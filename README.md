@@ -153,6 +153,26 @@ shown, and say how many they left; `SPC v o` in the explorer and `moai show
 -g` once done is let in with `--all`.
 `archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns it off.
 
+## The project wiki
+
+The manual lives next to the code: markdown pages under `docs/` — or wherever
+`wiki_dir` in `.moai/config.toml` points, a path inside the checkout — one page
+per `.md` file.
+
+```sh
+moai wiki ls                 # every page, and what does not resolve
+moai wiki show <slug>        # one page, drawn; --json gives the raw body
+```
+
+Nothing about it is stored in the tracker. The list, the links between pages and
+the issue ids a page names are read from the files every time. Pages are
+documents, so they ride the branch: inside a worktree you read that worktree's
+pages, and they merge like any other file. No command writes a page — edit the
+file and commit it. A page names an issue by its bare id and another page by a
+relative link (`[the explorer](explorer.md)`), and `moai wiki ls` counts the
+links that lead to no page, the ids the tracker does not have and the pages left
+with conflict markers. It blocks nothing.
+
 ## Working in parallel
 
 Several sessions in one repository is the normal case, not the exception.
@@ -397,6 +417,7 @@ eventually needs.
 
 ## Documentation
 
+- `docs/` — the project wiki; `moai wiki ls` lists its pages
 - `docs/cli.md` — every command's `--help`, generated from the binary
 - `CONTRIBUTING.md` — building, testing, and what a commit here looks like
 - `SECURITY.md` — reporting a vulnerability

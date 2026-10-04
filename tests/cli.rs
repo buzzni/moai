@@ -7458,6 +7458,8 @@ const JSON_SWEEP: &[&str] = &[
     // git 이 주는 임시 파일 셋을 받는다. 훑기는 깨끗이 합쳐지는 판으로만 부른다 —
     // 충돌은 종료 코드가 0 이 아닌 것이 계약이라 `ok` 로는 못 부른다.
     "merge-driver",
+    // 위키를 읽기만 한다(moai-ihu4). 훑는 판에는 `docs/` 가 없다 — 없는 위키도 객체 하나와 0 이다.
+    "wiki",
 ];
 
 /// 그 설정 곁의 읽음 파일들을 이어 읽는다(moai-omx7) — 읽음은 이제 설정이 아니라
@@ -7892,6 +7894,8 @@ fn every_command_still_speaks_json() {
         vec!["skill", "status", "--json"],
         // 공용 설정(없는 파일)을 읽기만 한다.
         vec!["project", "ls", "--json"],
+        // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
+        vec!["wiki", "ls", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
@@ -23242,4 +23246,216 @@ fn stats_names_a_group_s_unread_start_and_a_gone_epic() {
 
     let epics = ok(s.path(), &["stats", "--by", "epic"]);
     assert!(epics.contains("argos-zzzz  (없는 에픽)"), "끊긴 에픽을 빈 제목으로 댔다\n{epics}");
+}
+
+/// `moai wiki ls --json` 과 `show --json` 의 **꼴을 글자째 못박는다**(moai-ihu4) — moai-wiki 스킬이 이 키 이름을
+/// 읽는 계약이다. 키를 더하거나 차례를 바꾸면 여기부터 붉어지고, 그때는 그 에픽(moai-bl3x)에 알린다.
+///
+/// 링크는 페이지 링크만 슬러그로 서고(바깥 주소는 안 선다), id 는 이 저장소 접두어의 낱말을 코드 블록 밖에서만
+/// 센다 — 있는 줄은 `exists:true`, 없는 줄은 `false`(2026-10-04 사용자 결정).
+#[test]
+fn the_wiki_json_is_the_contract_the_skill_reads() {
+    let s = init("wiki-contract");
+    let id = field(&ok(s.path(), &["add", "적힌 일", "--json"]), "id");
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(docs.join("guide")).unwrap();
+    let home = format!(
+        "# Home\n\nSee {id} and argos-zzzz. [Guide](guide/a.md) [gone](nope.md) [web](https://x.y)\n\n```\nargos-yyyy\n```\n"
+    );
+    std::fs::write(docs.join("README.md"), &home).unwrap();
+    std::fs::write(docs.join("guide/a.md"), "# A guide\n\n[home](../README.md)\n").unwrap();
+
+    let ls = ok(s.path(), &["wiki", "ls", "--json"]);
+    let want_home = format!(
+        r#"{{"slug":"README","title":"Home","path":"docs/README.md","bytes":{},"issues":[{{"id":"{id}","exists":true}},{{"id":"argos-zzzz","exists":false}}],"links":[{{"text":"Guide","to":"guide/a","resolved":true}},{{"text":"gone","to":"nope","resolved":false}}],"conflict":false}}"#,
+        home.len()
+    );
+    let want_guide = r#"{"slug":"guide/a","title":"A guide","path":"docs/guide/a.md","bytes":32,"issues":[],"links":[{"text":"home","to":"README","resolved":true}],"conflict":false}"#;
+    assert_eq!(ls.trim_end(), format!(r#"{{"dir":"docs","pages":[{want_home},{want_guide}]}}"#));
+
+    let show = ok(s.path(), &["wiki", "show", "README", "--json"]);
+    let body = home.replace('\n', "\\n");
+    let open = want_home.strip_suffix('}').unwrap();
+    assert_eq!(show.trim_end(), format!(r#"{open},"body":"{body}"}}"#));
+}
+
+/// **위키는 이 체크아웃에서, 트래커는 루트에서 읽는다**(moai-ihu4). 워크트리에서 쓴 페이지는 그 워크트리의 목록에만
+/// 서고 루트에는 없다 — 에픽의 매뉴얼 고침이 그 가지의 diff 에 들어야 한다. 그 페이지가 댄 id 는 루트 트래커에서
+/// 찾는다(트래커는 옮겨 간다, moai-y7go).
+#[test]
+fn the_wiki_rides_the_branch_while_the_tracker_goes_to_the_root() {
+    let s = Scratch::new("wiki-worktree");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("docs")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    std::fs::write(main.join("docs/README.md"), "# Root home\n").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let wt = main.join(".claude/worktrees/argos-wt");
+    let id = field(&ok(&wt, &["add", "루트에 적힌 일", "--json"]), "id");
+    std::fs::write(wt.join("docs/new.md"), format!("# New page\n\nFor {id}.\n")).unwrap();
+
+    let here = ok(&wt, &["wiki", "ls", "--json"]);
+    assert!(here.contains(r#""slug":"new""#), "워크트리의 페이지를 못 읽었다 — {here}");
+    assert!(here.contains(&format!(r#"{{"id":"{id}","exists":true}}"#)), "id 를 루트 트래커에서 안 찾았다 — {here}");
+    let root = ok(&main, &["wiki", "ls", "--json"]);
+    assert!(!root.contains(r#""slug":"new""#), "루트가 워크트리의 페이지를 읽었다 — {root}");
+    assert!(root.contains(r#""title":"Root home""#), "{root}");
+    let drawn = ok(&wt, &["wiki", "show", "new"]);
+    assert!(drawn.contains("New page") && drawn.contains(&id), "{drawn}");
+}
+
+/// **`wiki_dir` 은 쓰는 자리에서 잰다** — 밖을 가리키는 값도 설정은 읽혀 `moai status` 가 선다. 위키만 그 까닭으로
+/// 비영이다. 디렉터리가 아직 없는 것은 안 쓴 위키라 0 이고, 그 자리의 페이지를 물으면 없는 페이지다.
+#[test]
+fn a_wiki_dir_typo_stands_up_nothing_but_the_wiki() {
+    let s = init("wiki-dir");
+    let none = moai(s.path(), &["wiki", "ls", "--json"]);
+    assert!(none.status.success(), "안 쓴 위키를 실패로 냈다\n{}", text(&none));
+    assert!(String::from_utf8_lossy(&none.stdout).starts_with(r#"{"dir":"docs","error":{"kind":"no_dir","said":"#));
+    assert!(moai(s.path(), &["wiki", "ls"]).status.success());
+    let asked = moai(s.path(), &["wiki", "show", "README", "--json"]);
+    assert!(!asked.status.success(), "없는 위키의 페이지를 0 으로 냈다\n{}", text(&asked));
+    assert!(!moai(s.path(), &["wiki", "show", "README"]).status.success());
+
+    let config = s.path().join(".moai/config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    for (raw, kind) in
+        [("/etc", "outside"), ("../elsewhere", "outside"), (".git", "outside"), ("AGENTS.md", "not_a_dir")]
+    {
+        std::fs::write(&config, format!("{base}wiki_dir = \"{raw}\"\n")).unwrap();
+        ok(s.path(), &["status"]);
+        ok(s.path(), &["show"]);
+        let out = moai(s.path(), &["wiki", "ls", "--json"]);
+        assert!(!out.status.success(), "{raw}: 못 쓰는 자리를 0 으로 냈다\n{}", text(&out));
+        let said = String::from_utf8_lossy(&out.stdout);
+        assert!(said.contains(&format!(r#""error":{{"kind":"{kind}","said":"#)), "{raw}: {said}");
+        assert!(!said.contains(r#""pages""#), "{raw}: 못 쓰는 자리에 목록을 냈다 — {said}");
+        assert!(!moai(s.path(), &["wiki", "ls"]).status.success(), "{raw}");
+    }
+}
+
+/// 없는 슬러그는 `not_found` 다 — 대소문자를 가린다.
+#[test]
+fn an_unknown_slug_is_not_found() {
+    let s = init("wiki-slug");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(s.path().join("docs/Guide.md"), "# Guide\n").unwrap();
+    ok(s.path(), &["wiki", "show", "Guide"]);
+    let out = moai(s.path(), &["wiki", "show", "guide", "--json"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"not_found""#), "{}", text(&out));
+}
+
+/// **못 읽는 페이지도 목록에 선다**(2026-10-04 사용자 결정) — 1MB 를 넘는 것은 일부러 안 읽은 것이라 목록은 0,
+/// 체크아웃 밖을 가리키는 링크는 못 읽은 것이라 목록을 다 내고 비영이다. `show` 는 본문을 못 냈으니 둘 다 비영이고
+/// `body` 가 없다.
+#[cfg(unix)]
+#[test]
+fn a_page_that_cannot_be_read_stays_listed_and_says_why() {
+    let s = init("wiki-unread");
+    let away = Scratch::new("wiki-unread-away");
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("ok.md"), "# Ok\n").unwrap();
+    std::fs::write(docs.join("big.md"), format!("# Big\n{}", "x".repeat(1024 * 1024))).unwrap();
+
+    let ls = ok(s.path(), &["wiki", "ls", "--json"]);
+    assert!(ls.contains(r#""slug":"big","title":"big","#), "{ls}");
+    assert!(ls.contains(r#""error":{"kind":"too_large","said":"#), "{ls}");
+    let big = moai(s.path(), &["wiki", "show", "big", "--json"]);
+    assert!(!big.status.success(), "본문을 못 낸 페이지를 0 으로 냈다\n{}", text(&big));
+    assert!(!String::from_utf8_lossy(&big.stdout).contains(r#""body""#), "{}", text(&big));
+
+    std::fs::write(away.path().join("secret.md"), "# Secret\n").unwrap();
+    std::os::unix::fs::symlink(away.path().join("secret.md"), docs.join("out.md")).unwrap();
+    let out = moai(s.path(), &["wiki", "ls", "--json"]);
+    assert!(!out.status.success(), "못 읽은 페이지를 두고 0 으로 냈다\n{}", text(&out));
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#""slug":"ok""#) && listed.contains(r#""slug":"out","title":"out","#), "{listed}");
+    assert!(listed.contains(r#""error":{"kind":"refused","said":"#), "{listed}");
+    assert!(!listed.contains("Secret"), "체크아웃 밖의 글을 읽었다 — {listed}");
+    assert!(!listed.contains(r#""skipped""#), "건너뛴 것이 없는데 `skipped` 가 섰다 — {listed}");
+    ok(s.path(), &["status"]);
+
+    // **걷다 건너뛴 자리도 기계에 댄다**(moai-ihu4.x94) — 비영 종료의 까닭이 stderr 의 사람 말에만 서면 기계는
+    // 성해 보이는 `pages` 와 비영 종료만 받는다.
+    std::fs::remove_file(docs.join("out.md")).unwrap();
+    std::os::unix::fs::symlink(away.path(), docs.join("away")).unwrap();
+    let out = moai(s.path(), &["wiki", "ls", "--json"]);
+    assert!(!out.status.success(), "건너뛴 자리를 두고 0 으로 냈다\n{}", text(&out));
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#","skipped":[{"path":"docs/away","kind":"dir_link","said":"#), "{listed}");
+}
+
+/// **알림은 비추기만 한다**(moai-ihu4.zdk) — 충돌 표시·풀리지 않는 링크·없는 id 를 목록 꼬리에 세고, 종료 코드는
+/// 그대로 0 이다. 충돌 표시가 든 페이지는 그리지 않고 원문 그대로 보인다 — 그리면 표시가 제목·줄글로 섞인다.
+/// 그 페이지 하나를 볼 때 충돌은 본문 머리에 이미 섰으니 꼬리 알림에는 다시 안 선다. 같은 없는 페이지로 가는
+/// 링크 둘은 고칠 자리가 하나라 한 번 센다.
+#[test]
+fn the_wiki_counts_what_does_not_resolve_and_blocks_nothing() {
+    let s = init("wiki-notices");
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("README.md"), "# Home\n\n[a](a.md) [gone](gone.md) [again](gone.md) argos-zz99\n")
+        .unwrap();
+    std::fs::write(docs.join("a.md"), "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n").unwrap();
+
+    let ls = ok(s.path(), &["wiki", "ls"]);
+    assert!(ls.contains("! 충돌 표시가 든 페이지 1  a"), "{ls}");
+    assert!(ls.contains("! 페이지로 안 풀리는 링크 1  README → gone"), "{ls}");
+    assert!(ls.contains("! 트래커에 없는 id 1  argos-zz99 (README)"), "{ls}");
+
+    let conflicted = ok(s.path(), &["wiki", "show", "a"]);
+    assert!(
+        conflicted.contains("  <<<<<<< HEAD\n  x\n  =======\n  y\n  >>>>>>> b"),
+        "충돌 페이지를 그렸다\n{conflicted}"
+    );
+    assert!(conflicted.contains("docs/a.md 의 병합을 풀고"), "{conflicted}");
+    assert!(!conflicted.contains("충돌 표시가 든 페이지"), "충돌을 머리와 꼬리에 두 번 댔다\n{conflicted}");
+    let home = ok(s.path(), &["wiki", "show", "README"]);
+    assert!(home.contains("! 페이지로 안 풀리는 링크 1  gone\n"), "{home}");
+    assert!(home.contains("! 트래커에 없는 id 1  argos-zz99"), "{home}");
+}
+
+/// **못 읽는 줄이 쓰는 id 도 있는 id 다**(moai-ihu4) — 그 줄은 트래커 파일에 있다. 읽어 낸 줄만 견주면 그 id 를 댄
+/// 페이지가 "트래커에 없는 id" 로 서는데, 고칠 것은 페이지가 아니라 트래커의 그 줄이다. 못 읽는 줄은 늘 그렇듯
+/// stderr 로 대고 비영으로 끝난다.
+#[test]
+fn an_id_on_an_unreadable_line_still_exists_for_the_wiki() {
+    let s = init("wiki-reserved");
+    let at = s.path().join(".moai/issues.jsonl");
+    let mut rows = std::fs::read_to_string(&at).unwrap_or_default();
+    // 제목이 수라 `Issue` 로는 안 풀리고, JSON 으로는 성해 id 까지는 읽힌다(`Load::reserved_ids`).
+    rows.push_str("{\"id\":\"argos-zz11\",\"title\":0,\"kind\":\"issue\",\"status\":\"todo\"}\n");
+    std::fs::write(&at, &rows).unwrap();
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(s.path().join("docs/README.md"), "# Home\n\nargos-zz11 argos-zz22\n").unwrap();
+
+    let out = moai(s.path(), &["wiki", "ls", "--json"]);
+    assert!(!out.status.success(), "못 읽는 줄을 두고 0 으로 냈다\n{}", text(&out));
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#"{"id":"argos-zz11","exists":true}"#), "못 읽는 줄의 id 를 없는 id 로 댔다 — {listed}");
+    assert!(listed.contains(r#"{"id":"argos-zz22","exists":false}"#), "{listed}");
+}
+
+/// **앞에 BOM 이 붙은 페이지도 제목을 읽는다** — 윈도 편집기가 붙이는 그 한 글자가 남으면 `# 제목` 이 제목으로
+/// 안 읽혀 파일 줄기가 제목으로 섰다. 원문(`body`)은 그대로다. 열었으나 UTF-8 이 아닌 페이지는 크기가 선다 —
+/// 0 은 못 연 페이지의 것이다.
+#[test]
+fn a_bom_keeps_the_title_and_an_opened_page_keeps_its_size() {
+    let s = init("wiki-bom");
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("bom.md"), "\u{feff}# Bom title\n").unwrap();
+    std::fs::write(docs.join("latin.md"), b"# caf\xe9\n").unwrap();
+
+    let out = moai(s.path(), &["wiki", "ls", "--json"]);
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#""slug":"bom","title":"Bom title","#), "{listed}");
+    assert!(listed.contains(r#""slug":"latin","title":"latin","path":"docs/latin.md","bytes":7,"#), "{listed}");
+    let shown = ok(s.path(), &["wiki", "show", "bom", "--json"]);
+    assert!(shown.contains("\"body\":\"\u{feff}# Bom title\\n\""), "원문을 고쳐 냈다 — {shown}");
 }

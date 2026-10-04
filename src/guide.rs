@@ -1360,9 +1360,10 @@ write that repository's name.
 /// 릴리스를 세운다. 그래서 "하지 않는 것" 에 게이트를 첫 줄로 적는다.
 ///
 /// **`--json` 의 키 이름은 위키 저장 에픽(moai-ihu4)이 정한 모양이다.** 그쪽이 키를 바꾸면 이 글이
-/// 없는 키를 가르친다 — `the_wiki_skill_names_the_wiki_commands` 가 이 글이 대는 키를 그 목록과 견준다.
-/// **그 목록은 손으로 옮긴 것이다** — 위키 명령이 이 가지에 없어 실제 `moai wiki ls --json` 과는 아직 안
-/// 견준다. 그쪽 키가 바뀌어도 여기는 초록이니, 키를 바꾸는 쪽이 이 글을 함께 고친다.
+/// 없는 키를 가르친다 — `the_wiki_skill_names_the_wiki_commands` 가 이 글이 대는 키를 그 목록과 견주고,
+/// **그 목록은 실제 출력에 묶여 있다**(moai-ihu4.l2e): `the_wiki_skill_teaches_the_keys_the_wiki_prints` 가
+/// 명령과 같은 자(`cmd::wiki::listed_json`·`page_json`)로 지은 `--json` 에서 키와 `kind` 값을 읽어 두 쪽을 견준다.
+/// 명령이 키를 바꾸거나 더하면 거기서 붉어진다.
 ///
 /// 발동어는 [`skill`] 과 같은 까닭으로 두 말을 함께 싣는다.
 pub fn wiki() -> String {
@@ -1383,8 +1384,8 @@ that changed nothing a person does writes nothing.
 
 ## What the wiki is
 
-    moai wiki ls                           the pages: slug, title, path
-    moai wiki ls --json                    the same, for a machine
+    moai wiki ls                           the pages: slug and title, and what does not resolve
+    moai wiki ls --json                    the same with each page's path, for a machine
     moai wiki show <slug>                  one page
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
@@ -1413,8 +1414,12 @@ false for an id that names no issue), `links` (the links to other pages — each
 `to` as the slug it lands on, and `resolved` false when no such page stands) and
 `conflict` (true while merge conflict markers stand in the page). A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
-whose `kind` says why — `too_large`, `refused` or `failed`. Branch on `kind`, not on
-the words beside it. Look at all of these after you write.
+whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
+leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
+link to a directory, not followed), `not_utf8` (a file name that cannot be a slug) or
+`unreadable` (a directory it could not open); with nothing left out the key is absent,
+and with it the exit code is non-zero although `pages` is whole. Branch on `kind`, not
+on the words beside it. Look at all of these after you write.
 
 ## Two kinds of page
 
@@ -3530,7 +3535,115 @@ stop sending outside work while a release runs",
         "too_large",
         "refused",
         "failed",
+        "skipped",
+        "dir_link",
+        "not_utf8",
+        "unreadable",
     ];
+
+    /// 위키 명령이 내는데 스킬이 **일부러 안 대는** 키 — `bytes` 는 고칠 것을 안 말하고, `said` 는 사람이 읽는
+    /// 말이라 가르면 안 되며("Branch on `kind`, not on the words beside it"), `body` 는 원문이라 페이지 파일을 읽는
+    /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
+    /// 여기 둘지를 그때 정한다.
+    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
+
+    /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
+    /// 키를 바꿔도 초록이라, 심긴 스킬이 `jq` 에서 `null` 이 되는 키를 가르칠 수 있었다(리뷰 moai-bl3x.vbw 4번).
+    ///
+    /// 명령과 같은 자(`cmd::wiki::listed_json`·`page_json`)로, 모든 갈래가 서는 위키를 지어 견준다 — 읽은 페이지
+    /// (id·링크·충돌), 못 읽은 세 까닭(`too_large`·`refused`·`failed`), 디렉터리 거절 넷(`no_dir`·`outside`·
+    /// `not_a_dir`·`failed`), 그리고 `show` 의 한 페이지.
+    ///
+    /// - 스킬이 대는 키와 `kind` 값은 모두 출력에 선다 — 출력에 없는 것을 가르치면 붉어진다
+    /// - 출력의 키와 `kind` 값은 모두 스킬이 대거나 [`WIKI_UNTAUGHT`] 에 든다 — 명령이 더한 것을 스킬이 모르면 붉어진다
+    /// - 홈 페이지(`wiki::HOMES`)도 스킬이 이름으로 댄다
+    #[cfg(unix)]
+    #[test]
+    fn the_wiki_skill_teaches_the_keys_the_wiki_prints() {
+        use crate::wiki::{DirTrouble, HOMES, TOO_LARGE};
+        use std::collections::BTreeSet;
+        let s = crate::scratch::Scratch::new("guide-wiki-keys");
+        let away = crate::scratch::Scratch::new("guide-wiki-keys-away");
+        let docs = s.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::write(docs.join("README.md"), "# Home\n\n[a](a.md) [gone](gone.md) moai-ab12 moai-zz99\n").unwrap();
+        std::fs::write(docs.join("a.md"), "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n").unwrap();
+        std::fs::write(docs.join("big.md"), "x".repeat(TOO_LARGE as usize + 1)).unwrap();
+        std::fs::write(docs.join("latin1.md"), b"caf\xe9\n").unwrap();
+        std::fs::write(away.path().join("out.md"), "# Out\n").unwrap();
+        std::os::unix::fs::symlink(away.path().join("out.md"), docs.join("out.md")).unwrap();
+        std::fs::write(s.path().join("file"), "").unwrap();
+        // 걷기가 건너뛰는 자리 — 디렉터리 링크와 UTF-8 이 아닌 이름. 못 연 디렉터리는 아래에서 갈래로 짓는다.
+        std::os::unix::fs::symlink(away.path(), docs.join("away")).unwrap();
+        let latin = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"caf\xe9.md");
+        std::fs::write(docs.join(latin), "# Name\n").unwrap();
+
+        let lang = crate::i18n::Lang::En;
+        let known = |id: &str| id == "moai-ab12";
+        let read = crate::wiki::load(s.path(), "docs", "moai", &known);
+        let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read).unwrap();
+        let loaded = read.unwrap();
+        printed.extend(crate::cmd::wiki::page_json(lang, loaded.find("README").unwrap()).unwrap());
+        for raw in ["missing", "/etc", "file"] {
+            let read = crate::wiki::load(s.path(), raw, "moai", &known);
+            assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
+            printed.extend(crate::cmd::wiki::listed_json(lang, raw, &read).unwrap());
+        }
+        // 디렉터리를 못 연 `failed` 는 픽스처로 못 세운다(권한은 root 에서 안 먹는다) — 갈래로 지어 넣는다.
+        let failed = Err(DirTrouble::Failed("permission denied".into()));
+        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &failed).unwrap());
+        let unreadable = crate::wiki::Skipped {
+            path: "docs/locked".into(),
+            why: crate::wiki::Skip::Unreadable("permission denied".into()),
+        };
+        let walked = crate::wiki::Wiki { pages: Vec::new(), skipped: vec![unreadable] };
+        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &Ok(walked)).unwrap());
+
+        // 출력에 선 키와 `kind` 값을 모은다.
+        fn gather(v: &serde_json::Value, keys: &mut BTreeSet<String>, kinds: &mut BTreeSet<String>) {
+            match v {
+                serde_json::Value::Object(m) => {
+                    for (k, v) in m {
+                        keys.insert(k.clone());
+                        if let ("kind", Some(kind)) = (k.as_str(), v.as_str()) {
+                            kinds.insert(kind.to_string());
+                        }
+                        gather(v, keys, kinds);
+                    }
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(|v| gather(v, keys, kinds)),
+                _ => {}
+            }
+        }
+        let (mut keys, mut kinds) = (BTreeSet::new(), BTreeSet::new());
+        for line in &printed {
+            gather(&serde_json::from_str(line).unwrap(), &mut keys, &mut kinds);
+        }
+        let want_kinds =
+            ["too_large", "refused", "failed", "no_dir", "outside", "not_a_dir", "dir_link", "not_utf8", "unreadable"];
+        assert_eq!(kinds, want_kinds.iter().map(|k| k.to_string()).collect(), "픽스처가 갈래를 다 안 세웠다");
+
+        for key in WIKI_KEYS {
+            assert!(
+                keys.contains(*key) || kinds.contains(*key),
+                "스킬이 대는 `{key}` 를 `moai wiki --json` 이 안 낸다"
+            );
+        }
+        for key in keys.iter().chain(&kinds) {
+            assert!(
+                WIKI_KEYS.contains(&key.as_str()) || WIKI_UNTAUGHT.contains(&key.as_str()),
+                "`moai wiki --json` 이 내는 `{key}` 를 스킬이 안 댄다 — `guide::wiki` 에 적고 WIKI_KEYS 에 더하거나, \
+                 일부러 안 대면 WIKI_UNTAUGHT 에 둔다"
+            );
+        }
+        for home in HOMES {
+            assert!(wiki().contains(&format!("`{home}.md`")), "스킬이 홈 페이지 `{home}.md` 를 안 댄다");
+        }
+        // 사람 화면이 대는 것만 가르친다 — 목록은 슬러그와 제목이고 경로는 `--json` 에만 선다.
+        let drawn = crate::view::wiki::list(lang, "docs", &loaded).join("\n");
+        assert!(!drawn.contains("docs/README.md"), "사람 목록에 경로가 섰다 — 스킬의 `moai wiki ls` 줄을 고친다");
+        assert!(wiki().contains("moai wiki ls                           the pages: slug and title"));
+    }
 
     #[test]
     fn the_wiki_skill_names_the_wiki_commands() {

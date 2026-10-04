@@ -23,8 +23,9 @@ pub mod skill;
 pub mod stats;
 pub mod status;
 pub mod tui;
+pub mod wiki;
 
-use crate::cli::{Cli, Cmd, IdeaCmd, ProjectCmd, SkillCmd, Typed};
+use crate::cli::{Cli, Cmd, IdeaCmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
 use crate::model::Kind;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -496,6 +497,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
         Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, *t, Kind::Idea),
         Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
+        Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
+        Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
     }
 }
 
