@@ -3921,3 +3921,12 @@
 {"ts":"2026-10-04T09:31:41Z","id":"moai-ogaw.3f6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=229826 (xhigh — epic-end review of wiki backlinks)"}
 {"ts":"2026-10-04T09:31:41Z","id":"moai-ogaw.3f6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받음: 2~8번 리뷰 고침 그대로(한 번 훑어 세기·차례 시험·못 읽은 페이지 링크 풀림 시험·show 의 stderr 시험·슬러그 셸 감싸기·주석). 1번은 새 키 없이 스킬 글이 고아 판정을 ls --json 에서 하게 했고, 기계에 알릴 키는 idea moai-31y4 로 넘김. 9번(CHANGELOG·docs/explorer.md)은 7-3·7-4 에서 고침"}
 {"ts":"2026-10-04T09:33:19Z","id":"moai-ogaw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — develop 머지(멤버 넷·리뷰 3f6 닫힘). 리뷰가 넘긴 것은 idea moai-31y4(곁의 못 읽은 페이지 탓에 덜 센 linked_from 을 기계에 알릴 키), 위키 고아 페이지는 idea moai-q1jb(explorer.md 를 아무도 안 가리킨다 — moai-tllo 뒤). 루트 release 바이너리는 아직 옛것이다"}
+{"ts":"2026-10-04T10:07:32Z","id":"moai-tllo.s5z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 위키 앵커와 용어집 에픽 전체"}
+{"ts":"2026-10-04T10:07:49Z","id":"moai-tllo.pi1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T10:07:51Z","id":"moai-tllo.5kj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T10:07:54Z","id":"moai-tllo.i2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T10:07:56Z","id":"moai-tllo.9q6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T10:07:59Z","id":"moai-tllo.0b8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T10:08:01Z","id":"moai-tllo.aje","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T10:08:03Z","id":"moai-tllo.s5z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T10:35:29Z","id":"moai-y8ec","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 앵커가 결합 부호·윗첨자 숫자에서 GitHub 과 갈린다"}
