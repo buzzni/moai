@@ -1773,6 +1773,8 @@ fn init_ignores_the_worktree_dir_once_and_respects_equivalent_spellings() {
     ok(&fresh, &["init", "argos"]);
     let got = std::fs::read_to_string(fresh.join(".gitignore")).unwrap();
     assert!(got.lines().any(|l| l == "/.claude/worktrees/"), "새 저장소에 워크트리 자리를 안 막았다\n{got}");
+    // 세 벤더가 함께 쓰는 자리도 막는다(moai-5s9l) — 옛 자리 줄은 남긴다, 그 자리에 선 워크트리가 아직 돈다.
+    assert!(got.lines().any(|l| l == "/.worktrees/"), "새 저장소에 공용 워크트리 자리를 안 막았다\n{got}");
     ok(&fresh, &["init"]);
     assert_eq!(
         std::fs::read_to_string(fresh.join(".gitignore")).unwrap(),
@@ -7162,7 +7164,7 @@ fn a_missing_dotfile_rule_shows_in_status_and_check() {
     let check = ok(s.path(), &["init", "--check"]);
     assert!(check.contains(".gitignore") && check.contains("worktrees"), "{check}");
     let cjs = ok(s.path(), &["init", "--check", "--json"]);
-    assert!(cjs.contains("\"missing\":{\".gitignore\":[\"/.claude/worktrees/\"]}"), "{cjs}");
+    assert!(cjs.contains("\"missing\":{\".gitignore\":[\"/.worktrees/\",\"/.claude/worktrees/\"]}"), "{cjs}");
 
     // **없는 파일은 통째로 빠진 것이다** — `git add -A` 가 옆 워크트리를 담는 위험이 가장 큰
     // 자리라 입을 다물면 안 된다. 못 읽는 파일과 갈린다: 그쪽은 무엇이 들었는지 모른다.
@@ -14482,6 +14484,21 @@ fn rule_five_refuses_picking_up_someone_elses_row_and_hands_the_take_over() {
     assert!(call(&s, "Bash", &mv, "s1").trim().is_empty());
 }
 
+/// **옆 워크트리 자리는 루트의 일로 안 센다**(moai-5s9l) — 세 벤더가 함께 쓰는 `.worktrees/` 밑은 남의
+/// 체크아웃이라, 루트의 세션이 그 밑을 고친 것을 규칙 2 가 세면 집은 것 없는 세션이 옆 일꾼의 파일 하나로
+/// 막힌다. 옛 자리 `.claude/worktrees/` 는 `.claude` 가 이미 안 센다.
+#[test]
+fn an_edit_under_the_shared_worktree_dir_is_not_the_roots_work() {
+    let s = init("hookwtdir");
+    ok(s.path(), &["add", "무엇"]);
+    let refused = call(&s, "Edit", "{\"file_path\":\"src/store.rs\"}", "s1");
+    assert!(!refused.trim().is_empty(), "집은 것 없이 고친 저장소 파일을 안 막는다 — 시험의 바닥이 무너졌다");
+    for path in [".worktrees/moai-ab12/src/store.rs", ".claude/worktrees/moai-ab12/src/store.rs"] {
+        let out = call(&s, "Edit", &format!("{{\"file_path\":\"{path}\"}}"), "s1");
+        assert!(out.trim().is_empty(), "{path} 를 루트의 일로 센다 — {out}");
+    }
+}
+
 /// 규칙이 실제로 계약 JSON 으로 나온다. **막힌 쪽이 읽고 그대로 고칠 수 있는
 /// 글이어야 한다** — 고칠 명령 없는 거절은 사람을 부르는 게이트다.
 #[test]
@@ -18420,7 +18437,7 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true);
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
-    for name in ["moai", "moai-supervise", "moai-wiki"] {
+    for name in ["moai", "moai-supervise", "moai-wiki", "moai-work"] {
         assert!(said.contains(&format!("rm -r {}", shared.join(name).display())), "{name} 을 안 댄다\n{said}");
         assert!(shared.join(name).join("SKILL.md").is_file(), "{name} 을 지웠다");
     }
@@ -18430,7 +18447,7 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     let json =
         String::from_utf8(c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--json"], true).stdout).unwrap();
     one_json_value(&json);
-    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(3), "{json}");
+    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(4), "{json}");
 
     let said = text(&c.run(s.path(), &["skill", "uninstall"], true));
     assert!(said.contains("걷어낼 것이 없다"), "{said}");
@@ -23911,6 +23928,193 @@ fn hello_registers_and_agents_sweeps_the_gone() {
     // 꼴이 아닌 이름과 여러 줄 역할은 거절한다.
     assert!(!moai(s.path(), &["hello", "--name", "a/b", "--pid", &other.pid()]).status.success());
     assert!(!moai(s.path(), &["hello", "--role", "두\n줄", "--pid", &other.pid()]).status.success());
+}
+
+/// **감독은 `agents --role worker --status idle` 로 일꾼을 찾는다**(moai-snyk, 2026-10-04 사용자 결정). 일꾼은 턴
+/// 안에서 `inbox --wait` 로 기다리므로 Claude 의 `Stop` 훅이 `idle` 을 못 적고, 훅이 없는 벤더는 `hello` 의 `busy`
+/// 에 머문다 — 그래서 기다리는 자리가 제 장을 고친다. 기다리면 `idle`, 편지가 오면 `busy`, 때가 다 되면 `idle`
+/// 그대로다. 걸러 낸 줄도 죽었으면 걷힌다.
+#[test]
+#[cfg(unix)]
+fn a_waiting_worker_reads_idle_and_the_supervisor_filters_for_it() {
+    let s = init("agents-filter");
+    let (w1, w2, boss) = (Sleeper::new(), Sleeper::new(), Sleeper::new());
+    let mut gone = Sleeper::new();
+    hello_as(s.path(), "w1", &w1.pid(), &["--vendor", "codex", "--role", "worker"]);
+    hello_as(s.path(), "w2", &w2.pid(), &["--vendor", "claude", "--role", "worker"]);
+    hello_as(s.path(), "boss", &boss.pid(), &["--role", "supervisor"]);
+    hello_as(s.path(), "gone", &gone.pid(), &["--role", "supervisor"]);
+    let names = |args: &[&str]| -> Vec<String> {
+        let out = ok(s.path(), &[&["agents", "--json"], args].concat());
+        out.match_indices("\"name\":\"")
+            .map(|(at, m)| out[at + m.len()..].split('"').next().unwrap().to_string())
+            .collect()
+    };
+    // `hello` 는 `busy` 를 적는다 — 아직 아무도 안 기다린다.
+    assert!(names(&["--role", "worker", "--status", "idle"]).is_empty());
+    assert_eq!(names(&["--role", "worker"]), ["w1", "w2"]);
+    // 낱말은 다듬어 견준다 — `hello` 가 다듬어 적는다.
+    assert_eq!(names(&["--role", " supervisor "]), ["boss", "gone"]);
+    let human = ok(s.path(), &["agents", "--role", "nobody"]);
+    assert!(
+        human.contains("그 역할과 상태의 에이전트가 여기 없다"),
+        "거른 끝이 빈 것을 등록이 없는 것으로 말한다 — {human}"
+    );
+
+    // 기다리는 동안 `idle` — 감독이 바로 그 줄을 찾는다.
+    let child = staged(&["inbox", "--as", "w1", "--ack", "--wait", "30", "--json"])
+        .current_dir(s.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while names(&["--role", "worker", "--status", "idle"]) != ["w1"] {
+        assert!(std::time::Instant::now() < deadline, "기다리는 일꾼이 idle 로 안 선다");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    ok(s.path(), &["send", "w1", "일감", "--as", "boss"]);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(
+        names(&["--status", "busy", "--role", "worker"]),
+        ["w1", "w2"],
+        "편지를 가진 일꾼이 busy 로 안 돌아갔다"
+    );
+    // 때가 다 된 기다림은 `idle` 을 남긴다 — 일꾼은 곧 다시 건다.
+    ok(s.path(), &["inbox", "--as", "w2", "--ack", "--wait", "1"]);
+    assert_eq!(names(&["--status", "idle"]), ["w2"]);
+    // 장이 없는 이름의 기다림은 장을 안 세운다 — 등록은 `hello` 와 훅의 일이다.
+    ok(s.path(), &["inbox", "--as", "stranger", "--wait", "1"]);
+    assert!(!s.path().join(".moai/agents/stranger.json").exists(), "기다림이 출석을 세웠다");
+
+    // 거르개 밖의 죽은 줄도 걷힌다.
+    gone.end();
+    let swept = ok(s.path(), &["agents", "--role", "worker", "--json"]);
+    assert!(swept.ends_with("\"swept\":[\"gone\"]}\n"), "거르개가 걷기를 좁혔다 — {swept}");
+}
+
+/// **편지를 가진 기다림만 `busy` 를 적고, 기다리지 않은 부름은 `idle` 을 안 적는다**(리뷰 moai-snyk.nic).
+///
+/// - 기다림을 시작하기 전에 `idle` 을 적던 판은 `--wait 0` 한 번이 일하는 장을 `idle` 로 남겼고, 편지가 이미 선
+///   판에는 `idle` 을 적었다가 곧장 `busy` 로 되돌려 `since`(얼마나 놀았나)만 새로 세웠다
+/// - 편지를 본 자리에서 `busy` 를 적던 판은 `any-idle-worker` 한 통을 두고 겨루다 **진** 일꾼까지 `busy` 로 세워,
+///   다시 걸기 전까지 `agents --status idle` 과 `send --wake` 의 후보에서 뺐다. 겨룸은 늘 서지는 않아 여러 바퀴로
+///   잰다 — 바퀴마다 가진 하나만 `busy` 다
+/// - 한 `--ack` 는 열린 편지를 한 통만 가진다 — 훅이 한 번에 한 통만 싣는 것과 같다. 쌓인 열린 편지를 먼저 깬
+///   일꾼 하나가 다 가지면 나머지 일감이 그 일꾼의 읽음 속에 숨는다
+/// - 아무도 없는 출석부는 거르개를 줘도 등록하는 길을 댄다
+#[test]
+#[cfg(unix)]
+fn only_a_wait_that_took_a_letter_reads_busy() {
+    let s = init("agents-took");
+    let nobody = ok(s.path(), &["agents", "--role", "worker"]);
+    assert!(nobody.contains("`moai hello` 가 등록하고"), "빈 출석부가 등록하는 길을 안 댄다 — {nobody}");
+    let sleepers: Vec<Sleeper> = (0..6).map(|_| Sleeper::new()).collect();
+    let workers: Vec<String> = (0..6).map(|n| format!("w{n}")).collect();
+    for (w, p) in workers.iter().zip(&sleepers) {
+        hello_as(s.path(), w, &p.pid(), &["--role", "worker"]);
+    }
+    // 그 이름의 장 한 조각 — `name` 부터 그 장이 닫힐 때까지.
+    let row = |w: &str| -> String {
+        let out = ok(s.path(), &["agents", "--json"]);
+        let at = out.find(&format!("\"name\":\"{w}\"")).unwrap_or_else(|| panic!("{w} 의 장이 없다 — {out}"));
+        out[at..out[at..].find('}').map_or(out.len(), |n| at + n)].to_string()
+    };
+
+    // 기다리지 않은 부름은 장을 안 바꾼다 — `hello` 가 적은 `busy` 와 그 `since` 그대로다.
+    let before = row("w0");
+    ok(s.path(), &["inbox", "--as", "w0", "--wait", "0"]);
+    assert_eq!(row("w0"), before, "기다리지 않은 부름이 일하는 장을 고쳤다");
+    // 편지가 이미 서 있으면 기다린 것이 아니다 — 시계를 안 고정한 부름이라, 장을 쓰면 `since` 가 바뀐다.
+    ok(s.path(), &["send", "w0", "벌써 왔다", "--as", "boss"]);
+    let out =
+        staged_live(&["inbox", "--as", "w0", "--ack", "--wait", "5", "--json"]).current_dir(s.path()).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(ids_in(&String::from_utf8(out.stdout).unwrap()).len(), 1, "이미 선 편지를 안 가졌다");
+    assert_eq!(row("w0"), before, "편지가 선 채로 부른 기다림이 idle 을 적었다가 since 를 새로 세웠다");
+
+    // 한 `--ack` 에 열린 편지 한 통 — 남은 것은 다음 일꾼의 몫이다.
+    for n in 0..2 {
+        ok(s.path(), &["send", "any-idle-worker", &format!("쌓인 일감 {n}"), "--as", "boss"]);
+    }
+    for w in ["w1", "w2"] {
+        let got = ids_in(&ok(s.path(), &["inbox", "--as", w, "--ack", "--json"]));
+        assert_eq!(got.len(), 1, "{w} 가 열린 편지를 한 통이 아니라 {}통 가졌다", got.len());
+    }
+
+    for round in 0..3 {
+        for w in &workers {
+            mark(s.path(), w, "idle");
+        }
+        ok(s.path(), &["send", "any-idle-worker", &format!("일감 {round}"), "--as", "boss"]);
+        let children: Vec<std::process::Child> = workers
+            .iter()
+            .map(|w| {
+                staged(&["inbox", "--as", w, "--ack", "--wait", "1", "--json"])
+                    .current_dir(s.path())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap()
+            })
+            .collect();
+        let mut took = Vec::new();
+        for (w, c) in workers.iter().zip(children) {
+            let out = c.wait_with_output().unwrap();
+            assert!(out.status.success(), "{}", text(&out));
+            if !ids_in(&String::from_utf8(out.stdout).unwrap()).is_empty() {
+                took.push(w.clone());
+            }
+        }
+        assert_eq!(took.len(), 1, "{round} 바퀴: 한 통이 하나에게 안 갔다 — {took:?}");
+        for w in &workers {
+            let want = if took.contains(w) { "busy" } else { "idle" };
+            assert_eq!(field(&row(w), "status"), want, "{round} 바퀴: {w} — 편지를 가진 기다림만 busy 다");
+        }
+    }
+}
+
+/// **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `inbox --wait` 는 기다리는 동안 장을 `idle` 로 적어,
+/// `send --wake` 가 그 칸에 `moai inbox`+Enter 를 쳤다 — 그 기다림은 턴 안의 셸 명령이라 도는 턴에 글자가 끼어든다.
+/// 기다림은 에이전트 프로세스 **아래**에서 도는 것으로 안다: 셸을 하나 끼워 그 셸을 에이전트로 등록하고, 그 아래에서
+/// 남의 이름으로 기다리게 한다(제 이름이면 보낸 편지가 기다림을 끝낸다). 기다림이 없는 에이전트는 예전처럼 칸이
+/// 없으니 `no_way` 다.
+#[test]
+#[cfg(target_os = "linux")]
+fn waking_passes_over_an_agent_already_waiting() {
+    let s = init("wake-waiting");
+    let mut shell = isolated("sh")
+        .args(["-c", "\"$0\" inbox --as somebody-else --wait 30; :", BIN])
+        .current_dir(s.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let idle = Sleeper::new();
+    hello_as(s.path(), "waiting", &shell.id().to_string(), &["--vendor", "codex", "--role", "worker"]);
+    hello_as(s.path(), "elsewhere", &idle.pid(), &["--vendor", "codex", "--role", "worker"]);
+    mark(s.path(), "waiting", "idle");
+    mark(s.path(), "elsewhere", "idle");
+    // 셸 아래의 기다림이 설 때까지 — 프로세스가 뜨기 전에 재면 기다리지 않는 것으로 읽는다.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let why = loop {
+        let out = ok(s.path(), &["send", "waiting", "일감", "--as", "boss", "--wake", "--json"]);
+        let why = field(&out, "why");
+        if why == "waiting" || std::time::Instant::now() > deadline {
+            break why;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    let _ = shell.kill();
+    let _ = shell.wait();
+    assert_eq!(why, "waiting", "기다리는 에이전트의 칸을 두드리려 한다");
+    let out = ok(s.path(), &["send", "elsewhere", "일감", "--as", "boss", "--wake", "--json"]);
+    assert_eq!(field(&out, "why"), "no_way", "기다리지 않는 에이전트를 기다리는 것으로 읽는다 — {out}");
+    // 사람 화면은 입을 다문다 — 기다리는 에이전트는 편지를 스스로 가진다.
+    let said = text(&moai(s.path(), &["send", "elsewhere", "또", "--as", "boss", "--wake"]));
+    assert!(!said.contains("waiting"), "{said}");
 }
 
 // ── 훅의 우편과 출석(moai-h8tn) ──────────────────────────────────────

@@ -25,13 +25,13 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = ".claude/moai-plugin";
 
 /// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
-/// 심는 차례(이슈 트래커·감독·위키)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
+/// 심는 차례(이슈 트래커·감독·위키·일꾼)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
 /// 있어 시험이 이 목록과 견주고(`guide::tests::the_frontmatter_opens_the_skill`), 트리가 이 목록 밖의 스킬을 심으면
 /// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
 /// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
-pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
+pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-work"];
 
 /// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
 /// 두 벤더 문서가 같은 `<저장소>/.agents/skills/<이름>/SKILL.md` 를 들어, 한 벌을 심으면 둘이 다 읽고 커밋돼 팀이
@@ -52,7 +52,7 @@ pub struct Skill {
 pub fn skills() -> Vec<Skill> {
     // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
     // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki] = NAMES;
+    let [main, supervisor, wiki, worker] = NAMES;
     vec![
         Skill {
             name: main,
@@ -64,6 +64,9 @@ pub fn skills() -> Vec<Skill> {
         // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai` 스킬에 섞으면 이슈
         // 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
         Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())] },
+        // 일꾼 스킬도 따로 선다(moai-0x59) — 사람이 일꾼으로 삼은 창만 그 걸음을 읽는다. 감독 스킬에 두면 감독이 매
+        // 바퀴 편지로 실어 보내야 하고, `moai` 스킬에 두면 일꾼이 아닌 세션까지 기다림과 보고의 걸음을 읽는다.
+        Skill { name: worker, files: vec![("SKILL.md", crate::guide::work())] },
     ]
 }
 
@@ -1258,14 +1261,15 @@ mod tests {
     /// 골랐는데, 그 그물은 `moai show -s todo,review` 를 끌어오고 리뷰
     /// 토막의 문구가 바뀌면 조용히 아무것도 안 고른다.
     fn taught() -> Vec<String> {
-        // AGENTS 블록도 같은 조각에서 나오고, 감독이 일꾼에게 싣는 글도 리뷰를 세우고
-        // 닫는 줄을 같은 조각으로 적으므로 같이 본다.
+        // AGENTS 블록도 같은 조각에서 나오고, 일꾼 스킬도 리뷰를 세우고 닫는 줄을 같은 조각으로
+        // 적으므로 같이 본다.
         let texts = [
             crate::guide::skill(),
             crate::guide::reference(),
             crate::guide::agents(),
             crate::guide::supervise(),
             crate::guide::wiki(),
+            crate::guide::work(),
         ];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
         // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
@@ -1330,6 +1334,14 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
+                    // 감독과 일꾼이 편지를 주고받는 자리(moai-snyk). 편지 id 는 `mail::is_id` 의 꼴이다 —
+                    // 꼴이 아니면 `send --reply-to` 가 거절해 가르친 줄이 아니라 그 거절을 잰다.
+                    .replace("<worker>", "w1")
+                    .replace("<supervisor>", "boss")
+                    .replace("<from>", "boss")
+                    .replace("<letter id>", "20261004-120000-abcd1234")
+                    .replace("<letter file>", "/tmp/letter.txt")
+                    .replace("<report file>", "/tmp/report.txt")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로

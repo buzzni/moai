@@ -17,7 +17,9 @@
 # 스튜디오가 제 세션을 적어 두는 곳
 /.ax/
 
-# 에이전트가 잡는 git 워크트리. 저장소 안에 생기므로 git add -A 에 딸려 오지 않게
+# 에이전트가 잡는 git 워크트리. 저장소 안에 생기므로 git add -A 에 딸려 오지 않게.
+# 세 벤더가 함께 쓰는 자리가 .worktrees/ 다(moai-5s9l) — 옛 자리 줄은 거기 선 워크트리가 다 걷힐 때까지 둔다
+/.worktrees/
 /.claude/worktrees/
 
 # auto-added by aplus-dev-studio (block env secrets)

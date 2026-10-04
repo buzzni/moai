@@ -227,8 +227,8 @@ moai init --print          # writes nothing, prints the block
 moai init --check          # writes nothing, says current / stale / missing
 ```
 
-`moai skill install` plants the skills — the tracker's rules, the supervisor and
-the wiki — for the agents you name. Claude Code gets a plugin in
+`moai skill install` plants the skills — the tracker's rules, the supervisor, the
+worker and the wiki — for the agents you name. Claude Code gets a plugin in
 `.claude/moai-plugin/`, with the hooks, registered with `claude`. Codex and
 Antigravity both read `.agents/skills/`, so naming either plants it for both,
 and committing it hands it to the team. One text serves all three: the steps

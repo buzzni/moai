@@ -3,7 +3,7 @@
 //! **트래커를 안 쓴다** — 출석은 `.moai/agents/` 의 파일이고 `issues.jsonl`·저널에 안 든다.
 
 use super::{Ctx, Fail, R, code, tell};
-use crate::cli::HelloArgs;
+use crate::cli::{AgentsArgs, HelloArgs};
 use crate::i18n::{fill, say};
 use crate::mail::{self, Presence};
 use serde::Serialize;
@@ -14,13 +14,21 @@ struct Listed<'a> {
     swept: &'a [String],
 }
 
-pub fn agents(ctx: &Ctx) -> R<Vec<String>> {
+pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     let dir = repo.agents_dir();
     // **걷는 자리는 여기다**(설계 노트 "죽은 pid 는 agents 가 걷는다"). 훅과 `send` 는 읽기만 하고 죽은 것을
     // 건너뛴다 — 도구 호출마다 도는 자리가 남의 파일을 지우지 않는다.
     let swept = mail::sweep(&dir);
-    let (agents, garbled) = mail::presences(&dir);
+    let (mut agents, garbled) = mail::presences(&dir);
+    // 거르개는 걷기 **뒤**다 — 걸러 낸 줄도 죽었으면 걷힌다. 거르개가 걷기를 좁히면 감독이 부를 때마다 남의 죽은
+    // 줄이 남는다.
+    //
+    // 빈 끝의 말은 **거르기 전에 줄이 있었는가**로 가른다(리뷰 moai-snyk.nic) — 아무도 없으면 거르개를 줬어도 등록하는
+    // 길(`moai hello`)을 대는 말이 맞다. 감독의 2 가 빈손일 때 사람이 보는 자리다.
+    let registered = !agents.is_empty();
+    let want = |given: &Option<String>, have: &str| given.as_deref().is_none_or(|w| w.trim() == have);
+    agents.retain(|p| want(&args.role, &p.role) && want(&args.status, &p.status));
     for g in &garbled {
         tell(&fill(
             say(ctx.lang(), "warn.agents_garbled"),
@@ -33,7 +41,8 @@ pub fn agents(ctx: &Ctx) -> R<Vec<String>> {
     let lang = ctx.lang();
     let mut out: Vec<String> = swept.iter().map(|n| fill(say(lang, "agents.swept"), &[("name", n)])).collect();
     if agents.is_empty() {
-        out.push(say(lang, "agents.none").to_string());
+        // 키는 `say` 에 글자째 적는다 — 소스가 부르는 키를 i18n 시험이 그 글자로 센다.
+        out.push(if registered { say(lang, "agents.none_match") } else { say(lang, "agents.none") }.to_string());
         return Ok(out);
     }
     out.extend(table(&agents, ctx.zone()));

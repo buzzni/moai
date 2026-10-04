@@ -504,7 +504,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // 우편함과 출석(moai-h8tn) — 트래커를 안 쓴다. 자리만 [`open_repo`] 로 찾는다.
         Cmd::Send(a) => mail::send(ctx, a),
         Cmd::Inbox(a) => mail::inbox(ctx, a),
-        Cmd::Agents => agents::agents(ctx),
+        Cmd::Agents(a) => agents::agents(ctx, a),
         Cmd::Hello(a) => agents::hello(ctx, a),
     }
 }

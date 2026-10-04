@@ -1058,6 +1058,7 @@
   "refuse.mail_who": "누구인가? `--as <이름>` 을 주거나 MOAI_AGENT 를 세우거나, 먼저 `moai hello` 로 인사한다",
   "refuse.mail_name": "`{name}` 는 에이전트 이름이 될 수 없다 — 영숫자와 `.`·`_`·`-`, 64자까지, `.` 으로 시작하지 않는다. any-idle-worker 는 받는 이 자리에만 선다",
   "agents.none": "여기 등록된 에이전트가 없다 — `moai hello` 가 등록하고, 훅은 세션이 열릴 때 등록한다",
+  "agents.none_match": "그 역할과 상태의 에이전트가 여기 없다",
   "agents.swept": "{name} 를 걷었다 — 그 프로세스가 없다",
   "agents.hello": "{name} 로 왔다({vendor}, {model}, {role})",
   "refuse.agents_word": "--{what} 는 64자까지의 한 줄이다 — 받은 것: `{value}`",

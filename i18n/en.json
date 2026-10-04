@@ -1058,6 +1058,7 @@
   "refuse.mail_who": "Who are you? Pass `--as <name>`, set MOAI_AGENT, or register with `moai hello` first",
   "refuse.mail_name": "`{name}` cannot be an agent name - letters, digits, `.`, `_` and `-`, up to 64, not starting with `.`; any-idle-worker is only a recipient",
   "agents.none": "No agents are registered here - `moai hello` registers one, and the hooks register a session when it starts",
+  "agents.none_match": "No agent here has that role and state",
   "agents.swept": "Swept {name} - its process is gone",
   "agents.hello": "Here as {name} ({vendor}, {model}, {role})",
   "refuse.agents_word": "--{what} takes one line of up to 64 characters - got `{value}`",

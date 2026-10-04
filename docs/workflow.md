@@ -62,6 +62,15 @@ Each piece of work goes on its own branch in a linked git
 [worktree](glossary.md#worktree), so sessions do not pile commits onto one branch
 and wait on each other to merge.
 
+    git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>
+
+- **Worktrees stand in `<root>/.worktrees/`**, the place Claude Code, Codex and
+  Antigravity share (moai-5s9l); `moai init` keeps it out of git. It stays inside
+  the repository because Codex's trust and Antigravity's workspace go by the
+  root's path. Claude Code enters one from the root (`EnterWorktree` with its
+  path) — come back to the root before entering another. Worktrees made earlier
+  under `.claude/worktrees/` keep working
+
 - **The [tracker](glossary.md#tracker) stays in the main checkout.** A `moai` run inside a linked
   worktree reads and writes the main checkout's `.moai/`, and one line on stderr
   says where the write went. Commit tracker changes from the main checkout with
@@ -149,4 +158,4 @@ where its contributors read them rather than repeated here:
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk
