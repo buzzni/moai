@@ -3885,3 +3885,10 @@
 {"ts":"2026-10-04T09:00:29Z","id":"moai-og9h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-04T09:00:31Z","id":"moai-fyul.iqe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1-13 as one fix: commit (clicks right after the wheel match the drawn frame top in the list and the wiki list; SPC v w now counts in Adrift; App::key is the one place that clears adrift for l/h/Tab; roll private again; comments, help, docs/explorer.md aligned). Handed on 14 as idea moai-pvrz (timezone change re-applying a date filter keeps a scrolled list; same footing as a reread, the board had it since moai-j0jf). Dropped 15: the wheel test already catches overshoot after drawing."}
 {"ts":"2026-10-04T09:03:25Z","id":"moai-fyul","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 머지(c85dad75)·닫기·감독 보고까지 끝났다. 남은 것은 idea moai-pvrz(시간대 바꾸기가 날짜 거름망을 다시 걸 때 굴린 화면이 남는다) 하나 — 에픽 밖이다. 이 창은 /clear 해도 된다"}
+{"ts":"2026-10-04T09:13:15Z","id":"moai-tllo","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 앵커와 용어집"}
+{"ts":"2026-10-04T09:13:15Z","id":"moai-tllo.5kj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"링크의 #앵커를 풀고 페이지의 머리글 앵커를 센다"}
+{"ts":"2026-10-04T09:13:15Z","id":"moai-tllo.i2s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai wiki --json 에 앵커와 풀림 여부를 더하고 못 푼 앵커를 알린다"}
+{"ts":"2026-10-04T09:13:15Z","id":"moai-tllo.9q6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 창이 앵커 링크를 따라 그 머리글로 간다"}
+{"ts":"2026-10-04T09:13:15Z","id":"moai-tllo.pi1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"용어집 페이지 docs/glossary.md"}
+{"ts":"2026-10-04T09:13:15Z","id":"moai-tllo.0b8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"기존 페이지의 용어를 용어집 앵커에 잇는다"}
+{"ts":"2026-10-04T09:13:15Z","id":"moai-tllo.aje","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·docs/explorer.md·CHANGELOG·스킬 글"}
