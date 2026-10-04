@@ -55,7 +55,9 @@ out), `codex`, `antigravity` or `auto` — and can be repeated.
   trusts them:** open `/hooks` in a codex session in the repository and trust
   moai's, and again after an install that changed them. A hooks file moai did
   not write — one with your own hooks in it — is left exactly as it is, and one
-  line says so: merge moai's into it by hand, or move it aside and install again
+  line says so: merge moai's into it by hand, or move it aside and install again.
+  For Antigravity that includes moai's own group with a handler of yours added to
+  it, or turned off (`"enabled": false`)
 - **`auto` looks at PATH** for `claude`, `codex` and `agy`, says what it found,
   and plants for Claude when it finds none of them
 
@@ -65,8 +67,9 @@ uninstall` takes Claude's registration away and leaves the files; with
 in `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
 wrote it, and deletes nothing. `moai skill status` shows Claude's registration,
 whether `.agents/skills/` holds this version's skills, whether each hooks file is
-this version's (or not moai's), and whether `codex` and `agy` are on PATH — and
-exits 0 whatever it finds.
+this version's (or not moai's) — judged by the moai that file calls, the way the
+plugin is, so a different build running `status` does not ask to plant again —
+and whether `codex` and `agy` are on PATH — and exits 0 whatever it finds.
 
 **One text serves every agent.** Both trees get the same skills. The steps only
 one agent has — entering a worktree, asking the person, calling the review,
@@ -104,7 +107,7 @@ The hooks catch the same few places in each agent's session. Each calls
 | A person sends a prompt | The `moai status` board is loaded, once per session. The letters for the session are loaded every time, and it is marked busy |
 | Before a tool call | The five rules below are checked — nothing else; the mailbox is not opened |
 | The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. A turn that ends is marked idle |
-| A turn ends without that | An API error (Claude), an interrupt (Codex) or the session closing marks it idle and loads nothing |
+| A turn ends without that | An API error (Claude, or an Antigravity run that stopped on one), an interrupt (Codex) or the session closing marks it idle and loads nothing — a Codex session that closes has its row taken away instead |
 
 **The hook never fails the session.** Whatever goes wrong inside it, it exits 0,
 and the only thing it refuses is the one tool call that broke a rule. A person
@@ -114,9 +117,12 @@ typing `moai` in a terminal never passes through it.
 whose they are (`--dialect`), and what differs is only what goes in and out:
 
 - **Codex** sends hooks only for its shell, `apply_patch` and MCP calls — a
-  patch is checked file by file, and one file that breaks a rule refuses the
-  patch. Its hooks run from a daemon its sessions share, so a Codex session's
-  presence row follows its session id and carries no tmux pane to wake
+  patch is checked file by file, whether it came through the `apply_patch` tool
+  or was typed as `apply_patch <<'EOF'` in the shell, and one file that breaks a
+  rule refuses the patch. Its hooks run from a daemon its sessions share, so a
+  Codex session's presence row follows its session id, carries no tmux pane to
+  wake, and goes away when the session ends — `moai agents` cannot sweep it by
+  its process, so a Codex session killed before its end leaves its row behind
 - **Antigravity** has no prompt event, so the first model call of each turn
   loads the board and the letters; it has no session start either, so the
   baseline is written there too. A line the rules only add to a tool call —
@@ -246,7 +252,9 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   command the refusal hands over. Do not stop to ask a person unless it is rule 5
 - **The rules do not seem to stand.** `moai skill status` says whether the plugin
   is registered and whether the binary the hook calls still runs. A session opened
-  before the install keeps the old hook until it is reopened
+  before the install keeps the old hook until it is reopened. The plugin hooks
+  `StopFailure`, which Claude Code knows from 2.1.78 — an older `claude` refuses
+  the plugin's hooks as a whole, so update it
 - **Codex runs none of moai's hooks.** Codex has not been told to trust them —
   open `/hooks` in a codex session in the repository and trust them. An install
   that changed them asks for that trust again

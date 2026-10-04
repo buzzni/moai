@@ -233,13 +233,15 @@ the wiki — for the agents you name. Claude Code gets a plugin in
 Antigravity both read `.agents/skills/`, so naming either plants it for both,
 and committing it hands it to the team. One text serves all three: the steps
 that differ per agent sit in the skills' "Words per agent" table. The hooks are
-planted for Claude Code only.
+each agent's own: Codex gets `.codex/hooks.json` (trust it once in `/hooks`)
+and Antigravity `.agents/hooks.json` — commit them too.
 
 ```sh
-moai skill install                   # Claude Code (the default)
-moai skill install --agent codex     # .agents/skills/ for Codex and Antigravity
-moai skill install --agent auto      # whichever of claude, codex, agy is on PATH
-moai skill status                    # what is planted where, and what is stale
+moai skill install                         # Claude Code (the default)
+moai skill install --agent codex           # .agents/skills/ and .codex/hooks.json
+moai skill install --agent antigravity     # .agents/skills/ and .agents/hooks.json
+moai skill install --agent auto            # whichever of claude, codex, agy is on PATH
+moai skill status                          # what is planted where, and what is stale
 ```
 
 moai never launches an agent or runs one headless. A person opens each session,

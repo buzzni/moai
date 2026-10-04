@@ -35,9 +35,12 @@ does not tag — see `CONTRIBUTING.md`.
   pane. The `SessionStart` hook registers a Claude session under the name
   Claude Code shows for it, `UserPromptSubmit` marks it busy and `Stop` idle.
   A turn that ends without a `Stop` is marked idle too — Claude's
-  `StopFailure` (an API error) and `SessionEnd`, Codex's `Interrupt` and
-  `SessionEnd`. A turn broken off with Esc in Claude or Antigravity sends no
-  hook at all, so that row stays busy until the next prompt.
+  `StopFailure` (an API error) and `SessionEnd`, Codex's `Interrupt`, and an
+  Antigravity run that stopped on an error. A Codex `SessionEnd` takes the
+  session's row away instead. A turn broken off with Esc in Claude or
+  Antigravity sends no hook at all, so that row stays busy until the next
+  prompt. `StopFailure` needs Claude Code 2.1.78 or later — an older `claude`
+  refuses the plugin's hooks as a whole.
   `moai agents` lists who is here and sweeps a row whose process is gone; on
   Linux a reused pid is told apart by the time the process started, and a
   session resumed in a new process moves its row there.
@@ -77,12 +80,17 @@ does not tag — see `CONTRIBUTING.md`.
   <event> --dialect codex|antigravity`: the five rules, the board and the
   letters are the same, only the shapes in and out are each agent's. Codex
   runs project hooks once a person trusts them in `/hooks`, and sends them only
-  for its shell, `apply_patch` (judged file by file) and MCP calls.
-  Antigravity has no prompt event, so its first model call of a turn loads the
-  board and the letters; a turn is held with `decision: continue`. A hooks
-  file moai did not write is left as it is, with one line saying so. Codex
-  runs its hooks from a daemon its sessions share, so a Codex session's
-  presence row follows its session id and records no pid or tmux pane.
+  for its shell, `apply_patch` and MCP calls; a patch — through the
+  `apply_patch` tool or typed as `apply_patch <<'EOF'` in its shell — is
+  judged file by file. Antigravity has no prompt event, so its first model
+  call of a turn loads the board and the letters; a turn is held with
+  `decision: continue`. A hooks file moai did not write is left as it is, with
+  one line saying so — for Antigravity that includes moai's group with a
+  handler of your own in it, or turned off. `moai skill status` judges each
+  file by the moai it calls. Codex runs its hooks from a daemon its sessions
+  share, so a Codex session's presence row follows its session id, records no
+  pid or tmux pane, and goes when the session ends; `moai agents` cannot sweep
+  it by its process.
 - **The AGENTS block says where no hook stands** — an agent without them, Codex
   before the trust, a tool call that sends none — the rules are words only,
   rules 4 and 5 most of all. `moai init` writes the new block.

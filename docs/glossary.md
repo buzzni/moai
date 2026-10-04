@@ -163,7 +163,8 @@ The row that says an agent is here — `.moai/agents/<name>.json`, with its
 vendor, model, role, whether it is busy or idle, and its process. `moai hello`
 writes it, and the hooks write it for a session as it starts and keep
 busy and idle up to date. `moai agents` lists them and sweeps a row whose
-process is gone. The name in it is what a [letter](#letter) is sent to.
+process is gone; a Codex session's row carries no process and goes when the
+session ends. The name in it is what a [letter](#letter) is sent to.
 
 ## Regression-of
 

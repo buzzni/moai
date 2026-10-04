@@ -189,7 +189,8 @@ are is unknown, nothing is refused.
 `moai skill install` planted them for your agent — Claude's plugin, Codex's
 `.codex/hooks.json` once a person has trusted it in `/hooks`, Antigravity's
 `.agents/hooks.json`. An agent without them, and a tool call that sends no hook
-(Codex sends them only for its shell, `apply_patch` and MCP calls), is refused
+(Codex sends them only for its shell, `apply_patch` and MCP calls) or that the
+hooks do not read (input typed into a command already running), is refused
 nothing — keep the five yourself. Rules 4 and 5 most of all: they guard the
 person's other sessions and other people's work, and nothing else will.
 

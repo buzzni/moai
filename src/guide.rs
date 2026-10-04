@@ -1013,7 +1013,8 @@ are is unknown, nothing is refused.
 `moai skill install` planted them for your agent — Claude's plugin, Codex's
 `.codex/hooks.json` once a person has trusted it in `/hooks`, Antigravity's
 `.agents/hooks.json`. An agent without them, and a tool call that sends no hook
-(Codex sends them only for its shell, `apply_patch` and MCP calls), is refused
+(Codex sends them only for its shell, `apply_patch` and MCP calls) or that the
+hooks do not read (input typed into a command already running), is refused
 nothing — keep the five yourself. Rules 4 and 5 most of all: they guard the
 person's other sessions and other people's work, and nothing else will."#
     )
@@ -1112,7 +1113,7 @@ whether it is stale, `moai init --check` — it writes nothing and answers
 
 ### The five things the hook actually watches
 
-They stand once `moai skill install` has planted the hooks into Claude.
+They stand once `moai skill install` has planted the hooks for your agent.
 
 {rules}
 
@@ -1435,10 +1436,12 @@ the beginning of a line, puts work nobody did into `work`.
 
 ## The hook
 
-    moai hook <event>    Claude's hooks call this. A person never runs it by hand
+    moai hook <event>    An agent's hooks call this. A person never runs it by hand
 
-The plugin planted by `moai skill install` is what calls it. Whatever goes wrong the
-exit code is 0 — a noisy hook gets turned off, and a rule that is off is no rule.
+The hooks `moai skill install` plants are what call it — Claude's plugin, Codex's
+`.codex/hooks.json` and Antigravity's `.agents/hooks.json`, each with its `--dialect`.
+Whatever goes wrong the exit code is 0 — a noisy hook gets turned off, and a rule that
+is off is no rule.
 
 **It may be called from inside a git hook.** git hooks and a linked worktree's
 `rebase -x` export the `GIT_DIR` family, and those beat `git -C <path>`, but moai

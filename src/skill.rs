@@ -134,14 +134,15 @@ pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 
 /// Codex 의 훅 — Claude 와 이벤트 이름이 같고, `Stop` 없이 끝난 턴은 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd`
-/// 로 온다. API 오류로 끊긴 턴에 오는 이벤트는 문서에 없다.
+/// 로 온다. API 오류로 끊긴 턴에 오는 이벤트는 문서에 없다. **`SessionEnd` 는 그 세션의 장을 걷는다** — 장을 `idle` 로
+/// 두는 Claude 와 다르다(`cmd::hook` 의 `rest`).
 const CODEX: &[(&str, &str, &str)] = &[
     ("SessionStart", "session-start", "counting moai warnings..."),
     ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
     ("PreToolUse", "pre-tool-use", "checking the moai rules..."),
     ("Stop", "stop", "comparing the moai state..."),
     ("Interrupt", "interrupt", "marking this session idle for moai..."),
-    ("SessionEnd", "session-end", "marking this session idle for moai..."),
+    ("SessionEnd", "session-end", "taking this session off moai's list..."),
 ];
 
 /// Codex 의 `PreToolUse` 가 볼 도구 — 셸과 패치다. Codex 는 그 둘과 MCP 에만 훅을 낸다(openai/codex#20204).
@@ -156,8 +157,9 @@ const ANTIGRAVITY: &[(&str, &str)] =
 /// Antigravity 의 `PreToolUse` 가 볼 도구 — 셸 하나와 파일을 쓰는 셋이다(2026-10-04 실측 이름).
 const ANTIGRAVITY_WATCHED: &str = "run_command|write_to_file|replace_file_content|multi_replace_file_content";
 
-/// 훅 하나가 기다리는 상한(초) — Claude 의 매니페스트와 같은 값이다. Codex 의 기본은 600초, Antigravity 는 30초라
-/// 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다.
+/// 훅 하나가 기다리는 상한(초) — 세 에이전트의 파일이 이 하나를 쓴다(Claude 의 매니페스트도). Codex 의 기본은 600초,
+/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. Codex 는 `Interrupt`·`SessionEnd`
+/// 의 상한을 제 손으로 1~3초에 묶는다 — 거기서는 이 값이 안 선다.
 const TIMEOUT: u64 = 15;
 
 /// Codex 가 싣는 글의 상한을 넉넉히 준다 — 기본이 2,500 토큰 언저리라(Codex 훅 문서) 보드와 편지(최대
@@ -213,16 +215,92 @@ pub fn antigravity_hooks(exe: &str) -> String {
 }
 
 /// 그 자리의 훅 파일을 **moai 가 통째로 썼는가** — 그때만 다시 쓴다(moai-u5wr 본문). 사람이 제 훅을 적어 둔 파일을
-/// 갈아엎으면 그 사람의 훅이 말없이 사라진다. Codex 는 맨 윗단 `description` 이 [`CODEX_DESCRIPTION`] 인 파일, Antigravity
-/// 는 맨 윗단에 [`ANTIGRAVITY_GROUP`] 하나만 선 파일이다. **못 읽는 파일은 moai 의 것이 아니다** — 병합 충돌 표시가
-/// 낀 파일을 덮으면 남의 반쪽도 같이 사라진다.
+/// 갈아엎으면 그 사람의 훅이 말없이 사라진다. **못 읽는 파일은 moai 의 것이 아니다** — 병합 충돌 표시가 낀 파일을
+/// 덮으면 남의 반쪽도 같이 사라진다.
+///
+/// - **Codex** 는 맨 윗단 `description` 이 [`CODEX_DESCRIPTION`] 인 파일이다 — 손으로 고치면 덮인다고 그 글이 말한다
+/// - **Antigravity** 는 그 파일에 설명을 못 두어([`antigravity_hooks`]) 무리 안까지 본다(리뷰 moai-u5wr.e74). 맨 윗단에
+///   [`ANTIGRAVITY_GROUP`] 하나만 서고, 그 무리가 켜져 있고(`enabled: true`), 이벤트마다 선 처리기가 **모두 moai 의 줄**
+///   (`moai hook … --dialect antigravity`)일 때다. 맨 윗단만 보던 판은 무리 안에 사람이 더한 처리기를 다음 `skill install`
+///   이 말없이 걷었고, 사람이 끈 무리(`enabled: false`)를 도로 켰다. 값이 `null` 인 이벤트는 agy 가 다시 쓰며 더한
+///   자리라 셈에 안 든다([`same_hooks`])
 pub fn hooks_are_ours(dialect: Dialect, text: &str) -> bool {
     let Ok(serde_json::Value::Object(top)) = serde_json::from_str::<serde_json::Value>(text) else { return false };
     match dialect {
         Dialect::Codex => top.get("description").and_then(|d| d.as_str()) == Some(CODEX_DESCRIPTION),
-        Dialect::Antigravity => top.len() == 1 && top.contains_key(ANTIGRAVITY_GROUP),
+        Dialect::Antigravity => {
+            let Some(serde_json::Value::Object(group)) = top.get(ANTIGRAVITY_GROUP).filter(|_| top.len() == 1) else {
+                return false;
+            };
+            group.iter().all(|(key, value)| match key.as_str() {
+                "enabled" => value.as_bool() == Some(true),
+                _ => value.is_null() || moai_handlers(value),
+            })
+        }
         Dialect::Claude => false,
     }
+}
+
+/// Antigravity 의 이벤트 하나에 선 처리기들이 **모두 moai 의 것**인가 — 처리기를 바로 두거나 `matcher` 무리의 `hooks`
+/// 로 한 번 싼 꼴([`antigravity_hooks`])이고, 하나도 없으면 아니다.
+fn moai_handlers(handlers: &serde_json::Value) -> bool {
+    fn ours(handler: &serde_json::Value) -> bool {
+        handler
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|c| c.contains(" hook ") && c.contains(" --dialect antigravity"))
+    }
+    fn every(list: &[serde_json::Value], each: fn(&serde_json::Value) -> bool) -> bool {
+        !list.is_empty() && list.iter().all(each)
+    }
+    fn entry(e: &serde_json::Value) -> bool {
+        match e.get("hooks").and_then(serde_json::Value::as_array) {
+            Some(inner) => every(inner, ours),
+            None => ours(e),
+        }
+    }
+    handlers.as_array().is_some_and(|list| every(list, entry))
+}
+
+/// 두 훅 파일이 **뜻으로** 같은가 — 꼴(빈칸·키 차례)과 값이 `null` 인 키는 안 본다(리뷰 moai-u5wr.e74). agy 는 이 파일을
+/// 제 꼴로 다시 쓰며 아는 이벤트를 `null` 로 더한다(실측, 전역 파일) — 글자로만 견주면 그 파일은 영영 낡았다고 서고,
+/// 다시 심을 때마다 커밋된 파일에 diff 가 났다가 agy 가 도로 바꾼다.
+pub fn same_hooks(a: &str, b: &str) -> bool {
+    fn bare(v: serde_json::Value) -> serde_json::Value {
+        match v {
+            serde_json::Value::Object(m) => serde_json::Value::Object(
+                m.into_iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k, bare(v))).collect(),
+            ),
+            serde_json::Value::Array(list) => serde_json::Value::Array(list.into_iter().map(bare).collect()),
+            other => other,
+        }
+    }
+    let read = |text: &str| serde_json::from_str::<serde_json::Value>(text).ok().map(bare);
+    matches!((read(a), read(b)), (Some(x), Some(y)) if x == y)
+}
+
+/// 심긴 훅 파일(`.codex/hooks.json`·`.agents/hooks.json`)이 부르는 실행 파일 — 첫 `command` 의 머리(`command -v -- "`)에서
+/// 꺼낸다([`hook_exe`] 와 같은 자). Codex 의 줄은 `sh -c '…'` 로 싸여 있어 그 껍질을 먼저 벗긴다. `moai skill status` 가
+/// 그 파일을 **그 파일이 부르는 moai 로** 견주는 데 쓴다 — Claude 의 줄이 설치본의 훅이 부르는 파일로 견주는 것과 같은
+/// 까닭이다(리뷰 moai-u5wr.e74).
+pub fn planted_exe(text: &str) -> Option<String> {
+    fn first(v: &serde_json::Value) -> Option<&str> {
+        match v {
+            serde_json::Value::Object(m) => {
+                m.get("command").and_then(serde_json::Value::as_str).or_else(|| m.values().find_map(first))
+            }
+            serde_json::Value::Array(list) => list.iter().find_map(first),
+            _ => None,
+        }
+    }
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let cmd = first(&v)?;
+    let line = match cmd.strip_prefix("sh -c '") {
+        Some(inner) => inner.replace(r"'\''", "'"),
+        None => cmd.to_string(),
+    };
+    let rest = line.strip_prefix("command -v -- \"")?;
+    Some(rest[..rest.find('"')?].to_string())
 }
 
 /// 훅이 부를 명령.
@@ -458,7 +536,7 @@ pub fn hooks_are_ours(dialect: Dialect, text: &str) -> bool {
 /// 재사용되면 표식이 남아 한 번을 잃는데, 그 자리는 `TMPDIR` 을 비우는 손이 함께 지운다.
 ///
 /// **이벤트 이름도 `printf` 의 꼴에 안 넣는다** — 꼴 안의 `%` 는 변환 문자로 읽힌다. 인자
-/// 자리로 넘기고 [`crate::text::single_quoted`] 로 싼다: 지금 넷은 안전한 낱말이지만, 꼴에
+/// 자리로 넘기고 [`crate::text::single_quoted`] 로 싼다: 지금 이름들은 안전한 낱말이지만, 꼴에
 /// 박아 두면 이름이 바뀌는 날 이 줄이 깨지고 그 값은 세션의 모든 도구 호출이다.
 fn command(exe: &str, event: &str) -> String {
     command_for(exe, event, Dialect::Claude)
@@ -520,8 +598,17 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     // **실을 수 없는 경로면 자리를 통째로 뺀다**([`sayable`], 리뷰 moai-514e.hgz 5번) — 셸에는
     // 멀쩡하지만 JSON 에는 못 싣는 경로(제어문자)가 그 자리다. 그런 경로도 훅은 그대로 부르니,
     // 빠지는 것은 알림의 한 토막뿐이고 어느 파일인지는 `moai skill status` 가 댄다.
-    let (spot, where_) =
-        if sayable(exe) { (": %s", format!(" {}", crate::text::single_quoted(exe))) } else { ("", String::new()) };
+    //
+    // **Codex 의 줄은 그 자리를 큰따옴표로 싼다**(리뷰 moai-u5wr.e74) — 그 줄은 통째로 `sh -c '…'` 에 한 번 더 싸이고
+    // ([`command_for`]) Codex 는 그것을 사람의 로그인 셸(`$SHELL -lc`)로 푼다. 작은따옴표로 싸면 자리에 든 `'` 가
+    // `'\''` 가 되어 바깥 작은따옴표 안에 `\'` 가 서는데, fish 는 작은따옴표 안의 `\'` 를 닫는 따옴표가 아니라 글자로 읽어
+    // 줄이 통째로 문법 오류가 된다 — 모든 Codex 훅이 `moai` 를 부르기도 전에 진다. [`quotable`] 이 `"`·`\`·`$`·`` ` `` 를
+    // 걸렀으니 큰따옴표 안에서 셸이 풀 것이 없다. Claude 의 줄은 판이 그 글의 해시라 그대로 둔다.
+    let (spot, where_) = match (sayable(exe), dialect) {
+        (true, Dialect::Codex) => (": %s", format!(" \"{exe}\"")),
+        (true, _) => (": %s", format!(" {}", crate::text::single_quoted(exe))),
+        (false, _) => ("", String::new()),
+    };
     // **세션마다 한 줄이다**(moai-f7up) — 표식 이름에 부를 바이너리의 철자를 섞는다. 같은 세션이
     // 저장소 둘을 오가면 둘 다 제 알림을 내야 하는데(제 바이너리가 저마다 못 돌 수 있다),
     // 이름만으로는 첫 저장소의 표식이 둘째의 입을 막는다. 셈은 셸이 못 하므로 **심을 때 박아
@@ -545,9 +632,9 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     // 에 남는다 — 사람이 못 듣는 알림 하나가 표식을 세워 `PreToolUse`·`UserPromptSubmit`·
     // `Stop` 의 입을 세션 내내 막았다. 규칙 다섯을 싣는 `PreToolUse` 가 매 도구 호출에 져도
     // 화면은 규칙이 통과한 것과 한 글자도 다르지 않았다 — moai-j4ie 가 끝내려던 바로 그 침묵이다.
-    // 값은 세션에 넷까지고, 문턱이 겨눈 140~1,257 과는 자릿수가 다르다.
+    // 값은 세션에 심은 이벤트 수까지고, 문턱이 겨눈 140~1,257 과는 자릿수가 다르다.
     //
-    // 이름은 `HOOKS` 가 든 넷뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다.
+    // 이름은 `HOOKS`·`CODEX`·`ANTIGRAVITY` 가 든 것뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다.
     //
     // **종료 값도 키에 든다**(리뷰 moai-514e.hgz). 목록이 0·1 밖 전부로 넓어지며 표식을 태우는
     // 것이 설치와 상관없는 한 번짜리 죽음까지가 됐다 — 이 컨테이너에 이력이 있는 OOM 의 137,
@@ -658,7 +745,7 @@ fn plugin_json(exe: &str, version: &str) -> String {
         let entry = serde_json::json!({
             "type": "command",
             "command": command(exe, event),
-            "timeout": 15,
+            "timeout": TIMEOUT,
             "statusMessage": message,
         });
         let group = if *at == "PreToolUse" {
@@ -2100,6 +2187,11 @@ mod tests {
             assert!(codex.contains("systemMessage"), "{sh}: Codex 가 못 도는 바이너리를 안 알린다 — {codex:?}");
             assert_eq!(run(&command_for(&dead, "stop", Dialect::Antigravity)), (Some(0), String::new()), "{sh}");
         }
+        // **Codex 의 속 줄에는 `\'` 가 안 선다**(리뷰 moai-u5wr.e74) — 그 줄은 `sh -c '…'` 에 한 번 더 싸여 사람의 로그인
+        // 셸이 푸는데, fish 는 작은따옴표 안의 `\'` 를 닫는 따옴표로 안 읽어 줄이 통째로 문법 오류가 된다. 자리에 `'` 가
+        // 든 실행 파일이 그 판이다 — POSIX 셸만 재는 위의 고리는 이것을 못 본다.
+        let quoted = shell_line("/home/me/Bob's tools/moai", "stop", Dialect::Codex);
+        assert!(!quoted.contains("\\'"), "Codex 의 속 줄에 \\' 가 섰다 — {quoted}");
     }
 
     /// **심는 훅 파일 둘의 꼴**(moai-u5wr.kov) — Codex 는 Claude 와 같은 틀에 `apply_patch` 를 보고 싣는 글의 상한을
@@ -2136,6 +2228,24 @@ mod tests {
             (Dialect::Claude, "{\"moai\":{}}"),
         ] {
             assert!(!hooks_are_ours(dialect, theirs), "{dialect:?} 가 남의 파일을 제 것으로 읽었다 — {theirs}");
+        }
+
+        // **Antigravity 의 무리는 안까지 본다**(리뷰 moai-u5wr.e74) — 사람이 끈 무리와 사람이 더한 처리기는 moai 의 것이
+        // 아니고, agy 가 다시 쓰며 더한 `null` 은 moai 의 것이며 낡은 것도 아니다.
+        let planted = antigravity_hooks(exe);
+        let nulled = planted.replacen("\"enabled\": true", "\"SessionStart\": null, \"enabled\": true", 1);
+        assert_ne!(nulled, planted, "시험이 null 을 못 넣었다");
+        assert!(hooks_are_ours(Dialect::Antigravity, &nulled) && same_hooks(&nulled, &planted));
+        assert!(!same_hooks(&planted, &antigravity_hooks("/elsewhere/moai")), "다른 moai 를 부르는 파일을 같다고 했다");
+        let off = planted.replacen("\"enabled\": true", "\"enabled\": false", 1);
+        assert!(!hooks_are_ours(Dialect::Antigravity, &off), "사람이 끈 무리를 제 것으로 읽었다");
+        let mine = "{\"moai\":{\"enabled\":true,\"Stop\":[{\"type\":\"command\",\"command\":\"echo mine\"}]}}";
+        assert!(!hooks_are_ours(Dialect::Antigravity, mine), "사람이 더한 처리기를 제 것으로 읽었다");
+
+        // **심긴 파일이 부르는 moai 를 읽는다** — `status` 가 그것으로 견준다. Codex 의 `sh -c '…'` 껍질과 자리에 든 `'` 도.
+        for exe in ["/repo/target/release/moai", "/home/me/Bob's tools/moai", "moai"] {
+            assert_eq!(planted_exe(&codex_hooks(exe)).as_deref(), Some(exe), "codex {exe}");
+            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe), "antigravity {exe}");
         }
     }
 

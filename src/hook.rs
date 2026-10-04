@@ -50,8 +50,9 @@ use std::path::{Path, PathBuf};
 ///
 /// **뒤의 셋은 `Stop` 없이 끝난 턴이다**(moai-u5wr.f29, 2026-10-04 사용자 결정) — 출석을 `idle` 로
 /// 적기만 하고 아무것도 안 싣는다. `busy` 는 `UserPromptSubmit` 이 적고 `Stop` 만 걷어서, 그 셋으로
-/// 끝난 장은 사람이 다시 칠 때까지 일하는 중으로 남았다. 벤더의 이름을 그대로 쓴다 — 심은 설정을
-/// 읽는 사람이 어느 이벤트가 어느 것인지 맞춰 볼 수 있게.
+/// 끝난 장은 사람이 다시 칠 때까지 일하는 중으로 남았다. **Codex 의 `SessionEnd` 만은 그 장을 걷는다** —
+/// Codex 의 장은 프로세스를 몰라 `moai agents` 가 못 걷는다(`cmd::hook` 의 `rest`). 벤더의 이름을 그대로
+/// 쓴다 — 심은 설정을 읽는 사람이 어느 이벤트가 어느 것인지 맞춰 볼 수 있게.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Event {
     // **`hook --help` 의 이벤트 목록이 이 글을 옮겨 적는다**(moai-h0r2) — clap 이 붙이는 값 목록은
@@ -68,7 +69,7 @@ pub enum Event {
     StopFailure,
     /// A person broke off a turn (Codex). Marks the agent idle
     Interrupt,
-    /// The session closes (Claude, Codex). Marks the agent idle
+    /// The session closes. Marks it idle; drops a Codex row
     SessionEnd,
 }
 

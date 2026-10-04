@@ -530,7 +530,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
                 .map(|h| serde_json::json!({
                     "agent": h.agent.as_str(),
                     "path": h.path.display().to_string(),
-                    "state": h.state(&root).as_str(),
+                    "state": h.seen(&root).as_str(),
                 }))
                 .collect::<Vec<_>>(),
         }));
@@ -742,15 +742,45 @@ impl HookFile {
     }
 
     /// **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`, [`Shared::read`] 와 같은 까닭). 못 읽는 자리는
-    /// moai 의 것이 아니다 — 다시 쓰는 길도 그 자리를 거절한다(`write_atomic_inside`).
+    /// moai 의 것이 아니다 — 다시 쓰는 길도 그 자리를 거절한다(`write_atomic_inside`). **뜻으로 견준다**
+    /// ([`skill::same_hooks`]) — agy 가 제 꼴로 다시 쓴 파일을 낡았다고 하면 다시 심을 때마다 커밋된 파일이 흔들린다.
     fn state(&self, root: &Path) -> HookState {
+        self.judged(root).0
+    }
+
+    /// [`HookFile::state`] 와 읽은 글 — moai 의 파일일 때만 글이 선다.
+    fn judged(&self, root: &Path) -> (HookState, Option<String>) {
         if std::fs::symlink_metadata(&self.path).is_err() {
-            return HookState::Missing;
+            return (HookState::Missing, None);
         }
         match crate::held::read_inside(&self.path, &crate::held::Home::of(root)) {
-            Ok(text) if text == self.want => HookState::Current,
-            Ok(text) if skill::hooks_are_ours(self.dialect, &text) => HookState::Stale,
-            _ => HookState::Foreign,
+            Ok(text) if text == self.want || skill::same_hooks(&text, &self.want) => (HookState::Current, Some(text)),
+            Ok(text) if skill::hooks_are_ours(self.dialect, &text) => (HookState::Stale, Some(text)),
+            _ => (HookState::Foreign, None),
+        }
+    }
+
+    /// `status` 가 대는 상태 — **낡았는지는 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74). Claude 의 줄이 설치본의
+    /// 훅이 부르는 파일로 견주는 것과 같은 까닭이다(`status` 의 `wants`): 지금 부른 moai 로 견주던 판은 워크트리의 빌드나
+    /// `cargo run` 으로 부른 것만으로 멀쩡한 두 파일을 "다시 심는다" 고 했고, 시킨 대로 심으면 커밋된 훅이 그 빌드를 부르게
+    /// 바뀌었다 — 워크트리를 걷는 날 그 줄이 `|| exit 0` 으로 말없이 꺼지고, Codex 는 `/hooks` 에서 다시 믿어 달라고 한다.
+    /// `install` 은 이것을 안 쓴다 — 심는 것은 늘 지금 부른 moai 다(Claude 의 `install` 과 같다).
+    fn seen(&self, root: &Path) -> HookState {
+        match self.judged(root) {
+            (HookState::Stale, Some(text))
+                if skill::planted_exe(&text).is_some_and(|exe| skill::same_hooks(&text, &self.written_for(&exe))) =>
+            {
+                HookState::Current
+            }
+            (state, _) => state,
+        }
+    }
+
+    /// 이 에이전트의 훅 파일을 `exe` 로 지은 글.
+    fn written_for(&self, exe: &str) -> String {
+        match self.dialect {
+            crate::cli::Dialect::Codex => skill::codex_hooks(exe),
+            _ => skill::antigravity_hooks(exe),
         }
     }
 
@@ -787,11 +817,11 @@ impl HookFile {
         std::iter::once(head).chain(trust).collect()
     }
 
-    /// `status` 의 한 줄.
+    /// `status` 의 한 줄 — 상태는 [`HookFile::seen`] 이 댄다.
     fn row(&self, root: &Path, lang: crate::i18n::Lang) -> (bool, String) {
         let (agent, path) = (self.agent.as_str(), self.shown(root));
         let args = [("agent", agent), ("path", path.as_str())];
-        match self.state(root) {
+        match self.seen(root) {
             HookState::Current => (true, fill(say(lang, "skill.hooks_row_current"), &args)),
             HookState::Stale => (false, fill(say(lang, "skill.hooks_row_stale"), &args)),
             HookState::Missing => (false, fill(say(lang, "skill.hooks_row_missing"), &args)),

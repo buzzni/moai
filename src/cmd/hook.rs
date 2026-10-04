@@ -10,13 +10,14 @@
 //!
 //! ## 세 에이전트의 말씨
 //!
-//! **판정은 하나고 말씨만 셋이다**(moai-u5wr). 들어온 것은 [`arrived`] 가 Claude 의 꼴([`Input`])로 옮기고,
+//! **판정은 하나고 말씨만 셋이다**(moai-u5wr). 들어온 것은 [`arrived`] 가 Claude 의 꼴([`Input`])과 이벤트로 옮기고,
 //! 나가는 것은 [`answer`] 가 그 에이전트의 꼴로 옮긴다 — 그 사이는 `--dialect` 를 모른다(출석만 안다,
-//! [`attendee`]). 꼴은 2026-10-04 에 사람이 띄운 대화형 codex 0.160·agy 1.2.16 에서 기록했다(moai-u5wr.amg 노트,
-//! `tests/hooks/`).
+//! [`attendee`]·[`rest`]). 꼴은 2026-10-04 에 사람이 띄운 대화형 codex 0.160·agy 1.2.16 에서 기록했다(moai-u5wr.amg
+//! 노트, `tests/hooks/`).
 //!
 //! - **Codex** 는 들고 나는 꼴이 Claude 와 같다. 다른 것은 `apply_patch` 하나다 — 패치가 고치는 파일마다
-//!   `Edit` 한 번으로 접는다. Codex 는 셸·`apply_patch`·MCP 부름에만 훅을 낸다(openai/codex#20204)
+//!   `Edit` 한 번으로 접는다(셸로 친 `apply_patch <<'EOF'` 도). Codex 는 셸·`apply_patch`·MCP 부름에만 훅을
+//!   낸다(openai/codex#20204)
 //! - **Antigravity** 는 camelCase 로 들어오고(`conversationId`·`workspacePaths`·`toolCall{name,args}`) 맨 윗단
 //!   `decision` 으로 나간다. `UserPromptSubmit` 이 없어 턴의 첫 모델 부름(`PreInvocation`, `invocationNum: 0`)이
 //!   그 자리에 서고, 싣는 글은 `injectSteps` 의 `ephemeralMessage` 다. `SessionStart` 도 없어 기준선은 턴 머리에서
@@ -65,11 +66,24 @@ struct RefusalBody<'a> {
     reason: String,
 }
 
-/// 턴을 끝내지 않게 붙드는 모양.
+/// 턴을 끝내지 않게 붙드는 모양 — Antigravity 는 도구 부름을 막는 답도 이 꼴이다([`antigravity_answer`]).
 #[derive(Serialize)]
 struct Hold {
-    decision: &'static str,
+    decision: Verdict,
     reason: String,
+}
+
+/// 맨 윗단 `decision` 의 낱말. **`allow` 가 없다** — Antigravity 에 `allow` 를 내면 사람이 물어야 할 도구 부름까지
+/// 허락한다([`antigravity_answer`]). 낱말을 글로 두던 판은 그 한 줄을 막을 것이 없었다.
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Verdict {
+    /// Claude·Codex 의 `Stop` 이 턴을 붙든다.
+    Block,
+    /// Antigravity 가 도구 부름을 막는다.
+    Deny,
+    /// Antigravity 의 `Stop` 이 턴을 붙든다.
+    Continue,
 }
 
 pub fn run(ctx: &Ctx, event: Event, dialect: Dialect) -> R<Vec<String>> {
@@ -91,10 +105,10 @@ pub fn run(ctx: &Ctx, event: Event, dialect: Dialect) -> R<Vec<String>> {
         return Ok(Vec::new());
     }
     // **부름 하나가 판정 여럿일 수 있다** — Codex 의 패치 하나가 파일 여럿을 고친다([`arrived`]). 차례는
-    // `Decision::then` 이 정한다: 한 파일이라도 막으면 그 패치를 막고, 뒤의 파일은 묻지 않는다.
-    let decision = arrived(dialect, event, &raw)
-        .iter()
-        .fold(Decision::Pass, |done, input| done.then(|| judge(ctx, event, dialect, input)));
+    // `Decision::then` 이 정한다: 한 파일이라도 막으면 그 패치를 막고, 뒤의 파일은 묻지 않는다. 이벤트도 말씨가 옮긴
+    // 것을 쓴다 — 오류로 끝난 Antigravity 의 `Stop` 은 `StopFailure` 다([`from_antigravity`]).
+    let (event, inputs) = arrived(dialect, event, &raw);
+    let decision = inputs.iter().fold(Decision::Pass, |done, input| done.then(|| judge(ctx, event, dialect, input)));
     Ok(answer(event, decision, dialect).into_iter().collect())
 }
 
@@ -166,12 +180,16 @@ fn decide(
         Ok(None) | Err(_) => Repo::find_here(&cwd, crate::i18n::Lang::default).ok()??,
     };
     // **`Stop` 없이 끝난 턴은 출석만 적는다**(moai-u5wr.f29) — 트래커를 안 읽는다. `SessionEnd` 는 Claude 가 1.5초
-    // 안에 끝내라고 하고, 실을 글도 없다(셋 다 출력을 안 읽는다).
-    if matches!(event, Event::StopFailure | Event::Interrupt | Event::SessionEnd) {
-        rest(input, &repo, dialect, event);
-        return Some(Decision::Pass);
-    }
-    let load = repo.read().ok()?;
+    // 안에 끝내라고 하고, 실을 글도 없다(셋 다 출력을 안 읽는다). **이벤트를 다 적어 가른다** — 새 이벤트를 더하면
+    // 컴파일러가 여기서 어느 쪽인지 묻는다. `matches!` 로 가르던 판은 아래 판정의 빈 갈래만 채우면 컴파일이 되어, 새 끝
+    // 이벤트가 트래커를 통째로 읽고 출석도 안 돌렸다.
+    let load = match event {
+        Event::StopFailure | Event::Interrupt | Event::SessionEnd => {
+            rest(input, &repo, dialect, event);
+            return Some(Decision::Pass);
+        }
+        Event::SessionStart | Event::UserPromptSubmit | Event::PreToolUse | Event::Stop => repo.read().ok()?,
+    };
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
     // 에이전트가 알아낼 길이 없는 유일한 경고다 — 기준선도 같은 만큼
@@ -224,9 +242,11 @@ fn decide(
             Decision::Pass
         }
         Event::UserPromptSubmit => {
-            // **`SessionStart` 가 없는 말씨는 턴 머리에서 기준선을 적는다** — 없을 때만이다(접힌 뒤와 같은 자). 안
-            // 적으면 Antigravity 의 `Stop` 이 끝까지 견줄 것이 없다. Claude·Codex 는 그 이벤트가 적으니 안 건드린다.
-            if dialect == Dialect::Antigravity && baseline(input, &repo).is_none() {
+            // **턴 머리에서도 기준선이 없으면 적는다** — 접힌 뒤와 같은 자다. 안 적으면 그 세션의 `Stop` 이 끝까지 견줄
+            // 것이 없다. Antigravity 는 `SessionStart` 가 아예 없고, Claude·Codex 도 그 훅이 안 돈 세션이 있다 — 첫 프롬프트
+            // 뒤에 `/hooks` 에서 믿어 준 Codex, 도중에 심었거나 임시 디렉터리가 비워진 세션(리뷰 moai-u5wr.e74). 말씨로
+            // 가르던 판은 그 Codex 세션이 경고를 아무리 늘려도 `Stop` 이 한 번도 안 붙들었다.
+            if baseline(input, &repo).is_none() {
                 write_baseline(input, &repo, &load.issues, &unreadable, ctx.zone());
             }
             let board = once_per_session(input, &repo, "board", || {
@@ -255,7 +275,11 @@ fn decide(
             });
             // 사람이 물었으니 일하는 중이다. 편지는 **매 프롬프트** 싣는다 — 보드처럼 한 번이 아니다(moai-h8tn). 보드와
             // 한 칸이라 그 다음 자리에 든다([`crate::hook::letters_room`]). 출석은 편지를 옮기기 전에 적는다(위와 같은 까닭).
-            let me = attendee(input, &repo, dialect);
+            //
+            // **프롬프트는 새 턴이다 — 이미 일하는 중인 장이어도 `since` 를 새로 댄다**(리뷰 moai-u5wr.e74). Claude 와
+            // Antigravity 는 사람이 Esc 로 끊은 턴에 훅을 하나도 안 내 장이 `busy` 로 남는데, 상태가 같다고 그때를 두던 판은
+            // `send --wake` 가 몇 시간 전에 끊긴 턴의 시각을 "그때부터 일하는 중" 으로 댔다 — 그 값을 댄 까닭과 거꾸로다.
+            let me = attendee(input, &repo, dialect).map(|p| mail::Presence { since: String::new(), ..p });
             attend(&repo, me.clone(), mail::BUSY);
             let letters =
                 me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::letters_room(&board), Mine::All));
@@ -493,7 +517,7 @@ fn answer(event: Event, decision: Decision, dialect: Dialect) -> Option<String> 
             serde_json::to_string(&Refusal { specific: RefusalBody { event: event.wire(), decision: "deny", reason } })
                 .ok()
         }
-        Decision::Block(reason) => serde_json::to_string(&Hold { decision: "block", reason }).ok(),
+        Decision::Block(reason) => serde_json::to_string(&Hold { decision: Verdict::Block, reason }).ok(),
     }
 }
 
@@ -507,66 +531,78 @@ fn answer(event: Event, decision: Decision, dialect: Dialect) -> Option<String> 
 /// 에 딸린다 — `deny` 로 실으면 막고, `allow` 로 실으면 허락한다. Claude·Codex 가 받는 그 줄(fork 1 의 둘째 물음
 /// 같은 것)이 여기서는 안 선다.
 fn antigravity_answer(event: Event, decision: Decision) -> Option<String> {
-    let said = match decision {
-        Decision::Pass => return None,
-        Decision::Deny(reason) => serde_json::json!({ "decision": "deny", "reason": reason }),
-        Decision::Block(reason) => serde_json::json!({ "decision": "continue", "reason": reason }),
+    match decision {
+        Decision::Pass => None,
+        Decision::Deny(reason) => serde_json::to_string(&Hold { decision: Verdict::Deny, reason }).ok(),
+        Decision::Block(reason) => serde_json::to_string(&Hold { decision: Verdict::Continue, reason }).ok(),
         Decision::Context(text) => match event {
             Event::UserPromptSubmit | Event::SessionStart => {
-                serde_json::json!({ "injectSteps": [{ "ephemeralMessage": text }] })
+                serde_json::to_string(&serde_json::json!({ "injectSteps": [{ "ephemeralMessage": text }] })).ok()
             }
-            _ => return None,
+            _ => None,
         },
-    };
-    serde_json::to_string(&said).ok()
+    }
 }
 
 /// 에이전트가 준 것을 판정이 읽는 꼴([`Input`])로 옮긴다 — 대개 하나고, 판정할 것이 없으면 비었다.
 ///
 /// - **Claude** 는 그대로다
-/// - **Codex** 도 키가 같다. `apply_patch` 만 고치는 파일마다 `Edit` 하나로 편다([`patched`])
-/// - **Antigravity** 는 [`from_antigravity`] 가 옮긴다
-fn arrived(dialect: Dialect, event: Event, raw: &str) -> Vec<Input> {
+/// - **Codex** 도 키가 같다. 패치(`apply_patch` 도구와 셸로 친 `apply_patch`)만 고치는 파일마다 `Edit` 하나로
+///   편다([`patched`])
+/// - **Antigravity** 는 [`from_antigravity`] 가 옮긴다 — 이벤트도 옮길 수 있어 함께 낸다
+fn arrived(dialect: Dialect, event: Event, raw: &str) -> (Event, Vec<Input>) {
     match dialect {
-        Dialect::Claude => vec![serde_json::from_str(raw).unwrap_or_default()],
-        Dialect::Codex => patched(serde_json::from_str(raw).unwrap_or_default()),
-        Dialect::Antigravity => from_antigravity(event, raw).into_iter().collect(),
+        Dialect::Claude => (event, vec![serde_json::from_str(raw).unwrap_or_default()]),
+        Dialect::Codex => (event, patched(serde_json::from_str(raw).unwrap_or_default())),
+        Dialect::Antigravity => match from_antigravity(event, raw) {
+            Some((event, input)) => (event, vec![input]),
+            None => (event, Vec::new()),
+        },
     }
 }
 
-/// Codex 의 `apply_patch` 를 고치는 파일마다 `Edit` 하나로 편다 — 패치 글은 `tool_input.command` 에 든다(Codex 의
-/// 훅 문서. 기록한 두 판에서는 모델이 셸로 고쳐 이 도구가 안 불렸다). **고치는 자리는 패치의 머리 줄이 댄다** —
-/// `*** Add File:`·`*** Update File:`·`*** Delete File:`·`*** Move to:` 다. 옮기는 패치는 떠나는 자리와 닿는 자리를
-/// 둘 다 고치는 것으로 본다. 상대 경로는 세션의 자리(`cwd`)에 붙인다 — 패치는 그 자리에서 풀린다.
+/// Codex 의 패치를 고치는 파일마다 `Edit` 하나로 편다 — 패치 글은 `tool_input.command` 에 든다(Codex 의 훅 문서).
+/// **고치는 자리는 패치의 머리 줄이 댄다** — `*** Add File:`·`*** Update File:`·`*** Delete File:`·`*** Move to:` 다.
+/// 옮기는 패치는 떠나는 자리와 닿는 자리를 둘 다 고치는 것으로 본다. 상대 경로는 패치가 풀리는 자리에 붙인다 — 세션의
+/// 자리(`cwd`)이고, 셸로 친 패치가 `cd` 로 옮겨 갔으면 그 자리다.
+///
+/// **패치는 두 길로 온다**(리뷰 moai-u5wr.e74) — `apply_patch` 도구(`tool_name: "apply_patch"`)와, 셸 도구로 친
+/// `apply_patch <<'EOF' … EOF`·`cd <자리> && apply_patch <<'EOF' …` 다. 뒤의 것은 훅에 셸 부름(`Bash`)으로만 오고, Codex 는
+/// 셸을 안 띄운 채 그 자리에서 패치를 푼다(codex-rs `exec_command.rs` 의 `intercept_apply_patch`). 셸 줄로만 보던 판은
+/// 거기서 쓰는 것을 못 봐 규칙 2 가 통째로 샜다 — 기록한 두 판의 모델도 셸로 고쳤다. 셸로 온 패치는 파일들을 먼저 보고
+/// 그 셸 줄도 그대로 판정한다. 파일을 먼저 보는 것은 막힐 때 셸 줄이 남기는 기록(집기)이 안 서게 하려는 것이다.
+///
+/// **머리 줄은 앞 빈칸을 걷고 읽는다** — Codex 의 풀이가 그렇다(`apply-patch` 의 `line.trim()`). 줄 머리에서만 찾던
+/// 판은 Codex 가 그대로 푸는 들여 쓴 머리 줄의 파일을 판정 없이 보냈다.
 ///
 /// **자리를 하나도 못 읽은 패치는 그대로 둔다** — 도구 이름이 `apply_patch` 라 판정이 아무 뜻도 안 둔다(`Call::Other`).
 /// 꼴을 모르는 패치를 막으면 고칠 길이 없는 거절이 선다.
 fn patched(input: Input) -> Vec<Input> {
-    if input.tool_name.as_deref() != Some("apply_patch") {
-        return vec![input];
-    }
-    let patch = input.tool_input.get("command").and_then(|v| v.as_str()).unwrap_or_default();
-    let mut paths: Vec<String> = Vec::new();
-    for line in patch.lines() {
-        let named = ["*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"]
-            .iter()
-            .find_map(|head| line.strip_prefix(head))
-            .map(str::trim)
-            .filter(|p| !p.is_empty());
-        if let Some(path) = named
-            && !paths.iter().any(|p| p == path)
-        {
-            paths.push(path.to_string());
-        }
-    }
+    let text = input.tool_input.get("command").and_then(|v| v.as_str()).unwrap_or_default();
+    // 패치가 풀리는 자리(`cd` 로 옮겨 간 곳)와, 셸로 온 패치인가.
+    let (under, shell) = match input.tool_name.as_deref() {
+        Some("apply_patch") => (None, false),
+        Some("Bash") => match shell_patch(text) {
+            Some(under) => (under, true),
+            None => return vec![input],
+        },
+        _ => return vec![input],
+    };
+    let paths = patch_paths(text);
     if paths.is_empty() {
         return vec![input];
     }
-    let at = |path: &str| match input.cwd.as_deref() {
-        Some(cwd) if Path::new(path).is_relative() => Path::new(cwd).join(path).display().to_string(),
+    let base = match (input.cwd.as_deref(), under.as_deref()) {
+        (Some(cwd), Some(dir)) => Some(Path::new(cwd).join(dir)),
+        (Some(cwd), None) => Some(PathBuf::from(cwd)),
+        (None, Some(dir)) if Path::new(dir).is_absolute() => Some(PathBuf::from(dir)),
+        (None, _) => None,
+    };
+    let at = |path: &str| match &base {
+        Some(base) if Path::new(path).is_relative() => base.join(path).display().to_string(),
         _ => path.to_string(),
     };
-    paths
+    let mut fanned: Vec<Input> = paths
         .iter()
         .map(|path| Input {
             session_id: input.session_id.clone(),
@@ -577,7 +613,47 @@ fn patched(input: Input) -> Vec<Input> {
             stop_hook_active: input.stop_hook_active,
             model_raw: input.model_raw.clone(),
         })
-        .collect()
+        .collect();
+    if shell {
+        fanned.push(input);
+    }
+    fanned
+}
+
+/// 패치 글의 머리 줄이 대는 자리 — 나온 차례로, 겹친 것은 한 번.
+fn patch_paths(patch: &str) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for line in patch.lines() {
+        let named = ["*** Add File:", "*** Update File:", "*** Delete File:", "*** Move to:"]
+            .iter()
+            .find_map(|head| line.trim_start().strip_prefix(head))
+            .map(str::trim)
+            .filter(|p| !p.is_empty());
+        if let Some(path) = named
+            && !paths.iter().any(|p| p == path)
+        {
+            paths.push(path.to_string());
+        }
+    }
+    paths
+}
+
+/// 셸로 친 패치인가 — Codex 가 셸을 안 띄우고 그 자리에서 푸는 꼴(`apply_patch <<'EOF' …`, `cd <자리> && apply_patch
+/// <<'EOF' …`, 이름이 `applypatch` 여도 같다)이면 `cd` 가 옮겨 간 자리를(안 옮겼으면 `None`) 낸다. 첫 줄만 본다 —
+/// 패치의 몸은 그 뒤의 heredoc 이다.
+fn shell_patch(cmd: &str) -> Option<Option<String>> {
+    let head = cmd.lines().next()?.trim_start();
+    let (under, rest) = match head.strip_prefix("cd").filter(|after| after.starts_with(char::is_whitespace)) {
+        Some(after) => {
+            let (dir, rest) = after.split_once("&&")?;
+            let dir = dir.trim();
+            let bare = ['\'', '"'].iter().find_map(|q| dir.strip_prefix(*q).and_then(|d| d.strip_suffix(*q)));
+            (Some(bare.unwrap_or(dir).to_string()), rest.trim_start())
+        }
+        None => (None, head),
+    };
+    let word = rest.split(|c: char| c.is_whitespace() || c == '<').next()?;
+    matches!(word, "apply_patch" | "applypatch").then_some(under)
 }
 
 /// Antigravity 가 준 것을 [`Input`] 으로 — 판정할 것이 없으면 `None` 이다(2026-10-04 agy 1.2.16 실측).
@@ -591,13 +667,20 @@ fn patched(input: Input) -> Vec<Input> {
 /// - `Stop` 이 이미 한 번 붙들었는지는 `executionNum` 이 댄다(붙든 뒤의 `Stop` 이 1 이었다)
 /// - **턴 머리만 `UserPromptSubmit` 이다** — `PreInvocation` 은 모델을 부를 때마다 오고, 사람이 친 턴의 첫 부름이
 ///   `invocationNum: 0` 이다. 그 뒤의 부름은 판정할 것이 없다
-fn from_antigravity(event: Event, raw: &str) -> Option<Input> {
+/// - **오류로 끝난 실행의 `Stop` 은 `StopFailure` 다**(리뷰 moai-u5wr.e74) — agy 는 API 오류로 끝난 실행에도 `Stop` 을
+///   내고 그 까닭을 `error`(정상 판은 빈 글이다)·`terminationReason` 에 싣는다. 보통 `Stop` 으로 판정하던 판은 편지를
+///   읽음으로 옮겨 `decision: continue` 로 실패하는 백엔드에 도로 밀어 넣고, 세션에 한 번인 닫기 물음을 그 판에 써
+///   버렸다. Claude 의 API 오류(`StopFailure`)처럼 출석만 `idle` 로 돌린다
+fn from_antigravity(event: Event, raw: &str) -> Option<(Event, Input)> {
     use serde_json::Value;
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
     if event == Event::UserPromptSubmit && v.get("invocationNum").and_then(Value::as_u64).is_some_and(|n| n != 0) {
         return None;
     }
     let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+    let failed = text(&v, "error").is_some_and(|e| !e.trim().is_empty())
+        || text(&v, "terminationReason").is_some_and(|r| r.eq_ignore_ascii_case("error"));
+    let event = if event == Event::Stop && failed { Event::StopFailure } else { event };
     let call = v.get("toolCall").cloned().unwrap_or_default();
     let args = call.get("args").cloned().unwrap_or_default();
     let workspace = v.get("workspacePaths").and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str);
@@ -613,7 +696,7 @@ fn from_antigravity(event: Event, raw: &str) -> Option<Input> {
         ),
         Some(other) => (Some(format!("antigravity:{other}")), args),
     };
-    Some(Input {
+    let input = Input {
         session_id: text(&v, "conversationId"),
         cwd,
         source: None,
@@ -621,7 +704,8 @@ fn from_antigravity(event: Event, raw: &str) -> Option<Input> {
         tool_input,
         stop_hook_active: v.get("executionNum").and_then(Value::as_u64).is_some_and(|n| n > 0),
         model_raw: v.get("modelName").cloned().unwrap_or_default(),
-    })
+    };
+    Some((event, input))
 }
 
 /// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).
@@ -1112,9 +1196,17 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
         };
     // 토막은 상한에 안 잘리게 잇는다([`mail::name_with`]) — 잘리면 가른 이름이 도로 산 남의 이름이다.
     // 대소문자만 다른 이름도 같은 장이다(`hello` 의 이름 겨루기와 같은 자).
-    let free = |name: String| match all.iter().any(|p| p.name.eq_ignore_ascii_case(&name) && !p.gone()) {
-        true => mail::name_with(&name, &short),
-        false => Some(name),
+    //
+    // **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고
+    // 65초 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같아, 한 번만 가르던 판은 셋째가 둘째의 장을 덮었고 둘은
+    // 훅마다 서로의 장과 편지를 빼앗았다. 토막을 이어도 산 남의 이름이면 세션 id 를 통째로 잇는다 — 세션마다 하나다.
+    let whole: String = session.chars().filter(char::is_ascii_alphanumeric).collect();
+    let taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && !p.gone());
+    let free = |name: String| {
+        if !taken(&name) {
+            return Some(name);
+        }
+        [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| mail::name_with(&name, tail)).find(|n| !taken(n))
     };
     if dialect == Dialect::Codex {
         return Some(fresh(free(mail::name_with("codex", &short)?)?, "codex", 0, None, (None, None)));
@@ -1160,6 +1252,12 @@ fn rest(input: &Input, repo: &Repo, dialect: Dialect, event: Event) {
     let Some(p) = all.into_iter().find(|p| p.session.as_deref() == Some(session)) else { return };
     if dialect == Dialect::Codex && event == Event::SessionEnd {
         let _ = mail::forget(&dir, &p.name);
+        return;
+    }
+    // **이미 노는 장은 다시 안 쓴다**(리뷰 moai-u5wr.e74) — 디스크에서 읽은 그대로라 바뀔 것이 없다. Claude 의 흔한 끝
+    // (`Stop` 뒤의 `SessionEnd`, `/clear` 마다)이 그 자리고, 저장소가 선 자리(Ceph RBD)가 멈춘 날 그 쓰기 하나가
+    // `SessionEnd` 의 짧은 상한을 넘긴다.
+    if p.status == mail::IDLE && !p.since.is_empty() {
         return;
     }
     attend(repo, Some(p), mail::IDLE);

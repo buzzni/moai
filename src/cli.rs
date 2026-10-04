@@ -813,7 +813,7 @@ IDEA
     stop                The turn ends. Loads letters, then checks the state
     stop-failure        An API error ended a turn (Claude). Marks the agent idle
     interrupt           A person broke off a turn (Codex). Marks the agent idle
-    session-end         The session closes (Claude, Codex). Marks the agent idle
+    session-end         The session closes. Marks it idle; drops a Codex row
 
   --dialect says which agent's shapes come in and go out: claude (the
   default), codex or antigravity. The rules are the same for all three.

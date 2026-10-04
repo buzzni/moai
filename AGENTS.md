@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:cd6aec7d -->
+<!-- moai:begin v:0.6.0 hash:eb37f5d1 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -426,7 +426,7 @@ work. It is a note, not a field.
 
 ### The five things the hook actually watches
 
-They stand once `moai skill install` has planted the hooks into Claude.
+They stand once `moai skill install` has planted the hooks for your agent.
 
 **1. New issues stay inside what you picked up.** The issue in focus is the one you picked up — it has left the
 first column and is not closed yet (`in_progress`·`review`).
@@ -486,7 +486,8 @@ are is unknown, nothing is refused.
 `moai skill install` planted them for your agent — Claude's plugin, Codex's
 `.codex/hooks.json` once a person has trusted it in `/hooks`, Antigravity's
 `.agents/hooks.json`. An agent without them, and a tool call that sends no hook
-(Codex sends them only for its shell, `apply_patch` and MCP calls), is refused
+(Codex sends them only for its shell, `apply_patch` and MCP calls) or that the
+hooks do not read (input typed into a command already running), is refused
 nothing — keep the five yourself. Rules 4 and 5 most of all: they guard the
 person's other sessions and other people's work, and nothing else will.
 
