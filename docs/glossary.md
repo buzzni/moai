@@ -127,8 +127,8 @@ from `moai show <id>`. The hook holds the end of a turn once to ask for it.
 A board line that informs without judging: ideas piling up, work deferred, a
 milestone running, a merge driver not installed. It stands apart from the
 [warnings](#warning) under `notices`. `moai wiki ls` uses the same word for a
-page with conflict markers, a link that does not resolve and an id the tracker
-does not hold.
+page with conflict markers, a link that leads to no page, a link to a heading the
+page does not have and an id the tracker does not hold.
 
 ## Pick up
 
