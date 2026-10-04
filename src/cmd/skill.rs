@@ -90,7 +90,15 @@ fn invoked(current: PathBuf, resolved: &Path) -> PathBuf {
 
 /// 훅에 이 실행 파일을 적었을 때 심을 트리.
 fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
-    skill::tree(prefix, root, exe, &crate::guide::skill(), &crate::guide::reference(), &crate::guide::supervise())
+    skill::tree(
+        prefix,
+        root,
+        exe,
+        &crate::guide::skill(),
+        &crate::guide::reference(),
+        &crate::guide::supervise(),
+        &crate::guide::wiki(),
+    )
 }
 
 pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
@@ -971,7 +979,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    /// **글마다 제 자리에 선다.** `skill::tree` 는 같은 `&str` 셋을 자리로 받아, 여기서 둘을
+    /// **글마다 제 자리에 선다.** `skill::tree` 는 같은 `&str` 넷을 자리로 받아, 여기서 둘을
     /// 바꿔 적어도 컴파일되고 판도 제 자신과 맞는다 — 커밋된 트리 시험은 `tree_named` 를
     /// 따로 불러 이 길을 안 지난다. 바뀌면 frontmatter 없는 참고 문서가 감독 스킬 자리에
     /// 서서, 모든 저장소에서 그 스킬이 조용히 안 뜬다.
@@ -985,6 +993,7 @@ mod tests {
             ("skills/moai/SKILL.md", "---\nname: moai\n"),
             ("skills/moai/references/commands.md", "# Every command"),
             ("skills/moai-supervise/SKILL.md", "---\nname: moai-supervise\n"),
+            ("skills/moai-wiki/SKILL.md", "---\nname: moai-wiki\n"),
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
         }

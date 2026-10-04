@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.3.0 hash:3ab2abd7 -->
+<!-- moai:begin v:0.5.0 hash:d247bab7 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -486,6 +486,14 @@ are is unknown, nothing is refused.
 the ideas that have piled up, one at a time, to the sessions idling on the same
 repository, and to take their reports — the supervisor picks, sends and checks;
 it does not fix and it does not merge.
+
+### The wiki
+
+The repository's manual is markdown pages under one directory — `docs` unless `wiki_dir`
+in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
+prints one. When an epic changes what a person does, the window that did it fixes the page
+on its branch before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
+that says how — and sweeps the wiki when a person calls it. Nothing checks this.
 
 ### Before you close the session
 
