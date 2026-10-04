@@ -77,6 +77,11 @@ When you are not doing an existing piece of work right now:
   moai defer <id> -m 'next quarter'  out of the plan for a while
   moai defer <id> --undo             pick it back up
 
+To read the project manual:
+
+  moai wiki ls                  the markdown pages under docs/ - the wiki
+  moai wiki show <slug>         one page
+
 To watch several projects from one place:
 
   moai project add <dir>        registered, moai/status/ready outside a
