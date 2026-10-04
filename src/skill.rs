@@ -32,6 +32,51 @@ pub const DIR: &str = ".claude/moai-plugin";
 /// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
 pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
 
+/// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
+/// 두 벤더 문서가 같은 `<저장소>/.agents/skills/<이름>/SKILL.md` 를 들어, 한 벌을 심으면 둘이 다 읽고 커밋돼 팀이
+/// 받는다. 매니페스트도 등록도 없다 — 그 디렉터리를 스스로 훑는다. v0.7.0 에서는 이 저장소 안의 자리 하나뿐이고
+/// 사용자 범위(`~/.agents/skills`)는 심지 않는다. 훅은 따로 선다(moai-u5wr).
+pub const AGENTS_DIR: &str = ".agents/skills";
+
+/// 심는 스킬 하나 — 이름([`NAMES`] 의 한 칸)과 그 디렉터리 안에 심을 글. 경로는 스킬 디렉터리부터의 상대고
+/// 첫 글이 `SKILL.md` 다.
+pub struct Skill {
+    pub name: &'static str,
+    pub files: Vec<(&'static str, String)>,
+}
+
+/// 심는 스킬 전부 — [`NAMES`] 의 차례로, 글은 `guide` 에서 온다. **트리 둘이 이 하나를 받는다**(moai-xs2h.xgo) —
+/// Claude 의 플러그인([`tree`])과 Codex·Antigravity 의 [`AGENTS_DIR`]([`agents_tree`]). 부르는 자리마다 글을 손으로
+/// 엮던 판은 `install` 과 커밋된 트리 시험이 같은 글 넷을 따로 늘어놓아, 스킬 하나를 더할 때마다 두 자리를 고쳤다.
+pub fn skills() -> Vec<Skill> {
+    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
+    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
+    let [main, supervisor, wiki] = NAMES;
+    vec![
+        Skill {
+            name: main,
+            files: vec![("SKILL.md", crate::guide::skill()), ("references/commands.md", crate::guide::reference())],
+        },
+        // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고, 일꾼이 `moai` 를 부를 때마다
+        // 감독의 걸음까지 읽는다. 발동어(description)는 따로 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
+        Skill { name: supervisor, files: vec![("SKILL.md", crate::guide::supervise())] },
+        // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai` 스킬에 섞으면 이슈
+        // 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
+        Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())] },
+    ]
+}
+
+/// 스킬마다의 글을 `<이름>/<상대 경로>` 로 편다 — 두 트리가 이 차례 그대로 받는다.
+fn skill_files(skills: &[Skill]) -> impl Iterator<Item = (PathBuf, String)> + '_ {
+    skills.iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+}
+
+/// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
+/// 없다는 것뿐이고, 에이전트마다 다른 걸음은 글 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
+pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
+    skill_files(skills).collect()
+}
+
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
 ///
 /// **저장소마다 달라야 한다.** 이름은 기계 하나에서 전역이라, 고정 이름을 쓰면
@@ -409,43 +454,16 @@ fn command(exe: &str, event: &str) -> String {
 ///
 /// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
 /// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
-pub fn tree(
-    prefix: &str,
-    root: &Path,
-    exe: &str,
-    skill: &str,
-    reference: &str,
-    supervise: &str,
-    wiki: &str,
-) -> Vec<(PathBuf, String)> {
-    tree_named(&market(prefix, root), exe, skill, reference, supervise, wiki)
+pub fn tree(prefix: &str, root: &Path, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+    tree_named(&market(prefix, root), exe, skills)
 }
 
 /// `tree` 의 몸통. 저장소 자리는 마켓플레이스 이름으로만 들어오므로, 이름을
 /// 받아 두면 **커밋된 트리를 그 트리가 적힌 자리 그대로** 다시 낼 수 있다 —
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
-fn tree_named(
-    market: &str,
-    exe: &str,
-    skill: &str,
-    reference: &str,
-    supervise: &str,
-    wiki: &str,
-) -> Vec<(PathBuf, String)> {
-    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
-    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki_name] = NAMES;
-    let mut files: Vec<(PathBuf, String)> = vec![
-        (PathBuf::from(format!("skills/{main}/SKILL.md")), skill.to_string()),
-        (PathBuf::from(format!("skills/{main}/references/commands.md")), reference.to_string()),
-        // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고,
-        // 일꾼이 `moai` 를 부를 때마다 감독의 걸음까지 읽는다. 발동어(description)는 따로
-        // 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        (PathBuf::from(format!("skills/{supervisor}/SKILL.md")), supervise.to_string()),
-        // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai`
-        // 스킬에 섞으면 이슈 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
-        (PathBuf::from(format!("skills/{wiki_name}/SKILL.md")), wiki.to_string()),
-    ];
+fn tree_named(market: &str, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+    let mut files: Vec<(PathBuf, String)> =
+        skill_files(skills).map(|(p, b)| (Path::new("skills").join(p), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
@@ -877,10 +895,25 @@ mod tests {
     }
 
     fn tree_at(prefix: &str, root: &Path, exe: &str, skill: &str) -> BTreeMap<String, String> {
-        tree(prefix, root, exe, skill, "참고", "감독", "위키")
-            .into_iter()
-            .map(|(p, b)| (p.display().to_string(), b))
-            .collect()
+        keyed(tree(prefix, root, exe, &fake(skill, "감독", "위키")))
+    }
+
+    fn keyed(files: Vec<(PathBuf, String)>) -> BTreeMap<String, String> {
+        files.into_iter().map(|(p, b)| (p.display().to_string(), b)).collect()
+    }
+
+    /// [`skills`] 와 같은 꼴에 글만 갈아 끼운 목록 — 이름과 자리는 [`skills`] 가 낸 그대로다. 손으로 다시 짜면
+    /// 스킬 하나가 늘 때 시험만 옛 꼴로 남는다. 참고 문서는 `참고` 로 둔다.
+    fn fake(skill: &str, supervise: &str, wiki: &str) -> Vec<Skill> {
+        let mut all = skills();
+        for (s, body) in all.iter_mut().zip([skill, supervise, wiki]) {
+            s.files = s
+                .files
+                .iter()
+                .map(|(rel, _)| (*rel, if *rel == "SKILL.md" { body } else { "참고" }.to_string()))
+                .collect();
+        }
+        all
     }
 
     /// 초점이 있을 때 **막히는 것이 옳은** 명령들.
@@ -1133,7 +1166,7 @@ mod tests {
     /// 이슈 id 로 센다(moai-mdzx.3pm).
     #[test]
     fn the_tree_plants_every_skill_name() {
-        let planted: Vec<String> = tree("t", Path::new("/repo"), "/bin/moai", "스킬", "참고", "감독", "위키")
+        let planted: Vec<String> = tree("t", Path::new("/repo"), "/bin/moai", &fake("스킬", "감독", "위키"))
             .into_iter()
             .filter_map(|(p, _)| {
                 let dir = p.strip_prefix("skills").ok()?.parent()?;
@@ -1141,6 +1174,55 @@ mod tests {
             })
             .collect();
         assert_eq!(planted, NAMES);
+    }
+
+    /// **`.agents/skills` 는 Claude 의 트리와 같은 글을 같은 이름 밑에 받는다**(moai-xs2h.xgo, 2026-10-04 사용자 결정) —
+    /// 다른 것은 매니페스트가 없다는 것뿐이다. 에이전트마다 글을 따로 내면 같은 것이 세 벌이 되어 갈라지고, 이름이
+    /// [`NAMES`] 밖으로 새면 위키가 그 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    #[test]
+    fn the_agents_tree_carries_the_same_skills_without_a_manifest() {
+        let all = fake("# 스킬", "감독", "위키");
+        let claude = keyed(tree("t", Path::new("/repo"), "/bin/moai", &all));
+        let shared = keyed(agents_tree(&all));
+        let dirs: Vec<String> = agents_tree(&all)
+            .into_iter()
+            .filter_map(|(p, _)| {
+                let dir = p.parent()?;
+                (p.file_name()? == "SKILL.md").then(|| dir.display().to_string())
+            })
+            .collect();
+        assert_eq!(dirs, NAMES, "심는 스킬이 NAMES 와 다르다 — 차례까지");
+        for (path, body) in &shared {
+            assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
+        }
+        assert_eq!(shared.len() + 2, claude.len(), "매니페스트 둘 말고 다른 것이 갈렸다");
+        assert!(!shared.keys().any(|p| p.contains(".claude-plugin")), "매니페스트가 .agents 에 섰다");
+    }
+
+    /// **심는 SKILL.md 는 Agent Skills 표준의 머리를 지킨다**(agentskills.io/specification, 세 에이전트가 다 받는다).
+    /// `name` 은 제 디렉터리 이름과 같고 소문자·숫자·붙임표 64자 안이며 붙임표로 열거나 닫거나 겹치지 않는다.
+    /// `description` 은 비지 않고 1024자 안이다. 어기면 그 에이전트가 스킬을 조용히 안 싣는다 — Claude 만 보던
+    /// 판에는 이 금이 글로만 있었다.
+    #[test]
+    fn every_skill_meets_the_agent_skills_frontmatter() {
+        for s in skills() {
+            let (first, body) = &s.files[0];
+            assert_eq!(*first, "SKILL.md", "{} 의 첫 글이 SKILL.md 가 아니다", s.name);
+            let head = body.strip_prefix("---\n").and_then(|b| b.split_once("\n---\n")).map(|(h, _)| h);
+            let head = head.unwrap_or_else(|| panic!("{} 에 머리(---)가 없다", s.name));
+            let field = |k: &str| head.lines().find_map(|l| l.strip_prefix(&format!("{k}: "))).map(str::trim);
+            let name = field("name").unwrap_or_else(|| panic!("{} 의 머리에 name 이 없다", s.name));
+            assert_eq!(name, s.name, "머리의 name 이 디렉터리 이름과 다르다");
+            let ok = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
+            assert!(
+                name.len() <= 64 && name.chars().all(ok) && !name.starts_with('-') && !name.ends_with('-'),
+                "{name} 이 표준의 name 꼴이 아니다"
+            );
+            assert!(!name.contains("--"), "{name} 에 붙임표가 겹친다");
+            let description = field("description").unwrap_or_else(|| panic!("{name} 의 머리에 description 이 없다"));
+            let n = description.chars().count();
+            assert!((1..=1024).contains(&n), "{name} 의 description 이 {n}자다 — 1~1024자");
+        }
     }
 
     /// **판은 내용에서 나온다.** 같은 내용이면 같은 판이라 헛 업데이트가 없고,
@@ -1158,15 +1240,9 @@ mod tests {
         assert_eq!(version(&a), version(&b), "같은 내용인데 판이 다르다");
         assert_ne!(version(&a), version(&c), "본문이 달라졌는데 판이 같다");
         assert_ne!(version(&a), version(&d), "부를 바이너리가 달라졌는데 판이 같다");
-        let e = tree("t", Path::new("/repo"), "/bin/moai", "# 스킬", "참고", "감독 (고침)", "위키")
-            .into_iter()
-            .map(|(p, b)| (p.display().to_string(), b))
-            .collect();
+        let e = keyed(tree("t", Path::new("/repo"), "/bin/moai", &fake("# 스킬", "감독 (고침)", "위키")));
         assert_ne!(version(&a), version(&e), "감독 스킬이 달라졌는데 판이 같다");
-        let f = tree("t", Path::new("/repo"), "/bin/moai", "# 스킬", "참고", "감독", "위키 (고침)")
-            .into_iter()
-            .map(|(p, b)| (p.display().to_string(), b))
-            .collect();
+        let f = keyed(tree("t", Path::new("/repo"), "/bin/moai", &fake("# 스킬", "감독", "위키 (고침)")));
         assert_ne!(version(&a), version(&f), "위키 스킬이 달라졌는데 판이 같다");
         // semver 세 자리여야 `claude` 가 읽는다.
         assert_eq!(version(&a).split('.').count(), 3, "{}", version(&a));
@@ -1658,7 +1734,7 @@ mod tests {
     #[test]
     fn the_hook_exe_round_trips_through_the_manifest() {
         for exe in ["/repo/target/release/moai", "moai"] {
-            let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고", "감독", "위키");
+            let files = tree("t", Path::new("/repo"), exe, &fake("# 스킬", "감독", "위키"));
             let (_, manifest) = files.iter().find(|(p, _)| p.ends_with("plugin.json")).unwrap();
             assert_eq!(hook_exe(manifest).as_deref(), Some(exe));
             assert!(version_in(&files).is_some_and(|v| v.split('.').count() == 3));
@@ -2200,14 +2276,7 @@ mod tests {
             .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
             .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
 
-        let want = tree_named(
-            &name,
-            &exe,
-            &crate::guide::skill(),
-            &crate::guide::reference(),
-            &crate::guide::supervise(),
-            &crate::guide::wiki(),
-        );
+        let want = tree_named(&name, &exe, &skills());
         if bless {
             for (path, body) in &want {
                 // 새로 느는 파일은 제 디렉터리가 아직 없다 (감독 스킬이 처음 그랬다).
@@ -2261,7 +2330,7 @@ mod tests {
     #[test]
     fn a_conflicted_tree_still_yields_its_exe_and_name() {
         let exe = "/repo/target/release/moai";
-        let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고", "감독", "위키");
+        let files = tree("t", Path::new("/repo"), exe, &fake("# 스킬", "감독", "위키"));
         let body = |end: &str| {
             let (_, b) = files.iter().find(|(p, _)| p.ends_with(end)).unwrap();
             format!("<<<<<<< HEAD\n{b}=======\n")

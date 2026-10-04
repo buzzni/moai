@@ -90,15 +90,7 @@ fn invoked(current: PathBuf, resolved: &Path) -> PathBuf {
 
 /// 훅에 이 실행 파일을 적었을 때 심을 트리.
 fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
-    skill::tree(
-        prefix,
-        root,
-        exe,
-        &crate::guide::skill(),
-        &crate::guide::reference(),
-        &crate::guide::supervise(),
-        &crate::guide::wiki(),
-    )
+    skill::tree(prefix, root, exe, &skill::skills())
 }
 
 pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
