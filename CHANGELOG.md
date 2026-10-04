@@ -66,9 +66,11 @@ does not tag — see `CONTRIBUTING.md`.
   out. Now, when the tag it holds is older than the moai you are running and this
   version has not asked yet, it asks again straight away; until the answer comes
   the line reads `latest not checked · v0.3.0 seen today`. A build from source
-  that really is ahead of every release asks once, hears the same tag, and goes
-  back to asking once a day — a failed ask counts as that once. `latest.toml`
-  gains an `asked_by` key, the version that last asked.
+  that really is ahead of every release asks once and hears the same tag; that
+  "ahead" answer is then kept for an hour rather than a day, so a build made from
+  the release commit before the release was published stops calling itself ahead
+  within the hour after it is. A failed ask counts as that once and is kept for
+  the day. `latest.toml` gains an `asked_by` key, the version that last asked.
 
 ## [0.5.0] - 2026-10-04
 
