@@ -167,7 +167,7 @@ impl Window {
         let mut items: Vec<Target> = Vec::new();
         for (text, dest) in p.body.as_deref().map(crate::wiki::links_in).unwrap_or_default() {
             items.push(match crate::wiki::target(&p.slug, &dest) {
-                Some(to) => {
+                Some(crate::wiki::Aim { to, .. }) => {
                     let found = self.pages.iter().any(|q| q.slug == to);
                     Target::Page { text, to, found }
                 }
