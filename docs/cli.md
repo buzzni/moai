@@ -2173,7 +2173,6 @@ Options:
     SPC /    search              SPC f    filter             SPC n    jot
     SPC q    quit
     SPC p a  register            SPC p d  drop from the list
-    SPC p s  statistics — the numbers `moai stats` gives, drawn (see below)
   Screen — which one stands; the root menu says which [list/board/statistics]:
     SPC g l  list                SPC g b  board — described below
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
@@ -2183,7 +2182,6 @@ Options:
              leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
              done has no letter of its own: the column that holds it does
-    SPC v b  list or board [list/board] — the board is described below
     SPC v d  detail pane [shown/hidden]
     SPC v w  overlay worktrees [on/off]
     SPC v r  raw or rendered

@@ -382,8 +382,13 @@ mod tests {
         let ctx = a.key_ctx(&a.rows());
         assert_eq!(ctx.screen(), Screen::Stats);
         let root = menu::entries(a.chord.held(), &ctx, &[]);
-        assert!(root.iter().any(|e| e.text() == "+화면 [통계]"), "화면 묶음이 지금 화면을 안 댄다");
-        assert!(root.iter().all(|e| e.is_group()), "통계 창 위에 묶음 아닌 항목이 섰다");
+        assert_eq!(
+            root.iter().map(menu::Entry::text).collect::<Vec<_>>(),
+            ["+화면 [통계]"],
+            "화면 묶음 말고 다른 것이 섰다"
+        );
+        a.hit("p");
+        assert_eq!(menu::title(a.chord.held()), "SPC", "통계 창 위에서 SPC p 가 열렸다");
         a.hit("Esc");
         assert!(!menu::open(&a.chord));
         window(&a);

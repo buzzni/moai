@@ -395,7 +395,7 @@ mod tests {
         // **`d` 는 done 이 아니다**(moai-h6z3·moai-mxvn) — done 은 제 글자를 안 갖고 번호가 세고,
         // 비운 그 글자는 상세 칸이 받았다. 한때 `d` 와 `3` 이 같은 설정을 켜고 꺼 이 목록에
         // `done [숨김]` 이 두 줄 섰다.
-        assert_eq!(keys_of(&items), ["l", "i", "o", "a", "1", "2", "3", "b", "d", "w", "r"]);
+        assert_eq!(keys_of(&items), ["l", "i", "o", "a", "1", "2", "3", "d", "w", "r"]);
         let text: Vec<String> = items.iter().map(Entry::text).collect();
         assert_eq!(
             text[..7],
@@ -608,7 +608,7 @@ mod tests {
         feed(&mut ch, &c, k('v'));
         assert_eq!(title(ch.held()), "SPC v");
         // 어느 줄을 보나가 먼저, 화면의 꼴이 뒤다. 번호 칸은 설정의 칸 수만큼 선다 — 여기는 0.
-        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "i", "o", "a", "b", "d", "w", "r"]);
+        assert_eq!(keys_of(&entries(ch.held(), &c, &[])), ["l", "i", "o", "a", "d", "w", "r"]);
         feed(&mut ch, &c, k('x'));
         assert_eq!(title(ch.held()), "SPC v", "하위 층의 모르는 키가 메뉴를 옮겼다");
         feed(&mut ch, &c, KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
@@ -754,18 +754,14 @@ mod tests {
         assert_eq!(keys_of(&root_layer), ["n", "q", "p", "g", "v", "o"], "층에서 검색·거름망·정렬·열·읽음이 섰다");
         assert!(keys_of(&root_in).contains(&"m"), "프로젝트 안에서 읽음이 안 섰다");
         assert!(keys_of(&root_in).contains(&"f"));
-        // 통계(`s`)는 어디서든 선다 — 세는 것은 프로젝트라 포커스와 상관이 없다(moai-1hka.bq9).
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a", "s"], "프로젝트 안에서 해제가 섰다");
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d", "s"]);
+        // 통계는 `p` 밑을 떠났다(moai-z46r) — 화면 고르기(`SPC g s`)다. 그 화면 묶음은 층에서도 선다(위의 `g`).
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &inside(), &[])), ["a"], "프로젝트 안에서 해제가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &layer(), &[])), ["a", "d"]);
         let detail = Ctx { list_focus: false, ..layer() };
-        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a", "s"], "상세 포커스에서 해제가 섰다");
+        assert_eq!(keys_of(&entries(&[k(' '), k('p')], &detail, &[])), ["a"], "상세 포커스에서 해제가 섰다");
         // 층에서도 상세 칸은 있다 — 숨기기(`d`)와 원문(`r`)은 서고, 줄을 가리는 것과 워크트리 겹쳐
-        // 보기(`w`)는 빠진다. 보드(`b`)도 선다 — 한눈 보기에도 프로젝트 머리줄의 보드가 있다(moai-oagj.vcj).
-        assert_eq!(
-            keys_of(&entries(&[k(' '), k('v')], &layer(), &[])),
-            ["b", "d", "r"],
-            "층에서 워크트리나 줄 보기가 섰다"
-        );
+        // 보기(`w`)는 빠진다. 보드는 화면 고르기로 옮겼다(`SPC g b`, moai-z46r).
+        assert_eq!(keys_of(&entries(&[k(' '), k('v')], &layer(), &[])), ["d", "r"], "층에서 워크트리나 줄 보기가 섰다");
 
         let mut ch = Chord::default();
         for x in [' ', 'v', 'w'] {
@@ -800,7 +796,7 @@ mod tests {
         assert_eq!(states(Ctx { detail: false, ..inside() }), [Some("[숨김]"), Some("[꺼짐]")]);
         assert_eq!(
             keys_of(&entries(&[k(' '), k('v')], &Ctx { detail: false, ..inside() }, &[])),
-            ["l", "i", "o", "a", "b", "d", "w"]
+            ["l", "i", "o", "a", "d", "w"]
         );
     }
 

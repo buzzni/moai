@@ -594,7 +594,6 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Quit, Some("SPC q"), LEADER, Key::plain('q')),
         row!(Pick, Some("SPC p a"), LEADER, Key::plain('p'), Key::plain('a')),
         row!(Unregister, Some("SPC p d"), LEADER, Key::plain('p'), Key::plain('d')),
-        row!(Go(Screen::Stats), None, LEADER, Key::plain('p'), Key::plain('s')),
         // **화면은 `SPC g`(go to)가 고른다**(moai-z46r, 2026-10-04 사용자 결정). 보드는 `SPC v b`, 통계는 `SPC p s` 에
         // 있었다 — 보기 토글과 프로젝트 밑이라, 화면이 하나 늘 때마다 어느 묶음에 둘지를 새로 정해야 했다. 다음 화면은
         // 여기에 `SPC g <글자>` 한 줄을 더해 든다. 옛 두 키는 별칭 없이 걷었다(1.0 전이라 지금 끊는다).
@@ -642,7 +641,6 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 상세 칸은 `d`(detail) — 자리 고르기 `SPC o d` 와 같은 글자다(moai-mxvn, 2026-09-22 사용자
         // 결정). 옛 `p`(pane)는 그 둘이 한 칸을 두고 글자가 갈려, 하나를 아는 사람이 다른 하나를
         // 못 짚었다. `d` 가 빈 것은 done 이 제 글자를 내놓은 뒤다(moai-h6z3) — 그 자리를 이것이 받는다.
-        row!(Go(Screen::Board), None, LEADER, Key::plain('v'), Key::plain('b')),
         row!(Detail, Some("SPC v d"), LEADER, Key::plain('v'), Key::plain('d')),
         row!(Worktree, Some("SPC v w"), LEADER, Key::plain('v'), Key::plain('w')),
         row!(Raw, Some("SPC v r"), LEADER, Key::plain('v'), Key::plain('r')),
@@ -1699,6 +1697,9 @@ mod tests {
             );
             assert_eq!(Browse::Go(to).enabled(&Ctx { stats: true, ..inside() }), Ok(()), "통계 창이 {keys} 를 껐다");
             assert!(!Browse::Go(to).stateful(), "{keys} 가 메뉴를 열어 둔다 — 고르는 키는 한 번에 끝난다");
+        }
+        for gone in ["SPC v b", "SPC p s"] {
+            assert_eq!(lookup(BROWSE, &parse_seq(gone).unwrap()), Lookup::Unknown, "옛 키 {gone} 가 남았다");
         }
         let stats = Ctx { stats: true, ..inside() };
         assert_eq!(stats.screen(), Screen::Stats);
