@@ -3795,3 +3795,7 @@
 {"ts":"2026-10-04T06:22:16Z","id":"moai-o3cb.kze","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T06:22:16Z","id":"moai-o3cb.pkv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T06:22:17Z","id":"moai-o3cb.xvv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T06:29:33Z","id":"moai-o3cb","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"2026-10-04 사람이 정했다(AskUserQuestion 한 번, 넷 다 권장안).\n\n- 본문 칸은 목록 커서를 따라간다 — 탐색기의 상세 칸과 같다. 목록의 Enter 는 포커스를 본문 칸으로 옮긴다. 링크로 건너뛰면 커서도 그 페이지로 간다\n- 휠은 포인터 아래 칸을 굴린다(탐색기의 2026-10-01 결정과 같다) — 포커스는 안 옮긴다. 기획 노트의 \"포커스 칸\" 을 이것으로 고쳤다\n- Esc 는 걸린 `/` 검색을 먼저 풀고, 없으면 창을 닫는다. 건너뛴 자취(trail)가 있어도 닫는다 — 되돌아가기는 Bksp·h 하나다\n- 한눈 보기(0)에서 연 위키에서 id 를 고르면 창을 닫고 그 프로젝트로 들어가(헤더 번호와 같은 길) 그 id 의 줄에 선다\n\n일꾼이 혼자 정한 것(기획에 없고 물을 값이 작은 것):\n- 위키 디렉터리가 없거나 못 쓰거나 페이지가 하나도 없으면 창을 안 열고 알림 한 줄로 까닭을 댄다 — 통계 창이 못 셀 때와 같다\n- 못 읽은 페이지는 본문 칸에 `moai wiki show` 와 같은 까닭 줄이 서고, 충돌 표시가 든 페이지는 원문 그대로에 경고 한 줄\n- 긴 목록은 탐색기 목록처럼 커서를 드러내며 구른다"}
+{"ts":"2026-10-04T06:30:15Z","id":"moai-fyul","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록의 휠은 화면만 굴린다"}
+{"ts":"2026-10-04T06:30:15Z","id":"moai-fyul.mjm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"목록 창의 휠이 커서를 옮기지 않고 화면만 굴린다"}
+{"ts":"2026-10-04T06:30:15Z","id":"moai-fyul.vlh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·docs/explorer.md·CHANGELOG"}
