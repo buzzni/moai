@@ -2,10 +2,12 @@
 
 moai is built so that AI agents run the tracker beside a person. There is no
 approval gate: an agent creates, moves and closes work without asking, and the
-one thing it asks about is picking up work that belongs to someone else. This
-page covers the three things that make that work — the instructions an agent
-reads, the skills and hooks planted into Claude, and the `--json` surface a loop
-of your own can drive. The commands' flags are in [the CLI reference](cli.md).
+one thing it asks about is picking up work that belongs to someone else — a
+[take over](glossary.md#take-over). This page covers the three things that make
+that work — the instructions an agent reads, the skills and hooks planted into
+Claude, and the `--json` surface a loop of your own can drive. The commands'
+flags are in [the CLI reference](cli.md), and the words in
+[the glossary](glossary.md).
 
 ## Tell the agent how the tracker works
 
@@ -46,10 +48,12 @@ Three skills come with it:
 
 - **The tracker skill** is what an agent reaches for instead of a to-do list of
   its own
-- **The supervisor** hands the ideas, one at a time, to the Claude sessions idling
-  on the same repository and takes their reports. It picks, sends and checks; it
-  does not fix and it does not merge. The workers follow a numbered brief, and
-  their way of working is on [the workflow page](workflow.md)
+- **The [supervisor](glossary.md#supervisor)** hands the
+  [ideas](glossary.md#idea), one at a time, to the Claude sessions idling on the
+  same repository and takes their reports. It picks, sends and checks; it does
+  not fix and it does not merge. The [workers](glossary.md#worker) follow a
+  numbered [brief](glossary.md#brief), and their way of working is on
+  [the workflow page](workflow.md#work-in-a-worktree)
 - **The wiki skill** is followed by the window that did an epic, to fix the page
   that teaches what the epic changed; a person can also call it to sweep
   everything merged since the last release
@@ -64,7 +68,7 @@ nobody runs by hand.
 | The session starts | A baseline of the warnings is written. After a compaction, what the session was holding is loaded back into it |
 | A person sends a prompt | The `moai status` board is loaded, once per session |
 | Before a tool call | The five rules below are checked |
-| The turn ends | If the session still holds work, the turn is held once and asks for a `Next:` note for whoever comes after; it is also held when the warnings grew |
+| The turn ends | If the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew |
 
 **The hook never fails the session.** Whatever goes wrong inside it, it exits 0,
 and the only thing it refuses is the one tool call that broke a rule. A person
@@ -75,8 +79,9 @@ typing `moai` in a terminal never passes through it.
 A refusal opens with the rule's number and name, and hands over the command that
 gets through — run it as given. None of them waits on a person except rule 5.
 
-1. **New issues stay inside what you picked up.** While an agent holds work, a
-   `moai add` must land in the same epic (`-e <epic>`) or under the held issue
+1. **New issues stay inside what you picked up.** While an agent holds work (its
+   [focus](glossary.md#focus)), a `moai add` must land in the same
+   [epic](glossary.md#epic) (`-e <epic>`) or under the held issue
    (`--parent <id>`). Something for later goes in as `moai idea add`, which this
    rule never stops; nor does it stop a whole plan created with `moai add --from`
 2. **Pick something up before you change the repository.** An `Edit`, a `Write`,
@@ -119,8 +124,9 @@ Every command takes `--json`. Three are enough for a loop:
 `examples/python-agents/agents.py` runs several agents at once. The test suite
 runs both.
 
-**Name the AI that did the work** before closing an issue — one note, one line per
-issue, read back as `work` in `--json` and summed by `moai stats`:
+**Name the AI that did the work** before closing an issue — one note, the
+[model line](glossary.md#model-line), one line per issue, read back as `work` in
+`--json` and summed by `moai stats`:
 
     moai note <id> 'model: anthropic/opus-5 tokens=182000 (high — the write path)'
 
@@ -142,4 +148,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo

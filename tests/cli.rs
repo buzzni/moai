@@ -23260,14 +23260,16 @@ fn the_wiki_json_is_the_contract_the_skill_reads() {
     let docs = s.path().join("docs");
     std::fs::create_dir_all(docs.join("guide")).unwrap();
     let home = format!(
-        "# Home\n\nSee {id} and argos-zzzz. [Guide](guide/a.md) [gone](nope.md) [web](https://x.y)\n\n```\nargos-yyyy\n```\n"
+        "# Home\n\nSee {id} and argos-zzzz. [Guide](guide/a.md#a-guide) [gone](nope.md) [web](https://x.y) [up](#nowhere)\n\n```\nargos-yyyy\n```\n"
     );
     std::fs::write(docs.join("README.md"), &home).unwrap();
     std::fs::write(docs.join("guide/a.md"), "# A guide\n\n[home](../README.md)\n").unwrap();
 
+    // 앵커가 든 링크만 `anchor`·`anchor_resolved` 를 단다(moai-tllo) — 없는 링크에는 키가 없다. 같은 페이지의
+    // `#앵커` 는 `to` 가 제 페이지고, 역링크로는 안 센다.
     let ls = ok(s.path(), &["wiki", "ls", "--json"]);
     let want_home = format!(
-        r#"{{"slug":"README","title":"Home","path":"docs/README.md","bytes":{},"issues":[{{"id":"{id}","exists":true}},{{"id":"argos-zzzz","exists":false}}],"links":[{{"text":"Guide","to":"guide/a","resolved":true}},{{"text":"gone","to":"nope","resolved":false}}],"linked_from":["guide/a"],"conflict":false}}"#,
+        r#"{{"slug":"README","title":"Home","path":"docs/README.md","bytes":{},"issues":[{{"id":"{id}","exists":true}},{{"id":"argos-zzzz","exists":false}}],"links":[{{"text":"Guide","to":"guide/a","anchor":"a-guide","resolved":true,"anchor_resolved":true}},{{"text":"gone","to":"nope","resolved":false}},{{"text":"up","to":"README","anchor":"nowhere","resolved":true,"anchor_resolved":false}}],"linked_from":["guide/a"],"conflict":false}}"#,
         home.len()
     );
     let want_guide = r#"{"slug":"guide/a","title":"A guide","path":"docs/guide/a.md","bytes":32,"issues":[],"links":[{"text":"home","to":"README","resolved":true}],"linked_from":["README"],"conflict":false}"#;
@@ -23428,7 +23430,8 @@ fn a_page_that_cannot_be_read_stays_listed_and_says_why() {
     assert!(listed.contains(r#","skipped":[{"path":"docs/away","kind":"dir_link","said":"#), "{listed}");
 }
 
-/// **알림은 비추기만 한다**(moai-ihu4.zdk) — 충돌 표시·풀리지 않는 링크·없는 id 를 목록 꼬리에 세고, 종료 코드는
+/// **알림은 비추기만 한다**(moai-ihu4.zdk) — 충돌 표시·풀리지 않는 링크·그 페이지에 없는 머리글(moai-tllo)·없는 id 를
+/// 목록 꼬리에 세고, 종료 코드는
 /// 그대로 0 이다. 충돌 표시가 든 페이지는 그리지 않고 원문 그대로 보인다 — 그리면 표시가 제목·줄글로 섞인다.
 /// 그 페이지 하나를 볼 때 충돌은 본문 머리에 이미 섰으니 꼬리 알림에는 다시 안 선다. 같은 없는 페이지로 가는
 /// 링크 둘은 고칠 자리가 하나라 한 번 센다.
@@ -23437,13 +23440,20 @@ fn the_wiki_counts_what_does_not_resolve_and_blocks_nothing() {
     let s = init("wiki-notices");
     let docs = s.path().join("docs");
     std::fs::create_dir_all(&docs).unwrap();
-    std::fs::write(docs.join("README.md"), "# Home\n\n[a](a.md) [gone](gone.md) [again](gone.md) argos-zz99\n")
-        .unwrap();
+    std::fs::write(
+        docs.join("README.md"),
+        "# Home\n\n[a](a.md) [gone](gone.md) [again](gone.md#x) argos-zz99 \
+         [b](b.md#epic) [no](b.md#idea) [self](#nowhere) [home](#home)\n",
+    )
+    .unwrap();
     std::fs::write(docs.join("a.md"), "# A\n\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n").unwrap();
+    std::fs::write(docs.join("b.md"), "# B\n\n## Epic\n").unwrap();
 
     let ls = ok(s.path(), &["wiki", "ls"]);
     assert!(ls.contains("! 충돌 표시가 든 페이지 1  a"), "{ls}");
-    assert!(ls.contains("! 페이지로 안 풀리는 링크 1  README → gone"), "{ls}");
+    assert!(ls.contains("! 페이지로 안 풀리는 링크 1  README → gone"), "없는 페이지는 앵커가 붙어도 한 번이다\n{ls}");
+    // 페이지는 있는데 머리글이 없는 링크(moai-tllo) — 링크 주소처럼 댄다. 같은 페이지의 것은 `#앵커` 하나다.
+    assert!(ls.contains("! 그 페이지에 없는 머리글로 가는 링크 2  README → b#idea, README → #nowhere\n"), "{ls}");
     assert!(ls.contains("! 트래커에 없는 id 1  argos-zz99 (README)"), "{ls}");
 
     let conflicted = ok(s.path(), &["wiki", "show", "a"]);
@@ -23455,6 +23465,7 @@ fn the_wiki_counts_what_does_not_resolve_and_blocks_nothing() {
     assert!(!conflicted.contains("충돌 표시가 든 페이지"), "충돌을 머리와 꼬리에 두 번 댔다\n{conflicted}");
     let home = ok(s.path(), &["wiki", "show", "README"]);
     assert!(home.contains("! 페이지로 안 풀리는 링크 1  gone\n"), "{home}");
+    assert!(home.contains("! 그 페이지에 없는 머리글로 가는 링크 2  b#idea, #nowhere\n"), "{home}");
     assert!(home.contains("! 트래커에 없는 id 1  argos-zz99"), "{home}");
 }
 
