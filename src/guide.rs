@@ -343,8 +343,8 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
 Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
 `ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
-to pick it up again. That is enough to build a loop that runs without a person — one
-such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+to pick it up again. A session a person opened reads that shape to choose its next row —
+moai never launches or drives a session itself.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -1223,9 +1223,8 @@ between your `ready` and your `mv`. `--from <column>` moves it **only while the
 column you saw still holds** — it is re-read inside the lock, so a row that changed
 in between is not touched. Without it nothing is blocked, as before.
 
-The shape of the call is shown end to end in the moai repository's `examples/bash-agent/agent.sh`.
-Cut short it is this — `col` is the column of that row as `ready` gave it, and `moved`
-says whether you got it.
+In shell, as one turn of a loop that takes the next row each time round, it is this —
+`col` is the column of that row as `ready` gave it, and `moved` says whether you got it.
 
 ```sh
 row=$(moai ready --json | jq -c '.ready[0]')
@@ -2887,25 +2886,27 @@ mod tests {
         }
     }
 
-    /// **심는 글이 가리키는 파일은 이 저장소의 것이라고 말한다**(moai-nnda). 이 글은 모든
-    /// 저장소에 심긴다 — 상대 경로로 적으면 남의 저장소에서는 없는 파일을 가리킨다.
+    /// **심는 글은 사람 없이 도는 고리를 가르치지 않는다**(moai-jo1u). moai 는 세션을 띄우지도
+    /// 헤드리스로 몰지도 않는다(2026-10-04 사용자 결정) — 그래서 그 고리를 보이던
+    /// `examples/bash-agent`·`examples/python-agents` 를 걷었다. 글에 경로가 남으면 모든 저장소에
+    /// 없는 파일을 가리키고, 사람 없이 돌리라는 말을 그대로 심는다.
+    ///
+    /// **바꾼 말이 서 있는지도 본다.** 걷은 낱말만 재면 문단이 통째로 빠져도 초록이다 —
+    /// `ready --json` 의 꼴을 읽는 쪽이 사람이 띄운 세션이라는 것이 이 문단이 남긴 뜻이다.
     #[test]
-    fn the_example_link_says_whose_repository_it_is() {
-        let path = "examples/bash-agent/agent.sh";
-        // **집는 것은 모든 자리다.** 첫 자리만 보면 뒤에 맨 경로를 하나 더 적어도
-        // 이 시험이 지나간다 — 걸러야 할 것은 바로 그 둘째 줄이다.
-        for (surface, text) in [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference())] {
-            for (at, _) in text.match_indices(path) {
-                assert!(
-                    text[..at].ends_with("moai repository's `"),
-                    "{surface} 이 {path} 를 어느 저장소의 것인지 없이 가리킨다"
-                );
+    fn the_planted_text_teaches_no_headless_loop() {
+        for (surface, text) in
+            [("AGENTS 블록", agents()), ("스킬", skill()), ("참고 문서", reference()), ("감독 스킬", supervise())]
+        {
+            for gone in ["examples/bash-agent", "examples/python-agents", "runs without a person"] {
+                assert!(!text.contains(gone), "{surface} 이 걷은 헤드리스 예제를 아직 가리킨다 — {gone}");
             }
         }
-        // **가리키기는 하는지도 본다.** 위 고리는 자리마다 재는 것이라 글에서
-        // 통째로 빠지면 한 번도 안 돌고 지나간다 — 사라지는 쪽이 어긋나는 쪽보다 흔하다.
         for (surface, text) in [("AGENTS 블록", agents()), ("스킬", skill())] {
-            assert!(text.contains(path), "{surface} 이 사람 없이 도는 예제를 더는 가리키지 않는다");
+            assert!(
+                text.contains("moai never launches or drives a session itself"),
+                "{surface} 이 세션을 띄우는 쪽이 사람이라는 말을 잃었다"
+            );
         }
     }
 

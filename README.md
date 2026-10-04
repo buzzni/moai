@@ -242,9 +242,8 @@ moai skill install --agent auto      # whichever of claude, codex, agy is on PAT
 moai skill status                    # what is planted where, and what is stale
 ```
 
-`examples/bash-agent/agent.sh` is a complete pick-work-close loop in bash and jq,
-and `examples/python-agents/agents.py` is the multi-agent version. Both are run
-by the test suite, so neither can rot quietly.
+moai never launches an agent or runs one headless. A person opens each session,
+and the session reads `moai ready --json` to choose its next row.
 
 ### The `--json` contract
 

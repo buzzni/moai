@@ -48,6 +48,17 @@ does not tag — see `CONTRIBUTING.md`.
   `/code-review`, `codex review`, a fresh `agy -p` session — and points at the
   "Words per agent" table in the `moai` skill for the other steps. `moai init`
   writes the new block.
+- **The AGENTS block no longer offers `ready --json` as a loop that runs
+  without a person.** It now says a session a person opened reads that shape to
+  choose its next row, and that moai never launches or drives a session itself.
+  `moai init` writes the new block.
+
+### Removed
+
+- **`examples/bash-agent` and `examples/python-agents`.** Both ran a command per
+  issue with no person watching — usually `claude -p` — and moai does not launch
+  agents or run them headless: a person opens each session. The AGENTS block,
+  the skills, the README and the agents page no longer point at them.
 
 ## [0.6.0] - 2026-10-04
 
