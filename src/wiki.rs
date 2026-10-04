@@ -578,6 +578,9 @@ pub struct Parsed {
 /// - id 는 글과 인라인 코드에서 센다. **울타리·들여쓴 코드 블록 안은 예시로 읽는다**(2026-10-04 사용자 결정) —
 ///   `work` 줄이 울타리 안을 안 세는 것과 같은 자다. 접두어가 맞는 낱말만 id 다: `worktree-moai-xxxx` 는 가지
 ///   이름이지 id 가 아니다
+/// - moai 가 심는 스킬의 이름([`crate::skill::NAMES`])은 id 가 아니다 — `moai-wiki` 는 접두어 `moai` 뒤 네 글자라
+///   꼴로는 id 다(2026-10-04 사용자 결정, moai-mdzx.3pm). 그 id 의 줄이 트래커에 있어도 안 센다 — 페이지에서 그
+///   낱말은 스킬이다
 /// - 링크는 [`target`] 이 페이지 링크로 푸는 것만 든다
 /// - 머리글은 모든 단이 앵커를 받는다([`Anchors`]). 앵커를 짓는 글은 GitHub 이 화면에 그리는 글이다 — 인라인 코드는
 ///   백틱 없이, 링크는 글만, 그림의 대체글은 빼고, 줄바꿈은 줄바꿈 글자로(그래서 [`anchor`] 가 걷는다)
@@ -609,7 +612,10 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     };
     let ids = |s: &str, out: &mut Vec<String>| {
         for id in crate::git::ids_in(s) {
-            if id.rsplit_once('-').is_some_and(|(p, _)| p == prefix) && !out.iter().any(|seen| seen == id) {
+            if id.rsplit_once('-').is_some_and(|(p, _)| p == prefix)
+                && !crate::skill::NAMES.contains(&id)
+                && !out.iter().any(|seen| seen == id)
+            {
                 out.push(id.to_string());
             }
         }
@@ -882,6 +888,18 @@ mod tests {
                     ```sh\nmoai show moai-zz99\n```\n\n    moai-yy88 indented\n\n[link moai-kk11](x.md)\n";
         assert_eq!(parse("a", body, "moai").ids, ["moai-ab12", "moai-cd34", "moai-ab12.x1y", "moai-kk11"]);
         assert_eq!(parse("a", "a-b e-mail x86-64\n", "e").ids, ["e-mail"], "접두어가 맞으면 꼴만 보는 것이 맞다");
+    }
+
+    /// moai 가 심는 스킬의 이름은 id 가 아니다(moai-mdzx.3pm) — `moai-wiki` 는 꼴로는 id 라 글에서도 인라인
+    /// 코드에서도 경로 조각에서도 없는 id 로 섰다. 이름이 같은 꼴의 다른 낱말은 그대로 센다.
+    #[test]
+    fn skill_names_are_not_issue_ids() {
+        let body = "Follow the moai-wiki skill, or `moai-wiki`, planted at `skills/moai-wiki/SKILL.md`.\n\n\
+                    moai-supervise and moai hand out moai-wik1 and moai-wiki.x1y.\n";
+        assert_eq!(parse("a", body, "moai").ids, ["moai-wik1", "moai-wiki.x1y"]);
+        for name in crate::skill::NAMES {
+            assert!(!parse("a", &format!("{name}\n"), "moai").ids.iter().any(|id| id == name), "{name} 를 id 로 셌다");
+        }
     }
 
     /// **링크 전부는 바깥 주소까지 든다** — 적힌 차례로, 같은 짝은 한 번, 코드 블록 안과 그림은 안 든다. 위키 창의

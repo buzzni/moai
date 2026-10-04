@@ -22,6 +22,14 @@ use std::path::{Path, PathBuf};
 
 /// 심는 자리. 저장소 안이라 팀이 그대로 커밋할 수 있다.
 pub const DIR: &str = ".claude/moai-plugin";
+
+/// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
+/// 심는 차례(이슈 트래커·감독·위키)다. 시험이 둘 다를 이 목록과 견준다(`the_tree_plants_every_skill_name`,
+/// `guide::tests::the_frontmatter_opens_the_skill`).
+///
+/// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
+/// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
+pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
 ///
 /// **저장소마다 달라야 한다.** 이름은 기계 하나에서 전역이라, 고정 이름을 쓰면
@@ -1114,6 +1122,20 @@ mod tests {
         ] {
             assert!(files.contains_key(want), "{want} 가 없다");
         }
+    }
+
+    /// 심는 스킬 디렉터리는 [`NAMES`] 그대로다 — 차례까지. 스킬을 더하거나 이름을 바꾸고 목록을 안 고치면 위키가
+    /// 새 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    #[test]
+    fn the_tree_plants_every_skill_name() {
+        let planted: Vec<String> = tree("t", Path::new("/repo"), "/bin/moai", "스킬", "참고", "감독", "위키")
+            .into_iter()
+            .filter_map(|(p, _)| {
+                let dir = p.strip_prefix("skills").ok()?.parent()?;
+                (p.file_name()? == "SKILL.md").then(|| dir.display().to_string())
+            })
+            .collect();
+        assert_eq!(planted, NAMES);
     }
 
     /// **판은 내용에서 나온다.** 같은 내용이면 같은 판이라 헛 업데이트가 없고,
