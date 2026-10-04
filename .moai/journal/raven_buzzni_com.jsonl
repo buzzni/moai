@@ -4089,3 +4089,22 @@
 {"ts":"2026-10-04T14:52:04Z","id":"moai-h8tn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04) — 깨우기를 덤으로 낮춘다\n- moai 는 에이전트 실행 파일을 실행하지 않는다. `wake` 의 `codex queue --thread` 길을 걷는다(moai 가 `codex` 를 실행하는 길이다)\n- tmux 를 안 쓰는 사람도 있다. 깨우기는 덤이다: 출석에 tmux 칸이 있으면 그 칸에 `moai inbox`, Claude 는 보내는 쪽의 SendMessage. 없으면 아무것도 안 한다\n- 기본 길은 일꾼의 기다림(`moai inbox --ack --wait`)이다. 일꾼 스킬 moai-work 는 moai-snyk 의 멤버로 따로 만든다\n- 이 에픽의 머지 전에 받는다. 출석 파일에 Codex thread 를 적는 키가 있으면 함께 걷는다 — 파일 꼴은 머지 뒤 되돌리기 어렵다"}
 {"ts":"2026-10-04T14:52:04Z","id":"moai-b6cw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04): 세션이 일을 받는 길은 일꾼 스킬 moai-work(moai-snyk 멤버)다 — 사람이 창에서 한 번 부르면 출석하고 moai inbox --wait 로 기다린다. tmux 는 필수가 아니고 깨우기는 덤이다. 안내도 그 그림으로 쓴다"}
 {"ts":"2026-10-04T14:58:23Z","id":"moai-jo1u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T15:17:17Z","id":"moai-jo1u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-04, 일꾼 창에서 물음): AGENTS 블록의 \"That is enough to build a loop that runs without a person — one such loop … agent.sh\" 는 \"A session a person opened reads that shape to choose its next row — moai never launches or drives a session itself.\" 로 바꾼다. docs/agents.md 의 \"## Run agents without a person\" 제목도 지금 바꾼다 — glossary.md:117 의 앵커 링크는 h8tn 이 쥔 파일이라 h8tn 머지 뒤 b6cw 멤버로 고친다(그 사이 develop 에 링크가 깨진 채 선다는 것을 알고 정했다)"}
+{"ts":"2026-10-04T15:20:26Z","id":"moai-u3t9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"glossary 의 Model line 링크를 agents.md 의 바뀐 앵커로 옮긴다"}
+{"ts":"2026-10-04T15:31:50Z","id":"moai-jo1u.d2s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 헤드리스 예제 걷기와 AGENTS 블록 문장"}
+{"ts":"2026-10-04T15:31:53Z","id":"moai-jo1u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T15:32:00Z","id":"moai-jo1u.d2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T15:34:39Z","id":"moai-a2y1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"send --wake 가 Codex·Antigravity 에 닿지 않는다 — 훅 없는 벤더는 idle 도 세션도 아무도 안 적는다"}
+{"ts":"2026-10-04T15:34:40Z","id":"moai-509k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"편지가 이름에만 매여, 떠난 세션의 편지가 같은 이름을 받은 새 세션에 실린다"}
+{"ts":"2026-10-04T15:34:41Z","id":"moai-tocf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"서브에이전트가 부모 세션의 장으로 우편함을 읽고 이름을 바꾼다"}
+{"ts":"2026-10-04T15:34:41Z","id":"moai-t9ar","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"MOAI_AGENT 로 정한 이름을 훅이 몰라 한 세션이 두 이름으로 선다"}
+{"ts":"2026-10-04T15:34:42Z","id":"moai-3u8n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"받는 이가 편지 파일 안에만 있어 훅이 매번 우편함 전체를 연다 — 꼴이 굳기 전에 정한다"}
+{"ts":"2026-10-04T15:34:42Z","id":"moai-w8z8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬이 moai hello --role supervisor 를 안 시킨다"}
+{"ts":"2026-10-04T15:34:43Z","id":"moai-dkkh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"끊긴 턴의 세션은 busy 로 남는다 — 그 턴에는 Stop 이 안 돈다"}
+{"ts":"2026-10-04T15:34:43Z","id":"moai-zyrv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 시험이 시험을 돌리는 프로세스의 조상에 기댄다"}
+{"ts":"2026-10-04T15:38:28Z","id":"moai-qde9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.8.0"}
+{"ts":"2026-10-04T15:38:47Z","id":"moai-fc97","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"거르개 칸의 Tab 자동완성"}
+{"ts":"2026-10-04T15:38:47Z","id":"moai-fc97.15o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"항목 이름을 Tab 으로 채운다 — mil<Tab> 이 milestone= 가 된다"}
+{"ts":"2026-10-04T15:38:47Z","id":"moai-fc97.c34","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"후보가 여럿이면 Tab·Shift-Tab 으로 돈다 — 다른 키가 굳힌다"}
+{"ts":"2026-10-04T15:38:47Z","id":"moai-fc97.0v8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"값 자리의 Tab — tag·assignee·milestone 목록과 status·priority·type 값"}
+{"ts":"2026-10-04T15:38:47Z","id":"moai-fc97.8zk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"힌트 줄·위키·CHANGELOG"}
