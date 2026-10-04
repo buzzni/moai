@@ -3969,3 +3969,10 @@
 {"ts":"2026-10-04T11:01:21Z","id":"moai-p61w.sne","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T11:01:22Z","id":"moai-p61w.uzr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-04T11:01:22Z","id":"moai-p61w.jz9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:04:44Z","id":"moai-mdzx.2i8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 위키 id 세기와 역링크 신호 에픽 전체"}
+{"ts":"2026-10-04T11:04:56Z","id":"moai-mdzx.3pm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T11:04:58Z","id":"moai-mdzx.jty","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-04T11:05:01Z","id":"moai-mdzx.2i8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-04T11:05:53Z","id":"moai-mdzx.2i8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review high --fix 가 백그라운드(@code-review)에서 돈다. 돌아오면 리뷰 원문을 note -b - 로 남기고, 고침을 시험한 뒤 CHANGELOG(scratchpad changelog.py)·docs/agents.md(agents.py) 커밋, develop 머지, 멤버·리뷰 닫기"}
+{"ts":"2026-10-04T11:16:59Z","id":"moai-8zz4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wiki 걷기가 못 읽은 디렉터리 항목을 말없이 버린다"}
+{"ts":"2026-10-04T11:17:10Z","id":"moai-q9q9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 위키 창의 역링크도 덜 셌을 때 알린다"}
