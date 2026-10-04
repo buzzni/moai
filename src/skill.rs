@@ -24,12 +24,14 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = ".claude/moai-plugin";
 
 /// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
-/// 심는 차례(이슈 트래커·감독·위키)다. 시험이 둘 다를 이 목록과 견준다(`the_tree_plants_every_skill_name`,
-/// `guide::tests::the_frontmatter_opens_the_skill`).
+/// 심는 차례(이슈 트래커·감독·위키)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
+/// 있어 시험이 이 목록과 견주고(`guide::tests::the_frontmatter_opens_the_skill`), 트리가 이 목록 밖의 스킬을 심으면
+/// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
 /// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
 pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
+
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
 ///
 /// **저장소마다 달라야 한다.** 이름은 기계 하나에서 전역이라, 고정 이름을 쓰면
@@ -430,16 +432,19 @@ fn tree_named(
     supervise: &str,
     wiki: &str,
 ) -> Vec<(PathBuf, String)> {
+    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
+    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
+    let [main, supervisor, wiki_name] = NAMES;
     let mut files: Vec<(PathBuf, String)> = vec![
-        (PathBuf::from("skills/moai/SKILL.md"), skill.to_string()),
-        (PathBuf::from("skills/moai/references/commands.md"), reference.to_string()),
+        (PathBuf::from(format!("skills/{main}/SKILL.md")), skill.to_string()),
+        (PathBuf::from(format!("skills/{main}/references/commands.md")), reference.to_string()),
         // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고,
         // 일꾼이 `moai` 를 부를 때마다 감독의 걸음까지 읽는다. 발동어(description)는 따로
         // 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        (PathBuf::from("skills/moai-supervise/SKILL.md"), supervise.to_string()),
+        (PathBuf::from(format!("skills/{supervisor}/SKILL.md")), supervise.to_string()),
         // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai`
         // 스킬에 섞으면 이슈 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
-        (PathBuf::from("skills/moai-wiki/SKILL.md"), wiki.to_string()),
+        (PathBuf::from(format!("skills/{wiki_name}/SKILL.md")), wiki.to_string()),
     ];
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
@@ -1124,8 +1129,8 @@ mod tests {
         }
     }
 
-    /// 심는 스킬 디렉터리는 [`NAMES`] 그대로다 — 차례까지. 스킬을 더하거나 이름을 바꾸고 목록을 안 고치면 위키가
-    /// 새 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    /// 심는 스킬 디렉터리는 [`NAMES`] 그대로다 — 차례까지. 목록 밖의 스킬을 트리에 더하면 위키가 그 이름을 다시
+    /// 이슈 id 로 센다(moai-mdzx.3pm).
     #[test]
     fn the_tree_plants_every_skill_name() {
         let planted: Vec<String> = tree("t", Path::new("/repo"), "/bin/moai", "스킬", "참고", "감독", "위키")

@@ -50,7 +50,7 @@ impl Wiki {
     /// 일부러 안 읽었어도 그 링크는 안 셌다)와 걷기가 건너뛴 자리다. 0 이 아니면 역링크가 덜 섰을 수 있다
     /// (2026-10-04 사용자 결정, moai-mdzx.jty). 물은 페이지 제 본문은 안 센다 — 제 자신을 가리키는 링크는 역링크가 아니다.
     pub fn uncounted(&self, slug: &str) -> usize {
-        self.skipped.len() + self.pages.iter().filter(|p| p.slug != slug && p.body.is_none()).count()
+        self.skipped.len() + self.pages.iter().filter(|p| p.slug != slug && p.error.is_some()).count()
     }
 }
 

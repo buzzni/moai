@@ -52,7 +52,7 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     if ctx.json {
         return page_json(ctx.lang(), &wiki, page);
     }
-    Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(slug)))
+    Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug)))
 }
 
 /// 트래커를 열고(id 가 있는가를 물을 자리) 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께.
