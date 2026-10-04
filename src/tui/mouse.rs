@@ -95,7 +95,8 @@ impl App {
         self.mouse_on
             && match &self.mode {
                 Mode::Browse | Mode::Stats(_) => true,
-                Mode::Wiki(w) => w.typing.is_none(),
+                // 고르기 창은 키로 다루는 창이다 — 그동안도 놓는다(위의 까닭).
+                Mode::Wiki(w) => w.typing.is_none() && w.choose.is_none(),
                 _ => false,
             }
     }

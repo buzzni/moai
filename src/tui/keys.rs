@@ -1275,6 +1275,47 @@ impl Wiki {
     }
 }
 
+/// 위키 창의 링크 고르기(moai-o3cb) — 커서, 고르기, 닫기. 고르기 창([`PICK`])과 같은 걸음이되 고를 것이 링크뿐이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Link {
+    Step(Move),
+    Enter,
+    Close,
+}
+
+pub const LINKS: &[Bind<Link>] = {
+    use KeyCode as C;
+    const MOVES: [Bind<Link>; 14] = moves!(Link::Step, Key::bare);
+    &[
+        MOVES[0],
+        MOVES[1],
+        MOVES[2],
+        MOVES[3],
+        MOVES[4],
+        MOVES[5],
+        MOVES[6],
+        MOVES[7],
+        MOVES[8],
+        MOVES[9],
+        MOVES[10],
+        MOVES[11],
+        MOVES[12],
+        MOVES[13],
+        row!(Link::Enter, Some("Enter"), Key::bare(C::Enter)),
+        row!(Link::Close, Some("Esc"), Key::bare(C::Esc)),
+    ]
+};
+
+impl Link {
+    pub fn what(self, lang: Lang) -> &'static str {
+        match self {
+            Link::Step(_) => say(lang, "tui.act.move"),
+            Link::Enter => say(lang, "tui.wiki.go"),
+            Link::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
+
 impl Pick {
     pub fn what(self, show_hidden: bool, lang: Lang) -> &'static str {
         use Pick::*;

@@ -1043,6 +1043,11 @@ fn wiki_window(
     if let Some(page_at) = page_at {
         wiki_page(f, w, page_at, raw, lang);
     }
+    // 고르기 창은 본문 칸을 덮는다 — 고를 것이 그 페이지의 것이라 그 자리에 선다. 본문이 접혔으면 목록을 덮는다.
+    let title = w.current().map(|p| crate::text::one_line(&p.title)).unwrap_or_default();
+    if let Some(c) = &mut w.choose {
+        wiki_choose(f, c, page_at.unwrap_or(list_at), &title, lang);
+    }
     super::mouse::WikiAt { list: list_at, rows, page: page_at }
 }
 
@@ -1201,6 +1206,55 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     f.render_widget(Paragraph::new(visible), inner);
 }
 
+/// 위키 창의 고르기 창(moai-o3cb) — 링크는 `글 → 대상`, id 는 `id  제목`. **갈 데가 없는 것은 낱말로 단다** — 없는
+/// 페이지·트래커에 없는 id 는 `(없음)`, 위키 밖 주소는 `(밖)`. 색이 혼자 뜻을 지지 않는다.
+fn wiki_choose(f: &mut Frame, c: &mut super::wiki::Choose, at: Rect, title: &str, lang: Lang) {
+    use super::wiki::Target;
+    f.render_widget(Clear, at);
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let room = inner_w.saturating_sub(crate::text::width(CURSOR));
+    let none = say(lang, "tui.wiki.unresolved");
+    let items: Vec<ListItem> = c
+        .items
+        .iter()
+        .map(|t| {
+            let (main, tail, warn) = match t {
+                Target::Page { text, to, found } => (
+                    format!("{} → {}", crate::text::one_line(text), crate::text::one_line(to)),
+                    (!found).then_some(none),
+                    true,
+                ),
+                Target::Out { text, dest } => (
+                    format!("{} → {}", crate::text::one_line(text), crate::text::one_line(dest)),
+                    Some(say(lang, "tui.wiki.external")),
+                    false,
+                ),
+                Target::Issue { id, title: Some(t) } => (format!("{id}  {}", crate::text::one_line(t)), None, false),
+                Target::Issue { id, title: None } => (id.clone(), Some(none), true),
+            };
+            let tail = tail.map(|t| format!("  {t}")).unwrap_or_default();
+            // 낱말이 먼저 자리를 얻는다 — 긴 주소가 `(없음)` 을 밀어내면 죽은 링크가 멀쩡한 줄로 선다.
+            let main = clip(&main, room.saturating_sub(crate::text::width(&tail)).max(1));
+            let look = if warn { from_anstyle(style::WARN) } else { dim() };
+            ListItem::new(Line::from(vec![Span::raw(main), Span::styled(tail, look)]))
+        })
+        .collect();
+    let head = fill(say(lang, "tui.wiki.choose_title"), &[("title", title)]);
+    let block = wiki_frame(true).title(clip(&format!(" {head} "), inner_w));
+    c.list.fit(at.height.saturating_sub(2) as usize, c.items.len());
+    c.list.reveal(c.cursor);
+    let mut state = ListState::default().with_offset(c.list.offset()).with_selected(Some(c.cursor));
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(CURSOR),
+        at,
+        &mut state,
+    );
+    scroll_mark(f, &c.list, at, "", true, lang);
+}
+
 /// 위키 창의 키 바 — 이름과 낱말은 키 표([`keys::WIKI`])에서 읽는다. **듣는 키만 적는다**: 건너온 자취가 없으면
 /// `Bksp` 를 안 댄다(눌러도 아무 일이 없다).
 fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
@@ -1210,6 +1264,14 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
         let none = w.shown().is_empty().then(|| say(lang, "tui.wiki.no_match").to_string());
         let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
         return prompt(f, at, say(lang, "tui.wiki.search"), &t.input, none, &help);
+    }
+    // 고르기 창이 떠 있으면 그 창의 키 — 이름과 낱말은 그 표([`keys::LINKS`])에서 읽는다.
+    if w.choose.is_some() {
+        use super::keys::{LINKS, Link};
+        let moves = labels(LINKS, &[Link::Step(Move::LineDown), Link::Step(Move::LineUp)]);
+        let hint = |a: Link| key(&label(LINKS, a), a.what(lang));
+        let optional = vec![key(&moves, Link::Step(Move::LineDown).what(lang))];
+        return bar(f, at, optional, vec![hint(Link::Enter), hint(Link::Close)]);
     }
     let on_page = w.focus == super::wiki::Side::Page;
     let what = |a: Wiki| a.what(on_page, w.searched(), lang);
@@ -1223,10 +1285,7 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     let hint = |a: Wiki| key(&label(WIKI, a), what(a));
     let moves = labels(WIKI, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
     let optional = vec![key(&moves, what(Wiki::Step(Move::LineDown))), hint(Wiki::FocusNext)];
-    let mut keep = Vec::new();
-    if !on_page {
-        keep.push(hint(Wiki::Enter));
-    }
+    let mut keep = vec![hint(Wiki::Enter)];
     if w.can_go_back() {
         keep.push(hint(Wiki::Back));
     }

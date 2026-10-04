@@ -536,6 +536,41 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     out
 }
 
+/// 본문의 링크 전부 — `(글, 주소)`, 적힌 차례로, 같은 짝은 한 번. **순수 함수다.**
+///
+/// [`parse`] 가 드는 것은 페이지로 풀리는 링크뿐이다(`Page::links`, `--json` 의 `links`). 탐색기의 위키 창은 바깥
+/// 주소까지 고르기 창에 세워야 해서(`(밖)`) 본문을 한 번 더 훑는다 — 설계 노트 moai-qunn 이 정한 자리다. 울타리·들여쓴
+/// 코드 블록 안은 [`parse`] 와 같이 예시로 읽어 안 든다. 그림(`![…](…)`)은 링크가 아니다.
+pub fn links_in(body: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut code_block = 0u32;
+    let mut link: Option<(String, String)> = None;
+    for event in Parser::new_ext(unmarked(body), crate::markdown::OPTIONS) {
+        match event {
+            Event::Start(Tag::CodeBlock(_)) => code_block += 1,
+            Event::End(TagEnd::CodeBlock) => code_block = code_block.saturating_sub(1),
+            Event::Start(Tag::Link { dest_url, .. }) if code_block == 0 => {
+                link = Some((dest_url.to_string(), String::new()));
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some((_, words)) = &mut link {
+                    words.push_str(&t);
+                }
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some((dest, words)) = link.take() {
+                    let pair = (words.trim().to_string(), dest);
+                    if !out.contains(&pair) {
+                        out.push(pair);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// 본문에서 **앞의 BOM 을 걷은** 글 — 읽는 [`parse`] 와 그리는 `view::wiki::page` 가 이것 하나로 걷는다.
 ///
 /// 윈도 편집기가 붙이는 그 한 글자가 남으면 첫 `# 제목` 이 제목으로 안 읽혀, 페이지가 파일 줄기를 제목으로 달고
@@ -654,6 +689,24 @@ mod tests {
                     ```sh\nmoai show moai-zz99\n```\n\n    moai-yy88 indented\n\n[link moai-kk11](x.md)\n";
         assert_eq!(parse("a", body, "moai").ids, ["moai-ab12", "moai-cd34", "moai-ab12.x1y", "moai-kk11"]);
         assert_eq!(parse("a", "a-b e-mail x86-64\n", "e").ids, ["e-mail"], "접두어가 맞으면 꼴만 보는 것이 맞다");
+    }
+
+    /// **링크 전부는 바깥 주소까지 든다** — 적힌 차례로, 같은 짝은 한 번, 코드 블록 안과 그림은 안 든다. 위키 창의
+    /// 고르기 창이 읽는다(moai-o3cb).
+    #[test]
+    fn every_link_is_listed_outside_code() {
+        let body = "\u{feff}# T\n\nSee [guide](guide.md), [site](https://example.com) and <https://x.org>.\n\n\
+                    Again [guide](guide.md), [`code`](a.md#top), ![pic](p.png).\n\n\
+                    ```md\n[not](x.md)\n```\n\n    [indented](y.md)\n";
+        assert_eq!(
+            links_in(body),
+            [
+                ("guide".to_string(), "guide.md".to_string()),
+                ("site".to_string(), "https://example.com".to_string()),
+                ("https://x.org".to_string(), "https://x.org".to_string()),
+                ("code".to_string(), "a.md#top".to_string()),
+            ]
+        );
     }
 
     /// 페이지 링크만 슬러그로 푼다 — 폴더 기준, `#`·`?` 뗌, 퍼센트 풂. 바깥 주소·앵커·`.md` 아닌 것·위키 밖은 아니다.
