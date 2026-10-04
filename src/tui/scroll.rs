@@ -200,9 +200,9 @@ pub fn cursor(m: Move, at: usize, len: impl FnOnce() -> usize) -> usize {
     }
 }
 
-/// 커서를 `d` 줄 옮긴다 — 음수면 위로. [`cursor`] 의 줄 수만큼 가는 갈래이고, 마우스의 휠도 이리 온다(moai-irrj) —
-/// 휠의 걸음(`mouse::WHEEL`)은 [`Move`] 가 아니다. **길이는 아래로 갈 때만 센다**(위의 까닭 그대로).
-pub fn cursor_by(d: isize, at: usize, len: impl FnOnce() -> usize) -> usize {
+/// 커서를 `d` 줄 옮긴다 — 음수면 위로. [`cursor`] 의 줄 수만큼 가는 갈래다. **길이는 아래로 갈 때만 센다**(위의 까닭
+/// 그대로). 마우스의 휠도 한때 이리 왔다(moai-irrj) — 휠은 이제 어느 칸에서나 화면만 굴린다(moai-fyul).
+fn cursor_by(d: isize, at: usize, len: impl FnOnce() -> usize) -> usize {
     if d < 0 { at.saturating_add_signed(d) } else { at.saturating_add_signed(d).min(len().saturating_sub(1)) }
 }
 

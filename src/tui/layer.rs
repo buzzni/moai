@@ -1271,8 +1271,8 @@ impl App {
     /// 버려 떠난 뿌리의 표가 새 프로젝트의 표에 섞였다. **프로젝트에 매인 것을 새로 들이면
     /// 여기에 적는다.** 선 자리(`Layer::at`)와 커서는 부르는 쪽이 정한다 — 어디로 가느냐가 다르다.
     fn leave_project(&mut self, park_at: Option<PathBuf>) {
-        // 굴려 떼어 둔 보드의 화면도 그 프로젝트의 것이다(moai-j0jf 리뷰, [`App::adrift`]) — 두 프로젝트가 같은
-        // prefix 를 쓰면 다음 프로젝트에서 커서가 선 `argos-0001` 이 굴려 떼어 둔 그 카드로 읽혀, 화면 밖에 선 채다.
+        // 굴려 떼어 둔 목록·보드의 화면도 그 프로젝트의 것이다(moai-j0jf 리뷰·moai-fyul, [`App::adrift`]) — 두 프로젝트가
+        // 같은 prefix 를 쓰면 다음 프로젝트에서 커서가 선 `argos-0001` 이 굴려 떼어 둔 그 줄로 읽혀, 화면 밖에 선 채다.
         self.adrift = None;
         if let Some((_, handle)) = self.pending.take() {
             self.discard(handle);
