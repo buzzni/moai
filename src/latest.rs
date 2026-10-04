@@ -18,12 +18,12 @@
 //!   다음 사람이 그 수를 지금 크기로 읽는다
 //! - **하루 한 번 묻는다**([`WINDOW`]). 답과 그것을 들은 때(moai-ggxi), 물은 때와 **물은
 //!   자리**(moai-dael), 못 들었으면 그 **까닭**(2026-09-22 사용자 결정)을 [`FILE`] 에 적고,
-//!   같은 자리의 답이 그 안이면 안 묻는다. **예외는 하나다**(moai-p3r9, 2026-10-04 사용자 결정):
+//!   같은 자리의 답이 그 안이면 안 묻는다.
+//!   자리는 읽음 파일([`crate::read_marks`])의 관례를 따라 설정 파일 곁이고, 판은 프로젝트마다
+//!   다르지 않으니 사람마다 한 파일이다. **창의 예외는 하나다**(moai-p3r9, 2026-10-04 사용자 결정):
 //!   들어 둔 태그가 도는 판보다 낡았고 이 판이 아직 안 물었으면 그 답은 낡은 것이 확실해
 //!   창 안이어도 한 번 묻는다([`Held::outdated`]). 물은 판도 적어 두므로([`ASKED_BY`]) 같은 판은
-//!   두 번 안 묻는다.
-//!   자리는 읽음 파일([`crate::read_marks`])의 관례를 따라 설정 파일 곁이고, 판은 프로젝트마다
-//!   다르지 않으니 사람마다 한 파일이다
+//!   두 번 안 묻는다
 //! - **기본은 켬이되 사람이 보는 화면에서만이다**([`gate`]). `--json` 과 파이프는 안 묻는다 —
 //!   에이전트가 도는 기계가 매번 바깥을 두드리면 안 된다. **둘은 따로 묻는다**: 에이전트는
 //!   tmux 칸 안에서 치므로 표준 출력이 터미널이고, 화면만 재면 `--json` 이 그 문을 지난다
@@ -580,7 +580,8 @@ impl Held {
     /// **낡은 것이 확실한 태그도 지난 답이다**([`Held::outdated`], moai-p3r9). 이 판이 다시 물어 답이
     /// 올 때까지 "릴리스보다 앞선 판" 이라 하지 않고, 못 물은 꼴로 그 태그와 들은 때를 댄다 —
     /// 2026-10-04 사용자 결정으로 새 글을 안 짓는다. 이 판이 아직 안 물었다는 말이라 글자째 참이다.
-    /// 이미 까닭이 선 줄은 그 위의 갈래가 먼저 잡아 그 까닭 그대로다.
+    /// 까닭과 들은 때가 함께 선 줄은 그 위의 갈래가 먼저 잡아 그 까닭 그대로다. **들은 때 없이 선
+    /// 까닭**(0.1.1 이 남긴 것, 위)은 그 태그의 것이 아니라 이 갈래에서도 안 댄다 — 못 물었다는 글이다.
     pub fn answer(&self) -> Seen {
         let why = |kind: Trouble| Why { kind, said: String::new() };
         match (&self.tag, self.trouble, &self.heard_at) {
@@ -608,6 +609,15 @@ impl Held {
     /// 들었으면, 이 판이 정말 앞선 것이다(소스로 지은 판). 다시 물어도 같은 답이라 하루 창으로
     /// 돌아간다. **못 들은 물음도 물은 것으로 센다** — 안 세면 그물 없는 기계가 탐색기를 열 때마다
     /// 묻는다([`refresh`] 가 못 들어도 도장을 찍는 까닭과 같다).
+    ///
+    /// **이 읽기가 틀리는 자리가 하나 있다**(리뷰). 판 번호는 소스로 지은 판과 릴리스로 받은 판을
+    /// 못 가른다 — 판을 올린 커밋(`chore(release)`)에서 지은 바이너리가 태그가 나기 전에 물으면
+    /// [`ASKED_BY`] 는 그 판인데 들은 태그는 앞 판이고, 릴리스가 난 뒤 같은 판(또는 그 판이 물을 때
+    /// 아직 안 났던 더 낮은 판)은 창이 남은 동안 "앞선 판" 을 댄다. 가르려면 판이 아닌 다른 값을
+    /// 적어야 해서 지금은 그대로 둔다 — 치르는 값은 그 하루 창 한 번이다.
+    ///
+    /// **"판마다 한 번" 은 더 낮은 판이 그 사이 안 물을 때다.** 낮은 판이 물으면 [`ASKED_BY`] 가
+    /// 그 판으로 내려가, 정말 앞선 판은 그 뒤에 한 번 더 묻는다 — 낮은 판이 하루 한 번 묻는 만큼이다.
     ///
     /// **판으로 못 읽는 [`Held::asked_by`] 는 물은 적이 없는 것이다.** 치르는 값은 한 번 더 묻는
     /// 것이고, 그때 이 판이 제 판을 적는다.
@@ -917,7 +927,8 @@ pub fn url_from(env: impl Fn(&str) -> Option<OsString>) -> String {
 }
 
 /// 창이 열렸으면 묻고 적는다. 창 안이면 적어 둔 것을 그대로 쓴다 — **낡은 것이 확실한 답만은 창 안이어도
-/// 다시 묻는다**([`Held::outdated`], moai-p3r9). 물은 판을 늘 적으므로 그것도 판마다 한 번이다.
+/// 다시 묻는다**([`Held::outdated`], moai-p3r9). 물은 판을 늘 적으므로 그것도 판마다 한 번이다(더 낮은
+/// 판이 그 사이 물으면 한 번 더다 — 그 자리에 적어 두었다).
 ///
 /// **못 들어도 적는다** — 물은 때를 적어 두어야 그물 없는 기계가 부를 때마다 [`TIMEOUT`] 을
 /// 버리지 않는다. 적기에 실패해도 이 판의 답은 안 바뀐다.
@@ -938,8 +949,13 @@ pub fn url_from(env: impl Fn(&str) -> Option<OsString>) -> String {
 ///
 /// **못 들었으면 적기 전에 한 번 더 읽는다**(리뷰). 첫 읽기는 창 밖이었거나 낡은 답이었으므로 지금
 /// 그대로 쓸 줄([`Held::stands`])이 섰으면 옆 프로세스가 묻는 사이 찍은 것이고, 그 줄을 따른다 —
-/// 옆이 들었는데 이쪽이 지난 답과 까닭으로 덮으면 하루 동안 [`Seen::Stale`] 이 서고 들은 때도 앞으로 되돌아간다. 들은 쪽은 그대로
-/// 적는다: 옆의 실패를 덮는 것이 맞다.
+/// 옆이 들었는데 이쪽이 지난 답과 까닭으로 덮으면 하루 동안 [`Seen::Stale`] 이 서고 들은 때도
+/// 앞으로 되돌아간다. 들은 쪽은 그대로 적는다: 옆의 실패를 덮는 것이 맞다.
+///
+/// **다시 읽은 줄이 안 서도 그 줄의 태그를 먼저 들고 간다**(리뷰). 옆이 들은 태그가 이 판보다
+/// 낡으면([`Held::outdated`]) 그 줄은 안 서는데, 그때 첫 읽기의 태그를 들고 가면 옆이 방금 들은 답이
+/// 하루 앞의 답으로 덮인다 — 0.7.0 이 못 듣는 사이 0.6.0 이 v0.6.0 을 들었으면, 그 줄은 v0.5.0 과
+/// 까닭으로 돌아가고 [`ASKED_BY`] 가 0.7.0 이라 0.6.0 은 하루 동안 다시 안 묻는다.
 pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
     // **다른 자리에 물은 답은 이 자리의 답이 아니다**(moai-dael) — 창도 안 닫고, 못 들었을 때
     // 들고 갈 지난 답도 안 된다. 거울을 한 번 보고 온 사람에게 그 태그가 진짜 릴리스로 서던
@@ -951,8 +967,9 @@ pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
         return h.answer();
     }
     let asked = ask(url);
-    if asked.is_err()
-        && let Some(h) = read(dir).filter(|h| h.asked_here(url) && h.stands(now, window))
+    let again = if asked.is_err() { read(dir).filter(|h| h.asked_here(url)) } else { None };
+    if let Some(h) = &again
+        && h.stands(now, window)
     {
         return h.answer();
     }
@@ -964,7 +981,9 @@ pub fn refresh(dir: &Path, url: &str, now: &str, window: i64) -> Seen {
     let (now, why) = match asked {
         Ok(tag) => (Held { tag: Some(tag), heard_at: Some(now.to_string()), ..stamp }, None),
         Err(why) => {
-            let (heard_at, tag) = held.and_then(|h| Some((h.heard().to_string(), h.tag?))).unzip();
+            // 다시 읽은 줄의 태그가 먼저다(위) — 태그 없는 줄이면 첫 읽기의 것을 들고 간다.
+            let last = |h: Held| Some((h.heard().to_string(), h.tag?));
+            let (heard_at, tag) = again.and_then(last).or_else(|| held.and_then(last)).unzip();
             (Held { tag, heard_at, trouble: Some(why.kind), ..stamp }, Some(why))
         }
     };
@@ -1624,22 +1643,19 @@ mod tests {
     /// 바이너리는 실패한 줄에 태그를 들고 갈 때 들은 때를 늘 함께 적으므로, 그 줄은 들은 줄이다.
     ///
     /// 그 실패 줄은 이 바이너리가 적었으므로 물은 판([`ASKED_BY`])도 남는다 — 0.1.1 은 그 키도
-    /// 그대로 둔다. 안 남으면 도는 판보다 낡은 `v0.0.1` 은 낡은 답([`Held::outdated`])으로 읽혀, 이
-    /// 시험이 재는 자리에 닿기 전에 갈린다.
+    /// 그대로 둔다. 안 남으면 도는 판보다 낡은 `v0.0.1` 은 낡은 답([`Held::outdated`])으로 읽힌다 —
+    /// 그때도 남은 까닭은 그 태그의 것이 아니라 안 대고, 못 물었다는 글에 그 태그를 단다(리뷰:
+    /// [`Held::answer`] 의 갈래 차례가 이 줄을 까닭 쪽으로 보내면 남의 실패를 이 태그의 것으로 댄다).
     #[test]
     fn a_reason_an_older_binary_left_beside_a_heard_tag_is_not_its_reason() {
         let s = Scratch::new("latest-v011");
         let url = nobody_there();
-        let place = place_of(&url);
-        let mine = mine();
-        std::fs::write(
-            file_at(s.path()),
-            format!(
-                "asked_at = \"2026-09-21T00:00:00Z\"\ntag = \"v0.0.1\"\nurl = \"{place}\"\ntrouble = \"offline\"\nasked_by = \"{mine}\"\n"
-            ),
-        )
-        .unwrap();
+        let by_me = format!("trouble = \"offline\"\nasked_by = \"{}\"\n", mine());
+        line_at(s.path(), &url, "v0.0.1", &by_me);
         assert_eq!(held(s.path(), &url), Seen::Ahead { tag: "v0.0.1".into() });
+        line_at(s.path(), &url, "v0.0.1", "trouble = \"offline\"\n");
+        let heard = "2026-09-21T00:00:00Z".to_string();
+        assert_eq!(held(s.path(), &url), Seen::Stale { why: Why::not_asked(), tag: "v0.0.1".into(), heard_at: heard });
     }
 
     /// **묻는 사이 옆이 들은 줄을 못 들은 쪽이 덮지 않는다**(리뷰). 두 탐색기가 창이 지난 뒤 함께
@@ -1671,6 +1687,44 @@ mod tests {
         handle.join().unwrap();
         assert_eq!(got, Seen::Newer { tag: "v9.9.9".into() }, "옆이 들은 답을 안 따랐다");
         assert_eq!(read(s.path()).as_ref(), Some(&sibling), "못 들은 쪽이 옆이 들은 줄을 덮었다");
+    }
+
+    /// **옆이 들은 줄이 이 판에 안 서도 그 태그를 들고 간다**(리뷰, moai-p3r9). 낮은 판의 옆이 이 판보다
+    /// 낡은 태그를 들으면 그 줄은 낡은 답([`Held::outdated`])이라 안 따르는데, 그때 첫 읽기의 태그를
+    /// 들고 가면 옆이 방금 들은 답이 그보다 앞의 답으로 덮인다 — 물은 판은 이 판이 되어 옆은 하루
+    /// 동안 다시 안 묻는다.
+    #[test]
+    fn a_failed_ask_carries_the_tag_a_lower_sibling_heard_meanwhile() {
+        let s = Scratch::new("latest-sibling-lower");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("못 띄웠다");
+        let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
+        line_at(s.path(), &url, "v0.0.1", "");
+        let heard = "2026-09-21T00:00:01Z";
+        let sibling = Held {
+            asked_at: heard.into(),
+            tag: Some("v0.0.2".into()),
+            heard_at: Some(heard.into()),
+            url: Some(place_of(&url)),
+            trouble: None,
+            asked_by: Some("0.0.1".into()),
+        };
+        let dir = s.path().to_path_buf();
+        let handle = std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                write(&dir, &sibling).unwrap();
+                answer(stream, "200 OK", b"not json");
+            }
+        });
+        let got = refresh(s.path(), &url, "2026-09-21T00:00:02Z", WINDOW);
+        handle.join().unwrap();
+        let Seen::Stale { why, tag, heard_at } = got else { panic!("지난 답을 못 들고 갔다 — {got:?}") };
+        assert_eq!(
+            (why.kind, tag.as_str(), heard_at.as_str()),
+            (Trouble::Garbled, "v0.0.2", heard),
+            "옆이 들은 답을 덮었다"
+        );
+        let back = read(s.path()).unwrap();
+        assert_eq!((back.tag.as_deref(), back.heard_at.as_deref()), (Some("v0.0.2"), Some(heard)));
     }
 
     /// **들은 때가 없는 옛 줄은 물은 때로 읽는다**(moai-ggxi). 이 필드 전의 바이너리가 적은
@@ -1716,8 +1770,8 @@ mod tests {
     }
 
     /// `asked_at` 이 `2026-09-21T00:00:00Z` 고 `url` 의 자리에 물은 줄을 손으로 적는다 — `more` 는 그
-    /// 밑에 그대로 붙는다. 물은 판([`ASKED_BY`])을 모르는 옛 바이너리의 줄을 지으려면 [`write`] 로는
-    /// 못 짓는다.
+    /// 밑에 그대로 붙는다. 옛 바이너리가 남긴 꼴(물은 판 없이 남은 까닭, 판으로 못 읽는 [`ASKED_BY`])을
+    /// 글자째 짓는 자리다 — [`Held`] 를 거치면 그 값들이 타입에 맞춰 걸러진다.
     fn line_at(dir: &Path, url: &str, tag: &str, more: &str) {
         let place = place_of(url);
         let src = format!("asked_at = \"2026-09-21T00:00:00Z\"\ntag = \"{tag}\"\nurl = \"{place}\"\n{more}");
