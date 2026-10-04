@@ -328,6 +328,10 @@ fn mirrored(block: &str, under: &str, dir: &str, name: Option<&str>) -> String {
         .lines()
         .filter_map(|l| l.strip_prefix(".moai/"))
         .filter(|rest| rest.starts_with(under))
+        // **파일 하나만 옮겨 갔으면 디렉터리 줄은 안 따라간다**(moai-h8tn) — 그 자리에 서는 것은 그 파일의 락과
+        // 임시 파일뿐이고, 우편함과 출석부(`mail/`·`agents/`)는 여전히 `.moai/` 밑이라 블록의 줄이 막는다.
+        // 따라 옮기면 사람의 디렉터리(`shared/mail/`)를 가린다.
+        .filter(|rest| name.is_none() || !rest.ends_with('/'))
         .map(|rest| {
             let rest = match name.zip(rest.strip_prefix('*')) {
                 Some((name, tail)) => format!("{name}{tail}"),
@@ -475,10 +479,21 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>
             let Ok(text) = read_held(&root.join(name), &home) else { return None };
             let text = text.unwrap_or_default();
             let block = block(root);
-            let missing: Vec<String> = missing_rules(&text, &block).into_iter().map(str::to_string).collect();
+            let missing: Vec<String> =
+                missing_rules(&text, &block).into_iter().filter(|l| !self_ignored(l)).map(str::to_string).collect();
             (!missing.is_empty()).then_some((name, kind, missing))
         })
         .collect()
+}
+
+/// 블록에 서되 **빠졌다고 조르지 않는 줄** — 우편함과 출석부(moai-h8tn)다. 두 디렉터리는 제 `.gitignore`(`*`)를
+/// 들어(`mail::ensure_dir`) 이 줄이 없어도 git 이 안 본다. `init` 은 여전히 적는다 — 선언은 블록이다. 조르면 이 판
+/// 전에 심은 모든 저장소의 보드와 `init --check` 에 "옆 워크트리가 `git add -A` 에 딸려간다" 는 거짓 까닭이 선다
+/// (리뷰 moai-h8tn.x4l). 규칙을 더하면 이미 심긴 저장소마다 알림이 새로 선다는 값은 moai-3akx 가 이미 재었다
+/// ([`tmp_dir`]). `.moai` 가 링크라 옮겨 적은 줄(`/tracker/mail/`)도 같다.
+fn self_ignored(line: &str) -> bool {
+    let line = line.trim_end();
+    line.ends_with("/mail/") || line.ends_with("/agents/")
 }
 
 /// **링크인** 딸린 파일의 이름(moai-yke5). git 은 2.32 부터 체크아웃 안의 `.gitattributes`·`.gitignore` 가
@@ -744,11 +759,19 @@ const GITATTRIBUTES: &str = "\
 // 워크트리를 뜨는데, 그 자리가 안 막히면 `git add -A` 에 남의 가지 전체가 딸려 온다. 넣는 것은
 // 그 자리 하나다 — `.claude/` 통째는 저장소가 커밋하는 설정·스킬·플러그인을 가린다. 끄는 길은
 // 두지 않는다: 워크트리를 안 쓰는 저장소에는 빈 자리를 막는 줄일 뿐이다.
+//
+// **우편함과 출석부도 막는다**(moai-h8tn, 2026-10-04 사용자 결정). 편지와 출석은 전달이지 기록이 아니라
+// 커밋할 것이 아니고, 출석에는 이 기계의 pid·경로·tmux 소켓이 든다. 두 디렉터리는 제 `.gitignore`(`*`)도
+// 들지만(`mail::ensure_dir`), 그것은 이 줄을 다시 심기 전의 저장소를 위한 것이고 선언은 여기다. **빠졌다고
+// 조르지는 않는다**([`self_ignored`]) — 제 무시를 든 디렉터리라 이 줄 없이도 안 담기고, 빠진 줄을 대는 알림의 머리
+// ("옆 워크트리가 `git add -A` 에 딸려간다")가 이 줄에는 거짓이다. 워크트리 줄 뒤에 두는 것은 그대로다.
 const GITIGNORE: &str = "\
 # moai
 .moai/lock
 .moai/*.tmp.*
 /.claude/worktrees/
+.moai/mail/
+.moai/agents/
 ";
 
 /// **새로 심는 접두어의 최대 길이**(moai-f7xs). id 는 `<접두어>-<4자>` 이고 사람과
@@ -1683,6 +1706,8 @@ mod tests {
         symlink("tracker", dir.join(".moai")).unwrap();
         let (ignore, attrs) = (gitignore_for(&dir), attributes_for(&dir));
         assert!(has(&ignore, "/tracker/lock") && has(&ignore, "/tracker/*.tmp.*"), "{ignore}");
+        // 우편함과 출석부도 `.moai` 를 따라 그 자리에 선다(moai-h8tn).
+        assert!(has(&ignore, "/tracker/mail/") && has(&ignore, "/tracker/agents/"), "{ignore}");
         assert!(has(&attrs, "/tracker/journal.jsonl  text eol=lf merge=union"), "{attrs}");
         assert!(has(&attrs, "/tracker/journal/*.jsonl  text eol=lf merge=union"), "{attrs}");
         assert!(has(&attrs, "/tracker/issues.jsonl   text eol=lf merge=moai"), "{attrs}");
@@ -1694,6 +1719,8 @@ mod tests {
         let (ignore, attrs) = (gitignore_for(&file), attributes_for(&file));
         assert!(has(&ignore, "/shared/lock") && has(&ignore, "/shared/issues.jsonl.tmp.*"), "{ignore}");
         assert!(!ignore.contains("/shared/*.tmp.*"), "사람의 디렉터리의 임시 파일을 통째로 가렸다: {ignore}");
+        // 파일만 옮겼으면 우편함은 `.moai/` 밑 그대로다 — 사람의 디렉터리에 `mail/` 을 가리면 안 된다.
+        assert!(!ignore.contains("/shared/mail") && !ignore.contains("/shared/agents"), "{ignore}");
         assert!(!attrs.contains("/shared/journal"), "제자리 저널을 옮겼다: {attrs}");
         assert!(!ignore.contains("/.moai/"), "제자리를 한 벌 더 적었다: {ignore}");
 
@@ -1731,6 +1758,24 @@ mod tests {
         assert_eq!(ignored(&file, &["shared/release.tmp.md"]), 0, "사람의 파일을 가렸다");
         assert_eq!(ignored(&top, &["lock", "issues.jsonl.tmp.1.0"]), 2);
         assert_eq!(ignored(&top, &["notes.tmp.md"]), 0, "뿌리의 남의 임시 파일을 가렸다");
+    }
+
+    /// **우편함과 출석부 줄은 빠졌다고 조르지 않는다**(리뷰 moai-h8tn.x4l) — 두 디렉터리가 제 무시를 들어, 이 판 전에
+    /// 심은 저장소의 보드에 "옆 워크트리가 딸려간다" 는 거짓 까닭을 세우지 않는다. `init` 은 여전히 적는다.
+    #[test]
+    fn the_self_ignoring_lines_are_not_nagged() {
+        let s = crate::scratch::Scratch::new("init-self-ignored");
+        let root = s.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".moai")).unwrap();
+        let before: String = GITIGNORE.lines().filter(|l| !self_ignored(l)).map(|l| format!("{l}\n")).collect();
+        assert_ne!(before, GITIGNORE, "옛 블록을 못 지었다");
+        std::fs::write(root.join(".gitignore"), &before).unwrap();
+        std::fs::write(root.join(".gitattributes"), &*attributes_for(&root)).unwrap();
+        assert!(dotfile_gaps(&root).is_empty(), "제 무시를 든 줄을 빠졌다고 졸랐다: {:?}", dotfile_gaps(&root));
+        assert!(gitignore_for(&root).contains(".moai/mail/") && gitignore_for(&root).contains(".moai/agents/"));
+        // 정말 빠진 줄은 여전히 댄다.
+        std::fs::write(root.join(".gitignore"), "").unwrap();
+        assert_eq!(dotfile_gaps(&root).len(), 1, "{:?}", dotfile_gaps(&root));
     }
 
     /// **링크인 딸린 파일에는 안 쓰고, 빠진 줄 대신 링크라고 말한다**(moai-yke5). git 은 2.32 부터 체크아웃

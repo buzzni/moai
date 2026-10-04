@@ -40,6 +40,10 @@ Commands:
   milestone     The verbs above, pinned to `--type milestone`
   idea          Jot a passing thought down where you are (`--type idea`)
   wiki          Read the project wiki - the markdown pages under `docs/`
+  send          Leave a letter for another agent - one file under .moai/mail
+  inbox         The letters for you - `--ack` marks them read
+  agents        Who is here - the agents under .moai/agents (sweeps the gone)
+  hello         Register this agent - name, vendor, model and role
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
   hook          Called by Claude's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
@@ -2245,6 +2249,169 @@ Options:
   stands. It leaves the exit code alone - `moai wiki ls` names those places.
 ```
 
+## `moai send`
+
+```
+Leave a letter for another agent - one file under .moai/mail
+
+Usage: moai send [OPTIONS] <to> <subject>
+
+Arguments:
+  <to>       An agent name from `moai agents`, or any-idle-worker
+  <subject>  One line saying what this is
+
+Options:
+  -b, --body <text>          Text, not a path. `-` reads stdin: `-b - < <file>`
+      --reply-to <id>        The id of the letter this answers
+      --wake                 Knock once on an idle recipient (a bonus)
+      --as <name>            Who sends (else MOAI_AGENT or `moai hello`)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai send moa-issue-25 'the review is done' -b - < notes.md
+  moai send any-idle-worker 'pick up moai-4aex' --wake
+  moai send moa-issue-b6 'Re: merged' --reply-to <letter id> -b 'as 1a2b3c'
+
+  The recipient is an agent name from `moai agents`, or any-idle-worker -
+  then the first agent that is neither the sender nor a supervisor to take
+  it keeps it, and a hook takes one such letter per load. A name nobody has
+  registered is still taken, with one line on stderr: the letter waits until
+  that agent says hello.
+
+  **It is not the tracker.** Nothing goes into issues.jsonl or the journal -
+  a letter is delivery, not record. A decision still goes on its issue as a
+  note. The mailbox follows the tracker: inside a linked worktree it is the
+  main checkout's, so every session of the repository sees one mailbox.
+
+  Who sends is --as, else MOAI_AGENT, else the registered agent this command
+  runs under (`moai hello`). With none of them it stops - a letter with no
+  sender cannot be answered. The body holds up to 64 KB, the subject one
+  line of up to 200 characters.
+
+  **Waking is a bonus.** The way a worker gets its letters is waiting for them
+  (`moai inbox --ack --wait`) or its hooks. --wake only knocks once on an idle
+  recipient: when its row carries a tmux pane, `moai inbox` is typed into that
+  pane; a Claude session cannot be woken from a command line, so the line
+  printed tells the sender to use SendMessage. With neither it does nothing
+  and says nothing. moai never runs an agent's own program to wake it. An
+  agent at work is not woken. For any-idle-worker it knocks on the agent idle
+  the longest.
+
+  --json gives the letter as written plus `id`, and `wake`
+  ({"to","via","done","why"}) when --wake was given. `via` is send_message,
+  tmux or none; `why` names what stood in the way (busy, ask_sender, no_way,
+  nobody, missing, failed, timeout).
+```
+
+## `moai inbox`
+
+```
+The letters for you - `--ack` marks them read
+
+Usage: moai inbox [OPTIONS]
+
+Options:
+      --ack                  Mark what is shown as read
+      --all                  The letters already read too
+      --wait <seconds>       Wait up to this many seconds for a letter to come
+      --as <name>            Who you are (else MOAI_AGENT or `moai hello`)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai inbox                    the unread letters for you
+  moai inbox --ack              the same, and marks them read
+  moai inbox --all              the ones already read too
+  moai inbox --ack --wait 600   waits up to 600 seconds for one to come
+
+  **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
+  end of each task, again and again. Nothing has to wake it.
+
+  A letter is read when it moves to .moai/mail/read/ - nothing is deleted,
+  and --all shows it again. The hooks do this by themselves: UserPromptSubmit
+  and Stop load the letters for the session into the conversation and mark
+  them read, so an agent with the hooks installed rarely needs this command.
+
+  A letter to any-idle-worker shows to every agent but its sender and the
+  supervisors, and the first --ack keeps it; another that tried in the same
+  moment is told it was taken (`lost`).
+
+  Who you are is --as, else MOAI_AGENT, else the registered agent this
+  command runs under (`moai hello`).
+
+  --json gives {"me","letters":[{"id","read","v","to","from","subject",
+  "body","sent_at","reply_to"}],"lost":[ids]}. Keys a letter carries that
+  this build does not know are passed through as they are.
+```
+
+## `moai agents`
+
+```
+Who is here - the agents under .moai/agents (sweeps the gone)
+
+Usage: moai agents [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  An agent is registered by `moai hello`, or by the hooks when its session
+  starts. UserPromptSubmit marks it busy and Stop marks it idle. A row whose
+  process is gone is swept here - on Linux a reused pid is told apart by the
+  time the process started. A row that cannot be told alive or gone stays.
+
+  --json gives {"agents":[{"v","name","vendor","model","role","status",
+  "since","pid","pid_start","session","cwd","tmux_pane","tmux_socket"}],
+  "swept":[names]}. pid_start, session and the two tmux keys are absent when
+  they are not known.
+```
+
+## `moai hello`
+
+```
+Register this agent - name, vendor, model and role
+
+Usage: moai hello [OPTIONS]
+
+Options:
+      --vendor <vendor>      claude, codex, antigravity or another word
+      --model <model>        The model this agent runs (opus-5, gpt-5.5, ...)
+      --role <role>          worker, supervisor or another word
+      --name <name>          The name others send to
+      --pid <pid>            The agent's process (else found among the parents)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai hello --vendor codex --model gpt-5.5 --role worker
+  moai hello --name reviewer-1 --role supervisor
+
+  Writes .moai/agents/<name>.json for the agent process this command runs
+  under - found among its parents by name (claude, codex, agy), or --pid.
+  The vendor defaults to what that name says. The name defaults to the one
+  this agent already has here, then to the session name Claude Code shows,
+  then to <vendor>-<pid>. Saying hello again updates the row; a new --name
+  replaces the old one.
+
+  A name is letters, digits, `.`, `_` and `-`, up to 64, not starting with
+  `.` - it becomes a file name. any-idle-worker is not one an agent can take.
+  An agent whose role is supervisor never takes letters to any-idle-worker.
+```
+
 ## `moai tui`
 
 ```
@@ -2550,9 +2717,9 @@ Options:
 
   Events:
     session-start       Writes the baseline. Loads what is held after a compact
-    user-prompt-submit  A person asked. Loads the board once per session
+    user-prompt-submit  A person asked. Loads letters, and the board once
     pre-tool-use        Just before a tool call. The rules stand here
-    stop                The turn ends. Checks the state against reality
+    stop                The turn ends. Loads letters, then checks the state
 
   echo '{"session_id":"x","cwd":"/repo"}' | moai hook user-prompt-submit
 ```

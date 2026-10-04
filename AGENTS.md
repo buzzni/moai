@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:46c077a3 -->
+<!-- moai:begin v:0.6.0 hash:3ec02764 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -488,6 +488,23 @@ are is unknown, nothing is refused.
 the ideas that have piled up, one at a time, to the sessions idling on the same
 repository, and to take their reports — the supervisor picks, sends and checks;
 it does not fix and it does not merge.
+
+### Letters between agents
+
+    moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
+    moai send any-idle-worker '<subject>'   one agent takes it - not you, not a supervisor
+    moai inbox --ack                        the letters for you, marked read as they are shown
+    moai inbox --ack --wait 600             a worker waits here for its next letter
+    moai agents                             who is here - `moai hello` registers you
+
+A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
+on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
+and the end of each turn load the letters for this session and mark them read, and an
+`any-idle-worker` letter goes, one per load, to whichever agent loads it first. A supervisor
+registers with `moai hello --role supervisor` so it never takes those. Waking is a bonus:
+`--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
+Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
+a worker waiting on `moai inbox --wait` needs no waking.
 
 ### The wiki
 

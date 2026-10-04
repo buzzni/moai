@@ -606,6 +606,15 @@ impl Repo {
     pub fn dir(&self) -> PathBuf {
         self.root.join(".moai")
     }
+    /// 우편함 — `.moai/mail/`(moai-h8tn). **트래커의 뿌리에 선다** — 딸린 워크트리에서 부른 것도 루트로
+    /// 옮겨 간 [`Repo::root`] 밑이라, 저장소의 모든 세션이 한 우편함을 본다. 그 안의 꼴은 [`crate::mail`] 이 든다.
+    pub fn mail_dir(&self) -> PathBuf {
+        self.dir().join("mail")
+    }
+    /// 출석부 — `.moai/agents/`(moai-h8tn). [`Repo::mail_dir`] 와 같은 자리에 선다.
+    pub fn agents_dir(&self) -> PathBuf {
+        self.dir().join("agents")
+    }
     pub fn issues_path(&self) -> PathBuf {
         self.dir().join("issues.jsonl")
     }

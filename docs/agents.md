@@ -3,10 +3,10 @@
 moai is built so that AI agents run the tracker beside a person. There is no
 approval gate: an agent creates, moves and closes work without asking, and the
 one thing it asks about is picking up work that belongs to someone else — a
-[take over](glossary.md#take-over). This page covers the three things that make
-that work — the instructions an agent reads, the skills planted for Claude Code,
-Codex and Antigravity (with hooks for Claude Code), and the `--json` surface a
-loop of your own can drive. The commands'
+[take over](glossary.md#take-over). This page covers what makes that work — the
+instructions an agent reads, the skills planted for Claude Code, Codex and
+Antigravity (with hooks for Claude Code), the letters agents leave each other,
+and the `--json` surface a session reads its queue from. The commands'
 flags are in [the CLI reference](cli.md), and the words in
 [the glossary](glossary.md).
 
@@ -90,10 +90,10 @@ nobody runs by hand.
 
 | When | What happens |
 |---|---|
-| The session starts | A baseline of the warnings is written. After a compaction, what the session was holding is loaded back into it |
-| A person sends a prompt | The `moai status` board is loaded, once per session |
-| Before a tool call | The five rules below are checked |
-| The turn ends | If the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew |
+| The session starts | A baseline of the warnings is written and the session's [presence](glossary.md#presence) row is written, idle. After a compaction, what the session was holding is loaded back into it, with any [letters](glossary.md#letter) for it, and busy or idle stays as it was |
+| A person sends a prompt | The `moai status` board is loaded, once per session. The letters for the session are loaded every time, and it is marked busy |
+| Before a tool call | The five rules below are checked — nothing else; the mailbox is not opened |
+| The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. A turn that ends is marked idle |
 
 **The hook never fails the session.** Whatever goes wrong inside it, it exits 0,
 and the only thing it refuses is the one tool call that broke a rule. A person
@@ -131,6 +131,55 @@ gets through — run it as given. None of them waits on a person except rule 5.
 **Who the agent is** comes from `--user "Name (email)"`, then `MOAI_ACTOR`, then
 `git config`. When none of them says, a write stops and asks for one — reads
 never ask — and rule 5 sets nothing apart.
+
+## Leave each other letters
+
+Agents talk through a mailbox under `.moai/` — a [letter](glossary.md#letter) is
+one file, and who is around is one [presence](glossary.md#presence) file per
+agent.
+
+    moai hello --role worker                 register this agent (the hooks do it for Claude)
+    moai agents                              who is here, busy or idle; sweeps the gone
+    moai send <agent> '<subject>' -b -       leave a letter, the body from stdin
+    moai send any-idle-worker '<subject>'    one agent takes it, not you or a supervisor
+    moai inbox --ack                         the letters for you, marked read
+    moai inbox --ack --wait 600              wait up to ten minutes for one
+
+- **A letter is delivery, not record.** Nothing goes into `issues.jsonl` or the
+  journal; a decision still goes on its issue as a note, and a report names the
+  issue it is about. The mailbox follows the tracker into the main checkout, so
+  every session of a repository — in any worktree — sees one mailbox, and
+  `moai init` keeps both directories out of git
+- **Names are what you send to.** A Claude session is registered by its hooks
+  under the name Claude Code shows for it (the one `SendMessage` uses);
+  `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
+  `moai send` and `moai inbox` know who you are from `--as`, `MOAI_AGENT`, or the
+  registered agent they run under
+- **`any-idle-worker`** is a recipient, not a name: the first agent that is
+  neither the sender nor registered as a `supervisor` (`moai hello --role
+  supervisor`) to take the letter keeps it. A hook takes one such letter per
+  load, so several of them spread over several agents; a `moai inbox --ack`
+  that tried in the same moment is told it was taken
+- **The hooks deliver.** With the plugin installed an agent rarely runs
+  `moai inbox`: each prompt and each turn's end load the letters for that session
+  and mark them read — `moai inbox --all` shows them again, nothing is deleted.
+  One load stays inside the 10,000 characters Claude Code carries per hook —
+  the board included, on the first prompt — and says how many still wait; a
+  letter too long for that is cut there, naming `moai inbox --all` for the
+  rest. A letter's body holds up to 64 KB, its subject 200 characters
+- **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
+  each task is how a worker session — one a person opened — gets its next one;
+  nothing has to wake it
+- **Waking is a bonus.** `moai send --wake` knocks once on an idle recipient:
+  when its presence row carries a tmux pane, `moai inbox` is typed into that
+  pane; a Claude session cannot be woken from a command line, so the sender
+  wakes it with `SendMessage`, as the printed line says. With neither, nothing
+  happens and nothing is said — not everyone runs tmux. moai never runs an
+  agent's own program to wake it. An agent at work is left alone
+
+Every one of these takes `--json`. `moai inbox --json` gives `me`, the `letters`
+(each with `id` and `read` besides the letter's own keys) and `lost` — the ids
+another agent took first.
 
 ## Work the queue from a session
 
@@ -172,4 +221,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn

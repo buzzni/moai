@@ -95,6 +95,17 @@ What a row is: `issue` (the default, never written to the file), `epic`,
 three separate questions — what it is, where it stands, and whether to look at
 it now. A tag such as `bug` or `review` is not a kind.
 
+## Letter
+
+What one agent leaves another — a file under `.moai/mail/`, written by
+`moai send` to an agent's name or to `any-idle-worker` (the first agent that is
+neither the sender nor registered as a [supervisor](#supervisor) with
+`moai hello --role supervisor` keeps it). It is delivery,
+not record: nothing of it enters the [tracker](#tracker) or the
+[journal](#journal). The hooks load the letters for a session into it and mark
+them read; `moai inbox` shows them. More in
+[working with agents](agents.md#leave-each-other-letters).
+
 ## Member
 
 A row that stands in a [group](#group), by its own field or by inheritance.
@@ -145,6 +156,14 @@ one `- [p1] issue title #tag` line per issue — fed to `moai add --from -`
 (`--dry-run` shows it first) or to `moai idea promote`. Show it to the person
 once, before writing code. More in
 [the workflow](workflow.md#plan-something-bigger).
+
+## Presence
+
+The row that says an agent is here — `.moai/agents/<name>.json`, with its
+vendor, model, role, whether it is busy or idle, and its process. `moai hello`
+writes it, and the hooks write it for a Claude session as it starts and keep
+busy and idle up to date. `moai agents` lists them and sweeps a row whose
+process is gone. The name in it is what a [letter](#letter) is sent to.
 
 ## Regression-of
 
