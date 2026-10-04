@@ -66,10 +66,10 @@ nobody runs by hand.
 
 | When | What happens |
 |---|---|
-| The session starts | A baseline of the warnings is written and the session's [presence](glossary.md#presence) row is written, idle. After a compaction, what the session was holding is loaded back into it, with any [letters](glossary.md#letter) for it |
+| The session starts | A baseline of the warnings is written and the session's [presence](glossary.md#presence) row is written, idle. After a compaction, what the session was holding is loaded back into it, with any [letters](glossary.md#letter) for it, and busy or idle stays as it was |
 | A person sends a prompt | The `moai status` board is loaded, once per session. The letters for the session are loaded every time, and it is marked busy |
 | Before a tool call | The five rules below are checked — nothing else; the mailbox is not opened |
-| The turn ends | Letters for the session hold the turn first. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. A turn that ends is marked idle |
+| The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. A turn that ends is marked idle |
 
 **The hook never fails the session.** Whatever goes wrong inside it, it exits 0,
 and the only thing it refuses is the one tool call that broke a rule. A person
@@ -117,7 +117,7 @@ agent.
     moai hello --role worker                 register this agent (the hooks do it for Claude)
     moai agents                              who is here, busy or idle; sweeps the gone
     moai send <agent> '<subject>' -b -       leave a letter, the body from stdin
-    moai send any-idle-worker '<subject>'    the first agent that is free takes it
+    moai send any-idle-worker '<subject>'    one agent takes it, not you or a supervisor
     moai inbox --ack                         the letters for you, marked read
     moai inbox --ack --wait 600              wait up to ten minutes for one
 
@@ -132,13 +132,17 @@ agent.
   `moai send` and `moai inbox` know who you are from `--as`, `MOAI_AGENT`, or the
   registered agent they run under
 - **`any-idle-worker`** is a recipient, not a name: the first agent that is
-  neither the sender nor a `supervisor` to take the letter keeps it, and the
-  others are told it was taken
+  neither the sender nor registered as a `supervisor` (`moai hello --role
+  supervisor`) to take the letter keeps it. A hook takes one such letter per
+  load, so several of them spread over several agents; a `moai inbox --ack`
+  that tried in the same moment is told it was taken
 - **The hooks deliver.** With the plugin installed an agent rarely runs
   `moai inbox`: each prompt and each turn's end load the letters for that session
   and mark them read — `moai inbox --all` shows them again, nothing is deleted.
-  One load carries about 48 KB and says how many still wait; a letter's body
-  holds up to 64 KB
+  One load stays inside the 10,000 characters Claude Code carries per hook —
+  the board included, on the first prompt — and says how many still wait; a
+  letter too long for that is cut there, naming `moai inbox --all` for the
+  rest. A letter's body holds up to 64 KB, its subject 200 characters
 - **An idle agent is not running its hooks**, so `moai send --wake` wakes it the
   vendor's way: a Codex session through `codex queue --thread`, an Antigravity
   session by typing `moai inbox` into its tmux pane. A Claude session cannot be

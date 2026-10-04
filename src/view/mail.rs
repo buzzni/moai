@@ -10,11 +10,18 @@ use crate::style::{self, paint};
 use crate::text::{one_line, sanitize};
 
 /// 편지 하나 — 머리 줄(id·보낸 이·때, 읽었으면 그 표), 제목, 답하는 편지, 네 칸 들여 쓴 본문.
-pub fn letter(lang: Lang, s: &Stored) -> Vec<String> {
+///
+/// **때는 보는 사람의 시간대로 적는다**(`view::stamp`, moai-p5az) — 다른 화면이 모두 그렇게 적는데 편지만 UTC 글자를
+/// 그대로 내던 판은, 같은 화면(훅이 싣는 보드와 편지)에서 몇 시간 어긋난 시각이 나란히 섰다(리뷰 moai-h8tn.x4l).
+pub fn letter(lang: Lang, zone: &crate::tz::Zone, s: &Stored) -> Vec<String> {
     let l = &s.letter;
     let mut head = fill(
         say(lang, "mail.letter_head"),
-        &[("id", &paint(style::ID, &s.id)), ("from", &one_line(&l.from)), ("at", &one_line(&l.sent_at))],
+        &[
+            ("id", &paint(style::ID, &s.id)),
+            ("from", &one_line(&l.from)),
+            ("at", &crate::view::stamp(&l.sent_at, zone)),
+        ],
     );
     if s.reader.is_some() {
         head.push_str(&format!("  {}", paint(style::DIM, say(lang, "mail.read_mark"))));
@@ -49,7 +56,7 @@ mod tests {
                 rest: Default::default(),
             },
         };
-        let lines = crate::style::plain(&letter(Lang::En, &s).join("\n"));
+        let lines = crate::style::plain(&letter(Lang::En, &crate::tz::Zone::utc(), &s).join("\n"));
         assert!(!lines.contains('\u{1b}') && !lines.contains('\u{7}'), "{lines:?}");
         assert!(lines.contains("    one\n    ") && lines.contains("two"), "{lines:?}");
     }

@@ -170,11 +170,18 @@ fn decide(
                 &away,
                 ctx.lang(),
             );
-            // **접힌 뒤는 편지도 싣는다** — 붙는 것을 잰 자리가 여기다(2026-10-04 사용자 결정). 접히는 것은 일하는
-            // 중이라 `busy` 다.
+            // **접힌 뒤는 편지도 싣는다** — 붙는 것을 잰 자리가 여기다(2026-10-04 사용자 결정). 편지는 같은 칸에 먼저 선
+            // 줄 다음 자리에 든다([`crate::hook::letters_room`]).
+            //
+            // **상태는 안 바꾼다**(리뷰 moai-h8tn.x4l) — 저절로 접히는 것은 턴 한가운데라 이미 `busy` 고, 사람이 친
+            // `/compact` 뒤에는 프롬프트도 `Stop` 도 안 와 `busy` 로 적으면 노는 세션이 내내 일하는 것으로 남는다.
+            // 처음 서는 장만 `busy` 로 적는다. 출석은 편지를 옮기기 전에 적는다 — 옮긴 뒤의 쓰기가 늦어 훅이 시간을
+            // 넘기면 그 편지는 아무에게도 안 실린다.
             let me = attendee(input, &repo);
-            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx));
-            attend(&repo, me, mail::BUSY);
+            let status = me.as_ref().map(|p| p.status.clone()).filter(|s| !s.is_empty());
+            attend(&repo, me.clone(), status.as_deref().unwrap_or(mail::BUSY));
+            let letters =
+                me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::letters_room(&carried), Mine::All));
             carried.then(|| letters.map_or(Decision::Pass, Decision::Context))
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다. **출석은 적는다**(moai-h8tn) — 편지는
@@ -210,10 +217,12 @@ fn decide(
                 );
                 crate::hook::board(&lines, ctx.lang())
             });
-            // 사람이 물었으니 일하는 중이다. 편지는 **매 프롬프트** 싣는다 — 보드처럼 한 번이 아니다(moai-h8tn).
+            // 사람이 물었으니 일하는 중이다. 편지는 **매 프롬프트** 싣는다 — 보드처럼 한 번이 아니다(moai-h8tn). 보드와
+            // 한 칸이라 그 다음 자리에 든다([`crate::hook::letters_room`]). 출석은 편지를 옮기기 전에 적는다(위와 같은 까닭).
             let me = attendee(input, &repo);
-            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx));
-            attend(&repo, me, mail::BUSY);
+            attend(&repo, me.clone(), mail::BUSY);
+            let letters =
+                me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::letters_room(&board), Mine::All));
             board.then(|| letters.map_or(Decision::Pass, Decision::Context))
         }
         Event::PreToolUse => {
@@ -367,41 +376,68 @@ fn decide(
         // 편지를 다 본 뒤의 `Stop` 이 묻는다: 함께 실으면 [`Decision::then`] 이 막는 답 하나만 남기는데, 버려진
         // 쪽이 편지면 읽음으로 옮긴 편지가 아무에게도 안 실린다. 편지는 실은 만큼 줄어 붙듦에 끝이 있으므로
         // `stop_hook_active` 여도 싣는다 — 보낸 이가 쉬지 않고 보내면 일이 쉬지 않고 오는 것이다.
+        //
+        // **편지 뒤의 `Stop` 은 `stop_hook_active` 로 온다**(리뷰 moai-h8tn.x4l) — 그 표만 보고 보내던 판은 편지가 온
+        // 턴마다 닫기 물음을 통째로 걸렀다(그 턴에 쥔 일·늘어난 경고를 아무도 안 물었다). 편지로 붙들 때 세션 표
+        // (`letters`)를 남기고, 그 표가 선 `Stop` 은 표를 걷으며 닫기 물음을 묻는다. 그래도 끝없이 돌지 않는 것은
+        // 표가 한 번 걷히고 닫기 물음이 세션에 한 번(`once_per_session`)이기 때문이다.
         Event::Stop => {
             let me = attendee(input, &repo);
-            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx));
-            let decision = letters.map_or(Decision::Pass, Decision::Block).then(|| {
-                // **이미 한 번 붙들었으면 보낸다.** 이 표를 안 보면 무한히 돈다.
-                if input.stop_hook_active {
-                    return Decision::Pass;
+            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::CONTEXT_CAP, Mine::Others));
+            let held_by_letters = session_file(input, &repo, "letters");
+            let decision = match letters {
+                Some(said) => {
+                    if let Some(path) = &held_by_letters {
+                        let _ = std::fs::write(path, "");
+                    }
+                    Decision::Block(said)
                 }
-                once_per_session(input, &repo, "stop", || {
-                    let now = model::now();
-                    let st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
-                    // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
-                    // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
-                    // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
-                    let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
-                    // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
-                    // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
-                    let (away, latest) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
-                    crate::hook::closing(
-                        &load.issues,
-                        latest.as_deref().unwrap_or(&load.issues),
-                        &repo.config,
-                        &away,
-                        warnings,
-                        baseline(input, &repo),
-                        ctx.lang(),
-                    )
-                })
-            });
+                None => {
+                    let after_letters = held_by_letters.is_some_and(|path| std::fs::remove_file(path).is_ok());
+                    // **이미 한 번 붙들었으면 보낸다.** 이 표를 안 보면 무한히 돈다 — 편지가 붙든 턴은 빼고.
+                    if input.stop_hook_active && !after_letters {
+                        Decision::Pass
+                    } else {
+                        closing_hold(input, &repo, &load.issues, &unreadable, ctx)
+                    }
+                }
+            };
             // 턴이 끝나면 논다 — 붙들었으면 아직 일하는 중이다.
             attend(&repo, me, if decision.blocks() { mail::BUSY } else { mail::IDLE });
             decision
         }
     };
     answer(event, decision)
+}
+
+/// 턴 끝의 닫기 물음 — 세션에 한 번 붙든다(`once_per_session`). 편지가 붙든 턴은 그 뒤의 `Stop` 이 묻는다([`decide`]).
+fn closing_hold(
+    input: &Input,
+    repo: &Repo,
+    issues: &[model::Issue],
+    unreadable: &[report::Unreadable],
+    ctx: &Ctx,
+) -> Decision {
+    once_per_session(input, repo, "stop", || {
+        let now = model::now();
+        let st = report::status(issues, unreadable, &repo.config, &now, ctx.zone());
+        // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
+        // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
+        // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
+        let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
+        // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
+        // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
+        let (away, latest) = releasing(input, repo, issues, &person_at(repo, ctx));
+        crate::hook::closing(
+            issues,
+            latest.as_deref().unwrap_or(issues),
+            &repo.config,
+            &away,
+            warnings,
+            baseline(input, repo),
+            ctx.lang(),
+        )
+    })
 }
 
 /// 판정을 계약 JSON 한 줄로 옮긴다 — `Pass` 는 아무 말도 안 한다.
@@ -850,12 +886,19 @@ fn route_one(
     Route::There(n)
 }
 
-/// 이 세션의 출석(moai-h8tn) — **적지는 않는다**, 상태와 함께 적는 것은 판정 뒤의 [`attend`] 다.
+/// 이 세션의 출석(moai-h8tn) — **옛 장을 걷는 것 말고는 적지 않는다**, 상태와 함께 적는 것은 판정 뒤의 [`attend`] 다.
 ///
 /// 세션 id 로 찾고, 없으면 같은 에이전트 프로세스(pid·선 때)의 장을 이 세션으로 잇는다 — `/clear` 는 세션
 /// id 만 바꾸고, `moai hello` 로 지은 이름과 역할은 남아야 한다. 그것도 없으면 새로 짓는다: 이름은 Claude 가
 /// 보이는 세션 이름, 못 읽으면 `<벤더>-<세션 id 앞 8자>` 다(2026-10-04 사용자 결정). 산 남이 그 이름을 쥐었으면
 /// 세션 토막을 붙여 가른다 — 두 세션이 한 이름이면 편지가 먼저 읽는 쪽으로 샌다.
+///
+/// **세션 id 로 찾은 장도 그 프로세스가 살아 있을 때만 그대로 쓴다**(리뷰 moai-h8tn.x4l) — `claude --resume` 은 세션
+/// id 를 그대로 들고 **새 프로세스**로 뜬다. 죽은 pid 를 든 채 다시 적던 판은 `moai agents` 가 산 세션의 장을
+/// 걷었고, `moai send`·`inbox` 는 조상의 pid 로 나를 못 찾았으며, 걷힌 뒤에는 새 이름·빈 역할로 다시 서서 감독이
+/// 일감을 가졌다. 그 장은 지금 프로세스와 칸으로 다시 잇는다 — 이름·역할은 그대로다. **한 프로세스는 장 하나다** —
+/// 다시 이은 프로세스가 다른 이름의 장도 들고 있으면(`/resume` 으로 세션을 갈아탄 프로세스) 그 장을 걷는다. 두
+/// 이름으로 서면 `moai inbox` 와 훅이 서로 다른 이름의 편지를 본다.
 ///
 /// **세션 id 가 없으면 아무도 아니다** — 누구의 편지를 실을지 모르고, 실으면 남의 것을 읽음으로 옮긴다.
 ///
@@ -863,10 +906,12 @@ fn route_one(
 /// 셸의 부모를 쓴다 — 훅은 아직 Claude 에만 걸리므로 그때의 벤더는 `claude` 다.
 fn attendee(input: &Input, repo: &Repo) -> Option<mail::Presence> {
     let session = input.session_id.as_deref().filter(|s| !s.trim().is_empty())?;
-    let (all, _) = mail::presences(&repo.agents_dir());
+    let dir = repo.agents_dir();
+    let (all, _) = mail::presences(&dir);
     // 모델은 장에 없을 때만 훅의 입력으로 채운다 — `moai hello --model` 이 적은 것이 먼저다.
     let model = |p: &mail::Presence| if p.model.is_empty() { input.model() } else { p.model.clone() };
-    if let Some(p) = all.iter().find(|p| p.session.as_deref() == Some(session)) {
+    let found = all.iter().find(|p| p.session.as_deref() == Some(session));
+    if let Some(p) = found.filter(|p| !p.gone()) {
         return Some(mail::Presence { model: model(p), ..p.clone() });
     }
     let ancestors = mail::ancestors();
@@ -874,16 +919,17 @@ fn attendee(input: &Input, repo: &Repo) -> Option<mail::Presence> {
         Some((p, v)) => (p.clone(), v),
         None => (ancestors.get(1).or(ancestors.first())?.clone(), "claude"),
     };
-    let alive = |p: &mail::Presence| mail::alive(p.pid, p.pid_start) != Some(false);
     let (tmux_pane, tmux_socket) = mail::Presence::tmux_here();
     let cwd = input.cwd.clone().unwrap_or_default();
-    let same = |p: &&mail::Presence| {
-        p.pid == agent.pid && (p.pid_start.is_none() || agent.start.is_none() || p.pid_start == agent.start)
-    };
-    if let Some(p) = all.iter().find(same) {
+    if let Some(p) = found.or_else(|| all.iter().find(|p| p.runs_as(&agent))) {
+        for other in all.iter().filter(|o| o.name != p.name && o.runs_as(&agent)) {
+            let _ = mail::forget(&dir, &other.name);
+        }
         return Some(mail::Presence {
             model: model(p),
             session: Some(session.to_string()),
+            pid: agent.pid,
+            pid_start: agent.start,
             cwd,
             tmux_pane,
             tmux_socket,
@@ -894,9 +940,11 @@ fn attendee(input: &Input, repo: &Repo) -> Option<mail::Presence> {
     let mut name = (vendor == "claude")
         .then(|| mail::claude_session_name(agent.pid))
         .flatten()
-        .or_else(|| mail::name_from(&format!("{vendor}-{short}")))?;
-    if all.iter().any(|p| p.name == name && alive(p)) {
-        name = mail::name_from(&format!("{name}-{short}"))?;
+        .or_else(|| mail::name_with(vendor, &short))?;
+    // 토막은 상한에 안 잘리게 잇는다([`mail::name_with`]) — 잘리면 가른 이름이 도로 산 남의 이름이다.
+    // 대소문자만 다른 이름도 같은 장이다(`hello` 의 이름 겨루기와 같은 자).
+    if all.iter().any(|p| p.name.eq_ignore_ascii_case(&name) && !p.gone()) {
+        name = mail::name_with(&name, &short)?;
     }
     Some(mail::Presence {
         v: mail::VERSION,
@@ -927,23 +975,45 @@ fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
     let _ = mail::write_presence(&repo.agents_dir(), &p);
 }
 
+/// [`deliver`] 가 싣는 편지 — 이 세션에 온 것 모두, 아니면 남이 보낸 것만.
+///
+/// **턴을 붙드는 `Stop` 은 제가 보낸 편지로 붙들지 않는다**(리뷰 moai-h8tn.x4l) — 붙듦에 끝이 있는 것은 실은 편지만큼
+/// 우편함이 주는 까닭인데(그래서 `stop_hook_active` 여도 싣는다), 제게 쓴 편지에 실린 말("`moai send <보낸 이>` 로
+/// 답한다")을 따르면 답이 도로 제게 와 턴이 끝없이 붙들린다. 제가 쓴 편지는 다음 프롬프트가 붙들지 않고 싣는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mine {
+    All,
+    Others,
+}
+
 /// 이 세션에 온 편지를 읽음으로 옮기며 실을 글을 낸다 — 없으면 `None`. **옮긴 것만 싣는다** — 남이 먼저
 /// 가진 `any-idle-worker` 편지는 빠진다. 말은 실을 편지가 있을 때만 푼다(사용자 설정을 여는 값이다).
-fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx) -> Option<String> {
+///
+/// `room` 은 이 글이 들 자리다([`crate::hook::letters_room`]) — 그 칸을 넘기면 Claude Code 가 칸을 통째로 파일로
+/// 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]).
+fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx, room: usize, which: Mine) -> Option<String> {
     let dir = repo.mail_dir();
-    let (all, _) = mail::list(&dir, false);
-    let mine: Vec<mail::Stored> = all.into_iter().filter(|s| mail::for_me(s, &me.name, &me.role)).collect();
+    let (all, _) = mail::list(&dir, None);
+    let mine: Vec<mail::Stored> = all
+        .into_iter()
+        .filter(|s| mail::for_me(s, &me.name, &me.role))
+        .filter(|s| which == Mine::All || s.letter.from != me.name)
+        .collect();
     if mine.is_empty() {
         return None;
     }
-    let n = crate::hook::deliverable(&mine);
-    let taken: Vec<mail::Stored> = mine
-        .iter()
-        .take(n)
+    let (lang, zone) = (ctx.lang(), ctx.zone());
+    let (picked, left) = crate::hook::deliverable(&mine, room, lang, zone);
+    let taken: Vec<&mail::Stored> = picked
+        .into_iter()
+        .map(|k| &mine[k])
         .filter(|s| matches!(mail::take(&dir, &s.id, &me.name), Ok(mail::Took::Mine)))
-        .cloned()
         .collect();
-    crate::hook::letters(&me.name, &taken, mine.len() - n, ctx.lang())
+    if taken.is_empty() {
+        return None;
+    }
+    let taken: Vec<mail::Stored> = taken.into_iter().cloned().collect();
+    crate::hook::letters(&me.name, &taken, left, lang, zone, room)
 }
 
 /// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.

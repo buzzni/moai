@@ -829,15 +829,17 @@ that says how — and sweeps the wiki when a person calls it. Nothing checks thi
 /// 값을 낸다. 동사 넷과 "기록이 아니다·훅이 싣는다·깨우기는 벤더의 길" 셋만 말하고, 꼴과 까닭은
 /// `moai send --help` 와 `src/mail.rs` 에 둔다.
 const MAILBOX: &str = r#"    moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
-    moai send any-idle-worker '<subject>'   the first idle agent but you and supervisors takes it
+    moai send any-idle-worker '<subject>'   one agent takes it - not you, not a supervisor
     moai inbox --ack                        the letters for you, marked read as they are shown
     moai agents                             who is here - `moai hello` registers you
 
 A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
 on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
-and the end of each turn load the letters for this session and mark them read. `--wake`
-wakes an idle recipient the vendor's way (Codex through `codex queue`, Antigravity through
-its tmux pane); a Claude session is woken by the sender, with SendMessage."#;
+and the end of each turn load the letters for this session and mark them read, and an
+`any-idle-worker` letter goes, one per load, to whichever agent loads it first. A supervisor
+registers with `moai hello --role supervisor` so it never takes those. `--wake` wakes an
+idle recipient the vendor's way (Codex through `codex queue`, Antigravity through its tmux
+pane); a Claude session is woken by the sender, with SendMessage."#;
 
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로

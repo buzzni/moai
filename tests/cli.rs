@@ -23604,16 +23604,6 @@ fn names_in(dir: &Path) -> Vec<String> {
     out
 }
 
-/// `inbox --json` 의 편지 id 들. `reply_to` 도 `id` 꼴이라 편지 머리(`{"id":`)만 센다.
-fn letter_ids(json: &str) -> Vec<String> {
-    json.match_indices("{\"id\":\"")
-        .map(|(at, _)| {
-            let rest = &json[at + 7..];
-            rest[..rest.find('"').unwrap()].to_string()
-        })
-        .collect()
-}
-
 /// **편지는 우편함을 지나고 트래커에는 한 글자도 안 든다**(moai-h8tn, CLAUDE.md "저널에 적는 것은 create·
 /// status·note·rm 넷뿐"). 보내고, 읽고, 읽음으로 옮기고, 답하고, 모르는 키를 지나 보내는 한 바퀴다.
 ///
@@ -23651,7 +23641,7 @@ fn letters_go_through_the_mailbox_and_never_into_the_tracker() {
     let second = field(&String::from_utf8(piped.stdout).unwrap(), "id");
 
     let unread = ok(s.path(), &["inbox", "--as", "w1", "--json"]);
-    assert_eq!(letter_ids(&unread), [first.clone(), second.clone()], "보낸 차례로 안 섰다 — {unread}");
+    assert_eq!(ids_in(&unread), [first.clone(), second.clone()], "보낸 차례로 안 섰다 — {unread}");
     assert!(
         unread.starts_with("{\"me\":\"w1\",\"letters\":[{\"id\":") && unread.contains("\"read\":false"),
         "{unread}"
@@ -23669,7 +23659,7 @@ fn letters_go_through_the_mailbox_and_never_into_the_tracker() {
     );
     assert!(ok(s.path(), &["inbox", "--as", "w1", "--json"]).contains("\"letters\":[]"), "읽은 편지가 또 섰다");
     let all = ok(s.path(), &["inbox", "--as", "w1", "--all", "--json"]);
-    assert_eq!(letter_ids(&all).len(), 2, "--all 이 읽은 편지를 안 냈다 — {all}");
+    assert_eq!(ids_in(&all).len(), 2, "--all 이 읽은 편지를 안 냈다 — {all}");
 
     let reply =
         field(&ok(s.path(), &["send", "boss", "Re: 첫 편지", "--reply-to", &first, "--as", "w1", "--json"]), "id");
@@ -23679,11 +23669,13 @@ fn letters_go_through_the_mailbox_and_never_into_the_tracker() {
     // **모르는 키는 지나간다** — 다른 판이 쓴 편지를 읽고 내는 사이에 그 키가 사라지면 안 된다.
     std::fs::write(
         s.path().join(".moai/mail/20261004-061203-00000001.json"),
-        r#"{"v":2,"to":"w1","from":"boss","subject":"새 판","body":"","sent_at":"2026-10-04T06:12:03Z","reply_to":null,"priority":"high"}"#,
+        r#"{"v":2,"to":"w1","from":"boss","subject":"새 판","body":"","sent_at":"2026-10-04T06:12:03Z","reply_to":null,"priority":"high","id":"forged","read":true}"#,
     )
     .unwrap();
     let newer = ok(s.path(), &["inbox", "--as", "w1", "--json"]);
     assert!(newer.contains("\"v\":2") && newer.contains("\"priority\":\"high\""), "모르는 키를 잃었다 — {newer}");
+    // **겉의 키와 겹치는 모르는 키는 안 낸다**(리뷰 moai-h8tn.x4l) — 한 객체에 `id` 가 둘 서면 jq 가 뒤의 것을 믿는다.
+    assert!(!newer.contains("forged") && !newer.contains("\"read\":true"), "편지의 키가 겉의 키를 가렸다 — {newer}");
 
     assert_eq!(issues(s.path()), snapshot, "편지가 스냅샷에 들었다");
     assert_eq!(names_in(&s.path().join(".moai/journal")), journals, "편지가 저널에 들었다");
@@ -23712,6 +23704,9 @@ fn a_letter_needs_a_named_sender_and_a_name_shaped_recipient() {
     assert_eq!(code_of(&["send", "w1", "제목", "--reply-to", "../x", "--as", "boss", "--json"]), "bad_input");
     let big = "x".repeat(64 * 1024 + 1);
     assert_eq!(code_of(&["send", "w1", "제목", "-b", &big, "--as", "boss", "--json"]), "bad_input");
+    // 제목도 상한이 있다 — 재지 않던 판은 13만 바이트 제목을 받아 훅이 싣는 한 통이 본문 상한을 몇 배 넘었다.
+    let long = "가".repeat(201);
+    assert_eq!(code_of(&["send", "w1", &long, "--as", "boss", "--json"]), "bad_input", "긴 제목을 받았다");
     assert!(
         !s.path().join(".moai/mail").exists() || names_in(&s.path().join(".moai/mail")).is_empty(),
         "거절하고도 보냈다"
@@ -23739,8 +23734,11 @@ fn the_agent_this_runs_under_is_who_i_am() {
 }
 
 /// **동시에 보낸 편지는 하나도 안 사라진다** — 겨루기 시험이다(CLAUDE.md "동시 쓰기 테스트를 지우지 않는다").
-/// 보내기가 `hard_link` 대신 `rename` 으로 들이면 이름이 겹친 편지 하나가 말없이 덮인다. 마이크로초가 같은
-/// 두 보내기가 여기서 실제로 겹친다.
+/// 스물넷이 함께 temp 를 쓰고 들이는 사이에 편지가 사라지거나 상하거나 한 id 에 둘이 서지 않는지 잰다.
+///
+/// **`hard_link` 와 `rename` 의 갈림은 이 시험이 못 잡는다**(리뷰 moai-h8tn.x4l) — 같은 마이크로초에 드는 두 보내기는
+/// 여기서 거의 안 선다(보내기를 `rename` 으로 되돌려 열다섯 번 돌려도 초록이었다). 이름이 겹친 자리는 단위 시험
+/// `mail::tests::a_taken_id_is_never_overwritten` 이 이웃을 미리 세워 두고 잰다.
 #[test]
 fn concurrent_sends_keep_every_letter() {
     let s = init("mail-race-send");
@@ -23760,7 +23758,7 @@ fn concurrent_sends_keep_every_letter() {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     let shown = ok(s.path(), &["inbox", "--as", "w1", "--json"]);
-    let ids = letter_ids(&shown);
+    let ids = ids_in(&shown);
     let unique: std::collections::BTreeSet<&String> = ids.iter().collect();
     assert_eq!((ids.len(), unique.len()), (N, N), "편지가 사라지거나 겹쳤다 — {shown}");
     for n in 0..N {
@@ -23802,7 +23800,7 @@ fn concurrent_acks_deliver_each_letter_once() {
                 while std::time::Instant::now() < until {
                     let out = staged(&["inbox", "--as", "w1", "--ack", "--json"]).current_dir(&dir).output().unwrap();
                     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-                    got.extend(letter_ids(&String::from_utf8(out.stdout).unwrap()));
+                    got.extend(ids_in(&String::from_utf8(out.stdout).unwrap()));
                     if names_in(&dir.join(".moai/mail/read")).len() >= SENT {
                         break;
                     }
@@ -23815,7 +23813,7 @@ fn concurrent_acks_deliver_each_letter_once() {
         h.join().unwrap();
     }
     let mut taken: Vec<String> = readers.into_iter().flat_map(|h| h.join().unwrap()).collect();
-    taken.extend(letter_ids(&ok(s.path(), &["inbox", "--as", "w1", "--ack", "--json"])));
+    taken.extend(ids_in(&ok(s.path(), &["inbox", "--as", "w1", "--ack", "--json"])));
     let unique: std::collections::BTreeSet<&String> = taken.iter().collect();
     assert_eq!(unique.len(), SENT, "편지를 잃었다 — {taken:?}");
     assert_eq!(taken.len(), SENT, "한 편지가 두 번 실렸다 — {taken:?}");
@@ -23832,6 +23830,10 @@ fn an_open_letter_goes_to_exactly_one_worker() {
             field(&ok(s.path(), &["send", "any-idle-worker", &format!("일감 {n}"), "--as", "boss", "--json"]), "id")
         })
         .collect();
+    // 보낸 이는 제 일감을 안 가진다 — **일감이 아직 서 있을 때 잰다.** 일꾼이 다 가져간 뒤에 재면 빈 우편함이라
+    // 보낸 이를 빼는 자가 없어도 초록이다.
+    let mine = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
+    assert!(mine.contains("\"letters\":[]"), "보낸 이가 제 일감을 받았다 — {mine}");
     let children: Vec<std::process::Child> = (0..8)
         .map(|w| {
             staged(&["inbox", "--as", &format!("w{w}"), "--ack", "--json"])
@@ -23846,15 +23848,12 @@ fn an_open_letter_goes_to_exactly_one_worker() {
     for c in children {
         let out = c.wait_with_output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        taken.extend(letter_ids(&String::from_utf8(out.stdout).unwrap()));
+        taken.extend(ids_in(&String::from_utf8(out.stdout).unwrap()));
     }
     taken.sort();
     let mut want = ids.clone();
     want.sort();
     assert_eq!(taken, want, "한 통이 두 일꾼에게 갔거나 아무에게도 안 갔다");
-    // 보낸 이는 제 일감을 안 가진다.
-    let mine = ok(s.path(), &["inbox", "--as", "boss", "--all", "--json"]);
-    assert!(mine.contains("\"letters\":[]"), "보낸 이가 제 일감을 받았다 — {mine}");
 }
 
 /// **`--wait` 는 편지가 올 때까지 기다리고, 오면 바로 돌아온다.** 헤드리스 고리가 쓰는 길이다.
@@ -23878,6 +23877,28 @@ fn the_inbox_waits_for_a_letter() {
     // 안 오면 그때까지 기다리고 빈 손으로 0 이다 — 시간이 다 된 것은 실패가 아니다.
     let quiet = ok(s.path(), &["inbox", "--as", "w1", "--wait", "1", "--json"]);
     assert!(quiet.contains("\"letters\":[]"), "{quiet}");
+
+    // **넘치는 기다림은 끝없는 기다림이다**(리뷰 moai-h8tn.x4l) — `Instant + Duration` 이 넘쳐 멈추던(panic) 값이다.
+    // 편지가 이미 서 있으니 바로 돌아온다.
+    // 되돌아가 끝없이 기다리면 시험 전체가 멈추므로 마감을 두고 부른다.
+    let id = field(&ok(s.path(), &["send", "w1", "또 왔다", "--as", "boss", "--json"]), "id");
+    let mut child = staged(&["inbox", "--as", "w1", "--wait", "18446744073709551615", "--json"])
+        .current_dir(s.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("편지가 서 있는데 끝없이 기다렸다");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains(&id), "{}", text(&out));
 }
 
 /// **깨우기는 벤더의 길이다**(2026-10-04 사용자 결정). Claude 는 이 CLI 가 못 깨워 보낸 쪽에 SendMessage 를
@@ -23928,6 +23949,22 @@ fn waking_takes_each_vendors_way() {
     assert_eq!(wake("cx"), "\"wake\":{\"to\":\"cx\",\"via\":\"codex\",\"done\":true}}\n");
     assert_eq!(std::fs::read_to_string(&said).unwrap(), "queue|--thread|th-1|--message|moai inbox|");
 
+    // **소켓을 모르는 칸은 안 친다**(리뷰 moai-h8tn.x4l) — `-S` 없는 `tmux` 는 보내는 쪽의 `$TMUX` 서버에 붙어, 그
+    // 서버의 같은 번호 칸(사람의 창일 수 있다)에 글자를 친다. 가짜 `tmux` 는 불리면 받은 인자를 남긴다.
+    let typed = s.path().join("tmux-args");
+    let fake = bin.join("tmux");
+    std::fs::write(&fake, format!("#!/bin/sh\nprintf '%s|' \"$@\" >> '{}'\n", typed.display())).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let out = staged(&["hello", "--name", "agy0", "--vendor", "antigravity", "--json"])
+        .current_dir(s.path())
+        .env("TMUX_PANE", "%999")
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("\"tmux_pane\":\"%999\""), "{}", text(&out));
+    mark(s.path(), "agy0", "idle");
+    assert_eq!(wake("agy0"), "\"wake\":{\"to\":\"agy0\",\"via\":\"tmux\",\"done\":false,\"why\":\"no_pane\"}}\n");
+    assert!(!typed.exists(), "소켓 없이 tmux 를 불렀다 — {:?}", std::fs::read_to_string(&typed));
+
     // `any-idle-worker` 는 가장 오래 논 일꾼을 깨운다 — 보낸 이와 감독은 빼고.
     let at = s.path().join(".moai/agents/cx.json");
     let card = std::fs::read_to_string(&at).unwrap();
@@ -23947,17 +23984,23 @@ fn waking_takes_each_vendors_way() {
 fn waking_types_into_the_agents_own_tmux_pane() {
     let s = init("mail-wake-tmux");
     let server = format!("moai-h8tn-{}", std::process::id());
+    // **넘어져도 제 서버를 내린다**(리뷰 moai-h8tn.x4l) — 내리는 줄을 끝에만 두던 판은 가운데 `assert` 가 지면 `cat` 을
+    // 든 서버를 남겼다. 놓을 때 `-L` 로 이 시험의 서버만 내린다.
+    struct Down(String);
+    impl Drop for Down {
+        fn drop(&mut self) {
+            let _ = isolated("tmux").arg("-L").arg(&self.0).arg("kill-server").output();
+        }
+    }
     let tmux = |args: &[&str]| isolated("tmux").arg("-L").arg(&server).args(args).output();
     let Ok(started) = tmux(&["-f", "/dev/null", "new-session", "-d", "-x", "80", "-y", "10", "cat"]) else {
         return;
     };
+    let down = Down(server.clone());
     assert!(started.status.success(), "{}", text(&started));
     let socket = String::from_utf8(tmux(&["display-message", "-p", "#{socket_path}"]).unwrap().stdout).unwrap();
     let pane = String::from_utf8(tmux(&["display-message", "-p", "#{pane_id}"]).unwrap().stdout).unwrap();
     let (socket, pane) = (socket.trim().to_string(), pane.trim().to_string());
-    let stop = || {
-        let _ = isolated("tmux").arg("-S").arg(&socket).arg("kill-server").output();
-    };
 
     let agent = Sleeper::new();
     let out = staged(&["hello", "--name", "agy1", "--vendor", "antigravity", "--json"])
@@ -23986,7 +24029,7 @@ fn waking_types_into_the_agents_own_tmux_pane() {
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    stop();
+    drop(down);
     assert!(sent.contains("\"via\":\"tmux\",\"done\":true"), "{sent}");
     assert!(shown.contains("moai inbox"), "그 칸에 안 쳤다 — {shown}");
 }
@@ -24067,11 +24110,20 @@ fn hello_registers_and_agents_sweeps_the_gone() {
     );
     assert!(ok(s.path(), &["agents"]).contains("w1"), "사람 화면에 안 섰다");
 
-    // 산 남의 이름은 못 뺏는다.
+    // 산 남의 이름은 못 뺏는다. **대소문자만 다른 이름도 같은 이름이다**(리뷰 moai-h8tn.x4l) — 대소문자를 안 가리는
+    // 파일 시스템에서는 한 장이다. 그 겨루기는 산 장을 찾는다: 앞에 선 죽은 `W1` 이 뒤의 산 `w1` 을 가리면 안 된다.
+    std::fs::write(
+        s.path().join(".moai/agents/W1.json"),
+        format!("{{\"v\":1,\"name\":\"W1\",\"pid\":{},\"pid_start\":1}}\n", std::process::id()),
+    )
+    .unwrap();
     let other = Sleeper::new();
-    let out = moai(s.path(), &["hello", "--name", "w1", "--pid", &other.pid(), "--json"]);
-    assert!(!out.status.success(), "산 에이전트의 이름을 뺏었다");
-    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "already_exists");
+    for asked in ["w1", "W1"] {
+        let out = moai(s.path(), &["hello", "--name", asked, "--pid", &other.pid(), "--json"]);
+        assert!(!out.status.success(), "산 에이전트의 이름({asked})을 뺏었다");
+        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "already_exists");
+    }
+    std::fs::remove_file(s.path().join(".moai/agents/W1.json")).unwrap();
     // 같은 에이전트가 새 이름으로 인사하면 옛 장이 걷힌다 — 한 에이전트가 두 이름으로 서면 편지가 갈린다.
     hello_as(s.path(), "w1-renamed", &w.pid(), &[]);
     assert_eq!(names_in(&s.path().join(".moai/agents")), ["w1-renamed.json"]);
@@ -24186,20 +24238,48 @@ fn the_hooks_deliver_letters_and_mark_them_read() {
     assert!(s.path().join(format!(".moai/mail/read/{after}@{me}.json")).is_file());
 }
 
+/// 계약 JSON 의 `additionalContext` 글의 길이 — 이스케이프를 풀어 **Claude Code 가 세는 대로**(UTF-16) 센다.
+fn context_units(out: &str) -> usize {
+    let key = "\"additionalContext\":\"";
+    let at = out.find(key).unwrap_or_else(|| panic!("실은 글이 없다 — {out}")) + key.len();
+    let mut n = 0;
+    let mut chars = out[at..].chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => return n,
+            '\\' => {
+                if chars.next() == Some('u') {
+                    chars.nth(3);
+                }
+                n += 1;
+            }
+            c => n += c.len_utf16(),
+        }
+    }
+    panic!("닫히지 않은 글 — {out}")
+}
+
 /// **한 번에 싣는 양에는 상한이 있다** — 넘는 편지는 다음 훅으로 미루고 몇 통이 남았는지 댄다. 남은 편지는
 /// 읽음으로 안 옮긴다.
+///
+/// **그 상한은 Claude Code 의 칸이다**(리뷰 moai-h8tn.x4l) — `additionalContext` 는 1만 자가 넘으면 통째로 파일로
+/// 빠지고 앞 2천 자만 남는다. 보드와 한 칸이라 둘을 더해 그 안에 들고, 혼자 넘는 편지는 잘라 싣고 전체를 다시 볼
+/// 길을 댄다.
 #[test]
 fn the_hooks_load_letters_up_to_a_budget() {
     let s = init("hook-budget");
     let ev = event(&s, "sess0003-cccc");
     hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    let big = "가".repeat(10_000); // 3만 바이트
+    let big = "가".repeat(10_000); // 1만 자 — 혼자 칸을 넘는다
     for n in 0..3 {
         ok(s.path(), &["send", "claude-sess0003", &format!("큰 편지 {n}"), "-b", &big, "--as", "boss"]);
     }
-    let said = loaded(&hook_out(&s, "user-prompt-submit", &ev));
+    let out = hook_out(&s, "user-prompt-submit", &ev);
+    let said = loaded(&out);
     assert!(said.contains("큰 편지 0") && !said.contains("큰 편지 1"), "상한을 넘겨 실었다");
     assert!(said.contains("2통이 더 기다린다"), "남은 수를 안 댔다 — {}", &said[..said.len().min(300)]);
+    assert!(said.contains("여기서 잘랐다") && said.contains("moai inbox --all"), "자른 자리를 안 댔다");
+    assert!(context_units(&out) <= 10_000, "Claude Code 의 칸을 넘겼다 — {}", context_units(&out));
     assert_eq!(names_in(&s.path().join(".moai/mail")).len(), 2, "안 실은 편지를 읽음으로 옮겼다");
 }
 
@@ -24221,4 +24301,88 @@ fn the_hooks_hand_an_open_letter_to_one_session() {
     assert!(out.contains("일감"), "일꾼이 일감을 못 받았다 — {out}");
     assert!(s.path().join(format!(".moai/mail/read/{id}@claude-work0001.json")).is_file());
     assert!(hook_out(&s, "stop", &event(&s, "work0002")).trim().is_empty(), "한 일감이 두 세션에 갔다");
+}
+
+/// **편지로 붙든 턴의 닫기 물음은 그 뒤의 `Stop` 이 묻는다**(리뷰 moai-h8tn.x4l) — 편지 뒤의 `Stop` 은
+/// `stop_hook_active` 로 와, 그 표만 보던 판은 편지가 온 턴마다 닫기 물음(쥔 일·늘어난 경고)을 걸렀다. 그래도 닫기
+/// 물음은 한 번이다.
+#[test]
+fn the_close_still_holds_after_letters_held_the_turn() {
+    let s = init("hook-letters-close");
+    let id = field(&ok(s.path(), &["add", "락을 잡는다", "--json"]), "id");
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let ev = event(&s, "sess0005-eeee");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    ok(s.path(), &["send", "claude-sess0005", "턴 끝에 온 편지", "--as", "boss"]);
+    let held = hook_out(&s, "stop", &ev);
+    assert!(held.contains("턴 끝에 온 편지") && !held.contains(&format!("moai mv {id} done")), "{held}");
+    let active = ev.replacen('{', "{\"stop_hook_active\":true,", 1);
+    let closing = hook_out(&s, "stop", &active);
+    assert!(closing.contains(&format!("moai mv {id} done")), "편지 뒤의 닫기 물음이 빠졌다 — {closing}");
+    assert!(hook_out(&s, "stop", &active).trim().is_empty(), "닫기 물음이 두 번 붙들었다");
+}
+
+/// **이어 연 세션은 제 장을 지금 프로세스로 다시 잇는다**(리뷰 moai-h8tn.x4l) — `claude --resume` 은 세션 id 를 든 채
+/// 새 프로세스로 뜬다. 죽은 pid 를 든 채 다시 적던 판은 `moai agents` 가 산 세션의 장을 걷었고, 다시 설 때 이름과
+/// 역할(감독)을 잃었다.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_resumed_session_moves_its_card_to_the_live_process() {
+    let s = init("hook-resume");
+    let mut before = Sleeper::new();
+    hello_as(s.path(), "sup", &before.pid(), &["--vendor", "claude", "--role", "supervisor"]);
+    // 그 장이 이 세션의 것이었다 — 훅이 적어 두는 세션 id 를 손으로 단다.
+    let at = s.path().join(".moai/agents/sup.json");
+    let card = std::fs::read_to_string(&at).unwrap();
+    std::fs::write(&at, card.replacen("\"cwd\":", "\"session\":\"sessRSM1-ffff\",\"cwd\":", 1)).unwrap();
+    before.end();
+    hook(&s, "session-start", &event(&s, "sessRSM1-ffff").replacen('{', "{\"source\":\"resume\",", 1));
+    let card = std::fs::read_to_string(&at).unwrap();
+    assert!(!card.contains(&format!("\"pid\":{},", before.pid())), "죽은 pid 를 그대로 적었다 — {card}");
+    assert!(card.contains("\"role\":\"supervisor\""), "역할을 잃었다 — {card}");
+    let listed = ok(s.path(), &["agents", "--json"]);
+    assert!(listed.ends_with("\"swept\":[]}\n") && listed.contains("\"name\":\"sup\""), "산 세션을 걷었다 — {listed}");
+}
+
+/// **일감은 한 번에 한 통이다**(리뷰 moai-h8tn.x4l) — 놀고 있는 일꾼 하나하나가 가지라고 보낸 `any-idle-worker` 일감을,
+/// 먼저 훅이 돈 세션 하나가 한 번에 다 쓸어 가지 않는다. 남은 일감은 그대로 서서 다른 일꾼을 기다린다.
+#[test]
+fn a_hook_takes_one_open_letter_at_a_time() {
+    let s = init("hook-open-one");
+    for n in 0..3 {
+        ok(s.path(), &["send", "any-idle-worker", &format!("일감 {n}"), "--as", "boss"]);
+    }
+    let out = hook_out(&s, "stop", &event(&s, "work0003"));
+    assert!(out.contains("일감 0") && !out.contains("일감 1"), "한 세션이 일감을 다 가져갔다 — {out}");
+    assert!(!out.contains("더 기다린다"), "남의 몫을 제 것처럼 댔다 — {out}");
+    assert_eq!(names_in(&s.path().join(".moai/mail")).len(), 2, "남은 일감을 읽음으로 옮겼다");
+}
+
+/// **접힌 뒤는 상태를 안 바꾼다**(리뷰 moai-h8tn.x4l) — 사람이 친 `/compact` 뒤에는 프롬프트도 `Stop` 도 안 와,
+/// `busy` 로 적으면 노는 세션이 내내 일하는 것으로 남는다. 턴 한가운데서 접힌 세션은 그대로 일하는 중이다.
+#[test]
+fn a_compact_keeps_the_presence_status() {
+    let s = init("hook-compact-status");
+    let ev = event(&s, "sess0006-gggg");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    hook(&s, "stop", &ev);
+    hook(&s, "session-start", &compacted(&s, "sess0006-gggg"));
+    assert!(presence_of(&s, "sess0006-gggg").contains("\"status\":\"idle\""), "접힌 뒤에 일하는 중으로 적었다");
+    hook(&s, "user-prompt-submit", &ev);
+    hook(&s, "session-start", &compacted(&s, "sess0006-gggg"));
+    assert!(presence_of(&s, "sess0006-gggg").contains("\"status\":\"busy\""), "턴 가운데 접혔는데 논다고 적었다");
+}
+
+/// **`Stop` 은 제가 보낸 편지로 턴을 붙들지 않는다**(리뷰 moai-h8tn.x4l) — 붙듦에 끝이 있는 것은 실은 만큼 우편함이
+/// 주는 까닭인데, 제게 쓴 편지의 "보낸 이에게 답한다" 를 따르면 답이 도로 제게 와 턴이 끝없이 붙들린다. 그 편지는
+/// 다음 프롬프트가 붙들지 않고 싣는다.
+#[test]
+fn the_stop_does_not_hold_on_a_letter_to_itself() {
+    let s = init("hook-self-letter");
+    let ev = event(&s, "sess0007-hhhh");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    let me = "claude-sess0007";
+    ok(s.path(), &["send", me, "나에게 쓴 쪽지", "--as", me]);
+    assert!(hook_out(&s, "stop", &ev).trim().is_empty(), "제 편지로 턴을 붙들었다");
+    assert!(loaded(&hook_out(&s, "user-prompt-submit", &ev)).contains("나에게 쓴 쪽지"), "제 편지를 안 실었다");
 }

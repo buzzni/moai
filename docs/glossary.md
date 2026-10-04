@@ -99,7 +99,8 @@ it now. A tag such as `bug` or `review` is not a kind.
 
 What one agent leaves another — a file under `.moai/mail/`, written by
 `moai send` to an agent's name or to `any-idle-worker` (the first agent that is
-neither the sender nor a [supervisor](#supervisor) keeps it). It is delivery,
+neither the sender nor registered as a [supervisor](#supervisor) with
+`moai hello --role supervisor` keeps it). It is delivery,
 not record: nothing of it enters the [tracker](#tracker) or the
 [journal](#journal). The hooks load the letters for a session into it and mark
 them read; `moai inbox` shows them. More in

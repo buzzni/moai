@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:3d362e70 -->
+<!-- moai:begin v:0.6.0 hash:1f35107b -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -490,15 +490,17 @@ it does not fix and it does not merge.
 ### Letters between agents
 
     moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
-    moai send any-idle-worker '<subject>'   the first idle agent but you and supervisors takes it
+    moai send any-idle-worker '<subject>'   one agent takes it - not you, not a supervisor
     moai inbox --ack                        the letters for you, marked read as they are shown
     moai agents                             who is here - `moai hello` registers you
 
 A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
 on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
-and the end of each turn load the letters for this session and mark them read. `--wake`
-wakes an idle recipient the vendor's way (Codex through `codex queue`, Antigravity through
-its tmux pane); a Claude session is woken by the sender, with SendMessage.
+and the end of each turn load the letters for this session and mark them read, and an
+`any-idle-worker` letter goes, one per load, to whichever agent loads it first. A supervisor
+registers with `moai hello --role supervisor` so it never takes those. `--wake` wakes an
+idle recipient the vendor's way (Codex through `codex queue`, Antigravity through its tmux
+pane); a Claude session is woken by the sender, with SendMessage.
 
 ### The wiki
 

@@ -1030,7 +1030,7 @@
   "mail.in_reply": "{id} 에 답한다",
   "warn.mail_garbled": "못 읽는 편지: {path} — {why}",
   "warn.agents_garbled": "못 읽는 출석 파일: {path} — {why}",
-  "refuse.mail_subject": "편지에는 제목이 있어야 하고, 제목은 한 줄이다",
+  "refuse.mail_subject": "편지에는 제목이 있어야 한다 — {max}자까지의 한 줄이다",
   "refuse.mail_reply_to": "`{id}` 는 편지 id 가 아니다 — 20261004-061203-0k3f9x2a 꼴이다(`moai inbox` 가 보인다)",
   "refuse.mail_body_large": "본문이 {n} 바이트다 — 편지는 {max} 까지 든다. 긴 것은 저장소의 파일로 두고 편지에서 그 자리를 댄다",
   "refuse.mail_who": "누구인가? `--as <이름>` 을 주거나 MOAI_AGENT 를 세우거나, 먼저 `moai hello` 로 인사한다",
@@ -1043,5 +1043,6 @@
   "refuse.agents_no_parent": "이 명령을 띄운 프로세스를 못 찾았다 — `--pid` 를 준다",
   "refuse.agents_name_taken": "{name} 는 도는 에이전트(pid {pid})가 이미 쓴다 — 다른 --name 을 고른다",
   "hook.letters": "{me} 에게 온 편지 {n}통. 지금 읽음으로 옮겼다 — `moai inbox --all` 이 다시 보인다. 답은 `moai send <보낸 이> '<제목>' --reply-to <id> -b -` 로 하고, 결정은 지금처럼 그 이슈에 노트로 남긴다.",
-  "hook.letters_left": "{n}통이 더 기다린다 — `moai inbox --ack` 가 읽거나, 다음 턴이 싣는다."
+  "hook.letters_left": "{n}통이 더 기다린다 — `moai inbox --ack` 가 읽거나, 다음 턴이 싣는다.",
+  "hook.letter_cut": "[훅이 싣는 1만 자에 맞춰 여기서 잘랐다 — 편지 전체는 `moai inbox --all` 이 보인다]"
 }

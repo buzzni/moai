@@ -53,11 +53,11 @@ pub enum Event {
     // `-h` 에서 80칸을 넘어 숨겼다. `the_hook_help_lists_every_event` 가 둘을 견준다.
     /// Writes the baseline. Loads what is held after a compact
     SessionStart,
-    /// A person asked. Loads the board once per session
+    /// A person asked. Loads letters, and the board once
     UserPromptSubmit,
     /// Just before a tool call. The rules stand here
     PreToolUse,
-    /// The turn ends. Checks the state against reality
+    /// The turn ends. Loads letters, then checks the state
     Stop,
 }
 
@@ -175,46 +175,126 @@ pub fn board(lines: &[String], lang: Lang) -> Decision {
     Decision::Context(format!("{}\n\n{body}", say(lang, "hook.lead")))
 }
 
-/// 한 번에 싣는 편지의 양(바이트). 넘는 편지는 다음 훅으로 미룬다 — 맥락 하나를 편지로 덮지 않는다.
-const LETTERS_BUDGET: usize = 48 * 1024;
+/// Claude Code 가 훅의 글 한 칸(`additionalContext`, 평문 stdout)에 싣는 상한 — 1만 자다(리뷰 moai-h8tn.x4l,
+/// code.claude.com/docs/en/hooks "JSON output"). **넘으면 그 칸을 통째로 파일로 빼고** 그 자리에 경로와 앞 2천 자만
+/// 남기며, Claude 에게 그 파일을 읽으라고 하지 않는다. 편지는 싣는 순간 읽음이라(2026-10-04 사용자 결정) 칸을 넘긴
+/// 편지는 읽음으로 옮겨진 채 아무도 못 본다 — 같은 칸에 먼저 선 보드가 미리보기를 차지해 편지는 한 줄도 안 남는다.
+/// 48KB 바이트로 재던 판이 그 자리였다. 글자는 Claude Code 가 세는 대로 UTF-16 단위로 센다([`units`]). `Stop` 의
+/// 붙드는 까닭(`reason`)은 문서가 상한을 대지 않지만 같은 자로 잰다.
+pub const CONTEXT_CAP: usize = 10_000;
 
-/// 이번에 실을 편지 수 — 앞에서부터 [`LETTERS_BUDGET`] 을 넘기 전까지, **적어도 하나**. 편지 하나는 본문
-/// 64KB(`mail::BODY_MAX`)까지라, 하나는 늘 싣고 그 뒤를 미룬다. 실을 것을 고르는 것이 훅의 판단이라 여기 둔다.
-pub fn deliverable(letters: &[crate::mail::Stored]) -> usize {
-    let mut used = 0;
-    let mut n = 0;
-    for s in letters {
-        // 머리와 줄 앞의 들여쓰기 몫으로 한 통에 128바이트를 더한다 — 어림이지만 상한을 재는 자리라 넉넉하면 된다.
-        let size = s.letter.subject.len() + s.letter.body.len() + 128;
-        if n > 0 && used + size > LETTERS_BUDGET {
-            break;
+/// 편지에 남은 자리가 이보다 작으면 이번에는 안 싣는다 — 같은 칸에 먼저 선 글(보드)이 칸을 거의 다 썼다. 편지는
+/// 다음 훅을 기다린다(`Stop` 은 칸을 통째로 쓴다).
+const LETTERS_MIN: usize = 2_000;
+
+/// 머리 줄(받는 이름 64자까지)·남은 수·자른 표처럼 편지 밖의 글에 남겨 두는 몫 — 셋을 더해도 500자가 안 된다.
+/// 편지 글은 어림하지 않고 실릴 글 그대로 잰다([`letter_block`]).
+const LETTERS_FRAME: usize = 600;
+
+/// Claude Code 가 세는 글자 수 — UTF-16 단위다.
+fn units(s: &str) -> usize {
+    s.encode_utf16().count()
+}
+
+/// 편지 한 통이 실릴 글 — 앞의 빈 줄까지. [`deliverable`] 이 자리를 재는 글과 [`letters`] 가 싣는 글이 **이 하나**다.
+/// 제목·본문의 길이로 어림하던 판은 짧은 줄이 많은 편지(줄마다 네 칸을 들여 쓴다)를 작게 재어, 함께 고른 뒤의
+/// 편지가 읽음으로 옮겨진 채 자르는 자리 밖으로 밀려났다(리뷰 moai-h8tn.x4l).
+fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> String {
+    format!("\n\n{}", crate::style::plain(&crate::view::mail::letter(lang, zone, s).join("\n")))
+}
+
+/// 같은 칸에 `earlier`(보드, 접힌 뒤 싣는 줄)가 먼저 섰을 때 편지에 남는 자리 — [`CONTEXT_CAP`] 에서 그 글과 둘 사이의
+/// 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다).
+pub fn letters_room(earlier: &Decision) -> usize {
+    let used = match earlier {
+        Decision::Pass => 0,
+        Decision::Context(s) | Decision::Deny(s) | Decision::Block(s) => units(s) + 2,
+    };
+    CONTEXT_CAP.saturating_sub(used)
+}
+
+/// 이번에 실을 편지 — 그 자리(`letters` 안의 차례)와, 이 세션 앞으로 남아 다음에 실릴 수다. 앞에서부터 `room` 에
+/// 드는 만큼이고 **적어도 하나**다 — 혼자 칸을 넘는 편지는 [`letters`] 가 잘라 싣는데, 그때는 그 한 통만 고른다
+/// (뒤의 편지를 읽음으로 옮겨 놓고 잘라 버리지 않는다). 자리가 [`LETTERS_MIN`] 보다 작으면 하나도 안 싣는다. 실을
+/// 것을 고르는 것이 훅의 판단이라 여기 둔다.
+///
+/// **`any-idle-worker` 편지는 한 번에 한 통만 싣는다**(리뷰 moai-h8tn.x4l) — 놀고 있는 일꾼 하나하나가 가지라고 보낸
+/// 일감들을, 먼저 훅이 돈 세션 하나가 한 번에 다 쓸어 가면 그 받는 이 낱말이 거짓이 된다. 남은 그 편지는 다른
+/// 일꾼의 몫이라 "더 기다린다" 에 안 센다.
+pub fn deliverable(
+    letters: &[crate::mail::Stored],
+    room: usize,
+    lang: Lang,
+    zone: &crate::tz::Zone,
+) -> (Vec<usize>, usize) {
+    let (mut picked, mut left) = (Vec::new(), 0);
+    if room < LETTERS_MIN {
+        return (picked, left);
+    }
+    let (mut used, mut open, mut full) = (LETTERS_FRAME, false, false);
+    for (k, s) in letters.iter().enumerate() {
+        let is_open = s.letter.to == crate::mail::ANY_IDLE_WORKER;
+        if is_open && open {
+            continue;
+        }
+        let size = units(&letter_block(lang, zone, s));
+        if full || (!picked.is_empty() && used + size > room) {
+            full = true;
+            left += usize::from(!is_open);
+            continue;
         }
         used += size;
-        n += 1;
+        open |= is_open;
+        picked.push(k);
     }
-    n
+    (picked, left)
 }
 
 /// 이 세션에 온 편지를 실을 글로(moai-h8tn). **실은 편지는 이미 읽음으로 옮겨졌다** — 싣는 것이 곧 읽음이다
-/// (2026-10-04 사용자 결정). 실은 것이 없으면 `None` 이다. `left` 는 상한에 걸려 이번에 못 실은 수다.
+/// (2026-10-04 사용자 결정). 실은 것이 없으면 `None` 이다. `left` 는 자리에 걸려 이번에 못 실은 수다.
 ///
 /// 부르는 쪽이 `UserPromptSubmit`·접힌 뒤 `SessionStart` 에서는 비추는 줄(`Context`)로, `Stop` 에서는 붙드는
 /// 까닭(`Block`)으로 싣는다 — **판정의 종류는 안 는다.** 편지 한 통은 `inbox` 와 같은 자(`view::mail`)로
 /// 그리고, 색은 걷는다(`board` 와 같은 까닭, `style::plain`).
-pub fn letters(me: &str, delivered: &[crate::mail::Stored], left: usize, lang: Lang) -> Option<String> {
+///
+/// **글은 `room` 을 안 넘는다**([`CONTEXT_CAP`]) — 넘치는 편지는 그 자리에서 자르고, 편지 전체를 다시 볼 길을 댄다.
+/// 머리 줄과 남은 수는 자르지 않는다.
+pub fn letters(
+    me: &str,
+    delivered: &[crate::mail::Stored],
+    left: usize,
+    lang: Lang,
+    zone: &crate::tz::Zone,
+    room: usize,
+) -> Option<String> {
     if delivered.is_empty() {
         return None;
     }
-    let mut out = fill(say(lang, "hook.letters"), &[("me", me), ("n", &delivered.len().to_string())]);
-    for s in delivered {
-        out.push_str("\n\n");
-        out.push_str(&crate::style::plain(&crate::view::mail::letter(lang, s).join("\n")));
+    let head = fill(say(lang, "hook.letters"), &[("me", me), ("n", &delivered.len().to_string())]);
+    let tail = if left > 0 {
+        format!("\n\n{}", fill(say(lang, "hook.letters_left"), &[("n", &left.to_string())]))
+    } else {
+        String::new()
+    };
+    let mut body: String = delivered.iter().map(|s| letter_block(lang, zone, s)).collect();
+    let fits = room.saturating_sub(units(&head) + units(&tail));
+    if units(&body) > fits {
+        let cut = format!("\n{}", say(lang, "hook.letter_cut"));
+        body = format!("{}{cut}", cut_to(&body, fits.saturating_sub(units(&cut))));
     }
-    if left > 0 {
-        out.push_str("\n\n");
-        out.push_str(&fill(say(lang, "hook.letters_left"), &[("n", &left.to_string())]));
+    Some(format!("{head}{body}{tail}"))
+}
+
+/// `s` 의 앞에서 UTF-16 단위 `max` 까지 — 글자 가운데서 안 자른다.
+fn cut_to(s: &str, max: usize) -> &str {
+    let mut used = 0;
+    for (at, c) in s.char_indices() {
+        used += c.len_utf16();
+        if used > max {
+            return &s[..at];
+        }
     }
-    Some(out)
+    s
 }
 
 /// 접힌 뒤에도 잃으면 안 되는 것 — 지금 집고 있는 일.
@@ -14538,5 +14618,47 @@ mod tests {
         assert!(counted("src/main.rs"));
         assert!(!counted(".moai/issues.jsonl"));
         assert!(!counted("/elsewhere/_workspace/final.md"));
+    }
+
+    /// **훅이 싣는 편지는 Claude Code 의 칸(1만 자)을 안 넘는다**(리뷰 moai-h8tn.x4l) — 넘기면 칸이 통째로 파일로
+    /// 빠져 읽음으로 옮긴 편지를 아무도 못 본다. 혼자 넘는 편지는 잘라 싣고 다시 볼 길을 대며, 보드가 칸을 거의 다
+    /// 썼으면 이번에는 안 싣는다. `any-idle-worker` 일감은 한 번에 한 통이다.
+    #[test]
+    fn loaded_letters_fit_the_hook_field() {
+        use crate::mail::{ANY_IDLE_WORKER, Letter, Stored, VERSION};
+        let mk = |id: &str, to: &str, body: String| Stored {
+            id: id.into(),
+            reader: None,
+            letter: Letter {
+                v: VERSION,
+                to: to.into(),
+                from: "boss".into(),
+                subject: format!("s-{id}"),
+                body,
+                sent_at: "2026-10-04T06:12:03Z".into(),
+                reply_to: None,
+                rest: Default::default(),
+            },
+        };
+        let utc = crate::tz::Zone::utc();
+        let pick = |all: &[Stored], room: usize| deliverable(all, room, Lang::En, &utc);
+        let big = mk("20261004-061203-00000001", "w1", "가".repeat(30_000));
+        let small = mk("20261004-061203-00000002", "w1", "x".into());
+        assert_eq!(pick(&[big.clone(), small.clone()], CONTEXT_CAP), (vec![0], 1));
+        // **실릴 글 그대로 잰다** — 줄마다 네 칸을 들여 쓰니, 짧은 줄 800개(8천 자)는 실릴 때 1만 자를 넘는다. 함께
+        // 고른 뒤의 편지는 읽음으로 옮겨진 채 자르는 자리 밖으로 밀려났었다.
+        let lines = mk("20261004-061203-00000003", "w1", "moai-abcd\n".repeat(800));
+        assert_eq!(pick(&[lines, small.clone()], CONTEXT_CAP), (vec![0], 1), "뒤의 편지를 잘릴 자리에 골랐다");
+        let said = letters("w1", std::slice::from_ref(&big), 1, Lang::En, &utc, CONTEXT_CAP).unwrap();
+        assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다 — {}", said.encode_utf16().count());
+        assert!(said.contains("s-20261004-061203-00000001") && said.contains("moai inbox --all"), "{said}");
+        assert!(said.ends_with(&fill(say(Lang::En, "hook.letters_left"), &[("n", "1")])), "남은 수를 잘랐다");
+        // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다.
+        let board = Decision::Context("b".repeat(CONTEXT_CAP - 100));
+        assert_eq!(pick(std::slice::from_ref(&small), letters_room(&board)), (vec![], 0));
+        // 일감은 한 통씩 — 나머지는 다른 일꾼의 몫이라 남은 수에도 안 센다.
+        let open = |id: &str| mk(id, ANY_IDLE_WORKER, "job".into());
+        let all = [open("20261004-061203-0000000a"), open("20261004-061203-0000000b"), small];
+        assert_eq!(pick(&all, CONTEXT_CAP), (vec![0, 2], 0));
     }
 }

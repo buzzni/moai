@@ -451,8 +451,9 @@ IDEA
 
   The recipient is an agent name from `moai agents`, or any-idle-worker -
   then the first agent that is neither the sender nor a supervisor to take
-  it keeps it. A name nobody has registered is still taken, with one line on
-  stderr: the letter waits until that agent says hello.
+  it keeps it, and a hook takes one such letter per load. A name nobody has
+  registered is still taken, with one line on stderr: the letter waits until
+  that agent says hello.
 
   **It is not the tracker.** Nothing goes into issues.jsonl or the journal -
   a letter is delivery, not record. A decision still goes on its issue as a
@@ -461,7 +462,8 @@ IDEA
 
   Who sends is --as, else MOAI_AGENT, else the registered agent this command
   runs under (`moai hello`). With none of them it stops - a letter with no
-  sender cannot be answered. The body holds up to 64 KB.
+  sender cannot be answered. The body holds up to 64 KB, the subject one
+  line of up to 200 characters.
 
   --wake wakes an idle recipient the vendor's way: a Codex session through
   `codex queue --thread`, an Antigravity session by typing `moai inbox` into
@@ -502,8 +504,8 @@ IDEA
     /// Who is here - the agents under .moai/agents (sweeps the gone)
     #[command(after_help = "  An agent is registered by `moai hello`, or by the hooks when its session
   starts. UserPromptSubmit marks it busy and Stop marks it idle. A row whose
-  process is gone is swept here - a reused pid is told apart by the time the
-  process started. A row that cannot be told alive or gone stays.
+  process is gone is swept here - on Linux a reused pid is told apart by the
+  time the process started. A row that cannot be told alive or gone stays.
 
   --json gives {\"agents\":[{\"v\",\"name\",\"vendor\",\"model\",\"role\",\"status\",
   \"since\",\"pid\",\"pid_start\",\"session\",\"cwd\",\"tmux_pane\",\"tmux_socket\"}],
@@ -800,9 +802,9 @@ IDEA
 
   Events:
     session-start       Writes the baseline. Loads what is held after a compact
-    user-prompt-submit  A person asked. Loads the board once per session
+    user-prompt-submit  A person asked. Loads letters, and the board once
     pre-tool-use        Just before a tool call. The rules stand here
-    stop                The turn ends. Checks the state against reality
+    stop                The turn ends. Loads letters, then checks the state
 
   echo '{\"session_id\":\"x\",\"cwd\":\"/repo\"}' | moai hook user-prompt-submit")]
     Hook {

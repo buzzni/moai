@@ -1030,7 +1030,7 @@
   "mail.in_reply": "in reply to {id}",
   "warn.mail_garbled": "A letter that cannot be read: {path} - {why}",
   "warn.agents_garbled": "A presence file that cannot be read: {path} - {why}",
-  "refuse.mail_subject": "A letter needs a subject, and the subject is one line",
+  "refuse.mail_subject": "A letter needs a subject: one line of up to {max} characters",
   "refuse.mail_reply_to": "`{id}` is not a letter id - it looks like 20261004-061203-0k3f9x2a (`moai inbox` shows them)",
   "refuse.mail_body_large": "The body is {n} bytes - a letter holds up to {max}. Put the long part in a file in the repository and name it in the letter",
   "refuse.mail_who": "Who are you? Pass `--as <name>`, set MOAI_AGENT, or register with `moai hello` first",
@@ -1043,5 +1043,6 @@
   "refuse.agents_no_parent": "Could not find the process this command runs under - pass `--pid`",
   "refuse.agents_name_taken": "{name} is already taken by a running agent (pid {pid}) - pick another --name",
   "hook.letters": "Letters for {me} ({n}). They are marked read now - `moai inbox --all` shows them again. Answer one with `moai send <from> '<subject>' --reply-to <id> -b -`; a decision still goes on its issue as a note.",
-  "hook.letters_left": "{n} more are waiting - `moai inbox --ack` reads them, or the next turn loads them."
+  "hook.letters_left": "{n} more are waiting - `moai inbox --ack` reads them, or the next turn loads them.",
+  "hook.letter_cut": "[Cut here to fit the 10,000 characters a hook can load - `moai inbox --all` shows the whole letter]"
 }

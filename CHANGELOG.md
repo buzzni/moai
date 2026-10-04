@@ -34,13 +34,17 @@ does not tag — see `CONTRIBUTING.md`.
   when, the agent's process and when it started, the session and the tmux
   pane. The `SessionStart` hook registers a Claude session under the name
   Claude Code shows for it, `UserPromptSubmit` marks it busy and `Stop` idle.
-  `moai agents` lists who is here and sweeps a row whose process is gone; a
-  reused pid is told apart by the time the process started.
+  `moai agents` lists who is here and sweeps a row whose process is gone; on
+  Linux a reused pid is told apart by the time the process started, and a
+  session resumed in a new process moves its row there.
 - **The hooks deliver letters.** Each prompt (`UserPromptSubmit`) loads the
   letters for the session into the conversation, the end of a turn (`Stop`)
   holds the turn with them, and a session opened after a compaction gets them
-  with what it was holding. A delivered letter is marked read; one load carries
-  up to about 48 KB and says how many are still waiting. `PreToolUse`, `moai
+  with what it was holding. A delivered letter is marked read; one load stays
+  inside the 10,000 characters Claude Code carries per hook, cuts a letter too
+  long for it (naming `moai inbox --all` for the rest), takes one
+  `any-idle-worker` letter at a time and says how many are still waiting. A
+  turn held by letters still gets the closing check. `PreToolUse`, `moai
   status` and the other read commands never open the mailbox.
 - **`moai send --wake` wakes an idle recipient the vendor's way** — a Codex
   session through `codex queue --thread`, an Antigravity session by typing

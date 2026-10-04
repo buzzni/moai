@@ -24,7 +24,7 @@ pub fn agents(ctx: &Ctx) -> R<Vec<String>> {
     for g in &garbled {
         tell(&fill(
             say(ctx.lang(), "warn.agents_garbled"),
-            &[("path", &g.path.display().to_string()), ("why", &crate::text::one_line(&g.why))],
+            &[("path", &crate::text::one_line(&g.path.display().to_string())), ("why", &crate::text::one_line(&g.why))],
         ));
     }
     if ctx.json {
@@ -36,13 +36,13 @@ pub fn agents(ctx: &Ctx) -> R<Vec<String>> {
         out.push(say(lang, "agents.none").to_string());
         return Ok(out);
     }
-    out.extend(table(&agents));
+    out.extend(table(&agents, ctx.zone()));
     Ok(out)
 }
 
 /// 출석부를 표로 — 이름·벤더·모델·역할·상태·그때·pid. 칸은 화면 폭으로 맞춘다(남이 적은 모델·역할에 두 칸
-/// 글자가 들 수 있다).
-fn table(agents: &[Presence]) -> Vec<String> {
+/// 글자가 들 수 있다). **그때는 보는 사람의 시간대로 적는다**(`view::stamp`, moai-p5az) — `--json` 은 UTC 그대로다.
+fn table(agents: &[Presence], zone: &crate::tz::Zone) -> Vec<String> {
     let rows: Vec<[String; 7]> = agents
         .iter()
         .map(|p| {
@@ -52,12 +52,12 @@ fn table(agents: &[Presence]) -> Vec<String> {
                 cell(&p.model),
                 cell(&p.role),
                 cell(&p.status),
-                cell(&p.since),
+                if p.since.is_empty() { cell(&p.since) } else { crate::view::stamp(&p.since, zone) },
                 p.pid.to_string(),
             ]
         })
         .collect();
-    let width = |k: usize| rows.iter().map(|r| unicode_width::UnicodeWidthStr::width(r[k].as_str())).max().unwrap_or(0);
+    let width = |k: usize| rows.iter().map(|r| crate::text::width(&r[k])).max().unwrap_or(0);
     let widths: Vec<usize> = (0..7).map(width).collect();
     rows.iter()
         .map(|r| {
@@ -66,7 +66,7 @@ fn table(agents: &[Presence]) -> Vec<String> {
                 if k + 1 == r.len() {
                     line.push_str(c);
                 } else {
-                    let pad = widths[k] - unicode_width::UnicodeWidthStr::width(c.as_str());
+                    let pad = widths[k] - crate::text::width(c);
                     line.push_str(&format!("{c}{}  ", " ".repeat(pad)));
                 }
             }
@@ -98,10 +98,13 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     {
         return Err(super::mail::bad_name(lang, name));
     }
+    // **낱말은 앞뒤를 다듬어 적는다**(리뷰 moai-h8tn.x4l) — `--role ' supervisor'` 를 그대로 적으면 `supervisor` 와 안
+    // 맞아 감독이 `any-idle-worker` 일감을 가진다.
+    let word = |v: &Option<String>| v.as_deref().map(|v| v.trim().to_string());
+    let (vendor_given, model_given, role_given) = (word(&args.vendor), word(&args.model), word(&args.role));
 
     // **에이전트 프로세스를 찾는다** — 준 pid, 아니면 조상 가운데 이름이 벤더인 것, 그것도 없으면 이 명령을
     // 띄운 셸(사람이 터미널에서 인사한 판)이다. 셸의 pid 도 그 창이 닫히면 죽어 출석이 걷힌다.
-    let ancestors = mail::ancestors();
     let (agent, seen) = match args.pid {
         Some(pid) => {
             let p = mail::proc_of(pid).ok_or_else(|| {
@@ -110,27 +113,25 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             let seen = mail::vendor_of(&p.comm);
             (p, seen)
         }
-        None => match mail::agent_among(&ancestors) {
-            Some((p, v)) => (p.clone(), Some(v)),
-            None => {
-                let shell = ancestors
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| Fail::new(say(lang, "refuse.agents_no_parent").to_string()))?;
-                (shell, None)
+        None => {
+            let ancestors = mail::ancestors();
+            match mail::agent_among(&ancestors) {
+                Some((p, v)) => (p.clone(), Some(v)),
+                None => {
+                    let shell = ancestors
+                        .first()
+                        .cloned()
+                        .ok_or_else(|| Fail::new(say(lang, "refuse.agents_no_parent").to_string()))?;
+                    (shell, None)
+                }
             }
-        },
+        }
     };
 
     let dir = repo.agents_dir();
     let (all, _) = mail::presences(&dir);
-    let same = |p: &&Presence| {
-        p.pid == agent.pid && (p.pid_start.is_none() || agent.start.is_none() || p.pid_start == agent.start)
-    };
-    let before = all.iter().find(same).cloned();
-    let vendor = args
-        .vendor
-        .clone()
+    let before = all.iter().find(|p| p.runs_as(&agent)).cloned();
+    let vendor = vendor_given
         .or_else(|| before.as_ref().map(|p| p.vendor.clone()).filter(|v| !v.is_empty()))
         .or_else(|| seen.map(str::to_string))
         .unwrap_or_default();
@@ -140,12 +141,13 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         .clone()
         .or_else(|| before.as_ref().map(|p| p.name.clone()))
         .or_else(|| (vendor == "claude").then(|| mail::claude_session_name(agent.pid)).flatten())
-        .or_else(|| mail::name_from(&format!("{}-{}", if vendor.is_empty() { "agent" } else { &vendor }, agent.pid)))
+        .or_else(|| mail::name_with(if vendor.is_empty() { "agent" } else { &vendor }, &agent.pid.to_string()))
         .ok_or_else(|| super::mail::bad_name(lang, &vendor))?;
-    // **산 남의 이름은 안 뺏는다** — 두 에이전트가 한 이름이면 편지가 먼저 읽은 쪽으로 샌다.
-    if let Some(other) = all.iter().find(|p| p.name == name && !same(p))
-        && mail::alive(other.pid, other.pid_start) != Some(false)
-    {
+    // **산 남의 이름은 안 뺏는다** — 두 에이전트가 한 이름이면 편지가 먼저 읽은 쪽으로 샌다. **대소문자만 다른
+    // 이름도 같은 이름이다**(리뷰 moai-h8tn.x4l) — 이름이 파일 이름이라, 대소문자를 안 가리는 파일 시스템(macOS
+    // 기본)에서는 `Worker` 와 `worker` 가 한 장이다.
+    // 산 것을 찾는다 — 대소문자로 겹치는 장은 여럿일 수 있어, 첫 장이 죽은 것이면 뒤의 산 장을 가린다.
+    if let Some(other) = all.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && !p.runs_as(&agent) && !p.gone()) {
         return Err(Fail::coded(
             fill(say(lang, "refuse.agents_name_taken"), &[("name", &name), ("pid", &other.pid.to_string())]),
             code::ALREADY_EXISTS,
@@ -164,8 +166,8 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         v: mail::VERSION,
         name: name.clone(),
         vendor,
-        model: args.model.clone().or_else(|| keep.as_ref().map(|p| p.model.clone())).unwrap_or_default(),
-        role: args.role.clone().or_else(|| keep.as_ref().map(|p| p.role.clone())).unwrap_or_default(),
+        model: model_given.or_else(|| keep.as_ref().map(|p| p.model.clone())).unwrap_or_default(),
+        role: role_given.or_else(|| keep.as_ref().map(|p| p.role.clone())).unwrap_or_default(),
         // 인사는 일하는 중에 친다 — 그 턴이 끝나면 `Stop` 훅이 `idle` 을 적는다.
         status: mail::BUSY.to_string(),
         since: match &keep {
@@ -187,9 +189,13 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         rest: keep.as_ref().map(|p| p.rest.clone()).unwrap_or_default(),
     };
     mail::write_presence(&dir, &presence).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-    // 이름을 바꿨으면 옛 장을 걷는다 — 한 에이전트가 두 이름으로 서면 편지가 둘로 갈린다.
-    if let Some(old) = before.filter(|p| p.name != name) {
-        let _ = std::fs::remove_file(dir.join(format!("{}.json", old.name)));
+    // 이름을 바꿨으면 옛 장을 걷는다 — 한 에이전트가 두 이름으로 서면 편지가 둘로 갈린다. **새 장을 쓴 뒤에, 그것이
+    // 다른 파일일 때만** 걷는다(리뷰 moai-h8tn.x4l) — 먼저 걷으면 쓰기가 진 판에 장이 하나도 안 남아 다음 훅이 빈
+    // 역할로 다시 세우고, 대소문자만 바꾼 이름은 대소문자를 안 가리는 파일 시스템에서 방금 쓴 그 파일이다.
+    if let Some(old) = before.filter(|p| p.name != name)
+        && !mail::same_card(&dir, &old.name, &name)
+    {
+        let _ = mail::forget(&dir, &old.name);
     }
     if ctx.json {
         return super::json_line(&presence);

@@ -21,13 +21,29 @@ struct Sent<'a> {
 }
 
 /// `inbox --json` 의 편지 하나 — `id` 와 `read` 에 편지 그대로.
+///
+/// **편지가 든 모르는 키가 `id`·`read` 면 뺀다**(리뷰 moai-h8tn.x4l) — 모르는 키는 그대로 내는데([`Letter::rest`]),
+/// 그 이름이 겉의 키와 겹치면 한 객체에 같은 키가 둘 서고, 읽는 쪽 대부분(jq·python)이 뒤의 것을 믿는다. 손으로
+/// 놓거나 다른 판이 쓴 편지 하나가 진짜 id 와 읽음 표를 가린다.
 #[derive(Serialize)]
 struct Shown<'a> {
     id: &'a str,
     read: bool,
     #[serde(flatten)]
-    letter: &'a Letter,
+    letter: Letter,
 }
+
+impl<'a> Shown<'a> {
+    fn of(s: &'a Stored) -> Shown<'a> {
+        let mut letter = s.letter.clone();
+        letter.rest.retain(|k, _| k != "id" && k != "read");
+        Shown { id: &s.id, read: s.reader.is_some(), letter }
+    }
+}
+
+/// 제목의 상한(글자) — 한 줄이다. 본문은 [`mail::BODY_MAX`] 가 재는데 제목은 재지 않던 판은 13만 바이트 제목을
+/// 받아, 훅이 싣는 편지 한 통이 본문 상한을 몇 배 넘었다.
+const SUBJECT_MAX: usize = 200;
 
 #[derive(Serialize)]
 struct Inbox<'a> {
@@ -43,8 +59,9 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         return Err(bad_name(ctx.lang(), &to));
     }
     let subject = args.subject.trim().to_string();
-    if subject.is_empty() || subject.contains(['\n', '\r']) {
-        return Err(Fail::coded(say(ctx.lang(), "refuse.mail_subject"), code::BAD_INPUT));
+    if subject.is_empty() || subject.contains(['\n', '\r']) || subject.chars().count() > SUBJECT_MAX {
+        let said = fill(say(ctx.lang(), "refuse.mail_subject"), &[("max", &SUBJECT_MAX.to_string())]);
+        return Err(Fail::coded(said, code::BAD_INPUT));
     }
     if let Some(id) = args.reply_to.as_deref()
         && !mail::is_id(id)
@@ -86,7 +103,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
     }
     let woke = args.wake.then(|| match to.as_str() {
         mail::ANY_IDLE_WORKER => mail::idle_worker(&agents, &from).map(mail::wake),
-        _ => named.filter(|p| mail::alive(p.pid, p.pid_start) != Some(false)).map(mail::wake),
+        _ => named.filter(|p| !p.gone()).map(mail::wake),
     });
     let woke =
         woke.map(|w| w.unwrap_or_else(|| Woke { to: to.clone(), via: "none", done: false, why: Some("nobody") }));
@@ -123,23 +140,33 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
 
     // **기다림은 훑기를 되풀이한다** — 파일 시스템의 알림(inotify)은 플랫폼마다 다르고 크레이트가 든다. 반 초에
     // 한 번 디렉터리 하나를 읽는 값이 그보다 싸다.
-    let until = args.wait.map(|s| std::time::Instant::now() + std::time::Duration::from_secs(s));
+    //
+    // **넘치는 값은 끝없이 기다리는 것으로 읽는다**(리뷰 moai-h8tn.x4l) — `Instant + Duration` 은 넘치면 멈춘다(panic).
+    // "끝없이" 를 `--wait 9223372036854775807` 로 적는 것은 자연스럽다.
+    let until = args.wait.map(|s| std::time::Instant::now().checked_add(std::time::Duration::from_secs(s)));
     let (mut mine, garbled) = loop {
-        let (all, garbled) = mail::list(&dir, args.all);
+        let (all, garbled) = mail::list(&dir, args.all.then_some(me.as_str()));
         let mine: Vec<Stored> = all.into_iter().filter(|s| mail::for_me(s, &me, &role)).collect();
-        let waiting = until.is_some_and(|t| std::time::Instant::now() < t);
+        let waiting = until.is_some_and(|t| t.is_none_or(|t| std::time::Instant::now() < t));
         if !waiting || mine.iter().any(|s| s.reader.is_none()) {
             break (mine, garbled);
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     };
-    // 못 읽은 편지는 답을 덜 낸 것이다 — 다 내고 비영으로 끝난다(`show` 의 못 읽는 줄과 같은 자).
+    // 못 읽은 편지는 답을 덜 낸 것이다 — 다 내고 비영으로 끝난다(`show` 의 못 읽는 줄과 같은 자). 자리도 남이 지은
+    // 이름이라 한 줄로 접는다 — 파일 이름에 든 제어문자가 터미널을 움직이지 않게.
+    //
+    // **남의 편지가 깨진 것은 말만 한다**(리뷰 moai-h8tn.x4l, `cmd::mod` 의 "남의 워크트리에서 만난 문제" 와 같은 자) —
+    // 받는 이를 읽어 내가 아니면 내 답이 덜 난 것이 아니다. 그것까지 세던 판은 깨진 편지 하나가 지워질 때까지 모든
+    // 에이전트의 `inbox` 를 비영으로 끝냈고, `--ack` 로 이미 읽음이 된 편지를 실패로 읽은 고리는 그 편지를 버렸다.
     for g in &garbled {
         tell(&fill(
             say(ctx.lang(), "warn.mail_garbled"),
-            &[("path", &g.path.display().to_string()), ("why", &crate::text::one_line(&g.why))],
+            &[("path", &crate::text::one_line(&g.path.display().to_string())), ("why", &crate::text::one_line(&g.why))],
         ));
-        note_partial();
+        if g.to.as_deref().is_none_or(|to| to == me || to == mail::ANY_IDLE_WORKER) {
+            note_partial();
+        }
     }
 
     let mut lost = Vec::new();
@@ -167,7 +194,7 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     }
 
     if ctx.json {
-        let letters = mine.iter().map(|s| Shown { id: &s.id, read: s.reader.is_some(), letter: &s.letter }).collect();
+        let letters = mine.iter().map(Shown::of).collect();
         return super::json_line(&Inbox { me: &me, letters, lost });
     }
     let lang = ctx.lang();
@@ -177,7 +204,7 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     }
     // 편지는 `view::mail` 한 자리에서 선다 — 훅이 세션에 싣는 글과 같은 꼴이다.
     for s in &mine {
-        out.extend(crate::view::mail::letter(lang, s));
+        out.extend(crate::view::mail::letter(lang, ctx.zone(), s));
     }
     for id in &lost {
         out.push(fill(say(lang, "mail.lost"), &[("id", id)]));
