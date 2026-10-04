@@ -78,7 +78,7 @@ gets through — run it as given. None of them waits on a person except rule 5.
 1. **New issues stay inside what you picked up.** While an agent holds work, a
    `moai add` must land in the same epic (`-e <epic>`) or under the held issue
    (`--parent <id>`). Something for later goes in as `moai idea add`, which this
-   rule never stops, and so is a whole plan through `moai add --from`
+   rule never stops; nor does it stop a whole plan created with `moai add --from`
 2. **Pick something up before you change the repository.** An `Edit`, a `Write`,
    or a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
@@ -133,8 +133,9 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **The rules do not seem to stand.** `moai skill status` says whether the plugin
   is registered and whether the binary the hook calls still runs. A session opened
   before the install keeps the old hook until it is reopened
-- **`skill install` printed two `claude plugin` lines and failed.** `claude` is
-  not on `PATH`; run those lines where it is
+- **`skill install` printed two `claude plugin` lines and failed.** The
+  registration did not go through — most often `claude` is not on `PATH`; run
+  those lines where it is
 - **The board says the `AGENTS.md` block differs.** Another binary wrote it, or a
   person edited it. Build the moai you mean to run and call `moai init`
 - **The agent keeps writing into a worktree's `.moai/`.** It does not need to: a

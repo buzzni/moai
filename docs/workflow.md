@@ -63,16 +63,17 @@ not pile commits onto one branch and wait on each other to merge.
   `git commit -- .moai/`; the worktree's own copy stays as it was when it split
   off, so the merge never fights over it (moai-y7go). `MOAI_HERE=1` turns this
   off for one run — almost nobody needs it
-- **Pick up in the main checkout first, then make the worktree.** The other
-  sessions see who holds what only once the pick-up is committed there
+- **Pick up first, then make the worktree.** Every session on the clone reads the
+  main checkout's tracker, so a pick-up shows to the others the moment it is
+  written; commit it there so it also reaches other clones
 - **See what the neighbours hold.** `moai ready --worktree` and
   `moai status --worktree` overlay what the sibling worktrees picked up. A
-  worktree at `.claude/worktrees/<id>`, or on a branch `worktree-<id>`, counts as
-  the place that work is being done, and `moai status` warns about work that was
-  picked up with no worktree at work on it
-- **The wiki rides the branch.** Unlike `.moai/`, pages under `docs/` are read
-  from the worktree you are in and merge like any other file — write them on the
-  branch, before the merge
+  worktree whose directory is named `<id>`, or on a branch `<id>` or
+  `worktree-<id>`, counts as the place that work is being done, and `moai status`
+  warns about work that was picked up with no worktree at work on it
+- **The wiki rides the branch.** Unlike `.moai/`, the wiki pages (`docs/` unless
+  `wiki_dir` in `.moai/config.toml` says otherwise) are read from the worktree you
+  are in and merge like any other file — write them on the branch, before the merge
 
 ## Merge the tracker file
 

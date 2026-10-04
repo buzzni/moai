@@ -14,7 +14,8 @@ reach for.
   with `moai project add` — or an empty list that points at `SPC p a` when there
   are none
 - **`--path <id>`** opens at that issue; `--path none` and `--path lost` open the
-  two baskets — rows with no milestone, and rows whose epic cannot be found
+  two baskets — rows with no milestone, and rows that cannot be placed because
+  the epic or milestone they name is not there (or their parent's id stands twice)
 
 It needs a terminal. A script that wants the same rows calls `moai tui --json`,
 which prints the listing and opens no screen.
