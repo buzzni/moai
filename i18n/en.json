@@ -1041,5 +1041,7 @@
   "refuse.agents_word": "--{what} takes one line of up to 64 characters - got `{value}`",
   "refuse.agents_no_pid": "There is no process {pid}",
   "refuse.agents_no_parent": "Could not find the process this command runs under - pass `--pid`",
-  "refuse.agents_name_taken": "{name} is already taken by a running agent (pid {pid}) - pick another --name"
+  "refuse.agents_name_taken": "{name} is already taken by a running agent (pid {pid}) - pick another --name",
+  "hook.letters": "Letters for {me} ({n}). They are marked read now - `moai inbox --all` shows them again. Answer one with `moai send <from> '<subject>' --reply-to <id> -b -`; a decision still goes on its issue as a note.",
+  "hook.letters_left": "{n} more are waiting - `moai inbox --ack` reads them, or the next turn loads them."
 }

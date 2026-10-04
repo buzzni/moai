@@ -1041,5 +1041,7 @@
   "refuse.agents_word": "--{what} 는 64자까지의 한 줄이다 — 받은 것: `{value}`",
   "refuse.agents_no_pid": "{pid} 라는 프로세스가 없다",
   "refuse.agents_no_parent": "이 명령을 띄운 프로세스를 못 찾았다 — `--pid` 를 준다",
-  "refuse.agents_name_taken": "{name} 는 도는 에이전트(pid {pid})가 이미 쓴다 — 다른 --name 을 고른다"
+  "refuse.agents_name_taken": "{name} 는 도는 에이전트(pid {pid})가 이미 쓴다 — 다른 --name 을 고른다",
+  "hook.letters": "{me} 에게 온 편지 {n}통. 지금 읽음으로 옮겼다 — `moai inbox --all` 이 다시 보인다. 답은 `moai send <보낸 이> '<제목>' --reply-to <id> -b -` 로 하고, 결정은 지금처럼 그 이슈에 노트로 남긴다.",
+  "hook.letters_left": "{n}통이 더 기다린다 — `moai inbox --ack` 가 읽거나, 다음 턴이 싣는다."
 }

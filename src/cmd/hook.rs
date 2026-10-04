@@ -12,7 +12,7 @@ use super::{Ctx, R};
 use crate::hook::{Decision, Event, Input};
 use crate::report;
 use crate::store::Repo;
-use crate::{model, view};
+use crate::{mail, model, view};
 use serde::Serialize;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -163,43 +163,59 @@ fn decide(
             // 누구의 것인지 모르는 줄은 싣지 않는다 — 남의 일을 "압축 전부터 집고 있다" 로 떠안긴다(moai-4jsy).
             // `Stop` 이 붙드는 것과 같은 자로 잰다([`releasing`]).
             let (away, latest) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
-            crate::hook::carried(
+            let carried = crate::hook::carried(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
                 &repo.config,
                 &away,
                 ctx.lang(),
-            )
+            );
+            // **접힌 뒤는 편지도 싣는다** — 붙는 것을 잰 자리가 여기다(2026-10-04 사용자 결정). 접히는 것은 일하는
+            // 중이라 `busy` 다.
+            let me = attendee(input, &repo);
+            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx));
+            attend(&repo, me, mail::BUSY);
+            carried.then(|| letters.map_or(Decision::Pass, Decision::Context))
         }
-        // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다.
+        // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다. **출석은 적는다**(moai-h8tn) — 편지는
+        // 안 싣는다: 여기 출력이 대화에 붙는다고 잰 것은 접힌 뒤뿐이라, 실으면 읽음으로 옮긴 편지가 아무에게도 안
+        // 실릴 수 있다. 첫 `UserPromptSubmit`·`Stop` 이 싣는다(2026-10-04 사용자 결정).
         Event::SessionStart => {
             write_baseline(input, &repo, &load.issues, &unreadable, ctx.zone());
+            attend(&repo, attendee(input, &repo), mail::IDLE);
             Decision::Pass
         }
-        Event::UserPromptSubmit => once_per_session(input, &repo, "board", || {
-            let now = model::now();
-            let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
-            // `moai status` 와 **같은 자**로 싣는다([`crate::cmd::status::install_notices`]) — 낡은
-            // AGENTS.md 를 모르고 시작하는 것이 바로 이 보드를 받는 새 세션이다. 셋을 여기서 따로
-            // 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했다(moai-6k1r). 세션의 셸 자리는 stdin 의
-            // `cwd` 라 이미 여기로 옮겨 왔으므로 `chdir` 은 `false` 다 (`-C` 가 아니다).
-            st.notices.extend(crate::cmd::status::install_notices(&repo, false));
-            // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
-            // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
-            let source = crate::cmd::status::source_of(&repo);
-            // 겹쳐 보지 않는다 — 훅의 보드는 제 저장소의 줄만 싣는다. 그래서 출처가 없는
-            // 화면이고(`view::Screen::new`), 빈 `Origin` 을 지어 빌려 줄 일이 없다.
-            let lines = view::status(
-                &st,
-                &load.issues,
-                &repo.config,
-                &now,
-                &source,
-                0,
-                view::Screen::new(ctx.lang()).at(ctx.clock()),
-            );
-            crate::hook::board(&lines, ctx.lang())
-        }),
+        Event::UserPromptSubmit => {
+            let board = once_per_session(input, &repo, "board", || {
+                let now = model::now();
+                let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
+                // `moai status` 와 **같은 자**로 싣는다([`crate::cmd::status::install_notices`]) — 낡은
+                // AGENTS.md 를 모르고 시작하는 것이 바로 이 보드를 받는 새 세션이다. 셋을 여기서 따로
+                // 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했다(moai-6k1r). 세션의 셸 자리는 stdin 의
+                // `cwd` 라 이미 여기로 옮겨 왔으므로 `chdir` 은 `false` 다 (`-C` 가 아니다).
+                st.notices.extend(crate::cmd::status::install_notices(&repo, false));
+                // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
+                // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
+                let source = crate::cmd::status::source_of(&repo);
+                // 겹쳐 보지 않는다 — 훅의 보드는 제 저장소의 줄만 싣는다. 그래서 출처가 없는
+                // 화면이고(`view::Screen::new`), 빈 `Origin` 을 지어 빌려 줄 일이 없다.
+                let lines = view::status(
+                    &st,
+                    &load.issues,
+                    &repo.config,
+                    &now,
+                    &source,
+                    0,
+                    view::Screen::new(ctx.lang()).at(ctx.clock()),
+                );
+                crate::hook::board(&lines, ctx.lang())
+            });
+            // 사람이 물었으니 일하는 중이다. 편지는 **매 프롬프트** 싣는다 — 보드처럼 한 번이 아니다(moai-h8tn).
+            let me = attendee(input, &repo);
+            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx));
+            attend(&repo, me, mail::BUSY);
+            board.then(|| letters.map_or(Decision::Pass, Decision::Context))
+        }
         Event::PreToolUse => {
             use crate::hook::Call;
             let cwd = cwd.clone();
@@ -347,28 +363,43 @@ fn decide(
             }
             decision
         }
-        // **이미 한 번 붙들었으면 보낸다.** 이 표를 안 보면 무한히 돈다.
-        Event::Stop if input.stop_hook_active => Decision::Pass,
-        Event::Stop => once_per_session(input, &repo, "stop", || {
-            let now = model::now();
-            let st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
-            // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
-            // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
-            // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
-            let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
-            // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
-            // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
-            let (away, latest) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
-            crate::hook::closing(
-                &load.issues,
-                latest.as_deref().unwrap_or(&load.issues),
-                &repo.config,
-                &away,
-                warnings,
-                baseline(input, &repo),
-                ctx.lang(),
-            )
-        }),
+        // **편지가 먼저다**(moai-h8tn) — 이 세션에 온 편지가 있으면 그것으로 턴을 붙든다. 닫기 물음(`closing`)은
+        // 편지를 다 본 뒤의 `Stop` 이 묻는다: 함께 실으면 [`Decision::then`] 이 막는 답 하나만 남기는데, 버려진
+        // 쪽이 편지면 읽음으로 옮긴 편지가 아무에게도 안 실린다. 편지는 실은 만큼 줄어 붙듦에 끝이 있으므로
+        // `stop_hook_active` 여도 싣는다 — 보낸 이가 쉬지 않고 보내면 일이 쉬지 않고 오는 것이다.
+        Event::Stop => {
+            let me = attendee(input, &repo);
+            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx));
+            let decision = letters.map_or(Decision::Pass, Decision::Block).then(|| {
+                // **이미 한 번 붙들었으면 보낸다.** 이 표를 안 보면 무한히 돈다.
+                if input.stop_hook_active {
+                    return Decision::Pass;
+                }
+                once_per_session(input, &repo, "stop", || {
+                    let now = model::now();
+                    let st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
+                    // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
+                    // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
+                    // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
+                    let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
+                    // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
+                    // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
+                    let (away, latest) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
+                    crate::hook::closing(
+                        &load.issues,
+                        latest.as_deref().unwrap_or(&load.issues),
+                        &repo.config,
+                        &away,
+                        warnings,
+                        baseline(input, &repo),
+                        ctx.lang(),
+                    )
+                })
+            });
+            // 턴이 끝나면 논다 — 붙들었으면 아직 일하는 중이다.
+            attend(&repo, me, if decision.blocks() { mail::BUSY } else { mail::IDLE });
+            decision
+        }
     };
     answer(event, decision)
 }
@@ -817,6 +848,102 @@ fn route_one(
     // 냈다)이 한 훅 판에 서로 다른 `-C` 를 댔다. 거절문이 내미는 줄도 `aims` 를 읽는다.
     *aim = Some((there[n].root.clone(), true));
     Route::There(n)
+}
+
+/// 이 세션의 출석(moai-h8tn) — **적지는 않는다**, 상태와 함께 적는 것은 판정 뒤의 [`attend`] 다.
+///
+/// 세션 id 로 찾고, 없으면 같은 에이전트 프로세스(pid·선 때)의 장을 이 세션으로 잇는다 — `/clear` 는 세션
+/// id 만 바꾸고, `moai hello` 로 지은 이름과 역할은 남아야 한다. 그것도 없으면 새로 짓는다: 이름은 Claude 가
+/// 보이는 세션 이름, 못 읽으면 `<벤더>-<세션 id 앞 8자>` 다(2026-10-04 사용자 결정). 산 남이 그 이름을 쥐었으면
+/// 세션 토막을 붙여 가른다 — 두 세션이 한 이름이면 편지가 먼저 읽는 쪽으로 샌다.
+///
+/// **세션 id 가 없으면 아무도 아니다** — 누구의 편지를 실을지 모르고, 실으면 남의 것을 읽음으로 옮긴다.
+///
+/// 에이전트는 이 훅을 띄운 셸의 부모다(`claude` → `sh` → `moai`). 조상에서 이름이 벤더인 것을 찾고, 없으면
+/// 셸의 부모를 쓴다 — 훅은 아직 Claude 에만 걸리므로 그때의 벤더는 `claude` 다.
+fn attendee(input: &Input, repo: &Repo) -> Option<mail::Presence> {
+    let session = input.session_id.as_deref().filter(|s| !s.trim().is_empty())?;
+    let (all, _) = mail::presences(&repo.agents_dir());
+    // 모델은 장에 없을 때만 훅의 입력으로 채운다 — `moai hello --model` 이 적은 것이 먼저다.
+    let model = |p: &mail::Presence| if p.model.is_empty() { input.model() } else { p.model.clone() };
+    if let Some(p) = all.iter().find(|p| p.session.as_deref() == Some(session)) {
+        return Some(mail::Presence { model: model(p), ..p.clone() });
+    }
+    let ancestors = mail::ancestors();
+    let (agent, vendor) = match mail::agent_among(&ancestors) {
+        Some((p, v)) => (p.clone(), v),
+        None => (ancestors.get(1).or(ancestors.first())?.clone(), "claude"),
+    };
+    let alive = |p: &mail::Presence| mail::alive(p.pid, p.pid_start) != Some(false);
+    let (tmux_pane, tmux_socket) = mail::Presence::tmux_here();
+    let cwd = input.cwd.clone().unwrap_or_default();
+    let same = |p: &&mail::Presence| {
+        p.pid == agent.pid && (p.pid_start.is_none() || agent.start.is_none() || p.pid_start == agent.start)
+    };
+    if let Some(p) = all.iter().find(same) {
+        return Some(mail::Presence {
+            model: model(p),
+            session: Some(session.to_string()),
+            cwd,
+            tmux_pane,
+            tmux_socket,
+            ..p.clone()
+        });
+    }
+    let short: String = session.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
+    let mut name = (vendor == "claude")
+        .then(|| mail::claude_session_name(agent.pid))
+        .flatten()
+        .or_else(|| mail::name_from(&format!("{vendor}-{short}")))?;
+    if all.iter().any(|p| p.name == name && alive(p)) {
+        name = mail::name_from(&format!("{name}-{short}"))?;
+    }
+    Some(mail::Presence {
+        v: mail::VERSION,
+        name,
+        vendor: vendor.to_string(),
+        model: input.model(),
+        role: String::new(),
+        status: String::new(),
+        since: String::new(),
+        pid: agent.pid,
+        pid_start: agent.start,
+        session: Some(session.to_string()),
+        cwd,
+        tmux_pane,
+        tmux_socket,
+        rest: Default::default(),
+    })
+}
+
+/// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다).
+/// 못 적으면 조용히 지나간다 — 훅은 실패하지 않는다(머리글).
+fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
+    let Some(mut p) = presence else { return };
+    if p.status != status || p.since.is_empty() {
+        p.status = status.to_string();
+        p.since = model::now();
+    }
+    let _ = mail::write_presence(&repo.agents_dir(), &p);
+}
+
+/// 이 세션에 온 편지를 읽음으로 옮기며 실을 글을 낸다 — 없으면 `None`. **옮긴 것만 싣는다** — 남이 먼저
+/// 가진 `any-idle-worker` 편지는 빠진다. 말은 실을 편지가 있을 때만 푼다(사용자 설정을 여는 값이다).
+fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx) -> Option<String> {
+    let dir = repo.mail_dir();
+    let (all, _) = mail::list(&dir, false);
+    let mine: Vec<mail::Stored> = all.into_iter().filter(|s| mail::for_me(s, &me.name, &me.role)).collect();
+    if mine.is_empty() {
+        return None;
+    }
+    let n = crate::hook::deliverable(&mine);
+    let taken: Vec<mail::Stored> = mine
+        .iter()
+        .take(n)
+        .filter(|s| matches!(mail::take(&dir, &s.id, &me.name), Ok(mail::Took::Mine)))
+        .cloned()
+        .collect();
+    crate::hook::letters(&me.name, &taken, mine.len() - n, ctx.lang())
 }
 
 /// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.

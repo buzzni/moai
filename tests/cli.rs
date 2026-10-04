@@ -24098,3 +24098,127 @@ fn hello_registers_and_agents_sweeps_the_gone() {
     assert!(!moai(s.path(), &["hello", "--name", "a/b", "--pid", &other.pid()]).status.success());
     assert!(!moai(s.path(), &["hello", "--role", "두\n줄", "--pid", &other.pid()]).status.success());
 }
+
+// ── 훅의 우편과 출석(moai-h8tn) ──────────────────────────────────────
+
+/// 훅이 실은 글 — 계약 JSON 한 줄을 그대로 돌려준다. [`carried_text`] 는 첫 `"` 에서 끊는데, 보드와 함께 실린
+/// 편지는 그 뒤에 서서 보드의 따옴표 하나가 편지를 통째로 가린다. 한글은 JSON 에서도 그대로라 찾을 수 있다.
+fn loaded(out: &str) -> String {
+    one_json_value(out);
+    assert!(out.contains("\"additionalContext\":\""), "실은 글이 없다 — {out}");
+    out.to_string()
+}
+
+/// 그 세션의 출석 파일 — 훅이 지은 이름은 세션 id 의 앞 8자로 선다(`claude` 세션 파일이 없는 시험의 집).
+fn presence_of(s: &Scratch, session: &str) -> String {
+    let short: String = session.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
+    std::fs::read_to_string(s.path().join(format!(".moai/agents/claude-{short}.json")))
+        .unwrap_or_else(|e| panic!("{session} 의 출석이 없다 — {e}"))
+}
+
+/// **훅이 출석을 적는다** — `SessionStart` 가 세우고(논다), `UserPromptSubmit` 이 일하는 중으로, `Stop` 이
+/// 노는 중으로 바꾼다. `PreToolUse` 는 출석도 우편함도 안 만진다 — 도구 호출마다 도는 자리다.
+#[test]
+fn the_hooks_keep_the_presence() {
+    let s = init("hook-presence");
+    let ev = event(&s, "sess0001-aaaa");
+    hook(&s, "pre-tool-use", &ev.replacen('{', "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},", 1));
+    assert!(!s.path().join(".moai/agents").exists(), "PreToolUse 가 출석을 썼다");
+
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",\"model\":\"claude-opus-5\",", 1));
+    let card = presence_of(&s, "sess0001-aaaa");
+    assert!(card.contains("\"name\":\"claude-sess0001\",\"vendor\":\"claude\",\"model\":\"claude-opus-5\""), "{card}");
+    assert!(card.contains("\"status\":\"idle\"") && card.contains("\"session\":\"sess0001-aaaa\""), "{card}");
+    hook(&s, "user-prompt-submit", &ev);
+    assert!(presence_of(&s, "sess0001-aaaa").contains("\"status\":\"busy\""), "프롬프트가 일하는 중을 안 적었다");
+    hook(&s, "stop", &ev);
+    assert!(presence_of(&s, "sess0001-aaaa").contains("\"status\":\"idle\""), "턴의 끝이 노는 중을 안 적었다");
+    // 세션 id 가 없으면 아무도 아니다 — 누구의 편지를 실을지 모른다.
+    hook(&s, "user-prompt-submit", &format!("{{\"cwd\":{}}}", json_str(&s.path().display().to_string())));
+    assert_eq!(names_in(&s.path().join(".moai/agents")), ["claude-sess0001.json"]);
+}
+
+/// **훅이 편지를 싣고 그것이 곧 읽음이다**(2026-10-04 사용자 결정). `UserPromptSubmit` 은 비추는 줄로 매
+/// 프롬프트, `Stop` 은 붙드는 까닭으로 싣는다 — 이미 붙든 뒤(`stop_hook_active`)여도 새 편지는 싣는다(실은
+/// 만큼 줄어 끝이 있다). `SessionStart` 는 접힌 뒤에만 싣는다 — 붙는다고 잰 자리가 거기뿐이다.
+#[test]
+fn the_hooks_deliver_letters_and_mark_them_read() {
+    let s = init("hook-letters");
+    let ev = event(&s, "sess0002-bbbb");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    let me = "claude-sess0002";
+    let send = |subject: &str, body: &str| {
+        field(&ok(s.path(), &["send", me, subject, "-b", body, "--as", "boss", "--json"]), "id")
+    };
+
+    // 막 연 세션은 안 싣는다.
+    let waiting = send("기다리는 편지", "아직 안 읽음");
+    let out = hook_out(&s, "session-start", &ev.replacen('{', "{\"source\":\"clear\",", 1));
+    assert!(!out.contains("기다리는 편지"), "붙는지 모르는 자리에 실었다 — {out}");
+    assert!(s.path().join(format!(".moai/mail/{waiting}.json")).is_file(), "안 실은 편지를 읽음으로 옮겼다");
+
+    // 프롬프트가 싣고 읽음으로 옮긴다 — 보드와 함께.
+    let out = hook_out(&s, "user-prompt-submit", &ev);
+    let said = loaded(&out);
+    assert!(said.contains("기다리는 편지") && said.contains("아직 안 읽음") && said.contains(&waiting), "{said}");
+    assert!(said.contains("moai inbox --all"), "다시 보는 길을 안 댔다 — {said}");
+    assert!(s.path().join(format!(".moai/mail/read/{waiting}@{me}.json")).is_file(), "실은 편지가 읽음이 아니다");
+    assert!(hook_out(&s, "user-prompt-submit", &ev).trim().is_empty(), "같은 편지를 또 실었다");
+
+    // `Stop` 은 붙든다. 이미 붙든 뒤여도 새 편지는 싣는다.
+    let late = send("늦은 편지", "턴 끝에 왔다");
+    let out = hook_out(&s, "stop", &ev);
+    assert!(out.starts_with("{\"decision\":\"block\",\"reason\":") && out.contains("늦은 편지"), "{out}");
+    assert!(presence_of(&s, "sess0002-bbbb").contains("\"status\":\"busy\""), "붙들고도 논다고 적었다");
+    let later = send("또 온 편지", "붙든 뒤에 왔다");
+    let active = ev.replacen('{', "{\"stop_hook_active\":true,", 1);
+    assert!(hook_out(&s, "stop", &active).contains("또 온 편지"), "붙든 뒤라고 새 편지를 버렸다");
+    assert!(hook_out(&s, "stop", &active).trim().is_empty(), "편지 없이 또 붙들었다");
+    assert!(presence_of(&s, "sess0002-bbbb").contains("\"status\":\"idle\""));
+    for id in [&late, &later] {
+        assert!(s.path().join(format!(".moai/mail/read/{id}@{me}.json")).is_file(), "{id} 를 읽음으로 안 옮겼다");
+    }
+
+    // 접힌 뒤의 `SessionStart` 는 싣는다.
+    let after = send("접힌 뒤", "다시 열렸다");
+    let out = hook_out(&s, "session-start", &compacted(&s, "sess0002-bbbb"));
+    assert!(loaded(&out).contains("접힌 뒤"), "접힌 뒤에 안 실었다 — {out}");
+    assert!(s.path().join(format!(".moai/mail/read/{after}@{me}.json")).is_file());
+}
+
+/// **한 번에 싣는 양에는 상한이 있다** — 넘는 편지는 다음 훅으로 미루고 몇 통이 남았는지 댄다. 남은 편지는
+/// 읽음으로 안 옮긴다.
+#[test]
+fn the_hooks_load_letters_up_to_a_budget() {
+    let s = init("hook-budget");
+    let ev = event(&s, "sess0003-cccc");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    let big = "가".repeat(10_000); // 3만 바이트
+    for n in 0..3 {
+        ok(s.path(), &["send", "claude-sess0003", &format!("큰 편지 {n}"), "-b", &big, "--as", "boss"]);
+    }
+    let said = loaded(&hook_out(&s, "user-prompt-submit", &ev));
+    assert!(said.contains("큰 편지 0") && !said.contains("큰 편지 1"), "상한을 넘겨 실었다");
+    assert!(said.contains("2통이 더 기다린다"), "남은 수를 안 댔다 — {}", &said[..said.len().min(300)]);
+    assert_eq!(names_in(&s.path().join(".moai/mail")).len(), 2, "안 실은 편지를 읽음으로 옮겼다");
+}
+
+/// **`any-idle-worker` 편지는 훅도 하나만 가진다** — 보낸 세션은 제 일감을 안 받고, 받는 세션 하나가 가진다.
+/// `moai hello` 로 지은 이름(여기서는 손으로 적은 장)이 훅의 이름보다 먼저다.
+#[test]
+fn the_hooks_hand_an_open_letter_to_one_session() {
+    let s = init("hook-open");
+    // 감독 — `hello` 로 지은 이름을 세션 id 로 잇는다.
+    std::fs::create_dir_all(s.path().join(".moai/agents")).unwrap();
+    std::fs::write(
+        s.path().join(".moai/agents/boss.json"),
+        "{\"v\":1,\"name\":\"boss\",\"vendor\":\"claude\",\"role\":\"supervisor\",\"status\":\"busy\",\"pid\":0,\"session\":\"boss0001\"}\n",
+    )
+    .unwrap();
+    let id = field(&ok(s.path(), &["send", "any-idle-worker", "일감", "--as", "boss", "--json"]), "id");
+    assert!(hook_out(&s, "stop", &event(&s, "boss0001")).trim().is_empty(), "감독이 제 일감을 받았다");
+    let out = hook_out(&s, "stop", &event(&s, "work0001"));
+    assert!(out.contains("일감"), "일꾼이 일감을 못 받았다 — {out}");
+    assert!(s.path().join(format!(".moai/mail/read/{id}@claude-work0001.json")).is_file());
+    assert!(hook_out(&s, "stop", &event(&s, "work0002")).trim().is_empty(), "한 일감이 두 세션에 갔다");
+}

@@ -98,6 +98,21 @@ pub struct Input {
     /// 이미 한 번 붙들었다는 표. **이것을 안 보면 무한히 돈다.**
     #[serde(default)]
     pub stop_hook_active: bool,
+    /// 이 세션의 모델 — 출석에 적는다(moai-h8tn). 계약이 약속한 키가 아니라 글이든 객체든 받는다([`Input::model`]).
+    #[serde(default, rename = "model")]
+    pub model_raw: serde_json::Value,
+}
+
+impl Input {
+    /// 모델 이름 — 글이면 그대로, 객체면 `id`·`display_name` 차례다. 모르면 빈 글이다.
+    pub fn model(&self) -> String {
+        let v = &self.model_raw;
+        v.as_str()
+            .or_else(|| v.get("id").and_then(|x| x.as_str()))
+            .or_else(|| v.get("display_name").and_then(|x| x.as_str()))
+            .map(crate::text::one_line)
+            .unwrap_or_default()
+    }
 }
 
 /// 훅이 내는 답.
@@ -158,6 +173,48 @@ pub fn board(lines: &[String], lang: Lang) -> Decision {
         return Decision::Pass;
     }
     Decision::Context(format!("{}\n\n{body}", say(lang, "hook.lead")))
+}
+
+/// 한 번에 싣는 편지의 양(바이트). 넘는 편지는 다음 훅으로 미룬다 — 맥락 하나를 편지로 덮지 않는다.
+const LETTERS_BUDGET: usize = 48 * 1024;
+
+/// 이번에 실을 편지 수 — 앞에서부터 [`LETTERS_BUDGET`] 을 넘기 전까지, **적어도 하나**. 편지 하나는 본문
+/// 64KB(`mail::BODY_MAX`)까지라, 하나는 늘 싣고 그 뒤를 미룬다. 실을 것을 고르는 것이 훅의 판단이라 여기 둔다.
+pub fn deliverable(letters: &[crate::mail::Stored]) -> usize {
+    let mut used = 0;
+    let mut n = 0;
+    for s in letters {
+        // 머리와 줄 앞의 들여쓰기 몫으로 한 통에 128바이트를 더한다 — 어림이지만 상한을 재는 자리라 넉넉하면 된다.
+        let size = s.letter.subject.len() + s.letter.body.len() + 128;
+        if n > 0 && used + size > LETTERS_BUDGET {
+            break;
+        }
+        used += size;
+        n += 1;
+    }
+    n
+}
+
+/// 이 세션에 온 편지를 실을 글로(moai-h8tn). **실은 편지는 이미 읽음으로 옮겨졌다** — 싣는 것이 곧 읽음이다
+/// (2026-10-04 사용자 결정). 실은 것이 없으면 `None` 이다. `left` 는 상한에 걸려 이번에 못 실은 수다.
+///
+/// 부르는 쪽이 `UserPromptSubmit`·접힌 뒤 `SessionStart` 에서는 비추는 줄(`Context`)로, `Stop` 에서는 붙드는
+/// 까닭(`Block`)으로 싣는다 — **판정의 종류는 안 는다.** 편지 한 통은 `inbox` 와 같은 자(`view::mail`)로
+/// 그리고, 색은 걷는다(`board` 와 같은 까닭, `style::plain`).
+pub fn letters(me: &str, delivered: &[crate::mail::Stored], left: usize, lang: Lang) -> Option<String> {
+    if delivered.is_empty() {
+        return None;
+    }
+    let mut out = fill(say(lang, "hook.letters"), &[("me", me), ("n", &delivered.len().to_string())]);
+    for s in delivered {
+        out.push_str("\n\n");
+        out.push_str(&crate::style::plain(&crate::view::mail::letter(lang, s).join("\n")));
+    }
+    if left > 0 {
+        out.push_str("\n\n");
+        out.push_str(&fill(say(lang, "hook.letters_left"), &[("n", &left.to_string())]));
+    }
+    Some(out)
 }
 
 /// 접힌 뒤에도 잃으면 안 되는 것 — 지금 집고 있는 일.
