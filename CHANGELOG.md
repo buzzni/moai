@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-04
+
 ### Added
 
 - **`moai wiki ls` and `moai wiki show <slug>` read the project wiki.** The
