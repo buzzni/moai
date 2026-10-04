@@ -136,6 +136,49 @@ a worker that waits needs no waking, and waking is a bonus.
   line telling the sender to wake it with `SendMessage`, which only a Claude
   session can send
 
+### Codex
+
+    codex
+
+- **Trust the repository** when Codex asks. It reads a project's own `.codex/`
+  only in a folder it trusts
+- **Trust moai's hooks in `/hooks`** once, and again after an install that
+  changed them. Until then Codex runs none of them, and the five rules are words
+  only
+- **Make it a worker** with `$moai-work`
+- **Waking**: nothing wakes a Codex window. Its hooks' row carries no tmux pane,
+  so a worker gets its letters by waiting on `moai inbox --ack --wait`
+
+**Keep the sandbox where it stands.** Codex runs commands in a sandbox of its
+own, and a machine where that works keeps it. `codex sandbox -- true` tells you:
+where the sandbox cannot stand — a container whose AppArmor stops bubblewrap
+from mounting, say — it fails with `bwrap: Failed to make / slave: Permission
+denied`. On such a machine this repository runs Codex without the sandbox,
+through a project file that stays out of git:
+
+    # .codex/config.toml
+    sandbox_mode = "danger-full-access"
+
+and one line, `/.codex/config.toml`, in `.git/info/exclude`. **Do not commit
+it**: anyone who clones the repository and says yes to Codex's trust question
+would run with the sandbox off, and the question does not say so.
+`.codex/hooks.json` in the same directory is committed — the two part ways
+there. Only the sandbox goes: the approval setting is left at Codex's default.
+
+**What holds today.** All of one user's Codex sessions on a machine run their
+hooks and their shell commands from one shared `codex app-server`, so a Codex
+session cannot yet tie the `moai` it runs in its shell to its own presence row
+(moai-u5wr.7xr, being fixed). Until that lands:
+
+- The row its hooks write (`codex-` and the first eight characters of its
+  session id, no role) and the row `moai hello` writes from its shell are two
+  rows. Send to the name `moai hello` printed — that is the one its wait reads
+- Two Codex windows on one machine that both say hello end up on one row. Keep
+  one Codex window per machine as a worker or a supervisor
+- A Codex supervisor's own hook row has no role, so it can take the
+  supervisor's own `any-idle-worker` letter at the end of its turn. From a Codex
+  supervisor, send to a worker by name
+
 ## What the hooks do
 
 The hooks catch the same few places in each agent's session. Each calls
