@@ -2,7 +2,7 @@
 //!
 //! 페이지는 `<wiki_dir>/**/*.md` 파일 하나다. 슬러그는 확장자를 뗀 상대 경로(`/` 로 가른다), 제목은 첫 1단
 //! 제목이고 없으면 파일 줄기다. **아무것도 저장하지 않는다** — `issues.jsonl` 에는 한 글자도 안 들어가고, 목록·
-//! 링크·id 는 부를 때마다 파일에서 읽는 파생값이다(CLAUDE.md "파생값은 저장하지 않는다").
+//! 링크·역링크·id 는 부를 때마다 파일에서 읽는 파생값이다(CLAUDE.md "파생값은 저장하지 않는다").
 //!
 //! **위키는 문서라 가지를 탄다.** 트래커는 딸린 워크트리에서 루트로 옮겨 가지만(`store::Repo::find_from`), 위키는
 //! 이 체크아웃(`store::Repo::here`) 밑에서 읽는다 — 에픽이 고친 매뉴얼이 그 에픽의 diff 에 든다. 병합은 git 의
@@ -99,6 +99,9 @@ pub struct Page {
     pub issues: Vec<IssueRef>,
     /// 다른 페이지로 가는 링크, 적힌 차례로.
     pub links: Vec<Link>,
+    /// 이 페이지를 가리키는 페이지의 슬러그 — 역링크(moai-ogaw). [`load`] 가 다른 페이지의 [`Page::links`] 를 뒤집어
+    /// 세고([`linked_from`]), 위키 목록의 차례로 가리키는 페이지마다 한 번이다.
+    pub linked_from: Vec<String>,
     /// git 의 충돌 표시(`<<<<<<<` → `=======` → `>>>>>>>`)가 차례로 선 페이지.
     pub conflict: bool,
     /// 본문을 못 읽었다 — 없으면 다 읽었다.
@@ -253,31 +256,10 @@ pub fn dir_of(here: &Path, raw: &str) -> Result<PathBuf, DirTrouble> {
 ///
 /// 위키 뿌리를 못 열면 [`DirTrouble`] 이다. 그 밑에서 못 연 디렉터리와 못 읽은 페이지는 멈추지 않고 [`Wiki`] 에
 /// 적는다 — 한 파일 때문에 나머지 페이지를 못 보면 무엇이 잘못됐는지 볼 길도 같이 사라진다.
+///
+/// **페이지 하나를 볼 때도 모든 본문을 읽는다** — 역링크는 다른 페이지가 적은 링크라서다(2026-10-04 사용자 결정,
+/// moai-ogaw: `moai wiki show` 도 역링크를 낸다). 그 결정 전에는 물은 페이지 하나만 열던 `load_one` 이 있었다.
 pub fn load(here: &Path, raw: &str, prefix: &str, known: &dyn Fn(&str) -> bool) -> Result<Wiki, DirTrouble> {
-    load_where(here, raw, None, prefix, known)
-}
-
-/// [`load`] 와 같되 **본문은 `slug` 페이지 하나만 읽는다** — `moai wiki show` 가 쓴다. 그 페이지의 링크가 풀리는가는
-/// 다른 페이지의 이름(슬러그)만 보면 되므로 나머지는 걷기만 하고 열지 않는다 — 다 읽던 판은 페이지 하나를 보려고
-/// 위키의 모든 본문을 읽고 파싱했다. 그 슬러그의 파일이 없으면 페이지가 빈 [`Wiki`] 다.
-pub fn load_one(
-    here: &Path,
-    raw: &str,
-    slug: &str,
-    prefix: &str,
-    known: &dyn Fn(&str) -> bool,
-) -> Result<Wiki, DirTrouble> {
-    load_where(here, raw, Some(slug), prefix, known)
-}
-
-/// [`load`]·[`load_one`] 의 몸통 — `only` 가 서면 그 슬러그의 페이지만 연다.
-fn load_where(
-    here: &Path,
-    raw: &str,
-    only: Option<&str>,
-    prefix: &str,
-    known: &dyn Fn(&str) -> bool,
-) -> Result<Wiki, DirTrouble> {
     let dir = dir_of(here, raw)?;
     let home = Home::of(here);
     let shown: Vec<String> = Path::new(raw)
@@ -290,17 +272,13 @@ fn load_where(
     let mut wiki = Wiki::default();
     let top = std::fs::read_dir(&dir).map_err(|e| DirTrouble::Failed(e.to_string()))?;
     walk(top, &dir, &mut Vec::new(), &shown, &mut files, &mut wiki.skipped);
-    // **슬러그는 이름만으로 선다** — 링크가 풀리는가는 못 읽은 페이지와 안 연 페이지까지, 걸은 파일 모두의 이름과 견준다.
-    let named: Vec<(String, Vec<String>, PathBuf)> =
-        files.into_iter().map(|(rel, at)| (slug_of(&rel), rel, at)).collect();
-    for (slug, rel, at) in &named {
-        if only.is_none_or(|o| o == slug) {
-            wiki.pages.push(page_at(at, slug.clone(), rel, &shown, &home, prefix, known));
-        }
+    for (rel, at) in &files {
+        wiki.pages.push(page_at(at, slug_of(rel), rel, &shown, &home, prefix, known));
     }
-    let slugs: HashSet<&str> = named.iter().map(|(slug, ..)| slug.as_str()).collect();
+    // **슬러그는 이름만으로 선다** — 링크가 풀리는가는 못 읽은 페이지까지, 걸은 파일 모두의 이름과 견준다.
+    let slugs: HashSet<String> = wiki.pages.iter().map(|p| p.slug.clone()).collect();
     for link in wiki.pages.iter_mut().flat_map(|p| p.links.iter_mut()) {
-        link.resolved = slugs.contains(link.to.as_str());
+        link.resolved = slugs.contains(&link.to);
     }
     wiki.pages.sort_by(|a, b| {
         let rank = |p: &Page| HOMES.iter().position(|h| *h == p.slug).unwrap_or(HOMES.len());
@@ -309,7 +287,24 @@ fn load_where(
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
             .then_with(|| a.slug.cmp(&b.slug))
     });
+    // 차례를 세운 뒤에 센다 — 역링크는 위키 목록의 차례로 선다.
+    let from: Vec<Vec<String>> = (0..wiki.pages.len()).map(|at| linked_from(&wiki.pages, at)).collect();
+    for (page, from) in wiki.pages.iter_mut().zip(from) {
+        page.linked_from = from;
+    }
     Ok(wiki)
+}
+
+/// `pages[at]` 를 가리키는 페이지의 슬러그 — 역링크(moai-ogaw). **세는 자는 여기 하나다** — `moai wiki ls`·`show` 와
+/// 탐색기의 위키 창이 이 값([`Page::linked_from`])을 읽어 셋이 다른 수를 안 낸다.
+///
+/// - `pages` 의 차례로, 가리키는 페이지마다 한 번 — 글이 다른 링크 둘로 가리켜도 한 번이다
+/// - 제 자신을 가리키는 링크(`#앵커` 를 뗀 제 슬러그)는 안 센다 — 들어오는 길이 아니다
+/// - 본문을 못 읽은 페이지([`Page::error`])는 링크가 없어 아무것도 안 가리킨다. 그러니 역링크는 **읽은 페이지가 적은
+///   것만큼이다** — 그 페이지는 목록에 `error` 로 선다
+fn linked_from(pages: &[Page], at: usize) -> Vec<String> {
+    let to = &pages[at].slug;
+    pages.iter().filter(|p| p.slug != *to && p.links.iter().any(|l| l.to == *to)).map(|p| p.slug.clone()).collect()
 }
 
 /// 디렉터리 하나를 걸어 페이지 파일을 모은다 — 이름 차례로, `.` 으로 시작하는 이름은 건너뛴다.
@@ -393,6 +388,7 @@ fn page_at(
         bytes,
         issues: Vec::new(),
         links: Vec::new(),
+        linked_from: Vec::new(),
         conflict: false,
         error: None,
         body: None,
@@ -884,25 +880,28 @@ mod tests {
         assert!(notices(&w.pages[..0]).is_empty());
     }
 
-    /// `load_one` 은 물은 페이지만 연다 — 나머지는 이름만 걸어, 그 페이지의 링크는 안 연 페이지로도 풀린다. 못 읽을
-    /// 페이지(FIFO)가 곁에 있어도 그것은 안 연다.
-    #[cfg(unix)]
+    /// **역링크는 다른 페이지의 링크를 뒤집어 센다**(moai-ogaw) — 위키 목록의 차례로, 가리키는 페이지마다 한 번. 제
+    /// 자신을 가리키는 링크·코드 블록 안의 링크·본문을 못 읽은 페이지의 링크는 안 센다. 못 읽은 페이지도 가리켜지면
+    /// 역링크가 선다 — 그 페이지는 이름으로 서 있다.
     #[test]
-    fn load_one_opens_only_the_page_asked_for() {
-        let s = Scratch::new("wiki-one");
-        write(s.path(), "docs/a.md", "# A\n\n[b](b.md) [gone](gone.md) [pipe](pipe.md)\n");
-        write(s.path(), "docs/b.md", "# B\n");
-        let fifo = s.join("docs/pipe.md");
-        let c = std::ffi::CString::new(fifo.as_os_str().as_encoded_bytes()).unwrap();
-        // SAFETY: 널로 끝나는 경로와 권한 비트만 넘긴다.
-        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0, "FIFO 를 못 지었다");
-        let w = load_one(s.path(), "docs", "a", "moai", &none).unwrap();
-        assert_eq!(w.pages.iter().map(|p| p.slug.as_str()).collect::<Vec<_>>(), ["a"]);
+    fn backlinks_invert_every_page_link_in_list_order() {
+        let s = Scratch::new("wiki-backlinks");
+        write(s.path(), "docs/README.md", "# Home\n\n[a](a.md) [again a](a.md) [gone](gone.md) [big](big.md)\n");
+        write(s.path(), "docs/a.md", "# A\n\n[self](a.md#top) [zed](guide/z.md)\n");
+        write(s.path(), "docs/guide/z.md", "# Zed\n\n[a](../a.md) [home](../README.md)\n");
+        write(s.path(), "docs/code.md", "# Code\n\n```md\n[a](a.md)\n```\n");
+        write(s.path(), "docs/big.md", &format!("# Big\n\n[a](a.md)\n{}", "x".repeat(TOO_LARGE as usize)));
+        let w = load(s.path(), "docs", "moai", &none).unwrap();
+        let from = |slug: &str| w.find(slug).unwrap().linked_from.clone();
         assert_eq!(
-            w.pages[0].links.iter().map(|l| (l.to.as_str(), l.resolved)).collect::<Vec<_>>(),
-            [("b", true), ("gone", false), ("pipe", true)]
+            from("a"),
+            ["README", "guide/z"],
+            "목록 차례로, 글이 다른 두 링크는 한 번, 제 링크·코드·못 읽은 것은 빼고"
         );
-        assert!(load_one(s.path(), "docs", "nope", "moai", &none).unwrap().pages.is_empty());
+        assert_eq!(from("README"), ["guide/z"]);
+        assert_eq!(from("guide/z"), ["a"]);
+        assert_eq!(from("big"), ["README"], "못 읽은 페이지도 가리켜지면 선다");
+        assert!(from("code").is_empty());
     }
 
     /// 크기 상한 바로 아래는 읽는다 — 상한은 "넘으면" 이다.
