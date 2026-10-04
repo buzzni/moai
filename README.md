@@ -175,8 +175,8 @@ with conflict markers. It blocks nothing.
 
 In the explorer `SPC g w` opens the same pages in a window, read only — the
 pages on the left, the one under the cursor on the right. `Enter` on a page
-lists its links and the issue ids it names: a link goes to that page and `Bksp`
-comes back, an id closes the window onto that row. `/` searches the titles and
+lists its links, the issue ids it names and the pages that link to it: a page goes
+there and `Bksp` comes back, an id closes the window onto that row. `/` searches the titles and
 bodies of the pages.
 
 ## Working in parallel
