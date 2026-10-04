@@ -832,9 +832,11 @@ pub enum WikiCmd {
   [{\"text\",\"to\",\"resolved\"}] - relative links to a `.md` page of this
   wiki, `to` being the target slug.
   A page that could not be read carries `error` ({\"kind\",\"said\"}, kind
-  too_large, refused or failed); absent, it was read whole. When the
-  directory itself cannot be used, `pages` gives way to `error` with kind
-  no_dir, outside, not_a_dir or failed.")]
+  too_large, refused or failed); absent, it was read whole. What the walk
+  left out stands in `skipped` ([{\"path\",\"kind\",\"said\"}], kind dir_link,
+  not_utf8 or unreadable); absent, nothing was left out. When the directory
+  itself cannot be used, `pages` gives way to `error` with kind no_dir,
+  outside, not_a_dir or failed.")]
     Ls,
     /// One page, drawn (`--json` gives the raw body)
     #[command(after_help = "  The slug is what `moai wiki ls` prints - matched letter for letter, so

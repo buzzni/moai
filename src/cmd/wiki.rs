@@ -97,7 +97,16 @@ pub(crate) fn listed_json(lang: Lang, dir: &str, read: &Result<Wiki, DirTrouble>
     match read {
         Ok(w) => {
             let pages = w.pages.iter().map(|p| PageOut::of(lang, p, false)).collect();
-            super::json_line(&Listed { dir, pages })
+            let skipped = w
+                .skipped
+                .iter()
+                .map(|s| SkippedOut {
+                    path: &s.path,
+                    kind: s.why.kind(),
+                    said: crate::view::wiki::skip_reason(lang, s),
+                })
+                .collect();
+            super::json_line(&Listed { dir, pages, skipped })
         }
         Err(t) => {
             let said = crate::view::wiki::dir_trouble(lang, dir, t);
@@ -118,6 +127,18 @@ pub(crate) fn page_json(lang: Lang, p: &Page) -> R<Vec<String>> {
 struct Listed<'a> {
     dir: &'a str,
     pages: Vec<PageOut<'a>>,
+    /// 걷다가 페이지로 못 세운 자리 — 없으면 키가 없다(2026-10-04 사용자 결정, moai-ihu4.x94). 이것이 서면 종료
+    /// 코드가 비영인데, 까닭이 stderr 의 사람 말에만 서면 기계는 성해 보이는 `pages` 와 비영 종료만 받는다.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skipped: Vec<SkippedOut<'a>>,
+}
+
+/// 건너뛴 자리 하나 — `path` 는 체크아웃에서의 상대 경로, `kind` 는 `dir_link`·`not_utf8`·`unreadable`.
+#[derive(serde::Serialize)]
+struct SkippedOut<'a> {
+    path: &'a str,
+    kind: &'static str,
+    said: String,
 }
 
 /// 위키 디렉터리를 못 쓸 때 — `pages` 대신 `error` 가 선다.

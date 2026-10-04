@@ -1414,8 +1414,12 @@ false for an id that names no issue), `links` (the links to other pages — each
 `to` as the slug it lands on, and `resolved` false when no such page stands) and
 `conflict` (true while merge conflict markers stand in the page). A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
-whose `kind` says why — `too_large`, `refused` or `failed`. Branch on `kind`, not on
-the words beside it. Look at all of these after you write.
+whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
+leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
+link to a directory, not followed), `not_utf8` (a file name that cannot be a slug) or
+`unreadable` (a directory it could not open); with nothing left out the key is absent,
+and with it the exit code is non-zero although `pages` is whole. Branch on `kind`, not
+on the words beside it. Look at all of these after you write.
 
 ## Two kinds of page
 
@@ -3531,6 +3535,10 @@ stop sending outside work while a release runs",
         "too_large",
         "refused",
         "failed",
+        "skipped",
+        "dir_link",
+        "not_utf8",
+        "unreadable",
     ];
 
     /// 위키 명령이 내는데 스킬이 **일부러 안 대는** 키 — `bytes` 는 고칠 것을 안 말하고, `said` 는 사람이 읽는
@@ -3565,6 +3573,10 @@ stop sending outside work while a release runs",
         std::fs::write(away.path().join("out.md"), "# Out\n").unwrap();
         std::os::unix::fs::symlink(away.path().join("out.md"), docs.join("out.md")).unwrap();
         std::fs::write(s.path().join("file"), "").unwrap();
+        // 걷기가 건너뛰는 자리 — 디렉터리 링크와 UTF-8 이 아닌 이름. 못 연 디렉터리는 아래에서 갈래로 짓는다.
+        std::os::unix::fs::symlink(away.path(), docs.join("away")).unwrap();
+        let latin = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(b"caf\xe9.md");
+        std::fs::write(docs.join(latin), "# Name\n").unwrap();
 
         let lang = crate::i18n::Lang::En;
         let known = |id: &str| id == "moai-ab12";
@@ -3580,6 +3592,12 @@ stop sending outside work while a release runs",
         // 디렉터리를 못 연 `failed` 는 픽스처로 못 세운다(권한은 root 에서 안 먹는다) — 갈래로 지어 넣는다.
         let failed = Err(DirTrouble::Failed("permission denied".into()));
         printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &failed).unwrap());
+        let unreadable = crate::wiki::Skipped {
+            path: "docs/locked".into(),
+            why: crate::wiki::Skip::Unreadable("permission denied".into()),
+        };
+        let walked = crate::wiki::Wiki { pages: Vec::new(), skipped: vec![unreadable] };
+        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &Ok(walked)).unwrap());
 
         // 출력에 선 키와 `kind` 값을 모은다.
         fn gather(v: &serde_json::Value, keys: &mut BTreeSet<String>, kinds: &mut BTreeSet<String>) {
@@ -3601,7 +3619,8 @@ stop sending outside work while a release runs",
         for line in &printed {
             gather(&serde_json::from_str(line).unwrap(), &mut keys, &mut kinds);
         }
-        let want_kinds = ["too_large", "refused", "failed", "no_dir", "outside", "not_a_dir"];
+        let want_kinds =
+            ["too_large", "refused", "failed", "no_dir", "outside", "not_a_dir", "dir_link", "not_utf8", "unreadable"];
         assert_eq!(kinds, want_kinds.iter().map(|k| k.to_string()).collect(), "픽스처가 갈래를 다 안 세웠다");
 
         for key in WIKI_KEYS {

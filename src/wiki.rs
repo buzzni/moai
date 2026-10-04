@@ -165,6 +165,17 @@ pub enum Skip {
     Unreadable(String),
 }
 
+impl Skip {
+    /// `--json` 의 `skipped[].kind`(2026-10-04 사용자 결정, moai-ihu4.x94).
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Skip::NotUtf8 => "not_utf8",
+            Skip::DirLink => "dir_link",
+            Skip::Unreadable(_) => "unreadable",
+        }
+    }
+}
+
 /// `wiki_dir` 이 쓸 수 없는 자리다 — 말이 아니라 자료다. 글은 `view` 가 짓는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirTrouble {

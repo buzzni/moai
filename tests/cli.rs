@@ -23377,7 +23377,17 @@ fn a_page_that_cannot_be_read_stays_listed_and_says_why() {
     assert!(listed.contains(r#""slug":"ok""#) && listed.contains(r#""slug":"out","title":"out","#), "{listed}");
     assert!(listed.contains(r#""error":{"kind":"refused","said":"#), "{listed}");
     assert!(!listed.contains("Secret"), "체크아웃 밖의 글을 읽었다 — {listed}");
+    assert!(!listed.contains(r#""skipped""#), "건너뛴 것이 없는데 `skipped` 가 섰다 — {listed}");
     ok(s.path(), &["status"]);
+
+    // **걷다 건너뛴 자리도 기계에 댄다**(moai-ihu4.x94) — 비영 종료의 까닭이 stderr 의 사람 말에만 서면 기계는
+    // 성해 보이는 `pages` 와 비영 종료만 받는다.
+    std::fs::remove_file(docs.join("out.md")).unwrap();
+    std::os::unix::fs::symlink(away.path(), docs.join("away")).unwrap();
+    let out = moai(s.path(), &["wiki", "ls", "--json"]);
+    assert!(!out.status.success(), "건너뛴 자리를 두고 0 으로 냈다\n{}", text(&out));
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#","skipped":[{"path":"docs/away","kind":"dir_link","said":"#), "{listed}");
 }
 
 /// **알림은 비추기만 한다**(moai-ihu4.zdk) — 충돌 표시·풀리지 않는 링크·없는 id 를 목록 꼬리에 세고, 종료 코드는

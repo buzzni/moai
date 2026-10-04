@@ -42,8 +42,12 @@ false for an id that names no issue), `links` (the links to other pages — each
 `to` as the slug it lands on, and `resolved` false when no such page stands) and
 `conflict` (true while merge conflict markers stand in the page). A page that could
 not be read still stands in the list, under its file name, with an `error` of its own
-whose `kind` says why — `too_large`, `refused` or `failed`. Branch on `kind`, not on
-the words beside it. Look at all of these after you write.
+whose `kind` says why — `too_large`, `refused` or `failed`. What the walk had to
+leave out stands under `skipped`, each with its `path` and a `kind` — `dir_link` (a
+link to a directory, not followed), `not_utf8` (a file name that cannot be a slug) or
+`unreadable` (a directory it could not open); with nothing left out the key is absent,
+and with it the exit code is non-zero although `pages` is whole. Branch on `kind`, not
+on the words beside it. Look at all of these after you write.
 
 ## Two kinds of page
 

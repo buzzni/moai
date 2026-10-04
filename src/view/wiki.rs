@@ -148,14 +148,16 @@ pub fn no_page(lang: Lang, slug: &str, dir: &str) -> String {
     fill(say(lang, "wiki.no_page"), &[("slug", &one_line(slug)), ("dir", &shown(dir))])
 }
 
-/// 걷다가 페이지로 못 세운 자리 한 줄 — stderr 로 나간다.
+/// 걷다가 페이지로 못 세운 자리 한 줄 — stderr 로 나간다. `<자리>: <까닭>`.
 pub fn skipped(lang: Lang, s: &Skipped) -> String {
-    let path = one_line(&s.path);
+    format!("{}: {}", one_line(&s.path), skip_reason(lang, s))
+}
+
+/// 건너뛴 까닭만 — `--json` 의 `skipped[].said` 다. 자리는 곁의 `path` 가 든다.
+pub fn skip_reason(lang: Lang, s: &Skipped) -> String {
     match &s.why {
-        Skip::NotUtf8 => fill(say(lang, "wiki.skip_not_utf8"), &[("path", &path)]),
-        Skip::DirLink => fill(say(lang, "wiki.skip_dir_link"), &[("path", &path)]),
-        Skip::Unreadable(said) => {
-            fill(say(lang, "wiki.skip_unreadable"), &[("path", &path), ("said", &one_line(said))])
-        }
+        Skip::NotUtf8 => say(lang, "wiki.skip_not_utf8").to_string(),
+        Skip::DirLink => say(lang, "wiki.skip_dir_link").to_string(),
+        Skip::Unreadable(said) => fill(say(lang, "wiki.skip_unreadable"), &[("said", &one_line(said))]),
     }
 }
