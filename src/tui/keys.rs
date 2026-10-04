@@ -1256,6 +1256,25 @@ pub const WIKI: &[Bind<Wiki>] = {
     ]
 };
 
+impl Wiki {
+    /// 바의 낱말. `on_page` 는 포커스가 본문 칸인가 — `Enter`·이동·칸 옮기기가 그것으로 갈린다. `searched` 는 찾기가
+    /// 걸려 있는가 — Esc 가 그것을 푼다.
+    pub fn what(self, on_page: bool, searched: bool, lang: Lang) -> &'static str {
+        match self {
+            Wiki::Step(_) if on_page => say(lang, "tui.act.scroll"),
+            Wiki::Step(_) => say(lang, "tui.act.move"),
+            Wiki::Enter if on_page => say(lang, "tui.wiki.links"),
+            Wiki::Enter => say(lang, "tui.wiki.read"),
+            Wiki::Back => say(lang, "tui.wiki.back"),
+            Wiki::Search => say(lang, "tui.act.grep"),
+            Wiki::FocusNext | Wiki::Focus(_) if on_page => say(lang, "tui.wiki.to_list"),
+            Wiki::FocusNext | Wiki::Focus(_) => say(lang, "tui.wiki.to_page"),
+            Wiki::Close if searched => say(lang, "tui.act.clear_filter"),
+            Wiki::Close => say(lang, "tui.act.close"),
+        }
+    }
+}
+
 impl Pick {
     pub fn what(self, show_hidden: bool, lang: Lang) -> &'static str {
         use Pick::*;

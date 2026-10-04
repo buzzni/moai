@@ -8,8 +8,8 @@
 //! 받는데(`cmd::tui::rolls`), 몰아 받는 동안에는 화면도 지난 프레임 그대로라 맞히는 바탕은 늘 사람이 보고 있는
 //! 그 화면이다. 키가 상세의 끝을 마지막으로 그린 줄 수로 가늠하는 것(`Scroll::go`)과 같은 결이다.
 //!
-//! **듣는 자리는 둘뿐이다**(사용자 결정 2026-10-01). 목록·상세를 둘러보는 동안(한눈 보기 `0` 도 같은 칸이다)과
-//! 통계 창 위의 휠이다 — 그 둘 위에 뜬 SPC 메뉴는 아래 문단이 본다. 폼·묻는 칸·고르는 창·지우기 확인·글을 받는
+//! **듣는 자리는 셋이다**(사용자 결정 2026-10-01, 위키 창은 moai-o3cb). 목록·상세를 둘러보는 동안(한눈 보기 `0` 도
+//! 같은 칸이다)과 통계 창 위의 휠, 위키 창의 누르기·휠이다 — 그 위에 뜬 SPC 메뉴는 아래 문단이 본다. 폼·묻는 칸·고르는 창·지우기 확인·글을 받는
 //! 칸이 떠 있으면 **마우스를 아예 놓는다**([`App::wants_mouse`], 리뷰 뒤 사용자 결정 2026-10-01) — 그 창들은 키로
 //! 다루는 자리고, 뒤의 목록을 누른 것이 적던 글을 두고 커서를 옮기면 무엇에 대해 적던 것인지를 잃는다. 잡은 채
 //! 아무것도 안 하면 그 자리에서 터미널의 가운데 단추 붙여넣기와 끌어서 글 고르기만 말없이 사라지므로, 놓아서 터미널의
@@ -52,6 +52,20 @@ pub struct Drawn {
     /// 메뉴에서 누를 수 있는 칸과 그 칸의 키(moai-m6ni) — 격자의 항목(접혔으면 접두어 줄의 항목)과 접두어 줄의
     /// 나가는 법(`Esc 닫기`·`Bksp 위로`)이다. 칠한 쪽(`draw::menu_panel`·`menu_line`)이 칠한 자리에서 잰다.
     pub menu_keys: Vec<(Rect, KeyEvent)>,
+    /// 위키 창의 칸 자리(moai-o3cb) — 창이 떠 있을 때만 선다. 창은 몸통을 덮으므로 그동안 위의 목록·상세 자리는 창
+    /// 밑에 깔린 그림의 것이다.
+    pub wiki: Option<WikiAt>,
+}
+
+/// 위키 창이 그린 자리 — `draw::wiki_window` 가 낸다.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WikiAt {
+    /// 페이지 목록 — 테두리까지.
+    pub list: Rect,
+    /// 목록의 줄이 서는 자리 — 테두리를 뺀 안쪽. 이 자리의 n 번째 줄이 목록의 굴린 자리에서 n 만큼 내려간 페이지다.
+    pub rows: Rect,
+    /// 본문 칸 — 테두리까지. 좁아 안 섰으면 없다.
+    pub page: Option<Rect>,
 }
 
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
@@ -77,7 +91,7 @@ impl App {
     /// 단추 붙여넣기(X11 PRIMARY)가 말없이 사라지고, 휠도 이 에픽 전에는 터미널이 화살표 키로 바꿔 고르는 창을
     /// 굴렸다. 놓으면 그 둘이 이 에픽 전 그대로다.
     pub fn wants_mouse(&self) -> bool {
-        self.mouse_on && matches!(self.mode, Mode::Browse | Mode::Stats(_))
+        self.mouse_on && matches!(self.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_))
     }
 
     /// 마우스 사건 하나. **루프가 받은 그대로 넘긴다**(`cmd::tui::take`).
@@ -152,6 +166,9 @@ impl App {
             }
             return;
         }
+        if matches!(self.mode, Mode::Wiki(_)) {
+            return self.wiki_pointer(kind, wheel, at);
+        }
         if self.mode != Mode::Browse {
             return;
         }
@@ -173,6 +190,40 @@ impl App {
                 self.wheel(at, by);
             }
             _ => {}
+        }
+    }
+
+    /// 위키 창 위의 손짓(moai-o3cb). **누른 칸으로 포커스가 가고**, 목록의 줄을 눌렀으면 커서가 그 페이지로 간다 —
+    /// 본문은 커서를 따라간다. **휠은 포인터 아래 칸이 받고 포커스는 안 옮긴다**(2026-10-04 사용자 결정 — 탐색기의
+    /// 둘러보기와 같은 규칙, [`App::wheel`]). 칸 사이의 선은 이 창에서 끌리지 않는다 — 몫은 목록·상세의 것을 빌려 쓴다.
+    fn wiki_pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, at: Position) {
+        use super::wiki::Side;
+        let Some(d) = self.drawn.wiki else { return };
+        let on = if d.page.is_some_and(|r| r.contains(at)) {
+            Side::Page
+        } else if d.list.contains(at) {
+            Side::List
+        } else {
+            return;
+        };
+        let pressed = matches!(kind, MouseEventKind::Down(MouseButton::Left));
+        if !pressed && wheel.is_none() {
+            return;
+        }
+        self.acted();
+        let Mode::Wiki(w) = &mut self.mode else { return };
+        match wheel {
+            Some(by) => w.roll(on, by),
+            None => {
+                w.chord.clear();
+                w.focus = on;
+                if on == Side::List && d.rows.contains(at) {
+                    let n = w.list.offset() + usize::from(at.y - d.rows.y);
+                    if n < w.shown().len() {
+                        w.move_to(n);
+                    }
+                }
+            }
         }
     }
 

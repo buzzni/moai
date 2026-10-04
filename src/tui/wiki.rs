@@ -60,6 +60,8 @@ pub struct Window {
     trail: Vec<(String, usize)>,
     /// 접두어(`gg`·`Ctrl-w`)를 기다리는 열 — 탐색의 열과 따로다(통계 창과 같다).
     pub chord: Chord,
+    /// 본문 칸에 선 페이지를 펴 둔 한 벌 — 그리는 쪽(`draw::wiki_page`)이 채우고 읽는다. 값일 뿐이라 없어도 그림이 같다.
+    pub(super) laid: Option<super::draw::WikiLaid>,
 }
 
 impl Window {
@@ -76,6 +78,7 @@ impl Window {
             focus: Side::List,
             trail: Vec::new(),
             chord: Chord::default(),
+            laid: None,
         }
     }
 
@@ -87,6 +90,25 @@ impl Window {
     /// 커서가 선 페이지 — 본문 칸이 그리는 것.
     pub fn current(&self) -> Option<&Page> {
         self.shown().get(self.cursor).copied()
+    }
+
+    /// 건너온 자취가 남았는가 — 바가 `Bksp` 를 댈지 이것으로 가른다.
+    pub fn can_go_back(&self) -> bool {
+        !self.trail.is_empty()
+    }
+
+    /// 휠 한 칸(moai-o3cb) — **포인터 아래 칸이 받는다**(2026-10-04 사용자 결정, 탐색기의 2026-10-01 결정과 같다): 목록이면
+    /// 커서, 본문이면 굴리기. 포커스는 안 옮기고, 기다리던 접두어는 버린다 — 휠을 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면
+    /// 사람이 친 적 없는 맨 위로 가기가 선다(`stats::Window::roll` 과 같은 까닭).
+    pub(super) fn roll(&mut self, on: Side, by: isize) {
+        self.chord.clear();
+        match on {
+            Side::List => {
+                let len = self.shown().len();
+                self.move_to(scroll::cursor_by(by, self.cursor, || len));
+            }
+            Side::Page => self.page.by(by),
+        }
     }
 
     /// 이동 하나를 **포커스 칸에** 준다 — 목록이면 커서, 본문이면 굴리기. 탐색기의 `App::step` 과 같은 자다.
@@ -317,7 +339,7 @@ fn read_wiki(
 
 #[cfg(test)]
 pub(super) mod tests {
-    use super::super::{App, Mode, Pane};
+    use super::super::{App, Mode, Pane, draw};
     use super::{Side, Window};
     use crate::config::Config;
     use crate::model::{Issue, Kind, Status};
@@ -507,5 +529,119 @@ pub(super) mod tests {
         }
         a.hit("w");
         assert_eq!(a.notice, None, "창의 키가 알림을 안 걷었다");
+    }
+
+    fn press(a: &mut App, kind: ratatui::crossterm::event::MouseEventKind, column: u16, row: u16) {
+        use ratatui::crossterm::event::{KeyModifiers, MouseEvent};
+        a.mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE });
+    }
+
+    fn click(a: &mut App, column: u16, row: u16) {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        press(a, MouseEventKind::Down(MouseButton::Left), column, row);
+    }
+
+    fn wheel(a: &mut App, down: bool, column: u16, row: u16) {
+        use ratatui::crossterm::event::MouseEventKind;
+        press(a, if down { MouseEventKind::ScrollDown } else { MouseEventKind::ScrollUp }, column, row);
+    }
+
+    /// **목록 칸과 본문 칸이 선다** — 목록은 제목, 본문 칸의 머리는 제목과 경로, 안은 그린 마크다운이다. 바는 듣는 키만
+    /// 댄다: 자취가 없으면 `Bksp` 가 없고, 링크로 건너오면 선다. 어떤 크기에서도 터지지 않고, 좁으면 목록만 선다.
+    #[test]
+    fn the_window_draws_the_pages_and_the_page_under_the_cursor() {
+        let (_s, mut a) = wiki_app("draw", PAGES);
+        a.hit("SPC g w");
+        let lines = draw::tests::render(&mut a, 200, 24);
+        let screen = lines.join("\n");
+        assert!(screen.contains(" 위키 · ") && screen.contains(" · docs/ "), "목록 머리가 없다\n{screen}");
+        assert!(screen.contains("Guide") && screen.contains("Deep"), "목록에 페이지가 없다\n{screen}");
+        assert!(screen.contains(" Home · docs/README.md "), "본문 칸 머리가 없다\n{screen}");
+        assert!(screen.contains("Read the guide (guide.md) and argos-0001."), "본문이 안 그려졌다\n{screen}");
+        assert!(!screen.contains("[guide](guide.md)"), "마크다운이 원문으로 섰다\n{screen}");
+        let bar = lines.last().unwrap();
+        assert!(bar.contains("Enter 읽기") && bar.contains("Esc 닫기") && bar.contains("SPC 메뉴"), "{bar:?}");
+        assert!(!bar.contains("Bksp"), "자취가 없는데 Bksp 를 댔다: {bar:?}");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        w.follow("guide");
+        let bar = draw::tests::render(&mut a, 100, 24).last().cloned().unwrap();
+        assert!(bar.contains("Bksp 뒤로"), "자취가 있는데 Bksp 를 안 댔다: {bar:?}");
+
+        for (w, h) in [(1, 1), (4, 3), (12, 6), (19, 8), (20, 8), (30, 10), (80, 24), (160, 60)] {
+            let screen = draw::tests::render(&mut a, w, h).join("\n");
+            assert!(matches!(a.mode, Mode::Wiki(_)), "{w}x{h} 에서 창이 닫혔다");
+            if w < 20 {
+                assert_eq!(a.drawn.wiki.and_then(|d| d.page), None, "{w}칸에 본문이 섰다\n{screen}");
+            }
+        }
+        // 좁아 본문이 접히면 포커스는 목록으로 돌아온다 — 안 보이는 칸을 굴리는 키가 생기지 않게.
+        a.hit("Enter");
+        let _ = draw::tests::render(&mut a, 19, 10);
+        assert_eq!(window(&a).focus, Side::List);
+    }
+
+    /// **원문 토글이 창의 본문을 바꾼다**(`SPC v r`) — 메뉴는 열린 채 남고, 굴린 자리는 첫 줄로 돌아간다.
+    #[test]
+    fn spc_v_r_shows_the_page_as_written() {
+        let (_s, mut a) = wiki_app("raw", PAGES);
+        a.hit("SPC g w SPC v r");
+        assert!(super::super::menu::open(&a.chord), "원문 토글이 메뉴를 닫았다");
+        a.hit("Esc");
+        let screen = draw::tests::render(&mut a, 160, 24).join("\n");
+        assert!(screen.contains("Read the [guide](guide.md) and argos-0001."), "원문이 안 섰다\n{screen}");
+        a.hit("SPC v r Esc");
+        let screen = draw::tests::render(&mut a, 160, 24).join("\n");
+        assert!(!screen.contains("[guide](guide.md)"), "그린 글로 안 돌아왔다\n{screen}");
+    }
+
+    /// **못 읽은 페이지와 충돌 표시가 든 페이지는 낱말로 달리고**, 본문 칸은 `moai wiki show` 와 같은 말을 한다 — 충돌은
+    /// 원문 그대로에 경고 한 줄, 못 읽은 것은 까닭 한 줄.
+    #[test]
+    fn unread_and_conflicted_pages_say_so() {
+        let conflicted = "# Merge\n\n<<<<<<< ours\nmine\n=======\ntheirs\n>>>>>>> theirs\n";
+        let (s, mut a) = wiki_app("odd", &[("README.md", "# Home\n"), ("merge.md", conflicted)]);
+        std::fs::write(s.path().join("docs/bad.md"), [0xff, 0xfe, 0x00]).unwrap();
+        a.hit("SPC g w");
+        let titles: Vec<String> = window(&a).shown().iter().map(|p| p.title.clone()).collect();
+        assert_eq!(titles, ["Home", "bad", "Merge"]);
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(screen.contains("bad  ! 못 읽음"), "못 읽은 페이지에 낱말이 없다\n{screen}");
+        assert!(screen.contains("Merge  ! 충돌 표시"), "충돌 페이지에 낱말이 없다\n{screen}");
+        a.hit("j");
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(screen.contains("! 본문을 못 읽었다"), "못 읽은 까닭이 본문 칸에 없다\n{screen}");
+        a.hit("j");
+        let screen = draw::tests::render(&mut a, 120, 24).join("\n");
+        assert!(screen.contains("! 충돌 표시") && screen.contains("<<<<<<< ours"), "충돌이 원문으로 안 섰다\n{screen}");
+    }
+
+    /// **누른 칸으로 포커스가 가고 목록의 줄을 누르면 그 페이지다**. **휠은 포인터 아래 칸이 받고 포커스는 안 옮긴다**
+    /// (2026-10-04 사용자 결정). 메뉴가 열린 채 창을 누르면 메뉴를 닫고 그 누르기를 한다(moai-m6ni).
+    #[test]
+    fn a_click_picks_the_pane_and_the_page_and_the_wheel_moves_the_pane_under_it() {
+        let (_s, mut a) = wiki_app("mouse", PAGES);
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 100, 24);
+        let d = a.drawn.wiki.expect("창의 자리가 안 섰다");
+        let page = d.page.expect("본문 칸이 안 섰다");
+        // 목록의 둘째 줄.
+        click(&mut a, d.rows.x + 2, d.rows.y + 1);
+        assert_eq!((window(&a).cursor, window(&a).focus), (1, Side::List));
+        click(&mut a, page.x + 3, page.y + 2);
+        assert_eq!(window(&a).focus, Side::Page, "본문을 눌렀는데 포커스가 안 갔다");
+        // 휠은 포인터 아래 칸 — 본문에 포커스가 있어도 목록 위의 휠은 커서를 옮긴다.
+        wheel(&mut a, true, d.rows.x + 2, d.rows.y);
+        assert_eq!((window(&a).cursor, window(&a).focus), (2, Side::Page), "목록 위의 휠이 포커스를 옮겼다");
+        let _ = draw::tests::render(&mut a, 100, 8);
+        let page = a.drawn.wiki.and_then(|d| d.page).expect("낮은 창에 본문 칸이 안 섰다");
+        wheel(&mut a, true, page.x + 3, page.y + 1);
+        assert!(window(&a).page.offset() > 0, "본문 위의 휠이 안 굴렸다");
+        // 메뉴가 열린 채 목록 첫 줄을 누르면 메뉴가 닫히고 커서가 간다.
+        a.hit("SPC");
+        let _ = draw::tests::render(&mut a, 100, 24);
+        let d = a.drawn.wiki.unwrap();
+        click(&mut a, d.rows.x + 2, d.rows.y);
+        assert!(!super::super::menu::open(&a.chord), "창을 눌렀는데 메뉴가 안 닫혔다");
+        assert_eq!((window(&a).cursor, window(&a).focus), (0, Side::List));
     }
 }

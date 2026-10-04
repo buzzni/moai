@@ -148,21 +148,22 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 하는 법이, 거름망은 거절문의 둘째 줄(고칠 글·있는 항목)이 윗줄에 선다 — 글칸 뒤에 붙이면 적는
     // 글에 밀려 사라진다.
     let keys_h = if matches!(app.mode, Mode::Ask(_) | Mode::Filter(_)) { 2 } else { 1 };
-    // SPC 메뉴는 탐색 중과 통계 창 위에서만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다. 통계 창 위에서는 화면
-    // 고르기 하나만 선다(moai-z46r, `keys::Ctx::stats`).
+    // SPC 메뉴는 탐색 중과 덮는 창(통계·위키) 위에서만 선다 — 글칸으로 넘어가면 열이 버려져 저절로 닫힌다. 통계 창
+    // 위에서는 화면 고르기 하나만 서고(moai-z46r, `keys::Ctx::stats`), 위키 창 위에서는 원문이 하나 더 선다(`Ctx::wiki`).
     //
     // **창은 몸통을 밀어 올린다**(moai-apsa). 덮으면 커서가 선 줄이 창 밑에 숨어, 메뉴가 무엇에
     // 대한 것인지를 잃는다. 목록·상세는 줄어든 높이로 커서를 드러내므로(`Scroll::reveal`) 따로
     // 굴리지 않는다. 격자에 줄 높이는 몸통의 몫([`menu::BODY_MIN`])을 먼저 남기고 정하고, 그것도
     // 없으면 격자 없이 접두어 줄 한 줄로 접는다([`menu_line`]). 헤더의 높이(`header_h`)는 위에서 이미 셌다.
-    let open_menu = (matches!(app.mode, Mode::Browse | Mode::Stats(_)) && menu::open(&app.chord)).then(|| {
-        let ctx = app.key_ctx(&rows);
-        let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
-        let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
-        let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
-        // 이 층이 ESC 를 기다리는가는 켜진 항목에서 읽는다 — 접두어 줄이 그것으로 안내를 세운다.
-        (items, grid, menu::waits(app.chord.held(), &ctx))
-    });
+    let open_menu =
+        (matches!(app.mode, Mode::Browse | Mode::Stats(_) | Mode::Wiki(_)) && menu::open(&app.chord)).then(|| {
+            let ctx = app.key_ctx(&rows);
+            let items = menu::entries(app.chord.held(), &ctx, &app.screen_statuses());
+            let left = area.height.saturating_sub(header_h + 1 + banner_h + keys_h) as usize;
+            let grid = menu::grid(&items, (area.width as usize).saturating_sub(2), menu::rows_for(left));
+            // 이 층이 ESC 를 기다리는가는 켜진 항목에서 읽는다 — 접두어 줄이 그것으로 안내를 세운다.
+            (items, grid, menu::waits(app.chord.held(), &ctx))
+        });
     // **거름망을 적는 동안은 메뉴 자리에 안내가 선다**(moai-h2rh, 2026-10-03 사용자 결정) — 쓸 수 있는 항목과 예, 커서가
     // 값 자리면 고를 값이다. 메뉴처럼 몸통을 밀어 올리고 덮지 않는다. 줄 수도 메뉴와 같은 자로 몸통의 몫을 먼저 남긴다.
     //
@@ -234,6 +235,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         columns,
         menu,
         menu_keys: Vec::new(),
+        wiki: None,
     };
     if let Some(right) = right {
         detail(f, app, right, &rows);
@@ -260,11 +262,15 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     .unwrap_or_default();
     // 말도 **폼을 그리기 전에** 든다 — 밑의 `&mut app.mode` 가 `app` 을 통째로 빌린다.
     let lang = app.site.lang;
+    // 위키 창의 본문은 탐색과 한 원문 토글을 탄다(`App::raw`), 칸 몫도 목록·상세의 몫 그대로다(`App::list_width`).
+    let (raw, share) = (app.raw, app.list_width);
+    let mut wiki_at = None;
     match &mut app.mode {
         Mode::Idea(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
+        Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
         Mode::Ask(ask) => {
             if let Mode::Idea(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
@@ -272,6 +278,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         }
         _ => {}
     }
+    // 위키 창의 칸 자리 — 마우스가 맞힌다(moai-o3cb). 창이 몸통을 덮으므로 목록·상세의 자리 대신 이것을 읽는다.
+    app.drawn.wiki = wiki_at;
     // 메뉴에서 누를 수 있는 칸 — 격자 창과 접두어 줄이 칠한 자리에서 저마다 낸다(moai-m6ni). 다 그린 뒤 한 번 남긴다.
     let mut menu_keys = Vec::new();
     if let Some((_, grid, _)) = &open_menu {
@@ -371,7 +379,10 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => stats_keys(f, w, keys, app.site.lang),
         },
-        Mode::Wiki(_) => {}
+        Mode::Wiki(w) => match &open_menu {
+            Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
+            None => wiki_keys(f, w, keys, app.site.lang),
+        },
         Mode::Unregister(u) => {
             let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
             // **이름은 반까지만 받는다.** 이름은 겹치면 위 조각이 붙어 자라는 파생값이고
@@ -999,6 +1010,215 @@ fn stats_keys(f: &mut Frame, w: &super::stats::Window, at: Rect, lang: Lang) {
     let hint = |a: Stat| key(&label(STATS, a), a.what(weekly, lang));
     let menu = key(&menu::title(&[LEADER.event()]), menu::root(lang));
     bar(f, at, optional, vec![hint(Stat::Bucket), hint(Stat::Close), menu]);
+}
+
+/// 위키 창(moai-o3cb). 목록·상세 자리를 **통째로** 덮는다([`stats_window`] 와 같은 까닭) — 왼쪽은 페이지 목록, 오른쪽은
+/// 커서가 선 페이지의 본문이다. 칸 몫은 목록·상세의 몫([`split_body`] 의 좌우 갈래)을 그대로 쓴다: 사람이 끌어 고른
+/// 몫이 이 창에서만 다르면 같은 화면의 두 칸이 창을 열 때마다 너비를 바꾼다.
+///
+/// 칸 자리를 낸다 — 마우스가 다음 사건에서 맞힌다(`mouse::Drawn::wiki`).
+fn wiki_window(
+    f: &mut Frame,
+    w: &mut super::wiki::Window,
+    at: Rect,
+    raw: bool,
+    share: Option<u16>,
+    lang: Lang,
+) -> super::mouse::WikiAt {
+    f.render_widget(Clear, at);
+    // 본문이 설 자리가 없으면(좁은 창) 목록만 선다 — 상세가 접히는 것과 같은 바닥([`DETAIL_MIN_H`]·[`LIST_MIN_H`])이다.
+    let (list_at, page_at) = if at.width < LIST_MIN_H + DETAIL_MIN_H {
+        (at, None)
+    } else {
+        let floor = (u32::from(LIST_MIN_H) * 100).div_ceil(u32::from(at.width.max(1))).min(100) as u16;
+        let share = share.unwrap_or(LEFT).max(floor);
+        let [a, b] = Layout::horizontal([Constraint::Percentage(share), Constraint::Min(DETAIL_MIN_H)]).areas(at);
+        (a, Some(b))
+    };
+    // **안 선 칸에는 포커스가 못 선다** — 본문이 접혔으면 목록으로 되돌린다(`screen` 의 상세와 같은 자리).
+    if page_at.is_none() {
+        w.focus = super::wiki::Side::List;
+    }
+    let rows = wiki_list(f, w, list_at, lang);
+    if let Some(page_at) = page_at {
+        wiki_page(f, w, page_at, raw, lang);
+    }
+    super::mouse::WikiAt { list: list_at, rows, page: page_at }
+}
+
+/// 위키 창의 칸 테두리 — 포커스가 선 칸은 굵은 초록이다([`frame`] 과 같은 꼴).
+fn wiki_frame(focused: bool) -> Block<'static> {
+    let block = Block::default().borders(Borders::ALL);
+    if focused { block.border_type(BorderType::Thick).border_style(from_anstyle(style::FOCUS)) } else { block }
+}
+
+/// 위키 창의 페이지 목록 — 제목만 선다(경로는 본문 칸의 머리가 댄다). 못 읽은 페이지와 충돌 표시가 든 페이지는
+/// **낱말로** 달린다 — 색이 혼자 뜻을 지지 않는다. 걷다가 못 세운 자리는 아래 테두리가 수를 댄다. 줄 자리를 낸다.
+fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -> Rect {
+    use crate::wiki::Unread;
+    let focused = w.focus == super::wiki::Side::List;
+    let inner_w = at.width.saturating_sub(2) as usize;
+    let room = inner_w.saturating_sub(crate::text::width(CURSOR));
+    let shown = w.shown();
+    let items: Vec<ListItem> = shown
+        .iter()
+        .map(|p| {
+            let mark = if p.conflict {
+                Some(say(lang, "tui.wiki.mark_conflict"))
+            } else {
+                match &p.error {
+                    Some(Unread::TooLarge) => Some(say(lang, "tui.wiki.mark_too_large")),
+                    Some(_) => Some(say(lang, "tui.wiki.mark_unread")),
+                    None => None,
+                }
+            };
+            let tail = mark.map(|m| format!("  ! {m}")).unwrap_or_default();
+            // 표시가 먼저 자리를 얻는다 — 긴 제목이 표시를 밀어내면 못 읽은 페이지가 멀쩡한 줄로 선다.
+            let title = clip(&crate::text::one_line(&p.title), room.saturating_sub(crate::text::width(&tail)).max(1));
+            let mut spans = vec![Span::raw(title)];
+            if !tail.is_empty() {
+                spans.push(Span::styled(tail, from_anstyle(style::WARN)));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+    let n = shown.len();
+    let title = format!(
+        " {} · {} · {}/ ",
+        say(lang, "tui.wiki.title"),
+        crate::text::one_line(&w.project),
+        crate::text::one_line(&w.dir)
+    );
+    let mut block = wiki_frame(focused).title(clip(&title, inner_w));
+    if w.skipped > 0 {
+        let said = fill(say(lang, "tui.wiki.skipped"), &[("n", &w.skipped.to_string())]);
+        block = block.title_bottom(Line::from(Span::styled(clip(&format!(" {said} "), inner_w / 2), dim())));
+    }
+    let inner = block.inner(at);
+    w.cursor = w.cursor.min(n.saturating_sub(1));
+    w.list.fit(inner.height as usize, n);
+    w.list.reveal(w.cursor);
+    let selected = (n > 0).then_some(w.cursor);
+    let mut state = ListState::default().with_offset(w.list.offset()).with_selected(selected);
+    // **포커스가 본문에 있어도 커서 줄은 보인다** — 본문이 그 줄의 페이지라, 어느 페이지를 읽는지가 목록에서 읽혀야
+    // 한다. 반전은 포커스 칸에만 두고 다른 칸에서는 굵게만 선다.
+    let look = if focused { Style::new().add_modifier(Modifier::REVERSED) } else { bold() };
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(look)
+            .highlight_symbol(CURSOR)
+            .highlight_spacing(HighlightSpacing::Always),
+        at,
+        &mut state,
+    );
+    let hint = if focused { String::new() } else { format!(" ({})", label(keys::WIKI, keys::Wiki::FocusNext)) };
+    scroll_mark(f, &w.list, at, &hint, focused, lang);
+    inner
+}
+
+/// 위키 창의 본문을 펴 둔 한 벌 — 상세의 [`Body`] 와 같은 까닭이다(moai-fauw): 그리는 쪽이 프레임마다 다시 펴면 `j` 를
+/// 누르고 있는 동안 키마다 마크다운을 판다. **정체는 슬러그·폭·원문 토글이다** — 창은 연 순간 읽은 페이지를 들어
+/// 그 사이 글이 안 바뀌므로 글을 견줄 까닭이 없다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct WikiLaid {
+    slug: String,
+    w: usize,
+    raw: bool,
+    lines: Vec<Line<'static>>,
+}
+
+/// 페이지 하나를 본문 칸의 줄로 — 충돌 표시가 든 페이지는 원문 그대로에 경고 한 줄, 못 읽은 페이지는 까닭 한 줄이다.
+/// 말과 꼴은 `moai wiki show` 와 같다(`view::wiki::page`).
+fn wiki_lines(p: &crate::wiki::Page, w: usize, raw: bool, lang: Lang) -> Vec<Line<'static>> {
+    let warn = from_anstyle(style::WARN);
+    match (&p.body, &p.error) {
+        (Some(body), _) if p.conflict => {
+            let said = fill(say(lang, "wiki.conflict_raw"), &[("path", &crate::text::one_line(&p.path))]);
+            let mut out = wrapped(&format!("! {said}"), w, warn);
+            out.push(Line::from(""));
+            out.extend(crate::text::sanitize(body).lines().map(|l| Line::from(l.to_string())));
+            out
+        }
+        (Some(body), _) => body_lines(crate::wiki::unmarked(body), w, raw),
+        (None, Some(u)) => {
+            let said = fill(say(lang, "wiki.body_unread"), &[("said", &crate::view::wiki::unread(lang, p, u))]);
+            wrapped(&format!("! {said}"), w, warn)
+        }
+        (None, None) => Vec::new(),
+    }
+}
+
+/// 위키 창의 본문 칸 — 머리는 제목과 경로, 안은 커서가 선 페이지다. **보이는 줄만 자른다** — 생성 페이지
+/// (`docs/cli.md`)는 수천 줄이라 프레임마다 전부를 손보면 굴리는 키가 무거워진다.
+fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, lang: Lang) {
+    let focused = w.focus == super::wiki::Side::Page;
+    let block = wiki_frame(focused).padding(Padding::horizontal(left_gutter() as u16));
+    let inner = block.inner(at);
+    let width = inner.width as usize;
+    let title = w
+        .current()
+        .map(|p| format!(" {} · {} ", crate::text::one_line(&p.title), crate::text::one_line(&p.path)))
+        .unwrap_or_default();
+    // 든 것이 그 페이지·그 폭·그 토글의 것이 아닐 때만 다시 편다.
+    let fresh = match w.current() {
+        Some(p) if !w.laid.as_ref().is_some_and(|l| l.slug == p.slug && l.w == width && l.raw == raw) => {
+            Some(WikiLaid { slug: p.slug.clone(), w: width, raw, lines: wiki_lines(p, width, raw, lang) })
+        }
+        _ => None,
+    };
+    if fresh.is_some() {
+        w.laid = fresh;
+    }
+    let lines: &[Line<'static>] = match (&w.laid, w.current()) {
+        (Some(l), Some(_)) => &l.lines,
+        _ => &[],
+    };
+    let len = lines.len();
+    let visible: Vec<Line> = lines
+        .iter()
+        .skip(w.page.offset().min(len))
+        .take(inner.height as usize)
+        .cloned()
+        .map(|l| fit(l, width))
+        .collect();
+    w.page.fit(inner.height as usize, len);
+    f.render_widget(block.title(clip(&title, at.width.saturating_sub(2) as usize)), at);
+    let hint = if focused {
+        labels(keys::WIKI, &[keys::Wiki::Step(Move::LineDown), keys::Wiki::Step(Move::LineUp)])
+    } else {
+        label(keys::WIKI, keys::Wiki::FocusNext)
+    };
+    scroll_mark(f, &w.page, at, &format!(" ({hint})"), focused, lang);
+    f.render_widget(Paragraph::new(visible), inner);
+}
+
+/// 위키 창의 키 바 — 이름과 낱말은 키 표([`keys::WIKI`])에서 읽는다. **듣는 키만 적는다**: 건너온 자취가 없으면
+/// `Bksp` 를 안 댄다(눌러도 아무 일이 없다).
+fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
+    use super::keys::{WIKI, Wiki};
+    let on_page = w.focus == super::wiki::Side::Page;
+    let what = |a: Wiki| a.what(on_page, false, lang);
+    if !w.chord.held().is_empty() {
+        let next = keys::next_keys(WIKI, w.chord.held())
+            .into_iter()
+            .map(|(k, a)| (k, if let Wiki::Step(m) = a { keys::move_word(m, lang) } else { what(a) }))
+            .collect();
+        return bar(f, at, Vec::new(), vec![waiting(w.chord.held(), next)]);
+    }
+    let hint = |a: Wiki| key(&label(WIKI, a), what(a));
+    let moves = labels(WIKI, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
+    let optional = vec![key(&moves, what(Wiki::Step(Move::LineDown))), hint(Wiki::FocusNext)];
+    let mut keep = Vec::new();
+    if !on_page {
+        keep.push(hint(Wiki::Enter));
+    }
+    if w.can_go_back() {
+        keep.push(hint(Wiki::Back));
+    }
+    keep.push(hint(Wiki::Close));
+    keep.push(key(&menu::title(&[LEADER.event()]), menu::root(lang)));
+    bar(f, at, optional, keep);
 }
 
 /// 창의 한 줄: `apps/  .moai  ✓ 등록됨`. `./` 은 지금 디렉터리, `..` 은 위로.
