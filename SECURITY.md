@@ -39,7 +39,9 @@ behaviour:
 - `install.sh` and the release artifacts: a downloaded archive that does not
   match `SHA256SUMS` must never be installed, and there is deliberately no flag
   to skip that check.
-- The release check the explorer makes once a day. One field of a GitHub API
+- The release check the explorer makes once a day, and once more after an
+  upgrade while the answer it kept is older than the running moai. One field of
+  a GitHub API
   response (`tag_name`) becomes a line on screen and is kept for a day in
   `latest.toml` next to your user config, so that field is measured where it
   comes in: it is rejected unless it is one short line with no control
