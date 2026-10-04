@@ -979,7 +979,7 @@
   "tui.wiki.choose_title": "링크 · {title}",
   "tui.wiki.unresolved": "(없음)",
   "tui.wiki.external": "(밖)",
-  "tui.wiki.no_links": "이 페이지는 페이지도 이슈도 대지 않는다",
+  "tui.wiki.no_links": "이 페이지는 페이지도 이슈도 대지 않고, 이리 오는 페이지도 없다",
   "tui.wiki.missing_page": "위키에 {to} 페이지가 없다 — 가는 데가 없는 링크다",
   "tui.wiki.outside": "위키 밖 주소다: {dest}",
   "tui.wiki.missing_id": "{id} 는 트래커에 없다",
@@ -1004,5 +1004,6 @@
   "wiki.notice_conflict": "충돌 표시가 든 페이지 {n}  {which}",
   "wiki.notice_unresolved": "페이지로 안 풀리는 링크 {n}  {which}",
   "wiki.notice_missing": "트래커에 없는 id {n}  {which}",
-  "wiki.conflict_raw": "충돌 표시가 있다 — 원문 그대로 보인다. {path} 의 병합을 풀고 커밋한다"
+  "wiki.conflict_raw": "충돌 표시가 있다 — 원문 그대로 보인다. {path} 의 병합을 풀고 커밋한다",
+  "wiki.linked_from": "이 페이지를 가리키는 페이지  {which}"
 }

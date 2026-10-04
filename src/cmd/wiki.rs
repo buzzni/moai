@@ -15,7 +15,7 @@ use crate::wiki::{self, DirTrouble, IssueRef, Link, Page, Wiki};
 use std::collections::HashSet;
 
 pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
-    let (dir, wiki) = read(ctx, None)?;
+    let (dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
         Err(t) => return trouble(ctx, &dir, &t, false),
@@ -33,7 +33,10 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
 }
 
 pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
-    let (dir, wiki) = read(ctx, Some(slug))?;
+    // 위키 전부를 읽는다 — 역링크는 다른 페이지가 적은 링크다(moai-ogaw). **종료 코드는 물은 페이지만 본다**: 다른
+    // 페이지를 못 읽어 역링크가 덜 셌어도 그 페이지는 `moai wiki ls` 가 대고, 여기서 비영이면 옆 파일 하나가 멀쩡한
+    // 페이지의 `show` 를 실패로 세운다.
+    let (dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
         Err(t) => return trouble(ctx, &dir, &t, true),
@@ -51,9 +54,8 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     Ok(crate::view::wiki::page(ctx.lang(), page))
 }
 
-/// 트래커를 열고(id 가 있는가를 물을 자리) 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께. `only` 가
-/// 서면 그 슬러그의 본문만 읽는다([`wiki::load_one`]).
-fn read(ctx: &Ctx, only: Option<&str>) -> R<(String, Result<Wiki, DirTrouble>)> {
+/// 트래커를 열고(id 가 있는가를 물을 자리) 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께.
+fn read(ctx: &Ctx) -> R<(String, Result<Wiki, DirTrouble>)> {
     let repo = super::open_repo(ctx)?;
     let load = repo.read()?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
@@ -63,10 +65,7 @@ fn read(ctx: &Ctx, only: Option<&str>) -> R<(String, Result<Wiki, DirTrouble>)> 
         load.issues.iter().map(|i| i.id.as_str()).chain(reserved.iter().map(String::as_str)).collect();
     let dir = repo.config.wiki_dir.clone();
     let known = |id: &str| ids.contains(id);
-    let wiki = match only {
-        None => wiki::load(repo.here(), &dir, &repo.config.prefix, &known),
-        Some(slug) => wiki::load_one(repo.here(), &dir, slug, &repo.config.prefix, &known),
-    };
+    let wiki = wiki::load(repo.here(), &dir, &repo.config.prefix, &known);
     Ok((dir, wiki))
 }
 
@@ -156,7 +155,8 @@ struct Told {
 }
 
 /// 페이지 하나. `error` 는 본문을 못 읽은 페이지에만 서고 없으면 다 읽은 것이다 — `commits_error`·`journal_error`
-/// 와 같은 약속이다(2026-10-04 사용자 결정). `body` 는 `show` 만 낸다 — 늘 원문이다.
+/// 와 같은 약속이다(2026-10-04 사용자 결정). `body` 는 `show` 만 낸다 — 늘 원문이다. `linked_from` 은 이 페이지를
+/// 가리키는 페이지의 슬러그고 **늘 선다** — 아무도 안 가리키면 `[]` 다(2026-10-04 사용자 결정, moai-ogaw).
 #[derive(serde::Serialize)]
 struct PageOut<'a> {
     slug: &'a str,
@@ -165,6 +165,7 @@ struct PageOut<'a> {
     bytes: u64,
     issues: &'a [IssueRef],
     links: &'a [Link],
+    linked_from: &'a [String],
     conflict: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<Told>,
@@ -181,6 +182,7 @@ impl<'a> PageOut<'a> {
             bytes: p.bytes,
             issues: &p.issues,
             links: &p.links,
+            linked_from: &p.linked_from,
             conflict: p.conflict,
             error: p.error.as_ref().map(|u| Told { kind: u.kind(), said: crate::view::wiki::unread(lang, p, u) }),
             body: if body { p.body.as_deref() } else { None },

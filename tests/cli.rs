@@ -23267,16 +23267,54 @@ fn the_wiki_json_is_the_contract_the_skill_reads() {
 
     let ls = ok(s.path(), &["wiki", "ls", "--json"]);
     let want_home = format!(
-        r#"{{"slug":"README","title":"Home","path":"docs/README.md","bytes":{},"issues":[{{"id":"{id}","exists":true}},{{"id":"argos-zzzz","exists":false}}],"links":[{{"text":"Guide","to":"guide/a","resolved":true}},{{"text":"gone","to":"nope","resolved":false}}],"conflict":false}}"#,
+        r#"{{"slug":"README","title":"Home","path":"docs/README.md","bytes":{},"issues":[{{"id":"{id}","exists":true}},{{"id":"argos-zzzz","exists":false}}],"links":[{{"text":"Guide","to":"guide/a","resolved":true}},{{"text":"gone","to":"nope","resolved":false}}],"linked_from":["guide/a"],"conflict":false}}"#,
         home.len()
     );
-    let want_guide = r#"{"slug":"guide/a","title":"A guide","path":"docs/guide/a.md","bytes":32,"issues":[],"links":[{"text":"home","to":"README","resolved":true}],"conflict":false}"#;
+    let want_guide = r#"{"slug":"guide/a","title":"A guide","path":"docs/guide/a.md","bytes":32,"issues":[],"links":[{"text":"home","to":"README","resolved":true}],"linked_from":["README"],"conflict":false}"#;
     assert_eq!(ls.trim_end(), format!(r#"{{"dir":"docs","pages":[{want_home},{want_guide}]}}"#));
 
     let show = ok(s.path(), &["wiki", "show", "README", "--json"]);
     let body = home.replace('\n', "\\n");
     let open = want_home.strip_suffix('}').unwrap();
     assert_eq!(show.trim_end(), format!(r#"{open},"body":"{body}"}}"#));
+}
+
+/// **`show` 도 역링크를 낸다**(2026-10-04 사용자 결정, moai-ogaw) — 사람 화면의 꼬리 한 줄과 `--json` 의
+/// `linked_from`. 페이지 하나를 볼 때도 모든 본문을 읽어 센다. 아무도 안 가리키는 페이지는 줄이 없고 키는 `[]` 다.
+///
+/// **종료 코드는 물은 페이지만 본다** — 곁의 페이지를 못 읽어도(체크아웃 밖 링크) 멀쩡한 페이지의 `show` 는 0 이다.
+/// 못 읽은 페이지는 링크가 없어 아무것도 안 가리킨다. 곁의 것은 stderr 에도 알림에도 안 선다 — 걸러 둔 디렉터리
+/// 링크(`ls` 는 stderr 로 댄다)도, 곁의 페이지의 없는 링크·없는 id 도. 빈칸이 든 슬러그는 셸 낱말로 감싸 선다.
+#[cfg(unix)]
+#[test]
+fn wiki_show_names_the_pages_that_link_to_it() {
+    let s = init("wiki-backlinks");
+    let away = Scratch::new("wiki-backlinks-away");
+    let docs = s.path().join("docs");
+    std::fs::create_dir_all(docs.join("guide")).unwrap();
+    std::fs::write(docs.join("README.md"), "# Home\n\n[target](guide/t.md)\n").unwrap();
+    std::fs::write(docs.join("guide/t.md"), "# Target\n\n[me](t.md#top)\n").unwrap();
+    std::fs::write(docs.join("work.md"), "# Work\n\n[t](guide/t.md) [again](guide/t.md) [gone](gone.md) argos-zzzz\n")
+        .unwrap();
+    std::fs::write(docs.join("my page.md"), "# My page\n\n[t](guide/t.md)\n").unwrap();
+    std::fs::write(away.path().join("secret.md"), "# Secret\n\n[t](guide/t.md)\n").unwrap();
+    std::os::unix::fs::symlink(away.path().join("secret.md"), docs.join("out.md")).unwrap();
+    std::os::unix::fs::symlink(away.path(), docs.join("away")).unwrap();
+
+    let out = moai(s.path(), &["wiki", "show", "guide/t"]);
+    let (shown, err) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success() && err.is_empty(), "곁의 것이 `show` 의 종료 코드나 stderr 를 바꿨다 — {err}");
+    assert!(shown.contains("이 페이지를 가리키는 페이지  README, 'my page', work\n"), "{shown}");
+    assert!(!shown.contains("gone") && !shown.contains("argos-zzzz"), "곁의 페이지의 알림이 섰다\n{shown}");
+    let json = ok(s.path(), &["wiki", "show", "guide/t", "--json"]);
+    assert!(
+        json.contains(r#""linked_from":["README","my page","work"]"#),
+        "제 링크·두 번 건 링크·못 읽은 페이지를 셌다 — {json}"
+    );
+    let home = ok(s.path(), &["wiki", "show", "README", "--json"]);
+    assert!(home.contains(r#""linked_from":[]"#), "아무도 안 가리키는 페이지의 키가 빠졌다 — {home}");
+    assert!(!ok(s.path(), &["wiki", "show", "README"]).contains("가리키는 페이지"), "빈 역링크에 줄이 섰다");
+    assert!(!moai(s.path(), &["wiki", "ls"]).status.success(), "곁의 못 읽는 페이지가 목록에서 안 섰다");
 }
 
 /// **위키는 이 체크아웃에서, 트래커는 루트에서 읽는다**(moai-ihu4). 워크트리에서 쓴 페이지는 그 워크트리의 목록에만

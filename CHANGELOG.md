@@ -24,8 +24,11 @@ does not tag — see `CONTRIBUTING.md`.
   read while the ids are still looked up in the main checkout's tracker. `ls`
   counts the links that lead to no page, the ids the tracker does not have and
   the pages left with conflict markers, and blocks nothing; a page over 1 MB
-  stays in the list unread. `--json` gives each page's `slug`, `title`, `path`,
-  `bytes`, `issues`, `links` and `conflict`, an `error` on a page that could not
+  stays in the list unread. `show` ends with the pages that link to the one
+  shown. `--json` gives each page's `slug`, `title`, `path`, `bytes`, `issues`,
+  `links`, `linked_from` (the slugs of the pages linking to it, in list order,
+  `[]` when none does — counted from the other pages' links every time, so
+  `show` reads every page) and `conflict`, an `error` on a page that could not
   be read, `skipped` for what the walk left out (a link to a directory, a name
   that is not UTF-8, a directory it could not open), and `body` under `show`. A `wiki_dir` that does not exist yet exits
   0; one that is absolute, climbs out with `..`, leads out of the checkout or
@@ -49,8 +52,9 @@ does not tag — see `CONTRIBUTING.md`.
   lists stand on the left, home page first, and the right pane shows the page
   under the cursor, drawn like an issue body. It reads the project you are in,
   or on the overview (`0`) the project of the row under the cursor, and it only
-  reads — pages are files you edit and commit. `Enter` on a page lists its links
-  and the issue ids it names: a page link goes there and `Bksp` comes back, an id
+  reads — pages are files you edit and commit. `Enter` on a page lists its links,
+  the issue ids it names and then the pages that link to it, marked `←`: a page
+  goes there and `Bksp` comes back, an id
   closes the window onto that row (from the overview, inside that project), and
   a link that leads nowhere, an address outside the wiki or an id the tracker
   does not hold is marked and only says so. `/` searches the titles and bodies of

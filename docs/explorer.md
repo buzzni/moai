@@ -63,9 +63,10 @@ are kept in your user config and carry over to the next run and to every project
   `Ctrl-d`/`Ctrl-u` and `Ctrl-f`/`Ctrl-b` scroll the page list without moving
   the cursor, as on the main list. `Enter` on
   the list goes to the page; `Enter` on the page lists its links and the issue
-  ids it names. Taking a page link goes there and `Backspace` comes back; taking
-  an id closes the window onto that row, inside that project when you opened it
-  from the overview. A link that leads nowhere, an address outside the wiki and
+  ids it names, then the pages that link to it, marked `←`. Taking a page —
+  either way — goes there and `Backspace` comes back; taking an id closes the
+  window onto that row, inside that project when you opened it from the
+  overview. A link that leads nowhere, an address outside the wiki and
   an id the tracker does not hold stay in that list marked `(none)` or
   `(outside)`, and taking one only says so. `/` searches the titles and bodies
   and narrows the list. `Esc` clears that search first, then goes back to where
@@ -184,4 +185,4 @@ line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw

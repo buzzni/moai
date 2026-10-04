@@ -423,13 +423,15 @@ IDEA
   come first, the rest by title.
 
   moai wiki ls                  every page, and what does not resolve
-  moai wiki show <slug>         one page, drawn. `--json` gives the raw body
+  moai wiki show <slug>         one page, drawn, and the pages linking to it.
+                                `--json` gives the raw body
 
   **Nothing is stored.** The tracker holds no page and no index - the list,
-  the links and the ids are read from the files every time. Pages are
-  documents, so they ride the branch: inside a linked worktree they are read
-  from that worktree, while the tracker still goes to the main checkout. Git
-  merges them like any other file.
+  the links, the pages linking to each page (`linked_from`) and the ids are
+  read from the files every time. Pages are documents, so they ride the
+  branch: inside a linked worktree they are read from that worktree, while
+  the tracker still goes to the main checkout. Git merges them like any
+  other file.
 
   There is no command that writes a page - edit the file and commit it. A
   page names an issue by its bare id, as a commit subject does, and another
@@ -658,17 +660,17 @@ IDEA
   Ctrl-f, Ctrl-b and the wheel scroll it and leave the cursor and the page
   where they are, as in the explorer's list. Enter on the list goes to the
   page and Ctrl-w w goes back and forth. On the page, Enter opens a list of
-  its links and the issue ids it names, which moves with j, k, gg, G,
-  Ctrl-d, Ctrl-u, Ctrl-f and Ctrl-b, takes one with Enter and closes on Esc.
-  Taking a page link goes there and Bksp comes back the way you came. Taking
-  an id closes the window onto that row (from the one list, inside that
-  project). Links that lead nowhere, addresses outside the wiki and ids
-  the tracker does not hold are marked and only say so. / searches the
-  titles and bodies of the pages and narrows the list as you type, and Esc
-  clears that search first and then closes the window, with the cursor, the
-  filter and the detail as they were. SPC opens the menu over it with the
-  screens and SPC v r (raw or rendered). The window is read fresh every time
-  and nothing of it is kept.
+  its links and the issue ids it names, then the pages linking to it (marked
+  ←), which moves with j, k, gg, G, Ctrl-d, Ctrl-u, Ctrl-f and Ctrl-b, takes
+  one with Enter and closes on Esc. Taking a page link or a page linking
+  here goes there and Bksp comes back the way you came. Taking an id closes
+  the window onto that row (from the one list, inside that project). Links
+  that lead nowhere, addresses outside the wiki and ids the tracker does not
+  hold are marked and only say so. / searches the titles and bodies of the
+  pages and narrows the list as you type, and Esc clears that search first
+  and then closes the window, with the cursor, the filter and the detail as
+  they were. SPC opens the menu over it with the screens and SPC v r (raw or
+  rendered). The window is read fresh every time and nothing of it is kept.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on
