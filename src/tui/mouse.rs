@@ -8,7 +8,7 @@
 //! 그 화면이다. 키가 상세의 끝을 마지막으로 그린 줄 수로 가늠하는 것(`Scroll::go`)과 같은 결이다.
 //!
 //! **듣는 자리는 셋이다**(사용자 결정 2026-10-01, 위키 창은 moai-o3cb). 목록·상세를 둘러보는 동안(한눈 보기 `0` 도
-//! 같은 칸이다)과 통계 창 위의 휠, 위키 창의 누르기·휠이다 — 그 위에 뜬 SPC 메뉴는 아래 문단이 본다. 폼·묻는 칸·고르는 창·지우기 확인·글을 받는
+//! 같은 칸이다)과 통계 창 위의 휠, 위키 창의 누르기·휠·선 끌기(moai-p61w)다 — 그 위에 뜬 SPC 메뉴는 아래 문단이 본다. 폼·묻는 칸·고르는 창·지우기 확인·글을 받는
 //! 칸이 떠 있으면 **마우스를 아예 놓는다**([`App::wants_mouse`], 리뷰 뒤 사용자 결정 2026-10-01) — 그 창들은 키로
 //! 다루는 자리고, 뒤의 목록을 누른 것이 적던 글을 두고 커서를 옮기면 무엇에 대해 적던 것인지를 잃는다. 잡은 채
 //! 아무것도 안 하면 그 자리에서 터미널의 가운데 단추 붙여넣기와 끌어서 글 고르기만 말없이 사라지므로, 놓아서 터미널의
@@ -61,7 +61,7 @@ pub struct Drawn {
 }
 
 /// 위키 창이 그린 자리 — `draw::wiki_window` 가 낸다.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WikiAt {
     /// 페이지 목록 — 테두리까지.
     pub list: Rect,
@@ -72,6 +72,9 @@ pub struct WikiAt {
     pub top: usize,
     /// 본문 칸 — 테두리까지. 좁아 안 섰으면 없다.
     pub page: Option<Rect>,
+    /// 본문 칸에 보이는 링크 칸과 그 링크(moai-p61w) — 본문에서 링크가 열린 차례다. 골라진 링크를 칠한 칸과 같은 자리에서
+    /// 잰다(`draw::shown_links`). 고르기 창이 본문을 덮었으면 비었다.
+    pub links: Vec<(Rect, usize)>,
 }
 
 /// 잡은 선(moai-irrj.mhr) — 끄는 동안 `App::dragging` 이 든다.
@@ -85,8 +88,11 @@ pub struct Grab {
     /// 그때 선이 선 칸 — 앞에 선 칸(왼쪽·위)의 끝 테두리.
     line: u16,
     /// 잡기 전의 몫. 손이 잡은 칸으로 돌아오면 이 몫으로 돌아간다 — 선을 누르다 손이 옆으로 미끄러진 것만으로는
-    /// 처음값이 설정에 박히지 않는다(`App::list_width`).
+    /// 처음값이 설정에 박히지 않는다(`App::list_width`·`App::wiki_width`).
     was: Option<u16>,
+    /// 위키 창의 선을 잡았는가(moai-p61w) — 그때는 위키 창의 몫(`App::wiki_width`)을 옮긴다. 목록·상세의 선과
+    /// 몫이 따로라(2026-10-04 사용자 결정) 어느 선을 잡았는지를 끝까지 든다.
+    wiki: bool,
 }
 
 impl App {
@@ -208,7 +214,14 @@ impl App {
 
     /// 위키 창 위의 손짓(moai-o3cb). **누른 칸으로 포커스가 가고**, 목록의 줄을 눌렀으면 커서가 그 페이지로 간다 —
     /// 본문은 커서를 따라간다. **휠은 포인터 아래 칸이 받고 포커스는 안 옮긴다**(2026-10-04 사용자 결정 — 탐색기의
-    /// 둘러보기와 같은 규칙, [`App::wheel`]). 칸 사이의 선은 이 창에서 끌리지 않는다 — 몫은 목록·상세의 것을 빌려 쓴다.
+    /// 둘러보기와 같은 규칙, [`App::wheel`]).
+    ///
+    /// **칸 사이의 선을 끌면 두 칸의 폭이 바뀐다**(2026-10-04 사용자 요청, moai-p61w) — 목록·상세의 선과 같은 손짓
+    /// ([`App::wiki_grab_at`]·[`App::drag_to`])이고, 몫은 이 창의 것(`App::wiki_width`)이라 탐색기의 가름은 안 움직인다
+    /// (사용자 결정). 놓을 때 한 번 설정에 적는다([`App::drop_line`]).
+    ///
+    /// **본문의 링크를 누르면 그 링크로 간다**(2026-10-04 사용자 요청, moai-p61w) — 골라 `Enter` 를 친 것과 같은 길이다
+    /// (`App::go_link`). 맞히는 칸은 지난 프레임이 그린 링크 칸([`WikiAt::links`])이다.
     ///
     /// **찾는 칸이나 고르기 창이 떠 있으면 버린다** — 그동안은 마우스를 놓는데([`App::wants_mouse`]), 놓는 글이 터미널에
     /// 닿기 전에 길에 있던 휠·누르기가 여기 닿는다. 받으면 고르기 창의 링크가 커서를 따라 바뀐 다른 페이지 머리 밑에
@@ -218,7 +231,21 @@ impl App {
         if !self.wants_mouse() {
             return;
         }
-        let Some(d) = self.drawn.wiki else { return };
+        if let (MouseEventKind::Drag(MouseButton::Left), Some(grab)) = (kind, self.dragging) {
+            return self.drag_to(grab, at);
+        }
+        // 빌려서 맞힌다 — 휠·끌기는 몰아 오니 사건마다 링크 칸 열을 베끼지 않는다.
+        let Some(d) = self.drawn.wiki.as_ref() else { return };
+        let pressed = matches!(kind, MouseEventKind::Down(MouseButton::Left));
+        if pressed && let Some(grab) = self.wiki_grab_at(d, at) {
+            self.acted();
+            // 창의 열도 버린다 — 선을 잡은 손짓을 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면 안 된다([`App::acted`]).
+            if let Mode::Wiki(w) = &mut self.mode {
+                w.chord.clear();
+            }
+            self.dragging = Some(grab);
+            return;
+        }
         let on = if d.page.is_some_and(|r| r.contains(at)) {
             Side::Page
         } else if d.list.contains(at) {
@@ -226,10 +253,11 @@ impl App {
         } else {
             return;
         };
-        let pressed = matches!(kind, MouseEventKind::Down(MouseButton::Left));
         if !pressed && wheel.is_none() {
             return;
         }
+        let row = (on == Side::List && d.rows.contains(at)).then(|| d.top + usize::from(at.y - d.rows.y));
+        let link = d.links.iter().find(|(r, _)| on == Side::Page && r.contains(at)).map(|&(_, k)| k);
         self.acted();
         let Mode::Wiki(w) = &mut self.mode else { return };
         match wheel {
@@ -237,11 +265,11 @@ impl App {
             None => {
                 w.chord.clear();
                 w.focus = on;
-                if on == Side::List && d.rows.contains(at) {
-                    let n = d.top + usize::from(at.y - d.rows.y);
-                    if n < w.shown().len() {
-                        w.move_to(n);
-                    }
+                if let Some(n) = row.filter(|&n| n < w.shown().len()) {
+                    w.move_to(n);
+                }
+                if let Some(k) = link {
+                    self.go_link(k);
                 }
             }
         }
@@ -306,7 +334,22 @@ impl App {
             (at.x, front.right(), self.list_width)
         };
         let line = end.checked_sub(1)?;
-        (d.body.contains(at) && (p == line || p == end)).then_some(Grab { from: p, line, was })
+        (d.body.contains(at) && (p == line || p == end)).then_some(Grab { from: p, line, was, wiki: false })
+    }
+
+    /// 위키 창의 칸 사이 선을 잡았는가(moai-p61w) — 목록의 끝 테두리와 본문의 첫 테두리, 둘 다 잡힌다([`App::grab_at`] 와
+    /// 같은 까닭). 본문이 안 섰으면(좁은 창) 선이 없다. 창은 늘 목록이 왼쪽이라 가르는 축이 하나다.
+    fn wiki_grab_at(&self, d: &WikiAt, at: Position) -> Option<Grab> {
+        let page = d.page?;
+        let end = d.list.right();
+        let line = end.checked_sub(1)?;
+        let rows = d.list.y..d.list.bottom();
+        (rows.contains(&at.y) && (at.x == line || at.x == end && page.x == end)).then_some(Grab {
+            from: at.x,
+            line,
+            was: self.wiki_width,
+            wiki: true,
+        })
     }
 
     /// 잡은 선을 `at` 으로 끈다. **선이 손을 따라온다** — 잡은 자리에서 손이 간 만큼 선이 가고, 앞에 선 칸이 그 자리까지
@@ -315,9 +358,19 @@ impl App {
     ///
     /// 몫은 백분율이라 100칸 넘는 몸통에서는 선이 손에서 한 칸 어긋날 수 있다(200칸 넘으면 두 칸 넘게씩 간다) — 설정에
     /// 사람이 읽고 고칠 수 있는 수로 남기는 값이고, 칸 단위로 들면 창 크기가 바뀔 때마다 뜻이 바뀐다.
+    ///
+    /// **위키 창의 선도 같은 셈이다**(moai-p61w) — 몸통은 위키 창이 그린 두 칸을 합친 자리, 창은 목록이 늘 왼쪽이라
+    /// 상세가 오른쪽에 선 가름과 같고, 몫은 위키 창의 것(`App::wiki_width`)이다. 창이 닫혔으면 아무 일도 없다.
     fn drag_to(&mut self, grab: Grab, at: Position) {
-        let body = self.drawn.body;
-        let vertical = self.detail_at.vertical();
+        let (body, side) = if grab.wiki {
+            let Some(d) = self.drawn.wiki.as_ref() else { return };
+            let Some(page) = d.page else { return };
+            let body = Rect::new(d.list.x, d.list.y, page.right().saturating_sub(d.list.x), d.list.height);
+            (body, super::view::DetailAt::Right)
+        } else {
+            (self.drawn.body, self.detail_at)
+        };
+        let vertical = side.vertical();
         let (start, len, p) = if vertical { (body.y, body.height, at.y) } else { (body.x, body.width, at.x) };
         if len == 0 {
             return;
@@ -329,13 +382,13 @@ impl App {
                 .clamp(i32::from(start), i32::from(start) + i32::from(len) - 1);
             // 앞에 선 칸이 차지할 칸 수 — 선이 그 칸의 끝 테두리다.
             let front = (line - i32::from(start) + 1) as u16;
-            let list = if self.detail_at.first() { len - front } else { front };
-            Some(super::draw::share_for(body, self.detail_at, list))
+            let list = if side.first() { len - front } else { front };
+            Some(super::draw::share_for(body, side, list))
         };
-        if vertical {
-            self.list_height = share;
-        } else {
-            self.list_width = share;
+        match (grab.wiki, vertical) {
+            (true, _) => self.wiki_width = share,
+            (false, true) => self.list_height = share,
+            (false, false) => self.list_width = share,
         }
     }
 

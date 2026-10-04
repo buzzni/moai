@@ -526,10 +526,12 @@ IDEA
              under it. The wheel scrolls the pane under the pointer, and
              neither the focus nor a cursor follows: the list, the detail, the
              statistics window, the wiki window's two panes (a click there
-             picks the pane and the page). Dragging the line between the
-             list and the detail resizes them, and the share the list takes
-             is kept under [tui] as list_width and list_height — the wiki
-             window splits by the same share. With the SPC menu open, a
+             picks the pane and the page, and a click on a link follows it).
+             Dragging the line between the list and the detail resizes them,
+             and the share the list takes is kept under [tui] as list_width
+             and list_height. The wiki window's line drags the same way and
+             keeps a share of its own as wiki_width — until it is dragged it
+             splits by list_width. With the SPC menu open, a
              click on an item is its key — a group goes down a level, a
              toggle keeps the menu open, and Esc and Bksp on the bottom line
              close it or go up — and a click or a roll outside the menu closes
@@ -662,21 +664,28 @@ IDEA
   and Ctrl-b, gg and G move the focused pane — on the list, Ctrl-d, Ctrl-u,
   Ctrl-f, Ctrl-b and the wheel scroll it and leave the cursor and the page
   where they are, as in the explorer's list. Enter on the list goes to the
-  page and Ctrl-w w goes back and forth. On the page, Enter opens a list of
-  its links and the issue ids it names, then the pages linking to it (marked
-  ←), which moves with j, k, gg, G, Ctrl-d, Ctrl-u, Ctrl-f and Ctrl-b, takes
-  one with Enter and closes on Esc. Taking a page link or a page linking
-  here goes there and Bksp comes back the way you came. Links to a heading
-  (page.md#anchor) open at that heading, its line marked ▸ until you
-  scroll; one to a heading the page does not have is marked and opens the
-  page at its top. Taking an id closes
+  page and Ctrl-w w goes back and forth. Tab picks the links drawn on the
+  page in turn, from the first one on screen and round from the last to the
+  first, and Shift-Tab goes the other way from the last one on screen: the
+  picked link shows reversed, the key bar names where it goes, Enter follows
+  it, and once it leaves the pane it is dropped. Clicking a link follows it
+  at once. On the page with no link picked, Enter opens
+  a list of its links and the issue ids it names, then the pages linking to
+  it (marked ←), which moves with j, k, gg, G, Ctrl-d, Ctrl-u, Ctrl-f and
+  Ctrl-b, takes one with Enter and closes on Esc. Taking a page link or a
+  page linking here goes there and Bksp comes back the way you came. Links
+  to a heading (page.md#anchor) open at that heading, its line marked ▸
+  until you scroll; one to a heading the page does not have is marked and
+  opens the page at its top. Taking an id closes
   the window onto that row (from the one list, inside that project). Links
   that lead nowhere, addresses outside the wiki and ids the tracker does not
-  hold are marked and only say so. / searches the titles and bodies of the
-  pages and narrows the list as you type, and Esc clears that search first
-  and then closes the window, with the cursor, the filter and the detail as
-  they were. SPC opens the menu over it with the screens and SPC v r (raw or
-  rendered). The window is read fresh every time and nothing of it is kept.
+  hold are marked and only say so. The page as written (SPC v r) marks no
+  link — Tab says so. / searches the titles and bodies of the pages and
+  narrows the list as you type, and Esc drops a picked link, then clears
+  that search, and then closes the window, with the cursor, the filter and
+  the detail as they were. SPC opens the menu over it with the screens and
+  SPC v r (raw or rendered). The window is read fresh every time and nothing
+  of it is kept.
 
   SPC n opens the jot form anywhere inside a project — it is kept as an idea
   (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on

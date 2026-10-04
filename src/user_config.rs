@@ -199,7 +199,7 @@ pub enum Want {
     Word,
     /// 낱말 배열
     Words,
-    /// 정수 — 목록이 가져가는 몫(`list_width`·`list_height`, moai-irrj.mhr)
+    /// 정수 — 목록이 가져가는 몫(`list_width`·`list_height`, moai-irrj.mhr)과 위키 창의 몫(`wiki_width`, moai-p61w)
     Number,
 }
 
@@ -1025,6 +1025,7 @@ impl Doc {
             mouse: look_one(t, MOUSE, Want::Bool, Item::as_bool, &mut problems),
             list_width: look_one(t, LIST_WIDTH, Want::Number, Item::as_integer, &mut problems),
             list_height: look_one(t, LIST_HEIGHT, Want::Number, Item::as_integer, &mut problems),
+            wiki_width: look_one(t, WIKI_WIDTH, Want::Number, Item::as_integer, &mut problems),
         };
         // **차례를 못 읽었으면 방향도 버린다**(moai-ys7c) — 둘은 한 벌이다. `sort = 3` 을 없는 키로 넘기고
         // 방향만 내면, 탐색기가 처음 차례(우선순위)에 그 방향을 입혀 아무도 안 고른 거꾸로가 선다. 모르는
@@ -1091,6 +1092,7 @@ impl Doc {
         let mut mouse = base.mouse != new.mouse;
         let mut list_width = base.list_width != new.list_width;
         let mut list_height = base.list_height != new.list_height;
+        let mut wiki_width = base.wiki_width != new.wiki_width;
         // **이 세션이 적을 키가 손으로 적은 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 무엇을 덮지
         // 않는가는 `set_hue` 와 같은 자다([`plain`]). `sort.by = "title"`·`[tui.sort]`·`sort = { … }` 은 무엇을
         // 적어 둔 것인지 모르는 채 낱값으로 덮이면 사라진다(`put_value` 는 값이 아닌 자리를 그대로 갈아 끼운다).
@@ -1140,6 +1142,7 @@ impl Doc {
         odd(&[MOUSE], false, &mut mouse);
         odd(&[LIST_WIDTH], false, &mut list_width);
         odd(&[LIST_HEIGHT], false, &mut list_height);
+        odd(&[WIKI_WIDTH], false, &mut wiki_width);
         let t = self.doc.get_mut(TUI).and_then(Item::as_table_like_mut).expect("방금 표로 섰다");
         let mut changed = false;
         let mut left = String::new();
@@ -1190,6 +1193,9 @@ impl Doc {
         }
         if list_height {
             changed |= put_value(t, LIST_HEIGHT, new.list_height.map(toml_edit::Value::from), &mut left);
+        }
+        if wiki_width {
+            changed |= put_value(t, WIKI_WIDTH, new.wiki_width.map(toml_edit::Value::from), &mut left);
         }
         self.dirty |= changed;
         // 끝 줄을 지워 표 밖으로 나갈 주석(moai-liij).
@@ -1249,6 +1255,8 @@ const MOUSE: &str = "mouse";
 /// 목록이 가져가는 몫(%) — 좌우로 가를 때의 폭과 위아래로 가를 때의 높이(moai-irrj.mhr). 칸 사이 선을 끌어 정한다.
 const LIST_WIDTH: &str = "list_width";
 const LIST_HEIGHT: &str = "list_height";
+/// 위키 창의 페이지 목록이 가져가는 폭의 몫(%) — 창의 칸 사이 선을 끌어 정한다(moai-p61w). 목록·상세의 몫과 따로다.
+const WIKI_WIDTH: &str = "wiki_width";
 const FIELDS_KNOWN: &str = "fields_known";
 
 /// 탐색기의 보기 — 사람이 마지막으로 고른 것(moai-2bzp). **낱말로 든다** — 무슨 낱말이 있는지는
@@ -1274,6 +1282,8 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// # 목록이 가져가는 몫(%) — 칸 사이 선을 끈 적이 있을 때만 선다.
 /// list_width = 55
 /// list_height = 70
+/// # 위키 창의 페이지 목록이 가져가는 몫(%) — 그 창의 선을 끈 적이 있을 때만 선다. 없으면 list_width 를 따른다.
+/// wiki_width = 30
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Look {
@@ -1328,6 +1338,10 @@ pub struct Look {
     /// 상세가 위아래에 설 때 목록이 가져가는 높이의 몫(%). [`Look::list_width`] 와 **따로다** — 폭의 몫을 높이에
     /// 그대로 쓰면 상세가 화면을 반 넘게 먹는다(`draw::ABOVE` 가 `draw::LEFT` 와 따로인 까닭).
     pub list_height: Option<i64>,
+    /// 위키 창(`SPC g w`)에서 페이지 목록이 가져가는 폭의 몫(%) — 그 창의 칸 사이 선을 끌어 정한다(moai-p61w).
+    /// [`Look::list_width`] 와 **따로다**(2026-10-04 사용자 결정): 위키는 읽는 창이라 본문을 넓게, 탐색기는 목록을 넓게
+    /// 둘 수 있다. 끈 적 없으면 안 적히고, 그동안은 위키 창도 `list_width` 를 따른다.
+    pub wiki_width: Option<i64>,
 }
 
 /// 설정에서 보기만 읽는다. 파일이 없으면 빈 `Look` 이고 문제도 아니다. 깨진 파일도 까닭 없이 빈 `Look` 이다 —
@@ -3138,6 +3152,7 @@ mod tests {
             mouse: Some(false),
             list_width: Some(40),
             list_height: Some(60),
+            wiki_width: Some(30),
         };
         upd(&path, |doc| doc.merge_look(&Look::default(), &look)).unwrap();
         let (back, problems) = read_look(Some(&path));
@@ -3397,6 +3412,7 @@ mod tests {
             mouse: None,
             list_width: None,
             list_height: None,
+            wiki_width: None,
         };
         let a = Look { fields: Some(vec!["id".into(), "assignee".into()]), ..base.clone() };
         let b = Look { hide_deferred: Some(true), ..base.clone() };
