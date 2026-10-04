@@ -12,6 +12,25 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai wiki ls` and `moai wiki show <slug>` read the project wiki.** The
+  wiki is the markdown pages under `docs/` — or the directory `wiki_dir` in
+  `.moai/config.toml` names, a relative path inside the checkout — one page per
+  `.md` file. A page's slug is its path without `.md` and its title is its first
+  `# ` heading. Nothing is stored in the tracker: the list, the links between
+  pages and the issue ids a page names are read from the files every time.
+  Pages ride the branch, so inside a linked worktree that worktree's pages are
+  read while the ids are still looked up in the main checkout's tracker. `ls`
+  counts the links that lead to no page, the ids the tracker does not have and
+  the pages left with conflict markers, and blocks nothing; a page over 1 MB
+  stays in the list unread. `--json` gives each page's `slug`, `title`, `path`,
+  `bytes`, `issues`, `links` and `conflict`, an `error` on a page that could not
+  be read, and `body` under `show`. A `wiki_dir` that does not exist yet exits
+  0; one that is absolute, climbs out with `..`, leads out of the checkout or
+  into `.git/`, or is not a directory fails `moai wiki` alone — every other
+  command reads the config as before.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added
