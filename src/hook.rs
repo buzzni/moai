@@ -116,6 +116,10 @@ pub struct Input {
     /// 이 세션의 모델 — 출석에 적는다(moai-h8tn). 계약이 약속한 키가 아니라 글이든 객체든 받는다([`Input::model`]).
     #[serde(default, rename = "model")]
     pub model_raw: serde_json::Value,
+    /// 서브에이전트의 도구 부름이면 그 서브에이전트 — Claude Code 가 `PreToolUse`·`PostToolUse` 에만 싣는다
+    /// (code.claude.com/docs/en/hooks). 본 세션의 부름에는 없다([`guard_subagent_mail`], moai-ew4o.4fv).
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 impl Input {
@@ -248,7 +252,7 @@ pub fn deliverable(
     }
     let (mut used, mut open, mut full) = (LETTERS_FRAME, false, false);
     for (k, s) in letters.iter().enumerate() {
-        let is_open = s.letter.to == crate::mail::ANY_IDLE_WORKER;
+        let is_open = s.open();
         if is_open && open {
             continue;
         }
@@ -6398,6 +6402,34 @@ pub fn guard_shell_in(
         .then(|| guard_moai(issues, cfg, away, line, segs.judges, aim))
         .then(|| guard_writes_in(issues, away, root, cwd, scan, segs.picks))
         .then(|| if calls_review(line) { guard_review(issues, cfg, away) } else { Decision::Pass })
+}
+
+/// **서브에이전트는 부모 세션의 이름으로 우편함을 안 만진다**(2026-10-04 사용자 결정, moai-ew4o.4fv). Claude Code 의
+/// 서브에이전트는 부모 세션과 한 `claude` 프로세스 밑에서 셸을 돌고 그 환경도 한 글자 안 다르다(2026-10-04 에 쟀다, 2.1.284 —
+/// `CLAUDE_CODE_CHILD_SESSION=1` 은 본 세션에도 선다). `moai` 는 조상의 출석으로 나를 찾으니, 서브에이전트의
+/// `moai inbox --ack`·`--wait` 는 부모의 편지를 읽음으로 옮기고(부모의 훅은 그 편지를 못 싣는다) `moai hello` 는 부모의 장의
+/// 이름과 역할을 바꾼다. CLI 는 둘을 못 가르고 훅의 입력에만 `agent_id` 가 선다 — 그래서 훅이 막는다(부르는 쪽이
+/// `agent_id` 를 본 뒤에만 부른다).
+///
+/// - **`--as` 를 준 부름은 지나간다** — 그 이름으로 일한다고 스스로 댄 것이다
+/// - **편지를 보기만 하는 `moai inbox` 와 `send` 는 지나간다** — 읽음으로 안 옮기고 장을 안 바꾼다
+/// - **규칙 번호를 안 단다** — 다섯 규칙이 지키는 일과 사람의 자리가 아니라 우편함의 거절이다. Codex·Antigravity 는 그런
+///   입력이 없어 글로만 선다
+pub fn guard_subagent_mail(line: &Line<'_>) -> Decision {
+    for seg in line.used() {
+        let Some(args) = moai_args(seg) else { continue };
+        let flags: Vec<&str> = flag_words(args).collect();
+        let has = |f: &str| flags.iter().any(|w| *w == f || w.strip_prefix(f).is_some_and(|v| v.starts_with('=')));
+        let acts = match positionals(args).first() {
+            Some(&"hello") => true,
+            Some(&"inbox") => has("--ack") || has("--wait"),
+            _ => false,
+        };
+        if acts && !has("--as") {
+            return Decision::Deny(crate::guide::SUBAGENT_MAIL.to_string());
+        }
+    }
+    Decision::Pass
 }
 
 /// 규칙 4 — **사람의 tmux 서버를 죽이지 않는다**(moai-zis7, 사용자 결정).
@@ -14645,6 +14677,7 @@ mod tests {
         use crate::mail::{ANY_IDLE_WORKER, Letter, Stored, VERSION};
         let mk = |id: &str, to: &str, body: String| Stored {
             id: id.into(),
+            mailbox: to.into(),
             reader: None,
             letter: Letter {
                 v: VERSION,

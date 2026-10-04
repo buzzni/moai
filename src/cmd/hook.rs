@@ -138,6 +138,15 @@ fn judge(ctx: &Ctx, event: Event, dialect: Dialect, input: &Input) -> Decision {
     {
         return refusal;
     }
+    // **서브에이전트는 부모의 이름으로 우편함을 안 만진다**(moai-ew4o.4fv) — 이것도 자리·트래커와 무관하다. 본 세션의 부름은
+    // `agent_id` 가 없어 명령줄을 다시 훑지 않는다.
+    if event == Event::PreToolUse
+        && input.agent_id.is_some()
+        && matches!(call, crate::hook::Call::Shell(_))
+        && let refusal @ Decision::Deny(_) = crate::hook::guard_subagent_mail(&line)
+    {
+        return refusal;
+    }
 
     // **자리는 stdin 이 정한다.** 훅 프로세스가 어디서 도는지는 아무도
     // 약속하지 않았다 — 시험판이 제 cwd 로 상대 경로를 풀다가 저장소 안의
@@ -287,6 +296,14 @@ fn decide(
         }
         Event::PreToolUse => {
             use crate::hook::Call;
+            // **Codex 의 장은 도구 부름에도 닻을 적는다**(moai-j3n5) — 그 장은 pid 를 몰라 오래 안 적히면 떠난 것으로
+            // 걷힌다. 프롬프트도 턴 끝도 없이 도구만 부르는 긴 턴이 그 사이에 걷히지 않게, 때가 되었을 때만 다시 적는다
+            // ([`mail::keep_alive`]). 다른 말씨는 프로세스로 재니 출석부를 안 연다 — 도구 부름마다 도는 자리다.
+            if dialect == Dialect::Codex
+                && let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty())
+            {
+                mail::keep_alive(&repo.agents_dir(), |p| p.session.as_deref() == Some(session));
+            }
             let cwd = cwd.clone();
             // **토막이 가리킨 자리는 한 번만 푼다**(moai-47zz) — [`route`] 와 아래 `stands` 가 저마다
             // 부르던 판은 같은 명령줄에 같은 답을 두 번 물었다. 한 자리에서 풀어 나눠 쓴다.
@@ -612,6 +629,7 @@ fn patched(input: Input) -> Vec<Input> {
             tool_input: serde_json::json!({ "file_path": at(path) }),
             stop_hook_active: input.stop_hook_active,
             model_raw: input.model_raw.clone(),
+            agent_id: input.agent_id.clone(),
         })
         .collect();
     if shell {
@@ -704,6 +722,7 @@ fn from_antigravity(event: Event, raw: &str) -> Option<(Event, Input)> {
         tool_input,
         stop_hook_active: v.get("executionNum").and_then(Value::as_u64).is_some_and(|n| n > 0),
         model_raw: v.get("modelName").cloned().unwrap_or_default(),
+        agent_id: None,
     };
     Some((event, input))
 }
@@ -1139,19 +1158,29 @@ fn route_one(
     Route::There(n)
 }
 
-/// 이 세션의 출석(moai-h8tn) — **옛 장을 걷는 것 말고는 적지 않는다**, 상태와 함께 적는 것은 판정 뒤의 [`attend`] 다.
+/// 이 세션의 출석(moai-h8tn) — **옛 장을 걷고 이름을 옮기는 것 말고는 적지 않는다**, 상태와 함께 적는 것은 판정 뒤의
+/// [`attend`] 다.
 ///
 /// 세션 id 로 찾고, 없으면 같은 에이전트 프로세스(pid·선 때)의 장을 이 세션으로 잇는다 — `/clear` 는 세션
-/// id 만 바꾸고, `moai hello` 로 지은 이름과 역할은 남아야 한다. 그것도 없으면 새로 짓는다: 이름은 Claude 가
-/// 보이는 세션 이름, 못 읽으면 `<벤더>-<세션 id 앞 8자>` 다(2026-10-04 사용자 결정). 산 남이 그 이름을 쥐었으면
-/// 세션 토막을 붙여 가른다 — 두 세션이 한 이름이면 편지가 먼저 읽는 쪽으로 샌다.
+/// id 만 바꾸고, `moai hello` 로 지은 이름과 역할은 남아야 한다. 그것도 없으면 새로 짓는다: 이름은 `MOAI_AGENT`,
+/// Claude 가 보이는 세션 이름, 못 읽으면 `<벤더>-<세션 id 앞 8자>` 차례다(2026-10-04 사용자 결정). 산 남이 그 이름을
+/// 쥐었으면 세션 토막을 붙여 가른다 — 두 세션이 한 이름이면 편지가 먼저 읽는 쪽으로 샌다.
+///
+/// **`MOAI_AGENT` 가 이 세션의 이름이다**(moai-ew4o.e1m) — `moai send`·`inbox` 가 그 이름으로 돌므로([`super::mail`] 의
+/// `who`), 훅이 그것을 모르면 한 세션이 두 이름으로 서서 그 이름 앞의 답장이 영영 안 실렸다. 이어 쓰는 장의 이름이
+/// 다르면 그 이름으로 옮기고 편지를 데려간다([`mail::rename_card`]) — 산 남이 그 이름을 쥐었으면 안 옮긴다. **Codex 는
+/// 안 읽는다** — 그 훅의 환경은 세션 여럿이 함께 쓰는 데몬의 것이다(moai-sile).
+///
+/// **떠난 장의 이름을 새 장이 넘겨받으면 그 함부터 비운다**(moai-ew4o.l3n, [`mail::take_over`]) — Claude 의 세션 이름은
+/// 디렉터리마다 256개라 떠난 세션 앞으로 남은 편지가 같은 이름을 받은 새 세션에 실렸다. 이어 쓰는 장은 넘겨받는 것이
+/// 아니다.
 ///
 /// **세션 id 로 찾은 장도 그 프로세스가 살아 있을 때만 그대로 쓴다**(리뷰 moai-h8tn.x4l) — `claude --resume` 은 세션
 /// id 를 그대로 들고 **새 프로세스**로 뜬다. 죽은 pid 를 든 채 다시 적던 판은 `moai agents` 가 산 세션의 장을
 /// 걷었고, `moai send`·`inbox` 는 조상의 pid 로 나를 못 찾았으며, 걷힌 뒤에는 새 이름·빈 역할로 다시 서서 감독이
 /// 일감을 가졌다. 그 장은 지금 프로세스와 칸으로 다시 잇는다 — 이름·역할은 그대로다. **한 프로세스는 장 하나다** —
-/// 다시 이은 프로세스가 다른 이름의 장도 들고 있으면(`/resume` 으로 세션을 갈아탄 프로세스) 그 장을 걷는다. 두
-/// 이름으로 서면 `moai inbox` 와 훅이 서로 다른 이름의 편지를 본다.
+/// 다시 이은 프로세스가 다른 이름의 장도 들고 있으면(`/resume` 으로 세션을 갈아탄 프로세스) 그 장을 걷고 그 함을
+/// 비운다. 두 이름으로 서면 `moai inbox` 와 훅이 서로 다른 이름의 편지를 본다.
 ///
 /// **세션 id 가 없으면 아무도 아니다** — 누구의 편지를 실을지 모르고, 실으면 남의 것을 읽음으로 옮긴다.
 ///
@@ -1161,22 +1190,47 @@ fn route_one(
 /// **Codex 는 세션 id 로만 잇는다**(moai-sile) — 그 훅은 TUI 가 아니라 세션 여럿이 함께 쓰는 `codex app-server` 데몬이
 /// 띄우고, 환경도 그 데몬이 떠오른 자리의 것이다(2026-10-04 실측). 조상으로 잇던 판은 Codex 세션 둘이 한 데몬 pid 로
 /// 서로의 장을 가져갔고, 데몬의 `TMUX_PANE` 을 적어 `send --wake` 가 남의 창에 글자를 쳤다. 그래서 pid 와 tmux 칸을
-/// 모름으로 둔다 — 모르는 pid 의 장은 `moai agents` 가 안 걷으니 `SessionEnd` 가 걷는다([`rest`]).
+/// 모름으로 둔다. 모르는 pid 의 장은 닻으로 산 것을 잰다([`mail::Presence::stale`]) — **세션 id 로 찾은 Codex 장은 닻이
+/// 낡았어도 그대로 잇는다**: 그 세션이 돌아온 것이다. `SessionEnd` 는 그 장을 걷는다([`rest`]).
 fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presence> {
     let session = input.session_id.as_deref().filter(|s| !s.trim().is_empty())?;
     let dir = repo.agents_dir();
+    let mail_dir = repo.mail_dir();
     let (all, _) = mail::presences(&dir);
     // 모델은 장에 없을 때만 훅의 입력으로 채운다 — `moai hello --model` 이 적은 것이 먼저다.
     let model = |p: &mail::Presence| if p.model.is_empty() { input.model() } else { p.model.clone() };
+    let asked = (dialect != Dialect::Codex)
+        .then(|| std::env::var("MOAI_AGENT").ok())
+        .flatten()
+        .map(|v| v.trim().to_string())
+        .filter(|v| mail::is_agent_name(v));
+    // 산 남이 쥔 이름인가 — 대소문자만 다른 이름도 같은 장이다(`hello` 의 이름 겨루기와 같은 자). `mine` 은 그 이름을 쥐어도
+    // 남이 아닌 장이다.
+    let held_by_other = |name: &str, mine: &str| {
+        all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && !p.name.eq_ignore_ascii_case(mine) && !p.gone())
+    };
+    // 이어 쓰는 장을 `MOAI_AGENT` 의 이름으로 옮긴다 — 옮길 수 없으면 그대로다.
+    let renamed = |p: mail::Presence| match asked.as_deref() {
+        Some(want) if want != p.name && !held_by_other(want, &p.name) => {
+            mail::take_over(&mail_dir, &all, want);
+            let moved = mail::Presence { name: want.to_string(), ..p.clone() };
+            match mail::rename_card(&dir, &mail_dir, &moved, &p.name) {
+                Ok(()) => moved,
+                Err(_) => p,
+            }
+        }
+        _ => p,
+    };
     let found = all.iter().find(|p| p.session.as_deref() == Some(session));
-    if let Some(p) = found.filter(|p| !p.gone()) {
-        return Some(mail::Presence { model: model(p), ..p.clone() });
+    if let Some(p) = found.filter(|p| dialect == Dialect::Codex || !p.gone()) {
+        return Some(renamed(mail::Presence { model: model(p), ..p.clone() }));
     }
     let cwd = input.cwd.clone().unwrap_or_default();
     let short: String = session.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
-    // 새 장의 뼈대 — 이름·벤더·프로세스·tmux 칸만 갈린다.
+    // 새 장의 뼈대 — 이름·벤더·프로세스·tmux 칸만 갈린다. 넘겨받는 이름이면 그 함부터 비운다.
     let fresh =
         |name: String, vendor: &str, pid: u32, pid_start: Option<u64>, tmux: (Option<String>, Option<String>)| {
+            mail::take_over(&mail_dir, &all, &name);
             mail::Presence {
                 v: mail::VERSION,
                 name,
@@ -1191,17 +1245,17 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
                 cwd: cwd.clone(),
                 tmux_pane: tmux.0,
                 tmux_socket: tmux.1,
+                seen: None,
                 rest: Default::default(),
             }
         };
     // 토막은 상한에 안 잘리게 잇는다([`mail::name_with`]) — 잘리면 가른 이름이 도로 산 남의 이름이다.
-    // 대소문자만 다른 이름도 같은 장이다(`hello` 의 이름 겨루기와 같은 자).
     //
     // **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고
     // 65초 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같아, 한 번만 가르던 판은 셋째가 둘째의 장을 덮었고 둘은
     // 훅마다 서로의 장과 편지를 빼앗았다. 토막을 이어도 산 남의 이름이면 세션 id 를 통째로 잇는다 — 세션마다 하나다.
     let whole: String = session.chars().filter(char::is_ascii_alphanumeric).collect();
-    let taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && !p.gone());
+    let taken = |name: &str| held_by_other(name, "");
     let free = |name: String| {
         if !taken(&name) {
             return Some(name);
@@ -1219,9 +1273,11 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
     let tmux = mail::Presence::tmux_here();
     if let Some(p) = found.or_else(|| all.iter().find(|p| p.runs_as(&agent))) {
         for other in all.iter().filter(|o| o.name != p.name && o.runs_as(&agent)) {
-            let _ = mail::forget(&dir, &other.name);
+            if mail::forget(&dir, &other.name).is_ok() {
+                mail::retire(&mail_dir, &other.name);
+            }
         }
-        return Some(mail::Presence {
+        return Some(renamed(mail::Presence {
             model: model(p),
             session: Some(session.to_string()),
             pid: agent.pid,
@@ -1230,11 +1286,11 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
             tmux_pane: tmux.0,
             tmux_socket: tmux.1,
             ..p.clone()
-        });
+        }));
     }
-    let name = (vendor == "claude")
-        .then(|| mail::claude_session_name(agent.pid))
-        .flatten()
+    let name = asked
+        .filter(|n| !taken(n))
+        .or_else(|| (vendor == "claude").then(|| mail::claude_session_name(agent.pid)).flatten())
         .or_else(|| mail::name_with(vendor, &short))?;
     Some(fresh(free(name)?, vendor, agent.pid, agent.start, tmux))
 }
@@ -1242,34 +1298,42 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
 /// `Stop` 없이 끝난 턴(moai-u5wr.f29) — 이 세션의 장이 있으면 `idle` 로 적는다. **장을 새로 짓지는 않는다** — 끝나는
 /// 세션에 이름을 지어 주면 아무도 안 쓸 장이 하나 선다.
 ///
-/// **Codex 의 `SessionEnd` 는 그 장을 걷는다**(moai-sile) — Codex 의 장은 pid 를 몰라([`attendee`]) `moai agents` 가
-/// 영영 안 걷는다. Claude 의 장은 남긴다: `/clear` 도 `SessionEnd` 를 내는데 같은 프로세스가 곧 새 세션으로 그 장을
-/// 잇는다(`moai hello` 로 지은 이름과 역할이 거기 있다).
+/// **Codex 의 `SessionEnd` 는 그 장을 걷고 그 함을 비운다**(moai-sile, moai-ew4o.l3n) — Codex 의 장은 pid 를 몰라
+/// ([`attendee`]) `moai agents` 가 닻이 낡을 때까지 안 걷고, 끝난 세션 앞의 편지는 보낸 이에게 돌아가야 한다. Claude 의
+/// 장은 남긴다: `/clear` 도 `SessionEnd` 를 내는데 같은 프로세스가 곧 새 세션으로 그 장을 잇는다(`moai hello` 로 지은
+/// 이름과 역할이 거기 있다).
 fn rest(input: &Input, repo: &Repo, dialect: Dialect, event: Event) {
     let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty()) else { return };
     let dir = repo.agents_dir();
     let (all, _) = mail::presences(&dir);
     let Some(p) = all.into_iter().find(|p| p.session.as_deref() == Some(session)) else { return };
     if dialect == Dialect::Codex && event == Event::SessionEnd {
-        let _ = mail::forget(&dir, &p.name);
+        if mail::forget(&dir, &p.name).is_ok() {
+            mail::retire(&repo.mail_dir(), &p.name);
+        }
         return;
     }
     // **이미 노는 장은 다시 안 쓴다**(리뷰 moai-u5wr.e74) — 디스크에서 읽은 그대로라 바뀔 것이 없다. Claude 의 흔한 끝
     // (`Stop` 뒤의 `SessionEnd`, `/clear` 마다)이 그 자리고, 저장소가 선 자리(Ceph RBD)가 멈춘 날 그 쓰기 하나가
-    // `SessionEnd` 의 짧은 상한을 넘긴다.
-    if p.status == mail::IDLE && !p.since.is_empty() {
+    // `SessionEnd` 의 짧은 상한을 넘긴다. 프로세스를 모르는 장은 닻을 적을 때가 되었으면 쓴다(moai-j3n5).
+    if p.status == mail::IDLE && !p.since.is_empty() && !p.due(&model::now()) {
         return;
     }
     attend(repo, Some(p), mail::IDLE);
 }
 
-/// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다).
-/// 못 적으면 조용히 지나간다 — 훅은 실패하지 않는다(머리글).
+/// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다). 프로세스를
+/// 모르는 장은 닻도 적는다(moai-j3n5) — 훅이 돈 것이 곧 그 세션이 산 것이다. 못 적으면 조용히 지나간다 — 훅은 실패하지
+/// 않는다(머리글).
 fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
     let Some(mut p) = presence else { return };
+    let now = model::now();
     if p.status != status || p.since.is_empty() {
         p.status = status.to_string();
-        p.since = model::now();
+        p.since = now.clone();
+    }
+    if p.pid == 0 {
+        p.seen = Some(now);
     }
     let _ = mail::write_presence(&repo.agents_dir(), &p);
 }
@@ -1292,7 +1356,8 @@ enum Mine {
 /// 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]).
 fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx, room: usize, which: Mine) -> Option<String> {
     let dir = repo.mail_dir();
-    let (all, _) = mail::list(&dir, None);
+    // 여는 자리는 제 함과 열린 편지의 함 둘뿐이다(moai-ew4o.c92) — 남에게 간 편지를 열어 가르지 않는다.
+    let (all, _) = mail::list(&dir, &me.name, false);
     let mine: Vec<mail::Stored> = all
         .into_iter()
         .filter(|s| mail::for_me(s, &me.name, &me.role))
@@ -1306,7 +1371,7 @@ fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx, room: usize, which: Mine
     let taken: Vec<&mail::Stored> = picked
         .into_iter()
         .map(|k| &mine[k])
-        .filter(|s| matches!(mail::take(&dir, &s.id, &me.name), Ok(mail::Took::Mine)))
+        .filter(|s| matches!(mail::take(&dir, s, &me.name), Ok(mail::Took::Mine)))
         .collect();
     if taken.is_empty() {
         return None;

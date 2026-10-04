@@ -20,15 +20,17 @@ struct Sent<'a> {
     wake: Option<&'a Woke>,
 }
 
-/// `inbox --json` 의 편지 하나 — `id` 와 `read` 에 편지 그대로.
+/// `inbox --json` 의 편지 하나 — `id`·`read`·`returned` 에 편지 그대로. `returned` 는 보낸 편지가 읽히기 전에 받는 이가
+/// 떠나 제 함으로 되돌아온 것이다([`Stored::returned`]) — 그 편지의 `to` 는 떠난 이, `from` 은 나다. 늘 선다.
 ///
-/// **편지가 든 모르는 키가 `id`·`read` 면 뺀다**(리뷰 moai-h8tn.x4l) — 모르는 키는 그대로 내는데([`Letter::rest`]),
+/// **편지가 든 모르는 키가 `id`·`read`·`returned` 면 뺀다**(리뷰 moai-h8tn.x4l) — 모르는 키는 그대로 내는데([`Letter::rest`]),
 /// 그 이름이 겉의 키와 겹치면 한 객체에 같은 키가 둘 서고, 읽는 쪽 대부분(jq·python)이 뒤의 것을 믿는다. 손으로
 /// 놓거나 다른 판이 쓴 편지 하나가 진짜 id 와 읽음 표를 가린다.
 #[derive(Serialize)]
 struct Shown<'a> {
     id: &'a str,
     read: bool,
+    returned: bool,
     #[serde(flatten)]
     letter: Letter,
 }
@@ -36,8 +38,8 @@ struct Shown<'a> {
 impl<'a> Shown<'a> {
     fn of(s: &'a Stored) -> Shown<'a> {
         let mut letter = s.letter.clone();
-        letter.rest.retain(|k, _| k != "id" && k != "read");
-        Shown { id: &s.id, read: s.reader.is_some(), letter }
+        letter.rest.retain(|k, _| !matches!(k.as_str(), "id" | "read" | "returned"));
+        Shown { id: &s.id, read: s.reader.is_some(), returned: s.returned(), letter }
     }
 }
 
@@ -93,6 +95,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         rest: Default::default(),
     };
     let dir = repo.mail_dir();
+    mail::migrate(&dir);
     let id = mail::send(&dir, &letter).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
 
     // **없는 이름에도 보낸다** — 아직 인사하지 않은 에이전트에게 먼저 보내는 것은 흔하다. 오타일 수 있으니
@@ -141,6 +144,7 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     let me = who(ctx, args.me.as_deref(), &agents)?;
     let role = agents.iter().find(|p| p.name == me).map(|p| p.role.clone()).unwrap_or_default();
     let dir = repo.mail_dir();
+    mail::migrate(&dir);
 
     // **기다림은 훑기를 되풀이한다** — 파일 시스템의 알림(inotify)은 플랫폼마다 다르고 크레이트가 든다. 반 초에
     // 한 번 디렉터리 하나를 읽는 값이 그보다 싸다.
@@ -153,13 +157,17 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // 판에는 `idle` 을 적었다가 곧장 `busy` 로 되돌려 `since`(얼마나 놀았나)만 새로 세웠다.
     let mut idled = false;
     let (mut mine, garbled) = loop {
-        let (all, garbled) = mail::list(&dir, args.all.then_some(me.as_str()));
+        let (all, garbled) = mail::list(&dir, &me, args.all);
         let mine: Vec<Stored> = all.into_iter().filter(|s| mail::for_me(s, &me, &role)).collect();
         let waiting = until.is_some_and(|t| t.is_none_or(|t| std::time::Instant::now() < t));
         if !waiting || mine.iter().any(|s| s.reader.is_none()) {
             break (mine, garbled);
         }
-        if !idled {
+        // 기다리는 동안 프로세스를 모르는 장(Codex)은 닻을 다시 적는다(moai-j3n5) — 안 적으면 오래 기다리는 일꾼이 떠난
+        // 것으로 걷혀, 감독이 일감을 보낼 곳을 잃는다. 때가 되었을 때만 쓴다([`mail::keep_alive`]).
+        if idled {
+            mail::keep_alive(&repo.agents_dir(), |p| p.name == me);
+        } else {
             attend(&repo, &me, mail::IDLE);
             idled = true;
         }
@@ -168,15 +176,15 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // 못 읽은 편지는 답을 덜 낸 것이다 — 다 내고 비영으로 끝난다(`show` 의 못 읽는 줄과 같은 자). 자리도 남이 지은
     // 이름이라 한 줄로 접는다 — 파일 이름에 든 제어문자가 터미널을 움직이지 않게.
     //
-    // **남의 편지가 깨진 것은 말만 한다**(리뷰 moai-h8tn.x4l, `cmd::mod` 의 "남의 워크트리에서 만난 문제" 와 같은 자) —
-    // 받는 이를 읽어 내가 아니면 내 답이 덜 난 것이 아니다. 그것까지 세던 판은 깨진 편지 하나가 지워질 때까지 모든
-    // 에이전트의 `inbox` 를 비영으로 끝냈고, `--ack` 로 이미 읽음이 된 편지를 실패로 읽은 고리는 그 편지를 버렸다.
+    // **남의 편지가 깨진 것은 내 답이 덜 난 것이 아니다**(리뷰 moai-h8tn.x4l) — 깨진 편지 하나가 모든 에이전트의 `inbox` 를
+    // 비영으로 끝내면 `--ack` 로 이미 읽음이 된 편지를 실패로 읽은 고리가 그 편지를 버린다. 받는 이마다 함이 따로라
+    // (moai-ew4o.c92) 여기 오는 것은 제 함과 열린 편지의 함뿐이다. 열린 편지는 감독이 안 가지니 감독에게는 말만 한다.
     for g in &garbled {
         tell(&fill(
             say(ctx.lang(), "warn.mail_garbled"),
             &[("path", &crate::text::one_line(&g.path.display().to_string())), ("why", &crate::text::one_line(&g.why))],
         ));
-        if g.to.as_deref().is_none_or(|to| to == me || to == mail::ANY_IDLE_WORKER) {
+        if g.mailbox.as_deref() != Some(mail::ANY_IDLE_WORKER) || role != mail::SUPERVISOR {
             note_partial();
         }
     }
@@ -196,11 +204,11 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
                 kept.push(s);
                 continue;
             }
-            let open = s.letter.to == mail::ANY_IDLE_WORKER;
+            let open = s.open();
             if open && opened {
                 continue;
             }
-            match mail::take(&dir, &s.id, &me) {
+            match mail::take(&dir, &s, &me) {
                 Ok(mail::Took::Mine) => {
                     opened |= open;
                     gained += 1;
@@ -266,8 +274,12 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     if p.status == status && !p.since.is_empty() {
         return;
     }
+    let now = crate::model::now();
     p.status = status.to_string();
-    p.since = crate::model::now();
+    p.since = now.clone();
+    if p.pid == 0 {
+        p.seen = Some(now);
+    }
     let _ = mail::write_presence(&dir, &p);
 }
 

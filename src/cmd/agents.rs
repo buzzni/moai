@@ -19,7 +19,7 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     let dir = repo.agents_dir();
     // **걷는 자리는 여기다**(설계 노트 "죽은 pid 는 agents 가 걷는다"). 훅과 `send` 는 읽기만 하고 죽은 것을
     // 건너뛴다 — 도구 호출마다 도는 자리가 남의 파일을 지우지 않는다.
-    let swept = mail::sweep(&dir);
+    let swept = mail::sweep(&dir, &repo.mail_dir());
     let (mut agents, garbled) = mail::presences(&dir);
     // 거르개는 걷기 **뒤**다 — 걸러 낸 줄도 죽었으면 걷힌다. 거르개가 걷기를 좁히면 감독이 부를 때마다 남의 죽은
     // 줄이 남는다.
@@ -195,17 +195,19 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
         tmux_pane,
         tmux_socket,
+        seen: keep.as_ref().and_then(|p| p.seen.clone()),
         rest: keep.as_ref().map(|p| p.rest.clone()).unwrap_or_default(),
     };
-    mail::write_presence(&dir, &presence).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-    // 이름을 바꿨으면 옛 장을 걷는다 — 한 에이전트가 두 이름으로 서면 편지가 둘로 갈린다. **새 장을 쓴 뒤에, 그것이
-    // 다른 파일일 때만** 걷는다(리뷰 moai-h8tn.x4l) — 먼저 걷으면 쓰기가 진 판에 장이 하나도 안 남아 다음 훅이 빈
-    // 역할로 다시 세우고, 대소문자만 바꾼 이름은 대소문자를 안 가리는 파일 시스템에서 방금 쓴 그 파일이다.
-    if let Some(old) = before.filter(|p| p.name != name)
-        && !mail::same_card(&dir, &old.name, &name)
-    {
-        let _ = mail::forget(&dir, &old.name);
-    }
+    // **떠난 장의 이름을 넘겨받으면 그 함부터 비운다**(moai-ew4o.l3n) — 그 세션 앞으로 남은 편지가 보낸 이에게 돌아간다.
+    let mail_dir = repo.mail_dir();
+    mail::take_over(&mail_dir, &all, &name);
+    // 이름을 바꿨으면 옛 장을 걷고 편지를 데려간다 — 한 에이전트가 두 이름으로 서면 편지가 둘로 갈리고, 옛 이름 앞의 안
+    // 읽은 편지는 아무도 못 읽고 남는다([`mail::rename_card`]).
+    let wrote = match before.filter(|p| p.name != name) {
+        Some(old) => mail::rename_card(&dir, &mail_dir, &presence, &old.name),
+        None => mail::write_presence(&dir, &presence),
+    };
+    wrote.map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
     if ctx.json {
         return super::json_line(&presence);
     }

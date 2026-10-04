@@ -1048,6 +1048,7 @@
   "mail.inbox_empty": "{me} 에게 온 편지가 없다",
   "mail.lost": "{id} 는 다른 에이전트가 먼저 가졌다",
   "mail.letter_head": "{id}  {from} 에게서  {at}",
+  "mail.returned_head": "{id}  되돌아왔다 - {to} 가 읽기 전에 떠났다  {at}",
   "mail.read_mark": "읽음",
   "mail.in_reply": "{id} 에 답한다",
   "warn.mail_garbled": "못 읽는 편지: {path} — {why}",

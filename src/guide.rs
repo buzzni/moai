@@ -35,6 +35,14 @@ pub fn rule_head(n: usize) -> String {
     format!("Rule {n} — {}.", RULES[n - 1])
 }
 
+/// 서브에이전트가 부모 세션의 이름으로 우편함을 만질 때 훅이 내는 거절문(moai-ew4o.4fv, [`crate::hook::guard_subagent_mail`]).
+/// **고칠 길을 함께 낸다** — 막힌 쪽이 사람을 안 부르고 제자리에서 푼다.
+pub const SUBAGENT_MAIL: &str = "Mailbox — a subagent does not speak as its parent session.\n\
+A subagent runs under the parent session's process, so this `moai hello` would rename the parent's presence, and this\n\
+`moai inbox --ack` or `--wait` would take the parent's letters before its hooks can load them. Leave letters to the\n\
+parent session. To look without taking, run `moai inbox` without --ack; to work under a name of your own, pass\n\
+`--as <name>`.";
+
 /// 리뷰 이슈를 세운 뒤의 세 걸음. **훅의 거절문과 스킬이 이것을 그대로 쓴다.**
 ///
 /// **여기 적힌 명령은 그대로 쳐서 지나가야 한다.** `-m` 없는 `done` 을 일러

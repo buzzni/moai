@@ -1048,6 +1048,7 @@
   "mail.inbox_empty": "No letters for {me}",
   "mail.lost": "{id} was taken by another agent first",
   "mail.letter_head": "{id}  from {from}  {at}",
+  "mail.returned_head": "{id}  returned - {to} left before reading it  {at}",
   "mail.read_mark": "read",
   "mail.in_reply": "in reply to {id}",
   "warn.mail_garbled": "A letter that cannot be read: {path} - {why}",
