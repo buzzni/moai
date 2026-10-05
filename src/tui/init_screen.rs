@@ -14,9 +14,9 @@ use ratatui::widgets::Paragraph;
 use ratatui::{Frame, TerminalOptions, Viewport};
 use unicode_width::UnicodeWidthStr;
 
-/// 머리 · 빈 줄 · 칸들 · 빈 줄 · 알림 · 키. 칸이 숨으면 아래가 빈 줄로 남는다 — 높이를 그때마다 바꾸면
-/// 인라인 뷰포트가 셸 스크롤을 밀어 올린다.
-const HEIGHT: u16 = 4 + FIELDS.len() as u16;
+/// 머리 · 빈 줄 · 칸들 · 빈 줄 · 알림 · 키 — 칸 말고 다섯 줄이다. 칸이 숨으면 아래가 빈 줄로 남는다 — 높이를
+/// 그때마다 바꾸면 인라인 뷰포트가 셸 스크롤을 밀어 올린다.
+const HEIGHT: u16 = 5 + FIELDS.len() as u16;
 
 /// 사람이 보는 터미널인가 — **읽는 쪽과 쓰는 쪽이 둘 다** 터미널이어야 묻는다. 한쪽이라도 파이프면
 /// 부른 것은 에이전트나 스크립트다: 묻는 순간 아무도 답하지 않는 키를 영영 기다린다.
@@ -119,7 +119,7 @@ fn draw(f: &mut Frame, form: &Form, lang: Lang, dir: &str) {
             Some((_, at)) => {
                 let shown: Vec<String> =
                     options.iter().enumerate().map(|(j, name)| format!("{} {name}", mark(j == at))).collect();
-                spans.push(Span::raw(shown.join("    ")));
+                spans.push(Span::raw(shown.join("   ")));
             }
         }
         match form.locked_by(field) {
