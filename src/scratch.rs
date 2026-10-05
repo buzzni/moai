@@ -209,6 +209,16 @@ pub fn inside_checkout(dir: &Path) -> bool {
     real(dir).ancestors().any(|d| d.join(".git").exists() || d.join(".moai").is_dir())
 }
 
+/// 디렉터리에 선 이름들, 이름 차례로 — 찌꺼기를 세는 시험들(`store`·`cmd::skill`)이 함께 쓴다. 저마다 베껴 두던 것을
+/// 모았다(리뷰 moai-dj4j.n9y) — 부르는 시험이 다 유닉스의 것이라 여기도 그렇다(밖에서는 쓰는 이가 없어 죽은 글이 된다).
+#[cfg(unix)]
+pub fn names(d: &Path) -> Vec<String> {
+    let mut v: Vec<String> =
+        std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    v.sort();
+    v
+}
+
 /// [`crate::path::real`] 과 같은 자 — **여기만 제 몸으로 든다.**
 ///
 /// 이 파일은 `tests/cli.rs` 가 `#[path]` 로 함께 들어(dev-dependency 0개, CLAUDE.md "테스트"),

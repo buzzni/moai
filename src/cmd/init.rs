@@ -286,8 +286,8 @@ const DOTFILES: [(&str, fn(&Path) -> std::borrow::Cow<'static, str>, &str); 2] =
 /// 둘이고 막는 넓이가 다르다.
 ///
 /// - **`.moai` 가 링크면**(`.moai -> tracker`) 락과 임시 파일이 모두 그 자리(`tracker/`)에 선다. `init` 이 갈아
-///   끼우는 `AGENTS.md` 의 임시 파일도 거기 선다([`tmp_dir`]) — 그 자리는 moai 의 디렉터리라 블록의 `.moai/`
-///   줄을 통째로 옮긴다
+///   끼우는 `AGENTS.md` 의 임시 파일도 거기 선다([`crate::store::write_staged`]) — 그 자리는 moai 의 디렉터리라
+///   블록의 `.moai/` 줄을 통째로 옮긴다
 /// - **트래커 파일만 링크면**(`.moai/issues.jsonl -> ../shared/issues.jsonl`) 그 파일이 든 자리에는
 ///   `store::Repo::far_lock` 의 `lock` 과, `.moai/` 에서 못 갈아끼울 때 물러선 **그 파일 이름의** 임시 파일만
 ///   선다. 그 자리는 사람의 디렉터리라 `*.tmp.*` 를 그대로 옮기면 남의 파일(`shared/release.tmp.md`)까지
@@ -490,7 +490,7 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>
 /// 들어(`mail::ensure_dir`) 이 줄이 없어도 git 이 안 본다. `init` 은 여전히 적는다 — 선언은 블록이다. 조르면 이 판
 /// 전에 심은 모든 저장소의 보드와 `init --check` 에 "옆 워크트리가 `git add -A` 에 딸려간다" 는 거짓 까닭이 선다
 /// (리뷰 moai-h8tn.x4l). 규칙을 더하면 이미 심긴 저장소마다 알림이 새로 선다는 값은 moai-3akx 가 이미 재었다
-/// ([`tmp_dir`]). `.moai` 가 링크라 옮겨 적은 줄(`/tracker/mail/`)도 같다.
+/// ([`crate::store::write_staged`]). `.moai` 가 링크라 옮겨 적은 줄(`/tracker/mail/`)도 같다.
 fn self_ignored(line: &str) -> bool {
     let line = line.trim_end();
     line.ends_with("/mail/") || line.ends_with("/agents/")
@@ -977,35 +977,13 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
     if path.exists() {
         std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
     }
-    let first = tmp_dir(path);
     // 링크는 저장소 안을 가리킬 때만 따라간다(moai-4oab) — 받은 저장소가 커밋한 `AGENTS.md` 링크가
-    // 체크아웃 밖을 가리키면 `init` 이 그 파일을 고쳐 쓴다. 뿌리는 이 파일이 든 자리다.
+    // 체크아웃 밖을 가리키면 `init` 이 그 파일을 고쳐 쓴다. 뿌리는 이 파일이 든 자리다. 임시 파일은 그 뿌리의
+    // `.moai/` 에 먼저 짓고(moai-3akx, 2026-09-18 사용자 결정 — `.moai/` 는 `init` 이 이 쓰기보다 먼저 세운다), 거기서
+    // 못 갈아 끼웠으면 옆자리로 한 번 더 간다 — 둘 다 쓰는 자([`crate::store::write_staged`])가 한다. 블록을 못 쓰는
+    // 것보다 찌꺼기가 남을 수 있는 쪽이 낫다.
     let checkout = crate::path::dir_of(path);
-    match crate::store::write_atomic_in(path, text.as_bytes(), &first, checkout) {
-        // `.moai/` 에서 못 갈아 끼웠으면 옆자리로 한 번 더 — 까닭은 [`tmp_dir`] 에 적었다. 실패한
-        // 쪽은 임시 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다.
-        Err(_) if path.parent() != Some(first.as_path()) => {
-            crate::store::write_atomic_inside(path, text.as_bytes(), checkout).map_err(|e| e.message)
-        }
-        done => done.map_err(|e| e.message),
-    }
-}
-
-/// 뿌리 파일을 갈아 끼울 임시 파일의 자리 — **`.moai/`** 다(moai-3akx, 2026-09-18 사용자 결정).
-///
-/// 옆자리에 두면 쓰다 죽은 `init` 이 `AGENTS.md.tmp.…` 를 저장소 뿌리에 남기고, 심는
-/// `.gitignore` 블록은 `.moai/*.tmp.*` 만 덮는다. 규칙을 더하는 길은 버렸다 — 이미 심긴
-/// 저장소마다 "규칙이 빠졌다" 알림이 새로 선다. `.moai/` 는 `init` 이 이 쓰기보다 먼저 세운다.
-///
-/// **거기서 못 쓰면 [`plant`] 가 옆자리로 물러선다 — 미리 재지 않고 써 보고 물러선다.** 다른
-/// 파일시스템이면 `rename` 이 `EXDEV` 로, 읽기 전용 `.moai/` 면 임시 파일 만들기가 막힌다. 장치
-/// 번호로 미리 재던 때는 뒤의 것을 못 봐 쓸 수 있는 `AGENTS.md` 를 "못 썼다" 고 하며 그 파일을
-/// 고치라고 했고, unix 밖에서는 재지도 못했다. 블록을 못 쓰는 것보다 찌꺼기가 남을 수 있는 쪽이
-/// 낫다. `.moai` 가 디렉터리가 아니면 처음부터 옆자리다.
-fn tmp_dir(path: &Path) -> std::path::PathBuf {
-    let beside = path.parent().map(Path::to_path_buf).unwrap_or_default();
-    let moai = beside.join(".moai");
-    if moai.is_dir() { moai } else { beside }
+    crate::store::write_staged(path, text.as_bytes(), checkout).map_err(|e| e.message)
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -2171,23 +2149,16 @@ mod tests {
     fn root_files_are_swapped_through_a_temp_file_in_dot_moai() {
         let s = crate::scratch::Scratch::new("init-tmp");
         let agents = s.join("AGENTS.md");
-        assert_eq!(tmp_dir(&agents), s.path(), ".moai 가 없으면 옆자리다");
+        let left = |d: &Path| std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
+        // `.moai` 가 없으면 옆자리에서 짓는다 — 고르는 자가 미리 묻지 않고 써 보고 물러선다(`store::write_staged`).
+        plant(&agents, "처음\n").expect("`.moai` 가 없는 뿌리에서 옆자리로 물러서지 않았다");
+        assert_eq!(left(s.path()), ["AGENTS.md"], "옆자리에 찌꺼기가 남았다");
         std::fs::create_dir(s.join(".moai")).unwrap();
-        assert_eq!(tmp_dir(&agents), s.join(".moai"));
         // **정말 `.moai/` 를 거치는지** 옆자리를 막아 두고 본다 — 옆에 쓰는 `plant` 도 성공하면 둘 다
         // 찌꺼기를 안 남겨 아래의 단언만으로는 못 가른다. 막은 자리는 디렉터리라 파일을 못 만든다.
-        // 첫 이름이 막히면 다음 이름으로 가므로(moai-ydm7.976) **이름을 다** 막는다.
-        let beside: Vec<_> = crate::store::tmp_names("AGENTS.md").map(|n| s.join(n)).collect();
-        for b in &beside {
-            std::fs::create_dir(b).unwrap();
-        }
-        let wrote = plant(&agents, "글\n");
-        for b in &beside {
-            std::fs::remove_dir(b).unwrap();
-        }
-        wrote.expect("`.moai/` 를 안 거치고 옆자리에 썼다");
+        crate::store::with_tmp_names_taken(s.path(), "AGENTS.md", || plant(&agents, "글\n"))
+            .expect("`.moai/` 를 안 거치고 옆자리에 썼다");
         assert_eq!(std::fs::read_to_string(&agents).unwrap(), "글\n");
-        let left = |d: &Path| std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name()).collect::<Vec<_>>();
         assert_eq!(left(&s.join(".moai")), Vec::<std::ffi::OsString>::new());
         assert_eq!(left(s.path()).len(), 2, "뿌리에는 .moai 와 AGENTS.md 뿐이다: {:?}", left(s.path()));
 

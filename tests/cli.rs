@@ -18136,7 +18136,7 @@ fn skill_install_keeps_a_declaration_whose_plugin_stays() {
     );
 }
 
-/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 읽지도 고치지도 않는다**(`store::write_atomic_inside`,
+/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 읽지도 고치지도 않는다**(`store::write_staged`,
 /// `held::read_inside`) — 받은 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃
 /// 밖의 파일을 고친다. 링크도 보통 파일로 안 바꾼다. 읽기도 같은 자다(moai-ml0d.21i) — 밖을 읽어 걸음을 세우던 판은
 /// 지우지도 못할 선언을 "못 지웠다" 로 댔다. 못 읽는 설정이라 걸음은 안 세우되 **말없이 넘기지 않는다**(사용자 결정
@@ -18187,7 +18187,7 @@ fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
 /// `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로 `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영
 /// 기다렸다. 고침이 없으면 멈추므로 마감을 두고 부른다 — 멈춘 프로세스는 죽이고 시험이 진다. 설정은 옛 판 moai 가
 /// project 범위에 선 장부여야 읽힌다(옛 선언을 걷는 걸음). 못 읽는 설정은 걸음을 안 세울 뿐 설치를 안 막고, 보통
-/// 파일이 아닌 `plugin.json` 은 다시 심는 길이 그 자리를 대며 비영으로 멈춘다(`store::write_atomic_inside`).
+/// 파일이 아닌 `plugin.json` 은 다시 심는 길과 그 연습이 그 자리를 대며 비영으로 멈춘다(`store::measure_inside`).
 #[cfg(unix)]
 #[test]
 fn skill_reads_no_fifo_in_the_committed_plugin_or_settings() {
@@ -18250,13 +18250,16 @@ fn skill_reads_no_fifo_in_the_committed_plugin_or_settings() {
 
     let manifest = dir.join(".claude-plugin/plugin.json");
     fifo(&manifest);
-    for args in [&["skill", "status"][..], &["skill", "install", "--dry-run"]] {
+    let out = bounded(&["skill", "status"]);
+    assert!(out.status.success(), "{}", text(&out));
+    // **연습도 같은 자로 잰다**(moai-dj4j.ug2) — 이름 겹침만 재던 연습은 진짜 실행이 거절할 트리에도 등록을 약속하고
+    // 0 으로 끝났다(리뷰 moai-ml0d.que 7번).
+    for args in [&["skill", "install", "--dry-run"][..], &["skill", "install"]] {
         let out = bounded(args);
-        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+        assert!(!out.status.success(), "{args:?}: 못 심을 자리가 있는데 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains("plugin.json"), "{args:?}: 어느 자리인지 안 댄다\n{}", text(&out));
+        assert!(!text(&out).contains("plugin install"), "{args:?}: 못 심을 트리에 등록을 약속한다\n{}", text(&out));
     }
-    let out = bounded(&["skill", "install"]);
-    assert!(!out.status.success(), "못 심은 자리가 있는데 성공으로 끝났다\n{}", text(&out));
-    assert!(text(&out).contains("plugin.json"), "어느 자리인지 안 댄다\n{}", text(&out));
     assert!(!std::fs::symlink_metadata(&manifest).unwrap().is_file(), "FIFO 를 갈아끼웠다");
 }
 
@@ -18614,7 +18617,8 @@ fn skill_status_shows_the_shared_skills_and_the_two_on_path() {
     let json = status(true);
     assert!(json.contains("moai-wiki/SKILL.md"), "읽지 못한 자리를 낡은 것으로 안 센다\n{json}");
     // **다시 심는 길도 그 자리를 안 연다** — FIFO 에 쓰려고 열면 읽는 쪽을 영영 기다린다. 보통 파일이 아닌 자리는
-    // 갈아끼우지도 않고(`store::write_atomic_inside`, moai-4oab) 그 자리를 대며 비영으로 멈춘다.
+    // 쓰기 전에 재는 자가 거절해 갈아끼우지도 않고(`store::measure_inside`, moai-4oab·moai-dj4j.ug2) 그 자리를 대며
+    // 비영으로 멈춘다.
     let out = bounded(&["skill", "install", "--agent", "codex"]);
     assert!(!out.status.success(), "못 심은 자리가 있는데 성공으로 끝났다\n{}", text(&out));
     assert!(text(&out).contains("moai-wiki/SKILL.md"), "어느 자리인지 안 댄다\n{}", text(&out));
@@ -18666,10 +18670,15 @@ fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
     let away = Scratch::new("skilloutside-away");
     std::os::unix::fs::symlink(away.path(), s.path().join(".agents")).unwrap();
 
-    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
-    assert!(!out.status.success(), "밖을 가리키는 자리에 심고 성공으로 끝났다\n{}", text(&out));
-    assert!(text(&out).contains("outside"), "어느 자리인지 안 댄다\n{}", text(&out));
-    assert!(!away.path().join("skills").exists(), "체크아웃 밖에 디렉터리를 지었다");
+    // **연습도 같은 자로 잰다**(moai-dj4j.ug2, 리뷰 moai-dj4j.n9y) — `.agents` 트리를 첫 쓰기 전에 재는 길은 연습에서만
+    // 드러난다. 진짜 실행은 그 트리가 첫 쓰기라 제 자를 다시 대므로, 연습을 안 부르면 그 길을 걷어도 이 시험이 푸르다.
+    for args in [&["skill", "install", "--agent", "codex", "--dry-run"][..], &["skill", "install", "--agent", "codex"]]
+    {
+        let out = c.run(s.path(), args, true);
+        assert!(!out.status.success(), "{args:?}: 밖을 가리키는 자리에 심고 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains("outside"), "{args:?}: 어느 자리인지 안 댄다\n{}", text(&out));
+        assert!(!away.path().join("skills").exists(), "{args:?}: 체크아웃 밖에 디렉터리를 지었다");
+    }
 
     std::fs::create_dir_all(away.path().join("skills/moai")).unwrap();
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
@@ -18711,8 +18720,9 @@ fn skill_install_writes_the_plugin_tree_through_no_link_outside() {
     assert_eq!(built, ["bashrc"], "체크아웃 밖에 지었다");
 
     // `uninstall` 도 밖에 선 트리를 심은 파일로 대지 않는다 — 그 자리(`.claude/moai-plugin/`)를 지우면 링크를 지나 밖을
-    // 지운다. 걷을 등록이 있어야 그 줄까지 가므로 이 저장소의 이름을 장부에 세운다.
-    let plan = String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+    // 지운다. 걷을 등록이 있어야 그 줄까지 가므로 이 저장소의 이름을 장부에 세운다. 이름은 `status` 에서 읽는다 — 이
+    // 트리 앞에서는 연습도 거절한다(moai-dj4j.ug2).
+    let plan = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
     let market = field(&plan, "market");
     let place = json_str(&plugin.display().to_string());
     c.ledger("known_marketplaces.json", &format!(r#"{{"{market}":{{"installLocation":{place}}}}}"#));
@@ -26256,4 +26266,74 @@ fn every_dialect_and_event_never_fails() {
             }
         }
     }
+}
+
+/// **고른 트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 6·7번) — `.agents`·훅 파일을 쓰고 나서
+/// Claude 의 트리가 거절되던 판은 `{"error":…}` 하나로 끝나, 앞서 쓴 절반(`agents_files`·`hooks`, Codex 의 `/hooks`
+/// 줄)을 아무도 몰랐다. 이제 한 트리가 거절되면 아무 트리도 안 쓰고 `claude` 도 안 부른다. 연습도 같은 말로 멈춘다 —
+/// 진짜 실행이 거절할 트리에 등록을 약속하고 0 으로 끝나지 않는다.
+#[cfg(unix)]
+#[test]
+fn skill_install_measures_every_chosen_tree_before_the_first_write() {
+    let s = init("skillmeasure");
+    let c = Claude::new("skillmeasure-home");
+    let away = Scratch::new("skillmeasure-away");
+    let victim = away.path().join("bashrc");
+    std::fs::write(&victim, "# 사람의 rc\n").unwrap();
+    let plugin = s.path().join(".claude/moai-plugin");
+    let manifest = plugin.join(".claude-plugin/plugin.json");
+    std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&victim, &manifest).unwrap();
+    let (agents, codex) = (s.path().join(".agents"), s.path().join(".codex/hooks.json"));
+    assert!(!agents.exists() && !codex.exists(), "init 이 이미 심었다 — 이 시험이 재는 것이 없다");
+
+    for dry_run in [true, false] {
+        let mut args = vec!["skill", "install", "--agent", "codex", "--agent", "claude"];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        let out = c.run(s.path(), &args, true);
+        assert!(!out.status.success(), "{args:?}: 못 심을 트리가 있는데 성공으로 끝났다\n{}", text(&out));
+        assert!(
+            text(&out).contains("plugin.json") && text(&out).contains("outside"),
+            "{args:?}: 어느 자리인지 안 댄다\n{}",
+            text(&out)
+        );
+        assert!(!text(&out).contains("plugin install"), "{args:?}: 못 심을 트리에 등록을 약속한다\n{}", text(&out));
+        assert!(!agents.exists(), "{args:?}: 거절될 설치가 .agents 를 먼저 썼다");
+        assert!(!codex.exists(), "{args:?}: 거절될 설치가 Codex 의 훅을 먼저 썼다");
+        assert!(!plugin.join("skills").exists(), "{args:?}: 거절될 트리의 스킬 글을 먼저 썼다");
+    }
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 덮었다");
+    assert_eq!(c.calls(), "", "거절될 설치가 claude 를 불렀다");
+
+    // 매니페스트를 보통 파일로 돌리면 같은 부름이 세 트리를 다 심는다 — 위의 거절이 그 링크 하나 때문이었다.
+    std::fs::remove_file(&manifest).unwrap();
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex", "--agent", "claude"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(agents.join("skills/moai/SKILL.md").is_file() && codex.is_file() && manifest.is_file());
+}
+
+/// **지을 수 없는 디렉터리도 첫 쓰기 전에 잰다**(리뷰 moai-dj4j.n9y) — 훅 자리 `.codex` 가 보통 파일이면 `create_dir_all`
+/// 이 거기서 멈춘다. 재지 않던 판은 `.agents/skills` 를 다 쓴 뒤에 그 자리에서 `File exists` 로 멈췄고, 연습은 0 으로
+/// 끝나며 훅을 심겠다고 했다. 이제 연습도 실행도 그 자리를 대며 아무것도 안 쓰고 멈춘다.
+#[test]
+fn skill_install_refuses_a_tree_it_cannot_build_before_the_first_write() {
+    let s = init("skillunbuilt");
+    let c = Claude::new("skillunbuilt-home");
+    let codex = s.path().join(".codex");
+    std::fs::write(&codex, "사람의 파일\n").unwrap();
+    let agents = s.path().join(".agents");
+    for dry_run in [true, false] {
+        let mut args = vec!["skill", "install", "--agent", "codex"];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        let out = c.run(s.path(), &args, true);
+        assert!(!out.status.success(), "{args:?}: 지을 수 없는 자리가 있는데 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains(".codex is not a directory"), "{args:?}: 어느 자리인지 안 댄다\n{}", text(&out));
+        assert!(!agents.exists(), "{args:?}: 거절될 설치가 .agents 를 먼저 썼다");
+    }
+    assert_eq!(std::fs::read_to_string(&codex).unwrap(), "사람의 파일\n", "사람의 파일을 고쳤다");
+    assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
 }

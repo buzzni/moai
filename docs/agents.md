@@ -481,12 +481,16 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **`skill install` printed two `claude plugin` lines and failed.** The
   registration did not go through — most often `claude` is not on `PATH`; run
   those lines where it is
-- **`skill install` refused a path that "points at … outside" or "is not a
-  regular file".** A file or directory under `.claude/moai-plugin/`,
-  `.agents/skills/` or a hooks file is a link that leaves the checkout (or lands
-  in `.git`), or a FIFO or device stands where a file goes. moai writes nothing
-  through it, and stops before registering with `claude`. Replace the link with
-  a real file or directory, or remove what stands there, and install again
+- **`skill install` refused a path that "points at … outside", "is not a
+  regular file" or "is not a directory".** A file or directory under
+  `.claude/moai-plugin/`, `.agents/skills/` or a hooks file is a link that leaves
+  the checkout (or lands in `.git`), a FIFO or device stands where a file goes,
+  or a file or a dangling link stands where a directory has to be made (a
+  `.codex` that is a file, say). moai checks every place before the first write,
+  so nothing was written — not the other agents' files either — and `claude` was
+  not asked to register. `--dry-run` stops with the same line. Replace the link
+  with a real file or directory, or move aside what stands there, and install
+  again
 - **`skill install` said it did not read `.claude/settings.json`.** That
   committed file is a link out of the checkout, a FIFO, or unreadable, so the
   marketplaces an earlier moai declared there were not removed. Delete the
@@ -558,4 +562,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-54yc
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc
