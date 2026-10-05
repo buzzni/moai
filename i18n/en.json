@@ -1055,7 +1055,7 @@
   "warn.mail_garbled": "A letter that cannot be read: {path} - {why}",
   "warn.agents_garbled": "A presence file that cannot be read: {path} - {why}",
   "refuse.mail_subject": "A letter needs a subject: one line of up to {max} characters",
-  "refuse.mail_reply_to": "`{id}` is not a letter id - it looks like 20261004-061203-0k3f9x2a (`moai inbox` shows them)",
+  "refuse.mail_id": "`{id}` is not a letter id - it looks like 20261004-061203-0k3f9x2a (`moai inbox` shows them)",
   "refuse.mail_no_letter": "No letter {id} for {me} - it is someone else's, or it was read long enough ago to be swept (`moai inbox --all --as {me}` lists what there is)",
   "refuse.mail_body_large": "The body is {n} bytes - a letter holds up to {max}. Put the long part in a file in the repository and name it in the letter",
   "refuse.mail_who": "Who are you? Pass `--as <name>`, set MOAI_AGENT, or register with `moai hello` first. A Codex session whose shell has no CODEX_THREAD_ID passes the name its hooks gave it (`codex-` and eight characters, named in its first context)",

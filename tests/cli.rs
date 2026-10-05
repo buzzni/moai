@@ -24253,6 +24253,12 @@ fn mail_and_attendance_follow_no_committed_link_out_of_the_checkout() {
         "못 연 우편함을 안 댄다\n{}",
         text(&out)
     );
+    // 편지 하나를 물어도 같다 — 못 연 우편함 앞에서 "남의 편지이거나 걷혔다"(`not_found`)로 답하지 않는다. 고칠 것은 그
+    // 링크다(리뷰 moai-54yc.vqe).
+    let out = moai(s.path(), &["inbox", "20261005-000000-00000001", "--as", "w1", "--json"]);
+    assert!(!out.status.success(), "못 연 우편함을 다 읽은 것으로 끝냈다\n{}", text(&out));
+    assert!(!text(&out).contains("not_found"), "못 연 우편함 앞에서 못 찾았다고 했다\n{}", text(&out));
+    assert!(text(&out).contains(&mail_away.display().to_string()), "못 연 우편함을 안 댄다\n{}", text(&out));
     // 못 연 우편함은 기다려도 안 풀린다 — `--wait` 를 다 채우며 그 일꾼을 노는 것으로 세우지 않고 곧 멈춘다.
     let started = std::time::Instant::now();
     let out = moai(s.path(), &["inbox", "--ack", "--wait", "60", "--as", "w1"]);
@@ -24546,6 +24552,13 @@ fn only_a_wait_that_took_a_letter_reads_busy() {
     let before = row("w0");
     ok(s.path(), &["inbox", "--as", "w0", "--wait", "0"]);
     assert_eq!(row("w0"), before, "기다리지 않은 부름이 일하는 장을 고쳤다");
+    // 보기만 하는 기다림도 편지를 보면 일하러 간다 — `--ack` 가 없으면 본 것이 얻은 것이다. 출석을 옮기기 앞으로 당긴
+    // 자리를 이 칸도 지난다(리뷰 moai-54yc.vqe). 본 편지는 치운다 — 아래 겨루기에서 제 편지를 일감으로 세지 않게.
+    mark(s.path(), "w5", "idle");
+    ok(s.path(), &["send", "w5", "보기만 한다", "--as", "boss"]);
+    ok(s.path(), &["inbox", "--as", "w5", "--wait", "0"]);
+    assert_eq!(field(&row("w5"), "status"), "busy", "편지를 본 기다림이 일하러 안 갔다");
+    ok(s.path(), &["inbox", "--as", "w5", "--ack"]);
     // 편지가 이미 서 있으면 기다린 것이 아니다 — 시계를 안 고정한 부름이라, 장을 쓰면 `since` 가 바뀐다. 닻(`seen`)은
     // 바뀌어도 된다 — 때가 된 닻은 상태가 같아도 다시 적는다(moai-dhxm).
     ok(s.path(), &["send", "w0", "벌써 왔다", "--as", "boss"]);
@@ -24617,6 +24630,32 @@ fn only_a_wait_that_took_a_letter_reads_busy() {
     }
 }
 
+/// 첫 파일 쓰기에서 죽을 자식 — 부르는 쪽이 `sh -c 'ulimit -f 0; …'` 로 감싸면 그 쓰기가 `SIGXFSZ` 를 낸다. **그 신호를
+/// 기본 동작으로 되돌린다**(리뷰 moai-jzym.a9k) — 시험을 띄운 쪽이 그 신호를 무시해 두면(CPython 은 켜질 때 무시하고
+/// `os.system` 은 안 되돌린다) 자식이 그 무시를 물려받고, 셸은 켜질 때 무시된 신호를 되돌리지 못한다. 그러면 쓰기는
+/// `EFBIG` 로 지기만 하고(출석 쓰기는 그 실패를 삼킨다) moai 는 편지를 옮긴 채 0 으로 끝나, 시험이 기계를 따라 붉어진다.
+/// 죽은 까닭은 [`died_writing`] 이 잰다 — 두 시험(훅의 `Stop`, `inbox` 의 기다림)이 이 둘을 함께 쓴다(리뷰 moai-54yc.vqe).
+#[cfg(unix)]
+fn dying_at_first_write(cmd: &mut Command) -> &mut Command {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: `fork` 와 `exec` 사이에서 부르는 것은 `signal` 하나다 — 비동기 신호에 안전한 함수다.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::signal(libc::SIGXFSZ, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+    cmd
+}
+
+/// **죽은 까닭까지 잰다** — 셸이 moai 를 띄우고 기다렸으면 `128 + SIGXFSZ`, moai 를 `exec` 했으면 그 신호 자체다. 다른
+/// 까닭으로 진 판(패닉의 101, 앞선 거절)은 편지를 옮기기 전에 끝나도 그 시험이 잴 것을 안 잰다.
+#[cfg(unix)]
+fn died_writing(out: &Output) -> bool {
+    use std::os::unix::process::ExitStatusExt as _;
+    out.status.signal() == Some(libc::SIGXFSZ) || out.status.code() == Some(128 + libc::SIGXFSZ)
+}
+
 /// **기다림은 편지를 읽음으로 옮기기 전에 출석을 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은 자다(moai-jzym.flj). 옮긴 뒤에
 /// 적던 판은 그 쓰기에서 끊기면 편지가 읽음으로 남고 아무것도 안 찍혀, 다음 `inbox --ack` 가 "편지가 없다" 고 답했다.
 /// 늦은 쓰기를 기다리는 대신 첫 파일 쓰기에서 죽인다(`ulimit -f 0` 이 `SIGXFSZ` 를 낸다). 장을 `idle` 로 두어야 그 쓰기가
@@ -24633,16 +24672,20 @@ fn a_wait_that_dies_writing_attendance_leaves_the_letter_unread() {
     let unread = names_in(&mailbox);
     assert_eq!(unread.len(), 1, "편지가 함에 안 들었다 — {unread:?}");
 
-    let out = isolated("sh")
-        .args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "inbox", "--as", "w1", "--ack", "--wait", "5"])
+    let mut cmd = isolated("sh");
+    cmd.args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "inbox", "--as", "w1", "--ack", "--wait", "5"])
         .env("MOAI_ACTOR", ACTOR)
         .env("MOAI_NOW", NOW)
         .env("NO_COLOR", "1")
         .current_dir(s.path())
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    assert!(!out.status.success(), "파일 쓰기에서 기다림이 안 죽었다 — 시험이 헛돈다");
+        .stdin(Stdio::null());
+    let out = dying_at_first_write(&mut cmd).output().unwrap();
+    assert!(
+        died_writing(&out),
+        "파일 쓰기에서 기다림이 안 죽었다 — 시험이 헛돈다 ({:?})\nstderr: {}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(names_in(&mailbox), unread, "출석을 적기 전에 편지를 읽음으로 옮겼다");
     assert!(names_in(&mailbox.join("read")).is_empty(), "죽은 기다림이 편지를 읽음으로 남겼다");
 
@@ -24672,7 +24715,9 @@ fn inbox_shows_one_letter_by_its_id() {
     // `--ack` 는 그 한 통만 옮긴다.
     ok(s.path(), &["inbox", &second, "--ack", "--as", "w1"]);
     assert_eq!(names_in(&s.path().join(".moai/mail/w1")), [format!("{first}.json")], "다른 편지까지 옮겼다");
-    // 읽은 편지도 다시 보인다 — 훅이 자른 편지가 그 자리다.
+    // 읽은 편지도 다시 보인다 — 훅이 자른 편지가 그 자리다. 그 id 와 무관한 깨진 편지는 그 부름을 덜 낸 것(비영)으로 안
+    // 끝낸다 — 훅이 내미는 `inbox <id> --ack` 가 편지를 옮겨 놓고 실패로 읽힌다(리뷰 moai-54yc.vqe).
+    std::fs::write(s.path().join(".moai/mail/w1/read/20261001-000000-00000000@w1.json"), "not json").unwrap();
     let again = ok(s.path(), &["inbox", &second, "--as", "w1", "--json"]);
     assert_eq!(ids_in(&again), [second.as_str()]);
     assert!(again.contains("\"read\":true"), "읽은 편지로 안 보였다 — {again}");
@@ -24691,9 +24736,13 @@ fn inbox_shows_one_letter_by_its_id() {
         assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "not_found", "{why} — {}", text(&out));
     }
     assert!(s.path().join(format!(".moai/mail/w2/{theirs}.json")).is_file(), "남의 편지를 건드렸다");
-    // 꼴이 아닌 id 는 멈춘다.
-    let out = moai(s.path(), &["inbox", "moai-abcd", "--as", "w1", "--json"]);
-    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input", "{}", text(&out));
+    // 꼴이 아닌 id 는 멈춘다 — **자리를 열기 전에**: 트래커 밖에서도 `bad_input` 이다. 자리를 먼저 열면 거기서는 "트래커가
+    // 아니다" 로 지니, 저장소 안에서만 재면 차례가 바뀌어도 푸르다(리뷰 moai-54yc.vqe).
+    let outside = Scratch::new("inbox-one-outside");
+    for at in [s.path(), outside.path()] {
+        let out = moai(at, &["inbox", "moai-abcd", "--as", "w1", "--json"]);
+        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input", "{at:?} — {}", text(&out));
+    }
     // 기다림과는 안 묶인다 — 이미 선 편지 하나를 보는 부름이다.
     assert!(
         !moai(s.path(), &["inbox", &first, "--wait", "1", "--as", "w1"]).status.success(),
@@ -24920,7 +24969,13 @@ fn the_hooks_load_letters_up_to_a_budget() {
     assert!(whole.contains(&big) && !whole.contains("큰 편지 1"), "그 편지 하나를 통째로 안 보였다");
     // 남은 수는 다음 한 통을 댄다 — 그 길은 그 한 통만 읽음으로 옮긴다.
     let next = format!("moai inbox {} --ack --as claude-sess0003", ids[1]);
-    assert!(said.contains(&next), "남은 수가 다음 한 통을 안 댔다 — {}", &said[said.len().saturating_sub(300)..]);
+    // 끝 300 바이트는 바이트로 자른다 — `&said[..]` 로 자르면 이 단언이 서는 바로 그 회귀에서 그 자리가 '가' 가운데라,
+    // 시험이 제 메시지를 짓다가 넘어진다(리뷰 moai-54yc.vqe).
+    assert!(
+        said.contains(&next),
+        "남은 수가 다음 한 통을 안 댔다 — {}",
+        String::from_utf8_lossy(&said.as_bytes()[said.len().saturating_sub(300)..])
+    );
     let one = ok(s.path(), &["inbox", &ids[1], "--ack", "--as", "claude-sess0003", "--json"]);
     assert_eq!(ids_in(&one), [ids[1].clone()], "다음 한 통이 아닌 것을 읽었다 — {one}");
     assert_eq!(names_in(&s.path().join(".moai/mail/claude-sess0003")), [format!("{}.json", ids[2])]);
@@ -25581,9 +25636,9 @@ fn a_hook_past_a_broken_root_config_keeps_attendance_and_letters_at_the_root() {
 /// 첫 파일 쓰기에서 훅을 죽인다(`ulimit -f 0` 이 `SIGXFSZ` 를 낸다) — 출석을 판정 뒤에 적던 판은 그때 편지를 이미
 /// 옮겨 놓았다.
 #[test]
+#[cfg(unix)]
 fn a_stop_that_dies_writing_attendance_leaves_the_letter_unread() {
     use std::io::Write as _;
-    use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
     let s = init("hook-stop-order");
     dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
     ok(s.path(), &["send", "codex-01a107b4", "일감 하나", "--as", "boss"]);
@@ -25604,24 +25659,13 @@ fn a_stop_that_dies_writing_attendance_leaves_the_letter_unread() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // **`SIGXFSZ` 를 기본 동작으로 되돌린다**(리뷰 moai-jzym.a9k) — 시험을 띄운 쪽이 그 신호를 무시해 두면(CPython 은
-    // 켜질 때 무시하고 `os.system` 은 안 되돌린다) 자식이 그 무시를 물려받고, 셸은 켜질 때 무시된 신호를 되돌리지 못한다.
-    // 그러면 쓰기는 `EFBIG` 로 지기만 하고 훅은 편지를 옮겨 붙든 채 0 으로 끝나, 시험이 기계를 따라 붉어진다.
-    // SAFETY: `fork` 와 `exec` 사이에서 부르는 것은 `signal` 하나다 — 비동기 신호에 안전한 함수다.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::signal(libc::SIGXFSZ, libc::SIG_DFL);
-            Ok(())
-        });
-    }
-    let mut child = cmd.spawn().unwrap();
+    // `SIGXFSZ` 를 기본 동작으로 되돌리고(리뷰 moai-jzym.a9k) 죽은 까닭까지 잰다 — 까닭은 [`dying_at_first_write`]·
+    // [`died_writing`] 에 있다.
+    let mut child = dying_at_first_write(&mut cmd).spawn().unwrap();
     child.stdin.take().unwrap().write_all(stop.as_bytes()).unwrap();
     let out = child.wait_with_output().unwrap();
-    // **죽은 까닭까지 잰다** — 셸이 훅을 띄우고 기다렸으면 `128 + SIGXFSZ`, 훅을 `exec` 했으면 그 신호 자체다. 다른
-    // 까닭으로 진 판(패닉의 101)은 편지를 옮기기 전에 끝나도 이 시험이 잴 것을 안 잰다.
-    let by_xfsz = out.status.signal() == Some(libc::SIGXFSZ) || out.status.code() == Some(128 + libc::SIGXFSZ);
     assert!(
-        by_xfsz,
+        died_writing(&out),
         "파일 쓰기에서 훅이 안 죽었다 — 시험이 헛돈다 ({:?})\nstderr: {}",
         out.status,
         String::from_utf8_lossy(&out.stderr)

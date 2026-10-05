@@ -68,10 +68,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
     if let Some(id) = args.reply_to.as_deref()
         && !mail::is_id(id)
     {
-        return Err(Fail::coded(
-            fill(say(ctx.lang(), "refuse.mail_reply_to"), &[("id", &crate::text::one_line(id))]),
-            code::BAD_INPUT,
-        ));
+        return Err(bad_id(ctx.lang(), id));
     }
     // **읽기는 이름을 다 댄 뒤다** — `-b -` 는 stdin 을 기다리므로, 잘못 친 이름은 그 앞에서 멈춘다.
     let (agents, roster) = mail::presences(&repo.agents_dir());
@@ -142,14 +139,11 @@ fn woke_line(lang: Lang, zone: &crate::tz::Zone, w: &Woke) -> Option<String> {
 pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // **편지 하나는 id 로 본다**(moai-54yc.v70) — 훅이 자른 편지는 이미 읽음이라, 그 나머지를 보는 길이 읽은 편지까지 함
     // 전체를 내는 `--all` 하나였다. 함이 크면 Codex 가 긴 출력의 가운데를 빼 그 편지가 다시 안 닿는다. 꼴은 `--reply-to`
-    // 와 같은 자로 잰다 — 자리를 열기 전이다.
+    // 와 같은 자로 잰다([`bad_id`]) — 자리를 열기 전이다.
     if let Some(id) = args.id.as_deref()
         && !mail::is_id(id)
     {
-        return Err(Fail::coded(
-            fill(say(ctx.lang(), "refuse.mail_reply_to"), &[("id", &crate::text::one_line(id))]),
-            code::BAD_INPUT,
-        ));
+        return Err(bad_id(ctx.lang(), id));
     }
     let repo = super::open_repo(ctx)?;
     let (agents, roster) = mail::presences(&repo.agents_dir());
@@ -173,8 +167,11 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // moai-ew4o.q9f — 반 초마다 모든 장을 읽던 자리다).
     let mut stamped = std::time::Instant::now();
     let (mut mine, garbled) = loop {
-        // id 하나는 읽은 편지 사이에서도 찾는다 — 훅이 자른 편지는 이미 읽음이다.
-        let (all, garbled) = mail::list(&dir, &me, args.all || args.id.is_some());
+        // id 하나는 그 id 의 파일만 연다([`mail::list_one`]) — 읽은 편지 사이에서도 찾는다: 훅이 자른 편지는 이미 읽음이다.
+        let (all, garbled) = match args.id.as_deref() {
+            Some(id) => mail::list_one(&dir, &me, id),
+            None => mail::list(&dir, &me, args.all),
+        };
         // **못 연 출석부면 안 읽은 열린 편지는 안 가진다**(리뷰 moai-kxkw.k2f) — 역할을 모른다. 빈 역할로 가르던 판은 감독이
         // `any-idle-worker` 일감을 가져 일꾼에게 안 갔다. 읽음으로 옮기는 것은 쓰기라 모르는 것으로 정하지 않는다 — 그 편지는
         // 출석부를 고칠 때까지 함에서 기다린다.
@@ -182,7 +179,6 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
             .into_iter()
             .filter(|s| mail::for_me(s, &me, &role))
             .filter(|s| !(roster_shut && s.open() && s.reader.is_none()))
-            .filter(|s| args.id.as_deref().is_none_or(|id| s.id == id))
             .collect();
         // **우편함을 못 열면 기다리지 않는다**(리뷰 moai-kxkw.k2f) — 그 거절은 기다려도 안 풀린다. 기다리던 판은 `--wait` 를 다
         // 채우는 동안 그 일꾼을 `idle` 로 적어, 감독이 거절될 편지를 보내게 했다. 함 하나의 거절(`mailbox` 가 있다)로는 안
@@ -229,25 +225,40 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
             note_partial();
         }
     }
-    // 준 id 가 없으면 빈 함이 아니라 못 찾은 것이다 — 남의 편지이거나, 읽은 지 오래되어 걷혔다.
+    // 준 id 가 없으면 빈 함이 아니라 못 찾은 것이다 — 남의 편지이거나, 읽은 지 오래되어 걷혔다. **가린 것이 있으면 못
+    // 찾았다고 안 한다**(리뷰 moai-54yc.vqe) — 못 연 우편함·함·`read/`, 못 읽은 그 id 의 파일, 못 연 출석부가 가린 열린
+    // 편지는 거기 있을 수 있다. "남의 편지이거나 걷혔다" 로 답하던 판은 링크 하나를 고치면 될 일을 편지가 없어진 것으로
+    // 읽게 했다. 그 까닭은 위에서 댔으니 맨 `inbox` 와 같이 빈 답으로 끝난다.
     if let Some(id) = args.id.as_deref()
         && mine.is_empty()
+        && garbled.is_empty()
+        && !roster_shut
     {
         let said = fill(say(ctx.lang(), "refuse.mail_no_letter"), &[("id", id), ("me", &me)]);
         return Err(Fail::coded(said, code::NOT_FOUND));
     }
 
-    // **기다림의 출석은 편지를 옮기기 전에 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은 까닭이다(moai-jzym.flj). 옮긴 뒤에
-    // 적던 판은 그 쓰기에서 멈추거나 끊기면(저장소가 선 Ceph 가 멈춘 날) 편지가 읽음으로 남고 아무것도 안 찍혔다 — 다음
-    // `inbox --ack` 는 "편지가 없다" 고 답해, 기다림 고리로 받던 일감 편지 한 통이 통째로 사라졌다. 가질 편지가 있으면
-    // 가질 것으로 보고 `busy` 를 먼저 적고, 하나도 못 가진 드문 판(열린 편지를 남이 먼저 가졌다)만 그 앞의 칸으로 되돌린다.
-    let early = (until.is_some() && args.ack && mine.iter().any(|s| s.reader.is_none()))
-        .then(|| attend(&repo, &me, mail::BUSY));
+    // **기다림이 편지로 끝났으면 일하러 간다 — 그 출석은 편지를 옮기기 전에 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은
+    // 까닭이다(moai-jzym.flj). 옮긴 뒤에 적던 판은 그 쓰기에서 멈추거나 끊기면(저장소가 선 Ceph 가 멈춘 날) 편지가 읽음으로
+    // 남고 아무것도 안 찍혔다 — 다음 `inbox --ack` 는 "편지가 없다" 고 답해, 기다림 고리로 받던 일감 편지 한 통이 통째로
+    // 사라졌다. 얻을 편지(안 읽은 것)가 있으면 얻을 것으로 보고 `busy` 를 먼저 적는다(`--ack` 가 아니면 본 것이 얻은 것이다).
+    //
+    // **`busy` 는 편지를 얻었을 때만이다**(리뷰 moai-snyk.nic) — 남이 먼저 가진 열린 편지는 일이 아니다: 겨루기에 진 일꾼을
+    // 일 없이 바쁜 것으로 세우면 다시 걸기 전까지 `agents --status idle` 과 `send --wake` 의 후보에서 빠진다. 그래서 `--ack`
+    // 가 하나도 못 가진 드문 판만 그 앞의 칸으로 되돌린다([`put_back`]). 때가 다 되어 끝났으면 `idle` 그대로다 — 일꾼은
+    // 곧 다시 건다.
+    //
+    // **창이 다 닫힌 것은 아니다** — 훅의 `Stop` 과 같다(리뷰 moai-jzym.a9k). 여러 통을 가지면 앞의 편지를 옮긴 뒤에도 뒤의
+    // 편지의 `stamp_read`·`rename` 이 남고 글은 다 옮긴 뒤에야 찍혀, 그 사이에 멈춰 끊기면 앞의 편지가 읽음으로 남는다.
+    // 닫으려면 옮기기를 출력 뒤로 미뤄야 하는데, 열린 편지는 옮기기가 곧 누가 가지는지를 가르는 자리라 그대로는 못 미룬다.
+    let early =
+        (until.is_some() && mine.iter().any(|s| s.reader.is_none())).then(|| attend(&repo, &me, mail::BUSY)).flatten();
     let mut lost = Vec::new();
-    // 이 부름이 얻은 편지의 수 — `--ack` 면 가진 것(과 옮기다 못 옮겨 그대로 보인 것)이고, 아니면 보인 못 읽은 것이다.
-    let gained = if args.ack {
+    if args.ack {
         let mut kept = Vec::new();
-        let mut gained = 0;
+        // 가진 편지의 수(옮기다 못 옮겨 그대로 보인 것도 센다)와, 진 편지를 같은 이름이 가졌는가 — 그 세션의 훅이나 같은
+        // 이름의 옆 기다림이 먼저 가졌으면 이 이름은 편지를 얻은 것이다.
+        let (mut gained, mut ours) = (0, false);
         // **열린 편지(`any-idle-worker`)는 한 부름에 한 통만 가진다**(리뷰 moai-snyk.nic) — 훅이 한 번에 한 통만 싣는
         // 것([`crate::hook::deliverable`])과 같은 자다. 일꾼은 이 부름으로 일감을 기다리는데, 쌓인 열린 편지를 먼저 깬
         // 하나가 다 가지면 그 받는 이 낱말이 거짓이 되고, 나머지 일감은 그 일꾼의 읽음 속에 숨어 아무도 못 가진다. 남에게
@@ -269,7 +280,10 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
                     s.reader = Some(me.clone());
                     kept.push(s);
                 }
-                Ok(mail::Took::Lost) => lost.push(s.id),
+                Ok(mail::Took::Lost) => {
+                    ours |= mail::read_by(&dir, &s, &me);
+                    lost.push(s.id);
+                }
                 Err(e) => {
                     // 쓰는 길의 거절과 같은 말이다 — 체크아웃 밖으로 풀린 `read/` 는 고른 말로 선다([`mail::refusal`]).
                     tell(&mail::refusal(ctx.lang(), &dir, &e).message);
@@ -280,21 +294,12 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
             }
         }
         mine = kept;
-        gained
-    } else {
-        mine.iter().filter(|s| s.reader.is_none()).count()
-    };
-    // 기다림이 편지로 끝났으면 일하러 간다 — **편지를 얻었을 때만**(리뷰 moai-snyk.nic). 남이 먼저 가진 열린 편지는
-    // 일이 아니다: 편지를 본 자리에서 `busy` 를 적던 판은 겨루기에 진 일꾼을 일 없이 바쁜 것으로 세워, 다시 걸기
-    // 전까지 `agents --status idle` 과 `send --wake` 의 후보에서 뺐다. 때가 다 되어 끝났으면 `idle` 그대로다 — 일꾼은
-    // 곧 다시 건다.
-    match early {
-        Some(Some(was)) if gained == 0 => put_back(&repo, &me, was),
-        Some(_) => {}
-        None if until.is_some() && gained > 0 => {
-            attend(&repo, &me, mail::BUSY);
+        if gained == 0
+            && !ours
+            && let Some(was) = early
+        {
+            put_back(&repo, &me, was);
         }
-        None => {}
     }
 
     if ctx.json {
@@ -368,7 +373,11 @@ struct Was {
 /// 겨루기에 진 일꾼은 그 사이 일하지 않았으니 "얼마나 놀았나" 가 이어진다(`send --wake` 가 가장 오래 논 일꾼을 고른다).
 /// 빈 `since` 는 되돌리지 않고 지금으로 채운다 — [`attend`] 와 같은 자다.
 ///
-/// **그 사이 장이 바뀌었으면 안 되돌린다** — 아직 `busy` 일 때만이다. 훅이 그 틈에 적은 칸을 덮지 않는다.
+/// **그 사이 장이 `busy` 가 아니게 바뀌었으면 안 되돌린다** — 훅이 그 틈에 적은 `idle` 을 덮지 않는다. **같은 이름이 그
+/// 편지를 가졌으면 부르지 않는다**(부르는 쪽이 [`mail::read_by`] 로 잰다, 리뷰 moai-54yc.vqe) — 뒤로 돌린 기다림이 제
+/// 세션의 `Stop` 에 지거나 같은 `MOAI_AGENT` 의 옆 창에 지면, 그 이름은 일하는 중인데 되돌리면 노는 일꾼으로 서서 깨우기가
+/// 일하는 칸을 두드린다. 남이 편지를 가진 틈에 같은 이름의 프롬프트 훅이 `busy` 를 적은 판은 못 가른다 — 시각이 초
+/// 단위라 그 쓰기와 제 쓰기가 한 글자도 안 다르다.
 fn put_back(repo: &crate::store::Repo, me: &str, was: Was) {
     let dir = repo.agents_dir();
     let (agents, _) = mail::presences(&dir);
@@ -445,4 +454,10 @@ pub(super) fn told_name(lang: Lang) -> R<Option<String>> {
 /// 이름이 될 수 없는 글 — 무엇이 되는지를 함께 댄다.
 pub(super) fn bad_name(lang: Lang, name: &str) -> Fail {
     Fail::coded(fill(say(lang, "refuse.mail_name"), &[("name", &crate::text::one_line(name))]), code::BAD_INPUT)
+}
+
+/// 편지 id 가 될 수 없는 글 — id 의 꼴을 함께 댄다. `send --reply-to` 와 `inbox <id>` 가 이 하나로 댄다(리뷰 moai-54yc.vqe —
+/// 두 자리에 베껴 두면 한쪽만 고친 날 같은 글을 둘이 다르게 거절한다).
+fn bad_id(lang: Lang, id: &str) -> Fail {
+    Fail::coded(fill(say(lang, "refuse.mail_id"), &[("id", &crate::text::one_line(id))]), code::BAD_INPUT)
 }

@@ -216,7 +216,8 @@ pub const CODEX_HOLD: Room = Room { size: 8_000, unit: Unit::Utf8 };
 const LETTERS_MIN: usize = 2_000;
 
 /// 머리 줄(받는 이름 64자까지)과 남은 수처럼 편지 밖의 글에 남겨 두는 몫 — 둘을 더해도 이 안에 든다(영어에 64자
-/// 이름이면 560자 남짓이다. 말마다 `the_frame_around_letters_fits_its_share` 가 잰다). 넘으면 함께 고른 뒤의 편지를
+/// 이름이면 590자 남짓이다 — 남은 수가 다음 한 통의 id 를 대면서(moai-54yc.v70) 몫이 열몇 자만 남았다. 말마다
+/// `the_frame_around_letters_fits_its_share` 가 잰다). 넘으면 함께 고른 뒤의 편지를
 /// [`letters`] 가 잘라, 읽음으로 옮긴 그 끝이 아무에게도 안 닿는다. 자른 표는 여기 안 센다 — 그 표는 한 통만 고를
 /// 때만 서고, 그때는 [`letters`] 가 제 자리 안에서 잰다. 편지 글은 어림하지 않고 실릴 글 그대로 잰다([`letter_block`]).
 /// UTF-16 단위로 적었다([`Unit::widest`]).
@@ -8529,10 +8530,13 @@ fn shelving_closes<'a>(
 /// 체크아웃이라, 거기 고친 것은 그 워크트리의 일이지 루트의 일이 아니다.
 /// 여기를 고치는 것은 "일" 이 아니다 — 일을 하러 가는 길이다.
 ///
-/// **`.agents/` 는 `.claude/` 와 같은 자리다**(2026-10-05 사용자 결정, moai-54yc.cq2) — Codex·Antigravity 의 도구 설정
-/// (스킬·`hooks.json`·`rules/`)이 서는 곳이다. 세던 판은 Claude 세션이 `.claude/moai-plugin/skills/moai/SKILL.md` 를
-/// 고치면 지나가고 같은 글인 `.agents/skills/moai/SKILL.md` 를 고치면 막았다(리뷰 moai-xs2h.dir 7번). 그 자리의
-/// `hooks.json`·`rules/` 를 고치는 일도 규칙 2 밖으로 나가는 것을 받아들였다 — `.claude/settings.json` 이 이미 그렇다.
+/// **`.agents/` 는 `.claude/` 와 같은 자리다**(2026-10-05 사용자 결정, moai-54yc.cq2) — Codex 와 Antigravity 가 함께 읽는
+/// 스킬(`.agents/skills/`)과 Antigravity 의 도구 설정(`hooks.json`·`rules/`)이 서는 곳이다. 세던 판은 Claude 세션이
+/// `.claude/moai-plugin/skills/moai/SKILL.md` 를 고치면 지나가고 같은 글인 `.agents/skills/moai/SKILL.md` 를 고치면
+/// 막았다(리뷰 moai-xs2h.dir 7번). 그 자리의 `hooks.json`·`rules/` 를 고치는 일도 규칙 2 밖으로 나가는 것을
+/// 받아들였다 — `.claude/settings.json` 이 이미 그렇다. **Codex 의 훅(`.codex/hooks.json`)은 아직 센다** — 같은 결의
+/// 자리지만 그 결정은 `.agents` 만 댔다(리뷰 moai-54yc.vqe). 규칙 2 의 글(`guide::rules`)이 `.git`·`node_modules` 밖의
+/// 이 목록을 댄다 — 한쪽만 고치면 `rule_two_names_every_directory_it_skips` 가 붉어진다.
 const SKIP: &[&str] = &[".moai", ".claude", ".agents", ".worktrees", ".git", "target", "node_modules"];
 
 /// 이 파일을 고치는 것이 일에 매여야 하는가 — **글자로 이미 푼 자리를 받는다**(moai-ln11).
@@ -11916,6 +11920,23 @@ mod tests {
         }
     }
 
+    /// **규칙 2 의 글은 [`SKIP`] 을 그대로 댄다**(리뷰 moai-54yc.vqe) — 글은 손으로 적고 훅은 [`SKIP`] 으로 잰다. 한쪽만
+    /// 고치면 심은 AGENTS 블록과 두 스킬이 훅과 다른 규칙을 가르친다 — moai-54yc.cq2 가 `.agents/` 를 더할 때 손으로 맞춘
+    /// 자리다. `.git/` 과 `node_modules/` 는 글이 일부러 안 댄다(그 밑에서 일하는 사람이 없다).
+    #[test]
+    fn rule_two_names_every_directory_it_skips() {
+        let agents = crate::guide::agents();
+        let at = agents.find("What counts is work inside the repository").expect("규칙 2 의 글이 없다");
+        let list = &agents[at..at + agents[at..].find(" do not.").expect("규칙 2 의 목록이 안 끝난다")];
+        let named: Vec<&str> = list.split('`').skip(1).step_by(2).filter_map(|w| w.strip_suffix('/')).collect();
+        for dir in SKIP.iter().filter(|d| !matches!(**d, ".git" | "node_modules")) {
+            assert!(named.contains(dir), "규칙 2 의 글이 `{dir}/` 를 안 댄다 — {named:?}");
+        }
+        for dir in &named {
+            assert!(SKIP.contains(dir), "규칙 2 의 글이 세는 자리 `{dir}/` 를 안 센다고 한다");
+        }
+    }
+
     /// **껍데기로 쓰는 파일도 센다.** `Edit`·`Write` 만 보던 판은 `sed -i` 와
     /// 리다이렉션을 그대로 보냈다 — 규칙이 못 보는 길이 따로 있으면 규칙은
     /// 절반만 서 있다.
@@ -14937,7 +14958,9 @@ mod tests {
         let utc = crate::tz::Zone::utc();
         let whole = stored("20261004-061203-00000001", "w1", "x".repeat(1_000));
         let long = stored("20261004-061203-00000002", "w1", "y".repeat(20_000));
-        let said = letters("w1", &[whole, long], &[], Lang::En, &utc, Room::CONTEXT).unwrap();
+        // 자르는 자리는 가운데 편지다 — 끝의 편지를 대는 판도 지나가지 않게(리뷰 moai-54yc.vqe).
+        let after = stored("20261004-061203-00000003", "w1", "z".into());
+        let said = letters("w1", &[whole, long, after], &[], Lang::En, &utc, Room::CONTEXT).unwrap();
         assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다");
         assert!(said.contains(&"x".repeat(1_000)), "앞의 편지를 잘랐다");
         let cut = said.trim_end().lines().last().unwrap_or_default();
@@ -14946,8 +14969,8 @@ mod tests {
 
     /// **편지 밖의 글은 [`LETTERS_FRAME`] 안에 든다** — 머리 줄과 남은 수가 그 몫을 넘으면 [`deliverable`] 이 함께
     /// 고른 뒤의 편지를 [`letters`] 가 잘라, 읽음으로 옮긴 편지의 끝이 아무에게도 안 닿는다. 영어에 64자 이름이면
-    /// 몫의 600자에 40자 남짓만 남아, 말을 옮기거나 다듬으면 넘기 쉽다. 이름은 가장 긴 64자, 수는 두 자리·세 자리로
-    /// 잰다. 남은 수는 다음 한 통의 id 도 든다(moai-54yc.v70). 두 자로 잰다 — Codex 의 붙듦은 그 몫을 바이트로 키워
+    /// 몫의 600자에 열네 자만 남아(586자 — 남은 수가 다음 한 통의 id 도 대서다, moai-54yc.v70), 말을 옮기거나 다듬으면
+    /// 넘기 쉽다. 이름은 가장 긴 64자, 수는 두 자리·세 자리로 잰다. 두 자로 잰다 — Codex 의 붙듦은 그 몫을 바이트로 키워
     /// 쓴다([`Unit::widest`]).
     #[test]
     fn the_frame_around_letters_fits_its_share() {
