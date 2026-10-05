@@ -179,6 +179,16 @@ does not tag — see `CONTRIBUTING.md`.
   session in the repository and make it a worker — including Codex's trust in
   `/hooks` and what to do on a machine where its sandbox cannot stand.
 
+### Fixed
+
+- **Codex's `/hooks` no longer warns about the hooks file moai plants.**
+  `.codex/hooks.json` set `additionalContextLimit` on `Stop`, `Interrupt` and
+  `SessionEnd`, which cannot add context, and a 15-second timeout on
+  `Interrupt` and `SessionEnd`, which Codex holds to 3. The limit now stands
+  only on the events that take it, and those two get 3 seconds. Run
+  `moai skill install --agent codex` again and trust the changed hooks once in
+  `/hooks`.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added
