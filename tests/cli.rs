@@ -24338,25 +24338,39 @@ fn the_hooks_deliver_letters_and_mark_them_read() {
     assert!(s.path().join(format!(".moai/mail/{me}/read/{after}@{me}.json")).is_file());
 }
 
-/// 계약 JSON 의 `additionalContext` 글의 길이 — 이스케이프를 풀어 **Claude Code 가 세는 대로**(UTF-16) 센다.
-fn context_units(out: &str) -> usize {
-    let key = "\"additionalContext\":\"";
-    let at = out.find(key).unwrap_or_else(|| panic!("실은 글이 없다 — {out}")) + key.len();
-    let mut n = 0;
+/// 계약 JSON 에서 `key` 의 문자열 값 — 이스케이프를 풀어 **에이전트가 받는 글 그대로** 낸다. 의존성 없이 하는 최소
+/// 풀이라 훅이 쓰는 꼴(`serde_json` — 비 ASCII 는 날것, 제어문자만 이스케이프)만 읽는다. 훅의 글을 재는 시험들이
+/// 이 하나로 푼다 — 풀이가 둘이면 한쪽만 고쳐져 같은 글을 두 자가 달리 잰다.
+fn json_text(out: &str, key: &str) -> String {
+    let field = format!("\"{key}\":\"");
+    let at = out.find(&field).unwrap_or_else(|| panic!("{key} 가 없다 — {out}")) + field.len();
+    let mut said = String::new();
     let mut chars = out[at..].chars();
     while let Some(c) = chars.next() {
         match c {
-            '"' => return n,
-            '\\' => {
-                if chars.next() == Some('u') {
-                    chars.nth(3);
+            '"' => return said,
+            '\\' => match chars.next() {
+                Some('n') => said.push('\n'),
+                Some('t') => said.push('\t'),
+                Some('r') => said.push('\r'),
+                Some('b') => said.push('\u{8}'),
+                Some('f') => said.push('\u{c}'),
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    said.push(char::from_u32(u32::from_str_radix(&hex, 16).unwrap()).unwrap_or('\u{fffd}'));
                 }
-                n += 1;
-            }
-            c => n += c.len_utf16(),
+                Some(c) => said.push(c),
+                None => break,
+            },
+            c => said.push(c),
         }
     }
     panic!("닫히지 않은 글 — {out}")
+}
+
+/// 계약 JSON 의 `additionalContext` 글의 길이 — 이스케이프를 풀어 **Claude Code 가 세는 대로**(UTF-16) 센다.
+fn context_units(out: &str) -> usize {
+    json_text(out, "additionalContext").encode_utf16().count()
 }
 
 /// **한 번에 싣는 양에는 상한이 있다** — 넘는 편지는 다음 훅으로 미루고 몇 통이 남았는지 댄다. 남은 편지는
@@ -24780,28 +24794,7 @@ fn a_codex_session_without_its_start_still_gets_a_baseline() {
 fn held_reason(out: &str) -> String {
     one_json_value(out);
     assert!(out.contains("\"decision\":\"block\""), "붙들지 않았다 — {out}");
-    let key = "\"reason\":\"";
-    let at = out.find(key).unwrap_or_else(|| panic!("까닭이 없다 — {out}")) + key.len();
-    let mut said = String::new();
-    let mut chars = out[at..].chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => return said,
-            '\\' => match chars.next() {
-                Some('n') => said.push('\n'),
-                Some('t') => said.push('\t'),
-                Some('r') => said.push('\r'),
-                Some('u') => {
-                    let hex: String = chars.by_ref().take(4).collect();
-                    said.push(char::from_u32(u32::from_str_radix(&hex, 16).unwrap()).unwrap_or('\u{fffd}'));
-                }
-                Some(c) => said.push(c),
-                None => break,
-            },
-            c => said.push(c),
-        }
-    }
-    panic!("닫히지 않은 글 — {out}")
+    json_text(out, "reason")
 }
 
 /// **Codex 가 붙드는 턴의 편지는 Codex 의 선 안에 든다**(moai-rxro) — Codex 는 `Stop` 의 `reason` 을 이어 가는
@@ -24816,7 +24809,10 @@ fn a_codex_stop_holds_letters_inside_codexs_limit() {
     ok(s.path(), &["send", "codex-01a107b4", "긴 편지", "-b", &big, "--as", "boss"]);
     let said = held_reason(&dialect_out(&s, "codex", "stop", &recorded(&s, "codex/stop.json")));
     assert!(said.contains("긴 편지") && said.contains("여기서 잘랐다"), "{}", &said[..said.len().min(300)]);
-    assert!(said.contains("moai inbox --all --as codex-01a107b4"), "다시 볼 길을 안 댔다");
+    // 다시 볼 길은 머리 줄에도 있다 — 자른 표가 그 길을 대는지는 그 표가 선 끝 줄로 잰다(남은 편지가 없어 그 뒤에
+    // 서는 줄이 없다).
+    let cut = said.lines().last().unwrap_or_default();
+    assert!(cut.contains("moai inbox --all --as codex-01a107b4"), "자른 자리가 다시 볼 길을 안 댔다 — {cut}");
     assert!(said.len().div_ceil(4) <= 2_500, "Codex 의 기본 상한을 넘겼다 — {} 바이트", said.len());
 
     let ev = event(&s, "sess0009-iiii");

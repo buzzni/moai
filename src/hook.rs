@@ -215,8 +215,11 @@ pub const CODEX_HOLD: Room = Room { size: 8_000, unit: Unit::Utf8 };
 /// 다음 훅을 기다린다(`Stop` 은 칸을 통째로 쓴다). UTF-16 단위로 적었다([`Unit::widest`]).
 const LETTERS_MIN: usize = 2_000;
 
-/// 머리 줄(받는 이름 64자까지)·남은 수·자른 표처럼 편지 밖의 글에 남겨 두는 몫 — 셋을 더해도 500자가 안 된다.
-/// 편지 글은 어림하지 않고 실릴 글 그대로 잰다([`letter_block`]). UTF-16 단위로 적었다([`Unit::widest`]).
+/// 머리 줄(받는 이름 64자까지)과 남은 수처럼 편지 밖의 글에 남겨 두는 몫 — 둘을 더해도 이 안에 든다(영어에 64자
+/// 이름이면 560자 남짓이다. 말마다 `the_frame_around_letters_fits_its_share` 가 잰다). 넘으면 함께 고른 뒤의 편지를
+/// [`letters`] 가 잘라, 읽음으로 옮긴 그 끝이 아무에게도 안 닿는다. 자른 표는 여기 안 센다 — 그 표는 한 통만 고를
+/// 때만 서고, 그때는 [`letters`] 가 제 자리 안에서 잰다. 편지 글은 어림하지 않고 실릴 글 그대로 잰다([`letter_block`]).
+/// UTF-16 단위로 적었다([`Unit::widest`]).
 const LETTERS_FRAME: usize = 600;
 
 /// 글 한 칸을 세는 자 — 에이전트마다 다르다(moai-rxro).
@@ -14738,19 +14741,15 @@ mod tests {
         assert!(!counted("/elsewhere/_workspace/final.md"));
     }
 
-    /// **훅이 싣는 편지는 Claude Code 의 칸(1만 자)을 안 넘는다**(리뷰 moai-h8tn.x4l) — 넘기면 칸이 통째로 파일로
-    /// 빠져 읽음으로 옮긴 편지를 아무도 못 본다. 혼자 넘는 편지는 잘라 싣고 다시 볼 길을 대며, 보드가 칸을 거의 다
-    /// 썼으면 이번에는 안 싣는다. `any-idle-worker` 일감은 한 번에 한 통이다.
-    #[test]
-    fn loaded_letters_fit_the_hook_field() {
-        use crate::mail::{ANY_IDLE_WORKER, Letter, Stored, VERSION};
-        let mk = |id: &str, to: &str, body: String| Stored {
+    /// `to` 의 함에 든 편지 하나 — 보낸 이·때·제목(`s-<id>`)은 시험마다 같다. 편지 시험들이 함께 쓴다.
+    fn stored(id: &str, to: &str, body: String) -> crate::mail::Stored {
+        crate::mail::Stored {
             id: id.into(),
             mailbox: to.into(),
             reader: None,
             returned: false,
-            letter: Letter {
-                v: VERSION,
+            letter: crate::mail::Letter {
+                v: crate::mail::VERSION,
                 to: to.into(),
                 from: "boss".into(),
                 subject: format!("s-{id}"),
@@ -14759,31 +14758,59 @@ mod tests {
                 reply_to: None,
                 rest: Default::default(),
             },
-        };
+        }
+    }
+
+    /// **훅이 싣는 편지는 Claude Code 의 칸(1만 자)을 안 넘는다**(리뷰 moai-h8tn.x4l) — 넘기면 칸이 통째로 파일로
+    /// 빠져 읽음으로 옮긴 편지를 아무도 못 본다. 혼자 넘는 편지는 잘라 싣고 다시 볼 길을 대며, 보드가 칸을 거의 다
+    /// 썼으면 이번에는 안 싣는다. `any-idle-worker` 일감은 한 번에 한 통이다.
+    #[test]
+    fn loaded_letters_fit_the_hook_field() {
+        use crate::mail::{ANY_IDLE_WORKER, Stored};
         let utc = crate::tz::Zone::utc();
         let pick = |all: &[Stored], room: Room| deliverable(all, room, Lang::En, &utc);
-        let big = mk("20261004-061203-00000001", "w1", "가".repeat(30_000));
-        let small = mk("20261004-061203-00000002", "w1", "x".into());
+        let big = stored("20261004-061203-00000001", "w1", "가".repeat(30_000));
+        let small = stored("20261004-061203-00000002", "w1", "x".into());
         assert_eq!(pick(&[big.clone(), small.clone()], Room::CONTEXT), (vec![0], 1));
         // **실릴 글 그대로 잰다** — 줄마다 네 칸을 들여 쓰니, 짧은 줄 800개(8천 자)는 실릴 때 1만 자를 넘는다. 함께
         // 고른 뒤의 편지는 읽음으로 옮겨진 채 자르는 자리 밖으로 밀려났었다.
-        let lines = mk("20261004-061203-00000003", "w1", "moai-abcd\n".repeat(800));
+        let lines = stored("20261004-061203-00000003", "w1", "moai-abcd\n".repeat(800));
         assert_eq!(pick(&[lines, small.clone()], Room::CONTEXT), (vec![0], 1), "뒤의 편지를 잘릴 자리에 골랐다");
         let said = letters("w1", std::slice::from_ref(&big), 1, Lang::En, &utc, Room::CONTEXT).unwrap();
         assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다 — {}", said.encode_utf16().count());
         assert!(said.contains("s-20261004-061203-00000001") && said.contains("moai inbox --all"), "{said}");
-        assert!(
-            said.ends_with(&fill(say(Lang::En, "hook.letters_left"), &[("n", "1"), ("me", "w1")])),
-            "남은 수를 잘랐다"
-        );
-        assert!(said.contains("moai inbox --all --as w1"), "자른 자리의 줄이 `--as` 를 안 달았다 — {said}");
+        let left = fill(say(Lang::En, "hook.letters_left"), &[("n", "1"), ("me", "w1")]);
+        assert!(said.ends_with(&left), "남은 수를 잘랐다");
+        // 다시 볼 길은 머리 줄에도 있다 — 자른 표가 그 길을 대는지는 남은 수 바로 앞에 선 그 표의 줄로 잰다.
+        let cut = said[..said.len() - left.len()].trim_end().lines().last().unwrap_or_default();
+        assert!(cut.contains("moai inbox --all --as w1"), "자른 자리의 줄이 `--as` 를 안 달았다 — {cut}");
         // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다.
         let board = Decision::Context("b".repeat(CONTEXT_CAP - 100));
         assert_eq!(pick(std::slice::from_ref(&small), letters_room(&board)), (vec![], 0));
         // 일감은 한 통씩 — 나머지는 다른 일꾼의 몫이라 남은 수에도 안 센다.
-        let open = |id: &str| mk(id, ANY_IDLE_WORKER, "job".into());
+        let open = |id: &str| stored(id, ANY_IDLE_WORKER, "job".into());
         let all = [open("20261004-061203-0000000a"), open("20261004-061203-0000000b"), small];
         assert_eq!(pick(&all, Room::CONTEXT), (vec![0, 2], 0));
+    }
+
+    /// **편지 밖의 글은 [`LETTERS_FRAME`] 안에 든다** — 머리 줄과 남은 수가 그 몫을 넘으면 [`deliverable`] 이 함께
+    /// 고른 뒤의 편지를 [`letters`] 가 잘라, 읽음으로 옮긴 편지의 끝이 아무에게도 안 닿는다. 영어에 64자 이름이면
+    /// 몫의 600자에 40자 남짓만 남아, 말을 옮기거나 다듬으면 넘기 쉽다. 이름은 가장 긴 64자, 수는 두 자리·세 자리로
+    /// 잰다. 두 자로 잰다 — Codex 의 붙듦은 그 몫을 바이트로 키워 쓴다([`Unit::widest`]).
+    #[test]
+    fn the_frame_around_letters_fits_its_share() {
+        let me = "w".repeat(64);
+        let utc = crate::tz::Zone::utc();
+        let many: Vec<_> = (0..12).map(|k| stored(&format!("20261005-041347-{k:08}"), &me, "x".into())).collect();
+        for lang in Lang::ALL {
+            let said = letters(&me, &many, 999, lang, &utc, Room::CONTEXT).unwrap();
+            let blocks: String = many.iter().map(|s| letter_block(lang, &utc, s)).collect();
+            assert!(said.contains(&blocks), "{lang:?}: 작은 편지 열둘을 잘랐다");
+            for unit in [Unit::Utf16, Unit::Utf8] {
+                let frame = unit.of(&said) - unit.of(&blocks);
+                assert!(frame <= unit.widest(LETTERS_FRAME), "{lang:?}·{unit:?}: 편지 밖의 글 {frame} 이 몫을 넘는다");
+            }
+        }
     }
 
     /// **Codex 가 붙드는 턴의 편지는 바이트로 잰다**(moai-rxro) — Codex 는 `Stop` 의 `reason` 을 기본 상한(UTF-8 네
@@ -14792,25 +14819,9 @@ mod tests {
     /// 나눠 어림하지 않는다 — 그 자리에 드는 편지는 그대로 다 싣는다.
     #[test]
     fn a_codex_hold_measures_letters_in_bytes() {
-        use crate::mail::{Letter, Stored, VERSION};
-        let mk = |id: &str, body: String| Stored {
-            id: id.into(),
-            mailbox: "codex-01a107b4".into(),
-            reader: None,
-            returned: false,
-            letter: Letter {
-                v: VERSION,
-                to: "codex-01a107b4".into(),
-                from: "boss".into(),
-                subject: format!("s-{id}"),
-                body,
-                sent_at: "2026-10-04T06:12:03Z".into(),
-                reply_to: None,
-                rest: Default::default(),
-            },
-        };
         let utc = crate::tz::Zone::utc();
         let me = "codex-01a107b4";
+        let mk = |id: &str, body: String| stored(id, me, body);
         let korean = mk("20261005-041347-00000001", "가".repeat(3_400));
         let said = letters(me, std::slice::from_ref(&korean), 0, Lang::Ko, &utc, CODEX_HOLD).unwrap();
         let cut = |lang: Lang| fill(say(lang, "hook.letter_cut"), &[("me", me)]);
