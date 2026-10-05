@@ -167,9 +167,10 @@ vendor, model, role, whether it is busy or idle, and its process. `moai hello`
 writes it, and the hooks write it for a session as it starts and keep
 busy and idle up to date; `moai inbox --wait` marks it idle while it waits.
 `moai agents` lists them and sweeps a row whose process is gone; a Codex
-session's row carries no process, so its hooks and waits mark it alive (`seen`),
-and it goes when the session ends or nothing has marked it for 20 minutes. The
-name in it is what a [letter](#letter) is sent to.
+session's row carries no process, so its hooks and waits mark it alive (`seen`):
+nothing marked for 20 minutes, it reads `gone` but stays, and it goes when the
+session ends or nothing has marked it for a day. The name in it is what a
+[letter](#letter) is sent to.
 
 ## Regression-of
 

@@ -187,10 +187,13 @@ there. Only the sandbox goes: the approval setting is left at Codex's default.
 **One row per Codex window.** Because the window says hello on the row its
 hooks wrote, the two are one: its role is on the row its hooks read, so a Codex
 supervisor's own turn end never takes an `any-idle-worker` letter, and two Codex
-windows on one machine keep a row each. A row whose session died is swept once
-nothing has marked it alive for 20 minutes — its hooks do at every prompt, turn
-end and tool call, and so does a worker's `moai inbox --wait` while it waits.
-The letters to it stay, for that session to read if it comes back.
+windows on one machine keep a row each. Its hooks mark the row alive at every
+prompt, turn end and tool call, and so does a worker's `moai inbox --wait` while
+it waits. A row nothing marked for 20 minutes reads `gone` in `moai agents` —
+`--status idle` and `--wake` pass it over, so a supervisor sends no work to a
+window that died — but it stays, role and name included, and a session that
+comes back picks it up as it was. After a day it is swept; the letters to it
+stay, for that session to read if it comes back.
 
 ### Antigravity
 
@@ -235,9 +238,9 @@ whose they are (`--dialect`), and what differs is only what goes in and out:
   rule refuses the patch. Its hooks run from a daemon its sessions share, so a
   Codex session's presence row follows its session id, carries no tmux pane to
   wake, and goes away when the session ends. `moai agents` cannot tell by its
-  process whether it still runs, so its hooks and its waits mark it alive, and
-  a row nothing marked for 20 minutes is swept — a Codex session killed before
-  its end no longer stays on the list
+  process whether it still runs, so its hooks and its waits mark it alive: a
+  row nothing marked for 20 minutes reads `gone`, and after a day it is swept
+  — a Codex session killed before its end no longer passes for a live one
 - **Antigravity** has no prompt event, so the first model call of each turn
   loads the board and the letters; it has no session start either, so the
   baseline is written there too. A line the rules only add to a tool call —
