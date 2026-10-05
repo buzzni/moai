@@ -217,6 +217,12 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         }
     }
 
+    // **기다림의 출석은 편지를 옮기기 전에 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은 까닭이다(moai-jzym.flj). 옮긴 뒤에
+    // 적던 판은 그 쓰기에서 멈추거나 끊기면(저장소가 선 Ceph 가 멈춘 날) 편지가 읽음으로 남고 아무것도 안 찍혔다 — 다음
+    // `inbox --ack` 는 "편지가 없다" 고 답해, 기다림 고리로 받던 일감 편지 한 통이 통째로 사라졌다. 가질 편지가 있으면
+    // 가질 것으로 보고 `busy` 를 먼저 적고, 하나도 못 가진 드문 판(열린 편지를 남이 먼저 가졌다)만 그 앞의 칸으로 되돌린다.
+    let early = (until.is_some() && args.ack && mine.iter().any(|s| s.reader.is_none()))
+        .then(|| attend(&repo, &me, mail::BUSY));
     let mut lost = Vec::new();
     // 이 부름이 얻은 편지의 수 — `--ack` 면 가진 것(과 옮기다 못 옮겨 그대로 보인 것)이고, 아니면 보인 못 읽은 것이다.
     let gained = if args.ack {
@@ -262,8 +268,13 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // 일이 아니다: 편지를 본 자리에서 `busy` 를 적던 판은 겨루기에 진 일꾼을 일 없이 바쁜 것으로 세워, 다시 걸기
     // 전까지 `agents --status idle` 과 `send --wake` 의 후보에서 뺐다. 때가 다 되어 끝났으면 `idle` 그대로다 — 일꾼은
     // 곧 다시 건다.
-    if until.is_some() && gained > 0 {
-        attend(&repo, &me, mail::BUSY);
+    match early {
+        Some(Some(was)) if gained == 0 => put_back(&repo, &me, was),
+        Some(_) => {}
+        None if until.is_some() && gained > 0 => {
+            attend(&repo, &me, mail::BUSY);
+        }
+        None => {}
     }
 
     if ctx.json {
@@ -296,16 +307,18 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
 /// ([`mail::Presence::due`]). **빈 `since` 는 채운다** — 훅의 `attend` 와 같은
 /// 자다. 빈 글은 가장 앞에 서서, 그대로 두면 `send --wake` 가 그 장을 가장 오래 논 일꾼으로 고른다(리뷰
 /// moai-snyk.nic). 못 적으면 조용히 지나간다 — 출석은 기록이 아니라 지금의 표다([`mail::write_presence`]).
-fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
+///
+/// 상태를 바꿨으면 그 앞의 칸을 낸다 — [`put_back`] 이 되돌린다.
+fn attend(repo: &crate::store::Repo, me: &str, status: &str) -> Option<Was> {
     let dir = repo.agents_dir();
     // 기다리기 직전·직후에 다시 읽는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다.
     let (agents, _) = mail::presences(&dir);
-    let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
+    let mut p = agents.into_iter().find(|p| p.name == me)?;
     // **다른 기계의 장은 안 고친다**(2026-10-05 사용자 결정, moai-dhxm) — 상태를 바꾸면 `since` 가, 아니면 닻이 새로 서서
     // 그 장이 산 것으로 읽힌다. 여기서 기다리는 것은 그 장의 프로세스가 아니다. 고치던 판은 컨테이너를 다시 띄운 뒤
     // `MOAI_AGENT=w1` 창이 앞 컨테이너의 낡은 w1 장을 기다릴 때마다 살려, 그 창의 훅이 이름을 못 되찾았다.
     if !p.here() {
-        return;
+        return None;
     }
     let now = crate::model::now();
     let changed = p.status != status || p.since.is_empty();
@@ -313,12 +326,39 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     // `inbox --ack --wait` 는 `busy` 를 `busy` 로 적어 아무것도 안 썼고, 그 일꾼의 닻은 그 앞의 인사에 머물렀다. 훅이 안
     // 도는 Codex 일꾼은 그만큼 일찍 걷혔다.
     if !changed && !p.due(&now) {
-        return;
+        return None;
     }
+    let was = (p.status != status).then(|| Was { status: p.status.clone(), since: p.since.clone() });
     if changed {
         p.status = status.to_string();
         p.since = now.clone();
     }
+    p.stamp(&now);
+    let _ = mail::write_presence(&dir, &p);
+    was
+}
+
+/// [`attend`] 가 바꾸기 앞의 상태와 그 `since`.
+struct Was {
+    status: String,
+    since: String,
+}
+
+/// 먼저 적은 `busy` 를 그 앞의 칸으로 되돌린다 — 기다림이 편지를 하나도 못 가졌을 때다(moai-4qtw). `since` 도 되돌린다:
+/// 겨루기에 진 일꾼은 그 사이 일하지 않았으니 "얼마나 놀았나" 가 이어진다(`send --wake` 가 가장 오래 논 일꾼을 고른다).
+/// 빈 `since` 는 되돌리지 않고 지금으로 채운다 — [`attend`] 와 같은 자다.
+///
+/// **그 사이 장이 바뀌었으면 안 되돌린다** — 아직 `busy` 일 때만이다. 훅이 그 틈에 적은 칸을 덮지 않는다.
+fn put_back(repo: &crate::store::Repo, me: &str, was: Was) {
+    let dir = repo.agents_dir();
+    let (agents, _) = mail::presences(&dir);
+    let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
+    if !p.here() || p.status != mail::BUSY {
+        return;
+    }
+    let now = crate::model::now();
+    p.status = was.status;
+    p.since = if was.since.is_empty() { now.clone() } else { was.since };
     p.stamp(&now);
     let _ = mail::write_presence(&dir, &p);
 }

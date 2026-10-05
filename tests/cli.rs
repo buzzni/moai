@@ -24574,9 +24574,15 @@ fn only_a_wait_that_took_a_letter_reads_busy() {
         assert_eq!(got.len(), 1, "{w} 가 열린 편지를 한 통이 아니라 {}통 가졌다", got.len());
     }
 
+    // 논 지 오래인 `since` — 시계를 못박은 부름(`NOW`)이 적는 값과 갈려야 되돌렸는지가 보인다.
+    let long_idle = "2026-09-01T00:00:00Z";
     for round in 0..3 {
         for w in &workers {
             mark(s.path(), w, "idle");
+            let at = s.path().join(".moai/agents").join(format!("{w}.json"));
+            let text = std::fs::read_to_string(&at).unwrap();
+            let was = format!("\"since\":\"{}\"", field(&text, "since"));
+            std::fs::write(&at, text.replacen(&was, &format!("\"since\":\"{long_idle}\""), 1)).unwrap();
         }
         ok(s.path(), &["send", "any-idle-worker", &format!("일감 {round}"), "--as", "boss"]);
         let children: Vec<std::process::Child> = workers
@@ -24602,8 +24608,49 @@ fn only_a_wait_that_took_a_letter_reads_busy() {
         for w in &workers {
             let want = if took.contains(w) { "busy" } else { "idle" };
             assert_eq!(field(&row(w), "status"), want, "{round} 바퀴: {w} — 편지를 가진 기다림만 busy 다");
+            // 진 일꾼은 먼저 적은 `busy` 를 되돌리며 `since` 까지 되돌린다(moai-4qtw) — 그 사이 일하지 않았다. 새로 세우면
+            // `send --wake` 가 가장 오래 논 일꾼을 잘못 고른다.
+            if !took.contains(w) {
+                assert_eq!(field(&row(w), "since"), long_idle, "{round} 바퀴: 진 {w} 의 since 가 새로 섰다");
+            }
         }
     }
+}
+
+/// **기다림은 편지를 읽음으로 옮기기 전에 출석을 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은 자다(moai-jzym.flj). 옮긴 뒤에
+/// 적던 판은 그 쓰기에서 끊기면 편지가 읽음으로 남고 아무것도 안 찍혀, 다음 `inbox --ack` 가 "편지가 없다" 고 답했다.
+/// 늦은 쓰기를 기다리는 대신 첫 파일 쓰기에서 죽인다(`ulimit -f 0` 이 `SIGXFSZ` 를 낸다). 장을 `idle` 로 두어야 그 쓰기가
+/// 선다 — `busy` 를 `busy` 로 적는 부름은 아무것도 안 쓴다.
+#[test]
+#[cfg(unix)]
+fn a_wait_that_dies_writing_attendance_leaves_the_letter_unread() {
+    let s = init("inbox-ack-order");
+    let alive = Sleeper::new();
+    hello_as(s.path(), "w1", &alive.pid(), &["--role", "worker"]);
+    mark(s.path(), "w1", "idle");
+    ok(s.path(), &["send", "w1", "일감 하나", "--as", "boss"]);
+    let mailbox = s.path().join(".moai/mail/w1");
+    let unread = names_in(&mailbox);
+    assert_eq!(unread.len(), 1, "편지가 함에 안 들었다 — {unread:?}");
+
+    let out = isolated("sh")
+        .args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "inbox", "--as", "w1", "--ack", "--wait", "5"])
+        .env("MOAI_ACTOR", ACTOR)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .current_dir(s.path())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "파일 쓰기에서 기다림이 안 죽었다 — 시험이 헛돈다");
+    assert_eq!(names_in(&mailbox), unread, "출석을 적기 전에 편지를 읽음으로 옮겼다");
+    assert!(names_in(&mailbox.join("read")).is_empty(), "죽은 기다림이 편지를 읽음으로 남겼다");
+
+    // 쓰기가 서면 같은 편지가 찍히고, 가진 일꾼은 일하는 중이다.
+    let said = ok(s.path(), &["inbox", "--as", "w1", "--ack", "--wait", "5"]);
+    assert!(said.contains("일감 하나"), "남은 편지가 다음 기다림에 안 찍혔다 — {said}");
+    let card = || std::fs::read_to_string(s.path().join(".moai/agents/w1.json")).unwrap();
+    assert_eq!(field(&card(), "status"), "busy", "편지를 가진 기다림을 노는 것으로 적었다 — {}", card());
 }
 
 /// **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `inbox --wait` 는 기다리는 동안 장을 `idle` 로 적어,
