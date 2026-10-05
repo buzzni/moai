@@ -27,10 +27,11 @@ does not tag — see `CONTRIBUTING.md`.
   the box (nothing is deleted; `--all` shows them again) — one
   `any-idle-worker` letter per call, as the hooks take them, so several spread
   over the agents that wait — and `--wait <seconds>` waits for one to come. Who you are is `--as`, else
-  `MOAI_AGENT`, else the registered agent the command runs under. A Codex
-  session passes `--as` with the name its hooks gave it — Codex runs its shell
-  under an app-server all its sessions share, so moai cannot find the session
-  from there — and the hooks name it in its first context.
+  `MOAI_AGENT`, else the registered agent the command runs under. Codex runs
+  every session's shell under one shared app-server, so there it is the row of
+  the session id Codex sets in the shell (`CODEX_THREAD_ID`) — the row its hooks
+  wrote; a Codex that does not set it passes `--as` with the name the hooks give
+  the session in its first context.
   **Nothing goes into `issues.jsonl` or the journal** — a letter is delivery,
   not record, and the mailbox follows the tracker into the main checkout, so
   every session of a repository sees one mailbox. There is no lock: sending
@@ -56,9 +57,10 @@ does not tag — see `CONTRIBUTING.md`.
   prompt. `StopFailure` needs Claude Code 2.1.78 or later — an older `claude`
   refuses the plugin's hooks as a whole. A window that sets `MOAI_AGENT` is
   registered under that name, by the hooks and `moai hello` alike. In Codex,
-  `moai hello` takes up the row the session's hooks wrote with `--as <name>`,
-  or registers a name of its own with `--name`; it never ties a row to the
-  app-server's process or the tmux pane it was started from.
+  `moai hello` takes up the row the session's hooks wrote, found by
+  `CODEX_THREAD_ID` (or named with `--as`), or writes the one they would; it
+  never ties a row to the app-server's process or the tmux pane it was started
+  from.
   `moai agents` lists who is here and sweeps a row whose process is gone; on
   Linux a reused pid is told apart by the time the process started, and a
   session resumed in a new process moves its row there. A Codex row has no
