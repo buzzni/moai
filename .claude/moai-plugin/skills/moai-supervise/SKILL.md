@@ -122,7 +122,9 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker — the one you sent that work to — is gone from `moai agents`.
+worker — the one you sent that work to — is gone from `moai agents`, or reads `gone`
+there: a worker on another machine (`here` false) or in Codex has no process to look at,
+so its row stays a day after nothing marked it for 20 minutes.
 
 - When there is such work, hand carrying it on to one waiting worker **before any new
   idea**. Send the letter in 3 with its first two lines changed to the two below, and the
@@ -191,9 +193,12 @@ reads `idle`.
     moai agents --json --role worker --status idle
 
 Each row names the agent (`name` — what you send to), its `vendor` (which column of the
-words table it reads, and whether 5-1 can clear it) and its tmux pane when it has one. The
-rows are this repository's: the list follows the tracker into the root, so every worktree
-of it sees the same one, and a row whose process is gone is swept as it is read.
+words table it reads, and whether 5-1 can clear it), whether it runs on this machine
+(`here` — 5-1 clears only those) and its tmux pane when it has one. The rows are this
+repository's: the list follows the tracker into the root, so every worktree of it sees
+the same one — and so do other machines (containers) sharing it. A row whose process is
+gone is swept as it is read; a row on another machine or in Codex has no process to look
+at, so it reads `gone` once nothing marked it for 20 minutes, and is swept after a day.
 
 - **Hand work only to a row whose role is `worker` and whose status is `idle`.** `busy` is
   working — on your work or on the person's — and a session with no role is one nobody made
@@ -303,8 +308,10 @@ measured before sending cannot cover a file that turns out to be needed mid-epic
 the worker meets such a file it does not fix it: it leaves it as a member and reports it
 (its 4-3).
 `<after>` is `end the turn` only when you will clear that window yourself in 5-1 — you run
-inside tmux, whatever your vendor, the worker's row carries a `tmux_pane` on your tmux
-server, and its vendor is `claude` (5-1 reads Claude Code's screen only). 5-1 then sends
+inside tmux, whatever your vendor, the worker's row says `here` (it runs on this machine —
+containers can share a tmux socket path, so the socket alone does not tell) and carries a
+`tmux_pane` on your tmux server, and its vendor is `claude` (5-1 reads Claude Code's screen
+only). 5-1 then sends
 the next letter itself and wakes the emptied window. Otherwise it is `wait again`: the
 worker reports and goes straight back to waiting.
 `<person>` is `here`, or `away` when the person told you they are stepping away — the
@@ -615,6 +622,10 @@ if not s:
     skip("could not find exactly one agent named " + name + " in `moai agents` run in " + root + " — check that the `moai` on PATH answers `agents` there")
 if s.get("vendor") != "claude":
     skip("this reads Claude Code's input box only, and " + name + " runs " + str(s.get("vendor")))
+# A row from another machine names a pane and a pid there. Containers can share the tmux socket
+# path, so the socket check below passes, and the pid here is someone else's process or none.
+if s.get("here") is not True:
+    skip(name + " runs on another machine" if "here" in s else "the `moai` on PATH does not say whether " + name + " runs on this machine")
 pane = str(s.get("tmux_pane") or "")
 if not pane.startswith("%"):
     skip("no tmux pane on that agent's row")
@@ -775,6 +786,10 @@ PY
   either.** Copy mode means the person is scrolling to read, and the characters typed go to
   copy-mode keys where `/` opens a search. In a tied pane the characters go to every pane of
   that window and erase the conversation of the worker next door too
+- **Clear only a worker on this machine** — its row says `here`. A row from another machine
+  (another container sharing this repository) names a pane and a pid on that machine;
+  containers can share the tmux socket path, and that pid here is someone else's process or
+  none. A `moai` on PATH too old to say `here` stops it as well
 - **Read the pane from the worker's row (`tmux_pane`, `tmux_socket`) and check that the
   pane's process spawned that agent.** A pane id names a pane on one server only, so a row
   from another server names someone else's pane here, and pane numbers are reused

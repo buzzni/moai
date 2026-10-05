@@ -33,6 +33,11 @@ window, stop waiting and answer them.
 
    While it waits, `moai agents` shows this window `idle` — that is how the supervisor
    finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
+   **If it comes back at once with a non-zero code and a line naming the mailbox**
+   (`…/.moai/mail: …`), the mailbox cannot be opened — a link the repository holds points
+   out of the checkout — and waiting again will not open it, so do not run it again. A
+   letter to the supervisor is refused the same way: tell the person watching this window
+   (*Ask the person watching*) and stop.
    Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
    Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
    minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
@@ -173,7 +178,8 @@ refusals in all.
    release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
    a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
    not in `ready`, not in `held`, no warning
-     moai edit <epic> --milestone <milestone>
+
+       moai edit <epic> --milestone <milestone>
 2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
    **Pass the column you saw** — this is a place where several sessions share one `.moai`,
    and overwriting a row picked up beside you means two of you do the same work. A non-zero
@@ -181,7 +187,8 @@ refusals in all.
    by every session — a commit made while someone has a merge open (MERGE_HEAD) seals that
    merge with its own subject. So give the tracker commit a path. With a merge open git
    refuses it, so wait for that merge to finish and run it again
-     git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
+
+       git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
    pick-up (rule 5). Ask the person watching this window — a yes the letter already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
@@ -196,10 +203,12 @@ refusals in all.
    `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
    relative path, filled in by the supervisor; if the letter carries no `Subdir:`, the root
    **is** the top and this step does not exist
-     cd <subdir>
+
+       cd <subdir>
 4. Do not guess a design decision that is not in the notes — ask (*Ask the person watching*);
    a person is watching the worker's window. With `Person: away` in the letter, decide by
    recommendation instead ("When the person is away")
+
 4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
    filled in by the supervisor — do not guess it from inside the worktree. **The tool moves
    that by itself** — even a bare `moai` typed inside the worktree reads and writes the
@@ -213,6 +222,7 @@ refusals in all.
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
    undo it with `git checkout -- .moai`, and if the row was already committed, undo that
    commit too and park it again from the root
+
 4-2. **If you test tmux, do it on a separate server only** — `env -u TMUX tmux -L <unique name>`
    on every call. Put the epic id in the name so it cannot collide with the test servers of
    the workers beside you or of a review subagent. `-S <socket>` works too, but a socket path
@@ -225,6 +235,7 @@ refusals in all.
    agent on that server, keep its cwd outside the root (the scratchpad) — raised in the root,
    it registers in this repository's `moai agents` beside the real workers.
    **Give a review subagent these words too** — it was a review subagent that killed a whole server
+
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
    the files named by `Work running alongside` in the letter, or files a sibling branch in
    `git worktree list` already changed
@@ -234,6 +245,7 @@ refusals in all.
    `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 12
    as **a member left because the work beside it holds the file**, together with that other
    work. The supervisor sends it once that work is done. Do not defer it
+
 5. **Do not review member by member.** When one member is finished, run the tests, commit and
    move to the next — the review looks at the whole epic once, in 7, after every member is
    finished. One review is expensive; do not call it as many times as there are members. The
@@ -267,12 +279,14 @@ refusals in all.
    where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled
    <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
    (rule 3)
-     moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
+
+       moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
    This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
    **In the same breath, stand the finished members in `review`** — while the review runs
    nobody is working on them, and `in_progress` on the board says somebody is. One id per
    call, as in 2
-     moai -C <root> mv <member> review --from in_progress
+
+       moai -C <root> mv <member> review --from in_progress
    `--from in_progress` passes over the members left in the first column by 4-3 (and by 7-1
    when you came back from 8) — this review does not see them, so they do not stand in it.
    moai answers that such a member already stands in the first column and moves nothing, with
@@ -303,6 +317,7 @@ refusals in all.
    5. Does anything newly open on a path that never opened it — not "is a lock held while
       opening", which is half of it. A read path that never opened the config and now parses
       it stops on a config that is a FIFO, lock or no lock
+
    **They have to reach the review itself, not only `-b`.** The angle on the issue is what the
    next person reads; the review command does not read the issue. Going through a subagent,
    put these five in its prompt; going through the command, hold them against what came back
@@ -318,6 +333,7 @@ refusals in all.
    and covers a commit you already made without a word, and a `cargo test` after that
    measures that agent's files rather than yours — that has happened too, and it also burned
    an hour and a half in a worktree that was gone.
+
 7-1. Before merging, go back over the ideas parked mid-epic
    (`moai -C <root> show --type idea -e <epic>` and what this window remembers) and what the
    review handed on — **can the epic deliver what it promised without them.** If not, it is
@@ -329,12 +345,14 @@ refusals in all.
    from the worktree, so pin the root into the line (4-1). **If that idea is already done, do
    not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
    promote unfolds a closed idea too, and the same member stands twice
-     moai -C <root> idea promote <idea id> -e <epic> --from -
+
+       moai -C <root> idea promote <idea id> -e <epic> --from -
    Do not do a reclaimed member here: merge with it left in the first column — work that has
    not been through 7's review does not get mixed into the merge, and a member still standing
    keeps the epic open. Do not `defer` that member. Deferring it closes the epic without its
    promise delivered. 7's review did not see that member, so write it in the `Next:` note in
    11 — the window that closes the epic with that member calls the epic-end review again
+
 7-2. **If the epic ran inside a milestone, sort what you handed on once more, by the release
    bar.** A review makes its findings without regard to the release bar, so fixing all of them
    inside pushes the release out by as many findings as there are, and sending all of them
@@ -343,7 +361,8 @@ refusals in all.
    inside**: create it as a member of that epic (`-e <epic>`) or under an epic in the same
    milestone. **What this release can do without goes outside** — not "not doing it", but
    "not in this release"
-     moai -C <root> edit <that row> -e none --milestone none
+
+       moai -C <root> edit <that row> -e none --milestone none
    **Pass `-e none` with it.** A milestone is inherited from the epic, so on an epic member
    `--milestone none` alone changes nothing and comes back with one line saying the place
    comes from the epic and cannot be cut — a row 7-1 reclaimed stands as that epic's member,
@@ -353,12 +372,14 @@ refusals in all.
    can a `Regression-of:` line be written (did something already merged break). Those two are
    inside; the rest is outside. A new axis is not made because it would become a fourth
    vocabulary beside the column, the kind and the defer
+
 7-3. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
    for the release being prepared**, and write it if it does not. Write it **here, in the
    worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
    the root, which every session shares and where the only commits that belong are the
    tracker's and the merge itself. Committed here it rides the merge commit instead
-     git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
+
+       git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
    This window is the only one that knows what the epic did, and it is the only one that
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
@@ -369,29 +390,35 @@ refusals in all.
    section by version name and hands it to `--notes-file` as it is, so a missing section
    reads to whoever receives it as the whole release. **Nothing checks this** — a check here
    would be a gate, and an empty section must not stop a release
+
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
    epic changed what a person does — a key, a command, a flag, a file, a format, a procedure.
    If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
    7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
-     git add -- <wiki dir>
-     git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
+
+       git add -- <wiki dir>
+       git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
    If it did not, write nothing. **Nothing checks this**
+
 8. *Come back to the root* — remove the worktree from inside it and this window stands in a
    directory that is gone.
    Before merging, check that the root stands on <base branch> — if it does not, do not merge:
    tell the supervisor
-     git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
+
+       git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
    Merge in the root, **in one call**. Overlap with the workers beside you was split when the
    supervisor sent the work, and where it still collides, undo as below and resolve in the
    worktree — do not go looking for the other session to tell it. Do not use `--no-commit`.
    Without `--no-ff` it ends as a fast-forward and no merge commit stands
-     git merge --no-ff worktree-<epic> -m "merge: …"
+
+       git merge --no-ff worktree-<epic> -m "merge: …"
    If the root's `.moai` holds uncommitted rows from another session the merge is refused —
    take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
    resolve it in the root — undo with `git merge --abort`, go back into the worktree
    (*Enter the worktree*) and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
+
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
    suggestion in the letter but the model that **actually ran** in this window. The line below
@@ -410,46 +437,50 @@ refusals in all.
    `tokens=<count>` out of the other members' lines.
    Quote free text with single quotes — inside double quotes the shell expands backticks and
    `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
-     moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+
+       moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
-   landed** — a worker moved them before the merge and had to undo it. It closes a member
-   from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
-   alike. Do not close the
-   members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
-   the worktree still stands, the hook reads this work as a sibling worktree's and cannot
-   refuse a review closed without `-m`. Close the review issue leaving what came out of it
-     moai note <review id> -b - < <review text>   the reviewer's own words (summarize past 64KB)
-     moai mv <review id> done -m '<what you took in, what you handed on>'
-   If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
-   the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
-   Leave the tests passing in the root with a commit with a path, as in 2
+    landed** — a worker moved them before the merge and had to undo it. It closes a member
+    from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
+    alike. Do not close the
+    members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
+    the worktree still stands, the hook reads this work as a sibling worktree's and cannot
+    refuse a review closed without `-m`. Close the review issue leaving what came out of it
+
+        moai note <review id> -b - < <review text>   the reviewer's own words (summarize past 64KB)
+        moai mv <review id> done -m '<what you took in, what you handed on>'
+    If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
+    the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
+    Leave the tests passing in the root with a commit with a path, as in 2
 11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and take it into the root
-   with a commit with a path as in 2. It is written after the commit in 10, so leaving it out
-   leaves it in the shared root where someone else's commit sweeps it up. If anything is left
-   (a background review, say), finish it before the note — the supervisor reads the note as
-   this work being over; what you cannot finish, name in the report (12)
+    with a commit with a path as in 2. It is written after the commit in 10, so leaving it out
+    leaves it in the shared root where someone else's commit sweeps it up. If anything is left
+    (a background review, say), finish it before the note — the supervisor reads the note as
+    this work being over; what you cannot finish, name in the report (12)
 12. Report with a letter to the supervisor, **last of all**. It carries the merge hash,
-   the unfolded epic's id, a line or two of summary, what you handed on and any new ideas,
-   the members reclaimed in 7-1 and left in the first column,
-   the members left in 4-3 because the work beside you held the file, with that other work
-   named, and the wiki pages 7-4 changed — or that it changed none — and anything still
-   running that 11 could not finish: the supervisor does not clear a window whose report
-   says so. Write it to a file outside the repository (your scratchpad, or a temporary
-   file) — nothing is held by now, so a file in the shared root is refused or left behind —
-   and send it
-     moai send <supervisor> 'report: <epic>' --reply-to <letter id> -b - < <report file>
-   Then **say when the window can be cleared**, in one line to the person watching. The
-   context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
-   commit messages. If you can see your own context usage, put that number in the line too.
-   **Say the opposite in the same line** — not to clear while a review is running in the
-   background, while a merge conflict is being resolved, while waiting on a person's answer,
-   or after the supervisor's next message has arrived in this window. Clearing then loses what
-   is not yet moved into the tracker, or the message that arrived.
-   Then do what `After the report:` says. With `wait again`, go back to waiting (the loop's 2)
-   — a person who wants the window cleared stops the wait, clears it (*Clear the window*) and
-   calls this skill again (*Call a skill*). With `end the turn`, end it — on tmux
-   the supervisor may check the report and clear this window itself once it sees the `Next:`
-   note stand, and then wakes it with the next letter
+    the unfolded epic's id, a line or two of summary, what you handed on and any new ideas,
+    the members reclaimed in 7-1 and left in the first column,
+    the members left in 4-3 because the work beside you held the file, with that other work
+    named, and the wiki pages 7-4 changed — or that it changed none — and anything still
+    running that 11 could not finish: the supervisor does not clear a window whose report
+    says so. Write it to a file outside the repository (your scratchpad, or a temporary
+    file) — nothing is held by now, so a file in the shared root is refused or left behind —
+    and send it
+
+        moai send <supervisor> 'report: <epic>' --reply-to <letter id> -b - < <report file>
+    Then **say when the window can be cleared**, in one line to the person watching. The
+    context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
+    commit messages. If you can see your own context usage, put that number in the line too.
+    **Say the opposite in the same line** — not to clear while a review is running in the
+    background, while a merge conflict is being resolved, while waiting on a person's answer,
+    or after the supervisor's next message has arrived in this window. Clearing then loses what
+    is not yet moved into the tracker, or the message that arrived.
+    Then do what `After the report:` says. With `wait again`, go back to waiting (the loop's 2)
+    — a person who wants the window cleared stops the wait, clears it (*Clear the window*) and
+    calls this skill again (*Call a skill*). With `end the turn`, end it — on tmux
+    the supervisor may check the report and clear this window itself once it sees the `Next:`
+    note stand, and then wakes it with the next letter
 
 ## Carrying on stalled work
 
@@ -469,7 +500,8 @@ notes), then
   hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
   by the supervisor; with no `Subdir:` in the letter, the root is the top and this step
   does not exist
-    cd <subdir>
+
+      cd <subdir>
 - The member's column is already picked up — do not pick it up again. **If its assignee
   is not you** (`moai show <member>`), ask the person watching before you carry it on; on
   a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
