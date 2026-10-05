@@ -2295,8 +2295,9 @@ Options:
 
   Who sends is --as, else MOAI_AGENT, else the registered agent this command
   runs under (`moai hello`). With none of them it stops - a letter with no
-  sender cannot be answered. A Codex session passes --as with the name its
-  hooks gave it: its shell runs under an app-server all sessions share.
+  sender cannot be answered. A Codex shell is found by the session id Codex
+  sets in it (CODEX_THREAD_ID); without one, pass --as with the name its
+  hooks gave the session.
   The body holds up to 64 KB, the subject one line of up to 200 characters.
 
   **Waking is a bonus.** The way a worker gets its letters is waiting for them
@@ -2359,8 +2360,8 @@ Options:
   the hooks do, so several of them spread over the agents that wait.
 
   Who you are is --as, else MOAI_AGENT, else the registered agent this
-  command runs under (`moai hello`). A Codex session passes --as with the
-  name its hooks gave it.
+  command runs under (`moai hello`) - in Codex, the row of the session id
+  Codex sets in its shell (CODEX_THREAD_ID).
 
   --json gives {"me","letters":[{"id","read","returned","v","to",
   "from","subject","body","sent_at","reply_to"}],"lost":[ids]}. Keys a
@@ -2431,7 +2432,7 @@ Options:
 
   moai hello --role worker
   moai hello --name reviewer-1 --role supervisor
-  moai hello --as codex-01a107b4 --role worker   in Codex
+  moai hello --as codex-01a107b4 --role worker   a Codex without CODEX_THREAD_ID
 
   Writes .moai/agents/<name>.json for the agent process this command runs
   under - found among its parents by name (claude, agy), or --pid. The
@@ -2441,10 +2442,12 @@ Options:
   row; a new --name replaces the old one and carries its letters along.
 
   Codex runs its shell under an app-server all its sessions share, so moai
-  cannot tell its sessions apart from there: pass --as with the row its
-  hooks gave the session (named in its first context), or --name. --as takes
-  up a row already standing under that name, keeping its process and
-  session.
+  tells its sessions apart by the id Codex sets in the shell
+  (CODEX_THREAD_ID): hello takes up the row its hooks wrote for that
+  session, or writes the one they would. Without that id, pass --as with the
+  row its hooks gave the session (named in its first context), or --name.
+  --as takes up a row already standing under that name, keeping its process
+  and session.
 
   A name is letters, digits, `.`, `_` and `-`, up to 64, not starting with
   `.` - it becomes a file name. any-idle-worker is not one an agent can take.

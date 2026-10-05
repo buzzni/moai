@@ -902,6 +902,17 @@ pub fn agent_among(ancestors: &[Proc]) -> Option<(&Proc, &'static str)> {
     ancestors.iter().find_map(|p| vendor_of(&p.comm).map(|v| (p, v)))
 }
 
+/// Codex 가 제 도구 셸에 세우는 그 세션의 id — `CODEX_THREAD_ID`, 없으면 `CODEX_SESSION_ID`(2026-10-05 사람의 codex 0.160
+/// 창에서 쟀다, moai-u5wr.7xr). 훅 stdin 의 `session_id` 와 같은 값이라 그 세션의 장을 이것으로 찾는다. Codex 의 셸은 세션
+/// 모두가 함께 쓰는 데몬 밑에서 돌아 조상으로는 세션을 못 가른다(moai-sile).
+///
+/// **조상이 codex 인 부름에서만 읽는다** — 부르는 쪽이 가린다. Codex 셸에서 띄운 다른 프로그램도 이 값을 물려받는다.
+pub fn codex_session() -> Option<String> {
+    ["CODEX_THREAD_ID", "CODEX_SESSION_ID"]
+        .into_iter()
+        .find_map(|k| std::env::var(k).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()))
+}
+
 /// 그 프로세스가 아직 사는가 — **모르면 `None`** 이다(걷지 않는다).
 ///
 /// 리눅스는 `/proc` 로 재고, 선 때가 다르면 죽은 것이다(pid 재사용). 다른 유닉스는 `kill(pid, 0)` 이고

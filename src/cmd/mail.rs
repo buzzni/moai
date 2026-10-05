@@ -283,7 +283,8 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     let _ = mail::write_presence(&dir, &p);
 }
 
-/// 이 부름이 **누구의 이름으로 도는가** — `--as`, `MOAI_AGENT`, 이 명령을 띄운 에이전트의 출석 차례다.
+/// 이 부름이 **누구의 이름으로 도는가** — `--as`, `MOAI_AGENT`, 이 명령을 띄운 에이전트의 출석 차례다. Codex 의 출석은
+/// 프로세스가 아니라 세션 id 로 찾는다.
 ///
 /// **아무도 아니면 멈춘다** — 보낸 이가 없는 편지는 답할 곳이 없고, 받는 이를 모르면 누구의 편지를 보일지
 /// 모른다. 사람을 묻는 쓰기가 "누군지 모르면 멈춘다" 와 같은 결이다(CLAUDE.md). 준 이름이 꼴이 아니어도
@@ -294,9 +295,19 @@ fn who(ctx: &Ctx, given: Option<&str>, agents: &[Presence]) -> R<String> {
         let name = name.trim().to_string();
         return if mail::is_agent_name(&name) { Ok(name) } else { Err(bad_name(ctx.lang(), &name)) };
     }
-    mail::me_among(agents, &mail::ancestors())
-        .map(|p| p.name.clone())
-        .ok_or_else(|| Fail::coded(say(ctx.lang(), "refuse.mail_who"), code::NO_ACTOR))
+    let ancestors = mail::ancestors();
+    let refused = || Fail::coded(say(ctx.lang(), "refuse.mail_who"), code::NO_ACTOR);
+    // **Codex 는 세션 id 로 찾는다**(moai-u5wr.7xr) — 그 셸의 조상은 세션 모두가 함께 쓰는 데몬이라 프로세스로는 이 세션을
+    // 못 가른다. Codex 가 셸에 세우는 그 세션의 id 가 훅이 장에 적은 세션과 같다([`mail::codex_session`]). 없으면 `--as` 다.
+    if matches!(mail::agent_among(&ancestors), Some((_, "codex"))) {
+        let session = mail::codex_session().ok_or_else(refused)?;
+        return agents
+            .iter()
+            .find(|p| p.session.as_deref() == Some(session.as_str()))
+            .map(|p| p.name.clone())
+            .ok_or_else(refused);
+    }
+    mail::me_among(agents, &ancestors).map(|p| p.name.clone()).ok_or_else(refused)
 }
 
 /// 이름이 될 수 없는 글 — 무엇이 되는지를 함께 댄다.

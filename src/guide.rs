@@ -857,8 +857,9 @@ registers with `moai hello --role supervisor` so it never takes those. Waking is
 `--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
 Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
 a worker waiting on `moai inbox --wait` needs no waking, and while it waits `moai agents`
-shows it idle. A Codex session passes `--as <name>` to `hello`, `inbox` and `send`: its
-shell runs outside its own process, and its hooks name it in its first context."#;
+shows it idle. A Codex shell is found by the session id Codex sets in it
+(`CODEX_THREAD_ID`); where that is missing, pass `--as <name>` — the hooks name the session
+in its first context."#;
 
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
@@ -1764,11 +1765,11 @@ root mixes their edits and commits together. Worktrees stand in
 
 The name in its reply is `<my name>` below — the name the workers send their reports to.
 The role keeps letters to `any-idle-worker` away from you: a supervisor never takes those.
-**In Codex, say hello as the row its hooks gave this session** — `moai hello --role
-supervisor --as <that name>`, the name its first context gives (`codex-` and eight
-characters) — and pass the same `--as` to every `moai send` and `moai inbox`
-you run as yourself. Codex runs your shell under an app-server all its sessions share, so
-moai cannot find this window from there.
+In Codex, moai finds this window by the session id Codex sets in its shell
+(`CODEX_THREAD_ID`) — the row its hooks wrote. If `moai hello` says it cannot tell which
+session this is, Codex did not set it: say hello as that row, `moai hello --role
+supervisor --as <that name>` (its first context names it, `codex-` and eight characters),
+and pass the same `--as` to every `moai send` and `moai inbox` you run as yourself.
 
 **Read the base branch once, at the start of the round.** The place a worker branches
 its worktree from and merges back into is the root checkout, so that checkout's current
@@ -2673,11 +2674,12 @@ window, stop waiting and answer them.
    The name in the reply is the one the supervisor sends to. moai finds this agent among
    the processes above the command (`claude`, `agy`); a session its hooks already
    registered keeps its name and gains the role. If this window sets `MOAI_AGENT`, that is
-   its name — `hello`, the wait and the hooks all go by it. **Codex is the exception**: its
-   shell runs under an app-server all its sessions share, so moai cannot find this window
-   from there. Its hooks name the session in its first context (`codex-` and eight
-   characters) — say hello as that row, `moai hello --role worker --as <that name>`, and pass
-   the same `--as` to every `moai inbox` and `moai send` below
+   its name — `hello`, the wait and the hooks all go by it. In Codex, moai finds this window
+   by the session id Codex sets in its shell (`CODEX_THREAD_ID`) — the row its hooks wrote.
+   If `moai hello` says it cannot tell which session this is, Codex did not set it: say hello
+   as that row, `moai hello --role worker --as <that name>` (its first context names it,
+   `codex-` and eight characters), and pass the same `--as` to every `moai inbox` and
+   `moai send` below
 2. **Wait for a letter**
 
        moai inbox --ack --wait 540

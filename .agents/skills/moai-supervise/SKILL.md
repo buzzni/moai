@@ -28,11 +28,11 @@ root mixes their edits and commits together. Worktrees stand in
 
 The name in its reply is `<my name>` below — the name the workers send their reports to.
 The role keeps letters to `any-idle-worker` away from you: a supervisor never takes those.
-**In Codex, say hello as the row its hooks gave this session** — `moai hello --role
-supervisor --as <that name>`, the name its first context gives (`codex-` and eight
-characters) — and pass the same `--as` to every `moai send` and `moai inbox`
-you run as yourself. Codex runs your shell under an app-server all its sessions share, so
-moai cannot find this window from there.
+In Codex, moai finds this window by the session id Codex sets in its shell
+(`CODEX_THREAD_ID`) — the row its hooks wrote. If `moai hello` says it cannot tell which
+session this is, Codex did not set it: say hello as that row, `moai hello --role
+supervisor --as <that name>` (its first context names it, `codex-` and eight characters),
+and pass the same `--as` to every `moai send` and `moai inbox` you run as yourself.
 
 **Read the base branch once, at the start of the round.** The place a worker branches
 its worktree from and merges back into is the root checkout, so that checkout's current

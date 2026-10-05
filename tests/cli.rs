@@ -140,6 +140,9 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
         .env_remove("CLAUDE_CODE_SESSION_ID")
+        // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr) — 새면 Codex 가 돌린 시험이 그 세션의 장으로 답한다.
+        .env_remove("CODEX_THREAD_ID")
+        .env_remove("CODEX_SESSION_ID")
         .env_remove("MOAI_AGENT")
         // **시험은 한국어 화면을 본다**(moai-zeyv). 기본은 영어지만(사용자 결정) 이 저장소의
         // 시험은 글자를 그대로 견주는 것이 수백 줄이라, 여기서 언어를 못 박는다 — 안 박으면
@@ -24958,6 +24961,74 @@ fn a_codex_session_takes_up_its_hook_row_with_as() {
     let told =
         staged(&["hello", "--name", "y1", "--json"]).env("MOAI_AGENT", "x1").current_dir(s.path()).output().unwrap();
     assert_eq!(code(told), "bad_input", "MOAI_AGENT 와 다른 이름을 받았다");
+}
+
+/// **Codex 의 셸은 그 세션의 id 를 대고, moai 는 그것으로 제 장을 찾는다**(moai-u5wr.7xr, 2026-10-05 잰 B) — Codex 0.160 은
+/// 도구 셸에 `CODEX_THREAD_ID` 를 세우고, 그 값이 훅이 장에 적은 세션 id 다. 그래서 `hello`·`inbox`·`send` 가 `--as` 없이
+/// 훅의 장으로 돈다. 훅이 아직 장을 안 지은 창(`/hooks` 에서 안 믿었다)의 `hello` 는 훅이 지을 그 이름과 세션으로 장을
+/// 세워, 나중에 훅이 그 장을 잇는다. 데몬의 환경에서 새어 든 남의 `CLAUDE_CODE_SESSION_ID` 는 안 읽는다.
+#[test]
+fn a_codex_shell_finds_its_row_by_the_thread_id() {
+    let s = init("codex-thread");
+    let sid = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
+    let in_codex = |thread: &str, args: &[&str]| {
+        isolated(fake_agent("codex"))
+            .args(["-c", "\"$0\" \"$@\"; exit $?", BIN])
+            .args(args)
+            .env("MOAI_ACTOR", ACTOR)
+            .env("MOAI_NOW", NOW)
+            .env("CODEX_THREAD_ID", thread)
+            .env("CLAUDE_CODE_SESSION_ID", "149af4f4-not-this-session")
+            .current_dir(s.path())
+            .output()
+            .unwrap()
+    };
+    let said = |out: Output| {
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    hook_argv(
+        &s,
+        s.path(),
+        None,
+        &[],
+        &["hook", "session-start", "--dialect", "codex"],
+        &recorded(&s, "codex/session-start.json"),
+    );
+    let card = said(in_codex(sid, &["hello", "--role", "worker", "--json"]));
+    assert!(
+        card.contains("\"name\":\"codex-01a107b4\"") && card.contains("\"role\":\"worker\""),
+        "훅의 장을 안 이었다 — {card}"
+    );
+    assert_eq!(names_in(&s.path().join(".moai/agents")), ["codex-01a107b4.json"], "장이 둘로 섰다");
+    ok(s.path(), &["send", "codex-01a107b4", "일감", "--as", "boss"]);
+    let got = said(in_codex(sid, &["inbox", "--ack", "--json"]));
+    assert!(got.starts_with("{\"me\":\"codex-01a107b4\"") && got.contains("일감"), "세션 id 로 나를 못 찾았다 — {got}");
+
+    // 훅이 아직 장을 안 지은 Codex 창 — `hello` 가 훅과 같은 이름·세션으로 세우고, 훅은 그 장을 잇는다.
+    let other = "02b207b4-ee4b-7b13-9ae8-269f43b5a38f";
+    let card = said(in_codex(other, &["hello", "--role", "worker", "--json"]));
+    assert!(
+        card.contains("\"name\":\"codex-02b207b4\"") && card.contains(&format!("\"session\":\"{other}\"")),
+        "{card}"
+    );
+    assert!(!card.contains("149af4f4"), "데몬에서 새어 든 Claude 세션을 적었다 — {card}");
+    let start = recorded(&s, "codex/session-start.json").replace(sid, other);
+    hook_argv(&s, s.path(), None, &[], &["hook", "session-start", "--dialect", "codex"], &start);
+    assert_eq!(
+        names_in(&s.path().join(".moai/agents")),
+        ["codex-01a107b4.json", "codex-02b207b4.json"],
+        "훅이 장을 새로 지었다"
+    );
+    assert!(
+        std::fs::read_to_string(s.path().join(".moai/agents/codex-02b207b4.json"))
+            .unwrap()
+            .contains("\"role\":\"worker\""),
+        "훅이 hello 의 역할을 지웠다"
+    );
+    // 장이 없는 세션 id 는 아무도 아니다 — 남의 장으로 답하지 않는다.
+    let none = in_codex("03c307b4-0000-0000-0000-000000000000", &["inbox", "--json"]);
+    assert_eq!(field(&String::from_utf8_lossy(&none.stderr), "code"), "no_actor");
 }
 
 /// **새 이벤트와 말씨도 실패하지 않는다** — [`the_hook_never_fails`] 의 입력을 세 말씨로.
