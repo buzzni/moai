@@ -353,8 +353,8 @@ fn clock_micros() -> u64 {
 /// 멈추고, 링크는 남의 파일을 읽힌다. 숨은 이름(temp)은 안 본다. 함이 없으면 빈 함이다.
 ///
 /// **읽은 편지는 파일 이름으로 먼저 거른다**(리뷰 moai-h8tn.x4l) — 읽은 이가 이름에 서 있으니, 남이 읽은 편지를
-/// 열어 가를 까닭이 없다. `read/` 는 지우지 않아 쌓이기만 하고, `inbox --all --wait` 는 반 초마다 이 자리를 훑는다.
-/// 읽은 이 자리가 이름의 꼴이 아니면(손으로 놓은 파일) 편지로 안 센다.
+/// 열어 가를 까닭이 없다. `read/` 는 읽은 지 며칠([`sweep_read`])이 지나야 걷혀 그동안 쌓이고, `inbox --all --wait` 는
+/// 반 초마다 이 자리를 훑는다. 읽은 이 자리가 이름의 꼴이 아니면(손으로 놓은 파일) 편지로 안 센다.
 ///
 /// **체크아웃 밖으로 풀리는 디렉터리는 안 연다**([`reach`], moai-kxkw.7ky) — 우편함이면 하나, 함이나 그 `read/` 면 그
 /// 함마다 하나씩 못 읽은 것으로 댄다. 빈 함으로 넘기면 받은 저장소의 링크 하나가 편지를 말없이 감춘다.
@@ -471,16 +471,88 @@ pub enum Took {
 ///
 /// `rename` 은 `read/<id>@<읽은 이>.json` 이 이미 서 있으면 **말없이 덮는다** — 그 자리가 비어 있다는 것은 id 가
 /// 두 번 안 서는 것([`place`] 가 이름을 들이기 바로 앞에 짓는다)에 기댄다.
+///
+/// **옮긴 쪽이 읽은 때를 적는다**([`stamp_read`]) — [`sweep_read`] 가 그것으로 읽은 지 며칠인지 잰다. 진 쪽은 안 건드린다.
 pub fn take(dir: &Path, stored: &Stored, reader: &str) -> std::io::Result<Took> {
     let home = home_of(dir);
     let held = reach(&mailbox(dir, &stored.mailbox), &home)?;
     let read = make_dir(&held.join("read"), &home)?;
     let read_as = read.join(format!("{}{}@{reader}.json", stored.id, mark(stored.returned)));
     match std::fs::rename(held.join(stored.file()), &read_as) {
-        Ok(()) => Ok(Took::Mine),
+        Ok(()) => {
+            stamp_read(&read_as);
+            Ok(Took::Mine)
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Took::Lost),
         Err(e) => Err(e),
     }
+}
+
+/// 읽은 때를 그 파일의 수정 시각에 적는다 — 지금([`crate::model::now`], 시험은 `MOAI_NOW` 로 못박는다). 편지는 한 번
+/// 쓰고 안 고치니 그 칸이 비어 있다. `rename` 은 그 시각을 안 바꿔, 안 적으면 보낸 때가 남는다.
+///
+/// **못 적어도 읽기는 그대로다** — 그 편지는 보낸 때로 재여 조금 일찍 걷힐 뿐이다. 막히지 않게(`O_NONBLOCK`), 링크를
+/// 안 따라(`O_NOFOLLOW`) 연다 — 방금 옮긴 자리라 보통 파일이어야 하지만, 훅이 지나는 자리라 FIFO 앞에서 멈추면 안 된다.
+fn stamp_read(path: &Path) {
+    let Some(secs) = crate::model::parse_rfc3339(&crate::model::now()).and_then(|s| u64::try_from(s).ok()) else {
+        return;
+    };
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    if let Ok(f) = o.open(path) {
+        let _ = f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs));
+    }
+}
+
+/// 읽은 지 `days` 날이 **지난** 편지를 걷는다 — 걷은 수를 낸다. `0` 이면 안 걷는다(2026-10-05 사용자 결정,
+/// moai-kxkw.my1).
+///
+/// 읽음으로 옮긴 편지([`take`])는 지우는 길이 없어 `read/` 에 끝없이 쌓였다 — 감독을 오래 돌릴수록 `.moai/mail` 이
+/// 컸다. 날수는 저장소의 설정(`mail_read_days`, 안 적으면 7일)이고, 읽은 때는 [`take`] 가 그 파일의 수정 시각에 적어
+/// 둔 것이다([`stamp_read`]). 그것을 안 적던 판에 읽은 편지는 그 시각이 보낸 때라 그것으로 잰다 — 읽은 때보다 이르다.
+///
+/// - **안 읽은 편지는 안 걷는다** — 떠난 이 앞의 편지는 [`retire`] 가 보낸 이에게 되돌린다
+/// - **읽은 편지의 꼴인 이름만 걷는다**(`<id>@<읽은 이>.json`) — 손으로 놓은 파일은 그대로다
+/// - 함마다 [`reach`] 로 잰다 — 체크아웃 밖으로 풀리는 함의 `read/` 는 안 연다. 밖에 선 남의 파일을 지우는 것이 이
+///   에픽이 막은 바로 그 꼴이다(moai-kxkw.7ky)
+/// - **걷는 자리는 `moai agents` 하나다** — 죽은 장을 걷는 그 자리다([`sweep`]). 훅과 `send`·`inbox` 는 안 걷는다 —
+///   도구 호출마다 도는 자리가 함을 다 훑지 않는다
+pub fn sweep_read(dir: &Path, days: i64) -> usize {
+    if days <= 0 {
+        return 0;
+    }
+    let Some(now) = crate::model::parse_rfc3339(&crate::model::now()) else { return 0 };
+    let cutoff = now.saturating_sub(days.saturating_mul(24 * 60 * 60));
+    let home = home_of(dir);
+    let Ok(dir) = reach(dir, &home) else { return 0 };
+    let Ok(entries) = std::fs::read_dir(&dir) else { return 0 };
+    let mut swept = 0;
+    for name in entries.filter_map(Result::ok).filter_map(|e| e.file_name().into_string().ok()) {
+        if !is_recipient(&name) {
+            continue;
+        }
+        let Ok(read) = reach(&mailbox(&dir, &name).join("read"), &home) else { continue };
+        for (path, stem) in json_files(&read) {
+            let Some((head, reader)) = stem.split_once('@') else { continue };
+            if letter_stem(head).is_none() || !is_name(reader) {
+                continue;
+            }
+            let read_at = std::fs::symlink_metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| i64::try_from(d.as_secs()).ok());
+            if read_at.is_some_and(|at| at < cutoff) && std::fs::remove_file(&path).is_ok() {
+                swept += 1;
+            }
+        }
+    }
+    swept
 }
 
 // ── 함 옮기기 ────────────────────────────────────────────────────────
@@ -2426,6 +2498,7 @@ mod tests {
         assert_eq!(retire(&mail, "w1"), 0);
         carry(&mail, "w1", "w2");
         migrate(&mail);
+        assert_eq!(sweep_read(&mail, 1), 0);
         assert!(outside_letter.exists() && !away.join("w2").exists(), "밖의 편지를 옮겼다");
         std::fs::remove_file(&mail).unwrap();
 
@@ -2459,6 +2532,7 @@ mod tests {
         let (got, _) = list(&mail, "w2", false);
         assert!(fenced(&take(&mail, &got[0], "w2").unwrap_err()));
         assert_eq!(list(&mail, "w2", false).0.len(), 1, "읽음으로 옮기다 편지를 잃었다");
+        assert_eq!(sweep_read(&mail, 1), 0);
         assert!(old_read.exists(), "밖에 선 파일을 읽은 편지로 걷었다");
     }
 

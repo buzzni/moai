@@ -24254,6 +24254,37 @@ fn mail_and_attendance_follow_no_committed_link_out_of_the_checkout() {
     assert!(everything(&mail_away.join("w1")).is_empty(), "체크아웃 밖의 함에 썼다");
 }
 
+/// **읽은 편지는 읽은 지 이레가 지나면 `moai agents` 가 걷는다**(moai-kxkw.my1, 2026-10-05 사용자 결정). 날은 보낸 날이
+/// 아니라 읽은 날로 잰다 — 보낸 지 열흘 된 편지를 오늘 읽으면 이레 동안 `inbox --all` 에 선다. 안 읽은 편지는 안 걷는다.
+/// 날수는 `.moai/config.toml` 의 `mail_read_days` 이고, `0` 이면 안 걷는다.
+#[cfg(unix)]
+#[test]
+fn a_read_letter_is_swept_a_week_after_it_was_read() {
+    let s = init("mail-read-sweep");
+    let (boss, worker) = (Sleeper::new(), Sleeper::new());
+    hello_as(s.path(), "boss", &boss.pid(), &["--role", "supervisor"]);
+    hello_as(s.path(), "w1", &worker.pid(), &["--role", "worker"]);
+    let (sent, read) = ("2026-09-01T00:00:00Z", "2026-09-11T00:00:00Z");
+    let old = field(&ok_at(s.path(), sent, &["send", "w1", "열흘 전", "-b", "x", "--as", "boss", "--json"]), "id");
+    ok_at(s.path(), read, &["inbox", "--ack", "--as", "w1"]);
+    let unread = field(&ok_at(s.path(), read, &["send", "w1", "안 읽음", "-b", "x", "--as", "boss", "--json"]), "id");
+    let all_at = |now: &str| {
+        ok_at(s.path(), now, &["agents"]);
+        ids_in(&ok_at(s.path(), now, &["inbox", "--all", "--as", "w1", "--json"]))
+    };
+    assert_eq!(all_at("2026-09-17T23:00:00Z"), [old.as_str(), unread.as_str()], "읽은 지 이레가 안 된 편지를 걷었다");
+    assert_eq!(all_at("2026-09-18T01:00:00Z"), [unread.as_str()], "읽은 지 이레가 지난 편지를 안 걷었다");
+
+    // `0` 이면 안 걷는다 — 날수를 줄이면 그만큼 일찍 걷는다.
+    let config = s.path().join(".moai/config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{base}mail_read_days = 0\n")).unwrap();
+    ok_at(s.path(), read, &["inbox", "--ack", "--as", "w1"]);
+    assert_eq!(all_at("2027-09-11T00:00:00Z"), [unread.as_str()], "끈 걷기가 읽은 편지를 걷었다");
+    std::fs::write(&config, format!("{base}mail_read_days = 2\n")).unwrap();
+    assert_eq!(all_at("2026-09-13T01:00:00Z"), Vec::<String>::new(), "이틀로 줄인 날수를 안 따랐다");
+}
+
 /// **다른 기계의 장은 pid 로 안 잰다**(moai-dhxm) — 컨테이너 여럿이 한 저장소를 쓰면 장의 pid 는 그것을 적은 컨테이너에서만
 /// 뜻을 갖는다. 이 기계의 `/proc` 에 없는 pid 를 죽은 것으로 읽던 판은 `moai agents` 가 남의 산 장을 걷고 그 함의 편지를
 /// 보낸 이에게 되돌렸다. `hello` 는 장에 기계와 호스트 이름과 닻을 적고, 기계가 다른 장은 닻으로 잰다. 기계를 안 적은 옛

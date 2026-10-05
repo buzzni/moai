@@ -20,6 +20,9 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     // **걷는 자리는 여기다**(설계 노트 "죽은 pid 는 agents 가 걷는다"). 훅과 `send` 는 읽기만 하고 죽은 것을
     // 건너뛴다 — 도구 호출마다 도는 자리가 남의 파일을 지우지 않는다.
     let swept = mail::sweep(&dir, &repo.mail_dir());
+    // 읽은 지 오래된 편지도 여기서 걷는다(moai-kxkw.my1) — 죽은 장을 걷는 자리가 우편함도 치운다. 말없이 걷는다: 읽은
+    // 편지는 전달을 마친 것이고, 날수는 저장소의 설정이 이미 말한다.
+    mail::sweep_read(&repo.mail_dir(), repo.config.mail_read_days);
     let (mut agents, garbled) = mail::presences(&dir);
     // 거르개는 걷기 **뒤**다 — 걸러 낸 줄도 죽었으면 걷힌다. 거르개가 걷기를 좁히면 감독이 부를 때마다 남의 죽은
     // 줄이 남는다.
