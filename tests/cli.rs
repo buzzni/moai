@@ -25068,6 +25068,24 @@ fn a_codex_stop_holds_letters_inside_codexs_limit() {
     assert!(whole.contains(&big) && !whole.contains("여기서 잘랐다"), "Claude 의 턴에서 칸에 드는 편지를 잘랐다");
 }
 
+/// **Antigravity 의 턴 끝은 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 사람이 띄운 agy 1.2.16 창이
+/// UTF-16 9,600~9,900 단위(21KB 남짓)의 한국어 편지를 턴 머리에서도 `Stop` 의 `decision: continue` 로도 자르거나 파일로
+/// 빼지 않고 실었다. Codex 의 좁은 선(바이트 8천)으로 옮기면 실을 수 있는 편지를 잘라 다시 보라고 시킨다.
+#[test]
+fn an_antigravity_stop_holds_a_letter_as_big_as_claudes_slot() {
+    let s = init("agy-hold-cap");
+    dialect_out(&s, "antigravity", "user-prompt-submit", &recorded(&s, "antigravity/pre-invocation-first.json"));
+    let names = names_in(&s.path().join(".moai/agents"));
+    assert_eq!(names.len(), 1, "턴 머리가 출석을 안 적었다 — {names:?}");
+    let big = "가".repeat(9_000); // 27KB — Codex 의 선은 넘고 칸 하나에는 든다
+    ok(s.path(), &["send", names[0].trim_end_matches(".json"), "긴 편지", "-b", &big, "--as", "boss"]);
+    let out = dialect_out(&s, "antigravity", "stop", &recorded(&s, "antigravity/stop.json"));
+    one_json_value(&out);
+    assert!(out.starts_with("{\"decision\":\"continue\",\"reason\":\""), "그 꼴로 안 붙들었다 — {out}");
+    let said = json_text(&out, "reason");
+    assert!(said.contains(&big) && !said.contains("여기서 잘랐다"), "Antigravity 의 턴 끝에서 칸에 드는 편지를 잘랐다");
+}
+
 /// **같은 1분 안에 연 Codex 세션 셋도 저마다 장 하나다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞
 /// 8자가 밀리초 시각의 윗자리고 65초 남짓마다만 바뀐다(기록한 두 id 가 그렇다). 겹친 이름을 그 토막으로 한 번만 가르던
 /// 판은 셋째가 둘째의 장을 덮었고, 둘은 훅마다 서로의 장을 빼앗았다.

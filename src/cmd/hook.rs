@@ -527,7 +527,12 @@ fn decide(
 /// `Stop` 이 붙드는 까닭(`reason`)에 편지가 들 자리 — 말씨마다 다르다(moai-rxro). Codex 는 그 글을 이어 가는
 /// 프롬프트로 실어 기본 상한에 묶고, 심은 파일의 `additionalContextLimit` 은 거기 안 닿는다([`crate::hook::CODEX_HOLD`]).
 /// 칸 하나([`crate::hook::Room::CONTEXT`])로 재던 판은 그 상한을 넘긴 한국어 편지의 가운데를 Codex 가 파일로 빼, 읽음으로
-/// 옮긴 그 자리를 아무도 못 봤다. Antigravity 의 상한은 문서에 없어 Claude 의 자로 잰다.
+/// 옮긴 그 자리를 아무도 못 봤다.
+///
+/// **Antigravity 는 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 상한이 문서에 없어 사람이 띄운 대화형 agy
+/// 1.2.16 창에 한국어 편지를 보내 쟀다. 이 칸이 낼 수 있는 가장 큰 글(UTF-16 9,600~9,900 단위, UTF-8 21KB 남짓)이 턴 머리의
+/// `ephemeralMessage` 로도, 여기 `Stop` 의 `decision: continue` 로도 자르지도 파일로 빼지도 않고 그대로 실렸다(가운데에 고루
+/// 박은 표지 스물이 다 섰다). 그 위의 선은 안 쟀다 — 우리가 내는 글이 이 칸을 안 넘으니 물을 까닭이 없다.
 fn hold_room(dialect: Dialect) -> crate::hook::Room {
     match dialect {
         Dialect::Codex => crate::hook::CODEX_HOLD,
