@@ -1,0 +1,6 @@
+{"ts":"2026-10-05T22:38:14Z","id":"moai-zynt","kind":"create","by":"minyoung.go","by_email":"hedone21@gamil.com","title":"init 을 선택 상자로 묻는다"}
+{"ts":"2026-10-05T22:38:14Z","id":"moai-zynt.a7y","kind":"create","by":"minyoung.go","by_email":"hedone21@gamil.com","title":"init 대화형 화면 — TTY 일 때만, 선택지마다 짝 플래그"}
+{"ts":"2026-10-05T22:38:14Z","id":"moai-zynt.own","kind":"create","by":"minyoung.go","by_email":"hedone21@gamil.com","title":"로컬 전용 트래커 — .git/info/exclude 또는 .gitignore 중 고른다"}
+{"ts":"2026-10-05T22:38:14Z","id":"moai-zynt.zhr","kind":"create","by":"minyoung.go","by_email":"hedone21@gamil.com","title":"status·merge-driver 알림이 로컬 전용 저장소에서 잔소리하지 않게"}
+{"ts":"2026-10-05T22:38:14Z","id":"moai-zynt.fa1","kind":"create","by":"minyoung.go","by_email":"hedone21@gamil.com","title":"시험 — 비TTY·--json 은 묻지 않고, 플래그와 화면이 같은 결과를 낸다"}
+{"ts":"2026-10-05T22:38:14Z","id":"moai-zynt.hqr","kind":"create","by":"minyoung.go","by_email":"hedone21@gamil.com","title":"위키와 AGENTS 블록에 init 선택지와 로컬 전용 모드를 적는다"}
