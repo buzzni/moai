@@ -2304,6 +2304,15 @@ mod tests {
     /// 경고에서 훅 파일의 자리를 갈음하는 글 — 갈무리는 그 기계의 절대 경로를 적는다.
     const HOOKS_AT: &str = "<hooks.json>";
 
+    /// 옮겨 붙이다 마지막 경고가 끊긴 갈무리의 이름(`tests/hooks/codex/config/<이름>.txt`) — 이 갈무리만 마지막 경고를
+    /// 앞머리로 맞춘다(`tests/hooks/README.md`).
+    const CODEX_CUT: &[&str] = &["before-moai-t6hl"];
+
+    /// Codex 가 그 이벤트의 상한을 깎는 값(초) — 안 깎는 이벤트는 `None` 이다.
+    fn codex_timeout_cap(event: &str) -> Option<u64> {
+        CODEX_TIMEOUT_CAP.iter().find(|(at, _)| *at == event).map(|&(_, cap)| cap)
+    }
+
     /// Codex 0.160 이 훅 파일을 읽으며 `/hooks` 의 Issues 에 내는 설정 경고를 본뜬다(moai-o9tg). 글은 그 판 실행 파일의
     /// `hooks/src/engine/discovery.rs` 가 든 것을 옮겼다. command 처리기에 서는 넷만 본뜬다 — 빈 명령, `async`, 이벤트가
     /// 안 받는 `additionalContextLimit`, 깎이는 상한. 같은 자리의 나머지 경고(못 읽는 파일, 틀린 matcher 정규식, prompt·
@@ -2328,8 +2337,9 @@ mod tests {
                         "ignoring additionalContextLimit for {event} hook in {HOOKS_AT}: this event cannot emit additionalContext"
                     ));
                 }
-                let cap = CODEX_TIMEOUT_CAP.iter().find(|(at, _)| at == event).map(|&(_, cap)| cap);
-                if let Some(cap) = cap.filter(|&cap| handler["timeout"].as_u64().is_some_and(|t| t > cap)) {
+                if let Some(cap) =
+                    codex_timeout_cap(event).filter(|&cap| handler["timeout"].as_u64().is_some_and(|t| t > cap))
+                {
                     said.push(format!("clamping {event} hook timeout to {cap}s in {HOOKS_AT}"));
                 }
             }
@@ -2384,10 +2394,19 @@ mod tests {
     /// `/hooks` 를 옮겨 붙인 글에서 Issues 밑의 경고를 하나씩 꺼낸다. 화면이 낱말 사이에서 접은 줄은 한 칸으로 잇고, 훅
     /// 파일의 절대 경로는 [`HOOKS_AT`] 으로 갈음한다. Issues 가 없으면(경고 없는 판) 빈 목록이다.
     fn codex_said(text: &str) -> Vec<String> {
+        // **줄바꿈이 접힌 갈무리는 Issues 를 못 찾는다** — 그대로 두면 경고가 든 글도 "아무 말 없음" 으로 읽혀 갈무리가
+        // 아무것도 못 붙든다. 그런 글은 줄바꿈을 되살려 넣으라고 멈춘다.
+        assert!(
+            text.lines().any(|l| l.trim() == "Issues") || !text.contains("Issues"),
+            "Issues 가 제 줄에 서지 않는다 — 줄바꿈이 접힌 갈무리는 되살려 넣는다"
+        );
         let mut said: Vec<String> = Vec::new();
         for line in text.lines().skip_while(|l| l.trim() != "Issues").skip(1) {
-            match line.strip_prefix("⚠ ") {
+            // 화면이 들여 쓴 줄도 경고다. 경고 뒤의 빈 줄은 Issues 토막의 끝이다 — 그 아래(표·도움말)를 마지막 경고에
+            // 이어 붙이지 않는다.
+            match line.trim_start().strip_prefix("⚠ ") {
                 Some(warning) => said.push(warning.trim().to_string()),
+                None if line.trim().is_empty() && !said.is_empty() => break,
                 None if line.trim().is_empty() => {}
                 None => {
                     let last = said.last_mut().expect("Issues 밑 첫 줄이 ⚠ 로 서지 않는다");
@@ -2426,9 +2445,12 @@ mod tests {
             }
             let mut ours = codex_issues(&read(&path.with_extension("json")));
             let said = codex_said(&read(&path));
-            // **갈무리의 마지막 경고는 앞만 남았을 수 있다** — 화면을 옮겨 붙이다 끊긴다. 그 하나만 앞머리로 맞춘다.
+            // **끊긴 갈무리의 마지막 경고는 앞만 남았다** — 화면을 옮겨 붙이다 끊긴다. [`CODEX_CUT`] 에 이름이 든 갈무리의
+            // 그 하나만 앞머리로 맞춘다. 온전한 갈무리까지 앞머리로 맞추면 본뜸이 마지막 경고 뒤에 덧붙인 말을 못 잡는다.
+            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            let cut_capture = CODEX_CUT.contains(&name);
             for (i, warning) in said.iter().enumerate() {
-                let cut = i + 1 == said.len();
+                let cut = cut_capture && i + 1 == said.len();
                 let at = ours.iter().position(|o| o == warning || (cut && o.starts_with(warning.as_str())));
                 let at = at.unwrap_or_else(|| {
                     panic!("{}: Codex 는 이렇게 말했는데 본뜸이 못 낸다 — {warning}\n본뜸: {ours:#?}", path.display())
@@ -2440,8 +2462,11 @@ mod tests {
         }
         assert!(captures > 0, "갈무리가 하나도 없다 — {}", dir.join("config").display());
 
+        // 깨진 stdin 갈무리는 그 자리에서 멈춘다 — 말없이 빼면 그 이벤트가 "Codex 가 보내 온 적 없는 이벤트" 로 읽혀
+        // 심는 표를 탓한다(리뷰 moai-o9tg.gx6).
         let sent = |p: &Path| -> Option<String> {
-            let input: serde_json::Value = serde_json::from_str(&read(p)).ok()?;
+            let input: serde_json::Value =
+                serde_json::from_str(&read(p)).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
             input["hook_event_name"].as_str().map(str::to_string)
         };
         let known: Vec<String> = std::fs::read_dir(&dir)
@@ -2461,8 +2486,7 @@ mod tests {
             let entry = &groups[0]["hooks"][0];
             let limit = CODEX_TAKES_CONTEXT.contains(&event.as_str()).then_some(crate::hook::CONTEXT_CAP as u64);
             assert_eq!(entry["additionalContextLimit"].as_u64(), limit, "{event}");
-            let cap = CODEX_TIMEOUT_CAP.iter().find(|(at, _)| at == event).map_or(TIMEOUT, |&(_, cap)| cap);
-            assert_eq!(entry["timeout"].as_u64(), Some(cap), "{event}");
+            assert_eq!(entry["timeout"].as_u64(), Some(codex_timeout_cap(event).unwrap_or(TIMEOUT)), "{event}");
         }
     }
 
