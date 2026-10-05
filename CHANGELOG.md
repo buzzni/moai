@@ -146,9 +146,11 @@ does not tag — see `CONTRIBUTING.md`.
   tokens; nobody needs tmux. When the letter says the person is away, the
   worker settles a design question by its recommendation and leaves a
   `Decided alone:` note instead of waiting. A wait that comes back at once with
-  no letter because the mailbox links out of the checkout is not run again —
-  the worker tells the person watching, since its report would be refused the
-  same way. The steps are laid out as markdown lists, so they read as steps on
+  no letter because the mailbox links out of the checkout or into `.git` is not
+  run again — the worker tells the person watching, since its report would be
+  refused the same way — and a letter moai could not mark read is done once
+  before the worker tells the person, since the next wait hands it back at
+  once. The steps are laid out as markdown lists, so they read as steps on
   GitHub too. `moai skill install` plants it in every tree.
 - **`moai init` adds `.moai/mail/` and `.moai/agents/` to `.gitignore`.** The
   two directories also carry their own `.gitignore`, so a repository that has
@@ -242,6 +244,10 @@ does not tag — see `CONTRIBUTING.md`.
   another machine or in Codex that reads `gone` has only been quiet for 20
   minutes — a window resting while its person answers reads the same — so the
   supervisor hands on its worktree only once the person says that window ended.
+  The supervisor's report wait stops the way the worker's does: on a mailbox
+  that links out of the checkout or into `.git` it tells the person instead of
+  waiting again, since its letters would be refused too, and a report moai
+  could not mark read is checked once.
 - **New worktrees stand in `<root>/.worktrees/`**, a place Claude Code, Codex
   and Antigravity share, instead of Claude's `.claude/worktrees/`. The worker
   and supervisor skills create them there, `moai init` adds `/.worktrees/` to
