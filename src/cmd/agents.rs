@@ -26,11 +26,11 @@ struct Row {
 }
 
 impl Row {
-    /// 장이 모르는 키로 `here` 를 들고 왔으면 걷는다 — 그대로 두면 한 줄에 같은 키가 둘 선다.
-    fn of(p: &Presence) -> Row {
-        let mut presence = p.clone();
+    /// 장이 모르는 키로 `here` 를 들고 왔으면 걷는다 — 그대로 두면 한 줄에 같은 키가 둘 선다. 장을 받아 옮긴다 — 내고 나면
+    /// 그 목록은 안 쓰니 줄마다 복제할 까닭이 없다.
+    fn of(mut presence: Presence) -> Row {
         presence.rest.remove("here");
-        Row { here: p.here(), presence }
+        Row { here: presence.here(), presence }
     }
 }
 
@@ -74,7 +74,7 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     }
     if ctx.json {
         let names: Vec<String> = swept.iter().map(|s| s.name.clone()).collect();
-        return super::json_line(&Listed { agents: agents.iter().map(Row::of).collect(), swept: &names });
+        return super::json_line(&Listed { agents: agents.into_iter().map(Row::of).collect(), swept: &names });
     }
     let lang = ctx.lang();
     // **걷은 까닭을 갈라 말한다**(moai-dhxm) — 프로세스가 죽은 장과 하루 넘게 아무것도 안 적은 다른 기계의 장은 그 함의
@@ -402,12 +402,12 @@ mod tests {
     /// 기계를 적은 장은 아니다. 장이 모르는 키로 든 `here` 는 걷혀 한 줄에 같은 키가 둘 서지 않는다.
     #[test]
     fn a_listed_row_says_whether_it_is_this_machines() {
-        let row = |p: &Presence| serde_json::to_value(Row::of(p)).expect("줄");
+        let row = |p: &Presence| serde_json::to_value(Row::of(p.clone())).expect("줄");
         let other = card(r#"{"name":"w1","pid":4242,"machine":"not-this-machine","here":true,"keep":1}"#);
         let listed = row(&other);
         assert_eq!(listed["here"], false, "다른 기계의 장을 이 기계의 것으로 낸다: {listed}");
         assert_eq!(listed["keep"], 1, "모르는 키를 잃는다: {listed}");
-        let text = serde_json::to_string(&Row::of(&other)).expect("글");
+        let text = serde_json::to_string(&Row::of(other)).expect("글");
         assert_eq!(text.matches("\"here\"").count(), 1, "한 줄에 here 가 둘이다: {text}");
         assert_eq!(row(&card(r#"{"name":"w2","pid":4242}"#))["here"], true, "기계를 안 적은 장은 이 기계의 것이다");
         if let Some(m) = mail::machine() {

@@ -33,11 +33,13 @@ window, stop waiting and answer them.
 
    While it waits, `moai agents` shows this window `idle` — that is how the supervisor
    finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
-   **If it comes back at once with a non-zero code and a line naming the mailbox**
-   (`…/.moai/mail: …`), the mailbox cannot be opened — a link the repository holds points
-   out of the checkout — and waiting again will not open it, so do not run it again. A
-   letter to the supervisor is refused the same way: tell the person watching this window
-   (*Ask the person watching*) and stop.
+   **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
+   (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository
+   holds points out of the checkout. Waiting again will not open it, so do not run it again.
+   A letter to the supervisor is refused the same way: tell the person watching this window
+   (*Ask the person watching*) and stop. A letter that comes with a line on the mailbox is
+   still yours to do — that line is moai failing to mark it read, so the next wait shows the
+   same letter again.
    Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
    Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
    minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
@@ -252,9 +254,9 @@ refusals in all.
    cost of member 2 piling onto a bug in member 1 is paid in that one review.
    `low`·`medium`·`high` is the rubric the model in the letter was picked on, and the same rubric measures
    the members when you pick the grade in 7.
-   `low` — text, comments, a one-line fix; behaviour unchanged
-   `medium` — a behaviour change inside one file, ringed by tests
-   `high` — several files, the write path, concurrency, the storage format, hooks; hard to undo
+   - `low` — text, comments, a one-line fix; behaviour unchanged
+   - `medium` — a behaviour change inside one file, ringed by tests
+   - `high` — several files, the write path, concurrency, the storage format, hooks; hard to undo
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
    conflicts and run the tests. Fix things here — while the worktree stands, rule 2 blocks
    edits in the root
@@ -276,9 +278,8 @@ refusals in all.
    inherits the window's model). Those models are Claude Code's: in Codex and Antigravity the
    grade still stands, and the window keeps the model its person picked.
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
-   where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled
-   <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
-   (rule 3)
+   where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled it
+   in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
 
        moai add 'review — <what you are looking at>' -t review --parent <epic> -b '<what you are looking for and why>'
    This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
@@ -304,6 +305,7 @@ refusals in all.
    above in `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the
    closing `-m` as they are. Any other refusal, such as a missing angle, is not worked around:
    fix it the way the refusal's own command says
+
    **Five places the review keeps finding.** They do not stand in for the angle — what this
    epic actually did is the angle, and these go on top of it
    1. A struct or function inserted above another takes over the doc block of the item below
@@ -322,6 +324,7 @@ refusals in all.
    next person reads; the review command does not read the issue. Going through a subagent,
    put these five in its prompt; going through the command, hold them against what came back
    before you take the findings in
+
    **While the review is running, do not touch this worktree's branch or its working tree.**
    A review that fixes leaves its fixes in the working tree uncommitted, so `reset --hard`,
    `rebase` and `commit --amend` throw them away — that has happened, told to do it by a
@@ -346,7 +349,7 @@ refusals in all.
    not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
    promote unfolds a closed idea too, and the same member stands twice
 
-       moai -C <root> idea promote <idea id> -e <epic> --from -
+    moai -C <root> idea promote <idea id> -e <epic> --from -
    Do not do a reclaimed member here: merge with it left in the first column — work that has
    not been through 7's review does not get mixed into the merge, and a member still standing
    keeps the epic open. Do not `defer` that member. Deferring it closes the epic without its
@@ -362,7 +365,7 @@ refusals in all.
    milestone. **What this release can do without goes outside** — not "not doing it", but
    "not in this release"
 
-       moai -C <root> edit <that row> -e none --milestone none
+    moai -C <root> edit <that row> -e none --milestone none
    **Pass `-e none` with it.** A milestone is inherited from the epic, so on an epic member
    `--milestone none` alone changes nothing and comes back with one line saying the place
    comes from the epic and cannot be cut — a row 7-1 reclaimed stands as that epic's member,
@@ -379,7 +382,7 @@ refusals in all.
    the root, which every session shares and where the only commits that belong are the
    tracker's and the merge itself. Committed here it rides the merge commit instead
 
-       git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
+    git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
    This window is the only one that knows what the epic did, and it is the only one that
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
@@ -396,8 +399,8 @@ refusals in all.
    If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
    7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
 
-       git add -- <wiki dir>
-       git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
+    git add -- <wiki dir>
+    git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
    If it did not, write nothing. **Nothing checks this**
 
 8. *Come back to the root* — remove the worktree from inside it and this window stands in a
@@ -438,7 +441,7 @@ refusals in all.
    Quote free text with single quotes — inside double quotes the shell expands backticks and
    `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
 
-       moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+    moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
 
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
     landed** — a worker moved them before the merge and had to undo it. It closes a member
@@ -452,6 +455,7 @@ refusals in all.
         moai mv <review id> done -m '<what you took in, what you handed on>'
     If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
     the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
+
     Leave the tests passing in the root with a commit with a path, as in 2
 11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and take it into the root
     with a commit with a path as in 2. It is written after the commit in 10, so leaving it out

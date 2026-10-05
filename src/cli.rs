@@ -568,10 +568,11 @@ IDEA
   host, session, the two tmux keys and seen are absent when they are not
   known. machine names where pid means that process; a row without it is
   looked at by its pid. here says whether the row is this machine's - its
-  machine is this one, or it names none (a Codex row, or one written before
-  rows named a machine). It is measured as the list is made and never
-  written to the row. status is busy, idle, or gone for a row told by seen
-  that nothing wrote for 20 minutes.")]
+  machine is this one, or it names none (a Codex row, one written before
+  rows named a machine, or one written where moai cannot name the machine,
+  as off Linux). It is measured as the list is made and never written to
+  the row. status is busy, idle, or gone for a row told by seen that
+  nothing wrote for 20 minutes.")]
     Agents(AgentsArgs),
 
     /// Register this agent - name, vendor, model and role

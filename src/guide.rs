@@ -1846,9 +1846,13 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker — the one you sent that work to — is gone from `moai agents`, or reads `gone`
-there: a worker on another machine (`here` false) or in Codex has no process to look at,
-so its row stays a day after nothing marked it for 20 minutes.
+worker — the one you sent that work to — is gone from `moai agents`. A worker on another
+machine (`here` false) or in Codex has no process to look at: its row is swept only a day
+after nothing marked it, and it reads `gone` after 20 quiet minutes, **which is not an
+ended session** — a window resting at its prompt while its person answers marks nothing,
+nor does a long stretch of only reading files, nor a Codex window whose hooks are not
+trusted. Hand on the work of a worker that reads `gone` but still stands in `moai agents`
+only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one waiting worker **before any new
   idea**. Send the letter in 3 with its first two lines changed to the two below, and the
@@ -1918,11 +1922,12 @@ reads `idle`.
 
 Each row names the agent (`name` — what you send to), its `vendor` (which column of the
 words table it reads, and whether 5-1 can clear it), whether it runs on this machine
-(`here` — 5-1 clears only those) and its tmux pane when it has one. The rows are this
-repository's: the list follows the tracker into the root, so every worktree of it sees
-the same one — and so do other machines (containers) sharing it. A row whose process is
-gone is swept as it is read; a row on another machine or in Codex has no process to look
-at, so it reads `gone` once nothing marked it for 20 minutes, and is swept after a day.
+(`here` — its machine is this one, or it names none; 5-1 clears only those) and its tmux
+pane when it has one. The rows are this repository's: the list follows the tracker into
+the root, so every worktree of it sees the same one — and so do other machines
+(containers) sharing it. A row whose process is gone is swept as it is read; a row on
+another machine or in Codex has no process to look at, so it reads `gone` once nothing
+marked it for 20 minutes, and is swept after a day.
 
 - **Hand work only to a row whose role is `worker` and whose status is `idle`.** `busy` is
   working — on your work or on the person's — and a session with no role is one nobody made
@@ -2022,12 +2027,11 @@ measured before sending cannot cover a file that turns out to be needed mid-epic
 the worker meets such a file it does not fix it: it leaves it as a member and reports it
 (its 4-3).
 `<after>` is `end the turn` only when you will clear that window yourself in 5-1 — you run
-inside tmux, whatever your vendor, the worker's row says `here` (it runs on this machine —
-containers can share a tmux socket path, so the socket alone does not tell) and carries a
-`tmux_pane` on your tmux server, and its vendor is `claude` (5-1 reads Claude Code's screen
-only). 5-1 then sends
-the next letter itself and wakes the emptied window. Otherwise it is `wait again`: the
-worker reports and goes straight back to waiting.
+inside tmux, whatever your vendor, the worker's row says `here` (its machine is this one,
+or it names none — containers can share a tmux socket path, so the socket alone does not
+tell) and carries a `tmux_pane` on your tmux server, and its vendor is `claude` (5-1 reads
+Claude Code's screen only). 5-1 then sends the next letter itself and wakes the emptied
+window. Otherwise it is `wait again`: the worker reports and goes straight back to waiting.
 `<person>` is `here`, or `away` when the person told you they are stepping away — the
 worker then settles a design question by its own recommendation instead of waiting on an
 answer, writes down what it decided, and stops at what cannot be undone.
@@ -2120,8 +2124,9 @@ report, `<root>` is the `root dir` from 2 — the script asks `moai agents` and 
 `<subject>` is its subject, `<id> — <title>`.
 
 The script reads Claude Code's screen — the input box under the prompt glyph — so it
-clears Claude Code workers only. For a worker on another vendor it prints `not clearing`,
-and the letter 3 sent it said `wait again`.
+clears Claude Code workers only, and only those whose row says `here`. For a worker on
+another vendor or another machine it prints `not clearing`, and the letter 3 sent it said
+`wait again`.
 
 ```sh
 python3 - '<worker>' '<epic>' '<my name>' '<root>' '<letter file>' '<subject>' <<'PY'
@@ -2494,7 +2499,9 @@ PY
 - **Clear only a worker on this machine** — its row says `here`. A row from another machine
   (another container sharing this repository) names a pane and a pid on that machine;
   containers can share the tmux socket path, and that pid here is someone else's process or
-  none. A `moai` on PATH too old to say `here` stops it as well
+  none. A `moai` on PATH too old to say `here` stops it as well. `here` is also true for a
+  row that names no machine (an older or non-Linux moai wrote it), so the fences below stand
+  for every row
 - **Read the pane from the worker's row (`tmux_pane`, `tmux_socket`) and check that the
   pane's process spawned that agent.** A pane id names a pane on one server only, so a row
   from another server names someone else's pane here, and pane numbers are reused
@@ -2707,11 +2714,13 @@ window, stop waiting and answer them.
 
    While it waits, `moai agents` shows this window `idle` — that is how the supervisor
    finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
-   **If it comes back at once with a non-zero code and a line naming the mailbox**
-   (`…/.moai/mail: …`), the mailbox cannot be opened — a link the repository holds points
-   out of the checkout — and waiting again will not open it, so do not run it again. A
-   letter to the supervisor is refused the same way: tell the person watching this window
-   (*Ask the person watching*) and stop.
+   **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
+   (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository
+   holds points out of the checkout. Waiting again will not open it, so do not run it again.
+   A letter to the supervisor is refused the same way: tell the person watching this window
+   (*Ask the person watching*) and stop. A letter that comes with a line on the mailbox is
+   still yours to do — that line is moai failing to mark it read, so the next wait shows the
+   same letter again.
    Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
    Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
    minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
@@ -2835,11 +2844,13 @@ fn brief() -> String {
     let close = indent(&close_steps("<review id>", "moai"), "      ");
     let over = indent(REVIEW_OVER_LIMIT, "    ");
     let levels = difficulty_levels();
-    let rubric = indent(&difficulty_rubric(), "   ");
+    // 잣대는 걸음 5 안의 글머리 목록이다 — 맨 줄로 두면 GitHub 에서 세 낱말이 한 문단으로 뭉친다(리뷰 moai-bkn4.c3d).
+    let rubric = indent(&difficulty_rubric(), "   - ");
     let top = top_model();
     let epic_rule = indent(&epic_review_rule(), "   ");
     let angle = indent(REVIEW_ANGLE, "   ");
-    let wiki_commit = indent(WIKI_COMMIT, "       ");
+    // 7-4 는 목록 밖의 문단이라 명령 줄이 네 칸이다(`the_brief_follows_the_markdown_list_rules`).
+    let wiki_commit = indent(WIKI_COMMIT, "    ");
     format!(
         r#"1. Unfold it in the root — the one way to turn an idea into work is
    `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
@@ -2955,9 +2966,8 @@ fn brief() -> String {
    inherits the window's model). Those models are Claude Code's: in Codex and Antigravity the
    grade still stands, and the window keeps the model its person picked.
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
-   where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled
-   <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
-   (rule 3)
+   where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled it
+   in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
 
        {review}
    This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
@@ -2983,7 +2993,9 @@ fn brief() -> String {
    above in `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the
    closing `-m` as they are. Any other refusal, such as a missing angle, is not worked around:
    fix it the way the refusal's own command says
+
 {angle}
+
    **While the review is running, do not touch this worktree's branch or its working tree.**
    A review that fixes leaves its fixes in the working tree uncommitted, so `reset --hard`,
    `rebase` and `commit --amend` throw them away — that has happened, told to do it by a
@@ -3008,7 +3020,7 @@ fn brief() -> String {
    not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
    promote unfolds a closed idea too, and the same member stands twice
 
-       {RECALL}
+    {RECALL}
    Do not do a reclaimed member here: merge with it left in the first column — work that has
    not been through 7's review does not get mixed into the merge, and a member still standing
    keeps the epic open. Do not `defer` that member. Deferring it closes the epic without its
@@ -3024,7 +3036,7 @@ fn brief() -> String {
    milestone. **What this release can do without goes outside** — not "not doing it", but
    "not in this release"
 
-       moai -C <root> edit <that row> -e none --milestone none
+    moai -C <root> edit <that row> -e none --milestone none
    **Pass `-e none` with it.** A milestone is inherited from the epic, so on an epic member
    `--milestone none` alone changes nothing and comes back with one line saying the place
    comes from the epic and cannot be cut — a row 7-1 reclaimed stands as that epic's member,
@@ -3041,7 +3053,7 @@ fn brief() -> String {
    the root, which every session shares and where the only commits that belong are the
    tracker's and the merge itself. Committed here it rides the merge commit instead
 
-       git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
+    git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
    This window is the only one that knows what the epic did, and it is the only one that
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
@@ -3099,7 +3111,7 @@ fn brief() -> String {
    Quote free text with single quotes — inside double quotes the shell expands backticks and
    `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
 
-       moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+    moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
 
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
     landed** — a worker moved them before the merge and had to undo it. It closes a member
@@ -3111,6 +3123,7 @@ fn brief() -> String {
 
 {close}
 {over}
+
     Leave the tests passing in the root with a commit with a path, as in 2
 11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and take it into the root
     with a commit with a path as in 2. It is written after the commit in 10, so leaving it out
@@ -3674,6 +3687,9 @@ mod tests {
             ("`<subdir>`", "모노레포 하위 자리를 감독이 안 채워 일꾼이 거절되는 꼴로 구한다"),
             // 거둔 일은 일꾼 스킬의 그 절로 보낸다 — 첫 줄이 그 절을 이름으로 댄다.
             ("from \"Carrying on stalled work\"", "거둔 일의 편지가 일꾼 스킬의 어느 절인지 안 댄다"),
+            // `gone` 은 20분 조용했다는 것이지 끝났다는 것이 아니다(리뷰 moai-bkn4.c3d) — 사람의 답을 기다리며 프롬프트에 쉬는
+            // 다른 기계·Codex 일꾼도 그렇게 읽혀, 그 워크트리를 둘째 일꾼에게 넘기면 산 두 세션이 한 가지에 선다.
+            ("only once the person says that window has ended", "20분 조용한 일꾼의 워크트리를 둘째 일꾼에게 넘긴다"),
             // 7-1 이 첫 칸에 남긴 멤버는 에픽을 연 채 둔다 — 감독의 확인(5)이 그것을 어긋남으로 읽으면
             // 시킨 대로 한 보고마다 그 창이 안 비워지고 다음 idea 도 못 받는다.
             (
@@ -3823,7 +3839,7 @@ stop sending outside work while a release runs",
         // 다시 적으면 여기서 붉어진다.
         let table = difficulty_table();
         assert!(head.contains(&table), "2-1 의 표가 DIFFICULTY 에서 안 나온다");
-        assert!(brief.contains(&indent(&difficulty_rubric(), "   ")), "일꾼이 받는 잣대가 DIFFICULTY 에서 안 나온다");
+        assert!(brief.contains(&indent(&difficulty_rubric(), "   - ")), "일꾼이 받는 잣대가 DIFFICULTY 에서 안 나온다");
         // **칸째로 맨다** — 머리의 `모델` 칸 자리에 짝이 서는지 본다. 줄 어디에 `` `haiku` ``
         // 가 들기만 하면 되던 판은 모델 칸과 리뷰 칸을 바꿔 끼워도 초록이었다.
         let cells = |l: &str| l.trim().trim_matches('|').split('|').map(|c| c.trim().to_string()).collect::<Vec<_>>();
@@ -4227,7 +4243,7 @@ stop sending outside work while a release runs",
             (format!("`{name}` skill"), "심는 스킬의 이름으로 안 보낸다"),
             ("`moai wiki ls`".to_string(), "위키가 있는지 무엇으로 아는지 안 적었다"),
             (CHANGED_USE.to_string(), "스킬과 같은 물음을 안 묻는다"),
-            (indent(WIKI_COMMIT, "       "), "고친 페이지를 담을 커밋 줄이 없다"),
+            (indent(WIKI_COMMIT, "    "), "고친 페이지를 담을 커밋 줄이 없다"),
             ("in the worktree, before the merge".to_string(), "워크트리에서 머지 전에 쓰라는 말이 없다"),
             ("write nothing".to_string(), "쓰임이 안 바뀐 에픽은 안 쓴다는 말이 없다"),
             ("**Nothing checks this**".to_string(), "게이트가 아니라는 말이 없다"),
@@ -4428,7 +4444,8 @@ stop sending outside work while a release runs",
         // `<after>` 가 스크립트와 같은 자로 고른다(moai-y2uy) — 다른 기계의 일꾼에게 `end the turn` 을 주면 5-1 이 멈춰 그
         // 창은 안 비워지고 안 깨워진 채 선다.
         let after = supervise.find("`<after>` is `end the turn` only when").expect("<after> 를 고르는 글이 없다");
-        let rule = &supervise[after..after + supervise[after..].find("Otherwise it is `wait again`").expect("<after> 글이 안 끝난다")];
+        let rule = &supervise
+            [after..after + supervise[after..].find("Otherwise it is `wait again`").expect("<after> 글이 안 끝난다")];
         assert!(rule.contains("row says `here`"), "<after> 가 다른 기계의 일꾼에게 end the turn 을 고른다");
         // **일꾼은 `moai agents` 로 찾는다**(moai-snyk) — Claude Code 의 속 파일은 문서에 없고 Claude 세션만 든다.
         // 출석의 이름은 비워도 그대로라(같은 프로세스) 이름으로 다시 찾아도 같은 장이다.
@@ -4849,28 +4866,39 @@ sys.exit(1 if bad else 0)
         // 거둔 일은 3 을 안 지나 4-1 부터 잇는다 — 그 절에도 같은 줄이 서야 이어받은 일꾼이 꼭대기에 안 선다.
         let stalled = &work[work.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
         assert!(stalled.contains(SUBDIR), "거둔 일의 일꾼이 워크트리 꼭대기에 선다");
+        // 글머리(`- `) 안의 코드 블록이다 — 빈 줄 뒤에 글 칸(2)에서 네 칸 더(moai-bkn4.9no). 빈 줄 없이 들여 쓰면 GitHub 에서
+        // 글머리 문단 끝에 `cd` 가 붙는다(리뷰 moai-bkn4.c3d — 브리프만 재는 시험이 이 자리를 못 본다).
+        assert!(stalled.contains(&format!("\n\n      {SUBDIR}\n")), "거둔 일의 `cd <subdir>` 가 코드 블록으로 안 선다");
     }
 
     /// **걸음은 마크다운 목록 규칙을 따른다**(moai-bkn4.9no, 리뷰 moai-snyk.nic). 에이전트는 날 글을 읽어 지장이 없지만,
-    /// GitHub 에서는 걸음마다 명령 줄과 잔걸음까지 한 문단으로 뭉쳤다. 넷을 맨다.
+    /// GitHub 에서는 걸음마다 명령 줄과 잔걸음까지 한 문단으로 뭉쳤다. 다섯을 맨다.
     ///
     /// - 명령 줄은 코드 블록이다 — 빈 줄 뒤에, 그 걸음의 글 칸에서 네 칸 더(`1.`~`9.` 는 7칸, `10.`~`12.` 는 8칸).
     ///   들여 쓴 코드는 문단을 못 끊어, 빈 줄 없이 들여 쓴 줄은 위 문단에 붙는다
-    /// - `4-1.` 같은 잔걸음은 빈 줄 뒤에 선다 — 목록 표시가 아니라서 빈 줄이 없으면 위 문단에 붙는다
+    /// - `4-1.` 같은 잔걸음은 빈 줄 뒤에 선다 — 목록 표시가 아니라서 빈 줄이 없으면 위 문단에 붙는다. 목록 밖의 맨 바깥
+    ///   문단이라 그 명령 줄은 네 칸이다 — 일곱 칸이면 코드 블록 안에 세 칸이 남는다(리뷰 moai-bkn4.c3d)
     /// - 잔걸음 뒤의 큰 걸음도 빈 줄 뒤다 — `1.` 이 아닌 번호는 문단을 끊고 목록을 열지 못한다
     /// - 이음은 그 걸음의 글 칸에 선다 — `10.` 은 표시가 네 칸이라, 세 칸 이음은 코드 블록 뒤에서 목록 밖으로 떨어진다
+    /// - 글 칸 세 칸 더에 서는 것은 걸음 안의 번호 목록(7 의 다섯 자리)의 이음뿐이고, 그 목록 뒤의 문단은 빈 줄 뒤다 —
+    ///   빈 줄이 없으면 목록의 마지막 항목에 붙는다. 목록 밖에서 세 칸 더에 선 줄은 명령 줄을 잘못 놓은 것이다
+    ///   (`10.`~`12.` 의 일곱 칸은 코드가 아니라 문단이다, 리뷰 moai-bkn4.c3d)
     #[test]
     fn the_brief_follows_the_markdown_list_rules() {
         let brief = brief();
-        let lines: Vec<&str> = brief.lines().collect();
         let lead = |l: &str| l.len() - l.trim_start().len();
-        let (mut col, mut after_sub) = (3, false);
-        for (i, l) in lines.iter().enumerate() {
-            if l.trim().is_empty() {
+        let blank = |l: &str| l.trim().is_empty();
+        let numbered = |l: &str| {
+            l.trim_start().split_once(". ").is_some_and(|(m, _)| !m.is_empty() && m.bytes().all(|b| b.is_ascii_digit()))
+        };
+        // 글 칸과 코드 칸, 바로 앞 걸음이 잔걸음인가, 걸음 안의 번호 목록 속인가, 마지막에 읽은 걸음 표시.
+        let (mut text, mut code, mut after_sub, mut nested, mut last) = (3, 7, false, false, "");
+        for (before, l) in std::iter::once("").chain(brief.lines()).zip(brief.lines()) {
+            if blank(l) {
                 continue;
             }
-            let before = if i == 0 { "" } else { lines[i - 1] };
-            if lead(l) == 0 {
+            let n = lead(l);
+            if n == 0 {
                 let mark = l.split_once(". ").map(|(m, _)| m).unwrap_or_default();
                 assert!(
                     !mark.is_empty() && mark.chars().all(|c| c.is_ascii_digit() || c == '-'),
@@ -4878,24 +4906,30 @@ sys.exit(1 if bad else 0)
                 );
                 let sub = mark.contains('-');
                 if sub || after_sub {
-                    assert!(before.is_empty(), "{mark} 앞에 빈 줄이 없어 위 문단에 붙는다");
+                    assert!(blank(before), "{mark} 앞에 빈 줄이 없어 위 문단에 붙는다");
                 }
-                after_sub = sub;
-                col = if sub { 3 } else { mark.len() + 2 };
+                (text, code) = if sub { (3, 4) } else { (mark.len() + 2, mark.len() + 6) };
+                (after_sub, nested, last) = (sub, false, mark);
                 continue;
             }
-            assert!(lead(l) >= col, "이음이 그 걸음의 글 칸({col})보다 얕다: {l}");
-            // 글 칸과 코드 칸 사이에 서는 것은 걸음 안의 번호 목록(7 의 다섯 자리)의 이음 하나다 — 옛 다섯 칸 명령 줄이
-            // 여기 걸린다.
-            let inner = lead(l) > col && lead(l) < col + 4;
-            assert!(!inner || lead(l) == col + 3, "명령 줄도 이음도 아닌 칸에 섰다: {l}");
-            if lead(l) >= col + 4 {
-                let code_above = !before.trim().is_empty() && lead(before) >= col + 4;
-                assert!(before.is_empty() || code_above, "명령 줄 앞에 빈 줄이 없어 문단에 붙는다: {l}");
-                assert_eq!(lead(l), col + 4, "명령 줄이 글 칸에서 네 칸 더가 아니다: {l}");
+            if n >= code {
+                assert!(blank(before) || lead(before) == code, "명령 줄 앞에 빈 줄이 없어 문단에 붙는다: {l}");
+                assert_eq!(n, code, "명령 줄이 그 걸음의 코드 칸({code})에 안 섰다: {l}");
+                nested = false;
+                continue;
             }
+            if n == text + 3 {
+                assert!(nested, "번호 목록 밖에서 글 칸 세 칸 더에 섰다 — 명령 줄이면 코드 칸({code})이다: {l}");
+                continue;
+            }
+            assert_eq!(n, text, "명령 줄도 이음도 아닌 칸에 섰다: {l}");
+            let item = numbered(l);
+            if nested && !item {
+                assert!(blank(before), "번호 목록 뒤의 문단 앞에 빈 줄이 없어 목록의 마지막 항목에 붙는다: {l}");
+            }
+            nested = item;
         }
-        assert_eq!(col, 4, "마지막 걸음을 못 읽었다 — 10.~12. 의 글 칸을 안 쟀다");
+        assert_eq!(last, "12", "마지막 걸음을 못 읽었다 — `12.` 가 걸음 표시로 안 섰다");
     }
 
     /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
@@ -5168,6 +5202,13 @@ sys.exit(1 if bad else 0)
         let shut = loop_.find("a line naming the mailbox").expect("못 연 우편함에서 멈추라는 말이 없다");
         assert!(loop_[shut..].contains("do not run it again"), "못 연 우편함 앞에서 기다림을 다시 건다");
         assert!(loop_[shut..].contains("*Ask the person watching*"), "못 연 우편함을 창의 사람에게 안 알린다");
+        // **편지가 왔으면 멈추지 않는다**(리뷰 moai-bkn4.c3d) — 편지를 읽음으로 못 옮긴 io 실패도 같은 `…/.moai/mail: …` 꼴의
+        // 줄과 비영으로 곧장 돌아온다(`mail::refusal` 의 못 막은 갈래). 그 줄만 보고 멈추면 받은 일감을 두고 선다.
+        assert!(
+            loop_.contains("non-zero code, no letter and a line naming"),
+            "편지를 받은 판에도 우편함 줄 하나로 멈춘다"
+        );
+        assert!(loop_[shut..].contains("still yours to do"), "읽음 표시만 못 한 편지를 버린다");
         // 보고는 편지다 — 일꾼이 SendMessage 로 보고하면 Claude 밖의 감독에게 안 닿는다.
         assert!(brief.contains("moai send <supervisor> 'report: <epic>'"), "일꾼이 보고를 편지로 안 보낸다");
         assert!(!brief.contains("SendMessage"), "일꾼의 걸음이 Claude 의 SendMessage 에 기댄다");

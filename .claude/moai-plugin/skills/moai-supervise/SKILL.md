@@ -122,9 +122,13 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker — the one you sent that work to — is gone from `moai agents`, or reads `gone`
-there: a worker on another machine (`here` false) or in Codex has no process to look at,
-so its row stays a day after nothing marked it for 20 minutes.
+worker — the one you sent that work to — is gone from `moai agents`. A worker on another
+machine (`here` false) or in Codex has no process to look at: its row is swept only a day
+after nothing marked it, and it reads `gone` after 20 quiet minutes, **which is not an
+ended session** — a window resting at its prompt while its person answers marks nothing,
+nor does a long stretch of only reading files, nor a Codex window whose hooks are not
+trusted. Hand on the work of a worker that reads `gone` but still stands in `moai agents`
+only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one waiting worker **before any new
   idea**. Send the letter in 3 with its first two lines changed to the two below, and the
@@ -194,11 +198,12 @@ reads `idle`.
 
 Each row names the agent (`name` — what you send to), its `vendor` (which column of the
 words table it reads, and whether 5-1 can clear it), whether it runs on this machine
-(`here` — 5-1 clears only those) and its tmux pane when it has one. The rows are this
-repository's: the list follows the tracker into the root, so every worktree of it sees
-the same one — and so do other machines (containers) sharing it. A row whose process is
-gone is swept as it is read; a row on another machine or in Codex has no process to look
-at, so it reads `gone` once nothing marked it for 20 minutes, and is swept after a day.
+(`here` — its machine is this one, or it names none; 5-1 clears only those) and its tmux
+pane when it has one. The rows are this repository's: the list follows the tracker into
+the root, so every worktree of it sees the same one — and so do other machines
+(containers) sharing it. A row whose process is gone is swept as it is read; a row on
+another machine or in Codex has no process to look at, so it reads `gone` once nothing
+marked it for 20 minutes, and is swept after a day.
 
 - **Hand work only to a row whose role is `worker` and whose status is `idle`.** `busy` is
   working — on your work or on the person's — and a session with no role is one nobody made
@@ -308,12 +313,11 @@ measured before sending cannot cover a file that turns out to be needed mid-epic
 the worker meets such a file it does not fix it: it leaves it as a member and reports it
 (its 4-3).
 `<after>` is `end the turn` only when you will clear that window yourself in 5-1 — you run
-inside tmux, whatever your vendor, the worker's row says `here` (it runs on this machine —
-containers can share a tmux socket path, so the socket alone does not tell) and carries a
-`tmux_pane` on your tmux server, and its vendor is `claude` (5-1 reads Claude Code's screen
-only). 5-1 then sends
-the next letter itself and wakes the emptied window. Otherwise it is `wait again`: the
-worker reports and goes straight back to waiting.
+inside tmux, whatever your vendor, the worker's row says `here` (its machine is this one,
+or it names none — containers can share a tmux socket path, so the socket alone does not
+tell) and carries a `tmux_pane` on your tmux server, and its vendor is `claude` (5-1 reads
+Claude Code's screen only). 5-1 then sends the next letter itself and wakes the emptied
+window. Otherwise it is `wait again`: the worker reports and goes straight back to waiting.
 `<person>` is `here`, or `away` when the person told you they are stepping away — the
 worker then settles a design question by its own recommendation instead of waiting on an
 answer, writes down what it decided, and stops at what cannot be undone.
@@ -415,8 +419,9 @@ report, `<root>` is the `root dir` from 2 — the script asks `moai agents` and 
 `<subject>` is its subject, `<id> — <title>`.
 
 The script reads Claude Code's screen — the input box under the prompt glyph — so it
-clears Claude Code workers only. For a worker on another vendor it prints `not clearing`,
-and the letter 3 sent it said `wait again`.
+clears Claude Code workers only, and only those whose row says `here`. For a worker on
+another vendor or another machine it prints `not clearing`, and the letter 3 sent it said
+`wait again`.
 
 ```sh
 python3 - '<worker>' '<epic>' '<my name>' '<root>' '<letter file>' '<subject>' <<'PY'
@@ -789,7 +794,9 @@ PY
 - **Clear only a worker on this machine** — its row says `here`. A row from another machine
   (another container sharing this repository) names a pane and a pid on that machine;
   containers can share the tmux socket path, and that pid here is someone else's process or
-  none. A `moai` on PATH too old to say `here` stops it as well
+  none. A `moai` on PATH too old to say `here` stops it as well. `here` is also true for a
+  row that names no machine (an older or non-Linux moai wrote it), so the fences below stand
+  for every row
 - **Read the pane from the worker's row (`tmux_pane`, `tmux_socket`) and check that the
   pane's process spawned that agent.** A pane id names a pane on one server only, so a row
   from another server names someone else's pane here, and pane numbers are reused
