@@ -502,6 +502,15 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   its tmux and its Claude session are on that machine — and a wait here never
   marks it alive, so a window that sets the same `MOAI_AGENT` after a restart
   gets the name back once the old row reads `gone`
+- **A new session came up as `<name>-<eight characters>`.** Another machine's
+  row holds that name. A name the tools made up — a Claude session name, which
+  each container counts on its own, or `claude-` and eight characters — stays
+  with that row until it is swept a day after it went quiet, even while it reads
+  `gone`: a Claude session resting at its prompt marks nothing, and taking its
+  name would send that live session's letters back. `moai hello` without
+  `--name` refuses the name instead and shows the row's `<pid>@<host>`. A name
+  you ask for — `MOAI_AGENT`, `moai hello --name` — is yours again once the old
+  row reads `gone`
 - **`moai hello` in Codex says it cannot tell which session this is.** That
   Codex set no `CODEX_THREAD_ID` in its shell. Pass `--as` with the row its hooks
   gave the session — the name in its first context, also in `moai agents` as
