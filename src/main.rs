@@ -16,6 +16,7 @@ mod held;
 mod hook;
 mod i18n;
 mod id;
+mod init_choice;
 mod latest;
 mod markdown;
 mod model;

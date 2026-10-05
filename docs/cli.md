@@ -2935,6 +2935,7 @@ Arguments:
 Options:
       --no-agents            Leave AGENTS.md alone
       --no-driver            Leave .git/config alone (plant no merge driver)
+  -y, --yes                  Ask nothing; what no flag sets takes the default
       --check                Write nothing; say if the AGENTS.md block is stale
       --print                Write nothing; print that block (to paste it)
       --json                 Machine-readable output. Every human line goes away
@@ -2949,6 +2950,14 @@ Options:
   and the journal are not touched.
 
   The prefix is decided once - every id already issued carries it.
+
+  **In a terminal the first init asks.** It shows the prefix and each choice
+  with its default picked, and Enter plants. A flag picks its row and locks
+  it; give every row a flag, or --yes, and nothing is asked. Nothing is
+  asked where a script or an agent calls it - stdin or stdout is not a
+  terminal, or --json - and there the defaults are what init has always
+  done. Running it again where .moai already stands never asks. Esc stops
+  with nothing written.
 
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
