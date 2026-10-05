@@ -2706,6 +2706,11 @@ window, stop waiting and answer them.
 
    While it waits, `moai agents` shows this window `idle` — that is how the supervisor
    finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
+   **If it comes back at once with a non-zero code and a line naming the mailbox**
+   (`…/.moai/mail: …`), the mailbox cannot be opened — a link the repository holds points
+   out of the checkout — and waiting again will not open it, so do not run it again. A
+   letter to the supervisor is refused the same way: tell the person watching this window
+   (*Ask the person watching*) and stop.
    Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
    Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
    minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
@@ -5082,6 +5087,11 @@ sys.exit(1 if bad else 0)
         assert!(said < waits, "일꾼이 출석하기 전에 기다린다 — 감독이 그 일꾼을 못 찾는다");
         assert!(loop_.contains("`idle`"), "기다리는 동안 idle 로 선다는 말이 없다");
         assert!(loop_.contains("one short turn of tokens"), "기다림의 값을 안 밝힌다");
+        // **못 연 우편함 앞에서는 다시 안 건다**(moai-bkn4.yo1) — moai-kxkw 뒤로 그 기다림은 곧장 비영으로 돌아와, "빈
+        // 기다림이면 다시 건다" 만 읽은 일꾼은 쉬지 않고 돈다. 감독에게 보내는 편지도 같은 거절이라 창의 사람에게 이른다.
+        let shut = loop_.find("a line naming the mailbox").expect("못 연 우편함에서 멈추라는 말이 없다");
+        assert!(loop_[shut..].contains("do not run it again"), "못 연 우편함 앞에서 기다림을 다시 건다");
+        assert!(loop_[shut..].contains("*Ask the person watching*"), "못 연 우편함을 창의 사람에게 안 알린다");
         // 보고는 편지다 — 일꾼이 SendMessage 로 보고하면 Claude 밖의 감독에게 안 닿는다.
         assert!(brief.contains("moai send <supervisor> 'report: <epic>'"), "일꾼이 보고를 편지로 안 보낸다");
         assert!(!brief.contains("SendMessage"), "일꾼의 걸음이 Claude 의 SendMessage 에 기댄다");
