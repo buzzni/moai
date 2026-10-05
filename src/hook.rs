@@ -8534,10 +8534,12 @@ fn shelving_closes<'a>(
 /// 스킬(`.agents/skills/`)과 Antigravity 의 도구 설정(`hooks.json`·`rules/`)이 서는 곳이다. 세던 판은 Claude 세션이
 /// `.claude/moai-plugin/skills/moai/SKILL.md` 를 고치면 지나가고 같은 글인 `.agents/skills/moai/SKILL.md` 를 고치면
 /// 막았다(리뷰 moai-xs2h.dir 7번). 그 자리의 `hooks.json`·`rules/` 를 고치는 일도 규칙 2 밖으로 나가는 것을
-/// 받아들였다 — `.claude/settings.json` 이 이미 그렇다. **Codex 의 훅(`.codex/hooks.json`)은 아직 센다** — 같은 결의
-/// 자리지만 그 결정은 `.agents` 만 댔다(리뷰 moai-54yc.vqe). 규칙 2 의 글(`guide::rules`)이 `.git`·`node_modules` 밖의
-/// 이 목록을 댄다 — 한쪽만 고치면 `rule_two_names_every_directory_it_skips` 가 붉어진다.
-const SKIP: &[&str] = &[".moai", ".claude", ".agents", ".worktrees", ".git", "target", "node_modules"];
+/// 받아들였다 — `.claude/settings.json` 이 이미 그렇다. **`.codex/` 도 같은 자리다**(2026-10-05 사용자 결정, moai-kr16) —
+/// Codex 의 훅(`.codex/hooks.json`)과 설정(`config.toml`)이 서는 곳으로 `.agents/hooks.json` 과 같은 일을 한다. `.agents`
+/// 만 더한 판은 아무것도 안 쥔 채 `.codex/hooks.json` 을 고치면 막고 `.agents/hooks.json` 은 보냈다(리뷰 moai-54yc.vqe
+/// 10번). 규칙 2 의 글(`guide::rules`)이 `.git`·`node_modules` 밖의 이 목록을 댄다 — 한쪽만 고치면
+/// `rule_two_names_every_directory_it_skips` 가 붉어진다.
+const SKIP: &[&str] = &[".moai", ".claude", ".agents", ".codex", ".worktrees", ".git", "target", "node_modules"];
 
 /// 이 파일을 고치는 것이 일에 매여야 하는가 — **글자로 이미 푼 자리를 받는다**(moai-ln11).
 ///
@@ -11912,6 +11914,8 @@ mod tests {
             // `.claude/` 와 같은 도구 설정 자리다(moai-54yc.cq2) — 같은 스킬 글이 한쪽에서만 막혔다.
             "/repo/.agents/skills/moai/SKILL.md",
             "/repo/.agents/hooks.json",
+            // Codex 의 훅 파일도 같은 일을 한다(moai-kr16) — `.agents/hooks.json` 만 지나던 판이 있었다.
+            "/repo/.codex/hooks.json",
             "/repo/target/debug/x",
             "/tmp/scratch/memo.md",
             "/other/repo/src/main.rs",

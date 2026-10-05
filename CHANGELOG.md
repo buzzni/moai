@@ -237,12 +237,13 @@ does not tag — see `CONTRIBUTING.md`.
   `.gitignore` and keeps the old line for worktrees still standing in the old
   place, and hook rule 2 does not count an edit under `.worktrees/` as the
   root's work.
-- **Hook rule 2 does not count an edit under `.agents/`**, as it already did
-  not for `.claude/` — the skills Codex and Antigravity read
-  (`.agents/skills/`) and Antigravity's hooks file stand there. Editing
-  `.claude/moai-plugin/skills/moai/SKILL.md` passed while the same text under
-  `.agents/skills/` was refused until an issue was picked up. Codex's own
-  `.codex/` still counts.
+- **Hook rule 2 does not count an edit under `.agents/` or `.codex/`**, as it
+  already did not for `.claude/` — the skills Codex and Antigravity read
+  (`.agents/skills/`), Antigravity's hooks file and Codex's own hooks file and
+  config stand there. Editing `.claude/moai-plugin/skills/moai/SKILL.md` passed
+  while the same text under `.agents/skills/` was refused until an issue was
+  picked up, and `.codex/hooks.json` was refused where `.agents/hooks.json`
+  passed.
 - **The AGENTS block no longer offers `ready --json` as a loop that runs
   without a person.** It now says a session a person opened reads that shape to
   choose its next row, and that moai never launches or drives a session itself.

@@ -276,8 +276,9 @@ gets through — run it as given. None of them waits on a person except rule 5.
    (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
    a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
-   the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.worktrees/`,
-   `.git/`, `target/`, `node_modules/`, and anything outside the repository
+   the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.codex/`,
+   `.worktrees/`, `.git/`, `target/`, `node_modules/`, and anything outside the
+   repository
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
