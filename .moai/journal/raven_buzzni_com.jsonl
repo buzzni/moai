@@ -4514,3 +4514,10 @@
 {"ts":"2026-10-05T09:31:45Z","id":"moai-kxkw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-05): v0.7.0 에 싣는다 — 우편함은 이 판에 새로 든 코드이고 moai-ml0d 가 막은 것과 같은 꼴의 보안 버그다. src/mail.rs·src/cmd/agents.rs 를 moai-nas5 가 쥐고 있어 그 머지 뒤에 보낸다"}
 {"ts":"2026-10-05T09:31:45Z","id":"moai-4qtw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-05): v0.7.0 에서 고친다. src/mail.rs 를 moai-nas5 가 쥐고 있어 그 머지 뒤에 보낸다"}
 {"ts":"2026-10-05T09:31:45Z","id":"moai-y2uy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-05): v0.7.0 에서 고친다. src/cmd/agents.rs 를 moai-nas5 가 쥐고 있어 그 머지 뒤에 보낸다"}
+{"ts":"2026-10-05T09:32:08Z","id":"moai-dp35","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 싣는 칸을 한 표로 쥔다"}
+{"ts":"2026-10-05T09:32:08Z","id":"moai-dp35.uy8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이벤트가 싣는 칸을 한 표로 — 편지 자리와 훅의 답이 읽는다"}
+{"ts":"2026-10-05T09:32:08Z","id":"moai-dp35.t8d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"심는 Codex 파일의 맥락 상한을 그 표에서 읽는다"}
+{"ts":"2026-10-05T09:32:08Z","id":"moai-dp35","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-i1rz 에서 펼쳤다 — Codex 에 맥락을 싣는 이벤트를 훅의 답과 심은 파일이 한 표로 쥔다"}
+{"ts":"2026-10-05T09:32:08Z","id":"moai-i1rz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dp35 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-10-05T09:32:13Z","id":"moai-dp35.uy8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T09:32:13Z","id":"moai-dp35.t8d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
