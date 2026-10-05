@@ -27,6 +27,12 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     // 빈 끝의 말은 **거르기 전에 줄이 있었는가**로 가른다(리뷰 moai-snyk.nic) — 아무도 없으면 거르개를 줬어도 등록하는
     // 길(`moai hello`)을 대는 말이 맞다. 감독의 2 가 빈손일 때 사람이 보는 자리다.
     let registered = !agents.is_empty();
+    // **20분 넘게 조용한 Codex 장은 떠난 것으로 보인다**(2026-10-05 사용자 결정, moai-j3n5) — 지우지 않고 상태만 그때 잰
+    // 낱말로 바꿔 보인다(파일은 안 고친다). `--status idle` 이 그 장을 안 내니 감독이 떠난 일꾼에게 일감을 안 보낸다.
+    let now = crate::model::now();
+    for p in agents.iter_mut().filter(|p| p.stale(&now)) {
+        p.status = mail::GONE.to_string();
+    }
     let want = |given: &Option<String>, have: &str| given.as_deref().is_none_or(|w| w.trim() == have);
     agents.retain(|p| want(&args.role, &p.role) && want(&args.status, &p.status));
     for g in &garbled {
@@ -202,12 +208,7 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             .then(|| mail::claude_session_name(proc.pid))
             .flatten()
             .or_else(|| mail::name_with(if vendor.is_empty() { "agent" } else { &vendor }, &proc.pid.to_string())),
-        Agent::Codex(session) => session.as_deref().and_then(|s| {
-            let alnum = |n: usize| s.chars().filter(char::is_ascii_alphanumeric).take(n).collect::<String>();
-            let taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && !p.gone());
-            let base = mail::name_with("codex", &alnum(8))?;
-            if taken(&base) { mail::name_with(&base, &alnum(usize::MAX)) } else { Some(base) }
-        }),
+        Agent::Codex(session) => session.as_deref().and_then(|s| mail::codex_name(&all, s)),
     };
     let name = match args.name.clone().or(told).or_else(|| before.as_ref().map(|p| p.name.clone())).or_else(generated) {
         Some(name) => name,

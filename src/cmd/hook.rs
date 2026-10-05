@@ -1274,7 +1274,7 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
         [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| mail::name_with(&name, tail)).find(|n| !taken(n))
     };
     if dialect == Dialect::Codex {
-        return Some(fresh(free(mail::name_with("codex", &short)?)?, "codex", 0, None, (None, None)));
+        return Some(fresh(mail::codex_name(&all, session)?, "codex", 0, None, (None, None)));
     }
     let ancestors = mail::ancestors();
     let (agent, vendor) = match mail::agent_among(&ancestors) {
@@ -1348,9 +1348,7 @@ fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
         p.status = status.to_string();
         p.since = now.clone();
     }
-    if p.pid == 0 {
-        p.seen = Some(now);
-    }
+    p.stamp(&now);
     let _ = mail::write_presence(&repo.agents_dir(), &p);
 }
 

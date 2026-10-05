@@ -24811,8 +24811,9 @@ fn codex_sessions_opened_in_the_same_minute_keep_their_own_cards() {
 
 /// **Codex 의 장은 닻으로 산 것을 잰다**(2026-10-04 사용자 결정, moai-j3n5) — 그 장은 pid 를 몰라 세션이 죽으면 `idle` 로
 /// 영영 남았고, `send any-idle-worker --wake` 가 그 죽은 장을 골라 산 일꾼을 안 깨웠다. 훅이 돌 때(도구 부름도)와 기다리는
-/// 동안 닻을 적고, 20분 넘게 안 적힌 장은 깨우기가 건너뛰고 `moai agents` 가 걷는다. **걷어도 그 이름 앞의 편지는 남는다**
-/// — 그 세션이 돌아오면 같은 이름을 다시 받아 편지가 실린다.
+/// 동안 닻을 적고, 20분 넘게 안 적힌 장은 깨우기와 `--status idle` 이 건너뛰고 `moai agents` 가 `gone` 으로 보인다.
+/// **지우지는 않는다**(2026-10-05 사용자 결정) — 돌아온 세션은 역할과 편지를 그대로 받는다. 지우는 것은 하루 넘게 안 적힌
+/// 장이고, 그때도 그 이름 앞의 편지는 남는다.
 #[test]
 fn a_codex_card_not_written_for_twenty_minutes_is_gone() {
     let s = init("codex-anchor");
@@ -24831,6 +24832,7 @@ fn a_codex_card_not_written_for_twenty_minutes_is_gone() {
     codex("session-start", &recorded(&s, "codex/session-start.json"), &at(0));
     let card = s.path().join(".moai/agents/codex-01a107b4.json");
     assert!(std::fs::read_to_string(&card).unwrap().contains(&format!("\"seen\":\"{}\"", at(0))), "닻을 안 적었다");
+    ok(s.path(), &["hello", "--as", "codex-01a107b4", "--role", "worker"]);
     ok(s.path(), &["send", "codex-01a107b4", "기다리는 일감", "--as", "boss"]);
     // 도구만 부르는 긴 턴도 닻을 다시 적는다 — 15분에 적은 닻은 30분에 산 것이다.
     codex("pre-tool-use", &recorded(&s, "codex/pre-tool-use-bash.json"), &at(15));
@@ -24839,15 +24841,22 @@ fn a_codex_card_not_written_for_twenty_minutes_is_gone() {
         "도구 부름이 닻을 안 적었다"
     );
     assert!(moai_at(&at(30), &["agents", "--json"]).contains("\"swept\":[]"), "산 Codex 장을 걷었다");
-    // 36분 — 21분 넘게 안 적혔다. 깨우기는 그 장을 안 고르고, `moai agents` 가 걷는다.
+    // 36분 — 21분 넘게 안 적혔다. 깨우기와 `--status idle` 은 그 장을 건너뛰고, `moai agents` 는 지우지 않고 gone 으로 보인다.
     let woke = moai_at(&at(36), &["send", "any-idle-worker", "다른 일감", "--wake", "--as", "boss", "--json"]);
     assert!(woke.contains("\"why\":\"nobody\""), "떠난 Codex 장을 깨우려 했다 — {woke}");
-    assert!(moai_at(&at(36), &["agents", "--json"]).contains("\"swept\":[\"codex-01a107b4\"]"), "낡은 장을 안 걷었다");
+    let listed = moai_at(&at(36), &["agents", "--json"]);
+    assert!(
+        listed.contains("\"swept\":[]") && listed.contains("\"status\":\"gone\""),
+        "조용한 장을 걷었거나 안 감췄다 — {listed}"
+    );
+    let idle = moai_at(&at(36), &["agents", "--role", "worker", "--status", "idle", "--json"]);
+    assert!(idle.starts_with("{\"agents\":[]"), "떠난 일꾼을 노는 일꾼으로 냈다 — {idle}");
+    assert!(!std::fs::read_to_string(&card).unwrap().contains("\"status\":\"gone\""), "보이는 상태를 파일에 적었다");
     assert!(
         ok(s.path(), &["inbox", "--as", "boss", "--json"]).contains("\"letters\":[]"),
-        "닻이 낡은 장의 편지를 되돌렸다"
+        "조용한 장의 편지를 되돌렸다"
     );
-    // 그 세션이 돌아오면 같은 이름을 다시 받고 편지가 실린다.
+    // 그 세션이 돌아오면 역할을 그대로 들고 편지가 실린다.
     let back = hook_argv(
         &s,
         s.path(),
@@ -24857,6 +24866,15 @@ fn a_codex_card_not_written_for_twenty_minutes_is_gone() {
         &recorded(&s, "codex/user-prompt-submit.json"),
     );
     assert!(String::from_utf8(back.stdout).unwrap().contains("기다리는 일감"), "돌아온 세션에 편지가 안 실렸다");
+    assert!(std::fs::read_to_string(&card).unwrap().contains("\"role\":\"worker\""), "돌아온 세션이 역할을 잃었다");
+    // 하루 넘게 안 적히면 지운다 — 그 이름 앞의 편지는 남는다.
+    ok(s.path(), &["send", "codex-01a107b4", "하루 뒤의 편지", "--as", "boss"]);
+    let later = moai_at("2026-09-12T05:00:03Z", &["agents", "--json"]);
+    assert!(later.contains("\"swept\":[\"codex-01a107b4\"]"), "하루 넘게 조용한 장을 안 지웠다 — {later}");
+    assert!(
+        ok(s.path(), &["inbox", "--as", "codex-01a107b4", "--json"]).contains("하루 뒤의 편지"),
+        "지운 장의 편지를 되돌렸다"
+    );
 }
 
 /// **서브에이전트는 부모 세션의 이름으로 우편함을 안 만진다**(2026-10-04 사용자 결정, moai-ew4o.4fv) — 서브에이전트의

@@ -2396,9 +2396,11 @@ Options:
   comes. A row whose process is gone is swept here - on Linux a reused pid is
   told apart by the time the process started - and the letters left unread
   for it go back to their senders. A Codex row has no process to look at:
-  its hooks and its waits write `seen`, and once nothing has written it for
-  20 minutes it is swept (its letters wait for that session to come back).
-  Any other row that cannot be told alive or gone stays.
+  its hooks and its waits write `seen`. Once nothing has written it for 20
+  minutes its status reads gone - --status idle and --wake pass it over -
+  but it stays, role and name included, for that session to come back to.
+  After a day it is swept, and its letters wait for that session. Any other
+  row that cannot be told alive or gone stays.
 
   --role and --status keep the rows whose word is exactly that one. A row a
   hook registered carries no role until the agent says `moai hello --role`.
@@ -2407,7 +2409,8 @@ Options:
   --json gives {"agents":[{"v","name","vendor","model","role","status",
   "since","pid","pid_start","session","cwd","tmux_pane","tmux_socket",
   "seen"}],"swept":[names]}. pid_start, session, the two tmux keys and seen
-  are absent when they are not known.
+  are absent when they are not known. status is busy, idle, or gone for a
+  Codex row nothing wrote for 20 minutes.
 ```
 
 ## `moai hello`

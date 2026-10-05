@@ -153,7 +153,7 @@ pub struct Letter {
     pub rest: BTreeMap<String, serde_json::Value>,
 }
 
-/// 우편함에 선 편지 — 파일 이름에서 읽은 id, 든 함, 읽었으면 읽은 이.
+/// 우편함에 선 편지 — 파일 이름에서 읽은 id 와 되돌아온 표, 든 함, 읽었으면 읽은 이.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stored {
     pub id: String,
@@ -161,6 +161,10 @@ pub struct Stored {
     pub mailbox: String,
     /// 읽은 이 — 안 읽었으면 `None`. `<함>/read/<id>@<읽은 이>.json` 의 뒤쪽이다.
     pub reader: Option<String>,
+    /// 되돌아온 편지인가 — 받는 이가 읽기 전에 떠나 보낸 이의 함으로 돌아왔다([`retire`]). **파일 이름의 표다**
+    /// (`<id>.returned.json`, 2026-10-05 사용자 결정) — 편지에 적힌 이름으로 알아내던 판은 이름을 바꾸면 표가 틀리거나
+    /// 빠졌다(리뷰 moai-ew4o.q9f 10·11번).
+    pub returned: bool,
     pub letter: Letter,
 }
 
@@ -170,10 +174,24 @@ impl Stored {
         self.mailbox == ANY_IDLE_WORKER
     }
 
-    /// 되돌아온 편지인가 — 보낸 이의 함에 든, 남에게 쓴 편지다([`retire`]). 이름을 바꾼 에이전트에게 따라간 편지
-    /// ([`carry`])도 적힌 `to` 가 함과 다르지만, 보낸 이가 남이라 되돌아온 것이 아니다.
-    pub fn returned(&self) -> bool {
-        self.letter.to != self.mailbox && self.letter.from == self.mailbox
+    /// 이 편지가 함에 선 파일 이름.
+    fn file(&self) -> String {
+        format!("{}{}.json", self.id, mark(self.returned))
+    }
+}
+
+/// 되돌아온 편지의 표 — 파일 이름에서 id 뒤, `.json` 앞에 선다. id 에는 `.` 가 없어 갈린다.
+const RETURNED: &str = ".returned";
+
+fn mark(returned: bool) -> &'static str {
+    if returned { RETURNED } else { "" }
+}
+
+/// 함에 선 파일 이름(`.json` 을 뗀 것)을 id 와 되돌아온 표로 가른다 — 편지 꼴이 아니면 `None` 이다.
+fn letter_stem(stem: &str) -> Option<(&str, bool)> {
+    match stem.strip_suffix(RETURNED) {
+        Some(id) if is_id(id) => Some((id, true)),
+        _ => is_id(stem).then_some((stem, false)),
     }
 }
 
@@ -223,7 +241,7 @@ fn send_from(dir: &Path, letter: &Letter, clock: &mut dyn FnMut() -> u64) -> std
     text.push('\n');
     let tmp = temp_in(&held);
     write_new(&tmp, text.as_bytes(), true)?;
-    let placed = place(&held, &letter.sent_at, None, clock, &mut |at| match std::fs::hard_link(&tmp, at) {
+    let placed = place(&held, &letter.sent_at, None, false, clock, &mut |at| match std::fs::hard_link(&tmp, at) {
         Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => {
             if at.exists() {
                 Err(e)
@@ -254,10 +272,14 @@ fn send_from(dir: &Path, letter: &Letter, clock: &mut dyn FnMut() -> u64) -> std
 /// 마이크로초에 시작한 이웃이 먼저 들인 편지가 그사이 읽혀 나가면 그대로 다시 들어가 한 id 가 두 편지에 선다.
 /// 둘째 편지를 같은 이가 읽으면 [`take`] 의 `rename` 이 첫 편지의 `read/` 파일을 말없이 덮는다. 들이기 바로 앞에
 /// 지으면 그 틈이 시스템 호출 하나 너비로 준다. 다시 들 때는 시계가 안 갔어도 하나 올린다.
+///
+/// `returned` 면 되돌아온 표를 단 이름(`<id>.returned.json`)으로 든다. **표가 다른 같은 id 도 선 것으로 친다** — 한 함 안의
+/// id 는 하나다(모듈 머리글).
 fn place(
     held: &Path,
     sent_at: &str,
     first: Option<&str>,
+    returned: bool,
     clock: &mut dyn FnMut() -> u64,
     put: &mut dyn FnMut(&Path) -> std::io::Result<()>,
 ) -> std::io::Result<String> {
@@ -273,7 +295,10 @@ fn place(
                 mint(sent_at, micros)
             }
         };
-        match put(&held.join(format!("{id}.json"))) {
+        if std::fs::symlink_metadata(held.join(format!("{id}{}.json", mark(!returned)))).is_ok() {
+            continue;
+        }
+        match put(&held.join(format!("{id}{}.json", mark(returned)))) {
             Ok(()) => return Ok(id),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
@@ -330,12 +355,18 @@ pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>)
             continue;
         }
         for (path, stem) in json_files(&at.join("read")) {
-            let Some((id, reader)) = stem.split_once('@') else { continue };
-            if !is_id(id) || reader != me || !is_name(reader) {
+            let Some((head, reader)) = stem.split_once('@') else { continue };
+            let Some((id, returned)) = letter_stem(head) else { continue };
+            if reader != me || !is_name(reader) {
                 continue;
             }
-            let stored =
-                |letter| Stored { id: id.to_string(), mailbox: held.to_string(), reader: Some(me.into()), letter };
+            let stored = |letter| Stored {
+                id: id.to_string(),
+                mailbox: held.to_string(),
+                reader: Some(me.into()),
+                returned,
+                letter,
+            };
             match read_json::<Letter>(&path) {
                 Ok(Some(letter)) => letters.push(stored(letter)),
                 Ok(None) => {}
@@ -352,11 +383,11 @@ fn unread_in(at: &Path, held: &str) -> (Vec<Stored>, Vec<Garbled>) {
     let mut letters = Vec::new();
     let mut garbled = Vec::new();
     for (path, stem) in json_files(at) {
-        if !is_id(&stem) {
-            continue;
-        }
+        let Some((id, returned)) = letter_stem(&stem) else { continue };
         match read_json::<Letter>(&path) {
-            Ok(Some(letter)) => letters.push(Stored { id: stem, mailbox: held.to_string(), reader: None, letter }),
+            Ok(Some(letter)) => {
+                letters.push(Stored { id: id.to_string(), mailbox: held.to_string(), reader: None, returned, letter })
+            }
             Ok(None) => {}
             Err(why) => garbled.push(Garbled { path, why, mailbox: Some(held.to_string()) }),
         }
@@ -397,7 +428,8 @@ pub enum Took {
     Lost,
 }
 
-/// 편지를 읽음으로 옮긴다 — `rename` 하나다(모듈 머리글). 먼저 옮긴 쪽만 [`Took::Mine`] 을 받는다.
+/// 편지를 읽음으로 옮긴다 — `rename` 하나다(모듈 머리글). 먼저 옮긴 쪽만 [`Took::Mine`] 을 받는다. 되돌아온 편지는 그
+/// 표를 읽은 이 앞에 들고 간다(`read/<id>.returned@<읽은 이>.json`) — 읽은 이의 이름에는 `.` 가 들 수 있어 뒤에 못 단다.
 ///
 /// **읽고 지우는 두 걸음으로 바꾸지 않는다** — 둘이 같이 읽고 같이 지우면 한 편지가 두 세션에 실린다.
 /// 겨루기 시험 둘(`tests/cli.rs` 의 `concurrent_acks_deliver_each_letter_once`·`an_open_letter_goes_to_exactly_one_worker`)이
@@ -409,8 +441,8 @@ pub fn take(dir: &Path, stored: &Stored, reader: &str) -> std::io::Result<Took> 
     let held = mailbox(dir, &stored.mailbox);
     let read = held.join("read");
     std::fs::create_dir_all(&read)?;
-    let id = &stored.id;
-    match std::fs::rename(held.join(format!("{id}.json")), read.join(format!("{id}@{reader}.json"))) {
+    let read_as = format!("{}{}@{reader}.json", stored.id, mark(stored.returned));
+    match std::fs::rename(held.join(stored.file()), read.join(read_as)) {
         Ok(()) => Ok(Took::Mine),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Took::Lost),
         Err(e) => Err(e),
@@ -430,6 +462,7 @@ pub fn take(dir: &Path, stored: &Stored, reader: &str) -> std::io::Result<Took> 
 ///   이름을 받는 세션의 것이다. 되돌리는 때는 장이 떠난 때지 편지가 온 때가 아니다
 /// - **제가 쓴 편지와 되돌아온 편지는 떠난 이가 읽은 것으로 둔다** — 보낸 이가 곧 떠난 이라 돌려보낼 곳이 없다
 /// - 깨진 편지는 그대로 둔다 — 보낸 이를 모른다
+/// - 돌려보낸 편지는 보낸 이의 함에 **되돌아온 표**를 달고 든다([`Stored::returned`])
 pub fn retire(dir: &Path, name: &str) -> usize {
     let at = mailbox(dir, name);
     let (letters, _) = unread_in(&at, name);
@@ -437,12 +470,12 @@ pub fn retire(dir: &Path, name: &str) -> usize {
     let mut returned = 0;
     for s in letters {
         let from = s.letter.from.as_str();
-        if from == name || !is_agent_name(from) {
+        if s.returned || from == name || !is_agent_name(from) {
             let _ = take(dir, &s, name);
             continue;
         }
-        let (path, into) = (at.join(format!("{}.json", s.id)), mailbox(dir, from));
-        if matches!(relocate(&path, &into, &s.id, &s.letter.sent_at), Ok(Some(_))) {
+        let (path, into) = (at.join(s.file()), mailbox(dir, from));
+        if matches!(relocate(&path, &into, &s.id, true, &s.letter.sent_at), Ok(Some(_))) {
             returned += 1;
             if !touched.contains(&into) {
                 touched.push(into);
@@ -461,7 +494,7 @@ pub fn carry(dir: &Path, old: &str, new: &str) {
     let (letters, _) = unread_in(&at, old);
     let mut moved = false;
     for s in letters {
-        moved |= matches!(relocate(&at.join(format!("{}.json", s.id)), &into, &s.id, &s.letter.sent_at), Ok(Some(_)));
+        moved |= matches!(relocate(&at.join(s.file()), &into, &s.id, s.returned, &s.letter.sent_at), Ok(Some(_)));
     }
     if moved {
         sync_dir(&into);
@@ -488,7 +521,7 @@ pub fn migrate(dir: &Path) {
         let Some(to) = addressee(&path).filter(|to| is_name(to)) else { continue };
         let sent_at = read_json::<Letter>(&path).ok().flatten().map(|l| l.sent_at).unwrap_or_default();
         let into = mailbox(dir, &to);
-        if matches!(relocate(&path, &into, &stem, &sent_at), Ok(Some(_))) {
+        if matches!(relocate(&path, &into, &stem, false, &sent_at), Ok(Some(_))) {
             moved(into);
         }
     }
@@ -511,9 +544,9 @@ pub fn migrate(dir: &Path) {
 /// 편지 하나를 다른 함으로 옮긴다 — **덮지 않는다**([`move_new`]). 그 함에 같은 id 가 서 있으면 다음 id 로 든다 —
 /// id 는 한 함 안에서만 겹치지 않는다(모듈 머리글). 옮긴 id 를 내고, 옮기기 전에 남이 가졌으면(읽었거나 먼저
 /// 옮겼으면) `None` 이다. **그 함의 이름표는 안 내려 쓴다** — 여럿을 옮기는 쪽이 다 옮긴 뒤 한 번 쓴다([`place`]).
-fn relocate(from: &Path, into: &Path, id: &str, sent_at: &str) -> std::io::Result<Option<String>> {
+fn relocate(from: &Path, into: &Path, id: &str, returned: bool, sent_at: &str) -> std::io::Result<Option<String>> {
     std::fs::create_dir_all(into)?;
-    match place(into, sent_at, Some(id), &mut clock_micros, &mut |at| move_new(from, at)) {
+    match place(into, sent_at, Some(id), returned, &mut clock_micros, &mut |at| move_new(from, at)) {
         Ok(id) => Ok(Some(id)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
@@ -627,7 +660,20 @@ pub struct Presence {
 /// 프로세스를 모르는 장이 이만큼(초) 넘게 안 적혔으면 떠난 것으로 본다(2026-10-04 사용자 결정, moai-j3n5) — 20분이다.
 /// Codex 의 장은 pid 를 몰라(훅이 세션 여럿이 함께 쓰는 데몬 밑에서 돈다, moai-sile) 세션이 죽거나 `SessionEnd` 가 짧은
 /// 상한을 넘기면 `idle` 로 영영 남았고, `send any-idle-worker --wake` 가 그 죽은 장을 골라 산 일꾼을 안 깨웠다.
+///
+/// **떠난 것으로 볼 뿐 지우지 않는다**(2026-10-05 사용자 결정, 리뷰 moai-ew4o.q9f 1·3번) — 깨우기·`--status idle`·이름
+/// 겨루기가 건너뛰고 `moai agents` 가 [`GONE`] 으로 보이지만, 장(역할·`hello --name` 의 이름)과 함은 남아 그 세션의 다음
+/// 훅에 살아난다. 지우던 판은 돌아온 감독이 역할을 잃고 `any-idle-worker` 일감을 가졌고, 같은 65초 안에 연 두 세션이
+/// 지워진 뒤 돌아오면 먼저 온 쪽이 남의 편지를 받았다. 지우는 것은 [`EXPIRE_AFTER`] 넘게 안 적힌 장이다.
 pub const STALE_AFTER: i64 = 20 * 60;
+
+/// 프로세스를 모르는 장이 이만큼(초) 넘게 안 적혔으면 `moai agents` 가 지운다 — 하루다(같은 결정). 그 세션은 끝났는데
+/// `SessionEnd` 가 안 왔거나(죽었다·짧은 상한을 넘겼다) 하루 넘게 아무것도 안 한 것이다. 그 함은 그대로 둔다 — 그 세션이
+/// 돌아오면 Codex 의 이름은 세션 id 에서 지어 같은 이름을 다시 받는다.
+pub const EXPIRE_AFTER: i64 = 24 * 60 * 60;
+
+/// [`STALE_AFTER`] 넘게 안 적힌 장을 `moai agents` 가 보이는 상태 — 파일에는 안 적는다(보는 쪽이 그때 잰다).
+pub const GONE: &str = "gone";
 
 /// 닻을 이만큼(초)마다 다시 적는다 — 도구 부름마다 장을 다시 쓰지 않으려고 둔다. [`STALE_AFTER`] 보다 한참 짧다.
 pub const SEEN_EVERY: i64 = 60;
@@ -661,24 +707,39 @@ impl Presence {
     /// 훅이 그 판을 부르는 동안)는 장을 고쳐 적어도 `seen` 을 모르는 키로 그대로 옮기고 `since` 만 새로 댄다. 닻만 보던
     /// 판은 그 훅이 도는 산 장을 새 판의 `hello` 가 닻을 적은 지 20분 뒤에 걷었다. 닻이 없는 장도 이 자로 `since` 다.
     pub fn stale(&self, now: &str) -> bool {
+        self.quiet(now).is_some_and(|secs| secs > STALE_AFTER)
+    }
+
+    /// 지울 때가 되었는가 — 프로세스를 모르는 장이 [`EXPIRE_AFTER`] 넘게 안 적혔다([`sweep`]).
+    pub fn expired(&self, now: &str) -> bool {
+        self.quiet(now).is_some_and(|secs| secs > EXPIRE_AFTER)
+    }
+
+    /// 프로세스를 모르는 장이 몇 초째 안 적혔나 — 닻과 `since` 가운데 늦은 쪽부터 잰다. 프로세스를 아는 장이거나 못
+    /// 읽으면 `None` 이다(모른다).
+    fn quiet(&self, now: &str) -> Option<i64> {
         if self.pid != 0 {
-            return false;
+            return None;
         }
         let at = [self.seen.as_deref(), Some(self.since.as_str())]
             .into_iter()
             .flatten()
             .filter_map(crate::model::parse_rfc3339)
-            .max();
-        match (crate::model::parse_rfc3339(now), at) {
-            (Some(now), Some(at)) => now - at > STALE_AFTER,
-            _ => false,
-        }
+            .max()?;
+        Some(crate::model::parse_rfc3339(now)? - at)
     }
 
     /// 그 에이전트가 떠났다고 보는가 — 프로세스가 죽었거나 닻이 낡았다. **모르면 아니다.** 걷기·깨우기·이름 겨루기가
     /// 이 하나로 잰다.
     pub fn gone(&self) -> bool {
         self.dead() || self.stale(&crate::model::now())
+    }
+
+    /// 닻을 적는다 — 프로세스를 모르는 장에만(moai-j3n5). 장을 쓰는 자리(훅·`hello`·기다림)가 이 하나로 적는다.
+    pub fn stamp(&mut self, now: &str) {
+        if self.pid == 0 {
+            self.seen = Some(now.to_string());
+        }
     }
 
     /// 닻을 다시 적을 때가 되었는가 — 프로세스를 모르는 장이고 닻이 [`SEEN_EVERY`] 넘게 묵었다.
@@ -762,11 +823,10 @@ pub fn presences(dir: &Path) -> (Vec<Presence>, Vec<Garbled>) {
 
 /// 떠난 출석을 걷는다 — 걷은 이름을 낸다. **산지 모르는 것은 안 걷는다**([`alive`] 가 `None`, 닻이 아직 산 장).
 ///
-/// **프로세스가 죽은 장은 그 함도 비운다**([`retire`]) — 안 읽은 편지가 보낸 이에게 되돌아간다. **닻이 낡아 걷은 장의
-/// 함은 그대로다** — 프로세스를 모르니 그 세션이 살아 돌아올 수 있고, Codex 의 이름은 세션 id 에서 지어 돌아온 세션이
-/// 대개 같은 이름을 다시 받는다. 다만 장과 함께 그 세션에 매인 것도 걷힌다 — 역할과 `hello --name` 이 준 이름을 잃고
-/// 돌아온 세션은 역할 없는 `codex-<8자>` 로 다시 서며, 장이 없으니 그 이름을 넘겨받는 세션([`take_over`])도 그 함을 못
-/// 비운다(리뷰 moai-ew4o.q9f — 고칠 길은 결정을 기다린다).
+/// **프로세스가 죽은 장은 그 함도 비운다**([`retire`]) — 안 읽은 편지가 보낸 이에게 되돌아간다. **프로세스를 모르는 장은
+/// 하루([`EXPIRE_AFTER`]) 넘게 안 적혔을 때만 걷고 그 함은 그대로 둔다** — 그 세션이 살아 돌아올 수 있다. 20분 넘게
+/// 조용한 장은 떠난 것으로 읽을 뿐 안 걷는다([`STALE_AFTER`], 2026-10-05 사용자 결정) — 역할과 이름이 남아야 돌아온
+/// 세션이 그대로 선다.
 ///
 /// **걷기 바로 앞에 장을 다시 읽는다**(리뷰 moai-ew4o.q9f) — 출석부를 한 번 읽고 이름으로 걷던 판은, 그 사이(앞선 장의
 /// 편지를 되돌리는 동안 길어진다) 같은 이름을 넘겨받은 새 세션의 장을 지우고 그 세션 앞으로 온 편지까지 보낸 이에게
@@ -781,7 +841,7 @@ fn sweep_from(dir: &Path, mail: &Path, all: Vec<Presence>, now: &str) -> Vec<Str
     let mut swept = Vec::new();
     for p in all {
         let dead = p.dead();
-        if !(dead || p.stale(now)) || !unchanged(dir, &p) || forget(dir, &p.name).is_err() {
+        if !(dead || p.expired(now)) || !unchanged(dir, &p) || forget(dir, &p.name).is_err() {
             continue;
         }
         if dead {
@@ -819,9 +879,20 @@ pub fn rename_card(dir: &Path, mail: &Path, presence: &Presence, old: &str) -> s
 /// **이어 쓰는 장(`keep`)은 넘겨받는 것이 아니다**(리뷰 moai-ew4o.q9f) — 제 장이 떠난 것으로 읽혀도(닻이 20분 넘게 묵은
 /// Codex 장, `hello --as` 로 이은 떠난 장) 그 함은 제 편지다. 안 빼던 판은 같은 세션이 다시 인사하는 것만으로 제 편지를
 /// 보낸 이에게 "읽기 전에 떠났다" 로 되돌렸다.
+///
+/// **새로 쥐는 이름의 함에 기다리던 되돌아온 편지는 앞사람의 것이다**(2026-10-05 사용자 결정, 리뷰 moai-ew4o.q9f 10번) —
+/// 둘 다 떠난 뒤 걷기가 보낸 이의 이름 앞으로 되돌린 편지는 아무 장도 안 쥔 함에 남는다. 그 이름을 받은 새 세션에
+/// "제가 보낸 편지가 되돌아왔다" 로 실리지 않게, 읽음으로 치운다. 이어 쓰는 장이 그 이름을 이미 쥐었으면 제 편지라 둔다.
 pub fn take_over(mail: &Path, all: &[Presence], name: &str, keep: Option<&str>) {
     for old in all.iter().filter(|p| p.name.eq_ignore_ascii_case(name) && keep != Some(p.name.as_str()) && p.gone()) {
         retire(mail, &old.name);
+    }
+    if keep.is_some_and(|k| k.eq_ignore_ascii_case(name)) {
+        return;
+    }
+    let (letters, _) = unread_in(&mailbox(mail, name), name);
+    for s in letters.iter().filter(|s| s.returned) {
+        let _ = take(mail, s, name);
     }
 }
 
@@ -834,8 +905,25 @@ pub fn keep_alive(dir: &Path, which: impl Fn(&Presence) -> bool) {
     if !p.due(&now) {
         return;
     }
-    p.seen = Some(now);
+    p.stamp(&now);
     let _ = write_presence(dir, &p);
+}
+
+/// Codex 세션의 장 이름 — `codex-<세션 id 앞 8자>`, 산 남이 쥐었으면 그 토막을 한 번 더, 그래도 쥐었으면 세션 id 를 통째로
+/// 잇는다. 훅([`crate::cmd::hook`] 의 `attendee`)과 `hello` 가 이 하나로 짓는다 — 따로 짓던 판은 잇는 토막의 차례가 갈려,
+/// 훅이 아직 장을 안 지은 창의 `hello` 가 훅과 다른 이름으로 섰다(리뷰 moai-ew4o.q9f).
+///
+/// **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고
+/// 65초 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같다. 토막은 상한에 안 잘리게 잇는다([`name_with`]).
+pub fn codex_name(all: &[Presence], session: &str) -> Option<String> {
+    let alnum = |n: usize| session.chars().filter(char::is_ascii_alphanumeric).take(n).collect::<String>();
+    let (short, whole) = (alnum(8), alnum(usize::MAX));
+    let taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && !p.gone());
+    let base = name_with("codex", &short)?;
+    if !taken(&base) {
+        return Some(base);
+    }
+    [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| name_with(&base, tail)).find(|n| !taken(n))
 }
 
 /// 이 프로세스의 조상 가운데 출석부에 선 에이전트 — **"나는 누구인가" 의 답이다.** 에이전트가 띄운 셸에서
@@ -1395,13 +1483,20 @@ mod tests {
             id: "x".into(),
             mailbox: ANY_IDLE_WORKER.into(),
             reader: None,
+            returned: false,
             letter: letter(ANY_IDLE_WORKER, "boss", "job"),
         };
         assert!(for_me(&open, "w1", ""));
         assert!(for_me(&open, "w1", "worker"));
         assert!(!for_me(&open, "boss", ""), "보낸 이가 제 편지를 받았다");
         assert!(!for_me(&open, "other", SUPERVISOR), "감독이 일감을 가졌다");
-        let named = Stored { id: "y".into(), mailbox: "w1".into(), reader: None, letter: letter("w1", "boss", "job") };
+        let named = Stored {
+            id: "y".into(),
+            mailbox: "w1".into(),
+            reader: None,
+            returned: false,
+            letter: letter("w1", "boss", "job"),
+        };
         assert!(for_me(&named, "w1", SUPERVISOR) && !for_me(&named, "w2", ""));
     }
 
@@ -1453,12 +1548,13 @@ mod tests {
         assert_eq!(vendor_of("bash"), None);
     }
 
-    /// 출석은 덮어 적고, 떠난 것만 걷는다 — 프로세스가 죽은 장과, 프로세스를 모르는데 닻이 낡은 장이다(moai-j3n5).
-    /// 닻이 아직 산 장(pid 0)은 남는다. **죽은 장의 편지는 보낸 이에게 돌아가고, 닻이 낡은 장의 편지는 남는다**
-    /// (moai-ew4o.l3n) — 프로세스를 모르는 세션은 살아 돌아와 같은 이름을 다시 받을 수 있다.
+    /// 출석은 덮어 적고, 걷는 것은 프로세스가 죽은 장과 프로세스를 모르는데 하루 넘게 안 적힌 장이다(moai-j3n5).
+    /// **20분 넘게 조용한 장은 떠난 것으로 읽을 뿐 남는다**(2026-10-05 사용자 결정) — 역할과 이름을 들고 그 세션을
+    /// 기다린다. **죽은 장의 편지는 보낸 이에게 되돌아온 표를 달고 돌아가고, 프로세스를 모르는 장의 편지는 남는다**
+    /// (moai-ew4o.l3n) — 그 세션은 살아 돌아와 같은 이름을 다시 받을 수 있다.
     #[test]
     #[cfg(target_os = "linux")]
-    fn the_sweep_takes_the_dead_and_the_stale() {
+    fn the_sweep_takes_the_dead_and_the_expired() {
         let s = Scratch::new("agents-sweep");
         let (agents, mail) = (s.path().join("agents"), s.path().join("mail"));
         let me = proc_of(std::process::id()).unwrap();
@@ -1471,7 +1567,7 @@ mod tests {
             model: String::new(),
             role: String::new(),
             status: IDLE.into(),
-            since: "2026-10-04T06:12:03Z".into(),
+            since: seen.clone().unwrap_or_else(|| "2026-10-04T06:12:03Z".into()),
             pid,
             pid_start: start,
             session: None,
@@ -1485,21 +1581,23 @@ mod tests {
         write_presence(&agents, &card("reused", me.pid, me.start.map(|t| t + 1), None)).unwrap();
         write_presence(&agents, &card("unknown", 0, None, ago(60))).unwrap();
         write_presence(&agents, &card("stale", 0, None, ago(STALE_AFTER + 1))).unwrap();
+        write_presence(&agents, &card("expired", 0, None, ago(EXPIRE_AFTER + 1))).unwrap();
         send(&mail, &letter("reused", "boss", "to the dead")).unwrap();
-        send(&mail, &letter("stale", "boss", "to the stale")).unwrap();
+        send(&mail, &letter("expired", "boss", "to the expired")).unwrap();
         let mut swept = sweep(&agents, &mail);
         swept.sort();
-        assert_eq!(swept, ["reused", "stale"]);
+        assert_eq!(swept, ["expired", "reused"]);
         let (left, _) = presences(&agents);
-        assert_eq!(left.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["live", "unknown"]);
+        assert_eq!(left.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["live", "stale", "unknown"]);
+        assert!(left.iter().any(|p| p.name == "stale" && p.gone()), "조용한 장을 떠난 것으로 안 읽었다");
         assert!(
             me_among(&left, std::slice::from_ref(&me)).is_some_and(|p| p.name == "live"),
             "조상의 pid 로 제 출석을 못 찾았다"
         );
         let (back, _) = list(&mail, "boss", false);
         assert_eq!(back.len(), 1, "죽은 이의 편지가 안 돌아왔다 — {back:?}");
-        assert!(back[0].returned() && back[0].letter.subject == "to the dead", "{back:?}");
-        assert_eq!(list(&mail, "stale", false).0.len(), 1, "닻이 낡은 이의 편지를 되돌렸다");
+        assert!(back[0].returned && back[0].letter.subject == "to the dead", "{back:?}");
+        assert_eq!(list(&mail, "expired", false).0.len(), 1, "프로세스를 모르는 이의 편지를 되돌렸다");
         assert!(list(&mail, "reused", false).0.is_empty(), "되돌린 편지가 떠난 이의 함에도 남았다");
     }
 
@@ -1537,7 +1635,7 @@ mod tests {
         take_over(&mail, &all, "W1", None);
         let (back, _) = list(&mail, "boss", false);
         assert_eq!(back.iter().map(|b| b.letter.subject.as_str()).collect::<Vec<_>>(), ["job"]);
-        assert!(back[0].returned(), "되돌아온 편지로 안 읽힌다");
+        assert!(back[0].returned, "되돌아온 편지로 안 읽힌다");
         let (left, _) = list(&mail, "w1", true);
         assert!(
             left.iter().all(|l| l.reader.as_deref() == Some("w1")),
@@ -1555,10 +1653,50 @@ mod tests {
         rename_card(&agents, &mail, &moved, "w1").unwrap();
         let (carried, _) = list(&mail, "w2", false);
         assert_eq!(carried.iter().map(|c| c.letter.subject.as_str()).collect::<Vec<_>>(), ["second"]);
-        assert!(!carried[0].returned());
+        assert!(!carried[0].returned);
         assert_eq!(presences(&agents).0.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["w2"]);
         // 인사 전에 보낸 편지는 아무도 안 쥔 이름 앞에 남는다.
         assert_eq!(list(&mail, "early", false).0.len(), 1);
+    }
+
+    /// **되돌아온 표는 파일 이름에 산다**(2026-10-05 사용자 결정, 리뷰 moai-ew4o.q9f 10·11번) — 이름으로 알아내던 판은
+    /// 받는 이가 보낸 이의 이름을 받으면 그 이에게 온 편지가 "되돌아왔다" 로 서고, 되돌아온 편지는 보낸 이가 이름을 바꾸면
+    /// 표를 잃었다. 둘 다 떠난 뒤 아무도 안 쥔 이름 앞으로 되돌린 편지는, 그 이름을 새로 받는 장에게 앞사람의 것이라
+    /// 읽음으로 치운다.
+    #[test]
+    fn the_returned_mark_lives_in_the_file_name() {
+        let s = Scratch::new("mail-returned-mark");
+        let mail = s.path();
+        // 받는 이(w2)가 보낸 이의 이름(boss)으로 바꿔도 그 편지는 되돌아온 것이 아니다.
+        send(mail, &letter("w2", "boss", "job")).unwrap();
+        carry(mail, "w2", "boss");
+        let (got, _) = list(mail, "boss", false);
+        assert_eq!(got.len(), 1);
+        assert!(!got[0].returned, "이름을 바꾼 받는 이의 편지를 되돌아온 것으로 읽었다");
+        // 되돌아온 편지는 보낸 이가 이름을 바꿔도 표를 들고 간다.
+        send(mail, &letter("gone1", "sup", "task")).unwrap();
+        retire(mail, "gone1");
+        let (back, _) = list(mail, "sup", false);
+        assert!(back.len() == 1 && back[0].returned, "{back:?}");
+        assert!(mail.join("sup").join(format!("{}.returned.json", back[0].id)).is_file(), "표가 파일 이름에 없다");
+        carry(mail, "sup", "sup2");
+        let (moved, _) = list(mail, "sup2", false);
+        assert!(moved.len() == 1 && moved[0].returned, "이름을 바꾸니 표를 잃었다 — {moved:?}");
+        // 읽어도 표가 남는다 — `inbox --all` 이 다시 보일 때.
+        assert_eq!(take(mail, &moved[0], "sup2").unwrap(), Took::Mine);
+        let (read, _) = list(mail, "sup2", true);
+        assert!(read.len() == 1 && read[0].returned && read[0].reader.as_deref() == Some("sup2"), "{read:?}");
+        // 둘 다 떠난 뒤 아무도 안 쥔 이름 앞으로 되돌린 편지는, 그 이름을 새로 받는 이에게 안 간다.
+        send(mail, &letter("zen-owl", "amber-fox", "for zen")).unwrap();
+        retire(mail, "zen-owl");
+        assert!(list(mail, "amber-fox", false).0.iter().all(|l| l.returned), "되돌린 편지에 표가 없다");
+        take_over(mail, &[], "amber-fox", None);
+        assert!(list(mail, "amber-fox", false).0.is_empty(), "앞사람에게 되돌아온 편지가 새 장에 남았다");
+        // 같은 이름을 이어 쓰는 장은 제 되돌아온 편지를 그대로 받는다.
+        send(mail, &letter("zen-owl", "amber-fox", "again")).unwrap();
+        retire(mail, "zen-owl");
+        take_over(mail, &[], "amber-fox", Some("amber-fox"));
+        assert_eq!(list(mail, "amber-fox", false).0.len(), 1, "이어 쓰는 장의 되돌아온 편지를 치웠다");
     }
 
     /// **한 함에 모두 두던 판의 편지는 받는 이의 함으로 옮겨진다**(moai-ew4o.c92) — 판을 갈아 끼우는 순간 길을 잃지 않게.
@@ -1592,14 +1730,15 @@ mod tests {
         let id = send(dir, &letter("a", "boss", "first")).unwrap();
         std::fs::create_dir_all(dir.join("b")).unwrap();
         std::fs::copy(dir.join("a").join(format!("{id}.json")), dir.join("b").join(format!("{id}.json"))).unwrap();
-        let moved = relocate(&dir.join("a").join(format!("{id}.json")), &dir.join("b"), &id, "2026-10-04T06:12:03Z")
-            .unwrap()
-            .unwrap();
+        let moved =
+            relocate(&dir.join("a").join(format!("{id}.json")), &dir.join("b"), &id, false, "2026-10-04T06:12:03Z")
+                .unwrap()
+                .unwrap();
         assert_ne!(moved, id, "같은 id 위로 옮겼다");
         assert_eq!(list(dir, "b", false).0.len(), 2, "옮긴 자리의 편지를 덮었다");
         assert!(list(dir, "a", false).0.is_empty());
         // 남이 먼저 가진 편지는 못 옮긴다 — 옮긴 것으로 세지 않는다.
-        assert_eq!(relocate(&dir.join("a").join("gone.json"), &dir.join("b"), &id, "").unwrap(), None);
+        assert_eq!(relocate(&dir.join("a").join("gone.json"), &dir.join("b"), &id, false, "").unwrap(), None);
     }
 
     /// 시험용 장 하나 — 프로세스를 모르는(pid 0) Codex 장이다. 시험마다 고칠 칸만 고친다.

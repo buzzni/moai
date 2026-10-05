@@ -14692,6 +14692,7 @@ mod tests {
             id: id.into(),
             mailbox: to.into(),
             reader: None,
+            returned: false,
             letter: Letter {
                 v: VERSION,
                 to: to.into(),

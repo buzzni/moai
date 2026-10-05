@@ -39,7 +39,7 @@ impl<'a> Shown<'a> {
     fn of(s: &'a Stored) -> Shown<'a> {
         let mut letter = s.letter.clone();
         letter.rest.retain(|k, _| !matches!(k.as_str(), "id" | "read" | "returned"));
-        Shown { id: &s.id, read: s.reader.is_some(), returned: s.returned(), letter }
+        Shown { id: &s.id, read: s.reader.is_some(), returned: s.returned, letter }
     }
 }
 
@@ -143,6 +143,9 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     let (agents, _) = mail::presences(&repo.agents_dir());
     let me = who(ctx, args.me.as_deref(), &agents)?;
     let role = agents.iter().find(|p| p.name == me).map(|p| p.role.clone()).unwrap_or_default();
+    // 닻을 적을 장인가 — 프로세스를 모르는 장(Codex)만이다. 다른 장은 기다리는 동안 출석부를 다시 안 연다(리뷰
+    // moai-ew4o.q9f — 반 초마다 모든 장을 읽던 자리다).
+    let anchored = agents.iter().any(|p| p.name == me && p.pid == 0);
     let dir = repo.mail_dir();
     mail::migrate(&dir);
 
@@ -166,7 +169,9 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         // 기다리는 동안 프로세스를 모르는 장(Codex)은 닻을 다시 적는다(moai-j3n5) — 안 적으면 오래 기다리는 일꾼이 떠난
         // 것으로 걷혀, 감독이 일감을 보낼 곳을 잃는다. 때가 되었을 때만 쓴다([`mail::keep_alive`]).
         if idled {
-            mail::keep_alive(&repo.agents_dir(), |p| p.name == me);
+            if anchored {
+                mail::keep_alive(&repo.agents_dir(), |p| p.name == me);
+            }
         } else {
             attend(&repo, &me, mail::IDLE);
             idled = true;
@@ -284,9 +289,7 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
         p.status = status.to_string();
         p.since = now.clone();
     }
-    if p.pid == 0 {
-        p.seen = Some(now);
-    }
+    p.stamp(&now);
     let _ = mail::write_presence(&dir, &p);
 }
 

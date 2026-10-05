@@ -19,7 +19,7 @@ use crate::text::{one_line, sanitize};
 pub fn letter(lang: Lang, zone: &crate::tz::Zone, s: &Stored) -> Vec<String> {
     let l = &s.letter;
     // 키는 `say` 에 글자째 적는다 — 소스가 부르는 키를 i18n 시험이 그 글자로 센다.
-    let (said, who) = if s.returned() {
+    let (said, who) = if s.returned {
         (say(lang, "mail.returned_head"), ("to", &l.to))
     } else {
         (say(lang, "mail.letter_head"), ("from", &l.from))
@@ -51,6 +51,7 @@ mod tests {
             id: "20261004-061203-00000001".into(),
             mailbox: "b".into(),
             reader: None,
+            returned: false,
             letter: Letter {
                 v: VERSION,
                 to: "b".into(),
