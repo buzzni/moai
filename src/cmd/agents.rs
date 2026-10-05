@@ -235,19 +235,25 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             .or_else(|| mail::name_with(if vendor.is_empty() { "agent" } else { &vendor }, &proc.pid.to_string())),
         Agent::Codex(session) => session.as_deref().and_then(|s| mail::codex_name(&all, s)),
     };
-    let name = match args.name.clone().or(told).or_else(|| before.as_ref().map(|p| p.name.clone())).or_else(generated) {
-        Some(name) => name,
-        None if matches!(agent, Agent::Codex(_)) => {
-            return Err(Fail::coded(say(lang, "refuse.agents_codex_who").to_string(), code::NO_ACTOR));
-        }
-        None => return Err(super::mail::bad_name(lang, &vendor)),
+    let (name, made) = match args.name.clone().or(told).or_else(|| before.as_ref().map(|p| p.name.clone())) {
+        Some(name) => (name, false),
+        None => match generated() {
+            Some(name) => (name, true),
+            None if matches!(agent, Agent::Codex(_)) => {
+                return Err(Fail::coded(say(lang, "refuse.agents_codex_who").to_string(), code::NO_ACTOR));
+            }
+            None => return Err(super::mail::bad_name(lang, &vendor)),
+        },
     };
     // **산 남의 이름은 안 뺏는다** — 두 에이전트가 한 이름이면 편지가 먼저 읽은 쪽으로 샌다. **대소문자만 다른
     // 이름도 같은 이름이다**(리뷰 moai-h8tn.x4l) — 이름이 파일 이름이라, 대소문자를 안 가리는 파일 시스템(macOS
     // 기본)에서는 `Worker` 와 `worker` 가 한 장이다.
     // 산 것을 찾는다 — 대소문자로 겹치는 장은 여럿일 수 있어, 첫 장이 죽은 것이면 뒤의 산 장을 가린다.
+    // **지은 이름은 다른 기계의 조용한 장이 하루 쥔다**(moai-nas5, [`mail::Presence::holds_made_name`]) — 우연히 겹친
+    // 이름으로 아직 산 저쪽 세션의 장과 편지를 가져가지 않는다. 대거나 이어 쓰는 이름은 떠나면 놓는다.
     let mine = |p: &Presence| before.as_ref().is_some_and(|b| b.name == p.name);
-    if let Some(other) = all.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && !mine(p) && !p.gone()) {
+    let holds = |p: &Presence| if made { p.holds_made_name() } else { !p.gone() };
+    if let Some(other) = all.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && !mine(p) && holds(p)) {
         return Err(Fail::coded(
             // 다른 기계의 장이면 pid 에 그 기계의 이름을 단다([`pid_cell`]) — 이 이름을 비우려는 사람이 이 기계에서 그 맨
             // 숫자를 죽이면 남의 프로세스다(moai-dhxm).

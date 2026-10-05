@@ -674,16 +674,16 @@ pub struct Presence {
 /// Codex 의 장은 pid 를 몰라(훅이 세션 여럿이 함께 쓰는 데몬 밑에서 돈다, moai-sile) 세션이 죽거나 `SessionEnd` 가 짧은
 /// 상한을 넘기면 `idle` 로 영영 남았고, `send any-idle-worker --wake` 가 그 죽은 장을 골라 산 일꾼을 안 깨웠다.
 ///
-/// **떠난 것으로 볼 뿐 지우지 않는다**(2026-10-05 사용자 결정, 리뷰 moai-ew4o.q9f 1·3번) — 깨우기·`--status idle`·이름
-/// 겨루기가 건너뛰고 `moai agents` 가 [`GONE`] 으로 보이지만, 장(역할·`hello --name` 의 이름)과 함은 남아 그 세션의 다음
-/// 훅에 살아난다. 지우던 판은 돌아온 감독이 역할을 잃고 `any-idle-worker` 일감을 가졌고, 같은 65초 안에 연 두 세션이
+/// **떠난 것으로 볼 뿐 지우지 않는다**(2026-10-05 사용자 결정, 리뷰 moai-ew4o.q9f 1·3번) — 깨우기·`--status idle`·창이
+/// 대는 이름의 겨루기가 건너뛰고 `moai agents` 가 [`GONE`] 으로 보이지만, 장(역할·`hello --name` 의 이름)과 함은 남아
+/// 그 세션의 다음 훅에 살아난다. 지우던 판은 돌아온 감독이 역할을 잃고 `any-idle-worker` 일감을 가졌고, 같은 65초 안에 연 두 세션이
 /// 지워진 뒤 돌아오면 먼저 온 쪽이 남의 편지를 받았다. 지우는 것은 [`EXPIRE_AFTER`] 넘게 안 적힌 장이다.
 pub const STALE_AFTER: i64 = 20 * 60;
 
 /// 프로세스로 못 재는 장이 이만큼(초) 넘게 안 적혔으면 `moai agents` 가 지운다 — 하루다(같은 결정). 그 세션은 끝났는데
 /// `SessionEnd` 가 안 왔거나(죽었다·짧은 상한을 넘겼다) 하루 넘게 아무것도 안 한 것이다. 그 함은 그대로 둔다 — 그 세션이
-/// 돌아오면 Codex 의 이름은 세션 id 에서 지어 같은 이름을 다시 받는다. 다른 기계의 장도 같다 — 그 기계에서는 아직 살아
-/// 있을 수 있다.
+/// 돌아오면 Codex 의 이름은 세션 id 에서 지어 같은 이름을 다시 받는다. 다른 기계의 장도 하루를 기다린다 — 그 기계에서는
+/// 아직 살아 있을 수 있다. 그 장이 지은 이름을 놓는 때도 이것이다([`Presence::holds_made_name`]).
 pub const EXPIRE_AFTER: i64 = 24 * 60 * 60;
 
 /// [`STALE_AFTER`] 넘게 안 적힌 장을 `moai agents` 가 보이는 상태 — 파일에는 안 적는다(보는 쪽이 그때 잰다).
@@ -792,10 +792,28 @@ impl Presence {
         Some(crate::model::parse_rfc3339(now)? - at)
     }
 
-    /// 그 에이전트가 떠났다고 보는가 — 프로세스가 죽었거나 닻이 낡았다. **모르면 아니다.** 걷기·깨우기·이름 겨루기가
-    /// 이 하나로 잰다.
+    /// 그 에이전트가 떠났다고 보는가 — 프로세스가 죽었거나 닻이 낡았다. **모르면 아니다.** 걷기·깨우기와 창이 대는
+    /// 이름(`MOAI_AGENT`·`hello --name`)의 겨루기가 이 하나로 잰다. 지은 이름의 겨루기는 [`Presence::holds_made_name`] 이다.
     pub fn gone(&self) -> bool {
         self.dead() || self.stale(&crate::model::now())
+    }
+
+    /// 지은 이름을 아직 쥐었는가 — 이름 겨루기에서 **지은 이름**(Claude 의 세션 이름, `<벤더>-<세션 토막>`,
+    /// `codex-<토막>`, `<벤더>-<pid>`)이 빈 것인지를 이 하나로 잰다(2026-10-05 사용자 결정, moai-nas5). **다른 기계의
+    /// 장은 하루([`EXPIRE_AFTER`]) 넘게 안 적힐 때까지 쥔다** — 보이는 상태([`Presence::gone`])와 이름을 놓는 때를 가른다.
+    /// 그 밖의 장은 떠나지 않은 동안 쥔다.
+    ///
+    /// Claude 의 장은 프롬프트 앞에서 쉬는 동안 훅이 안 돌아 닻을 안 적는다. 그래서 다른 기계의 산 Claude 장도 20분이면
+    /// 떠난 것으로 읽히는데, Claude 의 세션 이름은 컨테이너마다 따로 세어 겹친다. 떠난 것으로 읽힌 이름을 내주던 판은 다른
+    /// 컨테이너에서 같은 이름을 받은 새 세션이 그 장을 덮고 그 함의 편지를 보낸 이에게 되돌렸다 — 아직 산 세션의 편지다.
+    /// 이제 새 세션은 토막을 붙여 가른다. 하루가 지나면 걷기([`sweep`])가 그 장을 걷고 함을 비우는 때와 같다.
+    ///
+    /// **창이 대는 이름은 이것으로 안 잰다** — [`Presence::gone`] 이다. 그 이름은 우연히 겹친 것이 아니라 창이 "나는 이
+    /// 이름이다" 라고 댄 것이라, 컨테이너를 다시 띄운 `MOAI_AGENT=w1` 창은 앞 컨테이너의 낡은 w1 장이 20분 뒤 떠난
+    /// 것으로 읽히면 제 이름을 되찾는다(2026-10-05 사용자 결정, moai-dhxm). Codex 의 장(pid 0)은 이 기계의 장처럼 잰다 —
+    /// 기계를 안 적는다([`Presence::at`]).
+    pub fn holds_made_name(&self) -> bool {
+        if self.here() { !self.gone() } else { !self.expired(&crate::model::now()) }
     }
 
     /// 닻을 적는다(moai-j3n5). 장을 쓰는 자리(훅·`hello`·기다림)가 이 하나로 적는다. **모든 장에 적는다**(moai-dhxm) —
@@ -1013,7 +1031,8 @@ pub fn keep_alive(dir: &Path, which: impl Fn(&Presence) -> bool) {
 pub fn codex_name(all: &[Presence], session: &str) -> Option<String> {
     let alnum = |n: usize| session.chars().filter(char::is_ascii_alphanumeric).take(n).collect::<String>();
     let (short, whole) = (alnum(8), alnum(usize::MAX));
-    let taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && !p.gone());
+    // 지은 이름이다 — 다른 기계의 조용한 장도 하루 동안은 쥔 것으로 본다([`Presence::holds_made_name`]).
+    let taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && p.holds_made_name());
     let base = name_with("codex", &short)?;
     if !taken(&base) {
         return Some(base);
@@ -2093,6 +2112,36 @@ mod tests {
         assert_eq!(by("old").claimed().machine, None, "죽은 옛 장에 기계를 달았다");
         assert_eq!(codex_card("cx").claimed().machine, None, "pid 를 모르는 장에 기계를 달았다");
         assert_eq!(by("away").claimed().machine.as_deref(), Some(there), "남의 기계의 장을 이 기계로 고쳐 적었다");
+    }
+
+    /// **지은 이름은 다른 기계의 조용한 장이 하루 쥔다**(moai-nas5, 2026-10-05 사용자 결정) — 보이는 상태([`Presence::gone`])
+    /// 와 이름을 놓는 때를 가른다. 20분 조용한 다른 기계의 장은 떠난 것으로 보이지만 그 이름은 아직 그 장의 것이고, 하루가
+    /// 지나 걷힐 때 놓는다. 이 기계의 장과 Codex 의 장(pid 0)은 떠나면 놓는다.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_made_name_is_let_go_by_another_machine_only_after_a_day() {
+        let now = crate::model::parse_rfc3339(&crate::model::now()).unwrap();
+        let ago = |secs: i64| crate::model::format_rfc3339(now - secs);
+        let session = "01a107b4-6b9e-7c3d-8a21-5f0e9d4c3b2a";
+        let far = |secs: i64| Presence {
+            vendor: "claude".into(),
+            pid: 4_194_400,
+            pid_start: Some(1),
+            machine: Some("00000000-0000-0000-0000-000000000000/4026532999".into()),
+            since: ago(secs),
+            seen: Some(ago(secs)),
+            ..codex_card("codex-01a107b4")
+        };
+        let quiet = far(STALE_AFTER + 1);
+        assert!(!quiet.here() && quiet.gone(), "시험의 장이 떠난 다른 기계의 장이 아니다");
+        assert!(quiet.holds_made_name(), "20분 조용한 다른 기계의 장이 지은 이름을 놓았다");
+        assert!(far(60).holds_made_name());
+        assert!(!far(EXPIRE_AFTER + 1).holds_made_name(), "하루 넘게 조용한 다른 기계의 장이 이름을 쥐었다");
+        let codex = Presence { since: ago(STALE_AFTER + 1), seen: Some(ago(STALE_AFTER + 1)), ..codex_card("cx") };
+        assert!(codex.here() && codex.gone() && !codex.holds_made_name(), "떠난 Codex 장이 이름을 쥐었다");
+        // Codex 의 이름도 지은 이름이다 — 다른 기계의 조용한 장이 쥔 이름을 비켜 간다.
+        assert_eq!(codex_name(std::slice::from_ref(&quiet), session).as_deref(), Some("codex-01a107b4-01a107b4"));
+        assert_eq!(codex_name(&[far(EXPIRE_AFTER + 1)], session).as_deref(), Some("codex-01a107b4"));
     }
 
     /// **깨울 일꾼은 이 기계의 것부터 고른다**(moai-dhxm) — 다른 기계의 장은 못 깨운다([`wake`] 의 `no_way`). 가장 오래 논
