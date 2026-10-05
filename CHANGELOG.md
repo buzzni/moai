@@ -269,6 +269,26 @@ does not tag — see `CONTRIBUTING.md`.
   for such a manifest, and `skill uninstall` no longer tells you to delete
   `.claude/moai-plugin/` when that tree lands outside the checkout — deleting
   it would delete what lies behind the link.
+- **`moai skill install` checks every place it will write before it writes the
+  first file.** `.agents/skills`, the Codex and Antigravity hook files and
+  Claude's plugin tree are all checked first, so a place that would be refused —
+  a link out of the checkout or into `.git`, something that is not a regular
+  file, or a directory that cannot be made because a file or a dangling link
+  stands where it goes — now stops the run with nothing written, where it used
+  to write the skills and hooks and then fail. `--dry-run` checks the same way
+  and exits non-zero with the same message, instead of listing the plan and
+  promising a `claude plugin install` the real run would refuse. A hook file is
+  judged again just before it is overwritten, so hooks a person added to it in
+  the meantime are kept.
+- **`moai skill install` builds its temporary files in `.moai/`.** A run killed
+  between writing a file and moving it into place left `<file>.tmp.<pid>.<n>`
+  in `.claude/moai-plugin/`, `.agents/skills/` or `.codex/`, where nothing
+  ignores it and `git add -A` picks it up. They are now built in the checkout's
+  `.moai/`, which `moai init` already ignores, as `AGENTS.md`'s temporary file
+  already was; where `.moai/` cannot be used — another filesystem, read-only, or
+  a link out of the checkout — the file is built beside its target as before.
+  The same goes for the `.claude/settings.json` an install edits to remove an
+  earlier moai's marketplace declarations.
 - **`moai skill status`, `install` and `uninstall` no longer hang on a FIFO, or
   use up memory on a link to `/dev/zero`, in the committed plugin manifest or
   `.claude/settings.json`.** Both are read only as regular files inside the
