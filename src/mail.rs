@@ -893,8 +893,8 @@ fn card_at(dir: &Path, name: &str) -> PathBuf {
 }
 
 /// 출석을 적는다 — temp 를 쓰고 `<name>.json` 으로 `rename` 한다. **덮는 것이 뜻이다** — 같은 이름은 같은
-/// 에이전트고, 마지막에 적은 쪽이 지금이다. 반쯤 쓴 장은 안 보인다. 출석부가 체크아웃 밖으로 풀리면 안 쓴다
-/// ([`ensure_dir`]).
+/// 에이전트고, 마지막에 적은 쪽이 지금이다. 반쯤 쓴 장은 안 보이고, 쓰다 죽어 남은 temp 는 [`sweep`] 이 걷는다. 출석부가
+/// 체크아웃 밖으로 풀리면 안 쓴다([`ensure_dir`]).
 ///
 /// **`sync` 하지 않는다**(리뷰 moai-h8tn.x4l) — 훅이 프롬프트마다·턴 끝마다 이 장을 쓰는데, 저장소가 Ceph RBD 에
 /// 서는 이 기계에서 `sync` 한 번이 수십 ms 다. 출석은 기록이 아니라 지금의 표라 잃어도 다음 훅이 다시 쓰고, 기계가
@@ -992,7 +992,14 @@ pub struct Swept {
 /// 편지를 되돌리는 동안 길어진다) 같은 이름을 넘겨받은 새 세션의 장을 지우고 그 세션 앞으로 온 편지까지 보낸 이에게
 /// 되돌렸다. 장은 그 세션의 다음 훅이 다시 쓰지만 되돌린 편지는 안 돌아온다. 다시 읽은 것과 지우는 것 사이의 틈은
 /// 남는다 — 시스템 호출 몇 개 너비고, 그것을 막으려고 락을 두지 않는다.
+///
+/// **쓰다 죽은 출석의 temp 도 여기서 걷는다**(moai-kxkw.68i) — [`write_presence`] 가 temp 를 쓰고 `rename` 하기 전에 죽으면
+/// (훅이 I/O 정체 중에 끊기면) 점 파일이 남는데, temp 를 걷는 자리가 보내기([`send`])의 함뿐이라 출석부의 것은 아무도
+/// 안 걷었다. 훅이 아니라 여기서 걷는 까닭은 죽은 장과 같다 — 도구 호출마다 도는 자리가 디렉터리를 훑지 않는다.
 pub fn sweep(dir: &Path, mail: &Path) -> Vec<Swept> {
+    if let Ok(real) = reach(dir, &home_of(dir)) {
+        sweep_temps(&real);
+    }
     sweep_from(dir, mail, presences(dir).0, &crate::model::now())
 }
 
@@ -1599,8 +1606,8 @@ fn sync_dir(dir: &Path) {
     let _ = dir;
 }
 
-/// 죽은 보내기가 남긴 temp 를 걷는다 — 10분 넘은 것만. 보내는 쪽은 temp 를 몇 밀리초만 든다. `dir` 은 [`reach`] 를
-/// 지난 자리다. **이름부터 본다** —
+/// 죽은 보내기([`send`])와 죽은 출석 쓰기([`write_presence`], 걷는 자리는 [`sweep`])가 남긴 temp 를 걷는다 — 10분 넘은
+/// 것만. 쓰는 쪽은 temp 를 몇 밀리초만 든다. `dir` 은 [`reach`] 를 지난 자리다. **이름부터 본다** —
 /// 편지마다 `stat` 을 치르지 않는다.
 fn sweep_temps(dir: &Path) {
     const KEEP: std::time::Duration = std::time::Duration::from_secs(10 * 60);
@@ -2471,5 +2478,23 @@ mod tests {
         assert!(bad.is_empty() && got.len() == 1, "{bad:?}");
         assert_eq!(take(&mail, &got[0], "w1").unwrap(), Took::Mine);
         assert!(s.join(format!("data/w1/read/{id}@w1.json")).exists());
+    }
+
+    /// **출석부에 남은 temp 는 `moai agents` 의 걷기가 걷는다**(moai-kxkw.68i) — 쓰다 죽은 [`write_presence`] 가 남긴
+    /// 점 파일을 아무도 안 걷었다. 10분 넘은 것만이다 — 지금 쓰는 중인 temp 는 남는다.
+    #[test]
+    fn the_sweep_takes_the_temps_a_dead_attendance_write_left() {
+        let s = Scratch::new("mail-agent-temps");
+        let (agents, mail) = (crate::store::agents_at(s.path()), crate::store::mail_at(s.path()));
+        write_presence(&agents, &codex_card("w1")).unwrap();
+        let (stale, fresh) = (agents.join(".tmp.1.2"), agents.join(".tmp.3.4"));
+        std::fs::write(&stale, "{").unwrap();
+        std::fs::write(&fresh, "{").unwrap();
+        let ago = std::time::SystemTime::now() - std::time::Duration::from_secs(11 * 60);
+        std::fs::File::options().write(true).open(&stale).unwrap().set_modified(ago).unwrap();
+        sweep(&agents, &mail);
+        assert!(!stale.exists(), "쓰다 죽은 출석의 temp 를 안 걷었다");
+        assert!(fresh.exists(), "지금 쓰는 중일 수 있는 temp 를 걷었다");
+        assert!(agents.join("w1.json").exists());
     }
 }
