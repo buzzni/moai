@@ -4478,3 +4478,10 @@
 {"ts":"2026-10-05T08:22:59Z","id":"moai-jzym.a9k","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 이 창의 백그라운드에서 돈다 — 돌아오면 반영 커밋, CHANGELOG·위키 한 줄, develop 머지, 멤버 닫기"}
 {"ts":"2026-10-05T08:23:00Z","id":"moai-o9tg.elq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-05T08:23:06Z","id":"moai-o9tg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없다 — 머지 59e8a380 로 끝났다. 다음 Codex 판이 /hooks 에 새 경고를 내면 사람에게 그 글을 받아 tests/hooks/codex/config/ 에 갈무리로 넣는다(README 의 \"새로 갈무리하려면\")"}
+{"ts":"2026-10-05T08:26:34Z","id":"moai-nas5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"다른 기계의 조용한 장은 지은 이름을 하루 쥔다"}
+{"ts":"2026-10-05T08:26:34Z","id":"moai-nas5.zlc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이름 겨루기는 다른 기계의 장을 하루가 지나야 빈 것으로 본다"}
+{"ts":"2026-10-05T08:26:34Z","id":"moai-nas5.701","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 지은 이름은 다른 기계의 조용한 장을 비켜 간다"}
+{"ts":"2026-10-05T08:26:34Z","id":"moai-nas5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-tezd 에서 펼쳤다 — 다른 기계의 조용한 장 이름을 새 세션이 넘겨받아 그 함을 되돌린다"}
+{"ts":"2026-10-05T08:26:34Z","id":"moai-tezd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-nas5 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-10-05T08:26:38Z","id":"moai-nas5.zlc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T08:26:38Z","id":"moai-nas5.701","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
