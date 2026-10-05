@@ -24775,10 +24775,14 @@ fn pages_of(dir: &Path, id: &str, me: &str, mut from: usize) -> (String, usize) 
         pages += 1;
         let text = out.lines().filter_map(|l| l.strip_prefix("    ")).collect::<Vec<_>>().join("\n");
         got.push_str(&text);
-        let Some(next) = out.trim_end().lines().last().and_then(|l| l.split("--from ").nth(1)) else {
+        let last = out.trim_end().lines().last().unwrap_or_default();
+        let Some(next) = last.split("--from ").nth(1) else {
             return (got, pages);
         };
         let next: usize = next.split(' ').next().and_then(|n| n.parse().ok()).unwrap();
+        // 끝 줄은 그대로 치면 다음 쪽이 나오는 명령이다 — 셸에서 제 장을 못 찾는 세션도 치게 `--as` 를 단다.
+        let named = format!("moai inbox {id} --from {next} --as {me}");
+        assert!(last.contains(&named), "끝 줄이 다음 쪽의 명령이 아니다 — {last}");
         let to = from + text.chars().count();
         assert!(next == to || next == to + 1, "{from}..{to} 뒤에 {next} 를 댔다");
         if next == to + 1 {
@@ -24816,8 +24820,11 @@ fn inbox_pages_one_long_letter() {
         "j",
         "끝 글자를 안 보였다 — {last}"
     );
-    // `--from` 은 편지 하나의 깃발이다.
+    // `--from` 은 편지 하나의 깃발이다. **`--wait` 가 함께여도 그렇다**(리뷰 moai-54yc.fay) — clap 은 id 와 겨루는
+    // `--wait` 가 서면 `requires = "id"` 를 건너뛰어, 그 부름이 함의 편지를 통째로 내며 `--from` 을 말없이 버렸다.
     assert!(!moai(s.path(), &["inbox", "--from", "5", "--as", "w1"]).status.success(), "id 없이 --from 을 받았다");
+    let waited = moai(s.path(), &["inbox", "--from", "5", "--wait", "0", "--as", "w1"]);
+    assert!(!waited.status.success(), "--wait 와 함께면 id 없이 --from 을 받았다 — {}", text(&waited));
 }
 
 /// **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `inbox --wait` 는 기다리는 동안 장을 `idle` 로 적어,
@@ -25041,6 +25048,10 @@ fn the_hooks_load_letters_up_to_a_budget() {
     let context = json_text(&out, "additionalContext");
     let kept: usize = context.lines().filter_map(|l| l.strip_prefix("    ")).map(|l| l.matches('가').count()).sum();
     assert_eq!(at, kept, "자른 표가 실린 글자와 다른 자리를 댔다");
+    // 자른 표는 그대로 치면 나머지가 나오는 한 명령이다 — 셸에서 제 장을 못 찾는 세션도 치게 `--as` 를 단다(리뷰
+    // moai-54yc.fay — 앞머리만 견주면 말묶음이 이름을 명령 밖으로 옮겨도 모른다).
+    let named = format!("moai inbox {} --from {at} --as claude-sess0003", ids[0]);
+    assert!(context.contains(&named), "자른 표가 이어 볼 명령을 그대로 안 댔다 — {named}");
     let (rest, _) = pages_of(s.path(), &ids[0], "claude-sess0003", at);
     assert_eq!(rest, "가".repeat(10_000 - at), "자른 자리부터 나머지를 안 보였다");
     assert!(
@@ -25801,6 +25812,9 @@ fn a_codex_stop_holds_letters_inside_codexs_limit() {
     let at: usize = cut.split(&again).nth(1).and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap();
     let kept: usize = said.lines().filter_map(|l| l.strip_prefix("    ")).map(|l| l.matches('가').count()).sum();
     assert_eq!(at, kept, "자른 표가 실린 글자와 다른 자리를 댔다");
+    // 그 명령은 `--as` 를 단다 — `CODEX_THREAD_ID` 가 없는 셸은 맨 `moai inbox` 로는 제 장을 못 찾는다(리뷰 moai-54yc.fay).
+    let named = format!("moai inbox {id} --from {at} --as codex-01a107b4");
+    assert!(cut.contains(&named), "자른 표가 이어 볼 명령을 그대로 안 댔다 — {cut}");
     assert_eq!(pages_of(s.path(), &id, "codex-01a107b4", at).0, "가".repeat(3_400 - at), "나머지를 안 보였다");
 
     let ev = event(&s, "sess0009-iiii");

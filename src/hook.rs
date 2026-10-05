@@ -276,7 +276,7 @@ impl Room {
 /// 제목·본문의 길이로 어림하던 판은 짧은 줄이 많은 편지(줄마다 네 칸을 들여 쓴다)를 작게 재어, 함께 고른 뒤의
 /// 편지가 읽음으로 옮겨진 채 자르는 자리 밖으로 밀려났다(리뷰 moai-h8tn.x4l).
 fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> String {
-    format!("\n\n{}", crate::style::plain(&crate::view::mail::letter(lang, zone, s).join("\n")))
+    block(&crate::view::mail::letter(lang, zone, s))
 }
 
 /// [`letter_block`] 의 본문을 `to` 글자까지만 — 자르는 편지를 글자 자리에서 끊는다(moai-m81b). 자른 표가 대는 자리와
@@ -288,7 +288,14 @@ fn block_to(
     body: &crate::view::mail::Body,
     to: usize,
 ) -> String {
-    format!("\n\n{}", crate::style::plain(&crate::view::mail::part(lang, zone, s, body, 0, to).join("\n")))
+    block(&crate::view::mail::part(lang, zone, s, body, 0, to))
+}
+
+/// 그린 편지 한 통을 실을 글로 — 앞의 빈 줄과 색을 걷은 줄들. [`letter_block`] 과 [`block_to`] 가 **이 하나로** 싼다(리뷰
+/// moai-54yc.fay) — 고르는 쪽([`deliverable`])과 자를 편지를 찾는 쪽은 앞의 것으로 재고 자르는 자리는 뒤의 것으로 재니,
+/// 둘의 꼴이 갈리면 자른 자리가 어긋나고 자른 표가 `inbox` 가 거절하는 자리(본문의 끝)를 댈 수 있다.
+fn block(lines: &[String]) -> String {
+    format!("\n\n{}", crate::style::plain(&lines.join("\n")))
 }
 
 /// 이벤트 하나가 에이전트에게 글을 싣는 칸과 그 자리 — 말씨와 이벤트가 정한다([`Carry::of`]).
@@ -492,22 +499,27 @@ pub fn letters(
     };
     // 자르는 자리가 든 편지 — 앞에서부터 그 자로 재어 처음 넘는 편지다. 고르는 쪽이 혼자 넘치는 편지는 혼자 고르니
     // ([`deliverable`]) 대개 그 한 통이다. id 는 꼴이 하나라([`crate::mail::is_id`]) 어느 id 로 재도 자른 표의 길이가 같다.
-    // 자리는 실은 편지의 가장 긴 본문(글자)으로 잰다 — 어느 편지의 어느 자리를 대도 그 수보다 길지 않다.
-    let widest = delivered.iter().map(|s| crate::view::mail::Body::of(s).len()).max().unwrap_or(0);
+    // 자리는 실은 편지의 가장 긴 본문으로 잰다 — 어느 편지의 어느 자리를 대도 그 수보다 길지 않다. **날 본문의 글자
+    // 수로 넉넉히 잰다**(리뷰 moai-54yc.fay) — 걷은 글자 수([`crate::view::mail::Body::len`])보다 작지 않으니 표가 모자라지
+    // 않고, 편지마다 글자 표를 짓지 않는다. 넉넉한 만큼 자르는 자리가 한두 글자 앞에 설 뿐이다.
+    let widest = delivered.iter().map(|s| s.letter.body.chars().count()).fold(0, usize::max);
     let keep = fits.saturating_sub(size(&cut(&first.id, widest)));
     let mut used = 0;
-    let at = blocks
-        .iter()
-        .position(|b| {
-            used += size(b);
-            used > keep
-        })
-        .unwrap_or(0);
+    let found = blocks.iter().position(|b| {
+        used += size(b);
+        used > keep
+    });
+    // 여기 오면 편지 글 전체가 `fits` 를 넘고 자는 더해 가며 재니(`Unit::of`) 넘는 편지는 반드시 있다. 훅은 편지를 이미
+    // 읽음으로 옮겼으니 멈추지(panic) 않고 시험에서만 잡는다(리뷰 moai-54yc.fay).
+    debug_assert!(found.is_some(), "편지 글이 칸을 넘는데 넘는 편지가 없다");
+    let at = found.unwrap_or(0);
     let cut_in = &delivered[at];
-    // 앞의 편지는 다 든다 — 처음 넘는 편지가 이것이다. 그 편지만 본문의 글자 자리에서 끊는다.
+    // 앞의 편지는 다 든다 — 처음 넘는 편지가 이것이다. 그 편지만 본문의 글자 자리에서 끊고, 그 자리는 앞의 편지가 쓰고
+    // 남은 몫으로 잰다.
     let before = blocks[..at].concat();
+    let spare = keep.saturating_sub(size(&before));
     let whole = crate::view::mail::Body::of(cut_in);
-    let shown = |to: usize| size(&before) + size(&block_to(lang, zone, cut_in, &whole, to)) <= keep;
+    let shown = |to: usize| size(&block_to(lang, zone, cut_in, &whole, to)) <= spare;
     let (kept, from) = match whole.reach(0, shown) {
         Some(to) => (format!("{before}{}", block_to(lang, zone, cut_in, &whole, to)), to),
         None => (cut_to(&body, keep, room.unit).to_string(), 0),
@@ -11967,6 +11979,19 @@ mod tests {
         }
         for dir in &named {
             assert!(SKIP.contains(dir), "규칙 2 의 글이 세는 자리 `{dir}/` 를 안 센다고 한다");
+        }
+    }
+
+    /// **`skill install` 이 심는 자리는 규칙 2 가 안 센다**(리뷰 moai-54yc.fay) — [`SKIP`] 은 그 자리를 손으로 옮겨 적은
+    /// 목록이라, 심는 자리가 새로 서면 이 목록도 따라와야 한다. 이 에픽에서만 두 번 어긋났다 — `.agents/`(moai-54yc.cq2)와
+    /// `.codex/hooks.json`(moai-kr16)을 심어 놓고, 아무것도 안 쥔 세션이 그 파일을 고치면 막았다. 심는 자리를 더하면
+    /// 여기에도 적는다.
+    #[test]
+    fn rule_two_skips_every_place_skill_install_plants() {
+        use crate::skill::{AGENTS_DIR, AGENTS_HOOKS, CODEX_HOOKS, DIR};
+        for planted in [DIR, AGENTS_DIR, AGENTS_HOOKS, CODEX_HOOKS] {
+            let head = planted.split('/').next().unwrap_or_default();
+            assert!(SKIP.contains(&head), "`{planted}` 를 심는데 규칙 2 가 `{head}/` 의 편집을 센다");
         }
     }
 

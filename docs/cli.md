@@ -2364,10 +2364,11 @@ Options:
 
   **One letter comes a page at a time.** With an id, a body longer than about
   24 KB stops there and the last line names `moai inbox <id> --from <n>` for
-  the next part, so an agent's own output cap (30,000 characters in Claude
-  Code, 10,000 tokens in Codex) does not cut its middle out. <n> counts the
-  characters of the body as shown, from 0. --json is not paged: it gives the
-  whole letter, --from or not.
+  the next part, so each page stays under an agent's own output cap (30,000
+  characters in Claude Code, 10,000 tokens in Codex), past which the agent
+  cuts or sets aside what a command printed. <n> counts the characters of the
+  body as shown, from 0. --json is not paged: it gives the whole letter,
+  --from or not.
 
   An id or --all shows a read letter again until
   `moai agents` sweeps it, mail_read_days after it was read (7 unless

@@ -31,8 +31,9 @@ does not tag — see `CONTRIBUTING.md`.
   over the agents that wait — and `--wait <seconds>` waits for one to come.
   `moai inbox <id>` shows one letter, read or not, a page of about 24 KB at a
   time: the last line names `--from <n>` — characters of the body, counted
-  from 0 — for the next part, so an agent's own output cap (30,000 characters
-  in Claude Code, 10,000 tokens in Codex) does not cut its middle out.
+  from 0 — for the next part, so each page stays under an agent's own output
+  cap (30,000 characters in Claude Code, 10,000 tokens in Codex), past which
+  the agent cuts or sets aside what a command printed.
   `--json` gives the letter whole. Who you are is `--as`, else
   `MOAI_AGENT`, else the registered agent the command runs under. Codex runs
   every session's shell under one shared app-server, so there it is the row of

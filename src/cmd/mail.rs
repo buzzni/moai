@@ -48,9 +48,10 @@ impl<'a> Shown<'a> {
 const SUBJECT_MAX: usize = 200;
 
 /// 편지 하나를 보일 때 한 쪽의 상한 — 찍히는 글의 UTF-8 바이트다(moai-m81b). 에이전트의 출력 상한 둘 아래에 든다:
-/// Claude Code 의 Bash 는 3만 자(UTF-16 단위 — 바이트보다 늘 작거나 같다)에서, Codex 0.160 은 1만 토큰(네 바이트를 한
-/// 토큰으로 어림해 4만 바이트)에서 가운데를 뺀다. 둘 중 작은 3만에서 다섯에 하나를 남긴다 — 에이전트가 출력을 감싸는 글
-/// 탓에 어림이 어긋나도 그 선을 안 넘게.
+/// Claude Code 의 Bash 는 3만 자(UTF-16 단위 — 바이트보다 늘 작거나 같다)를 넘는 출력을 파일로 빼고 앞머리만
+/// 보이며(2.1.289 — 판에 따라 가운데를 자르기도 했다), Codex 0.160 은 1만 토큰(네 바이트를 한 토큰으로 어림해 4만
+/// 바이트)에서 가운데를 뺀다. 어느 쪽이든 편지는 그때 이미 읽음이다. 둘 중 작은 3만에서 다섯에 하나를 남긴다 —
+/// 에이전트가 출력을 감싸는 글 탓에 어림이 어긋나도 그 선을 안 넘게.
 const PAGE: usize = 24_000;
 
 #[derive(Serialize)]
@@ -246,9 +247,9 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // **본문 밖의 자리는 읽음으로 옮기기 전에 거절한다**(moai-m81b) — 보일 것이 없는 부름이 `--ack` 로 편지를 옮기면 안 된다.
     // `--json` 은 쪽을 안 자르니(편지 전체다) 그 자리를 안 본다.
     if let Some(from) = args.from.filter(|&n| n > 0 && !ctx.json)
+        && let Some(id) = args.id.as_deref()
         && let Some(len) = mine.iter().map(|s| crate::view::mail::Body::of(s).len()).find(|&len| from >= len)
     {
-        let id = args.id.as_deref().unwrap_or_default();
         let said = fill(
             say(ctx.lang(), "refuse.mail_from"),
             &[("id", id), ("len", &len.to_string()), ("from", &from.to_string())],

@@ -70,13 +70,19 @@ impl Body {
 /// **때는 보는 사람의 시간대로 적는다**(`view::stamp`, moai-p5az) — 다른 화면이 모두 그렇게 적는데 편지만 UTC 글자를
 /// 그대로 내던 판은, 같은 화면(훅이 싣는 보드와 편지)에서 몇 시간 어긋난 시각이 나란히 섰다(리뷰 moai-h8tn.x4l).
 pub fn letter(lang: Lang, zone: &crate::tz::Zone, s: &Stored) -> Vec<String> {
-    let body = Body::of(s);
-    part(lang, zone, s, &body, 0, body.len())
+    framed(lang, zone, s, &sanitize(&s.letter.body), None)
 }
 
 /// 편지 하나의 본문 `from`..`to` 글자(moai-m81b) — 머리 줄과 제목은 늘 선다. 처음부터가 아니면 어디서부터인지 한 줄을
 /// 단다: 머리 줄만 보고는 앞에서 이어 본 쪽인지 모른다. `body` 는 `s` 의 것이다([`Body::of`]).
 pub fn part(lang: Lang, zone: &crate::tz::Zone, s: &Stored, body: &Body, from: usize, to: usize) -> Vec<String> {
+    framed(lang, zone, s, body.part(from, to), (from > 0).then(|| (from, body.len())))
+}
+
+/// [`letter`]·[`part`] 가 함께 그리는 꼴 — 머리 줄·제목·답하는 편지, 앞에서 이어 본 쪽이면 그 자리(`after` — 건넌 글자
+/// 수와 본문의 글자 수), 네 칸 들여 쓴 본문 `text`. **통째로 그리는 편지는 글자 자리 표([`Body`])를 안 짓는다**(리뷰
+/// moai-54yc.fay) — 훅은 기다리는 편지마다 이 글을 그려 재므로, 표를 지으면 글자마다 8 바이트를 쓰지도 않고 쌓는다.
+fn framed(lang: Lang, zone: &crate::tz::Zone, s: &Stored, text: &str, after: Option<(usize, usize)>) -> Vec<String> {
     let l = &s.letter;
     // 키는 `say` 에 글자째 적는다 — 소스가 부르는 키를 i18n 시험이 그 글자로 센다.
     let (said, who) = if s.returned {
@@ -95,11 +101,11 @@ pub fn part(lang: Lang, zone: &crate::tz::Zone, s: &Stored, body: &Body, from: u
     if let Some(r) = l.reply_to.as_deref() {
         out.push(format!("  {}", paint(style::DIM, &fill(say(lang, "mail.in_reply"), &[("id", &one_line(r))]))));
     }
-    if from > 0 {
-        let (at, len) = (from.to_string(), body.len().to_string());
+    if let Some((from, len)) = after {
+        let (at, len) = (from.to_string(), len.to_string());
         out.push(format!("  {}", paint(style::DIM, &fill(say(lang, "mail.page_from"), &[("at", &at), ("len", &len)]))));
     }
-    out.extend(body.part(from, to).lines().map(|line| format!("    {line}")));
+    out.extend(text.lines().map(|line| format!("    {line}")));
     out
 }
 
@@ -120,7 +126,10 @@ pub fn page(lang: Lang, zone: &crate::tz::Zone, s: &Stored, me: &str, from: usiz
     let size = |lines: &[String]| lines.iter().map(|l| l.len() + 1).sum::<usize>();
     let room = budget.saturating_sub(more(len, len).len() + 1);
     let fits = |to: usize| size(&part(lang, zone, s, &body, from, to)) <= room;
-    let to = body.reach(from, fits).unwrap_or(from).max((from + 1).min(len));
+    let to = match body.reach(from, fits) {
+        Some(to) if to > from => to,
+        _ => from.saturating_add(1).min(len),
+    };
     let mut out = part(lang, zone, s, &body, from, to);
     if to < len {
         out.push(more(len - to, to));
@@ -161,6 +170,23 @@ mod tests {
         assert!(lines.contains("    one\n    ") && lines.contains("two"), "{lines:?}");
     }
 
+    /// **통째로 그린 편지는 처음부터 끝까지의 쪽과 같다**(리뷰 moai-54yc.fay) — 훅은 고를 때 통째로 그린 글로 재고 자를
+    /// 때 쪽으로 그린 글로 재니, 둘이 갈리면 자른 자리가 어긋난다. 머리 줄이 갈리는 꼴(읽음 표·되돌아온 편지·답하는
+    /// 편지)과 걷히는 제어문자·끝의 빈 줄을 함께 든다.
+    #[test]
+    fn a_whole_letter_is_one_part_from_the_start() {
+        let utc = crate::tz::Zone::utc();
+        let mut s = stored("subj", "one\r\n\u{1b}[31mtwo\n\n");
+        for (reader, returned, reply_to) in [(None, false, None), (Some("w1"), true, Some("20261004-061203-00000009"))]
+        {
+            s.reader = reader.map(Into::into);
+            s.returned = returned;
+            s.letter.reply_to = reply_to.map(Into::into);
+            let body = Body::of(&s);
+            assert_eq!(letter(Lang::En, &utc, &s), part(Lang::En, &utc, &s, &body, 0, body.len()), "{s:?}");
+        }
+    }
+
     /// 끝 줄이 대는 자리를 따라 끝까지 넘겨 본 본문과 쪽 수 — 쪽마다 `budget` 안에 드는지 잰다.
     fn walk(s: &Stored, budget: usize) -> (String, usize) {
         let utc = crate::tz::Zone::utc();
@@ -181,6 +207,9 @@ mod tests {
             got.push_str(&text);
             let Some(next) = lines.last().and_then(|l| l.split("--from ").nth(1)) else { break };
             let next: usize = next.split(' ').next().unwrap().parse().unwrap();
+            // 끝 줄은 그대로 치면 다음 쪽이 나오는 명령이다 — 셸에서 제 장을 못 찾는 세션도 치게 `--as` 를 단다.
+            let named = format!("moai inbox {} --from {next} --as w1", s.id);
+            assert!(lines.last().is_some_and(|l| l.contains(&named)), "끝 줄이 다음 쪽의 명령이 아니다 — {lines:?}");
             let to = from + text.chars().count();
             assert!(next == to || (next == to + 1 && shown.chars().nth(to) == Some('\n')), "{from}..{to} 뒤의 {next}");
             if next == to + 1 {

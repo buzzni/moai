@@ -372,10 +372,11 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   holds up to 64 KB, its subject 200 characters
 - **One long letter comes a page at a time.** `moai inbox <id>` stops a body
   at about 24 KB and its last line names `moai inbox <id> --from <n>` for the
-  next part — run that line as it is until no such line ends the output. An
-  agent's own output cap (30,000 characters in Claude Code, 10,000 tokens in
-  Codex) cuts the middle out of anything longer, and the letter is read by
-  then. `<n>` counts the characters of the body as shown, from 0, and a hook's
+  next part — run that line as it is until no such line ends the output.
+  Each page stays under an agent's own output cap (30,000 characters in Claude
+  Code, 10,000 tokens in Codex): past it, Codex drops the middle of what a
+  command printed and Claude Code sets it aside in a file, and the letter is
+  read by then. `<n>` counts the characters of the body as shown, from 0, and a hook's
   cut names the same count, so the page picks up exactly where the cut fell.
   `--json` is a record, not a page: it gives the whole letter, `--from` or not
 - **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
