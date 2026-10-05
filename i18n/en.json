@@ -1052,11 +1052,14 @@
   "mail.returned_head": "{id}  returned - {to} left before reading it  {at}",
   "mail.read_mark": "read",
   "mail.in_reply": "in reply to {id}",
+  "mail.page_from": "[after the first {at} of {len} characters]",
+  "mail.page_more": "[{left} more characters - `moai inbox {id} --from {at} --as {me}` shows the next part]",
   "warn.mail_garbled": "A letter that cannot be read: {path} - {why}",
   "warn.agents_garbled": "A presence file that cannot be read: {path} - {why}",
   "refuse.mail_subject": "A letter needs a subject: one line of up to {max} characters",
   "refuse.mail_id": "`{id}` is not a letter id - it looks like 20261004-061203-0k3f9x2a (`moai inbox` shows them)",
   "refuse.mail_no_letter": "No letter {id} for {me} - it is someone else's, or it was read long enough ago to be swept (`moai inbox --all --as {me}` lists what there is)",
+  "refuse.mail_from": "Letter {id} has {len} characters in its body - `--from {from}` leaves nothing to show (it skips that many)",
   "refuse.mail_body_large": "The body is {n} bytes - a letter holds up to {max}. Put the long part in a file in the repository and name it in the letter",
   "refuse.mail_who": "Who are you? Pass `--as <name>`, set MOAI_AGENT, or register with `moai hello` first. A Codex session whose shell has no CODEX_THREAD_ID passes the name its hooks gave it (`codex-` and eight characters, named in its first context)",
   "refuse.mail_name": "`{name}` cannot be an agent name - letters, digits, `.`, `_` and `-`, up to 64, not starting with `.`; any-idle-worker is only a recipient",
@@ -1077,5 +1080,5 @@
   "hook.you_are": "This Codex session is `{name}` in `moai agents`. If `moai` says it cannot tell who you are, pass `--as {name}` to `moai hello`, `moai inbox` and `moai send`.",
   "hook.letters": "Letters for {me} ({n}). They are marked read now - `moai inbox <id> --as {me}` shows one again. Answer one with `moai send <from> '<subject>' --reply-to <id> --as {me} -b -`; a decision still goes on its issue as a note.",
   "hook.letters_left": "{n} more are waiting - `moai inbox {next} --ack --as {me}` reads the next one, or the next turn loads them.",
-  "hook.letter_cut": "[Cut here to fit what a hook can load at once - `moai inbox {id} --as {me}` shows the whole letter]"
+  "hook.letter_cut": "[Cut here to fit what a hook can load at once - `moai inbox {id} --from {at} --as {me}` shows the next part]"
 }

@@ -47,6 +47,13 @@ impl<'a> Shown<'a> {
 /// 받아, 훅이 싣는 편지 한 통이 본문 상한을 몇 배 넘었다.
 const SUBJECT_MAX: usize = 200;
 
+/// 편지 하나를 보일 때 한 쪽의 상한 — 찍히는 글의 UTF-8 바이트다(moai-m81b). 에이전트의 출력 상한 둘 아래에 든다:
+/// Claude Code 의 Bash 는 3만 자(UTF-16 단위 — 바이트보다 늘 작거나 같다)를 넘는 출력을 파일로 빼고 앞머리만
+/// 보이며(2.1.289 — 판에 따라 가운데를 자르기도 했다), Codex 0.160 은 1만 토큰(네 바이트를 한 토큰으로 어림해 4만
+/// 바이트)에서 가운데를 뺀다. 어느 쪽이든 편지는 그때 이미 읽음이다. 둘 중 작은 3만에서 다섯에 하나를 남긴다 —
+/// 에이전트가 출력을 감싸는 글 탓에 어림이 어긋나도 그 선을 안 넘게.
+const PAGE: usize = 24_000;
+
 #[derive(Serialize)]
 struct Inbox<'a> {
     me: &'a str,
@@ -237,6 +244,18 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         let said = fill(say(ctx.lang(), "refuse.mail_no_letter"), &[("id", id), ("me", &me)]);
         return Err(Fail::coded(said, code::NOT_FOUND));
     }
+    // **본문 밖의 자리는 읽음으로 옮기기 전에 거절한다**(moai-m81b) — 보일 것이 없는 부름이 `--ack` 로 편지를 옮기면 안 된다.
+    // `--json` 은 쪽을 안 자르니(편지 전체다) 그 자리를 안 본다.
+    if let Some(from) = args.from.filter(|&n| n > 0 && !ctx.json)
+        && let Some(id) = args.id.as_deref()
+        && let Some(len) = mine.iter().map(|s| crate::view::mail::Body::of(s).len()).find(|&len| from >= len)
+    {
+        let said = fill(
+            say(ctx.lang(), "refuse.mail_from"),
+            &[("id", id), ("len", &len.to_string()), ("from", &from.to_string())],
+        );
+        return Err(Fail::coded(said, code::BAD_INPUT));
+    }
 
     // **기다림이 편지로 끝났으면 일하러 간다 — 그 출석은 편지를 옮기기 전에 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은
     // 까닭이다(moai-jzym.flj). 옮긴 뒤에 적던 판은 그 쓰기에서 멈추거나 끊기면(저장소가 선 Ceph 가 멈춘 날) 편지가 읽음으로
@@ -311,9 +330,14 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     if mine.is_empty() {
         out.push(fill(say(lang, "mail.inbox_empty"), &[("me", &me)]));
     }
-    // 편지는 `view::mail` 한 자리에서 선다 — 훅이 세션에 싣는 글과 같은 꼴이다.
+    // 편지는 `view::mail` 한 자리에서 선다 — 훅이 세션에 싣는 글과 같은 꼴이다. **id 로 부른 편지는 쪽으로 낸다**
+    // (moai-m81b) — 그 길은 훅이 자른 편지를 다시 보는 길이라, 통째로 내면 에이전트의 출력 상한이 같은 자리를 또 자른다.
+    // `--json` 은 위에서 이미 편지 전체를 냈다.
     for s in &mine {
-        out.extend(crate::view::mail::letter(lang, ctx.zone(), s));
+        match args.id {
+            Some(_) => out.extend(crate::view::mail::page(lang, ctx.zone(), s, &me, args.from.unwrap_or(0), PAGE)),
+            None => out.extend(crate::view::mail::letter(lang, ctx.zone(), s)),
+        }
     }
     for id in &lost {
         out.push(fill(say(lang, "mail.lost"), &[("id", id)]));
