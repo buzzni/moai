@@ -22,6 +22,12 @@ does not tag — see `CONTRIBUTING.md`.
   `.gitattributes` and the merge driver are left alone — there is nothing for
   git to merge. `--tracking commit` is what `init` has always done. Run again,
   `init` asks git which one stands rather than storing it, and refuses to switch.
+- **`moai init --guide file` writes the agent guide to `.moai/guide.md`** and
+  leaves only a few lines in the AGENTS.md block that point at it — with
+  `moai init --print` as the way to the same text where the file is missing.
+  `--guide block` is the full block as before, and `--guide none` is
+  `--no-agents`. `init --check` and `moai status` measure both the link and the
+  file; run again, `init` reads which one stands from the block itself.
 
 ### Changed
 

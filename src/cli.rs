@@ -854,9 +854,12 @@ Examples:
     Init {
         /// id prefix (up to 8). Made from the directory name when absent
         prefix: Option<String>,
-        /// Leave AGENTS.md alone
-        #[arg(long)]
+        /// Leave AGENTS.md alone (same as --guide none)
+        #[arg(long, conflicts_with = "guide")]
         no_agents: bool,
+        /// block, file (.moai/guide.md + link) or none
+        #[arg(long, value_name = "how", value_parser = ["block", "file", "none"], hide_possible_values = true)]
+        guide: Option<String>,
         /// Leave .git/config alone (plant no merge driver)
         #[arg(long)]
         no_driver: bool,
@@ -867,10 +870,10 @@ Examples:
         #[arg(short = 'y', long)]
         yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "yes"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "yes", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "yes", "check"])]
         print: bool,
     },
 }

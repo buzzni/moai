@@ -5,7 +5,7 @@ use crate::cmd::merge_driver::Planting;
 use crate::config::DEFAULT_STATUSES;
 use crate::held::Fell;
 use crate::i18n::{fill, say};
-use crate::init_choice::{Choices as Choice, Flags, Plan, Tracking};
+use crate::init_choice::{Choices as Choice, Flags, Guide, Plan, Tracking};
 use crate::store::Elsewhere;
 use std::path::Path;
 
@@ -268,7 +268,42 @@ fn unread(lang: crate::i18n::Lang, fell: &Fell) -> String {
 /// 재려고 다시 읽던 판은 파일을 두 번 열었고, 둘째 읽기가 지면 빈 글로 쳐 바이너리가 쓴 블록을 손으로 고쳤다고 댔다.
 pub fn agents_state(root: &Path) -> Result<(BlockState, String), Fell> {
     let text = read_agents(root)?.unwrap_or_default();
-    Ok((block_state(&text, &crate::guide::agents()), text))
+    if !links_to_guide(&text) {
+        return Ok((block_state(&text, &crate::guide::agents()), text));
+    }
+    // **링크 모드면 두 자리를 다 잰다**(moai-cbfz) — 링크 블록이 맞고, 그것이 가리키는 파일이 이 바이너리가
+    // 쓸 전문과 같아야 맞다. 파일이 없어도 낡은 것이다: `init` 이 다시 쓴다.
+    let link = block_state(&text, &crate::guide::agents_link());
+    if link != BlockState::Current {
+        return Ok((link, text));
+    }
+    let guide = read_held(&root.join(crate::guide::GUIDE_FILE), &crate::held::Home::of(root))?;
+    let state = match guide.as_deref() == Some(crate::guide::agents().as_str()) {
+        true => BlockState::Current,
+        false => BlockState::Stale,
+    };
+    Ok((state, text))
+}
+
+/// 낡았다고 잰 AGENTS.md 에서 낡은 것이 링크 블록이 아니라 `.moai/guide.md` 인가 — 블록은 맞는 링크다.
+fn guide_file_stale(text: &str) -> bool {
+    links_to_guide(text) && block_state(text, &crate::guide::agents_link()) == BlockState::Current
+}
+
+/// AGENTS.md 의 블록이 `.moai/guide.md` 를 가리키는 링크인가 — 그러면 안내는 파일 모드로 심긴 것이다.
+/// 모드를 어디에도 적지 않고 이 글에서 읽는다.
+fn links_to_guide(text: &str) -> bool {
+    blocks(text).first().is_some_and(|&(start, stop)| text[start..stop].contains(crate::guide::GUIDE_FILE))
+}
+
+/// 다시 부른 `init` 이 맞출 안내 — 블록이 링크면 파일, git 밖의 트래커면 안 건드림, 그 밖은 지금까지처럼 블록.
+/// 못 읽는 AGENTS.md 는 블록으로 친다: 그 갈래는 `run` 이 아무것도 쓰기 전에 제 말로 멈춘다.
+fn guide_of(root: &Path, tracking: Tracking) -> Guide {
+    match read_agents(root) {
+        Ok(Some(text)) if links_to_guide(&text) => Guide::File,
+        _ if !tracking.tracked() => Guide::None,
+        _ => Guide::Block,
+    }
 }
 
 /// 이 저장소가 심는 딸린 파일 — `(이름, 규칙 블록, 알림의 갈래)`. **갈래를 표에 함께 둔다** —
@@ -584,7 +619,9 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
     let Ok((BlockState::Stale, text)) = agents_state(root) else { return None };
     // **어느 쪽 낡음인지까지 말한다**(2026-09-15 사용자 결정). 한 낱말로 뭉뚱그려 `moai init` 만
     // 대면, 아직 다시 빌드 안 한 바이너리를 든 세션이 그 말을 따라 새 안내를 옛 글로 되돌린다.
-    Some(crate::report::Warning::agents_stale(away_root(root, chdir).as_deref(), stale_kind(&text) == Stale::Edited))
+    // 링크가 맞는데 낡았으면 손댄 것은 `.moai/guide.md` 다 — 손질로 알린다: `init` 이 그것을 다시 쓴다.
+    let edited = guide_file_stale(&text) || stale_kind(&text) == Stale::Edited;
+    Some(crate::report::Warning::agents_stale(away_root(root, chdir).as_deref(), edited))
 }
 
 /// `moai init --check`. **아무것도 안 쓰고, 파일을 못 읽을 때만 0 이 아니다**(2026-09-14 사용자
@@ -645,6 +682,10 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
         BlockState::Current => say(lang, "init.block_current").to_string(),
         // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")`
         // 모양만 읽어, 키를 변수로 넘기면 그 눈에서 통째로 사라진다.
+        // 링크 블록이 맞는데 낡았으면 낡은 것은 `.moai/guide.md` 다 — 블록의 해시로 가르면 "다른 바이너리" 로 읽힌다.
+        BlockState::Stale if guide_file_stale(&text) => {
+            fill(say(lang, "init.guide_file_stale"), &[("file", crate::guide::GUIDE_FILE)])
+        }
         BlockState::Stale => match stale_kind(&text) {
             Stale::Binary => say(lang, "init.block_stale_binary").to_string(),
             Stale::Edited => say(lang, "init.block_stale_edited").to_string(),
@@ -1167,7 +1208,6 @@ fn one_line(message: &str) -> String {
 }
 
 pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
-    let (prefix, no_agents, no_driver) = (flags.prefix, flags.no_agents, flags.no_driver);
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
@@ -1198,12 +1238,20 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         // 그것만 빠졌고, 그 줄을 따라 친 사람은 안 심기로 한 드라이버를 심었다 — `--local` 은
         // 클론이 함께 쓰는 자리라 그 한 번이 **모든 체크아웃**에 앉는다. 깃발이 하나 늘면 줄도
         // 하나만 는다.
+        //
+        // 값을 받는 깃발은 정한 낱말로 되살린다 — `--no-agents` 는 `--guide none` 으로 섰다(`Flags`).
         let mut same = String::new();
-        if let Some(p) = prefix {
+        if let Some(p) = flags.prefix {
             same.push(' ');
             same.push_str(&crate::text::quoted(p));
         }
-        for (on, flag) in [(no_agents, " --no-agents"), (no_driver, " --no-driver")] {
+        let worded = [("--tracking", flags.tracking.map(Tracking::word)), ("--guide", flags.guide.map(Guide::word))];
+        for (flag, word) in worded {
+            if let Some(word) = word {
+                same.push_str(&format!(" {flag} {word}"));
+            }
+        }
+        for (on, flag) in [(flags.no_driver, " --no-driver"), (yes, " --yes")] {
             if on {
                 same.push_str(flag);
             }
@@ -1255,6 +1303,12 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             ));
         }
         fixed.tracking = Some(now);
+        // 안내도 파일에서 읽는다 — 블록이 `.moai/guide.md` 를 가리키면 그 모드다. 그 밖에는 지금까지처럼
+        // 블록을 맞추되, git 밖에 둔 트래커는 커밋되는 AGENTS.md 를 안 건드린다. 플래그로 주면 바꿔 심는다:
+        // 블록과 링크는 둘 다 `init` 이 쥔 글이라 갈아 끼워도 잃을 것이 없다.
+        if fixed.guide.is_none() {
+            fixed.guide = Some(guide_of(&root, now));
+        }
     }
     let git = git_dir(&root).is_some();
     let plan = if !again
@@ -1296,7 +1350,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         }
         plan
     };
-    let (prefix, no_agents, no_driver) = (plan.prefix.as_deref(), !plan.agents, !plan.driver);
+    let (prefix, no_agents, no_driver) = (plan.prefix.as_deref(), plan.guide == Guide::None, !plan.driver);
     // 디렉터리 이름이 길어 줄였으면 그 원래 모양 — 무엇에서 줄였는지 말하려고 든다.
     let mut shortened: Option<String> = None;
     let prefix = match (prefix, again) {
@@ -1442,7 +1496,11 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
-            let next = with_block(existing, &crate::guide::agents());
+            let block = match plan.guide {
+                Guide::File => crate::guide::agents_link(),
+                Guide::Block | Guide::None => crate::guide::agents(),
+            };
+            let next = with_block(existing, &block);
             if next == *existing {
                 false
             } else {
@@ -1456,12 +1514,32 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             }
         }
     };
+    // **안내 전문은 `.moai/guide.md` 에 통째로 쓴다**(moai-cbfz). `init` 이 쥔 파일이라 블록처럼 마커가 없고,
+    // 다시 쓰면 그대로 덮는다 — 사람이 고친 것은 `--check` 가 낡았다고 비춘다. 같으면 안 쓴다.
+    let mut guide_trouble = None;
+    let guide_file = plan.guide == Guide::File && {
+        let path = root.join(crate::guide::GUIDE_FILE);
+        let text = crate::guide::agents();
+        let now = read_held(&path, &crate::held::Home::of(&root)).ok().flatten();
+        now.as_deref() != Some(text.as_str())
+            && match plant(&path, &text) {
+                Ok(()) => true,
+                Err(why) => {
+                    guide_trouble = Some(Added::Unwritable { why, missing: Vec::new() });
+                    false
+                }
+            }
+    };
     // 딸린 파일과 **한 자리에서 말한다** — 못 건드린 것은 이름·갈래·까닭으로 함께 선다. 블록은
     // 줄 몇 개가 아니라 통째로 갈아 끼우는 글이라 "손으로 더할 줄" 이 없다(빈 글을 넘긴다):
     // 사람이 할 일은 쓸 수 있게 고치고 다시 부르는 것(못 썼을 때)이나 그 자리에 보통 파일을 두는 것(안 읽었을
     // 때)뿐이고, 그 말은 [`hand`] 가 빈 자리에서 고른다.
     let untouched: Vec<(&str, &Added, &str)> =
-        untouched.into_iter().chain(agents_trouble.iter().map(|t| ("AGENTS.md", t, ""))).collect();
+        untouched
+            .into_iter()
+            .chain(agents_trouble.iter().map(|t| ("AGENTS.md", t, "")))
+            .chain(guide_trouble.iter().map(|t| (crate::guide::GUIDE_FILE, t, "")))
+            .collect();
     // **`agents` 가 아니라 "AGENTS.md 를 다뤘는가" 로 묻는다** — `agents` 는 이제 *쓴* 때만 참이라
     // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
     //
@@ -1485,6 +1563,8 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             "prefix": prefix,
             "created": !again,
             "tracking": plan.tracking.word(),
+            "guide": plan.guide.word(),
+            "guide_file": guide_file,
             "gitattributes": matches!(attrs, Added::Wrote { .. }),
             "gitignore": matches!(ignore, Added::Wrote { .. }),
             "agents": agents,
@@ -1631,6 +1711,9 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     if agents {
         out.push(say(lang, "init.agents_synced").to_string());
     }
+    if guide_file {
+        out.push(fill(say(lang, "init.wrote_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
+    }
     // **줄 수가 아니라 한 일로 묻는다.** 줄을 세던 때는 이 자리 위에 줄 하나를 더하는 것만으로
     // 이 안내가 말없이 사라졌다 — `moai-knn0` 전까지 `agents` 가 늘 참이라 실제로 그랬다.
     // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
@@ -1639,6 +1722,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let did_nothing = attrs == Added::Already
         && ignore == Added::Already
         && !agents
+        && !guide_file
         && untouched.is_empty()
         && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
     if again && did_nothing {

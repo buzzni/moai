@@ -931,6 +931,21 @@ pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
 /// 블록이 곧 에이전트가 읽는 글이라** 고치지 않으면 도구가 제 명령을 없다고 가르친다.
 /// 나뉜 자리는 이렇다 — 보드(`status`)는 사람이 한 화면으로 훑는 것이고, `prime` 은
 /// 세션 첫머리와 접힌 뒤에 **다시 주입되는** 짧은 한 판이다. 둘 다 [`CHEATSHEET`] 에 선다.
+/// 안내 전문이 사는 파일(moai-cbfz) — `init --guide file` 이 쓴다. 트래커 디렉터리 안이라 뿌리를 안 어지르고,
+/// 추적 여부를 `.moai` 와 함께 따른다.
+pub const GUIDE_FILE: &str = ".moai/guide.md";
+
+/// `init --guide file` 이 AGENTS.md 블록에 두는 몇 줄. 파일이 없는 자리(그 파일을 안 담은 클론)를 위해 같은
+/// 글을 내는 명령을 함께 댄다 — 바이너리만 있으면 어디서든 같은 글을 얻는다.
+pub fn agents_link() -> String {
+    format!(
+        "## Issue tracker — moai\n\n\
+         This repository's work lives in `.moai/issues.jsonl`, and moai is the tool for it.\n\
+         Read [`{GUIDE_FILE}`]({GUIDE_FILE}) before you start — it says how to work here.\n\
+         If that file is not there, `moai init --print` prints the same text.\n"
+    )
+}
+
 pub fn agents() -> String {
     let ideas = ideas();
     format!(

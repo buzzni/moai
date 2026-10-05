@@ -76,7 +76,10 @@ fn names(f: Field, lang: Lang) -> (&'static str, Vec<&'static str>) {
                 say(lang, "init.ask_tracking_gitignore"),
             ],
         ),
-        Field::Agents => (say(lang, "init.ask_agents"), vec![say(lang, "init.ask_agents_on"), say(lang, "init.ask_agents_off")]),
+        Field::Guide => (
+            say(lang, "init.ask_guide"),
+            vec![say(lang, "init.ask_guide_block"), say(lang, "init.ask_guide_file"), say(lang, "init.ask_guide_none")],
+        ),
         Field::Driver => (say(lang, "init.ask_driver"), vec![say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")]),
     }
 }

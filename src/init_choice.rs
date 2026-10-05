@@ -50,12 +50,41 @@ impl Tracking {
     }
 }
 
+/// 에이전트에게 moai 를 어떻게 알리는가(moai-cbfz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Guide {
+    /// AGENTS.md 에 안내 전문을 블록으로 쓴다 — 지금까지의 `init` 이다.
+    Block,
+    /// 안내 전문은 `.moai/guide.md` 에 쓰고 AGENTS.md 에는 그것을 가리키는 몇 줄만 둔다.
+    File,
+    /// AGENTS.md 를 안 건드린다(`--no-agents`).
+    None,
+}
+
+impl Guide {
+    pub const ALL: [Guide; 3] = [Guide::Block, Guide::File, Guide::None];
+
+    /// 플래그와 `--json` 이 쓰는 낱말.
+    pub fn word(self) -> &'static str {
+        match self {
+            Guide::Block => "block",
+            Guide::File => "file",
+            Guide::None => "none",
+        }
+    }
+
+    pub fn parse(word: &str) -> Option<Guide> {
+        Guide::ALL.into_iter().find(|g| g.word() == word)
+    }
+}
+
 /// 플래그로 준 것. 하나로 묶어 받는다 — 칸이 늘 때마다 함수 인자가 늘면 부르는 자리가 순서로 틀린다.
 #[derive(Debug, Clone, Default)]
 pub struct Flags<'a> {
     pub prefix: Option<&'a str>,
     pub tracking: Option<Tracking>,
-    pub no_agents: bool,
+    /// `--guide`, 그리고 `--no-agents` 는 `--guide none` 이다.
+    pub guide: Option<Guide>,
     pub no_driver: bool,
 }
 
@@ -66,8 +95,7 @@ pub struct Choices {
     /// 셈하지 않는다.
     pub prefix: Option<String>,
     pub tracking: Option<Tracking>,
-    /// AGENTS.md 에 안내 블록을 쓰는가.
-    pub agents: Option<bool>,
+    pub guide: Option<Guide>,
     /// `.git/config` 에 머지 드라이버를 심는가.
     pub driver: Option<bool>,
 }
@@ -78,7 +106,7 @@ impl Choices {
         Choices {
             prefix: f.prefix.map(str::to_string),
             tracking: f.tracking,
-            agents: f.no_agents.then_some(false),
+            guide: f.guide,
             driver: f.no_driver.then_some(false),
         }
     }
@@ -88,7 +116,7 @@ impl Choices {
         Choices {
             prefix: self.prefix.clone().or_else(|| under.prefix.clone()),
             tracking: self.tracking.or(under.tracking),
-            agents: self.agents.or(under.agents),
+            guide: self.guide.or(under.guide),
             driver: self.driver.or(under.driver),
         }
     }
@@ -101,7 +129,7 @@ impl Choices {
         FIELDS.iter().filter(|f| shown(**f, &plan)).all(|f| match f {
             Field::Prefix => self.prefix.is_some(),
             Field::Tracking => self.tracking.is_some(),
-            Field::Agents => self.agents.is_some(),
+            Field::Guide => self.guide.is_some(),
             Field::Driver => self.driver.is_some(),
         })
     }
@@ -111,18 +139,25 @@ impl Choices {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Defaults {
     pub tracking: Tracking,
-    pub agents: bool,
+    /// 커밋할 때의 안내. 앞 칸(추적)이 이 칸의 기본을 고른다.
+    pub guide_tracked: Guide,
+    /// 이 클론에만 둘 때의 안내 — 커밋되는 AGENTS.md 에 이 클론에만 있는 파일을 가리키게 하지 않는다.
+    pub guide_local: Guide,
     pub driver: bool,
 }
 
 /// 선택 상자가 미리 골라 두는 값. 추적은 안 한다 — 이 클론에만 두고 커밋되는 파일을 하나도 안
 /// 바꾸는 쪽이 기본이다(2026-10-06 사용자 결정, moai-zynt.own).
-pub const SCREEN: Defaults = Defaults { tracking: Tracking::Exclude, agents: true, driver: true };
+///
+/// 안내는 커밋하면 별도 파일과 링크(moai-cbfz), 이 클론에만 두면 AGENTS.md 를 안 건드린다(사용자 결정).
+pub const SCREEN: Defaults =
+    Defaults { tracking: Tracking::Exclude, guide_tracked: Guide::File, guide_local: Guide::None, driver: true };
 
 /// 터미널이 아닌 곳(에이전트·스크립트)과 `--yes` 의 값. **지금까지의 `init` 과 바이트째 같아야 한다**
 /// (2026-10-06 사용자 결정) — 에이전트가 부르던 결과를 이 묶음이 지킨다. 화면의 기본값이 달라져도
 /// 이쪽은 안 따라간다.
-pub const PLAIN: Defaults = Defaults { tracking: Tracking::Commit, agents: true, driver: true };
+pub const PLAIN: Defaults =
+    Defaults { tracking: Tracking::Commit, guide_tracked: Guide::Block, guide_local: Guide::None, driver: true };
 
 /// 빈칸 없는 계획. `init::run` 은 이것만 받고 판단하지 않는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,7 +165,7 @@ pub struct Plan {
     /// `None` 이면 디렉터리 이름에서 짓는다(위 [`Choices::prefix`]).
     pub prefix: Option<String>,
     pub tracking: Tracking,
-    pub agents: bool,
+    pub guide: Guide,
     pub driver: bool,
 }
 
@@ -138,10 +173,10 @@ pub struct Plan {
 /// 먼저 정하고, 뒤 칸은 이미 정한 앞 칸만 읽는다.
 pub fn resolve(c: &Choices, d: &Defaults) -> Plan {
     let tracking = c.tracking.unwrap_or(d.tracking);
-    let agents = c.agents.unwrap_or(d.agents);
+    let guide = c.guide.unwrap_or(if tracking.tracked() { d.guide_tracked } else { d.guide_local });
     // 추적하지 않으면 머지 드라이버는 할 일이 없다 — git 이 그 파일을 병합할 일이 없다. 고른 값은 두고 끈다.
     let driver = tracking.tracked() && c.driver.unwrap_or(d.driver);
-    Plan { prefix: c.prefix.clone(), tracking, agents, driver }
+    Plan { prefix: c.prefix.clone(), tracking, guide, driver }
 }
 
 /// 화면의 한 칸.
@@ -149,18 +184,18 @@ pub fn resolve(c: &Choices, d: &Defaults) -> Plan {
 pub enum Field {
     Prefix,
     Tracking,
-    Agents,
+    Guide,
     Driver,
 }
 
 /// 화면에 서는 차례. 규칙의 차례(머리글)와 맞춘다 — 앞 칸을 고르면 아래 칸이 바뀌는 쪽이 읽기 쉽다.
-pub const FIELDS: [Field; 4] = [Field::Prefix, Field::Tracking, Field::Agents, Field::Driver];
+pub const FIELDS: [Field; 4] = [Field::Prefix, Field::Tracking, Field::Guide, Field::Driver];
 
 /// 이 계획에서 그 칸이 서는가. 숨는 칸은 앞 칸이 이미 답을 정한 칸이다.
 pub fn shown(f: Field, plan: &Plan) -> bool {
     match f {
         Field::Driver => plan.tracking.tracked(),
-        Field::Prefix | Field::Tracking | Field::Agents => true,
+        Field::Prefix | Field::Tracking | Field::Guide => true,
     }
 }
 
@@ -218,7 +253,7 @@ impl Form {
         match f {
             Field::Prefix => self.fixed.prefix.is_some(),
             Field::Tracking => self.fixed.tracking.is_some(),
-            Field::Agents => self.fixed.agents.is_some(),
+            Field::Guide => self.fixed.guide.is_some(),
             Field::Driver => self.fixed.driver.is_some(),
         }
     }
@@ -249,8 +284,8 @@ impl Form {
         match f {
             Field::Prefix => None,
             Field::Tracking => Some((Tracking::ALL.len(), Tracking::ALL.iter().position(|t| *t == plan.tracking)?)),
+            Field::Guide => Some((Guide::ALL.len(), Guide::ALL.iter().position(|g| *g == plan.guide)?)),
             // 켜는 값이 왼쪽(0), 끄는 값이 오른쪽(1)에 그려진다.
-            Field::Agents => Some((2, usize::from(!plan.agents))),
             Field::Driver => Some((2, usize::from(!plan.driver))),
         }
     }
@@ -259,7 +294,7 @@ impl Form {
         match f {
             Field::Prefix => {}
             Field::Tracking => self.picked.tracking = Some(Tracking::ALL[at]),
-            Field::Agents => self.picked.agents = Some(at == 0),
+            Field::Guide => self.picked.guide = Some(Guide::ALL[at]),
             Field::Driver => self.picked.driver = Some(at == 0),
         }
     }
@@ -360,10 +395,10 @@ mod tests {
     #[test]
     fn a_flag_and_the_same_pick_on_screen_make_one_plan() {
         for tracking in Tracking::ALL {
-            for no_agents in [false, true] {
+            for guide in Guide::ALL {
                 for no_driver in [false, true] {
                     for prefix in [None, Some("abc")] {
-                        let flags = Flags { prefix, tracking: Some(tracking), no_agents, no_driver };
+                        let flags = Flags { prefix, tracking: Some(tracking), guide: Some(guide), no_driver };
                         let by_flags = resolve(&Choices::from_flags(&flags), &SCREEN);
                         let mut f = form(Choices::default());
                         if let Some(p) = prefix {
@@ -374,7 +409,7 @@ mod tests {
                         choose(&mut f, Field::Tracking, 0);
                         choose(&mut f, Field::Driver, usize::from(no_driver));
                         f.cursor = Field::Prefix;
-                        choose(&mut f, Field::Agents, usize::from(no_agents));
+                        choose(&mut f, Field::Guide, Guide::ALL.iter().position(|g| *g == guide).unwrap());
                         f.cursor = Field::Prefix;
                         choose(&mut f, Field::Tracking, Tracking::ALL.iter().position(|t| *t == tracking).unwrap());
                         assert_eq!(f.plan(), by_flags, "{flags:?}");
@@ -389,7 +424,7 @@ mod tests {
     fn plain_defaults_keep_what_init_always_did() {
         assert_eq!(
             resolve(&Choices::default(), &PLAIN),
-            Plan { prefix: None, tracking: Tracking::Commit, agents: true, driver: true }
+            Plan { prefix: None, tracking: Tracking::Commit, guide: Guide::Block, driver: true }
         );
     }
 
@@ -425,10 +460,10 @@ mod tests {
     #[test]
     fn no_driver_without_tracking_in_any_combination() {
         for tracking in [None].into_iter().chain(Tracking::ALL.map(Some)) {
-            for agents in [None, Some(true), Some(false)] {
+            for guide in [None].into_iter().chain(Guide::ALL.map(Some)) {
                 for driver in [None, Some(true), Some(false)] {
                     for d in [SCREEN, PLAIN] {
-                        let c = Choices { prefix: None, tracking, agents, driver };
+                        let c = Choices { prefix: None, tracking, guide, driver };
                         let plan = resolve(&c, &d);
                         assert!(plan.tracking.tracked() || !plan.driver, "{c:?} {d:?}");
                     }
@@ -442,7 +477,7 @@ mod tests {
         let mut f = form(Choices::from_flags(&Flags { tracking: Some(Tracking::Commit), ..Flags::default() }));
         assert!(f.locked(Field::Tracking));
         f.key(press(KeyCode::Down));
-        assert_eq!(f.cursor, Field::Agents, "the locked row is stepped over");
+        assert_eq!(f.cursor, Field::Guide, "the locked row is stepped over");
         f.key(press(KeyCode::Up));
         assert_eq!(f.cursor, Field::Prefix);
         // 잠긴 칸은 키로 못 바꾼다.
@@ -478,6 +513,20 @@ mod tests {
         assert_eq!(f.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)), Act::Stop);
     }
 
+    /// 안내의 기본은 앞 칸(추적)이 고른다 — 커밋하면 별도 파일, 이 클론에만 두면 AGENTS.md 를 안 건드린다.
+    /// 사람이 고른 안내는 추적을 바꿔도 남는다.
+    #[test]
+    fn the_guide_default_follows_tracking_and_a_pick_stays() {
+        let mut f = form(Choices::default());
+        assert_eq!(f.plan().guide, Guide::None);
+        choose(&mut f, Field::Tracking, 0);
+        assert_eq!(f.plan().guide, Guide::File);
+        choose(&mut f, Field::Guide, 0);
+        f.cursor = Field::Prefix;
+        choose(&mut f, Field::Tracking, 1);
+        assert_eq!(f.plan().guide, Guide::Block);
+    }
+
     #[test]
     fn space_cycles_and_arrows_stop_at_the_ends() {
         let mut f = form(Choices::default());
@@ -495,7 +544,7 @@ mod tests {
         let full = |tracking, driver| Choices {
             prefix: Some("a".into()),
             tracking: Some(tracking),
-            agents: Some(true),
+            guide: Some(Guide::Block),
             driver,
         };
         assert!(full(Tracking::Exclude, None).complete(&SCREEN), "the driver row is hidden");
