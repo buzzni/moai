@@ -2162,6 +2162,15 @@ pub(crate) fn write_atomic_inside(path: &Path, bytes: &[u8], checkout: &Path) ->
     atomic(path, bytes, Some(checkout), None)
 }
 
+/// [`write_atomic_inside`] 가 이 자리에 쓸지를 **쓰지 않고** 잰다 — 같은 자([`target_of`])라 여기서 지난 자리는 그
+/// 쓰기도 거절하지 않는다(moai-dj4j.ug2). 파일 여럿을 차례로 쓰는 쪽이 **첫 쓰기 전에** 모든 자리를 재려고 둔다 —
+/// 쓰면서 재면 뒤의 자리가 거절될 때 앞의 것은 이미 바뀌어 있고, 거절문의 "nothing is written" 이 거짓이 된다.
+/// 아무것도 안 연다([`on_lock`]) — FIFO 가 선 자리에서도 멈추지 않는다. 재는 것은 거절뿐이라 디스크가 차거나 권한이
+/// 없어 실패하는 쓰기는 여기서 못 본다.
+pub(crate) fn measure_inside(path: &Path, checkout: &Path) -> R<()> {
+    target_of(path, Some(checkout)).map(drop)
+}
+
 /// [`write_atomic`]·[`write_atomic_inside`]·[`write_atomic_in`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한
 /// 벌이다. 차례는 `stage`(받았으면) → 받은 철자 곁 → 가리키는 파일 곁이고, 같은 자리는 한 번만 간다. 실패한 자리는
 /// 임시 파일을 치우고 대상을 안 건드리므로([`replace`]) 다음 자리로 가도 잃을 것이 없다. 다 실패하면 마지막 자리의
@@ -2194,8 +2203,8 @@ fn parent_of<'a>(path: &'a Path, named: &Path) -> R<&'a Path> {
 }
 
 /// 쓸 자리 — [`resolve`] 가 낸 자리이되 **저장소 락이 아닐 때만** 낸다. 체크아웃 안의 쓰기
-/// ([`write_atomic_inside`]·[`write_atomic_in`]·[`append_inside`])가 모두 여기를 지난다. 무엇을 거절하는지는
-/// [`resolve`] 에 있고, 여기서 더하는 것은 락 하나다.
+/// ([`write_atomic_inside`]·[`write_atomic_in`]·[`append_inside`])와 쓰기 전에 재는 [`measure_inside`] 가 모두 여기를
+/// 지난다. 무엇을 거절하는지는 [`resolve`] 에 있고, 여기서 더하는 것은 락 하나다.
 ///
 /// **체크아웃 안이라도 저장소 락 자리는 아니다**(moai-x0o7.97w, [`on_lock`]). 받은 저장소가
 /// `AGENTS.md -> .moai/lock` 을 커밋해 두면 `moai init` 이 그 링크를 따라 락을 `rename` 으로 한 번 갈아끼웠다 —
@@ -4656,6 +4665,33 @@ mod tests {
         assert_eq!(read(), "three\n");
         assert_eq!(names(&stage), Vec::<String>::new(), "임시 자리에 찌꺼기가 남았다");
         assert_eq!(names(&tree), ["SKILL.md"], "대상 곁에 찌꺼기가 남았다");
+    }
+
+    /// **재는 자는 쓰는 자와 같은 말로 거절하고 아무것도 안 바꾼다**(moai-dj4j.ug2, [`measure_inside`]) — 파일 여럿을
+    /// 쓰는 쪽이 첫 쓰기 전에 그것으로 다 잰다. 다른 말을 하면 재기를 지난 자리를 쓰기가 거절해, 트리 반쪽이 쓰인 채
+    /// 멈춘다. 체크아웃 밖을 가리키는 링크와 FIFO 는 거절하고, 아직 없는 자리는 지나보낸다(쓰기가 짓는다). FIFO 를 열지
+    /// 않으므로 멈추지 않는다.
+    #[cfg(unix)]
+    #[test]
+    fn measuring_refuses_what_the_write_refuses_and_touches_nothing() {
+        let s = Scratch::new("store-measure");
+        let away = Scratch::new("store-measure-away");
+        let victim = away.join("rc");
+        std::fs::write(&victim, "rc\n").unwrap();
+        let link = s.join("plugin.json");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+        let fifo = s.join("fifo");
+        assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success(), "FIFO 를 못 지었다");
+
+        for at in [&link, &fifo] {
+            let measured = measure_inside(at, s.path()).expect_err("쓰기가 거절할 자리를 지나보냈다");
+            let wrote = write_atomic_inside(at, b"x\n", s.path()).expect_err("쓰기가 그 자리를 받았다");
+            assert_eq!(measured.message, wrote.message, "재는 자와 쓰는 자가 다른 말을 한다");
+        }
+        measure_inside(&s.join("not/yet/there.md"), s.path()).expect("아직 없는 자리를 거절했다");
+        assert_eq!(names(s.path()), ["fifo", "plugin.json"], "재기만 했는데 무엇을 지었다");
+        assert!(is_link(&link), "링크를 갈아끼웠다");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "rc\n", "체크아웃 밖의 파일을 고쳤다");
     }
 
     /// **가리키는 파일이 아직 없으면 거기에 만든다** — dotfiles 는 링크를 먼저 걸기도 한다. 가리키는

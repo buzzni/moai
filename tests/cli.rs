@@ -18187,7 +18187,7 @@ fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
 /// `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로 `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영
 /// 기다렸다. 고침이 없으면 멈추므로 마감을 두고 부른다 — 멈춘 프로세스는 죽이고 시험이 진다. 설정은 옛 판 moai 가
 /// project 범위에 선 장부여야 읽힌다(옛 선언을 걷는 걸음). 못 읽는 설정은 걸음을 안 세울 뿐 설치를 안 막고, 보통
-/// 파일이 아닌 `plugin.json` 은 다시 심는 길이 그 자리를 대며 비영으로 멈춘다(`store::write_atomic_inside`).
+/// 파일이 아닌 `plugin.json` 은 다시 심는 길과 그 연습이 그 자리를 대며 비영으로 멈춘다(`store::measure_inside`).
 #[cfg(unix)]
 #[test]
 fn skill_reads_no_fifo_in_the_committed_plugin_or_settings() {
@@ -18250,13 +18250,16 @@ fn skill_reads_no_fifo_in_the_committed_plugin_or_settings() {
 
     let manifest = dir.join(".claude-plugin/plugin.json");
     fifo(&manifest);
-    for args in [&["skill", "status"][..], &["skill", "install", "--dry-run"]] {
+    let out = bounded(&["skill", "status"]);
+    assert!(out.status.success(), "{}", text(&out));
+    // **연습도 같은 자로 잰다**(moai-dj4j.ug2) — 이름 겹침만 재던 연습은 진짜 실행이 거절할 트리에도 등록을 약속하고
+    // 0 으로 끝났다(리뷰 moai-ml0d.que 7번).
+    for args in [&["skill", "install", "--dry-run"][..], &["skill", "install"]] {
         let out = bounded(args);
-        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+        assert!(!out.status.success(), "{args:?}: 못 심을 자리가 있는데 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains("plugin.json"), "{args:?}: 어느 자리인지 안 댄다\n{}", text(&out));
+        assert!(!text(&out).contains("plugin install"), "{args:?}: 못 심을 트리에 등록을 약속한다\n{}", text(&out));
     }
-    let out = bounded(&["skill", "install"]);
-    assert!(!out.status.success(), "못 심은 자리가 있는데 성공으로 끝났다\n{}", text(&out));
-    assert!(text(&out).contains("plugin.json"), "어느 자리인지 안 댄다\n{}", text(&out));
     assert!(!std::fs::symlink_metadata(&manifest).unwrap().is_file(), "FIFO 를 갈아끼웠다");
 }
 
@@ -18711,8 +18714,9 @@ fn skill_install_writes_the_plugin_tree_through_no_link_outside() {
     assert_eq!(built, ["bashrc"], "체크아웃 밖에 지었다");
 
     // `uninstall` 도 밖에 선 트리를 심은 파일로 대지 않는다 — 그 자리(`.claude/moai-plugin/`)를 지우면 링크를 지나 밖을
-    // 지운다. 걷을 등록이 있어야 그 줄까지 가므로 이 저장소의 이름을 장부에 세운다.
-    let plan = String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+    // 지운다. 걷을 등록이 있어야 그 줄까지 가므로 이 저장소의 이름을 장부에 세운다. 이름은 `status` 에서 읽는다 — 이
+    // 트리 앞에서는 연습도 거절한다(moai-dj4j.ug2).
+    let plan = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
     let market = field(&plan, "market");
     let place = json_str(&plugin.display().to_string());
     c.ledger("known_marketplaces.json", &format!(r#"{{"{market}":{{"installLocation":{place}}}}}"#));
@@ -26102,4 +26106,50 @@ fn every_dialect_and_event_never_fails() {
             }
         }
     }
+}
+
+/// **고른 트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 6·7번) — `.agents`·훅 파일을 쓰고 나서
+/// Claude 의 트리가 거절되던 판은 `{"error":…}` 하나로 끝나, 앞서 쓴 절반(`agents_files`·`hooks`, Codex 의 `/hooks`
+/// 줄)을 아무도 몰랐다. 이제 한 트리가 거절되면 아무 트리도 안 쓰고 `claude` 도 안 부른다. 연습도 같은 말로 멈춘다 —
+/// 진짜 실행이 거절할 트리에 등록을 약속하고 0 으로 끝나지 않는다.
+#[cfg(unix)]
+#[test]
+fn skill_install_measures_every_chosen_tree_before_the_first_write() {
+    let s = init("skillmeasure");
+    let c = Claude::new("skillmeasure-home");
+    let away = Scratch::new("skillmeasure-away");
+    let victim = away.path().join("bashrc");
+    std::fs::write(&victim, "# 사람의 rc\n").unwrap();
+    let plugin = s.path().join(".claude/moai-plugin");
+    let manifest = plugin.join(".claude-plugin/plugin.json");
+    std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&victim, &manifest).unwrap();
+    let (agents, codex) = (s.path().join(".agents"), s.path().join(".codex/hooks.json"));
+    assert!(!agents.exists() && !codex.exists(), "init 이 이미 심었다 — 이 시험이 재는 것이 없다");
+
+    for dry_run in [true, false] {
+        let mut args = vec!["skill", "install", "--agent", "codex", "--agent", "claude"];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        let out = c.run(s.path(), &args, true);
+        assert!(!out.status.success(), "{args:?}: 못 심을 트리가 있는데 성공으로 끝났다\n{}", text(&out));
+        assert!(
+            text(&out).contains("plugin.json") && text(&out).contains("outside"),
+            "{args:?}: 어느 자리인지 안 댄다\n{}",
+            text(&out)
+        );
+        assert!(!text(&out).contains("plugin install"), "{args:?}: 못 심을 트리에 등록을 약속한다\n{}", text(&out));
+        assert!(!agents.exists(), "{args:?}: 거절될 설치가 .agents 를 먼저 썼다");
+        assert!(!codex.exists(), "{args:?}: 거절될 설치가 Codex 의 훅을 먼저 썼다");
+        assert!(!plugin.join("skills").exists(), "{args:?}: 거절될 트리의 스킬 글을 먼저 썼다");
+    }
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 덮었다");
+    assert_eq!(c.calls(), "", "거절될 설치가 claude 를 불렀다");
+
+    // 매니페스트를 보통 파일로 돌리면 같은 부름이 세 트리를 다 심는다 — 위의 거절이 그 링크 하나 때문이었다.
+    std::fs::remove_file(&manifest).unwrap();
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex", "--agent", "claude"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(agents.join("skills/moai/SKILL.md").is_file() && codex.is_file() && manifest.is_file());
 }

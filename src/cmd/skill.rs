@@ -172,33 +172,53 @@ impl Chosen {
 }
 
 /// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). 커밋된 트리 셋 — [`skill::AGENTS_DIR`]·Claude 의
-/// 플러그인([`skill::DIR`], moai-ml0d.izy)·두 에이전트의 훅 파일([`HookFile::plant`]) — 이 모두 이 하나로 쓴다. 읽는
+/// 플러그인([`skill::DIR`], moai-ml0d.izy)·두 에이전트의 훅 파일([`HookFile`]) — 이 모두 이 하나로 쓴다. 읽는
 /// 짝은 [`read_committed`] 다. 임시 파일을 갈아끼우니([`write_one`]) 쓰려고 열지 않아 그 자리에 선 FIFO 앞에서
 /// 멈추지 않고(보통 파일이 아닌 자리는 그 자리를 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다.
 /// 갈아끼우는 `rename` 은 그 이름이 비는 틈을 안 남겨, 지우지 않는다는 이 모듈의 약속도 그대로다.
 ///
-/// **임시 파일은 `.moai/` 에 먼저 짓는다**([`write_one`], moai-dj4j.rs4).
+/// **트리를 다 잰 뒤에 첫 파일을 쓴다**([`measure`], moai-dj4j.ug2). 파일마다 쓰는 그때 재던 판은 트리가
+/// `skills/**` 를 `plugin.json` 앞에 두어, 매니페스트가 거절되면 새 스킬 글이 옛 매니페스트 밑에 선 채 거절문은
+/// "nothing is written" 이라 했다(리뷰 moai-ml0d.que 8번 — 다섯 파일이 바뀌었다).
 ///
-/// **디렉터리를 짓기 전에도 잰다**(리뷰 moai-xs2h.dir) — `create_dir_all` 은 가운데 링크를 그대로 따라가, 받은
-/// 저장소가 커밋한 `.agents -> <밖>` 하나로 체크아웃 밖에 `skills/moai/references/` 를 지은 뒤에야
-/// `write_atomic_inside` 가 파일을 거절했다. 파일만 막고 디렉터리는 밖에 남기면 "체크아웃 안에서만 링크를 따른다"
-/// (moai-4oab) 가 반쪽이다.
+/// **임시 파일은 `.moai/` 에 먼저 짓는다**([`write_one`], moai-dj4j.rs4).
 fn write_committed(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
+    measure(dir, files, root)?;
     for (path, body) in files {
         let at = dir.join(path);
         if let Some(parent) = at.parent() {
-            if let Some(landed) = outside(parent, root) {
-                return Err(Fail::new(format!(
-                    "{} points at {}, outside {} — nothing is written there. A directory the repository holds is \
-                     followed only inside it: replace the link with a directory",
-                    parent.display(),
-                    crate::text::one_line(&landed.display().to_string()),
-                    root.display()
-                )));
-            }
             std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
         }
         write_one(&at, body.as_bytes(), root)?;
+    }
+    Ok(())
+}
+
+/// 트리의 자리를 다 잰다 — **아무것도 안 쓰고 안 짓는다**(moai-dj4j.ug2). [`write_committed`] 가 거절할 자리를 여기서
+/// 먼저 만난다: 체크아웃 밖이나 `.git` 에 닿는 디렉터리, 그리고 파일마다 [`crate::store::measure_inside`] 가 거절하는
+/// 자리(밖을 가리키는 링크, 보통 파일이 아닌 것, 락). `install` 은 고른 트리를 다 이것으로 잰 뒤에 첫 파일을 쓰고,
+/// `--dry-run` 도 같은 자로 재 진짜 실행이 거절할 트리를 약속하지 않는다. 디스크가 차거나 권한이 없어 실패하는 쓰기는
+/// 여기서 못 본다 — 그것은 쓰는 그때 멈춘다.
+///
+/// **디렉터리를 짓기 전에 잰다**(리뷰 moai-xs2h.dir) — `create_dir_all` 은 가운데 링크를 그대로 따라가, 받은
+/// 저장소가 커밋한 `.agents -> <밖>` 하나로 체크아웃 밖에 `skills/moai/references/` 를 지은 뒤에야
+/// `write_atomic_inside` 가 파일을 거절했다. 파일만 막고 디렉터리는 밖에 남기면 "체크아웃 안에서만 링크를 따른다"
+/// (moai-4oab) 가 반쪽이다.
+fn measure(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
+    for (path, _) in files {
+        let at = dir.join(path);
+        if let Some(parent) = at.parent()
+            && let Some(landed) = outside(parent, root)
+        {
+            return Err(Fail::new(format!(
+                "{} points at {}, outside {} — nothing is written there. A directory the repository holds is \
+                 followed only inside it: replace the link with a directory",
+                parent.display(),
+                crate::text::one_line(&landed.display().to_string()),
+                root.display()
+            )));
+        }
+        crate::store::measure_inside(&at, root)?;
     }
     Ok(())
 }
@@ -234,17 +254,35 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     let place = place(ctx)?;
     let shared =
         (!chosen.shared.is_empty()).then(|| (place.root.join(skill::AGENTS_DIR), skill::agents_tree(&place.skills)));
-    // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
-    // 안 기댄다. 못 쓰면 `claude` 를 부르기 전에 멈춘다.
-    if let (Some((dir, files)), false) = (&shared, dry_run) {
-        write_committed(dir, files, &place.root)?;
-    }
-    // **훅 파일도 Claude 보다 먼저다**(moai-u5wr.kov) — 같은 까닭이다. 남의 파일은 안 쓰고 한 줄로 댄다([`HookFile`]).
     let root = place.root.clone();
+    // 남의 훅 파일은 안 쓰고 한 줄로 댄다([`HookFile`]) — 쓸 것은 없거나 moai 의 것인 파일뿐이다.
     let hooks: Vec<(HookFile, HookState)> = HookFile::chosen(&root, &place.exe, &chosen)
         .into_iter()
-        .map(|h| h.plant(&root, dry_run).map(|state| (h, state)))
-        .collect::<R<_>>()?;
+        .map(|h| {
+            let state = h.state(&root);
+            (h, state)
+        })
+        .collect();
+    let hooked: Vec<(PathBuf, String)> =
+        hooks.iter().filter(|(_, state)| state.due()).map(|(h, _)| h.file(&root)).collect();
+    // **고른 트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 6·7번). `.agents`·훅 파일을 쓰고 나서
+    // Claude 의 트리가 거절되던 판은 `Err` 하나로 끝나 앞서 쓴 절반의 보고(`agents_files`·`hooks`, Codex 의 `/hooks`
+    // 줄)를 잃었다. 연습도 같은 자로 잰다 — 이름 겹침만 재던 연습은 진짜 실행이 거절할 트리에도 등록을 약속하고 0 으로
+    // 끝났다. 거절되면 아무것도 안 썼고 `claude` 도 안 불렀다.
+    let claude_tree = chosen.claude.then_some((place.dir.as_path(), place.files.as_slice()));
+    let trees =
+        shared.iter().map(|(dir, files)| (dir.as_path(), files.as_slice())).chain([(root.as_path(), &hooked[..])]);
+    for (dir, files) in trees.chain(claude_tree) {
+        measure(dir, files, &root)?;
+    }
+    // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
+    // 안 기댄다. 훅 파일도 같은 까닭이다(moai-u5wr.kov). 못 쓰면 `claude` 를 부르기 전에 멈춘다.
+    if !dry_run {
+        if let Some((dir, files)) = &shared {
+            write_committed(dir, files, &root)?;
+        }
+        write_committed(&root, &hooked, &root)?;
+    }
     let (mut json, claude) = match chosen.claude {
         true => claude_install(ctx, place, scope.unwrap_or(Scope::Local).as_str(), dry_run)?,
         false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
@@ -266,7 +304,7 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
                         "agent": h.agent.as_str(),
                         "path": h.path.display().to_string(),
                         "was": state.as_str(),
-                        "written": !dry_run && matches!(state, HookState::Missing | HookState::Stale),
+                        "written": !dry_run && state.due(),
                     })
                 })
                 .collect();
@@ -733,6 +771,11 @@ impl HookState {
             HookState::Foreign => "foreign",
         }
     }
+
+    /// `install` 이 쓸 상태인가 — 없거나 moai 의 것인데 낡았다.
+    fn due(self) -> bool {
+        matches!(self, HookState::Missing | HookState::Stale)
+    }
 }
 
 impl HookFile {
@@ -762,7 +805,7 @@ impl HookFile {
     }
 
     /// **보통 파일만, 체크아웃 안에서만 읽는다**([`read_committed`], [`Shared::read`] 와 같은 까닭). 못 읽는 자리는
-    /// moai 의 것이 아니다 — 다시 쓰는 길도 그 자리를 거절한다(`write_atomic_inside`). **뜻으로 견준다**
+    /// moai 의 것이 아니다 — 다시 쓰는 길도 그 자리를 거절한다([`write_committed`]). **뜻으로 견준다**
     /// ([`skill::same_hooks`]) — agy 가 제 꼴로 다시 쓴 파일을 낡았다고 하면 다시 심을 때마다 커밋된 파일이 흔들린다.
     fn state(&self, root: &Path) -> HookState {
         self.judged(root).0
@@ -809,17 +852,10 @@ impl HookFile {
         self.path.strip_prefix(root).unwrap_or(&self.path).display().to_string()
     }
 
-    /// 심는다 — 없거나 moai 의 것일 때만 쓴다. 쓴 뒤의 상태가 아니라 **쓰기 전의 상태**를 돌려준다.
-    fn plant(&self, root: &Path, dry_run: bool) -> R<HookState> {
-        let state = self.state(root);
-        if matches!(state, HookState::Missing | HookState::Stale) && !dry_run {
-            write_committed(
-                root,
-                &[(self.path.strip_prefix(root).unwrap_or(&self.path).to_path_buf(), self.want.clone())],
-                root,
-            )?;
-        }
-        Ok(state)
+    /// 심을 파일 — 저장소 뿌리부터의 자리와 지금 판의 글. 쓰는 것은 `install` 이 다른 트리와 함께 잰 뒤에 한다
+    /// ([`write_committed`]) — 없거나 moai 의 것일 때만이다([`HookState::due`]).
+    fn file(&self, root: &Path) -> (PathBuf, String) {
+        (self.path.strip_prefix(root).unwrap_or(&self.path).to_path_buf(), self.want.clone())
     }
 
     /// `install` 이 내는 줄 — 심었는지, 그대로인지, 남의 것이라 안 썼는지. Codex 에는 믿어 달라는 한 줄을 붙인다.
@@ -1571,6 +1607,35 @@ mod tests {
             std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         v.sort();
         v
+    }
+
+    /// **트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 8번) — 트리는 `skills/**` 를
+    /// `plugin.json` 앞에 둔다. 파일마다 쓰는 그때 재던 판은 매니페스트가 거절될 때 스킬 글을 이미 갈아끼웠고, 거절문은
+    /// "nothing is written" 이라 했다. 디렉터리도 안 짓는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_manifest_leaves_the_whole_tree_unwritten() {
+        let s = crate::scratch::Scratch::new("skill-measure-first");
+        let away = crate::scratch::Scratch::new("skill-measure-first-away");
+        let victim = away.join("rc");
+        std::fs::write(&victim, "rc\n").unwrap();
+        let dir = s.join("plugin");
+        std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        std::fs::create_dir_all(dir.join("skills/moai")).unwrap();
+        let skill = dir.join("skills/moai/SKILL.md");
+        std::fs::write(&skill, "옛 글\n").unwrap();
+        std::os::unix::fs::symlink(&victim, dir.join(".claude-plugin/plugin.json")).unwrap();
+        let files = [
+            (PathBuf::from("skills/moai/SKILL.md"), "새 글\n".to_string()),
+            (PathBuf::from("skills/moai-wiki/SKILL.md"), "새 위키\n".to_string()),
+            (PathBuf::from(".claude-plugin/plugin.json"), "{}\n".to_string()),
+        ];
+
+        let e = write_committed(&dir, &files, s.path()).expect_err("체크아웃 밖을 가리키는 매니페스트를 받았다");
+        assert!(e.message.contains("plugin.json") && e.message.contains("nothing is written"), "{}", e.message);
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), "옛 글\n", "거절된 트리의 앞 파일을 갈아끼웠다");
+        assert_eq!(names(&dir.join("skills")), ["moai"], "거절된 트리에 디렉터리를 지었다");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "rc\n", "체크아웃 밖의 파일을 고쳤다");
     }
 
     /// **커밋되는 트리의 임시 파일은 `.moai/` 에 선다**(moai-dj4j.rs4) — 대상 곁에 서면 쓰다 죽은 `install` 이
