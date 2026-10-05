@@ -137,7 +137,11 @@ does not tag — see `CONTRIBUTING.md`.
   `/hooks` has no configuration warning for the file: `additionalContextLimit`
   stands on `SessionStart`, `UserPromptSubmit` and `PreToolUse`, the events
   that can add context, and `Interrupt` and `SessionEnd` get 3 seconds, the
-  most Codex gives them. Antigravity has no prompt event, so its first model
+  most Codex gives them. The letters a Codex turn's end holds the turn with
+  stay within 8,000 bytes, because Codex keeps that text to its default of
+  about 2,500 tokens and no setting raises it — a longer letter is cut there,
+  naming `moai inbox --all`, where Codex would have moved its middle into a
+  file. Antigravity has no prompt event, so its first model
   call of a turn loads the board and the letters; a turn is held with
   `decision: continue`. A hooks file moai did not write is left as it is, with
   one line saying so — for Antigravity that includes moai's group with a
