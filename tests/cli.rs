@@ -24982,6 +24982,48 @@ fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
     assert!(names_in(&agents).is_empty(), "깨진 루트 설정 하나로 닫힌 Codex 세션의 장이 남았다");
 }
 
+/// **`Stop` 은 편지를 읽음으로 옮기기 전에 출석을 적는다**(moai-jzym.flj) — 옮긴 뒤의 쓰기가 늦어 훅이 시간을 넘기면,
+/// 심은 셸 줄은 `moai` 가 끝난 뒤에야 글을 흘려 붙드는 답이 버려지고 편지만 읽음으로 남는다. 늦은 쓰기를 기다리는 대신
+/// 첫 파일 쓰기에서 훅을 죽인다(`ulimit -f 0` 이 `SIGXFSZ` 를 낸다) — 출석을 판정 뒤에 적던 판은 그때 편지를 이미
+/// 옮겨 놓았다.
+#[test]
+fn a_stop_that_dies_writing_attendance_leaves_the_letter_unread() {
+    use std::io::Write as _;
+    let s = init("hook-stop-order");
+    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
+    ok(s.path(), &["send", "codex-01a107b4", "일감 하나", "--as", "boss"]);
+    let mailbox = s.path().join(".moai/mail/codex-01a107b4");
+    let unread = names_in(&mailbox);
+    assert_eq!(unread.len(), 1, "편지가 함에 안 들었다 — {unread:?}");
+
+    let stop = recorded(&s, "codex/stop.json");
+    let tmp = s.path().join("hooktmp");
+    let mut child = isolated(fake_agent("codex"))
+        .args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "hook", "stop", "--dialect", "codex"])
+        .env("MOAI_ACTOR", ACTOR)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"))
+        .env("TMPDIR", &tmp)
+        .current_dir(s.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(stop.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(!out.status.success(), "파일 쓰기에서 훅이 안 죽었다 — 시험이 헛돈다");
+    assert_eq!(names_in(&mailbox), unread, "출석을 적기 전에 편지를 읽음으로 옮겼다");
+    assert!(names_in(&mailbox.join("read")).is_empty(), "죽은 훅이 편지를 읽음으로 남겼다");
+
+    // 쓰기가 서면 같은 편지가 실리고, 붙든 턴은 일하는 중이다.
+    let said = held_reason(&dialect_out(&s, "codex", "stop", &stop));
+    assert!(said.contains("일감 하나"), "남은 편지가 다음 `Stop` 에 안 실렸다 — {said}");
+    let card = std::fs::read_to_string(s.path().join(".moai/agents/codex-01a107b4.json")).unwrap();
+    assert!(card.contains("\"status\":\"busy\""), "편지로 붙든 턴을 노는 것으로 적었다 — {card}");
+}
+
 /// **`SessionStart` 가 안 돈 세션도 턴 머리에서 기준선을 얻는다**(리뷰 moai-u5wr.e74) — 첫 프롬프트 뒤에 `/hooks` 에서
 /// 믿어 준 Codex 세션은 그 이벤트가 이미 지나갔다. 기준선이 없으면 그 세션은 경고를 아무리 늘려도 `Stop` 이 안 붙든다.
 #[test]

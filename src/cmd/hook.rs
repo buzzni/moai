@@ -245,7 +245,9 @@ fn decide(
             let status = me.as_ref().map(|p| p.status.clone()).filter(|s| !s.is_empty());
             attend(&repo.agents_dir(), me.clone(), status.as_deref().unwrap_or(mail::BUSY));
             let letters =
-                me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::letters_room(&carried), Mine::All));
+                me.as_ref().and_then(|p| {
+                deliver(&repo, p, ctx, crate::hook::letters_room(&carried), waiting(&repo, p, Mine::All))
+            });
             carried.then(|| letters.map_or(Decision::Pass, Decision::Context))
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다. **출석은 적는다**(moai-h8tn) — 편지는
@@ -308,7 +310,9 @@ fn decide(
                 _ => board,
             };
             let letters =
-                me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::letters_room(&board), Mine::All));
+                me.as_ref().and_then(|p| {
+                deliver(&repo, p, ctx, crate::hook::letters_room(&board), waiting(&repo, p, Mine::All))
+            });
             board.then(|| letters.map_or(Decision::Pass, Decision::Context))
         }
         Event::PreToolUse => {
@@ -475,9 +479,20 @@ fn decide(
         // 턴마다 닫기 물음을 통째로 걸렀다(그 턴에 쥔 일·늘어난 경고를 아무도 안 물었다). 편지로 붙들 때 세션 표
         // (`letters`)를 남기고, 그 표가 선 `Stop` 은 표를 걷으며 닫기 물음을 묻는다. 그래도 끝없이 돌지 않는 것은
         // 표가 한 번 걷히고 닫기 물음이 세션에 한 번(`once_per_session`)이기 때문이다.
+        //
+        // **출석은 편지를 옮기기 전에 적는다**(moai-jzym.flj) — 접힌 뒤·턴 머리와 같은 까닭이다: 옮긴 뒤의 쓰기가 늦어(저장소가
+        // 선 Ceph 가 멈춘 날) 훅이 시간을 넘기면, 심은 셸 줄은 `moai` 가 끝난 뒤에야 글을 흘려 `decision: block` 이 버려지고
+        // 편지만 읽음으로 남는다. 판정 뒤에 적던 판이 그 자리였다 — 붙들었는지를 판정 뒤에야 알아서다. 실을 편지가 있으면
+        // 붙드니 `busy` 로 먼저 적고, 없으면 옮길 것이 없어 예전처럼 판정 뒤에 한 번 적는다. 먼저 적은 뒤 그 편지를 남이
+        // 먼저 가져(`any-idle-worker`) 판정이 바뀐 드문 판만 한 번 더 쓴다.
         Event::Stop => {
             let me = attendee(input, &repo, dialect);
-            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx, hold_room(dialect), Mine::Others));
+            let pending = me.as_ref().map(|p| waiting(&repo, p, Mine::Others)).unwrap_or_default();
+            let early = (!pending.is_empty()).then_some(mail::BUSY);
+            if let Some(status) = early {
+                attend(&repo.agents_dir(), me.clone(), status);
+            }
+            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx, hold_room(dialect), pending));
             let held_by_letters = session_file(input, &repo, "letters");
             let decision = match letters {
                 Some(said) => {
@@ -497,7 +512,10 @@ fn decide(
                 }
             };
             // 턴이 끝나면 논다 — 붙들었으면 아직 일하는 중이다.
-            attend(&repo.agents_dir(), me, if decision.blocks() { mail::BUSY } else { mail::IDLE });
+            let status = if decision.blocks() { mail::BUSY } else { mail::IDLE };
+            if early != Some(status) {
+                attend(&repo.agents_dir(), me, status);
+            }
             decision
         }
         // 위에서 이미 보냈다 — 트래커를 찾기 전이다.
@@ -1384,7 +1402,7 @@ fn attend(agents: &Path, presence: Option<mail::Presence>, status: &str) {
     let _ = mail::write_presence(agents, &p);
 }
 
-/// [`deliver`] 가 싣는 편지 — 이 세션에 온 것 모두, 아니면 남이 보낸 것만.
+/// [`waiting`] 이 고르는 편지 — 이 세션에 온 것 모두, 아니면 남이 보낸 것만.
 ///
 /// **턴을 붙드는 `Stop` 은 제가 보낸 편지로 붙들지 않는다**(리뷰 moai-h8tn.x4l) — 붙듦에 끝이 있는 것은 실은 편지만큼
 /// 우편함이 주는 까닭인데(그래서 `stop_hook_active` 여도 싣는다), 제게 쓴 편지에 실린 말("`moai send <보낸 이>` 로
@@ -1395,23 +1413,33 @@ enum Mine {
     Others,
 }
 
-/// 이 세션에 온 편지를 읽음으로 옮기며 실을 글을 낸다 — 없으면 `None`. **옮긴 것만 싣는다** — 남이 먼저
+/// 이 세션 앞에 와 있는 편지 — **아직 안 옮겼다**. 옮기는 것은 [`deliver`] 다. 둘을 가른 것은 그 사이에 출석을 적게
+/// 하려는 것이다(moai-jzym.flj) — 옮긴 뒤의 쓰기가 늦으면 옮긴 편지가 아무에게도 안 실린다.
+fn waiting(repo: &Repo, me: &mail::Presence, which: Mine) -> Vec<mail::Stored> {
+    // 여는 자리는 제 함과 열린 편지의 함 둘뿐이다(moai-ew4o.c92) — 남에게 간 편지를 열어 가르지 않는다.
+    let (all, _) = mail::list(&repo.mail_dir(), &me.name, false);
+    all.into_iter()
+        .filter(|s| mail::for_me(s, &me.name, &me.role))
+        .filter(|s| which == Mine::All || s.letter.from != me.name)
+        .collect()
+}
+
+/// [`waiting`] 이 고른 편지를 읽음으로 옮기며 실을 글을 낸다 — 없으면 `None`. **옮긴 것만 싣는다** — 남이 먼저
 /// 가진 `any-idle-worker` 편지는 빠진다. 말은 실을 편지가 있을 때만 푼다(사용자 설정을 여는 값이다).
 ///
 /// `room` 은 이 글이 들 자리다([`crate::hook::letters_room`]·[`hold_room`]) — 그 칸을 넘기면 에이전트가 글을 파일로
 /// 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]·[`crate::hook::CODEX_HOLD`]).
-fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx, room: crate::hook::Room, which: Mine) -> Option<String> {
-    let dir = repo.mail_dir();
-    // 여는 자리는 제 함과 열린 편지의 함 둘뿐이다(moai-ew4o.c92) — 남에게 간 편지를 열어 가르지 않는다.
-    let (all, _) = mail::list(&dir, &me.name, false);
-    let mine: Vec<mail::Stored> = all
-        .into_iter()
-        .filter(|s| mail::for_me(s, &me.name, &me.role))
-        .filter(|s| which == Mine::All || s.letter.from != me.name)
-        .collect();
+fn deliver(
+    repo: &Repo,
+    me: &mail::Presence,
+    ctx: &Ctx,
+    room: crate::hook::Room,
+    mine: Vec<mail::Stored>,
+) -> Option<String> {
     if mine.is_empty() {
         return None;
     }
+    let dir = repo.mail_dir();
     let (lang, zone) = (ctx.lang(), ctx.zone());
     let (picked, left) = crate::hook::deliverable(&mine, room, lang, zone);
     let taken: Vec<&mail::Stored> = picked
