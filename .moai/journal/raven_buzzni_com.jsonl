@@ -4433,3 +4433,9 @@
 {"ts":"2026-10-05T07:20:35Z","id":"moai-jzym.uxa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T07:20:35Z","id":"moai-jzym.flj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T07:20:35Z","id":"moai-jzym.4pm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T07:24:05Z","id":"moai-ml0d.izy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 커밋된 플러그인 트리의 쓰기를 체크아웃 안 쓰기로 옮긴다. 이 창의 토큰 수는 모른다)"}
+{"ts":"2026-10-05T07:24:06Z","id":"moai-ml0d.21i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 커밋된 매니페스트·설정의 읽기를 held::read_inside 로. 이 창의 토큰 수는 모른다)"}
+{"ts":"2026-10-05T07:24:06Z","id":"moai-ml0d.que","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=569198 (max — 커밋된 트리 읽기·쓰기, 훅 심기. 리뷰 서브에이전트의 셈)"}
+{"ts":"2026-10-05T07:24:15Z","id":"moai-ml0d.izy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-05T07:24:15Z","id":"moai-ml0d.21i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-05T07:24:16Z","id":"moai-ml0d.que","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1·4·5·13·14·15번(리뷰가 고친 여섯 — read_committed·write_committed 하나로, written 을 같은 읽기로, uninstall 이 밖에 선 트리를 남긴 파일로 안 댐, Undeclare::call 다시 읽기 시험, Claude::bounded), 2번은 사람이 정해 고쳤다(못 읽은 설정을 한 줄과 settings_unread 로 댄다), 12번 CHANGELOG. 넘긴 것: 3번은 moai-8q6b 에 노트, 6·7·8번 moai-kcxd, 9번 moai-2oj9, 10번 moai-kauf, 11번 moai-81q5, 낮은 셋 moai-6rda — 모두 이 판 밖 idea"}
