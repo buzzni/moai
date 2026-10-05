@@ -316,12 +316,13 @@ fn guide_of(root: &Path, tracking: Tracking) -> Guide {
 const DOTFILES: [(&str, fn(&Path) -> std::borrow::Cow<'static, str>, &str); 2] =
     [(".gitattributes", attributes_for, "gitattributes_rules"), (".gitignore", gitignore_for, "gitignore_rules")];
 
-/// 이 클론에만 둔 트래커가 무시 블록에 더하는 줄(moai-zynt.own). 훅·스킬의 플러그인 트리(`moai skill install`)도
-/// 같이 막는다 — 그것만 남으면 `git status` 가 추적 안 된 파일로 비춘다.
+/// 이 클론에만 둔 트래커가 무시 블록에 더하는 줄(moai-zynt.own). 훅·스킬의 플러그인 트리(`moai skill install`)와
+/// `claude` 가 `--scope local` 등록을 적는 파일도 같이 막는다 — 그것만 남으면 `git status` 가 추적 안 된 파일로 비춘다.
 const LOCAL_IGNORE: &str = "\
 # This tracker stays in this clone - git does not track it.
 /.moai/
 /.claude/moai-plugin/
+/.claude/settings.local.json
 ";
 
 /// git 의 공통 디렉터리(`--git-common-dir`). 워크트리·서브모듈에서도 `info/exclude` 가 사는 곳이다.
@@ -353,6 +354,13 @@ fn tracking_of(root: &Path) -> Tracking {
         "" => Tracking::Commit,
         ".gitignore" => Tracking::Gitignore,
         _ => Tracking::Exclude,
+    }
+}
+
+/// 플래그끼리 부딪힌 까닭 — 화면과 플래그가 같은 말을 한다.
+fn clash_said(lang: crate::i18n::Lang, c: crate::init_choice::Conflict) -> String {
+    match c {
+        crate::init_choice::Conflict::HookWithoutSkill => say(lang, "refuse.init_hook_without_skill").to_string(),
     }
 }
 
@@ -1251,7 +1259,13 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
                 same.push_str(&format!(" {flag} {word}"));
             }
         }
-        for (on, flag) in [(flags.no_driver, " --no-driver"), (yes, " --yes")] {
+        let paired = [
+            (flags.skill == Some(true), " --skill"),
+            (flags.skill == Some(false), " --no-skill"),
+            (flags.register == Some(true), " --register"),
+            (flags.register == Some(false), " --no-register"),
+        ];
+        for (on, flag) in [(flags.no_driver, " --no-driver"), (yes, " --yes")].into_iter().chain(paired) {
             if on {
                 same.push_str(flag);
             }
@@ -1325,6 +1339,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             true => crate::init_choice::SCREEN,
             false => crate::init_choice::Defaults { tracking: Tracking::Commit, ..crate::init_choice::SCREEN },
         };
+        let fixed_flags = fixed.clone();
         let form = crate::init_choice::Form::new(fixed, defaults, suggested.clone());
         // 심으려는 접두어를 플래그로 준 것과 같은 잣대로 잰다. 거절문은 여러 줄이라 한 줄로 편다.
         let check = |plan: &Plan| {
@@ -1333,7 +1348,8 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
                 None if suggested.is_empty() => Some(say(lang, "refuse.init_no_prefix").to_string()),
                 None => None,
             };
-            prefix.or_else(|| local_without_git(lang, plan, git))
+            let clash = crate::init_choice::conflict(&fixed_flags, plan).map(|c| clash_said(lang, c));
+            prefix.or_else(|| local_without_git(lang, plan, git)).or(clash)
         };
         // 머리에는 디렉터리 이름만 댄다 — 온 경로는 한 줄을 넘겨 잘리고, 셸이 이미 그 자리에 서 있다.
         let name =
@@ -1347,6 +1363,9 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         let plan = crate::init_choice::resolve(&fixed, &crate::init_choice::PLAIN);
         if let Some(why) = local_without_git(ctx.lang(), &plan, git) {
             return Err(Fail::coded(why, super::code::BAD_INPUT));
+        }
+        if let Some(c) = crate::init_choice::conflict(&fixed, &plan) {
+            return Err(Fail::coded(clash_said(ctx.lang(), c), super::code::BAD_INPUT));
         }
         plan
     };
@@ -1559,6 +1578,13 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         && crate::path::real(&agents_path) != crate::path::real(&claude)
         && read_held(&claude, &crate::held::Home::of(&root)).is_ok_and(|t| t.is_some_and(|t| !t.contains("AGENTS.md")));
 
+    // **심은 뒤에 이어 부른다**(moai-785q) — 훅·스킬 설치와 프로젝트 목록. 제 명령을 그대로 부르고 그 말을
+    // 보고에 얹는다: 같은 일을 두 벌 두면 한쪽만 고쳐진다. 실패해도 심은 것은 그대로 두고 0 으로 끝낸다 —
+    // 머지 드라이버를 못 심었을 때와 같다. 설치는 `claude` 를 부르는 일이라 이 기계에 없을 수 있다.
+    let sub = Ctx::new(ctx.json, ctx.user.clone(), ctx.chdir);
+    let skilled = plan.skill.then(|| crate::cmd::skill::install(&sub, "local", false));
+    let listed = plan.project.then(|| crate::cmd::project::add(&sub, &root));
+
     if ctx.json {
         let mut v = serde_json::json!({
             "root": root.display().to_string(),
@@ -1590,6 +1616,17 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
+        }
+        // 이어 부른 명령은 그 명령의 `--json` 을 그대로 싣는다. 안 불렀으면 `false`, 실패했으면 그 코드와 말이다.
+        for (key, done) in [("skill", &skilled), ("project", &listed)] {
+            v[key] = match done {
+                None => serde_json::json!(false),
+                Some(Ok(lines)) => lines
+                    .first()
+                    .and_then(|l| serde_json::from_str(l).ok())
+                    .unwrap_or_else(|| serde_json::json!(true)),
+                Some(Err(f)) => serde_json::json!({ "code": f.code, "error": f.message }),
+            };
         }
         // **위에 트래커가 있었다는 것은 기계에게도 말한다**(moai-pjrr). 사람에게는 알림 한 줄인데
         // 여기만 조용하면, 고리를 짜는 쪽은 제가 방금 둘째 트래커를 세웠다는 것을 어디서도 못 본다.
@@ -1716,6 +1753,17 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     if guide_file {
         out.push(fill(say(lang, "init.wrote_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
     }
+    // 이어 부른 명령의 말은 그 이름 아래 들여 싣는다 — 어느 말이 어느 명령의 것인지 갈린다.
+    for (cmd, done) in [("moai skill install --scope local", &skilled), ("moai project add .", &listed)] {
+        match done {
+            None => {}
+            Some(Ok(lines)) => {
+                out.push(fill(say(lang, "init.ran"), &[("cmd", cmd)]));
+                out.extend(lines.iter().filter(|l| !l.trim().is_empty()).map(|l| format!("    {l}")));
+            }
+            Some(Err(f)) => out.push(fill(say(lang, "init.ran_failed"), &[("cmd", cmd), ("why", &one_line(&f.message))])),
+        }
+    }
     // **줄 수가 아니라 한 일로 묻는다.** 줄을 세던 때는 이 자리 위에 줄 하나를 더하는 것만으로
     // 이 안내가 말없이 사라졌다 — `moai-knn0` 전까지 `agents` 가 늘 참이라 실제로 그랬다.
     // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
@@ -1725,6 +1773,8 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         && ignore == Added::Already
         && !agents
         && !guide_file
+        && skilled.is_none()
+        && listed.is_none()
         && untouched.is_empty()
         && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
     if again && did_nothing {

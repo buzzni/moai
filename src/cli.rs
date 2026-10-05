@@ -866,14 +866,26 @@ Examples:
         /// Git tracks it (commit) or not (exclude, gitignore)
         #[arg(long, value_name = "how", value_parser = ["commit", "exclude", "gitignore"], hide_possible_values = true)]
         tracking: Option<String>,
+        /// Then run moai skill install --scope local
+        #[arg(long, conflicts_with = "no_skill")]
+        skill: bool,
+        /// Do not install the hooks and skills
+        #[arg(long)]
+        no_skill: bool,
+        /// Then add this repository to your project list
+        #[arg(long, conflicts_with = "no_register")]
+        register: bool,
+        /// Do not add it to your project list
+        #[arg(long)]
+        no_register: bool,
         /// Ask nothing; what no flag sets takes the default
         #[arg(short = 'y', long)]
         yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "yes"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "yes", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes", "check"])]
         print: bool,
     },
 }

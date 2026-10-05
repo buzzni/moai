@@ -31,6 +31,12 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai init --guide hook` leaves AGENTS.md alone and lets the hooks say it.**
   It is what the screen picks for a tracker kept out of git, so a file nobody
   else has is never named in a committed one.
+- **`moai init --skill` and `--register` run `moai skill install --scope local`
+  and `moai project add` once the tracker is planted**, and print what they
+  said under their names. The screen picks both; `--no-skill` and
+  `--no-register` turn them off, and a hooks guide keeps the install on —
+  `--guide hook --no-skill` is refused. A run that fails leaves what was
+  planted and still exits 0.
 
 ### Changed
 

@@ -5,7 +5,7 @@
 //! 남아야 한다. 끝나면 그 몇 줄을 지우고 보고가 그 자리에 선다.
 
 use crate::i18n::{Lang, fill, say};
-use crate::init_choice::{Act, FIELDS, Field, Form, Plan};
+use crate::init_choice::{Act, FIELDS, Field, Form, Lock, Plan};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
@@ -85,7 +85,11 @@ fn names(f: Field, lang: Lang) -> (&'static str, Vec<&'static str>) {
                 say(lang, "init.ask_guide_none"),
             ],
         ),
+        Field::Skill => (say(lang, "init.ask_skill"), vec![say(lang, "init.ask_skill_on"), say(lang, "init.ask_skill_off")]),
         Field::Driver => (say(lang, "init.ask_driver"), vec![say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")]),
+        Field::Project => {
+            (say(lang, "init.ask_project"), vec![say(lang, "init.ask_project_on"), say(lang, "init.ask_project_off")])
+        }
     }
 }
 
@@ -118,8 +122,10 @@ fn draw(f: &mut Frame, form: &Form, lang: Lang, dir: &str) {
                 spans.push(Span::raw(shown.join("    ")));
             }
         }
-        if locked {
-            spans.push(Span::raw(format!("   · {}", say(lang, "init.ask_by_flag"))));
+        match form.locked_by(field) {
+            Some(Lock::Flag) => spans.push(Span::raw(format!("   · {}", say(lang, "init.ask_by_flag")))),
+            Some(Lock::Hook) => spans.push(Span::raw(format!("   · {}", say(lang, "init.ask_by_hook")))),
+            None => {}
         }
         let style = if locked {
             Style::new().add_modifier(Modifier::DIM)

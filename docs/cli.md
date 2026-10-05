@@ -2937,6 +2937,10 @@ Options:
       --guide <how>          block, file (.moai/guide.md + link), hook or none
       --no-driver            Leave .git/config alone (plant no merge driver)
       --tracking <how>       Git tracks it (commit) or not (exclude, gitignore)
+      --skill                Then run moai skill install --scope local
+      --no-skill             Do not install the hooks and skills
+      --register             Then add this repository to your project list
+      --no-register          Do not add it to your project list
   -y, --yes                  Ask nothing; what no flag sets takes the default
       --check                Write nothing; say if the AGENTS.md block is stale
       --print                Write nothing; print that block (to paste it)

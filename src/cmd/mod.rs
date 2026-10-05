@@ -459,12 +459,34 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // 붙여 넣을 글을 내는 길도 같은 이름 밑이다 — 까닭은 `init::print` 에 있다.
         Cmd::Init { print: true, .. } => init::print(ctx),
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
-        Cmd::Init { prefix, no_agents, no_driver, tracking, guide, yes, check: false, print: false } => {
+        Cmd::Init {
+            prefix,
+            no_agents,
+            no_driver,
+            tracking,
+            guide,
+            skill,
+            no_skill,
+            register,
+            no_register,
+            yes,
+            check: false,
+            print: false,
+        } => {
             // 낱말은 clap 이 이미 골랐다 — 여기서 못 푸는 값은 오지 않는다.
             let tracking = tracking.as_deref().and_then(crate::init_choice::Tracking::parse);
             let guide = guide.as_deref().and_then(crate::init_choice::Guide::parse);
             let guide = guide.or(no_agents.then_some(crate::init_choice::Guide::None));
-            let flags = crate::init_choice::Flags { prefix: prefix.as_deref(), tracking, guide, no_driver };
+            // 짝 플래그는 clap 이 서로 막는다 — 둘 다 오는 일은 없다.
+            let pair = |on: bool, off: bool| if on { Some(true) } else { off.then_some(false) };
+            let flags = crate::init_choice::Flags {
+                prefix: prefix.as_deref(),
+                tracking,
+                guide,
+                no_driver,
+                skill: pair(skill, no_skill),
+                register: pair(register, no_register),
+            };
             init::run(ctx, &flags, yes)
         }
         Cmd::Hook { event } => hook::run(ctx, event),
