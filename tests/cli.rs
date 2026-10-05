@@ -25295,19 +25295,20 @@ fn a_codex_stop_holds_letters_inside_codexs_limit() {
     assert!(whole.contains(&big) && !whole.contains("여기서 잘랐다"), "Claude 의 턴에서 칸에 드는 편지를 잘랐다");
 }
 
-/// **Antigravity 의 턴 끝은 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 사람이 띄운 agy 1.2.16 창이
-/// UTF-16 9,600~9,900 단위(21KB 남짓)의 한국어 편지를 턴 머리에서도 `Stop` 의 `decision: continue` 로도 자르거나 파일로
-/// 빼지 않고 실었다. Codex 의 좁은 선(바이트 8천)으로 옮기면 실을 수 있는 편지를 잘라 다시 보라고 시킨다.
+/// **Antigravity 의 턴 끝은 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 사람이 띄운 agy 창이 칸을 거의
+/// 다 채운 한국어 편지를 턴 머리에서도 `Stop` 의 `decision: continue` 로도 자르거나 파일로 빼지 않고 실었다. 1.2.17 에서는
+/// 한글로만 채워 바이트로도 가장 큰 꼴(UTF-16 10,024 단위, UTF-8 28.4KB)까지 쟀다. Codex 의 좁은 선(바이트 8천)으로
+/// 옮기면 실을 수 있는 편지를 잘라 다시 보라고 시킨다.
 ///
-/// **편지는 잰 바이트 안에 둔다**(리뷰 moai-jzym.a9k) — 칸은 UTF-16 으로 세지만 agy 가 무엇으로 세는지는 모르고, 잰
-/// 글은 21KB 남짓이었다. 그보다 큰 편지로 재면 아무도 본 적 없는 크기를 이 시험이 약속한다.
+/// **편지는 잰 바이트 안에 둔다**(리뷰 moai-jzym.a9k) — 그보다 큰 편지로 재면 아무도 본 적 없는 크기를 이 시험이
+/// 약속한다.
 #[test]
 fn an_antigravity_stop_holds_whole_a_letter_codex_would_cut() {
     let s = init("agy-hold-cap");
     dialect_out(&s, "antigravity", "user-prompt-submit", &recorded(&s, "antigravity/pre-invocation-first.json"));
     let names = names_in(&s.path().join(".moai/agents"));
     assert_eq!(names.len(), 1, "턴 머리가 출석을 안 적었다 — {names:?}");
-    let big = "가".repeat(6_500); // 19.5KB — Codex 의 선(8천)은 넘고 잰 바이트(21KB 남짓) 안이다
+    let big = "가".repeat(9_000); // 27KB — Codex 의 선(8천)은 넘고 잰 바이트(28.4KB) 안이다
     ok(s.path(), &["send", names[0].trim_end_matches(".json"), "긴 편지", "-b", &big, "--as", "boss"]);
     let out = dialect_out(&s, "antigravity", "stop", &recorded(&s, "antigravity/stop.json"));
     one_json_value(&out);

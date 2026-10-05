@@ -281,8 +281,8 @@ fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> 
 /// 같은 칸에 `earlier`(보드, 접힌 뒤 싣는 줄)가 먼저 섰을 때 편지에 남는 자리 — [`CONTEXT_CAP`] 에서 그 글과 둘 사이의
 /// 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다). 비추는 줄(`additionalContext`)의 칸이라 세 에이전트 모두
 /// [`Room::CONTEXT`] 로 잰다 — Codex 는 심은 파일의 `additionalContextLimit` 이 그만큼을 준다(`skill::CODEX`).
-/// Antigravity 의 `ephemeralMessage` 는 칸을 거의 다 채운 편지(UTF-16 9,665 단위)를 통째로 실었다 — 바이트로는 21KB
-/// 남짓까지만 쟀다(moai-jzym.4pm 실측, `cmd::hook` 의 `hold_room`).
+/// Antigravity 의 `ephemeralMessage` 는 칸을 거의 다 채운 편지를 통째로 실었다 — 한글로만 채워 바이트로도 가장 큰
+/// 꼴(UTF-16 9,822 단위, UTF-8 28KB 남짓)까지다(moai-jzym.4pm 실측, `cmd::hook` 의 `hold_room`).
 pub fn letters_room(earlier: &Decision) -> Room {
     let room = Room::CONTEXT;
     let used = match earlier {
