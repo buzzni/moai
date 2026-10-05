@@ -279,6 +279,12 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     // 기다리기 직전·직후에 다시 읽는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다.
     let (agents, _) = mail::presences(&dir);
     let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
+    // **다른 기계의 장은 안 고친다**(2026-10-05 사용자 결정, moai-dhxm) — 상태를 바꾸면 `since` 가, 아니면 닻이 새로 서서
+    // 그 장이 산 것으로 읽힌다. 여기서 기다리는 것은 그 장의 프로세스가 아니다. 고치던 판은 컨테이너를 다시 띄운 뒤
+    // `MOAI_AGENT=w1` 창이 앞 컨테이너의 낡은 w1 장을 기다릴 때마다 살려, 그 창의 훅이 이름을 못 되찾았다.
+    if !p.here() {
+        return;
+    }
     let now = crate::model::now();
     let changed = p.status != status || p.since.is_empty();
     // **상태가 같아도 닻은 때가 되었으면 적는다**(리뷰 moai-ew4o.q9f) — 편지가 이미 와 있어 기다림 없이 끝난

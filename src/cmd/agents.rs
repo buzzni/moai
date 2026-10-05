@@ -53,7 +53,11 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     let mut out: Vec<String> = swept
         .iter()
         .map(|s| {
-            let said = if s.dead { say(lang, "agents.swept") } else { say(lang, "agents.swept_quiet") };
+            let said = match (s.dead, s.elsewhere) {
+                (true, _) => say(lang, "agents.swept"),
+                (false, true) => say(lang, "agents.swept_elsewhere"),
+                (false, false) => say(lang, "agents.swept_quiet"),
+            };
             fill(said, &[("name", &s.name)])
         })
         .collect();

@@ -1062,6 +1062,7 @@
   "agents.none_match": "그 역할과 상태의 에이전트가 여기 없다",
   "agents.swept": "{name} 를 걷었다 — 그 프로세스가 없다",
   "agents.swept_quiet": "{name} 를 걷었다 — 하루 넘게 아무것도 그 장을 안 적었다. 그 편지는 그 세션을 기다린다",
+  "agents.swept_elsewhere": "{name} 를 걷었다 — 다른 기계의 장을 하루 넘게 아무것도 안 적었다. 그 편지는 보낸 이에게 돌아갔다",
   "agents.hello": "{name} 로 왔다({vendor}, {model}, {role})",
   "refuse.agents_word": "--{what} 는 64자까지의 한 줄이다 — 받은 것: `{value}`",
   "refuse.agents_no_pid": "{pid} 라는 프로세스가 없다",

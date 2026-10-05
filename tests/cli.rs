@@ -24101,6 +24101,16 @@ fn a_card_from_another_container_is_not_swept_by_its_pid() {
     // 이름을 겨룰 때도 다른 기계의 pid 는 그 기계의 이름을 단다 — 맨 숫자면 이 기계에서 그 pid 를 죽인다.
     let taken = moai(s.path(), &["hello", "--name", "far", "--pid", &w.pid()]);
     assert!(!taken.status.success() && text(&taken).contains("4194400@box-b"), "{}", text(&taken));
+    // 이 기계의 기다림은 다른 기계의 장을 안 고친다(2026-10-05 사용자 결정) — 상태도 닻도. 여기서 기다리는 것은 그 장의
+    // 프로세스가 아니라, 고치면 낡은 장이 이 기계의 `--as`·`MOAI_AGENT` 덕에 영영 산 것으로 읽힌다.
+    let far = s.path().join(".moai/agents/far.json");
+    let before = std::fs::read_to_string(&far).unwrap();
+    let out = staged_live(&["inbox", "--as", "far", "--ack", "--wait", "1", "--json"])
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success() && text(&out).contains("저쪽 일감"), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&far).unwrap(), before, "다른 기계의 장을 이 기계의 기다림이 고쳤다");
 }
 
 /// **감독은 `agents --role worker --status idle` 로 일꾼을 찾는다**(moai-snyk, 2026-10-04 사용자 결정). 일꾼은 턴

@@ -881,22 +881,30 @@ pub fn presences(dir: &Path) -> (Vec<Presence>, Vec<Garbled>) {
     (out, garbled)
 }
 
-/// 걷은 장 하나 — 이름과 걷은 까닭(moai-dhxm). `dead` 면 그 프로세스가 죽어 걷었고 함을 비웠다(편지가 보낸 이에게
-/// 돌아갔다). 아니면 하루([`EXPIRE_AFTER`]) 넘게 아무것도 안 적어 걷었고 함은 남았다 — Codex 의 장과 다른 기계의 장이고,
-/// 다른 기계의 장은 그 기계에서 아직 살 수 있다. `moai agents` 가 사람에게 그 둘을 갈라 말한다.
+/// 걷은 장 하나 — 이름과 걷은 까닭(moai-dhxm). `moai agents` 가 사람에게 셋을 갈라 말한다.
+///
+/// - `dead` — 그 프로세스가 이 기계에서 죽어 걷었고 함을 비웠다(편지가 보낸 이에게 돌아갔다)
+/// - `elsewhere` — 다른 기계의 장이 하루([`EXPIRE_AFTER`]) 넘게 안 적혀 걷었고, 함도 비웠다
+/// - 둘 다 아니면 pid 를 모르는 장(Codex)이 하루 넘게 안 적혀 걷었고 함은 남았다
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Swept {
     pub name: String,
     pub dead: bool,
+    pub elsewhere: bool,
 }
 
 /// 떠난 출석을 걷는다 — 걷은 장을 낸다([`Swept`]). **산지 모르는 것은 안 걷는다**([`alive`] 가 `None`, 닻이 아직 산 장).
 ///
 /// **프로세스가 죽은 장은 그 함도 비운다**([`retire`]) — 안 읽은 편지가 보낸 이에게 되돌아간다. **프로세스로 못 재는 장
-/// (pid 를 모르거나 다른 기계의 것)은 하루([`EXPIRE_AFTER`]) 넘게 안 적혔을 때만 걷고 그 함은 그대로 둔다** — 그 세션이
-/// 살아 돌아올 수 있고, 다른 기계의 장은 그 기계에서 아직 살 수 있다(moai-dhxm). 20분 넘게
-/// 조용한 장은 떠난 것으로 읽을 뿐 안 걷는다([`STALE_AFTER`], 2026-10-05 사용자 결정) — 역할과 이름이 남아야 돌아온
-/// 세션이 그대로 선다.
+/// (pid 를 모르거나 다른 기계의 것)은 하루([`EXPIRE_AFTER`]) 넘게 안 적혔을 때만 걷는다**(moai-dhxm) — 그 세션이 살아
+/// 돌아올 수 있고, 다른 기계의 장은 그 기계에서 아직 살 수 있다. 20분 넘게 조용한 장은 떠난 것으로 읽을 뿐 안 걷는다
+/// ([`STALE_AFTER`], 2026-10-05 사용자 결정) — 역할과 이름이 남아야 돌아온 세션이 그대로 선다.
+///
+/// **걷은 장의 함은 pid 를 모르는 장(Codex)만 남긴다**(같은 결정) — 그 이름은 세션 id 에서 지어 돌아온 그 세션이 같은
+/// 이름을 다시 받는다. **다른 기계의 장은 함을 비운다**(2026-10-05 사용자 결정, moai-dhxm) — 컨테이너를 다시 띄우면 앞
+/// 컨테이너의 장이 모두 다른 기계의 것으로 읽혀 이 길을 타는데, Claude 의 세션 이름은 디렉터리마다 256개 남짓이라
+/// 남겨 둔 편지를 나중에 같은 이름을 받은 무관한 새 세션이 받았다(리뷰 moai-dhxm.3sc). 하루 넘게 쉰 세션이 돌아오면
+/// 그 편지는 보낸 이에게 되돌아간 표를 달고 있다.
 ///
 /// **걷기 바로 앞에 장을 다시 읽는다**(리뷰 moai-ew4o.q9f) — 출석부를 한 번 읽고 이름으로 걷던 판은, 그 사이(앞선 장의
 /// 편지를 되돌리는 동안 길어진다) 같은 이름을 넘겨받은 새 세션의 장을 지우고 그 세션 앞으로 온 편지까지 보낸 이에게
@@ -911,13 +919,16 @@ fn sweep_from(dir: &Path, mail: &Path, all: Vec<Presence>, now: &str) -> Vec<Swe
     let mut swept = Vec::new();
     for p in all {
         let dead = p.dead();
-        if !(dead || p.expired(now)) || !unchanged(dir, &p) || forget(dir, &p.name).is_err() {
+        let expired = !dead && p.expired(now);
+        if !(dead || expired) || !unchanged(dir, &p) || forget(dir, &p.name).is_err() {
             continue;
         }
-        if dead {
+        // pid 를 알지만 프로세스로 못 재는 장 — 다른 기계의 장이다([`Presence::here`]).
+        let elsewhere = expired && p.pid != 0;
+        if dead || elsewhere {
             retire(mail, &p.name);
         }
-        swept.push(Swept { name: p.name, dead });
+        swept.push(Swept { name: p.name, dead, elsewhere });
     }
     swept
 }
@@ -969,6 +980,8 @@ pub fn take_over(mail: &Path, all: &[Presence], name: &str, keep: Option<&str>) 
 /// 이 장의 닻을 다시 적는다 — 때가 되었을 때만([`Presence::due`]). 디스크의 장을 다시 읽어
 /// 적는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다. 못 적으면 조용히 지나간다.
 ///
+/// 다른 기계의 장은 안 적는다 — 그 장의 닻은 그 기계의 몫이다.
+///
 /// **쓰기 바로 앞에 한 번 더 읽어 견준다**(moai-dhxm) — 도구 부름의 훅이 모든 말씨에서 이것을 부르게 되자, 부모 세션의
 /// 장을 함께 쓰는 서브에이전트의 도구 부름이 그 사이 `Stop` 이 적은 상태나 `MOAI_AGENT` 로 옮긴 이름을 앞서 읽은 장으로
 /// 되돌릴 수 있었다(옮기기 전 이름의 장이 되살아난다). 그 사이 바뀌었으면 안 쓴다 — 바꾼 쪽이 닻도 적었다. 다시 읽은 것과
@@ -977,7 +990,11 @@ pub fn keep_alive(dir: &Path, which: impl Fn(&Presence) -> bool) {
     let (all, _) = presences(dir);
     let Some(read) = all.into_iter().find(|p| which(p)) else { return };
     let now = crate::model::now();
-    if !read.due(&now) {
+    // **다른 기계의 장에는 닻을 안 적는다**(2026-10-05 사용자 결정, moai-dhxm) — 닻은 "그 프로세스가 산다" 인데, 여기서
+    // 도는 것은 그 프로세스가 아니다. 적던 판은 컨테이너를 다시 띄운 뒤 `MOAI_AGENT=w1` 창의 `moai inbox` 가 앞 컨테이너의
+    // 낡은 w1 장을 1분마다 살려, 그 장이 영영 안 낡고 창은 그 이름을 못 되찾았다. 다른 기계에서 `--as` 로 읽어도 그 장을
+    // 살려 두지 않는다.
+    if !read.here() || !read.due(&now) {
         return;
     }
     let mut p = read.clone().claimed();
@@ -2028,16 +2045,32 @@ mod tests {
         assert!(by("quiet").gone() && !by("quiet").dead(), "조용한 다른 기계의 장을 떠난 것으로 안 읽었다");
         assert!(me_among(&all, std::slice::from_ref(&me)).is_none(), "pid 가 겹친 다른 기계의 장을 제 것으로 읽었다");
         assert!(by("old").dead() && by("mine").dead(), "이 기계의 죽은 장을 안 읽었다");
-        let mut swept: Vec<(String, bool)> = sweep(&agents, &mail).into_iter().map(|s| (s.name, s.dead)).collect();
+        let mut swept: Vec<(String, bool, bool)> =
+            sweep(&agents, &mail).into_iter().map(|s| (s.name, s.dead, s.elsewhere)).collect();
         swept.sort();
-        assert_eq!(swept, [("long-gone".to_string(), false), ("mine".to_string(), true), ("old".to_string(), true)]);
-        // 이 기계의 죽은 장은 편지가 돌아가고, 다른 기계의 장은 하루 넘게 조용해 걷어도 함이 남는다.
+        assert_eq!(
+            swept,
+            [
+                ("long-gone".to_string(), false, true),
+                ("mine".to_string(), true, false),
+                ("old".to_string(), true, false)
+            ]
+        );
+        // 이 기계의 죽은 장은 편지가 돌아간다. 다른 기계의 장은 20분 조용해도 함이 남고, 하루 넘게 조용해 걷으면 함을
+        // 비운다(2026-10-05 사용자 결정) — 같은 이름을 나중에 받은 무관한 세션이 그 편지를 받지 않게.
         let mut back: Vec<String> = list(&mail, "boss", false).0.into_iter().map(|l| l.letter.subject).collect();
         back.sort();
-        assert_eq!(back, ["mine", "old"]);
-        for name in ["away", "quiet", "long-gone"] {
+        assert_eq!(back, ["long-gone", "mine", "old"]);
+        for name in ["away", "quiet"] {
             assert_eq!(list(&mail, name, false).0.len(), 1, "{name} 의 편지를 되돌렸다");
         }
+        assert!(list(&mail, "long-gone", false).0.is_empty(), "걷은 다른 기계의 장의 함에 편지가 남았다");
+        // 다른 기계의 장에는 닻을 안 적는다(2026-10-05 사용자 결정) — 여기서 도는 것은 그 프로세스가 아니다. 적으면 낡은
+        // 장이 이 기계의 `inbox --as` 나 `MOAI_AGENT` 창 덕에 영영 산 것으로 읽힌다.
+        keep_alive(&agents, |p| p.name == "quiet");
+        let (left, _) = presences(&agents);
+        let quiet = left.iter().find(|p| p.name == "quiet").unwrap();
+        assert!(quiet.gone(), "다른 기계의 낡은 장에 닻을 적어 살렸다 — {quiet:?}");
         // 다른 기계의 에이전트는 못 깨운다 — 그 tmux 칸 id 는 이 기계의 서버에서 남의 칸이다.
         let far = Presence {
             vendor: "codex".into(),
