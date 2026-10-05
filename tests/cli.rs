@@ -18136,7 +18136,7 @@ fn skill_install_keeps_a_declaration_whose_plugin_stays() {
     );
 }
 
-/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 읽지도 고치지도 않는다**(`store::write_atomic_inside`,
+/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 읽지도 고치지도 않는다**(`store::write_staged`,
 /// `held::read_inside`) — 받은 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃
 /// 밖의 파일을 고친다. 링크도 보통 파일로 안 바꾼다. 읽기도 같은 자다(moai-ml0d.21i) — 밖을 읽어 걸음을 세우던 판은
 /// 지우지도 못할 선언을 "못 지웠다" 로 댔다. 못 읽는 설정이라 걸음은 안 세우되 **말없이 넘기지 않는다**(사용자 결정
@@ -18617,7 +18617,8 @@ fn skill_status_shows_the_shared_skills_and_the_two_on_path() {
     let json = status(true);
     assert!(json.contains("moai-wiki/SKILL.md"), "읽지 못한 자리를 낡은 것으로 안 센다\n{json}");
     // **다시 심는 길도 그 자리를 안 연다** — FIFO 에 쓰려고 열면 읽는 쪽을 영영 기다린다. 보통 파일이 아닌 자리는
-    // 갈아끼우지도 않고(`store::write_atomic_inside`, moai-4oab) 그 자리를 대며 비영으로 멈춘다.
+    // 쓰기 전에 재는 자가 거절해 갈아끼우지도 않고(`store::measure_inside`, moai-4oab·moai-dj4j.ug2) 그 자리를 대며
+    // 비영으로 멈춘다.
     let out = bounded(&["skill", "install", "--agent", "codex"]);
     assert!(!out.status.success(), "못 심은 자리가 있는데 성공으로 끝났다\n{}", text(&out));
     assert!(text(&out).contains("moai-wiki/SKILL.md"), "어느 자리인지 안 댄다\n{}", text(&out));
@@ -18669,10 +18670,15 @@ fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
     let away = Scratch::new("skilloutside-away");
     std::os::unix::fs::symlink(away.path(), s.path().join(".agents")).unwrap();
 
-    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
-    assert!(!out.status.success(), "밖을 가리키는 자리에 심고 성공으로 끝났다\n{}", text(&out));
-    assert!(text(&out).contains("outside"), "어느 자리인지 안 댄다\n{}", text(&out));
-    assert!(!away.path().join("skills").exists(), "체크아웃 밖에 디렉터리를 지었다");
+    // **연습도 같은 자로 잰다**(moai-dj4j.ug2, 리뷰 moai-dj4j.n9y) — `.agents` 트리를 첫 쓰기 전에 재는 길은 연습에서만
+    // 드러난다. 진짜 실행은 그 트리가 첫 쓰기라 제 자를 다시 대므로, 연습을 안 부르면 그 길을 걷어도 이 시험이 푸르다.
+    for args in [&["skill", "install", "--agent", "codex", "--dry-run"][..], &["skill", "install", "--agent", "codex"]]
+    {
+        let out = c.run(s.path(), args, true);
+        assert!(!out.status.success(), "{args:?}: 밖을 가리키는 자리에 심고 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains("outside"), "{args:?}: 어느 자리인지 안 댄다\n{}", text(&out));
+        assert!(!away.path().join("skills").exists(), "{args:?}: 체크아웃 밖에 디렉터리를 지었다");
+    }
 
     std::fs::create_dir_all(away.path().join("skills/moai")).unwrap();
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
@@ -26152,4 +26158,28 @@ fn skill_install_measures_every_chosen_tree_before_the_first_write() {
     let out = c.run(s.path(), &["skill", "install", "--agent", "codex", "--agent", "claude"], true);
     assert!(out.status.success(), "{}", text(&out));
     assert!(agents.join("skills/moai/SKILL.md").is_file() && codex.is_file() && manifest.is_file());
+}
+
+/// **지을 수 없는 디렉터리도 첫 쓰기 전에 잰다**(리뷰 moai-dj4j.n9y) — 훅 자리 `.codex` 가 보통 파일이면 `create_dir_all`
+/// 이 거기서 멈춘다. 재지 않던 판은 `.agents/skills` 를 다 쓴 뒤에 그 자리에서 `File exists` 로 멈췄고, 연습은 0 으로
+/// 끝나며 훅을 심겠다고 했다. 이제 연습도 실행도 그 자리를 대며 아무것도 안 쓰고 멈춘다.
+#[test]
+fn skill_install_refuses_a_tree_it_cannot_build_before_the_first_write() {
+    let s = init("skillunbuilt");
+    let c = Claude::new("skillunbuilt-home");
+    let codex = s.path().join(".codex");
+    std::fs::write(&codex, "사람의 파일\n").unwrap();
+    let agents = s.path().join(".agents");
+    for dry_run in [true, false] {
+        let mut args = vec!["skill", "install", "--agent", "codex"];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        let out = c.run(s.path(), &args, true);
+        assert!(!out.status.success(), "{args:?}: 지을 수 없는 자리가 있는데 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains(".codex is not a directory"), "{args:?}: 어느 자리인지 안 댄다\n{}", text(&out));
+        assert!(!agents.exists(), "{args:?}: 거절될 설치가 .agents 를 먼저 썼다");
+    }
+    assert_eq!(std::fs::read_to_string(&codex).unwrap(), "사람의 파일\n", "사람의 파일을 고쳤다");
+    assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
 }
