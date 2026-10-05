@@ -6,3 +6,5 @@
 {"ts":"2026-10-05T22:56:14Z","id":"moai-zynt.a7y","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"설계 덧붙임 — 규칙은 한 방향으로만 흐른다(2026-10-06 사용자 결정)\n\n- 칸 사이 규칙의 순서를 고정한다: 추적 → 안내 → 설치 → 드라이버. 앞 칸은 뒤 칸의 기본값·보임·잠김을 정할 수 있고, 뒤 칸은 앞 칸을 못 건드린다\n- 그래서 `resolve` 는 이 순서로 한 번 훑으면 답이 난다 — 다시 돌거나 수렴을 기다리지 않는다\n- 이 순서를 거스르는 규칙이 필요해지면 그때가 설계를 다시 볼 때다. 그 문제는 상태 머신이 아니라 제약 풀이다\n- 사람이 고른 값(`Some`)이 앞 칸 때문에 무효가 되면 지우지 않는다. 화면에서는 잠그고 실제 값은 `resolve` 가 정한다. 앞 칸을 되돌리면 고른 값이 그대로 돌아온다"}
 {"ts":"2026-10-05T22:56:14Z","id":"moai-zynt.a7y","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T23:07:02Z","id":"moai-78pr","kind":"create","by":"minyoung.go","by_email":"hedone21@gmail.com","title":"skill 시험이 이 기계의 sh 에서 없는 파일을 126 으로 받아 붉다"}
+{"ts":"2026-10-05T23:07:12Z","id":"moai-zynt.a7y","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — init 쓰기 경로와 새 터미널 화면, 여러 파일)"}
+{"ts":"2026-10-05T23:07:12Z","id":"moai-zynt.a7y","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"done"}
