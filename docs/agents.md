@@ -534,8 +534,8 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   nor reads through it: the write stops with `broken`, `moai agents` and
   `moai inbox` name it, and the hooks quietly do nothing for that session.
   `moai inbox --wait` comes back at once instead of waiting, since waiting will
-  not open it — a worker stops there and tells you rather than waiting again.
-  Replace the link with a real directory
+  not open it — a worker or the supervisor stops there and tells you rather than
+  waiting again. Replace the link with a real directory
 - **`moai agents` shows a pid as `<pid>@<host>`.** That row was written on
   another machine — another container sharing this repository, or this
   container before it was started again — and its pid is that machine's, not one
