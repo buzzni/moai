@@ -497,6 +497,7 @@ IDEA
     #[command(after_help = "  moai inbox                    the unread letters for you
   moai inbox --ack              the same, and marks them read
   moai inbox --all              the ones already read too
+  moai inbox <id>               that one letter, read or not (--ack marks it)
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
 
   **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
@@ -508,7 +509,9 @@ IDEA
   A letter is read when it moves to read/ inside its box. The hooks do this
   by themselves: UserPromptSubmit and Stop load the letters for the session
   into the conversation and mark them read, so an agent with the hooks
-  installed rarely needs this command. --all shows a read letter again until
+  installed rarely needs this command. A letter too long for one load is cut,
+  and the cut names `moai inbox <id>` for the whole of it. An id or --all
+  shows a read letter again until
   `moai agents` sweeps it, mail_read_days after it was read (7 unless
   .moai/config.toml says otherwise; 0 keeps it for good). An unread letter is
   never swept. A letter marked returned is one you sent: its recipient left
@@ -1114,9 +1117,13 @@ pub struct SendArgs {
     pub sender: Option<String>,
 }
 
-/// `moai inbox`(moai-h8tn).
+/// `moai inbox`(moai-h8tn). id 를 주면 그 편지 하나다(moai-54yc.v70) — 훅이 자른 편지를 다시 볼 길이 함 전체를 내던
+/// `--all` 하나였다. 기다림과는 안 묶는다 — 이미 선 편지 하나를 보는 부름이다.
 #[derive(Args, Debug)]
 pub struct InboxArgs {
+    /// One letter by its id, read or not
+    #[arg(value_name = "id", conflicts_with = "wait")]
+    pub id: Option<String>,
     /// Mark what is shown as read
     #[arg(long)]
     pub ack: bool,
