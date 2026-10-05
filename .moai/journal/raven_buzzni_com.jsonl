@@ -4635,3 +4635,7 @@
 {"ts":"2026-10-05T14:21:17Z","id":"moai-dj4j.rs4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-05T14:21:18Z","id":"moai-dj4j.n9y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1·2·3·5~12번(리뷰가 고친 열둘 — unbuildable, stage_inside, 훅 재판정, write_staged 하나로, 시험 보강) 을 a1b9f63a 로 커밋했다. 넘긴 것: 4번은 idea moai-kxqd, 15번은 idea moai-zso6 — 둘 다 v0.7.0 밖. 안 고치기로 한 것: 13번(.moai 를 거치는 디렉터리 fsync 하나 — 흔한 길이 아니고 replace 의 내구 결정), 14번(.moai 가 다른 장치면 두 번 씀 — 드문 꼴, 미리 재면 써 보고 물러선다는 결정과 어긋난다)"}
 {"ts":"2026-10-05T14:21:28Z","id":"moai-dj4j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 두 멤버와 리뷰가 develop 머지(merge: … (moai-dj4j))와 함께 닫혔다. 리뷰가 넘긴 둘은 v0.7.0 밖 idea: moai-kxqd(앞 트리 쓰기가 뒤 트리 링크 풀이를 바꾸는 판), moai-zso6(거절 아닌 I/O 실패 뒤 보고 손실)"}
+{"ts":"2026-10-05T14:22:36Z","id":"moai-y2uy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T14:22:37Z","id":"moai-9lvj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T14:22:37Z","id":"moai-bkn4.yo1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T14:22:37Z","id":"moai-bkn4.9no","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
