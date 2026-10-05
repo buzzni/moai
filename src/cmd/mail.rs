@@ -140,6 +140,17 @@ fn woke_line(lang: Lang, zone: &crate::tz::Zone, w: &Woke) -> Option<String> {
 }
 
 pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
+    // **편지 하나는 id 로 본다**(moai-54yc.v70) — 훅이 자른 편지는 이미 읽음이라, 그 나머지를 보는 길이 읽은 편지까지 함
+    // 전체를 내는 `--all` 하나였다. 함이 크면 Codex 가 긴 출력의 가운데를 빼 그 편지가 다시 안 닿는다. 꼴은 `--reply-to`
+    // 와 같은 자로 잰다 — 자리를 열기 전이다.
+    if let Some(id) = args.id.as_deref()
+        && !mail::is_id(id)
+    {
+        return Err(Fail::coded(
+            fill(say(ctx.lang(), "refuse.mail_reply_to"), &[("id", &crate::text::one_line(id))]),
+            code::BAD_INPUT,
+        ));
+    }
     let repo = super::open_repo(ctx)?;
     let (agents, roster) = mail::presences(&repo.agents_dir());
     let roster_shut = warn_roster(ctx, &roster);
@@ -162,7 +173,8 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // moai-ew4o.q9f — 반 초마다 모든 장을 읽던 자리다).
     let mut stamped = std::time::Instant::now();
     let (mut mine, garbled) = loop {
-        let (all, garbled) = mail::list(&dir, &me, args.all);
+        // id 하나는 읽은 편지 사이에서도 찾는다 — 훅이 자른 편지는 이미 읽음이다.
+        let (all, garbled) = mail::list(&dir, &me, args.all || args.id.is_some());
         // **못 연 출석부면 안 읽은 열린 편지는 안 가진다**(리뷰 moai-kxkw.k2f) — 역할을 모른다. 빈 역할로 가르던 판은 감독이
         // `any-idle-worker` 일감을 가져 일꾼에게 안 갔다. 읽음으로 옮기는 것은 쓰기라 모르는 것으로 정하지 않는다 — 그 편지는
         // 출석부를 고칠 때까지 함에서 기다린다.
@@ -170,6 +182,7 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
             .into_iter()
             .filter(|s| mail::for_me(s, &me, &role))
             .filter(|s| !(roster_shut && s.open() && s.reader.is_none()))
+            .filter(|s| args.id.as_deref().is_none_or(|id| s.id == id))
             .collect();
         // **우편함을 못 열면 기다리지 않는다**(리뷰 moai-kxkw.k2f) — 그 거절은 기다려도 안 풀린다. 기다리던 판은 `--wait` 를 다
         // 채우는 동안 그 일꾼을 `idle` 로 적어, 감독이 거절될 편지를 보내게 했다. 함 하나의 거절(`mailbox` 가 있다)로는 안
@@ -215,6 +228,13 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         if g.mailbox.as_deref() != Some(mail::ANY_IDLE_WORKER) || role != mail::SUPERVISOR {
             note_partial();
         }
+    }
+    // 준 id 가 없으면 빈 함이 아니라 못 찾은 것이다 — 남의 편지이거나, 읽은 지 오래되어 걷혔다.
+    if let Some(id) = args.id.as_deref()
+        && mine.is_empty()
+    {
+        let said = fill(say(ctx.lang(), "refuse.mail_no_letter"), &[("id", id), ("me", &me)]);
+        return Err(Fail::coded(said, code::NOT_FOUND));
     }
 
     // **기다림의 출석은 편지를 옮기기 전에 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은 까닭이다(moai-jzym.flj). 옮긴 뒤에
