@@ -177,6 +177,7 @@ epic actually did is the angle, and these go on top of it
 5. Does anything newly open on a path that never opened it — not "is a lock held while
    opening", which is half of it. A read path that never opened the config and now parses
    it stops on a config that is a FIFO, lock or no lock
+
 **They have to reach the review itself, not only `-b`.** The angle on the issue is what the
 next person reads; the review command does not read the issue. Going through a subagent,
 put these five in its prompt; going through the command, hold them against what came back
@@ -2795,7 +2796,8 @@ notes), then
   hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
   by the supervisor; with no `Subdir:` in the letter, the root is the top and this step
   does not exist
-    {SUBDIR}
+
+      {SUBDIR}
 - The member's column is already picked up — do not pick it up again. **If its assignee
   is not you** (`moai show <member>`), ask the person watching before you carry it on; on
   a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
@@ -2830,14 +2832,14 @@ notes), then
 /// 리뷰어의 말로 읽는다.
 fn brief() -> String {
     let review = make_review("--parent <epic>");
-    let close = indent(&close_steps("<review id>", "moai"), "   ");
-    let over = indent(REVIEW_OVER_LIMIT, "   ");
+    let close = indent(&close_steps("<review id>", "moai"), "      ");
+    let over = indent(REVIEW_OVER_LIMIT, "    ");
     let levels = difficulty_levels();
     let rubric = indent(&difficulty_rubric(), "   ");
     let top = top_model();
     let epic_rule = indent(&epic_review_rule(), "   ");
     let angle = indent(REVIEW_ANGLE, "   ");
-    let wiki_commit = indent(WIKI_COMMIT, "     ");
+    let wiki_commit = indent(WIKI_COMMIT, "       ");
     format!(
         r#"1. Unfold it in the root — the one way to turn an idea into work is
    `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
@@ -2863,7 +2865,8 @@ fn brief() -> String {
    release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
    a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
    not in `ready`, not in `held`, no warning
-     {MILESTONE_ATTACH}
+
+       {MILESTONE_ATTACH}
 2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
    **Pass the column you saw** — this is a place where several sessions share one `.moai`,
    and overwriting a row picked up beside you means two of you do the same work. A non-zero
@@ -2871,7 +2874,8 @@ fn brief() -> String {
    by every session — a commit made while someone has a merge open (MERGE_HEAD) seals that
    merge with its own subject. So give the tracker commit a path. With a merge open git
    refuses it, so wait for that merge to finish and run it again
-     git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
+
+       git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
    pick-up (rule 5). Ask the person watching this window — a yes the letter already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
@@ -2886,10 +2890,12 @@ fn brief() -> String {
    `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
    relative path, filled in by the supervisor; if the letter carries no `Subdir:`, the root
    **is** the top and this step does not exist
-     {SUBDIR}
+
+       {SUBDIR}
 4. Do not guess a design decision that is not in the notes — ask (*Ask the person watching*);
    a person is watching the worker's window. With `Person: away` in the letter, decide by
    recommendation instead ("When the person is away")
+
 4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
    filled in by the supervisor — do not guess it from inside the worktree. **The tool moves
    that by itself** — even a bare `moai` typed inside the worktree reads and writes the
@@ -2903,6 +2909,7 @@ fn brief() -> String {
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
    undo it with `git checkout -- .moai`, and if the row was already committed, undo that
    commit too and park it again from the root
+
 4-2. **If you test tmux, do it on a separate server only** — `env -u TMUX tmux -L <unique name>`
    on every call. Put the epic id in the name so it cannot collide with the test servers of
    the workers beside you or of a review subagent. `-S <socket>` works too, but a socket path
@@ -2915,6 +2922,7 @@ fn brief() -> String {
    agent on that server, keep its cwd outside the root (the scratchpad) — raised in the root,
    it registers in this repository's `moai agents` beside the real workers.
    **Give a review subagent these words too** — it was a review subagent that killed a whole server
+
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
    the files named by `Work running alongside` in the letter, or files a sibling branch in
    `git worktree list` already changed
@@ -2924,6 +2932,7 @@ fn brief() -> String {
    `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 12
    as **a member left because the work beside it holds the file**, together with that other
    work. The supervisor sends it once that work is done. Do not defer it
+
 5. **Do not review member by member.** When one member is finished, run the tests, commit and
    move to the next — the review looks at the whole epic once, in 7, after every member is
    finished. One review is expensive; do not call it as many times as there are members. The
@@ -2949,12 +2958,14 @@ fn brief() -> String {
    where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled
    <base branch> in 6, so the conflict resolution is inside it too. Create the review issue
    (rule 3)
-     {review}
+
+       {review}
    This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
    **In the same breath, stand the finished members in `review`** — while the review runs
    nobody is working on them, and `in_progress` on the board says somebody is. One id per
    call, as in 2
-     {TO_REVIEW}
+
+       {TO_REVIEW}
    `--from in_progress` passes over the members left in the first column by 4-3 (and by 7-1
    when you came back from 8) — this review does not see them, so they do not stand in it.
    moai answers that such a member already stands in the first column and moves nothing, with
@@ -2984,6 +2995,7 @@ fn brief() -> String {
    and covers a commit you already made without a word, and a `cargo test` after that
    measures that agent's files rather than yours — that has happened too, and it also burned
    an hour and a half in a worktree that was gone.
+
 7-1. Before merging, go back over the ideas parked mid-epic
    (`moai -C <root> show --type idea -e <epic>` and what this window remembers) and what the
    review handed on — **can the epic deliver what it promised without them.** If not, it is
@@ -2995,12 +3007,14 @@ fn brief() -> String {
    from the worktree, so pin the root into the line (4-1). **If that idea is already done, do
    not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
    promote unfolds a closed idea too, and the same member stands twice
-     {RECALL}
+
+       {RECALL}
    Do not do a reclaimed member here: merge with it left in the first column — work that has
    not been through 7's review does not get mixed into the merge, and a member still standing
    keeps the epic open. Do not `defer` that member. Deferring it closes the epic without its
    promise delivered. 7's review did not see that member, so write it in the `Next:` note in
    11 — the window that closes the epic with that member calls the epic-end review again
+
 7-2. **If the epic ran inside a milestone, sort what you handed on once more, by the release
    bar.** A review makes its findings without regard to the release bar, so fixing all of them
    inside pushes the release out by as many findings as there are, and sending all of them
@@ -3009,7 +3023,8 @@ fn brief() -> String {
    inside**: create it as a member of that epic (`-e <epic>`) or under an epic in the same
    milestone. **What this release can do without goes outside** — not "not doing it", but
    "not in this release"
-     moai -C <root> edit <that row> -e none --milestone none
+
+       moai -C <root> edit <that row> -e none --milestone none
    **Pass `-e none` with it.** A milestone is inherited from the epic, so on an epic member
    `--milestone none` alone changes nothing and comes back with one line saying the place
    comes from the epic and cannot be cut — a row 7-1 reclaimed stands as that epic's member,
@@ -3019,12 +3034,14 @@ fn brief() -> String {
    can a `Regression-of:` line be written (did something already merged break). Those two are
    inside; the rest is outside. A new axis is not made because it would become a fourth
    vocabulary beside the column, the kind and the defer
+
 7-3. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
    for the release being prepared**, and write it if it does not. Write it **here, in the
    worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
    the root, which every session shares and where the only commits that belong are the
    tracker's and the merge itself. Committed here it rides the merge commit instead
-     git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
+
+       git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
    This window is the only one that knows what the epic did, and it is the only one that
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
@@ -3035,28 +3052,34 @@ fn brief() -> String {
    section by version name and hands it to `--notes-file` as it is, so a missing section
    reads to whoever receives it as the whole release. **Nothing checks this** — a check here
    would be a gate, and an empty section must not stop a release
+
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
    epic changed what a person does — {CHANGED_USE}.
    If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
    7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
+
 {wiki_commit}
    If it did not, write nothing. **Nothing checks this**
+
 8. *Come back to the root* — remove the worktree from inside it and this window stands in a
    directory that is gone.
    Before merging, check that the root stands on <base branch> — if it does not, do not merge:
    tell the supervisor
-     git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
+
+       git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
    Merge in the root, **in one call**. Overlap with the workers beside you was split when the
    supervisor sent the work, and where it still collides, undo as below and resolve in the
    worktree — do not go looking for the other session to tell it. Do not use `--no-commit`.
    Without `--no-ff` it ends as a fast-forward and no merge commit stands
-     git merge --no-ff worktree-<epic> -m "merge: …"
+
+       git merge --no-ff worktree-<epic> -m "merge: …"
    If the root's `.moai` holds uncommitted rows from another session the merge is refused —
    take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
    resolve it in the root — undo with `git merge --abort`, go back into the worktree
    (*Enter the worktree*) and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
+
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
    suggestion in the letter but the model that **actually ran** in this window. The line below
@@ -3075,44 +3098,48 @@ fn brief() -> String {
    `tokens=<count>` out of the other members' lines.
    Quote free text with single quotes — inside double quotes the shell expands backticks and
    `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
-     moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+
+       moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
-   landed** — a worker moved them before the merge and had to undo it. It closes a member
-   from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
-   alike. Do not close the
-   members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
-   the worktree still stands, the hook reads this work as a sibling worktree's and cannot
-   refuse a review closed without `-m`. Close the review issue leaving what came out of it
+    landed** — a worker moved them before the merge and had to undo it. It closes a member
+    from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
+    alike. Do not close the
+    members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
+    the worktree still stands, the hook reads this work as a sibling worktree's and cannot
+    refuse a review closed without `-m`. Close the review issue leaving what came out of it
+
 {close}
 {over}
-   Leave the tests passing in the root with a commit with a path, as in 2
+    Leave the tests passing in the root with a commit with a path, as in 2
 11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and take it into the root
-   with a commit with a path as in 2. It is written after the commit in 10, so leaving it out
-   leaves it in the shared root where someone else's commit sweeps it up. If anything is left
-   (a background review, say), finish it before the note — the supervisor reads the note as
-   this work being over; what you cannot finish, name in the report (12)
+    with a commit with a path as in 2. It is written after the commit in 10, so leaving it out
+    leaves it in the shared root where someone else's commit sweeps it up. If anything is left
+    (a background review, say), finish it before the note — the supervisor reads the note as
+    this work being over; what you cannot finish, name in the report (12)
 12. Report with a letter to the supervisor, **last of all**. It carries the merge hash,
-   the unfolded epic's id, a line or two of summary, what you handed on and any new ideas,
-   the members reclaimed in 7-1 and left in the first column,
-   the members left in 4-3 because the work beside you held the file, with that other work
-   named, and the wiki pages 7-4 changed — or that it changed none — and anything still
-   running that 11 could not finish: the supervisor does not clear a window whose report
-   says so. Write it to a file outside the repository (your scratchpad, or a temporary
-   file) — nothing is held by now, so a file in the shared root is refused or left behind —
-   and send it
-     moai send <supervisor> 'report: <epic>' --reply-to <letter id> -b - < <report file>
-   Then **say when the window can be cleared**, in one line to the person watching. The
-   context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
-   commit messages. If you can see your own context usage, put that number in the line too.
-   **Say the opposite in the same line** — not to clear while a review is running in the
-   background, while a merge conflict is being resolved, while waiting on a person's answer,
-   or after the supervisor's next message has arrived in this window. Clearing then loses what
-   is not yet moved into the tracker, or the message that arrived.
-   Then do what `After the report:` says. With `wait again`, go back to waiting (the loop's 2)
-   — a person who wants the window cleared stops the wait, clears it (*Clear the window*) and
-   calls this skill again (*Call a skill*). With `end the turn`, end it — on tmux
-   the supervisor may check the report and clear this window itself once it sees the `Next:`
-   note stand, and then wakes it with the next letter"#
+    the unfolded epic's id, a line or two of summary, what you handed on and any new ideas,
+    the members reclaimed in 7-1 and left in the first column,
+    the members left in 4-3 because the work beside you held the file, with that other work
+    named, and the wiki pages 7-4 changed — or that it changed none — and anything still
+    running that 11 could not finish: the supervisor does not clear a window whose report
+    says so. Write it to a file outside the repository (your scratchpad, or a temporary
+    file) — nothing is held by now, so a file in the shared root is refused or left behind —
+    and send it
+
+        moai send <supervisor> 'report: <epic>' --reply-to <letter id> -b - < <report file>
+    Then **say when the window can be cleared**, in one line to the person watching. The
+    context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
+    commit messages. If you can see your own context usage, put that number in the line too.
+    **Say the opposite in the same line** — not to clear while a review is running in the
+    background, while a merge conflict is being resolved, while waiting on a person's answer,
+    or after the supervisor's next message has arrived in this window. Clearing then loses what
+    is not yet moved into the tracker, or the message that arrived.
+    Then do what `After the report:` says. With `wait again`, go back to waiting (the loop's 2)
+    — a person who wants the window cleared stops the wait, clears it (*Clear the window*) and
+    calls this skill again (*Call a skill*). With `end the turn`, end it — on tmux
+    the supervisor may check the report and clear this window itself once it sees the `Next:`
+    note stand, and then wakes it with the next letter"#
     )
 }
 
@@ -3400,7 +3427,7 @@ mod tests {
         }
         assert!(rules().contains(REVIEW_OVER_LIMIT), "규칙 3 이 넘칠 때의 길을 안 댄다");
         assert!(reference().contains(REVIEW_OVER_LIMIT), "참고 문서가 넘칠 때의 길을 안 댄다");
-        assert!(brief().contains(&indent(REVIEW_OVER_LIMIT, "   ")), "일꾼 걸음이 넘칠 때의 길을 안 댄다");
+        assert!(brief().contains(&indent(REVIEW_OVER_LIMIT, "    ")), "일꾼 걸음이 넘칠 때의 길을 안 댄다");
         // 상한 자체에서 넘는 글을 짓는다 — 손으로 적은 수는 상한이 그것을 넘어서면 `unwrap_err` 가
         // 엉뚱한 패닉으로 터진다. `가` 는 3바이트다.
         let big = "가".repeat(crate::model::MAX_TEXT_BYTES / 3 + 1);
@@ -4200,7 +4227,7 @@ stop sending outside work while a release runs",
             (format!("`{name}` skill"), "심는 스킬의 이름으로 안 보낸다"),
             ("`moai wiki ls`".to_string(), "위키가 있는지 무엇으로 아는지 안 적었다"),
             (CHANGED_USE.to_string(), "스킬과 같은 물음을 안 묻는다"),
-            (indent(WIKI_COMMIT, "     "), "고친 페이지를 담을 커밋 줄이 없다"),
+            (indent(WIKI_COMMIT, "       "), "고친 페이지를 담을 커밋 줄이 없다"),
             ("in the worktree, before the merge".to_string(), "워크트리에서 머지 전에 쓰라는 말이 없다"),
             ("write nothing".to_string(), "쓰임이 안 바뀐 에픽은 안 쓴다는 말이 없다"),
             ("**Nothing checks this**".to_string(), "게이트가 아니라는 말이 없다"),
@@ -4208,7 +4235,9 @@ stop sending outside work while a release runs",
             assert!(step.contains(&piece), "{why} — {piece}");
         }
         // 본문은 스킬에 있다 — 틀·훑기·하지 않는 것이 브리프로 새어 나오면 걸음이 자란다.
-        assert!(step.lines().count() <= 8, "7-4 가 {}줄로 자랐다 — 본문은 스킬에 둔다\n{step}", step.lines().count());
+        // 빈 줄은 세지 않는다 — 마크다운의 코드 블록과 걸음을 가르는 자리다(moai-bkn4.9no).
+        let grown = step.lines().filter(|l| !l.trim().is_empty()).count();
+        assert!(grown <= 8, "7-4 가 {grown}줄로 자랐다 — 본문은 스킬에 둔다\n{step}");
         // 닫기보다 앞이다 — 멤버가 닫히면 그 창은 규칙 2 로 저장소를 못 고친다.
         assert!(end < step_at(&brief, "10"), "위키를 닫은 뒤에 본다");
         // 보고(12)가 고친 페이지를 댄다 — 감독은 위키를 따로 안 본다.
@@ -4820,6 +4849,53 @@ sys.exit(1 if bad else 0)
         // 거둔 일은 3 을 안 지나 4-1 부터 잇는다 — 그 절에도 같은 줄이 서야 이어받은 일꾼이 꼭대기에 안 선다.
         let stalled = &work[work.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
         assert!(stalled.contains(SUBDIR), "거둔 일의 일꾼이 워크트리 꼭대기에 선다");
+    }
+
+    /// **걸음은 마크다운 목록 규칙을 따른다**(moai-bkn4.9no, 리뷰 moai-snyk.nic). 에이전트는 날 글을 읽어 지장이 없지만,
+    /// GitHub 에서는 걸음마다 명령 줄과 잔걸음까지 한 문단으로 뭉쳤다. 넷을 맨다.
+    ///
+    /// - 명령 줄은 코드 블록이다 — 빈 줄 뒤에, 그 걸음의 글 칸에서 네 칸 더(`1.`~`9.` 는 7칸, `10.`~`12.` 는 8칸).
+    ///   들여 쓴 코드는 문단을 못 끊어, 빈 줄 없이 들여 쓴 줄은 위 문단에 붙는다
+    /// - `4-1.` 같은 잔걸음은 빈 줄 뒤에 선다 — 목록 표시가 아니라서 빈 줄이 없으면 위 문단에 붙는다
+    /// - 잔걸음 뒤의 큰 걸음도 빈 줄 뒤다 — `1.` 이 아닌 번호는 문단을 끊고 목록을 열지 못한다
+    /// - 이음은 그 걸음의 글 칸에 선다 — `10.` 은 표시가 네 칸이라, 세 칸 이음은 코드 블록 뒤에서 목록 밖으로 떨어진다
+    #[test]
+    fn the_brief_follows_the_markdown_list_rules() {
+        let brief = brief();
+        let lines: Vec<&str> = brief.lines().collect();
+        let lead = |l: &str| l.len() - l.trim_start().len();
+        let (mut col, mut after_sub) = (3, false);
+        for (i, l) in lines.iter().enumerate() {
+            if l.trim().is_empty() {
+                continue;
+            }
+            let before = if i == 0 { "" } else { lines[i - 1] };
+            if lead(l) == 0 {
+                let mark = l.split_once(". ").map(|(m, _)| m).unwrap_or_default();
+                assert!(
+                    !mark.is_empty() && mark.chars().all(|c| c.is_ascii_digit() || c == '-'),
+                    "걸음 표시가 아닌 줄이 맨 앞에 서서 위 문단에 붙는다: {l}"
+                );
+                let sub = mark.contains('-');
+                if sub || after_sub {
+                    assert!(before.is_empty(), "{mark} 앞에 빈 줄이 없어 위 문단에 붙는다");
+                }
+                after_sub = sub;
+                col = if sub { 3 } else { mark.len() + 2 };
+                continue;
+            }
+            assert!(lead(l) >= col, "이음이 그 걸음의 글 칸({col})보다 얕다: {l}");
+            // 글 칸과 코드 칸 사이에 서는 것은 걸음 안의 번호 목록(7 의 다섯 자리)의 이음 하나다 — 옛 다섯 칸 명령 줄이
+            // 여기 걸린다.
+            let inner = lead(l) > col && lead(l) < col + 4;
+            assert!(!inner || lead(l) == col + 3, "명령 줄도 이음도 아닌 칸에 섰다: {l}");
+            if lead(l) >= col + 4 {
+                let code_above = !before.trim().is_empty() && lead(before) >= col + 4;
+                assert!(before.is_empty() || code_above, "명령 줄 앞에 빈 줄이 없어 문단에 붙는다: {l}");
+                assert_eq!(lead(l), col + 4, "명령 줄이 글 칸에서 네 칸 더가 아니다: {l}");
+            }
+        }
+        assert_eq!(col, 4, "마지막 걸음을 못 읽었다 — 10.~12. 의 글 칸을 안 쟀다");
     }
 
     /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
