@@ -471,7 +471,7 @@ fn decide(
         // 표가 한 번 걷히고 닫기 물음이 세션에 한 번(`once_per_session`)이기 때문이다.
         Event::Stop => {
             let me = attendee(input, &repo, dialect);
-            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::CONTEXT_CAP, Mine::Others));
+            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx, hold_room(dialect), Mine::Others));
             let held_by_letters = session_file(input, &repo, "letters");
             let decision = match letters {
                 Some(said) => {
@@ -498,6 +498,17 @@ fn decide(
         Event::StopFailure | Event::Interrupt | Event::SessionEnd => Decision::Pass,
     };
     Some(decision)
+}
+
+/// `Stop` 이 붙드는 까닭(`reason`)에 편지가 들 자리 — 말씨마다 다르다(moai-rxro). Codex 는 그 글을 이어 가는
+/// 프롬프트로 실어 기본 상한에 묶고, 심은 파일의 `additionalContextLimit` 은 거기 안 닿는다([`crate::hook::CODEX_HOLD`]).
+/// 칸 하나([`crate::hook::Room::CONTEXT`])로 재던 판은 그 상한을 넘긴 한국어 편지의 가운데를 Codex 가 파일로 빼, 읽음으로
+/// 옮긴 그 자리를 아무도 못 봤다. Antigravity 의 상한은 문서에 없어 Claude 의 자로 잰다.
+fn hold_room(dialect: Dialect) -> crate::hook::Room {
+    match dialect {
+        Dialect::Codex => crate::hook::CODEX_HOLD,
+        Dialect::Claude | Dialect::Antigravity => crate::hook::Room::CONTEXT,
+    }
 }
 
 /// 턴 끝의 닫기 물음 — 세션에 한 번 붙든다(`once_per_session`). 편지가 붙든 턴은 그 뒤의 `Stop` 이 묻는다([`decide`]).
@@ -1377,9 +1388,9 @@ enum Mine {
 /// 이 세션에 온 편지를 읽음으로 옮기며 실을 글을 낸다 — 없으면 `None`. **옮긴 것만 싣는다** — 남이 먼저
 /// 가진 `any-idle-worker` 편지는 빠진다. 말은 실을 편지가 있을 때만 푼다(사용자 설정을 여는 값이다).
 ///
-/// `room` 은 이 글이 들 자리다([`crate::hook::letters_room`]) — 그 칸을 넘기면 Claude Code 가 칸을 통째로 파일로
-/// 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]).
-fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx, room: usize, which: Mine) -> Option<String> {
+/// `room` 은 이 글이 들 자리다([`crate::hook::letters_room`]·[`hold_room`]) — 그 칸을 넘기면 에이전트가 글을 파일로
+/// 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]·[`crate::hook::CODEX_HOLD`]).
+fn deliver(repo: &Repo, me: &mail::Presence, ctx: &Ctx, room: crate::hook::Room, which: Mine) -> Option<String> {
     let dir = repo.mail_dir();
     // 여는 자리는 제 함과 열린 편지의 함 둘뿐이다(moai-ew4o.c92) — 남에게 간 편지를 열어 가르지 않는다.
     let (all, _) = mail::list(&dir, &me.name, false);

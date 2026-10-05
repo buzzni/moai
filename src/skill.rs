@@ -144,7 +144,7 @@ pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 /// 이다. Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 낸다(사람의 codex 0.160 이 짚었다). 그 상한은
 /// 추가 맥락을 낼 수 있는 이벤트만 받는다(Codex 훅 문서: SessionStart·SubagentStart·PreToolUse·PostToolUse·
 /// UserPromptSubmit) — `Stop` 이 붙드는 까닭(`reason`)은 이어 가는 프롬프트라 이 값이 안 닿고 Codex 의 기본 상한을
-/// 그대로 쓴다(같은 문서). 두 값을 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이 15초·상한 없음을 받는다 —
+/// 그대로 쓴다(같은 문서). 그래서 그 글은 훅이 그 상한에 맞춰 싣는다([`crate::hook::CODEX_HOLD`]). 두 값을 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이 15초·상한 없음을 받는다 —
 /// 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).
 const CODEX: &[(&str, &str, &str, u64, Option<usize>)] = &[
     ("SessionStart", "session-start", "counting moai warnings...", TIMEOUT, Some(CODEX_CONTEXT_LIMIT)),

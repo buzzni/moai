@@ -1074,5 +1074,5 @@
   "hook.you_are": "This Codex session is `{name}` in `moai agents`. If `moai` says it cannot tell who you are, pass `--as {name}` to `moai hello`, `moai inbox` and `moai send`.",
   "hook.letters": "Letters for {me} ({n}). They are marked read now - `moai inbox --all --as {me}` shows them again. Answer one with `moai send <from> '<subject>' --reply-to <id> --as {me} -b -`; a decision still goes on its issue as a note.",
   "hook.letters_left": "{n} more are waiting - `moai inbox --ack --as {me}` reads them, or the next turn loads them.",
-  "hook.letter_cut": "[Cut here to fit the 10,000 characters a hook can load - `moai inbox --all --as {me}` shows the whole letter]"
+  "hook.letter_cut": "[Cut here to fit what a hook can load at once - `moai inbox --all --as {me}` shows the whole letter]"
 }

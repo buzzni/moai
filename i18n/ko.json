@@ -1074,5 +1074,5 @@
   "hook.you_are": "이 Codex 세션은 `moai agents` 에서 `{name}` 이다. `moai` 가 누구인지 모른다고 하면 `moai hello`·`moai inbox`·`moai send` 에 `--as {name}` 을 준다.",
   "hook.letters": "{me} 에게 온 편지 {n}통. 지금 읽음으로 옮겼다 — `moai inbox --all --as {me}` 가 다시 보인다. 답은 `moai send <보낸 이> '<제목>' --reply-to <id> --as {me} -b -` 로 하고, 결정은 지금처럼 그 이슈에 노트로 남긴다.",
   "hook.letters_left": "{n}통이 더 기다린다 — `moai inbox --ack --as {me}` 가 읽거나, 다음 턴이 싣는다.",
-  "hook.letter_cut": "[훅이 싣는 1만 자에 맞춰 여기서 잘랐다 — 편지 전체는 `moai inbox --all --as {me}` 가 보인다]"
+  "hook.letter_cut": "[훅이 한 번에 싣는 양에 맞춰 여기서 잘랐다 — 편지 전체는 `moai inbox --all --as {me}` 가 보인다]"
 }
