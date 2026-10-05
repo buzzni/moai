@@ -44,7 +44,11 @@ fn place(ctx: &Ctx) -> R<Place> {
     // 글자로 견주면 자리로 견준 것이다. `skill` 은 글만 짓는 모듈이라 파일 시스템을 거기서 안 본다.
     let resolved = crate::path::real(&current);
     let on_path = which("moai");
-    let planted = std::fs::read_to_string(root.join(skill::DIR).join(".claude-plugin/plugin.json")).ok();
+    // **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`, moai-ml0d.21i) — 커밋된 트리라 받은 저장소의
+    // 링크일 수 있다. 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로 `skill status`·`install --dry-run`
+    // 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 는 메모리를 다 썼다. 못 읽으면 처음 심는 것처럼 부른 철자다.
+    let manifest = root.join(skill::DIR).join(".claude-plugin/plugin.json");
+    let planted = crate::held::read_inside(&manifest, &crate::held::Home::of(&root)).ok();
     let spelling = kept(planted.as_deref(), &resolved).unwrap_or_else(|| invoked(current, &resolved));
     let exe = skill::exe_name(&spelling, &resolved, on_path.as_deref());
     let prefix = repo.config.prefix.clone();
@@ -1214,9 +1218,9 @@ struct Undeclare {
 impl Undeclare {
     /// 그 파일에서 선언을 지운다. **이미 없으면 이룬 것이다.** 그 파일이 이 마켓의 플러그인을 아직 켜 두었으면
     /// 안 지운다 — 같은 `call` 에서 앞선 `plugin uninstall` 이 실패한 판이고, 선언을 걷으면 켠 플러그인이 출처를
-    /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다.
+    /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다. 읽는 자는 계획할 때와 같다([`read_settings`]).
     fn call(&self, root: &Path) -> bool {
-        let Ok(text) = std::fs::read_to_string(&self.file) else { return false };
+        let Some(text) = read_settings(&self.file, root) else { return false };
         let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
         if settings.get("extraKnownMarketplaces").and_then(|m| m.get(self.market)).is_none() {
             return true;
@@ -1398,8 +1402,7 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
         return out;
     }
     let file = root.join(".claude/settings.json");
-    let Some(settings) =
-        std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    let Some(settings) = read_settings(&file, root).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
     else {
         return out;
     };
@@ -1415,6 +1418,15 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
         out.undeclare.push(Undeclare { market, file: file.clone(), ok: None });
     }
     out
+}
+
+/// 커밋된 설정(`.claude/settings.json`)을 읽는다 — **보통 파일만, 체크아웃 `root` 안에서만**(`held::read_inside`,
+/// moai-ml0d.21i). 계획([`retire`])과 지우기 직전([`Undeclare::call`])이 이 하나로 읽는다. 맨 `fs::read_to_string` 으로
+/// 읽던 판은 받은 저장소가 커밋한 `-> /dev/zero` 하나로 `skill install` 이 메모리를 다 썼고 FIFO 앞에서 멈췄다.
+/// 쓰기(`write_atomic_inside`)가 이미 거절하던 자리라, 밖을 가리키는 링크를 읽어 걸음을 세워 봐야 지우지도 못한다.
+/// **못 읽으면 `None` 이다** — 어느 출처를 선언했는지 모르니 걸음을 안 세운다.
+fn read_settings(file: &Path, root: &Path) -> Option<String> {
+    crate::held::read_inside(file, &crate::held::Home::of(root)).ok()
 }
 
 /// 설치 id(`<플러그인>@<마켓플레이스>`)의 마켓플레이스 이름 — [`RETIRED`] 의 장부 줄과 설정 선언을 이 이름으로 찾는다.

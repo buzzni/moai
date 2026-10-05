@@ -18115,9 +18115,10 @@ fn skill_install_keeps_a_declaration_whose_plugin_stays() {
     );
 }
 
-/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 고치지 않는다**(`store::write_atomic_inside`) — 받은
-/// 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃 밖의 파일을 고친다. 링크도
-/// 보통 파일로 안 바꾼다. 못 지운 것으로 세어 손으로 지울 자리를 대고, 종료 코드는 등록만 따른다.
+/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 읽지도 고치지도 않는다**(`store::write_atomic_inside`,
+/// `held::read_inside`) — 받은 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃
+/// 밖의 파일을 고친다. 링크도 보통 파일로 안 바꾼다. 읽기도 같은 자다(moai-ml0d.21i) — 밖을 읽어 걸음을 세우던 판은
+/// 지우지도 못할 선언을 "못 지웠다" 로 댔다. 못 읽는 설정이라 걸음을 안 세우고, 종료 코드는 등록만 따른다.
 #[test]
 fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
     let s = init("skillundeclarelink");
@@ -18133,14 +18134,67 @@ fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
     std::os::unix::fs::symlink(&outside, &file).unwrap();
 
     let out = c.run(s.path(), &["skill", "install", "--scope", "project", "--json"], true);
-    assert!(out.status.success(), "선언 하나를 못 지웠다고 설치가 실패로 끝났다\n{}", text(&out));
+    assert!(out.status.success(), "못 읽는 설정 하나로 설치가 실패로 끝났다\n{}", text(&out));
     let json = String::from_utf8(out.stdout).unwrap();
-    for (name, _) in OLD_MARKETS {
-        let row = format!(r#"{{"file":{},"marketplace":"{name}","ok":false}}"#, json_str(&file.display().to_string()));
-        assert!(json.contains(&row), "{json}");
-    }
+    assert!(json.contains(r#""undeclared":[]"#), "체크아웃 밖의 설정을 읽어 걸음을 세웠다\n{json}");
     assert_eq!(std::fs::read_to_string(&outside).unwrap(), body, "체크아웃 밖의 파일을 고쳤다");
     assert!(std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink(), "링크를 보통 파일로 바꿨다");
+}
+
+/// **커밋된 `plugin.json`·`.claude/settings.json` 은 보통 파일로만 읽는다**(moai-ml0d.21i, `held::read_inside`) — 맨
+/// `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로 `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영
+/// 기다렸다. 고침이 없으면 멈추므로 마감을 두고 부른다 — 멈춘 프로세스는 죽이고 시험이 진다. 설정은 옛 판 moai 가
+/// project 범위에 선 장부여야 읽힌다(옛 선언을 걷는 걸음). 못 읽는 설정은 걸음을 안 세울 뿐 설치를 안 막고, 보통
+/// 파일이 아닌 `plugin.json` 은 다시 심는 길이 그 자리를 대며 비영으로 멈춘다(`store::write_atomic_inside`).
+#[cfg(unix)]
+#[test]
+fn skill_reads_no_fifo_in_the_committed_plugin_or_settings() {
+    let s = init("skillfifo");
+    let c = Claude::new("skillfifo-home");
+    let bounded = |args: &[&str]| -> Output {
+        let mut child = c
+            .command(Path::new(BIN), s.path(), args, true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("moai 를 못 띄웠다");
+        for _ in 0..600 {
+            if child.try_wait().unwrap().is_some() {
+                return child.wait_with_output().unwrap();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("moai {args:?} 가 멈췄다 — 커밋된 파일을 막히지 않게 열지 않았다");
+    };
+    let fifo = |p: &Path| {
+        let _ = std::fs::remove_file(p);
+        assert!(Command::new("mkfifo").arg(p).status().unwrap().success(), "FIFO 를 못 지었다: {}", p.display());
+    };
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    project_ledger(&c, &market, &root, &dir);
+
+    fifo(&root.join(".claude/settings.json"));
+    for args in [&["skill", "install", "--scope", "project", "--dry-run"][..], &["skill", "uninstall", "--dry-run"]] {
+        let out = bounded(args);
+        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+    }
+    let out = bounded(&["skill", "install", "--scope", "project", "--json"]);
+    assert!(out.status.success(), "못 읽는 설정 하나로 설치가 실패로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains(r#""undeclared":[]"#), "못 읽은 설정에 걸음을 세웠다\n{}", text(&out));
+
+    let manifest = dir.join(".claude-plugin/plugin.json");
+    fifo(&manifest);
+    for args in [&["skill", "status"][..], &["skill", "install", "--dry-run"]] {
+        let out = bounded(args);
+        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+    }
+    let out = bounded(&["skill", "install"]);
+    assert!(!out.status.success(), "못 심은 자리가 있는데 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains("plugin.json"), "어느 자리인지 안 댄다\n{}", text(&out));
+    assert!(!std::fs::symlink_metadata(&manifest).unwrap().is_file(), "FIFO 를 갈아끼웠다");
 }
 
 /// **선언을 걷는 문은 셋이 겹칠 때만 열린다**(moai-6ugu.aae) — 옛 판 moai 가 project 범위에 섰고, 그 파일에
