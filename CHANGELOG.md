@@ -24,7 +24,9 @@ does not tag — see `CONTRIBUTING.md`.
   <subject> -b <text|->` leaves one for an agent name or for `any-idle-worker`,
   which the first agent that is neither the sender nor a supervisor keeps.
   `moai inbox` shows the letters for you, `--ack` moves them to `read/` inside
-  the box (nothing is deleted; `--all` shows them again) — one
+  the box (`--all` shows them again until `moai agents` sweeps them,
+  `mail_read_days` after they were read — 7 unless `.moai/config.toml` says
+  otherwise, `0` keeps them; an unread letter is never swept) — one
   `any-idle-worker` letter per call, as the hooks take them, so several spread
   over the agents that wait — and `--wait <seconds>` waits for one to come. Who you are is `--as`, else
   `MOAI_AGENT`, else the registered agent the command runs under. Codex runs
@@ -35,7 +37,11 @@ does not tag — see `CONTRIBUTING.md`.
   hooks give the session in its first context.
   **Nothing goes into `issues.jsonl` or the journal** — a letter is delivery,
   not record, and the mailbox follows the tracker into the main checkout, so
-  every session of a repository sees one mailbox. There is no lock: sending
+  every session of a repository sees one mailbox. Like every other file the
+  repository holds, the mailbox and the presence rows follow a link only
+  inside the checkout: a committed `.moai/mail`, `.moai/agents`, box or
+  `read/` that points elsewhere is not opened — writing through it stops with
+  `broken`, and reading names it. There is no lock: sending
   links a finished temporary file into place and never overwrites a letter,
   and marking read is one rename, so two readers never both take a letter.
 - **A letter left for an agent that went away goes back to its sender.** When
