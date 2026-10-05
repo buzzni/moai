@@ -155,13 +155,15 @@ a worker that waits needs no waking, and waking is a bonus.
   changed them. Until then Codex runs none of them, and the five rules are words
   only
 - **Make it a worker** with `$moai-work`
-- **It names itself with `--as`.** Codex runs every session's shell from one
-  shared `codex app-server`, so `moai` typed in that shell cannot tell which
-  session it came from. The hooks name the session in its first context
-  (`codex-` and the first eight characters of its session id); the window says
-  hello as that row — `moai hello --role worker --as codex-01a107b4` — and passes
-  the same `--as` to every `moai inbox` and `moai send`. The skills tell it to.
-  Without `--as` or `--name`, `moai hello` in Codex stops and says so
+- **moai finds it by its session id.** Codex runs every session's shell from
+  one shared `codex app-server`, so `moai` cannot tell sessions apart by their
+  processes. Codex sets the session's id in that shell (`CODEX_THREAD_ID`), and
+  `moai hello`, `moai inbox` and `moai send` find the session's row by it — the
+  one its hooks wrote (`codex-` and the first eight characters of that id). A
+  Codex that does not set it makes `moai hello` stop and say so: then pass
+  `--as` with the row's name, which the hooks give in the session's first
+  context — `moai hello --role worker --as codex-01a107b4` — and the same `--as`
+  to every `moai inbox` and `moai send`
 - **Waking**: nothing is meant to wake a Codex window. Its row carries no tmux
   pane, so a worker gets its letters by waiting on `moai inbox --ack --wait`, and
   `--wake` passes it over
@@ -182,7 +184,7 @@ would run with the sandbox off, and the question does not say so.
 `.codex/hooks.json` in the same directory is committed — the two part ways
 there. Only the sandbox goes: the approval setting is left at Codex's default.
 
-**One row per Codex window.** Because the window says hello as the row its
+**One row per Codex window.** Because the window says hello on the row its
 hooks wrote, the two are one: its role is on the row its hooks read, so a Codex
 supervisor's own turn end never takes an `any-idle-worker` letter, and two Codex
 windows on one machine keep a row each. A row whose session died is swept once
@@ -309,8 +311,8 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   characters of its session id. `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
   `moai send` and `moai inbox` know who you are from `--as`, `MOAI_AGENT`, or the
   registered agent they run under. A window that sets `MOAI_AGENT` is registered
-  under that name by its hooks and by `moai hello` alike. A Codex session passes
-  `--as` with the name its hooks gave it ([Codex](#codex))
+  under that name by its hooks and by `moai hello` alike. A Codex session is found
+  by the session id Codex sets in its shell ([Codex](#codex))
 - **`any-idle-worker`** is a recipient, not a name: the first agent that is
   neither the sender nor registered as a `supervisor` (`moai hello --role
   supervisor`) to take the letter keeps it. A hook takes one such letter per
@@ -463,11 +465,10 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   nothing wakes a window that is not waiting
 - **A letter came back marked returned.** The agent it was for went away
   before reading it. Send the work on to another agent if it still needs doing
-- **`moai hello` in Codex says it cannot tell which session this is.** Pass
-  `--as` with the row its hooks gave the session — the name in its first
-  context, also in `moai agents` as `codex-` and eight characters — or `--name`
-  for one of your own. A Codex window whose hooks are not trusted yet has no
-  such row: trust them in `/hooks` first
+- **`moai hello` in Codex says it cannot tell which session this is.** That
+  Codex set no `CODEX_THREAD_ID` in its shell. Pass `--as` with the row its hooks
+  gave the session — the name in its first context, also in `moai agents` as
+  `codex-` and eight characters — or `--name` for one of your own
 - **A subagent's `moai inbox --ack` was refused.** It would have taken its
   parent session's letters. Leave the letters to the parent, or pass `--as` with
   a name of the subagent's own
