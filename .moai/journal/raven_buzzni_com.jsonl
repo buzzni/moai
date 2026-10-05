@@ -4592,3 +4592,5 @@
 {"ts":"2026-10-05T12:17:19Z","id":"moai-dp35","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 끝났다 — 790e51bd 로 develop 에 들었다. 이어 볼 것은 idea 둘: moai-2rby(Codex 닫기 물음을 붙드는 칸의 자리로 잰다), moai-yvev(편지를 출력 뒤에 읽음으로 옮긴다, 리뷰 13번)"}
 {"ts":"2026-10-05T12:18:32Z","id":"moai-dj4j.ug2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T12:18:34Z","id":"moai-dj4j.rs4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T12:20:17Z","id":"moai-svwu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"place_dir 과 skill 의 outside 가 끝 없는 링크를 달리 잰다"}
+{"ts":"2026-10-05T12:20:19Z","id":"moai-tykd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 연 우편함 앞에서 일꾼의 inbox --wait 고리가 쉬지 않고 돈다"}
