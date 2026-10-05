@@ -226,8 +226,8 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         .or_else(|| seen.map(str::to_string))
         .unwrap_or_default();
     // 이름: 준 것, `MOAI_AGENT`, 이 에이전트가 이미 든 것, Claude 가 보이는 세션 이름, `<벤더>-<pid>` 차례(사용자 결정).
-    // **Codex 는 데몬의 pid 로 짓지 않는다** — 창마다 같다. 훅이 짓는 것과 같은 `codex-<세션 id 앞 8자>` 이고, 산 남이 쥐었으면
-    // 세션 id 를 통째로 잇는다. 세션 id 도 없으면 짓지 않는다 — 훅이 지어 준 장을 `--as` 로 잇거나 이름을 댄다.
+    // **Codex 는 데몬의 pid 로 짓지 않는다** — 창마다 같다. 훅이 짓는 것과 같은 `codex-<세션 id 앞 8자>` 이고, 남이 쥐었으면
+    // 토막을 이어 가른다([`mail::codex_name`]). 세션 id 도 없으면 짓지 않는다 — 훅이 지어 준 장을 `--as` 로 잇거나 이름을 댄다.
     let generated = || match &agent {
         Agent::Known(proc, _) => (vendor == "claude")
             .then(|| mail::claude_session_name(proc.pid))
@@ -235,15 +235,15 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             .or_else(|| mail::name_with(if vendor.is_empty() { "agent" } else { &vendor }, &proc.pid.to_string())),
         Agent::Codex(session) => session.as_deref().and_then(|s| mail::codex_name(&all, s)),
     };
-    let (name, made) = match args.name.clone().or(told).or_else(|| before.as_ref().map(|p| p.name.clone())) {
-        Some(name) => (name, false),
-        None => match generated() {
-            Some(name) => (name, true),
-            None if matches!(agent, Agent::Codex(_)) => {
-                return Err(Fail::coded(say(lang, "refuse.agents_codex_who").to_string(), code::NO_ACTOR));
-            }
-            None => return Err(super::mail::bad_name(lang, &vendor)),
-        },
+    let given = args.name.clone().or(told).or_else(|| before.as_ref().map(|p| p.name.clone()));
+    // 지은 이름인가 — 준 것도 대는 것도 이어 쓰는 것도 없어 여기서 지었다(moai-nas5). 겨루는 자가 갈린다(아래).
+    let made = given.is_none();
+    let name = match given.or_else(generated) {
+        Some(name) => name,
+        None if matches!(agent, Agent::Codex(_)) => {
+            return Err(Fail::coded(say(lang, "refuse.agents_codex_who").to_string(), code::NO_ACTOR));
+        }
+        None => return Err(super::mail::bad_name(lang, &vendor)),
     };
     // **산 남의 이름은 안 뺏는다** — 두 에이전트가 한 이름이면 편지가 먼저 읽은 쪽으로 샌다. **대소문자만 다른
     // 이름도 같은 이름이다**(리뷰 moai-h8tn.x4l) — 이름이 파일 이름이라, 대소문자를 안 가리는 파일 시스템(macOS
@@ -254,10 +254,16 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     let mine = |p: &Presence| before.as_ref().is_some_and(|b| b.name == p.name);
     let holds = |p: &Presence| if made { p.holds_made_name() } else { !p.gone() };
     if let Some(other) = all.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && !mine(p) && holds(p)) {
+        // **떠난 것으로 보이는 장이 쥔 지은 이름은 "도는 에이전트" 라고 안 댄다**(리뷰 moai-nas5.cn7) — `moai agents` 는 그
+        // 장을 `gone` 으로 보이는데 거절이 도는 에이전트라고 하면 둘이 엇갈린다. 하루 쥐는 까닭과, 그 이름을 대면 넘겨받는다는
+        // 것을 댄다. 다른 기계의 장일 때만 그 말을 고른다 — 이 기계의 장은 `holds` 가 산 것으로 잰 장이라, 그 사이 죽었어도
+        // "다른 기계" 라고 대지 않는다.
+        let held = !other.here() && other.gone();
+        let said = if held { say(lang, "refuse.agents_name_held") } else { say(lang, "refuse.agents_name_taken") };
         return Err(Fail::coded(
             // 다른 기계의 장이면 pid 에 그 기계의 이름을 단다([`pid_cell`]) — 이 이름을 비우려는 사람이 이 기계에서 그 맨
             // 숫자를 죽이면 남의 프로세스다(moai-dhxm).
-            fill(say(lang, "refuse.agents_name_taken"), &[("name", &name), ("pid", &pid_cell(other))]),
+            fill(said, &[("name", &name), ("pid", &pid_cell(other))]),
             code::ALREADY_EXISTS,
         ));
     }

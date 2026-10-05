@@ -674,16 +674,18 @@ pub struct Presence {
 /// Codex 의 장은 pid 를 몰라(훅이 세션 여럿이 함께 쓰는 데몬 밑에서 돈다, moai-sile) 세션이 죽거나 `SessionEnd` 가 짧은
 /// 상한을 넘기면 `idle` 로 영영 남았고, `send any-idle-worker --wake` 가 그 죽은 장을 골라 산 일꾼을 안 깨웠다.
 ///
-/// **떠난 것으로 볼 뿐 지우지 않는다**(2026-10-05 사용자 결정, 리뷰 moai-ew4o.q9f 1·3번) — 깨우기·`--status idle`·창이
-/// 대는 이름의 겨루기가 건너뛰고 `moai agents` 가 [`GONE`] 으로 보이지만, 장(역할·`hello --name` 의 이름)과 함은 남아
-/// 그 세션의 다음 훅에 살아난다. 지우던 판은 돌아온 감독이 역할을 잃고 `any-idle-worker` 일감을 가졌고, 같은 65초 안에 연 두 세션이
-/// 지워진 뒤 돌아오면 먼저 온 쪽이 남의 편지를 받았다. 지우는 것은 [`EXPIRE_AFTER`] 넘게 안 적힌 장이다.
+/// **떠난 것으로 볼 뿐 지우지 않는다**(2026-10-05 사용자 결정, 리뷰 moai-ew4o.q9f 1·3번) — 깨우기·`--status idle`·이름
+/// 겨루기가 건너뛰고(다른 기계의 장이 쥔 지은 이름만은 하루를 기다린다 — [`Presence::holds_made_name`]) `moai agents` 가
+/// [`GONE`] 으로 보이지만, 장(역할·`hello --name` 의 이름)과 함은 남아 그 세션의 다음 훅에 살아난다. 지우던 판은 돌아온
+/// 감독이 역할을 잃고 `any-idle-worker` 일감을 가졌고, 같은 65초 안에 연 두 세션이 지워진 뒤 돌아오면 먼저 온 쪽이 남의
+/// 편지를 받았다. 지우는 것은 [`EXPIRE_AFTER`] 넘게 안 적힌 장이다.
 pub const STALE_AFTER: i64 = 20 * 60;
 
 /// 프로세스로 못 재는 장이 이만큼(초) 넘게 안 적혔으면 `moai agents` 가 지운다 — 하루다(같은 결정). 그 세션은 끝났는데
-/// `SessionEnd` 가 안 왔거나(죽었다·짧은 상한을 넘겼다) 하루 넘게 아무것도 안 한 것이다. 그 함은 그대로 둔다 — 그 세션이
-/// 돌아오면 Codex 의 이름은 세션 id 에서 지어 같은 이름을 다시 받는다. 다른 기계의 장도 하루를 기다린다 — 그 기계에서는
-/// 아직 살아 있을 수 있다. 그 장이 지은 이름을 놓는 때도 이것이다([`Presence::holds_made_name`]).
+/// `SessionEnd` 가 안 왔거나(죽었다·짧은 상한을 넘겼다) 하루 넘게 아무것도 안 한 것이다. Codex 의 장(pid 0)은 그 함을
+/// 그대로 둔다 — 그 세션이 돌아오면 Codex 의 이름은 세션 id 에서 지어 같은 이름을 다시 받는다. 다른 기계의 장도 하루를
+/// 기다린다 — 그 기계에서는 아직 살아 있을 수 있다. 그 함은 걷을 때 비운다([`sweep`]). 그 장이 지은 이름을 놓는 때도
+/// 이것이다([`Presence::holds_made_name`]).
 pub const EXPIRE_AFTER: i64 = 24 * 60 * 60;
 
 /// [`STALE_AFTER`] 넘게 안 적힌 장을 `moai agents` 가 보이는 상태 — 파일에는 안 적는다(보는 쪽이 그때 잰다).
@@ -801,7 +803,9 @@ impl Presence {
     /// 지은 이름을 아직 쥐었는가 — 이름 겨루기에서 **지은 이름**(Claude 의 세션 이름, `<벤더>-<세션 토막>`,
     /// `codex-<토막>`, `<벤더>-<pid>`)이 빈 것인지를 이 하나로 잰다(2026-10-05 사용자 결정, moai-nas5). **다른 기계의
     /// 장은 하루([`EXPIRE_AFTER`]) 넘게 안 적힐 때까지 쥔다** — 보이는 상태([`Presence::gone`])와 이름을 놓는 때를 가른다.
-    /// 그 밖의 장은 떠나지 않은 동안 쥔다.
+    /// 그 밖의 장은 떠나지 않은 동안 쥔다. **다른 기계의 장은 기계를 적은 장이다**([`Presence::here`]) — 기계를 안 적은 장은
+    /// 이 기계의 장처럼 잰다: Codex 의 장(pid 0, [`Presence::at`])은 20분 조용하면 그 이름을 놓고, 이 필드 전의 판이나 리눅스
+    /// 밖에서 적은 장은 그 pid 를 이 기계에서 잰다.
     ///
     /// Claude 의 장은 프롬프트 앞에서 쉬는 동안 훅이 안 돌아 닻을 안 적는다. 그래서 다른 기계의 산 Claude 장도 20분이면
     /// 떠난 것으로 읽히는데, Claude 의 세션 이름은 컨테이너마다 따로 세어 겹친다. 떠난 것으로 읽힌 이름을 내주던 판은 다른
@@ -810,8 +814,8 @@ impl Presence {
     ///
     /// **창이 대는 이름은 이것으로 안 잰다** — [`Presence::gone`] 이다. 그 이름은 우연히 겹친 것이 아니라 창이 "나는 이
     /// 이름이다" 라고 댄 것이라, 컨테이너를 다시 띄운 `MOAI_AGENT=w1` 창은 앞 컨테이너의 낡은 w1 장이 20분 뒤 떠난
-    /// 것으로 읽히면 제 이름을 되찾는다(2026-10-05 사용자 결정, moai-dhxm). Codex 의 장(pid 0)은 이 기계의 장처럼 잰다 —
-    /// 기계를 안 적는다([`Presence::at`]).
+    /// 것으로 읽히면 제 이름을 되찾는다(2026-10-05 사용자 결정, moai-dhxm). 그래서 다른 세션이 지은 이름을 창이 그대로
+    /// 대면, 떠난 것으로 읽히는 그 장을 넘겨받아 안 읽은 편지를 되돌린다 — 대는 쪽이 고른 것이다.
     pub fn holds_made_name(&self) -> bool {
         if self.here() { !self.gone() } else { !self.expired(&crate::model::now()) }
     }
@@ -1022,22 +1026,30 @@ pub fn keep_alive(dir: &Path, which: impl Fn(&Presence) -> bool) {
     }
 }
 
-/// Codex 세션의 장 이름 — `codex-<세션 id 앞 8자>`, 산 남이 쥐었으면 그 토막을 한 번 더, 그래도 쥐었으면 세션 id 를 통째로
-/// 잇는다. 훅([`crate::cmd::hook`] 의 `attendee`)과 `hello` 가 이 하나로 짓는다 — 따로 짓던 판은 잇는 토막의 차례가 갈려,
-/// 훅이 아직 장을 안 지은 창의 `hello` 가 훅과 다른 이름으로 섰다(리뷰 moai-ew4o.q9f).
-///
-/// **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고
-/// 65초 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같다. 토막은 상한에 안 잘리게 잇는다([`name_with`]).
+/// Codex 세션의 장 이름 — `codex-<세션 id 앞 8자>` 를 [`made_name`] 으로 가른다. 훅([`crate::cmd::hook`] 의 `attendee`)과
+/// `hello` 가 이 하나로 짓는다 — 따로 짓던 판은 잇는 토막의 차례가 갈려, 훅이 아직 장을 안 지은 창의 `hello` 가 훅과 다른
+/// 이름으로 섰다(리뷰 moai-ew4o.q9f).
 pub fn codex_name(all: &[Presence], session: &str) -> Option<String> {
-    let alnum = |n: usize| session.chars().filter(char::is_ascii_alphanumeric).take(n).collect::<String>();
-    let (short, whole) = (alnum(8), alnum(usize::MAX));
-    // 지은 이름이다 — 다른 기계의 조용한 장도 하루 동안은 쥔 것으로 본다([`Presence::holds_made_name`]).
-    let taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && p.holds_made_name());
-    let base = name_with("codex", &short)?;
-    if !taken(&base) {
+    let short: String = session.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
+    made_name(all, name_with("codex", &short)?, session)
+}
+
+/// 지은 이름을 가른다 — `base` 를 남이 쥐었으면 세션 id 앞 8자를, 그래도 쥐었으면 세션 id 를 통째로 잇는다. **쥐었는가는
+/// [`Presence::holds_made_name`] 으로 잰다**(moai-nas5) — 다른 기계의 조용한 장도 하루 동안은 그 이름을 쥔다. 훅이 짓는
+/// 이름(Claude 의 세션 이름, `<벤더>-<세션 토막>`)과 [`codex_name`] 이 이 하나로 가른다 — 두 자리에 따로 적던 판은 같은 자를
+/// 두 번 고쳐야 했다.
+///
+/// **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고 65초
+/// 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같아, 한 번만 가르던 판은 셋째가 둘째의 장을 덮었다. 토막을 이어도
+/// 남이 쥐었으면 세션 id 를 통째로 잇는다 — 세션마다 하나다. 토막은 상한에 안 잘리게 잇는다([`name_with`]).
+pub fn made_name(all: &[Presence], base: String, session: &str) -> Option<String> {
+    let held = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && p.holds_made_name());
+    if !held(&base) {
         return Some(base);
     }
-    [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| name_with(&base, tail)).find(|n| !taken(n))
+    let alnum = |n: usize| session.chars().filter(char::is_ascii_alphanumeric).take(n).collect::<String>();
+    let (short, whole) = (alnum(8), alnum(usize::MAX));
+    [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| name_with(&base, tail)).find(|n| !held(n))
 }
 
 /// 이 프로세스의 조상 가운데 출석부에 선 에이전트 — **"나는 누구인가" 의 답이다.** 에이전트가 띄운 셸에서
@@ -2139,7 +2151,18 @@ mod tests {
         assert!(!far(EXPIRE_AFTER + 1).holds_made_name(), "하루 넘게 조용한 다른 기계의 장이 이름을 쥐었다");
         let codex = Presence { since: ago(STALE_AFTER + 1), seen: Some(ago(STALE_AFTER + 1)), ..codex_card("cx") };
         assert!(codex.here() && codex.gone() && !codex.holds_made_name(), "떠난 Codex 장이 이름을 쥐었다");
-        // Codex 의 이름도 지은 이름이다 — 다른 기계의 조용한 장이 쥔 이름을 비켜 간다.
+        // 이 기계의 장은 프로세스로 잰다 — 산 동안은 닻이 아무리 묵어도 쥐고, 죽었으면 곧 놓는다. pid 를 아는 장을 다른
+        // 기계의 장처럼 닻으로 재면 죽은 장이 이름을 영영 쥐어(닻을 안 보니 하루도 안 찬다) 그 이름을 받는 새 세션마다 토막이
+        // 붙는다(리뷰 moai-nas5.cn7).
+        let me = proc_of(std::process::id()).unwrap();
+        let near = |pid: u32, start: Option<u64>| far(EXPIRE_AFTER + 1).at(pid, start);
+        assert!(
+            near(me.pid, me.start).here() && near(me.pid, me.start).holds_made_name(),
+            "이 기계의 산 장이 이름을 놓았다"
+        );
+        assert!(!near(4_194_400, Some(1)).holds_made_name(), "이 기계의 죽은 장이 지은 이름을 쥐었다");
+        // `codex_name` 도 [`made_name`] 으로 가른다 — 기계를 적은 다른 기계의 장(창이 `codex-…` 를 댄 Claude 장 같은)이 쥔
+        // 이름은 하루 동안 비켜 간다. Codex 의 장은 기계를 안 적어 위의 `codex` 처럼 20분이면 놓는다.
         assert_eq!(codex_name(std::slice::from_ref(&quiet), session).as_deref(), Some("codex-01a107b4-01a107b4"));
         assert_eq!(codex_name(&[far(EXPIRE_AFTER + 1)], session).as_deref(), Some("codex-01a107b4"));
     }

@@ -24722,7 +24722,7 @@ fn a_session_resumed_on_another_machine_moves_its_card_here() {
 /// 쉬는 동안 닻을 안 적어 20분이면 떠난 것으로 읽히는데, Claude 의 세션 이름은 컨테이너마다 따로 세어 겹친다. 떠난 것으로
 /// 읽힌 이름을 내주던 판은 이 기계에서 같은 이름을 지은 새 세션이 저쪽 장을 덮고, 아직 산 저쪽 세션의 편지를 보낸 이에게
 /// 되돌렸다. 새 세션은 토막을 붙여 가르고, 하루가 지나 저쪽 장이 걷힐 때가 되면 그 이름을 받는다. 창이 대는
-/// 이름(`MOAI_AGENT`)은 20분 뒤 되찾는다(moai-dhxm 의 결정) — 가르지 않는다.
+/// 이름(`MOAI_AGENT`, `hello --name`)은 20분 뒤 되찾는다(moai-dhxm 의 결정) — 가르지 않는다.
 #[test]
 #[cfg(target_os = "linux")]
 fn a_quiet_card_on_another_machine_keeps_its_made_name_for_a_day() {
@@ -24762,17 +24762,32 @@ fn a_quiet_card_on_another_machine_keeps_its_made_name_for_a_day() {
     );
     let back = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
     assert!(back.contains("\"letters\":[]"), "아직 산 저쪽 세션의 편지를 되돌렸다 — {back}");
-    // `hello` 가 짓는 이름(`<벤더>-<pid>`)도 같다 — 넘겨받지 않고, 그 이름을 쥔 저쪽 장을 댄다.
+    // 그 편지는 저쪽 세션의 함에 그대로다 — 토막을 붙인 이 세션에 실리지 않는다.
+    let kept = ok(s.path(), &["inbox", "--as", "claude-sessMDE1", "--json"]);
+    assert!(kept.contains("저쪽 일감"), "저쪽 세션의 편지가 제 함에 안 남았다 — {kept}");
+    let here = ok(s.path(), &["inbox", "--as", "claude-sessMDE1-sessMDE1", "--json"]);
+    assert!(here.contains("\"letters\":[]"), "저쪽 세션의 편지가 이 세션의 함으로 왔다 — {here}");
+    // `hello` 가 짓는 이름(`<벤더>-<pid>`)도 같다 — 넘겨받지 않고, 그 이름을 쥔 저쪽 장을 댄다. 그 장은 떠난 것으로 보이니
+    // 도는 에이전트라고 안 댄다(리뷰 moai-nas5.cn7).
     let w = Sleeper::new();
     let made = format!("claude-{}", w.pid());
     let held = far(&made, hour_ago);
     let taken = moai(s.path(), &["hello", "--pid", &w.pid(), "--vendor", "claude"]);
     assert!(!taken.status.success() && text(&taken).contains("4194400@box-b"), "{}", text(&taken));
+    assert!(
+        !text(&taken).contains("도는 에이전트"),
+        "떠난 것으로 보이는 장을 도는 에이전트라고 댔다 — {}",
+        text(&taken)
+    );
     assert_eq!(
         std::fs::read_to_string(agents.join(format!("{made}.json"))).unwrap(),
         held,
         "hello 가 저쪽 장을 덮었다"
     );
+    // `hello --name` 이 대는 이름은 창이 대는 이름이다 — 떠난 것으로 읽히는 저쪽 장의 것이면 되찾는다(moai-dhxm).
+    far("w6", hour_ago);
+    let asked = ok(s.path(), &["hello", "--pid", &w.pid(), "--name", "w6", "--json"]);
+    assert!(asked.contains(&format!("\"pid\":{},", w.pid())), "hello --name 이 댄 이름을 못 되찾았다 — {asked}");
     // 하루가 지나면 걷힐 때다 — 새 세션이 그 이름을 받고, 저쪽 함의 편지는 보낸 이에게 돌아간다.
     far("claude-sessMDE2", "2026-09-10T04:12:02Z");
     ok(s.path(), &["send", "claude-sessMDE2", "하루 묵은 일감", "--as", "boss"]);

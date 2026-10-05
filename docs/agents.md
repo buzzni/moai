@@ -135,7 +135,9 @@ a worker that waits needs no waking, and waking is a bonus.
 - **Open it the ordinary way**, not with `--dangerously-skip-permissions`
 - **The plugin's hooks register it** when the session starts, under the name
   Claude Code shows for it — the name another Claude session's `SendMessage`
-  uses. `/moai-work` keeps that name and adds the role
+  uses — with a piece of its session id appended when another row holds that
+  name ([below](#when-it-goes-wrong)). `/moai-work` keeps that name and adds the
+  role
 - **`/clear` keeps the row.** The same process takes it up again with its new
   session, name and role included, so a worker cleared between tasks calls
   `/moai-work` again and is the same worker
@@ -317,7 +319,10 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
 - **Names are what you send to.** A Claude session is registered by its hooks
   under the name Claude Code shows for it (the one `SendMessage` uses); a Codex
   or Antigravity session as `codex-` or `antigravity-` and the first eight
-  characters of its session id. `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
+  characters of its session id. When another row holds that name, a piece of
+  the session id is appended, and that longer name is the one to send to
+  ([When it goes wrong](#when-it-goes-wrong)) — `moai agents` lists it.
+  `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
   `moai send` and `moai inbox` know who you are from `--as`, `MOAI_AGENT`, or the
   registered agent they run under. A window that sets `MOAI_AGENT` is registered
   under that name by its hooks and by `moai hello` alike — but `moai hello --pid`
@@ -502,15 +507,23 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   its tmux and its Claude session are on that machine — and a wait here never
   marks it alive, so a window that sets the same `MOAI_AGENT` after a restart
   gets the name back once the old row reads `gone`
-- **A new session came up as `<name>-<eight characters>`.** Another machine's
-  row holds that name. A name the tools made up — a Claude session name, which
-  each container counts on its own, or `claude-` and eight characters — stays
-  with that row until it is swept a day after it went quiet, even while it reads
-  `gone`: a Claude session resting at its prompt marks nothing, and taking its
-  name would send that live session's letters back. `moai hello` without
-  `--name` refuses the name instead and shows the row's `<pid>@<host>`. A name
-  you ask for — `MOAI_AGENT`, `moai hello --name` — is yours again once the old
-  row reads `gone`
+- **A new session came up as `<name>-<eight characters>`.** Another row holds
+  that name — a live one here, or one from another machine. A name the tools
+  made up — a Claude session name, which each container counts on its own,
+  `<vendor>-` and eight characters of the session id, or `moai hello`'s
+  `<vendor>-<pid>` — stays with another machine's row for a day after that row
+  went quiet, even while it reads `gone`: a Claude session resting at its
+  prompt marks nothing, and taking its name would send that live session's
+  letters back. A `moai hello` that has to make the name up refuses it instead
+  and shows the row's `<pid>@<host>` (in Codex it appends the piece, as the
+  hooks do). Claude Code still calls the session by its own name, so
+  `SendMessage` reaches it by that name, not by `<name>-<eight characters>` —
+  even where `moai send --wake` names the latter. A name you ask for —
+  `MOAI_AGENT`, `moai hello --name` — is yours again once the old row reads
+  `gone`, which is how a window started again in a new container gets its name
+  back. Asking for another session's made-up name the same way takes its row
+  over and sends its unread letters back, so do it only for a session you know
+  has ended
 - **`moai hello` in Codex says it cannot tell which session this is.** That
   Codex set no `CODEX_THREAD_ID` in its shell. Pass `--as` with the row its hooks
   gave the session — the name in its first context, also in `moai agents` as
@@ -523,4 +536,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5
