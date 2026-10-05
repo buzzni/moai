@@ -4719,3 +4719,4 @@
 {"ts":"2026-10-05T17:37:30Z","id":"moai-keka.fpm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-kybp 에서 펼쳤다 — 닻이 앞날로 적힌 장은 낡지 않는다"}
 {"ts":"2026-10-05T17:37:30Z","id":"moai-kybp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-keka 의 멤버 moai-keka.fpm 로 펼쳤다"}
 {"ts":"2026-10-05T17:37:30Z","id":"moai-keka","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 요청(2026-10-05)의 묶기를 이어: moai-nas5 리뷰(moai-nas5.cn7)가 넘긴 출석 이름 아이디어 셋을 한 워크트리로 묶었다 — roa5(깨우기가 토막 붙은 장 이름을 SendMessage 이름으로 댄다), gset(지은 이름 셋이 다 쥐이면 훅이 장을 못 세운다), kybp(앞날로 적힌 닻이 안 낡고, 훅 없는 hello 가 이은 제 장을 못 찾는다). 셋 다 src/mail.rs 의 made_name·Presence·hello 둘레다. s0gc(Codex 장의 20분)는 사용자가 그대로 두기로 해 빼고 에픽 밖으로 옮겼다"}
+{"ts":"2026-10-05T17:38:04Z","id":"moai-keka","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 사람이 오늘 토큰이 모자라 일 분배를 멈췄다(2026-10-05 17:38). 이 묶음은 일꾼 moa-issue-25 에 보냈다가 바로 거뒀다 — 다음 회차에 다시 보낸다"}
