@@ -671,6 +671,7 @@
   "skill.undeclare_what": "drop the {market} marketplace from extraKnownMarketplaces in {file}",
   "skill.undeclared": "  · the {market} marketplace is no longer declared in {file} — commit that file so the team stops being offered it",
   "skill.undeclare_failed": "  ! the {market} marketplace is still declared in {file} — by hand: delete \"{market}\" under extraKnownMarketplaces there",
+  "skill.settings_unread": "  ! {file} was not read, so the old marketplaces it may declare are left — {why}. By hand: if it declares {markets} under extraKnownMarketplaces, delete them there",
   "skill.market_taken": "`{market}` already points at {at} — registering is skipped",
   "skill.reopen_claude": "Reopen Claude and it is in. Sessions already open keep the old copy",
   "skill.market_drop_first": "Once you are done with that repository, `claude plugin marketplace remove {market}` and then",

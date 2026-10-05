@@ -671,6 +671,7 @@
   "skill.undeclare_what": "{file} 의 extraKnownMarketplaces 에서 {market} 마켓플레이스 선언을 지운다",
   "skill.undeclared": "  · {file} 에서 {market} 마켓플레이스 선언을 지웠다 — 그 파일을 커밋해야 동료에게 더는 권하지 않는다",
   "skill.undeclare_failed": "  ! {file} 의 {market} 마켓플레이스 선언을 못 지웠다 — 손으로: 그 파일의 extraKnownMarketplaces 에서 \"{market}\" 를 지운다",
+  "skill.settings_unread": "  ! {file} 을 안 읽어 거기 선 옛 마켓플레이스 선언을 못 쟀다 — {why}. 손으로: 그 파일의 extraKnownMarketplaces 에 {markets} 가 있으면 지운다",
   "skill.market_taken": "`{market}` 이 이미 {at} 를 가리킨다 — 등록은 건너뛴다",
   "skill.reopen_claude": "Claude 를 다시 열면 든다. 이미 열려 있는 세션은 옛 판을 계속 쓴다",
   "skill.market_drop_first": "그 저장소를 이제 안 쓰면 `claude plugin marketplace remove {market}` 뒤에",

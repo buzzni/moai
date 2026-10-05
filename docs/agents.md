@@ -459,6 +459,17 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **`skill install` printed two `claude plugin` lines and failed.** The
   registration did not go through — most often `claude` is not on `PATH`; run
   those lines where it is
+- **`skill install` refused a path that "points at … outside" or "is not a
+  regular file".** A file or directory under `.claude/moai-plugin/`,
+  `.agents/skills/` or a hooks file is a link that leaves the checkout (or lands
+  in `.git`), or a FIFO or device stands where a file goes. moai writes nothing
+  through it, and stops before registering with `claude`. Replace the link with
+  a real file or directory, or remove what stands there, and install again
+- **`skill install` said it did not read `.claude/settings.json`.** That
+  committed file is a link out of the checkout, a FIFO, or unreadable, so the
+  marketplaces an earlier moai declared there were not removed. Delete the
+  marketplaces the line names from `extraKnownMarketplaces` yourself — in the
+  file it links to, when it is a link
 - **The board says the `AGENTS.md` block differs.** Another binary wrote it, or a
   person edited it. Build the moai you mean to run and call `moai init`
 - **The agent keeps writing into a worktree's `.moai/`.** It does not need to: a
@@ -497,4 +508,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d
