@@ -18575,6 +18575,38 @@ fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
     assert!(!said.contains("rm -r"), "밖에 선 남의 디렉터리를 지우라고 한다\n{said}");
 }
 
+/// **Claude 의 플러그인 트리도 체크아웃 밖 링크를 안 따른다**(moai-ml0d.izy) — `.agents` 와 같은 자다. 맨
+/// `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한 `.claude-plugin/plugin.json -> <밖>` 하나로 그 파일을
+/// 플러그인 JSON 으로 통째로 덮었고, 링크는 링크로 남아 티가 안 났다. 트리 자체가 밖을 가리키는 링크면 밖에
+/// 디렉터리도 안 짓는다. 못 심었으니 `claude` 에 등록하지 않고 비영으로 끝난다.
+#[cfg(unix)]
+#[test]
+fn skill_install_writes_the_plugin_tree_through_no_link_outside() {
+    let s = init("skillpluginlink");
+    let c = Claude::new("skillpluginlink-home");
+    let away = Scratch::new("skillpluginlink-away");
+    let victim = away.path().join("bashrc");
+    std::fs::write(&victim, "# 사람의 rc\n").unwrap();
+    let plugin = s.path().join(".claude/moai-plugin");
+    let manifest = plugin.join(".claude-plugin/plugin.json");
+    std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&victim, &manifest).unwrap();
+
+    let out = c.run(s.path(), &["skill", "install"], true);
+    assert!(!out.status.success(), "밖을 가리키는 자리에 심고 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains("outside"), "어느 자리인지 안 댄다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 덮었다");
+    assert!(std::fs::symlink_metadata(&manifest).unwrap().file_type().is_symlink(), "링크를 보통 파일로 바꿨다");
+    assert!(!c.calls().contains("plugin install"), "못 심었는데 등록했다\n{}", c.calls());
+
+    std::fs::remove_dir_all(&plugin).unwrap();
+    std::os::unix::fs::symlink(away.path(), &plugin).unwrap();
+    let out = c.run(s.path(), &["skill", "install"], true);
+    assert!(!out.status.success(), "밖을 가리키는 트리에 심고 성공으로 끝났다\n{}", text(&out));
+    let built: Vec<_> = std::fs::read_dir(away.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(built, ["bashrc"], "체크아웃 밖에 지었다");
+}
+
 /// **훅 파일은 고른 에이전트의 것만, moai 가 통째로 쓴 것만 쓴다**(moai-u5wr.kov) — `--agent codex` 는
 /// `.codex/hooks.json` 을, `--agent antigravity` 는 `.agents/hooks.json` 을 심는다. 스킬과 달리 한 자리를 나눠 쓰지 않아
 /// 안 고른 에이전트의 훅은 안 선다. 사람이 제 훅을 적어 둔 파일은 안 건드리고 한 줄로 댄다 — 갈아엎으면 그 사람의

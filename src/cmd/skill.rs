@@ -164,9 +164,11 @@ impl Chosen {
     }
 }
 
-/// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). [`skill::AGENTS_DIR`] 는 `write_atomic_inside` 로 쓴다 —
-/// 임시 파일을 갈아끼우니 쓰려고 열지 않아 그 자리에 선 FIFO 앞에서 멈추지 않고(보통 파일이 아닌 자리는 그 자리를
-/// 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다. 그 자리는 이 판 전에 moai 가 한 번도 안 쓰던 곳이다.
+/// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). 커밋된 트리 셋 — [`skill::AGENTS_DIR`]·Claude 의
+/// 플러그인([`skill::DIR`], moai-ml0d.izy)·두 에이전트의 훅 파일([`HookFile::plant`]) — 이 모두 이 하나로 쓴다.
+/// `write_atomic_inside` 로 쓴다 — 임시 파일을 갈아끼우니 쓰려고 열지 않아 그 자리에 선 FIFO 앞에서 멈추지 않고(보통
+/// 파일이 아닌 자리는 그 자리를 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다. 갈아끼우는 `rename` 은 그
+/// 이름이 비는 틈을 안 남겨, 지우지 않는다는 이 모듈의 약속도 그대로다.
 ///
 /// **디렉터리를 짓기 전에도 잰다**(리뷰 moai-xs2h.dir) — `create_dir_all` 은 가운데 링크를 그대로 따라가, 받은
 /// 저장소가 커밋한 `.agents -> <밖>` 하나로 체크아웃 밖에 `skills/moai/references/` 를 지은 뒤에야
@@ -348,14 +350,10 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         return Ok((serde_json::Value::Null, out));
     }
 
-    // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다.
-    for (path, body) in &files {
-        let at = dir.join(path);
-        if let Some(parent) = at.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
-        }
-        std::fs::write(&at, body).map_err(|e| Fail::new(format!("{}: {e}", at.display())))?;
-    }
+    // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다. 쓰는 자는 `.agents` 와 같다([`write_shared`],
+    // moai-ml0d.izy) — 맨 `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한
+    // `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그 파일을 플러그인 JSON 으로 통째로 덮었다.
+    write_shared(&dir, &files, &root)?;
 
     // **`--json` 보다 먼저 푼다** — 아래 두 갈래가 다 이것을 쓴다. 기계 출력으로 빠지는 판은
     // 이 글들을 안 지으므로 값이 새지 않는다(`register` 의 걸음 이름은 사람 화면에만 선다).
