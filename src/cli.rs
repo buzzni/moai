@@ -481,8 +481,10 @@ IDEA
   printed tells the sender to use SendMessage. With neither it does nothing
   and says nothing. moai never runs an agent's own program to wake it. An
   agent at work is not woken, nor one already waiting in `moai inbox --wait`
-  (Linux tells it from the processes). For any-idle-worker it knocks on the
-  agent idle the longest.
+  (Linux tells it from the processes), nor one on another machine sharing
+  this repository - its pane and its session are there (`why` is no_way).
+  For any-idle-worker it knocks on the agent idle the longest, one on this
+  machine first.
 
   --json gives the letter as written plus `id`, and `wake`
   ({\"to\",\"via\",\"done\",\"why\"}) when --wake was given. `via` is send_message,

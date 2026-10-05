@@ -1189,7 +1189,12 @@ fn route_one(
 /// **세션 id 로 찾은 장도 그 프로세스가 살아 있을 때만 그대로 쓴다**(리뷰 moai-h8tn.x4l) — `claude --resume` 은 세션
 /// id 를 그대로 들고 **새 프로세스**로 뜬다. 죽은 pid 를 든 채 다시 적던 판은 `moai agents` 가 산 세션의 장을
 /// 걷었고, `moai send`·`inbox` 는 조상의 pid 로 나를 못 찾았으며, 걷힌 뒤에는 새 이름·빈 역할로 다시 서서 감독이
-/// 일감을 가졌다. 그 장은 지금 프로세스와 칸으로 다시 잇는다 — 이름·역할은 그대로다. **한 프로세스는 장 하나다** —
+/// 일감을 가졌다. 그 장은 지금 프로세스와 칸으로 다시 잇는다 — 이름·역할은 그대로다. **다른 기계의 장도 그렇다**
+/// (moai-dhxm) — 그 장은 죽었는지를 이 기계에서 못 재 닻이 새로운 동안 떠난 것으로 안 읽히지만, 이 훅이 이 기계에서
+/// 돈다는 것이 곧 그 세션이 지금 여기 있다는 것이다(컨테이너를 다시 띄우고 `claude --resume` 으로 이었다). 그대로 이어
+/// 쓰던 판은 앞 기계의 pid 를 든 장에 닻만 새로 적어 영영 안 낡게 했고, 이 기계의 `moai inbox`·`send` 는 조상으로 나를
+/// 못 찾았다([`mail::Presence::runs_as`]). 기계를 안 적은 옛 장은 그 pid 가 이 기계에 살아 있으면 기계를 단다
+/// ([`mail::Presence::claimed`]). **한 프로세스는 장 하나다** —
 /// 다시 이은 프로세스가 다른 이름의 장도 들고 있으면(`/resume` 으로 세션을 갈아탄 프로세스) 그 장을 걷고 그 함을
 /// 비운다. 두 이름으로 서면 `moai inbox` 와 훅이 서로 다른 이름의 편지를 본다.
 ///
@@ -1233,8 +1238,8 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
         _ => p,
     };
     let found = all.iter().find(|p| p.session.as_deref() == Some(session));
-    if let Some(p) = found.filter(|p| dialect == Dialect::Codex || !p.gone()) {
-        return Some(renamed(mail::Presence { model: model(p), ..p.clone() }));
+    if let Some(p) = found.filter(|p| dialect == Dialect::Codex || (p.here() && !p.gone())) {
+        return Some(renamed(mail::Presence { model: model(p), ..p.clone() }.claimed()));
     }
     let cwd = input.cwd.clone().unwrap_or_default();
     let short: String = session.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
@@ -1335,8 +1340,10 @@ fn rest(input: &Input, repo: &Repo, dialect: Dialect, event: Event) {
     }
     // **이미 노는 장은 다시 안 쓴다**(리뷰 moai-u5wr.e74) — 디스크에서 읽은 그대로라 바뀔 것이 없다. Claude 의 흔한 끝
     // (`Stop` 뒤의 `SessionEnd`, `/clear` 마다)이 그 자리고, 저장소가 선 자리(Ceph RBD)가 멈춘 날 그 쓰기 하나가
-    // `SessionEnd` 의 짧은 상한을 넘긴다. 닻을 적을 때가 되었으면 쓴다(moai-j3n5, moai-dhxm).
-    if p.status == mail::IDLE && !p.since.is_empty() && !p.due(&model::now()) {
+    // `SessionEnd` 의 짧은 상한을 넘긴다. 닻을 적을 때가 되었으면 쓴다(moai-j3n5) — **세션이 닫힐 때는 빼고**(moai-dhxm).
+    // 닻은 "아직 산다" 다: 닫히는 세션에 적으면 한참 놀다 닫힌 세션이 다른 기계에 20분 동안 산 일꾼으로 다시 서고, `/clear`
+    // 에서는 곧 이을 `SessionStart` 가 어차피 다시 적는다. 닻이 모든 장의 것이 되며 이 쓰기가 Claude 의 그 끝에 되살아났었다.
+    if p.status == mail::IDLE && !p.since.is_empty() && (event == Event::SessionEnd || !p.due(&model::now())) {
         return;
     }
     attend(repo, Some(p), mail::IDLE);

@@ -645,7 +645,8 @@ pub struct Presence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
     /// 그 기계의 호스트 이름 — 사람 화면에 "어디의 pid 인가" 를 대는 데만 쓴다. **견주지 않는다** — 컨테이너끼리 같은
-    /// 이름을 쓸 수 있고, 같은 기계의 이름이 바뀔 수도 있다. 같은 기계인가는 `machine` 이 말한다.
+    /// 이름을 쓸 수 있고, 같은 기계의 이름이 바뀔 수도 있다. 같은 기계인가는 `machine` 이 말한다. `machine` 을 적을 때만
+    /// 적는다 — 기계를 모르면 댈 곳이 없다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<String>,
     /// 벤더의 세션 id — 훅이 이 세션의 출석을 찾는 열쇠다. 깨우기에는 안 쓴다(moai 는 에이전트를 안 띄운다).
@@ -725,10 +726,33 @@ impl Presence {
     }
 
     /// pid 를 이 기계의 프로세스로 적는다 — 기계와 호스트 이름이 pid 와 함께 간다(moai-dhxm). 장에 이 기계의 pid 를 적는
-    /// 자리(훅·`hello`)가 이 하나로 적는다. pid 0(모른다)이면 둘 다 비운다 — 가리킬 프로세스가 없다.
+    /// 자리(훅·`hello`)가 이 하나로 적는다. pid 0(모른다)이면 둘 다 비운다 — 가리킬 프로세스가 없다. 이 기계를 못 읽으면
+    /// 호스트 이름도 안 적는다([`Presence::host`]).
     pub fn at(self, pid: u32, pid_start: Option<u64>) -> Presence {
-        let (machine, host) = if pid == 0 { (None, None) } else { (machine(), hostname()) };
+        let machine = if pid == 0 { None } else { machine() };
+        let host = machine.as_ref().and_then(|_| hostname());
         Presence { pid, pid_start, machine, host, ..self }
+    }
+
+    /// 기계를 안 적은 옛 장의 프로세스가 이 기계에 살아 있으면 기계를 단다(moai-dhxm) — 이 필드 전의 판이 적은 장은 같은
+    /// 저장소를 쓰는 다른 기계가 pid 로 재어 걷고 그 함의 편지를 되돌린다. 산 세션의 장을 그대로 이어 쓰기만 하면 판을
+    /// 올린 날 돌던 세션은 끝날 때까지 기계를 안 단다. 그 장을 다시 쓰는 자리(훅의 [`crate::cmd::hook`] `attendee`·
+    /// [`keep_alive`])가 이것을 지난다.
+    ///
+    /// **산 것을 이 기계의 `/proc` 로 확인했을 때만 단다**([`alive`] 가 `Some(true)`) — 그 pid 가 이 기계의 것이라는 뜻이라
+    /// pid 와 기계가 함께 간다([`Presence::at`]). 모르면(`None`) 안 단다. pid 를 모르는 장(Codex)과 이미 기계를 적은 장은
+    /// 그대로다 — 남의 기계의 장을 이 기계의 것으로 고쳐 적지 않는다.
+    pub fn claimed(self) -> Presence {
+        if self.machine.is_some() || self.pid == 0 || machine().is_none() {
+            return self;
+        }
+        match alive(self.pid, self.pid_start) {
+            Some(true) => {
+                let (pid, start) = (self.pid, self.pid_start);
+                self.at(pid, start)
+            }
+            _ => self,
+        }
     }
 
     /// 그 에이전트의 프로세스가 없다고 확실한가 — **모르면 아니다**([`alive`] 가 `None`). 걷을 때 그 이름 앞의 편지를
@@ -775,7 +799,8 @@ impl Presence {
     }
 
     /// 닻을 적는다(moai-j3n5). 장을 쓰는 자리(훅·`hello`·기다림)가 이 하나로 적는다. **모든 장에 적는다**(moai-dhxm) —
-    /// 프로세스를 아는 장도 다른 기계에서는 이것으로만 잰다.
+    /// 프로세스를 아는 장도 다른 기계에서는 이것으로만 잰다. 노는 장이 닫힐 때(`SessionEnd`)는 다시 안 쓴다 — 닻은 "아직
+    /// 산다" 다([`crate::cmd::hook`] 의 `rest`).
     pub fn stamp(&mut self, now: &str) {
         self.seen = Some(now.to_string());
     }
@@ -856,7 +881,16 @@ pub fn presences(dir: &Path) -> (Vec<Presence>, Vec<Garbled>) {
     (out, garbled)
 }
 
-/// 떠난 출석을 걷는다 — 걷은 이름을 낸다. **산지 모르는 것은 안 걷는다**([`alive`] 가 `None`, 닻이 아직 산 장).
+/// 걷은 장 하나 — 이름과 걷은 까닭(moai-dhxm). `dead` 면 그 프로세스가 죽어 걷었고 함을 비웠다(편지가 보낸 이에게
+/// 돌아갔다). 아니면 하루([`EXPIRE_AFTER`]) 넘게 아무것도 안 적어 걷었고 함은 남았다 — Codex 의 장과 다른 기계의 장이고,
+/// 다른 기계의 장은 그 기계에서 아직 살 수 있다. `moai agents` 가 사람에게 그 둘을 갈라 말한다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Swept {
+    pub name: String,
+    pub dead: bool,
+}
+
+/// 떠난 출석을 걷는다 — 걷은 장을 낸다([`Swept`]). **산지 모르는 것은 안 걷는다**([`alive`] 가 `None`, 닻이 아직 산 장).
 ///
 /// **프로세스가 죽은 장은 그 함도 비운다**([`retire`]) — 안 읽은 편지가 보낸 이에게 되돌아간다. **프로세스로 못 재는 장
 /// (pid 를 모르거나 다른 기계의 것)은 하루([`EXPIRE_AFTER`]) 넘게 안 적혔을 때만 걷고 그 함은 그대로 둔다** — 그 세션이
@@ -868,12 +902,12 @@ pub fn presences(dir: &Path) -> (Vec<Presence>, Vec<Garbled>) {
 /// 편지를 되돌리는 동안 길어진다) 같은 이름을 넘겨받은 새 세션의 장을 지우고 그 세션 앞으로 온 편지까지 보낸 이에게
 /// 되돌렸다. 장은 그 세션의 다음 훅이 다시 쓰지만 되돌린 편지는 안 돌아온다. 다시 읽은 것과 지우는 것 사이의 틈은
 /// 남는다 — 시스템 호출 몇 개 너비고, 그것을 막으려고 락을 두지 않는다.
-pub fn sweep(dir: &Path, mail: &Path) -> Vec<String> {
+pub fn sweep(dir: &Path, mail: &Path) -> Vec<Swept> {
     sweep_from(dir, mail, presences(dir).0, &crate::model::now())
 }
 
 /// [`sweep`] 의 몸통 — 읽어 둔 출석부와 지금을 받는다. 시험이 읽은 뒤에 장을 고쳐 보려고 가른다.
-fn sweep_from(dir: &Path, mail: &Path, all: Vec<Presence>, now: &str) -> Vec<String> {
+fn sweep_from(dir: &Path, mail: &Path, all: Vec<Presence>, now: &str) -> Vec<Swept> {
     let mut swept = Vec::new();
     for p in all {
         let dead = p.dead();
@@ -883,7 +917,7 @@ fn sweep_from(dir: &Path, mail: &Path, all: Vec<Presence>, now: &str) -> Vec<Str
         if dead {
             retire(mail, &p.name);
         }
-        swept.push(p.name);
+        swept.push(Swept { name: p.name, dead });
     }
     swept
 }
@@ -934,15 +968,23 @@ pub fn take_over(mail: &Path, all: &[Presence], name: &str, keep: Option<&str>) 
 
 /// 이 장의 닻을 다시 적는다 — 때가 되었을 때만([`Presence::due`]). 디스크의 장을 다시 읽어
 /// 적는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다. 못 적으면 조용히 지나간다.
+///
+/// **쓰기 바로 앞에 한 번 더 읽어 견준다**(moai-dhxm) — 도구 부름의 훅이 모든 말씨에서 이것을 부르게 되자, 부모 세션의
+/// 장을 함께 쓰는 서브에이전트의 도구 부름이 그 사이 `Stop` 이 적은 상태나 `MOAI_AGENT` 로 옮긴 이름을 앞서 읽은 장으로
+/// 되돌릴 수 있었다(옮기기 전 이름의 장이 되살아난다). 그 사이 바뀌었으면 안 쓴다 — 바꾼 쪽이 닻도 적었다. 다시 읽은 것과
+/// 쓰는 것 사이의 틈은 [`sweep`] 과 같이 남긴다. 기계를 안 적은 옛 장은 여기서 기계를 단다([`Presence::claimed`]).
 pub fn keep_alive(dir: &Path, which: impl Fn(&Presence) -> bool) {
     let (all, _) = presences(dir);
-    let Some(mut p) = all.into_iter().find(|p| which(p)) else { return };
+    let Some(read) = all.into_iter().find(|p| which(p)) else { return };
     let now = crate::model::now();
-    if !p.due(&now) {
+    if !read.due(&now) {
         return;
     }
+    let mut p = read.clone().claimed();
     p.stamp(&now);
-    let _ = write_presence(dir, &p);
+    if unchanged(dir, &read) {
+        let _ = write_presence(dir, &p);
+    }
 }
 
 /// Codex 세션의 장 이름 — `codex-<세션 id 앞 8자>`, 산 남이 쥐었으면 그 토막을 한 번 더, 그래도 쥐었으면 세션 id 를 통째로
@@ -970,12 +1012,16 @@ pub fn me_among<'a>(presences: &'a [Presence], ancestors: &[Proc]) -> Option<&'a
 
 /// 출석 하나를 깨울 수 있는 일꾼 가운데 고른다 — `any-idle-worker` 편지를 보낼 때. 산 것, 놀고 있는 것,
 /// 그 편지를 가질 수 있는 것([`for_me`] 와 같은 자) 가운데 가장 오래 논 것이다.
+///
+/// **이 기계의 일꾼이 먼저다**(moai-dhxm) — 다른 기계의 장은 못 깨운다([`wake`] 의 `no_way`). 가장 오래 논 일꾼이 다른
+/// 기계에 있으면 그를 골라 아무도 안 두드리던 판은, 이 기계에서 노는 일꾼을 두고 열린 편지를 세워 두었다. 이 기계에 노는
+/// 일꾼이 없을 때만 다른 기계의 일꾼을 낸다 — 못 깨워도 누가 노는지는 댄다.
 pub fn idle_worker<'a>(presences: &'a [Presence], from: &str) -> Option<&'a Presence> {
     presences
         .iter()
         .filter(|p| p.status == IDLE && may_take_open(&p.name, &p.role, from))
         .filter(|p| !p.gone())
-        .min_by(|a, b| a.since.cmp(&b.since).then(a.name.cmp(&b.name)))
+        .min_by(|a, b| b.here().cmp(&a.here()).then(a.since.cmp(&b.since)).then(a.name.cmp(&b.name)))
 }
 
 // ── 프로세스 ──────────────────────────────────────────────────────────
@@ -1121,23 +1167,29 @@ pub fn codex_session() -> Option<String> {
 /// - **리눅스**는 `boot_id` 와 pid 이름공간의 번호를 잇는다(`<boot_id>/<번호>`). 한 커널 위의 컨테이너는 `boot_id` 가
 ///   같고 이름공간이 갈린다. 이름공간 번호는 커널마다 따로 세어(처음 것은 어느 기계나 `4026531836` 이다) `boot_id` 가
 ///   다른 기계를 가른다. 컨테이너를 다시 띄우거나 기계가 다시 서면 값이 바뀌어 앞의 장은 남의 것으로 읽힌다 — 걷기는
-///   닻이 하루 묵을 때로 미뤄지지만, 산 장을 죽은 것으로 걷는 쪽보다 싸다(모르면 아니다)
-/// - **다른 유닉스**는 pid 이름공간이 없어 호스트 이름이다
+///   닻이 하루 묵을 때로 미뤄지지만, 산 장을 죽은 것으로 걷는 쪽보다 싸다(모르면 아니다). **못 가르는 판이 하나 있다** —
+///   한 메모리 스냅숏에서 되살린 VM 들은 `boot_id` 를 함께 들고 처음 이름공간의 번호도 같아 한 기계로 읽힌다. 그 판은 이
+///   필드 전처럼 pid 로 잰다
+/// - **다른 유닉스는 `None` 이다** — 거기서 pid 가 뜻을 갖는 자리는 기계의 부팅 하나인데, 호스트 이름은 그것을 못 댄다.
+///   macOS 는 네트워크·VPN 을 옮기면 이름을 바꿔(DHCP·Bonjour) 그 순간 이 기계의 산 장이 모두 남의 것으로 읽히고(`moai
+///   inbox` 가 나를 못 찾는다), 기계끼리 같은 이름도 흔하다 — [`Presence::host`] 를 안 견주는 까닭과 같다. 부팅 하나를 대는
+///   값(macOS 의 `kern.bootsessionuuid`)은 이 저장소의 CI 가 짓지 않는 판에서만 읽을 수 있어 아직 들이지 않았다. 그 장은
+///   이 필드 전의 판처럼 pid 로 잰다
 /// - 못 읽으면 `None` 이다 — 장에 안 적고, 그 장은 이 필드 전의 판처럼 pid 로 잰다
 ///
 /// 한 번만 읽는다 — 프로세스가 사는 동안 바뀌지 않는다.
 pub fn machine() -> Option<String> {
     static HERE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     HERE.get_or_init(|| {
-        if cfg!(target_os = "linux") {
-            let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
-            let boot = boot.trim();
-            let ns = std::fs::read_link("/proc/self/ns/pid").ok()?;
-            let ns = ns.to_str()?.strip_prefix("pid:[")?.strip_suffix(']')?;
-            let word = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
-            return (word(boot) && word(ns)).then(|| format!("{boot}/{ns}"));
+        if !cfg!(target_os = "linux") {
+            return None;
         }
-        hostname()
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok()?;
+        let boot = boot.trim();
+        let ns = std::fs::read_link("/proc/self/ns/pid").ok()?;
+        let ns = ns.to_str()?.strip_prefix("pid:[")?.strip_suffix(']')?;
+        let word = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        (word(boot) && word(ns)).then(|| format!("{boot}/{ns}"))
     })
     .clone()
 }
@@ -1674,9 +1726,9 @@ mod tests {
         write_presence(&agents, &card("expired", 0, None, ago(EXPIRE_AFTER + 1))).unwrap();
         send(&mail, &letter("reused", "boss", "to the dead")).unwrap();
         send(&mail, &letter("expired", "boss", "to the expired")).unwrap();
-        let mut swept = sweep(&agents, &mail);
+        let mut swept: Vec<(String, bool)> = sweep(&agents, &mail).into_iter().map(|s| (s.name, s.dead)).collect();
         swept.sort();
-        assert_eq!(swept, ["expired", "reused"]);
+        assert_eq!(swept, [("expired".to_string(), false), ("reused".to_string(), true)]);
         let (left, _) = presences(&agents);
         assert_eq!(left.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["live", "stale", "unknown"]);
         assert!(left.iter().any(|p| p.name == "stale" && p.gone()), "조용한 장을 떠난 것으로 안 읽었다");
@@ -1886,8 +1938,6 @@ mod tests {
             vendor: "claude".into(),
             pid: me.pid,
             pid_start: me.start.map(|t| t + 1),
-            machine: None,
-            host: None,
             session: Some("old".into()),
             ..codex_card("w7")
         };
@@ -1978,9 +2028,9 @@ mod tests {
         assert!(by("quiet").gone() && !by("quiet").dead(), "조용한 다른 기계의 장을 떠난 것으로 안 읽었다");
         assert!(me_among(&all, std::slice::from_ref(&me)).is_none(), "pid 가 겹친 다른 기계의 장을 제 것으로 읽었다");
         assert!(by("old").dead() && by("mine").dead(), "이 기계의 죽은 장을 안 읽었다");
-        let mut swept = sweep(&agents, &mail);
+        let mut swept: Vec<(String, bool)> = sweep(&agents, &mail).into_iter().map(|s| (s.name, s.dead)).collect();
         swept.sort();
-        assert_eq!(swept, ["long-gone", "mine", "old"]);
+        assert_eq!(swept, [("long-gone".to_string(), false), ("mine".to_string(), true), ("old".to_string(), true)]);
         // 이 기계의 죽은 장은 편지가 돌아가고, 다른 기계의 장은 하루 넘게 조용해 걷어도 함이 남는다.
         let mut back: Vec<String> = list(&mail, "boss", false).0.into_iter().map(|l| l.letter.subject).collect();
         back.sort();
@@ -2003,6 +2053,36 @@ mod tests {
         assert!(placed.host.is_some() && placed.here() && placed.runs_as(&me));
         let unknown = placed.at(0, None);
         assert_eq!((unknown.machine, unknown.host), (None, None));
+        // 기계를 안 적은 옛 장은 그 pid 가 이 기계에 살아 있을 때만 기계를 단다 — 죽은 장·pid 를 모르는 장·남의 기계의 장은
+        // 그대로다.
+        let legacy = Presence { pid: me.pid, pid_start: me.start, ..codex_card("legacy") };
+        assert_eq!(legacy.claimed().machine.as_deref(), Some(here.as_str()), "산 옛 장에 기계를 안 달았다");
+        assert_eq!(by("old").claimed().machine, None, "죽은 옛 장에 기계를 달았다");
+        assert_eq!(codex_card("cx").claimed().machine, None, "pid 를 모르는 장에 기계를 달았다");
+        assert_eq!(by("away").claimed().machine.as_deref(), Some(there), "남의 기계의 장을 이 기계로 고쳐 적었다");
+    }
+
+    /// **깨울 일꾼은 이 기계의 것부터 고른다**(moai-dhxm) — 다른 기계의 장은 못 깨운다([`wake`] 의 `no_way`). 가장 오래 논
+    /// 일꾼이 다른 기계에 있으면 그를 골라 아무도 안 두드리던 판은, 이 기계에서 노는 일꾼을 두고 열린 편지를 세워 두었다.
+    /// 이 기계에 노는 일꾼이 없으면 다른 기계의 일꾼을 낸다 — 못 깨워도 누가 노는지는 댄다.
+    #[test]
+    fn the_worker_to_wake_is_one_on_this_machine_first() {
+        let now = crate::model::parse_rfc3339(&crate::model::now()).unwrap();
+        let ago = |secs: i64| crate::model::format_rfc3339(now - secs);
+        let far = Presence {
+            pid: 4_194_400,
+            pid_start: Some(1),
+            machine: Some("00000000-0000-0000-0000-000000000000/4026532999".into()),
+            since: ago(600),
+            seen: Some(ago(30)),
+            ..codex_card("far")
+        };
+        let near = Presence { since: ago(60), seen: Some(ago(30)), ..codex_card("near") };
+        assert!(!far.here() && !far.gone() && near.here() && !near.gone(), "시험의 장이 뜻한 대로가 아니다");
+        let picked = |all: &[Presence]| idle_worker(all, "boss").map(|p| p.name.clone());
+        assert_eq!(picked(&[far.clone(), near]).as_deref(), Some("near"), "못 깨우는 다른 기계의 일꾼을 골랐다");
+        assert_eq!(picked(std::slice::from_ref(&far)).as_deref(), Some("far"));
+        assert_eq!(wake(&far).why, Some("no_way"));
     }
 
     /// **닻은 모든 장에 적는다**(moai-dhxm) — 프로세스를 아는 장도 다른 기계에서는 닻으로만 잰다. 때는 [`SEEN_EVERY`] 다.
