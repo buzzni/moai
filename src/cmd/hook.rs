@@ -182,12 +182,13 @@ fn decide(
     // 컴파일러가 여기서 어느 쪽인지 묻는다. `matches!` 로 가르던 판은 아래 판정의 빈 갈래만 채우면 컴파일이 되어, 새 끝
     // 이벤트가 트래커를 통째로 읽고 출석도 안 돌렸다.
     //
-    // **설정도 안 읽는다 — 출석부가 선 뿌리만 찾는다**(moai-jzym.uxa). [`Repo`] 를 세우던 판은 루트의 `config.toml` 을
-    // 파싱했고, 거기 충돌 표시가 끼면 아래의 물러서는 길이 워크트리의 `.moai` 를 열어 루트의 장을 놓쳤다 — Codex 의
-    // `SessionEnd` 가 장을 안 걷고 `Interrupt` 가 `idle` 로 안 돌렸다. 그 길은 규칙을 위한 것이지 출석을 위한 것이 아니다.
+    // **설정도 안 읽는다 — 출석부가 선 뿌리만 찾는다**(moai-jzym.uxa, [`crate::store::tracker_in_use`]). [`Repo`] 를
+    // 세우던 판은 루트의 `config.toml` 을 파싱했고, 거기 충돌 표시가 끼면 아래의 물러서는 길이 워크트리의 `.moai` 를 열어
+    // 루트의 장을 놓쳤다 — Codex 의 `SessionEnd` 가 장을 안 걷고 `Interrupt` 가 `idle` 로 안 돌렸다. 그 길은 규칙을 위한
+    // 것이지 출석을 위한 것이 아니다.
     match event {
         Event::StopFailure | Event::Interrupt | Event::SessionEnd => {
-            rest(input, &Repo::tracker_root_from(&cwd)?, dialect, event);
+            rest(input, &crate::store::tracker_in_use(&cwd)?, dialect, event);
             return Some(Decision::Pass);
         }
         Event::SessionStart | Event::UserPromptSubmit | Event::PreToolUse | Event::Stop => {}
@@ -200,10 +201,25 @@ fn decide(
     //
     // **여기서는 말을 안 짓는다** — 못 찾은 것을 값으로만 가른다(moai-5j49). 훅은 화면이 아니라
     // 보드 한 덩이를 얹는 자리라, 찾기가 진 까닭을 사람에게 낼 일이 없다.
-    let repo = match Repo::find(crate::i18n::Lang::default) {
-        Ok(Some(repo)) => repo,
-        Ok(None) | Err(_) => Repo::find_here(&cwd, crate::i18n::Lang::default).ok()??,
+    //
+    // **출석과 우편함은 물러서지 않는다**(리뷰 moai-jzym.a9k) — 끝 이벤트와 같은 자리, 트래커의 뿌리(`post`)다. 물러선
+    // 트래커에 적던 판은 루트의 설정이 깨진 채 연 세션의 장을 워크트리의 `.moai` 에 세웠고(끝 이벤트는 루트를 보니 그 장을
+    // 영영 안 돌리고 안 걷었다), 깨지기 전에 연 세션에는 같은 이름의 장을 하나 더 세워 루트의 장이 낡은 상태로 남았다.
+    // 루트의 우편함에 와 있던 편지도 그동안 안 실렸다. 그 출석부는 아무도 안 읽는다 — `moai agents`·`send` 는 루트를
+    // 읽거나 크게 실패한다. 찾기가 이긴 판은 `repo.root` 가 곧 그 뿌리라 다시 안 찾는다(도구 부름마다 지나는 길이다).
+    let (repo, post) = match Repo::find_from(&cwd, crate::i18n::Lang::default) {
+        Ok(Some(repo)) => {
+            let post = repo.root.clone();
+            (repo, post)
+        }
+        Ok(None) => return None,
+        Err(_) => {
+            let here = Repo::find_here(&cwd, crate::i18n::Lang::default).ok()??;
+            let post = crate::store::tracker_in_use(&cwd).unwrap_or_else(|| here.root.clone());
+            (here, post)
+        }
     };
+    let agents = crate::store::agents_at(&post);
     let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
@@ -241,12 +257,11 @@ fn decide(
             // `/compact` 뒤에는 프롬프트도 `Stop` 도 안 와 `busy` 로 적으면 노는 세션이 내내 일하는 것으로 남는다.
             // 처음 서는 장만 `busy` 로 적는다. 출석은 편지를 옮기기 전에 적는다 — 옮긴 뒤의 쓰기가 늦어 훅이 시간을
             // 넘기면 그 편지는 아무에게도 안 실린다.
-            let me = attendee(input, &repo, dialect);
+            let me = attendee(input, &post, dialect);
             let status = me.as_ref().map(|p| p.status.clone()).filter(|s| !s.is_empty());
-            attend(&repo.agents_dir(), me.clone(), status.as_deref().unwrap_or(mail::BUSY));
-            let letters =
-                me.as_ref().and_then(|p| {
-                deliver(&repo, p, ctx, crate::hook::letters_room(&carried), waiting(&repo, p, Mine::All))
+            attend(&agents, me.clone(), status.as_deref().unwrap_or(mail::BUSY));
+            let letters = me.as_ref().and_then(|p| {
+                deliver(&post, p, ctx, crate::hook::letters_room(&carried), waiting(&post, p, Mine::All))
             });
             carried.then(|| letters.map_or(Decision::Pass, Decision::Context))
         }
@@ -255,7 +270,7 @@ fn decide(
         // 실릴 수 있다. 첫 `UserPromptSubmit`·`Stop` 이 싣는다(2026-10-04 사용자 결정).
         Event::SessionStart => {
             write_baseline(input, &repo, &load.issues, &unreadable, ctx.zone());
-            attend(&repo.agents_dir(), attendee(input, &repo, dialect), mail::IDLE);
+            attend(&agents, attendee(input, &post, dialect), mail::IDLE);
             Decision::Pass
         }
         Event::UserPromptSubmit => {
@@ -296,8 +311,8 @@ fn decide(
             // **프롬프트는 새 턴이다 — 이미 일하는 중인 장이어도 `since` 를 새로 댄다**(리뷰 moai-u5wr.e74). Claude 와
             // Antigravity 는 사람이 Esc 로 끊은 턴에 훅을 하나도 안 내 장이 `busy` 로 남는데, 상태가 같다고 그때를 두던 판은
             // `send --wake` 가 몇 시간 전에 끊긴 턴의 시각을 "그때부터 일하는 중" 으로 댔다 — 그 값을 댄 까닭과 거꾸로다.
-            let me = attendee(input, &repo, dialect).map(|p| mail::Presence { since: String::new(), ..p });
-            attend(&repo.agents_dir(), me.clone(), mail::BUSY);
+            let me = attendee(input, &post, dialect).map(|p| mail::Presence { since: String::new(), ..p });
+            attend(&agents, me.clone(), mail::BUSY);
             // **Codex 세션에는 제 장의 이름을 댄다**(moai-u5wr.7xr) — 그 셸은 세션 모두가 함께 쓰는 데몬 밑에서 돌아 `moai` 가
             // 조상으로 이 세션을 못 찾는다. 보드와 함께 세션에 한 번 싣고, `hello`·`inbox`·`send` 는 그 이름을 `--as` 로 받는다.
             let board = match (&me, dialect) {
@@ -309,10 +324,9 @@ fn decide(
                 }),
                 _ => board,
             };
-            let letters =
-                me.as_ref().and_then(|p| {
-                deliver(&repo, p, ctx, crate::hook::letters_room(&board), waiting(&repo, p, Mine::All))
-            });
+            let letters = me
+                .as_ref()
+                .and_then(|p| deliver(&post, p, ctx, crate::hook::letters_room(&board), waiting(&post, p, Mine::All)));
             board.then(|| letters.map_or(Decision::Pass, Decision::Context))
         }
         Event::PreToolUse => {
@@ -323,7 +337,7 @@ fn decide(
             // 기계(컨테이너)에서는 닻으로만 잰다. 일꾼의 턴은 몇 시간을 가니, 여기서 안 적으면 그 기계의 감독에게 일하는
             // 일꾼이 20분 만에 떠난 것으로 보인다.
             if let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty()) {
-                mail::keep_alive(&repo.agents_dir(), |p| p.session.as_deref() == Some(session));
+                mail::keep_alive(&agents, |p| p.session.as_deref() == Some(session));
             }
             let cwd = cwd.clone();
             // **토막이 가리킨 자리는 한 번만 푼다**(moai-47zz) — [`route`] 와 아래 `stands` 가 저마다
@@ -483,16 +497,19 @@ fn decide(
         // **출석은 편지를 옮기기 전에 적는다**(moai-jzym.flj) — 접힌 뒤·턴 머리와 같은 까닭이다: 옮긴 뒤의 쓰기가 늦어(저장소가
         // 선 Ceph 가 멈춘 날) 훅이 시간을 넘기면, 심은 셸 줄은 `moai` 가 끝난 뒤에야 글을 흘려 `decision: block` 이 버려지고
         // 편지만 읽음으로 남는다. 판정 뒤에 적던 판이 그 자리였다 — 붙들었는지를 판정 뒤에야 알아서다. 실을 편지가 있으면
-        // 붙드니 `busy` 로 먼저 적고, 없으면 옮길 것이 없어 예전처럼 판정 뒤에 한 번 적는다. 먼저 적은 뒤 그 편지를 남이
-        // 먼저 가져(`any-idle-worker`) 판정이 바뀐 드문 판만 한 번 더 쓴다.
+        // 붙드니 `busy` 로 먼저 적고, 없으면 옮길 것이 없어 예전처럼 판정 뒤에 한 번 적는다. 먼저 적은 뒤 한 통도 못 옮기고
+        // 붙들지도 않은 판만 한 번 더 쓴다 — 남이 먼저 가진 `any-idle-worker` 편지, 그 사이 `inbox --ack` 나 걷기가 옮긴
+        // 편지, 옮기기가 진 판(`read/` 를 못 짓거나 `rename` 이 진다 — 이어 지면 그 편지가 기다리는 `Stop` 마다다)이다.
+        // **창이 다 닫힌 것은 아니다**(리뷰 moai-jzym.a9k) — 첫 편지를 옮긴 뒤에도 나머지 편지의 `rename` 과 `TMPDIR` 의
+        // 표(`letters`) 쓰기가 남아, 그 사이에 멈추면 같은 일이 난다. 닫으려면 옮기기를 출력 뒤로 미뤄야 한다.
         Event::Stop => {
-            let me = attendee(input, &repo, dialect);
-            let pending = me.as_ref().map(|p| waiting(&repo, p, Mine::Others)).unwrap_or_default();
-            let early = (!pending.is_empty()).then_some(mail::BUSY);
-            if let Some(status) = early {
-                attend(&repo.agents_dir(), me.clone(), status);
+            let me = attendee(input, &post, dialect);
+            let pending = me.as_ref().map(|p| waiting(&post, p, Mine::Others)).unwrap_or_default();
+            let busy_first = !pending.is_empty();
+            if busy_first {
+                attend(&agents, me.clone(), mail::BUSY);
             }
-            let letters = me.as_ref().and_then(|p| deliver(&repo, p, ctx, hold_room(dialect), pending));
+            let letters = me.as_ref().and_then(|p| deliver(&post, p, ctx, hold_room(dialect), pending));
             let held_by_letters = session_file(input, &repo, "letters");
             let decision = match letters {
                 Some(said) => {
@@ -511,10 +528,10 @@ fn decide(
                     }
                 }
             };
-            // 턴이 끝나면 논다 — 붙들었으면 아직 일하는 중이다.
-            let status = if decision.blocks() { mail::BUSY } else { mail::IDLE };
-            if early != Some(status) {
-                attend(&repo.agents_dir(), me, status);
+            // 턴이 끝나면 논다 — 붙들었으면 아직 일하는 중이다(먼저 적은 `busy` 가 그대로 맞다).
+            let held = decision.blocks();
+            if !(busy_first && held) {
+                attend(&agents, me, if held { mail::BUSY } else { mail::IDLE });
             }
             decision
         }
@@ -530,9 +547,14 @@ fn decide(
 /// 옮긴 그 자리를 아무도 못 봤다.
 ///
 /// **Antigravity 는 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 상한이 문서에 없어 사람이 띄운 대화형 agy
-/// 1.2.16 창에 한국어 편지를 보내 쟀다. 이 칸이 낼 수 있는 가장 큰 글(UTF-16 9,600~9,900 단위, UTF-8 21KB 남짓)이 턴 머리의
-/// `ephemeralMessage` 로도, 여기 `Stop` 의 `decision: continue` 로도 자르지도 파일로 빼지도 않고 그대로 실렸다(가운데에 고루
-/// 박은 표지 스물이 다 섰다). 그 위의 선은 안 쟀다 — 우리가 내는 글이 이 칸을 안 넘으니 물을 까닭이 없다.
+/// 1.2.16 창에 한국어 편지를 보내 쟀다. 칸을 거의 다 채운 글(UTF-16 9,600~9,900 단위)이 턴 머리의 `ephemeralMessage` 로도,
+/// 여기 `Stop` 의 `decision: continue` 로도 자르지도 파일로 빼지도 않고 그대로 실렸다(가운데에 고루 박은 표지 스물이 다
+/// 섰다). UTF-16 으로 그 위의 선은 안 쟀다 — 우리가 내는 글이 이 칸을 안 넘으니 물을 까닭이 없다.
+///
+/// **바이트로는 칸 끝까지 안 쟀다**(리뷰 moai-jzym.a9k) — 잰 글은 영문 표지와 띄어쓰기가 섞여 UTF-8 21KB 남짓이었고,
+/// 칸은 UTF-16 으로 세므로 한글로만 채운 편지는 같은 칸에서 30KB 에 이른다. agy 의 선이 Codex 처럼 바이트나 토큰으로
+/// 서 있고 그 사이에 있다면 한글이 빽빽한 큰 편지의 끝이 빠진다 — 그런 편지로 다시 재기 전에는 "칸 하나" 는 UTF-16 의
+/// 말이고, 바이트로 선 것은 21KB 까지다.
 fn hold_room(dialect: Dialect) -> crate::hook::Room {
     match dialect {
         Dialect::Codex => crate::hook::CODEX_HOLD,
@@ -1209,8 +1231,9 @@ fn route_one(
     Route::There(n)
 }
 
-/// 이 세션의 출석(moai-h8tn) — **옛 장을 걷고 이름을 옮기는 것 말고는 적지 않는다**, 상태와 함께 적는 것은 판정 뒤의
-/// [`attend`] 다.
+/// 이 세션의 출석(moai-h8tn) — **옛 장을 걷고 이름을 옮기는 것 말고는 적지 않는다**, 상태와 함께 적는 것은 [`attend`]
+/// 다. 그 쓰기는 편지를 읽음으로 옮기기 **전에** 선다(moai-jzym.flj) — `Stop` 이 판정 뒤에 다시 적는 것은 상태가
+/// 바뀌었을 때뿐이다. `root` 는 트래커의 뿌리다 — 규칙이 물러선 자리가 아니다([`crate::store::tracker_in_use`]).
 ///
 /// 세션 id 로 찾고, 없으면 같은 에이전트 프로세스(pid·선 때)의 장을 이 세션으로 잇는다 — `/clear` 는 세션
 /// id 만 바꾸고, `moai hello` 로 지은 이름과 역할은 남아야 한다. 그것도 없으면 새로 짓는다: 이름은 `MOAI_AGENT`,
@@ -1248,10 +1271,10 @@ fn route_one(
 /// 서로의 장을 가져갔고, 데몬의 `TMUX_PANE` 을 적어 `send --wake` 가 남의 창에 글자를 쳤다. 그래서 pid 와 tmux 칸을
 /// 모름으로 둔다. 모르는 pid 의 장은 닻으로 산 것을 잰다([`mail::Presence::stale`]) — **세션 id 로 찾은 Codex 장은 닻이
 /// 낡았어도 그대로 잇는다**: 그 세션이 돌아온 것이다. `SessionEnd` 는 그 장을 걷는다([`rest`]).
-fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presence> {
+fn attendee(input: &Input, root: &Path, dialect: Dialect) -> Option<mail::Presence> {
     let session = input.session_id.as_deref().filter(|s| !s.trim().is_empty())?;
-    let dir = repo.agents_dir();
-    let mail_dir = repo.mail_dir();
+    let dir = crate::store::agents_at(root);
+    let mail_dir = crate::store::mail_at(root);
     let (all, _) = mail::presences(&dir);
     // 모델은 장에 없을 때만 훅의 입력으로 채운다 — `moai hello --model` 이 적은 것이 먼저다.
     let model = |p: &mail::Presence| if p.model.is_empty() { input.model() } else { p.model.clone() };
@@ -1368,7 +1391,7 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
 /// 장은 남긴다: `/clear` 도 `SessionEnd` 를 내는데 같은 프로세스가 곧 새 세션으로 그 장을 잇는다(`moai hello` 로 지은
 /// 이름과 역할이 거기 있다).
 ///
-/// **받는 것은 트래커의 뿌리 하나다**(moai-jzym.uxa) — 설정을 안 읽은 자리다([`Repo::tracker_root_from`]). 드는 것은
+/// **받는 것은 트래커의 뿌리 하나다**(moai-jzym.uxa) — 설정을 안 읽은 자리다([`crate::store::tracker_in_use`]). 드는 것은
 /// 출석부와 우편함뿐이라 [`Repo`] 를 받으면 그것을 세우는 값(루트의 `config.toml` 파싱)을 끝나는 세션마다 치르고,
 /// 그 파일이 깨진 날은 엉뚱한 출석부를 받는다.
 fn rest(input: &Input, root: &Path, dialect: Dialect, event: Event) {
@@ -1420,9 +1443,9 @@ enum Mine {
 
 /// 이 세션 앞에 와 있는 편지 — **아직 안 옮겼다**. 옮기는 것은 [`deliver`] 다. 둘을 가른 것은 그 사이에 출석을 적게
 /// 하려는 것이다(moai-jzym.flj) — 옮긴 뒤의 쓰기가 늦으면 옮긴 편지가 아무에게도 안 실린다.
-fn waiting(repo: &Repo, me: &mail::Presence, which: Mine) -> Vec<mail::Stored> {
+fn waiting(root: &Path, me: &mail::Presence, which: Mine) -> Vec<mail::Stored> {
     // 여는 자리는 제 함과 열린 편지의 함 둘뿐이다(moai-ew4o.c92) — 남에게 간 편지를 열어 가르지 않는다.
-    let (all, _) = mail::list(&repo.mail_dir(), &me.name, false);
+    let (all, _) = mail::list(&crate::store::mail_at(root), &me.name, false);
     all.into_iter()
         .filter(|s| mail::for_me(s, &me.name, &me.role))
         .filter(|s| which == Mine::All || s.letter.from != me.name)
@@ -1435,7 +1458,7 @@ fn waiting(repo: &Repo, me: &mail::Presence, which: Mine) -> Vec<mail::Stored> {
 /// `room` 은 이 글이 들 자리다([`crate::hook::letters_room`]·[`hold_room`]) — 그 칸을 넘기면 에이전트가 글을 파일로
 /// 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]·[`crate::hook::CODEX_HOLD`]).
 fn deliver(
-    repo: &Repo,
+    root: &Path,
     me: &mail::Presence,
     ctx: &Ctx,
     room: crate::hook::Room,
@@ -1444,18 +1467,18 @@ fn deliver(
     if mine.is_empty() {
         return None;
     }
-    let dir = repo.mail_dir();
+    let dir = crate::store::mail_at(root);
     let (lang, zone) = (ctx.lang(), ctx.zone());
     let (picked, left) = crate::hook::deliverable(&mine, room, lang, zone);
-    let taken: Vec<&mail::Stored> = picked
+    // 고른 차례(앞에서부터)대로 옮긴다. 받은 편지를 그대로 넘긴다 — 다시 베끼지 않는다. 한 통도 못 옮겼으면
+    // [`crate::hook::letters`] 가 `None` 을 낸다.
+    let taken: Vec<mail::Stored> = mine
         .into_iter()
-        .map(|k| &mine[k])
+        .enumerate()
+        .filter(|(k, _)| picked.contains(k))
+        .map(|(_, s)| s)
         .filter(|s| matches!(mail::take(&dir, s, &me.name), Ok(mail::Took::Mine)))
         .collect();
-    if taken.is_empty() {
-        return None;
-    }
-    let taken: Vec<mail::Stored> = taken.into_iter().cloned().collect();
     crate::hook::letters(&me.name, &taken, left, lang, zone, room)
 }
 

@@ -25090,13 +25090,10 @@ fn codex_attendance_follows_the_session_not_the_process() {
     assert_eq!(names_in(&agents), ["codex-02b207b4.json"], "닫힌 Codex 세션의 장이 남았다");
 }
 
-/// **끝 이벤트는 출석부만 찾는다 — 루트의 설정이 깨져도 루트의 장을 돌린다**(moai-jzym.uxa). `Interrupt`·`SessionEnd`
-/// 가 트래커를 통째로 세우던 판은 루트의 `config.toml` 을 파싱했고, 거기 충돌 표시가 끼면 규칙을 위해 둔 물러서는 길이
-/// 워크트리의 `.moai` 를 열었다 — 그 출석부에는 이 세션의 장이 없어, Codex 의 Esc 가 `idle` 로 안 돌리고 닫힌 세션의
-/// 장이 안 걷혔다.
-#[test]
-fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
-    let s = Scratch::new("hook-end-rootcfg");
+/// 루트 체크아웃(`main`)과 그 밑 `.worktrees/feat` 에 딸린 워크트리 — 루트의 설정이 깨진 날의 훅을 재는 시험이 함께
+/// 쓴다([`codex_in`]·[`break_root_config`]).
+fn main_and_worktree(name: &str) -> (Scratch, PathBuf, PathBuf) {
+    let s = Scratch::new(name);
     let main = s.path().join("main");
     std::fs::create_dir_all(&main).unwrap();
     git(&main, &["init", "-q"]);
@@ -25105,12 +25102,36 @@ fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
     git(&main, &["commit", "-q", "-m", "세운다"]);
     git(&main, &["worktree", "add", "-q", ".worktrees/feat", "-b", "feat"]);
     let inside = main.join(".worktrees/feat");
+    (s, main, inside)
+}
+
+/// 기록한 Codex 훅 입력([`recorded`] 가 낸 것)을 워크트리 `inside` 의 자리로 옮겨 거기서 부른다 — 낸 글을 돌려준다.
+fn codex_in(s: &Scratch, inside: &Path, event: &str, input: &str) -> String {
     let (here, there) = (s.path().display().to_string(), inside.display().to_string());
-    let codex = |event: &str, rel: &str| {
-        let input = recorded(&s, rel).replace(&here, &there);
-        assert!(input.contains(&there), "시험이 자리를 워크트리로 못 옮겼다");
-        hook_argv(&s, &inside, None, &[], &["hook", event, "--dialect", "codex"], &input);
-    };
+    let input = input.replace(&here, &there);
+    assert!(input.contains(&there), "시험이 자리를 워크트리로 못 옮겼다");
+    let out = hook_argv(s, inside, None, &[], &["hook", event, "--dialect", "codex"], &input);
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// 루트의 설정을 깨뜨린다 — 병합 자국 한 줄이면 된다. 워크트리의 설정은 멀쩡하다. **깨졌는지를 먼저 잰다** — 설정이
+/// 그 줄을 견디는 날에는 옛 길(루트를 그대로 연다)도 푸르러, 이것을 쓰는 시험이 아무것도 안 잰다.
+fn break_root_config(main: &Path, inside: &Path) {
+    let cfg = main.join(".moai/config.toml");
+    let was = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&cfg, format!("<<<<<<< HEAD\n{was}")).unwrap();
+    let out = staged(&["status"]).current_dir(inside).output().unwrap();
+    assert!(!out.status.success(), "시험의 전제 — 깨진 루트 설정을 `moai` 가 지나쳤다\n{}", text(&out));
+}
+
+/// **끝 이벤트는 출석부만 찾는다 — 루트의 설정이 깨져도 루트의 장을 돌린다**(moai-jzym.uxa). `Interrupt`·`SessionEnd`
+/// 가 트래커를 통째로 세우던 판은 루트의 `config.toml` 을 파싱했고, 거기 충돌 표시가 끼면 규칙을 위해 둔 물러서는 길이
+/// 워크트리의 `.moai` 를 열었다 — 그 출석부에는 이 세션의 장이 없어, Codex 의 Esc 가 `idle` 로 안 돌리고 닫힌 세션의
+/// 장이 안 걷혔다.
+#[test]
+fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
+    let (s, main, inside) = main_and_worktree("hook-end-rootcfg");
+    let codex = |event: &str, rel: &str| codex_in(&s, &inside, event, &recorded(&s, rel));
     codex("session-start", "codex/session-start.json");
     let agents = main.join(".moai/agents");
     assert_eq!(names_in(&agents), ["codex-01a107b4.json"], "워크트리의 세션이 루트에 장을 안 세웠다");
@@ -25118,14 +25139,56 @@ fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
     codex("user-prompt-submit", "codex/user-prompt-submit.json");
     assert!(card().contains("\"status\":\"busy\""), "{}", card());
 
-    // 루트의 설정을 깨뜨린다 — 병합 자국 한 줄이면 된다. 워크트리의 설정은 멀쩡하다.
-    let cfg = main.join(".moai/config.toml");
-    let was = std::fs::read_to_string(&cfg).unwrap();
-    std::fs::write(&cfg, format!("<<<<<<< HEAD\n{was}")).unwrap();
+    break_root_config(&main, &inside);
     codex("interrupt", "codex/interrupt.json");
     assert!(card().contains("\"status\":\"idle\""), "깨진 루트 설정 하나로 Esc 가 출석을 못 돌렸다 — {}", card());
     codex("session-end", "codex/session-end.json");
     assert!(names_in(&agents).is_empty(), "깨진 루트 설정 하나로 닫힌 Codex 세션의 장이 남았다");
+}
+
+/// **규칙이 물러서도 출석과 편지는 루트에 선다**(리뷰 moai-jzym.a9k). 루트의 설정이 깨지면 훅의 규칙은 워크트리의
+/// `.moai` 로 물러서는데(리뷰 moai-71ht.i1u), 출석과 우편함까지 그리로 가던 판은 한 세션의 장을 두 출석부로 갈랐다 —
+/// 깨지기 전에 연 세션은 턴 끝을 워크트리에 새로 선 장에만 적어 루트의 장이 낡은 상태로 남았고 루트의 우편함에 와 있던
+/// 편지가 안 실렸다. 깨진 채 연 세션의 장은 워크트리에만 서서, 루트를 보는 끝 이벤트(moai-jzym.uxa)가 못 돌리고 못
+/// 걷었다. 워크트리의 출석부는 아무도 안 읽는다.
+#[test]
+fn a_hook_past_a_broken_root_config_keeps_attendance_and_letters_at_the_root() {
+    let (s, main, inside) = main_and_worktree("hook-fallback-post");
+    let codex = |event: &str, rel: &str| codex_in(&s, &inside, event, &recorded(&s, rel));
+    let agents = main.join(".moai/agents");
+    let card = |name: &str| std::fs::read_to_string(agents.join(format!("{name}.json"))).unwrap();
+    let stray = || names_in(&inside.join(".moai/agents"));
+    codex("session-start", "codex/session-start.json");
+    ok(&main, &["send", "codex-01a107b4", "일감 하나", "--as", "boss"]);
+
+    // 깨지기 전에 연 세션 — 턴 머리는 루트의 장을 돌리고 루트의 우편함에서 싣는다. 턴 끝도 루트의 장에 적는다.
+    break_root_config(&main, &inside);
+    let said = codex("user-prompt-submit", "codex/user-prompt-submit.json");
+    assert!(said.contains("일감 하나"), "루트의 우편함에 와 있던 편지를 안 실었다 — {said}");
+    assert!(card("codex-01a107b4").contains("\"status\":\"busy\""), "{}", card("codex-01a107b4"));
+    codex("stop", "codex/stop.json");
+    assert!(card("codex-01a107b4").contains("\"status\":\"idle\""), "턴 끝이 루트의 장을 안 돌렸다");
+    assert!(stray().is_empty(), "아무도 안 읽는 워크트리의 출석부에 장을 세웠다 — {:?}", stray());
+
+    // 깨진 채 연 세션 — 장이 루트에 서야 끝 이벤트가 그 장을 돌리고 걷는다.
+    let id = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
+    let other = |event: &str, rel: &str| {
+        let input = recorded(&s, rel);
+        assert!(input.contains(id), "{rel} 에 세션 id 가 없다 — 시험이 세션을 못 바꾼다");
+        codex_in(&s, &inside, event, &input.replace(id, "02b207b4-ee4b-7b13-9ae8-269f43b5a38f"))
+    };
+    other("session-start", "codex/session-start.json");
+    other("user-prompt-submit", "codex/user-prompt-submit.json");
+    assert!(
+        card("codex-02b207b4").contains("\"status\":\"busy\""),
+        "깨진 채 연 세션의 장이 루트에 없다 — {:?}",
+        stray()
+    );
+    other("interrupt", "codex/interrupt.json");
+    assert!(card("codex-02b207b4").contains("\"status\":\"idle\""), "깨진 채 연 세션의 장을 Esc 가 못 돌렸다");
+    other("session-end", "codex/session-end.json");
+    assert_eq!(names_in(&agents), ["codex-01a107b4.json"], "깨진 채 연 Codex 세션의 장을 `SessionEnd` 가 못 걷었다");
+    assert!(stray().is_empty(), "아무도 안 읽는 워크트리의 출석부에 장을 세웠다 — {:?}", stray());
 }
 
 /// **`Stop` 은 편지를 읽음으로 옮기기 전에 출석을 적는다**(moai-jzym.flj) — 옮긴 뒤의 쓰기가 늦어 훅이 시간을 넘기면,
@@ -25135,6 +25198,7 @@ fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
 #[test]
 fn a_stop_that_dies_writing_attendance_leaves_the_letter_unread() {
     use std::io::Write as _;
+    use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
     let s = init("hook-stop-order");
     dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
     ok(s.path(), &["send", "codex-01a107b4", "일감 하나", "--as", "boss"]);
@@ -25144,8 +25208,8 @@ fn a_stop_that_dies_writing_attendance_leaves_the_letter_unread() {
 
     let stop = recorded(&s, "codex/stop.json");
     let tmp = s.path().join("hooktmp");
-    let mut child = isolated(fake_agent("codex"))
-        .args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "hook", "stop", "--dialect", "codex"])
+    let mut cmd = isolated(fake_agent("codex"));
+    cmd.args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "hook", "stop", "--dialect", "codex"])
         .env("MOAI_ACTOR", ACTOR)
         .env("MOAI_NOW", NOW)
         .env("NO_COLOR", "1")
@@ -25154,12 +25218,29 @@ fn a_stop_that_dies_writing_attendance_leaves_the_letter_unread() {
         .current_dir(s.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::piped());
+    // **`SIGXFSZ` 를 기본 동작으로 되돌린다**(리뷰 moai-jzym.a9k) — 시험을 띄운 쪽이 그 신호를 무시해 두면(CPython 은
+    // 켜질 때 무시하고 `os.system` 은 안 되돌린다) 자식이 그 무시를 물려받고, 셸은 켜질 때 무시된 신호를 되돌리지 못한다.
+    // 그러면 쓰기는 `EFBIG` 로 지기만 하고 훅은 편지를 옮겨 붙든 채 0 으로 끝나, 시험이 기계를 따라 붉어진다.
+    // SAFETY: `fork` 와 `exec` 사이에서 부르는 것은 `signal` 하나다 — 비동기 신호에 안전한 함수다.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::signal(libc::SIGXFSZ, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn().unwrap();
     child.stdin.take().unwrap().write_all(stop.as_bytes()).unwrap();
     let out = child.wait_with_output().unwrap();
-    assert!(!out.status.success(), "파일 쓰기에서 훅이 안 죽었다 — 시험이 헛돈다");
+    // **죽은 까닭까지 잰다** — 셸이 훅을 띄우고 기다렸으면 `128 + SIGXFSZ`, 훅을 `exec` 했으면 그 신호 자체다. 다른
+    // 까닭으로 진 판(패닉의 101)은 편지를 옮기기 전에 끝나도 이 시험이 잴 것을 안 잰다.
+    let by_xfsz = out.status.signal() == Some(libc::SIGXFSZ) || out.status.code() == Some(128 + libc::SIGXFSZ);
+    assert!(
+        by_xfsz,
+        "파일 쓰기에서 훅이 안 죽었다 — 시험이 헛돈다 ({:?})\nstderr: {}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(names_in(&mailbox), unread, "출석을 적기 전에 편지를 읽음으로 옮겼다");
     assert!(names_in(&mailbox.join("read")).is_empty(), "죽은 훅이 편지를 읽음으로 남겼다");
 
@@ -25217,13 +25298,16 @@ fn a_codex_stop_holds_letters_inside_codexs_limit() {
 /// **Antigravity 의 턴 끝은 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 사람이 띄운 agy 1.2.16 창이
 /// UTF-16 9,600~9,900 단위(21KB 남짓)의 한국어 편지를 턴 머리에서도 `Stop` 의 `decision: continue` 로도 자르거나 파일로
 /// 빼지 않고 실었다. Codex 의 좁은 선(바이트 8천)으로 옮기면 실을 수 있는 편지를 잘라 다시 보라고 시킨다.
+///
+/// **편지는 잰 바이트 안에 둔다**(리뷰 moai-jzym.a9k) — 칸은 UTF-16 으로 세지만 agy 가 무엇으로 세는지는 모르고, 잰
+/// 글은 21KB 남짓이었다. 그보다 큰 편지로 재면 아무도 본 적 없는 크기를 이 시험이 약속한다.
 #[test]
-fn an_antigravity_stop_holds_a_letter_as_big_as_claudes_slot() {
+fn an_antigravity_stop_holds_whole_a_letter_codex_would_cut() {
     let s = init("agy-hold-cap");
     dialect_out(&s, "antigravity", "user-prompt-submit", &recorded(&s, "antigravity/pre-invocation-first.json"));
     let names = names_in(&s.path().join(".moai/agents"));
     assert_eq!(names.len(), 1, "턴 머리가 출석을 안 적었다 — {names:?}");
-    let big = "가".repeat(9_000); // 27KB — Codex 의 선은 넘고 칸 하나에는 든다
+    let big = "가".repeat(6_500); // 19.5KB — Codex 의 선(8천)은 넘고 잰 바이트(21KB 남짓) 안이다
     ok(s.path(), &["send", names[0].trim_end_matches(".json"), "긴 편지", "-b", &big, "--as", "boss"]);
     let out = dialect_out(&s, "antigravity", "stop", &recorded(&s, "antigravity/stop.json"));
     one_json_value(&out);

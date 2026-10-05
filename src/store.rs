@@ -212,8 +212,8 @@ pub(crate) fn here_wanted() -> bool {
     matches!(v.as_deref(), Some("1" | "true" | "yes" | "on"))
 }
 
-/// 트래커 뿌리 `root` 의 우편함 — [`Repo::mail_dir`] 가 이것이다. [`Repo`] 를 안 세우는 자리(훅의 끝 이벤트,
-/// [`Repo::tracker_root_from`])가 같은 자리를 짚게 한 곳에 둔다.
+/// 트래커 뿌리 `root` 의 우편함 — [`Repo::mail_dir`] 가 이것이다. [`Repo`] 를 안 세우는 자리(훅의 출석과 편지,
+/// [`tracker_in_use`])가 같은 자리를 짚게 한 곳에 둔다.
 pub fn mail_at(root: &Path) -> PathBuf {
     root.join(".moai").join("mail")
 }
@@ -480,17 +480,6 @@ impl Repo {
     /// 그 줄은 시계가 돌 때까지 낡은 셈을 낸다.
     pub fn opened_root(dir: &Path) -> PathBuf {
         Repo::redirect(dir).unwrap_or_else(|| dir.to_path_buf())
-    }
-
-    /// [`Repo::find_from`] 이 읽을 트래커의 **뿌리만** — 설정도 스냅샷도 안 읽는다. 못 찾으면 `None` 이다.
-    ///
-    /// 훅의 끝 이벤트(`StopFailure`·`Interrupt`·`SessionEnd`)가 쓴다(moai-jzym.uxa) — 거기 드는 것은 출석부와 우편함
-    /// 디렉터리뿐이다([`agents_at`]·[`mail_at`]). [`Repo`] 를 통째로 세우면 루트의 `config.toml` 을 파싱하고, 거기 충돌
-    /// 표시 하나가 끼면 훅이 물러서는 길([`Repo::find_here`])이 워크트리의 `.moai` 를 열어 루트의 장을 놓친다 — Codex 의
-    /// `SessionEnd` 가 장을 안 걷고 `Interrupt` 가 `idle` 로 안 돌렸다. 옮겨 가는 자는 [`Repo::find_from`] 과 같은
-    /// [`Repo::redirect`] 다 — 갈라 두면 한쪽만 `MOAI_HERE` 를 본다.
-    pub fn tracker_root_from(dir: &Path) -> Option<PathBuf> {
-        Repo::found_root(dir).map(|found| Repo::opened_root(&found))
     }
 
     /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
@@ -2624,6 +2613,11 @@ pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
 /// 묻는다. 딸린 워크트리의 밑자리(`<wt>/src/deep`)가 그 자리다: 손잡이를 켠 셸은 `<wt>/.moai` 를
 /// 읽는데, 그 줄을 따라 치면 `src/deep` 에 아무도 안 읽는 `.moai` 가 서고 원래 줄들은 사라진 것처럼
 /// 보인다.
+///
+/// **훅의 출석과 편지도 이 자로 선다**(moai-jzym.uxa, 리뷰 moai-jzym.a9k) — 설정도 스냅샷도 안 읽으니, 루트의
+/// `config.toml` 에 충돌 표시가 끼어 [`Repo::find_from`] 이 지고 규칙이 이 자리의 트래커로 물러선 날에도
+/// 출석부와 우편함([`agents_at`]·[`mail_at`])은 그 뿌리에 선다. 물러선 트래커에 적던 판은 한 세션의 장이 두
+/// 출석부로 갈렸다 — 끝 이벤트만 뿌리를 보면, 그 창에 연 세션의 장은 `Interrupt` 가 못 돌리고 `SessionEnd` 가 못 걷는다.
 pub(crate) fn tracker_in_use(dir: &Path) -> Option<PathBuf> {
     look(dir).map(|found| Repo::opened_root(&found))
 }
