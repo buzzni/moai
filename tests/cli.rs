@@ -24718,6 +24718,91 @@ fn a_session_resumed_on_another_machine_moves_its_card_here() {
     assert!(!table.contains("@box-b"), "이어 연 세션을 다른 기계의 것으로 보였다 — {table}");
 }
 
+/// **지은 이름은 다른 기계의 조용한 장이 하루 쥔다**(moai-nas5, 2026-10-05 사용자 결정) — Claude 의 장은 프롬프트 앞에서
+/// 쉬는 동안 닻을 안 적어 20분이면 떠난 것으로 읽히는데, Claude 의 세션 이름은 컨테이너마다 따로 세어 겹친다. 떠난 것으로
+/// 읽힌 이름을 내주던 판은 이 기계에서 같은 이름을 지은 새 세션이 저쪽 장을 덮고, 아직 산 저쪽 세션의 편지를 보낸 이에게
+/// 되돌렸다. 새 세션은 토막을 붙여 가르고, 하루가 지나 저쪽 장이 걷힐 때가 되면 그 이름을 받는다. 창이 대는
+/// 이름(`MOAI_AGENT`, `hello --name`)은 20분 뒤 되찾는다(moai-dhxm 의 결정) — 가르지 않는다.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_quiet_card_on_another_machine_keeps_its_made_name_for_a_day() {
+    let s = init("hook-made-name-elsewhere");
+    let agents = s.path().join(".moai/agents");
+    std::fs::create_dir_all(&agents).unwrap();
+    // 저쪽 컨테이너의 Claude 세션 — 그 pid 는 이 기계에 없고, `seen` 뒤로 닻을 안 적었다.
+    let far = |name: &str, seen: &str| {
+        let card = format!(
+            "{{\"v\":1,\"name\":\"{name}\",\"vendor\":\"claude\",\"status\":\"idle\",\"since\":\"{seen}\",\
+             \"pid\":4194400,\"pid_start\":1,\"machine\":\"00000000-0000-0000-0000-000000000000/4026532999\",\
+             \"host\":\"box-b\",\"session\":\"far-{name}\",\"seen\":\"{seen}\"}}\n"
+        );
+        std::fs::write(agents.join(format!("{name}.json")), &card).unwrap();
+        card
+    };
+    let start = |session: &str, env: &[(&str, &str)]| {
+        let ev = event(&s, session).replacen('{', "{\"source\":\"startup\",", 1);
+        hook_at_home(&s, s.path(), None, env, "session-start", &ev)
+    };
+    let hour_ago = "2026-09-11T03:12:03Z";
+    let before = far("claude-sessMDE1", hour_ago);
+    ok(s.path(), &["send", "claude-sessMDE1", "저쪽 일감", "--as", "boss"]);
+    let table = ok(s.path(), &["agents"]);
+    assert!(table.lines().any(|l| l.starts_with("claude-sessMDE1 ") && l.contains("gone")), "{table}");
+    start("sessMDE1-aaaa", &[]);
+    assert_eq!(
+        std::fs::read_to_string(agents.join("claude-sessMDE1.json")).unwrap(),
+        before,
+        "다른 기계의 조용한 장을 덮었다"
+    );
+    assert!(
+        std::fs::read_to_string(agents.join("claude-sessMDE1-sessMDE1.json"))
+            .is_ok_and(|card| card.contains("\"session\":\"sessMDE1-aaaa\"")),
+        "토막을 붙여 가르지 않았다 — {:?}",
+        names_in(&agents)
+    );
+    let back = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
+    assert!(back.contains("\"letters\":[]"), "아직 산 저쪽 세션의 편지를 되돌렸다 — {back}");
+    // 그 편지는 저쪽 세션의 함에 그대로다 — 토막을 붙인 이 세션에 실리지 않는다.
+    let kept = ok(s.path(), &["inbox", "--as", "claude-sessMDE1", "--json"]);
+    assert!(kept.contains("저쪽 일감"), "저쪽 세션의 편지가 제 함에 안 남았다 — {kept}");
+    let here = ok(s.path(), &["inbox", "--as", "claude-sessMDE1-sessMDE1", "--json"]);
+    assert!(here.contains("\"letters\":[]"), "저쪽 세션의 편지가 이 세션의 함으로 왔다 — {here}");
+    // `hello` 가 짓는 이름(`<벤더>-<pid>`)도 같다 — 넘겨받지 않고, 그 이름을 쥔 저쪽 장을 댄다. 그 장은 떠난 것으로 보이니
+    // 도는 에이전트라고 안 댄다(리뷰 moai-nas5.cn7).
+    let w = Sleeper::new();
+    let made = format!("claude-{}", w.pid());
+    let held = far(&made, hour_ago);
+    let taken = moai(s.path(), &["hello", "--pid", &w.pid(), "--vendor", "claude"]);
+    assert!(!taken.status.success() && text(&taken).contains("4194400@box-b"), "{}", text(&taken));
+    assert!(
+        !text(&taken).contains("도는 에이전트"),
+        "떠난 것으로 보이는 장을 도는 에이전트라고 댔다 — {}",
+        text(&taken)
+    );
+    assert_eq!(
+        std::fs::read_to_string(agents.join(format!("{made}.json"))).unwrap(),
+        held,
+        "hello 가 저쪽 장을 덮었다"
+    );
+    // `hello --name` 이 대는 이름은 창이 대는 이름이다 — 떠난 것으로 읽히는 저쪽 장의 것이면 되찾는다(moai-dhxm).
+    far("w6", hour_ago);
+    let asked = ok(s.path(), &["hello", "--pid", &w.pid(), "--name", "w6", "--json"]);
+    assert!(asked.contains(&format!("\"pid\":{},", w.pid())), "hello --name 이 댄 이름을 못 되찾았다 — {asked}");
+    // 하루가 지나면 걷힐 때다 — 새 세션이 그 이름을 받고, 저쪽 함의 편지는 보낸 이에게 돌아간다.
+    far("claude-sessMDE2", "2026-09-10T04:12:02Z");
+    ok(s.path(), &["send", "claude-sessMDE2", "하루 묵은 일감", "--as", "boss"]);
+    start("sessMDE2-bbbb", &[]);
+    let card = std::fs::read_to_string(agents.join("claude-sessMDE2.json")).unwrap();
+    assert!(card.contains("\"session\":\"sessMDE2-bbbb\""), "하루 지난 장의 이름을 못 받았다 — {card}");
+    let back = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
+    assert!(back.contains("하루 묵은 일감") && !back.contains("저쪽 일감"), "{back}");
+    // 창이 대는 이름은 떠난 것으로 읽히면 되찾는다 — 컨테이너를 다시 띄운 `MOAI_AGENT=w5` 창이다.
+    far("w5", hour_ago);
+    start("sessMDE3-cccc", &[("MOAI_AGENT", "w5")]);
+    let card = std::fs::read_to_string(agents.join("w5.json")).unwrap();
+    assert!(card.contains("\"session\":\"sessMDE3-cccc\""), "창이 댄 이름을 못 되찾았다 — {card}");
+}
+
 /// **기계를 안 적은 옛 장은 그 세션이 이 기계에 살아 있으면 기계를 단다**(moai-dhxm) — 이 필드 전의 판이 적은 장은 같은
 /// 저장소를 쓰는 다른 기계가 pid 로 재어 걷고 편지를 되돌린다. 산 세션의 장을 그대로 이어 쓰던 판은 판을 올린 날 돌던
 /// 세션이 끝날 때까지 그 장에 기계를 안 달았다. 훅이 장을 다시 쓸 때와 도구 부름이 닻을 적을 때, 그 pid 가 이 기계에 살아

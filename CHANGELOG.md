@@ -87,7 +87,17 @@ does not tag — see `CONTRIBUTING.md`.
   back to; after a day it is swept. A Codex row's letters stay for that session;
   another machine's go back to their senders, since a later session can be
   given the same name. A container started again reads its earlier rows as
-  another machine's, so those wait out the day too.
+  another machine's, so those wait out the day too. Until that day is out,
+  another machine's row also keeps its name from any name the tools make up
+  here — a Claude session name, which each container counts on its own,
+  `<vendor>-` and the start of a session id, or `moai hello`'s
+  `<vendor>-<pid>` — even while it reads `gone`: a Claude session resting at
+  its prompt writes nothing, and a new session here that took over its name
+  would send that live session's letters back. Such a new session gets the
+  name with a piece of its session id appended instead, and a `moai hello`
+  that has to make the name up refuses it (in Codex it appends the piece too).
+  A name a window asks for (`MOAI_AGENT`, `moai hello --name`) still comes
+  back to it once the old row reads `gone`.
 - **The hooks deliver letters.** Each prompt (`UserPromptSubmit`) loads the
   letters for the session into the conversation, the end of a turn (`Stop`)
   holds the turn with them, and a session opened after a compaction gets them

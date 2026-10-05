@@ -1229,8 +1229,10 @@ fn route_one(
 ///
 /// 세션 id 로 찾고, 없으면 같은 에이전트 프로세스(pid·선 때)의 장을 이 세션으로 잇는다 — `/clear` 는 세션
 /// id 만 바꾸고, `moai hello` 로 지은 이름과 역할은 남아야 한다. 그것도 없으면 새로 짓는다: 이름은 `MOAI_AGENT`,
-/// Claude 가 보이는 세션 이름, 못 읽으면 `<벤더>-<세션 id 앞 8자>` 차례다(2026-10-04 사용자 결정). 산 남이 그 이름을
-/// 쥐었으면 세션 토막을 붙여 가른다 — 두 세션이 한 이름이면 편지가 먼저 읽는 쪽으로 샌다.
+/// Claude 가 보이는 세션 이름, 못 읽으면 `<벤더>-<세션 id 앞 8자>` 차례다(2026-10-04 사용자 결정). 지은 이름을 남이
+/// 쥐었으면 세션 토막을 붙여 가른다([`mail::made_name`]) — 두 세션이 한 이름이면 편지가 먼저 읽는 쪽으로 샌다. 다른 기계의
+/// 장은 떠난 것으로 읽혀도 하루 동안은 그 이름을 쥔다(moai-nas5). `MOAI_AGENT` 는 산 남이 쥐었으면 버리고 지은 이름으로
+/// 선다 — 창이 대는 이름이라 떠난 장의 것이면 되찾는다(moai-dhxm).
 ///
 /// **`MOAI_AGENT` 가 이 세션의 이름이다**(moai-ew4o.e1m) — `moai send`·`inbox` 가 그 이름으로 돌므로([`super::mail`] 의
 /// `who`), 훅이 그것을 모르면 한 세션이 두 이름으로 서서 그 이름 앞의 답장이 영영 안 실렸다. 이어 쓰는 장의 이름이
@@ -1275,8 +1277,9 @@ fn attendee(input: &Input, root: &Path, dialect: Dialect) -> Option<mail::Presen
         .flatten()
         .map(|v| v.trim().to_string())
         .filter(|v| mail::is_agent_name(v));
-    // 산 남이 쥔 이름인가 — 대소문자만 다른 이름도 같은 장이다(`hello` 의 이름 겨루기와 같은 자). `mine` 은 그 이름을 쥐어도
-    // 남이 아닌 장이다.
+    // 산 남이 쥔 이름인가 — 창이 대는 이름(`MOAI_AGENT`)을 재는 자다(`hello` 가 대는 이름을 재는 자와 같다). 지은 이름은
+    // [`mail::made_name`] 이 다른 자로 잰다(moai-nas5). 대소문자만 다른 이름도 같은 장이다. `mine` 은 그 이름을 쥐어도 남이
+    // 아닌 장이다.
     let held_by_other = |name: &str, mine: &str| {
         all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && !p.name.eq_ignore_ascii_case(mine) && !p.gone())
     };
@@ -1323,19 +1326,6 @@ fn attendee(input: &Input, root: &Path, dialect: Dialect) -> Option<mail::Presen
             }
             .at(pid, pid_start)
         };
-    // 토막은 상한에 안 잘리게 잇는다([`mail::name_with`]) — 잘리면 가른 이름이 도로 산 남의 이름이다.
-    //
-    // **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고
-    // 65초 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같아, 한 번만 가르던 판은 셋째가 둘째의 장을 덮었고 둘은
-    // 훅마다 서로의 장과 편지를 빼앗았다. 토막을 이어도 산 남의 이름이면 세션 id 를 통째로 잇는다 — 세션마다 하나다.
-    let whole: String = session.chars().filter(char::is_ascii_alphanumeric).collect();
-    let taken = |name: &str| held_by_other(name, "");
-    let free = |name: String| {
-        if !taken(&name) {
-            return Some(name);
-        }
-        [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| mail::name_with(&name, tail)).find(|n| !taken(n))
-    };
     if dialect == Dialect::Codex {
         return Some(fresh(mail::codex_name(&all, session)?, "codex", 0, None, (None, None)));
     }
@@ -1368,11 +1358,18 @@ fn attendee(input: &Input, root: &Path, dialect: Dialect) -> Option<mail::Presen
             .at(agent.pid, agent.start),
         ));
     }
-    let name = asked
-        .filter(|n| !taken(n))
-        .or_else(|| (vendor == "claude").then(|| mail::claude_session_name(agent.pid)).flatten())
+    // `MOAI_AGENT` 는 창이 대는 이름이라 떠난 장의 것이면 그대로 되찾는다(moai-dhxm) — 토막을 붙여 가르는 것은 지은
+    // 이름뿐이다. **지은 이름은 다른 기계의 조용한 장이 하루 쥔다**(moai-nas5, [`mail::made_name`]) — Claude 의 세션 이름은
+    // 컨테이너마다 따로 세어 겹친다. 떠난 것으로 읽힌(20분) 저쪽 장의 이름을 내주던 판은 그 장을 덮고 아직 산 저쪽 세션의
+    // 편지를 보낸 이에게 되돌렸다.
+    if let Some(name) = asked.filter(|n| !held_by_other(n, "")) {
+        return Some(fresh(name, vendor, agent.pid, agent.start, tmux));
+    }
+    let name = (vendor == "claude")
+        .then(|| mail::claude_session_name(agent.pid))
+        .flatten()
         .or_else(|| mail::name_with(vendor, &short))?;
-    Some(fresh(free(name)?, vendor, agent.pid, agent.start, tmux))
+    Some(fresh(mail::made_name(&all, name, session)?, vendor, agent.pid, agent.start, tmux))
 }
 
 /// `Stop` 없이 끝난 턴(moai-u5wr.f29) — 이 세션의 장이 있으면 `idle` 로 적는다. **장을 새로 짓지는 않는다** — 끝나는
