@@ -4315,3 +4315,8 @@
 {"ts":"2026-10-05T02:25:59Z","id":"moai-ew4o.q9f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T02:28:29Z","id":"moai-t6hl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 훅 파일이 이벤트가 안 받는 timeout·additionalContextLimit 을 적는다"}
 {"ts":"2026-10-05T02:29:57Z","id":"moai-t6hl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T02:39:50Z","id":"moai-t6hl.00z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — Codex 훅 파일이 이벤트별 timeout·additionalContextLimit 을 적는가"}
+{"ts":"2026-10-05T02:39:55Z","id":"moai-t6hl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-05T02:39:56Z","id":"moai-t6hl.00z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T02:40:05Z","id":"moai-t6hl.00z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 백그라운드에서 돈다(워크트리 .worktrees/moai-t6hl). 돌아오면 원문을 노트로 남기고 고침을 fix: 로 커밋한 뒤 develop 에 머지한다"}
+{"ts":"2026-10-05T02:55:26Z","id":"moai-u3na","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽은 편지의 보관 기한이 없어 mail 의 read 가 끝없이 쌓인다"}
