@@ -4357,3 +4357,14 @@
 {"ts":"2026-10-05T04:12:14Z","id":"moai-ew4o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 83c7d75f 로 머지했고 멤버·리뷰를 닫았다. 루트 release 바이너리를 다시 지었다(04:04). moai-u5wr 은 다른 일꾼이 세운 moai-rxro 하나로 열려 있다. 넘긴 것은 idea moai-wuj1(컨테이너 여럿의 걷기). 측정 흔적: agy 창은 agy-probe 로 서 있고 probe-sender 함에 agy 의 답장 하나가 남았다"}
 {"ts":"2026-10-05T04:13:59Z","id":"moai-rxro","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T04:20:19Z","id":"moai-rxro","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람 알림(2026-10-05): 사람의 codex 창이 /hooks 에서 훅을 믿었다 — 실제 Codex 의 Stop 붙듦을 재야 하면 그 창에서 부탁한다"}
+{"ts":"2026-10-05T04:29:51Z","id":"moai-u5wr.6un","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — Codex Stop 의 편지를 바이트로 재는 자리"}
+{"ts":"2026-10-05T04:29:54Z","id":"moai-u5wr.6un","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T04:29:56Z","id":"moai-rxro","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-05T04:30:05Z","id":"moai-u5wr.6un","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 워크트리 .worktrees/moai-rxro 에서 도는 중이다 — 돌아오면 고침을 fix: 로 커밋하고 머지(8)로 간다"}
+{"ts":"2026-10-05T04:47:10Z","id":"moai-dhxm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"다른 기계의 출석은 pid 가 아니라 닻으로 잰다"}
+{"ts":"2026-10-05T04:47:10Z","id":"moai-dhxm.rm1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"장에 기계를 적고 다른 기계의 장은 pid 로 재지 않는다"}
+{"ts":"2026-10-05T04:47:10Z","id":"moai-dhxm.owv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"프로세스를 아는 장도 닻을 적는다 — 다른 기계가 잴 수 있게"}
+{"ts":"2026-10-05T04:47:10Z","id":"moai-dhxm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-wuj1 에서 펼쳤다 — 컨테이너 여럿이 한 저장소를 쓰면 moai agents 가 남의 산 에이전트를 죽은 것으로 걷고 편지를 되돌린다"}
+{"ts":"2026-10-05T04:47:10Z","id":"moai-wuj1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-dhxm 로 펼쳤다 (이슈 2건)"}
+{"ts":"2026-10-05T04:47:13Z","id":"moai-dhxm.rm1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T04:47:14Z","id":"moai-dhxm.owv","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
