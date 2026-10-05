@@ -24760,6 +24760,66 @@ fn inbox_shows_one_letter_by_its_id() {
     );
 }
 
+/// `moai inbox <id>` 의 쪽을 끝 줄이 대는 자리(`--from`)를 따라 끝까지 넘겨 본문을 잇는다(moai-m81b) — 쪽마다 24KB
+/// (`cmd::mail::PAGE`) 안에 드는지 잰다. 줄 사이에서 끊긴 자리는 끝 줄의 자리가 실린 글자보다 하나 더 가서 안다.
+fn pages_of(dir: &Path, id: &str, me: &str, mut from: usize) -> (String, usize) {
+    let (mut got, mut pages) = (String::new(), 0);
+    loop {
+        let at = from.to_string();
+        let mut args = vec!["inbox", id, "--as", me];
+        if from > 0 {
+            args.extend(["--from", at.as_str()]);
+        }
+        let out = ok(dir, &args);
+        assert!(out.len() <= 24_000, "{pages} 째 뒤의 쪽이 {} 바이트다", out.len());
+        pages += 1;
+        let text = out.lines().filter_map(|l| l.strip_prefix("    ")).collect::<Vec<_>>().join("\n");
+        got.push_str(&text);
+        let Some(next) = out.trim_end().lines().last().and_then(|l| l.split("--from ").nth(1)) else {
+            return (got, pages);
+        };
+        let next: usize = next.split(' ').next().and_then(|n| n.parse().ok()).unwrap();
+        let to = from + text.chars().count();
+        assert!(next == to || next == to + 1, "{from}..{to} 뒤에 {next} 를 댔다");
+        if next == to + 1 {
+            got.push('\n');
+        }
+        from = next;
+    }
+}
+
+/// **편지 하나는 쪽으로 넘겨 본다**(moai-m81b) — `inbox <id>` 도 편지를 통째로 내, 에이전트의 출력 상한(Claude Code 의
+/// Bash 3만 자, Codex 0.160 의 1만 토큰)에서 가운데가 다시 빠졌다. 쪽마다 24KB 안에 들고, 끝 줄이 댄 `--from` 을 따라가면
+/// 본문이 그대로 이어진다. `--json` 은 쪽을 안 자른다(2026-10-05 사용자 결정). 본문 밖의 자리는 읽음으로 옮기기 전에
+/// 거절하고, `--from` 은 id 없이 안 선다.
+#[test]
+fn inbox_pages_one_long_letter() {
+    let s = init("inbox-page");
+    let body: String = (0..2_400)
+        .map(|k| format!("line {k:05} {}\n", if k % 3 == 0 { "가나다라마바사" } else { "abcdefghij" }))
+        .collect();
+    let id = field(&ok(s.path(), &["send", "w1", "긴 편지", "-b", &body, "--as", "boss", "--json"]), "id");
+    let (got, pages) = pages_of(s.path(), &id, "w1", 0);
+    assert!(pages >= 3, "쪽이 적다 — {pages}");
+    assert_eq!(got, body.strip_suffix('\n').unwrap(), "넘겨 본 쪽이 본문과 다르다");
+    // `--json` 은 기록이다 — `--from` 을 줘도 편지 전체를 낸다.
+    let json = ok(s.path(), &["inbox", &id, "--from", "100", "--as", "w1", "--json"]);
+    assert_eq!(json_text(&json, "body"), body, "--json 이 편지 전체가 아니다");
+    // 본문 밖의 자리는 거절한다 — `--ack` 가 함께여도 편지를 안 옮긴다.
+    let len = body.chars().count();
+    let out = moai(s.path(), &["inbox", &id, "--from", &len.to_string(), "--ack", "--as", "w1"]);
+    assert!(!out.status.success(), "본문 밖의 자리를 받았다 — {}", text(&out));
+    assert!(s.path().join(format!(".moai/mail/w1/{id}.json")).is_file(), "보일 것이 없는 부름이 편지를 옮겼다");
+    let last = ok(s.path(), &["inbox", &id, "--from", &(len - 2).to_string(), "--as", "w1"]);
+    assert_eq!(
+        last.lines().filter_map(|l| l.strip_prefix("    ")).collect::<String>(),
+        "j",
+        "끝 글자를 안 보였다 — {last}"
+    );
+    // `--from` 은 편지 하나의 깃발이다.
+    assert!(!moai(s.path(), &["inbox", "--from", "5", "--as", "w1"]).status.success(), "id 없이 --from 을 받았다");
+}
+
 /// **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `inbox --wait` 는 기다리는 동안 장을 `idle` 로 적어,
 /// `send --wake` 가 그 칸에 `moai inbox`+Enter 를 쳤다 — 그 기다림은 턴 안의 셸 명령이라 도는 턴에 글자가 끼어든다.
 /// 기다림은 에이전트 프로세스 **아래**에서 도는 것으로 안다: 셸을 하나 끼워 그 셸을 에이전트로 등록하고, 그 아래에서
@@ -24972,11 +25032,21 @@ fn the_hooks_load_letters_up_to_a_budget() {
     assert!(context_units(&out) <= 10_000, "Claude Code 의 칸을 넘겼다 — {}", context_units(&out));
     assert_eq!(names_in(&s.path().join(".moai/mail/claude-sess0003")).len(), 2, "안 실은 편지를 읽음으로 옮겼다");
 
-    // **자른 표는 그 편지 하나를 대고, 그 길이 편지 전체를 보인다**(moai-54yc.v70) — 함 전체를 내는 `--all` 이 아니다.
-    let cut = format!("moai inbox {} --as claude-sess0003", ids[0]);
+    // **자른 표는 그 편지 하나를 대고, 그 길이 나머지를 보인다**(moai-54yc.v70) — 함 전체를 내는 `--all` 이 아니다. **이어
+    // 볼 글자 자리도 댄다**(moai-m81b) — 편지를 통째로 내던 `inbox <id>` 는 그 출력도 에이전트의 상한에서 가운데가 빠졌다.
+    // 자리는 실린 글자 수이고, 거기서부터 넘겨 보면 남은 글자가 하나도 안 빠지고 겹치지도 않는다.
+    let cut = format!("moai inbox {} --from ", ids[0]);
     assert!(said.contains("여기서 잘랐다") && said.contains(&cut), "자른 편지를 id 로 안 댔다");
-    let whole = ok(s.path(), &["inbox", &ids[0], "--as", "claude-sess0003"]);
-    assert!(whole.contains(&big) && !whole.contains("큰 편지 1"), "그 편지 하나를 통째로 안 보였다");
+    let at: usize = said.split(&cut).nth(1).and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap();
+    let context = json_text(&out, "additionalContext");
+    let kept: usize = context.lines().filter_map(|l| l.strip_prefix("    ")).map(|l| l.matches('가').count()).sum();
+    assert_eq!(at, kept, "자른 표가 실린 글자와 다른 자리를 댔다");
+    let (rest, _) = pages_of(s.path(), &ids[0], "claude-sess0003", at);
+    assert_eq!(rest, "가".repeat(10_000 - at), "자른 자리부터 나머지를 안 보였다");
+    assert!(
+        !ok(s.path(), &["inbox", &ids[0], "--as", "claude-sess0003"]).contains("큰 편지 1"),
+        "그 편지 하나가 아니다"
+    );
     // 남은 수는 다음 한 통을 댄다 — 그 길은 그 한 통만 읽음으로 옮긴다.
     let next = format!("moai inbox {} --ack --as claude-sess0003", ids[1]);
     // 끝 300 바이트는 바이트로 자른다 — `&said[..]` 로 자르면 이 단언이 서는 바로 그 회귀에서 그 자리가 '가' 가운데라,
@@ -25724,9 +25794,14 @@ fn a_codex_stop_holds_letters_inside_codexs_limit() {
     // 다시 볼 길은 머리 줄에도 있다 — 자른 표가 그 편지를 대는지는 그 표가 선 끝 줄로 잰다(남은 편지가 없어 그 뒤에
     // 서는 줄이 없다).
     let cut = said.lines().last().unwrap_or_default();
-    let again = format!("moai inbox {id} --as codex-01a107b4");
+    let again = format!("moai inbox {id} --from ");
     assert!(cut.contains(&again), "자른 자리가 다시 볼 길을 안 댔다 — {cut}");
     assert!(said.len().div_ceil(4) <= 2_500, "Codex 의 기본 상한을 넘겼다 — {} 바이트", said.len());
+    // 그 자리에서 넘겨 보면 나머지가 그대로다(moai-m81b) — Codex 의 붙듦은 바이트로 자르니 자리도 그 자로 서야 한다.
+    let at: usize = cut.split(&again).nth(1).and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap();
+    let kept: usize = said.lines().filter_map(|l| l.strip_prefix("    ")).map(|l| l.matches('가').count()).sum();
+    assert_eq!(at, kept, "자른 표가 실린 글자와 다른 자리를 댔다");
+    assert_eq!(pages_of(s.path(), &id, "codex-01a107b4", at).0, "가".repeat(3_400 - at), "나머지를 안 보였다");
 
     let ev = event(&s, "sess0009-iiii");
     hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));

@@ -498,6 +498,7 @@ IDEA
   moai inbox --ack              the same, and marks them read
   moai inbox --all              the ones already read too
   moai inbox <id>               that one letter, read or not (--ack marks it)
+  moai inbox <id> --from 8000   the same letter, past the first 8000 characters
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
 
   **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
@@ -510,8 +511,16 @@ IDEA
   by themselves: UserPromptSubmit and Stop load the letters for the session
   into the conversation and mark them read, so an agent with the hooks
   installed rarely needs this command. A letter too long for one load is cut,
-  and the cut names `moai inbox <id>` for the whole of it. An id or --all
-  shows a read letter again until
+  and the cut names `moai inbox <id> --from <n>` for the rest of it.
+
+  **One letter comes a page at a time.** With an id, a body longer than about
+  24 KB stops there and the last line names `moai inbox <id> --from <n>` for
+  the next part, so an agent's own output cap (30,000 characters in Claude
+  Code, 10,000 tokens in Codex) does not cut its middle out. <n> counts the
+  characters of the body as shown, from 0. --json is not paged: it gives the
+  whole letter, --from or not.
+
+  An id or --all shows a read letter again until
   `moai agents` sweeps it, mail_read_days after it was read (7 unless
   .moai/config.toml says otherwise; 0 keeps it for good). An unread letter is
   never swept. A letter marked returned is one you sent: its recipient left
@@ -1119,11 +1128,18 @@ pub struct SendArgs {
 
 /// `moai inbox`(moai-h8tn). id 를 주면 그 편지 하나다(moai-54yc.v70) — 훅이 자른 편지를 다시 볼 길이 함 전체를 내던
 /// `--all` 하나였다. 기다림과는 안 묶는다 — 이미 선 편지 하나를 보는 부름이다.
+///
+/// **편지 하나는 쪽으로 넘겨 본다**(2026-10-05 사용자 결정, moai-m81b) — 그 길도 편지를 통째로 내 에이전트의 출력 상한
+/// (Claude Code 의 Bash 3만 자, Codex 0.160 의 1만 토큰)에서 가운데가 다시 빠졌다. `--from` 은 `mv`·`defer` 의 "본 칸" 과
+/// 이름이 같지만 받는 값이 다르다 — 여기서는 글자 자리다.
 #[derive(Args, Debug)]
 pub struct InboxArgs {
     /// One letter by its id, read or not
     #[arg(value_name = "id", conflicts_with = "wait")]
     pub id: Option<String>,
+    /// The body from this character, counted from 0
+    #[arg(long, value_name = "n", requires = "id")]
+    pub from: Option<usize>,
     /// Mark what is shown as read
     #[arg(long)]
     pub ack: bool,

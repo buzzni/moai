@@ -279,6 +279,18 @@ fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> 
     format!("\n\n{}", crate::style::plain(&crate::view::mail::letter(lang, zone, s).join("\n")))
 }
 
+/// [`letter_block`] 의 본문을 `to` 글자까지만 — 자르는 편지를 글자 자리에서 끊는다(moai-m81b). 자른 표가 대는 자리와
+/// `moai inbox <id> --from <n>` 이 잇는 자리가 같은 자([`crate::view::mail::Body`])로 서야 한다.
+fn block_to(
+    lang: Lang,
+    zone: &crate::tz::Zone,
+    s: &crate::mail::Stored,
+    body: &crate::view::mail::Body,
+    to: usize,
+) -> String {
+    format!("\n\n{}", crate::style::plain(&crate::view::mail::part(lang, zone, s, body, 0, to).join("\n")))
+}
+
 /// 이벤트 하나가 에이전트에게 글을 싣는 칸과 그 자리 — 말씨와 이벤트가 정한다([`Carry::of`]).
 ///
 /// **이 표 하나를 셋이 읽는다**(moai-dp35) — 편지가 드는 자리(`cmd::hook` 의 `deliver`), 훅의 답(`cmd::hook` 의
@@ -443,6 +455,10 @@ pub fn deliverable(
 /// 편지 하나를 다시 볼 길을 id 로 댄다(moai-54yc.v70). 함 전체를 내는 `inbox --all` 을 대던 판은 함이 크면 Codex 가 긴
 /// 출력의 가운데를 빼, 자른 편지의 나머지가 다시 안 닿았다. 머리 줄과 남은 수는 자르지 않는다.
 ///
+/// **자른 표는 이어 볼 글자 자리도 댄다**(moai-m81b) — 편지를 통째로 내는 `inbox <id>` 를 대던 판은 그 출력도 에이전트의
+/// 상한에서 가운데가 빠졌다. 그래서 자르는 편지는 본문의 글자 자리에서 끊고([`block_to`]), 표가 그 자리를 `--from` 으로
+/// 댄다. 머리 줄조차 안 드는 드문 자리만 글 가운데서 자르고 처음부터(`--from 0`) 대게 한다.
+///
 /// **내미는 명령은 모두 `--as <나>` 를 단다**(리뷰 moai-ew4o.q9f) — 셸에서 제 장을 못 찾는 세션(`CODEX_THREAD_ID` 가
 /// 없는 Codex)이 맨 `moai inbox` 를 치면 누구인지 몰라 멈춘다. 머리 줄만 달고 남은 수·자른 자리의 줄은 안 달던 판은
 /// 한 덩이 안에서 두 길을 댔다.
@@ -470,20 +486,33 @@ pub fn letters(
     if size(&body) <= fits {
         return Some(format!("{head}{body}{tail}"));
     }
-    let cut = |id: &str| format!("\n{}", fill(say(lang, "hook.letter_cut"), &[("id", id), ("me", me)]));
+    let cut = |id: &str, at: usize| {
+        let at = at.to_string();
+        format!("\n{}", fill(say(lang, "hook.letter_cut"), &[("id", id), ("at", &at), ("me", me)]))
+    };
     // 자르는 자리가 든 편지 — 앞에서부터 그 자로 재어 처음 넘는 편지다. 고르는 쪽이 혼자 넘치는 편지는 혼자 고르니
     // ([`deliverable`]) 대개 그 한 통이다. id 는 꼴이 하나라([`crate::mail::is_id`]) 어느 id 로 재도 자른 표의 길이가 같다.
-    let keep = fits.saturating_sub(size(&cut(&first.id)));
+    // 자리는 실은 편지의 가장 긴 본문(글자)으로 잰다 — 어느 편지의 어느 자리를 대도 그 수보다 길지 않다.
+    let widest = delivered.iter().map(|s| crate::view::mail::Body::of(s).len()).max().unwrap_or(0);
+    let keep = fits.saturating_sub(size(&cut(&first.id, widest)));
     let mut used = 0;
-    let cut_in = delivered
+    let at = blocks
         .iter()
-        .zip(&blocks)
-        .find(|(_, b)| {
+        .position(|b| {
             used += size(b);
             used > keep
         })
-        .map_or(first, |(s, _)| s);
-    Some(format!("{head}{}{}{tail}", cut_to(&body, keep, room.unit), cut(&cut_in.id)))
+        .unwrap_or(0);
+    let cut_in = &delivered[at];
+    // 앞의 편지는 다 든다 — 처음 넘는 편지가 이것이다. 그 편지만 본문의 글자 자리에서 끊는다.
+    let before = blocks[..at].concat();
+    let whole = crate::view::mail::Body::of(cut_in);
+    let shown = |to: usize| size(&before) + size(&block_to(lang, zone, cut_in, &whole, to)) <= keep;
+    let (kept, from) = match whole.reach(0, shown) {
+        Some(to) => (format!("{before}{}", block_to(lang, zone, cut_in, &whole, to)), to),
+        None => (cut_to(&body, keep, room.unit).to_string(), 0),
+    };
+    Some(format!("{head}{kept}{}{tail}", cut(&cut_in.id, from)))
 }
 
 /// `s` 의 앞에서 그 자(`unit`)로 `max` 까지 — 글자 가운데서 안 자른다.
@@ -14936,9 +14965,12 @@ mod tests {
         assert!(said.ends_with(&left), "남은 수를 잘랐다");
         assert!(left.contains("moai inbox 20261004-061203-00000002 --ack --as w1"), "다음 한 통을 안 댔다 — {left}");
         // **자른 표는 그 편지 하나를 id 로 댄다**(moai-54yc.v70) — 함 전체를 내는 `--all` 이 아니다. 남은 수 바로 앞에 선
-        // 그 표의 줄로 잰다. 머리 줄도 함 전체가 아니라 한 통을 다시 보는 길을 댄다.
+        // 그 표의 줄로 잰다. 머리 줄도 함 전체가 아니라 한 통을 다시 보는 길을 댄다. **이어 볼 자리는 실은 글자 수다**
+        // (moai-m81b) — 본문이 한 글자라 실린 글자를 세면 그 자리다.
         let cut = said[..said.len() - left.len()].trim_end().lines().last().unwrap_or_default();
-        assert!(cut.contains("moai inbox 20261004-061203-00000001 --as w1"), "자른 편지를 id 로 안 댔다 — {cut}");
+        let at = said.matches('가').count();
+        let named = format!("moai inbox 20261004-061203-00000001 --from {at} --as w1");
+        assert!(at > 0 && cut.contains(&named), "자른 편지와 이어 볼 자리를 안 댔다 — {cut}");
         assert!(!said.contains("--all"), "함 전체를 내는 길을 댔다 — {said}");
         // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다. 자리는 턴
         // 머리의 칸이 실제로 내는 것으로 잰다 — 손으로 지은 칸으로 재면 그 칸의 자리가 바뀌어도 여기는 모른다(리뷰
@@ -14961,14 +14993,43 @@ mod tests {
     fn the_cut_names_the_letter_it_falls_in() {
         let utc = crate::tz::Zone::utc();
         let whole = stored("20261004-061203-00000001", "w1", "x".repeat(1_000));
-        let long = stored("20261004-061203-00000002", "w1", "y".repeat(20_000));
+        let long = stored("20261004-061203-00000002", "w1", "=".repeat(20_000));
         // 자르는 자리는 가운데 편지다 — 끝의 편지를 대는 판도 지나가지 않게(리뷰 moai-54yc.vqe).
         let after = stored("20261004-061203-00000003", "w1", "z".into());
         let said = letters("w1", &[whole, long, after], &[], Lang::En, &utc, Room::CONTEXT).unwrap();
         assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다");
         assert!(said.contains(&"x".repeat(1_000)), "앞의 편지를 잘랐다");
         let cut = said.trim_end().lines().last().unwrap_or_default();
-        assert!(cut.contains("moai inbox 20261004-061203-00000002 --as w1"), "자른 편지를 안 댔다 — {cut}");
+        // 이어 볼 자리는 그 편지에서 실린 글자 수다 — 앞의 편지의 글자를 더해 세면 `inbox --from` 이 그만큼 건너뛴다(moai-m81b).
+        let at = said.matches('=').count();
+        let named = format!("moai inbox 20261004-061203-00000002 --from {at} --as w1");
+        assert!(at > 0 && cut.contains(&named), "자른 편지와 그 안의 자리를 안 댔다 — {cut}");
+    }
+
+    /// **자른 표가 댄 자리에서 이어 보면 빠지는 글자도 겹치는 글자도 없다**(moai-m81b) — 자르는 쪽과 넘겨 보는 쪽이 같은
+    /// 자([`crate::view::mail::Body`])로 센다. 줄 사이에서 잘렸으면 그 줄바꿈은 실린 쪽의 것이다. 본문은 줄이 여럿이고
+    /// 한국어와 영어가 섞였으며, 걷히는 제어문자(`\r`·ESC)가 든다 — 자리를 날 본문으로 세면 그 수만큼 어긋난다. 두 자로 잰다.
+    #[test]
+    fn the_cut_and_the_page_meet_at_one_place() {
+        let utc = crate::tz::Zone::utc();
+        let body: String = (0..2_000).map(|k| format!("\u{1b}[31m{k:05} 가나다 abc\r\n")).collect();
+        let s = stored("20261004-061203-00000001", "w1", body.clone());
+        let shown = crate::text::sanitize(&body);
+        for room in [Room::CONTEXT, CODEX_HOLD] {
+            let said = letters("w1", std::slice::from_ref(&s), &[], Lang::En, &utc, room).unwrap();
+            let cut = said.trim_end().lines().last().unwrap_or_default();
+            let at: usize = cut.split("--from ").nth(1).and_then(|r| r.split(' ').next()).unwrap().parse().unwrap();
+            // 실린 본문 — 머리 줄 둘(보낸 이·제목) 뒤의 네 칸 들여 쓴 줄들이다.
+            let lines: Vec<&str> = said.lines().filter_map(|l| l.strip_prefix("    ")).collect();
+            let kept = lines.join("\n");
+            let rest = crate::view::mail::page(Lang::En, &utc, &s, "w1", at, usize::MAX);
+            let rest: Vec<&str> = rest.iter().filter_map(|l| l.strip_prefix("    ")).collect();
+            let joint = if shown.chars().nth(kept.chars().count()) == Some('\n') { "\n" } else { "" };
+            // 본문 끝의 줄바꿈 하나는 어느 쪽에도 안 보인다 — 줄로 그리는 꼴(`lines`)이 늘 그랬다.
+            let whole = shown.strip_suffix('\n').unwrap_or(&shown);
+            assert_eq!(format!("{kept}{joint}{}", rest.join("\n")), whole, "{room:?}: 이어 본 글이 본문과 다르다");
+            assert_eq!(at, kept.chars().count() + joint.len(), "{room:?}: 자리가 실린 글과 다르다");
+        }
     }
 
     /// **편지 밖의 글은 [`LETTERS_FRAME`] 안에 든다** — 머리 줄과 남은 수가 그 몫을 넘으면 [`deliverable`] 이 함께
@@ -15004,16 +15065,17 @@ mod tests {
         let mk = |id: &str, body: String| stored(id, me, body);
         let korean = mk("20261005-041347-00000001", "가".repeat(3_400));
         let said = letters(me, std::slice::from_ref(&korean), &[], Lang::Ko, &utc, CODEX_HOLD).unwrap();
-        let cut = |lang: Lang, id: &str| fill(say(lang, "hook.letter_cut"), &[("id", id), ("me", me)]);
+        // 자른 표의 앞머리 — 이어 볼 자리(`--from`)는 실린 글자 수라 여기서는 안 견준다(moai-m81b).
+        let cut = |id: &str| format!("moai inbox {id} --from ");
         assert!(said.len() <= CODEX_HOLD.size, "Codex 의 선을 넘겼다 — {} 바이트", said.len());
-        assert!(said.contains(&cut(Lang::Ko, &korean.id)), "자른 자리를 안 댔다");
+        assert!(said.contains(&cut(&korean.id)), "자른 자리를 안 댔다");
         // 칸 하나로 재면 같은 편지가 자르지 않고 지나간다 — 이 시험이 가르는 것이 그 차이다.
         let whole = letters(me, std::slice::from_ref(&korean), &[], Lang::Ko, &utc, Room::CONTEXT).unwrap();
-        assert!(whole.len() > CODEX_HOLD.size && !whole.contains(&cut(Lang::Ko, &korean.id)), "시험의 편지가 작다");
+        assert!(whole.len() > CODEX_HOLD.size && !whole.contains(&cut(&korean.id)), "시험의 편지가 작다");
         // 영어 7천 자는 7천 바이트다 — UTF-16 셋에 하나로 어림하면 잘린다.
         let english = mk("20261005-041347-00000002", "x".repeat(7_000));
         let said = letters(me, std::slice::from_ref(&english), &[], Lang::En, &utc, CODEX_HOLD).unwrap();
-        assert!(said.len() <= CODEX_HOLD.size && !said.contains(&cut(Lang::En, &english.id)), "드는 편지를 잘랐다");
+        assert!(said.len() <= CODEX_HOLD.size && !said.contains(&cut(&english.id)), "드는 편지를 잘랐다");
         // 함께 고르는 것도 바이트로 잰다 — 둘째 편지는 다음 붙듦을 기다린다.
         let both = [korean.clone(), mk("20261005-041347-00000003", "나".repeat(1_000))];
         assert_eq!(

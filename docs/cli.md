@@ -2331,6 +2331,7 @@ Arguments:
   [id]  One letter by its id, read or not
 
 Options:
+      --from <n>             The body from this character, counted from 0
       --ack                  Mark what is shown as read
       --all                  The letters already read too
       --wait <seconds>       Wait up to this many seconds for a letter to come
@@ -2346,6 +2347,7 @@ Options:
   moai inbox --ack              the same, and marks them read
   moai inbox --all              the ones already read too
   moai inbox <id>               that one letter, read or not (--ack marks it)
+  moai inbox <id> --from 8000   the same letter, past the first 8000 characters
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
 
   **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
@@ -2358,8 +2360,16 @@ Options:
   by themselves: UserPromptSubmit and Stop load the letters for the session
   into the conversation and mark them read, so an agent with the hooks
   installed rarely needs this command. A letter too long for one load is cut,
-  and the cut names `moai inbox <id>` for the whole of it. An id or --all
-  shows a read letter again until
+  and the cut names `moai inbox <id> --from <n>` for the rest of it.
+
+  **One letter comes a page at a time.** With an id, a body longer than about
+  24 KB stops there and the last line names `moai inbox <id> --from <n>` for
+  the next part, so an agent's own output cap (30,000 characters in Claude
+  Code, 10,000 tokens in Codex) does not cut its middle out. <n> counts the
+  characters of the body as shown, from 0. --json is not paged: it gives the
+  whole letter, --from or not.
+
+  An id or --all shows a read letter again until
   `moai agents` sweeps it, mail_read_days after it was read (7 unless
   .moai/config.toml says otherwise; 0 keeps it for good). An unread letter is
   never swept. A letter marked returned is one you sent: its recipient left

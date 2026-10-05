@@ -1052,11 +1052,14 @@
   "mail.returned_head": "{id}  되돌아왔다 - {to} 가 읽기 전에 떠났다  {at}",
   "mail.read_mark": "읽음",
   "mail.in_reply": "{id} 에 답한다",
+  "mail.page_from": "[{len} 글자 중 앞의 {at} 글자 다음부터]",
+  "mail.page_more": "[{left} 글자가 더 있다 — 다음 쪽은 `moai inbox {id} --from {at} --as {me}` 가 보인다]",
   "warn.mail_garbled": "못 읽는 편지: {path} — {why}",
   "warn.agents_garbled": "못 읽는 출석 파일: {path} — {why}",
   "refuse.mail_subject": "편지에는 제목이 있어야 한다 — {max}자까지의 한 줄이다",
   "refuse.mail_id": "`{id}` 는 편지 id 가 아니다 — 20261004-061203-0k3f9x2a 꼴이다(`moai inbox` 가 보인다)",
   "refuse.mail_no_letter": "{me} 에게 온 편지 {id} 가 없다 — 남의 편지이거나, 읽은 지 오래되어 걷혔다(`moai inbox --all --as {me}` 가 있는 것을 보인다)",
+  "refuse.mail_from": "편지 {id} 의 본문은 {len} 글자라 `--from {from}` 뒤로 보일 것이 없다(그만큼 건너뛴다)",
   "refuse.mail_body_large": "본문이 {n} 바이트다 — 편지는 {max} 까지 든다. 긴 것은 저장소의 파일로 두고 편지에서 그 자리를 댄다",
   "refuse.mail_who": "누구인가? `--as <이름>` 을 주거나 MOAI_AGENT 를 세우거나 먼저 `moai hello` 로 등록한다. 셸에 CODEX_THREAD_ID 가 없는 Codex 세션은 훅이 지어 준 이름(`codex-` 와 여덟 글자, 첫 맥락에 적혀 있다)을 댄다",
   "refuse.mail_name": "`{name}` 는 에이전트 이름이 될 수 없다 — 영숫자와 `.`·`_`·`-`, 64자까지, `.` 으로 시작하지 않는다. any-idle-worker 는 받는 이 자리에만 선다",
@@ -1077,5 +1080,5 @@
   "hook.you_are": "이 Codex 세션은 `moai agents` 에서 `{name}` 이다. `moai` 가 누구인지 모른다고 하면 `moai hello`·`moai inbox`·`moai send` 에 `--as {name}` 을 준다.",
   "hook.letters": "{me} 에게 온 편지 {n}통. 지금 읽음으로 옮겼다 — `moai inbox <id> --as {me}` 가 한 통을 다시 보인다. 답은 `moai send <보낸 이> '<제목>' --reply-to <id> --as {me} -b -` 로 하고, 결정은 지금처럼 그 이슈에 노트로 남긴다.",
   "hook.letters_left": "{n}통이 더 기다린다 — `moai inbox {next} --ack --as {me}` 가 다음 한 통을 읽거나, 다음 턴이 싣는다.",
-  "hook.letter_cut": "[훅이 한 번에 싣는 양에 맞춰 여기서 잘랐다 — 편지 전체는 `moai inbox {id} --as {me}` 가 보인다]"
+  "hook.letter_cut": "[훅이 한 번에 싣는 양에 맞춰 여기서 잘랐다 — 나머지는 `moai inbox {id} --from {at} --as {me}` 가 보인다]"
 }
