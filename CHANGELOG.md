@@ -22,6 +22,9 @@ does not tag — see `CONTRIBUTING.md`.
   `.gitattributes` and the merge driver are left alone — there is nothing for
   git to merge. `--tracking commit` is what `init` has always done. Run again,
   `init` asks git which one stands rather than storing it, and refuses to switch.
+  `moai status` and `init --check` follow the same answer: a tracker kept out
+  of git is never told it lacks `.gitattributes` rules or an AGENTS.md block,
+  and a line missing from `.git/info/exclude` is named as that file's.
 - **`moai init --guide file` writes the agent guide to `.moai/guide.md`** and
   leaves only a few lines in the AGENTS.md block that point at it — with
   `moai init --print` as the way to the same text where the file is missing.

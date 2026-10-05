@@ -346,15 +346,19 @@ fn exclude_file(root: &Path) -> Option<std::path::PathBuf> {
 /// 그쪽이고, 그 밖의 자리(`info/exclude`, 사람의 전역 무시 파일)는 이 클론의 것으로 읽는다. git 저장소가
 /// 아니면 지금까지의 `init` 처럼 커밋으로 친다.
 fn tracking_of(root: &Path) -> Tracking {
-    let Ok(said) = crate::git::run(root, &["check-ignore", "-v", ".moai/config.toml"]) else {
-        return Tracking::Commit;
-    };
-    let source = said.split(':').next().unwrap_or_default();
-    match source {
+    tracking_within(root, None).unwrap_or(Tracking::Commit)
+}
+
+/// [`tracking_of`] 를 한도 안에서 — 마감을 넘기면 `None`(모른다). git 이 실패한 것(저장소가 아니다, 무시되지 않는다
+/// — `check-ignore` 는 안 걸리면 1 로 끝난다)은 커밋으로 친다.
+fn tracking_within(root: &Path, budget: Option<std::time::Duration>) -> Option<Tracking> {
+    let said = crate::git::run_within(root, &["check-ignore", "-v", ".moai/config.toml"], budget)?;
+    let Ok(said) = said else { return Some(Tracking::Commit) };
+    Some(match said.split(':').next().unwrap_or_default() {
         "" => Tracking::Commit,
         ".gitignore" => Tracking::Gitignore,
         _ => Tracking::Exclude,
-    }
+    })
 }
 
 /// 플래그끼리 부딪힌 까닭 — 화면과 플래그가 같은 말을 한다.
@@ -556,19 +560,71 @@ fn inside(root: &Path, path: &Path) -> Option<String> {
 ///
 /// **읽는 자는 [`ensure_lines`] 와 같다**([`crate::held::read_inside`], moai-x0o7) — `mkfifo .gitignore` 하나로
 /// `moai status` 가 멈추던 자리다. 안 읽기로 한 파일도 못 읽은 파일이라 말하지 않는다.
-pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>)> {
-    let home = crate::held::Home::of(root);
-    DOTFILES
+pub fn dotfile_gaps(root: &Path, budget: Option<std::time::Duration>) -> Vec<(&'static str, &'static str, Vec<String>)> {
+    dotfiles_for(root, budget)
         .into_iter()
-        .filter(|(name, ..)| !root.join(name).is_symlink())
-        .filter_map(|(name, block, kind)| {
-            let Ok(text) = read_held(&root.join(name), &home) else { return None };
+        .filter(|d| !d.path.is_symlink())
+        .filter_map(|d| {
+            let Ok(text) = read_held(&d.path, &crate::held::Home::of(&d.home)) else { return None };
             let text = text.unwrap_or_default();
-            let block = block(root);
-            let missing: Vec<String> = missing_rules(&text, &block).into_iter().map(str::to_string).collect();
-            (!missing.is_empty()).then_some((name, kind, missing))
+            let missing: Vec<String> = missing_rules(&text, &d.block).into_iter().map(str::to_string).collect();
+            (!missing.is_empty()).then_some((d.name, d.kind, missing))
         })
         .collect()
+}
+
+/// `init` 이 맞추는 딸린 파일 하나 — 이름(사람에게 대는 글), 자리, 그 안에 서야 할 블록, 알림의 갈래.
+struct Dotfile {
+    name: &'static str,
+    path: std::path::PathBuf,
+    /// 읽을 때 견줄 뿌리. `.git/info/exclude` 는 제 디렉터리다 — 체크아웃을 뿌리로 재면 읽는 자가 `.git/` 안이라
+    /// 거절한다([`crate::held::Unheld::IntoGit`]). 쓰는 길([`ensure_lines`])도 그 자리를 뿌리로 쓴다.
+    home: std::path::PathBuf,
+    block: String,
+    kind: &'static str,
+}
+
+/// 이 저장소에서 `init` 이 맞추는 딸린 파일들 — **추적 방식에 따라 갈린다**(moai-zynt.zhr). git 밖에 둔 트래커는
+/// 병합 규칙이 할 일이 없어 `.gitattributes` 를 안 재고, 무시 블록은 고른 자리(`.git/info/exclude`·`.gitignore`)에서
+/// 트래커를 막는 줄까지 함께 잰다. 추적 방식은 적어 두지 않고 그때마다 git 에 묻는다([`tracking_of`]) — 쓰는 길
+/// ([`run`])과 비추는 길이 같은 답을 받는다.
+///
+/// `budget` 은 git 을 기다리는 한도다 — 알림만 주고(`moai status`·훅의 보드), 마감 안에 답이 없으면 **아무 파일도
+/// 안 잰다**: 모르는 것을 커밋으로 치면 git 밖의 트래커에 `.gitattributes` 를 조른다. 죽은 마운트에 선 프로젝트
+/// 하나가 한눈 보기를 붙들던 자리(moai-59k3.u09)라 머지 드라이버의 알림과 같은 한도를 쓴다.
+fn dotfiles_for(root: &Path, budget: Option<std::time::Duration>) -> Vec<Dotfile> {
+    let local = || format!("{}{LOCAL_IGNORE}", gitignore_for(root));
+    let Some(tracking) = tracking_within(root, budget) else { return Vec::new() };
+    match tracking {
+        Tracking::Commit => DOTFILES
+            .into_iter()
+            .map(|(name, block, kind)| Dotfile {
+                name,
+                path: root.join(name),
+                home: root.to_path_buf(),
+                block: block(root).into_owned(),
+                kind,
+            })
+            .collect(),
+        Tracking::Gitignore => vec![Dotfile {
+            name: ".gitignore",
+            path: root.join(".gitignore"),
+            home: root.to_path_buf(),
+            block: local(),
+            kind: "gitignore_rules",
+        }],
+        // 공통 디렉터리를 못 찾으면 잴 자리가 없다 — 말하지 않는다. 읽는 길이라 `info/` 를 만들지 않는다.
+        Tracking::Exclude => git_dir(root)
+            .map(|dir| Dotfile {
+                name: ".git/info/exclude",
+                path: dir.join("info").join("exclude"),
+                home: dir.join("info"),
+                block: local(),
+                kind: "exclude_rules",
+            })
+            .into_iter()
+            .collect(),
+    }
 }
 
 /// **링크인** 딸린 파일의 이름(moai-yke5). git 은 2.32 부터 체크아웃 안의 `.gitattributes`·`.gitignore` 가
@@ -577,8 +633,8 @@ pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>
 ///
 /// 링크인지는 **따라가지 않고** 잰다(`Path::is_symlink`) — 못 재면 링크가 아니고, 그 파일은 읽는 길이 제
 /// 말로 댄다.
-pub fn linked_dotfiles(root: &Path) -> Vec<&'static str> {
-    DOTFILES.into_iter().map(|(name, ..)| name).filter(|name| root.join(name).is_symlink()).collect()
+pub fn linked_dotfiles(root: &Path, budget: Option<std::time::Duration>) -> Vec<&'static str> {
+    dotfiles_for(root, budget).into_iter().filter(|d| d.path.is_symlink()).map(|d| d.name).collect()
 }
 
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
@@ -606,7 +662,8 @@ pub(crate) fn away_root(root: &Path, chdir: bool) -> Option<String> {
 /// **링크인 파일은 따로 선다**([`linked_dotfiles`]) — 고칠 길이 `moai init` 이 아니다. 둘 다 링크여도
 /// **알림은 하나다**(리뷰) — 파일마다 세우면 같은 머리가 두 번 서고, 갈래로 알림을 찾는 쪽은 하나를 잃는다.
 pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
-    let (gaps, linked) = (dotfile_gaps(root), linked_dotfiles(root));
+    let budget = Some(crate::cmd::merge_driver::PROBE_BUDGET);
+    let (gaps, linked) = (dotfile_gaps(root, budget), linked_dotfiles(root, budget));
     let away = if gaps.is_empty() { None } else { away_root(root, chdir) };
     gaps.into_iter()
         .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, missing, away.as_deref()))
@@ -640,8 +697,8 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let (state, text) = agents_state(&root).map_err(|fell| Fail::new(agents_unread(ctx.lang(), &root, &fell)))?;
     // 빠진 딸린 파일 규칙도 같은 자리에서 본다(moai-2f99) — `--check` 는 "무엇이 낡았나" 를 묻는
     // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다.
-    let gaps = dotfile_gaps(&root);
-    let linked = linked_dotfiles(&root);
+    let gaps = dotfile_gaps(&root, None);
+    let linked = linked_dotfiles(&root, None);
     // **`moai init` 을 대기 전에 그것이 여기 서는지 묻는다**(moai-nppo). 딸린 워크트리에서는 안 선다
     // (moai-mz0e 가 거절을 세웠다) — 그 갈래를 모르던 판은 여기서 `moai init` 을 세 줄로 권하고,
     // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
@@ -698,6 +755,8 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
             Stale::Binary => say(lang, "init.block_stale_binary").to_string(),
             Stale::Edited => say(lang, "init.block_stale_edited").to_string(),
         },
+        // git 밖에 둔 트래커에서 블록이 없는 것은 `init` 이 일부러 안 쓴 것이다 — "심는다" 고 하면 거짓말이다.
+        BlockState::Missing if !tracking_of(&root).tracked() => say(lang, "init.block_missing_local").to_string(),
         BlockState::Missing => say(lang, "init.block_missing").to_string(),
     }];
     // **규칙끼리는 쉼표로 가른다** — `.gitattributes` 의 규칙은 제 안에 띄어쓰기를 여럿 들어
@@ -1471,6 +1530,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let (attributes, ignored) = (attributes_for(&root), gitignore_for(&root));
     let ignored: std::borrow::Cow<str> = match plan.tracking {
         Tracking::Commit => ignored,
+        // 비추는 길([`dotfiles_for`])이 재는 블록과 같은 글이다.
         Tracking::Exclude | Tracking::Gitignore => format!("{ignored}{LOCAL_IGNORE}").into(),
     };
     let ignore_path = match plan.tracking {
@@ -2030,8 +2090,8 @@ mod tests {
         let linked = |to: &str, outside: bool| Added::Linked { to: to.to_string(), outside };
         assert_eq!(ensure_lines(&root.join(".gitignore"), GITIGNORE, en), linked("conf/ignore", false));
         assert_eq!(std::fs::read_to_string(root.join("conf/ignore")).unwrap(), "target/\n", "링크 너머에 썼다");
-        assert_eq!(linked_dotfiles(&root), vec![".gitignore"]);
-        assert!(dotfile_gaps(&root).is_empty(), "링크를 빠진 줄로 말했다: {:?}", dotfile_gaps(&root));
+        assert_eq!(linked_dotfiles(&root, None), vec![".gitignore"]);
+        assert!(dotfile_gaps(&root, None).is_empty(), "링크를 빠진 줄로 말했다: {:?}", dotfile_gaps(&root, None));
         let notes = dotfile_notice(&root, false);
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].kind, "dotfile_linked");

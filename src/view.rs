@@ -945,6 +945,8 @@ fn says(w: &Warning, screen: Screen) -> String {
         // (`.moai/journal.jsonl  text eol=lf merge=union`) 한 줄에 이어 붙이면 어디서 한 줄이
         // 끝나는지 안 보인다.
         "gitignore_rules" => one(say(lang, "warn.gitignore_rules")),
+        // git 밖에 둔 트래커의 무시 줄(moai-zynt.zhr) — 막는 것이 트래커까지라 결과가 `.gitignore` 의 것과 다르다.
+        "exclude_rules" => one(say(lang, "warn.exclude_rules")),
         "gitattributes_rules" => one(say(lang, "warn.gitattributes_rules")),
         // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr) — 안 심은 것은 밑의
         // `merge_driver_absent` 가 제 낱말로 말한다. 여기는 심어 놓고 그 자리가 빈 판이고,
