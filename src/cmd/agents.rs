@@ -57,9 +57,9 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
         return super::json_line(&Listed { agents: &agents, swept: &names });
     }
     let lang = ctx.lang();
-    // **걷은 까닭을 갈라 말한다**(moai-dhxm) — 프로세스가 죽은 장은 편지가 보낸 이에게 돌아갔고, 하루 넘게 아무것도 안 적어
-    // 걷은 장(Codex 의 장, 다른 기계의 장)은 그 함이 남아 그 세션을 기다린다. 다른 기계에서 아직 돌 수 있는 장을 "그
-    // 프로세스가 없다" 로 대지 않는다.
+    // **걷은 까닭을 갈라 말한다**(moai-dhxm) — 프로세스가 죽은 장과 하루 넘게 아무것도 안 적은 다른 기계의 장은 그 함의
+    // 편지가 보낸 이에게 돌아갔고([`mail::sweep`]), 하루 넘게 안 적힌 Codex 의 장은 그 함이 남아 그 세션을 기다린다.
+    // 다른 기계에서 아직 돌 수 있는 장을 "그 프로세스가 없다" 로 대지 않는다.
     let mut out: Vec<String> = swept
         .iter()
         .map(|s| {
