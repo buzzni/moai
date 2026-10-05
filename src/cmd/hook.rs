@@ -11,9 +11,10 @@
 //! ## 세 에이전트의 말씨
 //!
 //! **판정은 하나고 말씨만 셋이다**(moai-u5wr). 들어온 것은 [`arrived`] 가 Claude 의 꼴([`Input`])과 이벤트로 옮기고,
-//! 나가는 것은 [`answer`] 가 그 에이전트의 꼴로 옮긴다 — 그 사이는 `--dialect` 를 모른다(출석만 안다,
-//! [`attendee`]·[`rest`]). 꼴은 2026-10-04 에 사람이 띄운 대화형 codex 0.160·agy 1.2.16 에서 기록했다(moai-u5wr.amg
-//! 노트, `tests/hooks/`).
+//! 나가는 것은 [`answer`] 가 그 에이전트의 꼴로 옮긴다 — 그 사이의 판정(규칙·보드·닫기 물음)은 `--dialect` 를 모른다.
+//! 말씨를 읽는 것은 셋뿐이다: 출석([`attendee`]·[`rest`]), 편지가 드는 자리와 그 답의 종류(그 말씨의 칸,
+//! [`crate::hook::Carry::of`]), Codex 세션에 제 장의 이름을 대는 줄이다. 꼴은 2026-10-04 에 사람이 띄운 대화형 codex
+//! 0.160·agy 1.2.16 에서 기록했다(moai-u5wr.amg 노트, `tests/hooks/`).
 //!
 //! - **Codex** 는 들고 나는 꼴이 Claude 와 같다. 다른 것은 `apply_patch` 하나다 — 패치가 고치는 파일마다
 //!   `Edit` 한 번으로 접는다(셸로 친 `apply_patch <<'EOF'` 도). Codex 는 셸·`apply_patch`·MCP 부름에만 훅을
@@ -178,9 +179,9 @@ fn decide(
 ) -> Option<Decision> {
     let cwd = std::env::current_dir().ok()?;
     // **`Stop` 없이 끝난 턴은 출석만 적는다**(moai-u5wr.f29) — 트래커를 안 읽는다. `SessionEnd` 는 Claude 가 1.5초
-    // 안에 끝내라고 하고, 실을 글도 없다(셋 다 출력을 안 읽는다). **이벤트를 다 적어 가른다** — 새 이벤트를 더하면
-    // 컴파일러가 여기서 어느 쪽인지 묻는다. `matches!` 로 가르던 판은 아래 판정의 빈 갈래만 채우면 컴파일이 되어, 새 끝
-    // 이벤트가 트래커를 통째로 읽고 출석도 안 돌렸다.
+    // 안에 끝내라고 하고, 실을 글도 없다(셋 다 글 칸이 없다 — [`crate::hook::Carry::of`]). **이벤트를 다 적어
+    // 가른다** — 새 이벤트를 더하면 컴파일러가 여기서 어느 쪽인지 묻는다. `matches!` 로 가르던 판은 아래 판정의 빈
+    // 갈래만 채우면 컴파일이 되어, 새 끝 이벤트가 트래커를 통째로 읽고 출석도 안 돌렸다.
     //
     // **설정도 안 읽는다 — 출석부가 선 뿌리만 찾는다**(moai-jzym.uxa, [`crate::store::tracker_in_use`]). [`Repo`] 를
     // 세우던 판은 루트의 `config.toml` 을 파싱했고, 거기 충돌 표시가 끼면 아래의 물러서는 길이 워크트리의 `.moai` 를 열어
@@ -193,6 +194,9 @@ fn decide(
         }
         Event::SessionStart | Event::UserPromptSubmit | Event::PreToolUse | Event::Stop => {}
     }
+    // **편지가 드는 자리와 그 답의 종류는 이 칸에서만 읽는다**(moai-dp35) — 답([`answer`])과 심는 Codex 파일이 읽는 표와
+    // 같은 것이다. 편지는 [`crate::hook::Carry::wrap`] 으로 싼다 — 손으로 고른 종류가 칸과 어긋나면 답이 그 글을 버린다.
+    let carry = crate::hook::Carry::of(dialect, event);
     // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
     // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
     // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
@@ -251,7 +255,7 @@ fn decide(
                 ctx.lang(),
             );
             // **접힌 뒤는 편지도 싣는다** — 붙는 것을 잰 자리가 여기다(2026-10-04 사용자 결정). 편지는 같은 칸에 먼저 선
-            // 줄 다음 자리에 든다([`crate::hook::letters_room`]).
+            // 줄 다음 자리에 든다([`crate::hook::Carry::letters_room`]).
             //
             // **상태는 안 바꾼다**(리뷰 moai-h8tn.x4l) — 저절로 접히는 것은 턴 한가운데라 이미 `busy` 고, 사람이 친
             // `/compact` 뒤에는 프롬프트도 `Stop` 도 안 와 `busy` 로 적으면 노는 세션이 내내 일하는 것으로 남는다.
@@ -260,10 +264,10 @@ fn decide(
             let me = attendee(input, &post, dialect);
             let status = me.as_ref().map(|p| p.status.clone()).filter(|s| !s.is_empty());
             attend(&agents, me.clone(), status.as_deref().unwrap_or(mail::BUSY));
-            let letters = me.as_ref().and_then(|p| {
-                deliver(&post, p, ctx, crate::hook::letters_room(&carried), waiting(&post, p, Mine::All))
-            });
-            carried.then(|| letters.map_or(Decision::Pass, Decision::Context))
+            let letters = me
+                .as_ref()
+                .and_then(|p| deliver(&post, p, ctx, carry.letters_room(&carried), waiting(&post, p, Mine::All)));
+            carried.then(|| letters.map_or(Decision::Pass, |said| carry.wrap(said)))
         }
         // 기준선만 적고 아무것도 싣지 않는다. 까닭은 `hook::Event` 에 있다. **출석은 적는다**(moai-h8tn) — 편지는
         // 안 싣는다: 여기 출력이 대화에 붙는다고 잰 것은 접힌 뒤뿐이라, 실으면 읽음으로 옮긴 편지가 아무에게도 안
@@ -306,7 +310,7 @@ fn decide(
                 crate::hook::board(&lines, ctx.lang())
             });
             // 사람이 물었으니 일하는 중이다. 편지는 **매 프롬프트** 싣는다 — 보드처럼 한 번이 아니다(moai-h8tn). 보드와
-            // 한 칸이라 그 다음 자리에 든다([`crate::hook::letters_room`]). 출석은 편지를 옮기기 전에 적는다(위와 같은 까닭).
+            // 한 칸이라 그 다음 자리에 든다([`crate::hook::Carry::letters_room`]). 출석은 편지를 옮기기 전에 적는다(위와 같은 까닭).
             //
             // **프롬프트는 새 턴이다 — 이미 일하는 중인 장이어도 `since` 를 새로 댄다**(리뷰 moai-u5wr.e74). Claude 와
             // Antigravity 는 사람이 Esc 로 끊은 턴에 훅을 하나도 안 내 장이 `busy` 로 남는데, 상태가 같다고 그때를 두던 판은
@@ -326,8 +330,8 @@ fn decide(
             };
             let letters = me
                 .as_ref()
-                .and_then(|p| deliver(&post, p, ctx, crate::hook::letters_room(&board), waiting(&post, p, Mine::All)));
-            board.then(|| letters.map_or(Decision::Pass, Decision::Context))
+                .and_then(|p| deliver(&post, p, ctx, carry.letters_room(&board), waiting(&post, p, Mine::All)));
+            board.then(|| letters.map_or(Decision::Pass, |said| carry.wrap(said)))
         }
         Event::PreToolUse => {
             use crate::hook::Call;
@@ -509,14 +513,15 @@ fn decide(
             if busy_first {
                 attend(&agents, me.clone(), mail::BUSY);
             }
-            let letters = me.as_ref().and_then(|p| deliver(&post, p, ctx, hold_room(dialect), pending));
+            let letters =
+                me.as_ref().and_then(|p| deliver(&post, p, ctx, carry.letters_room(&Decision::Pass), pending));
             let held_by_letters = session_file(input, &repo, "letters");
             let decision = match letters {
                 Some(said) => {
                     if let Some(path) = &held_by_letters {
                         let _ = std::fs::write(path, "");
                     }
-                    Decision::Block(said)
+                    carry.wrap(said)
                 }
                 None => {
                     let after_letters = held_by_letters.is_some_and(|path| std::fs::remove_file(path).is_ok());
@@ -539,27 +544,6 @@ fn decide(
         Event::StopFailure | Event::Interrupt | Event::SessionEnd => Decision::Pass,
     };
     Some(decision)
-}
-
-/// `Stop` 이 붙드는 까닭(`reason`)에 편지가 들 자리 — 말씨마다 다르다(moai-rxro). Codex 는 그 글을 이어 가는
-/// 프롬프트로 실어 기본 상한에 묶고, 심은 파일의 `additionalContextLimit` 은 거기 안 닿는다([`crate::hook::CODEX_HOLD`]).
-/// 칸 하나([`crate::hook::Room::CONTEXT`])로 재던 판은 그 상한을 넘긴 한국어 편지의 가운데를 Codex 가 파일로 빼, 읽음으로
-/// 옮긴 그 자리를 아무도 못 봤다.
-///
-/// **Antigravity 는 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 상한이 문서에 없어 사람이 띄운 대화형 agy
-/// 창에 한국어 편지를 보내 쟀다. 칸을 거의 다 채운 글이 턴 머리의 `ephemeralMessage` 로도, 여기 `Stop` 의
-/// `decision: continue` 로도 자르지도 파일로 빼지도 않고 그대로 실렸다(가운데에 고루 박은 표지 스물이 다 섰다).
-///
-/// - agy 1.2.16 — 영문이 섞인 편지, UTF-16 9,665·9,874 단위(UTF-8 21KB 남짓)
-/// - agy 1.2.17 — **한글로만 채운** 편지, UTF-16 9,822·10,024 단위(UTF-8 28.2·28.4KB). 칸은 UTF-16 으로 세므로 바이트로
-///   가장 큰 편지가 이 꼴이다 — agy 의 선이 Codex 처럼 바이트로 서 있다면 여기서 드러났다(리뷰 moai-jzym.a9k 가 짚은 틈)
-///
-/// 그 위의 선은 안 쟀다 — 우리가 내는 글이 이 칸을 안 넘으니 물을 까닭이 없다.
-fn hold_room(dialect: Dialect) -> crate::hook::Room {
-    match dialect {
-        Dialect::Codex => crate::hook::CODEX_HOLD,
-        Dialect::Claude | Dialect::Antigravity => crate::hook::Room::CONTEXT,
-    }
 }
 
 /// 턴 끝의 닫기 물음 — 세션에 한 번 붙든다(`once_per_session`). 편지가 붙든 턴은 그 뒤의 `Stop` 이 묻는다([`decide`]).
@@ -594,9 +578,20 @@ fn closing_hold(
 
 /// 판정을 계약 JSON 한 줄로 옮긴다 — `Pass` 는 아무 말도 안 한다. Codex 의 꼴은 Claude 와 같다(2026-10-04 실측:
 /// `permissionDecision: deny` 가 막고 `decision: block` 이 붙들었다).
+///
+/// **글은 그 이벤트의 칸에만 싣는다**(moai-dp35) — 비추는 줄은 `Context` 칸에, 붙드는 까닭은 `Hold` 칸에. 거르는 것은
+/// 말씨를 가르기 전에 한 번, 표가 한다([`crate::hook::Carry::admits`]) — 말씨마다 같은 거르기를 따로 적던 판은 한쪽만
+/// 고쳐도 컴파일이 되었다(리뷰 moai-dp35.gag). 칸이 없는 자리의 출력은 에이전트가 안 받는다 — Codex 는 이벤트마다 받는
+/// 꼴이 정해져 있어 그 밖의 글을 틀린 출력으로 읽는다(`hook returned invalid … hook JSON output`). 이벤트 목록을 심은
+/// 파일과 따로 들던 판은 그 둘을 잇는 것이 없었다(리뷰 moai-t6hl.00z). **여기서 버리는 글에 편지는 안 든다** — 편지는
+/// 칸이 있을 때만 옮기고([`deliver`]) 그 칸의 종류로 싼다([`crate::hook::Carry::wrap`]). 막는 답(`Deny`)은 글을 싣는
+/// 칸이 아니라 표 밖이다.
 fn answer(event: Event, decision: Decision, dialect: Dialect) -> Option<String> {
+    if !crate::hook::Carry::of(dialect, event).admits(&decision) {
+        return None;
+    }
     if dialect == Dialect::Antigravity {
-        return antigravity_answer(event, decision);
+        return antigravity_answer(decision);
     }
     match decision {
         Decision::Pass => None,
@@ -617,20 +612,16 @@ fn answer(event: Event, decision: Decision, dialect: Dialect) -> Option<String> 
 /// **`allow` 는 안 낸다** — 그 답은 사람이 물어야 할 도구 부름까지 허락해 버린다. 지나가는 것은 빈 출력이다(재 보니
 /// 빈 출력에서 도구가 그대로 돌았다).
 ///
-/// **도구 부름 앞의 비추는 줄은 버린다.** `PreToolUse` 의 답에는 글을 실을 칸이 `reason` 뿐이고 그 칸은 `decision`
-/// 에 딸린다 — `deny` 로 실으면 막고, `allow` 로 실으면 허락한다. Claude·Codex 가 받는 그 줄(fork 1 의 둘째 물음
-/// 같은 것)이 여기서는 안 선다.
-fn antigravity_answer(event: Event, decision: Decision) -> Option<String> {
+/// **도구 부름 앞의 비추는 줄은 버린다** — 그 이벤트는 칸이 없다([`crate::hook::Carry::of`]). 거르는 것은 이 꼴로 옮기기
+/// 전에 [`answer`] 가 한다. Claude·Codex 가 받는 그 줄(fork 1 의 둘째 물음 같은 것)이 여기서는 안 선다.
+fn antigravity_answer(decision: Decision) -> Option<String> {
     match decision {
         Decision::Pass => None,
         Decision::Deny(reason) => serde_json::to_string(&Hold { decision: Verdict::Deny, reason }).ok(),
         Decision::Block(reason) => serde_json::to_string(&Hold { decision: Verdict::Continue, reason }).ok(),
-        Decision::Context(text) => match event {
-            Event::UserPromptSubmit | Event::SessionStart => {
-                serde_json::to_string(&serde_json::json!({ "injectSteps": [{ "ephemeralMessage": text }] })).ok()
-            }
-            _ => None,
-        },
+        Decision::Context(text) => {
+            serde_json::to_string(&serde_json::json!({ "injectSteps": [{ "ephemeralMessage": text }] })).ok()
+        }
     }
 }
 
@@ -1452,15 +1443,17 @@ fn waiting(root: &Path, me: &mail::Presence, which: Mine) -> Vec<mail::Stored> {
 /// [`waiting`] 이 고른 편지를 읽음으로 옮기며 실을 글을 낸다 — 없으면 `None`. **옮긴 것만 싣는다** — 남이 먼저
 /// 가진 `any-idle-worker` 편지는 빠진다. 말은 실을 편지가 있을 때만 푼다(사용자 설정을 여는 값이다).
 ///
-/// `room` 은 이 글이 들 자리다([`crate::hook::letters_room`]·[`hold_room`]) — 그 칸을 넘기면 에이전트가 글을 파일로
-/// 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]·[`crate::hook::CODEX_HOLD`]).
+/// `room` 은 이 글이 들 자리다 — 그 이벤트의 칸이 낸다([`crate::hook::Carry::letters_room`]). 그 칸을 넘기면 에이전트가
+/// 글을 파일로 빼 읽음으로 옮긴 편지를 아무도 못 본다([`crate::hook::CONTEXT_CAP`]·[`crate::hook::CODEX_HOLD`]). **칸이 없는
+/// 이벤트(`None`)에서는 한 통도 안 옮긴다** — 실을 자리가 없는 글을 읽음으로 옮기면 그 편지는 아무에게도 안 닿는다.
 fn deliver(
     root: &Path,
     me: &mail::Presence,
     ctx: &Ctx,
-    room: crate::hook::Room,
+    room: Option<crate::hook::Room>,
     mine: Vec<mail::Stored>,
 ) -> Option<String> {
+    let room = room?;
     if mine.is_empty() {
         return None;
     }
@@ -1629,4 +1622,139 @@ fn session_file(input: &Input, repo: &Repo, what: &str) -> Option<std::path::Pat
     repo.dir().hash(&mut h);
     let at = h.finish();
     Some(std::env::temp_dir().join(format!("moai-hook-{safe}-{at:x}.{what}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hook::{CODEX_HOLD, Carry, Room, Unit};
+    use clap::ValueEnum;
+
+    /// **훅의 답은 심은 Codex 파일이 연 칸에만 글을 싣는다**(moai-dp35) — 비추는 줄을 내는 이벤트와 `additionalContextLimit`
+    /// 을 적은 이벤트가 같고, 편지가 드는 자리는 그 이벤트가 Codex 에서 받는 상한 안에 든다. 셋을 따로 들던 판은 한쪽만
+    /// 고쳐도 컴파일이 되어 이 둘을 잇는 것이 없었다(리뷰 moai-t6hl.00z·moai-u5wr.6un 5번).
+    ///
+    /// **상한을 안 적은 칸은 Codex 의 기본 상한으로 잰다** — 2,500 토큰 언저리에 UTF-8 네 바이트를 한 토큰으로 어림해 1만
+    /// 바이트다(Codex 훅 문서: "Tool feedback and continuation prompts keep the default limit", codex-rs 의
+    /// `approx_token_count`). 그 값을 여기 손으로 적는다 — 표에서 읽으면 `Stop` 의 칸을 칸 하나로 되돌려도 아무것도 안
+    /// 붉어진다.
+    #[test]
+    fn the_answer_carries_text_only_where_the_planted_codex_file_opens_a_slot() {
+        const CODEX_DEFAULT_BYTES: usize = 10_000;
+        let file: serde_json::Value =
+            serde_json::from_str(&crate::skill::codex_hooks("/repo/target/release/moai")).unwrap();
+        let hooks = file["hooks"].as_object().unwrap();
+        for (wire, groups) in hooks {
+            let event = *Event::value_variants().iter().find(|e| e.wire() == wire).expect("모르는 이벤트를 심었다");
+            let limit = groups[0]["hooks"][0]["additionalContextLimit"].as_u64().map(|n| n as usize);
+            let said = answer(event, Decision::Context("x".into()), Dialect::Codex);
+            assert_eq!(said.is_some(), limit.is_some(), "{wire}: 비추는 줄과 심은 상한이 갈렸다 — {said:?}");
+            let Some(room) = Carry::of(Dialect::Codex, event).letters_room(&Decision::Pass) else { continue };
+            match limit {
+                // 상한은 토큰이다 — 자리의 한 단위는 한 토큰을 안 넘는다(`skill::codex_hooks`).
+                Some(limit) => assert!(room.size <= limit, "{wire}: 편지 자리 {room:?} 가 심은 상한 {limit} 을 넘는다"),
+                None => assert!(
+                    room.unit == Unit::Utf8 && room.size <= CODEX_DEFAULT_BYTES,
+                    "{wire}: 상한을 안 심은 칸의 편지 자리 {room:?} 가 Codex 의 기본 상한을 넘는다"
+                ),
+            }
+        }
+        // 위의 고리가 붙드는 칸을 실제로 지났는지 — 심은 파일에서 `Stop` 이 빠지면 그 칸을 아무도 안 잰다.
+        assert!(hooks.contains_key("Stop") && hooks.contains_key("UserPromptSubmit"), "{:?}", hooks.keys());
+        assert_eq!(Carry::of(Dialect::Codex, Event::Stop), Carry::Hold(CODEX_HOLD));
+    }
+
+    /// **편지 자리는 칸이 있는 이벤트에만 선다** — `Stop` 없이 끝난 턴의 셋은 세 에이전트 모두 칸이 없고, Antigravity 의
+    /// 도구 부름 앞도 그렇다. 편지를 싣는 세 이벤트(접힌 뒤의 `SessionStart`·`UserPromptSubmit`·`Stop`)는 세 에이전트
+    /// 모두 칸이 있고, 그 칸의 종류로 싼 편지([`Carry::wrap`])를 그 이벤트의 답이 버리지 않는다 — 하나라도 어긋나면 그
+    /// 에이전트에게 편지가 그 자리에서 영영 안 실린다. 자리가 없을 때 `deliver` 가 한 통도 안 옮기는 것은
+    /// `deliver_moves_no_letter_without_a_room` 이 `deliver` 를 그대로 불러 잰다.
+    #[test]
+    fn letters_move_only_on_an_event_with_a_slot() {
+        for dialect in Dialect::value_variants().iter().copied() {
+            for event in [Event::StopFailure, Event::Interrupt, Event::SessionEnd] {
+                assert_eq!(Carry::of(dialect, event).letters_room(&Decision::Pass), None, "{dialect:?} {event:?}");
+                assert_eq!(answer(event, Decision::Context("x".into()), dialect), None, "{dialect:?} {event:?}");
+            }
+            for event in [Event::SessionStart, Event::UserPromptSubmit, Event::Stop] {
+                let carry = Carry::of(dialect, event);
+                assert!(carry.letters_room(&Decision::Pass).is_some(), "{dialect:?} {event:?}");
+                let said = answer(event, carry.wrap("편지".into()), dialect);
+                assert!(said.is_some_and(|s| s.contains("편지")), "{dialect:?} {event:?}: 싼 편지를 답이 버렸다");
+            }
+        }
+        assert_eq!(Carry::of(Dialect::Antigravity, Event::PreToolUse).letters_room(&Decision::Pass), None);
+        // 같은 칸에 먼저 선 글은 그 길이와 둘 사이의 빈 줄만큼 자리를 줄인다.
+        let board = Decision::Context("b".repeat(100));
+        let room = Carry::Context(Room::CONTEXT).letters_room(&board).unwrap();
+        assert_eq!(room, Room { size: Room::CONTEXT.size - 102, unit: Unit::Utf16 });
+        // 먼저 선 답이 막으면 자리가 없다 — 그 뒤의 글은 `Decision::then` 이 묻지도 않고 버린다.
+        for blocking in [Decision::Deny("막는다".into()), Decision::Block("붙든다".into())] {
+            for carry in [Carry::Context(Room::CONTEXT), Carry::Hold(CODEX_HOLD)] {
+                assert_eq!(carry.letters_room(&blocking), None, "{carry:?} 뒤의 {blocking:?}");
+            }
+        }
+    }
+
+    /// **자리가 없으면 `deliver` 는 한 통도 안 옮긴다** — 우편함에 편지 한 통을 두고 `deliver` 를 그대로 부른다(리뷰
+    /// moai-dp35.gag). 표만 재던 판은 그 문(`room?`)을 걷어도 단위·통합 시험이 다 초록이었다 — 오늘은 편지를 싣는 세
+    /// 이벤트가 세 말씨 모두 칸이 있어 그 문에 닿는 길이 없다. 칸을 잃는 이벤트가 생기는 날 그 편지를 지키는 것이 이
+    /// 문이다.
+    #[test]
+    fn deliver_moves_no_letter_without_a_room() {
+        let root = crate::scratch::Scratch::new("hook-deliver-no-room");
+        let letter = mail::Letter {
+            v: mail::VERSION,
+            to: "w1".into(),
+            from: "boss".into(),
+            subject: "일감".into(),
+            body: "본문".into(),
+            sent_at: "2026-10-05T00:00:00Z".into(),
+            reply_to: None,
+            rest: Default::default(),
+        };
+        mail::send(&crate::store::mail_at(&root), &letter).unwrap();
+        let me: mail::Presence = serde_json::from_str(r#"{"name":"w1"}"#).unwrap();
+        let mine = waiting(&root, &me, Mine::All);
+        assert_eq!(mine.len(), 1, "시험이 편지를 못 넣었다");
+        assert_eq!(deliver(&root, &me, &Ctx::new(false, None, false), None, mine), None);
+        assert_eq!(waiting(&root, &me, Mine::All).len(), 1, "자리가 없는데 편지를 읽음으로 옮겼다");
+    }
+
+    /// **답은 제 칸에만 선다** — 붙드는 까닭은 `Stop` 에서만, 비추는 줄은 턴 머리와 접힌 뒤, 그리고 Claude·Codex 의 도구
+    /// 부름 앞에서만 나간다. 기대를 표에서 읽지 않고 손으로 적는다 — 표에서 읽으면 거르기를 걷어도 아무것도 안
+    /// 붉어진다. 붙드는 답의 거르기는 오늘 `Stop` 밖에서 그 답이 안 서서, 이 시험 전에는 걷어도 초록이었다(리뷰
+    /// moai-dp35.gag).
+    #[test]
+    fn each_answer_lands_only_in_its_own_slot() {
+        for dialect in Dialect::value_variants().iter().copied() {
+            for event in Event::value_variants().iter().copied() {
+                let held = answer(event, Decision::Block("붙든다".into()), dialect);
+                assert_eq!(held.is_some(), event == Event::Stop, "{dialect:?} {event:?} — {held:?}");
+                let shown = answer(event, Decision::Context("비춘다".into()), dialect);
+                let slot = matches!(event, Event::SessionStart | Event::UserPromptSubmit)
+                    || (event == Event::PreToolUse && dialect != Dialect::Antigravity);
+                assert_eq!(shown.is_some(), slot, "{dialect:?} {event:?} — {shown:?}");
+            }
+        }
+    }
+
+    /// **막는 답은 표 밖이다** — 글을 싣는 칸이 없는 Antigravity 의 도구 부름 앞에서도 막는다. 막는 답까지 칸으로
+    /// 거르면 agy 에서 규칙 다섯이 통째로 지나간다. 그 자리의 비추는 줄은 버린다 — 그 답의 글 칸은 `decision` 에
+    /// 딸린다([`antigravity_answer`]).
+    #[test]
+    fn a_refusal_stands_outside_the_slots() {
+        for dialect in Dialect::value_variants().iter().copied() {
+            let said = answer(Event::PreToolUse, Decision::Deny("안 된다".into()), dialect).unwrap_or_default();
+            assert!(
+                said.contains("deny") && said.contains("안 된다"),
+                "{dialect:?} 의 도구 부름 앞에서 안 막았다 — {said}"
+            );
+        }
+        assert_eq!(answer(Event::PreToolUse, Decision::Context("x".into()), Dialect::Antigravity), None);
+        let held = answer(Event::Stop, Decision::Block("편지".into()), Dialect::Antigravity).unwrap_or_default();
+        assert!(held.starts_with("{\"decision\":\"continue\""), "{held}");
+        let shown = answer(Event::UserPromptSubmit, Decision::Context("보드".into()), Dialect::Antigravity);
+        assert!(shown.is_some_and(|s| s.contains("ephemeralMessage")));
+    }
 }

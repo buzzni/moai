@@ -18,6 +18,8 @@
 //! 다시 짓지 않고 그 멤버의 줄만 도려내, 서식은 그대로 남는다([`drop_marketplace`]).
 
 use crate::cli::Dialect;
+use crate::hook::Event;
+use clap::ValueEnum;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -140,20 +142,23 @@ pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 /// 로 온다. API 오류로 끊긴 턴에 오는 이벤트는 문서에 없다. **`SessionEnd` 는 그 세션의 장을 걷는다** — 장을 `idle` 로
 /// 두는 Claude 와 다르다(`cmd::hook` 의 `rest`).
 ///
-/// **줄마다 그 이벤트가 받는 값을 함께 적는다**(moai-t6hl) — 넷째 칸이 상한(초), 다섯째 칸이 `additionalContextLimit`
-/// 이다. Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 낸다(사람의 codex 0.160 이 짚었다 — 그 경고를
-/// `tests/hooks/codex/config/` 에 갈무리해 두고 시험이 이 표가 심는 파일을 그것에 대 본다, moai-o9tg). 그 상한은
-/// 추가 맥락을 낼 수 있는 이벤트만 받는다(Codex 훅 문서: SessionStart·SubagentStart·PreToolUse·PostToolUse·
-/// UserPromptSubmit) — `Stop` 이 붙드는 까닭(`reason`)은 이어 가는 프롬프트라 이 값이 안 닿고 Codex 의 기본 상한을
-/// 그대로 쓴다(같은 문서). 그래서 그 글은 훅이 그 상한에 맞춰 싣는다([`crate::hook::CODEX_HOLD`]). 두 값을 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이 15초·상한 없음을 받는다 —
-/// 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).
-const CODEX: &[(&str, &str, &str, u64, Option<usize>)] = &[
-    ("SessionStart", "session-start", "counting moai warnings...", TIMEOUT, Some(CODEX_CONTEXT_LIMIT)),
-    ("UserPromptSubmit", "user-prompt-submit", "reading the moai board...", TIMEOUT, Some(CODEX_CONTEXT_LIMIT)),
-    ("PreToolUse", "pre-tool-use", "checking the moai rules...", TIMEOUT, Some(CODEX_CONTEXT_LIMIT)),
-    ("Stop", "stop", "comparing the moai state...", TIMEOUT, None),
-    ("Interrupt", "interrupt", "marking this session idle for moai...", CODEX_SHORT_TIMEOUT, None),
-    ("SessionEnd", "session-end", "taking this session off moai's list...", CODEX_SHORT_TIMEOUT, None),
+/// **줄마다 그 이벤트의 상한(초)을 함께 적는다**(moai-t6hl) — 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이
+/// 15초를 받는다. 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).
+///
+/// **`additionalContextLimit` 은 이 표에 없다 — 훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽는다**(moai-dp35).
+/// Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 내는데(사람의 codex 0.160 이 짚었다 — 그 경고를
+/// `tests/hooks/codex/config/` 에 갈무리해 두고 시험이 이 표가 심는 파일을 그것에 대 본다, moai-o9tg), 그 값을 받는
+/// 이벤트와 편지가 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
+/// `cmd::hook` 의 `hold_room`, `hook::letters_room`)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
+/// 이벤트의 편지를 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
+/// moai-u5wr.6un 5번, moai-rxro 의 잃음).
+const CODEX: &[(Event, &str, u64)] = &[
+    (Event::SessionStart, "counting moai warnings...", TIMEOUT),
+    (Event::UserPromptSubmit, "reading the moai board...", TIMEOUT),
+    (Event::PreToolUse, "checking the moai rules...", TIMEOUT),
+    (Event::Stop, "comparing the moai state...", TIMEOUT),
+    (Event::Interrupt, "marking this session idle for moai...", CODEX_SHORT_TIMEOUT),
+    (Event::SessionEnd, "taking this session off moai's list...", CODEX_SHORT_TIMEOUT),
 ];
 
 /// Codex 의 `PreToolUse` 가 볼 도구 — 셸과 패치다. Codex 는 그 둘과 MCP 에만 훅을 낸다(openai/codex#20204).
@@ -179,11 +184,6 @@ const ANTIGRAVITY_WATCHED: &str = "run_command|write_to_file|replace_file_conten
 ///   훅의 상한이고, Claude 는 경고를 안 낸다. `cmd::hook` 의 `rest` 는 1.5초에 맞춰 쓰였다
 const TIMEOUT: u64 = 15;
 
-/// Codex 가 싣는 글의 상한을 넉넉히 준다 — 기본이 2,500 토큰 언저리라(Codex 훅 문서) 보드와 편지(최대
-/// [`crate::hook::CONTEXT_CAP`] 글자)가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는다. 편지는 싣는 순간
-/// 읽음이라 그 판에서 아무도 못 본다. 한 토큰은 적어도 한 글자이니 같은 수로 준다.
-const CODEX_CONTEXT_LIMIT: usize = crate::hook::CONTEXT_CAP;
-
 /// Codex 가 `Interrupt`·`SessionEnd` 에 주는 상한(초) — 기본 1초에 3초까지만 받는다(Codex 훅 문서). [`TIMEOUT`] 을 적어
 /// 두면 Codex 가 3 으로 깎으며 `/hooks` 에 경고를 내고, 실제 상한이 얼마인지 파일만 봐서는 모른다(moai-t6hl). 그 장을
 /// 걷는 `SessionEnd` 가 1초에 끊기지 않게 상한을 다 쓴다.
@@ -198,22 +198,27 @@ pub const ANTIGRAVITY_GROUP: &str = "moai";
 /// Codex 의 `.codex/hooks.json` 글.
 pub fn codex_hooks(exe: &str) -> String {
     let mut hooks = BTreeMap::new();
-    for (at, event, message, timeout, limit) in CODEX {
+    for &(event, message, timeout) in CODEX {
+        let name = event.to_possible_value().expect("훅 이벤트에 숨긴 이름이 없다");
         let mut entry = serde_json::json!({
             "type": "command",
-            "command": command_for(exe, event, Dialect::Codex),
+            "command": command_for(exe, name.get_name(), Dialect::Codex),
             "timeout": timeout,
             "statusMessage": message,
         });
-        // 안 받는 이벤트에는 키를 아예 안 둔다 — `Option` 을 그대로 실으면 `null` 이 적힌다.
-        if let Some(limit) = limit {
-            entry["additionalContextLimit"] = serde_json::json!(limit);
+        // **비추는 줄의 칸에만 상한을 둔다** — 그 칸의 자리를 다 받는 수로 준다. Codex 의 기본은 2,500 토큰 언저리라(Codex
+        // 훅 문서) 보드와 편지가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는데, 편지는 싣는 순간 읽음이라 그 판에서
+        // 아무도 못 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
+        // 단위(UTF-16 한 단위는 UTF-8 로 세 바이트까지다)는 한 토큰을 안 넘는다 — 같은 수로 준다. 안 받는 이벤트에는 키를
+        // 아예 안 둔다 — `Option` 을 그대로 실으면 `null` 이 적힌다.
+        if let crate::hook::Carry::Context(room) = crate::hook::Carry::of(Dialect::Codex, event) {
+            entry["additionalContextLimit"] = serde_json::json!(room.size);
         }
-        let group = match *at {
-            "PreToolUse" => serde_json::json!({ "matcher": CODEX_WATCHED, "hooks": [entry] }),
+        let group = match event {
+            Event::PreToolUse => serde_json::json!({ "matcher": CODEX_WATCHED, "hooks": [entry] }),
             _ => serde_json::json!({ "hooks": [entry] }),
         };
-        hooks.insert(*at, vec![group]);
+        hooks.insert(event.wire(), vec![group]);
     }
     pretty(&serde_json::json!({ "description": CODEX_DESCRIPTION, "hooks": hooks }))
 }
@@ -659,7 +664,9 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     // 화면은 규칙이 통과한 것과 한 글자도 다르지 않았다 — moai-j4ie 가 끝내려던 바로 그 침묵이다.
     // 값은 세션에 심은 이벤트 수까지고, 문턱이 겨눈 140~1,257 과는 자릿수가 다르다.
     //
-    // 이름은 `HOOKS`·`CODEX`·`ANTIGRAVITY` 가 든 것뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다.
+    // 이름은 `HOOKS`·`ANTIGRAVITY` 가 든 것과 `CODEX` 의 이벤트가 clap 으로 받는 이름(`hook::Event` 의
+    // kebab-case)뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다. `Event` 에 이름을 따로 다는 날
+    // (`#[value(name = …)]`)은 여기도 본다.
     //
     // **종료 값도 키에 든다**(리뷰 moai-514e.hgz). 목록이 0·1 밖 전부로 넓어지며 표식을 태우는
     // 것이 설치와 상관없는 한 번짜리 죽음까지가 됐다 — 이 컨테이너에 이력이 있는 OOM 의 137,
@@ -2287,7 +2294,8 @@ mod tests {
     }
 
     /// Codex 가 추가 맥락을 받는 이벤트 — 그 밖의 처리기에 적힌 `additionalContextLimit` 은 버리고 경고한다(Codex 훅
-    /// 문서). **[`CODEX`] 표에서 읽지 않는다** — 표를 되돌리면 본뜸도 같이 움직여 아무것도 안 붉어진다.
+    /// 문서). **훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽지 않는다** — 심는 상한이 그 표에서 오니(moai-dp35),
+    /// 거기서 읽으면 표를 되돌릴 때 본뜸도 같이 움직여 아무것도 안 붉어진다.
     const CODEX_TAKES_CONTEXT: &[&str] =
         &["SessionStart", "SubagentStart", "PreToolUse", "PostToolUse", "UserPromptSubmit"];
 
@@ -2433,7 +2441,7 @@ mod tests {
     ///   `<이름>.json`)마다 [`codex_issues`] 가 낸 경고와 Codex 의 경고가 하나하나 맞는다. 본뜸에서 규칙 하나를 지우면
     ///   여기가 붉어지고, 새 규칙에 걸린 갈무리를 넣으면 본뜸이 그 규칙을 배울 때까지 붉다
     /// - **심는 파일에는 경고가 없다** — 본뜸도 꼴([`codex_shape`])도 아무 말이 없고, 추가 맥락을 받는 이벤트에는 넉넉한
-    ///   상한을, 상한이 깎이는 이벤트에는 그 상한을 다 적는다([`CODEX`])
+    ///   상한을([`crate::hook::Carry::of`]), 상한이 깎이는 이벤트에는 그 상한을 다 적는다([`CODEX`])
     #[test]
     fn the_planted_codex_hooks_pass_codex_s_own_checks() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/hooks/codex");

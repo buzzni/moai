@@ -278,18 +278,114 @@ fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> 
     format!("\n\n{}", crate::style::plain(&crate::view::mail::letter(lang, zone, s).join("\n")))
 }
 
-/// 같은 칸에 `earlier`(보드, 접힌 뒤 싣는 줄)가 먼저 섰을 때 편지에 남는 자리 — [`CONTEXT_CAP`] 에서 그 글과 둘 사이의
-/// 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다). 비추는 줄(`additionalContext`)의 칸이라 세 에이전트 모두
-/// [`Room::CONTEXT`] 로 잰다 — Codex 는 심은 파일의 `additionalContextLimit` 이 그만큼을 준다(`skill::CODEX`).
-/// Antigravity 의 `ephemeralMessage` 는 칸을 거의 다 채운 편지를 통째로 실었다 — 한글로만 채워 바이트로도 가장 큰
-/// 꼴(UTF-16 9,822 단위, UTF-8 28KB 남짓)까지다(moai-jzym.4pm 실측, `cmd::hook` 의 `hold_room`).
-pub fn letters_room(earlier: &Decision) -> Room {
-    let room = Room::CONTEXT;
-    let used = match earlier {
-        Decision::Pass => 0,
-        Decision::Context(s) | Decision::Deny(s) | Decision::Block(s) => room.unit.of(s) + 2,
-    };
-    Room { size: room.size.saturating_sub(used), ..room }
+/// 이벤트 하나가 에이전트에게 글을 싣는 칸과 그 자리 — 말씨와 이벤트가 정한다([`Carry::of`]).
+///
+/// **이 표 하나를 셋이 읽는다**(moai-dp35) — 편지가 드는 자리(`cmd::hook` 의 `deliver`), 훅의 답(`cmd::hook` 의
+/// `answer`), 심는 Codex 파일의 `additionalContextLimit`(`skill::codex_hooks`)이다. 셋이 따로 서던 판은 Codex 의 한
+/// 줄을 바꾸거나 새 이벤트에 편지를 실어도 컴파일이 되었다 — 그때 편지는 칸 하나(UTF-16 1만, 한국어 30KB 남짓)로 재어지고,
+/// Codex 는 기본 상한을 넘긴 가운데를 파일로 빼 읽음으로 옮긴 그 자리를 아무도 못 본다(moai-rxro 의 잃음, 리뷰
+/// moai-u5wr.6un 5번). 이제 칸이 없는 이벤트는 편지를 안 옮기고([`Carry::letters_room`] 이 `None`), 편지는 그 칸의
+/// 종류로 싸며([`Carry::wrap`]), 답은 그 칸이 받는 글만 낸다([`Carry::admits`]). **종류도 이 표가 고른다**(리뷰
+/// moai-dp35.gag) — 부르는 쪽이 손으로 고르던 판은 칸이 있어 편지를 옮긴 뒤에 종류가 어긋나면 답이 그 글을 말없이 버려,
+/// 읽음으로 옮긴 편지가 아무에게도 안 닿았다.
+///
+/// 표가 맞는지는 표 밖에서 잰다 — Codex 가 맥락을 받는 이벤트는 Codex 의 `/hooks` 갈무리에 대 보고(`skill` 의
+/// `the_planted_codex_hooks_pass_codex_s_own_checks`), 붙드는 칸의 자는 에이전트마다 실은 편지로 잰다(`tests/cli.rs` 의
+/// `a_codex_stop_holds_letters_inside_codexs_limit`·`an_antigravity_stop_holds_whole_a_letter_codex_would_cut`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Carry {
+    /// 비추는 줄 — Claude·Codex 의 `additionalContext`, Antigravity 의 `ephemeralMessage`.
+    Context(Room),
+    /// 턴을 붙드는 까닭 — `Stop` 의 `reason`.
+    Hold(Room),
+    /// 글을 실을 칸이 없다 — 그 이벤트의 답은 글을 안 받는다. Codex 는 이벤트마다 받는 출력의 꼴이 정해져 있어
+    /// (`stop.command.output` 은 모르는 키를 안 받고, `interrupt.command.output` 은 `systemMessage` 하나다 — codex 0.160)
+    /// 그 밖의 글을 틀린 출력으로 읽는다(`hook returned invalid … hook JSON output`). `/hooks` 의 경고는 심은 파일의 키
+    /// (`additionalContextLimit`)를 두고 서는 것이라 이것과 다르다(리뷰 moai-dp35.gag).
+    Nothing,
+}
+
+impl Carry {
+    /// `dialect` 의 `event` 가 싣는 칸. **이벤트도 말씨도 다 적어 가른다** — 새 이벤트나 말씨를 더하면 컴파일러가 어느
+    /// 칸인지 묻는다.
+    ///
+    /// - **비추는 줄은 세 에이전트 모두 [`Room::CONTEXT`] 다.** Codex 는 심은 파일의 `additionalContextLimit` 이 그만큼을
+    ///   준다 — 그 값을 이 자리에서 읽는다(`skill::codex_hooks`). Codex 가 그 값을 받는 것은 추가 맥락을 낼 수 있는
+    ///   이벤트뿐이다(Codex 훅 문서: SessionStart·SubagentStart·PreToolUse·PostToolUse·UserPromptSubmit). Antigravity 의
+    ///   `ephemeralMessage` 는 칸을 거의 다 채운 편지를 통째로 실었다(아래 붙드는 칸과 같은 실측)
+    /// - **Antigravity 의 도구 부름 앞은 칸이 없다.** 그 답의 글 칸은 `reason` 뿐이고 그 칸은 `decision` 에 딸린다 —
+    ///   `deny` 로 실으면 막고 `allow` 로 실으면 허락한다(`cmd::hook` 의 `antigravity_answer`). 막는 답(`Deny`)은 글을
+    ///   싣는 칸이 아니라 이 표 밖이다
+    /// - **Codex 의 붙드는 칸은 [`CODEX_HOLD`] 다** — 그 글은 이어 가는 프롬프트라 기본 상한에 묶인다
+    /// - **Antigravity 의 붙드는 칸은 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 상한이 문서에 없어
+    ///   사람이 띄운 대화형 agy 창에 한국어 편지를 보내 쟀다. 칸을 거의 다 채운 글이 턴 머리의 `ephemeralMessage` 로도
+    ///   `Stop` 의 `decision: continue` 로도 자르지도 파일로 빼지도 않고 그대로 실렸다(가운데에 고루 박은 표지 스물이
+    ///   다 섰다). agy 1.2.16 은 영문이 섞인 편지 UTF-16 9,665·9,874 단위(UTF-8 21KB 남짓), agy 1.2.17 은 **한글로만
+    ///   채운** 편지 UTF-16 9,822·10,024 단위(UTF-8 28.2·28.4KB)다. 칸은 UTF-16 으로 세므로 바이트로 가장 큰 편지가 이
+    ///   꼴이다 — agy 의 선이 Codex 처럼 바이트로 서 있다면 여기서 드러났다(리뷰 moai-jzym.a9k). 그 위의 선은 안 쟀다
+    /// - **`Stop` 없이 끝난 턴의 셋은 칸이 없다** — 출석만 적는다(`cmd::hook` 의 `rest`). 실을 글이 없어서다 — 에이전트가
+    ///   그 출력을 안 읽어서가 아니다(리뷰 moai-dp35.gag). Antigravity 의 `StopFailure` 는 오류로 끝난 실행의 `Stop` 이라
+    ///   agy 가 그 답을 읽는다 — 붙들면 실패하는 백엔드에 편지를 도로 밀어 넣는다(`cmd::hook` 의 `from_antigravity`, 리뷰
+    ///   moai-u5wr.e74). Codex 의 `Interrupt` 도 `systemMessage` 하나는 읽는다
+    pub fn of(dialect: crate::cli::Dialect, event: Event) -> Carry {
+        use crate::cli::Dialect::{Antigravity, Claude, Codex};
+        match (event, dialect) {
+            (Event::SessionStart | Event::UserPromptSubmit, Claude | Codex | Antigravity) => {
+                Carry::Context(Room::CONTEXT)
+            }
+            (Event::PreToolUse, Claude | Codex) => Carry::Context(Room::CONTEXT),
+            (Event::PreToolUse, Antigravity) => Carry::Nothing,
+            (Event::Stop, Codex) => Carry::Hold(CODEX_HOLD),
+            (Event::Stop, Claude | Antigravity) => Carry::Hold(Room::CONTEXT),
+            (Event::StopFailure | Event::Interrupt | Event::SessionEnd, Claude | Codex | Antigravity) => Carry::Nothing,
+        }
+    }
+
+    /// 편지가 들 자리 — **칸이 없으면 `None` 이고, 그때 편지는 안 옮긴다.** 같은 칸에 `earlier`(보드, 접힌 뒤 싣는
+    /// 줄)가 먼저 섰으면 그 글과 둘 사이의 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다). 붙드는 칸에는
+    /// 먼저 선 글이 없다 — `Stop` 은 편지가 먼저다.
+    ///
+    /// **먼저 선 답이 막으면 자리가 없다**(리뷰 moai-dp35.gag) — [`Decision::then`] 은 막는 답 뒤의 글을 묻지도 않고
+    /// 버린다. 그 글의 길이만 빼고 자리를 내던 판은 편지를 읽음으로 옮긴 뒤 그 판정이 통째로 버리는 길을 열어 두었다.
+    pub fn letters_room(self, earlier: &Decision) -> Option<Room> {
+        let room = match self {
+            Carry::Context(room) | Carry::Hold(room) => room,
+            Carry::Nothing => return None,
+        };
+        let used = match earlier {
+            Decision::Pass => 0,
+            Decision::Context(s) => room.unit.of(s) + 2,
+            Decision::Deny(_) | Decision::Block(_) => return None,
+        };
+        Some(Room { size: room.size.saturating_sub(used), ..room })
+    }
+
+    /// 실을 편지 글을 이 칸의 답으로 — 비추는 칸이면 `Context`, 붙드는 칸이면 `Block` 이다. **답의 종류를 부르는 쪽이
+    /// 안 고른다** — 칸이 있어 편지를 옮겼는데 종류가 어긋나면 [`Carry::admits`] 가 그 답을 걸러, 읽음으로 옮긴 편지가
+    /// 아무에게도 안 닿는다. 칸이 없으면 `Pass` 다 — 그 자리에서는 편지를 애초에 안 옮긴다([`Carry::letters_room`]).
+    pub fn wrap(self, text: String) -> Decision {
+        match self {
+            Carry::Context(_) => Decision::Context(text),
+            Carry::Hold(_) => Decision::Block(text),
+            Carry::Nothing => Decision::Pass,
+        }
+    }
+
+    /// 이 칸이 그 답을 싣는가 — 비추는 줄은 비추는 칸에만, 붙드는 까닭은 붙드는 칸에만 든다. 칸과 답을 다 적어 가른다 —
+    /// 칸의 종류가 늘면 컴파일러가 여기서도 묻는다(`_` 로 받으면 새 칸의 글이 말없이 버려진다).
+    ///
+    /// **막는 답(`Deny`)은 표 밖이다** — 글 칸이 아니라 도구 부름을 막는 답이라, 글 칸이 없는 agy 의 도구 부름 앞에서도
+    /// 선다(거르면 agy 에서 규칙 다섯이 통째로 지나간다). 그 꼴은 도구 부름 앞(`PreToolUse`)의 것이다 — 막는 판정은 그
+    /// 이벤트에서만 선다(`cmd::hook` 의 `judge`·`decide`). 다른 이벤트에서 막으려면 그 이벤트가 받는 꼴부터 정한다.
+    pub fn admits(self, decision: &Decision) -> bool {
+        match (decision, self) {
+            (Decision::Pass | Decision::Deny(_), _)
+            | (Decision::Context(_), Carry::Context(_))
+            | (Decision::Block(_), Carry::Hold(_)) => true,
+            (Decision::Context(_), Carry::Hold(_) | Carry::Nothing)
+            | (Decision::Block(_), Carry::Context(_) | Carry::Nothing) => false,
+        }
+    }
 }
 
 /// 이번에 실을 편지 — 그 자리(`letters` 안의 차례)와, 이 세션 앞으로 남아 다음에 실릴 수다. 앞에서부터 `room` 에
@@ -14786,9 +14882,12 @@ mod tests {
         // 다시 볼 길은 머리 줄에도 있다 — 자른 표가 그 길을 대는지는 남은 수 바로 앞에 선 그 표의 줄로 잰다.
         let cut = said[..said.len() - left.len()].trim_end().lines().last().unwrap_or_default();
         assert!(cut.contains("moai inbox --all --as w1"), "자른 자리의 줄이 `--as` 를 안 달았다 — {cut}");
-        // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다.
+        // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다. 자리는 턴
+        // 머리의 칸이 실제로 내는 것으로 잰다 — 손으로 지은 칸으로 재면 그 칸의 자리가 바뀌어도 여기는 모른다(리뷰
+        // moai-dp35.gag).
         let board = Decision::Context("b".repeat(CONTEXT_CAP - 100));
-        assert_eq!(pick(std::slice::from_ref(&small), letters_room(&board)), (vec![], 0));
+        let room = Carry::of(crate::cli::Dialect::Claude, Event::UserPromptSubmit).letters_room(&board).unwrap();
+        assert_eq!(pick(std::slice::from_ref(&small), room), (vec![], 0));
         // 일감은 한 통씩 — 나머지는 다른 일꾼의 몫이라 남은 수에도 안 센다.
         let open = |id: &str| stored(id, ANY_IDLE_WORKER, "job".into());
         let all = [open("20261004-061203-0000000a"), open("20261004-061203-0000000b"), small];
