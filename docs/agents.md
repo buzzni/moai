@@ -158,7 +158,8 @@ a worker that waits needs no waking, and waking is a bonus.
   keep running and the changed ones stop until you trust them again — nothing
   says so, and `moai skill status` does not see the trust. With `Stop`,
   `Interrupt` and `SessionEnd` the ones left untrusted, `moai agents` shows the
-  session `busy` after its turn ends and keeps its row after it closes
+  session `busy` after its turn ends until 20 quiet minutes turn it `gone`, and
+  keeps its row for a day after it closes
 - **Make it a worker** with `$moai-work`
 - **moai finds it by its session id.** Codex runs every session's shell from
   one shared `codex app-server`, so `moai` cannot tell sessions apart by their
