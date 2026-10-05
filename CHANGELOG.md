@@ -41,8 +41,10 @@ does not tag — see `CONTRIBUTING.md`.
 - **A letter left for an agent that went away goes back to its sender.** When
   `moai agents` sweeps a row whose process is gone, when a new session takes
   over the name of a row that has gone, and when a Codex session ends, the
-  unread letters in that box move to their senders' boxes and show as
-  returned (`moai inbox --json`: `"returned":true`). A letter sent to a name
+  unread letters in that box move to their senders' boxes, marked as
+  returned in the file name (`<id>.returned.json`; `moai inbox --json`:
+  `"returned":true`). A returned letter still waiting when a new agent takes
+  that name was the previous holder's, and is put away as read. A letter sent to a name
   nobody holds yet still waits for the first agent that takes it, and
   `moai hello --name` carries an agent's letters to its new name.
 - **`moai hello` and the hooks keep a presence row** in
@@ -67,8 +69,9 @@ does not tag — see `CONTRIBUTING.md`.
   Linux a reused pid is told apart by the time the process started, and a
   session resumed in a new process moves its row there. A Codex row has no
   process to look at: its hooks (tool calls included) and its
-  `moai inbox --wait` write `seen`, and a row nothing wrote for 20 minutes is
-  swept, and passed over by `--wake`.
+  `moai inbox --wait` write `seen`. A row nothing wrote for 20 minutes reads
+  `gone` — `--status idle` and `--wake` pass it over — but keeps its role and
+  name for the session to come back to; after a day it is swept.
 - **The hooks deliver letters.** Each prompt (`UserPromptSubmit`) loads the
   letters for the session into the conversation, the end of a turn (`Stop`)
   holds the turn with them, and a session opened after a compaction gets them
