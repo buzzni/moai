@@ -304,7 +304,7 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
 [presence](glossary.md#presence) file per agent.
 
     moai hello --role worker                 register this agent (the hooks do it too)
-    moai agents                              who is here, busy or idle; sweeps the gone
+    moai agents                              who is here, busy or idle; sweeps the gone and old read letters
     moai agents --role worker --status idle  the workers waiting for work
     moai send <agent> '<subject>' -b -       leave a letter, the body from stdin
     moai send any-idle-worker '<subject>'    one agent takes it, not you or a supervisor
@@ -315,7 +315,9 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   journal; a decision still goes on its issue as a note, and a report names the
   issue it is about. The mailbox follows the tracker into the main checkout, so
   every session of a repository — in any worktree — sees one mailbox, and
-  `moai init` keeps both directories out of git
+  `moai init` keeps both directories out of git. Like every other file the
+  repository holds, the mailbox and the presence rows follow a link only inside
+  the checkout ([When it goes wrong](#when-it-goes-wrong))
 - **Names are what you send to.** A Claude session is registered by its hooks
   under the name Claude Code shows for it (the one `SendMessage` uses); a Codex
   or Antigravity session as `codex-` or `antigravity-` and the first eight
@@ -352,7 +354,9 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   words only
 - **The hooks deliver.** With the hooks installed an agent rarely runs
   `moai inbox`: each prompt and each turn's end load the letters for that session
-  and mark them read — `moai inbox --all` shows them again, nothing is deleted.
+  and mark them read — `moai inbox --all` shows them again until `moai agents`
+  sweeps them, a week after they were read (`mail_read_days` in
+  `.moai/config.toml`; `0` keeps them). A letter nobody has read is never swept.
   One load stays inside the 10,000 characters Claude Code carries per hook —
   the board included, on the first prompt — and says how many still wait; a
   letter too long for that is cut there, naming `moai inbox --all` for the
@@ -498,6 +502,17 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   nothing wakes a window that is not waiting
 - **A letter came back marked returned.** The agent it was for went away
   before reading it. Send the work on to another agent if it still needs doing
+- **A letter read last week is gone from `moai inbox --all`.** `moai agents`
+  swept it — read letters stay for `mail_read_days` after they were read (7
+  unless `.moai/config.toml` says otherwise). Raise the number, or set `0` to
+  keep them for good
+- **`moai hello`, `moai send` or `moai inbox` names `.moai/agents` or
+  `.moai/mail` and says it "points at … outside".** That directory — or a box,
+  or a box's `read/` — is a link that leaves the checkout (or lands in `.git`),
+  most often one committed in a repository you received. moai neither writes
+  nor reads through it: the write stops with `broken`, `moai agents` and
+  `moai inbox` name it, and the hooks quietly do nothing for that session.
+  Replace the link with a real directory
 - **`moai agents` shows a pid as `<pid>@<host>`.** That row was written on
   another machine — another container sharing this repository, or this
   container before it was started again — and its pid is that machine's, not one
@@ -536,4 +551,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw
