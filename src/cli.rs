@@ -817,6 +817,14 @@ Examples:
 
   The prefix is decided once - every id already issued carries it.
 
+  **In a terminal the first init asks.** It shows the prefix and each choice
+  with its default picked, and Enter plants. A flag picks its row and locks
+  it; give every row a flag, or --yes, and nothing is asked. Nothing is
+  asked where a script or an agent calls it - stdin or stdout is not a
+  terminal, or --json - and there the defaults are what init has always
+  done. Running it again where .moai already stands never asks. Esc stops
+  with nothing written.
+
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
   directory name: dropping hyphens if that fits (moa-issue becomes moaissue),
@@ -852,11 +860,14 @@ Examples:
         /// Leave .git/config alone (plant no merge driver)
         #[arg(long)]
         no_driver: bool,
+        /// Ask nothing; what no flag sets takes the default
+        #[arg(short = 'y', long)]
+        yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "yes", "check"])]
         print: bool,
     },
 }

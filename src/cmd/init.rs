@@ -5,6 +5,7 @@ use crate::cmd::merge_driver::Planting;
 use crate::config::DEFAULT_STATUSES;
 use crate::held::Fell;
 use crate::i18n::{fill, say};
+use crate::init_choice::Choices as Choice;
 use crate::store::Elsewhere;
 use std::path::Path;
 
@@ -1091,7 +1092,35 @@ fn merges(line: &str) -> Vec<&str> {
         .collect()
 }
 
-pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) -> R<Vec<String>> {
+/// 새로 심는 접두어를 잰다 — 플래그로 준 것도 선택 상자에 친 것도 이 하나로 잰다(moai-zynt.a7y).
+///
+/// **모양을 먼저 본다** — 길이를 먼저 보면 `MyCompanyBackend` 에 그 자체로 틀린 `MyCompan` 을 후보로
+/// 대, 따라 친 쪽이 둘째 오류를 만났다(리뷰 moai-f7xs.z1x). 후보는 명령줄이 아니라 접두어만 댄다 —
+/// `-C`·`--no-agents` 를 줬던 명령을 다시 짜서 대면 붙여 넣은 자리에 엉뚱하게 심는다.
+fn fresh_prefix(lang: crate::i18n::Lang, p: &str) -> Result<(), Fail> {
+    crate::config::check_prefix(p).map_err(|e| Fail::new(crate::view::config_trouble(lang, &e)))?;
+    if p.chars().count() > PREFIX_MAX {
+        return Err(Fail::coded(
+            format!(
+                "{}\n      {}",
+                fill(
+                    say(lang, "refuse.init_prefix_too_long"),
+                    &[("max", &PREFIX_MAX.to_string()), ("p", p), ("n", &p.chars().count().to_string())],
+                ),
+                fill(say(lang, "refuse.init_prefix_short"), &[("short", &shorten(p))]),
+            ),
+            super::code::BAD_INPUT,
+        ));
+    }
+    Ok(())
+}
+
+/// 여러 줄 거절문을 선택 상자의 한 줄로 편다 — 이음 들여쓰기는 `moai: ` 머리에 맞춘 값이라 거기서는 뜻이 없다.
+fn one_line(message: &str) -> String {
+    message.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" — ")
+}
+
+pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, yes: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
@@ -1160,6 +1189,35 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // 명령을 하나 더 만드는 대신 `init` 이 그 일을 맡는다 — 이슈와 저널은
     // 손대지 않으므로 다시 불러도 잃을 것이 없다.
     let again = dir.exists();
+
+    // **처음 심을 때 사람에게 묻는다**(moai-zynt.a7y). 플래그와 화면은 저마다 고른 것을 내고 같은
+    // `resolve` 를 지난다 — 아래는 그 계획만 읽는다. 묻는 것은 사람이 보는 터미널에서뿐이다: 에이전트·
+    // 스크립트·`--json` 은 지금까지와 바이트째 같은 `init` 을 받는다(`init_choice::PLAIN`). 다시 부른
+    // `init` 은 안 묻는다 — 접두어는 이미 못 바꾸고, 하는 일은 딸린 파일을 맞추는 것뿐이다. 워크트리
+    // 거절은 위에서 이미 섰다 — 다 물어 놓고 거절하지 않는다.
+    let fixed = Choice::from_flags(prefix, no_agents, no_driver);
+    let plan = if !again && !yes && !ctx.json && !fixed.complete() && crate::tui::init_screen::on_terminal() {
+        let lang = ctx.lang();
+        let suggested = prefix_from(&root).map(|full| shorten(&full)).unwrap_or_default();
+        let form = crate::init_choice::Form::new(fixed, crate::init_choice::SCREEN, suggested.clone());
+        // 심으려는 접두어를 플래그로 준 것과 같은 잣대로 잰다. 거절문은 여러 줄이라 한 줄로 편다.
+        let check = |p: &Option<String>| match p {
+            Some(p) => fresh_prefix(lang, p).err().map(|f| one_line(&f.message)),
+            None if suggested.is_empty() => Some(say(lang, "refuse.init_no_prefix").to_string()),
+            None => None,
+        };
+        // 머리에는 디렉터리 이름만 댄다 — 온 경로는 한 줄을 넘겨 잘리고, 셸이 이미 그 자리에 서 있다.
+        let name =
+            root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string());
+        match crate::tui::init_screen::ask(lang, &name, form, &check) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => return Err(Fail::new(say(lang, "init.stopped"))),
+            Err(why) => return Err(Fail::new(fill(say(lang, "init.no_screen"), &[("why", &why)]))),
+        }
+    } else {
+        crate::init_choice::resolve(&fixed, &crate::init_choice::PLAIN)
+    };
+    let (prefix, no_agents, no_driver) = (plan.prefix.as_deref(), !plan.agents, !plan.driver);
     // 디렉터리 이름이 길어 줄였으면 그 원래 모양 — 무엇에서 줄였는지 말하려고 든다.
     let mut shortened: Option<String> = None;
     let prefix = match (prefix, again) {
@@ -1182,25 +1240,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // **사람이 준 긴 접두어는 거절한다** — 쓰기는 엄하게. `init` 은 한 번 부르는 명령이라
         // 다시 부르는 비용이 작고, 거절문이 짧은 후보를 댄다. 이미 심긴 저장소의 긴 접두어는
         // 위 갈래가 그대로 받는다.
-        // **모양을 먼저 본다** — 길이를 먼저 보면 `MyCompanyBackend` 에 그 자체로 틀린
-        // `MyCompan` 을 후보로 대, 따라 친 쪽이 둘째 오류를 만났다(리뷰 moai-f7xs.z1x).
-        // 후보는 명령줄이 아니라 접두어만 댄다 — `-C`·`--no-agents` 를 줬던 명령을 다시 짜서
-        // 대면 붙여 넣은 자리에 엉뚱하게 심는다.
         (Some(p), false) => {
-            crate::config::check_prefix(p).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
-            if p.chars().count() > PREFIX_MAX {
-                return Err(Fail::coded(
-                    format!(
-                        "{}\n      {}",
-                        fill(
-                            say(ctx.lang(), "refuse.init_prefix_too_long"),
-                            &[("max", &PREFIX_MAX.to_string()), ("p", p), ("n", &p.chars().count().to_string())],
-                        ),
-                        fill(say(ctx.lang(), "refuse.init_prefix_short"), &[("short", &shorten(p))]),
-                    ),
-                    super::code::BAD_INPUT,
-                ));
-            }
+            fresh_prefix(ctx.lang(), p)?;
             p.to_string()
         }
         (None, true) => crate::config::Config::load(&root).map_err(|e| Fail::config(&e, ctx.lang()))?.prefix,

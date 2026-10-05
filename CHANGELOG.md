@@ -12,6 +12,21 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai init --yes` (`-y`) plants without asking.** What no flag sets takes
+  the default — the same `init` as before this release.
+
+### Changed
+
+- **The first `moai init` in a terminal asks before it plants.** A short screen
+  shows the id prefix, whether to write the AGENTS.md guide block and whether to
+  plant the merge driver, each with its default picked; Enter plants and Esc
+  stops with nothing written. A flag picks its row and locks it. It asks only
+  where a person is watching — when stdin or stdout is not a terminal, or under
+  `--json`, `init` is byte for byte what it was, so agents and scripts see no
+  change. Running `init` again where `.moai` already stands never asks.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added
