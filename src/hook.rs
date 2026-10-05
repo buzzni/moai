@@ -8528,7 +8528,12 @@ fn shelving_closes<'a>(
 /// `.worktrees/` 는 세 벤더가 함께 쓰는 워크트리 자리다(moai-5s9l). 루트에서 보면 그 밑은 남의
 /// 체크아웃이라, 거기 고친 것은 그 워크트리의 일이지 루트의 일이 아니다.
 /// 여기를 고치는 것은 "일" 이 아니다 — 일을 하러 가는 길이다.
-const SKIP: &[&str] = &[".moai", ".claude", ".worktrees", ".git", "target", "node_modules"];
+///
+/// **`.agents/` 는 `.claude/` 와 같은 자리다**(2026-10-05 사용자 결정, moai-54yc.cq2) — Codex·Antigravity 의 도구 설정
+/// (스킬·`hooks.json`·`rules/`)이 서는 곳이다. 세던 판은 Claude 세션이 `.claude/moai-plugin/skills/moai/SKILL.md` 를
+/// 고치면 지나가고 같은 글인 `.agents/skills/moai/SKILL.md` 를 고치면 막았다(리뷰 moai-xs2h.dir 7번). 그 자리의
+/// `hooks.json`·`rules/` 를 고치는 일도 규칙 2 밖으로 나가는 것을 받아들였다 — `.claude/settings.json` 이 이미 그렇다.
+const SKIP: &[&str] = &[".moai", ".claude", ".agents", ".worktrees", ".git", "target", "node_modules"];
 
 /// 이 파일을 고치는 것이 일에 매여야 하는가 — **글자로 이미 푼 자리를 받는다**(moai-ln11).
 ///
@@ -11900,6 +11905,9 @@ mod tests {
         for free in [
             "/repo/.moai/config.toml",
             "/repo/.claude/settings.json",
+            // `.claude/` 와 같은 도구 설정 자리다(moai-54yc.cq2) — 같은 스킬 글이 한쪽에서만 막혔다.
+            "/repo/.agents/skills/moai/SKILL.md",
+            "/repo/.agents/hooks.json",
             "/repo/target/debug/x",
             "/tmp/scratch/memo.md",
             "/other/repo/src/main.rs",
