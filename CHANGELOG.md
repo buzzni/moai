@@ -16,6 +16,12 @@ does not tag — see `CONTRIBUTING.md`.
 
 - **`moai init --yes` (`-y`) plants without asking.** What no flag sets takes
   the default — the same `init` as before this release.
+- **`moai init --tracking exclude|gitignore` keeps the tracker out of git.**
+  The ignore rules, `/.moai/` and the hook plugin's directory go into
+  `.git/info/exclude` (no committed file changes) or `.gitignore`, and
+  `.gitattributes` and the merge driver are left alone — there is nothing for
+  git to merge. `--tracking commit` is what `init` has always done. Run again,
+  `init` asks git which one stands rather than storing it, and refuses to switch.
 
 ### Changed
 

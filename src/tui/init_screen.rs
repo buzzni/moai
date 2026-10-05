@@ -5,7 +5,7 @@
 //! 남아야 한다. 끝나면 그 몇 줄을 지우고 보고가 그 자리에 선다.
 
 use crate::i18n::{Lang, fill, say};
-use crate::init_choice::{Act, Field, Form, Plan};
+use crate::init_choice::{Act, FIELDS, Field, Form, Plan};
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
@@ -14,8 +14,9 @@ use ratatui::widgets::Paragraph;
 use ratatui::{Frame, TerminalOptions, Viewport};
 use unicode_width::UnicodeWidthStr;
 
-/// 머리 · 빈 줄 · 칸 셋 · 빈 줄 · 알림 · 키.
-const HEIGHT: u16 = 8;
+/// 머리 · 빈 줄 · 칸들 · 빈 줄 · 알림 · 키. 칸이 숨으면 아래가 빈 줄로 남는다 — 높이를 그때마다 바꾸면
+/// 인라인 뷰포트가 셸 스크롤을 밀어 올린다.
+const HEIGHT: u16 = 4 + FIELDS.len() as u16;
 
 /// 사람이 보는 터미널인가 — **읽는 쪽과 쓰는 쪽이 둘 다** 터미널이어야 묻는다. 한쪽이라도 파이프면
 /// 부른 것은 에이전트나 스크립트다: 묻는 순간 아무도 답하지 않는 키를 영영 기다린다.
@@ -24,13 +25,13 @@ pub fn on_terminal() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-/// 묻고 계획을 돌려준다. `None` 은 사람이 그만뒀다 — 아무것도 안 썼다. `check` 는 심으려는 접두어를
-/// 재어 틀렸으면 까닭을 댄다(그 잣대는 `init` 이 쥔다). `Err` 는 터미널을 못 켠 까닭이다.
+/// 묻고 계획을 돌려준다. `None` 은 사람이 그만뒀다 — 아무것도 안 썼다. `check` 는 심으려는 계획을
+/// 재어 못 심으면 까닭을 댄다(그 잣대는 `init` 이 쥔다). `Err` 는 터미널을 못 켠 까닭이다.
 pub fn ask(
     lang: Lang,
     dir: &str,
     mut form: Form,
-    check: &dyn Fn(&Option<String>) -> Option<String>,
+    check: &dyn Fn(&Plan) -> Option<String>,
 ) -> Result<Option<Plan>, String> {
     let mut term = ratatui::try_init_with_options(TerminalOptions { viewport: Viewport::Inline(HEIGHT) })
         .map_err(|e| e.to_string())?;
@@ -45,7 +46,7 @@ pub fn ask(
             match form.key(k) {
                 Act::Stay => {}
                 Act::Stop => return Ok(None),
-                Act::Plant => match check(&form.choices().prefix) {
+                Act::Plant => match check(&form.plan()) {
                     Some(why) => form.problem = Some(why),
                     None => return Ok(Some(form.plan())),
                 },
@@ -63,39 +64,50 @@ pub fn ask(
     out.map_err(|e| e.to_string())
 }
 
+/// 칸의 이름과, 고르는 칸이면 선택지의 이름들(왼쪽부터).
+fn names(f: Field, lang: Lang) -> (&'static str, Vec<&'static str>) {
+    match f {
+        Field::Prefix => (say(lang, "init.ask_prefix"), Vec::new()),
+        Field::Tracking => (
+            say(lang, "init.ask_tracking"),
+            vec![
+                say(lang, "init.ask_tracking_commit"),
+                say(lang, "init.ask_tracking_exclude"),
+                say(lang, "init.ask_tracking_gitignore"),
+            ],
+        ),
+        Field::Agents => (say(lang, "init.ask_agents"), vec![say(lang, "init.ask_agents_on"), say(lang, "init.ask_agents_off")]),
+        Field::Driver => (say(lang, "init.ask_driver"), vec![say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")]),
+    }
+}
+
 fn draw(f: &mut Frame, form: &Form, lang: Lang, dir: &str) {
     let area = f.area();
-    let labels: Vec<(Field, &str)> = vec![
-        (Field::Prefix, say(lang, "init.ask_prefix")),
-        (Field::Agents, say(lang, "init.ask_agents")),
-        (Field::Driver, say(lang, "init.ask_driver")),
-    ];
-    let pad = labels.iter().map(|(_, l)| l.width()).max().unwrap_or(0);
+    // 이름 칸의 너비는 숨은 칸까지 재어 둔다 — 칸이 숨었다 서면 값 칸이 옆으로 뛰지 않게.
+    let pad = FIELDS.iter().map(|f| names(*f, lang).0.width()).max().unwrap_or(0);
     let mut lines = vec![
         Line::from(Span::styled(fill(say(lang, "init.ask_title"), &[("dir", dir)]), Style::new().bold())),
         Line::raw(""),
     ];
     let mut cursor_at: Option<Position> = None;
-    for (i, (field, label)) in labels.iter().enumerate() {
-        let here = form.cursor == i;
-        let locked = form.locked(*field);
+    for (i, field) in form.rows().into_iter().enumerate() {
+        let (label, options) = names(field, lang);
+        let here = form.cursor == field;
+        let locked = form.locked(field);
         let head = format!("{} {label}{}  ", if here { '▸' } else { ' ' }, " ".repeat(pad - label.width()));
         let mut spans = vec![Span::raw(head.clone())];
-        match field {
-            Field::Prefix => {
+        match form.option(field) {
+            None => {
                 spans.push(Span::styled(form.typed.clone(), Style::new().add_modifier(Modifier::UNDERLINED)));
                 if here && !locked {
                     let x = area.x + (head.width() + form.typed.width()) as u16;
                     cursor_at = Some(Position::new(x.min(area.right().saturating_sub(1)), area.y + 2 + i as u16));
                 }
             }
-            Field::Agents | Field::Driver => {
-                let (on, off) = match field {
-                    Field::Agents => (say(lang, "init.ask_agents_on"), say(lang, "init.ask_agents_off")),
-                    _ => (say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")),
-                };
-                let lit = form.on(*field);
-                spans.push(Span::raw(format!("{} {on}    {} {off}", mark(lit), mark(!lit))));
+            Some((_, at)) => {
+                let shown: Vec<String> =
+                    options.iter().enumerate().map(|(j, name)| format!("{} {name}", mark(j == at))).collect();
+                spans.push(Span::raw(shown.join("    ")));
             }
         }
         if locked {

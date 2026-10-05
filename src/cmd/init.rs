@@ -5,7 +5,7 @@ use crate::cmd::merge_driver::Planting;
 use crate::config::DEFAULT_STATUSES;
 use crate::held::Fell;
 use crate::i18n::{fill, say};
-use crate::init_choice::Choices as Choice;
+use crate::init_choice::{Choices as Choice, Flags, Plan, Tracking};
 use crate::store::Elsewhere;
 use std::path::Path;
 
@@ -280,6 +280,52 @@ pub fn agents_state(root: &Path) -> Result<(BlockState, String), Fell> {
 /// `.gitignore` 블록을 줬다(리뷰). 칸이 표에 있으면 줄을 더할 때 블록을 빠뜨릴 수 없다.
 const DOTFILES: [(&str, fn(&Path) -> std::borrow::Cow<'static, str>, &str); 2] =
     [(".gitattributes", attributes_for, "gitattributes_rules"), (".gitignore", gitignore_for, "gitignore_rules")];
+
+/// 이 클론에만 둔 트래커가 무시 블록에 더하는 줄(moai-zynt.own). 훅·스킬의 플러그인 트리(`moai skill install`)도
+/// 같이 막는다 — 그것만 남으면 `git status` 가 추적 안 된 파일로 비춘다.
+const LOCAL_IGNORE: &str = "\
+# This tracker stays in this clone - git does not track it.
+/.moai/
+/.claude/moai-plugin/
+";
+
+/// git 의 공통 디렉터리(`--git-common-dir`). 워크트리·서브모듈에서도 `info/exclude` 가 사는 곳이다.
+/// git 저장소가 아니면 `None`.
+fn git_dir(root: &Path) -> Option<std::path::PathBuf> {
+    let out = crate::git::run(root, &["rev-parse", "--git-common-dir"]).ok()?;
+    let dir = out.trim();
+    (!dir.is_empty()).then(|| root.join(dir))
+}
+
+/// `.git/info/exclude` 의 자리. `info/` 가 없으면 만든다 — 새로 `git init` 한 저장소에도 대개 있지만
+/// 템플릿을 끈 저장소에는 없다.
+fn exclude_file(root: &Path) -> Option<std::path::PathBuf> {
+    let info = git_dir(root)?.join("info");
+    std::fs::create_dir_all(&info).ok()?;
+    Some(info.join("exclude"))
+}
+
+/// 심긴 트래커를 git 이 추적하는가 — **git 에 묻는다**(`check-ignore`). 추적 중인 파일은 무시 규칙이
+/// 있어도 `check-ignore` 가 안 대므로, 커밋된 트래커는 커밋으로 읽힌다. 무시한 규칙이 `.gitignore` 의 것이면
+/// 그쪽이고, 그 밖의 자리(`info/exclude`, 사람의 전역 무시 파일)는 이 클론의 것으로 읽는다. git 저장소가
+/// 아니면 지금까지의 `init` 처럼 커밋으로 친다.
+fn tracking_of(root: &Path) -> Tracking {
+    let Ok(said) = crate::git::run(root, &["check-ignore", "-v", ".moai/config.toml"]) else {
+        return Tracking::Commit;
+    };
+    let source = said.split(':').next().unwrap_or_default();
+    match source {
+        "" => Tracking::Commit,
+        ".gitignore" => Tracking::Gitignore,
+        _ => Tracking::Exclude,
+    }
+}
+
+/// git 저장소가 아닌데 이 클론에만 두려 할 때의 까닭. 둘 자리(`info/exclude`)가 없고, `.gitignore` 에 적어도
+/// 막을 git 이 없다.
+fn local_without_git(lang: crate::i18n::Lang, plan: &Plan, git: bool) -> Option<String> {
+    (!git && !plan.tracking.tracked()).then(|| say(lang, "refuse.init_local_no_git").to_string())
+}
 
 /// `.gitignore` 에 심을 블록 — **트래커가 링크 너머에 살면 그 자리의 락과 임시 파일도 막는다**(moai-th3b).
 ///
@@ -1120,7 +1166,8 @@ fn one_line(message: &str) -> String {
     message.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" — ")
 }
 
-pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, yes: bool) -> R<Vec<String>> {
+pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
+    let (prefix, no_agents, no_driver) = (flags.prefix, flags.no_agents, flags.no_driver);
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
@@ -1195,16 +1242,44 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, ye
     // 스크립트·`--json` 은 지금까지와 바이트째 같은 `init` 을 받는다(`init_choice::PLAIN`). 다시 부른
     // `init` 은 안 묻는다 — 접두어는 이미 못 바꾸고, 하는 일은 딸린 파일을 맞추는 것뿐이다. 워크트리
     // 거절은 위에서 이미 섰다 — 다 물어 놓고 거절하지 않는다.
-    let fixed = Choice::from_flags(prefix, no_agents, no_driver);
-    let plan = if !again && !yes && !ctx.json && !fixed.complete() && crate::tui::init_screen::on_terminal() {
+    let mut fixed = Choice::from_flags(flags);
+    // **다시 부른 `init` 의 추적은 git 에 묻는다**(moai-zynt.own) — 어디에도 적어 두지 않는다. 적어 두면
+    // 사람이 무시 줄을 지운 날 적힌 값과 git 이 갈려, `init` 이 커밋되는 트래커에 드라이버를 안 심는다.
+    // 바꾸는 길은 `init` 이 아니다: 커밋된 것을 빼거나(`git rm --cached`) 넣는 일은 사람의 결정이다.
+    if again {
+        let now = tracking_of(&root);
+        if let Some(asked) = fixed.tracking.filter(|t| *t != now) {
+            return Err(Fail::coded(
+                fill(say(ctx.lang(), "refuse.init_tracking_fixed"), &[("now", now.word()), ("asked", asked.word())]),
+                super::code::ALREADY_EXISTS,
+            ));
+        }
+        fixed.tracking = Some(now);
+    }
+    let git = git_dir(&root).is_some();
+    let plan = if !again
+        && !yes
+        && !ctx.json
+        && !fixed.complete(&crate::init_choice::SCREEN)
+        && crate::tui::init_screen::on_terminal()
+    {
         let lang = ctx.lang();
         let suggested = prefix_from(&root).map(|full| shorten(&full)).unwrap_or_default();
-        let form = crate::init_choice::Form::new(fixed, crate::init_choice::SCREEN, suggested.clone());
+        // git 저장소가 아니면 이 클론에만 둘 자리가 없다 — 기본을 커밋 쪽으로 돌린다. 칸은 남겨 둔다:
+        // 고르면 심을 때 까닭을 댄다.
+        let defaults = match git {
+            true => crate::init_choice::SCREEN,
+            false => crate::init_choice::Defaults { tracking: Tracking::Commit, ..crate::init_choice::SCREEN },
+        };
+        let form = crate::init_choice::Form::new(fixed, defaults, suggested.clone());
         // 심으려는 접두어를 플래그로 준 것과 같은 잣대로 잰다. 거절문은 여러 줄이라 한 줄로 편다.
-        let check = |p: &Option<String>| match p {
-            Some(p) => fresh_prefix(lang, p).err().map(|f| one_line(&f.message)),
-            None if suggested.is_empty() => Some(say(lang, "refuse.init_no_prefix").to_string()),
-            None => None,
+        let check = |plan: &Plan| {
+            let prefix = match &plan.prefix {
+                Some(p) => fresh_prefix(lang, p).err().map(|f| one_line(&f.message)),
+                None if suggested.is_empty() => Some(say(lang, "refuse.init_no_prefix").to_string()),
+                None => None,
+            };
+            prefix.or_else(|| local_without_git(lang, plan, git))
         };
         // 머리에는 디렉터리 이름만 댄다 — 온 경로는 한 줄을 넘겨 잘리고, 셸이 이미 그 자리에 서 있다.
         let name =
@@ -1215,7 +1290,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, ye
             Err(why) => return Err(Fail::new(fill(say(lang, "init.no_screen"), &[("why", &why)]))),
         }
     } else {
-        crate::init_choice::resolve(&fixed, &crate::init_choice::PLAIN)
+        let plan = crate::init_choice::resolve(&fixed, &crate::init_choice::PLAIN);
+        if let Some(why) = local_without_git(ctx.lang(), &plan, git) {
+            return Err(Fail::coded(why, super::code::BAD_INPUT));
+        }
+        plan
     };
     let (prefix, no_agents, no_driver) = (plan.prefix.as_deref(), !plan.agents, !plan.driver);
     // 디렉터리 이름이 길어 줄였으면 그 원래 모양 — 무엇에서 줄였는지 말하려고 든다.
@@ -1311,9 +1390,27 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, ye
 
     // 블록은 [`DOTFILES`] 의 칸과 같은 자가 짓는다 — 비추는 길([`dotfile_gaps`])이 요구하는 줄과 여기서
     // 쓰는 줄이 갈릴 자리가 없다.
+    //
+    // **이 클론에만 두면**(moai-zynt.own) 병합 규칙은 할 일이 없어 `.gitattributes` 를 안 건드리고, 무시 블록에
+    // 트래커와 훅 자리를 더해 고른 파일에 쓴다. `.git/info/exclude` 를 고르면 커밋되는 파일은 하나도 안 바뀐다.
     let (attributes, ignored) = (attributes_for(&root), gitignore_for(&root));
-    let attrs = ensure_lines(&root.join(".gitattributes"), &attributes, || ctx.lang());
-    let ignore = ensure_lines(&root.join(".gitignore"), &ignored, || ctx.lang());
+    let ignored: std::borrow::Cow<str> = match plan.tracking {
+        Tracking::Commit => ignored,
+        Tracking::Exclude | Tracking::Gitignore => format!("{ignored}{LOCAL_IGNORE}").into(),
+    };
+    let ignore_path = match plan.tracking {
+        Tracking::Exclude => exclude_file(&root).ok_or_else(|| Fail::new(say(ctx.lang(), "refuse.init_local_no_git")))?,
+        Tracking::Commit | Tracking::Gitignore => root.join(".gitignore"),
+    };
+    let ignore_name = match plan.tracking {
+        Tracking::Exclude => ".git/info/exclude",
+        Tracking::Commit | Tracking::Gitignore => ".gitignore",
+    };
+    let attrs = match plan.tracking.tracked() {
+        true => ensure_lines(&root.join(".gitattributes"), &attributes, || ctx.lang()),
+        false => Added::Already,
+    };
+    let ignore = ensure_lines(&ignore_path, &ignored, || ctx.lang());
     // **선언을 쓴 바로 뒤에 그 이름이 가리키는 명령을 심는다**(moai-08bo, 2026-09-21 사용자 결정).
     // 앞 판은 이름만 쓰고 명령은 사람에게 치라고 했다 — 도구가 제 손으로 안 도는 절반이었다.
     // 무엇을 하고 안 하는지는 [`crate::cmd::merge_driver::plant_for_init`] 가 쥔다: 선언이 없는
@@ -1324,7 +1421,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, ye
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다. 링크는 줄 대신 고칠 말을 댄다
     // ([`Added::Linked`]).
     let untouched: Vec<(&str, &Added, &str)> =
-        [(".gitattributes", &attrs, &*attributes), (".gitignore", &ignore, &*ignored)]
+        [(".gitattributes", &attrs, &*attributes), (ignore_name, &ignore, &*ignored)]
             .into_iter()
             .filter(|(_, done, _)| done.trouble().is_some())
             .collect();
@@ -1387,6 +1484,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, ye
             "root": root.display().to_string(),
             "prefix": prefix,
             "created": !again,
+            "tracking": plan.tracking.word(),
             "gitattributes": matches!(attrs, Added::Wrote { .. }),
             "gitignore": matches!(ignore, Added::Wrote { .. }),
             "agents": agents,
@@ -1473,9 +1571,10 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool, ye
         }
         _ => {}
     }
-    match ignore {
-        Added::Wrote { rules: true } => out.push(say(lang, "init.wrote_gitignore").to_string()),
-        Added::Wrote { rules: false } => out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitignore")])),
+    match (&ignore, plan.tracking.tracked()) {
+        (Added::Wrote { rules: true }, true) => out.push(say(lang, "init.wrote_gitignore").to_string()),
+        (Added::Wrote { rules: true }, false) => out.push(fill(say(lang, "init.wrote_local"), &[("name", ignore_name)])),
+        (Added::Wrote { rules: false }, _) => out.push(fill(say(lang, "init.wrote_comments"), &[("name", ignore_name)])),
         _ => {}
     }
     // **한 일만 말한다** — 이미 서 있던 줄과 안 쓰기로 한 저장소는 조용하다. 못 심은 것은

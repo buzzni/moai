@@ -459,8 +459,11 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // 붙여 넣을 글을 내는 길도 같은 이름 밑이다 — 까닭은 `init::print` 에 있다.
         Cmd::Init { print: true, .. } => init::print(ctx),
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
-        Cmd::Init { prefix, no_agents, no_driver, yes, check: false, print: false } => {
-            init::run(ctx, prefix.as_deref(), no_agents, no_driver, yes)
+        Cmd::Init { prefix, no_agents, no_driver, tracking, yes, check: false, print: false } => {
+            // 낱말은 clap 이 이미 골랐다 — 여기서 못 푸는 값은 오지 않는다.
+            let tracking = tracking.as_deref().and_then(crate::init_choice::Tracking::parse);
+            let flags = crate::init_choice::Flags { prefix: prefix.as_deref(), tracking, no_agents, no_driver };
+            init::run(ctx, &flags, yes)
         }
         Cmd::Hook { event } => hook::run(ctx, event),
         // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도

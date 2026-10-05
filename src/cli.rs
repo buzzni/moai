@@ -860,14 +860,17 @@ Examples:
         /// Leave .git/config alone (plant no merge driver)
         #[arg(long)]
         no_driver: bool,
+        /// Git tracks it (commit) or not (exclude, gitignore)
+        #[arg(long, value_name = "how", value_parser = ["commit", "exclude", "gitignore"], hide_possible_values = true)]
+        tracking: Option<String>,
         /// Ask nothing; what no flag sets takes the default
         #[arg(short = 'y', long)]
         yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "yes"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "yes", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "yes", "check"])]
         print: bool,
     },
 }

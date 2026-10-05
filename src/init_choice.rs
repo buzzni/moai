@@ -11,9 +11,53 @@
 //! **칸 사이의 규칙은 한 방향으로만 흐른다**: 추적 → 안내 → 설치 → 드라이버(moai-zynt.a7y 노트,
 //! 2026-10-06 사용자 결정). 앞 칸은 뒤 칸의 기본값·보임·잠김을 정할 수 있고 뒤 칸은 앞 칸을 못
 //! 건드린다 — 그래서 [`resolve`] 는 그 차례로 한 번 훑으면 답이 난다. 거스르는 규칙이 필요해지면
-//! 그때가 설계를 다시 볼 때다. 지금 선 칸(접두어·안내·드라이버) 사이에는 아직 규칙이 없다.
+//! 그때가 설계를 다시 볼 때다.
+//!
+//! 사람이 고른 값이 앞 칸 때문에 무효가 되면 **지우지 않는다**. 화면은 그 칸을 숨기거나 잠그고 실제
+//! 값은 `resolve` 가 정한다 — 앞 칸을 되돌리면 고른 값이 그대로 돌아온다.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+/// 트래커를 git 이 추적하는가(moai-zynt.own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tracking {
+    /// 커밋해서 공유한다 — 지금까지의 `init` 이다.
+    Commit,
+    /// 이 클론에만 둔다. 무시 규칙을 `.git/info/exclude` 에 적는다 — 커밋되는 파일이 하나도 안 바뀐다.
+    Exclude,
+    /// 이 클론에만 둔다. 무시 규칙을 `.gitignore` 에 적는다 — 그 줄은 커밋되어 남에게도 보인다.
+    Gitignore,
+}
+
+impl Tracking {
+    pub const ALL: [Tracking; 3] = [Tracking::Commit, Tracking::Exclude, Tracking::Gitignore];
+
+    /// 플래그와 `--json` 이 쓰는 낱말.
+    pub fn word(self) -> &'static str {
+        match self {
+            Tracking::Commit => "commit",
+            Tracking::Exclude => "exclude",
+            Tracking::Gitignore => "gitignore",
+        }
+    }
+
+    pub fn parse(word: &str) -> Option<Tracking> {
+        Tracking::ALL.into_iter().find(|t| t.word() == word)
+    }
+
+    pub fn tracked(self) -> bool {
+        self == Tracking::Commit
+    }
+}
+
+/// 플래그로 준 것. 하나로 묶어 받는다 — 칸이 늘 때마다 함수 인자가 늘면 부르는 자리가 순서로 틀린다.
+#[derive(Debug, Clone, Default)]
+pub struct Flags<'a> {
+    pub prefix: Option<&'a str>,
+    pub tracking: Option<Tracking>,
+    pub no_agents: bool,
+    pub no_driver: bool,
+}
 
 /// 사람이 고른 값. `None` 은 고르지 않았다 — 기본값을 따른다.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -21,6 +65,7 @@ pub struct Choices {
     /// id 접두어. `None` 이면 `run` 이 디렉터리 이름에서 짓는다 — 파일 시스템을 알아야 해서 여기서
     /// 셈하지 않는다.
     pub prefix: Option<String>,
+    pub tracking: Option<Tracking>,
     /// AGENTS.md 에 안내 블록을 쓰는가.
     pub agents: Option<bool>,
     /// `.git/config` 에 머지 드라이버를 심는가.
@@ -28,12 +73,13 @@ pub struct Choices {
 }
 
 impl Choices {
-    /// 플래그가 고른 것. **플래그는 끄는 쪽만 있다** — 켜는 쪽은 기본값이라, 준 적 없는 것과 같다.
-    pub fn from_flags(prefix: Option<&str>, no_agents: bool, no_driver: bool) -> Choices {
+    /// 플래그가 고른 것. 끄는 플래그(`--no-*`)는 켜는 쪽이 기본값이라, 안 준 것은 고르지 않은 것이다.
+    pub fn from_flags(f: &Flags) -> Choices {
         Choices {
-            prefix: prefix.map(str::to_string),
-            agents: no_agents.then_some(false),
-            driver: no_driver.then_some(false),
+            prefix: f.prefix.map(str::to_string),
+            tracking: f.tracking,
+            agents: f.no_agents.then_some(false),
+            driver: f.no_driver.then_some(false),
         }
     }
 
@@ -41,60 +87,82 @@ impl Choices {
     pub fn over(&self, under: &Choices) -> Choices {
         Choices {
             prefix: self.prefix.clone().or_else(|| under.prefix.clone()),
+            tracking: self.tracking.or(under.tracking),
             agents: self.agents.or(under.agents),
             driver: self.driver.or(under.driver),
         }
     }
 
-    /// 묻지 않아도 되는가 — 모든 칸이 이미 골라졌다. **접두어도 센다**: 나중에 못 바꾸는 값이라
-    /// 기본값(디렉터리 이름)을 그대로 쓰더라도 한 번 보이는 값어치가 있다.
-    pub fn complete(&self) -> bool {
-        self.prefix.is_some() && self.agents.is_some() && self.driver.is_some()
+    /// 묻지 않아도 되는가 — 화면에 서는 칸이 모두 골라졌다. **접두어도 센다**: 나중에 못 바꾸는 값이라
+    /// 기본값(디렉터리 이름)을 그대로 쓰더라도 한 번 보이는 값어치가 있다. 숨는 칸은 안 센다 — 추적하지
+    /// 않으면 드라이버는 묻지 않는다.
+    pub fn complete(&self, d: &Defaults) -> bool {
+        let plan = resolve(self, d);
+        FIELDS.iter().filter(|f| shown(**f, &plan)).all(|f| match f {
+            Field::Prefix => self.prefix.is_some(),
+            Field::Tracking => self.tracking.is_some(),
+            Field::Agents => self.agents.is_some(),
+            Field::Driver => self.driver.is_some(),
+        })
     }
 }
 
 /// 고르지 않은 칸이 따를 값.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Defaults {
+    pub tracking: Tracking,
     pub agents: bool,
     pub driver: bool,
 }
 
-/// 선택 상자가 미리 골라 두는 값.
-pub const SCREEN: Defaults = Defaults { agents: true, driver: true };
+/// 선택 상자가 미리 골라 두는 값. 추적은 안 한다 — 이 클론에만 두고 커밋되는 파일을 하나도 안
+/// 바꾸는 쪽이 기본이다(2026-10-06 사용자 결정, moai-zynt.own).
+pub const SCREEN: Defaults = Defaults { tracking: Tracking::Exclude, agents: true, driver: true };
 
 /// 터미널이 아닌 곳(에이전트·스크립트)과 `--yes` 의 값. **지금까지의 `init` 과 바이트째 같아야 한다**
 /// (2026-10-06 사용자 결정) — 에이전트가 부르던 결과를 이 묶음이 지킨다. 화면의 기본값이 달라져도
 /// 이쪽은 안 따라간다.
-pub const PLAIN: Defaults = Defaults { agents: true, driver: true };
+pub const PLAIN: Defaults = Defaults { tracking: Tracking::Commit, agents: true, driver: true };
 
 /// 빈칸 없는 계획. `init::run` 은 이것만 받고 판단하지 않는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     /// `None` 이면 디렉터리 이름에서 짓는다(위 [`Choices::prefix`]).
     pub prefix: Option<String>,
+    pub tracking: Tracking,
     pub agents: bool,
     pub driver: bool,
 }
 
-/// 고른 값과 기본값으로 계획을 낸다. 규칙이 서면 위 머리글의 차례(추적 → 안내 → 설치 → 드라이버)로
-/// 여기에 적는다 — 앞 칸을 먼저 정하고, 뒤 칸은 이미 정한 앞 칸만 읽는다.
+/// 고른 값과 기본값으로 계획을 낸다. 머리글의 차례(추적 → 안내 → 설치 → 드라이버)로 적는다 — 앞 칸을
+/// 먼저 정하고, 뒤 칸은 이미 정한 앞 칸만 읽는다.
 pub fn resolve(c: &Choices, d: &Defaults) -> Plan {
+    let tracking = c.tracking.unwrap_or(d.tracking);
     let agents = c.agents.unwrap_or(d.agents);
-    let driver = c.driver.unwrap_or(d.driver);
-    Plan { prefix: c.prefix.clone(), agents, driver }
+    // 추적하지 않으면 머지 드라이버는 할 일이 없다 — git 이 그 파일을 병합할 일이 없다. 고른 값은 두고 끈다.
+    let driver = tracking.tracked() && c.driver.unwrap_or(d.driver);
+    Plan { prefix: c.prefix.clone(), tracking, agents, driver }
 }
 
 /// 화면의 한 칸.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Prefix,
+    Tracking,
     Agents,
     Driver,
 }
 
 /// 화면에 서는 차례. 규칙의 차례(머리글)와 맞춘다 — 앞 칸을 고르면 아래 칸이 바뀌는 쪽이 읽기 쉽다.
-pub const FIELDS: [Field; 3] = [Field::Prefix, Field::Agents, Field::Driver];
+pub const FIELDS: [Field; 4] = [Field::Prefix, Field::Tracking, Field::Agents, Field::Driver];
+
+/// 이 계획에서 그 칸이 서는가. 숨는 칸은 앞 칸이 이미 답을 정한 칸이다.
+pub fn shown(f: Field, plan: &Plan) -> bool {
+    match f {
+        Field::Driver => plan.tracking.tracked(),
+        Field::Prefix | Field::Tracking | Field::Agents => true,
+    }
+}
 
 /// 키 하나를 받은 뒤 부르는 쪽이 할 일.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,7 +188,8 @@ pub struct Form {
     pub suggested: String,
     /// 접두어 칸에 지금 적힌 글.
     pub typed: String,
-    pub cursor: usize,
+    /// 커서가 선 칸. 칸이 숨어도 칸으로 들고 있다 — 줄 번호로 들면 위 칸이 숨을 때 엉뚱한 칸으로 옮겨 간다.
+    pub cursor: Field,
     /// 심으려다 접두어가 틀려 멈춘 까닭. 접두어를 고치면 걷는다.
     pub problem: Option<String>,
 }
@@ -128,9 +197,19 @@ pub struct Form {
 impl Form {
     pub fn new(fixed: Choices, defaults: Defaults, suggested: String) -> Form {
         let typed = fixed.prefix.clone().unwrap_or_else(|| suggested.clone());
-        let mut form = Form { fixed, picked: Choices::default(), defaults, suggested, typed, cursor: 0, problem: None };
-        // 잠기지 않은 첫 칸에 선다 — 플래그로 접두어를 줬으면 그 칸에 서 봐야 고칠 것이 없다.
-        form.cursor = FIELDS.iter().position(|f| !form.locked(*f)).unwrap_or(0);
+        let mut form = Form {
+            fixed,
+            picked: Choices::default(),
+            defaults,
+            suggested,
+            typed,
+            cursor: Field::Prefix,
+            problem: None,
+        };
+        // 고를 수 있는 첫 칸에 선다 — 플래그로 접두어를 줬으면 그 칸에 서 봐야 고칠 것이 없다.
+        if let Some(f) = form.rows().into_iter().find(|f| !form.locked(*f)) {
+            form.cursor = f;
+        }
         form
     }
 
@@ -138,9 +217,16 @@ impl Form {
     pub fn locked(&self, f: Field) -> bool {
         match f {
             Field::Prefix => self.fixed.prefix.is_some(),
+            Field::Tracking => self.fixed.tracking.is_some(),
             Field::Agents => self.fixed.agents.is_some(),
             Field::Driver => self.fixed.driver.is_some(),
         }
+    }
+
+    /// 지금 서는 칸들, 위에서부터.
+    pub fn rows(&self) -> Vec<Field> {
+        let plan = self.plan();
+        FIELDS.into_iter().filter(|f| shown(*f, &plan)).collect()
     }
 
     /// 지금 고른 것 — 플래그를 화면 위에 얹는다. 접두어는 적힌 글이 지은 값과 같으면 `None` 으로 둔다:
@@ -157,18 +243,25 @@ impl Form {
         resolve(&self.choices(), &self.defaults)
     }
 
-    /// 한 칸의 실제 값 — 켜기·끄기 칸만. 그리는 쪽이 이것으로 `(•)` 를 고른다.
-    pub fn on(&self, f: Field) -> bool {
+    /// 고르는 칸의 선택지 수와 지금 선 자리. 접두어 칸은 고르는 칸이 아니다(`None`).
+    pub fn option(&self, f: Field) -> Option<(usize, usize)> {
         let plan = self.plan();
         match f {
-            Field::Agents => plan.agents,
-            Field::Driver => plan.driver,
-            Field::Prefix => true,
+            Field::Prefix => None,
+            Field::Tracking => Some((Tracking::ALL.len(), Tracking::ALL.iter().position(|t| *t == plan.tracking)?)),
+            // 켜는 값이 왼쪽(0), 끄는 값이 오른쪽(1)에 그려진다.
+            Field::Agents => Some((2, usize::from(!plan.agents))),
+            Field::Driver => Some((2, usize::from(!plan.driver))),
         }
     }
 
-    pub fn field(&self) -> Field {
-        FIELDS[self.cursor]
+    fn pick(&mut self, f: Field, at: usize) {
+        match f {
+            Field::Prefix => {}
+            Field::Tracking => self.picked.tracking = Some(Tracking::ALL[at]),
+            Field::Agents => self.picked.agents = Some(at == 0),
+            Field::Driver => self.picked.driver = Some(at == 0),
+        }
     }
 
     pub fn key(&mut self, k: KeyEvent) -> Act {
@@ -190,52 +283,48 @@ impl Form {
 
     /// 잠긴 칸을 건너 옮긴다. 끝에서 멈춘다 — 감아 돌면 몇 칸 안 되는 화면에서 어디 섰는지 잃는다.
     fn step(&mut self, by: isize) {
-        let mut at = self.cursor as isize;
+        let rows = self.rows();
+        let Some(mut at) = rows.iter().position(|f| *f == self.cursor).map(|i| i as isize) else {
+            return;
+        };
         loop {
             at += by;
-            if at < 0 || at >= FIELDS.len() as isize {
+            if at < 0 || at >= rows.len() as isize {
                 return;
             }
-            if !self.locked(FIELDS[at as usize]) {
-                self.cursor = at as usize;
+            if !self.locked(rows[at as usize]) {
+                self.cursor = rows[at as usize];
                 return;
             }
         }
     }
 
     fn edit(&mut self, code: KeyCode) {
-        let f = self.field();
+        let f = self.cursor;
         if self.locked(f) {
             return;
         }
-        match f {
-            Field::Prefix => {
-                match code {
-                    KeyCode::Backspace => {
-                        self.typed.pop();
-                    }
-                    // 받는 글자를 거르지 않는다 — 틀린 글자는 심을 때 까닭과 함께 잰다. 여기서 말없이
-                    // 삼키면 대문자를 친 사람은 왜 안 들어가는지 모른다.
-                    KeyCode::Char(c) if !c.is_control() => self.typed.push(c),
-                    _ => return,
+        let Some((n, at)) = self.option(f) else {
+            match code {
+                KeyCode::Backspace => {
+                    self.typed.pop();
                 }
-                self.problem = None;
+                // 받는 글자를 거르지 않는다 — 틀린 글자는 심을 때 까닭과 함께 잰다. 여기서 말없이
+                // 삼키면 대문자를 친 사람은 왜 안 들어가는지 모른다.
+                KeyCode::Char(c) if !c.is_control() => self.typed.push(c),
+                _ => return,
             }
-            Field::Agents | Field::Driver => {
-                // 켜는 값이 왼쪽, 끄는 값이 오른쪽에 그려진다 — 화살표는 그 자리로 가고, 띄어쓰기는 뒤집는다.
-                let on = match code {
-                    KeyCode::Left => true,
-                    KeyCode::Right => false,
-                    KeyCode::Char(' ') => !self.on(f),
-                    _ => return,
-                };
-                match f {
-                    Field::Agents => self.picked.agents = Some(on),
-                    Field::Driver => self.picked.driver = Some(on),
-                    Field::Prefix => {}
-                }
-            }
-        }
+            self.problem = None;
+            return;
+        };
+        // 화살표는 그 쪽으로 한 칸 가고 끝에서 멈춘다. 띄어쓰기는 감아 돈다.
+        let to = match code {
+            KeyCode::Left => at.saturating_sub(1),
+            KeyCode::Right => (at + 1).min(n - 1),
+            KeyCode::Char(' ') => (at + 1) % n,
+            _ => return,
+        };
+        self.pick(f, to);
     }
 }
 
@@ -252,50 +341,114 @@ mod tests {
         Form::new(fixed, SCREEN, "moai".to_string())
     }
 
-    /// 플래그 셋의 모든 조합이 화면에서 키로 고른 것과 같은 계획을 낸다 — 길이 하나라는 약속을 잰다.
+    /// 키로 칸에 가서 그 값을 고른다.
+    fn choose(f: &mut Form, field: Field, at: usize) {
+        while f.cursor != field {
+            let was = f.cursor;
+            f.key(press(KeyCode::Down));
+            assert_ne!(f.cursor, was, "{field:?} 칸에 못 간다");
+        }
+        for _ in 0..4 {
+            f.key(press(KeyCode::Left));
+        }
+        for _ in 0..at {
+            f.key(press(KeyCode::Right));
+        }
+    }
+
+    /// 플래그의 모든 조합이 화면에서 키로 고른 것과 같은 계획을 낸다 — 길이 하나라는 약속을 잰다.
     #[test]
     fn a_flag_and_the_same_pick_on_screen_make_one_plan() {
-        for no_agents in [false, true] {
-            for no_driver in [false, true] {
-                for prefix in [None, Some("abc")] {
-                    let by_flags = resolve(&Choices::from_flags(prefix, no_agents, no_driver), &SCREEN);
-                    let mut f = form(Choices::default());
-                    if let Some(p) = prefix {
-                        f.typed.clear();
-                        p.chars().for_each(|c| _ = f.key(press(KeyCode::Char(c))));
+        for tracking in Tracking::ALL {
+            for no_agents in [false, true] {
+                for no_driver in [false, true] {
+                    for prefix in [None, Some("abc")] {
+                        let flags = Flags { prefix, tracking: Some(tracking), no_agents, no_driver };
+                        let by_flags = resolve(&Choices::from_flags(&flags), &SCREEN);
+                        let mut f = form(Choices::default());
+                        if let Some(p) = prefix {
+                            f.typed.clear();
+                            p.chars().for_each(|c| _ = f.key(press(KeyCode::Char(c))));
+                        }
+                        // 추적을 켜 드라이버 칸을 세우고 그것부터 고른다 — 추적을 끄면 그 칸이 숨는다.
+                        choose(&mut f, Field::Tracking, 0);
+                        choose(&mut f, Field::Driver, usize::from(no_driver));
+                        f.cursor = Field::Prefix;
+                        choose(&mut f, Field::Agents, usize::from(no_agents));
+                        f.cursor = Field::Prefix;
+                        choose(&mut f, Field::Tracking, Tracking::ALL.iter().position(|t| *t == tracking).unwrap());
+                        assert_eq!(f.plan(), by_flags, "{flags:?}");
                     }
-                    f.key(press(KeyCode::Down));
-                    if no_agents {
-                        f.key(press(KeyCode::Right));
-                    }
-                    f.key(press(KeyCode::Down));
-                    if no_driver {
-                        f.key(press(KeyCode::Right));
-                    }
-                    assert_eq!(f.plan(), by_flags, "prefix {prefix:?} no_agents {no_agents} no_driver {no_driver}");
                 }
             }
         }
     }
 
-    /// 터미널이 아닌 `init` 은 지금까지와 같다 — 안내 블록도 드라이버도 심는다.
+    /// 터미널이 아닌 `init` 은 지금까지와 같다 — 커밋하고, 안내 블록도 드라이버도 심는다.
     #[test]
     fn plain_defaults_keep_what_init_always_did() {
-        assert_eq!(resolve(&Choices::default(), &PLAIN), Plan { prefix: None, agents: true, driver: true });
+        assert_eq!(
+            resolve(&Choices::default(), &PLAIN),
+            Plan { prefix: None, tracking: Tracking::Commit, agents: true, driver: true }
+        );
+    }
+
+    /// 화면의 기본은 추적하지 않는 것이다(사용자 결정) — 그러면 드라이버는 꺼지고 칸도 숨는다.
+    #[test]
+    fn the_screen_keeps_the_tracker_out_of_git_and_hides_the_driver() {
+        let f = form(Choices::default());
+        assert_eq!(f.plan().tracking, Tracking::Exclude);
+        assert!(!f.plan().driver);
+        assert!(!f.rows().contains(&Field::Driver));
+    }
+
+    /// 사람이 고른 값은 앞 칸이 무효로 만들어도 남는다 — 되돌리면 그대로 돌아온다.
+    #[test]
+    fn a_pick_hidden_by_an_earlier_row_comes_back_with_it() {
+        let mut f = form(Choices::default());
+        choose(&mut f, Field::Tracking, 0);
+        choose(&mut f, Field::Driver, 1);
+        assert!(!f.plan().driver);
+        f.cursor = Field::Prefix;
+        choose(&mut f, Field::Tracking, 1);
+        assert!(!f.rows().contains(&Field::Driver));
+        assert_eq!(f.picked.driver, Some(false), "hidden, not forgotten");
+        // 켜 두고 숨긴 것도 숨은 동안은 꺼진다.
+        f.picked.driver = Some(true);
+        assert!(!f.plan().driver);
+        f.cursor = Field::Prefix;
+        choose(&mut f, Field::Tracking, 0);
+        assert!(f.plan().driver);
+    }
+
+    /// 칸 사이 규칙은 모든 조합에서 선다 — 추적하지 않으면 드라이버는 없다.
+    #[test]
+    fn no_driver_without_tracking_in_any_combination() {
+        for tracking in [None].into_iter().chain(Tracking::ALL.map(Some)) {
+            for agents in [None, Some(true), Some(false)] {
+                for driver in [None, Some(true), Some(false)] {
+                    for d in [SCREEN, PLAIN] {
+                        let c = Choices { prefix: None, tracking, agents, driver };
+                        let plan = resolve(&c, &d);
+                        assert!(plan.tracking.tracked() || !plan.driver, "{c:?} {d:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]
     fn a_flag_locks_its_row_and_the_cursor_skips_it() {
-        let mut f = form(Choices::from_flags(None, true, false));
-        assert!(f.locked(Field::Agents));
+        let mut f = form(Choices::from_flags(&Flags { tracking: Some(Tracking::Commit), ..Flags::default() }));
+        assert!(f.locked(Field::Tracking));
         f.key(press(KeyCode::Down));
-        assert_eq!(f.field(), Field::Driver, "the locked row is stepped over");
+        assert_eq!(f.cursor, Field::Agents, "the locked row is stepped over");
         f.key(press(KeyCode::Up));
-        assert_eq!(f.field(), Field::Prefix);
+        assert_eq!(f.cursor, Field::Prefix);
         // 잠긴 칸은 키로 못 바꾼다.
-        f.cursor = 1;
+        f.cursor = Field::Tracking;
         f.key(press(KeyCode::Right));
-        assert!(!f.plan().agents);
+        assert_eq!(f.plan().tracking, Tracking::Commit);
     }
 
     #[test]
@@ -326,9 +479,28 @@ mod tests {
     }
 
     #[test]
-    fn only_every_row_chosen_is_complete() {
-        assert!(!Choices::from_flags(None, true, true).complete());
-        assert!(!Choices::from_flags(Some("a"), true, false).complete());
-        assert!(Choices { prefix: Some("a".into()), agents: Some(true), driver: Some(false) }.complete());
+    fn space_cycles_and_arrows_stop_at_the_ends() {
+        let mut f = form(Choices::default());
+        f.cursor = Field::Tracking;
+        f.key(press(KeyCode::Right));
+        f.key(press(KeyCode::Right));
+        f.key(press(KeyCode::Right));
+        assert_eq!(f.plan().tracking, Tracking::Gitignore);
+        f.key(press(KeyCode::Char(' ')));
+        assert_eq!(f.plan().tracking, Tracking::Commit);
+    }
+
+    #[test]
+    fn complete_counts_only_the_rows_that_stand() {
+        let full = |tracking, driver| Choices {
+            prefix: Some("a".into()),
+            tracking: Some(tracking),
+            agents: Some(true),
+            driver,
+        };
+        assert!(full(Tracking::Exclude, None).complete(&SCREEN), "the driver row is hidden");
+        assert!(!full(Tracking::Commit, None).complete(&SCREEN));
+        assert!(full(Tracking::Commit, Some(false)).complete(&SCREEN));
+        assert!(!Choices::default().complete(&SCREEN));
     }
 }
