@@ -221,7 +221,7 @@ The hooks catch the same few places in each agent's session. Each calls
 |---|---|
 | The session starts | A baseline of the warnings is written and the session's [presence](glossary.md#presence) row is written, idle. After a compaction, what the session was holding is loaded back into it, with any [letters](glossary.md#letter) for it, and busy or idle stays as it was |
 | A person sends a prompt | The `moai status` board is loaded, once per session. The letters for the session are loaded every time, and it is marked busy |
-| Before a tool call | The five rules below are checked, and a subagent is kept from taking its parent's letters ([below](#leave-each-other-letters)); the mailbox is not opened. A Codex session's row is marked as still alive, at most once a minute |
+| Before a tool call | The five rules below are checked, and a subagent is kept from taking its parent's letters ([below](#leave-each-other-letters)); the mailbox is not opened. The session's row is marked as still alive, at most once a minute — a row another machine reads is told by that mark alone |
 | The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. A turn that ends is marked idle |
 | A turn ends without that | An API error (Claude, or an Antigravity run that stopped on one), an interrupt (Codex) or the session closing marks it idle and loads nothing — a Codex session that closes has its row taken away instead |
 
@@ -476,6 +476,15 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   nothing wakes a window that is not waiting
 - **A letter came back marked returned.** The agent it was for went away
   before reading it. Send the work on to another agent if it still needs doing
+- **`moai agents` shows a pid as `<pid>@<host>`.** That row was written on
+  another machine — another container sharing this repository, or this
+  container before it was started again — and its pid is that machine's, not one
+  to look for or kill here. Such a row is never swept for its pid: it reads
+  `gone` once nothing has marked it for 20 minutes, and after a day it is swept
+  and its unread letters go back to their senders. Nothing wakes it from here —
+  its tmux and its Claude session are on that machine — and a wait here never
+  marks it alive, so a window that sets the same `MOAI_AGENT` after a restart
+  gets the name back once the old row reads `gone`
 - **`moai hello` in Codex says it cannot tell which session this is.** That
   Codex set no `CODEX_THREAD_ID` in its shell. Pass `--as` with the row its hooks
   gave the session — the name in its first context, also in `moai agents` as
@@ -488,4 +497,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm
