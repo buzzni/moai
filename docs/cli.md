@@ -2934,7 +2934,7 @@ Arguments:
 
 Options:
       --no-agents            Leave AGENTS.md alone (same as --guide none)
-      --guide <how>          block, file (.moai/guide.md + link) or none
+      --guide <how>          block, file (.moai/guide.md + link), hook or none
       --no-driver            Leave .git/config alone (plant no merge driver)
       --tracking <how>       Git tracks it (commit) or not (exclude, gitignore)
   -y, --yes                  Ask nothing; what no flag sets takes the default

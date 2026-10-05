@@ -1350,7 +1350,9 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         }
         plan
     };
-    let (prefix, no_agents, no_driver) = (plan.prefix.as_deref(), plan.guide == Guide::None, !plan.driver);
+    // 훅으로 알리는 것도 AGENTS.md 를 안 건드린다 — 알리는 일은 훅(`hook::guided_board`)이 한다.
+    let no_agents = matches!(plan.guide, Guide::None | Guide::Hook);
+    let (prefix, no_driver) = (plan.prefix.as_deref(), !plan.driver);
     // 디렉터리 이름이 길어 줄였으면 그 원래 모양 — 무엇에서 줄였는지 말하려고 든다.
     let mut shortened: Option<String> = None;
     let prefix = match (prefix, again) {
@@ -1498,7 +1500,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         Some(existing) => {
             let block = match plan.guide {
                 Guide::File => crate::guide::agents_link(),
-                Guide::Block | Guide::None => crate::guide::agents(),
+                Guide::Block | Guide::Hook | Guide::None => crate::guide::agents(),
             };
             let next = with_block(existing, &block);
             if next == *existing {

@@ -28,6 +28,9 @@ does not tag — see `CONTRIBUTING.md`.
   `--guide block` is the full block as before, and `--guide none` is
   `--no-agents`. `init --check` and `moai status` measure both the link and the
   file; run again, `init` reads which one stands from the block itself.
+- **`moai init --guide hook` leaves AGENTS.md alone and lets the hooks say it.**
+  It is what the screen picks for a tracker kept out of git, so a file nobody
+  else has is never named in a committed one.
 
 ### Changed
 
@@ -38,6 +41,9 @@ does not tag — see `CONTRIBUTING.md`.
   where a person is watching — when stdin or stdout is not a terminal, or under
   `--json`, `init` is byte for byte what it was, so agents and scripts see no
   change. Running `init` again where `.moai` already stands never asks.
+- **The board the hook loads on a session's first prompt says where moai's
+  usage lives when AGENTS.md carries no moai block** — one line naming the
+  `moai` skill and `moai prime`. Checkouts with the block see no change.
 
 ## [0.6.0] - 2026-10-04
 

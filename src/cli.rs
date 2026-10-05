@@ -857,8 +857,8 @@ Examples:
         /// Leave AGENTS.md alone (same as --guide none)
         #[arg(long, conflicts_with = "guide")]
         no_agents: bool,
-        /// block, file (.moai/guide.md + link) or none
-        #[arg(long, value_name = "how", value_parser = ["block", "file", "none"], hide_possible_values = true)]
+        /// block, file (.moai/guide.md + link), hook or none
+        #[arg(long, value_name = "how", value_parser = ["block", "file", "hook", "none"], hide_possible_values = true)]
         guide: Option<String>,
         /// Leave .git/config alone (plant no merge driver)
         #[arg(long)]

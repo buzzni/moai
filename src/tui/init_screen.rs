@@ -78,7 +78,12 @@ fn names(f: Field, lang: Lang) -> (&'static str, Vec<&'static str>) {
         ),
         Field::Guide => (
             say(lang, "init.ask_guide"),
-            vec![say(lang, "init.ask_guide_block"), say(lang, "init.ask_guide_file"), say(lang, "init.ask_guide_none")],
+            vec![
+                say(lang, "init.ask_guide_block"),
+                say(lang, "init.ask_guide_file"),
+                say(lang, "init.ask_guide_hook"),
+                say(lang, "init.ask_guide_none"),
+            ],
         ),
         Field::Driver => (say(lang, "init.ask_driver"), vec![say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")]),
     }

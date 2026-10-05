@@ -198,7 +198,11 @@ fn decide(
                 0,
                 view::Screen::new(ctx.lang()).at(ctx.clock()),
             );
-            crate::hook::board(&lines, ctx.lang())
+            // AGENTS.md 에 moai 블록이 없으면(git 밖에 둔 트래커의 `--guide hook`) 사용법이 어디 있는지 한 줄을 더한다.
+            // 못 읽으면 더하지 않는다 — 무엇이 들었는지 모른다.
+            let unguided =
+                matches!(crate::cmd::init::agents_state(repo.here()), Ok((crate::cmd::init::BlockState::Missing, _)));
+            crate::hook::guided_board(&lines, ctx.lang(), unguided)
         }),
         Event::PreToolUse => {
             use crate::hook::Call;

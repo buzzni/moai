@@ -57,18 +57,22 @@ pub enum Guide {
     Block,
     /// 안내 전문은 `.moai/guide.md` 에 쓰고 AGENTS.md 에는 그것을 가리키는 몇 줄만 둔다.
     File,
+    /// AGENTS.md 를 안 건드리고 Claude Code 의 훅·스킬로 알린다(moai-6pld) — 첫 프롬프트에 보드와 함께
+    /// "사용법은 moai 스킬에 있다" 를 싣는다. 훅·스킬이 깔려야 서는 값이라 설치 칸을 켠 채 잠근다.
+    Hook,
     /// AGENTS.md 를 안 건드린다(`--no-agents`).
     None,
 }
 
 impl Guide {
-    pub const ALL: [Guide; 3] = [Guide::Block, Guide::File, Guide::None];
+    pub const ALL: [Guide; 4] = [Guide::Block, Guide::File, Guide::Hook, Guide::None];
 
     /// 플래그와 `--json` 이 쓰는 낱말.
     pub fn word(self) -> &'static str {
         match self {
             Guide::Block => "block",
             Guide::File => "file",
+            Guide::Hook => "hook",
             Guide::None => "none",
         }
     }
@@ -149,13 +153,17 @@ pub struct Defaults {
 /// 선택 상자가 미리 골라 두는 값. 추적은 안 한다 — 이 클론에만 두고 커밋되는 파일을 하나도 안
 /// 바꾸는 쪽이 기본이다(2026-10-06 사용자 결정, moai-zynt.own).
 ///
-/// 안내는 커밋하면 별도 파일과 링크(moai-cbfz), 이 클론에만 두면 AGENTS.md 를 안 건드린다(사용자 결정).
+/// 안내는 커밋하면 별도 파일과 링크(moai-cbfz), 이 클론에만 두면 AGENTS.md 를 안 건드리고 훅으로 알린다
+/// (사용자 결정, moai-6pld).
 pub const SCREEN: Defaults =
-    Defaults { tracking: Tracking::Exclude, guide_tracked: Guide::File, guide_local: Guide::None, driver: true };
+    Defaults { tracking: Tracking::Exclude, guide_tracked: Guide::File, guide_local: Guide::Hook, driver: true };
 
 /// 터미널이 아닌 곳(에이전트·스크립트)과 `--yes` 의 값. **지금까지의 `init` 과 바이트째 같아야 한다**
 /// (2026-10-06 사용자 결정) — 에이전트가 부르던 결과를 이 묶음이 지킨다. 화면의 기본값이 달라져도
 /// 이쪽은 안 따라간다.
+///
+/// 이 클론에만 두라고 플래그로만 준 것은 AGENTS.md 를 안 건드리는 데서 멈춘다 — 훅을 기본으로 걸면 스크립트가
+/// 부른 `init` 이 `claude` 를 불러 플러그인을 깐다. 원하면 `--guide hook` 을 준다.
 pub const PLAIN: Defaults =
     Defaults { tracking: Tracking::Commit, guide_tracked: Guide::Block, guide_local: Guide::None, driver: true };
 
@@ -518,7 +526,7 @@ mod tests {
     #[test]
     fn the_guide_default_follows_tracking_and_a_pick_stays() {
         let mut f = form(Choices::default());
-        assert_eq!(f.plan().guide, Guide::None);
+        assert_eq!(f.plan().guide, Guide::Hook);
         choose(&mut f, Field::Tracking, 0);
         assert_eq!(f.plan().guide, Guide::File);
         choose(&mut f, Field::Guide, 0);
