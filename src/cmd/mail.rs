@@ -143,9 +143,6 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     let (agents, _) = mail::presences(&repo.agents_dir());
     let me = who(ctx, args.me.as_deref(), &agents)?;
     let role = agents.iter().find(|p| p.name == me).map(|p| p.role.clone()).unwrap_or_default();
-    // 닻을 적을 장인가 — 프로세스를 모르는 장(Codex)만이다. 다른 장은 기다리는 동안 출석부를 다시 안 연다(리뷰
-    // moai-ew4o.q9f — 반 초마다 모든 장을 읽던 자리다).
-    let anchored = agents.iter().any(|p| p.name == me && p.pid == 0);
     let dir = repo.mail_dir();
     mail::migrate(&dir);
 
@@ -159,6 +156,9 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // 이면 기다린 것이 아니다. 훑기 앞에서 적던 판은 `--wait 0` 한 번이 일하는 장을 `idle` 로 남겼고, 편지가 이미 선
     // 판에는 `idle` 을 적었다가 곧장 `busy` 로 되돌려 `since`(얼마나 놀았나)만 새로 세웠다.
     let mut idled = false;
+    // 닻을 마지막으로 다시 적으러 간 때 — 기다리는 동안 출석부는 [`mail::SEEN_EVERY`] 에 한 번만 연다(리뷰
+    // moai-ew4o.q9f — 반 초마다 모든 장을 읽던 자리다).
+    let mut stamped = std::time::Instant::now();
     let (mut mine, garbled) = loop {
         let (all, garbled) = mail::list(&dir, &me, args.all);
         let mine: Vec<Stored> = all.into_iter().filter(|s| mail::for_me(s, &me, &role)).collect();
@@ -166,11 +166,13 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
         if !waiting || mine.iter().any(|s| s.reader.is_none()) {
             break (mine, garbled);
         }
-        // 기다리는 동안 프로세스를 모르는 장(Codex)은 닻을 다시 적는다(moai-j3n5) — 안 적으면 오래 기다리는 일꾼이 떠난
-        // 것으로 걷혀, 감독이 일감을 보낼 곳을 잃는다. 때가 되었을 때만 쓴다([`mail::keep_alive`]).
+        // 기다리는 동안 닻을 다시 적는다(moai-j3n5) — 안 적으면 오래 기다리는 일꾼이 떠난 것으로 읽혀, 감독이 일감을 보낼
+        // 곳을 잃는다. 프로세스를 모르는 장(Codex)만이 아니다(moai-dhxm) — 다른 기계(컨테이너)의 감독은 어느 장이든 닻으로
+        // 잰다. 때가 되었을 때만 쓴다([`mail::keep_alive`]).
         if idled {
-            if anchored {
+            if stamped.elapsed().as_secs() >= mail::SEEN_EVERY.unsigned_abs() {
                 mail::keep_alive(&repo.agents_dir(), |p| p.name == me);
+                stamped = std::time::Instant::now();
             }
         } else {
             attend(&repo, &me, mail::IDLE);
@@ -268,7 +270,7 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
 ///
 /// **없는 장은 안 세운다** — 등록은 `hello` 와 훅의 일이다. `--as` 로 남의 이름을 대도 그 이름의 장을 고친다: 그
 /// 이름으로 편지를 가지는 것이 곧 그 에이전트로 일하는 것이다. 상태가 같으면 안 쓴다 — `since` 가 "얼마나
-/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). 프로세스를 모르는 장의 닻만은 때가 되었으면 적는다
+/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). 닻만은 때가 되었으면 적는다
 /// ([`mail::Presence::due`]). **빈 `since` 는 채운다** — 훅의 `attend` 와 같은
 /// 자다. 빈 글은 가장 앞에 서서, 그대로 두면 `send --wake` 가 그 장을 가장 오래 논 일꾼으로 고른다(리뷰
 /// moai-snyk.nic). 못 적으면 조용히 지나간다 — 출석은 기록이 아니라 지금의 표다([`mail::write_presence`]).
@@ -279,9 +281,9 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
     let now = crate::model::now();
     let changed = p.status != status || p.since.is_empty();
-    // **상태가 같아도 프로세스를 모르는 장(Codex)의 닻은 때가 되었으면 적는다**(리뷰 moai-ew4o.q9f) — 편지가 이미 와 있어
-    // 기다림 없이 끝난 `inbox --ack --wait` 는 `busy` 를 `busy` 로 적어 아무것도 안 썼고, 그 일꾼의 닻은 그 앞의 인사에
-    // 머물렀다. 훅이 안 도는 Codex 일꾼은 그만큼 일찍 걷혔다.
+    // **상태가 같아도 닻은 때가 되었으면 적는다**(리뷰 moai-ew4o.q9f) — 편지가 이미 와 있어 기다림 없이 끝난
+    // `inbox --ack --wait` 는 `busy` 를 `busy` 로 적어 아무것도 안 썼고, 그 일꾼의 닻은 그 앞의 인사에 머물렀다. 훅이 안
+    // 도는 Codex 일꾼은 그만큼 일찍 걷혔다.
     if !changed && !p.due(&now) {
         return;
     }

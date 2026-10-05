@@ -28,7 +28,7 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     // 길(`moai hello`)을 대는 말이 맞다. 감독의 2 가 빈손일 때 사람이 보는 자리다.
     let registered = !agents.is_empty();
     // **20분 넘게 조용한 Codex 장은 떠난 것으로 보인다**(2026-10-05 사용자 결정, moai-j3n5) — 지우지 않고 상태만 그때 잰
-    // 낱말로 바꿔 보인다(파일은 안 고친다). `--status idle` 이 그 장을 안 내니 감독이 떠난 일꾼에게 일감을 안 보낸다.
+    // 낱말로 바꿔 보인다(파일은 안 고친다). 다른 기계의 장도 같은 자로 잰다(moai-dhxm). `--status idle` 이 그 장을 안 내니 감독이 떠난 일꾼에게 일감을 안 보낸다.
     let now = crate::model::now();
     for p in agents.iter_mut().filter(|p| p.stale(&now)) {
         p.status = mail::GONE.to_string();
@@ -68,7 +68,7 @@ fn table(agents: &[Presence], zone: &crate::tz::Zone) -> Vec<String> {
                 cell(&p.role),
                 cell(&p.status),
                 if p.since.is_empty() { cell(&p.since) } else { crate::view::stamp(&p.since, zone) },
-                p.pid.to_string(),
+                pid_cell(p),
             ]
         })
         .collect();
@@ -88,6 +88,15 @@ fn table(agents: &[Presence], zone: &crate::tz::Zone) -> Vec<String> {
             line.trim_end().to_string()
         })
         .collect()
+}
+
+/// pid 칸 — **다른 기계의 pid 는 그 기계의 이름을 단다**(moai-dhxm). 맨 숫자로 두면 사람이 이 기계에서 그 pid 를 찾거나
+/// 죽인다 — 여기서는 남의 프로세스다. 이름을 모르면 `?` 다.
+fn pid_cell(p: &Presence) -> String {
+    if p.pid == 0 || p.here() {
+        return p.pid.to_string();
+    }
+    format!("{}@{}", p.pid, p.host.as_deref().map(crate::text::one_line).unwrap_or_else(|| "?".to_string()))
 }
 
 /// 남이 적은 칸 — 비었으면 `-`, 제어문자는 걷는다.
@@ -257,6 +266,9 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         },
         pid,
         pid_start,
+        // 기계는 아래에서 pid 와 함께 적는다([`Presence::at`]).
+        machine: None,
+        host: None,
         // **세션 id 는 조상에서 찾은 Claude 에게만 환경에서 읽는다** — `--pid` 로 남을 가리켰으면 이 셸의
         // 세션은 그 프로세스의 것이 아니다. 훅이 적어 둔 것이 있으면 그것이 먼저다.
         // Codex 는 그 셸이 대는 세션 id 를 적는다 — 훅이 그 세션의 장을 이것으로 찾는다. **Codex 셸의
@@ -270,9 +282,15 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
         tmux_pane,
         tmux_socket,
-        // 프로세스를 모르는 장은 닻을 적는다(moai-j3n5) — 인사한 것이 곧 산 것이다.
-        seen: (pid == 0).then(|| now.clone()).or_else(|| keep.as_ref().and_then(|p| p.seen.clone())),
+        // 닻을 적는다(moai-j3n5, moai-dhxm) — 인사한 것이 곧 산 것이다. 프로세스를 아는 장도 다른 기계에서는 이것으로 잰다.
+        seen: Some(now.clone()),
         rest: keep.as_ref().map(|p| p.rest.clone()).unwrap_or_default(),
+    };
+    // **`--as` 는 그 장의 pid 를 잇고, 그 pid 가 선 기계도 그 장의 것이다**(moai-dhxm) — 이 셸의 기계를 적으면 다른 기계의
+    // 장이 이 기계의 pid 로 읽혀 `moai agents` 가 걷는다. 그 밖은 이 기계의 프로세스다.
+    let presence = match &adopted {
+        Some(a) => Presence { machine: a.machine.clone(), host: a.host.clone(), ..presence },
+        None => presence.at(pid, pid_start),
     };
     // **떠난 장의 이름을 넘겨받으면 그 함부터 비운다**(moai-ew4o.l3n) — 그 세션 앞으로 남은 편지가 보낸 이에게 돌아간다.
     // 이어 쓰는 제 장(`before`)은 넘겨받는 것이 아니다([`mail::take_over`]).

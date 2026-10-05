@@ -307,12 +307,12 @@ fn decide(
         }
         Event::PreToolUse => {
             use crate::hook::Call;
-            // **Codex 의 장은 도구 부름에도 닻을 적는다**(moai-j3n5) — 그 장은 pid 를 몰라 오래 안 적히면 떠난 것으로
-            // 걷힌다. 프롬프트도 턴 끝도 없이 도구만 부르는 긴 턴이 그 사이에 걷히지 않게, 때가 되었을 때만 다시 적는다
-            // ([`mail::keep_alive`]). 다른 말씨는 프로세스로 재니 출석부를 안 연다 — 도구 부름마다 도는 자리다.
-            if dialect == Dialect::Codex
-                && let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty())
-            {
+            // **장은 도구 부름에도 닻을 적는다**(moai-j3n5) — 프로세스로 못 재는 장은 오래 안 적히면 떠난 것으로 읽힌다.
+            // 프롬프트도 턴 끝도 없이 도구만 부르는 긴 턴이 그 사이에 떠난 것으로 읽히지 않게, 때가 되었을 때만 다시 적는다
+            // ([`mail::keep_alive`]). **Codex 만이 아니다**(moai-dhxm) — 프로세스를 아는 장도 같은 저장소를 쓰는 다른
+            // 기계(컨테이너)에서는 닻으로만 잰다. 일꾼의 턴은 몇 시간을 가니, 여기서 안 적으면 그 기계의 감독에게 일하는
+            // 일꾼이 20분 만에 떠난 것으로 보인다.
+            if let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty()) {
                 mail::keep_alive(&repo.agents_dir(), |p| p.session.as_deref() == Some(session));
             }
             let cwd = cwd.clone();
@@ -1250,8 +1250,10 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
                 role: String::new(),
                 status: String::new(),
                 since: String::new(),
-                pid,
-                pid_start,
+                pid: 0,
+                pid_start: None,
+                machine: None,
+                host: None,
                 session: Some(session.to_string()),
                 cwd: cwd.clone(),
                 tmux_pane: tmux.0,
@@ -1259,6 +1261,7 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
                 seen: None,
                 rest: Default::default(),
             }
+            .at(pid, pid_start)
         };
     // 토막은 상한에 안 잘리게 잇는다([`mail::name_with`]) — 잘리면 가른 이름이 도로 산 남의 이름이다.
     //
@@ -1293,16 +1296,17 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
                 mail::retire(&mail_dir, &other.name);
             }
         }
-        return Some(renamed(mail::Presence {
-            model: model(p),
-            session: Some(session.to_string()),
-            pid: agent.pid,
-            pid_start: agent.start,
-            cwd: cwd.clone(),
-            tmux_pane: tmux.0,
-            tmux_socket: tmux.1,
-            ..p.clone()
-        }));
+        return Some(renamed(
+            mail::Presence {
+                model: model(p),
+                session: Some(session.to_string()),
+                cwd: cwd.clone(),
+                tmux_pane: tmux.0,
+                tmux_socket: tmux.1,
+                ..p.clone()
+            }
+            .at(agent.pid, agent.start),
+        ));
     }
     let name = asked
         .filter(|n| !taken(n))
@@ -1331,15 +1335,15 @@ fn rest(input: &Input, repo: &Repo, dialect: Dialect, event: Event) {
     }
     // **이미 노는 장은 다시 안 쓴다**(리뷰 moai-u5wr.e74) — 디스크에서 읽은 그대로라 바뀔 것이 없다. Claude 의 흔한 끝
     // (`Stop` 뒤의 `SessionEnd`, `/clear` 마다)이 그 자리고, 저장소가 선 자리(Ceph RBD)가 멈춘 날 그 쓰기 하나가
-    // `SessionEnd` 의 짧은 상한을 넘긴다. 프로세스를 모르는 장은 닻을 적을 때가 되었으면 쓴다(moai-j3n5).
+    // `SessionEnd` 의 짧은 상한을 넘긴다. 닻을 적을 때가 되었으면 쓴다(moai-j3n5, moai-dhxm).
     if p.status == mail::IDLE && !p.since.is_empty() && !p.due(&model::now()) {
         return;
     }
     attend(repo, Some(p), mail::IDLE);
 }
 
-/// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다). 프로세스를
-/// 모르는 장은 닻도 적는다(moai-j3n5) — 훅이 돈 것이 곧 그 세션이 산 것이다. 못 적으면 조용히 지나간다 — 훅은 실패하지
+/// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다). 닻도
+/// 적는다(moai-j3n5, moai-dhxm) — 훅이 돈 것이 곧 그 세션이 산 것이다. 못 적으면 조용히 지나간다 — 훅은 실패하지
 /// 않는다(머리글).
 fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
     let Some(mut p) = presence else { return };
