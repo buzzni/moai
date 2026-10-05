@@ -139,13 +139,20 @@ pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 /// Codex 의 훅 — Claude 와 이벤트 이름이 같고, `Stop` 없이 끝난 턴은 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd`
 /// 로 온다. API 오류로 끊긴 턴에 오는 이벤트는 문서에 없다. **`SessionEnd` 는 그 세션의 장을 걷는다** — 장을 `idle` 로
 /// 두는 Claude 와 다르다(`cmd::hook` 의 `rest`).
-const CODEX: &[(&str, &str, &str)] = &[
-    ("SessionStart", "session-start", "counting moai warnings..."),
-    ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
-    ("PreToolUse", "pre-tool-use", "checking the moai rules..."),
-    ("Stop", "stop", "comparing the moai state..."),
-    ("Interrupt", "interrupt", "marking this session idle for moai..."),
-    ("SessionEnd", "session-end", "taking this session off moai's list..."),
+///
+/// **줄마다 그 이벤트가 받는 값을 함께 적는다**(moai-t6hl) — 넷째 칸이 상한(초), 다섯째 칸이 `additionalContextLimit`
+/// 이다. Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 낸다(사람의 codex 0.160 이 짚었다). 그 상한은
+/// 추가 맥락을 낼 수 있는 이벤트만 받는다(Codex 훅 문서: SessionStart·SubagentStart·PreToolUse·PostToolUse·
+/// UserPromptSubmit) — `Stop` 이 붙드는 까닭(`reason`)은 이어 가는 프롬프트라 이 값이 안 닿고 Codex 의 기본 상한을
+/// 그대로 쓴다(같은 문서). 두 값을 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이 15초·상한 없음을 받는다 —
+/// 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).
+const CODEX: &[(&str, &str, &str, u64, Option<usize>)] = &[
+    ("SessionStart", "session-start", "counting moai warnings...", TIMEOUT, Some(CODEX_CONTEXT_LIMIT)),
+    ("UserPromptSubmit", "user-prompt-submit", "reading the moai board...", TIMEOUT, Some(CODEX_CONTEXT_LIMIT)),
+    ("PreToolUse", "pre-tool-use", "checking the moai rules...", TIMEOUT, Some(CODEX_CONTEXT_LIMIT)),
+    ("Stop", "stop", "comparing the moai state...", TIMEOUT, None),
+    ("Interrupt", "interrupt", "marking this session idle for moai...", CODEX_SHORT_TIMEOUT, None),
+    ("SessionEnd", "session-end", "taking this session off moai's list...", CODEX_SHORT_TIMEOUT, None),
 ];
 
 /// Codex 의 `PreToolUse` 가 볼 도구 — 셸과 패치다. Codex 는 그 둘과 MCP 에만 훅을 낸다(openai/codex#20204).
@@ -160,15 +167,26 @@ const ANTIGRAVITY: &[(&str, &str)] =
 /// Antigravity 의 `PreToolUse` 가 볼 도구 — 셸 하나와 파일을 쓰는 셋이다(2026-10-04 실측 이름).
 const ANTIGRAVITY_WATCHED: &str = "run_command|write_to_file|replace_file_content|multi_replace_file_content";
 
-/// 훅 하나가 기다리는 상한(초) — 세 에이전트의 파일이 이 하나를 쓴다(Claude 의 매니페스트도). Codex 의 기본은 600초,
-/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. Codex 는 `Interrupt`·`SessionEnd`
-/// 의 상한을 제 손으로 1~3초에 묶는다 — 거기서는 이 값이 안 선다.
+/// 훅 하나가 기다리는 상한(초) — 세 에이전트의 파일이 이것을 쓴다(Claude 의 매니페스트도). Codex 의 기본은 600초,
+/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. 세션 끝의 이벤트는 에이전트가
+/// 제 손으로 더 짧게 묶는다.
+///
+/// - **Codex** 는 `Interrupt`·`SessionEnd` 를 1~3초에 묶고, 3 보다 크게 적으면 깎으며 `/hooks` 에 경고를 낸다 — 거기는
+///   [`CODEX_SHORT_TIMEOUT`] 을 적는다([`CODEX`])
+/// - **Claude** 는 `SessionEnd` 훅들을 한 통 1.5초에 묶고, 플러그인 훅의 `timeout` 으로는 그 통이 안 는다(Claude Code
+///   훅 문서). 그래도 15 를 둔다 — 사람이 `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` 로 통을 늘리면 그때는 이 값이 그
+///   훅의 상한이고, Claude 는 경고를 안 낸다. `cmd::hook` 의 `rest` 는 1.5초에 맞춰 쓰였다
 const TIMEOUT: u64 = 15;
 
 /// Codex 가 싣는 글의 상한을 넉넉히 준다 — 기본이 2,500 토큰 언저리라(Codex 훅 문서) 보드와 편지(최대
 /// [`crate::hook::CONTEXT_CAP`] 글자)가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는다. 편지는 싣는 순간
 /// 읽음이라 그 판에서 아무도 못 본다. 한 토큰은 적어도 한 글자이니 같은 수로 준다.
 const CODEX_CONTEXT_LIMIT: usize = crate::hook::CONTEXT_CAP;
+
+/// Codex 가 `Interrupt`·`SessionEnd` 에 주는 상한(초) — 기본 1초에 3초까지만 받는다(Codex 훅 문서). [`TIMEOUT`] 을 적어
+/// 두면 Codex 가 3 으로 깎으며 `/hooks` 에 경고를 내고, 실제 상한이 얼마인지 파일만 봐서는 모른다(moai-t6hl). 그 장을
+/// 걷는 `SessionEnd` 가 1초에 끊기지 않게 상한을 다 쓴다.
+const CODEX_SHORT_TIMEOUT: u64 = 3;
 
 /// moai 가 통째로 쓴 Codex 훅 파일의 표 — 이 글이 `description` 이면 다시 쓴다.
 pub const CODEX_DESCRIPTION: &str = "Planted by moai. Edit it by hand and the next `moai skill install` overwrites it.";
@@ -179,14 +197,17 @@ pub const ANTIGRAVITY_GROUP: &str = "moai";
 /// Codex 의 `.codex/hooks.json` 글.
 pub fn codex_hooks(exe: &str) -> String {
     let mut hooks = BTreeMap::new();
-    for (at, event, message) in CODEX {
-        let entry = serde_json::json!({
+    for (at, event, message, timeout, limit) in CODEX {
+        let mut entry = serde_json::json!({
             "type": "command",
             "command": command_for(exe, event, Dialect::Codex),
-            "timeout": TIMEOUT,
+            "timeout": timeout,
             "statusMessage": message,
-            "additionalContextLimit": CODEX_CONTEXT_LIMIT,
         });
+        // 안 받는 이벤트에는 키를 아예 안 둔다 — `Option` 을 그대로 실으면 `null` 이 적힌다.
+        if let Some(limit) = limit {
+            entry["additionalContextLimit"] = serde_json::json!(limit);
+        }
         let group = match *at {
             "PreToolUse" => serde_json::json!({ "matcher": CODEX_WATCHED, "hooks": [entry] }),
             _ => serde_json::json!({ "hooks": [entry] }),
@@ -2221,7 +2242,16 @@ mod tests {
             let entry = &group[0]["hooks"][0];
             let line = entry["command"].as_str().unwrap();
             assert!(line.starts_with("sh -c '") && line.contains("--dialect codex"), "{at}: {line}");
-            assert_eq!(entry["additionalContextLimit"], crate::hook::CONTEXT_CAP, "{at}");
+            // **이벤트가 받는 것만 적는다**(moai-t6hl) — Codex 는 추가 맥락을 못 내는 이벤트의 `additionalContextLimit` 을
+            // 버리고 `/hooks` 에 설정 경고를 내며, `SessionEnd`·`Interrupt` 는 3초까지만 받는다(Codex 훅 문서).
+            let (limit, timeout) = match at.as_str() {
+                "SessionStart" | "UserPromptSubmit" | "PreToolUse" => (Some(crate::hook::CONTEXT_CAP as u64), TIMEOUT),
+                "Stop" => (None, TIMEOUT),
+                "Interrupt" | "SessionEnd" => (None, 3),
+                other => panic!("시험이 모르는 Codex 이벤트 {other}"),
+            };
+            assert_eq!(entry.get("additionalContextLimit").map(|v| v.as_u64()), limit.map(Some), "{at}");
+            assert_eq!(entry["timeout"], timeout, "{at}");
         }
         let agy: serde_json::Value = serde_json::from_str(&antigravity_hooks(exe)).unwrap();
         let group = agy[ANTIGRAVITY_GROUP].as_object().unwrap();

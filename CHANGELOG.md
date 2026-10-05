@@ -103,7 +103,11 @@ does not tag — see `CONTRIBUTING.md`.
   runs project hooks once a person trusts them in `/hooks`, and sends them only
   for its shell, `apply_patch` and MCP calls; a patch — through the
   `apply_patch` tool or typed as `apply_patch <<'EOF'` in its shell — is
-  judged file by file. Antigravity has no prompt event, so its first model
+  judged file by file. Each Codex hook carries only what its event takes, so
+  `/hooks` has no configuration warning for the file: `additionalContextLimit`
+  stands on `SessionStart`, `UserPromptSubmit` and `PreToolUse`, the events
+  that can add context, and `Interrupt` and `SessionEnd` get 3 seconds, the
+  most Codex gives them. Antigravity has no prompt event, so its first model
   call of a turn loads the board and the letters; a turn is held with
   `decision: continue`. A hooks file moai did not write is left as it is, with
   one line saying so — for Antigravity that includes moai's group with a
