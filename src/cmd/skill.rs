@@ -50,7 +50,7 @@ fn place(ctx: &Ctx) -> R<Place> {
     let on_path = which("moai");
     let dir = root.join(skill::DIR);
     // 커밋된 매니페스트다([`read_committed`]) — 못 읽으면 처음 심는 것처럼 부른 철자다.
-    let planted = read_committed(&dir.join(".claude-plugin/plugin.json"), &root);
+    let planted = read_committed(&dir.join(".claude-plugin/plugin.json"), &root).ok();
     let spelling = kept(planted.as_deref(), &resolved).unwrap_or_else(|| invoked(current, &resolved));
     let exe = skill::exe_name(&spelling, &resolved, on_path.as_deref());
     let prefix = repo.config.prefix.clone();
@@ -327,6 +327,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                     "lifted": retiring.lifted_json(),
                     "retired": retiring.json(),
                     "undeclared": retiring.undeclared_json(),
+                    "settings_unread": retiring.unread_json(ctx.lang()),
                     "kept": retiring.kept,
                 }),
                 Vec::new(),
@@ -353,7 +354,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
             out.push(fill(say(lang, "skill.plan_retire"), &[("cmd", &step.shown())]));
         }
         out.extend(retiring.undeclare.iter().map(|u| fill(say(lang, "skill.plan_retire"), &[("cmd", &u.what(lang))])));
-        out.extend(retiring.kept_lines(lang));
+        out.extend(retiring.left_lines(lang));
         return Ok((serde_json::Value::Null, out));
     }
 
@@ -406,6 +407,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                 "lifted": retiring.lifted_json(),
                 "retired": retiring.json(),
                 "undeclared": retiring.undeclared_json(),
+                "settings_unread": retiring.unread_json(ctx.lang()),
                 "kept": retiring.kept,
             }),
             Vec::new(),
@@ -433,7 +435,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         });
     }
     out.extend(retiring.undeclare.iter().map(|u| u.line(lang)));
-    out.extend(retiring.kept_lines(lang));
+    out.extend(retiring.left_lines(lang));
     if registered {
         out.push(String::new());
         out.push(say(lang, "skill.reopen_claude").to_string());
@@ -758,7 +760,7 @@ impl HookFile {
         if std::fs::symlink_metadata(&self.path).is_err() {
             return (HookState::Missing, None);
         }
-        match read_committed(&self.path, root) {
+        match read_committed(&self.path, root).ok() {
             Some(text) if text == self.want || skill::same_hooks(&text, &self.want) => (HookState::Current, Some(text)),
             Some(text) if skill::hooks_are_ours(self.dialect, &text) => (HookState::Stale, Some(text)),
             _ => (HookState::Foreign, None),
@@ -982,6 +984,7 @@ fn claude_uninstall(ctx: &Ctx, place: Place, dry_run: bool) -> R<(serde_json::Va
                 "claude": claude,
                 "retired": retiring.json(),
                 "undeclared": retiring.undeclared_json(),
+                "settings_unread": retiring.unread_json(ctx.lang()),
                 "kept": retiring.kept,
             }),
             Vec::new(),
@@ -1007,7 +1010,7 @@ fn claude_uninstall(ctx: &Ctx, place: Place, dry_run: bool) -> R<(serde_json::Va
         out.extend(plan.iter().map(|a| format!("  {}", shown(a))));
         out.extend(retiring.steps.iter().map(|step| format!("  {}", step.shown())));
         out.extend(retiring.undeclare.iter().map(|u| format!("  {}", u.what(lang))));
-        out.extend(retiring.kept_lines(lang));
+        out.extend(retiring.left_lines(lang));
         return Ok((serde_json::Value::Null, out));
     }
     // 한 걸음이라도 실패했으면 "걷었다" 고 말하지 않는다 — 종료 코드만 비영이고
@@ -1033,7 +1036,7 @@ fn claude_uninstall(ctx: &Ctx, place: Place, dry_run: bool) -> R<(serde_json::Va
         });
     }
     out.extend(retiring.undeclare.iter().map(|u| u.line(lang)));
-    out.extend(retiring.kept_lines(lang));
+    out.extend(retiring.left_lines(lang));
     out.push(String::new());
     out.push(say(lang, "skill.reopen_to_finish").to_string());
     // **트리가 링크로 체크아웃 밖에 닿으면 남긴 파일로 대지 않는다**([`outside`]) — moai 는 거기 심지 않으므로
@@ -1229,7 +1232,7 @@ impl Undeclare {
     /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다. 읽는 자는 계획할 때와 같다([`read_committed`]) —
     /// 그 사이에 못 읽게 된 파일은 못 지운 것으로 센다.
     fn call(&self, root: &Path) -> bool {
-        let Some(text) = read_committed(&self.file, root) else { return false };
+        let Ok(text) = read_committed(&self.file, root) else { return false };
         let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
         if settings.get("extraKnownMarketplaces").and_then(|m| m.get(self.market)).is_none() {
             return true;
@@ -1268,6 +1271,9 @@ struct Retired {
     undeclare: Vec<Undeclare>,
     /// 사용자 범위라 두고 가는 설치 id — 사람 출력은 손으로 걷는 줄을 함께 댄다.
     kept: Vec<&'static str>,
+    /// 문이 열렸는데 못 읽은 커밋된 설정 — 자리와 까닭([`retire`]). 어느 선언이 있는지 몰라 걸음은 안 세우고, 손으로
+    /// 볼 자리로 댄다(사용자 결정 2026-10-05, moai-ml0d.que 2번).
+    unread: Option<crate::store::Unread>,
 }
 
 impl Retired {
@@ -1313,9 +1319,29 @@ impl Retired {
             .collect()
     }
 
-    /// 두고 가는 것마다 한 줄 — 연습·실행·`uninstall` 이 같은 글을 낸다.
-    fn kept_lines(&self, lang: crate::i18n::Lang) -> impl Iterator<Item = String> + '_ {
-        self.kept.iter().map(move |id| fill(say(lang, "skill.kept_for_others"), &[("id", id)]))
+    /// `--json` 의 `settings_unread` — 못 읽은 설정의 자리와 까닭. `kind`·`said` 는 `show` 의 `journal_error` 와 같은
+    /// 꼴이다(`permission`·`failed`·`outside`). 다 읽었거나 문이 안 열렸으면 `null` 이다.
+    fn unread_json(&self, lang: crate::i18n::Lang) -> serde_json::Value {
+        self.unread.as_ref().map_or(
+            serde_json::Value::Null,
+            |u| serde_json::json!({"file": u.at.display().to_string(), "kind": u.kind(), "said": u.said(lang)}),
+        )
+    }
+
+    /// 사람 손에 두고 가는 것마다 한 줄 — 못 읽은 설정과, 다른 저장소도 쓰는 사용자 범위의 설치. 연습·실행·
+    /// `uninstall` 이 같은 글을 낸다.
+    fn left_lines(&self, lang: crate::i18n::Lang) -> impl Iterator<Item = String> + '_ {
+        let markets: Vec<&str> = RETIRED.iter().map(|(id, _)| market_of(id)).collect();
+        let unread = self.unread.as_ref().map(move |u| {
+            let file = crate::text::one_line(&u.at.display().to_string());
+            fill(
+                say(lang, "skill.settings_unread"),
+                &[("file", &file), ("why", &u.said(lang)), ("markets", &markets.join(", "))],
+            )
+        });
+        unread
+            .into_iter()
+            .chain(self.kept.iter().map(move |id| fill(say(lang, "skill.kept_for_others"), &[("id", id)])))
     }
 }
 
@@ -1407,14 +1433,24 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
     // 출처는 그 파일에 적힌 것으로 잰다. 그 파일이 이 마켓의 플러그인을 켜 두었으면 그것이 이번에 project 에서
     // 걷는 바로 그 플러그인일 때만 걷는다 — 다른 것을 켜 두었으면 그 선언은 이제 그것의 것이다. 못 읽는 파일에는
     // 걸음을 안 세운다 — 어느 출처를 선언했는지 모른다.
+    //
+    // **없는 파일은 조용히, 있는데 못 읽는 파일은 한 줄로 댄다**(사용자 결정 2026-10-05, 리뷰 moai-ml0d.que 2번).
+    // 체크아웃 밖 링크·`.git`·FIFO·권한이 그 자리다. 말없이 넘기면 등록이 이 범위를 새 판으로 올려 문이 닫히고, 다음
+    // `install` 도 그 파일을 다시 안 재 — `claude` 는 그 선언을 링크 너머로 계속 읽는데 아무도 그것을 안 댄다. init 이
+    // 못 읽는 파일을 자리와 까닭으로 대는 것과 같은 결이다. 글로 적힌 것을 못 푸는 JSON 은 전처럼 조용하다.
     if !scopes.contains(&"project") {
         return out;
     }
     let file = root.join(".claude/settings.json");
-    let Some(settings) = read_committed(&file, root).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    else {
-        return out;
+    let text = match read_committed(&file, root) {
+        Ok(text) => text,
+        Err(crate::held::Fell::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return out,
+        Err(fell) => {
+            out.unread = Some(crate::store::Unread { root: root.to_path_buf(), at: file, why: fell.into() });
+            return out;
+        }
     };
+    let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return out };
     for (id, repo) in RETIRED {
         let market = market_of(id);
         if !skill::declared_repo(&settings, market).is_some_and(|at| at.eq_ignore_ascii_case(repo)) {
@@ -1433,10 +1469,10 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
 /// 저장소가 커밋한 자리라 링크나 FIFO 일 수 있다 — 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로
 /// `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 하나로 메모리를 다 썼다. 체크아웃 밖을
 /// 가리키는 링크는 쓰기(`write_atomic_inside`)도 거절하는 자리라 읽어도 고칠 길이 없다. 매니페스트([`place`])·설정
-/// ([`retire`]·[`Undeclare::call`])·두 에이전트의 훅 파일([`HookFile::judged`])이 이 하나로 읽는다. **못 읽으면 `None`
-/// 이다** — 그것을 무엇으로 셀지는 부르는 쪽이 정한다.
-fn read_committed(file: &Path, root: &Path) -> Option<String> {
-    crate::held::read_inside(file, &crate::held::Home::of(root)).ok()
+/// ([`retire`]·[`Undeclare::call`])·두 에이전트의 훅 파일([`HookFile::judged`])이 이 하나로 읽는다. **못 읽은 까닭을
+/// 그대로 낸다** — 그것을 무엇으로 셀지는 부르는 쪽이 정한다(없는 파일·못 읽는 파일을 가르는 것은 [`retire`] 뿐이다).
+fn read_committed(file: &Path, root: &Path) -> Result<String, crate::held::Fell> {
+    crate::held::read_inside(file, &crate::held::Home::of(root))
 }
 
 /// 설치 id(`<플러그인>@<마켓플레이스>`)의 마켓플레이스 이름 — [`RETIRED`] 의 장부 줄과 설정 선언을 이 이름으로 찾는다.

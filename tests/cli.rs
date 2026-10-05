@@ -18139,7 +18139,9 @@ fn skill_install_keeps_a_declaration_whose_plugin_stays() {
 /// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 읽지도 고치지도 않는다**(`store::write_atomic_inside`,
 /// `held::read_inside`) — 받은 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃
 /// 밖의 파일을 고친다. 링크도 보통 파일로 안 바꾼다. 읽기도 같은 자다(moai-ml0d.21i) — 밖을 읽어 걸음을 세우던 판은
-/// 지우지도 못할 선언을 "못 지웠다" 로 댔다. 못 읽는 설정이라 걸음을 안 세우고, 종료 코드는 등록만 따른다.
+/// 지우지도 못할 선언을 "못 지웠다" 로 댔다. 못 읽는 설정이라 걸음은 안 세우되 **말없이 넘기지 않는다**(사용자 결정
+/// 2026-10-05, moai-ml0d.que 2번) — 그 자리와 까닭을 한 줄(`--json` 의 `settings_unread`)로 대고, 없는 파일은 조용하다.
+/// 종료 코드는 등록만 따른다.
 #[test]
 fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
     let s = init("skillundeclarelink");
@@ -18163,8 +18165,22 @@ fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
         json.contains(r#""id":"korean-skills@korean-skills","ok":true,"scope":"project""#),
         "옛 판을 걷는 문이 안 열려 설정을 읽는 자리까지 안 갔다\n{json}"
     );
+    let unread =
+        format!(r#""settings_unread":{{"file":{},"kind":"outside","said":"#, json_str(&file.display().to_string()));
+    assert!(json.contains(&unread), "못 읽은 설정을 안 댄다\n{json}");
     assert_eq!(std::fs::read_to_string(&outside).unwrap(), body, "체크아웃 밖의 파일을 고쳤다");
     assert!(std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink(), "링크를 보통 파일로 바꿨다");
+
+    let said = text(&c.run(s.path(), &["skill", "install", "--scope", "project", "--dry-run"], true));
+    let line = format!("! {} 을 안 읽어", file.display());
+    assert!(
+        said.contains(&line) && said.contains("korean-skills, im-not-ai"),
+        "사람에게 못 읽은 설정을 안 댄다\n{said}"
+    );
+    std::fs::remove_file(&file).unwrap();
+    let json =
+        String::from_utf8(c.run(s.path(), &["skill", "install", "--scope", "project", "--json"], true).stdout).unwrap();
+    assert!(json.contains(r#""settings_unread":null"#), "없는 설정을 못 읽은 것으로 댄다\n{json}");
 }
 
 /// **커밋된 `plugin.json`·`.claude/settings.json` 은 보통 파일로만 읽는다**(moai-ml0d.21i, `held::read_inside`) — 맨
@@ -18194,6 +18210,7 @@ fn skill_reads_no_fifo_in_the_committed_plugin_or_settings() {
     let out = bounded(&["skill", "install", "--scope", "project", "--json"]);
     assert!(out.status.success(), "못 읽는 설정 하나로 설치가 실패로 끝났다\n{}", text(&out));
     assert!(text(&out).contains(r#""undeclared":[]"#), "못 읽은 설정에 걸음을 세웠다\n{}", text(&out));
+    assert!(text(&out).contains(r#""kind":"failed","said":"#), "FIFO 인 설정을 못 읽은 것으로 안 댄다\n{}", text(&out));
     assert!(
         text(&out).contains(r#""id":"korean-skills@korean-skills","ok":true,"scope":"project""#),
         "옛 판을 걷는 문이 안 열려 설정을 읽는 자리까지 안 갔다\n{}",
