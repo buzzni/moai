@@ -348,7 +348,9 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   rest. A Codex turn's end carries less: Codex holds the text that keeps a
   turn going to its default of about 2,500 tokens, which
   `additionalContextLimit` does not raise, so there one load stays within
-  8,000 bytes — about 2,600 Korean characters or 8,000 English ones. A letter's body holds up to 64 KB, its subject 200 characters
+  8,000 bytes, the lines around the letter included — a letter of about 2,400
+  Korean characters or 7,000 English ones still arrives whole. A letter's body
+  holds up to 64 KB, its subject 200 characters
 - **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
   each task is how a worker session — one a person opened — gets its next one;
   nothing has to wake it. While it waits its row reads idle, and once a letter
