@@ -4639,3 +4639,7 @@
 {"ts":"2026-10-05T14:22:37Z","id":"moai-9lvj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T14:22:37Z","id":"moai-bkn4.yo1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T14:22:37Z","id":"moai-bkn4.9no","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T15:34:13Z","id":"moai-m81b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai inbox <id> 도 출력 상한에서 가운데를 잃는다"}
+{"ts":"2026-10-05T15:34:15Z","id":"moai-kr16","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 규칙 2 가 .codex/ 편집을 아직 센다"}
+{"ts":"2026-10-05T15:34:16Z","id":"moai-cy19","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"inbox --ack 와 Stop 이 여러 통을 가지다 끊기면 앞 편지가 읽음으로 남는다"}
+{"ts":"2026-10-05T15:34:37Z","id":"moai-ktjz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"출석 쓰기의 자가 세 벌이다 — inbox 와 훅의 attend, hello"}
