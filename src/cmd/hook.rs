@@ -307,12 +307,12 @@ fn decide(
         }
         Event::PreToolUse => {
             use crate::hook::Call;
-            // **Codex 의 장은 도구 부름에도 닻을 적는다**(moai-j3n5) — 그 장은 pid 를 몰라 오래 안 적히면 떠난 것으로
-            // 걷힌다. 프롬프트도 턴 끝도 없이 도구만 부르는 긴 턴이 그 사이에 걷히지 않게, 때가 되었을 때만 다시 적는다
-            // ([`mail::keep_alive`]). 다른 말씨는 프로세스로 재니 출석부를 안 연다 — 도구 부름마다 도는 자리다.
-            if dialect == Dialect::Codex
-                && let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty())
-            {
+            // **장은 도구 부름에도 닻을 적는다**(moai-j3n5) — 프로세스로 못 재는 장은 오래 안 적히면 떠난 것으로 읽힌다.
+            // 프롬프트도 턴 끝도 없이 도구만 부르는 긴 턴이 그 사이에 떠난 것으로 읽히지 않게, 때가 되었을 때만 다시 적는다
+            // ([`mail::keep_alive`]). **Codex 만이 아니다**(moai-dhxm) — 프로세스를 아는 장도 같은 저장소를 쓰는 다른
+            // 기계(컨테이너)에서는 닻으로만 잰다. 일꾼의 턴은 몇 시간을 가니, 여기서 안 적으면 그 기계의 감독에게 일하는
+            // 일꾼이 20분 만에 떠난 것으로 보인다.
+            if let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty()) {
                 mail::keep_alive(&repo.agents_dir(), |p| p.session.as_deref() == Some(session));
             }
             let cwd = cwd.clone();
@@ -1200,7 +1200,12 @@ fn route_one(
 /// **세션 id 로 찾은 장도 그 프로세스가 살아 있을 때만 그대로 쓴다**(리뷰 moai-h8tn.x4l) — `claude --resume` 은 세션
 /// id 를 그대로 들고 **새 프로세스**로 뜬다. 죽은 pid 를 든 채 다시 적던 판은 `moai agents` 가 산 세션의 장을
 /// 걷었고, `moai send`·`inbox` 는 조상의 pid 로 나를 못 찾았으며, 걷힌 뒤에는 새 이름·빈 역할로 다시 서서 감독이
-/// 일감을 가졌다. 그 장은 지금 프로세스와 칸으로 다시 잇는다 — 이름·역할은 그대로다. **한 프로세스는 장 하나다** —
+/// 일감을 가졌다. 그 장은 지금 프로세스와 칸으로 다시 잇는다 — 이름·역할은 그대로다. **다른 기계의 장도 그렇다**
+/// (moai-dhxm) — 그 장은 죽었는지를 이 기계에서 못 재 닻이 새로운 동안 떠난 것으로 안 읽히지만, 이 훅이 이 기계에서
+/// 돈다는 것이 곧 그 세션이 지금 여기 있다는 것이다(컨테이너를 다시 띄우고 `claude --resume` 으로 이었다). 그대로 이어
+/// 쓰던 판은 앞 기계의 pid 를 든 장에 닻만 새로 적어 영영 안 낡게 했고, 이 기계의 `moai inbox`·`send` 는 조상으로 나를
+/// 못 찾았다([`mail::Presence::runs_as`]). 기계를 안 적은 옛 장은 그 pid 가 이 기계에 살아 있으면 기계를 단다
+/// ([`mail::Presence::claimed`]). **한 프로세스는 장 하나다** —
 /// 다시 이은 프로세스가 다른 이름의 장도 들고 있으면(`/resume` 으로 세션을 갈아탄 프로세스) 그 장을 걷고 그 함을
 /// 비운다. 두 이름으로 서면 `moai inbox` 와 훅이 서로 다른 이름의 편지를 본다.
 ///
@@ -1244,8 +1249,8 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
         _ => p,
     };
     let found = all.iter().find(|p| p.session.as_deref() == Some(session));
-    if let Some(p) = found.filter(|p| dialect == Dialect::Codex || !p.gone()) {
-        return Some(renamed(mail::Presence { model: model(p), ..p.clone() }));
+    if let Some(p) = found.filter(|p| dialect == Dialect::Codex || (p.here() && !p.gone())) {
+        return Some(renamed(mail::Presence { model: model(p), ..p.clone() }.claimed()));
     }
     let cwd = input.cwd.clone().unwrap_or_default();
     let short: String = session.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
@@ -1261,8 +1266,10 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
                 role: String::new(),
                 status: String::new(),
                 since: String::new(),
-                pid,
-                pid_start,
+                pid: 0,
+                pid_start: None,
+                machine: None,
+                host: None,
                 session: Some(session.to_string()),
                 cwd: cwd.clone(),
                 tmux_pane: tmux.0,
@@ -1270,6 +1277,7 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
                 seen: None,
                 rest: Default::default(),
             }
+            .at(pid, pid_start)
         };
     // 토막은 상한에 안 잘리게 잇는다([`mail::name_with`]) — 잘리면 가른 이름이 도로 산 남의 이름이다.
     //
@@ -1304,16 +1312,17 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
                 mail::retire(&mail_dir, &other.name);
             }
         }
-        return Some(renamed(mail::Presence {
-            model: model(p),
-            session: Some(session.to_string()),
-            pid: agent.pid,
-            pid_start: agent.start,
-            cwd: cwd.clone(),
-            tmux_pane: tmux.0,
-            tmux_socket: tmux.1,
-            ..p.clone()
-        }));
+        return Some(renamed(
+            mail::Presence {
+                model: model(p),
+                session: Some(session.to_string()),
+                cwd: cwd.clone(),
+                tmux_pane: tmux.0,
+                tmux_socket: tmux.1,
+                ..p.clone()
+            }
+            .at(agent.pid, agent.start),
+        ));
     }
     let name = asked
         .filter(|n| !taken(n))
@@ -1342,15 +1351,17 @@ fn rest(input: &Input, repo: &Repo, dialect: Dialect, event: Event) {
     }
     // **이미 노는 장은 다시 안 쓴다**(리뷰 moai-u5wr.e74) — 디스크에서 읽은 그대로라 바뀔 것이 없다. Claude 의 흔한 끝
     // (`Stop` 뒤의 `SessionEnd`, `/clear` 마다)이 그 자리고, 저장소가 선 자리(Ceph RBD)가 멈춘 날 그 쓰기 하나가
-    // `SessionEnd` 의 짧은 상한을 넘긴다. 프로세스를 모르는 장은 닻을 적을 때가 되었으면 쓴다(moai-j3n5).
-    if p.status == mail::IDLE && !p.since.is_empty() && !p.due(&model::now()) {
+    // `SessionEnd` 의 짧은 상한을 넘긴다. 닻을 적을 때가 되었으면 쓴다(moai-j3n5) — **세션이 닫힐 때는 빼고**(moai-dhxm).
+    // 닻은 "아직 산다" 다: 닫히는 세션에 적으면 한참 놀다 닫힌 세션이 다른 기계에 20분 동안 산 일꾼으로 다시 서고, `/clear`
+    // 에서는 곧 이을 `SessionStart` 가 어차피 다시 적는다. 닻이 모든 장의 것이 되며 이 쓰기가 Claude 의 그 끝에 되살아났었다.
+    if p.status == mail::IDLE && !p.since.is_empty() && (event == Event::SessionEnd || !p.due(&model::now())) {
         return;
     }
     attend(repo, Some(p), mail::IDLE);
 }
 
-/// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다). 프로세스를
-/// 모르는 장은 닻도 적는다(moai-j3n5) — 훅이 돈 것이 곧 그 세션이 산 것이다. 못 적으면 조용히 지나간다 — 훅은 실패하지
+/// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다). 닻도
+/// 적는다(moai-j3n5, moai-dhxm) — 훅이 돈 것이 곧 그 세션이 산 것이다. 못 적으면 조용히 지나간다 — 훅은 실패하지
 /// 않는다(머리글).
 fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
     let Some(mut p) = presence else { return };

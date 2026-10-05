@@ -2308,8 +2308,10 @@ Options:
   printed tells the sender to use SendMessage. With neither it does nothing
   and says nothing. moai never runs an agent's own program to wake it. An
   agent at work is not woken, nor one already waiting in `moai inbox --wait`
-  (Linux tells it from the processes). For any-idle-worker it knocks on the
-  agent idle the longest.
+  (Linux tells it from the processes), nor one on another machine sharing
+  this repository - its pane and its session are there (`why` is no_way).
+  For any-idle-worker it knocks on the agent idle the longest, one on this
+  machine first.
 
   --json gives the letter as written plus `id`, and `wake`
   ({"to","via","done","why"}) when --wake was given. `via` is send_message,
@@ -2395,22 +2397,28 @@ Options:
   `moai inbox --wait` marks it idle while it waits and busy once a letter
   comes. A row whose process is gone is swept here - on Linux a reused pid is
   told apart by the time the process started - and the letters left unread
-  for it go back to their senders. A Codex row has no process to look at:
-  its hooks and its waits write `seen`. Once nothing has written it for 20
-  minutes its status reads gone - --status idle and --wake pass it over -
-  but it stays, role and name included, for that session to come back to.
-  After a day it is swept, and its letters wait for that session. Any other
-  row that cannot be told alive or gone stays.
+  for it go back to their senders. A Codex row has no process to look at,
+  and a row from another machine - another container sharing this
+  repository - is not looked at by its pid, which means something only
+  where it was written; the table shows that pid as <pid>@<host>. Those
+  rows are told by `seen`, which every row's hooks and waits write. Once
+  nothing has written it for 20 minutes its status reads gone - --status
+  idle and --wake pass it over - but it stays, role and name included, for
+  that session to come back to. After a day it is swept, and its letters
+  wait for that session. Any other row that cannot be told alive or gone
+  stays.
 
   --role and --status keep the rows whose word is exactly that one. A row a
   hook registered carries no role until the agent says `moai hello --role`.
   The sweep runs over every row either way.
 
   --json gives {"agents":[{"v","name","vendor","model","role","status",
-  "since","pid","pid_start","session","cwd","tmux_pane","tmux_socket",
-  "seen"}],"swept":[names]}. pid_start, session, the two tmux keys and seen
-  are absent when they are not known. status is busy, idle, or gone for a
-  Codex row nothing wrote for 20 minutes.
+  "since","pid","pid_start","machine","host","session","cwd","tmux_pane",
+  "tmux_socket","seen"}],"swept":[names]}. pid_start, machine, host,
+  session, the two tmux keys and seen are absent when they are not known.
+  machine names where pid means that process; a row without it is looked
+  at by its pid. status is busy, idle, or gone for a row told by seen that
+  nothing wrote for 20 minutes.
 ```
 
 ## `moai hello`
@@ -2455,8 +2463,8 @@ Options:
   row its hooks gave the session (named in its first context), and --name
   with it to rename that row. --name alone writes a row the hooks never
   read, so it is only for a Codex whose hooks do not run.
-  --as takes up a row already standing under that name, keeping its process
-  and session.
+  --as takes up a row already standing under that name, keeping its process,
+  the machine that process runs on, and its session.
 
   A name is letters, digits, `.`, `_` and `-`, up to 64, not starting with
   `.` - it becomes a file name. any-idle-worker is not one an agent can take.

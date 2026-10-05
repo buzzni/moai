@@ -1061,6 +1061,8 @@
   "agents.none": "No agents are registered here - `moai hello` registers one, and the hooks register a session when it starts",
   "agents.none_match": "No agent here has that role and state",
   "agents.swept": "Swept {name} - its process is gone",
+  "agents.swept_quiet": "Swept {name} - nothing marked it alive for a day; its letters wait for that session",
+  "agents.swept_elsewhere": "Swept {name} - a row from another machine nothing marked alive for a day; its letters went back to their senders",
   "agents.hello": "Here as {name} ({vendor}, {model}, {role})",
   "refuse.agents_word": "--{what} takes one line of up to 64 characters - got `{value}`",
   "refuse.agents_no_pid": "There is no process {pid}",
