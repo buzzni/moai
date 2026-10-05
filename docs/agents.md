@@ -152,8 +152,14 @@ a worker that waits needs no waking, and waking is a bonus.
 - **Trust the repository** when Codex asks. It reads a project's own `.codex/`
   only in a folder it trusts
 - **Trust moai's hooks in `/hooks`** once, and again after an install that
-  changed them. Until then Codex runs none of them, and the five rules are words
-  only
+  changed them. Before the first trust Codex runs none of them, and the five
+  rules are words only. Codex keeps that trust per handler, by a hash of each
+  one, so after an install that changed some of them the handlers it left alone
+  keep running and the changed ones stop until you trust them again — nothing
+  says so, and `moai skill status` does not see the trust. With `Stop`,
+  `Interrupt` and `SessionEnd` the ones left untrusted, `moai agents` shows the
+  session `busy` after its turn ends until 20 quiet minutes turn it `gone`, and
+  keeps its row for a day after it closes
 - **Make it a worker** with `$moai-work`
 - **moai finds it by its session id.** Codex runs every session's shell from
   one shared `codex app-server`, so `moai` cannot tell sessions apart by their
