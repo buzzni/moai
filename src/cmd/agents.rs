@@ -39,7 +39,10 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     for g in &garbled {
         tell(&fill(
             say(ctx.lang(), "warn.agents_garbled"),
-            &[("path", &crate::text::one_line(&g.path.display().to_string())), ("why", &crate::text::one_line(&g.why))],
+            &[
+                ("path", &crate::text::one_line(&g.path.display().to_string())),
+                ("why", &crate::text::one_line(&g.said(ctx.lang()))),
+            ],
         ));
     }
     if ctx.json {
@@ -334,7 +337,7 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         Some(old) => mail::rename_card(&dir, &mail_dir, &presence, &old.name),
         None => mail::write_presence(&dir, &presence),
     };
-    wrote.map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
+    wrote.map_err(|e| Fail::new(mail::refusal(lang, &dir, &e)))?;
     if ctx.json {
         return super::json_line(&presence);
     }

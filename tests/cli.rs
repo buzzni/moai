@@ -24196,6 +24196,64 @@ fn hello_registers_and_agents_sweeps_the_gone() {
     assert!(!moai(s.path(), &["hello", "--role", "두\n줄", "--pid", &other.pid()]).status.success());
 }
 
+/// **우편함과 출석부는 커밋된 링크를 체크아웃 밖으로 따라가지 않는다**(moai-kxkw.7ky) — 리뷰 moai-ml0d.que 가 잰 그대로다:
+/// 받은 저장소가 `.moai/agents -> <밖>` 을 커밋해 두면 `moai hello` 가 밖에 `.gitignore`(`*`)와 장을 쓰고, `moai agents` 는
+/// 밖에 심어 둔 죽은 pid 의 장을 지웠다. 이제 쓰는 명령은 그 자리를 대고 비영으로 멈추고, 읽는 명령은 그 자리를 못 읽은
+/// 것으로 댄다. 밖의 파일은 한 바이트도 안 바뀐다.
+#[cfg(unix)]
+#[test]
+fn mail_and_attendance_follow_no_committed_link_out_of_the_checkout() {
+    let s = init("mail-link-out");
+    let away = Scratch::new("mail-link-out-away");
+    let (agents_away, mail_away) = (away.path().join("agents"), away.path().join("mail"));
+    std::fs::create_dir_all(&agents_away).unwrap();
+    std::fs::create_dir_all(mail_away.join("w1")).unwrap();
+    let planted = agents_away.join("planted.json");
+    std::fs::write(
+        &planted,
+        format!("{{\"v\":1,\"name\":\"planted\",\"pid\":{},\"pid_start\":1}}\n", std::process::id()),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&agents_away, s.path().join(".moai/agents")).unwrap();
+    std::os::unix::fs::symlink(&mail_away, s.path().join(".moai/mail")).unwrap();
+    let everything = |dir: &Path| {
+        let mut names: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    };
+
+    let w = Sleeper::new();
+    let out = moai(s.path(), &["hello", "--name", "w1", "--pid", &w.pid()]);
+    assert!(!out.status.success(), "밖을 가리키는 출석부에 쓰고 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains(&agents_away.display().to_string()), "어느 자리인지 안 댄다\n{}", text(&out));
+
+    let out = moai(s.path(), &["agents", "--json"]);
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("{\"agents\":[],"), "밖의 장을 읽었다\n{}", text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&agents_away.display().to_string()),
+        "못 연 출석부를 안 댄다\n{}",
+        text(&out)
+    );
+    assert!(planted.exists(), "밖에 심어 둔 장을 걷었다");
+
+    let out = moai(s.path(), &["send", "w1", "제목", "-b", "본문", "--as", "boss"]);
+    assert!(!out.status.success(), "밖을 가리키는 우편함에 쓰고 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains(&mail_away.display().to_string()), "어느 자리인지 안 댄다\n{}", text(&out));
+
+    let out = moai(s.path(), &["inbox", "--as", "w1"]);
+    assert!(!out.status.success(), "못 연 우편함을 다 읽은 것으로 끝냈다\n{}", text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&mail_away.display().to_string()),
+        "못 연 우편함을 안 댄다\n{}",
+        text(&out)
+    );
+
+    assert_eq!(everything(&agents_away), ["planted.json"], "체크아웃 밖의 출석부에 썼다");
+    assert_eq!(everything(&mail_away), ["w1"], "체크아웃 밖의 우편함에 썼다");
+    assert!(everything(&mail_away.join("w1")).is_empty(), "체크아웃 밖의 함에 썼다");
+}
+
 /// **다른 기계의 장은 pid 로 안 잰다**(moai-dhxm) — 컨테이너 여럿이 한 저장소를 쓰면 장의 pid 는 그것을 적은 컨테이너에서만
 /// 뜻을 갖는다. 이 기계의 `/proc` 에 없는 pid 를 죽은 것으로 읽던 판은 `moai agents` 가 남의 산 장을 걷고 그 함의 편지를
 /// 보낸 이에게 되돌렸다. `hello` 는 장에 기계와 호스트 이름과 닻을 적고, 기계가 다른 장은 닻으로 잰다. 기계를 안 적은 옛

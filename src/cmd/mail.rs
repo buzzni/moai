@@ -96,7 +96,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
     };
     let dir = repo.mail_dir();
     mail::migrate(&dir);
-    let id = mail::send(&dir, &letter).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
+    let id = mail::send(&dir, &letter).map_err(|e| Fail::new(mail::refusal(ctx.lang(), &dir, &e)))?;
 
     // **없는 이름에도 보낸다** — 아직 인사하지 않은 에이전트에게 먼저 보내는 것은 흔하다. 오타일 수 있으니
     // 한 줄로만 댄다.
@@ -189,7 +189,10 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     for g in &garbled {
         tell(&fill(
             say(ctx.lang(), "warn.mail_garbled"),
-            &[("path", &crate::text::one_line(&g.path.display().to_string())), ("why", &crate::text::one_line(&g.why))],
+            &[
+                ("path", &crate::text::one_line(&g.path.display().to_string())),
+                ("why", &crate::text::one_line(&g.said(ctx.lang()))),
+            ],
         ));
         if g.mailbox.as_deref() != Some(mail::ANY_IDLE_WORKER) || role != mail::SUPERVISOR {
             note_partial();

@@ -201,8 +201,20 @@ pub struct Garbled {
     pub path: PathBuf,
     pub why: String,
     /// 든 함 — 편지면 그 함의 이름이고, 출석 파일이면 `None` 이다. 남의 함이 깨진 것을 제 답이 덜 난 것으로 세지
-    /// 않으려고 든다(`inbox`).
+    /// 않으려고 든다(`inbox`). 우편함 자체를 못 열었으면([`Fenced`]) 그것도 `None` 이다 — 제 함도 못 연 것이다.
     pub mailbox: Option<String>,
+    /// 체크아웃 밖으로 풀려 안 연 디렉터리면 그 까닭이다([`Fenced`]) — 사람에게 댈 말을 [`Garbled::said`] 가 고른다.
+    pub unheld: Option<crate::held::Unheld>,
+}
+
+impl Garbled {
+    /// 사람에게 댈 까닭 — 안 연 디렉터리면 고른 말로([`crate::held::said`]), 아니면 [`Garbled::why`] 그대로다.
+    pub fn said(&self, lang: crate::i18n::Lang) -> String {
+        match &self.unheld {
+            Some(why) => crate::held::said(lang, why),
+            None => self.why.clone(),
+        }
+    }
 }
 
 /// 받는 이의 함 — `<우편함>/<이름>/`. 이름은 파일 이름이 될 수 있는 글이다([`is_name`]) — 부르는 쪽이 걸러 둔다.
@@ -233,9 +245,10 @@ fn send_from(dir: &Path, letter: &Letter, clock: &mut dyn FnMut() -> u64) -> std
     if !is_recipient(&letter.to) {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, letter.to.clone()));
     }
-    ensure_dir(dir)?;
-    let held = mailbox(dir, &letter.to);
-    std::fs::create_dir_all(&held)?;
+    let home = home_of(dir);
+    let dir = ensure_dir(dir, &home)?;
+    // 함도 잰다 — 우편함이 안에 서도 그 밑의 `<받는 이> -> <밖>` 하나로 편지가 밖에 든다.
+    let held = make_dir(&mailbox(&dir, &letter.to), &home)?;
     sweep_temps(&held);
     let mut text = serde_json::to_string(letter).map_err(std::io::Error::other)?;
     text.push('\n');
@@ -342,19 +355,40 @@ fn clock_micros() -> u64 {
 /// **읽은 편지는 파일 이름으로 먼저 거른다**(리뷰 moai-h8tn.x4l) — 읽은 이가 이름에 서 있으니, 남이 읽은 편지를
 /// 열어 가를 까닭이 없다. `read/` 는 지우지 않아 쌓이기만 하고, `inbox --all --wait` 는 반 초마다 이 자리를 훑는다.
 /// 읽은 이 자리가 이름의 꼴이 아니면(손으로 놓은 파일) 편지로 안 센다.
+///
+/// **체크아웃 밖으로 풀리는 디렉터리는 안 연다**([`reach`], moai-kxkw.7ky) — 우편함이면 하나, 함이나 그 `read/` 면 그
+/// 함마다 하나씩 못 읽은 것으로 댄다. 빈 함으로 넘기면 받은 저장소의 링크 하나가 편지를 말없이 감춘다.
 pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>) {
     let mut letters = Vec::new();
     let mut garbled = Vec::new();
+    let home = home_of(dir);
+    let dir = match reach(dir, &home) {
+        Ok(dir) => dir,
+        Err(f) => return (letters, vec![f.garbled(None)]),
+    };
     let boxes: &[&str] = if me == ANY_IDLE_WORKER { &[ANY_IDLE_WORKER] } else { &[me, ANY_IDLE_WORKER] };
     for &held in boxes {
-        let at = mailbox(dir, held);
+        let at = match reach(&mailbox(&dir, held), &home) {
+            Ok(at) => at,
+            Err(f) => {
+                garbled.push(f.garbled(Some(held)));
+                continue;
+            }
+        };
         let (got, bad) = unread_in(&at, held);
         letters.extend(got);
         garbled.extend(bad);
         if !read_too {
             continue;
         }
-        for (path, stem) in json_files(&at.join("read")) {
+        let read = match reach(&at.join("read"), &home) {
+            Ok(read) => read,
+            Err(f) => {
+                garbled.push(f.garbled(Some(held)));
+                continue;
+            }
+        };
+        for (path, stem) in json_files(&read) {
             let Some((head, reader)) = stem.split_once('@') else { continue };
             let Some((id, returned)) = letter_stem(head) else { continue };
             if reader != me || !is_name(reader) {
@@ -370,7 +404,7 @@ pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>)
             match read_json::<Letter>(&path) {
                 Ok(Some(letter)) => letters.push(stored(letter)),
                 Ok(None) => {}
-                Err(why) => garbled.push(Garbled { path, why, mailbox: Some(held.to_string()) }),
+                Err(why) => garbled.push(Garbled { path, why, mailbox: Some(held.to_string()), unheld: None }),
             }
         }
     }
@@ -378,7 +412,7 @@ pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>)
     (letters, garbled)
 }
 
-/// 한 함의 안 읽은 편지 — 이름 차례는 부르는 쪽이 맞춘다.
+/// 한 함의 안 읽은 편지 — 이름 차례는 부르는 쪽이 맞춘다. `at` 은 [`reach`] 를 지난 자리다 — 부르는 쪽이 잰다.
 fn unread_in(at: &Path, held: &str) -> (Vec<Stored>, Vec<Garbled>) {
     let mut letters = Vec::new();
     let mut garbled = Vec::new();
@@ -389,7 +423,7 @@ fn unread_in(at: &Path, held: &str) -> (Vec<Stored>, Vec<Garbled>) {
                 letters.push(Stored { id: id.to_string(), mailbox: held.to_string(), reader: None, returned, letter })
             }
             Ok(None) => {}
-            Err(why) => garbled.push(Garbled { path, why, mailbox: Some(held.to_string()) }),
+            Err(why) => garbled.push(Garbled { path, why, mailbox: Some(held.to_string()), unheld: None }),
         }
     }
     (letters, garbled)
@@ -438,11 +472,11 @@ pub enum Took {
 /// `rename` 은 `read/<id>@<읽은 이>.json` 이 이미 서 있으면 **말없이 덮는다** — 그 자리가 비어 있다는 것은 id 가
 /// 두 번 안 서는 것([`place`] 가 이름을 들이기 바로 앞에 짓는다)에 기댄다.
 pub fn take(dir: &Path, stored: &Stored, reader: &str) -> std::io::Result<Took> {
-    let held = mailbox(dir, &stored.mailbox);
-    let read = held.join("read");
-    std::fs::create_dir_all(&read)?;
-    let read_as = format!("{}{}@{reader}.json", stored.id, mark(stored.returned));
-    match std::fs::rename(held.join(stored.file()), read.join(read_as)) {
+    let home = home_of(dir);
+    let held = reach(&mailbox(dir, &stored.mailbox), &home)?;
+    let read = make_dir(&held.join("read"), &home)?;
+    let read_as = read.join(format!("{}{}@{reader}.json", stored.id, mark(stored.returned)));
+    match std::fs::rename(held.join(stored.file()), &read_as) {
         Ok(()) => Ok(Took::Mine),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Took::Lost),
         Err(e) => Err(e),
@@ -464,7 +498,8 @@ pub fn take(dir: &Path, stored: &Stored, reader: &str) -> std::io::Result<Took> 
 /// - 깨진 편지는 그대로 둔다 — 보낸 이를 모른다
 /// - 돌려보낸 편지는 보낸 이의 함에 **되돌아온 표**를 달고 든다([`Stored::returned`])
 pub fn retire(dir: &Path, name: &str) -> usize {
-    let at = mailbox(dir, name);
+    let home = home_of(dir);
+    let Ok(at) = reach(&mailbox(dir, name), &home) else { return 0 };
     let (letters, _) = unread_in(&at, name);
     let mut touched: Vec<PathBuf> = Vec::new();
     let mut returned = 0;
@@ -475,7 +510,7 @@ pub fn retire(dir: &Path, name: &str) -> usize {
             continue;
         }
         let (path, into) = (at.join(s.file()), mailbox(dir, from));
-        if matches!(relocate(&path, &into, &s.id, true, &s.letter.sent_at), Ok(Some(_))) {
+        if let Ok(Some((_, into))) = relocate(&path, &into, &home, &s.id, true, &s.letter.sent_at) {
             returned += 1;
             if !touched.contains(&into) {
                 touched.push(into);
@@ -490,13 +525,17 @@ pub fn retire(dir: &Path, name: &str) -> usize {
 /// 이름을 바꾼 에이전트의 안 읽은 편지를 새 이름의 함으로 옮긴다 — 받는 이는 같은 에이전트다(moai-ew4o.l3n).
 /// 옛 이름 앞에 남은 편지는 아무도 못 읽고 남던 자리다.
 pub fn carry(dir: &Path, old: &str, new: &str) {
-    let (at, into) = (mailbox(dir, old), mailbox(dir, new));
+    let home = home_of(dir);
+    let Ok(at) = reach(&mailbox(dir, old), &home) else { return };
+    let into = mailbox(dir, new);
     let (letters, _) = unread_in(&at, old);
-    let mut moved = false;
+    let mut moved = None;
     for s in letters {
-        moved |= matches!(relocate(&at.join(s.file()), &into, &s.id, s.returned, &s.letter.sent_at), Ok(Some(_)));
+        if let Ok(Some((_, real))) = relocate(&at.join(s.file()), &into, &home, &s.id, s.returned, &s.letter.sent_at) {
+            moved = Some(real);
+        }
     }
-    if moved {
+    if let Some(into) = moved {
         sync_dir(&into);
     }
 }
@@ -508,6 +547,9 @@ pub fn carry(dir: &Path, old: &str, new: &str) {
 ///
 /// 이름이 `read` 인 에이전트의 함도 `<우편함>/read/` 다 — 그 함의 편지에는 `@` 가 없어 옛 읽은 편지와 갈린다.
 pub fn migrate(dir: &Path) {
+    let home = home_of(dir);
+    let Ok(dir) = reach(dir, &home) else { return };
+    let dir = dir.as_path();
     let mut touched: Vec<PathBuf> = Vec::new();
     let mut moved = |into: PathBuf| {
         if !touched.contains(&into) {
@@ -520,20 +562,20 @@ pub fn migrate(dir: &Path) {
         }
         let Some(to) = addressee(&path).filter(|to| is_name(to)) else { continue };
         let sent_at = read_json::<Letter>(&path).ok().flatten().map(|l| l.sent_at).unwrap_or_default();
-        let into = mailbox(dir, &to);
-        if matches!(relocate(&path, &into, &stem, false, &sent_at), Ok(Some(_))) {
+        if let Ok(Some((_, into))) = relocate(&path, &mailbox(dir, &to), &home, &stem, false, &sent_at) {
             moved(into);
         }
     }
-    let read = dir.join("read");
-    for (path, stem) in json_files(&read) {
+    // 옛 꼴의 읽은 편지 — 그 자리가 체크아웃 밖으로 풀리면 안 연다.
+    let read = reach(&dir.join("read"), &home).map(|read| json_files(&read)).unwrap_or_default();
+    for (path, stem) in read {
         let Some((id, reader)) = stem.split_once('@') else { continue };
         if !is_id(id) || !is_name(reader) {
             continue;
         }
         let Some(to) = addressee(&path).filter(|to| is_name(to)) else { continue };
-        let into = mailbox(dir, &to).join("read");
-        if std::fs::create_dir_all(&into).is_ok() && move_new(&path, &into.join(format!("{stem}.json"))).is_ok() {
+        let Ok(into) = make_dir(&mailbox(dir, &to).join("read"), &home) else { continue };
+        if move_new(&path, &into.join(format!("{stem}.json"))).is_ok() {
             moved(into);
         }
     }
@@ -542,12 +584,20 @@ pub fn migrate(dir: &Path) {
 }
 
 /// 편지 하나를 다른 함으로 옮긴다 — **덮지 않는다**([`move_new`]). 그 함에 같은 id 가 서 있으면 다음 id 로 든다 —
-/// id 는 한 함 안에서만 겹치지 않는다(모듈 머리글). 옮긴 id 를 내고, 옮기기 전에 남이 가졌으면(읽었거나 먼저
-/// 옮겼으면) `None` 이다. **그 함의 이름표는 안 내려 쓴다** — 여럿을 옮기는 쪽이 다 옮긴 뒤 한 번 쓴다([`place`]).
-fn relocate(from: &Path, into: &Path, id: &str, returned: bool, sent_at: &str) -> std::io::Result<Option<String>> {
-    std::fs::create_dir_all(into)?;
-    match place(into, sent_at, Some(id), returned, &mut clock_micros, &mut |at| move_new(from, at)) {
-        Ok(id) => Ok(Some(id)),
+/// id 는 한 함 안에서만 겹치지 않는다(모듈 머리글). 옮긴 id 와 그 함의 푼 자리를 내고, 옮기기 전에 남이 가졌으면
+/// (읽었거나 먼저 옮겼으면) `None` 이다. **그 함의 이름표는 안 내려 쓴다** — 여럿을 옮기는 쪽이 다 옮긴 뒤 한 번 쓴다
+/// ([`place`]). 옮길 함이 체크아웃 밖으로 풀리면 안 옮긴다([`make_dir`]) — 편지는 제자리에 남는다.
+fn relocate(
+    from: &Path,
+    into: &Path,
+    home: &crate::held::Home,
+    id: &str,
+    returned: bool,
+    sent_at: &str,
+) -> std::io::Result<Option<(String, PathBuf)>> {
+    let into = make_dir(into, home)?;
+    match place(&into, sent_at, Some(id), returned, &mut clock_micros, &mut |at| move_new(from, at)) {
+        Ok(id) => Ok(Some((id, into))),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
     }
@@ -843,7 +893,8 @@ fn card_at(dir: &Path, name: &str) -> PathBuf {
 }
 
 /// 출석을 적는다 — temp 를 쓰고 `<name>.json` 으로 `rename` 한다. **덮는 것이 뜻이다** — 같은 이름은 같은
-/// 에이전트고, 마지막에 적은 쪽이 지금이다. 반쯤 쓴 장은 안 보인다.
+/// 에이전트고, 마지막에 적은 쪽이 지금이다. 반쯤 쓴 장은 안 보인다. 출석부가 체크아웃 밖으로 풀리면 안 쓴다
+/// ([`ensure_dir`]).
 ///
 /// **`sync` 하지 않는다**(리뷰 moai-h8tn.x4l) — 훅이 프롬프트마다·턴 끝마다 이 장을 쓰는데, 저장소가 Ceph RBD 에
 /// 서는 이 기계에서 `sync` 한 번이 수십 ms 다. 출석은 기록이 아니라 지금의 표라 잃어도 다음 훅이 다시 쓰고, 기계가
@@ -852,19 +903,20 @@ pub fn write_presence(dir: &Path, presence: &Presence) -> std::io::Result<()> {
     if !is_agent_name(&presence.name) {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, presence.name.clone()));
     }
-    ensure_dir(dir)?;
+    let dir = ensure_dir(dir, &home_of(dir))?;
     let mut text = serde_json::to_string(presence).map_err(std::io::Error::other)?;
     text.push('\n');
-    let tmp = temp_in(dir);
+    let tmp = temp_in(&dir);
     write_new(&tmp, text.as_bytes(), false)?;
-    std::fs::rename(&tmp, card_at(dir, &presence.name)).inspect_err(|_| {
+    std::fs::rename(&tmp, card_at(&dir, &presence.name)).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
 }
 
-/// 출석 한 장을 걷는다 — 이름을 바꾼 에이전트의 옛 장이나 죽은 장이다.
+/// 출석 한 장을 걷는다 — 이름을 바꾼 에이전트의 옛 장이나 죽은 장이다. 출석부가 체크아웃 밖으로 풀리면 안 걷는다
+/// ([`reach`], moai-kxkw.7ky) — 밖에 심어 둔 죽은 pid 의 장을 `moai agents` 가 지우던 자리다.
 pub fn forget(dir: &Path, name: &str) -> std::io::Result<()> {
-    std::fs::remove_file(card_at(dir, name))
+    std::fs::remove_file(card_at(&reach(dir, &home_of(dir))?, name))
 }
 
 /// 두 이름의 장이 **한 파일**인가 — 대소문자를 안 가리는 파일 시스템(macOS 기본)에서는 `Worker` 와 `worker` 가 한
@@ -873,7 +925,8 @@ pub fn same_card(dir: &Path, a: &str, b: &str) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        let id = |name: &str| std::fs::metadata(card_at(dir, name)).ok().map(|m| (m.dev(), m.ino()));
+        let Ok(dir) = reach(dir, &home_of(dir)) else { return false };
+        let id = |name: &str| std::fs::metadata(card_at(&dir, name)).ok().map(|m| (m.dev(), m.ino()));
         matches!((id(a), id(b)), (Some(x), Some(y)) if x == y)
     }
     #[cfg(not(unix))]
@@ -884,10 +937,17 @@ pub fn same_card(dir: &Path, a: &str, b: &str) -> bool {
 }
 
 /// 출석부를 읽는다 — 이름 차례다. 산 것만 고르지 않는다: 그것은 [`alive`] 를 묻는 쪽이 한다.
+///
+/// 출석부가 체크아웃 밖으로 풀리면 안 읽고 그 자리 하나를 못 읽은 것으로 댄다([`reach`], moai-kxkw.7ky) — 밖에 심어 둔
+/// 장이 이 저장소의 에이전트로 서면 감독이 그 이름에 일감을 보낸다.
 pub fn presences(dir: &Path) -> (Vec<Presence>, Vec<Garbled>) {
     let mut out = Vec::new();
     let mut garbled = Vec::new();
-    for (path, stem) in json_files(dir) {
+    let dir = match reach(dir, &home_of(dir)) {
+        Ok(dir) => dir,
+        Err(f) => return (out, vec![f.garbled(None)]),
+    };
+    for (path, stem) in json_files(&dir) {
         if !is_agent_name(&stem) {
             continue;
         }
@@ -896,7 +956,7 @@ pub fn presences(dir: &Path) -> (Vec<Presence>, Vec<Garbled>) {
             // 다른 것은 손으로 옮긴 파일이다.
             Ok(Some(p)) => out.push(Presence { name: stem, ..p }),
             Ok(None) => {}
-            Err(why) => garbled.push(Garbled { path, why, mailbox: None }),
+            Err(why) => garbled.push(Garbled { path, why, mailbox: None, unheld: None }),
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -958,7 +1018,8 @@ fn sweep_from(dir: &Path, mail: &Path, all: Vec<Presence>, now: &str) -> Vec<Swe
 /// 그 장이 읽은 뒤로 그대로인가 — 디스크의 장을 다시 읽어 견준다([`sweep`]). 이름은 파일 이름으로 맞춘다([`presences`]).
 /// 없거나 못 읽으면 그대로가 아니다 — 걷지 않는다.
 fn unchanged(dir: &Path, p: &Presence) -> bool {
-    match read_json::<Presence>(&card_at(dir, &p.name)) {
+    let Ok(dir) = reach(dir, &home_of(dir)) else { return false };
+    match read_json::<Presence>(&card_at(&dir, &p.name)) {
         Ok(Some(now)) => Presence { name: p.name.clone(), ..now } == *p,
         _ => false,
     }
@@ -993,7 +1054,8 @@ pub fn take_over(mail: &Path, all: &[Presence], name: &str, keep: Option<&str>) 
     if keep.is_some_and(|k| k.eq_ignore_ascii_case(name)) {
         return;
     }
-    let (letters, _) = unread_in(&mailbox(mail, name), name);
+    let Ok(at) = reach(&mailbox(mail, name), &home_of(mail)) else { return };
+    let (letters, _) = unread_in(&at, name);
     for s in letters.iter().filter(|s| s.returned) {
         let _ = take(mail, s, name);
     }
@@ -1403,6 +1465,82 @@ fn run(cmd: &mut std::process::Command) -> Result<(), &'static str> {
     }
 }
 
+// ── 체크아웃 안에서만 ──────────────────────────────────────────────────
+
+/// 디렉터리가 체크아웃 밖으로(또는 `.git/` 안으로) 풀려 **안 열고 안 쓴** 까닭 — 그 디렉터리와 [`crate::held::Unheld`]
+/// (moai-kxkw.7ky).
+///
+/// io 실패에 실어 나른다(`io::Error::other`) — 쓰는 길은 모두 `io::Result` 라 `?` 하나로 멈춘다. 사람에게 대는 쪽은
+/// [`refusal`] 이 꺼내 고른 말로 펴고, 읽는 길은 [`Garbled`] 로 댄다. 말을 못 고르는 자리(훅)는 아무것도 안 댄다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fenced {
+    pub at: PathBuf,
+    pub why: crate::held::Unheld,
+}
+
+/// 말 없는 꼴 — `<자리> -> <풀린 자리>`([`crate::held::spelled`]). 고른 말은 [`refusal`]·[`Garbled::said`] 가 편다.
+impl std::fmt::Display for Fenced {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&crate::held::spelled(&self.at, &self.why))
+    }
+}
+
+impl std::error::Error for Fenced {}
+
+impl From<Fenced> for std::io::Error {
+    fn from(f: Fenced) -> std::io::Error {
+        std::io::Error::other(f)
+    }
+}
+
+impl Fenced {
+    /// 못 연 디렉터리 하나 — 읽는 길([`list`]·[`presences`])은 그 자리를 빈 것으로 넘기지 않고 댄다.
+    fn garbled(self, mailbox: Option<&str>) -> Garbled {
+        Garbled {
+            path: self.at.clone(),
+            why: self.to_string(),
+            mailbox: mailbox.map(str::to_string),
+            unheld: Some(self.why),
+        }
+    }
+}
+
+/// 쓰다 진 까닭을 사람에게 댈 한 줄 — `<자리>: <까닭>`. 체크아웃 밖으로 풀린 디렉터리면 그 자리와 고른 말이고
+/// ([`crate::held::refused`] — 스냅샷·설정·락의 거절과 같은 꼴), 아니면 `dir` 과 운영체제의 말이다. `send`·`hello` 가
+/// 이것으로 멈춘다.
+pub fn refusal(lang: crate::i18n::Lang, dir: &Path, e: &std::io::Error) -> String {
+    match e.get_ref().and_then(|inner| inner.downcast_ref::<Fenced>()) {
+        Some(f) => crate::held::refused(lang, &f.at, &f.why),
+        None => format!("{}: {e}", dir.display()),
+    }
+}
+
+/// 우편함·출석부가 선 트래커 뿌리 — **그 디렉터리의 두 칸 위다.** 이 모듈이 받는 `dir` 은 늘
+/// [`crate::store::mail_at`]·[`crate::store::agents_at`] 이 지은 `<뿌리>/.moai/<mail|agents>` 다. 견주는 자리가 뿌리라서
+/// `.moai` 자체가 밖을 가리키는 링크도 걸린다.
+///
+/// 뿌리를 따로 받지 않는 까닭은 부르는 쪽(`send`·`inbox`·`hello`·`agents` 와 훅)이 모두 그 디렉터리 하나만 들고
+/// 오기 때문이다 — 뿌리를 둘째 인자로 받으면 두 값이 갈리는 꼴이 지어진다.
+fn home_of(dir: &Path) -> crate::held::Home {
+    crate::held::Home::of(dir.parent().and_then(Path::parent).unwrap_or(dir))
+}
+
+/// 체크아웃 안에서 푼 디렉터리 — 밖이나 `.git/` 으로 풀리면([`Fenced`]) 안 연다. 재는 자는 [`crate::held::place_dir`]
+/// 이다 — 저장소가 든 파일을 읽는 자([`crate::held::place`])와 쓰는 자(`store::write_atomic_inside`)가 선 그 금이다.
+///
+/// **푼 자리를 낸다** — 뒤따르는 열기·짓기·옮기기는 그 자리에 한다. 받은 철자를 다시 열면 잰 뒤 바뀐 링크를
+/// 따라간다(`held::read_inside` 와 같은 까닭). 링크가 없으면 두 자리는 같다.
+fn reach(d: &Path, home: &crate::held::Home) -> Result<PathBuf, Fenced> {
+    crate::held::place_dir(d, home).map_err(|why| Fenced { at: d.to_path_buf(), why })
+}
+
+/// [`reach`] 로 재고 짓는다 — 푼 자리를 낸다.
+fn make_dir(d: &Path, home: &crate::held::Home) -> std::io::Result<PathBuf> {
+    let real = reach(d, home)?;
+    std::fs::create_dir_all(&real)?;
+    Ok(real)
+}
+
 // ── 파일 ──────────────────────────────────────────────────────────────
 
 /// 디렉터리를 짓고 **제 `.gitignore`(`*`)를 둔다.** `init` 이 `.gitignore` 에 이 자리를 더하지만, 그
@@ -1412,8 +1550,11 @@ fn run(cmd: &mut std::process::Command) -> Result<(), &'static str> {
 ///
 /// **빈 `.gitignore` 는 없는 것으로 친다**(리뷰 moai-h8tn.x4l) — 쓰다 기계가 죽으면 이름만 선 빈 파일이 남는데, 이름만
 /// 보고 넘어가던 판은 그 디렉터리의 무시를 영영 껐다. 한 번만 쓰는 파일이라 내려 쓴다.
-fn ensure_dir(dir: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
+///
+/// **짓기 전에 잰다**([`make_dir`], moai-kxkw.7ky) — 받은 저장소가 커밋한 `.moai/agents -> <밖>` 을 맨 `create_dir_all` 이
+/// 따라가, `moai hello` 가 밖에 `.gitignore`(`*`)와 장을 썼다. 푼 자리를 내니 그 디렉터리의 쓰기는 거기 한다.
+fn ensure_dir(dir: &Path, home: &crate::held::Home) -> std::io::Result<PathBuf> {
+    let dir = make_dir(dir, home)?;
     let ignore = dir.join(".gitignore");
     match std::fs::symlink_metadata(&ignore) {
         Err(_) => {
@@ -1425,7 +1566,7 @@ fn ensure_dir(dir: &Path) -> std::io::Result<()> {
         }
         Ok(_) => {}
     }
-    Ok(())
+    Ok(dir)
 }
 
 /// 숨은 temp 이름 — pid 와 나노초라 겹치지 않는다. 숨은 이름이라 읽는 쪽이 안 본다.
@@ -1458,7 +1599,8 @@ fn sync_dir(dir: &Path) {
     let _ = dir;
 }
 
-/// 죽은 보내기가 남긴 temp 를 걷는다 — 10분 넘은 것만. 보내는 쪽은 temp 를 몇 밀리초만 든다. **이름부터 본다** —
+/// 죽은 보내기가 남긴 temp 를 걷는다 — 10분 넘은 것만. 보내는 쪽은 temp 를 몇 밀리초만 든다. `dir` 은 [`reach`] 를
+/// 지난 자리다. **이름부터 본다** —
 /// 편지마다 `stat` 을 치르지 않는다.
 fn sweep_temps(dir: &Path) {
     const KEEP: std::time::Duration = std::time::Duration::from_secs(10 * 60);
@@ -1922,15 +2064,14 @@ mod tests {
         let id = send(dir, &letter("a", "boss", "first")).unwrap();
         std::fs::create_dir_all(dir.join("b")).unwrap();
         std::fs::copy(dir.join("a").join(format!("{id}.json")), dir.join("b").join(format!("{id}.json"))).unwrap();
-        let moved =
-            relocate(&dir.join("a").join(format!("{id}.json")), &dir.join("b"), &id, false, "2026-10-04T06:12:03Z")
-                .unwrap()
-                .unwrap();
+        let home = home_of(dir);
+        let from = dir.join("a").join(format!("{id}.json"));
+        let (moved, _) = relocate(&from, &dir.join("b"), &home, &id, false, "2026-10-04T06:12:03Z").unwrap().unwrap();
         assert_ne!(moved, id, "같은 id 위로 옮겼다");
         assert_eq!(list(dir, "b", false).0.len(), 2, "옮긴 자리의 편지를 덮었다");
         assert!(list(dir, "a", false).0.is_empty());
         // 남이 먼저 가진 편지는 못 옮긴다 — 옮긴 것으로 세지 않는다.
-        assert_eq!(relocate(&dir.join("a").join("gone.json"), &dir.join("b"), &id, false, "").unwrap(), None);
+        assert_eq!(relocate(&dir.join("a").join("gone.json"), &dir.join("b"), &home, &id, false, "").unwrap(), None);
     }
 
     /// 시험용 장 하나 — 프로세스를 모르는(pid 0) Codex 장이다. 시험마다 고칠 칸만 고친다.
@@ -2207,5 +2348,128 @@ mod tests {
         let dir = s.path().join("mail");
         send(&dir, &letter("b", "a", "x")).unwrap();
         assert_eq!(std::fs::read_to_string(dir.join(".gitignore")).unwrap(), "*\n");
+    }
+
+    /// 그 디렉터리의 모든 이름 — 숨은 것(`.gitignore`·temp)까지. 없으면 비었다.
+    fn everything_in(dir: &Path) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        let mut out: Vec<String> = entries.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        out.sort();
+        out
+    }
+
+    /// 쓰다 진 까닭이 체크아웃 밖으로 풀린 디렉터리인가 — `send`·`hello` 가 고른 말로 펴는 그 자료다([`refusal`]).
+    fn fenced(e: &std::io::Error) -> bool {
+        e.get_ref().and_then(|inner| inner.downcast_ref::<Fenced>()).is_some()
+    }
+
+    /// **우편함과 출석부는 체크아웃 밖으로 풀리는 링크를 안 따른다**(moai-kxkw.7ky) — 받은 저장소가 커밋한 링크 하나로
+    /// `moai hello` 가 밖에 `.gitignore`(`*`)와 장을 쓰고, `moai agents` 는 밖에 심어 둔 장을 지웠다(리뷰 moai-ml0d.que).
+    /// 링크가 서는 자리마다 잰다 — `.moai` 자체(훅은 `Repo` 없이 이 자리를 바로 짓는다), 우편함·출석부, 받는 이의 함,
+    /// 그 함의 `read/`. 쓰기는 [`Fenced`] 로 멈추고, 읽기는 그 자리를 못 읽은 것으로 대며, 걷기와 옮기기는 아무것도 안 한다.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_the_checkout_is_followed_nowhere() {
+        let s = Scratch::new("mail-fence");
+        let away = Scratch::new("mail-fence-away");
+        let link = |to: &Path, at: &Path| std::os::unix::fs::symlink(to, at).unwrap();
+        let (agents, mail) = (crate::store::agents_at(s.path()), crate::store::mail_at(s.path()));
+
+        // `.moai` 자체가 밖을 가리킨다 — 아직 없는 `.moai/agents` 를 지으며 그 링크를 따라가던 자리다.
+        link(away.path(), &s.join(".moai"));
+        assert!(fenced(&write_presence(&agents, &codex_card("w1")).unwrap_err()), "출석을 밖에 쓰려 했다");
+        assert!(fenced(&send(&mail, &letter("w1", "boss", "x")).unwrap_err()), "편지를 밖에 쓰려 했다");
+        assert_eq!(everything_in(away.path()), Vec::<String>::new(), "체크아웃 밖에 지었다");
+        std::fs::remove_file(s.join(".moai")).unwrap();
+
+        // 출석부가 밖을 가리킨다 — 밖에 심어 둔 죽은 pid 의 장은 이 저장소의 에이전트가 아니고, 걷을 것도 아니다.
+        std::fs::create_dir_all(s.join(".moai")).unwrap();
+        let planted = away.join("planted.json");
+        std::fs::write(
+            &planted,
+            format!("{{\"v\":1,\"name\":\"planted\",\"pid\":{},\"pid_start\":1}}\n", std::process::id()),
+        )
+        .unwrap();
+        link(away.path(), &agents);
+        assert!(fenced(&write_presence(&agents, &codex_card("w1")).unwrap_err()));
+        let (seen, bad) = presences(&agents);
+        assert!(seen.is_empty(), "밖에 선 장을 이 저장소의 에이전트로 읽었다");
+        assert!(
+            matches!(bad.as_slice(), [g] if g.unheld.is_some() && g.mailbox.is_none()),
+            "못 연 출석부를 안 댔다 — {bad:?}"
+        );
+        assert!(sweep(&agents, &mail).is_empty() && planted.exists(), "밖에 심어 둔 장을 걷었다");
+        assert!(fenced(&forget(&agents, "planted").unwrap_err()) && planted.exists(), "밖의 장을 지웠다");
+        assert!(!same_card(&agents, "planted", "planted"), "밖의 장을 열어 견줬다");
+        assert_eq!(everything_in(away.path()), ["planted.json"], "체크아웃 밖에 썼다");
+        std::fs::remove_file(&agents).unwrap();
+
+        // 우편함이 밖을 가리킨다 — 읽기는 우편함 하나를 못 읽은 것으로 대고, 옮기기는 아무것도 안 한다.
+        std::fs::create_dir_all(away.join("w1")).unwrap();
+        let outside_letter = away.join("w1/20261004-061203-00000001.json");
+        std::fs::write(&outside_letter, serde_json::to_string(&letter("w1", "boss", "밖")).unwrap()).unwrap();
+        link(away.path(), &mail);
+        assert!(fenced(&send(&mail, &letter("w1", "boss", "x")).unwrap_err()));
+        let (got, bad) = list(&mail, "w1", true);
+        assert!(got.is_empty(), "밖에 선 편지를 읽었다");
+        assert!(
+            matches!(bad.as_slice(), [g] if g.unheld.is_some() && g.mailbox.is_none()),
+            "못 연 우편함을 안 댔다 — {bad:?}"
+        );
+        assert_eq!(retire(&mail, "w1"), 0);
+        carry(&mail, "w1", "w2");
+        migrate(&mail);
+        assert!(outside_letter.exists() && !away.join("w2").exists(), "밖의 편지를 옮겼다");
+        std::fs::remove_file(&mail).unwrap();
+
+        // 받는 이의 함 하나가 밖을 가리킨다 — 우편함은 안에 서도 그 함마다 잰다.
+        std::fs::create_dir_all(&mail).unwrap();
+        link(&away.join("w1"), &mail.join("w1"));
+        assert!(fenced(&send(&mail, &letter("w1", "boss", "x")).unwrap_err()));
+        let (got, bad) = list(&mail, "w1", false);
+        assert!(got.is_empty() && matches!(bad.as_slice(), [g] if g.mailbox.as_deref() == Some("w1")), "{bad:?}");
+        let stored = Stored {
+            id: "20261004-061203-00000001".into(),
+            mailbox: "w1".into(),
+            reader: None,
+            returned: false,
+            letter: letter("w1", "boss", "밖"),
+        };
+        assert!(
+            fenced(&take(&mail, &stored, "w1").unwrap_err()) && outside_letter.exists(),
+            "밖의 편지를 읽음으로 옮겼다"
+        );
+        take_over(&mail, &[], "w1", None);
+        assert_eq!(everything_in(&away.join("w1")), ["20261004-061203-00000001.json"], "밖의 함을 건드렸다");
+
+        // 함은 안에 서고 그 `read/` 가 밖을 가리킨다 — 읽음으로 못 옮겨 편지가 제 함에 남고, 밖의 읽은 편지는 안 걷는다.
+        let id = send(&mail, &letter("w2", "boss", "안")).unwrap();
+        let old_read = away.join(format!("{id}@w2.json"));
+        std::fs::write(&old_read, "{}").unwrap();
+        let long_ago = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+        std::fs::File::options().write(true).open(&old_read).unwrap().set_modified(long_ago).unwrap();
+        link(away.path(), &mail.join("w2/read"));
+        let (got, _) = list(&mail, "w2", false);
+        assert!(fenced(&take(&mail, &got[0], "w2").unwrap_err()));
+        assert_eq!(list(&mail, "w2", false).0.len(), 1, "읽음으로 옮기다 편지를 잃었다");
+        assert!(old_read.exists(), "밖에 선 파일을 읽은 편지로 걷었다");
+    }
+
+    /// **안을 가리키는 링크는 따른다** — 저장소가 든 다른 파일과 같은 자다(`store::write_atomic_inside`). 끝이 아직 없는
+    /// 링크면 그 끝에 디렉터리를 짓는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_inside_the_checkout_is_followed() {
+        let s = Scratch::new("mail-fence-in");
+        let mail = crate::store::mail_at(s.path());
+        std::fs::create_dir_all(&mail).unwrap();
+        std::fs::create_dir_all(s.join("data")).unwrap();
+        std::os::unix::fs::symlink("../../data/w1", mail.join("w1")).unwrap();
+        let id = send(&mail, &letter("w1", "boss", "안")).unwrap();
+        assert!(s.join(format!("data/w1/{id}.json")).exists(), "안을 가리키는 함에 안 들였다");
+        let (got, bad) = list(&mail, "w1", false);
+        assert!(bad.is_empty() && got.len() == 1, "{bad:?}");
+        assert_eq!(take(&mail, &got[0], "w1").unwrap(), Took::Mine);
+        assert!(s.join(format!("data/w1/read/{id}@w1.json")).exists());
     }
 }
