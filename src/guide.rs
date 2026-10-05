@@ -2060,6 +2060,14 @@ and marked read, and it is the same letter. **Do not sweep `moai agents` over an
 the report comes to you. A worker that asked its person something sends nothing until it
 is answered.
 
+**If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
+(`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository holds
+points out of the checkout. Waiting again will not open it, so do not run it again. The
+letters you send are refused the same way, so no worker hears from you either: tell the
+person watching this window (*Ask the person watching*) and stop. A report that comes with a
+line on the mailbox is still a report to check — that line is moai failing to mark it read,
+so the next wait shows the same letter again.
+
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when
 the supervisor's turn ends. **That member is the worker's** — do not move it, do not
@@ -5186,6 +5194,14 @@ sys.exit(1 if bad else 0)
             "감독이 편지로 안 보낸다"
         );
         assert!(supervise.contains("moai inbox --ack --wait"), "감독이 보고를 편지로 안 기다린다");
+        // **감독도 못 연 우편함 앞에서는 다시 안 건다**(moai-bkn4.gmm) — 일꾼 고리 2 와 같은 자리다. "다 되면 다시 건다" 만
+        // 읽은 감독은 곧장 비영으로 돌아오는 기다림을 쉬지 않고 다시 건다. 일꾼에게 보내는 편지도 같은 우편함이라 사람에게 이른다.
+        let wait = &supervise[supervise.find("**4. Wait.**").expect("감독의 4 가 없다")
+            ..supervise.find("**5. Check the report").expect("감독의 5 가 없다")];
+        let shut = wait.find("no letter and a line naming the mailbox").expect("감독이 못 연 우편함에서 안 멈춘다");
+        assert!(wait[shut..].contains("do not run it again"), "감독이 못 연 우편함 앞에서 기다림을 다시 건다");
+        assert!(wait[shut..].contains("*Ask the person watching*"), "감독이 못 연 우편함을 창의 사람에게 안 알린다");
+        assert!(wait[shut..].contains("still a report to check"), "감독이 읽음 표시만 못 한 보고를 버린다");
         // 사람이 띄운 세션과만 통신한다 — 감독 글이 SendMessage 로 보내거나 기다리면 Claude 밖의 감독이 못 따른다.
         assert!(!supervise.contains("notify_when_idle"), "감독이 Claude 의 알림으로 기다린다");
         assert!(!supervise.contains("with `SendMessage`"), "감독이 Claude 의 SendMessage 로 보낸다");
