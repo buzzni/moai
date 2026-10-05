@@ -284,8 +284,10 @@ fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> 
 /// `answer`), 심는 Codex 파일의 `additionalContextLimit`(`skill::codex_hooks`)이다. 셋이 따로 서던 판은 Codex 의 한
 /// 줄을 바꾸거나 새 이벤트에 편지를 실어도 컴파일이 되었다 — 그때 편지는 칸 하나(UTF-16 1만, 한국어 30KB 남짓)로 재어지고,
 /// Codex 는 기본 상한을 넘긴 가운데를 파일로 빼 읽음으로 옮긴 그 자리를 아무도 못 본다(moai-rxro 의 잃음, 리뷰
-/// moai-u5wr.6un 5번). 이제 칸이 없는 이벤트는 편지를 안 옮기고([`Carry::letters_room`] 이 `None`), 답도 그 칸의 글을
-/// 안 낸다.
+/// moai-u5wr.6un 5번). 이제 칸이 없는 이벤트는 편지를 안 옮기고([`Carry::letters_room`] 이 `None`), 편지는 그 칸의
+/// 종류로 싸며([`Carry::wrap`]), 답은 그 칸이 받는 글만 낸다([`Carry::admits`]). **종류도 이 표가 고른다**(리뷰
+/// moai-dp35.gag) — 부르는 쪽이 손으로 고르던 판은 칸이 있어 편지를 옮긴 뒤에 종류가 어긋나면 답이 그 글을 말없이 버려,
+/// 읽음으로 옮긴 편지가 아무에게도 안 닿았다.
 ///
 /// 표가 맞는지는 표 밖에서 잰다 — Codex 가 맥락을 받는 이벤트는 Codex 의 `/hooks` 갈무리에 대 보고(`skill` 의
 /// `the_planted_codex_hooks_pass_codex_s_own_checks`), 붙드는 칸의 자는 에이전트마다 실은 편지로 잰다(`tests/cli.rs` 의
@@ -296,7 +298,10 @@ pub enum Carry {
     Context(Room),
     /// 턴을 붙드는 까닭 — `Stop` 의 `reason`.
     Hold(Room),
-    /// 글을 실을 칸이 없다 — 내면 에이전트가 버린다(Codex 는 `/hooks` 에 경고도 낸다).
+    /// 글을 실을 칸이 없다 — 그 이벤트의 답은 글을 안 받는다. Codex 는 이벤트마다 받는 출력의 꼴이 정해져 있어
+    /// (`stop.command.output` 은 모르는 키를 안 받고, `interrupt.command.output` 은 `systemMessage` 하나다 — codex 0.160)
+    /// 그 밖의 글을 틀린 출력으로 읽는다(`hook returned invalid … hook JSON output`). `/hooks` 의 경고는 심은 파일의 키
+    /// (`additionalContextLimit`)를 두고 서는 것이라 이것과 다르다(리뷰 moai-dp35.gag).
     Nothing,
 }
 
@@ -318,8 +323,10 @@ impl Carry {
     ///   다 섰다). agy 1.2.16 은 영문이 섞인 편지 UTF-16 9,665·9,874 단위(UTF-8 21KB 남짓), agy 1.2.17 은 **한글로만
     ///   채운** 편지 UTF-16 9,822·10,024 단위(UTF-8 28.2·28.4KB)다. 칸은 UTF-16 으로 세므로 바이트로 가장 큰 편지가 이
     ///   꼴이다 — agy 의 선이 Codex 처럼 바이트로 서 있다면 여기서 드러났다(리뷰 moai-jzym.a9k). 그 위의 선은 안 쟀다
-    /// - **`Stop` 없이 끝난 턴의 셋은 칸이 없다** — 출석만 적는다(`cmd::hook` 의 `rest`). 세 에이전트 모두 그 출력을 안
-    ///   읽는다
+    /// - **`Stop` 없이 끝난 턴의 셋은 칸이 없다** — 출석만 적는다(`cmd::hook` 의 `rest`). 실을 글이 없어서다 — 에이전트가
+    ///   그 출력을 안 읽어서가 아니다(리뷰 moai-dp35.gag). Antigravity 의 `StopFailure` 는 오류로 끝난 실행의 `Stop` 이라
+    ///   agy 가 그 답을 읽는다 — 붙들면 실패하는 백엔드에 편지를 도로 밀어 넣는다(`cmd::hook` 의 `from_antigravity`, 리뷰
+    ///   moai-u5wr.e74). Codex 의 `Interrupt` 도 `systemMessage` 하나는 읽는다
     pub fn of(dialect: crate::cli::Dialect, event: Event) -> Carry {
         use crate::cli::Dialect::{Antigravity, Claude, Codex};
         match (event, dialect) {
@@ -337,6 +344,9 @@ impl Carry {
     /// 편지가 들 자리 — **칸이 없으면 `None` 이고, 그때 편지는 안 옮긴다.** 같은 칸에 `earlier`(보드, 접힌 뒤 싣는
     /// 줄)가 먼저 섰으면 그 글과 둘 사이의 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다). 붙드는 칸에는
     /// 먼저 선 글이 없다 — `Stop` 은 편지가 먼저다.
+    ///
+    /// **먼저 선 답이 막으면 자리가 없다**(리뷰 moai-dp35.gag) — [`Decision::then`] 은 막는 답 뒤의 글을 묻지도 않고
+    /// 버린다. 그 글의 길이만 빼고 자리를 내던 판은 편지를 읽음으로 옮긴 뒤 그 판정이 통째로 버리는 길을 열어 두었다.
     pub fn letters_room(self, earlier: &Decision) -> Option<Room> {
         let room = match self {
             Carry::Context(room) | Carry::Hold(room) => room,
@@ -344,9 +354,37 @@ impl Carry {
         };
         let used = match earlier {
             Decision::Pass => 0,
-            Decision::Context(s) | Decision::Deny(s) | Decision::Block(s) => room.unit.of(s) + 2,
+            Decision::Context(s) => room.unit.of(s) + 2,
+            Decision::Deny(_) | Decision::Block(_) => return None,
         };
         Some(Room { size: room.size.saturating_sub(used), ..room })
+    }
+
+    /// 실을 편지 글을 이 칸의 답으로 — 비추는 칸이면 `Context`, 붙드는 칸이면 `Block` 이다. **답의 종류를 부르는 쪽이
+    /// 안 고른다** — 칸이 있어 편지를 옮겼는데 종류가 어긋나면 [`Carry::admits`] 가 그 답을 걸러, 읽음으로 옮긴 편지가
+    /// 아무에게도 안 닿는다. 칸이 없으면 `Pass` 다 — 그 자리에서는 편지를 애초에 안 옮긴다([`Carry::letters_room`]).
+    pub fn wrap(self, text: String) -> Decision {
+        match self {
+            Carry::Context(_) => Decision::Context(text),
+            Carry::Hold(_) => Decision::Block(text),
+            Carry::Nothing => Decision::Pass,
+        }
+    }
+
+    /// 이 칸이 그 답을 싣는가 — 비추는 줄은 비추는 칸에만, 붙드는 까닭은 붙드는 칸에만 든다. 칸과 답을 다 적어 가른다 —
+    /// 칸의 종류가 늘면 컴파일러가 여기서도 묻는다(`_` 로 받으면 새 칸의 글이 말없이 버려진다).
+    ///
+    /// **막는 답(`Deny`)은 표 밖이다** — 글 칸이 아니라 도구 부름을 막는 답이라, 글 칸이 없는 agy 의 도구 부름 앞에서도
+    /// 선다(거르면 agy 에서 규칙 다섯이 통째로 지나간다). 그 꼴은 도구 부름 앞(`PreToolUse`)의 것이다 — 막는 판정은 그
+    /// 이벤트에서만 선다(`cmd::hook` 의 `judge`·`decide`). 다른 이벤트에서 막으려면 그 이벤트가 받는 꼴부터 정한다.
+    pub fn admits(self, decision: &Decision) -> bool {
+        match (decision, self) {
+            (Decision::Pass | Decision::Deny(_), _)
+            | (Decision::Context(_), Carry::Context(_))
+            | (Decision::Block(_), Carry::Hold(_)) => true,
+            (Decision::Context(_), Carry::Hold(_) | Carry::Nothing)
+            | (Decision::Block(_), Carry::Context(_) | Carry::Nothing) => false,
+        }
     }
 }
 
@@ -14844,9 +14882,11 @@ mod tests {
         // 다시 볼 길은 머리 줄에도 있다 — 자른 표가 그 길을 대는지는 남은 수 바로 앞에 선 그 표의 줄로 잰다.
         let cut = said[..said.len() - left.len()].trim_end().lines().last().unwrap_or_default();
         assert!(cut.contains("moai inbox --all --as w1"), "자른 자리의 줄이 `--as` 를 안 달았다 — {cut}");
-        // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다.
+        // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다. 자리는 턴
+        // 머리의 칸이 실제로 내는 것으로 잰다 — 손으로 지은 칸으로 재면 그 칸의 자리가 바뀌어도 여기는 모른다(리뷰
+        // moai-dp35.gag).
         let board = Decision::Context("b".repeat(CONTEXT_CAP - 100));
-        let room = Carry::Context(Room::CONTEXT).letters_room(&board).unwrap();
+        let room = Carry::of(crate::cli::Dialect::Claude, Event::UserPromptSubmit).letters_room(&board).unwrap();
         assert_eq!(pick(std::slice::from_ref(&small), room), (vec![], 0));
         // 일감은 한 통씩 — 나머지는 다른 일꾼의 몫이라 남은 수에도 안 센다.
         let open = |id: &str| stored(id, ANY_IDLE_WORKER, "job".into());

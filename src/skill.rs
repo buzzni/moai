@@ -664,7 +664,9 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     // 화면은 규칙이 통과한 것과 한 글자도 다르지 않았다 — moai-j4ie 가 끝내려던 바로 그 침묵이다.
     // 값은 세션에 심은 이벤트 수까지고, 문턱이 겨눈 140~1,257 과는 자릿수가 다르다.
     //
-    // 이름은 `HOOKS`·`CODEX`·`ANTIGRAVITY` 가 든 것뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다.
+    // 이름은 `HOOKS`·`ANTIGRAVITY` 가 든 것과 `CODEX` 의 이벤트가 clap 으로 받는 이름(`hook::Event` 의
+    // kebab-case)뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다. `Event` 에 이름을 따로 다는 날
+    // (`#[value(name = …)]`)은 여기도 본다.
     //
     // **종료 값도 키에 든다**(리뷰 moai-514e.hgz). 목록이 0·1 밖 전부로 넓어지며 표식을 태우는
     // 것이 설치와 상관없는 한 번짜리 죽음까지가 됐다 — 이 컨테이너에 이력이 있는 OOM 의 137,
@@ -2292,7 +2294,8 @@ mod tests {
     }
 
     /// Codex 가 추가 맥락을 받는 이벤트 — 그 밖의 처리기에 적힌 `additionalContextLimit` 은 버리고 경고한다(Codex 훅
-    /// 문서). **[`CODEX`] 표에서 읽지 않는다** — 표를 되돌리면 본뜸도 같이 움직여 아무것도 안 붉어진다.
+    /// 문서). **훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽지 않는다** — 심는 상한이 그 표에서 오니(moai-dp35),
+    /// 거기서 읽으면 표를 되돌릴 때 본뜸도 같이 움직여 아무것도 안 붉어진다.
     const CODEX_TAKES_CONTEXT: &[&str] =
         &["SessionStart", "SubagentStart", "PreToolUse", "PostToolUse", "UserPromptSubmit"];
 
@@ -2438,7 +2441,7 @@ mod tests {
     ///   `<이름>.json`)마다 [`codex_issues`] 가 낸 경고와 Codex 의 경고가 하나하나 맞는다. 본뜸에서 규칙 하나를 지우면
     ///   여기가 붉어지고, 새 규칙에 걸린 갈무리를 넣으면 본뜸이 그 규칙을 배울 때까지 붉다
     /// - **심는 파일에는 경고가 없다** — 본뜸도 꼴([`codex_shape`])도 아무 말이 없고, 추가 맥락을 받는 이벤트에는 넉넉한
-    ///   상한을, 상한이 깎이는 이벤트에는 그 상한을 다 적는다([`CODEX`])
+    ///   상한을([`crate::hook::Carry::of`]), 상한이 깎이는 이벤트에는 그 상한을 다 적는다([`CODEX`])
     #[test]
     fn the_planted_codex_hooks_pass_codex_s_own_checks() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/hooks/codex");
