@@ -86,21 +86,40 @@ pub(crate) fn place(p: &Path, home: &Home) -> Result<PathBuf, Unheld> {
 ///
 /// [`place`] 는 링크가 아닌 없는 자리를 받은 철자 그대로 내보낸다 — 읽는 쪽이 `NotFound` 로 넘기니 그것으로 됐다. 짓는
 /// 쪽에서는 그것이 구멍이다: `.moai -> <밖>` 을 커밋한 저장소에서 `.moai/mail` 은 아직 없는 링크 아닌 자리라
-/// 그대로 지나고, `create_dir_all` 은 그 링크를 따라 밖에 디렉터리를 짓는다. 그래서 있는 조상을 [`place`] 로 잰다 —
-/// 거기 든 링크(끝이 없는 링크도)는 모두 [`place`] 가 푼다. 없는 나머지는 지을 때 보통 디렉터리로 선다.
+/// 그대로 지나고, `create_dir_all` 은 그 링크를 따라 밖에 디렉터리를 짓는다. 그래서 있는 조상을 [`place`] 로 잰다.
+/// 없는 나머지는 지을 때 보통 디렉터리로 선다.
+///
+/// **푼 자리가 아직 링크를 거치면 그 링크를 다시 잰다**(리뷰 moai-kxkw.k2f) — [`place`] 는 끝 없는 다른 링크를 거쳐 가는
+/// 링크를 그 끝 없는 조각을 없는 디렉터리로 쳐서 "안" 으로 읽고, 끝이 없고 그 끝의 디렉터리도 없는 채 `..` 을 든 링크는 철자
+/// 그대로 낸다. 둘 다 푼 자리의 있는 가장 깊은 조상이 링크로 남는다. 그 자리는 지금은 안 지어지지만(`mkdir` 은 끝 없는
+/// 링크를 안 따른다) 잰 뒤에 그 끝이 생기면 밖에 지어진다 — 잰 사이를 노려 밖의 끝을 지었다 지우는 것만으로 `hello` 가 밖에
+/// 장을 썼다. 그래서 남은 링크를 사슬의 끝까지 [`place`] 로 다시 재고, 끝내 못 푸는 링크(`..` 너머가 없다)는 어디에 닿을지
+/// 모르니 거절한다. 지금 지어지는 꼴은 하나도 안 진다 — 끝 없는 안 링크는 끝의 디렉터리로 풀어 그 밑에 짓는다.
 ///
 /// 우편함·출석부([`crate::mail`])가 디렉터리를 짓고 열기 전에 이 자로 잰다.
 pub(crate) fn place_dir(d: &Path, home: &Home) -> Result<PathBuf, Unheld> {
-    for head in d.ancestors() {
-        if std::fs::symlink_metadata(head).is_err() {
-            continue;
+    let Some(head) = d.ancestors().find(|a| std::fs::symlink_metadata(a).is_ok()) else { return Ok(d.to_path_buf()) };
+    let mut out = beneath(place(head, home)?, d, head);
+    // 사슬의 깊이는 리눅스가 경로 하나를 풀며 따라가는 링크 수(`MAXSYMLINKS`)까지다 — `path::follow_links` 와 같은 끝.
+    for _ in 0..=40 {
+        let deepest = out.ancestors().find_map(|a| std::fs::symlink_metadata(a).ok().map(|m| (a.to_path_buf(), m)));
+        let Some((link, _)) = deepest.filter(|(_, m)| m.file_type().is_symlink()) else { return Ok(out) };
+        let real = place(&link, home)?;
+        if real == link {
+            // 고리처럼 끝내 못 따라가는 링크는 그대로 낸다 — 어디로도 안 풀려, 지을 때 운영체제가 그 말(`ELOOP`)로 진다.
+            let Ok(end) = crate::path::follow_links(&link) else { return Ok(out) };
+            return Err(Unheld::Outside { to: beneath(crate::path::lexical(&end), &out, &link), home: home.0.clone() });
         }
-        let real = place(head, home)?;
-        // **떼어 내기는 실패하지 않는다** — `head` 는 `d` 의 조상이다(`path::real_prefix` 와 같은 자리).
-        let rest = d.strip_prefix(head).expect("조상에서 떼어 낸다");
-        return Ok(if rest.as_os_str().is_empty() { real } else { real.join(rest) });
+        out = beneath(real, &out, &link);
     }
-    Ok(d.to_path_buf())
+    Ok(out)
+}
+
+/// `d` 의 조상 `head` 를 `real` 로 바꿔 단 자리 — 남은 조각이 비면 붙이지 않는다(`path::real_prefix` 와 같은 까닭).
+fn beneath(real: PathBuf, d: &Path, head: &Path) -> PathBuf {
+    // **떼어 내기는 실패하지 않는다** — `head` 는 `d` 의 조상이다(`path::real_prefix` 와 같은 자리).
+    let rest = d.strip_prefix(head).expect("조상에서 떼어 낸다");
+    if rest.as_os_str().is_empty() { real } else { real.join(rest) }
 }
 
 /// 체크아웃 아래의 자리 `rest` 가 **git 의 자리(`.git/`)에 드는가** — 어느 조각이든 `.git` 이면 든다. 끝 이름도
@@ -430,6 +449,27 @@ pub(crate) mod tests {
             place_dir(&s.join("dangling-in/w1"), &home),
             Ok(home.0.join("data/later/w1")),
             "끝 없는 안 링크를 안 풀었다"
+        );
+
+        // **[`place`] 가 못 푸는 링크는 거절하고, 끝 없는 링크의 사슬은 끝까지 다시 잰다**(리뷰 moai-kxkw.k2f) — 둘 다 그대로
+        // 지나던 판은 잰 뒤 밖의 끝이 생기는 틈에 밖에 지었다.
+        let away_name = away.path().file_name().expect("자리에 이름이 있다");
+        link("dangling-up", &Path::new("..").join(away_name).join("missing/deep"));
+        link("not-yet", &away.join("not-yet"));
+        link("via", Path::new("not-yet/x"));
+        link("hop", Path::new("dangling-in/x"));
+        assert!(
+            matches!(place_dir(&s.join("dangling-up/w1"), &home), Err(Unheld::Outside { .. })),
+            "끝의 디렉터리도 없는 `..` 링크를 안으로 쟀다"
+        );
+        assert!(
+            matches!(place_dir(&s.join("via/w1"), &home), Err(Unheld::Outside { .. })),
+            "끝 없는 밖 링크를 거쳐 가는 링크를 안으로 쟀다"
+        );
+        assert_eq!(
+            place_dir(&s.join("hop/w1"), &home),
+            Ok(home.0.join("data/later/x/w1")),
+            "끝 없는 안 링크의 사슬을 끝까지 안 풀었다"
         );
     }
 

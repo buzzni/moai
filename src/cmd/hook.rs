@@ -1277,7 +1277,13 @@ fn attendee(input: &Input, root: &Path, dialect: Dialect) -> Option<mail::Presen
     let session = input.session_id.as_deref().filter(|s| !s.trim().is_empty())?;
     let dir = crate::store::agents_at(root);
     let mail_dir = crate::store::mail_at(root);
-    let (all, _) = mail::presences(&dir);
+    let (all, roster) = mail::presences(&dir);
+    // **못 연 출석부면 아무도 아니다**(리뷰 moai-kxkw.k2f) — 세션 id 가 없을 때와 같은 자리다. 그때 빈 출석부는 "아무도 없다"
+    // 가 아니라 누가 있는지 모른다는 뜻이라, 그것으로 이름을 짓고 넘겨받던 판은 이 세션의 되돌아온 편지를 떠난 이의 것으로
+    // 읽음에 치웠고(`take_over`), 역할이 빈 새 장으로 감독 세션이 `any-idle-worker` 일감을 가졌다. 장은 어차피 못 쓴다.
+    if mail::roster_fenced(&roster).is_some() {
+        return None;
+    }
     // 모델은 장에 없을 때만 훅의 입력으로 채운다 — `moai hello --model` 이 적은 것이 먼저다.
     let model = |p: &mail::Presence| if p.model.is_empty() { input.model() } else { p.model.clone() };
     let asked = (dialect != Dialect::Codex)

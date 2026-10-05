@@ -40,13 +40,17 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     let want = |given: &Option<String>, have: &str| given.as_deref().is_none_or(|w| w.trim() == have);
     agents.retain(|p| want(&args.role, &p.role) && want(&args.status, &p.status));
     for g in &garbled {
-        tell(&fill(
-            say(ctx.lang(), "warn.agents_garbled"),
-            &[
-                ("path", &crate::text::one_line(&g.path.display().to_string())),
-                ("why", &crate::text::one_line(&g.said(ctx.lang()))),
-            ],
-        ));
+        // 못 연 출석부는 "못 읽는 출석 파일" 이 아니다 — 쓰는 길(`hello`)의 거절과 같은 `<자리>: <까닭>` 으로 댄다.
+        tell(&match &g.why {
+            mail::Why::Fenced(why) => crate::held::refused(ctx.lang(), &g.path, why),
+            mail::Why::Bad(why) => fill(
+                say(ctx.lang(), "warn.agents_garbled"),
+                &[
+                    ("path", &crate::text::one_line(&g.path.display().to_string())),
+                    ("why", &crate::text::one_line(why)),
+                ],
+            ),
+        });
     }
     if ctx.json {
         let names: Vec<String> = swept.iter().map(|s| s.name.clone()).collect();
@@ -163,7 +167,13 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     let (vendor_given, model_given, role_given) = (word(&args.vendor), word(&args.model), word(&args.role));
 
     let dir = repo.agents_dir();
-    let (all, _) = mail::presences(&dir);
+    let (all, roster) = mail::presences(&dir);
+    // **못 연 출석부면 먼저 멈춘다**(리뷰 moai-kxkw.k2f) — 그때 빈 출석부는 "아무도 없다" 가 아니라 누가 있는지 모른다는 뜻이다.
+    // 그것으로 이어 쓸 장(`before`)과 넘겨받을 이름을 가리면, 어차피 쓰기에서 거절될 인사가 그 앞에서 이 이름의 되돌아온
+    // 편지를 읽음으로 치우고(`take_over`), `--as` 는 엉뚱하게 "그런 장이 없다" 고 댔다. 거절은 쓰는 길의 것과 같은 말·코드다.
+    if let Some(stop) = mail::roster_fenced(&roster).and_then(|g| g.refusal(lang)) {
+        return Err(stop);
+    }
     // **`--as` 는 이미 선 장을 이어받는다**(moai-u5wr.7xr) — 훅이 그 세션에 지어 준 장이다. 셸에서 제 세션을 못 찾는
     // Codex 가 그 이름을 대고 역할을 단다. 프로세스·세션·칸은 그 장의 것을 그대로 둔다.
     let adopted = match args.as_.as_deref() {
@@ -340,7 +350,7 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         Some(old) => mail::rename_card(&dir, &mail_dir, &presence, &old.name),
         None => mail::write_presence(&dir, &presence),
     };
-    wrote.map_err(|e| Fail::new(mail::refusal(lang, &dir, &e)))?;
+    wrote.map_err(|e| mail::refusal(lang, &dir, &e))?;
     if ctx.json {
         return super::json_line(&presence);
     }

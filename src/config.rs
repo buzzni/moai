@@ -503,7 +503,7 @@ pub enum Trouble {
     FlowDaysZero,
     /// `status_` 로 시작하는데 없는 설정이다 — 그 줄·키. **아는 키는 [`Thresholds::KEYS`] 가 댄다.**
     NoSuchThreshold { line: usize, key: String },
-    /// 평평한 키(문턱·`archive_days`·`wiki_dir`)를 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
+    /// 평평한 키(문턱·`archive_days`·`wiki_dir`·`mail_read_days`)를 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
     ThresholdInTable { line: usize, named: String },
     /// `prefix` 가 없다.
     NoPrefix,

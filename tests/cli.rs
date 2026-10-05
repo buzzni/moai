@@ -24227,6 +24227,9 @@ fn mail_and_attendance_follow_no_committed_link_out_of_the_checkout() {
     let out = moai(s.path(), &["hello", "--name", "w1", "--pid", &w.pid()]);
     assert!(!out.status.success(), "밖을 가리키는 출석부에 쓰고 성공으로 끝났다\n{}", text(&out));
     assert!(text(&out).contains(&agents_away.display().to_string()), "어느 자리인지 안 댄다\n{}", text(&out));
+    // 고칠 것은 그 링크다 — 스냅샷·설정·락의 거절과 같은 코드다(리뷰 moai-kxkw.k2f).
+    let out = moai(s.path(), &["hello", "--name", "w1", "--pid", &w.pid(), "--json"]);
+    assert!(text(&out).contains(r#""code":"broken""#), "링크의 거절을 `broken` 으로 안 냈다\n{}", text(&out));
 
     let out = moai(s.path(), &["agents", "--json"]);
     assert!(String::from_utf8_lossy(&out.stdout).starts_with("{\"agents\":[],"), "밖의 장을 읽었다\n{}", text(&out));
@@ -24240,6 +24243,8 @@ fn mail_and_attendance_follow_no_committed_link_out_of_the_checkout() {
     let out = moai(s.path(), &["send", "w1", "제목", "-b", "본문", "--as", "boss"]);
     assert!(!out.status.success(), "밖을 가리키는 우편함에 쓰고 성공으로 끝났다\n{}", text(&out));
     assert!(text(&out).contains(&mail_away.display().to_string()), "어느 자리인지 안 댄다\n{}", text(&out));
+    let out = moai(s.path(), &["send", "w1", "제목", "-b", "본문", "--as", "boss", "--json"]);
+    assert!(text(&out).contains(r#""code":"broken""#), "링크의 거절을 `broken` 으로 안 냈다\n{}", text(&out));
 
     let out = moai(s.path(), &["inbox", "--as", "w1"]);
     assert!(!out.status.success(), "못 연 우편함을 다 읽은 것으로 끝냈다\n{}", text(&out));
@@ -24248,10 +24253,107 @@ fn mail_and_attendance_follow_no_committed_link_out_of_the_checkout() {
         "못 연 우편함을 안 댄다\n{}",
         text(&out)
     );
+    // 못 연 우편함은 기다려도 안 풀린다 — `--wait` 를 다 채우며 그 일꾼을 노는 것으로 세우지 않고 곧 멈춘다.
+    let started = std::time::Instant::now();
+    let out = moai(s.path(), &["inbox", "--ack", "--wait", "60", "--as", "w1"]);
+    assert!(
+        !out.status.success() && started.elapsed() < std::time::Duration::from_secs(30),
+        "못 연 우편함 앞에서 기다렸다\n{}",
+        text(&out)
+    );
 
     assert_eq!(everything(&agents_away), ["planted.json"], "체크아웃 밖의 출석부에 썼다");
     assert_eq!(everything(&mail_away), ["w1"], "체크아웃 밖의 우편함에 썼다");
     assert!(everything(&mail_away.join("w1")).is_empty(), "체크아웃 밖의 함에 썼다");
+}
+
+/// **못 연 출석부는 "아무도 없다" 가 아니다**(리뷰 moai-kxkw.k2f) — 출석부만 밖을 가리키고 우편함은 안에 선 판. 누가 있는지
+/// 모르니 감독은 역할을 몰라도 열린 편지를 안 가지고, `send`·`inbox` 는 그 거절을 먼저 대며, 훅과 `hello` 는 이 이름의
+/// 되돌아온 편지를 떠난 이의 것으로 치우지 않는다 — 훅은 그 세션을 아무도 아닌 것으로 두고, `hello` 는 고른 말과 `broken`
+/// 으로 멈춘다. 함의 `read/` 만 밖을 가리키면 그 함의 편지는 내놓지 않는다 — 옮기지 못할 편지를 부를 때마다 새로 받은
+/// 것으로 내던 자리다. 밖의 출석부는 한 바이트도 안 바뀐다.
+#[cfg(unix)]
+#[test]
+fn a_fenced_roster_decides_nothing_and_a_box_whose_read_is_fenced_offers_nothing() {
+    let s = init("mail-roster-fenced");
+    let away = Scratch::new("mail-roster-fenced-away");
+    let (boss, worker) = (Sleeper::new(), Sleeper::new());
+    hello_as(s.path(), "boss", &boss.pid(), &["--role", "supervisor"]);
+    hello_as(s.path(), "w2", &worker.pid(), &["--role", "worker"]);
+    let (agents, mail) = (s.path().join(".moai/agents"), s.path().join(".moai/mail"));
+    let agents_away = away.path().join("agents");
+    std::fs::rename(&agents, &agents_away).unwrap();
+    std::os::unix::fs::symlink(&agents_away, &agents).unwrap();
+    let snapshot = |dir: &Path| {
+        let mut all: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap())
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).unwrap()))
+            .collect();
+        all.sort();
+        all
+    };
+    let before = snapshot(&agents_away);
+    let fence = agents_away.display().to_string();
+    let letter = |to: &str, from: &str| {
+        format!(
+            r#"{{"v":1,"to":"{to}","from":"{from}","subject":"s","body":"","sent_at":"2026-10-04T06:12:03Z","reply_to":null}}"#
+        )
+    };
+
+    // 우편함은 안에 서니 보내기는 된다 — 못 연 출석부만 먼저 댄다.
+    let out = moai(s.path(), &["send", "any-idle-worker", "일감", "-b", "x", "--as", "w1"]);
+    assert!(out.status.success() && String::from_utf8_lossy(&out.stderr).contains(&fence), "{}", text(&out));
+    // 감독은 역할을 몰라도 열린 편지를 안 가진다 — 일감은 함에서 출석부가 고쳐지기를 기다린다.
+    let out = moai(s.path(), &["inbox", "--ack", "--as", "boss", "--json"]);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("\"letters\":[]"),
+        "역할을 모른 채 열린 편지를 가졌다\n{}",
+        text(&out)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&fence), "못 연 출석부를 안 댄다\n{}", text(&out));
+    assert_eq!(names_in(&mail.join("any-idle-worker")).len(), 1, "열린 편지가 함을 떠났다");
+
+    // 훅은 그 세션을 아무도 아닌 것으로 둔다 — 되돌아온 편지를 떠난 이의 것으로 치우지도, 편지를 읽음으로 옮기지도 않는다.
+    let held = mail.join("claude-sess0001");
+    std::fs::create_dir_all(&held).unwrap();
+    std::fs::write(held.join("20261004-061203-00000001.json"), letter("claude-sess0001", "boss")).unwrap();
+    std::fs::write(held.join("20261004-061203-00000002.returned.json"), letter("w9", "claude-sess0001")).unwrap();
+    hook(&s, "user-prompt-submit", &event(&s, "sess0001-aaaa"));
+    assert_eq!(names_in(&held).len(), 2, "못 연 출석부로 이름을 지어 편지를 옮겼다");
+    assert!(!held.join("read").exists(), "못 연 출석부로 이름을 지어 편지를 읽음으로 옮겼다");
+
+    // 함의 `read/` 만 밖을 가리킨다 — 그 함의 편지는 내놓지 않고, 몇 번을 불러도 같은 편지를 새로 받았다고 안 한다.
+    let read_away = away.path().join("read");
+    std::fs::create_dir_all(&read_away).unwrap();
+    let id = field(&ok(s.path(), &["send", "w2", "일", "-b", "x", "--as", "boss", "--json"]), "id");
+    std::os::unix::fs::symlink(&read_away, mail.join("w2/read")).unwrap();
+    for _ in 0..2 {
+        let out = moai(s.path(), &["inbox", "--ack", "--as", "w2", "--json"]);
+        assert!(!out.status.success(), "못 연 `read/` 를 다 읽은 것으로 끝냈다\n{}", text(&out));
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("\"letters\":[]"),
+            "옮기지 못할 편지를 내놓았다\n{}",
+            text(&out)
+        );
+        assert!(String::from_utf8_lossy(&out.stderr).contains(&read_away.display().to_string()), "{}", text(&out));
+    }
+    assert!(mail.join(format!("w2/{id}.json")).exists(), "옮기지 못한 편지를 잃었다");
+    assert!(std::fs::read_dir(&read_away).unwrap().next().is_none(), "체크아웃 밖의 `read/` 에 썼다");
+
+    // `hello` 는 고른 말과 `broken` 으로 먼저 멈추고, 이 이름의 되돌아온 편지를 안 건드린다.
+    std::fs::create_dir_all(mail.join("w3")).unwrap();
+    let returned = mail.join("w3/20261004-061203-00000009.returned.json");
+    std::fs::write(&returned, letter("w9", "w3")).unwrap();
+    let w3 = Sleeper::new();
+    let out = moai(s.path(), &["hello", "--name", "w3", "--pid", &w3.pid(), "--json"]);
+    assert!(
+        !out.status.success() && text(&out).contains(r#""code":"broken""#) && text(&out).contains(&fence),
+        "{}",
+        text(&out)
+    );
+    assert!(returned.exists() && !mail.join("w3/read").exists(), "멈춘 인사가 되돌아온 편지를 치웠다");
+    assert_eq!(snapshot(&agents_away), before, "체크아웃 밖의 출석부를 고쳤다");
 }
 
 /// **읽은 편지는 읽은 지 이레가 지나면 `moai agents` 가 걷는다**(moai-kxkw.my1, 2026-10-05 사용자 결정). 날은 보낸 날이
