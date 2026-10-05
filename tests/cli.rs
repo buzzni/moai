@@ -24762,6 +24762,17 @@ fn a_quiet_card_on_another_machine_keeps_its_made_name_for_a_day() {
     );
     let back = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
     assert!(back.contains("\"letters\":[]"), "아직 산 저쪽 세션의 편지를 되돌렸다 — {back}");
+    // `hello` 가 짓는 이름(`<벤더>-<pid>`)도 같다 — 넘겨받지 않고, 그 이름을 쥔 저쪽 장을 댄다.
+    let w = Sleeper::new();
+    let made = format!("claude-{}", w.pid());
+    let held = far(&made, hour_ago);
+    let taken = moai(s.path(), &["hello", "--pid", &w.pid(), "--vendor", "claude"]);
+    assert!(!taken.status.success() && text(&taken).contains("4194400@box-b"), "{}", text(&taken));
+    assert_eq!(
+        std::fs::read_to_string(agents.join(format!("{made}.json"))).unwrap(),
+        held,
+        "hello 가 저쪽 장을 덮었다"
+    );
     // 하루가 지나면 걷힐 때다 — 새 세션이 그 이름을 받고, 저쪽 함의 편지는 보낸 이에게 돌아간다.
     far("claude-sessMDE2", "2026-09-10T04:12:02Z");
     ok(s.path(), &["send", "claude-sessMDE2", "하루 묵은 일감", "--as", "boss"]);
