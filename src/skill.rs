@@ -141,7 +141,8 @@ pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 /// 두는 Claude 와 다르다(`cmd::hook` 의 `rest`).
 ///
 /// **줄마다 그 이벤트가 받는 값을 함께 적는다**(moai-t6hl) — 넷째 칸이 상한(초), 다섯째 칸이 `additionalContextLimit`
-/// 이다. Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 낸다(사람의 codex 0.160 이 짚었다). 그 상한은
+/// 이다. Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 낸다(사람의 codex 0.160 이 짚었다 — 그 경고를
+/// `tests/hooks/codex/config/` 에 갈무리해 두고 시험이 이 표가 심는 파일을 그것에 대 본다, moai-o9tg). 그 상한은
 /// 추가 맥락을 낼 수 있는 이벤트만 받는다(Codex 훅 문서: SessionStart·SubagentStart·PreToolUse·PostToolUse·
 /// UserPromptSubmit) — `Stop` 이 붙드는 까닭(`reason`)은 이어 가는 프롬프트라 이 값이 안 닿고 Codex 의 기본 상한을
 /// 그대로 쓴다(같은 문서). 그래서 그 글은 훅이 그 상한에 맞춰 싣는다([`crate::hook::CODEX_HOLD`]). 두 값을 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이 15초·상한 없음을 받는다 —
@@ -2244,16 +2245,8 @@ mod tests {
             let entry = &group[0]["hooks"][0];
             let line = entry["command"].as_str().unwrap();
             assert!(line.starts_with("sh -c '") && line.contains("--dialect codex"), "{at}: {line}");
-            // **이벤트가 받는 것만 적는다**(moai-t6hl) — Codex 는 추가 맥락을 못 내는 이벤트의 `additionalContextLimit` 을
-            // 버리고 `/hooks` 에 설정 경고를 내며, `SessionEnd`·`Interrupt` 는 3초까지만 받는다(Codex 훅 문서).
-            let (limit, timeout) = match at.as_str() {
-                "SessionStart" | "UserPromptSubmit" | "PreToolUse" => (Some(crate::hook::CONTEXT_CAP as u64), TIMEOUT),
-                "Stop" => (None, TIMEOUT),
-                "Interrupt" | "SessionEnd" => (None, 3),
-                other => panic!("시험이 모르는 Codex 이벤트 {other}"),
-            };
-            assert_eq!(entry.get("additionalContextLimit").map(|v| v.as_u64()), limit.map(Some), "{at}");
-            assert_eq!(entry["timeout"], timeout, "{at}");
+            // 이벤트마다 상한과 `additionalContextLimit` 을 무엇으로 적는가는 Codex 의 규칙이 가른다 — 그것은
+            // `the_planted_codex_hooks_pass_codex_s_own_checks` 가 Codex 의 `/hooks` 갈무리에 대 본다(moai-o9tg).
         }
         let agy: serde_json::Value = serde_json::from_str(&antigravity_hooks(exe)).unwrap();
         let group = agy[ANTIGRAVITY_GROUP].as_object().unwrap();
@@ -2290,6 +2283,210 @@ mod tests {
         for exe in ["/repo/target/release/moai", "/home/me/Bob's tools/moai", "moai"] {
             assert_eq!(planted_exe(&codex_hooks(exe)).as_deref(), Some(exe), "codex {exe}");
             assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe), "antigravity {exe}");
+        }
+    }
+
+    /// Codex 가 추가 맥락을 받는 이벤트 — 그 밖의 처리기에 적힌 `additionalContextLimit` 은 버리고 경고한다(Codex 훅
+    /// 문서). **[`CODEX`] 표에서 읽지 않는다** — 표를 되돌리면 본뜸도 같이 움직여 아무것도 안 붉어진다.
+    const CODEX_TAKES_CONTEXT: &[&str] =
+        &["SessionStart", "SubagentStart", "PreToolUse", "PostToolUse", "UserPromptSubmit"];
+
+    /// Codex 가 상한을 깎는 이벤트와 그 상한(초) — 기본 1초에 3초까지다(Codex 훅 문서). 나머지는 기본이 600초고 깎는다는
+    /// 말이 문서에도 실행 파일에도 없다.
+    const CODEX_TIMEOUT_CAP: &[(&str, u64)] = &[("SessionEnd", 3), ("Interrupt", 3)];
+
+    /// Codex 0.160 의 command 처리기가 아는 키 — 그 판 실행 파일이 든 `HookHandlerConfig::Command` 의 여섯 칸에 꼬리표
+    /// `type` 을 더했다. 모르는 키를 Codex 가 어떻게 읽는지는 갈무리가 없다 — 어느 쪽이든 그 값은 안 선다(`timeoutSec` 은
+    /// Codex 앱 서버 API 의 이름이라 헷갈리기 쉽다).
+    const CODEX_HANDLER_KEYS: &[&str] =
+        &["type", "command", "commandWindows", "timeout", "async", "statusMessage", "additionalContextLimit"];
+
+    /// 경고에서 훅 파일의 자리를 갈음하는 글 — 갈무리는 그 기계의 절대 경로를 적는다.
+    const HOOKS_AT: &str = "<hooks.json>";
+
+    /// 옮겨 붙이다 마지막 경고가 끊긴 갈무리의 이름(`tests/hooks/codex/config/<이름>.txt`) — 이 갈무리만 마지막 경고를
+    /// 앞머리로 맞춘다(`tests/hooks/README.md`).
+    const CODEX_CUT: &[&str] = &["before-moai-t6hl"];
+
+    /// Codex 가 그 이벤트의 상한을 깎는 값(초) — 안 깎는 이벤트는 `None` 이다.
+    fn codex_timeout_cap(event: &str) -> Option<u64> {
+        CODEX_TIMEOUT_CAP.iter().find(|(at, _)| *at == event).map(|&(_, cap)| cap)
+    }
+
+    /// Codex 0.160 이 훅 파일을 읽으며 `/hooks` 의 Issues 에 내는 설정 경고를 본뜬다(moai-o9tg). 글은 그 판 실행 파일의
+    /// `hooks/src/engine/discovery.rs` 가 든 것을 옮겼다. command 처리기에 서는 넷만 본뜬다 — 빈 명령, `async`, 이벤트가
+    /// 안 받는 `additionalContextLimit`, 깎이는 상한. 같은 자리의 나머지 경고(못 읽는 파일, 틀린 matcher 정규식, prompt·
+    /// agent·MCP 처리기, `config.toml` 의 `[hooks]` 와 겹침)는 moai 가 안 심는 꼴에서 나서 [`codex_shape`] 가 그 꼴을 막는다.
+    /// **본뜸은 갈무리가 붙든다** — 시험이 갈무리마다 Codex 가 한 말과 이것이 낸 말을 하나하나 견준다.
+    fn codex_issues(text: &str) -> Vec<String> {
+        let file: serde_json::Value = serde_json::from_str(text).expect("훅 파일이 JSON 이 아니다");
+        let mut said = Vec::new();
+        for (event, groups) in file["hooks"].as_object().expect("훅 파일에 hooks 가 없다") {
+            let handlers =
+                groups.as_array().into_iter().flatten().flat_map(|g| g["hooks"].as_array().into_iter().flatten());
+            for handler in handlers {
+                if handler["command"].as_str().is_none_or(|c| c.trim().is_empty()) {
+                    said.push(format!("skipping empty hook command in {HOOKS_AT}"));
+                    continue;
+                }
+                if handler["async"] == true {
+                    said.push(format!("running async {event} hook synchronously in {HOOKS_AT}"));
+                }
+                if handler.get("additionalContextLimit").is_some() && !CODEX_TAKES_CONTEXT.contains(&event.as_str()) {
+                    said.push(format!(
+                        "ignoring additionalContextLimit for {event} hook in {HOOKS_AT}: this event cannot emit additionalContext"
+                    ));
+                }
+                if let Some(cap) =
+                    codex_timeout_cap(event).filter(|&cap| handler["timeout"].as_u64().is_some_and(|t| t > cap))
+                {
+                    said.push(format!("clamping {event} hook timeout to {cap}s in {HOOKS_AT}"));
+                }
+            }
+        }
+        said
+    }
+
+    /// 심는 Codex 훅 파일이 Codex 가 아는 꼴 안에 서는가 — 어긋난 자리마다 한 줄. [`codex_issues`] 가 안 본뜬 경고가 설
+    /// 자리를 moai 쪽에서 닫는다: 처리기는 command 뿐이고 키는 [`CODEX_HANDLER_KEYS`] 뿐이며, matcher 는 이름을 `|` 로
+    /// 이은 것뿐이라 늘 맞는 정규식이다. 이벤트는 `known` — Codex 가 실제로 보내 온 이벤트(`tests/hooks/codex/` 의 stdin
+    /// 갈무리) — 안에 선다. 잘못 적은 이벤트 이름은 경고가 없어도 그 훅이 한 번도 안 돈다.
+    fn codex_shape(text: &str, known: &[String]) -> Vec<String> {
+        let file: serde_json::Value = serde_json::from_str(text).expect("훅 파일이 JSON 이 아니다");
+        let stray = |value: &serde_json::Value, keys: &[&str]| -> Vec<String> {
+            value
+                .as_object()
+                .into_iter()
+                .flat_map(|o| o.keys())
+                .filter(|k| !keys.contains(&k.as_str()))
+                .cloned()
+                .collect()
+        };
+        let mut odd: Vec<String> =
+            stray(&file, &["description", "hooks"]).into_iter().map(|k| format!("맨 윗단의 {k}")).collect();
+        for (event, groups) in file["hooks"].as_object().expect("훅 파일에 hooks 가 없다") {
+            if !known.contains(event) {
+                odd.push(format!("{event}: Codex 가 보내 온 적이 없는 이벤트"));
+            }
+            for group in groups.as_array().into_iter().flatten() {
+                odd.extend(stray(group, &["matcher", "hooks"]).into_iter().map(|k| format!("{event}: 무리의 {k}")));
+                if let Some(matcher) = group.get("matcher") {
+                    let names = |m: &str| {
+                        m.split('|').all(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                    };
+                    if !matcher.as_str().is_some_and(names) {
+                        odd.push(format!("{event}: matcher {matcher}"));
+                    }
+                }
+                for handler in group["hooks"].as_array().into_iter().flatten() {
+                    if handler["type"] != "command" {
+                        odd.push(format!("{event}: 처리기 {}", handler["type"]));
+                    }
+                    odd.extend(
+                        stray(handler, CODEX_HANDLER_KEYS).into_iter().map(|k| format!("{event}: 처리기의 {k}")),
+                    );
+                }
+            }
+        }
+        odd
+    }
+
+    /// `/hooks` 를 옮겨 붙인 글에서 Issues 밑의 경고를 하나씩 꺼낸다. 화면이 낱말 사이에서 접은 줄은 한 칸으로 잇고, 훅
+    /// 파일의 절대 경로는 [`HOOKS_AT`] 으로 갈음한다. Issues 가 없으면(경고 없는 판) 빈 목록이다.
+    fn codex_said(text: &str) -> Vec<String> {
+        // **줄바꿈이 접힌 갈무리는 Issues 를 못 찾는다** — 그대로 두면 경고가 든 글도 "아무 말 없음" 으로 읽혀 갈무리가
+        // 아무것도 못 붙든다. 그런 글은 줄바꿈을 되살려 넣으라고 멈춘다.
+        assert!(
+            text.lines().any(|l| l.trim() == "Issues") || !text.contains("Issues"),
+            "Issues 가 제 줄에 서지 않는다 — 줄바꿈이 접힌 갈무리는 되살려 넣는다"
+        );
+        let mut said: Vec<String> = Vec::new();
+        for line in text.lines().skip_while(|l| l.trim() != "Issues").skip(1) {
+            // 화면이 들여 쓴 줄도 경고다. 경고 뒤의 빈 줄은 Issues 토막의 끝이다 — 그 아래(표·도움말)를 마지막 경고에
+            // 이어 붙이지 않는다.
+            match line.trim_start().strip_prefix("⚠ ") {
+                Some(warning) => said.push(warning.trim().to_string()),
+                None if line.trim().is_empty() && !said.is_empty() => break,
+                None if line.trim().is_empty() => {}
+                None => {
+                    let last = said.last_mut().expect("Issues 밑 첫 줄이 ⚠ 로 서지 않는다");
+                    last.push(' ');
+                    last.push_str(line.trim());
+                }
+            }
+        }
+        let path = |word: &str| {
+            let bare = word.strip_suffix(':').unwrap_or(word);
+            if bare.ends_with("/.codex/hooks.json") {
+                format!("{HOOKS_AT}{}", &word[bare.len()..])
+            } else {
+                word.to_string()
+            }
+        };
+        said.iter().map(|w| w.split(' ').map(path).collect::<Vec<_>>().join(" ")).collect()
+    }
+
+    /// **심는 Codex 훅 파일을 Codex 의 검증에 대 본다**(moai-o9tg) — 다음 Codex 설정 규칙이 사람이 `/hooks` 를 열어서야
+    /// 드러나지 않게 한다(moai-t6hl 이 그랬다). codex 는 띄우지 않는다 — moai 는 에이전트를 안 띄운다. 대신 둘을 붙든다.
+    ///
+    /// - **본뜸이 Codex 가 한 말과 같다** — `tests/hooks/codex/config/` 의 갈무리(`<이름>.txt`, 그때 Codex 가 읽은 파일은
+    ///   `<이름>.json`)마다 [`codex_issues`] 가 낸 경고와 Codex 의 경고가 하나하나 맞는다. 본뜸에서 규칙 하나를 지우면
+    ///   여기가 붉어지고, 새 규칙에 걸린 갈무리를 넣으면 본뜸이 그 규칙을 배울 때까지 붉다
+    /// - **심는 파일에는 경고가 없다** — 본뜸도 꼴([`codex_shape`])도 아무 말이 없고, 추가 맥락을 받는 이벤트에는 넉넉한
+    ///   상한을, 상한이 깎이는 이벤트에는 그 상한을 다 적는다([`CODEX`])
+    #[test]
+    fn the_planted_codex_hooks_pass_codex_s_own_checks() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/hooks/codex");
+        let read = |p: &Path| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        let mut captures = 0;
+        for path in std::fs::read_dir(dir.join("config")).unwrap().filter_map(Result::ok).map(|e| e.path()) {
+            if path.extension().is_none_or(|e| e != "txt") {
+                continue;
+            }
+            let mut ours = codex_issues(&read(&path.with_extension("json")));
+            let said = codex_said(&read(&path));
+            // **끊긴 갈무리의 마지막 경고는 앞만 남았다** — 화면을 옮겨 붙이다 끊긴다. [`CODEX_CUT`] 에 이름이 든 갈무리의
+            // 그 하나만 앞머리로 맞춘다. 온전한 갈무리까지 앞머리로 맞추면 본뜸이 마지막 경고 뒤에 덧붙인 말을 못 잡는다.
+            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            let cut_capture = CODEX_CUT.contains(&name);
+            for (i, warning) in said.iter().enumerate() {
+                let cut = cut_capture && i + 1 == said.len();
+                let at = ours.iter().position(|o| o == warning || (cut && o.starts_with(warning.as_str())));
+                let at = at.unwrap_or_else(|| {
+                    panic!("{}: Codex 는 이렇게 말했는데 본뜸이 못 낸다 — {warning}\n본뜸: {ours:#?}", path.display())
+                });
+                ours.remove(at);
+            }
+            assert!(ours.is_empty(), "{}: Codex 가 안 한 말을 본뜸이 했다 — {ours:#?}", path.display());
+            captures += 1;
+        }
+        assert!(captures > 0, "갈무리가 하나도 없다 — {}", dir.join("config").display());
+
+        // 깨진 stdin 갈무리는 그 자리에서 멈춘다 — 말없이 빼면 그 이벤트가 "Codex 가 보내 온 적 없는 이벤트" 로 읽혀
+        // 심는 표를 탓한다(리뷰 moai-o9tg.gx6).
+        let sent = |p: &Path| -> Option<String> {
+            let input: serde_json::Value =
+                serde_json::from_str(&read(p)).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+            input["hook_event_name"].as_str().map(str::to_string)
+        };
+        let known: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .filter_map(|p| sent(&p))
+            .collect();
+        let planted = codex_hooks("/repo/target/release/moai");
+        assert_eq!(codex_issues(&planted), Vec::<String>::new(), "심는 파일에 Codex 가 경고한다");
+        assert_eq!(codex_shape(&planted, &known), Vec::<String>::new(), "심는 파일이 Codex 가 아는 꼴 밖에 선다");
+        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드와 편지를
+        // 파일로 빼고, 깎이는 상한을 덜 적으면 `SessionEnd` 가 1초에 끊긴다.
+        let file: serde_json::Value = serde_json::from_str(&planted).unwrap();
+        for (event, groups) in file["hooks"].as_object().unwrap() {
+            let entry = &groups[0]["hooks"][0];
+            let limit = CODEX_TAKES_CONTEXT.contains(&event.as_str()).then_some(crate::hook::CONTEXT_CAP as u64);
+            assert_eq!(entry["additionalContextLimit"].as_u64(), limit, "{event}");
+            assert_eq!(entry["timeout"].as_u64(), Some(codex_timeout_cap(event).unwrap_or(TIMEOUT)), "{event}");
         }
     }
 
