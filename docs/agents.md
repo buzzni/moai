@@ -340,7 +340,8 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   several agents; an `--ack` that tried in the same moment is told it was taken
 - **A letter to an agent that left comes back.** When a session goes away
   before reading what was sent to it — `moai agents` sweeps its row because its
-  process is gone, a new session takes over its name, or a Codex session ends —
+  process is gone or because it is another machine's row nothing marked for a
+  day, a new session takes over its name, or a Codex session ends —
   the unread letters go back to their senders and show as returned (`--json`:
   `"returned":true`, with `to` still naming who left). Whether to send the work
   on to someone else is the sender's call. A letter sent to a name nobody holds
@@ -427,7 +428,16 @@ box first so a person's half-typed text is copied out, never typed over, and the
 letter told that worker to end its turn instead of waiting. Once the clear went
 through it sends the next letter and types `moai inbox` into the emptied box, and
 the hooks load the letter. Codex and Antigravity windows are left to the person —
-their input box is not read yet.
+their input box is not read yet — and so is a window on another machine sharing
+this repository (its row in `moai agents --json` reads `here: false`): its pane
+and its pid mean something only there, and that worker is told to wait again
+instead.
+
+**A worker that reads `gone` may still be working.** A worker on another machine
+or in Codex is told alive only by what its hooks and waits mark, so 20 quiet
+minutes — a window resting while its person answers a question, say — read
+`gone`. The supervisor does not hand such a worker's worktree to someone else
+until you say that window has ended.
 
 **When the person steps away**, they tell the supervisor, and the letters say
 `Person: away`. The worker then settles a design question by its own
@@ -523,14 +533,17 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   most often one committed in a repository you received. moai neither writes
   nor reads through it: the write stops with `broken`, `moai agents` and
   `moai inbox` name it, and the hooks quietly do nothing for that session.
+  `moai inbox --wait` comes back at once instead of waiting, since waiting will
+  not open it — a worker stops there and tells you rather than waiting again.
   Replace the link with a real directory
 - **`moai agents` shows a pid as `<pid>@<host>`.** That row was written on
   another machine — another container sharing this repository, or this
   container before it was started again — and its pid is that machine's, not one
   to look for or kill here. Such a row is never swept for its pid: it reads
   `gone` once nothing has marked it for 20 minutes, and after a day it is swept
-  and its unread letters go back to their senders. Nothing wakes it from here —
-  its tmux and its Claude session are on that machine — and a wait here never
+  and its unread letters go back to their senders. Nothing wakes or clears it
+  from here — its tmux and its Claude session are on that machine, and
+  `moai agents --json` says so with `here: false` — and a wait here never
   marks it alive, so a window that sets the same `MOAI_AGENT` after a restart
   gets the name back once the old row reads `gone`
 - **A new session came up as `<name>-<eight characters>`.** Another row holds
@@ -562,4 +575,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4
