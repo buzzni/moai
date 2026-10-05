@@ -18,3 +18,6 @@
 {"ts":"2026-10-05T23:21:17Z","id":"moai-6pld","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — 훅의 보드와 init 안내 칸)"}
 {"ts":"2026-10-05T23:21:17Z","id":"moai-6pld","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"review"}
 {"ts":"2026-10-05T23:21:17Z","id":"moai-785q","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T23:24:53Z","id":"moai-785q","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — init 이 다른 명령을 이어 부름, 사용자 설정)"}
+{"ts":"2026-10-05T23:24:53Z","id":"moai-785q","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-05T23:24:53Z","id":"moai-zynt.zhr","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
