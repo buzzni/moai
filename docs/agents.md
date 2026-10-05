@@ -311,6 +311,7 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
     moai send any-idle-worker '<subject>'    one agent takes it, not you or a supervisor
     moai inbox --ack                         the letters for you, marked read
     moai inbox <id>                          one letter, read or not
+    moai inbox <id> --from <n>               the next page of a long one
     moai inbox --ack --wait 600              wait up to ten minutes for one
 
 - **A letter is delivery, not record.** Nothing goes into `issues.jsonl` or the
@@ -362,13 +363,21 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   read is never swept. One load stays inside the 10,000 characters Claude Code
   carries per hook — the board included, on the first prompt — and says how
   many still wait, naming the next one for `moai inbox <id> --ack`; a letter too
-  long for that is cut there, naming `moai inbox <id>` for the whole of it. A
-  Codex turn's end carries less: Codex holds the text that keeps a
+  long for that is cut there, naming `moai inbox <id> --from <n>` for the rest
+  of it. A Codex turn's end carries less: Codex holds the text that keeps a
   turn going to its default of about 2,500 tokens, which
   `additionalContextLimit` does not raise, so there one load stays within
   8,000 bytes, the lines around the letter included — a letter of about 2,400
   Korean characters or 7,000 English ones still arrives whole. A letter's body
   holds up to 64 KB, its subject 200 characters
+- **One long letter comes a page at a time.** `moai inbox <id>` stops a body
+  at about 24 KB and its last line names `moai inbox <id> --from <n>` for the
+  next part — run that line as it is until no such line ends the output. An
+  agent's own output cap (30,000 characters in Claude Code, 10,000 tokens in
+  Codex) cuts the middle out of anything longer, and the letter is read by
+  then. `<n>` counts the characters of the body as shown, from 0, and a hook's
+  cut names the same count, so the page picks up exactly where the cut fell.
+  `--json` is a record, not a page: it gives the whole letter, `--from` or not
 - **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
   each task is how a worker session — one a person opened — gets its next one;
   nothing has to wake it. While it waits its row reads idle, and once a letter
