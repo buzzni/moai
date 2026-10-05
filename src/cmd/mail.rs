@@ -74,7 +74,8 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         ));
     }
     // **읽기는 이름을 다 댄 뒤다** — `-b -` 는 stdin 을 기다리므로, 잘못 친 이름은 그 앞에서 멈춘다.
-    let (agents, _) = mail::presences(&repo.agents_dir());
+    let (agents, roster) = mail::presences(&repo.agents_dir());
+    warn_roster(ctx, &roster);
     let from = who(ctx, args.sender.as_deref(), &agents)?;
     let body = super::add::read_body_said(args.body, ctx)?.unwrap_or_default();
     if body.len() > mail::BODY_MAX {
@@ -96,7 +97,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
     };
     let dir = repo.mail_dir();
     mail::migrate(&dir);
-    let id = mail::send(&dir, &letter).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
+    let id = mail::send(&dir, &letter).map_err(|e| mail::refusal(ctx.lang(), &dir, &e))?;
 
     // **없는 이름에도 보낸다** — 아직 인사하지 않은 에이전트에게 먼저 보내는 것은 흔하다. 오타일 수 있으니
     // 한 줄로만 댄다.
@@ -140,7 +141,8 @@ fn woke_line(lang: Lang, zone: &crate::tz::Zone, w: &Woke) -> Option<String> {
 
 pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
-    let (agents, _) = mail::presences(&repo.agents_dir());
+    let (agents, roster) = mail::presences(&repo.agents_dir());
+    let roster_shut = warn_roster(ctx, &roster);
     let me = who(ctx, args.me.as_deref(), &agents)?;
     let role = agents.iter().find(|p| p.name == me).map(|p| p.role.clone()).unwrap_or_default();
     let dir = repo.mail_dir();
@@ -161,9 +163,20 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     let mut stamped = std::time::Instant::now();
     let (mut mine, garbled) = loop {
         let (all, garbled) = mail::list(&dir, &me, args.all);
-        let mine: Vec<Stored> = all.into_iter().filter(|s| mail::for_me(s, &me, &role)).collect();
+        // **못 연 출석부면 안 읽은 열린 편지는 안 가진다**(리뷰 moai-kxkw.k2f) — 역할을 모른다. 빈 역할로 가르던 판은 감독이
+        // `any-idle-worker` 일감을 가져 일꾼에게 안 갔다. 읽음으로 옮기는 것은 쓰기라 모르는 것으로 정하지 않는다 — 그 편지는
+        // 출석부를 고칠 때까지 함에서 기다린다.
+        let mine: Vec<Stored> = all
+            .into_iter()
+            .filter(|s| mail::for_me(s, &me, &role))
+            .filter(|s| !(roster_shut && s.open() && s.reader.is_none()))
+            .collect();
+        // **우편함을 못 열면 기다리지 않는다**(리뷰 moai-kxkw.k2f) — 그 거절은 기다려도 안 풀린다. 기다리던 판은 `--wait` 를 다
+        // 채우는 동안 그 일꾼을 `idle` 로 적어, 감독이 거절될 편지를 보내게 했다. 함 하나의 거절(`mailbox` 가 있다)로는 안
+        // 멈춘다 — 다른 함으로 오는 편지는 아직 받는다.
+        let shut = garbled.iter().any(|g| g.mailbox.is_none() && matches!(g.why, mail::Why::Fenced(_)));
         let waiting = until.is_some_and(|t| t.is_none_or(|t| std::time::Instant::now() < t));
-        if !waiting || mine.iter().any(|s| s.reader.is_none()) {
+        if !waiting || shut || mine.iter().any(|s| s.reader.is_none()) {
             break (mine, garbled);
         }
         // 기다리는 동안 닻을 다시 적는다(moai-j3n5) — 안 적으면 오래 기다리는 일꾼이 떠난 것으로 읽혀, 감독이 일감을 보낼
@@ -186,11 +199,19 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // **남의 편지가 깨진 것은 내 답이 덜 난 것이 아니다**(리뷰 moai-h8tn.x4l) — 깨진 편지 하나가 모든 에이전트의 `inbox` 를
     // 비영으로 끝내면 `--ack` 로 이미 읽음이 된 편지를 실패로 읽은 고리가 그 편지를 버린다. 받는 이마다 함이 따로라
     // (moai-ew4o.c92) 여기 오는 것은 제 함과 열린 편지의 함뿐이다. 열린 편지는 감독이 안 가지니 감독에게는 말만 한다.
+    //
+    // 못 연 디렉터리(우편함·함·그 `read/`)는 "못 읽는 편지" 가 아니다 — 쓰는 길(`send`)의 거절과 같은 `<자리>: <까닭>` 이다.
     for g in &garbled {
-        tell(&fill(
-            say(ctx.lang(), "warn.mail_garbled"),
-            &[("path", &crate::text::one_line(&g.path.display().to_string())), ("why", &crate::text::one_line(&g.why))],
-        ));
+        tell(&match &g.why {
+            mail::Why::Fenced(why) => crate::held::refused(ctx.lang(), &g.path, why),
+            mail::Why::Bad(why) => fill(
+                say(ctx.lang(), "warn.mail_garbled"),
+                &[
+                    ("path", &crate::text::one_line(&g.path.display().to_string())),
+                    ("why", &crate::text::one_line(why)),
+                ],
+            ),
+        });
         if g.mailbox.as_deref() != Some(mail::ANY_IDLE_WORKER) || role != mail::SUPERVISOR {
             note_partial();
         }
@@ -224,7 +245,8 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
                 }
                 Ok(mail::Took::Lost) => lost.push(s.id),
                 Err(e) => {
-                    tell(&format!("{}: {e}", dir.display()));
+                    // 쓰는 길의 거절과 같은 말이다 — 체크아웃 밖으로 풀린 `read/` 는 고른 말로 선다([`mail::refusal`]).
+                    tell(&mail::refusal(ctx.lang(), &dir, &e).message);
                     note_partial();
                     gained += 1;
                     kept.push(s);
@@ -299,6 +321,21 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     }
     p.stamp(&now);
     let _ = mail::write_presence(&dir, &p);
+}
+
+/// 못 연 출석부를 한 줄로 댄다 — 쓰는 길(`hello`)의 거절과 같은 말이다([`mail::Garbled::refusal`]). 댔으면 `true` 다.
+///
+/// **막지는 않는다** — 우편함은 그대로 쓰고 읽는다. 다만 그 뒤에 서는 "누구냐"(`no_actor`)·"그런 이름이 없다" 의 까닭이 그것이라
+/// 먼저 댄다(리뷰 moai-kxkw.k2f). 비영으로 끝내지 않는다 — `--ack` 로 이미 읽음이 된 편지를 실패로 읽은 고리가 버린다
+/// (`inbox` 의 못 읽은 편지와 같은 까닭).
+fn warn_roster(ctx: &Ctx, roster: &[mail::Garbled]) -> bool {
+    match mail::roster_fenced(roster).and_then(|g| g.refusal(ctx.lang())) {
+        Some(stop) => {
+            tell(&stop.message);
+            true
+        }
+        None => false,
+    }
 }
 
 /// 이 부름이 **누구의 이름으로 도는가** — `--as`, `MOAI_AGENT`, 이 명령을 띄운 에이전트의 출석 차례다. Codex 의 출석은

@@ -505,12 +505,14 @@ IDEA
   wait that runs out leaves it idle. A name with no row is not registered by
   this - `moai hello` does that.
 
-  A letter is read when it moves to read/ inside its box - nothing is
-  deleted, and --all shows it again. The hooks do this by themselves:
-  UserPromptSubmit and Stop load the letters for the session into the
-  conversation and mark them read, so an agent with the hooks installed
-  rarely needs this command. A letter marked returned is one you sent: its
-  recipient left before reading it.
+  A letter is read when it moves to read/ inside its box. The hooks do this
+  by themselves: UserPromptSubmit and Stop load the letters for the session
+  into the conversation and mark them read, so an agent with the hooks
+  installed rarely needs this command. --all shows a read letter again until
+  `moai agents` sweeps it, mail_read_days after it was read (7 unless
+  .moai/config.toml says otherwise; 0 keeps it for good). An unread letter is
+  never swept. A letter marked returned is one you sent: its recipient left
+  before reading it.
 
   A letter to any-idle-worker shows to every agent but its sender and the
   supervisors, and the first --ack keeps it; another that tried in the same
@@ -546,6 +548,10 @@ IDEA
   that session to come back to. After a day it is swept, and its letters
   wait for that session. Any other row that cannot be told alive or gone
   stays.
+
+  The same sweep takes the letters read more than mail_read_days ago (7
+  unless .moai/config.toml says otherwise; 0 turns it off) - see
+  `moai inbox --help`.
 
   --role and --status keep the rows whose word is exactly that one. A row a
   hook registered carries no role until the agent says `moai hello --role`.

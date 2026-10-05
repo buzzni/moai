@@ -105,8 +105,9 @@ neither the sender nor registered as a [supervisor](#supervisor) with
 `moai hello --role supervisor` keeps it). It is delivery,
 not record: nothing of it enters the [tracker](#tracker) or the
 [journal](#journal). The hooks load the letters for a session into it and mark
-them read; `moai inbox` shows them. One left unread for an agent that went away
-goes back to its sender, marked returned. More in
+them read; `moai inbox` shows them, and `moai agents` sweeps a read one
+`mail_read_days` (a week) after it was read. One left unread for an agent that
+went away goes back to its sender, marked returned. More in
 [working with agents](agents.md#leave-each-other-letters).
 
 ## Member
@@ -246,4 +247,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw

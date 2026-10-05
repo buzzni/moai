@@ -81,6 +81,47 @@ pub(crate) fn place(p: &Path, home: &Home) -> Result<PathBuf, Unheld> {
     }
 }
 
+/// **디렉터리**가 끝내 닿는 자리 — [`place`] 이되 **아직 없는 디렉터리는 있는 가장 깊은 조상으로 잰다**
+/// (moai-kxkw.7ky). 거기서 짓고 쓸 자리라 푼 자리를 낸다 — 없는 조각은 그 뒤에 그대로 붙는다.
+///
+/// [`place`] 는 링크가 아닌 없는 자리를 받은 철자 그대로 내보낸다 — 읽는 쪽이 `NotFound` 로 넘기니 그것으로 됐다. 짓는
+/// 쪽에서는 그것이 구멍이다: `.moai -> <밖>` 을 커밋한 저장소에서 `.moai/mail` 은 아직 없는 링크 아닌 자리라
+/// 그대로 지나고, `create_dir_all` 은 그 링크를 따라 밖에 디렉터리를 짓는다. 그래서 있는 조상을 [`place`] 로 잰다.
+/// 없는 나머지는 지을 때 보통 디렉터리로 선다.
+///
+/// **푼 자리가 아직 링크를 거치면 그 링크를 다시 잰다**(리뷰 moai-kxkw.k2f) — [`place`] 는 끝 없는 다른 링크를 거쳐 가는
+/// 링크를 그 끝 없는 조각을 없는 디렉터리로 쳐서 "안" 으로 읽고, 끝이 없고 그 끝의 디렉터리도 없는 채 `..` 을 든 링크는 철자
+/// 그대로 낸다. 둘 다 푼 자리의 있는 가장 깊은 조상이 링크로 남는다. 그 자리는 지금은 안 지어지지만(`mkdir` 은 끝 없는
+/// 링크를 안 따른다) 잰 뒤에 그 끝이 생기면 밖에 지어진다 — 잰 사이를 노려 밖의 끝을 지었다 지우는 것만으로 `hello` 가 밖에
+/// 장을 썼다. 그래서 남은 링크를 사슬의 끝까지 [`place`] 로 다시 재고, 끝내 못 푸는 링크(`..` 너머가 없다)는 어디에 닿을지
+/// 모르니 거절한다. 지금 지어지는 꼴은 하나도 안 진다 — 끝 없는 안 링크는 끝의 디렉터리로 풀어 그 밑에 짓는다.
+///
+/// 우편함·출석부([`crate::mail`])가 디렉터리를 짓고 열기 전에 이 자로 잰다.
+pub(crate) fn place_dir(d: &Path, home: &Home) -> Result<PathBuf, Unheld> {
+    let Some(head) = d.ancestors().find(|a| std::fs::symlink_metadata(a).is_ok()) else { return Ok(d.to_path_buf()) };
+    let mut out = beneath(place(head, home)?, d, head);
+    // 사슬의 깊이는 리눅스가 경로 하나를 풀며 따라가는 링크 수(`MAXSYMLINKS`)까지다 — `path::follow_links` 와 같은 끝.
+    for _ in 0..=40 {
+        let deepest = out.ancestors().find_map(|a| std::fs::symlink_metadata(a).ok().map(|m| (a.to_path_buf(), m)));
+        let Some((link, _)) = deepest.filter(|(_, m)| m.file_type().is_symlink()) else { return Ok(out) };
+        let real = place(&link, home)?;
+        if real == link {
+            // 고리처럼 끝내 못 따라가는 링크는 그대로 낸다 — 어디로도 안 풀려, 지을 때 운영체제가 그 말(`ELOOP`)로 진다.
+            let Ok(end) = crate::path::follow_links(&link) else { return Ok(out) };
+            return Err(Unheld::Outside { to: beneath(crate::path::lexical(&end), &out, &link), home: home.0.clone() });
+        }
+        out = beneath(real, &out, &link);
+    }
+    Ok(out)
+}
+
+/// `d` 의 조상 `head` 를 `real` 로 바꿔 단 자리 — 남은 조각이 비면 붙이지 않는다(`path::real_prefix` 와 같은 까닭).
+fn beneath(real: PathBuf, d: &Path, head: &Path) -> PathBuf {
+    // **떼어 내기는 실패하지 않는다** — `head` 는 `d` 의 조상이다(`path::real_prefix` 와 같은 자리).
+    let rest = d.strip_prefix(head).expect("조상에서 떼어 낸다");
+    if rest.as_os_str().is_empty() { real } else { real.join(rest) }
+}
+
 /// 체크아웃 아래의 자리 `rest` 가 **git 의 자리(`.git/`)에 드는가** — 어느 조각이든 `.git` 이면 든다. 끝 이름도
 /// 센다 — 딸린 워크트리의 `.git` 은 디렉터리가 아니라 `gitdir:` 한 줄짜리 파일이다. 읽기([`place`])·쓰기
 /// (`store::resolve`)·규칙 줄(`cmd::init::inside`)이 이 하나로 잰다(리뷰 moai-x0o7.52k) — 셋이 저마다 적던 판은
@@ -376,6 +417,60 @@ pub(crate) mod tests {
         // 안을 가리키는 끝 없는 링크는 그대로 안이다 — 읽는 쪽이 `NotFound` 로 넘긴다.
         let inside = link("dangling-in", Path::new("data/missing"));
         assert_eq!(place(&inside, &home), Ok(home.0.join("data/missing")));
+    }
+
+    /// **아직 없는 디렉터리는 있는 가장 깊은 조상으로 잰다**(moai-kxkw.7ky) — [`place`] 는 링크 아닌 없는 자리를 그대로
+    /// 내보내, 밖을 가리키는 `.moai` 밑의 `.moai/mail` 이 안으로 읽혔다. 푼 자리를 내고, 없는 조각은 그 뒤에 붙인다.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_not_built_yet_is_measured_by_its_deepest_ancestor() {
+        let s = Scratch::new("held-place-dir");
+        let away = Scratch::new("held-place-dir-away");
+        let home = Home::of(s.path());
+        std::fs::create_dir_all(s.join("data")).unwrap();
+        std::fs::create_dir_all(s.join(".git")).unwrap();
+        let link = |name: &str, to: &Path| std::os::unix::fs::symlink(to, s.join(name)).unwrap();
+        link("out", away.path());
+        link("in", Path::new("data"));
+        link("git", Path::new(".git"));
+        link("dangling-in", Path::new("data/later"));
+
+        assert_eq!(place(&s.join("out/mail"), &home), Ok(s.join("out/mail")), "전제가 갈렸다 — place 가 이미 잰다");
+        assert!(matches!(place_dir(&s.join("out/mail/w1"), &home), Err(Unheld::Outside { .. })), "밖 밑을 안으로 쟀다");
+        assert!(matches!(place_dir(&s.join("out"), &home), Err(Unheld::Outside { .. })));
+        assert!(matches!(place_dir(&s.join("git/mail"), &home), Err(Unheld::IntoGit { .. })), ".git 밑을 안으로 쟀다");
+        assert_eq!(
+            place_dir(&s.join("in/mail/w1"), &home),
+            Ok(home.0.join("data/mail/w1")),
+            "안을 가리키는 링크를 안 풀었다"
+        );
+        assert_eq!(place_dir(&s.join("fresh/mail"), &home), Ok(home.0.join("fresh/mail")));
+        assert_eq!(
+            place_dir(&s.join("dangling-in/w1"), &home),
+            Ok(home.0.join("data/later/w1")),
+            "끝 없는 안 링크를 안 풀었다"
+        );
+
+        // **[`place`] 가 못 푸는 링크는 거절하고, 끝 없는 링크의 사슬은 끝까지 다시 잰다**(리뷰 moai-kxkw.k2f) — 둘 다 그대로
+        // 지나던 판은 잰 뒤 밖의 끝이 생기는 틈에 밖에 지었다.
+        let away_name = away.path().file_name().expect("자리에 이름이 있다");
+        link("dangling-up", &Path::new("..").join(away_name).join("missing/deep"));
+        link("not-yet", &away.join("not-yet"));
+        link("via", Path::new("not-yet/x"));
+        link("hop", Path::new("dangling-in/x"));
+        assert!(
+            matches!(place_dir(&s.join("dangling-up/w1"), &home), Err(Unheld::Outside { .. })),
+            "끝의 디렉터리도 없는 `..` 링크를 안으로 쟀다"
+        );
+        assert!(
+            matches!(place_dir(&s.join("via/w1"), &home), Err(Unheld::Outside { .. })),
+            "끝 없는 밖 링크를 거쳐 가는 링크를 안으로 쟀다"
+        );
+        assert_eq!(
+            place_dir(&s.join("hop/w1"), &home),
+            Ok(home.0.join("data/later/x/w1")),
+            "끝 없는 안 링크의 사슬을 끝까지 안 풀었다"
+        );
     }
 
     /// **git 의 자리는 조각째, 대소문자 없이 잰다**(리뷰 moai-x0o7.52k) — 대소문자를 안 가르는 볼륨에서는 `.GIT` 도
