@@ -381,6 +381,20 @@ fn clock_micros() -> u64 {
 /// 편지를 새로 받은 것으로 내어 `--wait` 로 일감을 기다리는 일꾼이 같은 일을 되풀이했다. 그 함은 하나로 대고 내놓지 않는다
 /// — 편지는 함에 그대로 남는다.
 pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>) {
+    list_of(dir, me, read_too, None)
+}
+
+/// 편지 하나 — `me` 에게 갈 수 있는 편지 가운데 id 가 `id` 인 것, 읽은 것까지다(moai-54yc.v70, `moai inbox <id>`). **그 id 의
+/// 파일만 연다** — id 는 파일 이름에 선다. 두 함과 그 `read/` 를 통째로 열던 판은 읽은 편지가 쌓인 만큼 부를 때마다 다
+/// 열었고(5천 통에 0.6초), 그 id 와 무관한 깨진 편지 하나로 그 부름을 덜 낸 것(비영)으로 끝냈다 — 훅이 내미는
+/// `inbox <id> --ack` 가 편지를 옮겨 놓고 실패로 읽혔다(리뷰 moai-54yc.vqe). 못 연 자리(체크아웃 밖으로 풀린 우편함·함·
+/// `read/`)는 [`list`] 와 같이 댄다. id 는 한 함 안에서만 겹치지 않으니(모듈 머리글) 두 함에 하나씩 설 수 있다.
+pub fn list_one(dir: &Path, me: &str, id: &str) -> (Vec<Stored>, Vec<Garbled>) {
+    list_of(dir, me, true, Some(id))
+}
+
+/// [`list`]·[`list_one`] 의 몸통 — `only` 면 그 id 의 파일만 연다(파일 이름으로 먼저 거른다).
+fn list_of(dir: &Path, me: &str, read_too: bool, only: Option<&str>) -> (Vec<Stored>, Vec<Garbled>) {
     let mut letters = Vec::new();
     let mut garbled = Vec::new();
     let home = home_of(dir);
@@ -392,7 +406,7 @@ pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>)
     for &held in boxes {
         let reached = reach(&mailbox(&real, held), &home).and_then(|at| Ok((reach(&at.join("read"), &home)?, at)));
         let Ok((read, at)) = reached.map_err(|f| garbled.push(f.garbled(Some(held)))) else { continue };
-        let (got, bad) = unread_in(&at, held);
+        let (got, bad) = unread_in(&at, held, only);
         letters.extend(got);
         garbled.extend(bad);
         if !read_too {
@@ -400,7 +414,7 @@ pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>)
         }
         for (path, stem) in json_files(&read) {
             let Some((id, returned, reader)) = read_stem(&stem) else { continue };
-            if reader != me {
+            if reader != me || only.is_some_and(|o| o != id) {
                 continue;
             }
             let stored = |letter| Stored {
@@ -421,12 +435,16 @@ pub fn list(dir: &Path, me: &str, read_too: bool) -> (Vec<Stored>, Vec<Garbled>)
     (letters, garbled)
 }
 
-/// 한 함의 안 읽은 편지 — 이름 차례는 부르는 쪽이 맞춘다. `at` 은 [`reach`] 를 지난 자리다 — 부르는 쪽이 잰다.
-fn unread_in(at: &Path, held: &str) -> (Vec<Stored>, Vec<Garbled>) {
+/// 한 함의 안 읽은 편지 — 이름 차례는 부르는 쪽이 맞춘다. `at` 은 [`reach`] 를 지난 자리다 — 부르는 쪽이 잰다. `only` 면
+/// 그 id 의 파일만 연다([`list_one`]).
+fn unread_in(at: &Path, held: &str, only: Option<&str>) -> (Vec<Stored>, Vec<Garbled>) {
     let mut letters = Vec::new();
     let mut garbled = Vec::new();
     for (path, stem) in json_files(at) {
         let Some((id, returned)) = letter_stem(&stem) else { continue };
+        if only.is_some_and(|o| o != id) {
+            continue;
+        }
         match read_json::<Letter>(&path) {
             Ok(Some(letter)) => {
                 letters.push(Stored { id: id.to_string(), mailbox: held.to_string(), reader: None, returned, letter })
@@ -512,6 +530,15 @@ pub fn take(dir: &Path, stored: &Stored, reader: &str) -> std::io::Result<Took> 
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Took::Lost),
         Err(e) => Err(e),
     }
+}
+
+/// 이 편지를 `reader` 가 읽음으로 옮겼는가 — 그 함의 `read/<id>[.returned]@<reader>.json` 이 섰다([`take`] 가 짓는 이름).
+/// [`Took::Lost`] 를 받은 쪽이 **누가** 가졌는지 묻는다(`inbox` 의 기다림, 리뷰 moai-54yc.vqe) — 같은 이름의 다른 부름(그
+/// 세션의 훅, 같은 이름의 옆 기다림)이 가졌으면 그 이름은 편지를 얻은 것이다. 함이 체크아웃 밖으로 풀리면 모른다(`false`).
+pub fn read_by(dir: &Path, stored: &Stored, reader: &str) -> bool {
+    let Ok(held) = reach(&mailbox(dir, &stored.mailbox), &home_of(dir)) else { return false };
+    let name = format!("{}{}@{reader}.json", stored.id, mark(stored.returned));
+    std::fs::symlink_metadata(held.join("read").join(name)).is_ok()
 }
 
 /// 읽은 때를 그 편지의 수정 시각에 적는다 — 지금([`crate::model::now`], 시험은 `MOAI_NOW` 로 못박는다). 편지는 한 번
@@ -627,7 +654,7 @@ pub fn sweep_read(dir: &Path, days: i64) -> usize {
 pub fn retire(dir: &Path, name: &str) -> usize {
     let home = home_of(dir);
     let Ok(at) = reach(&mailbox(dir, name), &home) else { return 0 };
-    let (letters, _) = unread_in(&at, name);
+    let (letters, _) = unread_in(&at, name, None);
     let mut touched: Vec<PathBuf> = Vec::new();
     let mut returned = 0;
     for s in letters {
@@ -655,7 +682,7 @@ pub fn carry(dir: &Path, old: &str, new: &str) {
     let home = home_of(dir);
     let Ok(at) = reach(&mailbox(dir, old), &home) else { return };
     let into = mailbox(dir, new);
-    let (letters, _) = unread_in(&at, old);
+    let (letters, _) = unread_in(&at, old, None);
     let mut moved = None;
     for s in letters {
         if let Ok(Some((_, real))) = relocate(&at.join(s.file()), &into, &home, &s.id, s.returned, &s.letter.sent_at) {
@@ -1199,7 +1226,7 @@ pub fn take_over(mail: &Path, all: &[Presence], name: &str, keep: Option<&str>) 
         return;
     }
     let Ok(at) = reach(&mailbox(mail, name), &home_of(mail)) else { return };
-    let (letters, _) = unread_in(&at, name);
+    let (letters, _) = unread_in(&at, name, None);
     for s in letters.iter().filter(|s| s.returned) {
         let _ = take(mail, s, name);
     }
@@ -1953,6 +1980,32 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].reader.as_deref(), Some("w1"));
         assert!(for_me(&got[0], "w1", "") && !for_me(&got[0], "w2", ""), "읽은 편지가 남의 것으로도 섰다");
+        // 진 쪽은 누가 가졌는지 이름으로 묻는다 — 같은 이름이 가졌으면 진 것이 아니다(`inbox` 의 기다림).
+        assert!(read_by(s.path(), &open[0], "w1") && !read_by(s.path(), &open[0], "w2"));
+    }
+
+    /// **편지 하나는 그 id 의 파일만 연다**(리뷰 moai-54yc.vqe) — 그 id 와 무관한 깨진 편지는 그 부름에 안 선다(`moai inbox
+    /// <id>` 가 그것 때문에 덜 낸 것으로 끝나지 않는다). 안 읽은 것도 읽은 것도 그 id 면 든다.
+    #[test]
+    fn one_letter_opens_only_its_own_files() {
+        let s = Scratch::new("mail-one");
+        let a = send(s.path(), &letter("w1", "boss", "a")).unwrap();
+        send(s.path(), &letter("w1", "boss", "b")).unwrap();
+        std::fs::write(s.path().join("w1/20261004-061203-zzzzzzzz.json"), "{").unwrap();
+        let (_, bad) = list(s.path(), "w1", false);
+        assert_eq!(bad.len(), 1, "깨진 편지를 안 댔다 — 시험이 헛돈다");
+        let (got, bad) = list_one(s.path(), "w1", &a);
+        assert!(bad.is_empty(), "그 id 와 무관한 깨진 편지를 댔다 — {bad:?}");
+        assert_eq!(got.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(), [a.as_str()]);
+        assert_eq!(take(s.path(), &got[0], "w1").unwrap(), Took::Mine);
+        std::fs::write(s.path().join("w1/read/20261004-061203-zzzzzzzy@w1.json"), "{").unwrap();
+        let (got, bad) = list_one(s.path(), "w1", &a);
+        assert!(bad.is_empty(), "{bad:?}");
+        assert_eq!(got.len(), 1, "읽은 편지를 안 찾았다");
+        assert_eq!(got[0].reader.as_deref(), Some("w1"));
+        // 그 id 의 파일이 깨졌으면 댄다 — 못 찾은 것과 못 읽은 것을 가른다.
+        let (got, bad) = list_one(s.path(), "w1", "20261004-061203-zzzzzzzz");
+        assert!(got.is_empty() && bad.len() == 1, "{got:?} {bad:?}");
     }
 
     /// `any-idle-worker` 는 보낸 이와 감독을 빼고 누구에게나 간다(2026-10-04 사용자 결정).

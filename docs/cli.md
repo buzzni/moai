@@ -2326,7 +2326,10 @@ Options:
 ```
 The letters for you - `--ack` marks them read
 
-Usage: moai inbox [OPTIONS]
+Usage: moai inbox [OPTIONS] [id]
+
+Arguments:
+  [id]  One letter by its id, read or not
 
 Options:
       --ack                  Mark what is shown as read
@@ -2343,6 +2346,7 @@ Options:
   moai inbox                    the unread letters for you
   moai inbox --ack              the same, and marks them read
   moai inbox --all              the ones already read too
+  moai inbox <id>               that one letter, read or not (--ack marks it)
   moai inbox --ack --wait 600   waits up to 600 seconds for one to come
 
   **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
@@ -2354,7 +2358,9 @@ Options:
   A letter is read when it moves to read/ inside its box. The hooks do this
   by themselves: UserPromptSubmit and Stop load the letters for the session
   into the conversation and mark them read, so an agent with the hooks
-  installed rarely needs this command. --all shows a read letter again until
+  installed rarely needs this command. A letter too long for one load is cut,
+  and the cut names `moai inbox <id>` for the whole of it. An id or --all
+  shows a read letter again until
   `moai agents` sweeps it, mail_read_days after it was read (7 unless
   .moai/config.toml says otherwise; 0 keeps it for good). An unread letter is
   never swept. A letter marked returned is one you sent: its recipient left

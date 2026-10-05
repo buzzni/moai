@@ -1466,6 +1466,7 @@ fn deliver(
     let dir = crate::store::mail_at(root);
     let (lang, zone) = (ctx.lang(), ctx.zone());
     let (picked, left) = crate::hook::deliverable(&mine, room, lang, zone);
+    let left: Vec<String> = left.into_iter().map(|k| mine[k].id.clone()).collect();
     // 고른 차례(앞에서부터)대로 옮긴다. 받은 편지를 그대로 넘긴다 — 다시 베끼지 않는다. 한 통도 못 옮겼으면
     // [`crate::hook::letters`] 가 `None` 을 낸다.
     let taken: Vec<mail::Stored> = mine
@@ -1475,7 +1476,7 @@ fn deliver(
         .map(|(_, s)| s)
         .filter(|s| matches!(mail::take(&dir, s, &me.name), Ok(mail::Took::Mine)))
         .collect();
-    crate::hook::letters(&me.name, &taken, left, lang, zone, room)
+    crate::hook::letters(&me.name, &taken, &left, lang, zone, room)
 }
 
 /// 이 세션이 열릴 때 적어 둔 경고 수. 없으면 견줄 것이 없다.

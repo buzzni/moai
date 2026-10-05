@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:d31e15a8 -->
+<!-- moai:begin v:0.6.0 hash:b9cb3d1f -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -437,8 +437,8 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
-What counts is work inside the repository — `.moai/`, `.claude/`, `.worktrees/`, `target/`
-and anything outside the repository (scratchpad, temporary files) do not. Shell
+What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.worktrees/`,
+`target/` and anything outside the repository (scratchpad, temporary files) do not. Shell
 writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
 was not in the plan, create it with `moai add 'a title'` and pick that up.
 

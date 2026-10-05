@@ -4639,3 +4639,21 @@
 {"ts":"2026-10-05T14:22:37Z","id":"moai-9lvj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T14:22:37Z","id":"moai-bkn4.yo1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T14:22:37Z","id":"moai-bkn4.9no","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T15:34:13Z","id":"moai-m81b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai inbox <id> 도 출력 상한에서 가운데를 잃는다"}
+{"ts":"2026-10-05T15:34:15Z","id":"moai-kr16","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 규칙 2 가 .codex/ 편집을 아직 센다"}
+{"ts":"2026-10-05T15:34:16Z","id":"moai-cy19","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"inbox --ack 와 Stop 이 여러 통을 가지다 끊기면 앞 편지가 읽음으로 남는다"}
+{"ts":"2026-10-05T15:34:37Z","id":"moai-ktjz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"출석 쓰기의 자가 세 벌이다 — inbox 와 훅의 attend, hello"}
+{"ts":"2026-10-05T15:45:06Z","id":"moai-4qtw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 출석 쓰기의 차례와 겨루기에 진 일꾼의 되돌림. 이 창의 토큰은 모른다)"}
+{"ts":"2026-10-05T15:45:06Z","id":"moai-54yc.v70","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 훅이 싣는 편지 글과 inbox <id>, 여러 파일)"}
+{"ts":"2026-10-05T15:45:06Z","id":"moai-54yc.cq2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 훅 규칙 2 와 생성물)"}
+{"ts":"2026-10-05T15:45:06Z","id":"moai-54yc.spq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 문서 한 줄)"}
+{"ts":"2026-10-05T15:45:06Z","id":"moai-54yc.vqe","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 tokens=5885868 (max — 에픽 끝 리뷰: 포크 세션 620214 + 그 서브에이전트 5265654, 둘 다 완료 알림의 값)"}
+{"ts":"2026-10-05T15:45:16Z","id":"moai-4qtw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-05T15:45:16Z","id":"moai-54yc.v70","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-05T15:45:17Z","id":"moai-54yc.cq2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-05T15:45:17Z","id":"moai-54yc.spq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-05T15:45:17Z","id":"moai-54yc.vqe","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: put_back 이 같은 이름이 가진 편지를 되돌리던 것(mail::read_by), inbox <id> 가 그 id 의 파일만 열고 가린 것이 있으면 not_found 를 안 내는 것(mail::list_one), 규칙 2 의 글과 SKIP 을 매는 시험, 쓰기에서 죽이는 두 시험의 SIGXFSZ, 자른 표 시험의 셋째 편지, 저장소 밖 bad_id, CHANGELOG·wiki 의 --all 문장. 넘긴 것: 페이징은 멤버 moai-m81b, .codex 를 SKIP 에 더하는 것은 멤버 moai-kr16(둘 다 사용자 결정으로 에픽에 남겨 첫 칸), 여러 통을 가지다 끊기는 창은 idea moai-cy19(이 에픽 전부터, 릴리스 밖), 출석 쓰기의 자 세 벌은 idea moai-ktjz. 안 고친 드문 것: 그 틈의 프롬프트 훅 busy 는 초 단위라 못 가른다(주석), 두 함의 같은 id, 진 일꾼의 두 번 쓰기, --ack <id> 의 종료 코드가 겨루기 때에 따라 다른 것과 새로 가진 것과 다시 본 것이 JSON 에서 안 갈리는 것"}
+{"ts":"2026-10-05T15:45:31Z","id":"moai-54yc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 524fb4ab 로 4qtw·v70·cq2·spq 를 머지했다(리뷰 moai-54yc.vqe, max). 남은 멤버 둘은 리뷰 뒤에 사용자 결정으로 에픽에 세워 첫 칸에 둔다 — moai-m81b(inbox <id> 페이징: --from 같은 자리 깃발이냐 BODY_MAX 를 낮추느냐가 갈림길), moai-kr16(.codex 를 SKIP 에 더한다, 규칙 2 글·생성물·CHANGELOG 의 \"Codex's own .codex/ still counts\" 줄·docs/agents.md 와 함께). 에픽 끝 리뷰가 둘을 안 봤으니, 둘을 하는 창이 에픽 끝 리뷰를 다시 부른다(훅이라 max)"}
+{"ts":"2026-10-05T15:47:40Z","id":"moai-m81b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-05, 감독이 물음): 넘겨 보는 깃발로 고친다 — inbox <id> --from <n> 처럼 자리를 주어 이어 본다. 훅의 자른 표가 이어 볼 자리를 대고, 길면 출력 끝에 다음 자리를 말한다. send 의 64KB 계약과 이미 쓴 편지는 그대로 둔다(BODY_MAX 를 낮추지 않는다)"}
+{"ts":"2026-10-05T15:47:59Z","id":"moai-m81b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T15:48:00Z","id":"moai-kr16","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
