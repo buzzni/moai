@@ -28,7 +28,12 @@ does not tag — see `CONTRIBUTING.md`.
   `mail_read_days` after they were read — 7 unless `.moai/config.toml` says
   otherwise, `0` keeps them; an unread letter is never swept) — one
   `any-idle-worker` letter per call, as the hooks take them, so several spread
-  over the agents that wait — and `--wait <seconds>` waits for one to come. Who you are is `--as`, else
+  over the agents that wait — and `--wait <seconds>` waits for one to come.
+  `moai inbox <id>` shows one letter, read or not, a page of about 24 KB at a
+  time: the last line names `--from <n>` — characters of the body, counted
+  from 0 — for the next part, so an agent's own output cap (30,000 characters
+  in Claude Code, 10,000 tokens in Codex) does not cut its middle out.
+  `--json` gives the letter whole. Who you are is `--as`, else
   `MOAI_AGENT`, else the registered agent the command runs under. Codex runs
   every session's shell under one shared app-server, so there it is the row of
   the session id Codex sets in the shell (`CODEX_THREAD_ID`) — the row its hooks
@@ -109,7 +114,8 @@ does not tag — see `CONTRIBUTING.md`.
   holds the turn with them, and a session opened after a compaction gets them
   with what it was holding. A delivered letter is marked read; one load stays
   inside the 10,000 characters Claude Code carries per hook, cuts a letter too
-  long for it (naming `moai inbox <id>`, which shows that one letter whole),
+  long for it (naming `moai inbox <id> --from <n>`, which goes on from where
+  the cut fell),
   takes one `any-idle-worker` letter at a time and says how many are still
   waiting, naming the next one. A
   turn held by letters still gets the closing check. `PreToolUse`, `moai
@@ -173,8 +179,8 @@ does not tag — see `CONTRIBUTING.md`.
   most Codex gives them. The letters a Codex turn's end holds the turn with
   stay within 8,000 bytes, because Codex keeps that text to its default of
   about 2,500 tokens and no setting raises it — a longer letter is cut there,
-  naming `moai inbox <id>`, where Codex would have moved its middle into a
-  file. Antigravity has no prompt event, so its first model
+  naming `moai inbox <id> --from <n>` for the rest, where Codex would have
+  moved its middle into a file. Antigravity has no prompt event, so its first model
   call of a turn loads the board and the letters; a turn is held with
   `decision: continue`. Both carry the same 10,000 characters as Claude Code —
   measured whole on agy 1.2.16 and 1.2.17, up to a letter written entirely in
