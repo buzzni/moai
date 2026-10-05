@@ -12,3 +12,6 @@
 {"ts":"2026-10-05T23:15:00Z","id":"moai-zynt.own","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — init 쓰기 경로, 무시 파일 자리)"}
 {"ts":"2026-10-05T23:15:00Z","id":"moai-zynt.own","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"review"}
 {"ts":"2026-10-05T23:15:00Z","id":"moai-cbfz","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T23:19:04Z","id":"moai-cbfz","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — AGENTS.md 쓰기 경로와 낡음 판정)"}
+{"ts":"2026-10-05T23:19:04Z","id":"moai-cbfz","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-05T23:19:05Z","id":"moai-6pld","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
