@@ -357,11 +357,12 @@ is answered.
 
 **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
 (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository holds
-points out of the checkout. Waiting again will not open it, so do not run it again. The
-letters you send are refused the same way, so no worker hears from you either: tell the
+points out of the checkout or into `.git`. Waiting will not open it — do not run it again.
+The letters you send are refused the same way, so no worker hears from you either: tell the
 person watching this window (*Ask the person watching*) and stop. A report that comes with a
 line on the mailbox is still a report to check — that line is moai failing to mark it read,
-so the next wait shows the same letter again.
+so the next wait hands the same letter back at once. Check it once, then tell the person
+watching this window and stop rather than wait again.
 
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when

@@ -35,11 +35,12 @@ window, stop waiting and answer them.
    finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
    **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
    (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository
-   holds points out of the checkout. Waiting again will not open it, so do not run it again.
-   A letter to the supervisor is refused the same way: tell the person watching this window
-   (*Ask the person watching*) and stop. A letter that comes with a line on the mailbox is
-   still yours to do — that line is moai failing to mark it read, so the next wait shows the
-   same letter again.
+   holds points out of the checkout or into `.git` — and waiting again will not open it.
+   So do not run it again. A letter to the supervisor is refused the same way: tell the
+   person watching this window (*Ask the person watching*) and stop. A letter that comes with
+   a line on the mailbox is still yours to do — that line is moai failing to mark it read, so
+   the next wait hands the same letter back at once. Do it once, then tell the person watching
+   this window and stop rather than wait again — another wait is the same work twice.
    Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
    Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
    minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs

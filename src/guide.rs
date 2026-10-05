@@ -2062,11 +2062,12 @@ is answered.
 
 **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
 (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository holds
-points out of the checkout. Waiting again will not open it, so do not run it again. The
-letters you send are refused the same way, so no worker hears from you either: tell the
+points out of the checkout or into `.git`. Waiting will not open it — do not run it again.
+The letters you send are refused the same way, so no worker hears from you either: tell the
 person watching this window (*Ask the person watching*) and stop. A report that comes with a
 line on the mailbox is still a report to check — that line is moai failing to mark it read,
-so the next wait shows the same letter again.
+so the next wait hands the same letter back at once. Check it once, then tell the person
+watching this window and stop rather than wait again.
 
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when
@@ -2724,11 +2725,12 @@ window, stop waiting and answer them.
    finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
    **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
    (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository
-   holds points out of the checkout. Waiting again will not open it, so do not run it again.
-   A letter to the supervisor is refused the same way: tell the person watching this window
-   (*Ask the person watching*) and stop. A letter that comes with a line on the mailbox is
-   still yours to do — that line is moai failing to mark it read, so the next wait shows the
-   same letter again.
+   holds points out of the checkout or into `.git` — and waiting again will not open it.
+   So do not run it again. A letter to the supervisor is refused the same way: tell the
+   person watching this window (*Ask the person watching*) and stop. A letter that comes with
+   a line on the mailbox is still yours to do — that line is moai failing to mark it read, so
+   the next wait hands the same letter back at once. Do it once, then tell the person watching
+   this window and stop rather than wait again — another wait is the same work twice.
    Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
    Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
    minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
@@ -5202,6 +5204,11 @@ sys.exit(1 if bad else 0)
         assert!(wait[shut..].contains("do not run it again"), "감독이 못 연 우편함 앞에서 기다림을 다시 건다");
         assert!(wait[shut..].contains("*Ask the person watching*"), "감독이 못 연 우편함을 창의 사람에게 안 알린다");
         assert!(wait[shut..].contains("still a report to check"), "감독이 읽음 표시만 못 한 보고를 버린다");
+        // 읽음으로 못 옮긴 보고는 다음 기다림에 곧장 다시 온다 — 한 번 보고 사람에게 이른다(리뷰 moai-bkn4.d91 1번).
+        assert!(
+            wait[shut..].contains("stop rather than wait again"),
+            "감독이 읽음 표시 못 한 같은 보고를 되풀이해 기다린다"
+        );
         // 사람이 띄운 세션과만 통신한다 — 감독 글이 SendMessage 로 보내거나 기다리면 Claude 밖의 감독이 못 따른다.
         assert!(!supervise.contains("notify_when_idle"), "감독이 Claude 의 알림으로 기다린다");
         assert!(!supervise.contains("with `SendMessage`"), "감독이 Claude 의 SendMessage 로 보낸다");
@@ -5225,6 +5232,7 @@ sys.exit(1 if bad else 0)
             "편지를 받은 판에도 우편함 줄 하나로 멈춘다"
         );
         assert!(loop_[shut..].contains("still yours to do"), "읽음 표시만 못 한 편지를 버린다");
+        assert!(loop_[shut..].contains("the same work twice"), "일꾼이 읽음 표시 못 한 같은 일감을 두 번 한다");
         // 보고는 편지다 — 일꾼이 SendMessage 로 보고하면 Claude 밖의 감독에게 안 닿는다.
         assert!(brief.contains("moai send <supervisor> 'report: <epic>'"), "일꾼이 보고를 편지로 안 보낸다");
         assert!(!brief.contains("SendMessage"), "일꾼의 걸음이 Claude 의 SendMessage 에 기댄다");
