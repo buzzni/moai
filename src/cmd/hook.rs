@@ -176,29 +176,35 @@ fn decide(
     call: crate::hook::Call<'_>,
     line: &crate::hook::Line<'_>,
 ) -> Option<Decision> {
+    let cwd = std::env::current_dir().ok()?;
+    // **`Stop` 없이 끝난 턴은 출석만 적는다**(moai-u5wr.f29) — 트래커를 안 읽는다. `SessionEnd` 는 Claude 가 1.5초
+    // 안에 끝내라고 하고, 실을 글도 없다(셋 다 출력을 안 읽는다). **이벤트를 다 적어 가른다** — 새 이벤트를 더하면
+    // 컴파일러가 여기서 어느 쪽인지 묻는다. `matches!` 로 가르던 판은 아래 판정의 빈 갈래만 채우면 컴파일이 되어, 새 끝
+    // 이벤트가 트래커를 통째로 읽고 출석도 안 돌렸다.
+    //
+    // **설정도 안 읽는다 — 출석부가 선 뿌리만 찾는다**(moai-jzym.uxa). [`Repo`] 를 세우던 판은 루트의 `config.toml` 을
+    // 파싱했고, 거기 충돌 표시가 끼면 아래의 물러서는 길이 워크트리의 `.moai` 를 열어 루트의 장을 놓쳤다 — Codex 의
+    // `SessionEnd` 가 장을 안 걷고 `Interrupt` 가 `idle` 로 안 돌렸다. 그 길은 규칙을 위한 것이지 출석을 위한 것이 아니다.
+    match event {
+        Event::StopFailure | Event::Interrupt | Event::SessionEnd => {
+            rest(input, &Repo::tracker_root_from(&cwd)?, dialect, event);
+            return Some(Decision::Pass);
+        }
+        Event::SessionStart | Event::UserPromptSubmit | Event::PreToolUse | Event::Stop => {}
+    }
     // **옮겨 갈 루트를 못 읽어도 규칙은 선다**(리뷰 moai-71ht.i1u). 트래커가 루트로 옮겨 가면서
     // (moai-y7go) 루트의 깨진 `config.toml` 하나가 저장소의 **모든** 워크트리에서 훅을 조용히
     // 껐다 — 고장의 크기가 규칙의 크기가 되면 안 된다. `moai` 자신은 그 자리에서 크게 실패하고
     // (사람이 그것을 본다), 훅은 이 자리의 트래커로 선다. 읽는 것은 갈라진 스냅샷이지만 아무
     // 말도 안 하는 것보다 낫다.
-    let cwd = std::env::current_dir().ok()?;
+    //
     // **여기서는 말을 안 짓는다** — 못 찾은 것을 값으로만 가른다(moai-5j49). 훅은 화면이 아니라
     // 보드 한 덩이를 얹는 자리라, 찾기가 진 까닭을 사람에게 낼 일이 없다.
     let repo = match Repo::find(crate::i18n::Lang::default) {
         Ok(Some(repo)) => repo,
         Ok(None) | Err(_) => Repo::find_here(&cwd, crate::i18n::Lang::default).ok()??,
     };
-    // **`Stop` 없이 끝난 턴은 출석만 적는다**(moai-u5wr.f29) — 트래커를 안 읽는다. `SessionEnd` 는 Claude 가 1.5초
-    // 안에 끝내라고 하고, 실을 글도 없다(셋 다 출력을 안 읽는다). **이벤트를 다 적어 가른다** — 새 이벤트를 더하면
-    // 컴파일러가 여기서 어느 쪽인지 묻는다. `matches!` 로 가르던 판은 아래 판정의 빈 갈래만 채우면 컴파일이 되어, 새 끝
-    // 이벤트가 트래커를 통째로 읽고 출석도 안 돌렸다.
-    let load = match event {
-        Event::StopFailure | Event::Interrupt | Event::SessionEnd => {
-            rest(input, &repo, dialect, event);
-            return Some(Decision::Pass);
-        }
-        Event::SessionStart | Event::UserPromptSubmit | Event::PreToolUse | Event::Stop => repo.read().ok()?,
-    };
+    let load = repo.read().ok()?;
     // **못 읽은 줄을 그대로 넘긴다.** 빈 슬라이스를 넘기면 보드에서
     // `unreadable_line` 경고만 조용히 빠지는데, 그것은 실린 보드 말고는
     // 에이전트가 알아낼 길이 없는 유일한 경고다 — 기준선도 같은 만큼
@@ -237,7 +243,7 @@ fn decide(
             // 넘기면 그 편지는 아무에게도 안 실린다.
             let me = attendee(input, &repo, dialect);
             let status = me.as_ref().map(|p| p.status.clone()).filter(|s| !s.is_empty());
-            attend(&repo, me.clone(), status.as_deref().unwrap_or(mail::BUSY));
+            attend(&repo.agents_dir(), me.clone(), status.as_deref().unwrap_or(mail::BUSY));
             let letters =
                 me.as_ref().and_then(|p| deliver(&repo, p, ctx, crate::hook::letters_room(&carried), Mine::All));
             carried.then(|| letters.map_or(Decision::Pass, Decision::Context))
@@ -247,7 +253,7 @@ fn decide(
         // 실릴 수 있다. 첫 `UserPromptSubmit`·`Stop` 이 싣는다(2026-10-04 사용자 결정).
         Event::SessionStart => {
             write_baseline(input, &repo, &load.issues, &unreadable, ctx.zone());
-            attend(&repo, attendee(input, &repo, dialect), mail::IDLE);
+            attend(&repo.agents_dir(), attendee(input, &repo, dialect), mail::IDLE);
             Decision::Pass
         }
         Event::UserPromptSubmit => {
@@ -289,7 +295,7 @@ fn decide(
             // Antigravity 는 사람이 Esc 로 끊은 턴에 훅을 하나도 안 내 장이 `busy` 로 남는데, 상태가 같다고 그때를 두던 판은
             // `send --wake` 가 몇 시간 전에 끊긴 턴의 시각을 "그때부터 일하는 중" 으로 댔다 — 그 값을 댄 까닭과 거꾸로다.
             let me = attendee(input, &repo, dialect).map(|p| mail::Presence { since: String::new(), ..p });
-            attend(&repo, me.clone(), mail::BUSY);
+            attend(&repo.agents_dir(), me.clone(), mail::BUSY);
             // **Codex 세션에는 제 장의 이름을 댄다**(moai-u5wr.7xr) — 그 셸은 세션 모두가 함께 쓰는 데몬 밑에서 돌아 `moai` 가
             // 조상으로 이 세션을 못 찾는다. 보드와 함께 세션에 한 번 싣고, `hello`·`inbox`·`send` 는 그 이름을 `--as` 로 받는다.
             let board = match (&me, dialect) {
@@ -491,10 +497,10 @@ fn decide(
                 }
             };
             // 턴이 끝나면 논다 — 붙들었으면 아직 일하는 중이다.
-            attend(&repo, me, if decision.blocks() { mail::BUSY } else { mail::IDLE });
+            attend(&repo.agents_dir(), me, if decision.blocks() { mail::BUSY } else { mail::IDLE });
             decision
         }
-        // 위에서 이미 보냈다 — 트래커를 읽기 전이다.
+        // 위에서 이미 보냈다 — 트래커를 찾기 전이다.
         Event::StopFailure | Event::Interrupt | Event::SessionEnd => Decision::Pass,
     };
     Some(decision)
@@ -1338,14 +1344,18 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
 /// ([`attendee`]) `moai agents` 가 닻이 낡을 때까지 안 걷고, 끝난 세션 앞의 편지는 보낸 이에게 돌아가야 한다. Claude 의
 /// 장은 남긴다: `/clear` 도 `SessionEnd` 를 내는데 같은 프로세스가 곧 새 세션으로 그 장을 잇는다(`moai hello` 로 지은
 /// 이름과 역할이 거기 있다).
-fn rest(input: &Input, repo: &Repo, dialect: Dialect, event: Event) {
+///
+/// **받는 것은 트래커의 뿌리 하나다**(moai-jzym.uxa) — 설정을 안 읽은 자리다([`Repo::tracker_root_from`]). 드는 것은
+/// 출석부와 우편함뿐이라 [`Repo`] 를 받으면 그것을 세우는 값(루트의 `config.toml` 파싱)을 끝나는 세션마다 치르고,
+/// 그 파일이 깨진 날은 엉뚱한 출석부를 받는다.
+fn rest(input: &Input, root: &Path, dialect: Dialect, event: Event) {
     let Some(session) = input.session_id.as_deref().filter(|s| !s.trim().is_empty()) else { return };
-    let dir = repo.agents_dir();
+    let dir = crate::store::agents_at(root);
     let (all, _) = mail::presences(&dir);
     let Some(p) = all.into_iter().find(|p| p.session.as_deref() == Some(session)) else { return };
     if dialect == Dialect::Codex && event == Event::SessionEnd {
         if mail::forget(&dir, &p.name).is_ok() {
-            mail::retire(&repo.mail_dir(), &p.name);
+            mail::retire(&crate::store::mail_at(root), &p.name);
         }
         return;
     }
@@ -1357,13 +1367,13 @@ fn rest(input: &Input, repo: &Repo, dialect: Dialect, event: Event) {
     if p.status == mail::IDLE && !p.since.is_empty() && (event == Event::SessionEnd || !p.due(&model::now())) {
         return;
     }
-    attend(repo, Some(p), mail::IDLE);
+    attend(&dir, Some(p), mail::IDLE);
 }
 
 /// 출석을 이 상태로 적는다 — 상태가 바뀔 때만 `since` 를 새로 댄다(얼마나 놀았나를 `send --wake` 가 잰다). 닻도
 /// 적는다(moai-j3n5, moai-dhxm) — 훅이 돈 것이 곧 그 세션이 산 것이다. 못 적으면 조용히 지나간다 — 훅은 실패하지
 /// 않는다(머리글).
-fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
+fn attend(agents: &Path, presence: Option<mail::Presence>, status: &str) {
     let Some(mut p) = presence else { return };
     let now = model::now();
     if p.status != status || p.since.is_empty() {
@@ -1371,7 +1381,7 @@ fn attend(repo: &Repo, presence: Option<mail::Presence>, status: &str) {
         p.since = now.clone();
     }
     p.stamp(&now);
-    let _ = mail::write_presence(&repo.agents_dir(), &p);
+    let _ = mail::write_presence(agents, &p);
 }
 
 /// [`deliver`] 가 싣는 편지 — 이 세션에 온 것 모두, 아니면 남이 보낸 것만.

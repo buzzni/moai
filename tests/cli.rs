@@ -24944,6 +24944,44 @@ fn codex_attendance_follows_the_session_not_the_process() {
     assert_eq!(names_in(&agents), ["codex-02b207b4.json"], "닫힌 Codex 세션의 장이 남았다");
 }
 
+/// **끝 이벤트는 출석부만 찾는다 — 루트의 설정이 깨져도 루트의 장을 돌린다**(moai-jzym.uxa). `Interrupt`·`SessionEnd`
+/// 가 트래커를 통째로 세우던 판은 루트의 `config.toml` 을 파싱했고, 거기 충돌 표시가 끼면 규칙을 위해 둔 물러서는 길이
+/// 워크트리의 `.moai` 를 열었다 — 그 출석부에는 이 세션의 장이 없어, Codex 의 Esc 가 `idle` 로 안 돌리고 닫힌 세션의
+/// 장이 안 걷혔다.
+#[test]
+fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
+    let s = Scratch::new("hook-end-rootcfg");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    git(&main, &["worktree", "add", "-q", ".worktrees/feat", "-b", "feat"]);
+    let inside = main.join(".worktrees/feat");
+    let (here, there) = (s.path().display().to_string(), inside.display().to_string());
+    let codex = |event: &str, rel: &str| {
+        let input = recorded(&s, rel).replace(&here, &there);
+        assert!(input.contains(&there), "시험이 자리를 워크트리로 못 옮겼다");
+        hook_argv(&s, &inside, None, &[], &["hook", event, "--dialect", "codex"], &input);
+    };
+    codex("session-start", "codex/session-start.json");
+    let agents = main.join(".moai/agents");
+    assert_eq!(names_in(&agents), ["codex-01a107b4.json"], "워크트리의 세션이 루트에 장을 안 세웠다");
+    let card = || std::fs::read_to_string(agents.join("codex-01a107b4.json")).unwrap();
+    codex("user-prompt-submit", "codex/user-prompt-submit.json");
+    assert!(card().contains("\"status\":\"busy\""), "{}", card());
+
+    // 루트의 설정을 깨뜨린다 — 병합 자국 한 줄이면 된다. 워크트리의 설정은 멀쩡하다.
+    let cfg = main.join(".moai/config.toml");
+    let was = std::fs::read_to_string(&cfg).unwrap();
+    std::fs::write(&cfg, format!("<<<<<<< HEAD\n{was}")).unwrap();
+    codex("interrupt", "codex/interrupt.json");
+    assert!(card().contains("\"status\":\"idle\""), "깨진 루트 설정 하나로 Esc 가 출석을 못 돌렸다 — {}", card());
+    codex("session-end", "codex/session-end.json");
+    assert!(names_in(&agents).is_empty(), "깨진 루트 설정 하나로 닫힌 Codex 세션의 장이 남았다");
+}
+
 /// **`SessionStart` 가 안 돈 세션도 턴 머리에서 기준선을 얻는다**(리뷰 moai-u5wr.e74) — 첫 프롬프트 뒤에 `/hooks` 에서
 /// 믿어 준 Codex 세션은 그 이벤트가 이미 지나갔다. 기준선이 없으면 그 세션은 경고를 아무리 늘려도 `Stop` 이 안 붙든다.
 #[test]

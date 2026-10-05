@@ -212,6 +212,17 @@ pub(crate) fn here_wanted() -> bool {
     matches!(v.as_deref(), Some("1" | "true" | "yes" | "on"))
 }
 
+/// 트래커 뿌리 `root` 의 우편함 — [`Repo::mail_dir`] 가 이것이다. [`Repo`] 를 안 세우는 자리(훅의 끝 이벤트,
+/// [`Repo::tracker_root_from`])가 같은 자리를 짚게 한 곳에 둔다.
+pub fn mail_at(root: &Path) -> PathBuf {
+    root.join(".moai").join("mail")
+}
+
+/// 트래커 뿌리 `root` 의 출석부 — [`Repo::agents_dir`] 가 이것이다([`mail_at`] 과 같은 까닭).
+pub fn agents_at(root: &Path) -> PathBuf {
+    root.join(".moai").join("agents")
+}
+
 /// 읽다가 만난 잘못된 줄. **한 줄이 깨졌다고 파일을 통째로 거부하지 않는다** —
 /// 거부하면 무엇이 잘못됐는지 볼 방법까지 같이 사라진다.
 #[derive(Debug)]
@@ -471,6 +482,17 @@ impl Repo {
         Repo::redirect(dir).unwrap_or_else(|| dir.to_path_buf())
     }
 
+    /// [`Repo::find_from`] 이 읽을 트래커의 **뿌리만** — 설정도 스냅샷도 안 읽는다. 못 찾으면 `None` 이다.
+    ///
+    /// 훅의 끝 이벤트(`StopFailure`·`Interrupt`·`SessionEnd`)가 쓴다(moai-jzym.uxa) — 거기 드는 것은 출석부와 우편함
+    /// 디렉터리뿐이다([`agents_at`]·[`mail_at`]). [`Repo`] 를 통째로 세우면 루트의 `config.toml` 을 파싱하고, 거기 충돌
+    /// 표시 하나가 끼면 훅이 물러서는 길([`Repo::find_here`])이 워크트리의 `.moai` 를 열어 루트의 장을 놓친다 — Codex 의
+    /// `SessionEnd` 가 장을 안 걷고 `Interrupt` 가 `idle` 로 안 돌렸다. 옮겨 가는 자는 [`Repo::find_from`] 과 같은
+    /// [`Repo::redirect`] 다 — 갈라 두면 한쪽만 `MOAI_HERE` 를 본다.
+    pub fn tracker_root_from(dir: &Path) -> Option<PathBuf> {
+        Repo::found_root(dir).map(|found| Repo::opened_root(&found))
+    }
+
     /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
     /// 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
     fn found_root(dir: &Path) -> Option<PathBuf> {
@@ -609,11 +631,11 @@ impl Repo {
     /// 우편함 — `.moai/mail/`(moai-h8tn). **트래커의 뿌리에 선다** — 딸린 워크트리에서 부른 것도 루트로
     /// 옮겨 간 [`Repo::root`] 밑이라, 저장소의 모든 세션이 한 우편함을 본다. 그 안의 꼴은 [`crate::mail`] 이 든다.
     pub fn mail_dir(&self) -> PathBuf {
-        self.dir().join("mail")
+        mail_at(&self.root)
     }
     /// 출석부 — `.moai/agents/`(moai-h8tn). [`Repo::mail_dir`] 와 같은 자리에 선다.
     pub fn agents_dir(&self) -> PathBuf {
-        self.dir().join("agents")
+        agents_at(&self.root)
     }
     pub fn issues_path(&self) -> PathBuf {
         self.dir().join("issues.jsonl")
