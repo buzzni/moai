@@ -276,8 +276,8 @@ gets through — run it as given. None of them waits on a person except rule 5.
    (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
    a shell write (`>`, `>>`, `sed -i`, `tee`) to a file in the checkout needs a
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
-   the plan. Not counted: `.moai/`, `.claude/`, `.worktrees/`, `.git/`,
-   `target/`, `node_modules/`, and anything outside the repository
+   the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.worktrees/`,
+   `.git/`, `target/`, `node_modules/`, and anything outside the repository
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what
@@ -309,6 +309,7 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
     moai send <agent> '<subject>' -b -       leave a letter, the body from stdin
     moai send any-idle-worker '<subject>'    one agent takes it, not you or a supervisor
     moai inbox --ack                         the letters for you, marked read
+    moai inbox <id>                          one letter, read or not
     moai inbox --ack --wait 600              wait up to ten minutes for one
 
 - **A letter is delivery, not record.** Nothing goes into `issues.jsonl` or the
@@ -354,13 +355,14 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   words only
 - **The hooks deliver.** With the hooks installed an agent rarely runs
   `moai inbox`: each prompt and each turn's end load the letters for that session
-  and mark them read — `moai inbox --all` shows them again until `moai agents`
-  sweeps them, a week after they were read (`mail_read_days` in
-  `.moai/config.toml`; `0` keeps them). A letter nobody has read is never swept.
-  One load stays inside the 10,000 characters Claude Code carries per hook —
-  the board included, on the first prompt — and says how many still wait; a
-  letter too long for that is cut there, naming `moai inbox --all` for the
-  rest. A Codex turn's end carries less: Codex holds the text that keeps a
+  and mark them read — `moai inbox <id>` shows one again and `moai inbox --all`
+  all of them, until `moai agents` sweeps them, a week after they were read
+  (`mail_read_days` in `.moai/config.toml`; `0` keeps them). A letter nobody has
+  read is never swept. One load stays inside the 10,000 characters Claude Code
+  carries per hook — the board included, on the first prompt — and says how
+  many still wait, naming the next one for `moai inbox <id> --ack`; a letter too
+  long for that is cut there, naming `moai inbox <id>` for the whole of it. A
+  Codex turn's end carries less: Codex holds the text that keeps a
   turn going to its default of about 2,500 tokens, which
   `additionalContextLimit` does not raise, so there one load stays within
   8,000 bytes, the lines around the letter included — a letter of about 2,400
@@ -556,4 +558,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-54yc
