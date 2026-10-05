@@ -4572,3 +4572,6 @@
 {"ts":"2026-10-05T09:57:33Z","id":"moai-kxkw.7ky","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T09:57:34Z","id":"moai-kxkw.68i","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-05T09:57:34Z","id":"moai-kxkw.my1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T09:57:59Z","id":"moai-2rby","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 의 닫기 물음을 붙드는 칸의 자리로 잰다"}
+{"ts":"2026-10-05T09:58:16Z","id":"moai-dp35.gag","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 뒤에서 도는 중이다(@code-review). 돌아오면 고침을 커밋하고 7-1~12 로 간다"}
+{"ts":"2026-10-05T09:59:10Z","id":"moai-a2y1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사용자 결정(2026-10-05): 닫는다 — 다른 일이 이 갈림길을 이미 풀었다. moai-snyk 가 깨우기를 덤으로 낮추고 codex queue 길을 걷었다(mail::wake 는 tmux 칸이 적힌 장이면 벤더를 안 가리고 치고, Claude 는 SendMessage 를 댄다). moai-u5wr·moai-jzym 의 Codex·Antigravity 훅이 idle·busy 와 session 을 적고, moai-ew4o(7xr)가 Codex 장을 CODEX_THREAD_ID 로 찾는다. Fable 이 묶음안을 짜며 src/mail.rs 의 wake 와 cmd/hook.rs 의 attendee 로 확인했다"}
