@@ -1223,7 +1223,7 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
     // 이어 쓰는 장을 `MOAI_AGENT` 의 이름으로 옮긴다 — 옮길 수 없으면 그대로다.
     let renamed = |p: mail::Presence| match asked.as_deref() {
         Some(want) if want != p.name && !held_by_other(want, &p.name) => {
-            mail::take_over(&mail_dir, &all, want);
+            mail::take_over(&mail_dir, &all, want, Some(&p.name));
             let moved = mail::Presence { name: want.to_string(), ..p.clone() };
             match mail::rename_card(&dir, &mail_dir, &moved, &p.name) {
                 Ok(()) => moved,
@@ -1241,7 +1241,7 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
     // 새 장의 뼈대 — 이름·벤더·프로세스·tmux 칸만 갈린다. 넘겨받는 이름이면 그 함부터 비운다.
     let fresh =
         |name: String, vendor: &str, pid: u32, pid_start: Option<u64>, tmux: (Option<String>, Option<String>)| {
-            mail::take_over(&mail_dir, &all, &name);
+            mail::take_over(&mail_dir, &all, &name, None);
             mail::Presence {
                 v: mail::VERSION,
                 name,
@@ -1283,8 +1283,13 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
     };
     let tmux = mail::Presence::tmux_here();
     if let Some(p) = found.or_else(|| all.iter().find(|p| p.runs_as(&agent))) {
+        // **`MOAI_AGENT` 가 이른 장은 걷어도 그 함을 안 비운다**(리뷰 moai-ew4o.q9f) — 그 이름은 세션이 아니라 이 창의 것이라,
+        // 이 창이 다른 세션을 이어 써도(`/resume`) 그 이름 앞의 편지는 이 창의 몫이다. 비우던 판은 떠나지도 않은 창의 편지를
+        // 보낸 이에게 "읽기 전에 떠났다" 로 되돌렸다. 이어 쓰는 장은 다음 훅의 `renamed` 가 그 이름으로 옮기고 편지를 합친다
+        // — 이 판의 출석부(`all`)에는 걷은 장이 아직 산 것으로 서 있어 지금은 못 옮긴다.
         for other in all.iter().filter(|o| o.name != p.name && o.runs_as(&agent)) {
-            if mail::forget(&dir, &other.name).is_ok() {
+            let windows = asked.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(&other.name));
+            if mail::forget(&dir, &other.name).is_ok() && !windows {
                 mail::retire(&mail_dir, &other.name);
             }
         }

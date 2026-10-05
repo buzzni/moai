@@ -2296,8 +2296,9 @@ Options:
   Who sends is --as, else MOAI_AGENT, else the registered agent this command
   runs under (`moai hello`). With none of them it stops - a letter with no
   sender cannot be answered. A Codex shell is found by the session id Codex
-  sets in it (CODEX_THREAD_ID); without one, pass --as with the name its
-  hooks gave the session.
+  sets in it (CODEX_THREAD_ID) and never by MOAI_AGENT, which that shell
+  inherits from the app-server all its sessions share; without the id, pass
+  --as with the name its hooks gave the session.
   The body holds up to 64 KB, the subject one line of up to 200 characters.
 
   **Waking is a bonus.** The way a worker gets its letters is waiting for them
@@ -2361,7 +2362,7 @@ Options:
 
   Who you are is --as, else MOAI_AGENT, else the registered agent this
   command runs under (`moai hello`) - in Codex, the row of the session id
-  Codex sets in its shell (CODEX_THREAD_ID).
+  Codex sets in its shell (CODEX_THREAD_ID); MOAI_AGENT is not read there.
 
   --json gives {"me","letters":[{"id","read","returned","v","to",
   "from","subject","body","sent_at","reply_to"}],"lost":[ids]}. Keys a
@@ -2438,14 +2439,19 @@ Options:
   under - found among its parents by name (claude, agy), or --pid. The
   vendor defaults to what that name says. The name defaults to MOAI_AGENT,
   then to the one this agent already has here, then to the session name
-  Claude Code shows, then to <vendor>-<pid>. Saying hello again updates the
-  row; a new --name replaces the old one and carries its letters along.
+  Claude Code shows, then to <vendor>-<pid>. MOAI_AGENT names the window it
+  is set in, so it is not read for a row named by --pid or --as. Saying
+  hello again updates the row; a new --name replaces the old one and
+  carries its letters along.
 
   Codex runs its shell under an app-server all its sessions share, so moai
   tells its sessions apart by the id Codex sets in the shell
   (CODEX_THREAD_ID): hello takes up the row its hooks wrote for that
-  session, or writes the one they would. Without that id, pass --as with the
-  row its hooks gave the session (named in its first context), or --name.
+  session, or writes the one they would. MOAI_AGENT is not read there - the
+  shell inherits it from the app-server. Without that id, pass --as with the
+  row its hooks gave the session (named in its first context), and --name
+  with it to rename that row. --name alone writes a row the hooks never
+  read, so it is only for a Codex whose hooks do not run.
   --as takes up a row already standing under that name, keeping its process
   and session.
 

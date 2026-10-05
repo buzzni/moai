@@ -1067,10 +1067,10 @@
   "refuse.agents_no_parent": "Could not find the process this command runs under - pass `--pid`",
   "refuse.agents_told_name": "MOAI_AGENT names this window {told} - `moai send`, `moai inbox` and the hooks go by that name, so --name {name} would not hold. Pass --name {told}, or unset MOAI_AGENT",
   "refuse.agents_no_card": "No agent named {name} is registered here - `moai agents` lists who is. To register under a new name, pass --name",
-  "refuse.agents_codex_who": "Codex did not say which session this shell belongs to (no CODEX_THREAD_ID), and its shell runs under an app-server all its sessions share. Pass --as <name>: the row its hooks gave this session (`codex-` and eight characters, named in the session's first context), or --name <a name of your own>",
+  "refuse.agents_codex_who": "Codex did not say which session this shell belongs to (no CODEX_THREAD_ID), and its shell runs under an app-server all its sessions share. Pass --as <name> with the row its hooks gave this session (`codex-` and eight characters, named in the session's first context), and --name <new> with it to rename that row. --name alone writes a second row the hooks never read - only for a Codex whose hooks do not run",
   "refuse.agents_name_taken": "{name} is already taken by a running agent (pid {pid}) - pick another --name",
   "hook.you_are": "This Codex session is `{name}` in `moai agents`. If `moai` says it cannot tell who you are, pass `--as {name}` to `moai hello`, `moai inbox` and `moai send`.",
   "hook.letters": "Letters for {me} ({n}). They are marked read now - `moai inbox --all --as {me}` shows them again. Answer one with `moai send <from> '<subject>' --reply-to <id> --as {me} -b -`; a decision still goes on its issue as a note.",
-  "hook.letters_left": "{n} more are waiting - `moai inbox --ack` reads them, or the next turn loads them.",
-  "hook.letter_cut": "[Cut here to fit the 10,000 characters a hook can load - `moai inbox --all` shows the whole letter]"
+  "hook.letters_left": "{n} more are waiting - `moai inbox --ack --as {me}` reads them, or the next turn loads them.",
+  "hook.letter_cut": "[Cut here to fit the 10,000 characters a hook can load - `moai inbox --all --as {me}` shows the whole letter]"
 }

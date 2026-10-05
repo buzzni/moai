@@ -30,8 +30,9 @@ does not tag — see `CONTRIBUTING.md`.
   `MOAI_AGENT`, else the registered agent the command runs under. Codex runs
   every session's shell under one shared app-server, so there it is the row of
   the session id Codex sets in the shell (`CODEX_THREAD_ID`) — the row its hooks
-  wrote; a Codex that does not set it passes `--as` with the name the hooks give
-  the session in its first context.
+  wrote — and never `MOAI_AGENT`, which that shell inherits from the shared
+  app-server; a Codex that does not set it passes `--as` with the name the
+  hooks give the session in its first context.
   **Nothing goes into `issues.jsonl` or the journal** — a letter is delivery,
   not record, and the mailbox follows the tracker into the main checkout, so
   every session of a repository sees one mailbox. There is no lock: sending
@@ -56,7 +57,8 @@ does not tag — see `CONTRIBUTING.md`.
   Antigravity sends no hook at all, so that row stays busy until the next
   prompt. `StopFailure` needs Claude Code 2.1.78 or later — an older `claude`
   refuses the plugin's hooks as a whole. A window that sets `MOAI_AGENT` is
-  registered under that name, by the hooks and `moai hello` alike. In Codex,
+  registered under that name, by the hooks and `moai hello` alike (not a row
+  `moai hello --pid` or `--as` names, and not a Codex window). In Codex,
   `moai hello` takes up the row the session's hooks wrote, found by
   `CODEX_THREAD_ID` (or named with `--as`), or writes the one they would; it
   never ties a row to the app-server's process or the tmux pane it was started

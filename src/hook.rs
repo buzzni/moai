@@ -278,6 +278,10 @@ pub fn deliverable(
 ///
 /// **글은 `room` 을 안 넘는다**([`CONTEXT_CAP`]) — 넘치는 편지는 그 자리에서 자르고, 편지 전체를 다시 볼 길을 댄다.
 /// 머리 줄과 남은 수는 자르지 않는다.
+///
+/// **내미는 명령은 모두 `--as <나>` 를 단다**(리뷰 moai-ew4o.q9f) — 셸에서 제 장을 못 찾는 세션(`CODEX_THREAD_ID` 가
+/// 없는 Codex)이 맨 `moai inbox` 를 치면 누구인지 몰라 멈춘다. 머리 줄만 달고 남은 수·자른 자리의 줄은 안 달던 판은
+/// 한 덩이 안에서 두 길을 댔다.
 pub fn letters(
     me: &str,
     delivered: &[crate::mail::Stored],
@@ -291,14 +295,14 @@ pub fn letters(
     }
     let head = fill(say(lang, "hook.letters"), &[("me", me), ("n", &delivered.len().to_string())]);
     let tail = if left > 0 {
-        format!("\n\n{}", fill(say(lang, "hook.letters_left"), &[("n", &left.to_string())]))
+        format!("\n\n{}", fill(say(lang, "hook.letters_left"), &[("n", &left.to_string()), ("me", me)]))
     } else {
         String::new()
     };
     let mut body: String = delivered.iter().map(|s| letter_block(lang, zone, s)).collect();
     let fits = room.saturating_sub(units(&head) + units(&tail));
     if units(&body) > fits {
-        let cut = format!("\n{}", say(lang, "hook.letter_cut"));
+        let cut = format!("\n{}", fill(say(lang, "hook.letter_cut"), &[("me", me)]));
         body = format!("{}{cut}", cut_to(&body, fits.saturating_sub(units(&cut))));
     }
     Some(format!("{head}{body}{tail}"))
@@ -6411,21 +6415,24 @@ pub fn guard_shell_in(
 /// 이름과 역할을 바꾼다. CLI 는 둘을 못 가르고 훅의 입력에만 `agent_id` 가 선다 — 그래서 훅이 막는다(부르는 쪽이
 /// `agent_id` 를 본 뒤에만 부른다).
 ///
-/// - **`--as` 를 준 부름은 지나간다** — 그 이름으로 일한다고 스스로 댄 것이다
-/// - **편지를 보기만 하는 `moai inbox` 와 `send` 는 지나간다** — 읽음으로 안 옮기고 장을 안 바꾼다
+/// - **`--as` 를 준 부름은 지나간다** — 그 이름으로 일한다고 스스로 댄 것이다. `inbox` 앞에 댄 `MOAI_AGENT=…` 도
+///   그렇다(`who` 가 그 이름으로 돈다) — `hello` 앞의 것은 아니다: 그 이름으로 부모의 장을 옮긴다
+/// - **편지를 보기만 하는 `moai inbox` 와 `send`, 도움말은 지나간다** — 읽음으로 안 옮기고 장을 안 바꾼다
+/// - **자리를 안 가린다**(리뷰 moai-ew4o.q9f) — 부모의 이름으로 도는 것은 어느 트래커를 겨누든 같다. 자리를 모르는 토막을
+///   건너뛰는 [`moai_args`] 로 찾던 판은 `env -C <저장소> moai inbox --ack` 를 그대로 보냈다
 /// - **규칙 번호를 안 단다** — 다섯 규칙이 지키는 일과 사람의 자리가 아니라 우편함의 거절이다. Codex·Antigravity 는 그런
 ///   입력이 없어 글로만 선다
 pub fn guard_subagent_mail(line: &Line<'_>) -> Decision {
     for seg in line.used() {
-        let Some(args) = moai_args(seg) else { continue };
+        let Some(args) = moai_flagged(&seg.words) else { continue };
         let flags: Vec<&str> = flag_words(args).collect();
         let has = |f: &str| flags.iter().any(|w| *w == f || w.strip_prefix(f).is_some_and(|v| v.starts_with('=')));
         let acts = match positionals(args).first() {
             Some(&"hello") => true,
-            Some(&"inbox") => has("--ack") || has("--wait"),
+            Some(&"inbox") => (has("--ack") || has("--wait")) && env_prefix(seg, "MOAI_AGENT=").is_none(),
             _ => false,
         };
-        if acts && !has("--as") {
+        if acts && !has("--as") && !asks_help(args) {
             return Decision::Deny(crate::guide::SUBAGENT_MAIL.to_string());
         }
     }
@@ -7688,11 +7695,17 @@ fn take_in(
 /// `--user` 다음으로 읽는 사람이다(`model::actor`). **빈 값은 없는 것이다** — `model::actor` 가 그렇게 읽는다.
 /// 명령 자리 앞에서만 찾는다: 뒤의 `MOAI_ACTOR=…` 는 `moai` 의 인자다.
 fn actor_prefix(seg: &Seg) -> Option<String> {
+    env_prefix(seg, "MOAI_ACTOR=")
+}
+
+/// 토막의 명령 자리 앞에 붙인 `<이름>=…` 의 값(`key` 는 `=` 까지다) — [`actor_prefix`] 와 [`guard_subagent_mail`] 의
+/// `MOAI_AGENT=…` 가 한 자로 읽는다. 빈 값은 없는 것이다.
+fn env_prefix(seg: &Seg, key: &str) -> Option<String> {
     let head = seg.words.len() - command_of(&seg.words).len();
     seg.words[..head]
         .iter()
         .rev()
-        .find_map(|w| w.strip_prefix("MOAI_ACTOR="))
+        .find_map(|w| w.strip_prefix(key))
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
@@ -14702,7 +14715,11 @@ mod tests {
         let said = letters("w1", std::slice::from_ref(&big), 1, Lang::En, &utc, CONTEXT_CAP).unwrap();
         assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다 — {}", said.encode_utf16().count());
         assert!(said.contains("s-20261004-061203-00000001") && said.contains("moai inbox --all"), "{said}");
-        assert!(said.ends_with(&fill(say(Lang::En, "hook.letters_left"), &[("n", "1")])), "남은 수를 잘랐다");
+        assert!(
+            said.ends_with(&fill(say(Lang::En, "hook.letters_left"), &[("n", "1"), ("me", "w1")])),
+            "남은 수를 잘랐다"
+        );
+        assert!(said.contains("moai inbox --all --as w1"), "자른 자리의 줄이 `--as` 를 안 달았다 — {said}");
         // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다.
         let board = Decision::Context("b".repeat(CONTEXT_CAP - 100));
         assert_eq!(pick(std::slice::from_ref(&small), letters_room(&board)), (vec![], 0));

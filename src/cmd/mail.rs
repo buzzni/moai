@@ -57,7 +57,7 @@ struct Inbox<'a> {
 pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     let to = args.to.trim().to_string();
-    if !mail::is_name(&to) {
+    if !mail::is_recipient(&to) {
         return Err(bad_name(ctx.lang(), &to));
     }
     let subject = args.subject.trim().to_string();
@@ -263,7 +263,8 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
 ///
 /// **없는 장은 안 세운다** — 등록은 `hello` 와 훅의 일이다. `--as` 로 남의 이름을 대도 그 이름의 장을 고친다: 그
 /// 이름으로 편지를 가지는 것이 곧 그 에이전트로 일하는 것이다. 상태가 같으면 안 쓴다 — `since` 가 "얼마나
-/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). **빈 `since` 는 채운다** — 훅의 `attend` 와 같은
+/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). 프로세스를 모르는 장의 닻만은 때가 되었으면 적는다
+/// ([`mail::Presence::due`]). **빈 `since` 는 채운다** — 훅의 `attend` 와 같은
 /// 자다. 빈 글은 가장 앞에 서서, 그대로 두면 `send --wake` 가 그 장을 가장 오래 논 일꾼으로 고른다(리뷰
 /// moai-snyk.nic). 못 적으면 조용히 지나간다 — 출석은 기록이 아니라 지금의 표다([`mail::write_presence`]).
 fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
@@ -271,12 +272,18 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     // 기다리기 직전·직후에 다시 읽는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다.
     let (agents, _) = mail::presences(&dir);
     let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
-    if p.status == status && !p.since.is_empty() {
+    let now = crate::model::now();
+    let changed = p.status != status || p.since.is_empty();
+    // **상태가 같아도 프로세스를 모르는 장(Codex)의 닻은 때가 되었으면 적는다**(리뷰 moai-ew4o.q9f) — 편지가 이미 와 있어
+    // 기다림 없이 끝난 `inbox --ack --wait` 는 `busy` 를 `busy` 로 적어 아무것도 안 썼고, 그 일꾼의 닻은 그 앞의 인사에
+    // 머물렀다. 훅이 안 도는 Codex 일꾼은 그만큼 일찍 걷혔다.
+    if !changed && !p.due(&now) {
         return;
     }
-    let now = crate::model::now();
-    p.status = status.to_string();
-    p.since = now.clone();
+    if changed {
+        p.status = status.to_string();
+        p.since = now.clone();
+    }
     if p.pid == 0 {
         p.seen = Some(now);
     }
@@ -290,8 +297,7 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
 /// 모른다. 사람을 묻는 쓰기가 "누군지 모르면 멈춘다" 와 같은 결이다(CLAUDE.md). 준 이름이 꼴이 아니어도
 /// 멈춘다 — 그 이름이 파일 이름이 된다.
 fn who(ctx: &Ctx, given: Option<&str>, agents: &[Presence]) -> R<String> {
-    let told = given.map(str::to_string).or_else(|| std::env::var("MOAI_AGENT").ok().filter(|v| !v.trim().is_empty()));
-    if let Some(name) = told {
+    if let Some(name) = given {
         let name = name.trim().to_string();
         return if mail::is_agent_name(&name) { Ok(name) } else { Err(bad_name(ctx.lang(), &name)) };
     }
@@ -299,6 +305,10 @@ fn who(ctx: &Ctx, given: Option<&str>, agents: &[Presence]) -> R<String> {
     let refused = || Fail::coded(say(ctx.lang(), "refuse.mail_who"), code::NO_ACTOR);
     // **Codex 는 세션 id 로 찾는다**(moai-u5wr.7xr) — 그 셸의 조상은 세션 모두가 함께 쓰는 데몬이라 프로세스로는 이 세션을
     // 못 가른다. Codex 가 셸에 세우는 그 세션의 id 가 훅이 장에 적은 세션과 같다([`mail::codex_session`]). 없으면 `--as` 다.
+    //
+    // **`MOAI_AGENT` 보다 먼저 본다**(리뷰 moai-ew4o.q9f) — 그 셸의 환경은 데몬의 것이라, 첫 창이 데몬을 띄울 때 든
+    // `MOAI_AGENT` 가 모든 Codex 창에 선다. 그것을 먼저 읽던 판은 둘째 창의 `inbox --ack` 가 첫 창의 편지를 가져갔다 —
+    // 훅도 Codex 에서는 그 값을 안 읽는다(`attendee`).
     if matches!(mail::agent_among(&ancestors), Some((_, "codex"))) {
         let session = mail::codex_session().ok_or_else(refused)?;
         return agents
@@ -307,7 +317,21 @@ fn who(ctx: &Ctx, given: Option<&str>, agents: &[Presence]) -> R<String> {
             .map(|p| p.name.clone())
             .ok_or_else(refused);
     }
+    if let Some(name) = told_name(ctx.lang())? {
+        return Ok(name);
+    }
     mail::me_among(agents, &ancestors).map(|p| p.name.clone()).ok_or_else(refused)
+}
+
+/// `MOAI_AGENT` — 이 창의 이름(moai-ew4o.e1m). 비었으면 없는 것이고, 꼴이 아니면 멈춘다 — 그 이름이 파일 이름이 된다
+/// (`who` 와 `hello` 가 한 자로 잰다 — `hello` 만 말없이 넘기던 판은 인사는 지나가고 그 창의 `inbox` 가 멈췄다).
+///
+/// **부르는 쪽이 Codex 셸이 아닐 때만 부른다** — 그 환경은 세션 모두가 함께 쓰는 데몬의 것이다(moai-sile).
+pub(super) fn told_name(lang: Lang) -> R<Option<String>> {
+    match std::env::var("MOAI_AGENT").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+        Some(name) if !mail::is_agent_name(&name) => Err(bad_name(lang, &name)),
+        told => Ok(told),
+    }
 }
 
 /// 이름이 될 수 없는 글 — 무엇이 되는지를 함께 댄다.

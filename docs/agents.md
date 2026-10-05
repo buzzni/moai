@@ -311,8 +311,11 @@ one file in its recipient's box (`.moai/mail/<name>/`, and
   characters of its session id. `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
   `moai send` and `moai inbox` know who you are from `--as`, `MOAI_AGENT`, or the
   registered agent they run under. A window that sets `MOAI_AGENT` is registered
-  under that name by its hooks and by `moai hello` alike. A Codex session is found
-  by the session id Codex sets in its shell ([Codex](#codex))
+  under that name by its hooks and by `moai hello` alike — but `moai hello --pid`
+  and `--as` name another window's row, so they leave it out. A Codex session is
+  found by the session id Codex sets in its shell ([Codex](#codex)), never by
+  `MOAI_AGENT`: its shell and its hooks carry the environment of the app-server
+  all its sessions share
 - **`any-idle-worker`** is a recipient, not a name: the first agent that is
   neither the sender nor registered as a `supervisor` (`moai hello --role
   supervisor`) to take the letter keeps it. A hook takes one such letter per
@@ -468,9 +471,13 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **`moai hello` in Codex says it cannot tell which session this is.** That
   Codex set no `CODEX_THREAD_ID` in its shell. Pass `--as` with the row its hooks
   gave the session — the name in its first context, also in `moai agents` as
-  `codex-` and eight characters — or `--name` for one of your own
-- **A subagent's `moai inbox --ack` was refused.** It would have taken its
-  parent session's letters. Leave the letters to the parent, or pass `--as` with
-  a name of the subagent's own
+  `codex-` and eight characters — and `--name` beside it to rename that row.
+  `--name` alone writes a second row the hooks never read, so a supervisor's own
+  turn end would take its `any-idle-worker` letters; it is only for a Codex whose
+  hooks do not run
+- **A subagent's `moai inbox --ack` or `moai hello` was refused.** It would have
+  taken its parent session's letters or rewritten its row. Leave the mailbox to
+  the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
+  and `moai send` — a subagent does not say `moai hello`
 
 Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o

@@ -120,17 +120,6 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             return Err(super::mail::bad_name(lang, name));
         }
     }
-    // **`MOAI_AGENT` 가 이 창의 이름이다**(moai-ew4o.e1m) — `send`·`inbox` 가 그 이름으로 돌고 훅도 그 이름으로 장을 세운다.
-    // 다른 `--name` 은 다음 훅이 도로 옮기니 받지 않는다.
-    let told = std::env::var("MOAI_AGENT").ok().map(|v| v.trim().to_string()).filter(|v| mail::is_agent_name(v));
-    if let (Some(name), Some(told)) = (args.name.as_deref(), told.as_deref())
-        && name != told
-    {
-        return Err(Fail::coded(
-            fill(say(lang, "refuse.agents_told_name"), &[("name", name), ("told", told)]),
-            code::BAD_INPUT,
-        ));
-    }
     // **낱말은 앞뒤를 다듬어 적는다**(리뷰 moai-h8tn.x4l) — `--role ' supervisor'` 를 그대로 적으면 `supervisor` 와 안
     // 맞아 감독이 `any-idle-worker` 일감을 가진다.
     let word = |v: &Option<String>| v.as_deref().map(|v| v.trim().to_string());
@@ -170,6 +159,26 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             }
         }
     };
+    // **`MOAI_AGENT` 가 이 창의 이름이다**(moai-ew4o.e1m) — `send`·`inbox` 가 그 이름으로 돌고 훅도 그 이름으로 장을 세운다.
+    // 다른 `--name` 은 다음 훅이 도로 옮기니 받지 않는다.
+    //
+    // **이 창이 제 장을 적을 때만 읽는다**(리뷰 moai-ew4o.q9f) — `--pid`·`--as` 가 가리킨 장은 남의 창의 것이다. 읽던 판은
+    // 사람의 터미널이 세운 이름을 그 장에 씌워 `--pid <일꾼> --name w1` 을 거절하고, `--name` 이 없으면 그 일꾼의 장을
+    // 사람의 이름으로 옮겨 편지까지 데려갔다 — 이 셸의 tmux 칸과 `CLAUDE_CODE_SESSION_ID` 를 안 적는 것과 같은 까닭이다.
+    // **Codex 셸에서도 안 읽는다** — 그 환경은 세션 모두가 함께 쓰는 데몬의 것이라 첫 창이 든 이름이 모든 창에 선다(훅의
+    // `attendee` 가 Codex 에서 안 읽는 것과 같은 자, moai-sile).
+    let told = match &agent {
+        Agent::Known(..) if args.pid.is_none() && adopted.is_none() => super::mail::told_name(lang)?,
+        _ => None,
+    };
+    if let (Some(name), Some(told)) = (args.name.as_deref(), told.as_deref())
+        && name != told
+    {
+        return Err(Fail::coded(
+            fill(say(lang, "refuse.agents_told_name"), &[("name", name), ("told", told)]),
+            code::BAD_INPUT,
+        ));
+    }
     // 이 에이전트가 이미 든 장 — 이어받은 장, 아니면 같은 프로세스의 장. Codex 는 같은 세션의 장이다 — 훅이 지었다.
     let before = adopted.clone().or_else(|| match &agent {
         Agent::Known(proc, _) => all.iter().find(|p| p.runs_as(proc)).cloned(),
@@ -265,8 +274,9 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         rest: keep.as_ref().map(|p| p.rest.clone()).unwrap_or_default(),
     };
     // **떠난 장의 이름을 넘겨받으면 그 함부터 비운다**(moai-ew4o.l3n) — 그 세션 앞으로 남은 편지가 보낸 이에게 돌아간다.
+    // 이어 쓰는 제 장(`before`)은 넘겨받는 것이 아니다([`mail::take_over`]).
     let mail_dir = repo.mail_dir();
-    mail::take_over(&mail_dir, &all, &name);
+    mail::take_over(&mail_dir, &all, &name, before.as_ref().map(|b| b.name.as_str()));
     // 이름을 바꿨으면 옛 장을 걷고 편지를 데려간다 — 한 에이전트가 두 이름으로 서면 편지가 둘로 갈리고, 옛 이름 앞의 안
     // 읽은 편지는 아무도 못 읽고 남는다([`mail::rename_card`]).
     let wrote = match before.filter(|p| p.name != name) {
