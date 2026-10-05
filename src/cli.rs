@@ -457,9 +457,10 @@ IDEA
   .moai/mail/<name>/ (and .moai/mail/any-idle-worker/).
 
   A letter left unread for an agent that has gone comes back to its sender,
-  marked as returned: when `moai agents` sweeps a row whose process is gone,
-  when a new session takes over the name of a row that has gone, and when a
-  Codex session ends. A new --name in `moai hello` carries the letters along.
+  marked as returned: when `moai agents` sweeps a row whose process is gone
+  or a row from another machine that nothing marked alive for a day, when a
+  new session takes over the name of a row that has gone, and when a Codex
+  session ends. A new --name in `moai hello` carries the letters along.
 
   **It is not the tracker.** Nothing goes into issues.jsonl or the journal -
   a letter is delivery, not record. A decision still goes on its issue as a
@@ -548,9 +549,10 @@ IDEA
   rows are told by `seen`, which every row's hooks and waits write. Once
   nothing has written it for 20 minutes its status reads gone - --status
   idle and --wake pass it over - but it stays, role and name included, for
-  that session to come back to. After a day it is swept, and its letters
-  wait for that session. Any other row that cannot be told alive or gone
-  stays.
+  that session to come back to. After a day it is swept: a Codex row's
+  letters wait for that session, and another machine's go back to their
+  senders - a later session can be given the same name. Any other row that
+  cannot be told alive or gone stays.
 
   The same sweep takes the letters read more than mail_read_days ago (7
   unless .moai/config.toml says otherwise; 0 turns it off) - see
@@ -562,10 +564,14 @@ IDEA
 
   --json gives {\"agents\":[{\"v\",\"name\",\"vendor\",\"model\",\"role\",\"status\",
   \"since\",\"pid\",\"pid_start\",\"machine\",\"host\",\"session\",\"cwd\",\"tmux_pane\",
-  \"tmux_socket\",\"seen\"}],\"swept\":[names]}. pid_start, machine, host,
-  session, the two tmux keys and seen are absent when they are not known.
-  machine names where pid means that process; a row without it is looked
-  at by its pid. status is busy, idle, or gone for a row told by seen that
+  \"tmux_socket\",\"seen\",\"here\"}],\"swept\":[names]}. pid_start, machine,
+  host, session, the two tmux keys and seen are absent when they are not
+  known. machine names where pid means that process; a row without it is
+  looked at by its pid. here says whether the row is this machine's - its
+  machine is this one, or it names none (a Codex row, one written before
+  rows named a machine, or one written where moai cannot name the machine,
+  as off Linux). It is measured as the list is made and never written to
+  the row. status is busy, idle, or gone for a row told by seen that
   nothing wrote for 20 minutes.")]
     Agents(AgentsArgs),
 

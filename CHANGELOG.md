@@ -103,7 +103,9 @@ does not tag — see `CONTRIBUTING.md`.
   name with a piece of its session id appended instead, and a `moai hello`
   that has to make the name up refuses it (in Codex it appends the piece too).
   A name a window asks for (`MOAI_AGENT`, `moai hello --name`) still comes
-  back to it once the old row reads `gone`.
+  back to it once the old row reads `gone`. `moai agents --json` says on each
+  row whether it is this machine's (`here` — true also for a row that names no
+  machine); it is measured as the list is read and never written to the row.
 - **The hooks deliver letters.** Each prompt (`UserPromptSubmit`) loads the
   letters for the session into the conversation, the end of a turn (`Stop`)
   holds the turn with them, and a session opened after a compaction gets them
@@ -143,8 +145,11 @@ does not tag — see `CONTRIBUTING.md`.
   `moai send` and waits again. Each wait that runs out costs one short turn of
   tokens; nobody needs tmux. When the letter says the person is away, the
   worker settles a design question by its recommendation and leaves a
-  `Decided alone:` note instead of waiting. `moai skill install` plants it in
-  every tree.
+  `Decided alone:` note instead of waiting. A wait that comes back at once with
+  no letter because the mailbox links out of the checkout is not run again —
+  the worker tells the person watching, since its report would be refused the
+  same way. The steps are laid out as markdown lists, so they read as steps on
+  GitHub too. `moai skill install` plants it in every tree.
 - **`moai init` adds `.moai/mail/` and `.moai/agents/` to `.gitignore`.** The
   two directories also carry their own `.gitignore`, so a repository that has
   not run `moai init` again does not commit them either.
@@ -229,8 +234,14 @@ does not tag — see `CONTRIBUTING.md`.
   report checks out, finding the pane from the worker's presence row; the script
   then sends the next letter and types `moai inbox` into the box it just emptied,
   so the cleared window takes the next task. The clear stops when the worker
-  turns out to be waiting for a letter inside its turn. Another vendor's input
-  box cannot be read yet, so that window is left to the person.
+  turns out to be waiting for a letter inside its turn, and when the worker's
+  row is not this machine's (`here` in `moai agents --json`) — containers can
+  share a tmux socket path, so the pane number would name someone else's pane
+  here; such a worker is told to wait again instead. Another vendor's input
+  box cannot be read yet, so that window is left to the person. A worker on
+  another machine or in Codex that reads `gone` has only been quiet for 20
+  minutes — a window resting while its person answers reads the same — so the
+  supervisor hands on its worktree only once the person says that window ended.
 - **New worktrees stand in `<root>/.worktrees/`**, a place Claude Code, Codex
   and Antigravity share, instead of Claude's `.claude/worktrees/`. The worker
   and supervisor skills create them there, `moai init` adds `/.worktrees/` to
