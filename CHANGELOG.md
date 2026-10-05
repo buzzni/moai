@@ -58,7 +58,13 @@ does not tag — see `CONTRIBUTING.md`.
   session's row away instead. A turn broken off with Esc in Claude or
   Antigravity sends no hook at all, so that row stays busy until the next
   prompt. `StopFailure` needs Claude Code 2.1.78 or later — an older `claude`
-  refuses the plugin's hooks as a whole. A window that sets `MOAI_AGENT` is
+  refuses the plugin's hooks as a whole. The hooks keep the row and read the
+  letters in the main checkout's tracker even when its `config.toml` cannot be
+  read and the rules fall back to a worktree's own tracker, so a turn's end
+  still marks the row idle and a Codex `SessionEnd` still takes it away. A turn's
+  end that holds the turn with letters marks the row busy before it takes them,
+  so a hook that stalls on that write leaves the letters unread for the next
+  one rather than marked read and never shown. A window that sets `MOAI_AGENT` is
   registered under that name, by the hooks and `moai hello` alike (not a row
   `moai hello --pid` or `--as` names, and not a Codex window). In Codex,
   `moai hello` takes up the row the session's hooks wrote, found by
@@ -163,7 +169,9 @@ does not tag — see `CONTRIBUTING.md`.
   naming `moai inbox --all`, where Codex would have moved its middle into a
   file. Antigravity has no prompt event, so its first model
   call of a turn loads the board and the letters; a turn is held with
-  `decision: continue`. A hooks file moai did not write is left as it is, with
+  `decision: continue`. Both carry the same 10,000 characters as Claude Code —
+  measured whole on agy 1.2.16 and 1.2.17, up to a letter written entirely in
+  Korean (28 KB). A hooks file moai did not write is left as it is, with
   one line saying so — for Antigravity that includes moai's group with a
   handler of your own in it, or turned off. `moai skill status` judges each
   file by the moai it calls. Codex runs its hooks from a daemon its sessions
