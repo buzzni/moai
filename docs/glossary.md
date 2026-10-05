@@ -166,10 +166,12 @@ The row that says an agent is here — `.moai/agents/<name>.json`, with its
 vendor, model, role, whether it is busy or idle, and its process. `moai hello`
 writes it, and the hooks write it for a session as it starts and keep
 busy and idle up to date; `moai inbox --wait` marks it idle while it waits.
-`moai agents` lists them and sweeps a row whose process is gone; a Codex
-session's row carries no process, so its hooks and waits mark it alive (`seen`):
-nothing marked for 20 minutes, it reads `gone` but stays, and it goes when the
-session ends or nothing has marked it for a day. The name in it is what a
+`moai agents` lists them and sweeps a row whose process is gone. A Codex
+session's row carries no process, and a row written on another machine — another
+container sharing the repository — carries one this machine cannot look at, so
+those are told by `seen`, which every row's own hooks and waits mark: nothing
+marked for 20 minutes, it reads `gone` but stays, and it goes when the session
+ends or nothing has marked it for a day. The name in it is what a
 [letter](#letter) is sent to.
 
 ## Regression-of
@@ -244,4 +246,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm

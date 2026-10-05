@@ -24196,6 +24196,69 @@ fn hello_registers_and_agents_sweeps_the_gone() {
     assert!(!moai(s.path(), &["hello", "--role", "두\n줄", "--pid", &other.pid()]).status.success());
 }
 
+/// **다른 기계의 장은 pid 로 안 잰다**(moai-dhxm) — 컨테이너 여럿이 한 저장소를 쓰면 장의 pid 는 그것을 적은 컨테이너에서만
+/// 뜻을 갖는다. 이 기계의 `/proc` 에 없는 pid 를 죽은 것으로 읽던 판은 `moai agents` 가 남의 산 장을 걷고 그 함의 편지를
+/// 보낸 이에게 되돌렸다. `hello` 는 장에 기계와 호스트 이름과 닻을 적고, 기계가 다른 장은 닻으로 잰다. 기계를 안 적은 옛
+/// 장은 옛 판처럼 pid 로 잰다. 사람 화면은 다른 기계의 pid 에 그 기계의 이름을 단다 — 이 기계에서 그 pid 는 남의 것이다.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_card_from_another_container_is_not_swept_by_its_pid() {
+    let s = init("agents-elsewhere");
+    let w = Sleeper::new();
+    let card = hello_as(s.path(), "w1", &w.pid(), &[]);
+    assert!(
+        card.contains("\"machine\":\"")
+            && card.contains("\"host\":\"")
+            && card.contains(&format!("\"seen\":\"{NOW}\"")),
+        "인사가 기계나 닻을 안 적었다 — {card}"
+    );
+    // 다른 컨테이너의 일꾼 — 그 pid 는 이 기계에 없다(커널의 pid 상한 위다). 닻은 방금 적혔다.
+    std::fs::write(
+        s.path().join(".moai/agents/far.json"),
+        format!(
+            "{{\"v\":1,\"name\":\"far\",\"vendor\":\"claude\",\"status\":\"busy\",\"since\":\"{NOW}\",\"pid\":4194400,\
+             \"pid_start\":1,\"machine\":\"00000000-0000-0000-0000-000000000000/4026532999\",\"host\":\"box-b\",\
+             \"seen\":\"{NOW}\"}}\n"
+        ),
+    )
+    .unwrap();
+    // 기계를 안 적은 옛 장은 옛 판처럼 pid 로 잰다 — 이 기계에 없는 pid 는 죽은 것이다.
+    std::fs::write(
+        s.path().join(".moai/agents/old.json"),
+        "{\"v\":1,\"name\":\"old\",\"pid\":4194400,\"pid_start\":1}\n",
+    )
+    .unwrap();
+    ok(s.path(), &["send", "far", "저쪽 일감", "--as", "boss"]);
+    let listed = ok(s.path(), &["agents", "--json"]);
+    assert!(listed.ends_with("\"swept\":[\"old\"]}\n"), "다른 기계의 산 장을 걷었거나 옛 장을 안 걷었다 — {listed}");
+    assert!(
+        listed.contains("\"name\":\"far\",\"vendor\":\"claude\",\"model\":\"\",\"role\":\"\",\"status\":\"busy\""),
+        "{listed}"
+    );
+    assert!(
+        ok(s.path(), &["inbox", "--as", "boss", "--json"]).contains("\"letters\":[]"),
+        "다른 기계의 장의 편지를 되돌렸다"
+    );
+    let table = ok(s.path(), &["agents"]);
+    assert!(table.contains("4194400@box-b"), "다른 기계의 pid 에 기계 이름을 안 달았다 — {table}");
+    // 제 줄로 잰다 — 표 전체에서 `<pid>@` 를 찾으면 이 pid 가 4194400 의 끝자리(400·94400…)일 때 남의 줄에 걸린다.
+    let w1 = table.lines().find(|l| l.starts_with("w1 ")).unwrap_or_else(|| panic!("w1 이 표에 없다 — {table}"));
+    assert!(w1.ends_with(&format!(" {}", w.pid())), "이 기계의 pid 에 이름을 달았다 — {table}");
+    // 이름을 겨룰 때도 다른 기계의 pid 는 그 기계의 이름을 단다 — 맨 숫자면 이 기계에서 그 pid 를 죽인다.
+    let taken = moai(s.path(), &["hello", "--name", "far", "--pid", &w.pid()]);
+    assert!(!taken.status.success() && text(&taken).contains("4194400@box-b"), "{}", text(&taken));
+    // 이 기계의 기다림은 다른 기계의 장을 안 고친다(2026-10-05 사용자 결정) — 상태도 닻도. 여기서 기다리는 것은 그 장의
+    // 프로세스가 아니라, 고치면 낡은 장이 이 기계의 `--as`·`MOAI_AGENT` 덕에 영영 산 것으로 읽힌다.
+    let far = s.path().join(".moai/agents/far.json");
+    let before = std::fs::read_to_string(&far).unwrap();
+    let out = staged_live(&["inbox", "--as", "far", "--ack", "--wait", "1", "--json"])
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success() && text(&out).contains("저쪽 일감"), "{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&far).unwrap(), before, "다른 기계의 장을 이 기계의 기다림이 고쳤다");
+}
+
 /// **감독은 `agents --role worker --status idle` 로 일꾼을 찾는다**(moai-snyk, 2026-10-04 사용자 결정). 일꾼은 턴
 /// 안에서 `inbox --wait` 로 기다리므로 Claude 의 `Stop` 훅이 `idle` 을 못 적고, 훅이 없는 벤더는 `hello` 의 `busy`
 /// 에 머문다 — 그래서 기다리는 자리가 제 장을 고친다. 기다리면 `idle`, 편지가 오면 `busy`, 때가 다 되면 `idle`
@@ -24292,13 +24355,24 @@ fn only_a_wait_that_took_a_letter_reads_busy() {
     let before = row("w0");
     ok(s.path(), &["inbox", "--as", "w0", "--wait", "0"]);
     assert_eq!(row("w0"), before, "기다리지 않은 부름이 일하는 장을 고쳤다");
-    // 편지가 이미 서 있으면 기다린 것이 아니다 — 시계를 안 고정한 부름이라, 장을 쓰면 `since` 가 바뀐다.
+    // 편지가 이미 서 있으면 기다린 것이 아니다 — 시계를 안 고정한 부름이라, 장을 쓰면 `since` 가 바뀐다. 닻(`seen`)은
+    // 바뀌어도 된다 — 때가 된 닻은 상태가 같아도 다시 적는다(moai-dhxm).
     ok(s.path(), &["send", "w0", "벌써 왔다", "--as", "boss"]);
     let out =
         staged_live(&["inbox", "--as", "w0", "--ack", "--wait", "5", "--json"]).current_dir(s.path()).output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
     assert_eq!(ids_in(&String::from_utf8(out.stdout).unwrap()).len(), 1, "이미 선 편지를 안 가졌다");
-    assert_eq!(row("w0"), before, "편지가 선 채로 부른 기다림이 idle 을 적었다가 since 를 새로 세웠다");
+    let unseen = |r: &str| -> String {
+        let key = ",\"seen\":\"";
+        let Some(at) = r.find(key) else { return r.to_string() };
+        let end = at + key.len() + r[at + key.len()..].find('"').unwrap() + 1;
+        format!("{}{}", &r[..at], &r[end..])
+    };
+    assert_eq!(
+        unseen(&row("w0")),
+        unseen(&before),
+        "편지가 선 채로 부른 기다림이 idle 을 적었다가 since 를 새로 세웠다"
+    );
 
     // 한 `--ack` 에 열린 편지 한 통 — 남은 것은 다음 일꾼의 몫이다.
     for n in 0..2 {
@@ -24401,7 +24475,8 @@ fn presence_of(s: &Scratch, session: &str) -> String {
 }
 
 /// **훅이 출석을 적는다** — `SessionStart` 가 세우고(논다), `UserPromptSubmit` 이 일하는 중으로, `Stop` 이
-/// 노는 중으로 바꾼다. `PreToolUse` 는 출석도 우편함도 안 만진다 — 도구 호출마다 도는 자리다.
+/// 노는 중으로 바꾼다. `PreToolUse` 는 우편함을 안 만지고 장을 세우지도 않는다 — 도구 호출마다 도는 자리다. 선 장의 닻만
+/// 때가 되었을 때 다시 적는다(moai-dhxm) — 같은 저장소를 쓰는 다른 기계(컨테이너)는 이 장을 닻으로만 잰다.
 #[test]
 fn the_hooks_keep_the_presence() {
     let s = init("hook-presence");
@@ -24431,6 +24506,14 @@ fn the_hooks_keep_the_presence() {
     assert!(presence_of(&s, "sess0001-aaaa").contains("\"status\":\"busy\""), "프롬프트가 일하는 중을 안 적었다");
     hook(&s, "stop", &ev);
     assert!(presence_of(&s, "sess0001-aaaa").contains("\"status\":\"idle\""), "턴의 끝이 노는 중을 안 적었다");
+    // 도구만 부르는 긴 턴도 닻을 다시 적는다 — 상태와 `since` 는 그대로다. Codex 장만 적던 판은 일꾼의 몇 시간짜리 턴이
+    // 다른 기계의 감독에게 20분 만에 떠난 것으로 보였다.
+    let tool = ev.replacen('{', "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},", 1);
+    let later = "2026-09-11T04:27:03Z";
+    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", later)], "pre-tool-use", &tool);
+    let card = presence_of(&s, "sess0001-aaaa");
+    assert!(card.contains(&format!("\"seen\":\"{later}\"")), "도구 부름이 닻을 안 적었다 — {card}");
+    assert!(card.contains(&format!("\"status\":\"idle\",\"since\":\"{NOW}\"")), "도구 부름이 상태를 바꿨다 — {card}");
     // 세션 id 가 없으면 아무도 아니다 — 누구의 편지를 실을지 모른다.
     hook(&s, "user-prompt-submit", &format!("{{\"cwd\":{}}}", json_str(&s.path().display().to_string())));
     assert_eq!(names_in(&s.path().join(".moai/agents")), ["claude-sess0001.json"]);
@@ -24603,6 +24686,89 @@ fn a_resumed_session_moves_its_card_to_the_live_process() {
     assert!(card.contains("\"role\":\"supervisor\""), "역할을 잃었다 — {card}");
     let listed = ok(s.path(), &["agents", "--json"]);
     assert!(listed.ends_with("\"swept\":[]}\n") && listed.contains("\"name\":\"sup\""), "산 세션을 걷었다 — {listed}");
+}
+
+/// **다른 기계에서 이어 연 세션도 제 장을 이 기계의 프로세스로 다시 잇는다**(moai-dhxm) — 컨테이너를 다시 띄우고
+/// `claude --resume` 으로 이으면 장은 앞 컨테이너의 기계와 pid 를 든 채 세션 id 로 찾힌다. 그 장은 이 기계에서 죽었는지
+/// 못 재고 닻도 아직 새로워 떠난 것으로 안 읽힌다. 그대로 이어 쓰던 판은 앞 기계의 pid 를 든 장에 닻만 새로 적어 영영
+/// 안 낡게 했고, 이 기계의 `moai inbox`·`send` 는 조상으로 나를 못 찾았다.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_session_resumed_on_another_machine_moves_its_card_here() {
+    let s = init("hook-resume-elsewhere");
+    let there = "00000000-0000-0000-0000-000000000000/4026532999";
+    std::fs::create_dir_all(s.path().join(".moai/agents")).unwrap();
+    let at = s.path().join(".moai/agents/sup.json");
+    std::fs::write(
+        &at,
+        format!(
+            "{{\"v\":1,\"name\":\"sup\",\"vendor\":\"claude\",\"role\":\"supervisor\",\"status\":\"idle\",\
+             \"since\":\"{NOW}\",\"pid\":4194400,\"pid_start\":1,\"machine\":\"{there}\",\"host\":\"box-b\",\
+             \"session\":\"sessRSM2-ffff\",\"seen\":\"{NOW}\"}}\n"
+        ),
+    )
+    .unwrap();
+    let (_, alive) =
+        hook_held(&s, "session-start", &event(&s, "sessRSM2-ffff").replacen('{', "{\"source\":\"resume\",", 1));
+    let card = std::fs::read_to_string(&at).unwrap();
+    assert!(!card.contains(there) && card.contains("\"machine\":\""), "앞 기계를 든 채 이어 썼다 — {card}");
+    assert!(card.contains(&format!("\"pid\":{},", alive.pid())), "지금 프로세스로 안 이었다 — {card}");
+    assert!(card.contains("\"role\":\"supervisor\""), "역할을 잃었다 — {card}");
+    let table = ok(s.path(), &["agents"]);
+    assert!(!table.contains("@box-b"), "이어 연 세션을 다른 기계의 것으로 보였다 — {table}");
+}
+
+/// **기계를 안 적은 옛 장은 그 세션이 이 기계에 살아 있으면 기계를 단다**(moai-dhxm) — 이 필드 전의 판이 적은 장은 같은
+/// 저장소를 쓰는 다른 기계가 pid 로 재어 걷고 편지를 되돌린다. 산 세션의 장을 그대로 이어 쓰던 판은 판을 올린 날 돌던
+/// 세션이 끝날 때까지 그 장에 기계를 안 달았다. 훅이 장을 다시 쓸 때와 도구 부름이 닻을 적을 때, 그 pid 가 이 기계에 살아
+/// 있으면 단다.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_card_from_before_machines_is_labelled_by_its_live_session() {
+    let s = init("hook-legacy-label");
+    let ev = event(&s, "sessLGC1-aaaa");
+    let (_, alive) = hook_held(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    let at = s.path().join(".moai/agents/claude-sessLGC1.json");
+    let unlabel = || {
+        let card = std::fs::read_to_string(&at).unwrap();
+        let drop = |card: &str, key: &str| -> String {
+            let head = format!(",\"{key}\":\"");
+            let Some(from) = card.find(&head) else { return card.to_string() };
+            let to = from + head.len() + card[from + head.len()..].find('"').unwrap() + 1;
+            format!("{}{}", &card[..from], &card[to..])
+        };
+        let old = drop(&drop(&card, "machine"), "host");
+        assert!(!old.contains("\"machine\"") && old.contains(&format!("\"pid\":{},", alive.pid())), "{old}");
+        std::fs::write(&at, old).unwrap();
+    };
+    unlabel();
+    hook(&s, "user-prompt-submit", &ev);
+    let card = std::fs::read_to_string(&at).unwrap();
+    assert!(card.contains("\"machine\":\"") && card.contains(&format!("\"pid\":{},", alive.pid())), "{card}");
+    // 도구만 부르는 긴 턴은 닻을 적을 때 단다.
+    unlabel();
+    let tool = ev.replacen('{', "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},", 1);
+    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", "2026-09-11T04:27:03Z")], "pre-tool-use", &tool);
+    let card = std::fs::read_to_string(&at).unwrap();
+    assert!(card.contains("\"machine\":\"") && card.contains("\"seen\":\"2026-09-11T04:27:03Z\""), "{card}");
+}
+
+/// **닫히는 세션에는 닻을 안 적는다**(moai-dhxm) — 닻은 "아직 산다" 다. `SessionEnd` 가 노는 장의 닻을 다시 적던 판은
+/// `/clear` 마다 쓰기 하나를 되살렸고(그 상한은 짧고 저장소는 멈출 수 있다, 리뷰 moai-u5wr.e74), 한참 놀다 닫힌 세션을
+/// 다른 기계에 20분 동안 산 일꾼으로 다시 세웠다. `Stop` 없이 끝난 턴(`StopFailure`)은 세션이 사니 닻을 적는다.
+#[test]
+fn a_closing_session_does_not_renew_its_anchor() {
+    let s = init("hook-end-anchor");
+    let ev = event(&s, "sess0011-llll");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    let before = presence_of(&s, "sess0011-llll");
+    assert!(before.contains("\"status\":\"idle\"") && before.contains(&format!("\"seen\":\"{NOW}\"")), "{before}");
+    let later = "2026-09-11T05:12:03Z";
+    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", later)], "session-end", &ev);
+    assert_eq!(presence_of(&s, "sess0011-llll"), before, "닫히는 세션의 장을 다시 썼다");
+    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", later)], "stop-failure", &ev);
+    let card = presence_of(&s, "sess0011-llll");
+    assert!(card.contains(&format!("\"seen\":\"{later}\"")), "산 세션의 닻을 안 적었다 — {card}");
 }
 
 /// **일감은 한 번에 한 통이다**(리뷰 moai-h8tn.x4l) — 놀고 있는 일꾼 하나하나가 가지라고 보낸 `any-idle-worker` 일감을,

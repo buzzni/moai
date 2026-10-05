@@ -67,11 +67,21 @@ does not tag — see `CONTRIBUTING.md`.
   from.
   `moai agents` lists who is here and sweeps a row whose process is gone; on
   Linux a reused pid is told apart by the time the process started, and a
-  session resumed in a new process moves its row there. A Codex row has no
-  process to look at: its hooks (tool calls included) and its
-  `moai inbox --wait` write `seen`. A row nothing wrote for 20 minutes reads
-  `gone` — `--status idle` and `--wake` pass it over — but keeps its role and
-  name for the session to come back to; after a day it is swept.
+  session resumed in a new process moves its row there. On Linux a row also
+  names the machine its pid belongs to (`machine` — the boot id and pid
+  namespace — and `host` for the screen), so when several containers share one
+  repository a row written in another one is never swept for a pid this
+  machine does not have: the table and the name-taken refusal show that pid as
+  `<pid>@<host>`, `--wake` never knocks on it and prefers an idle worker on
+  this machine, and a wait here never marks it alive. Such a row, like a Codex
+  row that has no process to look at, is told by `seen`, which every row's own
+  hooks (tool calls included) and `moai inbox --wait` write. A row told that
+  way that nothing wrote for 20 minutes reads `gone` — `--status idle` and
+  `--wake` pass it over — but keeps its role and name for the session to come
+  back to; after a day it is swept. A Codex row's letters stay for that session;
+  another machine's go back to their senders, since a later session can be
+  given the same name. A container started again reads its earlier rows as
+  another machine's, so those wait out the day too.
 - **The hooks deliver letters.** Each prompt (`UserPromptSubmit`) loads the
   letters for the session into the conversation, the end of a turn (`Stop`)
   holds the turn with them, and a session opened after a compaction gets them

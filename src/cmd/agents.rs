@@ -27,8 +27,9 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
     // 빈 끝의 말은 **거르기 전에 줄이 있었는가**로 가른다(리뷰 moai-snyk.nic) — 아무도 없으면 거르개를 줬어도 등록하는
     // 길(`moai hello`)을 대는 말이 맞다. 감독의 2 가 빈손일 때 사람이 보는 자리다.
     let registered = !agents.is_empty();
-    // **20분 넘게 조용한 Codex 장은 떠난 것으로 보인다**(2026-10-05 사용자 결정, moai-j3n5) — 지우지 않고 상태만 그때 잰
-    // 낱말로 바꿔 보인다(파일은 안 고친다). `--status idle` 이 그 장을 안 내니 감독이 떠난 일꾼에게 일감을 안 보낸다.
+    // **20분 넘게 조용한 장은 떠난 것으로 보인다**(2026-10-05 사용자 결정, moai-j3n5) — 프로세스로 못 재는 장(pid 를 모르는
+    // Codex 장, 다른 기계의 장 — moai-dhxm)이다. 지우지 않고 상태만 그때 잰 낱말로 바꿔 보인다(파일은 안 고친다).
+    // `--status idle` 이 그 장을 안 내니 감독이 떠난 일꾼에게 일감을 안 보낸다.
     let now = crate::model::now();
     for p in agents.iter_mut().filter(|p| p.stale(&now)) {
         p.status = mail::GONE.to_string();
@@ -42,10 +43,24 @@ pub fn agents(ctx: &Ctx, args: AgentsArgs) -> R<Vec<String>> {
         ));
     }
     if ctx.json {
-        return super::json_line(&Listed { agents: &agents, swept: &swept });
+        let names: Vec<String> = swept.iter().map(|s| s.name.clone()).collect();
+        return super::json_line(&Listed { agents: &agents, swept: &names });
     }
     let lang = ctx.lang();
-    let mut out: Vec<String> = swept.iter().map(|n| fill(say(lang, "agents.swept"), &[("name", n)])).collect();
+    // **걷은 까닭을 갈라 말한다**(moai-dhxm) — 프로세스가 죽은 장은 편지가 보낸 이에게 돌아갔고, 하루 넘게 아무것도 안 적어
+    // 걷은 장(Codex 의 장, 다른 기계의 장)은 그 함이 남아 그 세션을 기다린다. 다른 기계에서 아직 돌 수 있는 장을 "그
+    // 프로세스가 없다" 로 대지 않는다.
+    let mut out: Vec<String> = swept
+        .iter()
+        .map(|s| {
+            let said = match (s.dead, s.elsewhere) {
+                (true, _) => say(lang, "agents.swept"),
+                (false, true) => say(lang, "agents.swept_elsewhere"),
+                (false, false) => say(lang, "agents.swept_quiet"),
+            };
+            fill(said, &[("name", &s.name)])
+        })
+        .collect();
     if agents.is_empty() {
         // 키는 `say` 에 글자째 적는다 — 소스가 부르는 키를 i18n 시험이 그 글자로 센다.
         out.push(if registered { say(lang, "agents.none_match") } else { say(lang, "agents.none") }.to_string());
@@ -68,7 +83,7 @@ fn table(agents: &[Presence], zone: &crate::tz::Zone) -> Vec<String> {
                 cell(&p.role),
                 cell(&p.status),
                 if p.since.is_empty() { cell(&p.since) } else { crate::view::stamp(&p.since, zone) },
-                p.pid.to_string(),
+                pid_cell(p),
             ]
         })
         .collect();
@@ -88,6 +103,16 @@ fn table(agents: &[Presence], zone: &crate::tz::Zone) -> Vec<String> {
             line.trim_end().to_string()
         })
         .collect()
+}
+
+/// pid 칸 — **다른 기계의 pid 는 그 기계의 이름을 단다**(moai-dhxm). 맨 숫자로 두면 사람이 이 기계에서 그 pid 를 찾거나
+/// 죽인다 — 여기서는 남의 프로세스다. 이름을 모르거나 비었으면 `?` 다. 표와 `hello` 의 거절이 이 하나로 쓴다.
+fn pid_cell(p: &Presence) -> String {
+    if p.pid == 0 || p.here() {
+        return p.pid.to_string();
+    }
+    let host = p.host.as_deref().map(crate::text::one_line).filter(|h| !h.trim().is_empty());
+    format!("{}@{}", p.pid, host.unwrap_or_else(|| "?".to_string()))
 }
 
 /// 남이 적은 칸 — 비었으면 `-`, 제어문자는 걷는다.
@@ -224,7 +249,9 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     let mine = |p: &Presence| before.as_ref().is_some_and(|b| b.name == p.name);
     if let Some(other) = all.iter().find(|p| p.name.eq_ignore_ascii_case(&name) && !mine(p) && !p.gone()) {
         return Err(Fail::coded(
-            fill(say(lang, "refuse.agents_name_taken"), &[("name", &name), ("pid", &other.pid.to_string())]),
+            // 다른 기계의 장이면 pid 에 그 기계의 이름을 단다([`pid_cell`]) — 이 이름을 비우려는 사람이 이 기계에서 그 맨
+            // 숫자를 죽이면 남의 프로세스다(moai-dhxm).
+            fill(say(lang, "refuse.agents_name_taken"), &[("name", &name), ("pid", &pid_cell(other))]),
             code::ALREADY_EXISTS,
         ));
     }
@@ -257,6 +284,9 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         },
         pid,
         pid_start,
+        // 기계는 아래에서 pid 와 함께 적는다([`Presence::at`]).
+        machine: None,
+        host: None,
         // **세션 id 는 조상에서 찾은 Claude 에게만 환경에서 읽는다** — `--pid` 로 남을 가리켰으면 이 셸의
         // 세션은 그 프로세스의 것이 아니다. 훅이 적어 둔 것이 있으면 그것이 먼저다.
         // Codex 는 그 셸이 대는 세션 id 를 적는다 — 훅이 그 세션의 장을 이것으로 찾는다. **Codex 셸의
@@ -270,10 +300,18 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
         tmux_pane,
         tmux_socket,
-        // 프로세스를 모르는 장은 닻을 적는다(moai-j3n5) — 인사한 것이 곧 산 것이다.
-        seen: (pid == 0).then(|| now.clone()).or_else(|| keep.as_ref().and_then(|p| p.seen.clone())),
+        // 닻은 아래에서 적는다([`Presence::stamp`]).
+        seen: None,
         rest: keep.as_ref().map(|p| p.rest.clone()).unwrap_or_default(),
     };
+    // **`--as` 는 그 장의 pid 를 잇고, 그 pid 가 선 기계도 그 장의 것이다**(moai-dhxm) — 이 셸의 기계를 적으면 다른 기계의
+    // 장이 이 기계의 pid 로 읽혀 `moai agents` 가 걷는다. 그 밖은 이 기계의 프로세스다.
+    let mut presence = match &adopted {
+        Some(a) => Presence { machine: a.machine.clone(), host: a.host.clone(), ..presence },
+        None => presence.at(pid, pid_start),
+    };
+    // 닻을 적는다(moai-j3n5, moai-dhxm) — 인사한 것이 곧 산 것이다. 프로세스를 아는 장도 다른 기계에서는 이것으로 잰다.
+    presence.stamp(&now);
     // **떠난 장의 이름을 넘겨받으면 그 함부터 비운다**(moai-ew4o.l3n) — 그 세션 앞으로 남은 편지가 보낸 이에게 돌아간다.
     // 이어 쓰는 제 장(`before`)은 넘겨받는 것이 아니다([`mail::take_over`]).
     let mail_dir = repo.mail_dir();
