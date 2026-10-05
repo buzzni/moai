@@ -8,6 +8,31 @@ in [the CLI reference](cli.md), what to do when something ends up wrong is in
 [Recovery](recovery.md), and the words this page leans on are in
 [the glossary](glossary.md).
 
+## Plant the tracker
+
+`moai init` in a terminal shows a short screen before it writes anything: the id
+prefix (it cannot change later), whether git tracks the tracker, where the agent
+guide goes ([the agents page](agents.md#where-the-guide-goes)), whether to install
+the hooks and skills, the merge driver, and whether to add the repository to your
+project list. Each row comes with its default picked; Enter plants, Esc stops with
+nothing written. A flag picks its row and locks it, and `--yes` takes every
+default without asking. A script or an agent is never asked — without a terminal,
+`init` is what it has always been: committed, with the guide block.
+
+**Whether git tracks the tracker** is the one choice that changes how everything
+else behaves:
+
+    moai init --tracking commit      shared through git (what init has always done)
+    moai init --tracking exclude     kept in this clone; rules go to .git/info/exclude
+    moai init --tracking gitignore   kept in this clone; rules go to .gitignore
+
+Kept out of git, no committed file changes with `exclude` — use it to track your
+own work in a repository that is not yours. There is nothing for git to merge, so
+`.gitattributes` and the merge driver are left alone, and `moai status` does not
+ask for them. `init` asks git which way stands every time instead of storing it,
+so it will not switch it for you: moving `.moai` in or out of git is a commit you
+make yourself (`git rm --cached`, or dropping the ignore line).
+
 ## Pick up work
 
 1. `moai status` — start a session here. The board, the warnings and the flow come
