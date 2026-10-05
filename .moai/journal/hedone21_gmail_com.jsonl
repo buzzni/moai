@@ -9,3 +9,6 @@
 {"ts":"2026-10-05T23:07:12Z","id":"moai-zynt.a7y","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — init 쓰기 경로와 새 터미널 화면, 여러 파일)"}
 {"ts":"2026-10-05T23:07:12Z","id":"moai-zynt.a7y","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-05T23:09:10Z","id":"moai-zynt.own","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T23:15:00Z","id":"moai-zynt.own","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — init 쓰기 경로, 무시 파일 자리)"}
+{"ts":"2026-10-05T23:15:00Z","id":"moai-zynt.own","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-05T23:15:00Z","id":"moai-cbfz","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
