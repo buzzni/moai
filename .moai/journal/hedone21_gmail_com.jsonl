@@ -21,3 +21,6 @@
 {"ts":"2026-10-05T23:24:53Z","id":"moai-785q","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — init 이 다른 명령을 이어 부름, 사용자 설정)"}
 {"ts":"2026-10-05T23:24:53Z","id":"moai-785q","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"review"}
 {"ts":"2026-10-05T23:24:53Z","id":"moai-zynt.zhr","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-05T23:29:31Z","id":"moai-zynt.zhr","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 (high — status 알림, git 부름 한도)"}
+{"ts":"2026-10-05T23:29:32Z","id":"moai-zynt.zhr","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-05T23:29:32Z","id":"moai-zynt.fa1","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"todo","to":"in_progress"}
