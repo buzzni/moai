@@ -24338,25 +24338,39 @@ fn the_hooks_deliver_letters_and_mark_them_read() {
     assert!(s.path().join(format!(".moai/mail/{me}/read/{after}@{me}.json")).is_file());
 }
 
-/// 계약 JSON 의 `additionalContext` 글의 길이 — 이스케이프를 풀어 **Claude Code 가 세는 대로**(UTF-16) 센다.
-fn context_units(out: &str) -> usize {
-    let key = "\"additionalContext\":\"";
-    let at = out.find(key).unwrap_or_else(|| panic!("실은 글이 없다 — {out}")) + key.len();
-    let mut n = 0;
+/// 계약 JSON 에서 `key` 의 문자열 값 — 이스케이프를 풀어 **에이전트가 받는 글 그대로** 낸다. 의존성 없이 하는 최소
+/// 풀이라 훅이 쓰는 꼴(`serde_json` — 비 ASCII 는 날것, 제어문자만 이스케이프)만 읽는다. 훅의 글을 재는 시험들이
+/// 이 하나로 푼다 — 풀이가 둘이면 한쪽만 고쳐져 같은 글을 두 자가 달리 잰다.
+fn json_text(out: &str, key: &str) -> String {
+    let field = format!("\"{key}\":\"");
+    let at = out.find(&field).unwrap_or_else(|| panic!("{key} 가 없다 — {out}")) + field.len();
+    let mut said = String::new();
     let mut chars = out[at..].chars();
     while let Some(c) = chars.next() {
         match c {
-            '"' => return n,
-            '\\' => {
-                if chars.next() == Some('u') {
-                    chars.nth(3);
+            '"' => return said,
+            '\\' => match chars.next() {
+                Some('n') => said.push('\n'),
+                Some('t') => said.push('\t'),
+                Some('r') => said.push('\r'),
+                Some('b') => said.push('\u{8}'),
+                Some('f') => said.push('\u{c}'),
+                Some('u') => {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    said.push(char::from_u32(u32::from_str_radix(&hex, 16).unwrap()).unwrap_or('\u{fffd}'));
                 }
-                n += 1;
-            }
-            c => n += c.len_utf16(),
+                Some(c) => said.push(c),
+                None => break,
+            },
+            c => said.push(c),
         }
     }
     panic!("닫히지 않은 글 — {out}")
+}
+
+/// 계약 JSON 의 `additionalContext` 글의 길이 — 이스케이프를 풀어 **Claude Code 가 세는 대로**(UTF-16) 센다.
+fn context_units(out: &str) -> usize {
+    json_text(out, "additionalContext").encode_utf16().count()
 }
 
 /// **한 번에 싣는 양에는 상한이 있다** — 넘는 편지는 다음 훅으로 미루고 몇 통이 남았는지 댄다. 남은 편지는
@@ -24774,6 +24788,38 @@ fn a_codex_session_without_its_start_still_gets_a_baseline() {
     ok(s.path(), &["add", "에픽 없는 일"]);
     let out = dialect_out(&s, "codex", "stop", &recorded(&s, "codex/stop.json"));
     assert!(out.contains("\"decision\":\"block\""), "턴에 늘어난 경고에 안 붙들었다 — {out}");
+}
+
+/// 턴을 붙든 계약 JSON(`decision: block`)의 `reason` — 이스케이프를 풀어 **에이전트가 받는 글 그대로** 낸다.
+fn held_reason(out: &str) -> String {
+    one_json_value(out);
+    assert!(out.contains("\"decision\":\"block\""), "붙들지 않았다 — {out}");
+    json_text(out, "reason")
+}
+
+/// **Codex 가 붙드는 턴의 편지는 Codex 의 선 안에 든다**(moai-rxro) — Codex 는 `Stop` 의 `reason` 을 이어 가는
+/// 프롬프트로 실어 기본 상한(UTF-8 네 바이트를 한 토큰으로 어림한 2,500 토큰 언저리)에 묶고, `additionalContextLimit`
+/// 은 거기 안 닿는다. 넘으면 가운데를 파일로 빼, 읽음으로 옮긴 편지의 그 자리가 아무에게도 안 닿는다. 같은 편지가
+/// Claude 의 턴에서는 칸 하나(UTF-16 1만)에 들어 통째로 실린다 — 자는 말씨마다다.
+#[test]
+fn a_codex_stop_holds_letters_inside_codexs_limit() {
+    let s = init("codex-hold-cap");
+    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
+    let big = "가".repeat(3_400); // 10KB 남짓 — 칸 하나에는 든다
+    ok(s.path(), &["send", "codex-01a107b4", "긴 편지", "-b", &big, "--as", "boss"]);
+    let said = held_reason(&dialect_out(&s, "codex", "stop", &recorded(&s, "codex/stop.json")));
+    assert!(said.contains("긴 편지") && said.contains("여기서 잘랐다"), "{}", &said[..said.len().min(300)]);
+    // 다시 볼 길은 머리 줄에도 있다 — 자른 표가 그 길을 대는지는 그 표가 선 끝 줄로 잰다(남은 편지가 없어 그 뒤에
+    // 서는 줄이 없다).
+    let cut = said.lines().last().unwrap_or_default();
+    assert!(cut.contains("moai inbox --all --as codex-01a107b4"), "자른 자리가 다시 볼 길을 안 댔다 — {cut}");
+    assert!(said.len().div_ceil(4) <= 2_500, "Codex 의 기본 상한을 넘겼다 — {} 바이트", said.len());
+
+    let ev = event(&s, "sess0009-iiii");
+    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
+    ok(s.path(), &["send", "claude-sess0009", "긴 편지", "-b", &big, "--as", "boss"]);
+    let whole = held_reason(&hook_out(&s, "stop", &ev));
+    assert!(whole.contains(&big) && !whole.contains("여기서 잘랐다"), "Claude 의 턴에서 칸에 드는 편지를 잘랐다");
 }
 
 /// **같은 1분 안에 연 Codex 세션 셋도 저마다 장 하나다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞
