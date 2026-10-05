@@ -4707,3 +4707,15 @@
 {"ts":"2026-10-05T17:33:39Z","id":"moai-bkn4.gmm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-05T17:33:41Z","id":"moai-bkn4.d91","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"둘 다 받았다(6d34f6f). 1번: 읽음 못 옮긴 편지는 다음 기다림에 곧장 다시 오니 감독은 한 번 보고, 일꾼은 한 번 하고 사람에게 이르고 멈춘다. 2번: 못 연 우편함에 .git 으로 풀린 것도 든다. 리뷰의 every wait 는 다음 take 가 성공하면 과장이라 the next wait 로 고쳐 받고 줄을 다시 접었다. 넘긴 것 없음"}
 {"ts":"2026-10-05T17:33:55Z","id":"moai-bkn4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — 마지막 멤버 gmm 과 그 리뷰 d91 이 머지 6331cd0 와 함께 닫혀 에픽이 7/7 로 섰다. 옆 moai-54yc 가 머지할 때 .claude/moai-plugin/.claude-plugin/plugin.json 의 판이 충돌한다(생성물, MOAI_BLESS=1 cargo test checked_in 로 다시 지어 푼다)"}
+{"ts":"2026-10-05T17:37:17Z","id":"moai-s0gc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-05, 감독이 물음): 그대로 둔다 — moai-j3n5 의 20분을 유지한다. 세션 id 앞 8자가 겹치는 일은 드물다. v0.7.0 에 싣지 않고 실제로 서면 다시 본다"}
+{"ts":"2026-10-05T17:37:17Z","id":"moai-keka","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"출석의 이름 짓기 뒤끝 — 깨우는 이름·쥔 이름·앞선 닻"}
+{"ts":"2026-10-05T17:37:17Z","id":"moai-keka.id8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"send --wake 가 Claude 가 아는 이름을 댄다"}
+{"ts":"2026-10-05T17:37:17Z","id":"moai-keka","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-roa5 에서 펼쳤다 — send --wake 가 토막 붙은 이름을 SendMessage 이름으로 댄다"}
+{"ts":"2026-10-05T17:37:17Z","id":"moai-roa5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-keka 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-05T17:37:30Z","id":"moai-keka.q2w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"지은 이름 셋이 다 쥐였어도 훅이 장을 세운다"}
+{"ts":"2026-10-05T17:37:30Z","id":"moai-keka.q2w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-gset 에서 펼쳤다 — 지은 이름 셋이 다 쥐였으면 훅이 장을 못 세운다"}
+{"ts":"2026-10-05T17:37:30Z","id":"moai-gset","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-keka 의 멤버 moai-keka.q2w 로 펼쳤다"}
+{"ts":"2026-10-05T17:37:30Z","id":"moai-keka.fpm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"앞날로 적힌 닻도 낡고 훅 없는 hello 가 다른 컨테이너에서 이은 제 장을 찾는다"}
+{"ts":"2026-10-05T17:37:30Z","id":"moai-keka.fpm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-kybp 에서 펼쳤다 — 닻이 앞날로 적힌 장은 낡지 않는다"}
+{"ts":"2026-10-05T17:37:30Z","id":"moai-kybp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-keka 의 멤버 moai-keka.fpm 로 펼쳤다"}
+{"ts":"2026-10-05T17:37:30Z","id":"moai-keka","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 요청(2026-10-05)의 묶기를 이어: moai-nas5 리뷰(moai-nas5.cn7)가 넘긴 출석 이름 아이디어 셋을 한 워크트리로 묶었다 — roa5(깨우기가 토막 붙은 장 이름을 SendMessage 이름으로 댄다), gset(지은 이름 셋이 다 쥐이면 훅이 장을 못 세운다), kybp(앞날로 적힌 닻이 안 낡고, 훅 없는 hello 가 이은 제 장을 못 찾는다). 셋 다 src/mail.rs 의 made_name·Presence·hello 둘레다. s0gc(Codex 장의 20분)는 사용자가 그대로 두기로 해 빼고 에픽 밖으로 옮겼다"}
