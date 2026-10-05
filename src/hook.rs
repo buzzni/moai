@@ -198,21 +198,74 @@ pub fn board(lines: &[String], lang: Lang) -> Decision {
 /// code.claude.com/docs/en/hooks "JSON output"). **넘으면 그 칸을 통째로 파일로 빼고** 그 자리에 경로와 앞 2천 자만
 /// 남기며, Claude 에게 그 파일을 읽으라고 하지 않는다. 편지는 싣는 순간 읽음이라(2026-10-04 사용자 결정) 칸을 넘긴
 /// 편지는 읽음으로 옮겨진 채 아무도 못 본다 — 같은 칸에 먼저 선 보드가 미리보기를 차지해 편지는 한 줄도 안 남는다.
-/// 48KB 바이트로 재던 판이 그 자리였다. 글자는 Claude Code 가 세는 대로 UTF-16 단위로 센다([`units`]). `Stop` 의
-/// 붙드는 까닭(`reason`)은 문서가 상한을 대지 않지만 같은 자로 잰다.
+/// 48KB 바이트로 재던 판이 그 자리였다. 글자는 Claude Code 가 세는 대로 UTF-16 단위로 센다([`Unit::Utf16`]). `Stop`
+/// 의 붙드는 까닭(`reason`)은 문서가 상한을 대지 않지만 같은 자로 잰다 — Codex 의 그 자리만 따로다([`CODEX_HOLD`]).
 pub const CONTEXT_CAP: usize = 10_000;
 
+/// Codex 가 `Stop` 의 붙드는 까닭(`reason`)에 싣는 상한 — UTF-8 바이트로 8천이다(moai-rxro). Codex 는 그 글을 이어 가는
+/// 프롬프트로 싣고, 그 프롬프트는 기본 상한(2,500 토큰 언저리)을 그대로 쓴다 — `additionalContextLimit` 이 안 닿는다
+/// (Codex 훅 문서: "Tool feedback and continuation prompts keep the default limit"). 토큰은 UTF-8 네 바이트를 하나로
+/// 어림해(codex-rs 의 `approx_token_count`) 1만 바이트가 그 선이고, 넘으면 글을 `<tmp>/hook_outputs/…` 로 빼고 머리·꼬리와
+/// 경로만 싣는다 — 편지는 싣는 순간 읽음이라 가운데가 아무에게도 안 닿는다. [`CONTEXT_CAP`] 의 UTF-16 1만으로 재던 판은
+/// 한국어 편지 3,400 글자(10KB 남짓)에서 그 선을 넘겼다. 문서가 "언저리" 라 하고 이어 가는 프롬프트를 어떻게 감싸는지
+/// 대지 않아 다섯에 하나를 남긴다.
+pub const CODEX_HOLD: Room = Room { size: 8_000, unit: Unit::Utf8 };
+
 /// 편지에 남은 자리가 이보다 작으면 이번에는 안 싣는다 — 같은 칸에 먼저 선 글(보드)이 칸을 거의 다 썼다. 편지는
-/// 다음 훅을 기다린다(`Stop` 은 칸을 통째로 쓴다).
+/// 다음 훅을 기다린다(`Stop` 은 칸을 통째로 쓴다). UTF-16 단위로 적었다([`Unit::widest`]).
 const LETTERS_MIN: usize = 2_000;
 
 /// 머리 줄(받는 이름 64자까지)·남은 수·자른 표처럼 편지 밖의 글에 남겨 두는 몫 — 셋을 더해도 500자가 안 된다.
-/// 편지 글은 어림하지 않고 실릴 글 그대로 잰다([`letter_block`]).
+/// 편지 글은 어림하지 않고 실릴 글 그대로 잰다([`letter_block`]). UTF-16 단위로 적었다([`Unit::widest`]).
 const LETTERS_FRAME: usize = 600;
 
-/// Claude Code 가 세는 글자 수 — UTF-16 단위다.
-fn units(s: &str) -> usize {
-    s.encode_utf16().count()
+/// 글 한 칸을 세는 자 — 에이전트마다 다르다(moai-rxro).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unit {
+    /// UTF-16 단위 — Claude Code 가 칸의 글자를 세는 자다.
+    Utf16,
+    /// UTF-8 바이트 — Codex 가 토큰을 어림하는 자다(네 바이트가 한 토큰).
+    Utf8,
+}
+
+impl Unit {
+    /// `s` 의 길이를 이 자로.
+    fn of(self, s: &str) -> usize {
+        match self {
+            Unit::Utf16 => s.encode_utf16().count(),
+            Unit::Utf8 => s.len(),
+        }
+    }
+
+    /// 글자 하나의 길이를 이 자로.
+    fn of_char(self, c: char) -> usize {
+        match self {
+            Unit::Utf16 => c.len_utf16(),
+            Unit::Utf8 => c.len_utf8(),
+        }
+    }
+
+    /// UTF-16 단위로 적은 몫([`LETTERS_MIN`]·[`LETTERS_FRAME`])을 이 자로 — 가장 크게 잰다. UTF-16 한 단위는 UTF-8 로
+    /// 세 바이트까지다(한글 한 글자가 한 단위에 세 바이트다. 두 단위를 쓰는 글자는 네 바이트라 단위마다 둘이다).
+    /// 어림해 키우는 까닭은 [`deliverable`] 이 그 몫을 남겨 고른 편지를 [`letters`] 가 자르지 않게 하려는 것이다.
+    fn widest(self, utf16: usize) -> usize {
+        match self {
+            Unit::Utf16 => utf16,
+            Unit::Utf8 => utf16 * 3,
+        }
+    }
+}
+
+/// 편지가 들 자리 — 얼마나, 무엇으로 세어서인가([`Unit`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Room {
+    pub size: usize,
+    pub unit: Unit,
+}
+
+impl Room {
+    /// Claude Code 의 칸 하나([`CONTEXT_CAP`]).
+    pub const CONTEXT: Room = Room { size: CONTEXT_CAP, unit: Unit::Utf16 };
 }
 
 /// 편지 한 통이 실릴 글 — 앞의 빈 줄까지. [`deliverable`] 이 자리를 재는 글과 [`letters`] 가 싣는 글이 **이 하나**다.
@@ -223,41 +276,43 @@ fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> 
 }
 
 /// 같은 칸에 `earlier`(보드, 접힌 뒤 싣는 줄)가 먼저 섰을 때 편지에 남는 자리 — [`CONTEXT_CAP`] 에서 그 글과 둘 사이의
-/// 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다).
-pub fn letters_room(earlier: &Decision) -> usize {
+/// 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다). 비추는 줄(`additionalContext`)의 칸이라 세 에이전트 모두
+/// [`Room::CONTEXT`] 로 잰다 — Codex 는 심은 파일의 `additionalContextLimit` 이 그만큼을 준다(`skill::CODEX`).
+pub fn letters_room(earlier: &Decision) -> Room {
+    let room = Room::CONTEXT;
     let used = match earlier {
         Decision::Pass => 0,
-        Decision::Context(s) | Decision::Deny(s) | Decision::Block(s) => units(s) + 2,
+        Decision::Context(s) | Decision::Deny(s) | Decision::Block(s) => room.unit.of(s) + 2,
     };
-    CONTEXT_CAP.saturating_sub(used)
+    Room { size: room.size.saturating_sub(used), ..room }
 }
 
 /// 이번에 실을 편지 — 그 자리(`letters` 안의 차례)와, 이 세션 앞으로 남아 다음에 실릴 수다. 앞에서부터 `room` 에
 /// 드는 만큼이고 **적어도 하나**다 — 혼자 칸을 넘는 편지는 [`letters`] 가 잘라 싣는데, 그때는 그 한 통만 고른다
 /// (뒤의 편지를 읽음으로 옮겨 놓고 잘라 버리지 않는다). 자리가 [`LETTERS_MIN`] 보다 작으면 하나도 안 싣는다. 실을
-/// 것을 고르는 것이 훅의 판단이라 여기 둔다.
+/// 것을 고르는 것이 훅의 판단이라 여기 둔다. 편지는 그 자리의 자([`Room::unit`])로 잰다.
 ///
 /// **`any-idle-worker` 편지는 한 번에 한 통만 싣는다**(리뷰 moai-h8tn.x4l) — 놀고 있는 일꾼 하나하나가 가지라고 보낸
 /// 일감들을, 먼저 훅이 돈 세션 하나가 한 번에 다 쓸어 가면 그 받는 이 낱말이 거짓이 된다. 남은 그 편지는 다른
 /// 일꾼의 몫이라 "더 기다린다" 에 안 센다.
 pub fn deliverable(
     letters: &[crate::mail::Stored],
-    room: usize,
+    room: Room,
     lang: Lang,
     zone: &crate::tz::Zone,
 ) -> (Vec<usize>, usize) {
     let (mut picked, mut left) = (Vec::new(), 0);
-    if room < LETTERS_MIN {
+    if room.size < room.unit.widest(LETTERS_MIN) {
         return (picked, left);
     }
-    let (mut used, mut open, mut full) = (LETTERS_FRAME, false, false);
+    let (mut used, mut open, mut full) = (room.unit.widest(LETTERS_FRAME), false, false);
     for (k, s) in letters.iter().enumerate() {
         let is_open = s.open();
         if is_open && open {
             continue;
         }
-        let size = units(&letter_block(lang, zone, s));
-        if full || (!picked.is_empty() && used + size > room) {
+        let size = room.unit.of(&letter_block(lang, zone, s));
+        if full || (!picked.is_empty() && used + size > room.size) {
             full = true;
             left += usize::from(!is_open);
             continue;
@@ -276,8 +331,8 @@ pub fn deliverable(
 /// 까닭(`Block`)으로 싣는다 — **판정의 종류는 안 는다.** 편지 한 통은 `inbox` 와 같은 자(`view::mail`)로
 /// 그리고, 색은 걷는다(`board` 와 같은 까닭, `style::plain`).
 ///
-/// **글은 `room` 을 안 넘는다**([`CONTEXT_CAP`]) — 넘치는 편지는 그 자리에서 자르고, 편지 전체를 다시 볼 길을 댄다.
-/// 머리 줄과 남은 수는 자르지 않는다.
+/// **글은 `room` 을 그 자로 재어 안 넘는다**([`CONTEXT_CAP`]·[`CODEX_HOLD`]) — 넘치는 편지는 그 자리에서 자르고, 편지
+/// 전체를 다시 볼 길을 댄다. 머리 줄과 남은 수는 자르지 않는다.
 ///
 /// **내미는 명령은 모두 `--as <나>` 를 단다**(리뷰 moai-ew4o.q9f) — 셸에서 제 장을 못 찾는 세션(`CODEX_THREAD_ID` 가
 /// 없는 Codex)이 맨 `moai inbox` 를 치면 누구인지 몰라 멈춘다. 머리 줄만 달고 남은 수·자른 자리의 줄은 안 달던 판은
@@ -288,7 +343,7 @@ pub fn letters(
     left: usize,
     lang: Lang,
     zone: &crate::tz::Zone,
-    room: usize,
+    room: Room,
 ) -> Option<String> {
     if delivered.is_empty() {
         return None;
@@ -300,19 +355,20 @@ pub fn letters(
         String::new()
     };
     let mut body: String = delivered.iter().map(|s| letter_block(lang, zone, s)).collect();
-    let fits = room.saturating_sub(units(&head) + units(&tail));
-    if units(&body) > fits {
+    let size = |s: &str| room.unit.of(s);
+    let fits = room.size.saturating_sub(size(&head) + size(&tail));
+    if size(&body) > fits {
         let cut = format!("\n{}", fill(say(lang, "hook.letter_cut"), &[("me", me)]));
-        body = format!("{}{cut}", cut_to(&body, fits.saturating_sub(units(&cut))));
+        body = format!("{}{cut}", cut_to(&body, fits.saturating_sub(size(&cut)), room.unit));
     }
     Some(format!("{head}{body}{tail}"))
 }
 
-/// `s` 의 앞에서 UTF-16 단위 `max` 까지 — 글자 가운데서 안 자른다.
-fn cut_to(s: &str, max: usize) -> &str {
+/// `s` 의 앞에서 그 자(`unit`)로 `max` 까지 — 글자 가운데서 안 자른다.
+fn cut_to(s: &str, max: usize, unit: Unit) -> &str {
     let mut used = 0;
     for (at, c) in s.char_indices() {
-        used += c.len_utf16();
+        used += unit.of_char(c);
         if used > max {
             return &s[..at];
         }
@@ -14705,15 +14761,15 @@ mod tests {
             },
         };
         let utc = crate::tz::Zone::utc();
-        let pick = |all: &[Stored], room: usize| deliverable(all, room, Lang::En, &utc);
+        let pick = |all: &[Stored], room: Room| deliverable(all, room, Lang::En, &utc);
         let big = mk("20261004-061203-00000001", "w1", "가".repeat(30_000));
         let small = mk("20261004-061203-00000002", "w1", "x".into());
-        assert_eq!(pick(&[big.clone(), small.clone()], CONTEXT_CAP), (vec![0], 1));
+        assert_eq!(pick(&[big.clone(), small.clone()], Room::CONTEXT), (vec![0], 1));
         // **실릴 글 그대로 잰다** — 줄마다 네 칸을 들여 쓰니, 짧은 줄 800개(8천 자)는 실릴 때 1만 자를 넘는다. 함께
         // 고른 뒤의 편지는 읽음으로 옮겨진 채 자르는 자리 밖으로 밀려났었다.
         let lines = mk("20261004-061203-00000003", "w1", "moai-abcd\n".repeat(800));
-        assert_eq!(pick(&[lines, small.clone()], CONTEXT_CAP), (vec![0], 1), "뒤의 편지를 잘릴 자리에 골랐다");
-        let said = letters("w1", std::slice::from_ref(&big), 1, Lang::En, &utc, CONTEXT_CAP).unwrap();
+        assert_eq!(pick(&[lines, small.clone()], Room::CONTEXT), (vec![0], 1), "뒤의 편지를 잘릴 자리에 골랐다");
+        let said = letters("w1", std::slice::from_ref(&big), 1, Lang::En, &utc, Room::CONTEXT).unwrap();
         assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다 — {}", said.encode_utf16().count());
         assert!(said.contains("s-20261004-061203-00000001") && said.contains("moai inbox --all"), "{said}");
         assert!(
@@ -14727,6 +14783,50 @@ mod tests {
         // 일감은 한 통씩 — 나머지는 다른 일꾼의 몫이라 남은 수에도 안 센다.
         let open = |id: &str| mk(id, ANY_IDLE_WORKER, "job".into());
         let all = [open("20261004-061203-0000000a"), open("20261004-061203-0000000b"), small];
-        assert_eq!(pick(&all, CONTEXT_CAP), (vec![0, 2], 0));
+        assert_eq!(pick(&all, Room::CONTEXT), (vec![0, 2], 0));
+    }
+
+    /// **Codex 가 붙드는 턴의 편지는 바이트로 잰다**(moai-rxro) — Codex 는 `Stop` 의 `reason` 을 기본 상한(UTF-8 네
+    /// 바이트를 한 토큰으로 어림한 2,500 토큰 언저리)에 묶고, 넘으면 가운데를 파일로 뺀다. 칸 하나(UTF-16 1만)로 재면
+    /// 한국어 편지 3,400 글자(10KB 남짓)가 자르지 않고 지나가 그 선을 넘긴다. 영어 편지는 바이트가 곧 글자라 셋으로
+    /// 나눠 어림하지 않는다 — 그 자리에 드는 편지는 그대로 다 싣는다.
+    #[test]
+    fn a_codex_hold_measures_letters_in_bytes() {
+        use crate::mail::{Letter, Stored, VERSION};
+        let mk = |id: &str, body: String| Stored {
+            id: id.into(),
+            mailbox: "codex-01a107b4".into(),
+            reader: None,
+            returned: false,
+            letter: Letter {
+                v: VERSION,
+                to: "codex-01a107b4".into(),
+                from: "boss".into(),
+                subject: format!("s-{id}"),
+                body,
+                sent_at: "2026-10-04T06:12:03Z".into(),
+                reply_to: None,
+                rest: Default::default(),
+            },
+        };
+        let utc = crate::tz::Zone::utc();
+        let me = "codex-01a107b4";
+        let korean = mk("20261005-041347-00000001", "가".repeat(3_400));
+        let said = letters(me, std::slice::from_ref(&korean), 0, Lang::Ko, &utc, CODEX_HOLD).unwrap();
+        let cut = |lang: Lang| fill(say(lang, "hook.letter_cut"), &[("me", me)]);
+        assert!(said.len() <= CODEX_HOLD.size, "Codex 의 선을 넘겼다 — {} 바이트", said.len());
+        assert!(said.contains(&cut(Lang::Ko)), "자른 자리를 안 댔다");
+        // 칸 하나로 재면 같은 편지가 자르지 않고 지나간다 — 이 시험이 가르는 것이 그 차이다.
+        let whole = letters(me, std::slice::from_ref(&korean), 0, Lang::Ko, &utc, Room::CONTEXT).unwrap();
+        assert!(whole.len() > CODEX_HOLD.size && !whole.contains(&cut(Lang::Ko)), "시험의 편지가 작다");
+        // 영어 7천 자는 7천 바이트다 — UTF-16 셋에 하나로 어림하면 잘린다.
+        let english = mk("20261005-041347-00000002", "x".repeat(7_000));
+        let said = letters(me, std::slice::from_ref(&english), 0, Lang::En, &utc, CODEX_HOLD).unwrap();
+        assert!(said.len() <= CODEX_HOLD.size && !said.contains(&cut(Lang::En)), "드는 편지를 잘랐다");
+        // 함께 고르는 것도 바이트로 잰다 — 둘째 편지는 다음 붙듦을 기다린다.
+        let both = [korean.clone(), mk("20261005-041347-00000003", "나".repeat(1_000))];
+        assert_eq!(deliverable(&both, CODEX_HOLD, Lang::Ko, &utc), (vec![0], 1), "넘치는 둘째 편지를 함께 골랐다");
+        let small = mk("20261005-041347-00000004", "짧다".into());
+        assert_eq!(deliverable(&[small.clone(), small], CODEX_HOLD, Lang::Ko, &utc), (vec![0, 1], 0));
     }
 }
