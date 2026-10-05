@@ -206,6 +206,11 @@ does not tag — see `CONTRIBUTING.md`.
   without a person.** It now says a session a person opened reads that shape to
   choose its next row, and that moai never launches or drives a session itself.
   `moai init` writes the new block.
+- **`moai skill install` follows a link in Claude's plugin tree only inside the
+  checkout it plants in**, as it already did for `.agents/skills`. In a
+  subdirectory project that checkout is the subdirectory, so a `.claude` there
+  that links up to the repository's own `.claude` is now refused by name
+  instead of written through; plant from the top, or make it a directory.
 
 ### Removed
 
@@ -216,6 +221,29 @@ does not tag — see `CONTRIBUTING.md`.
   place the agents page says how to open a Claude Code, Codex or Antigravity
   session in the repository and make it a worker — including Codex's trust in
   `/hooks` and what to do on a machine where its sandbox cannot stand.
+
+### Fixed
+
+- **`moai skill install` no longer writes Claude's plugin through a committed
+  link that points out of the checkout.** A repository that committed
+  `.claude/moai-plugin/.claude-plugin/plugin.json -> ~/.bashrc` had that file
+  overwritten with the plugin's JSON, and the link stayed a link, so nothing
+  showed. The plugin tree is now written the way `.agents/skills` already was:
+  a place that is not a regular file is refused by name, and nothing is built
+  through a directory link that leaves the checkout. A refused tree stops before
+  `claude` is asked to register it. `skill status --json` says `written: false`
+  for such a manifest, and `skill uninstall` no longer tells you to delete
+  `.claude/moai-plugin/` when that tree lands outside the checkout — deleting
+  it would delete what lies behind the link.
+- **`moai skill status`, `install` and `uninstall` no longer hang on a FIFO, or
+  use up memory on a link to `/dev/zero`, in the committed plugin manifest or
+  `.claude/settings.json`.** Both are read only as regular files inside the
+  checkout, like the snapshot and `AGENTS.md`. A committed `.claude/settings.json`
+  that cannot be read — a link out of the checkout or into `.git`, a FIFO, no
+  permission — is no longer read to plan removing an earlier moai's marketplace
+  declarations; one line names it and says why, and `--json` carries it as
+  `settings_unread` (`file`, `kind`, `said`, the shape of `journal_error`). A
+  missing file stays quiet.
 
 ## [0.6.0] - 2026-10-04
 
