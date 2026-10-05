@@ -468,6 +468,11 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **Codex runs none of moai's hooks.** Codex has not been told to trust them —
   open `/hooks` in a codex session in the repository and trust them. An install
   that changed them asks for that trust again
+- **A Codex session reads `busy` long after its turn ended.** An install changed
+  some of moai's hooks and only those went untrusted — Codex keeps the trust per
+  handler, so the rest run and nothing says so. With `Stop` among them the row
+  stays `busy` until 20 quiet minutes turn it `gone`, and a closed session's row
+  stays for a day. Trust them again in `/hooks` ([Codex](#codex))
 - **`skill install` says a hooks file is not moai's.** It holds hooks someone
   else wrote, and moai will not overwrite them. Merge moai's entries into it by
   hand, or move it aside and install again
