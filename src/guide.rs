@@ -35,6 +35,19 @@ pub fn rule_head(n: usize) -> String {
     format!("Rule {n} — {}.", RULES[n - 1])
 }
 
+/// 서브에이전트가 부모 세션의 이름으로 우편함을 만질 때 훅이 내는 거절문(moai-ew4o.4fv, [`crate::hook::guard_subagent_mail`]).
+/// **고칠 길을 함께 낸다** — 막힌 쪽이 사람을 안 부르고 제자리에서 푼다.
+///
+/// **`--as` 는 `inbox`·`send` 의 길이다**(리뷰 moai-ew4o.q9f) — `hello --as` 는 이미 선 장을 이어받는 것이라(moai-u5wr.7xr) 새
+/// 이름에는 `not_found` 로 지고, `--name` 은 이 거절이 다시 막는다. 둘을 가리지 않던 글은 `hello` 에 서지 않는 길을 내밀었다.
+/// `--wait` 만으로는 편지를 안 가진다 — 부모의 장을 노는 것으로 적을 뿐이다.
+pub const SUBAGENT_MAIL: &str = "Mailbox — a subagent does not speak as its parent session.\n\
+A subagent runs under the parent session's process, so this `moai hello` would rewrite the parent's presence, this\n\
+`moai inbox --ack` would take the parent's letters before its hooks can load them, and `--wait` would mark the parent\n\
+idle. Leave the mailbox and the registration to the parent session: a subagent does not say `moai hello`. To look\n\
+without taking, run `moai inbox` without --ack or --wait; to work under a name of your own, pass `--as <name>` to\n\
+`moai inbox` and `moai send`.";
+
 /// 리뷰 이슈를 세운 뒤의 세 걸음. **훅의 거절문과 스킬이 이것을 그대로 쓴다.**
 ///
 /// **여기 적힌 명령은 그대로 쳐서 지나가야 한다.** `-m` 없는 `done` 을 일러
@@ -849,7 +862,9 @@ registers with `moai hello --role supervisor` so it never takes those. Waking is
 `--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
 Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
 a worker waiting on `moai inbox --wait` needs no waking, and while it waits `moai agents`
-shows it idle."#;
+shows it idle. A Codex shell is found by the session id Codex sets in it
+(`CODEX_THREAD_ID`); where that is missing, pass `--as <name>` — the hooks name the session
+in its first context."#;
 
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
@@ -1755,6 +1770,11 @@ root mixes their edits and commits together. Worktrees stand in
 
 The name in its reply is `<my name>` below — the name the workers send their reports to.
 The role keeps letters to `any-idle-worker` away from you: a supervisor never takes those.
+In Codex, moai finds this window by the session id Codex sets in its shell
+(`CODEX_THREAD_ID`) — the row its hooks wrote. If `moai hello` says it cannot tell which
+session this is, Codex did not set it: say hello as that row, `moai hello --role
+supervisor --as <that name>` (its first context names it, `codex-` and eight characters),
+and pass the same `--as` to every `moai send` and `moai inbox` you run as yourself.
 
 **Read the base branch once, at the start of the round.** The place a worker branches
 its worktree from and merges back into is the root checkout, so that checkout's current
@@ -2657,9 +2677,14 @@ window, stop waiting and answer them.
        moai hello --role worker
 
    The name in the reply is the one the supervisor sends to. moai finds this agent among
-   the processes above the command (`claude`, `codex`, `agy`); a Claude Code session its
-   hooks already registered keeps its name and gains the role. If this window sets
-   `MOAI_AGENT`, say hello under that name (`--name`) — the wait below answers to it
+   the processes above the command (`claude`, `agy`); a session its hooks already
+   registered keeps its name and gains the role. If this window sets `MOAI_AGENT`, that is
+   its name — `hello`, the wait and the hooks all go by it. In Codex, moai finds this window
+   by the session id Codex sets in its shell (`CODEX_THREAD_ID`) — the row its hooks wrote.
+   If `moai hello` says it cannot tell which session this is, Codex did not set it: say hello
+   as that row, `moai hello --role worker --as <that name>` (its first context names it,
+   `codex-` and eight characters), and pass the same `--as` to every `moai inbox` and
+   `moai send` below
 2. **Wait for a letter**
 
        moai inbox --ack --wait 540

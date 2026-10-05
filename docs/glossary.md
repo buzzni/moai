@@ -98,13 +98,15 @@ it now. A tag such as `bug` or `review` is not a kind.
 
 ## Letter
 
-What one agent leaves another — a file under `.moai/mail/`, written by
+What one agent leaves another — a file in the recipient's box under
+`.moai/mail/`, written by
 `moai send` to an agent's name or to `any-idle-worker` (the first agent that is
 neither the sender nor registered as a [supervisor](#supervisor) with
 `moai hello --role supervisor` keeps it). It is delivery,
 not record: nothing of it enters the [tracker](#tracker) or the
 [journal](#journal). The hooks load the letters for a session into it and mark
-them read; `moai inbox` shows them. More in
+them read; `moai inbox` shows them. One left unread for an agent that went away
+goes back to its sender, marked returned. More in
 [working with agents](agents.md#leave-each-other-letters).
 
 ## Member
@@ -165,8 +167,10 @@ vendor, model, role, whether it is busy or idle, and its process. `moai hello`
 writes it, and the hooks write it for a session as it starts and keep
 busy and idle up to date; `moai inbox --wait` marks it idle while it waits.
 `moai agents` lists them and sweeps a row whose process is gone; a Codex
-session's row carries no process and goes when the session ends. The name in
-it is what a [letter](#letter) is sent to.
+session's row carries no process, so its hooks and waits mark it alive (`seen`):
+nothing marked for 20 minutes, it reads `gone` but stays, and it goes when the
+session ends or nothing has marked it for a day. The name in it is what a
+[letter](#letter) is sent to.
 
 ## Regression-of
 

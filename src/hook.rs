@@ -116,6 +116,10 @@ pub struct Input {
     /// 이 세션의 모델 — 출석에 적는다(moai-h8tn). 계약이 약속한 키가 아니라 글이든 객체든 받는다([`Input::model`]).
     #[serde(default, rename = "model")]
     pub model_raw: serde_json::Value,
+    /// 서브에이전트의 도구 부름이면 그 서브에이전트 — Claude Code 가 `PreToolUse`·`PostToolUse` 에만 싣는다
+    /// (code.claude.com/docs/en/hooks). 본 세션의 부름에는 없다([`guard_subagent_mail`], moai-ew4o.4fv).
+    #[serde(default)]
+    pub agent_id: Option<String>,
 }
 
 impl Input {
@@ -248,7 +252,7 @@ pub fn deliverable(
     }
     let (mut used, mut open, mut full) = (LETTERS_FRAME, false, false);
     for (k, s) in letters.iter().enumerate() {
-        let is_open = s.letter.to == crate::mail::ANY_IDLE_WORKER;
+        let is_open = s.open();
         if is_open && open {
             continue;
         }
@@ -274,6 +278,10 @@ pub fn deliverable(
 ///
 /// **글은 `room` 을 안 넘는다**([`CONTEXT_CAP`]) — 넘치는 편지는 그 자리에서 자르고, 편지 전체를 다시 볼 길을 댄다.
 /// 머리 줄과 남은 수는 자르지 않는다.
+///
+/// **내미는 명령은 모두 `--as <나>` 를 단다**(리뷰 moai-ew4o.q9f) — 셸에서 제 장을 못 찾는 세션(`CODEX_THREAD_ID` 가
+/// 없는 Codex)이 맨 `moai inbox` 를 치면 누구인지 몰라 멈춘다. 머리 줄만 달고 남은 수·자른 자리의 줄은 안 달던 판은
+/// 한 덩이 안에서 두 길을 댔다.
 pub fn letters(
     me: &str,
     delivered: &[crate::mail::Stored],
@@ -287,14 +295,14 @@ pub fn letters(
     }
     let head = fill(say(lang, "hook.letters"), &[("me", me), ("n", &delivered.len().to_string())]);
     let tail = if left > 0 {
-        format!("\n\n{}", fill(say(lang, "hook.letters_left"), &[("n", &left.to_string())]))
+        format!("\n\n{}", fill(say(lang, "hook.letters_left"), &[("n", &left.to_string()), ("me", me)]))
     } else {
         String::new()
     };
     let mut body: String = delivered.iter().map(|s| letter_block(lang, zone, s)).collect();
     let fits = room.saturating_sub(units(&head) + units(&tail));
     if units(&body) > fits {
-        let cut = format!("\n{}", say(lang, "hook.letter_cut"));
+        let cut = format!("\n{}", fill(say(lang, "hook.letter_cut"), &[("me", me)]));
         body = format!("{}{cut}", cut_to(&body, fits.saturating_sub(units(&cut))));
     }
     Some(format!("{head}{body}{tail}"))
@@ -6400,6 +6408,37 @@ pub fn guard_shell_in(
         .then(|| if calls_review(line) { guard_review(issues, cfg, away) } else { Decision::Pass })
 }
 
+/// **서브에이전트는 부모 세션의 이름으로 우편함을 안 만진다**(2026-10-04 사용자 결정, moai-ew4o.4fv). Claude Code 의
+/// 서브에이전트는 부모 세션과 한 `claude` 프로세스 밑에서 셸을 돌고 그 환경도 한 글자 안 다르다(2026-10-04 에 쟀다, 2.1.284 —
+/// `CLAUDE_CODE_CHILD_SESSION=1` 은 본 세션에도 선다). `moai` 는 조상의 출석으로 나를 찾으니, 서브에이전트의
+/// `moai inbox --ack`·`--wait` 는 부모의 편지를 읽음으로 옮기고(부모의 훅은 그 편지를 못 싣는다) `moai hello` 는 부모의 장의
+/// 이름과 역할을 바꾼다. CLI 는 둘을 못 가르고 훅의 입력에만 `agent_id` 가 선다 — 그래서 훅이 막는다(부르는 쪽이
+/// `agent_id` 를 본 뒤에만 부른다).
+///
+/// - **`--as` 를 준 부름은 지나간다** — 그 이름으로 일한다고 스스로 댄 것이다. `inbox` 앞에 댄 `MOAI_AGENT=…` 도
+///   그렇다(`who` 가 그 이름으로 돈다) — `hello` 앞의 것은 아니다: 그 이름으로 부모의 장을 옮긴다
+/// - **편지를 보기만 하는 `moai inbox` 와 `send`, 도움말은 지나간다** — 읽음으로 안 옮기고 장을 안 바꾼다
+/// - **자리를 안 가린다**(리뷰 moai-ew4o.q9f) — 부모의 이름으로 도는 것은 어느 트래커를 겨누든 같다. 자리를 모르는 토막을
+///   건너뛰는 [`moai_args`] 로 찾던 판은 `env -C <저장소> moai inbox --ack` 를 그대로 보냈다
+/// - **규칙 번호를 안 단다** — 다섯 규칙이 지키는 일과 사람의 자리가 아니라 우편함의 거절이다. Codex·Antigravity 는 그런
+///   입력이 없어 글로만 선다
+pub fn guard_subagent_mail(line: &Line<'_>) -> Decision {
+    for seg in line.used() {
+        let Some(args) = moai_flagged(&seg.words) else { continue };
+        let flags: Vec<&str> = flag_words(args).collect();
+        let has = |f: &str| flags.iter().any(|w| *w == f || w.strip_prefix(f).is_some_and(|v| v.starts_with('=')));
+        let acts = match positionals(args).first() {
+            Some(&"hello") => true,
+            Some(&"inbox") => (has("--ack") || has("--wait")) && env_prefix(seg, "MOAI_AGENT=").is_none(),
+            _ => false,
+        };
+        if acts && !has("--as") && !asks_help(args) {
+            return Decision::Deny(crate::guide::SUBAGENT_MAIL.to_string());
+        }
+    }
+    Decision::Pass
+}
+
 /// 규칙 4 — **사람의 tmux 서버를 죽이지 않는다**(moai-zis7, 사용자 결정).
 ///
 /// 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있고, `-L`·`-S` 없는 tmux 는 `TMUX_TMPDIR` 를 무시하고
@@ -7656,11 +7695,17 @@ fn take_in(
 /// `--user` 다음으로 읽는 사람이다(`model::actor`). **빈 값은 없는 것이다** — `model::actor` 가 그렇게 읽는다.
 /// 명령 자리 앞에서만 찾는다: 뒤의 `MOAI_ACTOR=…` 는 `moai` 의 인자다.
 fn actor_prefix(seg: &Seg) -> Option<String> {
+    env_prefix(seg, "MOAI_ACTOR=")
+}
+
+/// 토막의 명령 자리 앞에 붙인 `<이름>=…` 의 값(`key` 는 `=` 까지다) — [`actor_prefix`] 와 [`guard_subagent_mail`] 의
+/// `MOAI_AGENT=…` 가 한 자로 읽는다. 빈 값은 없는 것이다.
+fn env_prefix(seg: &Seg, key: &str) -> Option<String> {
     let head = seg.words.len() - command_of(&seg.words).len();
     seg.words[..head]
         .iter()
         .rev()
-        .find_map(|w| w.strip_prefix("MOAI_ACTOR="))
+        .find_map(|w| w.strip_prefix(key))
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
@@ -14645,7 +14690,9 @@ mod tests {
         use crate::mail::{ANY_IDLE_WORKER, Letter, Stored, VERSION};
         let mk = |id: &str, to: &str, body: String| Stored {
             id: id.into(),
+            mailbox: to.into(),
             reader: None,
+            returned: false,
             letter: Letter {
                 v: VERSION,
                 to: to.into(),
@@ -14669,7 +14716,11 @@ mod tests {
         let said = letters("w1", std::slice::from_ref(&big), 1, Lang::En, &utc, CONTEXT_CAP).unwrap();
         assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다 — {}", said.encode_utf16().count());
         assert!(said.contains("s-20261004-061203-00000001") && said.contains("moai inbox --all"), "{said}");
-        assert!(said.ends_with(&fill(say(Lang::En, "hook.letters_left"), &[("n", "1")])), "남은 수를 잘랐다");
+        assert!(
+            said.ends_with(&fill(say(Lang::En, "hook.letters_left"), &[("n", "1"), ("me", "w1")])),
+            "남은 수를 잘랐다"
+        );
+        assert!(said.contains("moai inbox --all --as w1"), "자른 자리의 줄이 `--as` 를 안 달았다 — {said}");
         // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다.
         let board = Decision::Context("b".repeat(CONTEXT_CAP - 100));
         assert_eq!(pick(std::slice::from_ref(&small), letters_room(&board)), (vec![], 0));

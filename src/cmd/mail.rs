@@ -20,15 +20,17 @@ struct Sent<'a> {
     wake: Option<&'a Woke>,
 }
 
-/// `inbox --json` 의 편지 하나 — `id` 와 `read` 에 편지 그대로.
+/// `inbox --json` 의 편지 하나 — `id`·`read`·`returned` 에 편지 그대로. `returned` 는 보낸 편지가 읽히기 전에 받는 이가
+/// 떠나 제 함으로 되돌아온 것이다([`Stored::returned`]) — 그 편지의 `to` 는 떠난 이, `from` 은 나다. 늘 선다.
 ///
-/// **편지가 든 모르는 키가 `id`·`read` 면 뺀다**(리뷰 moai-h8tn.x4l) — 모르는 키는 그대로 내는데([`Letter::rest`]),
+/// **편지가 든 모르는 키가 `id`·`read`·`returned` 면 뺀다**(리뷰 moai-h8tn.x4l) — 모르는 키는 그대로 내는데([`Letter::rest`]),
 /// 그 이름이 겉의 키와 겹치면 한 객체에 같은 키가 둘 서고, 읽는 쪽 대부분(jq·python)이 뒤의 것을 믿는다. 손으로
 /// 놓거나 다른 판이 쓴 편지 하나가 진짜 id 와 읽음 표를 가린다.
 #[derive(Serialize)]
 struct Shown<'a> {
     id: &'a str,
     read: bool,
+    returned: bool,
     #[serde(flatten)]
     letter: Letter,
 }
@@ -36,8 +38,8 @@ struct Shown<'a> {
 impl<'a> Shown<'a> {
     fn of(s: &'a Stored) -> Shown<'a> {
         let mut letter = s.letter.clone();
-        letter.rest.retain(|k, _| k != "id" && k != "read");
-        Shown { id: &s.id, read: s.reader.is_some(), letter }
+        letter.rest.retain(|k, _| !matches!(k.as_str(), "id" | "read" | "returned"));
+        Shown { id: &s.id, read: s.reader.is_some(), returned: s.returned, letter }
     }
 }
 
@@ -55,7 +57,7 @@ struct Inbox<'a> {
 pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     let to = args.to.trim().to_string();
-    if !mail::is_name(&to) {
+    if !mail::is_recipient(&to) {
         return Err(bad_name(ctx.lang(), &to));
     }
     let subject = args.subject.trim().to_string();
@@ -93,6 +95,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         rest: Default::default(),
     };
     let dir = repo.mail_dir();
+    mail::migrate(&dir);
     let id = mail::send(&dir, &letter).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
 
     // **없는 이름에도 보낸다** — 아직 인사하지 않은 에이전트에게 먼저 보내는 것은 흔하다. 오타일 수 있으니
@@ -140,7 +143,11 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     let (agents, _) = mail::presences(&repo.agents_dir());
     let me = who(ctx, args.me.as_deref(), &agents)?;
     let role = agents.iter().find(|p| p.name == me).map(|p| p.role.clone()).unwrap_or_default();
+    // 닻을 적을 장인가 — 프로세스를 모르는 장(Codex)만이다. 다른 장은 기다리는 동안 출석부를 다시 안 연다(리뷰
+    // moai-ew4o.q9f — 반 초마다 모든 장을 읽던 자리다).
+    let anchored = agents.iter().any(|p| p.name == me && p.pid == 0);
     let dir = repo.mail_dir();
+    mail::migrate(&dir);
 
     // **기다림은 훑기를 되풀이한다** — 파일 시스템의 알림(inotify)은 플랫폼마다 다르고 크레이트가 든다. 반 초에
     // 한 번 디렉터리 하나를 읽는 값이 그보다 싸다.
@@ -153,13 +160,19 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // 판에는 `idle` 을 적었다가 곧장 `busy` 로 되돌려 `since`(얼마나 놀았나)만 새로 세웠다.
     let mut idled = false;
     let (mut mine, garbled) = loop {
-        let (all, garbled) = mail::list(&dir, args.all.then_some(me.as_str()));
+        let (all, garbled) = mail::list(&dir, &me, args.all);
         let mine: Vec<Stored> = all.into_iter().filter(|s| mail::for_me(s, &me, &role)).collect();
         let waiting = until.is_some_and(|t| t.is_none_or(|t| std::time::Instant::now() < t));
         if !waiting || mine.iter().any(|s| s.reader.is_none()) {
             break (mine, garbled);
         }
-        if !idled {
+        // 기다리는 동안 프로세스를 모르는 장(Codex)은 닻을 다시 적는다(moai-j3n5) — 안 적으면 오래 기다리는 일꾼이 떠난
+        // 것으로 걷혀, 감독이 일감을 보낼 곳을 잃는다. 때가 되었을 때만 쓴다([`mail::keep_alive`]).
+        if idled {
+            if anchored {
+                mail::keep_alive(&repo.agents_dir(), |p| p.name == me);
+            }
+        } else {
             attend(&repo, &me, mail::IDLE);
             idled = true;
         }
@@ -168,15 +181,15 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
     // 못 읽은 편지는 답을 덜 낸 것이다 — 다 내고 비영으로 끝난다(`show` 의 못 읽는 줄과 같은 자). 자리도 남이 지은
     // 이름이라 한 줄로 접는다 — 파일 이름에 든 제어문자가 터미널을 움직이지 않게.
     //
-    // **남의 편지가 깨진 것은 말만 한다**(리뷰 moai-h8tn.x4l, `cmd::mod` 의 "남의 워크트리에서 만난 문제" 와 같은 자) —
-    // 받는 이를 읽어 내가 아니면 내 답이 덜 난 것이 아니다. 그것까지 세던 판은 깨진 편지 하나가 지워질 때까지 모든
-    // 에이전트의 `inbox` 를 비영으로 끝냈고, `--ack` 로 이미 읽음이 된 편지를 실패로 읽은 고리는 그 편지를 버렸다.
+    // **남의 편지가 깨진 것은 내 답이 덜 난 것이 아니다**(리뷰 moai-h8tn.x4l) — 깨진 편지 하나가 모든 에이전트의 `inbox` 를
+    // 비영으로 끝내면 `--ack` 로 이미 읽음이 된 편지를 실패로 읽은 고리가 그 편지를 버린다. 받는 이마다 함이 따로라
+    // (moai-ew4o.c92) 여기 오는 것은 제 함과 열린 편지의 함뿐이다. 열린 편지는 감독이 안 가지니 감독에게는 말만 한다.
     for g in &garbled {
         tell(&fill(
             say(ctx.lang(), "warn.mail_garbled"),
             &[("path", &crate::text::one_line(&g.path.display().to_string())), ("why", &crate::text::one_line(&g.why))],
         ));
-        if g.to.as_deref().is_none_or(|to| to == me || to == mail::ANY_IDLE_WORKER) {
+        if g.mailbox.as_deref() != Some(mail::ANY_IDLE_WORKER) || role != mail::SUPERVISOR {
             note_partial();
         }
     }
@@ -196,11 +209,11 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
                 kept.push(s);
                 continue;
             }
-            let open = s.letter.to == mail::ANY_IDLE_WORKER;
+            let open = s.open();
             if open && opened {
                 continue;
             }
-            match mail::take(&dir, &s.id, &me) {
+            match mail::take(&dir, &s, &me) {
                 Ok(mail::Took::Mine) => {
                     opened |= open;
                     gained += 1;
@@ -255,7 +268,8 @@ pub fn inbox(ctx: &Ctx, args: InboxArgs) -> R<Vec<String>> {
 ///
 /// **없는 장은 안 세운다** — 등록은 `hello` 와 훅의 일이다. `--as` 로 남의 이름을 대도 그 이름의 장을 고친다: 그
 /// 이름으로 편지를 가지는 것이 곧 그 에이전트로 일하는 것이다. 상태가 같으면 안 쓴다 — `since` 가 "얼마나
-/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). **빈 `since` 는 채운다** — 훅의 `attend` 와 같은
+/// 놀았나" 를 잰다(`send --wake` 가 가장 오래 논 일꾼을 고른다). 프로세스를 모르는 장의 닻만은 때가 되었으면 적는다
+/// ([`mail::Presence::due`]). **빈 `since` 는 채운다** — 훅의 `attend` 와 같은
 /// 자다. 빈 글은 가장 앞에 서서, 그대로 두면 `send --wake` 가 그 장을 가장 오래 논 일꾼으로 고른다(리뷰
 /// moai-snyk.nic). 못 적으면 조용히 지나간다 — 출석은 기록이 아니라 지금의 표다([`mail::write_presence`]).
 fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
@@ -263,28 +277,64 @@ fn attend(repo: &crate::store::Repo, me: &str, status: &str) {
     // 기다리기 직전·직후에 다시 읽는다 — 앞에서 읽은 장으로 덮으면 그 사이 훅이 고친 칸을 되돌린다.
     let (agents, _) = mail::presences(&dir);
     let Some(mut p) = agents.into_iter().find(|p| p.name == me) else { return };
-    if p.status == status && !p.since.is_empty() {
+    let now = crate::model::now();
+    let changed = p.status != status || p.since.is_empty();
+    // **상태가 같아도 프로세스를 모르는 장(Codex)의 닻은 때가 되었으면 적는다**(리뷰 moai-ew4o.q9f) — 편지가 이미 와 있어
+    // 기다림 없이 끝난 `inbox --ack --wait` 는 `busy` 를 `busy` 로 적어 아무것도 안 썼고, 그 일꾼의 닻은 그 앞의 인사에
+    // 머물렀다. 훅이 안 도는 Codex 일꾼은 그만큼 일찍 걷혔다.
+    if !changed && !p.due(&now) {
         return;
     }
-    p.status = status.to_string();
-    p.since = crate::model::now();
+    if changed {
+        p.status = status.to_string();
+        p.since = now.clone();
+    }
+    p.stamp(&now);
     let _ = mail::write_presence(&dir, &p);
 }
 
-/// 이 부름이 **누구의 이름으로 도는가** — `--as`, `MOAI_AGENT`, 이 명령을 띄운 에이전트의 출석 차례다.
+/// 이 부름이 **누구의 이름으로 도는가** — `--as`, `MOAI_AGENT`, 이 명령을 띄운 에이전트의 출석 차례다. Codex 의 출석은
+/// 프로세스가 아니라 세션 id 로 찾는다.
 ///
 /// **아무도 아니면 멈춘다** — 보낸 이가 없는 편지는 답할 곳이 없고, 받는 이를 모르면 누구의 편지를 보일지
 /// 모른다. 사람을 묻는 쓰기가 "누군지 모르면 멈춘다" 와 같은 결이다(CLAUDE.md). 준 이름이 꼴이 아니어도
 /// 멈춘다 — 그 이름이 파일 이름이 된다.
 fn who(ctx: &Ctx, given: Option<&str>, agents: &[Presence]) -> R<String> {
-    let told = given.map(str::to_string).or_else(|| std::env::var("MOAI_AGENT").ok().filter(|v| !v.trim().is_empty()));
-    if let Some(name) = told {
+    if let Some(name) = given {
         let name = name.trim().to_string();
         return if mail::is_agent_name(&name) { Ok(name) } else { Err(bad_name(ctx.lang(), &name)) };
     }
-    mail::me_among(agents, &mail::ancestors())
-        .map(|p| p.name.clone())
-        .ok_or_else(|| Fail::coded(say(ctx.lang(), "refuse.mail_who"), code::NO_ACTOR))
+    let ancestors = mail::ancestors();
+    let refused = || Fail::coded(say(ctx.lang(), "refuse.mail_who"), code::NO_ACTOR);
+    // **Codex 는 세션 id 로 찾는다**(moai-u5wr.7xr) — 그 셸의 조상은 세션 모두가 함께 쓰는 데몬이라 프로세스로는 이 세션을
+    // 못 가른다. Codex 가 셸에 세우는 그 세션의 id 가 훅이 장에 적은 세션과 같다([`mail::codex_session`]). 없으면 `--as` 다.
+    //
+    // **`MOAI_AGENT` 보다 먼저 본다**(리뷰 moai-ew4o.q9f) — 그 셸의 환경은 데몬의 것이라, 첫 창이 데몬을 띄울 때 든
+    // `MOAI_AGENT` 가 모든 Codex 창에 선다. 그것을 먼저 읽던 판은 둘째 창의 `inbox --ack` 가 첫 창의 편지를 가져갔다 —
+    // 훅도 Codex 에서는 그 값을 안 읽는다(`attendee`).
+    if matches!(mail::agent_among(&ancestors), Some((_, "codex"))) {
+        let session = mail::codex_session().ok_or_else(refused)?;
+        return agents
+            .iter()
+            .find(|p| p.session.as_deref() == Some(session.as_str()))
+            .map(|p| p.name.clone())
+            .ok_or_else(refused);
+    }
+    if let Some(name) = told_name(ctx.lang())? {
+        return Ok(name);
+    }
+    mail::me_among(agents, &ancestors).map(|p| p.name.clone()).ok_or_else(refused)
+}
+
+/// `MOAI_AGENT` — 이 창의 이름(moai-ew4o.e1m). 비었으면 없는 것이고, 꼴이 아니면 멈춘다 — 그 이름이 파일 이름이 된다
+/// (`who` 와 `hello` 가 한 자로 잰다 — `hello` 만 말없이 넘기던 판은 인사는 지나가고 그 창의 `inbox` 가 멈췄다).
+///
+/// **부르는 쪽이 Codex 셸이 아닐 때만 부른다** — 그 환경은 세션 모두가 함께 쓰는 데몬의 것이다(moai-sile).
+pub(super) fn told_name(lang: Lang) -> R<Option<String>> {
+    match std::env::var("MOAI_AGENT").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
+        Some(name) if !mail::is_agent_name(&name) => Err(bad_name(lang, &name)),
+        told => Ok(told),
+    }
 }
 
 /// 이름이 될 수 없는 글 — 무엇이 되는지를 함께 댄다.
