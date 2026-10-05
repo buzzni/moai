@@ -25593,6 +25593,29 @@ fn an_antigravity_stop_holds_whole_a_letter_codex_would_cut() {
     assert!(said.contains(&big) && !said.contains("여기서 잘랐다"), "Antigravity 의 턴 끝에서 칸에 드는 편지를 잘랐다");
 }
 
+/// **Antigravity 의 턴 머리도 칸 하나를 통째로 싣는다**(moai-jzym.4pm 실측 — 칸을 거의 다 채운 한국어 편지가
+/// `ephemeralMessage` 로도 그대로 실렸다). 턴 끝만 재던 판은 턴 머리의 자리를 Codex 의 좁은 선으로 옮겨도 단위·통합 시험이
+/// 다 초록이었다(리뷰 moai-dp35.gag) — 그 자리는 훅이 싣는 칸의 표 한 줄이 정한다. 보드는 세션의 첫 턴 머리가 싣고 가니
+/// 편지는 둘째 턴 머리에서 칸을 통째로 받는다.
+#[test]
+fn an_antigravity_turn_head_holds_whole_a_letter_codex_would_cut() {
+    let s = init("agy-head-cap");
+    let first = recorded(&s, "antigravity/pre-invocation-first.json");
+    dialect_out(&s, "antigravity", "user-prompt-submit", &first);
+    let names = names_in(&s.path().join(".moai/agents"));
+    assert_eq!(names.len(), 1, "턴 머리가 출석을 안 적었다 — {names:?}");
+    let big = "가".repeat(9_000); // 27KB — Codex 의 선(8천)은 넘고 잰 바이트(28.4KB) 안이다
+    ok(s.path(), &["send", names[0].trim_end_matches(".json"), "긴 편지", "-b", &big, "--as", "boss"]);
+    let out = dialect_out(&s, "antigravity", "user-prompt-submit", &first);
+    one_json_value(&out);
+    assert!(out.starts_with("{\"injectSteps\":[{\"ephemeralMessage\":\""), "그 꼴로 안 실었다 — {out}");
+    let said = json_text(&out, "ephemeralMessage");
+    assert!(
+        said.contains(&big) && !said.contains("여기서 잘랐다"),
+        "Antigravity 의 턴 머리에서 칸에 드는 편지를 잘랐다"
+    );
+}
+
 /// **같은 1분 안에 연 Codex 세션 셋도 저마다 장 하나다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞
 /// 8자가 밀리초 시각의 윗자리고 65초 남짓마다만 바뀐다(기록한 두 id 가 그렇다). 겹친 이름을 그 토막으로 한 번만 가르던
 /// 판은 셋째가 둘째의 장을 덮었고, 둘은 훅마다 서로의 장을 빼앗았다.
