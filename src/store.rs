@@ -1690,6 +1690,17 @@ pub enum Missed {
     Held(crate::held::Unheld),
 }
 
+/// 읽는 자([`crate::held::read_inside`])가 진 까닭을 그대로 옮긴다 — io 의 것은 [`unread_kind`] 로 접는다. 저널 밖에서
+/// 못 읽은 자리(`skill` 이 커밋된 설정을 못 읽은 것, moai-ml0d)도 이것으로 [`Unread`] 를 지어 같은 `kind`·`said` 로 댄다.
+impl From<crate::held::Fell> for Missed {
+    fn from(fell: crate::held::Fell) -> Missed {
+        match fell {
+            crate::held::Fell::Unheld(why) => Missed::Held(why),
+            crate::held::Fell::Io(e) => Missed::Io { kind: unread_kind(&e), said: e.to_string() },
+        }
+    }
+}
+
 impl Unread {
     /// `permission`·`failed`·`outside`. 늘어날 수 있으므로 받는 쪽은 모르는 값을 `failed` 처럼 다룬다 —
     /// 고칠 길이 하나로 정해진 갈래를 가르는 것이 이 값의 일이다. `permission` 은 `chmod` 한 줄이고,

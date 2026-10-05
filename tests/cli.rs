@@ -16928,6 +16928,26 @@ impl Claude {
         self.command(Path::new(BIN), dir, args, with_claude).output().unwrap()
     }
 
+    /// [`Claude::run`] 이되 **멈추면 죽이고 진다** — 커밋된 자리의 FIFO 를 막히지 않게 열지 않은 `moai` 는 쓰는 쪽을
+    /// 영영 기다린다. 마감은 60초고, 그때까지 안 끝나면 시험이 그 인자를 대며 진다.
+    fn bounded(&self, dir: &Path, args: &[&str]) -> Output {
+        let mut child = self
+            .command(Path::new(BIN), dir, args, true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("moai 를 못 띄웠다");
+        for _ in 0..600 {
+            if child.try_wait().unwrap().is_some() {
+                return child.wait_with_output().unwrap();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("moai {args:?} 가 멈췄다 — 커밋된 파일을 막히지 않게 열지 않았다");
+    }
+
     /// 부를 moai 와 환경을 더 줄 수 있는 모양. **[`isolated`] 에서 출발해 집과 PATH 만
     /// 제 것으로 덮는다** — 따로 막으면 걷을 목록이 두 벌이 되고, 실제로 이쪽은
     /// `MOAI_ACTOR`·git 환경 변수를 물려받은 채 남아 있었다(moai-0auu).
@@ -17037,6 +17057,7 @@ fn skill_status_names_a_stale_install() {
     assert!(json.contains("\"current\":false"), "{json}");
     assert!(json.contains("\"hook_exe_found\":true"), "심은 바이너리를 못 찾는다\n{json}");
     assert!(json.contains("\"claude\":true"), "{json}");
+    assert!(json.contains("\"written\":true"), "심은 매니페스트를 안 심겼다고 한다\n{json}");
 
     // 판을 맞추면 조용해진다.
     let want = field(&json, "want_version");
@@ -18115,9 +18136,12 @@ fn skill_install_keeps_a_declaration_whose_plugin_stays() {
     );
 }
 
-/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 고치지 않는다**(`store::write_atomic_inside`) — 받은
-/// 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃 밖의 파일을 고친다. 링크도
-/// 보통 파일로 안 바꾼다. 못 지운 것으로 세어 손으로 지울 자리를 대고, 종료 코드는 등록만 따른다.
+/// **커밋된 설정이 체크아웃 밖을 가리키는 링크면 따라가 읽지도 고치지도 않는다**(`store::write_atomic_inside`,
+/// `held::read_inside`) — 받은 저장소의 `.claude/settings.json -> <밖>` 을 따라가면 흔한 `skill install` 이 체크아웃
+/// 밖의 파일을 고친다. 링크도 보통 파일로 안 바꾼다. 읽기도 같은 자다(moai-ml0d.21i) — 밖을 읽어 걸음을 세우던 판은
+/// 지우지도 못할 선언을 "못 지웠다" 로 댔다. 못 읽는 설정이라 걸음은 안 세우되 **말없이 넘기지 않는다**(사용자 결정
+/// 2026-10-05, moai-ml0d.que 2번) — 그 자리와 까닭을 한 줄(`--json` 의 `settings_unread`)로 대고, 없는 파일은 조용하다.
+/// 종료 코드는 등록만 따른다.
 #[test]
 fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
     let s = init("skillundeclarelink");
@@ -18133,14 +18157,107 @@ fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
     std::os::unix::fs::symlink(&outside, &file).unwrap();
 
     let out = c.run(s.path(), &["skill", "install", "--scope", "project", "--json"], true);
-    assert!(out.status.success(), "선언 하나를 못 지웠다고 설치가 실패로 끝났다\n{}", text(&out));
+    assert!(out.status.success(), "못 읽는 설정 하나로 설치가 실패로 끝났다\n{}", text(&out));
     let json = String::from_utf8(out.stdout).unwrap();
-    for (name, _) in OLD_MARKETS {
-        let row = format!(r#"{{"file":{},"marketplace":"{name}","ok":false}}"#, json_str(&file.display().to_string()));
-        assert!(json.contains(&row), "{json}");
-    }
+    assert!(json.contains(r#""undeclared":[]"#), "체크아웃 밖의 설정을 읽어 걸음을 세웠다\n{json}");
+    // 문은 열렸다 — 문이 닫혀도 `undeclared` 는 비므로, 걷는 걸음이 서야 설정을 읽는 자리까지 간 것이다.
+    assert!(
+        json.contains(r#""id":"korean-skills@korean-skills","ok":true,"scope":"project""#),
+        "옛 판을 걷는 문이 안 열려 설정을 읽는 자리까지 안 갔다\n{json}"
+    );
+    let unread =
+        format!(r#""settings_unread":{{"file":{},"kind":"outside","said":"#, json_str(&file.display().to_string()));
+    assert!(json.contains(&unread), "못 읽은 설정을 안 댄다\n{json}");
     assert_eq!(std::fs::read_to_string(&outside).unwrap(), body, "체크아웃 밖의 파일을 고쳤다");
     assert!(std::fs::symlink_metadata(&file).unwrap().file_type().is_symlink(), "링크를 보통 파일로 바꿨다");
+
+    let said = text(&c.run(s.path(), &["skill", "install", "--scope", "project", "--dry-run"], true));
+    let line = format!("! {} 을 안 읽어", file.display());
+    assert!(
+        said.contains(&line) && said.contains("korean-skills, im-not-ai"),
+        "사람에게 못 읽은 설정을 안 댄다\n{said}"
+    );
+    std::fs::remove_file(&file).unwrap();
+    let json =
+        String::from_utf8(c.run(s.path(), &["skill", "install", "--scope", "project", "--json"], true).stdout).unwrap();
+    assert!(json.contains(r#""settings_unread":null"#), "없는 설정을 못 읽은 것으로 댄다\n{json}");
+}
+
+/// **커밋된 `plugin.json`·`.claude/settings.json` 은 보통 파일로만 읽는다**(moai-ml0d.21i, `held::read_inside`) — 맨
+/// `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로 `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영
+/// 기다렸다. 고침이 없으면 멈추므로 마감을 두고 부른다 — 멈춘 프로세스는 죽이고 시험이 진다. 설정은 옛 판 moai 가
+/// project 범위에 선 장부여야 읽힌다(옛 선언을 걷는 걸음). 못 읽는 설정은 걸음을 안 세울 뿐 설치를 안 막고, 보통
+/// 파일이 아닌 `plugin.json` 은 다시 심는 길이 그 자리를 대며 비영으로 멈춘다(`store::write_atomic_inside`).
+#[cfg(unix)]
+#[test]
+fn skill_reads_no_fifo_in_the_committed_plugin_or_settings() {
+    let s = init("skillfifo");
+    let c = Claude::new("skillfifo-home");
+    let bounded = |args: &[&str]| c.bounded(s.path(), args);
+    let fifo = |p: &Path| {
+        let _ = std::fs::remove_file(p);
+        assert!(Command::new("mkfifo").arg(p).status().unwrap().success(), "FIFO 를 못 지었다: {}", p.display());
+    };
+    let (market, dir) = installed(&s, &c, "0.0.1");
+    let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
+    project_ledger(&c, &market, &root, &dir);
+
+    fifo(&root.join(".claude/settings.json"));
+    for args in [&["skill", "install", "--scope", "project", "--dry-run"][..], &["skill", "uninstall", "--dry-run"]] {
+        let out = bounded(args);
+        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+    }
+    let out = bounded(&["skill", "install", "--scope", "project", "--json"]);
+    assert!(out.status.success(), "못 읽는 설정 하나로 설치가 실패로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains(r#""undeclared":[]"#), "못 읽은 설정에 걸음을 세웠다\n{}", text(&out));
+    assert!(text(&out).contains(r#""kind":"failed","said":"#), "FIFO 인 설정을 못 읽은 것으로 안 댄다\n{}", text(&out));
+    assert!(
+        text(&out).contains(r#""id":"korean-skills@korean-skills","ok":true,"scope":"project""#),
+        "옛 판을 걷는 문이 안 열려 설정을 읽는 자리까지 안 갔다\n{}",
+        text(&out)
+    );
+
+    // **지우기 직전에 다시 읽는 길도 같은 자다**(`Undeclare::call`) — 계획 때 보통 파일이던 설정이 앞선 `plugin
+    // uninstall` 사이에 FIFO 로 갈려도 멈추지 않고 못 지운 것으로 센다. 계획이 못 읽으면 걸음이 안 서므로 이 읽기는
+    // 계획 뒤에 갈린 자리에서만 잴 수 있다 — 가짜 `claude` 가 그 걸음에서 FIFO 를 옮겨 놓는다.
+    let file = root.join(".claude/settings.json");
+    std::fs::remove_file(&file).unwrap();
+    std::fs::write(&file, project_settings(&market, &dir, &["korean-skills@korean-skills"], &OLD_MARKETS)).unwrap();
+    let staged = c.home.path().join("settings-fifo");
+    fifo(&staged);
+    let source = c.home.path().join("claude-fifo.sh");
+    std::fs::write(
+        &source,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> \"{}\"\ncase \"$*\" in *\"plugin uninstall korean-skills@korean-skills --scope project\"*) /bin/mv \"{}\" \"{}\";; esac\nexit 0\n",
+            c.log.display(),
+            staged.display(),
+            file.display()
+        ),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::remove_file(c.bin.join("claude")).unwrap();
+    place_exe(&source, &c.bin.join("claude"));
+    let out = bounded(&["skill", "install", "--scope", "project", "--json"]);
+    assert!(out.status.success(), "지우기 직전에 못 읽은 설정 하나로 설치가 실패로 끝났다\n{}", text(&out));
+    for (name, _) in OLD_MARKETS {
+        let row = format!(r#"{{"file":{},"marketplace":"{name}","ok":false}}"#, json_str(&file.display().to_string()));
+        assert!(text(&out).contains(&row), "못 읽은 설정의 선언을 지웠다고 하거나 걸음을 안 세웠다\n{}", text(&out));
+    }
+    assert!(!std::fs::symlink_metadata(&file).unwrap().is_file(), "FIFO 를 갈아끼웠다");
+
+    let manifest = dir.join(".claude-plugin/plugin.json");
+    fifo(&manifest);
+    for args in [&["skill", "status"][..], &["skill", "install", "--dry-run"]] {
+        let out = bounded(args);
+        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+    }
+    let out = bounded(&["skill", "install"]);
+    assert!(!out.status.success(), "못 심은 자리가 있는데 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains("plugin.json"), "어느 자리인지 안 댄다\n{}", text(&out));
+    assert!(!std::fs::symlink_metadata(&manifest).unwrap().is_file(), "FIFO 를 갈아끼웠다");
 }
 
 /// **선언을 걷는 문은 셋이 겹칠 때만 열린다**(moai-6ugu.aae) — 옛 판 moai 가 project 범위에 섰고, 그 파일에
@@ -18453,23 +18570,7 @@ fn skill_status_shows_the_shared_skills_and_the_two_on_path() {
     let s = init("skillshared");
     let c = Claude::new("skillshared-home");
     // 멈추면 죽이고 진다 — 고침이 없으면 FIFO 를 연 `moai` 가 쓰는 쪽을 영영 기다린다.
-    let bounded = |args: &[&str]| -> Output {
-        let mut child = c
-            .command(Path::new(BIN), s.path(), args, true)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("moai 를 못 띄웠다");
-        for _ in 0..600 {
-            if child.try_wait().unwrap().is_some() {
-                return child.wait_with_output().unwrap();
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        let _ = child.kill();
-        let _ = child.wait();
-        panic!("moai {args:?} 가 멈췄다 — .agents 의 파일을 막히지 않게 열지 않았다");
-    };
+    let bounded = |args: &[&str]| c.bounded(s.path(), args);
     let status = |json: bool| {
         let out = bounded(if json { &["skill", "status", "--json"] } else { &["skill", "status"] });
         assert!(out.status.success(), "status 가 비영으로 끝났다\n{}", text(&out));
@@ -18573,6 +18674,51 @@ fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
     std::fs::create_dir_all(away.path().join("skills/moai")).unwrap();
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
     assert!(!said.contains("rm -r"), "밖에 선 남의 디렉터리를 지우라고 한다\n{said}");
+}
+
+/// **Claude 의 플러그인 트리도 체크아웃 밖 링크를 안 따른다**(moai-ml0d.izy) — `.agents` 와 같은 자다. 맨
+/// `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한 `.claude-plugin/plugin.json -> <밖>` 하나로 그 파일을
+/// 플러그인 JSON 으로 통째로 덮었고, 링크는 링크로 남아 티가 안 났다. 트리 자체가 밖을 가리키는 링크면 밖에
+/// 디렉터리도 안 짓는다. 못 심었으니 `claude` 에 등록하지 않고 비영으로 끝난다.
+#[cfg(unix)]
+#[test]
+fn skill_install_writes_the_plugin_tree_through_no_link_outside() {
+    let s = init("skillpluginlink");
+    let c = Claude::new("skillpluginlink-home");
+    let away = Scratch::new("skillpluginlink-away");
+    let victim = away.path().join("bashrc");
+    std::fs::write(&victim, "# 사람의 rc\n").unwrap();
+    let plugin = s.path().join(".claude/moai-plugin");
+    let manifest = plugin.join(".claude-plugin/plugin.json");
+    std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&victim, &manifest).unwrap();
+
+    let out = c.run(s.path(), &["skill", "install"], true);
+    assert!(!out.status.success(), "밖을 가리키는 자리에 심고 성공으로 끝났다\n{}", text(&out));
+    assert!(text(&out).contains("outside"), "어느 자리인지 안 댄다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "# 사람의 rc\n", "체크아웃 밖의 파일을 덮었다");
+    assert!(std::fs::symlink_metadata(&manifest).unwrap().file_type().is_symlink(), "링크를 보통 파일로 바꿨다");
+    assert!(!c.calls().contains("plugin install"), "못 심었는데 등록했다\n{}", c.calls());
+    // `status` 도 같은 자로 읽는다 — 심는 길이 거절한 매니페스트를 심겼다고 하면 `written` 만 보는 쪽이 속는다.
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    assert!(json.contains("\"written\":false"), "체크아웃 밖을 가리키는 매니페스트를 심겼다고 한다\n{json}");
+
+    std::fs::remove_dir_all(&plugin).unwrap();
+    std::os::unix::fs::symlink(away.path(), &plugin).unwrap();
+    let out = c.run(s.path(), &["skill", "install"], true);
+    assert!(!out.status.success(), "밖을 가리키는 트리에 심고 성공으로 끝났다\n{}", text(&out));
+    let built: Vec<_> = std::fs::read_dir(away.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(built, ["bashrc"], "체크아웃 밖에 지었다");
+
+    // `uninstall` 도 밖에 선 트리를 심은 파일로 대지 않는다 — 그 자리(`.claude/moai-plugin/`)를 지우면 링크를 지나 밖을
+    // 지운다. 걷을 등록이 있어야 그 줄까지 가므로 이 저장소의 이름을 장부에 세운다.
+    let plan = String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], true).stdout).unwrap();
+    let market = field(&plan, "market");
+    let place = json_str(&plugin.display().to_string());
+    c.ledger("known_marketplaces.json", &format!(r#"{{"{market}":{{"installLocation":{place}}}}}"#));
+    let said = text(&c.run(s.path(), &["skill", "uninstall"], true));
+    assert!(said.contains("marketplace remove"), "걷을 등록이 안 서 그 줄까지 안 갔다\n{said}");
+    assert!(!said.contains("심은 파일"), "밖에 선 트리를 moai 가 심은 파일이라며 지우라고 한다\n{said}");
 }
 
 /// **훅 파일은 고른 에이전트의 것만, moai 가 통째로 쓴 것만 쓴다**(moai-u5wr.kov) — `--agent codex` 는
