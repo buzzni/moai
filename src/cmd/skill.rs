@@ -30,6 +30,10 @@ struct Place {
     /// 심는 스킬의 글 — `files`(Claude 의 트리)와 [`skill::AGENTS_DIR`] 의 트리가 이 한 벌에서 나온다. 부르는 자리마다
     /// [`skill::skills`] 를 다시 지으면 `guide` 의 글 넷을 명령 한 번에 몇 벌씩 짓는다.
     skills: Vec<skill::Skill>,
+    /// 커밋된 매니페스트(`plugin.json`)를 읽었는가 — `status` 의 `written` 이다. 철자를 잇는 읽기([`kept`])와 같은
+    /// 읽기라, 심는 길([`write_committed`])이 거절하는 자리(체크아웃 밖을 가리키는 링크, 보통 파일이 아닌 것)를 심겼다고
+    /// 하지 않는다.
+    written: bool,
 }
 
 fn place(ctx: &Ctx) -> R<Place> {
@@ -44,11 +48,9 @@ fn place(ctx: &Ctx) -> R<Place> {
     // 글자로 견주면 자리로 견준 것이다. `skill` 은 글만 짓는 모듈이라 파일 시스템을 거기서 안 본다.
     let resolved = crate::path::real(&current);
     let on_path = which("moai");
-    // **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`, moai-ml0d.21i) — 커밋된 트리라 받은 저장소의
-    // 링크일 수 있다. 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로 `skill status`·`install --dry-run`
-    // 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 는 메모리를 다 썼다. 못 읽으면 처음 심는 것처럼 부른 철자다.
-    let manifest = root.join(skill::DIR).join(".claude-plugin/plugin.json");
-    let planted = crate::held::read_inside(&manifest, &crate::held::Home::of(&root)).ok();
+    let dir = root.join(skill::DIR);
+    // 커밋된 매니페스트다([`read_committed`]) — 못 읽으면 처음 심는 것처럼 부른 철자다.
+    let planted = read_committed(&dir.join(".claude-plugin/plugin.json"), &root);
     let spelling = kept(planted.as_deref(), &resolved).unwrap_or_else(|| invoked(current, &resolved));
     let exe = skill::exe_name(&spelling, &resolved, on_path.as_deref());
     let prefix = repo.config.prefix.clone();
@@ -56,8 +58,9 @@ fn place(ctx: &Ctx) -> R<Place> {
     let skills = skill::skills();
     let files = plant(&prefix, &root, &exe, &skills);
     Ok(Place {
-        dir: root.join(skill::DIR),
+        dir,
         market: skill::market(&prefix, &root),
+        written: planted.is_some(),
         root,
         prefix,
         exe,
@@ -169,16 +172,16 @@ impl Chosen {
 }
 
 /// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). 커밋된 트리 셋 — [`skill::AGENTS_DIR`]·Claude 의
-/// 플러그인([`skill::DIR`], moai-ml0d.izy)·두 에이전트의 훅 파일([`HookFile::plant`]) — 이 모두 이 하나로 쓴다.
-/// `write_atomic_inside` 로 쓴다 — 임시 파일을 갈아끼우니 쓰려고 열지 않아 그 자리에 선 FIFO 앞에서 멈추지 않고(보통
-/// 파일이 아닌 자리는 그 자리를 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다. 갈아끼우는 `rename` 은 그
-/// 이름이 비는 틈을 안 남겨, 지우지 않는다는 이 모듈의 약속도 그대로다.
+/// 플러그인([`skill::DIR`], moai-ml0d.izy)·두 에이전트의 훅 파일([`HookFile::plant`]) — 이 모두 이 하나로 쓴다. 읽는
+/// 짝은 [`read_committed`] 다. `write_atomic_inside` 로 쓴다 — 임시 파일을 갈아끼우니 쓰려고 열지 않아 그 자리에 선
+/// FIFO 앞에서 멈추지 않고(보통 파일이 아닌 자리는 그 자리를 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만
+/// 따라간다. 갈아끼우는 `rename` 은 그 이름이 비는 틈을 안 남겨, 지우지 않는다는 이 모듈의 약속도 그대로다.
 ///
 /// **디렉터리를 짓기 전에도 잰다**(리뷰 moai-xs2h.dir) — `create_dir_all` 은 가운데 링크를 그대로 따라가, 받은
 /// 저장소가 커밋한 `.agents -> <밖>` 하나로 체크아웃 밖에 `skills/moai/references/` 를 지은 뒤에야
 /// `write_atomic_inside` 가 파일을 거절했다. 파일만 막고 디렉터리는 밖에 남기면 "체크아웃 안에서만 링크를 따른다"
 /// (moai-4oab) 가 반쪽이다.
-fn write_shared(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
+fn write_committed(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
     for (path, body) in files {
         let at = dir.join(path);
         if let Some(parent) = at.parent() {
@@ -221,7 +224,7 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
     // 안 기댄다. 못 쓰면 `claude` 를 부르기 전에 멈춘다.
     if let (Some((dir, files)), false) = (&shared, dry_run) {
-        write_shared(dir, files, &place.root)?;
+        write_committed(dir, files, &place.root)?;
     }
     // **훅 파일도 Claude 보다 먼저다**(moai-u5wr.kov) — 같은 까닭이다. 남의 파일은 안 쓰고 한 줄로 댄다([`HookFile`]).
     let root = place.root.clone();
@@ -354,10 +357,10 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         return Ok((serde_json::Value::Null, out));
     }
 
-    // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다. 쓰는 자는 `.agents` 와 같다([`write_shared`],
+    // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다. 쓰는 자는 `.agents` 와 같다([`write_committed`],
     // moai-ml0d.izy) — 맨 `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한
     // `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그 파일을 플러그인 JSON 으로 통째로 덮었다.
-    write_shared(&dir, &files, &root)?;
+    write_committed(&dir, &files, &root)?;
 
     // **`--json` 보다 먼저 푼다** — 아래 두 갈래가 다 이것을 쓴다. 기계 출력으로 빠지는 판은
     // 이 글들을 안 지으므로 값이 새지 않는다(`register` 의 걸음 이름은 사람 화면에만 선다).
@@ -463,7 +466,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, prefix, exe, on_path, files, skills } = place(ctx)?;
+    let Place { root, dir, market, prefix, exe, on_path, files, skills, written } = place(ctx)?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
@@ -514,7 +517,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             .collect();
         return super::json_line(&serde_json::json!({
             "dir": dir.display().to_string(),
-            "written": dir.join(".claude-plugin/plugin.json").is_file(),
+            "written": written,
             "market": market,
             "listed": listed.as_ref().map(|p| p.display().to_string()),
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
@@ -649,7 +652,7 @@ impl Shared {
     /// **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`). 그 자리는 이 판 전의 `status` 가 한 번도 안 열던
     /// 곳이라, 거기 선 FIFO 하나가 읽기를 멈춰 세우면 아무것도 안 막는다던 명령이 멈춘다. 못 읽은 파일은 낡은 것으로
     /// 센다 — 보통 파일이면 다시 심어 갈아끼우고, 보통 파일이 아닌 자리는 다시 심는 길이 그 자리를 대며 멈춘다
-    /// ([`write_shared`]).
+    /// ([`write_committed`]).
     fn read(root: &Path, skills: &[skill::Skill]) -> Shared {
         let dir = root.join(skill::AGENTS_DIR);
         let home = crate::held::Home::of(root);
@@ -743,7 +746,7 @@ impl HookFile {
         HookFile::all(root, exe).into_iter().filter(|h| chosen.shared.contains(&h.agent.as_str())).collect()
     }
 
-    /// **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`, [`Shared::read`] 와 같은 까닭). 못 읽는 자리는
+    /// **보통 파일만, 체크아웃 안에서만 읽는다**([`read_committed`], [`Shared::read`] 와 같은 까닭). 못 읽는 자리는
     /// moai 의 것이 아니다 — 다시 쓰는 길도 그 자리를 거절한다(`write_atomic_inside`). **뜻으로 견준다**
     /// ([`skill::same_hooks`]) — agy 가 제 꼴로 다시 쓴 파일을 낡았다고 하면 다시 심을 때마다 커밋된 파일이 흔들린다.
     fn state(&self, root: &Path) -> HookState {
@@ -755,9 +758,9 @@ impl HookFile {
         if std::fs::symlink_metadata(&self.path).is_err() {
             return (HookState::Missing, None);
         }
-        match crate::held::read_inside(&self.path, &crate::held::Home::of(root)) {
-            Ok(text) if text == self.want || skill::same_hooks(&text, &self.want) => (HookState::Current, Some(text)),
-            Ok(text) if skill::hooks_are_ours(self.dialect, &text) => (HookState::Stale, Some(text)),
+        match read_committed(&self.path, root) {
+            Some(text) if text == self.want || skill::same_hooks(&text, &self.want) => (HookState::Current, Some(text)),
+            Some(text) if skill::hooks_are_ours(self.dialect, &text) => (HookState::Stale, Some(text)),
             _ => (HookState::Foreign, None),
         }
     }
@@ -795,7 +798,7 @@ impl HookFile {
     fn plant(&self, root: &Path, dry_run: bool) -> R<HookState> {
         let state = self.state(root);
         if matches!(state, HookState::Missing | HookState::Stale) && !dry_run {
-            write_shared(
+            write_committed(
                 root,
                 &[(self.path.strip_prefix(root).unwrap_or(&self.path).to_path_buf(), self.want.clone())],
                 root,
@@ -857,7 +860,7 @@ pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
     let place = place(ctx)?;
     let shared = place.root.join(skill::AGENTS_DIR);
     // moai 가 심는 이름만 댄다 — 그 자리의 다른 스킬은 남의 것이다. **그 자리가 링크로 체크아웃 밖에 닿으면 아무것도
-    // 안 댄다**([`outside`]) — moai 는 거기 심지 않으므로(`write_shared`) 거기 선 것은 남의 것이고, 낸 `rm -r` 은 그
+    // 안 댄다**([`outside`]) — moai 는 거기 심지 않으므로(`write_committed`) 거기 선 것은 남의 것이고, 낸 `rm -r` 은 그
     // 링크를 지나 밖의 디렉터리를 지운다.
     let left: Vec<PathBuf> = match outside(&shared, &place.root) {
         Some(_) => Vec::new(),
@@ -1033,7 +1036,12 @@ fn claude_uninstall(ctx: &Ctx, place: Place, dry_run: bool) -> R<(serde_json::Va
     out.extend(retiring.kept_lines(lang));
     out.push(String::new());
     out.push(say(lang, "skill.reopen_to_finish").to_string());
-    out.push(fill(say(lang, "skill.files_left"), &[("dir", skill::DIR)]));
+    // **트리가 링크로 체크아웃 밖에 닿으면 남긴 파일로 대지 않는다**([`outside`]) — moai 는 거기 심지 않으므로
+    // ([`write_committed`]) 거기 선 것은 남의 것이고, 그 자리(`.claude/moai-plugin/`)를 지우면 링크를 지나 밖을 지운다.
+    // `uninstall` 이 `.agents` 를 대지 않는 것과 같은 셈이다.
+    if outside(&dir, &root).is_none() {
+        out.push(fill(say(lang, "skill.files_left"), &[("dir", skill::DIR)]));
+    }
     Ok((serde_json::Value::Null, out))
 }
 
@@ -1218,9 +1226,10 @@ struct Undeclare {
 impl Undeclare {
     /// 그 파일에서 선언을 지운다. **이미 없으면 이룬 것이다.** 그 파일이 이 마켓의 플러그인을 아직 켜 두었으면
     /// 안 지운다 — 같은 `call` 에서 앞선 `plugin uninstall` 이 실패한 판이고, 선언을 걷으면 켠 플러그인이 출처를
-    /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다. 읽는 자는 계획할 때와 같다([`read_settings`]).
+    /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다. 읽는 자는 계획할 때와 같다([`read_committed`]) —
+    /// 그 사이에 못 읽게 된 파일은 못 지운 것으로 센다.
     fn call(&self, root: &Path) -> bool {
-        let Some(text) = read_settings(&self.file, root) else { return false };
+        let Some(text) = read_committed(&self.file, root) else { return false };
         let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
         if settings.get("extraKnownMarketplaces").and_then(|m| m.get(self.market)).is_none() {
             return true;
@@ -1402,7 +1411,7 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
         return out;
     }
     let file = root.join(".claude/settings.json");
-    let Some(settings) = read_settings(&file, root).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    let Some(settings) = read_committed(&file, root).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
     else {
         return out;
     };
@@ -1420,12 +1429,13 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
     out
 }
 
-/// 커밋된 설정(`.claude/settings.json`)을 읽는다 — **보통 파일만, 체크아웃 `root` 안에서만**(`held::read_inside`,
-/// moai-ml0d.21i). 계획([`retire`])과 지우기 직전([`Undeclare::call`])이 이 하나로 읽는다. 맨 `fs::read_to_string` 으로
-/// 읽던 판은 받은 저장소가 커밋한 `-> /dev/zero` 하나로 `skill install` 이 메모리를 다 썼고 FIFO 앞에서 멈췄다.
-/// 쓰기(`write_atomic_inside`)가 이미 거절하던 자리라, 밖을 가리키는 링크를 읽어 걸음을 세워 봐야 지우지도 못한다.
-/// **못 읽으면 `None` 이다** — 어느 출처를 선언했는지 모르니 걸음을 안 세운다.
-fn read_settings(file: &Path, root: &Path) -> Option<String> {
+/// 커밋된 파일 하나를 읽는다 — **보통 파일만, 체크아웃 `root` 안에서만**(`held::read_inside`, moai-ml0d.21i). 받은
+/// 저장소가 커밋한 자리라 링크나 FIFO 일 수 있다 — 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로
+/// `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 하나로 메모리를 다 썼다. 체크아웃 밖을
+/// 가리키는 링크는 쓰기(`write_atomic_inside`)도 거절하는 자리라 읽어도 고칠 길이 없다. 매니페스트([`place`])·설정
+/// ([`retire`]·[`Undeclare::call`])·두 에이전트의 훅 파일([`HookFile::judged`])이 이 하나로 읽는다. **못 읽으면 `None`
+/// 이다** — 그것을 무엇으로 셀지는 부르는 쪽이 정한다.
+fn read_committed(file: &Path, root: &Path) -> Option<String> {
     crate::held::read_inside(file, &crate::held::Home::of(root)).ok()
 }
 
