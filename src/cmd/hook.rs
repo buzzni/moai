@@ -1286,11 +1286,18 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
     // 훅마다 서로의 장과 편지를 빼앗았다. 토막을 이어도 산 남의 이름이면 세션 id 를 통째로 잇는다 — 세션마다 하나다.
     let whole: String = session.chars().filter(char::is_ascii_alphanumeric).collect();
     let taken = |name: &str| held_by_other(name, "");
+    // **지은 이름은 다른 기계의 조용한 장이 하루 쥔다**(moai-nas5, [`mail::Presence::holds_made_name`]) — Claude 의 세션
+    // 이름은 컨테이너마다 따로 세어 겹친다. 떠난 것으로 읽힌(20분) 저쪽 장의 이름을 내주던 판은 그 장을 덮고 아직 산 저쪽
+    // 세션의 편지를 보낸 이에게 되돌렸다.
+    let made_taken = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && p.holds_made_name());
     let free = |name: String| {
-        if !taken(&name) {
+        if !made_taken(&name) {
             return Some(name);
         }
-        [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| mail::name_with(&name, tail)).find(|n| !taken(n))
+        [short.as_str(), whole.as_str()]
+            .into_iter()
+            .filter_map(|tail| mail::name_with(&name, tail))
+            .find(|n| !made_taken(n))
     };
     if dialect == Dialect::Codex {
         return Some(fresh(mail::codex_name(&all, session)?, "codex", 0, None, (None, None)));
@@ -1324,9 +1331,13 @@ fn attendee(input: &Input, repo: &Repo, dialect: Dialect) -> Option<mail::Presen
             .at(agent.pid, agent.start),
         ));
     }
-    let name = asked
-        .filter(|n| !taken(n))
-        .or_else(|| (vendor == "claude").then(|| mail::claude_session_name(agent.pid)).flatten())
+    // `MOAI_AGENT` 는 창이 대는 이름이라 떠난 장의 것이면 그대로 되찾는다(moai-dhxm) — 가르는 것은 지은 이름뿐이다.
+    if let Some(name) = asked.filter(|n| !taken(n)) {
+        return Some(fresh(name, vendor, agent.pid, agent.start, tmux));
+    }
+    let name = (vendor == "claude")
+        .then(|| mail::claude_session_name(agent.pid))
+        .flatten()
         .or_else(|| mail::name_with(vendor, &short))?;
     Some(fresh(free(name)?, vendor, agent.pid, agent.start, tmux))
 }
