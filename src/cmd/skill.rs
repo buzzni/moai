@@ -173,9 +173,11 @@ impl Chosen {
 
 /// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). 커밋된 트리 셋 — [`skill::AGENTS_DIR`]·Claude 의
 /// 플러그인([`skill::DIR`], moai-ml0d.izy)·두 에이전트의 훅 파일([`HookFile::plant`]) — 이 모두 이 하나로 쓴다. 읽는
-/// 짝은 [`read_committed`] 다. `write_atomic_inside` 로 쓴다 — 임시 파일을 갈아끼우니 쓰려고 열지 않아 그 자리에 선
-/// FIFO 앞에서 멈추지 않고(보통 파일이 아닌 자리는 그 자리를 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만
-/// 따라간다. 갈아끼우는 `rename` 은 그 이름이 비는 틈을 안 남겨, 지우지 않는다는 이 모듈의 약속도 그대로다.
+/// 짝은 [`read_committed`] 다. 임시 파일을 갈아끼우니([`write_one`]) 쓰려고 열지 않아 그 자리에 선 FIFO 앞에서
+/// 멈추지 않고(보통 파일이 아닌 자리는 그 자리를 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다.
+/// 갈아끼우는 `rename` 은 그 이름이 비는 틈을 안 남겨, 지우지 않는다는 이 모듈의 약속도 그대로다.
+///
+/// **임시 파일은 `.moai/` 에 먼저 짓는다**([`write_one`], moai-dj4j.rs4).
 ///
 /// **디렉터리를 짓기 전에도 잰다**(리뷰 moai-xs2h.dir) — `create_dir_all` 은 가운데 링크를 그대로 따라가, 받은
 /// 저장소가 커밋한 `.agents -> <밖>` 하나로 체크아웃 밖에 `skills/moai/references/` 를 지은 뒤에야
@@ -196,9 +198,20 @@ fn write_committed(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()
             }
             std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
         }
-        crate::store::write_atomic_inside(&at, body.as_bytes(), root)?;
+        write_one(&at, body.as_bytes(), root)?;
     }
     Ok(())
+}
+
+/// 커밋되는 파일 하나를 갈아끼운다 — **임시 파일은 체크아웃의 `.moai/` 에 먼저 짓는다**(moai-dj4j.rs4, 사용자 결정
+/// 2026-10-05). 대상 곁에 지으면 `open_tmp` 와 `rename` 사이에서 죽은 쓰기가 `SKILL.md.tmp.<pid>.<n>` 을
+/// `.claude/moai-plugin/**`·`.agents/skills/**`·`.codex/` 에 남겼다 — 무시하는 줄도 치우는 자도 없어 `git add -A` 가
+/// 그것을 담았다(리뷰 moai-ml0d.que 9번). `.moai/*.tmp.*` 는 `init` 이 이미 무시하는 자리다(moai-3akx). 거기서 못
+/// 쓰면(다른 파일시스템이라 `EXDEV`, 읽기 전용, `.moai` 가 디렉터리가 아니다) 대상 곁으로 물러선다
+/// (`store::write_atomic_in`) — `init` 의 뿌리 파일과 같은 꼴이다. 트리 셋([`write_committed`])과 옛 선언을 걷는
+/// 커밋된 설정([`Undeclare`])이 이 하나로 쓴다.
+fn write_one(at: &Path, bytes: &[u8], root: &Path) -> R<()> {
+    crate::store::write_atomic_in(at, bytes, &root.join(".moai"), root)
 }
 
 /// `dir` 이 링크를 다 푼 뒤 체크아웃 `root` 밖이나 그 `.git/` 안에 닿으면 그 자리 — 안이면 `None` 이다. 아직 없는
@@ -1241,7 +1254,7 @@ impl Undeclare {
             return false;
         }
         skill::drop_marketplace(&text, self.market)
-            .is_some_and(|out| crate::store::write_atomic_inside(&self.file, out.as_bytes(), root).is_ok())
+            .is_some_and(|out| write_one(&self.file, out.as_bytes(), root).is_ok())
     }
 
     /// 할 일 — 연습이 [`Retire::shown`] 자리에 댄다.
@@ -1550,5 +1563,43 @@ mod tests {
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
         }
+    }
+
+    /// 디렉터리에 선 이름들 — 이름 차례로.
+    fn names(d: &Path) -> Vec<String> {
+        let mut v: Vec<String> =
+            std::fs::read_dir(d).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        v.sort();
+        v
+    }
+
+    /// **커밋되는 트리의 임시 파일은 `.moai/` 에 선다**(moai-dj4j.rs4) — 대상 곁에 서면 쓰다 죽은 `install` 이
+    /// `SKILL.md.tmp.<pid>.<n>` 을 커밋되는 트리에 남기고 아무것도 그것을 무시하거나 치우지 않는다. 곁의 임시 이름을 다
+    /// 막아 두고 써 정말 `.moai/` 를 거치는지 본다. `.moai` 가 없으면 곁에서 짓는다.
+    #[cfg(unix)]
+    #[test]
+    fn committed_files_are_swapped_through_a_temp_file_in_dot_moai() {
+        let s = crate::scratch::Scratch::new("skill-stage");
+        std::fs::create_dir(s.join(".moai")).unwrap();
+        let dir = s.join(".agents/skills");
+        std::fs::create_dir_all(dir.join("moai")).unwrap();
+        let files = [(PathBuf::from("moai/SKILL.md"), "글\n".to_string())];
+        let taken: Vec<_> = crate::store::tmp_names("SKILL.md").map(|n| dir.join("moai").join(n)).collect();
+        for t in &taken {
+            std::fs::create_dir(t).unwrap();
+        }
+        let wrote = write_committed(&dir, &files, s.path());
+        for t in &taken {
+            std::fs::remove_dir(t).unwrap();
+        }
+        wrote.expect("`.moai/` 를 안 거치고 대상 곁에서 지으려 했다");
+        assert_eq!(std::fs::read_to_string(dir.join("moai/SKILL.md")).unwrap(), "글\n");
+        assert_eq!(names(&s.join(".moai")), Vec::<String>::new(), ".moai 에 찌꺼기가 남았다");
+
+        std::fs::remove_dir(s.join(".moai")).unwrap();
+        let files = [(PathBuf::from("moai/SKILL.md"), "둘째\n".to_string())];
+        write_committed(&dir, &files, s.path()).expect("`.moai` 가 없는 체크아웃에서 곁으로 물러서지 않았다");
+        assert_eq!(std::fs::read_to_string(dir.join("moai/SKILL.md")).unwrap(), "둘째\n");
+        assert_eq!(names(&dir.join("moai")), ["SKILL.md"], "대상 곁에 찌꺼기가 남았다");
     }
 }

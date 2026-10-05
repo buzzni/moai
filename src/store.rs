@@ -2147,10 +2147,10 @@ fn process_nonce() -> u64 {
 /// 찌꺼기가 `../shared/` 처럼 `init` 이 무시하지 않는 자리에 남아 `git add -A` 에 딸려 온다 —
 /// moai-3akx 가 뿌리 파일에서 막은 바로 그 찌꺼기다. 물러서는 까닭은 `rename` 이 파일시스템을 못
 /// 건너서다 — 대상이 다른 파일시스템이면 받은 철자 곁에서는 `EXDEV` 로 멈춘다. 실패한 쪽은 임시
-/// 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다(`cmd::init::plant` 와 같은 물러섬이다).
-/// 링크가 아니면 두 자리가 같아 한 번뿐이다.
+/// 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다([`write_atomic_in`] 이 `.moai/` 에서 물러서는
+/// 것과 같은 길이다, [`atomic`]). 링크가 아니면 두 자리가 같아 한 번뿐이다.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
-    atomic(path, bytes, None)
+    atomic(path, bytes, None, None)
 }
 
 /// [`write_atomic`] 이되 **링크는 `checkout` 안을 가리킬 때만 따라간다**(moai-4oab, 2026-09-29 사용자
@@ -2159,17 +2159,33 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> R<()> {
 /// 밖의 파일을 고쳐 쓴다. 사용자 설정·읽음 표시·`latest.toml` 은 사람이 제 손으로 건 링크(dotfiles)라
 /// [`write_atomic`] 으로 어디든 따라간다.
 pub(crate) fn write_atomic_inside(path: &Path, bytes: &[u8], checkout: &Path) -> R<()> {
-    atomic(path, bytes, Some(checkout))
+    atomic(path, bytes, Some(checkout), None)
 }
 
-/// [`write_atomic`]·[`write_atomic_inside`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한 벌이다.
-fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>) -> R<()> {
+/// [`write_atomic`]·[`write_atomic_inside`]·[`write_atomic_in`] 의 몸통 — 임시 자리를 고르고 물러서는 것이 여기 한
+/// 벌이다. 차례는 `stage`(받았으면) → 받은 철자 곁 → 가리키는 파일 곁이고, 같은 자리는 한 번만 간다. 실패한 자리는
+/// 임시 파일을 치우고 대상을 안 건드리므로([`replace`]) 다음 자리로 가도 잃을 것이 없다. 다 실패하면 마지막 자리의
+/// 말을 낸다.
+///
+/// **`stage` 에서 실패하면 까닭을 가리지 않고 물러선다**(moai-dj4j.rs4, `cmd::init::plant` 가 하던 꼴) — 다른
+/// 파일시스템이면 `rename` 이 `EXDEV` 로, 읽기 전용이면 임시 파일 만들기가 막힌다. 장치 번호로 미리 재던 `init` 은 뒤의
+/// 것을 못 봐 쓸 수 있는 파일을 "못 썼다" 고 했다. 쓰지 못하는 것보다 찌꺼기가 남을 수 있는 쪽이 낫다.
+fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>) -> R<()> {
     let real = target_of(path, within)?;
     let (near, far) = (parent_of(path, path)?, parent_of(&real, path)?);
-    match replace(&real, bytes, near) {
-        Err(_) if near != far => replace(&real, bytes, far),
-        done => done,
+    let mut tried: Vec<&Path> = Vec::with_capacity(3);
+    let mut last = None;
+    for dir in stage.into_iter().chain([near, far]) {
+        if tried.contains(&dir) {
+            continue;
+        }
+        tried.push(dir);
+        match replace(&real, bytes, dir) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
     }
+    Err(last.expect("받은 철자 곁은 늘 간다"))
 }
 
 /// 파일이 든 디렉터리 — 없으면(뿌리 `/` 나 빈 경로) `named` 를 대는 거절이다(moai-iq7j).
@@ -2341,12 +2357,13 @@ fn on_lock(real: &Path, root: &Path) -> bool {
     locks.filter_map(|lock| spelled(&lock)).any(|lock| lock == landed)
 }
 
-/// [`write_atomic`] 이되 **임시 파일을 `tmp_dir` 에 둔다**(moai-3akx). 쓰다 죽으면 임시 파일이
-/// 그 자리에 남으므로, 저장소 뿌리의 파일을 쓰는 `init` 은 이미 무시되는 `.moai/*.tmp.*` 자리를
-/// 준다 — 옆자리에 두면 `AGENTS.md.tmp.…` 가 뿌리에 남아 `git add -A` 에 딸려 온다.
-/// `rename` 은 파일시스템을 못 건너므로 `tmp_dir` 이 다른 파일시스템이면 `Err` 다 — 그때 옆자리로
-/// 물러서는 것은 고르는 쪽이 한다(`cmd::init::plant`). 실패하면 **임시 파일을 남기지 않고** 대상은
-/// 한 글자도 안 바뀐다.
+/// [`write_atomic`] 이되 **임시 파일을 먼저 `tmp_dir` 에 짓는다**(moai-3akx). 쓰다 죽으면 임시 파일이
+/// 그 자리에 남으므로, 커밋되는 파일을 쓰는 쪽은 이미 무시되는 `.moai/*.tmp.*` 자리를 준다 — 옆자리에
+/// 두면 `AGENTS.md.tmp.…` 가 뿌리에, `SKILL.md.tmp.…` 가 `skill install` 의 트리에 남아 `git add -A` 에
+/// 딸려 온다(`init` 의 뿌리 파일, moai-dj4j.rs4 부터 `skill install` 의 커밋된 트리).
+/// **거기서 못 쓰면 옆자리로 물러선다**([`atomic`]) — `rename` 은 파일시스템을 못 건너 `tmp_dir` 이 다른
+/// 파일시스템이면 `EXDEV` 로 멈춘다. 물러서는 것을 부르는 쪽마다 두던 판(`cmd::init::plant`)은 이 길을 새로
+/// 부르는 쪽이 그것을 잊을 자리였다. 실패하면 **임시 파일을 남기지 않고** 대상은 한 글자도 안 바뀐다.
 ///
 /// **대상이 심볼릭 링크면 링크를 따라가 가리키는 파일을 바꾼다**(moai-4oab). `rename` 은 링크를
 /// 안 따라가고 링크 자체를 갈아끼운다 — `AGENTS.md -> CLAUDE.md` 인 저장소의 `init` 이
@@ -2357,10 +2374,10 @@ fn on_lock(real: &Path, root: &Path) -> bool {
 /// 락은 읽기보다 먼저 잡아야 하는데, 이 함수는 읽은 뒤에 불린다. 링크 너머의 파일을 함께 쓰는 쪽과
 /// 서로를 막는 것은 부르는 쪽의 일이다([`Repo::write_locked`] 의 `far_lock`, 사용자 설정의 둘째 락).
 ///
-/// **부르는 쪽은 저장소 뿌리의 파일(`init` 의 `AGENTS.md`)뿐이라 링크는 `checkout` 안에서만
-/// 따른다**([`write_atomic_inside`] 와 같은 까닭이다).
+/// **부르는 쪽은 저장소가 든 파일뿐이라 링크는 `checkout` 안에서만 따른다**([`write_atomic_inside`] 와
+/// 같은 까닭이다).
 pub(crate) fn write_atomic_in(path: &Path, bytes: &[u8], tmp_dir: &Path, checkout: &Path) -> R<()> {
-    replace(&target_of(path, Some(checkout))?, bytes, tmp_dir)
+    atomic(path, bytes, Some(checkout), Some(tmp_dir))
 }
 
 /// 저장소가 든 파일에 **제자리에서 덧붙인다**(`O_APPEND`) — 링크는 [`write_atomic_inside`] 와 같은 자로
@@ -2418,7 +2435,7 @@ fn torn_tail(f: &mut std::fs::File) -> std::io::Result<bool> {
     Ok(last[0] != b'\n')
 }
 
-/// [`write_atomic`]·[`write_atomic_in`] 의 몸통 — **이미 푼 자리**([`target_of`])를 `tmp_dir` 의 임시
+/// [`atomic`] 이 고른 임시 자리마다 부르는 몸통 — **이미 푼 자리**([`target_of`])를 `tmp_dir` 의 임시
 /// 파일로 갈아끼운다. 푸는 것을 여기 두지 않는 까닭은 한 번만 풀기 위해서다(리뷰) — 두 번 풀면 그 사이에
 /// 링크가 바뀐 경우에 임시 자리와 갈아끼울 자리가 서로 다른 풀이에서 온다.
 fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
@@ -4602,6 +4619,43 @@ mod tests {
         write_atomic_in(&link, "셋째\n".as_bytes(), &s.join("tmp"), s.path()).unwrap();
         assert!(is_link(&link), "임시 자리를 따로 준 쓰기가 링크를 갈아끼웠다");
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "셋째\n");
+    }
+
+    /// **임시 자리를 받은 쓰기는 거기서 먼저 짓고, 거기서 못 쓰면 대상 곁으로 물러선다**(moai-dj4j.rs4) — 물러섬을
+    /// 부르는 쪽(`cmd::init::plant`)이 따로 두던 것을 쓰는 자 하나로 모았다. 곁의 임시 이름을 다 막아도 써져야 받은
+    /// 자리에서 난 것이고, 받은 자리가 못 쓰는 자리(없다, 읽기 전용)여도 써져야 물러선 것이다 — `EXDEV` 의 물러섬을 한
+    /// 파일시스템 안에서 시험하는 길이다. 어느 쪽이든 찌꺼기는 안 남는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_staged_write_falls_back_beside_the_target() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = Scratch::new("store-atomic-stage");
+        let (stage, tree) = (s.join("stage"), s.join("tree"));
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::create_dir(&tree).unwrap();
+        let file = tree.join("SKILL.md");
+        let read = || std::fs::read_to_string(&file).unwrap();
+
+        let taken: Vec<_> = tmp_names("SKILL.md").map(|n| tree.join(n)).collect();
+        for t in &taken {
+            std::fs::create_dir(t).unwrap();
+        }
+        let wrote = write_atomic_in(&file, b"one\n", &stage, s.path());
+        for t in &taken {
+            std::fs::remove_dir(t).unwrap();
+        }
+        wrote.expect("받은 임시 자리를 안 거치고 대상 곁에서 지으려 했다");
+        assert_eq!(read(), "one\n");
+
+        write_atomic_in(&file, b"two\n", &s.join("missing"), s.path()).expect("없는 임시 자리에서 물러서지 않았다");
+        assert_eq!(read(), "two\n");
+        std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let wrote = write_atomic_in(&file, b"three\n", &stage, s.path());
+        std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o755)).unwrap();
+        wrote.expect("읽기 전용 임시 자리에서 물러서지 않았다");
+        assert_eq!(read(), "three\n");
+        assert_eq!(names(&stage), Vec::<String>::new(), "임시 자리에 찌꺼기가 남았다");
+        assert_eq!(names(&tree), ["SKILL.md"], "대상 곁에 찌꺼기가 남았다");
     }
 
     /// **가리키는 파일이 아직 없으면 거기에 만든다** — dotfiles 는 링크를 먼저 걸기도 한다. 가리키는

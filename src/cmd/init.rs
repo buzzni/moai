@@ -977,18 +977,11 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
     if path.exists() {
         std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
     }
-    let first = tmp_dir(path);
     // 링크는 저장소 안을 가리킬 때만 따라간다(moai-4oab) — 받은 저장소가 커밋한 `AGENTS.md` 링크가
-    // 체크아웃 밖을 가리키면 `init` 이 그 파일을 고쳐 쓴다. 뿌리는 이 파일이 든 자리다.
+    // 체크아웃 밖을 가리키면 `init` 이 그 파일을 고쳐 쓴다. 뿌리는 이 파일이 든 자리다. `.moai/` 에서 못
+    // 갈아 끼웠으면 옆자리로 한 번 더 가는 것은 쓰는 자가 한다 — 까닭은 [`tmp_dir`] 에 적었다.
     let checkout = crate::path::dir_of(path);
-    match crate::store::write_atomic_in(path, text.as_bytes(), &first, checkout) {
-        // `.moai/` 에서 못 갈아 끼웠으면 옆자리로 한 번 더 — 까닭은 [`tmp_dir`] 에 적었다. 실패한
-        // 쪽은 임시 파일을 치우고 대상을 안 건드리므로 다시 써도 잃을 것이 없다.
-        Err(_) if path.parent() != Some(first.as_path()) => {
-            crate::store::write_atomic_inside(path, text.as_bytes(), checkout).map_err(|e| e.message)
-        }
-        done => done.map_err(|e| e.message),
-    }
+    crate::store::write_atomic_in(path, text.as_bytes(), &tmp_dir(path), checkout).map_err(|e| e.message)
 }
 
 /// 뿌리 파일을 갈아 끼울 임시 파일의 자리 — **`.moai/`** 다(moai-3akx, 2026-09-18 사용자 결정).
@@ -997,7 +990,7 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
 /// `.gitignore` 블록은 `.moai/*.tmp.*` 만 덮는다. 규칙을 더하는 길은 버렸다 — 이미 심긴
 /// 저장소마다 "규칙이 빠졌다" 알림이 새로 선다. `.moai/` 는 `init` 이 이 쓰기보다 먼저 세운다.
 ///
-/// **거기서 못 쓰면 [`plant`] 가 옆자리로 물러선다 — 미리 재지 않고 써 보고 물러선다.** 다른
+/// **거기서 못 쓰면 옆자리로 물러선다 — 미리 재지 않고 써 보고 물러선다**(`store::write_atomic_in`). 다른
 /// 파일시스템이면 `rename` 이 `EXDEV` 로, 읽기 전용 `.moai/` 면 임시 파일 만들기가 막힌다. 장치
 /// 번호로 미리 재던 때는 뒤의 것을 못 봐 쓸 수 있는 `AGENTS.md` 를 "못 썼다" 고 하며 그 파일을
 /// 고치라고 했고, unix 밖에서는 재지도 못했다. 블록을 못 쓰는 것보다 찌꺼기가 남을 수 있는 쪽이
