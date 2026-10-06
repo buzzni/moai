@@ -5034,3 +5034,4 @@
 {"ts":"2026-10-06T11:56:02Z","id":"moai-qde9.2hx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"15건 중 13건 받아 자식 11개로 넘김(p1 w5j·6e5·1h7·ui8, p2 i9w·yzg·wcx·w0p, p3 88m·mqf·yt6), 13번은 backlog moai-p1vy, 15번(PATH 훅)은 사람의 결정이라 되묻는다"}
 {"ts":"2026-10-06T12:10:43Z","id":"moai-95do","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 화면의 기본값이 훅을 안 깐다"}
 {"ts":"2026-10-06T12:10:44Z","id":"moai-bth3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"아카이브 뒤끝 — 리뷰 qde9.2hx 의 회귀 열 건"}
+{"ts":"2026-10-06T12:11:43Z","id":"moai-qde9.2hx.w5j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
