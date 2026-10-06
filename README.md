@@ -97,7 +97,7 @@ cargo build --release      # target/release/moai
 ## First five minutes
 
 ```sh
-moai init                            # writes .moai/ and the AGENTS.md block
+moai init                            # asks first in a terminal; --yes plants as before
 moai status                          # board, warnings, flow — start sessions here
 moai add 'the board wraps at 80 columns' -t bug -p 1
 moai ready                           # what you can pick up right now
@@ -219,6 +219,13 @@ the three decisions an agent has to make — create or idea, defer or done, and
 whether a request is big enough to split into an epic. Re-run `moai init` when
 the tool grows; it rewrites that block and tops up the `.gitattributes` and
 `.gitignore` rules it manages. It never touches your issues or your journal.
+
+The first `init` in a terminal asks where the guide goes — the whole block,
+`.moai/guide.md` with a link in the block, or the Claude hooks for a tracker kept
+out of git — and `--guide` says it without asking. Scripts and agents use the old
+block default when no existing ignore rules or guide files settle the choice.
+Initialization also preserves a clone's existing guide link and recognizes installed
+moai hooks; a git failure is reported before anything is planted.
 
 If your agent reads some other file, take the same block and paste it there:
 

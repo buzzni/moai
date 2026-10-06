@@ -4903,7 +4903,7 @@ impl Warning {
     }
 
     /// 딸린 파일(`.gitignore`·`.gitattributes`)에 moai 가 쓰는 규칙이 빠졌다는 **알림**
-    /// (moai-2f99). 재는 쪽은 `cmd::init::dotfile_gaps` 고, `status` 와 훅의 보드가 이것을
+    /// (moai-2f99). 재는 쪽은 `cmd::init::gaps_in` 고, `status` 와 훅의 보드가 이것을
     /// `notices` 에 얹는다 — [`status`] 는 `&[Issue]` 만 받는 순수 함수라 파일을 안 읽는다.
     ///
     /// **파일마다 `kind` 가 다르다**(부르는 쪽이 고른다). 빠졌을 때의 결과가 아주 달라
@@ -4919,7 +4919,7 @@ impl Warning {
     }
 
     /// 딸린 파일(`.gitattributes`·`.gitignore`)이 **링크라는 알림**(moai-yke5). 재는 쪽은
-    /// `cmd::init::linked_dotfiles` 고, `ids` 에 링크인 파일의 이름을 **모두** 든다.
+    /// `cmd::init::linked_in` 고, `ids` 에 링크인 파일의 이름을 **모두** 든다.
     ///
     /// **[`Warning::dotfile_rules`] 와 가른다.** git 은 2.32 부터 체크아웃 안의 링크인 딸린 파일을 안 읽어
     /// 규칙이 하나도 안 서는데, 빠진 줄로 말하면 `moai init` 을 대게 되고 그 `init` 은 링크에 안 쓰므로
@@ -4931,6 +4931,11 @@ impl Warning {
     /// 갈래로 알림을 찾는 쪽은 하나를 잃는다.
     pub fn dotfile_linked(names: &[&str]) -> Warning {
         Warning::new("dotfile_linked", names.iter().map(|n| n.to_string()).collect()).notice()
+    }
+
+    /// git 이 답하지 않아 추적 방식과 빠진 딸린 파일 규칙을 잴 수 없었다.
+    pub fn tracking_unknown() -> Warning {
+        Warning::new("tracking_unknown", Vec::new()).notice()
     }
 
     /// 트래커 파일(`.moai/issues.jsonl`)이 **링크라는 알림**(moai-jo3h, 2026-09-29 사용자 결정). 재는 쪽은

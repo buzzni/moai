@@ -5,6 +5,7 @@ use crate::cmd::merge_driver::Planting;
 use crate::config::DEFAULT_STATUSES;
 use crate::held::Fell;
 use crate::i18n::{fill, say};
+use crate::init_choice::{Choices as Choice, Flags, Guide, Plan, Tracking};
 use crate::store::Elsewhere;
 use std::path::Path;
 
@@ -247,7 +248,13 @@ fn read_agents(root: &Path) -> Result<Option<String>, Fell> {
 
 /// 이 디렉터리의 AGENTS.md 를 못 읽은 한 줄 — `<자리>: <까닭>`([`read_agents`]).
 fn agents_unread(lang: crate::i18n::Lang, root: &Path, fell: &Fell) -> String {
-    format!("{}: {}", root.join("AGENTS.md").display(), unread(lang, fell))
+    unread_at(lang, root, "AGENTS.md", fell)
+}
+
+/// 이 디렉터리의 `name` 을 못 읽은 한 줄 — `<자리>: <까닭>`. [`agents_state`] 는 링크 모드에서 `.moai/guide.md` 도
+/// 읽으므로 못 읽은 파일의 이름을 함께 낸다.
+fn unread_at(lang: crate::i18n::Lang, root: &Path, name: &str, fell: &Fell) -> String {
+    format!("{}: {}", root.join(name).display(), unread(lang, fell))
 }
 
 /// 저장소가 든 파일을 못 읽은 까닭 한 토막 — 안 읽기로 한 것은 고른 말로([`crate::held::said`]), io 가
@@ -265,20 +272,302 @@ fn unread(lang: crate::i18n::Lang, fell: &Fell) -> String {
 ///
 /// **글을 함께 내는 것은 낡음의 갈래([`stale_kind`])를 같은 글에서 재려는 것이다**(리뷰 moai-x0o7.52k) — 갈래를
 /// 재려고 다시 읽던 판은 파일을 두 번 열었고, 둘째 읽기가 지면 빈 글로 쳐 바이너리가 쓴 블록을 손으로 고쳤다고 댔다.
-pub fn agents_state(root: &Path) -> Result<(BlockState, String), Fell> {
-    let text = read_agents(root)?.unwrap_or_default();
-    Ok((block_state(&text, &crate::guide::agents()), text))
+///
+/// **못 읽은 자리는 그 파일의 이름과 함께 낸다**(리뷰 moai-zynt.63u) — 링크 모드는 `.moai/guide.md` 도 읽는데, 그
+/// 실패를 AGENTS.md 의 것으로 대던 판은 멀쩡한 AGENTS.md 를 들여다보게 했다.
+pub fn agents_state(root: &Path) -> Result<(BlockState, String), (&'static str, Fell)> {
+    let text = read_agents(root).map_err(|fell| ("AGENTS.md", fell))?.unwrap_or_default();
+    if !links_to_guide(&text) {
+        return Ok((block_state(&text, &crate::guide::agents()), text));
+    }
+    // **링크 모드면 두 자리를 다 잰다**(moai-cbfz) — 링크 블록이 맞고, 그것이 가리키는 파일이 이 바이너리가
+    // 쓸 전문과 같아야 맞다. 트래커가 있는데 파일이 없으면 낡은 것이다: `init` 이 다시 쓴다.
+    let link = block_state(&text, &crate::guide::agents_link());
+    if link != BlockState::Current {
+        return Ok((link, text));
+    }
+    let tracker = crate::store::Repo::opened_root(root);
+    let path = tracker.join(crate::guide::GUIDE_FILE);
+    let guide = read_held(&path, &crate::held::Home::of(&tracker)).map_err(|fell| (crate::guide::GUIDE_FILE, fell))?;
+    // git 밖의 트래커가 없는 새 클론은 링크의 init --print 대체 경로를 쓴다. 손질된 파일이 아니다.
+    if guide.is_none() && !tracker.join(".moai").exists() {
+        return Ok((BlockState::Current, text));
+    }
+    let state = match guide.is_some_and(|g| same_guide(&g)) {
+        true => BlockState::Current,
+        false => BlockState::Stale,
+    };
+    Ok((state, text))
 }
 
-/// 이 저장소가 심는 딸린 파일 — `(이름, 규칙 블록, 알림의 갈래)`. **갈래를 표에 함께 둔다** —
-/// 빠졌을 때의 결과가 파일마다 달라 화면의 낱말이 갈리고(`view::says`), 기계도 `kind` 로 그것을
-/// 가른다. `agents_stale`·`agents_hand_edited` 가 이미 그 자리다.
+/// `.moai/guide.md` 의 글이 이 바이너리가 쓸 전문과 같은가 — **줄 끝은 안 가린다**(리뷰 moai-zynt.63u). 그 파일은
+/// `.moai` 와 함께 커밋되어 `core.autocrlf` 체크아웃에서 CRLF 로 오는데, 바이트로 견주던 판은 늘 낡았다고 했고
+/// `init` 이 LF 로 다시 써 작업 트리에 헛 diff 를 남겼다. 블록이 파일의 줄 끝을 따르는 것([`with_block`])과 같은 자다.
+fn same_guide(text: &str) -> bool {
+    text.replace("\r\n", "\n") == crate::guide::agents()
+}
+
+/// 낡았다고 잰 AGENTS.md 에서 낡은 것이 링크 블록이 아니라 `.moai/guide.md` 인가 — 블록은 맞는 링크다. 링크가
+/// 전문의 해시를 들어([`crate::guide::agents_link`]) 다른 바이너리가 쓴 전문이면 링크부터 갈리므로, 여기 남는 것은
+/// 이 바이너리의 링크 밑에서 파일만 다른 판 — 손으로 고쳤거나 없어진 것이다.
+fn guide_file_stale(text: &str) -> bool {
+    links_to_guide(text) && block_state(text, &crate::guide::agents_link()) == BlockState::Current
+}
+
+/// AGENTS.md 의 블록이 `.moai/guide.md` 를 가리키는 링크인가 — 그러면 안내는 파일 모드로 심긴 것이다.
+/// 모드를 어디에도 적지 않고 이 글에서 읽는다. **링크의 끝줄([`crate::guide::GUIDE_MARK`])로 알아본다** — 경로가
+/// 든 글인지로 가르던 판은 그 경로를 적은 손질 한 줄에 블록 모드를 링크로 갈아 끼웠다(리뷰 moai-zynt.63u).
+fn links_to_guide(text: &str) -> bool {
+    blocks(text).first().is_some_and(|&(start, stop)| {
+        text[start..stop].lines().any(|l| l.trim_start().starts_with(crate::guide::GUIDE_MARK))
+    })
+}
+
+/// 서 있는 안내를 읽는다 — 링크와 블록은 AGENTS.md, 훅 안내는 moai 가 심은 훅에서 온다.
+/// 못 읽은 글은 여기서 빈 글로 바꾸지 않는다. 공통 거절 함수가 심기 전에 그 오류를 낸다.
+fn guide_of(root: &Path, agents: &Result<Option<String>, Fell>, tracking: Tracking, again: bool) -> Option<Guide> {
+    match agents {
+        Ok(Some(text)) if links_to_guide(text) => Some(Guide::File),
+        Ok(Some(text)) if !blocks(text).is_empty() => Some(Guide::Block),
+        _ if hooks_here(root) => Some(Guide::Hook),
+        _ if again && !tracking.tracked() => Some(Guide::None),
+        _ => None,
+    }
+}
+
+/// 체크아웃 안의 보통 훅 파일만 본다. 밖의 사용자 설정이나 플러그인 등록부는 안 연다.
+fn hooks_here(root: &Path) -> bool {
+    let home = crate::held::Home::of(root);
+    for (name, dialect) in [
+        (crate::skill::CODEX_HOOKS, crate::cli::Dialect::Codex),
+        (crate::skill::AGENTS_HOOKS, crate::cli::Dialect::Antigravity),
+    ] {
+        if read_held(&root.join(name), &home)
+            .is_ok_and(|t| t.is_some_and(|t| crate::skill::hooks_are_ours(dialect, &t)))
+        {
+            return true;
+        }
+    }
+    read_held(&root.join(crate::skill::DIR).join(".claude-plugin/plugin.json"), &home)
+        .is_ok_and(|t| t.is_some_and(|t| crate::skill::hook_exe(&t).is_some()))
+}
+
+/// 이 클론에만 둔 트래커가 무시 블록에 더하는 줄(moai-zynt.own). 훅·스킬의 플러그인 트리(`moai skill install`)와
+/// `claude` 가 `--scope local` 등록을 적는 파일도 같이 막는다 — 그것만 남으면 `git status` 가 추적 안 된 파일로 비춘다.
+const LOCAL_IGNORE: &str = "\
+# This tracker stays in this clone - git does not track it.
+/.moai/
+/.claude/moai-plugin/
+/.claude/settings.local.json
+";
+
+/// git 이 이 뿌리를 어디에 두는가 — 공통 디렉터리(`--git-common-dir`, 워크트리·서브모듈에서도 `info/exclude` 가
+/// 사는 곳)와 **작업 트리 꼭대기에서 이 뿌리까지의 길**(`--show-prefix`, 꼭대기면 빈 글 — 모노레포의 한 칸이면
+/// `svc/`), 그리고 **딸린 워크트리인가**(제 git 디렉터리가 공통 디렉터리와 갈린다 — 서브모듈은 둘이 같다). git
+/// 저장소가 아니거나 `budget` 안에 답이 없으면 `None`.
+struct GitPlace {
+    dir: std::path::PathBuf,
+    under: String,
+    linked: bool,
+}
+
+fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlace> {
+    let args = ["rev-parse", "--git-dir", "--git-common-dir", "--show-prefix"];
+    let out = crate::git::run_reading_user_config(root, &args, budget)?.ok()?;
+    let mut lines = out.lines();
+    let (own, dir) = (lines.next()?.trim(), lines.next()?.trim());
+    let under = lines.next().unwrap_or_default().to_string();
+    if own.is_empty() || dir.is_empty() {
+        return None;
+    }
+    let (own, dir) = (root.join(own), root.join(dir));
+    let linked = crate::path::real(&own) != crate::path::real(&dir);
+    Some(GitPlace { dir, under, linked })
+}
+
+/// git 이 트래커를 추적하는가. 저장소 밖은 커밋 방식이고, git 실패나 시간 초과는 모르는 것이다.
+/// 사용자 전역 무시 설정도 읽는다 — 사람이 쓰는 git 과 같은 답이어야 한다.
+fn tracking_of(root: &Path, lang: crate::i18n::Lang) -> R<Tracking> {
+    tracking_within(root, Some(crate::cmd::merge_driver::PROBE_BUDGET))
+        .ok_or_else(|| Fail::coded(say(lang, "refuse.init_tracking_unknown"), super::code::BAD_INPUT))
+}
+
+/// `.moai/` 디렉터리를 묻되, 링크면 링크 자체를 묻는다. `check-ignore` 는 링크 아래를 못 묻는다.
+/// git 의 빈 오류는 무시되지 않은 경로(exit 1)이고, 나머지는 모른다. git 표시가 없는 자리만 git 밖이다.
+fn tracking_within(root: &Path, budget: Option<std::time::Duration>) -> Option<Tracking> {
+    if !root.ancestors().any(|p| p.join(".git").symlink_metadata().is_ok()) {
+        return Some(Tracking::Commit);
+    }
+    let link = root.join(".moai").is_symlink();
+    let path = if link { ".moai" } else { ".moai/" };
+    let absent_dir = !link && !root.join(".moai").is_dir();
+    let mut args = vec!["check-ignore", "-v", path];
+    if absent_dir {
+        // git 은 없는 디렉터리에 !*/ 를 적용하지 않는다. 안쪽 파일을 같은 부름에서 확인해
+        // 허용 목록의 새 클론을 무시된 트래커로 읽지 않는다. 파일 하나만 무시된 것은 첫 답이 가른다.
+        args.push(".moai/config.toml");
+    }
+    match crate::git::run_reading_user_config(root, &args, budget)? {
+        Ok(said) => {
+            let line_for = |path: &str| said.lines().find(|l| l.rsplit_once('\t').is_some_and(|(_, p)| p == path));
+            let tracking = line_for(path).map_or(Tracking::Commit, ignored_by);
+            if absent_dir
+                && !tracking.tracked()
+                && line_for(".moai/config.toml").is_none_or(|line| ignored_by(line).tracked())
+            {
+                Some(Tracking::Commit)
+            } else {
+                Some(tracking)
+            }
+        }
+        Err(crate::git::Error::Failed(why)) if why.is_empty() => Some(Tracking::Commit),
+        Err(_) => None,
+    }
+}
+
+/// `check-ignore -v` 가 댄 규칙이 무엇을 뜻하는가 — 한 줄은 `<자리>:<줄 번호>:<패턴>\t<경로>` 다.
 ///
-/// **블록은 뿌리를 받아 짓는다** — `.gitattributes` 의 블록은 저장소마다 한 줄이 더 설 수 있다
-/// ([`attributes_for`]). 이름으로 블록을 고르는 `match` 를 따로 두던 판은 `_` 갈래가 모르는 이름에
-/// `.gitignore` 블록을 줬다(리뷰). 칸이 표에 있으면 줄을 더할 때 블록을 빠뜨릴 수 없다.
-const DOTFILES: [(&str, fn(&Path) -> std::borrow::Cow<'static, str>, &str); 2] =
-    [(".gitattributes", attributes_for, "gitattributes_rules"), (".gitignore", gitignore_for, "gitignore_rules")];
+/// - **되살리는 패턴(`!…`)이면 무시되지 않은 것이다**(리뷰 moai-zynt.63u). `-v` 는 그 줄도 대고 0 으로 끝난다 —
+///   허용 목록 꼴의 `.gitignore`(`*` · `!*/`)가 그렇다. 그것을 무시로 읽던 판은 커밋할 트래커를 `.gitignore` 의 것으로
+///   읽어 다시 부른 `init` 이 `/.moai/` 를 그 파일에 적었다
+/// - 자리가 **작업 트리 안의 `.gitignore`** 면 그쪽이다. git 은 그 자리를 꼭대기에서 잰 상대 경로로 대므로 하위
+///   디렉터리의 트래커는 `svc/.gitignore` 다(리뷰) — 이름이 `.gitignore` 와 같은지로 가르던 판은 그것을 이 클론의
+///   것으로 읽었다. 이상한 글자가 든 경로는 따옴표로 싸여 온다
+/// - 그 밖(`.git/info/exclude`, 딸린 워크트리가 대는 공통 디렉터리의 절대 경로, 사람의 전역 무시 파일)은 이 클론의 것이다
+fn ignored_by(said: &str) -> Tracking {
+    let Some((source, pattern)) = said.lines().next().and_then(rule_of) else { return Tracking::Commit };
+    if pattern.starts_with('!') {
+        return Tracking::Commit;
+    }
+    let source = Path::new(source.trim_matches('"'));
+    match source.is_relative() && source.file_name().is_some_and(|n| n == ".gitignore") {
+        true => Tracking::Gitignore,
+        false => Tracking::Exclude,
+    }
+}
+
+/// `check-ignore -v` 의 한 줄을 `(자리, 패턴)` 으로 — **자리에도 `:` 가 설 수 있어**(윈도의 `C:/…`) 숫자뿐인 칸을
+/// 줄 번호로 찾는다. 모양이 안 맞으면 `None`.
+fn rule_of(line: &str) -> Option<(&str, &str)> {
+    let (head, _) = line.rsplit_once('\t')?;
+    let mut from = 0;
+    while let Some(i) = head[from..].find(':') {
+        let colon = from + i;
+        if let Some((number, pattern)) = head[colon + 1..].split_once(':')
+            && !number.is_empty()
+            && number.bytes().all(|b| b.is_ascii_digit())
+        {
+            return Some((&head[..colon], pattern));
+        }
+        from = colon + 1;
+    }
+    None
+}
+
+/// 플래그끼리 부딪힌 까닭 — 화면과 플래그가 같은 말을 한다.
+fn clash_said(lang: crate::i18n::Lang, c: crate::init_choice::Conflict) -> String {
+    match c {
+        crate::init_choice::Conflict::HookWithoutSkill => say(lang, "refuse.init_hook_without_skill").to_string(),
+        crate::init_choice::Conflict::DriverWithoutTracking => {
+            say(lang, "refuse.init_driver_without_tracking").to_string()
+        }
+    }
+}
+
+/// 이 클론에만 두려 할 때 못 두는 까닭. git 저장소가 아니면 둘 자리(`info/exclude`)가 없고, `.gitignore` 에 적어도
+/// 막을 git 이 없다.
+///
+/// **딸린 워크트리면 막는 줄이 주 체크아웃까지 가린다**(리뷰 moai-zynt.63u) — `info/exclude` 는 모든 워크트리가 함께
+/// 쓰고 `.gitignore` 의 줄은 머지로 돌아가, 거기 커밋된 트래커의 새 파일(새 사람의 저널)이 말없이 커밋에서 빠진다.
+/// 워크트리 거절문이 대는 `MOAI_HERE=1 moai init` 이 그 자리로 가는 길이다. 처음 심을 때만 잰다 — 이미 선 트래커를
+/// 맞추는 `init` 을 막으면 고칠 길이 도구 밖에만 남는다.
+fn local_refusal(lang: crate::i18n::Lang, tracking: Tracking, place: Option<&GitPlace>) -> Option<String> {
+    if tracking.tracked() {
+        return None;
+    }
+    match place {
+        None => Some(say(lang, "refuse.init_local_no_git").to_string()),
+        Some(p) if p.linked => Some(say(lang, "refuse.init_local_linked").to_string()),
+        Some(_) => None,
+    }
+}
+
+/// 플래그·화면 진입·Enter 가 함께 쓰는 거절 — 접두어 → git → 부딪힘 → AGENTS.md 읽기.
+/// `fixed_only` 는 화면 진입 전이다. 아직 고를 수 있는 칸의 기본값으로는 거절하지 않는다.
+struct InitCheck<'a> {
+    lang: crate::i18n::Lang,
+    root: &'a Path,
+    again: bool,
+    fixed: &'a Choice,
+    place: Option<&'a GitPlace>,
+    agents: &'a Result<Option<String>, Fell>,
+    tracking: Option<Tracking>,
+}
+
+impl InitCheck<'_> {
+    fn refusal(&self, plan: &Plan, fixed_only: bool) -> R<()> {
+        let prefix = if fixed_only { self.fixed.prefix.as_deref() } else { plan.prefix.as_deref() };
+        if !self.again {
+            if let Some(p) = prefix {
+                fresh_prefix(self.lang, p)?;
+            } else if !fixed_only && prefix_from(self.root).is_none() {
+                return Err(Fail::coded(say(self.lang, "refuse.init_no_prefix"), super::code::BAD_INPUT));
+            }
+        } else if let Some(p) = prefix {
+            let cur = crate::config::Config::load(self.root).map_err(|e| Fail::config(&e, self.lang))?.prefix;
+            if p != cur {
+                return Err(Fail::coded(
+                    format!(
+                        "{}\n      {}",
+                        fill(say(self.lang, "refuse.init_prefix_fixed"), &[("cur", &cur)]),
+                        say(self.lang, "refuse.init_prefix_fixed_why")
+                    ),
+                    super::code::ALREADY_EXISTS,
+                ));
+            }
+        }
+        let now = self
+            .tracking
+            .ok_or_else(|| Fail::coded(say(self.lang, "refuse.init_tracking_unknown"), super::code::BAD_INPUT))?;
+        if (self.again || !now.tracked())
+            && let Some(asked) = self.fixed.tracking.filter(|t| *t != now)
+        {
+            return Err(Fail::coded(
+                fill(say(self.lang, "refuse.init_tracking_fixed"), &[("now", now.word()), ("asked", asked.word())]),
+                super::code::ALREADY_EXISTS,
+            ));
+        }
+        if !plan.tracking.tracked() && self.place.is_none() && now != Tracking::Commit {
+            return Err(Fail::coded(say(self.lang, "refuse.init_tracking_unknown"), super::code::BAD_INPUT));
+        }
+        if !self.again
+            && (!fixed_only || self.fixed.tracking.is_some())
+            && let Some(why) = local_refusal(self.lang, plan.tracking, self.place)
+        {
+            return Err(Fail::coded(why, super::code::BAD_INPUT));
+        }
+        let mut clash_flags = self.fixed.clone();
+        if self.fixed.guide.is_none() && (fixed_only || plan.guide == Guide::Hook) {
+            clash_flags.skill = None;
+        }
+        if let Some(c) = crate::init_choice::conflict(&clash_flags, plan)
+            .filter(|_| !fixed_only || self.fixed.tracking.is_some() || self.fixed.guide.is_some())
+        {
+            return Err(Fail::coded(clash_said(self.lang, c), super::code::BAD_INPUT));
+        }
+        // 화면에서는 사람이 안내 칸을 바꿀 수 있으므로, 읽을 수 없는 글은 열기 전에 댄다.
+        if (self.fixed.guide.is_none() || matches!(plan.guide, Guide::Block | Guide::File))
+            && let Err(fell @ Fell::Io(_)) = self.agents
+        {
+            return Err(Fail::new(format!(
+                "{}\n      {}",
+                agents_unread(self.lang, self.root, fell),
+                say(self.lang, "refuse.init_agents_unreadable")
+            )));
+        }
+        Ok(())
+    }
+}
 
 /// `.gitignore` 에 심을 블록 — **트래커가 링크 너머에 살면 그 자리의 락과 임시 파일도 막는다**(moai-th3b).
 ///
@@ -359,7 +648,7 @@ fn moai_moved(root: &Path) -> Option<String> {
 /// 합쳐지는 것은 그 파일인데 선언은 링크 경로에만 걸려, 그 파일이 git 의 기본 글 병합을 받아
 /// 충돌 표식을 든 JSONL 이 됐다 — 그런데 `init --check` 는 드라이버가 `current` 라고 했다.
 /// 선언을 재는 [`crate::cmd::merge_driver`] 의 `declared` 는 그대로 링크 경로를 묻는다. 빠진 것은
-/// 이 한 줄이고, 그것은 [`dotfile_gaps`] 가 `gitattributes_rules` 로 비춘다.
+/// 이 한 줄이고, 그것은 [`gaps_in`] 가 `gitattributes_rules` 로 비춘다.
 ///
 /// **뿌리에 못박는다**(`/<경로>`). `/` 없는 한 조각 패턴은 어느 깊이의 같은 이름에도 걸린다.
 /// 쓸 수 없는 경로는 줄을 안 세운다 — 뿌리 밖(위 디렉터리·체크아웃 밖, 쓰기가 거절하는 자리다)이거나
@@ -453,7 +742,7 @@ fn inside(root: &Path, path: &Path) -> Option<String> {
 }
 
 /// 이 저장소의 딸린 파일에서 **빠진 규칙** — `(파일 이름, 알림의 갈래, 빠진 줄들)`, 빠진 것이
-/// 있는 파일만.
+/// 있는 파일만. 재는 파일은 [`dotfiles`] 가 고른다 — 쓰는 길([`run`])이 쓰는 바로 그 목록이다.
 ///
 /// **못 읽는 파일은 여기서 말하지 않는다.** 무엇이 들었는지 모르니 빠졌다고 할 수 없고 — 그 줄이
 /// 이미 있을 수도 있다 — `init` 도 그 파일은 안 건드리므로 한 번 선 알림이 **영영 안 걷힌다.**
@@ -465,25 +754,126 @@ fn inside(root: &Path, path: &Path) -> Option<String> {
 ///
 /// **링크인 파일도 여기서 말하지 않는다**(moai-yke5) — git 은 2.32 부터 체크아웃 안의 링크인 딸린 파일을
 /// 안 읽어 무엇이 들었든 규칙이 하나도 안 선다. 빠진 줄을 대면 `init` 이 못 걷는 알림이 영영 서므로 그
-/// 파일은 [`linked_dotfiles`] 가 제 낱말로 말한다. 그보다 옛 git 은 그 링크를 읽지만 `init` 은 거기에도 안
+/// 파일은 [`linked_in`] 이 제 낱말로 말한다. 그보다 옛 git 은 그 링크를 읽지만 `init` 은 거기에도 안
 /// 쓴다 — git 을 올리는 날 말없이 꺼지는 규칙이라, 보통 파일로 바꾸라는 말은 어느 버전에서나 맞다.
 ///
 /// **읽는 자는 [`ensure_lines`] 와 같다**([`crate::held::read_inside`], moai-x0o7) — `mkfifo .gitignore` 하나로
 /// `moai status` 가 멈추던 자리다. 안 읽기로 한 파일도 못 읽은 파일이라 말하지 않는다.
-pub fn dotfile_gaps(root: &Path) -> Vec<(&'static str, &'static str, Vec<String>)> {
-    let home = crate::held::Home::of(root);
-    DOTFILES
-        .into_iter()
-        .filter(|(name, ..)| !root.join(name).is_symlink())
-        .filter_map(|(name, block, kind)| {
-            let Ok(text) = read_held(&root.join(name), &home) else { return None };
+fn gaps_in(files: &[Dotfile]) -> Vec<(&'static str, &'static str, Vec<String>)> {
+    files
+        .iter()
+        .filter(|d| !d.path.is_symlink())
+        .filter_map(|d| {
+            let Ok(text) = read_held(&d.path, &crate::held::Home::of(crate::path::dir_of(&d.path))) else {
+                return None;
+            };
             let text = text.unwrap_or_default();
-            let block = block(root);
             let missing: Vec<String> =
-                missing_rules(&text, &block).into_iter().filter(|l| !self_ignored(l)).map(str::to_string).collect();
-            (!missing.is_empty()).then_some((name, kind, missing))
+                missing_rules(&text, &d.block).into_iter().filter(|l| !self_ignored(l)).map(str::to_string).collect();
+            (!missing.is_empty()).then_some((d.name, d.kind, missing))
         })
         .collect()
+}
+
+/// `init` 이 맞추는 딸린 파일 하나 — 이름(사람에게 대는 글), 자리, 그 안에 서야 할 블록, 알림의 갈래.
+///
+/// 읽고 쓸 때 견주는 뿌리는 **그 파일이 든 디렉터리다**(`crate::path::dir_of`) — `.git/info/exclude` 를 체크아웃을
+/// 뿌리로 재면 읽는 자가 `.git/` 안이라 거절한다([`crate::held::Unheld::IntoGit`]). 쓰는 길([`ensure_lines`])도 그
+/// 자를 쓴다.
+struct Dotfile {
+    name: &'static str,
+    path: std::path::PathBuf,
+    block: String,
+    kind: &'static str,
+}
+
+/// 이 저장소에서 `init` 이 맞추는 딸린 파일들 — **추적 방식에 따라 갈린다**(moai-zynt.zhr). git 밖에 둔 트래커는
+/// 병합 규칙이 할 일이 없어 `.gitattributes` 가 없고, 무시 블록은 고른 자리(`.git/info/exclude`·`.gitignore`)에서
+/// 트래커를 막는 줄까지 함께 든다.
+///
+/// **쓰는 길([`run`])과 비추는 길([`dotfile_notice`]·[`check`])이 이 하나로 짓는다**(리뷰 moai-zynt.63u) — 이름·자리·
+/// 블록을 `run` 이 제 `match` 셋으로 다시 짓던 판은, 하위 디렉터리의 `info/exclude` 처럼 한쪽만 고쳐질 자리를 남겼다.
+/// `.git/info/exclude` 는 git 의 자리(`place`)를 알아야 서고, 모르면 목록에 없다.
+fn dotfiles(root: &Path, tracking: Tracking, place: Option<&GitPlace>) -> Vec<Dotfile> {
+    // 이름과 블록을 한 자리에서 짓는다 — 이름으로 블록을 고르는 `match` 를 따로 두던 판은 `_` 갈래가 모르는
+    // 이름에 `.gitignore` 블록을 줬다(리뷰). `.gitattributes` 의 블록은 저장소마다 한 줄이 더 설 수 있다([`attributes_for`]).
+    let attributes = tracking.tracked().then(|| Dotfile {
+        name: ".gitattributes",
+        path: root.join(".gitattributes"),
+        block: attributes_for(root).into_owned(),
+        kind: "gitattributes_rules",
+    });
+    let ignore = match tracking {
+        Tracking::Commit => Some(Dotfile {
+            name: ".gitignore",
+            path: root.join(".gitignore"),
+            block: gitignore_for(root).into_owned(),
+            kind: "gitignore_rules",
+        }),
+        // 갈래를 커밋하는 `.gitignore` 와 가른다(리뷰 moai-zynt.63u) — 빠졌을 때의 결과가 "옆 워크트리가 딸려 간다" 가
+        // 아니라 트래커와 그 파일이 커밋되는 것이라, 같은 갈래로 서면 엉뚱한 까닭을 댄다.
+        Tracking::Gitignore => Some(Dotfile {
+            name: ".gitignore",
+            path: root.join(".gitignore"),
+            block: local_block(root, ""),
+            kind: "gitignore_local_rules",
+        }),
+        Tracking::Exclude => place.map(|p| Dotfile {
+            name: ".git/info/exclude",
+            path: p.dir.join("info").join("exclude"),
+            block: local_block(root, &p.under),
+            kind: "exclude_rules",
+        }),
+    };
+    attributes.into_iter().chain(ignore).collect()
+}
+
+/// 이 클론에만 둔 트래커의 무시 블록 — `.gitignore` 의 블록에 트래커와 훅 자리([`LOCAL_IGNORE`])를 더한다.
+/// `under` 는 그 블록이 설 파일의 뿌리에서 이 뿌리까지의 길이다([`anchored`]) — `.gitignore` 는 제 디렉터리가
+/// 뿌리라 빈 글이다.
+fn local_block(root: &Path, under: &str) -> String {
+    // 디렉터리 전용 규칙은 링크 자체에 안 걸린다. 링크와 안쪽 타깃을 함께 막는다.
+    let mut block = format!("{}{LOCAL_IGNORE}", gitignore_for(root));
+    if root.join(".moai").is_symlink() {
+        block.push_str("/.moai\n");
+        if let Some(dir) = moai_moved(root).filter(|d| !d.is_empty()) {
+            block.push_str(&format!("/{dir}/\n"));
+        }
+    }
+    if under.is_empty() {
+        return block;
+    }
+    block.lines().map(|l| format!("{}\n", anchored(l, under))).collect()
+}
+
+/// 무시 블록의 한 줄을 `under`(작업 트리 꼭대기에서 뿌리까지의 길, `svc/`) 밑으로 옮겨 적는다 — **`.git/info/exclude`
+/// 의 줄은 작업 트리 꼭대기가 뿌리다**(리뷰 moai-zynt.63u). 하위 디렉터리(모노레포의 한 칸)에 심은 트래커의 `/.moai/`
+/// 를 그대로 적던 판은 그 트래커를 못 막고 꼭대기의 `.moai/` 를 막았다 — 꼭대기에 커밋된 트래커가 있으면 새 저널
+/// 파일이 말없이 무시됐고, 다시 부른 `init` 은 하위 트래커를 커밋으로 읽어 커밋되는 파일을 심었다.
+///
+/// 주석과 빈 줄은 그대로다. `/` 를 품은 줄은 제 자리에 못박힌 줄이라 길을 앞에 붙이고, 안 품은 줄(어느 깊이에나
+/// 걸리는 줄)은 `**/` 를 끼워 그 넓이를 지킨다. 길에 든 패턴 글자는 `\` 로 막는다.
+fn anchored(line: &str, under: &str) -> String {
+    if under.is_empty() || line.trim().is_empty() || line.starts_with('#') {
+        return line.to_string();
+    }
+    let (not, rule) = line.strip_prefix('!').map_or(("", line), |rest| ("!", rest));
+    let any_depth = !rule.starts_with('/') && !rule.trim_end_matches('/').contains('/');
+    let under: String =
+        under.chars().flat_map(|c| ["*?[\\".contains(c).then_some('\\'), Some(c)].into_iter().flatten()).collect();
+    format!("{not}/{under}{}{}", if any_depth { "**/" } else { "" }, rule.trim_start_matches('/'))
+}
+
+/// 한도 안에 추적 방식과 무시 파일 자리를 알면 딸린 파일을 낸다. 실패를 빈 목록으로 접지 않는다.
+fn dotfiles_within(root: &Path, budget: Option<std::time::Duration>) -> Option<Vec<Dotfile>> {
+    let deadline = budget.map(|b| std::time::Instant::now() + b);
+    let left = || deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+    let tracking = tracking_within(root, left())?;
+    let place = match tracking {
+        Tracking::Exclude => Some(git_place(root, left())?),
+        Tracking::Commit | Tracking::Gitignore => None,
+    };
+    Some(dotfiles(root, tracking, place.as_ref()))
 }
 
 /// 블록에 서되 **빠졌다고 조르지 않는 줄** — 우편함과 출석부(moai-h8tn)다. 두 디렉터리는 제 `.gitignore`(`*`)를
@@ -502,8 +892,8 @@ fn self_ignored(line: &str) -> bool {
 ///
 /// 링크인지는 **따라가지 않고** 잰다(`Path::is_symlink`) — 못 재면 링크가 아니고, 그 파일은 읽는 길이 제
 /// 말로 댄다.
-pub fn linked_dotfiles(root: &Path) -> Vec<&'static str> {
-    DOTFILES.into_iter().map(|(name, ..)| name).filter(|name| root.join(name).is_symlink()).collect()
+fn linked_in(files: &[Dotfile]) -> Vec<&'static str> {
+    files.iter().filter(|d| d.path.is_symlink()).map(|d| d.name).collect()
 }
 
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
@@ -528,10 +918,21 @@ pub(crate) fn away_root(root: &Path, chdir: bool) -> Option<String> {
 /// 가고, 그 사이 `git add -A` 한 번이 옆 워크트리를 통째로 담는다(moai-mxtb). 조용히 이어지는
 /// 위험이라 세션이 시작하는 화면에 선다 — 낡은 블록을 거기 둔 것과 같은 까닭이다.
 ///
-/// **링크인 파일은 따로 선다**([`linked_dotfiles`]) — 고칠 길이 `moai init` 이 아니다. 둘 다 링크여도
+/// **링크인 파일은 따로 선다**([`linked_in`]) — 고칠 길이 `moai init` 이 아니다. 둘 다 링크여도
 /// **알림은 하나다**(리뷰) — 파일마다 세우면 같은 머리가 두 번 서고, 갈래로 알림을 찾는 쪽은 하나를 잃는다.
+///
+/// **한 번 재어 둘로 가른다**(리뷰 moai-zynt.63u) — 빠진 줄과 링크를 따로 재던 판은 같은 git 물음을 두 번 띄워
+/// 한도도 두 번 썼고, 한쪽만 마감을 넘기면 두 답이 갈렸다.
 pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
-    let (gaps, linked) = (dotfile_gaps(root), linked_dotfiles(root));
+    let Some(files) = dotfiles_within(root, Some(crate::cmd::merge_driver::PROBE_BUDGET)) else {
+        // 링크 여부는 git 의 답과 무관하다. 느린 git 이 이 알림까지 삼키면 안 된다.
+        let linked: Vec<&str> =
+            [".gitattributes", ".gitignore"].into_iter().filter(|name| root.join(name).is_symlink()).collect();
+        return std::iter::once(crate::report::Warning::tracking_unknown())
+            .chain((!linked.is_empty()).then(|| crate::report::Warning::dotfile_linked(&linked)))
+            .collect();
+    };
+    let (gaps, linked) = (gaps_in(&files), linked_in(&files));
     let away = if gaps.is_empty() { None } else { away_root(root, chdir) };
     gaps.into_iter()
         .map(|(_, kind, missing)| crate::report::Warning::dotfile_rules(kind, missing, away.as_deref()))
@@ -552,7 +953,9 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
     let Ok((BlockState::Stale, text)) = agents_state(root) else { return None };
     // **어느 쪽 낡음인지까지 말한다**(2026-09-15 사용자 결정). 한 낱말로 뭉뚱그려 `moai init` 만
     // 대면, 아직 다시 빌드 안 한 바이너리를 든 세션이 그 말을 따라 새 안내를 옛 글로 되돌린다.
-    Some(crate::report::Warning::agents_stale(away_root(root, chdir).as_deref(), stale_kind(&text) == Stale::Edited))
+    // 링크가 맞는데 낡았으면 손댄 것은 `.moai/guide.md` 다 — 손질로 알린다: `init` 이 그것을 다시 쓴다.
+    let edited = guide_file_stale(&text) || stale_kind(&text) == Stale::Edited;
+    Some(crate::report::Warning::agents_stale(away_root(root, chdir).as_deref(), edited))
 }
 
 /// `moai init --check`. **아무것도 안 쓰고, 파일을 못 읽을 때만 0 이 아니다**(2026-09-14 사용자
@@ -560,11 +963,23 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
 /// 선다: 보는 것은 AGENTS.md 하나고, 심기 전에 부르는 것도 자연스럽다.
 pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
-    let (state, text) = agents_state(&root).map_err(|fell| Fail::new(agents_unread(ctx.lang(), &root, &fell)))?;
+    let (state, text) = agents_state(&root).map_err(|(name, fell)| {
+        let at = if name == crate::guide::GUIDE_FILE { crate::store::Repo::opened_root(&root) } else { root.clone() };
+        Fail::new(unread_at(ctx.lang(), &at, name, &fell))
+    })?;
     // 빠진 딸린 파일 규칙도 같은 자리에서 본다(moai-2f99) — `--check` 는 "무엇이 낡았나" 를 묻는
-    // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다.
-    let gaps = dotfile_gaps(&root);
-    let linked = linked_dotfiles(&root);
+    // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다. 추적 방식은 **한 번 묻고** 아래 블록 없음의
+    // 말에도 쓴다 — 같은 물음을 세 번 띄우던 자리다(리뷰 moai-zynt.63u). git 이 멈추면 모르는 것으로 거절한다.
+    let tracking = tracking_of(&root, ctx.lang())?;
+    let place = match tracking {
+        Tracking::Exclude => Some(
+            git_place(&root, Some(crate::cmd::merge_driver::PROBE_BUDGET))
+                .ok_or_else(|| Fail::coded(say(ctx.lang(), "refuse.init_tracking_unknown"), super::code::BAD_INPUT))?,
+        ),
+        Tracking::Commit | Tracking::Gitignore => None,
+    };
+    let files = dotfiles(&root, tracking, place.as_ref());
+    let (gaps, linked) = (gaps_in(&files), linked_in(&files));
     // **`moai init` 을 대기 전에 그것이 여기 서는지 묻는다**(moai-nppo). 딸린 워크트리에서는 안 선다
     // (moai-mz0e 가 거절을 세웠다) — 그 갈래를 모르던 판은 여기서 `moai init` 을 세 줄로 권하고,
     // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
@@ -586,6 +1001,11 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let driver = crate::cmd::merge_driver::state_at(&root, &crate::store::Repo::opened_root(&root), ctx.chdir);
     if ctx.json {
         let mut v = serde_json::json!({ "agents": state, "driver": driver });
+        // **git 밖에 둔 트래커면 그것을 댄다**(리뷰 moai-zynt.63u) — 그 트래커의 `missing` 은 `init` 이 일부러 안 쓴
+        // 것이라, 키가 없으면 기계는 "`init` 이 심는다" 와 못 가른다. 커밋하는 트래커는 키가 없다 — 전부터 내던 줄이 그대로다.
+        if !tracking.tracked() {
+            v["tracking"] = serde_json::json!(tracking.word());
+        }
         // **아닐 때는 키가 없다** — 늘 달면 전부터 내던 줄이 바뀐다(`missing` 과 같은 자).
         //
         // **못 싣는 경로에서도 키만 빠진다**(리뷰). `serde_json::json!(<식>)` 은 속으로
@@ -613,10 +1033,16 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
         BlockState::Current => say(lang, "init.block_current").to_string(),
         // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests::keys_in`)은 `say(…, "키")`
         // 모양만 읽어, 키를 변수로 넘기면 그 눈에서 통째로 사라진다.
+        // 링크 블록이 맞는데 낡았으면 낡은 것은 `.moai/guide.md` 다 — 블록의 해시로 가르면 "다른 바이너리" 로 읽힌다.
+        BlockState::Stale if guide_file_stale(&text) => {
+            fill(say(lang, "init.guide_file_stale"), &[("file", crate::guide::GUIDE_FILE)])
+        }
         BlockState::Stale => match stale_kind(&text) {
             Stale::Binary => say(lang, "init.block_stale_binary").to_string(),
             Stale::Edited => say(lang, "init.block_stale_edited").to_string(),
         },
+        // git 밖에 둔 트래커에서 블록이 없는 것은 `init` 이 일부러 안 쓴 것이다 — "심는다" 고 하면 거짓말이다.
+        BlockState::Missing if !tracking.tracked() => say(lang, "init.block_missing_local").to_string(),
         BlockState::Missing => say(lang, "init.block_missing").to_string(),
     }];
     // **규칙끼리는 쉼표로 가른다** — `.gitattributes` 의 규칙은 제 안에 띄어쓰기를 여럿 들어
@@ -957,7 +1383,7 @@ fn missing_lines<'a>(existing: &str, block: &'a str) -> Vec<&'a str> {
 
 /// 그 중 **규칙 줄만** — 주석은 규칙이 아니라 빠졌다고 세지 않는다.
 ///
-/// **쓰는 길([`ensure_lines`])과 비추는 길([`dotfile_gaps`])이 한 자에서 갈린다.** 따로 재면
+/// **쓰는 길([`ensure_lines`])과 비추는 길([`gaps_in`])이 한 자에서 갈린다.** 따로 재면
 /// `status` 가 빠졌다고 하는 줄을 `init` 이 이미 있다고 보거나 그 반대가 되고, 그러면 알림이 영영
 /// 안 걷히거나 헛 알림이 선다 — 여기서는 `missing_rules ⊆ missing_lines` 라 그럴 수 없다: 규칙이
 /// 빠졌으면 `init` 이 반드시 그것을 쓰고, `init` 이 할 일이 없으면 알림도 서지 않는다.
@@ -1094,7 +1520,42 @@ fn merges(line: &str) -> Vec<&str> {
         .collect()
 }
 
-pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) -> R<Vec<String>> {
+/// 새로 심는 접두어를 잰다 — 플래그로 준 것도 선택 상자에 친 것도 이 하나로 잰다(moai-zynt.a7y).
+///
+/// **모양을 먼저 본다** — 길이를 먼저 보면 `MyCompanyBackend` 에 그 자체로 틀린 `MyCompan` 을 후보로
+/// 대, 따라 친 쪽이 둘째 오류를 만났다(리뷰 moai-f7xs.z1x). 후보는 명령줄이 아니라 접두어만 댄다 —
+/// `-C`·`--no-agents` 를 줬던 명령을 다시 짜서 대면 붙여 넣은 자리에 엉뚱하게 심는다.
+fn fresh_prefix(lang: crate::i18n::Lang, p: &str) -> Result<(), Fail> {
+    // **빈 접두어는 모양 검사를 지난다** — 걸릴 글자가 없다. 그대로 두면 선택 상자를 닫은 뒤에야 설정 검사가
+    // "`prefix` 가 없다" 로 멈춰 화면에서 고른 것이 통째로 사라졌다(리뷰 moai-zynt.63u). 플래그(`moai init ''`)도 같은 말이다.
+    if p.is_empty() {
+        return Err(Fail::coded(say(lang, "refuse.init_empty_prefix"), super::code::BAD_INPUT));
+    }
+    crate::config::check_prefix(p).map_err(|e| Fail::new(crate::view::config_trouble(lang, &e)))?;
+    if p.chars().count() > PREFIX_MAX {
+        return Err(Fail::coded(
+            format!(
+                "{}\n      {}",
+                fill(
+                    say(lang, "refuse.init_prefix_too_long"),
+                    &[("max", &PREFIX_MAX.to_string()), ("p", p), ("n", &p.chars().count().to_string())],
+                ),
+                fill(say(lang, "refuse.init_prefix_short"), &[("short", &shorten(p))]),
+            ),
+            super::code::BAD_INPUT,
+        ));
+    }
+    Ok(())
+}
+
+/// 여러 줄 거절문을 선택 상자의 한 줄로 편다 — 이음 들여쓰기는 `moai: ` 머리에 맞춘 값이라 거기서는 뜻이 없다.
+/// **한 줄 자리의 자([`crate::text::one_line`])를 지난다**(리뷰 moai-zynt.63u) — 이어 부른 명령이 진 말은 경로와
+/// 사용자 설정의 글을 실어 오는데, 제어문자를 안 걷던 판은 그것을 터미널에 그대로 냈다.
+fn one_line(message: &str) -> String {
+    crate::text::one_line(&message.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" — "))
+}
+
+pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
@@ -1125,12 +1586,28 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 그것만 빠졌고, 그 줄을 따라 친 사람은 안 심기로 한 드라이버를 심었다 — `--local` 은
         // 클론이 함께 쓰는 자리라 그 한 번이 **모든 체크아웃**에 앉는다. 깃발이 하나 늘면 줄도
         // 하나만 는다.
+        //
+        // 값을 받는 깃발은 정한 낱말로 되살린다 — `--no-agents` 는 `--guide none` 으로 섰다(`Flags`).
         let mut same = String::new();
-        if let Some(p) = prefix {
+        if let Some(p) = flags.prefix {
             same.push(' ');
             same.push_str(&crate::text::quoted(p));
         }
-        for (on, flag) in [(no_agents, " --no-agents"), (no_driver, " --no-driver")] {
+        let worded = [("--tracking", flags.tracking.map(Tracking::word)), ("--guide", flags.guide.map(Guide::word))];
+        for (flag, word) in worded {
+            if let Some(word) = word {
+                same.push_str(&format!(" {flag} {word}"));
+            }
+        }
+        let paired = [
+            (flags.driver == Some(true), " --driver"),
+            (flags.driver == Some(false), " --no-driver"),
+            (flags.skill == Some(true), " --skill"),
+            (flags.skill == Some(false), " --no-skill"),
+            (flags.register == Some(true), " --register"),
+            (flags.register == Some(false), " --no-register"),
+        ];
+        for (on, flag) in [(yes, " --yes")].into_iter().chain(paired) {
             if on {
                 same.push_str(flag);
             }
@@ -1163,6 +1640,79 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // 명령을 하나 더 만드는 대신 `init` 이 그 일을 맡는다 — 이슈와 저널은
     // 손대지 않으므로 다시 불러도 잃을 것이 없다.
     let again = dir.exists();
+
+    // **처음 심을 때 사람에게 묻는다**(moai-zynt.a7y). 플래그와 화면은 저마다 고른 것을 내고 같은
+    // `resolve` 를 지난다 — 아래는 그 계획만 읽는다. 묻는 것은 사람이 보는 터미널에서뿐이다: 에이전트·
+    // 스크립트·`--json` 은 지금까지와 같은 파일을 심는다(`init_choice::PLAIN`) — `--json` 의 줄만 고른 것을 대는
+    // 키(`tracking`·`guide`·`guide_file`·`skill`·`project`)가 늘었다. 다시 부른
+    // `init` 은 안 묻는다 — 접두어는 이미 못 바꾸고, 하는 일은 딸린 파일을 맞추는 것뿐이다. 워크트리
+    // 거절은 위에서 이미 섰다 — 다 물어 놓고 거절하지 않는다.
+    let flag_choices = Choice::from_flags(flags);
+    let mut fixed = flag_choices.clone();
+    // 처음에도 서 있는 git 규칙과 AGENTS.md 를 읽는다. 오류는 공통 거절 함수가 차례대로 낸다.
+    let now = tracking_within(&root, Some(crate::cmd::merge_driver::PROBE_BUDGET));
+    let agents_read = read_agents(&root);
+    if let Some(tracking) = now {
+        if again || !tracking.tracked() {
+            fixed.tracking = Some(tracking);
+        }
+        if fixed.guide.is_none() {
+            fixed.guide = guide_of(&root, &agents_read, tracking, again);
+        }
+    }
+    let place = now.and_then(|_| git_place(&root, Some(crate::cmd::merge_driver::PROBE_BUDGET)));
+    let checker = InitCheck {
+        lang: ctx.lang(),
+        root: &root,
+        again,
+        fixed: &flag_choices,
+        place: place.as_ref(),
+        agents: &agents_read,
+        tracking: now,
+    };
+    let mut plan = if !again
+        && !yes
+        && !ctx.json
+        && !fixed.complete(&crate::init_choice::SCREEN)
+        && crate::tui::init_screen::on_terminal()
+    {
+        let lang = ctx.lang();
+        let suggested = prefix_from(&root).map(|full| shorten(&full)).unwrap_or_default();
+        // git 저장소가 아니면 이 클론에만 둘 자리가 없고, 딸린 워크트리면 막는 줄이 주 체크아웃까지 가린다
+        // ([`local_refusal`]) — 기본을 커밋 쪽으로 돌린다. 칸은 남겨 둔다: 고르면 심을 때 까닭을 댄다.
+        let mut defaults = match &place {
+            Some(p) if !p.linked => crate::init_choice::SCREEN,
+            _ => crate::init_choice::Defaults { tracking: Tracking::Commit, ..crate::init_choice::SCREEN },
+        };
+        // **`--no-skill` 이면 git 밖의 안내 기본을 훅에서 거둔다**(리뷰 moai-zynt.63u) — 훅 안내는 설치가 있어야
+        // 서서, 그대로 두면 화면이 처음부터 부딪히는 값을 골라 놓고 Enter 에서 거절한다. 사람이 훅을 고르면 그때
+        // 같은 까닭으로 머문다.
+        if fixed.skill == Some(false) {
+            defaults.guide_local = Guide::None;
+        }
+        checker.refusal(&crate::init_choice::resolve(&fixed, &defaults), true)?;
+        let form = crate::init_choice::Form::new(fixed, defaults, suggested.clone());
+        let check = |plan: &Plan| checker.refusal(plan, false).err().map(|f| one_line(&f.message));
+        // 머리에는 디렉터리 이름만 댄다 — 온 경로는 한 줄을 넘겨 잘리고, 셸이 이미 그 자리에 서 있다.
+        let name =
+            root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| root.display().to_string());
+        match crate::tui::init_screen::ask(lang, &name, form, &check) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => return Err(Fail::new(say(lang, "init.stopped"))),
+            Err(why) => return Err(Fail::new(fill(say(lang, "init.no_screen"), &[("why", &why)]))),
+        }
+    } else {
+        let plan = crate::init_choice::resolve(&fixed, &crate::init_choice::PLAIN);
+        checker.refusal(&plan, false)?;
+        plan
+    };
+    // 이미 설치된 훅으로 읽은 안내는 설치를 다시 부르지 않는다. 명시적으로 시키면 부른다.
+    if plan.guide == Guide::Hook && flags.guide != Some(Guide::Hook) && flags.skill != Some(true) {
+        plan.skill = false;
+    }
+    // 훅으로 알리는 것도 AGENTS.md 를 안 건드린다 — 알리는 일은 훅(`hook::guided_board`)이 한다.
+    let no_agents = matches!(plan.guide, Guide::None | Guide::Hook);
+    let (prefix, no_driver) = (plan.prefix.as_deref(), !plan.driver);
     // 디렉터리 이름이 길어 줄였으면 그 원래 모양 — 무엇에서 줄였는지 말하려고 든다.
     let mut shortened: Option<String> = None;
     let prefix = match (prefix, again) {
@@ -1185,25 +1735,8 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // **사람이 준 긴 접두어는 거절한다** — 쓰기는 엄하게. `init` 은 한 번 부르는 명령이라
         // 다시 부르는 비용이 작고, 거절문이 짧은 후보를 댄다. 이미 심긴 저장소의 긴 접두어는
         // 위 갈래가 그대로 받는다.
-        // **모양을 먼저 본다** — 길이를 먼저 보면 `MyCompanyBackend` 에 그 자체로 틀린
-        // `MyCompan` 을 후보로 대, 따라 친 쪽이 둘째 오류를 만났다(리뷰 moai-f7xs.z1x).
-        // 후보는 명령줄이 아니라 접두어만 댄다 — `-C`·`--no-agents` 를 줬던 명령을 다시 짜서
-        // 대면 붙여 넣은 자리에 엉뚱하게 심는다.
         (Some(p), false) => {
-            crate::config::check_prefix(p).map_err(|e| Fail::new(crate::view::config_trouble(ctx.lang(), &e)))?;
-            if p.chars().count() > PREFIX_MAX {
-                return Err(Fail::coded(
-                    format!(
-                        "{}\n      {}",
-                        fill(
-                            say(ctx.lang(), "refuse.init_prefix_too_long"),
-                            &[("max", &PREFIX_MAX.to_string()), ("p", p), ("n", &p.chars().count().to_string())],
-                        ),
-                        fill(say(ctx.lang(), "refuse.init_prefix_short"), &[("short", &shorten(p))]),
-                    ),
-                    super::code::BAD_INPUT,
-                ));
-            }
+            fresh_prefix(ctx.lang(), p)?;
             p.to_string()
         }
         (None, true) => crate::config::Config::load(&root).map_err(|e| Fail::config(&e, ctx.lang()))?.prefix,
@@ -1243,7 +1776,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     let agents_now = if no_agents {
         None
     } else {
-        match read_agents(&root) {
+        match agents_read {
             Ok(read) => Some(read.unwrap_or_default()),
             Err(Fell::Unheld(why)) => {
                 agents_unheld = Some(why);
@@ -1260,6 +1793,37 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         }
     };
 
+    // 블록과 자리는 비추는 길([`dotfile_notice`]·[`check`])과 같은 자([`dotfiles`])가 짓는다 — 비추는 길이 요구하는
+    // 줄과 여기서 쓰는 줄이 갈릴 자리가 없다.
+    //
+    // **이 클론에만 두면**(moai-zynt.own) 병합 규칙은 할 일이 없어 `.gitattributes` 가 목록에 없고, 무시 블록에
+    // 트래커와 훅 자리를 더해 고른 파일에 쓴다. `.git/info/exclude` 를 고르면 커밋되는 파일은 하나도 안 바뀐다.
+    let files = dotfiles(&root, plan.tracking, place.as_ref());
+    let attributes = files.iter().find(|d| d.kind == "gitattributes_rules");
+    let ignored = files.iter().find(|d| d.kind != "gitattributes_rules");
+    let ignore_name = ignored.map_or(".gitignore", |d| d.name);
+    let write = |d: &Dotfile| {
+        // `.git/info/` 는 템플릿을 끈 저장소에 없다 — 만든다. 못 만들면 아래 쓰기가 제 까닭으로 진다.
+        if d.kind == "exclude_rules" {
+            let _ = std::fs::create_dir_all(crate::path::dir_of(&d.path));
+        }
+        ensure_lines(&d.path, &d.block, || ctx.lang())
+    };
+    // **git 밖에 두는 트래커는 무시 줄을 먼저 쓰고, 못 쓰면 아무것도 안 심는다**(리뷰 moai-zynt.63u). 그 줄이 이
+    // 트래커가 git 밖이라는 유일한 기록이다 — `.moai/` 를 먼저 세우고 줄을 못 쓴 판은 커밋될 트래커를 남겼고, 시킨
+    // 대로 다시 부른 `init` 은 git 에 물어 그것을 커밋으로 읽어 커밋되는 파일을 심었다. 커밋하는 저장소의 딸린
+    // 파일은 지금까지처럼 못 써도 나머지를 심는다(moai-0dwc).
+    let early = match ignored {
+        Some(d) if !again && !plan.tracking.tracked() => Some(write(d)),
+        _ => None,
+    };
+    if let (Some(d), Some((kind, why))) = (ignored, early.as_ref().and_then(Added::trouble)) {
+        return Err(Fail::new(fill(
+            say(ctx.lang(), "refuse.init_local_unwritten"),
+            &[("name", d.name), ("kind", kind), ("why", why)],
+        )));
+    }
+
     if !again {
         std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
         // **저널 파일은 안 짓는다**(moai-nzlo). 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고 그
@@ -1271,11 +1835,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         }
     }
 
-    // 블록은 [`DOTFILES`] 의 칸과 같은 자가 짓는다 — 비추는 길([`dotfile_gaps`])이 요구하는 줄과 여기서
-    // 쓰는 줄이 갈릴 자리가 없다.
-    let (attributes, ignored) = (attributes_for(&root), gitignore_for(&root));
-    let attrs = ensure_lines(&root.join(".gitattributes"), &attributes, || ctx.lang());
-    let ignore = ensure_lines(&root.join(".gitignore"), &ignored, || ctx.lang());
+    let attrs = attributes.map_or(Added::Already, &write);
+    // 이 클론에만 둘 자리를 못 찾으면(`ignored` 가 없으면) 위의 거절(git 저장소가 아니다)이 이미 막았다.
+    let ignore = early.unwrap_or_else(|| ignored.map_or(Added::Already, &write));
     // **선언을 쓴 바로 뒤에 그 이름이 가리키는 명령을 심는다**(moai-08bo, 2026-09-21 사용자 결정).
     // 앞 판은 이름만 쓰고 명령은 사람에게 치라고 했다 — 도구가 제 손으로 안 도는 절반이었다.
     // 무엇을 하고 안 하는지는 [`crate::cmd::merge_driver::plant_for_init`] 가 쥔다: 선언이 없는
@@ -1285,11 +1847,12 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // 대면 사람은 도구가 무엇을 넣으려 했는지 모른 채 파일만 고치게 된다. 못 읽은 것과 못 쓴 것을
     // 가르는 것은 **말뿐이다** — 사람이 할 일이 인코딩과 권한으로 갈린다. 링크는 줄 대신 고칠 말을 댄다
     // ([`Added::Linked`]).
-    let untouched: Vec<(&str, &Added, &str)> =
-        [(".gitattributes", &attrs, &*attributes), (".gitignore", &ignore, &*ignored)]
-            .into_iter()
-            .filter(|(_, done, _)| done.trouble().is_some())
-            .collect();
+    let untouched: Vec<(&str, &Added, &str)> = attributes
+        .map(|d| (d.name, &attrs, d.block.as_str()))
+        .into_iter()
+        .chain(ignored.map(|d| (d.name, &ignore, d.block.as_str())))
+        .filter(|(_, done, _)| done.trouble().is_some())
+        .collect();
 
     // `AGENTS.md` **하나만** 쓴다. `CLAUDE.md` 에도 같은 것을 쓰면 곧 갈라지고,
     // 갈라진 두 벌 중 어느 것이 참인지 아무도 모른다.
@@ -1307,7 +1870,11 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
-            let next = with_block(existing, &crate::guide::agents());
+            let block = match plan.guide {
+                Guide::File => crate::guide::agents_link(),
+                Guide::Block | Guide::Hook | Guide::None => crate::guide::agents(),
+            };
+            let next = with_block(existing, &block);
             if next == *existing {
                 false
             } else {
@@ -1321,12 +1888,40 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
             }
         }
     };
+    // **안내 전문은 `.moai/guide.md` 에 통째로 쓴다**(moai-cbfz). `init` 이 쥔 파일이라 블록처럼 마커가 없고,
+    // 다시 쓰면 그대로 덮는다 — 사람이 고친 것은 `--check` 가 낡았다고 비춘다. 같으면 안 쓴다.
+    //
+    // **읽는 자는 AGENTS.md 와 같다**(리뷰 moai-zynt.63u) — 안 읽기로 한 자리(밖·`.git` 으로 가는 링크, FIFO 같은
+    // 보통 파일이 아닌 것)는 쓰기도 거절하는 자리라 건드리지 않고 못 건드린 자리로 댄다. 읽기 실패를 "없음" 으로 접던
+    // 판은 FIFO 를 쓰려고 열어 `init` 이 영영 멈췄다(moai-x0o7 이 AGENTS.md 에서 막은 그것이다). 그 밖에 못 읽은
+    // 글(UTF-8 아님)은 `init` 이 쥔 파일이라 다시 쓴다. 줄 끝만 다른 글은 같은 글이다([`same_guide`]).
+    let mut guide_trouble = None;
+    let guide_file = plan.guide == Guide::File && {
+        let path = root.join(crate::guide::GUIDE_FILE);
+        match read_held(&path, &crate::held::Home::of(&root)) {
+            Ok(Some(now)) if same_guide(&now) => false,
+            Err(Fell::Unheld(why)) => {
+                guide_trouble = Some(Added::Unreadable(crate::held::said(ctx.lang(), &why)));
+                false
+            }
+            _ => match plant(&path, &crate::guide::agents()) {
+                Ok(()) => true,
+                Err(why) => {
+                    guide_trouble = Some(Added::Unwritable { why, missing: Vec::new() });
+                    false
+                }
+            },
+        }
+    };
     // 딸린 파일과 **한 자리에서 말한다** — 못 건드린 것은 이름·갈래·까닭으로 함께 선다. 블록은
     // 줄 몇 개가 아니라 통째로 갈아 끼우는 글이라 "손으로 더할 줄" 이 없다(빈 글을 넘긴다):
     // 사람이 할 일은 쓸 수 있게 고치고 다시 부르는 것(못 썼을 때)이나 그 자리에 보통 파일을 두는 것(안 읽었을
     // 때)뿐이고, 그 말은 [`hand`] 가 빈 자리에서 고른다.
-    let untouched: Vec<(&str, &Added, &str)> =
-        untouched.into_iter().chain(agents_trouble.iter().map(|t| ("AGENTS.md", t, ""))).collect();
+    let untouched: Vec<(&str, &Added, &str)> = untouched
+        .into_iter()
+        .chain(agents_trouble.iter().map(|t| ("AGENTS.md", t, "")))
+        .chain(guide_trouble.iter().map(|t| (crate::guide::GUIDE_FILE, t, "")))
+        .collect();
     // **`agents` 가 아니라 "AGENTS.md 를 다뤘는가" 로 묻는다** — `agents` 는 이제 *쓴* 때만 참이라
     // (moai-knn0) 그것으로 물으면 블록이 이미 맞는 저장소에서는 이 안내가 영영 안 선다.
     //
@@ -1336,7 +1931,7 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     // `init` 마다 다시 선다. 이름이 아니라 푼 자리로 견준다.
     //
     // **못 읽는 `CLAUDE.md` 에는 말하지 않는다**(moai-x0o7) — 무엇이 들었는지 모르니 가리킴이 빠졌다고 할
-    // 수 없다([`dotfile_gaps`] 와 같은 자). 읽는 자는 스냅샷과 같다 — 맨 `fs::read_to_string` 은 FIFO 앞에서
+    // 수 없다([`gaps_in`] 와 같은 자). 읽는 자는 스냅샷과 같다 — 맨 `fs::read_to_string` 은 FIFO 앞에서
     // 영영 멈췄다. 못 읽은 것을 빈 글로 치면 이제 안 읽는 밖의 링크에 가리킴이 이미 들었어도 "더하라" 고 한다.
     let claude = root.join("CLAUDE.md");
     let claude_needs_pointer = agents_now.is_some()
@@ -1344,13 +1939,33 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         && crate::path::real(&agents_path) != crate::path::real(&claude)
         && read_held(&claude, &crate::held::Home::of(&root)).is_ok_and(|t| t.is_some_and(|t| !t.contains("AGENTS.md")));
 
+    // **심은 뒤에 이어 부른다**(moai-785q) — 훅·스킬 설치와 프로젝트 목록. 제 명령을 그대로 부르고 그 말을
+    // 보고에 얹는다: 같은 일을 두 벌 두면 한쪽만 고쳐진다. 실패해도 심은 것은 그대로 두고 0 으로 끝낸다 —
+    // 머지 드라이버를 못 심었을 때와 같다. 설치는 `claude` 를 부르는 일이라 이 기계에 없을 수 있다.
+    //
+    // **그 명령이 세운 부분 실패 깃발은 거둔다**(리뷰 moai-zynt.63u) — `skill install` 은 등록을 못 하면 `Ok` 를
+    // 내면서 깃발로 종료 코드를 1 로 만든다. 그대로 두면 다 심은 `init` 이 1 로 끝나, 종료 코드만 보는 쪽이 실패로
+    // 읽는다. 못 한 것은 그 명령의 말(`!` 줄, `--json` 의 `registered: false`)이 이미 댄다. 이 명령이 앞서 세운
+    // 깃발은 그대로 둔다.
+    let partial = super::take_partial();
+    let skilled = plan.skill.then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], false));
+    let listed = plan.project.then(|| crate::cmd::project::add(ctx, &root));
+    super::take_partial();
+    if partial {
+        super::note_partial();
+    }
+
     if ctx.json {
         let mut v = serde_json::json!({
             "root": root.display().to_string(),
             "prefix": prefix,
             "created": !again,
+            "tracking": plan.tracking.word(),
+            "guide": plan.guide.word(),
+            "guide_file": guide_file,
             "gitattributes": matches!(attrs, Added::Wrote { .. }),
-            "gitignore": matches!(ignore, Added::Wrote { .. }),
+            "gitignore": ignore_name == ".gitignore" && matches!(ignore, Added::Wrote { .. }),
+            "exclude": ignore_name == ".git/info/exclude" && matches!(ignore, Added::Wrote { .. }),
             "agents": agents,
             // **늘 서는 키다**(moai-08bo). `--no-driver` 는 `off` 와 같은 낱말을 쓰지 않는다 —
             // 안 쓰기로 한 저장소와 이번 한 번만 건너뛴 것은 다음에 칠 명령이 다르다.
@@ -1372,6 +1987,16 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
+        }
+        // 이어 부른 명령은 그 명령의 `--json` 을 그대로 싣는다. 안 불렀으면 `false`, 실패했으면 그 코드와 말이다.
+        for (key, done) in [("skill", &skilled), ("project", &listed)] {
+            v[key] = match done {
+                None => serde_json::json!(false),
+                Some(Ok(lines)) => {
+                    lines.first().and_then(|l| serde_json::from_str(l).ok()).unwrap_or(serde_json::Value::Bool(true))
+                }
+                Some(Err(f)) => serde_json::json!({ "code": f.code, "error": f.message }),
+            };
         }
         // **위에 트래커가 있었다는 것은 기계에게도 말한다**(moai-pjrr). 사람에게는 알림 한 줄인데
         // 여기만 조용하면, 고리를 짜는 쪽은 제가 방금 둘째 트래커를 세웠다는 것을 어디서도 못 본다.
@@ -1435,9 +2060,14 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
         }
         _ => {}
     }
-    match ignore {
-        Added::Wrote { rules: true } => out.push(say(lang, "init.wrote_gitignore").to_string()),
-        Added::Wrote { rules: false } => out.push(fill(say(lang, "init.wrote_comments"), &[("name", ".gitignore")])),
+    match (&ignore, plan.tracking.tracked()) {
+        (Added::Wrote { rules: true }, true) => out.push(say(lang, "init.wrote_gitignore").to_string()),
+        (Added::Wrote { rules: true }, false) => {
+            out.push(fill(say(lang, "init.wrote_local"), &[("name", ignore_name)]))
+        }
+        (Added::Wrote { rules: false }, _) => {
+            out.push(fill(say(lang, "init.wrote_comments"), &[("name", ignore_name)]))
+        }
         _ => {}
     }
     // **한 일만 말한다** — 이미 서 있던 줄과 안 쓰기로 한 저장소는 조용하다. 못 심은 것은
@@ -1494,6 +2124,28 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     if agents {
         out.push(say(lang, "init.agents_synced").to_string());
     }
+    if guide_file {
+        out.push(fill(say(lang, "init.wrote_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
+    }
+    // 이어 부른 명령의 말은 그 이름 아래 들여 싣는다 — 어느 말이 어느 명령의 것인지 갈린다. 이름은 **사람이 그대로
+    // 다시 칠 수 있는 줄이다** — 실패하면 "손으로 다시 부른다" 고 하므로, `-C` 로 불렀으면 그 자리를 붙인다(리뷰
+    // moai-zynt.63u). 맨 `moai project add .` 를 대던 판은 따라 친 셸의 자리를 목록에 올렸다. `-C` 를 붙이는 규칙은
+    // [`crate::report::Warning::cli_hint`] 하나다.
+    let away = away_root(&root, ctx.chdir);
+    let ran = [("skill install --scope local", &skilled), ("project add .", &listed)];
+    for (tail, done) in ran {
+        let cmd = crate::report::Warning::cli_hint(away.as_deref(), tail);
+        match done {
+            None => {}
+            Some(Ok(lines)) => {
+                out.push(fill(say(lang, "init.ran"), &[("cmd", &cmd)]));
+                out.extend(lines.iter().filter(|l| !l.trim().is_empty()).map(|l| format!("    {l}")));
+            }
+            Some(Err(f)) => {
+                out.push(fill(say(lang, "init.ran_failed"), &[("cmd", &cmd), ("why", &one_line(&f.message))]))
+            }
+        }
+    }
     // **줄 수가 아니라 한 일로 묻는다.** 줄을 세던 때는 이 자리 위에 줄 하나를 더하는 것만으로
     // 이 안내가 말없이 사라졌다 — `moai-knn0` 전까지 `agents` 가 늘 참이라 실제로 그랬다.
     // `Already` 는 "다 있어서 안 건드렸다" 뿐이다 — 못 읽은 자리는 `Unreadable` 이라 여기서 걸린다.
@@ -1502,6 +2154,9 @@ pub fn run(ctx: &Ctx, prefix: Option<&str>, no_agents: bool, no_driver: bool) ->
     let did_nothing = attrs == Added::Already
         && ignore == Added::Already
         && !agents
+        && !guide_file
+        && skilled.is_none()
+        && listed.is_none()
         && untouched.is_empty()
         && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
     if again && did_nothing {
@@ -1751,11 +2406,20 @@ mod tests {
         assert_ne!(before, GITIGNORE, "옛 블록을 못 지었다");
         std::fs::write(root.join(".gitignore"), &before).unwrap();
         std::fs::write(root.join(".gitattributes"), &*attributes_for(&root)).unwrap();
-        assert!(dotfile_gaps(&root).is_empty(), "제 무시를 든 줄을 빠졌다고 졸랐다: {:?}", dotfile_gaps(&root));
+        assert!(
+            gaps_in(&dotfiles(&root, Tracking::Commit, None)).is_empty(),
+            "제 무시를 든 줄을 빠졌다고 졸랐다: {:?}",
+            gaps_in(&dotfiles(&root, Tracking::Commit, None))
+        );
         assert!(gitignore_for(&root).contains(".moai/mail/") && gitignore_for(&root).contains(".moai/agents/"));
         // 정말 빠진 줄은 여전히 댄다.
         std::fs::write(root.join(".gitignore"), "").unwrap();
-        assert_eq!(dotfile_gaps(&root).len(), 1, "{:?}", dotfile_gaps(&root));
+        assert_eq!(
+            gaps_in(&dotfiles(&root, Tracking::Commit, None)).len(),
+            1,
+            "{:?}",
+            gaps_in(&dotfiles(&root, Tracking::Commit, None))
+        );
     }
 
     /// **링크인 딸린 파일에는 안 쓰고, 빠진 줄 대신 링크라고 말한다**(moai-yke5). git 은 2.32 부터 체크아웃
@@ -1779,8 +2443,9 @@ mod tests {
         let linked = |to: &str, outside: bool| Added::Linked { to: to.to_string(), outside };
         assert_eq!(ensure_lines(&root.join(".gitignore"), GITIGNORE, en), linked("conf/ignore", false));
         assert_eq!(std::fs::read_to_string(root.join("conf/ignore")).unwrap(), "target/\n", "링크 너머에 썼다");
-        assert_eq!(linked_dotfiles(&root), vec![".gitignore"]);
-        assert!(dotfile_gaps(&root).is_empty(), "링크를 빠진 줄로 말했다: {:?}", dotfile_gaps(&root));
+        let files = dotfiles_within(&root, None).unwrap();
+        assert_eq!(linked_in(&files), vec![".gitignore"]);
+        assert!(gaps_in(&files).is_empty(), "링크를 빠진 줄로 말했다: {:?}", gaps_in(&files));
         let notes = dotfile_notice(&root, false);
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].kind, "dotfile_linked");
@@ -2134,11 +2799,11 @@ mod tests {
         std::os::unix::fs::symlink(&file, s.join("AGENTS.md")).unwrap();
         let got = agents_state(s.path());
         assert!(
-            matches!(got, Err(Fell::Unheld(crate::held::Unheld::Outside { .. }))),
+            matches!(got, Err(("AGENTS.md", Fell::Unheld(crate::held::Unheld::Outside { .. })))),
             "밖을 가리키는 AGENTS.md 를 읽었다: {got:?}"
         );
         assert_eq!(agents_notice(s.path(), false), None);
-        let said = agents_unread(en(), s.path(), &got.unwrap_err());
+        let said = agents_unread(en(), s.path(), &got.unwrap_err().1);
         assert!(said.contains("AGENTS.md: ") && said.contains("outside"), "{said}");
     }
 
@@ -2176,5 +2841,69 @@ mod tests {
             assert_eq!(left(&moai), Vec::<std::ffi::OsString>::new());
             assert_eq!(left(s.path()).len(), 2, "옆자리로 물러선 임시 파일이 남았다: {:?}", left(s.path()));
         }
+    }
+
+    /// **`check-ignore -v` 의 한 줄을 그 뜻대로 읽는다**(리뷰 moai-zynt.63u) — 되살리는 패턴(`!…`)은 무시가 아니고,
+    /// 하위 디렉터리의 `.gitignore` 는 꼭대기에서 잰 상대 경로로, 이상한 글자가 든 경로는 따옴표로 싸여 온다.
+    #[test]
+    fn a_check_ignore_line_reads_as_the_tracking_it_means() {
+        let cases = [
+            (".gitignore:3:/.moai/\t.moai/\n", Tracking::Gitignore),
+            ("svc/.gitignore:1:/.moai/\t.moai/\n", Tracking::Gitignore),
+            ("\"\\355\\225\\234/.gitignore\":1:/.moai/\t.moai/\n", Tracking::Gitignore),
+            (".gitignore:2:!*/\t.moai/\n", Tracking::Commit),
+            (".git/info/exclude:7:/.moai/\t.moai/\n", Tracking::Exclude),
+            ("/home/u/.config/git/ignore:1:.moai/\t.moai/\n", Tracking::Exclude),
+            ("/home/u/.gitignore:1:.moai/\t.moai/\n", Tracking::Exclude),
+            ("", Tracking::Commit),
+        ];
+        for (said, want) in cases {
+            assert_eq!(ignored_by(said), want, "{said:?}");
+        }
+        // 자리에 `:` 가 서도 줄 번호 칸으로 가른다.
+        assert_eq!(rule_of("C:/u/ignore:4:a:b\t.moai/"), Some(("C:/u/ignore", "a:b")));
+    }
+
+    /// **`.git/info/exclude` 의 줄은 작업 트리 꼭대기가 뿌리다**(리뷰 moai-zynt.63u) — 하위 디렉터리의 트래커는 그
+    /// 길을 머리에 단다. 패턴 글자가 든 길은 막고, 어느 깊이에나 걸리던 줄은 그 넓이를 지킨다.
+    #[test]
+    fn exclude_lines_are_anchored_under_the_subdirectory() {
+        assert_eq!(anchored("/.moai/", "svc/"), "/svc/.moai/");
+        assert_eq!(anchored(".moai/lock", "svc/"), "/svc/.moai/lock");
+        assert_eq!(anchored("# moai", "svc/"), "# moai");
+        assert_eq!(anchored("target", "svc/"), "/svc/**/target");
+        assert_eq!(anchored("!/.moai/keep", "svc/"), "!/svc/.moai/keep");
+        assert_eq!(anchored("/.moai/", "a[1]/"), "/a\\[1]/.moai/");
+        assert_eq!(anchored("/.moai/", ""), "/.moai/");
+    }
+
+    /// **다른 바이너리가 쓴 안내 전문은 손질로 안 읽는다**(리뷰 moai-zynt.63u) — 링크가 전문의 해시를 들어, 다른
+    /// 전문을 쓴 바이너리의 링크는 제 마커의 해시를 대는 낡은 블록이다(`Stale::Binary`). 이 바이너리의 링크 밑에서
+    /// 파일만 다르면 손질이고, 줄 끝만 다른 전문은 같은 글이다.
+    #[test]
+    fn a_guide_another_binary_wrote_is_not_read_as_a_hand_edit() {
+        let s = crate::scratch::Scratch::new("init-guide-skew");
+        std::fs::create_dir_all(s.join(".moai")).unwrap();
+        let ours = format!("hash:{:08x}", crate::text::fnv1a32(crate::guide::agents().as_bytes()));
+        let theirs = crate::guide::agents_link().replace(&ours, "hash:00000000");
+        assert_ne!(theirs, crate::guide::agents_link(), "시험의 전제 — 링크가 전문의 해시를 안 든다");
+        std::fs::write(s.join("AGENTS.md"), with_block("", &theirs)).unwrap();
+        std::fs::write(s.join(crate::guide::GUIDE_FILE), "an older guide\n").unwrap();
+        let kind = |root: &Path| agents_notice(root, false).map(|w| w.kind);
+        assert_eq!(kind(s.path()), Some("agents_stale"), "다른 바이너리가 쓴 것을 손질로 댔다");
+        std::fs::write(s.join("AGENTS.md"), with_block("", &crate::guide::agents_link())).unwrap();
+        assert_eq!(kind(s.path()), Some("agents_hand_edited"));
+        std::fs::write(s.join(crate::guide::GUIDE_FILE), crate::guide::agents().replace('\n', "\r\n")).unwrap();
+        assert_eq!(kind(s.path()), None, "CRLF 체크아웃을 낡았다고 했다");
+    }
+
+    /// **링크 모드는 링크의 끝줄로 알아본다**(리뷰 moai-zynt.63u) — 블록이 `.moai/guide.md` 라는 글을 품는다고 링크가
+    /// 아니다. 그렇게 가르던 판은 그 경로를 적은 손질 한 줄에 블록 모드 저장소를 링크로 갈아 끼웠다.
+    #[test]
+    fn a_block_that_names_the_guide_file_is_still_a_block() {
+        let noted = with_block("", &format!("{}see {}\n", crate::guide::agents(), crate::guide::GUIDE_FILE));
+        assert!(!links_to_guide(&noted));
+        assert!(links_to_guide(&with_block("", &crate::guide::agents_link())));
+        assert!(!crate::guide::agents().contains(crate::guide::GUIDE_MARK), "전문이 링크의 표식을 품었다");
     }
 }

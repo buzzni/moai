@@ -179,7 +179,7 @@ pub(super) fn due(read_at: Option<std::time::Instant>) -> bool {
 
 /// 설치가 어긋난 것은 이만큼에 한 번만 다시 묻는다(moai-nzyh). **나머지 셈과 자를 따로 두는 까닭은
 /// 값이 다르기 때문이다** — 쓸기 한 벌의 나머지는 파일을 읽는 일이고 이 물음은 프로젝트마다
-/// 하위 프로세스를 셋까지 새로 실행한다(`git check-attr`·`git config`, 심겼으면 probe 하나). 등록 다섯에
+/// 하위 프로세스를 다섯까지 새로 실행한다(`git check-ignore`, git 밖이면 `rev-parse`, `git check-attr`·`git config`, 심겼으면 probe 하나). 등록 다섯에
 /// 57ms 가운데 32ms 가 그것이었다(`moai-nzyh` 의 표). [`REREAD_EVERY`] 로 같이 재면 탐색기가 선
 /// 동안 그 값을 1분마다 다시 치른다.
 ///
@@ -718,7 +718,7 @@ impl Layer {
                 // **버리는 줄에도 찍는다**(리뷰) — 아래 세대 견주기보다 **앞이다.** 이 수는 그
                 // 줄의 스냅샷이 아니라 그 디렉터리의 설치 상태라, 사람이 그새 줄을 다시 세웠다고
                 // 낡지 않는다. 뒤에 두던 때는 줄을 펼치는 키 하나가 [`Layer::set_by_hand`] 로
-                // 세대를 올려, 이미 치른 하위 프로세스 셋의 답이 통째로 버려지고
+                // 세대를 올려, 이미 치른 하위 프로세스 다섯의 답이 통째로 버려지고
                 // [`Place::install`] 이 빈 채 남았다 — 그러면 다음 쓸기가 같은 디렉터리에 그 셋을
                 // 또 새로 실행하고, 줄을 자주 건드리는 동안 이 캐시가 아예 안 선다.
                 if let Some(count) = l.asked_install {
@@ -896,7 +896,7 @@ impl App {
         layer.lang = self.site.lang;
         // **띄운 자리의 설치 알림은 이미 물어 두었다**(moai-k6ff, 리뷰) — 여는 읽기
         // ([`super::App::overlaid`])가 그 뿌리에 대고 한 번 물었다. 그 값을 그 줄에 옮겨 두지
-        // 않으면 첫 쓸기가 **같은 디렉터리**에 하위 프로세스 셋을 1초 안에 또 새로 실행한다.
+        // 않으면 첫 쓸기가 **같은 디렉터리**에 하위 프로세스 다섯을 1초 안에 또 새로 실행한다.
         if let Some((root, told)) = self.site.repo.as_ref().map(|r| r.root.clone()).zip(self.site.install)
             && let Some(p) = layer.places.iter_mut().find(|p| same_dir(&p.path, &root))
         {
@@ -1170,7 +1170,7 @@ impl App {
                 if let Some(layer) = &mut self.layer {
                     // **물어서 센 값은 그 줄에도 적는다**(리뷰) — 들이는 쪽과 같은 자다
                     // (`App::follow_site` 의 `stamp_install`). 안 적으면 올라와서 도는 첫 쓸기가
-                    // 같은 디렉터리에 하위 프로세스 셋을 또 새로 실행한다.
+                    // 같은 디렉터리에 하위 프로세스 다섯을 또 새로 실행한다.
                     if let Some(count) = fresh.asked_install {
                         layer.stamp_install(&path, count);
                     }
@@ -1223,7 +1223,7 @@ impl App {
                 // [`App::apply_fresh`] 는 물은 때만 찍는다. 그런데 [`App::leave_project`] 가 `Site` 를
                 // 갈아 끼워 그 자리가 비어, 안 옮기면 들어가서 **처음 쓰는 키**의 다시 읽기
                 // ([`App::reload`], 그 자리에서 읽는다)가 같은 것을 다시 묻는다 — 들어가는 키에서
-                // 아낀 하위 프로세스 셋을 그 키가 치르고, 심긴 드라이버의 probe 는 2초까지 기다린다.
+                // 아낀 하위 프로세스 다섯을 그 키가 치르고, 심긴 드라이버의 probe 는 2초까지 기다린다.
                 // 들이는 쪽과 같은 자다(`App::follow_site` 의 `.or(told)`) — 물은 때는 덮지 않는다.
                 self.site.install = self.site.install.or(told);
             }
@@ -4567,7 +4567,7 @@ mod tests {
     }
 
     /// 설치가 어긋난 것은 [`ASK_INSTALL_EVERY`] 에 **한 번만 묻는다**(moai-nzyh) — 그사이에 그 줄을
-    /// 몇 번 다시 읽든 들고 있던 수를 그대로 센다. 되돌리면 `tui::layer::summarize` 가 프로젝트 줄마다 하위 프로세스를 셋까지 새로 실행하고
+    /// 몇 번 다시 읽든 들고 있던 수를 그대로 센다. 되돌리면 `tui::layer::summarize` 가 프로젝트 줄마다 하위 프로세스를 다섯까지 새로 실행하고
     /// (`check-attr`·`config`·심긴 줄의 probe), 그 값이 등록 수만큼 더해진다.
     #[test]
     fn the_layer_asks_about_the_install_once_and_carries_the_count_until_the_clock_turns() {
@@ -4695,7 +4695,7 @@ mod tests {
         assert_eq!(a.site.notices, counted, "층이 댄 알림 수와 들어간 화면의 수가 갈렸다");
         // **물어 둔 것도 함께 든다**(리뷰) — 안 들면 들어가서 처음 쓰는 키의 다시 읽기
         // ([`super::App::reload`], 그 자리에서 읽는다)가 같은 것을 다시 물어, 들어가는 키에서
-        // 아낀 하위 프로세스 셋을 그 키가 치른다.
+        // 아낀 하위 프로세스 다섯을 그 키가 치른다.
         assert_eq!(
             a.site.install.map(|t| t.count),
             told.map(|t| t.count),

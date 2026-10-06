@@ -185,13 +185,28 @@ impl Decision {
 ///
 /// 머리말(`hook.lead`)은 말묶음에서 온다(moai-8d49) — 보드만 실으면 그것이 무엇을 하라는
 /// 뜻인지가 안 붙는데, 그 한 줄만 한국어로 박혀 있으면 영어 화면의 보드가 두 말로 답한다.
-pub fn board(lines: &[String], lang: Lang) -> Decision {
+///
+/// **사용법이 어디 있는지** 한 줄을 더할 수 있다 — `unguided` 는 그 체크아웃의 AGENTS.md 에 moai 블록이
+/// 없다는 뜻이다(moai-6pld). 트래커를 git 밖에 두고 AGENTS.md 를 안 건드린 저장소에서는 이 훅이 에이전트가
+/// moai 를 아는 유일한 길이라, 사용법을 든 스킬을 댄다. 블록이 있는 저장소에는 안 싣는다 — 같은 말을 두 번
+/// 하는 것은 첫 프롬프트마다 치르는 값이다.
+pub fn guided_board(lines: &[String], lang: Lang, unguided: bool) -> Decision {
     // 싣기 전에 색을 걷는다. 까닭은 `style::plain` 에 있다.
     let body = crate::style::plain(&lines.join("\n"));
     if body.trim().is_empty() {
         return Decision::Pass;
     }
-    Decision::Context(format!("{}\n\n{body}", say(lang, "hook.lead")))
+    let lead = match unguided {
+        true => format!("{}\n{}", say(lang, "hook.lead"), say(lang, "hook.unguided")),
+        false => say(lang, "hook.lead").to_string(),
+    };
+    Decision::Context(format!("{lead}\n\n{body}"))
+}
+
+/// 블록이 선 체크아웃의 보드 — 시험이 이 모양으로 부른다.
+#[cfg(test)]
+pub fn board(lines: &[String], lang: Lang) -> Decision {
+    guided_board(lines, lang, false)
 }
 
 /// Claude Code 가 훅의 글 한 칸(`additionalContext`, 평문 stdout)에 싣는 상한 — 1만 자다(리뷰 moai-h8tn.x4l,
@@ -12993,6 +13008,14 @@ mod tests {
     #[test]
     fn an_empty_board_says_nothing() {
         assert_eq!(board(&[]), Decision::Pass);
+        // AGENTS.md 에 블록이 없는 체크아웃에는 사용법이 어디 있는지 한 줄을 더 싣는다(moai-6pld).
+        let lang = crate::i18n::Lang::En;
+        let Decision::Context(bare) = guided_board(&["todo 3".into()], lang, true) else { panic!("실어야 한다") };
+        assert!(bare.contains(say(lang, "hook.unguided")), "{bare}");
+        let Decision::Context(plain) = guided_board(&["todo 3".into()], lang, false) else {
+            panic!("실어야 한다")
+        };
+        assert!(!plain.contains(say(lang, "hook.unguided")), "{plain}");
         assert_eq!(board(&["   ".into()]), Decision::Pass);
     }
 

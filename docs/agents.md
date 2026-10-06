@@ -28,6 +28,38 @@ the journal are never touched.
   by hand (`init` throws that edit away). `moai init --check` answers `current`,
   `stale` or `missing` and writes nothing
 
+### Where the guide goes
+
+The first `moai init` in a terminal asks, and `--guide` says it without asking:
+
+| `--guide` | What `init` writes | When to pick it |
+|---|---|---|
+| `block` | the whole guide inside the `AGENTS.md` block | what `init` has always done, and still does when a script or an agent runs it |
+| `file` | the guide in `.moai/guide.md`, and a few lines in the block that point at it | `AGENTS.md` is yours and you want it short — the screen's pick for a committed tracker |
+| `hook` | nothing in `AGENTS.md`; the hooks tell Claude instead | the tracker is kept out of git — the screen's pick there |
+| `none` | nothing (`--no-agents`) | you hand the guide over some other way |
+
+- **`file` keeps one way to the text everywhere.** The link names
+  `moai init --print` as well, so a clone that lacks the file still gets the same
+  guide from the binary. `--check` and `moai status` measure the link and the file
+  both. Linked worktrees read the guide from the main tracker. A clone with no
+  tracker uses the `--print` fallback without a false hand-edit notice; once the
+  tracker exists, a missing or edited guide reads as stale and `init` writes it again.
+  The link ends in a hash of the guide it points at, so a guide another version of
+  moai wrote reads as that binary's, not as a hand edit — rebuild before you plant it again
+- **`hook` needs the hooks installed**, so `init` installs them with it
+  (`moai skill install --scope local`) and refuses `--no-skill` beside it. The
+  first prompt of a session then carries the board and one line saying the usage
+  is in the `moai` skill. That line appears in any checkout whose `AGENTS.md` has
+  no moai block, and only there
+- **Nothing records which one you picked.** Run again, `init` reads it from the
+  block — a link means `file`, any other moai block means `block`, and that block is
+  kept current even in a tracker kept out of git. These checks run on the first
+  initialization too, so a clone keeps an existing link. With no block, installed
+  moai hooks mean `hook`, and a plain rerun leaves those hooks installed without
+  calling the installer again. Otherwise a tracker kept out of git is left without
+  a block and a committed one gets the block
+
 ## Plant the skills
 
     moai skill install                     Claude Code, just me (the default)
@@ -602,4 +634,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf

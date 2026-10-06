@@ -8,6 +8,41 @@ in [the CLI reference](cli.md), what to do when something ends up wrong is in
 [Recovery](recovery.md), and the words this page leans on are in
 [the glossary](glossary.md).
 
+## Plant the tracker
+
+`moai init` in a terminal shows a short screen before it writes anything: the id
+prefix (it cannot change later), whether git tracks the tracker, where the agent
+guide goes ([the agents page](agents.md#where-the-guide-goes)), whether to install
+the hooks and skills, the merge driver, and whether to add the repository to your
+project list. Each row comes with its default picked; Enter plants, Esc stops with
+nothing written. A flag picks its row and locks it. `--yes` asks nothing and plants
+the old defaults — committed, with the guide block — for choices that flags and
+existing git rules or guide files have not settled. A script or an agent is never
+asked, and gets the same as `--yes`; `TERM=dumb` also skips the screen.
+
+**Whether git tracks the tracker** is the one choice that changes how everything
+else behaves:
+
+    moai init --tracking commit      shared through git (what init has always done)
+    moai init --tracking exclude     kept in this clone; rules go to .git/info/exclude
+    moai init --tracking gitignore   kept in this clone; rules go to .gitignore
+
+Kept out of git, no committed file changes with `exclude` — use it to track your
+own work in a repository that is not yours. There is nothing for git to merge, so
+`.gitattributes` and the merge driver are left alone, and `moai status` does not
+ask for them. `init` asks git which way stands every time instead of storing it,
+so it will not switch it for you: moving `.moai` in or out of git is a commit you
+make yourself (`git rm --cached`, or dropping the ignore line).
+
+The first initialization reads existing ignore rules too, including your global
+excludes. If git fails or exceeds its probe budget, `init` refuses before writing
+and `status` says that the dotfile rules could not be checked. Repair git or try
+again; symlink notices still appear. A tracker linked to another directory inside
+the checkout is ignored at both the link and the directory it points at.
+
+`--driver` requires commit tracking. In `init --json`, `gitignore` means that
+`.gitignore` was written, and `exclude` means `.git/info/exclude` was written.
+
 ## Pick up work
 
 1. `moai status` — start a session here. The board, the warnings and the flow come
@@ -158,4 +193,4 @@ where its contributors read them rather than repeated here:
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf

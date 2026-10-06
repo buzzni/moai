@@ -1356,7 +1356,7 @@ enum Probe {
 /// 모르는 것이라 알림이 입을 다문다 — `probe` 가 한도를 넘긴 때와 같은 쪽이다. 한도는 부름마다 따로다.
 /// `moai init` 과 `init --check` 는 같은 물음을 한도 없이 한다(리뷰 moai-59k3.4c3,
 /// [`crate::git::run_within`]).
-const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 그 명령이 이 드라이버를 아는가 — **파일을 보지 않고 실제로 불러서 잰다**(moai-zdw4,
 /// 2026-09-20 사용자 결정).

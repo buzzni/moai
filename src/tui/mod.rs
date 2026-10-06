@@ -8,6 +8,7 @@ pub mod draw;
 pub mod edit;
 pub mod form;
 mod hint;
+pub mod init_screen;
 pub mod input;
 pub mod jotfile;
 pub mod keys;

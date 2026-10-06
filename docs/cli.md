@@ -3249,8 +3249,16 @@ Arguments:
   [PREFIX]  id prefix (up to 8). Made from the directory name when absent
 
 Options:
-      --no-agents            Leave AGENTS.md alone
+      --no-agents            Leave AGENTS.md alone (same as --guide none)
+      --guide <how>          block, file (.moai/guide.md + link), hook or none
+      --driver               Plant the merge driver in .git/config (the default)
       --no-driver            Leave .git/config alone (plant no merge driver)
+      --tracking <how>       Git tracks it (commit) or not (exclude, gitignore)
+      --skill                Then run moai skill install --scope local
+      --no-skill             Do not install the hooks and skills
+      --register             Then add this repository to your project list
+      --no-register          Do not add it to your project list
+  -y, --yes                  Ask nothing; unset rows plant as init always did
       --check                Write nothing; say if the AGENTS.md block is stale
       --print                Write nothing; print that block (to paste it)
       --json                 Machine-readable output. Every human line goes away
@@ -3265,6 +3273,18 @@ Options:
   and the journal are not touched.
 
   The prefix is decided once - every id already issued carries it.
+
+  **In a terminal the first init asks.** It shows the prefix and each choice
+  with its default picked, and Enter plants. A flag picks its row and locks
+  it; give every row a flag and nothing is asked. --yes asks nothing and
+  uses the old defaults - committed, with the guide block - for choices that
+  neither a flag nor existing git rules and guide files settle. Nothing is
+  asked where a script or an agent calls it - stdin or stdout is not a
+  terminal, TERM=dumb, or --json - and there init plants the same as --yes.
+  Running it again where .moai already stands never asks. Esc stops with nothing
+  written. Even a first run reads existing git ignore rules and the moai
+  guide block. A later run also recognizes installed moai hooks when no block
+  stands. If git fails, init refuses rather than guessing commit mode.
 
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
@@ -3284,11 +3304,15 @@ Options:
   --no-driver leaves .git/config alone. A repository that wants no driver at
   all says so in `.gitattributes` - a line for the snapshot that settles
   merge itself (`.moai/issues.jsonl   text eol=lf -merge`) is read as the
-  decision and init leaves it alone.
+  decision and init leaves it alone. An explicit --driver with --tracking
+  exclude or gitignore is refused.
+
+  --json reports gitignore=true only when .gitignore was written; exclude=true
+  means the ignore lines were written to .git/info/exclude.
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is
-  non-zero only when a file cannot be read.
+  non-zero when a file cannot be read or git cannot determine tracking.
 
   --print only prints that block. That is where to copy it from when the file
   the agent reads is not AGENTS.md - --print and init write the same text.

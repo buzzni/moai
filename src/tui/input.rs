@@ -656,8 +656,12 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 9] = [
+    const NOT_COMPONENTS: [(&str, &str); 10] = [
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
+        (
+            "init_screen.rs",
+            "init 의 선택 상자 — 터미널을 켜고 그리고 키를 넘긴다. 고르는 상태와 키는 조각 crate::init_choice 가 든다",
+        ),
         ("draw.rs", "그림 — Frame 에 찍는다"),
         (
             "hint.rs",

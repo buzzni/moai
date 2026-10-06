@@ -307,7 +307,13 @@ fn decide(
                     0,
                     view::Screen::new(ctx.lang()).at(ctx.clock()),
                 );
-                crate::hook::board(&lines, ctx.lang())
+                // AGENTS.md 에 moai 블록이 없으면(git 밖에 둔 트래커의 `--guide hook`) 사용법이 어디 있는지 한 줄을 더한다.
+                // 못 읽으면 더하지 않는다 — 무엇이 들었는지 모른다.
+                let unguided = matches!(
+                    crate::cmd::init::agents_state(repo.here()),
+                    Ok((crate::cmd::init::BlockState::Missing, _))
+                );
+                crate::hook::guided_board(&lines, ctx.lang(), unguided)
             });
             // 사람이 물었으니 일하는 중이다. 편지는 **매 프롬프트** 싣는다 — 보드처럼 한 번이 아니다(moai-h8tn). 보드와
             // 한 칸이라 그 다음 자리에 든다([`crate::hook::Carry::letters_room`]). 출석은 편지를 옮기기 전에 적는다(위와 같은 까닭).

@@ -946,6 +946,10 @@ fn says(w: &Warning, screen: Screen) -> String {
         // (`.moai/journal.jsonl  text eol=lf merge=union`) 한 줄에 이어 붙이면 어디서 한 줄이
         // 끝나는지 안 보인다.
         "gitignore_rules" => one(say(lang, "warn.gitignore_rules")),
+        // git 밖에 둔 트래커의 무시 줄(moai-zynt.zhr) — 막는 것이 트래커까지라 결과가 `.gitignore` 의 것과 다르다.
+        "exclude_rules" => one(say(lang, "warn.exclude_rules")),
+        // `.gitignore` 로 git 밖에 둔 트래커의 줄 — 결과는 `exclude_rules` 와 같고 파일만 다르다.
+        "gitignore_local_rules" => one(say(lang, "warn.gitignore_local_rules")),
         "gitattributes_rules" => one(say(lang, "warn.gitattributes_rules")),
         // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr) — 안 심은 것은 밑의
         // `merge_driver_absent` 가 제 낱말로 말한다. 여기는 심어 놓고 그 자리가 빈 판이고,
@@ -965,6 +969,7 @@ fn says(w: &Warning, screen: Screen) -> String {
         "tracker_linked" => one(say(lang, "warn.tracker_linked")),
         // **링크인 딸린 파일**(moai-yke5). 어느 파일인지는 `preview` 가 한 줄로 낸다 — 칠 줄이 없다.
         "dotfile_linked" => one(say(lang, "warn.dotfile_linked")),
+        "tracking_unknown" => one(say(lang, "warn.tracking_unknown")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
