@@ -222,8 +222,10 @@ the tool grows; it rewrites that block and tops up the `.gitattributes` and
 
 The first `init` in a terminal asks where the guide goes — the whole block,
 `.moai/guide.md` with a link in the block, or the Claude hooks for a tracker kept
-out of git — and `--guide` says it without asking. Scripts and agents get the
-block, as before.
+out of git — and `--guide` says it without asking. Scripts and agents use the old
+block default when no existing ignore rules or guide files settle the choice.
+Initialization also preserves a clone's existing guide link and recognizes installed
+moai hooks; a git failure is reported before anything is planted.
 
 If your agent reads some other file, take the same block and paste it there:
 
