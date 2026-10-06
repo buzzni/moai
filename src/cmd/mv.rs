@@ -266,7 +266,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 //
                 // 칸과 그 시각들 — **시작·끝 시각**(moai-38mh)까지 — 은 `Issue::move_to` 가 한 번에
                 // 옮긴다. 저널을 접어 세면 저널만 못 적힌 쓰기에서 조용히 틀리므로 이 쓰기에 싣고,
-                // `idea promote` 도 같은 길이라 어느 동사로 닫든 같은 줄이 선다.
+                // `backlog promote` 도 같은 길이라 어느 동사로 닫든 같은 줄이 선다.
                 let was = i.move_to(to.clone(), &at, cfg);
                 entries.push(JournalEntry::status(&i.id, &was, &to, msg.clone(), &at, &by));
                 // **남의 줄은 묻고 집는다**(moai-0zjo). 여기서는 막지 않는다 — 막는 자리는 훅 규칙 5

@@ -1489,14 +1489,14 @@ pub(super) mod tests {
         use super::Target;
         let filler = |from: usize| (from..from + 30).map(|n| format!("Line {n}.\n\n")).collect::<String>();
         let home = format!(
-            "# Home\n\n[epic](glossary.md#epic) [gone](glossary.md#gone) [idea](glossary.md#idea) [below](#below)\n\n\
+            "# Home\n\n[epic](glossary.md#epic) [gone](glossary.md#gone) [backlog](glossary.md#backlog) [below](#below)\n\n\
              {}## Below\n\nend\n\n{}",
             filler(0),
             filler(100)
         );
         // 머리 밑의 긴 문단은 칸의 폭에 따라 접히는 줄 수가 달라, 폭을 바꾸면 머리글이 선 줄이 옮겨 간다.
         let glossary = format!(
-            "# Glossary\n\n{}\n\n{}## Epic\n\nEpic text.\n\n{}## Idea\n\nLast.\n",
+            "# Glossary\n\n{}\n\n{}## Epic\n\nEpic text.\n\n{}## Backlog\n\nLast.\n",
             "word ".repeat(80).trim_end(),
             filler(0),
             filler(100)
@@ -1515,7 +1515,7 @@ pub(super) mod tests {
             [
                 page("glossary", "epic", true),
                 page("glossary", "gone", false),
-                page("glossary", "idea", true),
+                page("glossary", "backlog", true),
                 page("README", "below", true)
             ]
         );
@@ -1557,12 +1557,15 @@ pub(super) mod tests {
         // 페이지 끝 가까이의 머리글 — 맨 위까지 못 오르지만 표시가 그 줄에 선다.
         a.hit("Enter j j Enter");
         let screen = draw::tests::render(&mut a, 120, 24).join("\n");
-        assert!(screen.contains("▸ ## Idea") && screen.contains("Last."), "끝 가까이의 머리글에 표시가 없다\n{screen}");
-        assert!(!page_top(&screen.lines().map(str::to_string).collect::<Vec<_>>(), " Glossary · ").contains("Idea"));
+        assert!(
+            screen.contains("▸ ## Backlog") && screen.contains("Last."),
+            "끝 가까이의 머리글에 표시가 없다\n{screen}"
+        );
+        assert!(!page_top(&screen.lines().map(str::to_string).collect::<Vec<_>>(), " Glossary · ").contains("Backlog"));
         // 끝에 닿아 안 구르는 `j` 는 표시를 안 걷는다 — 그 표시가 서는 자리가 바로 여기다. 구르는 `k` 는 걷는다.
         a.hit("j");
         let screen = draw::tests::render(&mut a, 120, 24).join("\n");
-        assert!(screen.contains("▸ ## Idea"), "안 굴렀는데 표시가 걷혔다\n{screen}");
+        assert!(screen.contains("▸ ## Backlog"), "안 굴렀는데 표시가 걷혔다\n{screen}");
         a.hit("k");
         let screen = draw::tests::render(&mut a, 120, 24).join("\n");
         assert!(!screen.contains("▸ "), "굴렸는데 표시가 남았다\n{screen}");

@@ -154,7 +154,7 @@ const BUNDLE: &str =
 /// 없던 것들이고, 다섯 다 한 번이 아니라 여러 판에서 되풀이됐다 — 그때까지는 감독이 브리프마다
 /// 손으로 실었고, 실으면 잡히고 안 실으면 리뷰가 그때그때 운으로 잡았다.
 ///
-/// **어제의 버그 목록이 되지 않게 되풀이된 것만 싣는다**(idea `moai-53wq` 가 며칠 묵힌 까닭이
+/// **어제의 버그 목록이 되지 않게 되풀이된 것만 싣는다**(backlog `moai-53wq` 가 며칠 묵힌 까닭이
 /// 그것이다). 한 번 잡힌 것을 여기 박으면 브리프가 그날의 고침 목록으로 자란다.
 ///
 /// **관점을 대신하지 않는다.** 이 에픽이 실제로 한 일이 관점의 본체고, 이 다섯은 그 위에
@@ -313,7 +313,7 @@ refusals in all.
   commit from sealing someone's open merge, but it cannot keep it from carrying rows another
   session has not committed yet"#;
 
-/// 밖의 idea 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
+/// 밖의 backlog 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
 /// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
 /// 일이 밖에 선 채로 돌거나, 일꾼이 무엇을 달지 모른다. `promote` 에는 이 플래그가 없다.
 const MILESTONE_ATTACH: &str = "moai edit <epic> --milestone <milestone>";
@@ -325,7 +325,7 @@ const MILESTONE_ATTACH: &str = "moai edit <epic> --milestone <milestone>";
 /// 달지 않기로 한 뒤에는 `moai ready` 가 대는 **도는** 릴리스가 베낄 값이 아니다 — 베낄 것은 그
 /// 생각이 이미 선 릴리스이고, 그것을 내주는 자는 `moai show --milestone` 하나다(그 절이 같은 말을
 /// 한다). 옛 자리를 그대로 두면 글이 시키는 대로 베낀 값이 곧 규칙이 막는 값이 된다.
-const MILESTONE_FROM: &str = "the release `moai show --milestone` stands that idea under";
+const MILESTONE_FROM: &str = "the release `moai show --milestone` stands that backlog under";
 
 /// 모노레포 하위로 드는 한 줄(moai-ay3b). 새 일의 3 과 거둔 일의 워크트리 걸음이 같은 줄을 쓴다 —
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
@@ -405,9 +405,9 @@ split off, and the current rows are in the main checkout's file."#;
 const NO_GATE: &str = "There is no approval gate — create anything, move anything. Do not ask a human, \
 except before you pick up work that is someone else's or nobody's (hook rule 5).";
 
-const FORKS: &str = r#"**1. `add` or `idea`** — what decides is *whether you would pick it up now.*
-If you would, `moai add`; if it is for later, `moai idea add '<what came to mind>'`.
-An idea stands on neither the board nor `ready`, so it does not blur the plan.
+const FORKS: &str = r#"**1. `add` or `backlog`** — what decides is *whether you would pick it up now.*
+If you would, `moai add`; if it is for later, `moai backlog add '<what came to mind>'`.
+A backlog item stands on neither the board nor `ready`, so it does not blur the plan.
 **Walking past it without writing it down is the worst of all.**
 
 If it came out of an epic, ask one more question first — *can this epic deliver
@@ -415,13 +415,13 @@ what it promised without this?* If not, it is not for later: it is this work,
 unfinished. Even when you cannot do it now (waiting on a person's decision, the
 work beside you holds that file), create it as a member with `-e <epic>` and
 leave it in the first column — a member still standing keeps the epic from
-closing by itself. Send it out as an idea and the epic stands `done` without
+closing by itself. Send it out as a backlog item and the epic stands `done` without
 having delivered what it promised. To `defer` such a member is to decide to give
 that promise up.
 
 **2. `defer` or `done`** — never move to `done` what you decided not to do.
 `moai defer <id> -m '<why>'` changes neither the column nor the kind, and
-`--undo` brings the same row back as it was. An idea is "not work yet"; a defer
+`--undo` brings the same row back as it was. A backlog item is "not work yet"; a defer
 is "work, but not now".
 
 **3. Is it worth splitting into an epic** — if the request does not end inside one
@@ -501,43 +501,43 @@ Three common ways it goes wrong.
 ///
 /// 본문 걸음은 어느 글에도 없었다. `promote` 는 본문을 안 데려가, 2026-09-22 에 한 번에 펼친
 /// 에픽 셋이 모두 0자로 섰고 사람이 손으로 채웠다.
-fn ideas() -> String {
+fn backlog() -> String {
     format!(
-        r#"    moai idea add '<what just came to mind>'       park it
-    moai idea add '<a longer thought>' -b -        the body comes from stdin
-    moai idea ls                                   see what has piled up
+        r#"    moai backlog add '<what just came to mind>'       park it
+    moai backlog add '<a longer thought>' -b -        the body comes from stdin
+    moai backlog ls                                   see what has piled up
     moai show -g <keyword>                         find out whether it is written down already
 
 When the time comes, unfold one into an epic and issues. Unfolding closes the thought.
 
 ```sh
-moai idea promote <id> --from - <<'PLAN'
+moai backlog promote <id> --from - <<'PLAN'
 # Epic title
 - [p1] first issue #enhancement
 PLAN
 ```
 
-**A line in the plan becomes the issue title verbatim.** Copy over an idea title
+**A line in the plan becomes the issue title verbatim.** Copy over a backlog item title
 that grew long while you parked it and that length spreads into the issues, so
-write a short new title when you unfold — the original text stays on that idea,
+write a short new title when you unfold — the original text stays on that backlog,
 and the history line about being unfolded from it leads back there.
 
-**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+**The backlog's milestone and body go onto the epic by themselves.** `promote` puts
 both on the epic it unfolds — a milestone is inherited, so the epic alone carries
 it to every member, the ones added later included, and the body is what lets
 `moai show <epic>` say why these issues are one bundle. Not onto every issue: the
-original stays on the closed idea and the history leads back to it, and the one
+original stays on the closed backlog and the history leads back to it, and the one
 place worth filling is the epic, so the window that picks a member up does not
 have to press every member to find out what this is.
 
-**The milestone that comes over is the one `moai show --milestone` stands the idea
-under**, not whatever its own field says — an idea parked inside an epic comes over
+**The milestone that comes over is the one `moai show --milestone` stands the backlog
+under**, not whatever its own field says — a backlog item parked inside an epic comes over
 in that epic's release even with an empty field of its own, and a field of its own
 that loses to the epic it sits in never reaches the new epic. One reader answers
 where a row belongs, on every surface.
 
 **Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
-already the owner — its members inherit its milestone, and writing the idea's over
+already the owner — its members inherit its milestone, and writing the backlog's over
 theirs would stand one bundle in two places.
 
 **If what came over is not the release that is running, leave it where it stands.**
@@ -547,8 +547,8 @@ release:
 
     {MILESTONE_ATTACH}
 
-`promote` carries the release the idea stands in whatever state that release is in,
-so an idea parked with no milestone, one parked under a release that has since
+`promote` carries the release the backlog stands in whatever state that release is in,
+so a backlog item parked with no milestone, one parked under a release that has since
 shipped, and one parked under a milestone since deferred all come over exactly as
 they stood. **A dead one you do clear yourself** — nobody chose it here and it hides
 the new epic: `moai edit <epic> --milestone none` on a release that has shipped or
@@ -630,7 +630,7 @@ running beside each other overlap, and waiting on a person counts too.
 its epic's milestone. A child created with `--parent <epic>` belongs to that epic.
 Do not write it again on every issue — move the epic and the members come along.
 
-**A plan gives its members the epic's own id.** `moai add --from` and `moai idea
+**A plan gives its members the epic's own id.** `moai add --from` and `moai backlog
 promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
 <epic>` always did for a review — one subject, one id. The member carries no
 `epic` field of its own, so `jq -r .epic` on it is `null` while `jq -r
@@ -784,7 +784,7 @@ const STATS: &str = r#"    moai stats                           columns, priorit
 
 It takes the filters `moai show` takes and counts one kind — `issue` unless
 `--type` names another; a group is measured through its members (`-e`,
-`--milestone`). Done, deferred, ideas and the archive are opened, because a
+`--milestone`). Done, deferred, backlog and the archive are opened, because a
 count of history that hides what closed would say nothing closed. In the explorer
 `SPC g s` opens the same numbers as bars, narrowed by the filter that is hung.
 
@@ -828,7 +828,7 @@ the hook refuses it (rule 5). Who you are is matched by name or email, the same 
 
 const CLOSING: &str = r#"Run `moai status` once more and see whether the warnings grew. Warnings block
 nothing — they shine a light on issues with no epic, reviews stalled for a long
-time, and how much you have open at once. Ideas piling up and what is deferred are
+time, and how much you have open at once. Backlog piling up and what is deferred are
 not warnings; they stand apart as notices (`notices`).
 
 If you end the session still holding something, leave one line on that issue for
@@ -1015,7 +1015,7 @@ first column and is not closed yet (`in_progress`·`review`).
 Anything that comes out of that work belongs in the same epic (`-e <epic>`) or
 under that issue (`--parent <id>`). If the epic {PLEDGE}, it is one of those two
 even when you cannot do it now (fork 1). If it is not for now, park it with
-`moai idea add` — an idea is always free of this rule, and so is
+`moai backlog add` — a backlog item is always free of this rule, and so is
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. {two}.** `moai mv <id> in_progress`.
@@ -1084,6 +1084,31 @@ pub const TAKE_YES: &str = "--take -m '<who said yes>'";
 /// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
 pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
 
+/// 안내 전문이 사는 파일(moai-cbfz) — `init --guide file` 이 쓴다. 트래커 디렉터리 안이라 뿌리를 안 어지르고,
+/// 추적 여부를 `.moai` 와 함께 따른다.
+pub const GUIDE_FILE: &str = ".moai/guide.md";
+
+/// 링크 블록의 끝줄 머리 — **링크 모드는 이 줄로 알아본다**(리뷰 moai-zynt.63u). 블록이 `.moai/guide.md` 라는
+/// 글을 품는지로 가르던 판은 그 경로를 적은 손질 한 줄에 블록 모드 저장소를 링크 모드로 갈아 끼웠다.
+pub const GUIDE_MARK: &str = "<!-- moai:guide";
+
+/// `init --guide file` 이 AGENTS.md 블록에 두는 몇 줄. 파일이 없는 자리(그 파일을 안 담은 클론)를 위해 같은
+/// 글을 내는 명령을 함께 댄다 — 바이너리만 있으면 어디서든 같은 글을 얻는다.
+///
+/// **끝줄이 가리키는 전문의 해시를 든다**(리뷰 moai-zynt.63u). 전문이 바뀌면 링크도 바뀌어야 블록의 마커가
+/// "어느 바이너리가 쓴 그대로" 를 가린다(`Stale::Binary`, moai-mj45) — 바이너리마다 같은 링크를 두던 판은
+/// 새 바이너리가 쓴 전문을 옛 바이너리가 "손으로 고쳤다" 로 읽어, 따라 친 `init` 이 새 안내를 옛 글로 되돌렸다.
+pub fn agents_link() -> String {
+    format!(
+        "## Issue tracker — moai\n\n\
+         This repository's work lives in `.moai/issues.jsonl`, and moai is the tool for it.\n\
+         Read [`{GUIDE_FILE}`]({GUIDE_FILE}) before you start — it says how to work here.\n\
+         If that file is not there, `moai init --print` prints the same text.\n\
+         {GUIDE_MARK} hash:{:08x} -->\n",
+        crate::text::fnv1a32(agents().as_bytes())
+    )
+}
+
 /// `init` 이 AGENTS.md 의 마커 사이에 쓰는 블록. **언제나 읽히는 산문이다.**
 ///
 /// 한때 여기에 "정적이라 `bd prime` 같은 명령을 따로 두지 않는다 — `moai status` 가
@@ -1092,7 +1117,7 @@ pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
 /// 나뉜 자리는 이렇다 — 보드(`status`)는 사람이 한 화면으로 훑는 것이고, `prime` 은
 /// 세션 첫머리와 접힌 뒤에 **다시 주입되는** 짧은 한 판이다. 둘 다 [`CHEATSHEET`] 에 선다.
 pub fn agents() -> String {
-    let ideas = ideas();
+    let backlog = backlog();
     format!(
         r#"## Issue tracker — moai
 
@@ -1115,7 +1140,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
 
 ### Park what is out of scope
 
-{ideas}
+{backlog}
 
 ### When work already created is not for now
 
@@ -1142,8 +1167,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
 1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`.
 2. Show a plan split the way fork 3 says, once, and on a "yes" create it in one go.
 3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
-4. Park what you find along the way that is out of scope with `moai idea add` — if the
-   epic promised it, it is not an idea even when you cannot do it now (fork 1).
+4. Park what you find along the way that is out of scope with `moai backlog add` — if the
+   epic promised it, it is not a backlog item even when you cannot do it now (fork 1).
 5. Why it was decided goes on the issue with `moai note <id>`. The next session reads
    it with `moai show <id>`.
 
@@ -1175,7 +1200,7 @@ They stand once `moai skill install` has planted the hooks for your agent.
 `moai skill install` also plants `moai-work` and `moai-supervise`. A person calls
 `moai-work` in a window to make it a worker — it says hello, waits for a letter,
 does the work the letter hands over in a worktree, reports and waits again — and
-`moai-supervise` in one window to hand the ideas that have piled up, one at a time,
+`moai-supervise` in one window to hand the backlog that have piled up, one at a time,
 to those workers and take their reports. Claude Code, Codex and Antigravity can
 each be either, and every one of them is a session a person opened. The supervisor
 picks, sends and checks; it does not fix and it does not merge.
@@ -1248,7 +1273,7 @@ Every command and the `--from` syntax are in `references/commands.md`.
 
 /// 스킬의 참고 문서. 부를 때만 읽힌다.
 pub fn reference() -> String {
-    let ideas = ideas();
+    let backlog = backlog();
     format!(
         r#"# Every command
 
@@ -1390,7 +1415,7 @@ create nothing. The value becomes the title text exactly as written, so put vari
 in title positions only (in a tag or priority position it is refused). To put a literal
 `{{{{` in a template title, write `\{{{{`. A backslash immediately before `{{{{` is counted
 in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}}}`
-(`C:\\{{{{dir}}}}`). `idea promote --from` takes the same `--var`.
+(`C:\\{{{{dir}}}}`). `backlog promote --from` takes the same `--var`.
 
     moai add --from .moai/templates/release.md --var version=1.2 --dry-run
 
@@ -1408,7 +1433,7 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 
 ## Unfolding a parked thought
 
-{ideas}
+{backlog}
 
 ## Deferring
 
@@ -1709,14 +1734,14 @@ Decided in: <epic>
 - **No page per epic.** Pages follow what a person does, not the order things were
   built in. The history is the tracker and the CHANGELOG
 - **No to-do list in the wiki.** Work not done goes into the tracker — `moai add`, or
-  `moai idea add` for later
+  `moai backlog add` for later
 - **No token counts.** What did the work and what it cost is a note on the issue,
   never a page — and never an estimate
 "#
     )
 }
 
-/// 둘째 스킬 `moai-supervise` 의 SKILL.md. 같은 저장소에서 일을 기다리는 일꾼에게 idea 를 하나씩 나눠 주고 보고를
+/// 둘째 스킬 `moai-supervise` 의 SKILL.md. 같은 저장소에서 일을 기다리는 일꾼에게 backlog 를 하나씩 나눠 주고 보고를
 /// 받는 감독의 걸음이다 (moai-hxma).
 ///
 /// **벤더를 안 가린다**(2026-10-04 사용자 결정, moai-snyk). 감독도 일꾼도 Claude Code·Codex·Antigravity 가운데
@@ -1727,9 +1752,9 @@ Decided in: <epic>
 /// **편지는 맡길 일만 싣는다**([`letter`]). 일꾼의 걸음은 일꾼 스킬([`work`])에 있다 — 감독이 매 바퀴 걸음 전부를
 /// 실어 보내던 판은 그 값을 일꾼마다 냈고, 받는 쪽이 그 글을 어디에도 못 남겼다.
 ///
-/// **idea 를 일감으로 바꾸는 길은 `promote` 하나다** (사용자 결정). `moai edit` 에 `--type` 이 없어 제자리에서 못
-/// 바꾸는데, 첫 실행의 일꾼은 `add` 로 새 줄을 세우고 idea 를 손으로 닫았다. 길이 둘이면 일꾼마다 다르게 고르고,
-/// `add` 는 집은 것이 있는 세션에서 규칙 1 에 걸린다. `promote` 는 idea 를 저절로 닫고 출처를 저널에 남긴다.
+/// **backlog 를 일감으로 바꾸는 길은 `promote` 하나다** (사용자 결정). `moai edit` 에 `--type` 이 없어 제자리에서 못
+/// 바꾸는데, 첫 실행의 일꾼은 `add` 로 새 줄을 세우고 backlog 를 손으로 닫았다. 길이 둘이면 일꾼마다 다르게 고르고,
+/// `add` 는 집은 것이 있는 세션에서 규칙 1 에 걸린다. `promote` 는 backlog 를 저절로 닫고 출처를 저널에 남긴다.
 ///
 /// **모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 글에 적지 않고, 가지 이름을 박지 않는다 — 감독이 루트
 /// 체크아웃의 지금 가지를 읽어 `<base branch>` 에 채운다(사용자 결정, moai-7ljm). 일꾼이 뜨고 병합하는 곳이 그
@@ -1743,10 +1768,10 @@ pub fn supervise() -> String {
     format!(
         r#"---
 name: moai-supervise
-description: Use when handing the ideas piled up on one repository, one at a time, to the agent sessions waiting on it as workers — Claude Code, Codex or Antigravity — and taking their reports. Triggers on "supervise", "hand out the ideas", "put the idle sessions to work", "감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜".
+description: Use when handing the backlog piled up on one repository, one at a time, to the agent sessions waiting on it as workers — Claude Code, Codex or Antigravity — and taking their reports. Triggers on "supervise", "hand out the backlog", "put the idle sessions to work", "감독해 줘", "backlog 나눠 줘", "놀고 있는 세션에 일 시켜".
 ---
 
-# moai-supervise — hand ideas out to the workers that are waiting
+# moai-supervise — hand backlog out to the workers that are waiting
 
 The supervisor **picks, sends and checks.** It does not fix code, it does not merge,
 and it does not settle design in a worker's place. The workers merge. Overlapping
@@ -1803,7 +1828,7 @@ gives that worktree's own branch.
 ## One round
 
 **0. Reclaim first — work that lost its place.** When a session dies the row it picked
-up stays `in_progress` and nobody carries it on. Look at this before picking new ideas.
+up stays `in_progress` and nobody carries it on. Look at this before picking new backlog.
 
     moai status --json                     the ids of warnings whose kind is "stranded"
                                            (inside a worktree it stands only with `--worktree`)
@@ -1855,7 +1880,7 @@ trusted. Hand on the work of a worker that reads `gone` but still stands in `moa
 only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one waiting worker **before any new
-  idea**. Send the letter in 3 with its first two lines changed to the two below, and the
+  backlog**. Send the letter in 3 with its first two lines changed to the two below, and the
   rest filled as 3 says (`<other work>` too — 4-3 points at that line). The worker's
   `moai-work` skill has the section the first line names
 
@@ -1864,52 +1889,52 @@ only once the person says that window has ended; until then it is that worker's.
 
 - **Whether it is carried on or put down is not the supervisor's call.** If it looks like
   work to put down (`moai mv <id> todo`, `moai defer <id> -m '<why>'`), ask the person
-- Work handed on to be carried is, like an idea, not sent again until its report is checked
+- Work handed on to be carried is, like a backlog item, not sent again until its report is checked
 
-**1. Pick.** Out of the ideas that have piled up, keep only the ones that do not collide
+**1. Pick.** Out of the backlog that have piled up, keep only the ones that do not collide
 with what is open right now.
 
-    moai idea ls                           what has piled up
+    moai backlog ls                           what has piled up
     moai show -s in_progress,review        what is picked up
-    moai show <id>                         what that idea touches
+    moai show <id>                         what that backlog touches
 
-Look at `git worktree list` too. An idea that touches the **same files, the same area**
+Look at `git worktree list` too. A backlog item that touches the **same files, the same area**
 as a worktree already standing or an epic already picked up comes out of this round —
 when two of them change the same place, one waits for the other at the merge. **Compare
-the ideas you send in this same round against each other too** — a worker only raises
+the backlog you send in this same round against each other too** — a worker only raises
 its worktree after it receives the work, so what you just sent is not in the lists above
-yet. Do this count again for every further idea. An epic left open with only
+yet. Do this count again for every further backlog. An epic left open with only
 first-column members (what the worker's 7-1 left behind) shows as `in_progress` but is not
-picked up — there is no worktree and no picked-up member, so do not drop ideas over it.
+picked up — there is no worktree and no picked-up member, so do not drop backlog over it.
 
 **If a milestone is running, what is inside it comes first.** The line `moai ready` prints
 under its list says what is running and how many it held back outside it, and the
 `moai status` notice shines on the same thing. Then what you send this round is work
-attached to that milestone — an idea from outside waits for the next round unless it
+attached to that milestone — a backlog item from outside waits for the next round unless it
 should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
 **Work is never pulled into a running milestone — the supervisor does not bring an
-outside idea in.** `moai idea promote` carries over the body and the release the idea
+outside backlog in.** `moai backlog promote` carries over the body and the release the backlog
 stands in — the one `moai show --milestone` lists it under, not its own field — so an
-idea parked outside the release unfolds into an epic that stands outside it, and there it
-stays. What you send while a release runs is work that already stands in it; an idea from
+backlog parked outside the release unfolds into an epic that stands outside it, and there it
+stays. What you send while a release runs is work that already stands in it; a backlog item from
 outside waits for the next round, unless it should stand as `p0` or the person attaches
-the release themselves. **So `<milestone>` in 3 is the release that idea already stands
+the release themselves. **So `<milestone>` in 3 is the release that backlog already stands
 under, never one you picked for it**: the line the worker runs in its step 1 —
 `{MILESTONE_ATTACH}` — re-affirms what `promote` carried and is not a door you open. With
-nothing running, and for an idea that stands under no release, it is `none`.
+nothing running, and for a backlog item that stands under no release, it is `none`.
 The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
 the running release, and the person, not the tool, is what caught it. The answer is to
 stop sending outside work while a release runs, not to hang the release on it — hanging it
 on would make the release grow after it started, and that is the person's call alone.
 **The tool refuses none of this**, so this paragraph is the only thing holding it.
 
-**An idea you sent comes out of the candidates until its report is checked.** Until the
-worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
+**A backlog item you sent comes out of the candidates until its report is checked.** Until the
+worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a second worker.
 
-**Send only what is yours.** An idea or member whose assignee is someone else — or
+**Send only what is yours.** A backlog item or member whose assignee is someone else — or
 nobody — is asked about first: ask the person, and send it only on a yes, writing in the
 letter who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
 such rows apart under `others`.
@@ -1932,7 +1957,7 @@ marked it for 20 minutes, and is swept after a day.
 - **Hand work only to a row whose role is `worker` and whose status is `idle`.** `busy` is
   working — on your work or on the person's — and a session with no role is one nobody made
   a worker: it does not wait for letters, so a letter to it sits until someone types there
-- **Leave out a worker whose sent idea has not had its report checked.** A worker reads
+- **Leave out a worker whose sent backlog has not had its report checked.** A worker reads
   `busy` while it unfolds, picks up and merges, and it may read `idle` for a moment between
   two waits
 - **`idle` also stands on a window whose turn ended without waiting again** — its person
@@ -1991,7 +2016,7 @@ belongs to the worker who read the issue. A running session's model cannot be ch
 a letter and cannot be changed by config — the person in that window changes it
 (*Change the model*).
 
-**3. Send.** Send **one** idea to one waiting worker, as a letter. The worker's steps are
+**3. Send.** Send **one** backlog to one waiting worker, as a letter. The worker's steps are
 in its `moai-work` skill, so the letter carries only the assignment — but all of it: the
 worker knows nothing of this conversation. Write the letter below to a file in your
 scratchpad with every slot filled, and send it:
@@ -2003,7 +2028,7 @@ Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the letter.
-`<milestone>` is the release that idea already stands under **and that is still alive**,
+`<milestone>` is the release that backlog already stands under **and that is still alive**,
 read in 1 — `none` when it stands under none, `none` when the one it stands under has
 shipped or been deferred (the worker would otherwise re-open a release that is already
 out, which is what `promote` itself declines to carry), and `none` when nothing is
@@ -2092,23 +2117,23 @@ open, so the epic is not done either.
 
 A member the report says was left in the first column by the worker's 7-1 is right even
 when it is not done — that member keeps the epic open, so the epic is not done either. It
-is not an idea and it does not show in 1's list, so pass it to the person along with the
+is not a backlog item and it does not show in 1's list, so pass it to the person along with the
 reason it was left (a person's decision, a file held beside it).
 
-`<epic>` is the epic id carried in the report. An idea is already done once it is
+`<epic>` is the epic id carried in the report. A backlog item is already done once it is
 unfolded and it does not show its members, so `moai show <id>` cannot tell you whether
-the work finished — when the report does not carry it, read it from that idea's history
+the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, send the next idea. A worker whose letter said `wait again` is already
+If the three hold, send the next backlog. A worker whose letter said `wait again` is already
 waiting — send to it straight away. A worker whose letter said `end the turn` ends its turn
 right after the report: write the next letter to a file and hand it to 5-1 — the script
 clears the window, sends that letter only once the clear went through, and wakes the
-window. With no next idea, hand it `-` and it only clears. If 5-1 prints `not clearing`, do
+window. With no next backlog, hand it `-` and it only clears. If 5-1 prints `not clearing`, do
 what the end of its line says. Where that is pointing out to the person that the window is
 at a good place to be cleared, send the next only after the person has cleared it or said
 they will not — a letter loaded into the window before a late clear disappears with it,
-and that idea and that worker sit out of the candidates waiting for a report that will
+and that backlog and that worker sit out of the candidates waiting for a report that will
 never come. Its turn has ended, so that letter waits until a prompt comes into the window:
 send it with `--wake` and wake the window the way the line it prints says
 (*Wake a session that sits idle*) — a Claude Code supervisor sends SendMessage to the name
@@ -2612,24 +2637,24 @@ subject — that has actually happened. So in the root, supervisor and worker al
 
 ## When to stop
 
-- If there is no idea that does not collide, or no worker waiting, say so to the person and
-  stop — do not force a colliding idea out
+- If there is no backlog that does not collide, or no worker waiting, say so to the person and
+  stop — do not force a colliding backlog out
 - If a worker is waiting on a person's decision, the supervisor does not answer in their
   place. The decision is the person's
 "#
     )
 }
 
-/// 되짚기(7-1)가 에픽 목적에 걸리는 idea 를 선 에픽의 멤버로 되찾는 줄(moai-l288).
-/// **이것도 promote 다**(moai-f3ml) — `add` 와 손 닫기로 적었던 판은 "idea 를 일감으로 바꾸는
+/// 되짚기(7-1)가 에픽 목적에 걸리는 backlog 를 선 에픽의 멤버로 되찾는 줄(moai-l288).
+/// **이것도 promote 다**(moai-f3ml) — `add` 와 손 닫기로 적었던 판은 "backlog 를 일감으로 바꾸는
 /// 길은 promote 하나" 를 어겼고, 그것을 지키던 시험에서 이 줄을 빼야 했다.
 ///
 /// **`-C <루트>` 를 줄에 박는다.** 7-1 은 워크트리에서 치는데, 글로만 "4-1 대로" 라고 적고 줄을
 /// 맨 `moai` 로 두면 그대로 옮겨 친 줄이 워크트리의 `.moai` 에 멤버를 세운다 — 병합에서 스냅샷이
 /// 부딪히거나, 4-1 이 시키는 `git checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
 /// `<루트>` 는 감독이 채우는 자리라 받은 줄에 실제 자리가 박혀 온다. 다른 자리 이름은 그 목록과
-/// 겹치지 않는다 — 겹치면 맡긴 idea 의 값이 이 줄에 미리 박힌다(`<등급>` 와 같은 덫).
-const RECALL: &str = "moai -C <root> idea promote <idea id> -e <epic> --from -";
+/// 겹치지 않는다 — 겹치면 맡긴 backlog 의 값이 이 줄에 미리 박힌다(`<등급>` 와 같은 덫).
+const RECALL: &str = "moai -C <root> backlog promote <backlog id> -e <epic> --from -";
 
 /// 7 에서 리뷰 이슈를 세우며 멤버를 `review` 칸에 세우는 줄(사용자 결정 2026-10-03, moai-vxld).
 /// 리뷰가 도는 동안 아무도 손대지 않는 멤버가 보드에서 `in_progress` 로 "하는 중" 을 말했고,
@@ -2659,7 +2684,7 @@ const NO_REVIEW_COLUMN: &str = "`review` is not a column";
 /// `the_letter_carries_every_slot_the_skill_reads` 가 둘을 견준다.
 fn letter() -> String {
     format!(
-        r#"    Supervisor <my name> hands you idea <id> — <title>. Do it by the `moai-work` skill, from step 1.
+        r#"    Supervisor <my name> hands you backlog <id> — <title>. Do it by the `moai-work` skill, from step 1.
     Read first: moai show <id>
     {MODEL_SLOT}
     {BESIDE}
@@ -2751,7 +2776,7 @@ A letter that hands over no work is not work: if it asks something, answer it wi
 
 ## The letter
 
-The first line names the work and where to start — `from step 1` for a new idea,
+The first line names the work and where to start — `from step 1` for a new backlog,
 `from "Carrying on stalled work"` for work a session left behind, `from step 2` for an epic
 already unfolded whose first-column members are left. The letter's `from` is the supervisor
 you report to, `<supervisor>` below. Every other line fills a slot the steps use; a line the
@@ -2864,27 +2889,27 @@ fn brief() -> String {
     // 7-4 는 목록 밖의 문단이라 명령 줄이 네 칸이다(`the_brief_follows_the_markdown_list_rules`).
     let wiki_commit = indent(WIKI_COMMIT, "    ");
     format!(
-        r#"1. Unfold it in the root — the one way to turn an idea into work is
-   `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
+        r#"1. Unfold it in the root — the one way to turn a backlog item into work is
+   `moai backlog promote <id> --from -`. Unfold into an epic plus issues even for a single
    issue. Look at `--dry-run` first — that is for this window to see, not to show a person
    and ask. Showing a split plan to a person once is a step of work a person asked for
    directly; what a supervisor hands you is work a person already passed on. Design
    decisions are asked in 4.
-   If that idea is already done (someone unfolded it), do not unfold: tell the supervisor —
+   If that backlog is already done (someone unfolded it), do not unfold: tell the supervisor —
    unfolding again puts up two epics. **Write a short new title** — a line in the plan
-   becomes the issue title verbatim, so copying over an idea title that grew long while it
-   was parked spreads that length into the issues. The original text stays on that idea and
+   becomes the issue title verbatim, so copying over a backlog item title that grew long while it
+   was parked spreads that length into the issues. The original text stays on that backlog and
    the history leads back to it.
    Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
-   release the idea stood in, and a milestone is inherited, so the epic alone carries it to
+   release the backlog stood in, and a milestone is inherited, so the epic alone carries it to
    every member and to the members added later in 4-3 and 7-1. Hanging the same one again
    changes nothing. **Hang only the `<milestone>` in the letter, and nothing else**: work is
    never pulled into a running release, so a release you noticed running is not yours to
    attach — not to this epic, not to a member you create later. Inside this epic the release
    is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
-   stands outside every release — that is nothing running, or an idea that stood under none,
+   stands outside every release — that is nothing running, or a backlog item that stood under none,
    or one whose release is already dead, and you cannot tell which from the word alone. What
-   came over is still the release that idea stood in, so read the line `promote` printed and clear a
+   came over is still the release that backlog stood in, so read the line `promote` printed and clear a
    release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
    a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
    not in `ready`, not in `held`, no warning
@@ -2905,7 +2930,7 @@ fn brief() -> String {
    no leave that member and tell the supervisor
 3. Right after the commit in 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in
-   (*Enter the worktree*). The name is the unfolded epic's id, not the idea's. Until the
+   (*Enter the worktree*). The name is the unfolded epic's id, not the backlog's. Until the
    worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
@@ -2927,7 +2952,7 @@ fn brief() -> String {
    in the root, the only thing that stops the move is `MOAI_HERE`, so **do not turn it on** —
    turn it on and that worktree's `.moai` changes, and the snapshots conflict on the merge
    (and merging them overwrites someone else's rows).
-   Put `-e <epic>` on an idea you park mid-epic — it does not keep the epic open, and 7-1
+   Put `-e <epic>` on a backlog item you park mid-epic — it does not keep the epic open, and 7-1
    reclaims it through that even if the window is cleared or the work is taken over.
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
    undo it with `git checkout -- .moai`, and if the row was already committed, undo that
@@ -2951,7 +2976,7 @@ fn brief() -> String {
    `git worktree list` already changed
    (`git diff --name-only <base branch>...<sibling branch>`). When two of them change the
    same place, one waits for the other at the merge. If this epic cannot deliver what it
-   promised without that, it is not an idea but a member — create it with
+   promised without that, it is not a backlog item but a member — create it with
    `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 12
    as **a member left because the work beside it holds the file**, together with that other
    work. The supervisor sends it once that work is done. Do not defer it
@@ -3020,17 +3045,17 @@ fn brief() -> String {
    measures that agent's files rather than yours — that has happened too, and it also burned
    an hour and a half in a worktree that was gone.
 
-7-1. Before merging, go back over the ideas parked mid-epic
-   (`moai -C <root> show --type idea -e <epic>` and what this window remembers) and what the
+7-1. Before merging, go back over the backlog parked mid-epic
+   (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
    review handed on — **can the epic deliver what it promised without them.** If not, it is
-   not an idea but an unfinished member. What you sorted as "not for now" while parking has
+   not a backlog item but an unfinished member. What you sorted as "not for now" while parking has
    these mixed in — the one waiting on a person's decision, the one pushed out because a
    worker beside you held that file. This step sits after 7 so that it sees what 7's review
-   handed on too. Unfold such an idea as a member of the epic already standing — write only
-   `- issue` lines in the plan; the idea closes by itself and its source stays. You type this
-   from the worktree, so pin the root into the line (4-1). **If that idea is already done, do
+   handed on too. Unfold such a backlog item as a member of the epic already standing — write only
+   `- issue` lines in the plan; the backlog closes by itself and its source stays. You type this
+   from the worktree, so pin the root into the line (4-1). **If that backlog is already done, do
    not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
-   promote unfolds a closed idea too, and the same member stands twice
+   promote unfolds a closed backlog too, and the same member stands twice
 
     {RECALL}
    Do not do a reclaimed member here: merge with it left in the first column — work that has
@@ -3143,7 +3168,7 @@ fn brief() -> String {
     (a background review, say), finish it before the note — the supervisor reads the note as
     this work being over; what you cannot finish, name in the report (12)
 12. Report with a letter to the supervisor, **last of all**. It carries the merge hash,
-    the unfolded epic's id, a line or two of summary, what you handed on and any new ideas,
+    the unfolded epic's id, a line or two of summary, what you handed on and any new backlog,
     the members reclaimed in 7-1 and left in the first column,
     the members left in 4-3 because the work beside you held the file, with that other work
     named, and the wiki pages 7-4 changed — or that it changed none — and anything still
@@ -3206,8 +3231,8 @@ mod tests {
         assert!(CLOSING.contains(&handoff("<id>")), "안내의 핸드오프 줄이 훅과 갈라졌다");
         let rules = rules();
         assert!(agents.contains(&rules) && skill.contains(&rules), "규칙 셋이 갈라졌다");
-        let ideas = ideas();
-        for piece in [GROUPS, ideas.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS, WIKI] {
+        let backlog = backlog();
+        for piece in [GROUPS, backlog.as_str(), DEFERRING, PEOPLE, PROJECTS, LANGUAGE, UPDATES, COMMITS, WIKI] {
             let head = piece.lines().next().unwrap();
             assert!(agents.contains(piece), "AGENTS 블록에 없다 — {head}");
             assert!(reference.contains(piece), "참고 문서에 없다 — {head}");
@@ -3550,7 +3575,7 @@ mod tests {
             (
                 "moai-supervise",
                 head(&supervise()),
-                ["감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜"].as_slice(),
+                ["감독해 줘", "backlog 나눠 줘", "놀고 있는 세션에 일 시켜"].as_slice(),
             ),
             // 위키 스킬(moai-bl3x)의 발동어. 사람이 "위키 갱신" 이라고 불러야 훑기가 선다.
             ("moai-wiki", head(&wiki()), ["위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리"].as_slice()),
@@ -3590,22 +3615,22 @@ mod tests {
     #[test]
     fn the_supervisor_teaches_promote_as_the_one_way() {
         let (supervise, work, reference, brief) = (supervise(), work(), reference(), brief());
-        let promote = "moai idea promote <id> --from -";
+        let promote = "moai backlog promote <id> --from -";
         assert!(reference.contains(promote), "참고 문서의 펼치기 줄이 바뀌었다");
         assert!(work.contains(promote), "일꾼 스킬이 promote 를 안 가르친다");
-        assert!(supervise.contains("`moai idea promote`"), "감독이 일꾼이 무엇으로 펼치는지 모른다");
+        assert!(supervise.contains("`moai backlog promote`"), "감독이 일꾼이 무엇으로 펼치는지 모른다");
         let review = make_review("--parent <epic>");
         assert!(brief.contains(&review), "에픽 리뷰를 규칙 3 의 줄로 안 세운다");
         assert!(!supervise.contains("moai add"), "감독이 promote 말고 다른 길을 가르친다");
         assert!(!work.replace(&review, "").contains("moai add '<"), "일꾼이 promote 말고 다른 길로 펼친다");
         // 되짚기(7-1)의 줄도 promote 이고, 루트의 그 에픽을 가리킨다. `brief.contains(RECALL)` 는
-        // 글이 그 상수를 끼워 넣는 한 늘 참이라, 줄의 모양은 여기서 따로 맨다 — `moai idea add` 로
-        // 바꿔 7-1 이 거꾸로 idea 로 내보내라고 가르쳐도 다른 시험은 다 초록이었다.
+        // 글이 그 상수를 끼워 넣는 한 늘 참이라, 줄의 모양은 여기서 따로 맨다 — `moai backlog add` 로
+        // 바꿔 7-1 이 거꾸로 backlog 로 내보내라고 가르쳐도 다른 시험은 다 초록이었다.
         assert!(
-            RECALL.starts_with("moai -C <root> idea promote ") && RECALL.contains(" -e <epic> "),
+            RECALL.starts_with("moai -C <root> backlog promote ") && RECALL.contains(" -e <epic> "),
             "되짚기가 루트의 그 에픽에 promote 로 멤버를 세우지 않는다 — {RECALL}"
         );
-        // 되짚기의 자리는 일꾼이 채운다 — 감독이 채우는 목록(3)에 같은 이름이 들면 맡긴 idea 의 값이
+        // 되짚기의 자리는 일꾼이 채운다 — 감독이 채우는 목록(3)에 같은 이름이 들면 맡긴 backlog 의 값이
         // 그 줄에 미리 박혀 온다(첫 판의 `<제목>` 이 그랬다). `<root>` 만 감독이 채우라고 둔 자리다.
         let list = slot_list(&supervise);
         let slots = brief[step_at(&brief, "7-1")..step_at(&brief, "8")]
@@ -3665,18 +3690,21 @@ mod tests {
         let reviewed = brief.find("/code-review <grade> --fix").expect("에픽 리뷰 걸음이 없다");
         assert!(synced < reviewed, "본 가지를 받기 전에 에픽 전체를 리뷰한다");
         // 되짚기는 에픽 리뷰 뒤·병합 앞이다 — 앞에 두면 그 리뷰가 넘긴 것을 못 보고, 뒤에 두면
-        // 에픽이 이미 닫혔다. 없으면 에픽이 내건 것이 idea 로 빠진 채 닫힌다(moai-l288).
-        let recalled = brief.find("7-1. Before merging").expect("병합 전에 idea 를 되짚는 걸음이 없다");
+        // 에픽이 이미 닫혔다. 없으면 에픽이 내건 것이 backlog 로 빠진 채 닫힌다(moai-l288).
+        let recalled = brief.find("7-1. Before merging").expect("병합 전에 backlog 를 되짚는 걸음이 없다");
         let merged = brief.find("merge --no-ff").expect("병합 걸음이 없다");
         assert!(reviewed < recalled && recalled < merged, "되짚기가 에픽 리뷰 뒤·병합 앞이 아니다");
         assert!(brief.contains(RECALL), "되짚은 것을 멤버로 세우는 줄이 없다");
-        assert!(brief.contains("already done"), "누가 펼친 idea 를 또 펼쳐 에픽이 둘 선다");
+        assert!(brief.contains("already done"), "누가 펼친 backlog 를 또 펼쳐 에픽이 둘 선다");
         for (piece, why) in [
-            // promote 는 닫힌 idea 도 또 펼친다 — 8 에서 돌아와 다시 도는 7-1 이 같은 멤버를 둘 세운다.
-            ("If that idea is already done, do\n   not unfold it", "다시 도는 되짚기가 닫힌 idea 를 또 펼친다"),
+            // promote 는 닫힌 backlog 도 또 펼친다 — 8 에서 돌아와 다시 도는 7-1 이 같은 멤버를 둘 세운다.
+            ("If that backlog is already done, do\n   not unfold it", "다시 도는 되짚기가 닫힌 backlog 를 또 펼친다"),
             // 되짚을 것을 창의 기억에만 두면 창을 비우거나 일을 이어받은 창이 아무것도 못 찾는다.
-            ("Put `-e <epic>` on an idea you park mid-epic", "도중 담는 idea 에 에픽을 안 달아 7-1 이 되찾지 못한다"),
-            ("show --type idea -e <epic>", "도중 담은 idea 를 트래커에서 찾는 길이 없다"),
+            (
+                "Put `-e <epic>` on a backlog item you park mid-epic",
+                "도중 담는 backlog 에 에픽을 안 달아 7-1 이 되찾지 못한다",
+            ),
+            ("show --type backlog -e <epic>", "도중 담은 backlog 를 트래커에서 찾는 길이 없다"),
             // 7-1 이 첫 칸에 남긴 멤버는 아무도 안 했다 — 9-1 이 그 멤버에 모델 줄을 적거나 10 이
             // 그 멤버를 닫으면 통계가 거짓이 되거나 에픽이 목적을 못 이룬 채 닫힌다.
             ("which nobody did", "아무도 안 한 멤버에 일한 모델을 남긴다"),
@@ -3690,10 +3718,10 @@ mod tests {
         for (piece, why) in [
             ("A worker that refused the work", "맡기기를 거절한 일꾼을 빼라는 말이 없다"),
             ("in this same round against each other", "같은 바퀴에 보낸 둘이 같은 곳을 고친다"),
-            ("comes out of the candidates until its report is checked", "보낸 idea 가 둘째 일꾼에게 또 간다"),
+            ("comes out of the candidates until its report is checked", "보낸 backlog 가 둘째 일꾼에게 또 간다"),
             ("That member is the worker's", "감독이 훅에 떠밀려 일꾼의 멤버를 옮긴다"),
-            ("whose sent idea has not had its report checked", "맡긴 일을 하던 일꾼에게 또 맡긴다"),
-            ("moai show <epic>", "idea 로 확인하면 멤버가 안 보인다"),
+            ("whose sent backlog has not had its report checked", "맡긴 일을 하던 일꾼에게 또 맡긴다"),
+            ("moai show <epic>", "backlog 로 확인하면 멤버가 안 보인다"),
             // 목록의 끝은 `<subdir>` 이 붙어 바뀌었다(리뷰 moai-rgp9.sdj 1번) — 자리 이름만 맨다.
             ("`<root>`", "감독이 루트 자리를 안 채워 일꾼이 제 워크트리를 루트로 읽는다"),
             ("`<subdir>`", "모노레포 하위 자리를 감독이 안 채워 일꾼이 거절되는 꼴로 구한다"),
@@ -3703,7 +3731,7 @@ mod tests {
             // 다른 기계·Codex 일꾼도 그렇게 읽혀, 그 워크트리를 둘째 일꾼에게 넘기면 산 두 세션이 한 가지에 선다.
             ("only once the person says that window has ended", "20분 조용한 일꾼의 워크트리를 둘째 일꾼에게 넘긴다"),
             // 7-1 이 첫 칸에 남긴 멤버는 에픽을 연 채 둔다 — 감독의 확인(5)이 그것을 어긋남으로 읽으면
-            // 시킨 대로 한 보고마다 그 창이 안 비워지고 다음 idea 도 못 받는다.
+            // 시킨 대로 한 보고마다 그 창이 안 비워지고 다음 backlog 도 못 받는다.
             (
                 "A member the report says was left in the first column by the worker's 7-1",
                 "감독이 일부러 남긴 멤버를 어긋난 보고로 읽는다",
@@ -3771,13 +3799,13 @@ mod tests {
         }
     }
 
-    /// **밖의 idea 는 마일스톤을 달아야 들어온다**(moai-6qgz, 2026-09-21).
+    /// **밖의 backlog 는 마일스톤을 달아야 들어온다**(moai-6qgz, 2026-09-21).
     ///
     /// 앞 시험이 매는 "안의 것이 먼저다" 는 감독이 **무엇을 고를지**만 정한다. 고른 것이 밖의
-    /// idea 일 때 그것을 안으로 들이는 길은 아무 데도 없었고, 그래서 감독이 브리프에 "마일스톤은
+    /// backlog 일 때 그것을 안으로 들이는 길은 아무 데도 없었고, 그래서 감독이 브리프에 "마일스톤은
     /// 달지 마라" 고 적어 일꾼이 도는 판 밖의 일을 집었다. 도구는 그것을 그대로 지나 보낸다.
     ///
-    /// **2026-09-25 에 뜻이 뒤집혔다.** 그때까지 이 자리는 "밖의 idea 는 마일스톤을 달아야
+    /// **2026-09-25 에 뜻이 뒤집혔다.** 그때까지 이 자리는 "밖의 backlog 는 마일스톤을 달아야
     /// 들어온다" 였고, 감독이 들일지를 정했다. 사용자가 도는 마일스톤에 에이전트가 제 판단으로
     /// 밖의 줄을 달고 일한 판을 보고, 들이는 것은 사람만 하기로 정했다 — 감독은 밖의 일을
     /// **안 보내는** 것으로 답한다. 2026-09-21 의 사고(일꾼이 도는 판 밖의 일을 집었다)는
@@ -3786,7 +3814,7 @@ mod tests {
     /// **두 글이 한 줄에 매인다.** 감독의 1 이 무엇을 보낼지 정하고 일꾼의 1 이 헤더에 실린
     /// 릴리스만 단다 — `MILESTONE_ATTACH` 하나에서 둘 다 나오므로, 한쪽만 고치면 여기서 붉어진다.
     #[test]
-    fn an_outside_idea_is_not_pulled_into_a_running_release() {
+    fn an_outside_backlog_is_not_pulled_into_a_running_release() {
         let (supervise, brief) = (supervise(), brief());
         let head = supervise.as_str();
 
@@ -3794,13 +3822,13 @@ mod tests {
             (MILESTONE_ATTACH, "감독이 일꾼이 다는 줄을 안 가리킨다"),
             (
                 "**Work is never pulled into a running milestone — the supervisor does not bring an
-outside idea in.**",
-                "밖의 idea 를 안 들인다는 줄이 없다",
+outside backlog in.**",
+                "밖의 backlog 를 안 들인다는 줄이 없다",
             ),
             (
-                "an idea from
+                "a backlog item from
 outside waits for the next round",
-                "밖의 idea 가 다음 회차로 미뤄진다는 말이 없다",
+                "밖의 backlog 가 다음 회차로 미뤄진다는 말이 없다",
             ),
             (
                 "The answer is to
@@ -3943,7 +3971,7 @@ stop sending outside work while a release runs",
     /// 마지막 서브에이전트가 같은 워크트리의 파일을 제 판으로 다시 써, 커밋해 둔 되돌림을
     /// 덮었다. 그 뒤 돌린 시험의 초록은 그 에이전트의 파일을 잰 초록이었다.
     ///
-    /// **훅으로 막지 않는다**(idea `moai-uvs9` 의 두 길 가운데 글 쪽). 게이트를 하나 더 세우는
+    /// **훅으로 막지 않는다**(backlog `moai-uvs9` 의 두 길 가운데 글 쪽). 게이트를 하나 더 세우는
     /// 것은 "막지 않는다" 와 겨루고 그쪽이 더 무겁다 — 그래서 지키는 것은 읽는 사람이고, 이
     /// 시험이 그 줄이 서 있는지만 본다.
     #[test]
@@ -4305,7 +4333,7 @@ stop sending outside work while a release runs",
     /// AGENTS 블록 한 파일 안에서 앞 절이 뒤 절을 뒤집고, 읽는 차례상 앞 절이 이긴다.
     #[test]
     fn unfolding_alone_carries_the_body_and_the_release_it_stood_in() {
-        let ideas = ideas();
+        let backlog = backlog();
         for (piece, why) in [
             (MILESTONE_ATTACH, "사람이 들일 때 치는 줄이 없다"),
             (MILESTONE_FROM, "헛 id 를 못 가르니 어디서 베끼는지 대야 한다"),
@@ -4318,15 +4346,15 @@ stop sending outside work while a release runs",
                 "든 것이 딴 릴리스일 때 그대로 두라는 말이 없다",
             ),
             ("**A dead one you do clear yourself**", "죽은 릴리스를 스스로 걷는다는 말이 없다"),
-            ("`moai show --milestone` stands the idea", "데려가는 값이 적힌 필드로 읽힌다"),
+            ("`moai show --milestone` stands the backlog", "데려가는 값이 적힌 필드로 읽힌다"),
             ("A dead release is said", "죽은 릴리스를 알린다는 말이 없다"),
         ] {
-            assert!(ideas.contains(piece), "{why} — {piece}");
+            assert!(backlog.contains(piece), "{why} — {piece}");
         }
         // **심는 두 표면이 같은 글을 받는다** — 한쪽만 고치면 그 글을 읽은 세션만 걸음을 안다.
         let (agents, reference) = (agents(), reference());
-        assert!(agents.contains(&ideas), "AGENTS 블록의 idea 절이 갈라졌다");
-        assert!(reference.contains(&ideas), "참고 문서의 idea 절이 갈라졌다");
+        assert!(agents.contains(&backlog), "AGENTS 블록의 backlog 절이 갈라졌다");
+        assert!(reference.contains(&backlog), "참고 문서의 backlog 절이 갈라졌다");
     }
 
     /// **일꾼이 창을 비워도 되는 때를 알린다**(moai-gu5g, 2026-09-15 사용자 결정).
@@ -4810,14 +4838,14 @@ sys.exit(1 if bad else 0)
         assert!(!supervise.contains("tell the other worker first"), "일꾼이 찾을 길 없는 옆 세션에 알리라고 한다");
         assert!(!brief.contains("tell the other worker first"), "일꾼이 찾을 길 없는 옆 세션에 알리라고 한다");
         let one = &brief[step_at(&brief, "1")..step_at(&brief, "2")];
-        assert!(one.contains("not to show a person"), "맡긴 idea 를 펼칠 때 사람에게 또 묻는다");
+        assert!(one.contains("not to show a person"), "맡긴 backlog 를 펼칠 때 사람에게 또 묻는다");
     }
 
     #[test]
     fn a_file_held_next_door_becomes_a_member_not_an_edit() {
         // **에픽 도중 새로 필요해진 파일을 옆이 쥐었으면 멤버로 남기고 알린다**(2026-09-18 사용자
         // 결정). 감독이 보내기 전에 파일을 재도 도중에 새로 필요해진 파일은 못 잰다 — 그런 일이
-        // idea 로 밖에 나가 에픽이 목적을 못 이룬 채 닫힌 적이 있다. 일정 문제가 범위 결정으로 위장한다.
+        // backlog 로 밖에 나가 에픽이 목적을 못 이룬 채 닫힌 적이 있다. 일정 문제가 범위 결정으로 위장한다.
         let (supervise, brief) = (supervise(), brief());
         assert!(letter().contains(BESIDE), "편지에 옆에서 쥔 파일의 줄이 없다");
         assert!(BESIDE.starts_with("Work running alongside: <other work>"), "옆 일 줄의 머리가 바뀌었다 — {BESIDE}");

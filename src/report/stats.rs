@@ -17,7 +17,7 @@
 //!   자리라 끝난 줄을 숨길 까닭이 없다. `--since`·`--created`·`--done` 이 숨김을 다 여는 것과 같은 결이다
 //! - **세는 것은 한 종류다**([`counted_kind`]) — `--type` 이 없으면 일(`issue`, [`super::is_work`])이다. 보드의
 //!   `todo 6` 에 묶음을 섞지 않는 것과 같은 까닭이고, 묶음의 기간은 멤버로 잰다(`-e`·`--milestone`). 생각을
-//!   세려면 `--type idea` 다
+//!   세려면 `--type backlog` 다
 //! - **`kind` 축만 고른 줄 전부를 센다** — 센 종류 하나로 재면 늘 한 칸짜리라, 그 축이 대는 것은 "거르개가 무엇을
 //!   골랐고 무엇을 안 셌나" 다
 //! - **칸·소속은 다른 표면이 읽는 그 자로 읽는다**([`Where::column`]·[`Where::epic_of`]·[`Where::milestone_of`]) —
@@ -348,7 +348,7 @@ fn spread(axis: Axis, rows: &[&Issue], counted: &[&Issue], wh: &Where, cfg: &Con
             out.extend(n.into_iter().map(|(s, k)| plain(text(s), k)));
             out
         }
-        Axis::Kind => [Kind::Issue, Kind::Epic, Kind::Milestone, Kind::Idea]
+        Axis::Kind => [Kind::Issue, Kind::Epic, Kind::Milestone, Kind::Backlog]
             .into_iter()
             .map(|k| plain(text(k.as_str()), rows.iter().filter(|i| i.kind == k).count()))
             .collect(),
@@ -609,20 +609,20 @@ mod tests {
         put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
         let mut epic = row("argos-0004", "todo", "2026-09-01T00:00:00Z");
         epic.kind = Kind::Epic;
-        let mut idea = row("argos-0005", "todo", "2026-09-01T00:00:00Z");
-        idea.kind = Kind::Idea;
+        let mut backlog = row("argos-0005", "todo", "2026-09-01T00:00:00Z");
+        backlog.kind = Kind::Backlog;
         let all = vec![
             row("argos-0001", "todo", "2026-09-01T00:00:00Z"),
             closed("argos-0002", "2026-09-01T00:00:00Z", None, "2026-09-03T00:00:00Z"),
             put_off,
             epic,
-            idea,
+            backlog,
         ];
         let st = count(&all, &Ask::default(), &BTreeMap::new());
         assert_eq!(st.kind, Kind::Issue);
         assert_eq!(st.rows, 3, "끝난 일과 미룬 일도 센다");
         let kinds: Vec<usize> = axis(&st, Axis::Kind).iter().map(|c| c.rows).collect();
-        assert_eq!(kinds, [3, 1, 0, 1], "kind 축은 고른 줄 전부다 — issue·epic·milestone·idea");
+        assert_eq!(kinds, [3, 1, 0, 1], "kind 축은 고른 줄 전부다 — issue·epic·milestone·backlog");
         let status: Vec<(Option<Key>, usize)> =
             axis(&st, Axis::Status).iter().map(|c| (c.key.clone(), c.rows)).collect();
         assert_eq!(
@@ -631,8 +631,8 @@ mod tests {
             "설정의 칸은 비어도 차례대로 선다"
         );
 
-        let ideas = count(&all, &Ask { kind: Some(Kind::Idea), ..Ask::default() }, &BTreeMap::new());
-        assert_eq!((ideas.kind, ideas.rows), (Kind::Idea, 1), "--type 이 센 종류를 바꾼다");
+        let backlog = count(&all, &Ask { kind: Some(Kind::Backlog), ..Ask::default() }, &BTreeMap::new());
+        assert_eq!((backlog.kind, backlog.rows), (Kind::Backlog, 1), "--type 이 센 종류를 바꾼다");
     }
 
     /// **거르개는 `show` 의 그것이다** — 좁히는 말은 그대로 듣는다.

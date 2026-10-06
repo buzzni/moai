@@ -782,7 +782,7 @@ fn settle(o: Option<&[Row<'_>]>, a: Option<&[Row<'_>]>, b: Option<&[Row<'_>]>) -
 /// [`settle`] 의 `take` 가 원문 그대로 싣는 못 읽는 줄이다 — [`alike`] 는 값(`Read::Json`)이나 꼬리
 /// 흰 글자를 뗀 원문(`Read::Broken`)으로 견주므로, 키 차례나 꼬리 빈칸만 다른 두 줄이 "같다" 로
 /// 읽힌다. 늘 이쪽 것을 고르던 판은 `A` 에서 `B` 를 합친 것과 `B` 에서 `A` 를 합친 것의 바이트가
-/// 갈랐다(idea moai-y1vb).
+/// 갈랐다(backlog moai-y1vb).
 ///
 /// **바이트로 3-way 를 돌린다.** 바탕과 바이트가 같은 쪽은 바이트를 안 건드린 쪽이니 다른 쪽의
 /// 바이트가 답이다 — 읽히는 줄에서 "한쪽만 고쳤다" 를 푸는 것과 같은 자다. 두 쪽이 다 바꿨으면
@@ -1356,7 +1356,7 @@ enum Probe {
 /// 모르는 것이라 알림이 입을 다문다 — `probe` 가 한도를 넘긴 때와 같은 쪽이다. 한도는 부름마다 따로다.
 /// `moai init` 과 `init --check` 는 같은 물음을 한도 없이 한다(리뷰 moai-59k3.4c3,
 /// [`crate::git::run_within`]).
-const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// 그 명령이 이 드라이버를 아는가 — **파일을 보지 않고 실제로 불러서 잰다**(moai-zdw4,
 /// 2026-09-20 사용자 결정).
@@ -2700,7 +2700,7 @@ mod tests {
 
     /// **값이 같고 바이트만 다른 못 읽는 줄은 방향 없이 한 바이트를 낸다**(moai-mo9v.qgj).
     /// 한쪽만 바이트를 바꿨으면 그 쪽 것이다 — 바이트로 돌린 3-way 다. 원문을 그대로 싣던 판은
-    /// `x.v == y.v` 갈래에서 늘 이쪽 것을 골라, 두 방향이 서로 다른 파일을 냈다(idea moai-y1vb).
+    /// `x.v == y.v` 갈래에서 늘 이쪽 것을 골라, 두 방향이 서로 다른 파일을 냈다(backlog moai-y1vb).
     #[test]
     fn an_unreadable_line_one_side_reordered_merges_the_same_both_ways() {
         // `title` 이 글이 아니라 `Issue` 로는 못 읽고 JSON 으로는 읽힌다(`Read::Json`).

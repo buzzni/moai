@@ -38,17 +38,21 @@ directories.
 
 **What the list shows is the view.** Done is hidden to begin with, and the path
 line above the list says what is hidden and how it is sorted. The `SPC v` keys
-show or hide [deferred](glossary.md#deferred) work, [ideas](glossary.md#idea),
+show or hide [deferred](glossary.md#deferred) work, [backlog items](glossary.md#backlog),
 each [column](glossary.md#column), the detail and the archive;
 `SPC s` sorts and `SPC c` picks the columns on the right of a row. These choices
 are kept in your user config and carry over to the next run and to every project.
+
+`SPC v b` hides backlog items in the list and their column on the board.
+The choice is saved as `[tui] hide_backlog`. Existing `hide_ideas` settings
+remain readable; if both keys exist, `hide_backlog` wins.
 
 ## Pick a screen
 
 `SPC g` picks which screen stands; the menu's root names the one you are on.
 
 - **`SPC g l` — the list**, described above
-- **`SPC g b` — the board.** The same rows as a kanban board: idea, deferred, then
+- **`SPC g b` — the board.** The same rows as a kanban board: backlog, deferred, then
   your columns, with one lane per milestone at the project root. A card that is
   not yours says whose it is. `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
@@ -173,7 +177,7 @@ nothing anyone else sees; the CLI side is `moai read`.
 ## Park a thought
 
 `SPC n` opens the jot form anywhere inside a project, and what you write is kept
-as an [idea](glossary.md#idea) with no epic — off the board and out of
+as a [backlog item](glossary.md#backlog) with no epic — off the board and out of
 `moai ready` until someone
 unfolds it. With an editor on hand (`$VISUAL`, `$EDITOR`, `vi` or `nano`) it opens
 like a git commit message: the first line is the title. Without one, a built-in
@@ -213,4 +217,4 @@ line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp

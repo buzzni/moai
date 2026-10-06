@@ -16,36 +16,36 @@ use super::scroll::Move;
 /// 무엇인지 모른다.
 pub const CARD_MIN: usize = 18;
 
-/// 보드의 칸. **데이터의 칸이 아니라 화면의 칸이다**(사용자 결정) — idea 는 종류(`kind`), 미룸은 축
+/// 보드의 칸. **데이터의 칸이 아니라 화면의 칸이다**(사용자 결정) — backlog 는 종류(`kind`), 미룸은 축
 /// (`deferred_at`)이라 저장하는 것은 없다. 셋을 한 줄로 놓을 뿐이다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Column {
-    Idea,
+    Backlog,
     /// 미룬 줄 — 제가 미뤘든 물려받았든(`nav::Index::shelved_at`).
     Shelved,
     Status(String),
 }
 
-/// 그 줄이 서는 칸 — `idea` 는 그 줄이 담아 둔 생각인가(종류를 든 쪽이 잰다: 조각은 이슈를 모른다).
-/// **종류가 먼저, 축이 다음, 칸이 끝이다** — 미룬 idea 는 idea 칸에 선다: idea 는 아직 일이
-/// 아니라 미룸이 뜻이 없다(`moai idea` 는 미룰 일이 아니라 담아 둔 것이다). 미룬 일은 칸이 `in_progress`
+/// 그 줄이 서는 칸 — `backlog` 는 그 줄이 담아 둔 생각인가(종류를 든 쪽이 잰다: 조각은 이슈를 모른다).
+/// **종류가 먼저, 축이 다음, 칸이 끝이다** — 미룬 backlog 는 backlog 칸에 선다: backlog 는 아직 일이
+/// 아니라 미룸이 뜻이 없다(`moai backlog` 는 미룰 일이 아니라 담아 둔 것이다). 미룬 일은 칸이 `in_progress`
 /// 여도 미룸 칸이다 — 지금 누가 손대는 줄이 아니다(`Site::spins` 가 미룬 줄을 안 돌리는 것과 같은 자).
 ///
-/// 닫힌 idea 는 여기 안 온다 — 보드의 카드가 아니다(`App::cards_in`, moai-r1ly.91p).
-pub fn column_of(idea: bool, shelved: bool, status: &str) -> Column {
-    match (idea, shelved) {
-        (true, _) => Column::Idea,
+/// 닫힌 backlog 는 여기 안 온다 — 보드의 카드가 아니다(`App::cards_in`, moai-r1ly.91p).
+pub fn column_of(backlog: bool, shelved: bool, status: &str) -> Column {
+    match (backlog, shelved) {
+        (true, _) => Column::Backlog,
         (_, true) => Column::Shelved,
         _ => Column::Status(status.to_string()),
     }
 }
 
-/// 보드에 세울 칸과 그 차례 — `idea · 미룸 · 설정의 칸`. `shows` 가 숨긴 칸은 빠진다. **카드가 든 칸은 늘
+/// 보드에 세울 칸과 그 차례 — `backlog · 미룸 · 설정의 칸`. `shows` 가 숨긴 칸은 빠진다. **카드가 든 칸은 늘
 /// 선다**: 검색은 보기가 숨긴 줄까지 드러내고(moai-qnkn), 설정이 모르는 칸에 선 줄도 있다(읽기는 관대하다) —
 /// 그 칸을 빼면 그 줄이 보드에서 말없이 사라진다. 설정이 모르는 칸은 끝에 처음 만난 차례로 선다.
 pub fn columns(statuses: &[String], cards: &[Column], shows: &dyn Fn(&Column) -> bool) -> Vec<Column> {
     let held = |c: &Column| cards.contains(c);
-    let mut out: Vec<Column> = [Column::Idea, Column::Shelved]
+    let mut out: Vec<Column> = [Column::Backlog, Column::Shelved]
         .into_iter()
         .chain(statuses.iter().map(|s| Column::Status(s.clone())))
         .filter(|c| shows(c) || held(c))
@@ -194,7 +194,7 @@ impl Plan {
 
     /// 머리줄에서 한 걸음 — 아래(`down`)면 그 프로젝트의 카드로, 위면 앞 프로젝트의 카드로 간다. **`hint` 의 칸에
     /// 카드가 있으면 그 칸이고**(`k` 로 올라온 칸으로 돌아간다), 없으면 가장 가까운 줄의 카드 — 아래로는 맨 위의,
-    /// 위로는 맨 아래의 것이다. 칸 길(`run`)만 타면 처음 선 머리줄의 칸(`idea`)이 비었을 때 `j` 가 그 프로젝트의 카드를
+    /// 위로는 맨 아래의 것이다. 칸 길(`run`)만 타면 처음 선 머리줄의 칸(`backlog`)이 비었을 때 `j` 가 그 프로젝트의 카드를
     /// 통째로 건너 다음 머리줄로 간다. 그 프로젝트에 카드가 없으면(접혔거나 빈 프로젝트) 옆 머리줄이다. `hint` 가
     /// 없으면(아직 아무 카드에도 안 섰다) 처음부터 가장 가까운 카드다.
     fn off_banner(&self, cursor: usize, down: bool, hint: Option<usize>) -> usize {
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn the_three_axes_fall_into_one_row_of_columns() {
-        assert_eq!(column_of(true, true, "in_progress"), Column::Idea, "미룬 idea 는 idea 칸이다");
+        assert_eq!(column_of(true, true, "in_progress"), Column::Backlog, "미룬 backlog 는 backlog 칸이다");
         assert_eq!(column_of(false, true, "in_progress"), Column::Shelved, "미룬 일은 미룸 칸이다");
         assert_eq!(column_of(false, false, "review"), Column::Status("review".into()));
     }
@@ -402,15 +402,15 @@ mod tests {
         let names = |cs: Vec<Column>| {
             cs.into_iter()
                 .map(|c| match c {
-                    Column::Idea => "idea".to_string(),
+                    Column::Backlog => "backlog".to_string(),
                     Column::Shelved => "shelved".into(),
                     Column::Status(s) => s,
                 })
                 .collect::<Vec<_>>()
         };
-        assert_eq!(names(columns(&statuses, &[], &hides_done)), ["idea", "shelved", "todo"]);
+        assert_eq!(names(columns(&statuses, &[], &hides_done)), ["backlog", "shelved", "todo"]);
         let held = [Column::Status("done".into()), Column::Status("blocked".into())];
-        assert_eq!(names(columns(&statuses, &held, &hides_done)), ["idea", "shelved", "todo", "done", "blocked"]);
+        assert_eq!(names(columns(&statuses, &held, &hides_done)), ["backlog", "shelved", "todo", "done", "blocked"]);
     }
 
     /// 레인의 높이는 가장 긴 칸이고, 카드는 줄의 차례대로 쌓인다.
@@ -554,11 +554,11 @@ mod tests {
         assert_eq!(window(3, 40, Some(2), 5), Window { first: 1, count: 2 });
     }
 
-    /// **아직 아무 카드에도 안 서 본 머리줄의 `j` 는 가장 가까운 카드다**(리뷰) — 처음값으로 첫 칸(idea)을 들던 때는 맨
-    /// 아래 `(마일스톤 없음)` 레인의 idea 로 내려가, 그 위의 마일스톤 레인을 통째로 건넜다. 칸을 들고 있으면 그 칸이다.
+    /// **아직 아무 카드에도 안 서 본 머리줄의 `j` 는 가장 가까운 카드다**(리뷰) — 처음값으로 첫 칸(backlog)을 들던 때는 맨
+    /// 아래 `(마일스톤 없음)` 레인의 backlog 로 내려가, 그 위의 마일스톤 레인을 통째로 건넜다. 칸을 들고 있으면 그 칸이다.
     #[test]
     fn a_header_with_no_column_yet_steps_to_the_nearest_card() {
-        // 레인 1(마일스톤): 칸 2 의 카드. 레인 2(마일스톤 없음): 칸 0 의 idea.
+        // 레인 1(마일스톤): 칸 2 의 카드. 레인 2(마일스톤 없음): 칸 0 의 backlog.
         let slots = [
             Slot { lane: 0, column: None, height: 1, group: 0 },
             Slot { lane: 1, column: Some(2), height: 2, group: 0 },

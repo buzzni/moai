@@ -77,7 +77,7 @@
 
 **거절문과 몇 명령의 몸통도 들어왔다.** 모르는 칸을 대는 한 줄(`add -s`·`mv <칸>`·`mv --from`·
 `show -s`·탐색기 거름망이 나눠 쓴다, moai-fdk7), 사용자 설정을 **고치다** 멈춘 까닭(moai-wflg),
-그리고 `defer`·`edit`·`note`·`read`·`project add|rm|color|ls` 의 몸통과 `idea promote` 의 거절
+그리고 `defer`·`edit`·`note`·`read`·`project add|rm|color|ls` 의 몸통과 `backlog promote` 의 거절
 셋(moai-95g1)이 말묶음에서 온다.
 **`.moai` 를 못 찾았다는 첫 줄은 말묶음에 왔다**(moai-5j49) — `refuse.not_a_repo` 하나를
 `cmd::open_repo` 와 `nothing_registered` 가 함께 쓴다. 등록한 것도 없을 때의 두 줄이 한 말로
@@ -96,15 +96,15 @@
 탐색기의 거름망 프롬프트는 `view::Surface::Pairs` 를 건네 그 하나를 함께 쓴다. 말은 같고 고쳐 칠 글만 표면마다
 다르다(`-s todo,review` 와 `status=todo,review`, moai-tckz) — 그래서 `{fix}`·`{by_done}`·`{by_status}`·`{widen}`·
 `{status}` 자리에는 코드가 지은 명령이 통째로 든다. `type=` 의 거절만은 `Kind` 의 영어 글 그대로다 — `--type` 을
-푸는 clap 과 한 말이어야 해서다(moai-ivt9). 검색 범위의 이름(`GrepIn::name`)은 아직 한국어다(idea moai-2ksl).
+푸는 clap 과 한 말이어야 해서다(moai-ivt9). 검색 범위의 이름(`GrepIn::name`)은 아직 한국어다(backlog moai-2ksl).
 
 **설정을 읽다 멈춘 줄도 말묶음에 왔다**(moai-ivt9) — `config::Trouble`·`Refused`·`Want` 는
 자료만 내고 `view::config_trouble`·`config_refused` 가 `config.*` 로 편다. 사람을 못 푼 줄
 (`model::NoActor` → `view::no_actor`)과 git 이 이력을 못 낸 줄(`git::Error::said` →
 `view::git_trouble`), 계획 파서의 거절(`draft.*`)도 같은 판에서 함께 왔다.
 
-**남은 자리는 트래커가 든다** — 저장 계층에 남은 글(idea moai-uqxn, 쓰기 경로 안이다),
-검증 글 열넷(idea moai-gbk3). 그것이 남은 동안은 한 명령이 두 말로 서는 자리가 있다:
+**남은 자리는 트래커가 든다** — 저장 계층에 남은 글(backlog moai-uqxn, 쓰기 경로 안이다),
+검증 글 열넷(backlog moai-gbk3). 그것이 남은 동안은 한 명령이 두 말로 서는 자리가 있다:
 못 읽는 프로젝트 한 줄이 영어 테두리 안에 `store` 의 한국어 까닭을 든다.
 
 **같은 두 명령의 다른 자리는 아직 한국어다.** `.moai` 밖에서 부른 한눈 보기

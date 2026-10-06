@@ -307,7 +307,13 @@ fn decide(
                     0,
                     view::Screen::new(ctx.lang()).at(ctx.clock()),
                 );
-                crate::hook::board(&lines, ctx.lang())
+                // AGENTS.md 에 moai 블록이 없으면(git 밖에 둔 트래커의 `--guide hook`) 사용법이 어디 있는지 한 줄을 더한다.
+                // 못 읽으면 더하지 않는다 — 무엇이 들었는지 모른다.
+                let unguided = matches!(
+                    crate::cmd::init::agents_state(repo.here()),
+                    Ok((crate::cmd::init::BlockState::Missing, _))
+                );
+                crate::hook::guided_board(&lines, ctx.lang(), unguided)
             });
             // 사람이 물었으니 일하는 중이다. 편지는 **매 프롬프트** 싣는다 — 보드처럼 한 번이 아니다(moai-h8tn). 보드와
             // 한 칸이라 그 다음 자리에 든다([`crate::hook::Carry::letters_room`]). 출석은 편지를 옮기기 전에 적는다(위와 같은 까닭).
@@ -812,7 +818,7 @@ fn from_antigravity(event: Event, raw: &str) -> Option<(Event, Input)> {
 /// **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
 ///
 /// **다시 본 판정이 안 막으면 풀린 것이다** — 비추는 줄(`Context`)도 푼 답이라 그대로 낸다.
-/// `Pass` 만 풀린 것으로 치던 판은 `idea add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
+/// `Pass` 만 풀린 것으로 치던 판은 `backlog add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
 /// 막았다(moai-dw63.e31) — 그 거절은 이미 집은 일을 집으라고 시켰다.
 ///
 /// **겹친 판의 이름도 사람을 싣는다**(moai-0zjo) — `worktree::fresh` 가 짓는 이름에는 사람이 없어,
@@ -852,7 +858,7 @@ fn settle(
     }
     // **모르는 줄도 같은 판에서 뺀다**(moai-ntl6, 사용자 결정 B) — 옆 워크트리가 쥐었을 일을 초점으로
     // 대지 않는다. **비추는 줄도 같은 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로
-    // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`idea promote -e <남의 에픽>`).
+    // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`backlog promote -e <남의 에픽>`).
     let added = add_unsure(input, repo, &rows, &mut narrow);
     if !added {
         return wide;

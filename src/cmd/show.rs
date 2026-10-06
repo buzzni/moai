@@ -27,7 +27,7 @@ fn resolve(target: Option<&str>, lang: crate::i18n::Lang) -> R<Target> {
         Some("issue") => Ok(Target::OfKind(Kind::Issue)),
         Some("epic") => Ok(Target::OfKind(Kind::Epic)),
         Some("milestone") => Ok(Target::OfKind(Kind::Milestone)),
-        Some("idea") => Ok(Target::OfKind(Kind::Idea)),
+        Some("backlog" | "idea") => Ok(Target::OfKind(Kind::Backlog)),
         Some(t) if crate::id::is_valid(t) => Ok(Target::One(t.to_string())),
         // 조용히 0건을 내지 않는다. 모르는 값은 거부하고 있는 것을 나열한다.
         Some(t) => Err(Fail::coded(
@@ -141,7 +141,7 @@ pub(crate) fn filter_of(
         done_at: Vec::new(),
         all: a.all,
         archived: a.archived,
-        ideas: false,
+        backlog: false,
         deferred: a.deferred,
         filter: a.filter,
     })
@@ -780,7 +780,7 @@ fn one(
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
         // **사람 화면과 같은 자로 고른다** (`report::group_members`). 담아 둔
-        // 생각은 거기서 빠진다 — 찾으려면 `moai show --type idea -e <에픽>`. 한때
+        // 생각은 거기서 빠진다 — 찾으려면 `moai show --type backlog -e <에픽>`. 한때
         // 여기만 에픽에 한해 제 `epic` 을 적은 줄을 내, 마일스톤은 키가 없고
         // 물려받은 자식은 화면에만 있었다(moai-qizs).
         let mut extra = vec![
