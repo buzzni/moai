@@ -151,6 +151,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
     // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
     let lang = ctx.lang();
+    // Reopening an archived row restores only the selected row. The archive
+    // command keeps the rest of its former bundle in place by design.
+    let active = repo.read()?;
+    let wanted: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
+    let archived_rows: Vec<_> =
+        repo.read_all()?.issues.into_iter().filter(|i| wanted.contains(&i.id) && active.get(&i.id).is_none()).collect();
+    let restore_ids: std::collections::BTreeSet<String> = archived_rows.iter().map(|i| i.id.clone()).collect();
     let moved: Moved = repo.with_write(
         || lang,
         |issues, cfg, _| {
@@ -158,6 +165,7 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 쪽이 뒤에 써서, 칸 시각이 거꾸로 가고 안 덮이는 시작이 끝보다 늦게 선다 — 집기가 닫기를
             // 앞질러 `done_at − started_at` 이 음수가 된다. 락 안에서 뜨면 쓰는 차례가 곧 시각의 차례다.
             let at = model::now();
+            issues.extend(archived_rows.clone());
             // **칸부터 다 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
             // 하는지 모른다" 로 덮이면, 부르는 쪽은 둘을 글로만 가를 수 있다. 칸 검사가
             // 줄을 봐야 하므로(`check_from`) 락 안에서 잰다. **`bad_status` 를 내는 검사는
@@ -327,6 +335,9 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             Ok((entries, m))
         },
     )?;
+    if !restore_ids.is_empty() {
+        crate::archive::remove_ids(&repo.root, &restore_ids).map_err(|e| Fail::new(format!("archive: {e}")))?;
+    }
 
     // **`-m` 이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — **그 글이 저널에 든 판에만**: 옮긴 줄의 칸 줄과
     // 이미 그 칸이던 줄의 노트다. 진 줄·없는 줄뿐인 부름에 "저널에 남는 것은 …" 을 대면 없던 쓰기를 말한다(리뷰

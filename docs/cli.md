@@ -28,6 +28,7 @@ Commands:
   add           Create an issue
   show          Open one, or list them
   stats         Count them - spread, flow, lead and cycle time, AI work
+  archive       Move eligible closed rows into yearly archive files
   mv            Move the status
   edit          Edit title, body, tags, epic or priority
   rm            Remove
@@ -620,6 +621,23 @@ Filters  (comma = or,  repeated = and):
                           "lines":31,"tokened":28,"tokens":5100000}],
              "by_grade":[{"grade":"high","lines":12,...},...]},
      "reviews":{"rows":6,"work":{...the same keys as work...}}}
+```
+
+## `moai archive`
+
+```
+Move eligible closed rows into yearly archive files
+
+Usage: moai archive [OPTIONS]
+
+Options:
+      --dry-run              Show what would move without changing files
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
 ```
 
 ## `moai mv`

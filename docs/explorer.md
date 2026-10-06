@@ -151,12 +151,15 @@ with `Enter` first.
 
 ## The archive
 
-Work that has sat in done for two weeks is the archive. Nothing is stored for it
-— it is read off the column and the clock each time — and it stays hidden on the
-list and the board even when done is shown; the path line counts what it left
-out. `SPC v o` shows it, and `/` finds it either way. On the CLI it is
-`moai show --archived`. `archive_days` in `.moai/config.toml` sets the two weeks,
-and `0` turns the archive off (moai-47mz).
+Work that has sat in done for two weeks is eligible for the archive. The archive
+is moved explicitly with `moai archive`; use `moai archive --dry-run` first to
+see the rows. Closed epic bundles move together into
+`.moai/archive/<year>.jsonl`, while milestone rows stay live. Normal board and
+ready reads use only the active snapshot. `SPC v o` and `moai show --archived`
+read archived rows too, and `moai show <id>` can open one directly.
+`archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns archive
+eligibility off. Moving an archived row with `moai mv` restores that selected
+row; its former bundle remains archived (moai-fx9t).
 
 ## Catch up on what changed
 

@@ -39,6 +39,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .collect();
     let now = model::now();
     let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
+    let archiveable = crate::archive::eligible(&load.issues, &repo.config, &now).len();
+    if archiveable > 0 {
+        st.notices.push(report::Warning::archive_pending(archiveable));
+    }
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.

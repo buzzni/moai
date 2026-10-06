@@ -21,6 +21,11 @@ does not tag — see `CONTRIBUTING.md`.
   and kind names also complete; another key keeps the inserted candidate.
   Enter and Esc keep their existing meanings. (moai-fc97)
 
+- **Explicit yearly issue archives.** `moai archive --dry-run` previews eligible
+  closed rows and `moai archive` moves closed issue and epic bundles into
+  `.moai/archive/<year>.jsonl`; `show` and `stats` can read archived rows, while
+  normal board reads stay on the active snapshot. (moai-fx9t)
+
 ### Fixed
 
 - **Tracker writes compare changed rows through an ID map.** Adding or updating

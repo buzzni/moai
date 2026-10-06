@@ -869,6 +869,12 @@ impl Repo {
         Ok(read_snapshot(&self.root).map_err(Unsnapped::into_fail)?.unwrap_or_default())
     }
 
+    /// Read the active snapshot together with yearly archive files. Hot paths
+    /// deliberately continue to use [`Repo::read`] so archived rows stay out.
+    pub fn read_all(&self) -> R<Load> {
+        Ok(crate::archive::read_all(&self.root, self.read()?))
+    }
+
     /// `issues.jsonl` 을 바꾸는 **유일한 경로**.
     ///
     /// 락 → (락 안에서) 읽기 → 고치기 → 정규화·검증·정렬 → 원자적 교체 →
@@ -963,7 +969,8 @@ impl Repo {
             original_by_id.entry(o.id.as_str()).or_insert(o);
         }
 
-        let reserved = load.reserved_ids();
+        let mut reserved = load.reserved_ids();
+        reserved.extend(crate::archive::ids(&self.root));
         let mut issues = load.issues;
         let mut unread = load.errors;
         let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;

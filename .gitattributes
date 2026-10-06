@@ -7,6 +7,7 @@
 # Install the driver once per clone with `moai merge-driver --install`. In a
 # clone without it this word is ignored and git's default merge runs.
 .moai/issues.jsonl   text eol=lf merge=moai
+.moai/archive/*.jsonl text eol=lf merge=moai
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
 # It is filed per writer, by email — `.moai/journal/you_example_com.jsonl`.

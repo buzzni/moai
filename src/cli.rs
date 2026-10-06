@@ -254,6 +254,8 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
     /// Count them - spread, flow, lead and cycle time, AI work
     #[command(after_help = STATS_HELP)]
     Stats(StatsArgs),
+    /// Move eligible closed rows into yearly archive files
+    Archive(ArchiveArgs),
     /// Move the status
     #[command(after_help = "  The last argument is the column to go to, everything before it the issues.
   Column names and their order come from statuses in .moai/config.toml
@@ -1667,6 +1669,13 @@ pub struct StatsArgs {
 
     #[command(flatten)]
     pub filter: FilterArgs,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct ArchiveArgs {
+    /// Show what would move without changing files
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// `--by` 의 낱말 — `report::stats::Axis` 의 이름과 같다. 잇는 것은 `cmd::stats` 다(`report` 는 clap 을 모른다).

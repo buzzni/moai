@@ -28,8 +28,12 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
-    let crate::worktree::Gathered { load, origin, trouble, mut watched, swept, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, origin, trouble, mut watched, swept, sides, mine, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
+    // The explorer can switch between the live board and archived rows. Keep the
+    // active overlay from the worktree gather, then add the archive beside it so
+    // worktree-only rows remain visible in both views.
+    let load = crate::archive::read_all(&repo.root, active_load);
     crate::tui::watch(&mut watched, places);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).

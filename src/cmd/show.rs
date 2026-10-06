@@ -190,8 +190,13 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if args.removed {
         return removed(ctx, &repo, args, kind_filter);
     }
-    let crate::worktree::Gathered { load, origin, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
+    let load = if args.target.is_some() || args.filter.archived || args.filter.grep.is_some() {
+        crate::archive::read_all(&repo.root, active_load)
+    } else {
+        active_load
+    };
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {

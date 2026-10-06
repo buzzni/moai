@@ -8,10 +8,12 @@ in [the CLI reference](cli.md).
 ## Archive
 
 Work that has stood in `done` for longer than `archive_days` (two weeks unless
-`.moai/config.toml` says otherwise; `0` turns it off). Nothing is stored for it —
-it is read off the column and the clock each time. The list, the board and
-`moai show --all` leave it out; `moai show --archived` and `SPC v o` bring it
-back. More in [the explorer](explorer.md#the-archive).
+`.moai/config.toml` says otherwise; `0` turns eligibility off). `moai archive`
+moves eligible closed epic bundles and standalone rows into yearly JSONL files
+under `.moai/archive`; milestones stay live. Board and ready reads use the
+active snapshot, while `moai show --archived`, `moai show <id>` and `SPC v o`
+read the archive. `moai mv` restores only the selected archived row. More in
+[the explorer](explorer.md#the-archive).
 
 ## Assignee
 
