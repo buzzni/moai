@@ -303,8 +303,11 @@ The tag is what the release workflow trusts.
 an archive file, or repeated inside the archive. First open it with `moai show <id>`
 and confirm the live version is the one to keep. `moai archive --drop <id>`
 removes its archive copies while preserving the live row, and refuses to delete
-an archive-only row. For duplicates entirely inside the archive, inspect the
-source file and keep the version you want there.
+an archive-only row. It also refuses when the archived row is a different issue
+that only shares the ID (another kind or creation time) — compare the two with
+`moai show --archived`; dropping it would erase that issue. For duplicates
+entirely inside the archive, inspect the source file and keep the version you
+want there.
 
 After a restore commits, a failed archive cleanup is reported as a warning with
 the successful move still printed. Do not repeat the move with its old `--from`
@@ -312,9 +315,9 @@ column: it has already moved. Repair the archive copy instead. A failed journal
 write is reported separately so its lost note can also be recorded again.
 
 Unreadable archive files and rows name their own source and leave readable rows
-available. `moai rm --line` repairs the active snapshot only; it is never a repair
+available. Restore cleanup and `--drop` skip archive files they cannot read and
+name them. `moai rm --line` repairs the active snapshot only; it is never a repair
 for an archive file's line number.
-
 
 ## When nothing else fits
 
