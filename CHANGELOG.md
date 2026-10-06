@@ -18,7 +18,9 @@ does not tag — see `CONTRIBUTING.md`.
   closed rows and `moai archive` moves closed issue and epic bundles into
   `.moai/archive/<year>.jsonl`; `show` and `stats` can read archived rows, while
   board counts stay on the active snapshot and archived rows supply reference
-  and milestone context. (moai-fx9t, moai-bth3)
+  and milestone context. `moai archive --drop <id>` removes the stale archive
+  copies of a live row; it refuses an ID without a live row and an archived row
+  that is another issue under the same ID. (moai-fx9t, moai-bth3)
 - **`moai init --yes` (`-y`) plants without asking.** Choices not settled by
   flags or existing git rules and guide files take the old defaults.
 - **`moai init --driver` pins the merge-driver row**, the pair of `--no-driver`,
@@ -109,17 +111,19 @@ does not tag — see `CONTRIBUTING.md`.
 - **Local tracking ignores both a `.moai` symlink and its target directory.**
   An explicit `--driver` with excluded tracking is refused; JSON `gitignore`
   reports writes to `.gitignore`, and `exclude` reports writes to `.git/info/exclude`.
-
 - **Archive regression repairs.** Shipped milestones and archived blockers keep
-  their meaning after storage moves, and a restored member retains its parent
-  context without restoring its former bundle. Unreadable archive files leave
-  normal writes and board reads available, and diagnostics name the archive
-  source. `moai archive --drop <id>` removes stale archive copies while keeping
-  a live row; conflicting bundles stay live while other bundles move. Restore
-  cleanup failure preserves the successful move and any journal warning. Hook
-  ownership checks include archived pickups, sibling overlays do not create
-  archive collision or eligibility warnings, and archive temporary files stay
-  under the existing ignore rule. (moai-bth3)
+  their meaning after storage moves in `status` inside and outside a repository,
+  `ready` and the hook board, and a restored member retains its parent context
+  without restoring its former bundle. Rows already moved to the archive stay
+  out of `moai show` lists and the status board whatever `archive_days` says
+  now. Unreadable archive files leave writes and board reads available,
+  diagnostics name the archive source, and nothing about them is reported as
+  lost history. Conflicting bundles stay live while other bundles move, and
+  `--dry-run` and the board count only what will move. Restore cleanup failure
+  preserves the successful move and any journal warning; cleanup skips archive
+  files it cannot read. Hook ownership checks include archived pickups, sibling
+  overlays do not create archive collision or eligibility warnings, and archive
+  temporary files stay under the existing ignore rule. (moai-bth3)
 
 ### Deprecated
 
