@@ -644,6 +644,9 @@ writes keep using the active snapshot. Milestones stay live. Statistics, search,
 `show <id>`, `show --archived` and the explorer can read archive files too.
 
 Reopening with `moai mv <id> todo --from done` restores only the selected row.
-Its former bundle remains archived. Archived IDs stay reserved, and `status`
+Its former bundle remains archived. `moai defer <id> --undo` on an archived row
+brings it back the same way — a member reopened under an archived deferred epic
+stays out of the plan until that epic is undone, and `mv` names it (moai-b6w3).
+Archived IDs stay reserved, and `status`
 reports IDs duplicated across storage files. `init` installs the archive merge
 attributes alongside the active snapshot's rule (moai-fx9t).

@@ -12,7 +12,8 @@ Work that has stood in `done` for longer than `archive_days` (two weeks unless
 moves eligible closed epic bundles and standalone rows into yearly JSONL files
 under `.moai/archive`; milestones stay live. Board and ready count active work
 and use archived rows as reference context, while `moai show --archived`, `moai show <id>` and `SPC v o`
-read the archive. `moai mv` restores only the selected archived row. A live row
+read the archive. `moai mv` restores only the selected archived row, and so does
+`moai defer <id> --undo` on an archived deferred epic. A live row
 with a stale archive copy is repaired with `moai archive --drop <id>`. More in
 [the explorer](explorer.md#the-archive).
 

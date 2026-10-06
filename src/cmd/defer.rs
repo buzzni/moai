@@ -23,6 +23,8 @@ struct Moved {
     shelved: Vec<(String, Vec<String>)>,
     /// `--from` 을 걸었는데 그 사이 칸이 달라진 줄 — (그 줄, 지금 칸).
     stale: Vec<(String, String)>,
+    /// 아카이브에서 되살린 줄 — 산 파일에 담긴 뒤 아카이브의 사본을 지운다(moai-b6w3, `mv` 와 한 자).
+    restored: std::collections::BTreeSet<String>,
 }
 
 pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
@@ -52,9 +54,20 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
     // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
     // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
     let lang = ctx.lang();
-    let (moved, read): (Moved, super::Read) = repo.with_write(
+    let (moved, read): (Moved, super::Read) = repo.with_write_after(
         || lang,
-        |issues, cfg, _| {
+        |issues, unread, cfg, _| {
+            let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
+            // **아카이브로 간 줄도 미루고 도로 집는다**(moai-b6w3). 미룬 에픽이 멤버와 함께 아카이브로 가면, 되살린
+            // 멤버를 계획 밖에 두는 미룸이 그 에픽 줄에 남는다 — 산 줄만 찾던 판은 `defer <에픽> --undo` 를 "없다" 로
+            // 거절해 도구 안에 돌아올 길이 없었다. 찾는 길은 `mv` 와 하나다: 산 줄 밖으로 닿을 때만 읽고
+            // ([`super::archived_for`]), 고른 줄만 들여와 둔 뒤 실제로 바뀐 줄만 산 파일에 남긴다(아래).
+            let archived = super::archived_for(&repo.root, issues, &asked)?;
+            let opaque: std::collections::BTreeSet<&str> = unread.iter().filter_map(|e| e.id.as_deref()).collect();
+            let wanted: std::collections::BTreeSet<String> = args.ids.iter().cloned().collect();
+            let staged_rows = crate::archive::restoring(issues, &archived, &wanted, &opaque, cfg);
+            let staged: std::collections::BTreeSet<String> = staged_rows.iter().map(|i| i.id.clone()).collect();
+            issues.extend(staged_rows);
             // **칸부터 다 보고 누구인지는 그다음이다** — `mv` 와 같은 차례다. 뒤에 두면 신원
             // 없는 기계에서 칸 오타가 "누가 하는지 모른다" 로 덮인다. 칸 검사가 줄을 봐야
             // 하므로(`check_from`) 락 안으로 들어왔다. `bad_status` 를 내는 검사는 묶음 것까지
@@ -68,7 +81,6 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // 쓴다. 재는 축과 쓰는 축이 갈려 있어 겨루는 둘이 다 이긴다. `moai defer <묶음>`
             // 은 AGENTS.md 가 시키는 길이지만, 거기에 겨루는 가드는 원래 없었다.
             // 돌기 전에 한 번만 뜨는 까닭은 `standing_of` 가 적었다.
-            let asked: Vec<&str> = args.ids.iter().map(String::as_str).collect();
             if from.is_some()
                 && let Some(g) = issues.iter().find(|i| asked.contains(&i.id.as_str()) && crate::report::is_group(i))
             {
@@ -138,8 +150,12 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // 그 에픽 때문에 여전히 빠져 있었다(moai-kluk). 제 줄을 풀었어도 에픽이 아직
             // 미뤄져 있으면 같다. **쓰기를 마친 모습에서** 재야 에픽과 멤버를 한 번에 푼
             // 경우를 헛되이 안 센다.
+            //
+            // 미룸은 **아카이브를 겹친 문맥에서** 찾는다(moai-b6w3) — 미룬 에픽이 아카이브에 있으면 그 멤버를 계획 밖에
+            // 두는 것은 그 줄이다. 산 줄로만 재면 아직 빠진 멤버에 "이미 계획에 있다" 고 답한다.
+            let context = super::in_context(issues, &archived, unread);
             if back && !(m.done.is_empty() && m.already.is_empty()) {
-                let roots = crate::report::deferred_sources(issues);
+                let roots = crate::report::deferred_sources(&context);
                 m.shelved = m
                     .done
                     .iter()
@@ -151,10 +167,16 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             }
             // 묶음도 미룬다 — 그 줄을 내면서 적힌 칸을 그대로 내면 받는 쪽이
             // 안 읽히는 칸을 읽는다(`cmd::Row`).
+            // 되살린 묶음의 칸도 아카이브에 남은 멤버에서 읽는다 — 보드와 같은 문맥이다.
             let ids: Vec<&str> = m.done.iter().map(|i| i.id.as_str()).collect();
-            let read = super::read_of(issues, cfg, &ids, ctx.json);
+            let read = super::read_of(&context, cfg, &ids, ctx.json);
+            // **바뀐 줄만 산 파일에 남는다** — 이미 그 모양이던 줄과 진 줄은 아카이브에 그대로 선다. 바뀐 줄은 칸이
+            // 닫혀 있어도 남긴다: 그 미룸은 산 스냅샷에만 있고, 버리면 화면과 저널이 말한 쓰기가 사라진다.
+            let changed: std::collections::BTreeSet<String> = m.done.iter().map(|i| i.id.clone()).collect();
+            m.restored = crate::archive::finish_restoring(issues, &staged, &[], &changed);
             Ok((entries, (m, read)))
         },
+        |(m, _)| crate::archive::remove_ids(&repo.root, &m.restored),
     )?;
 
     // **`-m` 이 파일 이름이면 한 줄로 알린다 — 그 글이 저널에 든 판에만**(moai-yivo.xe9, 리뷰 moai-yivo.b5h). 노트는

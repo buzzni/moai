@@ -261,20 +261,21 @@ pub fn restoring(
         .collect()
 }
 
-/// Failed guards and moves to done keep the selected row in the archive. A row taken over stays live even when it
-/// did not move: the new assignee exists only in the live snapshot, and dropping it would leave the journal's
-/// `Taken-over` note with nothing behind it (moai-bth3 review).
+/// Failed guards and moves to done keep the selected row in the archive. A row changed in place — `kept` — stays live
+/// even when it did not move: a row taken over has its new assignee, and a row deferred or undone (moai-b6w3) its plan, only
+/// in the live snapshot, and dropping it would throw the write away while the journal and the screen report it
+/// (moai-bth3 review).
 pub fn finish_restoring(
     active: &mut Vec<Issue>,
     staged: &BTreeSet<String>,
     moved: &[Issue],
-    taken: &BTreeSet<String>,
+    kept: &BTreeSet<String>,
 ) -> BTreeSet<String> {
     let restored: BTreeSet<String> = moved
         .iter()
         .filter(|i| !i.status.is_done())
         .map(|i| i.id.clone())
-        .chain(taken.iter().cloned())
+        .chain(kept.iter().cloned())
         .filter(|id| staged.contains(id))
         .collect();
     active.retain(|i| !staged.contains(&i.id) || restored.contains(&i.id));

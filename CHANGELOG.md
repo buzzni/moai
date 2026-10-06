@@ -128,6 +128,11 @@ does not tag — see `CONTRIBUTING.md`.
   `link` and `backlog promote -e` accept an epic, parent or blocker that
   `moai archive` moved, instead of calling it missing; the new or edited row
   stays live and the archived row stays archived. (moai-tzzt)
+- **A deferred epic in the archive can be taken back.** `moai defer <id> --undo`
+  on an archived row brings that row live, out of the deferral, instead of
+  calling it missing, and a member restored under an archived deferred epic is
+  told — by `mv` and by `defer <member> --undo` — which deferral keeps it out
+  of the plan. (moai-b6w3)
 
 ### Deprecated
 

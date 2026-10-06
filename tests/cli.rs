@@ -28108,6 +28108,60 @@ fn archive_regressions_a_restored_group_row_goes_back_with_the_next_run() {
     assert!(!issues(s.path()).contains(&epic));
 }
 
+/// **A deferred epic that went to the archive still has a way back**(moai-b6w3). Restoring one of its members brings
+/// only that member live, and the member stays out of the plan because its epic is deferred — that much is the same as
+/// a live deferred epic. But every road back read live rows only: the move did not say where the deferral stood,
+/// `defer <member> --undo` answered "already in the plan", and `defer <epic> --undo` answered "not found". Now the
+/// hints name the archived epic, and undoing it brings that row live — the change exists only in the live snapshot.
+#[test]
+fn archive_regressions_an_archived_deferred_epic_can_be_undone() {
+    let s = init("archive-deferred-epic");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "shelved bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok(s.path(), &["defer", &epic, "-m", "not this quarter"]);
+    ok_at(s.path(), later, &["archive"]);
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    assert!(std::fs::read_to_string(&file).unwrap().contains(&epic));
+    // The restore says, as for a live epic, which deferral keeps the member out of the plan.
+    let moved: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done", "--json"])).unwrap();
+    assert_eq!(moved["shelved"], serde_json::json!([{"id": member, "root": epic}]), "{moved}");
+    // Undoing the member alone does not bring it back, and says where to.
+    let said = ok_at(s.path(), later, &["defer", &member, "--undo"]);
+    assert!(said.contains(&format!("moai defer {epic} --undo")), "{said}");
+    let undone: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &member, "--undo", "--json"])).unwrap();
+    assert_eq!(undone["already"], serde_json::json!([]), "{undone}");
+    assert_eq!(undone["shelved"], serde_json::json!([{"id": member, "root": epic}]), "{undone}");
+    // Deferring it again changes nothing, so the epic stays archived.
+    let archive = std::fs::read_to_string(&file).unwrap();
+    let live = issues(s.path());
+    let again: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--json"])).unwrap();
+    assert_eq!(again["already"], serde_json::json!([epic]), "{again}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), archive);
+    assert_eq!(issues(s.path()), live);
+    // Undoing the epic brings it live, out of the deferral, and the member is work again.
+    let back: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--undo", "--json"])).unwrap();
+    assert_eq!(back["changed"][0]["id"], epic, "{back}");
+    let row = issues(s.path())
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|r| r["id"] == epic)
+        .unwrap_or_else(|| panic!("{epic} did not come live\n{}", issues(s.path())));
+    assert!(row.get("deferred_at").is_none(), "{row}");
+    let archive = std::fs::read_to_string(&file).unwrap();
+    assert!(!archive.contains(&format!("\"id\":\"{epic}\"")) && archive.contains(&sibling), "{archive}");
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    assert_eq!(ready["ready"][0]["id"], member, "{ready}");
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+}
+
 /// **A row in an archive file that cannot be read is not just "not found"**(review of moai-bth3) — the move names the
 /// file it could not read, so nobody concludes the work never existed and raises it again.
 #[test]
