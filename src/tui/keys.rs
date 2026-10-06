@@ -1080,7 +1080,7 @@ pub enum Prompt {
     Apply,
     Cancel,
     /// 검색 칸에서 찾을 자리를 돌린다(moai-kojj) — 전체 → id → 제목 → 태그 → 본문 → 노트(moai-wcy8.3v9).
-    /// 다른 칸은 안 쓴다.
+    /// 거름망 칸에서는 항목·값 후보를 앞뒤로 완성한다(moai-fc97).
     NextScope,
     PrevScope,
     /// 거름망 칸의 값 목록에서 한 줄 위·아래(moai-h2rh). 목록이 안 선 칸에서는 아무것도 안 한다.
@@ -2172,7 +2172,14 @@ mod tests {
         for (edits, still, want) in [
             // 다른 문단에만 남은 키 — 검색 칸 문단의 Tab(범위 돌리기).
             (
-                &[("Tab and Shift-Tab pick where it", "it picks where it")][..],
+                &[
+                    ("Tab and Shift-Tab pick where it", "it picks where it"),
+                    (
+                        "Tab completes key names and values,\n  Shift-Tab cycles backwards",
+                        "completion fills key names and values,\n  cycling backwards",
+                    ),
+                    ("type names with Tab", "type names with completion"),
+                ][..],
                 &["Tab"][..],
                 &["PROMPT: Tab", "PROMPT: Shift-Tab"][..],
             ),
@@ -2185,6 +2192,7 @@ mod tests {
                         "The search and filter fields apply and give up",
                     ),
                     ("Enter puts it in", "it goes in"),
+                    ("these fields keep Enter to apply", "these fields apply"),
                 ][..],
                 &["Enter", "Esc"][..],
                 &["PROMPT: Enter", "PROMPT: Esc"][..],
@@ -2261,6 +2269,8 @@ mod tests {
         ("PROMPT", LIST, "The search and filter fields"),
         // 거름망 칸의 값 목록(moai-h2rh) — 여기 적힌 Enter 는 값을 넣는 Enter 다.
         ("PROMPT", LIST, "The filter field lists"),
+        ("PROMPT", LIST, "In the filter field,"),
+        ("PROMPT", LIST, "Fixed fields also complete status names"),
         // 목록(BROWSE)과 Esc·Bksp 를 나눠 쓴다.
         ("MENU", SPC, "stands up only what works"),
         // 메뉴가 언제 열린 채로 기다리는지를 말하는 두 문장도 메뉴의 것이다(moai-68j8) — 여기 적힌

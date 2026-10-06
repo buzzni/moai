@@ -134,7 +134,15 @@ kept.
 - **`SPC f` filters** with the same `key=value` words as `moai show --filter`.
   While you type, the keys it takes and a few examples stand above the field, and
   in the value of `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this
-  tracker holds do — `Up` and `Down` pick one and `Enter` puts it in
+  tracker holds do — `Up` and `Down` pick one and `Enter` puts it in.
+  `Tab` completes the key at the cursor: `mil` becomes `milestone=` so you can
+  start typing its value. If several keys match, Tab cycles through them in
+  the order shown in the hint panel, and `Shift-Tab` cycles backwards.
+  Tab also inserts and cycles through matching tag, assignee and milestone
+  values, or status columns, priorities `p0` to `p3` and kind names. The
+  highlighted value follows the candidate inserted into the field. Another
+  key keeps that candidate and ends the cycle; Enter applies the completed
+  filter, while Esc gives up
 - **`Esc` clears** the search or filter you set. It does not touch the view: what
   `SPC v` hides stays hidden, and the two apply together
 
@@ -202,4 +210,4 @@ line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97
