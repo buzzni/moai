@@ -327,25 +327,8 @@ pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
 /// 남은 것은 **읽기는 관대하고 쓰기는 엄하다** 는 규약 그대로다 — 찾기는 안 막고, 못 쓰는
 /// 트래커는 쓰기가 제 자리에서 거절한다(파일 권한이 이미 그 문이다). 대신 어느 트래커를
 /// 잡았는지를 [`CLIMBED`] 가 한 줄로 비춘다.
-///
-/// **제 체크아웃 안에서 못 찾았고 딸린 워크트리면 주 체크아웃으로 건너간다**(moai-n22o) — 트래커를 git 밖에
-/// 둔 저장소에서 체크아웃 밖에 만든 워크트리는 위로 가도 주 체크아웃에 안 닿는다
-/// ([`crate::worktree::main_tracker_for`]). **건너간 것은 올라간 것이 아니라 옮겨 간 것이다** — 둘째 값으로
-/// 이 워크트리의 같은 자리를 내고, [`Repo::find_from`] 이 그것을 `moved_from` 으로 남긴다. 커밋된 트래커를
-/// [`crate::worktree::tracker_root`] 로 옮길 때와 같아서, `here` 가 이 체크아웃으로 서고 쓰기가
-/// [`MOVED`] 의 한 줄로 알린다("올라가 잡았다" 는 옆으로 건너간 자리에 맞지 않는 말이다). 체크아웃 안에 만든
-/// 워크트리도 같은 길로 간다 — 대개 위로 찾던 것과 같은 트래커지만, git 밖에 둔 모노레포의 하위 트래커
-/// (`svc/.moai`)는 이제 위의 `top/.moai` 가 아니라 주 체크아웃의 같은 하위 자리로 간다. 주 체크아웃의
-/// `svc/` 에서 친 것과 같은 답이라 그쪽이 맞다.
-fn look(from: &Path) -> Option<(PathBuf, Option<PathBuf>)> {
-    let found = climb(from);
-    let (root, climbed) = match found {
-        Some((root, false)) => (root, false),
-        _ => match crate::worktree::main_tracker_for(from) {
-            Some((main, side)) => return Some((main, Some(side))),
-            None => found?,
-        },
-    };
+fn look(from: &Path) -> Option<PathBuf> {
+    let (root, climbed) = climb(from)?;
     // **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
     // 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
     // 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.
@@ -356,7 +339,7 @@ fn look(from: &Path) -> Option<(PathBuf, Option<PathBuf>)> {
             told.push(pair);
         }
     }
-    Some((root, None))
+    Some(root)
 }
 
 /// 찾은 뿌리와 **체크아웃을 두고 올라왔는가**. 뒤의 값이 알림을 가른다.
@@ -452,15 +435,8 @@ impl Repo {
     /// 쓰던 판은 루트의 `config.toml` 에 충돌 표시 하나가 박히는 순간 저장소의 모든 워크트리가
     /// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다. 쓸 트래커를
     /// 못 여는 것은 고칠 것이지 갈래가 아니다 — 루트에서 치면 나는 그 오류를 여기서도 그대로 낸다.
-    ///
-    /// **옆으로 건너간 찾기도 여기서 옮겨 온 것으로 적는다**(moai-n22o) — [`look`] 이 딸린 워크트리에서 주
-    /// 체크아웃의 트래커로 건너가면 그 워크트리의 같은 자리가 `moved_from` 이다.
     pub fn find_from(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
-        match Repo::found_root(dir) {
-            None => Ok(None),
-            Some((root, Some(side))) => Ok(Some(Repo { moved_from: Some(side), ..Repo::rooted(root, lang)? })),
-            Some((found, None)) => Repo::from_found(found, lang).map(Some),
-        }
+        Repo::found_root(dir).map(|found| Repo::from_found(found, lang)).transpose()
     }
 
     /// 찾은 자리로 [`Repo`] 를 짓는다 — **옮겨 가는 길은 여기 하나다**([`Repo::find_from`] 이 쓴다).
@@ -487,7 +463,7 @@ impl Repo {
     /// 자리다. 훅이 그 자리로 선다 — `moai` 는 크게 실패하는 것이 맞지만, 훅까지 조용해지면 그 한 파일
     /// 때문에 저장소의 모든 워크트리에서 규칙이 통째로 꺼진다(리뷰 moai-71ht.i1u).
     pub fn find_here(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
-        Repo::found_root(dir).map(|(root, _)| Repo::rooted(root, lang)).transpose()
+        Repo::found_root(dir).map(|root| Repo::rooted(root, lang)).transpose()
     }
 
     /// 이 자리의 트래커가 **옮겨 갈 루트** — 옮기지 않을 자리면 `None`.
@@ -506,9 +482,9 @@ impl Repo {
         Repo::redirect(dir).unwrap_or_else(|| dir.to_path_buf())
     }
 
-    /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리와, 옆으로 건너갔으면 건너오기 전의 자리다
-    /// ([`look`]). 설정은 안 읽는다: 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
-    fn found_root(dir: &Path) -> Option<(PathBuf, Option<PathBuf>)> {
+    /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
+    /// 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
+    fn found_root(dir: &Path) -> Option<PathBuf> {
         look(dir)
     }
 
@@ -2719,7 +2695,7 @@ pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
 /// 출석부와 우편함([`agents_at`]·[`mail_at`])은 그 뿌리에 선다. 물러선 트래커에 적던 판은 한 세션의 장이 두
 /// 출석부로 갈렸다 — 끝 이벤트만 뿌리를 보면, 그 창에 연 세션의 장은 `Interrupt` 가 못 돌리고 `SessionEnd` 가 못 걷는다.
 pub(crate) fn tracker_in_use(dir: &Path) -> Option<PathBuf> {
-    look(dir).map(|(found, _)| Repo::opened_root(&found))
+    look(dir).map(|found| Repo::opened_root(&found))
 }
 
 /// [`planted_elsewhere`] 가 찾은 자리 — **자리마다 값이 다르다.**

@@ -1444,13 +1444,6 @@ pub fn is_linked(root: &Path) -> bool {
 /// 병합에서 스냅샷이 충돌하기 때문이다.
 /// 공용 디렉터리가 `.git` 이 아니면(맨 저장소에 딸린 워크트리) 주 체크아웃이 없다 — `None`.
 pub fn main_root(root: &Path) -> Option<PathBuf> {
-    let (_, main, rel) = mirror(root)?;
-    Some(spot(&main, &rel))
-}
-
-/// [`main_root`] 와 [`main_tracker_for`] 가 함께 쓰는 자 — (이 워크트리의 꼭대기, 주 체크아웃, 꼭대기에서의
-/// 자리). 주 워크트리이거나 git 밖이면 `None`. 둘이 따로 [`git_dirs`] 를 훑으면 한 찾기에 같은 훑기가 두 번 돈다.
-fn mirror(root: &Path) -> Option<(&Path, PathBuf, PathBuf)> {
     let (top, common) = git_dirs(root)?;
     if top.join(".git").is_dir() || common.file_name()? != ".git" {
         return None;
@@ -1458,41 +1451,9 @@ fn mirror(root: &Path) -> Option<(&Path, PathBuf, PathBuf)> {
     // 둘 다 풀고 견준다 — [`same_repo`]·[`on_disk`] 와 같은 자다. `main` 은 이미 푼 경로라, 푸지 않은
     // 쪽의 조각을 붙이면 없는 자리가 선다.
     let rel = real(root).strip_prefix(real(top)).ok()?.to_path_buf();
-    let main = common.parent()?.to_path_buf();
-    Some((top, main, rel))
-}
-
-/// `base` 아래 `rel` 의 자리 — 빈 `rel` 을 붙이면 끝에 `/` 가 선다. 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
-fn spot(base: &Path, rel: &Path) -> PathBuf {
-    if rel.as_os_str().is_empty() { base.to_path_buf() } else { base.join(rel) }
-}
-
-/// 딸린 워크트리 안의 자리에서 **주 체크아웃의 트래커**를 찾는다 — 주 체크아웃의 같은 자리부터 그 꼭대기까지
-/// 거슬러 올라가 `.moai/config.toml` 이 선 첫 자리다(moai-n22o). 딸린 워크트리가 아니거나 못 찾으면 `None`.
-/// git 을 띄우지 않는다.
-///
-/// 트래커를 git 밖에 두면(`init --tracking exclude`) 워크트리에 `.moai` 가 안 따라온다. 체크아웃 **안에** 만든
-/// 워크트리(`.claude/worktrees/x`)는 위로 찾다 주 체크아웃에 닿지만, **밖에** 만든 것(`git worktree add ../side`)은
-/// 위로 아무리 가도 닿지 않는다 — 옆으로 건너가야 한다. 커밋된 트래커를 루트로 옮기는 [`tracker_root`] 와 같은
-/// 자(같은 나무의 같은 자리)로 건너간다.
-///
-/// **둘을 낸다 — (주 체크아웃의 트래커, 이 워크트리의 같은 자리).** 뒤의 것이 `Repo::here` 가 될 자리다 —
-/// 커밋된 트래커를 옮길 때 워크트리 쪽 자리를 `moved_from` 으로 남기는 것과 같다. 그것을 잃으면 `here` 가
-/// 주 체크아웃이 되어 이 가지의 커밋(`show` 의 `commits`)·위키·훅이 세는 파일을 모두 주 체크아웃에서 읽는다.
-///
-/// **주 체크아웃의 꼭대기에서 멈춘다** — 그 위는 이 저장소가 아니다. 거기서 더 오르는 것은 원래의 찾기
-/// (`store::look`)가 한다.
-pub fn main_tracker_for(dir: &Path) -> Option<(PathBuf, PathBuf)> {
-    let (top, main, mut rel) = mirror(dir)?;
-    loop {
-        let at = spot(&main, &rel);
-        if at.join(".moai").join("config.toml").is_file() {
-            return Some((at, spot(top, &rel)));
-        }
-        if !rel.pop() {
-            return None;
-        }
-    }
+    let main = common.parent()?;
+    // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
+    Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
 }
 
 /// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.

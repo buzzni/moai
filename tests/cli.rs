@@ -23894,36 +23894,6 @@ fn a_linked_worktree_does_not_keep_a_tracker_out_of_git() {
     assert!(!linked.join(".moai").exists(), "거절하고도 심었다");
 }
 
-/// **체크아웃 밖에 만든 워크트리도 git 밖의 트래커를 찾는다**(moai-n22o, 2026-10-06 사용자 결정 A). 트래커가
-/// git 밖이면 워크트리에 `.moai` 가 안 따라오고, 위로 찾는 길은 `../side` 에서 주 체크아웃에 안 닿는다 — 같은
-/// 나무의 같은 자리로 건너간다. 모노레포의 하위 트래커도 같은 하위 자리에서 찾는다.
-#[test]
-fn a_sibling_worktree_finds_a_tracker_kept_out_of_git() {
-    let s = Scratch::new("sibling-worktree");
-    let main = s.path().join("main");
-    std::fs::create_dir_all(main.join("svc")).unwrap();
-    git(&main, &["init", "-q", "."]);
-    git(&main, &["commit", "-q", "--allow-empty", "-m", "init"]);
-    ok(&main, &["init", "top", "--tracking", "exclude", "--guide", "none"]);
-    ok(&main.join("svc"), &["init", "svc", "--tracking", "exclude", "--guide", "none"]);
-    git(&main, &["worktree", "add", "-q", "../side"]);
-    let side = s.path().join("side");
-    std::fs::create_dir_all(side.join("svc")).unwrap();
-
-    let id = ok(&side, &["add", "from the side", "-q"]);
-    assert!(id.trim().starts_with("top-"), "주 체크아웃의 트래커가 아니다 — {id}");
-    assert!(issues(&main).contains("from the side"), "주 체크아웃의 트래커에 안 들었다");
-    assert!(!side.join(".moai").exists(), "옆 워크트리에 트래커가 섰다");
-    // **선 체크아웃은 옆 워크트리다** — 건너간 찾기가 `here` 를 주 체크아웃으로 두면 이 가지의 커밋을 못 찾는다.
-    git(&side, &["commit", "-q", "--allow-empty", "-m", &format!("feat: side ({})", id.trim())]);
-    let shown = ok(&side, &["show", id.trim(), "--json"]);
-    assert!(shown.contains("feat: side"), "옆 워크트리 가지의 커밋을 못 찾았다 — {shown}");
-
-    let id = ok(&side.join("svc"), &["add", "svc work", "-q"]);
-    assert!(id.trim().starts_with("svc-"), "하위 트래커를 못 찾았다 — {id}");
-    assert!(read(&main.join("svc/.moai/issues.jsonl")).contains("svc work"));
-}
-
 // ── 우편함과 출석(moai-h8tn) ────────────────────────────────────────
 
 /// 출석의 pid 로 쓸 산 프로세스 — 놓으면 죽는다. 시험 프로세스 자신을 쓰면 죽은 것을 못 재고, 남의 pid 를
