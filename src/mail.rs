@@ -1535,18 +1535,41 @@ pub fn alive(pid: u32, start: Option<u64>) -> Option<bool> {
     None
 }
 
-/// Claude Code 가 그 세션에 붙인 이름 — `~/.claude/sessions/<pid>.json` 의 `name` 이다. `ListAgents` 와
-/// `SendMessage` 가 쓰는 그 이름이라, 출석의 이름을 그것과 맞추면 감독이 같은 이름으로 깨운다
-/// (2026-10-04 사용자 결정). **비문서 파일이다** — 못 읽으면 `None` 이고 부르는 쪽이 세션 id 로 짓는다.
+/// Claude Code 가 그 세션에 붙인 이름을 출석의 이름으로 접은 것 — [`claude_session_title`] 을 [`name_from`] 으로 접는다.
+/// 출석의 이름을 그것과 맞추면 감독이 같은 이름으로 깨운다(2026-10-04 사용자 결정). 못 읽거나 이름으로 못 접으면 `None`
+/// 이고 부르는 쪽이 세션 id 로 짓는다.
+pub fn claude_session_name(pid: u32) -> Option<String> {
+    name_from(&claude_session_title(pid)?)
+}
+
+/// Claude Code 가 그 세션에 붙인 이름 그대로 — `~/.claude/sessions/<pid>.json` 의 `name` 이다. `ListAgents` 와
+/// `SendMessage` 가 쓰는 그 이름이다. **비문서 파일이다** — 못 읽으면 `None` 이다.
 ///
 /// **절대 경로만 본다**(리뷰 moai-h8tn.x4l) — 빈 `HOME` 은 빈 경로라 `.claude/sessions/…` 가 훅이 옮겨 간 자리, 곧
 /// 세션의 저장소에서 풀린다. 그 저장소가 심어 둔 파일 하나가 에이전트의 이름을 고르게 된다.
-pub fn claude_session_name(pid: u32) -> Option<String> {
+pub fn claude_session_title(pid: u32) -> Option<String> {
     let set = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let home =
         set("CLAUDE_CONFIG_DIR").or_else(|| set("HOME").map(|h| h.join(".claude"))).filter(|d| d.is_absolute())?;
     let v: serde_json::Value = read_json(&home.join("sessions").join(format!("{pid}.json"))).ok()??;
-    name_from(v.get("name")?.as_str()?)
+    Some(v.get("name")?.as_str()?.to_string())
+}
+
+/// `SendMessage` 로 그 세션에 닿는 이름 — Claude Code 가 붙인 이름 그대로다(2026-10-06 사용자 결정, moai-keka.id8).
+/// **장에 적지 않고 깨울 때 읽는다** — 깨우기는 이 기계의 장에만 돌아([`wake`]) 그 pid 의 파일이 여기 있고, 사람이 세션
+/// 이름을 바꿔도 지금 이름이 나온다. 장의 이름과 같으면 `None` 이다 — 댈 것이 없다.
+///
+/// 출석의 이름은 그 이름과 갈릴 수 있다 — 남이 쥐면 토막이 붙고(`moa-issue-3-1a2b3c4d`), 이름에 못 쓰는 글자는 접힌다.
+/// 그 이름을 대던 판은 보낸 쪽이 Claude 가 모르는 이름으로 `SendMessage` 를 했다. 한 줄이 아니거나 길면 안 댄다 — 남의
+/// 파일의 글을 보낸 쪽 화면에 그대로 싣는다.
+fn send_message_name(p: &Presence) -> Option<String> {
+    if p.pid == 0 {
+        return None;
+    }
+    let raw = claude_session_title(p.pid)?;
+    let raw = raw.trim();
+    let fits = !raw.is_empty() && raw.chars().count() <= NAME_MAX && !raw.chars().any(char::is_control);
+    (fits && raw != p.name).then(|| raw.to_string())
 }
 
 // ── 깨우기 ────────────────────────────────────────────────────────────
@@ -1565,12 +1588,17 @@ pub struct Woke {
     /// 그래서 "턴이 끝나면 싣는다" 를 약속하지 않고 이 값을 댄다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
+    /// 보낸 쪽이 `SendMessage` 에 댈 이름(`why: ask_sender`) — Claude Code 가 그 세션을 부르는 이름이 `to` 와 다를 때만
+    /// 선다(moai-keka.id8, [`send_message_name`]). 없으면 `to` 다 — 같거나, 이 기계에서 Claude 의 장부를 못 읽었다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_message_to: Option<String>,
 }
 
 /// 깨운다 — **덤이다**(2026-10-04 사용자 결정 "깨우기를 덤으로 낮춘다"). 편지를 받는 기본 길은 일꾼의 기다림
 /// (`moai inbox --ack --wait`)과 훅이고, 깨우기는 그 둘 밖에서 노는 에이전트를 한 번 두드리는 것뿐이다.
 ///
-/// - **Claude** 는 이 CLI 가 못 깨운다 — 보낸 쪽이 `SendMessage` 로 깨우라고 댄다(`ask_sender`)
+/// - **Claude** 는 이 CLI 가 못 깨운다 — 보낸 쪽이 `SendMessage` 로 깨우라고 댄다(`ask_sender`). Claude 가 그 세션을
+///   부르는 이름이 장의 이름과 다르면 그 이름을 함께 댄다(`send_message_to`, moai-keka.id8)
 /// - **tmux 칸이 적힌 에이전트**는 그 칸에 [`WAKE_WORDS`] 를 친다 — 벤더를 안 가린다
 /// - **둘 다 아니면 아무것도 안 한다**(`no_way`) — tmux 를 안 쓰는 사람도 있다. 사람 화면은 이때 입을 다문다
 ///
@@ -1582,7 +1610,7 @@ pub struct Woke {
 /// 띄우는 프로세스는 입출력을 모두 닫는다 — 물려주면 훅처럼 stdout 을 받아 두는 쪽이 EOF 를 못 받는다
 /// (`skill::command` 의 "그 성질에 기대고 있다"). 10초 안에 안 끝나면 죽인다.
 pub fn wake(p: &Presence) -> Woke {
-    let woke = |via, done, why| Woke { to: p.name.clone(), via, done, why, since: None };
+    let woke = |via, done, why| Woke { to: p.name.clone(), via, done, why, since: None, send_message_to: None };
     if p.status == BUSY {
         return Woke { since: Some(p.since.clone()).filter(|s| !s.is_empty()), ..woke("none", false, Some("busy")) };
     }
@@ -1593,7 +1621,7 @@ pub fn wake(p: &Presence) -> Woke {
         return woke("none", false, Some("no_way"));
     }
     if p.vendor == "claude" {
-        return woke("send_message", false, Some("ask_sender"));
+        return Woke { send_message_to: send_message_name(p), ..woke("send_message", false, Some("ask_sender")) };
     }
     // **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `moai inbox --wait` 는 기다리는 동안 장을 `idle` 로
     // 적는다 — 감독이 일꾼을 찾는 표다. 그런데 그 기다림은 턴 **안의** 셸 명령이라, 그 칸에 `moai inbox`+Enter 를 치면

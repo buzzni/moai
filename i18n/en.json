@@ -1044,6 +1044,7 @@
   "mail.nobody_named": "No agent named {to} is registered here - the letter waits until one says hello (`moai agents` lists who is here)",
   "mail.wake_done": "Woke {to} ({via})",
   "mail.wake_send_message": "{to} is a Claude session - a command line cannot wake it. Send it `moai inbox` with SendMessage",
+  "mail.wake_send_message_to": "{to} is a Claude session - a command line cannot wake it. Send `moai inbox` with SendMessage to {name}, the name Claude Code knows it by",
   "mail.wake_busy": "{to} has been at work since {since} - the letter is loaded at its next turn end or prompt, or by `moai inbox`",
   "mail.wake_failed": "Could not wake {to} through {via} ({why}) - it reads the letter on its next turn",
   "mail.inbox_empty": "No letters for {me}",

@@ -1044,6 +1044,7 @@
   "mail.nobody_named": "{to} 라는 에이전트가 여기 없다 — 그 이름이 인사할 때까지 편지가 기다린다(`moai agents` 가 누가 있는지 댄다)",
   "mail.wake_done": "{to} 를 깨웠다({via})",
   "mail.wake_send_message": "{to} 는 Claude 세션이라 명령줄로는 못 깨운다. SendMessage 로 `moai inbox` 를 보낸다",
+  "mail.wake_send_message_to": "{to} 는 Claude 세션이라 명령줄로는 못 깨운다. SendMessage 로 `moai inbox` 를 {name} 에게 보낸다 — Claude Code 가 그 세션을 부르는 이름이다",
   "mail.wake_busy": "{to} 는 {since} 부터 일하는 중이다 — 편지는 다음 턴의 끝이나 프롬프트, `moai inbox` 가 싣는다",
   "mail.wake_failed": "{via} 로 {to} 를 못 깨웠다({why}) — 다음 턴에 편지를 읽는다",
   "mail.inbox_empty": "{me} 에게 온 편지가 없다",

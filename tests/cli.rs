@@ -23975,6 +23975,33 @@ fn waking_is_a_bonus_that_never_runs_an_agent() {
         wake("cl"),
         "\"wake\":{\"to\":\"cl\",\"via\":\"send_message\",\"done\":false,\"why\":\"ask_sender\"}}\n"
     );
+    // **Claude 가 그 세션을 부르는 이름이 장의 이름과 다르면 그 이름을 댄다**(2026-10-06 사용자 결정, moai-keka.id8) — 남이
+    // 쥐어 토막이 붙은 장이다. 장의 이름만 대던 판은 보낸 쪽이 Claude 가 모르는 이름으로 `SendMessage` 를 했다. 이름은
+    // 깨울 때 Claude 의 장부에서 읽는다 — 장에 안 적는다. 같으면 안 댄다.
+    let cfg = s.path().join("claude-cfg");
+    std::fs::create_dir_all(cfg.join("sessions")).unwrap();
+    let book = cfg.join("sessions").join(format!("{}.json", a.pid()));
+    let wake_with_book = |args: &[&str]| {
+        let out =
+            staged(args).current_dir(s.path()).env("PATH", &path).env("CLAUDE_CONFIG_DIR", &cfg).output().unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    std::fs::write(&book, "{\"name\":\"moa-issue-3\"}").unwrap();
+    let json = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
+    assert!(
+        json.ends_with("\"why\":\"ask_sender\",\"send_message_to\":\"moa-issue-3\"}}\n"),
+        "Claude 가 아는 이름을 안 댔다 — {json}"
+    );
+    let line = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake"]);
+    assert!(line.contains("moa-issue-3 에게"), "사람 화면이 Claude 가 아는 이름을 안 댔다 — {line}");
+    assert!(
+        !std::fs::read_to_string(s.path().join(".moai/agents/cl.json")).unwrap().contains("moa-issue-3"),
+        "Claude 의 이름을 장에 적었다"
+    );
+    std::fs::write(&book, "{\"name\":\"cl\"}").unwrap();
+    let same = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
+    assert!(!same.contains("send_message_to"), "장과 같은 이름을 따로 댔다 — {same}");
     // 일하는 중이면 언제부터인지를 함께 댄다(moai-u5wr.f29) — 끊긴 턴은 끝이 안 와 "턴이 끝나면" 이 거짓일 수 있다.
     assert_eq!(
         wake("busy1"),
