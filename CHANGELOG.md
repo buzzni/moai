@@ -60,12 +60,27 @@ does not tag — see `CONTRIBUTING.md`.
   the repository to your project list. A flag picks its row and locks it, and
   `--yes` asks nothing and plants the old way. It asks only where a person is
   watching — when stdin or stdout is not a terminal, or under `--json`, `init`
-  plants exactly the files it always did, so agents and scripts see no change
-  on disk; the `--json` line gains `tracking`, `guide`, `guide_file`, `skill`
+  uses the old defaults for choices not settled by flags or existing git rules
+  and guide files; the `--json` line gains `tracking`, `guide`, `guide_file`, `skill`
   and `project`. Running `init` again where `.moai` already stands never asks.
 - **The board the hook loads on a session's first prompt says where moai's
   usage lives when AGENTS.md carries no moai block** — one line naming the
   `moai` skill and `moai prime`. Checkouts with the block see no change.
+
+### Fixed
+
+- **Initialization preserves the tracking and guide choices already present in a
+  clone**, including global git excludes and installed moai hooks. Git failures
+  or probe timeouts refuse initialization before it writes; status reports the
+  unknown tracking state and retains dotfile symlink notices. A linked worktree
+  reads the guide from the main tracker, and a clone without the local tracker
+  uses the guide link's `init --print` fallback without a false hand-edit notice.
+- **The init chooser skips `TERM=dumb`, checks refusals before opening, and puts
+  the report at the chooser's origin.** All paths validate prefix, git, conflicting
+  flags, and AGENTS.md readability in the same order.
+- **Local tracking ignores both a `.moai` symlink and its target directory.**
+  An explicit `--driver` with excluded tracking is refused; JSON `gitignore`
+  reports writes to `.gitignore`, and `exclude` reports writes to `.git/info/exclude`.
 
 ## [0.7.0] - 2026-10-06
 
