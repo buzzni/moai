@@ -316,8 +316,20 @@ pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
 /// 남은 것은 **읽기는 관대하고 쓰기는 엄하다** 는 규약 그대로다 — 찾기는 안 막고, 못 쓰는
 /// 트래커는 쓰기가 제 자리에서 거절한다(파일 권한이 이미 그 문이다). 대신 어느 트래커를
 /// 잡았는지를 [`CLIMBED`] 가 한 줄로 비춘다.
+///
+/// **제 체크아웃 안에서 못 찾았고 딸린 워크트리면 주 체크아웃으로 건너간다**(moai-n22o) — 트래커를 git 밖에
+/// 둔 저장소에서 체크아웃 밖에 만든 워크트리는 위로 가도 주 체크아웃에 안 닿는다
+/// ([`crate::worktree::main_tracker_for`]). 건너간 것도 올라간 것처럼 한 줄로 비춘다 — 어느 트래커를 잡았는지가
+/// 보여야 한다. 체크아웃 안에 만든 워크트리는 위로 찾든 건너가든 같은 트래커에 닿는다.
 fn look(from: &Path) -> Option<PathBuf> {
-    let (root, climbed) = climb(from)?;
+    let found = climb(from);
+    let (root, climbed) = match found {
+        Some((root, false)) => (root, false),
+        _ => match crate::worktree::main_tracker_for(from) {
+            Some(main) => (main, true),
+            None => found?,
+        },
+    };
     // **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
     // 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
     // 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.

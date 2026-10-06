@@ -1456,6 +1456,31 @@ pub fn main_root(root: &Path) -> Option<PathBuf> {
     Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
 }
 
+/// 딸린 워크트리 안의 자리에서 **주 체크아웃의 트래커**를 찾는다 — 주 체크아웃의 같은 자리부터 그 꼭대기까지
+/// 거슬러 올라가 `.moai/config.toml` 이 선 첫 자리다(moai-n22o). 딸린 워크트리가 아니거나 못 찾으면 `None`.
+/// git 을 띄우지 않는다.
+///
+/// 트래커를 git 밖에 두면(`init --tracking exclude`) 워크트리에 `.moai` 가 안 따라온다. 체크아웃 **안에** 만든
+/// 워크트리(`.claude/worktrees/x`)는 위로 찾다 주 체크아웃에 닿지만, **밖에** 만든 것(`git worktree add ../side`)은
+/// 위로 아무리 가도 닿지 않는다 — 옆으로 건너가야 한다. 커밋된 트래커를 루트로 옮기는 [`tracker_root`] 와 같은
+/// 자(같은 나무의 같은 자리)로 건너간다.
+///
+/// **주 체크아웃의 꼭대기에서 멈춘다** — 그 위는 이 저장소가 아니다. 거기서 더 오르는 것은 원래의 찾기
+/// (`store::look`)가 한다.
+pub fn main_tracker_for(dir: &Path) -> Option<PathBuf> {
+    let mut at = main_root(dir)?;
+    let (_, common) = git_dirs(dir)?;
+    let main = common.parent()?.to_path_buf();
+    loop {
+        if at.join(".moai").join("config.toml").is_file() {
+            return Some(at);
+        }
+        if at == main || !at.pop() || !at.starts_with(&main) {
+            return None;
+        }
+    }
+}
+
 /// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.
 ///
 /// 프로젝트 층(`tui::layer`)이 줄마다 걸음마다 잰다(moai-al0x). 층은 자리 판정을 요약에 싣는데
