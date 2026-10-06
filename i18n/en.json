@@ -152,6 +152,7 @@
   "hook.handoff_hint": "if you will carry on",
   "hook.review_open": "Review issue {id} is still open. Attach what it produced and close it.",
   "hook.warnings_grew": "Warnings grew from {before} to {now}. Run `moai status` to see what grew.",
+  "hook.closing_more": "{n} more did not fit here. `moai prime` lists everything you are holding.",
   "refuse.link_needs_side": "Say `--blocks` or `--unblocks`.",
   "refuse.link_both_ways": "{id} cannot be blocked and unblocked at once",
   "refuse.defer_empty_why": "the reason is empty",

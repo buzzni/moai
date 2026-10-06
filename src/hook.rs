@@ -300,8 +300,9 @@ fn block(lines: &[String]) -> String {
 
 /// 이벤트 하나가 에이전트에게 글을 싣는 칸과 그 자리 — 말씨와 이벤트가 정한다([`Carry::of`]).
 ///
-/// **이 표 하나를 셋이 읽는다**(moai-dp35) — 편지가 드는 자리(`cmd::hook` 의 `deliver`), 훅의 답(`cmd::hook` 의
-/// `answer`), 심는 Codex 파일의 `additionalContextLimit`(`skill::codex_hooks`)이다. 셋이 따로 서던 판은 Codex 의 한
+/// **이 표 하나를 넷이 읽는다**(moai-dp35) — 편지가 드는 자리(`cmd::hook` 의 `deliver`), 훅의 답(`cmd::hook` 의
+/// `answer`), 심는 Codex 파일의 `additionalContextLimit`(`skill::codex_hooks`), 닫기 물음이 드는 자리(`cmd::hook` 의
+/// `closing_hold`, moai-084j)다. 셋이 따로 서던 판은 Codex 의 한
 /// 줄을 바꾸거나 새 이벤트에 편지를 실어도 컴파일이 되었다 — 그때 편지는 칸 하나(UTF-16 1만, 한국어 30KB 남짓)로 재어지고,
 /// Codex 는 기본 상한을 넘긴 가운데를 파일로 빼 읽음으로 옮긴 그 자리를 아무도 못 본다(moai-rxro 의 잃음, 리뷰
 /// moai-u5wr.6un 5번). 이제 칸이 없는 이벤트는 편지를 안 옮기고([`Carry::letters_room`] 이 `None`), 편지는 그 칸의
@@ -361,6 +362,15 @@ impl Carry {
         }
     }
 
+    /// 이 칸의 자리 — 칸이 없으면 `None` 이다. 편지([`Carry::letters_room`])와 닫기 물음(`cmd::hook` 의
+    /// `closing_hold`, moai-084j)이 이것으로 잰다.
+    pub fn room(self) -> Option<Room> {
+        match self {
+            Carry::Context(room) | Carry::Hold(room) => Some(room),
+            Carry::Nothing => None,
+        }
+    }
+
     /// 편지가 들 자리 — **칸이 없으면 `None` 이고, 그때 편지는 안 옮긴다.** 같은 칸에 `earlier`(보드, 접힌 뒤 싣는
     /// 줄)가 먼저 섰으면 그 글과 둘 사이의 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다). 붙드는 칸에는
     /// 먼저 선 글이 없다 — `Stop` 은 편지가 먼저다.
@@ -368,10 +378,7 @@ impl Carry {
     /// **먼저 선 답이 막으면 자리가 없다**(리뷰 moai-dp35.gag) — [`Decision::then`] 은 막는 답 뒤의 글을 묻지도 않고
     /// 버린다. 그 글의 길이만 빼고 자리를 내던 판은 편지를 읽음으로 옮긴 뒤 그 판정이 통째로 버리는 길을 열어 두었다.
     pub fn letters_room(self, earlier: &Decision) -> Option<Room> {
-        let room = match self {
-            Carry::Context(room) | Carry::Hold(room) => room,
-            Carry::Nothing => return None,
-        };
+        let room = self.room()?;
         let used = match earlier {
             Decision::Pass => 0,
             Decision::Context(s) => room.unit.of(s) + 2,
@@ -8399,6 +8406,10 @@ fn holding<'a>(issues: &'a [Issue], latest: &[Issue], cfg: &Config, away: &Away)
 ///
 /// `latest` 는 에픽이 닫히는지를 잴 줄이다([`shelving_closes`]) — 받는 쪽이 옆 워크트리까지 겹쳐
 /// 넘긴다. 겹칠 것이 없으면 `issues` 그대로다. 집은 줄이 **아직 집혀 있는지도** 거기서 되짚는다.
+///
+/// `room` 은 이 글이 들 자리다 — `Stop` 의 붙드는 칸이 낸다([`Carry::of`]). 넘치면 줄 하나의 묶음을 통째로
+/// 덜어 낸다([`fit`]).
+#[allow(clippy::too_many_arguments)] // 경고 수와 기준선은 한 값이 아니고, 말과 자리는 부르는 쪽마다 다르다
 pub fn closing(
     issues: &[Issue],
     latest: &[Issue],
@@ -8407,6 +8418,7 @@ pub fn closing(
     warnings: usize,
     before: Option<usize>,
     lang: Lang,
+    room: Room,
 ) -> Decision {
     let wip = holding(issues, latest, cfg, away);
     // **집은 것이 없으면 붙들 것은 늘어난 경고뿐이다** — 아래는 집은 줄과 그것에 매인 리뷰만 센다. `Stop` 은
@@ -8415,15 +8427,16 @@ pub fn closing(
     if wip.is_empty() {
         return grown(warnings, before, lang).map_or(Decision::Pass, Decision::Block);
     }
-    let mut lines = Vec::new();
+    // 집은 줄 하나와 리뷰 하나가 묶음 하나다 — 자리가 모자라면 묶음째 덜어 낸다([`fit`]).
+    let mut blocks = Vec::new();
     // 한 벌로 짓고 아래 `unit_of_in` 에 그대로 준다 — 곁에서 `unit_of` 를 부르던 판은 같은 지도를
     // 두 벌 지었다(리뷰 moai-c4nk.ssb).
     let ties = report::Ties::of(issues);
     let out_of_plan = report::put_off(issues);
     let closes = shelving_closes(latest, cfg, &wip);
     if !wip.is_empty() {
-        lines.push(say(lang, "hook.still_held").to_string());
         for i in &wip {
+            let mut lines = Vec::new();
             // **그 줄이 갈 수 있는 칸만 댄다.** 모두에게 `review|done` 을 일러 주던
             // 판은 이미 review 인 줄에 제자리걸음을 시켰고, `|` 는 그대로 치면 파이프다.
             let ahead: Vec<&str> =
@@ -8481,6 +8494,7 @@ pub fn closing(
                 crate::text::single_quoted(say(lang, "hook.defer_why"))
             ));
             lines.push(format!("  {}      {}", crate::guide::handoff(&i.id), say(lang, "hook.handoff_hint")));
+            blocks.push(lines.join("\n"));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
@@ -8503,15 +8517,48 @@ pub fn closing(
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
         let mine = in_unit(&unit, &ties, i);
         if mine && !wip.iter().any(|w| w.id == i.id) {
-            lines.push(format!(
+            blocks.push(format!(
                 "{}\n{}",
                 fill(say(lang, "hook.review_open"), &[("id", &i.id)]),
                 crate::guide::close_steps(&i.id, "moai")
             ));
         }
     }
-    lines.extend(grown(warnings, before, lang));
-    if lines.is_empty() { Decision::Pass } else { Decision::Block(lines.join("\n")) }
+    Decision::Block(fit(say(lang, "hook.still_held"), &blocks, grown(warnings, before, lang), room, lang))
+}
+
+/// 닫기 물음을 그 칸의 자리(`room`)에 맞춘다(moai-084j) — 머리 줄(`head`)과 늘어난 경고 줄(`foot`)은 늘 싣고, 집은
+/// 줄과 리뷰의 묶음(`blocks`)은 앞에서부터 **통째로** 드는 만큼 싣는다. 안 든 묶음은 끝의 한 줄이 그 수와
+/// `moai prime` 을 댄다.
+///
+/// 재지 않던 판은 Codex 의 붙드는 칸([`CODEX_HOLD`], 바이트 8천)을 집은 줄 열둘 남짓에서 넘겼다 — Codex 는 가운데를
+/// 파일로 빼고 머리·꼬리와 경로만 실어, `mv`·`defer` 줄이 바이트 자리에서 끊겼다. 편지와 달리 읽음으로 옮긴 것이 아니라
+/// 잃음은 없었지만, 칸의 자리를 아는 것은 훅이 싣는 칸의 표([`Carry::of`])인데 자르는 것은 에이전트였다. 묶음 하나는
+/// 줄 하나가 갈 길을 다 대는 단위라 가운데서 끊지 않는다(2026-10-06 사용자 결정).
+///
+/// 앞에서부터 드는 데까지다 — 묶음을 하나 더 실으면 글은 그 묶음만큼 늘고, 남은 수의 자릿수가 줄어 덜어지는 것은
+/// 많아야 몇 글자라 늘 그보다 작다. 머리·끝 줄·경고 줄만으로도 안 들면 그 셋만 싣는다 — 셋 다 짧아 실제로는 안 선다.
+fn fit(head: &str, blocks: &[String], foot: Option<String>, room: Room, lang: Lang) -> String {
+    let more = |n: usize| fill(say(lang, "hook.closing_more"), &[("n", &n.to_string())]);
+    // 줄 사이의 줄바꿈 하나는 어느 자로도 1 이다.
+    let mut used = room.unit.of(head) + foot.as_deref().map_or(0, |f| 1 + room.unit.of(f));
+    let mut kept = 0;
+    for b in blocks {
+        let rest = blocks.len() - kept - 1;
+        let next = used + 1 + room.unit.of(b);
+        if next + if rest == 0 { 0 } else { 1 + room.unit.of(&more(rest)) } > room.size {
+            break;
+        }
+        used = next;
+        kept += 1;
+    }
+    let left = blocks.len() - kept;
+    std::iter::once(head.to_string())
+        .chain(blocks[..kept].iter().cloned())
+        .chain((left > 0).then(|| more(left)))
+        .chain(foot)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// 세션을 여는 때보다 경고가 늘었으면 그 한 줄([`closing`]).
@@ -8720,7 +8767,7 @@ mod tests {
         warnings: usize,
         before: Option<usize>,
     ) -> Decision {
-        super::closing(issues, latest, cfg, away, warnings, before, Lang::Ko)
+        super::closing(issues, latest, cfg, away, warnings, before, Lang::Ko, Room::CONTEXT)
     }
 
     fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away) -> Decision {
@@ -9621,7 +9668,8 @@ mod tests {
                 panic!("집은 줄을 안 실었다");
             };
             assert!(said.contains("t-1"), "{lang:?}: 집은 줄을 잃었다 — {said}");
-            let Decision::Block(said) = super::closing(&all, &all, &cfg(), &here(), 0, None, lang) else {
+            let Decision::Block(said) = super::closing(&all, &all, &cfg(), &here(), 0, None, lang, Room::CONTEXT)
+            else {
                 panic!("안 붙들었다");
             };
             assert!(said.contains("moai defer t-1"), "{lang:?}: 미룸 줄을 잃었다 — {said}");
@@ -9629,7 +9677,16 @@ mod tests {
         // 영어로 부른 판에 한국어가 남으면 그 줄이 아직 글자로 박힌 것이다 — 거절문(guide)은 안 센다.
         // **재는 자는 화면 말을 재는 시험들이 함께 쓰는 하나다**([`super::hangul`]) — 음절만 보던 판은
         // 자모만 남은 줄을 못 봤다(리뷰 moai-8d49.ssb).
-        let english = |issues: &[Issue]| match super::closing(issues, issues, &cfg(), &here(), 3, Some(1), Lang::En) {
+        let english = |issues: &[Issue]| match super::closing(
+            issues,
+            issues,
+            &cfg(),
+            &here(),
+            3,
+            Some(1),
+            Lang::En,
+            Room::CONTEXT,
+        ) {
             Decision::Block(said) => said,
             other => panic!("안 붙들었다 — {other:?}"),
         };
@@ -12542,6 +12599,50 @@ mod tests {
         assert!(!why.contains('|'), "그대로 치면 파이프가 되는 줄을 일러 준다\n{why}");
         assert!(why.contains("moai defer t-1"), "{why}");
         assert!(why.contains(&crate::guide::handoff("t-1")), "이어받을 한 줄을 안 일러 준다\n{why}");
+    }
+
+    /// **닫기 물음은 그 칸의 자리 안에 선다**(moai-084j) — 넘치면 집은 줄과 리뷰의 묶음을 뒤에서부터 통째로 덜어 내고,
+    /// 끝의 한 줄이 덜어 낸 수와 `moai prime` 을 댄다. 머리 줄과 늘어난 경고 줄은 늘 남는다. 재지 않던 판은 Codex 의
+    /// 붙드는 칸(바이트 8천)을 넘겨 Codex 가 가운데를 파일로 빼, `mv`·`defer` 줄이 바이트 자리에서 끊겼다.
+    #[test]
+    fn closing_fits_its_room_a_whole_row_at_a_time() {
+        const ROWS: usize = 60;
+        let mut all = vec![epic("t-e")];
+        for n in 0..ROWS {
+            let mut i = under(&format!("t-{n:02}"), "in_progress", "t-e");
+            i.title = "닫기 물음이 칸을 넘는지 재는 긴 제목".repeat(3);
+            all.push(i);
+        }
+        all.push(review("t-r", "todo", Some("t-e")));
+        let ask = |room: Room| match super::closing(&all, &all, &cfg(), &here(), 5, Some(3), Lang::Ko, room) {
+            Decision::Block(said) => said,
+            other => panic!("안 붙들었다 — {other:?}"),
+        };
+        let whole = ask(Room { size: usize::MAX, unit: Unit::Utf8 });
+        assert!(!whole.contains("moai prime"), "드는 글을 덜어 냈다");
+        assert!(whole.encode_utf16().count() > CONTEXT_CAP, "시험의 글이 작다 — {} 단위", whole.encode_utf16().count());
+        let grew = grown(5, Some(3), Lang::Ko).unwrap();
+        for (room, size) in
+            [(CODEX_HOLD, str::len as fn(&str) -> usize), (Room::CONTEXT, |s: &str| s.encode_utf16().count())]
+        {
+            let said = ask(room);
+            assert!(size(&said) <= room.size, "{room:?} 를 넘겼다 — {}", size(&said));
+            assert!(said.starts_with(say(Lang::Ko, "hook.still_held")), "머리 줄이 빠졌다");
+            assert!(said.ends_with(&format!("\n{grew}")), "늘어난 경고 줄이 빠졌다");
+            // 실린 줄은 앞에서부터고, 실린 줄마다 묶음이 통째다 — 이어받을 줄이 묶음의 끝이다.
+            let kept = (0..ROWS).take_while(|n| said.contains(&format!("moai mv t-{n:02} review\n"))).count();
+            assert!(kept > 0 && kept < ROWS, "{room:?} 에 {kept} 줄 — 시험이 자르는 자리를 못 잰다");
+            assert!(!said.contains(&format!("t-{kept:02}")), "덜어 낸 줄이 남았다 — t-{kept:02}");
+            for n in 0..kept {
+                assert!(
+                    said.contains(&crate::guide::handoff(&format!("t-{n:02}"))),
+                    "t-{n:02} 의 묶음을 가운데서 끊었다"
+                );
+            }
+            assert!(!said.contains("t-r"), "덜어 낸 리뷰가 남았다");
+            let more = fill(say(Lang::Ko, "hook.closing_more"), &[("n", &(ROWS + 1 - kept).to_string())]);
+            assert!(said.contains(&format!("\n{more}\n{grew}")), "덜어 낸 수(리뷰까지)를 안 댔다\n{said}");
+        }
     }
 
     /// **이미 review 인 줄에 review 로 옮기라고 하지 않는다.** 집은 것은 첫 칸도

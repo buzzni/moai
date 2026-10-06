@@ -529,7 +529,7 @@ fn decide(
                     if input.stop_hook_active && !after_letters {
                         Decision::Pass
                     } else {
-                        closing_hold(input, &repo, &load.issues, &unreadable, ctx)
+                        closing_hold(input, &repo, &load.issues, &unreadable, ctx, carry)
                     }
                 }
             };
@@ -547,13 +547,18 @@ fn decide(
 }
 
 /// 턴 끝의 닫기 물음 — 세션에 한 번 붙든다(`once_per_session`). 편지가 붙든 턴은 그 뒤의 `Stop` 이 묻는다([`decide`]).
+///
+/// **글은 편지와 같은 칸의 자리로 잰다**(moai-084j) — `carry` 는 그 이벤트의 칸이다([`crate::hook::Carry::of`]). 칸이
+/// 없으면 묻지 않는다 — 실을 자리가 없는 글로 세션의 한 번을 쓰면 그 세션은 끝내 안 묻는다.
 fn closing_hold(
     input: &Input,
     repo: &Repo,
     issues: &[model::Issue],
     unreadable: &[report::Unreadable],
     ctx: &Ctx,
+    carry: crate::hook::Carry,
 ) -> Decision {
+    let Some(room) = carry.room() else { return Decision::Pass };
     once_per_session(input, repo, "stop", || {
         let now = model::now();
         let st = report::status(issues, unreadable, &repo.config, &now, ctx.zone());
@@ -572,6 +577,7 @@ fn closing_hold(
             warnings,
             baseline(input, repo),
             ctx.lang(),
+            room,
         )
     })
 }
