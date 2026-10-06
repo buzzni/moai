@@ -4738,3 +4738,64 @@
 {"ts":"2026-10-06T01:43:30Z","id":"moai-084j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2rby 에서 펼쳤다 — Codex 의 닫기 물음을 붙드는 칸의 자리로 잰다"}
 {"ts":"2026-10-06T01:43:30Z","id":"moai-2rby","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-084j 로 펼쳤다 (이슈 1건)"}
 {"ts":"2026-10-06T01:43:35Z","id":"moai-084j.033","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T01:44:51Z","id":"moai-084j.033","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람 결정(2026-10-06): 닫기 물음이 Stop 칸의 자리를 넘으면 통째 줄로 자른다 — 집은 줄 하나의 묶음(mv·defer·note 줄)을 앞에서부터 들어가는 만큼 싣고, 안 든 것은 끝의 한 줄로 수와 `moai prime` 을 댄다. 늘어난 경고 줄은 늘 남긴다. 세 에이전트 모두 훅이 싣는 칸의 표(Carry::of)의 자리로 잰다. 다른 길은 둘 — 넘치는 줄만 한 줄 꼴로(두 꼴이 섞인다), 고치지 않고 글로만(Codex 의 파일 빼기는 잃음이 없다)"}
+{"ts":"2026-10-06T01:50:12Z","id":"moai-keka.id8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-06): SendMessage 이름은 장에 새 필드로 적지 않고 깨울 때 읽는다 — wake 는 이 기계의 장에만 도니 그때 받는 쪽 pid 의 ~/.claude/sessions/<pid>.json name 을 날글 그대로 댄다. 장 꼴이 안 바뀌고 세션 이름을 바꿔도 지금 값이 나온다. 못 읽으면 지금처럼 장 이름이다"}
+{"ts":"2026-10-06T01:50:12Z","id":"moai-keka.fpm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자 결정(2026-10-06): 앞날로 적힌 닻은 지금과의 거리로 잰다 — quiet 는 seen·since 가운데 지금에 가장 가까운 것과의 |차|. 20분 안쪽으로 앞선 시계가 여유 폭이고, 그 넘게 앞서면 곧장 낡음, 하루 넘게 앞서면 곧장 걷힌다"}
+{"ts":"2026-10-06T02:03:48Z","id":"moai-ekz9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"닻이 앞날로 적힌 이 기계의 장은 due 가 안 서 다시 안 적힌다"}
+{"ts":"2026-10-06T02:05:03Z","id":"moai-084j.ghf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 닫기 물음을 붙드는 칸의 자리로 잰다 (moai-084j)"}
+{"ts":"2026-10-06T02:05:07Z","id":"moai-084j.033","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T02:05:07Z","id":"moai-084j.ghf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T02:05:25Z","id":"moai-keka.qxk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-keka 출석 이름 짓기 뒤끝 셋"}
+{"ts":"2026-10-06T02:05:31Z","id":"moai-keka.qxk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T02:05:31Z","id":"moai-keka.fpm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T02:05:31Z","id":"moai-keka.id8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T02:05:32Z","id":"moai-keka.q2w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T02:05:34Z","id":"moai-084j.ghf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 워크트리 .worktrees/moai-084j 에서 도는 중 — 돌아오면 고침을 커밋하고 7-1 부터 이어 간다"}
+{"ts":"2026-10-06T02:05:44Z","id":"moai-keka.qxk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review max --fix 가 뒤에서 돈다(@code-review). 돌아오면 원문 노트 → 다섯 자리 대조 → 고침 커밋 → 닫기"}
+{"ts":"2026-10-06T02:06:03Z","id":"moai-keka.fpm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 에픽 끝 리뷰 moai-keka.qxk 가 뒤에서 돈다 — 돌아오면 고침을 받고 develop 에 머지한 뒤 닫는다"}
+{"ts":"2026-10-06T02:06:04Z","id":"moai-keka.id8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 에픽 끝 리뷰 moai-keka.qxk 가 뒤에서 돈다 — 돌아오면 고침을 받고 develop 에 머지한 뒤 닫는다"}
+{"ts":"2026-10-06T02:06:06Z","id":"moai-keka.q2w","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 에픽 끝 리뷰 moai-keka.qxk 가 뒤에서 돈다 — 돌아오면 고침을 받고 develop 에 머지한 뒤 닫는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-17bp","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Fail 을 error·code 로 푸는 자리를 하나로 묶는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-1msg","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-wiki 발동어가 doc 주석 요청까지 잡는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-2k3k","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"edit -a <my name> lets an agent sidestep hook rule 5"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-5i1f","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"못 연 우편함 앞의 inbox 는 부분 답 대신 send 처럼 거절한다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-773e","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"심는 스킬의 백틱 밖 자리 표시가 GitHub 에서 HTML 로 사라진다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-77ab","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"agy 의 manage_task send_input 으로 친 글은 규칙이 못 본다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-81q5","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"project 범위 등록이 moai 가 거절한 설정 링크를 claude 손으로 고친다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-8iz2","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"감독이 남은 워크트리를 그 일꾼에게 잇지 못한다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-8ze4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 패치를 파일마다 판정하면 파일 수만큼 판정을 통째로 다시 돈다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-935n","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"ratatui 의 차이 셈이 새 펜 바탕의 고아 꼬리를 안 낸다 — 위에 알릴까"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-9pcu","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 상세에 이력 절을 둔다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-ctpj","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"밖 한눈 보기의 problems 가 사용자 설정 탈의 코드를 잃는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-fm87","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"규칙 2 의 SKIP 이 옆 워크트리를 디렉터리 이름으로 가른다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-gy1v","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"prime 이 못 읽는 줄과 옆 워크트리 탈을 stderr 로만 낸다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-i5lb","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"하위 트래커가 설정을 공유 파일로 이을 수 있게 할까"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-i98g","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"docs 에 위키 홈 페이지가 없다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-ktjz","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"출석 쓰기의 자가 세 벌이다 — inbox 와 훅의 attend, hello"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-lkij","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"merge-driver --as 도움말의 기본값이 코드와 어긋나고 이 저장소 말이 섞였다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-piak","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"브리프의 코드 칸과 5-1 의 비우기 조건을 한 자리로 모은다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-pody","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"ready 가 todo 줄 수에 비해 가파르게 느려진다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-pvrz","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"시간대를 바꿔 날짜 거름망이 다시 걸려도 굴린 목록·보드가 커서로 안 돌아온다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-q9q9","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 위키 창의 역링크도 덜 셌을 때 알린다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-rkss","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"보드가 키마다 펼친 트리 전체를 다시 짓는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-s0gc","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 장은 지은 이름을 20분 뒤 놓아 65초 안에 연 두 세션이 이름을 다툰다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-s0nj","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 의 집기를 develop 에서 커밋하는 까닭이 moai-y7go 뒤로 맞지 않는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-sjtw","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"루프에서 저널을 읽는 세 자리가 held 의 리스 기다림(46초)을 물려받는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-svwu","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"place_dir 과 skill 의 outside 가 끝 없는 링크를 달리 잰다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-wd0q","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 스킬이 옆 에픽이 바꾸는 중인 행동을 적는 길을 말하지 않는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-y8ec","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 앵커가 결합 부호·윗첨자 숫자에서 GitHub 과 갈린다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-yuy4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"5-1 이 Codex·Antigravity 입력 칸을 읽어 그 창도 비운다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-z45z","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 스킬의 Decided in 줄이 옛 행동을 적는 새 페이지에 무엇을 대는지 말하지 않는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-zso6","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"skill install 이 첫 트리 뒤의 I/O 실패에서 쓴 것의 보고를 잃는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-6k5v","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"좁힌 훑기를 갈무리하지 않아 판정마다 다시 훑는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-pq0v","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"옆을 뜨는 일이 그것을 안 쓰는 길에서도 돈다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-7cpd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Regression-of 표식을 세어 에픽 리뷰 규칙을 되돌릴지 정한다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-qrnl","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"말묶음 키가 있는지를 줄 단위 grep 대신 컴파일이 잡게 한다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g.793","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"우편함 도구 — send·inbox·agents"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g.8fo","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"트래커 읽기 도구 — status·ready·show"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g.g34","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"stdio JSON-RPC 루프와 initialize·tools/list·tools/call"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g.gb9","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"트래커 쓰기 도구 — add·mv·note 를 CLI 와 같은 길로"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g.aut","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"skill install 이 세 에이전트의 MCP 설정에 moai 를 등록한다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g.b11","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"도움말·docs/cli.md·CHANGELOG"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g.mtw","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"2026-07-28 판 MCP 도 받는다"}
+{"ts":"2026-10-06T02:32:31Z","id":"moai-0f4g","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"moai mcp — 손으로 짠 stdio MCP 서버"}
