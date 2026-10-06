@@ -194,8 +194,14 @@ pub(crate) fn read(p: &Path) -> Result<Vec<u8>, Fell> {
 /// UTF-8 이 아니면 `fs::read_to_string` 과 같은 io 실패다(`InvalidData`, 같은 말) — 그 자리를 이것으로 바꿔도
 /// 사람이 보는 말이 안 바뀐다.
 pub(crate) fn read_inside(p: &Path, home: &Home) -> Result<String, Fell> {
+    utf8(read_bytes_inside(p, home)?).map_err(Fell::Io)
+}
+
+/// [`read_inside`] 의 바이트 판 — 같은 자리를 같은 자로 재고 읽되 글로 풀지 않는다. 아카이브의 id 를 예약하는 훑기가
+/// UTF-8 이 아닌 파일에서도 그 안의 id(ASCII)를 건지려고 쓴다(moai-bth3 리뷰).
+pub(crate) fn read_bytes_inside(p: &Path, home: &Home) -> Result<Vec<u8>, Fell> {
     let real = place(p, home).map_err(Fell::Unheld)?;
-    utf8(read(&real)?).map_err(Fell::Io)
+    read(&real)
 }
 
 /// 읽은 바이트를 글로 — UTF-8 이 아니면 `fs::read_to_string` 과 같은 io 실패다(`InvalidData`, 같은 말).

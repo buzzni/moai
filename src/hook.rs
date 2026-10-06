@@ -5778,8 +5778,9 @@ fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> 
 /// 이름으로 띄운 워크트리에서도 쥐었다(moai-m62u) — 그 세션의 초점이 비어 규칙 2 에 막혔다.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Away {
-    /// Root archive lookup is lazy and only used for missing pickup IDs.
-    pub archive_root: Option<PathBuf>,
+    /// 규칙 5 가 산 스냅샷에 없는 id 를 찾는 아카이브(moai-bth3) — **읽는 손은 `cmd/hook.rs` 가 건넨다**([`Archive`]).
+    /// 이 모듈은 저장소를 안 읽는다는 결정(모듈 머리) 그대로다. 집는 id 가 산 스냅샷에 없을 때만 부른다.
+    pub archive: Option<Archive>,
     /// 옆 워크트리들의 이름 후보(`worktree::away`) — 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에
     /// 든 줄을 가리킨다.
     pub names: BTreeSet<String>,
@@ -5801,6 +5802,21 @@ pub struct Away {
     /// **모르면 가르지 않는다**(`report::by_owner` 와 같은 약속). **푸는 것은 묻는 자리다**([`Person`]) —
     /// 줄의 담당을 실제로 가르는 규칙만 부른다.
     pub me: Person,
+}
+
+/// 아카이브를 찾는 손 — 그 트래커의 뿌리와, 뿌리를 받아 아카이브의 줄을 내는 함수. 함수는 `cmd/hook.rs` 가 대므로 이
+/// 모듈에는 파일을 여는 자리가 안 선다(`real_path` 하나라는 결정, 모듈 머리). 시험은 파일 없이 줄을 내는 함수를 댄다.
+#[derive(Debug, Clone)]
+pub struct Archive {
+    pub root: PathBuf,
+    pub read: fn(&Path) -> Vec<Issue>,
+}
+
+/// 같은 뿌리를 읽는 손은 같은 아카이브다 — 함수의 주소는 견줄 값이 아니다(코드 단위마다 갈린다).
+impl PartialEq for Archive {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
+    }
 }
 
 impl Away {
@@ -7892,20 +7908,14 @@ fn take_in(
             None => away.me.get().cloned(),
         };
         let Some(me) = me else { continue };
-        // Only a pickup aimed at a missing live ID needs archive I/O.
-        let archived = if ids.iter().any(|id| !issues.iter().any(|i| i.id == *id)) {
-            aim(k)
-                .and_then(Aimed::standing)
-                .or(away.archive_root.as_deref())
-                .and_then(|root| crate::archive::read(root).ok())
-        } else {
-            None
+        // **아카이브는 산 스냅샷에 없는 id 를 집을 때만 읽는다**(moai-bth3) — 되살리는 `mv` 도 집기라, 안 보면 남의 것이나
+        // 담당 없는 아카이브 줄이 묻지 않고 넘어간다. 읽는 손은 `cmd/hook.rs` 의 것이다([`Archive`]).
+        let archived: Vec<Issue> = match (ids.iter().any(|id| !issues.iter().any(|i| i.id == *id)), &away.archive) {
+            (true, Some(a)) => (a.read)(aim(k).and_then(Aimed::standing).unwrap_or(&a.root)),
+            _ => Vec::new(),
         };
         let Some((row, owner)) = ids.iter().find_map(|id| {
-            let row = issues
-                .iter()
-                .find(|i| i.id == *id)
-                .or_else(|| archived.as_ref()?.issues.iter().find(|i| i.id == *id))?;
+            let row = issues.iter().find(|i| i.id == *id).or_else(|| archived.iter().find(|i| i.id == *id))?;
             report::owner(&me, row).map(|o| (row, o))
         }) else {
             continue;

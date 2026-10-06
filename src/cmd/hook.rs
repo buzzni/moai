@@ -849,7 +849,7 @@ fn settle(
     let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
         Some((fresh, beside)) => (
             std::borrow::Cow::Owned(fresh),
-            crate::hook::Away { me: base.me.clone(), archive_root: base.archive_root.clone(), ..beside },
+            crate::hook::Away { me: base.me.clone(), archive: base.archive.clone(), ..beside },
         ),
         None => (std::borrow::Cow::Borrowed(issues), base),
     };
@@ -892,14 +892,20 @@ fn person_at(repo: &Repo, ctx: &Ctx) -> crate::hook::Person {
 /// **담당이 내가 아닌 줄도 뺀다**(moai-0zjo) — 사람은 늘 싣되 묻는 자리에서 푼다([`person_at`]). 집은 것이
 /// 없어도 싣는다 — 규칙 5 는 집은 것이 없는 세션의 첫 집기에서 가장 자주 선다.
 fn away_of(repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> crate::hook::Away {
+    // 규칙 5 가 아카이브의 줄을 찾는 손(moai-bth3) — 읽는 것은 여기(`cmd/`)고, `hook` 은 집는 id 가 산 스냅샷에 없을
+    // 때만 이 손을 부른다. 못 읽는 아카이브 파일은 건너뛴다(`archive::read` 가 너그럽다).
+    let archive = Some(crate::hook::Archive {
+        root: repo.root.clone(),
+        read: |root| crate::archive::read(root).map(|l| l.issues).unwrap_or_default(),
+    });
     if report::wip(issues, &repo.config).is_empty() {
-        return crate::hook::Away { me: me.clone(), archive_root: Some(repo.root.clone()), ..Default::default() };
+        return crate::hook::Away { me: me.clone(), archive, ..Default::default() };
     }
     // **제 이름은 세션이 선 체크아웃에서 읽는다 — 트래커의 자리가 아니다**(moai-y7go). 트래커를
     // 찾는 길이 딸린 워크트리를 루트로 옮기므로(`Repo::find_from`) `repo.root` 는 늘 루트다. 거기서
     // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
     // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
-    crate::hook::Away { me: me.clone(), archive_root: Some(repo.root.clone()), ..crate::worktree::away(repo.here()) }
+    crate::hook::Away { me: me.clone(), archive, ..crate::worktree::away(repo.here()) }
 }
 
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
@@ -1654,6 +1660,10 @@ fn session_file(input: &Input, repo: &Repo, what: &str) -> Option<std::path::Pat
     Some(std::env::temp_dir().join(format!("moai-hook-{safe}-{at:x}.{what}")))
 }
 
+/// 훅의 보드·`Stop`·기준선 — `moai status` 와 **같은 자**([`crate::cmd::status::archive_board`])로 짓는다(moai-bth3
+/// 리뷰). 따로 짓던 판은 아카이브 충돌(치명)과 옮길 수 있는 수를 빼먹어, `moai status` 가 1 로 끝나는데 세션의 보드는
+/// "드러난 문제 없다" 를 대고 `Stop` 은 그 충돌을 남긴 세션을 안 붙들었다. 훅은 루트의 스냅샷만 읽으므로 세는 줄이 곧
+/// 아카이브와 견줄 줄이다.
 fn archive_status(
     repo: &Repo,
     issues: &[model::Issue],
@@ -1661,12 +1671,7 @@ fn archive_status(
     now: &str,
     zone: &crate::tz::Zone,
 ) -> report::StatusReport {
-    let archived = crate::archive::read(&repo.root).unwrap_or_default();
-    let mut st = report::status_with_archive(issues, &archived.issues, unreadable, &repo.config, now, zone);
-    if !archived.errors.is_empty() {
-        st.notices.push(report::Warning::archive_unreadable(archived.errors.len()));
-    }
-    st
+    crate::cmd::status::archive_board(repo, issues, unreadable, (issues, unreadable), now, zone).0
 }
 
 #[cfg(test)]

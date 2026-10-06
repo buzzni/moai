@@ -393,44 +393,38 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
     if errors.is_empty() {
         return;
     }
-    let mut sources = std::collections::BTreeMap::<&std::path::Path, Vec<crate::store::LoadError>>::new();
-    for e in errors.iter().filter(|e| e.source.is_some()) {
-        sources.entry(e.source.as_deref().unwrap()).or_default().push(e.clone());
+    // **파일마다 제 머리 밑에 댄다**(moai-bth3) — 아카이브 파일의 줄을 산 파일의 머리 밑에 그 파일의 번호로 대면,
+    // `moai rm --line <n>` 이 산 파일의 엉뚱한 줄을 겨눈다. 자리(`source`)가 없는 것이 산 파일이고, 그 파일이 맨 뒤다.
+    let mut sources = std::collections::BTreeMap::<Option<&std::path::Path>, Vec<&crate::store::LoadError>>::new();
+    for e in errors {
+        sources.entry(e.source.as_deref()).or_default().push(e);
     }
-    for (source, errors) in sources {
-        tell(&fill(
-            say(lang, "warn.unreadable_file"),
-            &[("at", &source.display().to_string()), ("n", &errors.len().to_string())],
-        ));
+    let active = sources.remove(&None);
+    let groups = sources.into_iter().chain(active.map(|errors| (None, errors)));
+    for (source, errors) in groups {
+        // 자리도 파일 이름이라 남이 커밋한 글자다 — 제어문자를 걷는다(`text::one_line`).
+        let at = crate::text::one_line(&source.unwrap_or(path).display().to_string());
+        tell(&fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
         name_capped(lang, &errors, |e| {
+            // 파일째 못 읽은 것은 줄 번호가 없다(`line` 0) — 까닭 하나만 댄다.
             if e.line == 0 {
-                crate::text::one_line(&e.message)
-            } else {
-                fill(
-                    say(lang, "warn.unreadable_at"),
-                    &[("line", &e.line.to_string()), ("id", ""), ("why", &crate::text::one_line(&e.message))],
-                )
+                return crate::text::one_line(&e.message);
             }
+            // **그 줄이 쓰는 id 도 댄다**(리뷰 moai-mo9v.1ln) — 산 줄의 깨진 쌍둥이는 번호만으로는 어느 것인지
+            // 모르고, 보드의 `duplicate_id`·`archive_duplicate_id` 가 그 id 를 대며 이 화면으로 보낸다. 둘 다 파일에서
+            // 온 글이라 제어문자를 걷는다(`text::one_line`): 까닭(`why`)은 serde 가 모르는 값을 그대로 옮겨 적는다.
+            let id = e.id.as_deref().map(|id| format!(" ({})", crate::text::one_line(id))).unwrap_or_default();
+            let why = crate::text::one_line(&e.message);
+            fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("id", &id), ("why", &why)])
         });
+        // 번호를 대고 끝내면 사람은 그 번호로 편집기를 연다 — 도구 안의 길을 곁에 댄다(moai-mo9v.3yp). **둘
+        // 까닭이 없는 줄에만 댄다**(리뷰 moai-mo9v.1ln): 새 바이너리가 쓴 줄도 여기 서는데, 그 줄은 들고 가는
+        // 것이 설계다 — 글이 그 둘을 가른다. 이 자리는 줄의 뜻을 판단하지 않는다. **산 파일에만 댄다** — `rm --line`
+        // 은 아카이브 파일을 고치지 않는다.
+        if source.is_none() {
+            tell(say(lang, "warn.unreadable_rm"));
+        }
     }
-    let errors: Vec<_> = errors.iter().filter(|e| e.source.is_none()).cloned().collect();
-    if errors.is_empty() {
-        return;
-    }
-    let at = path.display().to_string();
-    tell(&fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
-    name_capped(lang, &errors, |e| {
-        // **그 줄이 쓰는 id 도 댄다**(리뷰 moai-mo9v.1ln) — 산 줄의 깨진 쌍둥이는 번호만으로는 어느 것인지
-        // 모르고, 보드의 `duplicate_id` 가 그 id 를 대며 이 화면으로 보낸다. 둘 다 파일에서 온 글이라
-        // 제어문자를 걷는다(`text::one_line`): 까닭(`why`)은 serde 가 모르는 값을 그대로 옮겨 적는다.
-        let id = e.id.as_deref().map(|id| format!(" ({})", crate::text::one_line(id))).unwrap_or_default();
-        let why = crate::text::one_line(&e.message);
-        fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("id", &id), ("why", &why)])
-    });
-    // 번호를 대고 끝내면 사람은 그 번호로 편집기를 연다 — 도구 안의 길을 곁에 댄다(moai-mo9v.3yp). **둘
-    // 까닭이 없는 줄에만 댄다**(리뷰 moai-mo9v.1ln): 새 바이너리가 쓴 줄도 여기 서는데, 그 줄은 들고 가는
-    // 것이 설계다 — 글이 그 둘을 가른다. 이 자리는 줄의 뜻을 판단하지 않는다.
-    tell(say(lang, "warn.unreadable_rm"));
 }
 
 /// 못 읽은 줄을 **다섯까지** 대고 나머지는 수로 접는다(`warn.unreadable_more`) — [`name_load_errors`] 와

@@ -3344,8 +3344,9 @@ pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
         Trouble::ArchiveCleanup { said } => {
             fill(say(lang, "store.archive_cleanup"), &[("said", &crate::text::one_line(said))])
         }
-        Trouble::ArchiveUnread { at, line, said } => {
-            format!("{}:{}: {}", crate::text::one_line(&at.display().to_string()), line, crate::text::one_line(said))
+        // 그 파일에 대해 낸 말에 자리가 이미 든다(`archive::reserve`) — 자리를 또 붙이지 않는다.
+        Trouble::ArchiveUnread { said } => {
+            fill(say(lang, "store.archive_unread"), &[("said", &crate::text::one_line(said))])
         }
         Trouble::Invalid { at, why } => invalid(lang, at, why),
         // **고치는 길은 "누군지 모른다" 와 한 벌이다** — 저널 파일 이름이 메일에서 오므로 모자란
