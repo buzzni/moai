@@ -25191,6 +25191,36 @@ fn a_session_resumed_on_another_machine_moves_its_card_here() {
     assert!(!table.contains("@box-b"), "이어 연 세션을 다른 기계의 것으로 보였다 — {table}");
 }
 
+/// **지은 이름 셋이 다 쥐였어도 훅은 그 세션에 장을 세운다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 이름은 앞 8자
+/// 토막 뒤에 수를 이어 찾는다. 장을 안 세우던 판은 그 세션의 `moai inbox`·`send` 가 누구인지 몰라(`no_actor`) 섰다.
+/// 다른 기계의 조용한 장이 지은 이름을 하루 쥐게 된 뒤로(moai-nas5) 그 판이 넓어졌다.
+#[test]
+#[cfg(target_os = "linux")]
+fn a_session_stands_a_card_when_every_made_name_is_held() {
+    let s = init("hook-made-name-full");
+    let agents = s.path().join(".moai/agents");
+    std::fs::create_dir_all(&agents).unwrap();
+    for name in ["claude-sessFUL1", "claude-sessFUL1-sessFUL1", "claude-sessFUL1-sessFUL1dddd"] {
+        std::fs::write(
+            agents.join(format!("{name}.json")),
+            format!(
+                "{{\"v\":1,\"name\":\"{name}\",\"vendor\":\"claude\",\"status\":\"idle\",\"since\":\"{NOW}\",\
+                 \"pid\":4194400,\"pid_start\":1,\"machine\":\"00000000-0000-0000-0000-000000000000/4026532999\",\
+                 \"host\":\"box-b\",\"session\":\"far-{name}\",\"seen\":\"{NOW}\"}}\n"
+            ),
+        )
+        .unwrap();
+    }
+    let ev = event(&s, "sessFUL1-dddd").replacen('{', "{\"source\":\"startup\",", 1);
+    hook_at_home(&s, s.path(), None, &[], "session-start", &ev);
+    let card = std::fs::read_to_string(agents.join("claude-sessFUL1-sessFUL1-2.json"));
+    assert!(
+        card.as_ref().is_ok_and(|c| c.contains("\"session\":\"sessFUL1-dddd\"")),
+        "장을 안 세웠다 — {:?}",
+        names_in(&agents)
+    );
+}
+
 /// **지은 이름은 다른 기계의 조용한 장이 하루 쥔다**(moai-nas5, 2026-10-05 사용자 결정) — Claude 의 장은 프롬프트 앞에서
 /// 쉬는 동안 닻을 안 적어 20분이면 떠난 것으로 읽히는데, Claude 의 세션 이름은 컨테이너마다 따로 세어 겹친다. 떠난 것으로
 /// 읽힌 이름을 내주던 판은 이 기계에서 같은 이름을 지은 새 세션이 저쪽 장을 덮고, 아직 산 저쪽 세션의 편지를 보낸 이에게

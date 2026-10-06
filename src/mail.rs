@@ -1275,6 +1275,11 @@ pub fn codex_name(all: &[Presence], session: &str) -> Option<String> {
 /// **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고 65초
 /// 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같아, 한 번만 가르던 판은 셋째가 둘째의 장을 덮었다. 토막을 이어도
 /// 남이 쥐었으면 세션 id 를 통째로 잇는다 — 세션마다 하나다. 토막은 상한에 안 잘리게 잇는다([`name_with`]).
+///
+/// **셋 다 쥐였어도 이름을 낸다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 앞 8자 토막 뒤에 `-2`, `-3`… 을 이어 빈
+/// 이름을 찾는다. `None` 을 내던 판은 훅이 그 세션에 장을 안 세워, 그 세션의 `moai inbox`·`send` 가 누구인지 몰라 섰다.
+/// 다른 기계의 조용한 장이 하루 쥐게 된 뒤로(moai-nas5) 그 판이 넓어졌다. 이어 보는 수는 출석부의 장 수보다 하나 많다 —
+/// 끝의 수가 다르면 이름이 다르니, 그 가운데 하나는 반드시 빈다. 이름이 못 되는 `base` 만 `None` 이다.
 pub fn made_name(all: &[Presence], base: String, session: &str) -> Option<String> {
     let held = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && p.holds_made_name());
     if !held(&base) {
@@ -1282,7 +1287,8 @@ pub fn made_name(all: &[Presence], base: String, session: &str) -> Option<String
     }
     let alnum = |n: usize| session.chars().filter(char::is_ascii_alphanumeric).take(n).collect::<String>();
     let (short, whole) = (alnum(8), alnum(usize::MAX));
-    [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| name_with(&base, tail)).find(|n| !held(n))
+    let counted = (2..=all.len() + 2).map(|n| format!("{short}-{n}"));
+    [short.clone(), whole].into_iter().chain(counted).filter_map(|tail| name_with(&base, &tail)).find(|n| !held(n))
 }
 
 /// 이 프로세스의 조상 가운데 출석부에 선 에이전트 — **"나는 누구인가" 의 답이다.** 에이전트가 띄운 셸에서
@@ -2402,6 +2408,29 @@ mod tests {
         assert!(!card(None, "2026-10-04T06:50:00Z").stale(now));
         assert!(card(None, "2026-10-04T06:30:00Z").stale(now));
         assert!(!card(None, "").stale(now), "모르는 것을 낡은 것으로 읽었다");
+    }
+
+    /// **지은 이름 셋이 다 쥐였어도 이름을 낸다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 앞 8자 토막 뒤에 수를 이어
+    /// 빈 이름을 찾는다. `None` 을 내던 판은 훅이 그 세션에 장을 안 세워, 그 세션의 `moai inbox`·`send` 가 누구인지 몰라
+    /// 섰다. 이어 보는 수는 출석부의 장 수보다 하나 많아 하나는 반드시 빈다.
+    #[test]
+    fn a_made_name_is_found_even_when_every_suffix_is_held() {
+        let now = crate::model::now();
+        let live = |name: &str| Presence { since: now.clone(), seen: Some(now.clone()), ..codex_card(name) };
+        let session = "01a107b4-6b9e-7c3d-8a21-5f0e9d4c3b2a";
+        let whole = "codex-01a107b46b9e7c3d8a215f0e9d4c3b2a";
+        let mut all = vec![live("codex"), live("codex-01a107b4"), live(whole)];
+        assert!(all.iter().all(Presence::holds_made_name), "시험의 장이 이름을 안 쥐었다");
+        assert_eq!(made_name(&all, "codex".into(), session).as_deref(), Some("codex-01a107b4-2"));
+        all.push(live("CODEX-01A107B4-2"));
+        assert_eq!(made_name(&all, "codex".into(), session).as_deref(), Some("codex-01a107b4-3"), "대소문자만 다른 장");
+        // 출석부가 그 이름들로 다 차도 하나는 빈다.
+        let full: Vec<Presence> = std::iter::once(live("codex"))
+            .chain([live("codex-01a107b4"), live(whole)])
+            .chain((2..=8).map(|n| live(&format!("codex-01a107b4-{n}"))))
+            .collect();
+        let got = made_name(&full, "codex".into(), session).expect("이름을 못 냈다");
+        assert!(!full.iter().any(|p| p.name.eq_ignore_ascii_case(&got)), "쥔 이름을 냈다 — {got}");
     }
 
     /// **다른 기계의 장은 pid 로 안 잰다**(moai-dhxm) — 같은 저장소를 컨테이너 여럿이 쓰면 장의 pid 는 그것을 적은
