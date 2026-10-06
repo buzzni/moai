@@ -1,0 +1,20 @@
+{
+  "artifactDirectoryPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "conversationId": "96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "modelName": "gemini-3.8-flash-high",
+  "stepIdx": 2,
+  "toolCall": {
+    "args": {
+      "CommandLine": "echo moai-hook-probe",
+      "Cwd": "/home/coder/workspace/moa-issue",
+      "WaitMsBeforeAsync": 5000,
+      "toolAction": "Running probe command",
+      "toolSummary": "Run probe command"
+    },
+    "name": "run_command"
+  },
+  "transcriptPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/home/coder/workspace/moa-issue"
+  ]
+}

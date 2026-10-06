@@ -181,12 +181,12 @@
 
     moai mv <id> in_progress --from todo          develop 에서 집는다
     git commit -m "chore(tracker): <id> 를 워크트리에서 집는다"
-    git worktree add -b worktree-moai-<id> .claude/worktrees/moai-<id> develop
+    git worktree add -b worktree-moai-<id> .worktrees/moai-<id> develop
     mkdir -p /tmp/cargo-target/moai-<id>          빌드 출력은 로컬 디스크로(아래)
-    ln -s /tmp/cargo-target/moai-<id> .claude/worktrees/moai-<id>/target
+    ln -s /tmp/cargo-target/moai-<id> .worktrees/moai-<id>/target
     (작업 · 커밋 · 필요하면 develop 을 받는다)
     git merge worktree-moai-<id>                  develop 에서, "merge: … (<id>)"
-    git worktree remove .claude/worktrees/moai-<id>
+    git worktree remove .worktrees/moai-<id>
     rm -rf /tmp/cargo-target/moai-<id>            링크만 지워지고 출력은 남으므로 따로 지운다
     moai mv <id> done                             "chore(tracker): <id> 를 develop 머지와 함께 닫는다"
 
@@ -205,6 +205,12 @@
   `origin/develop` 에서 뜨는데, 그쪽은 로컬보다 한참 낡았을 수 있다 (2026-09-14
   에 91커밋 뒤였다).
   `git worktree add` 로 만든 뒤 `EnterWorktree` 에 `path` 로 들어간다
+- **워크트리 자리는 `.worktrees/moai-<id>` 다**(2026-10-04 사용자 결정, `moai-5s9l`). 에이전트가 셋(Claude Code·
+  Codex·Antigravity)이 되어 Claude 의 자리 `.claude/worktrees/` 를 걷고 세 벤더가 함께 쓰는 자리로 옮겼다.
+  저장소 밖(`../`)이 아닌 까닭은 Codex 의 신뢰와 Antigravity 의 workspace 가 루트 경로 기준이라서다.
+  Claude Code 의 `EnterWorktree(path)` 는 루트에서 들어갈 때 이 자리를 받지만, 워크트리에서 다른 워크트리로
+  바로 옮기는 것은 `.claude/worktrees/` 밑만 받는다 — 그래서 늘 `ExitWorktree(keep)` 로 루트에 나왔다가
+  들어간다. 옛 자리에 선 워크트리는 그대로 돌고, `.gitignore` 의 옛 줄도 그것이 다 걷힐 때까지 둔다
 - **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
   GitHub 의 기본 가지 둘 다. 옛 `main` 주소는 GitHub 가 새 이름으로 이어 준다
 - 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다(3~7분)
@@ -312,7 +318,7 @@
 - **에픽 끝에 일꾼이 고친다**(브리프 7-4). 그 에픽이 사람의 쓰임(키·명령·플래그·파일·형식·절차)을
   바꿨으면 그것을 가르치는 페이지를 워크트리에서 `docs(wiki):` 로 커밋해 머지에 태운다 — 경로를 준
   `git commit` 은 새 파일을 말없이 빼니 `git add -- docs` 가 먼저 선다. 안 바뀌었으면
-  안 쓴다. 고친 페이지는 감독에게 보내는 보고(11)에 한 토막으로 선다
+  안 쓴다. 고친 페이지는 감독에게 보내는 보고(12)에 한 토막으로 선다
 - **사람이 `moai-wiki` 를 부르면 훑는다** — 지난 릴리스 뒤 닫힌 에픽과 에픽 밖 이슈를 돌고 고칠 목록을 한 번 보인다.
   지난 릴리스는 태그 날짜로 찾는다 — 태그는 `main` 의 머지 커밋에 서서 `develop` 의 `git describe` 에 안 닿는다.
   릴리스 앞에 한 번 부르는 것을 `CONTRIBUTING.md` 의 Releasing 이 권한다
@@ -436,7 +442,9 @@
 
 ## 막혔을 때
 
-추측해서 진행하지 않는다. 다음 형식으로 보고하고 멈춘다.
+추측해서 진행하지 않는다. 다음 형식으로 보고하고 멈춘다. 감독의 편지가 `Person: away` 를 이른
+일꾼만 예외다 — `moai-work` 스킬의 "When the person is away" 대로 권장안으로 정하고
+`Decided alone:` 노트를 남기며, 되돌릴 수 없는 것에서만 멈춘다(`moai-snyk`).
 
     <id> 진행 중 결정이 필요합니다.
     - 상황:

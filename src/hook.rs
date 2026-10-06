@@ -47,18 +47,30 @@ use std::path::{Path, PathBuf};
 /// 그 이벤트의 `hookSpecificOutput` 을 검증에서 거절했다 — 받는 이벤트 목록에
 /// `PreCompact` 가 없다. 훅은 돌았고 id 도 옳게 골랐지만 한 줄도 안 붙었고,
 /// stdout 만 보던 시험은 초록이었다.
+///
+/// **뒤의 셋은 `Stop` 없이 끝난 턴이다**(moai-u5wr.f29, 2026-10-04 사용자 결정) — 출석을 `idle` 로
+/// 적기만 하고 아무것도 안 싣는다. `busy` 는 `UserPromptSubmit` 이 적고 `Stop` 만 걷어서, 그 셋으로
+/// 끝난 장은 사람이 다시 칠 때까지 일하는 중으로 남았다. **Codex 의 `SessionEnd` 만은 그 장을 걷는다** —
+/// Codex 의 장은 프로세스를 몰라 `moai agents` 가 못 걷는다(`cmd::hook` 의 `rest`). 벤더의 이름을 그대로
+/// 쓴다 — 심은 설정을 읽는 사람이 어느 이벤트가 어느 것인지 맞춰 볼 수 있게.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Event {
     // **`hook --help` 의 이벤트 목록이 이 글을 옮겨 적는다**(moai-h0r2) — clap 이 붙이는 값 목록은
     // `-h` 에서 80칸을 넘어 숨겼다. `the_hook_help_lists_every_event` 가 둘을 견준다.
     /// Writes the baseline. Loads what is held after a compact
     SessionStart,
-    /// A person asked. Loads the board once per session
+    /// A person asked. Loads letters, and the board once
     UserPromptSubmit,
     /// Just before a tool call. The rules stand here
     PreToolUse,
-    /// The turn ends. Checks the state against reality
+    /// The turn ends. Loads letters, then checks the state
     Stop,
+    /// An API error ended a turn (Claude). Marks the agent idle
+    StopFailure,
+    /// A person broke off a turn (Codex). Marks the agent idle
+    Interrupt,
+    /// The session closes. Marks it idle; drops a Codex row
+    SessionEnd,
 }
 
 impl Event {
@@ -69,6 +81,9 @@ impl Event {
             Event::UserPromptSubmit => "UserPromptSubmit",
             Event::PreToolUse => "PreToolUse",
             Event::Stop => "Stop",
+            Event::StopFailure => "StopFailure",
+            Event::Interrupt => "Interrupt",
+            Event::SessionEnd => "SessionEnd",
         }
     }
 }
@@ -98,6 +113,25 @@ pub struct Input {
     /// 이미 한 번 붙들었다는 표. **이것을 안 보면 무한히 돈다.**
     #[serde(default)]
     pub stop_hook_active: bool,
+    /// 이 세션의 모델 — 출석에 적는다(moai-h8tn). 계약이 약속한 키가 아니라 글이든 객체든 받는다([`Input::model`]).
+    #[serde(default, rename = "model")]
+    pub model_raw: serde_json::Value,
+    /// 서브에이전트의 도구 부름이면 그 서브에이전트 — Claude Code 가 `PreToolUse`·`PostToolUse` 에만 싣는다
+    /// (code.claude.com/docs/en/hooks). 본 세션의 부름에는 없다([`guard_subagent_mail`], moai-ew4o.4fv).
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+impl Input {
+    /// 모델 이름 — 글이면 그대로, 객체면 `id`·`display_name` 차례다. 모르면 빈 글이다.
+    pub fn model(&self) -> String {
+        let v = &self.model_raw;
+        v.as_str()
+            .or_else(|| v.get("id").and_then(|x| x.as_str()))
+            .or_else(|| v.get("display_name").and_then(|x| x.as_str()))
+            .map(crate::text::one_line)
+            .unwrap_or_default()
+    }
 }
 
 /// 훅이 내는 답.
@@ -173,6 +207,358 @@ pub fn guided_board(lines: &[String], lang: Lang, unguided: bool) -> Decision {
 #[cfg(test)]
 pub fn board(lines: &[String], lang: Lang) -> Decision {
     guided_board(lines, lang, false)
+}
+
+/// Claude Code 가 훅의 글 한 칸(`additionalContext`, 평문 stdout)에 싣는 상한 — 1만 자다(리뷰 moai-h8tn.x4l,
+/// code.claude.com/docs/en/hooks "JSON output"). **넘으면 그 칸을 통째로 파일로 빼고** 그 자리에 경로와 앞 2천 자만
+/// 남기며, Claude 에게 그 파일을 읽으라고 하지 않는다. 편지는 싣는 순간 읽음이라(2026-10-04 사용자 결정) 칸을 넘긴
+/// 편지는 읽음으로 옮겨진 채 아무도 못 본다 — 같은 칸에 먼저 선 보드가 미리보기를 차지해 편지는 한 줄도 안 남는다.
+/// 48KB 바이트로 재던 판이 그 자리였다. 글자는 Claude Code 가 세는 대로 UTF-16 단위로 센다([`Unit::Utf16`]). `Stop`
+/// 의 붙드는 까닭(`reason`)은 문서가 상한을 대지 않지만 같은 자로 잰다 — Codex 의 그 자리만 따로다([`CODEX_HOLD`]).
+pub const CONTEXT_CAP: usize = 10_000;
+
+/// Codex 가 `Stop` 의 붙드는 까닭(`reason`)에 싣는 상한 — UTF-8 바이트로 8천이다(moai-rxro). Codex 는 그 글을 이어 가는
+/// 프롬프트로 싣고, 그 프롬프트는 기본 상한(2,500 토큰 언저리)을 그대로 쓴다 — `additionalContextLimit` 이 안 닿는다
+/// (Codex 훅 문서: "Tool feedback and continuation prompts keep the default limit"). 토큰은 UTF-8 네 바이트를 하나로
+/// 어림해(codex-rs 의 `approx_token_count`) 1만 바이트가 그 선이고, 넘으면 글을 `<tmp>/hook_outputs/…` 로 빼고 머리·꼬리와
+/// 경로만 싣는다 — 편지는 싣는 순간 읽음이라 가운데가 아무에게도 안 닿는다. [`CONTEXT_CAP`] 의 UTF-16 1만으로 재던 판은
+/// 한국어 편지 3,400 글자(10KB 남짓)에서 그 선을 넘겼다. 문서가 "언저리" 라 하고 이어 가는 프롬프트를 어떻게 감싸는지
+/// 대지 않아 다섯에 하나를 남긴다.
+pub const CODEX_HOLD: Room = Room { size: 8_000, unit: Unit::Utf8 };
+
+/// 편지에 남은 자리가 이보다 작으면 이번에는 안 싣는다 — 같은 칸에 먼저 선 글(보드)이 칸을 거의 다 썼다. 편지는
+/// 다음 훅을 기다린다(`Stop` 은 칸을 통째로 쓴다). UTF-16 단위로 적었다([`Unit::widest`]).
+const LETTERS_MIN: usize = 2_000;
+
+/// 머리 줄(받는 이름 64자까지)과 남은 수처럼 편지 밖의 글에 남겨 두는 몫 — 둘을 더해도 이 안에 든다(영어에 64자
+/// 이름이면 590자 남짓이다 — 남은 수가 다음 한 통의 id 를 대면서(moai-54yc.v70) 몫이 열몇 자만 남았다. 말마다
+/// `the_frame_around_letters_fits_its_share` 가 잰다). 넘으면 함께 고른 뒤의 편지를
+/// [`letters`] 가 잘라, 읽음으로 옮긴 그 끝이 아무에게도 안 닿는다. 자른 표는 여기 안 센다 — 그 표는 한 통만 고를
+/// 때만 서고, 그때는 [`letters`] 가 제 자리 안에서 잰다. 편지 글은 어림하지 않고 실릴 글 그대로 잰다([`letter_block`]).
+/// UTF-16 단위로 적었다([`Unit::widest`]).
+const LETTERS_FRAME: usize = 600;
+
+/// 글 한 칸을 세는 자 — 에이전트마다 다르다(moai-rxro).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unit {
+    /// UTF-16 단위 — Claude Code 가 칸의 글자를 세는 자다.
+    Utf16,
+    /// UTF-8 바이트 — Codex 가 토큰을 어림하는 자다(네 바이트가 한 토큰).
+    Utf8,
+}
+
+impl Unit {
+    /// `s` 의 길이를 이 자로.
+    fn of(self, s: &str) -> usize {
+        match self {
+            Unit::Utf16 => s.encode_utf16().count(),
+            Unit::Utf8 => s.len(),
+        }
+    }
+
+    /// 글자 하나의 길이를 이 자로.
+    fn of_char(self, c: char) -> usize {
+        match self {
+            Unit::Utf16 => c.len_utf16(),
+            Unit::Utf8 => c.len_utf8(),
+        }
+    }
+
+    /// UTF-16 단위로 적은 몫([`LETTERS_MIN`]·[`LETTERS_FRAME`])을 이 자로 — 가장 크게 잰다. UTF-16 한 단위는 UTF-8 로
+    /// 세 바이트까지다(한글 한 글자가 한 단위에 세 바이트다. 두 단위를 쓰는 글자는 네 바이트라 단위마다 둘이다).
+    /// 어림해 키우는 까닭은 [`deliverable`] 이 그 몫을 남겨 고른 편지를 [`letters`] 가 자르지 않게 하려는 것이다.
+    fn widest(self, utf16: usize) -> usize {
+        match self {
+            Unit::Utf16 => utf16,
+            Unit::Utf8 => utf16 * 3,
+        }
+    }
+}
+
+/// 편지가 들 자리 — 얼마나, 무엇으로 세어서인가([`Unit`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Room {
+    pub size: usize,
+    pub unit: Unit,
+}
+
+impl Room {
+    /// Claude Code 의 칸 하나([`CONTEXT_CAP`]).
+    pub const CONTEXT: Room = Room { size: CONTEXT_CAP, unit: Unit::Utf16 };
+}
+
+/// 편지 한 통이 실릴 글 — 앞의 빈 줄까지. [`deliverable`] 이 자리를 재는 글과 [`letters`] 가 싣는 글이 **이 하나**다.
+/// 제목·본문의 길이로 어림하던 판은 짧은 줄이 많은 편지(줄마다 네 칸을 들여 쓴다)를 작게 재어, 함께 고른 뒤의
+/// 편지가 읽음으로 옮겨진 채 자르는 자리 밖으로 밀려났다(리뷰 moai-h8tn.x4l).
+fn letter_block(lang: Lang, zone: &crate::tz::Zone, s: &crate::mail::Stored) -> String {
+    block(&crate::view::mail::letter(lang, zone, s))
+}
+
+/// [`letter_block`] 의 본문을 `to` 글자까지만 — 자르는 편지를 글자 자리에서 끊는다(moai-m81b). 자른 표가 대는 자리와
+/// `moai inbox <id> --from <n>` 이 잇는 자리가 같은 자([`crate::view::mail::Body`])로 서야 한다.
+fn block_to(
+    lang: Lang,
+    zone: &crate::tz::Zone,
+    s: &crate::mail::Stored,
+    body: &crate::view::mail::Body,
+    to: usize,
+) -> String {
+    block(&crate::view::mail::part(lang, zone, s, body, 0, to))
+}
+
+/// 그린 편지 한 통을 실을 글로 — 앞의 빈 줄과 색을 걷은 줄들. [`letter_block`] 과 [`block_to`] 가 **이 하나로** 싼다(리뷰
+/// moai-54yc.fay) — 고르는 쪽([`deliverable`])과 자를 편지를 찾는 쪽은 앞의 것으로 재고 자르는 자리는 뒤의 것으로 재니,
+/// 둘의 꼴이 갈리면 자른 자리가 어긋나고 자른 표가 `inbox` 가 거절하는 자리(본문의 끝)를 댈 수 있다.
+fn block(lines: &[String]) -> String {
+    format!("\n\n{}", crate::style::plain(&lines.join("\n")))
+}
+
+/// 이벤트 하나가 에이전트에게 글을 싣는 칸과 그 자리 — 말씨와 이벤트가 정한다([`Carry::of`]).
+///
+/// **이 표 하나를 넷이 읽는다**(moai-dp35) — 편지가 드는 자리(`cmd::hook` 의 `deliver`), 훅의 답(`cmd::hook` 의
+/// `answer`), 심는 Codex 파일의 `additionalContextLimit`(`skill::codex_hooks`), 닫기 물음이 드는 자리(`cmd::hook` 의
+/// `closing_hold`, moai-084j)다. 셋이 따로 서던 판은 Codex 의 한
+/// 줄을 바꾸거나 새 이벤트에 편지를 실어도 컴파일이 되었다 — 그때 편지는 칸 하나(UTF-16 1만, 한국어 30KB 남짓)로 재어지고,
+/// Codex 는 기본 상한을 넘긴 가운데를 파일로 빼 읽음으로 옮긴 그 자리를 아무도 못 본다(moai-rxro 의 잃음, 리뷰
+/// moai-u5wr.6un 5번). 이제 칸이 없는 이벤트는 편지를 안 옮기고([`Carry::letters_room`] 이 `None`), 편지는 그 칸의
+/// 종류로 싸며([`Carry::wrap`]), 답은 그 칸이 받는 글만 낸다([`Carry::admits`]). **종류도 이 표가 고른다**(리뷰
+/// moai-dp35.gag) — 부르는 쪽이 손으로 고르던 판은 칸이 있어 편지를 옮긴 뒤에 종류가 어긋나면 답이 그 글을 말없이 버려,
+/// 읽음으로 옮긴 편지가 아무에게도 안 닿았다.
+///
+/// 표가 맞는지는 표 밖에서 잰다 — Codex 가 맥락을 받는 이벤트는 Codex 의 `/hooks` 갈무리에 대 보고(`skill` 의
+/// `the_planted_codex_hooks_pass_codex_s_own_checks`), 붙드는 칸의 자는 에이전트마다 실은 편지로 잰다(`tests/cli.rs` 의
+/// `a_codex_stop_holds_letters_inside_codexs_limit`·`an_antigravity_stop_holds_whole_a_letter_codex_would_cut`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Carry {
+    /// 비추는 줄 — Claude·Codex 의 `additionalContext`, Antigravity 의 `ephemeralMessage`.
+    Context(Room),
+    /// 턴을 붙드는 까닭 — `Stop` 의 `reason`.
+    Hold(Room),
+    /// 글을 실을 칸이 없다 — 그 이벤트의 답은 글을 안 받는다. Codex 는 이벤트마다 받는 출력의 꼴이 정해져 있어
+    /// (`stop.command.output` 은 모르는 키를 안 받고, `interrupt.command.output` 은 `systemMessage` 하나다 — codex 0.160)
+    /// 그 밖의 글을 틀린 출력으로 읽는다(`hook returned invalid … hook JSON output`). `/hooks` 의 경고는 심은 파일의 키
+    /// (`additionalContextLimit`)를 두고 서는 것이라 이것과 다르다(리뷰 moai-dp35.gag).
+    Nothing,
+}
+
+impl Carry {
+    /// `dialect` 의 `event` 가 싣는 칸. **이벤트도 말씨도 다 적어 가른다** — 새 이벤트나 말씨를 더하면 컴파일러가 어느
+    /// 칸인지 묻는다.
+    ///
+    /// - **비추는 줄은 세 에이전트 모두 [`Room::CONTEXT`] 다.** Codex 는 심은 파일의 `additionalContextLimit` 이 그만큼을
+    ///   준다 — 그 값을 이 자리에서 읽는다(`skill::codex_hooks`). Codex 가 그 값을 받는 것은 추가 맥락을 낼 수 있는
+    ///   이벤트뿐이다(Codex 훅 문서: SessionStart·SubagentStart·PreToolUse·PostToolUse·UserPromptSubmit). Antigravity 의
+    ///   `ephemeralMessage` 는 칸을 거의 다 채운 편지를 통째로 실었다(아래 붙드는 칸과 같은 실측)
+    /// - **Antigravity 의 도구 부름 앞은 칸이 없다.** 그 답의 글 칸은 `reason` 뿐이고 그 칸은 `decision` 에 딸린다 —
+    ///   `deny` 로 실으면 막고 `allow` 로 실으면 허락한다(`cmd::hook` 의 `antigravity_answer`). 막는 답(`Deny`)은 글을
+    ///   싣는 칸이 아니라 이 표 밖이다
+    /// - **Codex 의 붙드는 칸은 [`CODEX_HOLD`] 다** — 그 글은 이어 가는 프롬프트라 기본 상한에 묶인다
+    /// - **Antigravity 의 붙드는 칸은 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 상한이 문서에 없어
+    ///   사람이 띄운 대화형 agy 창에 한국어 편지를 보내 쟀다. 칸을 거의 다 채운 글이 턴 머리의 `ephemeralMessage` 로도
+    ///   `Stop` 의 `decision: continue` 로도 자르지도 파일로 빼지도 않고 그대로 실렸다(가운데에 고루 박은 표지 스물이
+    ///   다 섰다). agy 1.2.16 은 영문이 섞인 편지 UTF-16 9,665·9,874 단위(UTF-8 21KB 남짓), agy 1.2.17 은 **한글로만
+    ///   채운** 편지 UTF-16 9,822·10,024 단위(UTF-8 28.2·28.4KB)다. 칸은 UTF-16 으로 세므로 바이트로 가장 큰 편지가 이
+    ///   꼴이다 — agy 의 선이 Codex 처럼 바이트로 서 있다면 여기서 드러났다(리뷰 moai-jzym.a9k). 그 위의 선은 안 쟀다
+    /// - **`Stop` 없이 끝난 턴의 셋은 칸이 없다** — 출석만 적는다(`cmd::hook` 의 `rest`). 실을 글이 없어서다 — 에이전트가
+    ///   그 출력을 안 읽어서가 아니다(리뷰 moai-dp35.gag). Antigravity 의 `StopFailure` 는 오류로 끝난 실행의 `Stop` 이라
+    ///   agy 가 그 답을 읽는다 — 붙들면 실패하는 백엔드에 편지를 도로 밀어 넣는다(`cmd::hook` 의 `from_antigravity`, 리뷰
+    ///   moai-u5wr.e74). Codex 의 `Interrupt` 도 `systemMessage` 하나는 읽는다
+    pub fn of(dialect: crate::cli::Dialect, event: Event) -> Carry {
+        use crate::cli::Dialect::{Antigravity, Claude, Codex};
+        match (event, dialect) {
+            (Event::SessionStart | Event::UserPromptSubmit, Claude | Codex | Antigravity) => {
+                Carry::Context(Room::CONTEXT)
+            }
+            (Event::PreToolUse, Claude | Codex) => Carry::Context(Room::CONTEXT),
+            (Event::PreToolUse, Antigravity) => Carry::Nothing,
+            (Event::Stop, Codex) => Carry::Hold(CODEX_HOLD),
+            (Event::Stop, Claude | Antigravity) => Carry::Hold(Room::CONTEXT),
+            (Event::StopFailure | Event::Interrupt | Event::SessionEnd, Claude | Codex | Antigravity) => Carry::Nothing,
+        }
+    }
+
+    /// 이 칸의 자리 — 칸이 없으면 `None` 이다. 편지([`Carry::letters_room`])가 이것으로 잰다. 닫기 물음(`cmd::hook` 의
+    /// `closing_hold`, moai-084j)은 붙드는 칸([`Carry::Hold`])의 자리만 쓴다 — 그 답은 다른 칸에 안 든다([`Carry::admits`]).
+    pub fn room(self) -> Option<Room> {
+        match self {
+            Carry::Context(room) | Carry::Hold(room) => Some(room),
+            Carry::Nothing => None,
+        }
+    }
+
+    /// 편지가 들 자리 — **칸이 없으면 `None` 이고, 그때 편지는 안 옮긴다.** 같은 칸에 `earlier`(보드, 접힌 뒤 싣는
+    /// 줄)가 먼저 섰으면 그 글과 둘 사이의 빈 줄을 뺀다([`Decision::then`] 이 두 글을 빈 줄로 잇는다). 붙드는 칸에는
+    /// 먼저 선 글이 없다 — `Stop` 은 편지가 먼저다.
+    ///
+    /// **먼저 선 답이 막으면 자리가 없다**(리뷰 moai-dp35.gag) — [`Decision::then`] 은 막는 답 뒤의 글을 묻지도 않고
+    /// 버린다. 그 글의 길이만 빼고 자리를 내던 판은 편지를 읽음으로 옮긴 뒤 그 판정이 통째로 버리는 길을 열어 두었다.
+    pub fn letters_room(self, earlier: &Decision) -> Option<Room> {
+        let room = self.room()?;
+        let used = match earlier {
+            Decision::Pass => 0,
+            Decision::Context(s) => room.unit.of(s) + 2,
+            Decision::Deny(_) | Decision::Block(_) => return None,
+        };
+        Some(Room { size: room.size.saturating_sub(used), ..room })
+    }
+
+    /// 실을 편지 글을 이 칸의 답으로 — 비추는 칸이면 `Context`, 붙드는 칸이면 `Block` 이다. **답의 종류를 부르는 쪽이
+    /// 안 고른다** — 칸이 있어 편지를 옮겼는데 종류가 어긋나면 [`Carry::admits`] 가 그 답을 걸러, 읽음으로 옮긴 편지가
+    /// 아무에게도 안 닿는다. 칸이 없으면 `Pass` 다 — 그 자리에서는 편지를 애초에 안 옮긴다([`Carry::letters_room`]).
+    pub fn wrap(self, text: String) -> Decision {
+        match self {
+            Carry::Context(_) => Decision::Context(text),
+            Carry::Hold(_) => Decision::Block(text),
+            Carry::Nothing => Decision::Pass,
+        }
+    }
+
+    /// 이 칸이 그 답을 싣는가 — 비추는 줄은 비추는 칸에만, 붙드는 까닭은 붙드는 칸에만 든다. 칸과 답을 다 적어 가른다 —
+    /// 칸의 종류가 늘면 컴파일러가 여기서도 묻는다(`_` 로 받으면 새 칸의 글이 말없이 버려진다).
+    ///
+    /// **막는 답(`Deny`)은 표 밖이다** — 글 칸이 아니라 도구 부름을 막는 답이라, 글 칸이 없는 agy 의 도구 부름 앞에서도
+    /// 선다(거르면 agy 에서 규칙 다섯이 통째로 지나간다). 그 꼴은 도구 부름 앞(`PreToolUse`)의 것이다 — 막는 판정은 그
+    /// 이벤트에서만 선다(`cmd::hook` 의 `judge`·`decide`). 다른 이벤트에서 막으려면 그 이벤트가 받는 꼴부터 정한다.
+    pub fn admits(self, decision: &Decision) -> bool {
+        match (decision, self) {
+            (Decision::Pass | Decision::Deny(_), _)
+            | (Decision::Context(_), Carry::Context(_))
+            | (Decision::Block(_), Carry::Hold(_)) => true,
+            (Decision::Context(_), Carry::Hold(_) | Carry::Nothing)
+            | (Decision::Block(_), Carry::Context(_) | Carry::Nothing) => false,
+        }
+    }
+}
+
+/// 이번에 실을 편지 — 그 자리(`letters` 안의 차례)와, 이 세션 앞으로 남아 다음에 실릴 편지의 자리다. 앞에서부터 `room` 에
+/// 드는 만큼이고 **적어도 하나**다 — 혼자 칸을 넘는 편지는 [`letters`] 가 잘라 싣는데, 그때는 그 한 통만 고른다
+/// (뒤의 편지를 읽음으로 옮겨 놓고 잘라 버리지 않는다). 자리가 [`LETTERS_MIN`] 보다 작으면 하나도 안 싣는다. 실을
+/// 것을 고르는 것이 훅의 판단이라 여기 둔다. 편지는 그 자리의 자([`Room::unit`])로 잰다.
+///
+/// **`any-idle-worker` 편지는 한 번에 한 통만 싣는다**(리뷰 moai-h8tn.x4l) — 놀고 있는 일꾼 하나하나가 가지라고 보낸
+/// 일감들을, 먼저 훅이 돈 세션 하나가 한 번에 다 쓸어 가면 그 받는 이 낱말이 거짓이 된다. 남은 그 편지는 다른
+/// 일꾼의 몫이라 "더 기다린다" 에 안 센다.
+///
+/// **남은 것은 수가 아니라 자리다**(moai-54yc.v70) — 남은 수의 줄이 다음 한 통을 id 로 댄다. 함을 통째로 읽는
+/// `inbox --ack` 를 대던 판은 쌓인 편지를 한 출력으로 내, Codex 가 긴 출력의 가운데를 빼면 읽음이 된 편지가 안 닿았다.
+pub fn deliverable(
+    letters: &[crate::mail::Stored],
+    room: Room,
+    lang: Lang,
+    zone: &crate::tz::Zone,
+) -> (Vec<usize>, Vec<usize>) {
+    let (mut picked, mut left) = (Vec::new(), Vec::new());
+    if room.size < room.unit.widest(LETTERS_MIN) {
+        return (picked, left);
+    }
+    let (mut used, mut open, mut full) = (room.unit.widest(LETTERS_FRAME), false, false);
+    for (k, s) in letters.iter().enumerate() {
+        let is_open = s.open();
+        if is_open && open {
+            continue;
+        }
+        let size = room.unit.of(&letter_block(lang, zone, s));
+        if full || (!picked.is_empty() && used + size > room.size) {
+            full = true;
+            if !is_open {
+                left.push(k);
+            }
+            continue;
+        }
+        used += size;
+        open |= is_open;
+        picked.push(k);
+    }
+    (picked, left)
+}
+
+/// 이 세션에 온 편지를 실을 글로(moai-h8tn). **실은 편지는 이미 읽음으로 옮겨졌다** — 싣는 것이 곧 읽음이다
+/// (2026-10-04 사용자 결정). 실은 것이 없으면 `None` 이다. `left` 는 자리에 걸려 이번에 못 실은 편지의 id 다 — 앞의
+/// 것부터이고, 남은 수의 줄이 그 첫 id 를 다음 한 통으로 댄다.
+///
+/// 부르는 쪽이 `UserPromptSubmit`·접힌 뒤 `SessionStart` 에서는 비추는 줄(`Context`)로, `Stop` 에서는 붙드는
+/// 까닭(`Block`)으로 싣는다 — **판정의 종류는 안 는다.** 편지 한 통은 `inbox` 와 같은 자(`view::mail`)로
+/// 그리고, 색은 걷는다(`board` 와 같은 까닭, `style::plain`).
+///
+/// **글은 `room` 을 그 자로 재어 안 넘는다**([`CONTEXT_CAP`]·[`CODEX_HOLD`]) — 넘치는 편지는 그 자리에서 자르고, 그
+/// 편지 하나를 다시 볼 길을 id 로 댄다(moai-54yc.v70). 함 전체를 내는 `inbox --all` 을 대던 판은 함이 크면 Codex 가 긴
+/// 출력의 가운데를 빼, 자른 편지의 나머지가 다시 안 닿았다. 머리 줄과 남은 수는 자르지 않는다.
+///
+/// **자른 표는 이어 볼 글자 자리도 댄다**(moai-m81b) — 편지를 통째로 내는 `inbox <id>` 를 대던 판은 그 출력도 에이전트의
+/// 상한에서 가운데가 빠졌다. 그래서 자르는 편지는 본문의 글자 자리에서 끊고([`block_to`]), 표가 그 자리를 `--from` 으로
+/// 댄다. 머리 줄조차 안 드는 드문 자리만 글 가운데서 자르고 처음부터(`--from 0`) 대게 한다.
+///
+/// **내미는 명령은 모두 `--as <나>` 를 단다**(리뷰 moai-ew4o.q9f) — 셸에서 제 장을 못 찾는 세션(`CODEX_THREAD_ID` 가
+/// 없는 Codex)이 맨 `moai inbox` 를 치면 누구인지 몰라 멈춘다. 머리 줄만 달고 남은 수·자른 자리의 줄은 안 달던 판은
+/// 한 덩이 안에서 두 길을 댔다.
+pub fn letters(
+    me: &str,
+    delivered: &[crate::mail::Stored],
+    left: &[String],
+    lang: Lang,
+    zone: &crate::tz::Zone,
+    room: Room,
+) -> Option<String> {
+    let first = delivered.first()?;
+    let head = fill(say(lang, "hook.letters"), &[("me", me), ("n", &delivered.len().to_string())]);
+    let tail = match left.first() {
+        Some(next) => format!(
+            "\n\n{}",
+            fill(say(lang, "hook.letters_left"), &[("n", &left.len().to_string()), ("next", next), ("me", me)])
+        ),
+        None => String::new(),
+    };
+    let blocks: Vec<String> = delivered.iter().map(|s| letter_block(lang, zone, s)).collect();
+    let body: String = blocks.concat();
+    let size = |s: &str| room.unit.of(s);
+    let fits = room.size.saturating_sub(size(&head) + size(&tail));
+    if size(&body) <= fits {
+        return Some(format!("{head}{body}{tail}"));
+    }
+    let cut = |id: &str, at: usize| {
+        let at = at.to_string();
+        format!("\n{}", fill(say(lang, "hook.letter_cut"), &[("id", id), ("at", &at), ("me", me)]))
+    };
+    // 자르는 자리가 든 편지 — 앞에서부터 그 자로 재어 처음 넘는 편지다. 고르는 쪽이 혼자 넘치는 편지는 혼자 고르니
+    // ([`deliverable`]) 대개 그 한 통이다. id 는 꼴이 하나라([`crate::mail::is_id`]) 어느 id 로 재도 자른 표의 길이가 같다.
+    // 자리는 실은 편지의 가장 긴 본문으로 잰다 — 어느 편지의 어느 자리를 대도 그 수보다 길지 않다. **날 본문의 글자
+    // 수로 넉넉히 잰다**(리뷰 moai-54yc.fay) — 걷은 글자 수([`crate::view::mail::Body::len`])보다 작지 않으니 표가 모자라지
+    // 않고, 편지마다 글자 표를 짓지 않는다. 넉넉한 만큼 자르는 자리가 한두 글자 앞에 설 뿐이다.
+    let widest = delivered.iter().map(|s| s.letter.body.chars().count()).fold(0, usize::max);
+    let keep = fits.saturating_sub(size(&cut(&first.id, widest)));
+    let mut used = 0;
+    let found = blocks.iter().position(|b| {
+        used += size(b);
+        used > keep
+    });
+    // 여기 오면 편지 글 전체가 `fits` 를 넘고 자는 더해 가며 재니(`Unit::of`) 넘는 편지는 반드시 있다. 훅은 편지를 이미
+    // 읽음으로 옮겼으니 멈추지(panic) 않고 시험에서만 잡는다(리뷰 moai-54yc.fay).
+    debug_assert!(found.is_some(), "편지 글이 칸을 넘는데 넘는 편지가 없다");
+    let at = found.unwrap_or(0);
+    let cut_in = &delivered[at];
+    // 앞의 편지는 다 든다 — 처음 넘는 편지가 이것이다. 그 편지만 본문의 글자 자리에서 끊고, 그 자리는 앞의 편지가 쓰고
+    // 남은 몫으로 잰다.
+    let before = blocks[..at].concat();
+    let spare = keep.saturating_sub(size(&before));
+    let whole = crate::view::mail::Body::of(cut_in);
+    let shown = |to: usize| size(&block_to(lang, zone, cut_in, &whole, to)) <= spare;
+    let (kept, from) = match whole.reach(0, shown) {
+        Some(to) => (format!("{before}{}", block_to(lang, zone, cut_in, &whole, to)), to),
+        None => (cut_to(&body, keep, room.unit).to_string(), 0),
+    };
+    Some(format!("{head}{kept}{}{tail}", cut(&cut_in.id, from)))
+}
+
+/// `s` 의 앞에서 그 자(`unit`)로 `max` 까지 — 글자 가운데서 안 자른다.
+fn cut_to(s: &str, max: usize, unit: Unit) -> &str {
+    let mut used = 0;
+    for (at, c) in s.char_indices() {
+        used += unit.of_char(c);
+        if used > max {
+            return &s[..at];
+        }
+    }
+    s
 }
 
 /// 접힌 뒤에도 잃으면 안 되는 것 — 지금 집고 있는 일.
@@ -6263,6 +6649,37 @@ pub fn guard_shell_in(
         .then(|| if calls_review(line) { guard_review(issues, cfg, away) } else { Decision::Pass })
 }
 
+/// **서브에이전트는 부모 세션의 이름으로 우편함을 안 만진다**(2026-10-04 사용자 결정, moai-ew4o.4fv). Claude Code 의
+/// 서브에이전트는 부모 세션과 한 `claude` 프로세스 밑에서 셸을 돌고 그 환경도 한 글자 안 다르다(2026-10-04 에 쟀다, 2.1.284 —
+/// `CLAUDE_CODE_CHILD_SESSION=1` 은 본 세션에도 선다). `moai` 는 조상의 출석으로 나를 찾으니, 서브에이전트의
+/// `moai inbox --ack`·`--wait` 는 부모의 편지를 읽음으로 옮기고(부모의 훅은 그 편지를 못 싣는다) `moai hello` 는 부모의 장의
+/// 이름과 역할을 바꾼다. CLI 는 둘을 못 가르고 훅의 입력에만 `agent_id` 가 선다 — 그래서 훅이 막는다(부르는 쪽이
+/// `agent_id` 를 본 뒤에만 부른다).
+///
+/// - **`--as` 를 준 부름은 지나간다** — 그 이름으로 일한다고 스스로 댄 것이다. `inbox` 앞에 댄 `MOAI_AGENT=…` 도
+///   그렇다(`who` 가 그 이름으로 돈다) — `hello` 앞의 것은 아니다: 그 이름으로 부모의 장을 옮긴다
+/// - **편지를 보기만 하는 `moai inbox` 와 `send`, 도움말은 지나간다** — 읽음으로 안 옮기고 장을 안 바꾼다
+/// - **자리를 안 가린다**(리뷰 moai-ew4o.q9f) — 부모의 이름으로 도는 것은 어느 트래커를 겨누든 같다. 자리를 모르는 토막을
+///   건너뛰는 [`moai_args`] 로 찾던 판은 `env -C <저장소> moai inbox --ack` 를 그대로 보냈다
+/// - **규칙 번호를 안 단다** — 다섯 규칙이 지키는 일과 사람의 자리가 아니라 우편함의 거절이다. Codex·Antigravity 는 그런
+///   입력이 없어 글로만 선다
+pub fn guard_subagent_mail(line: &Line<'_>) -> Decision {
+    for seg in line.used() {
+        let Some(args) = moai_flagged(&seg.words) else { continue };
+        let flags: Vec<&str> = flag_words(args).collect();
+        let has = |f: &str| flags.iter().any(|w| *w == f || w.strip_prefix(f).is_some_and(|v| v.starts_with('=')));
+        let acts = match positionals(args).first() {
+            Some(&"hello") => true,
+            Some(&"inbox") => (has("--ack") || has("--wait")) && env_prefix(seg, "MOAI_AGENT=").is_none(),
+            _ => false,
+        };
+        if acts && !has("--as") && !asks_help(args) {
+            return Decision::Deny(crate::guide::SUBAGENT_MAIL.to_string());
+        }
+    }
+    Decision::Pass
+}
+
 /// 규칙 4 — **사람의 tmux 서버를 죽이지 않는다**(moai-zis7, 사용자 결정).
 ///
 /// 세션이 tmux 안에서 돌면 `$TMUX` 가 서 있고, `-L`·`-S` 없는 tmux 는 `TMUX_TMPDIR` 를 무시하고
@@ -7519,11 +7936,17 @@ fn take_in(
 /// `--user` 다음으로 읽는 사람이다(`model::actor`). **빈 값은 없는 것이다** — `model::actor` 가 그렇게 읽는다.
 /// 명령 자리 앞에서만 찾는다: 뒤의 `MOAI_ACTOR=…` 는 `moai` 의 인자다.
 fn actor_prefix(seg: &Seg) -> Option<String> {
+    env_prefix(seg, "MOAI_ACTOR=")
+}
+
+/// 토막의 명령 자리 앞에 붙인 `<이름>=…` 의 값(`key` 는 `=` 까지다) — [`actor_prefix`] 와 [`guard_subagent_mail`] 의
+/// `MOAI_AGENT=…` 가 한 자로 읽는다. 빈 값은 없는 것이다.
+fn env_prefix(seg: &Seg, key: &str) -> Option<String> {
     let head = seg.words.len() - command_of(&seg.words).len();
     seg.words[..head]
         .iter()
         .rev()
-        .find_map(|w| w.strip_prefix("MOAI_ACTOR="))
+        .find_map(|w| w.strip_prefix(key))
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_string)
@@ -7998,6 +8421,9 @@ fn holding<'a>(issues: &'a [Issue], latest: &[Issue], cfg: &Config, away: &Away)
 ///
 /// `latest` 는 에픽이 닫히는지를 잴 줄이다([`shelving_closes`]) — 받는 쪽이 옆 워크트리까지 겹쳐
 /// 넘긴다. 겹칠 것이 없으면 `issues` 그대로다. 집은 줄이 **아직 집혀 있는지도** 거기서 되짚는다.
+///
+/// `room` 은 이 글이 들 자리다 — `Stop` 의 붙드는 칸이 낸다([`Carry::of`]). 넘치면 줄 하나의 묶음을 통째로
+/// 덜어 낸다([`fit`]).
 pub fn closing(
     issues: &[Issue],
     latest: &[Issue],
@@ -8006,6 +8432,7 @@ pub fn closing(
     warnings: usize,
     before: Option<usize>,
     lang: Lang,
+    room: Room,
 ) -> Decision {
     let wip = holding(issues, latest, cfg, away);
     // **집은 것이 없으면 붙들 것은 늘어난 경고뿐이다** — 아래는 집은 줄과 그것에 매인 리뷰만 센다. `Stop` 은
@@ -8014,15 +8441,17 @@ pub fn closing(
     if wip.is_empty() {
         return grown(warnings, before, lang).map_or(Decision::Pass, Decision::Block);
     }
-    let mut lines = Vec::new();
+    // 집은 줄 하나와 리뷰 하나가 묶음 하나다 — 자리가 모자라면 묶음째 덜어 낸다([`fit`]). 묶음마다 자리를 먼저 받는지를
+    // 함께 적는다 — 리뷰와, 미루면 에픽이 닫히는 줄이다.
+    let mut blocks = Vec::new();
     // 한 벌로 짓고 아래 `unit_of_in` 에 그대로 준다 — 곁에서 `unit_of` 를 부르던 판은 같은 지도를
     // 두 벌 지었다(리뷰 moai-c4nk.ssb).
     let ties = report::Ties::of(issues);
     let out_of_plan = report::put_off(issues);
     let closes = shelving_closes(latest, cfg, &wip);
     if !wip.is_empty() {
-        lines.push(say(lang, "hook.still_held").to_string());
         for i in &wip {
+            let mut lines = Vec::new();
             // **그 줄이 갈 수 있는 칸만 댄다.** 모두에게 `review|done` 을 일러 주던
             // 판은 이미 review 인 줄에 제자리걸음을 시켰고, `|` 는 그대로 치면 파이프다.
             let ahead: Vec<&str> =
@@ -8080,6 +8509,7 @@ pub fn closing(
                 crate::text::single_quoted(say(lang, "hook.defer_why"))
             ));
             lines.push(format!("  {}      {}", crate::guide::handoff(&i.id), say(lang, "hook.handoff_hint")));
+            blocks.push((shuts.is_some(), lines.join("\n")));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
@@ -8102,15 +8532,58 @@ pub fn closing(
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
         let mine = in_unit(&unit, &ties, i);
         if mine && !wip.iter().any(|w| w.id == i.id) {
-            lines.push(format!(
-                "{}\n{}",
-                fill(say(lang, "hook.review_open"), &[("id", &i.id)]),
-                crate::guide::close_steps(&i.id, "moai")
+            blocks.push((
+                true,
+                format!(
+                    "{}\n{}",
+                    fill(say(lang, "hook.review_open"), &[("id", &i.id)]),
+                    crate::guide::close_steps(&i.id, "moai")
+                ),
             ));
         }
     }
-    lines.extend(grown(warnings, before, lang));
-    if lines.is_empty() { Decision::Pass } else { Decision::Block(lines.join("\n")) }
+    Decision::Block(fit(say(lang, "hook.still_held"), &blocks, grown(warnings, before, lang), room, lang))
+}
+
+/// 닫기 물음을 그 칸의 자리(`room`)에 맞춘다(moai-084j) — 머리 줄(`head`)과 늘어난 경고 줄(`foot`)은 늘 싣고, 집은
+/// 줄과 리뷰의 묶음(`blocks`)은 **통째로** 드는 만큼 싣는다. 안 든 묶음은 그 뒤의 한 줄이 그 수와 `moai prime` 을
+/// 댄다. 묶음마다 붙은 표(`true`)는 자리를 먼저 받는다는 뜻이다.
+///
+/// 재지 않던 판은 Codex 의 붙드는 칸([`CODEX_HOLD`], 바이트 8천)을 집은 줄 열둘 남짓에서 넘겼다 — Codex 는 가운데를
+/// 파일로 빼고 머리·꼬리와 경로만 실어, `mv`·`defer` 줄이 바이트 자리에서 끊겼다. 편지와 달리 읽음으로 옮긴 것이 아니라
+/// 잃음은 없었지만, 칸의 자리를 아는 것은 훅이 싣는 칸의 표([`Carry::of`])인데 자르는 것은 에이전트였다. 묶음 하나는
+/// 줄 하나가 갈 길을 다 대는 단위라 가운데서 끊지 않는다(2026-10-06 사용자 결정).
+///
+/// **리뷰의 묶음이 자리를 먼저 받는다**(리뷰 moai-084j.ghf) — 덜어 낸 집은 줄은 `moai prime` 이 다시 보이지만, 집은 일에
+/// 매인 열린 리뷰는 집은 줄이 아니라 거기 안 선다. 리뷰를 맨 뒤에 두고 앞에서부터 담던 판은 넘치는 순간 리뷰부터 덜어,
+/// "낸 글을 붙이고 닫는다" 를 그 세션에서 아무도 다시 안 댔다 — 그 전에는 Codex 가 꼬리에 선 그 묶음을 그대로 실었다.
+/// **미루면 에픽이 닫히는 줄도 자리를 먼저 받는다**(리뷰 moai-084j.ghf 3번) — 그 묶음만 "목적을 접을 때만" 과 첫 칸으로
+/// 되돌리는 길을 댄다. `moai prime` 도 `moai defer` 도 그것을 안 대니, 덜어 내면 남은 수의 줄을 따라 `prime` 에서 그 줄을
+/// 찾은 에이전트가 머리 줄이 이른 대로 미뤄 에픽이 목적을 못 이룬 채 닫힌다(moai-l288 의 실패). 집은 줄은 남은 자리에
+/// 앞에서부터 든다. 이 세션이 집은 리뷰는 집은 줄이다 — `moai prime` 이 그 줄을 보인다. 싣는 차례는 그대로다 —
+/// 집은 줄, 리뷰, 남은 수, 경고 줄.
+///
+/// **재는 글과 싣는 글이 하나다**([`letter_block`] 과 같은 까닭, 리뷰 moai-084j.ghf) — 묶음 k 개를 실은 글을 지어 그대로
+/// 잰다. 줄과 줄바꿈의 길이를 따로 더하던 판은 글을 잇는 꼴이 바뀌면 두 셈을 함께 고쳐야 했다. 드는 데까지다 — 묶음
+/// 하나는 남은 수의 줄보다 길어(묶음은 줄이 둘 넘고 남은 수는 한 줄이다) 하나를 더 실은 글은 늘 더 길다. 머리·남은
+/// 수·경고 줄만으로도 안 들면 그 셋만 싣는다 — 셋 다 짧아 실제로는 안 선다.
+fn fit(head: &str, blocks: &[(bool, String)], foot: Option<String>, room: Room, lang: Lang) -> String {
+    let n = blocks.len();
+    // 자리를 받는 차례 — 먼저 받을 묶음이 앞이고, 그 안에서는 싣는 차례 그대로다(`sort_by_key` 는 섞지 않는다).
+    let mut turn: Vec<usize> = (0..n).collect();
+    turn.sort_by_key(|&i| !blocks[i].0);
+    let render = |k: usize| {
+        let mut kept = turn[..k].to_vec();
+        kept.sort_unstable();
+        let more = (k < n).then(|| fill(say(lang, "hook.closing_more"), &[("n", &(n - k).to_string())]));
+        std::iter::once(head)
+            .chain(kept.iter().map(|&i| blocks[i].1.as_str()))
+            .chain(more.as_deref())
+            .chain(foot.as_deref())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    (1..=n).map(&render).take_while(|t| room.unit.of(t) <= room.size).last().unwrap_or_else(|| render(0))
 }
 
 /// 세션을 여는 때보다 경고가 늘었으면 그 한 줄([`closing`]).
@@ -8165,9 +8638,21 @@ fn shelving_closes<'a>(
     aims.into_iter().filter(|(_, e)| after.get(&(crate::model::Kind::Epic, *e)) == Some(&crate::config::DONE)).collect()
 }
 
-/// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물.
+/// 세지 않는 자리. 저장소 밖, 트래커 자신, 도구 설정, 빌드 산출물, 그리고 옆 워크트리 —
+/// `.worktrees/` 는 세 벤더가 함께 쓰는 워크트리 자리다(moai-5s9l). 루트에서 보면 그 밑은 남의
+/// 체크아웃이라, 거기 고친 것은 그 워크트리의 일이지 루트의 일이 아니다.
 /// 여기를 고치는 것은 "일" 이 아니다 — 일을 하러 가는 길이다.
-const SKIP: &[&str] = &[".moai", ".claude", ".git", "target", "node_modules"];
+///
+/// **`.agents/` 는 `.claude/` 와 같은 자리다**(2026-10-05 사용자 결정, moai-54yc.cq2) — Codex 와 Antigravity 가 함께 읽는
+/// 스킬(`.agents/skills/`)과 Antigravity 의 도구 설정(`hooks.json`·`rules/`)이 서는 곳이다. 세던 판은 Claude 세션이
+/// `.claude/moai-plugin/skills/moai/SKILL.md` 를 고치면 지나가고 같은 글인 `.agents/skills/moai/SKILL.md` 를 고치면
+/// 막았다(리뷰 moai-xs2h.dir 7번). 그 자리의 `hooks.json`·`rules/` 를 고치는 일도 규칙 2 밖으로 나가는 것을
+/// 받아들였다 — `.claude/settings.json` 이 이미 그렇다. **`.codex/` 도 같은 자리다**(2026-10-05 사용자 결정, moai-kr16) —
+/// Codex 의 훅(`.codex/hooks.json`)과 설정(`config.toml`)이 서는 곳으로 `.agents/hooks.json` 과 같은 일을 한다. `.agents`
+/// 만 더한 판은 아무것도 안 쥔 채 `.codex/hooks.json` 을 고치면 막고 `.agents/hooks.json` 은 보냈다(리뷰 moai-54yc.vqe
+/// 10번). 규칙 2 의 글(`guide::rules`)이 `.git`·`node_modules` 밖의 이 목록을 댄다 — 한쪽만 고치면
+/// `rule_two_names_every_directory_it_skips` 가 붉어진다.
+const SKIP: &[&str] = &[".moai", ".claude", ".agents", ".codex", ".worktrees", ".git", "target", "node_modules"];
 
 /// 이 파일을 고치는 것이 일에 매여야 하는가 — **글자로 이미 푼 자리를 받는다**(moai-ln11).
 ///
@@ -8307,7 +8792,7 @@ mod tests {
         warnings: usize,
         before: Option<usize>,
     ) -> Decision {
-        super::closing(issues, latest, cfg, away, warnings, before, Lang::Ko)
+        super::closing(issues, latest, cfg, away, warnings, before, Lang::Ko, Room::CONTEXT)
     }
 
     fn carried(issues: &[Issue], latest: &[Issue], cfg: &Config, away: &Away) -> Decision {
@@ -9208,7 +9693,8 @@ mod tests {
                 panic!("집은 줄을 안 실었다");
             };
             assert!(said.contains("t-1"), "{lang:?}: 집은 줄을 잃었다 — {said}");
-            let Decision::Block(said) = super::closing(&all, &all, &cfg(), &here(), 0, None, lang) else {
+            let Decision::Block(said) = super::closing(&all, &all, &cfg(), &here(), 0, None, lang, Room::CONTEXT)
+            else {
                 panic!("안 붙들었다");
             };
             assert!(said.contains("moai defer t-1"), "{lang:?}: 미룸 줄을 잃었다 — {said}");
@@ -9216,7 +9702,16 @@ mod tests {
         // 영어로 부른 판에 한국어가 남으면 그 줄이 아직 글자로 박힌 것이다 — 거절문(guide)은 안 센다.
         // **재는 자는 화면 말을 재는 시험들이 함께 쓰는 하나다**([`super::hangul`]) — 음절만 보던 판은
         // 자모만 남은 줄을 못 봤다(리뷰 moai-8d49.ssb).
-        let english = |issues: &[Issue]| match super::closing(issues, issues, &cfg(), &here(), 3, Some(1), Lang::En) {
+        let english = |issues: &[Issue]| match super::closing(
+            issues,
+            issues,
+            &cfg(),
+            &here(),
+            3,
+            Some(1),
+            Lang::En,
+            Room::CONTEXT,
+        ) {
             Decision::Block(said) => said,
             other => panic!("안 붙들었다 — {other:?}"),
         };
@@ -11539,11 +12034,46 @@ mod tests {
         for free in [
             "/repo/.moai/config.toml",
             "/repo/.claude/settings.json",
+            // `.claude/` 와 같은 도구 설정 자리다(moai-54yc.cq2) — 같은 스킬 글이 한쪽에서만 막혔다.
+            "/repo/.agents/skills/moai/SKILL.md",
+            "/repo/.agents/hooks.json",
+            // Codex 의 훅 파일도 같은 일을 한다(moai-kr16) — `.agents/hooks.json` 만 지나던 판이 있었다.
+            "/repo/.codex/hooks.json",
             "/repo/target/debug/x",
             "/tmp/scratch/memo.md",
             "/other/repo/src/main.rs",
         ] {
             assert_eq!(guard_edit(&all, &cfg(), &here(), root, free), Decision::Pass, "{free}");
+        }
+    }
+
+    /// **규칙 2 의 글은 [`SKIP`] 을 그대로 댄다**(리뷰 moai-54yc.vqe) — 글은 손으로 적고 훅은 [`SKIP`] 으로 잰다. 한쪽만
+    /// 고치면 심은 AGENTS 블록과 두 스킬이 훅과 다른 규칙을 가르친다 — moai-54yc.cq2 가 `.agents/` 를 더할 때 손으로 맞춘
+    /// 자리다. `.git/` 과 `node_modules/` 는 글이 일부러 안 댄다(그 밑에서 일하는 사람이 없다).
+    #[test]
+    fn rule_two_names_every_directory_it_skips() {
+        let agents = crate::guide::agents();
+        let at = agents.find("What counts is work inside the repository").expect("규칙 2 의 글이 없다");
+        let list = &agents[at..at + agents[at..].find(" do not.").expect("규칙 2 의 목록이 안 끝난다")];
+        let named: Vec<&str> = list.split('`').skip(1).step_by(2).filter_map(|w| w.strip_suffix('/')).collect();
+        for dir in SKIP.iter().filter(|d| !matches!(**d, ".git" | "node_modules")) {
+            assert!(named.contains(dir), "규칙 2 의 글이 `{dir}/` 를 안 댄다 — {named:?}");
+        }
+        for dir in &named {
+            assert!(SKIP.contains(dir), "규칙 2 의 글이 세는 자리 `{dir}/` 를 안 센다고 한다");
+        }
+    }
+
+    /// **`skill install` 이 심는 자리는 규칙 2 가 안 센다**(리뷰 moai-54yc.fay) — [`SKIP`] 은 그 자리를 손으로 옮겨 적은
+    /// 목록이라, 심는 자리가 새로 서면 이 목록도 따라와야 한다. 이 에픽에서만 두 번 어긋났다 — `.agents/`(moai-54yc.cq2)와
+    /// `.codex/hooks.json`(moai-kr16)을 심어 놓고, 아무것도 안 쥔 세션이 그 파일을 고치면 막았다. 심는 자리를 더하면
+    /// 여기에도 적는다.
+    #[test]
+    fn rule_two_skips_every_place_skill_install_plants() {
+        use crate::skill::{AGENTS_DIR, AGENTS_HOOKS, CODEX_HOOKS, DIR};
+        for planted in [DIR, AGENTS_DIR, AGENTS_HOOKS, CODEX_HOOKS] {
+            let head = planted.split('/').next().unwrap_or_default();
+            assert!(SKIP.contains(&head), "`{planted}` 를 심는데 규칙 2 가 `{head}/` 의 편집을 센다");
         }
     }
 
@@ -12094,6 +12624,98 @@ mod tests {
         assert!(!why.contains('|'), "그대로 치면 파이프가 되는 줄을 일러 준다\n{why}");
         assert!(why.contains("moai defer t-1"), "{why}");
         assert!(why.contains(&crate::guide::handoff("t-1")), "이어받을 한 줄을 안 일러 준다\n{why}");
+    }
+
+    /// **닫기 물음은 그 칸의 자리 안에 선다**(moai-084j) — 넘치면 집은 줄의 묶음을 뒤에서부터 통째로 덜어 내고, 그 뒤의
+    /// 한 줄이 덜어 낸 수와 `moai prime` 을 댄다. 머리 줄과 늘어난 경고 줄은 늘 남는다. 재지 않던 판은 Codex 의
+    /// 붙드는 칸(바이트 8천)을 넘겨 Codex 가 가운데를 파일로 빼, `mv`·`defer` 줄이 바이트 자리에서 끊겼다.
+    ///
+    /// **집은 일에 매인 열린 리뷰와 미루면 에픽이 닫히는 줄은 자리를 먼저 받는다**(리뷰 moai-084j.ghf 1·3번) — `moai prime`
+    /// 은 집은 줄만 다시 보이고, 미루면 에픽이 닫힌다는 말은 그 묶음만 댄다. 앞에서부터 덜던 판은 넘치는 순간 "낸 글을
+    /// 붙이고 닫는다" 와 "목적을 접을 때만" 을 그 세션에서 잃었다.
+    #[test]
+    fn closing_fits_its_room_a_whole_row_at_a_time() {
+        const ROWS: usize = 60;
+        let mut all = vec![epic("t-e")];
+        for n in 0..ROWS {
+            let mut i = under(&format!("t-{n:02}"), "in_progress", "t-e");
+            i.title = "닫기 물음이 칸을 넘는지 재는 긴 제목".repeat(3);
+            all.push(i);
+        }
+        all.push(review("t-r", "todo", Some("t-e")));
+        // 끝난 멤버 곁에 이것만 남은 에픽 — 미루면 닫힌다. id 로는 맨 뒤라 앞에서부터 담으면 먼저 덜어진다.
+        all.extend([epic("t-z"), under("t-z1", "done", "t-z"), under("t-z2", "in_progress", "t-z")]);
+        let ask = |room: Room| match super::closing(&all, &all, &cfg(), &here(), 5, Some(3), Lang::Ko, room) {
+            Decision::Block(said) => said,
+            other => panic!("안 붙들었다 — {other:?}"),
+        };
+        let whole = ask(Room { size: usize::MAX, unit: Unit::Utf8 });
+        assert!(!whole.contains("moai prime"), "드는 글을 덜어 냈다");
+        assert!(whole.encode_utf16().count() > CONTEXT_CAP, "시험의 글이 작다 — {} 단위", whole.encode_utf16().count());
+        let grew = grown(5, Some(3), Lang::Ko).unwrap();
+        for (room, size) in
+            [(CODEX_HOLD, str::len as fn(&str) -> usize), (Room::CONTEXT, |s: &str| s.encode_utf16().count())]
+        {
+            let said = ask(room);
+            assert!(size(&said) <= room.size, "{room:?} 를 넘겼다 — {}", size(&said));
+            assert!(said.starts_with(say(Lang::Ko, "hook.still_held")), "머리 줄이 빠졌다");
+            assert!(said.ends_with(&format!("\n{grew}")), "늘어난 경고 줄이 빠졌다");
+            // 실린 줄은 앞에서부터고, 실린 줄마다 묶음이 통째다 — 이어받을 줄이 묶음의 끝이다.
+            let kept = (0..ROWS).take_while(|n| said.contains(&format!("moai mv t-{n:02} review\n"))).count();
+            assert!(kept > 0 && kept < ROWS, "{room:?} 에 {kept} 줄 — 시험이 자르는 자리를 못 잰다");
+            assert!(!said.contains(&format!("t-{kept:02}")), "덜어 낸 줄이 남았다 — t-{kept:02}");
+            for n in 0..kept {
+                assert!(
+                    said.contains(&crate::guide::handoff(&format!("t-{n:02}"))),
+                    "t-{n:02} 의 묶음을 가운데서 끊었다"
+                );
+            }
+            // 리뷰는 남고 싣는 자리는 집은 줄 뒤다. 덜어 낸 수는 집은 줄만이다 — `moai prime` 이 그것을 다 보인다.
+            let review = format!(
+                "{}\n{}",
+                fill(say(Lang::Ko, "hook.review_open"), &[("id", "t-r")]),
+                crate::guide::close_steps("t-r", "moai")
+            );
+            // 미루면 에픽이 닫히는 줄도 남는다 — 그 묶음만 "목적을 접을 때만" 을 댄다(리뷰 moai-084j.ghf 3번).
+            assert!(said.contains("t-z 의 목적을 접을 때만"), "{room:?}: 에픽을 닫는 줄을 덜었다");
+            assert!(said.contains(&crate::guide::handoff("t-z2")), "{room:?}: t-z2 의 묶음을 가운데서 끊었다");
+            let more = fill(say(Lang::Ko, "hook.closing_more"), &[("n", &(ROWS - kept).to_string())]);
+            assert!(
+                said.ends_with(&format!("\n{review}\n{more}\n{grew}")),
+                "리뷰를 덜었거나 덜어 낸 수가 틀렸다\n{said}"
+            );
+        }
+    }
+
+    /// **[`fit`] 은 그 칸의 자로 꼭 차게 싣는다**(리뷰 moai-084j.ghf) — 위 시험은 자리를 안 넘는지만 재, 바이트로 잰
+    /// 판이나 꼭 차는 글을 하나 덜 싣는 판(`>=`)도 지나갔다. 한글 묶음이라 UTF-8 바이트와 UTF-16 단위가 갈린다. 글이 꼭
+    /// 차는 자리에서는 그 글을, 한 자리 모자라면 묶음 하나를 덜고 그 수를 댄 글을 낸다. 리뷰와 미루면 에픽이 닫히는
+    /// 줄이 자리를 먼저 받는다.
+    #[test]
+    fn fit_fills_its_room_exactly_in_that_rooms_unit() {
+        let head = say(Lang::Ko, "hook.still_held");
+        let rows: Vec<String> =
+            (0..3).map(|n| format!("  moai mv t-{n} done     {}", "칸을 재는 한글 제목 ".repeat(8))).collect();
+        let review = format!("리뷰 이슈 t-r 가 아직 열려 있다. {}", "낸 글을 붙이고 닫는다 ".repeat(6));
+        let foot = grown(5, Some(3), Lang::Ko);
+        let grew = foot.clone().unwrap();
+        let more = |n: usize| fill(say(Lang::Ko, "hook.closing_more"), &[("n", &n.to_string())]);
+        let all = format!("{head}\n{}\n{review}\n{grew}", rows.join("\n"));
+        let two = format!("{head}\n{}\n{}\n{review}\n{}\n{grew}", rows[0], rows[1], more(1));
+        let alone = format!("{head}\n{review}\n{}\n{grew}", more(3));
+        // 셋째 줄은 미루면 에픽이 닫힌다 — 리뷰 다음으로 자리를 받고, 싣는 자리는 그대로 리뷰 앞이다.
+        let shuts = format!("{head}\n{}\n{review}\n{}\n{grew}", rows[2], more(2));
+        let blocks = |first: usize| -> Vec<(bool, String)> {
+            rows.iter().enumerate().map(|(n, r)| (n == first, r.clone())).chain([(true, review.clone())]).collect()
+        };
+        for unit in [Unit::Utf8, Unit::Utf16] {
+            let at = |size, first| fit(head, &blocks(first), foot.clone(), Room { size, unit }, Lang::Ko);
+            assert_eq!(at(unit.of(&all), 9), all, "{unit:?}: 꼭 차는 자리에서 묶음을 덜었다");
+            assert_eq!(at(unit.of(&all) - 1, 9), two, "{unit:?}: 한 자리 모자란 자리에 다 실었거나 둘을 덜었다");
+            assert_eq!(at(unit.of(&two), 9), two, "{unit:?}: 꼭 차는 자리에서 묶음을 덜었다");
+            assert_eq!(at(unit.of(&alone), 9), alone, "{unit:?}: 리뷰보다 집은 줄을 먼저 실었다");
+            assert_eq!(at(unit.of(&shuts), 2), shuts, "{unit:?}: 에픽을 닫는 줄보다 앞의 줄을 먼저 실었다");
+        }
     }
 
     /// **이미 review 인 줄에 review 로 옮기라고 하지 않는다.** 집은 것은 첫 칸도
@@ -14504,5 +15126,171 @@ mod tests {
         assert!(counted("src/main.rs"));
         assert!(!counted(".moai/issues.jsonl"));
         assert!(!counted("/elsewhere/_workspace/final.md"));
+    }
+
+    /// `to` 의 함에 든 편지 하나 — 보낸 이·때·제목(`s-<id>`)은 시험마다 같다. 편지 시험들이 함께 쓴다.
+    fn stored(id: &str, to: &str, body: String) -> crate::mail::Stored {
+        crate::mail::Stored {
+            id: id.into(),
+            mailbox: to.into(),
+            reader: None,
+            returned: false,
+            letter: crate::mail::Letter {
+                v: crate::mail::VERSION,
+                to: to.into(),
+                from: "boss".into(),
+                subject: format!("s-{id}"),
+                body,
+                sent_at: "2026-10-04T06:12:03Z".into(),
+                reply_to: None,
+                rest: Default::default(),
+            },
+        }
+    }
+
+    /// **훅이 싣는 편지는 Claude Code 의 칸(1만 자)을 안 넘는다**(리뷰 moai-h8tn.x4l) — 넘기면 칸이 통째로 파일로
+    /// 빠져 읽음으로 옮긴 편지를 아무도 못 본다. 혼자 넘는 편지는 잘라 싣고 다시 볼 길을 대며, 보드가 칸을 거의 다
+    /// 썼으면 이번에는 안 싣는다. `any-idle-worker` 일감은 한 번에 한 통이다.
+    #[test]
+    fn loaded_letters_fit_the_hook_field() {
+        use crate::mail::{ANY_IDLE_WORKER, Stored};
+        let utc = crate::tz::Zone::utc();
+        let pick = |all: &[Stored], room: Room| deliverable(all, room, Lang::En, &utc);
+        let big = stored("20261004-061203-00000001", "w1", "가".repeat(30_000));
+        let small = stored("20261004-061203-00000002", "w1", "x".into());
+        assert_eq!(pick(&[big.clone(), small.clone()], Room::CONTEXT), (vec![0], vec![1]));
+        // **실릴 글 그대로 잰다** — 줄마다 네 칸을 들여 쓰니, 짧은 줄 800개(8천 자)는 실릴 때 1만 자를 넘는다. 함께
+        // 고른 뒤의 편지는 읽음으로 옮겨진 채 자르는 자리 밖으로 밀려났었다.
+        let lines = stored("20261004-061203-00000003", "w1", "moai-abcd\n".repeat(800));
+        assert_eq!(pick(&[lines, small.clone()], Room::CONTEXT), (vec![0], vec![1]), "뒤의 편지를 잘릴 자리에 골랐다");
+        let next = [small.id.clone()];
+        let said = letters("w1", std::slice::from_ref(&big), &next, Lang::En, &utc, Room::CONTEXT).unwrap();
+        assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다 — {}", said.encode_utf16().count());
+        assert!(said.contains("s-20261004-061203-00000001"), "{said}");
+        // **남은 수는 다음 한 통을 id 로 댄다**(moai-54yc.v70) — 함을 통째로 읽는 `inbox --ack` 가 아니다.
+        let left = fill(say(Lang::En, "hook.letters_left"), &[("n", "1"), ("next", &small.id), ("me", "w1")]);
+        assert!(said.ends_with(&left), "남은 수를 잘랐다");
+        assert!(left.contains("moai inbox 20261004-061203-00000002 --ack --as w1"), "다음 한 통을 안 댔다 — {left}");
+        // **자른 표는 그 편지 하나를 id 로 댄다**(moai-54yc.v70) — 함 전체를 내는 `--all` 이 아니다. 남은 수 바로 앞에 선
+        // 그 표의 줄로 잰다. 머리 줄도 함 전체가 아니라 한 통을 다시 보는 길을 댄다. **이어 볼 자리는 실은 글자 수다**
+        // (moai-m81b) — 본문이 한 글자라 실린 글자를 세면 그 자리다.
+        let cut = said[..said.len() - left.len()].trim_end().lines().last().unwrap_or_default();
+        let at = said.matches('가').count();
+        let named = format!("moai inbox 20261004-061203-00000001 --from {at} --as w1");
+        assert!(at > 0 && cut.contains(&named), "자른 편지와 이어 볼 자리를 안 댔다 — {cut}");
+        assert!(!said.contains("--all"), "함 전체를 내는 길을 댔다 — {said}");
+        // 보드가 칸을 거의 다 쓰면 편지는 다음 훅을 기다린다 — 실을 자리가 없는데 읽음으로 옮기지 않는다. 자리는 턴
+        // 머리의 칸이 실제로 내는 것으로 잰다 — 손으로 지은 칸으로 재면 그 칸의 자리가 바뀌어도 여기는 모른다(리뷰
+        // moai-dp35.gag).
+        let board = Decision::Context("b".repeat(CONTEXT_CAP - 100));
+        let room = Carry::of(crate::cli::Dialect::Claude, Event::UserPromptSubmit).letters_room(&board).unwrap();
+        assert_eq!(pick(std::slice::from_ref(&small), room), (vec![], vec![]));
+        // 일감은 한 통씩 — 나머지는 다른 일꾼의 몫이라 남은 수에도 안 센다.
+        let open = |id: &str| stored(id, ANY_IDLE_WORKER, "job".into());
+        let all = [open("20261004-061203-0000000a"), open("20261004-061203-0000000b"), small.clone()];
+        assert_eq!(pick(&all, Room::CONTEXT), (vec![0, 2], vec![]));
+        // 넘쳐 남은 것도 열린 편지는 안 센다 — 다음 한 통으로 대는 것은 제 함의 편지다.
+        let all = [big.clone(), open("20261004-061203-0000000c"), small];
+        assert_eq!(pick(&all, Room::CONTEXT), (vec![0], vec![2]));
+    }
+
+    /// **자른 표는 자른 자리가 든 편지를 댄다**(moai-54yc.v70) — 고르는 쪽이 혼자 넘치는 편지만 자르게 하지만, 그 자가
+    /// 어긋나 여러 통 가운데서 잘려도 표가 앞의 편지를 대지 않는다. 앞의 편지는 다 실렸다.
+    #[test]
+    fn the_cut_names_the_letter_it_falls_in() {
+        let utc = crate::tz::Zone::utc();
+        let whole = stored("20261004-061203-00000001", "w1", "x".repeat(1_000));
+        let long = stored("20261004-061203-00000002", "w1", "=".repeat(20_000));
+        // 자르는 자리는 가운데 편지다 — 끝의 편지를 대는 판도 지나가지 않게(리뷰 moai-54yc.vqe).
+        let after = stored("20261004-061203-00000003", "w1", "z".into());
+        let said = letters("w1", &[whole, long, after], &[], Lang::En, &utc, Room::CONTEXT).unwrap();
+        assert!(said.encode_utf16().count() <= CONTEXT_CAP, "칸을 넘겼다");
+        assert!(said.contains(&"x".repeat(1_000)), "앞의 편지를 잘랐다");
+        let cut = said.trim_end().lines().last().unwrap_or_default();
+        // 이어 볼 자리는 그 편지에서 실린 글자 수다 — 앞의 편지의 글자를 더해 세면 `inbox --from` 이 그만큼 건너뛴다(moai-m81b).
+        let at = said.matches('=').count();
+        let named = format!("moai inbox 20261004-061203-00000002 --from {at} --as w1");
+        assert!(at > 0 && cut.contains(&named), "자른 편지와 그 안의 자리를 안 댔다 — {cut}");
+    }
+
+    /// **자른 표가 댄 자리에서 이어 보면 빠지는 글자도 겹치는 글자도 없다**(moai-m81b) — 자르는 쪽과 넘겨 보는 쪽이 같은
+    /// 자([`crate::view::mail::Body`])로 센다. 줄 사이에서 잘렸으면 그 줄바꿈은 실린 쪽의 것이다. 본문은 줄이 여럿이고
+    /// 한국어와 영어가 섞였으며, 걷히는 제어문자(`\r`·ESC)가 든다 — 자리를 날 본문으로 세면 그 수만큼 어긋난다. 두 자로 잰다.
+    #[test]
+    fn the_cut_and_the_page_meet_at_one_place() {
+        let utc = crate::tz::Zone::utc();
+        let body: String = (0..2_000).map(|k| format!("\u{1b}[31m{k:05} 가나다 abc\r\n")).collect();
+        let s = stored("20261004-061203-00000001", "w1", body.clone());
+        let shown = crate::text::sanitize(&body);
+        for room in [Room::CONTEXT, CODEX_HOLD] {
+            let said = letters("w1", std::slice::from_ref(&s), &[], Lang::En, &utc, room).unwrap();
+            let cut = said.trim_end().lines().last().unwrap_or_default();
+            let at: usize = cut.split("--from ").nth(1).and_then(|r| r.split(' ').next()).unwrap().parse().unwrap();
+            // 실린 본문 — 머리 줄 둘(보낸 이·제목) 뒤의 네 칸 들여 쓴 줄들이다.
+            let lines: Vec<&str> = said.lines().filter_map(|l| l.strip_prefix("    ")).collect();
+            let kept = lines.join("\n");
+            let rest = crate::view::mail::page(Lang::En, &utc, &s, "w1", at, usize::MAX);
+            let rest: Vec<&str> = rest.iter().filter_map(|l| l.strip_prefix("    ")).collect();
+            let joint = if shown.chars().nth(kept.chars().count()) == Some('\n') { "\n" } else { "" };
+            // 본문 끝의 줄바꿈 하나는 어느 쪽에도 안 보인다 — 줄로 그리는 꼴(`lines`)이 늘 그랬다.
+            let whole = shown.strip_suffix('\n').unwrap_or(&shown);
+            assert_eq!(format!("{kept}{joint}{}", rest.join("\n")), whole, "{room:?}: 이어 본 글이 본문과 다르다");
+            assert_eq!(at, kept.chars().count() + joint.len(), "{room:?}: 자리가 실린 글과 다르다");
+        }
+    }
+
+    /// **편지 밖의 글은 [`LETTERS_FRAME`] 안에 든다** — 머리 줄과 남은 수가 그 몫을 넘으면 [`deliverable`] 이 함께
+    /// 고른 뒤의 편지를 [`letters`] 가 잘라, 읽음으로 옮긴 편지의 끝이 아무에게도 안 닿는다. 영어에 64자 이름이면
+    /// 몫의 600자에 열네 자만 남아(586자 — 남은 수가 다음 한 통의 id 도 대서다, moai-54yc.v70), 말을 옮기거나 다듬으면
+    /// 넘기 쉽다. 이름은 가장 긴 64자, 수는 두 자리·세 자리로 잰다. 두 자로 잰다 — Codex 의 붙듦은 그 몫을 바이트로 키워
+    /// 쓴다([`Unit::widest`]).
+    #[test]
+    fn the_frame_around_letters_fits_its_share() {
+        let me = "w".repeat(64);
+        let utc = crate::tz::Zone::utc();
+        let many: Vec<_> = (0..12).map(|k| stored(&format!("20261005-041347-{k:08}"), &me, "x".into())).collect();
+        let left: Vec<String> = (100..1_099).map(|k| format!("20261005-041347-{k:08}")).collect();
+        for lang in Lang::ALL {
+            let said = letters(&me, &many, &left, lang, &utc, Room::CONTEXT).unwrap();
+            let blocks: String = many.iter().map(|s| letter_block(lang, &utc, s)).collect();
+            assert!(said.contains(&blocks), "{lang:?}: 작은 편지 열둘을 잘랐다");
+            for unit in [Unit::Utf16, Unit::Utf8] {
+                let frame = unit.of(&said) - unit.of(&blocks);
+                assert!(frame <= unit.widest(LETTERS_FRAME), "{lang:?}·{unit:?}: 편지 밖의 글 {frame} 이 몫을 넘는다");
+            }
+        }
+    }
+
+    /// **Codex 가 붙드는 턴의 편지는 바이트로 잰다**(moai-rxro) — Codex 는 `Stop` 의 `reason` 을 기본 상한(UTF-8 네
+    /// 바이트를 한 토큰으로 어림한 2,500 토큰 언저리)에 묶고, 넘으면 가운데를 파일로 뺀다. 칸 하나(UTF-16 1만)로 재면
+    /// 한국어 편지 3,400 글자(10KB 남짓)가 자르지 않고 지나가 그 선을 넘긴다. 영어 편지는 바이트가 곧 글자라 셋으로
+    /// 나눠 어림하지 않는다 — 그 자리에 드는 편지는 그대로 다 싣는다.
+    #[test]
+    fn a_codex_hold_measures_letters_in_bytes() {
+        let utc = crate::tz::Zone::utc();
+        let me = "codex-01a107b4";
+        let mk = |id: &str, body: String| stored(id, me, body);
+        let korean = mk("20261005-041347-00000001", "가".repeat(3_400));
+        let said = letters(me, std::slice::from_ref(&korean), &[], Lang::Ko, &utc, CODEX_HOLD).unwrap();
+        // 자른 표의 앞머리 — 이어 볼 자리(`--from`)는 실린 글자 수라 여기서는 안 견준다(moai-m81b).
+        let cut = |id: &str| format!("moai inbox {id} --from ");
+        assert!(said.len() <= CODEX_HOLD.size, "Codex 의 선을 넘겼다 — {} 바이트", said.len());
+        assert!(said.contains(&cut(&korean.id)), "자른 자리를 안 댔다");
+        // 칸 하나로 재면 같은 편지가 자르지 않고 지나간다 — 이 시험이 가르는 것이 그 차이다.
+        let whole = letters(me, std::slice::from_ref(&korean), &[], Lang::Ko, &utc, Room::CONTEXT).unwrap();
+        assert!(whole.len() > CODEX_HOLD.size && !whole.contains(&cut(&korean.id)), "시험의 편지가 작다");
+        // 영어 7천 자는 7천 바이트다 — UTF-16 셋에 하나로 어림하면 잘린다.
+        let english = mk("20261005-041347-00000002", "x".repeat(7_000));
+        let said = letters(me, std::slice::from_ref(&english), &[], Lang::En, &utc, CODEX_HOLD).unwrap();
+        assert!(said.len() <= CODEX_HOLD.size && !said.contains(&cut(&english.id)), "드는 편지를 잘랐다");
+        // 함께 고르는 것도 바이트로 잰다 — 둘째 편지는 다음 붙듦을 기다린다.
+        let both = [korean.clone(), mk("20261005-041347-00000003", "나".repeat(1_000))];
+        assert_eq!(
+            deliverable(&both, CODEX_HOLD, Lang::Ko, &utc),
+            (vec![0], vec![1]),
+            "넘치는 둘째 편지를 함께 골랐다"
+        );
+        let small = mk("20261005-041347-00000004", "짧다".into());
+        assert_eq!(deliverable(&[small.clone(), small], CODEX_HOLD, Lang::Ko, &utc), (vec![0, 1], vec![]));
     }
 }

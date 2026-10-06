@@ -18,6 +18,7 @@ mod i18n;
 mod id;
 mod init_choice;
 mod latest;
+mod mail;
 mod markdown;
 mod model;
 mod nav;

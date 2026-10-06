@@ -11,6 +11,7 @@
 //! 절반을 해 놓고 아무 말 없이 실패하는 것이 제일 나쁘다.
 
 use super::{Ctx, Fail, R};
+use crate::cli::{Agent, Scope};
 use crate::i18n::{fill, say};
 use crate::skill;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,13 @@ struct Place {
     /// PATH 에서 찾아지는 `moai` — 훅이 이름으로 적혔을 때 실제로 불리는 것.
     on_path: Option<PathBuf>,
     files: Vec<(PathBuf, String)>,
+    /// 심는 스킬의 글 — `files`(Claude 의 트리)와 [`skill::AGENTS_DIR`] 의 트리가 이 한 벌에서 나온다. 부르는 자리마다
+    /// [`skill::skills`] 를 다시 지으면 `guide` 의 글 넷을 명령 한 번에 몇 벌씩 짓는다.
+    skills: Vec<skill::Skill>,
+    /// 커밋된 매니페스트(`plugin.json`)를 읽었는가 — `status` 의 `written` 이다. 철자를 잇는 읽기([`kept`])와 같은
+    /// 읽기라, 심는 길([`write_committed`])이 거절하는 자리(체크아웃 밖을 가리키는 링크, 보통 파일이 아닌 것)를 심겼다고
+    /// 하지 않는다.
+    written: bool,
 }
 
 fn place(ctx: &Ctx) -> R<Place> {
@@ -40,13 +48,26 @@ fn place(ctx: &Ctx) -> R<Place> {
     // 글자로 견주면 자리로 견준 것이다. `skill` 은 글만 짓는 모듈이라 파일 시스템을 거기서 안 본다.
     let resolved = crate::path::real(&current);
     let on_path = which("moai");
-    let planted = std::fs::read_to_string(root.join(skill::DIR).join(".claude-plugin/plugin.json")).ok();
+    let dir = root.join(skill::DIR);
+    // 커밋된 매니페스트다([`read_committed`]) — 못 읽으면 처음 심는 것처럼 부른 철자다.
+    let planted = read_committed(&dir.join(".claude-plugin/plugin.json"), &root).ok();
     let spelling = kept(planted.as_deref(), &resolved).unwrap_or_else(|| invoked(current, &resolved));
     let exe = skill::exe_name(&spelling, &resolved, on_path.as_deref());
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
-    let files = plant(&prefix, &root, &exe);
-    Ok(Place { dir: root.join(skill::DIR), market: skill::market(&prefix, &root), root, prefix, exe, on_path, files })
+    let skills = skill::skills();
+    let files = plant(&prefix, &root, &exe, &skills);
+    Ok(Place {
+        dir,
+        market: skill::market(&prefix, &root),
+        written: planted.is_some(),
+        root,
+        prefix,
+        exe,
+        on_path,
+        files,
+        skills,
+    })
 }
 
 /// 이 체크아웃에 이미 심긴 훅의 철자 — **같은 파일이면 그것을 잇는다**(사용자 결정 2026-10-03, 리뷰
@@ -89,20 +110,266 @@ fn invoked(current: PathBuf, resolved: &Path) -> PathBuf {
 }
 
 /// 훅에 이 실행 파일을 적었을 때 심을 트리.
-fn plant(prefix: &str, root: &Path, exe: &str) -> Vec<(PathBuf, String)> {
-    skill::tree(
-        prefix,
-        root,
-        exe,
-        &crate::guide::skill(),
-        &crate::guide::reference(),
-        &crate::guide::supervise(),
-        &crate::guide::wiki(),
-    )
+fn plant(prefix: &str, root: &Path, exe: &str, skills: &[skill::Skill]) -> Vec<(PathBuf, String)> {
+    skill::tree(prefix, root, exe, skills)
 }
 
-pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, exe, files, .. } = place(ctx)?;
+/// 고른 에이전트를 심을 자리로 푼 것(moai-xs2h.ylx).
+struct Chosen {
+    /// Claude 의 플러그인을 심고 `claude` 에 등록하는가.
+    claude: bool,
+    /// [`skill::AGENTS_DIR`] 를 읽으려고 고른 에이전트 — 비면 그 자리를 안 심는다.
+    shared: Vec<&'static str>,
+    /// `auto` 가 PATH 에서 찾은 에이전트. `auto` 를 안 줬으면 `None` 이다.
+    found: Option<Vec<&'static str>>,
+}
+
+/// `auto` 가 PATH 에서 찾는 것 — 에이전트와 그 실행 파일(사용자 결정 2026-10-04). Antigravity 의 CLI 는 `agy` 다.
+/// 훅 한 줄과 `status` 가 이미 쓰는 [`which`] 로 묻는다 — 저장소의 표식(`.codex/` 등)은 새 저장소에 없어, 그것으로
+/// 고르면 Codex 를 쓰는 사람이 처음 부를 때 아무것도 못 받는다.
+const ON_PATH: [(Agent, &str); 3] = [(Agent::Claude, "claude"), (Agent::Codex, "codex"), (Agent::Antigravity, "agy")];
+
+impl Chosen {
+    /// **안 주면 `claude` 하나다**(사용자 결정 2026-10-04) — 지금 부르는 사람에게는 아무것도 안 바뀐다. `auto` 가
+    /// 아무것도 못 찾아도 `claude` 다. 되풀이한 값은 하나로 접힌다.
+    fn of(agents: &[Agent]) -> Chosen {
+        let found: Option<Vec<Agent>> = agents
+            .contains(&Agent::Auto)
+            .then(|| ON_PATH.iter().filter(|(_, bin)| which(bin).is_some()).map(|(a, _)| *a).collect());
+        let mut picked: Vec<Agent> = agents.iter().copied().filter(|a| *a != Agent::Auto).collect();
+        picked.extend(found.iter().flatten());
+        if picked.is_empty() {
+            picked.push(Agent::Claude);
+        }
+        let named = |all: &[Agent]| -> Vec<&'static str> {
+            [Agent::Claude, Agent::Codex, Agent::Antigravity]
+                .into_iter()
+                .filter(|a| all.contains(a))
+                .map(Agent::as_str)
+                .collect()
+        };
+        Chosen {
+            claude: picked.contains(&Agent::Claude),
+            shared: named(&picked).into_iter().filter(|a| *a != Agent::Claude.as_str()).collect(),
+            found: found.as_deref().map(named),
+        }
+    }
+
+    /// `--json` 의 `agents` — 고른 것 전부, 늘 같은 차례로.
+    fn names(&self) -> Vec<&'static str> {
+        self.claude.then_some(Agent::Claude.as_str()).into_iter().chain(self.shared.iter().copied()).collect()
+    }
+
+    /// `auto` 가 무엇을 찾았는지 한 줄 — `auto` 를 안 줬으면 없다. 고른 까닭이 화면에 없으면, PATH 가 다른 기계에서
+    /// 같은 명령이 다른 것을 심는 것이 설명되지 않는다. `install` 과 `uninstall` 이 같은 줄을 내므로 "심는다" 를
+    /// 말하지 않는다 — 걷는 자리에서 "claude 로 심는다" 가 섰다.
+    fn found_line(&self, lang: crate::i18n::Lang) -> Option<String> {
+        self.found.as_ref().map(|found| match found.is_empty() {
+            true => say(lang, "skill.auto_none").to_string(),
+            false => fill(say(lang, "skill.auto_found"), &[("agents", &found.join(", "))]),
+        })
+    }
+}
+
+/// 트리를 그 자리에 쓴다. **덮어쓰기만 한다**(이 모듈 머리). 커밋된 트리 셋 — [`skill::AGENTS_DIR`]·Claude 의
+/// 플러그인([`skill::DIR`], moai-ml0d.izy)·두 에이전트의 훅 파일([`HookFile`]) — 이 모두 이 하나로 쓴다. 읽는
+/// 짝은 [`read_committed`] 다. 임시 파일을 갈아끼우니([`crate::store::write_staged`]) 쓰려고 열지 않아 그 자리에 선
+/// FIFO 앞에서 멈추지 않고(보통 파일이 아닌 자리는 그 자리를 대며 거절한다), 링크는 체크아웃 안을 가리킬 때만 따라간다.
+/// 갈아끼우는 `rename` 은 그 이름이 비는 틈을 안 남겨, 지우지 않는다는 이 모듈의 약속도 그대로다.
+///
+/// **트리를 다 잰 뒤에 첫 파일을 쓴다**([`measure`], moai-dj4j.ug2). 파일마다 쓰는 그때 재던 판은 트리가
+/// `skills/**` 를 `plugin.json` 앞에 두어, 매니페스트가 거절되면 새 스킬 글이 옛 매니페스트 밑에 선 채 거절문은
+/// "nothing is written" 이라 했다(리뷰 moai-ml0d.que 8번 — 다섯 파일이 바뀌었다). `install` 이 고른 트리를 미리 다 재도
+/// 여기서 한 번 더 잰다 — 앞 트리를 쓴 것이 뒤 트리의 자리를 바꿀 수 있다(커밋된 링크가 한 트리에서 다른 트리로 가면).
+///
+/// **임시 파일은 `.moai/` 에 먼저 짓는다**(moai-dj4j.rs4) — 대상 곁에 지으면 `open_tmp` 와 `rename` 사이에서 죽은
+/// 쓰기가 `SKILL.md.tmp.<pid>.<n>` 을 `.claude/moai-plugin/**`·`.agents/skills/**`·`.codex/` 에 남겼고, 무시하는 줄도
+/// 치우는 자도 없어 `git add -A` 가 그것을 담았다(리뷰 moai-ml0d.que 9번). 옛 선언을 걷는 커밋된 설정([`Undeclare`])도
+/// 같은 쓰는 자를 지난다.
+fn write_committed(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
+    measure(dir, files, root)?;
+    for (path, body) in files {
+        let at = dir.join(path);
+        if let Some(parent) = at.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
+        }
+        crate::store::write_staged(&at, body.as_bytes(), root)?;
+    }
+    Ok(())
+}
+
+/// 트리의 자리를 다 잰다 — **아무것도 안 쓰고 안 짓는다**(moai-dj4j.ug2). [`write_committed`] 가 거절할 자리를 여기서
+/// 먼저 만난다: 체크아웃 밖이나 `.git` 에 닿는 디렉터리, 지을 수 없는 디렉터리([`unbuildable`]), 그리고 파일마다
+/// [`crate::store::measure_inside`] 가 거절하는 자리(밖을 가리키는 링크, 보통 파일이 아닌 것, 락). `install` 은 고른 트리를
+/// 다 이것으로 잰 뒤에 첫 파일을 쓰고, `--dry-run` 도 같은 자로 재 진짜 실행이 거절할 트리를 약속하지 않는다. 디스크가
+/// 차거나 권한이 없어 실패하는 쓰기는 여기서 못 본다 — 그것은 쓰는 그때 멈춘다.
+///
+/// **디렉터리를 짓기 전에 잰다**(리뷰 moai-xs2h.dir) — `create_dir_all` 은 가운데 링크를 그대로 따라가, 받은
+/// 저장소가 커밋한 `.agents -> <밖>` 하나로 체크아웃 밖에 `skills/moai/references/` 를 지은 뒤에야
+/// `write_atomic_inside` 가 파일을 거절했다. 파일만 막고 디렉터리는 밖에 남기면 "체크아웃 안에서만 링크를 따른다"
+/// (moai-4oab) 가 반쪽이다.
+fn measure(dir: &Path, files: &[(PathBuf, String)], root: &Path) -> R<()> {
+    for (path, _) in files {
+        let at = dir.join(path);
+        if let Some(parent) = at.parent() {
+            if let Some(landed) = outside(parent, root) {
+                return Err(Fail::new(format!(
+                    "{} points at {}, outside {} — nothing is written there. A directory the repository holds is \
+                     followed only inside it: replace the link with a directory",
+                    parent.display(),
+                    crate::text::one_line(&landed.display().to_string()),
+                    root.display()
+                )));
+            }
+            if let Some(stuck) = unbuildable(parent) {
+                return Err(Fail::new(format!(
+                    "{} is not a directory, and {} goes under it — nothing is written. Move it aside, or replace it \
+                     with a directory",
+                    stuck.display(),
+                    at.display()
+                )));
+            }
+        }
+        crate::store::measure_inside(&at, root)?;
+    }
+    Ok(())
+}
+
+/// `create_dir_all(dir)` 이 멈출 자리 — `dir` 과 그 조상 가운데 **있는 가장 깊은 것**이 디렉터리가 아니면(보통 파일,
+/// FIFO, 끊긴 링크, 고리, 파일을 가리키는 링크) 그 자리다(리뷰 moai-dj4j.n9y). 재지 않던 판은 [`outside`] 와
+/// [`crate::store::measure_inside`] 를 다 지나, 앞 트리와 앞 파일을 쓴 뒤에 `File exists` 로 멈췄고 연습은 0 으로 끝났다
+/// — 끊긴 링크는 받은 사람의 기계에 없는 자리를 가리키는 커밋된 링크(`-> /home/<남>/…`)가 흔한 꼴이고, [`outside`] 는
+/// 그 링크를 못 풀어 안으로 읽는다. 있는지는 링크를 안 따라 재고(끊긴 링크도 서 있다), 디렉터리인지는 따라 잰다 — 안의
+/// 디렉터리를 가리키는 링크 밑에는 지을 수 있다. 권한으로 못 짓는 자리는 못 본다 — 그것은 쓰는 그때 멈춘다.
+fn unbuildable(dir: &Path) -> Option<&Path> {
+    dir.ancestors().find(|a| std::fs::symlink_metadata(a).is_ok()).filter(|a| !a.is_dir())
+}
+
+/// `dir` 이 링크를 다 푼 뒤 체크아웃 `root` 밖이나 그 `.git/` 안에 닿으면 그 자리 — 안이면 `None` 이다. 아직 없는
+/// 조각은 있는 조상까지 풀고 붙인다([`crate::path::real_prefix`]) — 짓기 전의 자리를 재는 것이라 끝이 없어도 된다.
+fn outside(dir: &Path, root: &Path) -> Option<PathBuf> {
+    let landed = crate::path::real_prefix(&crate::path::lexical(dir));
+    match landed.strip_prefix(crate::path::real(root)) {
+        Ok(rest) if !crate::held::into_git(rest) => None,
+        _ => Some(landed),
+    }
+}
+
+/// 스킬을 고른 에이전트들에 심는다(moai-xs2h.ylx). Codex·Antigravity 는 [`skill::AGENTS_DIR`] 에 파일을 쓰는 것으로
+/// 끝난다 — 등록이 없다. Claude 는 지금까지와 같다([`claude_install`]).
+///
+/// **`--scope` 는 Claude 의 등록 범위다.** Claude 를 안 고르고 준 범위는 아무것도 안 바꾸니 한 줄로 그렇게 말한다 —
+/// 안 말하면 `--scope user` 로 모든 저장소에 심었다고 믿는다. 막지는 않는다.
+pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
+    let chosen = Chosen::of(agents);
+    let place = place(ctx)?;
+    let shared =
+        (!chosen.shared.is_empty()).then(|| (place.root.join(skill::AGENTS_DIR), skill::agents_tree(&place.skills)));
+    let root = place.root.clone();
+    // 남의 훅 파일은 안 쓰고 한 줄로 댄다([`HookFile`]) — 쓸 것은 없거나 moai 의 것인 파일뿐이다.
+    let mut hooks: Vec<(HookFile, HookState)> = HookFile::chosen(&root, &place.exe, &chosen)
+        .into_iter()
+        .map(|h| {
+            let state = h.state(&root);
+            (h, state)
+        })
+        .collect();
+    let due: Vec<(PathBuf, String)> =
+        hooks.iter().filter(|(_, state)| state.due()).map(|(h, _)| h.file(&root)).collect();
+    // **고른 트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 6·7번). `.agents`·훅 파일을 쓰고 나서
+    // Claude 의 트리가 거절되던 판은 `Err` 하나로 끝나 앞서 쓴 절반의 보고(`agents_files`·`hooks`, Codex 의 `/hooks`
+    // 줄)를 잃었다. 연습도 같은 자로 잰다 — 이름 겹침만 재던 연습은 진짜 실행이 거절할 트리에도 등록을 약속하고 0 으로
+    // 끝났다. 거절되면 아무것도 안 썼고 `claude` 도 안 불렀다. 재는 차례는 아래 쓰는 차례와 같다.
+    if let Some((dir, files)) = &shared {
+        measure(dir, files, &root)?;
+    }
+    measure(&root, &due, &root)?;
+    if chosen.claude {
+        measure(&place.dir, &place.files, &root)?;
+    }
+    // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
+    // 안 기댄다. 훅 파일도 같은 까닭이다(moai-u5wr.kov). 못 쓰면 `claude` 를 부르기 전에 멈춘다.
+    //
+    // **훅 파일은 쓰기 바로 앞에서 다시 판정한다**(리뷰 moai-dj4j.n9y) — 위의 판정 뒤에 `.agents` 트리 한 벌을 fsync 하며 쓰는
+    // 동안 사람이 그 파일에 제 훅을 적었으면 이제 남의 것이라 안 쓴다. 판정한 그대로 쓰던 판은 그 틈이 파일 하나에서 트리 한
+    // 벌로 넓어져 사람의 훅을 말없이 덮었다. 위에서 잰 파일만 쓰고, 다시 판정한 상태가 보고의 `was` 다.
+    if !dry_run {
+        if let Some((dir, files)) = &shared {
+            write_committed(dir, files, &root)?;
+        }
+        for (h, state) in hooks.iter_mut().filter(|(_, state)| state.due()) {
+            *state = h.state(&root);
+            if state.due() {
+                write_committed(&root, &[h.file(&root)], &root)?;
+            }
+        }
+    }
+    let (mut json, claude) = match chosen.claude {
+        true => claude_install(ctx, place, scope.unwrap_or(Scope::Local).as_str(), dry_run)?,
+        false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
+    };
+
+    if ctx.json {
+        if let Some(o) = json.as_object_mut() {
+            o.insert("agents".into(), serde_json::json!(chosen.names()));
+            o.insert("found".into(), serde_json::json!(chosen.found));
+            o.insert("agents_dir".into(), serde_json::json!(shared.as_ref().map(|(d, _)| d.display().to_string())));
+            let listed: Vec<String> =
+                shared.iter().flat_map(|(_, f)| f.iter().map(|(p, _)| p.display().to_string())).collect();
+            o.insert("agents_files".into(), serde_json::json!(listed));
+            // 쓰기 **전의** 상태다 — `missing`·`stale` 이면 (연습이 아닐 때) 이번에 썼고, `foreign` 은 안 썼다.
+            let hooked: Vec<serde_json::Value> = hooks
+                .iter()
+                .map(|(h, state)| {
+                    serde_json::json!({
+                        "agent": h.agent.as_str(),
+                        "path": h.path.display().to_string(),
+                        "was": state.as_str(),
+                        "written": !dry_run && state.due(),
+                    })
+                })
+                .collect();
+            o.insert("hooks".into(), serde_json::json!(hooked));
+        }
+        return super::json_line(&json);
+    }
+
+    let lang = ctx.lang();
+    let mut out: Vec<String> = chosen.found_line(lang).into_iter().collect();
+    if let Some((dir, files)) = &shared {
+        let at = dir.display().to_string();
+        if dry_run {
+            out.push(fill(say(lang, "skill.agents_plan"), &[("dir", &at)]));
+            out.extend(plan_lines(lang, files));
+        } else {
+            out.push(fill(say(lang, "skill.agents_planted"), &[("dir", &at)]));
+        }
+        if scope.is_some() && !chosen.claude {
+            out.push(fill(say(lang, "skill.scope_is_claudes"), &[("dir", &at)]));
+        }
+        for (h, state) in &hooks {
+            out.extend(h.said(&root, *state, dry_run, lang));
+        }
+        if chosen.claude {
+            out.push(String::new());
+        }
+    }
+    out.extend(claude);
+    Ok(out)
+}
+
+/// 연습이 심을 파일마다 내는 줄 — 두 트리가 같은 꼴로 선다.
+fn plan_lines<'a>(lang: crate::i18n::Lang, files: &'a [(PathBuf, String)]) -> impl Iterator<Item = String> + 'a {
+    files.iter().map(move |(path, body)| {
+        let n = body.lines().count().to_string();
+        format!("  {:<44} {}", path.display(), fill(say(lang, "skill.plan_lines"), &[("n", &n)]))
+    })
+}
+
+/// Claude 의 플러그인을 심고 등록한다. `--json` 이면 값만, 아니면 사람의 줄만 낸다 — 고른 에이전트를 함께 싣는
+/// 것은 [`install`] 이다.
+fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
+    let Place { root, dir, market, exe, files, .. } = place;
     // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
@@ -120,26 +387,27 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 
     if dry_run {
         if ctx.json {
-            return super::json_line(&serde_json::json!({
-                "dir": dir.display().to_string(),
-                "market": market,
-                "scope": scope,
-                "exe": exe,
-                "dry_run": true,
-                "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
-                "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-                "lifted": retiring.lifted_json(),
-                "retired": retiring.json(),
-                "undeclared": retiring.undeclared_json(),
-                "kept": retiring.kept,
-            }));
+            return Ok((
+                serde_json::json!({
+                    "dir": dir.display().to_string(),
+                    "market": market,
+                    "scope": scope,
+                    "exe": exe,
+                    "dry_run": true,
+                    "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
+                    "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                    "lifted": retiring.lifted_json(),
+                    "retired": retiring.json(),
+                    "undeclared": retiring.undeclared_json(),
+                    "settings_unread": retiring.unread_json(ctx.lang()),
+                    "kept": retiring.kept,
+                }),
+                Vec::new(),
+            ));
         }
         let lang = ctx.lang();
         let mut out = vec![fill(say(lang, "skill.plan_head"), &[("dir", &dir.display().to_string())])];
-        for (path, body) in &files {
-            let n = body.lines().count().to_string();
-            out.push(format!("  {:<44} {}", path.display(), fill(say(lang, "skill.plan_lines"), &[("n", &n)])));
-        }
+        out.extend(plan_lines(lang, &files));
         out.push(String::new());
         out.push(match &clash {
             Some(other) => fill(
@@ -158,18 +426,14 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
             out.push(fill(say(lang, "skill.plan_retire"), &[("cmd", &step.shown())]));
         }
         out.extend(retiring.undeclare.iter().map(|u| fill(say(lang, "skill.plan_retire"), &[("cmd", &u.what(lang))])));
-        out.extend(retiring.kept_lines(lang));
-        return Ok(out);
+        out.extend(retiring.left_lines(lang));
+        return Ok((serde_json::Value::Null, out));
     }
 
-    // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다.
-    for (path, body) in &files {
-        let at = dir.join(path);
-        if let Some(parent) = at.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| Fail::new(format!("{}: {e}", parent.display())))?;
-        }
-        std::fs::write(&at, body).map_err(|e| Fail::new(format!("{}: {e}", at.display())))?;
-    }
+    // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다. 쓰는 자는 `.agents` 와 같다([`write_committed`],
+    // moai-ml0d.izy) — 맨 `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한
+    // `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그 파일을 플러그인 JSON 으로 통째로 덮었다.
+    write_committed(&dir, &files, &root)?;
 
     // **`--json` 보다 먼저 푼다** — 아래 두 갈래가 다 이것을 쓴다. 기계 출력으로 빠지는 판은
     // 이 글들을 안 지으므로 값이 새지 않는다(`register` 의 걸음 이름은 사람 화면에만 선다).
@@ -200,22 +464,26 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
     }
 
     if ctx.json {
-        return super::json_line(&serde_json::json!({
-            "dry_run": false,
-            "dir": dir.display().to_string(),
-            "market": market,
-            "scope": scope,
-            "exe": exe,
-            "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
-            "registered": registered,
-            // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
-            // `registered: false` 만 보고 무엇을 해야 할지 모른다.
-            "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-            "lifted": retiring.lifted_json(),
-            "retired": retiring.json(),
-            "undeclared": retiring.undeclared_json(),
-            "kept": retiring.kept,
-        }));
+        return Ok((
+            serde_json::json!({
+                "dry_run": false,
+                "dir": dir.display().to_string(),
+                "market": market,
+                "scope": scope,
+                "exe": exe,
+                "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
+                "registered": registered,
+                // **못 한 까닭을 기계에도 준다.** 사람 출력에만 적어 두면 스크립트는
+                // `registered: false` 만 보고 무엇을 해야 할지 모른다.
+                "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                "lifted": retiring.lifted_json(),
+                "retired": retiring.json(),
+                "undeclared": retiring.undeclared_json(),
+                "settings_unread": retiring.unread_json(ctx.lang()),
+                "kept": retiring.kept,
+            }),
+            Vec::new(),
+        ));
     }
 
     let mut out = vec![fill(say(lang, "skill.planted"), &[("dir", &dir.display().to_string())])];
@@ -239,7 +507,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         });
     }
     out.extend(retiring.undeclare.iter().map(|u| u.line(lang)));
-    out.extend(retiring.kept_lines(lang));
+    out.extend(retiring.left_lines(lang));
     if registered {
         out.push(String::new());
         out.push(say(lang, "skill.reopen_claude").to_string());
@@ -264,7 +532,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
         ));
         out.push(format!("  claude plugin install moai@{market} --scope {scope} -y"));
     }
-    Ok(out)
+    Ok((serde_json::Value::Null, out))
 }
 
 /// 무엇이 어디 심겼는지 보인다. **읽기만 하고, 무엇이 어긋나도 0 이다.**
@@ -272,7 +540,7 @@ pub fn install(ctx: &Ctx, scope: &str, dry_run: bool) -> R<Vec<String>> {
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, prefix, exe, on_path, files } = place(ctx)?;
+    let Place { root, dir, market, prefix, exe, on_path, files, skills, written } = place(ctx)?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
@@ -292,13 +560,19 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let wants: Vec<String> = hooks
         .iter()
         .map(|h| match h.as_deref() {
-            Some(h) if h != exe => skill::version_in(&plant(&prefix, &root, h)).unwrap_or_default(),
+            Some(h) if h != exe => skill::version_in(&plant(&prefix, &root, h, &skills)).unwrap_or_default(),
             _ => want.clone(),
         })
         .collect();
     let hooked = hooks.iter().flatten().next().cloned();
     let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
+    let shared = Shared::read(&root, &skills);
+    // Claude 는 위의 `claude` 줄이 이미 댄다 — 여기는 `.agents/skills` 를 읽는 둘이다.
+    let others: Vec<(&str, bool)> =
+        ON_PATH.iter().filter(|(a, _)| *a != Agent::Claude).map(|(_, bin)| (*bin, which(bin).is_some())).collect();
+    // 두 에이전트의 훅 파일(moai-u5wr.kov) — Claude 의 훅은 위의 플러그인 줄들이 댄다.
+    let hook_files = HookFile::all(&root, &exe);
 
     if ctx.json {
         let rows: Vec<_> = installs
@@ -317,7 +591,7 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             .collect();
         return super::json_line(&serde_json::json!({
             "dir": dir.display().to_string(),
-            "written": dir.join(".claude-plugin/plugin.json").is_file(),
+            "written": written,
             "market": market,
             "listed": listed.as_ref().map(|p| p.display().to_string()),
             "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
@@ -329,6 +603,15 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
+            "agents": shared.json(&others),
+            "hooks": hook_files
+                .iter()
+                .map(|h| serde_json::json!({
+                    "agent": h.agent.as_str(),
+                    "path": h.path.display().to_string(),
+                    "state": h.seen(&root).as_str(),
+                }))
+                .collect::<Vec<_>>(),
         }));
     }
 
@@ -407,7 +690,229 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         // 하나를 물고 있을 수 있다. 수만 비춘다.
         out.push(fill(say(lang, "skill.stale_copies"), &[("n", &stale.to_string())]));
     }
+    // **Claude 의 줄 밑에 `.agents` 한 줄과 그것을 읽는 둘의 PATH 줄**(사용자 결정 2026-10-04).
+    let shared_row = say(lang, "skill.row_agents");
+    out.push(match (shared.planted, shared.stale.is_empty()) {
+        (false, _) => row(false, shared_row, say(lang, "skill.agents_missing")),
+        (true, false) => {
+            row(false, shared_row, &fill(say(lang, "skill.agents_stale"), &[("n", &shared.stale.len().to_string())]))
+        }
+        (true, true) => row(true, shared_row, say(lang, "skill.agents_current")),
+    });
+    for h in &hook_files {
+        let (ok, said) = h.row(&root, lang);
+        out.push(row(ok, h.label(), &said));
+    }
+    for (bin, on) in &others {
+        let said = match on {
+            true => say(lang, "skill.on_path"),
+            false => say(lang, "skill.not_on_path"),
+        };
+        out.push(row(*on, bin, said));
+    }
     Ok(out)
+}
+
+/// [`skill::AGENTS_DIR`] 가 지금 판의 글과 같은가(moai-xs2h.v2n) — `status` 가 Codex·Antigravity 의 자리를 대는 값.
+struct Shared {
+    dir: PathBuf,
+    /// 지금 판과 다르거나 없는 파일 — 그 자리부터의 상대 경로.
+    stale: Vec<String>,
+    /// 심을 파일 가운데 하나라도 서 있는가 — 없으면 "안 심겼다" 고, 있는데 다르면 "낡았다" 다.
+    planted: bool,
+}
+
+impl Shared {
+    /// **보통 파일만, 체크아웃 안에서만 읽는다**(`held::read_inside`). 그 자리는 이 판 전의 `status` 가 한 번도 안 열던
+    /// 곳이라, 거기 선 FIFO 하나가 읽기를 멈춰 세우면 아무것도 안 막는다던 명령이 멈춘다. 못 읽은 파일은 낡은 것으로
+    /// 센다 — 보통 파일이면 다시 심어 갈아끼우고, 보통 파일이 아닌 자리는 다시 심는 길이 그 자리를 대며 멈춘다
+    /// ([`write_committed`]).
+    fn read(root: &Path, skills: &[skill::Skill]) -> Shared {
+        let dir = root.join(skill::AGENTS_DIR);
+        let home = crate::held::Home::of(root);
+        let mut stale = Vec::new();
+        let mut planted = false;
+        for (path, body) in skill::agents_tree(skills) {
+            let at = dir.join(&path);
+            planted |= std::fs::symlink_metadata(&at).is_ok();
+            if crate::held::read_inside(&at, &home).ok().as_deref() != Some(body.as_str()) {
+                stale.push(path.display().to_string());
+            }
+        }
+        Shared { dir, stale, planted }
+    }
+
+    /// `--json` 의 `agents` — 자리·상태(`current`·`stale`·`missing`)·낡은 파일·PATH 에 선 둘.
+    fn json(&self, others: &[(&str, bool)]) -> serde_json::Value {
+        let state = match (self.planted, self.stale.is_empty()) {
+            (false, _) => "missing",
+            (true, false) => "stale",
+            (true, true) => "current",
+        };
+        let mut v = serde_json::json!({
+            "dir": self.dir.display().to_string(),
+            "state": state,
+            "stale": self.stale,
+        });
+        for (bin, on) in others {
+            v[*bin] = serde_json::json!(on);
+        }
+        v
+    }
+}
+
+/// Codex·Antigravity 의 훅 파일 하나(moai-u5wr.kov) — 그 에이전트, 자리, 지금 판의 글.
+///
+/// **moai 가 통째로 쓴 파일만 다시 쓴다**([`skill::hooks_are_ours`]) — 사람이 제 훅을 적어 둔 파일을 갈아엎으면 그
+/// 사람의 훅이 말없이 사라진다. 그 자리는 손대지 않고 한 줄로 댄다. 지우지도 않는다(이 모듈 머리).
+struct HookFile {
+    agent: Agent,
+    dialect: crate::cli::Dialect,
+    path: PathBuf,
+    want: String,
+}
+
+/// 훅 파일이 지금 어떤가.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HookState {
+    Missing,
+    Current,
+    /// moai 가 쓴 파일인데 지금 판과 다르다 — 다시 쓴다.
+    Stale,
+    /// moai 가 안 쓴 파일이다(못 읽는 자리도 여기다) — 안 건드린다.
+    Foreign,
+}
+
+impl HookState {
+    fn as_str(self) -> &'static str {
+        match self {
+            HookState::Missing => "missing",
+            HookState::Current => "current",
+            HookState::Stale => "stale",
+            HookState::Foreign => "foreign",
+        }
+    }
+
+    /// `install` 이 쓸 상태인가 — 없거나 moai 의 것인데 낡았다.
+    fn due(self) -> bool {
+        matches!(self, HookState::Missing | HookState::Stale)
+    }
+}
+
+impl HookFile {
+    /// 두 에이전트의 훅 파일 — Codex 는 [`skill::CODEX_HOOKS`], Antigravity 는 [`skill::AGENTS_HOOKS`] 다.
+    fn all(root: &Path, exe: &str) -> Vec<HookFile> {
+        use crate::cli::Dialect;
+        vec![
+            HookFile {
+                agent: Agent::Codex,
+                dialect: Dialect::Codex,
+                path: root.join(skill::CODEX_HOOKS),
+                want: skill::codex_hooks(exe),
+            },
+            HookFile {
+                agent: Agent::Antigravity,
+                dialect: Dialect::Antigravity,
+                path: root.join(skill::AGENTS_HOOKS),
+                want: skill::antigravity_hooks(exe),
+            },
+        ]
+    }
+
+    /// 고른 에이전트의 것만 — **스킬과 달리 에이전트마다 따로다.** 스킬은 한 자리를 둘이 함께 읽지만 훅 파일은
+    /// 저마다의 것이라, `--agent codex` 가 Antigravity 의 훅까지 심으면 안 부른 에이전트에 규칙이 선다.
+    fn chosen(root: &Path, exe: &str, chosen: &Chosen) -> Vec<HookFile> {
+        HookFile::all(root, exe).into_iter().filter(|h| chosen.shared.contains(&h.agent.as_str())).collect()
+    }
+
+    /// **보통 파일만, 체크아웃 안에서만 읽는다**([`read_committed`], [`Shared::read`] 와 같은 까닭). 못 읽는 자리는
+    /// moai 의 것이 아니다 — 다시 쓰는 길도 그 자리를 거절한다([`write_committed`]). **뜻으로 견준다**
+    /// ([`skill::same_hooks`]) — agy 가 제 꼴로 다시 쓴 파일을 낡았다고 하면 다시 심을 때마다 커밋된 파일이 흔들린다.
+    fn state(&self, root: &Path) -> HookState {
+        self.judged(root).0
+    }
+
+    /// [`HookFile::state`] 와 읽은 글 — moai 의 파일일 때만 글이 선다.
+    fn judged(&self, root: &Path) -> (HookState, Option<String>) {
+        if std::fs::symlink_metadata(&self.path).is_err() {
+            return (HookState::Missing, None);
+        }
+        match read_committed(&self.path, root).ok() {
+            Some(text) if text == self.want || skill::same_hooks(&text, &self.want) => (HookState::Current, Some(text)),
+            Some(text) if skill::hooks_are_ours(self.dialect, &text) => (HookState::Stale, Some(text)),
+            _ => (HookState::Foreign, None),
+        }
+    }
+
+    /// `status` 가 대는 상태 — **낡았는지는 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74). Claude 의 줄이 설치본의
+    /// 훅이 부르는 파일로 견주는 것과 같은 까닭이다(`status` 의 `wants`): 지금 부른 moai 로 견주던 판은 워크트리의 빌드나
+    /// `cargo run` 으로 부른 것만으로 멀쩡한 두 파일을 "다시 심는다" 고 했고, 시킨 대로 심으면 커밋된 훅이 그 빌드를 부르게
+    /// 바뀌었다 — 워크트리를 걷는 날 그 줄이 `|| exit 0` 으로 말없이 꺼지고, Codex 는 `/hooks` 에서 다시 믿어 달라고 한다.
+    /// `install` 은 이것을 안 쓴다 — 심는 것은 늘 지금 부른 moai 다(Claude 의 `install` 과 같다).
+    fn seen(&self, root: &Path) -> HookState {
+        match self.judged(root) {
+            (HookState::Stale, Some(text))
+                if skill::planted_exe(&text).is_some_and(|exe| skill::same_hooks(&text, &self.written_for(&exe))) =>
+            {
+                HookState::Current
+            }
+            (state, _) => state,
+        }
+    }
+
+    /// 이 에이전트의 훅 파일을 `exe` 로 지은 글.
+    fn written_for(&self, exe: &str) -> String {
+        match self.dialect {
+            crate::cli::Dialect::Codex => skill::codex_hooks(exe),
+            _ => skill::antigravity_hooks(exe),
+        }
+    }
+
+    /// 저장소 뿌리부터의 상대 자리 — 화면에 댄다.
+    fn shown(&self, root: &Path) -> String {
+        self.path.strip_prefix(root).unwrap_or(&self.path).display().to_string()
+    }
+
+    /// 심을 파일 — 저장소 뿌리부터의 자리와 지금 판의 글. 쓰는 것은 `install` 이 다른 트리와 함께 잰 뒤에 한다
+    /// ([`write_committed`]) — 없거나 moai 의 것일 때만이다([`HookState::due`]).
+    fn file(&self, root: &Path) -> (PathBuf, String) {
+        (self.path.strip_prefix(root).unwrap_or(&self.path).to_path_buf(), self.want.clone())
+    }
+
+    /// `install` 이 내는 줄 — 심었는지, 그대로인지, 남의 것이라 안 썼는지. Codex 에는 믿어 달라는 한 줄을 붙인다.
+    fn said(&self, root: &Path, state: HookState, dry_run: bool, lang: crate::i18n::Lang) -> Vec<String> {
+        let (agent, path) = (self.agent.as_str(), self.shown(root));
+        let args = [("agent", agent), ("path", path.as_str())];
+        let head = match (state, dry_run) {
+            (HookState::Foreign, _) => fill(say(lang, "skill.hooks_foreign"), &args),
+            (HookState::Current, _) => fill(say(lang, "skill.hooks_current"), &args),
+            (_, true) => fill(say(lang, "skill.hooks_plan"), &args),
+            (_, false) => fill(say(lang, "skill.hooks_planted"), &args),
+        };
+        let trust = (self.agent == Agent::Codex && state != HookState::Foreign)
+            .then(|| say(lang, "skill.codex_trust").to_string());
+        std::iter::once(head).chain(trust).collect()
+    }
+
+    /// `status` 의 한 줄 — 상태는 [`HookFile::seen`] 이 댄다.
+    fn row(&self, root: &Path, lang: crate::i18n::Lang) -> (bool, String) {
+        let (agent, path) = (self.agent.as_str(), self.shown(root));
+        let args = [("agent", agent), ("path", path.as_str())];
+        match self.seen(root) {
+            HookState::Current => (true, fill(say(lang, "skill.hooks_row_current"), &args)),
+            HookState::Stale => (false, fill(say(lang, "skill.hooks_row_stale"), &args)),
+            HookState::Missing => (false, fill(say(lang, "skill.hooks_row_missing"), &args)),
+            HookState::Foreign => (false, fill(say(lang, "skill.hooks_row_foreign"), &args)),
+        }
+    }
+
+    /// `status` 의 이름 칸 — 실행 파일 이름으로 댄다(그 아래 PATH 줄과 같은 낱말).
+    fn label(&self) -> &'static str {
+        match self.agent {
+            Agent::Codex => "codex hooks",
+            _ => "agy hooks",
+        }
+    }
 }
 
 /// 이름 칸을 **표시 폭**으로 맞춘다(moai-uzgp). 한글은 한 글자가 두 칸이라 `{:<14}` 로 맞추면
@@ -417,9 +922,74 @@ fn label(what: &str) -> String {
     format!("{what}{}", " ".repeat(WIDE.saturating_sub(crate::text::width(what))))
 }
 
-/// `claude` 에서 이 저장소의 등록을 걷어낸다. **파일은 남긴다.**
-pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
-    let Place { root, dir, market, .. } = place(ctx)?;
+/// 고른 에이전트에서 심은 것을 걷는다. **파일은 남긴다** — Claude 는 `claude` 의 등록만 걷고([`claude_uninstall`]),
+/// Codex·Antigravity 는 걷을 등록이 없어 손으로 지울 자리를 찍기만 한다(moai-xs2h.v2n, 이 모듈 머리의 "지우지 않는다").
+///
+/// **고르지 않은 자리에 moai 의 스킬이 남았으면 한 줄로 댄다.** `--agent codex` 로 심은 사람이 맨 `uninstall` 을 부르면
+/// Claude 쪽은 "걷을 것이 없다" 고 끝나는데, 그 줄만으로는 `.agents/skills` 가 그대로라는 것이 안 보인다.
+pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
+    let chosen = Chosen::of(agents);
+    let place = place(ctx)?;
+    let shared = place.root.join(skill::AGENTS_DIR);
+    // moai 가 심는 이름만 댄다 — 그 자리의 다른 스킬은 남의 것이다. **그 자리가 링크로 체크아웃 밖에 닿으면 아무것도
+    // 안 댄다**([`outside`]) — moai 는 거기 심지 않으므로(`write_committed`) 거기 선 것은 남의 것이고, 낸 `rm -r` 은 그
+    // 링크를 지나 밖의 디렉터리를 지운다.
+    let left: Vec<PathBuf> = match outside(&shared, &place.root) {
+        Some(_) => Vec::new(),
+        None => skill::NAMES.iter().map(|n| shared.join(n)).filter(|p| std::fs::symlink_metadata(p).is_ok()).collect(),
+    };
+    // 고른 에이전트의 훅 파일 가운데 **moai 가 쓴 것만** 댄다(moai-u5wr.kov) — 남의 훅이 든 파일을 지우라고 하면 그
+    // 사람의 훅이 같이 사라진다.
+    let root = place.root.clone();
+    let hooks_left: Vec<HookFile> = HookFile::chosen(&root, &place.exe, &chosen)
+        .into_iter()
+        .filter(|h| matches!(h.state(&root), HookState::Current | HookState::Stale))
+        .collect();
+    let (mut json, claude) = match chosen.claude {
+        true => claude_uninstall(ctx, place, dry_run)?,
+        false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
+    };
+
+    if ctx.json {
+        if let Some(o) = json.as_object_mut() {
+            o.insert("agents".into(), serde_json::json!(chosen.names()));
+            o.insert("found".into(), serde_json::json!(chosen.found));
+            let left: Vec<String> = left.iter().map(|p| p.display().to_string()).collect();
+            o.insert("agents_left".into(), serde_json::json!(left));
+            let hooks: Vec<String> = hooks_left.iter().map(|h| h.path.display().to_string()).collect();
+            o.insert("hooks_left".into(), serde_json::json!(hooks));
+        }
+        return super::json_line(&json);
+    }
+
+    let lang = ctx.lang();
+    let at = shared.display().to_string();
+    let mut out: Vec<String> = chosen.found_line(lang).into_iter().collect();
+    if !chosen.shared.is_empty() {
+        if left.is_empty() {
+            out.push(fill(say(lang, "skill.agents_nothing"), &[("dir", &at)]));
+        } else {
+            out.push(say(lang, "skill.agents_by_hand").to_string());
+            out.extend(left.iter().map(|p| format!("  rm -r {}", crate::text::shell_word(&p.display().to_string()))));
+        }
+        for h in &hooks_left {
+            out.push(fill(say(lang, "skill.hooks_by_hand"), &[("agent", h.agent.as_str())]));
+            out.push(format!("  rm {}", crate::text::shell_word(&h.path.display().to_string())));
+        }
+        if chosen.claude {
+            out.push(String::new());
+        }
+    }
+    out.extend(claude);
+    if chosen.shared.is_empty() && !left.is_empty() {
+        out.push(fill(say(lang, "skill.agents_left_hint"), &[("dir", &at)]));
+    }
+    Ok(out)
+}
+
+/// `claude` 에서 이 저장소의 등록을 걷어낸다. **파일은 남긴다.** `--json` 이면 값만, 아니면 사람의 줄만 낸다.
+fn claude_uninstall(ctx: &Ctx, place: Place, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
+    let Place { root, dir, market, .. } = place;
     let clash = clash_of(&market, &dir);
     let target = format!("moai@{market}");
     let installs = installs_here(&target, &root);
@@ -472,30 +1042,35 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
     }
 
     if ctx.json {
-        return super::json_line(&serde_json::json!({
-            "dry_run": dry_run,
-            "dir": dir.display().to_string(),
-            "market": market,
-            "planned": plan.iter().map(|a| shown(a)).collect::<Vec<_>>(),
-            "steps": steps.iter().map(|(c, ok)| serde_json::json!({"command": c, "ok": ok})).collect::<Vec<_>>(),
-            "removed": !dry_run && !failed && !plan.is_empty(),
-            "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
-            "claude": claude,
-            "retired": retiring.json(),
-            "undeclared": retiring.undeclared_json(),
-            "kept": retiring.kept,
-        }));
+        return Ok((
+            serde_json::json!({
+                "dry_run": dry_run,
+                "dir": dir.display().to_string(),
+                "market": market,
+                "planned": plan.iter().map(|a| shown(a)).collect::<Vec<_>>(),
+                "steps": steps.iter().map(|(c, ok)| serde_json::json!({"command": c, "ok": ok})).collect::<Vec<_>>(),
+                "removed": !dry_run && !failed && !plan.is_empty(),
+                "blocked_by": clash.as_ref().map(|p| p.display().to_string()),
+                "claude": claude,
+                "retired": retiring.json(),
+                "undeclared": retiring.undeclared_json(),
+                "settings_unread": retiring.unread_json(ctx.lang()),
+                "kept": retiring.kept,
+            }),
+            Vec::new(),
+        ));
     }
 
     let lang = ctx.lang();
     if let Some(other) = &clash {
-        return Ok(vec![
+        let out = vec![
             fill(say(lang, "skill.remove_elsewhere"), &[("market", &market), ("at", &other.display().to_string())]),
             say(lang, "skill.remove_elsewhere_there").to_string(),
-        ]);
+        ];
+        return Ok((serde_json::Value::Null, out));
     }
     if plan.is_empty() {
-        return Ok(vec![fill(say(lang, "skill.nothing_to_remove"), &[("market", &market)])]);
+        return Ok((serde_json::Value::Null, vec![fill(say(lang, "skill.nothing_to_remove"), &[("market", &market)])]));
     }
     if dry_run || !claude {
         let mut out = vec![match dry_run {
@@ -505,8 +1080,8 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         out.extend(plan.iter().map(|a| format!("  {}", shown(a))));
         out.extend(retiring.steps.iter().map(|step| format!("  {}", step.shown())));
         out.extend(retiring.undeclare.iter().map(|u| format!("  {}", u.what(lang))));
-        out.extend(retiring.kept_lines(lang));
-        return Ok(out);
+        out.extend(retiring.left_lines(lang));
+        return Ok((serde_json::Value::Null, out));
     }
     // 한 걸음이라도 실패했으면 "걷었다" 고 말하지 않는다 — 종료 코드만 비영이고
     // 첫 줄이 성공이면 사람은 첫 줄을 믿는다.
@@ -531,11 +1106,16 @@ pub fn uninstall(ctx: &Ctx, dry_run: bool) -> R<Vec<String>> {
         });
     }
     out.extend(retiring.undeclare.iter().map(|u| u.line(lang)));
-    out.extend(retiring.kept_lines(lang));
+    out.extend(retiring.left_lines(lang));
     out.push(String::new());
     out.push(say(lang, "skill.reopen_to_finish").to_string());
-    out.push(fill(say(lang, "skill.files_left"), &[("dir", skill::DIR)]));
-    Ok(out)
+    // **트리가 링크로 체크아웃 밖에 닿으면 남긴 파일로 대지 않는다**([`outside`]) — moai 는 거기 심지 않으므로
+    // ([`write_committed`]) 거기 선 것은 남의 것이고, 그 자리(`.claude/moai-plugin/`)를 지우면 링크를 지나 밖을 지운다.
+    // `uninstall` 이 `.agents` 를 대지 않는 것과 같은 셈이다.
+    if outside(&dir, &root).is_none() {
+        out.push(fill(say(lang, "skill.files_left"), &[("dir", skill::DIR)]));
+    }
+    Ok((serde_json::Value::Null, out))
 }
 
 fn argv(parts: &[&str]) -> Vec<String> {
@@ -719,9 +1299,10 @@ struct Undeclare {
 impl Undeclare {
     /// 그 파일에서 선언을 지운다. **이미 없으면 이룬 것이다.** 그 파일이 이 마켓의 플러그인을 아직 켜 두었으면
     /// 안 지운다 — 같은 `call` 에서 앞선 `plugin uninstall` 이 실패한 판이고, 선언을 걷으면 켠 플러그인이 출처를
-    /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다.
+    /// 잃는다. 그래서 계획한 때가 아니라 **지우기 직전에** 다시 읽는다. 읽는 자는 계획할 때와 같다([`read_committed`]) —
+    /// 그 사이에 못 읽게 된 파일은 못 지운 것으로 센다.
     fn call(&self, root: &Path) -> bool {
-        let Ok(text) = std::fs::read_to_string(&self.file) else { return false };
+        let Ok(text) = read_committed(&self.file, root) else { return false };
         let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return false };
         if settings.get("extraKnownMarketplaces").and_then(|m| m.get(self.market)).is_none() {
             return true;
@@ -730,7 +1311,7 @@ impl Undeclare {
             return false;
         }
         skill::drop_marketplace(&text, self.market)
-            .is_some_and(|out| crate::store::write_atomic_inside(&self.file, out.as_bytes(), root).is_ok())
+            .is_some_and(|out| crate::store::write_staged(&self.file, out.as_bytes(), root).is_ok())
     }
 
     /// 할 일 — 연습이 [`Retire::shown`] 자리에 댄다.
@@ -760,6 +1341,9 @@ struct Retired {
     undeclare: Vec<Undeclare>,
     /// 사용자 범위라 두고 가는 설치 id — 사람 출력은 손으로 걷는 줄을 함께 댄다.
     kept: Vec<&'static str>,
+    /// 문이 열렸는데 못 읽은 커밋된 설정 — 자리와 까닭([`retire`]). 어느 선언이 있는지 몰라 걸음은 안 세우고, 손으로
+    /// 볼 자리로 댄다(사용자 결정 2026-10-05, moai-ml0d.que 2번).
+    unread: Option<crate::store::Unread>,
 }
 
 impl Retired {
@@ -805,9 +1389,29 @@ impl Retired {
             .collect()
     }
 
-    /// 두고 가는 것마다 한 줄 — 연습·실행·`uninstall` 이 같은 글을 낸다.
-    fn kept_lines(&self, lang: crate::i18n::Lang) -> impl Iterator<Item = String> + '_ {
-        self.kept.iter().map(move |id| fill(say(lang, "skill.kept_for_others"), &[("id", id)]))
+    /// `--json` 의 `settings_unread` — 못 읽은 설정의 자리와 까닭. `kind`·`said` 는 `show` 의 `journal_error` 와 같은
+    /// 꼴이다(`permission`·`failed`·`outside`). 다 읽었거나 문이 안 열렸으면 `null` 이다.
+    fn unread_json(&self, lang: crate::i18n::Lang) -> serde_json::Value {
+        self.unread.as_ref().map_or(
+            serde_json::Value::Null,
+            |u| serde_json::json!({"file": u.at.display().to_string(), "kind": u.kind(), "said": u.said(lang)}),
+        )
+    }
+
+    /// 사람 손에 두고 가는 것마다 한 줄 — 못 읽은 설정과, 다른 저장소도 쓰는 사용자 범위의 설치. 연습·실행·
+    /// `uninstall` 이 같은 글을 낸다.
+    fn left_lines(&self, lang: crate::i18n::Lang) -> impl Iterator<Item = String> + '_ {
+        let markets: Vec<&str> = RETIRED.iter().map(|(id, _)| market_of(id)).collect();
+        let unread = self.unread.as_ref().map(move |u| {
+            let file = crate::text::one_line(&u.at.display().to_string());
+            fill(
+                say(lang, "skill.settings_unread"),
+                &[("file", &file), ("why", &u.said(lang)), ("markets", &markets.join(", "))],
+            )
+        });
+        unread
+            .into_iter()
+            .chain(self.kept.iter().map(move |id| fill(say(lang, "skill.kept_for_others"), &[("id", id)])))
     }
 }
 
@@ -899,15 +1503,24 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
     // 출처는 그 파일에 적힌 것으로 잰다. 그 파일이 이 마켓의 플러그인을 켜 두었으면 그것이 이번에 project 에서
     // 걷는 바로 그 플러그인일 때만 걷는다 — 다른 것을 켜 두었으면 그 선언은 이제 그것의 것이다. 못 읽는 파일에는
     // 걸음을 안 세운다 — 어느 출처를 선언했는지 모른다.
+    //
+    // **없는 파일은 조용히, 있는데 못 읽는 파일은 한 줄로 댄다**(사용자 결정 2026-10-05, 리뷰 moai-ml0d.que 2번).
+    // 체크아웃 밖 링크·`.git`·FIFO·권한이 그 자리다. 말없이 넘기면 등록이 이 범위를 새 판으로 올려 문이 닫히고, 다음
+    // `install` 도 그 파일을 다시 안 재 — `claude` 는 그 선언을 링크 너머로 계속 읽는데 아무도 그것을 안 댄다. init 이
+    // 못 읽는 파일을 자리와 까닭으로 대는 것과 같은 결이다. 글로 적힌 것을 못 푸는 JSON 은 전처럼 조용하다.
     if !scopes.contains(&"project") {
         return out;
     }
     let file = root.join(".claude/settings.json");
-    let Some(settings) =
-        std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    else {
-        return out;
+    let text = match read_committed(&file, root) {
+        Ok(text) => text,
+        Err(crate::held::Fell::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => return out,
+        Err(fell) => {
+            out.unread = Some(crate::store::Unread { root: root.to_path_buf(), at: file, why: fell.into() });
+            return out;
+        }
     };
+    let Ok(settings) = serde_json::from_str::<serde_json::Value>(&text) else { return out };
     for (id, repo) in RETIRED {
         let market = market_of(id);
         if !skill::declared_repo(&settings, market).is_some_and(|at| at.eq_ignore_ascii_case(repo)) {
@@ -920,6 +1533,17 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
         out.undeclare.push(Undeclare { market, file: file.clone(), ok: None });
     }
     out
+}
+
+/// 커밋된 파일 하나를 읽는다 — **보통 파일만, 체크아웃 `root` 안에서만**(`held::read_inside`, moai-ml0d.21i). 받은
+/// 저장소가 커밋한 자리라 링크나 FIFO 일 수 있다 — 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로
+/// `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 하나로 메모리를 다 썼다. 체크아웃 밖을
+/// 가리키는 링크는 쓰기([`write_committed`]·[`Undeclare::call`])도 거절하는 자리라 읽어도 고칠 길이 없다.
+/// 매니페스트([`place`])·설정([`retire`]·[`Undeclare::call`])·두 에이전트의 훅 파일([`HookFile::judged`])이 이 하나로
+/// 읽는다. **못 읽은 까닭을 그대로 낸다** — 그것을 무엇으로 셀지는 부르는 쪽이 정한다(없는 파일·못 읽는 파일을 가르는
+/// 것은 [`retire`] 뿐이다).
+fn read_committed(file: &Path, root: &Path) -> Result<String, crate::held::Fell> {
+    crate::held::read_inside(file, &crate::held::Home::of(root))
 }
 
 /// 설치 id(`<플러그인>@<마켓플레이스>`)의 마켓플레이스 이름 — [`RETIRED`] 의 장부 줄과 설정 선언을 이 이름으로 찾는다.
@@ -977,6 +1601,8 @@ fn run(root: &Path, args: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::scratch::names;
     use std::collections::BTreeMap;
 
     /// **글마다 제 자리에 선다.** `skill::tree` 는 같은 `&str` 넷을 자리로 받아, 여기서 둘을
@@ -985,7 +1611,7 @@ mod tests {
     /// 서서, 모든 저장소에서 그 스킬이 조용히 안 뜬다.
     #[test]
     fn each_text_is_planted_at_its_own_path() {
-        let files: BTreeMap<String, String> = plant("t", Path::new("/repo"), "/bin/moai")
+        let files: BTreeMap<String, String> = plant("t", Path::new("/repo"), "/bin/moai", &skill::skills())
             .into_iter()
             .map(|(p, b)| (p.display().to_string(), b))
             .collect();
@@ -997,5 +1623,111 @@ mod tests {
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
         }
+    }
+
+    /// **트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 8번) — 트리는 `skills/**` 를
+    /// `plugin.json` 앞에 둔다. 파일마다 쓰는 그때 재던 판은 매니페스트가 거절될 때 스킬 글을 이미 갈아끼웠고, 거절문은
+    /// "nothing is written" 이라 했다. 디렉터리도 안 짓는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_manifest_leaves_the_whole_tree_unwritten() {
+        let s = crate::scratch::Scratch::new("skill-measure-first");
+        let away = crate::scratch::Scratch::new("skill-measure-first-away");
+        let victim = away.join("rc");
+        std::fs::write(&victim, "rc\n").unwrap();
+        let dir = s.join("plugin");
+        std::fs::create_dir_all(dir.join(".claude-plugin")).unwrap();
+        std::fs::create_dir_all(dir.join("skills/moai")).unwrap();
+        let skill = dir.join("skills/moai/SKILL.md");
+        std::fs::write(&skill, "옛 글\n").unwrap();
+        std::os::unix::fs::symlink(&victim, dir.join(".claude-plugin/plugin.json")).unwrap();
+        let files = [
+            (PathBuf::from("skills/moai/SKILL.md"), "새 글\n".to_string()),
+            (PathBuf::from("skills/moai-wiki/SKILL.md"), "새 위키\n".to_string()),
+            (PathBuf::from(".claude-plugin/plugin.json"), "{}\n".to_string()),
+        ];
+
+        let e = write_committed(&dir, &files, s.path()).expect_err("체크아웃 밖을 가리키는 매니페스트를 받았다");
+        assert!(e.message.contains("plugin.json") && e.message.contains("nothing is written"), "{}", e.message);
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), "옛 글\n", "거절된 트리의 앞 파일을 갈아끼웠다");
+        assert_eq!(names(&dir.join("skills")), ["moai"], "거절된 트리에 디렉터리를 지었다");
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "rc\n", "체크아웃 밖의 파일을 고쳤다");
+    }
+
+    /// **지을 수 없는 디렉터리도 첫 쓰기 전에 잰다**(리뷰 moai-dj4j.n9y, [`unbuildable`]) — 디렉터리가 설 자리의 있는 가장
+    /// 깊은 조상이 디렉터리가 아니면(보통 파일, 끊긴 링크, 고리) `create_dir_all` 이 거기서 멈춘다. 그것을 안 재던 판은 앞
+    /// 파일을 갈아끼운 뒤에 `File exists` 로 멈췄고, 연습은 0 으로 끝나며 심겠다고 했다. 끊긴 링크는 받은 사람의 기계에 없는
+    /// 자리를 가리키는 커밋된 링크가 흔한 꼴인데, [`outside`] 는 그 링크를 못 풀어 안으로 읽는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_tree_that_cannot_be_built_is_refused_before_the_first_write() {
+        let s = crate::scratch::Scratch::new("skill-measure-unbuilt");
+        let dir = s.join("plugin");
+        std::fs::create_dir_all(dir.join("skills/moai")).unwrap();
+        let skill = dir.join("skills/moai/SKILL.md");
+        std::fs::write(&skill, "옛 글\n").unwrap();
+        std::fs::write(dir.join("skills/moai-wiki"), "보통 파일\n").unwrap();
+        std::os::unix::fs::symlink("/nonexistent/moai-plugin", dir.join(".claude-plugin")).unwrap();
+        std::os::unix::fs::symlink("hooks", dir.join("hooks")).unwrap();
+        for (rest, stuck) in [
+            ("skills/moai-wiki/SKILL.md", "skills/moai-wiki"),
+            (".claude-plugin/plugin.json", ".claude-plugin"),
+            ("hooks/hooks.json", "hooks"),
+        ] {
+            let files = [
+                (PathBuf::from("skills/moai/SKILL.md"), "새 글\n".to_string()),
+                (PathBuf::from(rest), "{}\n".to_string()),
+            ];
+            let e = write_committed(&dir, &files, s.path()).expect_err("지을 수 없는 디렉터리 밑에 쓰려 했다");
+            let said = format!("{} is not a directory", dir.join(stuck).display());
+            assert!(e.message.contains(&said), "{rest}: 어느 자리인지 안 댄다 — {}", e.message);
+            assert_eq!(
+                std::fs::read_to_string(&skill).unwrap(),
+                "옛 글\n",
+                "{rest}: 거절될 트리의 앞 파일을 갈아끼웠다"
+            );
+        }
+    }
+
+    /// **커밋되는 트리의 임시 파일은 `.moai/` 에 선다**(moai-dj4j.rs4) — 대상 곁에 서면 쓰다 죽은 `install` 이
+    /// `SKILL.md.tmp.<pid>.<n>` 을 커밋되는 트리에 남기고 아무것도 그것을 무시하거나 치우지 않는다. 곁의 임시 이름을 다
+    /// 막아 두고 써 정말 `.moai/` 를 거치는지 본다. `.moai` 가 없으면 곁에서 짓는다.
+    #[cfg(unix)]
+    #[test]
+    fn committed_files_are_swapped_through_a_temp_file_in_dot_moai() {
+        let s = crate::scratch::Scratch::new("skill-stage");
+        std::fs::create_dir(s.join(".moai")).unwrap();
+        let dir = s.join(".agents/skills");
+        std::fs::create_dir_all(dir.join("moai")).unwrap();
+        let files = [(PathBuf::from("moai/SKILL.md"), "글\n".to_string())];
+        crate::store::with_tmp_names_taken(&dir.join("moai"), "SKILL.md", || write_committed(&dir, &files, s.path()))
+            .expect("`.moai/` 를 안 거치고 대상 곁에서 지으려 했다");
+        assert_eq!(std::fs::read_to_string(dir.join("moai/SKILL.md")).unwrap(), "글\n");
+        assert_eq!(names(&s.join(".moai")), Vec::<String>::new(), ".moai 에 찌꺼기가 남았다");
+
+        std::fs::remove_dir(s.join(".moai")).unwrap();
+        let files = [(PathBuf::from("moai/SKILL.md"), "둘째\n".to_string())];
+        write_committed(&dir, &files, s.path()).expect("`.moai` 가 없는 체크아웃에서 곁으로 물러서지 않았다");
+        assert_eq!(std::fs::read_to_string(dir.join("moai/SKILL.md")).unwrap(), "둘째\n");
+        assert_eq!(names(&dir.join("moai")), ["SKILL.md"], "대상 곁에 찌꺼기가 남았다");
+    }
+
+    /// **옛 선언을 걷는 커밋된 설정도 임시 파일을 `.moai/` 에 짓는다**(moai-dj4j.rs4, 리뷰 moai-dj4j.n9y) —
+    /// `.claude/settings.json` 은 커밋되는 파일이라, 곁에 지으면 쓰다 죽은 걸음이 `settings.json.tmp.<pid>.<n>` 을 거기
+    /// 남긴다. 곁의 임시 이름을 다 막아도 선언이 걷혀야 `.moai/` 를 거친 것이다.
+    #[test]
+    fn an_undeclared_settings_file_is_swapped_through_dot_moai() {
+        let s = crate::scratch::Scratch::new("skill-undeclare-stage");
+        std::fs::create_dir_all(s.join(".moai")).unwrap();
+        std::fs::create_dir_all(s.join(".claude")).unwrap();
+        let file = s.join(".claude/settings.json");
+        let declared = "{\n  \"extraKnownMarketplaces\": {\n    \"korean-skills\": {\"source\": {\"source\": \"github\", \
+                        \"repo\": \"DaleSeo/korean-skills\"}}\n  }\n}\n";
+        std::fs::write(&file, declared).unwrap();
+        let step = Undeclare { market: "korean-skills", file: file.clone(), ok: None };
+        let gone = crate::store::with_tmp_names_taken(&s.join(".claude"), "settings.json", || step.call(s.path()));
+        assert!(gone, "`.moai/` 를 안 거치고 설정 곁에서 지으려 했다");
+        let left = std::fs::read_to_string(&file).unwrap();
+        assert!(left.contains("extraKnownMarketplaces") && !left.contains("korean-skills"), "{left}");
     }
 }
