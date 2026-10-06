@@ -21,6 +21,12 @@ does not tag — see `CONTRIBUTING.md`.
   and kind names also complete; another key keeps the inserted candidate.
   Enter and Esc keep their existing meanings. (moai-fc97)
 
+### Fixed
+
+- **Tracker writes compare changed rows through an ID map.** Adding or updating
+  an issue no longer scans the original tracker once for every row. The file
+  format and handling of unchanged rows remain the same. (moai-fx9t.opm)
+
 ## [0.7.0] - 2026-10-06
 
 ### Added

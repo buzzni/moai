@@ -955,6 +955,13 @@ impl Repo {
         for o in original.iter_mut() {
             o.normalize();
         }
+        // Keep the first twin, as the former linear lookup did. Repairing duplicate
+        // ids must compare against the same original row while normal writes scale
+        // with the number of rows rather than its square.
+        let mut original_by_id = BTreeMap::new();
+        for o in &original {
+            original_by_id.entry(o.id.as_str()).or_insert(o);
+        }
 
         let reserved = load.reserved_ids();
         let mut issues = load.issues;
@@ -979,7 +986,7 @@ impl Repo {
                 // 지운 줄)에 빈 글로 떨어지던 판은 `새 줄 ''` 을 냈다 — id 도 제목도 아니라,
                 // 받는 쪽에 손잡이가 하나도 안 남는다. `create`·`rm` 이 옮겨 적은 `title` 을
                 // 다음 자리로 두고, 그것마저 없으면 id 라도 댄다.
-                let at = || match original.iter().any(|o| o.id == e.id) {
+                let at = || match original_by_id.contains_key(e.id.as_str()) {
                     true => e.id.clone(),
                     false => {
                         match issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).or(e.title.as_deref()) {
@@ -999,7 +1006,7 @@ impl Repo {
 
         for i in issues.iter_mut() {
             i.normalize();
-            let was = original.iter().find(|o| o.id == i.id);
+            let was = original_by_id.get(i.id.as_str()).copied();
             if was != Some(&*i) {
                 // 제목과 본문은 **이번에 바뀌었을 때만** 잰다 — 이미 큰 것을 든 줄도 옮기고 고칠 수 있다.
                 //
@@ -4319,6 +4326,32 @@ mod tests {
             .unwrap_err()
             .message;
         assert!(e.contains("두 번"), "{e}");
+    }
+
+    #[test]
+    fn repairing_twins_compares_against_the_first_original_row() {
+        let (r, d) = repo("repair_first_twin");
+        let mut first = issue("argos-0001");
+        first.status = Status::new("old_column");
+        let second = issue("argos-0001");
+        std::fs::write(
+            d.join(".moai/issues.jsonl"),
+            format!("{}\n{}\n", serde_json::to_string(&first).unwrap(), serde_json::to_string(&second).unwrap()),
+        )
+        .unwrap();
+
+        r.with_write(
+            || crate::i18n::Lang::En,
+            |issues, _, _| {
+                issues.truncate(1);
+                Ok((vec![], ()))
+            },
+        )
+        .expect("removing the later twin must leave the unchanged first row writable");
+
+        let load = r.read().unwrap();
+        assert_eq!(load.issues.len(), 1);
+        assert_eq!(load.issues[0].status.as_str(), "old_column");
     }
 
     /// 남의 낡은 줄 하나가 모든 쓰기를 막지 않는다.
