@@ -25191,6 +25191,49 @@ fn a_session_resumed_on_another_machine_moves_its_card_here() {
     assert!(!table.contains("@box-b"), "이어 연 세션을 다른 기계의 것으로 보였다 — {table}");
 }
 
+/// **훅이 없는 창의 `hello` 도 다른 기계에서 이은 제 장을 세션 id 로 찾는다**(리뷰 moai-nas5.cn7, moai-keka.fpm) — 훅을
+/// 심기 전에 연 창은 컨테이너를 다시 띄우고 `claude --resume` 으로 이어도 훅이 장을 다시 잇지 않는다. 프로세스로만 찾던
+/// 판은 앞 기계의 pid 를 든 제 장을 못 찾아 새 이름으로 장을 하나 더 세웠고, 역할을 잃은 그 장으로 감독이 일감을 가졌다.
+/// 찾은 장은 이름·역할을 그대로 두고 이 기계의 프로세스로 다시 잇는다.
+#[test]
+#[cfg(target_os = "linux")]
+fn hello_without_hooks_finds_its_card_from_another_machine_by_session() {
+    let s = init("hello-resume-elsewhere");
+    let there = "00000000-0000-0000-0000-000000000000/4026532999";
+    let agents = s.path().join(".moai/agents");
+    std::fs::create_dir_all(&agents).unwrap();
+    std::fs::write(
+        agents.join("sup.json"),
+        format!(
+            "{{\"v\":1,\"name\":\"sup\",\"vendor\":\"claude\",\"role\":\"supervisor\",\"status\":\"idle\",\
+             \"since\":\"{NOW}\",\"pid\":4194400,\"pid_start\":1,\"machine\":\"{there}\",\"host\":\"box-b\",\
+             \"session\":\"sessHLO1-ffff\",\"seen\":\"{NOW}\"}}\n"
+        ),
+    )
+    .unwrap();
+    let out = staged_under("claude", &["hello", "--json"])
+        .env("CLAUDE_CODE_SESSION_ID", "sessHLO1-ffff")
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let card = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        card.contains("\"name\":\"sup\"") && card.contains("\"role\":\"supervisor\""),
+        "제 장을 못 찾았다 — {card}"
+    );
+    assert!(!card.contains(there) && !card.contains("\"pid\":4194400,"), "앞 기계의 프로세스를 든 채 적었다 — {card}");
+    assert_eq!(names_in(&agents), ["sup.json"], "장이 둘로 섰다");
+    // 다른 세션의 창은 그 장을 제 것으로 안 읽는다 — 세션 id 가 열쇠다.
+    let other = staged_under("claude", &["hello", "--name", "w9", "--json"])
+        .env("CLAUDE_CODE_SESSION_ID", "sessHLO2-eeee")
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(other.status.success(), "{}", text(&other));
+    assert_eq!(names_in(&agents), ["sup.json", "w9.json"], "다른 세션의 창이 제 장을 가져갔다");
+}
+
 /// **지은 이름 셋이 다 쥐였어도 훅은 그 세션에 장을 세운다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 이름은 앞 8자
 /// 토막 뒤에 수를 이어 찾는다. 장을 안 세우던 판은 그 세션의 `moai inbox`·`send` 가 누구인지 몰라(`no_actor`) 섰다.
 /// 다른 기계의 조용한 장이 지은 이름을 하루 쥐게 된 뒤로(moai-nas5) 그 판이 넓어졌다.

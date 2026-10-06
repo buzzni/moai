@@ -976,6 +976,7 @@ impl Presence {
     /// **닻과 상태를 바꾼 때(`since`) 가운데 늦은 쪽으로 잰다**(리뷰 moai-ew4o.q9f) — 닻을 모르는 바이너리(이 필드 전의 판,
     /// 훅이 그 판을 부르는 동안)는 장을 고쳐 적어도 `seen` 을 모르는 키로 그대로 옮기고 `since` 만 새로 댄다. 닻만 보던
     /// 판은 그 훅이 도는 산 장을 새 판의 `hello` 가 닻을 적은 지 20분 뒤에 걷었다. 닻이 없는 장도 이 자로 `since` 다.
+    /// 지금보다 뒤로 적힌 닻은 그만큼 앞선 것으로 잰다([`Presence::quiet`], moai-keka.fpm).
     pub fn stale(&self, now: &str) -> bool {
         self.quiet(now).is_some_and(|secs| secs > STALE_AFTER)
     }
@@ -985,18 +986,25 @@ impl Presence {
         self.quiet(now).is_some_and(|secs| secs > EXPIRE_AFTER)
     }
 
-    /// 프로세스로 못 재는 장이 몇 초째 안 적혔나 — 닻과 `since` 가운데 늦은 쪽부터 잰다. 프로세스로 재는 장이거나 못
-    /// 읽으면 `None` 이다(모른다).
+    /// 프로세스로 못 재는 장이 몇 초째 안 적혔나 — 닻과 `since` 가운데 지금에 가장 가까운 쪽과의 거리다. 둘 다 지난
+    /// 때면 늦은 쪽이다. 프로세스로 재는 장이거나 못 읽으면 `None` 이다(모른다).
+    ///
+    /// **지금보다 뒤로 적힌 때는 그만큼 앞선 것으로 잰다**(2026-10-06 사용자 결정, moai-keka.fpm) — 시계가 앞선 기계가 적은
+    /// 장이다. 차를 그대로 재던 판에서는 그 장이 그 차만큼 늦게 낡고 늦게 걷힌다 — 시계가 하루 앞선 컨테이너가 남기고 죽은
+    /// 장은 이틀 동안 지은 이름을 쥐고 노는 일꾼으로 선다. 여유 폭은 [`STALE_AFTER`] 다 — 그 안쪽으로 앞선 산 기계의 장은 산 것으로 읽고,
+    /// 그 넘게 앞선 닻은 곧장 낡은 것으로, [`EXPIRE_AFTER`] 넘게 앞선 닻은 곧장 걷을 것으로 읽는다. 적힌 때 말고는 읽을
+    /// 것이 없어(장에 아무것도 더 안 적는다), 그렇게 죽은 장은 제 닻의 앞뒤 20분 동안만은 다시 산 것으로 읽힌다.
     fn quiet(&self, now: &str) -> Option<i64> {
         if self.by_process() {
             return None;
         }
-        let at = [self.seen.as_deref(), Some(self.since.as_str())]
+        let now = crate::model::parse_rfc3339(now)?;
+        [self.seen.as_deref(), Some(self.since.as_str())]
             .into_iter()
             .flatten()
             .filter_map(crate::model::parse_rfc3339)
-            .max()?;
-        Some(crate::model::parse_rfc3339(now)? - at)
+            .map(|at| (now - at).abs())
+            .min()
     }
 
     /// 그 에이전트가 떠났다고 보는가 — 프로세스가 죽었거나 닻이 낡았다. **모르면 아니다.** 걷기·깨우기와 창이 대는
@@ -2408,6 +2416,24 @@ mod tests {
         assert!(!card(None, "2026-10-04T06:50:00Z").stale(now));
         assert!(card(None, "2026-10-04T06:30:00Z").stale(now));
         assert!(!card(None, "").stale(now), "모르는 것을 낡은 것으로 읽었다");
+    }
+
+    /// **앞날로 적힌 닻은 그만큼 앞선 것으로 잰다**(2026-10-06 사용자 결정, moai-keka.fpm) — 시계가 앞선 기계가 적은 장이다.
+    /// 차를 그대로 재던 판은 그 차만큼 늦게 낡고 늦게 걷혔다. 20분 안쪽으로 앞선 닻은 산 것이고, 그 넘게 앞서면 낡고, 하루
+    /// 넘게 앞서면 걷힌다. 둘 가운데 지금에 가까운 쪽으로 잰다 — 엉뚱한 앞날이 적힌 닻이 새로 선 `since` 를 가리지 않는다.
+    #[test]
+    fn an_anchor_stamped_ahead_of_now_goes_stale_by_its_distance() {
+        let card =
+            |seen: &str, since: &str| Presence { seen: Some(seen.into()), since: since.into(), ..codex_card("cx") };
+        let now = "2026-10-04T07:00:00Z";
+        let ahead = card("2026-10-04T07:10:00Z", "2026-10-04T07:10:00Z");
+        assert!(!ahead.stale(now), "10분 앞선 시계의 산 장을 낡은 것으로 읽었다");
+        let far = card("2026-10-04T07:21:00Z", "2026-10-04T07:21:00Z");
+        assert!(far.stale(now) && !far.expired(now), "20분 넘게 앞선 닻을 산 것으로 읽었다");
+        let wild = card("2026-10-05T07:00:01Z", "2026-10-05T07:00:01Z");
+        assert!(wild.expired(now), "하루 넘게 앞선 닻을 걷을 것으로 안 읽었다");
+        assert!(!wild.holds_made_name(), "하루 넘게 앞선 닻이 지은 이름을 쥐었다");
+        assert!(!card("2027-01-01T00:00:00Z", "2026-10-04T06:59:00Z").stale(now), "앞날의 닻이 새 since 를 가렸다");
     }
 
     /// **지은 이름 셋이 다 쥐였어도 이름을 낸다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 앞 8자 토막 뒤에 수를 이어

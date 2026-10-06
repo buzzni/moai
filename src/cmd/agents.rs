@@ -246,17 +246,34 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             code::BAD_INPUT,
         ));
     }
-    // 이 에이전트가 이미 든 장 — 이어받은 장, 아니면 같은 프로세스의 장. Codex 는 같은 세션의 장이다 — 훅이 지었다.
-    let before = adopted.clone().or_else(|| match &agent {
-        Agent::Known(proc, _) => all.iter().find(|p| p.runs_as(proc)).cloned(),
-        Agent::Codex(session) => {
-            session.as_deref().and_then(|s| all.iter().find(|p| p.session.as_deref() == Some(s))).cloned()
-        }
-    });
     let seen = match &agent {
         Agent::Known(_, seen) => *seen,
         Agent::Codex(_) => Some("codex"),
     };
+    // **세션 id 는 조상에서 찾은 Claude 에게만 환경에서 읽는다** — `--pid`·`--as` 로 남을 가리켰으면 이 셸의 세션은 그
+    // 프로세스의 것이 아니다. **Codex 셸의 `CLAUDE_CODE_SESSION_ID` 는 안 읽는다** — 데몬의 환경에서 새어 든 남의 Claude
+    // 세션이다(2026-10-05 쟀다).
+    let own_session = match &agent {
+        Agent::Known(..) if args.pid.is_none() && adopted.is_none() && seen == Some("claude") => {
+            std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|s| !s.is_empty())
+        }
+        _ => None,
+    };
+    let of_session = |s: &str| all.iter().find(|p| p.session.as_deref() == Some(s)).cloned();
+    // 이 에이전트가 이미 든 장 — 이어받은 장, 아니면 같은 프로세스의 장, 그도 없으면 이 세션의 장. Codex 는 같은 세션의
+    // 장이다 — 훅이 지었다.
+    //
+    // **Claude 도 세션 id 로 찾는다**(리뷰 moai-nas5.cn7, moai-keka.fpm) — 컨테이너를 다시 띄우고 `claude --resume` 으로
+    // 이은 세션은 새 프로세스라, 훅이 없는 창(심기 전에 연 창)에서는 앞 컨테이너의 pid 를 든 제 장을 프로세스로 못 찾는다.
+    // 못 찾던 판은 `hello` 가 새 이름으로 장을 하나 더 세우거나, 지은 이름을 그 제 장이 하루 쥐어 거절했다. 훅의
+    // [`super::hook`] `attendee` 가 세션 id 로 찾아 이 프로세스로 다시 잇는 것과 같은 자다 — 이 기계의 같은 세션
+    // `--resume` 도 그렇다.
+    let before = adopted.clone().or_else(|| match &agent {
+        Agent::Known(proc, _) => {
+            all.iter().find(|p| p.runs_as(proc)).cloned().or_else(|| own_session.as_deref().and_then(of_session))
+        }
+        Agent::Codex(session) => session.as_deref().and_then(of_session),
+    });
     let vendor = vendor_given
         .or_else(|| before.as_ref().map(|p| p.vendor.clone()).filter(|v| !v.is_empty()))
         .or_else(|| seen.map(str::to_string))
@@ -335,15 +352,11 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         // 기계는 아래에서 pid 와 함께 적는다([`Presence::at`]).
         machine: None,
         host: None,
-        // **세션 id 는 조상에서 찾은 Claude 에게만 환경에서 읽는다** — `--pid` 로 남을 가리켰으면 이 셸의
-        // 세션은 그 프로세스의 것이 아니다. 훅이 적어 둔 것이 있으면 그것이 먼저다.
-        // Codex 는 그 셸이 대는 세션 id 를 적는다 — 훅이 그 세션의 장을 이것으로 찾는다. **Codex 셸의
-        // `CLAUDE_CODE_SESSION_ID` 는 안 읽는다** — 데몬의 환경에서 새어 든 남의 Claude 세션이다(2026-10-05 쟀다).
+        // 훅이 적어 둔 것이 있으면 그것이 먼저다. Claude 는 이 셸의 세션 id 를(`own_session` 의 자), Codex 는 그 셸이
+        // 대는 세션 id 를 적는다 — 훅이 그 세션의 장을 이것으로 찾는다.
         session: keep.as_ref().and_then(|p| p.session.clone()).or_else(|| match &agent {
             Agent::Codex(session) => session.clone(),
-            Agent::Known(..) => (args.pid.is_none() && seen == Some("claude"))
-                .then(|| std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|s| !s.is_empty()))
-                .flatten(),
+            Agent::Known(..) => own_session.clone(),
         }),
         cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
         tmux_pane,
