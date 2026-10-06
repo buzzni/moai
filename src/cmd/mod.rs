@@ -278,6 +278,10 @@ pub fn note_partial() {
 pub fn had_partial() -> bool {
     PARTIAL.load(Ordering::Relaxed)
 }
+/// 깃발을 거두며 그때까지의 값을 낸다 — 이어 부른 명령의 부분 실패를 제 종료 코드에 안 싣는 자리(`init`)가 쓴다.
+pub fn take_partial() -> bool {
+    PARTIAL.swap(false, Ordering::Relaxed)
+}
 
 /// 제 저장소를 읽고, `worktree` 면 다른 워크트리를 겹친다(`worktree::gather`).
 ///
@@ -462,6 +466,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Init {
             prefix,
             no_agents,
+            driver,
             no_driver,
             tracking,
             guide,
@@ -483,7 +488,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
                 prefix: prefix.as_deref(),
                 tracking,
                 guide,
-                no_driver,
+                driver: pair(driver, no_driver),
                 skill: pair(skill, no_skill),
                 register: pair(register, no_register),
             };

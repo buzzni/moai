@@ -12390,7 +12390,9 @@ mod tests {
         let lang = crate::i18n::Lang::En;
         let Decision::Context(bare) = guided_board(&["todo 3".into()], lang, true) else { panic!("실어야 한다") };
         assert!(bare.contains(say(lang, "hook.unguided")), "{bare}");
-        let Decision::Context(plain) = guided_board(&["todo 3".into()], lang, false) else { panic!("실어야 한다") };
+        let Decision::Context(plain) = guided_board(&["todo 3".into()], lang, false) else {
+            panic!("실어야 한다")
+        };
         assert!(!plain.contains(say(lang, "hook.unguided")), "{plain}");
         assert_eq!(board(&["   ".into()]), Decision::Pass);
     }

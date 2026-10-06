@@ -89,7 +89,9 @@ pub struct Flags<'a> {
     pub tracking: Option<Tracking>,
     /// `--guide`, 그리고 `--no-agents` 는 `--guide none` 이다.
     pub guide: Option<Guide>,
-    pub no_driver: bool,
+    /// `--driver`·`--no-driver` — 칸마다 짝 플래그가 선다. 켜는 쪽이 없던 판은 커밋하는 트래커에서 이 칸만
+    /// 플래그로 못 잠가, 모든 칸에 플래그를 줘도 화면이 열렸다(리뷰 moai-zynt.63u).
+    pub driver: Option<bool>,
     /// `--skill`(`Some(true)`)·`--no-skill`(`Some(false)`).
     pub skill: Option<bool>,
     /// `--register`·`--no-register`.
@@ -120,7 +122,7 @@ impl Choices {
             tracking: f.tracking,
             guide: f.guide,
             skill: f.skill,
-            driver: f.no_driver.then_some(false),
+            driver: f.driver,
             project: f.register,
         }
     }
@@ -172,15 +174,14 @@ pub struct Defaults {
 ///
 /// 안내는 커밋하면 별도 파일과 링크(moai-cbfz), 이 클론에만 두면 AGENTS.md 를 안 건드리고 훅으로 알린다
 /// (사용자 결정, moai-6pld).
-pub const SCREEN: Defaults =
-    Defaults {
-        tracking: Tracking::Exclude,
-        guide_tracked: Guide::File,
-        guide_local: Guide::Hook,
-        skill: true,
-        driver: true,
-        project: true,
-    };
+pub const SCREEN: Defaults = Defaults {
+    tracking: Tracking::Exclude,
+    guide_tracked: Guide::File,
+    guide_local: Guide::Hook,
+    skill: true,
+    driver: true,
+    project: true,
+};
 
 /// 터미널이 아닌 곳(에이전트·스크립트)과 `--yes` 의 값. **지금까지의 `init` 과 바이트째 같아야 한다**
 /// (2026-10-06 사용자 결정) — 에이전트가 부르던 결과를 이 묶음이 지킨다. 화면의 기본값이 달라져도
@@ -188,15 +189,14 @@ pub const SCREEN: Defaults =
 ///
 /// 이 클론에만 두라고 플래그로만 준 것은 AGENTS.md 를 안 건드리는 데서 멈춘다 — 훅을 기본으로 걸면 스크립트가
 /// 부른 `init` 이 `claude` 를 불러 플러그인을 깐다. 원하면 `--guide hook` 을 준다.
-pub const PLAIN: Defaults =
-    Defaults {
-        tracking: Tracking::Commit,
-        guide_tracked: Guide::Block,
-        guide_local: Guide::None,
-        skill: false,
-        driver: true,
-        project: false,
-    };
+pub const PLAIN: Defaults = Defaults {
+    tracking: Tracking::Commit,
+    guide_tracked: Guide::Block,
+    guide_local: Guide::None,
+    skill: false,
+    driver: true,
+    project: false,
+};
 
 /// 빈칸 없는 계획. `init::run` 은 이것만 받고 판단하지 않는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -294,7 +294,8 @@ pub struct Form {
     pub typed: String,
     /// 커서가 선 칸. 칸이 숨어도 칸으로 들고 있다 — 줄 번호로 들면 위 칸이 숨을 때 엉뚱한 칸으로 옮겨 간다.
     pub cursor: Field,
-    /// 심으려다 접두어가 틀려 멈춘 까닭. 접두어를 고치면 걷는다.
+    /// 심으려다 멈춘 까닭(접두어·git 밖·부딪힘). **어느 칸이든 고치면 걷는다**(리뷰 moai-zynt.63u) — 접두어를
+    /// 고칠 때만 걷던 판은 안내 칸을 바꿔 부딪힘을 풀어도 옛 까닭이 다음 Enter 까지 남았다.
     pub problem: Option<String>,
 }
 
@@ -364,8 +365,10 @@ impl Form {
             Field::Prefix => None,
             Field::Tracking => Some((Tracking::ALL.len(), Tracking::ALL.iter().position(|t| *t == plan.tracking)?)),
             Field::Guide => Some((Guide::ALL.len(), Guide::ALL.iter().position(|g| *g == plan.guide)?)),
-            // 켜는 값이 왼쪽(0), 끄는 값이 오른쪽(1)에 그려진다.
-            Field::Skill => Some((2, usize::from(!plan.skill))),
+            // 켜는 값이 왼쪽(0), 끄는 값이 오른쪽(1)에 그려진다. **플래그로 잠긴 설치 칸은 플래그의 값을 그린다**(리뷰
+            // moai-zynt.63u) — `--no-skill` 에 훅 안내를 고르면 계획은 설치를 켜고 Enter 가 부딪힘을 대는데, 그 칸이
+            // "설치 · 플래그로 정함" 으로 서면 화면이 플래그와 거꾸로 말한다.
+            Field::Skill => Some((2, usize::from(!self.fixed.skill.unwrap_or(plan.skill)))),
             Field::Driver => Some((2, usize::from(!plan.driver))),
             Field::Project => Some((2, usize::from(!plan.project))),
         }
@@ -443,6 +446,7 @@ impl Form {
             _ => return,
         };
         self.pick(f, to);
+        self.problem = None;
     }
 }
 
@@ -485,7 +489,7 @@ mod tests {
                             prefix,
                             tracking: Some(tracking),
                             guide: Some(guide),
-                            no_driver,
+                            driver: no_driver.then_some(false),
                             skill: Some(true),
                             register: Some(false),
                         };
@@ -600,6 +604,30 @@ mod tests {
         assert_eq!(f.choices().prefix, None, "typed back to the suggestion");
         f.key(press(KeyCode::Char('x')));
         assert_eq!(f.choices().prefix.as_deref(), Some("moaix"));
+    }
+
+    /// 접두어가 아닌 칸을 고쳐도 멈춘 까닭을 걷는다 — 그 까닭은 이제 그 칸의 것일 수 있다(부딪힘·git 밖).
+    #[test]
+    fn picking_another_row_clears_the_problem() {
+        let mut f = form(Choices::default());
+        f.problem = Some("hooks need the skill".into());
+        choose(&mut f, Field::Guide, 3);
+        assert_eq!(f.problem, None);
+    }
+
+    /// 칸마다 짝 플래그가 선다 — `--driver` 로 드라이버 칸까지 잠그면 커밋하는 트래커도 묻지 않는다.
+    #[test]
+    fn every_row_that_stands_can_be_pinned_by_a_flag() {
+        let all = Flags {
+            prefix: Some("abc"),
+            tracking: Some(Tracking::Commit),
+            guide: Some(Guide::Block),
+            driver: Some(true),
+            skill: Some(false),
+            register: Some(false),
+        };
+        assert!(Choices::from_flags(&all).complete(&SCREEN));
+        assert!(!Choices::from_flags(&Flags { driver: None, ..all }).complete(&SCREEN));
     }
 
     #[test]

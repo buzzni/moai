@@ -23570,7 +23570,10 @@ fn init_tracking_exclude_leaves_every_committed_file_as_it_was() {
     for line in ["/.moai/", "/.claude/moai-plugin/", "/.claude/settings.local.json", "/.claude/worktrees/"] {
         assert!(exclude.lines().any(|l| l == line), "{line} 이 없다\n{exclude}");
     }
-    assert!(git(root, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(), "드라이버를 심었다");
+    assert!(
+        git(root, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(),
+        "드라이버를 심었다"
+    );
 
     let st = ok(root, &["status", "--json"]);
     for kind in ["gitattributes_rules", "gitignore_rules", "exclude_rules", "agents_"] {
@@ -23691,4 +23694,163 @@ fn the_board_says_where_the_usage_is_only_without_an_agents_block() {
     let block = init("hook-guided");
     let board = carried_text(&hook_out(&block, "user-prompt-submit", &event(&block, "u2")));
     assert!(!board.contains("`moai` 스킬"), "블록이 있는데 또 댔다 — {board}");
+}
+
+/// **하위 디렉터리의 트래커를 git 밖에 두면 그 디렉터리가 빠진다**(리뷰 moai-zynt.63u). `.git/info/exclude` 의 줄은
+/// 작업 트리 꼭대기가 뿌리라, `/.moai/` 를 그대로 적던 판은 하위 트래커를 못 막고(`git add -A` 가 담았다) 다시 부른
+/// `init` 이 그것을 커밋으로 읽어 커밋되는 파일을 심었다. `.gitignore` 로 뺀 것은 git 이 `web/.gitignore` 로 대는데,
+/// 이름이 `.gitignore` 인지로 가르던 판은 그것을 `exclude` 로 읽었다.
+#[test]
+fn a_tracker_kept_out_of_git_in_a_subdirectory_stays_out() {
+    let s = Scratch::new("init-sub-local");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    for (dir, tracking) in [("svc", "exclude"), ("web", "gitignore")] {
+        let at = root.join(dir);
+        std::fs::create_dir_all(&at).unwrap();
+        ok(&at, &["init", dir, "--tracking", tracking, "--guide", "none"]);
+        let st = ok(&at, &["status", "--json"]);
+        for kind in ["gitattributes_rules", "gitignore_rules", "exclude_rules", "gitignore_local_rules"] {
+            assert!(!st.contains(kind), "{dir}: 갓 심은 트래커에 {kind} 를 댔다 — {st}");
+        }
+        assert_eq!(field(&ok(&at, &["init", "--json"]), "tracking"), tracking, "{dir}: 다시 부르니 갈렸다");
+    }
+    assert_eq!(git(root, &["status", "--porcelain", "--untracked-files=all"]), "?? web/.gitignore\n");
+    let exclude = read(&root.join(".git/info/exclude"));
+    assert!(exclude.lines().any(|l| l == "/svc/.moai/"), "{exclude}");
+    assert!(!exclude.lines().any(|l| l == "/.moai/"), "꼭대기의 .moai/ 를 막았다\n{exclude}");
+}
+
+/// **되살리는 규칙은 무시가 아니고, 파일 하나에 걸린 남의 규칙은 트래커를 빼지 않는다**(리뷰 moai-zynt.63u).
+/// `check-ignore -v` 는 `!` 패턴에 걸린 경로도 대고 0 으로 끝난다 — 허용 목록 꼴의 `.gitignore` 나 `config.toml`
+/// 을 무시하는 저장소에서 커밋할 트래커를 `.gitignore` 의 것으로 읽던 판은, 보드가 시킨 대로 다시 부른 `init` 이
+/// `/.moai/` 를 그 파일에 적어 트래커를 git 밖으로 뺐다.
+#[test]
+fn a_reincluded_or_partly_ignored_tracker_stays_committed() {
+    for (name, rules) in [("allow", "*\n!*/\n!*.toml\n!*.jsonl\n!*.md\n!.git*\n"), ("cfg", "config.toml\n")] {
+        let s = Scratch::new(&format!("init-reincluded-{name}"));
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        std::fs::write(root.join(".gitignore"), rules).unwrap();
+        ok(root, &["init", "argos"]);
+        let st = ok(root, &["status", "--json"]);
+        assert!(!st.contains("gitignore_rules"), "{name}: 커밋할 트래커에 git 밖의 줄을 요구했다 — {st}");
+        assert_eq!(field(&ok(root, &["init", "--json"]), "tracking"), "commit", "{name}");
+        assert!(!read(&root.join(".gitignore")).lines().any(|l| l == "/.moai/"), "{name}: 트래커를 git 밖으로 뺐다");
+    }
+}
+
+/// **git 밖에 둔 트래커라도 서 있는 블록은 다시 부른 `init` 이 맞춘다**(리뷰 moai-zynt.63u) — 안 건드리던 판은
+/// 낡은 블록을 두고 "다 맞아 있다" 고 해, `moai init` 을 대는 `status` 의 알림이 영영 안 걷혔다.
+#[test]
+fn init_keeps_a_block_current_in_a_tracker_kept_out_of_git() {
+    let s = Scratch::new("init-local-block");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--tracking", "exclude", "--guide", "block"]);
+    let fresh = read(&root.join("AGENTS.md"));
+    assert!(fresh.contains("Start a session"), "시험의 전제 — 고칠 글이 블록에 없다");
+    std::fs::write(root.join("AGENTS.md"), fresh.replace("Start a session", "Begin a session")).unwrap();
+    assert!(ok(root, &["status", "--json"]).contains("agents_hand_edited"));
+    ok(root, &["init"]);
+    assert_eq!(read(&root.join("AGENTS.md")), fresh, "낡은 블록을 그대로 뒀다");
+    assert!(!ok(root, &["status", "--json"]).contains("agents_"));
+}
+
+/// **`.moai/guide.md` 는 AGENTS.md 와 같은 자로 읽는다**(리뷰 moai-zynt.63u) — CRLF 체크아웃은 같은 글이고, 못
+/// 읽으면 `--check` 가 그 파일의 이름을 대며, FIFO 는 건너뛰어 `init` 이 멈추지 않는다.
+#[cfg(unix)]
+#[test]
+fn the_guide_file_is_read_like_agents_md() {
+    let s = Scratch::new("init-guide-read");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--guide", "file"]);
+    let guide = root.join(".moai/guide.md");
+    std::fs::write(&guide, read(&guide).replace('\n', "\r\n")).unwrap();
+    assert_eq!(field(&ok(root, &["init", "--check", "--json"]), "agents"), "current", "CRLF 를 낡았다고 했다");
+    assert!(ok(root, &["init", "--json"]).contains("\"guide_file\":false"), "CRLF 를 LF 로 다시 썼다");
+
+    std::fs::write(&guide, b"caf\xe9\n").unwrap();
+    let out = moai(root, &["init", "--check"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("guide.md") && !err.contains("AGENTS.md"), "{err}");
+
+    std::fs::remove_file(&guide).unwrap();
+    assert!(Command::new("mkfifo").arg(&guide).status().unwrap().success(), "FIFO 를 못 지었다");
+    let mut child = staged(&["init", "--json"]).current_dir(root).stdout(Stdio::piped()).spawn().unwrap();
+    for _ in 0..600 {
+        if child.try_wait().unwrap().is_some() {
+            let out = child.wait_with_output().unwrap();
+            let js = String::from_utf8_lossy(&out.stdout);
+            assert!(out.status.success() && js.contains(".moai/guide.md"), "못 건드린 자리로 안 댔다 — {js}");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("FIFO 인 .moai/guide.md 앞에서 init 이 멈췄다");
+}
+
+/// **git 밖에 둘 줄을 못 쓰면 아무것도 안 심는다**(리뷰 moai-zynt.63u) — 그 줄이 이 트래커가 git 밖이라는 유일한
+/// 기록이다. `.moai/` 만 세우고 넘어가던 판은 시킨 대로 다시 부른 `init` 이 그것을 커밋으로 읽어 커밋되는 파일을 심었다.
+#[cfg(unix)]
+#[test]
+fn init_plants_nothing_when_the_exclude_lines_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("init-exclude-ro");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    let exclude = root.join(".git/info/exclude");
+    std::fs::create_dir_all(root.join(".git/info")).unwrap();
+    std::fs::write(&exclude, "").unwrap();
+    std::fs::set_permissions(&exclude, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&exclude).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+    let out = moai(root, &["init", "argos", "--tracking", "exclude", "--guide", "none"]);
+    std::fs::set_permissions(&exclude, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(!out.status.success(), "못 빼고도 0 으로 끝났다 — {}", String::from_utf8_lossy(&out.stdout));
+    assert!(!root.join(".moai").exists(), "git 밖에 못 두고도 트래커를 심었다");
+}
+
+/// **빈 접두어는 심기 전에 제 말로 거절한다**(리뷰 moai-zynt.63u) — 모양 검사를 지나 설정 검사에서야 멈추면 선택
+/// 상자는 이미 닫혀 고른 것이 사라진다. 플래그도 같은 잣대다.
+#[test]
+fn init_refuses_an_empty_prefix_up_front() {
+    let s = Scratch::new("init-empty-prefix");
+    git(s.path(), &["init", "-q", "."]);
+    let out = moai(s.path(), &["init", "", "--json"]);
+    assert!(!out.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+    assert!(!s.path().join(".moai").exists());
+}
+
+/// **딸린 워크트리에서는 트래커를 git 밖에 두지 않는다**(리뷰 moai-zynt.63u) — `.git/info/exclude` 는 모든 워크트리가
+/// 함께 쓰므로 `/.moai/` 한 줄이 주 체크아웃의 커밋된 트래커까지 가려, 새 사람의 저널 파일이 말없이 커밋에서 빠졌다.
+/// 워크트리 거절문이 대는 `MOAI_HERE=1 moai init` 이 그리로 가는 길이라 그 자리에서 거절하고, 주 체크아웃은 그대로다.
+#[test]
+fn a_linked_worktree_does_not_keep_a_tracker_out_of_git() {
+    let s = Scratch::new("init-linked-local");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "."]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-qm", "tracker"]);
+    let linked = s.path().join("linked");
+    git(&main, &["worktree", "add", "-q", "-b", "side", linked.to_str().unwrap()]);
+    git(&linked, &["rm", "-rq", "--cached", ".moai"]);
+    std::fs::remove_dir_all(linked.join(".moai")).unwrap();
+    let before = std::fs::read_to_string(main.join(".git/info/exclude")).unwrap_or_default();
+    let out = staged(&["init", "wt", "--tracking", "exclude", "--guide", "none", "--json"])
+        .env("MOAI_HERE", "1")
+        .current_dir(&linked)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+    assert_eq!(std::fs::read_to_string(main.join(".git/info/exclude")).unwrap_or_default(), before);
+    assert!(!linked.join(".moai").exists(), "거절하고도 심었다");
 }

@@ -97,7 +97,7 @@ cargo build --release      # target/release/moai
 ## First five minutes
 
 ```sh
-moai init                            # asks first in a terminal; --yes takes the defaults
+moai init                            # asks first in a terminal; --yes plants as before
 moai status                          # board, warnings, flow — start sessions here
 moai add 'the board wraps at 80 columns' -t bug -p 1
 moai ready                           # what you can pick up right now

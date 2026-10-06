@@ -819,11 +819,13 @@ Examples:
 
   **In a terminal the first init asks.** It shows the prefix and each choice
   with its default picked, and Enter plants. A flag picks its row and locks
-  it; give every row a flag, or --yes, and nothing is asked. Nothing is
+  it; give every row a flag and nothing is asked. --yes asks nothing and
+  plants what init has always planted - committed, with the guide block - in
+  every row no flag sets, which is not what the screen picks. Nothing is
   asked where a script or an agent calls it - stdin or stdout is not a
-  terminal, or --json - and there the defaults are what init has always
-  done. Running it again where .moai already stands never asks. Esc stops
-  with nothing written.
+  terminal, or --json - and there init plants the same as --yes. Running it
+  again where .moai already stands never asks. Esc stops with nothing
+  written.
 
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
@@ -860,6 +862,9 @@ Examples:
         /// block, file (.moai/guide.md + link), hook or none
         #[arg(long, value_name = "how", value_parser = ["block", "file", "hook", "none"], hide_possible_values = true)]
         guide: Option<String>,
+        /// Plant the merge driver in .git/config (the default)
+        #[arg(long, conflicts_with = "no_driver")]
+        driver: bool,
         /// Leave .git/config alone (plant no merge driver)
         #[arg(long)]
         no_driver: bool,
@@ -878,14 +883,14 @@ Examples:
         /// Do not add it to your project list
         #[arg(long)]
         no_register: bool,
-        /// Ask nothing; what no flag sets takes the default
+        /// Ask nothing; unset rows plant as init always did
         #[arg(short = 'y', long)]
         yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes", "check"])]
         print: bool,
     },
 }

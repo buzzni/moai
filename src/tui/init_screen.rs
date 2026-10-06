@@ -10,13 +10,20 @@ use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::{Frame, TerminalOptions, Viewport};
 use unicode_width::UnicodeWidthStr;
 
-/// 머리 · 빈 줄 · 칸들 · 빈 줄 · 알림 · 키 — 칸 말고 다섯 줄이다. 칸이 숨으면 아래가 빈 줄로 남는다 — 높이를
+/// 머리 · 빈 줄 · 칸들 · 빈 줄 · 알림 두 줄 · 키 — 칸 말고 여섯 줄이다. 칸이 숨으면 그 줄이 빈 줄로 남는다 — 높이를
 /// 그때마다 바꾸면 인라인 뷰포트가 셸 스크롤을 밀어 올린다.
-const HEIGHT: u16 = 5 + FIELDS.len() as u16;
+const HEIGHT: u16 = TOP + NOTE + 1;
+
+/// 머리 · 빈 줄 · 칸들 · 빈 줄.
+const TOP: u16 = 3 + FIELDS.len() as u16;
+
+/// 알림에 두는 줄 — **거절문은 한 줄을 넘는다**(리뷰 moai-zynt.63u). 한 줄에 자르던 판은 80칸에서 긴 접두어의
+/// 짧은 후보처럼 고칠 길을 대는 끝을 늘 잘랐다. 접어서 두 줄에 싣는다.
+const NOTE: u16 = 2;
 
 /// 사람이 보는 터미널인가 — **읽는 쪽과 쓰는 쪽이 둘 다** 터미널이어야 묻는다. 한쪽이라도 파이프면
 /// 부른 것은 에이전트나 스크립트다: 묻는 순간 아무도 답하지 않는 키를 영영 기다린다.
@@ -33,8 +40,16 @@ pub fn ask(
     mut form: Form,
     check: &dyn Fn(&Plan) -> Option<String>,
 ) -> Result<Option<Plan>, String> {
-    let mut term = ratatui::try_init_with_options(TerminalOptions { viewport: Viewport::Inline(HEIGHT) })
-        .map_err(|e| e.to_string())?;
+    // **못 켜도 raw mode 를 되돌린다**(리뷰 moai-zynt.63u) — `try_init_with_options` 는 raw mode 를 켠 **뒤에** 인라인
+    // 뷰포트를 세우려 커서 자리를 묻는다(`ESC[6n`). 답하지 않는 터미널에서 그 물음이 지면, `?` 로 바로 나가던 판은
+    // 아래의 끄는 길을 건너 사람의 셸을 raw mode 로 남겼다.
+    let mut term = match ratatui::try_init_with_options(TerminalOptions { viewport: Viewport::Inline(HEIGHT) }) {
+        Ok(term) => term,
+        Err(e) => {
+            let _ = ratatui::crossterm::terminal::disable_raw_mode();
+            return Err(e.to_string());
+        }
+    };
     let out = (|| -> std::io::Result<Option<Plan>> {
         loop {
             term.draw(|f| draw(f, &form, lang, dir))?;
@@ -85,8 +100,12 @@ fn names(f: Field, lang: Lang) -> (&'static str, Vec<&'static str>) {
                 say(lang, "init.ask_guide_none"),
             ],
         ),
-        Field::Skill => (say(lang, "init.ask_skill"), vec![say(lang, "init.ask_skill_on"), say(lang, "init.ask_skill_off")]),
-        Field::Driver => (say(lang, "init.ask_driver"), vec![say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")]),
+        Field::Skill => {
+            (say(lang, "init.ask_skill"), vec![say(lang, "init.ask_skill_on"), say(lang, "init.ask_skill_off")])
+        }
+        Field::Driver => {
+            (say(lang, "init.ask_driver"), vec![say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")])
+        }
         Field::Project => {
             (say(lang, "init.ask_project"), vec![say(lang, "init.ask_project_on"), say(lang, "init.ask_project_off")])
         }
@@ -116,9 +135,15 @@ fn draw(f: &mut Frame, form: &Form, lang: Lang, dir: &str) {
                     cursor_at = Some(Position::new(x.min(area.right().saturating_sub(1)), area.y + 2 + i as u16));
                 }
             }
+            // **잠긴 칸은 고른 값 하나만 댄다**(리뷰 moai-zynt.63u) — 못 고르는 칸에 선택지를 다 늘어놓으면 80칸에서
+            // 잠근 까닭(`· set by a flag`)이 잘려, 잠겼다는 것을 흐린 글씨 하나가 말했다(색이 혼자 뜻을 지지 않는다).
             Some((_, at)) => {
-                let shown: Vec<String> =
-                    options.iter().enumerate().map(|(j, name)| format!("{} {name}", mark(j == at))).collect();
+                let shown: Vec<String> = options
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, _)| !locked || *j == at)
+                    .map(|(j, name)| format!("{} {name}", mark(j == at)))
+                    .collect();
                 spans.push(Span::raw(shown.join("   ")));
             }
         }
@@ -136,9 +161,11 @@ fn draw(f: &mut Frame, form: &Form, lang: Lang, dir: &str) {
         };
         lines.push(Line::from(spans).style(style));
     }
-    lines.push(Line::raw(""));
+    // 칸이 숨어도 알림과 키는 제자리에 선다 — 칸 다음의 빈 줄은 숨은 칸의 자리까지 비운다.
+    let at = |dy: u16, height: u16| Rect { y: area.y.saturating_add(dy), height, ..area }.intersection(area);
+    f.render_widget(Paragraph::new(lines), at(0, TOP));
     // 틀린 접두어는 `!` 를 달고 선다 — 색이 혼자 뜻을 지지 않는다.
-    lines.push(match &form.problem {
+    let note = match &form.problem {
         Some(why) => Line::from(Span::styled(format!("! {why}"), Style::new().bold())),
         None => {
             let shown = if form.typed.is_empty() { "…" } else { form.typed.as_str() };
@@ -147,9 +174,10 @@ fn draw(f: &mut Frame, form: &Form, lang: Lang, dir: &str) {
                 Style::new().add_modifier(Modifier::DIM),
             ))
         }
-    });
-    lines.push(Line::from(Span::styled(say(lang, "init.ask_keys"), Style::new().add_modifier(Modifier::DIM))));
-    f.render_widget(Paragraph::new(lines), Rect { height: area.height.min(HEIGHT), ..area });
+    };
+    f.render_widget(Paragraph::new(note).wrap(Wrap { trim: true }), at(TOP, NOTE));
+    let keys = Line::from(Span::styled(say(lang, "init.ask_keys"), Style::new().add_modifier(Modifier::DIM)));
+    f.render_widget(Paragraph::new(keys), at(TOP + NOTE, 1));
     if let Some(p) = cursor_at {
         f.set_cursor_position(p);
     }

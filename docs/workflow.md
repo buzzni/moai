@@ -15,9 +15,10 @@ prefix (it cannot change later), whether git tracks the tracker, where the agent
 guide goes ([the agents page](agents.md#where-the-guide-goes)), whether to install
 the hooks and skills, the merge driver, and whether to add the repository to your
 project list. Each row comes with its default picked; Enter plants, Esc stops with
-nothing written. A flag picks its row and locks it, and `--yes` takes every
-default without asking. A script or an agent is never asked — without a terminal,
-`init` is what it has always been: committed, with the guide block.
+nothing written. A flag picks its row and locks it. `--yes` asks nothing and plants
+what `init` has always planted — committed, with the guide block — in every row no
+flag sets; that is not what the screen picks. A script or an agent is never asked,
+and gets the same as `--yes`.
 
 **Whether git tracks the tracker** is the one choice that changes how everything
 else behaves:
@@ -174,4 +175,4 @@ where its contributors read them rather than repeated here:
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-zynt
