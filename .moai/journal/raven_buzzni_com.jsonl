@@ -4864,3 +4864,13 @@
 {"ts":"2026-10-06T07:44:23Z","id":"moai-j9nf.395","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"guide 파일은 트래커 뿌리에서 읽고, 워크트리의 거짓 손질 알림을 걷는다 (5)"}
 {"ts":"2026-10-06T07:44:23Z","id":"moai-j9nf.ce9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"선택 상자 — TERM=dumb 는 묻지 않고 심는다, 보고는 상자 자리에, 거절은 한 함수로 (8·9·15)"}
 {"ts":"2026-10-06T07:44:23Z","id":"moai-j9nf.ehp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"링크 트래커의 무시 줄, --driver 거절, --json gitignore 의 뜻, 문서 (11·12·14)"}
+{"ts":"2026-10-06T07:45:30Z","id":"moai-j9nf.b45","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:33Z","id":"moai-j9nf.tfu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:37Z","id":"moai-j9nf.3su","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:40Z","id":"moai-j9nf.395","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:43Z","id":"moai-j9nf.ce9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:44Z","id":"moai-fc97.15o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:47Z","id":"moai-j9nf.ehp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:47Z","id":"moai-fc97.c34","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:50Z","id":"moai-fc97.0v8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T07:45:53Z","id":"moai-fc97.8zk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
