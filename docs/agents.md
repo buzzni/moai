@@ -231,7 +231,7 @@ The hooks catch the same few places in each agent's session. Each calls
 | The session starts | A baseline of the warnings is written and the session's [presence](glossary.md#presence) row is written, idle. After a compaction, what the session was holding is loaded back into it, with any [letters](glossary.md#letter) for it, and busy or idle stays as it was |
 | A person sends a prompt | The `moai status` board is loaded, once per session. The letters for the session are loaded every time, and it is marked busy |
 | Before a tool call | The five rules below are checked, and a subagent is kept from taking its parent's letters ([below](#leave-each-other-letters)); the mailbox is not opened. The session's row is marked as still alive, at most once a minute — a row another machine reads is told by that mark alone |
-| The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. A turn that ends is marked idle |
+| The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. That question fits the same room a letter gets there: open reviews tied to the held work, and held rows that would close their epic if deferred, get the room first; the other held rows fill what is left from the top, those that do not fit are left out whole, and one more line counts them and names `moai prime`, which lists everything held. A turn that ends is marked idle |
 | A turn ends without that | An API error (Claude, or an Antigravity run that stopped on one), an interrupt (Codex) or the session closing marks it idle and loads nothing — a Codex session that closes has its row taken away instead |
 
 **The hook never fails the session.** Whatever goes wrong inside it, it exits 0,
@@ -602,4 +602,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-keka
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka
