@@ -5278,12 +5278,13 @@ pub struct Unreadable<'a> {
 ///
 /// `zone` 은 **읽는 사람의 시간대**다 — 기한 판정 하나에만 든다([`Dues`]). 이 문은 **낼 것을 그
 /// 자리에서 다 내는** 표면의 것이라 판정까지 접어서 낸다([`StatusReport::judged`]): `moai status`·
-/// `--json`·훅의 셈이 그렇다. 셈을 들고 있다가 나중에 그리는 탐색기는 [`status_in`] 으로 시간대
-/// 없이 세고 [`Dues`] 를 그대로 들었다가 그릴 때 잰다(moai-fgjj).
+/// `--json`·훅의 셈이 그렇다. 셈을 들고 있다가 나중에 그리는 탐색기는 [`status_with_archive_unjudged`] 로
+/// 시간대 없이 세고 [`Dues`] 를 그대로 들었다가 그릴 때 잰다(moai-fgjj).
 ///
 /// **시험만 부른다**(moai-nkwg) — 표면들은 아카이브를 곁들인 `cmd::status::archive_board` 로 세고, 판정은
-/// 그 겉에서 접는다. 아카이브 없는 줄의 판을 한 줄로 세우는 시험의 길로 남긴다.
-#[cfg(test)]
+/// 그 겉에서 접는다. 아카이브 없는 줄의 판을 한 줄로 세우는 시험의 길로 남긴다. 문서에는 선다(`doc`) — 이 이름을
+/// 가리키는 글이 여럿이다.
+#[cfg(any(test, doc))]
 pub fn status(
     issues: &[Issue],
     unreadable: &[Unreadable],
@@ -5302,7 +5303,8 @@ pub fn status(
 /// 손으로 이으면 [`Soil`] 이 아닌 조각에서 지은 지도를 넘겨도 컴파일되고, 그때 수가 조용히
 /// 어긋난다 — 이 문은 `issues` 하나만 받아 그 짝을 못 어긋나게 한다.
 ///
-/// **이미 [`Soil`] 을 들고 있는 쪽은 [`status_in`] 이다.** 탐색기의 적재가 그쪽이다(moai-u5o9).
+/// **이미 [`Soil`] 을 들고 있는 쪽은 [`status_in`] 이다.** 줄만 든 탐색기 화면이 그쪽이다(moai-u5o9) — 저장소에서
+/// 읽은 화면은 아카이브를 곁들인 줄로 세어 [`status_with_archive_unjudged`] 가 제 지도를 잰다(moai-nkwg).
 pub fn status_unjudged(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
     // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
     // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
@@ -5346,7 +5348,8 @@ pub fn with_archive(active: &[Issue], archived_rows: &[Issue], opaque: &BTreeSet
 
 /// Archive rows supply references and rollups, while only active work is counted. Tests only — the surfaces count
 /// through `cmd::status::archive_board`, which judges the dues outside [`status_with_archive_unjudged`] (moai-nkwg).
-#[cfg(test)]
+/// Built for docs too, so the links that name it resolve.
+#[cfg(any(test, doc))]
 pub fn status_with_archive(
     active: &[Issue],
     archived_rows: &[Issue],

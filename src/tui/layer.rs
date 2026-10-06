@@ -266,7 +266,7 @@ pub enum Shut {
     Unreadable,
 }
 
-/// 연 프로젝트의 셈 — `moai status` 의 한눈 보기와 같은 자(`report::status`·`report::wip`).
+/// 연 프로젝트의 셈 — `moai status` 의 한눈 보기와 같은 자(`cmd::status::archive_board_unjudged`·`report::wip`).
 pub struct Summary {
     /// config 차례로 칸마다 일의 수. 미룬 것은 뺀다 — 한눈 보기의 보드와 같다.
     pub counts: Vec<(String, usize)>,
@@ -278,7 +278,7 @@ pub struct Summary {
     /// 지어 오고 층은 그 답을 [`REREAD_EVERY`] 만큼 들고 있으므로, 그 몫까지 접으면 `SPC o t` 로
     /// 시간대를 바꾼 뒤 최대 그만큼 옛 달로 판정한 `+N` 이 선다. 그리는 쪽이 그때의 달로 센다.
     pub warnings: super::Surfaced,
-    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 `report::status` 의
+    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 보드의 셈이 낸
     /// `notices`, moai-prdh). 링크인 트래커를 비추는 알림(moai-jo3h)도 같은 부름에서 와 여기 든다.
     /// **수만 센다** — 무엇인지는 들어가서 본다(2026-09-22 사람의 결정).
     /// 층의 줄은 80칸에서 이미 이름·칸·경로로 차 있어, 낱말로 가르면 정작 그 수가 잘린다.
@@ -4609,6 +4609,50 @@ mod tests {
         assert_eq!(notices, ["archive_unreadable"], "전제: 보드가 FIFO 를 알림으로 안 셌다");
         assert!(st.warnings.iter().all(|w| w.kind != "unreadable_line"), "FIFO 가 산 줄의 못 읽는 줄로 섰다");
         assert_eq!((sum.warnings.count(now, zone), sum.notices), (st.warnings.len(), 1), "층과 보드가 달리 센다");
+    }
+
+    /// **겹쳐 본 배너도 아카이브를 루트의 스냅샷과 견준다**(moai-nkwg 리뷰) — `moai status --worktree` 와 같은 자다.
+    /// 옆 워크트리의 스냅샷에만 남은 줄이 main 의 아카이브에도 있으면, 겹친 줄로 견주는 판은 그 사본을
+    /// `archive_duplicate_id` 로 세어 배너가 보드보다 하나 많다. 일은 겹친 줄로 세되 충돌과 옮길 수는 루트의
+    /// 스냅샷으로 잰다(`tui::board` 가 다시 읽는 자리).
+    #[test]
+    fn the_overlaid_banner_measures_the_archive_against_the_root_snapshot() {
+        let s = Scratch::fenced("layer-archive-overlay");
+        let main = s.project("main", &[("argos-0001", "산 줄", "todo")]);
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["add", ".moai"]);
+        run(&main, &["commit", "-q", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../wt", "-b", "wt"]);
+        // 옆에서 끝낸 줄 하나가 그 스냅샷에만 남았고, 같은 id 가 main 의 아카이브에도 있다.
+        let config = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        let gone = Issue::new(
+            "argos-0002".into(),
+            "옆에서 끝낸 줄".into(),
+            Kind::Issue,
+            Status::new("done"),
+            "2026-09-01T00:00:00Z",
+        );
+        crate::archive::append(&main, &[gone], &config).unwrap();
+        write_lines(&s.join("wt"), &[("argos-0001", "산 줄", "todo"), ("argos-0002", "옆에서 끝낸 줄", "done")]);
+        let repo = Repo::at(main.clone(), config);
+        let g = crate::worktree::gather(&repo, true).unwrap();
+        assert!(g.origin.branches().contains_key("argos-0002"), "전제: 옆의 줄이 겹친 줄에 안 섰다");
+
+        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko, Some(0)).unwrap();
+        let root = repo.read().unwrap();
+        let unreadable = g.load.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let board = |root: (&[Issue], &[crate::report::Unreadable])| {
+            crate::cmd::status::archive_board(&repo, &g.load.issues, &unreadable, root, &f.now, zone).0
+        };
+        let kinds = |st: &crate::report::StatusReport| st.warnings.iter().map(|w| w.kind).collect::<Vec<_>>();
+        // 전제: 겹친 줄로 견주면 충돌이 서고, 루트의 스냅샷으로 견주면 안 선다 — 이 시험이 두 자를 가른다.
+        assert!(kinds(&board((&g.load.issues, &unreadable))).contains(&"archive_duplicate_id"), "전제가 안 섰다");
+        let st = board((&root.issues, &root.unreadable()));
+        assert!(!kinds(&st).contains(&"archive_duplicate_id"), "{:?}", kinds(&st));
+        assert_eq!(f.warnings.count(&f.now, zone), st.warnings.len(), "겹친 배너가 보드와 달리 센다 {:?}", kinds(&st));
+        assert_eq!(f.notices, st.notices.len(), "겹친 배너가 보드와 알림을 달리 센다");
     }
 
     /// **띄울 때와 다시 읽을 때 지켜보는 목록이 같다**(리뷰 moai-3lul.kt0 다시 본 판). 다르면 조용한

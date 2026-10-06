@@ -894,9 +894,9 @@ pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::pat
 /// (`worktree::stranded_at`). 한때 여기만 안 세어, 층에서 `! 1` 을 보고 들어온 사람이 안쪽 배너에서
 /// 0 을 봤다(사용자 결정 2026-09-18 — 안쪽이 `moai status` 에 맞춘다).
 ///
-/// [`warnings_of`] 에 안 넣고 따로 둔 까닭: 그것은 `&[Issue]` 에 대한 순수한 셈이라 못 읽는 줄의
-/// 자가 바뀔 때마다 다시 부르는데, 이것은 디스크의 워크트리를 읽는다(이름으로 안 잡히는 집은 줄이
-/// 있으면 옆 스냅샷을 판다). 그래서 읽을 때마다 한 번 재어 더한다([`prepare`]·[`App::overlaid`]).
+/// [`board`] 에 안 넣고 따로 둔 까닭: 그것은 줄과 아카이브에 대한 셈인데, 이것은 디스크의 워크트리를
+/// 읽는다(이름으로 안 잡히는 집은 줄이 있으면 옆 스냅샷을 판다). 그래서 읽을 때마다 한 번 재어 더한다
+/// ([`prepare`]·[`App::overlaid`]).
 ///
 /// **`overlaid` 는 옆을 실제로 겹쳤는가다**(`Gathered::swept`), 켠 깃발이 아니다. 탐색기의 기본값(켬)
 /// 에서 겹쳤으면 `moai status --worktree` 와 같은 수고, `w` 로 끄면 `moai status` 와 같은 수다. 켰는데
@@ -958,8 +958,8 @@ fn warnings_of(issues: &[Issue], unreadable: &[Option<String>], cfg: &Config, no
 /// 컴파일러가 이름 대며 잡는다.
 #[derive(Debug, Clone, Default)]
 pub struct Surfaced {
-    /// 시간대와 무관한 몫 — 순수한 셈이 낸 경고(`report::status_in` 의 `warnings`)에, 그 셈이 못
-    /// 내는 몫(자리 없는 집은 줄)까지 더한 값이다. 그 몫을 얹는 자는 [`Surfaced::add`] 하나고
+    /// 시간대와 무관한 몫 — 보드의 셈이 낸 경고(저장소에서 읽은 화면은 [`board`], 줄만 든 화면은
+    /// [`warnings_in`] 의 `warnings`)에, 그 셈이 못 내는 몫(자리 없는 집은 줄)까지 더한 값이다. 그 몫을 얹는 자는 [`Surfaced::add`] 하나고
     /// (`prepare`·`App::overlaid` 가 부른다), 디스크를 읽어야 아는 값이라 `report` 가 못 낸다.
     free: usize,
     /// 아직 판정 안 한 기한. 마일스톤만 드는 값이라 줄이 몇 개다([`crate::report::Dues`]).
@@ -996,7 +996,7 @@ impl Surfaced {
         self.count(&crate::model::now(), crate::tz::Zone::stored())
     }
 
-    /// 기한 없이 수만 — **그림 시험이 든다.** 진짜 길은 [`warnings_in`] 이고, 기한을 재는 시험은
+    /// 기한 없이 수만 — **그림 시험이 든다.** 진짜 길은 [`board`] 고, 기한을 재는 시험은
     /// 마일스톤 줄을 세워 그 길로 센다.
     #[cfg(test)]
     pub fn flat(free: usize) -> Surfaced {
@@ -1004,7 +1004,8 @@ impl Surfaced {
     }
 }
 
-/// [`warnings_of`] 와 같은 것. 이미 잰 지도를 받는다(`report::status_in`, moai-u5o9). 받은 줄을 다 산 줄로 보므로
+/// 줄만 든 화면의 셈 — 이미 잰 지도를 받는다(`report::status_in`, moai-u5o9). 시험의 `warnings_of` 는 지도를 지어
+/// 이리로 든다. 받은 줄을 다 산 줄로 보므로
 /// 아카이브를 모르는 화면(줄만 든 [`App::count_all`])의 셈이다 — 저장소에서 읽은 화면은 [`board`] 다(moai-nkwg).
 ///
 /// **둘을 함께 낸다**(moai-k6ff) — 고칠 것의 수와, 순수한 셈이 낸 알림의 수(쌓인 backlog·미룬 것·
@@ -1534,7 +1535,7 @@ impl Site {
     /// 읽은 한 프로젝트를 세운다. **색인과 [`Ground`] 는 부른 쪽이 잰 것을 받는다**([`measure`]) —
     /// 여기서 다시 재면 같은 훑기를 두 번 하고, 그 훑기는 이슈 수에 비례한다.
     ///
-    /// 여는 길([`App::open`])과 한눈 보기가 프로젝트를 읽는 길(moai-12yx)이 **이 몸 하나**를 지난다 —
+    /// 여는 길([`App::open_counted`])과 한눈 보기가 프로젝트를 읽는 길(moai-12yx)이 **이 몸 하나**를 지난다 —
     /// 두 벌로 적으면 한쪽만 고쳐져 같은 프로젝트가 화면 둘에서 달리 선다.
     fn of(
         issues: Vec<Issue>,
@@ -1835,7 +1836,7 @@ struct Got {
 
 impl App {
     /// 저장소 없이 세운다 — 시험과 눈으로 보는 길이 이것을 쓴다. 진짜 길은
-    /// [`App::open`] 이고, 그쪽은 색인과 [`Ground`] 를 부른 쪽에서 받는다.
+    /// [`App::open_counted`] 이고, 그쪽은 색인과 [`Ground`] 를 부른 쪽에서 받는다.
     ///
     /// **아카이브는 끈다**(moai-47mz) — 시험의 줄은 날짜를 박아 두고 화면의 시계는 벽시계라, 시험이 그대로여도
     /// 날이 흐르면 끝난 줄이 하나씩 아카이브로 넘어가 다른 것을 재던 시험이 붉어진다. 아카이브를 재는 시험은
