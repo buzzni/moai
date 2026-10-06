@@ -402,7 +402,7 @@ pub fn summarize_with(
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
         warnings: super::Surfaced::of(st.warnings.len() + usize::from(lost.is_some()), st.dues),
-        // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 idea·미룬
+        // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 backlog·미룬
         // 것·도는 마일스톤)에 설치가 어긋난 셋을 더한 것이 안쪽 보드가 세우는 알림이다. 층에서
         // "드러난 문제 없다" 를 보고 들어간 사람이 안쪽에서 처음 보는 것이 그 셋이었다.
         //
@@ -1062,7 +1062,7 @@ impl App {
                 let text = super::jotfile::template(into.as_ref(), self.site.lang);
                 self.edit = Some(super::Edit { into, text, editor: editor.clone() });
             }
-            None => self.mode = super::Mode::Idea(Form::new(into)),
+            None => self.mode = super::Mode::Backlog(Form::new(into)),
         }
     }
 
@@ -2542,7 +2542,7 @@ mod tests {
         // 들어가면 `n` 은 오늘처럼 폼을 연다.
         a.key(key(KeyCode::Enter));
         a.hit("SPC n");
-        assert!(matches!(a.mode, Mode::Idea(_)));
+        assert!(matches!(a.mode, Mode::Backlog(_)));
     }
 
     /// 두 프로젝트의 `issues.jsonl` 바이트.
@@ -2551,12 +2551,12 @@ mod tests {
     }
 
     /// 그 프로젝트 파일에 선 생각들의 제목 — 화면이 아니라 **파일을** 읽는다.
-    fn ideas_at(dir: &Path) -> Vec<String> {
+    fn backlog_at(dir: &Path) -> Vec<String> {
         let repo = match Repo::open(dir, || crate::i18n::Lang::Ko).unwrap() {
             Opened::Repo(r) => r,
             _ => panic!("{} 가 안 열린다", dir.display()),
         };
-        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Idea).map(|i| i.title).collect()
+        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Backlog).map(|i| i.title).collect()
     }
 
     fn type_in(a: &mut App, text: &str) {
@@ -2567,7 +2567,7 @@ mod tests {
 
     fn target(a: &App) -> Option<PathBuf> {
         match &a.mode {
-            Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
+            Mode::Backlog(f) => f.into.as_ref().map(|t| t.path.clone()),
             Mode::Ask(_)
             | Mode::Browse
             | Mode::Grep(..)
@@ -3598,7 +3598,7 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
 
-        assert_eq!(ideas_at(&two), ["two 에 담을 것"]);
+        assert_eq!(backlog_at(&two), ["two 에 담을 것"]);
         assert_eq!(snapshots(&[&one]), before, "선 프로젝트 말고 다른 프로젝트 파일이 바뀌었다");
         // 저널만 새는 것을 잡는 줄이다 — 재는 자리는 `.moai/journal/` 이다(moai-nzlo, 리뷰).
         assert!(!one.join(".moai/journal").exists());
@@ -3627,7 +3627,7 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert_eq!(a.here(), Some(one.clone()), "담은 프로젝트로 안 들어갔다");
-        assert_eq!(ideas_at(&one), ["one 에 담을 것"]);
+        assert_eq!(backlog_at(&one), ["one 에 담을 것"]);
         assert_eq!(snapshots(&[&two])[0], before[1], "커서의 프로젝트 말고 다른 파일이 바뀌었다");
         assert_eq!(titles(&a).iter().filter(|t| *t == "one 에 담을 것").count(), 1);
         let on = a.current().and_then(|r| match r {
@@ -3733,7 +3733,7 @@ mod tests {
 
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        assert_eq!(ideas_at(&one), ["one 의 생각"]);
+        assert_eq!(backlog_at(&one), ["one 의 생각"]);
         assert_eq!(snapshots(&[&two]), before, "커서가 옮겨 간 프로젝트에 담겼다");
 
         // 프로젝트 안에서 연 폼인데 선 곳이 그새 다른 프로젝트면 **쓰지 않는다.**
@@ -3746,7 +3746,7 @@ mod tests {
         let (one_before, two_before) = (snapshots(&[&one]), snapshots(&[&two]));
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(
-            matches!(&a.mode, Mode::Idea(f) if f.title.text() == "one 에만"),
+            matches!(&a.mode, Mode::Backlog(f) if f.title.text() == "one 에만"),
             "선 곳이 다른데 폼이 닫혔다 — {:?}",
             a.mode
         );
@@ -3783,7 +3783,7 @@ mod tests {
 
         a.edited(edit.into, Ok("one 의 생각\n".into()));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        assert_eq!(ideas_at(&one), ["one 의 생각"]);
+        assert_eq!(backlog_at(&one), ["one 의 생각"]);
         assert_eq!(snapshots(&[&two]), before, "커서가 옮겨 간 프로젝트에 담겼다");
     }
 
@@ -3798,7 +3798,7 @@ mod tests {
         a.relayer(None);
         let before = snapshots(&[&one, &two]);
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-        assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
+        assert!(matches!(a.mode, Mode::Backlog(_)), "{:?}", a.mode);
         assert!(a.on_layer());
         assert!(a.trouble.as_deref().is_some_and(|t| t.contains("빠졌다")), "{:?}", a.trouble);
         assert_eq!(snapshots(&[&one, &two]), before);
@@ -3941,7 +3941,7 @@ mod tests {
         type_in(&mut a, "two 의 생각");
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(matches!(a.mode, Mode::Ask(_)), "{:?}", a.mode);
-        assert!(ideas_at(&two).is_empty(), "묻기 전에 썼다");
+        assert!(backlog_at(&two).is_empty(), "묻기 전에 썼다");
 
         // 묻는 칸을 Esc 로 물리면 폼이 돌아오고 담을 곳은 그대로다.
         a.key(key(KeyCode::Esc));
@@ -3950,7 +3950,7 @@ mod tests {
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Enter));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        assert_eq!(ideas_at(&two), ["two 의 생각"]);
+        assert_eq!(backlog_at(&two), ["two 의 생각"]);
         assert_eq!(snapshots(&[&one]), before, "묻고 이어진 쓰기가 다른 프로젝트에 닿았다");
         assert_eq!(a.here(), Some(two));
     }
@@ -4719,7 +4719,7 @@ mod tests {
         }
     }
 
-    /// **칸이 하나도 없어도 한눈 보기의 보드에는 프로젝트 머리줄이 선다**(리뷰) — idea·미룸을 다 숨기고 아직 아무
+    /// **칸이 하나도 없어도 한눈 보기의 보드에는 프로젝트 머리줄이 선다**(리뷰) — backlog·미룸을 다 숨기고 아직 아무
     /// 프로젝트도 안 읽었으면 칸이 없다. 칸이 없다고 그림을 통째로 접던 때는 머리줄까지 안 서 빈 테두리만 남았다.
     #[test]
     fn the_overview_board_stands_its_headers_even_with_no_column() {
@@ -4728,7 +4728,7 @@ mod tests {
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;
-        a.view.hide_ideas = true;
+        a.view.hide_backlog = true;
         a.view.hide_deferred = true;
         assert_eq!(a.rows(), [Row::Project(0), Row::Project(1)], "시험의 전제 — 아무것도 안 폈다");
         let text = super::super::draw::tests::render(&mut a, 120, 24).join("\n");
@@ -4738,13 +4738,16 @@ mod tests {
     }
 
     /// **머리줄의 `j` 는 `k` 로 올라온 그 칸으로 돌아간다 — 칸의 차례가 바뀌어도**(리뷰). 칸을 첨자로 들던 때는
-    /// `SPC v i` 가 idea 칸을 걷어 첨자가 한 칸씩 당겨지자, `in_progress` 에서 올라온 `j` 가 다른 칸으로 내려갔다.
+    /// `SPC v b` 가 backlog 칸을 걷어 첨자가 한 칸씩 당겨지자, `in_progress` 에서 올라온 `j` 가 다른 칸으로 내려갔다.
     #[test]
     fn a_header_returns_to_the_column_it_came_up_from_when_the_columns_shift() {
         let s = Scratch::fenced("layer-board-hint");
         let (one, two) = twins(&s);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&one, Issue::new("argos-0003".into(), "one 의 생각".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &one,
+            Issue::new("argos-0003".into(), "one 의 생각".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;
@@ -4760,7 +4763,7 @@ mod tests {
         assert_eq!(title_at_cursor(&a).as_deref(), Some("one 의 둘째 줄"), "시험의 전제 — in_progress 카드에 섰다");
         a.hit("k");
         assert_eq!(a.rows()[a.cursor], Row::Project(0));
-        a.hit("SPC v i Esc");
+        a.hit("SPC v b Esc");
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "시험의 전제 — 머리줄에 남았다");
         a.hit("j");
         assert_eq!(title_at_cursor(&a).as_deref(), Some("one 의 둘째 줄"), "머리줄의 j 가 올라온 칸으로 안 돌아갔다");
@@ -4806,7 +4809,10 @@ mod tests {
         let s = Scratch::fenced("layer-board-emptied");
         let solo = s.project("solo", &[]);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &solo,
+            Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let other = s.project("other", &[("argos-0001", "other 의 줄", "todo")]);
         let cfg = s.register(&[&solo, &other]);
         let mut a = layered(&cfg);
@@ -4814,8 +4820,8 @@ mod tests {
         a.hit("l");
         settle(&mut a);
         a.hit("j");
-        assert_eq!(title_at_cursor(&a).as_deref(), Some("생각 하나뿐"), "시험의 전제 — idea 카드에 섰다");
-        a.hit("SPC v i Esc");
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("생각 하나뿐"), "시험의 전제 — backlog 카드에 섰다");
+        a.hit("SPC v b Esc");
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "카드가 다 숨은 프로젝트 밖으로 갔다");
     }
 
@@ -4899,27 +4905,30 @@ mod tests {
         assert_eq!(title_at_cursor(&a).as_deref(), Some("three 의 집은 줄"), "빠진 카드의 칸을 떠났다");
     }
 
-    /// **카드를 다 숨긴 보기 토글은 한눈 보기에서도 되돌린다**(리뷰) — 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i`
+    /// **카드를 다 숨긴 보기 토글은 한눈 보기에서도 되돌린다**(리뷰) — 펼친 프로젝트의 카드가 모두 backlog 일 때 `SPC v b`
     /// 를 누르면 줄이 다 빠진다. 줄이 없다고 그 키와 `SPC v a` 까지 끄던 때는 프로젝트에 들어가야만 되돌렸다.
     #[test]
     fn a_view_toggle_that_hid_every_card_can_be_undone_on_the_overview() {
         let s = Scratch::fenced("layer-board-trap");
         let solo = s.project("solo", &[]);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &solo,
+            Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let cfg = s.register(&[&solo]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;
         a.hit("l");
         settle(&mut a);
         let cards = |a: &App| a.rows().iter().filter(|r| matches!(r, Row::Item(..))).count();
-        assert_eq!(cards(&a), 1, "시험의 전제 — idea 카드 하나: {:?}", a.rows());
-        a.hit("SPC v i Esc");
-        assert_eq!(cards(&a), 0, "시험의 전제 — idea 가 숨었다");
-        a.hit("SPC v i Esc");
-        assert_eq!(cards(&a), 1, "SPC v i 가 숨긴 idea 를 못 되돌렸다");
-        a.hit("SPC v i Esc");
+        assert_eq!(cards(&a), 1, "시험의 전제 — backlog 카드 하나: {:?}", a.rows());
+        a.hit("SPC v b Esc");
+        assert_eq!(cards(&a), 0, "시험의 전제 — backlog 가 숨었다");
+        a.hit("SPC v b Esc");
+        assert_eq!(cards(&a), 1, "SPC v b 가 숨긴 backlog 를 못 되돌렸다");
+        a.hit("SPC v b Esc");
         a.hit("SPC v a Esc");
-        assert_eq!(cards(&a), 1, "SPC v a 가 숨긴 idea 를 못 되돌렸다");
+        assert_eq!(cards(&a), 1, "SPC v a 가 숨긴 backlog 를 못 되돌렸다");
     }
 }

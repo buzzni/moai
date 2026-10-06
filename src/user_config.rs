@@ -1012,7 +1012,13 @@ impl Doc {
         let mut look = Look {
             hidden: look_words(t, HIDDEN, &mut problems),
             hide_deferred: look_one(t, HIDE_DEFERRED, Want::Bool, Item::as_bool, &mut problems),
-            hide_ideas: look_one(t, HIDE_IDEAS, Want::Bool, Item::as_bool, &mut problems),
+            hide_backlog: look_one(
+                t,
+                if t.contains_key(HIDE_BACKLOG) { HIDE_BACKLOG } else { HIDE_IDEAS_LEGACY },
+                Want::Bool,
+                Item::as_bool,
+                &mut problems,
+            ),
             show_archived: look_one(t, SHOW_ARCHIVED, Want::Bool, Item::as_bool, &mut problems),
             sort: look_one(t, SORT, Want::Word, word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, Want::Bool, Item::as_bool, &mut problems),
@@ -1070,7 +1076,7 @@ impl Doc {
         // 두 번 적으면 적는 쪽에만 키를 더하는 날 거절이 그 키를 못 보고, 손으로 적은 표 모양을 낱값으로 덮는다.
         let mut hidden = base.hidden != new.hidden;
         let mut hide_deferred = base.hide_deferred != new.hide_deferred;
-        let mut hide_ideas = base.hide_ideas != new.hide_ideas;
+        let mut hide_backlog = base.hide_backlog != new.hide_backlog;
         let mut show_archived = base.show_archived != new.show_archived;
         let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
         let mut fields = base.fields != new.fields;
@@ -1130,7 +1136,7 @@ impl Doc {
         };
         odd(&[HIDDEN], true, &mut hidden);
         odd(&[HIDE_DEFERRED], false, &mut hide_deferred);
-        odd(&[HIDE_IDEAS], false, &mut hide_ideas);
+        odd(&[if t.contains_key(HIDE_BACKLOG) { HIDE_BACKLOG } else { HIDE_IDEAS_LEGACY }], false, &mut hide_backlog);
         odd(&[SHOW_ARCHIVED], false, &mut show_archived);
         odd(&[SORT, SORT_REVERSED], false, &mut sort);
         odd(&[FIELDS], true, &mut fields);
@@ -1152,8 +1158,17 @@ impl Doc {
         if hide_deferred {
             changed |= put_value(t, HIDE_DEFERRED, new.hide_deferred.map(toml_edit::Value::from), &mut left);
         }
-        if hide_ideas {
-            changed |= put_value(t, HIDE_IDEAS, new.hide_ideas.map(toml_edit::Value::from), &mut left);
+        if hide_backlog {
+            // Rename the legacy scalar before changing its value, carrying its comments.
+            // If both keys exist, the canonical key owns the setting; leave the old text alone.
+            if !t.contains_key(HIDE_BACKLOG) && t.get(HIDE_IDEAS_LEGACY).is_some_and(|i| plain(i, false)) {
+                let decor = t.key(HIDE_IDEAS_LEGACY).expect("legacy key exists").leaf_decor().clone();
+                let item = t.remove(HIDE_IDEAS_LEGACY).expect("legacy value exists");
+                t.insert(HIDE_BACKLOG, item);
+                *t.key_mut(HIDE_BACKLOG).expect("renamed key exists").leaf_decor_mut() = decor;
+                changed = true;
+            }
+            changed |= put_value(t, HIDE_BACKLOG, new.hide_backlog.map(toml_edit::Value::from), &mut left);
         }
         if show_archived {
             changed |= put_value(t, SHOW_ARCHIVED, new.show_archived.map(toml_edit::Value::from), &mut left);
@@ -1229,11 +1244,12 @@ pub const LANG: &str = "lang";
 pub const TUI: &str = "tui";
 const HIDDEN: &str = "hidden";
 const HIDE_DEFERRED: &str = "hide_deferred";
-/// idea 를 숨기는가(moai-oagj.bjr) — 미룸([`HIDE_DEFERRED`])처럼 칸이 아니라 축이라 칸 이름 목록([`HIDDEN`])에
-/// 섞지 않는다. 섞으면 `idea` 라는 칸을 쓰는 설정에서 두 뜻이 한 낱말을 두고 갈린다.
-const HIDE_IDEAS: &str = "hide_ideas";
+/// backlog 를 숨기는가(moai-oagj.bjr) — 미룸([`HIDE_DEFERRED`])처럼 칸이 아니라 축이라 칸 이름 목록([`HIDDEN`])에
+/// 섞지 않는다. 섞으면 `backlog` 라는 칸을 쓰는 설정에서 두 뜻이 한 낱말을 두고 갈린다.
+const HIDE_BACKLOG: &str = "hide_backlog";
+const HIDE_IDEAS_LEGACY: &str = "hide_ideas";
 /// 아카이브(done 에 든 지 오래된 줄)를 보이는가(moai-47mz) — `SPC v o`. **처음값이 숨김이라 `show_` 다** —
-/// 미룸·idea 는 처음에 보이고 사람이 숨기는 것이라 `hide_` 지만, 아카이브는 처음부터 숨고 사람이 켠다.
+/// 미룸·backlog 는 처음에 보이고 사람이 숨기는 것이라 `hide_` 지만, 아카이브는 처음부터 숨고 사람이 켠다.
 const SHOW_ARCHIVED: &str = "show_archived";
 const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
@@ -1267,7 +1283,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// [tui]
 /// hidden = ["done"]
 /// hide_deferred = false
-/// hide_ideas = false
+/// hide_backlog = false
 /// show_archived = false
 /// detail = true
 /// detail_at = "right"
@@ -1289,7 +1305,7 @@ const FIELDS_KNOWN: &str = "fields_known";
 pub struct Look {
     pub hidden: Option<Vec<String>>,
     pub hide_deferred: Option<bool>,
-    pub hide_ideas: Option<bool>,
+    pub hide_backlog: Option<bool>,
     /// 아카이브를 보이는가(moai-47mz). 없으면 숨긴다 — [`SHOW_ARCHIVED`].
     pub show_archived: Option<bool>,
     pub sort: Option<String>,
@@ -3139,7 +3155,7 @@ mod tests {
         let look = Look {
             hidden: Some(vec!["done".into(), "review".into()]),
             hide_deferred: Some(true),
-            hide_ideas: Some(true),
+            hide_backlog: Some(true),
             show_archived: Some(true),
             sort: Some("updated".into()),
             sort_reversed: Some(false),
@@ -3399,7 +3415,7 @@ mod tests {
         let base = Look {
             hidden: Some(vec!["done".into()]),
             hide_deferred: Some(false),
-            hide_ideas: None,
+            hide_backlog: None,
             show_archived: None,
             sort: Some("updated".into()),
             sort_reversed: Some(false),
@@ -3731,5 +3747,36 @@ mod tests {
             threads * each,
             reg.projects.len()
         );
+    }
+    #[test]
+    fn backlog_hide_reads_legacy_settings_without_rewriting_them() {
+        let src = "[tui]\nhide_ideas = true\n";
+        let mut doc = Doc::parse(src).unwrap();
+        let (look, problems) = doc.look();
+        assert_eq!(look.hide_backlog, Some(true));
+        assert!(problems.is_empty());
+        doc.merge_look(&look, &look).unwrap();
+        assert_eq!(doc.render(), src);
+        let doc = Doc::parse("[tui]\nhide_backlog = false\nhide_ideas = true\n").unwrap();
+        assert_eq!(doc.look().0.hide_backlog, Some(false));
+        let doc = Doc::parse("[tui]\nhide_backlog = \"bad\"\nhide_ideas = true\n").unwrap();
+        assert_eq!(doc.look().0.hide_backlog, None, "an invalid canonical key must not fall back");
+        assert!(!doc.look().1.is_empty());
+    }
+
+    #[test]
+    fn backlog_hide_writes_the_new_key_and_keeps_legacy_comments() {
+        let mut doc = Doc::parse("[tui]\n# keep this note\nhide_ideas = true # keep this too\nother = 7\n").unwrap();
+        let base = doc.look().0;
+        let new = Look { hide_backlog: Some(false), ..base.clone() };
+        doc.merge_look(&base, &new).unwrap();
+        let text = doc.render();
+        assert!(text.contains("hide_backlog = false"), "{text}");
+        assert!(!text.contains("hide_ideas"), "{text}");
+        assert!(
+            text.contains("keep this note") && text.contains("keep this too") && text.contains("other = 7"),
+            "{text}"
+        );
+        assert_eq!(Doc::parse(&text).unwrap().look().0.hide_backlog, Some(false));
     }
 }

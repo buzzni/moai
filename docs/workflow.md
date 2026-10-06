@@ -84,8 +84,8 @@ puts an issue under it. Each issue gets an id under the epic's own,
 - **Do not move an epic or a [milestone](glossary.md#milestone).** A
   [group](glossary.md#group)'s column is read from its members: pick one member
   up and the group stands `in_progress`, finish them all and it stands `done`
-- **Something for later is an [idea](glossary.md#idea)**, not an issue — `moai idea add`. Ideas stay
-  off the board and out of `moai ready`, and `moai idea promote <id> --from -`
+- **Something for later is a [backlog item](glossary.md#backlog)**, not an issue — `moai backlog add`. Backlog items stay
+  off the board and out of `moai ready`, and `moai backlog promote <id> --from -`
   unfolds one into an epic and issues when its time comes
 - **A [running milestone](glossary.md#running-milestone) is the person's to fill.** A milestone runs once any of
   its members has started; from then `moai ready` hands out its work plus anything
@@ -193,4 +193,4 @@ where its contributors read them rather than repeated here:
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp

@@ -123,7 +123,7 @@ pub fn fit_title(title: &str) -> String {
 /// `Milestone` 은 2단계에 CLI 가 붙지만 **지금도 읽을 줄은 안다.**
 /// 모르는 값으로 거절하면 새 바이너리가 쓴 파일을 옛 바이너리가 통째로 못 읽는다.
 ///
-/// `Idea` 는 **status 가 아니라 kind 다.** 칸으로 두면 `statuses` 의 맨 앞이
+/// `Backlog` 는 **status 가 아니라 kind 다.** 칸으로 두면 `statuses` 의 맨 앞이
 /// 되고 `report::ready` 가 그 칸을 "지금 집을 수 있는 것" 으로 읽어, 담아 둔
 /// 생각이 전부 집을 일로 올라온다. 그것을 막으려면 "집을 수 있는 첫 칸" 이라는
 /// 둘째 어휘가 필요한데, 종류로 두면 `is_work` 가 이미 문지기다 — 묶음이
@@ -140,7 +140,8 @@ pub enum Kind {
     Issue,
     Epic,
     Milestone,
-    Idea,
+    #[serde(alias = "idea")]
+    Backlog,
 }
 
 impl Kind {
@@ -149,12 +150,16 @@ impl Kind {
     pub fn is_default(&self) -> bool {
         *self == Kind::Issue
     }
+    /// The shared file keeps its old spelling so older worker binaries can read it.
+    fn serialize_stored<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(if *self == Kind::Backlog { "idea" } else { self.as_str() })
+    }
     pub fn as_str(&self) -> &'static str {
         match self {
             Kind::Issue => "issue",
             Kind::Epic => "epic",
             Kind::Milestone => "milestone",
-            Kind::Idea => "idea",
+            Kind::Backlog => "backlog",
         }
     }
 }
@@ -170,8 +175,8 @@ impl std::str::FromStr for Kind {
             "issue" => Ok(Kind::Issue),
             "epic" => Ok(Kind::Epic),
             "milestone" => Ok(Kind::Milestone),
-            "idea" => Ok(Kind::Idea),
-            _ => Err(format!("`{s}` is not a kind. The kinds are: issue, epic, milestone, idea")),
+            "backlog" | "idea" => Ok(Kind::Backlog),
+            _ => Err(format!("`{s}` is not a kind. The kinds are: issue, epic, milestone, backlog")),
         }
     }
 }
@@ -212,7 +217,7 @@ impl std::fmt::Display for Status {
 pub struct Issue {
     pub id: String,
     pub title: String,
-    #[serde(default, skip_serializing_if = "Kind::is_default")]
+    #[serde(default, skip_serializing_if = "Kind::is_default", serialize_with = "Kind::serialize_stored")]
     pub kind: Kind,
     pub status: Status,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1587,8 +1592,20 @@ mod tests {
     fn round_trips_an_idea_line() {
         let line = r#"{"id":"argos-4aex","title":"반짝","kind":"idea","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#;
         let i: Issue = serde_json::from_str(line).unwrap();
-        assert_eq!(i.kind, Kind::Idea);
+        assert_eq!(i.kind, Kind::Backlog);
         assert_eq!(serde_json::to_string(&i).unwrap(), line);
+    }
+
+    #[test]
+    fn reads_both_backlog_spellings_but_keeps_the_shared_file_protocol() {
+        let old = r#"{"id":"argos-4aex","title":"later","kind":"idea","status":"todo","created_at":"2026-09-11T04:12:03Z","updated_at":"2026-09-11T04:12:03Z","status_since":"2026-09-11T04:12:03Z"}"#;
+        let new = old.replace("\"kind\":\"idea\"", "\"kind\":\"backlog\"");
+        for line in [old, new.as_str()] {
+            let i: Issue = serde_json::from_str(line).unwrap();
+            assert_eq!(i.kind, Kind::Backlog);
+            assert_eq!(serde_json::to_string(&i).unwrap(), old);
+            assert_eq!(serde_json::to_string(&i.kind).unwrap(), "\"backlog\"");
+        }
     }
 
     /// 모르는 종류는 **조용히 기본값이 되지 않는다.** 기본값으로 접으면 그
@@ -1606,10 +1623,11 @@ mod tests {
 
     #[test]
     fn idea_parses_from_the_command_line() {
-        assert_eq!("idea".parse::<Kind>(), Ok(Kind::Idea));
-        assert_eq!(Kind::Idea.as_str(), "idea");
+        assert_eq!("idea".parse::<Kind>(), Ok(Kind::Backlog));
+        assert_eq!("backlog".parse::<Kind>(), Ok(Kind::Backlog));
+        assert_eq!(Kind::Backlog.as_str(), "backlog");
         let e = "아이디어".parse::<Kind>().unwrap_err();
-        assert!(e.contains("idea"), "오류 문장이 idea 를 안 댄다 — {e}");
+        assert!(e.contains("backlog"), "오류 문장이 backlog 를 안 댄다 — {e}");
     }
 
     /// 옛 바이너리가 2단계 종류를 만나도 줄을 버리지 않는다.
@@ -1821,7 +1839,7 @@ mod tests {
         stone.milestone = Some("argos-9k2p".into());
         let e = refusal(&stone.validate_keeping(&c, false).unwrap_err());
         assert!(e.contains("다른 마일스톤에 들지 않는다") && e.contains("--milestone none"), "{e:?}");
-        for kind in [Kind::Issue, Kind::Epic, Kind::Idea] {
+        for kind in [Kind::Issue, Kind::Epic, Kind::Backlog] {
             let mut i = issue();
             i.kind = kind;
             i.milestone = Some("argos-9k2p".into());

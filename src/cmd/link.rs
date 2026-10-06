@@ -45,16 +45,22 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
                 let Some(blocker) = issues.iter().find(|i| i.id == args.id) else {
                     return Err(Fail::not_found(&args.id, lang));
                 };
-                // **담아 둔 생각은 막지 않는다.** idea 는 보통 `done` 에 닿지
+                // **담아 둔 생각은 막지 않는다.** backlog 는 보통 `done` 에 닿지
                 // 않으므로, 막게 두면 막힌 이슈가 영영 안 풀리면서 `status` 는
                 // 그것을 "계획이 멈춘 자리" 로 센다 — 도구가 스스로 만든 막다른
                 // 길이고, 막는 쪽이 목록에 안 나오니 풀 방법도 안 보인다.
-                if crate::report::is_idea(blocker) {
+                if crate::report::is_backlog(blocker) {
                     return Err(Fail::coded(
                         format!(
                             "{}\n      {}",
-                            crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_blocker"), &[("id", &args.id)]),
-                            crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_promote"), &[("id", &args.id)]),
+                            crate::i18n::fill(
+                                crate::i18n::say(lang, "refuse.link_backlog_blocker"),
+                                &[("id", &args.id)]
+                            ),
+                            crate::i18n::fill(
+                                crate::i18n::say(lang, "refuse.link_backlog_promote"),
+                                &[("id", &args.id)]
+                            ),
                         ),
                         super::code::BAD_TARGET,
                     ));
@@ -65,9 +71,9 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
                     return Err(Fail::not_found(target, lang));
                 };
                 // 막히는 쪽도 마찬가지다. 생각은 집는 것이 아니라서 막힐 것도 없다.
-                if *wants_block && crate::report::is_idea(t) {
+                if *wants_block && crate::report::is_backlog(t) {
                     return Err(Fail::coded(
-                        crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_blocked"), &[("id", target)]),
+                        crate::i18n::fill(crate::i18n::say(lang, "refuse.link_backlog_blocked"), &[("id", target)]),
                         super::code::BAD_TARGET,
                     ));
                 }

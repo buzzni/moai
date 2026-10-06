@@ -802,7 +802,7 @@ impl Disk {
 ///
 /// **main 워크트리는 쥔 곳으로 안 센다** — 모두의 집기가 모이는 자리라, 세면 모든 줄이 든다.
 /// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들거나 비추지 않기만 한다(`hook::unsure`). git 을
-/// 띄우지 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길, 비추는 길(`idea add` 의 물음),
+/// 띄우지 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길, 비추는 길(`backlog add` 의 물음),
 /// `Stop` 에서만 부른다.
 pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> BTreeSet<String> {
     let Some(disk) = on_disk(root) else { return BTreeSet::new() };
@@ -1045,7 +1045,7 @@ pub fn workplaces_in(
     // 소속을 줄에 묻는 자가 가려짐을 안 보면 여기가 조용히 닫혀, 파야 할 스냅샷을 안 판다.
     let all_names = names(linked.iter().copied());
     if footing.picked().values().all(|i| footing.claims(&all_names, i)) {
-        // **깨진 스냅샷은 안 파는 길에서도 선다**(moai-giz3, idea moai-7p48) — 이 문이 닫히면
+        // **깨진 스냅샷은 안 파는 길에서도 선다**(moai-giz3, backlog moai-7p48) — 이 문이 닫히면
         // 이 워크트리는 `unknown` 도 `holds` 도 없이 지나가, 깨진 파일이 어느 화면에도 안 섰다.
         // 그 사실은 자리 판정과 상관없이 고칠 사람이 있어야 고쳐진다([`crate::report::Workplace::broken`]).
         //
@@ -1314,7 +1314,7 @@ pub fn told_from(here: &Path, path: &Path) -> String {
 /// 아무 데서도 안 말하면 그 워크트리를 고칠 사람이 그것을 영영 모른다 — 고치는 것과 못 센 것은
 /// 다른 말이라 세는 자리를 가른다.
 ///
-/// **`all` 은 판 것에 매이지 않는다**(moai-giz3, idea moai-7p48 이 재현). [`workplaces_in`] 은
+/// **`all` 은 판 것에 매이지 않는다**(moai-giz3, backlog moai-7p48 이 재현). [`workplaces_in`] 은
 /// 이름만으로 자리가 다 잡히면 옆 스냅샷을 한 벌도 안 푸는데(moai-7igy, 잰 뒤 사람이 정한 문),
 /// 한때는 그 길에서 깨진 파일이 어느 화면에도 안 서서 같은 저장소를 `moai status` 는 조용히
 /// 지나고 `moai status --worktree` 는 그 워크트리를 댔다. 이제 안 파는 길도 파일을 **열어 보고**

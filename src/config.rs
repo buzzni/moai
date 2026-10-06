@@ -199,7 +199,7 @@ pub fn check_prefix(prefix: &str) -> Result<(), Trouble> {
 /// status_no_epic_ratio = 0.15
 /// status_no_epic_min   = 5
 /// status_flow_days     = 7
-/// status_idea_pile     = 5
+/// status_backlog_pile  = 5
 /// status_due_days      = 3
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -219,7 +219,7 @@ pub struct Thresholds {
     /// 흐름을 재는 창(일).
     pub flow_days: i64,
     /// 담아 둔 생각이 이만큼 쌓이면 알린다.
-    pub idea_pile: usize,
+    pub backlog_pile: usize,
     /// 마일스톤의 종료 기한이 **이 날수 안으로** 다가오면 알린다(`0 <= 남은 날수 <= due_days`,
     /// moai-tfcp). 지난 기한은 이 값과 무관하게 언제나 말한다 — 문턱은 "미리 한 번 비춘다" 의
     /// 폭이지 "늦은 것을 봐준다" 의 폭이 아니다.
@@ -246,7 +246,7 @@ impl Thresholds {
         no_epic_ratio: 0.15,
         no_epic_min: 5,
         flow_days: 7,
-        idea_pile: 5,
+        backlog_pile: 5,
         due_days: 3,
     };
 
@@ -254,7 +254,7 @@ impl Thresholds {
     /// 모르는 키는 거절한다. 여느 모르는 키와 달리 여기서 엄한 까닭은, 이 값들이 고치고
     /// 나서 화면이 안 바뀌는 것으로만 확인되는 자리라서다: `status_reveiw_days = 1` 은
     /// 조용히 통과하면 영영 안 먹고, 왜 안 먹는지 설정 파일에는 아무 자취가 없다.
-    pub const KEYS: [&'static str; 9] = [
+    pub const KEYS: [&'static str; 10] = [
         "status_review_days",
         "status_wip_days",
         "status_blocked_days",
@@ -262,6 +262,7 @@ impl Thresholds {
         "status_no_epic_ratio",
         "status_no_epic_min",
         "status_flow_days",
+        "status_backlog_pile",
         "status_idea_pile",
         "status_due_days",
     ];
@@ -276,7 +277,15 @@ impl Thresholds {
             no_epic_ratio: ratio(es, "status_no_epic_ratio", d.no_epic_ratio)?,
             no_epic_min: count(es, "status_no_epic_min", d.no_epic_min)?,
             flow_days: days(es, "status_flow_days", d.flow_days)?,
-            idea_pile: count(es, "status_idea_pile", d.idea_pile)?,
+            backlog_pile: count(
+                es,
+                if es.iter().any(|e| e.key == "status_backlog_pile") {
+                    "status_backlog_pile"
+                } else {
+                    "status_idea_pile"
+                },
+                d.backlog_pile,
+            )?,
             due_days: days(es, "status_due_days", d.due_days)?,
         };
         // 흐름 창이 0 이면 `생성 0 · 완료 0` 이 서서 "아무 일도 없었다" 로 읽힌다.
@@ -692,7 +701,7 @@ mod tests {
         let c = Config::parse("prefix = \"argos\"\n").unwrap();
         assert_eq!(c.status, Thresholds::DEFAULT);
         assert_eq!((c.status.review_days, c.status.wip_days, c.status.blocked_days), (3, 2, 3));
-        assert_eq!((c.status.wip_limit, c.status.no_epic_min, c.status.idea_pile), (3, 5, 5));
+        assert_eq!((c.status.wip_limit, c.status.no_epic_min, c.status.backlog_pile), (3, 5, 5));
         assert_eq!((c.status.no_epic_ratio, c.status.flow_days, c.status.due_days), (0.15, 7, 3));
     }
 
@@ -712,13 +721,14 @@ status_wip_limit     = 13
 status_no_epic_ratio = 0.5
 status_no_epic_min   = 14
 status_flow_days     = 15
-status_idea_pile     = 16
+status_backlog_pile  = 16
+status_idea_pile     = 99
 status_due_days      = 17
 ";
         assert_eq!(src.lines().skip(1).count(), Thresholds::KEYS.len(), "아는 키 하나가 이 시험에 안 섰다");
         let t = Config::parse(src).unwrap().status;
         assert_eq!((t.review_days, t.wip_days, t.blocked_days, t.flow_days), (10, 11, 12, 15));
-        assert_eq!((t.wip_limit, t.no_epic_min, t.idea_pile), (13, 14, 16));
+        assert_eq!((t.wip_limit, t.no_epic_min, t.backlog_pile), (13, 14, 16));
         assert_eq!(t.no_epic_ratio, 0.5);
         assert_eq!(t.due_days, 17, "status_due_days 가 안 먹는다");
     }
@@ -855,5 +865,16 @@ status_due_days      = 17
         ] {
             assert_eq!(Config::parse(src).unwrap_err(), want, "{src:?}");
         }
+    }
+    #[test]
+    fn backlog_threshold_reads_the_legacy_key_and_prefers_the_new_one() {
+        assert_eq!(Config::parse("prefix = \"a\"\nstatus_idea_pile = 8\n").unwrap().status.backlog_pile, 8);
+        assert_eq!(
+            Config::parse("prefix = \"a\"\nstatus_backlog_pile = 4\nstatus_idea_pile = 8\n")
+                .unwrap()
+                .status
+                .backlog_pile,
+            4
+        );
     }
 }

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.6.0 hash:f4035f0b -->
+<!-- moai:begin v:0.7.0 hash:e0deb5bb -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -84,9 +84,9 @@ the hook refuses it (rule 5). Who you are is matched by name or email, the same 
 
 ### The three forks
 
-**1. `add` or `idea`** — what decides is *whether you would pick it up now.*
-If you would, `moai add`; if it is for later, `moai idea add '<what came to mind>'`.
-An idea stands on neither the board nor `ready`, so it does not blur the plan.
+**1. `add` or `backlog`** — what decides is *whether you would pick it up now.*
+If you would, `moai add`; if it is for later, `moai backlog add '<what came to mind>'`.
+A backlog item stands on neither the board nor `ready`, so it does not blur the plan.
 **Walking past it without writing it down is the worst of all.**
 
 If it came out of an epic, ask one more question first — *can this epic deliver
@@ -94,13 +94,13 @@ what it promised without this?* If not, it is not for later: it is this work,
 unfinished. Even when you cannot do it now (waiting on a person's decision, the
 work beside you holds that file), create it as a member with `-e <epic>` and
 leave it in the first column — a member still standing keeps the epic from
-closing by itself. Send it out as an idea and the epic stands `done` without
+closing by itself. Send it out as a backlog item and the epic stands `done` without
 having delivered what it promised. To `defer` such a member is to decide to give
 that promise up.
 
 **2. `defer` or `done`** — never move to `done` what you decided not to do.
 `moai defer <id> -m '<why>'` changes neither the column nor the kind, and
-`--undo` brings the same row back as it was. An idea is "not work yet"; a defer
+`--undo` brings the same row back as it was. A backlog item is "not work yet"; a defer
 is "work, but not now".
 
 **3. Is it worth splitting into an epic** — if the request does not end inside one
@@ -147,41 +147,41 @@ The one thing that matters is that the next session reads this with
 
 ### Park what is out of scope
 
-    moai idea add '<what just came to mind>'       park it
-    moai idea add '<a longer thought>' -b -        the body comes from stdin
-    moai idea ls                                   see what has piled up
+    moai backlog add '<what just came to mind>'       park it
+    moai backlog add '<a longer thought>' -b -        the body comes from stdin
+    moai backlog ls                                   see what has piled up
     moai show -g <keyword>                         find out whether it is written down already
 
 When the time comes, unfold one into an epic and issues. Unfolding closes the thought.
 
 ```sh
-moai idea promote <id> --from - <<'PLAN'
+moai backlog promote <id> --from - <<'PLAN'
 # Epic title
 - [p1] first issue #enhancement
 PLAN
 ```
 
-**A line in the plan becomes the issue title verbatim.** Copy over an idea title
+**A line in the plan becomes the issue title verbatim.** Copy over a backlog item title
 that grew long while you parked it and that length spreads into the issues, so
-write a short new title when you unfold — the original text stays on that idea,
+write a short new title when you unfold — the original text stays on that backlog,
 and the history line about being unfolded from it leads back there.
 
-**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+**The backlog's milestone and body go onto the epic by themselves.** `promote` puts
 both on the epic it unfolds — a milestone is inherited, so the epic alone carries
 it to every member, the ones added later included, and the body is what lets
 `moai show <epic>` say why these issues are one bundle. Not onto every issue: the
-original stays on the closed idea and the history leads back to it, and the one
+original stays on the closed backlog and the history leads back to it, and the one
 place worth filling is the epic, so the window that picks a member up does not
 have to press every member to find out what this is.
 
-**The milestone that comes over is the one `moai show --milestone` stands the idea
-under**, not whatever its own field says — an idea parked inside an epic comes over
+**The milestone that comes over is the one `moai show --milestone` stands the backlog
+under**, not whatever its own field says — a backlog item parked inside an epic comes over
 in that epic's release even with an empty field of its own, and a field of its own
 that loses to the epic it sits in never reaches the new epic. One reader answers
 where a row belongs, on every surface.
 
 **Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
-already the owner — its members inherit its milestone, and writing the idea's over
+already the owner — its members inherit its milestone, and writing the backlog's over
 theirs would stand one bundle in two places.
 
 **If what came over is not the release that is running, leave it where it stands.**
@@ -191,8 +191,8 @@ release:
 
     moai edit <epic> --milestone <milestone>
 
-`promote` carries the release the idea stands in whatever state that release is in,
-so an idea parked with no milestone, one parked under a release that has since
+`promote` carries the release the backlog stands in whatever state that release is in,
+so a backlog item parked with no milestone, one parked under a release that has since
 shipped, and one parked under a milestone since deferred all come over exactly as
 they stood. **A dead one you do clear yourself** — nobody chose it here and it hides
 the new epic: `moai edit <epic> --milestone none` on a release that has shipped or
@@ -203,7 +203,7 @@ the moment it is created — not in `ready`, not in `held`, and no warning says 
 **A dead release is said out loud**: unfolding into a deferred or closed milestone
 prints one line on stderr naming it, and nothing is blocked.
 
-The id in that line is the release `moai show --milestone` stands that idea under. Only its shape is checked, so `moai-zzzz`
+The id in that line is the release `moai show --milestone` stands that backlog under. Only its shape is checked, so `moai-zzzz`
 goes in with exit 0 — but one line on stderr says there is no such milestone,
 and `moai status` counts the row as `dangling_milestone`.
 
@@ -243,7 +243,7 @@ running beside each other overlap, and waiting on a person counts too.
 its epic's milestone. A child created with `--parent <epic>` belongs to that epic.
 Do not write it again on every issue — move the epic and the members come along.
 
-**A plan gives its members the epic's own id.** `moai add --from` and `moai idea
+**A plan gives its members the epic's own id.** `moai add --from` and `moai backlog
 promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
 <epic>` always did for a review — one subject, one id. The member carries no
 `epic` field of its own, so `jq -r .epic` on it is `null` while `jq -r
@@ -338,8 +338,8 @@ in `latest.toml`. Ask somewhere else and the answer from the other place is not 
 1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`.
 2. Show a plan split the way fork 3 says, once, and on a "yes" create it in one go.
 3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
-4. Park what you find along the way that is out of scope with `moai idea add` — if the
-   epic promised it, it is not an idea even when you cannot do it now (fork 1).
+4. Park what you find along the way that is out of scope with `moai backlog add` — if the
+   epic promised it, it is not a backlog item even when you cannot do it now (fork 1).
 5. Why it was decided goes on the issue with `moai note <id>`. The next session reads
    it with `moai show <id>`.
 
@@ -433,7 +433,7 @@ first column and is not closed yet (`in_progress`·`review`).
 Anything that comes out of that work belongs in the same epic (`-e <epic>`) or
 under that issue (`--parent <id>`). If the epic cannot deliver what it promised without this, it is one of those two
 even when you cannot do it now (fork 1). If it is not for now, park it with
-`moai idea add` — an idea is always free of this rule, and so is
+`moai backlog add` — a backlog item is always free of this rule, and so is
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
@@ -497,7 +497,7 @@ person's other sessions and other people's work, and nothing else will.
 `moai skill install` also plants `moai-work` and `moai-supervise`. A person calls
 `moai-work` in a window to make it a worker — it says hello, waits for a letter,
 does the work the letter hands over in a worktree, reports and waits again — and
-`moai-supervise` in one window to hand the ideas that have piled up, one at a time,
+`moai-supervise` in one window to hand the backlog that have piled up, one at a time,
 to those workers and take their reports. Claude Code, Codex and Antigravity can
 each be either, and every one of them is a session a person opened. The supervisor
 picks, sends and checks; it does not fix and it does not merge.
@@ -534,7 +534,7 @@ that says how — and sweeps the wiki when a person calls it. Nothing checks thi
 
 Run `moai status` once more and see whether the warnings grew. Warnings block
 nothing — they shine a light on issues with no epic, reviews stalled for a long
-time, and how much you have open at once. Ideas piling up and what is deferred are
+time, and how much you have open at once. Backlog piling up and what is deferred are
 not warnings; they stand apart as notices (`notices`).
 
 If you end the session still holding something, leave one line on that issue for

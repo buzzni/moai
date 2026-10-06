@@ -8,5 +8,10 @@
   "overview.ready": "可以着手的工作",
   "overview.projects": "已登记的项目",
   "overview.tally": "项目 {places} 个 · {n} 项",
-  "overview.places": "{places} 个"
+  "overview.places": "{places} 个",
+  "warn.backlog_pile": "积压 {n} 项",
+  "warn.backlog_pile_aged": "积压 {n} 项（最早 {d} 天）",
+  "tui.act.backlog": "积压",
+  "tui.board.backlog": "积压",
+  "tui.jot.as_backlog": "存入积压 — 不属于史诗"
 }

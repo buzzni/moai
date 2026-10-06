@@ -14,8 +14,8 @@ Issues 941  · Epics 148       .moai/issues.jsonl
 
 ! Started at once 5 — finishing one at a time goes better
 
-+ Ideas piled up 36 (oldest 4 days)
-    → `moai idea ls`
++ Backlog 36 (oldest 4 days)
+    → `moai backlog ls`
 
 Last 7 days   created 41  ·  done 38   piling up +3
 
@@ -116,14 +116,20 @@ moai add 'write atomically' -e <epic> --milestone <milestone>
 moai show --tree
 ```
 
-Anything that is not work yet goes in as an idea. Ideas stay out of the board
+Anything that is not work yet goes in as a backlog item. Backlog items stay out of the board
 and out of `moai ready`, so they never blur the plan:
 
 ```sh
-moai idea add 'what if the board could fold by epic'
-moai idea ls
-moai idea promote <id> --from -      # opens it into an epic and issues
+moai backlog add 'what if the board could fold by epic'
+moai backlog ls
+moai backlog promote <id> --from -      # opens it into an epic and issues
 ```
+
+`moai idea` remains a hidden alias for one release (removed in v0.9.0).
+Issue JSON views use `kind: "backlog"`; the shared file keeps `kind: "idea"`
+for older binaries. `rm --json` returns the removed rows with that stored
+spelling. The warning key is `backlog_pile`, configured by
+`status_backlog_pile`; the old `status_idea_pile` setting remains readable.
 
 Work you have decided not to do *right now* is deferred, not closed. `moai defer
 <id> --undo` brings the same line back, in the same column, with the same kind.
@@ -136,9 +142,9 @@ key — a click outside the menu closes it and lands where you clicked. `moai tu
 --help` lists the keys, and `SPC o m` lets the mouse go when you would rather
 select or paste with it in the terminal.
 `SPC g` picks the screen: `SPC g b` lays the same list out as a kanban board —
-idea, deferred and your columns side by side, one lane per milestone, and in the
+backlog, deferred and your columns side by side, one lane per milestone, and in the
 overview one header per project — `SPC g l` brings the list back, and the choice
-is kept for the next run. `SPC v i` hides the ideas, and a card that is not
+is kept for the next run. `SPC v b` hides the backlog items, and a card that is not
 yours says whose it is.
 `SPC f` filters with the same `key=value` words as `--filter`. While you type,
 the keys it takes and a few examples stand above the field, and in the value of
@@ -215,7 +221,7 @@ moai merge-driver --install
 ## For agents
 
 `moai init` writes a managed block into `AGENTS.md` describing every command and
-the three decisions an agent has to make — create or idea, defer or done, and
+the three decisions an agent has to make — create or backlog, defer or done, and
 whether a request is big enough to split into an epic. Re-run `moai init` when
 the tool grows; it rewrites that block and tops up the `.gitattributes` and
 `.gitignore` rules it manages. It never touches your issues or your journal.
@@ -331,7 +337,7 @@ below shrink is the output, and with it the tokens.
   `updated_at=`, `started_at=` and `done_at=`, each reading the row's own field,
   and in the explorer's `SPC f` a value right after `=` may be quoted —
   `done_at="2026-10-03 00:00~2026-10-05 23:59"`. Asking by time opens what the
-  list hides by default — done, deferred and ideas — since a row closed
+  list hides by default — done, deferred and backlog items — since a row closed
   meanwhile changed too.
 - `-g` looks through the notes and move messages as well as the id, title, tags
   and body.
@@ -379,9 +385,9 @@ journal, so look at what the line held and then delete it by hand. A whole line
 that an older moai wrote straight onto a cut one is read back and listed.
 
 When a copy has to be complete, pull the whole list and compare it row by row:
-`moai show --archived --json`, plus `moai idea show --archived --json` since
-`moai show` leaves ideas out. `--all` is not enough for either: it leaves the
-archive out, and a closed idea goes to the archive like any other done row. An
+`moai show --archived --json`, plus `moai backlog show --archived --json` since
+`moai show` leaves backlog items out. `--all` is not enough for either: it leaves the
+archive out, and a closed backlog goes to the archive like any other done row. An
 id missing from the new pull was removed.
 
 ### Counting

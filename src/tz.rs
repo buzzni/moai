@@ -700,7 +700,7 @@ impl Posix<'_> {
 /// 이것을 얹고, 화면이 시각을 실제로 그릴 때에만 [`System::zone`] 이 tzdb 를 만진다.
 ///
 /// 옛 자리는 화면을 지을 때 시간대를 풀어 얹었다. 그래서 `ready`·`prime`·`show`(목록)·
-/// `idea ls` 처럼 시각을 한 줄도 안 그리는 명령도 zoneinfo 없는 기계(정적 musl 판, moai-77ap)
+/// `backlog ls` 처럼 시각을 한 줄도 안 그리는 명령도 zoneinfo 없는 기계(정적 musl 판, moai-77ap)
 /// 에서 [`System::trouble`] 한 줄을 stderr 에 냈다. 알림은 **드는 자리가 아니라 그리는 자리**
 /// 에서 선다 — 푼 적 없는 판은 할 말이 없다.
 #[derive(Default)]

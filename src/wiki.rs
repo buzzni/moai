@@ -1242,7 +1242,7 @@ mod tests {
             "# Home\n\n## Start here\n\n[epic](glossary.md#epic) [gone](glossary.md#gone) [again](glossary.md#gone) \
              [top](glossary.md) [here](#start-here) [nowhere](#nowhere) [lost](lost.md#x) [big](big.md#y)\n",
         );
-        write(s.path(), "docs/glossary.md", "# Glossary\n\n## Epic\n\n## Idea\n");
+        write(s.path(), "docs/glossary.md", "# Glossary\n\n## Epic\n\n## Backlog\n");
         write(s.path(), "docs/big.md", &format!("# Big\n\n## Y\n{}", "x".repeat(TOO_LARGE as usize)));
         let w = load(s.path(), "docs", "moai", &none).unwrap();
         let home = w.find("README").unwrap();
@@ -1272,7 +1272,7 @@ mod tests {
             !Notices { missed: n.missed.clone(), ..Notices::default() }.is_empty(),
             "없는 머리글 알림 하나만 서도 알림이 있는 것이다 — 없으면 `wiki show` 가 꼬리를 안 단다"
         );
-        assert_eq!(w.find("glossary").unwrap().holds("idea"), Some(true));
+        assert_eq!(w.find("glossary").unwrap().holds("backlog"), Some(true));
         assert_eq!(w.find("big").unwrap().holds("y"), None, "못 읽은 본문의 머리글은 모른다");
         assert_eq!(w.find("glossary").unwrap().linked_from, ["README"], "앵커가 달라도 역링크는 한 번이다");
         assert!(home.linked_from.is_empty(), "제 머리글로 가는 링크는 들어오는 길이 아니다");

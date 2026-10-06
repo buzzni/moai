@@ -187,7 +187,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         // **여기서 달을 입힌다**(moai-fgjj) — 셈은 시간대에 안 닿고, 이 길은 낼
                         // 것을 그 자리에서 다 내는 표면이다. 어느 시계로 셀지는 그대로 `Ctx::zone`
-                        // 이다(탐색기의 `[tui] timezone` 과 갈리는 것은 idea moai-dux7 이 든 자리다).
+                        // 이다(탐색기의 `[tui] timezone` 과 갈리는 것은 backlog moai-dux7 이 든 자리다).
                         warnings: sum.warnings.count(&now, ctx.zone()),
                         notices: sum.notices,
                         stranded: sum.stranded,
@@ -1046,7 +1046,7 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
 /// 짐작한 남이 먼저 둔 파일(심볼릭 링크 포함)을 열면 적은 생각이 그리로 샌다. `create_new` 는
 /// 있는 것을 안 연다. `.md` 는 편집기가 본문을 마크다운으로 칠하게 한다.
 fn scratch_file(dir: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
-    private_file(dir, "moai-idea")
+    private_file(dir, "moai-backlog")
 }
 
 /// `dir` 안에 `<stem>-<pid>-<n>.md` 로 **남이 못 읽는 새 파일**을 만든다 — [`scratch_file`] 과
@@ -1629,7 +1629,7 @@ mod tests {
             std::fs::read_dir(self.0.path())
                 .unwrap()
                 .filter_map(|e| e.ok()?.file_name().into_string().ok())
-                .filter(|n| n.starts_with("moai-idea-"))
+                .filter(|n| n.starts_with("moai-backlog-"))
                 .collect()
         }
     }
@@ -1702,7 +1702,7 @@ mod tests {
         // 다음에 고를 이름들을 남이 먼저 둔다 — 카운터만 믿으면 `create_new` 갈래를 한 번도 안 지난다.
         let n: usize = a.to_string_lossy().rsplit('-').next().unwrap().trim_end_matches(".md").parse().unwrap();
         let theirs: Vec<std::path::PathBuf> =
-            (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
+            (n + 1..=n + 8).map(|k| d.0.join(format!("moai-backlog-{}-{k}.md", std::process::id()))).collect();
         for p in &theirs {
             std::fs::write(p, "남의 것").unwrap();
         }
