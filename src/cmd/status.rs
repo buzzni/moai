@@ -207,10 +207,29 @@ pub(crate) fn archive_board(
     zone: &crate::tz::Zone,
 ) -> (report::StatusReport, crate::store::Load) {
     let archived = crate::archive::read(&repo.root).unwrap_or_default();
-    let mut st = report::status_with_archive(rows, &archived.issues, unreadable, &repo.config, now, zone);
+    // 기한은 아카이브의 경고를 더한 뒤에 재도 자리가 같다 — `judged` 는 셈이 적어 둔 자리(`Dues`)에 끼운다.
+    let st = archive_board_unjudged(rows, unreadable, root, &archived, &repo.config, now).judged(now, zone);
+    (st, archived)
+}
+
+/// [`archive_board`] 의 속 — **기한 판정을 안 접는다**(moai-nkwg). 탐색기의 배너(`tui::board`)와 프로젝트 층
+/// (`tui::layer::summarize_with`)이 이것으로 세어 `moai status` 와 같은 수를 낸다. 셈을 들고 있다가 그릴 때 읽는
+/// 사람의 달로 기한을 재는 쪽이라 시간대를 안 받는다(moai-fgjj).
+///
+/// 아카이브는 **부르는 쪽이 읽어 건넨다** — 배너는 같은 아카이브를 산 줄 곁에 놓아 거름망과 `SPC v o` 에도
+/// 쓰므로, 여기서 다시 읽으면 걸음마다 아카이브 파일을 두 벌 푼다.
+pub(crate) fn archive_board_unjudged(
+    rows: &[model::Issue],
+    unreadable: &[report::Unreadable],
+    root: (&[model::Issue], &[report::Unreadable]),
+    archived: &crate::store::Load,
+    cfg: &crate::config::Config,
+    now: &str,
+) -> report::StatusReport {
+    let mut st = report::status_with_archive_unjudged(rows, &archived.issues, unreadable, cfg, now);
     let live: std::collections::BTreeSet<&str> =
         root.0.iter().map(|i| i.id.as_str()).chain(root.1.iter().filter_map(|u| u.id)).collect();
-    let collisions = crate::archive::collisions(&live, &archived);
+    let collisions = crate::archive::collisions(&live, archived);
     if !collisions.is_empty() {
         st.warnings.push(report::Warning::archive_duplicates(collisions, root.0));
     }
@@ -218,11 +237,11 @@ pub(crate) fn archive_board(
         st.notices.push(report::Warning::archive_unreadable(archived.errors.len()));
     }
     // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
-    let movable = crate::archive::movable(root.0, &archived, &repo.config, now).len();
+    let movable = crate::archive::movable(root.0, archived, cfg, now).len();
     if movable > 0 {
         st.notices.push(report::Warning::archive_pending(movable));
     }
-    (st, archived)
+    st
 }
 
 /// **설치가 어긋난 것을 대는 알림 셋** — 낡은 AGENTS.md 블록(moai-mj45), 빠진 딸린 파일 규칙

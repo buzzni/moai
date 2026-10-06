@@ -5280,6 +5280,10 @@ pub struct Unreadable<'a> {
 /// 자리에서 다 내는** 표면의 것이라 판정까지 접어서 낸다([`StatusReport::judged`]): `moai status`·
 /// `--json`·훅의 셈이 그렇다. 셈을 들고 있다가 나중에 그리는 탐색기는 [`status_in`] 으로 시간대
 /// 없이 세고 [`Dues`] 를 그대로 들었다가 그릴 때 잰다(moai-fgjj).
+///
+/// **시험만 부른다**(moai-nkwg) — 표면들은 아카이브를 곁들인 `cmd::status::archive_board` 로 세고, 판정은
+/// 그 겉에서 접는다. 아카이브 없는 줄의 판을 한 줄로 세우는 시험의 길로 남긴다.
+#[cfg(test)]
 pub fn status(
     issues: &[Issue],
     unreadable: &[Unreadable],
@@ -5340,7 +5344,9 @@ pub fn with_archive(active: &[Issue], archived_rows: &[Issue], opaque: &BTreeSet
     all
 }
 
-/// Archive rows supply references and rollups, while only active work is counted.
+/// Archive rows supply references and rollups, while only active work is counted. Tests only — the surfaces count
+/// through `cmd::status::archive_board`, which judges the dues outside [`status_with_archive_unjudged`] (moai-nkwg).
+#[cfg(test)]
 pub fn status_with_archive(
     active: &[Issue],
     archived_rows: &[Issue],
@@ -5349,14 +5355,28 @@ pub fn status_with_archive(
     now: &str,
     zone: &crate::tz::Zone,
 ) -> StatusReport {
+    status_with_archive_unjudged(active, archived_rows, unreadable, cfg, now).judged(now, zone)
+}
+
+/// [`status_with_archive`] 에서 **기한 판정만 뺀 것**(moai-nkwg) — [`status_unjudged`] 가 [`status`] 의 짝인 것과
+/// 같다. 탐색기의 배너와 프로젝트 층이 이것으로 센다: 셈은 스레드에서 돌아 오래 들고 있고, 기한은 그릴 때 읽는
+/// 사람의 달로 잰다([`Dues`], moai-fgjj). 아카이브를 안 읽던 그 두 표면은 다 옮긴 마일스톤을 기한 지난 빈 todo
+/// 로 댔다.
+pub fn status_with_archive_unjudged(
+    active: &[Issue],
+    archived_rows: &[Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+) -> StatusReport {
     if archived_rows.is_empty() {
-        return status(active, unreadable, cfg, now, zone);
+        return status_unjudged(active, unreadable, cfg, now);
     }
     let visible: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
     let opaque: BTreeSet<&str> = unreadable.iter().filter_map(|u| u.id).collect();
     let all = with_archive(active, archived_rows, &opaque);
     let soil = Soil::of(&all);
-    status_in_scope(&all, unreadable, cfg, now, &soil, &|i| visible.contains(i.id.as_str())).judged(now, zone)
+    status_in_scope(&all, unreadable, cfg, now, &soil, &|i| visible.contains(i.id.as_str()))
 }
 
 fn status_in_scope<'a>(
