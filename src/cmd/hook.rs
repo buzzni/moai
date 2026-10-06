@@ -1681,7 +1681,8 @@ fn warned(repo: &Repo, issues: &[model::Issue], unreadable: &[report::Unreadable
     let now = model::now();
     let opaque = || unreadable.iter().filter_map(|u| u.id);
     let archived = crate::archive::around(&repo.root, issues, opaque());
-    let mut st = report::status_with_archive(issues, &archived.issues, unreadable, &repo.config, &now, zone);
+    let mut st = report::status_with_archive_unjudged(issues, &archived.issues, unreadable, &repo.config, &now)
+        .judged(&now, zone);
     let live: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).chain(opaque()).collect();
     let collisions = crate::archive::collisions(&live, &archived);
     if !collisions.is_empty() {

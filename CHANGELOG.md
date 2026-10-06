@@ -142,6 +142,15 @@ does not tag — see `CONTRIBUTING.md`.
   the live ones — parents, epics, milestones, blockers and their members — and
   skip the `archive_pending` count, a notice they never counted. The warnings
   they count are the ones `moai status` counts. (moai-i9ji)
+- **The explorer counts warnings and notices the way `moai status` does when an
+  archive exists.** The project layer's `+N` (and `tui --json` outside a
+  repository) and the banner inside a project read archived rows as context
+  only: a milestone whose members were all archived no longer shows as an
+  overdue empty todo, an archived blocker is no longer a dangling reference,
+  archived rows are not counted as work, and an unreadable archive file is the
+  `archive_unreadable` notice rather than an unreadable-line warning. Archive
+  collisions and bundles waiting for `moai archive` now show in both places,
+  and the layer re-reads a project when its archive changes. (moai-nkwg)
 
 ### Deprecated
 

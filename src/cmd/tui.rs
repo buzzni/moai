@@ -34,7 +34,15 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // The explorer can switch between the live board and archived rows. Keep the
     // active overlay from the worktree gather, then add the archive beside it so
     // worktree-only rows remain visible in both views.
-    let load = crate::archive::read_all(&repo.root, active_load)?;
+    // **배너의 수는 섞기 전에 센다**(moai-nkwg) — `moai status` 와 같은 자로, 산 줄을 일로 아카이브를 문맥으로
+    // 받는다(`tui::board`). 아카이브는 한 번 읽어 셈과 섞기가 나눠 쓴다. **`--json` 은 안 센다**(리뷰) — 그 길은
+    // 아래에서 화면을 안 켜고 돌아가 배너가 없는데, 셈은 이슈 전체를 한 벌 걷는다.
+    let archived = crate::archive::read(&repo.root)?;
+    let counted = match ctx.json {
+        true => Default::default(),
+        false => crate::tui::board(&repo, &active_load, &origin, &archived, &crate::model::now())?,
+    };
+    let load = crate::tui::beside(archived, active_load);
     crate::tui::watch(&mut watched, places);
     crate::tui::watch(&mut watched, archived_marks);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
@@ -79,7 +87,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi). 다시 읽기(`tui::prepare`)도 제 말을 들고
     // 가므로(moai-9it4) 여는 화면과 같은 자로 편다 — 둘이 갈리면 배너가 걸음마다 말을 바꾼다.
     let trouble = crate::tui::said_trouble(&trouble, ctx.lang());
-    let mut app = App::open(repo, load, index, ground, path, stamp);
+    let mut app = App::open_counted(repo, load, index, ground, path, stamp, counted);
     // **탐색기도 고른 말로 선다**(moai-ra67) — 명령 층에서 한 번 푼 것을 화면에 놓는다.
     // **겹치기 전에 놓는다**(moai-9it4) — `overlaid` 가 자리 판정의 글(`tui::placed` 의
     // `view::unread_worktree`)을 화면의 말로 편다. 뒤에 놓던 판은 그 한 줄만 도구의 기본 말로
