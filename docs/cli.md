@@ -38,7 +38,7 @@ Commands:
   issue         The verbs above, pinned to `--type issue`
   epic          The verbs above, pinned to `--type epic`
   milestone     The verbs above, pinned to `--type milestone`
-  idea          Jot a passing thought down where you are (`--type idea`)
+  backlog       Jot a passing thought down where you are (`--type backlog`)
   wiki          Read the project wiki - the markdown pages under `docs/`
   send          Leave a letter for another agent - one file under .moai/mail
   inbox         The letters for you - `--ack` marks them read
@@ -73,8 +73,8 @@ Start a session like this:
 
 When something not for now comes to mind:
 
-  moai idea add 'a passing thought'  jot it. A title is enough - not work yet
-  moai idea promote <id> --from -    unfold it into an epic and issues later
+  moai backlog add 'a passing thought'  jot it. A title is enough - not work yet
+  moai backlog promote <id> --from -    unfold it into an epic and issues later
 
 When you are not doing an existing piece of work right now:
 
@@ -154,7 +154,7 @@ Options:
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
-    status_idea_pile     = 5      when this many thoughts have piled up
+    status_backlog_pile  = 5      when this many thoughts have piled up
     status_due_days      = 3      days before a milestone deadline to say so
 ```
 
@@ -276,7 +276,7 @@ Options:
       --due <date>
           Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
-      --type <issue|epic|milestone|idea>
+      --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
 
       --parent <id>
@@ -387,24 +387,24 @@ Options:
   -h, --help                 Print help
 
 Filters  (comma = or,  repeated = and):
-  -s, --status <status>                   In that column
-  -t, --tag <tag>                         Carrying that tag
-      --no-tag <tag>                      Not carrying that tag
-  -e, --epic <id|none>                    In that epic (`none` = no epic)
-      --milestone <id|none>               In that milestone (`none` = none)
-      --parent <id|none>                  A child of that issue (`none` = top)
-  -p, --priority <0-3>                    
-  -a, --assignee <who|none|me>            That assignee (repeated = or)
-      --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag, body or notes
-      --stale <days>                      Sitting in its column that long
-      --since <when>                      Changed since that time (see below)
-      --created <from..to>                Created in that range (see below)
-      --done <from..to>                   Closed in that range (see below)
-      --deferred                          Only what is deferred
-      --all                               Include done and deferred, no archive
-      --archived                          Include the archive too (old done)
-      --filter <item=value>               Filters as one string (`status=todo`)
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
       --sort <key>     Order the list by that key (priority when absent)
@@ -457,7 +457,7 @@ Order and paging:
   group: closed that way it counts from its last finished member, and a
   deferred row moved into a closed group dates it from that row's deferral.
   Asking by time opens what the list hides by default - done, deferred and
-  ideas - because a row closed meanwhile changed too. Narrow it again with
+  backlogs - because a row closed meanwhile changed too. Narrow it again with
   -s (name the columns you want) or --type; --deferred keeps only what is
   deferred, and no flag leaves deferred rows out. A lone instant given to
   --created or --done is that one second, not a day.
@@ -480,7 +480,7 @@ Order and paging:
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai idea show --archived` for ideas) and compare row
+  (--archived, and `moai backlog show --archived` for backlogs) and compare row
   by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
@@ -533,27 +533,27 @@ Options:
   -h, --help                 Print help
 
 Filters  (comma = or,  repeated = and):
-  -s, --status <status>                   In that column
-  -t, --tag <tag>                         Carrying that tag
-      --no-tag <tag>                      Not carrying that tag
-  -e, --epic <id|none>                    In that epic (`none` = no epic)
-      --milestone <id|none>               In that milestone (`none` = none)
-      --parent <id|none>                  A child of that issue (`none` = top)
-  -p, --priority <0-3>                    
-  -a, --assignee <who|none|me>            That assignee (repeated = or)
-      --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag, body or notes
-      --stale <days>                      Sitting in its column that long
-      --since <when>                      Changed since that time (see below)
-      --created <from..to>                Created in that range (see below)
-      --done <from..to>                   Closed in that range (see below)
-      --deferred                          Only what is deferred
-      --all                               Include done and deferred, no archive
-      --archived                          Include the archive too (old done)
-      --filter <item=value>               Filters as one string (`status=todo`)
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
 
   Counts the rows the filters pick - the same filters as `moai show` -
-  with done, deferred, ideas and the archive in: it counts what happened,
+  with done, deferred, backlogs and the archive in: it counts what happened,
   so nothing finished is hidden. Every number counts one kind, issue
   unless --type names another; a group is measured through its members
   (-e, --milestone). The kind axis alone counts every row picked, to show
@@ -568,7 +568,7 @@ Filters  (comma = or,  repeated = and):
   the flow follows them), and without --by the overview shows the first
   three:
     status      the column, a group's read from its members as on the board
-    kind        issue, epic, milestone, idea - every row picked
+    kind        issue, epic, milestone, backlog - every row picked
     priority    0 to 3
     tag         a row counts once per tag it carries
     assignee    name and email
@@ -1049,7 +1049,7 @@ Options:
       --due <date>
           Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
-      --type <issue|epic|milestone|idea>
+      --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
 
       --parent <id>
@@ -1126,24 +1126,24 @@ Options:
   -h, --help                 Print help
 
 Filters  (comma = or,  repeated = and):
-  -s, --status <status>                   In that column
-  -t, --tag <tag>                         Carrying that tag
-      --no-tag <tag>                      Not carrying that tag
-  -e, --epic <id|none>                    In that epic (`none` = no epic)
-      --milestone <id|none>               In that milestone (`none` = none)
-      --parent <id|none>                  A child of that issue (`none` = top)
-  -p, --priority <0-3>                    
-  -a, --assignee <who|none|me>            That assignee (repeated = or)
-      --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag, body or notes
-      --stale <days>                      Sitting in its column that long
-      --since <when>                      Changed since that time (see below)
-      --created <from..to>                Created in that range (see below)
-      --done <from..to>                   Closed in that range (see below)
-      --deferred                          Only what is deferred
-      --all                               Include done and deferred, no archive
-      --archived                          Include the archive too (old done)
-      --filter <item=value>               Filters as one string (`status=todo`)
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
       --sort <key>     Order the list by that key (priority when absent)
@@ -1196,7 +1196,7 @@ Order and paging:
   group: closed that way it counts from its last finished member, and a
   deferred row moved into a closed group dates it from that row's deferral.
   Asking by time opens what the list hides by default - done, deferred and
-  ideas - because a row closed meanwhile changed too. Narrow it again with
+  backlogs - because a row closed meanwhile changed too. Narrow it again with
   -s (name the columns you want) or --type; --deferred keeps only what is
   deferred, and no flag leaves deferred rows out. A lone instant given to
   --created or --done is that one second, not a day.
@@ -1219,7 +1219,7 @@ Order and paging:
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai idea show --archived` for ideas) and compare row
+  (--archived, and `moai backlog show --archived` for backlogs) and compare row
   by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
@@ -1316,7 +1316,7 @@ Options:
       --due <date>
           Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
-      --type <issue|epic|milestone|idea>
+      --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
 
       --parent <id>
@@ -1393,24 +1393,24 @@ Options:
   -h, --help                 Print help
 
 Filters  (comma = or,  repeated = and):
-  -s, --status <status>                   In that column
-  -t, --tag <tag>                         Carrying that tag
-      --no-tag <tag>                      Not carrying that tag
-  -e, --epic <id|none>                    In that epic (`none` = no epic)
-      --milestone <id|none>               In that milestone (`none` = none)
-      --parent <id|none>                  A child of that issue (`none` = top)
-  -p, --priority <0-3>                    
-  -a, --assignee <who|none|me>            That assignee (repeated = or)
-      --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag, body or notes
-      --stale <days>                      Sitting in its column that long
-      --since <when>                      Changed since that time (see below)
-      --created <from..to>                Created in that range (see below)
-      --done <from..to>                   Closed in that range (see below)
-      --deferred                          Only what is deferred
-      --all                               Include done and deferred, no archive
-      --archived                          Include the archive too (old done)
-      --filter <item=value>               Filters as one string (`status=todo`)
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
       --sort <key>     Order the list by that key (priority when absent)
@@ -1463,7 +1463,7 @@ Order and paging:
   group: closed that way it counts from its last finished member, and a
   deferred row moved into a closed group dates it from that row's deferral.
   Asking by time opens what the list hides by default - done, deferred and
-  ideas - because a row closed meanwhile changed too. Narrow it again with
+  backlogs - because a row closed meanwhile changed too. Narrow it again with
   -s (name the columns you want) or --type; --deferred keeps only what is
   deferred, and no flag leaves deferred rows out. A lone instant given to
   --created or --done is that one second, not a day.
@@ -1486,7 +1486,7 @@ Order and paging:
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai idea show --archived` for ideas) and compare row
+  (--archived, and `moai backlog show --archived` for backlogs) and compare row
   by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
@@ -1583,7 +1583,7 @@ Options:
       --due <date>
           Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
-      --type <issue|epic|milestone|idea>
+      --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
 
       --parent <id>
@@ -1660,24 +1660,24 @@ Options:
   -h, --help                 Print help
 
 Filters  (comma = or,  repeated = and):
-  -s, --status <status>                   In that column
-  -t, --tag <tag>                         Carrying that tag
-      --no-tag <tag>                      Not carrying that tag
-  -e, --epic <id|none>                    In that epic (`none` = no epic)
-      --milestone <id|none>               In that milestone (`none` = none)
-      --parent <id|none>                  A child of that issue (`none` = top)
-  -p, --priority <0-3>                    
-  -a, --assignee <who|none|me>            That assignee (repeated = or)
-      --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag, body or notes
-      --stale <days>                      Sitting in its column that long
-      --since <when>                      Changed since that time (see below)
-      --created <from..to>                Created in that range (see below)
-      --done <from..to>                   Closed in that range (see below)
-      --deferred                          Only what is deferred
-      --all                               Include done and deferred, no archive
-      --archived                          Include the archive too (old done)
-      --filter <item=value>               Filters as one string (`status=todo`)
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
       --sort <key>     Order the list by that key (priority when absent)
@@ -1730,7 +1730,7 @@ Order and paging:
   group: closed that way it counts from its last finished member, and a
   deferred row moved into a closed group dates it from that row's deferral.
   Asking by time opens what the list hides by default - done, deferred and
-  ideas - because a row closed meanwhile changed too. Narrow it again with
+  backlogs - because a row closed meanwhile changed too. Narrow it again with
   -s (name the columns you want) or --type; --deferred keeps only what is
   deferred, and no flag leaves deferred rows out. A lone instant given to
   --created or --done is that one second, not a day.
@@ -1753,7 +1753,7 @@ Order and paging:
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai idea show --archived` for ideas) and compare row
+  (--archived, and `moai backlog show --archived` for backlogs) and compare row
   by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
@@ -1787,12 +1787,12 @@ Order and paging:
       FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
 ```
 
-## `moai idea`
+## `moai backlog`
 
 ```
-Jot a passing thought down where you are (`--type idea`)
+Jot a passing thought down where you are (`--type backlog`)
 
-Usage: moai idea [OPTIONS] <COMMAND>
+Usage: moai backlog [OPTIONS] <COMMAND>
 
 Commands:
   add      Create
@@ -1814,14 +1814,14 @@ Options:
   `-b -`. That title becomes the issue title when it is unfolded, so a long
   one here carries straight over.
 
-  moai idea add 'a passing thought'   jot it
-  moai idea ls                        what has piled up (same as `idea show`)
+  moai backlog add 'a passing thought'   jot it
+  moai backlog ls                   what has piled up (`backlog show`)
 
-moai idea add 'install the merge driver by hand in every clone' -b - <<'IDEA'
+moai backlog add 'install the merge driver in every clone' -b - <<'BACKLOG'
 Today `moai merge-driver --install` has to be typed once per clone.
-IDEA
+BACKLOG
 
-  An idea is not work - it is in neither `moai ready` nor the board's counts,
+  Backlog items stand outside `moai ready` and the board's counts,
   and living without an epic is normal for it, so it never trips the
   "issues with no epic" warning.
 
@@ -1829,12 +1829,12 @@ IDEA
   `moai rm <id>`.
 ```
 
-## `moai idea add`
+## `moai backlog add`
 
 ```
 Create
 
-Usage: moai idea add [OPTIONS] [title]
+Usage: moai backlog add [OPTIONS] [title]
 
 Arguments:
   [title]
@@ -1871,7 +1871,7 @@ Options:
       --due <date>
           Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
 
-      --type <issue|epic|milestone|idea>
+      --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
 
       --parent <id>
@@ -1924,12 +1924,12 @@ Options:
   For examples see `moai add --help`.
 ```
 
-## `moai idea show`
+## `moai backlog show`
 
 ```
 Open one, or list them (`ls` is the same)
 
-Usage: moai idea show [OPTIONS] [target]
+Usage: moai backlog show [OPTIONS] [target]
 
 Arguments:
   [target]  An issue id, or a kind (issue, epic). The whole list when absent
@@ -1948,24 +1948,24 @@ Options:
   -h, --help                 Print help
 
 Filters  (comma = or,  repeated = and):
-  -s, --status <status>                   In that column
-  -t, --tag <tag>                         Carrying that tag
-      --no-tag <tag>                      Not carrying that tag
-  -e, --epic <id|none>                    In that epic (`none` = no epic)
-      --milestone <id|none>               In that milestone (`none` = none)
-      --parent <id|none>                  A child of that issue (`none` = top)
-  -p, --priority <0-3>                    
-  -a, --assignee <who|none|me>            That assignee (repeated = or)
-      --type <issue|epic|milestone|idea>  
-  -g, --grep <text>                       In id, title, tag, body or notes
-      --stale <days>                      Sitting in its column that long
-      --since <when>                      Changed since that time (see below)
-      --created <from..to>                Created in that range (see below)
-      --done <from..to>                   Closed in that range (see below)
-      --deferred                          Only what is deferred
-      --all                               Include done and deferred, no archive
-      --archived                          Include the archive too (old done)
-      --filter <item=value>               Filters as one string (`status=todo`)
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
       --sort <key>     Order the list by that key (priority when absent)
@@ -2018,7 +2018,7 @@ Order and paging:
   group: closed that way it counts from its last finished member, and a
   deferred row moved into a closed group dates it from that row's deferral.
   Asking by time opens what the list hides by default - done, deferred and
-  ideas - because a row closed meanwhile changed too. Narrow it again with
+  backlogs - because a row closed meanwhile changed too. Narrow it again with
   -s (name the columns you want) or --type; --deferred keeps only what is
   deferred, and no flag leaves deferred rows out. A lone instant given to
   --created or --done is that one second, not a day.
@@ -2041,7 +2041,7 @@ Order and paging:
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai idea show --archived` for ideas) and compare row
+  (--archived, and `moai backlog show --archived` for backlogs) and compare row
   by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
@@ -2075,15 +2075,15 @@ Order and paging:
       FROM read_json('/dev/stdin', columns = {kind: 'VARCHAR'}) GROUP BY 1"
 ```
 
-## `moai idea promote`
+## `moai backlog promote`
 
 ```
 Unfold into one epic and several issues, and close that thought
 
-Usage: moai idea promote [OPTIONS] --from <file|-> <id>
+Usage: moai backlog promote [OPTIONS] --from <file|-> <id>
 
 Arguments:
-  <id>  The idea to unfold
+  <id>  The backlog to unfold
 
 Options:
       --from <file|->        Epic and issues from markdown. `-` is stdin
@@ -2100,24 +2100,24 @@ Options:
   The markdown it takes is the same shape as `add --from`. With two shapes,
   you get the grammar wrong every single time.
 
-moai idea promote <id> --from - <<'PLAN'
+moai backlog promote <id> --from - <<'PLAN'
 # Epic title
 - [p1] first issue #enhancement
 - [p2] second issue
 PLAN
 
-  **A line in the plan becomes the issue title as it is.** A long idea title
+  **A line in the plan becomes the issue title as it is.** A long backlog title
   carries its length over to the issue, so write a short title again when
-  unfolding. The original text stays on that idea and the history leads back.
+  unfolding. The original text stays on that backlog and the history leads back.
 
-  Unfolding closes it - that idea goes to `done`. What came from what is kept
+  Unfolding closes it - that backlog goes to `done`. What came from what is kept
   in the journal (the history in `moai show <id>`).
 
   With the epic already standing, `-e <epic>` unfolds into it as members.
   That is where you take back something the epic needs that had gone out as
-  an idea - the plan then holds `- issue` lines only.
+  a backlog item - the plan then holds `- issue` lines only.
 
-moai idea promote <id> -e <epic> --from - <<'PLAN'
+moai backlog promote <id> -e <epic> --from - <<'PLAN'
 - [p1] what the epic set out to do
 PLAN
 
@@ -2584,7 +2584,7 @@ Options:
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
     SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
-    SPC v l  deferred            SPC v i  ideas              SPC v a  show all
+    SPC v l  deferred         SPC v b  backlog        SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
              leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
@@ -2668,11 +2668,11 @@ Options:
   SPC g l brings the list back. It is the list's layout, not another window:
   the cursor, the filter, the view, search, [NEW] and the detail are the
   list's, and the choice is kept under [tui] as layout. The menu's root names
-  the screen that stands, as in +screen [board]. The columns are idea,
-  deferred and the config's columns in order — idea is a kind and deferred
+  the screen that stands, as in +screen [board]. The columns are backlog,
+  deferred and the config's columns in order — backlog is a kind and deferred
   an axis, so nothing is stored for them.
-  SPC v i hides ideas, the idea column here and the idea rows in the list
-  alike, and is kept under [tui] as hide_ideas.
+  SPC v b hides backlog items in both the board and the list, and is kept
+  under [tui] as hide_backlog.
   At the project root every milestone is a lane, with (no milestone) last;
   inside a milestone or an epic there is one lane. Epics and milestones are
   not cards. Each card is two lines, its id, column and priority over its title,
@@ -2777,8 +2777,8 @@ Options:
   SPC v r (raw or rendered). The window is read fresh every time and nothing
   of it is kept.
 
-  SPC n opens the jot form anywhere inside a project — it is kept as an idea
-  (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on
+  SPC n opens the jot form anywhere inside a project. It keeps a backlog item
+  with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on
   PATH) it opens like a git commit message: the first line is the title, then
   a blank line, then the body, and comment lines are guidance to be deleted.
   Leave the title empty, or end the editor with an error, and nothing is

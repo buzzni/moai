@@ -56,6 +56,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- **Parked work is called backlog.** The primary command is `moai backlog`
+  (`add`, `ls`, `show`, `promote`), the kind is `backlog` in JSON views, and the
+  board, explorer, guides and translations use the same name. `--type idea`
+  and stored `kind: "idea"` remain readable; the shared file still writes
+  `kind: "idea"` for older binaries. The JSON warning key is `backlog_pile`.
+  `SPC v b` hides backlog items, saved as `[tui] hide_backlog`; legacy
+  `hide_ideas` and `status_idea_pile` settings remain readable, with the new
+  keys taking precedence. The threshold's new name is `status_backlog_pile`.
+  (moai-jtvp)
 - **The first `moai init` in a terminal asks before it plants.** A short screen
   shows the id prefix, whether git tracks the tracker, where the agent guide
   goes, whether to install the hooks and skills, the merge driver and whether to
@@ -88,6 +97,11 @@ does not tag — see `CONTRIBUTING.md`.
 - **Local tracking ignores both a `.moai` symlink and its target directory.**
   An explicit `--driver` with excluded tracking is refused; JSON `gitignore`
   reports writes to `.gitignore`, and `exclude` reports writes to `.git/info/exclude`.
+
+### Deprecated
+
+- **`moai idea` is a hidden alias for `moai backlog` for one release.** It is
+  removed in v0.9.0. (moai-jtvp)
 
 ## [0.7.0] - 2026-10-06
 

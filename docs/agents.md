@@ -13,7 +13,7 @@ flags are in [the CLI reference](cli.md), and the words in
 ## Tell the agent how the tracker works
 
 `moai init` writes a managed block into `AGENTS.md`: every command an agent needs
-and the three forks it meets (create or idea, defer or done, split into an epic or
+and the three forks it meets (create or backlog, defer or done, split into an epic or
 not). The block sits between `<!-- moai:begin … -->` and `<!-- moai:end -->`, and
 only the block is rewritten — your own prose around it stays, and the issues and
 the journal are never touched.
@@ -113,15 +113,15 @@ have reads `—`: tell the person and go on.
 
 Four skills come with it:
 
-    moai              the tracker itself — what to pick up, issues, plans, ideas
-    moai-supervise    hands piled-up ideas to the workers waiting on the repository
+    moai              the tracker itself — what to pick up, issues, plans, backlog items
+    moai-supervise    hands piled-up backlog items to the workers waiting on the repository
     moai-wiki         keeps this wiki in step with the work
-    moai-work         makes a window a worker that waits for those ideas
+    moai-work         makes a window a worker that waits for those backlog items
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
 - **`moai-supervise`** makes a session the [supervisor](glossary.md#supervisor),
-  which hands the [ideas](glossary.md#idea), one at a time, to the
+  which hands the [backlog items](glossary.md#backlog), one at a time, to the
   [workers](glossary.md#worker) waiting on the same repository and takes their
   reports. It picks, sends and checks; it does not fix and it does not merge
 - **`moai-work`** makes a window a worker: it waits for a supervisor's letter and
@@ -303,7 +303,7 @@ gets through — run it as given. None of them waits on a person except rule 5.
 1. **New issues stay inside what you picked up.** While an agent holds work (its
    [focus](glossary.md#focus)), a `moai add` must land in the same
    [epic](glossary.md#epic) (`-e <epic>`) or under the held issue
-   (`--parent <id>`). Something for later goes in as `moai idea add`, which this
+   (`--parent <id>`). Something for later goes in as `moai backlog add`, which this
    rule never stops; nor does it stop a whole plan created with `moai add --from`
 2. **Pick something up before you change the repository.** A file edit
    (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
@@ -444,19 +444,19 @@ runs one headless, and nobody needs tmux.
    with `moai inbox --ack --wait`. Each wait that runs out costs one short turn of
    tokens before it waits again
 2. **Make the supervisor.** In one window, call `moai-supervise`. It says
-   `moai hello --role supervisor`, picks ideas that do not collide with the work
+   `moai hello --role supervisor`, picks backlog items that do not collide with the work
    open, finds the waiting workers with `moai agents --role worker --status idle`
-   and sends each one idea as a letter
-3. **The letter carries the assignment only** — the idea, the model and
+   and sends each one backlog as a letter
+3. **The letter carries the assignment only** — the backlog, the model and
    difficulty picked for it, the work running alongside, the base branch, the
    milestone, the root, whether to wait again or end the turn after the report,
    and whether the person is away. The steps are in the worker's skill
-4. **The worker does the work in a worktree** — unfolds the idea into an epic,
+4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
    picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
    reviewed inside its own session, merges, closes, leaves a `Next:` note and,
    last of all, reports with `moai send`
 5. **The supervisor checks the report** — the merge is on the base branch, the
-   epic is done, the worktree is gone — and sends the next idea
+   epic is done, the worktree is gone — and sends the next backlog
 
 **The review runs inside the worker's own session** — `/code-review` in Claude
 Code, the review the session has in Codex and Antigravity, or the worker reading
@@ -634,4 +634,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp
