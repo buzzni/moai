@@ -30,7 +30,8 @@ does not tag — see `CONTRIBUTING.md`.
   `init` asks git which one stands rather than storing it, and refuses to switch.
   A linked worktree finds a tracker kept out of git too — one made outside the
   checkout (`git worktree add ../side`) looks up the main checkout's tracker at
-  the same place instead of climbing to nothing.
+  the same place instead of climbing to nothing, and a write there says it went
+  to the root's tracker, as it does for a committed one.
   `moai status` and `init --check` follow the same answer: a tracker kept out
   of git is never told it lacks `.gitattributes` rules or an AGENTS.md block,
   and a line missing from `.git/info/exclude` is named as that file's.

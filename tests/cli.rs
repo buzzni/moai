@@ -23875,6 +23875,10 @@ fn a_sibling_worktree_finds_a_tracker_kept_out_of_git() {
     assert!(id.trim().starts_with("top-"), "주 체크아웃의 트래커가 아니다 — {id}");
     assert!(issues(&main).contains("from the side"), "주 체크아웃의 트래커에 안 들었다");
     assert!(!side.join(".moai").exists(), "옆 워크트리에 트래커가 섰다");
+    // **선 체크아웃은 옆 워크트리다** — 건너간 찾기가 `here` 를 주 체크아웃으로 두면 이 가지의 커밋을 못 찾는다.
+    git(&side, &["commit", "-q", "--allow-empty", "-m", &format!("feat: side ({})", id.trim())]);
+    let shown = ok(&side, &["show", id.trim(), "--json"]);
+    assert!(shown.contains("feat: side"), "옆 워크트리 가지의 커밋을 못 찾았다 — {shown}");
 
     let id = ok(&side.join("svc"), &["add", "svc work", "-q"]);
     assert!(id.trim().starts_with("svc-"), "하위 트래커를 못 찾았다 — {id}");
