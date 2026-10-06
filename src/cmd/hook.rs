@@ -548,8 +548,11 @@ fn decide(
 
 /// 턴 끝의 닫기 물음 — 세션에 한 번 붙든다(`once_per_session`). 편지가 붙든 턴은 그 뒤의 `Stop` 이 묻는다([`decide`]).
 ///
-/// **글은 편지와 같은 칸의 자리로 잰다**(moai-084j) — `carry` 는 그 이벤트의 칸이다([`crate::hook::Carry::of`]). 칸이
-/// 없으면 묻지 않는다 — 실을 자리가 없는 글로 세션의 한 번을 쓰면 그 세션은 끝내 안 묻는다.
+/// **글은 편지와 같은 칸의 자리로 잰다**(moai-084j) — `carry` 는 그 이벤트의 칸이다([`crate::hook::Carry::of`]). 붙드는
+/// 칸이 아니면 묻지 않는다 — 닫기 물음은 붙드는 답(`Block`)이라 다른 칸에서는 답([`answer`])이 그 글을 버리고, 실을
+/// 자리가 없는 글로 세션의 한 번을 쓰면 그 세션은 끝내 안 묻는다. 칸이 있는지만 보던 판은 `Stop` 이 비추는 칸으로
+/// 옮겨지는 날 그 한 번을 버릴 글에 쓸 자리였다(리뷰 moai-084j.ghf). **칸을 다 적어 가른다** — `_` 로 받으면 새 칸이
+/// 생긴 날 그 말씨의 닫기 물음이 말없이 꺼진다([`crate::hook::Carry::admits`] 와 같은 까닭).
 fn closing_hold(
     input: &Input,
     repo: &Repo,
@@ -558,7 +561,10 @@ fn closing_hold(
     ctx: &Ctx,
     carry: crate::hook::Carry,
 ) -> Decision {
-    let Some(room) = carry.room() else { return Decision::Pass };
+    let room = match carry {
+        crate::hook::Carry::Hold(room) => room,
+        crate::hook::Carry::Context(_) | crate::hook::Carry::Nothing => return Decision::Pass,
+    };
     once_per_session(input, repo, "stop", || {
         let now = model::now();
         let st = report::status(issues, unreadable, &repo.config, &now, ctx.zone());

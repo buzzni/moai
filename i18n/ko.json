@@ -152,7 +152,7 @@
   "hook.handoff_hint": "이어서 할 것이면",
   "hook.review_open": "리뷰 이슈 {id} 가 아직 열려 있다. 낸 글을 붙이고 닫는다.",
   "hook.warnings_grew": "경고가 {before} 에서 {now} 로 늘었다. `moai status` 로 무엇이 늘었는지 본다.",
-  "hook.closing_more": "그 밖에 {n} 개는 이 칸에 안 들었다. `moai prime` 이 집은 것을 다 보인다.",
+  "hook.closing_more": "그 밖에 {n} 개는 여기 안 들었다. `moai prime` 이 집은 것을 다 보인다.",
   "refuse.link_needs_side": "`--blocks` 나 `--unblocks` 를 적는다",
   "refuse.link_both_ways": "{id} 를 막으면서 동시에 막음을 없앨 수는 없다",
   "refuse.defer_empty_why": "까닭이 비었다",

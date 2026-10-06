@@ -189,10 +189,12 @@ does not tag — see `CONTRIBUTING.md`.
   about 2,500 tokens and no setting raises it — a longer letter is cut there,
   naming `moai inbox <id> --from <n>` for the rest, where Codex would have
   moved its middle into a file. The question a turn's end asks while work is
-  still held fits the same room: rows that do not fit are left out whole, and a
-  last line counts them and names `moai prime`. Antigravity has no prompt event, so its first model
-  call of a turn loads the board and the letters; a turn is held with
-  `decision: continue`. Both carry the same 10,000 characters as Claude Code —
+  still held fits the same room: held rows that do not fit are left out whole,
+  from the bottom, before any open review tied to them that is not held, and one
+  more line counts them and names `moai prime`. Antigravity has no prompt
+  event, so its first model call of a turn loads the board and the letters; a
+  turn is held with `decision: continue`. Both carry the same 10,000
+  characters as Claude Code —
   measured whole on agy 1.2.16 and 1.2.17, up to a letter written entirely in
   Korean (28 KB). A hooks file moai did not write is left as it is, with
   one line saying so — for Antigravity that includes moai's group with a
@@ -279,6 +281,13 @@ does not tag — see `CONTRIBUTING.md`.
   subdirectory project that checkout is the subdirectory, so a `.claude` there
   that links up to the repository's own `.claude` is now refused by name
   instead of written through; plant from the top, or make it a directory.
+- **In Claude Code, the question a turn's end asks while work is still held
+  fits the 10,000 characters a letter gets there.** It used to list every row
+  the session held, however long that ran. Now held rows that do not fit are
+  left out whole, from the bottom, before any open review tied to them that is
+  not held, and one more line counts what was left out and names `moai prime`.
+  The order on the page is unchanged, and the first line and the "warnings
+  grew" line always stand.
 
 ### Removed
 

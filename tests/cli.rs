@@ -25826,7 +25826,7 @@ fn a_codex_stop_holds_letters_inside_codexs_limit() {
 
 /// **Codex 의 닫기 물음도 편지와 같은 칸의 자리 안에 든다**(moai-084j) — 같은 `Stop` 의 `reason` 이라 같은 기본 상한에
 /// 묶인다. 재지 않던 판은 집은 줄이 열둘 남짓을 넘으면 그 선을 넘겨, Codex 가 가운데를 파일로 빼고 `mv`·`defer` 줄을
-/// 바이트 자리에서 끊었다. 넘치면 줄의 묶음을 통째로 덜어 내고 끝의 한 줄이 `moai prime` 을 댄다. 같은 줄들이 Claude 의
+/// 바이트 자리에서 끊었다. 넘치면 줄의 묶음을 통째로 덜어 내고 그 뒤의 한 줄이 `moai prime` 을 댄다. 같은 줄들이 Claude 의
 /// 턴에서는 칸 하나(UTF-16 1만)로 재어 더 많이 실린다 — 자는 말씨마다다.
 #[test]
 fn a_codex_stop_holds_its_closing_question_inside_codexs_limit() {
@@ -25838,23 +25838,29 @@ fn a_codex_stop_holds_its_closing_question_inside_codexs_limit() {
             }))
             .collect();
     assert!(from_stdin(s.path(), &["add", "--from", "-"], &plan).status.success());
+    // `--type issue` 는 에픽 줄을 안 낸다 — 멤버 예순이 그대로 선다. 줄머리에서만 센다([`ids_in`]).
     let listed = ok(s.path(), &["show", "--type", "issue", "--json"]);
-    let ids: Vec<&str> =
-        listed.split("\"id\":\"").skip(1).filter_map(|r| r.split('"').next()).filter(|id| id.contains('.')).collect();
+    let ids = ids_in(&listed);
     assert_eq!(ids.len(), 60, "{listed}");
-    let mut mv = ids.clone();
+    let mut mv: Vec<&str> = ids.iter().map(String::as_str).collect();
     mv.push("in_progress");
     ok(s.path(), &[&["mv"][..], &mv].concat());
 
     let said = held_reason(&dialect_out(&s, "codex", "stop", &recorded(&s, "codex/stop.json")));
     assert!(said.len() <= 8_000, "Codex 의 선을 넘겼다 — {} 바이트", said.len());
-    assert!(said.contains("`moai prime`"), "덜어 낸 줄을 댈 길이 없다 — {}", &said[said.len().saturating_sub(300)..]);
+    // 끝 300 바이트는 바이트로 자른다 — `&said[..]` 로 자르면 한글 가운데서 시험이 제 메시지를 짓다가 넘어진다(리뷰
+    // moai-54yc.vqe 와 같은 자리).
+    assert!(
+        said.contains("`moai prime`"),
+        "덜어 낸 줄을 댈 길이 없다 — {}",
+        String::from_utf8_lossy(&said.as_bytes()[said.len().saturating_sub(300)..])
+    );
     let shown = |said: &str| ids.iter().filter(|id| said.contains(&format!("moai mv {id} review\n"))).count();
     let codex = shown(&said);
     assert!(codex > 0, "한 줄도 안 실었다");
 
+    // Claude 의 `Stop` 은 여는 훅 없이도 붙든다 — 세션 id 하나면 된다(`the_close_holds_once_and_then_lets_go`).
     let ev = event(&s, "sess0010-jjjj");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
     let whole = held_reason(&hook_out(&s, "stop", &ev));
     assert!(whole.encode_utf16().count() <= 10_000, "Claude 의 칸을 넘겼다 — {} 단위", whole.encode_utf16().count());
     assert!(shown(&whole) > codex, "Claude 의 턴을 Codex 의 좁은 선으로 쟀다 — {} 대 {codex}", shown(&whole));
