@@ -1040,11 +1040,16 @@ impl Presence {
         self.seen = Some(now.to_string());
     }
 
-    /// 닻을 다시 적을 때가 되었는가 — 닻이 [`SEEN_EVERY`] 넘게 묵었다.
+    /// 닻을 다시 적을 때가 되었는가 — 닻이 [`SEEN_EVERY`] 넘게 묵었거나 그만큼 앞서 적혔다.
+    ///
+    /// **앞날로 적힌 닻도 그 거리로 잰다**(리뷰 moai-keka.qxk) — 읽는 쪽([`Presence::quiet`])이 그 닻을 거리로 낡은 것으로
+    /// 읽으니, 다시 적는 쪽도 같은 자로 재야 한다. 차를 그대로 재던 판은 시계를 뒤로 돌린 기계(앞서던 시계를 바로잡았다)의
+    /// 산 장을 시계가 그 닻을 따라잡을 때까지 다시 안 적어(`keep_alive`·기다림의 `attend`·훅의 `rest`), 그동안 그 장이 떠난
+    /// 것으로 읽혔고 하루 넘게 앞섰으면 걷혔다.
     pub fn due(&self, now: &str) -> bool {
         let at = self.seen.as_deref().and_then(crate::model::parse_rfc3339);
         match (crate::model::parse_rfc3339(now), at) {
-            (Some(now), Some(at)) => now - at >= SEEN_EVERY,
+            (Some(now), Some(at)) => (now - at).abs() >= SEEN_EVERY,
             _ => true,
         }
     }
@@ -2624,6 +2629,9 @@ mod tests {
         card.stamp("2026-10-04T06:12:03Z");
         assert_eq!(card.seen.as_deref(), Some("2026-10-04T06:12:03Z"), "프로세스를 아는 장에 닻을 안 적었다");
         assert!(!card.due("2026-10-04T06:13:02Z") && card.due("2026-10-04T06:13:03Z"));
+        // 앞날로 적힌 닻도 그 거리로 잰다(리뷰 moai-keka.qxk) — 시계를 뒤로 돌린 기계의 산 장이다. 안 적으면 그 장이 시계가
+        // 따라잡을 때까지 떠난 것으로 읽힌다([`Presence::quiet`]).
+        assert!(!card.due("2026-10-04T06:11:04Z") && card.due("2026-10-04T06:11:03Z"), "앞날의 닻을 다시 안 적는다");
     }
 
     /// 디렉터리는 제 무시를 든다 — `init` 을 다시 안 친 저장소에서도 `git add -A` 가 안 담는다.
