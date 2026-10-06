@@ -798,6 +798,43 @@ mod tests {
         assert_eq!(typed(&a), "status=");
     }
 
+    #[test]
+    fn fixed_values_wrap_and_status_uses_this_projects_columns() {
+        use ratatui::crossterm::event::KeyCode::*;
+        for (key, values) in [
+            ("priority", vec!["p0", "p1", "p2", "p3"]),
+            ("type", vec!["issue", "epic", "milestone", "idea"]),
+            ("status", vec!["queued", "testing", "shipped"]),
+        ] {
+            let mut a = explorer();
+            a.site.cfg.statuses = vec!["queued".into(), "testing".into(), "shipped".into()];
+            a.hit("SPC f");
+            type_in(&mut a, &format!("{key}="));
+            for value in values.iter().chain(values.iter().take(1)) {
+                press(&mut a, Tab);
+                assert_eq!(typed(&a), format!("{key}={value}"));
+            }
+            press(&mut a, BackTab);
+            assert_eq!(typed(&a), format!("{key}={}", values.last().unwrap()));
+        }
+    }
+
+    #[test]
+    fn the_panel_shows_the_inserted_value_and_enter_applies_it() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "no-tag=");
+        press(&mut a, Tab);
+        press(&mut a, Tab);
+        let screen = super::super::draw::tests::render(&mut a, 100, 30).join("\n");
+        assert!(screen.contains("> docs"), "the inserted candidate is not aimed: {screen}");
+        assert_eq!(typed(&a), "no-tag=docs");
+        assert!(screen.contains("Enter 걸기"), "Enter is advertised as inserting instead of applying: {screen}");
+        press(&mut a, Enter);
+        assert_eq!(a.mode, Mode::Browse);
+    }
+
     /// **값 목록이 선 동안 Enter 는 값을 넣고, 안 선 때 거름망을 건다**(사용자 결정).
     #[test]
     fn enter_puts_the_value_in_while_the_list_stands_and_applies_once_it_does_not() {

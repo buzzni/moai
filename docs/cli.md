@@ -2562,8 +2562,8 @@ Options:
   or milestone= it lists the values there instead: typing narrows them, Up
   and Down pick one, and Enter puts it in; with no list standing it applies
   the filter. Fixed fields also complete status names, priority p0 to p3 and
-  type names with Tab; these fields keep Enter to apply. The header at the top numbers
-  every registered project, and
+  type names with Tab; these fields keep Enter to apply. The header at the
+  top numbers every registered project, and
   pressing that number without SPC jumps straight there — 0 is everything,
   one list of all projects.
 

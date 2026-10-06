@@ -134,7 +134,7 @@ kept.
 - **`SPC f` filters** with the same `key=value` words as `moai show --filter`.
   While you type, the keys it takes and a few examples stand above the field, and
   in the value of `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this
-  tracker holds do — `Up` and `Down` pick one and `Enter` puts it in
+  tracker holds do — `Up` and `Down` pick one and `Enter` puts it in.
   `Tab` completes the key at the cursor: `mil` becomes `milestone=` so you can
   start typing its value. If several keys match, Tab cycles through them in
   the order shown in the hint panel, and `Shift-Tab` cycles backwards.
