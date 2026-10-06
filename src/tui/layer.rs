@@ -4538,6 +4538,7 @@ mod tests {
         let places = crate::worktree::place_marks(&repo.root);
         let mut g = crate::worktree::gather(&repo, true).unwrap();
         super::super::watch(&mut g.watched, places);
+        super::super::watch(&mut g.watched, crate::archive::marks(&repo.root).unwrap());
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
         let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(
             g.origin,

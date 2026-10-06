@@ -598,6 +598,19 @@ checkout in that state the moment the worktree is removed. Pass `--as` with a
 path that will not disappear. What is merged and how is in
 `moai merge-driver --help`."#;
 
+const ARCHIVE_STORAGE: &str = r#"    moai archive --dry-run     preview eligible closed bundles
+    moai archive               move them to .moai/archive/<year>.jsonl
+
+Moving is explicit; ordinary writes never archive work. An epic and its members,
+and a parent and its children, move together only once the whole bundle has
+stood closed for `archive_days`. Milestones stay in the active snapshot.
+`status`, `ready`, `prime` and hook boards read the active snapshot. `show <id>`,
+`show --archived`, search, statistics and the explorer can read the archive too.
+Reopening an archived row with `moai mv <id> todo --from done` restores only that
+selected row. Its former bundle stays archived. Archived IDs stay reserved, and
+`status` reports duplicate IDs across the live and archive files.
+Yearly archive files use the same `merge=moai` driver as the active snapshot."#;
+
 const DEFERRING: &str = r#"    moai defer <id> -m '<next quarter>'    take it out of the plan for a while
     moai defer <id> --undo                 take it back
     moai show --deferred                   see only what is deferred
@@ -1185,6 +1198,10 @@ whether it is stale, `moai init --check` — it writes nothing and answers
 
 {MERGE_DRIVER}
 
+### Move old closed work into archive files
+
+{ARCHIVE_STORAGE}
+
 ### Name the AI that did the work
 
 {WORK}
@@ -1454,6 +1471,10 @@ in pairs — for a literal backslash followed by a variable, write `\\{{{{name}}
 ## When the issue file has to be merged
 
 {MERGE_DRIVER}
+
+## Move old closed work into archive files
+
+{ARCHIVE_STORAGE}
 
 ## Name the AI that did the work
 

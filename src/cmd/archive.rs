@@ -27,9 +27,7 @@ pub fn run(ctx: &Ctx, args: ArchiveArgs) -> R<Vec<String>> {
                 if rows.is_empty() {
                     return Ok((Vec::new(), rows));
                 }
-                let archived = archive::ids(&repo.root);
-                let fresh: Vec<_> = rows.iter().filter(|row| !archived.contains(&row.id)).cloned().collect();
-                archive::append(&repo.root, &fresh).map_err(|e| super::Fail::new(format!("archive: {e}")))?;
+                archive::append(&repo.root, &rows, &repo.config)?;
                 let ids: std::collections::BTreeSet<String> = rows.iter().map(|i| i.id.clone()).collect();
                 let mut moved = Vec::new();
                 issues.retain(|i| {

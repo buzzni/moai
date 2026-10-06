@@ -936,6 +936,7 @@ fn says(w: &Warning, screen: Screen) -> String {
         // 밀어내므로 부르는 쪽이 stderr 로 이미 한 줄씩 냈다. 여기 서는 뜻은 "그 말을 놓쳤으면
         // 위를 봐라" 다: 이 줄이 없으면 보드가 "드러난 문제 없다" 로 방금 한 말을 뒤집는다.
         "user_config" => one(say(lang, "warn.user_config")),
+        "archive_pending" => one(say(lang, "warn.archive_pending")),
         "agents_stale" => one(say(lang, "warn.agents_stale")),
         "agents_hand_edited" => one(say(lang, "warn.agents_hand_edited")),
         // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가

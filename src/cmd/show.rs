@@ -192,8 +192,15 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     }
     let crate::worktree::Gathered { load: active_load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
-    let load = if args.target.is_some() || args.filter.archived || args.filter.grep.is_some() {
-        crate::archive::read_all(&repo.root, active_load)
+    let load = if args.target.is_some()
+        || args.filter.archived
+        || args.filter.grep.is_some()
+        || !args.filter.created.is_empty()
+        || !args.filter.done.is_empty()
+        || !args.filter.since.is_empty()
+        || !args.filter.filter.is_empty()
+    {
+        crate::archive::read_all(&repo.root, active_load)?
     } else {
         active_load
     };

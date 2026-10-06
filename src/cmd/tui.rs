@@ -25,6 +25,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 같은 모양이어야 첫 다시 읽기가 안 바뀐 커밋 표를 다시 짓지 않고, git 을 못 불러도 옆 워크트리를
     // 치운 것을 안다. 화면을 안 켜는 `--json` 은 지켜볼 것이 없다.
     let places = if ctx.json { Vec::new() } else { crate::worktree::place_marks(repo.here()) };
+    let archived_marks = crate::archive::marks(&repo.root)?;
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
@@ -33,8 +34,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // The explorer can switch between the live board and archived rows. Keep the
     // active overlay from the worktree gather, then add the archive beside it so
     // worktree-only rows remain visible in both views.
-    let load = crate::archive::read_all(&repo.root, active_load);
+    let load = crate::archive::read_all(&repo.root, active_load)?;
     crate::tui::watch(&mut watched, places);
+    crate::tui::watch(&mut watched, archived_marks);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
     // **노트는 여기서 안 읽는다**(리뷰 moai-wcy8.rbj) — `/` 가 노트를 처음 볼 때 읽는다(`tui::Ground::read_notes`).

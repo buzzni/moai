@@ -39,6 +39,17 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .collect();
     let now = model::now();
     let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
+    let archive_ids = crate::archive::id_counts(&repo.root)?;
+    let active_ids: std::collections::BTreeSet<&str> =
+        load.issues.iter().map(|i| i.id.as_str()).chain(load.errors.iter().filter_map(|e| e.id.as_deref())).collect();
+    let collisions: Vec<String> = archive_ids
+        .into_iter()
+        .filter(|(id, n)| *n > 1 || active_ids.contains(id.as_str()))
+        .map(|(id, _)| id)
+        .collect();
+    if !collisions.is_empty() {
+        st.warnings.push(report::Warning::archive_duplicates(collisions));
+    }
     let archiveable = crate::archive::eligible(&load.issues, &repo.config, &now).len();
     if archiveable > 0 {
         st.notices.push(report::Warning::archive_pending(archiveable));

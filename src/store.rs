@@ -872,7 +872,7 @@ impl Repo {
     /// Read the active snapshot together with yearly archive files. Hot paths
     /// deliberately continue to use [`Repo::read`] so archived rows stay out.
     pub fn read_all(&self) -> R<Load> {
-        Ok(crate::archive::read_all(&self.root, self.read()?))
+        crate::archive::read_all(&self.root, self.read()?)
     }
 
     /// `issues.jsonl` 을 바꾸는 **유일한 경로**.
@@ -908,8 +908,26 @@ impl Repo {
     where
         F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
+        self.with_write_lines_after(lang, f, |_| Ok(()))
+    }
+
+    /// Commit the live snapshot, then run archive cleanup before releasing the
+    /// same lock. Cleanup failure leaves the committed live rows recoverable.
+    pub fn with_write_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
+    where
+        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        G: FnOnce(&T) -> R<()>,
+    {
+        self.with_write_lines_after(lang, |issues, _, cfg, reserved| f(issues, cfg, reserved), after)
+    }
+
+    fn with_write_lines_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
+    where
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        G: FnOnce(&T) -> R<()>,
+    {
         // 펴는 자리는 락을 다 놓은 여기다 — 코드는 갈래가 쥔다([`Stop::said`]).
-        let (out, note) = self.write_locked(f).map_err(|stop| stop.said(&lang))?;
+        let (out, note) = self.write_locked(f, after).map_err(|stop| stop.said(&lang))?;
         // **못 적은 일기는 여기서 말이 된다** — 스냅샷은 담겼으니 실패가 아니고, 찍는 자는 `main` 이다.
         if let Some(t) = note {
             let said = crate::view::store_trouble(lang(), &t);
@@ -921,9 +939,10 @@ impl Repo {
     /// [`Repo::with_write_lines`] 의 몸통([`Repo::with_write`] 도 이것을 지난다) — 락을 잡고, 읽고,
     /// 고치고, 쓴다. **돌아올 때 락을 놓는다.**
     /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
-    fn write_locked<T, F>(&self, f: F) -> Result<(T, Option<Trouble>), Stop>
+    fn write_locked<T, F, G>(&self, f: F, after_commit: G) -> Result<(T, Option<Trouble>), Stop>
     where
         F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        G: FnOnce(&T) -> R<()>,
     {
         // **저장소 락은 받은 저장소가 커밋할 수 있는 자리다**([`Lock::inside`], moai-sn57) — 링크를 안 따르고
         // 체크아웃 안에만 짓는다. 두 락을 한 뿌리로 잰다. 못 잡으면 그 까닭도 자료로 들고 나간다.
@@ -970,7 +989,7 @@ impl Repo {
         }
 
         let mut reserved = load.reserved_ids();
-        reserved.extend(crate::archive::ids(&self.root));
+        reserved.extend(crate::archive::ids(&self.root)?);
         let mut issues = load.issues;
         let mut unread = load.errors;
         let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;
@@ -1140,6 +1159,7 @@ impl Repo {
                 moved.push(pair);
             }
         }
+        after_commit(&out)?;
         Ok((out, note))
     }
 

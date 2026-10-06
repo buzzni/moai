@@ -43,6 +43,7 @@
   "warn.backlog_pile_aged": "Backlog {n} (oldest {d} days)",
   "warn.deferred": "Deferred {n}",
   "warn.deferred_aged": "Deferred {n} (oldest {d} days)",
+  "warn.archive_pending": "Closed rows eligible to move to archive {n}",
   "warn.user_config": "Unread in the user config {n} — each one was said on stderr",
   "warn.agents_stale": "The AGENTS.md block differs — another binary wrote it, so this one may be the older (build again and look)",
   "warn.agents_hand_edited": "The AGENTS.md block was edited by hand — planting it again drops those edits",

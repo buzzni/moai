@@ -676,6 +676,7 @@ fn attributes_for(root: &Path) -> std::borrow::Cow<'static, str> {
     if let Some(dir) = moai_moved(root) {
         out.push_str(LINKED_JOURNAL_COMMENT);
         out.push_str(&mirrored(GITATTRIBUTES, "journal", &dir, None));
+        out.push_str(&mirrored(GITATTRIBUTES, "archive", &dir, None));
     }
     if out.is_empty() { GITATTRIBUTES.into() } else { format!("{GITATTRIBUTES}{out}").into() }
 }
@@ -1172,6 +1173,7 @@ const GITATTRIBUTES: &str = "\
 # Install the driver once per clone with `moai merge-driver --install`. In a
 # clone without it this word is ignored and git's default merge runs.
 .moai/issues.jsonl   text eol=lf merge=moai
+.moai/archive/*.jsonl text eol=lf merge=moai
 # The journal is append-only, order does not matter, and it is never read to
 # compute state. union is right here.
 # It is filed per writer, by email — `.moai/journal/you_example_com.jsonl`.

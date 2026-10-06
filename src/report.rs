@@ -4902,6 +4902,10 @@ impl Warning {
         Warning::new("archive_pending", Vec::new()).count(n).notice().hint("moai archive --dry-run")
     }
 
+    pub fn archive_duplicates(ids: Vec<String>) -> Warning {
+        Warning::new("duplicate_id", ids).fatal()
+    }
+
     pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
         let kind = if edited { "agents_hand_edited" } else { "agents_stale" };
         Warning::new(kind, Vec::new()).count(1).notice().hint(&Warning::init_hint(root))
