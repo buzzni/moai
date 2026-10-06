@@ -14,8 +14,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
-- **`moai init --yes` (`-y`) plants without asking.** What no flag sets takes
-  the default — the same `init` as before this release.
+- **`moai init --yes` (`-y`) plants without asking.** Choices not settled by
+  flags or existing git rules and guide files take the old defaults.
 - **`moai init --driver` pins the merge-driver row**, the pair of `--no-driver`,
   so a terminal run that gives every row a flag asks nothing.
 - **`moai init --tracking exclude|gitignore` keeps the tracker out of git.**
