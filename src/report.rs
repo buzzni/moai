@@ -4933,6 +4933,11 @@ impl Warning {
         Warning::new("dotfile_linked", names.iter().map(|n| n.to_string()).collect()).notice()
     }
 
+    /// git 이 답하지 않아 추적 방식과 빠진 딸린 파일 규칙을 잴 수 없었다.
+    pub fn tracking_unknown() -> Warning {
+        Warning::new("tracking_unknown", Vec::new()).notice()
+    }
+
     /// 트래커 파일(`.moai/issues.jsonl`)이 **링크라는 알림**(moai-jo3h, 2026-09-29 사용자 결정). 재는 쪽은
     /// `cmd::status::install_notices` 고, `ids` 에 링크가 가리키는 파일을 든다.
     ///

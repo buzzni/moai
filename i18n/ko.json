@@ -1123,5 +1123,8 @@
   "hook.you_are": "이 Codex 세션은 `moai agents` 에서 `{name}` 이다. `moai` 가 누구인지 모른다고 하면 `moai hello`·`moai inbox`·`moai send` 에 `--as {name}` 을 준다.",
   "hook.letters": "{me} 에게 온 편지 {n}통. 지금 읽음으로 옮겼다 — `moai inbox <id> --as {me}` 가 한 통을 다시 보인다. 답은 `moai send <보낸 이> '<제목>' --reply-to <id> --as {me} -b -` 로 하고, 결정은 지금처럼 그 이슈에 노트로 남긴다.",
   "hook.letters_left": "{n}통이 더 기다린다 — `moai inbox {next} --ack --as {me}` 가 다음 한 통을 읽거나, 다음 턴이 싣는다.",
-  "hook.letter_cut": "[훅이 한 번에 싣는 양에 맞춰 여기서 잘랐다 — 다음 쪽은 `moai inbox {id} --from {at} --as {me}` 가 보인다]"
+  "hook.letter_cut": "[훅이 한 번에 싣는 양에 맞춰 여기서 잘랐다 — 다음 쪽은 `moai inbox {id} --from {at} --as {me}` 가 보인다]",
+  "warn.tracking_unknown": "git 이 트래커 추적 방식에 답하지 않아 딸린 파일 규칙을 못 쟀다 — git 을 고치거나 다시 묻는다",
+  "refuse.init_tracking_unknown": "git 이 트래커 추적 방식에 답하지 않았다 — git 을 고치고 init 을 다시 부른다. 아무것도 안 심었다",
+  "refuse.init_driver_without_tracking": "--driver 는 --tracking commit 에서만 심는다 — git 밖의 트래커는 git 이 합칠 것이 없다"
 }

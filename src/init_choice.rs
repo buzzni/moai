@@ -226,7 +226,13 @@ pub fn resolve(c: &Choices, d: &Defaults) -> Plan {
 /// 플래그로 준 것이 계획과 부딪히는가 — 뒤 칸에 준 플래그가 앞 칸이 정한 것을 뒤집으려 할 때다. 화면은 그 칸을
 /// 잠가 못 고르게 하지만 플래그는 이미 와 있다. **조용히 한쪽을 이기게 하지 않는다**: 부르는 쪽이 거절한다.
 pub fn conflict(fixed: &Choices, plan: &Plan) -> Option<Conflict> {
-    (fixed.skill == Some(false) && plan.guide == Guide::Hook).then_some(Conflict::HookWithoutSkill)
+    if fixed.skill == Some(false) && plan.guide == Guide::Hook {
+        Some(Conflict::HookWithoutSkill)
+    } else if fixed.driver == Some(true) && !plan.tracking.tracked() {
+        Some(Conflict::DriverWithoutTracking)
+    } else {
+        None
+    }
 }
 
 /// [`conflict`] 의 갈래.
@@ -234,6 +240,8 @@ pub fn conflict(fixed: &Choices, plan: &Plan) -> Option<Conflict> {
 pub enum Conflict {
     /// `--no-skill` 인데 안내가 훅이다.
     HookWithoutSkill,
+    /// `--driver` 는 git 밖의 트래커에 심을 수 없다.
+    DriverWithoutTracking,
 }
 
 /// 화면의 한 칸.

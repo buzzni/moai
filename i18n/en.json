@@ -1123,5 +1123,8 @@
   "hook.you_are": "This Codex session is `{name}` in `moai agents`. If `moai` says it cannot tell who you are, pass `--as {name}` to `moai hello`, `moai inbox` and `moai send`.",
   "hook.letters": "Letters for {me} ({n}). They are marked read now - `moai inbox <id> --as {me}` shows one again. Answer one with `moai send <from> '<subject>' --reply-to <id> --as {me} -b -`; a decision still goes on its issue as a note.",
   "hook.letters_left": "{n} more are waiting - `moai inbox {next} --ack --as {me}` reads the next one, or the next turn loads them.",
-  "hook.letter_cut": "[Cut here to fit what a hook can load at once - `moai inbox {id} --from {at} --as {me}` shows the next part]"
+  "hook.letter_cut": "[Cut here to fit what a hook can load at once - `moai inbox {id} --from {at} --as {me}` shows the next part]",
+  "warn.tracking_unknown": "Git did not answer whether it tracks this tracker — dotfile rules could not be checked. Fix git or try again",
+  "refuse.init_tracking_unknown": "Cannot determine whether git tracks this tracker. Fix git and run init again; nothing was planted",
+  "refuse.init_driver_without_tracking": "--driver requires --tracking commit; a tracker kept out of git has nothing for git to merge"
 }

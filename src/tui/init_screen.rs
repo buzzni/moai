@@ -29,7 +29,9 @@ const NOTE: u16 = 2;
 /// 부른 것은 에이전트나 스크립트다: 묻는 순간 아무도 답하지 않는 키를 영영 기다린다.
 pub fn on_terminal() -> bool {
     use std::io::IsTerminal;
-    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+    std::env::var_os("TERM").is_none_or(|term| term != "dumb")
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
 }
 
 /// 묻고 계획을 돌려준다. `None` 은 사람이 그만뒀다 — 아무것도 안 썼다. `check` 는 심으려는 계획을
@@ -43,13 +45,25 @@ pub fn ask(
     // **못 켜도 raw mode 를 되돌린다**(리뷰 moai-zynt.63u) — `try_init_with_options` 는 raw mode 를 켠 **뒤에** 인라인
     // 뷰포트를 세우려 커서 자리를 묻는다(`ESC[6n`). 답하지 않는 터미널에서 그 물음이 지면, `?` 로 바로 나가던 판은
     // 아래의 끄는 길을 건너 사람의 셸을 raw mode 로 남겼다.
-    let mut term = match ratatui::try_init_with_options(TerminalOptions { viewport: Viewport::Inline(HEIGHT) }) {
-        Ok(term) => term,
-        Err(e) => {
+    // 인라인만 쓰므로 대체 화면을 떠나는 ratatui 의 panic hook 을 깔지 않는다.
+    ratatui::crossterm::terminal::enable_raw_mode().map_err(|e| e.to_string())?;
+    struct RawMode;
+    impl Drop for RawMode {
+        fn drop(&mut self) {
             let _ = ratatui::crossterm::terminal::disable_raw_mode();
-            return Err(e.to_string());
+            let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::Show);
         }
-    };
+    }
+    let _raw = RawMode;
+    let backend = ratatui::backend::CrosstermBackend::new(std::io::stdout());
+    let mut term =
+        match ratatui::Terminal::with_options(backend, TerminalOptions { viewport: Viewport::Inline(HEIGHT) }) {
+            Ok(term) => term,
+            Err(e) => {
+                let _ = ratatui::crossterm::terminal::disable_raw_mode();
+                return Err(e.to_string());
+            }
+        };
     let out = (|| -> std::io::Result<Option<Plan>> {
         loop {
             term.draw(|f| draw(f, &form, lang, dir))?;
@@ -71,9 +85,10 @@ pub fn ask(
     // **`ratatui::restore` 를 안 부른다** — 그것은 대체 화면을 떠나는 `?1049l` 도 내는데, 그 화면에 든
     // 적이 없는 터미널은 그 글을 "저장한 커서로 돌아가라" 로 읽어 커서가 엉뚱한 줄로 뛴다. 켠 것은
     // raw mode 하나라 그것만 끈다. 그 몇 줄은 지워 `init` 의 보고가 그 자리에서 시작하게 한다.
-    // 지운 뒤 커서는 줄 가운데(마지막에 그린 자리)에 남는다 — 줄 머리로 돌려야 보고의 첫 줄이 거기서 선다.
+    // 지우기는 커서를 마지막 그린 칸으로 돌린다 — 지우기 전 뷰포트 첫 줄을 잡고 그 줄 머리로 옮긴다.
+    let origin = term.get_frame().area().y;
     let _ = term.clear();
-    let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::MoveToColumn(0));
+    let _ = ratatui::crossterm::execute!(std::io::stdout(), ratatui::crossterm::cursor::MoveTo(0, origin));
     let _ = term.show_cursor();
     let _ = ratatui::crossterm::terminal::disable_raw_mode();
     out.map_err(|e| e.to_string())

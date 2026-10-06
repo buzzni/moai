@@ -3272,12 +3272,14 @@ Options:
   **In a terminal the first init asks.** It shows the prefix and each choice
   with its default picked, and Enter plants. A flag picks its row and locks
   it; give every row a flag and nothing is asked. --yes asks nothing and
-  plants what init has always planted - committed, with the guide block - in
-  every row no flag sets, which is not what the screen picks. Nothing is
+  uses the old defaults - committed, with the guide block - for choices that
+  neither a flag nor existing git rules and guide files settle. Nothing is
   asked where a script or an agent calls it - stdin or stdout is not a
-  terminal, or --json - and there init plants the same as --yes. Running it
+  terminal, TERM=dumb, or --json - and there init plants the same as --yes. Running it
   again where .moai already stands never asks. Esc stops with nothing
-  written.
+  written. Even a first run reads existing git ignore rules and the moai
+  guide block. A later run also recognizes installed moai hooks when no block
+  stands. If git fails, init refuses rather than guessing commit mode.
 
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
@@ -3297,11 +3299,15 @@ Options:
   --no-driver leaves .git/config alone. A repository that wants no driver at
   all says so in `.gitattributes` - a line for the snapshot that settles
   merge itself (`.moai/issues.jsonl   text eol=lf -merge`) is read as the
-  decision and init leaves it alone.
+  decision and init leaves it alone. An explicit --driver with --tracking
+  exclude or gitignore is refused.
+
+  --json reports gitignore=true only when .gitignore was written; exclude=true
+  means the ignore lines were written to .git/info/exclude.
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is
-  non-zero only when a file cannot be read.
+  non-zero when a file cannot be read or git cannot determine tracking.
 
   --print only prints that block. That is where to copy it from when the file
   the agent reads is not AGENTS.md - --print and init write the same text.

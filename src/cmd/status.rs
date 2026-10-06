@@ -205,8 +205,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// 함께 움직이고, 한쪽만 떼면 그 줄들이 먼저 붉어진다.
 ///
 /// **탐색기의 둘은 때를 가린다**(`tui::layer::ASK_INSTALL_EVERY`) — 세는 법은 여기 하나 그대로고,
-/// 갈라 둔 것은 "언제 묻나" 뿐이다. 이 부름은 하위 프로세스를 셋까지 새로 실행하는데
-/// (`git check-attr`·`git config`, 심긴 줄의 probe), 그쪽 두 길은 걸음마다 돈다.
+/// 갈라 둔 것은 "언제 묻나" 뿐이다. 이 부름은 하위 프로세스를 다섯까지 새로 실행하는데
+/// (`git check-ignore`, git 밖이면 `rev-parse`, `git check-attr`·`git config`, 심긴 줄의 probe), 그쪽 두 길은 걸음마다 돈다.
 ///
 /// **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이고, 종료 코드를 안 바꾼다
 /// (`moai status` 는 아무것도 막지 않는다, CLAUDE.md).

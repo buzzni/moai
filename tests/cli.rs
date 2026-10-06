@@ -23894,6 +23894,202 @@ fn a_linked_worktree_does_not_keep_a_tracker_out_of_git() {
     assert!(!linked.join(".moai").exists(), "거절하고도 심었다");
 }
 
+// ── moai-j9nf: PR 20 리뷰의 회귀 ──────────────────────────────────────────────────────────
+
+#[test]
+fn init_unknown_tracking_never_plants_commit_files() {
+    let s = Scratch::new("init-unknown-tracking");
+    git(s.path(), &["init", "-q", "."]);
+    ok(s.path(), &["init", "argos", "--tracking", "exclude", "--guide", "none"]);
+    let before = read(&s.path().join(".git/info/exclude"));
+    std::fs::write(s.path().join(".git/config"), "[broken\n").unwrap();
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("tracking_unknown"), "{status}");
+    assert!(!status.contains("gitattributes_rules"), "Unknown was treated as commit — {status}");
+    for args in
+        [vec!["init", "--json"], vec!["init", "--tracking", "exclude", "--json"], vec!["init", "--check", "--json"]]
+    {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "Succeeded despite broken git — {args:?}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("git"));
+    }
+    assert!(!s.path().join(".gitattributes").exists());
+    assert!(!s.path().join(".gitignore").exists());
+    assert!(!s.path().join("AGENTS.md").exists());
+    assert_eq!(read(&s.path().join(".git/info/exclude")), before);
+}
+
+#[test]
+fn init_first_run_preserves_ignored_tracking_and_the_standing_link() {
+    let source = Scratch::new("init-clone-source");
+    git(source.path(), &["init", "-q", "."]);
+    ok(source.path(), &["init", "argos", "--tracking", "gitignore", "--guide", "file"]);
+    let link = read(&source.path().join("AGENTS.md"));
+    let clone = Scratch::new("init-clone-first");
+    git(clone.path(), &["init", "-q", "."]);
+    for f in [".gitignore", "AGENTS.md"] {
+        std::fs::copy(source.path().join(f), clone.path().join(f)).unwrap();
+    }
+    assert!(!clone.path().join(".moai").exists());
+    assert!(!moai(clone.path(), &["init", "argos", "--tracking", "commit", "--json"]).status.success());
+    assert!(!clone.path().join(".moai").exists());
+    assert_eq!(field(&ok(clone.path(), &["init", "--check", "--json"]), "agents"), "current");
+    let out = ok(clone.path(), &["init", "argos", "--json"]);
+    assert_eq!(field(&out, "tracking"), "gitignore");
+    assert_eq!(field(&out, "guide"), "file");
+    assert_eq!(read(&clone.path().join("AGENTS.md")), link);
+    assert!(clone.path().join(".moai/guide.md").is_file());
+    assert!(!clone.path().join(".gitattributes").exists());
+}
+
+#[test]
+fn init_uses_the_persons_global_excludes_on_first_and_later_runs() {
+    let s = Scratch::new("init-global-excludes");
+    let root = s.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    git(&root, &["init", "-q", "."]);
+    let ignore = s.path().join("ignore");
+    std::fs::write(&ignore, ".moai/\n").unwrap();
+    let config = s.path().join("global-config");
+    std::fs::write(&config, format!("[core]\nexcludesFile = {}\n", ignore.display())).unwrap();
+    let run = |args: &[&str]| staged(args).env("GIT_CONFIG_GLOBAL", &config).current_dir(&root).output().unwrap();
+    for args in [vec!["init", "argos", "--json"], vec!["init", "--json"]] {
+        let out = run(&args);
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(field(&text, "tracking"), "exclude");
+        assert!(!root.join(".gitattributes").exists());
+        assert!(!root.join("AGENTS.md").exists());
+    }
+}
+
+#[test]
+fn init_recognizes_installed_hooks_without_replanting_a_block_or_reinstalling() {
+    let s = Scratch::new("init-standing-hooks");
+    git(s.path(), &["init", "-q", "."]);
+    ok(s.path(), &["init", "argos", "--guide", "none"]);
+    ok(s.path(), &["skill", "install", "--agent", "codex"]);
+    let out = ok(s.path(), &["init", "--json"]);
+    assert_eq!(field(&out, "guide"), "hook");
+    assert!(out.contains("\"skill\":false"), "{out}");
+    assert!(!s.path().join("AGENTS.md").exists());
+    assert_eq!(field(&ok(s.path(), &["init", "--no-skill", "--json"]), "guide"), "hook");
+}
+
+#[test]
+fn init_reads_a_linked_worktrees_guide_from_the_main_tracker() {
+    let s = Scratch::new("init-worktree-guide");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "."]);
+    ok(&main, &["init", "argos", "--guide", "file"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "init"]);
+    let side = s.path().join("side");
+    git(&main, &["worktree", "add", "-q", side.to_str().unwrap()]);
+    std::fs::remove_file(side.join(".moai/guide.md")).unwrap();
+    assert_eq!(field(&ok(&side, &["init", "--check", "--json"]), "agents"), "current");
+    assert!(!ok(&side, &["status", "--json"]).contains("agents_hand_edited"));
+    std::fs::write(main.join(".moai/guide.md"), "edited\n").unwrap();
+    assert_eq!(field(&ok(&side, &["init", "--check", "--json"]), "agents"), "stale");
+}
+
+#[cfg(unix)]
+#[test]
+fn init_local_tracking_ignores_both_a_tracker_link_and_its_target() {
+    use std::os::unix::fs::symlink;
+    for tracking in ["exclude", "gitignore"] {
+        let s = Scratch::new(&format!("init-link-local-{tracking}"));
+        git(s.path(), &["init", "-q", "."]);
+        std::fs::create_dir(s.path().join("tracker")).unwrap();
+        symlink("tracker", s.path().join(".moai")).unwrap();
+        // An existing empty link is a re-run; supply the config that re-runs read.
+        std::fs::write(s.path().join("tracker/config.toml"), "prefix = \"argos\"\n").unwrap();
+        if tracking == "exclude" {
+            std::fs::write(s.path().join(".git/info/exclude"), "/.moai\n").unwrap();
+        } else {
+            std::fs::write(s.path().join(".gitignore"), "/.moai\n").unwrap();
+        }
+        let out = ok(s.path(), &["init", "--guide", "none", "--json"]);
+        assert_eq!(field(&out, "tracking"), tracking);
+        std::fs::write(s.path().join("tracker/issues.jsonl"), "").unwrap();
+        git(s.path(), &["add", "-A"]);
+        let tracked = git(s.path(), &["ls-files"]);
+        assert!(!tracked.contains("tracker/") && !tracked.lines().any(|l| l == ".moai"), "{tracked}");
+        assert_eq!(field(&ok(s.path(), &["init", "--json"]), "tracking"), tracking);
+    }
+}
+
+#[test]
+fn init_explicit_driver_is_refused_when_the_tracker_is_not_tracked() {
+    for tracking in ["exclude", "gitignore"] {
+        let s = Scratch::new(&format!("init-driver-local-{tracking}"));
+        git(s.path(), &["init", "-q", "."]);
+        let out = moai(s.path(), &["init", "argos", "--tracking", tracking, "--driver", "--json"]);
+        assert!(!out.status.success());
+        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+        assert!(!s.path().join(".moai").exists());
+        assert!(!s.path().join(".gitignore").exists());
+    }
+}
+
+#[test]
+fn init_json_names_the_ignore_file_that_it_actually_wrote() {
+    let s = Scratch::new("init-json-exclude");
+    git(s.path(), &["init", "-q", "."]);
+    let js = ok(s.path(), &["init", "argos", "--tracking", "exclude", "--json"]);
+    assert!(js.contains("\"exclude\":true") && js.contains("\"gitignore\":false"), "{js}");
+    assert!(!s.path().join(".gitignore").exists());
+}
+
+#[test]
+fn init_checks_prefix_before_git_and_reads_agents_even_for_local_tracking() {
+    let s = Scratch::new("init-refusal-order");
+    std::fs::write(s.path().join("AGENTS.md"), b"bad\xff\n").unwrap();
+    let out = moai(s.path(), &["init", "", "--tracking", "exclude", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && !err.contains("AGENTS.md"), "{err}");
+    git(s.path(), &["init", "-q", "."]);
+    std::fs::write(s.path().join(".git/info/exclude"), "/.moai/\n").unwrap();
+    let before = read(&s.path().join(".git/info/exclude"));
+    let out = moai(s.path(), &["init", "argos", "--json"]);
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("AGENTS.md"));
+    assert!(!s.path().join(".moai").exists());
+    assert_eq!(read(&s.path().join(".git/info/exclude")), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn init_slow_git_does_not_hide_linked_dotfile_notices() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let s = Scratch::new("init-slow-git-link");
+    git(s.path(), &["init", "-q", "."]);
+    ok(s.path(), &["init", "argos", "--no-driver"]);
+    std::fs::rename(s.path().join(".gitattributes"), s.path().join("attrs")).unwrap();
+    symlink("attrs", s.path().join(".gitattributes")).unwrap();
+    let bin = s.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let script = bin.join("git");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\ncase \" $* \" in *' check-ignore '*) exec sleep 10;; esac\nexec /usr/bin/git \"$@\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let clock = std::time::Instant::now();
+    let out = staged(&["status", "--json"]).env("PATH", &path).current_dir(s.path()).output().unwrap();
+    let js = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success() && js.contains("tracking_unknown") && js.contains("dotfile_linked"), "{js}");
+    assert!(clock.elapsed() < std::time::Duration::from_secs(8), "probe budget was exceeded");
+    let before = read(&s.path().join(".gitignore"));
+    let clock = std::time::Instant::now();
+    let out = staged(&["init", "--json"]).env("PATH", &path).current_dir(s.path()).output().unwrap();
+    assert!(!out.status.success(), "slow git was treated as commit mode");
+    assert!(clock.elapsed() < std::time::Duration::from_secs(8));
+    assert_eq!(read(&s.path().join(".gitignore")), before);
+}
+
 // ── 우편함과 출석(moai-h8tn) ────────────────────────────────────────
 
 /// 출석의 pid 로 쓸 산 프로세스 — 놓으면 죽는다. 시험 프로세스 자신을 쓰면 죽은 것을 못 재고, 남의 pid 를
