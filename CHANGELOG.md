@@ -16,16 +16,56 @@ does not tag — see `CONTRIBUTING.md`.
 
 - **`moai init --yes` (`-y`) plants without asking.** What no flag sets takes
   the default — the same `init` as before this release.
+- **`moai init --driver` pins the merge-driver row**, the pair of `--no-driver`,
+  so a terminal run that gives every row a flag asks nothing.
+- **`moai init --tracking exclude|gitignore` keeps the tracker out of git.**
+  The ignore rules, `/.moai/` and the hook plugin's directory go into
+  `.git/info/exclude` (no committed file changes) or `.gitignore`, and
+  `.gitattributes` and the merge driver are left alone — there is nothing for
+  git to merge. A tracker planted in a subdirectory gets lines anchored at that
+  subdirectory, and when the lines cannot be written nothing is planted. A
+  linked worktree refuses both — the lines would hide the main checkout's
+  tracker too.
+  `--tracking commit` is what `init` has always done. Run again,
+  `init` asks git which one stands rather than storing it, and refuses to switch.
+  `moai status` and `init --check` follow the same answer: a tracker kept out
+  of git is never told it lacks `.gitattributes` rules or an AGENTS.md block,
+  and a line missing from `.git/info/exclude` is named as that file's.
+- **`moai init --guide file` writes the agent guide to `.moai/guide.md`** and
+  leaves only a few lines in the AGENTS.md block that point at it — with
+  `moai init --print` as the way to the same text where the file is missing.
+  `--guide block` is the full block as before, and `--guide none` is
+  `--no-agents`. `init --check` and `moai status` measure both the link and the
+  file; run again, `init` reads which one stands from the block itself.
+- **`moai init --guide hook` leaves AGENTS.md alone and lets the hooks say it.**
+  It is what the screen picks for a tracker kept out of git, so a file nobody
+  else has is never named in a committed one.
+- **`moai init --skill` and `--register` run `moai skill install --scope local`
+  and `moai project add` once the tracker is planted**, and print what they
+  said under their names. The screen picks both; `--no-skill` and
+  `--no-register` turn them off, and a hooks guide keeps the install on —
+  `--guide hook --no-skill` is refused. A run that fails leaves what was
+  planted and still exits 0.
 
 ### Changed
 
 - **The first `moai init` in a terminal asks before it plants.** A short screen
-  shows the id prefix, whether to write the AGENTS.md guide block and whether to
-  plant the merge driver, each with its default picked; Enter plants and Esc
-  stops with nothing written. A flag picks its row and locks it. It asks only
-  where a person is watching — when stdin or stdout is not a terminal, or under
-  `--json`, `init` is byte for byte what it was, so agents and scripts see no
-  change. Running `init` again where `.moai` already stands never asks.
+  shows the id prefix, whether git tracks the tracker, where the agent guide
+  goes, whether to install the hooks and skills, the merge driver and whether to
+  add the repository to your project list, each with its default picked; Enter
+  plants and Esc stops with nothing written. **The screen's defaults are not the
+  old `init`:** in a git repository Enter keeps the tracker out of git
+  (`.git/info/exclude`), leaves AGENTS.md alone and lets the hooks say it,
+  installs the hooks and skills for this clone (`claude plugin install`) and adds
+  the repository to your project list. A flag picks its row and locks it, and
+  `--yes` asks nothing and plants the old way. It asks only where a person is
+  watching — when stdin or stdout is not a terminal, or under `--json`, `init`
+  plants exactly the files it always did, so agents and scripts see no change
+  on disk; the `--json` line gains `tracking`, `guide`, `guide_file`, `skill`
+  and `project`. Running `init` again where `.moai` already stands never asks.
+- **The board the hook loads on a session's first prompt says where moai's
+  usage lives when AGENTS.md carries no moai block** — one line naming the
+  `moai` skill and `moai prime`. Checkouts with the block see no change.
 
 ## [0.6.0] - 2026-10-04
 

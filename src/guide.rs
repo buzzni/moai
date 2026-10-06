@@ -924,6 +924,31 @@ pub const TAKE_YES: &str = "--take -m '<who said yes>'";
 /// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
 pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
 
+/// 안내 전문이 사는 파일(moai-cbfz) — `init --guide file` 이 쓴다. 트래커 디렉터리 안이라 뿌리를 안 어지르고,
+/// 추적 여부를 `.moai` 와 함께 따른다.
+pub const GUIDE_FILE: &str = ".moai/guide.md";
+
+/// 링크 블록의 끝줄 머리 — **링크 모드는 이 줄로 알아본다**(리뷰 moai-zynt.63u). 블록이 `.moai/guide.md` 라는
+/// 글을 품는지로 가르던 판은 그 경로를 적은 손질 한 줄에 블록 모드 저장소를 링크 모드로 갈아 끼웠다.
+pub const GUIDE_MARK: &str = "<!-- moai:guide";
+
+/// `init --guide file` 이 AGENTS.md 블록에 두는 몇 줄. 파일이 없는 자리(그 파일을 안 담은 클론)를 위해 같은
+/// 글을 내는 명령을 함께 댄다 — 바이너리만 있으면 어디서든 같은 글을 얻는다.
+///
+/// **끝줄이 가리키는 전문의 해시를 든다**(리뷰 moai-zynt.63u). 전문이 바뀌면 링크도 바뀌어야 블록의 마커가
+/// "어느 바이너리가 쓴 그대로" 를 가린다(`Stale::Binary`, moai-mj45) — 바이너리마다 같은 링크를 두던 판은
+/// 새 바이너리가 쓴 전문을 옛 바이너리가 "손으로 고쳤다" 로 읽어, 따라 친 `init` 이 새 안내를 옛 글로 되돌렸다.
+pub fn agents_link() -> String {
+    format!(
+        "## Issue tracker — moai\n\n\
+         This repository's work lives in `.moai/issues.jsonl`, and moai is the tool for it.\n\
+         Read [`{GUIDE_FILE}`]({GUIDE_FILE}) before you start — it says how to work here.\n\
+         If that file is not there, `moai init --print` prints the same text.\n\
+         {GUIDE_MARK} hash:{:08x} -->\n",
+        crate::text::fnv1a32(agents().as_bytes())
+    )
+}
+
 /// `init` 이 AGENTS.md 의 마커 사이에 쓰는 블록. **언제나 읽히는 산문이다.**
 ///
 /// 한때 여기에 "정적이라 `bd prime` 같은 명령을 따로 두지 않는다 — `moai status` 가

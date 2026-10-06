@@ -27,6 +27,33 @@ the journal are never touched.
   by hand (`init` throws that edit away). `moai init --check` answers `current`,
   `stale` or `missing` and writes nothing
 
+### Where the guide goes
+
+The first `moai init` in a terminal asks, and `--guide` says it without asking:
+
+| `--guide` | What `init` writes | When to pick it |
+|---|---|---|
+| `block` | the whole guide inside the `AGENTS.md` block | what `init` has always done, and still does when a script or an agent runs it |
+| `file` | the guide in `.moai/guide.md`, and a few lines in the block that point at it | `AGENTS.md` is yours and you want it short — the screen's pick for a committed tracker |
+| `hook` | nothing in `AGENTS.md`; the hooks tell Claude instead | the tracker is kept out of git — the screen's pick there |
+| `none` | nothing (`--no-agents`) | you hand the guide over some other way |
+
+- **`file` keeps one way to the text everywhere.** The link names
+  `moai init --print` as well, so a clone that lacks the file still gets the same
+  guide from the binary. `--check` and `moai status` measure the link and the file
+  both, and a `.moai/guide.md` edited by hand reads as stale — `init` writes it again.
+  The link ends in a hash of the guide it points at, so a guide another version of
+  moai wrote reads as that binary's, not as a hand edit — rebuild before you plant it again
+- **`hook` needs the hooks installed**, so `init` installs them with it
+  (`moai skill install --scope local`) and refuses `--no-skill` beside it. The
+  first prompt of a session then carries the board and one line saying the usage
+  is in the `moai` skill. That line appears in any checkout whose `AGENTS.md` has
+  no moai block, and only there
+- **Nothing records which one you picked.** Run again, `init` reads it from the
+  block — a link means `file`, any other moai block means `block`, and that block is
+  kept current even in a tracker kept out of git. With no block, a tracker kept out
+  of git is left without one and a committed one gets the block
+
 ## Plant the skills and hooks into Claude
 
     moai skill install                     just me (the default)
@@ -148,4 +175,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-zynt
