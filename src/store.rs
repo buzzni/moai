@@ -2027,25 +2027,31 @@ pub fn parse_issues(src: &str) -> Load {
         if line.trim().is_empty() {
             continue;
         }
-        match serde_json::from_str::<Issue>(line) {
+        match parse_line(i, line) {
             Ok(issue) => load.issues.push(issue),
-            Err(e) => load.errors.push(LoadError {
-                source: None,
-                line: i + 1,
-                message: e.to_string(),
-                text: line.to_string(),
-                // **id 를 읽는 자는 하나다**(moai-ijfy). `crate::id::id_of` 가
-                // `serde_json` 을 한 겹 아래로 부르고, 그것도 진 줄은 머리에서
-                // 긁는다. 여기서 따로 읽던 동안 머지 드라이버만 그 머리를 보아,
-                // 산 줄의 깨진 쌍둥이가 든 id 를 [`Load::reserved_ids`] 가 안
-                // 잡아 두고 `report` 의 `duplicate_id` 도 못 댔다 — `moai status`
-                // 는 `Unreadable rows` 만 말했다.
-                id: crate::id::id_of(line),
-            }),
+            Err(e) => load.errors.push(e),
         }
     }
     load.issues.sort_by(|a, b| a.id.cmp(&b.id));
     load
+}
+
+/// [`parse_issues`] 의 한 줄 — `i` 는 0 부터 센 줄 자리다. **바이트 순서 표시는 안 걷는다**: 그것은 파일 머리에서
+/// 한 번 걷는 일이라, 줄을 골라 읽는 쪽(`archive::around`, moai-i9ji)이 이것을 불러도 파일째 읽은 판과 답이 같다.
+pub fn parse_line(i: usize, line: &str) -> Result<Issue, LoadError> {
+    serde_json::from_str::<Issue>(line).map_err(|e| LoadError {
+        source: None,
+        line: i + 1,
+        message: e.to_string(),
+        text: line.to_string(),
+        // **id 를 읽는 자는 하나다**(moai-ijfy). `crate::id::id_of` 가
+        // `serde_json` 을 한 겹 아래로 부르고, 그것도 진 줄은 머리에서
+        // 긁는다. 여기서 따로 읽던 동안 머지 드라이버만 그 머리를 보아,
+        // 산 줄의 깨진 쌍둥이가 든 id 를 [`Load::reserved_ids`] 가 안
+        // 잡아 두고 `report` 의 `duplicate_id` 도 못 댔다 — `moai status`
+        // 는 `Unreadable rows` 만 말했다.
+        id: crate::id::id_of(line),
+    })
 }
 
 /// 정렬은 `id` 바이트 오름차순이다. `-`(0x2D) < `.`(0x2E) < 숫자 < 소문자 라서

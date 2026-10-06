@@ -27671,6 +27671,77 @@ fn archive_regressions_the_hook_board_names_archive_collisions() {
     assert!(board.contains(&id) && board.contains("archive --drop"), "{board}");
 }
 
+/// **`Stop` and its baseline count the warnings `moai status` counts over an archive**(moai-i9ji) — they run at the end
+/// of every agent turn, so they read only the archive that reaches the live rows (`archive::around`) instead of
+/// parsing all of it. Every way an archived row feeds a live warning stands here at once: a restored member whose epic
+/// stayed archived, a live row blocked by an archived one, a live row put into an archived epic, a milestone past its
+/// deadline that stands done only through its archived members, and a live twin of an archived row
+/// (`archive_duplicate_id`). Read without them the board would name dangling references and an overdue milestone.
+/// The notices — a bundle `moai archive` would move, an unreadable archived line nothing reaches — are not counted.
+#[test]
+fn the_stop_count_matches_the_board_over_an_archive() {
+    let s = init("archive-stop-count");
+    let p = s.path();
+    let epic = ok(p, &["epic", "add", "closed bundle", "-q"]).trim().to_string();
+    let member = add(p, &["closed member", "--parent", &epic]);
+    let restored = add(p, &["restored member", "--parent", &epic]);
+    let stone = add(p, &["shipped", "--type", "milestone", "--due", "2026-09-20"]);
+    let released = ok(p, &["epic", "add", "released bundle", "--milestone", &stone, "-q"]).trim().to_string();
+    let shipped = add(p, &["shipped member", "--parent", &released]);
+    let blocker = add(p, &["closed blocker"]);
+    let twin = add(p, &["archived twin"]);
+    for id in [&member, &restored, &shipped, &blocker, &twin] {
+        ok(p, &["mv", id, "done"]);
+    }
+    let twin_line = line_of(p, &twin);
+    ok_at(p, ARCHIVED_AT, &["archive"]);
+    let archive = std::fs::read_to_string(p.join(".moai/archive/2026.jsonl")).unwrap();
+    for id in [&epic, &member, &restored, &released, &shipped, &blocker, &twin] {
+        assert!(Archived::has(&archive, id), "{id} was not archived\n{archive}");
+    }
+    ok_at(p, ARCHIVED_AT, &["mv", &restored, "todo", "--from", "done"]);
+    let waiting = add(p, &["waits on the archive"]);
+    ok(p, &["link", &blocker, "--blocks", &waiting]);
+    add(p, &["joins the archived epic", "-e", &epic]);
+    let pending = add(p, &["closed since"]);
+    ok(p, &["mv", &pending, "done"]);
+    let mut archive = std::fs::OpenOptions::new().append(true).open(p.join(".moai/archive/2026.jsonl")).unwrap();
+    std::io::Write::write_all(&mut archive, b"{\"id\":\"argos-zzzz\",\"title\":\n").unwrap();
+
+    let counted = |board: &serde_json::Value| -> usize {
+        board["warnings"].as_array().unwrap().iter().map(|w| w["count"].as_u64().unwrap() as usize).sum()
+    };
+    let at_archive = [("MOAI_NOW", ARCHIVED_AT)];
+    let start = |session: &str| hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, session));
+    // The session opens before the live twin, and the twin is what it leaves behind.
+    start("before-twin");
+    let before = baseline(&s, "before-twin").expect("no baseline");
+    let mut active = issues(p);
+    active.push_str(&format!("{twin_line}\n"));
+    std::fs::write(p.join(".moai/issues.jsonl"), active).unwrap();
+
+    let out = at(p, ARCHIVED_AT, &["status", "--json"]);
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<&str> = board["warnings"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
+    let notices: Vec<&str> = board["notices"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
+    assert!(kinds.contains(&"archive_duplicate_id"), "{board}");
+    for kind in ["dangling_epic", "dangling_blocked_by", "orphan_child", "milestone_overdue"] {
+        assert!(!kinds.contains(&kind), "{kind} — the board did not read the archive\n{board}");
+    }
+    assert!(notices.contains(&"archive_pending") && notices.contains(&"archive_unreadable"), "{board}");
+    let warnings = counted(&board);
+    assert_eq!(before + 1, warnings, "only the twin came in between\n{board}");
+
+    start("after-twin");
+    assert_eq!(baseline(&s, "after-twin"), Some(warnings), "{board}");
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "before-twin"));
+    let held = String::from_utf8_lossy(&stop.stdout);
+    let grew = |n: usize| held.contains(&format!(" {n} "));
+    assert!(held.contains(r#""decision":"block""#) && grew(before) && grew(warnings), "{held}");
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "after-twin"));
+    assert!(stop.stdout.is_empty(), "{}", String::from_utf8_lossy(&stop.stdout));
+}
+
 #[test]
 fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
     let s = init("archive-lenient-read");

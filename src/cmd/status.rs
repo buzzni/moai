@@ -190,10 +190,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     ))
 }
 
-/// 아카이브를 곁들인 보드(moai-bth3) — `moai status`, 등록한 프로젝트의 한눈 보기, 훅의 보드·`Stop`·기준선이 **이
-/// 하나로** 짓는다. 저마다 짓던 판은 훅이 `archive_duplicate_id`·`archive_pending` 을 빼먹어 `moai status` 가 1 로
-/// 끝나는데 세션의 보드는 "드러난 문제 없다" 를 댔고, 한눈 보기는 아카이브를 아예 안 읽어 낸 마일스톤을 기한 지난
-/// 빈 todo 로 댔다(moai-6k1r 이 [`install_notices`] 를 한 자리에 모은 것과 같은 까닭이다).
+/// 아카이브를 곁들인 보드(moai-bth3) — `moai status`, 등록한 프로젝트의 한눈 보기, 훅의 보드가 **이 하나로** 짓는다.
+/// 훅의 `Stop`·기준선은 같은 경고를 산 줄에 닿는 아카이브로만 센다(`cmd::hook::warned`, moai-i9ji) — 여기 아카이브
+/// 경고를 더하면 그쪽에도 더한다. 저마다 짓던 판은 훅이 `archive_duplicate_id`·`archive_pending` 을 빼먹어
+/// `moai status` 가 1 로 끝나는데 세션의 보드는 "드러난 문제 없다" 를 댔고, 한눈 보기는 아카이브를 아예 안 읽어 낸
+/// 마일스톤을 기한 지난 빈 todo 로 댔다(moai-6k1r 이 [`install_notices`] 를 한 자리에 모은 것과 같은 까닭이다).
 ///
 /// `rows`·`unreadable` 은 보드가 세는 줄(옆 워크트리를 겹쳤으면 겹친 것)이고, `root` 는 아카이브와 견줄 **루트의
 /// 스냅샷**(줄과 못 읽는 줄)이다 — 충돌과 옮길 수 있는 수는 옆의 줄로 재지 않는다. 아카이브는 함께 돌려준다: 그

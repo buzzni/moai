@@ -137,6 +137,11 @@ does not tag — see `CONTRIBUTING.md`.
   and `ready --json` called outside any `.moai` now carry `derived_epic` on a
   member restored under an epic that `moai archive` moved, as the in-repo
   `ready --json` does. (moai-kfjy)
+- **The end of an agent turn no longer parses the whole archive.** The hook's
+  `Stop` check and its session baseline read only the archived rows that reach
+  the live ones — parents, epics, milestones, blockers and their members — and
+  skip the `archive_pending` count, a notice they never counted. The warnings
+  they count are the ones `moai status` counts. (moai-i9ji)
 
 ### Deprecated
 
