@@ -587,7 +587,7 @@ impl Filter {
         // 좁히니(좁히면 미뤄 둔 에픽이 아무 데서도 안 보인다) 보는 쪽을 연다.
         //
         // 때로 물으면 이것도 함께 연다 — 맨 끝의 "숨김을 다 연다" 다.
-        let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred;
+        let ideas = raw.ideas || raw.kind == Some(Kind::Backlog) || raw.grep.is_some() || raw.deferred;
         // **`--deferred` 는 그것만 본다.** 목록 자리에서 미룬 것은 done 처럼
         // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
         // 한 낱말로 끝난다.
@@ -1704,7 +1704,7 @@ mod tests {
             plain.hidden_by(i, NOW, &Where::of(&all, &cfg()))
         };
         let mut thought = issue("a-0001", "todo", &[]);
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         let mut closed_thought = thought.clone();
         closed_thought.status = Status::new("done");
         let mut shelved = issue("a-0002", "todo", &[]);
@@ -1786,10 +1786,10 @@ mod tests {
         assert_eq!(why(&all, &unreadable), None);
         // 닫은 생각은 아카이브여도 한 낱말로 안 열린다 — `--type idea --archived` 둘이 든다.
         let mut thought = aged.clone();
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         assert_eq!(why(&archived, &thought), Some(Hide::Idea));
         assert_eq!(why(&all, &thought), Some(Hide::Unopenable));
-        let ideas = build(Raw { kind: Some(Kind::Idea), all: true, ..Raw::default() });
+        let ideas = build(Raw { kind: Some(Kind::Backlog), all: true, ..Raw::default() });
         assert_eq!(why(&ideas, &thought), Some(Hide::Archived), "닫힌 idea 도 같은 규칙이다");
 
         // `archive_days = 0` 이면 아카이브가 없다.
@@ -2605,7 +2605,7 @@ mod tests {
             at("a-0001", "todo", Kind::Issue, "2026-09-01T00:00:00Z"),
             closed,
             reopened,
-            at("a-0004", "todo", Kind::Idea, "2026-09-05T00:00:00Z"),
+            at("a-0004", "todo", Kind::Backlog, "2026-09-05T00:00:00Z"),
             old_close,
         ];
         let c = cfg();
@@ -2907,7 +2907,7 @@ mod tests {
         let mut epic = issue("argos-0001", "todo", &[]);
         epic.kind = Kind::Epic;
         let mut thought = issue("argos-0002", "todo", &[]);
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         thought.epic = Some("argos-0001".into());
         let all = vec![epic, issue("argos-0002", "todo", &[]), thought];
         let cfg = cfg();
@@ -3002,7 +3002,7 @@ mod tests {
     #[test]
     fn an_idea_hides_until_it_is_asked_for() {
         let mut thought = issue("argos-0001", "todo", &[]);
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         thought.title = "파서를 다시 쓴다".into();
         let all = vec![thought.clone(), issue("argos-0009", "todo", &[])];
         let cfg = cfg();
@@ -3014,7 +3014,7 @@ mod tests {
 
         assert_eq!(hits(Raw::default()), ["argos-0009"], "기본 목록에 idea 가 섞였다");
         assert_eq!(
-            hits(Raw { kind: Some(Kind::Idea), ..Raw::default() }),
+            hits(Raw { kind: Some(Kind::Backlog), ..Raw::default() }),
             ["argos-0001"],
             "콕 집어 물었는데 안 나온다"
         );

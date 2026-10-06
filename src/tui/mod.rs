@@ -6009,7 +6009,7 @@ fn save_idea(app: &mut App) {
     let kept = say(app.site.lang, "tui.jot.kept");
     let wrote = app.write(save_idea, move |issues, cfg, reserved, by| {
         let id = crate::store::new_id(issues, cfg, reserved, None, &title);
-        let mut idea = Issue::new(id, title, Kind::Idea, Status::new(cfg.first_status()), &at);
+        let mut idea = Issue::new(id, title, Kind::Backlog, Status::new(cfg.first_status()), &at);
         (idea.assignee, idea.assignee_email) = by.as_assignee();
         idea.body = body;
         let (entry, made) = crate::store::admit(issues, cfg, idea, by)?;
@@ -6268,7 +6268,7 @@ mod tests {
             first,
             held,
             loose,
-            make("argos-0006", Kind::Idea),
+            make("argos-0006", Kind::Backlog),
             put_off,
         ];
         App::new(issues, cfg(), Path::new())
@@ -6396,7 +6396,7 @@ mod tests {
     fn a_closed_idea_stands_nowhere_on_the_board() {
         let mut a = boarded();
         let mut issues = a.site.issues.clone();
-        let mut unfolded = make("argos-0009", Kind::Idea);
+        let mut unfolded = make("argos-0009", Kind::Backlog);
         unfolded.status = Status::new("done");
         issues.push(unfolded);
         let mut finished = make("argos-0010", Kind::Issue);
@@ -10943,7 +10943,7 @@ mod tests {
                 issues.push(Issue::new(
                     id.into(),
                     "떠오른 것".into(),
-                    Kind::Idea,
+                    Kind::Backlog,
                     Status::new("todo"),
                     "2026-09-13T00:00:00Z",
                 ));
@@ -11547,7 +11547,7 @@ mod tests {
                 issues.push(Issue::new(
                     "argos-0002".into(),
                     "t".into(),
-                    Kind::Idea,
+                    Kind::Backlog,
                     Status::new("없는칸"),
                     "2026-09-13T00:00:00Z",
                 ));
@@ -11645,7 +11645,7 @@ mod tests {
 
     /// 파일에 선 생각들 — 화면이 아니라 **파일을** 읽는다.
     fn ideas_in(repo: &Repo) -> Vec<Issue> {
-        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Idea).collect()
+        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Backlog).collect()
     }
 
     /// `n` 으로 폼을 열어 제목을 적는다.

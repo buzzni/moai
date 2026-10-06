@@ -732,7 +732,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
             // 또 고르면, 두 축이 딴 줄을 보게 되는 것이 컴파일에 안 걸린다. 걸음마다 `by_id`
             // 를 한 번 더 짚던 값도 함께 빠진다.
             let epic = line.and_then(|i| self.epic_of.at(i));
-            if matches!(here, Some(Kind::Issue | Kind::Idea))
+            if matches!(here, Some(Kind::Issue | Kind::Backlog))
                 && let Some(r) = self.joined(epic, Kind::Epic)
                 && visit(r)
             {
@@ -749,7 +749,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
                 Some(i) if at == start => self.epic_of.stood(i, self.lines),
                 _ => self.mile_of.get(at).copied(),
             };
-            if matches!(here, Some(Kind::Issue | Kind::Idea | Kind::Epic))
+            if matches!(here, Some(Kind::Issue | Kind::Backlog | Kind::Epic))
                 && let Some(r) = self.joined(stone, Kind::Milestone)
                 && visit(r)
             {
@@ -895,7 +895,7 @@ impl<'a> Lines<'a> {
 /// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
 /// 정하는 코드가 거기 있으면 다음 표면이 같은 판단을 다시 짠다.
 pub fn is_idea(i: &Issue) -> bool {
-    i.kind == Kind::Idea
+    i.kind == Kind::Backlog
 }
 
 /// **아직** 담아 둔 생각인가 — 닫힌 idea(`promote` 로 펼쳤거나 닫은 것)는 담아 둔 것이 아니다. 쌓인 생각의 셈과
@@ -2938,7 +2938,7 @@ impl<'a, 't> Handed<'a, 't> {
     fn idea_under(&mut self, t: &'a Issue, q: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>) -> Hand<'a> {
         // **이 거르개는 값을 나른다**(리뷰) — 에픽 밑에 바로 담긴 생각이 접히는 것으로 읽히면 그 밑이
         // 통째로 에픽을 물려받는다. 묶음 밑의 생각은 뿌리로 오른다.
-        if !matches!(q.kind, Kind::Issue | Kind::Idea) {
+        if !matches!(q.kind, Kind::Issue | Kind::Backlog) {
             return Hand::Given(None);
         }
         let passed = self.hand_of(q, by_id);
@@ -3133,7 +3133,7 @@ pub(crate) fn stood_at_line<'a>(i: &'a Issue, epic: Option<&'a str>, lines: &Lin
         // 여기서 다시 갈라야 아래 마지막 갈래로 안 떨어진다.
         Kind::Epic => milestone_stood(i),
         Kind::Milestone => None,
-        Kind::Issue | Kind::Idea => match epic {
+        Kind::Issue | Kind::Backlog => match epic {
             // 에픽으로 못 쓸 것을 들었으면 어디에도 안 선다 — 그 줄은 `(길 잃음)` 으로 가므로
             // 제 `milestone` 으로 되돌아가면 머리글은 세는데 목록에 없는 줄이 남는다.
             Some(e) => lines.at(e).filter(|e| e.kind == Kind::Epic).and_then(milestone_stood),
@@ -3275,7 +3275,7 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>, twins: &Twins<'a>) 
         .filter(|t| is_idea(t))
         .filter(|t| {
             let Some(p) = crate::id::parent_of(&t.id).and_then(|p| by_id.get(p).copied()) else { return true };
-            match (matches!(p.kind, Kind::Issue | Kind::Idea), t.epic.as_deref()) {
+            match (matches!(p.kind, Kind::Issue | Kind::Backlog), t.epic.as_deref()) {
                 (false, _) => true,
                 (true, None) => false,
                 // 제 에픽을 적은 생각은 **부모 id 의 줄마다** 그 에픽을 넘겨받을 때만 접힌다 — 한 줄이라도
@@ -3284,7 +3284,8 @@ fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>, twins: &Twins<'a>) 
                 (true, Some(e)) => {
                     let rows = twins.get(p.id.as_str()).map_or_else(|| vec![p], Clone::clone);
                     !rows.into_iter().all(|q| {
-                        matches!(q.kind, Kind::Issue | Kind::Idea) && handed.hand_of(q, by_id) == Hand::Given(Some(e))
+                        matches!(q.kind, Kind::Issue | Kind::Backlog)
+                            && handed.hand_of(q, by_id) == Hand::Given(Some(e))
                     })
                 }
             }
@@ -3327,7 +3328,7 @@ fn epic_through<'a>(i: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, handed: 
 /// 받으면 `moai show -e <바깥 에픽>` 만 트리에 없는 줄을 고른다. 마일스톤은 뿌리에 선다.
 /// 생각은 받되 그 밑에 그려지지는 않는다 — `-e <에픽>` 을 적은 생각과 같은 자리다.
 fn joins(i: &Issue) -> bool {
-    matches!(i.kind, Kind::Issue | Kind::Idea)
+    matches!(i.kind, Kind::Issue | Kind::Backlog)
 }
 
 /// 이슈 id → 그것이 속한 마일스톤 id.
@@ -3462,7 +3463,7 @@ fn fold_top<'a>(i: &'a Issue, pick: &impl Fn(&str) -> Option<&'a Issue>, rooted:
     let mut cur = i;
     // id 가 줄어들며 올라가므로 고리가 없다.
     while let Some(p) =
-        crate::id::parent_of(&cur.id).and_then(pick).filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+        crate::id::parent_of(&cur.id).and_then(pick).filter(|p| matches!(p.kind, Kind::Issue | Kind::Backlog))
     {
         if rooted.contains(p.id.as_str()) {
             return None;
@@ -3745,8 +3746,8 @@ pub(crate) fn misplace_of<'a>(
         // 일과 똑같이 드러나야 한다.
         // 쌍둥이 부모 밑에서 소속을 못 정한 줄이 먼저다 — 에픽이 없다고 읽고 조상의 마일스톤을
         // 재면, 못 가른다던 그 부모의 뒷줄을 거기서 다시 입는다.
-        Kind::Issue | Kind::Idea if epic_of.lost(i) => Some(Misplace::Twin),
-        Kind::Issue | Kind::Idea => match epic_of.at(i) {
+        Kind::Issue | Kind::Backlog if epic_of.lost(i) => Some(Misplace::Twin),
+        Kind::Issue | Kind::Backlog => match epic_of.at(i) {
             Some(e) if kind_of.get(e) != Some(&Kind::Epic) => Some(Misplace::Epic),
             // 에픽이 멀쩡하면 그 에픽의 마일스톤을 따르므로 여기서 안 본다.
             Some(_) => None,
@@ -3791,7 +3792,7 @@ pub fn under_lost<'a>(all: &'a [Issue], lines: &Lines<'a>, epic_of: &Handing<'a>
         let mut cur = i;
         while let Some(p) = crate::id::parent_of(&cur.id)
             .and_then(|p| lines.at(p))
-            .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+            .filter(|p| matches!(p.kind, Kind::Issue | Kind::Backlog))
         {
             // **소속은 줄마다 묻는다**(리뷰, [`joined_in`]) — `nav::Ctx::home_of_work` 가 같은
             // 물음을 `Ctx::epic_at` 으로 옮긴 자리다. 여기만 지도를 짚으면 접는 자와 그리는 자가
@@ -5873,7 +5874,7 @@ mod tests {
     /// 약속을 그 자리에서 어긴다(리뷰).
     #[test]
     fn a_twin_that_is_not_the_member_still_stands_as_a_child() {
-        let mut twin = make("argos-aaaa.b1x", Kind::Idea, "todo");
+        let mut twin = make("argos-aaaa.b1x", Kind::Backlog, "todo");
         twin.title = "가려진 앞줄".into();
         let all = vec![make("argos-aaaa", Kind::Epic, "todo"), twin, make("argos-aaaa.b1x", Kind::Issue, "todo")];
         let kids = children_of(&all, "argos-aaaa");
@@ -6377,7 +6378,7 @@ mod tests {
                 .unwrap_or_default()
         };
         let thought = |id: &str, epic: Option<&str>| {
-            let mut t = make(id, Kind::Idea, "todo");
+            let mut t = make(id, Kind::Backlog, "todo");
             t.epic = epic.map(str::to_string);
             t
         };
@@ -7794,7 +7795,7 @@ mod tests {
             make("argos-0001.aa1", Kind::Issue, "todo"),
             make("argos-0001.aa1.bb1", Kind::Issue, "todo"),
             own_epic,
-            make("argos-0001.aa3", Kind::Idea, "todo"),
+            make("argos-0001.aa3", Kind::Backlog, "todo"),
             make("argos-0001.ee1", Kind::Epic, "todo"),
             make("argos-0001.aa1.ee2", Kind::Epic, "todo"),
             make("argos-0001.aa2.ee3", Kind::Epic, "todo"),
@@ -7838,7 +7839,7 @@ mod tests {
         stone.title = "v0.1".into();
         let mut epic = make("argos-0002", Kind::Epic, "todo");
         epic.milestone = Some("argos-0001".into());
-        let mut thought = make("argos-0004", Kind::Idea, "todo");
+        let mut thought = make("argos-0004", Kind::Backlog, "todo");
         thought.epic = Some("argos-0002".into());
         // 에픽 줄이 든 `epic` — `nav` 는 에픽을 에픽 밑에 두지 않는다. 그 에픽의
         // 마일스톤도 물려받지 않는다 — 에픽 줄은 제 `milestone` 에만 선다(moai-0prl).
@@ -7988,7 +7989,7 @@ mod tests {
     fn a_milestone_reads_the_same_way() {
         let mut epic = make("argos-0001", Kind::Epic, "done");
         epic.milestone = Some("argos-0009".into());
-        let mut idea = make("argos-0005", Kind::Idea, "in_progress");
+        let mut idea = make("argos-0005", Kind::Backlog, "in_progress");
         idea.milestone = Some("argos-0009".into());
         let issues = vec![
             make("argos-0009", Kind::Milestone, "done"),
@@ -8237,7 +8238,7 @@ mod tests {
         for _ in 0..3000 {
             let mut issues: Vec<Issue> = Vec::new();
             for n in 0..(2 + roll(10)) {
-                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Backlog][roll(6)];
                 // 중복 id 를 섞는다 — 이 갈래가 갈리는 것은 그 저장소에서뿐이다.
                 let id = match roll(4) {
                     0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
@@ -8306,7 +8307,7 @@ mod tests {
         for _ in 0..3000 {
             let mut issues: Vec<Issue> = Vec::new();
             for n in 0..(2 + roll(10)) {
-                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Backlog][roll(6)];
                 // 쌍둥이는 안 섞는다 — 자식 id 와 새 id 만 짓는다.
                 let id = match roll(3) {
                     0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
@@ -8637,7 +8638,7 @@ mod tests {
     // 안 담게 된다. 저절로 빠지는 곳이 대부분이라 시험으로 못 박는다.
 
     fn idea(id: &str) -> Issue {
-        make(id, Kind::Idea, "todo")
+        make(id, Kind::Backlog, "todo")
     }
 
     #[test]
@@ -9042,7 +9043,7 @@ mod tests {
         let stone = make("argos-0001", Kind::Milestone, "todo");
         let mut epic = make("argos-0002", Kind::Epic, "todo");
         epic.milestone = Some("argos-0001".into());
-        let mut thought = make("argos-0003", Kind::Idea, "todo");
+        let mut thought = make("argos-0003", Kind::Backlog, "todo");
         thought.epic = Some("argos-0002".into());
         let child = make("argos-0003.aaa", Kind::Issue, "todo");
         let mut placed = make("argos-0003.bbb", Kind::Issue, "todo");
@@ -9098,10 +9099,10 @@ mod tests {
     fn a_thought_folded_under_a_rooted_thought_hands_nothing_down() {
         let epic = make("argos-0002", Kind::Epic, "todo");
         // 에픽 바로 밑의 생각은 늘 뿌리로 올라간다 — 부모가 묶음이라 접힐 자리가 없다.
-        let outer = make("argos-0002.aaa", Kind::Idea, "todo");
+        let outer = make("argos-0002.aaa", Kind::Backlog, "todo");
         // 그 밑의 생각이 제 `epic` 으로 같은 에픽을 적으면, 바깥 생각을 아직 안 끊긴 줄로 읽는
         // 때에만 "부모가 넘긴 것과 같다" 가 되어 접힌다.
-        let mut inner = make("argos-0002.aaa.bbb", Kind::Idea, "todo");
+        let mut inner = make("argos-0002.aaa.bbb", Kind::Backlog, "todo");
         inner.epic = Some("argos-0002".into());
         let under = make("argos-0002.aaa.bbb.ccc", Kind::Issue, "todo");
         let issues = vec![under, inner, epic, outer];
@@ -9123,7 +9124,7 @@ mod tests {
         epic.milestone = Some("argos-0001".into());
         let mut work = make("argos-0003", Kind::Issue, "todo");
         work.epic = Some("argos-0002".into());
-        let thought = make("argos-0003.aaa", Kind::Idea, "todo");
+        let thought = make("argos-0003.aaa", Kind::Backlog, "todo");
         let child = make("argos-0003.aaa.bbb", Kind::Issue, "todo");
         let mut issues = vec![stone.clone(), epic, work, thought, child];
 
@@ -9140,7 +9141,7 @@ mod tests {
         let issues = vec![
             stone,
             work,
-            make("argos-0004.aaa", Kind::Idea, "todo"),
+            make("argos-0004.aaa", Kind::Backlog, "todo"),
             make("argos-0004.aaa.bbb", Kind::Issue, "todo"),
         ];
         assert_eq!(milestones(&issues).get("argos-0004.aaa.bbb"), Some(&"argos-0001"));
@@ -9152,7 +9153,7 @@ mod tests {
     fn a_thought_passes_down_only_its_own_deferral() {
         let mut epic = make("argos-0001", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
-        let mut thought = make("argos-0002", Kind::Idea, "todo");
+        let mut thought = make("argos-0002", Kind::Backlog, "todo");
         thought.epic = Some("argos-0001".into());
         let issues = vec![epic, thought.clone(), make("argos-0002.aaa", Kind::Issue, "todo")];
         assert_eq!(picks(&issues), ["argos-0002.aaa"], "세지도 않는 에픽의 미룸을 받았다");
@@ -9228,7 +9229,7 @@ mod tests {
     /// `duplicate_id` 에 그 id 를 두 번 대지 않는다.
     #[test]
     fn a_warning_names_a_duplicated_id_once() {
-        let mut thought = make("argos-0000", Kind::Idea, "todo");
+        let mut thought = make("argos-0000", Kind::Backlog, "todo");
         thought.milestone = Some("argos-zzzz".into());
         let mut stone = make("argos-0000", Kind::Milestone, "todo");
         stone.milestone = Some("argos-zzzz".into());
@@ -9273,7 +9274,7 @@ mod tests {
         let epic = make("argos-e001", Kind::Epic, "todo");
         // 앞줄 이슈는 에픽이 없고, 뒷줄 생각이 그 에픽에 든다 — 에픽 칸이 흐르는 쪽.
         let bare = make("argos-0001", Kind::Issue, "todo");
-        let mut held = make("argos-0001", Kind::Idea, "todo");
+        let mut held = make("argos-0001", Kind::Backlog, "todo");
         held.epic = Some("argos-e001".into());
         let rows = [epic, bare, held];
         let labels = epic_labels(&rows);
@@ -9288,7 +9289,7 @@ mod tests {
         member.epic = Some("argos-e002".into());
         let mut shadowed = make("argos-0003", Kind::Issue, "todo");
         shadowed.epic = Some("argos-e002".into());
-        let loose_thought = make("argos-0003", Kind::Idea, "todo");
+        let loose_thought = make("argos-0003", Kind::Backlog, "todo");
         let rows = vec![stone, placed, member, shadowed, loose_thought];
         let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         for kind in ["no_epic", "no_milestone"] {
@@ -9550,7 +9551,7 @@ mod tests {
             i
         };
         let thought = |to: &str| {
-            let mut i = make("argos-p004.t01", Kind::Idea, "todo");
+            let mut i = make("argos-p004.t01", Kind::Backlog, "todo");
             i.epic = Some(to.into());
             i
         };
@@ -9596,7 +9597,7 @@ mod tests {
             let mut issue_row = make("argos-p005", Kind::Issue, "todo");
             issue_row.epic = hands.map(Into::into);
             for (a, b) in [(issue_row.clone(), epic_row.clone()), (epic_row.clone(), issue_row.clone())] {
-                let mut thought = make("argos-p005.t01", Kind::Idea, "todo");
+                let mut thought = make("argos-p005.t01", Kind::Backlog, "todo");
                 thought.epic = wrote.map(Into::into);
                 let rows = vec![
                     make("argos-e009", Kind::Epic, "todo"),
@@ -9620,7 +9621,7 @@ mod tests {
     #[test]
     fn idea_twins_are_folded_row_by_row() {
         let idea = |id: &str, to: Option<&str>| {
-            let mut i = make(id, Kind::Idea, "todo");
+            let mut i = make(id, Kind::Backlog, "todo");
             i.epic = to.map(Into::into);
             i
         };
@@ -9718,12 +9719,12 @@ mod tests {
     fn an_eclipsed_row_is_given_no_derived_epic() {
         let epic = make("argos-e001", Kind::Epic, "todo");
         let bare = make("argos-0001", Kind::Issue, "todo");
-        let mut held = make("argos-0001", Kind::Idea, "todo");
+        let mut held = make("argos-0001", Kind::Backlog, "todo");
         held.epic = Some("argos-e001".into());
         // 제 `epic` 을 적은 가려진 줄 — `query` 가 그 값으로도 안 고르므로 여기서도 안 낸다.
         let mut wrote = make("argos-0002", Kind::Issue, "todo");
         wrote.epic = Some("argos-e001".into());
-        let plain = make("argos-0002", Kind::Idea, "todo");
+        let plain = make("argos-0002", Kind::Backlog, "todo");
         let rows = [epic, bare, held, wrote, plain];
         let kind_of = Kinds::of(&rows);
         let placed = groups(&rows);
@@ -9759,7 +9760,7 @@ mod tests {
             deferred("argos-0009", "todo"),
             make("argos-0002", Kind::Issue, "todo"),
             shadowed,
-            make("argos-0001", Kind::Idea, "todo"),
+            make("argos-0001", Kind::Backlog, "todo"),
             make("argos-0002", Kind::Epic, "todo"),
         ];
         let rows = &rows[..];

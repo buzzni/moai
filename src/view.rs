@@ -4822,7 +4822,7 @@ mod tests {
     fn only_a_grouping_wears_the_grouping_colour() {
         let work = issue("argos-0009", "진짜 일", "todo");
         let mut thought = issue("argos-0001", "반짝", "todo");
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         let mut epic = issue("argos-0002", "저장 계층", "todo");
         epic.kind = Kind::Epic;
         let mut stone = issue("argos-0003", "v0.1", "todo");
@@ -4897,7 +4897,7 @@ mod tests {
         assert!(due_of(&stone, now, &z, Lang::Ko).is_some(), "마일스톤의 기한이 빠졌다");
 
         // 같은 값을 든 이슈·에픽·생각 — 어느 쪽도 기한 줄을 안 세운다.
-        for kind in [Kind::Issue, Kind::Epic, Kind::Idea] {
+        for kind in [Kind::Issue, Kind::Epic, Kind::Backlog] {
             let mut row = issue("argos-0002", "손으로 푼 충돌이 남긴 줄", "todo");
             row.kind = kind;
             row.due_on = Some("2026-09-20".into());
@@ -4998,11 +4998,11 @@ mod tests {
     fn the_list_column_is_one_glyph_wide_on_every_row() {
         let plain_work = issue("argos-0001", "일", "todo");
         let mut thought = issue("argos-0002", "생각", "todo");
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         let mut put_off = issue("argos-0003", "미룬 일", "in_progress");
         put_off.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let mut both = issue("argos-0004", "미룬 생각", "todo");
-        both.kind = Kind::Idea;
+        both.kind = Kind::Backlog;
         both.deferred_at = Some("2026-09-01T00:00:00Z".into());
 
         let rows = plain(&list(

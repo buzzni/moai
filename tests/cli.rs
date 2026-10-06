@@ -27239,3 +27239,46 @@ fn skill_install_refuses_a_tree_it_cannot_build_before_the_first_write() {
     assert_eq!(std::fs::read_to_string(&codex).unwrap(), "사람의 파일\n", "사람의 파일을 고쳤다");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
 }
+
+#[test]
+fn backlog_commands_show_the_new_word_and_keep_the_shared_file_spelling() {
+    let s = init("backlogcommands");
+    for command in ["backlog", "idea"] {
+        let out = ok(s.path(), &[command, "add", "later", "--json"]);
+        assert_eq!(field(&out, "kind"), "backlog", "{out}");
+        assert!(!out.contains(r#""kind":"idea""#), "{out}");
+        let id = field(&out, "id");
+        for args in [
+            vec!["show", &id, "--json"],
+            vec!["show", "--type", "backlog", "--json"],
+            vec!["show", "--type", "idea", "--json"],
+            vec!["show", "--filter", "type=backlog", "--json"],
+            vec!["backlog", "ls", "--json"],
+        ] {
+            let out = ok(s.path(), &args);
+            assert!(out.contains(r#""kind":"backlog""#), "{args:?}: {out}");
+            assert!(!out.contains(r#""kind":"idea""#), "{args:?}: {out}");
+        }
+    }
+    let stored = std::fs::read_to_string(s.path().join(".moai/issues.jsonl")).unwrap();
+    assert_eq!(stored.matches(r#""kind":"idea""#).count(), 2, "{stored}");
+    assert!(!stored.contains(r#""kind":"backlog""#), "{stored}");
+    let help = ok(s.path(), &["--help"]);
+    assert!(help.lines().any(|l| l.trim_start().starts_with("backlog ")), "{help}");
+    assert!(!help.lines().any(|l| l.trim_start().starts_with("idea ")), "old alias is visible: {help}");
+    assert!(ok(s.path(), &["idea", "--help"]).contains("moai backlog"));
+}
+
+#[test]
+fn backlog_spelling_in_a_file_is_read_and_rewritten_for_old_binaries() {
+    let s = init("backlogfile");
+    let out = ok(s.path(), &["backlog", "add", "later", "--json"]);
+    let id = field(&out, "id");
+    let at = s.path().join(".moai/issues.jsonl");
+    let old = std::fs::read_to_string(&at).unwrap();
+    std::fs::write(&at, old.replace(r#""kind":"idea""#, r#""kind":"backlog""#)).unwrap();
+    assert_eq!(field(&ok(s.path(), &["show", &id, "--json"]), "kind"), "backlog");
+    assert_eq!(field(&ok(s.path(), &["edit", &id, "--title", "later again", "--json"]), "kind"), "backlog");
+    let written = std::fs::read_to_string(&at).unwrap();
+    assert!(written.contains(r#""kind":"idea""#) && !written.contains(r#""kind":"backlog""#), "{written}");
+}

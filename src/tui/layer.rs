@@ -2556,7 +2556,7 @@ mod tests {
             Opened::Repo(r) => r,
             _ => panic!("{} 가 안 열린다", dir.display()),
         };
-        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Idea).map(|i| i.title).collect()
+        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Backlog).map(|i| i.title).collect()
     }
 
     fn type_in(a: &mut App, text: &str) {
@@ -4744,7 +4744,10 @@ mod tests {
         let s = Scratch::fenced("layer-board-hint");
         let (one, two) = twins(&s);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&one, Issue::new("argos-0003".into(), "one 의 생각".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &one,
+            Issue::new("argos-0003".into(), "one 의 생각".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;
@@ -4806,7 +4809,10 @@ mod tests {
         let s = Scratch::fenced("layer-board-emptied");
         let solo = s.project("solo", &[]);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &solo,
+            Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let other = s.project("other", &[("argos-0001", "other 의 줄", "todo")]);
         let cfg = s.register(&[&solo, &other]);
         let mut a = layered(&cfg);
@@ -4906,7 +4912,10 @@ mod tests {
         let s = Scratch::fenced("layer-board-trap");
         let solo = s.project("solo", &[]);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &solo,
+            Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let cfg = s.register(&[&solo]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;

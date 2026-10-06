@@ -5727,7 +5727,7 @@ pub(super) mod tests {
         issues.push(Issue::new(
             "argos-0100.c1a".into(),
             "자식".into(),
-            Kind::Idea,
+            Kind::Backlog,
             Status::new("todo"),
             "2026-09-01T00:00:00Z",
         ));
@@ -5767,7 +5767,7 @@ pub(super) mod tests {
         let make = |id: &str, title: &str, kind: Kind, st: &str| {
             Issue::new(id.into(), title.into(), kind, Status::new(st), "2026-09-01T00:00:00Z")
         };
-        let mut thought = make("argos-0002", "담은 생각", Kind::Idea, "todo");
+        let mut thought = make("argos-0002", "담은 생각", Kind::Backlog, "todo");
         thought.priority = Some(2);
         let mut shelved_epic = make("argos-0005", "미룬 에픽", Kind::Epic, "todo");
         shelved_epic.deferred_at = Some("2026-09-02T00:00:00Z".into());
@@ -5775,7 +5775,7 @@ pub(super) mod tests {
         let mut inherited = make("argos-0006", "물려받은 멤버", Kind::Issue, "in_progress");
         inherited.epic = Some("argos-0005".into());
         // 그 곁의 형제는 idea 다 — 셋이 저마다 다른 축을 물고 한 층에 선다.
-        let mut sibling = make("argos-0007", "곁의 생각", Kind::Idea, "todo");
+        let mut sibling = make("argos-0007", "곁의 생각", Kind::Backlog, "todo");
         sibling.epic = Some("argos-0005".into());
 
         let mut a = every([issues(), vec![thought, shelved_epic, inherited, sibling]].concat());
@@ -7161,7 +7161,7 @@ pub(super) mod tests {
         let stone = make("argos-0001", "릴리스 판", Kind::Milestone);
         let mut epic = make("argos-0002", "에픽", Kind::Epic);
         epic.milestone = Some("argos-0001".into());
-        let mut thought = make("argos-0003", "샤딩", Kind::Idea);
+        let mut thought = make("argos-0003", "샤딩", Kind::Backlog);
         thought.epic = Some("argos-0002".into());
         let mut a = App::new(
             vec![stone, epic, thought],

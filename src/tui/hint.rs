@@ -265,7 +265,7 @@ impl App {
             let values = match sl.field {
                 Field::Status => self.site.cfg.statuses.clone(),
                 Field::Priority => (0..=3).map(|p| format!("p{p}")).collect(),
-                Field::Type => [Kind::Issue, Kind::Epic, Kind::Milestone, Kind::Idea]
+                Field::Type => [Kind::Issue, Kind::Epic, Kind::Milestone, Kind::Backlog]
                     .into_iter()
                     .map(|k| k.as_str().to_string())
                     .collect(),

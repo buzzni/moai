@@ -364,12 +364,12 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다. 동사가 아예 못 받는 것이면(`idea
         // add`·`milestone add`) 동사를 대고, 아니면 사람이 친 것을 댄다.
         let asked = match kind_override {
-            Some(k @ (Kind::Idea | Kind::Milestone)) => Some(k),
+            Some(k @ (Kind::Backlog | Kind::Milestone)) => Some(k),
             _ => args.kind,
         };
         match asked {
             None | Some(Kind::Issue) | Some(Kind::Epic) => {}
-            Some(Kind::Idea) => {
+            Some(Kind::Backlog) => {
                 let lang = ctx.lang();
                 return Err(Fail::coded(
                     format!(
@@ -449,7 +449,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // idea 가 템플릿을 쓰는 길은 펼치기다 — 위의 `--from` 거절이 idea 에 가리키는 곳과 같게 댄다.
         let lang = ctx.lang();
         let how = match kind_override.or(args.kind) {
-            Some(Kind::Idea) => crate::i18n::say(lang, "refuse.var_needs_from_idea"),
+            Some(Kind::Backlog) => crate::i18n::say(lang, "refuse.var_needs_from_idea"),
             _ => crate::i18n::say(lang, "refuse.var_needs_from_add"),
         };
         return Err(Fail::coded(

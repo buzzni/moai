@@ -348,7 +348,7 @@ fn spread(axis: Axis, rows: &[&Issue], counted: &[&Issue], wh: &Where, cfg: &Con
             out.extend(n.into_iter().map(|(s, k)| plain(text(s), k)));
             out
         }
-        Axis::Kind => [Kind::Issue, Kind::Epic, Kind::Milestone, Kind::Idea]
+        Axis::Kind => [Kind::Issue, Kind::Epic, Kind::Milestone, Kind::Backlog]
             .into_iter()
             .map(|k| plain(text(k.as_str()), rows.iter().filter(|i| i.kind == k).count()))
             .collect(),
@@ -610,7 +610,7 @@ mod tests {
         let mut epic = row("argos-0004", "todo", "2026-09-01T00:00:00Z");
         epic.kind = Kind::Epic;
         let mut idea = row("argos-0005", "todo", "2026-09-01T00:00:00Z");
-        idea.kind = Kind::Idea;
+        idea.kind = Kind::Backlog;
         let all = vec![
             row("argos-0001", "todo", "2026-09-01T00:00:00Z"),
             closed("argos-0002", "2026-09-01T00:00:00Z", None, "2026-09-03T00:00:00Z"),
@@ -631,8 +631,8 @@ mod tests {
             "설정의 칸은 비어도 차례대로 선다"
         );
 
-        let ideas = count(&all, &Ask { kind: Some(Kind::Idea), ..Ask::default() }, &BTreeMap::new());
-        assert_eq!((ideas.kind, ideas.rows), (Kind::Idea, 1), "--type 이 센 종류를 바꾼다");
+        let ideas = count(&all, &Ask { kind: Some(Kind::Backlog), ..Ask::default() }, &BTreeMap::new());
+        assert_eq!((ideas.kind, ideas.rows), (Kind::Backlog, 1), "--type 이 센 종류를 바꾼다");
     }
 
     /// **거르개는 `show` 의 그것이다** — 좁히는 말은 그대로 듣는다.

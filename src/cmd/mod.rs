@@ -5,10 +5,10 @@
 
 pub mod add;
 pub mod agents;
+pub mod backlog;
 pub mod defer;
 pub mod edit;
 pub mod hook;
-pub mod idea;
 pub mod init;
 pub mod link;
 pub mod mail;
@@ -27,7 +27,7 @@ pub mod status;
 pub mod tui;
 pub mod wiki;
 
-use crate::cli::{Cli, Cmd, IdeaCmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
+use crate::cli::{BacklogCmd, Cli, Cmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
 use crate::model::Kind;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -529,8 +529,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
         // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
         // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
-        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, *t, Kind::Idea),
-        Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
+        Cmd::Backlog(BacklogCmd::Common(t)) => typed(ctx, *t, Kind::Backlog),
+        Cmd::Backlog(BacklogCmd::Promote(a)) => backlog::promote(ctx, a),
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
         // 우편함과 출석(moai-h8tn) — 트래커를 안 쓴다. 자리만 [`open_repo`] 로 찾는다.
@@ -700,7 +700,7 @@ pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
 /// 안 남는다. 덧붙이는 키도 없으니 한 객체에 같은 키가 둘 서지도 않는다.
 #[derive(serde::Serialize)]
 pub struct Row<'a> {
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "surface_issue")]
     pub issue: std::borrow::Cow<'a, crate::model::Issue>,
     /// 줄이 **기본값이라 안 적은** 종류와 우선순위(moai-51it·moai-a4u9). 파일이 기본값을 안 적는
     /// 것은 1만 줄이 통째로 diff 에 뜨는 것을 막으려는 것이고, 그 침묵의 뜻은 파일을 쓰는 쪽만
@@ -741,6 +741,20 @@ pub struct Row<'a> {
     /// "지금 브랜치의 줄" 이다** — `derived_status` 와 같은 약속이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<&'a str>,
+}
+
+/// `Issue` serializes the shared file protocol. JSON rows use the surface spelling.
+/// Only backlog rows need a translated object; other rows keep the borrowed path.
+fn surface_issue<S: serde::Serializer>(
+    issue: &std::borrow::Cow<'_, crate::model::Issue>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    if issue.kind != Kind::Backlog {
+        return serde::Serialize::serialize(issue, serializer);
+    }
+    let mut value = serde_json::to_value(issue).map_err(serde::ser::Error::custom)?;
+    value["kind"] = issue.kind.as_str().into();
+    serde::Serialize::serialize(&value, serializer)
 }
 
 /// **줄 하나의 `--json` 에 moai 가 덧붙이는 키 전부**(moai-qn5d) — 늘 붙이는 것도, 조건에 따라
