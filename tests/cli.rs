@@ -27614,6 +27614,59 @@ fn archive_regressions_preserve_reference_and_milestone_context() {
     assert!(active.iter().all(|row| row["id"] != epic && row["id"] != b));
 }
 
+/// **The explorer's project layer counts what `moai status` counts**(moai-nkwg) — the layer once read the live rows
+/// alone, so a milestone whose members had all been archived stood as an overdue empty todo, an archived blocker
+/// stood as a dangling reference, and the archive's collision, unreadable file and pending bundles never showed: the
+/// `+N` on the layer disagreed with the board behind it.
+#[test]
+fn archive_regressions_the_project_layer_counts_what_the_board_counts() {
+    let s = init("archive-layer-board");
+    let ms = ok(s.path(), &["milestone", "add", "shipped", "--due", "2026-01-01", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "closed bundle", "--milestone", &ms, "-q"]).trim().to_string();
+    let a = add(s.path(), &["closed blocker", "--parent", &epic]);
+    let b = add(s.path(), &["closed member", "--parent", &epic]);
+    let dependent = add(s.path(), &["live dependent"]);
+    ok(s.path(), &["link", &a, "--blocks", &dependent]);
+    for id in [&a, &b] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let twin = add(s.path(), &["archived and live"]);
+    ok(s.path(), &["mv", &twin, "done"]);
+    let twin_line = line_of(s.path(), &twin);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    // A live copy of an archived row, a bundle closed after the move, and an archive file that does not parse.
+    let mut active = issues(s.path());
+    active.push_str(&format!("{twin_line}\n"));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), active).unwrap();
+    let pending = add(s.path(), &["closed after the move"]);
+    ok(s.path(), &["mv", &pending, "done"]);
+    std::fs::write(s.path().join(".moai/archive/2025.jsonl"), "<<<<<<< conflict\n=======\n>>>>>>> other\n").unwrap();
+
+    let board: serde_json::Value =
+        serde_json::from_slice(&at(s.path(), later, &["status", "--json"]).stdout).expect("status --json");
+    let kinds = |key: &str| -> Vec<String> {
+        board[key].as_array().unwrap().iter().map(|w| w["kind"].as_str().unwrap().to_string()).collect()
+    };
+    // The fixture stands: the archive diagnostics are on the board, and the archived context raises nothing.
+    assert!(kinds("warnings").contains(&"archive_duplicate_id".to_string()), "{board}");
+    for kind in ["archive_pending", "archive_unreadable"] {
+        assert!(kinds("notices").contains(&kind.to_string()), "{kind}: {board}");
+    }
+    for kind in ["milestone_overdue", "dangling_blocked_by"] {
+        assert!(!kinds("warnings").contains(&kind.to_string()), "{kind}: {board}");
+    }
+
+    let out = Scratch::new("archive-layer-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let seen =
+        staged(&["tui", "--json"]).current_dir(out.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", later).output();
+    let layer: serde_json::Value = serde_json::from_slice(&seen.unwrap().stdout).expect("tui --json");
+    let row = &layer["projects"][0];
+    assert_eq!(row["warnings"], board["warnings"].as_array().unwrap().len(), "{layer}\n{board}");
+    assert_eq!(row["notices"], board["notices"].as_array().unwrap().len(), "{layer}\n{board}");
+}
+
 /// **The session board and Stop count what `moai status` counts**(review of moai-bth3) — the hook's archive board
 /// once left out the fatal `archive_duplicate_id`, so a session saw "nothing showing" while `status` exited 1.
 #[test]

@@ -155,12 +155,17 @@ impl Told {
 /// 그 답은 워크트리를 띄우거나 치우는 것만으로 바뀐다 — `.moai` 두 파일은 그대로다. 안 재면
 /// 워크트리를 치운 뒤에도 층이 영영 "자리 없는 것 0건" 을 댄다. 모두 `stat` 과 작은
 /// 파일 읽기라 걸음마다 재도 싸다(git 을 안 띄운다).
+///
+/// **아카이브도 잰다**(moai-nkwg) — 요약이 아카이브를 문맥으로 읽으므로([`summarize_with`]), `moai archive` 가
+/// 줄을 옮기면 스냅샷 표식과 함께 이것이 바뀐다. 재는 자는 다시 읽기(`tui::prepare`)와 같은
+/// [`crate::archive::marks`] 다 — 디렉터리와 그 안의 해마다 파일을 `stat` 만 하고 열지 않는다.
 #[derive(Debug, Clone, PartialEq, Default)]
 struct Marks {
     dir: bool,
     issues: Stamp,
     config: Stamp,
     trees: Vec<(PathBuf, Stamp)>,
+    archive: Vec<(PathBuf, Stamp)>,
 }
 
 /// 이만큼 지난 읽기는 표식이 그대로여도 다시 읽는다(moai-al0x·moai-z4r4, 사용자 결정 2026-09-18).
@@ -261,7 +266,7 @@ pub enum Shut {
     Unreadable,
 }
 
-/// 연 프로젝트의 셈 — `moai status` 의 한눈 보기와 같은 자(`report::status`·`report::wip`).
+/// 연 프로젝트의 셈 — `moai status` 의 한눈 보기와 같은 자(`cmd::status::archive_board_unjudged`·`report::wip`).
 pub struct Summary {
     /// config 차례로 칸마다 일의 수. 미룬 것은 뺀다 — 한눈 보기의 보드와 같다.
     pub counts: Vec<(String, usize)>,
@@ -273,7 +278,7 @@ pub struct Summary {
     /// 지어 오고 층은 그 답을 [`REREAD_EVERY`] 만큼 들고 있으므로, 그 몫까지 접으면 `SPC o t` 로
     /// 시간대를 바꾼 뒤 최대 그만큼 옛 달로 판정한 `+N` 이 선다. 그리는 쪽이 그때의 달로 센다.
     pub warnings: super::Surfaced,
-    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 `report::status` 의
+    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 보드의 셈이 낸
     /// `notices`, moai-prdh). 링크인 트래커를 비추는 알림(moai-jo3h)도 같은 부름에서 와 여기 든다.
     /// **수만 센다** — 무엇인지는 들어가서 본다(2026-09-22 사람의 결정).
     /// 층의 줄은 80칸에서 이미 이름·칸·경로로 차 있어, 낱말로 가르면 정작 그 수가 잘린다.
@@ -326,12 +331,15 @@ fn marks_of(dir: &Path) -> Marks {
     // `Repo::open` 이 루트의 트래커를 연다(`Repo::opened_root`). 그 자리의 `.moai` 를 재던 판은 루트에
     // 떨어진 쓰기를 하나도 못 보고 1분 시계가 돌 때까지 낡은 셈을 세웠다 — 표식이 있는 까닭이 그
     // 시계를 안 기다리는 것이다.
-    let moai = crate::store::Repo::opened_root(dir).join(".moai");
+    let root = crate::store::Repo::opened_root(dir);
+    let moai = root.join(".moai");
     Marks {
         dir: dir.is_dir(),
         issues: crate::store::stamp(&moai.join("issues.jsonl")),
         config: crate::store::stamp(&moai.join("config.toml")),
         trees: crate::worktree::place_marks(dir),
+        // 못 펴는 아카이브 디렉터리는 읽는 쪽이 알림으로 댄다 — 재는 것이 층을 멈추지 않는다.
+        archive: crate::archive::marks(&root).unwrap_or_default(),
     }
 }
 
@@ -385,7 +393,20 @@ pub fn summarize_with(
 ) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
-    let st = crate::report::status_unjudged(&load.issues, &unreadable, cfg, now);
+    // **아카이브를 문맥으로 읽는다**(moai-nkwg) — `moai status` 와 같은 자
+    // ([`crate::cmd::status::archive_board_unjudged`])라, 멤버를 다 옮긴 마일스톤이 빈 todo 로 안 서고 옮긴 줄을
+    // 가리키는 참조가 끊긴 것으로 안 선다. 아카이브의 충돌·못 읽은 파일·옮길 묶음도 같은 경고와 알림으로 선다.
+    // 층은 겹쳐 보지 않으므로 견줄 루트의 스냅샷은 이 읽기 그대로다. 못 읽는 아카이브(FIFO·밖을 가리키는
+    // 링크·디렉터리 아닌 자리)는 `archive::read` 가 열지 않고 오류로 돌려주고, 그것은 알림 하나가 된다.
+    let archived = crate::archive::read(&repo.root).unwrap_or_default();
+    let st = crate::cmd::status::archive_board_unjudged(
+        &load.issues,
+        &unreadable,
+        (&load.issues, &unreadable),
+        &archived,
+        cfg,
+        now,
+    );
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
@@ -859,7 +880,7 @@ impl App {
     /// "뜨는 스레드가 뜰 때의 시간대를 베껴 간다" 였다.
     pub fn on_projects(layer: Layer) -> App {
         let mut app =
-            App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
+            App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new(), None);
         // **말은 층이 들고 온 것이다** — 부른 쪽(`cmd::tui::outside`)이 고른 말을 `Layer::of` 에
         // 줘 `problems` 가 이미 그 말로 펴졌고, 화면의 말은 이 줄 뒤에 놓인다. 여기서 화면의
         // 처음값으로 덮으면 `launch` 가 띄우는 읽기가 도구의 기본 말로 `Look::Shut` 의 글을 지어,
@@ -4517,6 +4538,121 @@ mod tests {
             plain.shown(),
             "못 겹친 딸린 워크트리가 main 에서 끝낸 일을 자리 없다로 댄다 (여는 읽기)"
         );
+    }
+
+    /// **층의 줄은 아카이브를 문맥으로 읽고, 옮기는 것을 표식으로 안다**(moai-nkwg). 멤버를 다 옮긴 마일스톤이
+    /// 기한 지난 빈 todo 로 서지 않고, 옮긴 막는 줄이 끊긴 참조로 서지 않는다 — 수는 `moai status` 가 짓는 보드
+    /// ([`crate::cmd::status::archive_board`])와 같다. 아카이브에 줄이 떨어지면 표식이 바뀌어, 1분 시계를 안
+    /// 기다리고 다시 읽는다.
+    #[test]
+    fn the_layer_reads_the_archive_as_context_and_watches_it() {
+        let s = Scratch::fenced("layer-archive");
+        let dir = s.project("p", &[]);
+        let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
+        let row = |id: &str, kind: Kind, st: &str| {
+            Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(st), "2026-01-02T00:00:00Z")
+        };
+        let mut stone = row("argos-0001", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-01-10".into());
+        let mut waiting = row("argos-0002", Kind::Issue, "todo");
+        waiting.blocked_by = vec!["argos-a002".into()];
+        std::fs::write(dir.join(".moai/issues.jsonl"), line(&stone) + &line(&waiting)).unwrap();
+        let before = marks_of(&dir);
+        let mut epic = row("argos-a001", Kind::Epic, "done");
+        epic.milestone = Some("argos-0001".into());
+        let mut blocker = row("argos-a002", Kind::Issue, "done");
+        blocker.epic = Some("argos-a001".into());
+        let config = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        crate::archive::append(&dir, &[epic, blocker], &config).unwrap();
+        assert_ne!(marks_of(&dir), before, "아카이브에 줄이 떨어진 것을 표식이 못 본다");
+
+        let now = "2026-09-01T00:00:00Z";
+        let Look::Open { sum } = look_one(&dir, Some(0), now, crate::i18n::Lang::Ko).look else {
+            panic!("못 열었다")
+        };
+        let repo = Repo::at(dir.clone(), config);
+        let live = repo.read().unwrap();
+        let unreadable = live.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let (st, _) =
+            crate::cmd::status::archive_board(&repo, &live.issues, &unreadable, (&live.issues, &unreadable), now, zone);
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"milestone_overdue") && !kinds.contains(&"dangling_blocked_by"), "{kinds:?}");
+        assert_eq!(sum.warnings.count(now, zone), st.warnings.len(), "층과 보드가 경고를 달리 센다 {kinds:?}");
+        assert_eq!(sum.notices, st.notices.len(), "층과 보드가 알림을 달리 센다");
+    }
+
+    /// **못 읽는 아카이브가 층을 멈추지도 실패시키지도 않는다**(moai-nkwg) — 해마다 파일 자리의 FIFO 는 열지 않고
+    /// 알림 하나로 센다. 층은 그 아카이브를 열어 본 적이 없던 길이라, 여는 길이 FIFO 에 매이면 쓸기 스레드가 영영
+    /// 안 돌아온다.
+    #[cfg(unix)]
+    #[test]
+    fn an_archive_fifo_is_a_notice_on_the_layer_not_a_hang() {
+        let s = Scratch::fenced("layer-archive-fifo");
+        let dir = s.project("p", &[("argos-0001", "산 줄", "todo")]);
+        std::fs::create_dir_all(crate::archive::dir(&dir)).unwrap();
+        let fifo = crate::archive::path(&dir, "2026");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let _ = marks_of(&dir);
+        let now = "2026-09-01T00:00:00Z";
+        let Look::Open { sum } = look_one(&dir, Some(0), now, crate::i18n::Lang::Ko).look else {
+            panic!("못 열었다")
+        };
+        let repo = Repo::at(dir.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
+        let live = repo.read().unwrap();
+        let unreadable = live.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let (st, _) =
+            crate::cmd::status::archive_board(&repo, &live.issues, &unreadable, (&live.issues, &unreadable), now, zone);
+        let notices: Vec<&str> = st.notices.iter().map(|w| w.kind).collect();
+        assert_eq!(notices, ["archive_unreadable"], "전제: 보드가 FIFO 를 알림으로 안 셌다");
+        assert!(st.warnings.iter().all(|w| w.kind != "unreadable_line"), "FIFO 가 산 줄의 못 읽는 줄로 섰다");
+        assert_eq!((sum.warnings.count(now, zone), sum.notices), (st.warnings.len(), 1), "층과 보드가 달리 센다");
+    }
+
+    /// **겹쳐 본 배너도 아카이브를 루트의 스냅샷과 견준다**(moai-nkwg 리뷰) — `moai status --worktree` 와 같은 자다.
+    /// 옆 워크트리의 스냅샷에만 남은 줄이 main 의 아카이브에도 있으면, 겹친 줄로 견주는 판은 그 사본을
+    /// `archive_duplicate_id` 로 세어 배너가 보드보다 하나 많다. 일은 겹친 줄로 세되 충돌과 옮길 수는 루트의
+    /// 스냅샷으로 잰다(`tui::board` 가 다시 읽는 자리).
+    #[test]
+    fn the_overlaid_banner_measures_the_archive_against_the_root_snapshot() {
+        let s = Scratch::fenced("layer-archive-overlay");
+        let main = s.project("main", &[("argos-0001", "산 줄", "todo")]);
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["add", ".moai"]);
+        run(&main, &["commit", "-q", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../wt", "-b", "wt"]);
+        // 옆에서 끝낸 줄 하나가 그 스냅샷에만 남았고, 같은 id 가 main 의 아카이브에도 있다.
+        let config = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        let gone = Issue::new(
+            "argos-0002".into(),
+            "옆에서 끝낸 줄".into(),
+            Kind::Issue,
+            Status::new("done"),
+            "2026-09-01T00:00:00Z",
+        );
+        crate::archive::append(&main, &[gone], &config).unwrap();
+        write_lines(&s.join("wt"), &[("argos-0001", "산 줄", "todo"), ("argos-0002", "옆에서 끝낸 줄", "done")]);
+        let repo = Repo::at(main.clone(), config);
+        let g = crate::worktree::gather(&repo, true).unwrap();
+        assert!(g.origin.branches().contains_key("argos-0002"), "전제: 옆의 줄이 겹친 줄에 안 섰다");
+
+        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko, Some(0)).unwrap();
+        let root = repo.read().unwrap();
+        let unreadable = g.load.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let board = |root: (&[Issue], &[crate::report::Unreadable])| {
+            crate::cmd::status::archive_board(&repo, &g.load.issues, &unreadable, root, &f.now, zone).0
+        };
+        let kinds = |st: &crate::report::StatusReport| st.warnings.iter().map(|w| w.kind).collect::<Vec<_>>();
+        // 전제: 겹친 줄로 견주면 충돌이 서고, 루트의 스냅샷으로 견주면 안 선다 — 이 시험이 두 자를 가른다.
+        assert!(kinds(&board((&g.load.issues, &unreadable))).contains(&"archive_duplicate_id"), "전제가 안 섰다");
+        let st = board((&root.issues, &root.unreadable()));
+        assert!(!kinds(&st).contains(&"archive_duplicate_id"), "{:?}", kinds(&st));
+        assert_eq!(f.warnings.count(&f.now, zone), st.warnings.len(), "겹친 배너가 보드와 달리 센다 {:?}", kinds(&st));
+        assert_eq!(f.notices, st.notices.len(), "겹친 배너가 보드와 알림을 달리 센다");
     }
 
     /// **띄울 때와 다시 읽을 때 지켜보는 목록이 같다**(리뷰 moai-3lul.kt0 다시 본 판). 다르면 조용한
