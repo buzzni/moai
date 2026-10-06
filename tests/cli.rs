@@ -23922,6 +23922,8 @@ fn a_sibling_worktree_finds_a_tracker_kept_out_of_git() {
     let id = ok(&side.join("svc"), &["add", "svc work", "-q"]);
     assert!(id.trim().starts_with("svc-"), "하위 트래커를 못 찾았다 — {id}");
     assert!(read(&main.join("svc/.moai/issues.jsonl")).contains("svc work"));
+}
+
 // ── 우편함과 출석(moai-h8tn) ────────────────────────────────────────
 
 /// 출석의 pid 로 쓸 산 프로세스 — 놓으면 죽는다. 시험 프로세스 자신을 쓰면 죽은 것을 못 재고, 남의 pid 를
