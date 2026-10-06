@@ -1,0 +1,13 @@
+{
+  "artifactDirectoryPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "conversationId": "96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "error": "",
+  "executionNum": 1,
+  "fullyIdle": true,
+  "modelName": "gemini-3.8-flash-high",
+  "terminationReason": "NO_TOOL_CALL",
+  "transcriptPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/home/coder/workspace/moa-issue"
+  ]
+}

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.5.0 hash:d247bab7 -->
+<!-- moai:begin v:0.6.0 hash:f4035f0b -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -27,8 +27,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
 Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…],"held":[…]}` —
 `ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
-to pick it up again. That is enough to build a loop that runs without a person — one
-such loop, in bash and jq alone, is the moai repository's `examples/bash-agent/agent.sh`.
+to pick it up again. A session a person opened reads that shape to choose its next row —
+moai never launches or drives a session itself.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -426,7 +426,7 @@ work. It is a note, not a field.
 
 ### The five things the hook actually watches
 
-They stand once `moai skill install` has planted the hooks into Claude.
+They stand once `moai skill install` has planted the hooks for your agent.
 
 **1. New issues stay inside what you picked up.** The issue in focus is the one you picked up — it has left the
 first column and is not closed yet (`in_progress`·`review`).
@@ -437,13 +437,16 @@ even when you cannot do it now (fork 1). If it is not for now, park it with
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
-What counts is work inside the repository — `.moai/`, `.claude/`, `target/` and
-anything outside the repository (scratchpad, temporary files) do not. Shell
-writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and `Write`. If it
-was not in the plan, create it with `moai add 'a title'` and pick that up.
+What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, `.codex/`,
+`.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
+files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
+`Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
 
-**3. A review is an issue too.** Before you call `/code-review`, create a review issue tied to
-what you are reviewing.
+**3. A review is an issue too.** Before you call a review, create a review issue tied to
+what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
+Antigravity it is the review this session has, else read the diff yourself.
+It runs inside your own session — never start another agent program for it. The other
+steps that differ per agent are under "Words per agent" in the `moai` skill.
 
     moai add 'review — <what you are looking at>' -t review --parent <the issue> -b '<what you are looking for and why>'
     moai mv <id> in_progress      when the review starts
@@ -480,19 +483,51 @@ keeps whose it was. `moai ready` hands out only your own rows and sets the rest
 apart (`others`), and what someone else picked up is not your focus. When who you
 are is unknown, nothing is refused.
 
-### The supervisor
+**Where no hook stands, the rules are words only.** The hooks stand where
+`moai skill install` planted them for your agent — Claude's plugin, Codex's
+`.codex/hooks.json` once a person has trusted it in `/hooks`, Antigravity's
+`.agents/hooks.json`. An agent without them, and a tool call that sends no hook
+(Codex sends them only for its shell, `apply_patch` and MCP calls) or that the
+hooks do not read (input typed into a command already running), is refused
+nothing — keep the five yourself. Rules 4 and 5 most of all: they guard the
+person's other sessions and other people's work, and nothing else will.
 
-`moai skill install` also plants a second skill, `moai-supervise`. Call it to hand
-the ideas that have piled up, one at a time, to the sessions idling on the same
-repository, and to take their reports — the supervisor picks, sends and checks;
-it does not fix and it does not merge.
+### The supervisor and its workers
+
+`moai skill install` also plants `moai-work` and `moai-supervise`. A person calls
+`moai-work` in a window to make it a worker — it says hello, waits for a letter,
+does the work the letter hands over in a worktree, reports and waits again — and
+`moai-supervise` in one window to hand the ideas that have piled up, one at a time,
+to those workers and take their reports. Claude Code, Codex and Antigravity can
+each be either, and every one of them is a session a person opened. The supervisor
+picks, sends and checks; it does not fix and it does not merge.
+
+### Letters between agents
+
+    moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
+    moai send any-idle-worker '<subject>'   one agent takes it - not you, not a supervisor
+    moai inbox --ack                        the letters for you, marked read as they are shown
+    moai inbox --ack --wait 600             a worker waits here for its next letter
+    moai agents                             who is here - `moai hello` registers you
+
+A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
+on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
+and the end of each turn load the letters for this session and mark them read, and an
+`any-idle-worker` letter goes, one per load, to whichever agent loads it first. A supervisor
+registers with `moai hello --role supervisor` so it never takes those. Waking is a bonus:
+`--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
+Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
+a worker waiting on `moai inbox --wait` needs no waking, and while it waits `moai agents`
+shows it idle. A Codex shell is found by the session id Codex sets in it
+(`CODEX_THREAD_ID`); where that is missing, pass `--as <name>` — the hooks name the session
+in its first context.
 
 ### The wiki
 
 The repository's manual is markdown pages under one directory — `docs` unless `wiki_dir`
 in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
 prints one. When an epic changes what a person does, the window that did it fixes the page
-on its branch before the merge, and `moai skill install` plants a third skill, `moai-wiki`,
+on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this.
 
 ### Before you close the session

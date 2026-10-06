@@ -1,0 +1,14 @@
+⚠ 6 hooks need review before they can run.
+
+Issues
+⚠ clamping SessionEnd hook timeout to 3s in
+/home/coder/workspace/moa-issue/.codex/hooks.json
+⚠ ignoring additionalContextLimit for SessionEnd hook in
+/home/coder/workspace/moa-issue/.codex/hooks.json: this event cannot emit
+additionalContext
+⚠ ignoring additionalContextLimit for Stop hook in
+/home/coder/workspace/moa-issue/.codex/hooks.json: this event cannot emit
+additionalContext
+⚠ clamping Interrupt hook timeout to 3s in
+/home/coder/workspace/moa-issue/.codex/hooks.json
+⚠ ignoring additionalContextLimit for Interrupt hook in

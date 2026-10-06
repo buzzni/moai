@@ -17,6 +17,9 @@
 //! 플러그인의 마켓플레이스 선언을 걷는 것이다(사용자 결정 moai-6ugu.aae). 그때도
 //! 다시 짓지 않고 그 멤버의 줄만 도려내, 서식은 그대로 남는다([`drop_marketplace`]).
 
+use crate::cli::Dialect;
+use crate::hook::Event;
+use clap::ValueEnum;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -24,13 +27,61 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = ".claude/moai-plugin";
 
 /// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
-/// 심는 차례(이슈 트래커·감독·위키)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
+/// 심는 차례(이슈 트래커·감독·위키·일꾼)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
 /// 있어 시험이 이 목록과 견주고(`guide::tests::the_frontmatter_opens_the_skill`), 트리가 이 목록 밖의 스킬을 심으면
 /// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
 /// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
-pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
+pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-work"];
+
+/// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
+/// 두 벤더 문서가 같은 `<저장소>/.agents/skills/<이름>/SKILL.md` 를 들어, 한 벌을 심으면 둘이 다 읽고 커밋돼 팀이
+/// 받는다. 매니페스트도 등록도 없다 — 그 디렉터리를 스스로 훑는다. v0.7.0 에서는 이 저장소 안의 자리 하나뿐이고
+/// 사용자 범위(`~/.agents/skills`)는 심지 않는다. 훅은 따로 선다(moai-u5wr).
+pub const AGENTS_DIR: &str = ".agents/skills";
+
+/// 심는 스킬 하나 — 이름([`NAMES`] 의 한 칸)과 그 디렉터리 안에 심을 글. 경로는 스킬 디렉터리부터의 상대고
+/// 첫 글이 `SKILL.md` 다.
+pub struct Skill {
+    pub name: &'static str,
+    pub files: Vec<(&'static str, String)>,
+}
+
+/// 심는 스킬 전부 — [`NAMES`] 의 차례로, 글은 `guide` 에서 온다. **트리 둘이 이 하나를 받는다**(moai-xs2h.xgo) —
+/// Claude 의 플러그인([`tree`])과 Codex·Antigravity 의 [`AGENTS_DIR`]([`agents_tree`]). 부르는 자리마다 글을 손으로
+/// 엮던 판은 `install` 과 커밋된 트리 시험이 같은 글 넷을 따로 늘어놓아, 스킬 하나를 더할 때마다 두 자리를 고쳤다.
+pub fn skills() -> Vec<Skill> {
+    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
+    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
+    let [main, supervisor, wiki, worker] = NAMES;
+    vec![
+        Skill {
+            name: main,
+            files: vec![("SKILL.md", crate::guide::skill()), ("references/commands.md", crate::guide::reference())],
+        },
+        // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고, 일꾼이 `moai` 를 부를 때마다
+        // 감독의 걸음까지 읽는다. 발동어(description)는 따로 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
+        Skill { name: supervisor, files: vec![("SKILL.md", crate::guide::supervise())] },
+        // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai` 스킬에 섞으면 이슈
+        // 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
+        Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())] },
+        // 일꾼 스킬도 따로 선다(moai-0x59) — 사람이 일꾼으로 삼은 창만 그 걸음을 읽는다. 감독 스킬에 두면 감독이 매
+        // 바퀴 편지로 실어 보내야 하고, `moai` 스킬에 두면 일꾼이 아닌 세션까지 기다림과 보고의 걸음을 읽는다.
+        Skill { name: worker, files: vec![("SKILL.md", crate::guide::work())] },
+    ]
+}
+
+/// 스킬마다의 글을 `<이름>/<상대 경로>` 로 편다 — 두 트리가 이 차례 그대로 받는다.
+fn skill_files(skills: &[Skill]) -> impl Iterator<Item = (PathBuf, String)> + '_ {
+    skills.iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+}
+
+/// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
+/// 없다는 것뿐이고, 에이전트마다 다른 걸음은 글 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
+pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
+    skill_files(skills).collect()
+}
 
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
 ///
@@ -63,16 +114,224 @@ fn stable(bytes: &[u8]) -> u64 {
 /// 것을 여러 번 확인했다. 접힌 뒤에만 집고 있던 것을 싣는다. **`PreCompact`
 /// 는 걸지 않는다** — `claude` 가 그 출력을 거절한다. 까닭은 `hook::Event` 에
 /// 적혀 있다.
+///
+/// **`StopFailure`·`SessionEnd` 는 출석만 적는다**(moai-u5wr.f29, 2026-10-04 사용자 결정) — `Stop` 없이 끝난 턴의 장을
+/// `idle` 로 돌린다. 사람이 Esc 로 끊은 턴에는 Claude 가 어느 훅도 안 낸다(문서) — 그 장은 다음 프롬프트까지 `busy` 다.
 const HOOKS: &[(&str, &str, &str)] = &[
     ("SessionStart", "session-start", "counting moai warnings..."),
     ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
     ("PreToolUse", "pre-tool-use", "checking the moai rules..."),
     ("Stop", "stop", "comparing the moai state..."),
+    ("StopFailure", "stop-failure", "marking this session idle for moai..."),
+    ("SessionEnd", "session-end", "marking this session idle for moai..."),
 ];
 
 /// `PreToolUse` 가 볼 도구들. 규칙이 뜻을 두는 것만 적는다 — 전부 받으면
 /// 읽기만 하는 호출까지 훅을 한 번씩 띄운다.
 const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
+
+/// Codex 가 읽는 훅 자리 — 저장소 뿌리부터의 상대다(moai-u5wr, 2026-10-04 사용자 결정: 저장소에 심고 커밋한다).
+/// **Codex 는 사람이 한 번 믿어 줘야 돌린다** — 세션에서 `/hooks` 를 열어 이 정의들을 믿는다. 정의가 한 글자라도
+/// 바뀌면(다시 심어 실행 파일 자리가 바뀌면) 다시 묻는다.
+pub const CODEX_HOOKS: &str = ".codex/hooks.json";
+
+/// Antigravity 가 읽는 훅 자리 — 스킬과 같은 `.agents/` 밑이다([`AGENTS_DIR`]).
+pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
+
+/// Codex 의 훅 — Claude 와 이벤트 이름이 같고, `Stop` 없이 끝난 턴은 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd`
+/// 로 온다. API 오류로 끊긴 턴에 오는 이벤트는 문서에 없다. **`SessionEnd` 는 그 세션의 장을 걷는다** — 장을 `idle` 로
+/// 두는 Claude 와 다르다(`cmd::hook` 의 `rest`).
+///
+/// **줄마다 그 이벤트의 상한(초)을 함께 적는다**(moai-t6hl) — 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이
+/// 15초를 받는다. 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).
+///
+/// **`additionalContextLimit` 은 이 표에 없다 — 훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽는다**(moai-dp35).
+/// Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 내는데(사람의 codex 0.160 이 짚었다 — 그 경고를
+/// `tests/hooks/codex/config/` 에 갈무리해 두고 시험이 이 표가 심는 파일을 그것에 대 본다, moai-o9tg), 그 값을 받는
+/// 이벤트와 편지가 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
+/// `cmd::hook` 의 `hold_room`, `hook::letters_room`)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
+/// 이벤트의 편지를 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
+/// moai-u5wr.6un 5번, moai-rxro 의 잃음).
+const CODEX: &[(Event, &str, u64)] = &[
+    (Event::SessionStart, "counting moai warnings...", TIMEOUT),
+    (Event::UserPromptSubmit, "reading the moai board...", TIMEOUT),
+    (Event::PreToolUse, "checking the moai rules...", TIMEOUT),
+    (Event::Stop, "comparing the moai state...", TIMEOUT),
+    (Event::Interrupt, "marking this session idle for moai...", CODEX_SHORT_TIMEOUT),
+    (Event::SessionEnd, "taking this session off moai's list...", CODEX_SHORT_TIMEOUT),
+];
+
+/// Codex 의 `PreToolUse` 가 볼 도구 — 셸과 패치다. Codex 는 그 둘과 MCP 에만 훅을 낸다(openai/codex#20204).
+const CODEX_WATCHED: &str = "Bash|apply_patch";
+
+/// Antigravity 의 훅 — **`UserPromptSubmit` 이 없어 `PreInvocation` 이 그 자리에 선다**(턴의 첫 모델 부름만 그
+/// 몫을 한다, `cmd::hook`). `SessionStart` 도 없다. Esc 로 끊긴 턴에는 `Stop` 이 안 온다(2026-10-04 실측) — 그
+/// 장은 다음 턴까지 `busy` 다.
+const ANTIGRAVITY: &[(&str, &str)] =
+    &[("PreInvocation", "user-prompt-submit"), ("PreToolUse", "pre-tool-use"), ("Stop", "stop")];
+
+/// Antigravity 의 `PreToolUse` 가 볼 도구 — 셸 하나와 파일을 쓰는 셋이다(2026-10-04 실측 이름).
+const ANTIGRAVITY_WATCHED: &str = "run_command|write_to_file|replace_file_content|multi_replace_file_content";
+
+/// 훅 하나가 기다리는 상한(초) — 세 에이전트의 파일이 이것을 쓴다(Claude 의 매니페스트도). Codex 의 기본은 600초,
+/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. 세션 끝의 이벤트는 에이전트가
+/// 제 손으로 더 짧게 묶는다.
+///
+/// - **Codex** 는 `Interrupt`·`SessionEnd` 를 1~3초에 묶고, 3 보다 크게 적으면 깎으며 `/hooks` 에 경고를 낸다 — 거기는
+///   [`CODEX_SHORT_TIMEOUT`] 을 적는다([`CODEX`])
+/// - **Claude** 는 `SessionEnd` 훅들을 한 통 1.5초에 묶고, 플러그인 훅의 `timeout` 으로는 그 통이 안 는다(Claude Code
+///   훅 문서). 그래도 15 를 둔다 — 사람이 `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` 로 통을 늘리면 그때는 이 값이 그
+///   훅의 상한이고, Claude 는 경고를 안 낸다. `cmd::hook` 의 `rest` 는 1.5초에 맞춰 쓰였다
+const TIMEOUT: u64 = 15;
+
+/// Codex 가 `Interrupt`·`SessionEnd` 에 주는 상한(초) — 기본 1초에 3초까지만 받는다(Codex 훅 문서). [`TIMEOUT`] 을 적어
+/// 두면 Codex 가 3 으로 깎으며 `/hooks` 에 경고를 내고, 실제 상한이 얼마인지 파일만 봐서는 모른다(moai-t6hl). 그 장을
+/// 걷는 `SessionEnd` 가 1초에 끊기지 않게 상한을 다 쓴다.
+const CODEX_SHORT_TIMEOUT: u64 = 3;
+
+/// moai 가 통째로 쓴 Codex 훅 파일의 표 — 이 글이 `description` 이면 다시 쓴다.
+pub const CODEX_DESCRIPTION: &str = "Planted by moai. Edit it by hand and the next `moai skill install` overwrites it.";
+
+/// moai 가 Antigravity 훅 파일에 세우는 무리의 이름 — 맨 윗단에 이것 하나만 있으면 moai 의 파일이다.
+pub const ANTIGRAVITY_GROUP: &str = "moai";
+
+/// Codex 의 `.codex/hooks.json` 글.
+pub fn codex_hooks(exe: &str) -> String {
+    let mut hooks = BTreeMap::new();
+    for &(event, message, timeout) in CODEX {
+        let name = event.to_possible_value().expect("훅 이벤트에 숨긴 이름이 없다");
+        let mut entry = serde_json::json!({
+            "type": "command",
+            "command": command_for(exe, name.get_name(), Dialect::Codex),
+            "timeout": timeout,
+            "statusMessage": message,
+        });
+        // **비추는 줄의 칸에만 상한을 둔다** — 그 칸의 자리를 다 받는 수로 준다. Codex 의 기본은 2,500 토큰 언저리라(Codex
+        // 훅 문서) 보드와 편지가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는데, 편지는 싣는 순간 읽음이라 그 판에서
+        // 아무도 못 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
+        // 단위(UTF-16 한 단위는 UTF-8 로 세 바이트까지다)는 한 토큰을 안 넘는다 — 같은 수로 준다. 안 받는 이벤트에는 키를
+        // 아예 안 둔다 — `Option` 을 그대로 실으면 `null` 이 적힌다.
+        if let crate::hook::Carry::Context(room) = crate::hook::Carry::of(Dialect::Codex, event) {
+            entry["additionalContextLimit"] = serde_json::json!(room.size);
+        }
+        let group = match event {
+            Event::PreToolUse => serde_json::json!({ "matcher": CODEX_WATCHED, "hooks": [entry] }),
+            _ => serde_json::json!({ "hooks": [entry] }),
+        };
+        hooks.insert(event.wire(), vec![group]);
+    }
+    pretty(&serde_json::json!({ "description": CODEX_DESCRIPTION, "hooks": hooks }))
+}
+
+/// Antigravity 의 `.agents/hooks.json` 글 — 맨 윗단이 이름 붙은 무리고, 도구 이벤트만 `matcher` 로 한 번 싼다
+/// (Antigravity 훅 문서). **모르는 키를 안 넣는다** — agy 는 이 파일을 제 꼴로 읽어 다시 쓴다(실측: 전역 파일에
+/// `"SessionStart": null` 을 더해 다시 썼다). 그래서 무리 안에 설명을 못 두고, 무리의 이름이 표가 된다.
+pub fn antigravity_hooks(exe: &str) -> String {
+    let mut group = serde_json::Map::new();
+    group.insert("enabled".into(), serde_json::json!(true));
+    for (at, event) in ANTIGRAVITY {
+        let entry = serde_json::json!({
+            "type": "command",
+            "command": command_for(exe, event, Dialect::Antigravity),
+            "timeout": TIMEOUT,
+        });
+        let handlers = match *at {
+            "PreToolUse" => serde_json::json!([{ "matcher": ANTIGRAVITY_WATCHED, "hooks": [entry] }]),
+            _ => serde_json::json!([entry]),
+        };
+        group.insert((*at).into(), handlers);
+    }
+    pretty(&serde_json::json!({ ANTIGRAVITY_GROUP: group }))
+}
+
+/// 그 자리의 훅 파일을 **moai 가 통째로 썼는가** — 그때만 다시 쓴다(moai-u5wr 본문). 사람이 제 훅을 적어 둔 파일을
+/// 갈아엎으면 그 사람의 훅이 말없이 사라진다. **못 읽는 파일은 moai 의 것이 아니다** — 병합 충돌 표시가 낀 파일을
+/// 덮으면 남의 반쪽도 같이 사라진다.
+///
+/// - **Codex** 는 맨 윗단 `description` 이 [`CODEX_DESCRIPTION`] 인 파일이다 — 손으로 고치면 덮인다고 그 글이 말한다
+/// - **Antigravity** 는 그 파일에 설명을 못 두어([`antigravity_hooks`]) 무리 안까지 본다(리뷰 moai-u5wr.e74). 맨 윗단에
+///   [`ANTIGRAVITY_GROUP`] 하나만 서고, 그 무리가 켜져 있고(`enabled: true`), 이벤트마다 선 처리기가 **모두 moai 의 줄**
+///   (`moai hook … --dialect antigravity`)일 때다. 맨 윗단만 보던 판은 무리 안에 사람이 더한 처리기를 다음 `skill install`
+///   이 말없이 걷었고, 사람이 끈 무리(`enabled: false`)를 도로 켰다. 값이 `null` 인 이벤트는 agy 가 다시 쓰며 더한
+///   자리라 셈에 안 든다([`same_hooks`])
+pub fn hooks_are_ours(dialect: Dialect, text: &str) -> bool {
+    let Ok(serde_json::Value::Object(top)) = serde_json::from_str::<serde_json::Value>(text) else { return false };
+    match dialect {
+        Dialect::Codex => top.get("description").and_then(|d| d.as_str()) == Some(CODEX_DESCRIPTION),
+        Dialect::Antigravity => {
+            let Some(serde_json::Value::Object(group)) = top.get(ANTIGRAVITY_GROUP).filter(|_| top.len() == 1) else {
+                return false;
+            };
+            group.iter().all(|(key, value)| match key.as_str() {
+                "enabled" => value.as_bool() == Some(true),
+                _ => value.is_null() || moai_handlers(value),
+            })
+        }
+        Dialect::Claude => false,
+    }
+}
+
+/// Antigravity 의 이벤트 하나에 선 처리기들이 **모두 moai 의 것**인가 — 처리기를 바로 두거나 `matcher` 무리의 `hooks`
+/// 로 한 번 싼 꼴([`antigravity_hooks`])이고, 하나도 없으면 아니다.
+fn moai_handlers(handlers: &serde_json::Value) -> bool {
+    fn ours(handler: &serde_json::Value) -> bool {
+        handler
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|c| c.contains(" hook ") && c.contains(" --dialect antigravity"))
+    }
+    fn every(list: &[serde_json::Value], each: fn(&serde_json::Value) -> bool) -> bool {
+        !list.is_empty() && list.iter().all(each)
+    }
+    fn entry(e: &serde_json::Value) -> bool {
+        match e.get("hooks").and_then(serde_json::Value::as_array) {
+            Some(inner) => every(inner, ours),
+            None => ours(e),
+        }
+    }
+    handlers.as_array().is_some_and(|list| every(list, entry))
+}
+
+/// 두 훅 파일이 **뜻으로** 같은가 — 꼴(빈칸·키 차례)과 값이 `null` 인 키는 안 본다(리뷰 moai-u5wr.e74). agy 는 이 파일을
+/// 제 꼴로 다시 쓰며 아는 이벤트를 `null` 로 더한다(실측, 전역 파일) — 글자로만 견주면 그 파일은 영영 낡았다고 서고,
+/// 다시 심을 때마다 커밋된 파일에 diff 가 났다가 agy 가 도로 바꾼다.
+pub fn same_hooks(a: &str, b: &str) -> bool {
+    fn bare(v: serde_json::Value) -> serde_json::Value {
+        match v {
+            serde_json::Value::Object(m) => serde_json::Value::Object(
+                m.into_iter().filter(|(_, v)| !v.is_null()).map(|(k, v)| (k, bare(v))).collect(),
+            ),
+            serde_json::Value::Array(list) => serde_json::Value::Array(list.into_iter().map(bare).collect()),
+            other => other,
+        }
+    }
+    let read = |text: &str| serde_json::from_str::<serde_json::Value>(text).ok().map(bare);
+    matches!((read(a), read(b)), (Some(x), Some(y)) if x == y)
+}
+
+/// 심긴 훅 파일(`.codex/hooks.json`·`.agents/hooks.json`)이 부르는 실행 파일 — 첫 `command` 의 머리(`command -v -- "`)에서
+/// 꺼낸다([`hook_exe`] 와 같은 자). Codex 의 줄은 `sh -c '…'` 로 싸여 있어 그 껍질을 먼저 벗긴다. `moai skill status` 가
+/// 그 파일을 **그 파일이 부르는 moai 로** 견주는 데 쓴다 — Claude 의 줄이 설치본의 훅이 부르는 파일로 견주는 것과 같은
+/// 까닭이다(리뷰 moai-u5wr.e74).
+pub fn planted_exe(text: &str) -> Option<String> {
+    fn first(v: &serde_json::Value) -> Option<&str> {
+        match v {
+            serde_json::Value::Object(m) => {
+                m.get("command").and_then(serde_json::Value::as_str).or_else(|| m.values().find_map(first))
+            }
+            serde_json::Value::Array(list) => list.iter().find_map(first),
+            _ => None,
+        }
+    }
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let cmd = first(&v)?;
+    let line = match cmd.strip_prefix("sh -c '") {
+        Some(inner) => inner.replace(r"'\''", "'"),
+        None => cmd.to_string(),
+    };
+    let rest = line.strip_prefix("command -v -- \"")?;
+    Some(rest[..rest.find('"')?].to_string())
+}
 
 /// 훅이 부를 명령.
 ///
@@ -307,9 +566,36 @@ const WATCHED: &str = "Bash|Edit|Write|NotebookEdit|Skill";
 /// 재사용되면 표식이 남아 한 번을 잃는데, 그 자리는 `TMPDIR` 을 비우는 손이 함께 지운다.
 ///
 /// **이벤트 이름도 `printf` 의 꼴에 안 넣는다** — 꼴 안의 `%` 는 변환 문자로 읽힌다. 인자
-/// 자리로 넘기고 [`crate::text::single_quoted`] 로 싼다: 지금 넷은 안전한 낱말이지만, 꼴에
+/// 자리로 넘기고 [`crate::text::single_quoted`] 로 싼다: 지금 이름들은 안전한 낱말이지만, 꼴에
 /// 박아 두면 이름이 바뀌는 날 이 줄이 깨지고 그 값은 세션의 모든 도구 호출이다.
 fn command(exe: &str, event: &str) -> String {
+    command_for(exe, event, Dialect::Claude)
+}
+
+/// [`command`] 를 그 에이전트의 말씨로(moai-u5wr). **Claude 의 줄은 글자 하나 안 바뀐다** — 판이 그 글의 해시라
+/// ([`version_of`]) 바뀌면 열린 세션마다 헛 갱신이 선다. 갈리는 것은 셋이다.
+///
+/// - **`moai` 에 `--dialect` 를 붙인다** — Claude 는 안 붙인다(기본값이다)
+/// - **세션을 가르는 환경 변수가 다르다** — Antigravity 는 `ANTIGRAVITY_CONVERSATION_ID` 를 세운다(2026-10-04
+///   실측). Codex 는 세션을 대는 변수가 없고 훅을 띄운 데몬의 환경을 물려줘, 거기 선 `CLAUDE_CODE_SESSION_ID` 는
+///   **남의 세션 것**이다(moai-sile) — 그래서 Codex 의 표식은 `$PPID` 하나로 가른다. 그 값은 Codex 세션들이 함께
+///   쓰는 데몬이라 알림이 데몬마다 한 번이 되는데, 남의 세션 id 로 가르는 것보다 낫다
+/// - **Antigravity 에는 알림(`systemMessage`)을 안 낸다** — 그 꼴은 맨 윗단 `decision` 이라 모르는 키를 어떻게
+///   읽는지 재지 않았다. 못 도는 판은 빈 출력이다(빈 출력은 지나간다고 쟀다)
+///
+/// **Codex 의 줄은 `sh -c` 로 싼다.** Codex 가 훅 명령을 어느 셸로 푸는지는 문서에 없고, 기록한 훅의 부모가 곧
+/// 데몬이라(사이에 셸이 안 보였다) 사람의 로그인 셸(`fish` 일 수도 있다)로 풀릴 수 있다. 이 줄은 POSIX 셸의
+/// 글이라 감싸면 어느 쪽이든 선다 — 셸로 풀면 바깥 셸이 따옴표를 벗기고, 낱말로 쪼개도 작은따옴표 안은 한 낱말이다.
+fn command_for(exe: &str, event: &str, dialect: Dialect) -> String {
+    let line = shell_line(exe, event, dialect);
+    match dialect {
+        Dialect::Codex => format!("sh -c {}", crate::text::single_quoted(&line)),
+        Dialect::Claude | Dialect::Antigravity => line,
+    }
+}
+
+/// [`command_for`] 의 몸통 — 셸에 넘길 한 줄이다.
+fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     // 따옴표를 깨는 경로는 아예 안 쓴다. 셸 한 줄이 깨지면 그 세션의 모든
     // 도구 호출이 막힌다.
     let exe = if quotable(exe) { exe } else { "moai" };
@@ -342,8 +628,17 @@ fn command(exe: &str, event: &str) -> String {
     // **실을 수 없는 경로면 자리를 통째로 뺀다**([`sayable`], 리뷰 moai-514e.hgz 5번) — 셸에는
     // 멀쩡하지만 JSON 에는 못 싣는 경로(제어문자)가 그 자리다. 그런 경로도 훅은 그대로 부르니,
     // 빠지는 것은 알림의 한 토막뿐이고 어느 파일인지는 `moai skill status` 가 댄다.
-    let (spot, where_) =
-        if sayable(exe) { (": %s", format!(" {}", crate::text::single_quoted(exe))) } else { ("", String::new()) };
+    //
+    // **Codex 의 줄은 그 자리를 큰따옴표로 싼다**(리뷰 moai-u5wr.e74) — 그 줄은 통째로 `sh -c '…'` 에 한 번 더 싸이고
+    // ([`command_for`]) Codex 는 그것을 사람의 로그인 셸(`$SHELL -lc`)로 푼다. 작은따옴표로 싸면 자리에 든 `'` 가
+    // `'\''` 가 되어 바깥 작은따옴표 안에 `\'` 가 서는데, fish 는 작은따옴표 안의 `\'` 를 닫는 따옴표가 아니라 글자로 읽어
+    // 줄이 통째로 문법 오류가 된다 — 모든 Codex 훅이 `moai` 를 부르기도 전에 진다. [`quotable`] 이 `"`·`\`·`$`·`` ` `` 를
+    // 걸렀으니 큰따옴표 안에서 셸이 풀 것이 없다. Claude 의 줄은 판이 그 글의 해시라 그대로 둔다.
+    let (spot, where_) = match (sayable(exe), dialect) {
+        (true, Dialect::Codex) => (": %s", format!(" \"{exe}\"")),
+        (true, _) => (": %s", format!(" {}", crate::text::single_quoted(exe))),
+        (false, _) => ("", String::new()),
+    };
     // **세션마다 한 줄이다**(moai-f7up) — 표식 이름에 부를 바이너리의 철자를 섞는다. 같은 세션이
     // 저장소 둘을 오가면 둘 다 제 알림을 내야 하는데(제 바이너리가 저마다 못 돌 수 있다),
     // 이름만으로는 첫 저장소의 표식이 둘째의 입을 막는다. 셈은 셸이 못 하므로 **심을 때 박아
@@ -367,9 +662,11 @@ fn command(exe: &str, event: &str) -> String {
     // 에 남는다 — 사람이 못 듣는 알림 하나가 표식을 세워 `PreToolUse`·`UserPromptSubmit`·
     // `Stop` 의 입을 세션 내내 막았다. 규칙 다섯을 싣는 `PreToolUse` 가 매 도구 호출에 져도
     // 화면은 규칙이 통과한 것과 한 글자도 다르지 않았다 — moai-j4ie 가 끝내려던 바로 그 침묵이다.
-    // 값은 세션에 넷까지고, 문턱이 겨눈 140~1,257 과는 자릿수가 다르다.
+    // 값은 세션에 심은 이벤트 수까지고, 문턱이 겨눈 140~1,257 과는 자릿수가 다르다.
     //
-    // 이름은 `HOOKS` 가 든 넷뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다.
+    // 이름은 `HOOKS`·`ANTIGRAVITY` 가 든 것과 `CODEX` 의 이벤트가 clap 으로 받는 이름(`hook::Event` 의
+    // kebab-case)뿐이라 그대로 파일 이름에 적는다 — 모두 ASCII 낱말이다. `Event` 에 이름을 따로 다는 날
+    // (`#[value(name = …)]`)은 여기도 본다.
     //
     // **종료 값도 키에 든다**(리뷰 moai-514e.hgz). 목록이 0·1 밖 전부로 넓어지며 표식을 태우는
     // 것이 설치와 상관없는 한 번짜리 죽음까지가 됐다 — 이 컨테이너에 이력이 있는 OOM 의 137,
@@ -382,20 +679,33 @@ fn command(exe: &str, event: &str) -> String {
     // 받은 것을 흘려보내고 표식을 세우고, 아니면 판정의 꼴일 때 흘려보내기만 하고, 꼴이 아니면 알림을
     // 낸다. 0·1 을 두 자리에 적던 줄은 한쪽만 넓히는 날 토막을 판정으로 흘리거나 알림을 삼킨다.
     let handoff = crate::cmd::hook::HANDOFF;
+    // 세션을 가르는 값과 `moai` 에 붙일 말씨 — 까닭은 [`command_for`] 에 있다.
+    let (sid, flag) = match dialect {
+        Dialect::Claude => ("${CLAUDE_CODE_SESSION_ID:-$PPID}", String::new()),
+        Dialect::Codex => ("$PPID", " --dialect codex".to_string()),
+        Dialect::Antigravity => ("${ANTIGRAVITY_CONVERSATION_ID:-$PPID}", " --dialect antigravity".to_string()),
+    };
+    // 판정의 꼴이 아닌 출력 뒤에 서는 알림 — Antigravity 는 아무것도 안 낸다.
+    let notice = match dialect {
+        Dialect::Antigravity => String::new(),
+        Dialect::Claude | Dialect::Codex => format!(
+            "s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-{sid}.{event}.$c.said\"; \
+             {{ ! [ -e \"$s\" ] && ! [ -h \"$s\" ] && true 2>>/dev/null > \"$s\" \
+             || ! [ -f \"$s\" ] || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
+             printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
+             The five moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :"
+        ),
+    };
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; trap 'exit 0' PIPE; \
-         h=\"${{TMPDIR:-/tmp}}/moai-hook-${{CLAUDE_CODE_SESSION_ID:-$PPID}}-$$.handoff\"; \
-         c=0; o=$({handoff}=\"$h\" \"{exe}\" hook {event}) || c=$?; \
+         h=\"${{TMPDIR:-/tmp}}/moai-hook-{sid}-$$.handoff\"; \
+         c=0; o=$({handoff}=\"$h\" \"{exe}\" hook {event}{flag}) || c=$?; \
          set -C; \
          case \"$c\" in \
          0|1) [ -z \"$o\" ] || {{ printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] \
          && read -r m 2>>/dev/null < \"$h\" && ! [ -e \"$m\" ] && ! [ -h \"$m\" ] && true 2>>/dev/null > \"$m\"; }} || :;; \
          *) case \"$o\" in '{{'*'}}') printf '%s\\n' \"$o\" || :;; *) \
-         s=\"${{TMPDIR:-/tmp}}/moai-hook-{whose:04x}-${{CLAUDE_CODE_SESSION_ID:-$PPID}}.{event}.$c.said\"; \
-         {{ ! [ -e \"$s\" ] && ! [ -h \"$s\" ] && true 2>>/dev/null > \"$s\" \
-         || ! [ -f \"$s\" ] || ! [ -O \"$s\" ] || [ -h \"$s\" ]; }} && \
-         printf '{{\"systemMessage\":\"moai: the %s hook could not run (exit %s){spot}. \
-         The five moai rules are not standing - run moai skill status to see why.\"}}' {said} \"$c\"{where_} || :;; \
+         {notice};; \
          esac;; esac; exit 0"
     )
 }
@@ -409,43 +719,16 @@ fn command(exe: &str, event: &str) -> String {
 ///
 /// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
 /// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
-pub fn tree(
-    prefix: &str,
-    root: &Path,
-    exe: &str,
-    skill: &str,
-    reference: &str,
-    supervise: &str,
-    wiki: &str,
-) -> Vec<(PathBuf, String)> {
-    tree_named(&market(prefix, root), exe, skill, reference, supervise, wiki)
+pub fn tree(prefix: &str, root: &Path, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+    tree_named(&market(prefix, root), exe, skills)
 }
 
 /// `tree` 의 몸통. 저장소 자리는 마켓플레이스 이름으로만 들어오므로, 이름을
 /// 받아 두면 **커밋된 트리를 그 트리가 적힌 자리 그대로** 다시 낼 수 있다 —
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
-fn tree_named(
-    market: &str,
-    exe: &str,
-    skill: &str,
-    reference: &str,
-    supervise: &str,
-    wiki: &str,
-) -> Vec<(PathBuf, String)> {
-    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
-    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki_name] = NAMES;
-    let mut files: Vec<(PathBuf, String)> = vec![
-        (PathBuf::from(format!("skills/{main}/SKILL.md")), skill.to_string()),
-        (PathBuf::from(format!("skills/{main}/references/commands.md")), reference.to_string()),
-        // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고,
-        // 일꾼이 `moai` 를 부를 때마다 감독의 걸음까지 읽는다. 발동어(description)는 따로
-        // 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        (PathBuf::from(format!("skills/{supervisor}/SKILL.md")), supervise.to_string()),
-        // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai`
-        // 스킬에 섞으면 이슈 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
-        (PathBuf::from(format!("skills/{wiki_name}/SKILL.md")), wiki.to_string()),
-    ];
+fn tree_named(market: &str, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
+    let mut files: Vec<(PathBuf, String)> =
+        skill_files(skills).map(|(p, b)| (Path::new("skills").join(p), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
@@ -494,7 +777,7 @@ fn plugin_json(exe: &str, version: &str) -> String {
         let entry = serde_json::json!({
             "type": "command",
             "command": command(exe, event),
-            "timeout": 15,
+            "timeout": TIMEOUT,
             "statusMessage": message,
         });
         let group = if *at == "PreToolUse" {
@@ -877,10 +1160,25 @@ mod tests {
     }
 
     fn tree_at(prefix: &str, root: &Path, exe: &str, skill: &str) -> BTreeMap<String, String> {
-        tree(prefix, root, exe, skill, "참고", "감독", "위키")
-            .into_iter()
-            .map(|(p, b)| (p.display().to_string(), b))
-            .collect()
+        keyed(tree(prefix, root, exe, &fake(skill, "감독", "위키")))
+    }
+
+    fn keyed(files: Vec<(PathBuf, String)>) -> BTreeMap<String, String> {
+        files.into_iter().map(|(p, b)| (p.display().to_string(), b)).collect()
+    }
+
+    /// [`skills`] 와 같은 꼴에 글만 갈아 끼운 목록 — 이름과 자리는 [`skills`] 가 낸 그대로다. 손으로 다시 짜면
+    /// 스킬 하나가 늘 때 시험만 옛 꼴로 남는다. 참고 문서는 `참고` 로 둔다.
+    fn fake(skill: &str, supervise: &str, wiki: &str) -> Vec<Skill> {
+        let mut all = skills();
+        for (s, body) in all.iter_mut().zip([skill, supervise, wiki]) {
+            s.files = s
+                .files
+                .iter()
+                .map(|(rel, _)| (*rel, if *rel == "SKILL.md" { body } else { "참고" }.to_string()))
+                .collect();
+        }
+        all
     }
 
     /// 초점이 있을 때 **막히는 것이 옳은** 명령들.
@@ -992,14 +1290,15 @@ mod tests {
     /// 골랐는데, 그 그물은 `moai show -s todo,review` 를 끌어오고 리뷰
     /// 토막의 문구가 바뀌면 조용히 아무것도 안 고른다.
     fn taught() -> Vec<String> {
-        // AGENTS 블록도 같은 조각에서 나오고, 감독이 일꾼에게 싣는 글도 리뷰를 세우고
-        // 닫는 줄을 같은 조각으로 적으므로 같이 본다.
+        // AGENTS 블록도 같은 조각에서 나오고, 일꾼 스킬도 리뷰를 세우고 닫는 줄을 같은 조각으로
+        // 적으므로 같이 본다.
         let texts = [
             crate::guide::skill(),
             crate::guide::reference(),
             crate::guide::agents(),
             crate::guide::supervise(),
             crate::guide::wiki(),
+            crate::guide::work(),
         ];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
         // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
@@ -1064,6 +1363,16 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
+                    // 감독과 일꾼이 편지를 주고받는 자리(moai-snyk). 편지 id 는 `mail::is_id` 의 꼴이다 —
+                    // 꼴이 아니면 `send --reply-to` 가 거절해 가르친 줄이 아니라 그 거절을 잰다.
+                    .replace("<worker>", "w1")
+                    .replace("<supervisor>", "boss")
+                    .replace("<from>", "boss")
+                    .replace("<letter id>", "20261004-120000-abcd1234")
+                    .replace("<letter file>", "/tmp/letter.txt")
+                    .replace("<report file>", "/tmp/report.txt")
+                    // Codex 창이 훅이 지어 준 장을 잇는 자리(moai-u5wr.7xr).
+                    .replace("<that name>", "w1")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로
@@ -1133,7 +1442,7 @@ mod tests {
     /// 이슈 id 로 센다(moai-mdzx.3pm).
     #[test]
     fn the_tree_plants_every_skill_name() {
-        let planted: Vec<String> = tree("t", Path::new("/repo"), "/bin/moai", "스킬", "참고", "감독", "위키")
+        let planted: Vec<String> = tree("t", Path::new("/repo"), "/bin/moai", &fake("스킬", "감독", "위키"))
             .into_iter()
             .filter_map(|(p, _)| {
                 let dir = p.strip_prefix("skills").ok()?.parent()?;
@@ -1141,6 +1450,66 @@ mod tests {
             })
             .collect();
         assert_eq!(planted, NAMES);
+    }
+
+    /// **`.agents/skills` 는 Claude 의 트리와 같은 글을 같은 이름 밑에 받는다**(moai-xs2h.xgo, 2026-10-04 사용자 결정) —
+    /// 다른 것은 매니페스트가 없다는 것뿐이다. 에이전트마다 글을 따로 내면 같은 것이 세 벌이 되어 갈라지고, 이름이
+    /// [`NAMES`] 밖으로 새면 위키가 그 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    #[test]
+    fn the_agents_tree_carries_the_same_skills_without_a_manifest() {
+        let all = fake("# 스킬", "감독", "위키");
+        let claude = keyed(tree("t", Path::new("/repo"), "/bin/moai", &all));
+        let shared = keyed(agents_tree(&all));
+        let dirs: Vec<String> = agents_tree(&all)
+            .into_iter()
+            .filter_map(|(p, _)| {
+                let dir = p.parent()?;
+                (p.file_name()? == "SKILL.md").then(|| dir.display().to_string())
+            })
+            .collect();
+        assert_eq!(dirs, NAMES, "심는 스킬이 NAMES 와 다르다 — 차례까지");
+        for (path, body) in &shared {
+            assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
+        }
+        assert_eq!(shared.len() + 2, claude.len(), "매니페스트 둘 말고 다른 것이 갈렸다");
+        assert!(!shared.keys().any(|p| p.contains(".claude-plugin")), "매니페스트가 .agents 에 섰다");
+    }
+
+    /// **심는 SKILL.md 는 Agent Skills 표준의 머리를 지킨다**(agentskills.io/specification, 세 에이전트가 다 받는다).
+    /// `name` 은 제 디렉터리 이름과 같고 소문자·숫자·붙임표 64자 안이며 붙임표로 열거나 닫거나 겹치지 않는다.
+    /// `description` 은 비지 않고 1024자 안이다. 어기면 그 에이전트가 스킬을 조용히 안 싣는다 — Claude 만 보던
+    /// 판에는 이 금이 글로만 있었다.
+    #[test]
+    fn every_skill_meets_the_agent_skills_frontmatter() {
+        for s in skills() {
+            let (first, body) = &s.files[0];
+            assert_eq!(*first, "SKILL.md", "{} 의 첫 글이 SKILL.md 가 아니다", s.name);
+            let head = body.strip_prefix("---\n").and_then(|b| b.split_once("\n---\n")).map(|(h, _)| h);
+            let head = head.unwrap_or_else(|| panic!("{} 에 머리(---)가 없다", s.name));
+            let field = |k: &str| head.lines().find_map(|l| l.strip_prefix(&format!("{k}: "))).map(str::trim);
+            let name = field("name").unwrap_or_else(|| panic!("{} 의 머리에 name 이 없다", s.name));
+            assert_eq!(name, s.name, "머리의 name 이 디렉터리 이름과 다르다");
+            let ok = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
+            assert!(
+                name.len() <= 64 && name.chars().all(ok) && !name.starts_with('-') && !name.ends_with('-'),
+                "{name} 이 표준의 name 꼴이 아니다"
+            );
+            assert!(!name.contains("--"), "{name} 에 붙임표가 겹친다");
+            let description = field("description").unwrap_or_else(|| panic!("{name} 의 머리에 description 이 없다"));
+            let n = description.chars().count();
+            assert!((1..=1024).contains(&n), "{name} 의 description 이 {n}자다 — 1~1024자");
+            // **따옴표 없는 YAML 한 줄로 읽혀야 한다**(리뷰 moai-xs2h.dir) — 머리는 따옴표 없이 적혀, 글 안의 `: ` 는
+            // 둘째 키가 되고 ` #` 뒤는 주석으로 잘리며 표지 글자로 열면 다른 꼴로 읽힌다. Claude 는 너그럽게 읽어도 YAML 을
+            // 엄하게 읽는 에이전트는 그 스킬을 못 싣는다 — 글자 수와 이름만 재던 판은 이 금을 안 쟀다.
+            let indicator = |c: char| "-?:,[]{}#&*!|>'\"%@`".contains(c);
+            assert!(
+                !description.contains(": ")
+                    && !description.contains(" #")
+                    && !description.starts_with(indicator)
+                    && !description.ends_with(':'),
+                "{name} 의 description 이 따옴표 없는 YAML 한 줄로 안 읽힌다 — {description}"
+            );
+        }
     }
 
     /// **판은 내용에서 나온다.** 같은 내용이면 같은 판이라 헛 업데이트가 없고,
@@ -1158,15 +1527,9 @@ mod tests {
         assert_eq!(version(&a), version(&b), "같은 내용인데 판이 다르다");
         assert_ne!(version(&a), version(&c), "본문이 달라졌는데 판이 같다");
         assert_ne!(version(&a), version(&d), "부를 바이너리가 달라졌는데 판이 같다");
-        let e = tree("t", Path::new("/repo"), "/bin/moai", "# 스킬", "참고", "감독 (고침)", "위키")
-            .into_iter()
-            .map(|(p, b)| (p.display().to_string(), b))
-            .collect();
+        let e = keyed(tree("t", Path::new("/repo"), "/bin/moai", &fake("# 스킬", "감독 (고침)", "위키")));
         assert_ne!(version(&a), version(&e), "감독 스킬이 달라졌는데 판이 같다");
-        let f = tree("t", Path::new("/repo"), "/bin/moai", "# 스킬", "참고", "감독", "위키 (고침)")
-            .into_iter()
-            .map(|(p, b)| (p.display().to_string(), b))
-            .collect();
+        let f = keyed(tree("t", Path::new("/repo"), "/bin/moai", &fake("# 스킬", "감독", "위키 (고침)")));
         assert_ne!(version(&a), version(&f), "위키 스킬이 달라졌는데 판이 같다");
         // semver 세 자리여야 `claude` 가 읽는다.
         assert_eq!(version(&a).split('.').count(), 3, "{}", version(&a));
@@ -1658,7 +2021,7 @@ mod tests {
     #[test]
     fn the_hook_exe_round_trips_through_the_manifest() {
         for exe in ["/repo/target/release/moai", "moai"] {
-            let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고", "감독", "위키");
+            let files = tree("t", Path::new("/repo"), exe, &fake("# 스킬", "감독", "위키"));
             let (_, manifest) = files.iter().find(|(p, _)| p.ends_with("plugin.json")).unwrap();
             assert_eq!(hook_exe(manifest).as_deref(), Some(exe));
             assert!(version_in(&files).is_some_and(|v| v.split('.').count() == 3));
@@ -1832,6 +2195,307 @@ mod tests {
         // `the_notice_stands_once_a_session` 이 껍데기로 실제로 두 번 돌려 잰다.
         // 이벤트도 종료 값도 이름에 선다 — `$c` 는 껍데기가 풀 자리라 글자 그대로 남는다.
         assert!(mark(a, "stop").ends_with(".stop.$c.said"), "이벤트·종료 값이 표식에 안 선다 — {}", mark(a, "stop"));
+    }
+
+    /// **Codex·Antigravity 의 줄도 같은 셸 글이다**(moai-u5wr) — `moai` 에 제 말씨를 붙여 부르고, 받은 판정을
+    /// 그대로 흘려보낸다. Codex 의 줄은 `sh -c` 로 싸서 심으므로 바깥 셸이 한 번 더 푼다 — 그 둘째 풀이에서도 서야
+    /// 한다. 못 도는 바이너리에는 Codex 가 알림을 내고 Antigravity 는 아무것도 안 낸다(그 꼴에 알림 칸이 없다).
+    #[cfg(unix)]
+    #[test]
+    fn the_codex_and_antigravity_lines_call_moai_in_their_dialect() {
+        let scratch = crate::scratch::Scratch::new("skill-dialect-line");
+        let at = scratch.path();
+        // 받은 인자를 판정의 꼴로 낸다 — 줄이 그것을 그대로 흘려보내는지 본다.
+        let echo = planted(at, "echo", "#!/bin/sh\nprintf '{\"args\":\"%s\"}\\n' \"$*\"\n", 0o755);
+        if !crate::cmd::runnable(&echo) {
+            return;
+        }
+        let dead = planted(at, "dead", "#!/bin/sh\nexit 0\n", 0o644);
+        let (echo, dead) = (echo.display().to_string(), dead.display().to_string());
+        assert!(!command(&echo, "stop").contains("--dialect"), "Claude 의 줄에 말씨가 붙었다");
+        for (k, sh) in shells().into_iter().enumerate() {
+            let tmp = at.join(format!("tmp-{k}"));
+            std::fs::create_dir_all(&tmp).unwrap();
+            let run = |line: &str| {
+                let out = std::process::Command::new(sh).args(["-c", line]).env("TMPDIR", &tmp).output().unwrap();
+                (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string())
+            };
+            for (dialect, word) in [(Dialect::Codex, "codex"), (Dialect::Antigravity, "antigravity")] {
+                let said = run(&command_for(&echo, "pre-tool-use", dialect));
+                let want = format!("{{\"args\":\"hook pre-tool-use --dialect {word}\"}}\n");
+                assert_eq!(said, (Some(0), want), "{sh}: {word} 의 줄이 말씨를 안 붙였다");
+            }
+            let (code, codex) = run(&command_for(&dead, "stop", Dialect::Codex));
+            assert_eq!(code, Some(0), "{sh}: Codex 의 줄이 게이트가 됐다");
+            assert!(codex.contains("systemMessage"), "{sh}: Codex 가 못 도는 바이너리를 안 알린다 — {codex:?}");
+            assert_eq!(run(&command_for(&dead, "stop", Dialect::Antigravity)), (Some(0), String::new()), "{sh}");
+        }
+        // **Codex 의 속 줄에는 `\'` 가 안 선다**(리뷰 moai-u5wr.e74) — 그 줄은 `sh -c '…'` 에 한 번 더 싸여 사람의 로그인
+        // 셸이 푸는데, fish 는 작은따옴표 안의 `\'` 를 닫는 따옴표로 안 읽어 줄이 통째로 문법 오류가 된다. 자리에 `'` 가
+        // 든 실행 파일이 그 판이다 — POSIX 셸만 재는 위의 고리는 이것을 못 본다.
+        let quoted = shell_line("/home/me/Bob's tools/moai", "stop", Dialect::Codex);
+        assert!(!quoted.contains("\\'"), "Codex 의 속 줄에 \\' 가 섰다 — {quoted}");
+    }
+
+    /// **심는 훅 파일 둘의 꼴**(moai-u5wr.kov) — Codex 는 Claude 와 같은 틀에 `apply_patch` 를 보고 싣는 글의 상한을
+    /// 넉넉히 준다. Antigravity 는 이름 붙은 무리 하나에 `PreInvocation` 이 `user-prompt-submit` 을 부른다. 다시 쓸지는
+    /// 그 파일을 moai 가 통째로 썼는지가 가른다 — 남의 훅이 든 파일과 못 읽는 파일은 moai 의 것이 아니다.
+    #[test]
+    fn the_codex_and_antigravity_hook_files() {
+        let exe = "/repo/target/release/moai";
+        let codex: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
+        let hooks = codex["hooks"].as_object().unwrap();
+        let events: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        assert_eq!(events, ["Interrupt", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"]);
+        assert_eq!(hooks["PreToolUse"][0]["matcher"], "Bash|apply_patch");
+        for (at, group) in hooks {
+            let entry = &group[0]["hooks"][0];
+            let line = entry["command"].as_str().unwrap();
+            assert!(line.starts_with("sh -c '") && line.contains("--dialect codex"), "{at}: {line}");
+            // 이벤트마다 상한과 `additionalContextLimit` 을 무엇으로 적는가는 Codex 의 규칙이 가른다 — 그것은
+            // `the_planted_codex_hooks_pass_codex_s_own_checks` 가 Codex 의 `/hooks` 갈무리에 대 본다(moai-o9tg).
+        }
+        let agy: serde_json::Value = serde_json::from_str(&antigravity_hooks(exe)).unwrap();
+        let group = agy[ANTIGRAVITY_GROUP].as_object().unwrap();
+        assert_eq!(agy.as_object().unwrap().len(), 1, "무리가 하나가 아니다");
+        assert!(group["PreInvocation"][0]["command"].as_str().unwrap().contains("hook user-prompt-submit --dialect"));
+        assert_eq!(group["PreToolUse"][0]["matcher"], ANTIGRAVITY_WATCHED);
+        assert!(group["Stop"][0]["command"].as_str().unwrap().contains("hook stop --dialect antigravity"));
+
+        assert!(hooks_are_ours(Dialect::Codex, &codex_hooks(exe)));
+        assert!(hooks_are_ours(Dialect::Antigravity, &antigravity_hooks(exe)));
+        for (dialect, theirs) in [
+            (Dialect::Codex, "{\"hooks\":{}}"),
+            (Dialect::Codex, "<<<<<<< HEAD\n"),
+            (Dialect::Antigravity, "{\"moai\":{},\"mine\":{}}"),
+            (Dialect::Antigravity, "{\"mine\":{}}"),
+            (Dialect::Claude, "{\"moai\":{}}"),
+        ] {
+            assert!(!hooks_are_ours(dialect, theirs), "{dialect:?} 가 남의 파일을 제 것으로 읽었다 — {theirs}");
+        }
+
+        // **Antigravity 의 무리는 안까지 본다**(리뷰 moai-u5wr.e74) — 사람이 끈 무리와 사람이 더한 처리기는 moai 의 것이
+        // 아니고, agy 가 다시 쓰며 더한 `null` 은 moai 의 것이며 낡은 것도 아니다.
+        let planted = antigravity_hooks(exe);
+        let nulled = planted.replacen("\"enabled\": true", "\"SessionStart\": null, \"enabled\": true", 1);
+        assert_ne!(nulled, planted, "시험이 null 을 못 넣었다");
+        assert!(hooks_are_ours(Dialect::Antigravity, &nulled) && same_hooks(&nulled, &planted));
+        assert!(!same_hooks(&planted, &antigravity_hooks("/elsewhere/moai")), "다른 moai 를 부르는 파일을 같다고 했다");
+        let off = planted.replacen("\"enabled\": true", "\"enabled\": false", 1);
+        assert!(!hooks_are_ours(Dialect::Antigravity, &off), "사람이 끈 무리를 제 것으로 읽었다");
+        let mine = "{\"moai\":{\"enabled\":true,\"Stop\":[{\"type\":\"command\",\"command\":\"echo mine\"}]}}";
+        assert!(!hooks_are_ours(Dialect::Antigravity, mine), "사람이 더한 처리기를 제 것으로 읽었다");
+
+        // **심긴 파일이 부르는 moai 를 읽는다** — `status` 가 그것으로 견준다. Codex 의 `sh -c '…'` 껍질과 자리에 든 `'` 도.
+        for exe in ["/repo/target/release/moai", "/home/me/Bob's tools/moai", "moai"] {
+            assert_eq!(planted_exe(&codex_hooks(exe)).as_deref(), Some(exe), "codex {exe}");
+            assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe), "antigravity {exe}");
+        }
+    }
+
+    /// Codex 가 추가 맥락을 받는 이벤트 — 그 밖의 처리기에 적힌 `additionalContextLimit` 은 버리고 경고한다(Codex 훅
+    /// 문서). **훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽지 않는다** — 심는 상한이 그 표에서 오니(moai-dp35),
+    /// 거기서 읽으면 표를 되돌릴 때 본뜸도 같이 움직여 아무것도 안 붉어진다.
+    const CODEX_TAKES_CONTEXT: &[&str] =
+        &["SessionStart", "SubagentStart", "PreToolUse", "PostToolUse", "UserPromptSubmit"];
+
+    /// Codex 가 상한을 깎는 이벤트와 그 상한(초) — 기본 1초에 3초까지다(Codex 훅 문서). 나머지는 기본이 600초고 깎는다는
+    /// 말이 문서에도 실행 파일에도 없다.
+    const CODEX_TIMEOUT_CAP: &[(&str, u64)] = &[("SessionEnd", 3), ("Interrupt", 3)];
+
+    /// Codex 0.160 의 command 처리기가 아는 키 — 그 판 실행 파일이 든 `HookHandlerConfig::Command` 의 여섯 칸에 꼬리표
+    /// `type` 을 더했다. 모르는 키를 Codex 가 어떻게 읽는지는 갈무리가 없다 — 어느 쪽이든 그 값은 안 선다(`timeoutSec` 은
+    /// Codex 앱 서버 API 의 이름이라 헷갈리기 쉽다).
+    const CODEX_HANDLER_KEYS: &[&str] =
+        &["type", "command", "commandWindows", "timeout", "async", "statusMessage", "additionalContextLimit"];
+
+    /// 경고에서 훅 파일의 자리를 갈음하는 글 — 갈무리는 그 기계의 절대 경로를 적는다.
+    const HOOKS_AT: &str = "<hooks.json>";
+
+    /// 옮겨 붙이다 마지막 경고가 끊긴 갈무리의 이름(`tests/hooks/codex/config/<이름>.txt`) — 이 갈무리만 마지막 경고를
+    /// 앞머리로 맞춘다(`tests/hooks/README.md`).
+    const CODEX_CUT: &[&str] = &["before-moai-t6hl"];
+
+    /// Codex 가 그 이벤트의 상한을 깎는 값(초) — 안 깎는 이벤트는 `None` 이다.
+    fn codex_timeout_cap(event: &str) -> Option<u64> {
+        CODEX_TIMEOUT_CAP.iter().find(|(at, _)| *at == event).map(|&(_, cap)| cap)
+    }
+
+    /// Codex 0.160 이 훅 파일을 읽으며 `/hooks` 의 Issues 에 내는 설정 경고를 본뜬다(moai-o9tg). 글은 그 판 실행 파일의
+    /// `hooks/src/engine/discovery.rs` 가 든 것을 옮겼다. command 처리기에 서는 넷만 본뜬다 — 빈 명령, `async`, 이벤트가
+    /// 안 받는 `additionalContextLimit`, 깎이는 상한. 같은 자리의 나머지 경고(못 읽는 파일, 틀린 matcher 정규식, prompt·
+    /// agent·MCP 처리기, `config.toml` 의 `[hooks]` 와 겹침)는 moai 가 안 심는 꼴에서 나서 [`codex_shape`] 가 그 꼴을 막는다.
+    /// **본뜸은 갈무리가 붙든다** — 시험이 갈무리마다 Codex 가 한 말과 이것이 낸 말을 하나하나 견준다.
+    fn codex_issues(text: &str) -> Vec<String> {
+        let file: serde_json::Value = serde_json::from_str(text).expect("훅 파일이 JSON 이 아니다");
+        let mut said = Vec::new();
+        for (event, groups) in file["hooks"].as_object().expect("훅 파일에 hooks 가 없다") {
+            let handlers =
+                groups.as_array().into_iter().flatten().flat_map(|g| g["hooks"].as_array().into_iter().flatten());
+            for handler in handlers {
+                if handler["command"].as_str().is_none_or(|c| c.trim().is_empty()) {
+                    said.push(format!("skipping empty hook command in {HOOKS_AT}"));
+                    continue;
+                }
+                if handler["async"] == true {
+                    said.push(format!("running async {event} hook synchronously in {HOOKS_AT}"));
+                }
+                if handler.get("additionalContextLimit").is_some() && !CODEX_TAKES_CONTEXT.contains(&event.as_str()) {
+                    said.push(format!(
+                        "ignoring additionalContextLimit for {event} hook in {HOOKS_AT}: this event cannot emit additionalContext"
+                    ));
+                }
+                if let Some(cap) =
+                    codex_timeout_cap(event).filter(|&cap| handler["timeout"].as_u64().is_some_and(|t| t > cap))
+                {
+                    said.push(format!("clamping {event} hook timeout to {cap}s in {HOOKS_AT}"));
+                }
+            }
+        }
+        said
+    }
+
+    /// 심는 Codex 훅 파일이 Codex 가 아는 꼴 안에 서는가 — 어긋난 자리마다 한 줄. [`codex_issues`] 가 안 본뜬 경고가 설
+    /// 자리를 moai 쪽에서 닫는다: 처리기는 command 뿐이고 키는 [`CODEX_HANDLER_KEYS`] 뿐이며, matcher 는 이름을 `|` 로
+    /// 이은 것뿐이라 늘 맞는 정규식이다. 이벤트는 `known` — Codex 가 실제로 보내 온 이벤트(`tests/hooks/codex/` 의 stdin
+    /// 갈무리) — 안에 선다. 잘못 적은 이벤트 이름은 경고가 없어도 그 훅이 한 번도 안 돈다.
+    fn codex_shape(text: &str, known: &[String]) -> Vec<String> {
+        let file: serde_json::Value = serde_json::from_str(text).expect("훅 파일이 JSON 이 아니다");
+        let stray = |value: &serde_json::Value, keys: &[&str]| -> Vec<String> {
+            value
+                .as_object()
+                .into_iter()
+                .flat_map(|o| o.keys())
+                .filter(|k| !keys.contains(&k.as_str()))
+                .cloned()
+                .collect()
+        };
+        let mut odd: Vec<String> =
+            stray(&file, &["description", "hooks"]).into_iter().map(|k| format!("맨 윗단의 {k}")).collect();
+        for (event, groups) in file["hooks"].as_object().expect("훅 파일에 hooks 가 없다") {
+            if !known.contains(event) {
+                odd.push(format!("{event}: Codex 가 보내 온 적이 없는 이벤트"));
+            }
+            for group in groups.as_array().into_iter().flatten() {
+                odd.extend(stray(group, &["matcher", "hooks"]).into_iter().map(|k| format!("{event}: 무리의 {k}")));
+                if let Some(matcher) = group.get("matcher") {
+                    let names = |m: &str| {
+                        m.split('|').all(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                    };
+                    if !matcher.as_str().is_some_and(names) {
+                        odd.push(format!("{event}: matcher {matcher}"));
+                    }
+                }
+                for handler in group["hooks"].as_array().into_iter().flatten() {
+                    if handler["type"] != "command" {
+                        odd.push(format!("{event}: 처리기 {}", handler["type"]));
+                    }
+                    odd.extend(
+                        stray(handler, CODEX_HANDLER_KEYS).into_iter().map(|k| format!("{event}: 처리기의 {k}")),
+                    );
+                }
+            }
+        }
+        odd
+    }
+
+    /// `/hooks` 를 옮겨 붙인 글에서 Issues 밑의 경고를 하나씩 꺼낸다. 화면이 낱말 사이에서 접은 줄은 한 칸으로 잇고, 훅
+    /// 파일의 절대 경로는 [`HOOKS_AT`] 으로 갈음한다. Issues 가 없으면(경고 없는 판) 빈 목록이다.
+    fn codex_said(text: &str) -> Vec<String> {
+        // **줄바꿈이 접힌 갈무리는 Issues 를 못 찾는다** — 그대로 두면 경고가 든 글도 "아무 말 없음" 으로 읽혀 갈무리가
+        // 아무것도 못 붙든다. 그런 글은 줄바꿈을 되살려 넣으라고 멈춘다.
+        assert!(
+            text.lines().any(|l| l.trim() == "Issues") || !text.contains("Issues"),
+            "Issues 가 제 줄에 서지 않는다 — 줄바꿈이 접힌 갈무리는 되살려 넣는다"
+        );
+        let mut said: Vec<String> = Vec::new();
+        for line in text.lines().skip_while(|l| l.trim() != "Issues").skip(1) {
+            // 화면이 들여 쓴 줄도 경고다. 경고 뒤의 빈 줄은 Issues 토막의 끝이다 — 그 아래(표·도움말)를 마지막 경고에
+            // 이어 붙이지 않는다.
+            match line.trim_start().strip_prefix("⚠ ") {
+                Some(warning) => said.push(warning.trim().to_string()),
+                None if line.trim().is_empty() && !said.is_empty() => break,
+                None if line.trim().is_empty() => {}
+                None => {
+                    let last = said.last_mut().expect("Issues 밑 첫 줄이 ⚠ 로 서지 않는다");
+                    last.push(' ');
+                    last.push_str(line.trim());
+                }
+            }
+        }
+        let path = |word: &str| {
+            let bare = word.strip_suffix(':').unwrap_or(word);
+            if bare.ends_with("/.codex/hooks.json") {
+                format!("{HOOKS_AT}{}", &word[bare.len()..])
+            } else {
+                word.to_string()
+            }
+        };
+        said.iter().map(|w| w.split(' ').map(path).collect::<Vec<_>>().join(" ")).collect()
+    }
+
+    /// **심는 Codex 훅 파일을 Codex 의 검증에 대 본다**(moai-o9tg) — 다음 Codex 설정 규칙이 사람이 `/hooks` 를 열어서야
+    /// 드러나지 않게 한다(moai-t6hl 이 그랬다). codex 는 띄우지 않는다 — moai 는 에이전트를 안 띄운다. 대신 둘을 붙든다.
+    ///
+    /// - **본뜸이 Codex 가 한 말과 같다** — `tests/hooks/codex/config/` 의 갈무리(`<이름>.txt`, 그때 Codex 가 읽은 파일은
+    ///   `<이름>.json`)마다 [`codex_issues`] 가 낸 경고와 Codex 의 경고가 하나하나 맞는다. 본뜸에서 규칙 하나를 지우면
+    ///   여기가 붉어지고, 새 규칙에 걸린 갈무리를 넣으면 본뜸이 그 규칙을 배울 때까지 붉다
+    /// - **심는 파일에는 경고가 없다** — 본뜸도 꼴([`codex_shape`])도 아무 말이 없고, 추가 맥락을 받는 이벤트에는 넉넉한
+    ///   상한을([`crate::hook::Carry::of`]), 상한이 깎이는 이벤트에는 그 상한을 다 적는다([`CODEX`])
+    #[test]
+    fn the_planted_codex_hooks_pass_codex_s_own_checks() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/hooks/codex");
+        let read = |p: &Path| std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        let mut captures = 0;
+        for path in std::fs::read_dir(dir.join("config")).unwrap().filter_map(Result::ok).map(|e| e.path()) {
+            if path.extension().is_none_or(|e| e != "txt") {
+                continue;
+            }
+            let mut ours = codex_issues(&read(&path.with_extension("json")));
+            let said = codex_said(&read(&path));
+            // **끊긴 갈무리의 마지막 경고는 앞만 남았다** — 화면을 옮겨 붙이다 끊긴다. [`CODEX_CUT`] 에 이름이 든 갈무리의
+            // 그 하나만 앞머리로 맞춘다. 온전한 갈무리까지 앞머리로 맞추면 본뜸이 마지막 경고 뒤에 덧붙인 말을 못 잡는다.
+            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            let cut_capture = CODEX_CUT.contains(&name);
+            for (i, warning) in said.iter().enumerate() {
+                let cut = cut_capture && i + 1 == said.len();
+                let at = ours.iter().position(|o| o == warning || (cut && o.starts_with(warning.as_str())));
+                let at = at.unwrap_or_else(|| {
+                    panic!("{}: Codex 는 이렇게 말했는데 본뜸이 못 낸다 — {warning}\n본뜸: {ours:#?}", path.display())
+                });
+                ours.remove(at);
+            }
+            assert!(ours.is_empty(), "{}: Codex 가 안 한 말을 본뜸이 했다 — {ours:#?}", path.display());
+            captures += 1;
+        }
+        assert!(captures > 0, "갈무리가 하나도 없다 — {}", dir.join("config").display());
+
+        // 깨진 stdin 갈무리는 그 자리에서 멈춘다 — 말없이 빼면 그 이벤트가 "Codex 가 보내 온 적 없는 이벤트" 로 읽혀
+        // 심는 표를 탓한다(리뷰 moai-o9tg.gx6).
+        let sent = |p: &Path| -> Option<String> {
+            let input: serde_json::Value =
+                serde_json::from_str(&read(p)).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+            input["hook_event_name"].as_str().map(str::to_string)
+        };
+        let known: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .filter_map(|p| sent(&p))
+            .collect();
+        let planted = codex_hooks("/repo/target/release/moai");
+        assert_eq!(codex_issues(&planted), Vec::<String>::new(), "심는 파일에 Codex 가 경고한다");
+        assert_eq!(codex_shape(&planted, &known), Vec::<String>::new(), "심는 파일이 Codex 가 아는 꼴 밖에 선다");
+        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드와 편지를
+        // 파일로 빼고, 깎이는 상한을 덜 적으면 `SessionEnd` 가 1초에 끊긴다.
+        let file: serde_json::Value = serde_json::from_str(&planted).unwrap();
+        for (event, groups) in file["hooks"].as_object().unwrap() {
+            let entry = &groups[0]["hooks"][0];
+            let limit = CODEX_TAKES_CONTEXT.contains(&event.as_str()).then_some(crate::hook::CONTEXT_CAP as u64);
+            assert_eq!(entry["additionalContextLimit"].as_u64(), limit, "{event}");
+            assert_eq!(entry["timeout"].as_u64(), Some(codex_timeout_cap(event).unwrap_or(TIMEOUT)), "{event}");
+        }
     }
 
     /// 시험이 쓸 껍데기 — 있는 것만 쓴다. `sh` 는 기계마다 dash 일 수도 bash 일 수도 있어 셋 다 잰다.
@@ -2178,9 +2842,14 @@ mod tests {
     /// 다시 쓰는 길: `MOAI_BLESS=1 cargo test checked_in` — 같은
     /// `tree_named` 로 트리 전부를 적힌 자리 그대로 다시 쓴다. `skill install` 은
     /// `claude` 등록까지 건드리고 부른 자리의 경로를 적어, 워크트리에서는 못 쓴다.
+    ///
+    /// **세 에이전트의 트리를 다 본다**(moai-xs2h.zom) — 이 저장소는 Claude·Codex·Antigravity 로 자기 자신을
+    /// 관리한다. Codex 와 Antigravity 는 한 자리([`AGENTS_DIR`])를 함께 읽어 커밋된 트리는 둘이다. 그 자리는
+    /// 매니페스트가 없어 읽어 올 값이 없고 글만 견준다. 한쪽만 다시 쓰면 그 에이전트의 세션이 옛 글을 배운다.
     #[test]
     fn the_checked_in_plugin_matches_the_guide() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(DIR);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let dir = root.join(DIR);
         let read = |p: &str| std::fs::read_to_string(dir.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
         let bless = blessing(std::env::var("MOAI_BLESS").ok().as_deref());
         // **깨진 파일도 bless 로 되살린다.** 두 값은 JSON 을 읽어야 나오는데, 병합
@@ -2200,16 +2869,27 @@ mod tests {
             .or_else(|| loose(&market, TOP_NAME).filter(|_| bless))
             .expect("marketplace.json 에서 name 을 못 읽는다 — 깨졌으면 MOAI_BLESS=1 로 다시 쓴다");
 
-        let want = tree_named(
-            &name,
-            &exe,
-            &crate::guide::skill(),
-            &crate::guide::reference(),
-            &crate::guide::supervise(),
-            &crate::guide::wiki(),
-        );
+        let all = skills();
+        // **세 에이전트의 훅도 같은 실행 파일로 본다**(moai-u5wr.kov) — 이 저장소는 그 파일들도 커밋한다. 자리는 저장소
+        // 뿌리부터라 뿌리를 디렉터리로 준다.
+        let hooks = vec![
+            (PathBuf::from(CODEX_HOOKS), codex_hooks(&exe)),
+            (PathBuf::from(AGENTS_HOOKS), antigravity_hooks(&exe)),
+        ];
+        for (at, want) in [(DIR, tree_named(&name, &exe, &all)), (AGENTS_DIR, agents_tree(&all)), ("", hooks)] {
+            let stale = checked_in(&root.join(at), &want, bless);
+            assert!(
+                stale.is_empty(),
+                "{at} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
+                 MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
+            );
+        }
+    }
+
+    /// 커밋된 트리 하나를 `want` 와 견주어 다른 파일을 낸다 — `bless` 면 먼저 그대로 다시 쓴다. 없는 파일도 다른 것이다.
+    fn checked_in(dir: &Path, want: &[(PathBuf, String)], bless: bool) -> Vec<String> {
         if bless {
-            for (path, body) in &want {
+            for (path, body) in want {
                 // 새로 느는 파일은 제 디렉터리가 아직 없다 (감독 스킬이 처음 그랬다).
                 if let Some(parent) = dir.join(path).parent() {
                     std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("{}: {e}", parent.display()));
@@ -2217,16 +2897,10 @@ mod tests {
                 std::fs::write(dir.join(path), body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
             }
         }
-        let stale: Vec<String> = want
-            .iter()
-            .filter(|(path, body)| read(&path.to_string_lossy()) != *body)
+        want.iter()
+            .filter(|(path, body)| std::fs::read_to_string(dir.join(path)).ok().as_deref() != Some(body.as_str()))
             .map(|(path, _)| path.display().to_string())
-            .collect();
-        assert!(
-            stale.is_empty(),
-            "{DIR} 이 guide.rs 의 글에서 낡았다: {stale:?}\n  \
-             MOAI_BLESS=1 cargo test checked_in 으로 다시 쓴다"
-        );
+            .collect()
     }
 
     /// `MOAI_BLESS` 를 켰다고 읽는가. 있기만 하면 참으로 읽으면 끄려고 적은
@@ -2261,7 +2935,7 @@ mod tests {
     #[test]
     fn a_conflicted_tree_still_yields_its_exe_and_name() {
         let exe = "/repo/target/release/moai";
-        let files = tree("t", Path::new("/repo"), exe, "# 스킬", "참고", "감독", "위키");
+        let files = tree("t", Path::new("/repo"), exe, &fake("# 스킬", "감독", "위키"));
         let body = |end: &str| {
             let (_, b) = files.iter().find(|(p, _)| p.ends_with(end)).unwrap();
             format!("<<<<<<< HEAD\n{b}=======\n")

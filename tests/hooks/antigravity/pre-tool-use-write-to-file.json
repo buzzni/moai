@@ -1,0 +1,21 @@
+{
+  "artifactDirectoryPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "conversationId": "96037d0e-4dd0-4715-acaf-8e9ee734bd75",
+  "modelName": "gemini-3.8-flash-high",
+  "stepIdx": 39,
+  "toolCall": {
+    "args": {
+      "CodeContent": "hi\n",
+      "Description": "Create probe file with hi",
+      "Overwrite": true,
+      "TargetFile": "/tmp/moai-probe-agy.txt",
+      "toolAction": "Writing probe file",
+      "toolSummary": "Create /tmp/moai-probe-agy.txt"
+    },
+    "name": "write_to_file"
+  },
+  "transcriptPath": "/home/coder/.gemini/antigravity-cli/brain/96037d0e-4dd0-4715-acaf-8e9ee734bd75/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/home/coder/workspace/moa-issue"
+  ]
+}

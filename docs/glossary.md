@@ -22,10 +22,11 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 
 ## Brief
 
-The numbered instructions a [supervisor](#supervisor) sends a
-[worker](#worker): what to read first, which files the work running alongside
-holds, and every step from [pick up](#pick-up) to merge and report. The
-`moai-supervise` skill writes it.
+The numbered steps a [worker](#worker) follows for work a
+[supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
+They are carried by the `moai-work` skill; the supervisor's
+[letter](#letter) carries only the assignment — the idea, the model, the work
+running alongside, the base branch, the milestone and the root.
 
 ## Column
 
@@ -65,7 +66,7 @@ group moves its members along.
 
 ## Hook rules
 
-The five rules the hooks that `moai skill install` plants into Claude check
+The five rules the hooks that `moai skill install` plants for each agent check
 before a tool call: stay inside your [focus](#focus), pick up before you change
 the repository, a review is an issue, never kill the person's tmux server, and
 ask before you [take over](#take-over). A refusal hands over the command that
@@ -95,6 +96,20 @@ What a row is: `issue` (the default, never written to the file), `epic`,
 three separate questions — what it is, where it stands, and whether to look at
 it now. A tag such as `bug` or `review` is not a kind.
 
+## Letter
+
+What one agent leaves another — a file in the recipient's box under
+`.moai/mail/`, written by
+`moai send` to an agent's name or to `any-idle-worker` (the first agent that is
+neither the sender nor registered as a [supervisor](#supervisor) with
+`moai hello --role supervisor` keeps it). It is delivery,
+not record: nothing of it enters the [tracker](#tracker) or the
+[journal](#journal). The hooks load the letters for a session into it and mark
+them read; `moai inbox` shows them, and `moai agents` sweeps a read one
+`mail_read_days` (a week) after it was read. One left unread for an agent that
+went away goes back to its sender, marked returned. More in
+[working with agents](agents.md#leave-each-other-letters).
+
 ## Member
 
 A row that stands in a [group](#group), by its own field or by inheritance.
@@ -114,7 +129,7 @@ The note that names the AI that did the work, left before an issue is closed:
 `model: <vendor>/<model> tokens=<count> (<grade> — <why>)`. Leave `tokens=` out
 when the count is unknown, and write it on one id only. `--json` reads it back as
 `work`, and `moai stats` adds it up. More in
-[working with agents](agents.md#run-agents-without-a-person).
+[working with agents](agents.md#work-the-queue-from-a-session).
 
 ## `Next:` note
 
@@ -146,6 +161,20 @@ one `- [p1] issue title #tag` line per issue — fed to `moai add --from -`
 once, before writing code. More in
 [the workflow](workflow.md#plan-something-bigger).
 
+## Presence
+
+The row that says an agent is here — `.moai/agents/<name>.json`, with its
+vendor, model, role, whether it is busy or idle, and its process. `moai hello`
+writes it, and the hooks write it for a session as it starts and keep
+busy and idle up to date; `moai inbox --wait` marks it idle while it waits.
+`moai agents` lists them and sweeps a row whose process is gone. A Codex
+session's row carries no process, and a row written on another machine — another
+container sharing the repository — carries one this machine cannot look at, so
+those are told by `seen`, which every row's own hooks and waits mark: nothing
+marked for 20 minutes, it reads `gone` but stays, and it goes when the session
+ends or nothing has marked it for a day. The name in it is what a
+[letter](#letter) is sent to.
+
 ## Regression-of
 
 A convention of this repository, not of moai: a bug that a merged epic caused
@@ -175,11 +204,12 @@ whole under a lock. More in [Recovery](recovery.md#the-files).
 
 ## Supervisor
 
-A session running the `moai-supervise` skill. It hands the [ideas](#idea) that
-have piled up, one at a time, to the sessions idling on the repository, sends
-each a [brief](#brief) and takes their reports. It picks, sends and checks; it
+A session running the `moai-supervise` skill, registered with
+`moai hello --role supervisor`. It hands the [ideas](#idea) that have piled up,
+one at a time, to the [workers](#worker) waiting on the repository, sends each
+a [letter](#letter) with the assignment and takes their reports the same way. It picks, sends and checks; it
 does not fix and it does not merge. More in
-[working with agents](agents.md#plant-the-skills-and-hooks-into-claude).
+[working with agents](agents.md#plant-the-skills).
 
 ## Take over
 
@@ -204,9 +234,11 @@ only broken data does that. Compare [notice](#notice).
 
 ## Worker
 
-A session doing work a [supervisor](#supervisor) sent: it follows the
-[brief](#brief), picks the work up, does it in a [worktree](#worktree), has it
-reviewed, merges it and reports back.
+A window where a person called the `moai-work` skill: it says
+`moai hello --role worker`, waits for a [supervisor](#supervisor)'s
+[letter](#letter), follows the [brief](#brief) — picks the work up, does it in a
+[worktree](#worktree), has it reviewed, merges it — reports back and waits again.
+Claude Code, Codex or Antigravity alike.
 
 ## Worktree
 
@@ -215,4 +247,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw

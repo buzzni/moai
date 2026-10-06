@@ -13,6 +13,7 @@ use crate::worktree::Origin;
 use anstyle::Style;
 use std::collections::BTreeMap;
 
+pub mod mail;
 pub mod wiki;
 
 /// 제목이 이보다 길면 자른다. 표가 접히면 표가 아니다.

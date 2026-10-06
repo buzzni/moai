@@ -4,12 +4,14 @@
 //! 정하는 코드가 여기 있으면 나중에 TUI 가 그것을 다시 쓴다.
 
 pub mod add;
+pub mod agents;
 pub mod defer;
 pub mod edit;
 pub mod hook;
 pub mod idea;
 pub mod init;
 pub mod link;
+pub mod mail;
 pub mod merge_driver;
 pub mod mv;
 pub mod note;
@@ -462,14 +464,14 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Init { prefix, no_agents, no_driver, check: false, print: false } => {
             init::run(ctx, prefix.as_deref(), no_agents, no_driver)
         }
-        Cmd::Hook { event } => hook::run(ctx, event),
+        Cmd::Hook { event, dialect } => hook::run(ctx, event, dialect),
         // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
         // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
         Cmd::MergeDriver(a) => merge_driver::run(ctx, a),
-        Cmd::Skill(SkillCmd::Install { scope, dry_run }) => skill::install(ctx, scope.as_str(), dry_run),
+        Cmd::Skill(SkillCmd::Install { scope, agents, dry_run }) => skill::install(ctx, scope, &agents, dry_run),
         Cmd::Skill(SkillCmd::Status) => skill::status(ctx),
-        Cmd::Skill(SkillCmd::Uninstall { dry_run }) => skill::uninstall(ctx, dry_run),
+        Cmd::Skill(SkillCmd::Uninstall { agents, dry_run }) => skill::uninstall(ctx, &agents, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
@@ -499,6 +501,11 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
+        // 우편함과 출석(moai-h8tn) — 트래커를 안 쓴다. 자리만 [`open_repo`] 로 찾는다.
+        Cmd::Send(a) => mail::send(ctx, a),
+        Cmd::Inbox(a) => mail::inbox(ctx, a),
+        Cmd::Agents(a) => agents::agents(ctx, a),
+        Cmd::Hello(a) => agents::hello(ctx, a),
     }
 }
 

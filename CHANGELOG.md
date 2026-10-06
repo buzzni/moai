@@ -12,6 +12,349 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-06
+
+### Added
+
+- **Agents leave each other letters: `moai send`, `moai inbox`, `moai agents`
+  and `moai hello`.** A letter is one file in its recipient's box,
+  `.moai/mail/<name>/` or `.moai/mail/any-idle-worker/` —
+  `{"v":1,"to","from","subject","body","sent_at","reply_to"}`, keys this build
+  does not know passed through — and its id is the file name. An agent opens
+  its own box and the `any-idle-worker` one, nothing else, so a hook never reads
+  other agents' letters and a broken letter only stands in its own box. `moai send <to>
+  <subject> -b <text|->` leaves one for an agent name or for `any-idle-worker`,
+  which the first agent that is neither the sender nor a supervisor keeps.
+  `moai inbox` shows the letters for you, `--ack` moves them to `read/` inside
+  the box (`--all` shows them again until `moai agents` sweeps them,
+  `mail_read_days` after they were read — 7 unless `.moai/config.toml` says
+  otherwise, `0` keeps them; an unread letter is never swept) — one
+  `any-idle-worker` letter per call, as the hooks take them, so several spread
+  over the agents that wait — and `--wait <seconds>` waits for one to come.
+  `moai inbox <id>` shows one letter, read or not, a page of about 24 KB at a
+  time: the last line names `--from <n>` — characters of the body, counted
+  from 0 — for the next part, so each page stays under an agent's own output
+  cap (30,000 characters in Claude Code, 10,000 tokens in Codex), past which
+  the agent cuts or sets aside what a command printed.
+  `--json` gives the letter whole. Who you are is `--as`, else
+  `MOAI_AGENT`, else the registered agent the command runs under. Codex runs
+  every session's shell under one shared app-server, so there it is the row of
+  the session id Codex sets in the shell (`CODEX_THREAD_ID`) — the row its hooks
+  wrote — and never `MOAI_AGENT`, which that shell inherits from the shared
+  app-server; a Codex that does not set it passes `--as` with the name the
+  hooks give the session in its first context.
+  **Nothing goes into `issues.jsonl` or the journal** — a letter is delivery,
+  not record, and the mailbox follows the tracker into the main checkout, so
+  every session of a repository sees one mailbox. Like every other file the
+  repository holds, the mailbox and the presence rows follow a link only
+  inside the checkout: a committed `.moai/mail`, `.moai/agents`, box or
+  `read/` that points elsewhere is not opened — writing through it stops with
+  `broken`, and reading names it. There is no lock: sending
+  links a finished temporary file into place and never overwrites a letter,
+  and marking read is one rename, so two readers never both take a letter.
+- **A letter left for an agent that went away goes back to its sender.** When
+  `moai agents` sweeps a row whose process is gone, when a new session takes
+  over the name of a row that has gone, and when a Codex session ends, the
+  unread letters in that box move to their senders' boxes, marked as
+  returned in the file name (`<id>.returned.json`; `moai inbox --json`:
+  `"returned":true`). A returned letter still waiting when a new agent takes
+  that name was the previous holder's, and is put away as read. A letter sent to a name
+  nobody holds yet still waits for the first agent that takes it, and
+  `moai hello --name` carries an agent's letters to its new name.
+- **`moai hello` and the hooks keep a presence row** in
+  `.moai/agents/<name>.json` — name, vendor, model, role, busy or idle, since
+  when, the agent's process and when it started, the session and the tmux
+  pane. The `SessionStart` hook registers a Claude session under the name
+  Claude Code shows for it, `UserPromptSubmit` marks it busy and `Stop` idle.
+  A turn that ends without a `Stop` is marked idle too — Claude's
+  `StopFailure` (an API error) and `SessionEnd`, Codex's `Interrupt`, and an
+  Antigravity run that stopped on an error. A Codex `SessionEnd` takes the
+  session's row away instead. A turn broken off with Esc in Claude or
+  Antigravity sends no hook at all, so that row stays busy until the next
+  prompt. `StopFailure` needs Claude Code 2.1.78 or later — an older `claude`
+  refuses the plugin's hooks as a whole. The hooks keep the row and read the
+  letters in the main checkout's tracker even when its `config.toml` cannot be
+  read and the rules fall back to a worktree's own tracker, so a turn's end
+  still marks the row idle and a Codex `SessionEnd` still takes it away. A turn's
+  end that holds the turn with letters marks the row busy before it takes them,
+  so a hook that stalls on that write leaves the letters unread for the next
+  one rather than marked read and never shown. A window that sets `MOAI_AGENT` is
+  registered under that name, by the hooks and `moai hello` alike (not a row
+  `moai hello --pid` or `--as` names, and not a Codex window). In Codex,
+  `moai hello` takes up the row the session's hooks wrote, found by
+  `CODEX_THREAD_ID` (or named with `--as`), or writes the one they would; it
+  never ties a row to the app-server's process or the tmux pane it was started
+  from.
+  `moai agents` lists who is here and sweeps a row whose process is gone; on
+  Linux a reused pid is told apart by the time the process started, and a
+  session resumed in a new process moves its row there — found by its session
+  id, which `moai hello` in a Claude window without hooks reads too — while a
+  row whose process still runs here stays with it. On Linux a row also
+  names the machine its pid belongs to (`machine` — the boot id and pid
+  namespace — and `host` for the screen), so when several containers share one
+  repository a row written in another one is never swept for a pid this
+  machine does not have: the table and the name-taken refusal show that pid as
+  `<pid>@<host>`, `--wake` never knocks on it and prefers an idle worker on
+  this machine, and a wait here never marks it alive. Such a row, like a Codex
+  row that has no process to look at, is told by `seen`, which every row's own
+  hooks (tool calls included) and `moai inbox --wait` write. A row told that
+  way that nothing wrote for 20 minutes reads `gone` — `--status idle` and
+  `--wake` pass it over — but keeps its role and name for the session to come
+  back to; after a day it is swept. A row written on a clock running ahead
+  counts as far ahead as it is, from the nearer of the times it was last marked
+  and last changed status: more than 20 minutes ahead reads `gone` and more than
+  a day ahead is swept at once, and it reads alive again within 20 minutes of
+  those times as this clock passes them. A Codex row's letters stay for that session;
+  another machine's go back to their senders, since a later session can be
+  given the same name. A container started again reads its earlier rows as
+  another machine's, so those wait out the day too. Until that day is out,
+  another machine's row also keeps its name from any name the tools make up
+  here — a Claude session name, which each container counts on its own,
+  `<vendor>-` and the start of a session id, or `moai hello`'s
+  `<vendor>-<pid>` — even while it reads `gone`: a Claude session resting at
+  its prompt writes nothing, and a new session here that took over its name
+  would send that live session's letters back. Such a new session gets the
+  name with a piece of its session id appended instead — then the whole id,
+  then a number, so it always gets a row — and a `moai hello`
+  that has to make the name up refuses it (in Codex it appends the piece too).
+  A name a window asks for (`MOAI_AGENT`, `moai hello --name`) still comes
+  back to it once the old row reads `gone`. `moai agents --json` says on each
+  row whether it is this machine's (`here` — true also for a row that names no
+  machine); it is measured as the list is read and never written to the row.
+- **The hooks deliver letters.** Each prompt (`UserPromptSubmit`) loads the
+  letters for the session into the conversation, the end of a turn (`Stop`)
+  holds the turn with them, and a session opened after a compaction gets them
+  with what it was holding. A delivered letter is marked read; one load stays
+  inside the 10,000 characters Claude Code carries per hook, cuts a letter too
+  long for it (naming `moai inbox <id> --from <n>`, which goes on from where
+  the cut fell),
+  takes one `any-idle-worker` letter at a time and says how many are still
+  waiting, naming the next one. A
+  turn held by letters still gets the closing check. `PreToolUse`, `moai
+  status` and the other read commands never open the mailbox. A Claude Code
+  subagent shares its parent's process, so in a subagent's tool call the hook
+  refuses `moai hello` and `moai inbox --ack`/`--wait` without `--as` — they
+  would rename the parent and take its letters.
+- **A worker waits for its letters, and `moai send --wake` is a bonus.**
+  `moai inbox --ack --wait` is how a worker session — one a person opened —
+  gets its next task. While it waits, its presence row reads idle; once it
+  takes a letter it reads busy, and a wait that runs out leaves it idle — a
+  worker waits inside its turn, where no `Stop` hook marks it, and an agent
+  without hooks would otherwise stay at the busy `moai hello` wrote. A name
+  with no row gets none from the wait, and `--wake` passes over an agent whose
+  `moai inbox --wait` is running (Linux reads it from the processes): that wait
+  takes the letter itself. `--wake` knocks once on an idle recipient: `moai inbox` is typed into
+  its tmux pane when its presence row carries one, and for a Claude session the
+  line printed tells the sender to use SendMessage — naming the session the way
+  Claude Code knows it when that is not its row's name, read from Claude's own
+  session file as it wakes (`--json`: `send_message_to`). With neither it does
+  nothing and says nothing; an agent at work is left alone, and the line says
+  since when it has been at work (`--json`: `since`) rather than promising the
+  end of its turn. moai never runs an agent's own program to wake it.
+- **`moai agents --role <word> --status <word>`** keeps the rows whose role and
+  state are exactly those words — `moai agents --role worker --status idle` is
+  how a supervisor finds the workers waiting for work. The sweep of rows whose
+  process is gone still runs over every row.
+- **A fourth skill, `moai-work`, makes a window a worker.** A person calls it
+  once in a window they opened — Claude Code, Codex or Antigravity — and the
+  window says `moai hello --role worker`, waits with `moai inbox --ack --wait`,
+  does the work a supervisor's letter hands over in a worktree by the steps the
+  skill carries (they used to travel whole in every brief), reports with
+  `moai send` and waits again. Each wait that runs out costs one short turn of
+  tokens; nobody needs tmux. When the letter says the person is away, the
+  worker settles a design question by its recommendation and leaves a
+  `Decided alone:` note instead of waiting. A wait that comes back at once with
+  no letter because the mailbox links out of the checkout or into `.git` is not
+  run again — the worker tells the person watching, since its report would be
+  refused the same way — and a letter moai could not mark read is done once
+  before the worker tells the person, since the next wait hands it back at
+  once. The steps are laid out as markdown lists, so they read as steps on
+  GitHub too. `moai skill install` plants it in every tree.
+- **`moai init` adds `.moai/mail/` and `.moai/agents/` to `.gitignore`.** The
+  two directories also carry their own `.gitignore`, so a repository that has
+  not run `moai init` again does not commit them either.
+- **`moai skill install --agent` plants the skills for Codex and Antigravity
+  too.** `--agent` takes `claude`, `codex`, `antigravity` or `auto` and can be
+  repeated; without it the install is Claude's alone, exactly as before. Codex
+  and Antigravity read the same `.agents/skills/` in the repository, so naming
+  either writes it for both — there is nothing to register, and committing the
+  directory hands it to the team. `auto` takes whichever of `claude`, `codex`
+  and `agy` is on PATH (`claude` when none is) and says what it found.
+  `--scope` stays Claude's registration; given without Claude, one line says
+  so. `--json` adds `agents`, `found`, `agents_dir`, `agents_files` and
+  `hooks`, and Claude's keys stand only when Claude is among the agents.
+- **The hooks stand in Codex and Antigravity too.** `moai skill install --agent
+  codex` plants `.codex/hooks.json` and `--agent antigravity` plants
+  `.agents/hooks.json` — commit them with the skills. They call `moai hook
+  <event> --dialect codex|antigravity`: the five rules, the board and the
+  letters are the same, only the shapes in and out are each agent's. Codex
+  runs project hooks once a person trusts them in `/hooks`, and sends them only
+  for its shell, `apply_patch` and MCP calls; a patch — through the
+  `apply_patch` tool or typed as `apply_patch <<'EOF'` in its shell — is
+  judged file by file. Each Codex hook carries only what its event takes, so
+  `/hooks` has no configuration warning for the file: `additionalContextLimit`
+  stands on `SessionStart`, `UserPromptSubmit` and `PreToolUse`, the events
+  that can add context, and `Interrupt` and `SessionEnd` get 3 seconds, the
+  most Codex gives them. The letters a Codex turn's end holds the turn with
+  stay within 8,000 bytes, because Codex keeps that text to its default of
+  about 2,500 tokens and no setting raises it — a longer letter is cut there,
+  naming `moai inbox <id> --from <n>` for the rest, where Codex would have
+  moved its middle into a file. The question a turn's end asks while work is
+  still held fits the same room: open reviews tied to the held work, and held
+  rows that would close their epic if deferred, get the room first; the other
+  held rows fill what is left from the top, those that do not fit are left out
+  whole, and one more line counts them and names `moai prime`. Antigravity has no prompt
+  event, so its first model call of a turn loads the board and the letters; a
+  turn is held with `decision: continue`. Both carry the same 10,000
+  characters as Claude Code —
+  measured whole on agy 1.2.16 and 1.2.17, up to a letter written entirely in
+  Korean (28 KB). A hooks file moai did not write is left as it is, with
+  one line saying so — for Antigravity that includes moai's group with a
+  handler of your own in it, or turned off. `moai skill status` judges each
+  file by the moai it calls. Codex runs its hooks from a daemon its sessions
+  share, so a Codex session's presence row follows its session id, records no
+  pid or tmux pane, and goes when the session ends; `moai agents` cannot sweep
+  it by its process.
+- **The AGENTS block says where no hook stands** — an agent without them, Codex
+  before the trust, a tool call that sends none — the rules are words only,
+  rules 4 and 5 most of all. `moai init` writes the new block.
+- **One text for every agent.** The three trees get the same skills; the steps
+  only one agent has — entering a worktree, asking the person, calling the
+  review, changing the model, clearing the window (`/clear`, `/new`), calling a
+  skill, waking a session, stopping what a review left running — sit in a
+  "Words per agent" table in the `moai`, `moai-supervise` and `moai-work`
+  skills, one column per agent, and the steps name them in italics. A step an
+  agent does not have reads `—`: tell the person and go on.
+- **`moai skill status` shows `.agents/skills/`** — not planted, current, or
+  how many of its files differ from this version — the two hooks files
+  (current, stale, missing, or not moai's), and whether `codex` and `agy` are
+  on PATH. `--json` adds an `agents` object (`dir`, `state`, `stale`, `codex`,
+  `agy`) and a `hooks` list. The exit code is still 0 whatever it finds.
+- **`moai skill uninstall --agent codex|antigravity` prints the `rm -r` lines**
+  for moai's skills in `.agents/skills/`, and the `rm` line for that agent's
+  hooks file when moai wrote it, and deletes nothing; a plain `uninstall` says
+  in one line when the skills are still there. `--json` adds `agents`, `found`,
+  `agents_left` and `hooks_left`.
+
+### Changed
+
+- **Rule 3 in the AGENTS block names the review as a step.** It used to say
+  `/code-review` alone, a command only Claude Code has, though Codex and
+  Antigravity read the same block; it now names the review for all three —
+  `/code-review` in Claude Code, and in Codex and Antigravity the review that
+  session has, or the agent reading the diff itself — says the review runs
+  inside the agent's own session and never starts another agent program, and points at
+  the "Words per agent" table in the `moai` skill for the other steps.
+  `moai init` writes the new block.
+- **`moai-supervise` hands work to waiting workers of any vendor.** The
+  supervisor registers with `moai hello --role supervisor`, finds workers with
+  `moai agents --role worker --status idle`, sends one letter per idea with
+  `moai send` — the assignment only: the idea, the model and difficulty, the
+  work beside it, the base branch, the milestone, the root, whether to wait
+  again or end the turn after the report, and whether the person is away — and
+  waits for the report with `moai inbox --wait`. It no longer reads Claude
+  Code's undocumented session files or sends and waits with SendMessage. A
+  worker's report is now its last step, after its `Next:` note. On tmux a
+  supervisor of any vendor still clears a Claude Code worker's window once the
+  report checks out, finding the pane from the worker's presence row; the script
+  then sends the next letter and types `moai inbox` into the box it just emptied,
+  so the cleared window takes the next task. The clear stops when the worker
+  turns out to be waiting for a letter inside its turn, and when the worker's
+  row is not this machine's (`here` in `moai agents --json`) — containers can
+  share a tmux socket path, so the pane number would name someone else's pane
+  here; such a worker is told to wait again instead. Another vendor's input
+  box cannot be read yet, so that window is left to the person. A worker on
+  another machine or in Codex that reads `gone` has only been quiet for 20
+  minutes — a window resting while its person answers reads the same — so the
+  supervisor hands on its worktree only once the person says that window ended.
+  The supervisor's report wait stops the way the worker's does: on a mailbox
+  that links out of the checkout or into `.git` it tells the person instead of
+  waiting again, since its letters would be refused too, and a report moai
+  could not mark read is checked once.
+- **New worktrees stand in `<root>/.worktrees/`**, a place Claude Code, Codex
+  and Antigravity share, instead of Claude's `.claude/worktrees/`. The worker
+  and supervisor skills create them there, `moai init` adds `/.worktrees/` to
+  `.gitignore` and keeps the old line for worktrees still standing in the old
+  place, and hook rule 2 does not count an edit under `.worktrees/` as the
+  root's work.
+- **Hook rule 2 does not count an edit under `.agents/` or `.codex/`**, as it
+  already did not for `.claude/` — the skills Codex and Antigravity read
+  (`.agents/skills/`), Antigravity's hooks file and Codex's own hooks file and
+  config stand there. Editing `.claude/moai-plugin/skills/moai/SKILL.md` passed
+  while the same text under `.agents/skills/` was refused until an issue was
+  picked up, and `.codex/hooks.json` was refused where `.agents/hooks.json`
+  passed.
+- **The AGENTS block no longer offers `ready --json` as a loop that runs
+  without a person.** It now says a session a person opened reads that shape to
+  choose its next row, and that moai never launches or drives a session itself.
+  `moai init` writes the new block.
+- **`moai skill install` follows a link in Claude's plugin tree only inside the
+  checkout it plants in**, as it already did for `.agents/skills`. In a
+  subdirectory project that checkout is the subdirectory, so a `.claude` there
+  that links up to the repository's own `.claude` is now refused by name
+  instead of written through; plant from the top, or make it a directory.
+- **In Claude Code, the question a turn's end asks while work is still held
+  fits the 10,000 characters a letter gets there.** It used to list every row
+  the session held, however long that ran. Now open reviews tied to the held
+  work, and held rows that would close their epic if deferred, get the room
+  first; the other held rows fill what is left from the top, those that do not
+  fit are left out whole, and one more line counts them and names `moai prime`.
+  The order on the page is unchanged, and the first line and the "warnings
+  grew" line always stand.
+
+### Removed
+
+- **`examples/bash-agent` and `examples/python-agents`.** Both ran a command per
+  issue with no person watching — usually `claude -p` — and moai does not launch
+  agents or run them headless: a person opens each session. The AGENTS block,
+  the skills, the README and the agents page no longer point at them. In their
+  place the agents page says how to open a Claude Code, Codex or Antigravity
+  session in the repository and make it a worker — including Codex's trust in
+  `/hooks` and what to do on a machine where its sandbox cannot stand.
+
+### Fixed
+
+- **`moai skill install` no longer writes Claude's plugin through a committed
+  link that points out of the checkout.** A repository that committed
+  `.claude/moai-plugin/.claude-plugin/plugin.json -> ~/.bashrc` had that file
+  overwritten with the plugin's JSON, and the link stayed a link, so nothing
+  showed. The plugin tree is now written the way `.agents/skills` already was:
+  a place that is not a regular file is refused by name, and nothing is built
+  through a directory link that leaves the checkout. A refused tree stops before
+  `claude` is asked to register it. `skill status --json` says `written: false`
+  for such a manifest, and `skill uninstall` no longer tells you to delete
+  `.claude/moai-plugin/` when that tree lands outside the checkout — deleting
+  it would delete what lies behind the link.
+- **`moai skill install` checks every place it will write before it writes the
+  first file.** `.agents/skills`, the Codex and Antigravity hook files and
+  Claude's plugin tree are all checked first, so a place that would be refused —
+  a link out of the checkout or into `.git`, something that is not a regular
+  file, or a directory that cannot be made because a file or a dangling link
+  stands where it goes — now stops the run with nothing written, where it used
+  to write the skills and hooks and then fail. `--dry-run` checks the same way
+  and exits non-zero with the same message, instead of listing the plan and
+  promising a `claude plugin install` the real run would refuse. A hook file is
+  judged again just before it is overwritten, so hooks a person added to it in
+  the meantime are kept.
+- **`moai skill install` builds its temporary files in `.moai/`.** A run killed
+  between writing a file and moving it into place left `<file>.tmp.<pid>.<n>`
+  in `.claude/moai-plugin/`, `.agents/skills/` or `.codex/`, where nothing
+  ignores it and `git add -A` picks it up. They are now built in the checkout's
+  `.moai/`, which `moai init` already ignores, as `AGENTS.md`'s temporary file
+  already was; where `.moai/` cannot be used — another filesystem, read-only, or
+  a link out of the checkout — the file is built beside its target as before.
+  The same goes for the `.claude/settings.json` an install edits to remove an
+  earlier moai's marketplace declarations.
+- **`moai skill status`, `install` and `uninstall` no longer hang on a FIFO, or
+  use up memory on a link to `/dev/zero`, in the committed plugin manifest or
+  `.claude/settings.json`.** Both are read only as regular files inside the
+  checkout, like the snapshot and `AGENTS.md`. A committed `.claude/settings.json`
+  that cannot be read — a link out of the checkout or into `.git`, a FIFO, no
+  permission — is no longer read to plan removing an earlier moai's marketplace
+  declarations; one line names it and says why, and `--json` carries it as
+  `settings_unread` (`file`, `kind`, `said`, the shape of `journal_error`). A
+  missing file stays quiet.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added

@@ -17,6 +17,7 @@ mod hook;
 mod i18n;
 mod id;
 mod latest;
+mod mail;
 mod markdown;
 mod model;
 mod nav;

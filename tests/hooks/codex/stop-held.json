@@ -1,0 +1,11 @@
+{
+  "session_id": "01a107c5-8c5e-7f33-bfcb-8a3a19faeff6",
+  "turn_id": "01a107d0-d60e-71d1-a0b9-f9715382b968",
+  "transcript_path": "/home/coder/.codex/sessions/2026/10/04/rollout-2026-10-04T16-35-49-01a107c5-8c5e-7f33-bfcb-8a3a19faeff6.jsonl",
+  "cwd": "/home/coder/workspace/moa-issue",
+  "hook_event_name": "Stop",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "default",
+  "stop_hook_active": true,
+  "last_assistant_message": "PROBE-HELD"
+}
