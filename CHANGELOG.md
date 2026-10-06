@@ -133,6 +133,10 @@ does not tag — see `CONTRIBUTING.md`.
   calling it missing, and a member restored under an archived deferred epic is
   told — by `mv` and by `defer <member> --undo` — which deferral keeps it out
   of the plan. (moai-b6w3)
+- **The overview names the archived epic of a restored member.** `status --json`
+  and `ready --json` called outside any `.moai` now carry `derived_epic` on a
+  member restored under an epic that `moai archive` moved, as the in-repo
+  `ready --json` does. (moai-kfjy)
 
 ### Deprecated
 

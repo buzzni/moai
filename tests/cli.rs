@@ -27614,6 +27614,47 @@ fn archive_regressions_preserve_reference_and_milestone_context() {
     assert!(active.iter().all(|row| row["id"] != epic && row["id"] != b));
 }
 
+/// **The overview names the archived epic of a restored member**(moai-kfjy) — `status --json` and `ready --json`
+/// called outside any `.moai` built `derived_epic` from live rows alone, so a member restored under an archived epic
+/// stood in no epic there while the in-repo `ready --json` named it.
+#[test]
+fn archive_regressions_the_overview_names_the_archived_epic_of_a_restored_member() {
+    let s = init("archive-overview-epic");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "archived epic", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let out = Scratch::new("archive-overview-epic-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let outside = |args: &[&str]| -> serde_json::Value {
+        let seen = staged(args).current_dir(out.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", later).output();
+        serde_json::from_str(&String::from_utf8(seen.unwrap().stdout).unwrap()).unwrap()
+    };
+    // The in-repo `ready --json` names it — the overview has to say the same.
+    let inside: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    let row = inside["ready"].as_array().unwrap().iter().find(|r| r["id"] == member).unwrap();
+    assert_eq!(row["derived_epic"], epic, "{inside}");
+    let ready = outside(&["ready", "--json"]);
+    let row = ready["projects"][0]["ready"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["id"] == member))
+        .unwrap_or_else(|| panic!("{ready}"));
+    assert_eq!(row["derived_epic"], epic, "{ready}");
+    // Picked up, it stands under `picked` in the overview `status`.
+    ok_at(s.path(), later, &["mv", &member, "in_progress"]);
+    let board = outside(&["status", "--json"]);
+    let row = board["projects"][0]["picked"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["id"] == member))
+        .unwrap_or_else(|| panic!("{board}"));
+    assert_eq!(row["derived_epic"], epic, "{board}");
+}
+
 /// **The session board and Stop count what `moai status` counts**(review of moai-bth3) — the hook's archive board
 /// once left out the fatal `archive_duplicate_id`, so a session saw "nothing showing" while `status` exited 1.
 #[test]

@@ -2825,8 +2825,8 @@ pub struct Board<'a> {
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
     /// 집은 줄의 id 가 **넘겨받는** 에픽(`report::handed_of`) — [`Picks::epics`] 와 같은 자리,
-    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다.
-    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다. 제 문자열을 쥐는 것도 같은 까닭이다.
+    pub epics: std::collections::BTreeMap<String, String>,
     /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::kinds`] 와 같다.
     pub kinds: crate::report::Kinds<'a>,
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
@@ -2875,10 +2875,13 @@ pub struct Picks<'a> {
     /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
     /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
     ///
+    /// **제 문자열을 쥔다**(moai-kfjy) — 지도는 아카이브를 겹친 문맥으로 짓고(`cmd::handed`), 그 문맥은 고르는
+    /// 자리에서 지은 것이라 여기까지 못 산다. 산 줄로만 지으면 옮겨 둔 에픽 밑의 되살린 멤버가 에픽 없는 줄로 나온다.
+    ///
     /// **이 지도만으로는 답이 아니다**(리뷰 moai-jk2u.o78) — 제 `epic` 을 적은 줄은 아예 안 드니
     /// (`report::hands_down`) 혼자 짚으면 그 줄이 에픽 없는 줄로 나온다. 값을 내는 자는
     /// `report::stands_in` 이고 그쪽이 줄의 `epic` 을 먼저 읽는다 — `cmd::Row::of` 를 지난다.
-    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    pub epics: std::collections::BTreeMap<String, String>,
     /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::epics`] 와
     /// 같은 자리, 같은 까닭이다(moai-53s2).
     pub kinds: crate::report::Kinds<'a>,

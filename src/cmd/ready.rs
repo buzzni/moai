@@ -161,12 +161,15 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 // **지도는 기계 쪽만 짓는다**(리뷰) — `Picks::epics` 를 읽는 것은 `--json` 뿐인데,
                 // 여기서 늘 지으면 사람이 보는 한눈 보기가 등록한 프로젝트마다 저장소 전체의
                 // 소속을 한 벌씩 걷고 그대로 버린다.
-                let (epics, kinds) = match ctx.json {
-                    true => {
-                        let ids: Vec<&str> =
-                            picks.iter().chain(others.iter().map(|(i, _)| i)).map(|i| i.id.as_str()).collect();
-                        (report::handed_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
-                    }
+                //
+                // **소속은 고른 문맥으로 짓는다**(moai-kfjy) — 저장소 안의 `ready` 와 같다. 산 줄로만 지으면 옮겨 둔
+                // 에픽 밑에서 되살린 멤버가 여기서만 에픽 없는 줄로 나온다. 가려진 줄을 가르는 지도는 산 줄로 짓는다:
+                // 물은 id 는 다 산 줄이고 문맥은 산 줄과 같은 id 의 아카이브 사본을 안 들여(`report::with_archive`)
+                // 답이 같다.
+                let ids: Vec<&str> = picks.iter().chain(others.iter().map(|(i, _)| i)).map(|i| i.id.as_str()).collect();
+                let epics = super::handed(&context, &ids, ctx.json);
+                let kinds = match ctx.json {
+                    true => report::Kinds::of_ids(&load.issues, &ids),
                     false => Default::default(),
                 };
                 view::Picks {
@@ -213,14 +216,15 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                         .picks
                         .iter()
                         .map(|i| {
-                            super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).copied(), &k.kinds).on(&p.origin)
+                            super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).map(String::as_str), &k.kinds)
+                                .on(&p.origin)
                         })
                         .collect(),
                     others: k
                         .others
                         .iter()
                         .map(|(i, owner)| super::Other {
-                            row: super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).copied(), &k.kinds)
+                            row: super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).map(String::as_str), &k.kinds)
                                 .on(&p.origin),
                             owner: *owner,
                         })

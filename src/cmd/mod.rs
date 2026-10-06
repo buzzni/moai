@@ -1028,16 +1028,27 @@ impl Read {
 /// 두고 줄 서는 저장소다 — 락 안에서 `ctx.lang()` 과 `model::actor` 를 뺀 것과 같은 까닭이다.
 /// `ready`·`status` 의 한눈 보기도 같은 문을 쓴다.
 pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str], json: bool) -> Read {
-    let owned = |m: BTreeMap<&str, &str>| m.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     Read {
         states: crate::report::group_states_of(issues, cfg, ids)
             .into_iter()
             .map(|((kind, id), col)| (id.to_string(), (kind, col.to_string())))
             .collect(),
-        epics: match json {
-            true => owned(crate::report::handed_of(issues, ids)),
-            false => BTreeMap::new(),
-        },
+        epics: handed(issues, ids, json),
+    }
+}
+
+/// 줄 id → 그 id 의 부모가 **넘기는** 에픽(`report::handed_of`)을 **제 문자열로** 챙긴다 — [`Read::epic`] 과 등록한
+/// 프로젝트의 한눈 보기(`status`·`ready` 의 `.moai` 밖)가 같은 문으로 걷는다. `--json` 이 아니면 안 걷는다([`read_of`]).
+///
+/// **제 문자열을 쥐는 까닭은 `issues` 가 문맥이라서다**(moai-kfjy) — 아카이브를 겹친 줄(`report::with_archive`)은 그
+/// 자리에서 지은 것이라 낼 줄보다 먼저 죽는다. 산 줄로만 짓던 한눈 보기는 옮겨 둔 에픽 밑에서 되살린 멤버를 에픽
+/// 없는 줄로 냈는데, 저장소 안의 `ready --json` 은 그 에픽을 댔다.
+pub fn handed(issues: &[crate::model::Issue], ids: &[&str], json: bool) -> BTreeMap<String, String> {
+    match json {
+        true => {
+            crate::report::handed_of(issues, ids).into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        }
+        false => BTreeMap::new(),
     }
 }
 
