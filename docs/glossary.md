@@ -79,7 +79,9 @@ A thought parked for later — a row of kind `backlog`, off the board and out of
 in [the explorer](explorer.md#park-a-thought)), and
 `moai backlog promote <id> --from -` unfolds it into an epic
 and issues and closes it. The shared file still stores `kind: "idea"` so older
-binaries can read it; JSON views report `kind: "backlog"`. The hidden `moai idea`
+binaries can read it; issue JSON views report `kind: "backlog"`, except
+`rm --json`, which returns the removed rows with the stored spelling.
+The hidden `moai idea`
 command alias remains for one release and is removed in v0.9.0.
 A backlog item is "not work yet"; [deferred](#deferred) is
 "work, but not now".

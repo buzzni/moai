@@ -11845,14 +11845,22 @@ mod tests {
 
         // 선 에픽에 펼치는 promote 도 같은 자로 본다 — 안 보면 `backlog add` 뒤 `promote -e` 가
         // `add -e` 가 막히는 자리를 지나간다 (moai-f3ml.lm7). 새 에픽을 세우는 promote 는 그대로다.
-        let into = |e: &str| format!("moai backlog promote t-i -e {e} --from -");
-        assert!(
-            matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)),
-            "남의 에픽에 promote 로 멤버를 세웠다"
-        );
-        assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
-        assert_eq!(guard_create(&all, &cfg(), &here(), "moai backlog promote t-i --epic=t-e --from -"), Decision::Pass);
-        assert_eq!(guard_create(&all, &cfg(), &here(), "moai backlog promote t-i --from -"), Decision::Pass);
+        for command in ["backlog", "idea"] {
+            let into = |e: &str| format!("moai {command} promote t-i -e {e} --from -");
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)),
+                "{command}: 남의 에픽에 promote 로 멤버를 세웠다"
+            );
+            assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), &format!("moai {command} promote t-i --epic=t-e --from -")),
+                Decision::Pass
+            );
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), &format!("moai {command} promote t-i --from -")),
+                Decision::Pass
+            );
+        }
     }
 
     /// **만드는 토막은 저마다 소속을 댄다**(moai-ean3, 2026-09-19 사용자 결정) — 한 줄에 `moai add`

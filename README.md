@@ -126,8 +126,9 @@ moai backlog promote <id> --from -      # opens it into an epic and issues
 ```
 
 `moai idea` remains a hidden alias for one release (removed in v0.9.0).
-JSON views use `kind: "backlog"`; the shared file keeps `kind: "idea"` for
-older binaries. The warning key is `backlog_pile`, configured by
+Issue JSON views use `kind: "backlog"`; the shared file keeps `kind: "idea"`
+for older binaries. `rm --json` returns the removed rows with that stored
+spelling. The warning key is `backlog_pile`, configured by
 `status_backlog_pile`; the old `status_idea_pile` setting remains readable.
 
 Work you have decided not to do *right now* is deferred, not closed. `moai defer

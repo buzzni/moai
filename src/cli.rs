@@ -1561,7 +1561,7 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   group: closed that way it counts from its last finished member, and a
   deferred row moved into a closed group dates it from that row's deferral.
   Asking by time opens what the list hides by default - done, deferred and
-  backlogs - because a row closed meanwhile changed too. Narrow it again with
+  backlog items - because a row closed meanwhile changed too. Narrow with
   -s (name the columns you want) or --type; --deferred keeps only what is
   deferred, and no flag leaves deferred rows out. A lone instant given to
   --created or --done is that one second, not a day.
@@ -1584,8 +1584,8 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai backlog show --archived` for backlogs) and compare row
-  by row.
+  (--archived, and `moai backlog show --archived` for backlog items)
+  and compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
@@ -1620,8 +1620,8 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
 // **`--json` 의 모양을 여기 적는다** — 에이전트가 읽는 계약이라(moai-1hka.k16) 도움말이 그 문서다. 모양을
 // 바꾸면 이 글과 `report::stats::Stats` 를 함께 고치고, `docs/cli.md` 를 다시 짓는다.
 const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters as `moai show` -
-  with done, deferred, backlogs and the archive in: it counts what happened,
-  so nothing finished is hidden. Every number counts one kind, issue
+  with done, deferred, backlog items and the archive in: it counts what
+  happened, so nothing finished is hidden. Every number counts one kind, issue
   unless --type names another; a group is measured through its members
   (-e, --milestone). The kind axis alone counts every row picked, to show
   what was left out. --all and --archived are taken and change nothing.
