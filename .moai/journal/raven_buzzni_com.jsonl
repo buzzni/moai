@@ -4733,3 +4733,8 @@
 {"ts":"2026-10-06T01:42:09Z","id":"moai-keka.fpm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-06T01:42:10Z","id":"moai-keka.id8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-06T01:42:10Z","id":"moai-keka.q2w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T01:43:30Z","id":"moai-084j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"닫기 물음을 붙드는 칸의 자리로 잰다"}
+{"ts":"2026-10-06T01:43:30Z","id":"moai-084j.033","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"닫기 물음이 Stop 칸의 자리를 넘으면 통째 줄로 자른다"}
+{"ts":"2026-10-06T01:43:30Z","id":"moai-084j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-2rby 에서 펼쳤다 — Codex 의 닫기 물음을 붙드는 칸의 자리로 잰다"}
+{"ts":"2026-10-06T01:43:30Z","id":"moai-2rby","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-084j 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-06T01:43:35Z","id":"moai-084j.033","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
