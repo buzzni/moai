@@ -85,7 +85,8 @@ does not tag — see `CONTRIBUTING.md`.
   from.
   `moai agents` lists who is here and sweeps a row whose process is gone; on
   Linux a reused pid is told apart by the time the process started, and a
-  session resumed in a new process moves its row there. On Linux a row also
+  session resumed in a new process moves its row there — found by its session
+  id, which `moai hello` in a Claude window without hooks reads too. On Linux a row also
   names the machine its pid belongs to (`machine` — the boot id and pid
   namespace — and `host` for the screen), so when several containers share one
   repository a row written in another one is never swept for a pid this
@@ -96,7 +97,9 @@ does not tag — see `CONTRIBUTING.md`.
   hooks (tool calls included) and `moai inbox --wait` write. A row told that
   way that nothing wrote for 20 minutes reads `gone` — `--status idle` and
   `--wake` pass it over — but keeps its role and name for the session to come
-  back to; after a day it is swept. A Codex row's letters stay for that session;
+  back to; after a day it is swept. A row written on a clock running ahead
+  counts as far ahead as it is: more than 20 minutes ahead reads `gone` at once,
+  more than a day ahead is swept at once. A Codex row's letters stay for that session;
   another machine's go back to their senders, since a later session can be
   given the same name. A container started again reads its earlier rows as
   another machine's, so those wait out the day too. Until that day is out,
@@ -106,7 +109,8 @@ does not tag — see `CONTRIBUTING.md`.
   `<vendor>-<pid>` — even while it reads `gone`: a Claude session resting at
   its prompt writes nothing, and a new session here that took over its name
   would send that live session's letters back. Such a new session gets the
-  name with a piece of its session id appended instead, and a `moai hello`
+  name with a piece of its session id appended instead — then the whole id,
+  then a number, so it always gets a row — and a `moai hello`
   that has to make the name up refuses it (in Codex it appends the piece too).
   A name a window asks for (`MOAI_AGENT`, `moai hello --name`) still comes
   back to it once the old row reads `gone`. `moai agents --json` says on each
@@ -136,7 +140,9 @@ does not tag — see `CONTRIBUTING.md`.
   `moai inbox --wait` is running (Linux reads it from the processes): that wait
   takes the letter itself. `--wake` knocks once on an idle recipient: `moai inbox` is typed into
   its tmux pane when its presence row carries one, and for a Claude session the
-  line printed tells the sender to use SendMessage. With neither it does
+  line printed tells the sender to use SendMessage — naming the session the way
+  Claude Code knows it when that is not its row's name, read from Claude's own
+  session file as it wakes (`--json`: `send_message_to`). With neither it does
   nothing and says nothing; an agent at work is left alone, and the line says
   since when it has been at work (`--json`: `since`) rather than promising the
   end of its turn. moai never runs an agent's own program to wake it.
