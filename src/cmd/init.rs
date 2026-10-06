@@ -1662,6 +1662,8 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             fixed.guide = guide_of(&root, &agents_read, tracking, again);
         }
     }
+    // 플래그가 아니라 이미 설치된 훅에서 읽은 안내인지, 화면에 `fixed` 를 넘기기 전에 남긴다.
+    let existing_hooks = fixed.guide == Some(Guide::Hook) && flag_choices.guide.is_none();
     let place = now.and_then(|_| git_place(&root, Some(crate::cmd::merge_driver::PROBE_BUDGET)));
     let checker = InitCheck {
         lang: ctx.lang(),
@@ -1709,7 +1711,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         plan
     };
     // 이미 설치된 훅으로 읽은 안내는 설치를 다시 부르지 않는다. 명시적으로 시키면 부른다.
-    if plan.guide == Guide::Hook && flags.guide != Some(Guide::Hook) && flags.skill != Some(true) {
+    if existing_hooks && plan.guide == Guide::Hook && flags.skill != Some(true) {
         plan.skill = false;
     }
     // 훅으로 알리는 것도 AGENTS.md 를 안 건드린다 — 알리는 일은 훅(`hook::guided_board`)이 한다.

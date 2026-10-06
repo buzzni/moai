@@ -90,6 +90,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **The first init screen installs the hooks and skills when Enter keeps the
+  default hooks guide.** Only a guide inferred from already installed hooks
+  skips installation; an explicit `--guide hook` or `--skill` still installs.
+  (moai-95do)
 - **Tracker writes compare changed rows through an ID map.** Adding or updating
   an issue no longer scans the original tracker once for every row. The file
   format and handling of unchanged rows remain the same. (moai-fx9t.opm)
