@@ -86,7 +86,8 @@ does not tag — see `CONTRIBUTING.md`.
   `moai agents` lists who is here and sweeps a row whose process is gone; on
   Linux a reused pid is told apart by the time the process started, and a
   session resumed in a new process moves its row there — found by its session
-  id, which `moai hello` in a Claude window without hooks reads too. On Linux a row also
+  id, which `moai hello` in a Claude window without hooks reads too — while a
+  row whose process still runs here stays with it. On Linux a row also
   names the machine its pid belongs to (`machine` — the boot id and pid
   namespace — and `host` for the screen), so when several containers share one
   repository a row written in another one is never swept for a pid this
@@ -98,8 +99,10 @@ does not tag — see `CONTRIBUTING.md`.
   way that nothing wrote for 20 minutes reads `gone` — `--status idle` and
   `--wake` pass it over — but keeps its role and name for the session to come
   back to; after a day it is swept. A row written on a clock running ahead
-  counts as far ahead as it is: more than 20 minutes ahead reads `gone` at once,
-  more than a day ahead is swept at once. A Codex row's letters stay for that session;
+  counts as far ahead as it is, from the nearer of the times it was last marked
+  and last changed status: more than 20 minutes ahead reads `gone` and more than
+  a day ahead is swept at once, and it reads alive again within 20 minutes of
+  those times as this clock passes them. A Codex row's letters stay for that session;
   another machine's go back to their senders, since a later session can be
   given the same name. A container started again reads its earlier rows as
   another machine's, so those wait out the day too. Until that day is out,

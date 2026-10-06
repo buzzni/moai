@@ -560,10 +560,14 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   gets the name back once the old row reads `gone`. A session resumed here
   (`claude --resume`) takes its row back by its session id — its hooks do, and
   so does `moai hello` in a window opened without them — and the row moves to
-  this machine with its name and role. A machine whose clock runs ahead marks
-  its rows in the future, and that counts as far as it is ahead: up to 20
-  minutes ahead reads alive, further ahead reads `gone` at once, and more than
-  a day ahead is swept at once
+  this machine with its name and role. A row whose process still runs here
+  stays with that process — the same session open in a second window does not
+  take it over. A machine whose clock runs ahead marks its rows in the future, and that
+  counts as far as it is ahead, from the nearer of the times a row was last
+  marked and last changed status: up to 20 minutes ahead reads alive, further
+  ahead reads `gone`, and more than a day ahead is swept at once — and as this
+  clock passes those times the row reads alive again within 20 minutes of them,
+  a dead one included
 - **A new session came up as `<name>-<eight characters>`.** Another row holds
   that name — a live one here, or one from another machine. A name the tools
   made up — a Claude session name, which each container counts on its own,
@@ -578,7 +582,9 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   gets a row. Claude Code still calls the session by its own name, so
   `SendMessage` reaches it by that name, not by `<name>-<eight characters>` —
   `moai send --wake` names it, read from Claude's own session file as it wakes,
-  so the line it prints is the one to follow. A name you ask for —
+  so the line it prints is the one to follow. It reads that file where the
+  sender's Claude keeps its own, so a session run under another
+  `CLAUDE_CONFIG_DIR` is named by its row instead. A name you ask for —
   `MOAI_AGENT`, `moai hello --name` — is yours again once the old row reads
   `gone`, which is how a window started again in a new container gets its name
   back. Asking for another session's made-up name the same way takes its row

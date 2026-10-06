@@ -113,16 +113,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         mail::ANY_IDLE_WORKER => mail::idle_worker(&agents, &from).map(mail::wake),
         _ => named.filter(|p| !p.gone()).map(mail::wake),
     });
-    let woke = woke.map(|w| {
-        w.unwrap_or_else(|| Woke {
-            to: to.clone(),
-            via: "none",
-            done: false,
-            why: Some("nobody"),
-            since: None,
-            send_message_to: None,
-        })
-    });
+    let woke = woke.map(|w| w.unwrap_or_else(|| Woke::new(to.clone(), "none", false, Some("nobody"))));
 
     if ctx.json {
         return super::json_line(&Sent { id: &id, letter: &letter, wake: woke.as_ref() });

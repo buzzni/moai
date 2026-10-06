@@ -564,7 +564,9 @@ IDEA
   idle and --wake pass it over - but it stays, role and name included, for
   that session to come back to. After a day it is swept: a Codex row's
   letters wait for that session, and another machine's go back to their
-  senders - a later session can be given the same name. Any other row that
+  senders - a later session can be given the same name. A row written on a
+  clock running ahead counts as far ahead as it is: more than 20 minutes
+  ahead reads gone, more than a day ahead is swept. Any other row that
   cannot be told alive or gone stays.
 
   The same sweep takes the letters read more than mail_read_days ago (7
@@ -585,7 +587,8 @@ IDEA
   rows named a machine, or one written where moai cannot name the machine,
   as off Linux). It is measured as the list is made and never written to
   the row. status is busy, idle, or gone for a row told by seen that
-  nothing wrote for 20 minutes.")]
+  nothing wrote for 20 minutes or that was written more than 20 minutes
+  ahead.")]
     Agents(AgentsArgs),
 
     /// Register this agent - name, vendor, model and role
@@ -601,6 +604,12 @@ IDEA
   is set in, so it is not read for a row named by --pid or --as. Saying
   hello again updates the row; a new --name replaces the old one and
   carries its letters along.
+
+  In Claude, the row this agent already has is also found by the session id
+  Claude sets in the shell (CLAUDE_CODE_SESSION_ID) when no row runs as this
+  process: a session `claude --resume` continued in a new process, here or
+  in a container started again, takes that row back with its name and role -
+  unless the row's own process still runs on this machine.
 
   Codex runs its shell under an app-server all its sessions share, so moai
   tells its sessions apart by the id Codex sets in the shell

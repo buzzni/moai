@@ -23994,14 +23994,70 @@ fn waking_is_a_bonus_that_never_runs_an_agent() {
         "Claude 가 아는 이름을 안 댔다 — {json}"
     );
     let line = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake"]);
-    assert!(line.contains("moa-issue-3 에게"), "사람 화면이 Claude 가 아는 이름을 안 댔다 — {line}");
+    // 이름은 따옴표로 가른다(리뷰 moai-keka.qxk) — Claude 의 이름은 빈칸·쉼표를 들 수 있어, 맨 글로 이으면 어디까지가
+    // 이름인지 못 읽는다.
+    assert!(line.contains("`moa-issue-3` 에게"), "사람 화면이 Claude 가 아는 이름을 안 댔다 — {line}");
     assert!(
         !std::fs::read_to_string(s.path().join(".moai/agents/cl.json")).unwrap().contains("moa-issue-3"),
         "Claude 의 이름을 장에 적었다"
     );
+    // **Claude 가 쓰는 이름은 200자까지다**(리뷰 moai-keka.qxk) — 64자를 넘는 이름은 장의 이름에서 접혀 늘 갈리는 바로 그
+    // 이름이다. 출석의 이름 자(64자)로 재던 판은 그 이름을 안 대고 Claude 가 모르는 장의 이름을 댔다. 제어문자가 든 글은
+    // Claude 가 안 쓰는 꼴이라 안 댄다.
+    let long = "moa-issue keka review of the presence names and of clocks that run ahead";
+    assert!(long.chars().count() > 64, "시험의 이름이 길지 않다");
+    std::fs::write(&book, format!("{{\"name\":\"{long}\"}}")).unwrap();
+    let json = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
+    assert!(json.contains(&format!("\"send_message_to\":\"{long}\"")), "64자 넘는 Claude 의 이름을 안 댔다 — {json}");
+    std::fs::write(&book, "{\"name\":\"moa\\u0007issue\"}").unwrap();
+    let bell = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
+    assert!(!bell.contains("send_message_to"), "제어문자가 든 이름을 댔다 — {bell}");
+    // **그 프로세스의 장부만 믿는다**(리뷰 moai-keka.qxk) — Claude 는 죽은 프로세스의 장부를 안 걷어, 같은 pid 를 다시 받은
+    // 프로세스 앞에 남의 세션 이름이 선다. 장부의 `procStart` 가 장의 `pid_start`(그 프로세스가 선 때)와 다르면 남의 것이다.
+    #[cfg(target_os = "linux")]
+    {
+        let stat = std::fs::read_to_string(format!("/proc/{}/stat", a.pid())).unwrap();
+        let start = stat.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(19)).unwrap().to_string();
+        std::fs::write(&book, format!("{{\"name\":\"moa-issue-9\",\"procStart\":\"{start}\"}}")).unwrap();
+        let own = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
+        assert!(own.contains("\"send_message_to\":\"moa-issue-9\""), "그 프로세스의 장부를 안 믿었다 — {own}");
+        std::fs::write(&book, "{\"name\":\"moa-issue-9\",\"procStart\":\"1\"}").unwrap();
+        let stale = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
+        assert!(!stale.contains("send_message_to"), "죽은 프로세스의 장부의 이름을 댔다 — {stale}");
+    }
     std::fs::write(&book, "{\"name\":\"cl\"}").unwrap();
     let same = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
     assert!(!same.contains("send_message_to"), "장과 같은 이름을 따로 댔다 — {same}");
+    // **장부 자리가 FIFO 면 안 연다**(리뷰 moai-keka.qxk) — `send --wake` 가 이 장부를 새로 연다. 열면 쓰는 쪽을 끝없이
+    // 기다려 편지를 다 보낸 `send` 가 안 끝난다.
+    std::fs::remove_file(&book).unwrap();
+    assert!(Command::new("mkfifo").arg(&book).status().unwrap().success(), "FIFO 를 못 지었다");
+    let mut child = staged(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"])
+        .current_dir(s.path())
+        .env("PATH", &path)
+        .env("CLAUDE_CONFIG_DIR", &cfg)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let ended = (0..300).any(|_| {
+        let done = child.try_wait().unwrap().is_some();
+        if !done {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        done
+    });
+    if !ended {
+        let _ = child.kill();
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(ended, "FIFO 인 장부 앞에서 send --wake 가 멈췄다");
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("send_message_to"),
+        "{}",
+        text(&out)
+    );
+    std::fs::remove_file(&book).unwrap();
     // 일하는 중이면 언제부터인지를 함께 댄다(moai-u5wr.f29) — 끊긴 턴은 끝이 안 와 "턴이 끝나면" 이 거짓일 수 있다.
     assert_eq!(
         wake("busy1"),
@@ -25232,6 +25288,79 @@ fn hello_without_hooks_finds_its_card_from_another_machine_by_session() {
         .unwrap();
     assert!(other.status.success(), "{}", text(&other));
     assert_eq!(names_in(&agents), ["sup.json", "w9.json"], "다른 세션의 창이 제 장을 가져갔다");
+}
+
+/// **이 기계에서 아직 사는 장은 세션 id 가 같아도 이 창이 안 가져간다**(리뷰 moai-keka.qxk) — 훅의 `attendee` 가 그 장을
+/// 그대로 두는 것과 같은 자다(`Presence::resumable`). 살아 있는 세션을 다른 창에서 `claude --resume` 으로 이으면 두 프로세스가
+/// 한 세션 id 를 든다. 가리지 않던 판은 산 저쪽의 장을 이 프로세스로 옮겨, 저쪽의 `moai inbox`·`send` 가 누구인지 몰라
+/// 섰고 이쪽이 끝나면 `moai agents` 가 그 장을 죽은 것으로 걷어 편지를 되돌렸다. 이 창은 제 장을 따로 세운다.
+#[test]
+#[cfg(target_os = "linux")]
+fn hello_leaves_a_live_card_of_the_same_session_to_its_process() {
+    let s = init("hello-session-live");
+    let live = Sleeper::new();
+    hello_as(s.path(), "sup", &live.pid(), &["--vendor", "claude", "--role", "supervisor"]);
+    let at = s.path().join(".moai/agents/sup.json");
+    let card = std::fs::read_to_string(&at).unwrap();
+    std::fs::write(&at, card.replacen("\"cwd\":", "\"session\":\"sessLIV1-ffff\",\"cwd\":", 1)).unwrap();
+    let out = staged_under("claude", &["hello", "--json"])
+        .env("CLAUDE_CODE_SESSION_ID", "sessLIV1-ffff")
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let sup = std::fs::read_to_string(&at).unwrap();
+    assert!(
+        sup.contains(&format!("\"pid\":{},", live.pid())) && sup.contains("\"role\":\"supervisor\""),
+        "산 남의 장을 이 창으로 옮겼다 — {sup}"
+    );
+    assert_eq!(names_in(&s.path().join(".moai/agents")).len(), 2, "이 창의 장을 따로 안 세웠다");
+}
+
+/// **훅이 없는 창의 `hello` 는 지금 세션 id 를 장에 적는다**(리뷰 moai-keka.qxk) — `/clear` 는 같은 프로세스에서 세션 id 만
+/// 바꾸고, Claude 는 셸의 `CLAUDE_CODE_SESSION_ID` 도 그 값으로 세운다(2026-10-06 쟀다). 장에 적힌 옛 세션을 지키던 판은
+/// 비우고 다시 인사한 일꾼의 장이 옛 세션 id 에 머물러, 컨테이너를 다시 띄우고 `claude --resume` 으로 이은 지금 세션이 그
+/// 장을 못 찾았다 — 세션 id 로 찾는 까닭(moai-keka.fpm)이 한 번 비우면 사라졌다.
+#[test]
+#[cfg(target_os = "linux")]
+fn hello_without_hooks_follows_the_session_a_clear_started() {
+    let s = init("hello-session-clear");
+    let agents = s.path().join(".moai/agents");
+    // 한 프로세스(가짜 claude 셸 하나) 밑에서 두 번 인사한다 — 처음은 S1, 비운 뒤는 S2 다.
+    let out = isolated(fake_agent("claude"))
+        .args([
+            "-c",
+            "\"$0\" hello --role worker --json > /dev/null && CLAUDE_CODE_SESSION_ID=sessCLR2-bbbb \"$0\" hello --json; exit $?",
+            BIN,
+        ])
+        .env("MOAI_ACTOR", ACTOR)
+        .env("MOAI_NOW", NOW)
+        .env("NO_COLOR", "1")
+        .env("CLAUDE_CODE_SESSION_ID", "sessCLR1-aaaa")
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out));
+    let names = names_in(&agents);
+    assert_eq!(names.len(), 1, "같은 프로세스가 장을 둘 세웠다 — {names:?}");
+    let at = agents.join(&names[0]);
+    let card = std::fs::read_to_string(&at).unwrap();
+    assert!(card.contains("\"session\":\"sessCLR2-bbbb\""), "비운 뒤의 세션 id 를 안 적었다 — {card}");
+    // 컨테이너를 다시 띄운 것처럼 그 장을 다른 기계의 것으로 돌리고, 새 프로세스가 그 세션(S2)을 잇는다.
+    let key = "\"machine\":\"";
+    let from = card.find(key).expect("장에 기계가 없다") + key.len();
+    let to = from + card[from..].find('"').unwrap();
+    let there = "00000000-0000-0000-0000-000000000000/4026532999";
+    std::fs::write(&at, format!("{}{there}{}", &card[..from], &card[to..])).unwrap();
+    let back = staged_under("claude", &["hello", "--json"])
+        .env("CLAUDE_CODE_SESSION_ID", "sessCLR2-bbbb")
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(back.status.success(), "{}", text(&back));
+    assert_eq!(names_in(&agents), names, "이은 세션이 제 장을 못 찾았다");
+    let card = std::fs::read_to_string(&at).unwrap();
+    assert!(card.contains("\"role\":\"worker\"") && !card.contains(there), "이은 장이 역할이나 기계를 잃었다 — {card}");
 }
 
 /// **지은 이름 셋이 다 쥐였어도 훅은 그 세션에 장을 세운다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 이름은 앞 8자

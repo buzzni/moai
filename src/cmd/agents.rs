@@ -226,6 +226,10 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
             }
         }
     };
+    // **이 창이 제 장을 적는가** — `--pid`·`--as` 가 가리킨 장은 남의 창의 것이라, 이 셸의 `MOAI_AGENT`·
+    // `CLAUDE_CODE_SESSION_ID`·tmux 칸을 그 장에 안 적는다. 셋이 이 하나로 가른다(리뷰 moai-keka.qxk) — 저마다 적던 판은
+    // `--as` 가 생긴 날 한 자리만 넓혀, 사람의 터미널 이름이 `--pid`·`--as` 의 장에 씌워졌다(리뷰 moai-ew4o.q9f).
+    let own_window = args.pid.is_none() && adopted.is_none();
     // **`MOAI_AGENT` 가 이 창의 이름이다**(moai-ew4o.e1m) — `send`·`inbox` 가 그 이름으로 돌고 훅도 그 이름으로 장을 세운다.
     // 다른 `--name` 은 다음 훅이 도로 옮기니 받지 않는다.
     //
@@ -235,7 +239,7 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     // **Codex 셸에서도 안 읽는다** — 그 환경은 세션 모두가 함께 쓰는 데몬의 것이라 첫 창이 든 이름이 모든 창에 선다(훅의
     // `attendee` 가 Codex 에서 안 읽는 것과 같은 자, moai-sile).
     let told = match &agent {
-        Agent::Known(..) if args.pid.is_none() && adopted.is_none() => super::mail::told_name(lang)?,
+        Agent::Known(..) if own_window => super::mail::told_name(lang)?,
         _ => None,
     };
     if let (Some(name), Some(told)) = (args.name.as_deref(), told.as_deref())
@@ -254,7 +258,7 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     // 프로세스의 것이 아니다. **Codex 셸의 `CLAUDE_CODE_SESSION_ID` 는 안 읽는다** — 데몬의 환경에서 새어 든 남의 Claude
     // 세션이다(2026-10-05 쟀다).
     let own_session = match &agent {
-        Agent::Known(..) if args.pid.is_none() && adopted.is_none() && seen == Some("claude") => {
+        Agent::Known(..) if own_window && seen == Some("claude") => {
             std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|s| !s.is_empty())
         }
         _ => None,
@@ -267,11 +271,15 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     // 이은 세션은 새 프로세스라, 훅이 없는 창(심기 전에 연 창)에서는 앞 컨테이너의 pid 를 든 제 장을 프로세스로 못 찾는다.
     // 못 찾던 판은 `hello` 가 새 이름으로 장을 하나 더 세우거나, 지은 이름을 그 제 장이 하루 쥐어 거절했다. 훅의
     // [`super::hook`] `attendee` 가 세션 id 로 찾아 이 프로세스로 다시 잇는 것과 같은 자다 — 이 기계의 같은 세션
-    // `--resume` 도 그렇다.
+    // `--resume` 도 그렇다. **그 프로세스가 떠났거나 다른 기계의 장만 잇는다**(리뷰 moai-keka.qxk,
+    // [`Presence::resumable`]) — 이 기계에서 아직 사는 장은 같은 세션을 다른 창에서 이은 그 창의 것이다. 가리지 않던 판은
+    // 산 그 창의 장을 이 프로세스로 옮겨, 그 창의 `moai inbox`·`send` 가 누구인지 몰라 섰다.
     let before = adopted.clone().or_else(|| match &agent {
-        Agent::Known(proc, _) => {
-            all.iter().find(|p| p.runs_as(proc)).cloned().or_else(|| own_session.as_deref().and_then(of_session))
-        }
+        Agent::Known(proc, _) => all
+            .iter()
+            .find(|p| p.runs_as(proc))
+            .cloned()
+            .or_else(|| own_session.as_deref().and_then(of_session).filter(Presence::resumable)),
         Agent::Codex(session) => session.as_deref().and_then(of_session),
     });
     let vendor = vendor_given
@@ -330,10 +338,10 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
     // **남을 가리켰으면(`--pid`·`--as`) 이 셸의 tmux 칸을 안 적는다** — 그 칸은 그 프로세스의 것이 아닐 수 있고,
     // 깨우기가 그 칸에 글자를 친다. 엉뚱한 칸이면 사람의 창에 `moai inbox` 가 쳐진다. **Codex 도 안 적는다** — 그 셸의
     // 칸은 데몬이 뜬 칸이다(moai-u5wr.7xr 노트).
-    let (tmux_pane, tmux_socket) = match (&agent, args.pid.is_some() || adopted.is_some()) {
+    let (tmux_pane, tmux_socket) = match (&agent, own_window) {
         (Agent::Codex(_), _) => (None, None),
-        (_, false) => Presence::tmux_here(),
-        (_, true) => keep.as_ref().map(|p| (p.tmux_pane.clone(), p.tmux_socket.clone())).unwrap_or_default(),
+        (_, true) => Presence::tmux_here(),
+        (_, false) => keep.as_ref().map(|p| (p.tmux_pane.clone(), p.tmux_socket.clone())).unwrap_or_default(),
     };
     let presence = Presence {
         v: mail::VERSION,
@@ -352,12 +360,15 @@ pub fn hello(ctx: &Ctx, args: HelloArgs) -> R<Vec<String>> {
         // 기계는 아래에서 pid 와 함께 적는다([`Presence::at`]).
         machine: None,
         host: None,
-        // 훅이 적어 둔 것이 있으면 그것이 먼저다. Claude 는 이 셸의 세션 id 를(`own_session` 의 자), Codex 는 그 셸이
-        // 대는 세션 id 를 적는다 — 훅이 그 세션의 장을 이것으로 찾는다.
-        session: keep.as_ref().and_then(|p| p.session.clone()).or_else(|| match &agent {
-            Agent::Codex(session) => session.clone(),
-            Agent::Known(..) => own_session.clone(),
-        }),
+        // 훅이 지은 장을 잇는 Codex 는 그 장의 세션 id 가 먼저고, 없으면 그 셸이 대는 세션 id 다 — 훅이 그 세션의 장을
+        // 이것으로 찾는다. **Claude 의 제 창은 이 셸의 세션 id 가 먼저다**(리뷰 moai-keka.qxk) — `/clear` 는 같은 프로세스에서
+        // 세션 id 만 바꾸고, Claude 는 셸의 `CLAUDE_CODE_SESSION_ID` 도 그 값으로 세운다(2026-10-06 쟀다). 장의 옛 세션을
+        // 지키던 판은 훅 없는 창이 비우고 다시 인사해도 장이 옛 세션에 머물러, 컨테이너를 다시 띄우고 이은 그 세션이 세션
+        // id 로 제 장을 못 찾았다(moai-keka.fpm). 훅이 있는 창은 그 둘이 같은 값이다. `--pid`·`--as` 는 그 장의 것을 둔다.
+        session: match &agent {
+            Agent::Codex(session) => keep.as_ref().and_then(|p| p.session.clone()).or_else(|| session.clone()),
+            Agent::Known(..) => own_session.clone().or_else(|| keep.as_ref().and_then(|p| p.session.clone())),
+        },
         cwd: std::env::current_dir().map(|d| d.display().to_string()).unwrap_or_default(),
         tmux_pane,
         tmux_socket,

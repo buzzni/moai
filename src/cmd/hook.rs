@@ -1301,7 +1301,9 @@ fn attendee(input: &Input, root: &Path, dialect: Dialect) -> Option<mail::Presen
         _ => p,
     };
     let found = all.iter().find(|p| p.session.as_deref() == Some(session));
-    if let Some(p) = found.filter(|p| dialect == Dialect::Codex || (p.here() && !p.gone())) {
+    // 이 기계에서 아직 사는 장은 그대로 쓰고, 떠났거나 다른 기계의 장은 아래에서 이 프로세스로 다시 잇는다 — `hello` 와 한
+    // 자다([`mail::Presence::resumable`]).
+    if let Some(p) = found.filter(|p| dialect == Dialect::Codex || !p.resumable()) {
         return Some(renamed(mail::Presence { model: model(p), ..p.clone() }.claimed()));
     }
     let cwd = input.cwd.clone().unwrap_or_default();
