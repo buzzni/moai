@@ -405,7 +405,9 @@ at a good place to be cleared, send the next only after the person has cleared i
 they will not — a letter loaded into the window before a late clear disappears with it,
 and that idea and that worker sit out of the candidates waiting for a report that will
 never come. Its turn has ended, so that letter waits until a prompt comes into the window:
-a Claude Code supervisor wakes it with SendMessage, any other asks the person.
+send it with `--wake` and wake the window the way the line it prints says
+(*Wake a session that sits idle*) — a Claude Code supervisor sends SendMessage to the name
+that line gives, which can differ from the worker's row; any other asks the person.
 
 If they do not hold, ask that worker with a letter what is left, and do not finish it in
 its place.

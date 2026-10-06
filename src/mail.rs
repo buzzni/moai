@@ -917,6 +917,16 @@ impl Presence {
         self.here() && self.pid == p.pid && (self.pid_start.is_none() || p.start.is_none() || self.pid_start == p.start)
     }
 
+    /// 세션 id 로 찾은 이 장을 지금 프로세스로 다시 이을 것인가 — 그 프로세스가 떠났거나(이 기계에서 죽었다) 다른 기계의
+    /// 장이다(`claude --resume` 이 새 프로세스로, 다시 띄운 컨테이너에서 그 세션을 이었다). **이 기계에서 아직 사는 장은 그
+    /// 프로세스의 것이다** — 살아 있는 세션을 다른 창에서 이으면 두 프로세스가 한 세션 id 를 든다. 그 장을 이 프로세스로
+    /// 옮기면 저쪽의 `moai inbox`·`send` 가 조상으로 저를 못 찾고, 이쪽이 끝나면 `moai agents` 가 그 장을 죽은 것으로 걷어
+    /// 편지를 되돌린다. 훅의 [`crate::cmd::hook`] `attendee` 와 `hello` 가 이 하나로 가른다(리뷰 moai-keka.qxk) — `hello`
+    /// 가 따로 세션 id 로 찾던 판은 이 자를 빠뜨려 산 남의 장을 가져갔다.
+    pub fn resumable(&self) -> bool {
+        !self.here() || self.gone()
+    }
+
     /// 이 장의 pid 가 이 기계의 것인가(moai-dhxm) — 장에 적힌 기계가 이 프로세스의 기계([`machine`])와 같다. **기계를 안
     /// 적은 장은 이 기계의 것으로 읽는다** — 이 필드 전의 판과 기계를 못 읽은 판이 적은 장이고, 그 판이 하던 그대로다.
     /// 이 프로세스가 제 기계를 모르면 기계를 적은 장은 남의 것이다 — 같다고 말할 수 없다.
@@ -973,30 +983,40 @@ impl Presence {
     /// 닻이 낡았는가 — 프로세스로 못 재는 장이 [`STALE_AFTER`] 넘게 안 적혔다(moai-j3n5). 둘 다 못 읽으면 모른다(낡지
     /// 않았다).
     ///
-    /// **닻과 상태를 바꾼 때(`since`) 가운데 늦은 쪽으로 잰다**(리뷰 moai-ew4o.q9f) — 닻을 모르는 바이너리(이 필드 전의 판,
-    /// 훅이 그 판을 부르는 동안)는 장을 고쳐 적어도 `seen` 을 모르는 키로 그대로 옮기고 `since` 만 새로 댄다. 닻만 보던
-    /// 판은 그 훅이 도는 산 장을 새 판의 `hello` 가 닻을 적은 지 20분 뒤에 걷었다. 닻이 없는 장도 이 자로 `since` 다.
+    /// **닻과 상태를 바꾼 때(`since`) 가운데 지금에 가까운 쪽으로, 둘 다 지난 때면 늦은 쪽으로 잰다**(리뷰 moai-ew4o.q9f) —
+    /// 닻을 모르는 바이너리(이 필드 전의 판, 훅이 그 판을 부르는 동안)는 장을 고쳐 적어도 `seen` 을 모르는 키로 그대로
+    /// 옮기고 `since` 만 새로 댄다. 닻만 보던 판은 그 훅이 도는 산 장을 새 판의 `hello` 가 닻을 적은 지 20분 뒤에 걷었다.
+    /// 닻이 없는 장도 이 자로 `since` 다. 지금보다 뒤로 적힌 때는 그만큼 앞선 것으로 잰다([`Presence::quiet`],
+    /// moai-keka.fpm) — 엉뚱한 앞날의 닻이 새로 선 `since` 를 가리지 않는다.
     pub fn stale(&self, now: &str) -> bool {
         self.quiet(now).is_some_and(|secs| secs > STALE_AFTER)
     }
 
-    /// 지울 때가 되었는가 — 프로세스로 못 재는 장이 [`EXPIRE_AFTER`] 넘게 안 적혔다([`sweep`]).
+    /// 지울 때가 되었는가 — 프로세스로 못 재는 장이 [`EXPIRE_AFTER`] 넘게 안 적혔다([`sweep`]). 재는 자는
+    /// [`Presence::stale`] 과 같다 — 하루 넘게 앞서 적힌 장도 그만큼 떨어진 것이다.
     pub fn expired(&self, now: &str) -> bool {
         self.quiet(now).is_some_and(|secs| secs > EXPIRE_AFTER)
     }
 
-    /// 프로세스로 못 재는 장이 몇 초째 안 적혔나 — 닻과 `since` 가운데 늦은 쪽부터 잰다. 프로세스로 재는 장이거나 못
-    /// 읽으면 `None` 이다(모른다).
+    /// 프로세스로 못 재는 장이 몇 초째 안 적혔나 — 닻과 `since` 가운데 지금에 가장 가까운 쪽과의 거리다. 둘 다 지난
+    /// 때면 늦은 쪽이다. 프로세스로 재는 장이거나 못 읽으면 `None` 이다(모른다).
+    ///
+    /// **지금보다 뒤로 적힌 때는 그만큼 앞선 것으로 잰다**(2026-10-06 사용자 결정, moai-keka.fpm) — 시계가 앞선 기계가 적은
+    /// 장이다. 차를 그대로 재던 판에서는 그 장이 그 차만큼 늦게 낡고 늦게 걷힌다 — 시계가 하루 앞선 컨테이너가 남기고 죽은
+    /// 장은 이틀 동안 지은 이름을 쥐고 노는 일꾼으로 선다. 여유 폭은 [`STALE_AFTER`] 다 — 그 안쪽으로 앞선 산 기계의 장은 산 것으로 읽고,
+    /// 그 넘게 앞선 닻은 곧장 낡은 것으로, [`EXPIRE_AFTER`] 넘게 앞선 닻은 곧장 걷을 것으로 읽는다. 적힌 때 말고는 읽을
+    /// 것이 없어(장에 아무것도 더 안 적는다), 그렇게 죽은 장은 제 닻의 앞뒤 20분 동안만은 다시 산 것으로 읽힌다.
     fn quiet(&self, now: &str) -> Option<i64> {
         if self.by_process() {
             return None;
         }
-        let at = [self.seen.as_deref(), Some(self.since.as_str())]
+        let now = crate::model::parse_rfc3339(now)?;
+        [self.seen.as_deref(), Some(self.since.as_str())]
             .into_iter()
             .flatten()
             .filter_map(crate::model::parse_rfc3339)
-            .max()?;
-        Some(crate::model::parse_rfc3339(now)? - at)
+            .map(|at| (now - at).abs())
+            .min()
     }
 
     /// 그 에이전트가 떠났다고 보는가 — 프로세스가 죽었거나 닻이 낡았다. **모르면 아니다.** 걷기·깨우기와 창이 대는
@@ -1032,11 +1052,16 @@ impl Presence {
         self.seen = Some(now.to_string());
     }
 
-    /// 닻을 다시 적을 때가 되었는가 — 닻이 [`SEEN_EVERY`] 넘게 묵었다.
+    /// 닻을 다시 적을 때가 되었는가 — 닻이 [`SEEN_EVERY`] 넘게 묵었거나 그만큼 앞서 적혔다.
+    ///
+    /// **앞날로 적힌 닻도 그 거리로 잰다**(리뷰 moai-keka.qxk) — 읽는 쪽([`Presence::quiet`])이 그 닻을 거리로 낡은 것으로
+    /// 읽으니, 다시 적는 쪽도 같은 자로 재야 한다. 차를 그대로 재던 판은 시계를 뒤로 돌린 기계(앞서던 시계를 바로잡았다)의
+    /// 산 장을 시계가 그 닻을 따라잡을 때까지 다시 안 적어(`keep_alive`·기다림의 `attend`·훅의 `rest`), 그동안 그 장이 떠난
+    /// 것으로 읽혔고 하루 넘게 앞섰으면 걷혔다.
     pub fn due(&self, now: &str) -> bool {
         let at = self.seen.as_deref().and_then(crate::model::parse_rfc3339);
         match (crate::model::parse_rfc3339(now), at) {
-            (Some(now), Some(at)) => now - at >= SEEN_EVERY,
+            (Some(now), Some(at)) => (now - at).abs() >= SEEN_EVERY,
             _ => true,
         }
     }
@@ -1275,6 +1300,12 @@ pub fn codex_name(all: &[Presence], session: &str) -> Option<String> {
 /// **가른 이름도 다시 본다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞 8자가 밀리초 시각의 윗자리고 65초
 /// 남짓마다만 바뀐다. 그 사이에 연 세션 셋은 토막까지 같아, 한 번만 가르던 판은 셋째가 둘째의 장을 덮었다. 토막을 이어도
 /// 남이 쥐었으면 세션 id 를 통째로 잇는다 — 세션마다 하나다. 토막은 상한에 안 잘리게 잇는다([`name_with`]).
+///
+/// **셋 다 쥐였어도 이름을 낸다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 앞 8자 토막 뒤에 `-2`, `-3`… 을 이어 빈
+/// 이름을 찾는다. `None` 을 내던 판은 훅이 그 세션에 장을 안 세워, 그 세션의 `moai inbox`·`send` 가 누구인지 몰라 섰다.
+/// 다른 기계의 조용한 장이 하루 쥐게 된 뒤로(moai-nas5) 그 판이 넓어졌다. 이어 보는 수는 출석부의 장 수보다 하나 많다 —
+/// 끝의 수가 다르면 이름이 다르니, 그 가운데 하나는 반드시 빈다. 그래서 `None` 은 안 낸다 — 아무도 안 쥔 `base` 는
+/// 다시 재지 않고 그대로 내니, 부르는 쪽이 이름으로 접어 건넨다([`name_from`]·[`name_with`]).
 pub fn made_name(all: &[Presence], base: String, session: &str) -> Option<String> {
     let held = |name: &str| all.iter().any(|p| p.name.eq_ignore_ascii_case(name) && p.holds_made_name());
     if !held(&base) {
@@ -1282,7 +1313,8 @@ pub fn made_name(all: &[Presence], base: String, session: &str) -> Option<String
     }
     let alnum = |n: usize| session.chars().filter(char::is_ascii_alphanumeric).take(n).collect::<String>();
     let (short, whole) = (alnum(8), alnum(usize::MAX));
-    [short.as_str(), whole.as_str()].into_iter().filter_map(|tail| name_with(&base, tail)).find(|n| !held(n))
+    let free = |tail: &str| name_with(&base, tail).filter(|n| !held(n));
+    free(&short).or_else(|| free(&whole)).or_else(|| (2..=all.len() + 2).find_map(|n| free(&format!("{short}-{n}"))))
 }
 
 /// 이 프로세스의 조상 가운데 출석부에 선 에이전트 — **"나는 누구인가" 의 답이다.** 에이전트가 띄운 셸에서
@@ -1535,18 +1567,60 @@ pub fn alive(pid: u32, start: Option<u64>) -> Option<bool> {
     None
 }
 
-/// Claude Code 가 그 세션에 붙인 이름 — `~/.claude/sessions/<pid>.json` 의 `name` 이다. `ListAgents` 와
-/// `SendMessage` 가 쓰는 그 이름이라, 출석의 이름을 그것과 맞추면 감독이 같은 이름으로 깨운다
-/// (2026-10-04 사용자 결정). **비문서 파일이다** — 못 읽으면 `None` 이고 부르는 쪽이 세션 id 로 짓는다.
+/// Claude Code 가 그 세션에 붙인 이름을 출석의 이름으로 접은 것 — 장부([`claude_session_book`])의 `name` 을
+/// [`name_from`] 으로 접는다. 출석의 이름을 그것과 맞추면 감독이 같은 이름으로 깨운다(2026-10-04 사용자 결정). 못 읽거나
+/// 이름으로 못 접으면 `None` 이고 부르는 쪽이 세션 id 로 짓는다.
+pub fn claude_session_name(pid: u32) -> Option<String> {
+    name_from(claude_session_book(pid)?.get("name")?.as_str()?)
+}
+
+/// Claude Code 가 그 프로세스에 적어 둔 장부 — `~/.claude/sessions/<pid>.json` 이다. 그 `name` 이 `ListAgents` 와
+/// `SendMessage` 가 쓰는 세션의 이름이다. **비문서 파일이다** — 못 읽으면 `None` 이다.
 ///
 /// **절대 경로만 본다**(리뷰 moai-h8tn.x4l) — 빈 `HOME` 은 빈 경로라 `.claude/sessions/…` 가 훅이 옮겨 간 자리, 곧
 /// 세션의 저장소에서 풀린다. 그 저장소가 심어 둔 파일 하나가 에이전트의 이름을 고르게 된다.
-pub fn claude_session_name(pid: u32) -> Option<String> {
+fn claude_session_book(pid: u32) -> Option<serde_json::Value> {
     let set = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let home =
         set("CLAUDE_CONFIG_DIR").or_else(|| set("HOME").map(|h| h.join(".claude"))).filter(|d| d.is_absolute())?;
-    let v: serde_json::Value = read_json(&home.join("sessions").join(format!("{pid}.json"))).ok()??;
-    name_from(v.get("name")?.as_str()?)
+    let path = home.join("sessions").join(format!("{pid}.json"));
+    // **보통 파일만 연다**(리뷰 moai-keka.qxk 의 다섯 자리 5번) — `send --wake` 는 이 장부를 이제 처음 연다. 그 자리가 FIFO
+    // 면 [`read_json`] 은 쓰는 쪽을 끝없이 기다려, 편지를 다 보낸 `send` 가 안 끝난다.
+    std::fs::metadata(&path).ok().filter(std::fs::Metadata::is_file)?;
+    read_json(&path).ok().flatten()
+}
+
+/// Claude Code 가 붙인 세션 이름의 상한(글자) — Claude Code 가 이름을 이만큼에서 자른다(2.1.290 에서 읽었다). 출석의
+/// 이름([`NAME_MAX`])은 파일 이름이라 64자에서 접히는데, 그 자로 이 이름을 재던 판은 64자를 넘는 이름 — 접혀서 장의
+/// 이름과 반드시 갈리는 바로 그 이름 — 을 안 대고 장의 이름을 댔다(리뷰 moai-keka.qxk).
+const TITLE_MAX: usize = 200;
+
+/// `SendMessage` 로 그 세션에 닿는 이름 — Claude Code 가 붙인 이름 그대로다(2026-10-06 사용자 결정, moai-keka.id8).
+/// **장에 적지 않고 깨울 때 읽는다** — 깨우기는 이 기계의 장에만 돌아([`wake`]) 그 pid 의 파일이 여기 있고, 사람이 세션
+/// 이름을 바꿔도 지금 이름이 나온다. 장의 이름과 같으면 `None` 이다 — 댈 것이 없다.
+///
+/// 출석의 이름은 그 이름과 갈릴 수 있다 — 남이 쥐면 토막이 붙고(`moa-issue-3-1a2b3c4d`), 이름에 못 쓰는 글자는 접힌다.
+/// 그 이름을 대던 판은 보낸 쪽이 Claude 가 모르는 이름으로 `SendMessage` 를 했다. 빈 글·제어문자가 든 글·
+/// [`TITLE_MAX`] 넘는 글은 안 댄다 — Claude 가 안 쓰는 꼴이고, 남의 파일의 글을 보낸 쪽 화면에 그대로 싣는다.
+///
+/// **그 프로세스의 장부만 믿는다**(리뷰 moai-keka.qxk) — Claude 는 죽은 프로세스의 장부를 안 걷어(2026-10-06 이 기계에서
+/// 31개 가운데 26개가 죽은 pid 의 것이었다) 같은 pid 를 다시 받은 프로세스 앞에 남의 세션 이름이 서고, 보낸 쪽이 설정
+/// 자리(`CLAUDE_CONFIG_DIR`)가 다르면 남의 장부를 읽는다. 장부의 `procStart` 는 그 프로세스가 선 때(`/proc/<pid>/stat` 의
+/// 22째 칸, 장의 `pid_start` 와 같은 값)라 둘 다 알면 같아야 한다. 하나라도 모르면 믿는다 — 리눅스 밖, 그 필드가 없는 판.
+/// 세션 id 로는 안 견준다 — 한 프로세스의 장부도 `/clear` 마다 세션 id 를 바꾸고, 훅 없는 창의 장은 다음 인사까지 옛
+/// 세션을 든다.
+fn send_message_name(p: &Presence) -> Option<String> {
+    if p.pid == 0 {
+        return None;
+    }
+    let book = claude_session_book(p.pid)?;
+    let started = book.get("procStart").and_then(|s| s.as_u64().or_else(|| s.as_str()?.trim().parse().ok()));
+    if matches!((started, p.pid_start), (Some(a), Some(b)) if a != b) {
+        return None;
+    }
+    let raw = book.get("name")?.as_str()?.trim();
+    let fits = !raw.is_empty() && raw.chars().count() <= TITLE_MAX && !raw.chars().any(char::is_control);
+    (fits && raw != p.name).then(|| raw.to_string())
 }
 
 // ── 깨우기 ────────────────────────────────────────────────────────────
@@ -1565,12 +1639,27 @@ pub struct Woke {
     /// 그래서 "턴이 끝나면 싣는다" 를 약속하지 않고 이 값을 댄다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
+    /// 보낸 쪽이 `SendMessage` 에 댈 이름(`why: ask_sender`) — Claude Code 가 그 세션을 부르는 이름이 `to` 와 다를 때만
+    /// 선다(moai-keka.id8, [`send_message_name`]). 없으면 `to` 와 같거나 여기서 모른다 — 이 기계에서 그 프로세스의 장부를
+    /// 못 읽었거나, 그 이름이 Claude 가 안 쓰는 꼴이다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_message_to: Option<String>,
+}
+
+impl Woke {
+    /// 깨운 결과 한 벌 — 받는 이·길·탔는가·까닭만 대고 나머지(`since`·`send_message_to`)는 비운다. 짓는 자리(`wake` 와
+    /// `send` 의 `nobody`)가 이 하나로 짓는다 — 필드가 붙는 날 두 파일에 따로 적던 판은 한쪽을 빠뜨릴 수 있었다.
+    /// `Default` 는 안 단다 — `..Default::default()` 가 붙는 필드를 말없이 삼킨다(`cmd::add` 의 `Rooted` 와 같은 까닭).
+    pub fn new(to: String, via: &'static str, done: bool, why: Option<&'static str>) -> Woke {
+        Woke { to, via, done, why, since: None, send_message_to: None }
+    }
 }
 
 /// 깨운다 — **덤이다**(2026-10-04 사용자 결정 "깨우기를 덤으로 낮춘다"). 편지를 받는 기본 길은 일꾼의 기다림
 /// (`moai inbox --ack --wait`)과 훅이고, 깨우기는 그 둘 밖에서 노는 에이전트를 한 번 두드리는 것뿐이다.
 ///
-/// - **Claude** 는 이 CLI 가 못 깨운다 — 보낸 쪽이 `SendMessage` 로 깨우라고 댄다(`ask_sender`)
+/// - **Claude** 는 이 CLI 가 못 깨운다 — 보낸 쪽이 `SendMessage` 로 깨우라고 댄다(`ask_sender`). Claude 가 그 세션을
+///   부르는 이름이 장의 이름과 다르면 그 이름을 함께 댄다(`send_message_to`, moai-keka.id8)
 /// - **tmux 칸이 적힌 에이전트**는 그 칸에 [`WAKE_WORDS`] 를 친다 — 벤더를 안 가린다
 /// - **둘 다 아니면 아무것도 안 한다**(`no_way`) — tmux 를 안 쓰는 사람도 있다. 사람 화면은 이때 입을 다문다
 ///
@@ -1582,7 +1671,7 @@ pub struct Woke {
 /// 띄우는 프로세스는 입출력을 모두 닫는다 — 물려주면 훅처럼 stdout 을 받아 두는 쪽이 EOF 를 못 받는다
 /// (`skill::command` 의 "그 성질에 기대고 있다"). 10초 안에 안 끝나면 죽인다.
 pub fn wake(p: &Presence) -> Woke {
-    let woke = |via, done, why| Woke { to: p.name.clone(), via, done, why, since: None };
+    let woke = |via, done, why| Woke::new(p.name.clone(), via, done, why);
     if p.status == BUSY {
         return Woke { since: Some(p.since.clone()).filter(|s| !s.is_empty()), ..woke("none", false, Some("busy")) };
     }
@@ -1593,7 +1682,7 @@ pub fn wake(p: &Presence) -> Woke {
         return woke("none", false, Some("no_way"));
     }
     if p.vendor == "claude" {
-        return woke("send_message", false, Some("ask_sender"));
+        return Woke { send_message_to: send_message_name(p), ..woke("send_message", false, Some("ask_sender")) };
     }
     // **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `moai inbox --wait` 는 기다리는 동안 장을 `idle` 로
     // 적는다 — 감독이 일꾼을 찾는 표다. 그런데 그 기다림은 턴 **안의** 셸 명령이라, 그 칸에 `moai inbox`+Enter 를 치면
@@ -2358,8 +2447,8 @@ mod tests {
         assert!(send(s.path(), &letter("Any-Idle-Worker", "boss", "x")).is_err(), "대소문자만 다른 낱말 앞으로 보냈다");
     }
 
-    /// **닻과 `since` 가운데 늦은 쪽으로 잰다**(리뷰 moai-ew4o.q9f) — 닻을 모르는 옛 판의 훅이 `since` 만 새로 대도 그 장은
-    /// 산 것이다. 둘 다 못 읽으면 모른다.
+    /// **둘 다 지난 때면 닻과 `since` 가운데 늦은 쪽으로 잰다**(리뷰 moai-ew4o.q9f) — 닻을 모르는 옛 판의 훅이 `since` 만
+    /// 새로 대도 그 장은 산 것이다. 둘 다 못 읽으면 모른다. 앞날이 낀 판은 다음 시험이 본다.
     #[test]
     fn staleness_reads_the_later_of_seen_and_since() {
         let card = |seen: Option<&str>, since: &str| Presence {
@@ -2374,6 +2463,47 @@ mod tests {
         assert!(!card(None, "2026-10-04T06:50:00Z").stale(now));
         assert!(card(None, "2026-10-04T06:30:00Z").stale(now));
         assert!(!card(None, "").stale(now), "모르는 것을 낡은 것으로 읽었다");
+    }
+
+    /// **앞날로 적힌 닻은 그만큼 앞선 것으로 잰다**(2026-10-06 사용자 결정, moai-keka.fpm) — 시계가 앞선 기계가 적은 장이다.
+    /// 차를 그대로 재던 판은 그 차만큼 늦게 낡고 늦게 걷혔다. 20분 안쪽으로 앞선 닻은 산 것이고, 그 넘게 앞서면 낡고, 하루
+    /// 넘게 앞서면 걷힌다. 둘 가운데 지금에 가까운 쪽으로 잰다 — 엉뚱한 앞날이 적힌 닻이 새로 선 `since` 를 가리지 않는다.
+    #[test]
+    fn an_anchor_stamped_ahead_of_now_goes_stale_by_its_distance() {
+        let card =
+            |seen: &str, since: &str| Presence { seen: Some(seen.into()), since: since.into(), ..codex_card("cx") };
+        let now = "2026-10-04T07:00:00Z";
+        let ahead = card("2026-10-04T07:10:00Z", "2026-10-04T07:10:00Z");
+        assert!(!ahead.stale(now), "10분 앞선 시계의 산 장을 낡은 것으로 읽었다");
+        let far = card("2026-10-04T07:21:00Z", "2026-10-04T07:21:00Z");
+        assert!(far.stale(now) && !far.expired(now), "20분 넘게 앞선 닻을 산 것으로 읽었다");
+        let wild = card("2026-10-05T07:00:01Z", "2026-10-05T07:00:01Z");
+        assert!(wild.expired(now), "하루 넘게 앞선 닻을 걷을 것으로 안 읽었다");
+        // 지은 이름을 쥐는가는 지금의 시계로 잰다 — `a_made_name_is_let_go_by_another_machine_only_after_a_day` 가 본다.
+        assert!(!card("2027-01-01T00:00:00Z", "2026-10-04T06:59:00Z").stale(now), "앞날의 닻이 새 since 를 가렸다");
+    }
+
+    /// **지은 이름 셋이 다 쥐였어도 이름을 낸다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 앞 8자 토막 뒤에 수를 이어
+    /// 빈 이름을 찾는다. `None` 을 내던 판은 훅이 그 세션에 장을 안 세워, 그 세션의 `moai inbox`·`send` 가 누구인지 몰라
+    /// 섰다. 이어 보는 수는 출석부의 장 수보다 하나 많아 하나는 반드시 빈다.
+    #[test]
+    fn a_made_name_is_found_even_when_every_suffix_is_held() {
+        let now = crate::model::now();
+        let live = |name: &str| Presence { since: now.clone(), seen: Some(now.clone()), ..codex_card(name) };
+        let session = "01a107b4-6b9e-7c3d-8a21-5f0e9d4c3b2a";
+        let whole = "codex-01a107b46b9e7c3d8a215f0e9d4c3b2a";
+        let mut all = vec![live("codex"), live("codex-01a107b4"), live(whole)];
+        assert!(all.iter().all(Presence::holds_made_name), "시험의 장이 이름을 안 쥐었다");
+        assert_eq!(made_name(&all, "codex".into(), session).as_deref(), Some("codex-01a107b4-2"));
+        all.push(live("CODEX-01A107B4-2"));
+        assert_eq!(made_name(&all, "codex".into(), session).as_deref(), Some("codex-01a107b4-3"), "대소문자만 다른 장");
+        // 출석부가 그 이름들로 다 차도 하나는 빈다.
+        let full: Vec<Presence> = std::iter::once(live("codex"))
+            .chain([live("codex-01a107b4"), live(whole)])
+            .chain((2..=8).map(|n| live(&format!("codex-01a107b4-{n}"))))
+            .collect();
+        let got = made_name(&full, "codex".into(), session).expect("이름을 못 냈다");
+        assert!(!full.iter().any(|p| p.name.eq_ignore_ascii_case(&got)), "쥔 이름을 냈다 — {got}");
     }
 
     /// **다른 기계의 장은 pid 로 안 잰다**(moai-dhxm) — 같은 저장소를 컨테이너 여럿이 쓰면 장의 pid 는 그것을 적은
@@ -2492,6 +2622,12 @@ mod tests {
         assert!(quiet.holds_made_name(), "20분 조용한 다른 기계의 장이 지은 이름을 놓았다");
         assert!(far(60).holds_made_name());
         assert!(!far(EXPIRE_AFTER + 1).holds_made_name(), "하루 넘게 조용한 다른 기계의 장이 이름을 쥐었다");
+        // **앞날로 적힌 닻도 그 거리로 잰다**(2026-10-06 사용자 결정, moai-keka.fpm) — 시계가 앞선 기계의 장이다. 하루
+        // 안쪽으로 앞섰으면 떠난 것으로 읽혀도 이름을 쥐고, 하루 넘게 앞섰으면 곧장 놓는다. 거리를 넉넉히(60초) 둔다 — 시각을
+        // 두 번 읽어(장을 지을 때와 `holds_made_name` 안) 그 사이 초가 넘어가면 `EXPIRE_AFTER + 1` 이 딱 하루가 된다.
+        assert!(far(-(STALE_AFTER + 60)).holds_made_name(), "하루 안쪽으로 앞선 다른 기계의 장이 지은 이름을 놓았다");
+        assert!(!far(-(EXPIRE_AFTER + 60)).holds_made_name(), "하루 넘게 앞선 다른 기계의 장이 지은 이름을 쥐었다");
+        assert_eq!(codex_name(&[far(-(EXPIRE_AFTER + 60))], session).as_deref(), Some("codex-01a107b4"));
         let codex = Presence { since: ago(STALE_AFTER + 1), seen: Some(ago(STALE_AFTER + 1)), ..codex_card("cx") };
         assert!(codex.here() && codex.gone() && !codex.holds_made_name(), "떠난 Codex 장이 이름을 쥐었다");
         // 이 기계의 장은 프로세스로 잰다 — 산 동안은 닻이 아무리 묵어도 쥐고, 죽었으면 곧 놓는다. pid 를 아는 장을 다른
@@ -2541,6 +2677,9 @@ mod tests {
         card.stamp("2026-10-04T06:12:03Z");
         assert_eq!(card.seen.as_deref(), Some("2026-10-04T06:12:03Z"), "프로세스를 아는 장에 닻을 안 적었다");
         assert!(!card.due("2026-10-04T06:13:02Z") && card.due("2026-10-04T06:13:03Z"));
+        // 앞날로 적힌 닻도 그 거리로 잰다(리뷰 moai-keka.qxk) — 시계를 뒤로 돌린 기계의 산 장이다. 안 적으면 그 장이 시계가
+        // 따라잡을 때까지 떠난 것으로 읽힌다([`Presence::quiet`]).
+        assert!(!card.due("2026-10-04T06:11:04Z") && card.due("2026-10-04T06:11:03Z"), "앞날의 닻을 다시 안 적는다");
     }
 
     /// 디렉터리는 제 무시를 든다 — `init` 을 다시 안 친 저장소에서도 `git add -A` 가 안 담는다.

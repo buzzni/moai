@@ -113,9 +113,7 @@ pub fn send(ctx: &Ctx, args: SendArgs) -> R<Vec<String>> {
         mail::ANY_IDLE_WORKER => mail::idle_worker(&agents, &from).map(mail::wake),
         _ => named.filter(|p| !p.gone()).map(mail::wake),
     });
-    let woke = woke.map(|w| {
-        w.unwrap_or_else(|| Woke { to: to.clone(), via: "none", done: false, why: Some("nobody"), since: None })
-    });
+    let woke = woke.map(|w| w.unwrap_or_else(|| Woke::new(to.clone(), "none", false, Some("nobody"))));
 
     if ctx.json {
         return super::json_line(&Sent { id: &id, letter: &letter, wake: woke.as_ref() });
@@ -133,7 +131,11 @@ fn woke_line(lang: Lang, zone: &crate::tz::Zone, w: &Woke) -> Option<String> {
         (true, _) => fill(say(lang, "mail.wake_done"), &[("to", to), ("via", w.via)]),
         // 기다리는 에이전트는 두드릴 까닭이 없다 — 그 기다림이 편지를 가진다. 말하지 않는다.
         (false, Some("no_way" | "nobody" | "waiting")) => return None,
-        (false, Some("ask_sender")) => fill(say(lang, "mail.wake_send_message"), &[("to", to)]),
+        // Claude 가 부르는 이름이 장의 이름과 다르면 그 이름을 댄다(moai-keka.id8) — 보낸 쪽의 `SendMessage` 는 그 이름으로만 닿는다.
+        (false, Some("ask_sender")) => match w.send_message_to.as_deref() {
+            Some(name) => fill(say(lang, "mail.wake_send_message_to"), &[("to", to), ("name", name)]),
+            None => fill(say(lang, "mail.wake_send_message"), &[("to", to)]),
+        },
         // **턴이 끝나면 싣는다고 약속하지 않는다**(moai-u5wr.f29) — 끊긴 턴은 끝이 안 온다. 언제부터인지만 댄다.
         (false, Some("busy")) => {
             let since = w.since.as_deref().map(|s| crate::view::stamp(s, zone)).unwrap_or_else(|| "?".to_string());

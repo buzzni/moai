@@ -2306,7 +2306,9 @@ Options:
   (`moai inbox --ack --wait`) or its hooks. --wake only knocks once on an idle
   recipient: when its row carries a tmux pane, `moai inbox` is typed into that
   pane; a Claude session cannot be woken from a command line, so the line
-  printed tells the sender to use SendMessage. With neither it does nothing
+  printed tells the sender to use SendMessage, and names the session the way
+  Claude Code knows it when that differs from its row (read from Claude's own
+  session file when it wakes). With neither it does nothing
   and says nothing. moai never runs an agent's own program to wake it. An
   agent at work is not woken, nor one already waiting in `moai inbox --wait`
   (Linux tells it from the processes), nor one on another machine sharing
@@ -2318,7 +2320,8 @@ Options:
   ({"to","via","done","why"}) when --wake was given. `via` is send_message,
   tmux or none; `why` names what stood in the way (busy, ask_sender, waiting,
   no_way, nobody, missing, failed, timeout) - `waiting` is an agent already in
-  `moai inbox --wait`, which takes the letter itself.
+  `moai inbox --wait`, which takes the letter itself. With ask_sender,
+  `send_message_to` is the name to give SendMessage when it is not `to`.
 ```
 
 ## `moai inbox`
@@ -2426,7 +2429,9 @@ Options:
   idle and --wake pass it over - but it stays, role and name included, for
   that session to come back to. After a day it is swept: a Codex row's
   letters wait for that session, and another machine's go back to their
-  senders - a later session can be given the same name. Any other row that
+  senders - a later session can be given the same name. A row written on a
+  clock running ahead counts as far ahead as it is: more than 20 minutes
+  ahead reads gone, more than a day ahead is swept. Any other row that
   cannot be told alive or gone stays.
 
   The same sweep takes the letters read more than mail_read_days ago (7
@@ -2447,7 +2452,8 @@ Options:
   rows named a machine, or one written where moai cannot name the machine,
   as off Linux). It is measured as the list is made and never written to
   the row. status is busy, idle, or gone for a row told by seen that
-  nothing wrote for 20 minutes.
+  nothing wrote for 20 minutes or that was written more than 20 minutes
+  ahead.
 ```
 
 ## `moai hello`
@@ -2483,6 +2489,12 @@ Options:
   is set in, so it is not read for a row named by --pid or --as. Saying
   hello again updates the row; a new --name replaces the old one and
   carries its letters along.
+
+  In Claude, the row this agent already has is also found by the session id
+  Claude sets in the shell (CLAUDE_CODE_SESSION_ID) when no row runs as this
+  process: a session `claude --resume` continued in a new process, here or
+  in a container started again, takes that row back with its name and role -
+  unless the row's own process still runs on this machine.
 
   Codex runs its shell under an app-server all its sessions share, so moai
   tells its sessions apart by the id Codex sets in the shell

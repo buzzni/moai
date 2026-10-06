@@ -145,7 +145,8 @@ a worker that waits needs no waking, and waking is a bonus.
   older ones, or none — until it is reopened
 - **Waking**: `moai send --wake` never types into a Claude window. It prints a
   line telling the sender to wake it with `SendMessage`, which only a Claude
-  session can send
+  session can send — and when Claude Code calls the session by a name other
+  than its row's, that line names the one `SendMessage` reaches
 
 ### Codex
 
@@ -556,7 +557,17 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   from here — its tmux and its Claude session are on that machine, and
   `moai agents --json` says so with `here: false` — and a wait here never
   marks it alive, so a window that sets the same `MOAI_AGENT` after a restart
-  gets the name back once the old row reads `gone`
+  gets the name back once the old row reads `gone`. A session resumed here
+  (`claude --resume`) takes its row back by its session id — its hooks do, and
+  so does `moai hello` in a window opened without them — and the row moves to
+  this machine with its name and role. A row whose process still runs here
+  stays with that process — the same session open in a second window does not
+  take it over. A machine whose clock runs ahead marks its rows in the future, and that
+  counts as far as it is ahead, from the nearer of the times a row was last
+  marked and last changed status: up to 20 minutes ahead reads alive, further
+  ahead reads `gone`, and more than a day ahead is swept at once — and as this
+  clock passes those times the row reads alive again within 20 minutes of them,
+  a dead one included
 - **A new session came up as `<name>-<eight characters>`.** Another row holds
   that name — a live one here, or one from another machine. A name the tools
   made up — a Claude session name, which each container counts on its own,
@@ -566,9 +577,14 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   prompt marks nothing, and taking its name would send that live session's
   letters back. A `moai hello` that has to make the name up refuses it instead
   and shows the row's `<pid>@<host>` (in Codex it appends the piece, as the
-  hooks do). Claude Code still calls the session by its own name, so
+  hooks do). When that longer name is held too, the whole session id goes on,
+  and past that a number (`<name>-<eight characters>-2`), so a session always
+  gets a row. Claude Code still calls the session by its own name, so
   `SendMessage` reaches it by that name, not by `<name>-<eight characters>` —
-  even where `moai send --wake` names the latter. A name you ask for —
+  `moai send --wake` names it, read from Claude's own session file as it wakes,
+  so the line it prints is the one to follow. It reads that file where the
+  sender's Claude keeps its own, so a session run under another
+  `CLAUDE_CONFIG_DIR` is named by its row instead. A name you ask for —
   `MOAI_AGENT`, `moai hello --name` — is yours again once the old row reads
   `gone`, which is how a window started again in a new container gets its name
   back. Asking for another session's made-up name the same way takes its row
@@ -586,4 +602,4 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka
