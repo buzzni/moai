@@ -579,9 +579,14 @@ mod tests {
                             let plan = resolve(&c, &d);
                             assert!(plan.tracking.tracked() || !plan.driver, "{c:?} {d:?}");
                             assert!(plan.guide != Guide::Hook || plan.skill, "hooks without the skill: {c:?} {d:?}");
-                            // 부딪힘은 끄는 플래그와 훅이 만날 때만 선다.
+                            // 설치를 끈 훅 안내와, git 밖인데 드라이버를 켠 플래그는 거절한다.
                             let clash = conflict(&c, &plan).is_some();
-                            assert_eq!(clash, skill == Some(false) && plan.guide == Guide::Hook, "{c:?} {d:?}");
+                            assert_eq!(
+                                clash,
+                                skill == Some(false) && plan.guide == Guide::Hook
+                                    || driver == Some(true) && !plan.tracking.tracked(),
+                                "{c:?} {d:?}"
+                            );
                         }
                     }
                 }

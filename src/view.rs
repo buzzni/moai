@@ -969,6 +969,7 @@ fn says(w: &Warning, screen: Screen) -> String {
         "tracker_linked" => one(say(lang, "warn.tracker_linked")),
         // **링크인 딸린 파일**(moai-yke5). 어느 파일인지는 `preview` 가 한 줄로 낸다 — 칠 줄이 없다.
         "dotfile_linked" => one(say(lang, "warn.dotfile_linked")),
+        "tracking_unknown" => one(say(lang, "warn.tracking_unknown")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는

@@ -1027,8 +1027,8 @@ Examples:
   uses the old defaults - committed, with the guide block - for choices that
   neither a flag nor existing git rules and guide files settle. Nothing is
   asked where a script or an agent calls it - stdin or stdout is not a
-  terminal, TERM=dumb, or --json - and there init plants the same as --yes. Running it
-  again where .moai already stands never asks. Esc stops with nothing
+  terminal, TERM=dumb, or --json - and there init plants the same as --yes.
+  Running it again where .moai already stands never asks. Esc stops with nothing
   written. Even a first run reads existing git ignore rules and the moai
   guide block. A later run also recognizes installed moai hooks when no block
   stands. If git fails, init refuses rather than guessing commit mode.

@@ -281,7 +281,7 @@ pub fn agents_state(root: &Path) -> Result<(BlockState, String), (&'static str, 
         return Ok((block_state(&text, &crate::guide::agents()), text));
     }
     // **링크 모드면 두 자리를 다 잰다**(moai-cbfz) — 링크 블록이 맞고, 그것이 가리키는 파일이 이 바이너리가
-    // 쓸 전문과 같아야 맞다. 파일이 없어도 낡은 것이다: `init` 이 다시 쓴다.
+    // 쓸 전문과 같아야 맞다. 트래커가 있는데 파일이 없으면 낡은 것이다: `init` 이 다시 쓴다.
     let link = block_state(&text, &crate::guide::agents_link());
     if link != BlockState::Current {
         return Ok((link, text));
@@ -373,7 +373,7 @@ struct GitPlace {
 
 fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlace> {
     let args = ["rev-parse", "--git-dir", "--git-common-dir", "--show-prefix"];
-    let out = crate::git::run_within(root, &args, budget)?.ok()?;
+    let out = crate::git::run_reading_user_config(root, &args, budget)?.ok()?;
     let mut lines = out.lines();
     let (own, dir) = (lines.next()?.trim(), lines.next()?.trim());
     let under = lines.next().unwrap_or_default().to_string();
@@ -398,9 +398,28 @@ fn tracking_within(root: &Path, budget: Option<std::time::Duration>) -> Option<T
     if !root.ancestors().any(|p| p.join(".git").symlink_metadata().is_ok()) {
         return Some(Tracking::Commit);
     }
-    let path = if root.join(".moai").is_symlink() { ".moai" } else { ".moai/" };
-    match crate::git::run_reading_user_config(root, &["check-ignore", "-v", path], budget)? {
-        Ok(said) => Some(ignored_by(&said)),
+    let link = root.join(".moai").is_symlink();
+    let path = if link { ".moai" } else { ".moai/" };
+    let absent_dir = !link && !root.join(".moai").is_dir();
+    let mut args = vec!["check-ignore", "-v", path];
+    if absent_dir {
+        // git 은 없는 디렉터리에 !*/ 를 적용하지 않는다. 안쪽 파일을 같은 부름에서 확인해
+        // 허용 목록의 새 클론을 무시된 트래커로 읽지 않는다. 파일 하나만 무시된 것은 첫 답이 가른다.
+        args.push(".moai/config.toml");
+    }
+    match crate::git::run_reading_user_config(root, &args, budget)? {
+        Ok(said) => {
+            let line_for = |path: &str| said.lines().find(|l| l.rsplit_once('\t').is_some_and(|(_, p)| p == path));
+            let tracking = line_for(path).map_or(Tracking::Commit, ignored_by);
+            if absent_dir
+                && !tracking.tracked()
+                && line_for(".moai/config.toml").is_none_or(|line| ignored_by(line).tracked())
+            {
+                Some(Tracking::Commit)
+            } else {
+                Some(tracking)
+            }
+        }
         Err(crate::git::Error::Failed(why)) if why.is_empty() => Some(Tracking::Commit),
         Err(_) => None,
     }
@@ -944,8 +963,10 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
 /// 선다: 보는 것은 AGENTS.md 하나고, 심기 전에 부르는 것도 자연스럽다.
 pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
-    let (state, text) =
-        agents_state(&root).map_err(|(name, fell)| Fail::new(unread_at(ctx.lang(), &root, name, &fell)))?;
+    let (state, text) = agents_state(&root).map_err(|(name, fell)| {
+        let at = if name == crate::guide::GUIDE_FILE { crate::store::Repo::opened_root(&root) } else { root.clone() };
+        Fail::new(unread_at(ctx.lang(), &at, name, &fell))
+    })?;
     // 빠진 딸린 파일 규칙도 같은 자리에서 본다(moai-2f99) — `--check` 는 "무엇이 낡았나" 를 묻는
     // 자리고, 블록만이 아니라 딸린 파일도 `init` 이 맞추는 것이다. 추적 방식은 **한 번 묻고** 아래 블록 없음의
     // 말에도 쓴다 — 같은 물음을 세 번 띄우던 자리다(리뷰 moai-zynt.63u). git 이 멈추면 모르는 것으로 거절한다.

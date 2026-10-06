@@ -23906,6 +23906,8 @@ fn init_unknown_tracking_never_plants_commit_files() {
     let status = ok(s.path(), &["status", "--json"]);
     assert!(status.contains("tracking_unknown"), "{status}");
     assert!(!status.contains("gitattributes_rules"), "Unknown was treated as commit — {status}");
+    let human = staged(&["status"]).env("MOAI_LANG", "en").current_dir(s.path()).output().unwrap();
+    assert!(human.status.success() && String::from_utf8_lossy(&human.stdout).contains("Git did not answer"));
     for args in
         [vec!["init", "--json"], vec!["init", "--tracking", "exclude", "--json"], vec!["init", "--check", "--json"]]
     {
@@ -23951,8 +23953,19 @@ fn init_uses_the_persons_global_excludes_on_first_and_later_runs() {
     let ignore = s.path().join("ignore");
     std::fs::write(&ignore, ".moai/\n").unwrap();
     let config = s.path().join("global-config");
-    std::fs::write(&config, format!("[core]\nexcludesFile = {}\n", ignore.display())).unwrap();
-    let run = |args: &[&str]| staged(args).env("GIT_CONFIG_GLOBAL", &config).current_dir(&root).output().unwrap();
+    std::fs::write(
+        &config,
+        format!("[core]\nexcludesFile = {}\n[safe]\ndirectory = {}\n", ignore.display(), root.display()),
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        staged(args)
+            .env("GIT_CONFIG_GLOBAL", &config)
+            .env("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+            .current_dir(&root)
+            .output()
+            .unwrap()
+    };
     for args in [vec!["init", "argos", "--json"], vec!["init", "--json"]] {
         let out = run(&args);
         let text = String::from_utf8_lossy(&out.stdout);
@@ -23992,6 +24005,10 @@ fn init_reads_a_linked_worktrees_guide_from_the_main_tracker() {
     assert!(!ok(&side, &["status", "--json"]).contains("agents_hand_edited"));
     std::fs::write(main.join(".moai/guide.md"), "edited\n").unwrap();
     assert_eq!(field(&ok(&side, &["init", "--check", "--json"]), "agents"), "stale");
+    std::fs::write(main.join(".moai/guide.md"), b"bad\xff\n").unwrap();
+    let out = moai(&side, &["init", "--check"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&main.join(".moai/guide.md").display().to_string()));
 }
 
 #[cfg(unix)]

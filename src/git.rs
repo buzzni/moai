@@ -302,7 +302,7 @@ pub fn waited(child: &mut std::process::Child, budget: std::time::Duration) -> O
 /// [`run`] 과 같되 **설정 파일의 자리를 돌리는 변수 셋은 물려준다**(moai-b5np,
 /// [`crate::git_leaks::CONFIG_FILES`]).
 ///
-/// **사용자 설정의 답을 묻는 자리만 쓴다** — `merge_driver::planted_anywhere` 와 `init` 의 `check-ignore`.
+/// **사용자 설정의 답을 묻는 자리만 쓴다** — `merge_driver::planted_anywhere` 와 `init` 의 `check-ignore`·`rev-parse`.
 /// git 이 드라이버를 찾는가와 트래커를 무시하는가는 **git 이 실제로 읽을 파일**에서 나와야 참이다. 걷은 채로 물으면
 /// `GIT_CONFIG_GLOBAL` 로 전역 설정을 딴 파일에 둔 사람(dotfile 관리기·CI 이미지·컨테이너 래퍼)
 /// 에게 "안 심었다 — 병합이 기본 머지로 내려앉는다" 고 하는데, 그 줄은 실제로 돈다.
