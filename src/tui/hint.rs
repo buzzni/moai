@@ -803,7 +803,7 @@ mod tests {
         use ratatui::crossterm::event::KeyCode::*;
         for (key, values) in [
             ("priority", vec!["p0", "p1", "p2", "p3"]),
-            ("type", vec!["issue", "epic", "milestone", "idea"]),
+            ("type", vec!["issue", "epic", "milestone", "backlog"]),
             ("status", vec!["queued", "testing", "shipped"]),
         ] {
             let mut a = explorer();

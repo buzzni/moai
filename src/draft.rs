@@ -242,9 +242,9 @@ pub fn parse(src: &str) -> Result<Vec<Draft>, String> {
 /// 계획이 무엇을 세우는가. 형식은 하나고, 다른 것은 `#` 줄이 설 자리가 있느냐뿐이다.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shape {
-    /// 에픽과 그 이슈 — `add --from`, `idea promote`
+    /// 에픽과 그 이슈 — `add --from`, `backlog promote`
     Plan,
-    /// 이미 선 에픽에 넣을 이슈만 — `idea promote -e` (moai-f3ml). 에픽은 이미 있으니
+    /// 이미 선 에픽에 넣을 이슈만 — `backlog promote -e` (moai-f3ml). 에픽은 이미 있으니
     /// `#` 줄은 받지 않고, `-` 줄의 `epic` 은 비어 나온다 — 어느 에픽인지는 부르는 쪽이 안다
     Members,
 }

@@ -19,7 +19,7 @@ fn assignee_of(arg: Option<&str>, by: &Actor) -> (Option<String>, Option<String>
 
 /// `--from` 이 받는 한 덩이. `-` 이면 stdin, 아니면 파일이다.
 ///
-/// [`read_plan`] 만 부른다 — `add --from` 과 `idea promote --from` 은 그쪽 한 길로 읽는다. 여기를
+/// [`read_plan`] 만 부른다 — `add --from` 과 `backlog promote --from` 은 그쪽 한 길로 읽는다. 여기를
 /// 따로 부르면 템플릿 채우기를 건너뛴 계획이 선다.
 fn read_source(from: &str) -> R<String> {
     match from {
@@ -35,7 +35,7 @@ fn read_source(from: &str) -> R<String> {
 
 /// `--from` 의 계획 한 덩이를 읽어 **형식을 읽고 템플릿 변수를 채운다**(moai-cypw).
 ///
-/// `add --from` 과 `idea promote --from` 이 **이것만** 부른다 — 한쪽만 `--var` 를 받거나 한쪽만
+/// `add --from` 과 `backlog promote --from` 이 **이것만** 부른다 — 한쪽만 `--var` 를 받거나 한쪽만
 /// 거절 문장이 달라지지 않게. 읽기와 채우기는 `draft::fill` 한 자리다 — 값은 형식을 안 지나 늘
 /// 제목 글자다.
 ///
@@ -181,7 +181,7 @@ fn read_body_told(arg: Option<String>, ctx: &Ctx, plan_on_stdin: bool) -> R<Opti
 /// [`say_if_text_names_a_file`] 가 **누구의 글을 재는가** — 알림은 그 깃발과 그 글이 가는 자리를 댄다.
 #[derive(Clone, Copy)]
 pub enum Given {
-    /// `add`·`edit`·`idea add` 의 `--body` — 본문이다.
+    /// `add`·`edit`·`backlog add` 의 `--body` — 본문이다.
     Body,
     /// 계획이 stdin 을 이미 쥔 판의 `--body`(`add --from -`). `--body - < 파일` 을 권하면 따라 친 부름이
     /// `refuse.plan_body_stdin` 으로 거절되므로 계획을 파일로 옮기라고 댄다([`read_body_told`]).
@@ -199,7 +199,7 @@ pub enum Given {
 /// 2026-10-01 에 두 번 있었다. 막지도 글을 바꾸지도 않는다 — 경로 같은 글이 정말 글일 수 있다.
 /// **파일은 열지 않는다**: [`names_a_file`] 은 stat 이고, 한 번도 안 열던 경로를 새로 열지 않는다.
 ///
-/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`idea add`·`note -b`·`mv -m`·`defer -m` 이 한 자로 잰다 —
+/// 이 한 자리에 두어 `add`·`add --from`·`edit`·`backlog add`·`note -b`·`mv -m`·`defer -m` 이 한 자로 잰다 —
 /// **말만 [`Given`] 을 따른다**. `note` 는 [`read_body_said`] 를 안 지나서 이것을 따로 부른다 — `note -b
 /// plan.md` 가 경로를 노트로 남기고 말이 없던 것이 2026-10-02 에 한 번 밟혔다(moai-18so.rnm). `-m` 은
 /// `mv`·`defer` 가 쓰기가 선 뒤에 부른다([`read_msg`]).
@@ -258,7 +258,7 @@ fn names_a_file(text: &str) -> Option<std::path::PathBuf> {
 ///
 /// 여기 사는 까닭은 [`crate::cli::AddArgs::from`] 위에 적어 두었다(moai-yhb1) — 짧게는, clap 의
 /// `conflicts_with_all` 에 맡기면 그 거절이 [`run`] 보다 먼저 터져 네임스페이스가 지은 거절문
-/// (`moai idea add --from -` 은 동사가 틀렸다고 말한다)을 가리고, 평문 stderr 에 exit 2 라
+/// (`moai backlog add --from -` 은 동사가 틀렸다고 말한다)을 가리고, 평문 stderr 에 exit 2 라
 /// `--json` 으로 받는 쪽이 `code` 를 못 본다.
 ///
 /// **목록이 아니라 준 것만 댄다.** 무엇이 못 서는지를 통째로 읊으면 받는 쪽이 제가 친 것을
@@ -339,9 +339,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // **마크다운은 에픽과 이슈를 낸다.** `#` 이 에픽이고 `-` 가 이슈라는
         // 뜻이 형식에 박혀 있어 종류 고정 장치가 여기까지 못 온다. 다른
         // 네임스페이스는 그래도 뜻이 통하지만(`epic add --from` 은 에픽을
-        // 낸다) idea 는 정반대다 — 일로 세지 않으려고 담은 것이 그대로
+        // 낸다) backlog 는 정반대다 — 일로 세지 않으려고 담은 것이 그대로
         // 보드에 선다. 조용히 그렇게 하느니 어디로 가야 하는지 말한다.
-        // **두 철자를 한 자리에서 막는다.** `--type idea` 만 지나가면 그쪽이
+        // **두 철자를 한 자리에서 막는다.** `--type backlog` 만 지나가면 그쪽이
         // 그대로 보드에 이슈를 만든다.
         //
         // **마크다운이 못 내는 종류는 전부 막는다.** 하나만 막으면 나머지가
@@ -353,15 +353,15 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // 이름으로 댄다.
         //
         // **여기 재는 것은 `--type` 을 지킬 수 있는가가 아니라 어느 말이 가장 도움이 되는가다**
-        // (moai-g9a8). `--type idea`·`--type milestone` 은 갈 곳을 대는 제 글이 있어 여기서
+        // (moai-g9a8). `--type backlog`·`--type milestone` 은 갈 곳을 대는 제 글이 있어 여기서
         // 잡고, `--type issue`·`--type epic` 은 아래 [`flags_a_plan_cannot_keep`] 이 못 지키는
         // 깃발로 잡는다 — 통과한다는 뜻이 아니다.
         //
         // **고를 때도 둘을 안 뭉갠다**(리뷰). `kind_override.or(args.kind)` 로 고르던 판은 동사가
         // 기본값을 들고 오는 순간 사람이 친 `--type` 을 못 봤다 — `moai issue add --from - --type
-        // idea` 와 `moai epic add --from - --type idea` 가 `moai idea promote` 를 못 듣고 깃발
-        // 얘기만 들었다. 같은 `--type idea` 를 친 둘이 어느 동사로 들어왔느냐로 다른 말을 듣고,
-        // 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다. 동사가 아예 못 받는 것이면(`idea
+        // backlog` 와 `moai epic add --from - --type backlog` 가 `moai backlog promote` 를 못 듣고 깃발
+        // 얘기만 들었다. 같은 `--type backlog` 를 친 둘이 어느 동사로 들어왔느냐로 다른 말을 듣고,
+        // 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다. 동사가 아예 못 받는 것이면(`backlog
         // add`·`milestone add`) 동사를 대고, 아니면 사람이 친 것을 댄다.
         let asked = match kind_override {
             Some(k @ (Kind::Backlog | Kind::Milestone)) => Some(k),
@@ -374,8 +374,8 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 return Err(Fail::coded(
                     format!(
                         "{}\n      {}",
-                        crate::i18n::say(lang, "refuse.plan_is_not_an_idea"),
-                        crate::i18n::say(lang, "refuse.plan_is_not_an_idea_how"),
+                        crate::i18n::say(lang, "refuse.plan_is_not_a_backlog"),
+                        crate::i18n::say(lang, "refuse.plan_is_not_a_backlog_how"),
                     ),
                     super::code::BAD_INPUT,
                 ));
@@ -392,7 +392,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
                 ));
             }
         }
-        // **네임스페이스가 먼저다**(moai-yhb1) — `moai idea add --from - -b '글'` 이 `--body` 얘기를
+        // **네임스페이스가 먼저다**(moai-yhb1) — `moai backlog add --from - -b '글'` 이 `--body` 얘기를
         // 듣고, 그것을 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알던 차례다. 위의 갈래가 지은 글은
         // 어디로 가야 하는지를 대고, 아래 글은 이 부름에서 깃발 하나만 빼라고 한다 — 둘이 겹치면
         // 덜 아는 쪽이 이기면 안 된다.
@@ -411,7 +411,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         // **stdin 은 하나다**(moai-fppn·moai-kqid). 막을 것은 `--body` 자체가 아니라 그 둘이
         // 같은 입력을 읽으려 드는 판이다 — 계획이 파일이거나 본문이 argv 에 적힌 글이면 둘은
         // 서로 다른 데서 오고, 그때 본문은 첫 뿌리에 선다. 통째로 막던 판은 다툴 것이 없는
-        // 부름까지 같이 막아, `Rooted.body` 가 서 있고 `idea promote` 가 그 길로 본문을 채우는
+        // 부름까지 같이 막아, `Rooted.body` 가 서 있고 `backlog promote` 가 그 길로 본문을 채우는
         // 동안 사람만 그 길을 못 썼다.
         //
         // **`-` 라는 철자가 아니라 stdin 인가를 잰다**(리뷰). 글자만 견주던 판은
@@ -446,10 +446,10 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // **`--var` 도 `--from` 이 있어야 뜻이 있다**(moai-cypw) — 아래 `--dry-run` 과 같은 까닭이다.
     // 조용히 버리면 템플릿을 채운 줄 안 사람이 `{{이름}}` 이 아닌 제목 하나를 만든다.
     if !args.var.is_empty() {
-        // idea 가 템플릿을 쓰는 길은 펼치기다 — 위의 `--from` 거절이 idea 에 가리키는 곳과 같게 댄다.
+        // backlog 가 템플릿을 쓰는 길은 펼치기다 — 위의 `--from` 거절이 backlog 에 가리키는 곳과 같게 댄다.
         let lang = ctx.lang();
         let how = match kind_override.or(args.kind) {
-            Some(Kind::Backlog) => crate::i18n::say(lang, "refuse.var_needs_from_idea"),
+            Some(Kind::Backlog) => crate::i18n::say(lang, "refuse.var_needs_from_backlog"),
             _ => crate::i18n::say(lang, "refuse.var_needs_from_add"),
         };
         return Err(Fail::coded(
@@ -576,7 +576,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         paint(style::priority_style(made.priority()), &format!("p{}", made.priority())),
         paint(st, style::glyph(col)),
         paint(
-            // 묶음만 묶음 색이다. idea 는 담는 것이 아니라 담기는 것이라
+            // 묶음만 묶음 색이다. backlog 는 담는 것이 아니라 담기는 것이라
             // 여기서 갈라지면 만든 순간부터 에픽처럼 보인다.
             if crate::report::is_group(&made) { style::EPIC } else { style::PLAIN },
             &made.title
@@ -608,7 +608,7 @@ fn bulk(
     let drafts = read_plan(from, vars, draft::Shape::Plan, ctx.lang())?;
     // **마일스톤은 계획의 뿌리로 간다**(moai-xoyg) — 에픽에 서고 이슈는 물려받는다.
     // 본문은 **첫 뿌리 하나**다(moai-kqid) — 물려받는 값이 아니라, 뿌리마다 적으면 같은 글이
-    // 에픽 수만큼 베껴진다. 고르는 자는 `create_drafts` 하나고 `idea promote` 가 데려가는
+    // 에픽 수만큼 베껴진다. 고르는 자는 `create_drafts` 하나고 `backlog promote` 가 데려가는
     // 본문도 그 자리를 지난다.
     let rooted = Rooted { milestone, body };
 
@@ -657,7 +657,7 @@ fn bulk(
     out.extend(drafts.iter().zip(&made).map(|(d, i)| line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(tally(&drafts, ctx.lang()));
-    // **만든 줄에서 읽는다** — `idea promote` 와 한 자리다(리뷰). 적은 값을 그대로 찍으면
+    // **만든 줄에서 읽는다** — `backlog promote` 와 한 자리다(리뷰). 적은 값을 그대로 찍으면
     // 같은 한 줄을 한쪽은 argv 로, 한쪽은 파일로 셈해, 쓰기에 정규화가 붙는 날 둘이 갈린다.
     out.extend(milestone_line(stood_on(&made), known, made.iter().filter(|i| is_root(i)).count(), ctx.lang()));
     Ok(out)
@@ -665,7 +665,7 @@ fn bulk(
 
 /// 만든 줄에서 **뿌리가 선 마일스톤**을 읽는다 — 적은 값이 아니라 써진 값이다.
 ///
-/// `add --from` 과 `idea promote` 가 이 한 자리를 쓴다(리뷰). 뿌리가 없으면(`-e <에픽>`)
+/// `add --from` 과 `backlog promote` 가 이 한 자리를 쓴다(리뷰). 뿌리가 없으면(`-e <에픽>`)
 /// `None` 이고, 그것이 그대로 답이다 — 그 에픽이 이미 임자다.
 ///
 /// **뿌리는 최상위 id 다**(moai-exh7). 멤버는 에픽의 자식 id 를 받고 제 `epic` 을 안 적으므로
@@ -676,7 +676,7 @@ pub fn stood_on(made: &[Issue]) -> Option<&str> {
 
 /// 계획이 만든 줄 가운데 **뿌리인가** — id 밑에 부모가 없는 줄.
 ///
-/// **한 자리에서 잰다**(리뷰). [`stood_on`] 이 마일스톤 줄을 고르는 자고 `idea::promote` 의
+/// **한 자리에서 잰다**(리뷰). [`stood_on`] 이 마일스톤 줄을 고르는 자고 `backlog::promote` 의
 /// `grown` 이 출처 노트를 붙일 줄을 고르는 자인데, 둘이 갈라지면 한쪽은 엉뚱한 릴리스를 찍고
 /// 한쪽은 같은 노트를 멤버마다 붙여 `이슈 0건` 이라 말한다 — 실제로 그랬고, 고치는 데 두 파일을
 /// 같이 손대야 했다. 컴파일러가 둘을 이름으로 매어 두는 것이 주석 한 줄보다 싸다.
@@ -687,7 +687,7 @@ pub fn is_root(i: &Issue) -> bool {
 /// 계획의 **뿌리**(id 부모가 없는 줄)가 받아 갈 것. 멤버는 거기서 물려받으므로 여기서 안 적는다 —
 /// 멤버마다 적으면 그것이 파생값을 저장하는 것이고, 에픽을 옮기는 날 멤버가 안 따라온다.
 ///
-/// `add --from --milestone` 이 마일스톤을 주고(moai-xoyg), `idea promote` 가 담아 둔 생각의
+/// `add --from --milestone` 이 마일스톤을 주고(moai-xoyg), `backlog promote` 가 담아 둔 생각의
 /// 마일스톤과 본문을 준다(moai-07v1). **`-e <에픽>` 으로 선 에픽에 펼칠 때는 뿌리가 없어**
 /// 아무것도 안 서는데, 그것이 맞는 답이다 — 그 에픽이 이미 임자다.
 ///
@@ -707,7 +707,7 @@ pub struct Rooted<'a> {
 /// 초안 묶음을 실제 이슈로 빚어 `issues` 에 밀어 넣는다. **쓰기 트랜잭션
 /// 안에서 부른다** — 다 되거나 하나도 안 된다는 성질이 그 트랜잭션에서 온다.
 ///
-/// `add --from` 과 `idea promote` 가 이 한 길을 같이 쓴다. 둘이 갈라지면
+/// `add --from` 과 `backlog promote` 가 이 한 길을 같이 쓴다. 둘이 갈라지면
 /// 같은 마크다운이 어느 쪽으로 들어왔느냐에 따라 다른 이슈가 된다.
 ///
 /// 담당은 **이미 갈라진 채로** 받는다 (`(이름, 메일)`). 부르는 쪽이 `-a` 를
@@ -728,7 +728,7 @@ pub fn create_drafts(
     // **`into` 가 서면 계획에 `#` 줄이 없다**([`draft::Shape::Members`]). 어긴 채로 오면 그 `#` 줄이
     // `into` 의 자식 id 를 받아 에픽이 에픽 밑에 서고, 뿌리가 아니게 되어 마일스톤과 본문을 잃는다 —
     // 예전에는 `epic` 필드가 틀리는 데서 그쳐 `moai edit -e` 로 되돌렸지만, 이제는 id 에 박히고
-    // id 는 안 고친다(moai-sfza). 지키는 자가 다른 파일 한 줄(`cmd::idea` 의 `Shape` 고르기)뿐이라
+    // id 는 안 고친다(moai-sfza). 지키는 자가 다른 파일 한 줄(`cmd::backlog` 의 `Shape` 고르기)뿐이라
     // 여기에 못을 박는다.
     debug_assert!(
         into.is_none() || drafts.iter().all(|d| d.kind != Kind::Epic),
@@ -891,7 +891,7 @@ pub fn check_plan(drafts: &[Draft], rooted: Rooted<'_>, lang: crate::i18n::Lang)
 /// 미리 보는 자리인데 거기서만 사람 글이 나오면, 미리 보는 쪽은 파싱에
 /// 실패하고 결국 진짜로 만들어 보고서야 계획을 읽는다.
 ///
-/// `add --from` 과 `idea promote` 가 이 한 자리를 같이 쓴다. 둘이 갈라지면
+/// `add --from` 과 `backlog promote` 가 이 한 자리를 같이 쓴다. 둘이 갈라지면
 /// 같은 마크다운이 어느 동사로 들어왔느냐에 따라 다른 모양이 되고, 미리
 /// 검사하는 코드가 두 벌 필요해진다. `promoted` 는 펼칠 때만 붙는다.
 ///
@@ -927,7 +927,7 @@ pub fn json_rehearsal(
         drafts: Vec<DraftOut<'a>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         promoted: Option<&'a str>,
-        /// 이슈가 들 이미 선 에픽 (`idea promote -e`). 초안의 `epic` 은 첨자라 거기에 못 적는다
+        /// 이슈가 들 이미 선 에픽 (`backlog promote -e`). 초안의 `epic` 은 첨자라 거기에 못 적는다
         #[serde(skip_serializing_if = "Option::is_none")]
         into: Option<&'a str>,
         /// 뿌리인 에픽이 설 마일스톤. **없으면 안 낸다** — 그 없음이 답이다(AGENTS.md).
@@ -997,8 +997,8 @@ fn body_lands_on(drafts: &[Draft], body: Option<&str>) -> Option<usize> {
 /// 마일스톤은 도는 판에서 `ready` 가 무엇을 먼저 내주는지를 가르는 값이라, 조용히 서면
 /// 계획을 세운 쪽이 그것을 `moai show` 로 한 번 더 확인해야 한다.
 ///
-/// **본문 글자는 여기서 안 낸다**(moai-07v1). 그것은 펼치는 idea 가 이미 들고 있는 글이고
-/// (`moai show <idea>`), 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이 그 글에 묻힌다.
+/// **본문 글자는 여기서 안 낸다**(moai-07v1). 그것은 펼치는 backlog 가 이미 들고 있는 글이고
+/// (`moai show <backlog>`), 64KB 짜리 본문을 연습이 한 번 더 찍으면 계획이 그 글에 묻힌다.
 /// 선다는 **사실**은 [`body_line`] 이 낸다 — 글자를 안 찍는다는 이 결정과 어긋나지 않는다.
 ///
 /// **없는 마일스톤에는 "선다" 고 말하지 않는다**(moai-pp9i.gxf). `--milestone <없는 id>` 가 0 으로
@@ -1036,7 +1036,7 @@ pub fn say_no_such_milestone(milestone: Option<&str>, known: bool, lang: crate::
 ///
 /// **종류는 그 id 의 뒷줄로 읽는다**([`crate::report::kinds_of`]) — `status` 가 같은 id 의 줄 둘을 그렇게
 /// 읽는다. 아무 줄이나 마일스톤이면 참으로 읽던 때는 마일스톤 줄 뒤에 다른 종류의 쌍둥이가 선 id 를
-/// 연습(`add --from --dry-run`·`idea promote --dry-run`)이 "선다" 고 냈는데, `status` 는 그 id 에 선 줄을
+/// 연습(`add --from --dry-run`·`backlog promote --dry-run`)이 "선다" 고 냈는데, `status` 는 그 id 에 선 줄을
 /// `dangling_milestone` 으로 셌다(리뷰 moai-3hxc.uhh). 쓰는 길은 쌍둥이가 선 파일을 통째로 물려 여기 안 닿는다.
 pub fn is_milestone(issues: &[Issue], id: Option<&str>) -> bool {
     id.is_some_and(|m| crate::report::kinds_of(issues, &[m]).get(m) == Some(&Kind::Milestone))

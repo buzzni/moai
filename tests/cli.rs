@@ -850,7 +850,7 @@ fn the_issue_command_refusals_stand_in_one_language() {
         let group = field(&ok(s.path(), &["add", "묶음", "--type", "epic", "--json"]), "id");
         // 펼치기 화면을 실제로 세운다. **제목과 계획은 아스키다** — 영어 화면을 재는 잣대가
         // "한글이 한 자도 없다" 라, 여기 한국어를 두면 그 줄이 제 자료 때문에 붉어진다.
-        let idea = ok(s.path(), &["idea", "add", "a parked thought", "-q"]).trim().to_string();
+        let idea = ok(s.path(), &["backlog", "add", "a parked thought", "-q"]).trim().to_string();
         let plan = s.path().join("plan.md");
         std::fs::write(&plan, "# Storage layer\n- [p1] first issue\n").unwrap();
         let plan = plan.display().to_string();
@@ -875,7 +875,7 @@ fn the_issue_command_refusals_stand_in_one_language() {
             // **그 이름의 화면을 실제로 세운다**(리뷰). 여기 `idea add … -q` 를 두던 판은 id 한
             // 줄만 받아, 두 잣대(빈 줄이 아니다·한글이 없다)가 id 를 재고 통과했다 — 줄의 이름이
             // 댄 화면과 그 여섯 키(`idea.will_unfold` 무리)는 한 번도 안 섰다.
-            ("idea promote --dry-run".to_string(), run(&["idea", "promote", &idea, "--dry-run", "--from", &plan])),
+            ("idea promote --dry-run".to_string(), run(&["backlog", "promote", &idea, "--dry-run", "--from", &plan])),
             // 같은 거절을 두 명령이 같은 글로 말하는지 — 한쪽만 말묶음으로 옮겨졌던 자리다.
             ("mv <group> --from".to_string(), run(&["mv", &group, "done", "--from", "todo"])),
             ("defer <group> --from".to_string(), run(&["defer", &group, "--from", "todo", "-m", "why"])),
@@ -3052,7 +3052,7 @@ fn break_the_install(root: &Path) {
 }
 
 /// **층의 알림 셈은 안쪽 보드의 것과 같은 자다**(moai-prdh) — 설치가 어긋난 것
-/// (`cmd::status::install_notices`)과 순수한 셈이 낸 것(쌓인 idea·미룬 것)을 함께 센다. 한때
+/// (`cmd::status::install_notices`)과 순수한 셈이 낸 것(쌓인 백로그·미룬 것)을 함께 센다. 한때
 /// 층은 경고만 세, "드러난 문제 없다" 를 보고 들어간 사람이 안쪽 `moai status` 에서 알림을
 /// 처음 봤다.
 ///
@@ -3471,8 +3471,8 @@ fn every_way_into_a_column_stamps_the_same() {
         "첫 칸에서 난 줄에 시각을 적었다 — {untouched}"
     );
 
-    let thought = made(&["idea", "add", "펼칠 생각", "-q"]);
-    let out = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-"], "# 펼친 에픽\n- 첫 일\n");
+    let thought = made(&["backlog", "add", "펼칠 생각", "-q"]);
+    let out = from_stdin(s.path(), &["backlog", "promote", &thought, "--from", "-"], "# 펼친 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let line = line_of(s.path(), &thought);
     assert!(
@@ -3748,7 +3748,7 @@ fn edit_says_when_another_milestone_loses_to_the_epic_or_an_ancestor() {
     let json = ok(s.path(), &["edit", &grand, "--milestone", &m2, "--json"]);
     assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","parent":"{under}"}}"#)), "{json}");
     // 뿌리로 올라간 생각 밑 — 어느 필드로도 못 옮기니 길은 안 대고, 조용하지도 않다.
-    let thought = ok(s.path(), &["idea", "add", "생각", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "생각", "-q"]).trim().to_string();
     let pinned = add(s.path(), &["생각 밑", "--parent", &thought]);
     let err = says(&pinned, &format!("id 가 {thought} 밑에"), "어느 마일스톤에도 안 든다");
     assert!(!err.contains("moai edit"), "고쳐도 안 바뀌는 길을 댔다 — {err:?}");
@@ -4039,7 +4039,7 @@ fn rm_names_the_rows_that_inherited_the_epic_it_removed() {
             row("argos-0001", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
             row("argos-0001.abc", "물려받는 자식", "issue", ""),
             row("argos-0001.abc.def", "물려받는 손자", "issue", ""),
-            row("argos-0001.i01", "물려받는 생각", "idea", ""),
+            row("argos-0001.i01", "물려받는 생각", "backlog", ""),
             row("argos-0002", "전부터 끊긴 멤버", "issue", ",\"epic\":\"argos-zzzz\""),
             row("argos-0002.abc", "전부터 끊긴 자식", "issue", ""),
             row("argos-e001", "지울 에픽", "epic", ""),
@@ -4373,7 +4373,7 @@ fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
     // 마일스톤을 쓰는 저장소여야 `no_milestone` 도 같은 자로 읽는지 본다.
     let stone = add(s.path(), &["v1", "--type", "milestone"]);
     let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &stone]);
-    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let thought = add(s.path(), &["생각", "--type", "backlog", "-e", &epic]);
     let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
     assert!(moai(s.path(), &["rm", &epic]).status.success());
 
@@ -4407,7 +4407,7 @@ fn none_filters_skip_a_child_under_a_lost_thought_like_status() {
     let s = init("nonelost");
     let mile = add(s.path(), &["마일스톤", "--type", "milestone"]);
     let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &mile]);
-    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let thought = add(s.path(), &["생각", "--type", "backlog", "-e", &epic]);
     let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
     let loose = add(s.path(), &["그냥 소속 없는 일"]);
     assert!(moai(s.path(), &["rm", &epic]).status.success());
@@ -4512,10 +4512,11 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
 
     // **연습이 진짜와 같은 것을 본다**(moai-5229). 연습이 "좋다" 를 받은 뒤에 진짜가 거절하면
     // 그 승인이 뒤늦은 말이 된다 — `add --from` 과 `idea promote` 두 길 모두.
-    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    for args in
-        [vec!["add", "--from", "-", "--dry-run"], vec!["idea", "promote", thought.as_str(), "--from", "-", "--dry-run"]]
-    {
+    let thought = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    for args in [
+        vec!["add", "--from", "-", "--dry-run"],
+        vec!["backlog", "promote", thought.as_str(), "--from", "-", "--dry-run"],
+    ] {
         let out = from_stdin(s.path(), &args, &format!("# 에픽\n- {big}\n"));
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "연습이 진짜가 거절할 계획에 좋다고 했다 — {args:?}");
@@ -4733,9 +4734,9 @@ fn every_surface_that_prints_a_group_reads_its_column() {
         assert!(json.contains(r#""derived_status":"in_progress""#), "{args:?} 가 읽은 칸을 안 낸다 — {json}");
     }
     // 펼친 계획의 에픽도 같다.
-    let idea = ok(s.path(), &["idea", "add", "캐시 층", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["backlog", "add", "캐시 층", "-q"]).trim().to_string();
     let grown =
-        from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-", "--json"], "# 캐시 층\n- [p2] 첫 이슈\n");
+        from_stdin(s.path(), &["backlog", "promote", &idea, "--from", "-", "--json"], "# 캐시 층\n- [p2] 첫 이슈\n");
     let json = String::from_utf8_lossy(&grown.stdout).to_string();
     assert!(json.contains(r#""derived_status":"todo""#), "펼친 에픽이 읽은 칸을 안 낸다 — {json}");
 }
@@ -5195,7 +5196,7 @@ fn prime_never_fails_where_there_is_no_tracker() {
     assert!(moai(s.path(), &["prime", "--json"]).status.success(), "--json 이 실패했다");
     // **두 표면이 같은 것을 낸다.** 사람 쪽만 닫기 전 목록과 명령을 빼면, 훅에 건 쪽이
     // 새 체크아웃에서 규칙 없는 판을 받고 `--json` 쪽은 받는다 — 어느 것이 참인지 못 가린다.
-    assert!(said.contains("moai idea add"), "사람 쪽에만 명령이 빠졌다\n{said}");
+    assert!(said.contains("moai backlog add"), "사람 쪽에만 명령이 빠졌다\n{said}");
     let json = ok(s.path(), &["prime", "--json"]);
     assert!(json.contains("\"no_tracker\":true") && !json.contains("tracker_error"), "{json}");
 }
@@ -5229,7 +5230,7 @@ fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
         "까닭을 판에 안 실었다\n{said}"
     );
     assert!(!said.contains("`.moai` 가 없다"), "못 연 트래커를 없는 것으로 읽었다\n{said}");
-    assert!(said.contains("moai idea add"), "닫기 전 목록과 명령이 빠졌다\n{said}");
+    assert!(said.contains("moai backlog add"), "닫기 전 목록과 명령이 빠졌다\n{said}");
     // 말은 한 번 — 판이 대는 까닭을 stderr 에 또 내지 않는다.
     assert!(!String::from_utf8_lossy(&out.stderr).contains("issues.jsonl"), "{}", String::from_utf8_lossy(&out.stderr));
 
@@ -5571,7 +5572,7 @@ fn show_filters_by_time() {
         ok_at(s.path(), "2026-09-05T00:00:00Z", &["mv", id, "done"]);
     }
     ok_at(s.path(), "2026-09-06T00:00:00Z", &["edit", &old, "--title", "옛 일 고침"]);
-    let idea = ok_at(s.path(), "2026-09-06T00:00:00Z", &["idea", "add", "생각", "-q"]).trim().to_string();
+    let idea = ok_at(s.path(), "2026-09-06T00:00:00Z", &["backlog", "add", "생각", "-q"]).trim().to_string();
     let picked = |extra: &[&str]| {
         let mut args = vec!["show", "--json"];
         args.extend_from_slice(extra);
@@ -6384,7 +6385,7 @@ fn a_rehearsal_measures_the_body_it_would_write() {
 /// **그 거절은 moai 의 것이지 clap 의 것이 아니다**(moai-yhb1).
 ///
 /// `conflicts_with_all` 에 맡기던 판은 둘을 깼다. 하나, `add::run` 이 닿기 전에 터져
-/// 네임스페이스가 지은 거절문을 가렸다 — `moai idea add --from - -b '글'` 이 "`--body` 를 빼라"
+/// 네임스페이스가 지은 거절문을 가렸다 — `moai backlog add --from - -b '글'` 이 "`--body` 를 빼라"
 /// 를 듣고, 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알았다. 둘, 평문 stderr 에 exit 2 라
 /// `--json` 으로 받는 쪽이 `code` 를 못 봤다 — 같은 명령의 형제 거절(`--milestone <모양 틀림>`)은
 /// `{"code": …}` 에 exit 1 이다. 한 기능에 거절 계약이 둘이면 그것은 계약이 아니다.
@@ -6392,7 +6393,7 @@ fn a_rehearsal_measures_the_body_it_would_write() {
 fn a_plan_refusal_is_moais_own_not_claps() {
     let s = init("planrefusal");
     // 네임스페이스가 먼저다 — 깃발 얘기는 한마디도 안 나온다.
-    for verb in [["idea", "add"].as_slice(), ["milestone", "add"].as_slice()] {
+    for verb in [["backlog", "add"].as_slice(), ["milestone", "add"].as_slice()] {
         let mut argv = verb.to_vec();
         argv.extend_from_slice(&["--from", "-", "-b", "글"]);
         let out = from_stdin(s.path(), &argv, PLAN);
@@ -6406,7 +6407,7 @@ fn a_plan_refusal_is_moais_own_not_claps() {
     }
     // 동사가 맞으면 깃발을 댄다 — 그리고 그 거절도 `--json` 으로 갈라진다.
     for (argv, want) in [
-        (["idea", "add", "--from", "-", "-b", "글"].as_slice(), "moai idea promote"),
+        (["backlog", "add", "--from", "-", "-b", "글"].as_slice(), "moai backlog promote"),
         (["add", "--from", "-", "--status", "in_progress"].as_slice(), "--status"),
         (["add", "--from", "-", "-b", "-"].as_slice(), "--body"),
     ] {
@@ -6545,7 +6546,7 @@ fn a_single_add_says_a_milestone_that_is_not_there() {
     assert!(said(&out), "-q: 말없이 지나갔다");
 
     // idea 도 이 길을 지난다.
-    let out = moai(s.path(), &["idea", "add", "나중에 볼 것", "--milestone", "argos-zzzz", "-q"]);
+    let out = moai(s.path(), &["backlog", "add", "나중에 볼 것", "--milestone", "argos-zzzz", "-q"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(said(&out), "idea add 가 말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
 
@@ -6700,7 +6701,7 @@ fn a_single_add_says_an_epic_that_is_not_there() {
     assert!(status.contains("dangling_epic"), "알린 말의 근거가 없다\n{status}");
 
     // idea 도 이 길을 지난다.
-    let out = moai(s.path(), &["idea", "add", "나중에 볼 것", "-e", "argos-zzzz", "-q"]);
+    let out = moai(s.path(), &["backlog", "add", "나중에 볼 것", "-e", "argos-zzzz", "-q"]);
     assert!(out.status.success(), "{}", text(&out));
     assert!(said(&out, "argos-zzzz"), "idea add 가 말없이 지나갔다\n{}", text(&out));
 
@@ -6815,10 +6816,10 @@ fn a_single_add_says_a_missing_milestone_even_when_the_epic_overrides_it() {
 fn promote_carries_the_milestone_and_the_body() {
     let s = init("promotecarry");
     let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
-    let idea = ok(s.path(), &["idea", "add", "캐시 층", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+    let idea = ok(s.path(), &["backlog", "add", "캐시 층", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
         .trim()
         .to_string();
-    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], "# 캐시 층\n- [p2] 첫 이슈\n");
+    let grown = from_stdin(s.path(), &["backlog", "promote", &idea, "--from", "-"], "# 캐시 층\n- [p2] 첫 이슈\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
 
     let made = issues(s.path());
@@ -6846,11 +6847,11 @@ fn promote_carries_the_milestone_and_the_body() {
 fn a_multi_epic_unfold_copies_the_body_once() {
     let s = init("promotemany");
     let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
-    let idea = ok(s.path(), &["idea", "add", "두 갈래", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+    let idea = ok(s.path(), &["backlog", "add", "두 갈래", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
         .trim()
         .to_string();
     let plan = "# 앞 에픽\n- [p1] 첫 일\n# 뒤 에픽\n- [p2] 둘째 일\n";
-    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], plan);
+    let grown = from_stdin(s.path(), &["backlog", "promote", &idea, "--from", "-"], plan);
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
 
     let made = issues(s.path());
@@ -6870,9 +6871,10 @@ fn promote_into_a_standing_epic_carries_nothing() {
     let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
     let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
     let epic = add(s.path(), &["선 에픽", "--type", "epic", "--milestone", &m1]);
-    let idea =
-        ok(s.path(), &["idea", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"]).trim().to_string();
-    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "-e", &epic, "--from", "-"], "- 멤버 하나\n");
+    let idea = ok(s.path(), &["backlog", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"])
+        .trim()
+        .to_string();
+    let grown = from_stdin(s.path(), &["backlog", "promote", &idea, "-e", &epic, "--from", "-"], "- 멤버 하나\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
 
     let made = issues(s.path());
@@ -6894,17 +6896,17 @@ fn promote_carries_the_milestone_the_tool_shows_it_under() {
     let epic = add(s.path(), &["담는 에픽", "--type", "epic", "--milestone", &m1]);
 
     // 제 필드는 비었고 에픽이 `m1` 에 선 생각. 화면은 이것을 `m1` 밑에 낸다.
-    let bare = ok(s.path(), &["idea", "add", "필드 없는 생각", "-e", &epic, "-q"]).trim().to_string();
+    let bare = ok(s.path(), &["backlog", "add", "필드 없는 생각", "-e", &epic, "-q"]).trim().to_string();
     // idea 는 목록에서 접히므로 `--type idea` 로 펴서 본다 — 접혔을 뿐 `m1` 밑이다.
     let ideas_under = ok(s.path(), &["show", "--milestone", &m1, "--type", "idea"]);
     assert!(ideas_under.contains("필드 없는 생각"), "화면이 m1 밑에 안 냈다\n{ideas_under}");
-    let grown = from_stdin(s.path(), &["idea", "promote", &bare, "--from", "-"], "# 펼친 하나\n- 첫 일\n");
+    let grown = from_stdin(s.path(), &["backlog", "promote", &bare, "--from", "-"], "# 펼친 하나\n- 첫 일\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 하나"), "릴리스 밖으로 펼쳤다");
 
     // 제 필드가 `m2` 인데 에픽의 `m1` 이 이기는 생각. 이긴 쪽을 데려간다.
-    let lost = ok(s.path(), &["idea", "add", "진 필드", "-e", &epic, "--milestone", &m2, "-q"]).trim().to_string();
-    let grown = from_stdin(s.path(), &["idea", "promote", &lost, "--from", "-"], "# 펼친 둘\n- 둘째 일\n");
+    let lost = ok(s.path(), &["backlog", "add", "진 필드", "-e", &epic, "--milestone", &m2, "-q"]).trim().to_string();
+    let grown = from_stdin(s.path(), &["backlog", "promote", &lost, "--from", "-"], "# 펼친 둘\n- 둘째 일\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
     let under2 = ok(s.path(), &["show", "--milestone", &m2]);
     assert!(!under2.contains("펼친 둘"), "아무 화면에도 없던 값을 데려갔다\n{under2}");
@@ -6921,10 +6923,11 @@ fn promote_says_when_the_milestone_it_carries_is_dead() {
     let s = init("promotedead");
     let put_off = ok(s.path(), &["milestone", "add", "미룬 v", "-q"]).trim().to_string();
     ok(s.path(), &["defer", &put_off, "-m", "다음 분기"]);
-    let idea = ok(s.path(), &["idea", "add", "미룬 릴리스의 생각", "--milestone", &put_off, "-q"]).trim().to_string();
+    let idea =
+        ok(s.path(), &["backlog", "add", "미룬 릴리스의 생각", "--milestone", &put_off, "-q"]).trim().to_string();
 
     for dry in [true, false] {
-        let mut argv = vec!["idea", "promote", &idea, "--from", "-"];
+        let mut argv = vec!["backlog", "promote", &idea, "--from", "-"];
         if dry {
             argv.push("--dry-run");
         }
@@ -6938,8 +6941,8 @@ fn promote_says_when_the_milestone_it_carries_is_dead() {
     let shut = ok(s.path(), &["milestone", "add", "닫힌 v", "-q"]).trim().to_string();
     let done = add(s.path(), &["끝난 멤버", "--milestone", &shut]);
     ok(s.path(), &["mv", &done, "done"]);
-    let late = ok(s.path(), &["idea", "add", "닫힌 릴리스의 생각", "--milestone", &shut, "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &late, "--from", "-"], "# 늦은 것\n- 한 일\n");
+    let late = ok(s.path(), &["backlog", "add", "닫힌 릴리스의 생각", "--milestone", &shut, "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &late, "--from", "-"], "# 늦은 것\n- 한 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stderr).contains(&shut), "닫힌 것을 안 알렸다");
     assert!(ok(s.path(), &["show", "--milestone", &shut]).contains("늦은 것"), "데려가지 않았다");
@@ -7011,15 +7014,15 @@ fn template_vars_that_do_not_fit_are_refused_and_write_nothing() {
 #[test]
 fn promote_fills_a_template_too() {
     let s = init("templatepromote");
-    let idea = ok(s.path(), &["idea", "add", "릴리스를 돌린다", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["backlog", "add", "릴리스를 돌린다", "-q"]).trim().to_string();
     let tpl = s.path().join("t.md");
     std::fs::write(&tpl, "# 릴리스 {{version}}\n- 올린다\n").unwrap();
-    ok(s.path(), &["idea", "promote", &idea, "--from", tpl.to_str().unwrap(), "--var", "version=2.0"]);
+    ok(s.path(), &["backlog", "promote", &idea, "--from", tpl.to_str().unwrap(), "--var", "version=2.0"]);
     assert!(issues(s.path()).contains("\"title\":\"릴리스 2.0\""), "{}", issues(s.path()));
     // 채우지 않은 템플릿은 펼치지 않는다 — 아직 열린 생각에 대고 불러, 아무것도 안 쓰고 닫지도 않는지 본다.
-    let open = ok(s.path(), &["idea", "add", "다음 릴리스", "-q"]).trim().to_string();
+    let open = ok(s.path(), &["backlog", "add", "다음 릴리스", "-q"]).trim().to_string();
     let before = issues(s.path());
-    let out = moai(s.path(), &["idea", "promote", &open, "--from", tpl.to_str().unwrap()]);
+    let out = moai(s.path(), &["backlog", "promote", &open, "--from", tpl.to_str().unwrap()]);
     assert!(!out.status.success(), "채우지 않은 템플릿을 펼쳤다");
     assert_eq!(issues(s.path()), before, "거절한 펼치기가 썼다");
 }
@@ -7408,7 +7411,7 @@ fn the_json_sweep_covers_every_command() {
     }
 }
 
-/// `moai idea` 의 공통 동사는 `moai issue` 의 것과 **같은 목록**이다(moai-g33x).
+/// `moai backlog` 의 공통 동사는 `moai issue` 의 것과 **같은 목록**이다(moai-g33x).
 ///
 /// 손으로 베껴 두었을 때는 `Typed` 에 동사를 더해도 idea 만 조용히 안 따라왔고 컴파일
 /// 오류도 안 났다. 도움말에서 두 목록을 읽어 견주므로, 다시 베끼면 여기부터 붉어진다.
@@ -7433,9 +7436,9 @@ fn idea_and_issue_share_one_list_of_verbs() {
     let only_idea: Vec<&String> = idea.iter().filter(|v| !issue.contains(v)).collect();
     assert_eq!(only_idea, [&"promote".to_string()], "idea 에만 있어야 할 동사는 promote 하나다 — {idea:?}");
     let missing: Vec<&String> = issue.iter().filter(|v| !idea.contains(v)).collect();
-    assert!(missing.is_empty(), "`moai idea` 가 {missing:?} 를 안 따라왔다 — `Typed` 를 접어 넣는 대신 베꼈나");
+    assert!(missing.is_empty(), "`moai backlog` 가 {missing:?} 를 안 따라왔다 — `Typed` 를 접어 넣는 대신 베꼈나");
     // 별명도 한 자리에서 온다 — 베낀 판에는 `alias = "ls"` 가 두 곳에 섰다.
-    ok(s.path(), &["idea", "ls", "--json"]);
+    ok(s.path(), &["backlog", "ls", "--json"]);
 }
 
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
@@ -7463,7 +7466,7 @@ const JSON_SWEEP: &[&str] = &[
     "issue",
     "epic",
     "milestone",
-    "idea",
+    "backlog",
     // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
     "project",
     // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
@@ -7908,7 +7911,7 @@ fn every_command_still_speaks_json() {
         vec!["issue", "show", "--json"],
         vec!["epic", "show", "--json"],
         vec!["milestone", "show", "--json"],
-        vec!["idea", "show", "--json"],
+        vec!["backlog", "show", "--json"],
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
@@ -8102,9 +8105,9 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
     assert_eq!(issues(s.path()), "", "거부해 놓고 썼다");
 
     // 빠져나갈 길은 부른 동사로 댄다 — `moai add -- -x` 를 따라 치면 생각 대신 이슈가 선다(리뷰).
-    let out = moai(s.path(), &["idea", "add", "-x"]);
+    let out = moai(s.path(), &["backlog", "add", "-x"]);
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success() && err.contains("moai idea add -- -x"), "{err}");
+    assert!(!out.status.success() && err.contains("moai backlog add -- -x"), "{err}");
 
     // `--from` 과 함께 와도 깃발을 댄다 — `[title]` 을 받지 않는다는 말이 아니다.
     std::fs::write(s.path().join("p.md"), "# 에픽\n- 이슈\n").unwrap();
@@ -8201,7 +8204,7 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     let id = add(s.path(), &["고칠 것"]);
     let out = moai(s.path(), &["edit", &id, "-b", "plan.md"]);
     assert!(out.status.success() && err(&out).contains(said), "edit 이 말없이 지나갔다\n{}", err(&out));
-    let out = moai(s.path(), &["idea", "add", "나중에", "-b", "plan.md", "-q"]);
+    let out = moai(s.path(), &["backlog", "add", "나중에", "-b", "plan.md", "-q"]);
     assert!(out.status.success() && err(&out).contains(said), "idea add 가 말없이 지나갔다\n{}", err(&out));
 
     // `note -b` 도 같은 자로 재고, 노트는 글자 그대로 선다(moai-18so.rnm). `note` 는 빈 stdin 을 제가
@@ -10630,15 +10633,15 @@ fn the_status_thresholds_come_from_the_config() {
     };
     let piled = |dir: &Path| -> bool {
         let json = ok(dir, &["status", "--json"]);
-        json.contains("\"idea_pile\"")
+        json.contains("\"backlog_pile\"")
     };
 
     for n in 1..=2 {
-        ok(s.path(), &["idea", "add", &format!("떠오른 것 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("떠오른 것 {n}"), "-q"]);
     }
     assert!(!piled(s.path()), "기본 문턱은 다섯인데 둘에 벌써 말한다");
 
-    set("status_idea_pile = 2");
+    set("status_backlog_pile = 2");
     assert!(piled(s.path()), "설정한 문턱이 report 까지 안 닿았다");
     // **낮춘 문턱으로도 안 막는다.** `ok` 가 종료 코드 0 을 이미 요구한다.
     ok(s.path(), &["status"]);
@@ -10650,7 +10653,7 @@ fn the_status_thresholds_come_from_the_config() {
     // 오타는 조용히 통과하지 않는다 — 통과하면 왜 문턱이 안 바뀌는지 못 찾는다.
     set("status_idea_pyle = 2");
     let err = String::from_utf8_lossy(&moai(s.path(), &["status"]).stderr).into_owned();
-    assert!(err.contains("status_idea_pile"), "오타를 조용히 넘긴다 — {err}");
+    assert!(err.contains("status_backlog_pile"), "오타를 조용히 넘긴다 — {err}");
 }
 
 // ── idea — 반짝 생각을 담는 칸 ──────────────────────────────────────
@@ -10661,7 +10664,7 @@ fn the_status_thresholds_come_from_the_config() {
 #[test]
 fn an_idea_costs_one_title() {
     let s = init("ideaadd");
-    let id = ok(s.path(), &["idea", "add", "반짝 떠오른 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "반짝 떠오른 것", "-q"]).trim().to_string();
     let line = line_of(s.path(), &id);
     assert!(line.contains(r#""kind":"idea""#), "{line}");
     assert!(!line.contains(r#""epic""#), "안 물은 에픽이 붙었다 — {line}");
@@ -10672,7 +10675,7 @@ fn an_idea_costs_one_title() {
 #[test]
 fn an_idea_takes_a_body_from_stdin() {
     let s = init("ideabody");
-    let out = from_stdin(s.path(), &["idea", "add", "긴 생각", "-b", "-", "--json"], "여러\n줄\n");
+    let out = from_stdin(s.path(), &["backlog", "add", "긴 생각", "-b", "-", "--json"], "여러\n줄\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let made = String::from_utf8(out.stdout).unwrap();
     assert!(made.contains(r#""body":"여러\n줄""#), "{made}");
@@ -10683,10 +10686,10 @@ fn an_idea_takes_a_body_from_stdin() {
 #[test]
 fn idea_ls_is_idea_show() {
     let s = init("idealist");
-    let id = ok(s.path(), &["idea", "add", "담아 둔 것", "-q"]).trim().to_string();
-    let listed = ok(s.path(), &["idea", "ls"]);
+    let id = ok(s.path(), &["backlog", "add", "담아 둔 것", "-q"]).trim().to_string();
+    let listed = ok(s.path(), &["backlog", "ls"]);
     assert!(listed.contains(&id), "{listed}");
-    assert_eq!(listed, ok(s.path(), &["idea", "show"]), "ls 와 show 가 다른 것을 낸다");
+    assert_eq!(listed, ok(s.path(), &["backlog", "show"]), "ls 와 show 가 다른 것을 낸다");
 }
 
 /// 고치고 버리는 것은 이미 있는 동사가 한다. `id` 가 대상을 정확히 가리키므로
@@ -10695,7 +10698,7 @@ fn idea_ls_is_idea_show() {
 #[test]
 fn editing_and_removing_an_idea_uses_the_plain_verbs() {
     let s = init("ideaedit");
-    let id = ok(s.path(), &["idea", "add", "고칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "고칠 것", "-q"]).trim().to_string();
     ok(s.path(), &["edit", &id, "--tag", "parser"]);
     assert!(line_of(s.path(), &id).contains(r#""tags":["parser"]"#));
     ok(s.path(), &["rm", &id]);
@@ -10707,10 +10710,10 @@ fn editing_and_removing_an_idea_uses_the_plain_verbs() {
 #[test]
 fn an_idea_is_not_a_grouping() {
     let s = init("ideadetail");
-    let id = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "반짝", "-q"]).trim().to_string();
     let out = ok(s.path(), &["show", &id]);
     assert!(!out.contains("멤버"), "idea 를 묶음으로 펼쳤다 — {out}");
-    assert!(out.contains("idea"), "무슨 종류인지 안 말한다 — {out}");
+    assert!(out.contains("backlog"), "무슨 종류인지 안 말한다 — {out}");
 }
 
 /// idea 는 일도 아니다 — 보드에도 `ready` 에도 안 든다. 여기가 조용히
@@ -10718,7 +10721,7 @@ fn an_idea_is_not_a_grouping() {
 #[test]
 fn an_idea_stays_out_of_the_board_and_ready() {
     let s = init("ideaquiet");
-    ok(s.path(), &["idea", "add", "반짝", "-q"]);
+    ok(s.path(), &["backlog", "add", "반짝", "-q"]);
     let work = add(s.path(), &["진짜 일"]);
     let st = ok(s.path(), &["status"]);
     assert!(st.contains("이슈 1"), "idea 를 이슈로 셌다 — {st}");
@@ -10732,14 +10735,14 @@ fn an_idea_stays_out_of_the_board_and_ready() {
 #[test]
 fn ideas_stay_out_of_the_plain_list() {
     let s = init("ideafilter");
-    let thought = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "반짝", "-q"]).trim().to_string();
     let work = add(s.path(), &["진짜 일"]);
 
     let plain = ok(s.path(), &["show"]);
     assert!(plain.contains(&work), "{plain}");
     assert!(!plain.contains(&thought), "기본 목록에 idea 가 섞였다 — {plain}");
 
-    for args in [vec!["show", "--type", "idea"], vec!["idea", "ls"]] {
+    for args in [vec!["show", "--type", "idea"], vec!["backlog", "ls"]] {
         let out = ok(s.path(), &args);
         assert!(out.contains(&thought), "{args:?} — {out}");
         assert!(!out.contains(&work), "{args:?} 가 일까지 냈다 — {out}");
@@ -10751,7 +10754,7 @@ fn ideas_stay_out_of_the_plain_list() {
 #[test]
 fn grep_reaches_into_ideas() {
     let s = init("ideagrep");
-    let thought = ok(s.path(), &["idea", "add", "파서를 다시 쓴다", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "파서를 다시 쓴다", "-q"]).trim().to_string();
     let out = ok(s.path(), &["show", "-g", "파서"]);
     assert!(out.contains(&thought), "적어 둔 생각을 못 찾는다 — {out}");
 }
@@ -10762,7 +10765,7 @@ fn grep_reaches_into_ideas() {
 fn the_kind_vocabulary_names_idea() {
     let s = init("ideavocab");
     let err = String::from_utf8_lossy(&moai(s.path(), &["show", "아이디어"]).stderr).into_owned();
-    assert!(err.contains("idea"), "종류 목록이 idea 를 안 댄다 — {err}");
+    assert!(err.contains("backlog"), "종류 목록이 idea 를 안 댄다 — {err}");
 }
 
 /// 쌓인 생각을 `status` 가 한 줄로 비춘다. **막지 않는다** — 종료 코드가
@@ -10772,15 +10775,15 @@ fn the_kind_vocabulary_names_idea() {
 fn status_shows_a_pile_of_ideas_without_blocking() {
     let s = init("ideapile");
     for n in 0..5 {
-        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("생각 {n}"), "-q"]);
     }
     let out = moai(s.path(), &["status"]);
     assert!(out.status.success(), "알림으로 비영 종료했다 — 그러면 이건 게이트다");
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("쌓인 idea 5건"), "{text}");
-    assert!(text.contains("moai idea ls"), "다음에 무엇을 칠지 안 말한다 — {text}");
+    assert!(text.contains("쌓인 백로그 5건"), "{text}");
+    assert!(text.contains("moai backlog ls"), "다음에 무엇을 칠지 안 말한다 — {text}");
     // `?` 는 보드에서 review 칸의 글리프다. 한 글자가 두 뜻을 지면 안 된다.
-    assert!(text.contains("+ 쌓인 idea"), "알림이 경고 글리프를 달았다 — {text}");
+    assert!(text.contains("+ 쌓인 백로그"), "알림이 경고 글리프를 달았다 — {text}");
 }
 
 /// **펼치면 닫힌다.** 에픽과 이슈가 생기고 그 idea 는 `done` 으로 간다 —
@@ -10788,10 +10791,10 @@ fn status_shows_a_pile_of_ideas_without_blocking() {
 #[test]
 fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
     let s = init("ideapromote");
-    let id = ok(s.path(), &["idea", "add", "저장 계층을 다시", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "저장 계층을 다시", "-q"]).trim().to_string();
     let out = from_stdin(
         s.path(),
-        &["idea", "promote", &id, "--from", "-"],
+        &["backlog", "promote", &id, "--from", "-"],
         "# 저장 계층\n- [p1] 원자적으로 쓴다 #bug\n- 잘린 줄을 복구한다\n",
     );
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -10815,13 +10818,13 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     // **꼬리를 알아볼 수 있게 짓는다** — 한 글자만 되풀이하면 어느 쪽에서 잘랐든 단언이 지나가,
     // "앞에서부터 줄인다" 를 못 잰다.
     let big = format!("머리{}꼬리", "가".repeat(limit / 3 - 4));
-    let id = ok(s.path(), &["idea", "add", &big, "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", &big, "-q"]).trim().to_string();
     // 머리말 길이는 접두어를 따르니 **베껴 적지 않고 여기서 잰다**. 제목 자체는 상한 아래고,
     // 머리말을 붙여야 넘는다 — 그 사이가 아니면 이 시험이 `fit` 를 한 번도 안 부른다.
     let head = format!("{id} 에서 펼쳤다 — ").len();
     assert!(big.len() <= limit && big.len() + head > limit, "{} + {head}", big.len());
 
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
     assert!(out.status.success(), "상한 턱밑 idea 를 못 펼쳤다 — {}", String::from_utf8_lossy(&out.stderr));
 
     let notes = journal(s.path());
@@ -10851,8 +10854,8 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
 #[test]
 fn what_came_from_what_lives_in_the_journal() {
     let s = init("ideatrace");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 새 에픽\n- 첫 일\n");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 
     let epic = {
@@ -10869,9 +10872,9 @@ fn what_came_from_what_lives_in_the_journal() {
 #[test]
 fn promote_can_be_rehearsed() {
     let s = init("ideadry");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let before = issues(s.path());
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], "# 새 에픽\n- 첫 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--dry-run"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("새 에픽") && text.contains("첫 일"), "{text}");
@@ -10883,11 +10886,11 @@ fn promote_can_be_rehearsed() {
 #[test]
 fn a_rehearsed_promote_still_speaks_json() {
     let s = init("ideadryjson");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let before = issues(s.path());
     let out = from_stdin(
         s.path(),
-        &["idea", "promote", &id, "--from", "-", "--dry-run", "--json"],
+        &["backlog", "promote", &id, "--from", "-", "--dry-run", "--json"],
         "# 새 에픽\n- [p1] 첫 일\n",
     );
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -10907,10 +10910,10 @@ fn a_rehearsed_promote_still_speaks_json() {
 fn promote_can_pour_into_a_standing_epic() {
     let s = init("ideainto");
     let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
-    let id = ok(s.path(), &["idea", "add", "밖에 나간 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "밖에 나간 것", "-q"]).trim().to_string();
     let before = issues(s.path()).lines().filter(|l| l.contains(r#""kind":"epic""#)).count();
 
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 되찾은 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 되찾은 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let after = issues(s.path());
     assert_eq!(after.lines().filter(|l| l.contains(r#""kind":"epic""#)).count(), before, "새 에픽이 섰다");
@@ -10995,8 +10998,8 @@ fn old_flat_members_keep_their_ids_beside_new_child_members() {
     let s = init("mixedmembers");
     let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
     let flat = add(s.path(), &["옛 멤버", "-e", &epic]);
-    let id = ok(s.path(), &["idea", "add", "되찾을 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 새 멤버\n");
+    let id = ok(s.path(), &["backlog", "add", "되찾을 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 새 멤버\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 
     // 옛 줄은 id 도 소속도 그대로다 — 없으면 `line_of` 가 그 자리에서 패닉한다.
@@ -11097,7 +11100,7 @@ fn promote_into_refuses_what_it_cannot_honour() {
     let s = init("ideaintobad");
     let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
     let work = add(s.path(), &["그냥 일"]);
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let before = issues(s.path());
     for (target, plan, why) in [
         (epic.as_str(), "# 또 에픽\n- 가\n", "`#` 줄"),
@@ -11105,7 +11108,7 @@ fn promote_into_refuses_what_it_cannot_honour() {
         (work.as_str(), "- 가\n", "에픽 아닌 것"),
     ] {
         for dry in [false, true] {
-            let mut args = vec!["idea", "promote", &id, "-e", target, "--from", "-"];
+            let mut args = vec!["backlog", "promote", &id, "-e", target, "--from", "-"];
             if dry {
                 args.push("--dry-run");
             }
@@ -11119,13 +11122,13 @@ fn promote_into_refuses_what_it_cannot_honour() {
 /// idea 가 아닌 것은 펼치지 않는다. 조용히 받아 주면 이슈 하나가 까닭 없이
 /// 닫히고, 그 까닭은 저널에만 남는다.
 #[test]
-fn only_an_idea_can_be_promoted() {
+fn only_a_backlog_item_can_be_promoted() {
     let s = init("ideaonly");
     let work = add(s.path(), &["진짜 일"]);
-    let out = from_stdin(s.path(), &["idea", "promote", &work, "--from", "-"], "# 가\n- 나\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &work, "--from", "-"], "# 가\n- 나\n");
     assert!(!out.status.success(), "일을 펼쳐 버렸다");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("idea"), "{err}");
+    assert!(err.contains("백로그"), "{err}");
 }
 
 /// `promote` 는 훑기 목록의 `idea` 줄이 닿지 않는 길이다 — stdin 을 먹으므로
@@ -11133,8 +11136,8 @@ fn only_an_idea_can_be_promoted() {
 #[test]
 fn promote_speaks_json_too() {
     let s = init("ideapromotejson");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     one_json_value(&String::from_utf8(out.stdout).unwrap());
 }
@@ -11145,7 +11148,7 @@ fn promote_speaks_json_too() {
 fn the_agents_block_teaches_idea() {
     let s = init("agentsidea");
     let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
-    for want in ["moai idea add", "moai idea ls", "moai idea promote", "moai defer"] {
+    for want in ["moai backlog add", "moai backlog ls", "moai backlog promote", "moai defer"] {
         assert!(block.contains(want), "{want} 가 없다 — {block}");
     }
 }
@@ -11158,7 +11161,7 @@ fn the_agents_block_teaches_idea() {
 fn a_plan_cannot_be_poured_in_through_idea_add() {
     let s = init("ideafrom");
     let before = issues(s.path());
-    let out = from_stdin(s.path(), &["idea", "add", "--from", "-"], "# 에픽\n- 이슈\n");
+    let out = from_stdin(s.path(), &["backlog", "add", "--from", "-"], "# 에픽\n- 이슈\n");
     assert!(!out.status.success(), "생각 담는 자리로 계획이 들어왔다");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("promote"), "어디로 가야 하는지 안 말한다 — {err}");
@@ -11174,9 +11177,9 @@ fn a_plan_cannot_be_poured_in_through_idea_add() {
 #[test]
 fn promoting_a_closed_thought_forges_no_transition() {
     let s = init("ideatwice");
-    let id = ok(s.path(), &["idea", "add", "두 번 펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "두 번 펼칠 것", "-q"]).trim().to_string();
     for plan in ["# 첫 계획\n- 가\n", "# 둘째 계획\n- 나\n"] {
-        let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+        let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], plan);
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     let closed = line_of(s.path(), &id);
@@ -11204,8 +11207,8 @@ fn promoting_a_closed_thought_forges_no_transition() {
 #[test]
 fn promote_json_names_the_thought_it_closed() {
     let s = init("ideapromoted");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains(&id), "무엇을 닫았는지 안 말한다 — {text}");
@@ -11219,7 +11222,7 @@ fn promote_json_names_the_thought_it_closed() {
 #[test]
 fn a_child_of_a_thought_stays_under_it() {
     let s = init("ideachild");
-    let parent = ok(s.path(), &["idea", "add", "부모 생각", "-q"]).trim().to_string();
+    let parent = ok(s.path(), &["backlog", "add", "부모 생각", "-q"]).trim().to_string();
     let child = add(s.path(), &["그 자식", "--parent", &parent]);
     assert!(child.starts_with(&format!("{parent}.")), "{child}");
 
@@ -11238,7 +11241,7 @@ fn a_child_of_a_thought_stays_under_it() {
 fn a_child_of_a_thought_in_an_epic_is_counted_where_it_is_drawn() {
     let s = init("ideachildepic");
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
-    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
     let child = add(s.path(), &["생각의 자식", "--parent", &thought]);
 
     let detail = ok(s.path(), &["show", &epic]);
@@ -11256,7 +11259,7 @@ fn a_child_of_a_thought_in_an_epic_is_counted_where_it_is_drawn() {
 fn a_thought_parked_under_work_does_not_stall_it() {
     let s = init("ideachild");
     let work = add(s.path(), &["진짜 일"]);
-    ok(s.path(), &["idea", "add", "나중에 볼 것", "--parent", &work, "-q"]);
+    ok(s.path(), &["backlog", "add", "나중에 볼 것", "--parent", &work, "-q"]);
     let r = ok(s.path(), &["ready"]);
     assert!(r.contains(&work), "담아 둔 생각이 일을 멈춰 세웠다 — {r}");
 }
@@ -11266,7 +11269,7 @@ fn a_thought_parked_under_work_does_not_stall_it() {
 #[test]
 fn a_thought_cannot_block_work() {
     let s = init("ideablock");
-    let thought = ok(s.path(), &["idea", "add", "먼저 생각", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "먼저 생각", "-q"]).trim().to_string();
     let work = add(s.path(), &["막힐 일"]);
     let out = moai(s.path(), &["link", &thought, "--blocks", &work]);
     assert!(!out.status.success(), "생각이 일을 막게 뒀다");
@@ -11282,7 +11285,7 @@ fn the_rehearsal_checks_what_the_real_run_checks() {
     let s = init("ideadrycheck");
     let work = add(s.path(), &["진짜 일"]);
     for target in [work.as_str(), "argos-zzzz"] {
-        let out = from_stdin(s.path(), &["idea", "promote", target, "--from", "-", "--dry-run"], "# 가\n- 나\n");
+        let out = from_stdin(s.path(), &["backlog", "promote", target, "--from", "-", "--dry-run"], "# 가\n- 나\n");
         assert!(!out.status.success(), "{target} 를 펼치겠다고 했다");
     }
 }
@@ -11292,8 +11295,8 @@ fn the_rehearsal_checks_what_the_real_run_checks() {
 #[test]
 fn promoting_keeps_the_thought_unowned() {
     let s = init("ideaowner");
-    let id = ok(s.path(), &["idea", "add", "임자 없는 생각", "-a", "none", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--json"], "# 가\n- 나\n");
+    let id = ok(s.path(), &["backlog", "add", "임자 없는 생각", "-a", "none", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--json"], "# 가\n- 나\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let made = String::from_utf8(out.stdout).unwrap();
     assert!(!made.contains("assignee"), "임자 없이 담은 것에 임자가 붙었다 — {made}");
@@ -11315,10 +11318,10 @@ fn a_plan_cannot_be_poured_in_as_a_type_flag_either() {
 fn an_empty_list_says_the_thoughts_are_hidden() {
     let s = init("ideahiddencount");
     for n in 0..3 {
-        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("생각 {n}"), "-q"]);
     }
     let out = ok(s.path(), &["show"]);
-    assert!(out.contains('3') && out.contains("idea"), "숨긴 것을 안 센다 — {out}");
+    assert!(out.contains('3') && out.contains("backlog"), "숨긴 것을 안 센다 — {out}");
 }
 
 /// **한 화면이 두 말을 하지 않는다.** 에픽에 든 생각을 상세가 줄로 내면서
@@ -11329,14 +11332,14 @@ fn an_empty_list_says_the_thoughts_are_hidden() {
 fn a_thought_does_not_hang_under_an_epic() {
     let s = init("ideaepic");
     let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
-    let thought = ok(s.path(), &["idea", "add", "샤딩을 해 볼까", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩을 해 볼까", "-e", &epic, "-q"]).trim().to_string();
 
     let detail = ok(s.path(), &["show", &epic]);
     assert!(!detail.contains(&thought), "멤버 0/0 밑에 생각을 그렸다 — {detail}");
     assert!(!ok(s.path(), &["show", "--tree"]).contains(&thought));
 
     // 소속은 잃지 않았다.
-    let found = ok(s.path(), &["show", "--type", "idea", "-e", &epic]);
+    let found = ok(s.path(), &["show", "--type", "backlog", "-e", &epic]);
     assert!(found.contains(&thought), "에픽으로 못 찾는다 — {found}");
 }
 
@@ -11512,7 +11515,7 @@ fn status_shows_what_was_put_off_without_blocking() {
 fn a_repo_with_only_notices_still_reads_clean() {
     let s = init("noticeclean");
     let id = add(s.path(), &["지금 할 일"]);
-    ok(s.path(), &["idea", "add", "반짝", "-q"]);
+    ok(s.path(), &["backlog", "add", "반짝", "-q"]);
     let later = add(s.path(), &["나중에"]);
     ok(s.path(), &["defer", &later]);
     ok(s.path(), &["epic", "add", "묶음", "-q"]);
@@ -11796,7 +11799,7 @@ fn a_plan_refuses_a_kind_the_markdown_cannot_make() {
 fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
     let s = init("plantype");
     // 마크다운은 `#` 을 에픽으로 `-` 를 이슈로 내므로 넷 가운데 지킬 수 있는 값이 없다.
-    for kind in ["issue", "epic", "idea", "milestone"] {
+    for kind in ["issue", "epic", "backlog", "milestone"] {
         let out = from_stdin(s.path(), &["add", "--from", "-", "--type", kind], PLAN);
         let err = String::from_utf8_lossy(&out.stderr);
         assert_eq!(out.status.code(), Some(1), "--type {kind}: {err}");
@@ -11804,14 +11807,14 @@ fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
     }
     // **갈 곳을 대는 말은 동사를 안 가린다**(리뷰). `kind_override.or(args.kind)` 로 고르던 판은
     // 동사가 기본값을 들고 오는 순간 사람이 친 `--type` 을 못 봐, `moai issue add --from - --type
-    // idea` 가 `moai idea promote` 를 못 듣고 깃발 얘기만 들었다 — 같은 `--type idea` 를 친 둘이
+    // idea` 가 `moai backlog promote` 를 못 듣고 깃발 얘기만 들었다 — 같은 `--type idea` 를 친 둘이
     // 어느 동사로 들어왔느냐로 다른 말을 듣고, 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다.
     for verb in [["add"].as_slice(), ["issue", "add"].as_slice(), ["epic", "add"].as_slice()] {
         let mut argv = verb.to_vec();
         argv.extend_from_slice(&["--from", "-", "--type", "idea"]);
         let out = from_stdin(s.path(), &argv, PLAN);
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains("moai idea promote"), "{verb:?}: 갈 곳을 안 댄다\n{err}");
+        assert!(err.contains("moai backlog promote"), "{verb:?}: 갈 곳을 안 댄다\n{err}");
         assert_eq!(issues(s.path()), "", "{verb:?}: 거절해 놓고 썼다");
     }
     // 동사가 들고 온 기본값은 그대로 선다 — 그것은 이 부름에 친 요구가 아니다.
@@ -11834,7 +11837,7 @@ fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
 #[test]
 fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     let s = init("promotebig");
-    let id = ok(s.path(), &["idea", "add", "큰 생각", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "큰 생각", "-q"]).trim().to_string();
     // 상한을 넘는 본문은 도구로는 못 쓴다 — 손으로 푼 머지가 남기는 줄을 그대로 짓는다.
     let path = s.path().join(".moai/issues.jsonl");
     let line = issues(s.path());
@@ -11845,8 +11848,8 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     std::fs::write(&path, format!("{swollen}\n")).unwrap();
 
     let plan = "# 펼친 에픽\n- 첫 이슈\n";
-    let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], plan);
-    let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    let rehearsal = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--dry-run"], plan);
+    let real = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], plan);
     let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
     assert_eq!(real.status.code(), Some(1), "{was}");
     assert_eq!(rehearsal.status.code(), Some(1), "연습만 좋다고 했다\n{said}");
@@ -11866,8 +11869,8 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     ok(s.path(), &["defer", &stone, "-m", "접는다"]);
     let big_title = format!("# {}\n- 첫 이슈\n", "나".repeat(30_000));
     for text in [plan, big_title.as_str()] {
-        let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], text);
-        let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], text);
+        let rehearsal = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--dry-run"], text);
+        let real = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], text);
         let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
         assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
         assert_eq!(real.status.code(), Some(1), "{was}");
@@ -11877,7 +11880,7 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     // 그 길이 실제로 통한다 — 줄이면 같은 부름이 그대로 지난다.
     let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "짧게 줄인 본문");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], plan);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(issues(s.path()).contains("짧게 줄인 본문"), "본문이 에픽에 안 갔다");
 }
@@ -11888,13 +11891,13 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
 #[test]
 fn an_unreadable_line_does_not_fail_a_promote() {
     let s = init("promotebroken");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let path = s.path().join(".moai/issues.jsonl");
     let mut text = issues(s.path());
     text.push_str("{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n");
     std::fs::write(&path, text).unwrap();
 
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 새 에픽\n- [p1] 첫 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 새 에픽\n- [p1] 첫 일\n");
     assert!(
         out.status.success(),
         "성공한 promote 가 실패로 끝났다 — 다시 부르면 계획이 두 벌이다\nstderr: {}",
@@ -12245,7 +12248,7 @@ fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
             "{}{}{}",
             row("argos-0001", "에픽", "epic", ""),
             row("argos-0002", "가려진 이슈", "issue", ",\"epic\":\"argos-0001\""),
-            row("argos-0002", "가리는 생각", "idea", ",\"epic\":\"argos-0001\""),
+            row("argos-0002", "가리는 생각", "backlog", ",\"epic\":\"argos-0001\""),
         ) + &row("argos-0001.aa1", "성한 멤버", "issue", ""),
     )
     .unwrap();
@@ -13233,7 +13236,7 @@ fn a_write_that_touched_nothing_still_names_the_unreadable_line() {
 #[test]
 fn the_deferred_line_points_at_a_command_that_shows_them() {
     let s = init("deferidea");
-    let id = ok(s.path(), &["idea", "add", "미룰 생각", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "미룰 생각", "-q"]).trim().to_string();
     ok(s.path(), &["defer", &id]);
     assert!(ok(s.path(), &["status"]).contains("미뤄 둔 것 1건"), "안 센다");
     let out = ok(s.path(), &["show", "--deferred"]);
@@ -13313,15 +13316,15 @@ fn a_grouping_lists_the_same_members_on_both_surfaces() {
 #[test]
 fn the_tree_tail_does_not_count_what_it_drew() {
     let s = init("treetailancestor");
-    let thought = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "반짝", "-q"]).trim().to_string();
     let child = add(s.path(), &["자식", "--parent", &thought]);
 
     let out = ok(s.path(), &["show", "--tree"]);
     assert!(out.contains(&thought) && out.contains(&child), "{out}");
-    assert!(!out.contains("idea 1건 숨김"), "그린 줄을 숨겼다고 말한다 — {out}");
+    assert!(!out.contains("backlog 1건 숨김"), "그린 줄을 숨겼다고 말한다 — {out}");
 
     // 목록은 조상을 안 그리므로 여전히 센다.
-    assert!(ok(s.path(), &["show"]).contains("idea 1건 숨김"), "목록이 숨긴 것을 안 센다");
+    assert!(ok(s.path(), &["show"]).contains("backlog 1건 숨김"), "목록이 숨긴 것을 안 센다");
 }
 
 /// **트리가 조상으로 그린 줄도 계획 밖이면 그렇다고 단다.** 에픽의 미룸을 받은
@@ -13331,7 +13334,7 @@ fn the_tree_tail_does_not_count_what_it_drew() {
 fn the_tree_marks_a_deferred_row_it_draws_as_an_ancestor() {
     let s = init("treedeferredancestor");
     let epic = ok(s.path(), &["epic", "add", "나중", "-q"]).trim().to_string();
-    let thought = ok(s.path(), &["idea", "add", "생각", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "생각", "-e", &epic, "-q"]).trim().to_string();
     let child = add(s.path(), &["자식", "--parent", &thought]);
     ok(s.path(), &["defer", &epic]);
 
@@ -13353,7 +13356,7 @@ fn a_thought_is_not_a_member_on_either_surface() {
     let s = init("epicjsonidea");
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
     let member = add(s.path(), &["진짜 일", "-e", &epic]);
-    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
 
     let json = ok(s.path(), &["show", &epic, "--json"]);
     assert!(json.contains(&member), "멤버를 잃었다 — {json}");
@@ -13370,7 +13373,7 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
     let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "-q"]).trim().to_string();
     add(s.path(), &["진짜 일", "-e", &epic]);
-    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
 
     let out = ok(s.path(), &["show", &stone]);
     assert!(out.contains("멤버   0/1"), "{out}");
@@ -13577,7 +13580,7 @@ fn a_deferred_epic_is_not_nagged_in_the_table_either() {
 
 /// **끝난 묶음은 미뤄 둔 것으로 안 센다.** 세면 `moai status` 가 센 줄을 그 줄이
 /// 가리키는 `moai show --deferred` 가 done 으로 숨겨, 세어 놓고 못 보여 주는 수가
-/// 된다 — `idea_pile` 이 피한 그 덫이다. 남은 일이 생기면 다시 센다.
+/// 된다 — `backlog_pile` 이 피한 그 덫이다. 남은 일이 생기면 다시 센다.
 #[test]
 fn a_finished_grouping_is_not_counted_as_shelved() {
     let s = init("shelvedone");
@@ -13653,7 +13656,7 @@ fn status_says_which_groupings_stand_closed() {
 
 /// **꼬리가 대는 낱말이 실제로 그 줄을 내야 한다.** 첫 까닭으로 갈랐을 때
 /// 닫아 둔 생각이 `idea N건 숨김 — --type idea` 로 섰는데 그 명령은 done 을
-/// 여전히 숨겨 아무것도 안 냈다 — `idea_pile` 이 피한 "세어 놓고 못 보여 주는
+/// 여전히 숨겨 아무것도 안 냈다 — `backlog_pile` 이 피한 "세어 놓고 못 보여 주는
 /// 수" 가 목록 꼬리에 그대로 있었다.
 #[test]
 fn every_hidden_count_names_a_flag_that_opens_it() {
@@ -13661,9 +13664,9 @@ fn every_hidden_count_names_a_flag_that_opens_it() {
     let shelved = add(s.path(), &["닫고 미룬 일"]);
     ok(s.path(), &["mv", &shelved, "done"]);
     ok(s.path(), &["defer", &shelved]);
-    let closed = ok(s.path(), &["idea", "add", "닫은 생각", "-q"]).trim().to_string();
+    let closed = ok(s.path(), &["backlog", "add", "닫은 생각", "-q"]).trim().to_string();
     ok(s.path(), &["mv", &closed, "done"]);
-    let alive = ok(s.path(), &["idea", "add", "산 생각", "-q"]).trim().to_string();
+    let alive = ok(s.path(), &["backlog", "add", "산 생각", "-q"]).trim().to_string();
 
     let out = ok(s.path(), &["show"]);
     // 닫고 미룬 줄은 `--all` 이 연다 — `--deferred` 는 done 을 그대로 숨긴다.
@@ -13671,7 +13674,7 @@ fn every_hidden_count_names_a_flag_that_opens_it() {
     assert!(ok(s.path(), &["show", "--all"]).contains(&shelved), "댄 낱말이 그 줄을 안 낸다");
     // 산 생각 하나만 `--type idea` 가 연다. 닫은 생각은 어느 한 낱말로도
     // 안 열리므로 아예 안 센다 — 못 보여 줄 수를 대느니 말을 안 한다.
-    assert!(out.contains("idea 1건 숨김 — `--type idea`"), "{out}");
+    assert!(out.contains("backlog 1건 숨김 — `--type backlog`"), "{out}");
     let ideas = ok(s.path(), &["show", "--type", "idea"]);
     assert!(ideas.contains(&alive), "{ideas}");
     assert!(!ideas.contains(&closed), "{ideas}");
@@ -13764,7 +13767,7 @@ fn the_detail_draws_exactly_what_it_counts_as_a_member() {
     let s = init("memberdraw");
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
     let work = add(s.path(), &["파서", "-e", &epic]);
-    let thought = ok(s.path(), &["idea", "add", "이렇게 하면", "--parent", &work, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "이렇게 하면", "--parent", &work, "-q"]).trim().to_string();
 
     let human = ok(s.path(), &["show", &epic]);
     assert!(human.contains("멤버   0/1"), "{human}");
@@ -13783,11 +13786,11 @@ fn a_child_that_is_not_in_the_plan_says_so() {
     let parent = add(s.path(), &["부모"]);
     let shelved = add(s.path(), &["미룰 자식", "--parent", &parent]);
     ok(s.path(), &["defer", &shelved]);
-    ok(s.path(), &["idea", "add", "자식 생각", "--parent", &parent, "-q"]);
+    ok(s.path(), &["backlog", "add", "자식 생각", "--parent", &parent, "-q"]);
 
     let out = ok(s.path(), &["show", &parent]);
     assert!(out.contains("미룸"), "미뤄 둔 자식이 일과 똑같이 보인다 — {out}");
-    assert!(out.contains("idea"), "담아 둔 자식이 일과 똑같이 보인다 — {out}");
+    assert!(out.contains("backlog"), "담아 둔 자식이 일과 똑같이 보인다 — {out}");
 }
 /// **연습은 진짜와 같은 값을 말한다.** 마크다운은 `# [p1] 제목` 을 받고
 /// `create_drafts` 는 그것을 에픽에도 그대로 쓰는데, 연습만 종류로 잘라 내면
@@ -13812,18 +13815,18 @@ fn a_rehearsal_reports_the_priority_it_will_write() {
 #[test]
 fn a_rehearsal_is_no_stricter_than_the_real_run() {
     let s = init("dryruncarry");
-    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let path = s.path().join(".moai/issues.jsonl");
     let mut raw = std::fs::read_to_string(&path).unwrap();
     raw.push_str("{\"id\":\"argos-zzzz\",\"title\":\"x\",\"kind\":\"몰라\",\"status\":\"todo\",\"created_at\":\"2026-01-01T00:00:00Z\",\"updated_at\":\"2026-01-01T00:00:00Z\",\"status_since\":\"2026-01-01T00:00:00Z\"}\n");
     std::fs::write(&path, raw).unwrap();
 
     let plan = "# 새 에픽\n- 첫 일\n";
-    let rehearsal = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-", "--dry-run"], plan);
+    let rehearsal = from_stdin(s.path(), &["backlog", "promote", &thought, "--from", "-", "--dry-run"], plan);
     assert!(rehearsal.status.success(), "연습만 실패로 끝난다 — {}", String::from_utf8_lossy(&rehearsal.stderr));
     // 어느 줄인지는 그래도 말한다.
     assert!(String::from_utf8_lossy(&rehearsal.stderr).contains("읽을 수 없는 줄"), "조용히 지나갔다");
-    let real = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-"], plan);
+    let real = from_stdin(s.path(), &["backlog", "promote", &thought, "--from", "-"], plan);
     assert!(real.status.success(), "{}", String::from_utf8_lossy(&real.stderr));
 }
 
@@ -14312,7 +14315,7 @@ fn stop_does_not_count_notices_as_new_warnings() {
     hook_out(&s, "session-start", &event(&s, "s1"));
 
     for n in 0..5 {
-        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("생각 {n}"), "-q"]);
     }
     let later = add(s.path(), &["나중에"]);
     ok(s.path(), &["defer", &later]);
@@ -14388,7 +14391,7 @@ fn the_board_and_the_hook_carry_the_same_install_notices() {
     // 실린 글은 JSON 문자열 그대로라 줄바꿈이 두 글자(`\n`)다.
     let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s-notices")));
     // **설치 알림만 견준다**(리뷰). 알림 줄 전부를 견주면 `moai status` 에만 서는 알림(사용자
-    // 설정의 말 문제·쌓인 idea·미룬 것)이 생기는 날 이 시험이 붉어지고, 그 글은 "설치 알림이
+    // 설정의 말 문제·쌓인 백로그·미룬 것)이 생기는 날 이 시험이 붉어지고, 그 글은 "설치 알림이
     // 갈렸다" 고 말한다 — 엉뚱한 곳을 고치게 만드는 시험이다.
     let mine = |l: &str| {
         let l = l.trim();
@@ -14695,7 +14698,8 @@ fn json_str(s: &str) -> String {
 #[test]
 fn korean_text_going_into_moai_gets_no_notice() {
     let s = init("hookkorean");
-    for cmd in ["moai idea add '떠오른 것'", "moai note x '한글 노트'", "printf '한글' | moai note x -b -"] {
+    for cmd in ["moai backlog add '떠오른 것'", "moai note x '한글 노트'", "printf '한글' | moai note x -b -"]
+    {
         let out = shell_call(&s, cmd);
         assert!(out.trim().is_empty(), "한국어 글에 무언가를 붙였다 — {cmd}\n{out}");
     }
@@ -14744,7 +14748,7 @@ fn creation_is_judged_through_the_contract() {
     }
 
     // 담는 것은 막지 않고 **갈림길 1 의 둘째 물음을 싣는다**(moai-d4e0) — 계약의 `additionalContext` 로.
-    let out = shell_call(&s, "moai idea add \"떠오른 것\"");
+    let out = shell_call(&s, "moai backlog add \"떠오른 것\"");
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "담는 것을 막았다\n{out}");
     assert!(
@@ -16607,14 +16611,14 @@ fn work_an_unnamed_worktree_may_hold_is_not_offered_as_this_sessions_aim() {
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
     let bash = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
 
-    let out = bash("moai idea add \"관찰\"");
+    let out = bash("moai backlog add \"관찰\"");
     assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일의 에픽을 제 물음으로 비춘다\n{out}");
 
     // 갈라진 뒤 main 에서 집은 제 일은 비춘다 — 그것만 댄다.
     let mine = field(&ok(&main, &["add", "제 에픽", "--type", "epic", "--json"]), "id");
     let work = field(&ok(&main, &["add", "main 에서 집은 일", "-e", &mine, "--json"]), "id");
     ok(&main, &["mv", &work, "in_progress"]);
-    let out = bash("moai idea add \"관찰\"");
+    let out = bash("moai backlog add \"관찰\"");
     assert!(out.contains(&format!("can {mine} deliver what it promised")), "제 일의 물음을 안 비춘다\n{out}");
     assert!(!out.contains(&theirs), "옆이 쥐었을 일의 에픽을 댄다\n{out}");
 }
@@ -16792,18 +16796,18 @@ fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
     let bp = b.path().display().to_string();
 
     // 제 자리의 물음이 남의 트래커의 규칙 1 을 가리지 않는다.
-    let why = refusal(&bash(&format!("moai idea add \"a\"; moai -C {bp} add \"딴 일\"")));
+    let why = refusal(&bash(&format!("moai backlog add \"a\"; moai -C {bp} add \"딴 일\"")));
     assert!(why.contains(&wb), "{why}");
 
     // 둘 다 비추면 둘 다 싣는다 — 뒤의 물음을 말없이 버리지 않는다.
-    let out = bash(&format!("moai idea add \"a\"; moai -C {bp} idea add \"b\""));
+    let out = bash(&format!("moai backlog add \"a\"; moai -C {bp} idea add \"b\""));
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "{out}");
     // 두 토막이 저마다 제 트래커의 에픽을 대니 물음도 둘이다 — 뒤의 것을 말없이 버리지 않는다.
     assert!(out.contains(&format!("can {ea} deliver what it promised")), "{out}");
     assert!(out.contains(&format!("can {eb} deliver what it promised")), "{out}");
     assert!(
-        out.contains(&format!("moai -C {bp} idea promote <that id> -e {eb}")),
+        out.contains(&format!("moai -C {bp} backlog promote <that id> -e {eb}")),
         "남의 트래커에 되찾을 자리를 안 댄다\n{out}"
     );
 }
@@ -19610,7 +19614,7 @@ fn screens_that_draw_no_time_never_reach_for_the_timezone() {
     let repo = init("screen-tz-repo");
     let id = ok(repo.path(), &["add", "시각 없는 줄", "-q"]);
     let id = id.trim();
-    ok(repo.path(), &["idea", "add", "나중 생각"]);
+    ok(repo.path(), &["backlog", "add", "나중 생각"]);
     project_ok(home.path(), &config, &["project", "add", repo.path().to_str().unwrap()]);
     // 없는 자리를 가리켜 tzdb 를 깨뜨린다 — `TZ` 가 UTC 면 자료 없이 서서 이 판이 안 난다.
     let nowhere = home.path().join("no-zoneinfo");
@@ -19631,7 +19635,7 @@ fn screens_that_draw_no_time_never_reach_for_the_timezone() {
         (repo.path(), &["prime"], id),
         (repo.path(), &["show"], id),
         (repo.path(), &["show", "--tree"], id),
-        (repo.path(), &["idea", "ls"], "나중 생각"),
+        (repo.path(), &["backlog", "ls"], "나중 생각"),
         (home.path(), &["ready"], id),
     ];
     for (dir, args, want) in quiet {
@@ -23045,7 +23049,7 @@ fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
     let put_off = add(s.path(), &["미룬 일"]);
     ok(s.path(), &["defer", &put_off]);
     add(s.path(), &["에픽", "--type", "epic"]);
-    ok(s.path(), &["idea", "add", "생각"]);
+    ok(s.path(), &["backlog", "add", "생각"]);
 
     let json = ok(s.path(), &["stats", "--json"]);
     one_json_value(&json);
@@ -23058,7 +23062,7 @@ fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
     );
     assert_eq!(
         value_at(by, "kind"),
-        r#"[{"key":"issue","rows":3},{"key":"epic","rows":1},{"key":"milestone","rows":0},{"key":"idea","rows":1}]"#,
+        r#"[{"key":"issue","rows":3},{"key":"epic","rows":1},{"key":"milestone","rows":0},{"key":"backlog","rows":1}]"#,
         "kind 축은 고른 줄 전부다"
     );
     assert_eq!(
@@ -23079,13 +23083,13 @@ fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
     assert!(ok(s.path(), &["stats", "--deferred", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
     assert!(ok(s.path(), &["stats", "-s", "done", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
     assert!(
-        ok(s.path(), &["stats", "--type", "idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        ok(s.path(), &["stats", "--type", "backlog", "--json"]).starts_with(r#"{"kind":"backlog","rows":1,"#),
         "--type 이 센 종류를 바꾼다"
     );
     // **`--filter type=…` 도 같은 말이다** — 센 종류는 지은 거르개에서 읽는다. argv 의 `--type` 만 읽던 판은 생각만
     // 골라 놓고 `issue` 로 세어 `rows:0` 을 냈다(탐색기의 `SPC f type=idea` 는 처음부터 생각을 셌다).
     assert!(
-        ok(s.path(), &["stats", "--filter", "type=idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        ok(s.path(), &["stats", "--filter", "type=idea", "--json"]).starts_with(r#"{"kind":"backlog","rows":1,"#),
         "--filter type= 이 센 종류를 안 바꿨다"
     );
     // `--all` 은 받고 아무것도 안 바꾼다 — 이미 다 연 채로 센다.
@@ -27245,6 +27249,7 @@ fn backlog_commands_show_the_new_word_and_keep_the_shared_file_spelling() {
     let s = init("backlogcommands");
     for command in ["backlog", "idea"] {
         let out = ok(s.path(), &[command, "add", "later", "--json"]);
+        assert!(out.starts_with(r#"{"id":""#), "row field order changed: {out}");
         assert_eq!(field(&out, "kind"), "backlog", "{out}");
         assert!(!out.contains(r#""kind":"idea""#), "{out}");
         let id = field(&out, "id");
@@ -27254,6 +27259,8 @@ fn backlog_commands_show_the_new_word_and_keep_the_shared_file_spelling() {
             vec!["show", "--type", "idea", "--json"],
             vec!["show", "--filter", "type=backlog", "--json"],
             vec!["backlog", "ls", "--json"],
+            vec!["idea", "ls", "--json"],
+            vec!["idea", "show", "--json"],
         ] {
             let out = ok(s.path(), &args);
             assert!(out.contains(r#""kind":"backlog""#), "{args:?}: {out}");
@@ -27276,9 +27283,18 @@ fn backlog_spelling_in_a_file_is_read_and_rewritten_for_old_binaries() {
     let id = field(&out, "id");
     let at = s.path().join(".moai/issues.jsonl");
     let old = std::fs::read_to_string(&at).unwrap();
-    std::fs::write(&at, old.replace(r#""kind":"idea""#, r#""kind":"backlog""#)).unwrap();
-    assert_eq!(field(&ok(s.path(), &["show", &id, "--json"]), "kind"), "backlog");
+    let mut input: serde_json::Value = serde_json::from_str(&old).unwrap();
+    input["kind"] = "backlog".into();
+    input["metadata"] = serde_json::json!({"kind": "idea", "text": "kind stays idea here"});
+    std::fs::write(&at, format!("{}\n", input)).unwrap();
+    let shown = ok(s.path(), &["show", &id, "--json"]);
+    assert!(shown.starts_with(r#"{"id":""#), "row field order changed: {shown}");
+    let shown: serde_json::Value = serde_json::from_str(&shown).unwrap();
+    assert_eq!(shown["kind"], "backlog");
+    assert_eq!(shown["metadata"]["kind"], "idea", "nested user data was renamed");
     assert_eq!(field(&ok(s.path(), &["edit", &id, "--title", "later again", "--json"]), "kind"), "backlog");
     let written = std::fs::read_to_string(&at).unwrap();
-    assert!(written.contains(r#""kind":"idea""#) && !written.contains(r#""kind":"backlog""#), "{written}");
+    let written: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(written["kind"], "idea");
+    assert_eq!(written["metadata"], input["metadata"], "unknown data did not survive the write");
 }

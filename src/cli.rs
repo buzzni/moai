@@ -152,7 +152,7 @@ pub enum Cmd {
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
-    status_idea_pile     = 5      when this many thoughts have piled up
+    status_backlog_pile  = 5      when this many thoughts have piled up
     status_due_days      = 3      days before a milestone deadline to say so")]
     Status(WorktreeArg),
 
@@ -400,9 +400,9 @@ NOTE
   moai backlog add 'a passing thought'   jot it
   moai backlog ls                   what has piled up (`backlog show`)
 
-moai backlog add 'install the merge driver by hand in every clone' -b - <<'IDEA'
+moai backlog add 'install the merge driver in every clone' -b - <<'BACKLOG'
 Today `moai merge-driver --install` has to be typed once per clone.
-IDEA
+BACKLOG
 
   Backlog items stand outside `moai ready` and the board's counts,
   and living without an epic is normal for it, so it never trips the
@@ -685,7 +685,7 @@ IDEA
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
     SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
-    SPC v l  deferred         SPC v i  backlog        SPC v a  show all
+    SPC v l  deferred         SPC v b  backlog        SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
              leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
@@ -772,8 +772,8 @@ IDEA
   the screen that stands, as in +screen [board]. The columns are backlog,
   deferred and the config's columns in order — backlog is a kind and deferred
   an axis, so nothing is stored for them.
-  SPC v i hides backlog items in both the board and the list, and is kept
-  under [tui] as hide_ideas.
+  SPC v b hides backlog items in both the board and the list, and is kept
+  under [tui] as hide_backlog.
   At the project root every milestone is a lane, with (no milestone) last;
   inside a milestone or an epic there is one lane. Epics and milestones are
   not cards. Each card is two lines, its id, column and priority over its title,

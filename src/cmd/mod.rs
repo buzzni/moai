@@ -120,7 +120,7 @@ impl Ctx {
 
     /// 화면에 얹을 시간대 — **아직 안 푼 채로** 준다(moai-s3i7). `view::Screen` 이 시각을 실제로
     /// 그릴 때에만 풀리므로, 화면을 짓기만 하고 시각을 안 그리는 `ready`·`prime`·`show`(목록)·
-    /// `idea ls` 는 tzdb 를 안 만지고 [`Ctx::zone_trouble`] 줄도 안 낸다. 시간대를 셈에 쓰는
+    /// `backlog ls` 는 tzdb 를 안 만지고 [`Ctx::zone_trouble`] 줄도 안 낸다. 시간대를 셈에 쓰는
     /// 자리(`report::status` 의 기한 판정, `show` 와 `show --removed` 의 날로 친 때 거르개 —
     /// `query::Filter::needs_zone`)는 여전히 [`Ctx::zone`] 으로 바로 푼다 — 그 목록은 그때만 tzdb 를 만진다.
     pub fn clock(&self) -> &crate::tz::System {
@@ -528,7 +528,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Epic(t) => typed(ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
         // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
-        // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
+        // `Typed` 에 동사를 더하는 날 backlog 만 조용히 안 따라온다.
         Cmd::Backlog(BacklogCmd::Common(t)) => typed(ctx, *t, Kind::Backlog),
         Cmd::Backlog(BacklogCmd::Promote(a)) => backlog::promote(ctx, a),
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
@@ -589,7 +589,7 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     // **이 꼬리도 말묶음에서 온다**(리뷰) — 바로 위의 `status` 가 통째로 제 말로 나오는데
     // 여기만 한국어로 박혀 있으면, 세션이 가장 많이 치는 맨몸 `moai` 의 **마지막 줄**이
     // 화면과 다른 말로 선다. **키가 둘인 것은 AGENTS.md 를 댈지 말지가 여기서 정하는
-    // 것**이라서다 — 한 키에 넣으면 그 말에서만 빈 꼬리가 남는다(`warn.idea_pile` 과 같다).
+    // 것**이라서다 — 한 키에 넣으면 그 말에서만 빈 꼬리가 남는다(`warn.backlog_pile` 과 같다).
     let lang = ctx.lang();
     let tail = match here {
         true => crate::i18n::say(lang, "opening.commands_here"),
@@ -667,7 +667,7 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
 /// [`refuse_if_flag_like`] 를 부른 자리 — 거절문과 빠져나갈 길이 여기서 갈린다.
 #[derive(Clone, Copy)]
 pub enum FlagLike<'a> {
-    /// `add` 의 제목 자리 인자. 든 것은 부른 동사(`add`·`idea add`…)다 — `moai idea add -x` 에
+    /// `add` 의 제목 자리 인자. 든 것은 부른 동사(`add`·`backlog add`…)다 — `moai backlog add -x` 에
     /// `moai add -- -x` 를 대면 따라 친 사람이 생각 대신 보드에 선 이슈를 얻는다(리뷰).
     Title(&'a str),
     /// `edit <id> --title` 의 값.
@@ -745,16 +745,33 @@ pub struct Row<'a> {
 
 /// `Issue` serializes the shared file protocol. JSON rows use the surface spelling.
 /// Only backlog rows need a translated object; other rows keep the borrowed path.
-fn surface_issue<S: serde::Serializer>(
-    issue: &std::borrow::Cow<'_, crate::model::Issue>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
+fn surface_issue<S: serde::Serializer>(issue: &crate::model::Issue, serializer: S) -> Result<S::Ok, S::Error> {
     if issue.kind != Kind::Backlog {
         return serde::Serialize::serialize(issue, serializer);
     }
-    let mut value = serde_json::to_value(issue).map_err(serde::ser::Error::custom)?;
-    value["kind"] = issue.kind.as_str().into();
-    serde::Serialize::serialize(&value, serializer)
+    // Keep the file's field order (id first), including unknown nested fields.
+    // Going through a Value map would sort the top-level keys.
+    struct Surface<S>(S);
+    impl<'de, S: serde::Serializer> serde::de::Visitor<'de> for Surface<S> {
+        type Value = S::Ok;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("an issue object")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            use serde::ser::SerializeMap;
+            let mut out = self.0.serialize_map(None).map_err(serde::de::Error::custom)?;
+            while let Some((key, mut value)) = map.next_entry::<String, serde_json::Value>()? {
+                if key == "kind" {
+                    value = Kind::Backlog.as_str().into();
+                }
+                out.serialize_entry(&key, &value).map_err(serde::de::Error::custom)?;
+            }
+            out.end().map_err(serde::de::Error::custom)
+        }
+    }
+    let json = serde_json::to_string(issue).map_err(serde::ser::Error::custom)?;
+    serde::Deserializer::deserialize_map(&mut serde_json::Deserializer::from_str(&json), Surface(serializer))
+        .map_err(serde::ser::Error::custom)
 }
 
 /// **줄 하나의 `--json` 에 moai 가 덧붙이는 키 전부**(moai-qn5d) — 늘 붙이는 것도, 조건에 따라

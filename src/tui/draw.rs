@@ -255,9 +255,9 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 동안 층을 못 본다. 폼의 `Target` 은 조각(`form.rs`)이라 `style` 을 모르므로 색을 들지 않고,
     // 정한 색(moai-o04b)은 경로로 층에서 다시 찾는다.
     let tint = match &app.mode {
-        Mode::Idea(form) => form.into.as_ref(),
+        Mode::Backlog(form) => form.into.as_ref(),
         Mode::Ask(ask) => match ask.back.as_ref() {
-            Mode::Idea(form) => form.into.as_ref(),
+            Mode::Backlog(form) => form.into.as_ref(),
             _ => None,
         },
         _ => None,
@@ -271,13 +271,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let (raw, share) = (app.raw, app.wiki_width.or(app.list_width));
     let mut wiki_at = None;
     match &mut app.mode {
-        Mode::Idea(form) => jot(f, form, body, true, tint, lang),
+        Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
         Mode::Ask(ask) => {
-            if let Mode::Idea(form) = ask.back.as_mut() {
+            if let Mode::Backlog(form) = ask.back.as_mut() {
                 jot(f, form, body, false, tint, lang);
             }
         }
@@ -366,7 +366,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             );
             prompt(f, line, say(lang, "tui.prompt.who"), &ask.input, ask.error.clone(), &help);
         }
-        Mode::Idea(form) => jot_keys(f, form, keys, app.site.lang),
+        Mode::Backlog(form) => jot_keys(f, form, keys, app.site.lang),
         Mode::Pick(p) => match &p.typing {
             Some(input) => {
                 let lang = app.site.lang;
@@ -1673,7 +1673,7 @@ fn jot_keys(f: &mut Frame, form: &Form, at: Rect, lang: Lang) {
             hint(Jot::Switch),
             hint(Jot::Next),
             hint(Jot::Close),
-            Span::styled(format!("   {}", say(lang, "tui.jot.as_idea")), dim()),
+            Span::styled(format!("   {}", say(lang, "tui.jot.as_backlog")), dim()),
         ])
     };
     let line = fit(line, at.width as usize);
@@ -2713,20 +2713,20 @@ fn board_title<'a>(app: &App, laid: &super::Laid, win: super::board::Window, emp
     fill(say(lang, "tui.board.more"), &[("n", &off.len().to_string()), ("names", &off.join(" · "))]).into()
 }
 
-/// 칸의 이름 — idea 는 종류의 이름 그대로, 미룸은 화면의 말, 칸은 설정의 이름 그대로다.
+/// 칸의 이름 — backlog 는 종류의 이름 그대로, 미룸은 화면의 말, 칸은 설정의 이름 그대로다.
 fn column_name(c: &super::board::Column, lang: Lang) -> String {
     match c {
-        super::board::Column::Idea => say(lang, "tui.board.idea").into(),
+        super::board::Column::Backlog => say(lang, "tui.board.backlog").into(),
         super::board::Column::Shelved => say(lang, "tui.act.deferred").into(),
         super::board::Column::Status(s) => s.clone(),
     }
 }
 
-/// 칸의 멈춘 글리프 — idea `◇`·미룸 `‖`·칸은 그 칸의 글리프(사용자가 그린 그림). **색이 혼자 뜻을 지지
+/// 칸의 멈춘 글리프 — backlog `◇`·미룸 `‖`·칸은 그 칸의 글리프(사용자가 그린 그림). **색이 혼자 뜻을 지지
 /// 않는다**: 글리프 곁에 늘 칸 이름이 선다.
 fn column_glyph(c: &super::board::Column) -> &'static str {
     match c {
-        super::board::Column::Idea => "◇",
+        super::board::Column::Backlog => "◇",
         super::board::Column::Shelved => "‖",
         super::board::Column::Status(s) => style::glyph(s),
     }
@@ -2851,7 +2851,7 @@ fn card<'a>(app: &App, r: &Row, chosen: bool, w: usize, h: usize) -> Vec<Line<'a
         body.push(Span::raw(" "));
     }
     // **들어갈 수 있는 카드는 제목 끝에 `/`**(moai-4la6.qf1, 사용자 결정) — 목록 줄과 같은 꼴이다. 셈을 끄거나
-    // 자식이 모두 idea 면 카드에 들어갈 수 있다고 말하는 것이 달리 없다. 제목을 먼저 잘라 `/` 가 남는다 — 다만
+    // 자식이 모두 backlog 면 카드에 들어갈 수 있다고 말하는 것이 달리 없다. 제목을 먼저 잘라 `/` 가 남는다 — 다만
     // `[NEW]`·가지 표시만으로 몸이 차면 제목 몫이 없어 `fit` 이 끝의 `/` 까지 자른다(리뷰 moai-4la6.ihu 5번).
     let title = dir_title(
         &i.title,
@@ -3739,7 +3739,7 @@ fn glyph_of(app: &App, site: &Site, at: usize) -> &'static str {
 /// 글리프가 진다(`⠋▸`·`⠋?`). 안 도는 줄은 한 칸 띄워 두 글자 자리를 맞춘다 — 줄마다 제목이
 /// 들쭉날쭉하면 훑어 내려갈 수 없다. 상세 머리와 건수는 칸 이름을 곁에 적으므로 [`glyph_of`] 다.
 ///
-/// **줄머리는 늘 두 칸이다**(moai-nb6w) — 한때 그 곁에 표식 둘(idea `◇`·미룸 `‖`)이 줄마다 붙어,
+/// **줄머리는 늘 두 칸이다**(moai-nb6w) — 한때 그 곁에 표식 둘(backlog `◇`·미룸 `‖`)이 줄마다 붙어,
 /// 붙은 줄만 트리 선이 한두 칸 안으로 밀렸다. 까닭과 되살릴 때 먼저 풀 것은 `style` 에 적어 두었다.
 fn row_glyph(app: &App, site: &Site, at: usize) -> String {
     let col = style::glyph(site.column(at));
@@ -3823,7 +3823,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
         Span::raw("  ·  "),
         Span::styled(format!("p{}", i.priority()), priority(i.priority())),
     ];
-    // **색은 묶음에만 준다.** `kind != Issue` 로 칠하면 idea 가 에픽과 같은
+    // **색은 묶음에만 준다.** `kind != Issue` 로 칠하면 backlog 가 에픽과 같은
     // 파랑을 입어, 아무것도 담지 않는 줄이 담는 줄처럼 보인다. CLI 상세가
     // 쓰는 자(`report::is_group`)와 같은 자로 잰다.
     if i.kind != crate::model::Kind::Issue {
@@ -5460,7 +5460,7 @@ pub(super) mod tests {
         let lines = render(&mut a, 120, 16);
         let text = lines.join("\n");
         for want in
-            ["◇ idea 0", "‖ 미룸 0", "· todo 3", "in_progress 1", "? review 0", "── argos-0001", "(마일스톤 없음)"]
+            ["◇ 백로그 0", "‖ 미룸 0", "· todo 3", "in_progress 1", "? review 0", "── argos-0001", "(마일스톤 없음)"]
         {
             assert!(text.contains(want), "`{want}` 가 없다\n{text}");
         }
@@ -5496,7 +5496,7 @@ pub(super) mod tests {
     #[test]
     fn on_a_narrow_board_the_column_window_follows_h_and_l() {
         let mut a = board_app(1);
-        // 폭 44 에는 칸이 둘 선다. 칸은 idea · 미룸 · todo · in_progress · review 이고 커서는 todo 의 첫 카드다.
+        // 폭 44 에는 칸이 둘 선다. 칸은 backlog · 미룸 · todo · in_progress · review 이고 커서는 todo 의 첫 카드다.
         let frame = |a: &mut App| {
             let lines = render(a, 44, 14);
             let top = lines.iter().position(|l| l.contains('┏')).unwrap_or_else(|| panic!("{lines:#?}"));
@@ -5754,7 +5754,7 @@ pub(super) mod tests {
     }
 
     /// **탐색기의 줄머리는 줄마다 두 칸이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그 곁에
-    /// 표식 둘(idea `◇`·미룸 `‖`)이 붙어, 붙은 줄만 트리 선이 한두 칸 안으로 밀렸다 — 같은 층의
+    /// 표식 둘(backlog `◇`·미룸 `‖`)이 붙어, 붙은 줄만 트리 선이 한두 칸 안으로 밀렸다 — 같은 층의
     /// 형제 줄이 저마다 다른 자리에서 시작했다.
     ///
     /// **재는 것은 표식이 없는 것과 줄머리 폭 둘이다.** 표식만 재면 폭을 다시 자료에서 재기
@@ -5774,7 +5774,7 @@ pub(super) mod tests {
         // 제 `deferred_at` 이 없는 멤버다 — 미룸을 에픽에서 물려받는다.
         let mut inherited = make("argos-0006", "물려받은 멤버", Kind::Issue, "in_progress");
         inherited.epic = Some("argos-0005".into());
-        // 그 곁의 형제는 idea 다 — 셋이 저마다 다른 축을 물고 한 층에 선다.
+        // 그 곁의 형제는 backlog 다 — 셋이 저마다 다른 축을 물고 한 층에 선다.
         let mut sibling = make("argos-0007", "곁의 생각", Kind::Backlog, "todo");
         sibling.epic = Some("argos-0005".into());
 
@@ -5787,7 +5787,7 @@ pub(super) mod tests {
         let text = render(&mut a, 100, 20).join("\n");
 
         // 칸 글리프 다음은 곧바로 빈 칸이다 — 종류도 미룸도 그 사이에 안 낀다.
-        assert!(text.contains("· 담은 생각"), "idea 줄머리가 두 칸이 아니다\n{text}");
+        assert!(text.contains("· 담은 생각"), "backlog 줄머리가 두 칸이 아니다\n{text}");
         // 미룬 에픽도 멤버에서 읽은 제 칸(`▸`)을 그대로 말한다.
         assert!(text.contains("▸ 미룬 에픽"), "미룬 에픽의 줄머리가 두 칸이 아니다\n{text}");
         // 이 줄은 `in_progress` 지만 계획 밖이라 안 돈다(`Site::spins`) — 멈춘 `▸` 로 선다.
@@ -7852,7 +7852,7 @@ pub(super) mod tests {
 
         a.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         a.hit("SPC n");
-        assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
+        assert!(matches!(a.mode, Mode::Backlog(_)), "{:?}", a.mode);
         let form = render(&mut a, 160, 24).join("\n");
         assert!(!a.spun, "폼이 덮은 도는 줄로 깬다\n{form}");
     }
@@ -10057,7 +10057,7 @@ pub(super) mod tests {
     /// 굵은 칸은 그것 하나다 — 폼이 뒤의 목록·상세를 통째로 덮는다. 칸 이름이 테두리에 서고,
     /// 담는 법·칸 옮기는 법·닫는 법이 맨 아랫줄에 다 든다. `Tab` 이면 굵은 선이 본문으로 간다.
     #[test]
-    fn the_idea_form_reads_without_colour_at_eighty_columns() {
+    fn the_backlog_form_reads_without_colour_at_eighty_columns() {
         let mut a = app();
         a.hit("SPC n");
         typed(&mut a, "떠오른 것");
@@ -10087,7 +10087,7 @@ pub(super) mod tests {
     /// 들고, 이름은 경로 줄·층과 같은 프로젝트 색을 입는다. 담을 곳 없이 세운 화면(저장소 없음)
     /// 에는 머리가 안 선다.
     #[test]
-    fn the_idea_form_names_the_project_it_saves_into() {
+    fn the_backlog_form_names_the_project_it_saves_into() {
         use super::super::layer::At;
         let mut a = layered(At::Project("/w/one".into()));
         a.hit("SPC n");
@@ -10241,7 +10241,7 @@ pub(super) mod tests {
 
     /// 폼이 열린 채로 **좁고 낮은 창**에서도 무너지지 않고 줄이 넘치지 않는다.
     #[test]
-    fn the_idea_form_survives_tiny_windows() {
+    fn the_backlog_form_survives_tiny_windows() {
         let mut a = app();
         a.hit("SPC n");
         typed(&mut a, "아주 긴 한글 제목이 여기 들어가서 좁은 창을 넘친다");

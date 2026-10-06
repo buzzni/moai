@@ -818,7 +818,7 @@ fn from_antigravity(event: Event, raw: &str) -> Option<(Event, Input)> {
 /// **겹쳐 보기는 막을 때만 치른다** — 지나가는 호출은 전과 같은 값이다.
 ///
 /// **다시 본 판정이 안 막으면 풀린 것이다** — 비추는 줄(`Context`)도 푼 답이라 그대로 낸다.
-/// `Pass` 만 풀린 것으로 치던 판은 `idea add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
+/// `Pass` 만 풀린 것으로 치던 판은 `backlog add` 하나를 곁들인 명령줄을 낡은 스냅샷의 거절로 도로
 /// 막았다(moai-dw63.e31) — 그 거절은 이미 집은 일을 집으라고 시켰다.
 ///
 /// **겹친 판의 이름도 사람을 싣는다**(moai-0zjo) — `worktree::fresh` 가 짓는 이름에는 사람이 없어,
@@ -858,7 +858,7 @@ fn settle(
     }
     // **모르는 줄도 같은 판에서 뺀다**(moai-ntl6, 사용자 결정 B) — 옆 워크트리가 쥐었을 일을 초점으로
     // 대지 않는다. **비추는 줄도 같은 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로
-    // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`idea promote -e <남의 에픽>`).
+    // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`backlog promote -e <남의 에픽>`).
     let added = add_unsure(input, repo, &rows, &mut narrow);
     if !added {
         return wide;

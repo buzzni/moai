@@ -6,16 +6,16 @@
 //! 사실(묶음이면 멤버에서 읽은 칸, 물려받았든 미뤘는가)도 든 쪽이 재서 넘긴다 — 여기서 이슈를
 //! 풀어 칸을 다시 읽으면 목록의 글리프와 숨김이 다른 칸을 본다.
 
-/// 칸마다 보이는가, 미룬 것을 보이는가, 담아 둔 생각(idea)을 보이는가, 아카이브를 보이는가.
+/// 칸마다 보이는가, 미룬 것을 보이는가, 담아 둔 생각(backlog)을 보이는가, 아카이브를 보이는가.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct View {
     /// 숨긴 칸의 이름. **보인 쪽이 아니라 숨긴 쪽을 든다** — 설정에 칸이 새로 생기면 저절로
     /// 보인다. 보인 쪽을 들면 새 칸의 줄이 이유 없이 사라진다.
     pub hidden: Vec<String>,
     pub hide_deferred: bool,
-    /// idea 를 숨긴다 — `SPC v i`(moai-oagj.bjr). **칸이 아니라 종류(`kind`)의 축이다**: 미룸이 `deferred_at` 축인
-    /// 것과 같은 결이라 칸 이름 목록(`hidden`)에 섞지 않는다. 보드의 idea 칸도 목록의 idea 줄도 이 하나로 숨는다.
-    pub hide_ideas: bool,
+    /// backlog 를 숨긴다 — `SPC v b`(moai-oagj.bjr). **칸이 아니라 종류(`kind`)의 축이다**: 미룸이 `deferred_at` 축인
+    /// 것과 같은 결이라 칸 이름 목록(`hidden`)에 섞지 않는다. 보드의 backlog 칸도 목록의 backlog 줄도 이 하나로 숨는다.
+    pub hide_backlog: bool,
     /// 아카이브(done 에 든 지 오래된 줄, `report::archived`)를 보인다 — `SPC v o`(moai-47mz). **처음값이 숨김이라
     /// `show_` 다**: done 을 보여도 아카이브는 숨는다(2026-10-03 사용자 결정). 칸이 아니라 시각의 축이라 칸 이름
     /// 목록(`hidden`)에 섞지 않고, 모두 보이기([`View::show_all`])도 안 건드린다 — `show --all` 이 아카이브를 안
@@ -42,7 +42,7 @@ impl View {
         }
     }
 
-    /// 그 줄이 보이는가. `column` 은 묶음이면 멤버에서 읽은 칸이고, `idea` 는 그 줄이 담아 둔 생각인가,
+    /// 그 줄이 보이는가. `column` 은 묶음이면 멤버에서 읽은 칸이고, `backlog` 는 그 줄이 담아 둔 생각인가,
     /// `known` 은 이 프로젝트의 칸이다.
     ///
     /// **아카이브는 여기서 안 가른다**(리뷰 moai-47mz.5il) — 그 줄이 아카이브인가는 시계를 든 쪽이 재고
@@ -53,9 +53,9 @@ impl View {
     /// **숨김은 이 프로젝트에 있는 칸에만 건다**(moai-2kyl 단계 리뷰) — 뱃지([`View::badge`])와 같은 자다.
     /// 보기는 사람의 설정이라 다른 프로젝트의 칸 이름을 들고 다니는데, 그 이름이 여기서 줄을 숨기면 뱃지도
     /// 번호 토글도 없어 줄이 말없이 사라진다. 설정에서 칸 이름을 바꿔 옛 칸에 남은 줄도 그렇다.
-    pub fn shows(&self, column: &str, deferred: bool, idea: bool, known: &[String]) -> bool {
+    pub fn shows(&self, column: &str, deferred: bool, backlog: bool, known: &[String]) -> bool {
         let hidden = self.hides(column) && known.iter().any(|k| k == column);
-        !hidden && !(deferred && self.hide_deferred) && !(idea && self.hide_ideas)
+        !hidden && !(deferred && self.hide_deferred) && !(backlog && self.hide_backlog)
     }
 
     /// 모두 보인다(`SPC v a`). **아카이브는 안 연다**(moai-47mz) — 그것은 `SPC v o` 다. **이 프로젝트의 칸만 걷는다**(moai-2kyl 단계 리뷰) — 다른 프로젝트에만 있는
@@ -64,10 +64,10 @@ impl View {
     pub fn show_all(&mut self, known: &[String]) {
         self.hidden.retain(|h| !known.contains(h));
         self.hide_deferred = false;
-        self.hide_ideas = false;
+        self.hide_backlog = false;
     }
 
-    /// 경로 줄에 댈 한 마디 — `done·미룸·idea 숨김`. 숨긴 것이 없으면 없다.
+    /// 경로 줄에 댈 한 마디 — `done·미룸·백로그 숨김`. 숨긴 것이 없으면 없다.
     ///
     /// **아카이브는 수로 댄다**(moai-47mz) — `aged` 는 아카이브라서**만** 숨은 줄의 수다(든 쪽이 센다,
     /// `Site::aged`). done 을 숨긴 동안에는 0 이라 안 서고, done 을 켜면 `아카이브 312 숨김` 이 선다 — 안 대면
@@ -82,8 +82,8 @@ impl View {
         if self.hide_deferred {
             names.push(crate::i18n::say(lang, "tui.act.deferred"));
         }
-        if self.hide_ideas {
-            names.push(crate::i18n::say(lang, "tui.board.idea"));
+        if self.hide_backlog {
+            names.push(crate::i18n::say(lang, "tui.board.backlog"));
         }
         // 수를 든 낱말은 이것 하나라 여기서만 짓는다 — 다른 이름은 빌린 채 둔다(프레임마다 불린다).
         let archive =
@@ -513,7 +513,7 @@ mod tests {
         let mut v = View::hiding("done");
         assert!(!v.shows("done", false, false, &here()));
         assert!(v.shows("todo", true, false, &here()), "미룬 것은 처음에 보인다");
-        assert!(v.shows("todo", false, true, &here()), "idea 는 처음에 보인다");
+        assert!(v.shows("todo", false, true, &here()), "backlog 는 처음에 보인다");
         v.toggle("done");
         assert_eq!(v, View::default());
         v.toggle("done");
@@ -527,16 +527,16 @@ mod tests {
         assert!(v.shows("todo", false, false, &here()), "미룸을 숨겨도 안 미룬 칸은 그대로다");
     }
 
-    /// **idea 는 제 축으로 숨는다**(moai-oagj.bjr) — 칸 이름이 아니라 종류라, 같은 `todo` 칸의 일은 그대로 선다.
+    /// **backlog 는 제 축으로 숨는다**(moai-oagj.bjr) — 칸 이름이 아니라 종류라, 같은 `todo` 칸의 일은 그대로 선다.
     /// 모두 보이기(`SPC v a`)가 함께 걷는다.
     #[test]
-    fn ideas_hide_on_their_own_axis() {
-        let mut v = View { hide_ideas: true, ..View::default() };
+    fn backlog_hide_on_their_own_axis() {
+        let mut v = View { hide_backlog: true, ..View::default() };
         assert!(!v.shows("todo", false, true, &here()));
-        assert!(v.shows("todo", false, false, &here()), "idea 를 숨겼는데 같은 칸의 일이 숨었다");
-        assert!(!v.shows("todo", true, true, &here()), "미룬 idea 도 idea 다");
+        assert!(v.shows("todo", false, false, &here()), "backlog 를 숨겼는데 같은 칸의 일이 숨었다");
+        assert!(!v.shows("todo", true, true, &here()), "미룬 backlog 도 backlog 다");
         v.show_all(&here());
-        assert!(v.shows("todo", false, true, &here()), "모두 보이기가 idea 를 안 걷었다");
+        assert!(v.shows("todo", false, true, &here()), "모두 보이기가 backlog 를 안 걷었다");
     }
 
     #[test]
@@ -552,7 +552,7 @@ mod tests {
         let mut v = View {
             hidden: vec!["blocked".into(), "done".into()],
             hide_deferred: true,
-            hide_ideas: true,
+            hide_backlog: true,
             show_archived: false,
         };
         assert!(v.shows("blocked", false, false, &lacks), "이 프로젝트에 없는 칸 이름이 줄을 숨겼다");
@@ -568,8 +568,8 @@ mod tests {
         assert_eq!(View::hiding("done").badge(&known, 0, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
         let v = View { hidden: vec!["review".into(), "done".into()], hide_deferred: true, ..View::default() };
         assert_eq!(v.badge(&known, 0, crate::i18n::Lang::Ko).as_deref(), Some("review·done·미룸 숨김"));
-        let v = View { hide_ideas: true, ..v };
-        assert_eq!(v.badge(&known, 0, crate::i18n::Lang::Ko).as_deref(), Some("review·done·미룸·idea 숨김"));
+        let v = View { hide_backlog: true, ..v };
+        assert_eq!(v.badge(&known, 0, crate::i18n::Lang::Ko).as_deref(), Some("review·done·미룸·백로그 숨김"));
         // 다른 프로젝트의 칸 이름은 들고만 있고 대지 않는다.
         let elsewhere = View { hidden: vec!["blocked".into(), "done".into()], ..View::default() };
         assert_eq!(elsewhere.badge(&known, 0, crate::i18n::Lang::Ko).as_deref(), Some("done 숨김"));
