@@ -23598,6 +23598,114 @@ fn init_without_a_terminal_asks_nothing_and_matches_yes() {
     assert_eq!(field(&js, "guide"), "block", "{js}");
 }
 
+/// 실제 터미널에서 기본값을 Enter 로 고른다 — 플래그에는 없는 훅 안내가 설치를 켜야 한다(moai-95do).
+/// 커서 자리 물음에 답하는 PTY 를 직접 세워 tmux 나 사람의 터미널 없이 화면 길을 지난다.
+#[cfg(unix)]
+#[test]
+fn init_screen_defaults_install_the_hooks_and_skills() {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    let s = Scratch::new("init-screen-hooks");
+    git(s.path(), &["init", "-q", "."]);
+    let c = Claude::new("init-screen-hooks-home");
+    // Claude 의 격리된 PATH 에 git 만 더한다 — 진짜 claude 는 절대 찾지 않는다.
+    let git_bin = git(s.path(), &["--exec-path"]);
+    std::os::unix::fs::symlink(Path::new(git_bin.trim()).join("git"), c.bin.join("git")).unwrap();
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    // SAFETY: openpty 가 쓰는 두 fd 와 읽는 크기는 살아 있는 값이며, 이름·설정은 필요 없다.
+    assert_eq!(
+        unsafe { libc::openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), std::ptr::null(), &size) },
+        0,
+        "{}",
+        std::io::Error::last_os_error()
+    );
+    // SAFETY: openpty 가 만든 fd 를 File 에 한 번씩 넘겨 닫는 일을 맡긴다.
+    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    // 자식이 master 를 물려받으면 slave 가 닫혀도 EOF 가 안 선다. 읽기는 마감을 지키게 막히지 않는다.
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let mut command = c.command(Path::new(BIN), s.path(), &["init", "argos"], true);
+    command
+        .env("TERM", "xterm")
+        .env("MOAI_LANG", "en")
+        .env("MOAI_CONFIG", c.home.path().join("config.toml"))
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    // SAFETY: fork 뒤에는 비동기 신호 안전한 시스템 호출만 쓴다. 자식의 stdin 을 제어 터미널로 만든다.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = Child(command.spawn().unwrap());
+    // Command 도 slave 복사본을 쥔다 — 끝난 프로세스의 PTY 를 열어 두지 않는다.
+    drop(command);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (mut shown, mut answered, mut entered) = (String::new(), 0, false);
+    loop {
+        let mut buf = [0; 8192];
+        match master.read(&mut buf) {
+            Ok(n) => shown.push_str(&String::from_utf8_lossy(&buf[..n])),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
+            Err(e) => panic!("PTY: {e}"),
+        }
+        let queries = shown.matches("\x1b[6n").count();
+        while answered < queries {
+            master.write_all(b"\x1b[1;1R").unwrap();
+            answered += 1;
+        }
+        if !entered && shown.contains("Enter plant") {
+            master.write_all(b"\r").unwrap();
+            entered = true;
+        }
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(status.success(), "{shown}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "init 화면이 끝나지 않았다\n{shown}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(entered, "화면 대신 비대화형 길로 갔다\n{shown}");
+    assert!(read(&s.path().join(".git/info/exclude")).contains("/.moai/"));
+    assert!(!s.path().join("AGENTS.md").exists());
+    assert!(s.path().join(".claude/moai-plugin/skills/moai/SKILL.md").is_file(), "스킬을 안 심었다\n{shown}");
+    let plugin: serde_json::Value =
+        serde_json::from_str(&read(&s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json"))).unwrap();
+    assert!(plugin["hooks"]["PreToolUse"].is_array(), "훅을 안 심었다\n{shown}");
+    assert!(c.calls().contains("plugin install ") && c.calls().contains("--scope local"), "{}", c.calls());
+    assert!(read(&c.home.path().join("config.toml")).contains(&s.path().display().to_string()));
+    let calls = c.calls();
+    for args in [vec!["init", "--json"], vec!["init", "--no-skill", "--json"]] {
+        let out = c.run(s.path(), &args, true);
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(text(&out).contains("\"skill\":false"), "{}", text(&out));
+        assert_eq!(c.calls(), calls, "기존 훅을 다시 설치했다");
+    }
+    for args in [vec!["init", "--skill", "--json"], vec!["init", "--guide", "hook", "--json"]] {
+        let before = c.calls();
+        let out = c.run(s.path(), &args, true);
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(c.calls().len() > before.len(), "명시적으로 시킨 설치를 건너뛰었다\n{}", text(&out));
+    }
+}
+
 /// **`--tracking exclude` 는 커밋되는 파일을 하나도 안 바꾼다**(moai-zynt.own). 병합 규칙과 드라이버는 할 일이
 /// 없어 안 심고, `moai status` 는 그 저장소에 커밋 저장소의 잔소리를 안 한다(moai-zynt.zhr). 다시 부르면 추적
 /// 방식은 git 에 묻고, 바꾸려 하면 거절한다.
