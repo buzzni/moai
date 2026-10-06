@@ -2311,11 +2311,20 @@ mod tests {
         assert_ne!(before, GITIGNORE, "옛 블록을 못 지었다");
         std::fs::write(root.join(".gitignore"), &before).unwrap();
         std::fs::write(root.join(".gitattributes"), &*attributes_for(&root)).unwrap();
-        assert!(gaps_in(&dotfiles(&root, Tracking::Commit, None)).is_empty(), "제 무시를 든 줄을 빠졌다고 졸랐다: {:?}", gaps_in(&dotfiles(&root, Tracking::Commit, None)));
+        assert!(
+            gaps_in(&dotfiles(&root, Tracking::Commit, None)).is_empty(),
+            "제 무시를 든 줄을 빠졌다고 졸랐다: {:?}",
+            gaps_in(&dotfiles(&root, Tracking::Commit, None))
+        );
         assert!(gitignore_for(&root).contains(".moai/mail/") && gitignore_for(&root).contains(".moai/agents/"));
         // 정말 빠진 줄은 여전히 댄다.
         std::fs::write(root.join(".gitignore"), "").unwrap();
-        assert_eq!(gaps_in(&dotfiles(&root, Tracking::Commit, None)).len(), 1, "{:?}", gaps_in(&dotfiles(&root, Tracking::Commit, None)));
+        assert_eq!(
+            gaps_in(&dotfiles(&root, Tracking::Commit, None)).len(),
+            1,
+            "{:?}",
+            gaps_in(&dotfiles(&root, Tracking::Commit, None))
+        );
     }
 
     /// **링크인 딸린 파일에는 안 쓰고, 빠진 줄 대신 링크라고 말한다**(moai-yke5). git 은 2.32 부터 체크아웃
