@@ -39,3 +39,10 @@
 {"ts":"2026-10-06T00:34:43Z","id":"moai-zynt.63u","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"앞 노트의 moai-xxxx 는 moai-n22o 다. idea 는 moai-7x7l(처음 init 의 무시 규칙)·moai-6wl9(작은 것들)"}
 {"ts":"2026-10-06T00:34:43Z","id":"moai-zynt.63u","kind":"note","by":"minyoung.go","by_email":"hedone21@gmail.com","text":"model: anthropic/opus-5.5 tokens=682712 (max — 쓰기 경로·훅·status 를 건드린 에픽)"}
 {"ts":"2026-10-06T00:34:43Z","id":"moai-zynt.63u","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"in_progress","to":"done","note":"지적 23건 전부 반영(9cb2f5e2). 넘긴 것: 옆 워크트리 찾기 moai-n22o(에픽 멤버, 결정 대기), moai-7x7l, moai-6wl9"}
+{"ts":"2026-10-06T00:35:30Z","id":"moai-zynt.own","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"review","to":"done"}
+{"ts":"2026-10-06T00:35:30Z","id":"moai-cbfz","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"review","to":"done"}
+{"ts":"2026-10-06T00:35:30Z","id":"moai-6pld","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"review","to":"done"}
+{"ts":"2026-10-06T00:35:31Z","id":"moai-785q","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"review","to":"done"}
+{"ts":"2026-10-06T00:35:31Z","id":"moai-zynt.zhr","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"review","to":"done"}
+{"ts":"2026-10-06T00:35:31Z","id":"moai-zynt.fa1","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"review","to":"done"}
+{"ts":"2026-10-06T00:35:31Z","id":"moai-zynt.hqr","kind":"status","by":"minyoung.go","by_email":"hedone21@gmail.com","from":"review","to":"done"}
