@@ -43,6 +43,7 @@
   "warn.backlog_pile_aged": "쌓인 백로그 {n}건 (가장 오래된 것 {d}일)",
   "warn.deferred": "미뤄 둔 것 {n}건",
   "warn.deferred_aged": "미뤄 둔 것 {n}건 (가장 오래된 것 {d}일)",
+  "warn.archive_pending": "아카이브 파일로 옮길 수 있는 닫힌 줄 {n}건",
   "warn.user_config": "사용자 설정에서 못 읽은 것 {n}건 — 한 줄씩은 stderr 에 냈다",
   "warn.agents_stale": "AGENTS.md 블록이 다르다 — 다른 바이너리가 쓴 것이라 이쪽이 더 낡았을 수 있다 (다시 빌드해 보고)",
   "warn.agents_hand_edited": "AGENTS.md 블록을 손으로 고쳤다 — 다시 심으면 그 손질은 사라진다",

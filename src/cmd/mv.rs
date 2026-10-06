@@ -11,6 +11,8 @@ use crate::style::{self, paint};
 
 #[derive(Default)]
 struct Moved {
+    /// Rows actually reopened from archive, for cleanup after the live commit.
+    restored: std::collections::BTreeSet<String>,
     /// 옮긴 이슈와 그것이 있던 칸.
     done: Vec<(Issue, Status)>,
     /// 이미 그 칸에 있던 것.
@@ -151,13 +153,40 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
     // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
     let lang = ctx.lang();
-    let moved: Moved = repo.with_write(
+    // Reopening an archived row restores only the selected row. The archive
+    // command keeps the rest of its former bundle in place by design.
+    let wanted: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
+    let moved: Moved = repo.with_write_after(
         || lang,
         |issues, cfg, _| {
             // **시각은 락을 쥔 뒤에 뜬다**(리뷰 moai-u5bk.3wq). 밖에서 뜨면 먼저 뜨고 늦게 락을 잡은
             // 쪽이 뒤에 써서, 칸 시각이 거꾸로 가고 안 덮이는 시작이 끝보다 늦게 선다 — 집기가 닫기를
             // 앞질러 `done_at − started_at` 이 음수가 된다. 락 안에서 뜨면 쓰는 차례가 곧 시각의 차례다.
             let at = model::now();
+            let active_ids: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
+            let archived_rows: Vec<_> = if wanted.iter().all(|id| active_ids.contains(id.as_str())) {
+                Vec::new()
+            } else {
+                let archived = crate::archive::read(&repo.root)?;
+                let stands = crate::report::group_stands(&archived.issues, cfg);
+                archived
+                    .issues
+                    .iter()
+                    .filter(|i| wanted.contains(&i.id) && !active_ids.contains(i.id.as_str()))
+                    .map(|i| {
+                        let mut row = i.clone();
+                        // Group rows store no derived status. Reopening uses the
+                        // closed status read from their archived members.
+                        if let Some(stand) = stands.get(&(i.kind, i.id.as_str())) {
+                            row.status = Status::new(stand.column);
+                            row.status_since = stand.entered.into();
+                        }
+                        row
+                    })
+                    .collect()
+            };
+            let restore_ids: std::collections::BTreeSet<String> = archived_rows.iter().map(|i| i.id.clone()).collect();
+            issues.extend(archived_rows.clone());
             // **칸부터 다 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
             // 하는지 모른다" 로 덮이면, 부르는 쪽은 둘을 글로만 가를 수 있다. 칸 검사가
             // 줄을 봐야 하므로(`check_from`) 락 안에서 잰다. **`bad_status` 를 내는 검사는
@@ -324,8 +353,17 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                     m.unblocked.iter().chain(&m.closable).chain(&m.next).map(|i| i.id.as_str()).collect();
                 m.freed = super::read_of(issues, cfg, &freed, ctx.json);
             }
+            m.restored = m
+                .done
+                .iter()
+                .filter(|(i, _)| !i.status.is_done() && restore_ids.contains(&i.id))
+                .map(|(i, _)| i.id.clone())
+                .collect();
+            // Failed guards and mv-to-done do not change storage location.
+            issues.retain(|i| !restore_ids.contains(&i.id) || m.restored.contains(&i.id));
             Ok((entries, m))
         },
+        |m| crate::archive::remove_ids(&repo.root, &m.restored),
     )?;
 
     // **`-m` 이 파일 이름이면 한 줄로 알린다**(moai-yivo.xe9) — **그 글이 저널에 든 판에만**: 옮긴 줄의 칸 줄과

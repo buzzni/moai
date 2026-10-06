@@ -5,6 +5,7 @@
 
 pub mod add;
 pub mod agents;
+pub mod archive;
 pub mod backlog;
 pub mod defer;
 pub mod edit;
@@ -513,6 +514,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Add(a) => add::run(ctx, a, None),
         Cmd::Show(a) => show::run(ctx, a, None),
         Cmd::Stats(a) => stats::run(ctx, a),
+        Cmd::Archive(a) => archive::run(ctx, a),
         Cmd::Mv(a) => mv::run(ctx, a),
         Cmd::Edit(a) => edit::run(ctx, a),
         Cmd::Rm(a) => rm::run(ctx, a),

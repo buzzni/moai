@@ -14,6 +14,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- **Explicit yearly issue archives.** `moai archive --dry-run` previews eligible
+  closed rows and `moai archive` moves closed issue and epic bundles into
+  `.moai/archive/<year>.jsonl`; `show` and `stats` can read archived rows, while
+  normal board reads stay on the active snapshot. (moai-fx9t)
 - **`moai init --yes` (`-y`) plants without asking.** Choices not settled by
   flags or existing git rules and guide files take the old defaults.
 - **`moai init --driver` pins the merge-driver row**, the pair of `--no-driver`,
@@ -85,6 +89,9 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **Tracker writes compare changed rows through an ID map.** Adding or updating
+  an issue no longer scans the original tracker once for every row. The file
+  format and handling of unchanged rows remain the same. (moai-fx9t.opm)
 - **Initialization preserves the tracking and guide choices already present in a
   clone**, including global git excludes and installed moai hooks. Git failures
   or probe timeouts refuse initialization before it writes; status reports the

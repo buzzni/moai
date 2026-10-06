@@ -635,3 +635,15 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   and `moai send` — a subagent does not say `moai hello`
 
 Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp
+
+## Archive storage
+
+`moai archive --dry-run` previews closed bundles and `moai archive` moves them
+into `.moai/archive/<year>.jsonl`. It is an explicit maintenance command: normal
+writes keep using the active snapshot. Milestones stay live. Statistics, search,
+`show <id>`, `show --archived` and the explorer can read archive files too.
+
+Reopening with `moai mv <id> todo --from done` restores only the selected row.
+Its former bundle remains archived. Archived IDs stay reserved, and `status`
+reports IDs duplicated across storage files. `init` installs the archive merge
+attributes alongside the active snapshot's rule (moai-fx9t).

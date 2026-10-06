@@ -763,7 +763,9 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     // 안 들어 — 워크트리를 `rm -rf` 로 치워도 `App::follow` 가 다시 안 읽고 배너만 옛 수로 선다.
     // 층이 제 줄을 재는 자와 같다(`layer::marks_of`). **읽기 전에** 잰다(위와 같은 까닭).
     let places = crate::worktree::place_marks(repo.here());
-    let g = crate::worktree::gather(repo, worktree)?;
+    let archived_marks = crate::archive::marks(&repo.root)?;
+    let mut g = crate::worktree::gather(repo, worktree)?;
+    g.load = crate::archive::read_all(&repo.root, g.load)?;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
         .origin
@@ -788,6 +790,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     let mut watched = g.watched;
     watch(&mut watched, heads);
     watch(&mut watched, places);
+    watch(&mut watched, archived_marks);
     // 옆을 **실제로 겹쳤는가**로 잰다 — 켠 깃발이 아니다([`placed`]).
     // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다(moai-kos1) — 자리 판정이 바로 앞에서 푼 같은
     // 파일을 다시 열어 파고 있었다. 걸음마다 치르던 값이라 쓰기·`SPC r`·프로젝트 들어가기가
@@ -12134,5 +12137,22 @@ mod tests {
             a.key(key(k));
         }
         assert_eq!(a.cursor, 0);
+    }
+    #[test]
+    fn archive_storage_survives_explorer_reload_and_background_changes() {
+        let (scratch, mut a) = writable("archive-reload");
+        let mut row = make("argos-a001", Kind::Issue);
+        row.status = Status::new("done");
+        let root = scratch.path();
+        crate::archive::append(root, &[row], &cfg()).unwrap();
+        a.reload();
+        assert!(a.site.issues.iter().any(|i| i.id == "argos-a001"));
+        let file = crate::archive::path(root, "2026");
+        assert!(a.site.watched.iter().any(|(p, _)| *p == file));
+        let mut row = make("argos-b001", Kind::Issue);
+        row.status = Status::new("done");
+        crate::archive::append(root, &[row], &cfg()).unwrap();
+        settle_reads(&mut a);
+        assert!(a.site.issues.iter().any(|i| i.id == "argos-b001"));
     }
 }

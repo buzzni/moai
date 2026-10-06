@@ -1060,7 +1060,7 @@ fn an_old_planting_hears_that_only_the_comments_changed() {
     // 옛 바이너리가 심은 모양 — 규칙은 같고 주석만 한국어다.
     std::fs::write(
         &attrs,
-        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n\
+        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/archive/*.jsonl text eol=lf merge=moai\n\
          .moai/journal.jsonl  text eol=lf merge=union\n.moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
     .unwrap();
@@ -7452,6 +7452,7 @@ const JSON_SWEEP: &[&str] = &[
     "show",
     // 거르개가 고른 줄을 센다(moai-1hka.k16) — 객체 하나를 낸다.
     "stats",
+    "archive",
     "note",
     "link",
     "defer",
@@ -7902,6 +7903,7 @@ fn every_command_still_speaks_json() {
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["stats", "--json"],
+        vec!["archive", "--dry-run", "--json"],
         vec!["note", &id, "메모", "--json"],
         vec!["link", &id, "--blocks", &epic, "--json"],
         vec!["defer", &id, "--json"],
@@ -27297,4 +27299,155 @@ fn backlog_spelling_in_a_file_is_read_and_rewritten_for_old_binaries() {
     let written: serde_json::Value = serde_json::from_str(&written).unwrap();
     assert_eq!(written["kind"], "idea");
     assert_eq!(written["metadata"], input["metadata"], "unknown data did not survive the write");
+}
+
+// Explicit storage archives, as distinct from time-based view hiding.
+#[test]
+fn archive_storage_moves_closed_bundles_and_restores_only_selected_rows() {
+    let s = init("archive-storage-bundle");
+    let has_row =
+        |text: &str, id: &str| text.lines().any(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"] == id);
+    let milestone = ok(s.path(), &["milestone", "add", "release", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "bundle", "--milestone", &milestone, "-q"]).trim().to_string();
+    let a = add(s.path(), &["first", "--parent", &epic]);
+    let b = add(s.path(), &["second", "--parent", &epic]);
+    ok(s.path(), &["mv", &a, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    assert!(ok_at(s.path(), later, &["archive", "--dry-run", "--json"]).contains("\"rows\":0"));
+    ok(s.path(), &["mv", &b, "done"]);
+    let before = issues(s.path());
+    let dry = ok_at(s.path(), later, &["archive", "--dry-run", "--json"]);
+    assert!(dry.contains("\"rows\":3"), "{dry}");
+    assert_eq!(issues(s.path()), before);
+    assert!(!s.path().join(".moai/archive").exists());
+    assert!(ok_at(s.path(), later, &["status"]).contains("아카이브 파일로 옮길 수 있는 닫힌 줄 3건"));
+    ok_at(s.path(), later, &["archive", "--json"]);
+    let active = issues(s.path());
+    assert!(active.contains(&milestone));
+    for id in [&epic, &a, &b] {
+        assert!(!active.contains(id));
+    }
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    let archived = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(archived.lines().count(), 3);
+    assert!(ok_at(s.path(), later, &["show", &a, "--json"]).contains("first"));
+    assert!(ok_at(s.path(), later, &["show", "--archived", "--json"]).contains(&a));
+    assert!(ok_at(s.path(), later, &["show", "-g", "first", "--all", "--json"]).contains(&a));
+    assert!(ok_at(s.path(), later, &["stats", "--json"]).contains(r#"{"key":"done","rows":2}"#));
+    assert!(ok_at(s.path(), later, &["tui", "--path", &epic, "--json"]).contains(&a));
+    assert!(ok_at(s.path(), later, &["show", "--done", "2026-09-01..2026-09-30", "--json"]).contains(&a));
+    let stale = at(s.path(), later, &["mv", &a, "todo", "--from", "todo", "--json"]);
+    assert!(!stale.status.success());
+    assert_eq!(issues(s.path()), active, "failed guard restored a row");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), archived);
+    ok_at(s.path(), later, &["mv", &a, "done", "--json"]);
+    assert_eq!(issues(s.path()), active, "no-op move changed storage");
+    ok_at(s.path(), later, &["mv", &a, "todo", "--from", "done", "--json"]);
+    let active = issues(s.path());
+    assert!(active.contains(&a));
+    assert!(!has_row(&active, &b) && !has_row(&active, &epic));
+    let archived = std::fs::read_to_string(&file).unwrap();
+    assert!(!archived.contains(&a) && archived.contains(&b) && archived.contains(&epic));
+    ok_at(s.path(), later, &["mv", &epic, "todo", "--json"]);
+    assert!(issues(s.path()).contains(&epic));
+    assert!(!has_row(&std::fs::read_to_string(&file).unwrap(), &epic));
+}
+
+#[test]
+fn archive_storage_serializes_concurrent_archive_and_restore_commands() {
+    let s = init("archive-storage-concurrent");
+    let ids: Vec<_> = (0..8).map(|n| add(s.path(), &[&format!("row {n}")])).collect();
+    for id in &ids {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let later = "2026-10-01T00:00:00Z";
+    let children: Vec<_> = (0..4)
+        .map(|_| {
+            staged(&["archive", "--json"])
+                .current_dir(s.path())
+                .env("MOAI_NOW", later)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 8);
+    let children: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            staged(&["mv", id, "todo", "--from", "done", "--json"])
+                .current_dir(s.path())
+                .env("MOAI_NOW", later)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    assert_eq!(issues(s.path()).lines().count(), 8);
+    assert!(std::fs::read_to_string(&file).unwrap().is_empty());
+}
+
+#[test]
+fn archive_storage_reports_cross_file_duplicate_ids_without_dropping_changed_rows() {
+    let s = init("archive-storage-duplicate");
+    let id = add(s.path(), &["original"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let row = issues(s.path());
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    // An old binary can create a duplicate live row. A changed row must not be
+    // discarded merely because its ID is already in the archive.
+    let changed = row.replace("original", "changed live row");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &changed).unwrap();
+    let status = at(s.path(), later, &["status", "--json"]);
+    assert!(!status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("duplicate_id"));
+    let archived_before = std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    assert!(!at(s.path(), later, &["archive"]).status.success());
+    assert_eq!(issues(s.path()), changed);
+    assert_eq!(std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived_before);
+}
+
+#[test]
+fn archive_storage_uses_the_installed_merge_driver_for_yearly_files() {
+    let s = init("archive-storage-merge");
+    assert!(
+        std::fs::read_to_string(s.path().join(".gitattributes"))
+            .unwrap()
+            .contains(".moai/archive/*.jsonl text eol=lf merge=moai")
+    );
+    let a = add(s.path(), &["first"]);
+    ok(s.path(), &["mv", &a, "done"]);
+    let base = issues(s.path());
+    let b = add(s.path(), &["second"]);
+    ok(s.path(), &["mv", &b, "done"]);
+    let ours = issues(s.path());
+    let c = add(s.path(), &["third"]);
+    ok(s.path(), &["mv", &c, "done"]);
+    let theirs: String =
+        issues(s.path()).lines().filter(|line| !line.contains(&b)).map(|line| format!("{line}\n")).collect();
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    let paths: Vec<_> = ["base.jsonl", "2026.jsonl", "theirs.jsonl"].iter().map(|n| dir.join(n)).collect();
+    for (p, data) in paths.iter().zip([base, ours, theirs]) {
+        std::fs::write(p, data).unwrap();
+    }
+    let names: Vec<_> = paths.iter().map(|p| p.to_str().unwrap()).collect();
+    ok(s.path(), &["merge-driver", names[0], names[1], names[2]]);
+    let merged = std::fs::read_to_string(&paths[1]).unwrap();
+    assert_eq!(merged.lines().count(), 3);
+    for id in [&a, &b, &c] {
+        assert!(merged.contains(id));
+    }
 }

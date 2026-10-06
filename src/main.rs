@@ -4,6 +4,7 @@
 //! `Result` 를 종료 코드로 바꾼다. 계산이 여기 있으면 나중에 TUI 도
 //! 같은 것을 다시 짜야 한다.
 
+mod archive;
 mod cli;
 mod cmd;
 mod config;

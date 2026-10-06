@@ -869,6 +869,12 @@ impl Repo {
         Ok(read_snapshot(&self.root).map_err(Unsnapped::into_fail)?.unwrap_or_default())
     }
 
+    /// Read the active snapshot together with yearly archive files. Hot paths
+    /// deliberately continue to use [`Repo::read`] so archived rows stay out.
+    pub fn read_all(&self) -> R<Load> {
+        crate::archive::read_all(&self.root, self.read()?)
+    }
+
     /// `issues.jsonl` 을 바꾸는 **유일한 경로**.
     ///
     /// 락 → (락 안에서) 읽기 → 고치기 → 정규화·검증·정렬 → 원자적 교체 →
@@ -902,8 +908,26 @@ impl Repo {
     where
         F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
     {
+        self.with_write_lines_after(lang, f, |_| Ok(()))
+    }
+
+    /// Commit the live snapshot, then run archive cleanup before releasing the
+    /// same lock. Cleanup failure leaves the committed live rows recoverable.
+    pub fn with_write_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
+    where
+        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        G: FnOnce(&T) -> R<()>,
+    {
+        self.with_write_lines_after(lang, |issues, _, cfg, reserved| f(issues, cfg, reserved), after)
+    }
+
+    fn with_write_lines_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
+    where
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        G: FnOnce(&T) -> R<()>,
+    {
         // 펴는 자리는 락을 다 놓은 여기다 — 코드는 갈래가 쥔다([`Stop::said`]).
-        let (out, note) = self.write_locked(f).map_err(|stop| stop.said(&lang))?;
+        let (out, note) = self.write_locked(f, after).map_err(|stop| stop.said(&lang))?;
         // **못 적은 일기는 여기서 말이 된다** — 스냅샷은 담겼으니 실패가 아니고, 찍는 자는 `main` 이다.
         if let Some(t) = note {
             let said = crate::view::store_trouble(lang(), &t);
@@ -915,9 +939,10 @@ impl Repo {
     /// [`Repo::with_write_lines`] 의 몸통([`Repo::with_write`] 도 이것을 지난다) — 락을 잡고, 읽고,
     /// 고치고, 쓴다. **돌아올 때 락을 놓는다.**
     /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
-    fn write_locked<T, F>(&self, f: F) -> Result<(T, Option<Trouble>), Stop>
+    fn write_locked<T, F, G>(&self, f: F, after_commit: G) -> Result<(T, Option<Trouble>), Stop>
     where
         F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        G: FnOnce(&T) -> R<()>,
     {
         // **저장소 락은 받은 저장소가 커밋할 수 있는 자리다**([`Lock::inside`], moai-sn57) — 링크를 안 따르고
         // 체크아웃 안에만 짓는다. 두 락을 한 뿌리로 잰다. 못 잡으면 그 까닭도 자료로 들고 나간다.
@@ -955,8 +980,16 @@ impl Repo {
         for o in original.iter_mut() {
             o.normalize();
         }
+        // Keep the first twin, as the former linear lookup did. Repairing duplicate
+        // ids must compare against the same original row while normal writes scale
+        // with the number of rows rather than its square.
+        let mut original_by_id = BTreeMap::new();
+        for o in &original {
+            original_by_id.entry(o.id.as_str()).or_insert(o);
+        }
 
-        let reserved = load.reserved_ids();
+        let mut reserved = load.reserved_ids();
+        reserved.extend(crate::archive::ids(&self.root)?);
         let mut issues = load.issues;
         let mut unread = load.errors;
         let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;
@@ -979,7 +1012,7 @@ impl Repo {
                 // 지운 줄)에 빈 글로 떨어지던 판은 `새 줄 ''` 을 냈다 — id 도 제목도 아니라,
                 // 받는 쪽에 손잡이가 하나도 안 남는다. `create`·`rm` 이 옮겨 적은 `title` 을
                 // 다음 자리로 두고, 그것마저 없으면 id 라도 댄다.
-                let at = || match original.iter().any(|o| o.id == e.id) {
+                let at = || match original_by_id.contains_key(e.id.as_str()) {
                     true => e.id.clone(),
                     false => {
                         match issues.iter().find(|i| i.id == e.id).map(|i| i.title.as_str()).or(e.title.as_deref()) {
@@ -999,7 +1032,7 @@ impl Repo {
 
         for i in issues.iter_mut() {
             i.normalize();
-            let was = original.iter().find(|o| o.id == i.id);
+            let was = original_by_id.get(i.id.as_str()).copied();
             if was != Some(&*i) {
                 // 제목과 본문은 **이번에 바뀌었을 때만** 잰다 — 이미 큰 것을 든 줄도 옮기고 고칠 수 있다.
                 //
@@ -1126,6 +1159,7 @@ impl Repo {
                 moved.push(pair);
             }
         }
+        after_commit(&out)?;
         Ok((out, note))
     }
 
@@ -4319,6 +4353,32 @@ mod tests {
             .unwrap_err()
             .message;
         assert!(e.contains("두 번"), "{e}");
+    }
+
+    #[test]
+    fn repairing_twins_compares_against_the_first_original_row() {
+        let (r, d) = repo("repair_first_twin");
+        let mut first = issue("argos-0001");
+        first.status = Status::new("old_column");
+        let second = issue("argos-0001");
+        std::fs::write(
+            d.join(".moai/issues.jsonl"),
+            format!("{}\n{}\n", serde_json::to_string(&first).unwrap(), serde_json::to_string(&second).unwrap()),
+        )
+        .unwrap();
+
+        r.with_write(
+            || crate::i18n::Lang::En,
+            |issues, _, _| {
+                issues.truncate(1);
+                Ok((vec![], ()))
+            },
+        )
+        .expect("removing the later twin must leave the unchanged first row writable");
+
+        let load = r.read().unwrap();
+        assert_eq!(load.issues.len(), 1);
+        assert_eq!(load.issues[0].status.as_str(), "old_column");
     }
 
     /// 남의 낡은 줄 하나가 모든 쓰기를 막지 않는다.
