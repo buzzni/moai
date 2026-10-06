@@ -332,17 +332,21 @@ pub fn screen(f: &mut Frame, app: &mut App) {
                 f.render_widget(Paragraph::new(Line::from(Span::styled(text, Style::new().fg(Color::LightRed)))), more);
             }
             // 값 목록이 서 있으면 Enter 는 값을 넣는다 — 안내도 그 말을 한다(moai-h2rh).
-            let help = if listing {
+            let help = if listing && !app.completing_value() {
                 fill(
                     say(lang, "tui.hint.pick"),
                     &[
-                        ("keys", &labels(PROMPT, &[Prompt::Up, Prompt::Down])),
+                        ("keys", &labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope, Prompt::Up, Prompt::Down])),
                         ("ok", &label(PROMPT, Prompt::Apply)),
                         ("cancel", &label(PROMPT, Prompt::Cancel)),
                     ],
                 )
             } else {
-                prompt_help(say(lang, "tui.prompt.hang"), lang)
+                format!(
+                    "{}  {}",
+                    labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope]),
+                    prompt_help(say(lang, "tui.prompt.hang"), lang)
+                )
             };
             prompt(f, line, say(lang, "tui.prompt.filter"), q, error, &help)
         }
@@ -4809,7 +4813,16 @@ fn hint_lines(app: &App, width: usize, room: usize) -> (Vec<Line<'static>>, bool
         }
         let keys = rows.into_iter().enumerate().map(|(i, row)| {
             let name = if i == 0 { heads } else { "" };
-            vec![Span::styled(pad(name, lead), dim()), Span::raw("  "), Span::styled(row, Style::new().fg(MENU_KEY))]
+            let mut spans = vec![Span::styled(pad(name, lead), dim()), Span::raw("  ")];
+            for (at, k) in row.split_whitespace().enumerate() {
+                if at > 0 {
+                    spans.push(Span::raw(" "));
+                }
+                let style = Style::new().fg(MENU_KEY);
+                let style = if app.completed_key() == Some(k) { style.add_modifier(Modifier::REVERSED) } else { style };
+                spans.push(Span::styled(k.to_string(), style));
+            }
+            spans
         });
         let examples = super::hint::EXAMPLES.iter().enumerate().map(|(i, ex)| {
             let name = if i == 0 { eg } else { "" };
@@ -10971,7 +10984,7 @@ pub(super) mod tests {
         assert!(row.starts_with(" 거름망  status=xyz    `xyz` 라는 칸이 없고"), "{row}");
         assert_eq!(x, 9 + 10);
         let (row, _) = filter_line("tag=parser", 80);
-        assert!(row.starts_with(" 거름망  tag=parser    Enter 걸기  Esc 그만"), "{row}");
+        assert!(row.starts_with(" 거름망  tag=parser    Tab·Shift-Tab  Enter 걸기  Esc 그만"), "{row}");
     }
 
     /// **거름망은 거절문의 둘째 줄을 제 윗줄에 그린다**(moai-tckz). 한 줄이던 때는 글칸 옆에 첫 줄만 들어가,
