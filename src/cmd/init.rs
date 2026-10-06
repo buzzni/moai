@@ -1854,7 +1854,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     // 읽는다. 못 한 것은 그 명령의 말(`!` 줄, `--json` 의 `registered: false`)이 이미 댄다. 이 명령이 앞서 세운
     // 깃발은 그대로 둔다.
     let partial = super::take_partial();
-    let skilled = plan.skill.then(|| crate::cmd::skill::install(ctx, "local", false));
+    let skilled = plan.skill.then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], false));
     let listed = plan.project.then(|| crate::cmd::project::add(ctx, &root));
     super::take_partial();
     if partial {
