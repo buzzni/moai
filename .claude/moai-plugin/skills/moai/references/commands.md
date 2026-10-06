@@ -28,7 +28,7 @@ running beside each other overlap, and waiting on a person counts too.
 its epic's milestone. A child created with `--parent <epic>` belongs to that epic.
 Do not write it again on every issue — move the epic and the members come along.
 
-**A plan gives its members the epic's own id.** `moai add --from` and `moai idea
+**A plan gives its members the epic's own id.** `moai add --from` and `moai backlog
 promote` mint `<epic>.<body>` for every issue in the plan, the way `--parent
 <epic>` always did for a review — one subject, one id. The member carries no
 `epic` field of its own, so `jq -r .epic` on it is `null` while `jq -r
@@ -203,7 +203,7 @@ create nothing. The value becomes the title text exactly as written, so put vari
 in title positions only (in a tag or priority position it is refused). To put a literal
 `{{` in a template title, write `\{{`. A backslash immediately before `{{` is counted
 in pairs — for a literal backslash followed by a variable, write `\\{{name}}`
-(`C:\\{{dir}}`). `idea promote --from` takes the same `--var`.
+(`C:\\{{dir}}`). `backlog promote --from` takes the same `--var`.
 
     moai add --from .moai/templates/release.md --var version=1.2 --dry-run
 
@@ -255,41 +255,41 @@ in `latest.toml`. Ask somewhere else and the answer from the other place is not 
 
 ## Unfolding a parked thought
 
-    moai idea add '<what just came to mind>'       park it
-    moai idea add '<a longer thought>' -b -        the body comes from stdin
-    moai idea ls                                   see what has piled up
+    moai backlog add '<what just came to mind>'       park it
+    moai backlog add '<a longer thought>' -b -        the body comes from stdin
+    moai backlog ls                                   see what has piled up
     moai show -g <keyword>                         find out whether it is written down already
 
 When the time comes, unfold one into an epic and issues. Unfolding closes the thought.
 
 ```sh
-moai idea promote <id> --from - <<'PLAN'
+moai backlog promote <id> --from - <<'PLAN'
 # Epic title
 - [p1] first issue #enhancement
 PLAN
 ```
 
-**A line in the plan becomes the issue title verbatim.** Copy over an idea title
+**A line in the plan becomes the issue title verbatim.** Copy over a backlog item title
 that grew long while you parked it and that length spreads into the issues, so
-write a short new title when you unfold — the original text stays on that idea,
+write a short new title when you unfold — the original text stays on that backlog,
 and the history line about being unfolded from it leads back there.
 
-**The idea's milestone and body go onto the epic by themselves.** `promote` puts
+**The backlog's milestone and body go onto the epic by themselves.** `promote` puts
 both on the epic it unfolds — a milestone is inherited, so the epic alone carries
 it to every member, the ones added later included, and the body is what lets
 `moai show <epic>` say why these issues are one bundle. Not onto every issue: the
-original stays on the closed idea and the history leads back to it, and the one
+original stays on the closed backlog and the history leads back to it, and the one
 place worth filling is the epic, so the window that picks a member up does not
 have to press every member to find out what this is.
 
-**The milestone that comes over is the one `moai show --milestone` stands the idea
-under**, not whatever its own field says — an idea parked inside an epic comes over
+**The milestone that comes over is the one `moai show --milestone` stands the backlog
+under**, not whatever its own field says — a backlog item parked inside an epic comes over
 in that epic's release even with an empty field of its own, and a field of its own
 that loses to the epic it sits in never reaches the new epic. One reader answers
 where a row belongs, on every surface.
 
 **Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
-already the owner — its members inherit its milestone, and writing the idea's over
+already the owner — its members inherit its milestone, and writing the backlog's over
 theirs would stand one bundle in two places.
 
 **If what came over is not the release that is running, leave it where it stands.**
@@ -299,8 +299,8 @@ release:
 
     moai edit <epic> --milestone <milestone>
 
-`promote` carries the release the idea stands in whatever state that release is in,
-so an idea parked with no milestone, one parked under a release that has since
+`promote` carries the release the backlog stands in whatever state that release is in,
+so a backlog item parked with no milestone, one parked under a release that has since
 shipped, and one parked under a milestone since deferred all come over exactly as
 they stood. **A dead one you do clear yourself** — nobody chose it here and it hides
 the new epic: `moai edit <epic> --milestone none` on a release that has shipped or
@@ -311,7 +311,7 @@ the moment it is created — not in `ready`, not in `held`, and no warning says 
 **A dead release is said out loud**: unfolding into a deferred or closed milestone
 prints one line on stderr naming it, and nothing is blocked.
 
-The id in that line is the release `moai show --milestone` stands that idea under. Only its shape is checked, so `moai-zzzz`
+The id in that line is the release `moai show --milestone` stands that backlog under. Only its shape is checked, so `moai-zzzz`
 goes in with exit 0 — but one line on stderr says there is no such milestone,
 and `moai status` counts the row as `dangling_milestone`.
 
@@ -453,7 +453,7 @@ work. It is a note, not a field.
 
 It takes the filters `moai show` takes and counts one kind — `issue` unless
 `--type` names another; a group is measured through its members (`-e`,
-`--milestone`). Done, deferred, ideas and the archive are opened, because a
+`--milestone`). Done, deferred, backlog and the archive are opened, because a
 count of history that hides what closed would say nothing closed. In the explorer
 `SPC g s` opens the same numbers as bars, narrowed by the filter that is hung.
 

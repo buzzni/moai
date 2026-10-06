@@ -1,9 +1,9 @@
 ---
 name: moai-supervise
-description: Use when handing the ideas piled up on one repository, one at a time, to the agent sessions waiting on it as workers — Claude Code, Codex or Antigravity — and taking their reports. Triggers on "supervise", "hand out the ideas", "put the idle sessions to work", "감독해 줘", "idea 나눠 줘", "놀고 있는 세션에 일 시켜".
+description: Use when handing the backlog piled up on one repository, one at a time, to the agent sessions waiting on it as workers — Claude Code, Codex or Antigravity — and taking their reports. Triggers on "supervise", "hand out the backlog", "put the idle sessions to work", "감독해 줘", "backlog 나눠 줘", "놀고 있는 세션에 일 시켜".
 ---
 
-# moai-supervise — hand ideas out to the workers that are waiting
+# moai-supervise — hand backlog out to the workers that are waiting
 
 The supervisor **picks, sends and checks.** It does not fix code, it does not merge,
 and it does not settle design in a worker's place. The workers merge. Overlapping
@@ -79,7 +79,7 @@ person watching and go on without it.
 ## One round
 
 **0. Reclaim first — work that lost its place.** When a session dies the row it picked
-up stays `in_progress` and nobody carries it on. Look at this before picking new ideas.
+up stays `in_progress` and nobody carries it on. Look at this before picking new backlog.
 
     moai status --json                     the ids of warnings whose kind is "stranded"
                                            (inside a worktree it stands only with `--worktree`)
@@ -131,7 +131,7 @@ trusted. Hand on the work of a worker that reads `gone` but still stands in `moa
 only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one waiting worker **before any new
-  idea**. Send the letter in 3 with its first two lines changed to the two below, and the
+  backlog**. Send the letter in 3 with its first two lines changed to the two below, and the
   rest filled as 3 says (`<other work>` too — 4-3 points at that line). The worker's
   `moai-work` skill has the section the first line names
 
@@ -140,52 +140,52 @@ only once the person says that window has ended; until then it is that worker's.
 
 - **Whether it is carried on or put down is not the supervisor's call.** If it looks like
   work to put down (`moai mv <id> todo`, `moai defer <id> -m '<why>'`), ask the person
-- Work handed on to be carried is, like an idea, not sent again until its report is checked
+- Work handed on to be carried is, like a backlog item, not sent again until its report is checked
 
-**1. Pick.** Out of the ideas that have piled up, keep only the ones that do not collide
+**1. Pick.** Out of the backlog that have piled up, keep only the ones that do not collide
 with what is open right now.
 
-    moai idea ls                           what has piled up
+    moai backlog ls                           what has piled up
     moai show -s in_progress,review        what is picked up
-    moai show <id>                         what that idea touches
+    moai show <id>                         what that backlog touches
 
-Look at `git worktree list` too. An idea that touches the **same files, the same area**
+Look at `git worktree list` too. A backlog item that touches the **same files, the same area**
 as a worktree already standing or an epic already picked up comes out of this round —
 when two of them change the same place, one waits for the other at the merge. **Compare
-the ideas you send in this same round against each other too** — a worker only raises
+the backlog you send in this same round against each other too** — a worker only raises
 its worktree after it receives the work, so what you just sent is not in the lists above
-yet. Do this count again for every further idea. An epic left open with only
+yet. Do this count again for every further backlog. An epic left open with only
 first-column members (what the worker's 7-1 left behind) shows as `in_progress` but is not
-picked up — there is no worktree and no picked-up member, so do not drop ideas over it.
+picked up — there is no worktree and no picked-up member, so do not drop backlog over it.
 
 **If a milestone is running, what is inside it comes first.** The line `moai ready` prints
 under its list says what is running and how many it held back outside it, and the
 `moai status` notice shines on the same thing. Then what you send this round is work
-attached to that milestone — an idea from outside waits for the next round unless it
+attached to that milestone — a backlog item from outside waits for the next round unless it
 should stand as `p0`.
 **The tool does not block this** (a pick-up goes straight through), which is why the
 place to decide is here. If two milestones are running, both are inside.
 
 **Work is never pulled into a running milestone — the supervisor does not bring an
-outside idea in.** `moai idea promote` carries over the body and the release the idea
+outside backlog in.** `moai backlog promote` carries over the body and the release the backlog
 stands in — the one `moai show --milestone` lists it under, not its own field — so an
-idea parked outside the release unfolds into an epic that stands outside it, and there it
-stays. What you send while a release runs is work that already stands in it; an idea from
+backlog parked outside the release unfolds into an epic that stands outside it, and there it
+stays. What you send while a release runs is work that already stands in it; a backlog item from
 outside waits for the next round, unless it should stand as `p0` or the person attaches
-the release themselves. **So `<milestone>` in 3 is the release that idea already stands
+the release themselves. **So `<milestone>` in 3 is the release that backlog already stands
 under, never one you picked for it**: the line the worker runs in its step 1 —
 `moai edit <epic> --milestone <milestone>` — re-affirms what `promote` carried and is not a door you open. With
-nothing running, and for an idea that stands under no release, it is `none`.
+nothing running, and for a backlog item that stands under no release, it is `none`.
 The 2026-09-21 round is why both halves are written down: a worker picked up a row outside
 the running release, and the person, not the tool, is what caught it. The answer is to
 stop sending outside work while a release runs, not to hang the release on it — hanging it
 on would make the release grow after it started, and that is the person's call alone.
 **The tool refuses none of this**, so this paragraph is the only thing holding it.
 
-**An idea you sent comes out of the candidates until its report is checked.** Until the
-worker unfolds it, it stays in `moai idea ls`, and the same idea goes to a second worker.
+**A backlog item you sent comes out of the candidates until its report is checked.** Until the
+worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a second worker.
 
-**Send only what is yours.** An idea or member whose assignee is someone else — or
+**Send only what is yours.** A backlog item or member whose assignee is someone else — or
 nobody — is asked about first: ask the person, and send it only on a yes, writing in the
 letter who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
 such rows apart under `others`.
@@ -208,7 +208,7 @@ marked it for 20 minutes, and is swept after a day.
 - **Hand work only to a row whose role is `worker` and whose status is `idle`.** `busy` is
   working — on your work or on the person's — and a session with no role is one nobody made
   a worker: it does not wait for letters, so a letter to it sits until someone types there
-- **Leave out a worker whose sent idea has not had its report checked.** A worker reads
+- **Leave out a worker whose sent backlog has not had its report checked.** A worker reads
   `busy` while it unfolds, picks up and merges, and it may read `idle` for a moment between
   two waits
 - **`idle` also stands on a window whose turn ended without waiting again** — its person
@@ -277,7 +277,7 @@ belongs to the worker who read the issue. A running session's model cannot be ch
 a letter and cannot be changed by config — the person in that window changes it
 (*Change the model*).
 
-**3. Send.** Send **one** idea to one waiting worker, as a letter. The worker's steps are
+**3. Send.** Send **one** backlog to one waiting worker, as a letter. The worker's steps are
 in its `moai-work` skill, so the letter carries only the assignment — but all of it: the
 worker knows nothing of this conversation. Write the letter below to a file in your
 scratchpad with every slot filled, and send it:
@@ -289,7 +289,7 @@ Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the letter.
-`<milestone>` is the release that idea already stands under **and that is still alive**,
+`<milestone>` is the release that backlog already stands under **and that is still alive**,
 read in 1 — `none` when it stands under none, `none` when the one it stands under has
 shipped or been deferred (the worker would otherwise re-open a release that is already
 out, which is what `promote` itself declines to carry), and `none` when nothing is
@@ -299,7 +299,7 @@ epic, which the tool refuses because it is not an id at all. **A wrong id it doe
 refuse** — the check is the shape, not whether that milestone stands, so a stale one goes
 in with exit 0: one line on stderr says there is no such milestone, and `moai status`
 counts the epic as `dangling_milestone`. Copy it off
-the release `moai show --milestone` stands that idea under; do not write it from memory.
+the release `moai show --milestone` stands that backlog under; do not write it from memory.
 `<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
@@ -325,7 +325,7 @@ Do not fill `<grade>` — that is the review grade the worker picks in 7, after 
 Do not fill `<vendor>` or `<count>` either — those are the vendor and the token count the
 worker reads in its own window in 9-1.
 
-    Supervisor <my name> hands you idea <id> — <title>. Do it by the `moai-work` skill, from step 1.
+    Supervisor <my name> hands you backlog <id> — <title>. Do it by the `moai-work` skill, from step 1.
     Read first: moai show <id>
     Model: <model> (<difficulty> — <why>)
     Work running alongside: <other work> — do not touch those files (4-3)
@@ -387,23 +387,23 @@ open, so the epic is not done either.
 
 A member the report says was left in the first column by the worker's 7-1 is right even
 when it is not done — that member keeps the epic open, so the epic is not done either. It
-is not an idea and it does not show in 1's list, so pass it to the person along with the
+is not a backlog item and it does not show in 1's list, so pass it to the person along with the
 reason it was left (a person's decision, a file held beside it).
 
-`<epic>` is the epic id carried in the report. An idea is already done once it is
+`<epic>` is the epic id carried in the report. A backlog item is already done once it is
 unfolded and it does not show its members, so `moai show <id>` cannot tell you whether
-the work finished — when the report does not carry it, read it from that idea's history
+the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, send the next idea. A worker whose letter said `wait again` is already
+If the three hold, send the next backlog. A worker whose letter said `wait again` is already
 waiting — send to it straight away. A worker whose letter said `end the turn` ends its turn
 right after the report: write the next letter to a file and hand it to 5-1 — the script
 clears the window, sends that letter only once the clear went through, and wakes the
-window. With no next idea, hand it `-` and it only clears. If 5-1 prints `not clearing`, do
+window. With no next backlog, hand it `-` and it only clears. If 5-1 prints `not clearing`, do
 what the end of its line says. Where that is pointing out to the person that the window is
 at a good place to be cleared, send the next only after the person has cleared it or said
 they will not — a letter loaded into the window before a late clear disappears with it,
-and that idea and that worker sit out of the candidates waiting for a report that will
+and that backlog and that worker sit out of the candidates waiting for a report that will
 never come. Its turn has ended, so that letter waits until a prompt comes into the window:
 send it with `--wake` and wake the window the way the line it prints says
 (*Wake a session that sits idle*) — a Claude Code supervisor sends SendMessage to the name
@@ -907,7 +907,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 
 ## When to stop
 
-- If there is no idea that does not collide, or no worker waiting, say so to the person and
-  stop — do not force a colliding idea out
+- If there is no backlog that does not collide, or no worker waiting, say so to the person and
+  stop — do not force a colliding backlog out
 - If a worker is waiting on a person's decision, the supervisor does not answer in their
   place. The decision is the person's

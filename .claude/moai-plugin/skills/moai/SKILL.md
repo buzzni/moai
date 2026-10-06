@@ -68,9 +68,9 @@ Whoever creates an issue is its assignee, for free.
 
 ## The three forks
 
-**1. `add` or `idea`** — what decides is *whether you would pick it up now.*
-If you would, `moai add`; if it is for later, `moai idea add '<what came to mind>'`.
-An idea stands on neither the board nor `ready`, so it does not blur the plan.
+**1. `add` or `backlog`** — what decides is *whether you would pick it up now.*
+If you would, `moai add`; if it is for later, `moai backlog add '<what came to mind>'`.
+A backlog item stands on neither the board nor `ready`, so it does not blur the plan.
 **Walking past it without writing it down is the worst of all.**
 
 If it came out of an epic, ask one more question first — *can this epic deliver
@@ -78,13 +78,13 @@ what it promised without this?* If not, it is not for later: it is this work,
 unfinished. Even when you cannot do it now (waiting on a person's decision, the
 work beside you holds that file), create it as a member with `-e <epic>` and
 leave it in the first column — a member still standing keeps the epic from
-closing by itself. Send it out as an idea and the epic stands `done` without
+closing by itself. Send it out as a backlog item and the epic stands `done` without
 having delivered what it promised. To `defer` such a member is to decide to give
 that promise up.
 
 **2. `defer` or `done`** — never move to `done` what you decided not to do.
 `moai defer <id> -m '<why>'` changes neither the column nor the kind, and
-`--undo` brings the same row back as it was. An idea is "not work yet"; a defer
+`--undo` brings the same row back as it was. A backlog item is "not work yet"; a defer
 is "work, but not now".
 
 **3. Is it worth splitting into an epic** — if the request does not end inside one
@@ -136,7 +136,7 @@ first column and is not closed yet (`in_progress`·`review`).
 Anything that comes out of that work belongs in the same epic (`-e <epic>`) or
 under that issue (`--parent <id>`). If the epic cannot deliver what it promised without this, it is one of those two
 even when you cannot do it now (fork 1). If it is not for now, park it with
-`moai idea add` — an idea is always free of this rule, and so is
+`moai backlog add` — a backlog item is always free of this rule, and so is
 `moai add --from` (what it creates is an epic and its children, one unit on its own).
 
 **2. Pick something up before you change the repository.** `moai mv <id> in_progress`.
@@ -220,7 +220,7 @@ person watching and go on without it.
 
 Run `moai status` once more and see whether the warnings grew. Warnings block
 nothing — they shine a light on issues with no epic, reviews stalled for a long
-time, and how much you have open at once. Ideas piling up and what is deferred are
+time, and how much you have open at once. Backlog piling up and what is deferred are
 not warnings; they stand apart as notices (`notices`).
 
 If you end the session still holding something, leave one line on that issue for
