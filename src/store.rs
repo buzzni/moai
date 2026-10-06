@@ -39,6 +39,10 @@ pub enum Trouble {
     SnapshotOnLock { at: PathBuf, to: PathBuf },
     /// 스냅샷은 담겼는데 저널을 못 적었다 — io 가 낸 말과, 말이 함께 사라진 이슈들.
     JournalLost { said: String, ids: Vec<String> },
+    /// 스냅샷은 담겼는데 되살린 줄의 아카이브 사본을 못 걷었다 — io 가 낸 말. 이력은 남았다(moai-bth3).
+    ArchiveCleanup { said: String },
+    /// 새 id 를 지은 쓰기가 못 읽은 아카이브 파일 하나 — 그 파일에 대해 낸 말. 그 안의 id 와는 못 견줬다(moai-bth3).
+    ArchiveUnread { said: String },
     /// 쓰려는 줄이 검사에 걸렸다([`crate::model::Invalid`], moai-yve0) — 가리키는 자리와 그 까닭.
     Invalid { at: At, why: crate::model::Invalid },
     /// 적을 저널 줄에 메일이 없다([`file_entries`], moai-nzlo) — 그 줄의 id.
@@ -64,7 +68,11 @@ impl Trouble {
             // 고칠 곳이 argv 가 아니라 사용자 정보다 — `model::NoActor` 와 같은 코드로 나간다.
             Trouble::NoJournalEmail { .. } => code::NO_ACTOR,
             // 나머지는 부르는 쪽이 준 값이나 자리가 틀린 것이다.
-            Trouble::NotADirectory { .. } | Trouble::JournalLost { .. } | Trouble::Invalid { .. } => code::ERROR,
+            Trouble::NotADirectory { .. }
+            | Trouble::JournalLost { .. }
+            | Trouble::ArchiveCleanup { .. }
+            | Trouble::ArchiveUnread { .. }
+            | Trouble::Invalid { .. } => code::ERROR,
         }
     }
 }
@@ -225,8 +233,10 @@ pub fn agents_at(root: &Path) -> PathBuf {
 
 /// 읽다가 만난 잘못된 줄. **한 줄이 깨졌다고 파일을 통째로 거부하지 않는다** —
 /// 거부하면 무엇이 잘못됐는지 볼 방법까지 같이 사라진다.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadError {
+    /// Archive diagnostics carry their own source. None means the active file.
+    pub source: Option<PathBuf>,
     pub line: usize,
     pub message: String,
     /// 못 읽은 줄의 **원문 그대로**. 이것이 있어야 되쓸 때 그 줄을 잃지 않는다.
@@ -869,8 +879,10 @@ impl Repo {
         Ok(read_snapshot(&self.root).map_err(Unsnapped::into_fail)?.unwrap_or_default())
     }
 
-    /// Read the active snapshot together with yearly archive files. Hot paths
-    /// deliberately continue to use [`Repo::read`] so archived rows stay out.
+    /// Read the active snapshot together with yearly archive files, duplicates kept. The write path reads only
+    /// [`Repo::read`] and reserves archive ids by a scan (`archive::reserve`); boards count the active snapshot and
+    /// read archived rows only as context for parents, blockers and milestones (`archive::context`,
+    /// `report::status_with_archive`).
     pub fn read_all(&self) -> R<Load> {
         crate::archive::read_all(&self.root, self.read()?)
     }
@@ -913,12 +925,15 @@ impl Repo {
 
     /// Commit the live snapshot, then run archive cleanup before releasing the
     /// same lock. Cleanup failure leaves the committed live rows recoverable.
+    ///
+    /// The closure also sees the unreadable live lines, read-only: a restore must not stage an archive copy of an id
+    /// that still stands live as a line this binary cannot read (moai-bth3 review).
     pub fn with_write_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
     where
-        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &[LoadError], &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
         G: FnOnce(&T) -> R<()>,
     {
-        self.with_write_lines_after(lang, |issues, _, cfg, reserved| f(issues, cfg, reserved), after)
+        self.with_write_lines_after(lang, |issues, unread, cfg, reserved| f(issues, unread, cfg, reserved), after)
     }
 
     fn with_write_lines_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
@@ -929,9 +944,15 @@ impl Repo {
         // 펴는 자리는 락을 다 놓은 여기다 — 코드는 갈래가 쥔다([`Stop::said`]).
         let (out, note) = self.write_locked(f, after).map_err(|stop| stop.said(&lang))?;
         // **못 적은 일기는 여기서 말이 된다** — 스냅샷은 담겼으니 실패가 아니고, 찍는 자는 `main` 이다.
-        if let Some(t) = note {
+        // **이력을 잃은 것만 [`MISSED`] 로 간다**(moai-bth3 리뷰) — 그 통의 말은 "썼지만 이력은 못 남겼다" 라, 아카이브
+        // 정리가 진 것까지 거기 실으면 남은 이력을 잃었다고 말하고, 탐색기는 첫 줄만 보여 진짜 잃은 이력을 가렸다.
+        for t in note {
             let said = crate::view::store_trouble(lang(), &t);
-            MISSED.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), said));
+            let to = match t {
+                Trouble::JournalLost { .. } => &MISSED,
+                _ => &NOTED,
+            };
+            to.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), said));
         }
         Ok(out)
     }
@@ -939,7 +960,7 @@ impl Repo {
     /// [`Repo::with_write_lines`] 의 몸통([`Repo::with_write`] 도 이것을 지난다) — 락을 잡고, 읽고,
     /// 고치고, 쓴다. **돌아올 때 락을 놓는다.**
     /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
-    fn write_locked<T, F, G>(&self, f: F, after_commit: G) -> Result<(T, Option<Trouble>), Stop>
+    fn write_locked<T, F, G>(&self, f: F, after_commit: G) -> Result<(T, Vec<Trouble>), Stop>
     where
         F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
         G: FnOnce(&T) -> R<()>,
@@ -989,7 +1010,11 @@ impl Repo {
         }
 
         let mut reserved = load.reserved_ids();
-        reserved.extend(crate::archive::ids(&self.root)?);
+        // **아카이브는 파싱하지 않고 훑는다**(moai-bth3 리뷰) — 쓰기마다 락을 쥔 채 도는 자리라, 여기서 아카이브
+        // 전부를 풀던 판은 아카이브가 클수록 옆 세션을 5초 락 너머로 밀어냈다. 쓰기가 알아야 할 것은 새로 지을 id
+        // 를 피할 자리뿐이다. 못 읽는 파일은 쓰기를 안 막는다(ui8) — 그 안의 id 를 못 견줬다는 말만 아래에서 한다.
+        let archive = crate::archive::reserve(&self.root);
+        reserved.extend(archive.ids);
         let mut issues = load.issues;
         let mut unread = load.errors;
         let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;
@@ -1120,7 +1145,15 @@ impl Repo {
         //
         // **안 썼으면 그대로 `Err` 다.** `note` 처럼 저널만 적는 쓰기는 저널이 전부라,
         // 거기서 실패하면 아무것도 안 담겼고 다시 부르는 것이 맞다.
-        let mut note = None;
+        //
+        // **못 읽은 아카이브는 새 id 를 지은 쓰기에서만 말한다**(moai-bth3 리뷰). 그 파일의 id 를 못 피한 것은 id 를
+        // 지은 쓰기뿐이다 — 되살린 줄은 아카이브의 id 라 `reserved` 에 이미 들고, 옮기기·메모·편집은 id 를 안 짓는다.
+        // 파일마다 한 줄이다: 줄마다 내던 판은 깨진 줄 마흔에 쓰기마다 마흔 줄을 냈다.
+        let minted = issues.iter().any(|i| !original_by_id.contains_key(i.id.as_str()) && !reserved.contains(&i.id));
+        let mut note: Vec<Trouble> = match wrote && minted {
+            true => archive.unread.into_iter().map(|said| Trouble::ArchiveUnread { said }).collect(),
+            false => Vec::new(),
+        };
         if !filed.is_empty()
             && let Err(e) = self.append_journal(&filed)
         {
@@ -1143,7 +1176,7 @@ impl Repo {
                 .map(|j| j.id.clone())
                 .collect();
             worded.dedup();
-            note = Some(Trouble::JournalLost { said: e.message, ids: worded });
+            note.push(Trouble::JournalLost { said: e.message, ids: worded });
         }
         // **어디에 썼는지 담아 둔다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는 루트의 트래커를
         // 고친다([`Repo::find_from`]). 조용히 옮기면 시킨 쪽은 제가 선 자리에 썼다고 믿고, 그
@@ -1159,7 +1192,12 @@ impl Repo {
                 moved.push(pair);
             }
         }
-        after_commit(&out)?;
+        if let Err(e) = after_commit(&out) {
+            if !wrote && filed.is_empty() {
+                return Err(e.into());
+            }
+            note.push(Trouble::ArchiveCleanup { said: e.message });
+        }
         Ok((out, note))
     }
 
@@ -1685,6 +1723,15 @@ pub fn journal_misses() -> Vec<(PathBuf, String)> {
     MISSED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+/// 스냅샷은 담겼고 **이력도 남았는데** 덧붙일 말이 있는 쓰기 — `(저장소 뿌리, 말)`, 일어난 차례대로(moai-bth3 리뷰).
+/// 되살린 뒤 아카이브 정리가 진 것과, 새 id 를 못 읽은 아카이브 파일과 견주지 못한 것이다. [`MISSED`] 와 통을 가르는
+/// 까닭은 말이다 — 그 통은 "썼지만 이력은 못 남겼다" 로 펴진다. `main` 이 끝에 한 번, 같은 말은 한 번만 낸다.
+static NOTED: std::sync::Mutex<Vec<(PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn write_notes() -> Vec<(PathBuf, String)> {
+    NOTED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 /// 못 읽어 건너뛴 저널 자리 하나 — 어느 저장소의 어느 파일을 왜 못 읽었나.
 ///
 /// **[`Unread::kind`] 는 기계의 것이고 [`Unread::said`] 는 사람의 것이다**([`crate::git::Told`] 와 같은 가름,
@@ -1983,6 +2030,7 @@ pub fn parse_issues(src: &str) -> Load {
         match serde_json::from_str::<Issue>(line) {
             Ok(issue) => load.issues.push(issue),
             Err(e) => load.errors.push(LoadError {
+                source: None,
                 line: i + 1,
                 message: e.to_string(),
                 text: line.to_string(),

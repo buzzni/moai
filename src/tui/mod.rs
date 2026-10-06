@@ -620,6 +620,7 @@ impl Ground {
             // 시간대는 적재가 아니라 보는 사람의 것이다(`App::zone`) — 거름망을 거는 자리가 얹는다.
             zone: None,
             archive_days: self.archive_days,
+            stored: Default::default(),
         }
     }
 }

@@ -1717,6 +1717,9 @@ pub struct ArchiveArgs {
     /// Show what would move without changing files
     #[arg(long)]
     pub dry_run: bool,
+    /// Remove archive copies; keep the live row
+    #[arg(long, value_name = "ID", conflicts_with = "dry_run")]
+    pub drop: Option<String>,
 }
 
 /// `--by` 의 낱말 — `report::stats::Axis` 의 이름과 같다. 잇는 것은 `cmd::stats` 다(`report` 는 clap 을 모른다).

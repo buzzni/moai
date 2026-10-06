@@ -2076,6 +2076,14 @@ pub fn archived(column: &str, since: &str, now: &str, days: i64) -> bool {
     days > 0 && column == crate::config::DONE && days_since(since, now).is_some_and(|d| d >= days)
 }
 
+/// 목록과 보드가 **숨기는** 아카이브 — [`archived`] 에 더해, `moai archive` 가 이미 `.moai/archive` 로 옮긴 닫힌 줄
+/// (`stored`, moai-bth3 리뷰). 옮긴 것은 시계가 정한 것이 아니라 사람이 옮긴 것이라, `archive_days` 를 0 으로 끄거나
+/// 늘렸다고 목록과 보드로 돌아오지 않는다 — 그 값은 무엇을 옮길지를 정하지 옮긴 것을 되돌리지 않는다. 옮긴 묶음이라도
+/// 되살린 멤버가 있어 닫히지 않았으면(읽은 칸이 done 이 아니면) 보인다: 그 멤버의 묶음이다.
+pub fn is_put_away(column: &str, since: &str, now: &str, days: i64, stored: bool) -> bool {
+    (stored && column == crate::config::DONE) || archived(column, since, now, days)
+}
+
 /// 줄 하나가 입는 **읽은 칸** — `--json` 의 `derived_status` 가 내는 그 값이다. 묶음이
 /// 아니거나 못 받았으면 없다.
 ///
@@ -4902,8 +4910,20 @@ impl Warning {
         Warning::new("archive_pending", Vec::new()).count(n).notice().hint("moai archive --dry-run")
     }
 
-    pub fn archive_duplicates(ids: Vec<String>) -> Warning {
-        Warning::new("duplicate_id", ids).fatal()
+    pub fn archive_unreadable(n: usize) -> Warning {
+        Warning::new("archive_unreadable", Vec::new()).count(n).notice()
+    }
+
+    pub fn archive_duplicates(ids: Vec<String>, active: &[Issue]) -> Warning {
+        let hint = if ids.iter().all(|id| active.iter().any(|i| i.id == *id)) {
+            match ids.as_slice() {
+                [id] => format!("moai archive --drop {id}"),
+                _ => "moai archive --drop <id>".to_string(),
+            }
+        } else {
+            "moai show --archived".to_string()
+        };
+        Warning::new("archive_duplicate_id", ids).hint(&hint).fatal()
     }
 
     pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
@@ -5303,6 +5323,50 @@ pub fn status_in<'a>(
     now: &str,
     soil: &Soil<'a>,
 ) -> StatusReport {
+    status_in_scope(issues, unreadable, cfg, now, soil, &|_| true)
+}
+
+/// Combine reference context without letting a stale archive copy eclipse a live row. A live id is a readable row
+/// or an unreadable live line that still names it (`opaque`) — `archive::context` applies the same rule, so `status`
+/// and `ready` never read one row two ways (moai-bth3 review).
+pub fn with_archive(active: &[Issue], archived_rows: &[Issue], opaque: &BTreeSet<&str>) -> Vec<Issue> {
+    let ids: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    let mut all: Vec<Issue> = archived_rows
+        .iter()
+        .filter(|i| !ids.contains(i.id.as_str()) && !opaque.contains(i.id.as_str()))
+        .cloned()
+        .collect();
+    all.extend_from_slice(active);
+    all
+}
+
+/// Archive rows supply references and rollups, while only active work is counted.
+pub fn status_with_archive(
+    active: &[Issue],
+    archived_rows: &[Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    zone: &crate::tz::Zone,
+) -> StatusReport {
+    if archived_rows.is_empty() {
+        return status(active, unreadable, cfg, now, zone);
+    }
+    let visible: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    let opaque: BTreeSet<&str> = unreadable.iter().filter_map(|u| u.id).collect();
+    let all = with_archive(active, archived_rows, &opaque);
+    let soil = Soil::of(&all);
+    status_in_scope(&all, unreadable, cfg, now, &soil, &|i| visible.contains(i.id.as_str())).judged(now, zone)
+}
+
+fn status_in_scope<'a>(
+    issues: &'a [Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    soil: &Soil<'a>,
+    visible: &dyn Fn(&Issue) -> bool,
+) -> StatusReport {
     let group = &soil.epic;
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
@@ -5325,8 +5389,12 @@ pub fn status_in<'a>(
     // id 의 앞줄이 뒷줄의 답을 입는다. 보드 수·경고·흐름이 이 하나를 지나므로 여기서 갈리면
     // 아래가 다 갈린다. **id 로 불리는 자리**(막는 줄, 빈 에픽, 마감)는 그대로 접은 것을 쓴다.
     let off = &soil.shelved;
-    let work: Vec<&Issue> =
-        issues.iter().enumerate().filter(|(k, i)| is_work(i) && off[*k].is_none()).map(|(_, i)| i).collect();
+    let work: Vec<&Issue> = issues
+        .iter()
+        .enumerate()
+        .filter(|(k, i)| visible(i) && is_work(i) && off[*k].is_none())
+        .map(|(_, i)| i)
+        .collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
@@ -5403,7 +5471,7 @@ pub fn status_in<'a>(
     // 줄로 재면 같은 종류 쌍둥이 한 쌍이 `status_no_epic_min` 을 넘겨 놓고 `4건` 을 말한다.
     let open = issues
         .iter()
-        .filter(|i| is_work(i) && !i.status.is_done())
+        .filter(|i| visible(i) && is_work(i) && !i.status.is_done())
         .map(|i| i.id.as_str())
         .collect::<BTreeSet<_>>()
         .len();
@@ -5562,11 +5630,16 @@ pub fn status_in<'a>(
     // 에픽은 `미뤄 둔 것` 으로 세면서 `속이 빈 에픽` 으로도 꾸짖으면 안 된다.
     // 제 미룸을 따로 묻지 않는다: 빈 묶음은 읽은 칸이 첫 칸이라 `deferred_roots`
     // 에서 빠지지 않으므로, 미뤘으면 언제나 `out_of_plan` 에 든다.
+    // **꾸짖는 것은 산 줄뿐이다**(moai-bth3 리뷰) — 아카이브에서 온 줄은 소속·막음·마감을 읽는 재료지 고칠 일이
+    // 아니다. 아래 6번까지 모든 줄을 훑는 경고는 저마다 이 문(`visible`)을 지난다. 한때 다 센 뒤 경고의 id 를
+    // 한 번에 걸렀는데, 그 거르개가 못 읽는 줄의 id 를 산 줄이 아닌 것으로 읽어 `duplicate_id` 를 지웠고,
+    // 기한 줄이 설 자리(`Dues::at`)를 잰 뒤에 경고를 빼 기한 줄이 치명 줄 밑으로 내려갔다.
     let empty: Vec<String> = rolls
         .iter()
         .filter(|r| r.id.is_some() && r.total == 0)
         .filter_map(|r| r.id.clone())
         .filter(|id| !out_of_plan.contains(id.as_str()))
+        .filter(|id| by_id.get(id.as_str()).is_some_and(|i| visible(i)))
         .collect();
     if !empty.is_empty() {
         warnings.push(Warning::new("empty_epic", empty));
@@ -5585,14 +5658,16 @@ pub fn status_in<'a>(
     // 여기서 합친다. 빼면 `moai rm` 이 "끊긴 참조가 남았다" 고 말한 그 줄에
     // 대해 `status` 가 그다음부터 영영 침묵한다.
     for (kind, why) in [("dangling_epic", Misplace::Epic), ("dangling_milestone", Misplace::Milestone)] {
-        let hit: Vec<&Issue> = dangling_by(issues, placed, &held, why).collect();
+        let hit: Vec<&Issue> = dangling_by(issues, placed, &held, why).filter(|i| visible(i)).collect();
         if !hit.is_empty() {
             warnings.push(Warning::new(kind, ids_of(&hit)));
         }
     }
 
-    let orphans: Vec<&Issue> =
-        issues.iter().filter(|i| crate::id::parent_of(&i.id).is_some_and(|p| !known.contains(p))).collect();
+    let orphans: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| visible(i) && crate::id::parent_of(&i.id).is_some_and(|p| !known.contains(p)))
+        .collect();
     if !orphans.is_empty() {
         warnings.push(Warning::new("orphan_child", ids_of(&orphans)));
     }
@@ -5600,24 +5675,24 @@ pub fn status_in<'a>(
     // 결정). 한때 이 줄은 부모의 뒷줄을 조용히 입어, 두 줄의 차례를 바꾸면 에픽이 뒤집혔고
     // `duplicate_id` 는 부모 id 만 댔다 — 자식이 자리를 옮긴 것을 말하는 자가 없었다. **줄마다
     // 묻는다**: `placed` 는 id 로 접은 지도라 같은 id 의 앞줄이 뒷줄의 판정을 입는다.
-    let twin_parent: Vec<&Issue> = issues.iter().filter(|i| in_epic.lost(i)).collect();
+    let twin_parent: Vec<&Issue> = issues.iter().filter(|i| visible(i) && in_epic.lost(i)).collect();
     if !twin_parent.is_empty() {
         warnings.push(Warning::new("twin_parent", ids_of(&twin_parent)));
     }
     let dangling_blockers: Vec<&Issue> =
-        issues.iter().filter(|i| i.blocked_by.iter().any(|b| !known.contains(b.as_str()))).collect();
+        issues.iter().filter(|i| visible(i) && i.blocked_by.iter().any(|b| !known.contains(b.as_str()))).collect();
     if !dangling_blockers.is_empty() {
         warnings.push(Warning::new("dangling_blocked_by", ids_of(&dangling_blockers)));
     }
     // 먼 미래 시각(moai-ugjp). **경고지 깨진 데이터가 아니다** — 줄은 읽히고 고칠 것일 뿐이라
     // 종료 코드를 안 바꾼다(사람이 정했다). 종류를 안 가린다: 시각은 모든 줄이 든다.
-    let ahead: Vec<&Issue> = issues.iter().filter(|i| far_ahead(i, now)).collect();
+    let ahead: Vec<&Issue> = issues.iter().filter(|i| visible(i) && far_ahead(i, now)).collect();
     if !ahead.is_empty() {
         warnings.push(Warning::new("future_timestamp", ids_of(&ahead)));
     }
     // 모르는 필드는 **버리지 않고 들고 있다.** 들고 있다는 사실만 비춘다 —
     // 2단계 바이너리가 쓴 파일을 1단계가 만졌다는 뜻일 수 있다.
-    let carrying: Vec<&Issue> = issues.iter().filter(|i| !i.rest.is_empty()).collect();
+    let carrying: Vec<&Issue> = issues.iter().filter(|i| visible(i) && !i.rest.is_empty()).collect();
     if !carrying.is_empty() {
         warnings.push(Warning::new("unknown_field", ids_of(&carrying)));
     }
@@ -5631,7 +5706,7 @@ pub fn status_in<'a>(
     //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai backlog
     //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
     //      아래 6-3 이 제 이름으로 말한다.
-    let piled = |(k, i): &(usize, &Issue)| is_open_backlog(i) && off[*k].is_none();
+    let piled = |(k, i): &(usize, &Issue)| visible(i) && is_open_backlog(i) && off[*k].is_none();
     let count = issues.iter().enumerate().filter(piled).count();
     // 문턱 0 으로 `쌓인 backlog 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
     if count > 0 && count >= cfg.status.backlog_pile {
@@ -5662,7 +5737,7 @@ pub fn status_in<'a>(
     //
     //      **줄마다 센다**(moai-u3ta) — 이 수가 가리키는 `moai show --deferred` 도 줄마다
     //      고르므로, id 로 세면 미룬 쌍둥이 하나가 제 짝까지 이 수에 얹는다.
-    let shelved = |(k, _): &(usize, &Issue)| off[*k].is_some();
+    let shelved = |(k, i): &(usize, &Issue)| visible(i) && off[*k].is_some();
     let count = issues.iter().enumerate().filter(shelved).count();
     if count > 0 {
         let oldest = issues
@@ -5771,6 +5846,7 @@ pub fn status_in<'a>(
     let mut seen = BTreeSet::new();
     let dups: Vec<String> = issues
         .iter()
+        .filter(|i| visible(i))
         .map(|i| i.id.as_str())
         .chain(unreadable.iter().filter_map(|u| u.id))
         .filter(|id| !seen.insert(*id))
@@ -5807,7 +5883,7 @@ pub fn status_in<'a>(
     // **먼 미래 시각을 든 줄은 통째로 뺀다**(moai-ugjp) — 2099 는 "최근" 이 아니고, 셈에 넣으면
     // 위 `future_timestamp` 가 드러낸 오타가 흐름 숫자로도 새어 나온다.
     let within = |at: &str| days_since(at, now).is_some_and(|d| d < cfg.status.flow_days);
-    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !far_ahead(i, now)).collect();
+    let happened: Vec<&Issue> = issues.iter().filter(|i| visible(i) && is_work(i) && !far_ahead(i, now)).collect();
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed = happened.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
 
@@ -5818,10 +5894,14 @@ pub fn status_in<'a>(
     // **경고를 다 센 뒤에 뺀다**(리뷰 moai-47mz.5il) — 아카이브는 보드의 목록을 줄이는 보기의 일이다. 위의 1-2 가
     // "마일스톤을 쓰는 저장소인가" 를 이 목록으로 묻는데, 먼저 빼던 판은 끝난 릴리스만 남은 저장소에서 `no_milestone`
     // 이 시계를 따라 꺼졌다가 새 마일스톤 하나에 도로 켜졌다 — Stop 훅은 그것을 기준선보다 는 경고로 읽는다.
+    //
+    // **아카이브 파일로 옮긴 묶음은 시계를 안 본다**(moai-bth3 리뷰) — 산 줄이 아니면(`visible`) 이미 옮겨 둔 것이라,
+    // `archive_days` 를 0 으로 끄거나 늘려도 보드로 돌아오지 않는다. 같은 자를 목록(`query::Where::archived`)이 쓴다.
     let aged = |r: &Roll| {
         r.id.as_deref().is_some_and(|id| {
             let since = group_entered.get(id).copied().unwrap_or_default();
-            archived(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days)
+            let stored = by_id.get(id).is_some_and(|i| !visible(i));
+            is_put_away(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days, stored)
         })
     };
     let before = (stones.len(), epics.len());
@@ -7718,6 +7798,30 @@ mod tests {
         assert_eq!(st.total, 1);
         assert_eq!(st.counts.get("todo"), Some(&1));
         assert!(ready(&issues, &cfg()).iter().all(|i| i.id == "argos-0002"));
+    }
+
+    #[test]
+    fn archived_rows_are_context_not_diagnostics() {
+        // **아카이브의 줄은 꾸짖지 않고 재료로만 쓴다**(moai-bth3 리뷰). 산 줄의 경고는 그대로 서고 — 못 읽는 쌍둥이의
+        // `duplicate_id` 도 — 기한 줄은 치명 줄 앞에 선다. 경고를 다 센 뒤 id 로 거르던 판은 둘 다 무너뜨렸다: 못 읽는
+        // 줄의 id 는 산 줄이 아니라며 지웠고, 기한 줄이 설 자리를 잰 뒤에 경고를 빼 그 자리가 밀렸다.
+        let now = "2026-10-01T00:00:00Z";
+        let mut stone = make("argos-m001", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-09-20".into());
+        let mut inside = make("argos-0002", Kind::Issue, "todo");
+        inside.milestone = Some("argos-m001".into());
+        let mut newer = make("argos-0009", Kind::Issue, "done");
+        newer.rest.insert("lane".into(), serde_json::json!("x"));
+        let twins = [Unreadable { id: Some("argos-0005") }, Unreadable { id: Some("argos-0005") }];
+        let st = status_with_archive(&[stone, inside], &[newer], &twins, &cfg(), now, utc());
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"unknown_field"), "an archived row was scolded — {kinds:?}");
+        let at = |k: &str| kinds.iter().position(|x| *x == k).unwrap_or_else(|| panic!("{k} missing — {kinds:?}"));
+        assert!(
+            at("milestone_overdue") < at("duplicate_id") && at("duplicate_id") < at("unreadable_line"),
+            "{kinds:?}"
+        );
+        assert_eq!(st.warnings[at("duplicate_id")].ids, ["argos-0005"]);
     }
 
     /// **아카이브된 묶음은 보드의 목록에서 빠지고 수로만 남는다**(moai-47mz, 2026-10-03 사용자 결정). 묶음은

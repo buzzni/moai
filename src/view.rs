@@ -936,6 +936,8 @@ fn says(w: &Warning, screen: Screen) -> String {
         // 밀어내므로 부르는 쪽이 stderr 로 이미 한 줄씩 냈다. 여기 서는 뜻은 "그 말을 놓쳤으면
         // 위를 봐라" 다: 이 줄이 없으면 보드가 "드러난 문제 없다" 로 방금 한 말을 뒤집는다.
         "user_config" => one(say(lang, "warn.user_config")),
+        "archive_duplicate_id" => one(say(lang, "warn.archive_duplicate_id")),
+        "archive_unreadable" => one(say(lang, "warn.archive_unreadable")),
         "archive_pending" => one(say(lang, "warn.archive_pending")),
         "agents_stale" => one(say(lang, "warn.agents_stale")),
         "agents_hand_edited" => one(say(lang, "warn.agents_hand_edited")),
@@ -1178,7 +1180,13 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
     // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
     if matches!(
         w.kind,
-        "wip_overload" | "duplicate_id" | "orphan_child" | "twin_parent" | "dangling_blocked_by" | "future_timestamp"
+        "wip_overload"
+            | "duplicate_id"
+            | "archive_duplicate_id"
+            | "orphan_child"
+            | "twin_parent"
+            | "dangling_blocked_by"
+            | "future_timestamp"
     ) {
         if !w.ids.is_empty() {
             out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
@@ -3332,6 +3340,13 @@ pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
         Trouble::JournalLost { said, ids } if ids.is_empty() => said.clone(),
         Trouble::JournalLost { said, ids } => {
             fill(say(lang, "store.journal_lost"), &[("said", said), ("ids", &ids.join(" "))])
+        }
+        Trouble::ArchiveCleanup { said } => {
+            fill(say(lang, "store.archive_cleanup"), &[("said", &crate::text::one_line(said))])
+        }
+        // 그 파일에 대해 낸 말에 자리가 이미 든다(`archive::reserve`) — 자리를 또 붙이지 않는다.
+        Trouble::ArchiveUnread { said } => {
+            fill(say(lang, "store.archive_unread"), &[("said", &crate::text::one_line(said))])
         }
         Trouble::Invalid { at, why } => invalid(lang, at, why),
         // **고치는 길은 "누군지 모른다" 와 한 벌이다** — 저널 파일 이름이 메일에서 오므로 모자란

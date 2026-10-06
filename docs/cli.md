@@ -632,6 +632,7 @@ Usage: moai archive [OPTIONS]
 
 Options:
       --dry-run              Show what would move without changing files
+      --drop <ID>            Remove archive copies; keep the live row
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)

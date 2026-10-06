@@ -84,6 +84,10 @@ pub struct Where<'a> {
     /// [`Where::from_soil`] 이 설정을 받아 옮기고, 탐색기의 거름망은 적재가 설정에서 옮겨 둔 값을 받는다
     /// (`tui::Ground::here`). 0 이면(`Where::default`) 아카이브가 없다.
     pub archive_days: i64,
+    /// `.moai/archive` 에서만 온 줄의 id — 산 줄이 없는 id 다(moai-bth3 리뷰). 시계와 상관없이 아카이브다
+    /// ([`crate::report::is_put_away`]): `archive_days` 를 0 으로 끄거나 늘려도 `--all` 에 돌아오지 않는다. 아카이브를
+    /// 겹쳐 읽은 쪽(`cmd::show`)이 싣고, 안 실었으면(`Where::default`) 시계만 본다.
+    pub stored: BTreeSet<&'a str>,
 }
 
 /// 이슈 id → 그 이슈에 붙은 노트 글들(`model::note_of` — `moai note` 의 글과 칸 옮김의 `-m`).
@@ -202,6 +206,7 @@ impl<'a> Where<'a> {
             notes: None,
             zone: None,
             archive_days: cfg.archive_days,
+            stored: BTreeSet::new(),
         }
     }
 
@@ -285,7 +290,8 @@ impl<'a> Where<'a> {
     /// [`Where::since`])로 읽어 [`crate::report::archived`] 에 댄다. `-s` 가 고른 칸과 `--done <폭>` 이 잰 때가
     /// 아카이브와 한 줄을 다르게 보지 않는다.
     pub fn archived(&self, i: &Issue, now: &str) -> bool {
-        crate::report::archived(self.column(i), self.since(i), now, self.archive_days)
+        let stored = self.stored.contains(i.id.as_str());
+        crate::report::is_put_away(self.column(i), self.since(i), now, self.archive_days, stored)
     }
 }
 

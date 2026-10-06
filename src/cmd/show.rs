@@ -192,18 +192,10 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     }
     let crate::worktree::Gathered { load: active_load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
-    let load = if args.target.is_some()
-        || args.filter.archived
-        || args.filter.grep.is_some()
-        || !args.filter.created.is_empty()
-        || !args.filter.done.is_empty()
-        || !args.filter.since.is_empty()
-        || !args.filter.filter.is_empty()
-    {
-        crate::archive::read_all(&repo.root, active_load)?
-    } else {
-        active_load
-    };
+    // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
+    let live: std::collections::BTreeSet<String> =
+        active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
+    let load = crate::archive::read_all(&repo.root, active_load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -325,6 +317,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         .then(|| journal_of_rows(&repo, &origin, &load.issues, |l| model::may_hold_note(l) || model::may_hold_work(l)));
     let notes = journal.as_ref().map(notes_of);
     let mut wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
+    // **옮겨 둔 줄은 시계와 상관없이 아카이브다**(moai-bth3 리뷰) — 소속·막음을 읽으려고 늘 겹쳐 읽지만, `--archived`
+    // 없이 서는 목록에는 안 선다. 시계만 보던 판은 `archive_days = 0` 에서 옮긴 줄을 `--all` 로 도로 냈다.
+    wh.stored = load.issues.iter().map(|i| i.id.as_str()).filter(|id| !live.contains(*id)).collect();
     // **받은 글 그대로 싣는다**(리뷰 moai-wcy8.rbj) — 한 번 거르고 끝나는 이 길은 숨길 줄의 노트까지 미리 접을
     // 까닭이 없다. 키마다 다시 거르는 탐색기는 접어 둔 것을 싣는다([`crate::query::NoteView`]).
     wh.notes = notes.as_ref().map(crate::query::NoteView::Raw);

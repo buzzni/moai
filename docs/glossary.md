@@ -10,9 +10,10 @@ in [the CLI reference](cli.md).
 Work that has stood in `done` for longer than `archive_days` (two weeks unless
 `.moai/config.toml` says otherwise; `0` turns eligibility off). `moai archive`
 moves eligible closed epic bundles and standalone rows into yearly JSONL files
-under `.moai/archive`; milestones stay live. Board and ready reads use the
-active snapshot, while `moai show --archived`, `moai show <id>` and `SPC v o`
-read the archive. `moai mv` restores only the selected archived row. More in
+under `.moai/archive`; milestones stay live. Board and ready count active work
+and use archived rows as reference context, while `moai show --archived`, `moai show <id>` and `SPC v o`
+read the archive. `moai mv` restores only the selected archived row. A live row
+with a stale archive copy is repaired with `moai archive --drop <id>`. More in
 [the explorer](explorer.md#the-archive).
 
 ## Assignee
@@ -254,4 +255,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3

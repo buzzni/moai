@@ -159,11 +159,22 @@ Work that has sat in done for two weeks is eligible for the archive. The archive
 is moved explicitly with `moai archive`; use `moai archive --dry-run` first to
 see the rows. Closed epic bundles move together into
 `.moai/archive/<year>.jsonl`, while milestone rows stay live. Normal board and
-ready reads use only the active snapshot. `SPC v o` and `moai show --archived`
+ready counts use the active snapshot. Archived rows still supply parent, blocker
+and milestone context, so a shipped release stays closed and a restored member
+keeps its original group. `SPC v o` and `moai show --archived`
 read archived rows too, and `moai show <id>` can open one directly.
 `archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns archive
-eligibility off. Moving an archived row with `moai mv` restores that selected
+eligibility off; `moai show` and `moai status` leave rows already moved to the
+archive out either way. Moving an archived row with `moai mv` restores that selected
 row; its former bundle remains archived (moai-fx9t).
+
+When a live row also has an archive copy, `moai status` names the conflict as
+`archive_duplicate_id`. Keep the live row and run `moai archive --drop <id>` to
+remove its archive copies. This refuses an ID without a live row, and an archived
+row that is a different issue under the same ID (another kind or creation time).
+A conflicting bundle stays live during `moai archive`, while other eligible
+bundles can move; `--dry-run` and the board count only what will move.
+Unreadable archive files are reported by source and readable rows remain available.
 
 ## Catch up on what changed
 
@@ -217,4 +228,4 @@ line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3

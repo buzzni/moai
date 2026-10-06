@@ -425,15 +425,18 @@ path that will not disappear. What is merged and how is in
 
     moai archive --dry-run     preview eligible closed bundles
     moai archive               move them to .moai/archive/<year>.jsonl
+    moai archive --drop <id>   remove the stale archive copies of a live row
 
 Moving is explicit; ordinary writes never archive work. An epic and its members,
 and a parent and its children, move together only once the whole bundle has
 stood closed for `archive_days`. Milestones stay in the active snapshot.
-`status`, `ready`, `prime` and hook boards read the active snapshot. `show <id>`,
-`show --archived`, search, statistics and the explorer can read the archive too.
+`status`, `ready`, `prime` and hook boards count the active snapshot and read
+archived rows only as context: parents, blockers and milestones. `show <id>`,
+`show --archived`, search, statistics and the explorer can list archived rows.
 Reopening an archived row with `moai mv <id> todo --from done` restores only that
 selected row. Its former bundle stays archived. Archived IDs stay reserved, and
-`status` reports duplicate IDs across the live and archive files.
+`status` names an ID that stands both live and archived as `archive_duplicate_id`;
+`moai archive --drop <id>` repairs it and keeps the live row.
 Yearly archive files use the same `merge=moai` driver as the active snapshot.
 
 ## Name the AI that did the work

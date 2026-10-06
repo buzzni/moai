@@ -27522,7 +27522,7 @@ fn archive_storage_reports_cross_file_duplicate_ids_without_dropping_changed_row
     assert!(!status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("duplicate_id"));
     let archived_before = std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap();
-    assert!(!at(s.path(), later, &["archive"]).status.success());
+    assert!(at(s.path(), later, &["archive"]).status.success());
     assert_eq!(issues(s.path()), changed);
     assert_eq!(std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived_before);
 }
@@ -27558,4 +27558,487 @@ fn archive_storage_uses_the_installed_merge_driver_for_yearly_files() {
     for id in [&a, &b, &c] {
         assert!(merged.contains(id));
     }
+}
+
+#[test]
+fn archive_regressions_preserve_reference_and_milestone_context() {
+    let s = init("archive-reference-context");
+    let ms = ok(s.path(), &["milestone", "add", "shipped", "--due", "2026-01-01", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "closed bundle", "--milestone", &ms, "-q"]).trim().to_string();
+    let a = add(s.path(), &["closed blocker", "--parent", &epic]);
+    let b = add(s.path(), &["closed member", "--parent", &epic]);
+    let dependent = add(s.path(), &["live dependent"]);
+    ok(s.path(), &["link", &a, "--blocks", &dependent]);
+    for id in [&a, &b] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(!board.contains("dangling_blocked_by") && !board.contains("milestone_overdue"), "{board}");
+    let parsed: serde_json::Value = serde_json::from_str(&board).unwrap();
+    assert_eq!(parsed["total"], 1);
+    assert_eq!(parsed["archived"]["milestones"], 1);
+    assert!(ok_at(s.path(), later, &["ready", "--json"]).contains(&dependent));
+    // Seen from outside the repository, the overview reads the same context.
+    let out = Scratch::new("archive-reference-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let seen =
+        staged(&["status", "--json"]).current_dir(out.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", later).output();
+    let seen = String::from_utf8(seen.unwrap().stdout).unwrap();
+    assert!(!seen.contains("dangling_blocked_by") && !seen.contains("milestone_overdue"), "{seen}");
+    assert!(seen.contains("\"archived\":{\"milestones\":1"), "{seen}");
+    let restored: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &a, "todo", "--from", "done", "--json"])).unwrap();
+    assert_eq!(restored["moved"][0]["derived_epic"], epic);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(!board.contains("orphan_child") && !board.contains("dangling_epic"), "{board}");
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    let row = ready["ready"].as_array().unwrap().iter().find(|r| r["id"] == a).unwrap();
+    assert_eq!(row["derived_epic"], epic);
+    // `prime` reads the same context as `ready`.
+    let prime: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["prime", "--json"])).unwrap();
+    let row = prime["ready"].as_array().unwrap().iter().find(|r| r["id"] == a).unwrap();
+    assert_eq!(row["derived_epic"], epic, "{prime}");
+    // The member is drawn under its archived epic — `a` itself contains the epic's id, so look at the line above it.
+    let tree = ok_at(s.path(), later, &["show", "--tree"]);
+    let lines: Vec<&str> = tree.lines().collect();
+    let at = lines.iter().position(|l| l.contains(&a)).unwrap_or_else(|| panic!("{tree}"));
+    assert!(at > 0 && lines[at - 1].trim_start().starts_with(&epic) && lines[at].starts_with(' '), "{tree}");
+    // A second move of the restored row still walks to its archived epic.
+    let picked: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &a, "in_progress", "--json"])).unwrap();
+    assert_eq!(picked["moved"][0]["derived_epic"], epic, "{picked}");
+    let active: Vec<serde_json::Value> =
+        issues(s.path()).lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert!(active.iter().all(|row| row["id"] != epic && row["id"] != b));
+}
+
+/// **The session board and Stop count what `moai status` counts**(review of moai-bth3) — the hook's archive board
+/// once left out the fatal `archive_duplicate_id`, so a session saw "nothing showing" while `status` exited 1.
+#[test]
+fn archive_regressions_the_hook_board_names_archive_collisions() {
+    let s = init("archive-hook-board");
+    let id = add(s.path(), &["live and archived"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let live = line_of(s.path(), &id);
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    let mut active = issues(s.path());
+    active.push_str(&format!("{live}\n"));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), active).unwrap();
+    let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "archive-board")));
+    assert!(board.contains(&id) && board.contains("archive --drop"), "{board}");
+}
+
+#[test]
+fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
+    let s = init("archive-lenient-read");
+    let id = add(s.path(), &["readable work"]);
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("2024.jsonl"), [0xff, 0xfe]).unwrap();
+    std::fs::write(dir.join("2025.jsonl"), "<<<<<<< conflict\n=======\n>>>>>>> other\n").unwrap();
+    let another = add(s.path(), &["write despite archive damage"]);
+    ok(s.path(), &["mv", &another, "in_progress"]);
+    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    for args in [vec!["show", &id], vec!["stats", "--json"]] {
+        let out = at(s.path(), NOW, &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{err}");
+        assert!(err.contains("archive/2025.jsonl"), "{err}");
+        assert!(!err.contains("issues.jsonl:") && !err.contains("rm --line"), "{err}");
+    }
+    assert_eq!(std::fs::read(dir.join("2024.jsonl")).unwrap(), [0xff, 0xfe]);
+}
+
+#[test]
+fn archive_regressions_conflicting_bundles_stay_live_and_drop_repairs_them() {
+    let s = init("archive-conflict-repair");
+    let epic = ok(s.path(), &["epic", "add", "original", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    let before = issues(s.path());
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), before.replace("original", "changed live group")).unwrap();
+    let separate = add(s.path(), &["separate closed bundle"]);
+    ok(s.path(), &["mv", &separate, "done"]);
+    // The preview promises what the move does: the conflicting bundle is not on it.
+    let dry = ok_at(s.path(), later, &["archive", "--dry-run", "--json"]);
+    assert!(dry.contains(&separate) && !dry.contains(&epic) && !dry.contains(&member), "{dry}");
+    let out = ok_at(s.path(), later, &["archive", "--json"]);
+    assert!(out.contains(&separate) && !out.contains(&epic) && !out.contains(&member), "{out}");
+    assert!(issues(s.path()).contains(&epic) && issues(s.path()).contains(&member));
+    let status = at(s.path(), later, &["status", "--json"]);
+    let board = String::from_utf8_lossy(&status.stdout);
+    assert!(board.contains("archive_duplicate_id") && board.contains("archive --drop"), "{board}");
+    // Nothing is left that `moai archive` would move, so the board does not say there is.
+    assert!(!board.contains("archive_pending"), "{board}");
+    assert!(!status.status.success());
+    let live = issues(s.path());
+    assert!(!at(s.path(), later, &["archive", "--drop", &separate]).status.success());
+    for id in [&epic, &member] {
+        ok_at(s.path(), later, &["archive", "--drop", id]);
+    }
+    assert_eq!(issues(s.path()), live);
+    let archive = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    assert!(!archive.contains(&epic) && !archive.contains(&member) && archive.contains(&separate));
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+    ok_at(s.path(), later, &["archive"]);
+    assert!(!issues(s.path()).contains(&member));
+}
+
+#[test]
+fn archive_regressions_rule_five_covers_archived_owned_and_unowned_rows() {
+    let s = init("archive-hook-owner");
+    let later = "2026-10-01T00:00:00Z";
+    for owner in ["B (b@x.io)", "none"] {
+        let id = add(s.path(), &["archived pickup", "-a", owner]);
+        ok(s.path(), &["mv", &id, "done"]);
+        ok_at(s.path(), later, &["archive"]);
+        let cmd = format!("{{\"command\":\"moai mv {id} in_progress --from done\"}}");
+        let why = refusal(&call(&s, "Bash", &cmd, "archive-worker"));
+        assert!(why.starts_with("Rule 5") && why.contains("--from done --take"), "{why}");
+        let cmd = format!("{{\"command\":\"moai mv {id} in_progress --from done --take -m 'Person authorized'\"}}");
+        assert!(call(&s, "Bash", &cmd, "archive-worker").trim().is_empty());
+        ok_at(s.path(), later, &["mv", &id, "in_progress", "--from", "done", "--take", "-m", "Person authorized"]);
+        assert!(ok(s.path(), &["show", &id]).contains("Taken-over:"));
+        ok(s.path(), &["mv", &id, "done"]);
+    }
+}
+
+#[test]
+fn archive_regressions_worktree_overlay_does_not_create_archive_collisions_or_pending_rows() {
+    let t = trees("archive-worktree-context");
+    let main = t.main();
+    let independent = add(&main, &["old closed row"]);
+    ok(&main, &["mv", &independent, "done"]);
+    // Give the sibling an edited stale copy which the overlay must display.
+    let copy: String =
+        issues(&main).lines().filter(|line| line.contains(&independent)).map(|line| format!("{line}\n")).collect();
+    let feat = t.s.path().join("feat");
+    let mut side = issues(&feat);
+    side.push_str(&copy.replace("old closed row", "sibling copy"));
+    std::fs::write(feat.join(".moai/issues.jsonl"), side).unwrap();
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(&main, later, &["archive"]);
+    let dry: serde_json::Value =
+        serde_json::from_str(&ok_at(&main, later, &["archive", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["rows"], 0);
+    let board = ok_at(&main, later, &["status", "--worktree", "--json"]);
+    assert!(!board.contains("archive_duplicate_id") && !board.contains("archive_pending"), "{board}");
+    assert!(ok_at(&main, later, &["show", "--worktree", "--archived"]).contains("sibling copy"));
+}
+
+#[cfg(unix)]
+#[test]
+fn archive_regressions_fifos_and_outside_links_never_block_active_operations() {
+    use std::os::unix::fs::symlink;
+    let s = init("archive-special-files");
+    let away = Scratch::new("archive-outside");
+    std::fs::write(away.path().join("outside.jsonl"), "unchanged").unwrap();
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    symlink(away.path().join("outside.jsonl"), dir.join("2024.jsonl")).unwrap();
+    let fifo = dir.join("2025.jsonl");
+    assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let id = add(s.path(), &["works with special files"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    assert_eq!(std::fs::read_to_string(away.path().join("outside.jsonl")).unwrap(), "unchanged");
+}
+
+/// A cleanup that fails after the restore committed keeps the move, names the repair, and does not claim the history
+/// was lost — the journal holds the move. The copy's directory refuses new names, so the rewrite fails.
+#[cfg(unix)]
+#[test]
+fn archive_regressions_cleanup_failure_keeps_the_successful_move_and_recovery_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("archive-cleanup-failure");
+    let id = add(s.path(), &["restore despite cleanup failure"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let dir = s.path().join(".moai/archive");
+    let mode = |m: u32| std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    if std::fs::File::create(dir.join("probe")).is_ok() {
+        mode(0o755);
+        return; // root 는 권한을 안 본다
+    }
+    let moved = at(s.path(), later, &["mv", &id, "todo", "--from", "done", "--json"]);
+    mode(0o755);
+    let err = String::from_utf8_lossy(&moved.stderr);
+    assert!(moved.status.success(), "{err}");
+    let output: serde_json::Value = serde_json::from_slice(&moved.stdout).unwrap();
+    assert_eq!(output["moved"][0]["id"], id);
+    assert!(err.contains("archive --drop") && !err.contains("이력은 못 남겼다"), "{err}");
+    assert!(std::fs::read_to_string(journal_file(s.path())).unwrap().contains("\"to\":\"todo\""));
+    assert!(issues(s.path()).contains(&id));
+    assert!(std::fs::read_to_string(dir.join("2026.jsonl")).unwrap().contains(&id));
+    let retry = at(s.path(), later, &["mv", &id, "todo", "--from", "done", "--json"]);
+    assert!(!retry.status.success());
+    assert!(String::from_utf8_lossy(&retry.stdout).contains("stale"));
+    ok_at(s.path(), later, &["archive", "--drop", &id]);
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+}
+
+/// **An unrelated archive file that cannot be read stops neither a restore's cleanup nor `--drop`**(review of
+/// moai-bth3) — no reader sees a row in it, and stopping on it left a fatal duplicate whose only repair was outside the
+/// tool. What could not be checked is named.
+#[cfg(unix)]
+#[test]
+fn archive_regressions_an_unrelated_broken_archive_file_blocks_neither_cleanup_nor_drop() {
+    let s = init("archive-unrelated-broken");
+    let later = "2026-10-01T00:00:00Z";
+    let restored = add(s.path(), &["restored row"]);
+    let twin = add(s.path(), &["row with a stale archive copy"]);
+    for id in [&restored, &twin] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let live = line_of(s.path(), &twin);
+    ok_at(s.path(), later, &["archive"]);
+    let dir = s.path().join(".moai/archive");
+    std::fs::write(dir.join("2024.jsonl"), [0xff, 0xfe]).unwrap();
+    assert!(Command::new("mkfifo").arg(dir.join("2023.jsonl")).status().unwrap().success());
+    let moved = at(s.path(), later, &["mv", &restored, "todo", "--from", "done"]);
+    assert!(moved.status.success() && moved.stderr.is_empty(), "{}", String::from_utf8_lossy(&moved.stderr));
+    let archive = std::fs::read_to_string(dir.join("2026.jsonl")).unwrap();
+    assert!(!archive.contains(&restored), "cleanup stopped on an unrelated file: {archive}");
+    let mut active = issues(s.path());
+    active.push_str(&format!("{live}\n"));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), active).unwrap();
+    let dropped = at(s.path(), later, &["archive", "--drop", &twin, "--json"]);
+    let err = String::from_utf8_lossy(&dropped.stderr);
+    assert!(dropped.status.success(), "{err}");
+    assert!(String::from_utf8_lossy(&dropped.stdout).contains("\"removed\":1"));
+    assert!(err.contains("2023.jsonl") && err.contains("2024.jsonl"), "unchecked files went unnamed: {err}");
+    assert!(!std::fs::read_to_string(dir.join("2026.jsonl")).unwrap().contains(&twin));
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+}
+
+/// **`--drop` removes copies of the live row only**(review of moai-bth3). An archived row that merely shares the id
+/// is another issue — an id minted while its file could not be read, or by another clone — and removing it would
+/// erase that issue. With no copy nothing is claimed, an unknown id is `not_found`, and an archive-only id stays.
+#[test]
+fn archive_regressions_drop_never_erases_another_issue_under_the_same_id() {
+    let s = init("archive-drop-identity");
+    let later = "2026-10-01T00:00:00Z";
+    let id = add(s.path(), &["archived original"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    let archived = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    let other = archived.replace("archived original", "a different live issue").replace(NOW, later);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &other).unwrap();
+    let refused = at(s.path(), later, &["archive", "--drop", &id, "--json"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("\"code\":\"bad_target\""));
+    assert_eq!(std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived);
+    let fresh = add(s.path(), &["never archived"]);
+    let none = ok_at(s.path(), later, &["archive", "--drop", &fresh, "--json"]);
+    assert!(none.contains("\"removed\":0"), "{none}");
+    let unknown = at(s.path(), later, &["archive", "--drop", "argos-zzzz", "--json"]);
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("\"code\":\"not_found\""));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), "").unwrap();
+    let only = at(s.path(), later, &["archive", "--drop", &id, "--json"]);
+    assert!(String::from_utf8_lossy(&only.stderr).contains("\"code\":\"bad_target\""));
+    assert_eq!(std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived);
+}
+
+/// **An unreadable archive is named where it matters, in its own words**(review of moai-bth3) — once per source, only
+/// by a write that minted an id it could not check, and never as lost history: the journal was written.
+#[cfg(unix)]
+#[test]
+fn archive_regressions_unreadable_archive_files_never_read_as_lost_history() {
+    let s = init("archive-write-notes");
+    let id = add(s.path(), &["first"]);
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("2025.jsonl"), "<<<<<<< ours\n=======\n>>>>>>> theirs\nnot json\n").unwrap();
+    assert!(Command::new("mkfifo").arg(dir.join("2024.jsonl")).status().unwrap().success());
+    let added = at(s.path(), NOW, &["add", "minted beside an unreadable file", "-q"]);
+    let err = String::from_utf8_lossy(&added.stderr);
+    assert!(added.status.success(), "{err}");
+    assert_eq!(err.lines().count(), 1, "one line per unreadable source: {err}");
+    assert!(err.contains("2024.jsonl") && !err.contains("2025.jsonl"), "{err}");
+    assert!(!err.contains("이력은 못 남겼다"), "an archive file was reported as lost history: {err}");
+    for args in [vec!["note", &id, "a memo"], vec!["mv", &id, "todo"], vec!["edit", &id, "-p", "1"]] {
+        let out = at(s.path(), NOW, &args);
+        assert!(out.status.success() && out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+}
+
+/// **A restore never stages an archive copy beside an unreadable live line of the same id**(review of moai-bth3) —
+/// say a row a newer binary wrote. Restoring the stale copy wrote a live duplicate and shadowed the newer row.
+#[test]
+fn archive_regressions_restore_leaves_an_unreadable_live_twin_alone() {
+    let s = init("archive-opaque-live");
+    let id = add(s.path(), &["archived, then rewritten by a newer binary"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let archived = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    let newer = format!("{{\"id\":\"{id}\",\"title\":\"newer\",\"status\":{{\"column\":\"todo\"}}}}\n");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &newer).unwrap();
+    let out = at(s.path(), later, &["mv", &id, "todo", "--from", "done"]);
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()), newer, "a stale copy was restored beside the live line");
+    assert_eq!(std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived);
+}
+
+/// **Taking over an archived row keeps the new assignee**(review of moai-bth3) — `mv <id> done --take` on an archived
+/// row in its column journaled `Taken-over` while the row stayed archived under the old assignee. It comes back live.
+#[test]
+fn archive_regressions_taking_over_an_archived_row_keeps_the_new_assignee() {
+    let s = init("archive-take");
+    let id = add(s.path(), &["someone else's closed row", "-a", "B (b@x.io)"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &id, "done", "--take", "-m", "Person authorized"]);
+    let row = line_of(s.path(), &id);
+    assert!(row.contains("tester@example.com") && row.contains("\"status\":\"done\""), "{row}");
+    assert!(!std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap().contains(&id));
+}
+
+/// **A close reads the archive as `ready` does**(review of moai-bth3) — the rows it frees keep their archived epic
+/// (`derived_epic`), and its next pick respects a milestone that runs because some of its members were archived.
+#[test]
+fn archive_regressions_a_close_reads_the_same_context_as_ready() {
+    let s = init("archive-close-context");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "archived epic", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let ms = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let shipped = ok(s.path(), &["epic", "add", "shipped part", "--milestone", &ms, "-q"]).trim().to_string();
+    let done = add(s.path(), &["closed in v1", "--parent", &shipped]);
+    ok(s.path(), &["mv", &done, "done"]);
+    let open = ok(s.path(), &["epic", "add", "open part", "--milestone", &ms, "-q"]).trim().to_string();
+    add(s.path(), &["still to do in v1", "--parent", &open]);
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let blocker = add(s.path(), &["loose blocker"]);
+    ok(s.path(), &["link", &blocker, "--blocks", &member]);
+    let freed: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &blocker, "done", "--json"])).unwrap();
+    let row =
+        freed["unblocked"].as_array().unwrap().iter().find(|r| r["id"] == member).unwrap_or_else(|| panic!("{freed}"));
+    assert_eq!(row["derived_epic"], epic, "{freed}");
+    // v1 runs: one of its members is done (in the archive) and one is not. Work outside it is held back.
+    let outside = ok(s.path(), &["epic", "add", "outside v1", "-q"]).trim().to_string();
+    let x = add(s.path(), &["outside one", "--parent", &outside]);
+    let y = add(s.path(), &["outside two", "--parent", &outside]);
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    assert!(ready["outside"].as_array().unwrap().iter().any(|i| i == &serde_json::json!(y)), "{ready}");
+    let closed: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &x, "done", "--json"])).unwrap();
+    assert_eq!(closed["next"], serde_json::json!([]), "the next pick is work `ready` holds back: {closed}");
+}
+
+/// **A group row restored on its own goes back with the next run**(review of moai-bth3) — its column comes from its
+/// archived members, as on every board. Read from live rows alone it stood in the first column forever, while the
+/// board counted it as archived.
+#[test]
+fn archive_regressions_a_restored_group_row_goes_back_with_the_next_run() {
+    let s = init("archive-group-row");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &epic, "todo"]);
+    assert!(issues(s.path()).contains(&epic));
+    let much_later = "2027-06-01T00:00:00Z";
+    let dry = ok_at(s.path(), much_later, &["archive", "--dry-run", "--json"]);
+    assert!(dry.contains(&epic), "{dry}");
+    ok_at(s.path(), much_later, &["archive"]);
+    assert!(!issues(s.path()).contains(&epic));
+}
+
+/// **A row in an archive file that cannot be read is not just "not found"**(review of moai-bth3) — the move names the
+/// file it could not read, so nobody concludes the work never existed and raises it again.
+#[test]
+fn archive_regressions_a_row_in_an_unreadable_archive_file_names_that_file() {
+    let s = init("archive-unreadable-missing");
+    let id = add(s.path(), &["archived"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    let mut bytes = std::fs::read(&file).unwrap();
+    bytes.push(0xff);
+    std::fs::write(&file, bytes).unwrap();
+    let out = at(s.path(), later, &["mv", &id, "todo", "--from", "done"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(err.contains("2026.jsonl") && !err.contains("이력은 못 남겼다"), "{err}");
+}
+
+/// **The explorer opens while `.moai/archive` cannot be listed**(review of moai-bth3) — the readers name it; watching
+/// it never stops the explorer.
+#[test]
+fn archive_regressions_the_explorer_opens_beside_a_broken_archive_directory() {
+    let s = init("archive-explorer-dir");
+    add(s.path(), &["visible work"]);
+    std::fs::write(s.path().join(".moai/archive"), "not a directory\n").unwrap();
+    let out = moai(s.path(), &["tui", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// **What is said about an archive file is the file's own words, cleaned**(review of moai-bth3) — a committed file name
+/// carries no terminal control sequence to stderr, and an unreadable archive row names its id like an active one.
+#[test]
+fn archive_regressions_archive_diagnostics_strip_control_characters_and_name_ids() {
+    let s = init("archive-diagnostic-text");
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("x\u{1b}]0;PWNED\u{7}.jsonl"), "{\"id\":\"argos-zzzz\",\"title\":5}\n").unwrap();
+    let out = moai(s.path(), &["status", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains('\u{1b}') && !err.contains('\u{7}'), "{err:?}");
+    assert!(err.contains("(argos-zzzz)"), "{err}");
+}
+
+#[test]
+fn archive_regressions_physical_rows_stay_hidden_when_aging_is_disabled() {
+    let s = init("archive-physical-hidden");
+    let early = "2025-01-01T00:00:00Z";
+    let later = "2025-04-01T00:00:00Z";
+    let id = add_at(s.path(), early, &["old row"]);
+    ok_at(s.path(), early, &["mv", &id, "done"]);
+    let epic = ok_at(s.path(), early, &["epic", "add", "old epic", "-q"]).trim().to_string();
+    let member = add_at(s.path(), early, &["old member", "--parent", &epic]);
+    ok_at(s.path(), early, &["mv", &member, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    let config = s.path().join(".moai/config.toml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(config, format!("archive_days = 0\n{original}")).unwrap();
+    let ordinary = ok_at(s.path(), later, &["show", "--all", "--json"]);
+    for row in [&id, &epic, &member] {
+        assert!(!ordinary.contains(row.as_str()), "physical archive leaked into --all: {ordinary}");
+    }
+    assert!(ok_at(s.path(), later, &["show", "--archived", "--json"]).contains(&id));
+    // The board leaves moved bundles out whatever `archive_days` says now.
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(board["epics"], serde_json::json!([]), "a moved epic came back to the board: {board}");
+    assert_eq!(board["archived"]["epics"], 1);
+}
+
+#[test]
+fn archive_regressions_status_keeps_duplicate_ids_from_opaque_active_rows() {
+    let s = init("archive-opaque-duplicates");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), "{\"id\":\"argos-a001\"}\n{\"id\":\"argos-a001\"}\n").unwrap();
+    let out = moai(s.path(), &["status", "--json"]);
+    assert!(
+        !out.status.success(),
+        "opaque twins lost their fatal diagnostic: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let warnings = board["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w["kind"] == "duplicate_id" && w["ids"][0] == "argos-a001"), "{board}");
 }

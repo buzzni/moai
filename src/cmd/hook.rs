@@ -287,7 +287,7 @@ fn decide(
             }
             let board = once_per_session(input, &repo, "board", || {
                 let now = model::now();
-                let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
+                let mut st = archive_status(&repo, &load.issues, &unreadable, &now, ctx.zone());
                 // `moai status` 와 **같은 자**로 싣는다([`crate::cmd::status::install_notices`]) — 낡은
                 // AGENTS.md 를 모르고 시작하는 것이 바로 이 보드를 받는 새 세션이다. 셋을 여기서 따로
                 // 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했다(moai-6k1r). 세션의 셸 자리는 stdin 의
@@ -573,7 +573,7 @@ fn closing_hold(
     };
     once_per_session(input, repo, "stop", || {
         let now = model::now();
-        let st = report::status(issues, unreadable, &repo.config, &now, ctx.zone());
+        let st = archive_status(repo, issues, unreadable, &now, ctx.zone());
         // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
         // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
         // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
@@ -847,7 +847,10 @@ fn settle(
     // **빌려 쓴다** — 겹치지 않은 판의 줄은 부르는 쪽의 것 그대로다. 통째로 베끼던 판은 막거나 비추는
     // 호출마다 스냅샷 전체를 복제했고, 훅은 도구 호출마다 돈다.
     let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
-        Some((fresh, beside)) => (std::borrow::Cow::Owned(fresh), crate::hook::Away { me: base.me.clone(), ..beside }),
+        Some((fresh, beside)) => (
+            std::borrow::Cow::Owned(fresh),
+            crate::hook::Away { me: base.me.clone(), archive: base.archive.clone(), ..beside },
+        ),
         None => (std::borrow::Cow::Borrowed(issues), base),
     };
     // **겹쳐 보기만으로 풀리면 거기서 끝낸다** — 모름을 재는 값(옆 스냅샷을 다시 읽고 세션의 기록을
@@ -889,14 +892,20 @@ fn person_at(repo: &Repo, ctx: &Ctx) -> crate::hook::Person {
 /// **담당이 내가 아닌 줄도 뺀다**(moai-0zjo) — 사람은 늘 싣되 묻는 자리에서 푼다([`person_at`]). 집은 것이
 /// 없어도 싣는다 — 규칙 5 는 집은 것이 없는 세션의 첫 집기에서 가장 자주 선다.
 fn away_of(repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> crate::hook::Away {
+    // 규칙 5 가 아카이브의 줄을 찾는 손(moai-bth3) — 읽는 것은 여기(`cmd/`)고, `hook` 은 집는 id 가 산 스냅샷에 없을
+    // 때만 이 손을 부른다. 못 읽는 아카이브 파일은 건너뛴다(`archive::read` 가 너그럽다).
+    let archive = Some(crate::hook::Archive {
+        root: repo.root.clone(),
+        read: |root| crate::archive::read(root).map(|l| l.issues).unwrap_or_default(),
+    });
     if report::wip(issues, &repo.config).is_empty() {
-        return crate::hook::Away { me: me.clone(), ..Default::default() };
+        return crate::hook::Away { me: me.clone(), archive, ..Default::default() };
     }
     // **제 이름은 세션이 선 체크아웃에서 읽는다 — 트래커의 자리가 아니다**(moai-y7go). 트래커를
     // 찾는 길이 딸린 워크트리를 루트로 옮기므로(`Repo::find_from`) `repo.root` 는 늘 루트다. 거기서
     // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
     // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
-    crate::hook::Away { me: me.clone(), ..crate::worktree::away(repo.here()) }
+    crate::hook::Away { me: me.clone(), archive, ..crate::worktree::away(repo.here()) }
 }
 
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
@@ -1630,7 +1639,7 @@ fn write_baseline(
         return;
     };
     let now = model::now();
-    let st = report::status(issues, unreadable, &repo.config, &now, zone);
+    let st = archive_status(repo, issues, unreadable, &now, zone);
     // `Stop` 과 같은 자 — 알림은 안 센다.
     let n: usize = st.warnings.iter().map(|w| w.count).sum();
     let _ = std::fs::write(path, n.to_string());
@@ -1649,6 +1658,20 @@ fn session_file(input: &Input, repo: &Repo, what: &str) -> Option<std::path::Pat
     repo.dir().hash(&mut h);
     let at = h.finish();
     Some(std::env::temp_dir().join(format!("moai-hook-{safe}-{at:x}.{what}")))
+}
+
+/// 훅의 보드·`Stop`·기준선 — `moai status` 와 **같은 자**([`crate::cmd::status::archive_board`])로 짓는다(moai-bth3
+/// 리뷰). 따로 짓던 판은 아카이브 충돌(치명)과 옮길 수 있는 수를 빼먹어, `moai status` 가 1 로 끝나는데 세션의 보드는
+/// "드러난 문제 없다" 를 대고 `Stop` 은 그 충돌을 남긴 세션을 안 붙들었다. 훅은 루트의 스냅샷만 읽으므로 세는 줄이 곧
+/// 아카이브와 견줄 줄이다.
+fn archive_status(
+    repo: &Repo,
+    issues: &[model::Issue],
+    unreadable: &[report::Unreadable],
+    now: &str,
+    zone: &crate::tz::Zone,
+) -> report::StatusReport {
+    crate::cmd::status::archive_board(repo, issues, unreadable, (issues, unreadable), now, zone).0
 }
 
 #[cfg(test)]

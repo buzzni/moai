@@ -13,6 +13,8 @@ use crate::style::{self, paint};
 struct Moved {
     /// Rows actually reopened from archive, for cleanup after the live commit.
     restored: std::collections::BTreeSet<String>,
+    /// 못 찾은 줄이 있을 때, 그 줄이 들었을 수 있는데 못 읽은 아카이브 자리 — 파일째 못 읽은 것과 그 id 를 대는 못 읽은 줄.
+    unread_archive: Vec<String>,
     /// 옮긴 이슈와 그것이 있던 칸.
     done: Vec<(Issue, Status)>,
     /// 이미 그 칸에 있던 것.
@@ -158,33 +160,22 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     let wanted: std::collections::BTreeSet<String> = ids.iter().cloned().collect();
     let moved: Moved = repo.with_write_after(
         || lang,
-        |issues, cfg, _| {
+        |issues, unread, cfg, _| {
             // **시각은 락을 쥔 뒤에 뜬다**(리뷰 moai-u5bk.3wq). 밖에서 뜨면 먼저 뜨고 늦게 락을 잡은
             // 쪽이 뒤에 써서, 칸 시각이 거꾸로 가고 안 덮이는 시작이 끝보다 늦게 선다 — 집기가 닫기를
             // 앞질러 `done_at − started_at` 이 음수가 된다. 락 안에서 뜨면 쓰는 차례가 곧 시각의 차례다.
             let at = model::now();
-            let active_ids: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
-            let archived_rows: Vec<_> = if wanted.iter().all(|id| active_ids.contains(id.as_str())) {
-                Vec::new()
+            // **닫는 쓰기도 아카이브를 읽는다**(moai-bth3 리뷰) — 닫으면 풀린 줄과 다음 할 일을 대는데(`freed`), 풀린
+            // 줄이 되살린 멤버면 그 에픽이, 도는 마일스톤이면 옮겨 둔 멤버가 아카이브에 산다. 옮기는 줄의 조상만 보던
+            // 판은 `--json` 의 풀린 줄에서 `derived_epic` 을 빼고, `ready` 가 밖으로 미룬 일을 다음 일로 댔다.
+            let archived = if to.is_done() || crate::archive::needs_context(issues, &wanted) {
+                crate::archive::read(&repo.root)?
             } else {
-                let archived = crate::archive::read(&repo.root)?;
-                let stands = crate::report::group_stands(&archived.issues, cfg);
-                archived
-                    .issues
-                    .iter()
-                    .filter(|i| wanted.contains(&i.id) && !active_ids.contains(i.id.as_str()))
-                    .map(|i| {
-                        let mut row = i.clone();
-                        // Group rows store no derived status. Reopening uses the
-                        // closed status read from their archived members.
-                        if let Some(stand) = stands.get(&(i.kind, i.id.as_str())) {
-                            row.status = Status::new(stand.column);
-                            row.status_since = stand.entered.into();
-                        }
-                        row
-                    })
-                    .collect()
+                Default::default()
             };
+            // 못 읽어도 산 줄의 id 다 — 그 id 의 아카이브 사본은 되살리지도, 문맥으로 겹치지도 않는다.
+            let opaque: std::collections::BTreeSet<&str> = unread.iter().filter_map(|e| e.id.as_deref()).collect();
+            let archived_rows = crate::archive::restoring(issues, &archived.issues, &wanted, &opaque, cfg);
             let restore_ids: std::collections::BTreeSet<String> = archived_rows.iter().map(|i| i.id.clone()).collect();
             issues.extend(archived_rows.clone());
             // **칸부터 다 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
@@ -332,7 +323,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 통이 하나 더 생기는 날 그것이 저절로 다시 끼어든다.
             let asked: Vec<&str> =
                 m.done.iter().map(|(i, _)| i.id.as_str()).chain(m.already.iter().map(String::as_str)).collect();
-            m.read = super::read_of(issues, cfg, &asked, ctx.json);
+            // 아카이브를 안 읽었으면 산 줄을 그대로 빌린다 — 옮길 때마다 스냅샷 전부를 베끼지 않는다.
+            let context: std::borrow::Cow<'_, [model::Issue]> = match archived.issues.is_empty() {
+                true => std::borrow::Cow::Borrowed(&issues[..]),
+                false => std::borrow::Cow::Owned(crate::report::with_archive(issues, &archived.issues, &opaque)),
+            };
+            m.read = super::read_of(&context, cfg, &asked, ctx.json);
             // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
             m.finished = issues
                 .iter()
@@ -342,8 +338,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 이 쓰기가 연 것 셋. 옮긴 것이 없으면 연 것도 없다. 판단은 `report` 가 한다.
             if let Some(before) = before.filter(|_| !m.done.is_empty()) {
                 let closed: Vec<&str> = m.done.iter().map(|(i, _)| i.id.as_str()).collect();
-                // **다음은 내 줄만 댄다**(moai-0zjo 리뷰) — `ready` 와 같은 자다. 옮기는 사람이 `me` 다.
-                let opened = crate::report::freed(&before, issues, cfg, &closed, Some(&me));
+                // **다음은 내 줄만 댄다**(moai-0zjo 리뷰) — `ready` 와 같은 자다. 옮기는 사람이 `me` 다. 전과 후를
+                // **같은 문맥**으로 잰다(moai-bth3 리뷰) — `ready` 가 아카이브를 겹쳐 읽으므로, 여기만 산 줄로 재면 옮겨
+                // 둔 멤버로 도는 마일스톤을 안 도는 것으로 읽어 `ready` 가 미룬 일을 다음 일로 댄다.
+                let before = match archived.issues.is_empty() {
+                    true => before,
+                    false => crate::report::with_archive(&before, &archived.issues, &opaque),
+                };
+                let opened = crate::report::freed(&before, &context, cfg, &closed, Some(&me));
                 m.unblocked = opened.unblocked.into_iter().cloned().collect();
                 m.closable = opened.closable.into_iter().cloned().collect();
                 m.next = opened.next.into_iter().cloned().collect();
@@ -351,16 +353,28 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 // 줄이 섞인다(`read_of` 와 같은 까닭).
                 let freed: Vec<&str> =
                     m.unblocked.iter().chain(&m.closable).chain(&m.next).map(|i| i.id.as_str()).collect();
-                m.freed = super::read_of(issues, cfg, &freed, ctx.json);
+                m.freed = super::read_of(&context, cfg, &freed, ctx.json);
             }
-            m.restored = m
-                .done
-                .iter()
-                .filter(|(i, _)| !i.status.is_done() && restore_ids.contains(&i.id))
-                .map(|(i, _)| i.id.clone())
-                .collect();
-            // Failed guards and mv-to-done do not change storage location.
-            issues.retain(|i| !restore_ids.contains(&i.id) || m.restored.contains(&i.id));
+            let taken: std::collections::BTreeSet<String> = m.taken.iter().map(|w| w.id.clone()).collect();
+            m.restored = crate::archive::finish_restoring(
+                issues,
+                &restore_ids,
+                &m.done.iter().map(|(i, _)| i.clone()).collect::<Vec<_>>(),
+                &taken,
+            );
+            // 못 찾은 id 가 있으면 그 줄이 들었을 수 있는 못 읽은 아카이브 자리를 챙긴다 — 파일째 못 읽은 것, 그 id 를 대는
+            // 못 읽은 줄. 아카이브는 못 찾은 id 가 있으면 늘 읽혀 있다(`needs_context`).
+            if !m.missing.is_empty() {
+                m.unread_archive = archived
+                    .errors
+                    .iter()
+                    .filter(|e| e.line == 0 || e.id.as_ref().is_some_and(|id| m.missing.contains(id)))
+                    .map(|e| match (&e.source, e.line) {
+                        (Some(at), line @ 1..) => format!("{}:{line}: {}", at.display(), e.message),
+                        _ => e.message.clone(),
+                    })
+                    .collect();
+            }
             Ok((entries, m))
         },
         |m| crate::archive::remove_ids(&repo.root, &m.restored),
@@ -376,6 +390,17 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     for id in &moved.missing {
         super::note_partial();
         eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(lang, "refuse.not_found"), &[("id", id)]));
+    }
+    // **못 찾은 줄이 못 읽은 아카이브에 있을 수 있으면 그 자리를 댄다**(moai-bth3 리뷰) — 아카이브를 못 읽어도 쓰기는
+    // 서므로, 말없이 "없다" 만 대면 사람은 그 일이 없는 줄 알고 새로 세운다.
+    for said in &moved.unread_archive {
+        eprintln!(
+            "moai: {}",
+            crate::i18n::fill(
+                crate::i18n::say(lang, "mv.missing_in_archive"),
+                &[("said", &crate::text::one_line(said))]
+            )
+        );
     }
     // **진 집기도 못 찾은 줄과 같은 자리다.** 종료 코드로 갈려야 jq 없는 껍데기가
     // 이긴 쪽과 진 쪽을 가른다 — 여기서 실패로 끝내지는 않는다(나머지 id 는 옮겼다).
