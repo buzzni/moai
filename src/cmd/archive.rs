@@ -13,6 +13,19 @@ struct Report<'a> {
 
 pub fn run(ctx: &Ctx, args: ArchiveArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
+    if let Some(id) = args.drop {
+        repo.with_write(
+            || ctx.lang(),
+            |issues, _, _| {
+                archive::drop_copy(&repo.root, issues, &id)?;
+                Ok((Vec::new(), ()))
+            },
+        )?;
+        if ctx.json {
+            return super::json_line(&serde_json::json!({"dropped": [id]}));
+        }
+        return Ok(vec![format!("removed archive copies of {id}; live row kept")]);
+    }
     let now = crate::model::now();
     let rows = if args.dry_run {
         let load = repo.read()?;
@@ -27,7 +40,7 @@ pub fn run(ctx: &Ctx, args: ArchiveArgs) -> R<Vec<String>> {
                 if rows.is_empty() {
                     return Ok((Vec::new(), rows));
                 }
-                archive::append(&repo.root, &rows, &repo.config)?;
+                let rows = archive::append(&repo.root, &rows, &repo.config)?;
                 let ids: std::collections::BTreeSet<String> = rows.iter().map(|i| i.id.clone()).collect();
                 let mut moved = Vec::new();
                 issues.retain(|i| {

@@ -4902,8 +4902,20 @@ impl Warning {
         Warning::new("archive_pending", Vec::new()).count(n).notice().hint("moai archive --dry-run")
     }
 
-    pub fn archive_duplicates(ids: Vec<String>) -> Warning {
-        Warning::new("duplicate_id", ids).fatal()
+    pub fn archive_unreadable(n: usize) -> Warning {
+        Warning::new("archive_unreadable", Vec::new()).count(n).notice()
+    }
+
+    pub fn archive_duplicates(ids: Vec<String>, active: &[Issue]) -> Warning {
+        let hint = if ids.iter().all(|id| active.iter().any(|i| i.id == *id)) {
+            match ids.as_slice() {
+                [id] => format!("moai archive --drop {id}"),
+                _ => "moai archive --drop <id>".to_string(),
+            }
+        } else {
+            "moai show --archived".to_string()
+        };
+        Warning::new("archive_duplicate_id", ids).hint(&hint).fatal()
     }
 
     pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
@@ -5303,6 +5315,40 @@ pub fn status_in<'a>(
     now: &str,
     soil: &Soil<'a>,
 ) -> StatusReport {
+    status_in_scope(issues, unreadable, cfg, now, soil, &|_| true)
+}
+
+/// Combine reference context without letting a stale archive copy eclipse a live row.
+pub fn with_archive(active: &[Issue], archived_rows: &[Issue]) -> Vec<Issue> {
+    let ids: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    let mut all: Vec<Issue> = archived_rows.iter().filter(|i| !ids.contains(i.id.as_str())).cloned().collect();
+    all.extend_from_slice(active);
+    all
+}
+
+/// Archive rows supply references and rollups, while only active work is counted.
+pub fn status_with_archive(
+    active: &[Issue],
+    archived_rows: &[Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    zone: &crate::tz::Zone,
+) -> StatusReport {
+    let visible: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    let all = with_archive(active, archived_rows);
+    let soil = Soil::of(&all);
+    status_in_scope(&all, unreadable, cfg, now, &soil, &|i| visible.contains(i.id.as_str())).judged(now, zone)
+}
+
+fn status_in_scope<'a>(
+    issues: &'a [Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    soil: &Soil<'a>,
+    visible: &dyn Fn(&Issue) -> bool,
+) -> StatusReport {
     let group = &soil.epic;
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
@@ -5325,8 +5371,12 @@ pub fn status_in<'a>(
     // id 의 앞줄이 뒷줄의 답을 입는다. 보드 수·경고·흐름이 이 하나를 지나므로 여기서 갈리면
     // 아래가 다 갈린다. **id 로 불리는 자리**(막는 줄, 빈 에픽, 마감)는 그대로 접은 것을 쓴다.
     let off = &soil.shelved;
-    let work: Vec<&Issue> =
-        issues.iter().enumerate().filter(|(k, i)| is_work(i) && off[*k].is_none()).map(|(_, i)| i).collect();
+    let work: Vec<&Issue> = issues
+        .iter()
+        .enumerate()
+        .filter(|(k, i)| visible(i) && is_work(i) && off[*k].is_none())
+        .map(|(_, i)| i)
+        .collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
@@ -5403,7 +5453,7 @@ pub fn status_in<'a>(
     // 줄로 재면 같은 종류 쌍둥이 한 쌍이 `status_no_epic_min` 을 넘겨 놓고 `4건` 을 말한다.
     let open = issues
         .iter()
-        .filter(|i| is_work(i) && !i.status.is_done())
+        .filter(|i| visible(i) && is_work(i) && !i.status.is_done())
         .map(|i| i.id.as_str())
         .collect::<BTreeSet<_>>()
         .len();
@@ -5631,7 +5681,7 @@ pub fn status_in<'a>(
     //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai backlog
     //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
     //      아래 6-3 이 제 이름으로 말한다.
-    let piled = |(k, i): &(usize, &Issue)| is_open_backlog(i) && off[*k].is_none();
+    let piled = |(k, i): &(usize, &Issue)| visible(i) && is_open_backlog(i) && off[*k].is_none();
     let count = issues.iter().enumerate().filter(piled).count();
     // 문턱 0 으로 `쌓인 backlog 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
     if count > 0 && count >= cfg.status.backlog_pile {
@@ -5662,7 +5712,7 @@ pub fn status_in<'a>(
     //
     //      **줄마다 센다**(moai-u3ta) — 이 수가 가리키는 `moai show --deferred` 도 줄마다
     //      고르므로, id 로 세면 미룬 쌍둥이 하나가 제 짝까지 이 수에 얹는다.
-    let shelved = |(k, _): &(usize, &Issue)| off[*k].is_some();
+    let shelved = |(k, i): &(usize, &Issue)| visible(i) && off[*k].is_some();
     let count = issues.iter().enumerate().filter(shelved).count();
     if count > 0 {
         let oldest = issues
@@ -5771,6 +5821,7 @@ pub fn status_in<'a>(
     let mut seen = BTreeSet::new();
     let dups: Vec<String> = issues
         .iter()
+        .filter(|i| visible(i))
         .map(|i| i.id.as_str())
         .chain(unreadable.iter().filter_map(|u| u.id))
         .filter(|id| !seen.insert(*id))
@@ -5807,7 +5858,7 @@ pub fn status_in<'a>(
     // **먼 미래 시각을 든 줄은 통째로 뺀다**(moai-ugjp) — 2099 는 "최근" 이 아니고, 셈에 넣으면
     // 위 `future_timestamp` 가 드러낸 오타가 흐름 숫자로도 새어 나온다.
     let within = |at: &str| days_since(at, now).is_some_and(|d| d < cfg.status.flow_days);
-    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !far_ahead(i, now)).collect();
+    let happened: Vec<&Issue> = issues.iter().filter(|i| visible(i) && is_work(i) && !far_ahead(i, now)).collect();
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed = happened.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
 
@@ -5828,6 +5879,15 @@ pub fn status_in<'a>(
     stones.retain(|r| !aged(r));
     epics.retain(|r| !aged(r));
     let put_away = Archived { milestones: before.0 - stones.len(), epics: before.1 - epics.len() };
+
+    // Diagnostics target active rows; archived references are context, not work.
+    for w in &mut warnings {
+        if !w.ids.is_empty() {
+            w.ids.retain(|id| by_id.get(id.as_str()).is_some_and(|i| visible(i)));
+            w.count = w.ids.len();
+        }
+    }
+    warnings.retain(|w| w.count > 0);
 
     StatusReport {
         counts,

@@ -163,28 +163,12 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 쪽이 뒤에 써서, 칸 시각이 거꾸로 가고 안 덮이는 시작이 끝보다 늦게 선다 — 집기가 닫기를
             // 앞질러 `done_at − started_at` 이 음수가 된다. 락 안에서 뜨면 쓰는 차례가 곧 시각의 차례다.
             let at = model::now();
-            let active_ids: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).collect();
-            let archived_rows: Vec<_> = if wanted.iter().all(|id| active_ids.contains(id.as_str())) {
-                Vec::new()
+            let archived = if crate::archive::needs_context(issues, &wanted) {
+                crate::archive::read(&repo.root)?
             } else {
-                let archived = crate::archive::read(&repo.root)?;
-                let stands = crate::report::group_stands(&archived.issues, cfg);
-                archived
-                    .issues
-                    .iter()
-                    .filter(|i| wanted.contains(&i.id) && !active_ids.contains(i.id.as_str()))
-                    .map(|i| {
-                        let mut row = i.clone();
-                        // Group rows store no derived status. Reopening uses the
-                        // closed status read from their archived members.
-                        if let Some(stand) = stands.get(&(i.kind, i.id.as_str())) {
-                            row.status = Status::new(stand.column);
-                            row.status_since = stand.entered.into();
-                        }
-                        row
-                    })
-                    .collect()
+                Default::default()
             };
+            let archived_rows = crate::archive::restoring(issues, &archived.issues, &wanted, cfg);
             let restore_ids: std::collections::BTreeSet<String> = archived_rows.iter().map(|i| i.id.clone()).collect();
             issues.extend(archived_rows.clone());
             // **칸부터 다 보고 누구인지는 그다음이다.** 신원 없는 기계에서 칸 오타가 "누가
@@ -332,7 +316,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 통이 하나 더 생기는 날 그것이 저절로 다시 끼어든다.
             let asked: Vec<&str> =
                 m.done.iter().map(|(i, _)| i.id.as_str()).chain(m.already.iter().map(String::as_str)).collect();
-            m.read = super::read_of(issues, cfg, &asked, ctx.json);
+            let context = crate::report::with_archive(issues, &archived.issues);
+            m.read = super::read_of(&context, cfg, &asked, ctx.json);
             // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
             m.finished = issues
                 .iter()
@@ -351,16 +336,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
                 // 줄이 섞인다(`read_of` 와 같은 까닭).
                 let freed: Vec<&str> =
                     m.unblocked.iter().chain(&m.closable).chain(&m.next).map(|i| i.id.as_str()).collect();
-                m.freed = super::read_of(issues, cfg, &freed, ctx.json);
+                m.freed = super::read_of(&context, cfg, &freed, ctx.json);
             }
-            m.restored = m
-                .done
-                .iter()
-                .filter(|(i, _)| !i.status.is_done() && restore_ids.contains(&i.id))
-                .map(|(i, _)| i.id.clone())
-                .collect();
-            // Failed guards and mv-to-done do not change storage location.
-            issues.retain(|i| !restore_ids.contains(&i.id) || m.restored.contains(&i.id));
+            m.restored = crate::archive::finish_restoring(
+                issues,
+                &restore_ids,
+                &m.done.iter().map(|(i, _)| i.clone()).collect::<Vec<_>>(),
+            );
             Ok((entries, m))
         },
         |m| crate::archive::remove_ids(&repo.root, &m.restored),

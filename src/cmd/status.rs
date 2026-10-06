@@ -38,19 +38,24 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .map(|id| report::Unreadable { id })
         .collect();
     let now = model::now();
-    let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
-    let archive_ids = crate::archive::id_counts(&repo.root)?;
-    let active_ids: std::collections::BTreeSet<&str> =
-        load.issues.iter().map(|i| i.id.as_str()).chain(load.errors.iter().filter_map(|e| e.id.as_deref())).collect();
-    let collisions: Vec<String> = archive_ids
-        .into_iter()
-        .filter(|(id, n)| *n > 1 || active_ids.contains(id.as_str()))
-        .map(|(id, _)| id)
-        .collect();
+    let archived = crate::archive::read(&repo.root)?;
+    super::name_load_errors(ctx.lang(), &repo.issues_path(), &archived.errors);
+    let mut st =
+        report::status_with_archive(&load.issues, &archived.issues, &unreadable, &repo.config, &now, ctx.zone());
+    // Archive diagnostics use the root snapshot, never overlaid sibling rows.
+    let active = if worktree {
+        repo.read()?
+    } else {
+        crate::store::Load { issues: load.issues.clone(), errors: load.errors.clone() }
+    };
+    let collisions = crate::archive::collisions(&active, &archived);
     if !collisions.is_empty() {
-        st.warnings.push(report::Warning::archive_duplicates(collisions));
+        st.warnings.push(report::Warning::archive_duplicates(collisions, &active.issues));
     }
-    let archiveable = crate::archive::eligible(&load.issues, &repo.config, &now).len();
+    if !archived.errors.is_empty() {
+        st.notices.push(report::Warning::archive_unreadable(archived.errors.len()));
+    }
+    let archiveable = crate::archive::eligible(&active.issues, &repo.config, &now).len();
     if archiveable > 0 {
         st.notices.push(report::Warning::archive_pending(archiveable));
     }

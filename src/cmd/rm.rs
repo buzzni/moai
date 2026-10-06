@@ -322,7 +322,7 @@ mod tests {
     use crate::store::LoadError;
 
     fn unread(text: &str) -> LoadError {
-        LoadError { line: 1, message: String::new(), text: text.to_string(), id: None }
+        LoadError { source: None, line: 1, message: String::new(), text: text.to_string(), id: None }
     }
 
     /// 한 벌뿐인 줄의 해시.

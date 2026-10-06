@@ -26,23 +26,52 @@ const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trouble {
     /// 연 자리가 디렉터리가 아니다 — 그 자리([`Repo::open`]).
-    NotADirectory { at: String },
+    NotADirectory {
+        at: String,
+    },
     /// 같은 id 가 두 번 있다 — 그 id. 짝지을 수가 없으니 아무것도 안 쓴다.
-    DuplicateId { id: String },
+    DuplicateId {
+        id: String,
+    },
     /// 다른 moai 가 쓰고 있어 물러났다 — 기다린 초.
-    LockBusy { secs: u64 },
+    LockBusy {
+        secs: u64,
+    },
     /// 저장소 락을 그 자리에 못 잡는다([`crate::held::lock`], moai-sn57) — 락 자리와 까닭. 링크이거나 보통
     /// 파일이 아니거나, 그 디렉터리가 체크아웃 밖·`.git/` 으로 풀린다. 기다려도 안 풀리니 `locked` 가 아니다.
-    LockUnheld { at: PathBuf, why: crate::held::Unheld },
+    LockUnheld {
+        at: PathBuf,
+        why: crate::held::Unheld,
+    },
     /// 스냅샷이 쓰는 동안 쥐는 락과 한 파일로 풀린다([`Repo::far_lock`]) — 스냅샷 자리와 풀린 자리. 거기 쓰면
     /// `rename` 이 락을 갈아끼워 쓰는 쪽들이 서로를 못 막는다.
-    SnapshotOnLock { at: PathBuf, to: PathBuf },
+    SnapshotOnLock {
+        at: PathBuf,
+        to: PathBuf,
+    },
     /// 스냅샷은 담겼는데 저널을 못 적었다 — io 가 낸 말과, 말이 함께 사라진 이슈들.
-    JournalLost { said: String, ids: Vec<String> },
+    JournalLost {
+        said: String,
+        ids: Vec<String>,
+    },
+    /// The snapshot committed; archive cleanup can be retried separately.
+    ArchiveCleanup {
+        said: String,
+    },
+    ArchiveUnread {
+        at: PathBuf,
+        line: usize,
+        said: String,
+    },
     /// 쓰려는 줄이 검사에 걸렸다([`crate::model::Invalid`], moai-yve0) — 가리키는 자리와 그 까닭.
-    Invalid { at: At, why: crate::model::Invalid },
+    Invalid {
+        at: At,
+        why: crate::model::Invalid,
+    },
     /// 적을 저널 줄에 메일이 없다([`file_entries`], moai-nzlo) — 그 줄의 id.
-    NoJournalEmail { id: String },
+    NoJournalEmail {
+        id: String,
+    },
 }
 
 impl Trouble {
@@ -64,7 +93,11 @@ impl Trouble {
             // 고칠 곳이 argv 가 아니라 사용자 정보다 — `model::NoActor` 와 같은 코드로 나간다.
             Trouble::NoJournalEmail { .. } => code::NO_ACTOR,
             // 나머지는 부르는 쪽이 준 값이나 자리가 틀린 것이다.
-            Trouble::NotADirectory { .. } | Trouble::JournalLost { .. } | Trouble::Invalid { .. } => code::ERROR,
+            Trouble::NotADirectory { .. }
+            | Trouble::JournalLost { .. }
+            | Trouble::ArchiveCleanup { .. }
+            | Trouble::ArchiveUnread { .. }
+            | Trouble::Invalid { .. } => code::ERROR,
         }
     }
 }
@@ -225,8 +258,10 @@ pub fn agents_at(root: &Path) -> PathBuf {
 
 /// 읽다가 만난 잘못된 줄. **한 줄이 깨졌다고 파일을 통째로 거부하지 않는다** —
 /// 거부하면 무엇이 잘못됐는지 볼 방법까지 같이 사라진다.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadError {
+    /// Archive diagnostics carry their own source. None means the active file.
+    pub source: Option<PathBuf>,
     pub line: usize,
     pub message: String,
     /// 못 읽은 줄의 **원문 그대로**. 이것이 있어야 되쓸 때 그 줄을 잃지 않는다.
@@ -929,7 +964,7 @@ impl Repo {
         // 펴는 자리는 락을 다 놓은 여기다 — 코드는 갈래가 쥔다([`Stop::said`]).
         let (out, note) = self.write_locked(f, after).map_err(|stop| stop.said(&lang))?;
         // **못 적은 일기는 여기서 말이 된다** — 스냅샷은 담겼으니 실패가 아니고, 찍는 자는 `main` 이다.
-        if let Some(t) = note {
+        for t in note {
             let said = crate::view::store_trouble(lang(), &t);
             MISSED.lock().unwrap_or_else(|e| e.into_inner()).push((self.root.clone(), said));
         }
@@ -939,7 +974,7 @@ impl Repo {
     /// [`Repo::with_write_lines`] 의 몸통([`Repo::with_write`] 도 이것을 지난다) — 락을 잡고, 읽고,
     /// 고치고, 쓴다. **돌아올 때 락을 놓는다.**
     /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
-    fn write_locked<T, F, G>(&self, f: F, after_commit: G) -> Result<(T, Option<Trouble>), Stop>
+    fn write_locked<T, F, G>(&self, f: F, after_commit: G) -> Result<(T, Vec<Trouble>), Stop>
     where
         F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
         G: FnOnce(&T) -> R<()>,
@@ -989,7 +1024,8 @@ impl Repo {
         }
 
         let mut reserved = load.reserved_ids();
-        reserved.extend(crate::archive::ids(&self.root)?);
+        let archived = crate::archive::read(&self.root)?;
+        reserved.extend(crate::archive::id_counts(&archived).into_keys());
         let mut issues = load.issues;
         let mut unread = load.errors;
         let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;
@@ -1120,7 +1156,15 @@ impl Repo {
         //
         // **안 썼으면 그대로 `Err` 다.** `note` 처럼 저널만 적는 쓰기는 저널이 전부라,
         // 거기서 실패하면 아무것도 안 담겼고 다시 부르는 것이 맞다.
-        let mut note = None;
+        let mut note: Vec<Trouble> = archived
+            .errors
+            .iter()
+            .map(|e| Trouble::ArchiveUnread {
+                at: e.source.clone().unwrap_or_else(|| crate::archive::dir(&self.root)),
+                line: e.line,
+                said: e.message.clone(),
+            })
+            .collect();
         if !filed.is_empty()
             && let Err(e) = self.append_journal(&filed)
         {
@@ -1143,7 +1187,7 @@ impl Repo {
                 .map(|j| j.id.clone())
                 .collect();
             worded.dedup();
-            note = Some(Trouble::JournalLost { said: e.message, ids: worded });
+            note.push(Trouble::JournalLost { said: e.message, ids: worded });
         }
         // **어디에 썼는지 담아 둔다**(moai-y7go) — 딸린 워크트리에서 친 `moai` 는 루트의 트래커를
         // 고친다([`Repo::find_from`]). 조용히 옮기면 시킨 쪽은 제가 선 자리에 썼다고 믿고, 그
@@ -1159,7 +1203,12 @@ impl Repo {
                 moved.push(pair);
             }
         }
-        after_commit(&out)?;
+        if let Err(e) = after_commit(&out) {
+            if !wrote && filed.is_empty() {
+                return Err(e.into());
+            }
+            note.push(Trouble::ArchiveCleanup { said: e.message });
+        }
         Ok((out, note))
     }
 
@@ -1983,6 +2032,7 @@ pub fn parse_issues(src: &str) -> Load {
         match serde_json::from_str::<Issue>(line) {
             Ok(issue) => load.issues.push(issue),
             Err(e) => load.errors.push(LoadError {
+                source: None,
                 line: i + 1,
                 message: e.to_string(),
                 text: line.to_string(),

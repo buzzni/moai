@@ -27414,7 +27414,7 @@ fn archive_storage_reports_cross_file_duplicate_ids_without_dropping_changed_row
     assert!(!status.status.success());
     assert!(String::from_utf8_lossy(&status.stdout).contains("duplicate_id"));
     let archived_before = std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap();
-    assert!(!at(s.path(), later, &["archive"]).status.success());
+    assert!(at(s.path(), later, &["archive"]).status.success());
     assert_eq!(issues(s.path()), changed);
     assert_eq!(std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived_before);
 }
@@ -27450,4 +27450,176 @@ fn archive_storage_uses_the_installed_merge_driver_for_yearly_files() {
     for id in [&a, &b, &c] {
         assert!(merged.contains(id));
     }
+}
+
+#[test]
+fn archive_regressions_preserve_reference_and_milestone_context() {
+    let s = init("archive-reference-context");
+    let ms = ok(s.path(), &["milestone", "add", "shipped", "--due", "2026-01-01", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "closed bundle", "--milestone", &ms, "-q"]).trim().to_string();
+    let a = add(s.path(), &["closed blocker", "--parent", &epic]);
+    let b = add(s.path(), &["closed member", "--parent", &epic]);
+    let dependent = add(s.path(), &["live dependent"]);
+    ok(s.path(), &["link", &a, "--blocks", &dependent]);
+    for id in [&a, &b] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(!board.contains("dangling_blocked_by") && !board.contains("milestone_overdue"), "{board}");
+    let parsed: serde_json::Value = serde_json::from_str(&board).unwrap();
+    assert_eq!(parsed["total"], 1);
+    assert_eq!(parsed["archived"]["milestones"], 1);
+    assert!(ok_at(s.path(), later, &["ready", "--json"]).contains(&dependent));
+    let restored: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &a, "todo", "--from", "done", "--json"])).unwrap();
+    assert_eq!(restored["moved"][0]["derived_epic"], epic);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(!board.contains("orphan_child") && !board.contains("dangling_epic"), "{board}");
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    let row = ready["ready"].as_array().unwrap().iter().find(|r| r["id"] == a).unwrap();
+    assert_eq!(row["derived_epic"], epic);
+    let tree = ok_at(s.path(), later, &["show", "--tree"]);
+    assert!(tree.contains(&epic) && tree.contains(&a), "{tree}");
+    let active: Vec<serde_json::Value> =
+        issues(s.path()).lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert!(active.iter().all(|row| row["id"] != epic && row["id"] != b));
+}
+
+#[test]
+fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
+    let s = init("archive-lenient-read");
+    let id = add(s.path(), &["readable work"]);
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("2024.jsonl"), [0xff, 0xfe]).unwrap();
+    std::fs::write(dir.join("2025.jsonl"), "<<<<<<< conflict\n=======\n>>>>>>> other\n").unwrap();
+    let another = add(s.path(), &["write despite archive damage"]);
+    ok(s.path(), &["mv", &another, "in_progress"]);
+    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    for args in [vec!["show", &id], vec!["stats", "--json"]] {
+        let out = at(s.path(), NOW, &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{err}");
+        assert!(err.contains("archive/2025.jsonl"), "{err}");
+        assert!(!err.contains("issues.jsonl:") && !err.contains("rm --line"), "{err}");
+    }
+    assert_eq!(std::fs::read(dir.join("2024.jsonl")).unwrap(), [0xff, 0xfe]);
+}
+
+#[test]
+fn archive_regressions_conflicting_bundles_stay_live_and_drop_repairs_them() {
+    let s = init("archive-conflict-repair");
+    let epic = ok(s.path(), &["epic", "add", "original", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    let before = issues(s.path());
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), before.replace("original", "changed live group")).unwrap();
+    let separate = add(s.path(), &["separate closed bundle"]);
+    ok(s.path(), &["mv", &separate, "done"]);
+    let out = ok_at(s.path(), later, &["archive", "--json"]);
+    assert!(out.contains(&separate) && !out.contains(&epic) && !out.contains(&member), "{out}");
+    assert!(issues(s.path()).contains(&epic) && issues(s.path()).contains(&member));
+    let status = at(s.path(), later, &["status", "--json"]);
+    let board = String::from_utf8_lossy(&status.stdout);
+    assert!(board.contains("archive_duplicate_id") && board.contains("archive --drop"), "{board}");
+    assert!(!status.status.success());
+    let live = issues(s.path());
+    assert!(!at(s.path(), later, &["archive", "--drop", &separate]).status.success());
+    for id in [&epic, &member] {
+        ok_at(s.path(), later, &["archive", "--drop", id]);
+    }
+    assert_eq!(issues(s.path()), live);
+    let archive = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    assert!(!archive.contains(&epic) && !archive.contains(&member) && archive.contains(&separate));
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+    ok_at(s.path(), later, &["archive"]);
+    assert!(!issues(s.path()).contains(&member));
+}
+
+#[test]
+fn archive_regressions_rule_five_covers_archived_owned_and_unowned_rows() {
+    let s = init("archive-hook-owner");
+    let later = "2026-10-01T00:00:00Z";
+    for owner in ["B (b@x.io)", "none"] {
+        let id = add(s.path(), &["archived pickup", "-a", owner]);
+        ok(s.path(), &["mv", &id, "done"]);
+        ok_at(s.path(), later, &["archive"]);
+        let cmd = format!("{{\"command\":\"moai mv {id} in_progress --from done\"}}");
+        let why = refusal(&call(&s, "Bash", &cmd, "archive-worker"));
+        assert!(why.starts_with("Rule 5") && why.contains("--from done --take"), "{why}");
+        let cmd = format!("{{\"command\":\"moai mv {id} in_progress --from done --take -m 'Person authorized'\"}}");
+        assert!(call(&s, "Bash", &cmd, "archive-worker").trim().is_empty());
+        ok_at(s.path(), later, &["mv", &id, "in_progress", "--from", "done", "--take", "-m", "Person authorized"]);
+        assert!(ok(s.path(), &["show", &id]).contains("Taken-over:"));
+        ok(s.path(), &["mv", &id, "done"]);
+    }
+}
+
+#[test]
+fn archive_regressions_worktree_overlay_does_not_create_archive_collisions_or_pending_rows() {
+    let t = trees("archive-worktree-context");
+    let main = t.main();
+    let independent = add(&main, &["old closed row"]);
+    ok(&main, &["mv", &independent, "done"]);
+    // Give the sibling an edited stale copy which the overlay must display.
+    let copy: String =
+        issues(&main).lines().filter(|line| line.contains(&independent)).map(|line| format!("{line}\n")).collect();
+    let feat = t.s.path().join("feat");
+    let mut side = issues(&feat);
+    side.push_str(&copy.replace("old closed row", "sibling copy"));
+    std::fs::write(feat.join(".moai/issues.jsonl"), side).unwrap();
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(&main, later, &["archive"]);
+    let dry: serde_json::Value =
+        serde_json::from_str(&ok_at(&main, later, &["archive", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["rows"], 0);
+    let board = ok_at(&main, later, &["status", "--worktree", "--json"]);
+    assert!(!board.contains("archive_duplicate_id") && !board.contains("archive_pending"), "{board}");
+    assert!(ok_at(&main, later, &["show", "--worktree", "--archived"]).contains("sibling copy"));
+}
+
+#[cfg(unix)]
+#[test]
+fn archive_regressions_fifos_and_outside_links_never_block_active_operations() {
+    use std::os::unix::fs::symlink;
+    let s = init("archive-special-files");
+    let away = Scratch::new("archive-outside");
+    std::fs::write(away.path().join("outside.jsonl"), "unchanged").unwrap();
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    symlink(away.path().join("outside.jsonl"), dir.join("2024.jsonl")).unwrap();
+    let fifo = dir.join("2025.jsonl");
+    assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let id = add(s.path(), &["works with special files"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    assert_eq!(std::fs::read_to_string(away.path().join("outside.jsonl")).unwrap(), "unchanged");
+}
+
+#[test]
+fn archive_regressions_cleanup_failure_keeps_the_successful_move_and_recovery_path() {
+    let s = init("archive-cleanup-failure");
+    let id = add(s.path(), &["restore despite cleanup failure"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let damaged = s.path().join(".moai/archive/2024.jsonl");
+    std::fs::write(&damaged, [0xff]).unwrap();
+    let moved = at(s.path(), later, &["mv", &id, "todo", "--from", "done", "--json"]);
+    assert!(moved.status.success(), "{}", String::from_utf8_lossy(&moved.stderr));
+    let output: serde_json::Value = serde_json::from_slice(&moved.stdout).unwrap();
+    assert_eq!(output["moved"][0]["id"], id);
+    assert!(String::from_utf8_lossy(&moved.stderr).contains("archive --drop"));
+    assert!(issues(s.path()).contains(&id));
+    assert!(std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap().contains(&id));
+    let retry = at(s.path(), later, &["mv", &id, "todo", "--from", "done", "--json"]);
+    assert!(!retry.status.success());
+    assert!(String::from_utf8_lossy(&retry.stdout).contains("stale"));
+    std::fs::write(damaged, "").unwrap();
+    ok_at(s.path(), later, &["archive", "--drop", &id]);
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
 }

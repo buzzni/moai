@@ -206,6 +206,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         Err(e) => return bare(ctx, lang, Some(&e)),
     };
     let crate::worktree::Gathered { load, origin, .. } = gathered;
+    let load = crate::archive::context(&repo.root, load)?;
     // **못 읽는 줄은 말만 한다.** [`super::name_load_errors`] 는 `report_load_errors` 와 같은
     // 글을 내면서 부분 실패 깃발을 안 세운다 — `ready` 는 "답을 덜 냈다" 를 종료 코드로 말하는
     // 것이 맞고, 세션을 여는 이 판은 그 반대다.

@@ -375,7 +375,9 @@ pub fn report_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, error
     if errors.is_empty() {
         return;
     }
-    note_partial();
+    if errors.iter().any(|e| e.source.is_none()) {
+        note_partial();
+    }
     name_load_errors(lang, path, errors);
 }
 
@@ -391,9 +393,33 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
     if errors.is_empty() {
         return;
     }
+    let mut sources = std::collections::BTreeMap::<&std::path::Path, Vec<crate::store::LoadError>>::new();
+    for e in errors.iter().filter(|e| e.source.is_some()) {
+        sources.entry(e.source.as_deref().unwrap()).or_default().push(e.clone());
+    }
+    for (source, errors) in sources {
+        tell(&fill(
+            say(lang, "warn.unreadable_file"),
+            &[("at", &source.display().to_string()), ("n", &errors.len().to_string())],
+        ));
+        name_capped(lang, &errors, |e| {
+            if e.line == 0 {
+                crate::text::one_line(&e.message)
+            } else {
+                fill(
+                    say(lang, "warn.unreadable_at"),
+                    &[("line", &e.line.to_string()), ("id", ""), ("why", &crate::text::one_line(&e.message))],
+                )
+            }
+        });
+    }
+    let errors: Vec<_> = errors.iter().filter(|e| e.source.is_none()).cloned().collect();
+    if errors.is_empty() {
+        return;
+    }
     let at = path.display().to_string();
     tell(&fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
-    name_capped(lang, errors, |e| {
+    name_capped(lang, &errors, |e| {
         // **그 줄이 쓰는 id 도 댄다**(리뷰 moai-mo9v.1ln) — 산 줄의 깨진 쌍둥이는 번호만으로는 어느 것인지
         // 모르고, 보드의 `duplicate_id` 가 그 id 를 대며 이 화면으로 보낸다. 둘 다 파일에서 온 글이라
         // 제어문자를 걷는다(`text::one_line`): 까닭(`why`)은 serde 가 모르는 값을 그대로 옮겨 적는다.

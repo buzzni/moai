@@ -47,10 +47,24 @@ fn source(root: &Path, file: &Path) -> R<String> {
 
 pub fn read(root: &Path) -> R<Load> {
     let mut out = Load::default();
-    for file in files(root)? {
-        let mut load = parse_issues(&source(root, &file)?);
+    let files = match files(root) {
+        Ok(files) => files,
+        Err(e) => {
+            out.errors.push(read_error(dir(root), e.message));
+            return Ok(out);
+        }
+    };
+    for file in files {
+        let src = match source(root, &file) {
+            Ok(src) => src,
+            Err(e) => {
+                out.errors.push(read_error(file, e.message));
+                continue;
+            }
+        };
+        let mut load = parse_issues(&src);
         for error in &mut load.errors {
-            error.message = format!("{}: {}", file.display(), error.message);
+            error.source = Some(file.clone());
         }
         out.issues.append(&mut load.issues);
         out.errors.append(&mut load.errors);
@@ -59,27 +73,22 @@ pub fn read(root: &Path) -> R<Load> {
     Ok(out)
 }
 
-/// The normal serialized shape needs no JSON parsing. Hand-written shapes use
-/// the existing ID reader so moving a key cannot silently make its ID reusable.
-pub fn id_counts(root: &Path) -> R<BTreeMap<String, usize>> {
-    let mut out = BTreeMap::new();
-    for file in files(root)? {
-        for line in source(root, &file)?.lines() {
-            let id = line.trim_start().strip_prefix(r#"{"id":""#).and_then(|s| s.split_once('"').map(|(id, _)| id));
-            let id = match id.filter(|id| crate::id::is_valid(id) && !id.contains('\\')) {
-                Some(id) => Some(id.to_string()),
-                None => crate::id::id_of(line),
-            };
-            if let Some(id) = id {
-                *out.entry(id).or_default() += 1;
-            }
-        }
-    }
-    Ok(out)
+fn read_error(file: PathBuf, message: String) -> crate::store::LoadError {
+    crate::store::LoadError { source: Some(file), line: 0, message, text: String::new(), id: None }
 }
 
+/// Reserve IDs from both readable rows and opaque rows that still name an ID.
+pub fn id_counts(load: &Load) -> BTreeMap<String, usize> {
+    let mut out = BTreeMap::new();
+    for id in load.issues.iter().map(|i| i.id.as_str()).chain(load.errors.iter().filter_map(|e| e.id.as_deref())) {
+        *out.entry(id.to_string()).or_default() += 1;
+    }
+    out
+}
+
+#[cfg(test)]
 pub fn ids(root: &Path) -> R<BTreeSet<String>> {
-    Ok(id_counts(root)?.into_keys().collect())
+    Ok(id_counts(&read(root)?).into_keys().collect())
 }
 
 pub fn marks(root: &Path) -> R<Vec<(PathBuf, crate::store::Stamp)>> {
@@ -94,6 +103,17 @@ pub fn marks(root: &Path) -> R<Vec<(PathBuf, crate::store::Stamp)>> {
         .collect())
 }
 
+/// Active rows win over stale archive copies when selecting current work.
+pub fn context(root: &Path, active: Load) -> R<Load> {
+    let mut archived = read(root)?;
+    let opaque = active.reserved_ids();
+    archived.issues.retain(|i| !opaque.contains(&i.id));
+    archived.issues = report::with_archive(&active.issues, &archived.issues);
+    archived.issues.sort_by(|a, b| a.id.cmp(&b.id));
+    archived.errors.extend(active.errors);
+    Ok(archived)
+}
+
 pub fn read_all(root: &Path, active: Load) -> R<Load> {
     let mut archived = read(root)?;
     // Retain duplicates for diagnostics, with the live row winning Load::get.
@@ -103,9 +123,73 @@ pub fn read_all(root: &Path, active: Load) -> R<Load> {
     Ok(archived)
 }
 
+pub fn collisions(active: &Load, archived: &Load) -> Vec<String> {
+    let active_ids: BTreeSet<&str> = active
+        .issues
+        .iter()
+        .map(|i| i.id.as_str())
+        .chain(active.errors.iter().filter_map(|e| e.id.as_deref()))
+        .collect();
+    id_counts(archived)
+        .into_iter()
+        .filter(|(id, n)| *n > 1 || active_ids.contains(id.as_str()))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// Existing restored rows also need context when their parent or group stayed archived.
+pub fn needs_context(active: &[Issue], wanted: &BTreeSet<String>) -> bool {
+    let by_id: BTreeMap<&str, &Issue> = active.iter().map(|i| (i.id.as_str(), i)).collect();
+    let mut pending: Vec<&str> = wanted.iter().map(String::as_str).collect();
+    let mut seen = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(i) = by_id.get(id) else {
+            return true;
+        };
+        if report::is_group(i) {
+            return true;
+        }
+        pending.extend([crate::id::parent_of(&i.id), i.epic.as_deref(), i.milestone.as_deref()].into_iter().flatten());
+    }
+    false
+}
+
+/// Group rows reopen from their derived column; only requested rows are staged.
+pub fn restoring(active: &[Issue], archived: &[Issue], wanted: &BTreeSet<String>, cfg: &Config) -> Vec<Issue> {
+    let active_ids: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    let stands = report::group_stands(archived, cfg);
+    archived
+        .iter()
+        .filter(|i| wanted.contains(&i.id) && !active_ids.contains(i.id.as_str()))
+        .map(|i| {
+            let mut row = i.clone();
+            if let Some(stand) = stands.get(&(i.kind, i.id.as_str())) {
+                row.status = crate::model::Status::new(stand.column);
+                row.status_since = stand.entered.into();
+            }
+            row
+        })
+        .collect()
+}
+
+/// Failed guards and moves to done keep the selected row in the archive.
+pub fn finish_restoring(active: &mut Vec<Issue>, staged: &BTreeSet<String>, moved: &[Issue]) -> BTreeSet<String> {
+    let restored: BTreeSet<String> =
+        moved.iter().filter(|i| !i.status.is_done() && staged.contains(&i.id)).map(|i| i.id.clone()).collect();
+    active.retain(|i| !staged.contains(&i.id) || restored.contains(&i.id));
+    restored
+}
+
 /// Keep connected epic/member and parent/child bundles together. Milestones
 /// stay live. An old closed member never leaves a bundle that is still open.
 pub fn eligible(issues: &[Issue], cfg: &Config, now: &str) -> Vec<Issue> {
+    eligible_except(issues, cfg, now, &BTreeSet::new())
+}
+
+fn eligible_except(issues: &[Issue], cfg: &Config, now: &str, excluded: &BTreeSet<String>) -> Vec<Issue> {
     if cfg.archive_days <= 0 {
         return Vec::new();
     }
@@ -146,7 +230,7 @@ pub fn eligible(issues: &[Issue], cfg: &Config, now: &str) -> Vec<Issue> {
                 .is_some_and(|s| report::archived(s.column, s.entered, now, cfg.archive_days)),
             _ => report::archived(i.status.as_str(), &i.status_since, now, cfg.archive_days),
         };
-        if !eligible || counts[i.id.as_str()] > 1 {
+        if !eligible || counts[i.id.as_str()] > 1 || excluded.contains(&i.id) {
             blocked.insert(root(&mut parents, at));
         }
     }
@@ -160,21 +244,27 @@ pub fn eligible(issues: &[Issue], cfg: &Config, now: &str) -> Vec<Issue> {
 
 /// Prepare all destinations before writing any. Existing identical rows recover
 /// an interrupted active-file write; conflicting or unreadable twins stay live.
-pub fn append(root: &Path, rows: &[Issue], cfg: &Config) -> R<()> {
+pub fn append(root: &Path, rows: &[Issue], cfg: &Config) -> R<Vec<Issue>> {
     if rows.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let archived = read(root)?;
+    let mut conflicts = BTreeSet::new();
     for row in rows {
         let twins: Vec<_> = archived.issues.iter().filter(|old| old.id == row.id).collect();
         if twins.iter().any(|old| *old != row)
             || twins.len() > 1
             || archived.errors.iter().any(|e| e.id.as_deref() == Some(&row.id))
         {
-            return Err(Fail::new(format!("{}: conflicting archive row; active row kept", row.id)));
+            conflicts.insert(row.id.clone());
         }
     }
-    let stands = report::group_stands(rows, cfg);
+    // A conflicting member keeps its entire connected bundle live. Other
+    // bundles can still move; eligibility is always decided as a bundle.
+    let allowed: BTreeSet<String> =
+        eligible_except(rows, cfg, &crate::model::now(), &conflicts).into_iter().map(|i| i.id).collect();
+    let rows: Vec<Issue> = rows.iter().filter(|i| allowed.contains(&i.id)).cloned().collect();
+    let stands = report::group_stands(&rows, cfg);
     let mut by_year: BTreeMap<String, Vec<&Issue>> = BTreeMap::new();
     for row in rows.iter().filter(|row| archived.get(&row.id).is_none()) {
         let finished = row.done_at.as_deref().unwrap_or_else(|| {
@@ -184,7 +274,7 @@ pub fn append(root: &Path, rows: &[Issue], cfg: &Config) -> R<()> {
         by_year.entry(year.to_string()).or_default().push(row);
     }
     if by_year.is_empty() {
-        return Ok(());
+        return Ok(rows);
     }
     let home = crate::held::Home::of(root);
     let at = crate::held::place_dir(&dir(root), &home).map_err(|e| Fail::new(crate::held::spelled(&dir(root), &e)))?;
@@ -201,14 +291,27 @@ pub fn append(root: &Path, rows: &[Issue], cfg: &Config) -> R<()> {
         writes.push((file, format!("{}\n", lines.join("\n"))));
     }
     for (file, text) in writes {
-        crate::store::write_atomic_inside(&file, text.as_bytes(), root)?;
+        crate::store::write_staged(&file, text.as_bytes(), root)?;
     }
-    Ok(())
+    Ok(rows)
+}
+
+/// Conflict repair runs under the same lock as archive and restore. Never
+/// delete an archive-only row: there must be a live copy to keep.
+pub fn drop_copy(root: &Path, active: &[Issue], id: &str) -> R<()> {
+    if !active.iter().any(|i| i.id == id) {
+        return Err(Fail::new(format!("{id}: no live row; archive copy kept")));
+    }
+    remove_selected(root, &BTreeSet::from([id.to_string()]), true)
 }
 
 /// Remove selected rows after the live snapshot commits, still under its lock.
 /// If cleanup fails, both copies remain and status reports the duplicate.
 pub fn remove_ids(root: &Path, ids: &BTreeSet<String>) -> R<()> {
+    remove_selected(root, ids, false)
+}
+
+fn remove_selected(root: &Path, ids: &BTreeSet<String>, opaque: bool) -> R<()> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -217,7 +320,11 @@ pub fn remove_ids(root: &Path, ids: &BTreeSet<String>) -> R<()> {
         let src = source(root, &file)?;
         let mut kept = String::new();
         for line in src.split_inclusive('\n') {
-            let remove = serde_json::from_str::<Issue>(line).is_ok_and(|i| ids.contains(&i.id));
+            let remove = if opaque {
+                crate::id::id_of(line).is_some_and(|id| ids.contains(&id))
+            } else {
+                serde_json::from_str::<Issue>(line).is_ok_and(|i| ids.contains(&i.id))
+            };
             if !remove {
                 kept.push_str(line);
             }
@@ -228,7 +335,7 @@ pub fn remove_ids(root: &Path, ids: &BTreeSet<String>) -> R<()> {
         }
     }
     for (file, kept) in writes {
-        crate::store::write_atomic_inside(&file, kept.as_bytes(), root)?;
+        crate::store::write_staged(&file, kept.as_bytes(), root)?;
     }
     Ok(())
 }
@@ -305,7 +412,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(id_counts(&s).unwrap()["argos-a001"], 1);
+        assert_eq!(id_counts(&read(&s).unwrap())["argos-a001"], 1);
     }
 
     #[test]
@@ -318,7 +425,7 @@ mod tests {
         assert_eq!(fs::read(path(&s, "2025")).unwrap(), first);
         let mut changed = row;
         changed.title = "changed after interruption".into();
-        assert!(append(&s, &[changed], &cfg()).is_err());
+        assert!(append(&s, &[changed], &cfg()).unwrap().is_empty());
         assert_eq!(fs::read(path(&s, "2025")).unwrap(), first);
     }
 
@@ -335,6 +442,30 @@ mod tests {
         assert!(ids(&s).unwrap().contains("argos-b001"));
     }
 
+    #[test]
+    fn committed_restore_keeps_both_cleanup_and_journal_diagnostics() {
+        let s = scratch("archive-post-commit");
+        let repo = crate::store::Repo::at(s.to_path_buf(), cfg());
+        fs::write(s.join(".moai/journal"), "not a directory").unwrap();
+        let by = crate::model::Actor::parse("Raven (raven@example.com)").unwrap();
+        let result = repo
+            .with_write_after(
+                || crate::i18n::Lang::En,
+                |rows, _, _| {
+                    rows.push(row("argos-a001", Kind::Issue, "todo"));
+                    Ok((vec![crate::model::JournalEntry::note("argos-a001", "keep this note", NOW, &by)], 42))
+                },
+                |_| Err(Fail::new("cleanup failed")),
+            )
+            .unwrap();
+        assert_eq!(result, 42);
+        assert!(repo.read().unwrap().get("argos-a001").is_some());
+        let notes: Vec<_> = crate::store::journal_misses().into_iter().filter(|(root, _)| root == s.path()).collect();
+        assert_eq!(notes.len(), 2, "one committed-write diagnostic covered another: {notes:?}");
+        assert!(notes.iter().any(|(_, said)| said.contains("cleanup failed")));
+        assert!(notes.iter().any(|(_, said)| said.contains("argos-a001") && said.contains("moai note")));
+    }
+
     #[cfg(unix)]
     #[test]
     fn archive_storage_rejects_outside_links_and_fifos() {
@@ -343,14 +474,14 @@ mod tests {
         let away = Scratch::new("archive-away");
         fs::write(away.join("2025.jsonl"), "untouched").unwrap();
         symlink(away.join("2025.jsonl"), path(&s, "2025")).unwrap();
-        assert!(read(&s).is_err());
-        assert!(ids(&s).is_err());
+        assert!(!read(&s).unwrap().errors.is_empty());
+        assert!(ids(&s).unwrap().is_empty());
         assert!(append(&s, &[row("argos-a001", Kind::Issue, "done")], &cfg()).is_err());
         assert_eq!(fs::read_to_string(away.join("2025.jsonl")).unwrap(), "untouched");
         fs::remove_file(path(&s, "2025")).unwrap();
         let fifo = path(&s, "2025");
         let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
-        assert!(read(&s).is_err());
+        assert!(!read(&s).unwrap().errors.is_empty());
     }
 }

@@ -19,6 +19,7 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         return overview(ctx, worktree, limit);
     };
     let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, &repo, worktree)?;
+    let load = crate::archive::context(&repo.root, load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서

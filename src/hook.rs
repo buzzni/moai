@@ -5778,6 +5778,8 @@ fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> 
 /// 이름으로 띄운 워크트리에서도 쥐었다(moai-m62u) — 그 세션의 초점이 비어 규칙 2 에 막혔다.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Away {
+    /// Root archive lookup is lazy and only used for missing pickup IDs.
+    pub archive_root: Option<PathBuf>,
     /// 옆 워크트리들의 이름 후보(`worktree::away`) — 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에
     /// 든 줄을 가리킨다.
     pub names: BTreeSet<String>,
@@ -7890,8 +7892,20 @@ fn take_in(
             None => away.me.get().cloned(),
         };
         let Some(me) = me else { continue };
+        // Only a pickup aimed at a missing live ID needs archive I/O.
+        let archived = if ids.iter().any(|id| !issues.iter().any(|i| i.id == *id)) {
+            aim(k)
+                .and_then(Aimed::standing)
+                .or(away.archive_root.as_deref())
+                .and_then(|root| crate::archive::read(root).ok())
+        } else {
+            None
+        };
         let Some((row, owner)) = ids.iter().find_map(|id| {
-            let row = issues.iter().find(|i| i.id == *id)?;
+            let row = issues
+                .iter()
+                .find(|i| i.id == *id)
+                .or_else(|| archived.as_ref()?.issues.iter().find(|i| i.id == *id))?;
             report::owner(&me, row).map(|o| (row, o))
         }) else {
             continue;
