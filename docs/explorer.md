@@ -161,7 +161,9 @@ see the rows. Closed epic bundles move together into
 `.moai/archive/<year>.jsonl`, while milestone rows stay live. Normal board and
 ready counts use the active snapshot. Archived rows still supply parent, blocker
 and milestone context, so a shipped release stays closed and a restored member
-keeps its original group. `SPC v o` and `moai show --archived`
+keeps its original group. A new or edited row can point at an archived epic,
+parent or blocker (`add -e`, `edit -e`, `add --parent`, `link`,
+`backlog promote -e`) without restoring it. `SPC v o` and `moai show --archived`
 read archived rows too, and `moai show <id>` can open one directly.
 `archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns archive
 eligibility off; `moai show` and `moai status` leave rows already moved to the

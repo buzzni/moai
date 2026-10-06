@@ -1041,6 +1041,38 @@ pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids:
     }
 }
 
+/// 쓰기가 참조를 잴 때 곁에 둘 **아카이브의 줄** — 참조가 산 줄 밖으로 닿을 때만 읽는다(moai-tzzt).
+///
+/// `moai archive` 가 옮긴 에픽·부모·막는 줄도 있는 줄이고, 보드는 그것을 문맥으로 읽어 멀쩡하다고 센다. 쓰기만
+/// 산 줄로 재던 판은 `add -e`·`edit -e` 에 "없는 에픽" 을 알리고 `--parent`·`link` 를 "없다" 로 거절했다. 읽는
+/// 길은 `mv` 와 하나다 — 락 안에서 [`crate::archive::read`] 로 읽고 [`in_context`] 가 겹친다. 닿는지는
+/// [`crate::archive::reaches_out`] 이 잰다: 늘 읽으면 `add -e` 마다 락을 쥔 채 아카이브 전부를 푼다.
+/// **되살리지 않는다** — 이 줄들은 판단에만 쓰이고, 쓰는 줄은 여전히 산 줄이다.
+pub fn archived_for(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    wanted: &[&str],
+) -> R<Vec<crate::model::Issue>> {
+    match crate::archive::reaches_out(issues, wanted) {
+        true => Ok(crate::archive::read(root)?.issues),
+        false => Ok(Vec::new()),
+    }
+}
+
+/// 산 줄에 [`archived_for`] 의 줄을 겹친 문맥 — 보드와 같은 자([`crate::report::with_archive`])다. 산 줄이 이기고,
+/// 산 파일에 못 읽는 줄로 선 id 의 아카이브 사본은 안 겹친다. 겹칠 것이 없으면 산 줄을 그대로 빌린다.
+pub fn in_context<'a>(
+    issues: &'a [crate::model::Issue],
+    archived: &[crate::model::Issue],
+    unread: &[crate::store::LoadError],
+) -> std::borrow::Cow<'a, [crate::model::Issue]> {
+    if archived.is_empty() {
+        return std::borrow::Cow::Borrowed(issues);
+    }
+    let opaque: std::collections::BTreeSet<&str> = unread.iter().filter_map(|e| e.id.as_deref()).collect();
+    std::borrow::Cow::Owned(crate::report::with_archive(issues, archived, &opaque))
+}
+
 /// `--from` 이 받는 칸 — **아는 칸이거나, 어느 줄이 실제로 서 있는 칸**(moai-hym7).
 ///
 /// 오타는 그대로 거절한다. 거절이 노리는 것은 오타지 낡음이 아니다 — `config` 에서 칸

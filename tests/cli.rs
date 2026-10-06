@@ -27688,6 +27688,155 @@ fn archive_regressions_conflicting_bundles_stay_live_and_drop_repairs_them() {
     assert!(!issues(s.path()).contains(&member));
 }
 
+/// **아카이브로 옮긴 줄도 가리킬 수 있다**(moai-tzzt) — 아카이브는 닫힌 묶음을 파일만 옮긴 것이라, 그 에픽·부모·
+/// 막는 줄은 여전히 있는 줄이다. 쓰기의 참조 검사가 산 줄만 보던 판은 `add -e`·`edit -e` 에 "없는 에픽" 을 알리고,
+/// `--parent`·`link` 는 "없다" 로 거절했다 — 보드는 아카이브를 문맥으로 읽어 같은 줄을 멀쩡하다고 세는데.
+/// 가리킨 줄은 아카이브에 그대로 서고, 새 줄만 산 파일에 선다. 아래 넷이 이 판을 같이 쓴다.
+struct Archived {
+    s: Scratch,
+    epic: String,
+    member: String,
+    blocker: String,
+    /// 산 줄 `live` 에 막혔던 채로 닫혀 아카이브로 간 줄 — 고리가 아카이브를 지나는 판이다.
+    waited: String,
+    live: String,
+    archive: String,
+}
+
+const ARCHIVED_AT: &str = "2026-10-01T00:00:00Z";
+
+impl Archived {
+    fn new(name: &str) -> Archived {
+        let s = init(name);
+        let epic = ok(s.path(), &["epic", "add", "closed bundle", "-q"]).trim().to_string();
+        let member = add(s.path(), &["closed member", "--parent", &epic]);
+        let blocker = add(s.path(), &["closed blocker"]);
+        let live = add(s.path(), &["live row"]);
+        let waited = add(s.path(), &["closed while blocked"]);
+        ok(s.path(), &["link", &live, "--blocks", &waited]);
+        for id in [&member, &blocker, &waited] {
+            ok(s.path(), &["mv", id, "done"]);
+        }
+        ok_at(s.path(), ARCHIVED_AT, &["archive"]);
+        let archive = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+        let a = Archived { s, epic, member, blocker, waited, live, archive };
+        for id in [&a.epic, &a.member, &a.blocker, &a.waited] {
+            assert!(Archived::has(&a.archive, id) && !Archived::has(&issues(a.s.path()), id), "{id} 가 안 옮겨졌다");
+        }
+        a
+    }
+
+    fn has(text: &str, id: &str) -> bool {
+        text.lines().any(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"] == id)
+    }
+
+    /// 성공하고 stderr 에 아무 말도 없어야 한다 — "없는 에픽" 알림도 거기 선다.
+    fn quiet(&self, args: &[&str]) -> String {
+        let out = at(self.s.path(), ARCHIVED_AT, args);
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success(), "moai {args:?}\n{err}");
+        assert!(err.is_empty(), "moai {args:?} 가 아카이브의 줄을 없다고 읽었다\n{err}");
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// 보드는 끊긴 참조를 안 세고 `rows`(이 쓰기가 아카이브를 가리키게 한 줄)를 어느 경고에도 안 올린다 — 에픽 없는
+    /// 줄도 고아도 아니다. 가리킨 줄은 아카이브에 그대로다 — 되살린 것이 아니다.
+    fn settled(&self, rows: &[&str]) {
+        let board = ok_at(self.s.path(), ARCHIVED_AT, &["status", "--json"]);
+        assert!(!board.contains("dangling_"), "{board}");
+        let parsed: serde_json::Value = serde_json::from_str(&board).unwrap();
+        for w in parsed["warnings"].as_array().unwrap() {
+            let named = w["ids"].as_array().into_iter().flatten().filter_map(|id| id.as_str());
+            for id in named {
+                assert!(!rows.contains(&id), "{id} 가 {} 로 섰다\n{board}", w["kind"]);
+            }
+        }
+        let active = issues(self.s.path());
+        for id in [&self.epic, &self.member, &self.blocker, &self.waited] {
+            assert!(!Archived::has(&active, id), "{id} 가 산 파일로 돌아왔다\n{active}");
+        }
+        let archive = std::fs::read_to_string(self.s.path().join(".moai/archive/2026.jsonl")).unwrap();
+        assert_eq!(archive, self.archive);
+    }
+}
+
+#[test]
+fn archive_regressions_add_e_points_at_an_archived_epic() {
+    let a = Archived::new("archive-ref-add-e");
+    let made: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "joins the archived epic", "-e", &a.epic, "--json"])).unwrap();
+    assert_eq!(made["derived_epic"], a.epic.as_str(), "{made}");
+    a.settled(&[made["id"].as_str().unwrap()]);
+}
+
+#[test]
+fn archive_regressions_edit_e_points_at_an_archived_epic() {
+    let a = Archived::new("archive-ref-edit-e");
+    let edited: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["edit", &a.live, "-e", &a.epic, "--json"])).unwrap();
+    assert_eq!(edited["derived_epic"], a.epic.as_str(), "{edited}");
+    // 사람 화면의 상세도 그 에픽을 이름으로 댄다 — "(에픽이 없다)" 가 아니다.
+    let shown = a.quiet(&["edit", &a.live, "-e", &a.epic, "--title", "live row again"]);
+    assert!(shown.contains("closed bundle"), "{shown}");
+    a.settled(&[&a.live]);
+}
+
+#[test]
+fn archive_regressions_parent_points_at_archived_rows() {
+    let a = Archived::new("archive-ref-parent");
+    // 아카이브의 에픽과 멤버 밑에 자식이 선다. id 는 그 부모의 것을 잇는다.
+    let child: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "under the archived epic", "--parent", &a.epic, "--json"])).unwrap();
+    assert!(child["id"].as_str().unwrap().starts_with(&format!("{}.", a.epic)), "{child}");
+    let grand: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "under the archived member", "--parent", &a.member, "--json"])).unwrap();
+    assert!(grand["id"].as_str().unwrap().starts_with(&format!("{}.", a.member)), "{grand}");
+    assert_eq!(grand["derived_epic"], a.epic.as_str(), "{grand}");
+    a.settled(&[child["id"].as_str().unwrap(), grand["id"].as_str().unwrap()]);
+}
+
+#[test]
+fn archive_regressions_link_takes_an_archived_blocker() {
+    let a = Archived::new("archive-ref-link");
+    a.quiet(&["link", &a.blocker, "--blocks", &a.live]);
+    // 막힌 쪽(산 줄)에만 적힌다. 닫힌 줄이 막으니 그 줄은 그대로 집을 수 있다.
+    let row: serde_json::Value = serde_json::from_str(&line_of(a.s.path(), &a.live)).unwrap();
+    assert_eq!(row["blocked_by"], serde_json::json!([a.blocker]), "{row}");
+    assert!(ok_at(a.s.path(), ARCHIVED_AT, &["ready", "--json"]).contains(&a.live));
+    // 고리는 아카이브의 줄을 지나서도 잰다 — 아카이브의 `waited` 는 `live` 에 막혀 있으니, 그것이 `live` 를 막으면 고리다.
+    let looped = at(a.s.path(), ARCHIVED_AT, &["link", &a.waited, "--blocks", &a.live, "--json"]);
+    assert!(!looped.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&looped.stderr), "code"), "bad_input");
+    // 막히는 쪽은 이 쓰기가 고치는 줄이라 산 줄이라야 한다 — 아카이브의 줄은 `edit` 처럼 못 찾는다.
+    let archived = at(a.s.path(), ARCHIVED_AT, &["link", &a.live, "--blocks", &a.blocker, "--json"]);
+    assert_eq!(field(&String::from_utf8_lossy(&archived.stderr), "code"), "not_found");
+    a.settled(&[]);
+}
+
+/// `backlog promote -e` 는 `add -e` 와 같은 에픽을 받는다 — 연습도 진짜도. 없는 에픽을 거절하는 자리라, 산 줄만
+/// 재면 아카이브의 에픽에 펼치는 길이 통째로 막힌다.
+#[test]
+fn archive_regressions_promote_e_unfolds_into_an_archived_epic() {
+    let a = Archived::new("archive-ref-promote-e");
+    let idea = ok(a.s.path(), &["backlog", "add", "a later thought", "-q"]).trim().to_string();
+    let run = |dry: bool| {
+        let mut args = vec!["backlog", "promote", &idea, "-e", &a.epic, "--from", "-", "--json"];
+        if dry {
+            args.push("--dry-run");
+        }
+        let out = from_stdin(a.s.path(), &args, "- unfolded member\n");
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success() && err.is_empty(), "dry-run {dry}\n{err}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    run(true);
+    let made: serde_json::Value = serde_json::from_str(&run(false)).unwrap();
+    let member = made["made"][0]["id"].as_str().unwrap();
+    assert!(member.starts_with(&format!("{}.", a.epic)), "{made}");
+    assert_eq!(made["made"][0]["derived_epic"], a.epic.as_str(), "{made}");
+    a.settled(&[member]);
+}
+
 #[test]
 fn archive_regressions_rule_five_covers_archived_owned_and_unowned_rows() {
     let s = init("archive-hook-owner");

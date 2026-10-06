@@ -491,11 +491,18 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
     // 만들면 만든 줄이 처음부터 `in_progress` 로 선다.
-    let (made, read, kept, known, held_epic) = repo.with_write(
+    let (made, read, kept, known, held_epic) = repo.with_write_after(
         || ctx.lang(),
-        |issues, cfg, reserved| {
+        |issues, unread, cfg, reserved| {
+            // **아카이브로 옮긴 부모·에픽도 있는 줄이다**(moai-tzzt) — 참조가 산 줄 밖으로 닿을 때만 읽어 곁에 둔다.
+            // 새 줄은 산 파일에 서고, 가리킨 줄은 아카이브에 그대로 선다.
+            let wanted: Vec<&str> = [args.parent.as_deref(), args.epic.as_deref(), args.milestone.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect();
+            let archived = super::archived_for(&repo.root, issues, &wanted)?;
             if let Some(p) = &args.parent
-                && !issues.iter().any(|i| &i.id == p)
+                && !issues.iter().chain(&archived).any(|i| &i.id == p)
             {
                 return Err(Fail::coded(
                     crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.no_such_parent"), &[("id", p)]),
@@ -519,6 +526,8 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
             issue.body = body.clone();
             let (entry, issue) = store::admit(issues, cfg, issue, &by)?;
+            let issues = super::in_context(issues, &archived, unread);
+            let issues = &issues[..];
             let read = super::read_of(issues, cfg, &[issue.id.as_str()], ctx.json);
             // **적은 마일스톤이 에픽·조상에게 졌으면 `edit` 과 같은 말로 댄다**(moai-pp9i.wvo). `add -e
             // <에픽> --milestone <다른 것>` 은 안 읽힐 필드를 말없이 썼고, 같은 판에서 `edit` 은 한 줄을
@@ -536,6 +545,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             let held_epic = crate::report::epic_held_wrong(issues, &issue);
             Ok((vec![entry], (issue, read, kept, known, held_epic)))
         },
+        |_| Ok(()),
     )?;
 
     // 쓰기가 선 **뒤에** 말한다 — `bulk` 와 같은 자리고, 거절된 쓰기가 줄 알림이 아니다. `--json` 도

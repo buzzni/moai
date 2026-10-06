@@ -124,6 +124,10 @@ does not tag — see `CONTRIBUTING.md`.
   files it cannot read. Hook ownership checks include archived pickups, sibling
   overlays do not create archive collision or eligibility warnings, and archive
   temporary files stay under the existing ignore rule. (moai-bth3)
+- **Writes can point at archived rows.** `add -e`, `edit -e`, `add --parent`,
+  `link` and `backlog promote -e` accept an epic, parent or blocker that
+  `moai archive` moved, instead of calling it missing; the new or edited row
+  stays live and the archived row stays archived. (moai-tzzt)
 
 ### Deprecated
 

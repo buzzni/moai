@@ -207,6 +207,28 @@ pub fn needs_context(active: &[Issue], wanted: &BTreeSet<String>) -> bool {
     false
 }
 
+/// A write's references reach past the live snapshot — `wanted`, or a parent, epic, milestone or blocker above it,
+/// is an id no live row holds (moai-tzzt). Only then does the write read the archive: an epic, parent or blocker that
+/// `moai archive` moved is still a row, and the board already reads it as context. Unlike [`needs_context`] a live
+/// group does not count — reference checks read the row, not its members, and parsing the whole archive under the
+/// lock on every `add -e` is what pushed concurrent writes past the lock timeout (moai-bth3 review).
+pub fn reaches_out(active: &[Issue], wanted: &[&str]) -> bool {
+    let by_id: BTreeMap<&str, &Issue> = active.iter().map(|i| (i.id.as_str(), i)).collect();
+    let mut pending: Vec<&str> = wanted.to_vec();
+    let mut seen = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let Some(i) = by_id.get(id) else {
+            return true;
+        };
+        pending.extend([crate::id::parent_of(&i.id), i.epic.as_deref(), i.milestone.as_deref()].into_iter().flatten());
+        pending.extend(i.blocked_by.iter().map(String::as_str));
+    }
+    false
+}
+
 /// Group rows reopen from their derived column; only requested rows are staged. An id the live file holds — as a
 /// readable row or as an unreadable line (`opaque`, say from a newer binary) — is never staged: restoring the stale
 /// archive copy beside it would write a live duplicate and shadow the newer row (moai-bth3 review).
