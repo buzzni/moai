@@ -189,9 +189,10 @@ does not tag — see `CONTRIBUTING.md`.
   about 2,500 tokens and no setting raises it — a longer letter is cut there,
   naming `moai inbox <id> --from <n>` for the rest, where Codex would have
   moved its middle into a file. The question a turn's end asks while work is
-  still held fits the same room: held rows that do not fit are left out whole,
-  from the bottom, before any open review tied to them that is not held, and one
-  more line counts them and names `moai prime`. Antigravity has no prompt
+  still held fits the same room: open reviews tied to the held work, and held
+  rows that would close their epic if deferred, get the room first; the other
+  held rows fill what is left from the top, those that do not fit are left out
+  whole, and one more line counts them and names `moai prime`. Antigravity has no prompt
   event, so its first model call of a turn loads the board and the letters; a
   turn is held with `decision: continue`. Both carry the same 10,000
   characters as Claude Code —
@@ -283,9 +284,10 @@ does not tag — see `CONTRIBUTING.md`.
   instead of written through; plant from the top, or make it a directory.
 - **In Claude Code, the question a turn's end asks while work is still held
   fits the 10,000 characters a letter gets there.** It used to list every row
-  the session held, however long that ran. Now held rows that do not fit are
-  left out whole, from the bottom, before any open review tied to them that is
-  not held, and one more line counts what was left out and names `moai prime`.
+  the session held, however long that ran. Now open reviews tied to the held
+  work, and held rows that would close their epic if deferred, get the room
+  first; the other held rows fill what is left from the top, those that do not
+  fit are left out whole, and one more line counts them and names `moai prime`.
   The order on the page is unchanged, and the first line and the "warnings
   grew" line always stand.
 

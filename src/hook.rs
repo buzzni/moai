@@ -8426,9 +8426,9 @@ pub fn closing(
     if wip.is_empty() {
         return grown(warnings, before, lang).map_or(Decision::Pass, Decision::Block);
     }
-    // 집은 줄 하나와 리뷰 하나가 묶음 하나다 — 자리가 모자라면 묶음째 덜어 낸다([`fit`]). 둘을 따로 모은다 — 리뷰가
-    // 자리를 먼저 받는다.
-    let mut rows = Vec::new();
+    // 집은 줄 하나와 리뷰 하나가 묶음 하나다 — 자리가 모자라면 묶음째 덜어 낸다([`fit`]). 묶음마다 자리를 먼저 받는지를
+    // 함께 적는다 — 리뷰와, 미루면 에픽이 닫히는 줄이다.
+    let mut blocks = Vec::new();
     // 한 벌로 짓고 아래 `unit_of_in` 에 그대로 준다 — 곁에서 `unit_of` 를 부르던 판은 같은 지도를
     // 두 벌 지었다(리뷰 moai-c4nk.ssb).
     let ties = report::Ties::of(issues);
@@ -8494,7 +8494,7 @@ pub fn closing(
                 crate::text::single_quoted(say(lang, "hook.defer_why"))
             ));
             lines.push(format!("  {}      {}", crate::guide::handoff(&i.id), say(lang, "hook.handoff_hint")));
-            rows.push(lines.join("\n"));
+            blocks.push((shuts.is_some(), lines.join("\n")));
         }
     }
     // **굴러가는 리뷰와 지금 집은 것에 매인 리뷰만 센다.** 저장소에 남은 옛
@@ -8508,7 +8508,6 @@ pub fn closing(
     let out = report::put_off(latest);
     let settled: BTreeSet<&str> =
         latest.iter().filter(|i| i.status.is_done() || out.contains(i.id.as_str())).map(|i| i.id.as_str()).collect();
-    let mut reviews = Vec::new();
     for i in issues
         .iter()
         .filter(|i| is_review(i, &out_of_plan) && !i.status.is_done() && !theirs(i) && !settled.contains(i.id.as_str()))
@@ -8518,19 +8517,22 @@ pub fn closing(
         // 아무도 안 챙기는 줄이 된다 — 한 규칙의 두 짝이 서로 다른 말을 한다.
         let mine = in_unit(&unit, &ties, i);
         if mine && !wip.iter().any(|w| w.id == i.id) {
-            reviews.push(format!(
-                "{}\n{}",
-                fill(say(lang, "hook.review_open"), &[("id", &i.id)]),
-                crate::guide::close_steps(&i.id, "moai")
+            blocks.push((
+                true,
+                format!(
+                    "{}\n{}",
+                    fill(say(lang, "hook.review_open"), &[("id", &i.id)]),
+                    crate::guide::close_steps(&i.id, "moai")
+                ),
             ));
         }
     }
-    Decision::Block(fit(say(lang, "hook.still_held"), &rows, &reviews, grown(warnings, before, lang), room, lang))
+    Decision::Block(fit(say(lang, "hook.still_held"), &blocks, grown(warnings, before, lang), room, lang))
 }
 
 /// 닫기 물음을 그 칸의 자리(`room`)에 맞춘다(moai-084j) — 머리 줄(`head`)과 늘어난 경고 줄(`foot`)은 늘 싣고, 집은
-/// 줄의 묶음(`rows`)과 리뷰의 묶음(`reviews`)은 **통째로** 드는 만큼 싣는다. 안 든 묶음은 그 뒤의 한 줄이 그 수와
-/// `moai prime` 을 댄다.
+/// 줄과 리뷰의 묶음(`blocks`)은 **통째로** 드는 만큼 싣는다. 안 든 묶음은 그 뒤의 한 줄이 그 수와 `moai prime` 을
+/// 댄다. 묶음마다 붙은 표(`true`)는 자리를 먼저 받는다는 뜻이다.
 ///
 /// 재지 않던 판은 Codex 의 붙드는 칸([`CODEX_HOLD`], 바이트 8천)을 집은 줄 열둘 남짓에서 넘겼다 — Codex 는 가운데를
 /// 파일로 빼고 머리·꼬리와 경로만 실어, `mv`·`defer` 줄이 바이트 자리에서 끊겼다. 편지와 달리 읽음으로 옮긴 것이 아니라
@@ -8540,22 +8542,27 @@ pub fn closing(
 /// **리뷰의 묶음이 자리를 먼저 받는다**(리뷰 moai-084j.ghf) — 덜어 낸 집은 줄은 `moai prime` 이 다시 보이지만, 집은 일에
 /// 매인 열린 리뷰는 집은 줄이 아니라 거기 안 선다. 리뷰를 맨 뒤에 두고 앞에서부터 담던 판은 넘치는 순간 리뷰부터 덜어,
 /// "낸 글을 붙이고 닫는다" 를 그 세션에서 아무도 다시 안 댔다 — 그 전에는 Codex 가 꼬리에 선 그 묶음을 그대로 실었다.
-/// 집은 줄은 남은 자리에 앞에서부터 든다. 이 세션이 집은 리뷰는 집은 줄이다(`rows`) — `moai prime` 이 그 줄을 보인다.
-/// 싣는 차례는 그대로다 — 집은 줄, 리뷰, 남은 수, 경고 줄.
+/// **미루면 에픽이 닫히는 줄도 자리를 먼저 받는다**(리뷰 moai-084j.ghf 3번) — 그 묶음만 "목적을 접을 때만" 과 첫 칸으로
+/// 되돌리는 길을 댄다. `moai prime` 도 `moai defer` 도 그것을 안 대니, 덜어 내면 남은 수의 줄을 따라 `prime` 에서 그 줄을
+/// 찾은 에이전트가 머리 줄이 이른 대로 미뤄 에픽이 목적을 못 이룬 채 닫힌다(moai-l288 의 실패). 집은 줄은 남은 자리에
+/// 앞에서부터 든다. 이 세션이 집은 리뷰는 집은 줄이다 — `moai prime` 이 그 줄을 보인다. 싣는 차례는 그대로다 —
+/// 집은 줄, 리뷰, 남은 수, 경고 줄.
 ///
 /// **재는 글과 싣는 글이 하나다**([`letter_block`] 과 같은 까닭, 리뷰 moai-084j.ghf) — 묶음 k 개를 실은 글을 지어 그대로
 /// 잰다. 줄과 줄바꿈의 길이를 따로 더하던 판은 글을 잇는 꼴이 바뀌면 두 셈을 함께 고쳐야 했다. 드는 데까지다 — 묶음
 /// 하나는 남은 수의 줄보다 길어(묶음은 줄이 둘 넘고 남은 수는 한 줄이다) 하나를 더 실은 글은 늘 더 길다. 머리·남은
 /// 수·경고 줄만으로도 안 들면 그 셋만 싣는다 — 셋 다 짧아 실제로는 안 선다.
-fn fit(head: &str, rows: &[String], reviews: &[String], foot: Option<String>, room: Room, lang: Lang) -> String {
-    let n = rows.len() + reviews.len();
+fn fit(head: &str, blocks: &[(bool, String)], foot: Option<String>, room: Room, lang: Lang) -> String {
+    let n = blocks.len();
+    // 자리를 받는 차례 — 먼저 받을 묶음이 앞이고, 그 안에서는 싣는 차례 그대로다(`sort_by_key` 는 섞지 않는다).
+    let mut turn: Vec<usize> = (0..n).collect();
+    turn.sort_by_key(|&i| !blocks[i].0);
     let render = |k: usize| {
-        // k 개 가운데 리뷰가 앞의 몫이다 — 남은 자리가 집은 줄의 몫이다.
-        let (r, w) = (k.min(reviews.len()), k.saturating_sub(reviews.len()));
+        let mut kept = turn[..k].to_vec();
+        kept.sort_unstable();
         let more = (k < n).then(|| fill(say(lang, "hook.closing_more"), &[("n", &(n - k).to_string())]));
         std::iter::once(head)
-            .chain(rows[..w].iter().map(String::as_str))
-            .chain(reviews[..r].iter().map(String::as_str))
+            .chain(kept.iter().map(|&i| blocks[i].1.as_str()))
             .chain(more.as_deref())
             .chain(foot.as_deref())
             .collect::<Vec<_>>()
@@ -12608,9 +12615,9 @@ mod tests {
     /// 한 줄이 덜어 낸 수와 `moai prime` 을 댄다. 머리 줄과 늘어난 경고 줄은 늘 남는다. 재지 않던 판은 Codex 의
     /// 붙드는 칸(바이트 8천)을 넘겨 Codex 가 가운데를 파일로 빼, `mv`·`defer` 줄이 바이트 자리에서 끊겼다.
     ///
-    /// **집은 일에 매인 열린 리뷰는 집은 줄보다 자리를 먼저 받는다**(리뷰 moai-084j.ghf) — `moai prime` 은 집은 줄만 다시
-    /// 보인다.
-    /// 리뷰를 맨 뒤에서 덜던 판은 넘치는 순간 "낸 글을 붙이고 닫는다" 를 그 세션에서 잃었다.
+    /// **집은 일에 매인 열린 리뷰와 미루면 에픽이 닫히는 줄은 자리를 먼저 받는다**(리뷰 moai-084j.ghf 1·3번) — `moai prime`
+    /// 은 집은 줄만 다시 보이고, 미루면 에픽이 닫힌다는 말은 그 묶음만 댄다. 앞에서부터 덜던 판은 넘치는 순간 "낸 글을
+    /// 붙이고 닫는다" 와 "목적을 접을 때만" 을 그 세션에서 잃었다.
     #[test]
     fn closing_fits_its_room_a_whole_row_at_a_time() {
         const ROWS: usize = 60;
@@ -12621,6 +12628,8 @@ mod tests {
             all.push(i);
         }
         all.push(review("t-r", "todo", Some("t-e")));
+        // 끝난 멤버 곁에 이것만 남은 에픽 — 미루면 닫힌다. id 로는 맨 뒤라 앞에서부터 담으면 먼저 덜어진다.
+        all.extend([epic("t-z"), under("t-z1", "done", "t-z"), under("t-z2", "in_progress", "t-z")]);
         let ask = |room: Room| match super::closing(&all, &all, &cfg(), &here(), 5, Some(3), Lang::Ko, room) {
             Decision::Block(said) => said,
             other => panic!("안 붙들었다 — {other:?}"),
@@ -12652,6 +12661,9 @@ mod tests {
                 fill(say(Lang::Ko, "hook.review_open"), &[("id", "t-r")]),
                 crate::guide::close_steps("t-r", "moai")
             );
+            // 미루면 에픽이 닫히는 줄도 남는다 — 그 묶음만 "목적을 접을 때만" 을 댄다(리뷰 moai-084j.ghf 3번).
+            assert!(said.contains("t-z 의 목적을 접을 때만"), "{room:?}: 에픽을 닫는 줄을 덜었다");
+            assert!(said.contains(&crate::guide::handoff("t-z2")), "{room:?}: t-z2 의 묶음을 가운데서 끊었다");
             let more = fill(say(Lang::Ko, "hook.closing_more"), &[("n", &(ROWS - kept).to_string())]);
             assert!(
                 said.ends_with(&format!("\n{review}\n{more}\n{grew}")),
@@ -12662,7 +12674,8 @@ mod tests {
 
     /// **[`fit`] 은 그 칸의 자로 꼭 차게 싣는다**(리뷰 moai-084j.ghf) — 위 시험은 자리를 안 넘는지만 재, 바이트로 잰
     /// 판이나 꼭 차는 글을 하나 덜 싣는 판(`>=`)도 지나갔다. 한글 묶음이라 UTF-8 바이트와 UTF-16 단위가 갈린다. 글이 꼭
-    /// 차는 자리에서는 그 글을, 한 자리 모자라면 묶음 하나를 덜고 그 수를 댄 글을 낸다. 리뷰가 자리를 먼저 받는다.
+    /// 차는 자리에서는 그 글을, 한 자리 모자라면 묶음 하나를 덜고 그 수를 댄 글을 낸다. 리뷰와 미루면 에픽이 닫히는
+    /// 줄이 자리를 먼저 받는다.
     #[test]
     fn fit_fills_its_room_exactly_in_that_rooms_unit() {
         let head = say(Lang::Ko, "hook.still_held");
@@ -12675,13 +12688,18 @@ mod tests {
         let all = format!("{head}\n{}\n{review}\n{grew}", rows.join("\n"));
         let two = format!("{head}\n{}\n{}\n{review}\n{}\n{grew}", rows[0], rows[1], more(1));
         let alone = format!("{head}\n{review}\n{}\n{grew}", more(3));
+        // 셋째 줄은 미루면 에픽이 닫힌다 — 리뷰 다음으로 자리를 받고, 싣는 자리는 그대로 리뷰 앞이다.
+        let shuts = format!("{head}\n{}\n{review}\n{}\n{grew}", rows[2], more(2));
+        let blocks = |first: usize| -> Vec<(bool, String)> {
+            rows.iter().enumerate().map(|(n, r)| (n == first, r.clone())).chain([(true, review.clone())]).collect()
+        };
         for unit in [Unit::Utf8, Unit::Utf16] {
-            let at =
-                |size| fit(head, &rows, std::slice::from_ref(&review), foot.clone(), Room { size, unit }, Lang::Ko);
-            assert_eq!(at(unit.of(&all)), all, "{unit:?}: 꼭 차는 자리에서 묶음을 덜었다");
-            assert_eq!(at(unit.of(&all) - 1), two, "{unit:?}: 한 자리 모자란 자리에 다 실었거나 둘을 덜었다");
-            assert_eq!(at(unit.of(&two)), two, "{unit:?}: 꼭 차는 자리에서 묶음을 덜었다");
-            assert_eq!(at(unit.of(&alone)), alone, "{unit:?}: 리뷰보다 집은 줄을 먼저 실었다");
+            let at = |size, first| fit(head, &blocks(first), foot.clone(), Room { size, unit }, Lang::Ko);
+            assert_eq!(at(unit.of(&all), 9), all, "{unit:?}: 꼭 차는 자리에서 묶음을 덜었다");
+            assert_eq!(at(unit.of(&all) - 1, 9), two, "{unit:?}: 한 자리 모자란 자리에 다 실었거나 둘을 덜었다");
+            assert_eq!(at(unit.of(&two), 9), two, "{unit:?}: 꼭 차는 자리에서 묶음을 덜었다");
+            assert_eq!(at(unit.of(&alone), 9), alone, "{unit:?}: 리뷰보다 집은 줄을 먼저 실었다");
+            assert_eq!(at(unit.of(&shuts), 2), shuts, "{unit:?}: 에픽을 닫는 줄보다 앞의 줄을 먼저 실었다");
         }
     }
 
