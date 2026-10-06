@@ -47,6 +47,13 @@ does not tag — see `CONTRIBUTING.md`.
   `--guide hook --no-skill` is refused. A run that fails leaves what was
   planted and still exits 0.
 
+- **Tab completes keys and values in the explorer's filter field (`SPC f`).**
+  A unique key gains `=` (`mil` becomes `milestone=`), and Tab or Shift-Tab
+  cycles through matching keys in query-table order or the available values
+  for tags, assignees and milestones. Status columns, priorities `p0` to `p3`
+  and kind names also complete; another key keeps the inserted candidate.
+  Enter and Esc keep their existing meanings. (moai-fc97)
+
 ### Changed
 
 - **The first `moai init` in a terminal asks before it plants.** A short screen

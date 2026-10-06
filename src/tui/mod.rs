@@ -1363,6 +1363,7 @@ pub struct App {
     dragging: Option<mouse::Grab>,
     /// 거름망 칸의 값 목록에서 겨눈 줄(moai-h2rh) — 겨눈 그 글과 커서에서만 선다([`hint::Aim`]).
     offer_aim: hint::Aim,
+    completion: Option<hint::Completion>,
     /// 지난 그림에서 거름망 칸 위의 안내가 받은 줄 수(moai-h2rh). `None` 이면 아직 안 그렸다. **0 이면 값 목록이
     /// 안 서는 것으로 친다**([`App::offered`]) — 창이 낮아 안 보이는 목록이 Enter 를 먹으면 안 된다. 그리는 쪽이
     /// 재는 값이라 거기서 적는다([`draw::screen`]).
@@ -1932,6 +1933,7 @@ impl App {
             wiki_width: None,
             dragging: None,
             offer_aim: hint::Aim::default(),
+            completion: None,
             hint_room: None,
             zone: crate::tz::Zone::utc(),
             saved_zone: None,
@@ -5418,6 +5420,12 @@ impl App {
     /// 정한다 — Enter·Esc·Ctrl-C. 칸이 먹은 키는 여기까지 오지 않으므로 빈 칸의
     /// Backspace 가 "한 층 위로" 로 새지 않는다.
     fn typing(&mut self, k: KeyEvent) {
+        // Tab / Shift-Tab in the filter extends a completion cycle.
+        let tab =
+            matches!(keys::lookup(keys::PROMPT, &[k]), Lookup::Run(keys::Prompt::NextScope | keys::Prompt::PrevScope));
+        if !tab || !matches!(self.mode, Mode::Filter(_)) {
+            self.completion = None;
+        }
         match self.mode {
             Mode::Idea(_) => return self.jot(k),
             Mode::Pick(_) => return self.pick(k),
@@ -5506,6 +5514,9 @@ impl App {
             }
             keys::Prompt::Up | keys::Prompt::Down => self.aim_offer(act == keys::Prompt::Down),
             keys::Prompt::NextScope | keys::Prompt::PrevScope => {
+                if matches!(self.mode, Mode::Filter(_)) {
+                    self.complete_filter(act == keys::Prompt::NextScope);
+                }
                 if let Mode::Grep(_, g) = &mut self.mode {
                     *g = if act == keys::Prompt::NextScope { g.next() } else { g.prev() };
                     self.live();
@@ -5688,6 +5699,7 @@ impl App {
                 self.live();
             }
             Mode::Filter(input) => {
+                self.completion = None;
                 input.paste(s);
                 self.offer_aim = hint::Aim::default();
             }
@@ -7931,7 +7943,11 @@ mod tests {
             a.key(key(KeyCode::Tab));
             a.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
             assert_eq!(a.focus, start, "{opener:?} 중에 Tab 이 포커스를 옮겼다");
-            assert!(matches!(&a.mode, Mode::Grep(b, _) | Mode::Filter(b) if b.text() == "a"), "{:?}", a.mode);
+            match &a.mode {
+                Mode::Grep(b, _) => assert_eq!(b.text(), "a"),
+                Mode::Filter(b) => assert_eq!(b.text(), "assignee=none"),
+                mode => panic!("{mode:?}"),
+            }
         }
     }
 
@@ -9618,10 +9634,10 @@ mod tests {
         assert_eq!(a.grep_query(), Some((GrepIn::Tag, "pars")), "Esc 가 좁힌 범위를 못 돌렸다");
         assert_eq!(shown(&a), ["argos-0009"]);
 
-        // 거름망(`f`) 칸의 Tab 은 아무 일도 안 한다.
+        // 거름망(`f`) 칸의 Tab 은 항목을 완성하고 검색 범위는 안 바꾼다.
         a.hit("SPC f");
         a.key(key(KeyCode::Tab));
-        assert!(matches!(&a.mode, Mode::Filter(q) if q.text().is_empty()), "{:?}", a.mode);
+        assert!(matches!(&a.mode, Mode::Filter(q) if q.text() == "status"), "{:?}", a.mode);
     }
 
     /// 거름망은 **CLI 와 같은 문법**이다. 없는 항목은 그 자리에서 나무란다.
