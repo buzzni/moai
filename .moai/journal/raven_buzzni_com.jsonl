@@ -5058,3 +5058,25 @@
 {"ts":"2026-10-06T12:23:24Z","id":"moai-95do.jrs","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: openai/gpt-6.1-sol (max — 훅 설치 회귀를 에픽 전체 diff 와 다섯 반복 점검 항목으로 자체 검토했다)"}
 {"ts":"2026-10-06T12:23:27Z","id":"moai-95do.jrs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"에픽 전체 검토에서 추가 수정과 넘길 항목 없음. 전체 시험·fmt·clippy·init 경로 시험 통과 및 원래 조건에서 회귀 시험 실패를 확인했다."}
 {"ts":"2026-10-06T12:24:21Z","id":"moai-95do","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 완료. 기본 init 화면이 고른 훅 안내는 스킬과 훅을 설치하며, 기존 훅 감지 시 재설치를 생략하고 명시적 --guide hook·--skill 은 설치한다. 전체 2736개 시험·fmt·clippy, develop 반영 뒤 및 병합된 루트의 init 관련 44개 시험 통과. 리뷰 moai-95do.jrs 에 지적 없음. 위키 변경 없음. 남은 멤버·새 백로그·실행 중 작업 없음."}
+{"ts":"2026-10-06T12:35:30Z","id":"moai-y42g","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex exec_command workdir 를 훅의 작업 자리로 읽기"}
+{"ts":"2026-10-06T12:35:35Z","id":"moai-qde9.2hx.w0p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"기존 한 줄만 되살리는 결정을 유지했다. 산 줄을 세는 표면은 아카이브를 참조 문맥으로 받아 부모·에픽·blocker·마일스톤을 같은 함수로 읽는다. mv의 되살리기 판단은 archive 순수 함수로 옮겼다."}
+{"ts":"2026-10-06T12:35:39Z","id":"moai-qde9.2hx.yzg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"저장 뒤 정리 실패는 성공한 이동 결과를 유지하는 Trouble로 싣는다. 저널 실패와 함께 나더라도 두 진단을 모두 남긴다. 저장 자체가 없던 실패는 계속 실패로 끝난다."}
+{"ts":"2026-10-06T12:43:10Z","id":"moai-bth3.o7a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — archive regression repairs"}
+{"ts":"2026-10-06T12:43:21Z","id":"moai-bth3.o7a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-06T12:43:26Z","id":"moai-qde9.2hx.1h7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:43:30Z","id":"moai-qde9.2hx.6e5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:43:35Z","id":"moai-qde9.2hx.ui8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:43:39Z","id":"moai-qde9.2hx.i9w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:43:44Z","id":"moai-qde9.2hx.w0p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:43:48Z","id":"moai-qde9.2hx.wcx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:43:52Z","id":"moai-qde9.2hx.yzg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:43:56Z","id":"moai-qde9.2hx.88m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:44:01Z","id":"moai-qde9.2hx.mqf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T12:44:05Z","id":"moai-qde9.2hx.yt6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-06T13:09:16Z","id":"moai-bth3.o7a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Carried on by moa-issue-5d (Claude, supervisor window) on the person's word after codex-01a110fd vanished mid-review (2026-10-06 13:0x). Found two uncommitted, uncompiled tests in tests/cli.rs (physical archive rows under --all with archive_days = 0; opaque duplicate active rows) — fixed them to compile; both fail, kept as leads for the review."}
+{"ts":"2026-10-06T14:50:03Z","id":"moai-tzzt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"아카이브된 에픽을 가리키는 -e·--parent·link 가 not found 로 읽는다"}
+{"ts":"2026-10-06T14:50:03Z","id":"moai-b6w3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"미룬 에픽의 아카이브된 멤버를 되살리면 계획에서 빠진다"}
+{"ts":"2026-10-06T14:50:04Z","id":"moai-nkwg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tui 프로젝트 층과 배너가 산 줄만 센다"}
+{"ts":"2026-10-06T14:50:04Z","id":"moai-kfjy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"개관 --json 이 되살린 멤버의 derived_epic 을 안 낸다"}
+{"ts":"2026-10-06T14:50:04Z","id":"moai-5y2a","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"못 읽는 아카이브 파일을 status 가 fatal 로 셀지 정한다"}
+{"ts":"2026-10-06T14:50:05Z","id":"moai-i9ji","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Stop 훅이 턴마다 아카이브 전체를 파싱한다"}
