@@ -884,7 +884,11 @@ Examples:
   exclude or gitignore is refused.
 
   --json reports gitignore=true only when .gitignore was written; exclude=true
-  means the ignore lines were written to .git/info/exclude.
+  means the ignore lines were written to .git/info/exclude. Its driver is
+  planted, current (already the same line), off (the repository declares no
+  driver, or is not a git repository), failed (driver_trouble says why),
+  skipped (--no-driver, this run only) or untracked (a tracker kept out of
+  git - git never merges it, so there is nothing to drive).
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is
@@ -899,8 +903,8 @@ Examples:
         #[arg(long, conflicts_with = "guide")]
         no_agents: bool,
         /// block, file (.moai/guide.md + link), hook or none
-        #[arg(long, value_name = "how", value_parser = ["block", "file", "hook", "none"], hide_possible_values = true)]
-        guide: Option<String>,
+        #[arg(long, value_name = "how", hide_possible_values = true)]
+        guide: Option<crate::init_choice::Guide>,
         /// Plant the merge driver in .git/config (the default)
         #[arg(long, conflicts_with = "no_driver")]
         driver: bool,
@@ -908,8 +912,8 @@ Examples:
         #[arg(long)]
         no_driver: bool,
         /// Git tracks it (commit) or not (exclude, gitignore)
-        #[arg(long, value_name = "how", value_parser = ["commit", "exclude", "gitignore"], hide_possible_values = true)]
-        tracking: Option<String>,
+        #[arg(long, value_name = "how", hide_possible_values = true)]
+        tracking: Option<crate::init_choice::Tracking>,
         /// Then run moai skill install --scope local
         #[arg(long, conflicts_with = "no_skill")]
         skill: bool,

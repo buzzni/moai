@@ -12,8 +12,41 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **`moai init --json` says `"driver": "untracked"` for a tracker kept out of
+  git.** With `--tracking exclude` or `gitignore` it said `skipped`, the word
+  `--no-driver` uses for a driver left out this run only — but git never
+  merges an untracked tracker, so there is nothing for a driver to do.
+  `skipped` now stands only for `--no-driver` on a committed tracker.
+  (moai-8gwh.86j)
+
 ### Fixed
 
+- **`moai init` no longer erases the rules it just wrote through an
+  `AGENTS.md` link.** With a committed `AGENTS.md -> .gitattributes` the block
+  was planted last, over the text read before the rules were appended, so the
+  `merge=moai` lines vanished and AGENTS markdown stood as attribute patterns;
+  `-> .gitignore` lost `.moai/lock` the same way — and the output said both
+  were written. When `AGENTS.md` leads to a file `init` appends to, the block
+  is no longer planted: `AGENTS.md` is named as left alone (`untouched`, kind
+  `shared` under `--json`), and `moai init --check` names it too
+  (`agents_shared`). (moai-8gwh.esm)
+- **Switching `--guide file` to `--guide block` no longer leaves
+  `.moai/guide.md` behind.** Once `AGENTS.md` holds the whole block and no
+  longer links to it, `moai init` removes the guide file it wrote, says so in
+  one line, and `--json` carries `guide_file_removed`. With `--guide none` or
+  `hook` — `AGENTS.md` untouched, its link still standing — or when `AGENTS.md`
+  could not be written, the file stays. So does a `.moai/guide.md` that is not
+  a moai guide — one that does not open with the guide's heading and first
+  sentence: `init` names it as left in one line, and `--json` carries
+  `guide_file_kept`. (moai-8gwh.ftm)
+- **A tracker kept out of git that cannot be created no longer leaves its
+  ignore lines behind.** `moai init --tracking exclude|gitignore` writes those
+  lines before `.moai` on purpose; when creating `.moai` or its files then
+  failed, the lines stayed with no tracker. `init` now takes back exactly what
+  it appended (or removes the file it created) and any `.moai` it made, and
+  still stops with the error. (moai-8gwh.67q)
 - **A committed link from a file outside `.moai` into the tracker is no longer
   followed.** `AGENTS.md -> .moai/issues.jsonl` made `moai init` read the
   snapshot as AGENTS.md and replace it without the repository lock — racing a

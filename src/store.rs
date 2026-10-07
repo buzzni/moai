@@ -2079,9 +2079,9 @@ pub type Stamp = Option<(std::time::SystemTime, u64)>;
 /// 파일 하나의 자리 — 장치와 inode(moai-itsu.aod). 이름이 둘이어도(하드 링크, 같은 파일로 가는 링크) 같은
 /// 파일이면 같은 값이다. 유닉스 밖에서는 안 선다 — 그때는 푼 자리로 접고([`Repo::journal_files`]), 락은 견줄
 /// 길이 없다고 답한다([`Lock::holds`]).
-type FileId = Option<(u64, u64)>;
+pub(crate) type FileId = Option<(u64, u64)>;
 
-fn file_id(m: &std::fs::Metadata) -> FileId {
+pub(crate) fn file_id(m: &std::fs::Metadata) -> FileId {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -2493,6 +2493,27 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
     }
 }
 
+/// 링크를 끝까지 푼 끝([`crate::path::follow_links`])이 앉은 자리 — **끝 파일은 없어도 된다**. 디렉터리는 풀고 끝
+/// 이름은 그대로 붙인다. 디렉터리를 못 풀면 있는 조상까지 푼 철자다([`crate::path::real_prefix`]).
+pub(crate) fn landed(end: &Path) -> PathBuf {
+    match (std::fs::canonicalize(crate::path::dir_of(end)), end.file_name()) {
+        (Ok(dir), Some(name)) => dir.join(name),
+        _ => crate::path::real_prefix(&crate::path::lexical(end)),
+    }
+}
+
+/// 링크를 끝까지 푼 두 끝이 한 파일인가 — **둘 다 있으면 파일의 자리(장치·inode, [`file_id`])로 견주고**, 하나라도
+/// 없으면(아직 안 지은 끝, 유닉스 밖) 앉은 자리([`landed`])의 철자로 접는다(리뷰 moai-8gwh 8번). 철자로만 견주면
+/// 대소문자를 안 가리는 파일 시스템의 `AGENTS.md -> .GITATTRIBUTES` 를 딴 파일로 읽는다. 스냅샷을 견주는
+/// [`into_tracker`] 와 `init` 의 `agents_shares` 가 이 하나로 잰다 — 둘이 따로 베껴 두던 판은 한쪽만 inode 를 봤다.
+pub(crate) fn same_file(a: &Path, b: &Path) -> bool {
+    let id = |p: &Path| std::fs::metadata(p).ok().and_then(|m| file_id(&m));
+    match (id(a), id(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => landed(a) == landed(b),
+    }
+}
+
 /// `.moai` 밖에 적힌 쓰기가 링크를 푼 뒤 **트래커 안**에 닿으면 그 자리와 까닭(moai-r0x8.a42). 트래커 안은 뿌리 안의 어느
 /// `.moai` 디렉터리든(하위 트래커도 든다)과, 스냅샷이 링크면 그 너머의 파일이다. 락은 [`on_lock`] 이 앞서 잰다.
 ///
@@ -2514,13 +2535,7 @@ fn into_tracker(path: &Path, real: &Path, root: &Path) -> Option<(PathBuf, &'sta
     if tracker(rest) {
         return None;
     }
-    let land = |p: &Path| -> PathBuf {
-        match (std::fs::canonicalize(crate::path::dir_of(p)), p.file_name()) {
-            (Ok(dir), Some(name)) => dir.join(name),
-            _ => crate::path::real_prefix(&crate::path::lexical(p)),
-        }
-    };
-    let landed = land(real);
+    let landed = landed(real);
     // **`.moai` 와 그 안의 디렉터리가 링크여도 트래커 안이다**(리뷰 moai-r0x8 1번) — 푼 자리의 철자에 `.moai` 가
     // 없으면 조각으로만 재던 판은 `.moai -> data` 인 저장소의 `AGENTS.md -> .moai/config.toml` 을 지나보내, `init` 이
     // 설정을 블록으로 갈아끼우고 0 으로 끝났다. 저널·아카이브 디렉터리가 체크아웃 안의 딴 자리로 가는 링크인 것도 같다.
@@ -2532,12 +2547,7 @@ fn into_tracker(path: &Path, real: &Path, root: &Path) -> Option<(PathBuf, &'sta
         return Some((landed, "inside the tracker (.moai)"));
     }
     let snapshot = crate::path::follow_links(&root.join(".moai").join("issues.jsonl")).ok()?;
-    let id = |p: &Path| std::fs::metadata(p).ok().and_then(|m| file_id(&m));
-    let same = match (id(real), id(&snapshot)) {
-        (Some(a), Some(b)) => a == b,
-        _ => landed == land(&snapshot),
-    };
-    same.then_some((landed, "the tracker's snapshot beyond its link, inside the tracker"))
+    same_file(real, &snapshot).then_some((landed, "the tracker's snapshot beyond its link, inside the tracker"))
 }
 
 /// 쓸 자리 — 링크를 끝까지 푼 자리([`crate::path::follow_links`])이고, **갈아끼워도 되는 자리일 때만**

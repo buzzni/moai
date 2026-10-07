@@ -1133,6 +1133,14 @@ fn init_plants_the_merge_driver_too() {
     assert!(git(&other, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(), "줄이 섰다");
     // 안 심었으니 이제 알림이 선다 — 그 갈래는 그대로다.
     assert!(ok(&other, &["status"]).contains("안 심었다"), "안 심었는데 조용하다");
+
+    // **기계에게는 `skipped` 다** — 커밋하는 트래커에서 이번만 건너뛴 것이라, git 밖의 트래커(`untracked`,
+    // moai-8gwh.86j)와 낱말이 갈린다.
+    let third = s.path().join("셋째");
+    std::fs::create_dir_all(&third).unwrap();
+    git(&third, &["init", "-q", "."]);
+    let js = ok(&third, &["init", "argos", "--no-driver", "--json"]);
+    assert_eq!(field(&js, "driver"), "skipped", "{js}");
 }
 
 /// **`moai init --check` 는 드라이버의 자리도 답하고 아무것도 안 쓴다**(moai-08bo).
@@ -1530,6 +1538,175 @@ fn init_never_writes_into_a_tracker_whose_moai_is_a_directory_link() {
     }
 }
 
+/// **AGENTS.md 가 `init` 이 줄을 덧붙이는 딸린 파일로 가는 링크면 블록을 안 심는다**(moai-8gwh.esm). 블록은 처음에
+/// 읽은 글에 붙여 맨 끝에 갈아끼우므로, 커밋된 `AGENTS.md -> .gitattributes` 에서 같은 실행이 덧붙인 `merge=moai`
+/// 줄이 통째로 지워지고 AGENTS 마크다운이 속성 패턴으로 섰다 — 출력은 둘 다 썼다고 하고 0 으로 끝났다.
+/// `-> .gitignore` 면 `.moai/lock` 줄이 같은 길로 사라졌다.
+#[cfg(unix)]
+#[test]
+fn init_never_plants_the_block_over_a_dotfile_agents_md_leads_to() {
+    for (target, rule) in
+        [(".gitattributes", ".moai/issues.jsonl   text eol=lf merge=moai"), (".gitignore", ".moai/lock")]
+    {
+        let s = Scratch::new("init-agents-dotfile");
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        std::fs::write(root.join(target), "*.png binary\n").unwrap();
+        std::os::unix::fs::symlink(target, root.join("AGENTS.md")).unwrap();
+        let out = staged(&["init", "argos", "--no-skill", "--no-register"])
+            .env("MOAI_LANG", "en")
+            .current_dir(root)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert!(out.status.success(), "{target}: 0 이 아니다\n{said}\n{}", String::from_utf8_lossy(&out.stderr));
+        let held = read(&root.join(target));
+        assert!(held.starts_with("*.png binary\n"), "{target}: 사람의 줄을 지웠다\n{held}");
+        assert!(held.lines().any(|l| l == rule), "{target}: 방금 덧붙인 규칙이 지워졌다\n{held}\n{said}");
+        assert!(!held.contains("moai:begin") && !held.contains("Issue tracker"), "{target}: 블록을 심었다\n{held}");
+        assert!(said.contains(&format!("AGENTS.md leads to {target}")), "{target}: 안 썼다고 안 댔다\n{said}");
+        assert!(!said.contains("AGENTS.md block"), "{target}: 블록을 맞췄다고 했다\n{said}");
+
+        let js = ok(root, &["init", "--json"]);
+        assert!(js.contains("\"AGENTS.md\":{\"kind\":\"shared\""), "{target}: 기계에게 안 댔다 — {js}");
+        assert_eq!(read(&root.join(target)), held, "{target}: 다시 부른 init 이 파일을 바꿨다");
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert_eq!(field(&check, "agents_shared"), target, "{target}: --check 가 안 댔다 — {check}");
+    }
+}
+
+/// **링크인 딸린 파일은 AGENTS.md 와 한 파일이어도 블록을 막지 않는다**(리뷰 moai-8gwh 7번). `init` 은 링크인
+/// `.gitattributes` 에 줄을 안 덧붙여 블록이 지울 것이 없는데, 견주던 판은 `.gitattributes -> x` 와 `AGENTS.md -> x`
+/// 에서 "init 이 함께 쓰는 파일" 이라며 블록을 안 심었다. 링크라는 것은 그 파일의 알림이 따로 댄다.
+#[cfg(unix)]
+#[test]
+fn a_linked_dotfile_does_not_keep_the_block_out_of_agents_md() {
+    let s = Scratch::new("init-agents-linked-dotfile");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    std::fs::write(root.join("x"), "*.png binary\n").unwrap();
+    std::os::unix::fs::symlink("x", root.join(".gitattributes")).unwrap();
+    std::os::unix::fs::symlink("x", root.join("AGENTS.md")).unwrap();
+    let out = staged(&["init", "argos", "--guide", "block", "--no-skill", "--no-register"])
+        .env("MOAI_LANG", "en")
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "0 이 아니다\n{said}\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!said.contains("AGENTS.md leads to"), "링크인 딸린 파일을 함께 쓴다고 댔다\n{said}");
+    assert!(read(&root.join("x")).contains("Start a session"), "블록을 안 심었다\n{said}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(!check.contains("agents_shared"), "--check 가 함께 쓴다고 댔다 — {check}");
+}
+
+/// **`--check` 는 AGENTS.md 에 심는 안내일 때만 딸린 파일과 견준다**(리뷰 moai-8gwh 6번) — `run` 이 그렇게 잰다.
+/// git 밖에 둔 트래커를 `--guide none` 으로 심은 저장소에서 늘 재던 판은 "AGENTS.md 를 안 건드린다" 뒤에 "블록을
+/// 받으려면 보통 파일로 바꾼다" 를 함께 세웠다.
+#[cfg(unix)]
+#[test]
+fn init_check_measures_the_shared_agents_md_only_where_it_would_plant() {
+    let s = Scratch::new("init-check-shared-none");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    std::os::unix::fs::symlink(".gitignore", root.join("AGENTS.md")).unwrap();
+    ok(root, &["init", "argos", "--tracking", "gitignore", "--guide", "none", "--no-skill", "--no-register"]);
+    let out = staged(&["init", "--check"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        said.contains("leaves the committed AGENTS.md alone"),
+        "시험의 전제 — 안내를 안 심는 저장소가 아니다\n{said}"
+    );
+    assert!(!said.contains("AGENTS.md leads to"), "안 심는 안내에 보통 파일로 바꾸라고 했다\n{said}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(!check.contains("agents_shared"), "{check}");
+}
+
+/// **`--guide file` 에서 `--guide block` 으로 바꾸면 `.moai/guide.md` 를 걷는다**(moai-8gwh.ftm). 링크 블록이 전문으로
+/// 갈린 뒤에도 그 파일이 아무도 안 가리킨 채 남았다. AGENTS.md 를 안 건드리는 안내(`none`)로 부르면 링크가 아직
+/// 사니 그대로 둔다.
+#[test]
+fn switching_the_guide_to_a_block_removes_the_guide_file() {
+    let s = Scratch::new("init-guide-switch");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--guide", "file", "--no-skill", "--no-register"]);
+    let guide = root.join(".moai/guide.md");
+    assert!(guide.is_file(), "시험의 전제 — 링크 모드가 전문 파일을 안 썼다");
+
+    let kept = ok(root, &["init", "--guide", "none", "--json"]);
+    assert!(guide.is_file(), "AGENTS.md 의 링크가 아직 가리키는 파일을 걷었다 — {kept}");
+    assert!(!kept.contains("guide_file_removed"), "{kept}");
+
+    let js = ok(root, &["init", "--guide", "block", "--json"]);
+    assert!(!guide.exists(), "블록으로 바꿨는데 전문 파일이 남았다 — {js}");
+    assert_eq!(field(&js, "guide_file_removed"), ".moai/guide.md", "{js}");
+    assert!(read(&root.join("AGENTS.md")).contains("Start a session"), "AGENTS.md 에 전문이 안 섰다");
+    assert_eq!(field(&ok(root, &["init", "--check", "--json"]), "agents"), "current");
+
+    // 이미 블록인 저장소에 남은 옛 판의 전문도 걷는다 — 첫머리로 알아본다. 사람에게는 한 줄로 댄다.
+    let old =
+        "## Issue tracker — moai\r\n\r\nThis repository's work lives in `.moai/issues.jsonl`.\r\nan older guide\r\n";
+    std::fs::write(&guide, old).unwrap();
+    let said = staged(&["init"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&said.stdout);
+    assert!(!guide.exists(), "{said}");
+    assert!(said.contains("removed .moai/guide.md"), "걷은 것을 안 댔다\n{said}");
+    let again = ok(root, &["init", "--json"]);
+    assert!(!again.contains("guide_file_removed"), "없는 파일을 걷었다고 했다 — {again}");
+
+    // **moai 의 안내가 아닌 파일은 남긴다**(리뷰 moai-8gwh 5번) — 늘 블록 모드였던 저장소에서 사람이 그 이름으로 둔
+    // 메모를 `init` 이 묻지 않고 지웠다. 남긴 것은 한 줄로, 기계에게는 키로 댄다.
+    std::fs::write(&guide, "my notes\n").unwrap();
+    let said = staged(&["init"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&said.stdout);
+    assert_eq!(read(&guide), "my notes\n", "사람의 파일을 지웠다\n{said}");
+    assert!(said.contains("left .moai/guide.md — it is not a moai guide"), "남긴 것을 안 댔다\n{said}");
+    let js = ok(root, &["init", "--json"]);
+    assert_eq!(field(&js, "guide_file_kept"), ".moai/guide.md", "{js}");
+    assert!(!js.contains("guide_file_removed"), "{js}");
+}
+
+/// **트래커를 못 세우면 먼저 덧붙인 무시 줄을 걷는다**(moai-8gwh.67q). git 밖에 둔 트래커는 무시 줄을 `.moai`
+/// 보다 먼저 쓰는데, `.moai` 를 못 지어 멈춘 판이 그 줄을 남겼다. 뿌리를 읽기 전용으로 두면 덧붙이기(쓸 수 있는
+/// 파일, 또는 `.git/info/` 안)는 되고 `.moai` 짓기만 진다. 권한을 안 따지는 사용자(root)면 그 자리를 못 지어 건너뛴다.
+#[cfg(unix)]
+#[test]
+fn a_tracker_that_cannot_be_created_takes_its_ignore_lines_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+    for tracking in ["gitignore", "exclude"] {
+        let s = Scratch::new("init-local-rollback");
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        let (file, before) = match tracking {
+            "gitignore" => (root.join(".gitignore"), Some("target/\n")),
+            _ => (root.join(".git/info/exclude"), None),
+        };
+        match before {
+            Some(text) => std::fs::write(&file, text).unwrap(),
+            None => {
+                let _ = std::fs::remove_file(&file);
+            }
+        }
+        mode(root, 0o555);
+        if std::fs::write(root.join("probe"), "").is_ok() {
+            mode(root, 0o755);
+            return;
+        }
+        let out =
+            moai(root, &["init", "argos", "--tracking", tracking, "--guide", "none", "--no-skill", "--no-register"]);
+        mode(root, 0o755);
+        assert!(!out.status.success(), "{tracking}: 트래커를 못 세웠는데 0 으로 끝났다");
+        assert!(!root.join(".moai").exists(), "{tracking}: 반쯤 지은 .moai 를 남겼다");
+        match before {
+            Some(text) => assert_eq!(read(&file), text, "{tracking}: 덧붙인 무시 줄을 안 걷었다"),
+            None => assert!(!file.exists(), "{tracking}: 이 실행이 지은 무시 파일을 남겼다 — {}", read(&file)),
+        }
+    }
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
@@ -1623,6 +1800,21 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     assert!(!err.contains("argos-wt/.moai"), "아무도 안 읽는 트래커를 고치라고 했다 — {err}");
     assert!(err.contains("MOAI_HERE=1 moai init argos"), "친 접두어를 빠뜨린 줄을 댔다 — {err}");
     assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
+
+    // **깃발도 친 대로 도로 낸다** — 값을 받는 깃발은 정한 낱말로, 짝 깃발은 준 쪽으로. `--register` 는 고른 값의
+    // `project` 칸에서 되살아난다(moai-8gwh.86j) — 칸 이름이 깃발과 달라 빠뜨리기 쉬운 자리다.
+    let out = moai(
+        &deep,
+        &["init", "argos", "--tracking", "commit", "--no-agents", "--no-driver", "--no-skill", "--register", "--yes"],
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(
+        err.contains(
+            "MOAI_HERE=1 moai init argos --tracking commit --guide none --yes --no-driver --no-skill --register\n"
+        ),
+        "친 깃발을 그대로 안 되살렸다 — {err}"
+    );
 
     // **`-C` 로 왔으면 그것도 도로 낸다** — `-C` 는 `set_current_dir` 로 따르므로 "여기" 는 `-C` 가
     // 가리킨 자리고 사람의 셸은 딴 데 있다. 빠뜨린 줄을 그대로 베끼면 그 셸 자리에 트래커가 하나
@@ -24088,7 +24280,8 @@ fn init_tracking_exclude_leaves_every_committed_file_as_it_was() {
     git(root, &["init", "-q", "."]);
     let js = ok(root, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
     assert_eq!(field(&js, "tracking"), "exclude", "{js}");
-    assert_eq!(field(&js, "driver"), "skipped", "{js}");
+    // **`skipped` 가 아니라 `untracked` 다**(moai-8gwh.86j) — `skipped` 는 `--no-driver` 로 이번만 건너뛴 것이다.
+    assert_eq!(field(&js, "driver"), "untracked", "{js}");
     assert!(js.contains("\"gitattributes\":false"), "{js}");
     assert_eq!(git(root, &["status", "--porcelain", "--untracked-files=all"]), "", "커밋될 파일이 생겼다");
     let exclude = read(&root.join(".git/info/exclude"));

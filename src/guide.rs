@@ -1061,6 +1061,12 @@ pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
 /// 추적 여부를 `.moai` 와 함께 따른다.
 pub const GUIDE_FILE: &str = ".moai/guide.md";
 
+/// 안내 전문의 첫머리 — 제목과 첫 문장이다. **`.moai/guide.md` 가 moai 의 안내인지 이 글로 알아본다**(리뷰 moai-8gwh
+/// 5번): `--guide block` 이 그 파일을 걷을 때 사람이 같은 이름으로 둔 메모까지 지우지 않으려는 것이다. 그 파일이
+/// 생긴 판(moai-cbfz)부터 [`agents`] 가 이 두 줄로 열었으니(제목과 첫 문장은 moai-54k2 의 영어 통일부터 그대로다)
+/// 어느 판이 쓴 전문이든 이것으로 연다. 바꾸면 옛 판이 쓴 파일을 못 알아봐 남긴다 — 시험이 [`agents`] 의 첫머리와 맨다.
+pub const GUIDE_OPENING: &str = "## Issue tracker — moai\n\nThis repository's work lives in `.moai/issues.jsonl`.\n";
+
 /// 링크 블록의 끝줄 머리 — **링크 모드는 이 줄로 알아본다**(리뷰 moai-zynt.63u). 블록이 `.moai/guide.md` 라는
 /// 글을 품는지로 가르던 판은 그 경로를 적은 손질 한 줄에 블록 모드 저장소를 링크 모드로 갈아 끼웠다.
 pub const GUIDE_MARK: &str = "<!-- moai:guide";
