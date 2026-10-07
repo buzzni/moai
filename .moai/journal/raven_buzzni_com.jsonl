@@ -5206,3 +5206,11 @@
 {"ts":"2026-10-07T07:40:57Z","id":"moai-5uwh.kjw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T07:40:57Z","id":"moai-5uwh.rts","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T07:40:57Z","id":"moai-5uwh.zl9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T07:41:09Z","id":"moai-obxm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Person decided (2026-10-07, asked in the worker window): drop the 5-1 tmux clear script whole. Clearing a window is the person's; the worker says when it can be cleared at the end of its report, and the supervisor sends the next work by SendMessage."}
+{"ts":"2026-10-07T07:41:25Z","id":"moai-obxm.fl0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T07:41:25Z","id":"moai-obxm.h9p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T07:41:25Z","id":"moai-obxm.ikh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T07:41:26Z","id":"moai-obxm.z9u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T07:41:26Z","id":"moai-obxm.1h1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T07:41:26Z","id":"moai-obxm.m84","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T07:41:26Z","id":"moai-obxm.paf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
