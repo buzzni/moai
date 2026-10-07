@@ -30,6 +30,16 @@ does not tag — see `CONTRIBUTING.md`.
   `moai init` there refused and pointed at the main checkout. Both now ask the
   same question — does the main checkout hold `.moai/config.toml` — so `init`
   in that worktree plants its own tracker. (moai-r0x8.apz)
+- **A linked worktree with no `.moai` of its own reads the main checkout's
+  tracker wherever it stands.** A worktree split off before moai came in and
+  placed outside the main checkout (`git worktree add ../side <old commit>`)
+  found nothing above it: `moai prime` said `no_tracker` and to run
+  `moai init`, `status` and `ready` refused with the same advice, and `init`
+  there refused because the tracker lives in the main checkout. Every command
+  there now opens the main checkout's tracker, as `project add` already did, and
+  a write says in one line where it went. One inside the main checkout no longer
+  reports that it "climbed up" to that tracker. `MOAI_HERE=1` still keeps the
+  worktree on its own. (moai-r0x8.3fi)
 
 ## [0.9.0] - 2026-10-07
 

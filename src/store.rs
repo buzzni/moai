@@ -328,17 +328,23 @@ pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
 /// 잡았는지를 [`CLIMBED`] 가 한 줄로 비춘다.
 fn look(from: &Path) -> Option<PathBuf> {
     let (root, climbed) = climb(from)?;
-    // **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
-    // 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
-    // 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.
+    told_climb(from, &root, climbed);
+    Some(root)
+}
+
+/// 체크아웃 밖으로 올라가 잡았으면 [`CLIMBED`] 에 적는다 — [`look`] 과 [`reach`] 가 함께 쓴다.
+///
+/// **적는 것은 이 명령이 선 자리에서 올라간 때뿐이다.** 훅은 셸 명령에서 읽어 낸 남의
+/// 디렉터리로도 트래커를 찾아 보므로(`cmd::hook::route_one`), 그것까지 적으면 손도 안 댄
+/// 프로젝트를 잡았다고 말한다 — 아직 만들지도 않은 디렉터리를 대기도 한다.
+fn told_climb(from: &Path, root: &Path, climbed: bool) {
     if climbed && std::env::current_dir().is_ok_and(|cwd| cwd == from) {
         let mut told = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
-        let pair = (from.to_path_buf(), root.clone());
+        let pair = (from.to_path_buf(), root.to_path_buf());
         if !told.contains(&pair) {
             told.push(pair);
         }
     }
-    Some(root)
 }
 
 /// 찾은 뿌리와 **체크아웃을 두고 올라왔는가**. 뒤의 값이 알림을 가른다.
@@ -370,6 +376,57 @@ fn climb(from: &Path) -> Option<(PathBuf, bool)> {
             return None;
         }
     }
+}
+
+/// [`reach`] 가 낸 자리 — 위로 찾은 `.moai` 인가, 딸린 워크트리라 주 체크아웃의 것으로 옮겨 간 것인가.
+enum Reached {
+    /// 위로 찾은 `.moai` 의 자리. 거기서 한 번 더 옮길지는 [`Repo::redirect`] 가 가른다.
+    Found(PathBuf),
+    /// 주 체크아웃의 트래커(`root`)와, 이 워크트리에서 그에 맞서는 자리(`here`) — [`Repo::here`] 가 낼 값이다.
+    Mirrored { root: PathBuf, here: PathBuf },
+}
+
+/// **명령이 선 자리에서 가는 트래커** — [`look`] 에 하나를 더한다(moai-r0x8.3fi).
+///
+/// **제 체크아웃 안에 `.moai` 가 없는 딸린 워크트리는 주 체크아웃의 트래커로 간다.** moai 를 들이기 전 커밋에서
+/// 갈라진 워크트리가 그 자리다. 주 체크아웃 **밖**에 선 것(`git worktree add ../side <옛 커밋>`)은 위로 찾아도
+/// 아무것도 없어, `prime` 이 "`moai init` 이 심는다" 를 대고 그 `init` 은 "트래커는 주 체크아웃에 있다" 로
+/// 거절했다 — `init --check` 와 `project add|ls`(옆으로 옮기는 [`Repo::open`])는 이미 주 체크아웃을 댔는데
+/// 위로만 찾던 이 길 하나가 안 옮겼다. 안에 선 것은 올라가다 주 체크아웃의 `.moai` 를 잡아 "체크아웃 밖으로
+/// 올라갔다" 를 댔는데, 실은 옮겨 간 것이라 이제 쓸 때 [`MOVED`] 의 한 줄로 댄다.
+///
+/// **주 체크아웃의 트래커는 [`governing`] 이 고른다** — `init` 의 거절([`elsewhere`])이 대는 그 자리다. 둘이
+/// 갈리면 한쪽이 "여기 없다" 를, 다른 쪽이 "저기 있다" 를 댄다.
+///
+/// **제 체크아웃의 `.moai` 가 이긴다** — 워크트리가 들고 온 트래커는 [`Repo::redirect`] 가 옮긴다. 제 체크아웃
+/// 밖으로 올라가 잡은 것보다는 주 체크아웃의 것이 먼저다: 그 워크트리를 다스리는 것이 그쪽이다. `MOAI_HERE` 는
+/// 이것도 끈다 — [`Repo::redirect`] 와 같은 손잡이다.
+fn reach(from: &Path) -> Option<Reached> {
+    let climbed = climb(from);
+    let own = matches!(climbed, Some((_, false)));
+    if !own && !here_wanted() {
+        let mirror = crate::worktree::main_root(from);
+        if let Some((mirror, root)) = mirror.and_then(|m| governing(&m).map(|root| (m, root))) {
+            // 주 체크아웃에서 트래커 밑으로 내려온 만큼 이 워크트리에서 올라간 자리가 `here` 다.
+            let below = mirror.strip_prefix(&root).map_or(0, |p| p.components().count());
+            let mut here = crate::path::real(from);
+            for _ in 0..below {
+                here.pop();
+            }
+            return Some(Reached::Mirrored { root, here });
+        }
+    }
+    let (root, out) = climbed?;
+    told_climb(from, &root, out);
+    Some(Reached::Found(root))
+}
+
+/// 딸린 워크트리의 비친 자리(`mirror`, [`crate::worktree::main_root`])를 **다스리는 주 체크아웃의 트래커** —
+/// 비친 자리에서 위로 찾되 주 체크아웃을 안 떠나고, 찾은 것이 [`holds_tracker`] 여야 한다.
+///
+/// [`reach`] 와 [`elsewhere`] 가 이 하나로 고른다 — 찾기가 옮겨 가는 자리와 `init` 이 대는 자리가 같다.
+fn governing(mirror: &Path) -> Option<PathBuf> {
+    climb(mirror).filter(|(at, left_a_checkout)| !*left_a_checkout && holds_tracker(at)).map(|(at, _)| at)
 }
 
 /// 디렉터리 하나를 [`Repo::open`] 으로 연 결과.
@@ -426,7 +483,7 @@ impl Repo {
     /// **막지 않는다** — 옮겨 갈 뿐이라 게이트가 아니다. 읽기도 함께 옮겨 간다: 쓰기만 옮기면
     /// 명령이 **갈라질 때의 낡은 줄**로 id 를 풀고 지금 줄에 쓴다.
     ///
-    /// 옮겨 가지 않는 자리 둘 — 루트에 `.moai` 가 없거나([`Repo::find_from`] 이 위로 찾다 만난
+    /// 옮겨 가지 않는 자리 둘 — 루트에 트래커가 없거나([`holds_tracker`] — [`Repo::find_from`] 이 위로 찾다 만난
     /// 워크트리가 그 저장소의 것이 아니다) 주 체크아웃을 못 찾는 것(서브모듈·맨 저장소)이다.
     /// 그때는 찾은 그대로다.
     ///
@@ -434,8 +491,17 @@ impl Repo {
     /// 쓰던 판은 루트의 `config.toml` 에 충돌 표시 하나가 박히는 순간 저장소의 모든 워크트리가
     /// 말없이 제 스냅샷에 쓰기 시작해, 이 기능이 막으려던 갈라짐을 아무 말 없이 지었다. 쓸 트래커를
     /// 못 여는 것은 고칠 것이지 갈래가 아니다 — 루트에서 치면 나는 그 오류를 여기서도 그대로 낸다.
+    ///
+    /// **`.moai` 없는 딸린 워크트리도 옮겨 간다**(moai-r0x8.3fi) — 위로 찾아 닿지 않는 주 체크아웃의 트래커다.
+    /// 고르는 자는 [`reach`] 에 있다.
     pub fn find_from(dir: &Path, lang: impl FnOnce() -> Lang) -> R<Option<Repo>> {
-        Repo::found_root(dir).map(|found| Repo::from_found(found, lang)).transpose()
+        match reach(dir) {
+            None => Ok(None),
+            Some(Reached::Found(found)) => Repo::from_found(found, lang).map(Some),
+            Some(Reached::Mirrored { root, here }) => {
+                Ok(Some(Repo { moved_from: Some(here), ..Repo::rooted(root, lang)? }))
+            }
+        }
     }
 
     /// 찾은 자리로 [`Repo`] 를 짓는다 — **옮겨 가는 길은 여기 하나다**([`Repo::find_from`] 이 쓴다).
@@ -481,8 +547,8 @@ impl Repo {
         Repo::redirect(dir).unwrap_or_else(|| dir.to_path_buf())
     }
 
-    /// [`Repo::find_from`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다:
-    /// 읽을 자리를 [`crate::worktree::tracker_root`] 가 아직 옮길 수 있다.
+    /// [`Repo::find_here`] 의 **찾기만** — `.moai` 를 가진 조상의 자리다. 설정은 안 읽는다. 옮겨 가는
+    /// [`Repo::find_from`] 은 [`reach`] 로 찾는다.
     fn found_root(dir: &Path) -> Option<PathBuf> {
         look(dir)
     }
@@ -2757,11 +2823,8 @@ fn elsewhere(root: &Path) -> Option<Elsewhere> {
     // 딸린 워크트리가 아니면 위에서 찾은 것이 답이다 — 조상 훑기는 여기서 처음 돈다.
     let Some(mirror) = crate::worktree::main_root(root) else { return above() };
     // **주 체크아웃에 트래커가 있는가는 [`holds_tracker`] 로 묻는다**(moai-r0x8.apz) — 찾기가 옮겨 갈지를
-    // 가르는 [`crate::worktree::tracker_root`] 와 같은 자다.
-    climb(&mirror)
-        .filter(|(at, left_a_checkout)| !*left_a_checkout && holds_tracker(at))
-        .map(|(at, _)| Elsewhere::Worktree(at))
-        .or_else(above)
+    // 가르는 [`crate::worktree::tracker_root`] 와 같은 자다. 고르는 걸음은 찾기([`reach`])와 한 벌이다.
+    governing(&mirror).map(Elsewhere::Worktree).or_else(above)
 }
 
 /// **이 디렉터리의 `.moai` 가 딸린 워크트리가 옮겨 갈 트래커인가** — `.moai/config.toml` 이 파일로 서 있다.
@@ -2817,7 +2880,7 @@ pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
 ///
 /// [`init_belongs_at`] 과 **묻는 것이 다르다.** 그쪽은 "나중의 다른 부름이 어디서 `init` 을 쳐야
 /// 하나" 라 손잡이를 안 보고(moai-ko4y), 이쪽은 "지금 이 셸이 무엇을 읽고 있나" 라 손잡이를 본다.
-/// 가르는 자는 [`Repo::redirect`] 하나고, 찾는 걸음은 [`Repo::find_from`] 과 같은 자([`look`])다 —
+/// 가르는 자는 [`Repo::redirect`] 하나고, 찾는 걸음은 [`Repo::find_from`] 과 같은 자([`reach`])다 —
 /// 갈라 적으면 한쪽만 옮겨 가는 날 이 답이 읽는 파일과 갈린다.
 ///
 /// 쓰는 자리는 `moai init --check` 의 끝줄이다(moai-ha0f, 리뷰 moai-uocc.45o 의 2번) — 손잡이를 켠
@@ -2826,7 +2889,10 @@ pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
 /// 읽는데, 그 줄을 따라 치면 `src/deep` 에 아무도 안 읽는 `.moai` 가 서고 원래 줄들은 사라진 것처럼
 /// 보인다.
 pub(crate) fn tracker_in_use(dir: &Path) -> Option<PathBuf> {
-    look(dir).map(|found| Repo::opened_root(&found))
+    reach(dir).map(|r| match r {
+        Reached::Found(found) => Repo::opened_root(&found),
+        Reached::Mirrored { root, .. } => root,
+    })
 }
 
 /// [`planted_elsewhere`] 가 찾은 자리 — **자리마다 값이 다르다.**

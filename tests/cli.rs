@@ -1680,6 +1680,48 @@ fn a_main_checkout_holding_only_a_lock_is_no_tracker_to_either_judge() {
     assert!(!main.join(".moai/issues.jsonl").exists(), "락만 남은 주 체크아웃에 썼다");
 }
 
+/// **주 체크아웃 밖에 선, `.moai` 없는 딸린 워크트리도 주 체크아웃의 트래커를 읽는다**(moai-r0x8.3fi).
+/// `git worktree add ../side <moai 전 커밋>` 에서 `prime` 은 `no_tracker:true` 와 "`moai init` 이 심는다" 를
+/// 냈는데, 그 `init` 은 "트래커는 주 체크아웃에 있다" 로 거절했다. `init --check` 와 `project add|ls` 는 이미
+/// 주 체크아웃을 댔다 — 위로만 찾던 `Repo::find` 하나가 옮겨 가지 않았다. 밑자리도 같다.
+#[test]
+fn a_worktree_outside_the_main_checkout_without_moai_reads_the_main_tracker() {
+    let s = Scratch::new("wt-outside-pre");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "before"]);
+    git(&main, &["branch", "pre"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "주 체크아웃의 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "--detach", "../side", "pre"]);
+    let side = s.path().join("side");
+    assert!(!side.join(".moai").exists(), "시험의 전제 — 워크트리가 트래커를 들고 왔다");
+    let deep = side.join("src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    for at in [&side, &deep] {
+        let json = ok(at, &["prime", "--json"]);
+        assert!(!json.contains("no_tracker"), "주 체크아웃의 트래커를 두고 없다 했다 — {}\n{json}", at.display());
+        assert!(json.contains(&id), "주 체크아웃의 일을 안 냈다 — {}\n{json}", at.display());
+        let said = ok(at, &["prime"]);
+        assert!(!said.contains("moai init"), "안 서는 init 을 댔다 — {}\n{said}", at.display());
+        // status·ready 도 `.moai` 를 못 찾았다는 거절(`refuse.not_a_repo`) 없이 그 트래커를 연다.
+        assert!(ok(at, &["status"]).contains(&id), "status 가 주 체크아웃의 트래커를 안 열었다");
+        assert!(ok(at, &["ready"]).contains(&id), "ready 가 주 체크아웃의 트래커를 안 열었다");
+    }
+
+    // 쓰기도 주 체크아웃에 들고, 어디에 썼는지 한 줄로 댄다.
+    let out = moai(&side, &["add", "워크트리에서 친 일", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let later = field(&String::from_utf8_lossy(&out.stdout), "id");
+    assert!(issues(&main).contains(&format!("\"id\":\"{later}\"")), "주 체크아웃에 안 썼다");
+    assert!(!side.join(".moai").exists(), "워크트리에 트래커를 세웠다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("루트의 트래커에 썼다"), "{}", text(&out));
+}
+
 /// **알리는 표면은 `MOAI_HERE` 를 안 물려받는다**(moai-ko4y, 2026-09-21 사용자 결정). `--check` 의
 /// `tracker_at` 은 **나중의 다른 부름**이 어디서 서느냐에 답하는 자라, 지금 셸이 손잡이를 켰는지와
 /// 무관하다. 물려받던 판은 `MOAI_HERE=1` 인 셸에서 그 키가 통째로 빠져, 사람 없이 도는 고리가
