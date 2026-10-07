@@ -1380,16 +1380,9 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
-                    // 감독과 일꾼이 편지를 주고받는 자리(moai-snyk). 편지 id 는 `mail::is_id` 의 꼴이다 —
-                    // 꼴이 아니면 `send --reply-to` 가 거절해 가르친 줄이 아니라 그 거절을 잰다.
+                    // 감독과 일꾼이 서로를 부르는 이름(moai-obxm) — `SendMessage` 의 `to` 다.
                     .replace("<worker>", "w1")
                     .replace("<supervisor>", "boss")
-                    .replace("<from>", "boss")
-                    .replace("<letter id>", "20261004-120000-abcd1234")
-                    .replace("<letter file>", "/tmp/letter.txt")
-                    .replace("<report file>", "/tmp/report.txt")
-                    // Codex 창이 훅이 지어 준 장을 잇는 자리(moai-u5wr.7xr).
-                    .replace("<that name>", "w1")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로

@@ -231,7 +231,7 @@ fn epic_review_rule() -> String {
     )
 }
 
-/// 편지의 `Model:` 줄 — 감독이 2-1 에서 골라 채운다. 새 일과 거둔 일(감독 0)이 **같은 줄**을 싣는다 — 손으로 두
+/// 메시지 머리의 `Model:` 줄 — 감독이 2-1 에서 골라 채운다. 새 일과 거둔 일(감독 0)이 **같은 줄**을 싣는다 — 손으로 두
 /// 벌 적던 판은 거둔 쪽이 일꾼에게 없는 감독의 절(2-1)을 가리켰다.
 ///
 /// 자리 이름은 `<difficulty>` 다. `<grade>` 는 7 에서 개발해 본 일꾼이 고르는 리뷰 등급의 자리라, 감독이 채우는
@@ -263,11 +263,11 @@ The grade of the epic-end review (7) is measured on this same rubric, member by 
     )
 }
 
-/// 편지의 옆 일 줄(moai-alsi). 새 일과 거둔 일(감독 0)이 **같은 줄**을 싣는다 — 4-3 이 "편지의
-/// `Work running alongside`" 를 가리키니, 거둔 일의 편지에 없으면 이어받은 일꾼은 가리키는 줄이 없는 규칙을 받는다.
+/// 메시지 머리의 옆 일 줄(moai-alsi). 새 일과 거둔 일(감독 0)이 **같은 줄**을 싣는다 — 4-3 이 "메시지의
+/// `Work running alongside`" 를 가리키니, 거둔 일의 메시지에 없으면 이어받은 일꾼은 가리키는 줄이 없는 규칙을 받는다.
 const BESIDE: &str = "Work running alongside: <other work> — do not touch those files (4-3)";
 
-/// 루트 HEAD 를 대조하는 글(moai-gokz, 2026-09-18 사용자 결정). 일꾼 스킬의 걸음 앞에 한 번 선다 — 새 일과
+/// 루트 HEAD 를 대조하는 글(moai-gokz, 2026-09-18 사용자 결정). 일꾼 글([`worker`])의 걸음 앞에 한 번 선다 — 새 일과
 /// 거둔 일이 같은 스킬을 읽으니 두 벌이 없다(moai-snyk). 그 전에는 감독 글이 새 일과 거둔 일의 머리에 따로 실어,
 /// 한쪽에 없으면 그 일꾼의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 섰다.
 const BRANCH_CHECK: &str = r#"Before you commit or merge in the root, **only check** that the root still stands on that
@@ -290,7 +290,7 @@ worktree go back in with `EnterWorktree(path)`"#;
 /// 가 있었다 — 심은 글이 거절되는 명령을 시키고 있었다.
 ///
 /// **Claude Code 의 것이다**(moai-snyk) — 그 하네스의 격리 가드가 거절한 꼴을 센 글이라, Codex·Antigravity 창은
-/// 이 걸음 없이 `cd` 로 든다. 일꾼 스킬에 한 번 서서 새 일과 거둔 일이 같은 글을 읽는다.
+/// 이 걸음 없이 `cd` 로 든다. 일꾼 글에 한 번 서서 새 일과 거둔 일이 같은 글을 읽는다.
 const GIT_SHAPES: &str = r#"**Git in a Claude Code worktree session: one plain command per call.** The harness reads each Bash call
 and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
 intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
@@ -1875,8 +1875,8 @@ raises its worktree). **A worktree that is still there while the session working
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
 worker — the session you sent that work to — no longer stands in `ListAgents`. A session
 that still stands there, idle, has not ended: its person may be answering it, or it may
-be holding your message for approval. Hand its work on only once the person says that
-window has ended; until then it is that worker's.
+be holding your message for approval. Hand its work on
+only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
@@ -2383,9 +2383,9 @@ it. When the person is back in the window, what they say overrides what you deci
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
    When the worktree's hook cannot see a review issue created or picked up in the root and
-   blocks you — a binary from before the hook moved the tracker to the root reads that
-   worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
-   scope. A subagent inherits the window's model, so pass the model for the grade above in
+   blocks you — a binary from before the hook moved the tracker to the root
+   reads that worktree's snapshot only — run a review subagent with the same angle, grade and
+   `--fix` scope. A subagent inherits the window's model, so pass the model for the grade above in
    `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
    `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
    the way the refusal's own command says
@@ -2584,6 +2584,15 @@ mod tests {
 
     /// 일꾼 걸음의 `n` 번째가 여는 자리 — 줄 머리의 `<n>. `. 첫 걸음은 글의 맨 앞이라 앞에 줄바꿈이 없다.
     /// 들여쓴 `1. `(다섯 자리의 번호)는 걸음이 아니다.
+    /// 일꾼 글의 번호 걸음 — "The steps" 절 하나. 그 앞(맡은 일·사람이 비울 때·걸음 앞)과 뒤(이어받기)는 번호가
+    /// 없는 절이라, 번호 목록의 규칙을 잴 때는 이 토막만 본다.
+    fn numbered_steps(worker: &str) -> &str {
+        let head = "## The steps\n\n";
+        let from = worker.find(head).expect("일꾼 글에 걸음 절이 없다") + head.len();
+        let to = worker[from..].find("\n## ").map_or(worker.len(), |at| from + at);
+        &worker[from..to]
+    }
+
     fn step_at(brief: &str, n: &str) -> usize {
         let open = format!("{n}. ");
         if brief.starts_with(&open) {
@@ -2595,7 +2604,7 @@ mod tests {
     /// 감독이 채우는 자리 목록 한 줄 — 셋이 이 줄에서 자리 이름을 센다. 손으로 세 벌 찾던 판은
     /// 줄의 모양이 바뀔 때 한 곳만 고쳐졌다.
     fn slot_list(supervise: &str) -> &str {
-        supervise.lines().find(|l| l.starts_with("Fill in `<my name>`")).expect("감독이 채울 자리 목록이 없다")
+        supervise.lines().find(|l| l.starts_with("Fill in `<id>`")).expect("감독이 채울 자리 목록이 없다")
     }
 
     /// **공통 조각은 두 표면에 똑같이 든다.** 한쪽만 고치면 여기서 붉어진다 —
@@ -2630,7 +2639,7 @@ mod tests {
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
             ("위키 스킬", wiki()),
-            ("일꾼 스킬", work()),
+            ("일꾼 글", worker()),
         ] {
             for gone in ["Korean text", "korean-skills", "humanize-korean", "_workspace", "korean-terms"] {
                 assert!(!text.contains(gone), "{surface} 에 걷은 한국어 글 절이 남았다 — {gone}");
@@ -2697,7 +2706,7 @@ mod tests {
             ("스킬", skill()),
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
-            ("일꾼 스킬", work()),
+            ("일꾼 글", worker()),
         ] {
             let found: String = text.chars().filter(|c| emoji(*c)).collect();
             assert!(found.is_empty(), "{surface} 이 이모지를 쓴다 — {found}");
@@ -2718,7 +2727,7 @@ mod tests {
             ("스킬", skill()),
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
-            ("일꾼 스킬", work()),
+            ("일꾼 글", worker()),
         ] {
             for gone in ["examples/bash-agent", "examples/python-agents", "runs without a person"] {
                 assert!(!text.contains(gone), "{surface} 이 걷은 헤드리스 예제를 아직 가리킨다 — {gone}");
@@ -2731,26 +2740,22 @@ mod tests {
             );
         }
         // **리뷰는 일꾼의 세션 안에서 돈다**(moai-5kk1) — 새 에이전트를 띄우는 명령이 리뷰의 낱말로 서면 감독도
-        // 일꾼도 에이전트를 안 띄운다는 결정이 깨진다. 일꾼 스킬은 그 명령을 **하지 말라고** 이름으로만 댄다.
+        // 일꾼도 에이전트를 안 띄운다는 결정이 깨진다. 일꾼 글은 Claude Code 만 받으니(moai-obxm) 다른 벤더의 그
+        // 명령을 이름으로 댈 까닭도 없다.
         let spawns = ["codex review", "codex exec", "agy -p"];
         for (surface, text) in [
             ("낱말표", verbs_section()),
             ("규칙 셋", rules()),
             ("감독 스킬", supervise()),
-            ("일꾼 걸음 앞", work().replace(&brief(), "")),
+            ("일꾼 글", worker()),
         ] {
             for spawn in spawns {
                 assert!(!text.contains(spawn), "{surface} 이 새 에이전트를 띄우는 {spawn} 를 가르친다");
             }
         }
-        let brief = brief();
+        let brief = worker();
         let review = &brief[step_at(&brief, "7")..step_at(&brief, "7-1")];
-        let never = review.find("never start another").expect("7 이 다른 에이전트를 띄우지 말라고 안 한다");
-        for spawn in spawns {
-            let at = brief.find(spawn).unwrap_or_else(|| panic!("7 이 {spawn} 를 이름으로 안 막는다"));
-            assert!(at > step_at(&brief, "7") + never, "{spawn} 가 하지 말라는 말 앞에 섰다");
-            assert_eq!(brief.matches(spawn).count(), 1, "{spawn} 가 일꾼 걸음의 다른 자리에도 섰다");
-        }
+        assert!(review.contains("never start another agent program"), "7 이 다른 에이전트를 띄우지 말라고 안 한다");
     }
 
     /// **예시가 제 스타일을 지킨다**(moai-1xf2). 스타일을 가르치는 글에서 예시가 어긋나면
@@ -2838,7 +2843,7 @@ mod tests {
             ("SKILL.md", skill()),
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
-            ("일꾼 스킬", work()),
+            ("일꾼 글", worker()),
         ] {
             for said in stated(&text) {
                 assert_eq!(
@@ -2857,7 +2862,7 @@ mod tests {
         }
         assert!(rules().contains(REVIEW_OVER_LIMIT), "규칙 3 이 넘칠 때의 길을 안 댄다");
         assert!(reference().contains(REVIEW_OVER_LIMIT), "참고 문서가 넘칠 때의 길을 안 댄다");
-        assert!(brief().contains(&indent(REVIEW_OVER_LIMIT, "    ")), "일꾼 걸음이 넘칠 때의 길을 안 댄다");
+        assert!(worker().contains(&indent(REVIEW_OVER_LIMIT, "    ")), "일꾼 걸음이 넘칠 때의 길을 안 댄다");
         // 상한 자체에서 넘는 글을 짓는다 — 손으로 적은 수는 상한이 그것을 넘어서면 `unwrap_err` 가
         // 엉뚱한 패닉으로 터진다. `가` 는 3바이트다.
         let big = "가".repeat(crate::model::MAX_TEXT_BYTES / 3 + 1);
@@ -2959,8 +2964,6 @@ mod tests {
             ),
             // 위키 스킬(moai-bl3x)의 발동어. 사람이 "위키 갱신" 이라고 불러야 훑기가 선다.
             ("moai-wiki", head(&wiki()), ["위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리"].as_slice()),
-            // 일꾼 스킬(moai-0x59)의 발동어. 사람이 창을 일꾼으로 삼을 때 부른다.
-            ("moai-work", head(&work()), ["일꾼 해", "일 기다려", "감독 일 받아"].as_slice()),
         ] {
             for trigger in triggers {
                 assert!(said.contains(trigger), "{whose} 의 발동어에서 {trigger} 가 빠졌다 — {said}");
@@ -2981,11 +2984,12 @@ mod tests {
         let head: String = skill.chars().take(40).collect();
         // 이름은 `skill::NAMES` 의 것이다 — 위키가 그 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 머리의
         // 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
-        let [moai, supervisor, wiki_skill, worker] = crate::skill::NAMES;
+        let [moai, supervisor, wiki_skill] = crate::skill::NAMES;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
-        assert!(work().starts_with(&format!("---\nname: {worker}\ndescription: ")), "일꾼 스킬의 머리가 없다");
+        // 일꾼 글은 스킬이 아니라 감독 스킬의 참고 파일이다(moai-obxm) — 머리가 서면 그 글이 메시지 한가운데 YAML 로 선다.
+        assert!(worker().starts_with("# Worker steps\n"), "일꾼 글이 제목으로 안 연다");
     }
 
     /// **감독이 일꾼에게 가르치는 펼치기는 참고 문서의 그 명령이다.** 길이 둘로
@@ -2994,10 +2998,10 @@ mod tests {
     /// 막던 판은 그 조각을 못 실어, 관점(`-b`) 없는 줄을 손으로 줄여 적었다.
     #[test]
     fn the_supervisor_teaches_promote_as_the_one_way() {
-        let (supervise, work, reference, brief) = (supervise(), work(), reference(), brief());
+        let (supervise, work, reference, brief) = (supervise(), worker(), reference(), worker());
         let promote = "moai backlog promote <id> --from -";
         assert!(reference.contains(promote), "참고 문서의 펼치기 줄이 바뀌었다");
-        assert!(work.contains(promote), "일꾼 스킬이 promote 를 안 가르친다");
+        assert!(work.contains(promote), "일꾼 글이 promote 를 안 가르친다");
         assert!(supervise.contains("`moai backlog promote`"), "감독이 일꾼이 무엇으로 펼치는지 모른다");
         let review = make_review("--parent <epic>");
         assert!(brief.contains(&review), "에픽 리뷰를 규칙 3 의 줄로 안 세운다");
@@ -3023,15 +3027,16 @@ mod tests {
         }
     }
 
-    /// **일꾼의 걸음(`brief`)에 첫 실행에서 넘어진 자리가 선다.** 감독 스킬에만 적으면 시험은 초록인데
+    /// **일꾼의 걸음(`worker`)에 첫 실행에서 넘어진 자리가 선다.** 감독 스킬에만 적으면 시험은 초록인데
     /// 일꾼은 못 읽는다 — `MERGE_HEAD` 가 실제로 그랬다. 하나라도 빠지면 다음 일꾼이 같은 자리에서 또
-    /// 넘어진다. 걸음은 일꾼 스킬(`work`)에 서고 감독은 편지(`letter`)만 보낸다(moai-snyk).
+    /// 넘어진다. 걸음은 감독 스킬의 `references/worker.md`([`worker`])에 서고 감독이 메시지 머리([`message`]) 뒤에 붙여
+    /// 보낸다(moai-obxm).
     #[test]
     fn the_worker_brief_carries_what_the_first_run_tripped_on() {
-        let (brief, supervise, work) = (brief(), supervise(), work());
-        assert!(work.contains(&brief), "일꾼 스킬이 싣는 걸음이 brief 가 아니다");
-        assert!(supervise.contains(&letter()), "감독이 보내는 편지가 letter 가 아니다");
-        assert!(!supervise.contains(&brief), "감독이 걸음 전부를 편지로 싣는다 — 편지는 맡길 일만 싣는다");
+        let (brief, supervise, work) = (worker(), supervise(), worker());
+        assert!(supervise.contains(&message()), "감독이 보내는 메시지의 머리가 message 가 아니다");
+        // 걸음은 감독 SKILL.md 가 아니라 그 참고 파일(`references/worker.md`)에 선다 — 감독은 보낼 때만 읽는다.
+        assert!(!supervise.contains(&brief), "감독 SKILL.md 가 일꾼 걸음 전부를 싣는다");
         let review = make_review("--parent <epic>");
         for (piece, why) in [
             // **4-1 도 "리뷰 서브에이전트" 를 말한다.** 글자만 보면 7 의 길이 통째로 빠져도
@@ -3047,7 +3052,7 @@ mod tests {
             ("The tracker you edit is always the root's", "워크트리의 트래커를 고쳐 병합에서 스냅샷이 충돌한다"),
             ("`MOAI_HERE`", "옮김을 끄는 손잡이를 켜지 말라는 말이 없다"),
             ("review subagent", "서브에이전트가 워크트리의 .moai 를 고친다"),
-            ("*Come back to the root*", "루트로 돌아오는 걸음이 없다"),
+            ("`ExitWorktree(keep)`", "루트로 돌아오는 걸음이 없다"),
             ("MERGE_HEAD", "남이 열어 둔 병합을 봉인하지 말라는 말이 없다"),
             ("-- .moai/", "트래커 커밋이 열린 병합을 봉인한다"),
             ("Do not use `--no-commit`", "병합을 한 번에 끝내라는 말이 없다"),
@@ -3100,13 +3105,13 @@ mod tests {
             ("in this same round against each other", "같은 바퀴에 보낸 둘이 같은 곳을 고친다"),
             ("comes out of the candidates until its report is checked", "보낸 backlog 가 둘째 일꾼에게 또 간다"),
             ("That member is the worker's", "감독이 훅에 떠밀려 일꾼의 멤버를 옮긴다"),
-            ("whose sent backlog has not had its report checked", "맡긴 일을 하던 일꾼에게 또 맡긴다"),
+            ("whose sent work has not had its report checked", "맡긴 일을 하던 일꾼에게 또 맡긴다"),
             ("moai show <epic>", "backlog 로 확인하면 멤버가 안 보인다"),
             // 목록의 끝은 `<subdir>` 이 붙어 바뀌었다(리뷰 moai-rgp9.sdj 1번) — 자리 이름만 맨다.
             ("`<root>`", "감독이 루트 자리를 안 채워 일꾼이 제 워크트리를 루트로 읽는다"),
             ("`<subdir>`", "모노레포 하위 자리를 감독이 안 채워 일꾼이 거절되는 꼴로 구한다"),
-            // 거둔 일은 일꾼 스킬의 그 절로 보낸다 — 첫 줄이 그 절을 이름으로 댄다.
-            ("from \"Carrying on stalled work\"", "거둔 일의 편지가 일꾼 스킬의 어느 절인지 안 댄다"),
+            // 거둔 일은 일꾼 글의 그 절로 보낸다 — 첫 줄이 그 절을 이름으로 댄다.
+            ("from \"Carrying on stalled work\"", "거둔 일의 메시지가 일꾼 글의 어느 절인지 안 댄다"),
             // `gone` 은 20분 조용했다는 것이지 끝났다는 것이 아니다(리뷰 moai-bkn4.c3d) — 사람의 답을 기다리며 프롬프트에 쉬는
             // 다른 기계·Codex 일꾼도 그렇게 읽혀, 그 워크트리를 둘째 일꾼에게 넘기면 산 두 세션이 한 가지에 선다.
             ("only once the person says that window has ended", "20분 조용한 일꾼의 워크트리를 둘째 일꾼에게 넘긴다"),
@@ -3124,9 +3129,9 @@ mod tests {
         // 못 받았다.
         let stalled = &work[work.find("## Carrying on stalled work").expect("거둔 일의 절이 없다")..];
         assert!(stalled.contains("from 4-1 to the end"), "거둔 일이 4-1 을 빼거나 끝을 자른다");
-        // 거둔 일도 새 일과 같은 편지를 받는다 — 모델 줄은 그 편지의 한 줄이고, 읽는 법은 스킬에 한 번 선다.
-        assert!(letter().contains(MODEL_SLOT), "편지에 모델 줄이 없다");
-        assert!(work.contains(&indent(&model_rule(), "  ")), "일꾼 스킬이 모델 줄을 어떻게 읽는지 안 댄다");
+        // 거둔 일도 새 일과 같은 메시지를 받는다 — 모델 줄은 그 머리의 한 줄이고, 읽는 법은 일꾼 글에 한 번 선다.
+        assert!(message().contains(MODEL_SLOT), "메시지에 모델 줄이 없다");
+        assert!(work.contains(&indent(&model_rule(), "  ")), "일꾼 글이 모델 줄을 어떻게 읽는지 안 댄다");
     }
 
     /// **마일스톤 우선 규칙은 글이 유일한 자리다**(moai-s526, 2026-09-20 사용자 결정).
@@ -3139,7 +3144,7 @@ mod tests {
     /// 만든다 — 옛 moai 가 죽은 자리다.
     #[test]
     fn the_milestone_first_rule_stands_in_all_three_teachings() {
-        let (agents, supervise, brief) = (agents(), supervise(), brief());
+        let (agents, supervise, brief) = (agents(), supervise(), worker());
         // 감독 스킬은 이제 걸음을 안 품는다(moai-snyk) — 통째로 재도 일꾼의 같은 글이 메우지 않는다.
         assert!(!supervise.contains(&brief), "감독 스킬이 일꾼의 걸음을 품는다");
         let head = supervise.as_str();
@@ -3195,7 +3200,7 @@ mod tests {
     /// 릴리스만 단다 — `MILESTONE_ATTACH` 하나에서 둘 다 나오므로, 한쪽만 고치면 여기서 붉어진다.
     #[test]
     fn an_outside_backlog_is_not_pulled_into_a_running_release() {
-        let (supervise, brief) = (supervise(), brief());
+        let (supervise, brief) = (supervise(), worker());
         let head = supervise.as_str();
 
         for (piece, why) in [
@@ -3235,7 +3240,7 @@ stop sending outside work while a release runs",
             (MILESTONE_ATTACH, "일꾼이 마일스톤을 다는 줄이 1 에 없다"),
             ("If `<milestone>` is `none`", "아무것도 안 도는 판을 안 적었다"),
             (
-                "**Hang only the `<milestone>` in the letter, and nothing else**",
+                "**Hang only the `<milestone>` in the message, and nothing else**",
                 "일꾼이 제 손으로 도는 릴리스를 달지 말라는 줄이 1 에 없다",
             ),
         ] {
@@ -3247,10 +3252,10 @@ stop sending outside work while a release runs",
     ///
     /// 축을 따로 두면 브리프가 판단을 두 벌 들고, 둘이 어긋나는 날 싼 모델이 쓰기 경로를 맡는다.
     /// 그래서 짝은 리뷰 등급과 같은 낱말 위에 선다 — low·medium·high 가 그대로 haiku·sonnet·opus 다.
-    /// **브리프에 실려야 뜻이 있다**: 감독 스킬에만 적힌 규칙은 일꾼이 받는 글에 없다(`brief`).
+    /// **브리프에 실려야 뜻이 있다**: 감독 스킬에만 적힌 규칙은 일꾼이 받는 글에 없다(`worker`).
     #[test]
     fn the_supervisor_picks_a_model_by_difficulty() {
-        let (supervise, brief) = (supervise(), brief());
+        let (supervise, brief) = (supervise(), worker());
         // 감독 스킬은 걸음을 안 품는다(moai-snyk) — 통째로 재도 브리프의 같은 글이 감독 쪽에서 빠진 자리를
         // 메우지 않는다(표의 잣대가 한때 그렇게 가려졌다).
         assert!(!supervise.contains(&brief), "감독 스킬이 일꾼의 걸음을 품는다");
@@ -3294,9 +3299,9 @@ stop sending outside work while a release runs",
         // 훅에 막혀 돌리는 리뷰 서브에이전트도 창의 모델을 물려받는다 — 창을 못 맞췄으면 싼 모델이
         // 쓰기 경로를 본다. 서브에이전트에는 모델을 직접 준다.
         assert!(step.contains("`Agent`'s `model`"), "리뷰 서브에이전트의 모델을 안 준다");
-        // 일꾼이 받는 편지에 그 자리가 있어야 감독이 채운다. **목록 줄에서 찾는다** — 바로 아래
+        // 일꾼이 받는 메시지에 그 자리가 있어야 감독이 채운다. **목록 줄에서 찾는다** — 바로 아래
         // 풀이 글도 세 자리를 적어, 감독 쪽 전체에서 찾으면 목록에서 빠져도 초록이었다.
-        assert!(letter().contains(MODEL_SLOT), "편지에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
+        assert!(message().contains(MODEL_SLOT), "메시지에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
         let list = slot_list(head);
         for slot in ["<model>", "<difficulty>", "<why>"] {
             assert!(
@@ -3333,7 +3338,7 @@ stop sending outside work while a release runs",
         }
         // 에픽 끝을 `max` 로 올리는 멤버도 두 자리가 같은 글이다 — 멤버를 따로 안 보니
         // 여기서 `동시성` 이 빠지면 그 멤버는 한 번도 비싼 눈을 안 받는다.
-        let brief = brief();
+        let brief = worker();
         assert!(claude.contains(EPIC_MAX), "CLAUDE.md 의 에픽 끝 max 줄이 브리프와 갈라졌다 — {EPIC_MAX}");
         assert!(brief.contains(EPIC_MAX), "브리프 7 이 에픽 끝 max 줄을 안 쓴다 — {EPIC_MAX}");
         // 에픽 둘에 걸친 묶음도 같은 꼴로 두 자리에 선다(moai-h89f) — 표에만 적으면 일꾼이
@@ -3356,7 +3361,7 @@ stop sending outside work while a release runs",
     /// 시험이 그 줄이 서 있는지만 본다.
     #[test]
     fn a_running_review_owns_the_worktree() {
-        let brief = brief();
+        let brief = worker();
         // **끝을 못 찾으면 붉어진다.** 여기서 브리프 끝으로 물러서면 7-1 의 이름이 바뀐 판에도
         // 아래 낱말이 한참 뒤의 걸음에서 걸려, 자리를 못 잡는 시험이 초록으로 선다.
         let step = &brief[step_at(&brief, "7")..step_at(&brief, "7-1")];
@@ -3381,7 +3386,7 @@ stop sending outside work while a release runs",
     /// 걸음이 없다" 로 못 읽고 멈추거나 우회한다. 다시 돌아온 판의 `mv.stale` 도 같다.
     #[test]
     fn the_brief_stands_members_in_review() {
-        let brief = brief();
+        let brief = worker();
         let step = &brief[step_at(&brief, "7")..step_at(&brief, "7-1")];
         let issue = step.find(&make_review("--parent <epic>")).expect("7 에 리뷰 이슈를 세우는 줄이 없다");
         let moved = step.find(TO_REVIEW).expect("7 이 멤버를 review 칸에 세우지 않는다");
@@ -3420,7 +3425,7 @@ stop sending outside work while a release runs",
     /// 사람이 "왜 이 등급이었나" 를 거기서 읽을 수 없다 — 그 말이 함께 서는지 본다.
     #[test]
     fn the_brief_carries_the_five_places_the_review_keeps_finding() {
-        let brief = brief();
+        let brief = worker();
         // **7 안에 서는지까지 본다.** 브리프 아무 걸음이나 들여쓰기가 같아, 통째로 찾으면
         // 리뷰를 안 부르는 걸음에 실려도 초록이었다.
         let step = &brief[step_at(&brief, "7")..step_at(&brief, "7-1")];
@@ -3452,7 +3457,7 @@ stop sending outside work while a release runs",
     /// `.moai/` 만 담아, 고친 글이 루트에 커밋 없이 남거나 남의 커밋에 쓸려 든다.
     #[test]
     fn closing_an_epic_looks_at_the_changelog() {
-        let brief = brief();
+        let brief = worker();
         let (at, end) = (step_at(&brief, "7-3"), step_at(&brief, "8"));
         let step = &brief[at..end];
         for (piece, why) in [
@@ -3652,7 +3657,7 @@ stop sending outside work while a release runs",
     /// 7-3 의 CHANGELOG 와 같은 까닭으로 워크트리에서 머지 전에 커밋하고, 아무것도 막지 않는다.
     #[test]
     fn the_brief_sends_the_wiki_step_to_the_skill() {
-        let brief = brief();
+        let brief = worker();
         let changelog = step_at(&brief, "7-3");
         let (at, end) = (step_at(&brief, "7-4"), step_at(&brief, "8"));
         assert!(changelog < at, "7-4 가 7-3 앞에 섰다");
@@ -3744,10 +3749,10 @@ stop sending outside work while a release runs",
     /// 충돌을 푸는 중·사람의 답을 기다리는 중에 지우면 아직 트래커에 안 옮긴 것이 사라진다.
     #[test]
     fn the_brief_says_when_the_pane_can_be_cleared() {
-        let brief = brief();
+        let brief = worker();
         // **보고 뒤다** — 보고 전에 지우면 보고에 담을 것이 대화에만 있던 채로 사라진다.
-        let report = brief.find("moai send <supervisor> 'report: <epic>'").expect("보고 걸음이 없다");
-        let at = report + brief[report..].find("*Clear the window*").expect("창을 비워도 되는 때를 안 알린다");
+        let report = brief.find("`SendMessage(to: <supervisor>, message: …)`").expect("보고 걸음이 없다");
+        let at = report + brief[report..].find("(`/clear`)").expect("창을 비워도 되는 때를 안 알린다");
         // **남긴 줄은 담은 뒤에 비운다.** 이어받을 줄은 10 의 트래커 커밋 뒤에 적으므로, 담지
         // 않으면 공유 루트의 `.moai` 가 더러운 채로 남아 남의 커밋에 쓸려 들어간다. 그 줄(11)은 보고 앞이다 —
         // 보고가 마지막이라 감독은 보고를 받으면 노트가 섰다고 읽는다.
@@ -3762,247 +3767,16 @@ stop sending outside work while a release runs",
             ("a review is running", "리뷰가 도는 중에는 지우지 말라는 말이 없다"),
             ("conflict", "머지 충돌을 푸는 중을 안 가린다"),
             ("waiting on a person", "답을 기다리는 중을 안 가린다"),
-            // 감독은 보고를 확인하면 같은 창에 다음 편지를 보낸다 — 그 뒤의 비우기는 그 편지를 지운다.
-            ("next message", "감독의 다음 편지가 온 뒤에는 지우지 말라는 말이 없다"),
+            // 감독은 보고를 확인하면 다음 메시지를 보낸다 — 그 뒤의 비우기는 그 메시지를 지운다.
+            ("next message", "감독의 다음 메시지가 온 뒤에는 지우지 말라는 말이 없다"),
         ] {
             assert!(against.contains(piece), "{missing}");
         }
-        // **보고 뒤에는 편지가 이른 대로다**(2026-10-04 사용자 결정) — 다시 기다리거나 턴을 끝낸다.
-        assert!(brief[report..].contains("`wait again`"), "보고 뒤에 다시 기다리라는 말이 없다");
-        assert!(brief[report..].contains("`end the turn`"), "감독이 비울 창이 턴을 끝내라는 말이 없다");
-    }
-
-    /// **tmux 면 감독이 일꾼의 창을 비운다**(2026-09-18 사용자 결정 — 곧바로 친다, 치던 글은
-    /// 지우고 친다, 상태줄과 감독 창에 한 줄씩).
-    ///
-    /// 비우기는 그 일꾼이 쥔 유일한 대화를 지운다 — 그래서 울타리가 전부 **치기 전에** 서야 한다.
-    /// 순서를 매는 것은 그 까닭이다: 확인 뒤에 부르고, 거르는 것은 모두 `/clear` 보다 앞이다.
-    #[test]
-    fn the_supervisor_clears_a_tmux_pane_only_behind_its_fences() {
-        let supervise = supervise();
-        let at = supervise.find("**5-1. On tmux").expect("감독이 창을 비우는 걸음이 없다");
-        let checks = supervise.find("git merge-base --is-ancestor <merge hash>").expect("보고 확인이 없다");
-        assert!(checks < at, "보고를 확인하기 전에 창을 비운다");
-        let open = at + supervise[at..].find("python3 - '<worker>'").expect("비우는 스크립트가 없다");
-        let script = &supervise[open..open + supervise[open..].find("\nPY\n").expect("스크립트가 안 닫힌다")];
-        let send = script.find("\"-l\", \"/clear\"").expect("/clear 를 안 친다");
-        for (fence, why) in [
-            ("os.environ.get(\"TMUX\")", "tmux 밖에서도 친다"),
-            ("except OSError:\n    skip(\"no tmux\")", "tmux 가 없으면 오류로 죽는다"),
-            ("TMUX_PANE", "감독이 제 창을 비운다"),
-            ("!= \"idle\"", "idle 이 아닌 판에 친다"),
-            ("no longer idle", "치기 직전에 다시 안 본다"),
-            // `idle` 은 턴이 끝났다는 뜻만이 아니다 — `inbox --wait` 가 턴 안의 셸 명령이 도는 동안 적는다(리뷰
-            // moai-snyk.nic). 그 기다림이 일꾼 밑에서 돌면 도는 턴에 친다.
-            ("if waiting(int(s[\"pid\"])):", "기다리며 idle 로 선 일꾼의 도는 턴에 /clear 를 친다"),
-            ("went back to waiting for a letter", "치기 직전에 다시 기다리러 간 일꾼을 안 본다"),
-            // 한 줄씩 내보낸다 — 파이프에 쥔 치던 글의 사본은 스크립트가 도중에 멎으면 함께 죽는다.
-            ("line_buffering=True", "치던 글의 사본이 파이프 버퍼에 남아 스크립트와 함께 사라진다"),
-            // 셸 도구의 두 분 안에 끝난다 — 넘기면 지운 칸에 아무것도 안 친 채 멎을 수 있다.
-            ("time.monotonic() + 60", "idle 을 기다리다 셸 도구의 두 분을 넘긴다"),
-            // 화면을 읽을 줄 아는 벤더만 친다 — 못 읽는 칸에 치면 사람의 글 뒤에 비우는 명령이 붙는다(moai-snyk).
-            ("s.get(\"vendor\") != \"claude\"", "입력 칸을 못 읽는 벤더의 창에 친다"),
-            // 칸 번호는 서버마다 따로다 — 다른 서버의 `%N` 은 이 서버에서 남의 칸이다(moai-snyk).
-            ("another tmux server", "다른 tmux 서버의 칸 번호로 이 서버의 남의 칸을 비운다"),
-            // 다른 기계의 장은 그 기계의 칸과 pid 를 댄다 — 컨테이너끼리 소켓 경로가 같아 위 울타리를 지나고, pid 가 우연히
-            // 겹치면 이 기계의 남의 칸을 비운다(moai-y2uy). `here` 를 안 대는 옛 moai 도 멈춘다.
-            ("if s.get(\"here\") is not True:", "다른 기계의 일꾼 칸을 이 기계의 칸으로 읽어 비운다"),
-            ("pane_pid", "낡은 장이 가리키는 남의 판을 비운다"),
-            ("pane_in_mode", "사람이 복사 모드로 스크롤해 읽는 판에 친다 — `/` 가 검색을 연다"),
-            ("pane_synchronized", "묶인 판에 쳐 옆 일꾼의 대화까지 지운다"),
-            ("could not empty the input box", "치던 글 뒤에 /clear 가 붙어 프롬프트로 간다"),
-            // 부르는 자리로 찾는다 — `dim_only(pane)` 만 찾으면 `def` 줄이 먼저 걸려, 부르는 줄을
-            // 지워도 초록이다.
-            ("and dim_only(pane)", "흐린 제안 글에 막혀 창이 영영 안 비워진다"),
-            ("erased = rest != kept", "하나도 안 지운 글을 이미 지웠다고 해 사람에게 한 벌 더 돌려준다"),
-            // 한 줄만 지우고 멈추면 나머지는 아직 그 칸에 있다 — 통째로 돌려주면 두 벌이 된다.
-            ("def gone(kept, left)", "지우다 멈췄을 때 칸에 남은 줄까지 돌려줘 같은 줄이 두 벌 선다"),
-            ("def grey(code)", "참색(`38;2;…`)으로 그린 흐린 글을 못 알아봐 창이 안 비워진다"),
-            (
-                "bare(l).startswith(PROMPT)",
-                "사람이 친 글 속의 프롬프트 표시나 붙임표를 제안 글로 읽어 그 글 뒤에 /clear 가 붙는다",
-            ),
-            ("l[:2] in head", "옮긴 치던 글이 들여쓰기를 잃거나 앞머리 아닌 줄까지 두 글자 깎인다"),
-            ("left is None", "입력 칸을 놓친 화면에 지우는 키를 계속 친다"),
-            // 마지막으로 읽은 뒤·치기 전의 틈에 친 글 뒤에도 `/clear` 가 붙는다.
-            ("text appeared in the input box meanwhile", "지운 뒤 치기 전에 사람이 친 글 뒤에 /clear 가 붙는다"),
-            ("the draft is already erased", "지우다 멈추면 사람의 글이 말없이 사라진다"),
-            ("list-clients", "상태줄의 한 줄이 일꾼의 판이 아니라 감독의 클라이언트에 뜬다"),
-            ("print(kept)", "치던 글을 지우기 전에 감독 창에 안 옮긴다"),
-            ("copied into the supervisor's window", "치던 글이 어디 갔는지 사람에게 안 알린다"),
-            ("display-message", "판을 보는 사람에게 무엇을 왜 비우는지 안 알린다"),
-        ] {
-            let pos = script.find(fence).unwrap_or_else(|| panic!("{why} — {fence}"));
-            assert!(pos < send, "{why} — /clear 뒤에 거른다: {fence}");
-        }
-        // 못 치면 **조용히** 넘어간다 — 오류가 아니라 한 줄과 0 이다. tmux 없는 사람의 화면에
-        // 오류가 뜨면 안 된다.
-        assert!(script.contains("sys.exit(0)"), "건너뛸 때 0 으로 안 끝난다");
-        assert!(!script.contains("sys.exit(1)"), "건너뛰기가 실패로 끝난다");
-        // **비우기와 다음 배정을 한 호흡에 하지 않는다** — `/clear` 는 큐의 글을 함께 지운다.
-        // 출석의 세션 id 가 바뀐 것을 보고서야 `비웠다` 를 내고, 편지는 그 뒤에 보낸다.
-        assert!(
-            script[send..].contains("now.get(\"session\") != s.get(\"session\")"),
-            "비워졌는지를 출석의 세션으로 안 본다"
-        );
-        // **비운 뒤에 보내고, 보낸 뒤에 깨운다**(2026-10-04 사용자 결정, 리뷰 moai-snyk.nic 1번) — 어느 벤더의 감독이든
-        // 비운 Claude 창에 다음 일을 싣는다. `send --wake` 는 Claude 칸에 안 치니 스크립트가 방금 비운 빈 칸에 친다. 세션이
-        // 바뀌기 전에 보내면 끝나 가던 옛 턴이 그 편지를 싣고 읽음으로 옮긴 채 비우기에 지워진다.
-        let changed = script.find("now.get(\"session\") != s.get(\"session\")").expect("비워졌는지를 안 본다");
-        let sent = script.find("[\"moai\", \"send\", name, subject").expect("비운 뒤에 다음 편지를 안 보낸다");
-        let woke = script.find("\"-l\", \"moai inbox\"").expect("비운 창을 안 깨운다");
-        assert!(send < changed && changed < sent && sent < woke, "비우기·확인·보내기·깨우기의 차례가 어긋났다");
-        for (fence, why) in [
-            ("if letter == \"-\":", "보낼 편지가 없을 때도 보낸다"),
-            ("sent.returncode != 0", "못 보낸 편지를 보낸 것으로 읽고 깨운다"),
-            ("box != \"\" and not dim_only(pane)", "빈 칸이 아닌 판에 `moai inbox` 를 친다"),
-        ] {
-            let at = script.find(fence).unwrap_or_else(|| panic!("{why} — {fence}"));
-            assert!(changed < at && at < woke, "{why} — 깨우기 앞에서 안 거른다: {fence}");
-        }
-        assert!(supervise.contains("whatever your vendor"), "감독의 벤더를 비우기의 조건으로 둔다");
-        // `<after>` 가 스크립트와 같은 자로 고른다(moai-y2uy) — 다른 기계의 일꾼에게 `end the turn` 을 주면 5-1 이 멈춰 그
-        // 창은 안 비워지고 안 깨워진 채 선다.
-        let after = supervise.find("`<after>` is `end the turn` only when").expect("<after> 를 고르는 글이 없다");
-        let rule = &supervise
-            [after..after + supervise[after..].find("Otherwise it is `wait again`").expect("<after> 글이 안 끝난다")];
-        assert!(rule.contains("row says `here`"), "<after> 가 다른 기계의 일꾼에게 end the turn 을 고른다");
-        // **일꾼은 `moai agents` 로 찾는다**(moai-snyk) — Claude Code 의 속 파일은 문서에 없고 Claude 세션만 든다.
-        // 출석의 이름은 비워도 그대로라(같은 프로세스) 이름으로 다시 찾아도 같은 장이다.
-        assert!(script.contains("[\"moai\", \"agents\", \"--json\"]"), "일꾼을 출석부로 안 찾는다");
-        assert!(!script.contains("sessions"), "감독이 아직 Claude 의 세션 파일을 읽는다");
-        let rest = &supervise[open..];
-        assert!(rest.contains("`cleared`, then `sent`"), "비운 뒤에야 다음 편지를 보낸다는 말이 없다");
-        // 일꾼 쪽: 감독은 `Next:` 노트를 보고 친다 — 그 노트는 보고 앞이고, 보고가 일꾼의 마지막 걸음이다.
-        assert!(supervise[at..open].contains("`Next:` note"), "감독이 일꾼의 11 을 마쳤는지 안 본다");
-        let brief = brief();
-        assert!(
-            brief[step_at(&brief, "12")..].contains("the supervisor may check the report"),
-            "일꾼이 감독이 비울 수 있다는 것을 모른다"
-        );
-    }
-
-    #[test]
-    fn erasing_stops_when_the_person_types_between_the_strokes() {
-        // **지우는 사이에 사람이 친 글은 옮긴 적이 없다**(2026-09-18 사용자 결정). 한 번 읽고 스무
-        // 번 지우던 판은 그 4초 남짓에 친 글자를 옮기지 않고 지웠다. 지우기가 깎은 글과 새 글을
-        // `shrunk` 가 가르는지 실제 파이썬으로 돌려 본다.
-        const CASES: &str = r##"
-import sys
-CASES = [
-    ("첫 줄이 비고 다음 줄이 올라왔다", "b\nc", "a\nb\nc", True),
-    ("다 지웠다", "", "a\nb", True),
-    ("안 지워지는 제안 글", "Try it", "Try it", True),
-    ("줄 끝에 더 쳤다", "b!\nc", "a\nb\nc", False),
-    ("새 줄을 쳤다", "b\nc\nd", "a\nb\nc", False),
-    ("한 줄뿐인 칸에 더 쳤다", "hello there", "hello", False),
-    ("방금 비운 줄이 아직 빈 채로 섰다", "a\n\nc", "a\nb\nc", True),
-    # 줄 안에 드는지만 보던 판은 이 둘을 깎인 글로 읽어 옮기지 않고 지웠다.
-    ("다 지운 칸에 새로 친 한 글자", "o", "hello", False),
-    ("사라진 글을 다시 치는 앞머리", "hel", "hello", False),
-]
-bad = [why for why, now, was, want in CASES if shrunk(now, was) != want]
-print("\n".join(bad))
-sys.exit(1 if bad else 0)
-"##;
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let supervise = supervise();
-        let open = supervise.find("python3 - '<worker>'").expect("비우는 스크립트가 없다");
-        let script = &supervise[open..open + supervise[open..].find("\nPY\n").expect("스크립트가 안 닫힌다")];
-        let from = script.find("def shrunk(").expect("지우기가 깎은 글을 가르는 함수가 없다");
-        let to = from + script[from..].find("\nQUIET = ").expect("shrunk 뒤의 줄이 없다");
-        let loop_at = script.find("for _ in range(20):").expect("지우는 고리가 없다");
-        assert!(script[loop_at..].contains("if not shrunk(left, seen):"), "지우는 고리가 사람이 친 글을 안 본다");
-        // 사람의 글을 다 지운 빈 칸에 다시 선 흐린 제안 글은 친 글이 아니다 — 그것에 멈추면 "제안 글이
-        // 다시 서도 그대로 친다"(사용자 결정)가 죽는다. 흐린 글은 옮겨 두고 지워 보아 가른다.
-        let stop = loop_at + script[loop_at..].find("if not shrunk(left, seen):").unwrap();
-        let fresh = &script[stop..stop + script[stop..].find("\n    seen = left").expect("고리가 본 글을 안 넘긴다")];
-        assert!(fresh.contains("if not dim_only(pane):"), "다시 선 제안 글을 사람이 친 글로 읽어 창이 안 비워진다");
-        assert!(fresh.contains("ghost = left"), "흐린 글을 지워 보지 않고 색으로만 가른다");
-        assert!(
-            script[loop_at..].contains("if ghost is not None and left != ghost:"),
-            "지워진 흐린 글을 사람의 글로 안 본다"
-        );
-        let program = format!("{}{CASES}", &script[from..to]);
-        let mut child = Command::new("python3")
-            .arg("-")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("python3 를 실행하지 못했다 — 이 시험에는 python3 가 있어야 한다");
-        child.stdin.take().expect("stdin").write_all(program.as_bytes()).expect("스크립트를 못 넘겼다");
-        let out = child.wait_with_output().expect("python3 가 안 끝났다");
-        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        assert!(out.status.success(), "지우기가 깎은 글과 사람이 친 글을 못 가른다:\n{said}");
-    }
-
-    /// **흐린 제안 글은 tmux 가 실제로 내보내는 모양으로 가른다.** 위의 울타리는 함수가 있는지만
-    /// 보고 무엇을 읽는지는 못 본다. Claude Code(2.1.276)는 빈 칸의 커서를 제안 글 첫 글자에
-    /// `\x1b[7m` 으로 그리고 tmux 는 그 다음을 `0;2` 한 조각으로 내보내, 제안 글을 한 번도 못
-    /// 알아봤다. 거꾸로 밝은 테마의 사람 글(`38;2;0;0;0`)과 흐린 글 뒤의 `0;1` 은 흐린 글로 읽혔다.
-    /// 화면은 `capture-pane -e` 가 내는 모양 그대로 적고, 맨 캡처는 거기서 색만 뺀 것이다.
-    #[test]
-    fn the_supervisor_reads_the_dim_suggestion_as_tmux_captures_it() {
-        const HEAD: &str = r##"import re, sys
-SCREEN = [""]
-class Captured:
-    def __init__(self, stdout):
-        self.stdout = stdout
-def tmux(*args):
-    shown = SCREEN[0]
-    return Captured(shown if "-e" in args else re.sub("\x1b\\[[0-9;:]*m", "", shown))
-"##;
-        const CASES: &str = r##"
-E = "\x1b"
-RULE = E + "[38;5;244m" + "─" * 8 + E + "[39m"
-def box(*rows):
-    return "\n".join(["지난 대화", RULE] + list(rows) + [RULE, "  ? for shortcuts", ""])
-CASES = [
-    ("제안 글 — 첫 글자에 뒤집힌 커서, 이어서 0;2", box("❯ " + E + "[7mT" + E + "[0;2mry it" + E + "[0m"), True, "Try it"),
-    ("흐림 뒤에 글자색", box("❯ " + E + "[2m" + E + "[37mTry it" + E + "[0m"), True, "Try it"),
-    ("흐림과 기울임이 한 조각", box("❯ " + E + "[2;3mTry it" + E + "[0m"), True, "Try it"),
-    ("참색 회색", box("❯ " + E + "[38;2;136;136;136mTry it" + E + "[39m"), True, "Try it"),
-    ("접힌 제안 글의 둘째 줄은 색 조각 없이 온다", box("❯ " + E + "[2mTry this", "  and that" + E + "[0m"), True, "Try this\nand that"),
-    ("사람의 글", box("❯ hello"), False, "hello"),
-    ("밝은 테마의 사람 글", box("❯ " + E + "[38;2;0;0;0mhello" + E + "[39m"), False, "hello"),
-    ("흐린 글 뒤의 굵은 사람 글", box("❯ " + E + "[2mx" + E + "[0;1mBOLD" + E + "[0m"), False, "xBOLD"),
-    ("첫 줄에 프롬프트 표시만 친 사람 글", box("❯ ❯❯"), False, "❯❯"),
-    ("커서가 맨 앞에 선 사람 글", box("❯ " + E + "[7mh" + E + "[0mello"), False, "hello"),
-    ("커서 한 칸뿐인 사람 글", box("❯ " + E + "[7mx" + E + "[0m"), False, "x"),
-    ("흐린 첫 줄 아래의 사람 글", box("❯ " + E + "[2mTry" + E + "[0m", "  human"), False, "Try\nhuman"),
-    ("빈 칸", box("❯"), False, ""),
-    ("들여쓴 사람 글", box("❯ def f():", "      return 1"), False, "def f():\n    return 1"),
-]
-bad = []
-for why, shown, dim, text in CASES:
-    SCREEN[0] = shown
-    got = (dim_only("%1"), draft("%1"))
-    if got != (dim, text):
-        bad.append(why + " — " + repr(got) + ", 바란 것 " + repr((dim, text)))
-print("\n".join(bad))
-sys.exit(1 if bad else 0)
-"##;
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let supervise = supervise();
-        let open = supervise.find("python3 - '<worker>'").expect("비우는 스크립트가 없다");
-        let script = &supervise[open..open + supervise[open..].find("\nPY\n").expect("스크립트가 안 닫힌다")];
-        let from = script.find("PROMPT = ").expect("프롬프트 표시가 없다");
-        let to = script.find("def looks(").expect("판을 읽는 함수가 없다");
-        let program = format!("{HEAD}{}{CASES}", &script[from..to]);
-        let mut child = Command::new("python3")
-            .arg("-")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("python3 를 실행하지 못했다 — 이 시험에는 python3 가 있어야 한다");
-        child.stdin.take().expect("stdin").write_all(program.as_bytes()).expect("스크립트를 못 넘겼다");
-        let out = child.wait_with_output().expect("python3 가 안 끝났다");
-        let said = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        assert!(out.status.success(), "입력 칸을 잘못 읽는다:\n{said}");
+        // **보고 뒤에는 턴을 끝낸다**(moai-obxm) — 기다리는 고리가 없고, 다음 메시지가 창을 깨운다. 비우기는 사람의
+        // 몫이라 감독이 창을 비운다는 말도 없다.
+        assert!(brief[at..].contains("Then end the turn"), "보고 뒤에 턴을 끝내라는 말이 없다");
+        assert!(!brief.contains("wait again") && !brief.contains("After the report"), "일꾼이 아직 기다림 고리를 돈다");
+        assert!(!brief.contains("clear this window itself"), "감독이 창을 비운다고 가르친다");
     }
 
     /// **tmux 시험은 떼어 낸 서버에서만 가르친다**(2026-09-18 사용자 규칙). 스킬이 맨
@@ -4012,15 +3786,16 @@ sys.exit(1 if bad else 0)
     /// 리뷰 서브에이전트다.
     #[test]
     fn tmux_tests_are_taught_on_a_separate_server() {
-        let (supervise, brief) = (supervise(), brief());
+        let (supervise, brief) = (supervise(), worker());
         // 감독 스킬은 걸음을 안 품는다(moai-snyk) — 두 글을 따로 잰다. 품던 판은 통째로 재면 브리프의 같은
         // 줄이 감독 쪽에서 빠진 자리를 메웠다.
         assert!(!supervise.contains(&brief), "감독 스킬이 일꾼의 걸음을 품는다");
-        for (name, text) in [("감독 스킬", supervise.as_str()), ("일꾼 걸음", brief.as_str())] {
+        // 감독은 tmux 를 안 만진다 — 창을 비우던 5-1 을 걷었다(moai-obxm). 시험하는 것은 일꾼이라 규칙은 일꾼 글에 선다.
+        for (name, text) in [("일꾼 걸음", brief.as_str())] {
             assert!(text.contains("env -u TMUX tmux -L"), "{name}: 떼어 낸 서버로 시험하라는 말이 없다");
             assert!(text.contains("without `-L`/`-S`"), "{name}: 맨 kill-server 를 막는 말이 없다");
             assert!(text.contains("TMUX_TMPDIR"), "{name}: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
-            // 속에서 `tmux` 를 부르는 스크립트(5-1)에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
+            // 속에서 `tmux` 를 부르는 스크립트에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
             // 일꾼에게도 가둘 길이 있어야 하고, 그 감싸개가 PATH 로 제 자신을 부르면 끝나지 않는다.
             assert!(
                 text.contains("wrapper") && text.contains("absolute path"),
@@ -4055,7 +3830,7 @@ sys.exit(1 if bad else 0)
                     .is_none_or(|sub| words[t..t + sub].iter().any(|w| w.starts_with("-L") || w.starts_with("-S")))
             })
         };
-        for line in supervise.lines().chain(work().lines().collect::<Vec<_>>()) {
+        for line in supervise.lines().chain(worker().lines().collect::<Vec<_>>()) {
             let spans = line.split('`').skip(1).step_by(2);
             for cmd in std::iter::once(line).chain(spans) {
                 // 맨 명령을 **하지 말라고** 적은 줄만 뺀다 — 영어 글에서 그 자리를 대는 낱말 셋이다.
@@ -4071,10 +3846,10 @@ sys.exit(1 if bad else 0)
         // **거둔 일의 노트는 앞 세션 몫을 모른다고 말한다**(2026-09-18 사용자 결정). 일한 모델은
         // 닫을 때만 적어(결정 4), 앞 세션이 하다 죽은 멤버를 거둔 창이 닫으면 통째로 제 몫이 된다.
         // 집을 때도 적게 넓히지 않고, 통계가 그 줄을 가를 수 있게 까닭에 표시만 한다. 그 걸음은 일꾼
-        // 스킬의 한 절이고, 감독의 편지는 첫 줄로 그 절을 이름 짓는다(moai-snyk).
-        let (supervise, work) = (supervise(), work());
+        // 글의 한 절이고, 감독의 메시지는 첫 줄로 그 절을 이름 짓는다(moai-snyk).
+        let (supervise, work) = (supervise(), worker());
         let title = "Carrying on stalled work";
-        assert!(supervise.contains(&format!("from \"{title}\"")), "거둔 일의 편지가 일꾼 스킬의 그 절을 안 댄다");
+        assert!(supervise.contains(&format!("from \"{title}\"")), "거둔 일의 메시지가 일꾼 글의 그 절을 안 댄다");
         let at = work.find(&format!("## {title}")).expect("거둔 일의 절이 없다");
         let end = work[at + 3..].find("\n## ").map_or(work.len(), |n| at + 3 + n);
         assert!(
@@ -4090,7 +3865,7 @@ sys.exit(1 if bad else 0)
     /// 필드가 아니라 이력으로 남는다(CLAUDE.md 의 되돌리지 않을 결정 둘).
     #[test]
     fn the_worker_may_raise_the_model_and_records_it_when_closing() {
-        let (brief, work) = (brief(), work());
+        let (brief, work) = (worker(), worker());
         // **올리는 길이 명령으로 서고, 그 명령을 칠 수 있는 자에게 간다.** "올린다" 만 적으면
         // 일꾼이 무엇을 쳐야 하는지 모른다. 그런데 `/model` 은 사람만 친다 — 에이전트는 붙박이
         // 명령을 못 불러, 제 손으로 치라고 하면 올렸다고 믿고 9-1 에 안 돈 모델을 적는다.
@@ -4107,14 +3882,14 @@ sys.exit(1 if bad else 0)
             work[..raise].contains("ask the person watching the window"),
             "`/model` 을 사람에게 청하라는 말이 없다 — {shown}"
         );
-        assert!(work.contains(&indent(&model_rule(), "  ")), "편지의 모델 줄을 읽는 법이 조각에서 안 나온다");
+        assert!(work.contains(&indent(&model_rule(), "  ")), "메시지의 모델 줄을 읽는 법이 조각에서 안 나온다");
         // **닫는 자리에 선다** — 워크트리를 지운 뒤(맨 `moai` 가 루트를 읽는다), 멤버를 닫기
         // 전. 자리를 바이트 거리로 재던 판은 9-1 이 9 위로 올라가도 초록이었다.
         let removed = brief.find("git worktree remove").expect("워크트리를 지우는 걸음이 없다");
         let note = brief.find("model:").expect("일한 모델을 남기는 걸음이 없다");
         let done = brief.find("moai mv <member> done").expect("멤버를 닫는 걸음이 없다");
         assert!(removed < note && note < done, "모델 노트가 워크트리를 지운 뒤·멤버를 닫기 전이 아니다");
-        // **남기는 것은 실제로 돈 모델이다.** 편지의 제안은 감독이 채워 보내 이 줄에도 박혀
+        // **남기는 것은 실제로 돈 모델이다.** 메시지의 제안은 감독이 채워 보내 이 줄에도 박혀
         // 오므로, 다르면 고쳐 적으라는 말이 같은 걸음에 서야 한다 — 없으면 제안이 일한 것으로
         // 남는다. 그 까닭이 남을 자리가 이 노트다.
         let step = step_at(&brief, "9-1");
@@ -4133,7 +3908,7 @@ sys.exit(1 if bad else 0)
     /// 토큰을 모를 때 `tokens=<수>` 를 통째로 빼도 읽혀야 한다 — 0 을 적게 두면 통계가 "공짜" 로 읽는다.
     #[test]
     fn the_taught_model_line_is_the_one_the_parser_reads() {
-        let texts = [("브리프 9-1", brief()), ("AGENTS 블록", agents()), ("스킬 참고 문서", reference())];
+        let texts = [("브리프 9-1", worker()), ("AGENTS 블록", agents()), ("스킬 참고 문서", reference())];
         for (whose, text) in &texts {
             let line = text
                 .lines()
@@ -4169,7 +3944,7 @@ sys.exit(1 if bad else 0)
             ("스킬", skill()),
             ("참고 문서", reference()),
             ("감독", supervise()),
-            ("일꾼", work()),
+            ("일꾼", worker()),
         ];
         for (whose, text) in &texts {
             for line in text.lines().filter(|l| l.contains("moai ")) {
@@ -4195,7 +3970,7 @@ sys.exit(1 if bad else 0)
     /// 거른다. 위키가 거르는 그 목록이고, 스킬 머리의 이름과 갈리면 `the_frontmatter_opens_the_skill` 이 붉어진다.
     #[test]
     fn the_supervisor_names_no_issue_of_this_repo() {
-        for (whose, text) in [("감독 스킬", supervise()), ("위키 스킬", wiki()), ("일꾼 스킬", work())] {
+        for (whose, text) in [("감독 스킬", supervise()), ("위키 스킬", wiki()), ("일꾼 글", worker())] {
             let ids: Vec<&str> = text
                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                 .filter(|w| !crate::skill::NAMES.contains(w))
@@ -4212,7 +3987,7 @@ sys.exit(1 if bad else 0)
     fn the_supervised_worker_settles_the_three_old_questions() {
         // 2026-09-18 사용자 결정 셋. (1) 보낸 일은 늘 워크트리 (2) 일꾼은 병합 전에 옆 세션을 찾아
         // 알리지 않는다 — 찾을 길이 없는 말은 지킬 수 없다 (3) 펼칠 안을 사람에게 다시 묻지 않는다.
-        let (supervise, brief) = (supervise(), brief());
+        let (supervise, brief) = (supervise(), worker());
         let head = &supervise[..supervise.find("## One round").expect("한 바퀴가 없다")];
         assert!(head.contains("**Work you send out is always done in a worktree**"), "워크트리 전제가 머리에 없다");
         assert!(!supervise.contains("tell the other worker first"), "일꾼이 찾을 길 없는 옆 세션에 알리라고 한다");
@@ -4226,8 +4001,8 @@ sys.exit(1 if bad else 0)
         // **에픽 도중 새로 필요해진 파일을 옆이 쥐었으면 멤버로 남기고 알린다**(2026-09-18 사용자
         // 결정). 감독이 보내기 전에 파일을 재도 도중에 새로 필요해진 파일은 못 잰다 — 그런 일이
         // backlog 로 밖에 나가 에픽이 목적을 못 이룬 채 닫힌 적이 있다. 일정 문제가 범위 결정으로 위장한다.
-        let (supervise, brief) = (supervise(), brief());
-        assert!(letter().contains(BESIDE), "편지에 옆에서 쥔 파일의 줄이 없다");
+        let (supervise, brief) = (supervise(), worker());
+        assert!(message().contains(BESIDE), "메시지에 옆에서 쥔 파일의 줄이 없다");
         assert!(BESIDE.starts_with("Work running alongside: <other work>"), "옆 일 줄의 머리가 바뀌었다 — {BESIDE}");
         let list = slot_list(&supervise);
         assert!(list.contains("`<other work>`"), "감독이 옆 일을 안 채운다 — {list}");
@@ -4254,15 +4029,16 @@ sys.exit(1 if bad else 0)
 
     #[test]
     fn a_test_claude_on_a_detached_server_is_no_worker() {
-        // **떼어 낸 tmux 서버의 시험용 에이전트는 일꾼이 아니다**(2026-09-18 사용자 결정). 그 세션도 출석을
-        // 적고 루트에서 띄우면 놀고 있는 세션으로 읽힐 수 있다. 감독은 `--role worker` 로 거른다 — 일꾼은
-        // 사람이 `moai-work` 를 부른 창뿐이다(moai-snyk). 시험하는 쪽에도 루트 밖에서 띄우라고 한다 —
+        // **떼어 낸 tmux 서버의 시험용 에이전트는 일꾼이 아니다**(2026-09-18 사용자 결정). 루트에서 띄우면
+        // `ListAgents` 에 이 저장소의 놀고 있는 세션으로 선다. 감독은 이 저장소의 idle 세션 전부를 일꾼으로 읽으니
+        // (moai-obxm) 거르는 것은 자리다 — 시험하는 쪽에 루트 밖에서 띄우라고 하고, 감독은 저장소 밖의 줄을 안 센다.
         // 둘 중 하나만 서면 다른 쪽이 샌다.
-        let (supervise, brief) = (supervise(), brief());
+        let (supervise, brief) = (supervise(), worker());
         let two = supervise.find("**2. Find a worker.**").expect("2 가 없다");
         let three = supervise.find("**2-1. ").expect("2-1 이 없다");
         let step = &supervise[two..three];
-        assert!(step.contains("moai agents --json --role worker --status idle"), "감독이 일꾼을 역할로 안 거른다");
+        assert!(step.contains("Call `ListAgents` once"), "감독이 일꾼을 ListAgents 로 안 찾는다");
+        assert!(step.contains("belongs to this repository") && step.contains("is not you"), "감독이 일꾼을 자리로 안 거른다");
         assert!(step.contains("**A test agent is no worker.**"), "시험용 에이전트를 어떻게 할지 없다");
         assert!(brief.contains("keep its cwd outside the root"), "시험용 에이전트를 루트에서 띄운다");
         // Claude Code 의 속 파일은 문서에 없고 Claude 세션만 든다 — 감독이 다시 그것을 읽으면 다른 벤더의
@@ -4278,9 +4054,9 @@ sys.exit(1 if bad else 0)
         // **모노레포의 하위가 루트면 워크트리 안의 같은 하위에서 일한다**(2026-09-18 사용자 결정).
         // 워크트리 꼭대기에 선 일꾼은 `moai` 가 공유 루트의 `.moai` 를 찾아 쓰고, 훅 규칙 2 는
         // `.worktrees/` 아래라 편집을 안 센다(moai-5s9l — 옛 자리 `.claude/` 도 같다).
-        let (supervise, brief, work) = (supervise(), brief(), work());
+        let (supervise, brief, work) = (supervise(), worker(), worker());
         assert!(supervise.contains("print(\"subdir\", os.path.relpath(here, top))"), "감독이 하위 경로를 안 낸다");
-        assert!(letter().contains("Subdir: <subdir>"), "편지에 하위 경로 자리가 없다");
+        assert!(message().contains("Subdir: <subdir>"), "메시지에 하위 경로 자리가 없다");
         let three = &brief[step_at(&brief, "3")..step_at(&brief, "4")];
         assert!(three.contains(SUBDIR), "일꾼이 워크트리 안의 하위로 안 들어간다");
         // 거둔 일은 3 을 안 지나 4-1 부터 잇는다 — 그 절에도 같은 줄이 서야 이어받은 일꾼이 꼭대기에 안 선다.
@@ -4304,8 +4080,9 @@ sys.exit(1 if bad else 0)
     ///   빈 줄이 없으면 목록의 마지막 항목에 붙는다. 목록 밖에서 세 칸 더에 선 줄은 명령 줄을 잘못 놓은 것이다
     ///   (`10.`~`12.` 의 일곱 칸은 코드가 아니라 문단이다, 리뷰 moai-bkn4.c3d)
     #[test]
-    fn the_brief_follows_the_markdown_list_rules() {
-        let brief = brief();
+    fn the_worker_steps_follow_the_markdown_list_rules() {
+        let worker = worker();
+        let brief = numbered_steps(&worker);
         let lead = |l: &str| l.len() - l.trim_start().len();
         let blank = |l: &str| l.trim().is_empty();
         let numbered = |l: &str| {
@@ -4359,8 +4136,8 @@ sys.exit(1 if bad else 0)
     /// 막힌다. 감독이 제 손으로 치는 병합 확인도 같은 자리를 쓰는지 본다.
     #[test]
     fn the_brief_names_no_branch() {
-        let (brief, supervise, work) = (brief(), supervise(), work());
-        for (whose, text) in [("일꾼 스킬", work.as_str()), ("편지", letter().as_str())] {
+        let (brief, supervise, work) = (worker(), supervise(), worker());
+        for (whose, text) in [("일꾼 글", work.as_str()), ("메시지", message().as_str())] {
             let named: Vec<&str> = text
                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
                 .filter(|w| ["main", "master", "develop", "trunk"].contains(w))
@@ -4368,7 +4145,7 @@ sys.exit(1 if bad else 0)
             assert!(named.is_empty(), "{whose} 가 가지 이름을 박았다 — {named:?}");
         }
         assert!(brief.contains("<base branch>"), "일꾼 글에 본 가지 자리가 없다");
-        assert!(letter().contains("Base branch: <base branch>"), "편지에 본 가지 자리가 없다");
+        assert!(message().contains("Base branch: <base branch>"), "메시지에 본 가지 자리가 없다");
         assert!(
             supervise.contains("git merge-base --is-ancestor <merge hash> <base branch>"),
             "감독의 병합 확인이 본 가지 자리를 안 쓴다"
@@ -4392,8 +4169,8 @@ sys.exit(1 if bad else 0)
             brief[step_at(&brief, "8")..merge].contains("symbolic-ref -q HEAD"),
             "병합 전에 루트의 가지를 대조하지 않는다"
         );
-        // 커밋 전의 대조는 걸음 앞에 한 번 선다 — 새 일과 거둔 일이 같은 스킬을 읽는다(moai-snyk).
-        let steps = work.find(&brief).expect("일꾼 스킬이 걸음을 안 싣는다");
+        // 커밋 전의 대조는 걸음 앞에 한 번 선다 — 새 일과 거둔 일이 같은 글을 읽는다(moai-snyk).
+        let steps = work.find("## The steps").expect("일꾼 글에 걸음 절이 없다");
         assert!(work[..steps].contains(BRANCH_CHECK), "걸음 앞에 루트 대조가 없다");
         assert!(work[..steps].contains(GIT_SHAPES), "걸음 앞에 git 꼴이 없다");
         // **대조를 루트에서 한다**(moai-rgp9) — 워크트리 안에서 `-C <루트>` 로 묻는 꼴은 격리
@@ -4405,7 +4182,7 @@ sys.exit(1 if bad else 0)
         // 꼴을 **이르는** 자리만 잰다 — `GIT_SHAPES` 는 거절되는 꼴의 이름을 대야 하므로 그 글자가
         // 그 안에 서는 것은 맞다.
         for shape in ["$(git -C", "git -C <root> rev-parse"] {
-            assert!(!work.contains(shape), "일꾼 스킬이 거절되는 꼴을 시킨다 — {shape}");
+            assert!(!work.contains(shape), "일꾼 글이 거절되는 꼴을 시킨다 — {shape}");
             assert!(!supervise.contains(shape), "감독 글이 거절되는 꼴을 시킨다 — {shape}");
         }
         assert!(
@@ -4439,7 +4216,7 @@ sys.exit(1 if bad else 0)
             ("agents", agents(), 2),
             ("skill", skill(), 1),
             ("reference", reference(), 3),
-            ("supervise", supervise(), 2),
+            ("supervise", supervise(), 1),
         ] {
             let lines: Vec<&str> = text.lines().collect();
             let mut seen = 0;
@@ -4501,7 +4278,6 @@ sys.exit(1 if bad else 0)
             "/code-review",
             "/model",
             "/clear",
-            "SendMessage",
             "TaskStop",
         ];
         for word in claude_only {
@@ -4531,8 +4307,15 @@ sys.exit(1 if bad else 0)
         let section = verbs_section();
         let title = section.lines().next().unwrap().trim_start_matches("## ");
         assert!(skill().contains(&section), "moai 스킬에 낱말표가 없다");
-        assert!(supervise().contains(&section), "감독 스킬에 낱말표가 없다");
-        assert!(work().contains(&section), "일꾼 스킬에 낱말표가 없다");
+        // **감독과 일꾼 글은 표 없이 도구를 바로 적는다**(moai-obxm) — 둘 다 Claude Code 에만 가니, 표를 실으면 받는 창이
+        // 없는 열을 읽고 *기울인* 걸음 이름은 한 번 더 건너뛰는 길이 된다.
+        for (whose, text) in [("감독 스킬", supervise()), ("일꾼 글", worker())] {
+            assert!(!text.contains(title), "{whose} 에 낱말표가 섰다");
+            for v in &VERBS {
+                let step = v.step.split(" (").next().unwrap_or(v.step);
+                assert!(!text.contains(&format!("*{step}*")), "{whose} 가 걸음을 *{step}* 로 가리킨다 — 도구를 바로 적는다");
+            }
+        }
         let head = section.lines().find(|l| l.starts_with("| Step |")).expect("표 머리가 없다");
         for vendor in VENDORS {
             assert!(head.contains(vendor), "표 머리에 {vendor} 열이 없다 — {head}");
@@ -4548,106 +4331,91 @@ sys.exit(1 if bad else 0)
         assert!(VERBS.iter().any(|v| v.step == REVIEW_VERB.step), "규칙 3 이 대는 리뷰 걸음이 표에 없다");
     }
 
-    /// **편지의 줄과 일꾼 스킬이 읽는 줄이 한 벌이다**(moai-snyk). 편지는 맡길 일만 싣고 읽는 법은 스킬에 있다 —
-    /// 편지에 줄을 더하고 스킬이 모르면 일꾼은 그 값을 버리고, 스킬이 없는 줄을 읽으면 일꾼은 빈 값으로 일한다.
-    /// 감독이 채우는 목록(3)도 편지의 자리와 한 벌이다 — 목록에서 빠진 자리는 꺾쇠째 일꾼에게 간다.
+    /// **메시지 머리의 줄과 일꾼 글이 읽는 줄이 한 벌이다**(moai-snyk, moai-obxm). 머리는 맡길 일만 싣고 읽는 법은
+    /// 그 아래 일꾼 글에 있다 — 머리에 줄을 더하고 일꾼 글이 모르면 일꾼은 그 값을 버리고, 없는 줄을 읽으면 빈 값으로
+    /// 일한다. 감독이 채우는 목록(3)도 머리의 자리와 한 벌이다 — 목록에서 빠진 자리는 꺾쇠째 일꾼에게 간다.
     #[test]
-    fn the_letter_carries_every_slot_the_skill_reads() {
-        let (letter, work, supervise) = (letter(), work(), supervise());
-        let section = &work[work.find("## The letter").expect("일꾼 스킬에 편지를 읽는 절이 없다")..];
+    fn the_message_carries_every_slot_the_steps_read() {
+        let (message, work, supervise) = (message(), worker(), supervise());
+        let section = &work[work.find("## The assignment").expect("일꾼 글에 메시지를 읽는 절이 없다")..];
         let section = &section[..section[3..].find("\n## ").map_or(section.len(), |n| n + 3)];
         // 첫 두 줄은 무엇을 맡기는가와 먼저 읽을 것이다 — 나머지 줄이 `<머리>: <값>` 이다.
         let heads: Vec<&str> =
-            letter.lines().skip(2).map(|l| l.trim().split_once(": ").expect("편지 줄에 머리가 없다").0).collect();
-        assert!(heads.len() >= 8, "편지의 줄이 모자란다 — {heads:?}");
+            message.lines().skip(2).map(|l| l.trim().split_once(": ").expect("메시지 줄에 머리가 없다").0).collect();
+        assert!(heads.len() >= 7, "메시지의 줄이 모자란다 — {heads:?}");
+        // 걷은 두 자리가 돌아오면 붉어진다 — 보고할 곳은 메시지의 `from` 이고, 보고 뒤에는 늘 턴을 끝낸다.
+        assert!(!message.contains("<my name>") && !message.contains("After the report"), "걷은 자리가 메시지에 섰다");
         for head in &heads {
-            assert!(section.contains(&format!("- `{head}:`")), "일꾼 스킬이 편지의 `{head}:` 줄을 안 읽는다");
+            assert!(section.contains(&format!("- `{head}:`")), "일꾼 글이 메시지의 `{head}:` 줄을 안 읽는다");
         }
         let read: Vec<&str> = section
             .lines()
             .filter_map(|l| l.strip_prefix("- `"))
             .filter_map(|l| l.split_once(":`").map(|(h, _)| h))
             .collect();
-        assert_eq!(read, heads, "일꾼 스킬이 편지에 없는 줄을 읽거나 차례가 다르다");
-        // 편지의 자리는 모두 감독이 채운다 — 목록에 없는 자리는 꺾쇠째 간다.
+        assert_eq!(read, heads, "일꾼 글이 메시지에 없는 줄을 읽거나 차례가 다르다");
+        // 메시지의 자리는 모두 감독이 채운다 — 목록에 없는 자리는 꺾쇠째 간다.
         let list = slot_list(&supervise);
-        let slots = letter.split('<').skip(1).filter_map(|s| s.split_once('>')).map(|(s, _)| format!("`<{s}>`"));
+        let slots = message.split('<').skip(1).filter_map(|s| s.split_once('>')).map(|(s, _)| format!("`<{s}>`"));
         for slot in slots {
-            assert!(list.contains(&slot), "감독이 편지의 {slot} 를 안 채운다 — {list}");
+            assert!(list.contains(&slot), "감독이 메시지의 {slot} 를 안 채운다 — {list}");
         }
-        // 감독이 채우는 자리는 모두 편지에 선다 — 편지에 없는 자리를 채우라고 하면 감독은 어디 채울지 모른다.
+        // 감독이 채우는 자리는 모두 메시지에 선다 — 메시지에 없는 자리를 채우라고 하면 감독은 어디 채울지 모른다.
         for slot in list.split('`').skip(1).step_by(2) {
-            assert!(letter.contains(slot), "감독이 편지에 없는 {slot} 를 채우라고 한다");
+            assert!(message.contains(slot), "감독이 메시지에 없는 {slot} 를 채우라고 한다");
         }
-        // 편지의 첫 줄은 스킬의 어디서 시작할지를 댄다 — 새 일·거둔 일·펼친 에픽 셋이 다 스킬에 있어야 한다.
-        assert!(letter.lines().next().unwrap().contains("from step 1"), "편지가 어디서 시작할지 안 댄다");
+        // 메시지의 첫 줄은 일꾼 글의 어디서 시작할지를 댄다 — 새 일·거둔 일·펼친 에픽 셋이 다 일꾼 글에 있어야 한다.
+        assert!(message.lines().next().unwrap().contains("from step 1"), "메시지가 어디서 시작할지 안 댄다");
         for start in ["from step 1", "from \"Carrying on stalled work\"", "from step 2"] {
-            assert!(supervise.contains(start), "감독이 `{start}` 편지를 안 보낸다");
-            assert!(section.contains(start), "일꾼 스킬이 `{start}` 를 어떻게 읽는지 안 댄다");
+            assert!(supervise.contains(start), "감독이 `{start}` 메시지를 안 보낸다");
+            assert!(section.contains(start), "일꾼 글이 `{start}` 를 어떻게 읽는지 안 댄다");
         }
     }
 
-    /// **감독도 일꾼도 출석하고, 일은 편지로 오간다**(2026-10-04 사용자 결정, moai-snyk). 감독이 이름 없이 돌면
-    /// 일꾼이 보고할 곳이 없고, 역할이 없으면 감독이 `any-idle-worker` 편지를 가져간다(moai-snyk.xte, 리뷰
-    /// moai-h8tn.x4l C20). 일꾼은 턴 안에서 기다리고(그동안 `idle`), 감독은 그 줄을 `moai agents` 로 고른다 —
-    /// 기다림이 장을 고치지 않으면 감독이 아무 일꾼도 못 찾는다(`cmd::mail::attend`).
+    /// **감독과 일꾼은 Claude Code 의 제 수단으로 말한다**(2026-10-06 사용자 결정, moai-obxm). moai 는 통신을 안 든다 —
+    /// 우편함·출석을 걷었으니(moai-5uwh) 그 명령이 글에 다시 서면 받는 창이 없는 명령을 친다. 일꾼은 `ListAgents` 의
+    /// 이 저장소 idle 세션이고, 일은 `SendMessage` 로 가며 보고도 그렇게 온다. 감독은 `notify_when_idle` 로 기다리고
+    /// `ListAgents` 를 되풀이해 훑지 않는다.
     #[test]
-    fn the_supervisor_and_the_workers_say_hello_and_trade_letters() {
-        let (supervise, work, brief) = (supervise(), work(), brief());
+    fn the_supervisor_and_the_workers_talk_through_claude_code() {
+        let (supervise, brief) = (supervise(), worker());
+        for (whose, text) in [("감독 스킬", supervise.as_str()), ("일꾼 글", brief.as_str()), ("AGENTS 블록", &agents())] {
+            for gone in ["moai hello", "moai send", "moai inbox", "moai agents", "any-idle-worker", "moai-work"] {
+                assert!(!text.contains(gone), "{whose} 이 걷은 {gone} 를 가르친다");
+            }
+        }
         let round = supervise.find("## One round").expect("한 바퀴가 없다");
-        let hello = supervise.find("moai hello --role supervisor").expect("감독이 출석하지 않는다");
-        assert!(hello < round, "감독이 바퀴를 돈 뒤에야 출석한다");
+        // 넷의 낱말은 바퀴 앞에 한 번 선다 — 바퀴가 그 낱말로 말한다.
+        for tool in ["`ListAgents`", "`SendMessage(to: <name>, message: …)`", "`notify_when_idle: true`"] {
+            assert!(supervise[..round].contains(tool), "감독이 바퀴 앞에 {tool} 를 안 댄다");
+        }
         assert!(
-            supervise.contains("moai agents --json --role worker --status idle"),
-            "감독이 기다리는 일꾼을 안 고른다"
+            supervise[..round].contains("**A worker is every idle session of this\nrepository in `ListAgents`, except you**"),
+            "일꾼이 이 저장소의 idle 세션 전부라는 말이 없다"
         );
-        assert!(
-            supervise.contains("moai send <worker> '<id> — <title>' -b - < <letter file>"),
-            "감독이 편지로 안 보낸다"
-        );
-        assert!(supervise.contains("moai inbox --ack --wait"), "감독이 보고를 편지로 안 기다린다");
-        // **감독도 못 연 우편함 앞에서는 다시 안 건다**(moai-bkn4.gmm) — 일꾼 고리 2 와 같은 자리다. "다 되면 다시 건다" 만
-        // 읽은 감독은 곧장 비영으로 돌아오는 기다림을 쉬지 않고 다시 건다. 일꾼에게 보내는 편지도 같은 우편함이라 사람에게 이른다.
-        let wait = &supervise[supervise.find("**4. Wait.**").expect("감독의 4 가 없다")
+        assert!(supervise[..round].contains("Never poll `ListAgents` in a loop"), "ListAgents 를 되풀이해 훑지 말라는 말이 없다");
+        assert!(supervise[..round].contains("`@path` in a message attaches nothing"), "@path 가 아무것도 안 붙인다는 말이 없다");
+        assert!(supervise[..round].contains("different permission mode"), "권한 모드가 다른 창이 메시지를 붙든다는 말이 없다");
+        assert!(supervise[..round].contains("A subagent sends under its parent"), "서브에이전트가 부모의 주소로 보낸다는 말이 없다");
+        // 보내기는 걸음 전부를 싣는다 — 일꾼 창에는 심긴 글이 없다.
+        let send = &supervise[supervise.find("**3. Send.**").expect("감독의 3 이 없다")
+            ..supervise.find("**4. Wait.**").expect("감독의 4 가 없다")];
+        assert!(send.contains("SendMessage(to: <worker>, message: "), "감독이 SendMessage 로 안 보낸다");
+        assert!(send.contains("notify_when_idle: true"), "감독이 보낼 때 idle 알림을 안 건다");
+        assert!(send.contains("**the whole text of this skill's\n`references/worker.md`**"), "감독이 일꾼 걸음을 통째로 안 싣는다");
+        let wait = &supervise[supervise.find("**4. Wait.**").unwrap()
             ..supervise.find("**5. Check the report").expect("감독의 5 가 없다")];
-        let shut = wait.find("no letter and a line naming the mailbox").expect("감독이 못 연 우편함에서 안 멈춘다");
-        assert!(wait[shut..].contains("do not run it again"), "감독이 못 연 우편함 앞에서 기다림을 다시 건다");
-        assert!(wait[shut..].contains("*Ask the person watching*"), "감독이 못 연 우편함을 창의 사람에게 안 알린다");
-        assert!(wait[shut..].contains("still a report to check"), "감독이 읽음 표시만 못 한 보고를 버린다");
-        // 읽음으로 못 옮긴 보고는 다음 기다림에 곧장 다시 온다 — 한 번 보고 사람에게 이른다(리뷰 moai-bkn4.d91 1번).
-        assert!(
-            wait[shut..].contains("stop rather than wait again"),
-            "감독이 읽음 표시 못 한 같은 보고를 되풀이해 기다린다"
-        );
-        // 사람이 띄운 세션과만 통신한다 — 감독 글이 SendMessage 로 보내거나 기다리면 Claude 밖의 감독이 못 따른다.
-        assert!(!supervise.contains("notify_when_idle"), "감독이 Claude 의 알림으로 기다린다");
-        assert!(!supervise.contains("with `SendMessage`"), "감독이 Claude 의 SendMessage 로 보낸다");
-        let loop_ = &work[work.find("## The loop").expect("일꾼의 고리가 없다")..work.find("## The letter").unwrap()];
-        let (said, waits) = (
-            loop_.find("moai hello --role worker").expect("일꾼이 출석하지 않는다"),
-            loop_.find("moai inbox --ack --wait").expect("일꾼이 편지를 안 기다린다"),
-        );
-        assert!(said < waits, "일꾼이 출석하기 전에 기다린다 — 감독이 그 일꾼을 못 찾는다");
-        assert!(loop_.contains("`idle`"), "기다리는 동안 idle 로 선다는 말이 없다");
-        assert!(loop_.contains("one short turn of tokens"), "기다림의 값을 안 밝힌다");
-        // **못 연 우편함 앞에서는 다시 안 건다**(moai-bkn4.yo1) — moai-kxkw 뒤로 그 기다림은 곧장 비영으로 돌아와, "빈
-        // 기다림이면 다시 건다" 만 읽은 일꾼은 쉬지 않고 돈다. 감독에게 보내는 편지도 같은 거절이라 창의 사람에게 이른다.
-        let shut = loop_.find("a line naming the mailbox").expect("못 연 우편함에서 멈추라는 말이 없다");
-        assert!(loop_[shut..].contains("do not run it again"), "못 연 우편함 앞에서 기다림을 다시 건다");
-        assert!(loop_[shut..].contains("*Ask the person watching*"), "못 연 우편함을 창의 사람에게 안 알린다");
-        // **편지가 왔으면 멈추지 않는다**(리뷰 moai-bkn4.c3d) — 편지를 읽음으로 못 옮긴 io 실패도 같은 `…/.moai/mail: …` 꼴의
-        // 줄과 비영으로 곧장 돌아온다(`mail::refusal` 의 못 막은 갈래). 그 줄만 보고 멈추면 받은 일감을 두고 선다.
-        assert!(
-            loop_.contains("non-zero code, no letter and a line naming"),
-            "편지를 받은 판에도 우편함 줄 하나로 멈춘다"
-        );
-        assert!(loop_[shut..].contains("still yours to do"), "읽음 표시만 못 한 편지를 버린다");
-        assert!(loop_[shut..].contains("the same work twice"), "일꾼이 읽음 표시 못 한 같은 일감을 두 번 한다");
-        // 보고는 편지다 — 일꾼이 SendMessage 로 보고하면 Claude 밖의 감독에게 안 닿는다.
-        assert!(brief.contains("moai send <supervisor> 'report: <epic>'"), "일꾼이 보고를 편지로 안 보낸다");
-        assert!(!brief.contains("SendMessage"), "일꾼의 걸음이 Claude 의 SendMessage 에 기댄다");
-        // tmux 는 누구에게도 안 시킨다 — 깨우기는 덤이다.
-        assert!(work.contains("needs no tmux"), "일꾼 스킬이 tmux 를 시키지 않는다는 말을 잃었다");
-        assert!(supervise.contains("tmux is nobody's requirement"), "감독 스킬이 tmux 를 시키지 않는다는 말을 잃었다");
+        assert!(wait.contains("cross-session message"), "감독이 보고를 세션 사이 메시지로 안 받는다");
+        assert!(wait.contains("**Do not poll `ListAgents`**"), "감독이 기다리며 ListAgents 를 훑는다");
+        // 0 의 재회수도 ListAgents 를 읽는다 — 출석부가 없으니 살아 있는 세션은 그것뿐이다.
+        let reclaim = &supervise[round..supervise.find("**1. Pick.**").expect("감독의 1 이 없다")];
+        assert!(reclaim.contains("`ListAgents` shows a `busy` session"), "재회수가 바쁜 세션을 ListAgents 로 안 본다");
+        // 일꾼은 메시지의 `from` 에게 SendMessage 로 보고한다.
+        assert!(brief.contains("The message's `from` is the supervisor"), "일꾼이 보고할 곳을 메시지의 from 으로 안 읽는다");
+        assert!(brief[step_at(&brief, "12")..].contains("`SendMessage(to: <supervisor>"), "일꾼이 SendMessage 로 보고하지 않는다");
+        // 감독은 창에 아무것도 안 친다 — 5-1 을 걷었다.
+        assert!(!supervise.contains("**5-1."), "감독이 창을 비우는 5-1 이 남았다");
+        assert!(!supervise.contains("send-keys") && !supervise.contains("tmux_pane"), "감독이 tmux 칸을 만진다");
+        assert!(supervise.contains("**Clearing a window is the\nperson's**"), "창을 비우는 것이 사람의 몫이라는 말이 없다");
     }
 }

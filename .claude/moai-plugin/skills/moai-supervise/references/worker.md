@@ -224,9 +224,9 @@ refusals in all.
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
    When the worktree's hook cannot see a review issue created or picked up in the root and
-   blocks you — a binary from before the hook moved the tracker to the root reads that
-   worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
-   scope. A subagent inherits the window's model, so pass the model for the grade above in
+   blocks you — a binary from before the hook moved the tracker to the root
+   reads that worktree's snapshot only — run a review subagent with the same angle, grade and
+   `--fix` scope. A subagent inherits the window's model, so pass the model for the grade above in
    `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
    `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
    the way the refusal's own command says

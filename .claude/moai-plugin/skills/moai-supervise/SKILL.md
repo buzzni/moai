@@ -108,8 +108,8 @@ raises its worktree). **A worktree that is still there while the session working
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
 worker — the session you sent that work to — no longer stands in `ListAgents`. A session
 that still stands there, idle, has not ended: its person may be answering it, or it may
-be holding your message for approval. Hand its work on only once the person says that
-window has ended; until then it is that worker's.
+be holding your message for approval. Hand its work on
+only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
