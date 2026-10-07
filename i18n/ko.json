@@ -664,6 +664,7 @@
   "init.ask_guide_file": "guide.md + 링크",
   "init.ask_guide_none": "안 씀",
   "init.wrote_guide_file": "  {file} 에 moai 안내를 썼다 — AGENTS.md 블록은 그것을 가리킨다",
+  "init.kept_guide_file": "  {file} 는 남겼다 — moai 의 안내가 아니라 init 이 걷지 않는다",
   "init.removed_guide_file": "  {file} 를 걷었다 — 이제 AGENTS.md 블록이 안내 전문을 든다",
   "init.ask_tracking": "git",
   "init.ask_tracking_commit": "커밋",

@@ -664,6 +664,7 @@
   "init.ask_guide_file": "guide.md + link",
   "init.ask_guide_none": "none",
   "init.wrote_guide_file": "  wrote the moai guide to {file} — the AGENTS.md block points at it",
+  "init.kept_guide_file": "  left {file} — it is not a moai guide, so init does not remove it",
   "init.removed_guide_file": "  removed {file} — the AGENTS.md block now carries the whole guide",
   "init.ask_tracking": "git",
   "init.ask_tracking_commit": "commit",

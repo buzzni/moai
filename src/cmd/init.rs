@@ -310,6 +310,13 @@ fn same_guide(text: &str) -> bool {
     text.replace("\r\n", "\n") == crate::guide::agents()
 }
 
+/// `.moai/guide.md` 의 글이 moai 의 안내인가 — 이 바이너리가 쓸 전문이거나, 어느 판이든 전문이 여는 첫머리
+/// ([`crate::guide::GUIDE_OPENING`])로 열거나. 줄 끝은 [`same_guide`] 처럼 안 가린다. 손으로 고친 전문도 첫머리가
+/// 서 있으면 moai 의 것이다 — `init` 이 쥐고 묻지 않고 덮는 파일이다.
+fn moai_guide(text: &str) -> bool {
+    same_guide(text) || text.replace("\r\n", "\n").starts_with(crate::guide::GUIDE_OPENING)
+}
+
 /// 낡았다고 잰 AGENTS.md 에서 낡은 것이 링크 블록이 아니라 `.moai/guide.md` 인가 — 블록은 맞는 링크다. 링크가
 /// 전문의 해시를 들어([`crate::guide::agents_link`]) 다른 바이너리가 쓴 전문이면 링크부터 갈리므로, 여기 남는 것은
 /// 이 바이너리의 링크 밑에서 파일만 다른 판 — 손으로 고쳤거나 없어진 것이다.
@@ -2056,12 +2063,21 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     // 걷는 것도 묻지 않는다. **AGENTS.md 에 전문이 선 것을 본 뒤에만 걷는다** — 못 쓴 AGENTS.md 는 아직 링크 블록이라
     // 걷으면 링크가 빈 자리를 가리키고, 훅·`none` 은 AGENTS.md 를 안 건드려 그 링크가 아직 산다. 링크와 못 읽는
     // 자리(보통 파일이 아닌 것, 밖으로 가는 것)는 `init` 이 쥔 파일이 아니라 그대로 둔다.
-    let guide_removed = plan.guide == Guide::Block && agents_holds.as_deref().is_some_and(|t| !links_to_guide(t)) && {
-        let path = root.join(crate::guide::GUIDE_FILE);
-        !path.is_symlink()
-            && matches!(read_held(&path, &crate::held::Home::of(&root)), Ok(Some(_)))
-            && std::fs::remove_file(&path).is_ok()
-    };
+    //
+    // **moai 의 안내로 알아본 파일만 걷는다**(리뷰 moai-8gwh 5번) — 늘 블록 모드였던 저장소에서 사람이 그 이름으로 둔
+    // 메모를 다음 `init` 이 묻지 않고 지웠다. 알아보는 자는 [`moai_guide`] 다. 못 알아본 파일은 남기고 한 줄로 댄다.
+    let (guide_removed, guide_kept) =
+        match plan.guide == Guide::Block && agents_holds.as_deref().is_some_and(|t| !links_to_guide(t)) {
+            false => (false, false),
+            true => {
+                let path = root.join(crate::guide::GUIDE_FILE);
+                match (!path.is_symlink()).then(|| read_held(&path, &crate::held::Home::of(&root))) {
+                    Some(Ok(Some(text))) if moai_guide(&text) => (std::fs::remove_file(&path).is_ok(), false),
+                    Some(Ok(Some(_))) => (false, true),
+                    _ => (false, false),
+                }
+            }
+        };
     // 딸린 파일과 **한 자리에서 말한다** — 못 건드린 것은 이름·갈래·까닭으로 함께 선다. 블록은
     // 줄 몇 개가 아니라 통째로 갈아 끼우는 글이라 "손으로 더할 줄" 이 없다(빈 글을 넘긴다):
     // 사람이 할 일은 쓸 수 있게 고치고 다시 부르는 것(못 썼을 때)이나 그 자리에 보통 파일을 두는 것(안 읽었을
@@ -2151,6 +2167,10 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         // 걷었을 때만 싣는다 — 값은 걷은 파일의 자리다(`shortened_from` 과 같은 자).
         if guide_removed {
             v["guide_file_removed"] = serde_json::json!(crate::guide::GUIDE_FILE);
+        }
+        // 못 알아봐 남긴 파일도 그때만 싣는다 — 값은 남긴 파일의 자리다.
+        if guide_kept {
+            v["guide_file_kept"] = serde_json::json!(crate::guide::GUIDE_FILE);
         }
         // 칠 줄이다 — 낡은 것이 없으면 키가 없다(`shortened_from` 과 같은 자).
         if let Some(cmd) = &skills_stale {
@@ -2303,6 +2323,9 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     if guide_removed {
         out.push(fill(say(lang, "init.removed_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
     }
+    if guide_kept {
+        out.push(fill(say(lang, "init.kept_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
+    }
     // 이어 부른 명령의 말은 그 이름 아래 들여 싣는다 — 어느 말이 어느 명령의 것인지 갈린다. 이름은 **사람이 그대로
     // 다시 칠 수 있는 줄이다** — 실패하면 "손으로 다시 부른다" 고 하므로, `-C` 로 불렀으면 그 자리를 붙인다(리뷰
     // moai-zynt.63u). 맨 `moai project add .` 를 대던 판은 따라 친 셸의 자리를 목록에 올렸다. `-C` 를 붙이는 규칙은
@@ -2358,6 +2381,15 @@ mod tests {
     /// [`ensure_lines`] 가 거절의 까닭을 펼 말 — 시험은 영어로 잰다.
     fn en() -> crate::i18n::Lang {
         crate::i18n::Lang::En
+    }
+
+    /// **전문은 알아보는 첫머리로 연다**(리뷰 moai-8gwh 5번) — 갈리면 이 바이너리가 쓴 전문도 [`moai_guide`] 가 못
+    /// 알아보는 날이 오고, 첫머리를 옮기면 옛 판이 쓴 파일을 블록 모드가 남긴다. 사람의 메모는 알아보지 않는다.
+    #[test]
+    fn the_guide_opens_with_the_mark_it_is_known_by() {
+        assert!(crate::guide::agents().starts_with(crate::guide::GUIDE_OPENING));
+        assert!(moai_guide(&crate::guide::GUIDE_OPENING.replace('\n', "\r\n")));
+        assert!(!moai_guide("# my notes\n\n## Issue tracker — moai\n"));
     }
 
     /// **선언을 거는 자리와 묻는 자리가 한 글을 쓴다**(moai-9khu). `.gitattributes` 에 쓰는 줄과

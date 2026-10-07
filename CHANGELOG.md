@@ -37,7 +37,10 @@ does not tag — see `CONTRIBUTING.md`.
   longer links to it, `moai init` removes the guide file it wrote, says so in
   one line, and `--json` carries `guide_file_removed`. With `--guide none` or
   `hook` — `AGENTS.md` untouched, its link still standing — or when `AGENTS.md`
-  could not be written, the file stays. (moai-8gwh.ftm)
+  could not be written, the file stays. So does a `.moai/guide.md` that is not
+  a moai guide — one that does not open with the guide's heading and first
+  sentence: `init` names it as left in one line, and `--json` carries
+  `guide_file_kept`. (moai-8gwh.ftm)
 - **A tracker kept out of git that cannot be created no longer leaves its
   ignore lines behind.** `moai init --tracking exclude|gitignore` writes those
   lines before `.moai` on purpose; when creating `.moai` or its files then

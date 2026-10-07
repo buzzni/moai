@@ -1645,14 +1645,27 @@ fn switching_the_guide_to_a_block_removes_the_guide_file() {
     assert!(read(&root.join("AGENTS.md")).contains("Start a session"), "AGENTS.md 에 전문이 안 섰다");
     assert_eq!(field(&ok(root, &["init", "--check", "--json"]), "agents"), "current");
 
-    // 이미 블록인 저장소에 남은 파일도 걷는다 — 사람에게는 한 줄로 댄다.
-    std::fs::write(&guide, "left behind\n").unwrap();
+    // 이미 블록인 저장소에 남은 옛 판의 전문도 걷는다 — 첫머리로 알아본다. 사람에게는 한 줄로 댄다.
+    let old =
+        "## Issue tracker — moai\r\n\r\nThis repository's work lives in `.moai/issues.jsonl`.\r\nan older guide\r\n";
+    std::fs::write(&guide, old).unwrap();
     let said = staged(&["init"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
     let said = String::from_utf8_lossy(&said.stdout);
     assert!(!guide.exists(), "{said}");
     assert!(said.contains("removed .moai/guide.md"), "걷은 것을 안 댔다\n{said}");
     let again = ok(root, &["init", "--json"]);
     assert!(!again.contains("guide_file_removed"), "없는 파일을 걷었다고 했다 — {again}");
+
+    // **moai 의 안내가 아닌 파일은 남긴다**(리뷰 moai-8gwh 5번) — 늘 블록 모드였던 저장소에서 사람이 그 이름으로 둔
+    // 메모를 `init` 이 묻지 않고 지웠다. 남긴 것은 한 줄로, 기계에게는 키로 댄다.
+    std::fs::write(&guide, "my notes\n").unwrap();
+    let said = staged(&["init"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&said.stdout);
+    assert_eq!(read(&guide), "my notes\n", "사람의 파일을 지웠다\n{said}");
+    assert!(said.contains("left .moai/guide.md — it is not a moai guide"), "남긴 것을 안 댔다\n{said}");
+    let js = ok(root, &["init", "--json"]);
+    assert_eq!(field(&js, "guide_file_kept"), ".moai/guide.md", "{js}");
+    assert!(!js.contains("guide_file_removed"), "{js}");
 }
 
 /// **트래커를 못 세우면 먼저 덧붙인 무시 줄을 걷는다**(moai-8gwh.67q). git 밖에 둔 트래커는 무시 줄을 `.moai`
