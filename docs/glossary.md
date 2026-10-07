@@ -28,10 +28,11 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 
 The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
-The supervisor skill carries them, and each assignment message carries them
-whole, after the lines for this assignment — the backlog, the model, the work
-running alongside, the base branch, the milestone, the root and whether the
-person is away.
+They stand in a file of the supervisor skill, `references/worker.md`. Each
+assignment message carries the lines for this assignment — the backlog, the
+model, the work running alongside, the base branch, the milestone, the root and
+whether the person is away — and one line telling the worker to read that file,
+by its absolute path, and from which step to follow it.
 
 ## Column
 

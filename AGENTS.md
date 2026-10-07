@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.8.0 hash:e8e954c6 -->
+<!-- moai:begin v:0.8.0 hash:e223cc9a -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -518,9 +518,9 @@ In Claude Code, `moai skill install` also plants `moai-supervise`. A person call
 one window to hand the backlog that have piled up, one at a time, to the other sessions
 of this repository and take their reports. Every idle session of this repository that
 `ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
-assignment with the worker's steps in it (`SendMessage`), and the worker reports the same
-way. moai carries no messaging and never launches a session; every one of them is a
-session a person opened. The supervisor picks, sends and checks; it does not fix and it
+assignment (`SendMessage`) with a line naming the file of the worker's steps to read, and
+the worker reports the same way. moai carries no messaging and never launches a session;
+every one of them is a session a person opened. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki

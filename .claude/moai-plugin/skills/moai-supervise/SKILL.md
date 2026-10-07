@@ -24,7 +24,8 @@ workers talk with Claude Code's own tools:
 headless, and neither does the supervisor. **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's name and a `-`. Nobody registers and nobody is asked which windows count.
-The message you send is the whole assignment, and the worker's steps travel inside it (3).
+The message you send is the whole assignment, and it names the file of the worker's steps,
+which the worker reads (3).
 
 Five things about the messaging, one line each:
 
@@ -34,7 +35,8 @@ Five things about the messaging, one line each:
   idle notice comes, only its report
 - A subagent sends under its parent session's address — a message can come from a session
   that did not write it itself
-- `@path` in a message attaches nothing — what the worker has to read goes into the message
+- `@path` in a message attaches nothing — a file the worker has to read is named by its
+  absolute path, and the worker reads it itself (3)
 - Never poll `ListAgents` in a loop — the report comes to you (4)
 
 **Work you send out is always done in a worktree** — even if the repository has no
@@ -115,10 +117,10 @@ only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
-  the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The worker
-  steps you paste after the lines have the section the first line names
+  the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The steps file
+  has the section the first line names
 
-      You are handed the stalled work in <epic> — the previous session did not finish it. Do it by the worker steps below, from "Carrying on stalled work".
+      You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
       Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
 
 - **Whether it is carried on or put down is not the supervisor's call.** If it looks like
@@ -246,15 +248,19 @@ belongs to the worker who read the issue. A running session's model cannot be ch
 a message and cannot be changed by config — the person in that window changes it with
 `/model`.
 
-**3. Send.** Send **one** backlog to one idle worker. The message carries the assignment —
-the lines below, every slot filled — and after them, **the whole text of this skill's
-`references/worker.md`**: the worker's steps. The worker knows nothing of this conversation
-and has no skill of its own for this, so what is not in the message does not reach it —
-read that file and paste it whole; a path or `@path` brings nothing.
+**3. Send.** Send **one** backlog to one idle worker. The message is the lines below, every
+slot filled. The worker knows nothing of this conversation, so what is not in the message
+does not reach it — except the worker's steps: they stand in this skill's
+`references/worker.md`, and the first line tells the worker to `Read` that file and follow
+it. The worker is a session of this same repository and loaded the same plugin, so the file
+is there for it. **Do not copy the file into the message** — name it.
 
-    SendMessage(to: <worker>, message: <the lines below, a blank line, references/worker.md>, notify_when_idle: true)
+    SendMessage(to: <worker>, message: <the lines below>, notify_when_idle: true)
 
-Fill in `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+`<steps file>` is that file's absolute path: this skill's base directory — Claude Code shows
+it as "Base directory for this skill" when the skill loads — followed by
+`/references/worker.md`. Write it out whole; `@path` attaches nothing.
+Fill in `<id>`, `<title>`, `<steps file>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -286,7 +292,7 @@ Do not fill `<grade>` — that is the review grade the worker picks in 7, after 
 Do not fill `<vendor>` or `<count>` either — those are the vendor and the token count the
 worker reads in its own window in 9-1.
 
-    You are handed backlog <id> — <title>. Do it by the worker steps below, from step 1.
+    You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
     Read first: moai show <id>
     Model: <model> (<difficulty> — <why>)
     Work running alongside: <other work> — do not touch those files (4-3)
@@ -318,7 +324,7 @@ idle worker after that other work's report is checked. Send the message of 3 wit
 filled with the epic and its first line changed to the one below. Until then, count it in 1
 as work holding that file.
 
-    You are handed epic <id> — <title>. It is already unfolded; do not promote. Do it by the worker steps below, from step 2.
+    You are handed epic <id> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.
 
 Like the ones from 7-1, that member is right even when it is not done — it keeps the epic
 open, so the epic is not done either.

@@ -285,11 +285,15 @@ and Antigravity have no supervisor; their sessions pick their own work with
 2. **Make the supervisor.** In one of them, call `/moai-supervise`. It picks
    backlog items that do not collide with the work open, and finds the workers
    in `ListAgents`: every idle session of this repository except itself
-3. **The message carries the assignment and the steps.** `SendMessage` to the
-   worker opens with the lines for this assignment — the backlog, the model and
-   difficulty picked for it, the work running alongside, the base branch, the
-   milestone, the root and whether the person is away — and then the whole
-   [brief](glossary.md#brief), the worker's numbered steps. The supervisor
+3. **The message carries the assignment and names the steps.** `SendMessage` to
+   the worker opens with a line naming the work and telling it to read the
+   [brief](glossary.md#brief) — the worker's numbered steps, a file of the
+   supervisor skill (`references/worker.md`) given by its absolute path — and
+   from which step to follow it. The worker is a session of the same repository
+   and loaded the same plugin, so the file is there for it. The lines after that
+   fill this assignment — the backlog, the model and difficulty picked for it,
+   the work running alongside, the base branch, the milestone, the root and
+   whether the person is away. The supervisor
    sends it with `notify_when_idle` and waits for the report; it does not poll
    `ListAgents`
 4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
@@ -311,7 +315,8 @@ safe and when it is not. The supervisor never types into a window.
 **What the messages do not do.** A session in a different permission mode
 keeps an incoming message for its person's approval; a subagent's message goes
 out under its parent session's address; an `@path` in a message attaches
-nothing, so the steps travel as text.
+nothing, so the message names the steps file by its absolute path and the
+worker reads it.
 
 **Stalled work** — a member picked up with no live session working it — the
 supervisor tells apart by the busy and idle rows of `ListAgents`.

@@ -34,8 +34,8 @@ pub const DIR: &str = ".claude/moai-plugin";
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
 /// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
 ///
-/// **일꾼 스킬 `moai-work` 는 걷었다**(2026-10-06 사용자 결정, moai-obxm). 일꾼의 걸음은 감독이 보내는 메시지에
-/// 통째로 실린다 — 감독 스킬의 `references/worker.md`([`crate::guide::worker`]).
+/// **일꾼 스킬 `moai-work` 는 걷었다**(2026-10-06 사용자 결정, moai-obxm). 일꾼의 걸음은 감독 스킬의
+/// `references/worker.md`([`crate::guide::worker`])에 서고, 감독의 메시지가 그 파일을 읽으라고 이른다(moai-fim6).
 pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
 
 /// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
@@ -70,8 +70,9 @@ pub fn skills() -> Vec<Skill> {
         },
         // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고, 일꾼이 `moai` 를 부를 때마다
         // 감독의 걸음까지 읽는다. 발동어(description)는 따로 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        // 일꾼의 걸음(`references/worker.md`)은 감독이 읽어 메시지에 통째로 붙인다(moai-obxm) — 일꾼 창도 같은 플러그인이라
-        // 이 파일은 거기에도 심겨 있지만, 그것을 읽으라고 이르는 스킬이 일꾼에게는 없다.
+        // 일꾼의 걸음(`references/worker.md`)은 감독의 메시지가 절대 경로로 읽으라고 이른다(2026-10-07 사용자 결정,
+        // moai-fim6) — 일꾼 창도 같은 저장소의 같은 플러그인을 읽어 그 파일이 거기 있다. 32KB 를 매번 손으로 옮겨 붙이던
+        // 판은 보낼 때마다 출력 토큰 8~10k 가 들었고, 줄이거나 바꿔 옮긴 글을 아무것도 못 잡았다.
         Skill {
             name: supervisor,
             files: vec![("SKILL.md", crate::guide::supervise()), ("references/worker.md", crate::guide::worker())],
@@ -1461,9 +1462,9 @@ mod tests {
         assert_eq!(planted, NAMES);
     }
 
-    /// **스킬 곁에 심는 파일은 그 SKILL.md 가 경로로 부른다.** 감독은 `references/worker.md` 를 읽어 메시지에 통째로
-    /// 붙이는데(moai-obxm), 여기서 파일 이름만 바꾸면 감독 글은 없는 파일을 가리킨 채 초록이었다 — 일꾼은 걸음 없이
-    /// 맡은 일만 받는다.
+    /// **스킬 곁에 심는 파일은 그 SKILL.md 가 경로로 부른다.** 감독의 메시지는 일꾼에게 `references/worker.md` 를
+    /// 읽으라고 이르는데(moai-fim6), 여기서 파일 이름만 바꾸면 감독 글은 없는 파일을 가리킨 채 초록이었다 — 일꾼은
+    /// 걸음 없이 맡은 일만 받는다.
     #[test]
     fn every_planted_reference_is_named_by_its_skill() {
         for s in skills() {

@@ -1,15 +1,15 @@
 # Worker steps
 
-This message comes from a supervisor — a Claude Code session running `moai-supervise` on
-this repository. The lines above are your assignment; the text below is how to do it. You
-know nothing else of the supervisor's conversation and need nothing else. **The person comes
-first** — this window is theirs; when they speak, answer them.
+A supervisor — a Claude Code session running `moai-supervise` on this repository — sent you
+a message that names this file. The message's lines are your assignment; this file is how to
+do it. You know nothing else of the supervisor's conversation and need nothing else. **The
+person comes first** — this window is theirs; when they speak, answer them.
 
 ## The assignment
 
-The first line names the work and where to start — `from step 1` for a new backlog,
-`from "Carrying on stalled work"` for work a session left behind, `from step 2` for an epic
-already unfolded whose first-column members are left. The message's `from` is the supervisor
+The message's first line names the work and the step of this file to start from —
+`from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
+behind, `from step 2` for an epic already unfolded whose first-column members are left. The message's `from` is the supervisor
 — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`. Every
 other line fills a slot the steps use; a line the supervisor adds beyond those — who already
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.
@@ -66,19 +66,18 @@ worktree go back in with `EnterWorktree(path)`
 
 **Git in a Claude Code worktree session: one plain command per call.** The harness reads each Bash call
 and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
-intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
-refusals in all.
-- One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
-  compound commands (`&&`, `;`, `||`)
-- `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+intent.
+- One command per call. `git add X && git commit …` is refused whole — so is anything with
+  `&&`, `;` or `||`
+- `-m "…"` on one plain command is fine; a **heredoc** message is refused.
   When the message runs past one line, write it with Write and use `git commit -F <that file>`
 - Several git steps in a row: put them in a script file and call it as a bare
-  `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
-  refused had `&&`, a pipe or `$PWD` after them
-- Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
-  `computed at runtime` (119 cases)
+  `bash /abs/path/script.sh` with literal arguments and nothing appended — `&&`, a pipe or
+  `$PWD` after it is refused
+- Never build a command or a path with a variable or `$(…)` — that is refused as
+  `computed at runtime`
 - **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
-  `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+  `symbolic-ref` are refused even as single plain commands. Root work happens after
   ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
 - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
   commit from sealing someone's open merge, but it cannot keep it from carrying rows another
@@ -166,7 +165,7 @@ refusals in all.
    and inserts `-L`. Do not send keys into a pane someone else raised. If you raise a test
    agent on that server, keep its cwd outside the root (the scratchpad) — raised in the root,
    it stands in `ListAgents` as a session of this repository and a supervisor takes it for a worker.
-   **Give a review subagent these words too** — it was a review subagent that killed a whole server
+   **Give a review subagent these words too**
 
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
    the files named by `Work running alongside` in the message, or files a sibling branch in
@@ -223,13 +222,8 @@ refusals in all.
    does not exist here: leave the members where they stand and go on. If it answers that the
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
-   When the worktree's hook cannot see a review issue created or picked up in the root and
-   blocks you — a binary from before the hook moved the tracker to the root
-   reads that worktree's snapshot only — run a review subagent with the same angle, grade and
-   `--fix` scope. A subagent inherits the window's model, so pass the model for the grade above in
-   `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
-   `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
-   the way the refusal's own command says
+   A refusal from the hook, such as a missing angle, is not worked around: fix it the way the
+   refusal's own command says
 
    **Five places the review keeps finding.** They do not stand in for the angle — what this
    epic actually did is the angle, and these go on top of it
@@ -246,20 +240,18 @@ refusals in all.
       it stops on a config that is a FIFO, lock or no lock
 
    **They have to reach the review itself, not only `-b`.** The angle on the issue is what the
-   next person reads; the review command does not read the issue. Going through a subagent,
-   put these five in its prompt; going through the command, hold them against what came back
-   before you take the findings in
+   next person reads; the review command does not read the issue. Hold these five against what
+   came back before you take the findings in
 
    **While the review is running, do not touch this worktree's branch or its working tree.**
    A review that fixes leaves its fixes in the working tree uncommitted, so `reset --hard`,
-   `rebase` and `commit --amend` throw them away — that has happened, told to do it by a
-   supervisor saying "it is before the merge, so it can still be fixed". Nothing blocks it;
-   this line is what holds. Fixing a commit subject waits until the review has returned.
+   `rebase` and `commit --amend` throw them away — even when it is before the merge and
+   looks fixable. Nothing blocks it; this line is what holds. Fixing a commit subject waits
+   until the review has returned.
    **When it returns, stop what it left running with `TaskStop` before you touch the tree**
    and read the working tree's status. A sweep subagent still alive writes its own version
    into this same worktree and covers a commit you already made without a word, and a
-   `cargo test` after that measures that agent's files rather than yours — that has happened
-   too, and it also burned an hour and a half in a worktree that was gone.
+   `cargo test` after that measures that agent's files rather than yours.
 
 7-1. Before merging, go back over the backlog parked mid-epic
    (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
@@ -297,8 +289,7 @@ refusals in all.
    point: it is a row decided out of this release.
    **Bug-level is measured with the words that already exist** — does a `#bug` tag fit, and
    can a `Regression-of:` line be written (did something already merged break). Those two are
-   inside; the rest is outside. A new axis is not made because it would become a fourth
-   vocabulary beside the column, the kind and the defer
+   inside; the rest is outside. Do not make a new tag or field for it
 
 7-3. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
    for the release being prepared**, and write it if it does not. Write it **here, in the
@@ -310,12 +301,8 @@ refusals in all.
    This window is the only one that knows what the epic did, and it is the only one that
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
-   a revert subject of its own. It is cheaper here than in the window that closes the
-   section: v0.1.1 stood with 327 commits behind it, four of which touched the CHANGELOG, and
-   three epics named in its section out of the twenty-four the release held; the rest were
-   written by the window that closed it, 91 lines in one go. The release workflow cuts that
-   section by version name and hands it to `--notes-file` as it is, so a missing section
-   reads to whoever receives it as the whole release. **Nothing checks this** — a check here
+   a revert subject of its own. The release notes are that section as it stands, so a
+   missing line reads to whoever receives them as a change that never shipped. **Nothing checks this** — a check here
    would be a gate, and an empty section must not stop a release
 
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
@@ -352,8 +339,7 @@ refusals in all.
    was filled in by the supervisor as a suggestion, so if you raised it, or the window was on
    a different model from the start, correct the model and the difficulty to the real ones and
    write why in the reason — the next person reads "what was put on work of this size" there.
-   It is a note, not a field: the journal is not read to compute state and derived values are
-   not stored. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
+   It is a note, not a field. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
    `anthropic`, and the model is its real name (`opus-5`), not the `/model` alias — the
    `<model>` the supervisor filled in is an alias (`opus`), so write the real name even if you
    did not change models.
@@ -368,7 +354,8 @@ refusals in all.
     moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
 
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
-    landed** — a worker moved them before the merge and had to undo it. It closes a member
+    landed** — closed before it, a merge that stops on a conflict leaves them done on work
+    that is not in. It closes a member
     from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
     alike. Do not close the
     members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
@@ -409,8 +396,7 @@ member still stands picked up. Read how far it got (`moai show <epic>`, its hist
 notes), then
 
 - If the worktree is there, go in with `EnterWorktree(path)`, read how far it got with
-  `git log <base branch>..HEAD` and `git status`, and carry on. One raised before the
-  shared place stands at `.claude/worktrees/<epic>` — remove it from there in 9
+  `git log <base branch>..HEAD` and `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`

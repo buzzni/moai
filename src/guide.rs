@@ -179,9 +179,8 @@ epic actually did is the angle, and these go on top of it
    it stops on a config that is a FIFO, lock or no lock
 
 **They have to reach the review itself, not only `-b`.** The angle on the issue is what the
-next person reads; the review command does not read the issue. Going through a subagent,
-put these five in its prompt; going through the command, hold them against what came back
-before you take the findings in"#;
+next person reads; the review command does not read the issue. Hold these five against what
+came back before you take the findings in"#;
 
 /// 감독이 읽는 표 — 머리까지 여기서 낸다. 머리는 표면에, 칸의 차례는 여기에 두던 판은
 /// 칸을 바꿔 끼워도 머리가 엉뚱한 칸을 이름 짓는 채로 아무도 안 붉어졌다.
@@ -293,19 +292,18 @@ worktree go back in with `EnterWorktree(path)`"#;
 /// 이 걸음 없이 `cd` 로 든다. 일꾼 글에 한 번 서서 새 일과 거둔 일이 같은 글을 읽는다.
 const GIT_SHAPES: &str = r#"**Git in a Claude Code worktree session: one plain command per call.** The harness reads each Bash call
 and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
-intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
-refusals in all.
-- One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
-  compound commands (`&&`, `;`, `||`)
-- `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+intent.
+- One command per call. `git add X && git commit …` is refused whole — so is anything with
+  `&&`, `;` or `||`
+- `-m "…"` on one plain command is fine; a **heredoc** message is refused.
   When the message runs past one line, write it with Write and use `git commit -F <that file>`
 - Several git steps in a row: put them in a script file and call it as a bare
-  `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
-  refused had `&&`, a pipe or `$PWD` after them
-- Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
-  `computed at runtime` (119 cases)
+  `bash /abs/path/script.sh` with literal arguments and nothing appended — `&&`, a pipe or
+  `$PWD` after it is refused
+- Never build a command or a path with a variable or `$(…)` — that is refused as
+  `computed at runtime`
 - **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
-  `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+  `symbolic-ref` are refused even as single plain commands. Root work happens after
   ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
 - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
   commit from sealing someone's open merge, but it cannot keep it from carrying rows another
@@ -1193,9 +1191,9 @@ In Claude Code, `moai skill install` also plants `moai-supervise`. A person call
 one window to hand the backlog that have piled up, one at a time, to the other sessions
 of this repository and take their reports. Every idle session of this repository that
 `ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
-assignment with the worker's steps in it (`SendMessage`), and the worker reports the same
-way. moai carries no messaging and never launches a session; every one of them is a
-session a person opened. The supervisor picks, sends and checks; it does not fix and it
+assignment (`SendMessage`) with a line naming the file of the worker's steps to read, and
+the worker reports the same way. moai carries no messaging and never launches a session;
+every one of them is a session a person opened. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki
@@ -1543,7 +1541,7 @@ write that repository's name.
 ///
 /// **부르는 자리가 둘이다.** 일꾼이 에픽 끝(브리프 7-4)에서 그 에픽이 사람의 쓰임을 바꿨는지 묻고
 /// 고치는 것이 주된 길이고, 사람이 부르면 지난 릴리스 뒤 닫힌 에픽과 에픽 밖 이슈를 훑는다. 브리프의 7-4 는 짧게
-/// 두고 본문은 여기 둔다 — 브리프는 감독이 매 바퀴 통째로 싣는 글이라 한 줄이 일꾼 수만큼 값을 낸다.
+/// 두고 본문은 여기 둔다 — 브리프는 일꾼이 매 바퀴 통째로 읽는 글이라 한 줄이 일꾼 수만큼 값을 낸다.
 ///
 /// **아무것도 막지 않는다.** 페이지가 안 고쳐졌다고 붉어지는 자리를 만들면 그것이 게이트고, 글이
 /// 릴리스를 세운다. 그래서 "하지 않는 것" 에 게이트를 첫 줄로 적는다.
@@ -1745,10 +1743,13 @@ Decided in: <epic>
 /// **일꾼은 이 저장소의 놀고 있는 세션 전부다** — 감독 자신만 뺀다. 등록도, 사람에게 어느 창인지 묻기도 없다. 출석부를
 /// 따로 두면 그것이 `ListAgents` 와 어긋나는 둘째 진실이 된다.
 ///
-/// **일꾼의 걸음은 메시지에 통째로 실린다**([`worker`], 이 스킬의 `references/worker.md`). 일꾼 스킬(`moai-work`)을
-/// 걷었으니 일꾼에게는 그 글을 읽으라고 이르는 스킬이 없다 — 같은 플러그인이라 파일은 일꾼 쪽에도 심겨 있지만, 감독이
-/// 맡길 자리 줄 뒤에 그 글 전부를 붙여 보낸다(2026-10-07 사용자 결정, 당분간). `@path` 는 아무것도 안 붙이므로 경로만
-/// 적으면 일꾼은 빈손이다.
+/// **일꾼의 걸음은 파일이고, 메시지는 그것을 읽으라고만 한다**([`worker`], 이 스킬의 `references/worker.md`,
+/// 2026-10-07 사용자 결정, moai-fim6). 일꾼 창도 같은 저장소의 같은 플러그인을 읽어 그 파일이 거기 있다 — 감독은 제
+/// 스킬의 기준 디렉터리("Base directory for this skill")에 `/references/worker.md` 를 붙인 절대 경로를 적는다.
+/// `.claude/moai-plugin` 을 박지 않는 것은 Claude Code 가 설치한 플러그인을 제 캐시에서 읽을 수 있어서다 — 스킬이 읽힌
+/// 자리는 Claude Code 가 알린 그 디렉터리다. 글 전부를 붙여
+/// 보내던 판은 32KB 를 보낼 때마다 손으로 옮겨 출력 토큰 8~10k 가 들었고, 줄이거나 바꿔 옮긴 글을 아무것도 못 잡았다.
+/// `@path` 는 아무것도 안 붙이므로 경로는 일꾼이 `Read` 로 연다.
 ///
 /// **창을 비우는 것은 사람의 몫이다.** tmux 칸에 `/clear` 를 쳐 넣던 5-1(약 480줄)을 통째로 걷었다 — 일꾼이 보고
 /// 끝에 언제 비워도 되는지를 사람에게 한 줄로 말한다. 감독은 칸에 아무것도 치지 않는다.
@@ -1792,7 +1793,8 @@ workers talk with Claude Code's own tools:
 headless, and neither does the supervisor. **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's name and a `-`. Nobody registers and nobody is asked which windows count.
-The message you send is the whole assignment, and the worker's steps travel inside it (3).
+The message you send is the whole assignment, and it names the file of the worker's steps,
+which the worker reads (3).
 
 Five things about the messaging, one line each:
 
@@ -1802,7 +1804,8 @@ Five things about the messaging, one line each:
   idle notice comes, only its report
 - A subagent sends under its parent session's address — a message can come from a session
   that did not write it itself
-- `@path` in a message attaches nothing — what the worker has to read goes into the message
+- `@path` in a message attaches nothing — a file the worker has to read is named by its
+  absolute path, and the worker reads it itself (3)
 - Never poll `ListAgents` in a loop — the report comes to you (4)
 
 **Work you send out is always done in a worktree** — even if the repository has no
@@ -1883,10 +1886,10 @@ only once the person says that window has ended; until then it is that worker's.
 
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
-  the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The worker
-  steps you paste after the lines have the section the first line names
+  the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The steps file
+  has the section the first line names
 
-      You are handed the stalled work in <epic> — the previous session did not finish it. Do it by the worker steps below, from "Carrying on stalled work".
+      You are handed the stalled work in <epic> — the previous session did not finish it. Read <steps file> and follow its steps from "Carrying on stalled work".
       Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
 
 - **Whether it is carried on or put down is not the supervisor's call.** If it looks like
@@ -2004,15 +2007,19 @@ belongs to the worker who read the issue. A running session's model cannot be ch
 a message and cannot be changed by config — the person in that window changes it with
 `/model`.
 
-**3. Send.** Send **one** backlog to one idle worker. The message carries the assignment —
-the lines below, every slot filled — and after them, **the whole text of this skill's
-`references/worker.md`**: the worker's steps. The worker knows nothing of this conversation
-and has no skill of its own for this, so what is not in the message does not reach it —
-read that file and paste it whole; a path or `@path` brings nothing.
+**3. Send.** Send **one** backlog to one idle worker. The message is the lines below, every
+slot filled. The worker knows nothing of this conversation, so what is not in the message
+does not reach it — except the worker's steps: they stand in this skill's
+`references/worker.md`, and the first line tells the worker to `Read` that file and follow
+it. The worker is a session of this same repository and loaded the same plugin, so the file
+is there for it. **Do not copy the file into the message** — name it.
 
-    SendMessage(to: <worker>, message: <the lines below, a blank line, references/worker.md>, notify_when_idle: true)
+    SendMessage(to: <worker>, message: <the lines below>, notify_when_idle: true)
 
-Fill in `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+`<steps file>` is that file's absolute path: this skill's base directory — Claude Code shows
+it as "Base directory for this skill" when the skill loads — followed by
+`/references/worker.md`. Write it out whole; `@path` attaches nothing.
+Fill in `<id>`, `<title>`, `<steps file>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -2068,7 +2075,7 @@ idle worker after that other work's report is checked. Send the message of 3 wit
 filled with the epic and its first line changed to the one below. Until then, count it in 1
 as work holding that file.
 
-    You are handed epic <id> — <title>. It is already unfolded; do not promote. Do it by the worker steps below, from step 2.
+    You are handed epic <id> — <title>. It is already unfolded; do not promote. Read <steps file> and follow its steps from step 2.
 
 Like the ones from 7-1, that member is right even when it is not done — it keeps the epic
 open, so the epic is not done either.
@@ -2143,8 +2150,8 @@ const TO_REVIEW: &str = "moai -C <root> mv <member> review --from in_progress";
 /// `the_brief_stands_members_in_review` 가 이 글을 `refuse.no_column` 의 영어 글과 견준다.
 const NO_REVIEW_COLUMN: &str = "`review` is not a column";
 
-/// 감독이 일꾼에게 `SendMessage` 로 보내는 메시지의 머리 — 맡길 일(첫 줄)과 감독이 채운 자리들(moai-obxm). 이 줄들
-/// 뒤에 [`worker`] 의 글 전부가 붙는다. **일꾼이 아는 것은 이 메시지뿐이다** — 감독 스킬의 다른 절을 가리키면 일꾼에게
+/// 감독이 일꾼에게 `SendMessage` 로 보내는 메시지 — 맡길 일(첫 줄)과 감독이 채운 자리들(moai-obxm). 첫 줄이
+/// [`worker`] 의 파일(`<steps file>`)을 읽고 몇째 걸음부터 할지를 댄다(moai-fim6). **일꾼이 아는 것은 이 메시지와 그 파일뿐이다** — 감독 스킬의 다른 절을 가리키면 일꾼에게
 /// 없는 글을 가리키는 것이라(첫 판의 "아래 공유 main" 이 그랬다), 감독만 아는 값은 모두 자리로 싣는다. 자리마다 읽는
 /// 법은 일꾼 글의 "The assignment" 가 댄다.
 ///
@@ -2155,7 +2162,7 @@ const NO_REVIEW_COLUMN: &str = "`review` is not a column";
 /// `the_message_carries_every_slot_the_steps_read` 가 둘을 견준다.
 fn message() -> String {
     format!(
-        r#"    You are handed backlog <id> — <title>. Do it by the worker steps below, from step 1.
+        r#"    You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
     Read first: moai show <id>
     {MODEL_SLOT}
     {BESIDE}
@@ -2167,7 +2174,8 @@ fn message() -> String {
     )
 }
 
-/// 일꾼의 걸음 — 감독 스킬의 `references/worker.md`(moai-obxm). 감독이 [`message`] 의 줄 뒤에 **통째로** 붙여 보낸다.
+/// 일꾼의 걸음 — 감독 스킬의 `references/worker.md`(moai-obxm). 감독의 [`message`] 가 첫 줄에서 이 파일을 읽으라고 이른다
+/// (moai-fim6). 일꾼이 하는 일을 바꾸지 않는 내력·측정 글은 여기 안 싣는다 — 그것은 이 주석과 커밋 메시지에 선다.
 /// 일꾼 스킬(`moai-work`)을 걷었으니 일꾼이 지킬 것은 모두 여기 적는다.
 ///
 /// **Claude Code 의 것이다**(2026-10-06 사용자 결정). 감독 스킬이 Claude Code 에만 심기니 이 글을 받는 창도 Claude
@@ -2206,16 +2214,16 @@ pub fn worker() -> String {
     format!(
         r#"# Worker steps
 
-This message comes from a supervisor — a Claude Code session running `moai-supervise` on
-this repository. The lines above are your assignment; the text below is how to do it. You
-know nothing else of the supervisor's conversation and need nothing else. **The person comes
-first** — this window is theirs; when they speak, answer them.
+A supervisor — a Claude Code session running `moai-supervise` on this repository — sent you
+a message that names this file. The message's lines are your assignment; this file is how to
+do it. You know nothing else of the supervisor's conversation and need nothing else. **The
+person comes first** — this window is theirs; when they speak, answer them.
 
 ## The assignment
 
-The first line names the work and where to start — `from step 1` for a new backlog,
-`from "Carrying on stalled work"` for work a session left behind, `from step 2` for an epic
-already unfolded whose first-column members are left. The message's `from` is the supervisor
+The message's first line names the work and the step of this file to start from —
+`from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
+behind, `from step 2` for an epic already unfolded whose first-column members are left. The message's `from` is the supervisor
 — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`. Every
 other line fills a slot the steps use; a line the supervisor adds beyond those — who already
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.
@@ -2341,7 +2349,7 @@ it. When the person is back in the window, what they say overrides what you deci
    and inserts `-L`. Do not send keys into a pane someone else raised. If you raise a test
    agent on that server, keep its cwd outside the root (the scratchpad) — raised in the root,
    it stands in `ListAgents` as a session of this repository and a supervisor takes it for a worker.
-   **Give a review subagent these words too** — it was a review subagent that killed a whole server
+   **Give a review subagent these words too**
 
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
    the files named by `Work running alongside` in the message, or files a sibling branch in
@@ -2390,26 +2398,20 @@ it. When the person is back in the window, what they say overrides what you deci
    does not exist here: leave the members where they stand and go on. If it answers that the
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
-   When the worktree's hook cannot see a review issue created or picked up in the root and
-   blocks you — a binary from before the hook moved the tracker to the root
-   reads that worktree's snapshot only — run a review subagent with the same angle, grade and
-   `--fix` scope. A subagent inherits the window's model, so pass the model for the grade above in
-   `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
-   `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
-   the way the refusal's own command says
+   A refusal from the hook, such as a missing angle, is not worked around: fix it the way the
+   refusal's own command says
 
 {angle}
 
    **While the review is running, do not touch this worktree's branch or its working tree.**
    A review that fixes leaves its fixes in the working tree uncommitted, so `reset --hard`,
-   `rebase` and `commit --amend` throw them away — that has happened, told to do it by a
-   supervisor saying "it is before the merge, so it can still be fixed". Nothing blocks it;
-   this line is what holds. Fixing a commit subject waits until the review has returned.
+   `rebase` and `commit --amend` throw them away — even when it is before the merge and
+   looks fixable. Nothing blocks it; this line is what holds. Fixing a commit subject waits
+   until the review has returned.
    **When it returns, stop what it left running with `TaskStop` before you touch the tree**
    and read the working tree's status. A sweep subagent still alive writes its own version
    into this same worktree and covers a commit you already made without a word, and a
-   `cargo test` after that measures that agent's files rather than yours — that has happened
-   too, and it also burned an hour and a half in a worktree that was gone.
+   `cargo test` after that measures that agent's files rather than yours.
 
 7-1. Before merging, go back over the backlog parked mid-epic
    (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
@@ -2447,8 +2449,7 @@ it. When the person is back in the window, what they say overrides what you deci
    point: it is a row decided out of this release.
    **Bug-level is measured with the words that already exist** — does a `#bug` tag fit, and
    can a `Regression-of:` line be written (did something already merged break). Those two are
-   inside; the rest is outside. A new axis is not made because it would become a fourth
-   vocabulary beside the column, the kind and the defer
+   inside; the rest is outside. Do not make a new tag or field for it
 
 7-3. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
    for the release being prepared**, and write it if it does not. Write it **here, in the
@@ -2460,12 +2461,8 @@ it. When the person is back in the window, what they say overrides what you deci
    This window is the only one that knows what the epic did, and it is the only one that
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
-   a revert subject of its own. It is cheaper here than in the window that closes the
-   section: v0.1.1 stood with 327 commits behind it, four of which touched the CHANGELOG, and
-   three epics named in its section out of the twenty-four the release held; the rest were
-   written by the window that closed it, 91 lines in one go. The release workflow cuts that
-   section by version name and hands it to `--notes-file` as it is, so a missing section
-   reads to whoever receives it as the whole release. **Nothing checks this** — a check here
+   a revert subject of its own. The release notes are that section as it stands, so a
+   missing line reads to whoever receives them as a change that never shipped. **Nothing checks this** — a check here
    would be a gate, and an empty section must not stop a release
 
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
@@ -2501,8 +2498,7 @@ it. When the person is back in the window, what they say overrides what you deci
    was filled in by the supervisor as a suggestion, so if you raised it, or the window was on
    a different model from the start, correct the model and the difficulty to the real ones and
    write why in the reason — the next person reads "what was put on work of this size" there.
-   It is a note, not a field: the journal is not read to compute state and derived values are
-   not stored. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
+   It is a note, not a field. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
    `anthropic`, and the model is its real name (`opus-5`), not the `/model` alias — the
    `<model>` the supervisor filled in is an alias (`opus`), so write the real name even if you
    did not change models.
@@ -2517,7 +2513,8 @@ it. When the person is back in the window, what they say overrides what you deci
     moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
 
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
-    landed** — a worker moved them before the merge and had to undo it. It closes a member
+    landed** — closed before it, a merge that stops on a conflict leaves them done on work
+    that is not in. It closes a member
     from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
     alike. Do not close the
     members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
@@ -2556,8 +2553,7 @@ member still stands picked up. Read how far it got (`moai show <epic>`, its hist
 notes), then
 
 - If the worktree is there, go in with `EnterWorktree(path)`, read how far it got with
-  `git log <base branch>..HEAD` and `git status`, and carry on. One raised before the
-  shared place stands at `.claude/worktrees/<epic>` — remove it from there in 9
+  `git log <base branch>..HEAD` and `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
@@ -3038,8 +3034,8 @@ mod tests {
 
     /// **일꾼의 걸음(`worker`)에 첫 실행에서 넘어진 자리가 선다.** 감독 스킬에만 적으면 시험은 초록인데
     /// 일꾼은 못 읽는다 — `MERGE_HEAD` 가 실제로 그랬다. 하나라도 빠지면 다음 일꾼이 같은 자리에서 또
-    /// 넘어진다. 걸음은 감독 스킬의 `references/worker.md`([`worker`])에 서고 감독이 메시지 머리([`message`]) 뒤에 붙여
-    /// 보낸다(moai-obxm).
+    /// 넘어진다. 걸음은 감독 스킬의 `references/worker.md`([`worker`])에 서고, 감독의 메시지([`message`])가 그것을 읽으라고
+    /// 이른다(moai-fim6).
     #[test]
     fn the_worker_brief_carries_what_the_first_run_tripped_on() {
         let (brief, supervise) = (worker(), supervise());
@@ -3049,10 +3045,8 @@ mod tests {
         assert!(!supervise.contains(&brief), "감독 SKILL.md 가 일꾼 걸음 전부를 싣는다");
         let review = make_review("--parent <epic>");
         for (piece, why) in [
-            // **4-1 도 "리뷰 서브에이전트" 를 말한다.** 글자만 보면 7 의 길이 통째로 빠져도
-            // 초록이라, 7 의 그 줄에만 있는 앞말까지 매어 찾는다.
-            ("run a review subagent with the same angle", "워크트리에서 /code-review 가 막힐 때의 길이 없다"),
-            ("reads that worktree's snapshot only", "막히는 까닭이 없어 다른 거절까지 돌아간다"),
+            // 거절은 돌아가지 않고 거절문의 명령대로 고친다 — 옛 바이너리를 위한 서브에이전트 우회는 걷었다(moai-fim6).
+            ("is not worked around: fix it the way the", "훅의 거절을 우회한다"),
             ("only once that merge has really", "병합 전에 done 으로 옮기지 말라는 말이 없다"),
             ("Do not review member by member", "멤버 리뷰를 걷었다는 말이 없어 일꾼이 멤버마다 리뷰한다"),
             ("`low`·`medium`·`high`", "멤버를 잴 난이도의 폭이 없다"),
@@ -3142,6 +3136,19 @@ mod tests {
         // 거둔 일도 새 일과 같은 메시지를 받는다 — 모델 줄은 그 머리의 한 줄이고, 읽는 법은 일꾼 글에 한 번 선다.
         assert!(message().contains(MODEL_SLOT), "메시지에 모델 줄이 없다");
         assert!(work.contains(&indent(&model_rule(), "  ")), "일꾼 글이 모델 줄을 어떻게 읽는지 안 댄다");
+        // **일꾼이 하는 일을 바꾸지 않는 내력·측정은 걸음에 안 싣는다**(moai-fim6) — 규칙은 남고 그 까닭의 숫자와 옛 판의
+        // 우회만 걷었다. 내력은 주석과 커밋에 선다.
+        for (gone, why) in [
+            ("714", "git 꼴의 측정 수를 싣는다"),
+            ("cases)", "git 꼴의 건수를 싣는다"),
+            ("v0.1.1", "7-3 이 옛 릴리스의 내력을 싣는다"),
+            ("91 lines", "7-3 이 옛 릴리스의 내력을 싣는다"),
+            ("binary from before", "7 이 옛 바이너리를 위한 우회를 싣는다"),
+            (".claude/worktrees", "거둔 일이 옛 워크트리 자리를 싣는다"),
+            ("that has happened", "걸음이 일어난 일의 내력을 싣는다"),
+        ] {
+            assert!(!work.contains(gone), "{why} — {gone}");
+        }
     }
 
     /// **마일스톤 우선 규칙은 글이 유일한 자리다**(moai-s526, 2026-09-20 사용자 결정).
@@ -3306,9 +3313,9 @@ stop sending outside work while a release runs",
         assert!(step.contains("/code-review <grade> --fix"), "에픽 리뷰 걸음이 7 에 없다");
         assert!(step.contains(&indent(&rule, "   ")), "브리프 7 에 에픽 끝 등급·모델 규칙이 없다");
         assert!(step.contains("`/model opus`"), "에픽 끝 리뷰의 모델을 맞추라는 말이 일꾼에게 없다");
-        // 훅에 막혀 돌리는 리뷰 서브에이전트도 창의 모델을 물려받는다 — 창을 못 맞췄으면 싼 모델이
-        // 쓰기 경로를 본다. 서브에이전트에는 모델을 직접 준다.
-        assert!(step.contains("`Agent`'s `model`"), "리뷰 서브에이전트의 모델을 안 준다");
+        // 훅에 막힐 때 리뷰 서브에이전트로 돌리던 길은 옛 바이너리의 것이라 걷었다(moai-fim6) — 리뷰는 이 창의
+        // `/code-review` 하나고, 그 모델은 바로 위의 `/model` 로 맞춘다.
+        assert!(!step.contains("`Agent`'s `model`"), "옛 바이너리를 위한 리뷰 서브에이전트 우회가 남았다");
         // 일꾼이 받는 메시지에 그 자리가 있어야 감독이 채운다. **목록 줄에서 찾는다** — 바로 아래
         // 풀이 글도 세 자리를 적어, 감독 쪽 전체에서 찾으면 목록에서 빠져도 초록이었다.
         assert!(message().contains(MODEL_SLOT), "메시지에 모델 자리가 없다 — 감독이 골라도 일꾼은 모른다");
@@ -3663,7 +3670,7 @@ stop sending outside work while a release runs",
     }
 
     /// **에픽 끝의 위키 걸음(7-4)은 짧게 두고 본문은 스킬로 보낸다**(moai-bl3x, 사용자 결정 2026-10-04).
-    /// 브리프는 감독이 매 바퀴 통째로 싣는 글이라, 위키 쓰는 법을 여기 펴면 그 값을 일꾼마다 낸다.
+    /// 브리프는 일꾼이 매 바퀴 통째로 읽는 글이라, 위키 쓰는 법을 여기 펴면 그 값을 일꾼마다 낸다.
     /// 7-3 의 CHANGELOG 와 같은 까닭으로 워크트리에서 머지 전에 커밋하고, 아무것도 막지 않는다.
     #[test]
     fn the_brief_sends_the_wiki_step_to_the_skill() {
@@ -4419,12 +4426,29 @@ stop sending outside work while a release runs",
             "다른 기계의 일꾼에게서도 idle 알림이 온다고 읽힌다"
         );
         assert!(supervise[..round].contains("A subagent sends under its parent"), "서브에이전트가 부모의 주소로 보낸다는 말이 없다");
-        // 보내기는 걸음 전부를 싣는다 — 일꾼 창에는 심긴 글이 없다.
+        // 보내기는 SendMessage 이고 idle 알림을 건다.
         let send = &supervise[supervise.find("**3. Send.**").expect("감독의 3 이 없다")
             ..supervise.find("**4. Wait.**").expect("감독의 4 가 없다")];
         assert!(send.contains("SendMessage(to: <worker>, message: "), "감독이 SendMessage 로 안 보낸다");
         assert!(send.contains("notify_when_idle: true"), "감독이 보낼 때 idle 알림을 안 건다");
-        assert!(send.contains("**the whole text of this skill's\n`references/worker.md`**"), "감독이 일꾼 걸음을 통째로 안 싣는다");
+        // **메시지는 걸음 파일을 읽으라고만 한다**(2026-10-07 사용자 결정, moai-fim6). 32KB 를 손으로 옮겨 붙이던 판은
+        // 보낼 때마다 출력 토큰 8~10k 가 들었고 줄이거나 바꿔 옮긴 글을 아무것도 못 잡았다 — 되돌리면 여기서 붉어진다.
+        assert!(send.contains("`references/worker.md`"), "감독의 3 이 일꾼 걸음 파일을 이름으로 안 댄다");
+        assert!(send.contains("tells the worker to `Read` that file"), "감독의 3 이 일꾼에게 그 파일을 읽히지 않는다");
+        assert!(send.contains("**Do not copy the file into the message**"), "감독이 걸음 파일을 메시지에 옮겨 붙인다");
+        assert!(send.contains("\"Base directory for this skill\""), "감독이 걸음 파일의 절대 경로를 어디서 읽는지 모른다");
+        assert!(!send.contains(".claude/moai-plugin"), "걸음 파일의 자리를 박았다 — 스킬의 기준 디렉터리에서 읽는다");
+        for gone in ["whole text", "paste", "a blank line, references/worker.md"] {
+            assert!(!send.contains(gone), "감독의 3 이 걸음 전부를 싣던 말을 들고 있다 — {gone}");
+        }
+        // 세 메시지의 첫 줄이 모두 그 파일을 읽으라고 한다 — 새 일·거둔 일·펼친 에픽.
+        let read = "Read <steps file> and follow its steps from ";
+        assert!(message().lines().next().unwrap().contains(&format!("{read}step 1.")), "메시지 첫 줄이 걸음 파일을 안 읽힌다");
+        for start in ["\"Carrying on stalled work\".", "step 2."] {
+            assert!(supervise.contains(&format!("{read}{start}")), "감독의 `{start}` 메시지가 걸음 파일을 안 읽힌다");
+        }
+        assert!(!supervise.contains("worker steps below"), "메시지가 아래에 붙은 걸음을 가리킨다");
+        assert!(!brief.contains("The lines above are your assignment"), "일꾼 글이 메시지 아래에 붙은 글로 읽힌다");
         let wait = &supervise[supervise.find("**4. Wait.**").unwrap()
             ..supervise.find("**5. Check the report").expect("감독의 5 가 없다")];
         assert!(wait.contains("cross-session message"), "감독이 보고를 세션 사이 메시지로 안 받는다");
