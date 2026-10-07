@@ -24,6 +24,12 @@ does not tag — see `CONTRIBUTING.md`.
   it would land inside any `.moai` directory or on the snapshot behind its link,
   naming the path and where it points; nothing is written and the link stays.
   (moai-r0x8.a42)
+- **A main checkout left holding only `.moai/lock` no longer traps its linked
+  worktrees.** After checking out an old commit or bisecting, the lookup in a
+  sibling worktree said there was no tracker and to run `moai init`, while
+  `moai init` there refused and pointed at the main checkout. Both now ask the
+  same question — does the main checkout hold `.moai/config.toml` — so `init`
+  in that worktree plants its own tracker. (moai-r0x8.apz)
 
 ## [0.9.0] - 2026-10-07
 

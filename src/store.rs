@@ -2693,9 +2693,10 @@ fn open_tmp(path: &Path, tmp_dir: &Path) -> R<(PathBuf, std::fs::File)> {
 ///
 /// `MOAI_HERE` 는 둘 다 끈다 — 그 워크트리에서만 쓰는 트래커를 일부러 두는 길이다.
 ///
-/// **위로 찾는 자는 `.moai` 가 디렉터리인가로 가른다** — [`look`] 의 위로 찾기와 같은 자다.
-/// `config.toml` 까지 봐야 트래커라고 세는 자리도 있지만([`crate::worktree::tracker_root`]), 여기서
-/// 물어야 하는 것은 "명령이 어디로 가는가" 라 그쪽 자를 쓰면 설정이 빠진 `.moai` 위에서 둘이 갈린다.
+/// **위로 찾는 걸음은 [`look`] 의 것과 같다**([`climb`]) — 물어야 하는 것이 "명령이 어디로 가는가" 라서다.
+/// 다만 **딸린 워크트리가 주 체크아웃으로 가는가**는 찾기가 옮겨 갈 때와 같은 자([`holds_tracker`])로
+/// 묻는다(moai-r0x8.apz) — 찾기는 설정이 있어야 옮겨 가므로, 여기서 `.moai` 디렉터리만 보면 락만 남은 주
+/// 체크아웃 앞에서 찾기는 "`init` 하라" 를, `init` 은 "주 체크아웃에 있다" 를 대 막다른 길이 선다.
 ///
 /// **찾은 자리에서 한 번 더 옮김을 묻는다**(리뷰) — `.moai` 를 가진 조상을 찾았다고 거기가 끝이
 /// 아니다. [`Repo::find_from`] 은 그 자리에서 [`crate::worktree::tracker_root`] 로 한
@@ -2755,10 +2756,27 @@ fn elsewhere(root: &Path) -> Option<Elsewhere> {
     };
     // 딸린 워크트리가 아니면 위에서 찾은 것이 답이다 — 조상 훑기는 여기서 처음 돈다.
     let Some(mirror) = crate::worktree::main_root(root) else { return above() };
+    // **주 체크아웃에 트래커가 있는가는 [`holds_tracker`] 로 묻는다**(moai-r0x8.apz) — 찾기가 옮겨 갈지를
+    // 가르는 [`crate::worktree::tracker_root`] 와 같은 자다.
     climb(&mirror)
-        .filter(|(_, left_a_checkout)| !*left_a_checkout)
+        .filter(|(at, left_a_checkout)| !*left_a_checkout && holds_tracker(at))
         .map(|(at, _)| Elsewhere::Worktree(at))
         .or_else(above)
+}
+
+/// **이 디렉터리의 `.moai` 가 딸린 워크트리가 옮겨 갈 트래커인가** — `.moai/config.toml` 이 파일로 서 있다.
+///
+/// **가르는 자는 이 하나다**(moai-r0x8.apz). 찾기([`crate::worktree::tracker_root`])는 설정이 있어야 옮겨 가고
+/// `init` 의 거절([`elsewhere`])은 `.moai` 디렉터리만 보던 판은, 옛 커밋을 체크아웃하거나 bisect 해 `.moai/lock`
+/// 하나만 남은 주 체크아웃 앞에서 둘이 갈렸다 — 옆 워크트리의 찾기는 "`moai init` 이 심는다" 를 대고, 그
+/// `init` 은 주 체크아웃을 대며 거절했다. 락은 `Lock::drop` 이 안 지우므로 트래커가 통째로 사라져도 그
+/// 파일만 남는다. 설정이 없는 `.moai` 는 어느 명령도 못 연다(`Config::load_in`) — 그리로 옮겨 가면
+/// 저장소의 모든 워크트리가 "설정이 없다" 로 넘어진다.
+///
+/// 위로 찾는 걸음([`climb`])은 이 자를 안 쓴다. 그쪽이 묻는 것은 "명령이 어느 `.moai` 로 가는가" 라, 설정이
+/// 빠진 `.moai` 위에서 부른 명령은 거기서 그 까닭으로 멈추는 것이 맞다.
+pub(crate) fn holds_tracker(dir: &Path) -> bool {
+    dir.join(".moai").join("config.toml").is_file()
 }
 
 /// **"여기서 `moai init` 하라" 를 대도 되는가** — 안 되면 대신 댈 주 체크아웃이다(moai-nppo).

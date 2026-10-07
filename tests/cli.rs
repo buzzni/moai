@@ -1650,6 +1650,36 @@ fn a_worktree_split_before_moai_still_refuses_to_plant_a_tracker() {
     assert!(!out.status.success(), "워크트리 꼭대기에 세웠다 — {}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// **주 체크아웃에 트래커가 있는가를 가르는 자는 하나다**(moai-r0x8.apz). 옛 커밋을 체크아웃하거나 bisect 하면
+/// 주 체크아웃에 `.moai/lock` 하나만 남는다(`Lock::drop` 은 락 파일을 안 지운다). 찾기(`worktree::tracker_root`)는
+/// `config.toml` 이 없으니 트래커가 아니라 하고, `init` 의 거절(`store::elsewhere`)은 `.moai` 디렉터리가 있으니
+/// 트래커라 했다 — 옆 워크트리의 `prime` 은 "`moai init` 이 심는다" 를 대고, 그 `init` 은 주 체크아웃을 대며
+/// 거절했다. 막다른 길이다. 이제 둘 다 `store::holds_tracker` 로 묻는다.
+#[test]
+fn a_main_checkout_holding_only_a_lock_is_no_tracker_to_either_judge() {
+    let s = Scratch::new("initwt-lockonly");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "before"]);
+    git(&main, &["worktree", "add", "-q", "../side", "-b", "side"]);
+    std::fs::create_dir_all(main.join(".moai")).unwrap();
+    std::fs::write(main.join(".moai/lock"), "").unwrap();
+    let side = s.path().join("side");
+
+    let json = ok(&side, &["prime", "--json"]);
+    assert!(json.contains("\"no_tracker\":true"), "시험의 전제 — 찾기는 락만 남은 자리를 트래커로 안 센다\n{json}");
+    let json = ok(&side, &["init", "--check", "--json"]);
+    assert!(!json.contains("tracker_at"), "init --check 가 락만 남은 주 체크아웃을 댔다\n{json}");
+
+    // prime 이 댄 `moai init` 이 실제로 선다 — 막다른 길이 없다.
+    ok(&side, &["init", "argos"]);
+    assert!(side.join(".moai/config.toml").is_file(), "워크트리에 트래커가 안 섰다");
+    let id = field(&ok(&side, &["add", "이 가지의 일", "--json"]), "id");
+    assert!(issues(&side).contains(&format!("\"id\":\"{id}\"")), "세운 트래커를 안 읽었다");
+    assert!(!main.join(".moai/issues.jsonl").exists(), "락만 남은 주 체크아웃에 썼다");
+}
+
 /// **알리는 표면은 `MOAI_HERE` 를 안 물려받는다**(moai-ko4y, 2026-09-21 사용자 결정). `--check` 의
 /// `tracker_at` 은 **나중의 다른 부름**이 어디서 서느냐에 답하는 자라, 지금 셸이 손잡이를 켰는지와
 /// 무관하다. 물려받던 판은 `MOAI_HERE=1` 인 셸에서 그 키가 통째로 빠져, 사람 없이 도는 고리가
