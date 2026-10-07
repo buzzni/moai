@@ -1180,8 +1180,8 @@ of this repository and take their reports. Every idle session of this repository
 `ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
 assignment (`SendMessage`) with a line naming the file of the worker's steps to read, and
 the worker reports the same way. moai carries no messaging and never launches a session;
-every one of them is a session a person opened. The supervisor picks, sends and checks; it does not fix and it
-does not merge.
+every one of them is a session a person opened. The supervisor picks, sends and checks; it
+does not fix and it does not merge.
 
 ### The wiki
 
@@ -2212,8 +2212,8 @@ person comes first** — this window is theirs; when they speak, answer them.
 
 The message's first line names the work and the step of this file to start from —
 `from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
-behind, `from step 2` for an epic already unfolded whose first-column members are left. The message's `from` is the supervisor
-— `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`. Every
+behind, `from step 2` for an epic already unfolded whose first-column members are left.
+The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`. Every
 other line fills a slot the steps use; a line the supervisor adds beyond those — who already
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.
 
@@ -2451,8 +2451,9 @@ it. When the person is back in the window, what they say overrides what you deci
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
    a revert subject of its own. The release notes are that section as it stands, so a
-   missing line reads to whoever receives them as a change that never shipped. **Nothing checks this** — a check here
-   would be a gate, and an empty section must not stop a release
+   missing line reads to whoever receives them as a change that never shipped.
+   **Nothing checks this** — a check here would be a gate, and an empty section must not
+   stop a release
 
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
    epic changed what a person does — {CHANGED_USE}.
@@ -2503,9 +2504,8 @@ it. When the person is back in the window, what they say overrides what you deci
 
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
     landed** — closed before it, a merge that stops on a conflict leaves them done on work
-    that is not in. It closes a member
-    from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
-    alike. Do not close the
+    that is not in. It closes a member from `review`, where 7 stood it, and from
+    `in_progress` where there is no `review` column alike. Do not close the
     members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
     the worktree still stands, the hook reads this work as a sibling worktree's and cannot
     refuse a review closed without `-m`. Close the review issue leaving what came out of it

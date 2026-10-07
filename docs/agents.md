@@ -276,8 +276,9 @@ and Antigravity have no supervisor; their sessions pick their own work with
 `moai ready`.
 
 1. **Open the sessions.** Every Claude Code session a person opened in the
-   repository's root that sits idle in `ListAgents` is a
-   [worker](glossary.md#worker). `ListAgents` shows no directory, so the
+   repository's root on this machine that sits idle in `ListAgents` is a
+   [worker](glossary.md#worker) — a Remote Control or cloud session cannot read
+   the steps file the supervisor names. `ListAgents` shows no directory, so the
    supervisor knows a session of this repository by its name, which Claude Code
    takes from the directory it was opened in (`moa-issue-bc` for `moa-issue`) —
    a session you renamed is not counted. Nothing registers it, and
@@ -390,7 +391,8 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   this repository that read idle in `ListAgents` — by name: a session opened
   outside the root, or renamed, does not start with the repository's directory
   name. A session busy on its person's
-  work is not one, and Codex and Antigravity sessions never show there
+  work is not one, nor is a Remote Control or cloud session, and Codex and
+  Antigravity sessions never show there
 - **A worker never answers.** Its session may run in another permission mode,
   where an incoming message waits for its person's approval — look at that
   window
