@@ -2736,12 +2736,9 @@ mod tests {
         // 일꾼도 에이전트를 안 띄운다는 결정이 깨진다. 일꾼 글은 Claude Code 만 받으니(moai-obxm) 다른 벤더의 그
         // 명령을 이름으로 댈 까닭도 없다.
         let spawns = ["codex review", "codex exec", "agy -p"];
-        for (surface, text) in [
-            ("낱말표", verbs_section()),
-            ("규칙 셋", rules()),
-            ("감독 스킬", supervise()),
-            ("일꾼 글", worker()),
-        ] {
+        for (surface, text) in
+            [("낱말표", verbs_section()), ("규칙 셋", rules()), ("감독 스킬", supervise()), ("일꾼 글", worker())]
+        {
             for spawn in spawns {
                 assert!(!text.contains(spawn), "{surface} 이 새 에이전트를 띄우는 {spawn} 를 가르친다");
             }
@@ -3788,8 +3785,8 @@ stop sending outside work while a release runs",
     /// **tmux 시험은 떼어 낸 서버에서만 가르친다**(2026-09-18 사용자 규칙). 스킬이 맨
     /// `tmux new-session -d` 를 가르치던 날, 그 길을 따른 리뷰 서브에이전트가 맨 `kill-server` 로
     /// 사람의 tmux 서버를 통째로 죽였다 — tmux 안에서는 `$TMUX` 가 `TMUX_TMPDIR` 를 이긴다.
-    /// 감독이 읽는 글과 일꾼이 받는 글 **둘 다** 에 서야 한다: 시험을 실제로 치는 것은 일꾼과 그
-    /// 리뷰 서브에이전트다.
+    /// 일꾼이 받는 글에 서야 한다: 시험을 실제로 치는 것은 일꾼과 그 리뷰 서브에이전트다. 감독은
+    /// tmux 를 안 만지니(moai-obxm) 감독 글에는 규칙이 안 선다.
     #[test]
     fn tmux_tests_are_taught_on_a_separate_server() {
         let (supervise, brief) = (supervise(), worker());
@@ -3797,17 +3794,15 @@ stop sending outside work while a release runs",
         // 줄이 감독 쪽에서 빠진 자리를 메웠다.
         assert!(!supervise.contains(&brief), "감독 스킬이 일꾼의 걸음을 품는다");
         // 감독은 tmux 를 안 만진다 — 창을 비우던 5-1 을 걷었다(moai-obxm). 시험하는 것은 일꾼이라 규칙은 일꾼 글에 선다.
-        for (name, text) in [("일꾼 걸음", brief.as_str())] {
-            assert!(text.contains("env -u TMUX tmux -L"), "{name}: 떼어 낸 서버로 시험하라는 말이 없다");
-            assert!(text.contains("without `-L`/`-S`"), "{name}: 맨 kill-server 를 막는 말이 없다");
-            assert!(text.contains("TMUX_TMPDIR"), "{name}: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
-            // 속에서 `tmux` 를 부르는 스크립트에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
-            // 일꾼에게도 가둘 길이 있어야 하고, 그 감싸개가 PATH 로 제 자신을 부르면 끝나지 않는다.
-            assert!(
-                text.contains("wrapper") && text.contains("absolute path"),
-                "{name}: 스크립트를 떼어 낸 서버에 돌릴 길이 없다"
-            );
-        }
+        assert!(brief.contains("env -u TMUX tmux -L"), "일꾼 걸음: 떼어 낸 서버로 시험하라는 말이 없다");
+        assert!(brief.contains("without `-L`/`-S`"), "일꾼 걸음: 맨 kill-server 를 막는 말이 없다");
+        assert!(brief.contains("TMUX_TMPDIR"), "일꾼 걸음: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
+        // 속에서 `tmux` 를 부르는 스크립트에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
+        // 일꾼에게도 가둘 길이 있어야 하고, 그 감싸개가 PATH 로 제 자신을 부르면 끝나지 않는다.
+        assert!(
+            brief.contains("wrapper") && brief.contains("absolute path"),
+            "일꾼 걸음: 스크립트를 떼어 낸 서버에 돌릴 길이 없다"
+        );
         assert!(
             brief.contains("**Give a review subagent these words too**"),
             "리뷰 서브에이전트가 tmux 규칙을 못 받는다"
@@ -4046,14 +4041,23 @@ stop sending outside work while a release runs",
         let three = supervise.find("**2-1. ").expect("2-1 이 없다");
         let step = &supervise[two..three];
         assert!(step.contains("Call `ListAgents` once"), "감독이 일꾼을 ListAgents 로 안 찾는다");
-        assert!(step.contains("belongs to this repository") && step.contains("is not you"), "감독이 일꾼을 자리로 안 거른다");
+        assert!(
+            step.contains("belongs to this repository") && step.contains("is not you"),
+            "감독이 일꾼을 자리로 안 거른다"
+        );
         // `ListAgents` 는 서브에이전트도 늘어놓는다 — 자리만 보면 감독 제 서브에이전트(같은 저장소, idle)가 일꾼으로 서고,
         // 그것에 보낸 메시지는 그 서브에이전트를 되살린다. `ListAgents` 는 자리를 안 보이니(2026-10-07 실제 목록) 이름의 머리로 거른다.
         assert!(step.contains("Not a subagent"), "감독이 서브에이전트를 일꾼으로 센다");
-        assert!(step.contains("A row whose name does not start that way"), "이름이 이 저장소의 것이 아닌 줄을 일꾼으로 센다");
+        assert!(
+            step.contains("A row whose name does not start that way"),
+            "이름이 이 저장소의 것이 아닌 줄을 일꾼으로 센다"
+        );
         // 일꾼은 감독이 이름 대는 걸음 파일의 절대 경로를 읽는다 — 다른 기계의 세션은 그 파일을 못 연다(moai-fim6).
         assert!(step.contains("runs on this machine"), "다른 기계의 세션을 일꾼으로 센다");
-        assert!(step.contains("`interactive`") && step.contains("not a `bg` session"), "사람이 연 세션만 거르지 않는다");
+        assert!(
+            step.contains("`interactive`") && step.contains("not a `bg` session"),
+            "사람이 연 세션만 거르지 않는다"
+        );
         assert!(step.contains("**A test agent is no worker.**"), "시험용 에이전트를 어떻게 할지 없다");
         assert!(brief.contains("keep its cwd outside the root"), "시험용 에이전트를 루트에서 띄운다");
         // Claude Code 의 속 파일은 문서에 없고 Claude 세션만 든다 — 감독이 다시 그것을 읽으면 다른 벤더의
@@ -4288,15 +4292,8 @@ stop sending outside work while a release runs",
     /// 실패한다. 칸이 빈 글이면 표가 아무것도 안 가르치니 빈 칸은 [`NO_VERB`] 로 적혀야 한다.
     #[test]
     fn the_words_table_splits_every_claude_only_step() {
-        let claude_only = [
-            "EnterWorktree",
-            "ExitWorktree",
-            "AskUserQuestion",
-            "/code-review",
-            "/model",
-            "/clear",
-            "TaskStop",
-        ];
+        let claude_only =
+            ["EnterWorktree", "ExitWorktree", "AskUserQuestion", "/code-review", "/model", "/clear", "TaskStop"];
         for word in claude_only {
             let row =
                 VERBS.iter().find(|v| v.words[0].contains(word)).unwrap_or_else(|| panic!("{word} 의 줄이 표에 없다"));
@@ -4330,7 +4327,10 @@ stop sending outside work while a release runs",
             assert!(!text.contains(title), "{whose} 에 낱말표가 섰다");
             for v in &VERBS {
                 let step = v.step.split(" (").next().unwrap_or(v.step);
-                assert!(!text.contains(&format!("*{step}*")), "{whose} 가 걸음을 *{step}* 로 가리킨다 — 도구를 바로 적는다");
+                assert!(
+                    !text.contains(&format!("*{step}*")),
+                    "{whose} 가 걸음을 *{step}* 로 가리킨다 — 도구를 바로 적는다"
+                );
             }
         }
         let head = section.lines().find(|l| l.starts_with("| Step |")).expect("표 머리가 없다");
@@ -4396,7 +4396,9 @@ stop sending outside work while a release runs",
     #[test]
     fn the_supervisor_and_the_workers_talk_through_claude_code() {
         let (supervise, brief) = (supervise(), worker());
-        for (whose, text) in [("감독 스킬", supervise.as_str()), ("일꾼 글", brief.as_str()), ("AGENTS 블록", &agents())] {
+        for (whose, text) in
+            [("감독 스킬", supervise.as_str()), ("일꾼 글", brief.as_str()), ("AGENTS 블록", &agents())]
+        {
             for gone in ["moai hello", "moai send", "moai inbox", "moai agents", "any-idle-worker", "moai-work"] {
                 assert!(!text.contains(gone), "{whose} 이 걷은 {gone} 를 가르친다");
             }
@@ -4407,17 +4409,30 @@ stop sending outside work while a release runs",
             assert!(supervise[..round].contains(tool), "감독이 바퀴 앞에 {tool} 를 안 댄다");
         }
         assert!(
-            supervise[..round].contains("**A worker is every idle session of this\nrepository in `ListAgents`, except you**"),
+            supervise[..round]
+                .contains("**A worker is every idle session of this\nrepository in `ListAgents`, except you**"),
             "일꾼이 이 저장소의 idle 세션 전부라는 말이 없다"
         );
-        assert!(supervise[..round].contains("Never poll `ListAgents` in a loop"), "ListAgents 를 되풀이해 훑지 말라는 말이 없다");
-        assert!(supervise[..round].contains("`@path` in a message attaches nothing"), "@path 가 아무것도 안 붙인다는 말이 없다");
-        assert!(supervise[..round].contains("different permission mode"), "권한 모드가 다른 창이 메시지를 붙든다는 말이 없다");
+        assert!(
+            supervise[..round].contains("Never poll `ListAgents` in a loop"),
+            "ListAgents 를 되풀이해 훑지 말라는 말이 없다"
+        );
+        assert!(
+            supervise[..round].contains("`@path` in a message attaches nothing"),
+            "@path 가 아무것도 안 붙인다는 말이 없다"
+        );
+        assert!(
+            supervise[..round].contains("different permission mode"),
+            "권한 모드가 다른 창이 메시지를 붙든다는 말이 없다"
+        );
         assert!(
             supervise[..round].contains("`notify_when_idle` answers only for a session on this machine"),
             "다른 기계의 일꾼에게서도 idle 알림이 온다고 읽힌다"
         );
-        assert!(supervise[..round].contains("A subagent sends under its parent"), "서브에이전트가 부모의 주소로 보낸다는 말이 없다");
+        assert!(
+            supervise[..round].contains("A subagent sends under its parent"),
+            "서브에이전트가 부모의 주소로 보낸다는 말이 없다"
+        );
         // 보내기는 SendMessage 이고 idle 알림을 건다.
         let send = &supervise[supervise.find("**3. Send.**").expect("감독의 3 이 없다")
             ..supervise.find("**4. Wait.**").expect("감독의 4 가 없다")];
@@ -4428,14 +4443,20 @@ stop sending outside work while a release runs",
         assert!(send.contains("`references/worker.md`"), "감독의 3 이 일꾼 걸음 파일을 이름으로 안 댄다");
         assert!(send.contains("tells the worker to `Read` that file"), "감독의 3 이 일꾼에게 그 파일을 읽히지 않는다");
         assert!(send.contains("**Do not copy the file into the message**"), "감독이 걸음 파일을 메시지에 옮겨 붙인다");
-        assert!(send.contains("\"Base directory for this skill\""), "감독이 걸음 파일의 절대 경로를 어디서 읽는지 모른다");
+        assert!(
+            send.contains("\"Base directory for this skill\""),
+            "감독이 걸음 파일의 절대 경로를 어디서 읽는지 모른다"
+        );
         assert!(!send.contains(".claude/moai-plugin"), "걸음 파일의 자리를 박았다 — 스킬의 기준 디렉터리에서 읽는다");
         for gone in ["whole text", "paste", "a blank line, references/worker.md"] {
             assert!(!send.contains(gone), "감독의 3 이 걸음 전부를 싣던 말을 들고 있다 — {gone}");
         }
         // 세 메시지의 첫 줄이 모두 그 파일을 읽으라고 한다 — 새 일·거둔 일·펼친 에픽.
         let read = "Read <steps file> and follow its steps from ";
-        assert!(message().lines().next().unwrap().contains(&format!("{read}step 1.")), "메시지 첫 줄이 걸음 파일을 안 읽힌다");
+        assert!(
+            message().lines().next().unwrap().contains(&format!("{read}step 1.")),
+            "메시지 첫 줄이 걸음 파일을 안 읽힌다"
+        );
         for start in ["\"Carrying on stalled work\".", "step 2."] {
             assert!(supervise.contains(&format!("{read}{start}")), "감독의 `{start}` 메시지가 걸음 파일을 안 읽힌다");
         }
@@ -4449,11 +4470,20 @@ stop sending outside work while a release runs",
         let reclaim = &supervise[round..supervise.find("**1. Pick.**").expect("감독의 1 이 없다")];
         assert!(reclaim.contains("`ListAgents` shows a `busy` session"), "재회수가 바쁜 세션을 ListAgents 로 안 본다");
         // 일꾼은 메시지의 `from` 에게 SendMessage 로 보고한다.
-        assert!(brief.contains("The message's `from` is the supervisor"), "일꾼이 보고할 곳을 메시지의 from 으로 안 읽는다");
-        assert!(brief[step_at(&brief, "12")..].contains("`SendMessage(to: <supervisor>"), "일꾼이 SendMessage 로 보고하지 않는다");
+        assert!(
+            brief.contains("The message's `from` is the supervisor"),
+            "일꾼이 보고할 곳을 메시지의 from 으로 안 읽는다"
+        );
+        assert!(
+            brief[step_at(&brief, "12")..].contains("`SendMessage(to: <supervisor>"),
+            "일꾼이 SendMessage 로 보고하지 않는다"
+        );
         // 감독은 창에 아무것도 안 친다 — 5-1 을 걷었다.
         assert!(!supervise.contains("**5-1."), "감독이 창을 비우는 5-1 이 남았다");
         assert!(!supervise.contains("send-keys") && !supervise.contains("tmux_pane"), "감독이 tmux 칸을 만진다");
-        assert!(supervise.contains("**Clearing a window is the\nperson's**"), "창을 비우는 것이 사람의 몫이라는 말이 없다");
+        assert!(
+            supervise.contains("**Clearing a window is the\nperson's**"),
+            "창을 비우는 것이 사람의 몫이라는 말이 없다"
+        );
     }
 }

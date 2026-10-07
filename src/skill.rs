@@ -115,9 +115,7 @@ where
     I: IntoIterator<Item = &'a Skill>,
     I::IntoIter: 'a,
 {
-    skills
-        .into_iter()
-        .flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+    skills.into_iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
 }
 
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
