@@ -1616,8 +1616,12 @@ impl Leftover {
     /// - **지우기 바로 앞에서 다시 잰다**([`ours`]) — [`leftovers`] 가 잰 뒤 트리 한 벌을 fsync 하며 쓰는 동안 사람이 그 안에
     ///   파일을 두었으면 이제 남의 것이라 안 지운다. 훅 파일을 쓰기 바로 앞에서 다시 판정하는 것과 같은 까닭이다(리뷰
     ///   moai-dj4j.n9y). 그사이 디렉터리가 통째로 사라졌으면 걷힌 것이다
-    /// - **`SKILL.md` 는 다른 파일이 다 지워진 뒤에야 지운다** — 그것이 이 디렉터리를 moai 의 것으로 알아보는 머리다. 먼저
-    ///   지우고 다른 파일에서 멈추면 다음 `install` 이 남은 것을 남의 것으로 읽어 영영 안 걷는다
+    /// - **`SKILL.md` 는 다른 파일과 하위 디렉터리가 다 지워진 뒤에야 지운다** — 그것이 이 디렉터리를 moai 의 것으로
+    ///   알아보는 머리다. 먼저 지우고 다른 자리에서 멈추면 다음 `install` 이 남은 것을 남의 것으로 읽어 영영 안 걷는다.
+    ///   하위 디렉터리를 머리와 같은 걸음에서 지우던 판은 그 `rmdir` 이 실패하면 머리 없는 트리를 남겼다(리뷰
+    ///   moai-ybns.451.fbh)
+    /// - **머리 다음은 그 디렉터리 하나다.** 그것만 못 지우면(위 디렉터리에 쓸 권한이 없다) 빈 디렉터리가 남는데, [`ours`] 가
+    ///   빈 디렉터리만 든 트리를 moai 의 것으로 받아 다음 `install` 이 마저 걷는다
     /// - **다른 파일은 하나가 실패해도 나머지를 다 해 본다.** 그사이 사라진 것은 지운 것으로 친다 — 옆 세션의 `install` 이
     ///   먼저 걷었다
     fn remove(&mut self, root: &Path) {
@@ -1635,10 +1639,18 @@ impl Leftover {
         let head = self.dir.join("SKILL.md");
         let (heads, rest): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|f| *f == head);
         let gone = |r: std::io::Result<()>| r.is_ok() || r.is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        // `dirs` 는 깊은 것부터라 이 디렉터리 자신이 맨 뒤다.
+        let (inner, top) = dirs.split_at(dirs.len().saturating_sub(1));
         let mut stuck = rest.iter().filter(|f| !gone(std::fs::remove_file(f))).count();
+        // 하위 디렉터리는 깊은 것부터라 하나가 멈추면 그 위도 못 지운다 — 거기서 멈춘다.
+        if stuck == 0 && !inner.iter().all(|d| gone(std::fs::remove_dir(d))) {
+            stuck = 1;
+        }
         if stuck == 0 {
-            stuck = heads.iter().filter(|f| !gone(std::fs::remove_file(f))).count()
-                + dirs.iter().filter(|d| !gone(std::fs::remove_dir(d))).count();
+            stuck = heads.iter().filter(|f| !gone(std::fs::remove_file(f))).count();
+        }
+        if stuck == 0 {
+            stuck = top.iter().filter(|d| !gone(std::fs::remove_dir(d))).count();
         }
         self.state = if stuck == 0 { Left::Removed } else { Left::Failed };
     }
@@ -1690,7 +1702,8 @@ fn one_place(a: &Path, b: &Path) -> bool {
 /// - **링크가 아닌 디렉터리**이고 그 안도 디렉터리와 보통 파일뿐이다 — 링크를 따라 지우면 링크 너머의 것이 사라진다
 /// - **파일이 모두 moai 가 그 스킬에 심던 것**이다([`skill::EVER_PLANTED`]) — 사람이 곁에 둔 메모 하나가 있어도 안 지운다
 /// - **`SKILL.md` 머리가 그 이름이다**(`---` 다음 줄이 `name: <이름>`) — moai 가 심는 글은 모두 이 머리로 연다. 줄 끝은
-///   `\r\n` 이어도 된다 — `core.autocrlf` 로 받은 체크아웃은 커밋된 글을 그렇게 푼다
+///   `\r\n` 이어도 된다 — `core.autocrlf` 로 받은 체크아웃은 커밋된 글을 그렇게 푼다. **파일이 하나도 없으면 머리를 안
+///   본다** — 지우다 맨 위 디렉터리에서 멈춘 자리라(리뷰 moai-ybns.451.fbh), 머리를 따지면 영영 남의 것으로 남는다
 fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<PathBuf>, Vec<PathBuf>)> {
     if !std::fs::symlink_metadata(dir).ok()?.is_dir() {
         return None;
@@ -1712,10 +1725,14 @@ fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<Path
             }
         }
     }
-    let head = read_committed(&dir.join("SKILL.md"), root).ok()?;
-    let mut lines = head.lines();
-    if lines.next() != Some("---") || lines.next() != Some(format!("name: {name}").as_str()) {
-        return None;
+    // 파일이 하나도 없으면 머리를 안 본다 — 빈 디렉터리만 든 트리는 [`Leftover::remove`] 가 머리까지 지우고 맨 위
+    // 디렉터리에서 멈춘 자리다. 거기 사람의 것은 없다.
+    if !files.is_empty() {
+        let head = read_committed(&dir.join("SKILL.md"), root).ok()?;
+        let mut lines = head.lines();
+        if lines.next() != Some("---") || lines.next() != Some(format!("name: {name}").as_str()) {
+            return None;
+        }
     }
     dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     Some((files, dirs))
@@ -1959,6 +1976,41 @@ mod tests {
         assert_eq!(states(&left), [Left::Foreign; 2], "링크를 따라 걷으려 했다");
         left.iter_mut().for_each(|l| l.remove(&root));
         assert!(away.join("SKILL.md").is_file(), "링크 너머를 지웠다");
+    }
+
+    /// **맨 위 디렉터리만 못 지운 남은 것은 다음 `install` 이 마저 걷는다**(리뷰 moai-ybns.451.fbh) — 스킬 자리에 쓸 권한이
+    /// 없으면 머리(`SKILL.md`)와 하위 디렉터리까지 지운 뒤 그 디렉터리의 `rmdir` 만 멈춘다. 머리 없는 빈 트리를 남의 것으로
+    /// 읽던 판은 권한을 고쳐도 영영 "moai 가 안 쓴 것" 이라 했다. 권한이 안 막는 자리(root 로 도는 시험)에서는 잴 수 없어
+    /// 건너뛴다.
+    #[cfg(unix)]
+    #[test]
+    fn a_leftover_stuck_at_its_own_rmdir_is_finished_later() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = crate::scratch::Scratch::new("skill-leftovers-stuck");
+        let root = s.path().to_path_buf();
+        let skills = root.join("skills");
+        let dir = skills.join("moai-supervise");
+        std::fs::create_dir_all(dir.join("references")).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "---\nname: moai-supervise\ndescription: x\n---\n").unwrap();
+        std::fs::write(dir.join("references/worker.md"), "# worker\n").unwrap();
+        let states = |left: &[Leftover]| left.iter().map(|l| l.state).collect::<Vec<_>>();
+        std::fs::set_permissions(&skills, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let blocked = std::fs::write(skills.join("probe"), "").is_err();
+        if blocked {
+            let mut left = leftovers(&skills, &["moai"], &root);
+            left.iter_mut().for_each(|l| l.remove(&root));
+            assert_eq!(states(&left), [Left::Failed]);
+            assert_eq!(names(&dir), Vec::<String>::new(), "맨 위 디렉터리 말고 다른 것이 남았다");
+        }
+        std::fs::set_permissions(&skills, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !blocked {
+            return;
+        }
+        let mut left = leftovers(&skills, &["moai"], &root);
+        assert_eq!(states(&left), [Left::Planned], "머리 없는 빈 트리를 남의 것으로 읽었다");
+        left.iter_mut().for_each(|l| l.remove(&root));
+        assert_eq!(states(&left), [Left::Removed]);
+        assert!(!dir.exists());
     }
 
     /// **두 트리가 링크로 한 자리에 닿으면 다른 트리가 심는 스킬을 안 걷는다**(리뷰 moai-ybns.451.a3o) — `.agents/skills` 가
