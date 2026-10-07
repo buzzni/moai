@@ -772,12 +772,11 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     let archived_marks = crate::archive::marks(&repo.root)?;
     let mut g = crate::worktree::gather(repo, worktree)?;
     let now = crate::model::now();
-    // **경고와 알림은 아카이브를 섞기 전에 센다**(moai-nkwg) — 섞은 줄로 세면 옮긴 줄이 일로 서고 아카이브의
-    // 못 읽은 줄이 산 줄의 `unreadable_line` 으로 선다. 아카이브는 한 번만 읽어 셈과 섞기가 나눠 쓴다([`board`]).
-    let archived = crate::archive::read(&repo.root)?;
+    // **경고와 알림은 아카이브를 섞기 전에 센다**(moai-nkwg) — 여는 길과 같은 이음([`counted_beside`])을 지난다.
+    let (merged, counted) = counted_beside(repo, std::mem::take(&mut g.load), &g.origin, true, &now)?;
     let Counted { mut warnings, notices, unreadable: unreadable_live, archive_unreadable: unreadable_archive } =
-        board(repo, &g.load, &g.origin, &archived, &now)?;
-    g.load = beside(archived, g.load);
+        counted;
+    g.load = merged;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
         .origin
@@ -889,6 +888,23 @@ pub(crate) fn board(
         unreadable: unreadable.len(),
         archive_unreadable: archived.errors.len(),
     })
+}
+
+/// 아카이브를 읽어 **섞기 전에 세고**(`count` 일 때, [`board`]) 산 줄 곁에 놓는다([`beside`]) — 여는 길(`cmd::tui`)과
+/// 다시 읽기([`prepare`])가 함께 지나는 이음이다(moai-ug6x.a3e). 섞은 줄로 세면 옮긴 줄이 일로 서고 아카이브의 줄마다
+/// `archive_duplicate_id` 가 서며 그 못 읽은 줄이 산 줄의 `unreadable_line` 으로 선다(moai-nkwg). 두 길이 이 셋을
+/// 저마다 잇던 때는 여는 길에서 섞은 줄을 건네도 아무 시험이 안 붉어졌다 — 시험의 여는 길(`App::open`)은 아카이브
+/// 없이 센다. 아카이브는 한 번만 읽어 셈과 섞기가 나눠 쓴다. 안 세면(`--json`) 셈은 빈 값이다.
+pub(crate) fn counted_beside(
+    repo: &Repo,
+    live: Load,
+    origin: &crate::worktree::Origin,
+    count: bool,
+    now: &str,
+) -> crate::fail::R<(Load, Counted)> {
+    let archived = crate::archive::read(&repo.root)?;
+    let counted = if count { board(repo, &live, origin, &archived, now)? } else { Counted::default() };
+    Ok((beside(archived, live), counted))
 }
 
 /// 아카이브의 줄을 산 줄 곁에 놓는다 — `archive::read_all` 과 같은 섞기를 **이미 읽은 아카이브로** 한다
@@ -12345,6 +12361,47 @@ mod tests {
         assert_eq!(f.warnings.count(&f.now, zone), st.warnings.len(), "배너와 보드가 경고를 달리 센다 {warnings:?}");
         assert_eq!(f.notices, st.notices.len(), "배너와 보드가 알림을 달리 센다 {notices:?}");
         assert!(f.issues.iter().any(|i| i.id == "argos-a002"), "화면이 아카이브의 줄을 잃었다");
+    }
+
+    /// **여는 길은 산 줄만 일로 센다**(moai-ug6x.a3e) — `cmd::tui::run` 이 지나는 이음([`counted_beside`])을 그대로
+    /// 지나 [`App::open_counted`] 로 연다. 셈에 섞은 줄을 건네면 아카이브의 줄마다 `archive_duplicate_id` 가 서고
+    /// 옮긴 줄이 일로 서서 배너의 수가 `moai status` 보다 커진다. 시험의 여는 길(`App::open`)은 아카이브 없이 세어
+    /// 그 갈림을 못 본다.
+    #[test]
+    fn the_open_path_counts_only_live_work_beside_an_archive() {
+        let (scratch, a) = writable("open-path-archive");
+        let root = scratch.path();
+        let zone = crate::tz::Zone::stored();
+        let before = a.site.warnings.count(&a.site.now, zone);
+        let mut done = make("argos-a001", Kind::Issue);
+        done.status = Status::new("done");
+        let mut epic = make("argos-a002", Kind::Epic);
+        epic.status = Status::new("done");
+        let mut closed = member("argos-a003", "argos-a002");
+        closed.status = Status::new("done");
+        crate::archive::append(root, &[done, epic, closed], &cfg()).unwrap();
+
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let stamp = stamp_of(&repo);
+        let live = repo.read().unwrap();
+        let now = crate::model::now();
+        let (load, counted) = counted_beside(&repo, live, &Default::default(), true, &now).unwrap();
+        assert!(load.issues.iter().any(|i| i.id == "argos-a001"), "섞은 줄에 아카이브가 없다");
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        assert_eq!(
+            a.site.warnings.count(&a.site.now, zone),
+            before,
+            "아카이브의 닫힌 줄이 여는 길의 경고로 섰다 — 셈이 섞은 줄을 받았다"
+        );
+        assert_eq!(a.site.unreadable_live, 0);
+        assert!(a.site.issues.iter().any(|i| i.id == "argos-a003"), "화면이 아카이브의 줄을 잃었다");
+
+        // `--json` 은 안 센다 — 섞기만 한다.
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let (load, counted) = counted_beside(&repo, repo.read().unwrap(), &Default::default(), false, &now).unwrap();
+        assert_eq!((counted.notices, counted.unreadable), (0, 0));
+        assert_eq!(load.issues.len(), 4);
     }
 
     /// **아카이브로 옮긴 미룬 에픽도 산 멤버를 미룬 것으로 세운다**(moai-ug6x.cpq) — 보드의 셈(`report` 의

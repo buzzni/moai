@@ -35,14 +35,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // active overlay from the worktree gather, then add the archive beside it so
     // worktree-only rows remain visible in both views.
     // **배너의 수는 섞기 전에 센다**(moai-nkwg) — `moai status` 와 같은 자로, 산 줄을 일로 아카이브를 문맥으로
-    // 받는다(`tui::board`). 아카이브는 한 번 읽어 셈과 섞기가 나눠 쓴다. **`--json` 은 안 센다**(리뷰) — 그 길은
-    // 아래에서 화면을 안 켜고 돌아가 배너가 없는데, 셈은 이슈 전체를 한 벌 걷는다.
-    let archived = crate::archive::read(&repo.root)?;
-    let counted = match ctx.json {
-        true => Default::default(),
-        false => crate::tui::board(&repo, &active_load, &origin, &archived, &crate::model::now())?,
-    };
-    let load = crate::tui::beside(archived, active_load);
+    // 받는다. 다시 읽기와 같은 이음(`tui::counted_beside`)이라 그 시험이 이 길도 잰다. **`--json` 은 안 센다**(리뷰)
+    // — 그 길은 아래에서 화면을 안 켜고 돌아가 배너가 없는데, 셈은 이슈 전체를 한 벌 걷는다.
+    let (load, counted) = crate::tui::counted_beside(&repo, active_load, &origin, !ctx.json, &crate::model::now())?;
     crate::tui::watch(&mut watched, places);
     crate::tui::watch(&mut watched, archived_marks);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
