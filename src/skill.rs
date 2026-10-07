@@ -116,7 +116,7 @@ fn stable(bytes: &[u8]) -> u64 {
 /// 적혀 있다.
 ///
 /// **`StopFailure`·`SessionEnd` 는 안 건다**(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 옛 판이 심은 훅이
-/// 그 하위명령을 부르는 동안은 `moai hook` 이 빈 명령으로 받는다(`cmd::hook` 의 `run`).
+/// 그 하위명령을 부르는 동안은 `moai hook` 이 빈 명령으로 받는다(`cmd::hook` 의 `decide`).
 const HOOKS: &[(&str, &str, &str)] = &[
     ("SessionStart", "session-start", "counting moai warnings..."),
     ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
@@ -145,10 +145,10 @@ pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 /// **`additionalContextLimit` 은 이 표에 없다 — 훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽는다**(moai-dp35).
 /// Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 내는데(사람의 codex 0.160 이 짚었다 — 그 경고를
 /// `tests/hooks/codex/config/` 에 갈무리해 두고 시험이 이 표가 심는 파일을 그것에 대 본다, moai-o9tg), 그 값을 받는
-/// 이벤트와 편지가 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
-/// `cmd::hook` 의 `hold_room`, `hook::letters_room`)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
-/// 이벤트의 편지를 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
-/// moai-u5wr.6un 5번, moai-rxro 의 잃음).
+/// 이벤트와 글이 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
+/// `cmd::hook` 의 `hold_room`, 그때의 편지 자리)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
+/// 이벤트의 글을 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
+/// moai-u5wr.6un 5번, moai-rxro).
 const CODEX: &[(Event, &str, u64)] = &[
     (Event::SessionStart, "counting moai warnings...", TIMEOUT),
     (Event::UserPromptSubmit, "reading the moai board...", TIMEOUT),
@@ -190,8 +190,8 @@ pub fn codex_hooks(exe: &str) -> String {
             "statusMessage": message,
         });
         // **비추는 줄의 칸에만 상한을 둔다** — 그 칸의 자리를 다 받는 수로 준다. Codex 의 기본은 2,500 토큰 언저리라(Codex
-        // 훅 문서) 보드와 편지가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는데, 편지는 싣는 순간 읽음이라 그 판에서
-        // 아무도 못 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
+        // 훅 문서) 보드가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는다 — 넘긴 뒤쪽은 그 판에서 아무도 못
+        // 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
         // 단위(UTF-16 한 단위는 UTF-8 로 세 바이트까지다)는 한 토큰을 안 넘는다 — 같은 수로 준다. 안 받는 이벤트에는 키를
         // 아예 안 둔다 — `Option` 을 그대로 실으면 `null` 이 적힌다.
         if let crate::hook::Carry::Context(room) = crate::hook::Carry::of(Dialect::Codex, event) {
@@ -2470,7 +2470,7 @@ mod tests {
         let planted = codex_hooks("/repo/target/release/moai");
         assert_eq!(codex_issues(&planted), Vec::<String>::new(), "심는 파일에 Codex 가 경고한다");
         assert_eq!(codex_shape(&planted, &known), Vec::<String>::new(), "심는 파일이 Codex 가 아는 꼴 밖에 선다");
-        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드와 편지를
+        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드를
         // 파일로 빼고, 깎이는 상한보다 크게 적으면 Codex 가 깎으며 경고한다.
         let file: serde_json::Value = serde_json::from_str(&planted).unwrap();
         for (event, groups) in file["hooks"].as_object().unwrap() {

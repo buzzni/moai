@@ -24420,6 +24420,35 @@ fn every_dialect_and_event_never_fails() {
     }
 }
 
+/// **0.9 전에 심은 훅이 부르는 셋은 저장소 안에서도 빈 명령이다**(moai-5uwh.e9j) — 다시 심기 전의 Claude 플러그인은
+/// `stop-failure`·`session-end` 를, Codex 의 `.codex/hooks.json` 은 `interrupt`·`session-end` 를 부른다. 기록한 Codex
+/// 입력과 Claude 의 세션 하나로 저장소 안에서 부른다 — 아무것도 안 내고, 출석이 적던 자리(`.moai/agents`·`.moai/mail`)를
+/// 안 세우며, 그 세션의 기준선도 안 고친다. 저장소 밖의 입력만 재는 [`every_dialect_and_event_never_fails`] 는 그 셋이
+/// 트래커를 읽고 무엇을 적어도 푸르다.
+#[test]
+fn the_events_planted_before_0_9_do_nothing_inside_a_repository() {
+    let s = init("hook-legacy-events");
+    let sid = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
+    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
+    let before = baseline(&s, sid);
+    assert!(before.is_some(), "Codex 의 여는 훅이 기준선을 안 적었다");
+    // 경고를 늘린다 — 빈 명령이 기준선을 다시 적으면 그 수가 달라진다.
+    ok(s.path(), &["add", "에픽 없는 일"]);
+    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
+        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
+        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
+    }
+    let claude = event(&s, "sessLGCY-0001");
+    for ev in ["session-start", "stop-failure", "session-end"] {
+        let out = hook_out(&s, ev, &claude);
+        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
+    }
+    assert_eq!(baseline(&s, sid), before, "빈 명령이 Codex 세션의 기준선을 고쳤다");
+    for gone in [".moai/agents", ".moai/mail"] {
+        assert!(!s.path().join(gone).exists(), "훅이 {gone} 를 세웠다");
+    }
+}
+
 /// **고른 트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 6·7번) — `.agents`·훅 파일을 쓰고 나서
 /// Claude 의 트리가 거절되던 판은 `{"error":…}` 하나로 끝나, 앞서 쓴 절반(`agents_files`·`hooks`, Codex 의 `/hooks`
 /// 줄)을 아무도 몰랐다. 이제 한 트리가 거절되면 아무 트리도 안 쓰고 `claude` 도 안 부른다. 연습도 같은 말로 멈춘다 —

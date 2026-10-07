@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 ///
 /// **뒤의 셋은 `Stop` 없이 끝난 턴이다**(moai-u5wr.f29) — 출석을 `idle` 로 적던 자리였고, 출석을 걷은 뒤로
 /// 아무것도 안 한다(moai-5uwh.yhx). `skill install` 도 더는 안 건다(moai-5uwh.e9j) — 하위명령은 옛 판이 심은 훅이
-/// 부르는 동안만 빈 명령으로 남는다(`cmd::hook` 의 `run`). Antigravity 의 실패한 `Stop` 은 안에서 `StopFailure` 로
+/// 부르는 동안만 빈 명령으로 남는다(`cmd::hook` 의 `decide`). Antigravity 의 실패한 `Stop` 은 안에서 `StopFailure` 로
 /// 옮긴다(`cmd::hook` 의 `from_antigravity`). 벤더의 이름을 그대로 쓴다 — 심은 설정을 읽는 사람이 어느 이벤트가
 /// 어느 것인지 맞춰 볼 수 있게.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]

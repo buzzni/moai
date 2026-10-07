@@ -99,15 +99,6 @@ pub fn run(ctx: &Ctx, event: Event, dialect: Dialect) -> R<Vec<String>> {
     if let Some(slip) = handoff() {
         let _ = std::fs::remove_file(slip);
     }
-    // **출석 전용 이벤트 셋은 빈 명령이다**(moai-5uwh.e9j) — 0.9 는 출석을 걷어 그 셋을 더는 안 심는다. 그래도 옛 판이
-    // 심은 훅(Claude 의 플러그인, `.codex/hooks.json`)은 다시 심을 때까지 이 하위명령을 부른다 — 하위명령을 지우면
-    // clap 이 2 로 끝나 감싼 셸이 세션마다 "the … hook could not run" 을 낸다. 아무 말 없이 0 으로 끝난다 — stdin 은
-    // 읽어 버린다(안 읽고 끝나면 보내는 쪽의 쓰기가 끊긴 관에 진다). **한 판만 둔다** — 다음 판에 지운다(backlog). Antigravity 의 실패한 `Stop` 이 안에서 옮겨지는
-    // `StopFailure` 는 이 길이 아니다 — 그것은 `stop` 으로 들어와 [`decide`] 가 지나 보낸다.
-    if matches!(event, Event::StopFailure | Event::Interrupt | Event::SessionEnd) {
-        let _ = std::io::copy(&mut std::io::stdin(), &mut std::io::sink());
-        return Ok(Vec::new());
-    }
 
     let mut raw = String::new();
     if std::io::stdin().read_to_string(&mut raw).is_err() {
@@ -178,7 +169,11 @@ fn decide(
 ) -> Option<Decision> {
     let cwd = std::env::current_dir().ok()?;
     // **`Stop` 없이 끝난 턴은 아무것도 안 한다** — 트래커도 안 읽는다. 그 셋은 출석을 적던 자리였다(moai-u5wr.f29) —
-    // 출석을 걷었다(moai-5uwh.yhx). **이벤트를 다 적어 가른다** — 새 이벤트를 더하면 컴파일러가 여기서 어느 쪽인지 묻는다.
+    // 출석을 걷었다(moai-5uwh.yhx). **하위명령은 한 판만 빈 명령으로 남는다**(moai-5uwh.e9j) — 0.9 는 그 셋을 더는 안
+    // 심지만, 옛 판이 심은 훅(Claude 의 플러그인, `.codex/hooks.json`)은 다시 심을 때까지 그 하위명령을 부른다. 지우면 clap
+    // 이 2 로 끝나 감싼 셸이 세션마다 "the … hook could not run" 을 낸다. 다음 판에 지운다(backlog). 빈 명령을 가르는
+    // 자리는 여기 하나다 — Antigravity 의 실패한 `Stop` 도 [`from_antigravity`] 가 `StopFailure` 로 옮겨 여기로 온다.
+    // **이벤트를 다 적어 가른다** — 새 이벤트를 더하면 컴파일러가 여기서 어느 쪽인지 묻는다.
     match event {
         Event::StopFailure | Event::Interrupt | Event::SessionEnd => return Some(Decision::Pass),
         Event::SessionStart | Event::UserPromptSubmit | Event::PreToolUse | Event::Stop => {}

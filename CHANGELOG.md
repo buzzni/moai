@@ -12,6 +12,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **The planted hooks no longer listen for `StopFailure` and `SessionEnd`
+  (Claude Code) or `Interrupt` and `SessionEnd` (Codex)** — only presence used
+  them. `moai skill install` rewrites the planted files without them. For one
+  release `moai hook stop-failure`, `interrupt` and `session-end` stay as
+  commands that do nothing, so hooks planted before 0.9 do not print an error.
+  (moai-5uwh)
+
 ### Removed
 
 - **The mailbox and presence are gone: `moai send`, `moai inbox`, `moai hello`
@@ -23,15 +32,6 @@ does not tag — see `CONTRIBUTING.md`.
   left behind (`.moai/mail/`, `.moai/agents/`) are ignored and left as they
   are. A `mail_read_days` key in `.moai/config.toml` is now ignored without a
   word. (moai-5uwh)
-
-### Changed
-
-- **The planted hooks no longer listen for `StopFailure` and `SessionEnd`
-  (Claude Code) or `Interrupt` and `SessionEnd` (Codex)** — only presence used
-  them. `moai skill install` rewrites the planted files without them. For one
-  release `moai hook stop-failure`, `interrupt` and `session-end` stay as
-  commands that do nothing, so hooks planted before 0.9 do not print an error.
-  (moai-5uwh)
 
 ## [0.8.0] - 2026-10-07
 
