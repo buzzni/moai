@@ -24328,8 +24328,8 @@ fn a_linked_worktree_does_not_keep_a_tracker_out_of_git() {
 
 /// **맨 저장소의 워크트리에는 주 체크아웃이 없다**(moai-r0x8.33p). 위의 거절은 맞지만 그 말이 "주 체크아웃의
 /// 트래커까지 가린다" 라, `git clone --bare` 로 받아 워크트리만 띄운 저장소에서는 없는 자리를 댔다. 가리는 것은
-/// 같은 `info/exclude` 를 함께 쓰는 **다른 워크트리들**의 커밋된 트래커다. 주 체크아웃이 있는가는 찾기가 옮겨
-/// 갈 때와 같은 자(`worktree::main_root`)로 가른다 — 그것이 없다고 하면 이 워크트리의 트래커가 읽힌다.
+/// 같은 `info/exclude` 를 함께 쓰는 **다른 워크트리들**의 커밋된 트래커다. 맨 저장소인가는 git 에게 묻는다 — 아래
+/// 시험이 그 까닭이다.
 #[test]
 fn a_bare_repository_worktree_refusal_names_no_main_checkout() {
     let s = Scratch::new("init-bare-local");
@@ -24356,6 +24356,40 @@ fn a_bare_repository_worktree_refusal_names_no_main_checkout() {
     assert!(said.contains("--tracking commit"), "고칠 길을 안 댔다 — {said}");
     assert_eq!(std::fs::read_to_string(repo.join("info/exclude")).unwrap_or_default(), before);
     assert!(!wt.join(".moai").exists(), "거절하고도 심었다");
+}
+
+/// **맨 저장소인가는 git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 공통 디렉터리의 이름이 `.git` 인가로 가르던 판은
+/// 두 자리에서 틀렸다 — `git init --separate-git-dir` 로 띄운 저장소(공통 디렉터리가 `sep.git`)의 워크트리에는
+/// 주 체크아웃이 있는데 "없다" 고 했고, `.git` 이라는 이름의 맨 저장소(`git clone --bare <url> bin/.git`)의
+/// 워크트리에는 주 체크아웃이 없는데 "주 체크아웃의 트래커" 를 댔다.
+#[test]
+fn a_worktree_refusal_asks_git_whether_the_repository_is_bare() {
+    let s = Scratch::new("init-bare-truth");
+    let refusal = |wt: &std::path::Path| {
+        let out = moai(wt, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
+        assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+        assert!(!wt.join(".moai").exists(), "거절하고도 심었다");
+        field(&String::from_utf8_lossy(&out.stderr), "error")
+    };
+
+    // 주 체크아웃이 딴 데 선 저장소 — 맨 저장소가 아니다.
+    let main = s.path().join("main");
+    let sep = s.path().join("sep.git");
+    git(s.path(), &["init", "-q", "--separate-git-dir", sep.to_str().unwrap(), "main"]);
+    git(&main, &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-q", "--allow-empty", "-m", "처음"]);
+    let wt = s.path().join("wt-sep");
+    git(&main, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let said = refusal(&wt);
+    assert!(!said.contains("맨 저장소") && said.contains("주 체크아웃"), "있는 주 체크아웃을 없다 했다 — {said}");
+
+    // 이름이 `.git` 인 맨 저장소 — 주 체크아웃이 없다.
+    let bin = s.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    git(s.path(), &["clone", "-q", "--bare", main.to_str().unwrap(), bin.join(".git").to_str().unwrap()]);
+    let wt = s.path().join("wt-bin");
+    git(&bin.join(".git"), &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let said = refusal(&wt);
+    assert!(said.contains("맨 저장소") && !said.contains("주 체크아웃의 트래커"), "없는 주 체크아웃을 댔다 — {said}");
 }
 
 // ── moai-j9nf: PR 20 리뷰의 회귀 ──────────────────────────────────────────────────────────

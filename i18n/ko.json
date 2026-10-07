@@ -54,7 +54,7 @@
   "warn.gitattributes_rules": ".gitattributes 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 그 파일이 머지 규칙을 잃어(트래커나 저널이 머지에서 충돌한다) 줄 끝이 흔들린다",
   "warn.exclude_rules": ".git/info/exclude 에 moai 가 쓰는 자리 {n}줄이 빠졌다 — 트래커나 그 파일이 실수로 커밋될 수 있다",
   "warn.gitignore_local_rules": ".gitignore 에 이 트래커를 git 밖에 두는 줄 {n}줄이 빠졌다 — 트래커나 그 파일이 실수로 커밋될 수 있다",
-  "refuse.init_local_linked": "여기는 딸린 워크트리다 — 여기서 트래커를 git 밖에 두면 주 체크아웃의 트래커까지 가린다(`.git/info/exclude` 는 함께 쓰고, `.gitignore` 의 줄은 머지로 돌아간다). `--tracking commit` 으로 심는다",
+  "refuse.init_local_linked": "여기는 딸린 워크트리다 — 여기서 트래커를 git 밖에 두면 주 체크아웃의 트래커까지 가린다(저장소의 `info/exclude` 는 모든 워크트리가 함께 쓰고, `.gitignore` 의 줄은 머지로 돌아간다). `--tracking commit` 으로 심는다",
   "refuse.init_local_bare": "여기는 맨 저장소의 워크트리라 주 체크아웃이 없다 — 여기서 트래커를 git 밖에 두면 다른 워크트리들이 커밋하는 트래커까지 가린다(저장소의 `info/exclude` 는 모든 워크트리가 함께 쓰고, `.gitignore` 의 줄은 머지로 돌아간다). `--tracking commit` 으로 심는다",
   "warn.merge_driver_rotten": "심어 둔 머지 드라이버가 안 돈다 — 병합이 git 의 기본 머지로 내려앉는다",
   "warn.merge_driver_stale": "심어 둔 머지 드라이버가 옛 판이다 — 적은 자리가 사라지면 표식 없이 저쪽을 버린다",

@@ -369,10 +369,22 @@ struct GitPlace {
     dir: std::path::PathBuf,
     under: String,
     linked: bool,
-    /// 딸린 워크트리인데 **주 체크아웃이 없다**(맨 저장소, moai-r0x8.33p) — 가르는 자는 찾기가 옮겨 갈 때와 같은
-    /// [`crate::worktree::main_root`] 다. 그것이 없다고 하면 이 워크트리의 트래커가 읽히므로, 거절문이 "주
-    /// 체크아웃의 트래커" 를 대면 없는 자리를 댄다.
-    bare: bool,
+}
+
+/// 이 공통 디렉터리가 **맨 저장소인가**(moai-r0x8.33p) — 그러면 딸린 워크트리에 주 체크아웃이 없어, 거절문이 "주
+/// 체크아웃의 트래커" 를 대면 없는 자리를 댄다.
+///
+/// **git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 찾기가 옮겨 갈 자리를 재는 [`crate::worktree::main_root`] 로 가르던
+/// 판은 공통 디렉터리의 이름(`.git` 인가)을 읽어, `git init --separate-git-dir` 의 워크트리에는 있는 주 체크아웃을
+/// 없다 하고, `.git` 이라는 이름의 맨 저장소(`git clone --bare <url> bin/.git`)에는 없는 주 체크아웃을 댔다. 이름이
+/// 아니라 `core.bare` 가 답이고, 그것을 읽는 자는 git 이다. git 을 띄우므로 **이 거절의 갈래에서만** 묻는다 —
+/// 딸린 워크트리에서 트래커를 git 밖에 두려 할 때뿐이다. 답을 못 얻으면 맨 저장소가 아니라고 둔다(딸린 워크트리의
+/// 거절이 그대로 선다).
+fn is_bare(common: &Path) -> bool {
+    let args = ["rev-parse", "--is-bare-repository"];
+    crate::git::run_reading_user_config(common, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET))
+        .and_then(Result::ok)
+        .is_some_and(|said| said.trim() == "true")
 }
 
 fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlace> {
@@ -386,8 +398,7 @@ fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlac
     }
     let (own, dir) = (root.join(own), root.join(dir));
     let linked = crate::path::real(&own) != crate::path::real(&dir);
-    let bare = linked && crate::worktree::main_root(root).is_none();
-    Some(GitPlace { dir, under, linked, bare })
+    Some(GitPlace { dir, under, linked })
 }
 
 /// git 이 트래커를 추적하는가. 저장소 밖은 커밋 방식이고, git 실패나 시간 초과는 모르는 것이다.
@@ -497,7 +508,7 @@ fn local_refusal(lang: crate::i18n::Lang, tracking: Tracking, place: Option<&Git
         None => Some(say(lang, "refuse.init_local_no_git").to_string()),
         // 맨 저장소의 워크트리에는 주 체크아웃이 없다(moai-r0x8.33p) — 가리는 것은 같은 `info/exclude` 를 쓰는
         // 다른 워크트리들의 트래커다.
-        Some(p) if p.bare => Some(say(lang, "refuse.init_local_bare").to_string()),
+        Some(p) if p.linked && is_bare(&p.dir) => Some(say(lang, "refuse.init_local_bare").to_string()),
         Some(p) if p.linked => Some(say(lang, "refuse.init_local_linked").to_string()),
         Some(_) => None,
     }

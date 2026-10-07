@@ -54,7 +54,7 @@
   "warn.gitattributes_rules": ".gitattributes is missing {n} lines moai uses — those files lose their merge rule (the tracker or the journal conflicts on merge) and line ends drift",
   "warn.exclude_rules": ".git/info/exclude is missing {n} lines moai uses — the tracker or its files can be committed by mistake",
   "warn.gitignore_local_rules": ".gitignore is missing {n} lines that keep this tracker out of git — the tracker or its files can be committed by mistake",
-  "refuse.init_local_linked": "This checkout is a linked worktree — keeping the tracker out of git here would hide the main checkout's tracker too (`.git/info/exclude` is shared, and a `.gitignore` line merges back). Plant it with `--tracking commit`",
+  "refuse.init_local_linked": "This checkout is a linked worktree — keeping the tracker out of git here would hide the main checkout's tracker too (the repository's `info/exclude` is shared by every worktree, and a `.gitignore` line merges back). Plant it with `--tracking commit`",
   "refuse.init_local_bare": "This checkout is a worktree of a bare repository, which has no main checkout — keeping the tracker out of git here would hide the trackers your other worktrees commit (the repository's `info/exclude` is shared by every worktree, and a `.gitignore` line merges back). Plant it with `--tracking commit`",
   "warn.merge_driver_rotten": "The planted merge driver does not run — merges fall back to the default one",
   "warn.merge_driver_stale": "The planted merge driver is an old one — if the recorded place goes, it drops their side with no markers",
