@@ -16,10 +16,14 @@
 //! 사람이 고른 값이 앞 칸 때문에 무효가 되면 **지우지 않는다**. 화면은 그 칸을 숨기거나 잠그고 실제
 //! 값은 `resolve` 가 정한다 — 앞 칸을 되돌리면 고른 값이 그대로 돌아온다.
 
+use clap::ValueEnum;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// 트래커를 git 이 추적하는가(moai-zynt.own).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// **`--tracking` 의 값은 clap 이 이 열거형에서 푼다**(moai-8gwh.86j) — 낱말 목록을 손으로 적고 `parse` 로 다시
+/// 풀던 판은 두 목록이 갈리면 맞지 않는 값을 말없이 버렸다. 플래그의 낱말은 [`Tracking::word`] 와 같다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Tracking {
     /// 커밋해서 공유한다 — 지금까지의 `init` 이다.
     Commit,
@@ -41,17 +45,13 @@ impl Tracking {
         }
     }
 
-    pub fn parse(word: &str) -> Option<Tracking> {
-        Tracking::ALL.into_iter().find(|t| t.word() == word)
-    }
-
     pub fn tracked(self) -> bool {
         self == Tracking::Commit
     }
 }
 
-/// 에이전트에게 moai 를 어떻게 알리는가(moai-cbfz).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 에이전트에게 moai 를 어떻게 알리는가(moai-cbfz). `--guide` 의 값도 [`Tracking`] 처럼 clap 이 푼다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Guide {
     /// AGENTS.md 에 안내 전문을 블록으로 쓴다 — 지금까지의 `init` 이다.
     Block,
@@ -75,10 +75,6 @@ impl Guide {
             Guide::Hook => "hook",
             Guide::None => "none",
         }
-    }
-
-    pub fn parse(word: &str) -> Option<Guide> {
-        Guide::ALL.into_iter().find(|g| g.word() == word)
     }
 }
 
@@ -521,6 +517,21 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// **플래그가 받는 낱말은 `word` 가 내는 낱말과 같다**(moai-8gwh.86j) — 워크트리 거절문이 `word` 로 명령줄을
+    /// 되살리고 `--json` 이 그것을 싣는다. clap 이 푸는 이름이 갈리면 되살린 줄을 따라 친 사람이 거절당한다.
+    #[test]
+    fn the_flag_words_are_the_words_the_tool_prints() {
+        let names = |vs: Vec<clap::builder::PossibleValue>| vs.iter().map(|v| v.get_name().to_string()).collect();
+        let tracking: Vec<String> = names(Tracking::ALL.iter().filter_map(|t| t.to_possible_value()).collect());
+        assert_eq!(tracking, Tracking::ALL.map(|t| t.word().to_string()));
+        assert_eq!(tracking, ["commit", "exclude", "gitignore"]);
+        let guide: Vec<String> = names(Guide::ALL.iter().filter_map(|g| g.to_possible_value()).collect());
+        assert_eq!(guide, Guide::ALL.map(|g| g.word().to_string()));
+        assert_eq!(guide, ["block", "file", "hook", "none"]);
+        assert_eq!(Tracking::value_variants(), Tracking::ALL);
+        assert_eq!(Guide::value_variants(), Guide::ALL);
     }
 
     /// 터미널이 아닌 `init` 은 지금까지와 같다 — 커밋하고, 안내 블록도 드라이버도 심는다.

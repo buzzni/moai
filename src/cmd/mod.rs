@@ -499,9 +499,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             check: false,
             print: false,
         } => {
-            // 낱말은 clap 이 이미 골랐다 — 여기서 못 푸는 값은 오지 않는다.
-            let tracking = tracking.as_deref().and_then(crate::init_choice::Tracking::parse);
-            let guide = guide.as_deref().and_then(crate::init_choice::Guide::parse);
+            // 낱말은 clap 이 이미 열거형으로 풀었다(`ValueEnum`) — 여기서 다시 풀 것이 없다.
             let guide = guide.or(no_agents.then_some(crate::init_choice::Guide::None));
             // 짝 플래그는 clap 이 서로 막는다 — 둘 다 오는 일은 없다.
             let pair = |on: bool, off: bool| if on { Some(true) } else { off.then_some(false) };

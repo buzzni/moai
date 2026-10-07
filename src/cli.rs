@@ -903,8 +903,8 @@ Examples:
         #[arg(long, conflicts_with = "guide")]
         no_agents: bool,
         /// block, file (.moai/guide.md + link), hook or none
-        #[arg(long, value_name = "how", value_parser = ["block", "file", "hook", "none"], hide_possible_values = true)]
-        guide: Option<String>,
+        #[arg(long, value_name = "how", hide_possible_values = true)]
+        guide: Option<crate::init_choice::Guide>,
         /// Plant the merge driver in .git/config (the default)
         #[arg(long, conflicts_with = "no_driver")]
         driver: bool,
@@ -912,8 +912,8 @@ Examples:
         #[arg(long)]
         no_driver: bool,
         /// Git tracks it (commit) or not (exclude, gitignore)
-        #[arg(long, value_name = "how", value_parser = ["commit", "exclude", "gitignore"], hide_possible_values = true)]
-        tracking: Option<String>,
+        #[arg(long, value_name = "how", hide_possible_values = true)]
+        tracking: Option<crate::init_choice::Tracking>,
         /// Then run moai skill install --scope local
         #[arg(long, conflicts_with = "no_skill")]
         skill: bool,
