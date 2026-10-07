@@ -1926,7 +1926,9 @@ impl App {
     }
 
     /// 여는 읽기가 겹쳐 본 것을 들인다(`worktree::gather`). 못 읽는 줄은 겹친 뒤의 자로
-    /// 다시 적는다 — 배너의 `못 읽는 줄 N` 과 id 를 지키는 자리들이 읽는다. **경고는 다시 안 센다**(moai-nkwg):
+    /// 다시 적는다 — id 를 지키는 자리들이 읽는다. 배너의 `못 읽는 줄 N` 은 이 목록이 아니라 여는 쪽이 [`board`] 로
+    /// 센 산 줄의 수다([`Site::unreadable_live`], moai-e18s) — 겹쳐 다시 적어도 줄 수는 그대로다([`crate::worktree::Origin::unreadable`]).
+    /// **경고는 다시 안 센다**(moai-nkwg):
     /// 여는 쪽이 겹친 뒤의 자로 이미 셌고([`board`]), 여기 든 줄은 아카이브를 섞은 것이라 세면 옮긴 줄이 일로 선다.
     ///
     /// `swept` 은 옆을 실제로 겹쳤는가다(`Gathered::swept`) — 자리 판정이 그것으로 잰다([`placed`]).
@@ -12336,6 +12338,11 @@ mod tests {
         let mut row = make("argos-a001", Kind::Issue);
         row.status = Status::new("done");
         crate::archive::append(root, &[row], &cfg()).unwrap();
+        // 깨지기 전의 경고 수를 잰다 — 빈 에픽 하나(`empty_epic`)가 이미 경고라, `> 0` 으로는 아카이브의 경고가
+        // 안 서도 지나간다(리뷰 moai-e18s.dgp).
+        a.reload();
+        let zone = crate::tz::Zone::stored();
+        let before = a.site.warnings.count(&a.site.now, zone);
         let file = crate::archive::path(root, "2026");
         let mut text = std::fs::read_to_string(&file).unwrap();
         text.push_str("{\"id\":\"argos-a009\",\"kind\":42}\n");
@@ -12347,7 +12354,13 @@ mod tests {
             "전제: 아카이브의 못 읽는 줄이 목록에 없다"
         );
         assert_eq!(a.site.unreadable_live, 0, "아카이브 파일의 못 읽는 줄을 배너가 산 줄로 셌다");
-        assert!(a.site.warnings.count(&a.site.now, crate::tz::Zone::stored()) > 0, "보드처럼 경고로 안 섰다");
+        assert_eq!(
+            a.site.warnings.count(&a.site.now, zone),
+            before + 1,
+            "보드처럼 `archive_unreadable` 경고로 안 섰다"
+        );
+        let said = draw::tests_banner(&mut a);
+        assert!(!said.contains("읽을 수 없는 줄"), "{said}");
 
         // 산 줄이 깨지면 그 수만큼 선다 — 아카이브의 것은 여전히 안 든다.
         let live = root.join(".moai/issues.jsonl");
