@@ -1127,6 +1127,30 @@ pub(super) mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "없는 디렉터리를 안 댔다: {:?}", a.notice);
     }
 
+    /// **창 위에서 다시 못 읽으면 옛 창을 닫고 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 통계 창과 같은 꼴이다. 위키
+    /// 디렉터리가 사라진 것과 페이지가 다 빠진 것 둘 다 연 적 없는 화면과 같은 알림으로 선다.
+    #[test]
+    fn a_failed_reread_over_the_window_closes_it_and_says_why() {
+        let (s, mut a) = wiki_app("reread", PAGES);
+        a.hit("SPC g w");
+        window(&a);
+        for (file, _) in PAGES {
+            std::fs::remove_file(s.path().join("docs").join(file)).unwrap();
+        }
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse, "빈 위키를 다시 읽은 창이 남았다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("README.md")), "{:?}", a.notice);
+
+        std::fs::write(s.path().join("docs/README.md"), "# Home\n").unwrap();
+        a.hit("SPC g w");
+        window(&a);
+        std::fs::remove_dir_all(s.path().join("docs")).unwrap();
+        a.notice = None;
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse, "디렉터리가 사라진 창이 남았다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "{:?}", a.notice);
+    }
+
     /// **창 위의 메뉴도 알림을 탐색과 같은 자로 다룬다** — 메뉴만 만진 키와 기다리는 접두어는 알림을 안 걷고, 창의
     /// 키는 걷는다.
     #[test]

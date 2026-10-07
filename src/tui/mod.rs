@@ -4780,16 +4780,21 @@ impl App {
     ///
     /// **덮는 창(통계·위키) 위에서 고른 목록·보드는 창을 닫고 그 배치로 선다** — 닫는 것이 먼저다. 커서·거름망·상세는
     /// 창이 안 건드렸으니 연 자리 그대로고, 배치만 고른 쪽으로 바뀐다([`App::flip_layout`]).
+    ///
+    /// **덮는 창을 새로 못 읽으면 옛 창을 닫고 알림으로 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 옛 창을 남기면
+    /// 사람이 방금 다시 읽은 줄 알고 낡은 수와 페이지를 읽는다. 그래서 고르기 전에 닫는다: 여는 자(`open_stats`·
+    /// `open_wiki`)는 실패하면 `mode` 를 안 건드리니, 닫아 둔 자리가 곧 "창 없는 화면" 이다. 실패하는 갈래마다
+    /// 닫기를 흩어 두면 새 갈래 하나가 그것을 잊는다.
     pub(super) fn go(&mut self, to: keys::Screen, rows: &[Row]) {
+        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) {
+            self.mode = Mode::Browse;
+        }
         let layout = match to {
             keys::Screen::Stats => return self.open_stats(),
             keys::Screen::Wiki => return self.open_wiki(),
             keys::Screen::List => view::Layout::List,
             keys::Screen::Board => view::Layout::Board,
         };
-        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) {
-            self.mode = Mode::Browse;
-        }
         if self.layout != layout {
             self.flip_layout(rows);
         }

@@ -511,6 +511,19 @@ mod tests {
         assert_eq!(a.notice, None, "화면을 고른 키가 알림을 안 걷었다");
     }
 
+    /// **창 위에서 다시 못 세면 옛 창을 닫고 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 남은 창의 낡은 수를 방금 센
+    /// 것으로 읽지 않게. 닫힌 자리는 창을 안 연 화면 그대로다. 걸린 거름망이 더는 안 지나는 글이 되는 것이 실패의 한 꼴이다.
+    #[test]
+    fn a_failed_recount_over_the_window_closes_it_and_says_why() {
+        let mut a = app();
+        a.hit("SPC g s");
+        window(&a);
+        a.hung = Some(Hung::Filter { text: "nonsense=1".into(), grep: None });
+        a.hit("SPC g s");
+        assert_eq!(a.mode, Mode::Browse, "다시 못 센 창이 남았다");
+        assert!(a.notice.is_some(), "까닭을 안 댔다");
+    }
+
     /// **걸린 거름망으로 좁혀 세고 제목이 그 글을 댄다** — 닫아도 거름망은 그대로 걸려 있다.
     #[test]
     fn a_hung_filter_narrows_what_the_window_counts() {
