@@ -53,10 +53,13 @@ does not tag — see `CONTRIBUTING.md`.
   above it, the page said it could not read the tracker here and that `moai
   init` would not help; that it had climbed was only on stderr, which a
   session-start hook does not carry. The page now says there is no `.moai`
-  here, names the tracker it climbed to and why it could not be read, and gives
-  both ways out — fix that tracker, or start a separate one here with
-  `moai init`. `--json` adds `climbed_to` with that root beside
-  `tracker_error`. (moai-r0x8.ris)
+  in this checkout, names the tracker it climbed to and why it could not be
+  read, and gives both ways out — fix that tracker, or start a separate one
+  for this checkout with `moai init` (as `moai -C <checkout top> init` when
+  called below the top). When the search climbed past a `.moai` it could not
+  look at, the page says so instead and does not offer `moai init`. `--json`
+  adds `climbed_to` with that root beside `tracker_error`, and `init_at` or
+  `unseen_at` for the two cases. (moai-r0x8.ris)
 - **`moai init --tracking exclude|gitignore` in a worktree of a bare repository
   no longer names a main checkout that does not exist.** The refusal is the
   same, but it now says the repository has no main checkout and that keeping

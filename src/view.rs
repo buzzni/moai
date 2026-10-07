@@ -1444,6 +1444,22 @@ pub fn prime(
     out
 }
 
+/// 못 연 트래커가 **이 체크아웃 밖으로 올라가 잡은 것**일 때 [`prime_bare`] 가 대는 것(moai-r0x8.ris).
+pub enum Climbed {
+    /// 이 체크아웃에는 `.moai` 가 없다 — `go` 가 그 꼭대기(`top`)에 따로 세우는 줄이다.
+    Fresh { root: std::path::PathBuf, top: std::path::PathBuf, go: String },
+    /// 이 체크아웃의 `.moai`(`at`)를 들여다보지 못해 건너뛰고 올라갔다 — 있는지조차 모른다.
+    Unseen { root: std::path::PathBuf, at: std::path::PathBuf, err: String },
+}
+
+impl Climbed {
+    pub fn root(&self) -> &std::path::Path {
+        match self {
+            Climbed::Fresh { root, .. } | Climbed::Unseen { root, .. } => root,
+        }
+    }
+}
+
 /// 트래커가 없거나 못 연 자리의 [`prime`]. **머리글이 한 자리에만 있다** — `cmd/prime.rs` 가 같은
 /// `# 제목` 을 손으로 한 벌 더 짓던 판은 이 함수를 고쳐도 그쪽이 옛 모양으로 남았다.
 ///
@@ -1455,15 +1471,22 @@ pub fn prime(
 ///
 /// **닫기 전 목록과 명령은 여기서도 선다.** `--json` 이 그 둘을 싣는데 사람 쪽만 빼면,
 /// 훅에 거는 쪽이 두 표면 중 하나를 못 믿는다([`prime_closing`] 의 까닭 그대로).
-pub fn prime_bare(lang: Lang, refused: Option<&str>, climbed: Option<&std::path::Path>) -> Vec<String> {
+pub fn prime_bare(lang: Lang, refused: Option<&str>, climbed: Option<&Climbed>) -> Vec<String> {
     let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
+    let shown = |p: &std::path::Path| one_line(&p.display().to_string());
     out.push(match (refused, climbed) {
         (None, _) => say(lang, "prime.no_repo").to_string(),
         // **올라가 잡은 트래커면 여기 것이라 하지 않는다**(moai-r0x8.ris, 2026-10-07 사용자 결정) — 여기에는
-        // `.moai` 가 없다고 대고, 길 둘을 함께 댄다: 그 트래커를 고치거나 여기 따로 세운다.
-        (Some(why), Some(root)) => fill(
+        // `.moai` 가 없다고 대고, 길 둘을 함께 댄다: 그 트래커를 고치거나 이 체크아웃에 따로 세운다. 세우는 줄은
+        // 실제로 심을 자리를 댄다(리뷰 moai-r0x8.qbh 9번).
+        (Some(why), Some(Climbed::Fresh { root, go, .. })) => fill(
             say(lang, "prime.refused_climbed"),
-            &[("root", &one_line(&root.display().to_string())), ("why", &one_line(why))],
+            &[("root", &shown(root)), ("why", &one_line(why)), ("go", &one_line(go))],
+        ),
+        // 들여다보지 못한 `.moai` 를 건너뛰고 올라간 것이면 "없다" 도 `init` 도 아니다(리뷰 moai-r0x8.qbh 9번).
+        (Some(why), Some(Climbed::Unseen { root, at, err })) => fill(
+            say(lang, "prime.refused_climbed_unseen"),
+            &[("root", &shown(root)), ("why", &one_line(why)), ("at", &shown(at)), ("err", &one_line(err))],
         ),
         // **끝을 깎지 않는다**(리뷰 moai-yivo.b5h) — 까닭의 끝에 선 것이 경로(`-> <링크 끝>`)일 수 있어, 마침표나
         // 빈칸을 걷으면 다른 파일을 댄다(`one_line` 이 한 줄짜리를 안 깎는 것과 같은 까닭). 여기 닿는 거절은

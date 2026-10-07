@@ -5432,7 +5432,7 @@ fn prime_says_the_unreadable_tracker_was_climbed_to_and_gives_both_ways() {
     let out = moai(&proj, &["prime"]);
     assert!(out.status.success(), "{}", text(&out));
     let said = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(said.contains("여기엔 `.moai` 가 없고, 올라가 잡은"), "올라가 잡은 것을 안 댔다\n{said}");
+    assert!(said.contains("이 체크아웃엔 `.moai` 가 없고, 올라가 잡은"), "올라가 잡은 것을 안 댔다\n{said}");
     assert!(said.contains(&format!("{top} 의 트래커")), "잡은 뿌리를 안 댔다\n{said}");
     assert!(said.contains("config.toml"), "못 읽은 까닭을 안 댔다\n{said}");
     assert!(said.contains("그 트래커를 고친") && said.contains("`moai init`"), "길 둘을 안 댔다\n{said}");
@@ -5450,6 +5450,62 @@ fn prime_says_the_unreadable_tracker_was_climbed_to_and_gives_both_ways() {
     ok(&proj, &["init", "argos"]);
     let json = ok(&proj, &["prime", "--json"]);
     assert!(!json.contains("tracker_error") && !json.contains("climbed_to"), "{json}");
+}
+
+/// **올라간 판이 대는 자리는 실제 자리다**(리뷰 moai-r0x8.qbh 9번). 둘이 틀렸다.
+///
+/// - 체크아웃의 밑자리(`proj/src`)에서 부르면 `moai init` 은 **거기**(`proj/src/.moai`)에 심는다 — 이 체크아웃의
+///   트래커를 세우는 길은 꼭대기를 대는 `moai -C <proj> init` 이다. `--json` 은 그 자리를 `init_at` 으로 싣는다
+/// - 찾기는 들여다보지 못한 `.moai`(권한)를 건너뛰고 올라간다. 그 자리에서 "여기엔 `.moai` 가 없다" 는 거짓이고
+///   `moai init` 도 길이 아니다 — 들여다보지 못했다고 댄다(`--json`: `unseen_at`)
+#[cfg(unix)]
+#[test]
+fn prime_names_the_real_place_after_climbing() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let s = init("primeclimbplace");
+    std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
+    let top = std::fs::canonicalize(s.path()).unwrap();
+    let proj = top.join("proj");
+    let src = proj.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&proj, &["init", "-q"]);
+
+    let said = String::from_utf8_lossy(&moai(&src, &["prime"]).stdout).into_owned();
+    let go = format!("`moai -C {} init`", proj.display());
+    assert!(said.contains(&go), "밑자리에 심을 `moai init` 을 댔다 — {go} 가 없다\n{said}");
+    let json = ok(&src, &["prime", "--json"]);
+    assert!(json.contains(&format!("\"init_at\":{:?}", proj.display().to_string())), "{json}");
+    // 댄 줄이 실제로 이 체크아웃의 트래커를 세운다.
+    ok(&src, &["-C", proj.to_str().unwrap(), "init", "argos"]);
+    assert!(proj.join(".moai").is_dir() && !src.join(".moai").exists());
+    let json = ok(&src, &["prime", "--json"]);
+    assert!(!json.contains("tracker_error") && !json.contains("climbed_to"), "{json}");
+
+    // 들여다보지 못한 `.moai` — 링크 끝이 권한 없는 디렉터리 안이다.
+    let other = top.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    git(&other, &["init", "-q"]);
+    let locked = top.join("locked");
+    std::fs::create_dir_all(locked.join("x")).unwrap();
+    std::os::unix::fs::symlink(locked.join("x"), other.join(".moai")).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = std::fs::metadata(other.join(".moai")).is_ok();
+    if !readable {
+        let out = moai(&other, &["prime"]);
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        let json = ok(&other, &["prime", "--json"]);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(!said.contains("`.moai` 가 없"), "들여다보지 못한 자리를 없다 했다\n{said}");
+        assert!(said.contains("들여다보지 못했다"), "들여다보지 못했다고 안 댔다\n{said}");
+        assert!(said.contains(&other.join(".moai").display().to_string()), "그 자리를 안 댔다\n{said}");
+        assert!(!said.contains("init`"), "길이 아닌 `moai init` 을 댔다\n{said}");
+        assert!(json.contains(&format!("\"unseen_at\":{:?}", other.join(".moai").display().to_string())), "{json}");
+        assert!(json.contains("\"climbed_to\":") && !json.contains("init_at"), "{json}");
+    } else {
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // root 는 권한을 안 본다
+    }
 }
 
 /// **디렉터리가 아닌 `.moai` 는 트래커가 없는 것이 아니라 못 읽는 것이다**(moai-r0x8.e19). 위로 찾는 걸음이
