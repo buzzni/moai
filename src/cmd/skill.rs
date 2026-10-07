@@ -1892,7 +1892,8 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let skills = skill::skills();
         let tracked = |at: &str| -> Option<Vec<String>> {
-            let out = Command::new("git").args(["ls-files", "-z", "--", at]).current_dir(root).output().ok()?;
+            // git 은 [`crate::git::command`] 로만 띄운다 — 훅 안에서 돌 때 바깥 저장소의 환경을 걷는다.
+            let out = crate::git::command().args(["ls-files", "-z", "--", at]).current_dir(root).output().ok()?;
             if !out.status.success() {
                 return None;
             }
