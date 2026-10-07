@@ -369,6 +369,10 @@ struct GitPlace {
     dir: std::path::PathBuf,
     under: String,
     linked: bool,
+    /// 딸린 워크트리인데 **주 체크아웃이 없다**(맨 저장소, moai-r0x8.33p) — 가르는 자는 찾기가 옮겨 갈 때와 같은
+    /// [`crate::worktree::main_root`] 다. 그것이 없다고 하면 이 워크트리의 트래커가 읽히므로, 거절문이 "주
+    /// 체크아웃의 트래커" 를 대면 없는 자리를 댄다.
+    bare: bool,
 }
 
 fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlace> {
@@ -382,7 +386,8 @@ fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlac
     }
     let (own, dir) = (root.join(own), root.join(dir));
     let linked = crate::path::real(&own) != crate::path::real(&dir);
-    Some(GitPlace { dir, under, linked })
+    let bare = linked && crate::worktree::main_root(root).is_none();
+    Some(GitPlace { dir, under, linked, bare })
 }
 
 /// git 이 트래커를 추적하는가. 저장소 밖은 커밋 방식이고, git 실패나 시간 초과는 모르는 것이다.
@@ -481,12 +486,18 @@ fn clash_said(lang: crate::i18n::Lang, c: crate::init_choice::Conflict) -> Strin
 /// 쓰고 `.gitignore` 의 줄은 머지로 돌아가, 거기 커밋된 트래커의 새 파일(새 사람의 저널)이 말없이 커밋에서 빠진다.
 /// 워크트리 거절문이 대는 `MOAI_HERE=1 moai init` 이 그 자리로 가는 길이다. 처음 심을 때만 잰다 — 이미 선 트래커를
 /// 맞추는 `init` 을 막으면 고칠 길이 도구 밖에만 남는다.
+///
+/// **맨 저장소의 워크트리도 같은 까닭으로 거절하되 말이 다르다**(moai-r0x8.33p) — 주 체크아웃이 없으니 가리는 것은
+/// 같은 `info/exclude` 를 쓰는 다른 워크트리들의 트래커다. "주 체크아웃의 트래커" 를 대던 판은 없는 자리를 댔다.
 fn local_refusal(lang: crate::i18n::Lang, tracking: Tracking, place: Option<&GitPlace>) -> Option<String> {
     if tracking.tracked() {
         return None;
     }
     match place {
         None => Some(say(lang, "refuse.init_local_no_git").to_string()),
+        // 맨 저장소의 워크트리에는 주 체크아웃이 없다(moai-r0x8.33p) — 가리는 것은 같은 `info/exclude` 를 쓰는
+        // 다른 워크트리들의 트래커다.
+        Some(p) if p.bare => Some(say(lang, "refuse.init_local_bare").to_string()),
         Some(p) if p.linked => Some(say(lang, "refuse.init_local_linked").to_string()),
         Some(_) => None,
     }

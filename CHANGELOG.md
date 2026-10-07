@@ -57,6 +57,11 @@ does not tag — see `CONTRIBUTING.md`.
   both ways out — fix that tracker, or start a separate one here with
   `moai init`. `--json` adds `climbed_to` with that root beside
   `tracker_error`. (moai-r0x8.ris)
+- **`moai init --tracking exclude|gitignore` in a worktree of a bare repository
+  no longer names a main checkout that does not exist.** The refusal is the
+  same, but it now says the repository has no main checkout and that keeping
+  the tracker out of git would hide the trackers the other worktrees commit.
+  (moai-r0x8.33p)
 
 ## [0.9.0] - 2026-10-07
 

@@ -24297,6 +24297,40 @@ fn a_linked_worktree_does_not_keep_a_tracker_out_of_git() {
     assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
     assert_eq!(std::fs::read_to_string(main.join(".git/info/exclude")).unwrap_or_default(), before);
     assert!(!linked.join(".moai").exists(), "거절하고도 심었다");
+    // 주 체크아웃이 있는 저장소의 말은 그대로다.
+    assert!(field(&String::from_utf8_lossy(&out.stderr), "error").contains("주 체크아웃"));
+}
+
+/// **맨 저장소의 워크트리에는 주 체크아웃이 없다**(moai-r0x8.33p). 위의 거절은 맞지만 그 말이 "주 체크아웃의
+/// 트래커까지 가린다" 라, `git clone --bare` 로 받아 워크트리만 띄운 저장소에서는 없는 자리를 댔다. 가리는 것은
+/// 같은 `info/exclude` 를 함께 쓰는 **다른 워크트리들**의 커밋된 트래커다. 주 체크아웃이 있는가는 찾기가 옮겨
+/// 갈 때와 같은 자(`worktree::main_root`)로 가른다 — 그것이 없다고 하면 이 워크트리의 트래커가 읽힌다.
+#[test]
+fn a_bare_repository_worktree_refusal_names_no_main_checkout() {
+    let s = Scratch::new("init-bare-local");
+    let src = s.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-q", "."]);
+    git(&src, &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-q", "--allow-empty", "-m", "처음"]);
+    git(s.path(), &["clone", "-q", "--bare", "src", "repo.git"]);
+    let repo = s.path().join("repo.git");
+    let wt = s.path().join("wt");
+    git(&repo, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let before = std::fs::read_to_string(repo.join("info/exclude")).unwrap_or_default();
+
+    let out = moai(&wt, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(field(&err, "code"), "bad_input", "{err}");
+    let said = field(&err, "error");
+    assert!(said.contains("맨 저장소"), "맨 저장소라고 안 댔다 — {said}");
+    assert!(
+        !said.contains("주 체크아웃의 트래커") && said.contains("주 체크아웃이 없다"),
+        "없는 주 체크아웃을 댔다 — {said}"
+    );
+    assert!(said.contains("--tracking commit"), "고칠 길을 안 댔다 — {said}");
+    assert_eq!(std::fs::read_to_string(repo.join("info/exclude")).unwrap_or_default(), before);
+    assert!(!wt.join(".moai").exists(), "거절하고도 심었다");
 }
 
 // ── moai-j9nf: PR 20 리뷰의 회귀 ──────────────────────────────────────────────────────────
