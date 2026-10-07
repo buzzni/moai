@@ -1018,7 +1018,6 @@ pub fn status(
 
     out.push(board(cfg, &st.counts));
 
-    let shelved = crate::report::put_off(issues);
     // **아카이브된 묶음은 수 한 줄로 선다**(moai-47mz) — 목록은 그 줄을 뺐고(`report::Archived`), 그 줄을 보는
     // 명령을 함께 댄다. 마일스톤이 다 아카이브여도 머리글은 선다 — 안 서면 두 수가 어느 목록의 것인지 모른다.
     let labelled = !st.milestones.is_empty() || st.archived.milestones > 0;
@@ -1042,7 +1041,9 @@ pub fn status(
             // **미뤄 둔 묶음은 낱말로 말한다** — 색만으로 뜻을 지는 자리를 만들지
             // 않는다. 물려받은 미룸도 친다. "닫을 때가 됐다" 는 더 안 낸다: 묶음의
             // 칸은 멤버에서 읽으므로 100% 면 곧 닫힌 것이다(moai-j3b3).
-            let put_off = e.id.as_deref().is_some_and(|id| shelved.contains(id));
+            // **판정은 보고서가 든다**([`crate::report::Roll::put_off`], moai-sai2) — 여기 받은 줄은 산 줄뿐이라,
+            // 다시 재면 아카이브의 미룬 에픽이 되살린 멤버의 묶음으로 섰을 때 낱말을 잃는다.
+            let put_off = e.put_off;
             // **접은 묶음은 그렇다고 말한다.** 남은 멤버를 미뤄 닫은 묶음은 막대가
             // `1/2` 인 채로 done 에 서는데(칸은 미룬 멤버를 빼고 센다), 말하지 않으면
             // 세션이 시작하는 이 화면에서 접은 것과 굴러가는 것이 똑같아 보인다.
@@ -2825,8 +2826,8 @@ pub struct Board<'a> {
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
     /// 집은 줄의 id 가 **넘겨받는** 에픽(`report::handed_of`) — [`Picks::epics`] 와 같은 자리,
-    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다.
-    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다. 제 문자열을 쥐는 것도 같은 까닭이다.
+    pub epics: std::collections::BTreeMap<String, String>,
     /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::kinds`] 와 같다.
     pub kinds: crate::report::Kinds<'a>,
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
@@ -2875,10 +2876,13 @@ pub struct Picks<'a> {
     /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
     /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
     ///
+    /// **제 문자열을 쥔다**(moai-kfjy) — 지도는 아카이브를 겹친 문맥으로 짓고(`cmd::handed`), 그 문맥은 고르는
+    /// 자리에서 지은 것이라 여기까지 못 산다. 산 줄로만 지으면 옮겨 둔 에픽 밑의 되살린 멤버가 에픽 없는 줄로 나온다.
+    ///
     /// **이 지도만으로는 답이 아니다**(리뷰 moai-jk2u.o78) — 제 `epic` 을 적은 줄은 아예 안 드니
     /// (`report::hands_down`) 혼자 짚으면 그 줄이 에픽 없는 줄로 나온다. 값을 내는 자는
     /// `report::stands_in` 이고 그쪽이 줄의 `epic` 을 먼저 읽는다 — `cmd::Row::of` 를 지난다.
-    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    pub epics: std::collections::BTreeMap<String, String>,
     /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::epics`] 와
     /// 같은 자리, 같은 까닭이다(moai-53s2).
     pub kinds: crate::report::Kinds<'a>,

@@ -572,12 +572,10 @@ fn closing_hold(
         crate::hook::Carry::Context(_) | crate::hook::Carry::Nothing => return Decision::Pass,
     };
     once_per_session(input, repo, "stop", || {
-        let now = model::now();
-        let st = archive_status(repo, issues, unreadable, &now, ctx.zone());
         // **고칠 것만 센다.** 알림(쌓인 생각·미뤄 둔 것)은 `notices` 에 따로
         // 있다 — 여기 섞이던 때 `defer` 만 해도 "경고가 늘었다" 로 세션이
-        // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다.
-        let warnings: usize = st.warnings.iter().map(|w| w.count).sum();
+        // 붙들렸다(moai-c8lb). 기준선도 같은 자로 잰다([`warned`]).
+        let warnings = warned(repo, issues, unreadable, ctx.zone());
         // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
         // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
         let (away, latest) = releasing(input, repo, issues, &person_at(repo, ctx));
@@ -1638,11 +1636,8 @@ fn write_baseline(
     let Some(path) = session_file(input, repo, "warn") else {
         return;
     };
-    let now = model::now();
-    let st = archive_status(repo, issues, unreadable, &now, zone);
     // `Stop` 과 같은 자 — 알림은 안 센다.
-    let n: usize = st.warnings.iter().map(|w| w.count).sum();
-    let _ = std::fs::write(path, n.to_string());
+    let _ = std::fs::write(path, warned(repo, issues, unreadable, zone).to_string());
 }
 
 /// 세션의 표가 놓이는 자리.
@@ -1660,10 +1655,9 @@ fn session_file(input: &Input, repo: &Repo, what: &str) -> Option<std::path::Pat
     Some(std::env::temp_dir().join(format!("moai-hook-{safe}-{at:x}.{what}")))
 }
 
-/// 훅의 보드·`Stop`·기준선 — `moai status` 와 **같은 자**([`crate::cmd::status::archive_board`])로 짓는다(moai-bth3
-/// 리뷰). 따로 짓던 판은 아카이브 충돌(치명)과 옮길 수 있는 수를 빼먹어, `moai status` 가 1 로 끝나는데 세션의 보드는
-/// "드러난 문제 없다" 를 대고 `Stop` 은 그 충돌을 남긴 세션을 안 붙들었다. 훅은 루트의 스냅샷만 읽으므로 세는 줄이 곧
-/// 아카이브와 견줄 줄이다.
+/// 훅의 보드 — `moai status` 와 **같은 자**([`crate::cmd::status::archive_board`])로 짓는다(moai-bth3 리뷰). 따로 짓던
+/// 판은 아카이브 충돌(치명)과 옮길 수 있는 수를 빼먹어, `moai status` 가 1 로 끝나는데 세션의 보드는 "드러난 문제
+/// 없다" 를 댔다. 훅은 루트의 스냅샷만 읽으므로 세는 줄이 곧 아카이브와 견줄 줄이다. `Stop`·기준선은 [`warned`] 다.
 fn archive_status(
     repo: &Repo,
     issues: &[model::Issue],
@@ -1672,6 +1666,40 @@ fn archive_status(
     zone: &crate::tz::Zone,
 ) -> report::StatusReport {
     crate::cmd::status::archive_board(repo, issues, unreadable, (issues, unreadable), now, zone).0
+}
+
+/// `Stop` 과 기준선이 세는 경고의 수 — [`archive_status`] 의 경고와 **같은 수**다(moai-i9ji). 알림은 안 센다(moai-c8lb).
+///
+/// **아카이브는 산 줄에 닿는 것만 읽는다**([`crate::archive::around`]). `Stop` 은 턴이 끝날 때마다 돌아, 보드처럼
+/// 아카이브를 통째로 파싱하고 옮길 수 있는 묶음(`archive_pending`, 알림이다)까지 세던 판은 아카이브가 클수록 턴 끝이
+/// 느려졌다 — 릴리스 빌드로 줄 2만에 0.6초였고, 닿는 줄이 없으면 0.1초다. 경고는 산 줄만 꾸짖으므로 산 줄에 닿지 않는
+/// 아카이브 줄은 그 수를 못 바꾼다. **산 마일스톤에 달린 묶음은 닿는 것이다** — 에픽마다 마일스톤을 단 저장소는 여기서도
+/// 아카이브를 거의 다 읽어, 아끼는 것은 옮길 묶음 셈뿐이다(같은 2만 줄에 0.75초가 0.63초). 경고를 더는 자는
+/// [`crate::cmd::status::archive_board`] 와 같다 — 저쪽에 아카이브 경고를 더하면 여기도 더한다.
+/// `the_stop_count_matches_the_board_over_an_archive` 가 둘을 견준다.
+///
+/// **못 읽는 아카이브 줄은 닿든 안 닿든 센다**(moai-5y2a) — 깨진 데이터라 `moai status` 를 비영으로 끝내는 경고다.
+/// 닿지 않는 줄도 전부 읽는 판과 같은 [`crate::store::parse_line`] 으로 읽고 줄만 버린다 — 꼴만 재는 둘째 파서를 두었다가
+/// `Issue` 와 어긋난 것이 리뷰에서 드러났다(moai-bth3.zpc). 값은 릴리스 빌드로 닿는 줄이 없는 2만 줄의 `Stop` 중앙값이
+/// 0.10초(세지 않던 판)에서 0.135초가 되었다 — 꼴만 재던 판은 0.11~0.14초, 전부 읽던 판은 0.6초다(부하 13~16 에서
+/// 열다섯 번씩 세 차례, 2026-10-07). 세션이 아카이브를 깨 두고 가면 여기서 붙든다
+/// (`a_session_that_breaks_the_archive_is_held_at_stop`).
+fn warned(repo: &Repo, issues: &[model::Issue], unreadable: &[report::Unreadable], zone: &crate::tz::Zone) -> usize {
+    let now = model::now();
+    let opaque = || unreadable.iter().filter_map(|u| u.id);
+    let archived = crate::archive::around(&repo.root, issues, opaque());
+    let mut st = report::status_with_archive_unjudged(issues, &archived.issues, unreadable, &repo.config, &now)
+        .judged(&now, zone);
+    let live: std::collections::BTreeSet<&str> = issues.iter().map(|i| i.id.as_str()).chain(opaque()).collect();
+    let collisions = crate::archive::collisions(&live, &archived);
+    if !collisions.is_empty() {
+        st.warnings.push(report::Warning::archive_duplicates(collisions, issues));
+    }
+    // 못 읽는 줄은 닿든 안 닿든 다 돌아온다(`around`) — 보드와 같은 수다(moai-5y2a).
+    if !archived.errors.is_empty() {
+        st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
+    }
+    st.warnings.iter().map(|w| w.count).sum()
 }
 
 #[cfg(test)]

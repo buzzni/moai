@@ -434,7 +434,9 @@ stood closed for `archive_days`. Milestones stay in the active snapshot.
 archived rows only as context: parents, blockers and milestones. `show <id>`,
 `show --archived`, search, statistics and the explorer can list archived rows.
 Reopening an archived row with `moai mv <id> todo --from done` restores only that
-selected row. Its former bundle stays archived. Archived IDs stay reserved, and
+selected row. Its former bundle stays archived. `moai defer <id> --undo` on an
+archived row — a deferred epic whose member you reopened — brings that row back the
+same way. Archived IDs stay reserved, and
 `status` names an ID that stands both live and archived as `archive_duplicate_id`;
 `moai archive --drop <id>` repairs it and keeps the live row.
 Yearly archive files use the same `merge=moai` driver as the active snapshot.

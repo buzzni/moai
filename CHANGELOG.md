@@ -89,6 +89,12 @@ does not tag — see `CONTRIBUTING.md`.
 - **The board the hook loads on a session's first prompt says where moai's
   usage lives when AGENTS.md carries no moai block** — one line naming the
   `moai` skill and `moai prime`. Checkouts with the block see no change.
+- **An archive file that cannot be read is broken data.** `archive_unreadable`
+  is now a warning rather than a notice, so `moai status` exits non-zero on it
+  the way it does on an unreadable line in the active snapshot, and points at
+  `moai show --archived`, which names each file and line. The hook's `Stop`
+  check counts it too, reached by the live rows or not. `moai stats` and
+  `moai show --archived` still exit 0. (moai-5y2a)
 
 ### Fixed
 
@@ -124,15 +130,40 @@ does not tag — see `CONTRIBUTING.md`.
   files it cannot read. Hook ownership checks include archived pickups, sibling
   overlays do not create archive collision or eligibility warnings, and archive
   temporary files stay under the existing ignore rule. (moai-bth3)
+- **Writes can point at archived rows.** `add -e`, `edit -e`, `add --parent`,
+  `link` and `backlog promote -e` accept an epic, parent or blocker that
+  `moai archive` moved, instead of calling it missing; the new or edited row
+  stays live and the archived row stays archived. (moai-tzzt)
+- **A deferred epic in the archive can be taken back.** `moai defer <id> --undo`
+  on an archived row brings that row live, out of the deferral, instead of
+  calling it missing, and a member restored under an archived deferred epic is
+  told — by `mv` and by `defer <member> --undo` — which deferral keeps it out
+  of the plan. (moai-b6w3)
+- **The overview names the archived epic of a restored member.** `status --json`
+  and `ready --json` called outside any `.moai` now carry `derived_epic` on a
+  member restored under an epic that `moai archive` moved, as the in-repo
+  `ready --json` does. (moai-kfjy)
+- **The end of an agent turn no longer parses the whole archive.** The hook's
+  `Stop` check and its session baseline read only the archived rows that reach
+  the live ones — parents, epics, milestones, blockers and their members — and
+  skip the `archive_pending` count, a notice they never counted. The warnings
+  they count are the ones `moai status` counts. (moai-i9ji)
 - **The explorer counts warnings and notices the way `moai status` does when an
   archive exists.** The project layer's `+N` (and `tui --json` outside a
   repository) and the banner inside a project read archived rows as context
   only: a milestone whose members were all archived no longer shows as an
   overdue empty todo, an archived blocker is no longer a dangling reference,
-  archived rows are not counted as work, and an unreadable archive file is the
-  `archive_unreadable` notice rather than an unreadable-line warning. Archive
+  archived rows are not counted as work, and an unreadable archive file is
+  `archive_unreadable` rather than an unreadable-line warning. Archive
   collisions and bundles waiting for `moai archive` now show in both places,
   and the layer re-reads a project when its archive changes. (moai-nkwg)
+- **An archived deferred epic over a restored member counts as deferred again.**
+  When a member of a deferred epic that `moai archive` moved is restored, the
+  epic is back on the board as that member's group, and the board now marks it
+  `deferred` and counts it in the Deferred notice, as it does for a live epic
+  and as the `moai show --deferred` the notice points at lists it. An archived
+  deferred epic with nothing live under it stays out of the count.
+  (moai-sai2)
 
 ### Deprecated
 

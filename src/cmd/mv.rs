@@ -301,8 +301,14 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 옮겨져도 보드·`ready`·훅의 초점에서 빠진다 — 말하지 않으면 방금 집은
             // 일을 훅이 "집은 것 없음" 으로 막는 까닭이 아무 데도 없다.
             // 옮긴 것이 없으면 재지 않는다 — 락을 쥔 채 저장소 전체를 걷는 자리다.
+            //
+            // **아카이브를 겹친 문맥으로 잰다**(moai-b6w3) — 미룬 에픽이 멤버와 함께 아카이브로 갔으면, 되살린 멤버를
+            // 계획 밖에 두는 미룸은 그 에픽 줄에 있다. 산 줄로만 재면 그 멤버가 왜 보드와 `ready` 에서 빠졌는지를
+            // 아무 데서도 못 읽는다. 아카이브를 안 읽었으면 산 줄을 그대로 빌린다 — 옮길 때마다 스냅샷 전부를 베끼지
+            // 않는다. 겹치는 자는 다른 쓰기와 하나다([`super::in_context`]).
+            let context = super::in_context(issues, &archived.issues, unread);
             if !m.done.is_empty() {
-                let roots = crate::report::deferred_sources(issues);
+                let roots = crate::report::deferred_sources(&context);
                 m.shelved = m
                     .done
                     .iter()
@@ -323,11 +329,6 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // 통이 하나 더 생기는 날 그것이 저절로 다시 끼어든다.
             let asked: Vec<&str> =
                 m.done.iter().map(|(i, _)| i.id.as_str()).chain(m.already.iter().map(String::as_str)).collect();
-            // 아카이브를 안 읽었으면 산 줄을 그대로 빌린다 — 옮길 때마다 스냅샷 전부를 베끼지 않는다.
-            let context: std::borrow::Cow<'_, [model::Issue]> = match archived.issues.is_empty() {
-                true => std::borrow::Cow::Borrowed(&issues[..]),
-                false => std::borrow::Cow::Owned(crate::report::with_archive(issues, &archived.issues, &opaque)),
-            };
             m.read = super::read_of(&context, cfg, &asked, ctx.json);
             // 접는 길이 갈리는 자리 — `report` 가 정하고 여기서는 그 답을 나른다.
             m.finished = issues

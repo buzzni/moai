@@ -169,9 +169,9 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
         .transpose()
         .map_err(|e| Fail::no_actor(&e, lang))?;
 
-    let done: Edited = repo.with_write(
+    let done: Edited = repo.with_write_after(
         || ctx.lang(),
-        |issues, cfg, _| {
+        |issues, unread, cfg, _| {
             let Some(i) = issues.iter_mut().find(|i| i.id == args.id) else {
                 return Err(Fail::not_found(&args.id, lang));
             };
@@ -236,6 +236,16 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 i.updated_at = at.clone();
             }
             let out = i.clone();
+            // **아래의 판단은 아카이브로 옮긴 줄까지 겹쳐 읽는다**(moai-tzzt) — `-e` 로 적은 에픽이나 이 줄의 부모·
+            // 막는 줄이 아카이브에 있으면 산 줄만으로는 "없는 에픽" 이 되는데, 보드는 같은 줄을 멀쩡하다고 센다.
+            // 고친 줄은 산 파일의 것이 이긴다([`super::in_context`]).
+            // 상세의 자식 줄은 산 줄에서 고른다(`live`) — 겹친 문맥은 위로 닿을 때만 서므로, 거기서 고르면 아카이브의
+            // 자식이 부름마다 섰다 말았다 한다.
+            let live = &issues[..];
+            // 고친 줄이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]).
+            let archived = super::archived_with_groups(&repo.root, live, &[out.id.as_str()])?;
+            let issues = super::in_context(live, &archived, unread);
+            let issues = &issues[..];
             // **`-e none` 이 못 끊는 소속을 묻는다** (moai-w5gz). 이슈의 뜻은 `report` 가
             // 판단한다 — 여기서는 비우라고 적었는지만 본다. 바뀐 것이 없어도 묻는다: 필드가
             // 원래 비어 있던 에픽 밑 자식이 가장 흔한 자리다.
@@ -301,7 +311,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // **멤버는 여기서 안 뺀다.** `show` 는 뺀 줄을 멤버 칸이 받아 그리지만(`kin_of`)
             // 이 화면에는 그 칸이 없어, 빼면 그 줄이 어느 자리에도 안 선다 — 가리는 것은
             // 고침이 아니다. 둘을 맞추려면 이 화면에도 멤버 칸이 서야 한다.
-            let children: Vec<Issue> = crate::report::children_of(issues, &out.id).into_iter().cloned().collect();
+            let children: Vec<Issue> = crate::report::children_of(live, &out.id).into_iter().cloned().collect();
             // 상세가 그리는 줄 — 고친 줄과 그 자식. 미룸과 읽은 칸을 같은 자로 고른다.
             let near: Vec<&str> =
                 std::iter::once(out.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
@@ -333,6 +343,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 },
             ))
         },
+        |_| Ok(()),
     )?;
 
     let Edited {

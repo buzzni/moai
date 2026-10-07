@@ -27614,6 +27614,47 @@ fn archive_regressions_preserve_reference_and_milestone_context() {
     assert!(active.iter().all(|row| row["id"] != epic && row["id"] != b));
 }
 
+/// **The overview names the archived epic of a restored member**(moai-kfjy) — `status --json` and `ready --json`
+/// called outside any `.moai` built `derived_epic` from live rows alone, so a member restored under an archived epic
+/// stood in no epic there while the in-repo `ready --json` named it.
+#[test]
+fn archive_regressions_the_overview_names_the_archived_epic_of_a_restored_member() {
+    let s = init("archive-overview-epic");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "archived epic", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let out = Scratch::new("archive-overview-epic-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let outside = |args: &[&str]| -> serde_json::Value {
+        let seen = staged(args).current_dir(out.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", later).output();
+        serde_json::from_str(&String::from_utf8(seen.unwrap().stdout).unwrap()).unwrap()
+    };
+    // The in-repo `ready --json` names it — the overview has to say the same.
+    let inside: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    let row = inside["ready"].as_array().unwrap().iter().find(|r| r["id"] == member).unwrap();
+    assert_eq!(row["derived_epic"], epic, "{inside}");
+    let ready = outside(&["ready", "--json"]);
+    let row = ready["projects"][0]["ready"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["id"] == member))
+        .unwrap_or_else(|| panic!("{ready}"));
+    assert_eq!(row["derived_epic"], epic, "{ready}");
+    // Picked up, it stands under `picked` in the overview `status`.
+    ok_at(s.path(), later, &["mv", &member, "in_progress"]);
+    let board = outside(&["status", "--json"]);
+    let row = board["projects"][0]["picked"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["id"] == member))
+        .unwrap_or_else(|| panic!("{board}"));
+    assert_eq!(row["derived_epic"], epic, "{board}");
+}
+
 /// **The explorer's project layer counts what `moai status` counts**(moai-nkwg) — the layer once read the live rows
 /// alone, so a milestone whose members had all been archived stood as an overdue empty todo, an archived blocker
 /// stood as a dangling reference, and the archive's collision, unreadable file and pending bundles never showed: the
@@ -27650,9 +27691,8 @@ fn archive_regressions_the_project_layer_counts_what_the_board_counts() {
     };
     // The fixture stands: the archive diagnostics are on the board, and the archived context raises nothing.
     assert!(kinds("warnings").contains(&"archive_duplicate_id".to_string()), "{board}");
-    for kind in ["archive_pending", "archive_unreadable"] {
-        assert!(kinds("notices").contains(&kind.to_string()), "{kind}: {board}");
-    }
+    assert!(kinds("warnings").contains(&"archive_unreadable".to_string()), "{board}");
+    assert!(kinds("notices").contains(&"archive_pending".to_string()), "{board}");
     for kind in ["milestone_overdue", "dangling_blocked_by"] {
         assert!(!kinds("warnings").contains(&kind.to_string()), "{kind}: {board}");
     }
@@ -27683,6 +27723,150 @@ fn archive_regressions_the_hook_board_names_archive_collisions() {
     assert!(board.contains(&id) && board.contains("archive --drop"), "{board}");
 }
 
+/// **`Stop` and its baseline count the warnings `moai status` counts over an archive**(moai-i9ji) — they run at the end
+/// of every agent turn, so they read only the archive that reaches the live rows (`archive::around`) instead of
+/// parsing all of it. Every way an archived row feeds a live warning stands here at once: a restored member whose epic
+/// stayed archived, a live row blocked by an archived one, a live row put into an archived epic, a milestone past its
+/// deadline that stands done only through its archived members, and a live twin of an archived row
+/// (`archive_duplicate_id`). Read without them the board would name dangling references and an overdue milestone.
+/// The notice — a bundle `moai archive` would move — is not counted; an unreadable archived line nothing reaches is
+/// broken data and is counted the same on both sides (moai-5y2a).
+#[test]
+fn the_stop_count_matches_the_board_over_an_archive() {
+    let s = init("archive-stop-count");
+    let p = s.path();
+    let epic = ok(p, &["epic", "add", "closed bundle", "-q"]).trim().to_string();
+    let member = add(p, &["closed member", "--parent", &epic]);
+    let restored = add(p, &["restored member", "--parent", &epic]);
+    let stone = add(p, &["shipped", "--type", "milestone", "--due", "2026-09-20"]);
+    let released = ok(p, &["epic", "add", "released bundle", "--milestone", &stone, "-q"]).trim().to_string();
+    let shipped = add(p, &["shipped member", "--parent", &released]);
+    let blocker = add(p, &["closed blocker"]);
+    let twin = add(p, &["archived twin"]);
+    for id in [&member, &restored, &shipped, &blocker, &twin] {
+        ok(p, &["mv", id, "done"]);
+    }
+    let twin_line = line_of(p, &twin);
+    ok_at(p, ARCHIVED_AT, &["archive"]);
+    let archive = std::fs::read_to_string(p.join(".moai/archive/2026.jsonl")).unwrap();
+    for id in [&epic, &member, &restored, &released, &shipped, &blocker, &twin] {
+        assert!(Archived::has(&archive, id), "{id} was not archived\n{archive}");
+    }
+    ok_at(p, ARCHIVED_AT, &["mv", &restored, "todo", "--from", "done"]);
+    let waiting = add(p, &["waits on the archive"]);
+    ok(p, &["link", &blocker, "--blocks", &waiting]);
+    add(p, &["joins the archived epic", "-e", &epic]);
+    let pending = add(p, &["closed since"]);
+    ok(p, &["mv", &pending, "done"]);
+    let mut archive = std::fs::OpenOptions::new().append(true).open(p.join(".moai/archive/2026.jsonl")).unwrap();
+    std::io::Write::write_all(&mut archive, b"{\"id\":\"argos-zzzz\",\"title\":\n").unwrap();
+
+    let counted = |board: &serde_json::Value| -> usize {
+        board["warnings"].as_array().unwrap().iter().map(|w| w["count"].as_u64().unwrap() as usize).sum()
+    };
+    let at_archive = [("MOAI_NOW", ARCHIVED_AT)];
+    let start = |session: &str| hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, session));
+    // The session opens before the live twin, and the twin is what it leaves behind.
+    start("before-twin");
+    let before = baseline(&s, "before-twin").expect("no baseline");
+    let mut active = issues(p);
+    active.push_str(&format!("{twin_line}\n"));
+    std::fs::write(p.join(".moai/issues.jsonl"), active).unwrap();
+
+    let out = at(p, ARCHIVED_AT, &["status", "--json"]);
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<&str> = board["warnings"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
+    let notices: Vec<&str> = board["notices"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
+    assert!(kinds.contains(&"archive_duplicate_id") && kinds.contains(&"archive_unreadable"), "{board}");
+    for kind in ["dangling_epic", "dangling_blocked_by", "orphan_child", "milestone_overdue"] {
+        assert!(!kinds.contains(&kind), "{kind} — the board did not read the archive\n{board}");
+    }
+    assert!(notices.contains(&"archive_pending"), "{board}");
+    let warnings = counted(&board);
+    assert_eq!(before + 1, warnings, "only the twin came in between\n{board}");
+
+    start("after-twin");
+    assert_eq!(baseline(&s, "after-twin"), Some(warnings), "{board}");
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "before-twin"));
+    let held = String::from_utf8_lossy(&stop.stdout);
+    let grew = |n: usize| held.contains(&format!(" {n} "));
+    assert!(held.contains(r#""decision":"block""#) && grew(before) && grew(warnings), "{held}");
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "after-twin"));
+    assert!(stop.stdout.is_empty(), "{}", String::from_utf8_lossy(&stop.stdout));
+}
+
+/// **An archive that cannot be read is broken data**(moai-5y2a, 2026-10-06 the person's decision) — `moai status`
+/// exits non-zero on it, on the same line as an unreadable live row (`unreadable_line`). A file of conflict markers, a
+/// file that is not UTF-8 and a FIFO in a year's place are all `archive_unreadable`, a fatal warning that names the
+/// command listing each source. `stats` and `show --archived` still answer with 0: they read what they can and say the
+/// rest on stderr (moai-qde9.2hx.yt6).
+#[test]
+fn an_unreadable_archive_is_broken_data_for_status_alone() {
+    let mut cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
+        ("conflict", Box::new(|f| std::fs::write(f, "<<<<<<< ours\n=======\n>>>>>>> theirs\n").unwrap())),
+        ("not-utf8", Box::new(|f| std::fs::write(f, [0xff, 0xfe, b'\n']).unwrap())),
+    ];
+    #[cfg(unix)]
+    cases.push(("fifo", Box::new(|f| assert!(Command::new("mkfifo").arg(f).status().unwrap().success()))));
+    for (name, make) in cases {
+        let s = init(&format!("archive-broken-{name}"));
+        add(s.path(), &["live work"]);
+        let dir = s.path().join(".moai/archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        make(&dir.join("2025.jsonl"));
+
+        let out = at(s.path(), NOW, &["status", "--json"]);
+        assert!(!out.status.success(), "{name}: status exited 0 over a broken archive");
+        let board: serde_json::Value = serde_json::from_slice(&out.stdout).expect("status --json");
+        let found = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "archive_unreadable");
+        let w = found.unwrap_or_else(|| panic!("{name}: no archive_unreadable warning\n{board}"));
+        assert_eq!(
+            (&w["fatal"], &w["notice"], &w["hint"]),
+            (&serde_json::json!(true), &serde_json::json!(false), &serde_json::json!("moai show --archived"))
+        );
+        assert!(board["notices"].as_array().unwrap().iter().all(|n| n["kind"] != "archive_unreadable"), "{board}");
+        assert!(!at(s.path(), NOW, &["status"]).status.success(), "{name}: the text board exited 0");
+        for args in [&["stats", "--json"][..], &["show", "--archived"]] {
+            let out = at(s.path(), NOW, args);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "{name}: {args:?} exited non-zero\n{err}");
+            assert!(err.contains("archive/2025.jsonl"), "{name}: {args:?} did not name the source\n{err}");
+        }
+    }
+}
+
+/// **A session that leaves a broken archive behind is held at `Stop`**(moai-5y2a) — `Stop` reads only the archive that
+/// reaches the live rows (`archive::around`, moai-i9ji), yet it counts every unreadable archived line the way `moai
+/// status` does, reached or not. The line here is JSON but not a row (it has no `status`), so a syntax check alone
+/// would miss it, and nothing else names its id.
+#[test]
+fn a_session_that_breaks_the_archive_is_held_at_stop() {
+    let s = init("archive-broken-stop");
+    let p = s.path();
+    let done = add(p, &["closed"]);
+    ok(p, &["mv", &done, "done"]);
+    ok_at(p, ARCHIVED_AT, &["archive"]);
+    add(p, &["live work"]);
+    let at_archive = [("MOAI_NOW", ARCHIVED_AT)];
+    hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, "breaks"));
+    let before = baseline(&s, "breaks").expect("no baseline");
+
+    let mut archive = std::fs::OpenOptions::new().append(true).open(p.join(".moai/archive/2026.jsonl")).unwrap();
+    std::io::Write::write_all(&mut archive, b"{\"id\":\"argos-zzzy\",\"title\":\"no status\"}\n").unwrap();
+    let out = at(p, ARCHIVED_AT, &["status", "--json"]);
+    assert!(!out.status.success());
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let counted: usize =
+        board["warnings"].as_array().unwrap().iter().map(|w| w["count"].as_u64().unwrap() as usize).sum();
+    assert_eq!(counted, before + 1, "{board}");
+
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "breaks"));
+    let held = String::from_utf8_lossy(&stop.stdout);
+    assert!(held.contains(r#""decision":"block""#) && held.contains(&format!(" {counted} ")), "{held}");
+    hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, "after"));
+    assert_eq!(baseline(&s, "after"), Some(counted), "the baseline and the board count apart");
+}
+
 #[test]
 fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
     let s = init("archive-lenient-read");
@@ -27693,7 +27877,8 @@ fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
     std::fs::write(dir.join("2025.jsonl"), "<<<<<<< conflict\n=======\n>>>>>>> other\n").unwrap();
     let another = add(s.path(), &["write despite archive damage"]);
     ok(s.path(), &["mv", &another, "in_progress"]);
-    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    let board = at(s.path(), NOW, &["status", "--json"]);
+    assert!(!board.status.success() && String::from_utf8_lossy(&board.stdout).contains("archive_unreadable"));
     for args in [vec!["show", &id], vec!["stats", "--json"]] {
         let out = at(s.path(), NOW, &args);
         let err = String::from_utf8_lossy(&out.stderr);
@@ -27739,6 +27924,155 @@ fn archive_regressions_conflicting_bundles_stay_live_and_drop_repairs_them() {
     assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
     ok_at(s.path(), later, &["archive"]);
     assert!(!issues(s.path()).contains(&member));
+}
+
+/// **아카이브로 옮긴 줄도 가리킬 수 있다**(moai-tzzt) — 아카이브는 닫힌 묶음을 파일만 옮긴 것이라, 그 에픽·부모·
+/// 막는 줄은 여전히 있는 줄이다. 쓰기의 참조 검사가 산 줄만 보던 판은 `add -e`·`edit -e` 에 "없는 에픽" 을 알리고,
+/// `--parent`·`link` 는 "없다" 로 거절했다 — 보드는 아카이브를 문맥으로 읽어 같은 줄을 멀쩡하다고 세는데.
+/// 가리킨 줄은 아카이브에 그대로 서고, 새 줄만 산 파일에 선다. 아래 넷이 이 판을 같이 쓴다.
+struct Archived {
+    s: Scratch,
+    epic: String,
+    member: String,
+    blocker: String,
+    /// 산 줄 `live` 에 막혔던 채로 닫혀 아카이브로 간 줄 — 고리가 아카이브를 지나는 판이다.
+    waited: String,
+    live: String,
+    archive: String,
+}
+
+const ARCHIVED_AT: &str = "2026-10-01T00:00:00Z";
+
+impl Archived {
+    fn new(name: &str) -> Archived {
+        let s = init(name);
+        let epic = ok(s.path(), &["epic", "add", "closed bundle", "-q"]).trim().to_string();
+        let member = add(s.path(), &["closed member", "--parent", &epic]);
+        let blocker = add(s.path(), &["closed blocker"]);
+        let live = add(s.path(), &["live row"]);
+        let waited = add(s.path(), &["closed while blocked"]);
+        ok(s.path(), &["link", &live, "--blocks", &waited]);
+        for id in [&member, &blocker, &waited] {
+            ok(s.path(), &["mv", id, "done"]);
+        }
+        ok_at(s.path(), ARCHIVED_AT, &["archive"]);
+        let archive = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+        let a = Archived { s, epic, member, blocker, waited, live, archive };
+        for id in [&a.epic, &a.member, &a.blocker, &a.waited] {
+            assert!(Archived::has(&a.archive, id) && !Archived::has(&issues(a.s.path()), id), "{id} 가 안 옮겨졌다");
+        }
+        a
+    }
+
+    fn has(text: &str, id: &str) -> bool {
+        text.lines().any(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"] == id)
+    }
+
+    /// 성공하고 stderr 에 아무 말도 없어야 한다 — "없는 에픽" 알림도 거기 선다.
+    fn quiet(&self, args: &[&str]) -> String {
+        let out = at(self.s.path(), ARCHIVED_AT, args);
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success(), "moai {args:?}\n{err}");
+        assert!(err.is_empty(), "moai {args:?} 가 아카이브의 줄을 없다고 읽었다\n{err}");
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// 보드는 끊긴 참조를 안 세고 `rows`(이 쓰기가 아카이브를 가리키게 한 줄)를 어느 경고에도 안 올린다 — 에픽 없는
+    /// 줄도 고아도 아니다. 가리킨 줄은 아카이브에 그대로다 — 되살린 것이 아니다.
+    fn settled(&self, rows: &[&str]) {
+        let board = ok_at(self.s.path(), ARCHIVED_AT, &["status", "--json"]);
+        assert!(!board.contains("dangling_"), "{board}");
+        let parsed: serde_json::Value = serde_json::from_str(&board).unwrap();
+        for w in parsed["warnings"].as_array().unwrap() {
+            let named = w["ids"].as_array().into_iter().flatten().filter_map(|id| id.as_str());
+            for id in named {
+                assert!(!rows.contains(&id), "{id} 가 {} 로 섰다\n{board}", w["kind"]);
+            }
+        }
+        let active = issues(self.s.path());
+        for id in [&self.epic, &self.member, &self.blocker, &self.waited] {
+            assert!(!Archived::has(&active, id), "{id} 가 산 파일로 돌아왔다\n{active}");
+        }
+        let archive = std::fs::read_to_string(self.s.path().join(".moai/archive/2026.jsonl")).unwrap();
+        assert_eq!(archive, self.archive);
+    }
+}
+
+#[test]
+fn archive_regressions_add_e_points_at_an_archived_epic() {
+    let a = Archived::new("archive-ref-add-e");
+    let made: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "joins the archived epic", "-e", &a.epic, "--json"])).unwrap();
+    assert_eq!(made["derived_epic"], a.epic.as_str(), "{made}");
+    a.settled(&[made["id"].as_str().unwrap()]);
+}
+
+#[test]
+fn archive_regressions_edit_e_points_at_an_archived_epic() {
+    let a = Archived::new("archive-ref-edit-e");
+    let edited: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["edit", &a.live, "-e", &a.epic, "--json"])).unwrap();
+    assert_eq!(edited["derived_epic"], a.epic.as_str(), "{edited}");
+    // 사람 화면의 상세도 그 에픽을 이름으로 댄다 — "(에픽이 없다)" 가 아니다.
+    let shown = a.quiet(&["edit", &a.live, "-e", &a.epic, "--title", "live row again"]);
+    assert!(shown.contains("closed bundle"), "{shown}");
+    a.settled(&[&a.live]);
+}
+
+#[test]
+fn archive_regressions_parent_points_at_archived_rows() {
+    let a = Archived::new("archive-ref-parent");
+    // 아카이브의 에픽과 멤버 밑에 자식이 선다. id 는 그 부모의 것을 잇는다.
+    let child: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "under the archived epic", "--parent", &a.epic, "--json"])).unwrap();
+    assert!(child["id"].as_str().unwrap().starts_with(&format!("{}.", a.epic)), "{child}");
+    let grand: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "under the archived member", "--parent", &a.member, "--json"])).unwrap();
+    assert!(grand["id"].as_str().unwrap().starts_with(&format!("{}.", a.member)), "{grand}");
+    assert_eq!(grand["derived_epic"], a.epic.as_str(), "{grand}");
+    a.settled(&[child["id"].as_str().unwrap(), grand["id"].as_str().unwrap()]);
+}
+
+#[test]
+fn archive_regressions_link_takes_an_archived_blocker() {
+    let a = Archived::new("archive-ref-link");
+    a.quiet(&["link", &a.blocker, "--blocks", &a.live]);
+    // 막힌 쪽(산 줄)에만 적힌다. 닫힌 줄이 막으니 그 줄은 그대로 집을 수 있다.
+    let row: serde_json::Value = serde_json::from_str(&line_of(a.s.path(), &a.live)).unwrap();
+    assert_eq!(row["blocked_by"], serde_json::json!([a.blocker]), "{row}");
+    assert!(ok_at(a.s.path(), ARCHIVED_AT, &["ready", "--json"]).contains(&a.live));
+    // 고리는 아카이브의 줄을 지나서도 잰다 — 아카이브의 `waited` 는 `live` 에 막혀 있으니, 그것이 `live` 를 막으면 고리다.
+    let looped = at(a.s.path(), ARCHIVED_AT, &["link", &a.waited, "--blocks", &a.live, "--json"]);
+    assert!(!looped.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&looped.stderr), "code"), "bad_input");
+    // 막히는 쪽은 이 쓰기가 고치는 줄이라 산 줄이라야 한다 — 아카이브의 줄은 `edit` 처럼 못 찾는다.
+    let archived = at(a.s.path(), ARCHIVED_AT, &["link", &a.live, "--blocks", &a.blocker, "--json"]);
+    assert_eq!(field(&String::from_utf8_lossy(&archived.stderr), "code"), "not_found");
+    a.settled(&[]);
+}
+
+/// `backlog promote -e` 는 `add -e` 와 같은 에픽을 받는다 — 연습도 진짜도. 없는 에픽을 거절하는 자리라, 산 줄만
+/// 재면 아카이브의 에픽에 펼치는 길이 통째로 막힌다.
+#[test]
+fn archive_regressions_promote_e_unfolds_into_an_archived_epic() {
+    let a = Archived::new("archive-ref-promote-e");
+    let idea = ok(a.s.path(), &["backlog", "add", "a later thought", "-q"]).trim().to_string();
+    let run = |dry: bool| {
+        let mut args = vec!["backlog", "promote", &idea, "-e", &a.epic, "--from", "-", "--json"];
+        if dry {
+            args.push("--dry-run");
+        }
+        let out = from_stdin(a.s.path(), &args, "- unfolded member\n");
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success() && err.is_empty(), "dry-run {dry}\n{err}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    run(true);
+    let made: serde_json::Value = serde_json::from_str(&run(false)).unwrap();
+    let member = made["made"][0]["id"].as_str().unwrap();
+    assert!(member.starts_with(&format!("{}.", a.epic)), "{made}");
+    assert_eq!(made["made"][0]["derived_epic"], a.epic.as_str(), "{made}");
+    a.settled(&[member]);
 }
 
 #[test]
@@ -27797,7 +28131,8 @@ fn archive_regressions_fifos_and_outside_links_never_block_active_operations() {
     assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
     let id = add(s.path(), &["works with special files"]);
     ok(s.path(), &["mv", &id, "in_progress"]);
-    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    let board = at(s.path(), NOW, &["status", "--json"]);
+    assert!(!board.status.success() && String::from_utf8_lossy(&board.stdout).contains("archive_unreadable"));
     assert_eq!(std::fs::read_to_string(away.path().join("outside.jsonl")).unwrap(), "unchanged");
 }
 
@@ -27867,7 +28202,11 @@ fn archive_regressions_an_unrelated_broken_archive_file_blocks_neither_cleanup_n
     assert!(String::from_utf8_lossy(&dropped.stdout).contains("\"removed\":1"));
     assert!(err.contains("2023.jsonl") && err.contains("2024.jsonl"), "unchecked files went unnamed: {err}");
     assert!(!std::fs::read_to_string(dir.join("2026.jsonl")).unwrap().contains(&twin));
-    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+    // The broken files are still there, so the board ends non-zero on them alone (moai-5y2a).
+    let board = at(s.path(), later, &["status", "--json"]);
+    let text = String::from_utf8_lossy(&board.stdout);
+    assert!(!board.status.success() && text.contains("archive_unreadable"), "{text}");
+    assert!(!text.contains("archive_duplicate_id"), "{text}");
 }
 
 /// **`--drop` removes copies of the live row only**(review of moai-bth3). An archived row that merely shares the id
@@ -28010,6 +28349,120 @@ fn archive_regressions_a_restored_group_row_goes_back_with_the_next_run() {
     assert!(dry.contains(&epic), "{dry}");
     ok_at(s.path(), much_later, &["archive"]);
     assert!(!issues(s.path()).contains(&epic));
+}
+
+/// **A restored group reads its column from its archived members in the writes that report it** — `edit` and `defer`
+/// overlay the archive only when a reference reaches past the live rows, and a restored epic reaches nothing: it is
+/// live and its members are not looked up. Read from live rows alone it has no members, so `derived_status` said the
+/// first column where `moai show` and the board say done.
+#[test]
+fn archive_regressions_a_restored_group_reads_its_column_from_archived_members_on_write() {
+    let s = init("archive-group-column");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &epic, "todo"]);
+    assert!(issues(s.path()).contains(&epic) && !issues(s.path()).contains(&member));
+    let shown: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["show", &epic, "--json"])).unwrap();
+    assert_eq!(shown["derived_status"], "done", "{shown}");
+    let edited: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["edit", &epic, "--title", "renamed", "--json"])).unwrap();
+    assert_eq!(edited["derived_status"], "done", "{edited}");
+    let blocker = add(s.path(), &["live blocker"]);
+    let linked: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["link", &blocker, "--blocks", &epic, "--json"])).unwrap();
+    assert_eq!(linked[0]["derived_status"], "done", "{linked}");
+    let deferred: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--json"])).unwrap();
+    assert_eq!(deferred["changed"][0]["derived_status"], "done", "{deferred}");
+}
+
+/// **A deferred epic that went to the archive still has a way back**(moai-b6w3). Restoring one of its members brings
+/// only that member live, and the member stays out of the plan because its epic is deferred — that much is the same as
+/// a live deferred epic. But every road back read live rows only: the move did not say where the deferral stood,
+/// `defer <member> --undo` answered "already in the plan", and `defer <epic> --undo` answered "not found". Now the
+/// hints name the archived epic, and undoing it brings that row live — the change exists only in the live snapshot.
+#[test]
+fn archive_regressions_an_archived_deferred_epic_can_be_undone() {
+    let s = init("archive-deferred-epic");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "shelved bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok(s.path(), &["defer", &epic, "-m", "not this quarter"]);
+    ok_at(s.path(), later, &["archive"]);
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    assert!(std::fs::read_to_string(&file).unwrap().contains(&epic));
+    // The restore says, as for a live epic, which deferral keeps the member out of the plan.
+    let moved: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done", "--json"])).unwrap();
+    assert_eq!(moved["shelved"], serde_json::json!([{"id": member, "root": epic}]), "{moved}");
+    // Undoing the member alone does not bring it back, and says where to.
+    let said = ok_at(s.path(), later, &["defer", &member, "--undo"]);
+    assert!(said.contains(&format!("moai defer {epic} --undo")), "{said}");
+    let undone: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &member, "--undo", "--json"])).unwrap();
+    assert_eq!(undone["already"], serde_json::json!([]), "{undone}");
+    assert_eq!(undone["shelved"], serde_json::json!([{"id": member, "root": epic}]), "{undone}");
+    // Deferring it again changes nothing, so the epic stays archived.
+    let archive = std::fs::read_to_string(&file).unwrap();
+    let live = issues(s.path());
+    let again: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--json"])).unwrap();
+    assert_eq!(again["already"], serde_json::json!([epic]), "{again}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), archive);
+    assert_eq!(issues(s.path()), live);
+    // Undoing the epic brings it live, out of the deferral, and the member is work again.
+    let back: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--undo", "--json"])).unwrap();
+    assert_eq!(back["changed"][0]["id"], epic, "{back}");
+    let row = issues(s.path())
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|r| r["id"] == epic)
+        .unwrap_or_else(|| panic!("{epic} did not come live\n{}", issues(s.path())));
+    assert!(row.get("deferred_at").is_none(), "{row}");
+    let archive = std::fs::read_to_string(&file).unwrap();
+    assert!(!archive.contains(&format!("\"id\":\"{epic}\"")) && archive.contains(&sibling), "{archive}");
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    assert_eq!(ready["ready"][0]["id"], member, "{ready}");
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+}
+
+/// **The board counts and marks an archived deferred epic the way it does a live one**(moai-sai2). Restoring a member
+/// brings the epic back onto the board as that member's group, and the member is out of the plan because of it — the
+/// `Deferred` notice said 1 where the live epic says 2, and the epic row lost its `deferred` word, while the
+/// `moai show --deferred` the notice points at listed both. An archived deferred epic with nothing live under it is
+/// history and stays uncounted.
+#[test]
+fn archive_regressions_the_board_counts_an_archived_deferred_epic_over_a_live_member() {
+    let s = init("archive-deferred-board");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "shelved bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok(s.path(), &["defer", &epic, "-m", "not this quarter"]);
+    ok_at(s.path(), later, &["archive"]);
+    let deferred = |board: &serde_json::Value| {
+        board["notices"].as_array().unwrap().iter().find(|w| w["kind"] == "deferred").map(|w| w["count"].clone())
+    };
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(deferred(&board), None, "an archived bundle with nothing live under it was counted\n{board}");
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(deferred(&board), Some(serde_json::json!(2)), "{board}");
+    let text = ok_at(s.path(), later, &["status"]);
+    let row = text.lines().find(|l| l.contains(&epic)).unwrap_or_else(|| panic!("{epic} is not on the board\n{text}"));
+    assert!(row.contains("미룸"), "the archived deferred epic lost its mark\n{text}");
+    let listed = ok_at(s.path(), later, &["show", "--deferred", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&listed).unwrap().as_array().unwrap().len(), 2, "{listed}");
 }
 
 /// **A row in an archive file that cannot be read is not just "not found"**(review of moai-bth3) — the move names the

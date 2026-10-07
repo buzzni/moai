@@ -163,7 +163,8 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             return Err(not_a_backlog(&args.id, thought, ctx.lang()));
         }
         if let Some(e) = into {
-            check_epic(&load.issues, e, ctx.lang())?;
+            let archived = super::archived_for(&repo.root, &load.issues, &[e])?;
+            check_epic(&super::in_context(&load.issues, &archived, &load.errors), e, ctx.lang())?;
         }
         // **크기도 여기서 잰다**(moai-5229) — 연습이 승인한 계획을 진짜가 거절하면, 그 "좋다" 가
         // 뒤늦은 말이 된다. `add --from --dry-run` 과 한 자리를 지난다.
@@ -226,9 +227,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // 바로 위 `model::actor` 를 밖으로 뺀 것과 같은 자다(`cmd/mv.rs` 의 주석).
     let lang = ctx.lang();
-    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
+    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write_after(
         || ctx.lang(),
-        |issues, cfg, reserved| {
+        |issues, unread, cfg, reserved| {
             // 시각은 **락을 쥔 뒤에** 뜬다 — `mv` 와 같은 까닭이다. 밖에서 뜨면 이 닫기가 옆의 집기보다
             // 늦게 써져도 이른 시각을 들어, 생각의 끝이 시작보다 앞선다(리뷰 moai-u5bk.3wq).
             let at = model::now();
@@ -248,9 +249,14 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             }
             let title = thought.title.clone();
             let was = thought.status.clone();
-            // 들 에픽도 락 안에서 다시 본다 — 연습과 진짜 사이에 지워졌을 수 있다.
+            // 들 에픽도 락 안에서 다시 본다 — 연습과 진짜 사이에 지워졌을 수 있다. **아카이브로 옮긴 에픽도 받는다**
+            // (moai-tzzt) — `add -e` 와 같은 자다. 멤버는 산 파일에 서고 에픽은 아카이브에 그대로 선다.
+            let archived = match into {
+                Some(e) => super::archived_for(&repo.root, issues, &[e])?,
+                None => Vec::new(),
+            };
             if let Some(e) = into {
-                check_epic(issues, e, lang)?;
+                check_epic(&super::in_context(issues, &archived, unread), e, lang)?;
             }
             // 담아 둔 생각의 담당을 **갈라진 채로** 물려준다. 펼친 계획의 임자가
             // 없으면 `ready` 가 집으라고 내면서 누가 집는지는 말하지 않는다.
@@ -341,10 +347,11 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             }
             // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
-            let read = crate::cmd::read_of(issues, cfg, &ids, ctx.json);
+            let read = crate::cmd::read_of(&super::in_context(issues, &archived, unread), cfg, &ids, ctx.json);
             let known = crate::cmd::add::is_milestone(issues, crate::cmd::add::stood_on(&made));
             Ok((entries, (made, read, known)))
         },
+        |_| Ok(()),
     )?;
 
     if ctx.json {

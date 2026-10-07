@@ -190,10 +190,11 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     ))
 }
 
-/// 아카이브를 곁들인 보드(moai-bth3) — `moai status`, 등록한 프로젝트의 한눈 보기, 훅의 보드·`Stop`·기준선이 **이
-/// 하나로** 짓는다. 저마다 짓던 판은 훅이 `archive_duplicate_id`·`archive_pending` 을 빼먹어 `moai status` 가 1 로
-/// 끝나는데 세션의 보드는 "드러난 문제 없다" 를 댔고, 한눈 보기는 아카이브를 아예 안 읽어 낸 마일스톤을 기한 지난
-/// 빈 todo 로 댔다(moai-6k1r 이 [`install_notices`] 를 한 자리에 모은 것과 같은 까닭이다).
+/// 아카이브를 곁들인 보드(moai-bth3) — `moai status`, 등록한 프로젝트의 한눈 보기, 훅의 보드가 **이 하나로** 짓는다.
+/// 훅의 `Stop`·기준선은 같은 경고를 산 줄에 닿는 아카이브로만 센다(`cmd::hook::warned`, moai-i9ji) — 여기 아카이브
+/// 경고를 더하면 그쪽에도 더한다. 저마다 짓던 판은 훅이 `archive_duplicate_id`·`archive_pending` 을 빼먹어
+/// `moai status` 가 1 로 끝나는데 세션의 보드는 "드러난 문제 없다" 를 댔고, 한눈 보기는 아카이브를 아예 안 읽어 낸
+/// 마일스톤을 기한 지난 빈 todo 로 댔다(moai-6k1r 이 [`install_notices`] 를 한 자리에 모은 것과 같은 까닭이다).
 ///
 /// `rows`·`unreadable` 은 보드가 세는 줄(옆 워크트리를 겹쳤으면 겹친 것)이고, `root` 는 아카이브와 견줄 **루트의
 /// 스냅샷**(줄과 못 읽는 줄)이다 — 충돌과 옮길 수 있는 수는 옆의 줄로 재지 않는다. 아카이브는 함께 돌려준다: 그
@@ -233,8 +234,9 @@ pub(crate) fn archive_board_unjudged(
     if !collisions.is_empty() {
         st.warnings.push(report::Warning::archive_duplicates(collisions, root.0));
     }
+    // 치명 줄의 끝이다 — 산 줄의 `duplicate_id`·`unreadable_line` 처럼 충돌 다음에 못 읽는 것이 선다(moai-5y2a).
     if !archived.errors.is_empty() {
-        st.notices.push(report::Warning::archive_unreadable(archived.errors.len()));
+        st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
     }
     // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
     let movable = crate::archive::movable(root.0, archived, cfg, now).len();
@@ -367,7 +369,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 마일스톤을 기한 지난 빈 todo 로, 옮겨 둔 막음을 끊긴 참조로 댔다. 충돌은 루트의 스냅샷으로 잰다.
             let reread = if worktree { repo.read().ok() } else { None };
             let root = reread.as_ref().unwrap_or(load);
-            let (mut status, _) =
+            let (mut status, archived) =
                 archive_board(repo, &load.issues, &unreadable, (&root.issues, &root.unreadable()), &now, ctx.zone());
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
             // **여는 길이 판 것을 받는다**(moai-65ie, `Project::dug`) — 안 받으면 이 줄이 프로젝트
@@ -388,11 +390,17 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 프로젝트의 줄 목록이 안 따라간다. 다만 **기계 쪽만 짓는다**(리뷰): `Board::epics`
             // 를 읽는 것은 `--json` 뿐이라, 늘 지으면 사람이 보는 보드가 프로젝트마다 저장소
             // 전체의 소속을 한 벌씩 걷고 그대로 버린다.
+            //
+            // **소속은 아카이브를 겹친 문맥으로 짓는다**(moai-kfjy) — 저장소 안의 `ready --json` 과 같은 문맥이다
+            // ([`crate::cmd::ready`] 의 한눈 보기와 같은 자, `report::with_archive`). 산 줄로만 지으면 옮겨 둔 에픽
+            // 밑에서 되살려 집은 멤버가 에픽 없는 줄로 나온다. 가려진 줄을 가르는 지도는 산 줄로 짓는다 — 집은 줄은
+            // 다 산 줄이고 문맥은 산 줄과 같은 id 의 아카이브 사본을 안 들여 답이 같다.
             let picked = report::wip(&load.issues, &repo.config);
             let (epics, kinds) = match ctx.json {
                 true => {
                     let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
-                    (report::handed_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
+                    let context = super::in_context(&load.issues, &archived.issues, &load.errors);
+                    (super::handed(&context, &ids, true), report::Kinds::of_ids(&load.issues, &ids))
                 }
                 false => Default::default(),
             };
@@ -448,7 +456,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                         .picked
                         .iter()
                         .map(|i| {
-                            super::Row::of(i, |_| None, b.epics.get(i.id.as_str()).copied(), &b.kinds).on(&p.origin)
+                            super::Row::of(i, |_| None, b.epics.get(i.id.as_str()).map(String::as_str), &b.kinds)
+                                .on(&p.origin)
                         })
                         .collect(),
                     // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.

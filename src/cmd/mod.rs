@@ -1028,17 +1028,75 @@ impl Read {
 /// 두고 줄 서는 저장소다 — 락 안에서 `ctx.lang()` 과 `model::actor` 를 뺀 것과 같은 까닭이다.
 /// `ready`·`status` 의 한눈 보기도 같은 문을 쓴다.
 pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str], json: bool) -> Read {
-    let owned = |m: BTreeMap<&str, &str>| m.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     Read {
         states: crate::report::group_states_of(issues, cfg, ids)
             .into_iter()
             .map(|((kind, id), col)| (id.to_string(), (kind, col.to_string())))
             .collect(),
-        epics: match json {
-            true => owned(crate::report::handed_of(issues, ids)),
-            false => BTreeMap::new(),
-        },
+        epics: handed(issues, ids, json),
     }
+}
+
+/// 줄 id → 그 id 의 부모가 **넘기는** 에픽(`report::handed_of`)을 **제 문자열로** 챙긴다 — [`Read::epic`] 과 등록한
+/// 프로젝트의 한눈 보기(`status`·`ready` 의 `.moai` 밖)가 같은 문으로 걷는다. `--json` 이 아니면 안 걷는다([`read_of`]).
+///
+/// **제 문자열을 쥐는 까닭은 `issues` 가 문맥이라서다**(moai-kfjy) — 아카이브를 겹친 줄(`report::with_archive`)은 그
+/// 자리에서 지은 것이라 낼 줄보다 먼저 죽는다. 산 줄로만 짓던 한눈 보기는 옮겨 둔 에픽 밑에서 되살린 멤버를 에픽
+/// 없는 줄로 냈는데, 저장소 안의 `ready --json` 은 그 에픽을 댔다.
+pub fn handed(issues: &[crate::model::Issue], ids: &[&str], json: bool) -> BTreeMap<String, String> {
+    match json {
+        true => {
+            crate::report::handed_of(issues, ids).into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        }
+        false => BTreeMap::new(),
+    }
+}
+
+/// 쓰기가 참조를 잴 때 곁에 둘 **아카이브의 줄** — 참조가 산 줄 밖으로 닿을 때만 읽는다(moai-tzzt).
+///
+/// `moai archive` 가 옮긴 에픽·부모·막는 줄도 있는 줄이고, 보드는 그것을 문맥으로 읽어 멀쩡하다고 센다. 쓰기만
+/// 산 줄로 재던 판은 `add -e`·`edit -e` 에 "없는 에픽" 을 알리고 `--parent`·`link` 를 "없다" 로 거절했다. 읽는
+/// 길은 `mv` 와 하나다 — 락 안에서 [`crate::archive::read`] 로 읽고 [`in_context`] 가 겹친다. 닿는지는
+/// [`crate::archive::reaches_out`] 이 잰다: 늘 읽으면 `add -e` 마다 락을 쥔 채 아카이브 전부를 푼다.
+/// **되살리지 않는다** — 이 줄들은 판단에만 쓰이고, 쓰는 줄은 여전히 산 줄이다.
+pub fn archived_for(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    wanted: &[&str],
+) -> R<Vec<crate::model::Issue>> {
+    match crate::archive::reaches_out(issues, wanted) {
+        true => Ok(crate::archive::read(root)?.issues),
+        false => Ok(Vec::new()),
+    }
+}
+
+/// [`archived_for`] 에 더해 **고친 줄의 칸을 내는 쓰기**가 부른다 — 고친 줄 가운데 산 묶음이 있으면 늘 읽는다. 묶음의
+/// 칸은 멤버에서 읽는데(`read_of`), 되살린 묶음의 멤버는 아카이브에 남아 있다 — 산 줄로만 읽으면 보드가 done 으로 세는
+/// 그 묶음을 `--json` 의 `derived_status` 가 첫 칸으로 낸다. `mv` 가 묶음이면 늘 읽는 것([`crate::archive::needs_context`])과
+/// 같은 까닭이고, 참조만 재는 `add -e` 는 이 길을 안 지난다(그 묶음의 멤버를 안 읽는다).
+pub fn archived_with_groups(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+) -> R<Vec<crate::model::Issue>> {
+    match issues.iter().any(|i| rows.contains(&i.id.as_str()) && crate::report::is_group(i)) {
+        true => Ok(crate::archive::read(root)?.issues),
+        false => archived_for(root, issues, rows),
+    }
+}
+
+/// 산 줄에 [`archived_for`] 의 줄을 겹친 문맥 — 보드와 같은 자([`crate::report::with_archive`])다. 산 줄이 이기고,
+/// 산 파일에 못 읽는 줄로 선 id 의 아카이브 사본은 안 겹친다. 겹칠 것이 없으면 산 줄을 그대로 빌린다.
+pub fn in_context<'a>(
+    issues: &'a [crate::model::Issue],
+    archived: &[crate::model::Issue],
+    unread: &[crate::store::LoadError],
+) -> std::borrow::Cow<'a, [crate::model::Issue]> {
+    if archived.is_empty() {
+        return std::borrow::Cow::Borrowed(issues);
+    }
+    let opaque: std::collections::BTreeSet<&str> = unread.iter().filter_map(|e| e.id.as_deref()).collect();
+    std::borrow::Cow::Owned(crate::report::with_archive(issues, archived, &opaque))
 }
 
 /// `--from` 이 받는 칸 — **아는 칸이거나, 어느 줄이 실제로 서 있는 칸**(moai-hym7).
