@@ -25504,6 +25504,41 @@ fn a_session_that_breaks_the_archive_is_held_at_stop() {
     assert_eq!(baseline(&s, "after"), Some(counted), "the baseline and the board count apart");
 }
 
+/// **아카이브의 id 는 다시 안 짓는다 — 아카이브를 물을 때만 훑게 한 뒤에도**(moai-r0x8.2kg). 쓰기는 이제 id 를 지을
+/// 때만 아카이브를 연다(`store::Reserved`). 그 문이 어긋나 짓는 쓰기가 아카이브를 안 보면, 부모 밑 자식 자리
+/// 46,656개 가운데 하나만 비워 둔 여기서 새 자식이 아카이브의 id 를 받는다 — 우연히 빈 자리를 맞힐 확률은 1/46,656 이다.
+/// 옮기기는 그 사이에 아카이브를 안 열어도 같은 판을 쓴다.
+#[test]
+fn an_archived_id_is_never_minted_again_while_moves_skip_the_archive() {
+    let s = init("archive-reserved-ids");
+    let parent = add(s.path(), &["parent"]);
+    let row = issues(s.path());
+    let row = row.lines().next().unwrap();
+    let digits = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let free = "q7x";
+    let mut archived = String::new();
+    for a in digits {
+        for b in digits {
+            for c in digits {
+                let body = String::from_utf8(vec![*a, *b, *c]).unwrap();
+                if body == free {
+                    continue;
+                }
+                archived.push_str(&row.replacen(&parent, &format!("{parent}.{body}"), 1));
+                archived.push('\n');
+            }
+        }
+    }
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("2025.jsonl"), &archived).unwrap();
+    // 옮기기는 id 를 안 짓는다 — 아카이브를 안 열어도 그대로 지난다.
+    ok(s.path(), &["mv", &parent, "in_progress"]);
+    let child = add(s.path(), &["the one free child", "--parent", &parent]);
+    assert_eq!(child, format!("{parent}.{free}"), "an archived id was minted again");
+    assert_eq!(std::fs::read_to_string(dir.join("2025.jsonl")).unwrap(), archived);
+}
+
 #[test]
 fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
     let s = init("archive-lenient-read");

@@ -227,7 +227,8 @@ pub(crate) fn archive_board_unjudged(
     cfg: &crate::config::Config,
     now: &str,
 ) -> report::StatusReport {
-    let mut st = report::status_with_archive_unjudged(rows, &archived.issues, unreadable, cfg, now);
+    // 보드와 옮길 수를 함께 센다 — 문맥이 같으면 묶음 칸을 한 번만 잰다([`crate::archive::board`], moai-r0x8.2kg).
+    let (mut st, movable) = crate::archive::board(rows, unreadable, root.0, archived, cfg, now);
     let live: std::collections::BTreeSet<&str> =
         root.0.iter().map(|i| i.id.as_str()).chain(root.1.iter().filter_map(|u| u.id)).collect();
     let collisions = crate::archive::collisions(&live, archived);
@@ -239,7 +240,6 @@ pub(crate) fn archive_board_unjudged(
         st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
     }
     // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
-    let movable = crate::archive::movable(root.0, archived, cfg, now).len();
     if movable > 0 {
         st.notices.push(report::Warning::archive_pending(movable));
     }

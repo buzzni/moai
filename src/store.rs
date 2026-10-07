@@ -245,6 +245,59 @@ pub struct Load {
     pub errors: Vec<LoadError>,
 }
 
+/// **쓰기가 새로 짓지 말아야 할 id** — 락 안에서 다시 읽은 못 읽는 산 줄의 것과 아카이브의 것([`Repo::with_write`]
+/// 의 닫는 함수가 받는다).
+///
+/// **아카이브는 처음 물을 때 훑는다**(moai-r0x8.2kg). id 를 짓는 쓰기(`add`·`backlog add`·`promote`·탐색기의 `n`)는
+/// 묻고, 옮기기·고치기·메모(`mv`·`edit`·`note`·`defer`)는 안 묻는다 — 그쪽이 쓰기 대부분인데 아카이브 파일 전부를 락을
+/// 쥔 채 읽던 판은 아카이브 줄 2만 3천(20MB)에서 쓰기 한 번이 0.13초였다(아카이브 없이 0.02초). 묻는 것도 훑는 것도 닫는
+/// 함수 안, 곧 락 안이라 답은 늘 훑던 판과 같다. **저장하는 값이 아니다** — 쓰기마다 그 자리에서 다시 잰다.
+///
+/// 집합으로 펴 보는 쪽(`*reserved` — [`new_id`]·[`taken_ids`]·탐색기)은 그 자리에서 훑은 것까지 받는다.
+#[derive(Debug)]
+pub struct Reserved<'r> {
+    /// 못 읽는 산 줄이 쓰는 id([`Load::reserved_ids`]).
+    live: BTreeSet<String>,
+    root: &'r Path,
+    /// 훑은 뒤의 `live` ∪ 아카이브 id, 그리고 못 읽은 아카이브 자리의 말([`crate::archive::reserve`]).
+    scanned: std::cell::OnceCell<(BTreeSet<String>, Vec<String>)>,
+}
+
+impl<'r> Reserved<'r> {
+    pub fn new(live: BTreeSet<String>, root: &'r Path) -> Reserved<'r> {
+        Reserved { live, root, scanned: std::cell::OnceCell::new() }
+    }
+
+    fn scanned(&self) -> &(BTreeSet<String>, Vec<String>) {
+        self.scanned.get_or_init(|| {
+            let archive = crate::archive::reserve(self.root);
+            // 큰 쪽(아카이브)에 작은 쪽을 붓는다.
+            let mut ids = archive.ids;
+            ids.extend(self.live.iter().cloned());
+            (ids, archive.unread)
+        })
+    }
+
+    /// 그 id 가 이미 쓰이는가. 못 읽는 산 줄의 것이면 아카이브를 안 연다.
+    pub fn contains(&self, id: &str) -> bool {
+        self.live.contains(id) || self.scanned().0.contains(id)
+    }
+
+    /// 못 읽은 아카이브 자리의 말 — **훑었을 때만** 선다. 안 훑은 쓰기는 id 를 안 지었으니 피하지 못한 id 도 없다.
+    fn unread(self) -> Vec<String> {
+        self.scanned.into_inner().map(|(_, unread)| unread).unwrap_or_default()
+    }
+}
+
+impl std::ops::Deref for Reserved<'_> {
+    type Target = BTreeSet<String>;
+
+    /// 집합으로 펴면 아카이브까지 훑은 것이다.
+    fn deref(&self) -> &BTreeSet<String> {
+        &self.scanned().0
+    }
+}
+
 impl Load {
     /// id 로 줄을 찾는다. **같은 id 의 줄이 둘이면 뒷줄이다.**
     ///
@@ -946,14 +999,6 @@ impl Repo {
         Ok(read_snapshot(&self.root).map_err(Unsnapped::into_fail)?.unwrap_or_default())
     }
 
-    /// Read the active snapshot together with yearly archive files, duplicates kept. The write path reads only
-    /// [`Repo::read`] and reserves archive ids by a scan (`archive::reserve`); boards count the active snapshot and
-    /// read archived rows only as context for parents, blockers and milestones (`archive::context`,
-    /// `report::status_with_archive`).
-    pub fn read_all(&self) -> R<Load> {
-        crate::archive::read_all(&self.root, self.read()?)
-    }
-
     /// `issues.jsonl` 을 바꾸는 **유일한 경로**.
     ///
     /// 락 → (락 안에서) 읽기 → 고치기 → 정규화·검증·정렬 → 원자적 교체 →
@@ -972,7 +1017,7 @@ impl Repo {
     /// 뺀 것이다.
     pub fn with_write<T, F>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F) -> R<T>
     where
-        F: FnOnce(&mut Vec<Issue>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &Config, &Reserved<'_>) -> R<(Vec<JournalEntry>, T)>,
     {
         self.with_write_lines(lang, |issues, _, cfg, reserved| f(issues, cfg, reserved))
     }
@@ -985,7 +1030,7 @@ impl Repo {
     /// 그것을 안 보인다: 보이면 못 읽는 줄을 들고 다시 쓴다는 약속을 명령마다 지켜야 한다.
     pub fn with_write_lines<T, F>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F) -> R<T>
     where
-        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &Reserved<'_>) -> R<(Vec<JournalEntry>, T)>,
     {
         self.with_write_lines_after(lang, f, |_| Ok(()))
     }
@@ -997,7 +1042,7 @@ impl Repo {
     /// that still stands live as a line this binary cannot read (moai-bth3 review).
     pub fn with_write_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
     where
-        F: FnOnce(&mut Vec<Issue>, &[LoadError], &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &[LoadError], &Config, &Reserved<'_>) -> R<(Vec<JournalEntry>, T)>,
         G: FnOnce(&T) -> R<()>,
     {
         self.with_write_lines_after(lang, |issues, unread, cfg, reserved| f(issues, unread, cfg, reserved), after)
@@ -1005,7 +1050,7 @@ impl Repo {
 
     fn with_write_lines_after<T, F, G>(&self, lang: impl Fn() -> crate::i18n::Lang, f: F, after: G) -> R<T>
     where
-        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &Reserved<'_>) -> R<(Vec<JournalEntry>, T)>,
         G: FnOnce(&T) -> R<()>,
     {
         // 펴는 자리는 락을 다 놓은 여기다 — 코드는 갈래가 쥔다([`Stop::said`]).
@@ -1029,7 +1074,7 @@ impl Repo {
     /// 멈춘 까닭과 못 적은 일기는 [`Trouble`] 로 들고 나온다: 이 안은 화면 말을 모른다.
     fn write_locked<T, F, G>(&self, f: F, after_commit: G) -> Result<(T, Vec<Trouble>), Stop>
     where
-        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &BTreeSet<String>) -> R<(Vec<JournalEntry>, T)>,
+        F: FnOnce(&mut Vec<Issue>, &mut Vec<LoadError>, &Config, &Reserved<'_>) -> R<(Vec<JournalEntry>, T)>,
         G: FnOnce(&T) -> R<()>,
     {
         // **저장소 락은 받은 저장소가 커밋할 수 있는 자리다**([`Lock::inside`], moai-sn57) — 링크를 안 따르고
@@ -1076,12 +1121,11 @@ impl Repo {
             original_by_id.entry(o.id.as_str()).or_insert(o);
         }
 
-        let mut reserved = load.reserved_ids();
         // **아카이브는 파싱하지 않고 훑는다**(moai-bth3 리뷰) — 쓰기마다 락을 쥔 채 도는 자리라, 여기서 아카이브
         // 전부를 풀던 판은 아카이브가 클수록 옆 세션을 5초 락 너머로 밀어냈다. 쓰기가 알아야 할 것은 새로 지을 id
         // 를 피할 자리뿐이다. 못 읽는 파일은 쓰기를 안 막는다(ui8) — 그 안의 id 를 못 견줬다는 말만 아래에서 한다.
-        let archive = crate::archive::reserve(&self.root);
-        reserved.extend(archive.ids);
+        // **그 훑기도 물을 때만 한다**([`Reserved`], moai-r0x8.2kg) — 락 안에서 묻는 것이라 답은 그대로다.
+        let reserved = Reserved::new(load.reserved_ids(), &self.root);
         let mut issues = load.issues;
         let mut unread = load.errors;
         let (entries, out) = f(&mut issues, &mut unread, &self.config, &reserved)?;
@@ -1218,7 +1262,7 @@ impl Repo {
         // 파일마다 한 줄이다: 줄마다 내던 판은 깨진 줄 마흔에 쓰기마다 마흔 줄을 냈다.
         let minted = issues.iter().any(|i| !original_by_id.contains_key(i.id.as_str()) && !reserved.contains(&i.id));
         let mut note: Vec<Trouble> = match wrote && minted {
-            true => archive.unread.into_iter().map(|said| Trouble::ArchiveUnread { said }).collect(),
+            true => reserved.unread().into_iter().map(|said| Trouble::ArchiveUnread { said }).collect(),
             false => Vec::new(),
         };
         if !filed.is_empty()

@@ -80,9 +80,10 @@ pub struct Reserved {
     pub unread: Vec<String>,
 }
 
-/// Every write runs this under the repository lock, so it scans lines instead of parsing rows ([`named`]). A file
-/// that is not UTF-8 still reserves the ids in it — ids are ASCII and survive a lossy decode — so one bad byte never
-/// makes its ids reusable. An unreadable source never stops the write (ui8); it comes back in `unread`.
+/// Every write that mints an id runs this under the repository lock (`store::Reserved`), so it scans lines instead of
+/// parsing rows ([`named_in`]). A file that is not UTF-8 still reserves the ids in it — ids are ASCII and survive a
+/// lossy decode — so one bad byte never makes its ids reusable. An unreadable source never stops the write (ui8); it
+/// comes back in `unread`.
 pub fn reserve(root: &Path) -> Reserved {
     let mut out = Reserved::default();
     let files = match files(root) {
@@ -94,11 +95,51 @@ pub fn reserve(root: &Path) -> Reserved {
     };
     for file in files {
         match bytes(root, &file) {
-            Ok(b) => out.ids.extend(String::from_utf8_lossy(&b).lines().filter_map(named)),
+            Ok(b) => out.ids.extend(lines_of(&b).filter_map(named_in)),
             Err(e) => out.unread.push(e.message),
         }
     }
     out
+}
+
+/// The lines of a file as [`str::lines`] splits them — at `\n`, with a `\r` before it dropped — without decoding the
+/// bytes first. `\n` is never part of a multi-byte sequence, so a lossy decode of each line is the same text as that
+/// line of a lossy decode of the whole file.
+///
+/// The ends are found by [`std::io::BufRead::skip_until`], which searches with the platform's `memchr` — a byte-by-byte
+/// search cost as much as the decode it saved.
+fn lines_of(b: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut rest = b;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let now = rest;
+        // A slice never fails to read; the fallback only keeps the walk finite.
+        let took = std::io::BufRead::skip_until(&mut rest, b'\n').unwrap_or(now.len());
+        rest = &now[took.min(now.len())..];
+        let line = &now[..took.min(now.len())];
+        Some(match line.strip_suffix(b"\n") {
+            Some(line) => line.strip_suffix(b"\r").unwrap_or(line),
+            None => line,
+        })
+    })
+}
+
+/// [`named`] over a line's bytes. The shape a write produces is read off its head without decoding the line — decoding
+/// every archived line was most of what a minting write paid for the archive (moai-r0x8.2kg). Any other line, and a
+/// head that is not an id [`named`] takes there, goes through [`named`] on the lossy text, so the answer is its answer.
+fn named_in(line: &[u8]) -> Option<String> {
+    let bare = line.strip_prefix("\u{feff}".as_bytes()).unwrap_or(line);
+    let head = bare
+        .strip_prefix(br#"{"id":""#)
+        .and_then(|s| s.iter().position(|&c| c == b'"').map(|end| &s[..end]))
+        .and_then(|id| std::str::from_utf8(id).ok())
+        .filter(|id| crate::id::is_valid(id) && !id.contains('\\'));
+    match head {
+        Some(id) => Some(id.to_string()),
+        None => named(&String::from_utf8_lossy(line)),
+    }
 }
 
 pub fn read(root: &Path) -> R<Load> {
@@ -327,6 +368,7 @@ fn scan(line: &str) -> Scan {
 }
 
 /// Reserve IDs from both readable rows and opaque rows that still name an ID.
+#[cfg(test)]
 pub fn id_counts(load: &Load) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for id in load.issues.iter().map(|i| i.id.as_str()).chain(load.errors.iter().filter_map(|e| e.id.as_deref())) {
@@ -365,6 +407,9 @@ pub fn context(root: &Path, active: Load) -> R<Load> {
     Ok(archived)
 }
 
+/// The active snapshot `active` together with yearly archive files, duplicates kept. The write path reads only
+/// `Repo::read` and reserves archive ids by a scan ([`reserve`]); boards count the active snapshot and read archived
+/// rows only as context for parents, blockers and milestones ([`context`], `report::status_with_archive`).
 pub fn read_all(root: &Path, active: Load) -> R<Load> {
     let mut archived = read(root)?;
     // Retain duplicates for diagnostics, with the live row winning Load::get.
@@ -376,8 +421,20 @@ pub fn read_all(root: &Path, active: Load) -> R<Load> {
 
 /// Ids repeated inside the archive or shared with a live row — `live` holds the readable live rows and the
 /// unreadable live lines that still name an id.
+///
+/// Counted over borrowed ids: `moai status` asks this over every archived row, and owning a key per row cost it 30ms at
+/// 23,000 rows (moai-r0x8.2kg). The ids come back sorted.
 pub fn collisions(live: &BTreeSet<&str>, archived: &Load) -> Vec<String> {
-    id_counts(archived).into_iter().filter(|(id, n)| *n > 1 || live.contains(id.as_str())).map(|(id, _)| id).collect()
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    let named =
+        archived.issues.iter().map(|i| i.id.as_str()).chain(archived.errors.iter().filter_map(|e| e.id.as_deref()));
+    for id in named {
+        *counts.entry(id).or_default() += 1;
+    }
+    let mut out: Vec<String> =
+        counts.into_iter().filter(|(id, n)| *n > 1 || live.contains(id)).map(|(id, _)| id.to_string()).collect();
+    out.sort();
+    out
 }
 
 /// Existing restored rows also need context when their parent or group stayed archived.
@@ -478,13 +535,21 @@ pub fn finish_restoring(
 
 /// Rows whose archive twin differs, repeats, or stands as an unreadable line. An identical single twin is not a
 /// conflict: it is an interrupted move that the next run finishes.
+///
+/// The archive is walked once and only the twins of `rows` are kept — asking the whole archive once per row was rows ×
+/// archived comparisons, 30ms per `moai status` at 23,000 archived rows (moai-r0x8.2kg).
 pub fn conflicts(rows: &[Issue], archived: &Load) -> BTreeSet<String> {
+    let mut twins: HashMap<&str, Vec<&Issue>> = rows.iter().map(|row| (row.id.as_str(), Vec::new())).collect();
+    for old in &archived.issues {
+        if let Some(t) = twins.get_mut(old.id.as_str()) {
+            t.push(old);
+        }
+    }
+    let broken: HashSet<&str> = archived.errors.iter().filter_map(|e| e.id.as_deref()).collect();
     rows.iter()
         .filter(|row| {
-            let twins: Vec<_> = archived.issues.iter().filter(|old| old.id == row.id).collect();
-            twins.iter().any(|old| *old != *row)
-                || twins.len() > 1
-                || archived.errors.iter().any(|e| e.id.as_deref() == Some(&row.id))
+            let twins = &twins[row.id.as_str()];
+            twins.iter().any(|old| **old != **row) || twins.len() > 1 || broken.contains(row.id.as_str())
         })
         .map(|row| row.id.clone())
         .collect()
@@ -498,16 +563,52 @@ pub fn conflicts(rows: &[Issue], archived: &Load) -> BTreeSet<String> {
 /// on its own stands done from its archived members, so it goes back with the next run instead of being counted as
 /// archived by the board while the move never picks it.
 pub fn movable(issues: &[Issue], archived: &Load, cfg: &Config, now: &str) -> Vec<Issue> {
+    if cfg.archive_days <= 0 {
+        return Vec::new();
+    }
     let context = report::with_archive(issues, &archived.issues, &BTreeSet::new());
-    eligible_except(issues, &context, cfg, now, &conflicts(issues, archived))
+    eligible_except(issues, &report::group_stands(&context, cfg), cfg, now, &conflicts(issues, archived))
+}
+
+/// The board over `rows` with the archive beside it, and how many rows [`movable`] picks from `root` — what
+/// `cmd::status::archive_board_unjudged` counts (moai-r0x8.2kg).
+///
+/// **The group columns are read once when the two contexts are the same.** The board joins `rows` with the archive
+/// minus the ids of `unreadable` live lines; [`movable`] joins `root` with the whole archive. With `rows` the root
+/// snapshot (no sibling worktree overlaid) and no unreadable live line naming an archived id, the two joins are the
+/// same rows in the same order, so the columns the board counted are the ones [`movable`] would count again — at
+/// 23,000 archived rows that second walk was 0.2s of a 0.9s `moai status`. Otherwise each is read on its own, as before.
+pub fn board(
+    rows: &[Issue],
+    unreadable: &[report::Unreadable],
+    root: &[Issue],
+    archived: &Load,
+    cfg: &Config,
+    now: &str,
+) -> (report::StatusReport, usize) {
+    let opaque: BTreeSet<&str> = unreadable.iter().filter_map(|u| u.id).collect();
+    let same =
+        !archived.issues.is_empty() && rows == root && !archived.issues.iter().any(|i| opaque.contains(i.id.as_str()));
+    if !same {
+        let st = report::status_with_archive_unjudged(rows, &archived.issues, unreadable, cfg, now);
+        return (st, movable(root, archived, cfg, now).len());
+    }
+    let all = report::with_archive(rows, &archived.issues, &opaque);
+    let soil = report::Soil::of(&all);
+    let stands = soil.stands(&all, cfg);
+    let moving = match cfg.archive_days <= 0 {
+        true => 0,
+        false => eligible_except(root, &stands, cfg, now, &conflicts(root, archived)).len(),
+    };
+    (report::status_of_context(&all, rows, unreadable, cfg, now, &soil, stands), moving)
 }
 
 /// Keep connected epic/member and parent/child bundles together. Milestones
 /// stay live. An old closed member never leaves a bundle that is still open.
-/// `stood` holds the rows group columns are read from — `issues` with archived rows beside it.
+/// `stands` holds the group columns read with archived rows beside `issues` ([`report::group_stands`]).
 fn eligible_except(
     issues: &[Issue],
-    stood: &[Issue],
+    stands: &BTreeMap<report::GroupKey<'_>, report::Stand<'_, '_>>,
     cfg: &Config,
     now: &str,
     excluded: &BTreeSet<String>,
@@ -515,7 +616,6 @@ fn eligible_except(
     if cfg.archive_days <= 0 {
         return Vec::new();
     }
-    let stands = report::group_stands(stood, cfg);
     let handing = report::Handing::of(issues);
     let by_id: BTreeMap<&str, usize> = issues.iter().enumerate().map(|(at, i)| (i.id.as_str(), at)).collect();
     let mut parents: Vec<usize> = (0..issues.len()).collect();
@@ -834,6 +934,31 @@ mod tests {
         assert!(reserved.ids.contains("argos-a001") && reserved.ids.contains("argos-b001"), "{reserved:?}");
         assert_eq!(reserved.unread.len(), 1, "{reserved:?}");
         assert!(reserved.unread[0].contains("2024.jsonl"));
+    }
+
+    /// The scan over bytes (moai-r0x8.2kg) reserves exactly what the scan over a lossy decode of the whole file did —
+    /// line ends, marks, bad bytes, escapes and lines the head cannot vouch for alike.
+    #[test]
+    fn the_byte_scan_reserves_what_the_decoded_scan_did() {
+        let cases: &[&[u8]] = &[
+            b"",
+            b"\n\n",
+            b"{\"id\":\"argos-a001\"}",
+            b"{\"id\":\"argos-a001\"}\r\n{\"id\":\"argos-a002\"}\r",
+            b"\xef\xbb\xbf{\"id\":\"argos-a001\"}\n\xef\xbb\xbf{\"id\":\"argos-a002\"}\n",
+            b"{\"id\":\"argos-a001\",\"title\":\"\xff\"}\n{\"id\":\"ar\xffgos-a002\"}\n{\"id\":\"argos-a0\xc3\"}\n",
+            b"{\"id\":\"argos-\\u0061001\"}\n  {\"id\":\"argos-a003\"}\n{\"title\":\"t\",\"id\":\"argos-a004\"}\n",
+            b"{\"id\":\"not an id\"}\n{\"id\":\"argos-a005.x1y\"}\n<<<<<<< ours\n\xe3\x80\x80{\"id\":\"argos-a006\"}\n",
+        ];
+        for bytes in cases {
+            let decoded: BTreeSet<String> = String::from_utf8_lossy(bytes).lines().filter_map(named).collect();
+            let scanned: BTreeSet<String> = lines_of(bytes).filter_map(named_in).collect();
+            assert_eq!(scanned, decoded, "{:?}", String::from_utf8_lossy(bytes));
+            assert_eq!(
+                lines_of(bytes).map(|l| String::from_utf8_lossy(l).into_owned()).collect::<Vec<_>>(),
+                String::from_utf8_lossy(bytes).lines().map(str::to_string).collect::<Vec<_>>(),
+            );
+        }
     }
 
     /// Cleanup reads lines the way [`read`] does: a byte-order mark in front of the copy does not keep it, and a

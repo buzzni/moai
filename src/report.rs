@@ -5374,7 +5374,7 @@ pub fn status_in<'a>(
     now: &str,
     soil: &Soil<'a>,
 ) -> StatusReport {
-    status_in_scope(issues, unreadable, cfg, now, soil, &|_| true)
+    status_in_scope(issues, unreadable, cfg, now, soil, soil.stands(issues, cfg), &|_| true)
 }
 
 /// Combine reference context without letting a stale archive copy eclipse a live row. A live id is a readable row
@@ -5420,19 +5420,36 @@ pub fn status_with_archive_unjudged(
     if archived_rows.is_empty() {
         return status_unjudged(active, unreadable, cfg, now);
     }
-    let visible: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
     let opaque: BTreeSet<&str> = unreadable.iter().filter_map(|u| u.id).collect();
     let all = with_archive(active, archived_rows, &opaque);
     let soil = Soil::of(&all);
-    status_in_scope(&all, unreadable, cfg, now, &soil, &|i| visible.contains(i.id.as_str()))
+    status_of_context(&all, active, unreadable, cfg, now, &soil, soil.stands(&all, cfg))
 }
 
-fn status_in_scope<'a>(
-    issues: &'a [Issue],
+/// [`status_with_archive_unjudged`] 의 속 — **부르는 쪽이 이미 이은 문맥**(`all` = [`with_archive`] 가 `active` 곁에
+/// 아카이브를 놓은 것)과 그 위에서 잰 [`Soil`]·묶음 칸을 받는다(moai-r0x8.2kg). `moai status` 는 같은 문맥의 묶음 칸으로
+/// 옮길 묶음(`archive::movable`)도 세므로, 여기서 다시 재면 아카이브 줄 2만 3천에 같은 걸음을 두 벌 걷는다. 세는 줄은
+/// `active` 뿐이다.
+pub fn status_of_context<'a, 'c>(
+    all: &'a [Issue],
+    active: &[Issue],
     unreadable: &[Unreadable],
-    cfg: &Config,
+    cfg: &'c Config,
     now: &str,
     soil: &Soil<'a>,
+    stands: BTreeMap<GroupKey<'a>, Stand<'a, 'c>>,
+) -> StatusReport {
+    let visible: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    status_in_scope(all, unreadable, cfg, now, soil, stands, &|i| visible.contains(i.id.as_str()))
+}
+
+fn status_in_scope<'a, 'c>(
+    issues: &'a [Issue],
+    unreadable: &[Unreadable],
+    cfg: &'c Config,
+    now: &str,
+    soil: &Soil<'a>,
+    stands: BTreeMap<GroupKey<'a>, Stand<'a, 'c>>,
     visible: &dyn Fn(&Issue) -> bool,
 ) -> StatusReport {
     let group = &soil.epic;
@@ -5442,7 +5459,7 @@ fn status_in_scope<'a>(
     // 묶음의 읽은 칸도 같은 자리에서 한 번만 받는다 — 둘 다 조상과 소속을 타는
     // 셈이라 따로 부르면 `moai status` 한 번에 같은 걸음을 두 벌 걷는다.
     let roots = &soil.roots;
-    let stands = soil.stands(issues, cfg);
+    // 묶음 칸은 받는다 — [`Soil::stands`] 로 잰 것이다([`status_of_context`]).
     // 묶음이 막을 때 그 막음이 선 때(`blocked_since`). 칸과 한 번의 셈에서 받는다.
     let group_since: BTreeMap<&str, &str> = stands.iter().map(|((_, id), s)| (*id, s.since)).collect();
     // 아카이브가 재는 때는 따로다 — 읽은 칸에 든 때([`Stand::entered`])라 막힘의 시계와 갈린다(moai-23q4).
