@@ -48,6 +48,15 @@ does not tag — see `CONTRIBUTING.md`.
   `prime` (`tracker_error`, code `broken`), `status`, `project ls`, `init` and
   `init --check` — now says what stands there and stops on it, and `init`
   leaves it untouched. (moai-r0x8.e19)
+- **`moai prime` no longer calls a tracker it climbed to "the tracker here".**
+  In a checkout with no `.moai` whose search climbed to an unreadable tracker
+  above it, the page said it could not read the tracker here and that `moai
+  init` would not help; that it had climbed was only on stderr, which a
+  session-start hook does not carry. The page now says there is no `.moai`
+  here, names the tracker it climbed to and why it could not be read, and gives
+  both ways out — fix that tracker, or start a separate one here with
+  `moai init`. `--json` adds `climbed_to` with that root beside
+  `tracker_error`. (moai-r0x8.ris)
 
 ## [0.9.0] - 2026-10-07
 

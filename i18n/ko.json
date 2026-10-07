@@ -605,6 +605,7 @@
   "prime.cmd_backlog": "지금 할 일이 아닌 것을 담는다",
   "prime.no_repo": "여기엔 `.moai` 가 없다. `moai init` 이 심는다",
   "prime.refused": "여기 트래커를 못 읽었다 — {why}. `moai init` 으로는 안 풀린다 — 그 까닭이 대는 것을 고친 뒤 `moai prime` 을 다시 부른다",
+  "prime.refused_climbed": "여기엔 `.moai` 가 없고, 올라가 잡은 {root} 의 트래커를 못 읽었다 — {why}. 그 트래커를 고친 뒤 `moai prime` 을 다시 부르거나, 여기 따로 세우려면 `moai init` 을 친다",
   "warn.unreadable_more": "  … {n}개 더",
   "warn.unreadable_rm": "  둘 까닭이 없는 줄(깨진 쌍둥이·쓰레기)은 `moai rm --line <n>` 으로 지운다 — 새 moai 가 쓴 줄은 moai 를 새로 받으면 다시 읽히니 그대로 둔다",
   "init.block_current": "AGENTS.md 블록: current — 이 바이너리가 쓸 글과 같다",

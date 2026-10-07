@@ -1455,14 +1455,20 @@ pub fn prime(
 ///
 /// **닫기 전 목록과 명령은 여기서도 선다.** `--json` 이 그 둘을 싣는데 사람 쪽만 빼면,
 /// 훅에 거는 쪽이 두 표면 중 하나를 못 믿는다([`prime_closing`] 의 까닭 그대로).
-pub fn prime_bare(lang: Lang, refused: Option<&str>) -> Vec<String> {
+pub fn prime_bare(lang: Lang, refused: Option<&str>, climbed: Option<&std::path::Path>) -> Vec<String> {
     let mut out = vec![format!("# {}", say(lang, "prime.title")), String::new()];
-    out.push(match refused {
-        None => say(lang, "prime.no_repo").to_string(),
+    out.push(match (refused, climbed) {
+        (None, _) => say(lang, "prime.no_repo").to_string(),
+        // **올라가 잡은 트래커면 여기 것이라 하지 않는다**(moai-r0x8.ris, 2026-10-07 사용자 결정) — 여기에는
+        // `.moai` 가 없다고 대고, 길 둘을 함께 댄다: 그 트래커를 고치거나 여기 따로 세운다.
+        (Some(why), Some(root)) => fill(
+            say(lang, "prime.refused_climbed"),
+            &[("root", &one_line(&root.display().to_string())), ("why", &one_line(why))],
+        ),
         // **끝을 깎지 않는다**(리뷰 moai-yivo.b5h) — 까닭의 끝에 선 것이 경로(`-> <링크 끝>`)일 수 있어, 마침표나
         // 빈칸을 걷으면 다른 파일을 댄다(`one_line` 이 한 줄짜리를 안 깎는 것과 같은 까닭). 여기 닿는 거절은
         // 마침표로 끝나지 않는다.
-        Some(why) => fill(say(lang, "prime.refused"), &[("why", &one_line(why))]),
+        (Some(why), None) => fill(say(lang, "prime.refused"), &[("why", &one_line(why))]),
     });
     out.push(String::new());
     out.push(format!("## {}", say(lang, "prime.closing")));
@@ -3987,10 +3993,10 @@ mod tests {
     #[test]
     fn prime_bare_keeps_the_end_of_the_reason() {
         for why in ["/r/.moai/issues.jsonl -> /away/x ", "/r/.moai/issues.jsonl -> /away/y..."] {
-            let page = prime_bare(Lang::En, Some(why)).join("\n");
+            let page = prime_bare(Lang::En, Some(why), None).join("\n");
             assert!(page.contains(&format!("{why}. `moai init`")), "{page}");
         }
-        let page = prime_bare(Lang::En, Some("first\n## forged")).join("\n");
+        let page = prime_bare(Lang::En, Some("first\n## forged"), None).join("\n");
         assert!(!page.lines().any(|l| l.starts_with("## forged")), "{page}");
     }
 

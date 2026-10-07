@@ -310,6 +310,16 @@ pub fn climbs() -> Vec<(PathBuf, PathBuf)> {
     CLIMBED.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
+/// `from` 에서 올라가 잡은 뿌리를 **꺼낸다** — [`CLIMBED`] 에서 빠지므로 `main` 의 줄로는 안 선다.
+///
+/// 그 사실을 제 판에 싣는 표면이 쓴다(`cmd::prime`, moai-r0x8.ris) — 판이 대는 것을 stderr 가 또 대면
+/// 터미널의 사람에게 같은 말이 두 번 선다.
+pub fn take_climb(from: &Path) -> Option<PathBuf> {
+    let mut told = CLIMBED.lock().unwrap_or_else(|e| e.into_inner());
+    let at = told.iter().position(|(f, _)| f == from)?;
+    Some(told.remove(at).1)
+}
+
 /// `.moai` 를 가진 조상을 찾는다 — **위로 끝까지 간다.**
 ///
 /// **천장을 두었다가 걷었다**(moai-a2kn, 2026-09-20 사용자 결정 둘째 판). 한때 "내 것이 아닌

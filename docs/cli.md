@@ -218,7 +218,9 @@ Options:
   tracker it cannot read - a link out of the checkout, a broken config, a
   `.moai` that is not a directory - it says why instead and does not send you
   to `moai init` (--json: tracker_error, whose code is the one the other
-  commands stop with).
+  commands stop with). When that tracker is one it climbed to from a checkout
+  with no `.moai`, it says so and names it (--json: climbed_to), and gives both
+  ways out: fix that tracker, or start a separate one here with `moai init`.
 
   Wire it where your editor injects context at session start. For Claude Code
   that is a SessionStart hook, which fires again after a compact:

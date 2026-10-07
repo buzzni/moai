@@ -5386,6 +5386,45 @@ fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
         "{code} 가 아니다 — {json}"
     );
     assert!(!json.contains("no_tracker"), "{json}");
+    // 올라가 잡은 것이 아니면 그 키는 안 선다.
+    assert!(!json.contains("climbed_to"), "{json}");
+}
+
+/// **올라가 잡은 못 읽는 트래커를 여기 것이라 하지 않는다**(moai-r0x8.ris, 2026-10-07 사용자 결정). `.moai` 없는
+/// 체크아웃(`top/proj`)에서 위의 `top/.moai` 를 못 읽으면 `prime` 은 "여기 트래커를 못 읽었다 — <top 의 자리>" 를
+/// 냈고, 올라갔다는 말은 세션 시작 훅이 안 싣는 stderr 에만 섰다. 이제 판이 여기에는 `.moai` 가 없다고 대고 길
+/// 둘을 함께 댄다 — 그 트래커를 고치거나 여기 따로 `moai init` 으로 세운다. `--json` 은 `tracker_error` 곁에
+/// `climbed_to` 로 그 뿌리를 싣는다. 대는 `moai init` 은 실제로 선다.
+#[test]
+fn prime_says_the_unreadable_tracker_was_climbed_to_and_gives_both_ways() {
+    let s = init("primeclimbed");
+    std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
+    let proj = s.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    git(&proj, &["init", "-q"]);
+    let top = std::fs::canonicalize(s.path()).unwrap().display().to_string();
+
+    let out = moai(&proj, &["prime"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("여기엔 `.moai` 가 없고, 올라가 잡은"), "올라가 잡은 것을 안 댔다\n{said}");
+    assert!(said.contains(&format!("{top} 의 트래커")), "잡은 뿌리를 안 댔다\n{said}");
+    assert!(said.contains("config.toml"), "못 읽은 까닭을 안 댔다\n{said}");
+    assert!(said.contains("그 트래커를 고친") && said.contains("`moai init`"), "길 둘을 안 댔다\n{said}");
+    assert!(!said.contains("여기 트래커를 못 읽었다"), "올라가 잡은 트래커를 여기 것이라 했다\n{said}");
+    // 판이 댄 것을 stderr 가 또 대지 않는다.
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("올라가"), "{}", text(&out));
+
+    let json = ok(&proj, &["prime", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains("\"tracker_error\":{\"code\":\""), "{json}");
+    assert!(json.contains(&format!("\"climbed_to\":{top:?}")), "잡은 뿌리를 안 실었다\n{json}");
+    assert!(!json.contains("no_tracker"), "{json}");
+
+    // 대는 둘째 길이 실제로 선다 — 여기 따로 세우면 prime 이 그것을 읽는다.
+    ok(&proj, &["init", "argos"]);
+    let json = ok(&proj, &["prime", "--json"]);
+    assert!(!json.contains("tracker_error") && !json.contains("climbed_to"), "{json}");
 }
 
 /// **디렉터리가 아닌 `.moai` 는 트래커가 없는 것이 아니라 못 읽는 것이다**(moai-r0x8.e19). 위로 찾는 걸음이

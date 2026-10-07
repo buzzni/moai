@@ -61,6 +61,12 @@ struct Said<'a> {
     /// `commits_error` 처럼 객체 하나다.
     #[serde(skip_serializing_if = "Option::is_none")]
     tracker_error: Option<TrackerError>,
+    /// **못 연 트래커가 이 체크아웃 밖으로 올라가 잡은 것일 때만 선다**(moai-r0x8.ris, 2026-10-07 사용자 결정) —
+    /// 그 트래커의 뿌리다. 여기에는 `.moai` 가 없으니 길이 둘이다: 그 트래커를 고치거나, 여기 따로 `moai init`
+    /// 으로 세운다. 이 키 없이는 `tracker_error` 가 "여기 트래커" 를 대는 것처럼 읽혀, 받는 쪽이 여기 없는
+    /// 것을 고치러 든다. `tracker_error` 곁에 따로 두는 것은 그 꼴(`{code,said}`)을 안 바꾸려서다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    climbed_to: Option<String>,
 }
 
 /// [`Said::tracker_error`] 의 값. **가르는 것은 `code` 다** — 다른 명령의 `--json` 거절(`{"error","code"}`)과
@@ -157,7 +163,10 @@ impl<'a> Brief<'a> {
 /// 없다, `moai init` 이 심는다")으로 내던 때는 세션을 여는 에이전트가 `init` 을 불렀고, 링크나 못 읽는
 /// 스냅샷이면 `init` 은 다 괜찮다고 답했다. 까닭은 **판에 싣고 stderr 에는 안 낸다** — 세션 시작 훅은
 /// stdout 만 맥락에 싣고, 터미널의 사람에게는 같은 글이 두 번 선다.
+///
+/// **못 연 트래커가 올라가 잡은 것이면 그렇다고 댄다**(moai-r0x8.ris, 2026-10-07 사용자 결정) — [`climbed_away`].
 fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<Vec<String>> {
+    let climbed = refused.and_then(|_| climbed_away());
     if ctx.json {
         return super::json_line(&Said {
             picked: Vec::new(),
@@ -171,9 +180,26 @@ fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<
             commands: lines(lang),
             no_tracker: refused.is_none(),
             tracker_error: refused.map(|e| TrackerError { code: e.code, said: crate::text::one_line(&e.message) }),
+            climbed_to: climbed.as_ref().map(|at| at.display().to_string()),
         });
     }
-    Ok(view::prime_bare(lang, refused.map(|e| e.message.as_str())))
+    Ok(view::prime_bare(lang, refused.map(|e| e.message.as_str()), climbed.as_deref()))
+}
+
+/// 못 연 트래커가 **이 체크아웃 밖으로 올라가 잡은 것**이면 그 뿌리 — 아니면 `None`.
+///
+/// "여기 트래커를 못 읽었다" 로 대던 판은 `.moai` 없는 체크아웃(`top/proj`)에서 위의 `top/.moai` 를 여기 것이라
+/// 했다. 올라갔다는 말은 stderr 한 줄(`warn.tracker_climbed`)에만 섰는데, 세션 시작 훅은 stdout 만 싣는다.
+/// 판에 실으므로 그 줄은 꺼낸다([`crate::store::take_climb`]) — 터미널에서 같은 말이 두 번 서지 않는다.
+///
+/// **여기서 `moai init` 이 안 서면 이 갈래로 안 든다** — 딸린 워크트리의 밑자리라 `init` 이 주 체크아웃을 대며
+/// 거절하는 자리([`crate::store::init_belongs_at`])다. 둘째 길로 그것을 대면 1 로 끝나는 명령을 권한다.
+fn climbed_away() -> Option<std::path::PathBuf> {
+    let here = std::env::current_dir().ok()?;
+    if crate::store::init_belongs_at(&here).is_some() {
+        return None;
+    }
+    crate::store::take_climb(&here)
 }
 
 fn lines(lang: crate::i18n::Lang) -> Vec<Line<'static>> {
@@ -264,6 +290,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             commands: lines(lang),
             no_tracker: false,
             tracker_error: None,
+            climbed_to: None,
         });
     }
 
