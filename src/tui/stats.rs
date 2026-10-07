@@ -472,6 +472,23 @@ mod tests {
         assert_eq!(window(&a).scroll.offset(), bottom, "메뉴의 Bksp 가 창을 건드렸다");
     }
 
+    /// **바로 친 Ctrl·Alt 화살표와 쪽 키도 창을 굴린다**(moai-ug6x.3ip) — 메뉴를 거친 같은 키는 탐색의 표(`Key::any`)로
+    /// 굴렸는데 창의 표만 `bare` 라 바로 친 것은 아무 일도 없었다. 글자는 정확히 견주는 그대로다(Ctrl-j 는 안 굴린다).
+    #[test]
+    fn ctrl_and_alt_arrows_scroll_the_window_pressed_directly() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers as M};
+        let mut a = app();
+        a.hit("SPC g s");
+        let _ = draw::tests::render(&mut a, 40, 12);
+        a.key(KeyEvent::new(KeyCode::Down, M::CONTROL));
+        assert_eq!(window(&a).scroll.offset(), 1, "Ctrl-Down 이 창을 안 굴렸다");
+        a.key(KeyEvent::new(KeyCode::PageDown, M::ALT));
+        assert!(window(&a).scroll.offset() > 1, "Alt-PageDown 이 창을 안 굴렸다");
+        let at = window(&a).scroll.offset();
+        a.key(KeyEvent::new(KeyCode::Char('j'), M::CONTROL));
+        assert_eq!(window(&a).scroll.offset(), at, "Ctrl-j 가 창을 굴렸다");
+    }
+
     /// **창 위의 메뉴도 알림을 탐색과 같은 자로 다룬다**(moai-g56h·moai-y8v2) — 메뉴만 만진 키(열기·내려가기·Bksp·Esc)와
     /// 메뉴를 닫은 이동키, 둘째 키를 기다리는 창의 `g` 는 알림을 안 걷는다. 걷는 것은 창의 키와 화면을 고른 키다.
     #[test]

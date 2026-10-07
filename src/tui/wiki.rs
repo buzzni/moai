@@ -1013,6 +1013,24 @@ pub(super) mod tests {
         assert_eq!(window(&a).page.offset(), 0, "다른 페이지로 갔는데 굴린 자리가 남았다");
     }
 
+    /// **바로 친 Ctrl·Alt 화살표와 쪽 키도 포커스 칸을 움직인다**(moai-ug6x.3ip) — 통계 창과 같은 까닭이다. 메뉴를 거친
+    /// 같은 키는 탐색의 표로 움직였다.
+    #[test]
+    fn ctrl_and_alt_arrows_move_the_focused_pane_pressed_directly() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers as M};
+        let (_s, mut a) = wiki_app("modified-moves", PAGES);
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 80, 24);
+        a.key(KeyEvent::new(KeyCode::Down, M::CONTROL));
+        assert_eq!(window(&a).cursor, 1, "Ctrl-Down 이 커서를 안 옮겼다");
+        a.key(KeyEvent::new(KeyCode::End, M::ALT));
+        assert_eq!(window(&a).cursor, 2, "Alt-End 가 커서를 안 옮겼다");
+        a.hit("Enter");
+        let _ = draw::tests::render(&mut a, 80, 6);
+        a.key(KeyEvent::new(KeyCode::PageDown, M::ALT));
+        assert!(window(&a).page.offset() > 0, "Alt-PageDown 이 본문을 안 굴렸다");
+    }
+
     /// **되돌아가기는 링크로 건너온 길만 되감는다** — 읽던 줄로 돌아온다. 자취가 비면 `Bksp` 는 아무 일도 없고 창은
     /// 남는다. 자취가 있어도 Esc 는 창을 닫는다(2026-10-04 사용자 결정).
     #[test]

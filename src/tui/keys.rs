@@ -1163,8 +1163,13 @@ pub enum Stat {
 
 /// **`q` 는 안 둔다** — 고르기 창에서 걷은 까닭(moai-en4u)이 여기도 선다: 탐색에서 `q` 가 아무것도 안 하는데
 /// 창에서만 닫으면 같은 글자가 자리마다 뜻이 갈린다. 닫는 것은 다른 창과 같은 Esc 다.
+///
+/// **화살표·Home·End·PgUp/Dn 은 수식키를 안 본다** — 탐색의 목록([`BROWSE`])과 같은 손이다(moai-ug6x.3ip). 창 위의
+/// SPC 메뉴는 모르는 이동키를 탐색의 표로 다시 먹이는데(`menu::feed`), 그 표가 `Key::any` 라 메뉴를 거친
+/// Ctrl-Down 은 창을 굴리고 바로 친 것은 아무 일도 없었다. 글자(`j`·`k`·`G`)는 정확히 견주는 그대로다.
+/// 고르기 창([`PICK`])은 메뉴가 없어 그 어긋남이 안 서서 거르는 대로 둔다.
 pub const STATS: &[Bind<Stat>] = {
-    const MOVES: [Bind<Stat>; 14] = moves!(Stat::Step, Key::bare);
+    const MOVES: [Bind<Stat>; 14] = moves!(Stat::Step, Key::any);
     &[
         MOVES[0],
         MOVES[1],
@@ -1226,10 +1231,11 @@ pub enum Wiki {
 
 /// **`q` 는 안 둔다** — 통계 창([`STATS`])과 같은 까닭이다. `l`·`→` 도 안 둔다: 목록에서는 본문 칸으로 가는 것이
 /// `Enter` 하나로 서고, 본문에서는 고를 것이 링크라 창이 뜬다 — 한 글자가 두 칸에서 뜻이 갈리면 손이 헷갈린다.
+/// 이동의 화살표·쪽 키가 수식키를 안 보는 것도 통계 창과 같은 까닭이다.
 pub const WIKI: &[Bind<Wiki>] = {
     use KeyCode as C;
     use Wiki::*;
-    const MOVES: [Bind<Wiki>; 14] = moves!(Wiki::Step, Key::bare);
+    const MOVES: [Bind<Wiki>; 14] = moves!(Wiki::Step, Key::any);
     &[
         MOVES[0],
         MOVES[1],
