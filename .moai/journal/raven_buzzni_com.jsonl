@@ -5416,3 +5416,96 @@
 {"ts":"2026-10-07T15:39:13Z","id":"moai-ftwt","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Explorer install-probe comments still count three processes"}
 {"ts":"2026-10-07T15:39:13Z","id":"moai-kxqd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"skill install 이 앞 트리를 쓰며 바뀌는 뒤 트리의 링크 풀이를 미리 못 잰다"}
 {"ts":"2026-10-07T15:39:14Z","id":"moai-6rda","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"write_atomic_inside 의 거절·갈아끼우기가 권한과 .git 착지를 잘못 댄다"}
+{"ts":"2026-10-07T15:40:25Z","id":"moai-zzok","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.10.0"}
+{"ts":"2026-10-07T15:40:25Z","id":"moai-r0x8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"트래커 자리·링크 판정 — store·worktree·prime"}
+{"ts":"2026-10-07T15:40:25Z","id":"moai-8gwh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 마무리 — 심기 실패·블록 자리·선택 상자"}
+{"ts":"2026-10-07T15:40:25Z","id":"moai-9s9s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill·hook 뒤끝 — 낡은 스킬 판정·옛 훅 걷기·Codex workdir"}
+{"ts":"2026-10-07T15:40:25Z","id":"moai-ug6x","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 뒤끝 — 아카이브 보기·다시 읽기·키"}
+{"ts":"2026-10-07T15:40:25Z","id":"moai-ltsv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLI·거르개·시험·스크립트 뒤끝"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.a42","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 뿌리 파일 링크를 따라 .moai 스냅샷·설정을 락 없이 갈아끼운다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.a42","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8q6b 에서 펼쳤다 — init 이 뿌리 파일 링크를 따라 .moai 의 스냅샷·설정을 락 없이 갈아끼운다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-8q6b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r0x8 의 멤버 moai-r0x8.a42 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.e19","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"디렉터리가 아닌 .moai 를 트래커 없음으로 읽어 init 을 권한다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.e19","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-on5b 에서 펼쳤다 — 디렉터리가 아닌 .moai 를 트래커 없음으로 읽어 init 을 권한다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-on5b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r0x8 의 멤버 moai-r0x8.e19 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.apz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"트래커인가를 가르는 자가 둘이다 — config.toml 과 .moai 디렉터리"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.apz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ghg2 에서 펼쳤다 — 트래커인가를 가르는 자가 둘이다 — config.toml 과 .moai 디렉터리"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-ghg2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r0x8 의 멤버 moai-r0x8.apz 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.33p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 의 bare 워크트리 거절이 없는 주 체크아웃을 가리킨다"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-r0x8.33p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-gqna 에서 펼쳤다 — init bare-worktree refusal names a nonexistent main checkout"}
+{"ts":"2026-10-07T15:40:26Z","id":"moai-gqna","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r0x8 의 멤버 moai-r0x8.33p 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-r0x8.ris","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"prime 이 올라가 잡은 못 읽는 트래커를 여기 것이라 한다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-r0x8.ris","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-94vn 에서 펼쳤다 — prime 이 올라가 잡은 못 읽는 트래커를 여기 것이라 한다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-94vn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r0x8 의 멤버 moai-r0x8.ris 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-r0x8.3fi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"prime 이 주 체크아웃 밖 워크트리에서 안 서는 init 을 권한다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-r0x8.3fi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-t73s 에서 펼쳤다 — prime 이 주 체크아웃 밖 워크트리에서 안 서는 init 을 권한다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-t73s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r0x8 의 멤버 moai-r0x8.3fi 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-r0x8.2kg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쓰기·status 마다 아카이브 파일 전부를 다시 읽는다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-r0x8.2kg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-p1vy 에서 펼쳤다 — 쓰기·status 마다 아카이브 파일 전부를 다시 읽는다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-p1vy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-r0x8 의 멤버 moai-r0x8.2kg 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-8gwh.esm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 딸린 파일로 풀리는 AGENTS.md 에 블록을 심어 방금 쓴 규칙 줄을 지운다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-8gwh.esm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-9j25 에서 펼쳤다 — init 이 딸린 파일로 풀리는 AGENTS.md 에 블록을 심어 방금 쓴 규칙 줄을 지운다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-9j25","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8gwh 의 멤버 moai-8gwh.esm 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-8gwh.67q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"심기가 실패해도 init 이 무시 규칙 줄을 남긴다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-8gwh.67q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-m7yu 에서 펼쳤다 — init leaves ignore rules behind when planting fails"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-m7yu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8gwh 의 멤버 moai-8gwh.67q 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-8gwh.ftm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"--guide 를 file 에서 block 으로 바꾸면 guide.md 가 고아로 남는다"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-8gwh.ftm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-3s7p 에서 펼쳤다 — init block mode leaves an orphan guide file"}
+{"ts":"2026-10-07T15:40:27Z","id":"moai-3s7p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8gwh 의 멤버 moai-8gwh.ftm 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-8gwh.86j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 선택 상자 다듬을 거리 — 리뷰 moai-zynt.63u 가 넘긴 것"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-8gwh.86j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-6wl9 에서 펼쳤다 — init 선택 상자 다듬을 거리 — 리뷰 moai-zynt.63u 가 넘긴 작은 것들"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-6wl9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-8gwh 의 멤버 moai-8gwh.86j 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.x3n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skills_stale·skill status 가 CRLF 체크아웃을 낡았다고 읽는다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.x3n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-k3ao 에서 펼쳤다 — skills_stale and skill status read CRLF checkouts as stale"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-k3ao","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9s9s 의 멤버 moai-9s9s.x3n 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.v0y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill status 가 걷힌 스킬의 남은 디렉터리를 알리지 않는다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.v0y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-v4j8 에서 펼쳤다 — skill status 가 걷힌 스킬의 남은 디렉터리를 알리지 않는다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-v4j8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9s9s 의 멤버 moai-9s9s.v0y 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.ctx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"다시 뜬 감독이 보낸 일과 확인한 보고를 트래커에서 못 가린다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.ctx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-vi8p 에서 펼쳤다 — supervisor restart: sent backlog and checked reports cannot be told from the tracker"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-vi8p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9s9s 의 멤버 moai-9s9s.ctx 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.qmd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬이 저장소 밖 캐시에 있으면 일꾼의 worker.md 읽기가 권한을 묻는다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.qmd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-nx5w 에서 펼쳤다 — 감독 스킬이 플러그인 캐시(저장소 밖)에 있으면 일꾼의 worker.md Read 가 권한을 물을 수 있다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-nx5w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9s9s 의 멤버 moai-9s9s.qmd 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.89e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill 시험이 이 기계의 sh 가 내는 126 을 127 로 기대해 붉다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.89e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-78pr 에서 펼쳤다 — skill 시험이 이 기계의 sh 에서 없는 파일을 126 으로 받아 붉다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-78pr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9s9s 의 멤버 moai-9s9s.89e 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.vzn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"stop-failure·interrupt·session-end 빈 훅 하위명령을 지운다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-9s9s.vzn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-28vm 에서 펼쳤다 — stop-failure·interrupt·session-end 빈 훅 하위명령을 다음 판에 지운다"}
+{"ts":"2026-10-07T15:40:28Z","id":"moai-28vm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9s9s 의 멤버 moai-9s9s.vzn 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-9s9s.hs8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 훅이 exec workdir 를 안 읽어 상대 쓰기 경로를 잘못 잰다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-9s9s.hs8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hz38 에서 펼쳤다 — Codex hook ignores exec workdir for relative write paths"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-hz38","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-9s9s 의 멤버 moai-9s9s.hs8 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.bbh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"아카이브 보기에서 깨진 아카이브 줄이 빠졌다고 안 이른다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.bbh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8kkr 에서 펼쳤다 — 아카이브 보기에서 깨진 아카이브 줄이 빠졌다고 안 이른다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-8kkr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ug6x 의 멤버 moai-ug6x.bbh 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.cpq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 트리가 아카이브된 미룬 에픽에 미룸 표식을 다는지 본다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.cpq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-lnca 에서 펼쳤다 — 탐색기 트리가 아카이브된 미룬 에픽에 미룸 표식을 다는지 안 봤다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-lnca","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ug6x 의 멤버 moai-ug6x.cpq 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.pi3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"배너 다시 읽기가 루트 스냅샷과 Soil 을 두 벌 든다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.pi3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-5o3a 에서 펼쳤다 — 배너 다시 읽기가 루트 스냅샷과 Soil 을 두 벌 든다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-5o3a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ug6x 의 멤버 moai-ug6x.pi3 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.a3e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 여는 길의 셈을 시험이 안 지난다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.a3e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-qfsl 에서 펼쳤다 — 탐색기 여는 길의 셈을 시험이 안 지난다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-qfsl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ug6x 의 멤버 moai-ug6x.a3e 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.hr1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"덮는 창을 다시 열다 못 읽으면 옛 창이 알림 밑에 남는다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-ug6x.hr1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-07ed 에서 펼쳤다 — 덮는 창(통계·위키)을 다시 열다 못 읽으면 옛 창이 알림 밑에 남는다"}
+{"ts":"2026-10-07T15:40:29Z","id":"moai-07ed","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ug6x 의 멤버 moai-ug6x.hr1 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ug6x.3ip","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"통계 창의 이동키가 수식키를 안 받아 메뉴 길과 갈린다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ug6x.3ip","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-0z6c 에서 펼쳤다 — 통계 창의 이동키가 수식키를 안 받아 메뉴 길과 갈린다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-0z6c","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ug6x 의 멤버 moai-ug6x.3ip 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.auf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"되풀이한 grep=·type=·stale= 이 말없이 앞의 값을 버린다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.auf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-8kwq 에서 펼쳤다 — 되풀이한 grep=·type=·stale= 이 말없이 앞의 값을 버린다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-8kwq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ltsv 의 멤버 moai-ltsv.auf 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.4t0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"note·add 의 자리 인자 - 가 stdin 을 안 읽고 - 를 적는다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.4t0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-foyr 에서 펼쳤다 — note·add 의 자리 인자 - 가 stdin 을 안 읽고 - 한 글자를 적는다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-foyr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ltsv 의 멤버 moai-ltsv.4t0 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.uqw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"mv -m 의 빈 글이 빈 닫는 줄로 리뷰를 닫는다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.uqw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-mkrt 에서 펼쳤다 — mv -m 의 빈 argv 글이 빈 닫는 줄로 리뷰를 닫는다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-mkrt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ltsv 의 멤버 moai-ltsv.uqw 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.y10","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"a_malformed_git_identity_is_refused_too 가 꼴 틀린 설정을 재지 못한다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-ltsv.y10","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-qiuy 에서 펼쳤다 — a_malformed_git_identity_is_refused_too 가 꼴 틀린 사람 설정을 재지 못한다"}
+{"ts":"2026-10-07T15:40:30Z","id":"moai-qiuy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ltsv 의 멤버 moai-ltsv.y10 로 펼쳤다"}
+{"ts":"2026-10-07T15:40:31Z","id":"moai-ltsv.3qk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh 의 다음 안내가 develop 끝에 태그를 단다"}
+{"ts":"2026-10-07T15:40:31Z","id":"moai-ltsv.3qk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-oix7 에서 펼쳤다 — bump-version.sh 끝의 다음 안내가 develop 끝에 태그를 단다"}
+{"ts":"2026-10-07T15:40:31Z","id":"moai-oix7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ltsv 의 멤버 moai-ltsv.3qk 로 펼쳤다"}
