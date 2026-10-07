@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-07
+
 ### Added
 
 - **Explicit yearly issue archives.** `moai archive --dry-run` previews eligible
