@@ -24532,6 +24532,48 @@ fn the_events_planted_before_0_9_do_nothing_inside_a_repository() {
     }
 }
 
+/// **0.9 전에 심은 셋은 스냅샷을 읽기 전에 돌아간다**(moai-ybns.451.sdk) — 위 시험은 그 셋이 아무것도 안 내고 안 적는
+/// 것만 잰다. `decide` 의 빈 명령 갈래를 트래커를 읽은 뒤로 내려도 푸르다 — 그 갈래가 서는 까닭은 세션이 끝날 때마다
+/// 스냅샷 전체를 읽고 버리지 않는 것이다. 그래서 `.moai/issues.jsonl` 의 atime 을 2000-01-01 로 돌려 두고 부른 뒤
+/// 그대로인지 본다.
+///
+/// **대조로 여는 훅이 그 값을 움직이는 것을 먼저 본다** — atime 을 안 적는 파일 시스템(`noatime`)이면 이 시험은 아무것도
+/// 못 재니, 그때는 조용히 푸르지 않고 붉어진다. `relatime` 은 24시간보다 낡은 atime 을 고치므로 2000 년이면 선다.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_events_planted_before_0_9_return_before_reading_the_snapshot() {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    let s = init("hook-legacy-atime");
+    ok(s.path(), &["add", "읽히는지 볼 줄"]);
+    let snapshot = s.path().join(".moai/issues.jsonl");
+    let old = UNIX_EPOCH + Duration::from_secs(946_684_800); // 2000-01-01T00:00:00Z
+    let rewind = || {
+        let f = std::fs::File::options().write(true).open(&snapshot).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_accessed(old)).unwrap();
+        assert_eq!(std::fs::metadata(&snapshot).unwrap().accessed().unwrap(), old, "atime 을 못 돌렸다");
+    };
+    let accessed = || std::fs::metadata(&snapshot).unwrap().accessed().unwrap();
+
+    let claude = event(&s, "sessATIM-0001");
+    rewind();
+    hook_out(&s, "session-start", &claude);
+    let moved: SystemTime = accessed();
+    assert_ne!(moved, old, "여는 훅이 읽어도 atime 이 그대로다 — 이 파일 시스템에서는 이 시험이 아무것도 못 잰다");
+
+    for ev in ["stop-failure", "session-end"] {
+        rewind();
+        let out = hook_out(&s, ev, &claude);
+        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
+        assert_eq!(accessed(), old, "claude {ev} 가 스냅샷을 읽었다");
+    }
+    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
+        rewind();
+        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
+        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
+        assert_eq!(accessed(), old, "codex {ev} 가 스냅샷을 읽었다");
+    }
+}
+
 /// **고른 트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 6·7번) — `.agents`·훅 파일을 쓰고 나서
 /// Claude 의 트리가 거절되던 판은 `{"error":…}` 하나로 끝나, 앞서 쓴 절반(`agents_files`·`hooks`, Codex 의 `/hooks`
 /// 줄)을 아무도 몰랐다. 이제 한 트리가 거절되면 아무 트리도 안 쓰고 `claude` 도 안 부른다. 연습도 같은 말로 멈춘다 —

@@ -2328,6 +2328,29 @@ mod tests {
         }
     }
 
+    /// **Claude 의 플러그인이 거는 이벤트를 손으로 적은 목록에 맨다**(moai-ybns.451.sdk) — 커밋된 plugin.json 을 견주는
+    /// `the_checked_in_plugin_matches_the_guide` 는 `MOAI_BLESS=1` 한 번에 [`HOOKS`] 가 낸 것을 그대로 다시 써서, 표에서
+    /// 이벤트가 빠지거나 걷은 `StopFailure`·`SessionEnd` 가 되돌아와도 아무것도 안 붉어진다. 기대를 표에서 읽지 않는다 —
+    /// 읽으면 표와 함께 움직인다.
+    #[test]
+    fn the_claude_plugin_hooks_exactly_these_events() {
+        const WANT: &[(&str, &str)] = &[
+            ("PreToolUse", "pre-tool-use"),
+            ("SessionStart", "session-start"),
+            ("Stop", "stop"),
+            ("UserPromptSubmit", "user-prompt-submit"),
+        ];
+        let v: serde_json::Value = serde_json::from_str(&plugin_json("/repo/target/release/moai", "0")).unwrap();
+        let hooks = v["hooks"].as_object().unwrap();
+        let events: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        assert_eq!(events, WANT.iter().map(|(at, _)| *at).collect::<Vec<_>>(), "Claude 에 거는 이벤트가 달라졌다");
+        for (at, sub) in WANT {
+            let line = hooks[*at][0]["hooks"][0]["command"].as_str().unwrap();
+            assert!(line.contains(&format!(" hook {sub}")), "{at} 가 hook {sub} 를 안 부른다 — {line}");
+        }
+        assert_eq!(hooks["PreToolUse"][0]["matcher"], WATCHED);
+    }
+
     /// Codex 가 추가 맥락을 받는 이벤트 — 그 밖의 처리기에 적힌 `additionalContextLimit` 은 버리고 경고한다(Codex 훅
     /// 문서). **훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽지 않는다** — 심는 상한이 그 표에서 오니(moai-dp35),
     /// 거기서 읽으면 표를 되돌릴 때 본뜸도 같이 움직여 아무것도 안 붉어진다.

@@ -1357,6 +1357,20 @@ mod tests {
         assert_eq!(Carry::of(Dialect::Codex, Event::Stop), Carry::Hold(CODEX_HOLD));
     }
 
+    /// **Antigravity 의 붙드는 칸은 UTF-16 1만 단위다**(moai-ybns.451.sdk) — 사람이 띄운 agy 창에 한글로만 채운 글을
+    /// 보내 잰 자리다(moai-jzym.4pm, [`Carry::of`]). 그 칸을 재는 시험이 Codex 의 것뿐이라, 표의 Antigravity 줄을 Codex 의
+    /// 바이트 8천으로 바꾸거나 칸 없음으로 걷어도 아무것도 안 붉어졌다. 값을 `Room::CONTEXT` 에서 읽지 않고 손으로 적는다
+    /// — 읽으면 그 상수를 바꿔도 함께 움직인다.
+    #[test]
+    fn antigravity_holds_a_stop_in_ten_thousand_utf16_units() {
+        assert_eq!(
+            Carry::of(Dialect::Antigravity, Event::Stop),
+            Carry::Hold(crate::hook::Room { size: 10_000, unit: Unit::Utf16 })
+        );
+        // 오류로 끝난 실행의 `Stop` 은 붙들지 않는다 — 실패하는 백엔드에 글을 도로 밀어 넣는다(`from_antigravity`).
+        assert_eq!(Carry::of(Dialect::Antigravity, Event::StopFailure), Carry::Nothing);
+    }
+
     /// **답은 제 칸에만 선다** — 붙드는 까닭은 `Stop` 에서만, 비추는 줄은 턴 머리와 접힌 뒤, 그리고 Claude·Codex 의 도구
     /// 부름 앞에서만 나간다. 기대를 표에서 읽지 않고 손으로 적는다 — 표에서 읽으면 거르기를 걷어도 아무것도 안
     /// 붉어진다. 붙드는 답의 거르기는 오늘 `Stop` 밖에서 그 답이 안 서서, 이 시험 전에는 걷어도 초록이었다(리뷰
