@@ -23,6 +23,12 @@ does not tag — see `CONTRIBUTING.md`.
   is no longer planted: `AGENTS.md` is named as left alone (`untouched`, kind
   `shared` under `--json`), and `moai init --check` names it too
   (`agents_shared`). (moai-8gwh.esm)
+- **Switching `--guide file` to `--guide block` no longer leaves
+  `.moai/guide.md` behind.** Once `AGENTS.md` holds the whole block and no
+  longer links to it, `moai init` removes the guide file it wrote, says so in
+  one line, and `--json` carries `guide_file_removed`. With `--guide none` or
+  `hook` — `AGENTS.md` untouched, its link still standing — or when `AGENTS.md`
+  could not be written, the file stays. (moai-8gwh.ftm)
 - **A committed link from a file outside `.moai` into the tracker is no longer
   followed.** `AGENTS.md -> .moai/issues.jsonl` made `moai init` read the
   snapshot as AGENTS.md and replace it without the repository lock — racing a

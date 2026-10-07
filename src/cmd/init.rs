@@ -1940,6 +1940,8 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let mut agents_trouble = agents_unheld
         .map(|why| Added::Unreadable(crate::held::said(ctx.lang(), &why)))
         .or(agents_shared.map(Added::Shared));
+    // 이 실행이 끝난 뒤 AGENTS.md 에 선 글 — 썼거나 이미 그 글이었을 때만 든다. 못 쓴 자리는 모른다.
+    let mut agents_holds: Option<String> = None;
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
@@ -1949,10 +1951,14 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             };
             let next = with_block(existing, &block);
             if next == *existing {
+                agents_holds = Some(next);
                 false
             } else {
                 match plant(&agents_path, &next) {
-                    Ok(()) => true,
+                    Ok(()) => {
+                        agents_holds = Some(next);
+                        true
+                    }
                     Err(why) => {
                         agents_trouble = Some(Added::Unwritable { why, missing: Vec::new() });
                         false
@@ -1985,6 +1991,18 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
                 }
             },
         }
+    };
+    // **블록 모드로 바꾸면 링크가 가리키던 전문 파일을 걷는다**(moai-8gwh.ftm). `--guide file` 로 심은 저장소에
+    // `--guide block` 을 부르면 링크 블록은 전문으로 갈렸는데 `.moai/guide.md` 가 아무도 안 가리킨 채 남았다 —
+    // 커밋되는 트래커 안이라 낡은 두 벌째 안내가 그대로 실려 다닌다. `init` 이 쥔 파일이라(위에서 묻지 않고 덮는다)
+    // 걷는 것도 묻지 않는다. **AGENTS.md 에 전문이 선 것을 본 뒤에만 걷는다** — 못 쓴 AGENTS.md 는 아직 링크 블록이라
+    // 걷으면 링크가 빈 자리를 가리키고, 훅·`none` 은 AGENTS.md 를 안 건드려 그 링크가 아직 산다. 링크와 못 읽는
+    // 자리(보통 파일이 아닌 것, 밖으로 가는 것)는 `init` 이 쥔 파일이 아니라 그대로 둔다.
+    let guide_removed = plan.guide == Guide::Block && agents_holds.as_deref().is_some_and(|t| !links_to_guide(t)) && {
+        let path = root.join(crate::guide::GUIDE_FILE);
+        !path.is_symlink()
+            && matches!(read_held(&path, &crate::held::Home::of(&root)), Ok(Some(_)))
+            && std::fs::remove_file(&path).is_ok()
     };
     // 딸린 파일과 **한 자리에서 말한다** — 못 건드린 것은 이름·갈래·까닭으로 함께 선다. 블록은
     // 줄 몇 개가 아니라 통째로 갈아 끼우는 글이라 "손으로 더할 줄" 이 없다(빈 글을 넘긴다):
@@ -2066,6 +2084,10 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
+        }
+        // 걷었을 때만 싣는다 — 값은 걷은 파일의 자리다(`shortened_from` 과 같은 자).
+        if guide_removed {
+            v["guide_file_removed"] = serde_json::json!(crate::guide::GUIDE_FILE);
         }
         // 칠 줄이다 — 낡은 것이 없으면 키가 없다(`shortened_from` 과 같은 자).
         if let Some(cmd) = &skills_stale {
@@ -2215,6 +2237,9 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     if guide_file {
         out.push(fill(say(lang, "init.wrote_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
     }
+    if guide_removed {
+        out.push(fill(say(lang, "init.removed_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
+    }
     // 이어 부른 명령의 말은 그 이름 아래 들여 싣는다 — 어느 말이 어느 명령의 것인지 갈린다. 이름은 **사람이 그대로
     // 다시 칠 수 있는 줄이다** — 실패하면 "손으로 다시 부른다" 고 하므로, `-C` 로 불렀으면 그 자리를 붙인다(리뷰
     // moai-zynt.63u). 맨 `moai project add .` 를 대던 판은 따라 친 셸의 자리를 목록에 올렸다. `-C` 를 붙이는 규칙은
@@ -2243,6 +2268,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         && ignore == Added::Already
         && !agents
         && !guide_file
+        && !guide_removed
         && skilled.is_none()
         && listed.is_none()
         && untouched.is_empty()

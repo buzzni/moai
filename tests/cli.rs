@@ -1566,6 +1566,38 @@ fn init_never_plants_the_block_over_a_dotfile_agents_md_leads_to() {
     }
 }
 
+/// **`--guide file` 에서 `--guide block` 으로 바꾸면 `.moai/guide.md` 를 걷는다**(moai-8gwh.ftm). 링크 블록이 전문으로
+/// 갈린 뒤에도 그 파일이 아무도 안 가리킨 채 남았다. AGENTS.md 를 안 건드리는 안내(`none`)로 부르면 링크가 아직
+/// 사니 그대로 둔다.
+#[test]
+fn switching_the_guide_to_a_block_removes_the_guide_file() {
+    let s = Scratch::new("init-guide-switch");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--guide", "file", "--no-skill", "--no-register"]);
+    let guide = root.join(".moai/guide.md");
+    assert!(guide.is_file(), "시험의 전제 — 링크 모드가 전문 파일을 안 썼다");
+
+    let kept = ok(root, &["init", "--guide", "none", "--json"]);
+    assert!(guide.is_file(), "AGENTS.md 의 링크가 아직 가리키는 파일을 걷었다 — {kept}");
+    assert!(!kept.contains("guide_file_removed"), "{kept}");
+
+    let js = ok(root, &["init", "--guide", "block", "--json"]);
+    assert!(!guide.exists(), "블록으로 바꿨는데 전문 파일이 남았다 — {js}");
+    assert_eq!(field(&js, "guide_file_removed"), ".moai/guide.md", "{js}");
+    assert!(read(&root.join("AGENTS.md")).contains("Start a session"), "AGENTS.md 에 전문이 안 섰다");
+    assert_eq!(field(&ok(root, &["init", "--check", "--json"]), "agents"), "current");
+
+    // 이미 블록인 저장소에 남은 파일도 걷는다 — 사람에게는 한 줄로 댄다.
+    std::fs::write(&guide, "left behind\n").unwrap();
+    let said = staged(&["init"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&said.stdout);
+    assert!(!guide.exists(), "{said}");
+    assert!(said.contains("removed .moai/guide.md"), "걷은 것을 안 댔다\n{said}");
+    let again = ok(root, &["init", "--json"]);
+    assert!(!again.contains("guide_file_removed"), "없는 파일을 걷었다고 했다 — {again}");
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
