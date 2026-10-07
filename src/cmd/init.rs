@@ -911,16 +911,6 @@ fn linked_in(files: &[Dotfile]) -> Vec<&'static str> {
     files.iter().filter(|d| d.path.is_symlink()).map(|d| d.name).collect()
 }
 
-/// 링크를 끝까지 푼 자리 — **끝 파일은 없어도 된다**(`store::into_tracker` 의 `land` 와 같은 자). 디렉터리는
-/// 풀고 끝 이름은 그대로 붙인다. 못 풀면(고리) 받은 철자다.
-fn landed(p: &Path) -> std::path::PathBuf {
-    let Ok(end) = crate::path::follow_links(p) else { return p.to_path_buf() };
-    match (std::fs::canonicalize(crate::path::dir_of(&end)), end.file_name()) {
-        (Ok(dir), Some(name)) => dir.join(name),
-        _ => crate::path::real_prefix(&crate::path::lexical(&end)),
-    }
-}
-
 /// 이 디렉터리의 AGENTS.md 가 링크를 따라 `files`(이 실행이 줄을 덧붙이는 딸린 파일) 중 하나에 닿으면 그 이름
 /// (moai-8gwh.esm). `CLAUDE.md` 를 견주는 [`run`] 의 자리처럼 이름이 아니라 푼 자리로 견준다.
 ///
@@ -931,7 +921,7 @@ fn landed(p: &Path) -> std::path::PathBuf {
 /// 링크는 [`plant`] 의 갈아끼우기가 끊어 덧붙인 줄을 안 지운다).
 ///
 /// **둘 다 있으면 파일의 자리(장치·inode)로 견준다**(리뷰 moai-8gwh) — `store::into_tracker` 가 스냅샷을 견주는
-/// 것과 같은 자다. 푼 철자로만 견주던 판은 대소문자를 안 가리는 파일 시스템(macOS·Windows 기본)의
+/// 것과 같은 자([`crate::store::same_file`])다. 푼 철자로만 견주던 판은 대소문자를 안 가리는 파일 시스템(macOS·Windows 기본)의
 /// `AGENTS.md -> .GITATTRIBUTES` 를 딴 파일로 읽어 블록을 심었고, 같은 실행이 덧붙인 규칙이 지워졌다. 끝 파일이
 /// 아직 없으면 푼 철자로 접는다.
 fn agents_shares(root: &Path, files: &[Dotfile]) -> Option<&'static str> {
@@ -939,15 +929,10 @@ fn agents_shares(root: &Path, files: &[Dotfile]) -> Option<&'static str> {
     if !agents.is_symlink() {
         return None;
     }
-    let id = |p: &Path| std::fs::metadata(p).ok().and_then(|m| crate::store::file_id(&m));
-    let (at, at_id) = (landed(&agents), id(&agents));
-    files
-        .iter()
-        .find(|d| match (at_id, id(&d.path)) {
-            (Some(a), Some(b)) => a == b,
-            _ => landed(&d.path) == at,
-        })
-        .map(|d| d.name)
+    // 못 풀면(고리) 받은 철자다.
+    let end = |p: &Path| crate::path::follow_links(p).unwrap_or_else(|_| p.to_path_buf());
+    let at = end(&agents);
+    files.iter().find(|d| crate::store::same_file(&at, &end(&d.path))).map(|d| d.name)
 }
 
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
