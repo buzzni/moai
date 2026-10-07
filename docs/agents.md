@@ -107,9 +107,9 @@ and whether `codex` and `agy` are on PATH — and exits 0 whatever it finds.
 skills. The steps only one agent has — entering a worktree, asking the person,
 calling the review, changing the model, clearing the window, calling a skill,
 stopping what a review left running — sit in a "Words per agent" table in the
-`moai` skill, one column per agent, and each agent reads its own; the steps name
-a row in *italics*. A step an agent does not have reads `—`: tell the person and
-go on.
+`moai` skill, one column per agent, and each agent reads its own. A step an agent
+does not have reads `—`: tell the person and go on. The supervisor skill, planted
+for Claude Code only, names Claude Code's tools directly.
 
 Three skills come with it:
 
@@ -276,8 +276,11 @@ and Antigravity have no supervisor; their sessions pick their own work with
 `moai ready`.
 
 1. **Open the sessions.** Every Claude Code session a person opened in the
-   repository — in the root or one of its worktrees — that sits idle in
-   `ListAgents` is a [worker](glossary.md#worker). Nothing registers it, and
+   repository's root that sits idle in `ListAgents` is a
+   [worker](glossary.md#worker). `ListAgents` shows no directory, so the
+   supervisor knows a session of this repository by its name, which Claude Code
+   takes from the directory it was opened in (`moa-issue-bc` for `moa-issue`) —
+   a session you renamed is not counted. Nothing registers it, and
    nobody is asked which ones
 2. **Make the supervisor.** In one of them, call `/moai-supervise`. It picks
    backlog items that do not collide with the work open, and finds the workers
@@ -379,7 +382,9 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
 - **The supervisor finds no worker.** It counts only Claude Code sessions of
-  this repository that read idle in `ListAgents`. A session busy on its person's
+  this repository that read idle in `ListAgents` — by name: a session opened
+  outside the root, or renamed, does not start with the repository's directory
+  name. A session busy on its person's
   work is not one, and Codex and Antigravity sessions never show there
 - **A worker never answers.** Its session may run in another permission mode,
   where an incoming message waits for its person's approval — look at that

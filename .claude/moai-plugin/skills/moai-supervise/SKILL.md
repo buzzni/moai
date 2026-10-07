@@ -13,8 +13,8 @@ they still collide the worker goes back into its worktree and resolves them.
 **This skill is for Claude Code, and moai carries no messaging.** The supervisor and its
 workers talk with Claude Code's own tools:
 
-- `ListAgents` lists the live sessions — each row's name, where it runs and whether it is
-  busy or idle
+- `ListAgents` lists the live sessions, and subagents too — each row's name, its kind
+  (`interactive`, `bg`), whether it is busy or idle, and its tmux pane if it has one
 - `SendMessage(to: <name>, message: …)` sends to one session. With `notify_when_idle: true`
   you also get one notice when that session goes idle; leave `message` out and it only
   subscribes
@@ -22,14 +22,16 @@ workers talk with Claude Code's own tools:
 
 **Every session here is one a person opened.** moai never launches an agent or runs one
 headless, and neither does the supervisor. **A worker is every idle session of this
-repository in `ListAgents`, except you** — a row whose working directory is the root
-checkout or one of its worktrees. Nobody registers and nobody is asked which windows count.
+repository in `ListAgents`, except you** — a row whose name starts with the root
+directory's name and a `-`. Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and the worker's steps travel inside it (3).
 
-Four things about the messaging, one line each:
+Five things about the messaging, one line each:
 
 - A session in a different permission mode holds an incoming message for its person's
   approval — a worker that stays idle after you sent may be waiting on that
+- `notify_when_idle` answers only for a session on this machine — from one elsewhere no
+  idle notice comes, only its report
 - A subagent sends under its parent session's address — a message can come from a session
   that did not write it itself
 - `@path` in a message attaches nothing — what the worker has to read goes into the message
@@ -173,8 +175,13 @@ such rows apart under `others`.
 
 **2. Find a worker.** Call `ListAgents` once. A worker is a row that
 
-- belongs to this repository — its working directory is the root checkout or one of its
-  worktrees (under `<root>/.worktrees/`)
+- belongs to this repository. `ListAgents` shows no directory; a session takes its name from
+  the directory it was opened in — `<root dir name>-` and a short suffix, as in `moa-issue-bc`
+  for a session opened in `moa-issue`. A row whose name does not start that way — renamed, or
+  opened somewhere else — is not one
+- is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
+  yours or another session's (they stand under "Subagents", and a message to one resumes that
+  subagent instead), and not a `bg` session
 - reads `idle`
 - is not you
 
@@ -188,8 +195,8 @@ worker, and the message is the whole assignment.
   session of another repository
 - **A worker that refused the work comes out of the candidates and is not sent to
   again.** Some sessions take work only from their own person
-- **A test agent is no worker.** One raised for a test keeps its working directory outside
-  the repository (a scratchpad), so it is not a row of this repository
+- **A test agent is no worker.** One raised for a test is opened outside the repository (a
+  scratchpad), so its name is not this repository's
 
 The root checkout and, for a subdirectory project in a monorepo, the path down to it come
 from the lines below. The root is where `.moai` stands, so for a monorepo it is the
@@ -331,7 +338,7 @@ person's** — the supervisor never types into a window. The report ends with th
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
 report that never comes. Send to that window once the person has cleared it or said they will
-not, or send to another idle worker.
+not — a clear does not show from here, so ask the person — or send to another idle worker.
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.

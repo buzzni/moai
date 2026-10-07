@@ -1746,8 +1746,9 @@ Decided in: <epic>
 /// 따로 두면 그것이 `ListAgents` 와 어긋나는 둘째 진실이 된다.
 ///
 /// **일꾼의 걸음은 메시지에 통째로 실린다**([`worker`], 이 스킬의 `references/worker.md`). 일꾼 스킬(`moai-work`)을
-/// 걷었으니 일꾼 창에는 그 글이 없다 — 감독이 맡길 자리 줄 뒤에 그 글 전부를 붙여 보낸다. `@path` 는 아무것도 안
-/// 붙이므로 경로만 적으면 일꾼은 빈손이다.
+/// 걷었으니 일꾼에게는 그 글을 읽으라고 이르는 스킬이 없다 — 같은 플러그인이라 파일은 일꾼 쪽에도 심겨 있지만, 감독이
+/// 맡길 자리 줄 뒤에 그 글 전부를 붙여 보낸다(2026-10-07 사용자 결정, 당분간). `@path` 는 아무것도 안 붙이므로 경로만
+/// 적으면 일꾼은 빈손이다.
 ///
 /// **창을 비우는 것은 사람의 몫이다.** tmux 칸에 `/clear` 를 쳐 넣던 5-1(약 480줄)을 통째로 걷었다 — 일꾼이 보고
 /// 끝에 언제 비워도 되는지를 사람에게 한 줄로 말한다. 감독은 칸에 아무것도 치지 않는다.
@@ -1780,8 +1781,8 @@ they still collide the worker goes back into its worktree and resolves them.
 **This skill is for Claude Code, and moai carries no messaging.** The supervisor and its
 workers talk with Claude Code's own tools:
 
-- `ListAgents` lists the live sessions — each row's name, where it runs and whether it is
-  busy or idle
+- `ListAgents` lists the live sessions, and subagents too — each row's name, its kind
+  (`interactive`, `bg`), whether it is busy or idle, and its tmux pane if it has one
 - `SendMessage(to: <name>, message: …)` sends to one session. With `notify_when_idle: true`
   you also get one notice when that session goes idle; leave `message` out and it only
   subscribes
@@ -1789,14 +1790,16 @@ workers talk with Claude Code's own tools:
 
 **Every session here is one a person opened.** moai never launches an agent or runs one
 headless, and neither does the supervisor. **A worker is every idle session of this
-repository in `ListAgents`, except you** — a row whose working directory is the root
-checkout or one of its worktrees. Nobody registers and nobody is asked which windows count.
+repository in `ListAgents`, except you** — a row whose name starts with the root
+directory's name and a `-`. Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and the worker's steps travel inside it (3).
 
-Four things about the messaging, one line each:
+Five things about the messaging, one line each:
 
 - A session in a different permission mode holds an incoming message for its person's
   approval — a worker that stays idle after you sent may be waiting on that
+- `notify_when_idle` answers only for a session on this machine — from one elsewhere no
+  idle notice comes, only its report
 - A subagent sends under its parent session's address — a message can come from a session
   that did not write it itself
 - `@path` in a message attaches nothing — what the worker has to read goes into the message
@@ -1940,8 +1943,13 @@ such rows apart under `others`.
 
 **2. Find a worker.** Call `ListAgents` once. A worker is a row that
 
-- belongs to this repository — its working directory is the root checkout or one of its
-  worktrees (under `<root>/.worktrees/`)
+- belongs to this repository. `ListAgents` shows no directory; a session takes its name from
+  the directory it was opened in — `<root dir name>-` and a short suffix, as in `moa-issue-bc`
+  for a session opened in `moa-issue`. A row whose name does not start that way — renamed, or
+  opened somewhere else — is not one
+- is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
+  yours or another session's (they stand under "Subagents", and a message to one resumes that
+  subagent instead), and not a `bg` session
 - reads `idle`
 - is not you
 
@@ -1955,8 +1963,8 @@ worker, and the message is the whole assignment.
   session of another repository
 - **A worker that refused the work comes out of the candidates and is not sent to
   again.** Some sessions take work only from their own person
-- **A test agent is no worker.** One raised for a test keeps its working directory outside
-  the repository (a scratchpad), so it is not a row of this repository
+- **A test agent is no worker.** One raised for a test is opened outside the repository (a
+  scratchpad), so its name is not this repository's
 
 The root checkout and, for a subdirectory project in a monorepo, the path down to it come
 from the lines below. The root is where `.moai` stands, so for a monorepo it is the
@@ -2080,7 +2088,7 @@ person's** — the supervisor never types into a window. The report ends with th
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
 report that never comes. Send to that window once the person has cleared it or said they will
-not, or send to another idle worker.
+not — a clear does not show from here, so ask the person — or send to another idle worker.
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.
@@ -2582,8 +2590,6 @@ fn indent(text: &str, by: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 일꾼 걸음의 `n` 번째가 여는 자리 — 줄 머리의 `<n>. `. 첫 걸음은 글의 맨 앞이라 앞에 줄바꿈이 없다.
-    /// 들여쓴 `1. `(다섯 자리의 번호)는 걸음이 아니다.
     /// 일꾼 글의 번호 걸음 — "The steps" 절 하나. 그 앞(맡은 일·사람이 비울 때·걸음 앞)과 뒤(이어받기)는 번호가
     /// 없는 절이라, 번호 목록의 규칙을 잴 때는 이 토막만 본다.
     fn numbered_steps(worker: &str) -> &str {
@@ -2593,6 +2599,8 @@ mod tests {
         &worker[from..to]
     }
 
+    /// 일꾼 걸음의 `n` 번째가 여는 자리 — 줄 머리의 `<n>. `. 첫 걸음은 글의 맨 앞이라 앞에 줄바꿈이 없다.
+    /// 들여쓴 `1. `(다섯 자리의 번호)는 걸음이 아니다.
     fn step_at(brief: &str, n: &str) -> usize {
         let open = format!("{n}. ");
         if brief.starts_with(&open) {
@@ -2998,7 +3006,8 @@ mod tests {
     /// 막던 판은 그 조각을 못 실어, 관점(`-b`) 없는 줄을 손으로 줄여 적었다.
     #[test]
     fn the_supervisor_teaches_promote_as_the_one_way() {
-        let (supervise, work, reference, brief) = (supervise(), worker(), reference(), worker());
+        let (supervise, reference, brief) = (supervise(), reference(), worker());
+        let work = &brief;
         let promote = "moai backlog promote <id> --from -";
         assert!(reference.contains(promote), "참고 문서의 펼치기 줄이 바뀌었다");
         assert!(work.contains(promote), "일꾼 글이 promote 를 안 가르친다");
@@ -3033,7 +3042,8 @@ mod tests {
     /// 보낸다(moai-obxm).
     #[test]
     fn the_worker_brief_carries_what_the_first_run_tripped_on() {
-        let (brief, supervise, work) = (worker(), supervise(), worker());
+        let (brief, supervise) = (worker(), supervise());
+        let work = &brief;
         assert!(supervise.contains(&message()), "감독이 보내는 메시지의 머리가 message 가 아니다");
         // 걸음은 감독 SKILL.md 가 아니라 그 참고 파일(`references/worker.md`)에 선다 — 감독은 보낼 때만 읽는다.
         assert!(!supervise.contains(&brief), "감독 SKILL.md 가 일꾼 걸음 전부를 싣는다");
@@ -3865,7 +3875,8 @@ stop sending outside work while a release runs",
     /// 필드가 아니라 이력으로 남는다(CLAUDE.md 의 되돌리지 않을 결정 둘).
     #[test]
     fn the_worker_may_raise_the_model_and_records_it_when_closing() {
-        let (brief, work) = (worker(), worker());
+        let brief = worker();
+        let work = &brief;
         // **올리는 길이 명령으로 서고, 그 명령을 칠 수 있는 자에게 간다.** "올린다" 만 적으면
         // 일꾼이 무엇을 쳐야 하는지 모른다. 그런데 `/model` 은 사람만 친다 — 에이전트는 붙박이
         // 명령을 못 불러, 제 손으로 치라고 하면 올렸다고 믿고 9-1 에 안 돈 모델을 적는다.
@@ -4031,7 +4042,7 @@ stop sending outside work while a release runs",
     fn a_test_claude_on_a_detached_server_is_no_worker() {
         // **떼어 낸 tmux 서버의 시험용 에이전트는 일꾼이 아니다**(2026-09-18 사용자 결정). 루트에서 띄우면
         // `ListAgents` 에 이 저장소의 놀고 있는 세션으로 선다. 감독은 이 저장소의 idle 세션 전부를 일꾼으로 읽으니
-        // (moai-obxm) 거르는 것은 자리다 — 시험하는 쪽에 루트 밖에서 띄우라고 하고, 감독은 저장소 밖의 줄을 안 센다.
+        // (moai-obxm) 거르는 것은 이름이다 — 세션 이름은 연 디렉터리에서 오니 시험하는 쪽에 루트 밖에서 띄우라고 하고, 감독은 이름이 저장소의 것이 아닌 줄을 안 센다.
         // 둘 중 하나만 서면 다른 쪽이 샌다.
         let (supervise, brief) = (supervise(), worker());
         let two = supervise.find("**2. Find a worker.**").expect("2 가 없다");
@@ -4039,6 +4050,11 @@ stop sending outside work while a release runs",
         let step = &supervise[two..three];
         assert!(step.contains("Call `ListAgents` once"), "감독이 일꾼을 ListAgents 로 안 찾는다");
         assert!(step.contains("belongs to this repository") && step.contains("is not you"), "감독이 일꾼을 자리로 안 거른다");
+        // `ListAgents` 는 서브에이전트도 늘어놓는다 — 자리만 보면 감독 제 서브에이전트(같은 저장소, idle)가 일꾼으로 서고,
+        // 그것에 보낸 메시지는 그 서브에이전트를 되살린다. `ListAgents` 는 자리를 안 보이니(2026-10-07 실제 목록) 이름의 머리로 거른다.
+        assert!(step.contains("Not a subagent"), "감독이 서브에이전트를 일꾼으로 센다");
+        assert!(step.contains("A row whose name does not start that way"), "이름이 이 저장소의 것이 아닌 줄을 일꾼으로 센다");
+        assert!(step.contains("`interactive`") && step.contains("not a `bg` session"), "사람이 연 세션만 거르지 않는다");
         assert!(step.contains("**A test agent is no worker.**"), "시험용 에이전트를 어떻게 할지 없다");
         assert!(brief.contains("keep its cwd outside the root"), "시험용 에이전트를 루트에서 띄운다");
         // Claude Code 의 속 파일은 문서에 없고 Claude 세션만 든다 — 감독이 다시 그것을 읽으면 다른 벤더의
@@ -4054,7 +4070,8 @@ stop sending outside work while a release runs",
         // **모노레포의 하위가 루트면 워크트리 안의 같은 하위에서 일한다**(2026-09-18 사용자 결정).
         // 워크트리 꼭대기에 선 일꾼은 `moai` 가 공유 루트의 `.moai` 를 찾아 쓰고, 훅 규칙 2 는
         // `.worktrees/` 아래라 편집을 안 센다(moai-5s9l — 옛 자리 `.claude/` 도 같다).
-        let (supervise, brief, work) = (supervise(), worker(), worker());
+        let (supervise, brief) = (supervise(), worker());
+        let work = &brief;
         assert!(supervise.contains("print(\"subdir\", os.path.relpath(here, top))"), "감독이 하위 경로를 안 낸다");
         assert!(message().contains("Subdir: <subdir>"), "메시지에 하위 경로 자리가 없다");
         let three = &brief[step_at(&brief, "3")..step_at(&brief, "4")];
@@ -4136,7 +4153,8 @@ stop sending outside work while a release runs",
     /// 막힌다. 감독이 제 손으로 치는 병합 확인도 같은 자리를 쓰는지 본다.
     #[test]
     fn the_brief_names_no_branch() {
-        let (brief, supervise, work) = (worker(), supervise(), worker());
+        let (brief, supervise) = (worker(), supervise());
+        let work = &brief;
         for (whose, text) in [("일꾼 글", work.as_str()), ("메시지", message().as_str())] {
             let named: Vec<&str> = text
                 .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
@@ -4396,6 +4414,10 @@ stop sending outside work while a release runs",
         assert!(supervise[..round].contains("Never poll `ListAgents` in a loop"), "ListAgents 를 되풀이해 훑지 말라는 말이 없다");
         assert!(supervise[..round].contains("`@path` in a message attaches nothing"), "@path 가 아무것도 안 붙인다는 말이 없다");
         assert!(supervise[..round].contains("different permission mode"), "권한 모드가 다른 창이 메시지를 붙든다는 말이 없다");
+        assert!(
+            supervise[..round].contains("`notify_when_idle` answers only for a session on this machine"),
+            "다른 기계의 일꾼에게서도 idle 알림이 온다고 읽힌다"
+        );
         assert!(supervise[..round].contains("A subagent sends under its parent"), "서브에이전트가 부모의 주소로 보낸다는 말이 없다");
         // 보내기는 걸음 전부를 싣는다 — 일꾼 창에는 심긴 글이 없다.
         let send = &supervise[supervise.find("**3. Send.**").expect("감독의 3 이 없다")

@@ -12,6 +12,24 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Removed
+
+- **The worker skill `moai-work` is gone.** A window no longer becomes a worker
+  by calling a skill and waiting for letters: every idle Claude Code session of
+  the repository is a worker, and the supervisor's message carries the
+  assignment with the worker's steps in it. (moai-obxm)
+
+### Changed
+
+- **`moai-supervise` is planted for Claude Code only, and talks through Claude
+  Code's own `ListAgents` and `SendMessage`.** It finds the idle sessions of the
+  repository there, sends each one its assignment with the worker's steps
+  (`references/worker.md`) pasted in, and takes the report back the same way. It
+  no longer says hello, sends letters or waits on `moai inbox`, and it no longer
+  clears a worker's tmux pane — clearing a window is the person's, and the
+  worker's report says when it is safe. `moai skill install --agent codex` or
+  `antigravity` no longer plants it in `.agents/skills/`. (moai-obxm)
+
 ## [0.8.0] - 2026-10-07
 
 ### Added

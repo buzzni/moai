@@ -70,7 +70,8 @@ pub fn skills() -> Vec<Skill> {
         },
         // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고, 일꾼이 `moai` 를 부를 때마다
         // 감독의 걸음까지 읽는다. 발동어(description)는 따로 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        // 일꾼의 걸음(`references/worker.md`)은 감독이 읽어 메시지에 통째로 붙인다(moai-obxm) — 일꾼 창에는 심긴 글이 없다.
+        // 일꾼의 걸음(`references/worker.md`)은 감독이 읽어 메시지에 통째로 붙인다(moai-obxm) — 일꾼 창도 같은 플러그인이라
+        // 이 파일은 거기에도 심겨 있지만, 그것을 읽으라고 이르는 스킬이 일꾼에게는 없다.
         Skill {
             name: supervisor,
             files: vec![("SKILL.md", crate::guide::supervise()), ("references/worker.md", crate::guide::worker())],
@@ -1380,9 +1381,6 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
-                    // 감독과 일꾼이 서로를 부르는 이름(moai-obxm) — `SendMessage` 의 `to` 다.
-                    .replace("<worker>", "w1")
-                    .replace("<supervisor>", "boss")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로
@@ -1461,6 +1459,19 @@ mod tests {
             })
             .collect();
         assert_eq!(planted, NAMES);
+    }
+
+    /// **스킬 곁에 심는 파일은 그 SKILL.md 가 경로로 부른다.** 감독은 `references/worker.md` 를 읽어 메시지에 통째로
+    /// 붙이는데(moai-obxm), 여기서 파일 이름만 바꾸면 감독 글은 없는 파일을 가리킨 채 초록이었다 — 일꾼은 걸음 없이
+    /// 맡은 일만 받는다.
+    #[test]
+    fn every_planted_reference_is_named_by_its_skill() {
+        for s in skills() {
+            let (_, body) = s.files.iter().find(|(rel, _)| *rel == "SKILL.md").expect("SKILL.md 가 없다");
+            for (rel, _) in s.files.iter().filter(|(rel, _)| *rel != "SKILL.md") {
+                assert!(body.contains(&format!("`{rel}`")), "{} 의 SKILL.md 가 곁에 심는 {rel} 를 안 부른다", s.name);
+            }
+        }
     }
 
     /// **`.agents/skills` 는 Claude 의 트리와 같은 글을 같은 이름 밑에 받는다**(moai-xs2h.xgo, 2026-10-04 사용자 결정) —
