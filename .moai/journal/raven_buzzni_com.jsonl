@@ -5396,3 +5396,23 @@
 {"ts":"2026-10-07T13:52:01Z","id":"moai-iu73.zci","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5 (xhigh — epic-end review, the person chose xhigh over the rubric max)"}
 {"ts":"2026-10-07T13:52:01Z","id":"moai-iu73.zci","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1-5, 12, 13 (bf258e4c). 11 taken too: dropped the seven Fixed lines (unshipped 0.9 behaviour). Handed on 6 and 7 as backlog moai-vi8p, 8 as backlog moai-k3ao. 9 and 10 kept by design: an empty dir loses nothing, and a noatime box fails loudly instead of measuring nothing."}
 {"ts":"2026-10-07T13:52:01Z","id":"moai-iu73","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: none — all 13 members merged in 329b9f9a. Follow-ups are backlog moai-vi8p (supervisor restart bookkeeping) and moai-k3ao (CRLF in skill status/skills_stale)."}
+{"ts":"2026-10-07T15:39:11Z","id":"moai-snrk","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"checked-in 트리 시험이 작업 트리를 걷는다 — 추적 안 된 파일에 붉어진다"}
+{"ts":"2026-10-07T15:39:11Z","id":"moai-7x7l","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"처음 init 이 .moai 를 이미 막는 무시 규칙을 못 보고 커밋으로 심는다"}
+{"ts":"2026-10-07T15:39:11Z","id":"moai-0tyw","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"커밋된 위 트래커와 git 밖 하위 트래커가 섞인 모노레포에서 옆 워크트리가 다른 트래커에 쓴다"}
+{"ts":"2026-10-07T15:39:11Z","id":"moai-hdzy","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"project add 로 등록한 옆 워크트리가 한눈 보기에서 init 전으로 선다"}
+{"ts":"2026-10-07T15:39:11Z","id":"moai-y42g","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex exec_command workdir 를 훅의 작업 자리로 읽기"}
+{"ts":"2026-10-07T15:39:12Z","id":"moai-279k","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init 의 git check-attr 가 FIFO 인 .gitattributes 앞에서 한도 없이 기다린다"}
+{"ts":"2026-10-07T15:39:12Z","id":"moai-2sbt","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init 의 AGENTS.md 먼저 열기가 막히게 열려 FIFO 로 갈린 틈에 멈춘다"}
+{"ts":"2026-10-07T15:39:12Z","id":"moai-mtae","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init exclude mode refuses a linked info/exclude"}
+{"ts":"2026-10-07T15:39:12Z","id":"moai-rj44","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init ignore-rule parser misreads colons in filenames"}
+{"ts":"2026-10-07T15:39:12Z","id":"moai-brxy","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"add -e <오타 id> 가 락 안에서 아카이브를 통째로 파싱한다"}
+{"ts":"2026-10-07T15:39:12Z","id":"moai-jjjq","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"개관 --worktree 가 옆 워크트리에서만 못 읽는 id 로 아카이브 사본을 가린다"}
+{"ts":"2026-10-07T15:39:12Z","id":"moai-7hks","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 못 읽는 줄 목록이 줄마다 출처를 든다"}
+{"ts":"2026-10-07T15:39:13Z","id":"moai-wzdo","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"tui::beside 가 archive::read_all 의 섞기를 베꼈다"}
+{"ts":"2026-10-07T15:39:13Z","id":"moai-xdpv","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"link <산 줄> --blocks <아카이브 줄> 은 여전히 not found"}
+{"ts":"2026-10-07T15:39:13Z","id":"moai-k3zt","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Me 가 지금 사람을 갈린 채로 들지 않아 짝 없는 ( 가 든 메일을 되가르지 못한다"}
+{"ts":"2026-10-07T15:39:13Z","id":"moai-lgm7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC o t on an unresolvable configured zone: bare Enter rewrites the config to UTC"}
+{"ts":"2026-10-07T15:39:13Z","id":"moai-zepg","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"쓰기 쪽 링크 거절(target_of)이 영어와 error 로 선다"}
+{"ts":"2026-10-07T15:39:13Z","id":"moai-ftwt","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Explorer install-probe comments still count three processes"}
+{"ts":"2026-10-07T15:39:13Z","id":"moai-kxqd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"skill install 이 앞 트리를 쓰며 바뀌는 뒤 트리의 링크 풀이를 미리 못 잰다"}
+{"ts":"2026-10-07T15:39:14Z","id":"moai-6rda","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"write_atomic_inside 의 거절·갈아끼우기가 권한과 .git 착지를 잘못 댄다"}
