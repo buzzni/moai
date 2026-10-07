@@ -1537,7 +1537,8 @@ fn init_never_writes_into_a_tracker_whose_moai_is_a_directory_link() {
 #[cfg(unix)]
 #[test]
 fn init_never_plants_the_block_over_a_dotfile_agents_md_leads_to() {
-    for (target, rule) in [(".gitattributes", ".moai/issues.jsonl   text eol=lf merge=moai"), (".gitignore", ".moai/lock")]
+    for (target, rule) in
+        [(".gitattributes", ".moai/issues.jsonl   text eol=lf merge=moai"), (".gitignore", ".moai/lock")]
     {
         let s = Scratch::new("init-agents-dotfile");
         let root = s.path();
@@ -1596,6 +1597,45 @@ fn switching_the_guide_to_a_block_removes_the_guide_file() {
     assert!(said.contains("removed .moai/guide.md"), "걷은 것을 안 댔다\n{said}");
     let again = ok(root, &["init", "--json"]);
     assert!(!again.contains("guide_file_removed"), "없는 파일을 걷었다고 했다 — {again}");
+}
+
+/// **트래커를 못 세우면 먼저 덧붙인 무시 줄을 걷는다**(moai-8gwh.67q). git 밖에 둔 트래커는 무시 줄을 `.moai`
+/// 보다 먼저 쓰는데, `.moai` 를 못 지어 멈춘 판이 그 줄을 남겼다. 뿌리를 읽기 전용으로 두면 덧붙이기(쓸 수 있는
+/// 파일, 또는 `.git/info/` 안)는 되고 `.moai` 짓기만 진다. 권한을 안 따지는 사용자(root)면 그 자리를 못 지어 건너뛴다.
+#[cfg(unix)]
+#[test]
+fn a_tracker_that_cannot_be_created_takes_its_ignore_lines_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+    for tracking in ["gitignore", "exclude"] {
+        let s = Scratch::new("init-local-rollback");
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        let (file, before) = match tracking {
+            "gitignore" => (root.join(".gitignore"), Some("target/\n")),
+            _ => (root.join(".git/info/exclude"), None),
+        };
+        match before {
+            Some(text) => std::fs::write(&file, text).unwrap(),
+            None => {
+                let _ = std::fs::remove_file(&file);
+            }
+        }
+        mode(root, 0o555);
+        if std::fs::write(root.join("probe"), "").is_ok() {
+            mode(root, 0o755);
+            return;
+        }
+        let out =
+            moai(root, &["init", "argos", "--tracking", tracking, "--guide", "none", "--no-skill", "--no-register"]);
+        mode(root, 0o755);
+        assert!(!out.status.success(), "{tracking}: 트래커를 못 세웠는데 0 으로 끝났다");
+        assert!(!root.join(".moai").exists(), "{tracking}: 반쯤 지은 .moai 를 남겼다");
+        match before {
+            Some(text) => assert_eq!(read(&file), text, "{tracking}: 덧붙인 무시 줄을 안 걷었다"),
+            None => assert!(!file.exists(), "{tracking}: 이 실행이 지은 무시 파일을 남겼다 — {}", read(&file)),
+        }
+    }
 }
 
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.

@@ -29,6 +29,12 @@ does not tag — see `CONTRIBUTING.md`.
   one line, and `--json` carries `guide_file_removed`. With `--guide none` or
   `hook` — `AGENTS.md` untouched, its link still standing — or when `AGENTS.md`
   could not be written, the file stays. (moai-8gwh.ftm)
+- **A tracker kept out of git that cannot be created no longer leaves its
+  ignore lines behind.** `moai init --tracking exclude|gitignore` writes those
+  lines before `.moai` on purpose; when creating `.moai` or its files then
+  failed, the lines stayed with no tracker. `init` now takes back exactly what
+  it appended (or removes the file it created) and any `.moai` it made, and
+  still stops with the error. (moai-8gwh.67q)
 - **A committed link from a file outside `.moai` into the tracker is no longer
   followed.** `AGENTS.md -> .moai/issues.jsonl` made `moai init` read the
   snapshot as AGENTS.md and replace it without the repository lock — racing a

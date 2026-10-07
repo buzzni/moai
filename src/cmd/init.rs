@@ -1884,10 +1884,18 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     // 트래커가 git 밖이라는 유일한 기록이다 — `.moai/` 를 먼저 세우고 줄을 못 쓴 판은 커밋될 트래커를 남겼고, 시킨
     // 대로 다시 부른 `init` 은 git 에 물어 그것을 커밋으로 읽어 커밋되는 파일을 심었다. 커밋하는 저장소의 딸린
     // 파일은 지금까지처럼 못 써도 나머지를 심는다(moai-0dwc).
+    //
+    // **덧붙이기 전의 길이를 함께 든다**(moai-8gwh.67q) — 아래에서 `.moai` 를 못 세우면 이 실행이 덧붙인 바이트만 걷어
+    // 되돌린다(`None` 이면 이 실행이 그 파일을 지었다). 남겨 두면 트래커도 없는데 `/.moai/` 를 막는 줄이 서, 그 뒤에
+    // 고른 커밋 추적이 git 에 물어 그 줄을 "git 밖" 으로 읽는다. 링크는 [`ensure_lines`] 가 안 쓰니 잴 것이 없다.
     let early = match ignored {
-        Some(d) if !again && !plan.tracking.tracked() => Some(write(d)),
+        Some(d) if !again && !plan.tracking.tracked() => {
+            let before = std::fs::symlink_metadata(&d.path).ok().map(|m| m.len());
+            Some((write(d), before))
+        }
         _ => None,
     };
+    let (early, early_before) = early.map_or((None, None), |(done, before)| (Some(done), Some(before)));
     if let (Some(d), Some((kind, why))) = (ignored, early.as_ref().and_then(Added::trouble)) {
         return Err(Fail::new(fill(
             say(ctx.lang(), "refuse.init_local_unwritten"),
@@ -1896,13 +1904,32 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     }
 
     if !again {
-        std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display())))?;
-        // **저널 파일은 안 짓는다**(moai-nzlo). 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고 그
-        // 자리는 첫 쓰기가 만든다 — 빈 `journal.jsonl` 을 심으면 이력이 거기 사는 것으로 읽히는데,
-        // 그 파일은 이제 읽기만 하는 옛 자리다. 빈 디렉터리는 git 이 안 담으므로 미리 만들지도 않는다.
-        for (name, body) in [("config.toml", config.as_str()), ("issues.jsonl", "")] {
-            let p = dir.join(name);
-            std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))?;
+        // **못 세우면 이 실행이 한 것을 걷고 그 까닭으로 멈춘다**(moai-8gwh.67q) — 반쯤 지은 `.moai` 와 먼저 덧붙인
+        // 무시 줄을 남기면, 다시 부른 `init` 이 그 `.moai` 를 "이미 심겼다" 로 읽어 설정 없는 트래커에서 넘어진다.
+        let mut made = false;
+        let built =
+            std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display()))).and_then(|()| {
+                made = true;
+                // **저널 파일은 안 짓는다**(moai-nzlo). 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고 그
+                // 자리는 첫 쓰기가 만든다 — 빈 `journal.jsonl` 을 심으면 이력이 거기 사는 것으로 읽히는데,
+                // 그 파일은 이제 읽기만 하는 옛 자리다. 빈 디렉터리는 git 이 안 담으므로 미리 만들지도 않는다.
+                [("config.toml", config.as_str()), ("issues.jsonl", "")].into_iter().try_for_each(|(name, body)| {
+                    let p = dir.join(name);
+                    std::fs::write(&p, body).map_err(|e| Fail::new(format!("{}: {e}", p.display())))
+                })
+            });
+        if let Err(fail) = built {
+            // 지은 것만 걷는다 — `!again` 이라 `.moai` 는 이 실행 전에 없었고, `made` 는 이 실행이 지었다는 뜻이다.
+            if made {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            if let (Some(d), Some(Added::Wrote { .. }), Some(before)) = (ignored, &early, early_before) {
+                let _ = match before {
+                    None => std::fs::remove_file(&d.path),
+                    Some(len) => std::fs::OpenOptions::new().write(true).open(&d.path).and_then(|f| f.set_len(len)),
+                };
+            }
+            return Err(fail);
         }
     }
 
