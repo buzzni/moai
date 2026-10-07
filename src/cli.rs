@@ -1882,8 +1882,13 @@ pub enum SkillCmd {
   two keys in is `claude`'s job. The one exception is the old declarations
   below.
 
-  **No file is deleted.** Running again only overwrites. Deleting a hook file
-  a running session holds would block every tool call of that session.
+  **Running again only overwrites.** Deleting a hook file a running session
+  holds would block every tool call of that session. The one thing deleted
+  is a skill directory an earlier moai planted in the same tree and this one
+  no longer plants (skills/moai-work/, and skills/moai-supervise/ in
+  .agents/skills/), and only while it holds nothing but the files moai
+  planted there; one with a file of yours in it is left, and one line names
+  it.
 
   The version is a hash of what is installed. Same content, same version, so
   there are no empty updates.

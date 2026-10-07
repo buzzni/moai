@@ -36,8 +36,10 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai skill install` removes the skill directories an earlier moai planted
   and this one no longer does** — `skills/moai-work/` in the Claude plugin and
   in `.agents/skills/`, and `skills/moai-supervise/` in `.agents/skills/`
-  (Codex and Antigravity). Only a directory that holds exactly what moai wrote
-  goes; one with a file of yours in it is left and named in one line.
+  (Codex and Antigravity). Only a directory that holds nothing but the files
+  moai planted there goes — their text is not compared, so a `SKILL.md` you
+  edited goes with it, as an install overwrites one; a directory with a file
+  of yours in it is left and named in one line.
   `moai skill uninstall --agent codex` still names such a leftover for you to
   delete, and the wiki still does not read `moai-work` as an issue id.
   (moai-six5.1xz)

@@ -304,7 +304,7 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     if !dry_run {
         if let Some((dir, files)) = &shared {
             write_committed(dir, files, &root)?;
-            shared_left.iter_mut().for_each(Leftover::remove);
+            shared_left.iter_mut().for_each(|l| l.remove(&root));
         }
         for (h, state) in hooks.iter_mut().filter(|(_, state)| state.due()) {
             *state = h.state(&root);
@@ -446,11 +446,12 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         return Ok((serde_json::Value::Null, out));
     }
 
-    // **덮어쓰기만 한다.** 남은 파일을 치우는 것은 다음 설치의 몫이다. 쓰는 자는 `.agents` 와 같다([`write_committed`],
-    // moai-ml0d.izy) — 맨 `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한
-    // `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그 파일을 플러그인 JSON 으로 통째로 덮었다.
+    // **심는 파일은 덮어쓰기만 한다.** 이 판이 안 심는 스킬 디렉터리만 쓴 뒤에 걷는다([`leftovers`]) — 등록이 이 트리를
+    // 캐시로 옮겨 담기 전이다. 쓰는 자는 `.agents` 와 같다([`write_committed`], moai-ml0d.izy) — 맨
+    // `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한 `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그
+    // 파일을 플러그인 JSON 으로 통째로 덮었다.
     write_committed(&dir, &files, &root)?;
-    left.iter_mut().for_each(Leftover::remove);
+    left.iter_mut().for_each(|l| l.remove(&root));
 
     // **`--json` 보다 먼저 푼다** — 아래 두 갈래가 다 이것을 쓴다. 기계 출력으로 빠지는 판은
     // 이 글들을 안 지으므로 값이 새지 않는다(`register` 의 걸음 이름은 사람 화면에만 선다).
@@ -1559,33 +1560,41 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
     out
 }
 
-/// 트리 `files`(`under` 밑의 `<이름>/…`)가 심는 스킬 이름.
+/// 트리 `files`(`under` 밑의 `<이름>/…`)가 심는 스킬 이름 — 같은 이름이 여러 번 설 수 있다(`contains` 로만 쓴다).
 fn planted_names<'a>(files: &'a [(PathBuf, String)], under: &str) -> Vec<&'a str> {
-    let mut names: Vec<&str> = files
-        .iter()
-        .filter_map(|(p, _)| p.strip_prefix(under).ok()?.components().next()?.as_os_str().to_str())
-        .collect();
-    names.dedup();
-    names
+    files.iter().filter_map(|(p, _)| p.strip_prefix(under).ok()?.components().next()?.as_os_str().to_str()).collect()
 }
 
 /// 옛 판이 심고 이 판은 안 심는 스킬 디렉터리 하나(moai-six5.1xz).
 struct Leftover {
     dir: PathBuf,
-    /// moai 가 심은 꼴 그대로면 지울 파일과 디렉터리(깊은 것부터). 아니면 `None` 이고 손대지 않는다([`ours`]).
-    ours: Option<(Vec<PathBuf>, Vec<PathBuf>)>,
-    /// 지웠는가 — 연습이거나 남의 것이면 `None` 이다.
-    removed: Option<bool>,
+    /// 그 스킬의 이름과 moai 가 그 안에 심던 파일([`skill::EVER_PLANTED`]) — 지우기 바로 앞에서 이것으로 다시 잰다
+    /// ([`Leftover::remove`]).
+    name: &'static str,
+    known: &'static [&'static str],
+    state: Left,
+}
+
+/// 남은 디렉터리의 처지 — `--json` 의 `state` 다.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Left {
+    /// moai 가 심은 꼴이 아니다([`ours`]) — 손대지 않고 한 줄로 댄다.
+    Foreign,
+    /// moai 가 심은 꼴이고 아직 안 지웠다 — 연습이 내는 처지다.
+    Planned,
+    Removed,
+    /// 지우다 멈췄다 — 손으로 지울 줄을 낸다.
+    Failed,
 }
 
 impl Leftover {
-    /// `--json` 의 한 칸 — 자리와 상태(`removed`·`failed`·`planned`·`foreign`).
+    /// `--json` 의 한 칸 — 자리와 처지(`removed`·`failed`·`planned`·`foreign`).
     fn json(&self) -> serde_json::Value {
-        let state = match (&self.ours, self.removed) {
-            (None, _) => "foreign",
-            (Some(_), None) => "planned",
-            (Some(_), Some(true)) => "removed",
-            (Some(_), Some(false)) => "failed",
+        let state = match self.state {
+            Left::Foreign => "foreign",
+            Left::Planned => "planned",
+            Left::Removed => "removed",
+            Left::Failed => "failed",
         };
         serde_json::json!({ "path": self.dir.display().to_string(), "state": state })
     }
@@ -1593,22 +1602,45 @@ impl Leftover {
     /// 사람의 한 줄. 연습이면 지울 것을 댄다.
     fn line(&self, lang: crate::i18n::Lang) -> String {
         let dir = crate::text::shell_word(&self.dir.display().to_string());
-        let text = match (&self.ours, self.removed) {
-            (None, _) => say(lang, "skill.leftover_foreign"),
-            (Some(_), None) => say(lang, "skill.leftover_plan"),
-            (Some(_), Some(true)) => say(lang, "skill.leftover_removed"),
-            (Some(_), Some(false)) => say(lang, "skill.leftover_failed"),
+        let text = match self.state {
+            Left::Foreign => say(lang, "skill.leftover_foreign"),
+            Left::Planned => say(lang, "skill.leftover_plan"),
+            Left::Removed => say(lang, "skill.leftover_removed"),
+            Left::Failed => say(lang, "skill.leftover_failed"),
         };
         fill(text, &[("dir", &dir)])
     }
 
-    /// 지운다 — 파일을 하나씩, 그 뒤 빈 디렉터리를 깊은 것부터. 통째로 지우지 않는다(`remove_dir_all`) — 잰 뒤에 사람이
-    /// 그 안에 둔 파일이 있으면 그 디렉터리는 비지 않아 남고, 실패로 댄다.
-    fn remove(&mut self) {
-        let Some((files, dirs)) = &self.ours else { return };
-        let files_gone = files.iter().all(|f| std::fs::remove_file(f).is_ok());
-        let dirs_gone = dirs.iter().all(|d| std::fs::remove_dir(d).is_ok());
-        self.removed = Some(files_gone && dirs_gone);
+    /// 지운다 — 파일을 하나씩, 그 뒤 빈 디렉터리를 깊은 것부터. 통째로 지우지 않는다(`remove_dir_all`).
+    ///
+    /// - **지우기 바로 앞에서 다시 잰다**([`ours`]) — [`leftovers`] 가 잰 뒤 트리 한 벌을 fsync 하며 쓰는 동안 사람이 그 안에
+    ///   파일을 두었으면 이제 남의 것이라 안 지운다. 훅 파일을 쓰기 바로 앞에서 다시 판정하는 것과 같은 까닭이다(리뷰
+    ///   moai-dj4j.n9y). 그사이 디렉터리가 통째로 사라졌으면 걷힌 것이다
+    /// - **`SKILL.md` 는 다른 파일이 다 지워진 뒤에야 지운다** — 그것이 이 디렉터리를 moai 의 것으로 알아보는 머리다. 먼저
+    ///   지우고 다른 파일에서 멈추면 다음 `install` 이 남은 것을 남의 것으로 읽어 영영 안 걷는다
+    /// - **다른 파일은 하나가 실패해도 나머지를 다 해 본다.** 그사이 사라진 것은 지운 것으로 친다 — 옆 세션의 `install` 이
+    ///   먼저 걷었다
+    fn remove(&mut self, root: &Path) {
+        if self.state != Left::Planned {
+            return;
+        }
+        if std::fs::symlink_metadata(&self.dir).is_err() {
+            self.state = Left::Removed;
+            return;
+        }
+        let Some((files, dirs)) = ours(&self.dir, self.name, self.known, root) else {
+            self.state = Left::Foreign;
+            return;
+        };
+        let head = self.dir.join("SKILL.md");
+        let (heads, rest): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|f| *f == head);
+        let gone = |r: std::io::Result<()>| r.is_ok() || r.is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        let mut stuck = rest.iter().filter(|f| !gone(std::fs::remove_file(f))).count();
+        if stuck == 0 {
+            stuck = heads.iter().filter(|f| !gone(std::fs::remove_file(f))).count()
+                + dirs.iter().filter(|d| !gone(std::fs::remove_dir(d))).count();
+        }
+        self.state = if stuck == 0 { Left::Removed } else { Left::Failed };
     }
 }
 
@@ -1621,21 +1653,28 @@ fn leftovers(skills: &Path, planting: &[&str], root: &Path) -> Vec<Leftover> {
     skill::EVER_PLANTED
         .iter()
         .filter(|(name, _)| !planting.contains(name))
-        .filter_map(|(name, known)| {
+        .filter_map(|&(name, known)| {
             let dir = skills.join(name);
             std::fs::symlink_metadata(&dir).ok()?;
-            Some(Leftover { ours: ours(&dir, name, known, root), dir, removed: None })
+            let state = match ours(&dir, name, known, root) {
+                Some(_) => Left::Planned,
+                None => Left::Foreign,
+            };
+            Some(Leftover { dir, name, known, state })
         })
         .collect()
 }
 
 /// 디렉터리 `dir` 이 **moai 가 심은 꼴 그대로인가** — 그렇다면 지울 파일과 디렉터리(깊은 것부터)다.
 ///
-/// 사람의 것을 지우지 않으려고 셋을 다 본다. 하나라도 어긋나면 `None` 이고 그 디렉터리는 통째로 남는다.
+/// 사람의 것을 지우지 않으려고 셋을 다 본다. 하나라도 어긋나면 `None` 이고 그 디렉터리는 통째로 남는다. **글은 견주지
+/// 않는다** — 옛 판마다 글이 달라 견줄 원본이 없다. 사람이 고친 `SKILL.md` 도 걷힌다: 심는 스킬의 글을 다음 `install` 이
+/// 덮어쓰는 것과 같은 셈이다.
 ///
 /// - **링크가 아닌 디렉터리**이고 그 안도 디렉터리와 보통 파일뿐이다 — 링크를 따라 지우면 링크 너머의 것이 사라진다
 /// - **파일이 모두 moai 가 그 스킬에 심던 것**이다([`skill::EVER_PLANTED`]) — 사람이 곁에 둔 메모 하나가 있어도 안 지운다
-/// - **`SKILL.md` 머리가 그 이름이다**(`---\nname: <이름>\n`) — moai 가 심는 글은 모두 이 머리로 연다
+/// - **`SKILL.md` 머리가 그 이름이다**(`---` 다음 줄이 `name: <이름>`) — moai 가 심는 글은 모두 이 머리로 연다. 줄 끝은
+///   `\r\n` 이어도 된다 — `core.autocrlf` 로 받은 체크아웃은 커밋된 글을 그렇게 푼다
 fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<PathBuf>, Vec<PathBuf>)> {
     if !std::fs::symlink_metadata(dir).ok()?.is_dir() {
         return None;
@@ -1658,7 +1697,8 @@ fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<Path
         }
     }
     let head = read_committed(&dir.join("SKILL.md"), root).ok()?;
-    if !head.starts_with(&format!("---\nname: {name}\n")) {
+    let mut lines = head.lines();
+    if lines.next() != Some("---") || lines.next() != Some(format!("name: {name}").as_str()) {
         return None;
     }
     dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
@@ -1838,29 +1878,71 @@ mod tests {
         put("moai-supervise/SKILL.md", &skill_md("moai-supervise"));
         put("moai-supervise/references/worker.md", "# worker\n");
         put("moai-wiki/SKILL.md", &skill_md("moai-wiki"));
-        let mut left = leftovers(&skills, &["moai", "moai-wiki"], &root);
+        let planting = ["moai", "moai-wiki"];
+        let states = |left: &[Leftover]| left.iter().map(|l| l.state).collect::<Vec<_>>();
+        let mut left = leftovers(&skills, &planting, &root);
         let named: Vec<String> = left.iter().map(|l| l.dir.display().to_string()).collect();
         assert_eq!(named, [skills.join("moai-supervise"), skills.join("moai-work")].map(|p| p.display().to_string()));
-        assert!(left.iter().all(|l| l.ours.is_some()), "moai 가 심은 꼴을 남의 것으로 읽었다");
-        left.iter_mut().for_each(Leftover::remove);
-        assert!(left.iter().all(|l| l.removed == Some(true)));
+        assert_eq!(states(&left), [Left::Planned; 2], "moai 가 심은 꼴을 남의 것으로 읽었다");
+        left.iter_mut().for_each(|l| l.remove(&root));
+        assert_eq!(states(&left), [Left::Removed; 2]);
         assert!(!skills.join("moai-work").exists() && !skills.join("moai-supervise").exists());
         assert!(skills.join("moai-wiki/SKILL.md").is_file(), "심는 스킬을 걷었다");
+
+        // `core.autocrlf` 로 받은 체크아웃의 머리(`\r\n`)도 moai 의 것이다.
+        put("moai-work/SKILL.md", &skill_md("moai-work").replace('\n', "\r\n"));
+        let mut left = leftovers(&skills, &planting, &root);
+        assert_eq!(states(&left), [Left::Planned], "줄 끝이 `\\r\\n` 인 머리를 남의 것으로 읽었다");
+        // 잰 뒤에 사람이 파일을 두면 지우기 바로 앞에서 다시 재 남긴다 — 잰 그대로 지우면 그 파일이 남은 디렉터리를
+        // 실패로 대며 `rm -r` 을 권한다.
+        put("moai-work/notes.md", "mine\n");
+        left.iter_mut().for_each(|l| l.remove(&root));
+        assert_eq!(states(&left), [Left::Foreign]);
+        assert!(skills.join("moai-work/SKILL.md").is_file() && skills.join("moai-work/notes.md").is_file());
+        // 잰 뒤에 통째로 사라졌으면(옆 세션의 `install`) 걷힌 것이다 — 실패가 아니다.
+        std::fs::remove_file(skills.join("moai-work/notes.md")).unwrap();
+        let mut left = leftovers(&skills, &planting, &root);
+        std::fs::remove_dir_all(skills.join("moai-work")).unwrap();
+        left.iter_mut().for_each(|l| l.remove(&root));
+        assert_eq!(states(&left), [Left::Removed]);
+
+        // **다른 파일이 안 지워지면 머리(`SKILL.md`)를 남긴다** — 다음 `install` 이 그 디렉터리를 다시 알아보고 마저 걷는다.
+        // 권한이 안 막는 자리(root 로 도는 시험)에서는 잴 수 없어 건너뛴다.
+        use std::os::unix::fs::PermissionsExt;
+        put("moai-supervise/SKILL.md", &skill_md("moai-supervise"));
+        put("moai-supervise/references/worker.md", "# worker\n");
+        let refs = skills.join("moai-supervise/references");
+        std::fs::set_permissions(&refs, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(refs.join("probe"), "").is_err() {
+            let mut left = leftovers(&skills, &planting, &root);
+            left.iter_mut().for_each(|l| l.remove(&root));
+            assert_eq!(states(&left), [Left::Failed]);
+            assert!(skills.join("moai-supervise/SKILL.md").is_file(), "머리를 먼저 지워 다음 install 이 못 알아본다");
+            assert_eq!(states(&leftovers(&skills, &planting, &root)), [Left::Planned]);
+        }
+        std::fs::set_permissions(&refs, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_file(refs.join("probe"));
+        let mut left = leftovers(&skills, &planting, &root);
+        left.iter_mut().for_each(|l| l.remove(&root));
+        assert_eq!(states(&left), [Left::Removed]);
 
         // 사람의 메모가 곁에 있으면, 머리의 이름이 다르면, 링크면 — 통째로 남긴다.
         put("moai-work/SKILL.md", &skill_md("moai-work"));
         put("moai-work/notes.md", "mine\n");
         put("moai-supervise/SKILL.md", &skill_md("my-own"));
-        let away = crate::scratch::Scratch::new("skill-leftovers-away");
+        let left = leftovers(&skills, &planting, &root);
+        assert_eq!(states(&left), [Left::Foreign; 2], "사람의 것을 걷으려 했다");
+        // 링크는 **체크아웃 안을** 가리킨다 — 밖을 가리키면 `SKILL.md` 를 읽는 자([`read_committed`])가 먼저 거절해, 링크를
+        // 거르는 자리를 걷어도 이 시험이 초록이다.
+        let away = root.join("elsewhere");
+        std::fs::create_dir_all(&away).unwrap();
         std::fs::write(away.join("SKILL.md"), skill_md("moai-work")).unwrap();
-        let left = leftovers(&skills, &["moai", "moai-wiki"], &root);
-        assert_eq!(left.len(), 2);
-        assert!(left.iter().all(|l| l.ours.is_none()), "사람의 것을 걷으려 했다");
         std::fs::remove_dir_all(skills.join("moai-work")).unwrap();
-        std::os::unix::fs::symlink(away.path(), skills.join("moai-work")).unwrap();
-        let left = leftovers(&skills, &["moai", "moai-wiki"], &root);
-        assert!(left.iter().all(|l| l.ours.is_none()), "링크를 따라 걷으려 했다");
-        assert!(away.join("SKILL.md").is_file());
+        std::os::unix::fs::symlink(&away, skills.join("moai-work")).unwrap();
+        let mut left = leftovers(&skills, &planting, &root);
+        assert_eq!(states(&left), [Left::Foreign; 2], "링크를 따라 걷으려 했다");
+        left.iter_mut().for_each(|l| l.remove(&root));
+        assert!(away.join("SKILL.md").is_file(), "링크 너머를 지웠다");
     }
 
     /// **트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 8번) — 트리는 `skills/**` 를

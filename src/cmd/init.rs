@@ -2345,6 +2345,15 @@ mod tests {
         assert!(!ignore.contains("/shared/*.tmp.*"), "사람의 디렉터리의 임시 파일을 통째로 가렸다: {ignore}");
         assert!(!attrs.contains("/shared/journal"), "제자리 저널을 옮겼다: {attrs}");
         assert!(!ignore.contains("/.moai/"), "제자리를 한 벌 더 적었다: {ignore}");
+        // 블록에 `.moai/` 밑 디렉터리 줄이 다시 서는 날에도(우편함 줄이 그랬다, moai-h8tn) 파일 하나만 옮겼으면 그 줄은
+        // 안 따라간다 — 사람의 디렉터리(`shared/<dir>/`)를 가린다. 지금 블록에는 그 줄이 없어 지어 넣은 블록으로 잰다.
+        let block = ".moai/lock\n.moai/cache/\n";
+        assert_eq!(mirrored(block, "", "shared", Some("issues.jsonl")), "/shared/lock\n", "디렉터리 줄이 따라갔다");
+        assert_eq!(
+            mirrored(block, "", "tracker", None),
+            "/tracker/lock\n/tracker/cache/\n",
+            "통째로 옮긴 자리를 빠뜨렸다"
+        );
 
         let top = s.join("top");
         std::fs::create_dir_all(top.join(".moai")).unwrap();

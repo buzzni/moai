@@ -84,8 +84,8 @@ pub struct Skill {
 /// Claude 의 플러그인([`tree`])과 Codex·Antigravity 의 [`AGENTS_DIR`]([`agents_tree`]). 부르는 자리마다 글을 손으로
 /// 엮던 판은 `install` 과 커밋된 트리 시험이 같은 글 넷을 따로 늘어놓아, 스킬 하나를 더할 때마다 두 자리를 고쳤다.
 pub fn skills() -> Vec<Skill> {
-    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
-    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
+    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 스킬 이름을 id 에서 거르는 [`EVER_PLANTED`] 가 그 목록을 다 들니
+    // (moai-mdzx.3pm, moai-six5.1xz), 여기 글자를 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
     let [main, supervisor, wiki] = NAMES;
     vec![
         Skill {
