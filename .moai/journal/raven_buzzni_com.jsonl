@@ -5574,3 +5574,8 @@
 {"ts":"2026-10-07T18:16:50Z","id":"moai-r0x8.ris","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-07T18:16:57Z","id":"moai-r0x8.qbh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1·2·5·6·8 은 리뷰가 고쳤고(fix(store) 커밋), 4·9 는 이 창이 서브에이전트로 고쳤다(3a87b2fe, 6cfe7349). 넘긴 것: 3 → moai-tg0n(링크된 하위 트래커 스냅샷, 에픽 전부터), 7 → moai-bcfx(체크아웃 밖 조상의 .moai 파일, 사람이 정할 갈래), 4 의 남은 쪽 → moai-m7up(main_root 이름 판정), 2kg 의 남은 읽기 값 → moai-v5xd"}
 {"ts":"2026-10-07T18:17:03Z","id":"moai-r0x8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 일곱과 리뷰가 develop 에 머지됐다(54c29daa). 남은 것은 에픽 밖 backlog 넷 — moai-tg0n·moai-bcfx·moai-m7up·moai-v5xd (-e moai-r0x8 로 담았다, bcfx·m7up 은 사람의 설계 결정)"}
+{"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.esm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.67q","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.ftm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.86j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress","note":"레이븐 (raven@buzzni.com) 이 이 창에서 허락했다"}
+{"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.86j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Taken-over: minyoung.go (hedone21@gmail.com)"}
