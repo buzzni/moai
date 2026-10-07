@@ -862,27 +862,6 @@ prints one. When an epic changes what a person does, the window that did it fixe
 on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
 
-/// 우편함을 AGENTS 블록에 알리는 조각(moai-h8tn). **짧게 둔다** — 언제나 읽히는 블록이라 모든 세션이 그
-/// 값을 낸다. 동사 넷과 "기록이 아니다·훅이 싣는다·깨우기는 덤" 셋만 말하고, 꼴과 까닭은
-/// `moai send --help` 와 `src/mail.rs` 에 둔다.
-const MAILBOX: &str = r#"    moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
-    moai send any-idle-worker '<subject>'   one agent takes it - not you, not a supervisor
-    moai inbox --ack                        the letters for you, marked read as they are shown
-    moai inbox --ack --wait 600             a worker waits here for its next letter
-    moai agents                             who is here - `moai hello` registers you
-
-A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
-on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
-and the end of each turn load the letters for this session and mark them read, and an
-`any-idle-worker` letter goes, one per load, to whichever agent loads it first. A supervisor
-registers with `moai hello --role supervisor` so it never takes those. Waking is a bonus:
-`--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
-Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
-a worker waiting on `moai inbox --wait` needs no waking, and while it waits `moai agents`
-shows it idle. A Codex shell is found by the session id Codex sets in it
-(`CODEX_THREAD_ID`); where that is missing, pass `--as <name>` — the hooks name the session
-in its first context."#;
-
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
 /// 물은 창이 같은 에픽을 다르게 가른다.
@@ -1210,17 +1189,14 @@ They stand once `moai skill install` has planted the hooks for your agent.
 
 ### The supervisor and its workers
 
-`moai skill install` also plants `moai-work` and `moai-supervise`. A person calls
-`moai-work` in a window to make it a worker — it says hello, waits for a letter,
-does the work the letter hands over in a worktree, reports and waits again — and
-`moai-supervise` in one window to hand the backlog that have piled up, one at a time,
-to those workers and take their reports. Claude Code, Codex and Antigravity can
-each be either, and every one of them is a session a person opened. The supervisor
-picks, sends and checks; it does not fix and it does not merge.
-
-### Letters between agents
-
-{MAILBOX}
+In Claude Code, `moai skill install` also plants `moai-supervise`. A person calls it in
+one window to hand the backlog that have piled up, one at a time, to the other sessions
+of this repository and take their reports. Every idle session of this repository that
+`ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
+assignment with the worker's steps in it (`SendMessage`), and the worker reports the same
+way. moai carries no messaging and never launches a session; every one of them is a
+session a person opened. The supervisor picks, sends and checks; it does not fix and it
+does not merge.
 
 ### The wiki
 
