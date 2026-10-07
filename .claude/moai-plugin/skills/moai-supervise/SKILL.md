@@ -110,10 +110,15 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker — the session you sent that work to — no longer stands in `ListAgents`. A session
-that still stands there, idle, has not ended: its person may be answering it, or it may
-be holding your message for approval. Hand its work on
-only once the person says that window has ended; until then it is that worker's.
+worker — the session you sent that work to — no longer answers. **A name gone from
+`ListAgents` is not an ended session**: the name belongs to the process, so a window resumed
+with `claude --resume` comes back under a new name, still in that worktree. A session that
+still stands there, idle, has not ended either: its person may be answering it, or it may be
+holding your message for approval. Look for the worker by its worktree, not its name — ask
+the person which window works in it. Hand its work on
+only once the person says that window has ended; until then it is that worker's. When it
+comes back under a new name, move what you keep under the old one — the work you sent, a
+refusal — to the new name (2).
 
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
@@ -194,7 +199,9 @@ worker, and the message is the whole assignment.
 
 - **Leave out a worker whose sent work has not had its report checked.** It goes idle
   whenever its turn ends — while it asks its person something, say — and it is still
-  holding your work
+  holding your work. A resumed window comes back under a new name (0): while a worker you
+  sent to is gone from `ListAgents` with its report unchecked, a name you have not sent to
+  may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
   session of another repository
 - **A worker that refused the work comes out of the candidates and is not sent to

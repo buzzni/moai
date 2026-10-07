@@ -1868,10 +1868,15 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker — the session you sent that work to — no longer stands in `ListAgents`. A session
-that still stands there, idle, has not ended: its person may be answering it, or it may
-be holding your message for approval. Hand its work on
-only once the person says that window has ended; until then it is that worker's.
+worker — the session you sent that work to — no longer answers. **A name gone from
+`ListAgents` is not an ended session**: the name belongs to the process, so a window resumed
+with `claude --resume` comes back under a new name, still in that worktree. A session that
+still stands there, idle, has not ended either: its person may be answering it, or it may be
+holding your message for approval. Look for the worker by its worktree, not its name — ask
+the person which window works in it. Hand its work on
+only once the person says that window has ended; until then it is that worker's. When it
+comes back under a new name, move what you keep under the old one — the work you sent, a
+refusal — to the new name (2).
 
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
@@ -1952,7 +1957,9 @@ worker, and the message is the whole assignment.
 
 - **Leave out a worker whose sent work has not had its report checked.** It goes idle
   whenever its turn ends — while it asks its person something, say — and it is still
-  holding your work
+  holding your work. A resumed window comes back under a new name (0): while a worker you
+  sent to is gone from `ListAgents` with its report unchecked, a name you have not sent to
+  may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
   session of another repository
 - **A worker that refused the work comes out of the candidates and is not sent to
@@ -3107,6 +3114,12 @@ mod tests {
             // `gone` 은 20분 조용했다는 것이지 끝났다는 것이 아니다(리뷰 moai-bkn4.c3d) — 사람의 답을 기다리며 프롬프트에 쉬는
             // 다른 기계·Codex 일꾼도 그렇게 읽혀, 그 워크트리를 둘째 일꾼에게 넘기면 산 두 세션이 한 가지에 선다.
             ("only once the person says that window has ended", "20분 조용한 일꾼의 워크트리를 둘째 일꾼에게 넘긴다"),
+            // 세션 이름은 프로세스의 것이라 `claude --resume` 으로 되살아난 일꾼은 새 이름으로 선다(moai-ybns.451.ed8) —
+            // 옛 이름이 목록에서 빠진 것을 끝난 것으로 읽으면 산 워크트리를 둘째 일꾼에게 넘기고, 이름으로 적어 둔
+            // "보낸 일"·"거절" 을 놓쳐 그 창에 일을 또 맡긴다.
+            ("with `claude --resume` comes back under a new name", "이름이 바뀐 일꾼의 워크트리를 끝난 것으로 읽는다"),
+            ("Look for the worker by its worktree, not its name", "멈춘 워크트리의 일꾼을 이름으로 찾는다"),
+            ("may be that worker — ask the person before sending to it", "되살아난 일꾼에게 일을 또 맡긴다"),
             // 7-1 이 첫 칸에 남긴 멤버는 에픽을 연 채 둔다 — 감독의 확인(5)이 그것을 어긋남으로 읽으면
             // 시킨 대로 한 보고마다 그 창이 안 비워지고 다음 backlog 도 못 받는다.
             (
