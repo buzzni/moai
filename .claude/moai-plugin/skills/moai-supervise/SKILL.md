@@ -27,6 +27,12 @@ directory's slug and a `-` (2). Nobody registers and nobody is asked which windo
 The message you send is the whole assignment, and it names the file of the worker's steps,
 which the worker reads (3).
 
+**One supervisor per repository.** A supervisor waiting for reports reads `idle` in
+`ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
+books of what was sent — one backlog, or one worker, gets two jobs. Before the first round,
+ask the person whether another window here runs `moai-supervise`; if one does, stop. A
+session that refuses work because it is a supervisor comes out of the candidates.
+
 Five things about the messaging, one line each:
 
 - A session in a different permission mode holds an incoming message for its person's
@@ -197,7 +203,7 @@ such rows apart under `others`.
 - runs on this machine — a Remote Control or cloud session cannot read the steps file at the
   path you name (3), and sends no idle notice
 - reads `idle`
-- is not you
+- is not you, and not a supervisor (one per repository, above)
 
 Its name is what you send to. Nobody registers: any idle session a person opened here is a
 worker, and the message is the whole assignment.

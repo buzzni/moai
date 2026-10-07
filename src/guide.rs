@@ -1785,6 +1785,12 @@ directory's slug and a `-` (2). Nobody registers and nobody is asked which windo
 The message you send is the whole assignment, and it names the file of the worker's steps,
 which the worker reads (3).
 
+**One supervisor per repository.** A supervisor waiting for reports reads `idle` in
+`ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
+books of what was sent — one backlog, or one worker, gets two jobs. Before the first round,
+ask the person whether another window here runs `moai-supervise`; if one does, stop. A
+session that refuses work because it is a supervisor comes out of the candidates.
+
 Five things about the messaging, one line each:
 
 - A session in a different permission mode holds an incoming message for its person's
@@ -1955,7 +1961,7 @@ such rows apart under `others`.
 - runs on this machine — a Remote Control or cloud session cannot read the steps file at the
   path you name (3), and sends no idle notice
 - reads `idle`
-- is not you
+- is not you, and not a supervisor (one per repository, above)
 
 Its name is what you send to. Nobody registers: any idle session a person opened here is a
 worker, and the message is the whole assignment.
@@ -2244,6 +2250,8 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
 else, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from a worktree.
+**If this window runs `moai-supervise` itself**, it is a supervisor, not a worker: do
+nothing of it, reply to the message's `from` that you are a supervisor, and end the turn.
 **If `Root:` is not this window's repository** — the window stands neither in it nor in one
 of its worktrees — the supervisor took you for a worker by a name that only looks like its
 repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
@@ -4082,6 +4090,12 @@ stop sending outside work while a release runs",
         assert!(step.contains("`tvshop-updater-ca` for `tvshop_updater`"), "감독이 이름을 슬러그로 견주지 않는다");
         assert!(step.contains("**A name that does start so is still only a candidate**"), "머리가 맞으면 남의 저장소 세션도 일꾼으로 센다");
         assert!(brief.contains("**If `Root:` is not this window's repository**"), "남의 저장소 세션이 받은 일을 한다");
+        // 보고를 기다리는 감독도 idle 이라 일꾼의 자에 다 맞는다(moai-ybns.451.qgx) — 둘째 감독이 그것에 backlog 를
+        // 보내고, 둘이 따로 적는 "보낸 일" 이 한 backlog·한 일꾼에 일을 둘 준다. 저장소마다 감독은 하나고, 받은 감독은 거절한다.
+        let before = &supervise[..supervise.find("## One round").expect("한 바퀴가 없다")];
+        assert!(before.contains("**One supervisor per repository.**"), "감독이 저장소마다 하나라는 말이 없다");
+        assert!(step.contains("not a supervisor"), "감독이 다른 감독을 일꾼으로 센다");
+        assert!(brief.contains("**If this window runs `moai-supervise` itself**"), "일을 받은 감독이 일꾼 걸음을 탄다");
         // 일꾼은 감독이 이름 대는 걸음 파일의 절대 경로를 읽는다 — 다른 기계의 세션은 그 파일을 못 연다(moai-fim6).
         assert!(step.contains("runs on this machine"), "다른 기계의 세션을 일꾼으로 센다");
         assert!(
