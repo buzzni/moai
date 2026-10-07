@@ -4811,12 +4811,19 @@ impl App {
     /// **덮는 창(통계·위키) 위에서 고른 목록·보드는 창을 닫고 그 배치로 선다** — 닫는 것이 먼저다. 커서·거름망·상세는
     /// 창이 안 건드렸으니 연 자리 그대로고, 배치만 고른 쪽으로 바뀐다([`App::flip_layout`]).
     ///
-    /// **덮는 창을 새로 못 읽으면 옛 창을 닫고 알림으로 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 옛 창을 남기면
+    /// **같은 창을 다시 못 읽으면 그 창을 닫고 알림으로 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 옛 창을 남기면
     /// 사람이 방금 다시 읽은 줄 알고 낡은 수와 페이지를 읽는다. 그래서 고르기 전에 닫는다: 여는 자(`open_stats`·
     /// `open_wiki`)는 실패하면 `mode` 를 안 건드리니, 닫아 둔 자리가 곧 "창 없는 화면" 이다. 실패하는 갈래마다
     /// 닫기를 흩어 두면 새 갈래 하나가 그것을 잊는다.
+    ///
+    /// **다른 창을 못 열면 지금 창을 그대로 둔다**(moai-ug6x.wwg, 사용자 결정) — 위키 위의 `SPC g s` 가 못 세면 위키의
+    /// 커서와 링크 자취가 그대로 남고 알림만 선다. 그 창의 페이지는 낡지 않았다: 사람이 다시 읽으라 한 것은 다른 창이다.
+    /// 열리면 새 창이 그 자리를 덮는 것은 같다.
     pub(super) fn go(&mut self, to: keys::Screen, rows: &[Row]) {
-        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) {
+        let same =
+            matches!((&self.mode, to), (Mode::Stats(_), keys::Screen::Stats) | (Mode::Wiki(_), keys::Screen::Wiki));
+        let covering = matches!(to, keys::Screen::Stats | keys::Screen::Wiki);
+        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) && (same || !covering) {
             self.mode = Mode::Browse;
         }
         let layout = match to {

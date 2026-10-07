@@ -1151,6 +1151,39 @@ pub(super) mod tests {
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "{:?}", a.notice);
     }
 
+    /// **다른 창을 못 열면 지금 창을 그대로 둔다**(moai-ug6x.wwg, 사용자 결정) — 위키에서 링크를 따라 온 자리와 커서가
+    /// 남고 알림만 선다. 거꾸로 통계 창 위에서 못 읽은 위키도 통계 창의 굴린 자리를 안 건드린다. 같은 창을 다시 못 읽을
+    /// 때만 닫는다(`a_failed_reread_over_the_window_closes_it_and_says_why`).
+    #[test]
+    fn failing_to_open_the_other_window_keeps_this_one_as_it_was() {
+        use super::super::Hung;
+        let (s, mut a) = wiki_app("other", PAGES);
+        a.hit("SPC g w");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        assert!(w.follow("guide"));
+        let before = (slug(&a), window(&a).cursor, window(&a).trail.len());
+        assert_eq!(before.2, 1, "시험의 전제 — 링크 자취가 섰다");
+        a.hung = Some(Hung::Filter { text: "nonsense=1".into(), grep: None });
+        a.hit("SPC g s");
+        assert_eq!((slug(&a), window(&a).cursor, window(&a).trail.len()), before, "못 연 통계가 위키를 건드렸다");
+        assert!(a.notice.is_some(), "까닭을 안 댔다");
+
+        a.hung = None;
+        a.notice = None;
+        a.hit("SPC g s");
+        let _ = draw::tests::render(&mut a, 40, 12);
+        a.hit("j");
+        let offset = |a: &App| match &a.mode {
+            Mode::Stats(w) => w.scroll.offset(),
+            other => panic!("통계 창이 안 섰다 — {other:?}"),
+        };
+        assert_eq!(offset(&a), 1, "시험의 전제 — 통계 창을 굴렸다");
+        std::fs::remove_dir_all(s.path().join("docs")).unwrap();
+        a.hit("SPC g w");
+        assert_eq!(offset(&a), 1, "못 읽은 위키가 통계 창을 건드렸다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "{:?}", a.notice);
+    }
+
     /// **창 위의 메뉴도 알림을 탐색과 같은 자로 다룬다** — 메뉴만 만진 키와 기다리는 접두어는 알림을 안 걷고, 창의
     /// 키는 걷는다.
     #[test]
