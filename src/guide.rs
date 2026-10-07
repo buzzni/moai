@@ -4101,7 +4101,10 @@ stop sending outside work while a release runs",
         // 의 `tvshop-updater-ca` 를 놓친다. 머리가 맞아도 `api` 는 `api-gateway-1c` 를, `moai` 는
         // `moai-web` 이라는 다른 클론의 세션을 잡으니, 머리는 후보일 뿐이고 일꾼이 `Root:` 로 제 저장소인지 확인해 거절한다.
         assert!(step.contains("`tvshop-updater-ca` for `tvshop_updater`"), "감독이 이름을 슬러그로 견주지 않는다");
-        assert!(step.contains("**A name that does start so is still only a candidate**"), "머리가 맞으면 남의 저장소 세션도 일꾼으로 센다");
+        assert!(
+            step.contains("**A name that does start so is still only a candidate**"),
+            "머리가 맞으면 남의 저장소 세션도 일꾼으로 센다"
+        );
         assert!(brief.contains("**If `Root:` is not this window's repository**"), "남의 저장소 세션이 받은 일을 한다");
         // 보고를 기다리는 감독도 idle 이라 일꾼의 자에 다 맞는다(moai-ybns.451.qgx) — 둘째 감독이 그것에 backlog 를
         // 보내고, 둘이 따로 적는 "보낸 일" 이 한 backlog·한 일꾼에 일을 둘 준다. 저장소마다 감독은 하나고, 받은 감독은 거절한다.
