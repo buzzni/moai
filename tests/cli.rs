@@ -133,14 +133,13 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 꺼진 채로 푸르게 서, 시험이 재는 것이 사람마다 달라진다.
         .env_remove("MOAI_API_URL")
         .env_remove("MOAI_NO_UPDATE_CHECK")
-        // **출석이 적는 자리도 걷는다**(moai-h8tn). `moai hello` 와 훅은 `$TMUX`·`$TMUX_PANE` 을 출석에 적고,
-        // `send --wake` 는 그 칸에 `moai inbox` 를 친다 — 사람의 tmux 안에서 돈 시험이 그 값을 물려받으면
-        // **사람의 창에 글자가 쳐진다.** 깨우기를 재는 시험은 제 서버(`tmux -L`)의 값을 따로 준다. 세션 id 와
-        // `MOAI_AGENT` 는 "나는 누구인가" 를 바꿔, 시험이 돌리는 사람의 세션으로 답한다.
+        // **돌리는 사람의 세션 값도 걷는다.** 이 값들을 읽던 출석과 깨우기(moai-h8tn)는 0.9.0 에서 걷혔지만
+        // (moai-5uwh), 다시 읽는 길이 생기는 날 사람의 tmux 안에서 돈 시험이 **사람의 창과 세션으로 답한다.**
+        // 걷어 두는 값이 그 날을 막는다.
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
         .env_remove("CLAUDE_CODE_SESSION_ID")
-        // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr) — 새면 Codex 가 돌린 시험이 그 세션의 장으로 답한다.
+        // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr).
         .env_remove("CODEX_THREAD_ID")
         .env_remove("CODEX_SESSION_ID")
         .env_remove("MOAI_AGENT")
@@ -13896,50 +13895,6 @@ fn hook_at_home(
     hook_argv(s, run_in, home, env, &["hook", event], input)
 }
 
-/// 훅을 **시험이 띄운 에이전트 밑에서** 돌린다(moai-ew4o.vuv) — `sh` 를 그 에이전트의 이름(`claude`·`codex`·`agy`)으로 건
-/// 링크로 띄우고, 그 셸이 `moai hook` 을 부른다. 훅은 조상 가운데 이름이 벤더인 첫 프로세스를 그 세션의 에이전트로
-/// 읽으니(`src/mail.rs` 의 `agent_among`), 이 셸이 그 자리에 선다.
-///
-/// 그냥 띄우던 판은 시험을 돌리는 프로세스의 조상을 읽었다 — Codex 세션이 `cargo test` 를 돌리면 장이 `codex-<8자>` 로
-/// 서서 이름을 `claude-<8자>` 로 박은 시험이 붉어졌고, Claude 아래서는 그 세션의 진짜 claude pid 가 시험 저장소의 장에
-/// 적혔다. 세션이 여럿인 시험은 그 한 pid 를 함께 써서, 한 프로세스는 장 하나라며 서로의 장을 이어 갔다. **셸은 훅을
-/// `exec` 하지 않는다**(`; exit $?`) — `exec` 하면 훅이 그 자리를 차지해 조상이 도로 시험 쪽이 된다. 셸은 훅이 끝나면
-/// 함께 끝나니, 그 장의 pid 는 다음 훅에서 죽은 것이다 — 이어 연 세션처럼 지금 프로세스로 다시 잇는다.
-fn under_agent(args: &[&str]) -> Command {
-    let vendor = match args.windows(2).find(|w| w[0] == "--dialect").map(|w| w[1]) {
-        Some("codex") => "codex",
-        Some("antigravity") => "agy",
-        _ => "claude",
-    };
-    staged_under(vendor, args)
-}
-
-/// [`staged`] 을 **그 벤더 이름의 가짜 에이전트 밑에서**(리뷰 moai-ew4o.q9f) — [`under_agent`] 와 같은 셸이다. `moai` 가
-/// 조상에서 찾는 첫 에이전트가 이것이라, 시험을 돌리는 프로세스 위가 무엇이든(Codex 세션이 `cargo test` 를 돌려도) 답이
-/// 같다. 조상으로 나를 찾는 `send`·`inbox`·`hello` 는 Codex 밑에서 세션 id 로만 찾고 `MOAI_AGENT` 를 안 읽어, 그냥 띄운
-/// 시험은 돌리는 쪽이 Codex 면 붉어졌다. 셸은 `moai` 가 끝나면 함께 끝난다 — 그 pid 로 적힌 장은 곧 죽은 것이다.
-fn staged_under(vendor: &str, args: &[&str]) -> Command {
-    let mut cmd = isolated(fake_agent(vendor));
-    cmd.args(["-c", "\"$0\" \"$@\"; exit $?", BIN])
-        .args(args)
-        .env("MOAI_ACTOR", ACTOR)
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1");
-    cmd
-}
-
-/// 그 벤더의 이름을 단 `sh` — `<시험 임시 자리>/fake-agents/<이름>` 에 건 링크다. 프로세스 이름(`/proc/<pid>/comm`)은
-/// 링크의 이름이라 훅이 그 벤더로 읽는다. 시험 여럿이 함께 지어도 하나만 선다.
-fn fake_agent(vendor: &str) -> PathBuf {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake-agents");
-    std::fs::create_dir_all(&dir).unwrap();
-    let at = dir.join(vendor);
-    if let Err(e) = std::os::unix::fs::symlink("/bin/sh", &at) {
-        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists, "{}: {e}", at.display());
-    }
-    at
-}
-
 /// [`hook_at_home`] 의 몸통 — 인자를 통째로 받는다(`--dialect`, moai-u5wr).
 fn hook_argv(
     s: &Scratch,
@@ -13952,7 +13907,7 @@ fn hook_argv(
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut cmd = under_agent(args);
+    let mut cmd = staged(args);
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
@@ -24406,7 +24361,7 @@ fn held_reason(out: &str) -> String {
     json_text(out, "reason")
 }
 
-/// **Codex 의 닫기 물음도 편지와 같은 칸의 자리 안에 든다**(moai-084j) — 같은 `Stop` 의 `reason` 이라 같은 기본 상한에
+/// **Codex 의 닫기 물음도 그 칸의 자리 안에 든다**(moai-084j) — 같은 `Stop` 의 `reason` 이라 같은 기본 상한에
 /// 묶인다. 재지 않던 판은 집은 줄이 열둘 남짓을 넘으면 그 선을 넘겨, Codex 가 가운데를 파일로 빼고 `mv`·`defer` 줄을
 /// 바이트 자리에서 끊었다. 넘치면 줄의 묶음을 통째로 덜어 내고 그 뒤의 한 줄이 `moai prime` 을 댄다. 같은 줄들이 Claude 의
 /// 턴에서는 칸 하나(UTF-16 1만)로 재어 더 많이 실린다 — 자는 말씨마다다.
