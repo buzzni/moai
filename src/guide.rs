@@ -238,30 +238,28 @@ fn epic_review_rule() -> String {
 /// 목록에 같은 이름을 넣으면 읽기 전의 제안이 그 명령에 박힌다.
 const MODEL_SLOT: &str = "Model: <model> (<difficulty> — <why>)";
 
-/// 그 줄을 일꾼이 어떻게 읽는가 — 일꾼 스킬의 "The letter" 에 선다(moai-snyk). 편지에는 자리만 싣고 읽는 법은
-/// 스킬에 둔다: 편지는 맡길 일만 싣는다(2026-10-04 사용자 결정).
+/// 그 줄을 일꾼이 어떻게 읽는가 — 일꾼 글([`worker`])의 "The assignment" 에 선다(moai-obxm). 메시지의 머리에는
+/// 자리만 싣고 읽는 법은 그 아래 일꾼 글에 둔다.
 ///
 /// **모델은 사람만 바꾼다.** 에이전트는 붙박이 명령을 못 부르고, 설정 파일의 모델은 새 세션에만 든다 — 그래서
-/// 바꾸기는 창을 보는 사람에게 청한다(*Change the model*). 제 손으로 치라고 하면 일꾼은 올렸다고 믿고 9-1 에 안 돈
+/// 바꾸기는 창을 보는 사람에게 청한다(`/model`). 제 손으로 치라고 하면 일꾼은 올렸다고 믿고 9-1 에 안 돈
 /// 모델을 적는다. 결정은 "맞추거나 올린다" 였다 — 제안과 다른 모델로 뜬 창은 먼저 맞춘다.
 ///
 /// **올릴 때는 다시 잰 난이도의 짝으로 간다**(2026-09-18 사용자 결정). "한 단계 올린다" 만 주던 판은 `low` 로 받아
 /// 읽어 보니 `high` 인 일이 가운데 모델에 멈춰, 쓰기 경로를 싼 모델이 했다 — 난이도 한 낱말이 모델을 정한다는 축과
 /// 어긋난다.
 ///
-/// **사다리는 Claude 의 것이다**(2026-10-04 사용자 결정) — OpenAI·Google 의 모델 열은 비우고 그 창의 모델을 적는다.
+/// **사다리는 Claude 의 것이다** — 감독 스킬이 Claude Code 에만 심기니(moai-obxm) 받는 창도 Claude Code 다.
 fn model_rule() -> String {
     let ladder = DIFFICULTY.iter().map(|(_, model, _)| *model).collect::<Vec<_>>().join(" → ");
     let top = top_model();
     format!(
         r#"`Model:` is a suggestion picked by difficulty before anyone read the code. The model is
-changed by the person (*Change the model* — `/model`), never by you — if this window is not on
+changed by the person with `/model`, never by you — if this window is not on
 that model, ask the person watching the window to match it, and if it reads harder than it
 looked, raise it the same way to the model that pairs with the difficulty you just measured —
 not one step at a time ({ladder}). Handed `low` but it is `high`, the model is `{top}`.
-The grade of the epic-end review (7) is measured on this same rubric, member by member.
-The ladder is Claude Code's. In Codex and Antigravity `<model>` is `—`: the person picked
-the model when opening the window, and the difficulty still picks the review grade"#
+The grade of the epic-end review (7) is measured on this same rubric, member by member"#
     )
 }
 
@@ -279,8 +277,8 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 
 **Ask it where you already are.** Before the first tracker commit you are still in the root, so
 it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
-refused there in Claude Code (the git shapes below): *Come back to the root*, ask, and if
-work is left in that worktree go back in (*Enter the worktree*)"#;
+refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
+worktree go back in with `EnterWorktree(path)`"#;
 
 /// **격리 가드가 읽을 수 있는 꼴로 이른다**(moai-rgp9). `EnterWorktree` 로 들어간 세션의 Bash
 /// 호출은 하네스가 정적으로 읽고, git 이 그 워크트리를 겨눈다는 것을 증명 못 하면 거절한다 —
@@ -950,15 +948,12 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 /// 것은 지어 적지 않고 [`NO_VERB`] 로 둔다: 지어낸 명령은 치면 실패하고, 빈 칸은 표 아래 한 줄(사람에게 알리고
 /// 건너뛴다)이 받는다.
 ///
-/// **세션 사이 편지는 표에 없다**(moai-snyk) — `moai send`·`moai inbox` 는 세 벤더가 같은 글로 친다. 표에 남은 것은
-/// 깨우기(덤)다: `moai send --wake` 는 tmux 칸이 있는 Claude 밖의 세션을 두드리고, Claude 세션은 칸이 있어도 안
-/// 친다(`mail::wake`) — 그 세션은 보낸 쪽의 `SendMessage` 만 깨운다. 감독이 5-1 에서 비운 Claude 창 하나는 예외다 —
-/// 그 스크립트가 비운 뒤 다음 편지를 보내고 방금 비운 빈 칸에 `moai inbox` 를 친다(2026-10-04 사용자 결정, 리뷰
-/// moai-snyk.nic 1번). 그래서 어느 벤더의 감독이든 tmux 에서 돌면 Claude 일꾼의 창을 비우고 다음 일을 싣는다.
+/// **세션 사이 통신은 표에 없다**(moai-obxm) — moai 는 통신을 안 든다. 깨우기 줄(`moai send --wake`)은 우편함과 함께
+/// 걷었고, 창을 비우는 것은 사람의 몫이다.
 ///
-/// 표를 싣는 것은 `moai`·`moai-supervise`·`moai-work` 세 스킬이다([`verbs_section`]). 감독과 일꾼의 걸음은 이 표의
-/// 걸음 이름을 *기울여* 적어 가리킨다.
-pub const VERBS: [Verb; 9] = [
+/// 표를 싣는 것은 `moai` 스킬 하나다([`verbs_section`]) — 세 벤더에 다 심기는 스킬이다. 감독 스킬과 그 일꾼 글은
+/// Claude Code 에만 가니(moai-obxm) 도구를 바로 적는다.
+pub const VERBS: [Verb; 8] = [
     Verb {
         step: "Enter the worktree",
         words: [
@@ -981,19 +976,15 @@ pub const VERBS: [Verb; 9] = [
     },
     REVIEW_VERB,
     Verb { step: "Change the model (the person does it)", words: ["`/model`", "`/model`", NO_VERB] },
-    Verb { step: "Clear the window (the person, or a supervisor on tmux)", words: ["`/clear`", "`/new`", "`/clear`"] },
+    Verb { step: "Clear the window (the person does it)", words: ["`/clear`", "`/new`", "`/clear`"] },
     Verb {
         step: "Call a skill (the person does it)",
         words: ["`/<skill>`", "`$<skill>`", "ask for the skill by name"],
     },
-    Verb {
-        step: "Wake a session that sits idle (a bonus)",
-        words: ["`moai send --wake`, or `SendMessage` when it says so", "`moai send --wake`", "`moai send --wake`"],
-    },
     Verb { step: "Stop what a review left running", words: ["`TaskStop`", NO_VERB, NO_VERB] },
 ];
 
-/// 낱말표 절 — `moai`·`moai-supervise`·`moai-work` 세 스킬이 같은 글을 싣는다(사용자 결정 2026-10-04). 머리까지 여기서 낸다 —
+/// 낱말표 절 — `moai` 스킬이 싣는다(사용자 결정 2026-10-04, moai-obxm 에서 감독·일꾼이 빠졌다). 머리까지 여기서 낸다 —
 /// 열의 차례는 [`VENDORS`] 에 있어, 머리를 표면에 따로 적으면 열을 바꿔 끼워도 머리가 엉뚱한 열을 이름 짓는다
 /// ([`difficulty_table`] 이 한 번 겪은 자리다).
 fn verbs_section() -> String {
@@ -1003,9 +994,9 @@ fn verbs_section() -> String {
     format!(
         r#"## Words per agent
 
-moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them
-are named by what they do — a step written in *italics* is a row of this table. Each agent
-types a step its own way — read your own column.
+moai plants this skill for Claude Code, Codex and Antigravity alike, so a step that differs
+per agent is named by what it does — each row of this table is one. Each agent types a step
+its own way — read your own column.
 
 {head}
 {rule}
@@ -1767,16 +1758,23 @@ Decided in: <epic>
     )
 }
 
-/// 둘째 스킬 `moai-supervise` 의 SKILL.md. 같은 저장소에서 일을 기다리는 일꾼에게 backlog 를 하나씩 나눠 주고 보고를
-/// 받는 감독의 걸음이다 (moai-hxma).
+/// 둘째 스킬 `moai-supervise` 의 SKILL.md. 같은 저장소에서 놀고 있는 세션에 backlog 를 하나씩 나눠 주고 보고를 받는
+/// 감독의 걸음이다 (moai-hxma).
 ///
-/// **벤더를 안 가린다**(2026-10-04 사용자 결정, moai-snyk). 감독도 일꾼도 Claude Code·Codex·Antigravity 가운데
-/// 무엇이든 되고, 모두 사람이 띄운 대화형 세션이다 — moai 도 감독도 에이전트를 띄우거나 헤드리스로 돌리지 않는다.
-/// 일은 편지(`moai send`)로 가고 보고도 편지로 온다. 일꾼을 찾는 것은 `moai agents` 다 — Claude Code 의 속 파일
-/// (`~/.claude/sessions/*.json`)을 읽던 파이썬 훑기는 문서에 없는 꼴에 기댄 데다 Claude 세션만 봤다.
+/// **Claude Code 에만 심는다**(2026-10-06 사용자 결정, moai-obxm). moai 는 세션 사이의 통신을 안 든다 — 우편함
+/// (`moai send`·`moai inbox`)과 출석(`moai hello`·`moai agents`)을 걷었다(moai-5uwh). 감독과 일꾼은 그 벤더의 제 수단으로
+/// 말하는데, 그것이 알려진 것은 Claude Code 의 `ListAgents`·`SendMessage` 뿐이다. Codex·Antigravity 에는 같은 수단이
+/// 알려지지 않아 감독 스킬을 안 심는다([`crate::skill::Skill::claude_only`]).
 ///
-/// **편지는 맡길 일만 싣는다**([`letter`]). 일꾼의 걸음은 일꾼 스킬([`work`])에 있다 — 감독이 매 바퀴 걸음 전부를
-/// 실어 보내던 판은 그 값을 일꾼마다 냈고, 받는 쪽이 그 글을 어디에도 못 남겼다.
+/// **일꾼은 이 저장소의 놀고 있는 세션 전부다** — 감독 자신만 뺀다. 등록도, 사람에게 어느 창인지 묻기도 없다. 출석부를
+/// 따로 두면 그것이 `ListAgents` 와 어긋나는 둘째 진실이 된다.
+///
+/// **일꾼의 걸음은 메시지에 통째로 실린다**([`worker`], 이 스킬의 `references/worker.md`). 일꾼 스킬(`moai-work`)을
+/// 걷었으니 일꾼 창에는 그 글이 없다 — 감독이 맡길 자리 줄 뒤에 그 글 전부를 붙여 보낸다. `@path` 는 아무것도 안
+/// 붙이므로 경로만 적으면 일꾼은 빈손이다.
+///
+/// **창을 비우는 것은 사람의 몫이다.** tmux 칸에 `/clear` 를 쳐 넣던 5-1(약 480줄)을 통째로 걷었다 — 일꾼이 보고
+/// 끝에 언제 비워도 되는지를 사람에게 한 줄로 말한다. 감독은 칸에 아무것도 치지 않는다.
 ///
 /// **backlog 를 일감으로 바꾸는 길은 `promote` 하나다** (사용자 결정). `moai edit` 에 `--type` 이 없어 제자리에서 못
 /// 바꾸는데, 첫 실행의 일꾼은 `add` 로 새 줄을 세우고 backlog 를 손으로 닫았다. 길이 둘이면 일꾼마다 다르게 고르고,
@@ -1787,46 +1785,51 @@ Decided in: <epic>
 /// 체크아웃이라 원격 기본 가지보다 덜 어긋난다. 루트가 detached 면 감독이 보내지 않고, 바퀴 사이에 루트의 가지가
 /// 바뀌면 일꾼이 루트 커밋·병합 직전의 대조(`BRANCH_CHECK`)로 멈춘다(moai-gokz).
 pub fn supervise() -> String {
-    let letter = letter();
+    let message = message();
     let table = difficulty_table();
     let epic_rule = epic_review_rule();
-    let verbs = verbs_section();
     format!(
         r#"---
 name: moai-supervise
-description: Use when handing the backlog piled up on one repository, one at a time, to the agent sessions waiting on it as workers — Claude Code, Codex or Antigravity — and taking their reports. Triggers on "supervise", "hand out the backlog", "put the idle sessions to work", "감독해 줘", "backlog 나눠 줘", "놀고 있는 세션에 일 시켜".
+description: Use in Claude Code when handing the backlog piled up on one repository, one at a time, to the idle Claude Code sessions of that repository as workers, and taking their reports. Triggers on "supervise", "hand out the backlog", "put the idle sessions to work", "감독해 줘", "backlog 나눠 줘", "놀고 있는 세션에 일 시켜".
 ---
 
-# moai-supervise — hand backlog out to the workers that are waiting
+# moai-supervise — hand backlog out to the idle sessions of this repository
 
 The supervisor **picks, sends and checks.** It does not fix code, it does not merge,
 and it does not settle design in a worker's place. The workers merge. Overlapping
 merges are prevented by splitting the files when the supervisor sends (1), and where
 they still collide the worker goes back into its worktree and resolves them.
 
-**Every session here is one a person opened** — the supervisor and its workers alike,
-Claude Code, Codex or Antigravity in any mix. moai never launches an agent or runs one
-headless, and neither does the supervisor. Work goes out as a letter (`moai send`) to a
-window a person made a worker with the `moai-work` skill, and the report comes back the
-same way. tmux is nobody's requirement: on tmux the supervisor may also clear a worker's
-window (5-1), and that is all it adds.
+**This skill is for Claude Code, and moai carries no messaging.** The supervisor and its
+workers talk with Claude Code's own tools:
+
+- `ListAgents` lists the live sessions — each row's name, where it runs and whether it is
+  busy or idle
+- `SendMessage(to: <name>, message: …)` sends to one session. With `notify_when_idle: true`
+  you also get one notice when that session goes idle; leave `message` out and it only
+  subscribes
+- A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
+
+**Every session here is one a person opened.** moai never launches an agent or runs one
+headless, and neither does the supervisor. **A worker is every idle session of this
+repository in `ListAgents`, except you** — a row whose working directory is the root
+checkout or one of its worktrees. Nobody registers and nobody is asked which windows count.
+The message you send is the whole assignment, and the worker's steps travel inside it (3).
+
+Four things about the messaging, one line each:
+
+- A session in a different permission mode holds an incoming message for its person's
+  approval — a worker that stays idle after you sent may be waiting on that
+- A subagent sends under its parent session's address — a message can come from a session
+  that did not write it itself
+- `@path` in a message attaches nothing — what the worker has to read goes into the message
+- Never poll `ListAgents` in a loop — the report comes to you (4)
 
 **Work you send out is always done in a worktree** — even if the repository has no
 worktree convention. Several workers share one root checkout, so fixing things in the
 root mixes their edits and commits together. Worktrees stand in
 `<root>/.worktrees/`, and `moai init` writes that path into the gitignore.
-
-**Say hello first** — once per window, so the workers have someone to report to:
-
-    moai hello --role supervisor
-
-The name in its reply is `<my name>` below — the name the workers send their reports to.
-The role keeps letters to `any-idle-worker` away from you: a supervisor never takes those.
-In Codex, moai finds this window by the session id Codex sets in its shell
-(`CODEX_THREAD_ID`) — the row its hooks wrote. If `moai hello` says it cannot tell which
-session this is, Codex did not set it: say hello as that row, `moai hello --role
-supervisor --as <that name>` (its first context names it, `codex-` and eight characters),
-and pass the same `--as` to every `moai send` and `moai inbox` you run as yourself.
 
 **Read the base branch once, at the start of the round.** The place a worker branches
 its worktree from and merges back into is the root checkout, so that checkout's current
@@ -1845,11 +1848,9 @@ fail, and `branch -d` deletes that work's only reference. Do not read the remote
 default branch instead — the root does not stand on that branch, so it is the same
 accident. Ask the person to put the root on a branch, and stop.
 
-Fill the name you read into `<base branch>` in the commands below and in the letter you
+Fill the name you read into `<base branch>` in the commands below and in the message you
 send the worker. **The worker does not read it again** — read inside a worktree, it
 gives that worktree's own branch.
-
-{verbs}
 
 ## One round
 
@@ -1863,10 +1864,9 @@ up stays `in_progress` and nobody carries it on. Look at this before picking new
 
 `stranded` is a row that was picked up while no live worktree holds that work — either
 the worktree is gone, or **the work was being done in the root with no worktree**. This
-row alone does not tell the two apart: if `moai agents` — every row, not only the idle
-workers of 2 — shows a live session that is `busy`, it may be that one, so ask what it is
-holding before handing the work on: a worker with a letter, any other window through the
-person.
+row alone does not tell the two apart: if `ListAgents` shows a `busy` session of this
+repository, it may be that one, so ask what it is holding before handing the work on —
+a worker with a message, any other window through the person.
 
 The `Place` line (`place` under `--json`) has four values. **Only `none` is handed on.**
 
@@ -1897,20 +1897,17 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker — the one you sent that work to — is gone from `moai agents`. A worker on another
-machine (`here` false) or in Codex has no process to look at: its row is swept only a day
-after nothing marked it, and it reads `gone` after 20 quiet minutes, **which is not an
-ended session** — a window resting at its prompt while its person answers marks nothing,
-nor does a long stretch of only reading files, nor a Codex window whose hooks are not
-trusted. Hand on the work of a worker that reads `gone` but still stands in `moai agents`
-only once the person says that window has ended; until then it is that worker's.
+worker — the session you sent that work to — no longer stands in `ListAgents`. A session
+that still stands there, idle, has not ended: its person may be answering it, or it may
+be holding your message for approval. Hand its work on only once the person says that
+window has ended; until then it is that worker's.
 
-- When there is such work, hand carrying it on to one waiting worker **before any new
-  backlog**. Send the letter in 3 with its first two lines changed to the two below, and the
-  rest filled as 3 says (`<other work>` too — 4-3 points at that line). The worker's
-  `moai-work` skill has the section the first line names
+- When there is such work, hand carrying it on to one idle worker **before any new
+  backlog**. Send the message in 3 with its first two lines changed to the two below, and
+  the rest filled as 3 says (`<other work>` too — 4-3 points at that line). The worker
+  steps you paste after the lines have the section the first line names
 
-      Supervisor <my name> hands you the stalled work in <epic> — the previous session did not finish it. Do it by the `moai-work` skill, from "Carrying on stalled work".
+      You are handed the stalled work in <epic> — the previous session did not finish it. Do it by the worker steps below, from "Carrying on stalled work".
       Read first: moai show <epic> (history and notes) · moai show <member> (the place too — a place stands on work only)
 
 - **Whether it is carried on or put down is not the supervisor's call.** If it looks like
@@ -1962,43 +1959,28 @@ worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a
 
 **Send only what is yours.** A backlog item or member whose assignee is someone else — or
 nobody — is asked about first: ask the person, and send it only on a yes, writing in the
-letter who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
+message who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
 such rows apart under `others`.
 
-**2. Find a worker.** A worker is a window where a person called the `moai-work` skill:
-it said `moai hello --role worker` and waits for a letter, and while it waits its row
-reads `idle`.
+**2. Find a worker.** Call `ListAgents` once. A worker is a row that
 
-    moai agents --json --role worker --status idle
+- belongs to this repository — its working directory is the root checkout or one of its
+  worktrees (under `<root>/.worktrees/`)
+- reads `idle`
+- is not you
 
-Each row names the agent (`name` — what you send to), its `vendor` (which column of the
-words table it reads, and whether 5-1 can clear it), whether it runs on this machine
-(`here` — its machine is this one, or it names none; 5-1 clears only those) and its tmux
-pane when it has one. The rows are this repository's: the list follows the tracker into
-the root, so every worktree of it sees the same one — and so do other machines
-(containers) sharing it. A row whose process is gone is swept as it is read; a row on
-another machine or in Codex has no process to look at, so it reads `gone` once nothing
-marked it for 20 minutes, and is swept after a day.
+Its name is what you send to. Nobody registers: any idle session a person opened here is a
+worker, and the message is the whole assignment.
 
-- **Hand work only to a row whose role is `worker` and whose status is `idle`.** `busy` is
-  working — on your work or on the person's — and a session with no role is one nobody made
-  a worker: it does not wait for letters, so a letter to it sits until someone types there
-- **Leave out a worker whose sent backlog has not had its report checked.** A worker reads
-  `busy` while it unfolds, picks up and merges, and it may read `idle` for a moment between
-  two waits
-- **`idle` also stands on a window whose turn ended without waiting again** — its person
-  stopped the wait to talk to it, or the window was just cleared. A letter sent there sits
-  until that window's next prompt: if the row still reads `idle` well after you sent, nobody
-  took the letter — ask the person watching that window
-- **If no row comes back, nobody waits here.** Ask the person to call `moai-work` in the
-  windows that should take work (*Call a skill*), and stop — do not send to a session that
-  is not a worker
+- **Leave out a worker whose sent work has not had its report checked.** It goes idle
+  whenever its turn ends — while it asks its person something, say — and it is still
+  holding your work
+- **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
+  session of another repository
 - **A worker that refused the work comes out of the candidates and is not sent to
-  again.** Some sessions take work only from their own person — once one has refused,
-  do not even leave a letter on it after that
-- **A test agent is no worker.** One raised on a separate tmux server registers here like
-  any session, but it reads no role until someone says `moai hello --role worker` in it —
-  the role is what keeps it out of this list
+  again.** Some sessions take work only from their own person
+- **A test agent is no worker.** One raised for a test keeps its working directory outside
+  the repository (a scratchpad), so it is not a row of this repository
 
 The root checkout and, for a subdirectory project in a monorepo, the path down to it come
 from the lines below. The root is where `.moai` stands, so for a monorepo it is the
@@ -2023,14 +2005,10 @@ PY
 
 **2-1. Pick a model — by one word of difficulty.** The grade of the epic-end review
 (the worker's 7) is measured on this same rubric, member by member. Keep two axes and the
-letter carries two sets of judgement, and on the day they differ the cheap model takes the
+message carries two sets of judgement, and on the day they differ the cheap model takes the
 write path.
 
 {table}
-
-The model column is Claude Code's. For a worker on Codex or Antigravity, fill `<model>`
-with `—` — the person picked the model when opening that window — and still write the
-difficulty: it picks the epic-end review's grade there too.
 
 The epic-end review is that epic's only review, because the members are not reviewed
 separately (the worker's 5 and 7).
@@ -2039,21 +2017,21 @@ separately (the worker's 5 and 7).
 
 The supervisor picks before reading any code, so this is a suggestion; the last word
 belongs to the worker who read the issue. A running session's model cannot be changed by
-a letter and cannot be changed by config — the person in that window changes it
-(*Change the model*).
+a message and cannot be changed by config — the person in that window changes it with
+`/model`.
 
-**3. Send.** Send **one** backlog to one waiting worker, as a letter. The worker's steps are
-in its `moai-work` skill, so the letter carries only the assignment — but all of it: the
-worker knows nothing of this conversation. Write the letter below to a file in your
-scratchpad with every slot filled, and send it:
+**3. Send.** Send **one** backlog to one idle worker. The message carries the assignment —
+the lines below, every slot filled — and after them, **the whole text of this skill's
+`references/worker.md`**: the worker's steps. The worker knows nothing of this conversation
+and has no skill of its own for this, so what is not in the message does not reach it —
+read that file and paste it whole; a path or `@path` brings nothing.
 
-    moai send <worker> '<id> — <title>' -b - < <letter file>
+    SendMessage(to: <worker>, message: <the lines below, a blank line, references/worker.md>, notify_when_idle: true)
 
-Fill in `<my name>`, `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<after>`, `<person>` and — only for a subdirectory project — `<subdir>`.
-`<my name>` is the name your hello printed — the worker reports to it.
+Fill in `<id>`, `<title>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
-of the letter.
+of the message.
 `<milestone>` is the release that backlog already stands under **and that is still alive**,
 read in 1 — `none` when it stands under none, `none` when the one it stands under has
 shipped or been deferred (the worker would otherwise re-open a release that is already
@@ -2069,20 +2047,12 @@ counts the epic as `dangling_milestone`. Copy it off
 **Leave them unfilled** and those placeholders travel as they are, so the note the worker
 leaves when it closes says `<model>` instead of what actually did the work.
 Do not use a single quote inside `<why>` — it closes the single quote in the worker's 9-1
-and the rest of the text leaks into the shell. The same goes for `<title>` in the send line,
-and there the subject also has to stay within 200 characters — `moai send` refuses a longer
-one — so cut a long title in the send line; the letter's first line carries it whole.
+and the rest of the text leaks into the shell.
 `<other work>` is the sibling worktrees you measured in 1, the work you send in this same
 round, and the files that work holds — `none` if there is none. What the supervisor
 measured before sending cannot cover a file that turns out to be needed mid-epic, so when
 the worker meets such a file it does not fix it: it leaves it as a member and reports it
 (its 4-3).
-`<after>` is `end the turn` only when you will clear that window yourself in 5-1 — you run
-inside tmux, whatever your vendor, the worker's row says `here` (its machine is this one,
-or it names none — containers can share a tmux socket path, so the socket alone does not
-tell) and carries a `tmux_pane` on your tmux server, and its vendor is `claude` (5-1 reads
-Claude Code's screen only). 5-1 then sends the next letter itself and wakes the emptied
-window. Otherwise it is `wait again`: the worker reports and goes straight back to waiting.
 `<person>` is `here`, or `away` when the person told you they are stepping away — the
 worker then settles a design question by its own recommendation instead of waiting on an
 answer, writes down what it decided, and stops at what cannot be undone.
@@ -2090,35 +2060,13 @@ Do not fill `<grade>` — that is the review grade the worker picks in 7, after 
 Do not fill `<vendor>` or `<count>` either — those are the vendor and the token count the
 worker reads in its own window in 9-1.
 
-{letter}
+{message}
 
-**Waking is a bonus.** A worker that waits needs none. The one window to wake is one you
-clear in 5-1, and the script does it: after the clear it sends the next letter and types
-`moai inbox` into the box it just emptied, and the hooks load the letter as that prompt
-arrives. `moai send --wake` never types into a Claude Code pane — for one you did not just
-clear, a Claude Code supervisor wakes it with SendMessage (*Wake a session that sits idle*).
-
-**4. Wait.** Wait for the reports the way a worker waits for work:
-
-    moai inbox --ack --wait 540
-
-and again when it runs out — keep one wait inside your own limit for a shell command, and
-ask for that limit: Claude Code's Bash tool gives a command two minutes unless you pass it a
-longer `timeout`, at most ten. A
-report is a letter from the worker (`report: <epic>`); with the hooks installed (Claude
-Code), one that comes as a turn ends or a prompt arrives is loaded into the conversation
-and marked read, and it is the same letter. **Do not sweep `moai agents` over and over** —
-the report comes to you. A worker that asked its person something sends nothing until it
-is answered.
-
-**If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
-(`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository holds
-points out of the checkout or into `.git`. Waiting will not open it — do not run it again.
-The letters you send are refused the same way, so no worker hears from you either: tell the
-person watching this window (*Ask the person watching*) and stop. A report that comes with a
-line on the mailbox is still a report to check — that line is moai failing to mark it read,
-so the next wait hands the same letter back at once. Check it once, then tell the person
-watching this window and stop rather than wait again.
+**4. Wait.** End your turn. The report comes back as a cross-session message from the
+worker, `report: <epic>` at its head, and it wakes you. The idle notice that
+`notify_when_idle` sends is not a report: a worker goes idle whenever its turn ends — while
+it waits on its person's answer, say — and one that asked its person something sends nothing
+until it is answered. **Do not poll `ListAgents`** — the report comes to you.
 
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when
@@ -2131,12 +2079,12 @@ defer it, do not put a note on it; just finish the turn.
     moai show <epic>                       are the unfolded epic and its members done
     git worktree list                      is that worktree gone
 
-**A member left because the work beside it holds the file** (the worker's 4-3) goes to a
-waiting worker after that other work's report is checked. Send the letter of 3 with `<id>`
+**A member left because the work beside it holds the file** (the worker's 4-3) goes to an
+idle worker after that other work's report is checked. Send the message of 3 with `<id>`
 filled with the epic and its first line changed to the one below. Until then, count it in 1
 as work holding that file.
 
-    Supervisor <my name> hands you epic <id> — <title>. It is already unfolded; do not promote. Do it by the `moai-work` skill, from step 2.
+    You are handed epic <id> — <title>. It is already unfolded; do not promote. Do it by the worker steps below, from step 2.
 
 Like the ones from 7-1, that member is right even when it is not done — it keeps the epic
 open, so the epic is not done either.
@@ -2151,503 +2099,15 @@ unfolded and it does not show its members, so `moai show <id>` cannot tell you w
 the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, send the next backlog. A worker whose letter said `wait again` is already
-waiting — send to it straight away. A worker whose letter said `end the turn` ends its turn
-right after the report: write the next letter to a file and hand it to 5-1 — the script
-clears the window, sends that letter only once the clear went through, and wakes the
-window. With no next backlog, hand it `-` and it only clears. If 5-1 prints `not clearing`, do
-what the end of its line says. Where that is pointing out to the person that the window is
-at a good place to be cleared, send the next only after the person has cleared it or said
-they will not — a letter loaded into the window before a late clear disappears with it,
-and that backlog and that worker sit out of the candidates waiting for a report that will
-never come. Its turn has ended, so that letter waits until a prompt comes into the window:
-send it with `--wake` and wake the window the way the line it prints says
-(*Wake a session that sits idle*) — a Claude Code supervisor sends SendMessage to the name
-that line gives, which can differ from the worker's row; any other asks the person.
+If the three hold, send the next backlog to an idle worker. **Clearing a window is the
+person's** — the supervisor never types into a window. The report ends with the worker
+telling its person when its window can be cleared, so a message you send to that same window
+right away can be erased by a clear that comes after it, and that backlog then waits for a
+report that never comes. Send to that window once the person has cleared it or said they will
+not, or send to another idle worker.
 
-If they do not hold, ask that worker with a letter what is left, and do not finish it in
+If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.
-
-**5-1. On tmux, the supervisor clears the window.** Instead of pointing it out to the
-person and waiting, the supervisor types the clear command (*Clear the window*) into that
-worker's pane. Call it only after the three hold, and only after the `Next:` note the
-worker leaves in its 11 stands in the history of `moai show <epic>`. Only a note that
-stands **after the letter that sent this work** counts — `Next:` is also the hand-over
-line a session leaves when it could not finish, so an epic reclaimed in 0 already has the
-previous session's one. The report is the worker's last act, so when it arrives the turn
-is about to end; the script waits up to a minute for the row to read `idle`, so that all of
-it ends inside a shell tool's limit (two minutes by default in Claude Code). `idle` alone
-does not say the turn is over — `moai inbox --wait` writes it while its shell command runs —
-so the script also stops when it finds that wait running under the worker: such a worker
-takes the next letter as it is. Clearing erases the whole conversation that worker holds,
-so never call it before the check. `<worker>` is the name of the worker that sent the
-report, `<root>` is the `root dir` from 2 — the script asks `moai agents` and sends there —
-`<letter file>` is the next letter for that worker, written as 3 says (`-` for none), and
-`<subject>` is its subject, `<id> — <title>`.
-
-The script reads Claude Code's screen — the input box under the prompt glyph — so it
-clears Claude Code workers only, and only those whose row says `here`. For a worker on
-another vendor or another machine it prints `not clearing`, and the letter 3 sent it said
-`wait again`.
-
-```sh
-python3 - '<worker>' '<epic>' '<my name>' '<root>' '<letter file>' '<subject>' <<'PY'
-import json, os, re, subprocess, sys, time
-name, epic, me, root, letter, subject = sys.argv[1:7]
-# Every line goes out as it is printed. Into a pipe Python holds them back, and the copy of
-# the person's draft printed below would die with the script if it were stopped mid-way.
-sys.stdout.reconfigure(line_buffering=True)
-erased = False
-def gone(kept, left):
-    """**Only the lines erased** from the draft. What is left stands in order as lines of the
-    earlier screen (`shrunk`), so those are subtracted and the rest returned. If what is left is
-    not a line of the draft (the person typed meanwhile), None — what was erased cannot be told."""
-    rest = iter(kept.split("\n"))
-    out = []
-    for line in left.split("\n"):
-        if not line:
-            continue
-        for k in rest:
-            if k == line:
-                break
-            out.append(k)
-        else:
-            return None
-    out.extend(rest)
-    return "\n".join(out)
-def skip(why, then="only point out to the person that it can be cleared"):
-    print("not clearing —", why, "—", then)
-    if erased:
-        # **Give back only what was erased.** Stop after erasing one line and the rest is still
-        # in the box — give the whole draft back and the person pastes the lines still in their
-        # box on top of it, so the same lines stand twice.
-        left = draft(pane)
-        if left and dim_only(pane):
-            left = ""
-        back = None if left is None else gone(kept, left)
-        if back is None:
-            print("erased part of the draft — look at what is left in that box and give the person of that window the `draft` copied above, minus the lines that overlap")
-        elif not back.strip("\n"):
-            # Only blank lines left means nothing was erased — blank lines in the box are skipped
-            # above, so the draft's blank lines flow in here unpaired. Calling that "erased" would
-            # tell the supervisor to hand back an empty text.
-            print("the draft is still in that box — there is nothing to hand back")
-        elif back == kept:
-            print("the draft is already erased — give the person of that window the `draft` copied above")
-        else:
-            print("erased from the draft — hand back only this to the person of that window. The rest is still in that box")
-            print(back)
-    sys.exit(0)
-def tmux(*args):
-    return subprocess.run(["tmux", *args], capture_output=True, text=True)
-def row():
-    """The worker's row in `moai agents --json`, asked in the root (this shell may stand
-    elsewhere). The name is the key there, and a clear keeps it — the row's `session` is what
-    changes. None when moai cannot be asked or the row is gone."""
-    try:
-        out = subprocess.run(["moai", "agents", "--json"], cwd=root, capture_output=True, text=True).stdout
-        found = [a for a in json.loads(out)["agents"] if a.get("name") == name]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    return found[0] if len(found) == 1 else None
-def parents(pid):
-    while pid > 1:
-        yield pid
-        try:
-            out = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
-        except OSError:
-            return
-        pid = int(out) if out.isdigit() else 0
-def waiting(pid):
-    """Does a `moai inbox --wait` run under that agent? Then the row's `idle` is the wait's,
-    written while a shell command of a running turn goes on — not a window back at its prompt."""
-    if pid <= 1:
-        return False
-    try:
-        out = subprocess.run(["ps", "-eo", "pid=,ppid=,args="], capture_output=True, text=True).stdout
-    except OSError:
-        return False
-    kids = {{}}
-    for line in out.splitlines():
-        p = line.split(None, 2)
-        if len(p) == 3 and p[0].isdigit() and p[1].isdigit():
-            kids.setdefault(int(p[1]), []).append((int(p[0]), p[2].split()))
-    todo, seen = [pid], set()
-    while todo:
-        at = todo.pop()
-        if at in seen:
-            continue
-        seen.add(at)
-        for kid, words in kids.get(at, []):
-            if "inbox" in words and any(w.startswith("--wait") for w in words):
-                return True
-            todo.append(kid)
-    return False
-PROMPT = "\u276f"
-SGR = "\x1b\\[([0-9;:]*)m"
-def screen(pane, colour=False):
-    args = ["capture-pane", "-p"] + (["-e"] if colour else []) + ["-t", pane]
-    return tmux(*args).stdout.split("\n")
-def draft(pane):
-    lines = screen(pane)
-    at = [i for i, l in enumerate(lines) if l.startswith(PROMPT)]
-    box = []
-    for line in lines[at[-1] :] if at else []:
-        if line.startswith("─"):
-            # The first line is the prompt and one space, the following lines two — strip only
-            # that much and the indentation survives. Lines without that prefix are not cut: the
-            # day the screen draws differently two characters would vanish silently, and the copy
-            # is the only one the person has left, so nobody would see it shrink.
-            head = (PROMPT + " ", "  ")
-            return "\n".join((l[2:] if l[:2] in head else l[1:] if l[:1] == PROMPT else l).rstrip() for l in box).strip("\n")
-        box.append(line)
-def grey(code):
-    """Is this foreground colour a dim grey. Look at both the 256-colour grey ramp and true colour
-    (r=g=b) — Claude Code's colours are the theme's hex values, so a pane that takes true colour
-    gets `38;2;136;136;136` rather than `38;5;244`. The black end is not grey — a light theme draws
-    text the person typed as `rgb(0,0,0)`."""
-    n = code.split(";")
-    if code == "90":
-        return True
-    if n[:2] == ["38", "5"] and len(n) == 3 and n[2].isdigit():
-        return int(n[2]) == 8 or 238 <= int(n[2]) <= 247
-    if n[:2] == ["38", "2"] and len(n) == 5 and all(p.isdigit() for p in n[2:]):
-        return len(set(n[2:])) == 1 and 64 <= int(n[2]) < 160
-    return False
-def sgr(code, was):
-    """Fold one SGR piece into (dim attribute, dim foreground, reverse). tmux emits the foreground
-    separately (`\x1b[2m\x1b[37m`) and gathers attributes into one piece — drop one attribute and it
-    prefixes a reset, `0;2`; set two at once and it is `2;3`. So attribute pieces are read one by one."""
-    attr, fg, rev = was
-    n = code.split(";")
-    if n[0] in ("38", "39") or (len(n) == 1 and n[0].isdigit() and (30 <= int(n[0]) <= 37 or 90 <= int(n[0]) <= 97)):
-        return attr, grey(code), rev
-    if n[0] in ("48", "58"):
-        return was
-    for p in n:
-        if p in ("", "0"):
-            attr, fg, rev = False, False, False
-        elif p in ("2", "22"):
-            attr = p == "2"
-        elif p in ("7", "27"):
-            rev = p == "7"
-    return attr, fg, rev
-def dim_only(pane):
-    """Is every visible character in the input box dim — that is, Claude Code's suggestion text
-    rather than text the person typed."""
-    lines = screen(pane, True)
-    bare = lambda l: re.sub(SGR, "", l)
-    # Open the input box on the **same line** as `draft`. Searching with `in` lets a prompt glyph
-    # inside text the person typed drag it further down, so the person's text above is missed. The
-    # end of the box is read with `startswith` too — return true on one dash inside a pasted line
-    # and the clear command lands after the person's text.
-    at = [i for i, l in enumerate(lines) if bare(l).startswith(PROMPT)]
-    if not at:
-        return False
-    # Fold the colours from the top of the screen — tmux does not re-emit the same colour across a
-    # line break, so the second line of a wrapped suggestion arrives with no colour piece. If no dim
-    # character was seen at all, it is not true.
-    was, prompt, cursor, seen = (False, False, False), True, True, False
-    for n, line in enumerate(lines):
-        if n > at[-1] and bare(line).startswith("─"):
-            return seen
-        for i, piece in enumerate(re.split(SGR, line)):
-            if i % 2:
-                was = sgr(piece, was)
-                continue
-            if n < at[-1]:
-                continue
-            if n == at[-1] and prompt and piece:
-                piece, prompt = piece[1:], False
-            # Claude Code draws the cursor of an empty box reversed over the first character of the
-            # suggestion (with no dim). If the first character of the prompt line is reversed, take
-            # that one cell out as the cursor and count the rest as it is.
-            if n == at[-1] and cursor and piece.strip():
-                cursor = False
-                if was[2] and not (was[0] or was[1]):
-                    piece = piece.lstrip()[1:]
-            if piece.strip():
-                if not (was[0] or was[1]):
-                    return False
-                seen = True
-    return False
-def looks(fmt):
-    return tmux("display-message", "-p", "-t", pane, fmt).stdout.strip()
-def shrunk(now, was):
-    """Is this text the erasing pared down. One erase only empties a line and pulls the next one up,
-    so every line left stands in order as **the same line** of the earlier screen (a blank line is
-    the one just emptied). A line that does not match is text the person typed meanwhile — testing
-    only whether a line is contained in the earlier screen cannot tell them apart, because one newly
-    typed character or a retyped prefix is contained in some earlier line."""
-    rest = iter(was.split("\n"))
-    return all(not line or line in rest for line in now.split("\n"))
-QUIET = '#{{pane_in_mode}}#{{pane_synchronized}}'
-pane = ""
-if not os.environ.get("TMUX"):
-    skip("outside tmux")
-try:
-    tmux("-V")
-except OSError:
-    skip("no tmux")
-s = row()
-if not s:
-    skip("could not find exactly one agent named " + name + " in `moai agents` run in " + root + " — check that the `moai` on PATH answers `agents` there")
-if s.get("vendor") != "claude":
-    skip("this reads Claude Code's input box only, and " + name + " runs " + str(s.get("vendor")))
-# A row from another machine names a pane and a pid there. Containers can share the tmux socket
-# path, so the socket check below passes, and the pid here is someone else's process or none.
-if s.get("here") is not True:
-    skip(name + " runs on another machine" if "here" in s else "the `moai` on PATH does not say whether " + name + " runs on this machine")
-pane = str(s.get("tmux_pane") or "")
-if not pane.startswith("%"):
-    skip("no tmux pane on that agent's row")
-if pane == os.environ.get("TMUX_PANE"):
-    skip("the supervisor's own window")
-# Pane ids are per server — the same `%N` on another server is someone else's pane.
-server = os.environ["TMUX"].split(",")[0]
-if s.get("tmux_socket") and os.path.realpath(s["tmux_socket"]) != os.path.realpath(server):
-    skip("that pane is on another tmux server")
-# The report is the worker's last act, so the turn is about to end — wait for it, a minute at
-# most. A shell tool gives a command two minutes unless told otherwise (Claude Code's default),
-# and the steps below need their own seconds: stopped between erasing and typing, the box is
-# left erased with nothing typed.
-until = time.monotonic() + 60
-while s.get("status") != "idle" and time.monotonic() < until:
-    time.sleep(0.5)
-    s = row() or s
-if s.get("status") != "idle":
-    skip("not idle — " + str(s.get("status")), "the worker is still in its turn — call again once it ends")
-if waiting(int(s["pid"])):
-    skip("it waits for a letter inside its turn", "send it the next letter as it is — it takes it without a clear")
-owner = looks('#{{pane_pid}}')
-if not owner.isdigit() or int(owner) not in parents(int(s["pid"])):
-    skip("pane " + pane + " does not belong to that agent")
-if looks(QUIET) != "00":
-    skip("the pane is in copy mode (the person is scrolling to read) or synchronized with others")
-kept = draft(pane)
-if kept is None:
-    skip("could not read the input box")
-if kept:
-    print("draft —", name, pane)
-    print(kept)
-seen, ghost = kept, None
-for _ in range(20):
-    left = draft(pane)
-    if left == "" and ghost is None:
-        break
-    if left is None or looks(QUIET) != "00":
-        skip("lost the input box while erasing")
-    # If text taken for dim changed when erased, it was not suggestion text — suggestions do not
-    # erase. It is already copied above.
-    if ghost is not None and left != ghost:
-        skip("the person is typing", "stopped erasing. Also hand back the `dim text that appeared meanwhile` copied above to the person of that window")
-    # Text the person typed while erasing was never copied out — erase more and no copy is left for
-    # them (user decision).
-    if not shrunk(left, seen):
-        if not dim_only(pane):
-            print("typed meanwhile —", name, pane)
-            print(left)
-            skip("the person is typing", "stopped erasing. Only point out to the person that it can be cleared")
-        # A box emptied of the person's text gets dim suggestion text again — it is not typed text,
-        # so do not stop. Do not tell them apart by colour alone either: copy it out and try
-        # erasing, and if it erases it was the person's text drawn dim (`ghost` above).
-        print("dim text that appeared meanwhile —", name, pane)
-        print(left)
-        ghost = left
-    seen = left
-    erased = True
-    tmux("send-keys", "-t", pane, "C-e", "C-u", "DC")
-    time.sleep(0.2)
-else:
-    # Tell them apart by erasing (user decision): if text that survived even the last stroke is all
-    # dim, it is not what the person typed but Claude Code's suggestion — that does not land in front
-    # of the clear command, so type it. Do not require it to equal the draft — when a suggestion
-    # reappears in a box emptied of the person's text, the draft is already copied out and only the
-    # suggestion is left.
-    rest = draft(pane)
-    if ghost is not None and rest != ghost:
-        skip("the person is typing", "stopped erasing. Also hand back the `dim text that appeared meanwhile` copied above to the person of that window")
-    if rest and rest == left and dim_only(pane):
-        if rest == kept:
-            print("the `draft` above was dim suggestion text — the person did not type it")
-            erased = False
-            # It is not the person's text, so do not say "copied into the supervisor's window" on the
-            # status line — a person who reads that goes hunting in the supervisor's window for text
-            # they never wrote.
-            kept = ""
-        elif rest == ghost:
-            print("the `dim text that appeared meanwhile` above was suggestion text — the person did not type it")
-    elif rest != "":
-        # If nothing was erased, that text is still in the box — say "already erased" and the
-        # supervisor hands the person a second copy of text that is sitting right there.
-        erased = rest != kept
-        skip("could not empty the input box")
-if (row() or {{}}).get("status") != "idle":
-    skip("no longer idle")
-if waiting(int(s["pid"])):
-    skip("it went back to waiting for a letter inside its turn meanwhile", "send it the next letter as it is — it takes it without a clear")
-if looks(QUIET) != "00":
-    skip("the pane went into copy mode meanwhile")
-# If the person typed after the last read, the clear command lands after that text — read once more
-# right before typing. Type it when the box is empty, unchanged, or holds only new dim suggestion text.
-last = draft(pane)
-if last is None or (last not in ("", left) and not dim_only(pane)):
-    skip("text appeared in the input box meanwhile", "stopped erasing. Only point out to the person that it can be cleared")
-say ="supervisor " + me + ": checked the report for " + epic + " — clearing this window" + (". The draft is copied into the supervisor's window" if kept else "")
-for client in tmux("list-clients", "-t", pane, "-F", '#{{client_name}}').stdout.split("\n"):
-    if client:
-        tmux("display-message", "-c", client, "-d", "8000", "-t", pane, say)
-tmux("send-keys", "-t", pane, "-l", "/clear")
-time.sleep(0.5)
-tmux("send-keys", "-t", pane, "Enter")
-for _ in range(30):
-    time.sleep(0.5)
-    now = row()
-    if now and now.get("session") != s.get("session"):
-        break
-else:
-    print("cannot tell whether it cleared —", name, pane, "— look at that window before sending the next letter")
-    sys.exit(0)
-print("cleared —", name, pane, epic)
-if letter == "-":
-    sys.exit(0)
-# Send only now. A letter that waited while the old turn was ending would be loaded into the
-# conversation the clear just erased — the hooks mark it read as they load it, so it would be lost.
-try:
-    with open(letter) as fh:
-        sent = subprocess.run(["moai", "send", name, subject, "--as", me, "-b", "-"], cwd=root, stdin=fh, capture_output=True, text=True)
-except OSError as e:
-    print("not sent —", e, "— the window is cleared; send the letter yourself")
-    sys.exit(0)
-if sent.returncode != 0:
-    print("not sent —", sent.stderr.strip(), "— the window is cleared; send the letter yourself")
-    sys.exit(0)
-print("sent —", sent.stdout.strip())
-# Wake it — `moai send --wake` never types into a Claude Code pane, so the script does, into the box
-# the clear emptied a moment ago, behind the same fences as the clear: an idle row, no copy mode,
-# a box that is empty or holds only dim suggestion text. Otherwise the letter waits for the next prompt.
-time.sleep(1)
-box = draft(pane)
-if box is None or (box != "" and not dim_only(pane)) or (row() or {{}}).get("status") != "idle" or looks(QUIET) != "00":
-    print("not woken —", name, pane, "— the letter waits for the next prompt in that window; point the person at it")
-    sys.exit(0)
-tmux("send-keys", "-t", pane, "-l", "moai inbox")
-time.sleep(0.3)
-tmux("send-keys", "-t", pane, "Enter")
-print("woken —", name, pane)
-PY
-```
-
-- **Call it only on a worker you handed work to, and whose letter said `end the turn`.** The
-  worker that sent the report is the one, so the supervisor's own window and another
-  supervisor's window are already out by name. The script filters its own pane
-  (`$TMUX_PANE`) once more as well. A worker that waits again is inside its turn
-- **With no tmux it skips quietly.** If `$TMUX` is unset or `tmux` is missing it prints one
-  `not clearing` line and exits 0 — then point it out to the person and wait, as above. When
-  the script prints `not clearing`, do what the end of that line says — only `not idle`
-  means call again, and a worker found waiting inside its turn takes the next letter as it
-  is; for the rest, point it out to the person
-- **Type only into an `idle` pane.** Typing into a `busy` one slips characters into a
-  running turn or between a person's answers — and `idle` is not enough on its own, since
-  `moai inbox --wait` writes it while a shell command of the turn runs, so the script also
-  looks for that wait under the agent's process. Read once more right before sending. The
-  times the worker said "do not clear" in its 12 — a review running in the background, a
-  merge conflict being resolved, waiting on a person's answer — hold here too. If the report
-  or a letter after it says any of that is left, do not call it
-- **Do not type into a pane in copy mode, or a pane tied together by `synchronize-panes`
-  either.** Copy mode means the person is scrolling to read, and the characters typed go to
-  copy-mode keys where `/` opens a search. In a tied pane the characters go to every pane of
-  that window and erase the conversation of the worker next door too
-- **Clear only a worker on this machine** — its row says `here`. A row from another machine
-  (another container sharing this repository) names a pane and a pid on that machine;
-  containers can share the tmux socket path, and that pid here is someone else's process or
-  none. A `moai` on PATH too old to say `here` stops it as well. `here` is also true for a
-  row that names no machine (an older or non-Linux moai wrote it), so the fences below stand
-  for every row
-- **Read the pane from the worker's row (`tmux_pane`, `tmux_socket`) and check that the
-  pane's process spawned that agent.** A pane id names a pane on one server only, so a row
-  from another server names someone else's pane here, and pane numbers are reused
-- **Erase the draft before typing** (user decision). Type over it and `<draft>/clear` goes to
-  the worker as a prompt. Before erasing, read that text off the screen and copy it into the
-  supervisor's window as `draft`, and one line on the status line of every client watching
-  that pane says so — the person looks for that text in the supervisor's window. Claude
-  Code's `Ctrl+Y` restores only the last line of a multi-line text, so it cannot be relied
-  on. The input box is read as the last line of the Claude Code screen where the prompt glyph
-  (U+276F) stands. That screen is undocumented, so where it cannot be read it falls towards
-  not typing — and that is why another vendor's window is not typed into at all. If erasing
-  stops midway, **only the lines erased so far** come out with it — `the draft is already
-  erased` when it all went, and `erased from the draft` gives the lines when it stopped after
-  one. The rest is still in the box, so handing the whole draft back would make the same
-  lines stand twice. If what is left is not a line of the draft (the person typed meanwhile)
-  what was erased cannot be told, and then it says to look at that box and leave the
-  overlapping lines out
-- **Strip only the two leading columns when copying** (user decision). The first line is the
-  prompt and one space, the following lines two spaces, and the rest is the screen as it is —
-  trim every line and indented code comes back flattened. Lines that do not carry that prefix
-  are **not cut** — the day the screen draws differently two characters would be shaved off
-  silently, and the copy is the only one the person has left, so nobody would see it shrink.
-  A line the screen wrapped cannot be told from a newline the person typed, so the copy may
-  show one newline more than there was
-- **Tell text that will not erase apart by erasing it** (user decision). The dim suggestion
-  Claude Code floats in an empty box is not what the person typed, and it does not erase.
-  When it survives twenty strokes and all of it is dim (`capture-pane -e`), take it as a
-  suggestion and type the clear command — a suggestion does not land in front of it. Colour
-  alone does not decide it, because on a build that draws the person's text dim the command
-  would land after that text. Text that erases is always taken as the person's. Claude Code
-  draws the cursor of an empty box reversed over the suggestion's first character, so that one
-  cell does not count as text. A suggestion reappearing in a box emptied of the person's text
-  is the same — the draft is already copied out, so type it
-- **Stop if the person types while you erase** (user decision). Read the input box again after
-  every stroke, and the moment text appears that was not pared down from the earlier screen,
-  stop and do not type — that text was never copied out, so erasing more leaves the person no
-  copy. Copy the new text into the supervisor's window as `typed meanwhile`, and `the draft is
-  already erased` speaks for what went before. Merging them and erasing on is not the road
-  taken — while the person types, the command lands after their text. A line left must be
-  **equal** to a line of the earlier screen to count as pared down — test only whether it is
-  contained and one newly typed character is contained in some earlier line. If the new text
-  is all dim it may be a suggestion that reappeared in a box emptied of the person's text, so
-  do not stop: copy it out as `dim text that appeared meanwhile` and try erasing — if it
-  erases, take it as the person's text and stop. Read the input box once more right before
-  typing too
-- **Do not clear and assign in one breath.** A clear erases what is queued along with it,
-  and a letter the old turn loaded as it ended is read and gone. So the script sends the
-  letter it was handed only after the row's `session` changed — `cleared`, then `sent` —
-  and on `cannot tell whether it cleared` it sends nothing: look at that window before you
-  send. On `not sent` the window is cleared and idle — send the letter yourself, and wake it
-  as 5 says
-- **Wake only the window you just emptied.** After `sent` the script types `moai inbox` into
-  that box — the prompt the hooks load the letter on — behind the same fences as the clear.
-  On `not woken` the letter waits for the next prompt there; point the person at it
-- **Leave one line in your own window when you clear** — `cleared <worker> pane %N (<epic>)`.
-  A person who was watching that window finds in the supervisor's window why the screen went
-  away
-- **Do not type into a live worker's window while testing.** Raise the pane you are testing
-  on a **separate tmux server** and give the same name to **every** call that reaches that
-  server — `new-session`, `send-keys`, `capture-pane`, `display-message`, `list-clients`,
-  `kill-session`. Put the epic id in the name so it cannot collide with the test servers of
-  the workers beside you or of a review subagent. To run the script in that pane, put a
-  `tmux` wrapper that inserts `-L` at the front of `PATH` — the wrapper has to call the real
-  `tmux` **by absolute path** so it does not call itself again. Call the script itself without
-  `env -u TMUX` — with no `$TMUX` it skips as `outside tmux` — and with `$TMUX` naming that
-  test server's socket: the script stops at a row whose `tmux_socket` is not `$TMUX`'s, and
-  the test agent's row carries the test server's. The test agent has to stand in this
-  repository's `moai agents` too, or the script finds no row — say `moai -C <root> hello`
-  in its pane, with no role: no role keeps it out of 2's list, and its row is swept once
-  that agent is gone
-
-      env -u TMUX tmux -L <unique name> new-session -d -s <pane> …
-      env -u TMUX tmux -L <unique name> capture-pane -p -t <pane>
-      env -u TMUX tmux -L <unique name> display-message -p '#{{socket_path}}'          its socket
-      mkdir -p <scratchpad>/bin; printf '#!/bin/sh\nexec env -u TMUX %s -L <unique name> "$@"\n' "$(command -v tmux)" > <scratchpad>/bin/tmux
-      chmod +x <scratchpad>/bin/tmux; TMUX=<its socket>,0,0 PATH=<scratchpad>/bin:$PATH python3 - …      the script into that pane
-      env -u TMUX tmux -L <unique name> kill-server          to clean up — only the server of that name dies
-
-  **Never use `tmux kill-server` or `kill-session` without `-L`/`-S`.** Inside tmux a bare
-  `tmux` follows `$TMUX` to the person's default server, and every pane and session on that
-  machine dies at once. `TMUX_TMPDIR` does not fence it in — `$TMUX` wins.
-  A bare `tmux new-session -d` is not isolation either, because it raises the pane on the
-  default server — cleaning up then means running `kill-*` against the default server, and
-  that road has killed a whole server before
 
 ## The shared root
 
@@ -2663,7 +2123,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 
 ## When to stop
 
-- If there is no backlog that does not collide, or no worker waiting, say so to the person and
+- If there is no backlog that does not collide, or no idle worker, say so to the person and
   stop — do not force a colliding backlog out
 - If a worker is waiting on a person's decision, the supervisor does not answer in their
   place. The decision is the person's
@@ -2699,18 +2159,19 @@ const TO_REVIEW: &str = "moai -C <root> mv <member> review --from in_progress";
 /// `the_brief_stands_members_in_review` 가 이 글을 `refuse.no_column` 의 영어 글과 견준다.
 const NO_REVIEW_COLUMN: &str = "`review` is not a column";
 
-/// 감독이 일꾼에게 `moai send` 로 보내는 편지(moai-snyk). **맡길 일만 싣는다**(2026-10-04 사용자 결정) — 무엇을
-/// 하는가(첫 줄)와 감독이 채운 자리들. 걸음은 일꾼 스킬([`work`])에 있고, 편지의 첫 줄이 어디서 시작할지를 댄다.
+/// 감독이 일꾼에게 `SendMessage` 로 보내는 메시지의 머리 — 맡길 일(첫 줄)과 감독이 채운 자리들(moai-obxm). 이 줄들
+/// 뒤에 [`worker`] 의 글 전부가 붙는다. **일꾼이 아는 것은 이 메시지뿐이다** — 감독 스킬의 다른 절을 가리키면 일꾼에게
+/// 없는 글을 가리키는 것이라(첫 판의 "아래 공유 main" 이 그랬다), 감독만 아는 값은 모두 자리로 싣는다. 자리마다 읽는
+/// 법은 일꾼 글의 "The assignment" 가 댄다.
 ///
-/// **일꾼이 아는 것은 이 편지와 그 스킬뿐이다** — 감독 스킬의 다른 절을 가리키면 일꾼에게 없는 글을 가리키는 것이라
-/// (첫 판의 "아래 공유 main" 이 그랬다), 감독만 아는 값은 모두 자리로 싣는다. 자리마다 읽는 법은 스킬의 "The
-/// letter" 가 댄다.
+/// **보고할 곳은 자리가 아니다** — 메시지의 `from` 이 감독이다. 옛 편지의 `Supervisor <my name>` 은 출석(`hello`)이
+/// 준 이름을 실었는데 출석을 걷었다. `After the report:` 도 걷었다 — 일꾼은 보고하고 턴을 끝내고, 다음 메시지가 깨운다.
 ///
-/// **줄 머리의 낱말이 계약이다** — 스킬이 `Model:`·`Base branch:` 따위를 그 이름으로 가리킨다.
-/// `the_letter_carries_every_slot_the_skill_reads` 가 둘을 견준다.
-fn letter() -> String {
+/// **줄 머리의 낱말이 계약이다** — 일꾼 글이 `Model:`·`Base branch:` 따위를 그 이름으로 가리킨다.
+/// `the_message_carries_every_slot_the_steps_read` 가 둘을 견준다.
+fn message() -> String {
     format!(
-        r#"    Supervisor <my name> hands you backlog <id> — <title>. Do it by the `moai-work` skill, from step 1.
+        r#"    You are handed backlog <id> — <title>. Do it by the worker steps below, from step 1.
     Read first: moai show <id>
     {MODEL_SLOT}
     {BESIDE}
@@ -2718,96 +2179,62 @@ fn letter() -> String {
     Milestone: <milestone>
     Root: <root>
     Subdir: <subdir>
-    After the report: <after>
     Person: <person>"#
     )
 }
 
-/// 넷째 스킬 `moai-work` 의 SKILL.md — 일꾼(moai-0x59, 2026-10-04 사용자 결정). 사람이 대화형 창에서 한 번 부르면
-/// 그 창이 일꾼이 된다: 출석하고(`hello --role worker`), 편지를 기다리고(`inbox --ack --wait`), 편지가 맡긴 일을
-/// [`brief`] 의 걸음대로 하고, `moai send` 로 보고하고, 다시 기다린다.
+/// 일꾼의 걸음 — 감독 스킬의 `references/worker.md`(moai-obxm). 감독이 [`message`] 의 줄 뒤에 **통째로** 붙여 보낸다.
+/// 일꾼 스킬(`moai-work`)을 걷었으니 일꾼이 지킬 것은 모두 여기 적는다.
 ///
-/// **브리프가 여기로 왔다.** 감독이 매 바퀴 걸음 전부를 편지로 싣던 판은 받는 쪽이 그 글을 남길 데가 없어, 창을
-/// 비우면 걸음도 사라지고 이어받은 창은 감독이 다시 실어 줘야 했다. 스킬은 창에 심겨 있으니 편지는 맡길 일만
-/// 싣는다([`letter`]).
+/// **Claude Code 의 것이다**(2026-10-06 사용자 결정). 감독 스킬이 Claude Code 에만 심기니 이 글을 받는 창도 Claude
+/// Code 다 — 낱말표의 *기울인* 걸음 이름을 걷고 도구를 바로 적는다(`EnterWorktree(path)`·`ExitWorktree(keep)`·
+/// `AskUserQuestion`·`/code-review`·`/model`·`TaskStop`·`/clear`). Codex·Antigravity 를 위한 갈래 글도 걷었다.
 ///
-/// **tmux 를 누구에게도 안 시킨다.** 깨우기(tmux 칸, Claude 의 SendMessage)는 덤이고, 일을 데려오는 것은 기다림이다.
-/// 대가는 기다림이 상한마다 다시 걸리는 짧은 턴 하나만큼의 토큰이다 — 글이 그것을 밝힌다.
+/// **고리가 없다.** 출석·기다림·편지(`moai hello`·`moai inbox`·`moai send`)를 걷었다 — 메시지가 창을 깨우고, 일꾼은
+/// 보고하고 턴을 끝낸다. 다음 메시지가 다음 일이다.
 ///
-/// **사람이 먼저다.** 창은 사람이 띄웠고 사람이 보고 있다 — 사람이 말하면 기다림을 멈추고 답한다. `Person: away`
-/// 는 감독이 사람에게 들은 것을 옮긴 자리다(밤샘 모드, moai-snyk.epv).
-pub fn work() -> String {
+/// **리뷰 줄은 규칙 3 의 조각으로 적는다.** 손으로 줄인 `-t review --parent <에픽>` 은 관점(`-b`)이 빠져, 에픽 리뷰가
+/// 무엇을 왜 보는지 없이 섰다.
+///
+/// **닫기는 워크트리를 지운 뒤다.** 워크트리가 남아 있으면 훅이 그 에픽을 옆 워크트리의 일로 읽어(`worktree::away`)
+/// `-m` 없는 리뷰 닫기를 못 막고, 루트의 편집은 규칙 2 로 막는다 — 그래서 충돌과 시험은 워크트리에서 풀고, 루트
+/// 병합이 막히면 되돌리고 돌아간다.
+///
+/// **보고가 마지막이다**(moai-snyk). 감독은 보고를 받고서야 다음을 보낸다 — 보고 뒤에 `Next:` 노트를 적던 판은
+/// 감독이 읽을 때 노트가 없었다. 그래서 11 이 노트, 12 가 보고다.
+///
+/// **넘칠 때의 길도 여기 적는다**(리뷰 moai-4u6b.5hl). 닫는 걸음이 싣는 것은 `(64KB 를 넘으면 요약)` 한 마디뿐이라,
+/// 이 글만 받은 일꾼은 줄이라는 말은 읽고 **요약이라고 밝히라는 말은** 못 읽었다 — 밝히지 않은 요약은 다음 사람이
+/// 리뷰어의 말로 읽는다.
+pub fn worker() -> String {
     let rule = indent(&model_rule(), "  ");
-    let verbs = verbs_section();
-    let brief = brief();
+    let review = make_review("--parent <epic>");
+    let close = indent(&close_steps("<review id>", "moai"), "      ");
+    let over = indent(REVIEW_OVER_LIMIT, "    ");
+    let levels = difficulty_levels();
+    // 잣대는 걸음 5 안의 글머리 목록이다 — 맨 줄로 두면 GitHub 에서 세 낱말이 한 문단으로 뭉친다(리뷰 moai-bkn4.c3d).
+    let rubric = indent(&difficulty_rubric(), "   - ");
+    let top = top_model();
+    let epic_rule = indent(&epic_review_rule(), "   ");
+    let angle = indent(REVIEW_ANGLE, "   ");
+    // 7-4 는 목록 밖의 문단이라 명령 줄이 네 칸이다(`the_worker_steps_follow_the_markdown_list_rules`).
+    let wiki_commit = indent(WIKI_COMMIT, "    ");
     format!(
-        r#"---
-name: moai-work
-description: Use when a person makes this window a worker for a moai supervisor — say hello, wait for a letter, do the work it hands over in a worktree, report it, and wait again. Triggers on "be a worker", "wait for work", "take work from the supervisor", "일꾼 해", "일 기다려", "감독 일 받아".
----
+        r#"# Worker steps
 
-# moai-work — wait for work from a supervisor and do it
+This message comes from a supervisor — a Claude Code session running `moai-supervise` on
+this repository. The lines above are your assignment; the text below is how to do it. You
+know nothing else of the supervisor's conversation and need nothing else. **The person comes
+first** — this window is theirs; when they speak, answer them.
 
-A person calls this skill once, in a window they opened (*Call a skill*). From then on the
-window is a **worker**: it waits for a letter from the supervisor — the session running
-`moai-supervise` — does the work the letter hands over by the steps below, reports, and
-waits again. Nobody launches this window or drives it: the person opened it, and the
-letter is the whole assignment. **The person comes first** — when they speak in this
-window, stop waiting and answer them.
-
-## The loop
-
-1. **Say who you are**, once per window
-
-       moai hello --role worker
-
-   The name in the reply is the one the supervisor sends to. moai finds this agent among
-   the processes above the command (`claude`, `agy`); a session its hooks already
-   registered keeps its name and gains the role. If this window sets `MOAI_AGENT`, that is
-   its name — `hello`, the wait and the hooks all go by it. In Codex, moai finds this window
-   by the session id Codex sets in its shell (`CODEX_THREAD_ID`) — the row its hooks wrote.
-   If `moai hello` says it cannot tell which session this is, Codex did not set it: say hello
-   as that row, `moai hello --role worker --as <that name>` (its first context names it,
-   `codex-` and eight characters), and pass the same `--as` to every `moai inbox` and
-   `moai send` below
-2. **Wait for a letter**
-
-       moai inbox --ack --wait 540
-
-   While it waits, `moai agents` shows this window `idle` — that is how the supervisor
-   finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
-   **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
-   (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository
-   holds points out of the checkout or into `.git` — and waiting again will not open it.
-   So do not run it again. A letter to the supervisor is refused the same way: tell the
-   person watching this window (*Ask the person watching*) and stop. A letter that comes with
-   a line on the mailbox is still yours to do — that line is moai failing to mark it read, so
-   the next wait hands the same letter back at once. Do it once, then tell the person watching
-   this window and stop rather than wait again — another wait is the same work twice.
-   Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
-   Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
-   minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
-   one short turn of tokens — the price of a worker that needs no tmux and nobody to wake it.
-   With the hooks installed, a letter that comes as a turn ends or a prompt arrives is loaded
-   into the conversation and marked read; it is the same letter, so do it
-3. **Do what the letter hands over** — read it as "The letter" says, then follow "The
-   steps" from where its first line says to start. The steps begin in the root the letter
-   names (`Root:`) — if this window stands anywhere else, go there first: `cd` from a
-   subdirectory, *Come back to the root* from a worktree
-4. **Report it last** (12) and then do what `After the report:` says — wait again (2 here),
-   or end the turn
-
-A letter that hands over no work is not work: if it asks something, answer it with
-`moai send <from> '<subject>' --reply-to <id> -b -`, and wait again.
-
-## The letter
+## The assignment
 
 The first line names the work and where to start — `from step 1` for a new backlog,
 `from "Carrying on stalled work"` for work a session left behind, `from step 2` for an epic
-already unfolded whose first-column members are left. The letter's `from` is the supervisor
-you report to, `<supervisor>` below. Every other line fills a slot the steps use; a line the
-supervisor adds beyond those — who already said yes to taking over a row that is not yours,
-say — belongs to the assignment as well.
+already unfolded whose first-column members are left. The message's `from` is the supervisor
+— `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`. Every
+other line fills a slot the steps use; a line the supervisor adds beyond those — who already
+said yes to taking over a row that is not yours, say — belongs to the assignment as well.
 
 - `Model:` — `<model>` and `<difficulty>`.
 {rule}
@@ -2818,12 +2245,16 @@ say — belongs to the assignment as well.
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
-- `After the report:` — `wait again` or `end the turn` (12)
 - `Person:` — `here`, or `away` (below)
+
+The steps begin in the root the message names (`Root:`) — if this window stands anywhere
+else, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from a worktree.
+A message that hands over no work is not work: if it asks something, answer it with
+`SendMessage` to its `from`, and end the turn.
 
 ## When the person is away
 
-When the letter says `Person: away`, decide by recommendation. A design question the notes
+When the message says `Person: away`, decide by recommendation. A design question the notes
 do not settle is not asked (4) — settle it the way you would have recommended, and write it
 on the issue where the next person reads it
 
@@ -2831,14 +2262,12 @@ on the issue where the next person reads it
 
 Nothing else waits on the person either. A model the window is not on is not asked for —
 work on the window's model and say so in the reason of 9-1. A row that is someone else's or
-nobody's (rule 5) is taken over only on a yes the letter carries; without one, leave that row
+nobody's (rule 5) is taken over only on a yes the message carries; without one, leave that row
 and name it in the report.
 
 **Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
 else has, a release, anything outside this repository — and report that instead of doing
 it. When the person is back in the window, what they say overrides what you decided alone.
-
-{verbs}
 
 ## Before the steps
 
@@ -2848,74 +2277,7 @@ it. When the person is back in the window, what they say overrides what you deci
 
 ## The steps
 
-{brief}
-
-## Carrying on stalled work
-
-A session died holding a member of `<epic>`, the epic the letter's first line names; that
-member still stands picked up. Read how far it got (`moai show <epic>`, its history and
-notes), then
-
-- If the worktree is there, go in (*Enter the worktree*), read how far it got with
-  `git log <base branch>..HEAD` and `git status`, and carry on. One raised before the
-  shared place stands at `.claude/worktrees/<epic>` — remove it from there in 9
-- If it is not, raise it again from the root. If the branch survives, on that branch
-  (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
-  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
-- **If the root is not the top of the repository** (a subdirectory project in a
-  monorepo), go into the worktree and then move to the same subdirectory inside it and
-  work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-  hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
-  by the supervisor; with no `Subdir:` in the letter, the root is the top and this step
-  does not exist
-
-      {SUBDIR}
-- The member's column is already picked up — do not pick it up again. **If its assignee
-  is not you** (`moai show <member>`), ask the person watching before you carry it on; on
-  a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
-  column stays, the assignee becomes you, and a note keeps whose it was
-- The note in 9-1 records this window's share only. Append `reclaimed work, the previous
-  session's share is unknown` to the end of the reason — the previous session's model and
-  tokens are written nowhere, and without it the whole member reads as this window's work
-- Then go on with the steps from 4-1 to the end
-"#
-    )
-}
-
-/// 일꾼의 걸음 — 일꾼 스킬([`work`])의 "The steps" 절. **일꾼이 지킬 것은 모두 여기 적는다** — 편지는 맡길 일만
-/// 싣는다(moai-snyk).
-///
-/// **벤더 낱말은 표의 걸음 이름으로 적는다**(moai-snyk.4zn). `EnterWorktree`·`AskUserQuestion`·`/code-review` 처럼
-/// Claude Code 에만 있는 걸음은 *기울인* 걸음 이름으로 가리키고, 칸은 낱말표([`VERBS`])가 벤더마다 댄다. Claude 에만
-/// 서는 길(리뷰 서브에이전트, `/code-review <grade> --fix`)은 그렇다고 밝혀 적는다.
-///
-/// **리뷰 줄은 규칙 3 의 조각으로 적는다.** 손으로 줄인 `-t review --parent <에픽>` 은 관점(`-b`)이 빠져, 에픽 리뷰가
-/// 무엇을 왜 보는지 없이 섰다.
-///
-/// **닫기는 워크트리를 지운 뒤다.** 워크트리가 남아 있으면 훅이 그 에픽을 옆 워크트리의 일로 읽어(`worktree::away`)
-/// `-m` 없는 리뷰 닫기를 못 막고, 루트의 편집은 규칙 2 로 막는다 — 그래서 충돌과 시험은 워크트리에서 풀고, 루트
-/// 병합이 막히면 되돌리고 돌아간다.
-///
-/// **보고가 마지막이다**(moai-snyk). 감독은 보고 편지를 받고 창을 비운다(5-1) — 보고 뒤에 `Next:` 노트를 적던 판은
-/// 감독이 그 노트가 설 때까지 기다릴 길이 없었다(편지는 노트가 섰다고 안 알린다). 그래서 11 이 노트, 12 가 보고다.
-///
-/// **넘칠 때의 길도 여기 적는다**(리뷰 moai-4u6b.5hl). 닫는 걸음이 싣는 것은 `(64KB 를 넘으면 요약)` 한 마디뿐이라,
-/// 이 글만 받은 일꾼은 줄이라는 말은 읽고 **요약이라고 밝히라는 말은** 못 읽었다 — 밝히지 않은 요약은 다음 사람이
-/// 리뷰어의 말로 읽는다.
-fn brief() -> String {
-    let review = make_review("--parent <epic>");
-    let close = indent(&close_steps("<review id>", "moai"), "      ");
-    let over = indent(REVIEW_OVER_LIMIT, "    ");
-    let levels = difficulty_levels();
-    // 잣대는 걸음 5 안의 글머리 목록이다 — 맨 줄로 두면 GitHub 에서 세 낱말이 한 문단으로 뭉친다(리뷰 moai-bkn4.c3d).
-    let rubric = indent(&difficulty_rubric(), "   - ");
-    let top = top_model();
-    let epic_rule = indent(&epic_review_rule(), "   ");
-    let angle = indent(REVIEW_ANGLE, "   ");
-    // 7-4 는 목록 밖의 문단이라 명령 줄이 네 칸이다(`the_brief_follows_the_markdown_list_rules`).
-    let wiki_commit = indent(WIKI_COMMIT, "    ");
-    format!(
-        r#"1. Unfold it in the root — the one way to turn a backlog item into work is
+1. Unfold it in the root — the one way to turn a backlog item into work is
    `moai backlog promote <id> --from -`. Unfold into an epic plus issues even for a single
    issue. Look at `--dry-run` first — that is for this window to see, not to show a person
    and ask. Showing a split plan to a person once is a step of work a person asked for
@@ -2929,7 +2291,7 @@ fn brief() -> String {
    Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
    release the backlog stood in, and a milestone is inherited, so the epic alone carries it to
    every member and to the members added later in 4-3 and 7-1. Hanging the same one again
-   changes nothing. **Hang only the `<milestone>` in the letter, and nothing else**: work is
+   changes nothing. **Hang only the `<milestone>` in the message, and nothing else**: work is
    never pulled into a running release, so a release you noticed running is not yours to
    attach — not to this epic, not to a member you create later. Inside this epic the release
    is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
@@ -2951,23 +2313,23 @@ fn brief() -> String {
 
        git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
-   pick-up (rule 5). Ask the person watching this window — a yes the letter already carries
+   pick-up (rule 5). Ask the person watching this window — a yes the message already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
    no leave that member and tell the supervisor
 3. Right after the commit in 2, branch from the local <base branch> with
-   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in
-   (*Enter the worktree*). The name is the unfolded epic's id, not the backlog's. Until the
-   worktree stands, the other sessions in the root read this member as their own focus.
+   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
+   `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
+   Until the worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
    it and work there — standing at the worktree top, `moai` walks up and finds the root's
    `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
-   relative path, filled in by the supervisor; if the letter carries no `Subdir:`, the root
+   relative path, filled in by the supervisor; if the message carries no `Subdir:`, the root
    **is** the top and this step does not exist
 
        {SUBDIR}
-4. Do not guess a design decision that is not in the notes — ask (*Ask the person watching*);
-   a person is watching the worker's window. With `Person: away` in the letter, decide by
+4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
+   a person is watching the worker's window. With `Person: away` in the message, decide by
    recommendation instead ("When the person is away")
 
 4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
@@ -2994,11 +2356,11 @@ fn brief() -> String {
    run it with a wrapper at the front of `PATH` that calls the real `tmux` by absolute path
    and inserts `-L`. Do not send keys into a pane someone else raised. If you raise a test
    agent on that server, keep its cwd outside the root (the scratchpad) — raised in the root,
-   it registers in this repository's `moai agents` beside the real workers.
+   it stands in `ListAgents` as a session of this repository and a supervisor takes it for a worker.
    **Give a review subagent these words too** — it was a review subagent that killed a whole server
 
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
-   the files named by `Work running alongside` in the letter, or files a sibling branch in
+   the files named by `Work running alongside` in the message, or files a sibling branch in
    `git worktree list` already changed
    (`git diff --name-only <base branch>...<sibling branch>`). When two of them change the
    same place, one waits for the other at the merge. If this epic cannot deliver what it
@@ -3011,23 +2373,18 @@ fn brief() -> String {
    move to the next — the review looks at the whole epic once, in 7, after every member is
    finished. One review is expensive; do not call it as many times as there are members. The
    cost of member 2 piling onto a bug in member 1 is paid in that one review.
-   {levels} is the rubric the model in the letter was picked on, and the same rubric measures
+   {levels} is the rubric the model in the message was picked on, and the same rubric measures
    the members when you pick the grade in 7.
 {rubric}
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
    conflicts and run the tests. Fix things here — while the worktree stands, rule 2 blocks
    edits in the root
-7. Before merging, review the whole epic (*Review the work*) — the members were not reviewed
-   separately, so this once is the only review. In Claude Code that is
-   `/code-review <grade> --fix`. In Codex and Antigravity it is the review that session has,
-   and where it has none, read the whole diff yourself with the angle and the five places
-   below, and fix what you take in. **It runs inside this session** — never start another
-   agent program for it: `codex review`, `codex exec` and `agy -p` each start one.
+7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
+   not reviewed separately, so this once is the only review. **It runs inside this session** —
+   never start another agent program for it.
 {epic_rule}
-   If the window is not on that model, ask the person watching it to change it
-   (*Change the model*) before you call — as in `/model {top}` in Claude Code (a review agent
-   inherits the window's model). Those models are Claude Code's: in Codex and Antigravity the
-   grade still stands, and the window keeps the model its person picked.
+   If the window is not on that model, ask the person watching it to change it before you
+   call — `/model {top}` (a review agent inherits the window's model).
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled it
    in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
@@ -3049,13 +2406,13 @@ fn brief() -> String {
    does not exist here: leave the members where they stand and go on. If it answers that the
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
-   In Claude Code only: when the worktree's hook cannot see a review issue created or picked
-   up in the root and blocks you — a binary from before the hook moved the tracker to the root
-   reads that worktree's snapshot only — run a review subagent with the same angle, grade and
-   `--fix` scope. A subagent inherits the window's model, so pass the model for the grade
-   above in `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the
-   closing `-m` as they are. Any other refusal, such as a missing angle, is not worked around:
-   fix it the way the refusal's own command says
+   When the worktree's hook cannot see a review issue created or picked up in the root and
+   blocks you — a binary from before the hook moved the tracker to the root reads that
+   worktree's snapshot only — run a review subagent with the same angle, grade and `--fix`
+   scope. A subagent inherits the window's model, so pass the model for the grade above in
+   `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the closing
+   `-m` as they are. Any other refusal, such as a missing angle, is not worked around: fix it
+   the way the refusal's own command says
 
 {angle}
 
@@ -3064,12 +2421,11 @@ fn brief() -> String {
    `rebase` and `commit --amend` throw them away — that has happened, told to do it by a
    supervisor saying "it is before the merge, so it can still be fixed". Nothing blocks it;
    this line is what holds. Fixing a commit subject waits until the review has returned.
-   **When it returns, stop what it left running before you touch the tree**
-   (*Stop what a review left running* — `TaskStop` in Claude Code) and read the working
-   tree's status. A sweep subagent still alive writes its own version into this same worktree
-   and covers a commit you already made without a word, and a `cargo test` after that
-   measures that agent's files rather than yours — that has happened too, and it also burned
-   an hour and a half in a worktree that was gone.
+   **When it returns, stop what it left running with `TaskStop` before you touch the tree**
+   and read the working tree's status. A sweep subagent still alive writes its own version
+   into this same worktree and covers a commit you already made without a word, and a
+   `cargo test` after that measures that agent's files rather than yours — that has happened
+   too, and it also burned an hour and a half in a worktree that was gone.
 
 7-1. Before merging, go back over the backlog parked mid-epic
    (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
@@ -3136,8 +2492,8 @@ fn brief() -> String {
 {wiki_commit}
    If it did not, write nothing. **Nothing checks this**
 
-8. *Come back to the root* — remove the worktree from inside it and this window stands in a
-   directory that is gone.
+8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
+   this window stands in a directory that is gone.
    Before merging, check that the root stands on <base branch> — if it does not, do not merge:
    tell the supervisor
 
@@ -3150,22 +2506,22 @@ fn brief() -> String {
        git merge --no-ff worktree-<epic> -m "merge: …"
    If the root's `.moai` holds uncommitted rows from another session the merge is refused —
    take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
-   resolve it in the root — undo with `git merge --abort`, go back into the worktree
-   (*Enter the worktree*) and run again from 6
+   resolve it in the root — undo with `git merge --abort`, go back into the worktree with
+   `EnterWorktree(path)` and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
 
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
-   suggestion in the letter but the model that **actually ran** in this window. The line below
+   suggestion in the message but the model that **actually ran** in this window. The line below
    was filled in by the supervisor as a suggestion, so if you raised it, or the window was on
    a different model from the start, correct the model and the difficulty to the real ones and
    write why in the reason — the next person reads "what was put on work of this size" there.
    It is a note, not a field: the journal is not read to compute state and derived values are
    not stored. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
-   `anthropic`, `openai` or `google`, and the model is its real name (`opus-5`), not the
-   `/model` alias — the `<model>` the supervisor filled in is an alias (`opus`) or `—`, so
-   write the real name even if you did not change models.
+   `anthropic`, and the model is its real name (`opus-5`), not the `/model` alias — the
+   `<model>` the supervisor filled in is an alias (`opus`), so write the real name even if you
+   did not change models.
    `<count>` is the tokens this window used. **If you do not know the token count, drop
    `tokens=<count>` whole** — do not write 0 and do not estimate. **One line per id** —
    write the same line on several ids and the tokens multiply by the number of ids. A window's
@@ -3193,29 +2549,51 @@ fn brief() -> String {
     leaves it in the shared root where someone else's commit sweeps it up. If anything is left
     (a background review, say), finish it before the note — the supervisor reads the note as
     this work being over; what you cannot finish, name in the report (12)
-12. Report with a letter to the supervisor, **last of all**. It carries the merge hash,
+12. Report to the supervisor, **last of all**, with `SendMessage(to: <supervisor>, message: …)`
+    — `report: <epic>` at its head. It carries the merge hash,
     the unfolded epic's id, a line or two of summary, what you handed on and any new backlog,
     the members reclaimed in 7-1 and left in the first column,
     the members left in 4-3 because the work beside you held the file, with that other work
     named, and the wiki pages 7-4 changed — or that it changed none — and anything still
-    running that 11 could not finish: the supervisor does not clear a window whose report
-    says so. Write it to a file outside the repository (your scratchpad, or a temporary
-    file) — nothing is held by now, so a file in the shared root is refused or left behind —
-    and send it
-
-        moai send <supervisor> 'report: <epic>' --reply-to <letter id> -b - < <report file>
+    running that 11 could not finish.
     Then **say when the window can be cleared**, in one line to the person watching. The
     context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
     commit messages. If you can see your own context usage, put that number in the line too.
     **Say the opposite in the same line** — not to clear while a review is running in the
     background, while a merge conflict is being resolved, while waiting on a person's answer,
-    or after the supervisor's next message has arrived in this window. Clearing then loses what
-    is not yet moved into the tracker, or the message that arrived.
-    Then do what `After the report:` says. With `wait again`, go back to waiting (the loop's 2)
-    — a person who wants the window cleared stops the wait, clears it (*Clear the window*) and
-    calls this skill again (*Call a skill*). With `end the turn`, end it — on tmux
-    the supervisor may check the report and clear this window itself once it sees the `Next:`
-    note stand, and then wakes it with the next letter"#
+    or after the supervisor's next message has arrived in this window. Clearing (`/clear`) then
+    loses what is not yet moved into the tracker, or the message that arrived.
+    Then end the turn. The supervisor's next message is the next work
+
+## Carrying on stalled work
+
+A session died holding a member of `<epic>`, the epic the message's first line names; that
+member still stands picked up. Read how far it got (`moai show <epic>`, its history and
+notes), then
+
+- If the worktree is there, go in with `EnterWorktree(path)`, read how far it got with
+  `git log <base branch>..HEAD` and `git status`, and carry on. One raised before the
+  shared place stands at `.claude/worktrees/<epic>` — remove it from there in 9
+- If it is not, raise it again from the root. If the branch survives, on that branch
+  (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
+  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
+- **If the root is not the top of the repository** (a subdirectory project in a
+  monorepo), go into the worktree and then move to the same subdirectory inside it and
+  work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
+  hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
+  by the supervisor; with no `Subdir:` in the message, the root is the top and this step
+  does not exist
+
+      {SUBDIR}
+- The member's column is already picked up — do not pick it up again. **If its assignee
+  is not you** (`moai show <member>`), ask the person watching before you carry it on; on
+  a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
+  column stays, the assignee becomes you, and a note keeps whose it was
+- The note in 9-1 records this window's share only. Append `reclaimed work, the previous
+  session's share is unknown` to the end of the reason — the previous session's model and
+  tokens are written nowhere, and without it the whole member reads as this window's work
+- Then go on with the steps from 4-1 to the end
+"#
     )
 }
 

@@ -27,13 +27,16 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = ".claude/moai-plugin";
 
 /// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
-/// 심는 차례(이슈 트래커·감독·위키·일꾼)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
+/// 심는 차례(이슈 트래커·감독·위키)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
 /// 있어 시험이 이 목록과 견주고(`guide::tests::the_frontmatter_opens_the_skill`), 트리가 이 목록 밖의 스킬을 심으면
 /// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
 /// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
-pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-work"];
+///
+/// **일꾼 스킬 `moai-work` 는 걷었다**(2026-10-06 사용자 결정, moai-obxm). 일꾼의 걸음은 감독이 보내는 메시지에
+/// 통째로 실린다 — 감독 스킬의 `references/worker.md`([`crate::guide::worker`]).
+pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
 
 /// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
 /// 두 벤더 문서가 같은 `<저장소>/.agents/skills/<이름>/SKILL.md` 를 들어, 한 벌을 심으면 둘이 다 읽고 커밋돼 팀이
@@ -54,7 +57,7 @@ pub struct Skill {
 pub fn skills() -> Vec<Skill> {
     // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
     // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki, worker] = NAMES;
+    let [main, supervisor, wiki] = NAMES;
     vec![
         Skill {
             name: main,
@@ -62,13 +65,14 @@ pub fn skills() -> Vec<Skill> {
         },
         // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고, 일꾼이 `moai` 를 부를 때마다
         // 감독의 걸음까지 읽는다. 발동어(description)는 따로 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        Skill { name: supervisor, files: vec![("SKILL.md", crate::guide::supervise())] },
+        // 일꾼의 걸음(`references/worker.md`)은 감독이 읽어 메시지에 통째로 붙인다(moai-obxm) — 일꾼 창에는 심긴 글이 없다.
+        Skill {
+            name: supervisor,
+            files: vec![("SKILL.md", crate::guide::supervise()), ("references/worker.md", crate::guide::worker())],
+        },
         // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai` 스킬에 섞으면 이슈
         // 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
         Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())] },
-        // 일꾼 스킬도 따로 선다(moai-0x59) — 사람이 일꾼으로 삼은 창만 그 걸음을 읽는다. 감독 스킬에 두면 감독이 매
-        // 바퀴 편지로 실어 보내야 하고, `moai` 스킬에 두면 일꾼이 아닌 세션까지 기다림과 보고의 걸음을 읽는다.
-        Skill { name: worker, files: vec![("SKILL.md", crate::guide::work())] },
     ]
 }
 
