@@ -14297,6 +14297,71 @@ fn the_board_and_the_hook_carry_the_same_install_notices() {
     assert_eq!(here, there, "두 화면의 설치 알림이 갈렸다\n--- status\n{said}\n--- 보드\n{board}");
 }
 
+/// **옛 판이 심은 스킬·훅은 다시 심으라고 댄다**(moai-ybns.451.rpd). 0.8 이 심은 저장소를 0.9 로 열면 AGENTS.md 의
+/// 알림 하나만 섰고, 그것을 따라 친 `moai init` 은 스킬을 안 건드려 보드가 "드러난 것 없다" 로 끝났다 — 걷힌 명령을
+/// 가르치는 `moai-work` 와 걷힌 이벤트를 든 Codex 훅이 그대로인데. 알림이지 경고가 아니고, 종료 코드는 0 이다.
+#[test]
+fn a_stale_planted_tree_names_the_install_line() {
+    let s = init("staletree");
+    let root = s.path();
+    let stale = |root: &Path| -> Option<serde_json::Value> {
+        let out = moai(root, &["status", "--json"]);
+        assert!(out.status.success(), "알림이 종료 코드를 바꿨다");
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(v["warnings"].as_array().unwrap().iter().all(|w| w["kind"] != "skills_stale"), "경고로 섰다");
+        v["notices"].as_array().unwrap().iter().find(|n| n["kind"] == "skills_stale").cloned()
+    };
+    // 아무것도 안 심은 저장소와 방금 심은 저장소는 조용하다.
+    assert_eq!(stale(root), None);
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    assert_eq!(stale(root), None, "방금 심은 트리를 낡았다고 했다");
+
+    // 옛 판이 심고 이 판은 안 심는 스킬, 그리고 이 판에 없는 이벤트를 든 훅.
+    let work = root.join(".agents/skills/moai-work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("SKILL.md"), "---\nname: moai-work\n---\nmoai hello\n").unwrap();
+    let hooks = root.join(".codex/hooks.json");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&hooks).unwrap()).unwrap();
+    let first = v["hooks"].as_object().unwrap().values().next().unwrap().clone();
+    v["hooks"]["Interrupt"] = first;
+    std::fs::write(&hooks, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    let n = stale(root).expect("낡은 트리를 안 댔다");
+    assert_eq!(n["ids"], serde_json::json!([".codex/hooks.json", ".agents/skills"]));
+    assert_eq!(n["hint"], "moai skill install --agent codex", ".agents 를 맞추는 줄은 --agent 를 단다");
+    let said = ok(root, &["status"]);
+    assert!(said.contains("moai skill install --agent codex"), "보드가 칠 줄을 안 댄다\n{said}");
+    // 보드를 받는 훅도 같은 알림을 싣는다(`install_notices` 한 자리).
+    let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s-stale-tree")));
+    assert!(board.contains("moai skill install --agent codex"), "훅의 보드가 안 댄다\n{board}");
+
+    // `init` 은 훅이 선 저장소에서 스킬을 안 심는다 — 그 대신 같은 줄을 대고, "다 맞아 있다" 고 하지 않는다.
+    let again = ok(root, &["init"]);
+    assert!(again.contains("moai skill install --agent codex"), "init 이 다시 심으라고 안 한다\n{again}");
+    let json: serde_json::Value = serde_json::from_str(&ok(root, &["init", "--json"])).unwrap();
+    assert_eq!(json["skills_stale"], "moai skill install --agent codex");
+
+    // **못 읽는 자리는 세지 않고, 멈추지도 않는다** — 심긴 파일 하나를 FIFO 로 바꿔도 보드는 끝난다.
+    let skill = root.join(".agents/skills/moai/SKILL.md");
+    std::fs::remove_file(&skill).unwrap();
+    let made = Command::new("mkfifo").arg(&skill).status().unwrap();
+    assert!(made.success());
+    assert!(stale(root).is_some());
+    std::fs::remove_file(&skill).unwrap();
+
+    // 시킨 대로 다시 심으면 걷힌다.
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    assert_eq!(stale(root), None, "다시 심어도 안 걷혔다");
+    assert!(!work.exists());
+
+    // Claude 의 트리만 낡았으면 맨 `install` 이다 — 기본이 Claude 다.
+    let _ = moai(root, &["skill", "install"]);
+    std::fs::write(root.join(".claude/moai-plugin/skills/moai/SKILL.md"), "old\n").unwrap();
+    let n = stale(root).expect("낡은 Claude 트리를 안 댔다");
+    assert_eq!(n["ids"], serde_json::json!([".claude/moai-plugin"]));
+    assert_eq!(n["hint"], "moai skill install");
+}
+
 /// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.
 #[test]
 fn the_hook_works_where_stdin_says() {

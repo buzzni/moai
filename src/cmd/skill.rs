@@ -1824,6 +1824,84 @@ fn run(root: &Path, args: &[String]) -> bool {
     Command::new("claude").args(args).current_dir(root).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
+/// 이 체크아웃에 심긴 트리 가운데 **이 판이 심을 것과 다른 자리**와, 그것을 맞출 에이전트(moai-ybns.451.rpd) —
+/// `moai status` 의 알림(`skills_stale`)과 `init` 의 끝줄이 이것을 댄다. 0.8 이 심은 저장소를 0.9 로 열면 `init` 은
+/// AGENTS.md 만 고치고, 걷힌 명령을 가르치는 스킬과 옛 훅이 그대로 서는데 어느 화면도 그것을 안 댔다.
+///
+/// **값싸고 관대하다** — 아무것도 안 심긴 저장소는 `stat` 몇 번으로 끝나고 글을 짓지 않는다. 읽는 것은 보통 파일만,
+/// 체크아웃 안에서만이다([`read_committed`]) — FIFO 하나가 아무것도 안 막는다던 명령을 세우면 안 된다. **못 읽은 파일은
+/// 낡은 것으로 세지 않는다**(`skill status` 와 다른 자리다) — 다시 심는 길이 그 자리를 거절하면 알림이 영영 안 걷힌다.
+/// 체크아웃 밖을 가리키는 자리([`outside`])도 같은 까닭으로 안 본다. 남은 스킬 디렉터리는 `install` 이 걷는 꼴
+/// (`Left::Planned`)만 센다.
+///
+/// 훅 파일은 그 파일이 부르는 moai 로 견준다([`HookFile::seen`]) — 지금 부른 빌드의 철자로 견주면 멀쩡한 파일이 낡아
+/// 보인다. Claude 의 매니페스트도 같은 까닭으로 그 훅이 부르는 실행 파일로 지은 `hooks` 만 견준다 — 판(해시)은
+/// 마켓플레이스 이름을 거쳐 체크아웃의 자리를 들어, 워크트리마다 갈린다.
+pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent)> {
+    let plugin = root.join(skill::DIR);
+    let manifest = plugin.join(".claude-plugin/plugin.json");
+    let shared_dir = root.join(skill::AGENTS_DIR);
+    let hook_files = HookFile::all(root, "moai");
+    let seen = |p: &Path| std::fs::symlink_metadata(p).is_ok();
+    if !seen(&manifest) && !seen(&shared_dir) && !hook_files.iter().any(|h| seen(&h.path)) {
+        return Vec::new();
+    }
+    let home = crate::held::Home::of(root);
+    // 없는 파일은 다르다. 못 읽는 파일은 모른다 — 세지 않는다.
+    let differs = |at: &Path, body: &str| match crate::held::read_inside(at, &home) {
+        Ok(text) => text != body,
+        Err(_) => std::fs::symlink_metadata(at).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound),
+    };
+    let left = |dir: &Path, planting: &[&str]| leftovers(dir, planting, root).iter().any(|l| l.state == Left::Planned);
+    let skills = skill::skills();
+    let mut out = Vec::new();
+
+    if outside(&plugin, root).is_none()
+        && let Ok(text) = read_committed(&manifest, root)
+    {
+        let hooks = |body: &str| serde_json::from_str::<serde_json::Value>(body).ok().map(|v| v["hooks"].clone());
+        let hooks_differ = skill::hook_exe(&text).is_some_and(|exe| {
+            let want = plant(prefix, root, &exe, &skills);
+            want.iter().find(|(p, _)| p.ends_with("plugin.json")).is_some_and(|(_, w)| hooks(w) != hooks(&text))
+        });
+        let skills_differ = plant(prefix, root, "moai", &skills)
+            .iter()
+            .filter(|(p, _)| p.starts_with("skills"))
+            .any(|(p, body)| differs(&plugin.join(p), body));
+        let names: Vec<&str> = skills.iter().map(|s| s.name).collect();
+        if hooks_differ || skills_differ || left(&plugin.join("skills"), &names) {
+            out.push((skill::DIR, Agent::Claude));
+        }
+    }
+
+    let shared_stale = outside(&shared_dir, root).is_none() && {
+        let tree = skill::agents_tree(&skills);
+        let names: Vec<&str> = skills.iter().filter(|s| !s.claude_only).map(|s| s.name).collect();
+        let planted = tree.iter().any(|(p, _)| seen(&shared_dir.join(p)));
+        (planted && tree.iter().any(|(p, body)| differs(&shared_dir.join(p), body))) || left(&shared_dir, &names)
+    };
+    let states: Vec<HookState> = hook_files.iter().map(|h| h.seen(root)).collect();
+    for (h, state) in hook_files.iter().zip(&states) {
+        if *state == HookState::Stale {
+            out.push((if h.agent == Agent::Codex { skill::CODEX_HOOKS } else { skill::AGENTS_HOOKS }, h.agent));
+        }
+    }
+    if shared_stale {
+        // 그 자리는 Codex 와 Antigravity 가 함께 읽는다 — 훅 파일이 선 쪽으로 댄다. 둘 다 없으면 Codex 다.
+        let mut by: Vec<Agent> = hook_files
+            .iter()
+            .zip(&states)
+            .filter(|(_, s)| matches!(s, HookState::Current | HookState::Stale))
+            .map(|(h, _)| h.agent)
+            .collect();
+        if by.is_empty() {
+            by.push(Agent::Codex);
+        }
+        out.extend(by.into_iter().map(|a| (skill::AGENTS_DIR, a)));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

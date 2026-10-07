@@ -1940,6 +1940,13 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let skilled = plan.skill.then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], false));
     let listed = plan.project.then(|| crate::cmd::project::add(ctx, &root));
     super::take_partial();
+    // **스킬을 안 심었으면 낡은 스킬·훅을 한 줄로 댄다**(moai-ybns.451.rpd). 훅이 이미 선 저장소에서는 위가 설치를
+    // 안 부르는데(`existing_hooks`), 옛 판이 심은 스킬이 걷힌 명령을 가르쳐도 이 명령이 다 맞췄다고 끝냈다. 막지
+    // 않는다 — `moai status` 의 알림(`skills_stale`)과 같은 자로 재고 같은 줄을 댄다.
+    let skills_stale = match skilled {
+        Some(_) => None,
+        None => crate::cmd::status::skills_notice(&root, &prefix, ctx.chdir).and_then(|w| w.hint),
+    };
     if partial {
         super::note_partial();
     }
@@ -1976,6 +1983,10 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         // 줄였을 때만 싣는다 — 늘 `null` 을 두면 줄이지 않은 대부분의 줄이 헛 키를 든다.
         if let Some(full) = &shortened {
             v["shortened_from"] = serde_json::json!(full);
+        }
+        // 칠 줄이다 — 낡은 것이 없으면 키가 없다(`shortened_from` 과 같은 자).
+        if let Some(cmd) = &skills_stale {
+            v["skills_stale"] = serde_json::json!(cmd);
         }
         // 이어 부른 명령은 그 명령의 `--json` 을 그대로 싣는다. 안 불렀으면 `false`, 실패했으면 그 코드와 말이다.
         for (key, done) in [("skill", &skilled), ("project", &listed)] {
@@ -2113,6 +2124,9 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     if agents {
         out.push(say(lang, "init.agents_synced").to_string());
     }
+    if let Some(cmd) = &skills_stale {
+        out.push(fill(say(lang, "init.skills_stale"), &[("cmd", cmd)]));
+    }
     if guide_file {
         out.push(fill(say(lang, "init.wrote_guide_file"), &[("file", crate::guide::GUIDE_FILE)]));
     }
@@ -2147,6 +2161,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         && skilled.is_none()
         && listed.is_none()
         && untouched.is_empty()
+        && skills_stale.is_none()
         && !matches!(planting, Some(Planting::Planted(_) | Planting::Failed(_)));
     if again && did_nothing {
         out.push(say(lang, "init.all_current").to_string());
