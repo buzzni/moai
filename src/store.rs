@@ -283,6 +283,12 @@ impl<'r> Reserved<'r> {
         self.live.contains(id) || self.scanned().0.contains(id)
     }
 
+    /// 아카이브를 이미 훑었는가 — 옮기기·고치기가 안 훑는다는 것을 시험이 잰다(리뷰 moai-r0x8 5번).
+    #[cfg(test)]
+    pub(crate) fn scanned_yet(&self) -> bool {
+        self.scanned.get().is_some()
+    }
+
     /// 못 읽은 아카이브 자리의 말 — **훑었을 때만** 선다. 안 훑은 쓰기는 id 를 안 지었으니 피하지 못한 id 도 없다.
     fn unread(self) -> Vec<String> {
         self.scanned.into_inner().map(|(_, unread)| unread).unwrap_or_default()
@@ -471,7 +477,10 @@ enum Reached {
 fn reach(from: &Path) -> Option<Reached> {
     let climbed = climb(from);
     let own = matches!(climbed, Some((_, false)));
-    if !own && !here_wanted() {
+    // 딸린 워크트리인지는 `stat` 으로만 먼저 가린다([`crate::worktree::is_linked`], 리뷰 moai-r0x8 6번) — `main_root` 는
+    // `.git` 파일을 읽으므로, 트래커 밖 어디서나 지나는 이 길(훅이 `cd`·`-C` 마다 묻는다)이 보통 파일이 아닌 `.git` 에서
+    // 서지 않게 한다.
+    if !own && !here_wanted() && crate::worktree::is_linked(from) {
         let mirror = crate::worktree::main_root(from);
         if let Some((mirror, root)) = mirror.and_then(|m| governing(&m).map(|root| (m, root))) {
             // 주 체크아웃에서 트래커 밑으로 내려온 만큼 이 워크트리에서 올라간 자리가 `here` 다.
@@ -695,7 +704,15 @@ impl Repo {
             },
             // **디렉터리가 아닌 `.moai` 는 못 읽는 트래커다**(moai-r0x8.e19) — 위로 찾는 [`Repo::find`] 와 같은
             // 자([`spot`])다. "init 전" 으로 대던 판은 `init` 이 넘어질 자리에 그것을 시켰다.
-            Spot::NotADir(stood) => Err(not_a_dir(lang(), dir, &stood)),
+            //
+            // **딸린 워크트리면 먼저 옮겨 간다**(리뷰 moai-r0x8 2번) — 찾기([`Repo::find_from`])는 거기서 주 체크아웃의
+            // 트래커로 가므로, 여기서만 멈추면 같은 자리를 CLI 는 읽고 `project ls`·탐색기는 "못 읽는다" 로 댄다.
+            Spot::NotADir(stood) => match Repo::redirect(dir) {
+                Some(root) => {
+                    Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root, lang)? }))
+                }
+                None => Err(not_a_dir(lang(), dir, &stood)),
+            },
             // **`.moai` 가 없는 딸린 워크트리도 옮겨 간다**(리뷰 moai-71ht 셋째 판) — moai 를 들이기 전에
             // 갈라진 가지다. "init 전" 으로 대던 판은 `moai -C <워크트리> init` 을 시켰는데, 그 뒤로는
             // 어느 길도 그 트래커를 안 읽고(CLI 는 위로 찾아 루트로 간다) 커밋하면 병합에서 `config.toml`
@@ -2504,7 +2521,14 @@ fn into_tracker(path: &Path, real: &Path, root: &Path) -> Option<(PathBuf, &'sta
         }
     };
     let landed = land(real);
-    if landed.strip_prefix(&base).is_ok_and(tracker) {
+    // **`.moai` 와 그 안의 디렉터리가 링크여도 트래커 안이다**(리뷰 moai-r0x8 1번) — 푼 자리의 철자에 `.moai` 가
+    // 없으면 조각으로만 재던 판은 `.moai -> data` 인 저장소의 `AGENTS.md -> .moai/config.toml` 을 지나보내, `init` 이
+    // 설정을 블록으로 갈아끼우고 0 으로 끝났다. 저널·아카이브 디렉터리가 체크아웃 안의 딴 자리로 가는 링크인 것도 같다.
+    let dot = root.join(".moai");
+    let beyond = [dot.join("journal"), crate::archive::dir(root), dot];
+    if landed.strip_prefix(&base).is_ok_and(tracker)
+        || beyond.iter().any(|d| std::fs::canonicalize(d).is_ok_and(|d| landed.starts_with(&d)))
+    {
         return Some((landed, "inside the tracker (.moai)"));
     }
     let snapshot = crate::path::follow_links(&root.join(".moai").join("issues.jsonl")).ok()?;
@@ -3468,6 +3492,36 @@ mod tests {
                 }
                 None => panic!("{} 에 트래커를 심어도 된다고 했다", at.display()),
             }
+        }
+    }
+
+    /// **딸린 워크트리의 디렉터리 아닌 `.moai` 는 여는 길도 찾기처럼 주 체크아웃으로 옮긴다**(리뷰 moai-r0x8 2번).
+    /// 찾기([`Repo::find_from`])는 거기서 주 체크아웃의 트래커를 여는데, 여는 길만 멈추던 판은 같은 자리를 `status` 는
+    /// 읽고 `project ls` 는 "못 읽는다(`broken`)" 로 댔다.
+    #[test]
+    fn a_moai_file_in_a_linked_worktree_opens_the_main_tracker_like_the_lookup() {
+        let dir = Scratch::real("open-wt-moai-file");
+        let main = dir.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |at: &std::path::Path, args: &[&str]| crate::git::tests::run_git(at, None, args);
+        git(&main, &["init", "-q"]);
+        moai_at(&main);
+        std::fs::write(main.join(".moai/config.toml"), "prefix = \"argos\"\n").unwrap();
+        git(&main, &["add", "-A", "-f"]);
+        git(&main, &["commit", "-q", "-m", "init"]);
+        git(&main, &["worktree", "add", "-q", "--detach", "../side"]);
+        let side = dir.join("side");
+        std::fs::remove_dir_all(side.join(".moai")).unwrap();
+        std::fs::write(side.join(".moai"), "not a tracker\n").unwrap();
+
+        let found = Repo::find_from(&side, || Lang::En).unwrap().expect("찾기가 아무것도 못 찾았다");
+        assert!(crate::user_config::same_dir(&found.root, &main), "찾기가 {} 로 갔다", found.root.display());
+        match Repo::open(&side, || Lang::En) {
+            Ok(Opened::Repo(repo)) => {
+                assert!(crate::user_config::same_dir(&repo.root, &main), "여는 길이 {} 로 갔다", repo.root.display())
+            }
+            Ok(_) => panic!("여는 길이 트래커를 못 열었다"),
+            Err(e) => panic!("찾기는 주 체크아웃을 여는데 여는 길만 멈췄다 — {}", e.message),
         }
     }
 

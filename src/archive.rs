@@ -587,8 +587,10 @@ pub fn board(
     now: &str,
 ) -> (report::StatusReport, usize) {
     let opaque: BTreeSet<&str> = unreadable.iter().filter_map(|u| u.id).collect();
-    let same =
-        !archived.issues.is_empty() && rows == root && !archived.issues.iter().any(|i| opaque.contains(i.id.as_str()));
+    // 겹치지 않은 `moai status` 는 같은 슬라이스를 둘로 건넨다 — 줄마다 견주기 전에 자리부터 본다.
+    let same = !archived.issues.is_empty()
+        && (std::ptr::eq(rows, root) || rows == root)
+        && !archived.issues.iter().any(|i| opaque.contains(i.id.as_str()));
     if !same {
         let st = report::status_with_archive_unjudged(rows, &archived.issues, unreadable, cfg, now);
         return (st, movable(root, archived, cfg, now).len());
@@ -850,7 +852,10 @@ mod tests {
         repo.with_write(
             || crate::i18n::Lang::En,
             |_, _, reserved| {
+                // 묻기 전에는 아카이브를 안 연다(moai-r0x8.2kg) — 옮기기·고치기는 여기서 끝난다.
+                assert!(!reserved.scanned_yet(), "a write that asked nothing scanned the archive");
                 assert!(reserved.contains("argos-a001"));
+                assert!(reserved.scanned_yet());
                 Ok((vec![], ()))
             },
         )

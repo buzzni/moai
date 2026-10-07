@@ -1505,6 +1505,31 @@ fn init_never_writes_into_the_tracker_through_agents_md() {
     ok(root, &["status"]);
 }
 
+/// `.moai` 자체가 체크아웃 안의 딴 디렉터리로 가는 링크여도 그 안은 트래커다(리뷰 moai-r0x8 1번) — 푼 자리의 철자에
+/// `.moai` 가 없어 조각으로만 재던 판은 `AGENTS.md -> .moai/config.toml` 을 지나보내 `init` 이 설정을 블록으로 갈아끼웠다.
+#[cfg(unix)]
+#[test]
+fn init_never_writes_into_a_tracker_whose_moai_is_a_directory_link() {
+    let s = init("init-agents-dir-link");
+    let root = s.path();
+    std::fs::rename(root.join(".moai"), root.join("data")).unwrap();
+    std::os::unix::fs::symlink("data", root.join(".moai")).unwrap();
+    let agents = root.join("AGENTS.md");
+    for target in [".moai/config.toml", "data/config.toml"] {
+        let before = std::fs::read_to_string(root.join("data/config.toml")).unwrap();
+        std::fs::remove_file(&agents).unwrap();
+        std::os::unix::fs::symlink(target, &agents).unwrap();
+        let said = ok(root, &["init"]);
+        assert_eq!(
+            std::fs::read_to_string(root.join("data/config.toml")).unwrap(),
+            before,
+            "{target}: 설정에 AGENTS.md 블록을 썼다\n{said}"
+        );
+        assert!(said.contains("inside the tracker"), "{target}: 왜 안 썼는지를 안 댔다\n{said}");
+        ok(root, &["status"]);
+    }
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
