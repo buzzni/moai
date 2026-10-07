@@ -28,9 +28,11 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 
 The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
-They are carried by the `moai-work` skill; the supervisor's
-[letter](#letter) carries only the assignment — the backlog, the model, the work
-running alongside, the base branch, the milestone and the root.
+They stand in a file of the supervisor skill, `references/worker.md`. Each
+assignment message carries the lines for this assignment — the backlog, the
+model, the work running alongside, the base branch, the milestone, the root and
+whether the person is away — and one line telling the worker to read that file,
+by its absolute path, and from which step to follow it.
 
 ## Column
 
@@ -105,20 +107,6 @@ What a row is: `issue` (the default, never written to the file), `epic`,
 three separate questions — what it is, where it stands, and whether to look at
 it now. A tag such as `bug` or `review` is not a kind.
 
-## Letter
-
-What one agent leaves another — a file in the recipient's box under
-`.moai/mail/`, written by
-`moai send` to an agent's name or to `any-idle-worker` (the first agent that is
-neither the sender nor registered as a [supervisor](#supervisor) with
-`moai hello --role supervisor` keeps it). It is delivery,
-not record: nothing of it enters the [tracker](#tracker) or the
-[journal](#journal). The hooks load the letters for a session into it and mark
-them read; `moai inbox` shows them, and `moai agents` sweeps a read one
-`mail_read_days` (a week) after it was read. One left unread for an agent that
-went away goes back to its sender, marked returned. More in
-[working with agents](agents.md#leave-each-other-letters).
-
 ## Member
 
 A row that stands in a [group](#group), by its own field or by inheritance.
@@ -170,20 +158,6 @@ one `- [p1] issue title #tag` line per issue — fed to `moai add --from -`
 once, before writing code. More in
 [the workflow](workflow.md#plan-something-bigger).
 
-## Presence
-
-The row that says an agent is here — `.moai/agents/<name>.json`, with its
-vendor, model, role, whether it is busy or idle, and its process. `moai hello`
-writes it, and the hooks write it for a session as it starts and keep
-busy and idle up to date; `moai inbox --wait` marks it idle while it waits.
-`moai agents` lists them and sweeps a row whose process is gone. A Codex
-session's row carries no process, and a row written on another machine — another
-container sharing the repository — carries one this machine cannot look at, so
-those are told by `seen`, which every row's own hooks and waits mark: nothing
-marked for 20 minutes, it reads `gone` but stays, and it goes when the session
-ends or nothing has marked it for a day. The name in it is what a
-[letter](#letter) is sent to.
-
 ## Regression-of
 
 A convention of this repository, not of moai: a bug that a merged epic caused
@@ -213,12 +187,13 @@ whole under a lock. More in [Recovery](recovery.md#the-files).
 
 ## Supervisor
 
-A session running the `moai-supervise` skill, registered with
-`moai hello --role supervisor`. It hands the [backlog items](#backlog) that have piled up,
-one at a time, to the [workers](#worker) waiting on the repository, sends each
-a [letter](#letter) with the assignment and takes their reports the same way. It picks, sends and checks; it
-does not fix and it does not merge. More in
-[working with agents](agents.md#plant-the-skills).
+A Claude Code session running the `moai-supervise` skill. It hands the
+[backlog items](#backlog) that have piled up, one at a time, to the
+[workers](#worker) idle on the repository, sends each one a message with
+`SendMessage` carrying the assignment and naming the [brief](#brief) to read,
+and takes their reports the same way. It picks, sends and checks; it does not fix and it does
+not merge. Codex and Antigravity have none. More in
+[working with agents](agents.md#hand-work-to-idle-sessions).
 
 ## Take over
 
@@ -243,11 +218,11 @@ only broken data does that. Compare [notice](#notice).
 
 ## Worker
 
-A window where a person called the `moai-work` skill: it says
-`moai hello --role worker`, waits for a [supervisor](#supervisor)'s
-[letter](#letter), follows the [brief](#brief) — picks the work up, does it in a
-[worktree](#worktree), has it reviewed, merges it — reports back and waits again.
-Claude Code, Codex or Antigravity alike.
+Any idle Claude Code session of the repository other than the
+[supervisor](#supervisor) — nothing registers it. On the supervisor's message it
+follows the [brief](#brief) — picks the work up, does it in a
+[worktree](#worktree), has it reviewed, merges it — reports back with
+`SendMessage` and says when its window can be cleared.
 
 ## Worktree
 
@@ -256,4 +231,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm

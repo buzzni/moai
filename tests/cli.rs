@@ -133,14 +133,13 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 꺼진 채로 푸르게 서, 시험이 재는 것이 사람마다 달라진다.
         .env_remove("MOAI_API_URL")
         .env_remove("MOAI_NO_UPDATE_CHECK")
-        // **출석이 적는 자리도 걷는다**(moai-h8tn). `moai hello` 와 훅은 `$TMUX`·`$TMUX_PANE` 을 출석에 적고,
-        // `send --wake` 는 그 칸에 `moai inbox` 를 친다 — 사람의 tmux 안에서 돈 시험이 그 값을 물려받으면
-        // **사람의 창에 글자가 쳐진다.** 깨우기를 재는 시험은 제 서버(`tmux -L`)의 값을 따로 준다. 세션 id 와
-        // `MOAI_AGENT` 는 "나는 누구인가" 를 바꿔, 시험이 돌리는 사람의 세션으로 답한다.
+        // **돌리는 사람의 세션 값도 걷는다.** 이 값들을 읽던 출석과 깨우기(moai-h8tn)는 0.9.0 에서 걷혔지만
+        // (moai-5uwh), 다시 읽는 길이 생기는 날 사람의 tmux 안에서 돈 시험이 **사람의 창과 세션으로 답한다.**
+        // 걷어 두는 값이 그 날을 막는다.
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
         .env_remove("CLAUDE_CODE_SESSION_ID")
-        // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr) — 새면 Codex 가 돌린 시험이 그 세션의 장으로 답한다.
+        // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr).
         .env_remove("CODEX_THREAD_ID")
         .env_remove("CODEX_SESSION_ID")
         .env_remove("MOAI_AGENT")
@@ -7477,12 +7476,6 @@ const JSON_SWEEP: &[&str] = &[
     "merge-driver",
     // 위키를 읽기만 한다(moai-ihu4). 훑는 판에는 `docs/` 가 없다 — 없는 위키도 객체 하나와 0 이다.
     "wiki",
-    // 우편함과 출석(moai-h8tn) — 트래커가 아니라 `.moai/mail`·`.moai/agents` 의 파일이다. 인사는 시험
-    // 프로세스의 pid 로 한다: 훑는 동안 살아 있다.
-    "hello",
-    "send",
-    "inbox",
-    "agents",
 ];
 
 /// 그 설정 곁의 읽음 파일들을 이어 읽는다(moai-omx7) — 읽음은 이제 설정이 아니라
@@ -7887,13 +7880,8 @@ fn every_command_still_speaks_json() {
     let made = ok(s.path(), &["add", "제목", "--json"]);
     let id = field(&made, "id");
     let epic = field(&ok(s.path(), &["add", "에픽", "--type", "epic", "--json"]), "id");
-    let me = std::process::id().to_string();
 
     let cases = [
-        vec!["hello", "--name", "sweeper", "--pid", &me, "--json"],
-        vec!["send", "sweeper", "훑기", "--as", "boss", "--json"],
-        vec!["inbox", "--as", "sweeper", "--json"],
-        vec!["agents", "--json"],
         vec!["status", "--json"],
         vec!["ready", "--json"],
         vec!["prime", "--json"],
@@ -13907,103 +13895,6 @@ fn hook_at_home(
     hook_argv(s, run_in, home, env, &["hook", event], input)
 }
 
-/// 훅을 **시험이 띄운 에이전트 밑에서** 돌린다(moai-ew4o.vuv) — `sh` 를 그 에이전트의 이름(`claude`·`codex`·`agy`)으로 건
-/// 링크로 띄우고, 그 셸이 `moai hook` 을 부른다. 훅은 조상 가운데 이름이 벤더인 첫 프로세스를 그 세션의 에이전트로
-/// 읽으니(`src/mail.rs` 의 `agent_among`), 이 셸이 그 자리에 선다.
-///
-/// 그냥 띄우던 판은 시험을 돌리는 프로세스의 조상을 읽었다 — Codex 세션이 `cargo test` 를 돌리면 장이 `codex-<8자>` 로
-/// 서서 이름을 `claude-<8자>` 로 박은 시험이 붉어졌고, Claude 아래서는 그 세션의 진짜 claude pid 가 시험 저장소의 장에
-/// 적혔다. 세션이 여럿인 시험은 그 한 pid 를 함께 써서, 한 프로세스는 장 하나라며 서로의 장을 이어 갔다. **셸은 훅을
-/// `exec` 하지 않는다**(`; exit $?`) — `exec` 하면 훅이 그 자리를 차지해 조상이 도로 시험 쪽이 된다. 셸은 훅이 끝나면
-/// 함께 끝나니, 그 장의 pid 는 다음 훅에서 죽은 것이다 — 이어 연 세션처럼 지금 프로세스로 다시 잇는다.
-fn under_agent(args: &[&str]) -> Command {
-    let vendor = match args.windows(2).find(|w| w[0] == "--dialect").map(|w| w[1]) {
-        Some("codex") => "codex",
-        Some("antigravity") => "agy",
-        _ => "claude",
-    };
-    staged_under(vendor, args)
-}
-
-/// [`staged`] 을 **그 벤더 이름의 가짜 에이전트 밑에서**(리뷰 moai-ew4o.q9f) — [`under_agent`] 와 같은 셸이다. `moai` 가
-/// 조상에서 찾는 첫 에이전트가 이것이라, 시험을 돌리는 프로세스 위가 무엇이든(Codex 세션이 `cargo test` 를 돌려도) 답이
-/// 같다. 조상으로 나를 찾는 `send`·`inbox`·`hello` 는 Codex 밑에서 세션 id 로만 찾고 `MOAI_AGENT` 를 안 읽어, 그냥 띄운
-/// 시험은 돌리는 쪽이 Codex 면 붉어졌다. 셸은 `moai` 가 끝나면 함께 끝난다 — 그 pid 로 적힌 장은 곧 죽은 것이다.
-fn staged_under(vendor: &str, args: &[&str]) -> Command {
-    let mut cmd = isolated(fake_agent(vendor));
-    cmd.args(["-c", "\"$0\" \"$@\"; exit $?", BIN])
-        .args(args)
-        .env("MOAI_ACTOR", ACTOR)
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1");
-    cmd
-}
-
-/// 훅을 **살아 남는 에이전트 밑에서** 돌린다 — [`under_agent`] 의 셸은 훅이 끝나면 함께 끝나 그 장의 pid 가 곧 죽는다.
-/// 훅이 끝난 뒤에도 그 세션이 살아 있어야 재는 시험(이어 연 세션, 일하는 중인 세션 깨우기)이 쓴다. 셸은 훅을 부르고
-/// 다 썼다는 표를 세운 뒤 `sleep` 이 되어(`exec` — pid 와 선 때는 그대로다) 놓을 때까지 산다. 낸 글을 함께 돌려준다.
-///
-/// **훅의 종료 코드도 잰다**(리뷰 moai-ew4o.q9f) — [`hook_argv`] 와 같은 자다. 셸이 `sleep` 이 되어 그 코드를 못 돌려주니
-/// 셸이 적어 둔 것을 읽는다. 안 재던 판은 이 길로 옮긴 시험에서 "훅은 무엇이 어긋나도 0" 을 아무도 안 봤다.
-#[cfg(unix)]
-fn hook_held(s: &Scratch, event: &str, input: &str) -> (String, Sleeper) {
-    use std::io::Write as _;
-    let tmp = s.path().join("hooktmp");
-    std::fs::create_dir_all(&tmp).unwrap();
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let at = |what: &str| tmp.join(format!("held-{nanos}.{what}"));
-    let (out, err, code, done) = (at("out"), at("err"), at("code"), at("done"));
-    let mut child = isolated(fake_agent("claude"))
-        .args([
-            "-c",
-            "\"$0\" \"$@\" > \"$HELD_OUT\" 2> \"$HELD_ERR\"; echo $? > \"$HELD_CODE\"; : > \"$HELD_DONE\"; exec sleep 600",
-            BIN,
-            "hook",
-            event,
-        ])
-        .env("MOAI_ACTOR", ACTOR)
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"))
-        .env("TMPDIR", &tmp)
-        .env("HELD_OUT", &out)
-        .env("HELD_ERR", &err)
-        .env("HELD_CODE", &code)
-        .env("HELD_DONE", &done)
-        .current_dir(s.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let _ = child.stdin.take().unwrap().write_all(input.as_bytes());
-    let alive = Sleeper(child);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while !done.exists() {
-        assert!(std::time::Instant::now() < until, "훅이 20초 안에 안 끝났다");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    assert_eq!(
-        std::fs::read_to_string(&code).unwrap().trim(),
-        "0",
-        "훅이 비영으로 끝났다 — 훅은 무엇이 어긋나도 0 이어야 한다\nstderr: {}",
-        std::fs::read_to_string(&err).unwrap_or_default()
-    );
-    (std::fs::read_to_string(&out).unwrap(), alive)
-}
-
-/// 그 벤더의 이름을 단 `sh` — `<시험 임시 자리>/fake-agents/<이름>` 에 건 링크다. 프로세스 이름(`/proc/<pid>/comm`)은
-/// 링크의 이름이라 훅이 그 벤더로 읽는다. 시험 여럿이 함께 지어도 하나만 선다.
-fn fake_agent(vendor: &str) -> PathBuf {
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fake-agents");
-    std::fs::create_dir_all(&dir).unwrap();
-    let at = dir.join(vendor);
-    if let Err(e) = std::os::unix::fs::symlink("/bin/sh", &at) {
-        assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists, "{}: {e}", at.display());
-    }
-    at
-}
-
 /// [`hook_at_home`] 의 몸통 — 인자를 통째로 받는다(`--dialect`, moai-u5wr).
 fn hook_argv(
     s: &Scratch,
@@ -14016,7 +13907,7 @@ fn hook_argv(
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut cmd = under_agent(args);
+    let mut cmd = staged(args);
     if let Some(home) = home {
         cmd.env("HOME", home);
     }
@@ -14404,6 +14295,78 @@ fn the_board_and_the_hook_carry_the_same_install_notices() {
     assert_eq!(here.len(), 3, "설치 알림 셋이 다 서지 않았다 — {said}");
     // **양쪽으로 견준다.** 한쪽만 보면 그 화면에서 알림이 **빠지는** 되돌림이 푸르게 지나간다.
     assert_eq!(here, there, "두 화면의 설치 알림이 갈렸다\n--- status\n{said}\n--- 보드\n{board}");
+}
+
+/// **옛 판이 심은 스킬·훅은 다시 심으라고 댄다**(moai-ybns.451.rpd). 0.8 이 심은 저장소를 0.9 로 열면 AGENTS.md 의
+/// 알림 하나만 섰고, 그것을 따라 친 `moai init` 은 스킬을 안 건드려 보드가 "드러난 것 없다" 로 끝났다 — 걷힌 명령을
+/// 가르치는 `moai-work` 와 걷힌 이벤트를 든 Codex 훅이 그대로인데. 알림이지 경고가 아니고, 종료 코드는 0 이다.
+#[test]
+fn a_stale_planted_tree_names_the_install_line() {
+    let s = init("staletree");
+    let root = s.path();
+    let stale = |root: &Path| -> Option<serde_json::Value> {
+        let out = moai(root, &["status", "--json"]);
+        assert!(out.status.success(), "알림이 종료 코드를 바꿨다");
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(v["warnings"].as_array().unwrap().iter().all(|w| w["kind"] != "skills_stale"), "경고로 섰다");
+        v["notices"].as_array().unwrap().iter().find(|n| n["kind"] == "skills_stale").cloned()
+    };
+    // 아무것도 안 심은 저장소와 방금 심은 저장소는 조용하다.
+    assert_eq!(stale(root), None);
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    assert_eq!(stale(root), None, "방금 심은 트리를 낡았다고 했다");
+
+    // 옛 판이 심고 이 판은 안 심는 스킬, 그리고 이 판에 없는 이벤트를 든 훅.
+    let work = root.join(".agents/skills/moai-work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("SKILL.md"), "---\nname: moai-work\n---\nmoai hello\n").unwrap();
+    let hooks = root.join(".codex/hooks.json");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&hooks).unwrap()).unwrap();
+    let first = v["hooks"].as_object().unwrap().values().next().unwrap().clone();
+    v["hooks"]["Interrupt"] = first;
+    std::fs::write(&hooks, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    let n = stale(root).expect("낡은 트리를 안 댔다");
+    assert_eq!(n["ids"], serde_json::json!([".codex/hooks.json", ".agents/skills"]));
+    assert_eq!(n["hint"], "moai skill install --agent codex", ".agents 를 맞추는 줄은 --agent 를 단다");
+    let said = ok(root, &["status"]);
+    assert!(said.contains("moai skill install --agent codex"), "보드가 칠 줄을 안 댄다\n{said}");
+    // 보드를 받는 훅도 같은 알림을 싣는다(`install_notices` 한 자리).
+    let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s-stale-tree")));
+    assert!(board.contains("moai skill install --agent codex"), "훅의 보드가 안 댄다\n{board}");
+
+    // `init` 은 훅이 선 저장소에서 스킬을 안 심는다 — 그 대신 같은 줄을 대고, "다 맞아 있다" 고 하지 않는다.
+    let again = ok(root, &["init"]);
+    assert!(again.contains("moai skill install --agent codex"), "init 이 다시 심으라고 안 한다\n{again}");
+    let json: serde_json::Value = serde_json::from_str(&ok(root, &["init", "--json"])).unwrap();
+    assert_eq!(json["skills_stale"], "moai skill install --agent codex");
+
+    // **못 읽는 자리는 세지 않고, 멈추지도 않는다** — 심긴 파일 하나를 FIFO 로 바꿔도 보드는 끝난다.
+    let skill = root.join(".agents/skills/moai/SKILL.md");
+    std::fs::remove_file(&skill).unwrap();
+    let made = Command::new("mkfifo").arg(&skill).status().unwrap();
+    assert!(made.success());
+    assert!(stale(root).is_some());
+    std::fs::remove_file(&skill).unwrap();
+
+    // 시킨 대로 다시 심으면 걷힌다.
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    assert_eq!(stale(root), None, "다시 심어도 안 걷혔다");
+    assert!(!work.exists());
+
+    // Claude 의 트리만 낡았으면 맨 `install` 이다 — 기본이 Claude 다. **진짜 `claude` 에 닿지 않는다**(`Claude` 위의
+    // 머리 주석) — 맨 `moai` 는 PATH 를 물려받아, `claude` 가 깔린 기계에서 시험이 함께 쓰는 빈 집에 등록을 적었다.
+    // 트리는 `claude` 가 없어도 심긴다.
+    let planted = staged(&["skill", "install"]).current_dir(root).env("PATH", "/nonexistent").output().unwrap();
+    assert!(
+        root.join(".claude/moai-plugin/.claude-plugin/plugin.json").is_file(),
+        "트리를 안 심었다\n{}",
+        text(&planted)
+    );
+    std::fs::write(root.join(".claude/moai-plugin/skills/moai/SKILL.md"), "old\n").unwrap();
+    let n = stale(root).expect("낡은 Claude 트리를 안 댔다");
+    assert_eq!(n["ids"], serde_json::json!([".claude/moai-plugin"]));
+    assert_eq!(n["hint"], "moai skill install");
 }
 
 /// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.
@@ -18487,9 +18450,11 @@ fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
 
     let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
     assert!(out.status.success(), "{}", text(&out));
-    for skill in ["moai/SKILL.md", "moai/references/commands.md", "moai-supervise/SKILL.md", "moai-wiki/SKILL.md"] {
+    for skill in ["moai/SKILL.md", "moai/references/commands.md", "moai-wiki/SKILL.md"] {
         assert!(shared.join(skill).is_file(), "{skill} 를 안 심었다\n{}", text(&out));
     }
+    // 감독 스킬은 Claude Code 에만 선다(moai-obxm) — 그 글은 Codex 에 없는 ListAgents·SendMessage 로 말한다.
+    assert!(!shared.join("moai-supervise").exists(), "Codex 의 자리에 감독 스킬을 심었다");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
     assert!(!s.path().join(".claude/moai-plugin").exists(), "고르지 않은 Claude 의 트리를 심었다");
 
@@ -18509,7 +18474,8 @@ fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
 }
 
 /// **두 트리는 같은 글을 받는다**(사용자 결정 2026-10-04) — 에이전트마다 다른 걸음은 글 안의 낱말표가 열로 가른다.
-/// 되풀이한 `--agent` 는 하나로 접히고, Codex 와 Antigravity 는 한 자리를 함께 쓴다.
+/// 되풀이한 `--agent` 는 하나로 접히고, Codex 와 Antigravity 는 한 자리를 함께 쓴다. 감독 스킬만 Claude 의 트리에
+/// 선다(moai-obxm).
 #[test]
 fn skill_install_plants_one_text_for_every_agent() {
     let s = init("skillevery");
@@ -18518,11 +18484,16 @@ fn skill_install_plants_one_text_for_every_agent() {
         ["skill", "install", "--agent", "codex", "--agent", "claude", "--agent", "antigravity", "--agent", "codex"];
     let out = c.run(s.path(), &args, true);
     assert!(out.status.success(), "{}", text(&out));
-    for skill in ["moai/SKILL.md", "moai-supervise/SKILL.md", "moai-wiki/SKILL.md"] {
+    for skill in ["moai/SKILL.md", "moai-wiki/SKILL.md"] {
         let claude = std::fs::read_to_string(s.path().join(".claude/moai-plugin/skills").join(skill)).unwrap();
         let shared = std::fs::read_to_string(s.path().join(".agents/skills").join(skill)).unwrap();
         assert_eq!(claude, shared, "{skill} 가 두 트리에서 다르다");
     }
+    let supervisor = s.path().join(".claude/moai-plugin/skills/moai-supervise");
+    for file in ["SKILL.md", "references/worker.md"] {
+        assert!(supervisor.join(file).is_file(), "Claude 의 트리에 감독의 {file} 가 없다");
+    }
+    assert!(!s.path().join(".agents/skills/moai-supervise").exists(), ".agents 에 감독 스킬을 심었다");
     assert!(c.calls().contains("plugin install"), "claude 를 골랐는데 등록을 안 했다\n{}", c.calls());
     let mut json_args = args.to_vec();
     json_args.extend(["--dry-run", "--json"]);
@@ -18648,17 +18619,19 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true);
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
-    for name in ["moai", "moai-supervise", "moai-wiki", "moai-work"] {
+    for name in ["moai", "moai-wiki"] {
         assert!(said.contains(&format!("rm -r {}", shared.join(name).display())), "{name} 을 안 댄다\n{said}");
         assert!(shared.join(name).join("SKILL.md").is_file(), "{name} 을 지웠다");
     }
+    // 심지 않은 감독 스킬은 대지 않는다 — 없는 자리를 `rm -r` 로 대면 사람이 무엇이 있는지 헛갈린다.
+    assert!(!said.contains(&shared.join("moai-supervise").display().to_string()), "심지 않은 감독 스킬을 댄다\n{said}");
     assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
 
     let json =
         String::from_utf8(c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--json"], true).stdout).unwrap();
     one_json_value(&json);
-    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(4), "{json}");
+    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(2), "{json}");
 
     let said = text(&c.run(s.path(), &["skill", "uninstall"], true));
     assert!(said.contains("걷어낼 것이 없다"), "{said}");
@@ -18757,8 +18730,12 @@ fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
     // 심었다는 줄도 `.codex/hooks.json` 이라 `/hooks` 를 든다 — 믿어 달라는 줄만의 글로 본다(리뷰 moai-u5wr.e74).
     assert!(text(&out).contains("/hooks 를 연다"), "Codex 에 믿어 달라는 줄이 없다\n{}", text(&out));
     let body = std::fs::read_to_string(&codex).unwrap();
-    for word in ["Planted by moai", "--dialect codex", "Bash|apply_patch", "\"Interrupt\"", "\"SessionEnd\""] {
+    for word in ["Planted by moai", "--dialect codex", "Bash|apply_patch", "\"Stop\""] {
         assert!(body.contains(word), "{word} 가 없다\n{body}");
+    }
+    // 출석 전용 이벤트는 0.9 부터 안 심는다(moai-5uwh.e9j).
+    for word in ["\"Interrupt\"", "\"SessionEnd\""] {
+        assert!(!body.contains(word), "{word} 를 심었다\n{body}");
     }
     assert!(!agy.exists(), "고르지 않은 Antigravity 의 훅을 심었다");
 
@@ -18791,6 +18768,79 @@ fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
     assert!(said.contains(&format!("rm {}", codex.display())), "moai 의 훅을 안 댄다\n{said}");
     assert!(!said.contains(&format!("rm {}", agy.display())), "남의 훅을 지우라고 한다\n{said}");
     assert!(codex.is_file() && agy.is_file(), "파일을 지웠다");
+}
+
+/// **심긴 트리에는 이 판이 심는 것만 남는다**(moai-six5.puc, moai-six5.1xz) — 옛 판이 심고 이 판은 안 심는 스킬
+/// 디렉터리(0.9.0 이 걷은 `moai-work`, `.agents` 의 감독)가 남으면 그 트리를 읽는 에이전트가 걷힌 명령을 배운다.
+/// 걷은 이름을 여기 적지 않고, 심은 뒤의 트리를 `--json` 이 댄 파일 목록과 견준다 — 어느 판이 무엇을 걷든 남는 것이
+/// 있으면 붉다. moai 가 안 심은 이름(`theirs`)과 사람의 파일이 든 디렉터리는 그대로 남는다.
+#[test]
+fn skill_install_leaves_nothing_an_older_moai_planted() {
+    let s = init("skillleftover");
+    let c = Claude::new("skillleftover-home");
+    let (plugin, shared) = (s.path().join(".claude/moai-plugin"), s.path().join(".agents/skills"));
+    let put = |at: PathBuf, body: &str| {
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(at, body).unwrap();
+    };
+    for tree in [plugin.join("skills"), shared.clone()] {
+        for name in ["moai-work", "moai-supervise"] {
+            put(tree.join(name).join("SKILL.md"), &format!("---\nname: {name}\ndescription: old\n---\n"));
+        }
+        put(tree.join("theirs/SKILL.md"), "---\nname: theirs\n---\n");
+    }
+    // 사람이 곁에 둔 파일 — moai 가 아는 이름이어도 그 디렉터리는 안 걷는다.
+    put(shared.join("moai-work/notes.md"), "mine\n");
+
+    let out = c.run(s.path(), &["skill", "install", "--agent", "claude", "--agent", "codex", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    let walk = |dir: &Path| -> Vec<String> {
+        let (mut out, mut todo) = (Vec::new(), vec![dir.to_path_buf()]);
+        while let Some(at) = todo.pop() {
+            for entry in std::fs::read_dir(&at).unwrap() {
+                let path = entry.unwrap().path();
+                match path.is_dir() {
+                    true => todo.push(path),
+                    false => out.push(path.strip_prefix(dir).unwrap().display().to_string()),
+                }
+            }
+        }
+        out.sort();
+        out
+    };
+    let expect = |planted: Vec<String>, kept: &[&str]| {
+        let mut all: Vec<String> = planted.into_iter().chain(kept.iter().map(|k| k.to_string())).collect();
+        all.sort();
+        all.dedup();
+        all
+    };
+    let claude_files = list_in(&json, "files").expect("files 가 없다");
+    assert_eq!(walk(&plugin), expect(claude_files, &["skills/theirs/SKILL.md"]), "{json}");
+    let shared_files = list_in(&json, "agents_files").expect("agents_files 가 없다");
+    let kept = ["theirs/SKILL.md", "moai-work/SKILL.md", "moai-work/notes.md"];
+    assert_eq!(walk(&shared), expect(shared_files, &kept), "{json}");
+    assert_eq!(std::fs::read_to_string(shared.join("moai-work/notes.md")).unwrap(), "mine\n");
+    // 0.9.0 이 걷은 것 — 일꾼은 두 트리에서, 감독은 `.agents` 에서만.
+    assert!(!plugin.join("skills/moai-work").exists() && !shared.join("moai-supervise").exists(), "{json}");
+    assert!(plugin.join("skills/moai-supervise/SKILL.md").is_file(), "Claude 의 감독을 걷었다");
+    assert!(
+        json.contains(&format!("\"path\":\"{}\",\"state\":\"foreign\"", shared.join("moai-work").display())),
+        "{json}"
+    );
+
+    // 다시 심어도 같다 — 걷을 것이 없으면 아무것도 안 바뀐다. 남긴 것은 한 줄로 댄다.
+    let again = walk(&shared);
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains(&shared.join("moai-work").display().to_string()), "남긴 것을 안 댄다\n{}", text(&out));
+    assert_eq!(walk(&shared), again);
+
+    // `uninstall` 은 남은 일꾼 스킬도 손으로 지울 자리로 댄다 — moai 가 심었던 이름이다.
+    let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
+    assert!(said.contains(&format!("rm -r {}", shared.join("moai-work").display())), "{said}");
+    assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
 }
 
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
@@ -24221,1502 +24271,7 @@ fn init_slow_git_does_not_hide_linked_dotfile_notices() {
     assert_eq!(read(&s.path().join(".gitignore")), before);
 }
 
-// ── 우편함과 출석(moai-h8tn) ────────────────────────────────────────
-
-/// 출석의 pid 로 쓸 산 프로세스 — 놓으면 죽는다. 시험 프로세스 자신을 쓰면 죽은 것을 못 재고, 남의 pid 를
-/// 쓰면 그 사이에 재사용될 수 있다.
-#[cfg(unix)]
-struct Sleeper(std::process::Child);
-
-#[cfg(unix)]
-impl Sleeper {
-    fn new() -> Sleeper {
-        Sleeper(Command::new("sleep").arg("600").stdin(Stdio::null()).spawn().expect("sleep 을 못 띄웠다"))
-    }
-    fn pid(&self) -> String {
-        self.0.id().to_string()
-    }
-    /// 죽이고 거둔다 — 거두지 않으면 좀비로 남아 `/proc` 에 선다.
-    fn end(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-#[cfg(unix)]
-impl Drop for Sleeper {
-    fn drop(&mut self) {
-        self.end();
-    }
-}
-
-/// 이 시험의 사람으로 인사한다 — `--pid` 를 주어 시험 프로세스의 조상(시험을 돌리는 `claude` 일 수 있다)을
-/// 안 집게 한다.
-fn hello_as(dir: &Path, name: &str, pid: &str, extra: &[&str]) -> String {
-    let mut args = vec!["hello", "--name", name, "--pid", pid, "--json"];
-    args.extend_from_slice(extra);
-    ok(dir, &args)
-}
-
-/// 출석 파일의 상태를 손으로 바꾼다 — 훅의 `Stop` 이 `idle` 을 적는 자리를 흉내 낸다.
-fn mark(dir: &Path, name: &str, status: &str) {
-    let at = dir.join(".moai/agents").join(format!("{name}.json"));
-    let text = std::fs::read_to_string(&at).unwrap();
-    let was =
-        ["\"status\":\"busy\"", "\"status\":\"idle\""].into_iter().find(|w| text.contains(w)).expect("상태 칸이 없다");
-    std::fs::write(&at, text.replacen(was, &format!("\"status\":\"{status}\""), 1)).unwrap();
-}
-
-/// 그 디렉터리의 보통 파일 이름 — 숨은 것(`.gitignore`·temp)은 뺀다.
-fn names_in(dir: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
-    let mut out: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| !n.starts_with('.'))
-        .collect();
-    out.sort();
-    out
-}
-
-/// **편지는 우편함을 지나고 트래커에는 한 글자도 안 든다**(moai-h8tn, CLAUDE.md "저널에 적는 것은 create·
-/// status·note·rm 넷뿐"). 보내고, 읽고, 읽음으로 옮기고, 답하고, 모르는 키를 지나 보내는 한 바퀴다.
-///
-/// **`status`·`ready`·`show` 는 우편함을 안 읽는다**(리뷰 다섯째 물음) — 편지와 출석이 서기 전후로 그 화면이
-/// 바이트째 같다. 보드에 "편지 N통" 을 얹는 날 이 시험이 붉어진다: 그것은 읽기 길이 새로 우편함을 여는
-/// 결정이라, 따로 정하고 이 단언을 함께 고친다.
-#[test]
-#[cfg(unix)]
-fn letters_go_through_the_mailbox_and_never_into_the_tracker() {
-    let s = init("mail-roundtrip");
-    let id = field(&ok(s.path(), &["add", "평범한 줄", "--json"]), "id");
-    let screens =
-        || ["status", "ready", "show"].map(|c| ok(s.path(), &[c])).join("\n---\n") + &ok(s.path(), &["show", &id]);
-    let before = screens();
-    let snapshot = issues(s.path());
-    let journals = names_in(&s.path().join(".moai/journal"));
-
-    let (boss, worker) = (Sleeper::new(), Sleeper::new());
-    let card = hello_as(s.path(), "boss", &boss.pid(), &["--vendor", "claude", "--role", "supervisor"]);
-    assert!(card.starts_with("{\"v\":1,\"name\":\"boss\",\"vendor\":\"claude\""), "출석의 꼴이 다르다 — {card}");
-    hello_as(s.path(), "w1", &worker.pid(), &["--role", "worker"]);
-
-    let sent = ok(s.path(), &["send", "w1", "첫 편지", "-b", "본문 한 줄", "--as", "boss", "--json"]);
-    let first = field(&sent, "id");
-    assert_eq!(
-        sent,
-        format!(
-            "{{\"id\":\"{first}\",\"v\":1,\"to\":\"w1\",\"from\":\"boss\",\"subject\":\"첫 편지\",\"body\":\"본문 한 줄\",\"sent_at\":\"{NOW}\",\"reply_to\":null}}\n"
-        )
-    );
-    let file = std::fs::read_to_string(s.path().join(format!(".moai/mail/w1/{first}.json"))).unwrap();
-    assert!(file.starts_with("{\"v\":1,\"to\":\"w1\""), "파일에 id 를 적었거나 꼴이 다르다 — {file}");
-    let piped = from_stdin(s.path(), &["send", "w1", "둘째", "-b", "-", "--as", "boss", "--json"], "여러\n줄\n");
-    assert!(piped.status.success(), "{}", text(&piped));
-    let second = field(&String::from_utf8(piped.stdout).unwrap(), "id");
-
-    let unread = ok(s.path(), &["inbox", "--as", "w1", "--json"]);
-    assert_eq!(ids_in(&unread), [first.clone(), second.clone()], "보낸 차례로 안 섰다 — {unread}");
-    assert!(
-        unread.starts_with("{\"me\":\"w1\",\"letters\":[{\"id\":") && unread.contains("\"read\":false"),
-        "{unread}"
-    );
-    assert!(unread.contains("\"body\":\"여러\\n줄\""), "stdin 의 본문을 잃었다 — {unread}");
-    assert!(ok(s.path(), &["inbox", "--as", "boss", "--json"]).contains("\"letters\":[]"), "남의 편지가 보였다");
-
-    let acked = ok(s.path(), &["inbox", "--as", "w1", "--ack", "--json"]);
-    assert!(!acked.contains("\"read\":false") && acked.contains("\"lost\":[]"), "{acked}");
-    assert_eq!(names_in(&s.path().join(".moai/mail/w1")), Vec::<String>::new(), "읽음으로 안 옮겼다");
-    assert_eq!(
-        names_in(&s.path().join(".moai/mail/w1/read")),
-        [format!("{first}@w1.json"), format!("{second}@w1.json")],
-        "읽은 이를 파일 이름에 안 적었다"
-    );
-    assert!(ok(s.path(), &["inbox", "--as", "w1", "--json"]).contains("\"letters\":[]"), "읽은 편지가 또 섰다");
-    let all = ok(s.path(), &["inbox", "--as", "w1", "--all", "--json"]);
-    assert_eq!(ids_in(&all).len(), 2, "--all 이 읽은 편지를 안 냈다 — {all}");
-
-    let reply =
-        field(&ok(s.path(), &["send", "boss", "Re: 첫 편지", "--reply-to", &first, "--as", "w1", "--json"]), "id");
-    let boss_box = ok(s.path(), &["inbox", "--as", "boss"]);
-    assert!(boss_box.contains(&reply) && boss_box.contains(&first), "답하는 편지를 안 댔다 — {boss_box}");
-
-    // **모르는 키는 지나간다** — 다른 판이 쓴 편지를 읽고 내는 사이에 그 키가 사라지면 안 된다.
-    std::fs::write(
-        s.path().join(".moai/mail/w1/20261004-061203-00000001.json"),
-        r#"{"v":2,"to":"w1","from":"boss","subject":"새 판","body":"","sent_at":"2026-10-04T06:12:03Z","reply_to":null,"priority":"high","id":"forged","read":true}"#,
-    )
-    .unwrap();
-    let newer = ok(s.path(), &["inbox", "--as", "w1", "--json"]);
-    assert!(newer.contains("\"v\":2") && newer.contains("\"priority\":\"high\""), "모르는 키를 잃었다 — {newer}");
-    // **겉의 키와 겹치는 모르는 키는 안 낸다**(리뷰 moai-h8tn.x4l) — 한 객체에 `id` 가 둘 서면 jq 가 뒤의 것을 믿는다.
-    assert!(!newer.contains("forged") && !newer.contains("\"read\":true"), "편지의 키가 겉의 키를 가렸다 — {newer}");
-
-    assert_eq!(issues(s.path()), snapshot, "편지가 스냅샷에 들었다");
-    assert_eq!(names_in(&s.path().join(".moai/journal")), journals, "편지가 저널에 들었다");
-    let journal_text: String =
-        journals.iter().map(|n| std::fs::read_to_string(s.path().join(".moai/journal").join(n)).unwrap()).collect();
-    assert!(!journal_text.contains("첫 편지"), "편지가 저널에 적혔다");
-    assert_eq!(screens(), before, "읽기 화면이 우편함이나 출석을 읽기 시작했다");
-}
-
-/// **보낸 이와 받는 이는 이름이다** — 이름이 파일 이름이 되므로 꼴을 엄하게 재고(쓰기는 엄하다), 누구인지
-/// 모르면 멈춘다. 아직 인사 안 한 이름에게는 보내되 한 줄로 댄다.
-#[test]
-fn a_letter_needs_a_named_sender_and_a_name_shaped_recipient() {
-    let s = init("mail-refuse");
-    let code_of = |args: &[&str]| {
-        let out = moai(s.path(), args);
-        assert!(!out.status.success(), "{args:?} 를 받았다");
-        field(&String::from_utf8_lossy(&out.stderr), "code")
-    };
-    assert_eq!(code_of(&["send", "w1", "제목", "--json"]), "no_actor", "보낸 이 없이 보냈다");
-    assert_eq!(code_of(&["inbox", "--json"]), "no_actor", "누구인지 모르고 편지를 보였다");
-    assert_eq!(code_of(&["send", "a/b", "제목", "--as", "boss", "--json"]), "bad_input");
-    assert_eq!(code_of(&["send", "w1", "제목", "--as", "any-idle-worker", "--json"]), "bad_input");
-    assert_eq!(code_of(&["send", "w1", "  ", "--as", "boss", "--json"]), "bad_input");
-    assert_eq!(code_of(&["send", "w1", "두\n줄", "--as", "boss", "--json"]), "bad_input");
-    assert_eq!(code_of(&["send", "w1", "제목", "--reply-to", "../x", "--as", "boss", "--json"]), "bad_input");
-    let big = "x".repeat(64 * 1024 + 1);
-    assert_eq!(code_of(&["send", "w1", "제목", "-b", &big, "--as", "boss", "--json"]), "bad_input");
-    // 제목도 상한이 있다 — 재지 않던 판은 13만 바이트 제목을 받아 훅이 싣는 한 통이 본문 상한을 몇 배 넘었다.
-    let long = "가".repeat(201);
-    assert_eq!(code_of(&["send", "w1", &long, "--as", "boss", "--json"]), "bad_input", "긴 제목을 받았다");
-    assert!(names_in(&s.path().join(".moai/mail/w1")).is_empty(), "거절하고도 보냈다");
-    // **대소문자만 다른 `any-idle-worker` 는 받는 이도 이름도 아니다**(리뷰 moai-ew4o.q9f) — 대소문자를 안 가리는 파일
-    // 시스템에서는 그 함이 열린 편지의 함이라, 한 사람에게 쓴 편지를 누구나 가졌다.
-    assert_eq!(code_of(&["send", "Any-Idle-Worker", "제목", "--as", "boss", "--json"]), "bad_input");
-    assert_eq!(code_of(&["send", "w1", "제목", "--as", "ANY-IDLE-WORKER", "--json"]), "bad_input");
-
-    // `MOAI_AGENT` 도 이름이다. 아직 인사 안 한 받는 이는 받되 한 줄로 댄다. 가짜 claude 밑에서 부른다 — Codex 밑에서는
-    // 그 값을 안 읽어(`staged_under`), 돌리는 쪽이 Codex 면 시험이 갈린다.
-    let told = |args: &[&str], name: &str| {
-        staged_under("claude", args).current_dir(s.path()).env("MOAI_AGENT", name).output().unwrap()
-    };
-    let out = told(&["send", "nobody-yet", "제목"], "boss");
-    assert!(out.status.success(), "{}", text(&out));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("nobody-yet"), "없는 이름을 말없이 받았다");
-    let mine = told(&["inbox", "--json"], "nobody-yet");
-    assert!(String::from_utf8_lossy(&mine.stdout).contains("\"me\":\"nobody-yet\""), "{}", text(&mine));
-}
-
-/// **나는 누구인가 — 이 명령을 띄운 에이전트다.** 조상의 pid 가 출석부에 서 있으면 `--as` 없이도 그 이름이다.
-/// 여기서는 시험 프로세스가 그 에이전트다(`moai` 의 조부모). 사이에 가짜 claude 를 둔다(`staged_under`) — 돌리는 쪽이
-/// Codex 면 그 밑의 `moai` 는 조상이 아니라 세션 id 로 나를 찾아(리뷰 moai-ew4o.q9f) 이 시험이 붉어졌다.
-#[test]
-#[cfg(target_os = "linux")]
-fn the_agent_this_runs_under_is_who_i_am() {
-    let s = init("mail-who");
-    hello_as(s.path(), "me1", &std::process::id().to_string(), &[]);
-    let ok = |dir: &Path, args: &[&str]| {
-        let out = staged_under("claude", args).current_dir(dir).output().unwrap();
-        assert!(out.status.success(), "{}", text(&out));
-        String::from_utf8(out.stdout).unwrap()
-    };
-    let out = ok(s.path(), &["inbox", "--json"]);
-    assert!(out.starts_with("{\"me\":\"me1\""), "조상의 출석으로 나를 못 찾았다 — {out}");
-    let sent = ok(s.path(), &["send", "me1", "나에게", "--json"]);
-    assert_eq!(field(&sent, "from"), "me1");
-}
-
-/// **동시에 보낸 편지는 하나도 안 사라진다** — 겨루기 시험이다(CLAUDE.md "동시 쓰기 테스트를 지우지 않는다").
-/// 스물넷이 함께 temp 를 쓰고 들이는 사이에 편지가 사라지거나 상하거나 한 id 에 둘이 서지 않는지 잰다.
-///
-/// **`hard_link` 와 `rename` 의 갈림은 이 시험이 못 잡는다**(리뷰 moai-h8tn.x4l) — 같은 마이크로초에 드는 두 보내기는
-/// 여기서 거의 안 선다(보내기를 `rename` 으로 되돌려 열다섯 번 돌려도 초록이었다). 이름이 겹친 자리는 단위 시험
-/// `mail::tests::a_taken_id_is_never_overwritten` 이 이웃을 미리 세워 두고 잰다.
-#[test]
-fn concurrent_sends_keep_every_letter() {
-    let s = init("mail-race-send");
-    const N: usize = 24;
-    let children: Vec<std::process::Child> = (0..N)
-        .map(|n| {
-            staged(&["send", "w1", &format!("편지 {n}"), "-b", &format!("본문 {n}"), "--as", "boss"])
-                .current_dir(s.path())
-                .stdout(Stdio::null())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap()
-        })
-        .collect();
-    for c in children {
-        let out = c.wait_with_output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    }
-    let shown = ok(s.path(), &["inbox", "--as", "w1", "--json"]);
-    let ids = ids_in(&shown);
-    let unique: std::collections::BTreeSet<&String> = ids.iter().collect();
-    assert_eq!((ids.len(), unique.len()), (N, N), "편지가 사라지거나 겹쳤다 — {shown}");
-    for n in 0..N {
-        assert!(
-            shown.contains(&format!("\"subject\":\"편지 {n}\",\"body\":\"본문 {n}\"")),
-            "{n} 번 편지가 상했다 — {shown}"
-        );
-    }
-}
-
-/// **여럿이 함께 읽음으로 옮겨도 편지 하나는 한 번만 실린다** — 겨루기 시험이다. 읽기가 `rename` 하나가
-/// 아니라 "읽고 지운다" 두 걸음이면 둘이 같은 편지를 가진다. 보내기도 그 사이에 섞어, 반쯤 쓴 편지를 읽는
-/// 쪽이 보거나 옮기던 편지를 잃는 자리도 함께 잰다.
-#[test]
-fn concurrent_acks_deliver_each_letter_once() {
-    let s = init("mail-race-ack");
-    const SENT: usize = 30;
-    let dir = s.path().to_path_buf();
-    let senders: Vec<std::thread::JoinHandle<()>> = (0..3)
-        .map(|k| {
-            let dir = dir.clone();
-            std::thread::spawn(move || {
-                for n in 0..SENT / 3 {
-                    let out = staged(&["send", "w1", &format!("{k}-{n}"), "--as", "boss"])
-                        .current_dir(&dir)
-                        .output()
-                        .unwrap();
-                    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-                }
-            })
-        })
-        .collect();
-    let readers: Vec<std::thread::JoinHandle<Vec<String>>> = (0..4)
-        .map(|_| {
-            let dir = dir.clone();
-            std::thread::spawn(move || {
-                let mut got = Vec::new();
-                let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
-                while std::time::Instant::now() < until {
-                    let out = staged(&["inbox", "--as", "w1", "--ack", "--json"]).current_dir(&dir).output().unwrap();
-                    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-                    got.extend(ids_in(&String::from_utf8(out.stdout).unwrap()));
-                    if names_in(&dir.join(".moai/mail/w1/read")).len() >= SENT {
-                        break;
-                    }
-                }
-                got
-            })
-        })
-        .collect();
-    for h in senders {
-        h.join().unwrap();
-    }
-    let mut taken: Vec<String> = readers.into_iter().flat_map(|h| h.join().unwrap()).collect();
-    taken.extend(ids_in(&ok(s.path(), &["inbox", "--as", "w1", "--ack", "--json"])));
-    let unique: std::collections::BTreeSet<&String> = taken.iter().collect();
-    assert_eq!(unique.len(), SENT, "편지를 잃었다 — {taken:?}");
-    assert_eq!(taken.len(), SENT, "한 편지가 두 번 실렸다 — {taken:?}");
-    assert_eq!(names_in(&s.path().join(".moai/mail/w1/read")).len(), SENT);
-}
-
-/// **`any-idle-worker` 편지는 먼저 옮긴 하나만 가진다** — 여덟이 한꺼번에 집어도 한 통은 한 일꾼에게 간다.
-/// 진 쪽은 `lost` 로 그 id 를 받는다.
-#[test]
-fn an_open_letter_goes_to_exactly_one_worker() {
-    let s = init("mail-race-open");
-    let ids: Vec<String> = (0..5)
-        .map(|n| {
-            field(&ok(s.path(), &["send", "any-idle-worker", &format!("일감 {n}"), "--as", "boss", "--json"]), "id")
-        })
-        .collect();
-    // 보낸 이는 제 일감을 안 가진다 — **일감이 아직 서 있을 때 잰다.** 일꾼이 다 가져간 뒤에 재면 빈 우편함이라
-    // 보낸 이를 빼는 자가 없어도 초록이다.
-    let mine = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
-    assert!(mine.contains("\"letters\":[]"), "보낸 이가 제 일감을 받았다 — {mine}");
-    let children: Vec<std::process::Child> = (0..8)
-        .map(|w| {
-            staged(&["inbox", "--as", &format!("w{w}"), "--ack", "--json"])
-                .current_dir(s.path())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap()
-        })
-        .collect();
-    let mut taken = Vec::new();
-    for c in children {
-        let out = c.wait_with_output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        taken.extend(ids_in(&String::from_utf8(out.stdout).unwrap()));
-    }
-    taken.sort();
-    let mut want = ids.clone();
-    want.sort();
-    assert_eq!(taken, want, "한 통이 두 일꾼에게 갔거나 아무에게도 안 갔다");
-}
-
-/// **`--wait` 는 편지가 올 때까지 기다리고, 오면 바로 돌아온다.** 헤드리스 고리가 쓰는 길이다.
-#[test]
-fn the_inbox_waits_for_a_letter() {
-    let s = init("mail-wait");
-    let started = std::time::Instant::now();
-    let child = staged(&["inbox", "--as", "w1", "--ack", "--wait", "30", "--json"])
-        .current_dir(s.path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(700));
-    let id = field(&ok(s.path(), &["send", "w1", "왔다", "--as", "boss", "--json"]), "id");
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    assert!(String::from_utf8_lossy(&out.stdout).contains(&id), "기다리다 온 편지를 안 냈다 — {}", text(&out));
-    assert!(started.elapsed() < std::time::Duration::from_secs(20), "편지가 왔는데 끝까지 기다렸다");
-
-    // 안 오면 그때까지 기다리고 빈 손으로 0 이다 — 시간이 다 된 것은 실패가 아니다.
-    let quiet = ok(s.path(), &["inbox", "--as", "w1", "--wait", "1", "--json"]);
-    assert!(quiet.contains("\"letters\":[]"), "{quiet}");
-
-    // **넘치는 기다림은 끝없는 기다림이다**(리뷰 moai-h8tn.x4l) — `Instant + Duration` 이 넘쳐 멈추던(panic) 값이다.
-    // 편지가 이미 서 있으니 바로 돌아온다.
-    // 되돌아가 끝없이 기다리면 시험 전체가 멈추므로 마감을 두고 부른다.
-    let id = field(&ok(s.path(), &["send", "w1", "또 왔다", "--as", "boss", "--json"]), "id");
-    let mut child = staged(&["inbox", "--as", "w1", "--wait", "18446744073709551615", "--json"])
-        .current_dir(s.path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while child.try_wait().unwrap().is_none() {
-        if std::time::Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("편지가 서 있는데 끝없이 기다렸다");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains(&id), "{}", text(&out));
-}
-
-/// **깨우기는 덤이다**(2026-10-04 사용자 결정 "깨우기를 덤으로 낮춘다"). Claude 는 이 CLI 가 못 깨워 보낸 쪽에
-/// SendMessage 를 대고, 일하는 중이면 안 깨우고, tmux 칸이 없으면 아무것도 안 하고 **사람 화면은 입을 다문다.**
-/// **moai 는 에이전트의 실행 파일을 안 띄운다** — 세션 id 를 든 Codex 의 장 앞에서도 `codex` 가 안 불린다. 불리면
-/// 받은 인자를 남기는 가짜 `codex` 를 PATH 앞에 둬 잰다.
-#[test]
-#[cfg(unix)]
-fn waking_is_a_bonus_that_never_runs_an_agent() {
-    use std::os::unix::fs::PermissionsExt;
-    let s = init("mail-wake");
-    let (a, b, c, d) = (Sleeper::new(), Sleeper::new(), Sleeper::new(), Sleeper::new());
-    hello_as(s.path(), "cl", &a.pid(), &["--vendor", "claude"]);
-    hello_as(s.path(), "busy1", &b.pid(), &["--vendor", "codex"]);
-    hello_as(s.path(), "cx", &c.pid(), &["--vendor", "codex"]);
-    hello_as(s.path(), "odd", &d.pid(), &["--vendor", "aider"]);
-    for n in ["cl", "cx", "odd"] {
-        mark(s.path(), n, "idle");
-    }
-    // 세션 id 를 든 Codex 의 장 — 옛 판은 이것으로 `codex queue --thread` 를 띄웠다.
-    let at = s.path().join(".moai/agents/cx.json");
-    let card = std::fs::read_to_string(&at).unwrap();
-    std::fs::write(&at, card.replacen("\"cwd\":", "\"session\":\"th-1\",\"cwd\":", 1)).unwrap();
-
-    let bin = s.path().join("fakebin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let said = s.path().join("codex-args");
-    let fake = bin.join("codex");
-    std::fs::write(&fake, format!("#!/bin/sh\nprintf '%s|' \"$@\" > '{}'\n", said.display())).unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-    let wake = |to: &str| {
-        let out = staged(&["send", to, "깨어나", "--as", "boss", "--wake", "--json"])
-            .current_dir(s.path())
-            .env("PATH", &path)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{}", text(&out));
-        let json = String::from_utf8(out.stdout).unwrap();
-        json[json.find("\"wake\":").expect("wake 가 없다")..].to_string()
-    };
-    assert_eq!(
-        wake("cl"),
-        "\"wake\":{\"to\":\"cl\",\"via\":\"send_message\",\"done\":false,\"why\":\"ask_sender\"}}\n"
-    );
-    // **Claude 가 그 세션을 부르는 이름이 장의 이름과 다르면 그 이름을 댄다**(2026-10-06 사용자 결정, moai-keka.id8) — 남이
-    // 쥐어 토막이 붙은 장이다. 장의 이름만 대던 판은 보낸 쪽이 Claude 가 모르는 이름으로 `SendMessage` 를 했다. 이름은
-    // 깨울 때 Claude 의 장부에서 읽는다 — 장에 안 적는다. 같으면 안 댄다.
-    let cfg = s.path().join("claude-cfg");
-    std::fs::create_dir_all(cfg.join("sessions")).unwrap();
-    let book = cfg.join("sessions").join(format!("{}.json", a.pid()));
-    let wake_with_book = |args: &[&str]| {
-        let out =
-            staged(args).current_dir(s.path()).env("PATH", &path).env("CLAUDE_CONFIG_DIR", &cfg).output().unwrap();
-        assert!(out.status.success(), "{}", text(&out));
-        String::from_utf8(out.stdout).unwrap()
-    };
-    std::fs::write(&book, "{\"name\":\"moa-issue-3\"}").unwrap();
-    let json = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
-    assert!(
-        json.ends_with("\"why\":\"ask_sender\",\"send_message_to\":\"moa-issue-3\"}}\n"),
-        "Claude 가 아는 이름을 안 댔다 — {json}"
-    );
-    let line = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake"]);
-    // 이름은 따옴표로 가른다(리뷰 moai-keka.qxk) — Claude 의 이름은 빈칸·쉼표를 들 수 있어, 맨 글로 이으면 어디까지가
-    // 이름인지 못 읽는다.
-    assert!(line.contains("`moa-issue-3` 에게"), "사람 화면이 Claude 가 아는 이름을 안 댔다 — {line}");
-    assert!(
-        !std::fs::read_to_string(s.path().join(".moai/agents/cl.json")).unwrap().contains("moa-issue-3"),
-        "Claude 의 이름을 장에 적었다"
-    );
-    // **Claude 가 쓰는 이름은 200자까지다**(리뷰 moai-keka.qxk) — 64자를 넘는 이름은 장의 이름에서 접혀 늘 갈리는 바로 그
-    // 이름이다. 출석의 이름 자(64자)로 재던 판은 그 이름을 안 대고 Claude 가 모르는 장의 이름을 댔다. 제어문자가 든 글은
-    // Claude 가 안 쓰는 꼴이라 안 댄다.
-    let long = "moa-issue keka review of the presence names and of clocks that run ahead";
-    assert!(long.chars().count() > 64, "시험의 이름이 길지 않다");
-    std::fs::write(&book, format!("{{\"name\":\"{long}\"}}")).unwrap();
-    let json = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
-    assert!(json.contains(&format!("\"send_message_to\":\"{long}\"")), "64자 넘는 Claude 의 이름을 안 댔다 — {json}");
-    std::fs::write(&book, "{\"name\":\"moa\\u0007issue\"}").unwrap();
-    let bell = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
-    assert!(!bell.contains("send_message_to"), "제어문자가 든 이름을 댔다 — {bell}");
-    // **그 프로세스의 장부만 믿는다**(리뷰 moai-keka.qxk) — Claude 는 죽은 프로세스의 장부를 안 걷어, 같은 pid 를 다시 받은
-    // 프로세스 앞에 남의 세션 이름이 선다. 장부의 `procStart` 가 장의 `pid_start`(그 프로세스가 선 때)와 다르면 남의 것이다.
-    #[cfg(target_os = "linux")]
-    {
-        let stat = std::fs::read_to_string(format!("/proc/{}/stat", a.pid())).unwrap();
-        let start = stat.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(19)).unwrap().to_string();
-        std::fs::write(&book, format!("{{\"name\":\"moa-issue-9\",\"procStart\":\"{start}\"}}")).unwrap();
-        let own = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
-        assert!(own.contains("\"send_message_to\":\"moa-issue-9\""), "그 프로세스의 장부를 안 믿었다 — {own}");
-        std::fs::write(&book, "{\"name\":\"moa-issue-9\",\"procStart\":\"1\"}").unwrap();
-        let stale = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
-        assert!(!stale.contains("send_message_to"), "죽은 프로세스의 장부의 이름을 댔다 — {stale}");
-    }
-    std::fs::write(&book, "{\"name\":\"cl\"}").unwrap();
-    let same = wake_with_book(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"]);
-    assert!(!same.contains("send_message_to"), "장과 같은 이름을 따로 댔다 — {same}");
-    // **장부 자리가 FIFO 면 안 연다**(리뷰 moai-keka.qxk) — `send --wake` 가 이 장부를 새로 연다. 열면 쓰는 쪽을 끝없이
-    // 기다려 편지를 다 보낸 `send` 가 안 끝난다.
-    std::fs::remove_file(&book).unwrap();
-    assert!(Command::new("mkfifo").arg(&book).status().unwrap().success(), "FIFO 를 못 지었다");
-    let mut child = staged(&["send", "cl", "깨어나", "--as", "boss", "--wake", "--json"])
-        .current_dir(s.path())
-        .env("PATH", &path)
-        .env("CLAUDE_CONFIG_DIR", &cfg)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let ended = (0..300).any(|_| {
-        let done = child.try_wait().unwrap().is_some();
-        if !done {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        done
-    });
-    if !ended {
-        let _ = child.kill();
-    }
-    let out = child.wait_with_output().unwrap();
-    assert!(ended, "FIFO 인 장부 앞에서 send --wake 가 멈췄다");
-    assert!(
-        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("send_message_to"),
-        "{}",
-        text(&out)
-    );
-    std::fs::remove_file(&book).unwrap();
-    // 일하는 중이면 언제부터인지를 함께 댄다(moai-u5wr.f29) — 끊긴 턴은 끝이 안 와 "턴이 끝나면" 이 거짓일 수 있다.
-    assert_eq!(
-        wake("busy1"),
-        format!(
-            "\"wake\":{{\"to\":\"busy1\",\"via\":\"none\",\"done\":false,\"why\":\"busy\",\"since\":\"{NOW}\"}}}}\n"
-        )
-    );
-    assert_eq!(wake("odd"), "\"wake\":{\"to\":\"odd\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
-    assert_eq!(wake("ghost"), "\"wake\":{\"to\":\"ghost\",\"via\":\"none\",\"done\":false,\"why\":\"nobody\"}}\n");
-    assert_eq!(wake("cx"), "\"wake\":{\"to\":\"cx\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
-    assert!(!said.exists(), "에이전트의 실행 파일을 띄웠다 — {:?}", std::fs::read_to_string(&said));
-    // 길이 없으면 사람 화면은 보낸 줄 하나뿐이다 — 깨우기는 덤이라 "못 깨웠다" 를 안 댄다.
-    let quiet = staged(&["send", "odd", "조용히", "--as", "boss", "--wake"])
-        .current_dir(s.path())
-        .env("PATH", &path)
-        .output()
-        .unwrap();
-    assert_eq!(String::from_utf8_lossy(&quiet.stdout).lines().count(), 1, "{}", text(&quiet));
-
-    // **소켓을 모르는 칸은 안 친다**(리뷰 moai-h8tn.x4l) — `-S` 없는 `tmux` 는 보내는 쪽의 `$TMUX` 서버에 붙어, 그
-    // 서버의 같은 번호 칸(사람의 창일 수 있다)에 글자를 친다. 가짜 `tmux` 는 불리면 받은 인자를 남긴다.
-    let typed = s.path().join("tmux-args");
-    let fake = bin.join("tmux");
-    std::fs::write(&fake, format!("#!/bin/sh\nprintf '%s|' \"$@\" >> '{}'\n", typed.display())).unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-    // `--pid` 없이 인사해야 tmux 칸이 적힌다 — 가짜 claude 밑에서 인사하고(돌리는 쪽이 Codex 여도 같은 답이다, 리뷰
-    // moai-ew4o.q9f), 그 셸은 곧 끝나니 pid 만 산 프로세스로 바꾼다.
-    let out = staged_under("claude", &["hello", "--name", "agy0", "--vendor", "antigravity", "--json"])
-        .current_dir(s.path())
-        .env("TMUX_PANE", "%999")
-        .output()
-        .unwrap();
-    assert!(String::from_utf8_lossy(&out.stdout).contains("\"tmux_pane\":\"%999\""), "{}", text(&out));
-    let e = Sleeper::new();
-    let at0 = s.path().join(".moai/agents/agy0.json");
-    let mut card0 = serde_like::Card::read(&at0);
-    card0.set("pid", &e.pid());
-    card0.drop_key("pid_start");
-    card0.write(&at0);
-    mark(s.path(), "agy0", "idle");
-    assert_eq!(wake("agy0"), "\"wake\":{\"to\":\"agy0\",\"via\":\"none\",\"done\":false,\"why\":\"no_way\"}}\n");
-    assert!(!typed.exists(), "소켓 없이 tmux 를 불렀다 — {:?}", std::fs::read_to_string(&typed));
-
-    // `any-idle-worker` 는 가장 오래 논 일꾼을 두드린다 — 보낸 이와 감독은 빼고.
-    let at = s.path().join(".moai/agents/cx.json");
-    let card = std::fs::read_to_string(&at).unwrap();
-    std::fs::write(&at, card.replacen(&format!("\"since\":\"{NOW}\""), "\"since\":\"2026-01-01T00:00:00Z\"", 1))
-        .unwrap();
-    assert!(
-        wake("any-idle-worker").starts_with("\"wake\":{\"to\":\"cx\",\"via\":\"none\""),
-        "가장 오래 논 일꾼을 안 골랐다"
-    );
-    assert!(!said.exists(), "에이전트의 실행 파일을 띄웠다");
-}
-
-/// **tmux 칸이 적힌 에이전트는 그 칸에 `moai inbox` 를 친다 — 벤더를 안 가린다**(2026-10-04 사용자 결정, 여기서는
-/// Codex 의 장이다). 시험은 **제 서버**(`tmux -L`)를 띄워 그 칸만 겨눈다. 사람의 tmux 에 붙지 않게 `TMUX` 를
-/// 걷고(`isolated`), 끝에 그 서버만 `-L` 로 내린다. tmux 가 없는 기계에서는 잴 것이 없어 지나간다.
-#[test]
-#[cfg(unix)]
-fn waking_types_into_the_agents_own_tmux_pane() {
-    let s = init("mail-wake-tmux");
-    let server = format!("moai-h8tn-{}", std::process::id());
-    // **넘어져도 제 서버를 내린다**(리뷰 moai-h8tn.x4l) — 내리는 줄을 끝에만 두던 판은 가운데 `assert` 가 지면 `cat` 을
-    // 든 서버를 남겼다. 놓을 때 `-L` 로 이 시험의 서버만 내린다.
-    struct Down(String);
-    impl Drop for Down {
-        fn drop(&mut self) {
-            let _ = isolated("tmux").arg("-L").arg(&self.0).arg("kill-server").output();
-        }
-    }
-    let tmux = |args: &[&str]| isolated("tmux").arg("-L").arg(&server).args(args).output();
-    let Ok(started) = tmux(&["-f", "/dev/null", "new-session", "-d", "-x", "80", "-y", "10", "cat"]) else {
-        return;
-    };
-    let down = Down(server.clone());
-    assert!(started.status.success(), "{}", text(&started));
-    let socket = String::from_utf8(tmux(&["display-message", "-p", "#{socket_path}"]).unwrap().stdout).unwrap();
-    let pane = String::from_utf8(tmux(&["display-message", "-p", "#{pane_id}"]).unwrap().stdout).unwrap();
-    let (socket, pane) = (socket.trim().to_string(), pane.trim().to_string());
-
-    let agent = Sleeper::new();
-    // 가짜 claude 밑에서 인사한다 — 돌리는 쪽이 Codex 여도 칸이 적힌다(리뷰 moai-ew4o.q9f).
-    let out = staged_under("claude", &["hello", "--name", "agy1", "--vendor", "codex", "--json"])
-        .current_dir(s.path())
-        .env("TMUX", format!("{socket},1,0"))
-        .env("TMUX_PANE", &pane)
-        .output()
-        .unwrap();
-    // `--pid` 없이 인사해야 tmux 칸이 적힌다 — 그 뒤에 pid 만 그 에이전트로 바꾼다.
-    let card = String::from_utf8_lossy(&out.stdout).to_string();
-    assert!(card.contains(&format!("\"tmux_pane\":\"{pane}\"")), "칸을 안 적었다 — {card}");
-    let at = s.path().join(".moai/agents/agy1.json");
-    let mut moved: serde_like::Card = serde_like::Card::read(&at);
-    moved.set("pid", &agent.pid());
-    moved.drop_key("pid_start");
-    moved.write(&at);
-    mark(s.path(), "agy1", "idle");
-
-    let sent = ok(s.path(), &["send", "agy1", "일어나", "--as", "boss", "--wake", "--json"]);
-    // 칸이 친 글을 되비추는 것은 tmux 가 pty 를 다시 읽은 뒤라 잠깐 늦는다 — 2초까지 다시 본다.
-    let mut shown = String::new();
-    for _ in 0..40 {
-        shown = String::from_utf8(tmux(&["capture-pane", "-p", "-t", &pane]).unwrap().stdout).unwrap();
-        if shown.contains("moai inbox") {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    drop(down);
-    assert!(sent.contains("\"via\":\"tmux\",\"done\":true"), "{sent}");
-    assert!(shown.contains("moai inbox"), "그 칸에 안 쳤다 — {shown}");
-}
-
-/// 출석 파일을 고치는 작은 손 — 의존성 없이 키 하나를 갈고 뺀다. 꼴은 우리가 쓴 한 줄 JSON 이다.
-mod serde_like {
-    pub struct Card(String);
-    impl Card {
-        pub fn read(at: &std::path::Path) -> Card {
-            Card(std::fs::read_to_string(at).unwrap())
-        }
-        /// 숫자 값 하나를 간다.
-        pub fn set(&mut self, key: &str, value: &str) {
-            let head = format!("\"{key}\":");
-            let at = self.0.find(&head).unwrap() + head.len();
-            let end = at + self.0[at..].find([',', '}']).unwrap();
-            self.0.replace_range(at..end, value);
-        }
-        /// 숫자 값을 든 키 하나를 뺀다.
-        pub fn drop_key(&mut self, key: &str) {
-            let head = format!(",\"{key}\":");
-            if let Some(at) = self.0.find(&head) {
-                let end = at + 1 + self.0[at + 1..].find([',', '}']).unwrap();
-                self.0.replace_range(at..end, "");
-            }
-        }
-        pub fn write(&self, at: &std::path::Path) {
-            std::fs::write(at, &self.0).unwrap();
-        }
-    }
-}
-
-/// **우편함은 트래커를 따라 루트로 간다** — 딸린 워크트리에서 보낸 편지와 인사가 주 체크아웃의 `.moai` 밑에
-/// 선다. 워크트리마다 우편함이 갈리면 옆 세션이 그 편지를 영영 못 본다.
-#[test]
-#[cfg(unix)]
-fn the_mailbox_of_a_worktree_is_the_main_checkouts() {
-    let s = Scratch::new("mail-worktree");
-    let main = s.path().join("main");
-    std::fs::create_dir_all(&main).unwrap();
-    git(&main, &["init", "-q"]);
-    ok(&main, &["init", "argos"]);
-    git(&main, &["add", "-A"]);
-    git(&main, &["commit", "-q", "-m", "init"]);
-    git(&main, &["worktree", "add", "-q", ".claude/worktrees/wt", "-b", "worktree-wt"]);
-    let inside = main.join(".claude/worktrees/wt");
-    let agent = Sleeper::new();
-    hello_as(&inside, "w1", &agent.pid(), &[]);
-    let id = field(&ok(&inside, &["send", "w1", "옆에서", "--as", "boss", "--json"]), "id");
-    assert!(main.join(format!(".moai/mail/w1/{id}.json")).is_file(), "루트의 우편함에 안 섰다");
-    assert!(main.join(".moai/agents/w1.json").is_file(), "루트의 출석부에 안 섰다");
-    assert!(!inside.join(".moai/mail").exists() && !inside.join(".moai/agents").exists(), "워크트리에 우편함을 세웠다");
-    assert!(ok(&main, &["inbox", "--as", "w1", "--json"]).contains(&id), "루트에서 그 편지를 못 본다");
-    // 디렉터리는 제 무시를 들어, `init` 을 다시 안 친 저장소에서도 git 이 안 담는다.
-    let status = git(&main, &["status", "--porcelain", "--untracked-files=all"]);
-    assert!(!status.contains(".moai/mail") && !status.contains(".moai/agents"), "git 이 우편함을 본다 — {status}");
-}
-
-/// **인사하면 출석부에 서고, 프로세스가 사라지면 `agents` 가 걷는다.** pid 가 재사용돼도 선 때가 다르면 죽은
-/// 것이다. 산 남의 이름은 못 뺏고, 같은 에이전트가 새 이름으로 인사하면 옛 장이 걷힌다.
-#[test]
-#[cfg(target_os = "linux")]
-fn hello_registers_and_agents_sweeps_the_gone() {
-    let s = init("agents-sweep");
-    let mut w = Sleeper::new();
-    let card = hello_as(s.path(), "w1", &w.pid(), &["--vendor", "codex", "--model", "gpt-5.5", "--role", "worker"]);
-    assert!(
-        card.starts_with(&format!(
-            "{{\"v\":1,\"name\":\"w1\",\"vendor\":\"codex\",\"model\":\"gpt-5.5\",\"role\":\"worker\",\"status\":\"busy\",\"since\":\"{NOW}\",\"pid\":{},\"pid_start\":",
-            w.pid()
-        )),
-        "출석의 꼴이 다르다 — {card}"
-    );
-    let listed = ok(s.path(), &["agents", "--json"]);
-    assert!(
-        listed.starts_with("{\"agents\":[{\"v\":1,\"name\":\"w1\"") && listed.ends_with("\"swept\":[]}\n"),
-        "{listed}"
-    );
-    assert!(ok(s.path(), &["agents"]).contains("w1"), "사람 화면에 안 섰다");
-
-    // 산 남의 이름은 못 뺏는다. **대소문자만 다른 이름도 같은 이름이다**(리뷰 moai-h8tn.x4l) — 대소문자를 안 가리는
-    // 파일 시스템에서는 한 장이다. 그 겨루기는 산 장을 찾는다: 앞에 선 죽은 `W1` 이 뒤의 산 `w1` 을 가리면 안 된다.
-    std::fs::write(
-        s.path().join(".moai/agents/W1.json"),
-        format!("{{\"v\":1,\"name\":\"W1\",\"pid\":{},\"pid_start\":1}}\n", std::process::id()),
-    )
-    .unwrap();
-    let other = Sleeper::new();
-    for asked in ["w1", "W1"] {
-        let out = moai(s.path(), &["hello", "--name", asked, "--pid", &other.pid(), "--json"]);
-        assert!(!out.status.success(), "산 에이전트의 이름({asked})을 뺏었다");
-        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "already_exists");
-    }
-    std::fs::remove_file(s.path().join(".moai/agents/W1.json")).unwrap();
-    // 같은 에이전트가 새 이름으로 인사하면 옛 장이 걷힌다 — 한 에이전트가 두 이름으로 서면 편지가 갈린다.
-    hello_as(s.path(), "w1-renamed", &w.pid(), &[]);
-    assert_eq!(names_in(&s.path().join(".moai/agents")), ["w1-renamed.json"]);
-    let renamed = std::fs::read_to_string(s.path().join(".moai/agents/w1-renamed.json")).unwrap();
-    assert!(
-        renamed.contains("\"role\":\"worker\"") && renamed.contains("\"model\":\"gpt-5.5\""),
-        "다시 인사하며 역할을 잃었다"
-    );
-
-    // pid 재사용 — 산 pid(이 시험 프로세스)에 다른 선 때를 적은 장은 죽은 것이다.
-    std::fs::write(
-        s.path().join(".moai/agents/reused.json"),
-        format!("{{\"v\":1,\"name\":\"reused\",\"pid\":{},\"pid_start\":1}}\n", std::process::id()),
-    )
-    .unwrap();
-    // 산지 모르는 장(pid 0)은 남는다.
-    std::fs::write(s.path().join(".moai/agents/unknown.json"), "{\"v\":1,\"name\":\"unknown\",\"pid\":0}\n").unwrap();
-    w.end();
-    let swept = ok(s.path(), &["agents", "--json"]);
-    assert!(swept.ends_with("\"swept\":[\"reused\",\"w1-renamed\"]}\n"), "죽은 것을 못 걷었다 — {swept}");
-    assert_eq!(names_in(&s.path().join(".moai/agents")), ["unknown.json"], "모르는 것을 걷었다");
-
-    // 꼴이 아닌 이름과 여러 줄 역할은 거절한다.
-    assert!(!moai(s.path(), &["hello", "--name", "a/b", "--pid", &other.pid()]).status.success());
-    assert!(!moai(s.path(), &["hello", "--role", "두\n줄", "--pid", &other.pid()]).status.success());
-}
-
-/// **우편함과 출석부는 커밋된 링크를 체크아웃 밖으로 따라가지 않는다**(moai-kxkw.7ky) — 리뷰 moai-ml0d.que 가 잰 그대로다:
-/// 받은 저장소가 `.moai/agents -> <밖>` 을 커밋해 두면 `moai hello` 가 밖에 `.gitignore`(`*`)와 장을 쓰고, `moai agents` 는
-/// 밖에 심어 둔 죽은 pid 의 장을 지웠다. 이제 쓰는 명령은 그 자리를 대고 비영으로 멈추고, 읽는 명령은 그 자리를 못 읽은
-/// 것으로 댄다. 밖의 파일은 한 바이트도 안 바뀐다.
-#[cfg(unix)]
-#[test]
-fn mail_and_attendance_follow_no_committed_link_out_of_the_checkout() {
-    let s = init("mail-link-out");
-    let away = Scratch::new("mail-link-out-away");
-    let (agents_away, mail_away) = (away.path().join("agents"), away.path().join("mail"));
-    std::fs::create_dir_all(&agents_away).unwrap();
-    std::fs::create_dir_all(mail_away.join("w1")).unwrap();
-    let planted = agents_away.join("planted.json");
-    std::fs::write(
-        &planted,
-        format!("{{\"v\":1,\"name\":\"planted\",\"pid\":{},\"pid_start\":1}}\n", std::process::id()),
-    )
-    .unwrap();
-    std::os::unix::fs::symlink(&agents_away, s.path().join(".moai/agents")).unwrap();
-    std::os::unix::fs::symlink(&mail_away, s.path().join(".moai/mail")).unwrap();
-    let everything = |dir: &Path| {
-        let mut names: Vec<String> =
-            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        names.sort();
-        names
-    };
-
-    let w = Sleeper::new();
-    let out = moai(s.path(), &["hello", "--name", "w1", "--pid", &w.pid()]);
-    assert!(!out.status.success(), "밖을 가리키는 출석부에 쓰고 성공으로 끝났다\n{}", text(&out));
-    assert!(text(&out).contains(&agents_away.display().to_string()), "어느 자리인지 안 댄다\n{}", text(&out));
-    // 고칠 것은 그 링크다 — 스냅샷·설정·락의 거절과 같은 코드다(리뷰 moai-kxkw.k2f).
-    let out = moai(s.path(), &["hello", "--name", "w1", "--pid", &w.pid(), "--json"]);
-    assert!(text(&out).contains(r#""code":"broken""#), "링크의 거절을 `broken` 으로 안 냈다\n{}", text(&out));
-
-    let out = moai(s.path(), &["agents", "--json"]);
-    assert!(String::from_utf8_lossy(&out.stdout).starts_with("{\"agents\":[],"), "밖의 장을 읽었다\n{}", text(&out));
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains(&agents_away.display().to_string()),
-        "못 연 출석부를 안 댄다\n{}",
-        text(&out)
-    );
-    assert!(planted.exists(), "밖에 심어 둔 장을 걷었다");
-
-    let out = moai(s.path(), &["send", "w1", "제목", "-b", "본문", "--as", "boss"]);
-    assert!(!out.status.success(), "밖을 가리키는 우편함에 쓰고 성공으로 끝났다\n{}", text(&out));
-    assert!(text(&out).contains(&mail_away.display().to_string()), "어느 자리인지 안 댄다\n{}", text(&out));
-    let out = moai(s.path(), &["send", "w1", "제목", "-b", "본문", "--as", "boss", "--json"]);
-    assert!(text(&out).contains(r#""code":"broken""#), "링크의 거절을 `broken` 으로 안 냈다\n{}", text(&out));
-
-    let out = moai(s.path(), &["inbox", "--as", "w1"]);
-    assert!(!out.status.success(), "못 연 우편함을 다 읽은 것으로 끝냈다\n{}", text(&out));
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains(&mail_away.display().to_string()),
-        "못 연 우편함을 안 댄다\n{}",
-        text(&out)
-    );
-    // 편지 하나를 물어도 같다 — 못 연 우편함 앞에서 "남의 편지이거나 걷혔다"(`not_found`)로 답하지 않는다. 고칠 것은 그
-    // 링크다(리뷰 moai-54yc.vqe).
-    let out = moai(s.path(), &["inbox", "20261005-000000-00000001", "--as", "w1", "--json"]);
-    assert!(!out.status.success(), "못 연 우편함을 다 읽은 것으로 끝냈다\n{}", text(&out));
-    assert!(!text(&out).contains("not_found"), "못 연 우편함 앞에서 못 찾았다고 했다\n{}", text(&out));
-    assert!(text(&out).contains(&mail_away.display().to_string()), "못 연 우편함을 안 댄다\n{}", text(&out));
-    // 못 연 우편함은 기다려도 안 풀린다 — `--wait` 를 다 채우며 그 일꾼을 노는 것으로 세우지 않고 곧 멈춘다.
-    let started = std::time::Instant::now();
-    let out = moai(s.path(), &["inbox", "--ack", "--wait", "60", "--as", "w1"]);
-    assert!(
-        !out.status.success() && started.elapsed() < std::time::Duration::from_secs(30),
-        "못 연 우편함 앞에서 기다렸다\n{}",
-        text(&out)
-    );
-
-    assert_eq!(everything(&agents_away), ["planted.json"], "체크아웃 밖의 출석부에 썼다");
-    assert_eq!(everything(&mail_away), ["w1"], "체크아웃 밖의 우편함에 썼다");
-    assert!(everything(&mail_away.join("w1")).is_empty(), "체크아웃 밖의 함에 썼다");
-}
-
-/// **못 연 출석부는 "아무도 없다" 가 아니다**(리뷰 moai-kxkw.k2f) — 출석부만 밖을 가리키고 우편함은 안에 선 판. 누가 있는지
-/// 모르니 감독은 역할을 몰라도 열린 편지를 안 가지고, `send`·`inbox` 는 그 거절을 먼저 대며, 훅과 `hello` 는 이 이름의
-/// 되돌아온 편지를 떠난 이의 것으로 치우지 않는다 — 훅은 그 세션을 아무도 아닌 것으로 두고, `hello` 는 고른 말과 `broken`
-/// 으로 멈춘다. 함의 `read/` 만 밖을 가리키면 그 함의 편지는 내놓지 않는다 — 옮기지 못할 편지를 부를 때마다 새로 받은
-/// 것으로 내던 자리다. 밖의 출석부는 한 바이트도 안 바뀐다.
-#[cfg(unix)]
-#[test]
-fn a_fenced_roster_decides_nothing_and_a_box_whose_read_is_fenced_offers_nothing() {
-    let s = init("mail-roster-fenced");
-    let away = Scratch::new("mail-roster-fenced-away");
-    let (boss, worker) = (Sleeper::new(), Sleeper::new());
-    hello_as(s.path(), "boss", &boss.pid(), &["--role", "supervisor"]);
-    hello_as(s.path(), "w2", &worker.pid(), &["--role", "worker"]);
-    let (agents, mail) = (s.path().join(".moai/agents"), s.path().join(".moai/mail"));
-    let agents_away = away.path().join("agents");
-    std::fs::rename(&agents, &agents_away).unwrap();
-    std::os::unix::fs::symlink(&agents_away, &agents).unwrap();
-    let snapshot = |dir: &Path| {
-        let mut all: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
-            .unwrap()
-            .map(|e| e.unwrap())
-            .map(|e| (e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).unwrap()))
-            .collect();
-        all.sort();
-        all
-    };
-    let before = snapshot(&agents_away);
-    let fence = agents_away.display().to_string();
-    let letter = |to: &str, from: &str| {
-        format!(
-            r#"{{"v":1,"to":"{to}","from":"{from}","subject":"s","body":"","sent_at":"2026-10-04T06:12:03Z","reply_to":null}}"#
-        )
-    };
-
-    // 우편함은 안에 서니 보내기는 된다 — 못 연 출석부만 먼저 댄다.
-    let out = moai(s.path(), &["send", "any-idle-worker", "일감", "-b", "x", "--as", "w1"]);
-    assert!(out.status.success() && String::from_utf8_lossy(&out.stderr).contains(&fence), "{}", text(&out));
-    // 감독은 역할을 몰라도 열린 편지를 안 가진다 — 일감은 함에서 출석부가 고쳐지기를 기다린다.
-    let out = moai(s.path(), &["inbox", "--ack", "--as", "boss", "--json"]);
-    assert!(
-        String::from_utf8_lossy(&out.stdout).contains("\"letters\":[]"),
-        "역할을 모른 채 열린 편지를 가졌다\n{}",
-        text(&out)
-    );
-    assert!(String::from_utf8_lossy(&out.stderr).contains(&fence), "못 연 출석부를 안 댄다\n{}", text(&out));
-    assert_eq!(names_in(&mail.join("any-idle-worker")).len(), 1, "열린 편지가 함을 떠났다");
-
-    // 훅은 그 세션을 아무도 아닌 것으로 둔다 — 되돌아온 편지를 떠난 이의 것으로 치우지도, 편지를 읽음으로 옮기지도 않는다.
-    let held = mail.join("claude-sess0001");
-    std::fs::create_dir_all(&held).unwrap();
-    std::fs::write(held.join("20261004-061203-00000001.json"), letter("claude-sess0001", "boss")).unwrap();
-    std::fs::write(held.join("20261004-061203-00000002.returned.json"), letter("w9", "claude-sess0001")).unwrap();
-    hook(&s, "user-prompt-submit", &event(&s, "sess0001-aaaa"));
-    assert_eq!(names_in(&held).len(), 2, "못 연 출석부로 이름을 지어 편지를 옮겼다");
-    assert!(!held.join("read").exists(), "못 연 출석부로 이름을 지어 편지를 읽음으로 옮겼다");
-
-    // 함의 `read/` 만 밖을 가리킨다 — 그 함의 편지는 내놓지 않고, 몇 번을 불러도 같은 편지를 새로 받았다고 안 한다.
-    let read_away = away.path().join("read");
-    std::fs::create_dir_all(&read_away).unwrap();
-    let id = field(&ok(s.path(), &["send", "w2", "일", "-b", "x", "--as", "boss", "--json"]), "id");
-    std::os::unix::fs::symlink(&read_away, mail.join("w2/read")).unwrap();
-    for _ in 0..2 {
-        let out = moai(s.path(), &["inbox", "--ack", "--as", "w2", "--json"]);
-        assert!(!out.status.success(), "못 연 `read/` 를 다 읽은 것으로 끝냈다\n{}", text(&out));
-        assert!(
-            String::from_utf8_lossy(&out.stdout).contains("\"letters\":[]"),
-            "옮기지 못할 편지를 내놓았다\n{}",
-            text(&out)
-        );
-        assert!(String::from_utf8_lossy(&out.stderr).contains(&read_away.display().to_string()), "{}", text(&out));
-    }
-    assert!(mail.join(format!("w2/{id}.json")).exists(), "옮기지 못한 편지를 잃었다");
-    assert!(std::fs::read_dir(&read_away).unwrap().next().is_none(), "체크아웃 밖의 `read/` 에 썼다");
-
-    // `hello` 는 고른 말과 `broken` 으로 먼저 멈추고, 이 이름의 되돌아온 편지를 안 건드린다.
-    std::fs::create_dir_all(mail.join("w3")).unwrap();
-    let returned = mail.join("w3/20261004-061203-00000009.returned.json");
-    std::fs::write(&returned, letter("w9", "w3")).unwrap();
-    let w3 = Sleeper::new();
-    let out = moai(s.path(), &["hello", "--name", "w3", "--pid", &w3.pid(), "--json"]);
-    assert!(
-        !out.status.success() && text(&out).contains(r#""code":"broken""#) && text(&out).contains(&fence),
-        "{}",
-        text(&out)
-    );
-    assert!(returned.exists() && !mail.join("w3/read").exists(), "멈춘 인사가 되돌아온 편지를 치웠다");
-    assert_eq!(snapshot(&agents_away), before, "체크아웃 밖의 출석부를 고쳤다");
-}
-
-/// **읽은 편지는 읽은 지 이레가 지나면 `moai agents` 가 걷는다**(moai-kxkw.my1, 2026-10-05 사용자 결정). 날은 보낸 날이
-/// 아니라 읽은 날로 잰다 — 보낸 지 열흘 된 편지를 오늘 읽으면 이레 동안 `inbox --all` 에 선다. 안 읽은 편지는 안 걷는다.
-/// 날수는 `.moai/config.toml` 의 `mail_read_days` 이고, `0` 이면 안 걷는다.
-#[cfg(unix)]
-#[test]
-fn a_read_letter_is_swept_a_week_after_it_was_read() {
-    let s = init("mail-read-sweep");
-    let (boss, worker) = (Sleeper::new(), Sleeper::new());
-    hello_as(s.path(), "boss", &boss.pid(), &["--role", "supervisor"]);
-    hello_as(s.path(), "w1", &worker.pid(), &["--role", "worker"]);
-    let (sent, read) = ("2026-09-01T00:00:00Z", "2026-09-11T00:00:00Z");
-    let old = field(&ok_at(s.path(), sent, &["send", "w1", "열흘 전", "-b", "x", "--as", "boss", "--json"]), "id");
-    ok_at(s.path(), read, &["inbox", "--ack", "--as", "w1"]);
-    let unread = field(&ok_at(s.path(), read, &["send", "w1", "안 읽음", "-b", "x", "--as", "boss", "--json"]), "id");
-    let all_at = |now: &str| {
-        ok_at(s.path(), now, &["agents"]);
-        ids_in(&ok_at(s.path(), now, &["inbox", "--all", "--as", "w1", "--json"]))
-    };
-    assert_eq!(all_at("2026-09-17T23:00:00Z"), [old.as_str(), unread.as_str()], "읽은 지 이레가 안 된 편지를 걷었다");
-    assert_eq!(all_at("2026-09-18T01:00:00Z"), [unread.as_str()], "읽은 지 이레가 지난 편지를 안 걷었다");
-
-    // `0` 이면 안 걷는다 — 날수를 줄이면 그만큼 일찍 걷는다.
-    let config = s.path().join(".moai/config.toml");
-    let base = std::fs::read_to_string(&config).unwrap();
-    std::fs::write(&config, format!("{base}mail_read_days = 0\n")).unwrap();
-    ok_at(s.path(), read, &["inbox", "--ack", "--as", "w1"]);
-    assert_eq!(all_at("2027-09-11T00:00:00Z"), [unread.as_str()], "끈 걷기가 읽은 편지를 걷었다");
-    std::fs::write(&config, format!("{base}mail_read_days = 2\n")).unwrap();
-    assert_eq!(all_at("2026-09-13T01:00:00Z"), Vec::<String>::new(), "이틀로 줄인 날수를 안 따랐다");
-}
-
-/// **다른 기계의 장은 pid 로 안 잰다**(moai-dhxm) — 컨테이너 여럿이 한 저장소를 쓰면 장의 pid 는 그것을 적은 컨테이너에서만
-/// 뜻을 갖는다. 이 기계의 `/proc` 에 없는 pid 를 죽은 것으로 읽던 판은 `moai agents` 가 남의 산 장을 걷고 그 함의 편지를
-/// 보낸 이에게 되돌렸다. `hello` 는 장에 기계와 호스트 이름과 닻을 적고, 기계가 다른 장은 닻으로 잰다. 기계를 안 적은 옛
-/// 장은 옛 판처럼 pid 로 잰다. 사람 화면은 다른 기계의 pid 에 그 기계의 이름을 단다 — 이 기계에서 그 pid 는 남의 것이다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_card_from_another_container_is_not_swept_by_its_pid() {
-    let s = init("agents-elsewhere");
-    let w = Sleeper::new();
-    let card = hello_as(s.path(), "w1", &w.pid(), &[]);
-    assert!(
-        card.contains("\"machine\":\"")
-            && card.contains("\"host\":\"")
-            && card.contains(&format!("\"seen\":\"{NOW}\"")),
-        "인사가 기계나 닻을 안 적었다 — {card}"
-    );
-    // 다른 컨테이너의 일꾼 — 그 pid 는 이 기계에 없다(커널의 pid 상한 위다). 닻은 방금 적혔다.
-    std::fs::write(
-        s.path().join(".moai/agents/far.json"),
-        format!(
-            "{{\"v\":1,\"name\":\"far\",\"vendor\":\"claude\",\"status\":\"busy\",\"since\":\"{NOW}\",\"pid\":4194400,\
-             \"pid_start\":1,\"machine\":\"00000000-0000-0000-0000-000000000000/4026532999\",\"host\":\"box-b\",\
-             \"seen\":\"{NOW}\"}}\n"
-        ),
-    )
-    .unwrap();
-    // 기계를 안 적은 옛 장은 옛 판처럼 pid 로 잰다 — 이 기계에 없는 pid 는 죽은 것이다.
-    std::fs::write(
-        s.path().join(".moai/agents/old.json"),
-        "{\"v\":1,\"name\":\"old\",\"pid\":4194400,\"pid_start\":1}\n",
-    )
-    .unwrap();
-    ok(s.path(), &["send", "far", "저쪽 일감", "--as", "boss"]);
-    let listed = ok(s.path(), &["agents", "--json"]);
-    assert!(listed.ends_with("\"swept\":[\"old\"]}\n"), "다른 기계의 산 장을 걷었거나 옛 장을 안 걷었다 — {listed}");
-    assert!(
-        listed.contains("\"name\":\"far\",\"vendor\":\"claude\",\"model\":\"\",\"role\":\"\",\"status\":\"busy\""),
-        "{listed}"
-    );
-    assert!(
-        ok(s.path(), &["inbox", "--as", "boss", "--json"]).contains("\"letters\":[]"),
-        "다른 기계의 장의 편지를 되돌렸다"
-    );
-    let table = ok(s.path(), &["agents"]);
-    assert!(table.contains("4194400@box-b"), "다른 기계의 pid 에 기계 이름을 안 달았다 — {table}");
-    // 제 줄로 잰다 — 표 전체에서 `<pid>@` 를 찾으면 이 pid 가 4194400 의 끝자리(400·94400…)일 때 남의 줄에 걸린다.
-    let w1 = table.lines().find(|l| l.starts_with("w1 ")).unwrap_or_else(|| panic!("w1 이 표에 없다 — {table}"));
-    assert!(w1.ends_with(&format!(" {}", w.pid())), "이 기계의 pid 에 이름을 달았다 — {table}");
-    // 이름을 겨룰 때도 다른 기계의 pid 는 그 기계의 이름을 단다 — 맨 숫자면 이 기계에서 그 pid 를 죽인다.
-    let taken = moai(s.path(), &["hello", "--name", "far", "--pid", &w.pid()]);
-    assert!(!taken.status.success() && text(&taken).contains("4194400@box-b"), "{}", text(&taken));
-    // 이 기계의 기다림은 다른 기계의 장을 안 고친다(2026-10-05 사용자 결정) — 상태도 닻도. 여기서 기다리는 것은 그 장의
-    // 프로세스가 아니라, 고치면 낡은 장이 이 기계의 `--as`·`MOAI_AGENT` 덕에 영영 산 것으로 읽힌다.
-    let far = s.path().join(".moai/agents/far.json");
-    let before = std::fs::read_to_string(&far).unwrap();
-    let out = staged_live(&["inbox", "--as", "far", "--ack", "--wait", "1", "--json"])
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert!(out.status.success() && text(&out).contains("저쪽 일감"), "{}", text(&out));
-    assert_eq!(std::fs::read_to_string(&far).unwrap(), before, "다른 기계의 장을 이 기계의 기다림이 고쳤다");
-}
-
-/// **감독은 `agents --role worker --status idle` 로 일꾼을 찾는다**(moai-snyk, 2026-10-04 사용자 결정). 일꾼은 턴
-/// 안에서 `inbox --wait` 로 기다리므로 Claude 의 `Stop` 훅이 `idle` 을 못 적고, 훅이 없는 벤더는 `hello` 의 `busy`
-/// 에 머문다 — 그래서 기다리는 자리가 제 장을 고친다. 기다리면 `idle`, 편지가 오면 `busy`, 때가 다 되면 `idle`
-/// 그대로다. 걸러 낸 줄도 죽었으면 걷힌다.
-#[test]
-#[cfg(unix)]
-fn a_waiting_worker_reads_idle_and_the_supervisor_filters_for_it() {
-    let s = init("agents-filter");
-    let (w1, w2, boss) = (Sleeper::new(), Sleeper::new(), Sleeper::new());
-    let mut gone = Sleeper::new();
-    hello_as(s.path(), "w1", &w1.pid(), &["--vendor", "codex", "--role", "worker"]);
-    hello_as(s.path(), "w2", &w2.pid(), &["--vendor", "claude", "--role", "worker"]);
-    hello_as(s.path(), "boss", &boss.pid(), &["--role", "supervisor"]);
-    hello_as(s.path(), "gone", &gone.pid(), &["--role", "supervisor"]);
-    let names = |args: &[&str]| -> Vec<String> {
-        let out = ok(s.path(), &[&["agents", "--json"], args].concat());
-        out.match_indices("\"name\":\"")
-            .map(|(at, m)| out[at + m.len()..].split('"').next().unwrap().to_string())
-            .collect()
-    };
-    // `hello` 는 `busy` 를 적는다 — 아직 아무도 안 기다린다.
-    assert!(names(&["--role", "worker", "--status", "idle"]).is_empty());
-    assert_eq!(names(&["--role", "worker"]), ["w1", "w2"]);
-    // 낱말은 다듬어 견준다 — `hello` 가 다듬어 적는다.
-    assert_eq!(names(&["--role", " supervisor "]), ["boss", "gone"]);
-    let human = ok(s.path(), &["agents", "--role", "nobody"]);
-    assert!(
-        human.contains("그 역할과 상태의 에이전트가 여기 없다"),
-        "거른 끝이 빈 것을 등록이 없는 것으로 말한다 — {human}"
-    );
-
-    // 기다리는 동안 `idle` — 감독이 바로 그 줄을 찾는다.
-    let child = staged(&["inbox", "--as", "w1", "--ack", "--wait", "30", "--json"])
-        .current_dir(s.path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while names(&["--role", "worker", "--status", "idle"]) != ["w1"] {
-        assert!(std::time::Instant::now() < deadline, "기다리는 일꾼이 idle 로 안 선다");
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    ok(s.path(), &["send", "w1", "일감", "--as", "boss"]);
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(
-        names(&["--status", "busy", "--role", "worker"]),
-        ["w1", "w2"],
-        "편지를 가진 일꾼이 busy 로 안 돌아갔다"
-    );
-    // 때가 다 된 기다림은 `idle` 을 남긴다 — 일꾼은 곧 다시 건다.
-    ok(s.path(), &["inbox", "--as", "w2", "--ack", "--wait", "1"]);
-    assert_eq!(names(&["--status", "idle"]), ["w2"]);
-    // 장이 없는 이름의 기다림은 장을 안 세운다 — 등록은 `hello` 와 훅의 일이다.
-    ok(s.path(), &["inbox", "--as", "stranger", "--wait", "1"]);
-    assert!(!s.path().join(".moai/agents/stranger.json").exists(), "기다림이 출석을 세웠다");
-
-    // 거르개 밖의 죽은 줄도 걷힌다.
-    gone.end();
-    let swept = ok(s.path(), &["agents", "--role", "worker", "--json"]);
-    assert!(swept.ends_with("\"swept\":[\"gone\"]}\n"), "거르개가 걷기를 좁혔다 — {swept}");
-}
-
-/// **편지를 가진 기다림만 `busy` 를 적고, 기다리지 않은 부름은 `idle` 을 안 적는다**(리뷰 moai-snyk.nic).
-///
-/// - 기다림을 시작하기 전에 `idle` 을 적던 판은 `--wait 0` 한 번이 일하는 장을 `idle` 로 남겼고, 편지가 이미 선
-///   판에는 `idle` 을 적었다가 곧장 `busy` 로 되돌려 `since`(얼마나 놀았나)만 새로 세웠다
-/// - 편지를 본 자리에서 `busy` 를 적던 판은 `any-idle-worker` 한 통을 두고 겨루다 **진** 일꾼까지 `busy` 로 세워,
-///   다시 걸기 전까지 `agents --status idle` 과 `send --wake` 의 후보에서 뺐다. 겨룸은 늘 서지는 않아 여러 바퀴로
-///   잰다 — 바퀴마다 가진 하나만 `busy` 다
-/// - 한 `--ack` 는 열린 편지를 한 통만 가진다 — 훅이 한 번에 한 통만 싣는 것과 같다. 쌓인 열린 편지를 먼저 깬
-///   일꾼 하나가 다 가지면 나머지 일감이 그 일꾼의 읽음 속에 숨는다
-/// - 아무도 없는 출석부는 거르개를 줘도 등록하는 길을 댄다
-#[test]
-#[cfg(unix)]
-fn only_a_wait_that_took_a_letter_reads_busy() {
-    let s = init("agents-took");
-    let nobody = ok(s.path(), &["agents", "--role", "worker"]);
-    assert!(nobody.contains("`moai hello` 가 등록하고"), "빈 출석부가 등록하는 길을 안 댄다 — {nobody}");
-    let sleepers: Vec<Sleeper> = (0..6).map(|_| Sleeper::new()).collect();
-    let workers: Vec<String> = (0..6).map(|n| format!("w{n}")).collect();
-    for (w, p) in workers.iter().zip(&sleepers) {
-        hello_as(s.path(), w, &p.pid(), &["--role", "worker"]);
-    }
-    // 그 이름의 장 한 조각 — `name` 부터 그 장이 닫힐 때까지.
-    let row = |w: &str| -> String {
-        let out = ok(s.path(), &["agents", "--json"]);
-        let at = out.find(&format!("\"name\":\"{w}\"")).unwrap_or_else(|| panic!("{w} 의 장이 없다 — {out}"));
-        out[at..out[at..].find('}').map_or(out.len(), |n| at + n)].to_string()
-    };
-
-    // 기다리지 않은 부름은 장을 안 바꾼다 — `hello` 가 적은 `busy` 와 그 `since` 그대로다.
-    let before = row("w0");
-    ok(s.path(), &["inbox", "--as", "w0", "--wait", "0"]);
-    assert_eq!(row("w0"), before, "기다리지 않은 부름이 일하는 장을 고쳤다");
-    // 보기만 하는 기다림도 편지를 보면 일하러 간다 — `--ack` 가 없으면 본 것이 얻은 것이다. 출석을 옮기기 앞으로 당긴
-    // 자리를 이 칸도 지난다(리뷰 moai-54yc.vqe). 본 편지는 치운다 — 아래 겨루기에서 제 편지를 일감으로 세지 않게.
-    mark(s.path(), "w5", "idle");
-    ok(s.path(), &["send", "w5", "보기만 한다", "--as", "boss"]);
-    ok(s.path(), &["inbox", "--as", "w5", "--wait", "0"]);
-    assert_eq!(field(&row("w5"), "status"), "busy", "편지를 본 기다림이 일하러 안 갔다");
-    ok(s.path(), &["inbox", "--as", "w5", "--ack"]);
-    // 편지가 이미 서 있으면 기다린 것이 아니다 — 시계를 안 고정한 부름이라, 장을 쓰면 `since` 가 바뀐다. 닻(`seen`)은
-    // 바뀌어도 된다 — 때가 된 닻은 상태가 같아도 다시 적는다(moai-dhxm).
-    ok(s.path(), &["send", "w0", "벌써 왔다", "--as", "boss"]);
-    let out =
-        staged_live(&["inbox", "--as", "w0", "--ack", "--wait", "5", "--json"]).current_dir(s.path()).output().unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    assert_eq!(ids_in(&String::from_utf8(out.stdout).unwrap()).len(), 1, "이미 선 편지를 안 가졌다");
-    let unseen = |r: &str| -> String {
-        let key = ",\"seen\":\"";
-        let Some(at) = r.find(key) else { return r.to_string() };
-        let end = at + key.len() + r[at + key.len()..].find('"').unwrap() + 1;
-        format!("{}{}", &r[..at], &r[end..])
-    };
-    assert_eq!(
-        unseen(&row("w0")),
-        unseen(&before),
-        "편지가 선 채로 부른 기다림이 idle 을 적었다가 since 를 새로 세웠다"
-    );
-
-    // 한 `--ack` 에 열린 편지 한 통 — 남은 것은 다음 일꾼의 몫이다.
-    for n in 0..2 {
-        ok(s.path(), &["send", "any-idle-worker", &format!("쌓인 일감 {n}"), "--as", "boss"]);
-    }
-    for w in ["w1", "w2"] {
-        let got = ids_in(&ok(s.path(), &["inbox", "--as", w, "--ack", "--json"]));
-        assert_eq!(got.len(), 1, "{w} 가 열린 편지를 한 통이 아니라 {}통 가졌다", got.len());
-    }
-
-    // 논 지 오래인 `since` — 시계를 못박은 부름(`NOW`)이 적는 값과 갈려야 되돌렸는지가 보인다.
-    let long_idle = "2026-09-01T00:00:00Z";
-    for round in 0..3 {
-        for w in &workers {
-            mark(s.path(), w, "idle");
-            let at = s.path().join(".moai/agents").join(format!("{w}.json"));
-            let text = std::fs::read_to_string(&at).unwrap();
-            let was = format!("\"since\":\"{}\"", field(&text, "since"));
-            std::fs::write(&at, text.replacen(&was, &format!("\"since\":\"{long_idle}\""), 1)).unwrap();
-        }
-        ok(s.path(), &["send", "any-idle-worker", &format!("일감 {round}"), "--as", "boss"]);
-        let children: Vec<std::process::Child> = workers
-            .iter()
-            .map(|w| {
-                staged(&["inbox", "--as", w, "--ack", "--wait", "1", "--json"])
-                    .current_dir(s.path())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .unwrap()
-            })
-            .collect();
-        let mut took = Vec::new();
-        for (w, c) in workers.iter().zip(children) {
-            let out = c.wait_with_output().unwrap();
-            assert!(out.status.success(), "{}", text(&out));
-            if !ids_in(&String::from_utf8(out.stdout).unwrap()).is_empty() {
-                took.push(w.clone());
-            }
-        }
-        assert_eq!(took.len(), 1, "{round} 바퀴: 한 통이 하나에게 안 갔다 — {took:?}");
-        for w in &workers {
-            let want = if took.contains(w) { "busy" } else { "idle" };
-            assert_eq!(field(&row(w), "status"), want, "{round} 바퀴: {w} — 편지를 가진 기다림만 busy 다");
-            // 진 일꾼은 먼저 적은 `busy` 를 되돌리며 `since` 까지 되돌린다(moai-4qtw) — 그 사이 일하지 않았다. 새로 세우면
-            // `send --wake` 가 가장 오래 논 일꾼을 잘못 고른다.
-            if !took.contains(w) {
-                assert_eq!(field(&row(w), "since"), long_idle, "{round} 바퀴: 진 {w} 의 since 가 새로 섰다");
-            }
-        }
-    }
-}
-
-/// 첫 파일 쓰기에서 죽을 자식 — 부르는 쪽이 `sh -c 'ulimit -f 0; …'` 로 감싸면 그 쓰기가 `SIGXFSZ` 를 낸다. **그 신호를
-/// 기본 동작으로 되돌린다**(리뷰 moai-jzym.a9k) — 시험을 띄운 쪽이 그 신호를 무시해 두면(CPython 은 켜질 때 무시하고
-/// `os.system` 은 안 되돌린다) 자식이 그 무시를 물려받고, 셸은 켜질 때 무시된 신호를 되돌리지 못한다. 그러면 쓰기는
-/// `EFBIG` 로 지기만 하고(출석 쓰기는 그 실패를 삼킨다) moai 는 편지를 옮긴 채 0 으로 끝나, 시험이 기계를 따라 붉어진다.
-/// 죽은 까닭은 [`died_writing`] 이 잰다 — 두 시험(훅의 `Stop`, `inbox` 의 기다림)이 이 둘을 함께 쓴다(리뷰 moai-54yc.vqe).
-#[cfg(unix)]
-fn dying_at_first_write(cmd: &mut Command) -> &mut Command {
-    use std::os::unix::process::CommandExt as _;
-    // SAFETY: `fork` 와 `exec` 사이에서 부르는 것은 `signal` 하나다 — 비동기 신호에 안전한 함수다.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::signal(libc::SIGXFSZ, libc::SIG_DFL);
-            Ok(())
-        });
-    }
-    cmd
-}
-
-/// **죽은 까닭까지 잰다** — 셸이 moai 를 띄우고 기다렸으면 `128 + SIGXFSZ`, moai 를 `exec` 했으면 그 신호 자체다. 다른
-/// 까닭으로 진 판(패닉의 101, 앞선 거절)은 편지를 옮기기 전에 끝나도 그 시험이 잴 것을 안 잰다.
-#[cfg(unix)]
-fn died_writing(out: &Output) -> bool {
-    use std::os::unix::process::ExitStatusExt as _;
-    out.status.signal() == Some(libc::SIGXFSZ) || out.status.code() == Some(128 + libc::SIGXFSZ)
-}
-
-/// **기다림은 편지를 읽음으로 옮기기 전에 출석을 적는다**(moai-4qtw) — 훅의 `Stop` 과 같은 자다(moai-jzym.flj). 옮긴 뒤에
-/// 적던 판은 그 쓰기에서 끊기면 편지가 읽음으로 남고 아무것도 안 찍혀, 다음 `inbox --ack` 가 "편지가 없다" 고 답했다.
-/// 늦은 쓰기를 기다리는 대신 첫 파일 쓰기에서 죽인다(`ulimit -f 0` 이 `SIGXFSZ` 를 낸다). 장을 `idle` 로 두어야 그 쓰기가
-/// 선다 — `busy` 를 `busy` 로 적는 부름은 아무것도 안 쓴다.
-#[test]
-#[cfg(unix)]
-fn a_wait_that_dies_writing_attendance_leaves_the_letter_unread() {
-    let s = init("inbox-ack-order");
-    let alive = Sleeper::new();
-    hello_as(s.path(), "w1", &alive.pid(), &["--role", "worker"]);
-    mark(s.path(), "w1", "idle");
-    ok(s.path(), &["send", "w1", "일감 하나", "--as", "boss"]);
-    let mailbox = s.path().join(".moai/mail/w1");
-    let unread = names_in(&mailbox);
-    assert_eq!(unread.len(), 1, "편지가 함에 안 들었다 — {unread:?}");
-
-    let mut cmd = isolated("sh");
-    cmd.args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "inbox", "--as", "w1", "--ack", "--wait", "5"])
-        .env("MOAI_ACTOR", ACTOR)
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .current_dir(s.path())
-        .stdin(Stdio::null());
-    let out = dying_at_first_write(&mut cmd).output().unwrap();
-    assert!(
-        died_writing(&out),
-        "파일 쓰기에서 기다림이 안 죽었다 — 시험이 헛돈다 ({:?})\nstderr: {}",
-        out.status,
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert_eq!(names_in(&mailbox), unread, "출석을 적기 전에 편지를 읽음으로 옮겼다");
-    assert!(names_in(&mailbox.join("read")).is_empty(), "죽은 기다림이 편지를 읽음으로 남겼다");
-
-    // 쓰기가 서면 같은 편지가 찍히고, 가진 일꾼은 일하는 중이다.
-    let said = ok(s.path(), &["inbox", "--as", "w1", "--ack", "--wait", "5"]);
-    assert!(said.contains("일감 하나"), "남은 편지가 다음 기다림에 안 찍혔다 — {said}");
-    let card = || std::fs::read_to_string(s.path().join(".moai/agents/w1.json")).unwrap();
-    assert_eq!(field(&card(), "status"), "busy", "편지를 가진 기다림을 노는 것으로 적었다 — {}", card());
-}
-
-/// **`moai inbox <id>` 는 그 편지 하나다**(moai-54yc.v70) — 훅이 자른 편지는 이미 읽음이라, 그 나머지를 보는 길이 읽은
-/// 편지까지 함 전체를 내는 `--all` 하나였다. 읽은 것도 안 읽은 것도 보이고, `--ack` 는 그 한 통만 옮긴다. 남의 편지와
-/// 없는 편지는 못 찾은 것이고, 꼴이 아닌 id 는 자리를 열기 전에 멈춘다. 기다림과는 안 묶인다.
-#[test]
-fn inbox_shows_one_letter_by_its_id() {
-    let s = init("inbox-one");
-    let send = |to: &str, subject: &str| field(&ok(s.path(), &["send", to, subject, "--as", "boss", "--json"]), "id");
-    let first = send("w1", "첫 편지");
-    let second = send("w1", "둘째 편지");
-    let theirs = send("w2", "남의 편지");
-    let open = send("any-idle-worker", "일감");
-
-    // 안 읽은 편지 하나 — 보기만 하면 함에 그대로다.
-    let shown = ok(s.path(), &["inbox", &second, "--as", "w1", "--json"]);
-    assert_eq!(ids_in(&shown), [second.as_str()], "그 편지 하나가 아니다 — {shown}");
-    assert!(s.path().join(format!(".moai/mail/w1/{second}.json")).is_file(), "보기만 한 편지를 옮겼다");
-    // `--ack` 는 그 한 통만 옮긴다.
-    ok(s.path(), &["inbox", &second, "--ack", "--as", "w1"]);
-    assert_eq!(names_in(&s.path().join(".moai/mail/w1")), [format!("{first}.json")], "다른 편지까지 옮겼다");
-    // 읽은 편지도 다시 보인다 — 훅이 자른 편지가 그 자리다. 그 id 와 무관한 깨진 편지는 그 부름을 덜 낸 것(비영)으로 안
-    // 끝낸다 — 훅이 내미는 `inbox <id> --ack` 가 편지를 옮겨 놓고 실패로 읽힌다(리뷰 moai-54yc.vqe).
-    std::fs::write(s.path().join(".moai/mail/w1/read/20261001-000000-00000000@w1.json"), "not json").unwrap();
-    let again = ok(s.path(), &["inbox", &second, "--as", "w1", "--json"]);
-    assert_eq!(ids_in(&again), [second.as_str()]);
-    assert!(again.contains("\"read\":true"), "읽은 편지로 안 보였다 — {again}");
-    // 열린 편지도 id 로 가진다.
-    let took = ok(s.path(), &["inbox", &open, "--ack", "--as", "w1", "--json"]);
-    assert_eq!(ids_in(&took), [open.as_str()]);
-    assert!(
-        s.path().join(format!(".moai/mail/any-idle-worker/read/{open}@w1.json")).is_file(),
-        "열린 편지를 안 가졌다"
-    );
-
-    // 남의 편지와 없는 편지는 못 찾은 것이다.
-    for (id, why) in [(&theirs, "남의 편지"), (&"20261005-000000-zzzzzzzz".to_string(), "없는 편지")] {
-        let out = moai(s.path(), &["inbox", id, "--as", "w1", "--json"]);
-        assert!(!out.status.success(), "{why}를 찾았다");
-        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "not_found", "{why} — {}", text(&out));
-    }
-    assert!(s.path().join(format!(".moai/mail/w2/{theirs}.json")).is_file(), "남의 편지를 건드렸다");
-    // 꼴이 아닌 id 는 멈춘다 — **자리를 열기 전에**: 트래커 밖에서도 `bad_input` 이다. 자리를 먼저 열면 거기서는 "트래커가
-    // 아니다" 로 지니, 저장소 안에서만 재면 차례가 바뀌어도 푸르다(리뷰 moai-54yc.vqe).
-    let outside = Scratch::new("inbox-one-outside");
-    for at in [s.path(), outside.path()] {
-        let out = moai(at, &["inbox", "moai-abcd", "--as", "w1", "--json"]);
-        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input", "{at:?} — {}", text(&out));
-    }
-    // 기다림과는 안 묶인다 — 이미 선 편지 하나를 보는 부름이다.
-    assert!(
-        !moai(s.path(), &["inbox", &first, "--wait", "1", "--as", "w1"]).status.success(),
-        "id 와 --wait 를 받았다"
-    );
-}
-
-/// `moai inbox <id>` 의 쪽을 끝 줄이 대는 자리(`--from`)를 따라 끝까지 넘겨 본문을 잇는다(moai-m81b) — 쪽마다 24KB
-/// (`cmd::mail::PAGE`) 안에 드는지 잰다. 줄 사이에서 끊긴 자리는 끝 줄의 자리가 실린 글자보다 하나 더 가서 안다.
-fn pages_of(dir: &Path, id: &str, me: &str, mut from: usize) -> (String, usize) {
-    let (mut got, mut pages) = (String::new(), 0);
-    loop {
-        let at = from.to_string();
-        let mut args = vec!["inbox", id, "--as", me];
-        if from > 0 {
-            args.extend(["--from", at.as_str()]);
-        }
-        let out = ok(dir, &args);
-        assert!(out.len() <= 24_000, "{pages} 째 뒤의 쪽이 {} 바이트다", out.len());
-        pages += 1;
-        let text = out.lines().filter_map(|l| l.strip_prefix("    ")).collect::<Vec<_>>().join("\n");
-        got.push_str(&text);
-        let last = out.trim_end().lines().last().unwrap_or_default();
-        let Some(next) = last.split("--from ").nth(1) else {
-            return (got, pages);
-        };
-        let next: usize = next.split(' ').next().and_then(|n| n.parse().ok()).unwrap();
-        // 끝 줄은 그대로 치면 다음 쪽이 나오는 명령이다 — 셸에서 제 장을 못 찾는 세션도 치게 `--as` 를 단다.
-        let named = format!("moai inbox {id} --from {next} --as {me}");
-        assert!(last.contains(&named), "끝 줄이 다음 쪽의 명령이 아니다 — {last}");
-        let to = from + text.chars().count();
-        assert!(next == to || next == to + 1, "{from}..{to} 뒤에 {next} 를 댔다");
-        if next == to + 1 {
-            got.push('\n');
-        }
-        from = next;
-    }
-}
-
-/// **편지 하나는 쪽으로 넘겨 본다**(moai-m81b) — `inbox <id>` 도 편지를 통째로 내, 에이전트의 출력 상한(Claude Code 의
-/// Bash 3만 자, Codex 0.160 의 1만 토큰)에서 가운데가 다시 빠졌다. 쪽마다 24KB 안에 들고, 끝 줄이 댄 `--from` 을 따라가면
-/// 본문이 그대로 이어진다. `--json` 은 쪽을 안 자른다(2026-10-05 사용자 결정). 본문 밖의 자리는 읽음으로 옮기기 전에
-/// 거절하고, `--from` 은 id 없이 안 선다.
-#[test]
-fn inbox_pages_one_long_letter() {
-    let s = init("inbox-page");
-    let body: String = (0..2_400)
-        .map(|k| format!("line {k:05} {}\n", if k % 3 == 0 { "가나다라마바사" } else { "abcdefghij" }))
-        .collect();
-    let id = field(&ok(s.path(), &["send", "w1", "긴 편지", "-b", &body, "--as", "boss", "--json"]), "id");
-    let (got, pages) = pages_of(s.path(), &id, "w1", 0);
-    assert!(pages >= 3, "쪽이 적다 — {pages}");
-    assert_eq!(got, body.strip_suffix('\n').unwrap(), "넘겨 본 쪽이 본문과 다르다");
-    // `--json` 은 기록이다 — `--from` 을 줘도 편지 전체를 낸다.
-    let json = ok(s.path(), &["inbox", &id, "--from", "100", "--as", "w1", "--json"]);
-    assert_eq!(json_text(&json, "body"), body, "--json 이 편지 전체가 아니다");
-    // 본문 밖의 자리는 거절한다 — `--ack` 가 함께여도 편지를 안 옮긴다.
-    let len = body.chars().count();
-    let out = moai(s.path(), &["inbox", &id, "--from", &len.to_string(), "--ack", "--as", "w1"]);
-    assert!(!out.status.success(), "본문 밖의 자리를 받았다 — {}", text(&out));
-    assert!(s.path().join(format!(".moai/mail/w1/{id}.json")).is_file(), "보일 것이 없는 부름이 편지를 옮겼다");
-    let last = ok(s.path(), &["inbox", &id, "--from", &(len - 2).to_string(), "--as", "w1"]);
-    assert_eq!(
-        last.lines().filter_map(|l| l.strip_prefix("    ")).collect::<String>(),
-        "j",
-        "끝 글자를 안 보였다 — {last}"
-    );
-    // `--from` 은 편지 하나의 깃발이다. **`--wait` 가 함께여도 그렇다**(리뷰 moai-54yc.fay) — clap 은 id 와 겨루는
-    // `--wait` 가 서면 `requires = "id"` 를 건너뛰어, 그 부름이 함의 편지를 통째로 내며 `--from` 을 말없이 버렸다.
-    assert!(!moai(s.path(), &["inbox", "--from", "5", "--as", "w1"]).status.success(), "id 없이 --from 을 받았다");
-    let waited = moai(s.path(), &["inbox", "--from", "5", "--wait", "0", "--as", "w1"]);
-    assert!(!waited.status.success(), "--wait 와 함께면 id 없이 --from 을 받았다 — {}", text(&waited));
-}
-
-/// **기다리는 에이전트는 안 두드린다**(리뷰 moai-snyk.nic 9번). `inbox --wait` 는 기다리는 동안 장을 `idle` 로 적어,
-/// `send --wake` 가 그 칸에 `moai inbox`+Enter 를 쳤다 — 그 기다림은 턴 안의 셸 명령이라 도는 턴에 글자가 끼어든다.
-/// 기다림은 에이전트 프로세스 **아래**에서 도는 것으로 안다: 셸을 하나 끼워 그 셸을 에이전트로 등록하고, 그 아래에서
-/// 남의 이름으로 기다리게 한다(제 이름이면 보낸 편지가 기다림을 끝낸다). 기다림이 없는 에이전트는 예전처럼 칸이
-/// 없으니 `no_way` 다.
-#[test]
-#[cfg(target_os = "linux")]
-fn waking_passes_over_an_agent_already_waiting() {
-    let s = init("wake-waiting");
-    let mut shell = isolated("sh")
-        .args(["-c", "\"$0\" inbox --as somebody-else --wait 30; :", BIN])
-        .current_dir(s.path())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let idle = Sleeper::new();
-    hello_as(s.path(), "waiting", &shell.id().to_string(), &["--vendor", "codex", "--role", "worker"]);
-    hello_as(s.path(), "elsewhere", &idle.pid(), &["--vendor", "codex", "--role", "worker"]);
-    mark(s.path(), "waiting", "idle");
-    mark(s.path(), "elsewhere", "idle");
-    // 셸 아래의 기다림이 설 때까지 — 프로세스가 뜨기 전에 재면 기다리지 않는 것으로 읽는다.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let why = loop {
-        let out = ok(s.path(), &["send", "waiting", "일감", "--as", "boss", "--wake", "--json"]);
-        let why = field(&out, "why");
-        if why == "waiting" || std::time::Instant::now() > deadline {
-            break why;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    };
-    let _ = shell.kill();
-    let _ = shell.wait();
-    assert_eq!(why, "waiting", "기다리는 에이전트의 칸을 두드리려 한다");
-    let out = ok(s.path(), &["send", "elsewhere", "일감", "--as", "boss", "--wake", "--json"]);
-    assert_eq!(field(&out, "why"), "no_way", "기다리지 않는 에이전트를 기다리는 것으로 읽는다 — {out}");
-    // 사람 화면은 입을 다문다 — 기다리는 에이전트는 편지를 스스로 가진다.
-    let said = text(&moai(s.path(), &["send", "elsewhere", "또", "--as", "boss", "--wake"]));
-    assert!(!said.contains("waiting"), "{said}");
-}
-
-// ── 훅의 우편과 출석(moai-h8tn) ──────────────────────────────────────
-
-/// 훅이 실은 글 — 계약 JSON 한 줄을 그대로 돌려준다. [`carried_text`] 는 첫 `"` 에서 끊는데, 보드와 함께 실린
-/// 편지는 그 뒤에 서서 보드의 따옴표 하나가 편지를 통째로 가린다. 한글은 JSON 에서도 그대로라 찾을 수 있다.
-fn loaded(out: &str) -> String {
-    one_json_value(out);
-    assert!(out.contains("\"additionalContext\":\""), "실은 글이 없다 — {out}");
-    out.to_string()
-}
-
-/// 그 세션의 출석 파일 — 훅이 지은 이름은 세션 id 의 앞 8자로 선다(`claude` 세션 파일이 없는 시험의 집).
-fn presence_of(s: &Scratch, session: &str) -> String {
-    let short: String = session.chars().filter(char::is_ascii_alphanumeric).take(8).collect();
-    std::fs::read_to_string(s.path().join(format!(".moai/agents/claude-{short}.json")))
-        .unwrap_or_else(|e| panic!("{session} 의 출석이 없다 — {e}"))
-}
-
-/// **훅이 출석을 적는다** — `SessionStart` 가 세우고(논다), `UserPromptSubmit` 이 일하는 중으로, `Stop` 이
-/// 노는 중으로 바꾼다. `PreToolUse` 는 우편함을 안 만지고 장을 세우지도 않는다 — 도구 호출마다 도는 자리다. 선 장의 닻만
-/// 때가 되었을 때 다시 적는다(moai-dhxm) — 같은 저장소를 쓰는 다른 기계(컨테이너)는 이 장을 닻으로만 잰다.
-#[test]
-fn the_hooks_keep_the_presence() {
-    let s = init("hook-presence");
-    let ev = event(&s, "sess0001-aaaa");
-    hook(&s, "pre-tool-use", &ev.replacen('{', "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},", 1));
-    assert!(!s.path().join(".moai/agents").exists(), "PreToolUse 가 출석을 썼다");
-
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",\"model\":\"claude-opus-5\",", 1));
-    let card = presence_of(&s, "sess0001-aaaa");
-    assert!(card.contains("\"name\":\"claude-sess0001\",\"vendor\":\"claude\",\"model\":\"claude-opus-5\""), "{card}");
-    // **시험을 돌리는 프로세스의 조상을 안 읽는다**(moai-ew4o.vuv) — 훅은 시험이 띄운 에이전트 밑에서 돈다
-    // ([`under_agent`]). 조상을 읽던 판은 Codex 가 돌린 시험에서 이름이 `codex-<8자>` 로 갈렸고, Claude 가 돌린 시험에는
-    // 그 세션의 진짜 claude pid 가 적혔다.
-    #[cfg(target_os = "linux")]
-    {
-        let at = card.find("\"pid\":").unwrap() + "\"pid\":".len();
-        let pid: u32 = card[at..].chars().take_while(char::is_ascii_digit).collect::<String>().parse().unwrap();
-        let mut up = std::os::unix::process::parent_id();
-        while up > 1 {
-            assert_ne!(pid, up, "시험을 돌리는 프로세스의 조상을 장에 적었다 — {card}");
-            let stat = std::fs::read_to_string(format!("/proc/{up}/stat")).unwrap_or_default();
-            up = stat.rsplit_once(')').and_then(|(_, r)| r.split_whitespace().nth(1)?.parse().ok()).unwrap_or(0);
-        }
-    }
-    assert!(card.contains("\"status\":\"idle\"") && card.contains("\"session\":\"sess0001-aaaa\""), "{card}");
-    hook(&s, "user-prompt-submit", &ev);
-    assert!(presence_of(&s, "sess0001-aaaa").contains("\"status\":\"busy\""), "프롬프트가 일하는 중을 안 적었다");
-    hook(&s, "stop", &ev);
-    assert!(presence_of(&s, "sess0001-aaaa").contains("\"status\":\"idle\""), "턴의 끝이 노는 중을 안 적었다");
-    // 도구만 부르는 긴 턴도 닻을 다시 적는다 — 상태와 `since` 는 그대로다. Codex 장만 적던 판은 일꾼의 몇 시간짜리 턴이
-    // 다른 기계의 감독에게 20분 만에 떠난 것으로 보였다.
-    let tool = ev.replacen('{', "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},", 1);
-    let later = "2026-09-11T04:27:03Z";
-    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", later)], "pre-tool-use", &tool);
-    let card = presence_of(&s, "sess0001-aaaa");
-    assert!(card.contains(&format!("\"seen\":\"{later}\"")), "도구 부름이 닻을 안 적었다 — {card}");
-    assert!(card.contains(&format!("\"status\":\"idle\",\"since\":\"{NOW}\"")), "도구 부름이 상태를 바꿨다 — {card}");
-    // 세션 id 가 없으면 아무도 아니다 — 누구의 편지를 실을지 모른다.
-    hook(&s, "user-prompt-submit", &format!("{{\"cwd\":{}}}", json_str(&s.path().display().to_string())));
-    assert_eq!(names_in(&s.path().join(".moai/agents")), ["claude-sess0001.json"]);
-}
-
-/// **훅이 편지를 싣고 그것이 곧 읽음이다**(2026-10-04 사용자 결정). `UserPromptSubmit` 은 비추는 줄로 매
-/// 프롬프트, `Stop` 은 붙드는 까닭으로 싣는다 — 이미 붙든 뒤(`stop_hook_active`)여도 새 편지는 싣는다(실은
-/// 만큼 줄어 끝이 있다). `SessionStart` 는 접힌 뒤에만 싣는다 — 붙는다고 잰 자리가 거기뿐이다.
-#[test]
-fn the_hooks_deliver_letters_and_mark_them_read() {
-    let s = init("hook-letters");
-    let ev = event(&s, "sess0002-bbbb");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    let me = "claude-sess0002";
-    let send = |subject: &str, body: &str| {
-        field(&ok(s.path(), &["send", me, subject, "-b", body, "--as", "boss", "--json"]), "id")
-    };
-
-    // 막 연 세션은 안 싣는다.
-    let waiting = send("기다리는 편지", "아직 안 읽음");
-    let out = hook_out(&s, "session-start", &ev.replacen('{', "{\"source\":\"clear\",", 1));
-    assert!(!out.contains("기다리는 편지"), "붙는지 모르는 자리에 실었다 — {out}");
-    assert!(s.path().join(format!(".moai/mail/{me}/{waiting}.json")).is_file(), "안 실은 편지를 읽음으로 옮겼다");
-
-    // 프롬프트가 싣고 읽음으로 옮긴다 — 보드와 함께.
-    let out = hook_out(&s, "user-prompt-submit", &ev);
-    let said = loaded(&out);
-    assert!(said.contains("기다리는 편지") && said.contains("아직 안 읽음") && said.contains(&waiting), "{said}");
-    assert!(said.contains(&format!("moai inbox <id> --as {me}")), "다시 보는 길을 안 댔다 — {said}");
-    assert!(s.path().join(format!(".moai/mail/{me}/read/{waiting}@{me}.json")).is_file(), "실은 편지가 읽음이 아니다");
-    assert!(hook_out(&s, "user-prompt-submit", &ev).trim().is_empty(), "같은 편지를 또 실었다");
-
-    // `Stop` 은 붙든다. 이미 붙든 뒤여도 새 편지는 싣는다.
-    let late = send("늦은 편지", "턴 끝에 왔다");
-    let out = hook_out(&s, "stop", &ev);
-    assert!(out.starts_with("{\"decision\":\"block\",\"reason\":") && out.contains("늦은 편지"), "{out}");
-    assert!(presence_of(&s, "sess0002-bbbb").contains("\"status\":\"busy\""), "붙들고도 논다고 적었다");
-    let later = send("또 온 편지", "붙든 뒤에 왔다");
-    let active = ev.replacen('{', "{\"stop_hook_active\":true,", 1);
-    assert!(hook_out(&s, "stop", &active).contains("또 온 편지"), "붙든 뒤라고 새 편지를 버렸다");
-    assert!(hook_out(&s, "stop", &active).trim().is_empty(), "편지 없이 또 붙들었다");
-    assert!(presence_of(&s, "sess0002-bbbb").contains("\"status\":\"idle\""));
-    for id in [&late, &later] {
-        assert!(s.path().join(format!(".moai/mail/{me}/read/{id}@{me}.json")).is_file(), "{id} 를 읽음으로 안 옮겼다");
-    }
-
-    // 접힌 뒤의 `SessionStart` 는 싣는다.
-    let after = send("접힌 뒤", "다시 열렸다");
-    let out = hook_out(&s, "session-start", &compacted(&s, "sess0002-bbbb"));
-    assert!(loaded(&out).contains("접힌 뒤"), "접힌 뒤에 안 실었다 — {out}");
-    assert!(s.path().join(format!(".moai/mail/{me}/read/{after}@{me}.json")).is_file());
-}
+// ── 훅이 내는 계약 JSON 읽기 ──────────────────────────────────────
 
 /// 계약 JSON 에서 `key` 의 문자열 값 — 이스케이프를 풀어 **에이전트가 받는 글 그대로** 낸다. 의존성 없이 하는 최소
 /// 풀이라 훅이 쓰는 꼴(`serde_json` — 비 ASCII 는 날것, 제어문자만 이스케이프)만 읽는다. 훅의 글을 재는 시험들이
@@ -25746,488 +24301,6 @@ fn json_text(out: &str, key: &str) -> String {
         }
     }
     panic!("닫히지 않은 글 — {out}")
-}
-
-/// 계약 JSON 의 `additionalContext` 글의 길이 — 이스케이프를 풀어 **Claude Code 가 세는 대로**(UTF-16) 센다.
-fn context_units(out: &str) -> usize {
-    json_text(out, "additionalContext").encode_utf16().count()
-}
-
-/// **한 번에 싣는 양에는 상한이 있다** — 넘는 편지는 다음 훅으로 미루고 몇 통이 남았는지 댄다. 남은 편지는
-/// 읽음으로 안 옮긴다.
-///
-/// **그 상한은 Claude Code 의 칸이다**(리뷰 moai-h8tn.x4l) — `additionalContext` 는 1만 자가 넘으면 통째로 파일로
-/// 빠지고 앞 2천 자만 남는다. 보드와 한 칸이라 둘을 더해 그 안에 들고, 혼자 넘는 편지는 잘라 싣고 전체를 다시 볼
-/// 길을 댄다.
-#[test]
-fn the_hooks_load_letters_up_to_a_budget() {
-    let s = init("hook-budget");
-    let ev = event(&s, "sess0003-cccc");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    let big = "가".repeat(10_000); // 1만 자 — 혼자 칸을 넘는다
-    let ids: Vec<String> = (0..3)
-        .map(|n| {
-            let sent = ["send", "claude-sess0003", &format!("큰 편지 {n}"), "-b", &big, "--as", "boss", "--json"];
-            field(&ok(s.path(), &sent), "id")
-        })
-        .collect();
-    let out = hook_out(&s, "user-prompt-submit", &ev);
-    let said = loaded(&out);
-    assert!(said.contains("큰 편지 0") && !said.contains("큰 편지 1"), "상한을 넘겨 실었다");
-    assert!(said.contains("2통이 더 기다린다"), "남은 수를 안 댔다 — {}", &said[..said.len().min(300)]);
-    assert!(context_units(&out) <= 10_000, "Claude Code 의 칸을 넘겼다 — {}", context_units(&out));
-    assert_eq!(names_in(&s.path().join(".moai/mail/claude-sess0003")).len(), 2, "안 실은 편지를 읽음으로 옮겼다");
-
-    // **자른 표는 그 편지 하나를 대고, 그 길이 나머지를 보인다**(moai-54yc.v70) — 함 전체를 내는 `--all` 이 아니다. **이어
-    // 볼 글자 자리도 댄다**(moai-m81b) — 편지를 통째로 내던 `inbox <id>` 는 그 출력도 에이전트의 상한에서 가운데가 빠졌다.
-    // 자리는 실린 글자 수이고, 거기서부터 넘겨 보면 남은 글자가 하나도 안 빠지고 겹치지도 않는다.
-    let cut = format!("moai inbox {} --from ", ids[0]);
-    assert!(said.contains("여기서 잘랐다") && said.contains(&cut), "자른 편지를 id 로 안 댔다");
-    let at: usize = said.split(&cut).nth(1).and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap();
-    let context = json_text(&out, "additionalContext");
-    let kept: usize = context.lines().filter_map(|l| l.strip_prefix("    ")).map(|l| l.matches('가').count()).sum();
-    assert_eq!(at, kept, "자른 표가 실린 글자와 다른 자리를 댔다");
-    // 자른 표는 그대로 치면 나머지가 나오는 한 명령이다 — 셸에서 제 장을 못 찾는 세션도 치게 `--as` 를 단다(리뷰
-    // moai-54yc.fay — 앞머리만 견주면 말묶음이 이름을 명령 밖으로 옮겨도 모른다).
-    let named = format!("moai inbox {} --from {at} --as claude-sess0003", ids[0]);
-    assert!(context.contains(&named), "자른 표가 이어 볼 명령을 그대로 안 댔다 — {named}");
-    let (rest, _) = pages_of(s.path(), &ids[0], "claude-sess0003", at);
-    assert_eq!(rest, "가".repeat(10_000 - at), "자른 자리부터 나머지를 안 보였다");
-    assert!(
-        !ok(s.path(), &["inbox", &ids[0], "--as", "claude-sess0003"]).contains("큰 편지 1"),
-        "그 편지 하나가 아니다"
-    );
-    // 남은 수는 다음 한 통을 댄다 — 그 길은 그 한 통만 읽음으로 옮긴다.
-    let next = format!("moai inbox {} --ack --as claude-sess0003", ids[1]);
-    // 끝 300 바이트는 바이트로 자른다 — `&said[..]` 로 자르면 이 단언이 서는 바로 그 회귀에서 그 자리가 '가' 가운데라,
-    // 시험이 제 메시지를 짓다가 넘어진다(리뷰 moai-54yc.vqe).
-    assert!(
-        said.contains(&next),
-        "남은 수가 다음 한 통을 안 댔다 — {}",
-        String::from_utf8_lossy(&said.as_bytes()[said.len().saturating_sub(300)..])
-    );
-    let one = ok(s.path(), &["inbox", &ids[1], "--ack", "--as", "claude-sess0003", "--json"]);
-    assert_eq!(ids_in(&one), [ids[1].clone()], "다음 한 통이 아닌 것을 읽었다 — {one}");
-    assert_eq!(names_in(&s.path().join(".moai/mail/claude-sess0003")), [format!("{}.json", ids[2])]);
-}
-
-/// **`any-idle-worker` 편지는 훅도 하나만 가진다** — 보낸 세션은 제 일감을 안 받고, 받는 세션 하나가 가진다.
-/// `moai hello` 로 지은 이름(여기서는 손으로 적은 장)이 훅의 이름보다 먼저다.
-#[test]
-fn the_hooks_hand_an_open_letter_to_one_session() {
-    let s = init("hook-open");
-    // 감독 — `hello` 로 지은 이름을 세션 id 로 잇는다.
-    std::fs::create_dir_all(s.path().join(".moai/agents")).unwrap();
-    std::fs::write(
-        s.path().join(".moai/agents/boss.json"),
-        "{\"v\":1,\"name\":\"boss\",\"vendor\":\"claude\",\"role\":\"supervisor\",\"status\":\"busy\",\"pid\":0,\"session\":\"boss0001\"}\n",
-    )
-    .unwrap();
-    let id = field(&ok(s.path(), &["send", "any-idle-worker", "일감", "--as", "boss", "--json"]), "id");
-    assert!(hook_out(&s, "stop", &event(&s, "boss0001")).trim().is_empty(), "감독이 제 일감을 받았다");
-    let out = hook_out(&s, "stop", &event(&s, "work0001"));
-    assert!(out.contains("일감"), "일꾼이 일감을 못 받았다 — {out}");
-    assert!(s.path().join(format!(".moai/mail/any-idle-worker/read/{id}@claude-work0001.json")).is_file());
-    assert!(hook_out(&s, "stop", &event(&s, "work0002")).trim().is_empty(), "한 일감이 두 세션에 갔다");
-}
-
-/// **편지로 붙든 턴의 닫기 물음은 그 뒤의 `Stop` 이 묻는다**(리뷰 moai-h8tn.x4l) — 편지 뒤의 `Stop` 은
-/// `stop_hook_active` 로 와, 그 표만 보던 판은 편지가 온 턴마다 닫기 물음(쥔 일·늘어난 경고)을 걸렀다. 그래도 닫기
-/// 물음은 한 번이다.
-#[test]
-fn the_close_still_holds_after_letters_held_the_turn() {
-    let s = init("hook-letters-close");
-    let id = field(&ok(s.path(), &["add", "락을 잡는다", "--json"]), "id");
-    ok(s.path(), &["mv", &id, "in_progress"]);
-    let ev = event(&s, "sess0005-eeee");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    ok(s.path(), &["send", "claude-sess0005", "턴 끝에 온 편지", "--as", "boss"]);
-    let held = hook_out(&s, "stop", &ev);
-    assert!(held.contains("턴 끝에 온 편지") && !held.contains(&format!("moai mv {id} done")), "{held}");
-    let active = ev.replacen('{', "{\"stop_hook_active\":true,", 1);
-    let closing = hook_out(&s, "stop", &active);
-    assert!(closing.contains(&format!("moai mv {id} done")), "편지 뒤의 닫기 물음이 빠졌다 — {closing}");
-    assert!(hook_out(&s, "stop", &active).trim().is_empty(), "닫기 물음이 두 번 붙들었다");
-}
-
-/// **이어 연 세션은 제 장을 지금 프로세스로 다시 잇는다**(리뷰 moai-h8tn.x4l) — `claude --resume` 은 세션 id 를 든 채
-/// 새 프로세스로 뜬다. 죽은 pid 를 든 채 다시 적던 판은 `moai agents` 가 산 세션의 장을 걷었고, 다시 설 때 이름과
-/// 역할(감독)을 잃었다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_resumed_session_moves_its_card_to_the_live_process() {
-    let s = init("hook-resume");
-    let mut before = Sleeper::new();
-    hello_as(s.path(), "sup", &before.pid(), &["--vendor", "claude", "--role", "supervisor"]);
-    // 그 장이 이 세션의 것이었다 — 훅이 적어 두는 세션 id 를 손으로 단다.
-    let at = s.path().join(".moai/agents/sup.json");
-    let card = std::fs::read_to_string(&at).unwrap();
-    std::fs::write(&at, card.replacen("\"cwd\":", "\"session\":\"sessRSM1-ffff\",\"cwd\":", 1)).unwrap();
-    before.end();
-    let (_, _alive) =
-        hook_held(&s, "session-start", &event(&s, "sessRSM1-ffff").replacen('{', "{\"source\":\"resume\",", 1));
-    let card = std::fs::read_to_string(&at).unwrap();
-    assert!(!card.contains(&format!("\"pid\":{},", before.pid())), "죽은 pid 를 그대로 적었다 — {card}");
-    assert!(card.contains("\"role\":\"supervisor\""), "역할을 잃었다 — {card}");
-    let listed = ok(s.path(), &["agents", "--json"]);
-    assert!(listed.ends_with("\"swept\":[]}\n") && listed.contains("\"name\":\"sup\""), "산 세션을 걷었다 — {listed}");
-}
-
-/// **다른 기계에서 이어 연 세션도 제 장을 이 기계의 프로세스로 다시 잇는다**(moai-dhxm) — 컨테이너를 다시 띄우고
-/// `claude --resume` 으로 이으면 장은 앞 컨테이너의 기계와 pid 를 든 채 세션 id 로 찾힌다. 그 장은 이 기계에서 죽었는지
-/// 못 재고 닻도 아직 새로워 떠난 것으로 안 읽힌다. 그대로 이어 쓰던 판은 앞 기계의 pid 를 든 장에 닻만 새로 적어 영영
-/// 안 낡게 했고, 이 기계의 `moai inbox`·`send` 는 조상으로 나를 못 찾았다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_session_resumed_on_another_machine_moves_its_card_here() {
-    let s = init("hook-resume-elsewhere");
-    let there = "00000000-0000-0000-0000-000000000000/4026532999";
-    std::fs::create_dir_all(s.path().join(".moai/agents")).unwrap();
-    let at = s.path().join(".moai/agents/sup.json");
-    std::fs::write(
-        &at,
-        format!(
-            "{{\"v\":1,\"name\":\"sup\",\"vendor\":\"claude\",\"role\":\"supervisor\",\"status\":\"idle\",\
-             \"since\":\"{NOW}\",\"pid\":4194400,\"pid_start\":1,\"machine\":\"{there}\",\"host\":\"box-b\",\
-             \"session\":\"sessRSM2-ffff\",\"seen\":\"{NOW}\"}}\n"
-        ),
-    )
-    .unwrap();
-    let (_, alive) =
-        hook_held(&s, "session-start", &event(&s, "sessRSM2-ffff").replacen('{', "{\"source\":\"resume\",", 1));
-    let card = std::fs::read_to_string(&at).unwrap();
-    assert!(!card.contains(there) && card.contains("\"machine\":\""), "앞 기계를 든 채 이어 썼다 — {card}");
-    assert!(card.contains(&format!("\"pid\":{},", alive.pid())), "지금 프로세스로 안 이었다 — {card}");
-    assert!(card.contains("\"role\":\"supervisor\""), "역할을 잃었다 — {card}");
-    let table = ok(s.path(), &["agents"]);
-    assert!(!table.contains("@box-b"), "이어 연 세션을 다른 기계의 것으로 보였다 — {table}");
-}
-
-/// **훅이 없는 창의 `hello` 도 다른 기계에서 이은 제 장을 세션 id 로 찾는다**(리뷰 moai-nas5.cn7, moai-keka.fpm) — 훅을
-/// 심기 전에 연 창은 컨테이너를 다시 띄우고 `claude --resume` 으로 이어도 훅이 장을 다시 잇지 않는다. 프로세스로만 찾던
-/// 판은 앞 기계의 pid 를 든 제 장을 못 찾아 새 이름으로 장을 하나 더 세웠고, 역할을 잃은 그 장으로 감독이 일감을 가졌다.
-/// 찾은 장은 이름·역할을 그대로 두고 이 기계의 프로세스로 다시 잇는다.
-#[test]
-#[cfg(target_os = "linux")]
-fn hello_without_hooks_finds_its_card_from_another_machine_by_session() {
-    let s = init("hello-resume-elsewhere");
-    let there = "00000000-0000-0000-0000-000000000000/4026532999";
-    let agents = s.path().join(".moai/agents");
-    std::fs::create_dir_all(&agents).unwrap();
-    std::fs::write(
-        agents.join("sup.json"),
-        format!(
-            "{{\"v\":1,\"name\":\"sup\",\"vendor\":\"claude\",\"role\":\"supervisor\",\"status\":\"idle\",\
-             \"since\":\"{NOW}\",\"pid\":4194400,\"pid_start\":1,\"machine\":\"{there}\",\"host\":\"box-b\",\
-             \"session\":\"sessHLO1-ffff\",\"seen\":\"{NOW}\"}}\n"
-        ),
-    )
-    .unwrap();
-    let out = staged_under("claude", &["hello", "--json"])
-        .env("CLAUDE_CODE_SESSION_ID", "sessHLO1-ffff")
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    let card = String::from_utf8(out.stdout).unwrap();
-    assert!(
-        card.contains("\"name\":\"sup\"") && card.contains("\"role\":\"supervisor\""),
-        "제 장을 못 찾았다 — {card}"
-    );
-    assert!(!card.contains(there) && !card.contains("\"pid\":4194400,"), "앞 기계의 프로세스를 든 채 적었다 — {card}");
-    assert_eq!(names_in(&agents), ["sup.json"], "장이 둘로 섰다");
-    // 다른 세션의 창은 그 장을 제 것으로 안 읽는다 — 세션 id 가 열쇠다.
-    let other = staged_under("claude", &["hello", "--name", "w9", "--json"])
-        .env("CLAUDE_CODE_SESSION_ID", "sessHLO2-eeee")
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert!(other.status.success(), "{}", text(&other));
-    assert_eq!(names_in(&agents), ["sup.json", "w9.json"], "다른 세션의 창이 제 장을 가져갔다");
-}
-
-/// **이 기계에서 아직 사는 장은 세션 id 가 같아도 이 창이 안 가져간다**(리뷰 moai-keka.qxk) — 훅의 `attendee` 가 그 장을
-/// 그대로 두는 것과 같은 자다(`Presence::resumable`). 살아 있는 세션을 다른 창에서 `claude --resume` 으로 이으면 두 프로세스가
-/// 한 세션 id 를 든다. 가리지 않던 판은 산 저쪽의 장을 이 프로세스로 옮겨, 저쪽의 `moai inbox`·`send` 가 누구인지 몰라
-/// 섰고 이쪽이 끝나면 `moai agents` 가 그 장을 죽은 것으로 걷어 편지를 되돌렸다. 이 창은 제 장을 따로 세운다.
-#[test]
-#[cfg(target_os = "linux")]
-fn hello_leaves_a_live_card_of_the_same_session_to_its_process() {
-    let s = init("hello-session-live");
-    let live = Sleeper::new();
-    hello_as(s.path(), "sup", &live.pid(), &["--vendor", "claude", "--role", "supervisor"]);
-    let at = s.path().join(".moai/agents/sup.json");
-    let card = std::fs::read_to_string(&at).unwrap();
-    std::fs::write(&at, card.replacen("\"cwd\":", "\"session\":\"sessLIV1-ffff\",\"cwd\":", 1)).unwrap();
-    let out = staged_under("claude", &["hello", "--json"])
-        .env("CLAUDE_CODE_SESSION_ID", "sessLIV1-ffff")
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    let sup = std::fs::read_to_string(&at).unwrap();
-    assert!(
-        sup.contains(&format!("\"pid\":{},", live.pid())) && sup.contains("\"role\":\"supervisor\""),
-        "산 남의 장을 이 창으로 옮겼다 — {sup}"
-    );
-    assert_eq!(names_in(&s.path().join(".moai/agents")).len(), 2, "이 창의 장을 따로 안 세웠다");
-}
-
-/// **훅이 없는 창의 `hello` 는 지금 세션 id 를 장에 적는다**(리뷰 moai-keka.qxk) — `/clear` 는 같은 프로세스에서 세션 id 만
-/// 바꾸고, Claude 는 셸의 `CLAUDE_CODE_SESSION_ID` 도 그 값으로 세운다(2026-10-06 쟀다). 장에 적힌 옛 세션을 지키던 판은
-/// 비우고 다시 인사한 일꾼의 장이 옛 세션 id 에 머물러, 컨테이너를 다시 띄우고 `claude --resume` 으로 이은 지금 세션이 그
-/// 장을 못 찾았다 — 세션 id 로 찾는 까닭(moai-keka.fpm)이 한 번 비우면 사라졌다.
-#[test]
-#[cfg(target_os = "linux")]
-fn hello_without_hooks_follows_the_session_a_clear_started() {
-    let s = init("hello-session-clear");
-    let agents = s.path().join(".moai/agents");
-    // 한 프로세스(가짜 claude 셸 하나) 밑에서 두 번 인사한다 — 처음은 S1, 비운 뒤는 S2 다.
-    let out = isolated(fake_agent("claude"))
-        .args([
-            "-c",
-            "\"$0\" hello --role worker --json > /dev/null && CLAUDE_CODE_SESSION_ID=sessCLR2-bbbb \"$0\" hello --json; exit $?",
-            BIN,
-        ])
-        .env("MOAI_ACTOR", ACTOR)
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .env("CLAUDE_CODE_SESSION_ID", "sessCLR1-aaaa")
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    let names = names_in(&agents);
-    assert_eq!(names.len(), 1, "같은 프로세스가 장을 둘 세웠다 — {names:?}");
-    let at = agents.join(&names[0]);
-    let card = std::fs::read_to_string(&at).unwrap();
-    assert!(card.contains("\"session\":\"sessCLR2-bbbb\""), "비운 뒤의 세션 id 를 안 적었다 — {card}");
-    // 컨테이너를 다시 띄운 것처럼 그 장을 다른 기계의 것으로 돌리고, 새 프로세스가 그 세션(S2)을 잇는다.
-    let key = "\"machine\":\"";
-    let from = card.find(key).expect("장에 기계가 없다") + key.len();
-    let to = from + card[from..].find('"').unwrap();
-    let there = "00000000-0000-0000-0000-000000000000/4026532999";
-    std::fs::write(&at, format!("{}{there}{}", &card[..from], &card[to..])).unwrap();
-    let back = staged_under("claude", &["hello", "--json"])
-        .env("CLAUDE_CODE_SESSION_ID", "sessCLR2-bbbb")
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert!(back.status.success(), "{}", text(&back));
-    assert_eq!(names_in(&agents), names, "이은 세션이 제 장을 못 찾았다");
-    let card = std::fs::read_to_string(&at).unwrap();
-    assert!(card.contains("\"role\":\"worker\"") && !card.contains(there), "이은 장이 역할이나 기계를 잃었다 — {card}");
-}
-
-/// **지은 이름 셋이 다 쥐였어도 훅은 그 세션에 장을 세운다**(리뷰 moai-nas5.cn7 15번, moai-keka.q2w) — 이름은 앞 8자
-/// 토막 뒤에 수를 이어 찾는다. 장을 안 세우던 판은 그 세션의 `moai inbox`·`send` 가 누구인지 몰라(`no_actor`) 섰다.
-/// 다른 기계의 조용한 장이 지은 이름을 하루 쥐게 된 뒤로(moai-nas5) 그 판이 넓어졌다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_session_stands_a_card_when_every_made_name_is_held() {
-    let s = init("hook-made-name-full");
-    let agents = s.path().join(".moai/agents");
-    std::fs::create_dir_all(&agents).unwrap();
-    for name in ["claude-sessFUL1", "claude-sessFUL1-sessFUL1", "claude-sessFUL1-sessFUL1dddd"] {
-        std::fs::write(
-            agents.join(format!("{name}.json")),
-            format!(
-                "{{\"v\":1,\"name\":\"{name}\",\"vendor\":\"claude\",\"status\":\"idle\",\"since\":\"{NOW}\",\
-                 \"pid\":4194400,\"pid_start\":1,\"machine\":\"00000000-0000-0000-0000-000000000000/4026532999\",\
-                 \"host\":\"box-b\",\"session\":\"far-{name}\",\"seen\":\"{NOW}\"}}\n"
-            ),
-        )
-        .unwrap();
-    }
-    let ev = event(&s, "sessFUL1-dddd").replacen('{', "{\"source\":\"startup\",", 1);
-    hook_at_home(&s, s.path(), None, &[], "session-start", &ev);
-    let card = std::fs::read_to_string(agents.join("claude-sessFUL1-sessFUL1-2.json"));
-    assert!(
-        card.as_ref().is_ok_and(|c| c.contains("\"session\":\"sessFUL1-dddd\"")),
-        "장을 안 세웠다 — {:?}",
-        names_in(&agents)
-    );
-}
-
-/// **지은 이름은 다른 기계의 조용한 장이 하루 쥔다**(moai-nas5, 2026-10-05 사용자 결정) — Claude 의 장은 프롬프트 앞에서
-/// 쉬는 동안 닻을 안 적어 20분이면 떠난 것으로 읽히는데, Claude 의 세션 이름은 컨테이너마다 따로 세어 겹친다. 떠난 것으로
-/// 읽힌 이름을 내주던 판은 이 기계에서 같은 이름을 지은 새 세션이 저쪽 장을 덮고, 아직 산 저쪽 세션의 편지를 보낸 이에게
-/// 되돌렸다. 새 세션은 토막을 붙여 가르고, 하루가 지나 저쪽 장이 걷힐 때가 되면 그 이름을 받는다. 창이 대는
-/// 이름(`MOAI_AGENT`, `hello --name`)은 20분 뒤 되찾는다(moai-dhxm 의 결정) — 가르지 않는다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_quiet_card_on_another_machine_keeps_its_made_name_for_a_day() {
-    let s = init("hook-made-name-elsewhere");
-    let agents = s.path().join(".moai/agents");
-    std::fs::create_dir_all(&agents).unwrap();
-    // 저쪽 컨테이너의 Claude 세션 — 그 pid 는 이 기계에 없고, `seen` 뒤로 닻을 안 적었다.
-    let far = |name: &str, seen: &str| {
-        let card = format!(
-            "{{\"v\":1,\"name\":\"{name}\",\"vendor\":\"claude\",\"status\":\"idle\",\"since\":\"{seen}\",\
-             \"pid\":4194400,\"pid_start\":1,\"machine\":\"00000000-0000-0000-0000-000000000000/4026532999\",\
-             \"host\":\"box-b\",\"session\":\"far-{name}\",\"seen\":\"{seen}\"}}\n"
-        );
-        std::fs::write(agents.join(format!("{name}.json")), &card).unwrap();
-        card
-    };
-    let start = |session: &str, env: &[(&str, &str)]| {
-        let ev = event(&s, session).replacen('{', "{\"source\":\"startup\",", 1);
-        hook_at_home(&s, s.path(), None, env, "session-start", &ev)
-    };
-    let hour_ago = "2026-09-11T03:12:03Z";
-    let before = far("claude-sessMDE1", hour_ago);
-    ok(s.path(), &["send", "claude-sessMDE1", "저쪽 일감", "--as", "boss"]);
-    let table = ok(s.path(), &["agents"]);
-    assert!(table.lines().any(|l| l.starts_with("claude-sessMDE1 ") && l.contains("gone")), "{table}");
-    start("sessMDE1-aaaa", &[]);
-    assert_eq!(
-        std::fs::read_to_string(agents.join("claude-sessMDE1.json")).unwrap(),
-        before,
-        "다른 기계의 조용한 장을 덮었다"
-    );
-    assert!(
-        std::fs::read_to_string(agents.join("claude-sessMDE1-sessMDE1.json"))
-            .is_ok_and(|card| card.contains("\"session\":\"sessMDE1-aaaa\"")),
-        "토막을 붙여 가르지 않았다 — {:?}",
-        names_in(&agents)
-    );
-    let back = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
-    assert!(back.contains("\"letters\":[]"), "아직 산 저쪽 세션의 편지를 되돌렸다 — {back}");
-    // 그 편지는 저쪽 세션의 함에 그대로다 — 토막을 붙인 이 세션에 실리지 않는다.
-    let kept = ok(s.path(), &["inbox", "--as", "claude-sessMDE1", "--json"]);
-    assert!(kept.contains("저쪽 일감"), "저쪽 세션의 편지가 제 함에 안 남았다 — {kept}");
-    let here = ok(s.path(), &["inbox", "--as", "claude-sessMDE1-sessMDE1", "--json"]);
-    assert!(here.contains("\"letters\":[]"), "저쪽 세션의 편지가 이 세션의 함으로 왔다 — {here}");
-    // `hello` 가 짓는 이름(`<벤더>-<pid>`)도 같다 — 넘겨받지 않고, 그 이름을 쥔 저쪽 장을 댄다. 그 장은 떠난 것으로 보이니
-    // 도는 에이전트라고 안 댄다(리뷰 moai-nas5.cn7).
-    let w = Sleeper::new();
-    let made = format!("claude-{}", w.pid());
-    let held = far(&made, hour_ago);
-    let taken = moai(s.path(), &["hello", "--pid", &w.pid(), "--vendor", "claude"]);
-    assert!(!taken.status.success() && text(&taken).contains("4194400@box-b"), "{}", text(&taken));
-    assert!(
-        !text(&taken).contains("도는 에이전트"),
-        "떠난 것으로 보이는 장을 도는 에이전트라고 댔다 — {}",
-        text(&taken)
-    );
-    assert_eq!(
-        std::fs::read_to_string(agents.join(format!("{made}.json"))).unwrap(),
-        held,
-        "hello 가 저쪽 장을 덮었다"
-    );
-    // `hello --name` 이 대는 이름은 창이 대는 이름이다 — 떠난 것으로 읽히는 저쪽 장의 것이면 되찾는다(moai-dhxm).
-    far("w6", hour_ago);
-    let asked = ok(s.path(), &["hello", "--pid", &w.pid(), "--name", "w6", "--json"]);
-    assert!(asked.contains(&format!("\"pid\":{},", w.pid())), "hello --name 이 댄 이름을 못 되찾았다 — {asked}");
-    // 하루가 지나면 걷힐 때다 — 새 세션이 그 이름을 받고, 저쪽 함의 편지는 보낸 이에게 돌아간다.
-    far("claude-sessMDE2", "2026-09-10T04:12:02Z");
-    ok(s.path(), &["send", "claude-sessMDE2", "하루 묵은 일감", "--as", "boss"]);
-    start("sessMDE2-bbbb", &[]);
-    let card = std::fs::read_to_string(agents.join("claude-sessMDE2.json")).unwrap();
-    assert!(card.contains("\"session\":\"sessMDE2-bbbb\""), "하루 지난 장의 이름을 못 받았다 — {card}");
-    let back = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
-    assert!(back.contains("하루 묵은 일감") && !back.contains("저쪽 일감"), "{back}");
-    // 창이 대는 이름은 떠난 것으로 읽히면 되찾는다 — 컨테이너를 다시 띄운 `MOAI_AGENT=w5` 창이다.
-    far("w5", hour_ago);
-    start("sessMDE3-cccc", &[("MOAI_AGENT", "w5")]);
-    let card = std::fs::read_to_string(agents.join("w5.json")).unwrap();
-    assert!(card.contains("\"session\":\"sessMDE3-cccc\""), "창이 댄 이름을 못 되찾았다 — {card}");
-}
-
-/// **기계를 안 적은 옛 장은 그 세션이 이 기계에 살아 있으면 기계를 단다**(moai-dhxm) — 이 필드 전의 판이 적은 장은 같은
-/// 저장소를 쓰는 다른 기계가 pid 로 재어 걷고 편지를 되돌린다. 산 세션의 장을 그대로 이어 쓰던 판은 판을 올린 날 돌던
-/// 세션이 끝날 때까지 그 장에 기계를 안 달았다. 훅이 장을 다시 쓸 때와 도구 부름이 닻을 적을 때, 그 pid 가 이 기계에 살아
-/// 있으면 단다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_card_from_before_machines_is_labelled_by_its_live_session() {
-    let s = init("hook-legacy-label");
-    let ev = event(&s, "sessLGC1-aaaa");
-    let (_, alive) = hook_held(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    let at = s.path().join(".moai/agents/claude-sessLGC1.json");
-    let unlabel = || {
-        let card = std::fs::read_to_string(&at).unwrap();
-        let drop = |card: &str, key: &str| -> String {
-            let head = format!(",\"{key}\":\"");
-            let Some(from) = card.find(&head) else { return card.to_string() };
-            let to = from + head.len() + card[from + head.len()..].find('"').unwrap() + 1;
-            format!("{}{}", &card[..from], &card[to..])
-        };
-        let old = drop(&drop(&card, "machine"), "host");
-        assert!(!old.contains("\"machine\"") && old.contains(&format!("\"pid\":{},", alive.pid())), "{old}");
-        std::fs::write(&at, old).unwrap();
-    };
-    unlabel();
-    hook(&s, "user-prompt-submit", &ev);
-    let card = std::fs::read_to_string(&at).unwrap();
-    assert!(card.contains("\"machine\":\"") && card.contains(&format!("\"pid\":{},", alive.pid())), "{card}");
-    // 도구만 부르는 긴 턴은 닻을 적을 때 단다.
-    unlabel();
-    let tool = ev.replacen('{', "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},", 1);
-    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", "2026-09-11T04:27:03Z")], "pre-tool-use", &tool);
-    let card = std::fs::read_to_string(&at).unwrap();
-    assert!(card.contains("\"machine\":\"") && card.contains("\"seen\":\"2026-09-11T04:27:03Z\""), "{card}");
-}
-
-/// **닫히는 세션에는 닻을 안 적는다**(moai-dhxm) — 닻은 "아직 산다" 다. `SessionEnd` 가 노는 장의 닻을 다시 적던 판은
-/// `/clear` 마다 쓰기 하나를 되살렸고(그 상한은 짧고 저장소는 멈출 수 있다, 리뷰 moai-u5wr.e74), 한참 놀다 닫힌 세션을
-/// 다른 기계에 20분 동안 산 일꾼으로 다시 세웠다. `Stop` 없이 끝난 턴(`StopFailure`)은 세션이 사니 닻을 적는다.
-#[test]
-fn a_closing_session_does_not_renew_its_anchor() {
-    let s = init("hook-end-anchor");
-    let ev = event(&s, "sess0011-llll");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    let before = presence_of(&s, "sess0011-llll");
-    assert!(before.contains("\"status\":\"idle\"") && before.contains(&format!("\"seen\":\"{NOW}\"")), "{before}");
-    let later = "2026-09-11T05:12:03Z";
-    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", later)], "session-end", &ev);
-    assert_eq!(presence_of(&s, "sess0011-llll"), before, "닫히는 세션의 장을 다시 썼다");
-    hook_at_home(&s, s.path(), None, &[("MOAI_NOW", later)], "stop-failure", &ev);
-    let card = presence_of(&s, "sess0011-llll");
-    assert!(card.contains(&format!("\"seen\":\"{later}\"")), "산 세션의 닻을 안 적었다 — {card}");
-}
-
-/// **일감은 한 번에 한 통이다**(리뷰 moai-h8tn.x4l) — 놀고 있는 일꾼 하나하나가 가지라고 보낸 `any-idle-worker` 일감을,
-/// 먼저 훅이 돈 세션 하나가 한 번에 다 쓸어 가지 않는다. 남은 일감은 그대로 서서 다른 일꾼을 기다린다.
-#[test]
-fn a_hook_takes_one_open_letter_at_a_time() {
-    let s = init("hook-open-one");
-    for n in 0..3 {
-        ok(s.path(), &["send", "any-idle-worker", &format!("일감 {n}"), "--as", "boss"]);
-    }
-    let out = hook_out(&s, "stop", &event(&s, "work0003"));
-    assert!(out.contains("일감 0") && !out.contains("일감 1"), "한 세션이 일감을 다 가져갔다 — {out}");
-    assert!(!out.contains("더 기다린다"), "남의 몫을 제 것처럼 댔다 — {out}");
-    assert_eq!(names_in(&s.path().join(".moai/mail/any-idle-worker")).len(), 2, "남은 일감을 읽음으로 옮겼다");
-}
-
-/// **접힌 뒤는 상태를 안 바꾼다**(리뷰 moai-h8tn.x4l) — 사람이 친 `/compact` 뒤에는 프롬프트도 `Stop` 도 안 와,
-/// `busy` 로 적으면 노는 세션이 내내 일하는 것으로 남는다. 턴 한가운데서 접힌 세션은 그대로 일하는 중이다.
-#[test]
-fn a_compact_keeps_the_presence_status() {
-    let s = init("hook-compact-status");
-    let ev = event(&s, "sess0006-gggg");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    hook(&s, "stop", &ev);
-    hook(&s, "session-start", &compacted(&s, "sess0006-gggg"));
-    assert!(presence_of(&s, "sess0006-gggg").contains("\"status\":\"idle\""), "접힌 뒤에 일하는 중으로 적었다");
-    hook(&s, "user-prompt-submit", &ev);
-    hook(&s, "session-start", &compacted(&s, "sess0006-gggg"));
-    assert!(presence_of(&s, "sess0006-gggg").contains("\"status\":\"busy\""), "턴 가운데 접혔는데 논다고 적었다");
-}
-
-/// **`Stop` 은 제가 보낸 편지로 턴을 붙들지 않는다**(리뷰 moai-h8tn.x4l) — 붙듦에 끝이 있는 것은 실은 만큼 우편함이
-/// 주는 까닭인데, 제게 쓴 편지의 "보낸 이에게 답한다" 를 따르면 답이 도로 제게 와 턴이 끝없이 붙들린다. 그 편지는
-/// 다음 프롬프트가 붙들지 않고 싣는다.
-#[test]
-fn the_stop_does_not_hold_on_a_letter_to_itself() {
-    let s = init("hook-self-letter");
-    let ev = event(&s, "sess0007-hhhh");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    let me = "claude-sess0007";
-    ok(s.path(), &["send", me, "나에게 쓴 쪽지", "--as", me]);
-    assert!(hook_out(&s, "stop", &ev).trim().is_empty(), "제 편지로 턴을 붙들었다");
-    assert!(loaded(&hook_out(&s, "user-prompt-submit", &ev)).contains("나에게 쓴 쪽지"), "제 편지를 안 실었다");
 }
 
 // ── 훅의 말씨 — Codex·Antigravity(moai-u5wr) ──────────────────────────
@@ -26407,253 +24480,21 @@ fn antigravity_holds_the_turn_with_continue() {
 }
 
 /// **오류로 끝난 Antigravity 의 실행은 `StopFailure` 처럼 다룬다**(리뷰 moai-u5wr.e74) — agy 는 API 오류에도 `Stop` 을
-/// 내고 까닭을 `error` 에 싣는다. 편지를 읽음으로 옮겨 실패하는 백엔드에 `continue` 로 밀어 넣지 않고, 닫기 물음도 그
-/// 판에 안 쓴다. 출석만 `idle` 로 돌린다.
+/// 내고 까닭을 `error` 에 싣는다. 실패하는 백엔드에 `continue` 로 밀어 넣지 않고, 세션에 한 번인 닫기 물음도 그 판에
+/// 안 쓴다 — 다음의 멀쩡한 `Stop` 이 묻는다.
 #[test]
 fn an_antigravity_run_that_failed_is_a_stop_failure() {
     let s = init("agy-failed");
     let id = add(s.path(), &["락을 잡는다"]);
     ok(s.path(), &["mv", &id, "in_progress"]);
     dialect_out(&s, "antigravity", "user-prompt-submit", &recorded(&s, "antigravity/pre-invocation-first.json"));
-    let agents = s.path().join(".moai/agents");
-    let names = names_in(&agents);
-    assert_eq!(names.len(), 1, "턴 머리가 출석을 안 적었다 — {names:?}");
-    let card = || std::fs::read_to_string(agents.join(&names[0])).unwrap();
-    ok(s.path(), &["send", names[0].trim_end_matches(".json"), "일감 하나", "--as", "boss"]);
 
     let clean = recorded(&s, "antigravity/stop.json");
     let failed = clean.replace("\"error\": \"\"", "\"error\": \"429 quota exhausted\"");
     assert_ne!(failed, clean, "시험이 오류를 못 넣었다");
     assert!(dialect_out(&s, "antigravity", "stop", &failed).trim().is_empty(), "실패한 실행을 붙들었다");
-    assert!(card().contains("\"status\":\"idle\""), "실패한 실행 뒤에도 일하는 중이다 — {}", card());
-    // 편지는 안 읽은 채 남아 다음 `Stop` 이 싣는다.
     let out = dialect_out(&s, "antigravity", "stop", &clean);
-    assert!(out.contains("일감 하나"), "실패한 판에 편지를 읽음으로 옮겼다 — {out}");
-}
-
-/// **`Stop` 없이 끝난 턴도 출석을 `idle` 로 돌린다**(moai-u5wr.f29, 2026-10-04 사용자 결정) — Claude 의 API 오류
-/// (`StopFailure`)와 세션 닫기(`SessionEnd`), Codex 의 Esc(`Interrupt`)다. 장을 새로 짓지는 않는다. Claude 의 장은 닫혀도
-/// 남고(`/clear` 뒤 같은 프로세스가 잇는다), 일하는 중인 장을 깨우면 언제부터인지를 댄다 — 턴의 끝을 약속하지 않는다.
-#[test]
-fn a_turn_that_ends_without_a_stop_marks_the_session_idle() {
-    let s = init("hook-turn-broken");
-    let ev = event(&s, "sess0008-iiii");
-    let status = || presence_of(&s, "sess0008-iiii");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    for end in ["stop-failure", "session-end"] {
-        hook(&s, "user-prompt-submit", &ev);
-        assert!(status().contains("\"status\":\"busy\""), "프롬프트가 일하는 중을 안 적었다");
-        assert!(hook_out(&s, end, &ev).trim().is_empty(), "{end} 가 무언가 냈다");
-        assert!(status().contains("\"status\":\"idle\""), "{end} 뒤에도 일하는 중이다 — {}", status());
-    }
-    let before = status();
-    hook(&s, "session-end", &event(&s, "sess0009-jjjj"));
-    assert_eq!(names_in(&s.path().join(".moai/agents")), ["claude-sess0008.json"], "끝나는 세션의 장을 지었다");
-    // **남의 장도 안 건드린다**(리뷰 moai-u5wr.e74) — 시험의 훅은 모두 한 프로세스 밑에서 돌아, 출석을 지어 주는 길
-    // (`attendee`)이었다면 새 장 대신 이 장을 끝나는 세션으로 옮겨 이었다. 파일 이름만 보는 위 줄은 그 판에도 푸르다.
-    assert_eq!(status(), before, "끝나는 남의 세션이 이 장을 건드렸다");
-
-    // 일하는 중인 세션은 살아 있어야 깨우기가 그 장을 본다 — 훅이 끝나도 그 에이전트가 산다.
-    let (_, _alive) = hook_held(&s, "user-prompt-submit", &ev);
-    let sent = ok(s.path(), &["send", "claude-sess0008", "일감", "--wake", "--as", "boss", "--json"]);
-    assert!(sent.contains(&format!("\"why\":\"busy\",\"since\":\"{NOW}\"")), "언제부터인지를 안 댔다 — {sent}");
-    let said = ok(s.path(), &["send", "claude-sess0008", "일감", "--wake", "--as", "boss"]);
-    assert!(said.contains("부터 일하는 중이다") && !said.contains("그 턴의 끝"), "턴의 끝을 약속했다 — {said}");
-}
-
-/// **프롬프트는 새 턴이다**(리뷰 moai-u5wr.e74) — Esc 로 끊긴 턴에는 Claude·Antigravity 가 훅을 하나도 안 내 장이 `busy`
-/// 로 남는다. 다음 프롬프트가 상태가 같다고 그때를 두면 `send --wake` 가 끊긴 턴의 시각을 "그때부터 일하는 중" 으로 댄다.
-#[test]
-fn a_prompt_after_a_broken_turn_restarts_since() {
-    let s = init("hook-turn-since");
-    let ev = event(&s, "sess0010-kkkk");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    hook(&s, "user-prompt-submit", &ev);
-    assert!(presence_of(&s, "sess0010-kkkk").contains(&format!("\"status\":\"busy\",\"since\":\"{NOW}\"")));
-    // Esc — 훅이 안 온다. 한참 뒤의 프롬프트다.
-    let later = "2026-09-11T09:30:00Z";
-    hook_argv(&s, s.path(), None, &[("MOAI_NOW", later)], &["hook", "user-prompt-submit"], &ev);
-    let card = presence_of(&s, "sess0010-kkkk");
-    assert!(card.contains(&format!("\"since\":\"{later}\"")), "끊긴 턴의 시각을 그대로 뒀다 — {card}");
-}
-
-/// **Codex 의 출석은 세션 id 로만 잇는다**(moai-sile) — Codex 의 훅은 세션 여럿이 함께 쓰는 `codex app-server`
-/// 데몬이 띄우고 환경도 그 데몬의 것이라(2026-10-04 실측), 프로세스로 이으면 두 세션이 한 장을 빼앗고 데몬의 tmux
-/// 칸에 글자가 쳐진다. 그래서 pid 와 tmux 칸을 모름으로 두고, `Interrupt` 는 `idle` 로, `SessionEnd` 는 장을 걷는다.
-#[test]
-fn codex_attendance_follows_the_session_not_the_process() {
-    let s = init("codex-presence");
-    let tmux = [("TMUX", "/tmp/moai-u5wr-not-this-session,1,0"), ("TMUX_PANE", "%77")];
-    let codex = |event: &str, input: &str| {
-        hook_argv(&s, s.path(), None, &tmux, &["hook", event, "--dialect", "codex"], input);
-    };
-    let start = recorded(&s, "codex/session-start.json");
-    codex("session-start", &start);
-    let other = start.replace("01a107b4-ee4b-7b13-9ae8-269f43b5a38f", "02b207b4-ee4b-7b13-9ae8-269f43b5a38f");
-    assert_ne!(other, start, "시험이 세션을 못 바꿨다");
-    codex("session-start", &other);
-    let agents = s.path().join(".moai/agents");
-    assert_eq!(names_in(&agents), ["codex-01a107b4.json", "codex-02b207b4.json"], "두 세션이 한 장을 나눴다");
-    let card = || std::fs::read_to_string(agents.join("codex-01a107b4.json")).unwrap();
-    assert!(card().contains("\"vendor\":\"codex\"") && card().contains("\"pid\":0,"), "{}", card());
-    assert!(!card().contains("%77") && !card().contains("tmux"), "데몬의 tmux 칸을 적었다 — {}", card());
-
-    codex("user-prompt-submit", &recorded(&s, "codex/user-prompt-submit.json"));
-    assert!(card().contains("\"status\":\"busy\""), "{}", card());
-    codex("interrupt", &recorded(&s, "codex/interrupt.json"));
-    assert!(card().contains("\"status\":\"idle\""), "Esc 뒤에도 일하는 중이다 — {}", card());
-    codex("session-end", &recorded(&s, "codex/session-end.json"));
-    assert_eq!(names_in(&agents), ["codex-02b207b4.json"], "닫힌 Codex 세션의 장이 남았다");
-}
-
-/// 루트 체크아웃(`main`)과 그 밑 `.worktrees/feat` 에 딸린 워크트리 — 루트의 설정이 깨진 날의 훅을 재는 시험이 함께
-/// 쓴다([`codex_in`]·[`break_root_config`]).
-fn main_and_worktree(name: &str) -> (Scratch, PathBuf, PathBuf) {
-    let s = Scratch::new(name);
-    let main = s.path().join("main");
-    std::fs::create_dir_all(&main).unwrap();
-    git(&main, &["init", "-q"]);
-    ok(&main, &["init", "argos"]);
-    git(&main, &["add", "-A"]);
-    git(&main, &["commit", "-q", "-m", "세운다"]);
-    git(&main, &["worktree", "add", "-q", ".worktrees/feat", "-b", "feat"]);
-    let inside = main.join(".worktrees/feat");
-    (s, main, inside)
-}
-
-/// 기록한 Codex 훅 입력([`recorded`] 가 낸 것)을 워크트리 `inside` 의 자리로 옮겨 거기서 부른다 — 낸 글을 돌려준다.
-fn codex_in(s: &Scratch, inside: &Path, event: &str, input: &str) -> String {
-    let (here, there) = (s.path().display().to_string(), inside.display().to_string());
-    let input = input.replace(&here, &there);
-    assert!(input.contains(&there), "시험이 자리를 워크트리로 못 옮겼다");
-    let out = hook_argv(s, inside, None, &[], &["hook", event, "--dialect", "codex"], &input);
-    String::from_utf8(out.stdout).unwrap()
-}
-
-/// 루트의 설정을 깨뜨린다 — 병합 자국 한 줄이면 된다. 워크트리의 설정은 멀쩡하다. **깨졌는지를 먼저 잰다** — 설정이
-/// 그 줄을 견디는 날에는 옛 길(루트를 그대로 연다)도 푸르러, 이것을 쓰는 시험이 아무것도 안 잰다.
-fn break_root_config(main: &Path, inside: &Path) {
-    let cfg = main.join(".moai/config.toml");
-    let was = std::fs::read_to_string(&cfg).unwrap();
-    std::fs::write(&cfg, format!("<<<<<<< HEAD\n{was}")).unwrap();
-    let out = staged(&["status"]).current_dir(inside).output().unwrap();
-    assert!(!out.status.success(), "시험의 전제 — 깨진 루트 설정을 `moai` 가 지나쳤다\n{}", text(&out));
-}
-
-/// **끝 이벤트는 출석부만 찾는다 — 루트의 설정이 깨져도 루트의 장을 돌린다**(moai-jzym.uxa). `Interrupt`·`SessionEnd`
-/// 가 트래커를 통째로 세우던 판은 루트의 `config.toml` 을 파싱했고, 거기 충돌 표시가 끼면 규칙을 위해 둔 물러서는 길이
-/// 워크트리의 `.moai` 를 열었다 — 그 출석부에는 이 세션의 장이 없어, Codex 의 Esc 가 `idle` 로 안 돌리고 닫힌 세션의
-/// 장이 안 걷혔다.
-#[test]
-fn ending_a_turn_in_a_worktree_finds_the_roots_cards_past_a_broken_config() {
-    let (s, main, inside) = main_and_worktree("hook-end-rootcfg");
-    let codex = |event: &str, rel: &str| codex_in(&s, &inside, event, &recorded(&s, rel));
-    codex("session-start", "codex/session-start.json");
-    let agents = main.join(".moai/agents");
-    assert_eq!(names_in(&agents), ["codex-01a107b4.json"], "워크트리의 세션이 루트에 장을 안 세웠다");
-    let card = || std::fs::read_to_string(agents.join("codex-01a107b4.json")).unwrap();
-    codex("user-prompt-submit", "codex/user-prompt-submit.json");
-    assert!(card().contains("\"status\":\"busy\""), "{}", card());
-
-    break_root_config(&main, &inside);
-    codex("interrupt", "codex/interrupt.json");
-    assert!(card().contains("\"status\":\"idle\""), "깨진 루트 설정 하나로 Esc 가 출석을 못 돌렸다 — {}", card());
-    codex("session-end", "codex/session-end.json");
-    assert!(names_in(&agents).is_empty(), "깨진 루트 설정 하나로 닫힌 Codex 세션의 장이 남았다");
-}
-
-/// **규칙이 물러서도 출석과 편지는 루트에 선다**(리뷰 moai-jzym.a9k). 루트의 설정이 깨지면 훅의 규칙은 워크트리의
-/// `.moai` 로 물러서는데(리뷰 moai-71ht.i1u), 출석과 우편함까지 그리로 가던 판은 한 세션의 장을 두 출석부로 갈랐다 —
-/// 깨지기 전에 연 세션은 턴 끝을 워크트리에 새로 선 장에만 적어 루트의 장이 낡은 상태로 남았고 루트의 우편함에 와 있던
-/// 편지가 안 실렸다. 깨진 채 연 세션의 장은 워크트리에만 서서, 루트를 보는 끝 이벤트(moai-jzym.uxa)가 못 돌리고 못
-/// 걷었다. 워크트리의 출석부는 아무도 안 읽는다.
-#[test]
-fn a_hook_past_a_broken_root_config_keeps_attendance_and_letters_at_the_root() {
-    let (s, main, inside) = main_and_worktree("hook-fallback-post");
-    let codex = |event: &str, rel: &str| codex_in(&s, &inside, event, &recorded(&s, rel));
-    let agents = main.join(".moai/agents");
-    let card = |name: &str| std::fs::read_to_string(agents.join(format!("{name}.json"))).unwrap();
-    let stray = || names_in(&inside.join(".moai/agents"));
-    codex("session-start", "codex/session-start.json");
-    ok(&main, &["send", "codex-01a107b4", "일감 하나", "--as", "boss"]);
-
-    // 깨지기 전에 연 세션 — 턴 머리는 루트의 장을 돌리고 루트의 우편함에서 싣는다. 턴 끝도 루트의 장에 적는다.
-    break_root_config(&main, &inside);
-    let said = codex("user-prompt-submit", "codex/user-prompt-submit.json");
-    assert!(said.contains("일감 하나"), "루트의 우편함에 와 있던 편지를 안 실었다 — {said}");
-    assert!(card("codex-01a107b4").contains("\"status\":\"busy\""), "{}", card("codex-01a107b4"));
-    codex("stop", "codex/stop.json");
-    assert!(card("codex-01a107b4").contains("\"status\":\"idle\""), "턴 끝이 루트의 장을 안 돌렸다");
-    assert!(stray().is_empty(), "아무도 안 읽는 워크트리의 출석부에 장을 세웠다 — {:?}", stray());
-
-    // 깨진 채 연 세션 — 장이 루트에 서야 끝 이벤트가 그 장을 돌리고 걷는다.
-    let id = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
-    let other = |event: &str, rel: &str| {
-        let input = recorded(&s, rel);
-        assert!(input.contains(id), "{rel} 에 세션 id 가 없다 — 시험이 세션을 못 바꾼다");
-        codex_in(&s, &inside, event, &input.replace(id, "02b207b4-ee4b-7b13-9ae8-269f43b5a38f"))
-    };
-    other("session-start", "codex/session-start.json");
-    other("user-prompt-submit", "codex/user-prompt-submit.json");
-    assert!(
-        card("codex-02b207b4").contains("\"status\":\"busy\""),
-        "깨진 채 연 세션의 장이 루트에 없다 — {:?}",
-        stray()
-    );
-    other("interrupt", "codex/interrupt.json");
-    assert!(card("codex-02b207b4").contains("\"status\":\"idle\""), "깨진 채 연 세션의 장을 Esc 가 못 돌렸다");
-    other("session-end", "codex/session-end.json");
-    assert_eq!(names_in(&agents), ["codex-01a107b4.json"], "깨진 채 연 Codex 세션의 장을 `SessionEnd` 가 못 걷었다");
-    assert!(stray().is_empty(), "아무도 안 읽는 워크트리의 출석부에 장을 세웠다 — {:?}", stray());
-}
-
-/// **`Stop` 은 편지를 읽음으로 옮기기 전에 출석을 적는다**(moai-jzym.flj) — 옮긴 뒤의 쓰기가 늦어 훅이 시간을 넘기면,
-/// 심은 셸 줄은 `moai` 가 끝난 뒤에야 글을 흘려 붙드는 답이 버려지고 편지만 읽음으로 남는다. 늦은 쓰기를 기다리는 대신
-/// 첫 파일 쓰기에서 훅을 죽인다(`ulimit -f 0` 이 `SIGXFSZ` 를 낸다) — 출석을 판정 뒤에 적던 판은 그때 편지를 이미
-/// 옮겨 놓았다.
-#[test]
-#[cfg(unix)]
-fn a_stop_that_dies_writing_attendance_leaves_the_letter_unread() {
-    use std::io::Write as _;
-    let s = init("hook-stop-order");
-    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
-    ok(s.path(), &["send", "codex-01a107b4", "일감 하나", "--as", "boss"]);
-    let mailbox = s.path().join(".moai/mail/codex-01a107b4");
-    let unread = names_in(&mailbox);
-    assert_eq!(unread.len(), 1, "편지가 함에 안 들었다 — {unread:?}");
-
-    let stop = recorded(&s, "codex/stop.json");
-    let tmp = s.path().join("hooktmp");
-    let mut cmd = isolated(fake_agent("codex"));
-    cmd.args(["-c", "ulimit -c 0; ulimit -f 0; \"$0\" \"$@\"", BIN, "hook", "stop", "--dialect", "codex"])
-        .env("MOAI_ACTOR", ACTOR)
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"))
-        .env("TMPDIR", &tmp)
-        .current_dir(s.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    // `SIGXFSZ` 를 기본 동작으로 되돌리고(리뷰 moai-jzym.a9k) 죽은 까닭까지 잰다 — 까닭은 [`dying_at_first_write`]·
-    // [`died_writing`] 에 있다.
-    let mut child = dying_at_first_write(&mut cmd).spawn().unwrap();
-    child.stdin.take().unwrap().write_all(stop.as_bytes()).unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(
-        died_writing(&out),
-        "파일 쓰기에서 훅이 안 죽었다 — 시험이 헛돈다 ({:?})\nstderr: {}",
-        out.status,
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert_eq!(names_in(&mailbox), unread, "출석을 적기 전에 편지를 읽음으로 옮겼다");
-    assert!(names_in(&mailbox.join("read")).is_empty(), "죽은 훅이 편지를 읽음으로 남겼다");
-
-    // 쓰기가 서면 같은 편지가 실리고, 붙든 턴은 일하는 중이다.
-    let said = held_reason(&dialect_out(&s, "codex", "stop", &stop));
-    assert!(said.contains("일감 하나"), "남은 편지가 다음 `Stop` 에 안 실렸다 — {said}");
-    let card = std::fs::read_to_string(s.path().join(".moai/agents/codex-01a107b4.json")).unwrap();
-    assert!(card.contains("\"status\":\"busy\""), "편지로 붙든 턴을 노는 것으로 적었다 — {card}");
+    assert!(out.contains(&format!("moai mv {id} done")), "실패한 판에 닫기 물음을 써 버렸다 — {out}");
 }
 
 /// **`SessionStart` 가 안 돈 세션도 턴 머리에서 기준선을 얻는다**(리뷰 moai-u5wr.e74) — 첫 프롬프트 뒤에 `/hooks` 에서
@@ -26675,41 +24516,7 @@ fn held_reason(out: &str) -> String {
     json_text(out, "reason")
 }
 
-/// **Codex 가 붙드는 턴의 편지는 Codex 의 선 안에 든다**(moai-rxro) — Codex 는 `Stop` 의 `reason` 을 이어 가는
-/// 프롬프트로 실어 기본 상한(UTF-8 네 바이트를 한 토큰으로 어림한 2,500 토큰 언저리)에 묶고, `additionalContextLimit`
-/// 은 거기 안 닿는다. 넘으면 가운데를 파일로 빼, 읽음으로 옮긴 편지의 그 자리가 아무에게도 안 닿는다. 같은 편지가
-/// Claude 의 턴에서는 칸 하나(UTF-16 1만)에 들어 통째로 실린다 — 자는 말씨마다다.
-#[test]
-fn a_codex_stop_holds_letters_inside_codexs_limit() {
-    let s = init("codex-hold-cap");
-    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
-    let big = "가".repeat(3_400); // 10KB 남짓 — 칸 하나에는 든다
-    let id = field(&ok(s.path(), &["send", "codex-01a107b4", "긴 편지", "-b", &big, "--as", "boss", "--json"]), "id");
-    let said = held_reason(&dialect_out(&s, "codex", "stop", &recorded(&s, "codex/stop.json")));
-    assert!(said.contains("긴 편지") && said.contains("여기서 잘랐다"), "{}", &said[..said.len().min(300)]);
-    // 다시 볼 길은 머리 줄에도 있다 — 자른 표가 그 편지를 대는지는 그 표가 선 끝 줄로 잰다(남은 편지가 없어 그 뒤에
-    // 서는 줄이 없다).
-    let cut = said.lines().last().unwrap_or_default();
-    let again = format!("moai inbox {id} --from ");
-    assert!(cut.contains(&again), "자른 자리가 다시 볼 길을 안 댔다 — {cut}");
-    assert!(said.len().div_ceil(4) <= 2_500, "Codex 의 기본 상한을 넘겼다 — {} 바이트", said.len());
-    // 그 자리에서 넘겨 보면 나머지가 그대로다(moai-m81b) — Codex 의 붙듦은 바이트로 자르니 자리도 그 자로 서야 한다.
-    let at: usize = cut.split(&again).nth(1).and_then(|r| r.split(' ').next()).and_then(|n| n.parse().ok()).unwrap();
-    let kept: usize = said.lines().filter_map(|l| l.strip_prefix("    ")).map(|l| l.matches('가').count()).sum();
-    assert_eq!(at, kept, "자른 표가 실린 글자와 다른 자리를 댔다");
-    // 그 명령은 `--as` 를 단다 — `CODEX_THREAD_ID` 가 없는 셸은 맨 `moai inbox` 로는 제 장을 못 찾는다(리뷰 moai-54yc.fay).
-    let named = format!("moai inbox {id} --from {at} --as codex-01a107b4");
-    assert!(cut.contains(&named), "자른 표가 이어 볼 명령을 그대로 안 댔다 — {cut}");
-    assert_eq!(pages_of(s.path(), &id, "codex-01a107b4", at).0, "가".repeat(3_400 - at), "나머지를 안 보였다");
-
-    let ev = event(&s, "sess0009-iiii");
-    hook(&s, "session-start", &ev.replacen('{', "{\"source\":\"startup\",", 1));
-    ok(s.path(), &["send", "claude-sess0009", "긴 편지", "-b", &big, "--as", "boss"]);
-    let whole = held_reason(&hook_out(&s, "stop", &ev));
-    assert!(whole.contains(&big) && !whole.contains("여기서 잘랐다"), "Claude 의 턴에서 칸에 드는 편지를 잘랐다");
-}
-
-/// **Codex 의 닫기 물음도 편지와 같은 칸의 자리 안에 든다**(moai-084j) — 같은 `Stop` 의 `reason` 이라 같은 기본 상한에
+/// **Codex 의 닫기 물음도 그 칸의 자리 안에 든다**(moai-084j) — 같은 `Stop` 의 `reason` 이라 같은 기본 상한에
 /// 묶인다. 재지 않던 판은 집은 줄이 열둘 남짓을 넘으면 그 선을 넘겨, Codex 가 가운데를 파일로 빼고 `mv`·`defer` 줄을
 /// 바이트 자리에서 끊었다. 넘치면 줄의 묶음을 통째로 덜어 내고 그 뒤의 한 줄이 `moai prime` 을 댄다. 같은 줄들이 Claude 의
 /// 턴에서는 칸 하나(UTF-16 1만)로 재어 더 많이 실린다 — 자는 말씨마다다.
@@ -26751,522 +24558,6 @@ fn a_codex_stop_holds_its_closing_question_inside_codexs_limit() {
     assert!(shown(&whole) > codex, "Claude 의 턴을 Codex 의 좁은 선으로 쟀다 — {} 대 {codex}", shown(&whole));
 }
 
-/// **Antigravity 의 턴 끝은 칸 하나를 통째로 싣는다**(moai-jzym.4pm, 2026-10-05 실측) — 사람이 띄운 agy 창이 칸을 거의
-/// 다 채운 한국어 편지를 턴 머리에서도 `Stop` 의 `decision: continue` 로도 자르거나 파일로 빼지 않고 실었다. 1.2.17 에서는
-/// 한글로만 채워 바이트로도 가장 큰 꼴(UTF-16 10,024 단위, UTF-8 28.4KB)까지 쟀다. Codex 의 좁은 선(바이트 8천)으로
-/// 옮기면 실을 수 있는 편지를 잘라 다시 보라고 시킨다.
-///
-/// **편지는 잰 바이트 안에 둔다**(리뷰 moai-jzym.a9k) — 그보다 큰 편지로 재면 아무도 본 적 없는 크기를 이 시험이
-/// 약속한다.
-#[test]
-fn an_antigravity_stop_holds_whole_a_letter_codex_would_cut() {
-    let s = init("agy-hold-cap");
-    dialect_out(&s, "antigravity", "user-prompt-submit", &recorded(&s, "antigravity/pre-invocation-first.json"));
-    let names = names_in(&s.path().join(".moai/agents"));
-    assert_eq!(names.len(), 1, "턴 머리가 출석을 안 적었다 — {names:?}");
-    let big = "가".repeat(9_000); // 27KB — Codex 의 선(8천)은 넘고 잰 바이트(28.4KB) 안이다
-    ok(s.path(), &["send", names[0].trim_end_matches(".json"), "긴 편지", "-b", &big, "--as", "boss"]);
-    let out = dialect_out(&s, "antigravity", "stop", &recorded(&s, "antigravity/stop.json"));
-    one_json_value(&out);
-    assert!(out.starts_with("{\"decision\":\"continue\",\"reason\":\""), "그 꼴로 안 붙들었다 — {out}");
-    let said = json_text(&out, "reason");
-    assert!(said.contains(&big) && !said.contains("여기서 잘랐다"), "Antigravity 의 턴 끝에서 칸에 드는 편지를 잘랐다");
-}
-
-/// **Antigravity 의 턴 머리도 칸 하나를 통째로 싣는다**(moai-jzym.4pm 실측 — 칸을 거의 다 채운 한국어 편지가
-/// `ephemeralMessage` 로도 그대로 실렸다). 턴 끝만 재던 판은 턴 머리의 자리를 Codex 의 좁은 선으로 옮겨도 단위·통합 시험이
-/// 다 초록이었다(리뷰 moai-dp35.gag) — 그 자리는 훅이 싣는 칸의 표 한 줄이 정한다. 보드는 세션의 첫 턴 머리가 싣고 가니
-/// 편지는 둘째 턴 머리에서 칸을 통째로 받는다.
-#[test]
-fn an_antigravity_turn_head_holds_whole_a_letter_codex_would_cut() {
-    let s = init("agy-head-cap");
-    let first = recorded(&s, "antigravity/pre-invocation-first.json");
-    dialect_out(&s, "antigravity", "user-prompt-submit", &first);
-    let names = names_in(&s.path().join(".moai/agents"));
-    assert_eq!(names.len(), 1, "턴 머리가 출석을 안 적었다 — {names:?}");
-    let big = "가".repeat(9_000); // 27KB — Codex 의 선(8천)은 넘고 잰 바이트(28.4KB) 안이다
-    ok(s.path(), &["send", names[0].trim_end_matches(".json"), "긴 편지", "-b", &big, "--as", "boss"]);
-    let out = dialect_out(&s, "antigravity", "user-prompt-submit", &first);
-    one_json_value(&out);
-    assert!(out.starts_with("{\"injectSteps\":[{\"ephemeralMessage\":\""), "그 꼴로 안 실었다 — {out}");
-    let said = json_text(&out, "ephemeralMessage");
-    assert!(
-        said.contains(&big) && !said.contains("여기서 잘랐다"),
-        "Antigravity 의 턴 머리에서 칸에 드는 편지를 잘랐다"
-    );
-}
-
-/// **같은 1분 안에 연 Codex 세션 셋도 저마다 장 하나다**(리뷰 moai-u5wr.e74) — Codex 의 세션 id 는 UUIDv7 이라 앞
-/// 8자가 밀리초 시각의 윗자리고 65초 남짓마다만 바뀐다(기록한 두 id 가 그렇다). 겹친 이름을 그 토막으로 한 번만 가르던
-/// 판은 셋째가 둘째의 장을 덮었고, 둘은 훅마다 서로의 장을 빼앗았다.
-#[test]
-fn codex_sessions_opened_in_the_same_minute_keep_their_own_cards() {
-    let s = init("codex-same-minute");
-    let start = recorded(&s, "codex/session-start.json");
-    let sessions = [
-        "01a107b4-ee4b-7b13-9ae8-269f43b5a38f",
-        "01a107b4-f001-7c22-8a11-000000000001",
-        "01a107b4-f002-7d33-9b22-000000000002",
-    ];
-    let codex = |sid: &str| {
-        let input = start.replace(sessions[0], sid);
-        assert!(input.contains(sid), "시험이 세션을 못 바꿨다");
-        hook_argv(&s, s.path(), None, &[], &["hook", "session-start", "--dialect", "codex"], &input);
-    };
-    // 두 바퀴 돈다 — 덮인 세션이 다음 훅에서 남의 장을 도로 빼앗던 자리다.
-    for sid in sessions.iter().chain(sessions.iter()) {
-        codex(sid);
-    }
-    let agents = s.path().join(".moai/agents");
-    let cards = names_in(&agents);
-    assert_eq!(cards.len(), 3, "세션 셋이 장 셋이 아니다 — {cards:?}");
-    for sid in sessions {
-        let holding = cards
-            .iter()
-            .filter(|n| std::fs::read_to_string(agents.join(n)).unwrap().contains(&format!("\"session\":\"{sid}\"")))
-            .count();
-        assert_eq!(holding, 1, "{sid} 의 장이 하나가 아니다 — {cards:?}");
-    }
-}
-
-/// **Codex 의 장은 닻으로 산 것을 잰다**(2026-10-04 사용자 결정, moai-j3n5) — 그 장은 pid 를 몰라 세션이 죽으면 `idle` 로
-/// 영영 남았고, `send any-idle-worker --wake` 가 그 죽은 장을 골라 산 일꾼을 안 깨웠다. 훅이 돌 때(도구 부름도)와 기다리는
-/// 동안 닻을 적고, 20분 넘게 안 적힌 장은 깨우기와 `--status idle` 이 건너뛰고 `moai agents` 가 `gone` 으로 보인다.
-/// **지우지는 않는다**(2026-10-05 사용자 결정) — 돌아온 세션은 역할과 편지를 그대로 받는다. 지우는 것은 하루 넘게 안 적힌
-/// 장이고, 그때도 그 이름 앞의 편지는 남는다.
-#[test]
-fn a_codex_card_not_written_for_twenty_minutes_is_gone() {
-    let s = init("codex-anchor");
-    let at = |minutes: i64| {
-        let (h, m) = (4 + (12 + minutes) / 60, (12 + minutes) % 60);
-        format!("2026-09-11T{h:02}:{m:02}:03Z")
-    };
-    let codex = |on: &str, input: &str, now: &str| {
-        hook_argv(&s, s.path(), None, &[("MOAI_NOW", now)], &["hook", on, "--dialect", "codex"], input);
-    };
-    let moai_at = |now: &str, args: &[&str]| {
-        let out = staged(args).env("MOAI_NOW", now).current_dir(s.path()).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        String::from_utf8(out.stdout).unwrap()
-    };
-    codex("session-start", &recorded(&s, "codex/session-start.json"), &at(0));
-    let card = s.path().join(".moai/agents/codex-01a107b4.json");
-    assert!(std::fs::read_to_string(&card).unwrap().contains(&format!("\"seen\":\"{}\"", at(0))), "닻을 안 적었다");
-    ok(s.path(), &["hello", "--as", "codex-01a107b4", "--role", "worker"]);
-    ok(s.path(), &["send", "codex-01a107b4", "기다리는 일감", "--as", "boss"]);
-    // 도구만 부르는 긴 턴도 닻을 다시 적는다 — 15분에 적은 닻은 30분에 산 것이다.
-    codex("pre-tool-use", &recorded(&s, "codex/pre-tool-use-bash.json"), &at(15));
-    assert!(
-        std::fs::read_to_string(&card).unwrap().contains(&format!("\"seen\":\"{}\"", at(15))),
-        "도구 부름이 닻을 안 적었다"
-    );
-    assert!(moai_at(&at(30), &["agents", "--json"]).contains("\"swept\":[]"), "산 Codex 장을 걷었다");
-    // 36분 — 21분 넘게 안 적혔다. 깨우기와 `--status idle` 은 그 장을 건너뛰고, `moai agents` 는 지우지 않고 gone 으로 보인다.
-    let woke = moai_at(&at(36), &["send", "any-idle-worker", "다른 일감", "--wake", "--as", "boss", "--json"]);
-    assert!(woke.contains("\"why\":\"nobody\""), "떠난 Codex 장을 깨우려 했다 — {woke}");
-    let listed = moai_at(&at(36), &["agents", "--json"]);
-    assert!(
-        listed.contains("\"swept\":[]") && listed.contains("\"status\":\"gone\""),
-        "조용한 장을 걷었거나 안 감췄다 — {listed}"
-    );
-    let idle = moai_at(&at(36), &["agents", "--role", "worker", "--status", "idle", "--json"]);
-    assert!(idle.starts_with("{\"agents\":[]"), "떠난 일꾼을 노는 일꾼으로 냈다 — {idle}");
-    assert!(!std::fs::read_to_string(&card).unwrap().contains("\"status\":\"gone\""), "보이는 상태를 파일에 적었다");
-    assert!(
-        ok(s.path(), &["inbox", "--as", "boss", "--json"]).contains("\"letters\":[]"),
-        "조용한 장의 편지를 되돌렸다"
-    );
-    // 그 세션이 돌아오면 역할을 그대로 들고 편지가 실린다.
-    let back = hook_argv(
-        &s,
-        s.path(),
-        None,
-        &[("MOAI_NOW", &at(40))],
-        &["hook", "user-prompt-submit", "--dialect", "codex"],
-        &recorded(&s, "codex/user-prompt-submit.json"),
-    );
-    assert!(String::from_utf8(back.stdout).unwrap().contains("기다리는 일감"), "돌아온 세션에 편지가 안 실렸다");
-    assert!(std::fs::read_to_string(&card).unwrap().contains("\"role\":\"worker\""), "돌아온 세션이 역할을 잃었다");
-    // 하루 넘게 안 적히면 지운다 — 그 이름 앞의 편지는 남는다.
-    ok(s.path(), &["send", "codex-01a107b4", "하루 뒤의 편지", "--as", "boss"]);
-    let later = moai_at("2026-09-12T05:00:03Z", &["agents", "--json"]);
-    assert!(later.contains("\"swept\":[\"codex-01a107b4\"]"), "하루 넘게 조용한 장을 안 지웠다 — {later}");
-    assert!(
-        ok(s.path(), &["inbox", "--as", "codex-01a107b4", "--json"]).contains("하루 뒤의 편지"),
-        "지운 장의 편지를 되돌렸다"
-    );
-}
-
-/// **서브에이전트는 부모 세션의 이름으로 우편함을 안 만진다**(2026-10-04 사용자 결정, moai-ew4o.4fv) — 서브에이전트의
-/// 셸은 부모와 한 프로세스 밑이고 환경도 같아, `moai inbox --ack` 가 부모의 편지를 가져가고 `moai hello` 가 부모의 장을
-/// 바꾼다. 훅은 `agent_id` 가 선 부름에서 그 둘을 막는다. `--as` 를 준 부름, 보기만 하는 `inbox`, 본 세션의 부름은 지나간다.
-#[test]
-fn a_subagent_cannot_take_its_parents_letters() {
-    let s = init("hook-subagent-mail");
-    let call = |cmd: &str, agent: Option<&str>| {
-        let mut ev = event(&s, "sessSUB1-aaaa").replacen(
-            '{',
-            &format!("{{\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":{}}},", json_str(cmd)),
-            1,
-        );
-        if let Some(a) = agent {
-            ev = ev.replacen('{', &format!("{{\"agent_id\":\"{a}\",\"agent_type\":\"general-purpose\","), 1);
-        }
-        hook_out(&s, "pre-tool-use", &ev)
-    };
-    // 자리를 옮겨 부른 것도 막는다(리뷰 moai-ew4o.q9f) — 부모의 이름으로 도는 것은 어느 트래커를 겨누든 같다. `hello` 앞의
-    // `MOAI_AGENT=…` 는 그 이름으로 부모의 장을 옮기니 막는다.
-    let elsewhere = format!("env -C {} moai inbox --ack --wait 540", s.path().display());
-    for cmd in [
-        "moai inbox --ack",
-        "moai inbox --wait 540 --ack",
-        "moai --json inbox --wait=60",
-        "moai hello --role worker",
-        elsewhere.as_str(),
-        "MOAI_AGENT=sub-1 moai hello --role worker",
-    ] {
-        let out = call(cmd, Some("sub-1"));
-        assert!(out.contains("\"permissionDecision\":\"deny\"") && out.contains("Mailbox"), "{cmd} 를 보냈다 — {out}");
-        assert!(out.contains("--as <name>"), "고칠 길을 안 댔다 — {out}");
-        // 내미는 길이 `hello` 에 서지 않는 `--as` 가 아니다 — `--as` 는 `inbox`·`send` 의 길이다.
-        assert!(out.contains("does not say `moai hello`"), "hello 에 안 서는 길을 내밀었다 — {out}");
-    }
-    // 도움말과, `inbox` 앞에 댄 제 이름(`MOAI_AGENT=…`)은 아무것도 안 빼앗는다.
-    for cmd in [
-        "moai inbox --ack --as sub-1",
-        "moai inbox --as=sub-1 --wait 60",
-        "moai inbox",
-        "moai send boss hi --as sub-1",
-        "moai hello --help",
-        "moai inbox --wait --help",
-        "MOAI_AGENT=sub-1 moai inbox --ack",
-    ] {
-        assert!(call(cmd, Some("sub-1")).trim().is_empty(), "{cmd} 를 막았다");
-    }
-    assert!(call("moai inbox --ack", None).trim().is_empty(), "본 세션의 부름을 막았다");
-}
-
-/// **`MOAI_AGENT` 는 훅에도 이 세션의 이름이다**(moai-ew4o.e1m) — `moai send`·`inbox` 는 그 이름으로 도는데 훅이 그것을
-/// 모르면 한 세션이 두 이름으로 서서, 그 이름 앞으로 온 답장이 훅에 영영 안 실렸다. 새 장은 그 이름으로 서고, 다른
-/// 이름으로 선 장은 그 이름으로 옮겨 편지를 데려간다.
-#[test]
-fn moai_agent_names_the_session_for_the_hooks_too() {
-    let s = init("hook-moai-agent");
-    let named = |on: &str, session: &str, name: &str| {
-        let out = hook_at_home(&s, s.path(), None, &[("MOAI_AGENT", name)], on, &event(&s, session));
-        String::from_utf8(out.stdout).unwrap()
-    };
-    named("session-start", "sessE1M1-aaaa", "w9");
-    let agents = s.path().join(".moai/agents");
-    assert_eq!(names_in(&agents), ["w9.json"], "MOAI_AGENT 의 이름으로 안 섰다");
-    ok(s.path(), &["send", "w9", "답장", "--as", "boss"]);
-    assert!(named("user-prompt-submit", "sessE1M1-aaaa", "w9").contains("답장"), "그 이름 앞의 편지가 안 실렸다");
-
-    // 맨 이름으로 선 세션이 나중에 MOAI_AGENT 를 대면 장을 그 이름으로 옮기고 편지가 따라간다.
-    hook(&s, "session-start", &event(&s, "sessE1M2-bbbb"));
-    assert!(agents.join("claude-sessE1M2.json").is_file());
-    ok(s.path(), &["send", "claude-sessE1M2", "옛 이름 앞의 편지", "--as", "boss"]);
-    let out = named("user-prompt-submit", "sessE1M2-bbbb", "w8");
-    assert!(out.contains("옛 이름 앞의 편지"), "옮긴 이름으로 편지가 안 따라왔다 — {out}");
-    assert_eq!(names_in(&agents), ["w8.json", "w9.json"], "옛 이름의 장이 남았다");
-}
-
-/// **떠난 세션의 이름을 새 세션이 넘겨받으면 그 앞의 편지는 보낸 이에게 돌아간다**(2026-10-04 사용자 결정,
-/// moai-ew4o.l3n) — Claude 의 세션 이름은 디렉터리마다 256개라, 떠난 세션 앞으로 남은 편지가 같은 이름을 받은 새 세션의
-/// 첫 프롬프트에 실려 읽음이 되었다. 보낸 이에게는 "읽기 전에 떠났다" 로 선다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_new_session_taking_a_gone_name_returns_its_letters() {
-    let s = init("hook-takeover");
-    let mut old = Sleeper::new();
-    hello_as(s.path(), "w7", &old.pid(), &["--vendor", "claude"]);
-    ok(s.path(), &["send", "w7", "떠난 이의 일감", "-b", "다시 맡길 일", "--as", "boss"]);
-    old.end();
-    let named = |on: &str| {
-        let out = hook_at_home(&s, s.path(), None, &[("MOAI_AGENT", "w7")], on, &event(&s, "sessNEW1-cccc"));
-        String::from_utf8(out.stdout).unwrap()
-    };
-    named("session-start");
-    assert!(!named("user-prompt-submit").contains("떠난 이의 일감"), "떠난 이의 편지가 새 세션에 실렸다");
-    let back = ok(s.path(), &["inbox", "--as", "boss", "--json"]);
-    assert!(back.contains("\"returned\":true") && back.contains("떠난 이의 일감"), "보낸 이에게 안 돌아왔다 — {back}");
-    assert!(back.contains("\"to\":\"w7\",\"from\":\"boss\""), "되돌아온 편지의 받는 이·보낸 이가 바뀌었다 — {back}");
-    let said = ok(s.path(), &["inbox", "--as", "boss"]);
-    assert!(said.contains("되돌아왔다 - w7 가 읽기 전에 떠났다"), "{said}");
-}
-
-/// **이름을 바꾸면 안 읽은 편지가 새 이름으로 따라간다**(moai-ew4o.l3n) — 옛 이름 앞의 편지는 아무도 못 읽고 남았다.
-#[test]
-#[cfg(unix)]
-fn hello_under_a_new_name_carries_the_letters() {
-    let s = init("hello-carry");
-    let agent = Sleeper::new();
-    hello_as(s.path(), "w1", &agent.pid(), &[]);
-    ok(s.path(), &["send", "w1", "옛 이름으로", "--as", "boss"]);
-    hello_as(s.path(), "w2", &agent.pid(), &[]);
-    assert!(ok(s.path(), &["inbox", "--as", "w2", "--json"]).contains("옛 이름으로"), "편지가 새 이름으로 안 따라왔다");
-    assert!(ok(s.path(), &["inbox", "--as", "w1", "--json"]).contains("\"letters\":[]"), "옛 이름에도 남았다");
-}
-
-/// **Codex 세션은 훅이 지어 준 장을 `--as` 로 잇는다**(moai-u5wr.7xr, 사용자 결정 A) — Codex 의 셸은 세션 모두가 함께 쓰는
-/// `codex app-server` 밑에서 돌아 `moai` 가 조상으로 이 세션을 못 찾는다. 훅은 첫 프롬프트에 그 장의 이름을 대고,
-/// `hello --as` 는 그 장을 이어받아 역할을 단다 — 프로세스·세션은 그 장의 것이고 데몬의 tmux 칸을 안 적는다. 이름 없는
-/// `hello` 는 Codex 에서 멈춘다: 데몬의 pid 로 지은 장은 창 둘이 한 장을 빼앗았다. 역할을 단 Codex 감독은 제 훅이
-/// `any-idle-worker` 일감을 가져가지 않는다.
-#[test]
-fn a_codex_session_takes_up_its_hook_row_with_as() {
-    let s = init("codex-as");
-    let tmux = [("TMUX", "/tmp/moai-7xr-not-this-session,1,0"), ("TMUX_PANE", "%78")];
-    let codex = |on: &str, input: &str| {
-        let out = hook_argv(&s, s.path(), None, &tmux, &["hook", on, "--dialect", "codex"], input);
-        String::from_utf8(out.stdout).unwrap()
-    };
-    codex("session-start", &recorded(&s, "codex/session-start.json"));
-    let first = codex("user-prompt-submit", &recorded(&s, "codex/user-prompt-submit.json"));
-    assert!(
-        first.contains("이 Codex 세션은 `moai agents` 에서 `codex-01a107b4` 이다"),
-        "제 장의 이름을 안 댔다 — {first}"
-    );
-    assert!(first.contains("--as codex-01a107b4"), "{first}");
-
-    // 이름 없는 인사는 Codex 에서 멈춘다 — 데몬의 pid 로는 세션을 못 가른다.
-    let in_codex = |args: &[&str]| staged_under("codex", args).envs(tmux).current_dir(s.path()).output().unwrap();
-    let bare = in_codex(&["hello", "--role", "supervisor", "--json"]);
-    assert!(!bare.status.success(), "Codex 에서 이름 없이 인사를 받았다");
-    assert_eq!(field(&String::from_utf8_lossy(&bare.stderr), "code"), "no_actor");
-    let card = in_codex(&["hello", "--as", "codex-01a107b4", "--role", "supervisor", "--json"]);
-    let said = String::from_utf8(card.stdout).unwrap();
-    assert!(card.status.success(), "{}", String::from_utf8_lossy(&card.stderr));
-    assert!(said.contains("\"name\":\"codex-01a107b4\"") && said.contains("\"role\":\"supervisor\""), "{said}");
-    assert!(said.contains("\"pid\":0,") && said.contains("\"session\":\"01a107b4-"), "훅의 장을 안 이었다 — {said}");
-    assert!(!said.contains("%78"), "데몬의 tmux 칸을 적었다 — {said}");
-    assert_eq!(names_in(&s.path().join(".moai/agents")), ["codex-01a107b4.json"], "장이 둘로 섰다");
-    // 제 이름을 댄 Codex 창은 그 이름의 새 장이다 — 프로세스도 칸도 모름이다.
-    let named = in_codex(&["hello", "--name", "cx-worker", "--json"]);
-    let said = String::from_utf8(named.stdout).unwrap();
-    assert!(said.contains("\"pid\":0,") && !said.contains("%78"), "{said}");
-
-    // 역할을 단 감독의 훅은 제 일감을 안 가진다.
-    ok(s.path(), &["send", "any-idle-worker", "일감", "--as", "boss"]);
-    assert!(!codex("stop", &recorded(&s, "codex/stop.json")).contains("일감"), "Codex 감독의 훅이 일감을 가졌다");
-    // `--as` 로 댄 이름이 없으면 멈추고, MOAI_AGENT 와 다른 --name 은 받지 않는다.
-    let code = |out: Output| field(&String::from_utf8_lossy(&out.stderr), "code");
-    assert_eq!(code(moai(s.path(), &["hello", "--as", "nobody", "--json"])), "not_found");
-    // 가짜 claude 밑에서 부른다 — Codex 밑에서는 `MOAI_AGENT` 를 안 읽어(리뷰 moai-ew4o.q9f) 돌리는 쪽에 따라 갈린다.
-    let told = staged_under("claude", &["hello", "--name", "y1", "--json"])
-        .env("MOAI_AGENT", "x1")
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert_eq!(code(told), "bad_input", "MOAI_AGENT 와 다른 이름을 받았다");
-}
-
-/// **Codex 의 셸은 그 세션의 id 를 대고, moai 는 그것으로 제 장을 찾는다**(moai-u5wr.7xr, 2026-10-05 잰 B) — Codex 0.160 은
-/// 도구 셸에 `CODEX_THREAD_ID` 를 세우고, 그 값이 훅이 장에 적은 세션 id 다. 그래서 `hello`·`inbox`·`send` 가 `--as` 없이
-/// 훅의 장으로 돈다. 훅이 아직 장을 안 지은 창(`/hooks` 에서 안 믿었다)의 `hello` 는 훅이 지을 그 이름과 세션으로 장을
-/// 세워, 나중에 훅이 그 장을 잇는다. 데몬의 환경에서 새어 든 남의 `CLAUDE_CODE_SESSION_ID` 는 안 읽는다.
-#[test]
-fn a_codex_shell_finds_its_row_by_the_thread_id() {
-    let s = init("codex-thread");
-    let sid = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
-    let in_codex = |thread: &str, args: &[&str]| {
-        staged_under("codex", args)
-            .env("CODEX_THREAD_ID", thread)
-            .env("CLAUDE_CODE_SESSION_ID", "149af4f4-not-this-session")
-            .current_dir(s.path())
-            .output()
-            .unwrap()
-    };
-    let said = |out: Output| {
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        String::from_utf8(out.stdout).unwrap()
-    };
-    hook_argv(
-        &s,
-        s.path(),
-        None,
-        &[],
-        &["hook", "session-start", "--dialect", "codex"],
-        &recorded(&s, "codex/session-start.json"),
-    );
-    let card = said(in_codex(sid, &["hello", "--role", "worker", "--json"]));
-    assert!(
-        card.contains("\"name\":\"codex-01a107b4\"") && card.contains("\"role\":\"worker\""),
-        "훅의 장을 안 이었다 — {card}"
-    );
-    assert_eq!(names_in(&s.path().join(".moai/agents")), ["codex-01a107b4.json"], "장이 둘로 섰다");
-    ok(s.path(), &["send", "codex-01a107b4", "일감", "--as", "boss"]);
-    let got = said(in_codex(sid, &["inbox", "--ack", "--json"]));
-    assert!(got.starts_with("{\"me\":\"codex-01a107b4\"") && got.contains("일감"), "세션 id 로 나를 못 찾았다 — {got}");
-
-    // 훅이 아직 장을 안 지은 Codex 창 — `hello` 가 훅과 같은 이름·세션으로 세우고, 훅은 그 장을 잇는다.
-    let other = "02b207b4-ee4b-7b13-9ae8-269f43b5a38f";
-    let card = said(in_codex(other, &["hello", "--role", "worker", "--json"]));
-    assert!(
-        card.contains("\"name\":\"codex-02b207b4\"") && card.contains(&format!("\"session\":\"{other}\"")),
-        "{card}"
-    );
-    assert!(!card.contains("149af4f4"), "데몬에서 새어 든 Claude 세션을 적었다 — {card}");
-    let start = recorded(&s, "codex/session-start.json").replace(sid, other);
-    hook_argv(&s, s.path(), None, &[], &["hook", "session-start", "--dialect", "codex"], &start);
-    assert_eq!(
-        names_in(&s.path().join(".moai/agents")),
-        ["codex-01a107b4.json", "codex-02b207b4.json"],
-        "훅이 장을 새로 지었다"
-    );
-    assert!(
-        std::fs::read_to_string(s.path().join(".moai/agents/codex-02b207b4.json"))
-            .unwrap()
-            .contains("\"role\":\"worker\""),
-        "훅이 hello 의 역할을 지웠다"
-    );
-    // 장이 없는 세션 id 는 아무도 아니다 — 남의 장으로 답하지 않는다.
-    let none = in_codex("03c307b4-0000-0000-0000-000000000000", &["inbox", "--json"]);
-    assert_eq!(field(&String::from_utf8_lossy(&none.stderr), "code"), "no_actor");
-}
-
-/// **같은 세션이 다시 인사해도 제 편지는 그대로다**(리뷰 moai-ew4o.q9f) — 닻이 20분 넘게 묵은 Codex 장은 떠난 것으로
-/// 읽히지만, 그 세션이 다시 `hello` 하는 것은 그 이름을 넘겨받는 것이 아니다. 넘겨받기로 세던 판은 그 함을 비워 편지를
-/// 보낸 이에게 "읽기 전에 떠났다" 로 되돌렸다.
-#[test]
-fn hello_on_its_own_stale_codex_row_keeps_its_letters() {
-    let s = init("codex-own-stale");
-    hook_argv(
-        &s,
-        s.path(),
-        None,
-        &[],
-        &["hook", "session-start", "--dialect", "codex"],
-        &recorded(&s, "codex/session-start.json"),
-    );
-    ok(s.path(), &["send", "codex-01a107b4", "일감", "--as", "boss"]);
-    // 48분 뒤 — 그 사이 아무 훅도 닻을 안 적었다.
-    let out = staged_under("codex", &["hello", "--role", "worker", "--json"])
-        .env("CODEX_THREAD_ID", "01a107b4-ee4b-7b13-9ae8-269f43b5a38f")
-        .env("MOAI_NOW", "2026-09-11T05:00:03Z")
-        .current_dir(s.path())
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", text(&out));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("\"name\":\"codex-01a107b4\""), "{}", text(&out));
-    assert!(ok(s.path(), &["inbox", "--as", "boss", "--json"]).contains("\"letters\":[]"), "제 편지를 되돌렸다");
-    assert!(ok(s.path(), &["inbox", "--as", "codex-01a107b4", "--json"]).contains("일감"), "제 함이 비었다");
-}
-
-/// **Codex 셸은 `MOAI_AGENT` 를 안 읽는다**(리뷰 moai-ew4o.q9f) — 그 셸의 환경은 세션 모두가 함께 쓰는 app-server 의
-/// 것이라, 첫 창이 데몬을 띄울 때 든 이름이 모든 Codex 창에 선다. 읽던 판은 다른 창의 `inbox --ack` 가 그 이름 앞의
-/// 편지를 가져가고, `hello` 는 어느 이름으로도 못 섰다. 훅이 Codex 에서 그 값을 안 읽는 것과 같은 자다.
-#[test]
-#[cfg(unix)]
-fn a_codex_shell_never_reads_moai_agent() {
-    let s = init("codex-told");
-    let in_codex = |args: &[&str]| {
-        staged_under("codex", args)
-            .env("CODEX_THREAD_ID", "01a107b4-ee4b-7b13-9ae8-269f43b5a38f")
-            .env("MOAI_AGENT", "w1")
-            .current_dir(s.path())
-            .output()
-            .unwrap()
-    };
-    hook_argv(
-        &s,
-        s.path(),
-        None,
-        &[],
-        &["hook", "session-start", "--dialect", "codex"],
-        &recorded(&s, "codex/session-start.json"),
-    );
-    // 데몬을 띄운 첫 창 — 그 이름이 w1 이다.
-    let first = Sleeper::new();
-    hello_as(s.path(), "w1", &first.pid(), &[]);
-    ok(s.path(), &["send", "w1", "첫 창의 편지", "--as", "boss"]);
-    let card = in_codex(&["hello", "--role", "worker", "--json"]);
-    assert!(card.status.success(), "{}", text(&card));
-    assert!(String::from_utf8_lossy(&card.stdout).contains("\"name\":\"codex-01a107b4\""), "{}", text(&card));
-    let got = in_codex(&["inbox", "--ack", "--json"]);
-    assert!(got.status.success(), "{}", text(&got));
-    assert!(String::from_utf8_lossy(&got.stdout).starts_with("{\"me\":\"codex-01a107b4\""), "{}", text(&got));
-    assert!(ok(s.path(), &["inbox", "--as", "w1", "--json"]).contains("첫 창의 편지"), "첫 창의 편지를 가져갔다");
-    let sent = in_codex(&["send", "boss", "보고", "--json"]);
-    assert_eq!(field(&String::from_utf8_lossy(&sent.stdout), "from"), "codex-01a107b4", "{}", text(&sent));
-}
-
-/// **`--pid`·`--as` 로 가리킨 장에는 이 창의 `MOAI_AGENT` 를 안 씌운다**(리뷰 moai-ew4o.q9f) — 그 이름은 이 창의 것이다.
-/// 씌우던 판은 사람의 터미널에서 일꾼을 `--pid` 로 세우는 것을 거절하고, `--name` 없이는 일꾼의 장을 사람의 이름으로 옮겨
-/// 그 편지까지 데려갔다.
-#[test]
-#[cfg(unix)]
-fn hello_for_another_row_leaves_moai_agent_out() {
-    let s = init("hello-told-pid");
-    let worker = Sleeper::new();
-    let told = |args: &[&str]| staged(args).env("MOAI_AGENT", "boss").current_dir(s.path()).output().unwrap();
-    let out = told(&["hello", "--pid", &worker.pid(), "--name", "w1", "--json"]);
-    assert!(out.status.success(), "{}", text(&out));
-    ok(s.path(), &["send", "w1", "일꾼에게", "--as", "sup"]);
-    let again = told(&["hello", "--pid", &worker.pid(), "--role", "worker", "--json"]);
-    assert!(String::from_utf8_lossy(&again.stdout).contains("\"name\":\"w1\""), "{}", text(&again));
-    let adopted = told(&["hello", "--as", "w1", "--json"]);
-    assert!(String::from_utf8_lossy(&adopted.stdout).contains("\"name\":\"w1\""), "{}", text(&adopted));
-    assert_eq!(names_in(&s.path().join(".moai/agents")), ["w1.json"], "일꾼의 장을 사람의 이름으로 옮겼다");
-    assert!(ok(s.path(), &["inbox", "--as", "w1", "--json"]).contains("일꾼에게"), "일꾼의 편지가 옮겨 갔다");
-}
-
-/// **`MOAI_AGENT` 가 이른 장은 그 창이 다른 세션을 이어 써도 편지를 안 되돌린다**(리뷰 moai-ew4o.q9f) — 그 이름은 세션이
-/// 아니라 창의 것이다. `/resume` 으로 옛 세션(죽은 프로세스의 장이 남은)을 이어 쓴 창은 "한 프로세스는 장 하나" 로 제
-/// 이름의 장을 걷는데, 그 함까지 비우던 판은 떠나지도 않은 창의 편지를 보낸 이에게 "읽기 전에 떠났다" 로 되돌렸다.
-#[test]
-#[cfg(target_os = "linux")]
-fn a_window_named_by_moai_agent_keeps_its_letters_across_a_resume() {
-    let s = init("hook-resume-told");
-    // 옛 세션의 장 — 그 프로세스는 죽었다.
-    let mut gone = Sleeper::new();
-    hello_as(s.path(), "claude-sessOLD1", &gone.pid(), &["--vendor", "claude"]);
-    let at = s.path().join(".moai/agents/claude-sessOLD1.json");
-    let card = std::fs::read_to_string(&at).unwrap();
-    std::fs::write(&at, card.replacen("\"cwd\":", "\"session\":\"sessOLD1-aaaa\",\"cwd\":", 1)).unwrap();
-    gone.end();
-    ok(s.path(), &["send", "w1", "창에게", "--as", "boss"]);
-    // 창(MOAI_AGENT=w1)이 인사하고, 같은 프로세스로 옛 세션을 이어 쓴다. 셸은 끝까지 산다 — 그 창이다.
-    let tmp = s.path().join("hooktmp");
-    std::fs::create_dir_all(&tmp).unwrap();
-    let (input, code, done) = (tmp.join("resume.json"), tmp.join("resume.code"), tmp.join("resume.done"));
-    std::fs::write(&input, event(&s, "sessOLD1-aaaa").replacen('{', "{\"source\":\"resume\",", 1)).unwrap();
-    let child = isolated(fake_agent("claude"))
-        .args([
-            "-c",
-            "\"$0\" hello --json > /dev/null && \"$0\" hook session-start < \"$IN\" > /dev/null; echo $? > \"$CODE\"; \
-             : > \"$DONE\"; exec sleep 600",
-            BIN,
-        ])
-        .env("MOAI_ACTOR", ACTOR)
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .env("MOAI_AGENT", "w1")
-        .env("MOAI_CONFIG", s.path().join("hookcfg").join("config.toml"))
-        .env("TMPDIR", &tmp)
-        .env("IN", &input)
-        .env("CODE", &code)
-        .env("DONE", &done)
-        .current_dir(s.path())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let _window = Sleeper(child);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while !done.exists() {
-        assert!(std::time::Instant::now() < until, "창이 20초 안에 인사와 훅을 못 마쳤다");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    assert_eq!(std::fs::read_to_string(&code).unwrap().trim(), "0", "인사나 훅이 비영으로 끝났다");
-    assert!(
-        ok(s.path(), &["inbox", "--as", "boss", "--json"]).contains("\"letters\":[]"),
-        "떠나지 않은 창의 편지를 되돌렸다"
-    );
-    assert!(ok(s.path(), &["inbox", "--as", "w1", "--json"]).contains("창에게"), "창의 편지가 사라졌다");
-}
-
 /// **새 이벤트와 말씨도 실패하지 않는다** — [`the_hook_never_fails`] 의 입력을 세 말씨로.
 #[test]
 fn every_dialect_and_event_never_fails() {
@@ -27281,6 +24572,77 @@ fn every_dialect_and_event_never_fails() {
                 assert!(out.trim().is_empty(), "{dialect} {ev} 가 {input:?} 에 무언가 냈다\n{out}");
             }
         }
+    }
+}
+
+/// **0.9 전에 심은 훅이 부르는 셋은 저장소 안에서도 빈 명령이다**(moai-5uwh.e9j) — 다시 심기 전의 Claude 플러그인은
+/// `stop-failure`·`session-end` 를, Codex 의 `.codex/hooks.json` 은 `interrupt`·`session-end` 를 부른다. 기록한 Codex
+/// 입력과 Claude 의 세션 하나로 저장소 안에서 부른다 — 아무것도 안 내고, 출석이 적던 자리(`.moai/agents`·`.moai/mail`)를
+/// 안 세우며, 그 세션의 기준선도 안 고친다. 저장소 밖의 입력만 재는 [`every_dialect_and_event_never_fails`] 는 그 셋이
+/// 트래커를 읽고 무엇을 적어도 푸르다.
+#[test]
+fn the_events_planted_before_0_9_do_nothing_inside_a_repository() {
+    let s = init("hook-legacy-events");
+    let sid = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
+    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
+    let before = baseline(&s, sid);
+    assert!(before.is_some(), "Codex 의 여는 훅이 기준선을 안 적었다");
+    // 경고를 늘린다 — 빈 명령이 기준선을 다시 적으면 그 수가 달라진다.
+    ok(s.path(), &["add", "에픽 없는 일"]);
+    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
+        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
+        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
+    }
+    let claude = event(&s, "sessLGCY-0001");
+    for ev in ["session-start", "stop-failure", "session-end"] {
+        let out = hook_out(&s, ev, &claude);
+        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
+    }
+    assert_eq!(baseline(&s, sid), before, "빈 명령이 Codex 세션의 기준선을 고쳤다");
+    for gone in [".moai/agents", ".moai/mail"] {
+        assert!(!s.path().join(gone).exists(), "훅이 {gone} 를 세웠다");
+    }
+}
+
+/// **0.9 전에 심은 셋은 스냅샷을 읽기 전에 돌아간다**(moai-ybns.451.sdk) — 위 시험은 그 셋이 아무것도 안 내고 안 적는
+/// 것만 잰다. `decide` 의 빈 명령 갈래를 트래커를 읽은 뒤로 내려도 푸르다 — 그 갈래가 서는 까닭은 세션이 끝날 때마다
+/// 스냅샷 전체를 읽고 버리지 않는 것이다. 그래서 `.moai/issues.jsonl` 의 atime 을 2000-01-01 로 돌려 두고 부른 뒤
+/// 그대로인지 본다.
+///
+/// **대조로 여는 훅이 그 값을 움직이는 것을 먼저 본다** — atime 을 안 적는 파일 시스템(`noatime`)이면 이 시험은 아무것도
+/// 못 재니, 그때는 조용히 푸르지 않고 붉어진다. `relatime` 은 24시간보다 낡은 atime 을 고치므로 2000 년이면 선다.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_events_planted_before_0_9_return_before_reading_the_snapshot() {
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    let s = init("hook-legacy-atime");
+    ok(s.path(), &["add", "읽히는지 볼 줄"]);
+    let snapshot = s.path().join(".moai/issues.jsonl");
+    let old = UNIX_EPOCH + Duration::from_secs(946_684_800); // 2000-01-01T00:00:00Z
+    let rewind = || {
+        let f = std::fs::File::options().write(true).open(&snapshot).unwrap();
+        f.set_times(std::fs::FileTimes::new().set_accessed(old)).unwrap();
+        assert_eq!(std::fs::metadata(&snapshot).unwrap().accessed().unwrap(), old, "atime 을 못 돌렸다");
+    };
+    let accessed = || std::fs::metadata(&snapshot).unwrap().accessed().unwrap();
+
+    let claude = event(&s, "sessATIM-0001");
+    rewind();
+    hook_out(&s, "session-start", &claude);
+    let moved: SystemTime = accessed();
+    assert_ne!(moved, old, "여는 훅이 읽어도 atime 이 그대로다 — 이 파일 시스템에서는 이 시험이 아무것도 못 잰다");
+
+    for ev in ["stop-failure", "session-end"] {
+        rewind();
+        let out = hook_out(&s, ev, &claude);
+        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
+        assert_eq!(accessed(), old, "claude {ev} 가 스냅샷을 읽었다");
+    }
+    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
+        rewind();
+        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
+        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
+        assert_eq!(accessed(), old, "codex {ev} 가 스냅샷을 읽었다");
     }
 }
 

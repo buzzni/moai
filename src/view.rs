@@ -13,7 +13,6 @@ use crate::worktree::Origin;
 use anstyle::Style;
 use std::collections::BTreeMap;
 
-pub mod mail;
 pub mod wiki;
 
 /// 제목이 이보다 길면 자른다. 표가 접히면 표가 아니다.
@@ -941,6 +940,8 @@ fn says(w: &Warning, screen: Screen) -> String {
         "archive_pending" => one(say(lang, "warn.archive_pending")),
         "agents_stale" => one(say(lang, "warn.agents_stale")),
         "agents_hand_edited" => one(say(lang, "warn.agents_hand_edited")),
+        // **심긴 스킬·훅이 이 판의 것과 다르다**(moai-ybns.451.rpd). 어느 자리인지는 `preview` 가 한 줄씩 낸다.
+        "skills_stale" => one(say(lang, "warn.skills_stale")),
         // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가
         // 없는 것과 `.gitattributes` 에 `merge=union` 이 없는 것은 결과가 아주 다르다(옆 워크트리가
         // `add -A` 에 딸려가는 것과, 저널이 머지에서 충돌하는 것). 한 낱말로 뭉치면 그 중 한쪽이

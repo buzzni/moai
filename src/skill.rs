@@ -27,13 +27,41 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = ".claude/moai-plugin";
 
 /// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
-/// 심는 차례(이슈 트래커·감독·위키·일꾼)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
+/// 심는 차례(이슈 트래커·감독·위키)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
 /// 있어 시험이 이 목록과 견주고(`guide::tests::the_frontmatter_opens_the_skill`), 트리가 이 목록 밖의 스킬을 심으면
 /// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
-/// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
-pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-work"];
+/// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`). 위키는 걷은 이름까지 든
+/// [`EVER_PLANTED`] 로 거른다.
+///
+/// **일꾼 스킬 `moai-work` 는 걷었다**(2026-10-06 사용자 결정, moai-obxm). 일꾼의 걸음은 감독 스킬의
+/// `references/worker.md`([`crate::guide::worker`])에 서고, 감독의 메시지가 그 파일을 읽으라고 이른다(moai-fim6).
+pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
+
+/// **moai 가 한 번이라도 심은 스킬**과 그 디렉터리 안에 심은 파일 — 지금 심는 것([`NAMES`])에 걷은 것이 더해진
+/// 목록이다(moai-six5.1xz). 셋이 이 하나로 잰다.
+///
+/// - `skill install` 이 걷는 남은 디렉터리(`cmd::skill::leftovers`) — 이 목록에 있고 이번 트리에 없는 이름이다. 일꾼 스킬 `moai-work` 는
+///   0.9.0 에서 걷혔고(2026-10-06 사용자 결정, moai-ybns), 감독 스킬은 Claude 의 트리에만 선다 — 옛 판이 심은 그
+///   디렉터리가 남으면 에이전트가 걷힌 명령(`moai hello`·`inbox`·`send`)을 배운다
+/// - `uninstall` 이 손으로 지우라고 대는 `.agents/skills` 의 디렉터리 — 남은 것까지 댄다
+/// - 위키와 새 id 가 스킬 이름을 id 로 안 읽는 거르개([`crate::wiki`]·[`crate::store::taken_ids`], moai-mdzx.3pm) — 걷은
+///   이름이 빠지면 페이지의 `moai-work` 가 없는 id 로 선다
+///
+/// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
+/// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
+pub const EVER_PLANTED: [(&str, &[&str]); 4] = [
+    ("moai", &["SKILL.md", "references/commands.md"]),
+    ("moai-supervise", &["SKILL.md", "references/worker.md"]),
+    ("moai-wiki", &["SKILL.md"]),
+    ("moai-work", &["SKILL.md"]),
+];
+
+/// `name` 이 moai 가 심었던 스킬의 이름인가([`EVER_PLANTED`]).
+pub fn ever_planted(name: &str) -> bool {
+    EVER_PLANTED.iter().any(|(n, _)| *n == name)
+}
 
 /// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
 /// 두 벤더 문서가 같은 `<저장소>/.agents/skills/<이름>/SKILL.md` 를 들어, 한 벌을 심으면 둘이 다 읽고 커밋돼 팀이
@@ -46,41 +74,55 @@ pub const AGENTS_DIR: &str = ".agents/skills";
 pub struct Skill {
     pub name: &'static str,
     pub files: Vec<(&'static str, String)>,
+    /// Claude 의 플러그인([`tree`])에만 심고 [`AGENTS_DIR`]([`agents_tree`])에는 안 심는가. 감독 스킬이 그렇다 —
+    /// 세션 사이에 말하는 수단이 Claude Code 의 `ListAgents`·`SendMessage` 뿐이라(2026-10-06 사용자 결정, moai-obxm),
+    /// Codex·Antigravity 창이 그 글을 받으면 칠 수 없는 도구를 배운다.
+    pub claude_only: bool,
 }
 
 /// 심는 스킬 전부 — [`NAMES`] 의 차례로, 글은 `guide` 에서 온다. **트리 둘이 이 하나를 받는다**(moai-xs2h.xgo) —
 /// Claude 의 플러그인([`tree`])과 Codex·Antigravity 의 [`AGENTS_DIR`]([`agents_tree`]). 부르는 자리마다 글을 손으로
 /// 엮던 판은 `install` 과 커밋된 트리 시험이 같은 글 넷을 따로 늘어놓아, 스킬 하나를 더할 때마다 두 자리를 고쳤다.
 pub fn skills() -> Vec<Skill> {
-    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
-    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki, worker] = NAMES;
+    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 스킬 이름을 id 에서 거르는 [`EVER_PLANTED`] 가 그 목록을 다 들니
+    // (moai-mdzx.3pm, moai-six5.1xz), 여기 글자를 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
+    let [main, supervisor, wiki] = NAMES;
     vec![
         Skill {
             name: main,
             files: vec![("SKILL.md", crate::guide::skill()), ("references/commands.md", crate::guide::reference())],
+            claude_only: false,
         },
         // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고, 일꾼이 `moai` 를 부를 때마다
         // 감독의 걸음까지 읽는다. 발동어(description)는 따로 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        Skill { name: supervisor, files: vec![("SKILL.md", crate::guide::supervise())] },
+        // 일꾼의 걸음(`references/worker.md`)은 감독의 메시지가 절대 경로로 읽으라고 이른다(2026-10-07 사용자 결정,
+        // moai-fim6) — 일꾼 창도 같은 저장소의 같은 플러그인을 읽어 그 파일이 거기 있다. 32KB 를 매번 손으로 옮겨 붙이던
+        // 판은 보낼 때마다 출력 토큰 8~10k 가 들었고, 줄이거나 바꿔 옮긴 글을 아무것도 못 잡았다.
+        Skill {
+            name: supervisor,
+            files: vec![("SKILL.md", crate::guide::supervise()), ("references/worker.md", crate::guide::worker())],
+            claude_only: true,
+        },
         // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai` 스킬에 섞으면 이슈
         // 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
-        Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())] },
-        // 일꾼 스킬도 따로 선다(moai-0x59) — 사람이 일꾼으로 삼은 창만 그 걸음을 읽는다. 감독 스킬에 두면 감독이 매
-        // 바퀴 편지로 실어 보내야 하고, `moai` 스킬에 두면 일꾼이 아닌 세션까지 기다림과 보고의 걸음을 읽는다.
-        Skill { name: worker, files: vec![("SKILL.md", crate::guide::work())] },
+        Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())], claude_only: false },
     ]
 }
 
 /// 스킬마다의 글을 `<이름>/<상대 경로>` 로 편다 — 두 트리가 이 차례 그대로 받는다.
-fn skill_files(skills: &[Skill]) -> impl Iterator<Item = (PathBuf, String)> + '_ {
-    skills.iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (PathBuf, String)> + 'a
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
+    skills.into_iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
 }
 
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
-/// 없다는 것뿐이고, 에이전트마다 다른 걸음은 글 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
+/// 없다는 것과 Claude 에만 서는 스킬([`Skill::claude_only`], 감독)이 빠진다는 것뿐이고, 에이전트마다 다른 걸음은 글
+/// 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
 pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
-    skill_files(skills).collect()
+    skill_files(skills.iter().filter(|s| !s.claude_only)).collect()
 }
 
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
@@ -115,15 +157,13 @@ fn stable(bytes: &[u8]) -> u64 {
 /// 는 걸지 않는다** — `claude` 가 그 출력을 거절한다. 까닭은 `hook::Event` 에
 /// 적혀 있다.
 ///
-/// **`StopFailure`·`SessionEnd` 는 출석만 적는다**(moai-u5wr.f29, 2026-10-04 사용자 결정) — `Stop` 없이 끝난 턴의 장을
-/// `idle` 로 돌린다. 사람이 Esc 로 끊은 턴에는 Claude 가 어느 훅도 안 낸다(문서) — 그 장은 다음 프롬프트까지 `busy` 다.
+/// **`StopFailure`·`SessionEnd` 는 안 건다**(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 옛 판이 심은 훅이
+/// 그 하위명령을 부르는 동안은 `moai hook` 이 빈 명령으로 받는다(`cmd::hook` 의 `decide`).
 const HOOKS: &[(&str, &str, &str)] = &[
     ("SessionStart", "session-start", "counting moai warnings..."),
     ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
     ("PreToolUse", "pre-tool-use", "checking the moai rules..."),
     ("Stop", "stop", "comparing the moai state..."),
-    ("StopFailure", "stop-failure", "marking this session idle for moai..."),
-    ("SessionEnd", "session-end", "marking this session idle for moai..."),
 ];
 
 /// `PreToolUse` 가 볼 도구들. 규칙이 뜻을 두는 것만 적는다 — 전부 받으면
@@ -138,9 +178,8 @@ pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 /// Antigravity 가 읽는 훅 자리 — 스킬과 같은 `.agents/` 밑이다([`AGENTS_DIR`]).
 pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 
-/// Codex 의 훅 — Claude 와 이벤트 이름이 같고, `Stop` 없이 끝난 턴은 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd`
-/// 로 온다. API 오류로 끊긴 턴에 오는 이벤트는 문서에 없다. **`SessionEnd` 는 그 세션의 장을 걷는다** — 장을 `idle` 로
-/// 두는 Claude 와 다르다(`cmd::hook` 의 `rest`).
+/// Codex 의 훅 — Claude 와 이벤트 이름이 같다. `Stop` 없이 끝난 턴의 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd` 는
+/// 안 건다(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 옛 판이 심은 줄은 `moai hook` 이 빈 명령으로 받는다.
 ///
 /// **줄마다 그 이벤트의 상한(초)을 함께 적는다**(moai-t6hl) — 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이
 /// 15초를 받는다. 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).
@@ -148,25 +187,22 @@ pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 /// **`additionalContextLimit` 은 이 표에 없다 — 훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽는다**(moai-dp35).
 /// Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 내는데(사람의 codex 0.160 이 짚었다 — 그 경고를
 /// `tests/hooks/codex/config/` 에 갈무리해 두고 시험이 이 표가 심는 파일을 그것에 대 본다, moai-o9tg), 그 값을 받는
-/// 이벤트와 편지가 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
-/// `cmd::hook` 의 `hold_room`, `hook::letters_room`)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
-/// 이벤트의 편지를 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
-/// moai-u5wr.6un 5번, moai-rxro 의 잃음).
+/// 이벤트와 글이 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
+/// `cmd::hook` 의 `hold_room`, 그때의 편지 자리)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
+/// 이벤트의 글을 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
+/// moai-u5wr.6un 5번, moai-rxro).
 const CODEX: &[(Event, &str, u64)] = &[
     (Event::SessionStart, "counting moai warnings...", TIMEOUT),
     (Event::UserPromptSubmit, "reading the moai board...", TIMEOUT),
     (Event::PreToolUse, "checking the moai rules...", TIMEOUT),
     (Event::Stop, "comparing the moai state...", TIMEOUT),
-    (Event::Interrupt, "marking this session idle for moai...", CODEX_SHORT_TIMEOUT),
-    (Event::SessionEnd, "taking this session off moai's list...", CODEX_SHORT_TIMEOUT),
 ];
 
 /// Codex 의 `PreToolUse` 가 볼 도구 — 셸과 패치다. Codex 는 그 둘과 MCP 에만 훅을 낸다(openai/codex#20204).
 const CODEX_WATCHED: &str = "Bash|apply_patch";
 
 /// Antigravity 의 훅 — **`UserPromptSubmit` 이 없어 `PreInvocation` 이 그 자리에 선다**(턴의 첫 모델 부름만 그
-/// 몫을 한다, `cmd::hook`). `SessionStart` 도 없다. Esc 로 끊긴 턴에는 `Stop` 이 안 온다(2026-10-04 실측) — 그
-/// 장은 다음 턴까지 `busy` 다.
+/// 몫을 한다, `cmd::hook`). `SessionStart` 도 없다. Esc 로 끊긴 턴에는 `Stop` 이 안 온다(2026-10-04 실측).
 const ANTIGRAVITY: &[(&str, &str)] =
     &[("PreInvocation", "user-prompt-submit"), ("PreToolUse", "pre-tool-use"), ("Stop", "stop")];
 
@@ -174,20 +210,9 @@ const ANTIGRAVITY: &[(&str, &str)] =
 const ANTIGRAVITY_WATCHED: &str = "run_command|write_to_file|replace_file_content|multi_replace_file_content";
 
 /// 훅 하나가 기다리는 상한(초) — 세 에이전트의 파일이 이것을 쓴다(Claude 의 매니페스트도). Codex 의 기본은 600초,
-/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. 세션 끝의 이벤트는 에이전트가
-/// 제 손으로 더 짧게 묶는다.
-///
-/// - **Codex** 는 `Interrupt`·`SessionEnd` 를 1~3초에 묶고, 3 보다 크게 적으면 깎으며 `/hooks` 에 경고를 낸다 — 거기는
-///   [`CODEX_SHORT_TIMEOUT`] 을 적는다([`CODEX`])
-/// - **Claude** 는 `SessionEnd` 훅들을 한 통 1.5초에 묶고, 플러그인 훅의 `timeout` 으로는 그 통이 안 는다(Claude Code
-///   훅 문서). 그래도 15 를 둔다 — 사람이 `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` 로 통을 늘리면 그때는 이 값이 그
-///   훅의 상한이고, Claude 는 경고를 안 낸다. `cmd::hook` 의 `rest` 는 1.5초에 맞춰 쓰였다
+/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. 세션 끝의 이벤트(Codex 는
+/// `Interrupt`·`SessionEnd` 를 1~3초에 묶는다)는 이제 안 건다([`CODEX`]).
 const TIMEOUT: u64 = 15;
-
-/// Codex 가 `Interrupt`·`SessionEnd` 에 주는 상한(초) — 기본 1초에 3초까지만 받는다(Codex 훅 문서). [`TIMEOUT`] 을 적어
-/// 두면 Codex 가 3 으로 깎으며 `/hooks` 에 경고를 내고, 실제 상한이 얼마인지 파일만 봐서는 모른다(moai-t6hl). 그 장을
-/// 걷는 `SessionEnd` 가 1초에 끊기지 않게 상한을 다 쓴다.
-const CODEX_SHORT_TIMEOUT: u64 = 3;
 
 /// moai 가 통째로 쓴 Codex 훅 파일의 표 — 이 글이 `description` 이면 다시 쓴다.
 pub const CODEX_DESCRIPTION: &str = "Planted by moai. Edit it by hand and the next `moai skill install` overwrites it.";
@@ -207,8 +232,8 @@ pub fn codex_hooks(exe: &str) -> String {
             "statusMessage": message,
         });
         // **비추는 줄의 칸에만 상한을 둔다** — 그 칸의 자리를 다 받는 수로 준다. Codex 의 기본은 2,500 토큰 언저리라(Codex
-        // 훅 문서) 보드와 편지가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는데, 편지는 싣는 순간 읽음이라 그 판에서
-        // 아무도 못 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
+        // 훅 문서) 보드가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는다 — 넘긴 뒤쪽은 그 판에서 아무도 못
+        // 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
         // 단위(UTF-16 한 단위는 UTF-8 로 세 바이트까지다)는 한 토큰을 안 넘는다 — 같은 수로 준다. 안 받는 이벤트에는 키를
         // 아예 안 둔다 — `Option` 을 그대로 실으면 `null` 이 적힌다.
         if let crate::hook::Carry::Context(room) = crate::hook::Carry::of(Dialect::Codex, event) {
@@ -712,10 +737,11 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
 
 /// 심을 파일들. 경로는 `DIR` 부터의 상대다.
 ///
-/// **판(version)은 내용의 해시다.** `claude plugin install` 은 `directory`
-/// 원본이어도 제 캐시로 **복사**하고, 그 복사는 `plugin.json` 의 판이 달라질
-/// 때만 새로 뜬다. 손으로 세는 판은 반드시 어긋난다 — 내용이 같으면 판도
-/// 같아 헛 업데이트가 없고, 한 글자라도 다르면 반드시 달라진다.
+/// **판(version)은 내용의 해시다.** Claude Code 는 디렉터리 마켓플레이스의 플러그인 스킬을 이 자리([`DIR`])에서
+/// 그대로 읽는다 — 세션의 "Base directory for this skill" 이 `<체크아웃>/.claude/moai-plugin/skills/<이름>` 이다.
+/// `claude plugin install`·`update` 는 제 캐시에 사본을 뜨고 설치 장부의 판을 올리지만, 세션은 그 사본의 스킬을
+/// 안 읽는다 — 판이 정하는 것은 `plugin update` 가 새 판을 알아보는 때다. 손으로 세는 판은 반드시 어긋난다 —
+/// 내용이 같으면 판도 같아 헛 업데이트가 없고, 한 글자라도 다르면 반드시 달라진다.
 ///
 /// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
 /// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
@@ -1290,7 +1316,7 @@ mod tests {
     /// 골랐는데, 그 그물은 `moai show -s todo,review` 를 끌어오고 리뷰
     /// 토막의 문구가 바뀌면 조용히 아무것도 안 고른다.
     fn taught() -> Vec<String> {
-        // AGENTS 블록도 같은 조각에서 나오고, 일꾼 스킬도 리뷰를 세우고 닫는 줄을 같은 조각으로
+        // AGENTS 블록도 같은 조각에서 나오고, 일꾼 글도 리뷰를 세우고 닫는 줄을 같은 조각으로
         // 적으므로 같이 본다.
         let texts = [
             crate::guide::skill(),
@@ -1298,7 +1324,7 @@ mod tests {
             crate::guide::agents(),
             crate::guide::supervise(),
             crate::guide::wiki(),
-            crate::guide::work(),
+            crate::guide::worker(),
         ];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
         // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
@@ -1363,16 +1389,6 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
-                    // 감독과 일꾼이 편지를 주고받는 자리(moai-snyk). 편지 id 는 `mail::is_id` 의 꼴이다 —
-                    // 꼴이 아니면 `send --reply-to` 가 거절해 가르친 줄이 아니라 그 거절을 잰다.
-                    .replace("<worker>", "w1")
-                    .replace("<supervisor>", "boss")
-                    .replace("<from>", "boss")
-                    .replace("<letter id>", "20261004-120000-abcd1234")
-                    .replace("<letter file>", "/tmp/letter.txt")
-                    .replace("<report file>", "/tmp/report.txt")
-                    // Codex 창이 훅이 지어 준 장을 잇는 자리(moai-u5wr.7xr).
-                    .replace("<that name>", "w1")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로
@@ -1422,7 +1438,7 @@ mod tests {
 
     const NOW: &str = "2026-01-01T00:00:00Z";
 
-    /// 심는 것은 여섯이다 — 스킬, 참고, 감독 스킬, 위키 스킬, 그리고 매니페스트 둘.
+    /// 심는 것은 일곱이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, 그리고 매니페스트 둘.
     #[test]
     fn the_tree_has_what_claude_needs() {
         let files = tree_of("/bin/moai", "# 스킬");
@@ -1430,6 +1446,7 @@ mod tests {
             "skills/moai/SKILL.md",
             "skills/moai/references/commands.md",
             "skills/moai-supervise/SKILL.md",
+            "skills/moai-supervise/references/worker.md",
             "skills/moai-wiki/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
@@ -1452,9 +1469,25 @@ mod tests {
         assert_eq!(planted, NAMES);
     }
 
+    /// **스킬 곁에 심는 파일은 그 SKILL.md 가 경로로 부른다.** 감독의 메시지는 일꾼에게 `references/worker.md` 를
+    /// 읽으라고 이르는데(moai-fim6), 여기서 파일 이름만 바꾸면 감독 글은 없는 파일을 가리킨 채 초록이었다 — 일꾼은
+    /// 걸음 없이 맡은 일만 받는다.
+    #[test]
+    fn every_planted_reference_is_named_by_its_skill() {
+        for s in skills() {
+            let (_, body) = s.files.iter().find(|(rel, _)| *rel == "SKILL.md").expect("SKILL.md 가 없다");
+            for (rel, _) in s.files.iter().filter(|(rel, _)| *rel != "SKILL.md") {
+                assert!(body.contains(&format!("`{rel}`")), "{} 의 SKILL.md 가 곁에 심는 {rel} 를 안 부른다", s.name);
+            }
+        }
+    }
+
     /// **`.agents/skills` 는 Claude 의 트리와 같은 글을 같은 이름 밑에 받는다**(moai-xs2h.xgo, 2026-10-04 사용자 결정) —
-    /// 다른 것은 매니페스트가 없다는 것뿐이다. 에이전트마다 글을 따로 내면 같은 것이 세 벌이 되어 갈라지고, 이름이
-    /// [`NAMES`] 밖으로 새면 위키가 그 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    /// 다른 것은 매니페스트가 없다는 것과 감독 스킬이 빠진다는 것뿐이다. 에이전트마다 글을 따로 내면 같은 것이 세 벌이
+    /// 되어 갈라지고, 이름이 [`NAMES`] 밖으로 새면 위키가 그 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    ///
+    /// **감독 스킬은 Claude 에만 선다**(2026-10-06 사용자 결정, moai-obxm) — 그 글은 Codex·Antigravity 에 없는
+    /// `ListAgents`·`SendMessage` 로 말한다. 거르개를 걷으면 `.agents` 에 `moai-supervise` 가 다시 서서 붉어진다.
     #[test]
     fn the_agents_tree_carries_the_same_skills_without_a_manifest() {
         let all = fake("# 스킬", "감독", "위키");
@@ -1467,11 +1500,14 @@ mod tests {
                 (p.file_name()? == "SKILL.md").then(|| dir.display().to_string())
             })
             .collect();
-        assert_eq!(dirs, NAMES, "심는 스킬이 NAMES 와 다르다 — 차례까지");
+        assert_eq!(dirs, ["moai", "moai-wiki"], "Codex·Antigravity 가 받는 스킬이 다르다 — 차례까지");
+        assert!(!shared.keys().any(|p| p.starts_with("moai-supervise/")), "감독 스킬이 .agents 에 섰다");
         for (path, body) in &shared {
             assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
         }
-        assert_eq!(shared.len() + 2, claude.len(), "매니페스트 둘 말고 다른 것이 갈렸다");
+        let only_claude = claude.keys().filter(|p| p.starts_with("skills/moai-supervise/")).count();
+        assert_eq!(only_claude, 2, "감독 스킬은 SKILL.md 와 references/worker.md 둘이다");
+        assert_eq!(shared.len() + 2 + only_claude, claude.len(), "매니페스트 둘과 감독 스킬 말고 다른 것이 갈렸다");
         assert!(!shared.keys().any(|p| p.contains(".claude-plugin")), "매니페스트가 .agents 에 섰다");
     }
 
@@ -2246,7 +2282,7 @@ mod tests {
         let codex: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
         let hooks = codex["hooks"].as_object().unwrap();
         let events: Vec<&str> = hooks.keys().map(String::as_str).collect();
-        assert_eq!(events, ["Interrupt", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"]);
+        assert_eq!(events, ["PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
         assert_eq!(hooks["PreToolUse"][0]["matcher"], "Bash|apply_patch");
         for (at, group) in hooks {
             let entry = &group[0]["hooks"][0];
@@ -2291,6 +2327,29 @@ mod tests {
             assert_eq!(planted_exe(&codex_hooks(exe)).as_deref(), Some(exe), "codex {exe}");
             assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe), "antigravity {exe}");
         }
+    }
+
+    /// **Claude 의 플러그인이 거는 이벤트를 손으로 적은 목록에 맨다**(moai-ybns.451.sdk) — 커밋된 plugin.json 을 견주는
+    /// `the_checked_in_plugin_matches_the_guide` 는 `MOAI_BLESS=1` 한 번에 [`HOOKS`] 가 낸 것을 그대로 다시 써서, 표에서
+    /// 이벤트가 빠지거나 걷은 `StopFailure`·`SessionEnd` 가 되돌아와도 아무것도 안 붉어진다. 기대를 표에서 읽지 않는다 —
+    /// 읽으면 표와 함께 움직인다.
+    #[test]
+    fn the_claude_plugin_hooks_exactly_these_events() {
+        const WANT: &[(&str, &str)] = &[
+            ("PreToolUse", "pre-tool-use"),
+            ("SessionStart", "session-start"),
+            ("Stop", "stop"),
+            ("UserPromptSubmit", "user-prompt-submit"),
+        ];
+        let v: serde_json::Value = serde_json::from_str(&plugin_json("/repo/target/release/moai", "0")).unwrap();
+        let hooks = v["hooks"].as_object().unwrap();
+        let events: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        assert_eq!(events, WANT.iter().map(|(at, _)| *at).collect::<Vec<_>>(), "Claude 에 거는 이벤트가 달라졌다");
+        for (at, sub) in WANT {
+            let line = hooks[*at][0]["hooks"][0]["command"].as_str().unwrap();
+            assert!(line.contains(&format!(" hook {sub}")), "{at} 가 hook {sub} 를 안 부른다 — {line}");
+        }
+        assert_eq!(hooks["PreToolUse"][0]["matcher"], WATCHED);
     }
 
     /// Codex 가 추가 맥락을 받는 이벤트 — 그 밖의 처리기에 적힌 `additionalContextLimit` 은 버리고 경고한다(Codex 훅
@@ -2487,8 +2546,8 @@ mod tests {
         let planted = codex_hooks("/repo/target/release/moai");
         assert_eq!(codex_issues(&planted), Vec::<String>::new(), "심는 파일에 Codex 가 경고한다");
         assert_eq!(codex_shape(&planted, &known), Vec::<String>::new(), "심는 파일이 Codex 가 아는 꼴 밖에 선다");
-        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드와 편지를
-        // 파일로 빼고, 깎이는 상한을 덜 적으면 `SessionEnd` 가 1초에 끊긴다.
+        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드를
+        // 파일로 빼고, 깎이는 상한보다 크게 적으면 Codex 가 깎으며 경고한다.
         let file: serde_json::Value = serde_json::from_str(&planted).unwrap();
         for (event, groups) in file["hooks"].as_object().unwrap() {
             let entry = &groups[0]["hooks"][0];

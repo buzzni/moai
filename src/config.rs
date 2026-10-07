@@ -345,12 +345,6 @@ pub struct Config {
     /// ([`crate::wiki::dir_of`])가 잰다 — `Config::parse` 가 거절하면 경로 오타 하나가 위키와 아무 상관 없는
     /// `moai status` 까지 세운다. 따옴표와 자리(테이블 밖)는 이 파일의 다른 글 키와 같은 자로 잰다.
     pub wiki_dir: String,
-    /// 읽은 편지를 **읽은 지 이 날수가 지나면** 걷는다(moai-kxkw.my1) — `moai agents` 가 걷는다([`crate::mail::sweep_read`]).
-    /// `0` 이면 안 걷는다. 평평한 키 `mail_read_days`, 안 적으면 7일.
-    ///
-    /// **저장소의 값이다**(2026-10-05 사용자 결정) — 우편함은 저장소의 모든 세션이 함께 보는 자리라, 걷는 날수가 사람마다
-    /// 다르면 한 사람의 `moai agents` 가 남이 아직 보려던 편지를 걷는다. [`Config::archive_days`] 가 여기 사는 것과 같은 까닭이다.
-    pub mail_read_days: i64,
 }
 
 /// [`Config::archive_days`] 를 안 적은 저장소가 받는 날수 — 두 주(2026-10-03 사용자 결정).
@@ -365,12 +359,6 @@ pub const WIKI_DIR: &str = "docs";
 
 /// [`Config::wiki_dir`] 를 적는 키.
 pub const WIKI_KEY: &str = "wiki_dir";
-
-/// [`Config::mail_read_days`] 를 안 적은 저장소가 받는 날수 — 한 주(2026-10-05 사용자 결정).
-pub const MAIL_READ_DAYS: i64 = 7;
-
-/// [`Config::mail_read_days`] 를 적는 키.
-pub const MAIL_READ_KEY: &str = "mail_read_days";
 
 impl Config {
     /// **저장소가 든 파일이라 그 체크아웃 안에서만 읽는다**([`crate::held`], moai-itsu). 받은 저장소가
@@ -421,17 +409,13 @@ impl Config {
         // **테이블 안에 적은 날수는 소리낸다** — 문턱과 같은 까닭이다([`Thresholds::check_keys`]). `[archive]`
         // 밑의 `archive_days` 는 이 파서가 안 읽어, 조용히 넘기면 고친 값이 영영 안 먹는다.
         // `[wiki]` 밑의 `wiki_dir` 도 같다 — 넘기면 고친 자리가 영영 안 먹고 위키는 `docs` 를 읽는다.
-        // `[mail]` 밑의 `mail_read_days` 도 같다 — 넘기면 읽은 편지가 이레 뒤에 말없이 걷힌다.
-        if let Some(e) =
-            es.iter().find(|e| e.table.is_some() && [ARCHIVE_KEY, WIKI_KEY, MAIL_READ_KEY].contains(&e.key))
-        {
+        if let Some(e) = es.iter().find(|e| e.table.is_some() && [ARCHIVE_KEY, WIKI_KEY].contains(&e.key)) {
             return Err(Trouble::ThresholdInTable { line: e.line, named: e.key.into() });
         }
         let archive_days = days(es, ARCHIVE_KEY, ARCHIVE_DAYS)?;
         let wiki_dir = text(es, WIKI_KEY)?.unwrap_or_else(|| WIKI_DIR.into());
-        let mail_read_days = days(es, MAIL_READ_KEY, MAIL_READ_DAYS)?;
 
-        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, mail_read_days })
+        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -512,7 +496,7 @@ pub enum Trouble {
     FlowDaysZero,
     /// `status_` 로 시작하는데 없는 설정이다 — 그 줄·키. **아는 키는 [`Thresholds::KEYS`] 가 댄다.**
     NoSuchThreshold { line: usize, key: String },
-    /// 평평한 키(문턱·`archive_days`·`wiki_dir`·`mail_read_days`)를 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
+    /// 평평한 키(문턱·`archive_days`·`wiki_dir`)를 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
     ThresholdInTable { line: usize, named: String },
     /// `prefix` 가 없다.
     NoPrefix,
@@ -749,20 +733,19 @@ status_due_days      = 17
         ));
     }
 
-    /// **읽은 편지는 안 적으면 이레 뒤에 걷힌다**(moai-kxkw.my1, 2026-10-05 사용자 결정). `0` 은 끄는 값이고, 테이블 안에
-    /// 적은 줄은 안 먹는 대신 소리낸다 — `archive_days` 와 같은 자다.
+    /// **0.9.0 이 걷은 `mail_read_days` 를 든 옛 설정도 말없이 읽힌다**(moai-5uwh.st1) — 우편함이 걷혀 그 키를 읽는
+    /// 자가 없다. 모르는 평평한 키를 거절하면 0.7·0.8 이 쓴 `config.toml` 하나가 모든 명령을 세운다. 값이 틀렸거나
+    /// `[mail]` 밑에 적혔어도 이제 아무도 안 읽으니 소리내지 않는다.
     #[test]
-    fn mail_read_days_defaults_to_a_week() {
-        assert_eq!(Config::parse("prefix = \"a\"\n").unwrap().mail_read_days, MAIL_READ_DAYS);
-        assert_eq!(MAIL_READ_DAYS, 7, "사람이 정한 기본값이 바뀌었다");
-        assert_eq!(Config::parse("prefix = \"a\"\nmail_read_days = 30\n").unwrap().mail_read_days, 30);
-        assert_eq!(Config::parse("prefix = \"a\"\nmail_read_days = 0\n").unwrap().mail_read_days, 0);
-        let e = Config::parse("prefix = \"a\"\n[mail]\nmail_read_days = 3\n").unwrap_err();
-        assert_eq!(e, Trouble::ThresholdInTable { line: 3, named: "mail_read_days".into() });
-        assert!(matches!(
-            Config::parse("prefix = \"a\"\nmail_read_days = -1\n").unwrap_err(),
-            Trouble::NotANumber { line: 2, .. }
-        ));
+    fn an_old_mail_read_days_is_ignored() {
+        for src in [
+            "prefix = \"a\"\nmail_read_days = 7\n",
+            "prefix = \"a\"\nmail_read_days = -1\n",
+            "prefix = \"a\"\n[mail]\nmail_read_days = 3\n",
+        ] {
+            let c = Config::parse(src).unwrap_or_else(|e| panic!("{src:?}: {e:?}"));
+            assert_eq!(c.prefix, "a");
+        }
     }
 
     /// **위키 자리는 안 적으면 `docs`, 적은 글은 날글자 그대로다**(moai-ihu4). 경로로서 맞는가는 여기서 안 잰다 —

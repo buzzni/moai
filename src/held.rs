@@ -85,7 +85,7 @@ pub(crate) fn place(p: &Path, home: &Home) -> Result<PathBuf, Unheld> {
 /// (moai-kxkw.7ky). 거기서 짓고 쓸 자리라 푼 자리를 낸다 — 없는 조각은 그 뒤에 그대로 붙는다.
 ///
 /// [`place`] 는 링크가 아닌 없는 자리를 받은 철자 그대로 내보낸다 — 읽는 쪽이 `NotFound` 로 넘기니 그것으로 됐다. 짓는
-/// 쪽에서는 그것이 구멍이다: `.moai -> <밖>` 을 커밋한 저장소에서 `.moai/mail` 은 아직 없는 링크 아닌 자리라
+/// 쪽에서는 그것이 구멍이다: `.moai -> <밖>` 을 커밋한 저장소에서 `.moai/archive` 는 아직 없는 링크 아닌 자리라
 /// 그대로 지나고, `create_dir_all` 은 그 링크를 따라 밖에 디렉터리를 짓는다. 그래서 있는 조상을 [`place`] 로 잰다.
 /// 없는 나머지는 지을 때 보통 디렉터리로 선다.
 ///
@@ -96,7 +96,7 @@ pub(crate) fn place(p: &Path, home: &Home) -> Result<PathBuf, Unheld> {
 /// 장을 썼다. 그래서 남은 링크를 사슬의 끝까지 [`place`] 로 다시 재고, 끝내 못 푸는 링크(`..` 너머가 없다)는 어디에 닿을지
 /// 모르니 거절한다. 지금 지어지는 꼴은 하나도 안 진다 — 끝 없는 안 링크는 끝의 디렉터리로 풀어 그 밑에 짓는다.
 ///
-/// 우편함·출석부([`crate::mail`])가 디렉터리를 짓고 열기 전에 이 자로 잰다.
+/// 아카이브([`crate::archive`])가 디렉터리를 짓고 열기 전에 이 자로 잰다.
 pub(crate) fn place_dir(d: &Path, home: &Home) -> Result<PathBuf, Unheld> {
     let Some(head) = d.ancestors().find(|a| std::fs::symlink_metadata(a).is_ok()) else { return Ok(d.to_path_buf()) };
     let mut out = beneath(place(head, home)?, d, head);
