@@ -78,51 +78,30 @@ impl Guide {
     }
 }
 
-/// 플래그로 준 것. 하나로 묶어 받는다 — 칸이 늘 때마다 함수 인자가 늘면 부르는 자리가 순서로 틀린다.
-#[derive(Debug, Clone, Default)]
-pub struct Flags<'a> {
-    pub prefix: Option<&'a str>,
-    pub tracking: Option<Tracking>,
-    /// `--guide`, 그리고 `--no-agents` 는 `--guide none` 이다.
-    pub guide: Option<Guide>,
-    /// `--driver`·`--no-driver` — 칸마다 짝 플래그가 선다. 켜는 쪽이 없던 판은 커밋하는 트래커에서 이 칸만
-    /// 플래그로 못 잠가, 모든 칸에 플래그를 줘도 화면이 열렸다(리뷰 moai-zynt.63u).
-    pub driver: Option<bool>,
-    /// `--skill`(`Some(true)`)·`--no-skill`(`Some(false)`).
-    pub skill: Option<bool>,
-    /// `--register`·`--no-register`.
-    pub register: Option<bool>,
-}
-
 /// 사람이 고른 값. `None` 은 고르지 않았다 — 기본값을 따른다.
+///
+/// **플래그도 이 꼴로 온다**(moai-8gwh.86j) — 따로 두던 `Flags` 는 칸이 같은데 이름만 달라(`register` 대
+/// `project`) 다리(`from_flags`)가 하나 더 섰다. 칸이 늘면 세 자리를 고쳐야 했다. 끄는 플래그(`--no-*`)는
+/// `Some(false)` 고, 안 준 플래그는 고르지 않은 것(`None`)이다.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Choices {
     /// id 접두어. `None` 이면 `run` 이 디렉터리 이름에서 짓는다 — 파일 시스템을 알아야 해서 여기서
     /// 셈하지 않는다.
     pub prefix: Option<String>,
     pub tracking: Option<Tracking>,
+    /// `--guide`, 그리고 `--no-agents` 는 `--guide none` 이다.
     pub guide: Option<Guide>,
-    /// 끝에 `moai skill install --scope local` 을 부르는가(moai-785q).
+    /// 끝에 `moai skill install --scope local` 을 부르는가(moai-785q). `--skill`·`--no-skill`.
     pub skill: Option<bool>,
-    /// `.git/config` 에 머지 드라이버를 심는가.
+    /// `.git/config` 에 머지 드라이버를 심는가. `--driver`·`--no-driver` — 칸마다 짝 플래그가 선다. 켜는 쪽이
+    /// 없던 판은 커밋하는 트래커에서 이 칸만 플래그로 못 잠가, 모든 칸에 플래그를 줘도 화면이 열렸다(리뷰
+    /// moai-zynt.63u).
     pub driver: Option<bool>,
-    /// 끝에 `moai project add` 로 사용자 설정의 프로젝트 목록에 올리는가(moai-785q).
+    /// 끝에 `moai project add` 로 사용자 설정의 프로젝트 목록에 올리는가(moai-785q). `--register`·`--no-register`.
     pub project: Option<bool>,
 }
 
 impl Choices {
-    /// 플래그가 고른 것. 끄는 플래그(`--no-*`)는 켜는 쪽이 기본값이라, 안 준 것은 고르지 않은 것이다.
-    pub fn from_flags(f: &Flags) -> Choices {
-        Choices {
-            prefix: f.prefix.map(str::to_string),
-            tracking: f.tracking,
-            guide: f.guide,
-            skill: f.skill,
-            driver: f.driver,
-            project: f.register,
-        }
-    }
-
     /// `self` 가 고른 칸은 `self` 의 것, 나머지는 `under` 의 것. 플래그(`self`)를 화면(`under`) 위에 얹는다.
     pub fn over(&self, under: &Choices) -> Choices {
         Choices {
@@ -489,15 +468,15 @@ mod tests {
             for guide in Guide::ALL {
                 for no_driver in [false, true] {
                     for prefix in [None, Some("abc")] {
-                        let flags = Flags {
-                            prefix,
+                        let flags = Choices {
+                            prefix: prefix.map(str::to_string),
                             tracking: Some(tracking),
                             guide: Some(guide),
                             driver: no_driver.then_some(false),
                             skill: Some(true),
-                            register: Some(false),
+                            project: Some(false),
                         };
-                        let by_flags = resolve(&Choices::from_flags(&flags), &SCREEN);
+                        let by_flags = resolve(&flags, &SCREEN);
                         let mut f = form(Choices::default());
                         if let Some(p) = prefix {
                             f.typed.clear();
@@ -607,7 +586,7 @@ mod tests {
 
     #[test]
     fn a_flag_locks_its_row_and_the_cursor_skips_it() {
-        let mut f = form(Choices::from_flags(&Flags { tracking: Some(Tracking::Commit), ..Flags::default() }));
+        let mut f = form(Choices { tracking: Some(Tracking::Commit), ..Choices::default() });
         assert!(f.locked(Field::Tracking));
         f.key(press(KeyCode::Down));
         assert_eq!(f.cursor, Field::Guide, "the locked row is stepped over");
@@ -642,16 +621,16 @@ mod tests {
     /// 칸마다 짝 플래그가 선다 — `--driver` 로 드라이버 칸까지 잠그면 커밋하는 트래커도 묻지 않는다.
     #[test]
     fn every_row_that_stands_can_be_pinned_by_a_flag() {
-        let all = Flags {
-            prefix: Some("abc"),
+        let all = Choices {
+            prefix: Some("abc".into()),
             tracking: Some(Tracking::Commit),
             guide: Some(Guide::Block),
             driver: Some(true),
             skill: Some(false),
-            register: Some(false),
+            project: Some(false),
         };
-        assert!(Choices::from_flags(&all).complete(&SCREEN));
-        assert!(!Choices::from_flags(&Flags { driver: None, ..all }).complete(&SCREEN));
+        assert!(all.complete(&SCREEN));
+        assert!(!Choices { driver: None, ..all }.complete(&SCREEN));
     }
 
     #[test]

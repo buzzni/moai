@@ -503,13 +503,14 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             let guide = guide.or(no_agents.then_some(crate::init_choice::Guide::None));
             // 짝 플래그는 clap 이 서로 막는다 — 둘 다 오는 일은 없다.
             let pair = |on: bool, off: bool| if on { Some(true) } else { off.then_some(false) };
-            let flags = crate::init_choice::Flags {
-                prefix: prefix.as_deref(),
+            // 플래그가 고른 것은 화면이 고른 것과 같은 꼴(`Choices`)이다 — 안 준 칸은 고르지 않은 것이다.
+            let flags = crate::init_choice::Choices {
+                prefix,
                 tracking,
                 guide,
                 driver: pair(driver, no_driver),
                 skill: pair(skill, no_skill),
-                register: pair(register, no_register),
+                project: pair(register, no_register),
             };
             init::run(ctx, &flags, yes)
         }

@@ -5,7 +5,7 @@ use crate::cmd::merge_driver::Planting;
 use crate::config::DEFAULT_STATUSES;
 use crate::held::Fell;
 use crate::i18n::{fill, say};
-use crate::init_choice::{Choices as Choice, Flags, Guide, Plan, Tracking};
+use crate::init_choice::{Choices as Choice, Guide, Plan, Tracking};
 use crate::store::Elsewhere;
 use std::path::Path;
 
@@ -1611,7 +1611,7 @@ fn one_line(message: &str) -> String {
     crate::text::one_line(&message.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" — "))
 }
 
-pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
+pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
     // **디렉터리가 아닌 `.moai` 위에는 안 세운다**(moai-r0x8.e19) — 다른 명령이 멈추는 그 말(`store::not_a_dir`)로
@@ -1649,9 +1649,9 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         // 클론이 함께 쓰는 자리라 그 한 번이 **모든 체크아웃**에 앉는다. 깃발이 하나 늘면 줄도
         // 하나만 는다.
         //
-        // 값을 받는 깃발은 정한 낱말로 되살린다 — `--no-agents` 는 `--guide none` 으로 섰다(`Flags`).
+        // 값을 받는 깃발은 정한 낱말로 되살린다 — `--no-agents` 는 `--guide none` 으로 섰다(`cmd::dispatch` 의 `Cmd::Init`).
         let mut same = String::new();
-        if let Some(p) = flags.prefix {
+        if let Some(p) = flags.prefix.as_deref() {
             same.push(' ');
             same.push_str(&crate::text::quoted(p));
         }
@@ -1666,8 +1666,8 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             (flags.driver == Some(false), " --no-driver"),
             (flags.skill == Some(true), " --skill"),
             (flags.skill == Some(false), " --no-skill"),
-            (flags.register == Some(true), " --register"),
-            (flags.register == Some(false), " --no-register"),
+            (flags.project == Some(true), " --register"),
+            (flags.project == Some(false), " --no-register"),
         ];
         for (on, flag) in [(yes, " --yes")].into_iter().chain(paired) {
             if on {
@@ -1709,8 +1709,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     // 키(`tracking`·`guide`·`guide_file`·`skill`·`project`)가 늘었다. 다시 부른
     // `init` 은 안 묻는다 — 접두어는 이미 못 바꾸고, 하는 일은 딸린 파일을 맞추는 것뿐이다. 워크트리
     // 거절은 위에서 이미 섰다 — 다 물어 놓고 거절하지 않는다.
-    let flag_choices = Choice::from_flags(flags);
-    let mut fixed = flag_choices.clone();
+    let mut fixed = flags.clone();
     // 처음에도 서 있는 git 규칙과 AGENTS.md 를 읽는다. 오류는 공통 거절 함수가 차례대로 낸다.
     let now = tracking_within(&root, Some(crate::cmd::merge_driver::PROBE_BUDGET));
     let agents_read = read_agents(&root);
@@ -1723,13 +1722,13 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         }
     }
     // 플래그가 아니라 이미 설치된 훅에서 읽은 안내인지, 화면에 `fixed` 를 넘기기 전에 남긴다.
-    let existing_hooks = fixed.guide == Some(Guide::Hook) && flag_choices.guide.is_none();
+    let existing_hooks = fixed.guide == Some(Guide::Hook) && flags.guide.is_none();
     let place = now.and_then(|_| git_place(&root, Some(crate::cmd::merge_driver::PROBE_BUDGET)));
     let checker = InitCheck {
         lang: ctx.lang(),
         root: &root,
         again,
-        fixed: &flag_choices,
+        fixed: flags,
         place: place.as_ref(),
         agents: &agents_read,
         tracking: now,

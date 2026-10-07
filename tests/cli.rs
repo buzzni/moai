@@ -1740,6 +1740,21 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     assert!(err.contains("MOAI_HERE=1 moai init argos"), "친 접두어를 빠뜨린 줄을 댔다 — {err}");
     assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
 
+    // **깃발도 친 대로 도로 낸다** — 값을 받는 깃발은 정한 낱말로, 짝 깃발은 준 쪽으로. `--register` 는 고른 값의
+    // `project` 칸에서 되살아난다(moai-8gwh.86j) — 칸 이름이 깃발과 달라 빠뜨리기 쉬운 자리다.
+    let out = moai(
+        &deep,
+        &["init", "argos", "--tracking", "commit", "--no-agents", "--no-driver", "--no-skill", "--register", "--yes"],
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(
+        err.contains(
+            "MOAI_HERE=1 moai init argos --tracking commit --guide none --yes --no-driver --no-skill --register\n"
+        ),
+        "친 깃발을 그대로 안 되살렸다 — {err}"
+    );
+
     // **`-C` 로 왔으면 그것도 도로 낸다** — `-C` 는 `set_current_dir` 로 따르므로 "여기" 는 `-C` 가
     // 가리킨 자리고 사람의 셸은 딴 데 있다. 빠뜨린 줄을 그대로 베끼면 그 셸 자리에 트래커가 하나
     // 더 선다 — 나머지를 친 대로 되살린 줄일수록 더 그대로 베낀다.
