@@ -328,6 +328,15 @@ worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you.
 
+**A report reaches only the name it was sent to.** A supervisor that started again —
+restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
+report to the old one fails leaves it on the epic as a note with `report: <epic>` at its
+head. So when you start or resume, before waiting, read what the tracker holds:
+`moai show -s in_progress,review` is the work sent and not done, and
+`moai show -g 'report:' --all` finds the reports nobody received. Check each one you have
+not checked as in 5. A worker holding sent work you have no report for is still left out
+in 2 — ask it, or its person, how it stands.
+
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when
 the supervisor's turn ends. **That member is the worker's** — do not move it, do not

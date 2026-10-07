@@ -2068,6 +2068,15 @@ worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you.
 
+**A report reaches only the name it was sent to.** A supervisor that started again —
+restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
+report to the old one fails leaves it on the epic as a note with `report: <epic>` at its
+head. So when you start or resume, before waiting, read what the tracker holds:
+`moai show -s in_progress,review` is the work sent and not done, and
+`moai show -g 'report:' --all` finds the reports nobody received. Check each one you have
+not checked as in 5. A worker holding sent work you have no report for is still left out
+in 2 — ask it, or its person, how it stands.
+
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when
 the supervisor's turn ends. **That member is the worker's** — do not move it, do not
@@ -2552,6 +2561,10 @@ it. When the person is back in the window, what they say overrides what you deci
     the members left in 4-3 because the work beside you held the file, with that other work
     named, and the wiki pages 7-4 changed — or that it changed none — and anything still
     running that 11 could not finish.
+    **If that send fails** — the supervisor restarted, so its old name is gone — the report
+    must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
+    `moai note <epic> -b -` and take it into the root with a commit with a path as in 2. Tell
+    the person watching that the report is on the epic; the next supervisor reads it there.
     Then **say when the window can be cleared**, in one line to the person watching. The
     context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
     commit messages. If you can see your own context usage, put that number in the line too.
@@ -4522,6 +4535,13 @@ stop sending outside work while a release runs",
             brief[step_at(&brief, "12")..].contains("`SendMessage(to: <supervisor>"),
             "일꾼이 SendMessage 로 보고하지 않는다"
         );
+        // `from` 은 감독 프로세스의 이름이라 감독이 다시 뜨면 보고가 갈 곳이 없다(moai-ybns.451.3zc). 일꾼은 그 보고를
+        // 에픽의 노트로 남기고, 다시 뜬 감독은 기다리기 전에 트래커에서 보낸 일과 받지 못한 보고를 읽는다 — 없으면 감독은
+        // 오지 않을 보고를 기다리고, 그 일꾼은 2 에서 늘 빠진다.
+        assert!(brief[step_at(&brief, "12")..].contains("**If that send fails**"), "보고가 실패하면 사라진다");
+        assert!(brief[step_at(&brief, "12")..].contains("`moai note <epic> -b -`"), "실패한 보고를 트래커에 안 남긴다");
+        assert!(wait.contains("`moai show -g 'report:' --all`"), "다시 뜬 감독이 트래커의 보고를 안 읽는다");
+        assert!(wait.contains("when you start or resume"), "다시 뜬 감독이 기다리기만 한다");
         // 감독은 창에 아무것도 안 친다 — 5-1 을 걷었다.
         assert!(!supervise.contains("**5-1."), "감독이 창을 비우는 5-1 이 남았다");
         assert!(!supervise.contains("send-keys") && !supervise.contains("tmux_pane"), "감독이 tmux 칸을 만진다");

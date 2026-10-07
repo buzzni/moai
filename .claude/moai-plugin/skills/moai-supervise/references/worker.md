@@ -386,6 +386,10 @@ intent.
     the members left in 4-3 because the work beside you held the file, with that other work
     named, and the wiki pages 7-4 changed — or that it changed none — and anything still
     running that 11 could not finish.
+    **If that send fails** — the supervisor restarted, so its old name is gone — the report
+    must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
+    `moai note <epic> -b -` and take it into the root with a commit with a path as in 2. Tell
+    the person watching that the report is on the epic; the next supervisor reads it there.
     Then **say when the window can be cleared**, in one line to the person watching. The
     context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
     commit messages. If you can see your own context usage, put that number in the line too.
