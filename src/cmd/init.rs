@@ -2093,7 +2093,12 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
             "agents": agents,
             // **늘 서는 키다**(moai-08bo). `--no-driver` 는 `off` 와 같은 낱말을 쓰지 않는다 —
             // 안 쓰기로 한 저장소와 이번 한 번만 건너뛴 것은 다음에 칠 명령이 다르다.
+            //
+            // **git 밖의 트래커는 `untracked` 다**(moai-8gwh.86j, 사용자 결정). `resolve` 가 드라이버를 꺼 `skipped` 로
+            // 서던 판은 `--no-driver` 로 이번만 건너뛴 것과 안 갈렸다 — 그쪽은 다음에 드라이버를 심을 수 있지만
+            // 이쪽은 git 이 그 파일을 병합할 일이 없어 할 일 자체가 없다.
             "driver": match &planting {
+                None if !plan.tracking.tracked() => "untracked",
                 None => "skipped",
                 Some(Planting::Off) => "off",
                 Some(Planting::Already) => "current",

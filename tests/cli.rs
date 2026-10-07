@@ -1133,6 +1133,14 @@ fn init_plants_the_merge_driver_too() {
     assert!(git(&other, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(), "줄이 섰다");
     // 안 심었으니 이제 알림이 선다 — 그 갈래는 그대로다.
     assert!(ok(&other, &["status"]).contains("안 심었다"), "안 심었는데 조용하다");
+
+    // **기계에게는 `skipped` 다** — 커밋하는 트래커에서 이번만 건너뛴 것이라, git 밖의 트래커(`untracked`,
+    // moai-8gwh.86j)와 낱말이 갈린다.
+    let third = s.path().join("셋째");
+    std::fs::create_dir_all(&third).unwrap();
+    git(&third, &["init", "-q", "."]);
+    let js = ok(&third, &["init", "argos", "--no-driver", "--json"]);
+    assert_eq!(field(&js, "driver"), "skipped", "{js}");
 }
 
 /// **`moai init --check` 는 드라이버의 자리도 답하고 아무것도 안 쓴다**(moai-08bo).
@@ -24196,7 +24204,8 @@ fn init_tracking_exclude_leaves_every_committed_file_as_it_was() {
     git(root, &["init", "-q", "."]);
     let js = ok(root, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
     assert_eq!(field(&js, "tracking"), "exclude", "{js}");
-    assert_eq!(field(&js, "driver"), "skipped", "{js}");
+    // **`skipped` 가 아니라 `untracked` 다**(moai-8gwh.86j) — `skipped` 는 `--no-driver` 로 이번만 건너뛴 것이다.
+    assert_eq!(field(&js, "driver"), "untracked", "{js}");
     assert!(js.contains("\"gitattributes\":false"), "{js}");
     assert_eq!(git(root, &["status", "--porcelain", "--untracked-files=all"]), "", "커밋될 파일이 생겼다");
     let exclude = read(&root.join(".git/info/exclude"));

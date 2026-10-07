@@ -46,6 +46,9 @@ the checkout is ignored at both the link and the directory it points at.
 
 `--driver` requires commit tracking. In `init --json`, `gitignore` means that
 `.gitignore` was written, and `exclude` means `.git/info/exclude` was written.
+Its `driver` is `untracked` when the tracker is kept out of git — there is
+nothing for a merge driver to do — and `skipped` only for `--no-driver` on a
+committed tracker.
 
 ## Pick up work
 

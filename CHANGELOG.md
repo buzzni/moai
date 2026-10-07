@@ -12,6 +12,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **`moai init --json` says `"driver": "untracked"` for a tracker kept out of
+  git.** With `--tracking exclude` or `gitignore` it said `skipped`, the word
+  `--no-driver` uses for a driver left out this run only — but git never
+  merges an untracked tracker, so there is nothing for a driver to do.
+  `skipped` now stands only for `--no-driver` on a committed tracker.
+  (moai-8gwh.86j)
+
 ### Fixed
 
 - **`moai init` no longer erases the rules it just wrote through an
