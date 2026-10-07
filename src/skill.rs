@@ -737,10 +737,11 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
 
 /// 심을 파일들. 경로는 `DIR` 부터의 상대다.
 ///
-/// **판(version)은 내용의 해시다.** `claude plugin install` 은 `directory`
-/// 원본이어도 제 캐시로 **복사**하고, 그 복사는 `plugin.json` 의 판이 달라질
-/// 때만 새로 뜬다. 손으로 세는 판은 반드시 어긋난다 — 내용이 같으면 판도
-/// 같아 헛 업데이트가 없고, 한 글자라도 다르면 반드시 달라진다.
+/// **판(version)은 내용의 해시다.** Claude Code 는 디렉터리 마켓플레이스의 플러그인 스킬을 이 자리([`DIR`])에서
+/// 그대로 읽는다 — 세션의 "Base directory for this skill" 이 `<체크아웃>/.claude/moai-plugin/skills/<이름>` 이다.
+/// `claude plugin install`·`update` 는 제 캐시에 사본을 뜨고 설치 장부의 판을 올리지만, 세션은 그 사본의 스킬을
+/// 안 읽는다 — 판이 정하는 것은 `plugin update` 가 새 판을 알아보는 때다. 손으로 세는 판은 반드시 어긋난다 —
+/// 내용이 같으면 판도 같아 헛 업데이트가 없고, 한 글자라도 다르면 반드시 달라진다.
 ///
 /// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
 /// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
