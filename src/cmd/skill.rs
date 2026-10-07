@@ -1593,13 +1593,13 @@ impl Leftover {
     /// 사람의 한 줄. 연습이면 지울 것을 댄다.
     fn line(&self, lang: crate::i18n::Lang) -> String {
         let dir = crate::text::shell_word(&self.dir.display().to_string());
-        let key = match (&self.ours, self.removed) {
-            (None, _) => "skill.leftover_foreign",
-            (Some(_), None) => "skill.leftover_plan",
-            (Some(_), Some(true)) => "skill.leftover_removed",
-            (Some(_), Some(false)) => "skill.leftover_failed",
+        let text = match (&self.ours, self.removed) {
+            (None, _) => say(lang, "skill.leftover_foreign"),
+            (Some(_), None) => say(lang, "skill.leftover_plan"),
+            (Some(_), Some(true)) => say(lang, "skill.leftover_removed"),
+            (Some(_), Some(false)) => say(lang, "skill.leftover_failed"),
         };
-        fill(say(lang, key), &[("dir", &dir)])
+        fill(text, &[("dir", &dir)])
     }
 
     /// 지운다 — 파일을 하나씩, 그 뒤 빈 디렉터리를 깊은 것부터. 통째로 지우지 않는다(`remove_dir_all`) — 잰 뒤에 사람이
