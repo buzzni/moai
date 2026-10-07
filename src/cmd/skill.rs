@@ -7,6 +7,10 @@
 //! 때도 `claude` 의 등록만 걷고 파일은 남긴다. moai 가 제 손으로 고치는 사람의
 //! 설정은 옛 판이 커밋된 설정에 적은 선언을 걷는 [`Undeclare`] 하나다.
 //!
+//! **하나뿐인 예외는 이 판이 더는 안 심는 스킬 디렉터리다**([`leftovers`], moai-six5.1xz). `install` 이 제 트리를
+//! 다시 심을 때, 옛 판이 같은 트리에 심었고 moai 가 심은 꼴 그대로인 것만 걷는다 — 훅 파일이 아니라 세션이 물고
+//! 있지 않고, 남겨 두면 에이전트가 걷힌 명령을 배운다. 사람의 파일이 하나라도 든 디렉터리는 그대로 두고 한 줄로 댄다.
+//!
 //! `claude` 를 못 찾아도 파일은 심는다. 등록만 사람이 한 줄 치면 된다 —
 //! 절반을 해 놓고 아무 말 없이 실패하는 것이 제일 나쁘다.
 
@@ -287,6 +291,12 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     if chosen.claude {
         measure(&place.dir, &place.files, &root)?;
     }
+    // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기 뒤에 걷는다: 쓰기가 거절되면 아무것도
+    // 안 바뀐 채 멈춘다. Claude 의 트리는 등록 앞에서 걷는다([`claude_install`]) — 등록이 그 트리를 캐시로 옮겨 담는다.
+    let mut shared_left: Vec<Leftover> = shared
+        .as_ref()
+        .map(|(dir, files)| leftovers(dir, &planted_names(files, ""), &root))
+        .unwrap_or_default();
     // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
     // 안 기댄다. 훅 파일도 같은 까닭이다(moai-u5wr.kov). 못 쓰면 `claude` 를 부르기 전에 멈춘다.
     //
@@ -296,6 +306,7 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     if !dry_run {
         if let Some((dir, files)) = &shared {
             write_committed(dir, files, &root)?;
+            shared_left.iter_mut().for_each(Leftover::remove);
         }
         for (h, state) in hooks.iter_mut().filter(|(_, state)| state.due()) {
             *state = h.state(&root);
@@ -317,6 +328,8 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
             let listed: Vec<String> =
                 shared.iter().flat_map(|(_, f)| f.iter().map(|(p, _)| p.display().to_string())).collect();
             o.insert("agents_files".into(), serde_json::json!(listed));
+            let left: Vec<serde_json::Value> = shared_left.iter().map(Leftover::json).collect();
+            o.insert("agents_leftovers".into(), serde_json::json!(left));
             // 쓰기 **전의** 상태다 — `missing`·`stale` 이면 (연습이 아닐 때) 이번에 썼고, `foreign` 은 안 썼다.
             let hooked: Vec<serde_json::Value> = hooks
                 .iter()
@@ -344,6 +357,7 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
         } else {
             out.push(fill(say(lang, "skill.agents_planted"), &[("dir", &at)]));
         }
+        out.extend(shared_left.iter().map(|l| l.line(lang)));
         if scope.is_some() && !chosen.claude {
             out.push(fill(say(lang, "skill.scope_is_claudes"), &[("dir", &at)]));
         }
@@ -370,6 +384,8 @@ fn plan_lines<'a>(lang: crate::i18n::Lang, files: &'a [(PathBuf, String)]) -> im
 /// 것은 [`install`] 이다.
 fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
     let Place { root, dir, market, exe, files, .. } = place;
+    let skills_dir = dir.join("skills");
+    let mut left = leftovers(&skills_dir, &planted_names(&files, "skills"), &root);
     // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
@@ -401,6 +417,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                     "undeclared": retiring.undeclared_json(),
                     "settings_unread": retiring.unread_json(ctx.lang()),
                     "kept": retiring.kept,
+                    "leftovers": left.iter().map(Leftover::json).collect::<Vec<_>>(),
                 }),
                 Vec::new(),
             ));
@@ -408,6 +425,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         let lang = ctx.lang();
         let mut out = vec![fill(say(lang, "skill.plan_head"), &[("dir", &dir.display().to_string())])];
         out.extend(plan_lines(lang, &files));
+        out.extend(left.iter().map(|l| l.line(lang)));
         out.push(String::new());
         out.push(match &clash {
             Some(other) => fill(
@@ -434,6 +452,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
     // moai-ml0d.izy) — 맨 `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한
     // `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그 파일을 플러그인 JSON 으로 통째로 덮었다.
     write_committed(&dir, &files, &root)?;
+    left.iter_mut().for_each(Leftover::remove);
 
     // **`--json` 보다 먼저 푼다** — 아래 두 갈래가 다 이것을 쓴다. 기계 출력으로 빠지는 판은
     // 이 글들을 안 지으므로 값이 새지 않는다(`register` 의 걸음 이름은 사람 화면에만 선다).
@@ -481,12 +500,14 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                 "undeclared": retiring.undeclared_json(),
                 "settings_unread": retiring.unread_json(ctx.lang()),
                 "kept": retiring.kept,
+                "leftovers": left.iter().map(Leftover::json).collect::<Vec<_>>(),
             }),
             Vec::new(),
         ));
     }
 
     let mut out = vec![fill(say(lang, "skill.planted"), &[("dir", &dir.display().to_string())])];
+    out.extend(left.iter().map(|l| l.line(lang)));
     out.push(fill(say(lang, "skill.hook_call"), &[("cmd", &format!("{exe} hook <event>"))]));
     for (what, ok) in &steps {
         out.push(format!("  {} {what}", if *ok { "·" } else { "!" }));
@@ -936,7 +957,12 @@ pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
     // 링크를 지나 밖의 디렉터리를 지운다.
     let left: Vec<PathBuf> = match outside(&shared, &place.root) {
         Some(_) => Vec::new(),
-        None => skill::NAMES.iter().map(|n| shared.join(n)).filter(|p| std::fs::symlink_metadata(p).is_ok()).collect(),
+        // 걷은 스킬(`moai-work`, `.agents` 의 감독)도 댄다 — 옛 판이 심어 둔 그 디렉터리도 moai 의 것이다([`EVER_PLANTED`]).
+        None => EVER_PLANTED
+            .iter()
+            .map(|(n, _)| shared.join(n))
+            .filter(|p| std::fs::symlink_metadata(p).is_ok())
+            .collect(),
     };
     // 고른 에이전트의 훅 파일 가운데 **moai 가 쓴 것만** 댄다(moai-u5wr.kov) — 남의 훅이 든 파일을 지우라고 하면 그
     // 사람의 훅이 같이 사라진다.
@@ -1535,6 +1561,134 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
     out
 }
 
+/// **moai 가 한 번이라도 심은 스킬**과 그 디렉터리 안에 심은 파일 — 지금 심는 것([`skill::NAMES`])에 걷은 것이 더해진
+/// 목록이다(moai-six5.1xz). 셋이 이 하나로 잰다.
+///
+/// - `install` 이 걷는 남은 디렉터리([`leftovers`]) — 이 목록에 있고 이번 트리에 없는 이름이다. 일꾼 스킬 `moai-work` 는
+///   0.9.0 에서 걷혔고(2026-10-06 사용자 결정, moai-ybns), 감독 스킬은 Claude 의 트리에만 선다 — 옛 판이 심은 그
+///   디렉터리가 남으면 에이전트가 걷힌 명령(`moai hello`·`inbox`·`send`)을 배운다
+/// - `uninstall` 이 손으로 지우라고 대는 `.agents/skills` 의 디렉터리 — 남은 것까지 댄다
+/// - 위키와 새 id 가 스킬 이름을 id 로 안 읽는 거르개([`crate::wiki`]·[`crate::store::taken_ids`], moai-mdzx.3pm) — 걷은
+///   이름이 빠지면 페이지의 `moai-work` 가 없는 id 로 선다
+///
+/// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
+/// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`every_planted_skill_is_on_the_list`).
+pub const EVER_PLANTED: [(&str, &[&str]); 4] = [
+    ("moai", &["SKILL.md", "references/commands.md"]),
+    ("moai-supervise", &["SKILL.md", "references/worker.md"]),
+    ("moai-wiki", &["SKILL.md"]),
+    ("moai-work", &["SKILL.md"]),
+];
+
+/// `name` 이 moai 가 심었던 스킬의 이름인가([`EVER_PLANTED`]).
+pub fn ever_planted(name: &str) -> bool {
+    EVER_PLANTED.iter().any(|(n, _)| *n == name)
+}
+
+/// 트리 `files`(`under` 밑의 `<이름>/…`)가 심는 스킬 이름.
+fn planted_names<'a>(files: &'a [(PathBuf, String)], under: &str) -> Vec<&'a str> {
+    let mut names: Vec<&str> = files
+        .iter()
+        .filter_map(|(p, _)| p.strip_prefix(under).ok()?.components().next()?.as_os_str().to_str())
+        .collect();
+    names.dedup();
+    names
+}
+
+/// 옛 판이 심고 이 판은 안 심는 스킬 디렉터리 하나(moai-six5.1xz).
+struct Leftover {
+    dir: PathBuf,
+    /// moai 가 심은 꼴 그대로면 지울 파일과 디렉터리(깊은 것부터). 아니면 `None` 이고 손대지 않는다([`ours`]).
+    ours: Option<(Vec<PathBuf>, Vec<PathBuf>)>,
+    /// 지웠는가 — 연습이거나 남의 것이면 `None` 이다.
+    removed: Option<bool>,
+}
+
+impl Leftover {
+    /// `--json` 의 한 칸 — 자리와 상태(`removed`·`failed`·`planned`·`foreign`).
+    fn json(&self) -> serde_json::Value {
+        let state = match (&self.ours, self.removed) {
+            (None, _) => "foreign",
+            (Some(_), None) => "planned",
+            (Some(_), Some(true)) => "removed",
+            (Some(_), Some(false)) => "failed",
+        };
+        serde_json::json!({ "path": self.dir.display().to_string(), "state": state })
+    }
+
+    /// 사람의 한 줄. 연습이면 지울 것을 댄다.
+    fn line(&self, lang: crate::i18n::Lang) -> String {
+        let dir = crate::text::shell_word(&self.dir.display().to_string());
+        let key = match (&self.ours, self.removed) {
+            (None, _) => "skill.leftover_foreign",
+            (Some(_), None) => "skill.leftover_plan",
+            (Some(_), Some(true)) => "skill.leftover_removed",
+            (Some(_), Some(false)) => "skill.leftover_failed",
+        };
+        fill(say(lang, key), &[("dir", &dir)])
+    }
+
+    /// 지운다 — 파일을 하나씩, 그 뒤 빈 디렉터리를 깊은 것부터. 통째로 지우지 않는다(`remove_dir_all`) — 잰 뒤에 사람이
+    /// 그 안에 둔 파일이 있으면 그 디렉터리는 비지 않아 남고, 실패로 댄다.
+    fn remove(&mut self) {
+        let Some((files, dirs)) = &self.ours else { return };
+        let files_gone = files.iter().all(|f| std::fs::remove_file(f).is_ok());
+        let dirs_gone = dirs.iter().all(|d| std::fs::remove_dir(d).is_ok());
+        self.removed = Some(files_gone && dirs_gone);
+    }
+}
+
+/// 스킬 자리 `skills` 에 남은, 이번 트리가 안 심는 moai 의 스킬 디렉터리들 — [`EVER_PLANTED`] 의 차례로. 아무것도 안
+/// 지운다. **그 자리가 링크로 체크아웃 밖에 닿으면 아무것도 안 댄다**([`outside`]) — moai 는 거기 안 심는다.
+fn leftovers(skills: &Path, planting: &[&str], root: &Path) -> Vec<Leftover> {
+    if outside(skills, root).is_some() {
+        return Vec::new();
+    }
+    EVER_PLANTED
+        .iter()
+        .filter(|(name, _)| !planting.contains(name))
+        .filter_map(|(name, known)| {
+            let dir = skills.join(name);
+            std::fs::symlink_metadata(&dir).ok()?;
+            Some(Leftover { ours: ours(&dir, name, known, root), dir, removed: None })
+        })
+        .collect()
+}
+
+/// 디렉터리 `dir` 이 **moai 가 심은 꼴 그대로인가** — 그렇다면 지울 파일과 디렉터리(깊은 것부터)다.
+///
+/// 사람의 것을 지우지 않으려고 셋을 다 본다. 하나라도 어긋나면 `None` 이고 그 디렉터리는 통째로 남는다.
+///
+/// - **링크가 아닌 디렉터리**이고 그 안도 디렉터리와 보통 파일뿐이다 — 링크를 따라 지우면 링크 너머의 것이 사라진다
+/// - **파일이 모두 moai 가 그 스킬에 심던 것**이다([`EVER_PLANTED`]) — 사람이 곁에 둔 메모 하나가 있어도 안 지운다
+/// - **`SKILL.md` 머리가 그 이름이다**(`---\nname: <이름>\n`) — moai 가 심는 글은 모두 이 머리로 연다
+fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<PathBuf>, Vec<PathBuf>)> {
+    if !std::fs::symlink_metadata(dir).ok()?.is_dir() {
+        return None;
+    }
+    let (mut files, mut dirs, mut walk) = (Vec::new(), vec![dir.to_path_buf()], vec![dir.to_path_buf()]);
+    while let Some(at) = walk.pop() {
+        for entry in std::fs::read_dir(&at).ok()? {
+            let entry = entry.ok()?;
+            let (path, kind) = (entry.path(), entry.file_type().ok()?);
+            if kind.is_dir() {
+                dirs.push(path.clone());
+                walk.push(path);
+            } else if kind.is_file() && known.iter().any(|k| path.strip_prefix(dir).is_ok_and(|rel| rel == Path::new(k))) {
+                files.push(path);
+            } else {
+                return None;
+            }
+        }
+    }
+    let head = read_committed(&dir.join("SKILL.md"), root).ok()?;
+    if !head.starts_with(&format!("---\nname: {name}\n")) {
+        return None;
+    }
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    Some((files, dirs))
+}
+
 /// 커밋된 파일 하나를 읽는다 — **보통 파일만, 체크아웃 `root` 안에서만**(`held::read_inside`, moai-ml0d.21i). 받은
 /// 저장소가 커밋한 자리라 링크나 FIFO 일 수 있다 — 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로
 /// `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 하나로 메모리를 다 썼다. 체크아웃 밖을
@@ -1623,6 +1777,72 @@ mod tests {
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
         }
+    }
+
+    /// **지금 심는 스킬과 그 파일은 모두 [`EVER_PLANTED`] 에 있다**(moai-six5.1xz). 빠지면 그 스킬을 걷는 날 다음 판이
+    /// 옛 디렉터리를 못 알아봐 남기고, 위키가 그 이름을 다시 id 로 센다. 두 트리를 다 본다.
+    #[test]
+    fn every_planted_skill_is_on_the_list() {
+        let skills = skill::skills();
+        let claude = plant("t", Path::new("/repo"), "/bin/moai", &skills);
+        let shared = skill::agents_tree(&skills);
+        let trees = [(claude.as_slice(), "skills"), (shared.as_slice(), "")];
+        for (files, under) in trees {
+            for (path, _) in files.iter().filter(|(p, _)| p.starts_with(under) && p.components().count() > 1) {
+                let rel = path.strip_prefix(under).unwrap();
+                let mut parts = rel.components();
+                let name = parts.next().unwrap().as_os_str().to_str().unwrap();
+                let file = parts.as_path();
+                let known = EVER_PLANTED.iter().find(|(n, _)| *n == name).map(|(_, f)| *f);
+                assert!(known.is_some_and(|f| f.iter().any(|k| Path::new(k) == file)), "{} 이 목록에 없다", path.display());
+            }
+        }
+        for name in skill::NAMES {
+            assert!(ever_planted(name), "{name} 이 목록에 없다");
+        }
+    }
+
+    /// **moai 가 심은 꼴 그대로인 디렉터리만 걷는다**(moai-six5.1xz) — 머리의 이름이 다르거나, 사람의 파일이 곁에
+    /// 있거나, 링크면 손대지 않는다. 이번 트리가 심는 이름은 대지도 않는다.
+    #[cfg(unix)]
+    #[test]
+    fn only_a_leftover_moai_wrote_is_removed() {
+        let s = crate::scratch::Scratch::new("skill-leftovers");
+        let root = s.path().to_path_buf();
+        let skills = root.join("skills");
+        let skill_md = |name: &str| format!("---\nname: {name}\ndescription: x\n---\n");
+        let put = |rel: &str, body: &str| {
+            let at = skills.join(rel);
+            std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+            std::fs::write(at, body).unwrap();
+        };
+        put("moai-work/SKILL.md", &skill_md("moai-work"));
+        put("moai-supervise/SKILL.md", &skill_md("moai-supervise"));
+        put("moai-supervise/references/worker.md", "# worker\n");
+        put("moai-wiki/SKILL.md", &skill_md("moai-wiki"));
+        let mut left = leftovers(&skills, &["moai", "moai-wiki"], &root);
+        let named: Vec<String> = left.iter().map(|l| l.dir.display().to_string()).collect();
+        assert_eq!(named, [skills.join("moai-supervise"), skills.join("moai-work")].map(|p| p.display().to_string()));
+        assert!(left.iter().all(|l| l.ours.is_some()), "moai 가 심은 꼴을 남의 것으로 읽었다");
+        left.iter_mut().for_each(Leftover::remove);
+        assert!(left.iter().all(|l| l.removed == Some(true)));
+        assert!(!skills.join("moai-work").exists() && !skills.join("moai-supervise").exists());
+        assert!(skills.join("moai-wiki/SKILL.md").is_file(), "심는 스킬을 걷었다");
+
+        // 사람의 메모가 곁에 있으면, 머리의 이름이 다르면, 링크면 — 통째로 남긴다.
+        put("moai-work/SKILL.md", &skill_md("moai-work"));
+        put("moai-work/notes.md", "mine\n");
+        put("moai-supervise/SKILL.md", &skill_md("my-own"));
+        let away = crate::scratch::Scratch::new("skill-leftovers-away");
+        std::fs::write(away.join("SKILL.md"), skill_md("moai-work")).unwrap();
+        let left = leftovers(&skills, &["moai", "moai-wiki"], &root);
+        assert_eq!(left.len(), 2);
+        assert!(left.iter().all(|l| l.ours.is_none()), "사람의 것을 걷으려 했다");
+        std::fs::remove_dir_all(skills.join("moai-work")).unwrap();
+        std::os::unix::fs::symlink(away.path(), skills.join("moai-work")).unwrap();
+        let left = leftovers(&skills, &["moai", "moai-wiki"], &root);
+        assert!(left.iter().all(|l| l.ours.is_none()), "링크를 따라 걷으려 했다");
+        assert!(away.join("SKILL.md").is_file());
     }
 
     /// **트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 8번) — 트리는 `skills/**` 를
