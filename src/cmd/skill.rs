@@ -291,32 +291,15 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     if chosen.claude {
         measure(&place.dir, &place.files, &root)?;
     }
-    // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기 뒤에 걷는다: 쓰기가 거절되면 아무것도
-    // 안 바뀐 채 멈춘다. Claude 의 트리는 등록 앞에서 걷는다([`claude_install`]) — 등록이 그 트리를 캐시로 옮겨 담는다.
+    // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기가 다 된 뒤에 걷는다([`write_then_sweep`]).
+    // Claude 의 트리는 등록 앞에서 걷는다([`claude_install`]) — 등록이 그 트리를 캐시로 옮겨 담는다.
     let mut shared_left: Vec<Leftover> =
         shared.as_ref().map(|(dir, files)| leftovers(dir, &planted_names(files, ""), &root)).unwrap_or_default();
-    // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
-    // 안 기댄다. 훅 파일도 같은 까닭이다(moai-u5wr.kov). 못 쓰면 `claude` 를 부르기 전에 멈춘다.
-    //
-    // **훅 파일은 쓰기 바로 앞에서 다시 판정한다**(리뷰 moai-dj4j.n9y) — 위의 판정 뒤에 `.agents` 트리 한 벌을 fsync 하며 쓰는
-    // 동안 사람이 그 파일에 제 훅을 적었으면 이제 남의 것이라 안 쓴다. 판정한 그대로 쓰던 판은 그 틈이 파일 하나에서 트리 한
-    // 벌로 넓어져 사람의 훅을 말없이 덮었다. 위에서 잰 파일만 쓰고, 다시 판정한 상태가 보고의 `was` 다.
-    if !dry_run {
-        if let Some((dir, files)) = &shared {
-            write_committed(dir, files, &root)?;
-            shared_left.iter_mut().for_each(|l| l.remove(&root));
-        }
-        for (h, state) in hooks.iter_mut().filter(|(_, state)| state.due()) {
-            *state = h.state(&root);
-            if state.due() {
-                write_committed(&root, &[h.file(&root)], &root)?;
-            }
-        }
-    }
-    let (mut json, claude) = match chosen.claude {
-        true => claude_install(ctx, place, scope.unwrap_or(Scope::Local).as_str(), dry_run)?,
-        false => (serde_json::json!({ "dry_run": dry_run }), Vec::new()),
-    };
+    let (mut json, claude) =
+        write_then_sweep(shared.as_ref(), &mut shared_left, &mut hooks, &root, dry_run, || match chosen.claude {
+            true => claude_install(ctx, place, scope.unwrap_or(Scope::Local).as_str(), dry_run),
+            false => Ok((serde_json::json!({ "dry_run": dry_run }), Vec::new())),
+        })?;
 
     if ctx.json {
         if let Some(o) = json.as_object_mut() {
@@ -368,6 +351,43 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     }
     out.extend(claude);
     Ok(out)
+}
+
+/// `install` 의 쓰는 걸음 — `.agents` 의 트리, 훅 파일, 그다음 Claude 의 걸음(`claude`)을 차례로 하고, **그것이 다 `Ok`
+/// 일 때만** `.agents` 의 남은 디렉터리를 걷는다(리뷰 moai-ybns.451.ng7). 연습이면 아무것도 안 쓰고 안 걷는다.
+///
+/// - **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에 안
+///   기댄다. 훅 파일도 같은 까닭이다(moai-u5wr.kov). 못 쓰면 `claude` 를 부르기 전에 멈춘다
+/// - **훅 파일은 쓰기 바로 앞에서 다시 판정한다**(리뷰 moai-dj4j.n9y) — `install` 의 판정 뒤에 `.agents` 트리 한 벌을
+///   fsync 하며 쓰는 동안 사람이 그 파일에 제 훅을 적었으면 이제 남의 것이라 안 쓴다. 판정한 그대로 쓰던 판은 그 틈이 파일
+///   하나에서 트리 한 벌로 넓어져 사람의 훅을 말없이 덮었다. 잰 파일만 쓰고, 다시 판정한 상태가 보고의 `was` 다
+/// - **걷는 것은 맨 끝이다.** `.agents` 를 쓴 바로 뒤에 걷던 판은 뒤의 쓰기(훅 파일의 `EACCES`, 꽉 찬 디스크 — [`measure`]
+///   가 못 보는 실패)가 멈추면 맨 `Err` 하나로 끝나, 이미 지운 디렉터리를 아무 데도 안 댔다 — `--json` 에도
+///   `agents_leftovers` 가 없었고, 다시 부르면 `[]` 였다. 지운 것은 보고가 서는 길에서만 지운다
+fn write_then_sweep<T>(
+    shared: Option<&(PathBuf, Vec<(PathBuf, String)>)>,
+    shared_left: &mut [Leftover],
+    hooks: &mut [(HookFile, HookState)],
+    root: &Path,
+    dry_run: bool,
+    claude: impl FnOnce() -> R<T>,
+) -> R<T> {
+    if !dry_run {
+        if let Some((dir, files)) = shared {
+            write_committed(dir, files, root)?;
+        }
+        for (h, state) in hooks.iter_mut().filter(|(_, state)| state.due()) {
+            *state = h.state(root);
+            if state.due() {
+                write_committed(root, &[h.file(root)], root)?;
+            }
+        }
+    }
+    let done = claude()?;
+    if !dry_run {
+        shared_left.iter_mut().for_each(|l| l.remove(root));
+    }
+    Ok(done)
 }
 
 /// 연습이 심을 파일마다 내는 줄 — 두 트리가 같은 꼴로 선다.
@@ -1976,6 +1996,61 @@ mod tests {
         assert_eq!(states(&left), [Left::Foreign; 2], "링크를 따라 걷으려 했다");
         left.iter_mut().for_each(|l| l.remove(&root));
         assert!(away.join("SKILL.md").is_file(), "링크 너머를 지웠다");
+    }
+
+    /// **남은 디렉터리는 쓰기가 다 된 뒤에야 걷는다**(리뷰 moai-ybns.451.ng7) — `.agents` 를 쓴 바로 뒤에 걷던 판은 뒤의
+    /// 훅 파일 쓰기가 `EACCES` 로 멈추면 이미 지운 디렉터리를 아무 데도 안 댔다. 뒤의 Claude 걸음이 `Err` 여도 같다. 권한이
+    /// 안 막는 자리(root 로 도는 시험)에서는 훅 쪽을 잴 수 없어 건너뛴다.
+    #[cfg(unix)]
+    #[test]
+    fn leftovers_are_swept_only_after_every_write() {
+        use std::os::unix::fs::PermissionsExt;
+        let s = crate::scratch::Scratch::new("skill-sweep-last");
+        let root = s.path().to_path_buf();
+        std::fs::create_dir(root.join(".moai")).unwrap();
+        let dir = root.join(skill::AGENTS_DIR);
+        let work = dir.join("moai-work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("SKILL.md"), "---\nname: moai-work\ndescription: x\n---\n").unwrap();
+        let shared = (dir.clone(), skill::agents_tree(&skill::skills()));
+        let swept = |hooks: &mut Vec<(HookFile, HookState)>, claude: R<()>| {
+            let mut left = leftovers(&dir, &planted_names(&shared.1, ""), &root);
+            let r = write_then_sweep(Some(&shared), &mut left, hooks, &root, false, || claude);
+            (r.is_ok(), left.iter().map(|l| l.state).collect::<Vec<_>>())
+        };
+
+        // 뒤의 Claude 걸음이 멈추면 안 걷는다.
+        let (ok, states) = swept(&mut Vec::new(), Err(Fail::new("claude 의 트리를 못 썼다")));
+        assert!(!ok);
+        assert_eq!(states, [Left::Planned]);
+        assert!(work.join("SKILL.md").is_file(), "뒤의 걸음이 멈췄는데 걷었다");
+
+        // 훅 파일을 못 쓰면 안 걷는다 — `measure` 는 권한을 못 본다.
+        let codex = root.join(".codex");
+        std::fs::create_dir(&codex).unwrap();
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(codex.join("probe"), "").is_err() {
+            let mut hooks: Vec<(HookFile, HookState)> =
+                HookFile::chosen(&root, "/bin/moai", &Chosen::of(&[Agent::Codex]))
+                    .into_iter()
+                    .map(|h| {
+                        let state = h.state(&root);
+                        (h, state)
+                    })
+                    .collect();
+            assert_eq!(hooks.len(), 1);
+            let (ok, states) = swept(&mut hooks, Ok(()));
+            assert!(!ok, "쓸 수 없는 `.codex` 에 훅 파일을 썼다");
+            assert_eq!(states, [Left::Planned]);
+            assert!(work.join("SKILL.md").is_file(), "훅 파일을 못 썼는데 걷었다");
+        }
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // 다 되면 걷는다.
+        let (ok, states) = swept(&mut Vec::new(), Ok(()));
+        assert!(ok);
+        assert_eq!(states, [Left::Removed]);
+        assert!(!work.exists());
     }
 
     /// **맨 위 디렉터리만 못 지운 남은 것은 다음 `install` 이 마저 걷는다**(리뷰 moai-ybns.451.fbh) — 스킬 자리에 쓸 권한이
