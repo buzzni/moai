@@ -647,6 +647,8 @@ pub struct Fresh {
     unreadable: Vec<Option<String>>,
     /// 배너가 대는 못 읽는 줄의 수 — **산 줄만**([`Counted::unreadable`], moai-e18s).
     unreadable_live: usize,
+    /// 아카이브 파일의 못 읽는 줄 수 — 아카이브를 보는 동안만 배너가 댄다([`Counted::archive_unreadable`]).
+    unreadable_archive: usize,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
     /// 옆 워크트리를 못 찾은 까닭(`Gathered::unfound`). 사람이 SPC v w 로 켰을 때만 댄다.
@@ -773,7 +775,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     // **경고와 알림은 아카이브를 섞기 전에 센다**(moai-nkwg) — 섞은 줄로 세면 옮긴 줄이 일로 서고 아카이브의
     // 못 읽은 줄이 산 줄의 `unreadable_line` 으로 선다. 아카이브는 한 번만 읽어 셈과 섞기가 나눠 쓴다([`board`]).
     let archived = crate::archive::read(&repo.root)?;
-    let Counted { mut warnings, notices, unreadable: unreadable_live } =
+    let Counted { mut warnings, notices, unreadable: unreadable_live, archive_unreadable: unreadable_archive } =
         board(repo, &g.load, &g.origin, &archived, &now)?;
     g.load = beside(archived, g.load);
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
@@ -818,6 +820,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
         issues,
         unreadable,
         unreadable_live,
+        unreadable_archive,
         origin: g.origin,
         elsewhere,
         // 못 찾은 까닭도 여기서 편다(moai-dpbi) — 배너와 알림은 글을 그대로 낸다.
@@ -842,6 +845,9 @@ pub struct Counted {
     /// **산 줄의** 못 읽는 줄 수 — `moai status` 의 `unreadable_line` 과 같은 자다(moai-e18s). 아카이브 파일의
     /// 못 읽는 줄은 안 든다: 보드는 그것을 `archive_unreadable` 로 따로 세고, 배너도 그 경고로 센다.
     pub unreadable: usize,
+    /// **아카이브 파일의** 못 읽는 줄 수 — 줄마다 하나다(moai-ug6x.bbh). 경고는 위의 `warnings` 에 하나로 들고,
+    /// 아카이브를 보는 동안의 배너가 그 수를 따로 댄다 — 지금 보는 목록에서 그만큼 빠졌다는 말이다.
+    pub archive_unreadable: usize,
 }
 
 /// 배너가 대는 수 — 고칠 것(기한 판정은 안 접은 채), 순수한 셈이 낸 알림의 수, 산 줄의 못 읽는 줄 수
@@ -881,6 +887,7 @@ pub(crate) fn board(
         warnings: Surfaced::of(st.warnings.len(), st.dues),
         notices: st.notices.len(),
         unreadable: unreadable.len(),
+        archive_unreadable: archived.errors.len(),
     })
 }
 
@@ -1123,6 +1130,9 @@ pub struct Site {
     /// 경고로 센다 — 이 수를 따로 든다. **세는 자는 [`board`] 하나다.** 저장소 없이 세운 화면(시험)은 받은 목록을
     /// 다 산 줄로 본다.
     pub unreadable_live: usize,
+    /// 아카이브 파일의 못 읽는 줄 수([`Counted::archive_unreadable`]) — 아카이브를 보는 동안만 배너가 댄다. 저장소
+    /// 없이 세운 화면은 아카이브가 없어 0 이다.
+    pub unreadable_archive: usize,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     ///
     /// **기한 판정은 안 접혀 있다**([`Surfaced`], moai-fgjj) — 그 몫만 시간대에 닿으므로, 그리는
@@ -1591,6 +1601,7 @@ impl Site {
             me: None,
             now: crate::model::now(),
             unreadable_live: unreadable.len(),
+            unreadable_archive: 0,
             unreadable,
             warnings: Surfaced::default(),
             notices: 0,
@@ -2078,8 +2089,9 @@ impl App {
         // moai-fgjj 가 걷었다(moai-ynd6) — 읽는 쪽이 일부러 없앤 것인지 실수로 지워진 것인지
         // 못 가렸다.
         match counted {
-            Some(Counted { warnings, notices, unreadable }) => {
-                (app.site.warnings, app.site.notices, app.site.unreadable_live) = (warnings, notices, unreadable)
+            Some(Counted { warnings, notices, unreadable, archive_unreadable }) => {
+                (app.site.warnings, app.site.notices, app.site.unreadable_live) = (warnings, notices, unreadable);
+                app.site.unreadable_archive = archive_unreadable;
             }
             None => app.count_all(),
         }
@@ -2477,6 +2489,7 @@ impl App {
         self.site.stamp = f.stamp;
         self.site.unreadable = f.unreadable;
         self.site.unreadable_live = f.unreadable_live;
+        self.site.unreadable_archive = f.unreadable_archive;
         self.site.origin = f.origin;
         self.site.elsewhere = f.elsewhere;
         self.site.unfound = f.unfound;
@@ -4378,6 +4391,7 @@ impl App {
                 site.warnings = fresh.warnings;
                 // 들어간 화면의 배너가 대는 못 읽는 줄도 산 줄만이다(moai-e18s) — `Site::of` 는 받은 목록을 다 센다.
                 site.unreadable_live = fresh.unreadable_live;
+                site.unreadable_archive = fresh.unreadable_archive;
                 // **알림도 그 줄과 함께 든다**(moai-k6ff) — 이 줄로 들어가면 그 화면의 배너가
                 // 프로젝트 층에서 본 `+N` 을 그대로 댄다.
                 site.notices = fresh.notices;
@@ -12366,6 +12380,13 @@ mod tests {
         );
         let said = draw::tests_banner(&mut a);
         assert!(!said.contains("읽을 수 없는 줄"), "{said}");
+        // **아카이브를 보는 동안만 그 줄을 따로 댄다**(moai-ug6x.bbh) — 수는 다시 읽기가 실어 온 줄마다의 수다.
+        assert_eq!(a.site.unreadable_archive, 1, "다시 읽기가 아카이브의 못 읽는 줄 수를 안 실어 왔다");
+        assert!(!said.contains("아카이브의 못 읽는 줄"), "산 목록에서 아카이브의 줄을 댔다: {said}");
+        a.view.show_archived = true;
+        let said = draw::tests_banner(&mut a);
+        assert!(said.contains("아카이브의 못 읽는 줄 1 — 그 줄 없이 보는 중"), "{said}");
+        a.view.show_archived = false;
 
         // 산 줄이 깨지면 그 수만큼 선다 — 아카이브의 것은 여전히 안 든다.
         let live = root.join(".moai/issues.jsonl");
