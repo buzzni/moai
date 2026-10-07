@@ -5514,3 +5514,12 @@
 {"ts":"2026-10-07T15:45:59Z","id":"moai-ug6x.bbh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T15:45:59Z","id":"moai-ug6x.cpq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T15:45:59Z","id":"moai-ug6x.hr1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.a42","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.2kg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.33p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.3fi","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.e19","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.ris","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.apz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress","note":"레이븐 (raven@buzzni.com) 이 이 창에서 넘겨받기를 허락했다"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.apz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Taken-over: minyoung.go (hedone21@gmail.com)"}
+{"ts":"2026-10-07T15:49:54Z","id":"moai-r0x8.ris","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided: 사람(레이븐)이 두 길을 함께 대기로 정했다 — \"여기엔 .moai 가 없고 올라가 잡은 <뿌리> 의 트래커를 못 읽었다\" + 그 트래커를 고친다 / 여기에 따로 init 한다. --json 은 tracker_error 곁에 그 뿌리를 싣는다"}
