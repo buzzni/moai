@@ -1679,9 +1679,11 @@ fn archive_status(
 /// `the_stop_count_matches_the_board_over_an_archive` 가 둘을 견준다.
 ///
 /// **못 읽는 아카이브 줄은 닿든 안 닿든 센다**(moai-5y2a) — 깨진 데이터라 `moai status` 를 비영으로 끝내는 경고다.
-/// 닿지 않는 줄은 꼴만 재고 값을 안 지어(`store::readable`) 아끼는 것이 그대로 선다 — 릴리스 빌드로 닿는 줄이 없는 2만
-/// 줄에 0.10초가 0.12초가 되었고, 그 줄을 다 파싱하면 0.135초였다(전부 읽던 판은 0.6초). 세션이 아카이브를 깨 두고 가면
-/// 여기서 붙든다(`a_session_that_breaks_the_archive_is_held_at_stop`).
+/// 닿지 않는 줄도 전부 읽는 판과 같은 [`crate::store::parse_line`] 으로 읽고 줄만 버린다 — 꼴만 재는 둘째 파서를 두었다가
+/// `Issue` 와 어긋난 것이 리뷰에서 드러났다(moai-bth3.zpc). 값은 릴리스 빌드로 닿는 줄이 없는 2만 줄의 `Stop` 중앙값이
+/// 0.10초(세지 않던 판)에서 0.135초가 되었다 — 꼴만 재던 판은 0.11~0.14초, 전부 읽던 판은 0.6초다(부하 13~16 에서
+/// 열다섯 번씩 세 차례, 2026-10-07). 세션이 아카이브를 깨 두고 가면 여기서 붙든다
+/// (`a_session_that_breaks_the_archive_is_held_at_stop`).
 fn warned(repo: &Repo, issues: &[model::Issue], unreadable: &[report::Unreadable], zone: &crate::tz::Zone) -> usize {
     let now = model::now();
     let opaque = || unreadable.iter().filter_map(|u| u.id);

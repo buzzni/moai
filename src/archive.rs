@@ -153,9 +153,10 @@ fn read_error(file: PathBuf, message: String) -> crate::store::LoadError {
 /// A line left out is read for its head id alone, and that id stands on no other line and on no live row, so it can
 /// never collide. **Every unreadable line still comes back in `errors`, reached or not** — `archive_unreadable` is broken
 /// data that `Stop` counts the way `moai status` does (moai-5y2a), so the count here is [`read`]'s. A line left out is
-/// not parsed for that: [`crate::store::readable`] checks its shape without building the row, and only a line that
-/// fails it is parsed for the error. The order of what comes back is [`read`]'s: file, then line, then a stable sort
-/// by id.
+/// parsed for that with [`crate::store::parse_line`], the parse [`read`] does, and its row is thrown away — a second
+/// reader of the row's shape would have to follow every change to how [`Issue`] reads a line, and the one that stood
+/// here had already drifted from it (moai-bth3.zpc). What is still saved is the work after the parse: the board never
+/// runs over the rows left out. The order of what comes back is [`read`]'s: file, then line, then a stable sort by id.
 pub fn around<'a>(root: &Path, live: &[Issue], opaque: impl IntoIterator<Item = &'a str>) -> Load {
     let mut out = Load::default();
     let files = match files(root) {
@@ -226,14 +227,9 @@ pub fn around<'a>(root: &Path, live: &[Issue], opaque: impl IntoIterator<Item = 
         }
     }
     for (k, (f, n, text, _)) in lines.iter().enumerate() {
-        // A line left out is only asked whether it reads ([`crate::store::readable`]), and parsed only when it does not.
-        // Every line that does not read comes back, reached or not — `archive_unreadable` is broken data.
-        let row = match picked[k] {
-            true => parsed.remove(&k).unwrap_or_else(|| crate::store::parse_line(*n, text)),
-            false if crate::store::readable(text) => continue,
-            false => crate::store::parse_line(*n, text),
-        };
-        match row {
+        // A line left out is parsed too, and the row thrown away: only the parse a full read does says whether the line
+        // reads. Every line that does not read comes back, reached or not — `archive_unreadable` is broken data.
+        match parsed.remove(&k).unwrap_or_else(|| crate::store::parse_line(*n, text)) {
             Ok(issue) if picked[k] => out.issues.push(issue),
             Ok(_) => {}
             Err(mut e) => {
@@ -907,6 +903,7 @@ mod tests {
         let mut escaped = row("argos-x001", Kind::Issue, "done");
         escaped.epic = Some("argos-e001".into());
         let line = |i: &Issue| serde_json::to_string(i).unwrap();
+        let unknown = |i: &Issue, value: &str| format!(r#"{},"x":{value}}}"#, line(i).strip_suffix('}').unwrap());
         let text = [
             line(&row("argos-e001", Kind::Epic, "done")),
             line(&row("argos-e001.aaa", Kind::Issue, "done")),
@@ -921,6 +918,12 @@ mod tests {
             line(&row("argos-n001", Kind::Issue, "done")).replacen(r#"{"id":"#, r#"{ "id": "#, 1),
             r#"{"id":"argos-zzzz","title":"#.to_string(),
             r#"{"id":"argos-zzzy","title":"no status"}"#.to_string(),
+            // What only a full parse of the row sees, on lines nothing reaches: the value of an unknown key read to the
+            // end — a lone surrogate, a number out of range, nesting past serde_json's depth — and a conflict marker.
+            unknown(&row("argos-q001", Kind::Issue, "done"), r#""\ud800""#),
+            unknown(&row("argos-q002", Kind::Issue, "done"), "1e400"),
+            unknown(&row("argos-q003", Kind::Issue, "done"), &format!("{}{}", "[".repeat(200), "]".repeat(200))),
+            "<<<<<<< ours".to_string(),
         ];
         assert!(text[9].contains(r"\u0030"), "{}", text[9]);
         fs::write(path(&s, "2025"), text.join("\n") + "\n").unwrap();
@@ -940,11 +943,11 @@ mod tests {
             "argos-x001",
         ];
         assert_eq!(ids, want);
-        // Every unreadable line comes back, reached or not — `archive_unreadable` is a warning (moai-5y2a). The second
-        // one is JSON but not a row, so only a check of the row's shape sees it.
+        // Every unreadable line comes back, reached or not — `archive_unreadable` is a warning (moai-5y2a). All but the
+        // first and the last are JSON, and only reading the row in full says they are not rows.
         let all = read(&s).unwrap();
         let spots = |l: &Load| l.errors.iter().map(|e| (e.source.clone(), e.line, e.id.clone())).collect::<Vec<_>>();
-        assert_eq!(all.errors.len(), 2, "{:?}", all.errors);
+        assert_eq!(all.errors.len(), 6, "{:?}", all.errors);
         assert_eq!(spots(&near), spots(&all));
         let live_ids = BTreeSet::from(["argos-l001", "argos-o001"]);
         assert_eq!(collisions(&live_ids, &near), collisions(&live_ids, &all));
