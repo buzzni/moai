@@ -5336,3 +5336,33 @@
 {"ts":"2026-10-07T12:24:54Z","id":"moai-ybns.451.sdk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T12:24:55Z","id":"moai-ybns.451.rf7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T12:24:55Z","id":"moai-ybns.451.oyg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T12:46:45Z","id":"moai-ybns.451.31a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:45Z","id":"moai-ybns.451.3zc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:46Z","id":"moai-ybns.451.52s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:46Z","id":"moai-ybns.451.a3o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:46Z","id":"moai-ybns.451.ed8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:47Z","id":"moai-ybns.451.fbh","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:48Z","id":"moai-ybns.451.ng7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:48Z","id":"moai-ybns.451.oyg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:48Z","id":"moai-ybns.451.qgx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:49Z","id":"moai-ybns.451.rf7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:49Z","id":"moai-ybns.451.rpd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:49Z","id":"moai-ybns.451.sdk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T12:46:50Z","id":"moai-ybns.451.tf3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagents fix this in .worktrees/moai-iu73-* sub-worktrees; merge into worktree-moai-iu73, then epic-end review xhigh"}
+{"ts":"2026-10-07T13:28:04Z","id":"moai-iu73.zci","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — v0.9.0 리뷰 버그 열셋 에픽 끝"}
+{"ts":"2026-10-07T13:28:12Z","id":"moai-ybns.451.31a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:13Z","id":"moai-ybns.451.3zc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:13Z","id":"moai-ybns.451.52s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:14Z","id":"moai-ybns.451.a3o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:14Z","id":"moai-ybns.451.ed8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:15Z","id":"moai-ybns.451.fbh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:16Z","id":"moai-ybns.451.ng7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:16Z","id":"moai-ybns.451.oyg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:17Z","id":"moai-ybns.451.qgx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:18Z","id":"moai-ybns.451.rf7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:18Z","id":"moai-ybns.451.rpd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:19Z","id":"moai-ybns.451.sdk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:19Z","id":"moai-ybns.451.tf3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T13:28:20Z","id":"moai-iu73.zci","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T13:50:04Z","id":"moai-vi8p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"supervisor restart: sent backlog and checked reports cannot be told from the tracker"}
+{"ts":"2026-10-07T13:50:05Z","id":"moai-k3ao","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skills_stale and skill status read CRLF checkouts as stale"}
