@@ -292,7 +292,7 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
         measure(&place.dir, &place.files, &root)?;
     }
     // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기가 다 된 뒤에 걷는다([`write_then_sweep`]).
-    // Claude 의 트리는 등록 앞에서 걷는다([`claude_install`]) — 등록이 그 트리를 캐시로 옮겨 담는다.
+    // Claude 의 트리는 [`claude_install`] 이 제 트리를 쓴 뒤 등록 앞에서 걷는다 — 까닭은 거기 있다.
     let mut shared_left: Vec<Leftover> =
         shared.as_ref().map(|(dir, files)| leftovers(dir, &planted_names(files, ""), &root)).unwrap_or_default();
     let (mut json, claude) =
@@ -466,10 +466,13 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         return Ok((serde_json::Value::Null, out));
     }
 
-    // **심는 파일은 덮어쓰기만 한다.** 이 판이 안 심는 스킬 디렉터리만 쓴 뒤에 걷는다([`leftovers`]) — 등록이 이 트리를
-    // 캐시로 옮겨 담기 전이다. 쓰는 자는 `.agents` 와 같다([`write_committed`], moai-ml0d.izy) — 맨
-    // `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한 `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그
-    // 파일을 플러그인 JSON 으로 통째로 덮었다.
+    // **심는 파일은 덮어쓰기만 한다.** 이 판이 안 심는 스킬 디렉터리만 쓴 뒤에 걷는다([`leftovers`]) — Claude Code 는
+    // 디렉터리 마켓플레이스의 스킬을 이 트리 그 자리에서 읽어(세션의 "Base directory for this skill" 이
+    // `<체크아웃>/.claude/moai-plugin/skills/<이름>` 이다), 남은 디렉터리는 다음 세션에 그대로 스킬로 선다. 등록 앞에서
+    // 걷는 것은 `plugin install`·`update` 가 캐시에 뜨는 사본에도 안 실리게 하려는 것뿐이다 — 세션은 그 사본의 스킬을
+    // 안 읽고, 판(내용의 해시)이 정하는 것은 `plugin update` 가 새 판을 알아보는 때다. 쓰는 자는 `.agents` 와 같다
+    // ([`write_committed`], moai-ml0d.izy) — 맨 `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한
+    // `.claude-plugin/plugin.json -> ~/.bashrc` 하나로 그 파일을 플러그인 JSON 으로 통째로 덮었다.
     write_committed(&dir, &files, &root)?;
     left.iter_mut().for_each(|l| l.remove(&root));
 
@@ -1762,9 +1765,9 @@ fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<Path
 /// 저장소가 커밋한 자리라 링크나 FIFO 일 수 있다 — 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로
 /// `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 하나로 메모리를 다 썼다. 체크아웃 밖을
 /// 가리키는 링크는 쓰기([`write_committed`]·[`Undeclare::call`])도 거절하는 자리라 읽어도 고칠 길이 없다.
-/// 매니페스트([`place`])·설정([`retire`]·[`Undeclare::call`])·두 에이전트의 훅 파일([`HookFile::judged`])이 이 하나로
-/// 읽는다. **못 읽은 까닭을 그대로 낸다** — 그것을 무엇으로 셀지는 부르는 쪽이 정한다(없는 파일·못 읽는 파일을 가르는
-/// 것은 [`retire`] 뿐이다).
+/// 매니페스트([`place`])·설정([`retire`]·[`Undeclare::call`])·두 에이전트의 훅 파일([`HookFile::judged`])·남은 스킬
+/// 디렉터리의 머리([`ours`] — 그 답으로 디렉터리를 지우는 길이다)가 이 하나로 읽는다. **못 읽은 까닭을 그대로
+/// 낸다** — 그것을 무엇으로 셀지는 부르는 쪽이 정한다(없는 파일·못 읽는 파일을 가르는 것은 [`retire`] 뿐이다).
 fn read_committed(file: &Path, root: &Path) -> Result<String, crate::held::Fell> {
     crate::held::read_inside(file, &crate::held::Home::of(root))
 }
