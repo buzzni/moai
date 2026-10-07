@@ -1792,7 +1792,8 @@ fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize
     let mut dimmed = None;
     if app.view.show_archived && app.site.unreadable_archive > 0 {
         dimmed = Some(parts.len());
-        parts.push(fill(say(lang, "tui.banner.archive_unreadable"), &[("n", &app.site.unreadable_archive.to_string())]));
+        parts
+            .push(fill(say(lang, "tui.banner.archive_unreadable"), &[("n", &app.site.unreadable_archive.to_string())]));
         soft += 1;
     }
     // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 프로젝트 층의 줄이 대는 `+N`
