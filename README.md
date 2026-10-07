@@ -240,12 +240,13 @@ moai init --print          # writes nothing, prints the block
 moai init --check          # writes nothing, says current / stale / missing
 ```
 
-`moai skill install` plants the skills — the tracker's rules, the supervisor, the
-worker and the wiki — for the agents you name. Claude Code gets a plugin in
+`moai skill install` plants the skills for the agents you name — the tracker's
+rules and the wiki for each of them, and the supervisor for Claude Code only.
+Claude Code gets a plugin in
 `.claude/moai-plugin/`, with the hooks, registered with `claude`. Codex and
 Antigravity both read `.agents/skills/`, so naming either plants it for both,
 and committing it hands it to the team. One text serves all three: the steps
-that differ per agent sit in the skills' "Words per agent" table. The hooks are
+that differ per agent sit in the `moai` skill's "Words per agent" table. The hooks are
 each agent's own: Codex gets `.codex/hooks.json` (trust it once in `/hooks`)
 and Antigravity `.agents/hooks.json` — commit them too.
 
@@ -258,19 +259,16 @@ moai skill status                          # what is planted where, and what is 
 ```
 
 moai never launches an agent or runs one headless. A person opens each session
-in the repository root, the ordinary way — it asks that person before it acts,
-as it always does — and the session reads `moai ready --json` to choose its next
-row:
+(`claude`, `codex` or `agy`) in the repository root, the ordinary way — it asks
+that person before it acts, as it always does — and the session reads
+`moai ready --json` to choose its next row.
 
-| | Claude Code | Codex | Antigravity |
-|---|---|---|---|
-| Open it | `claude` | `codex` | `agy` |
-| Make it a worker | `/moai-work` | `$moai-work` | ask for `moai-work` by name |
-
-A window becomes a worker when its person calls `moai-work` once, and a
-supervisor (`moai-supervise`) finds it with `moai agents` and hands it work with
-`moai send`. Nobody needs tmux. What each agent needs first — Codex's trust in
-`/hooks`, and its sandbox on a machine where that cannot stand — is in
+moai carries no messaging between agents. In Claude Code, one session that calls
+`/moai-supervise` hands piled-up backlog items to the other idle sessions of the
+repository it sees in `ListAgents`, through Claude Code's own `SendMessage`, and
+takes their reports back the same way. Codex and Antigravity have no supervisor.
+What each agent needs first — Codex's trust in `/hooks`, and its sandbox on a
+machine where that cannot stand — is in
 [working with agents](docs/agents.md#open-a-session-for-each-agent).
 
 ### The `--json` contract
