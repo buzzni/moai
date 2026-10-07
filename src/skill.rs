@@ -27,13 +27,16 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = ".claude/moai-plugin";
 
 /// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
-/// 심는 차례(이슈 트래커·감독·위키·일꾼)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
+/// 심는 차례(이슈 트래커·감독·위키)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
 /// 있어 시험이 이 목록과 견주고(`guide::tests::the_frontmatter_opens_the_skill`), 트리가 이 목록 밖의 스킬을 심으면
 /// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
 /// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
-pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-work"];
+///
+/// **일꾼 스킬 `moai-work` 는 걷었다**(2026-10-06 사용자 결정, moai-obxm). 일꾼의 걸음은 감독 스킬의
+/// `references/worker.md`([`crate::guide::worker`])에 서고, 감독의 메시지가 그 파일을 읽으라고 이른다(moai-fim6).
+pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
 
 /// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
 /// 두 벤더 문서가 같은 `<저장소>/.agents/skills/<이름>/SKILL.md` 를 들어, 한 벌을 심으면 둘이 다 읽고 커밋돼 팀이
@@ -46,6 +49,10 @@ pub const AGENTS_DIR: &str = ".agents/skills";
 pub struct Skill {
     pub name: &'static str,
     pub files: Vec<(&'static str, String)>,
+    /// Claude 의 플러그인([`tree`])에만 심고 [`AGENTS_DIR`]([`agents_tree`])에는 안 심는가. 감독 스킬이 그렇다 —
+    /// 세션 사이에 말하는 수단이 Claude Code 의 `ListAgents`·`SendMessage` 뿐이라(2026-10-06 사용자 결정, moai-obxm),
+    /// Codex·Antigravity 창이 그 글을 받으면 칠 수 없는 도구를 배운다.
+    pub claude_only: bool,
 }
 
 /// 심는 스킬 전부 — [`NAMES`] 의 차례로, 글은 `guide` 에서 온다. **트리 둘이 이 하나를 받는다**(moai-xs2h.xgo) —
@@ -54,33 +61,45 @@ pub struct Skill {
 pub fn skills() -> Vec<Skill> {
     // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
     // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki, worker] = NAMES;
+    let [main, supervisor, wiki] = NAMES;
     vec![
         Skill {
             name: main,
             files: vec![("SKILL.md", crate::guide::skill()), ("references/commands.md", crate::guide::reference())],
+            claude_only: false,
         },
         // 감독 스킬은 따로 선다 — `moai` 스킬에 섞으면 감독의 낱말에 `moai` 가 불려 오고, 일꾼이 `moai` 를 부를 때마다
         // 감독의 걸음까지 읽는다. 발동어(description)는 따로 서도 모든 세션에 실리므로, 나눈 것이 그 값을 아끼지는 않는다.
-        Skill { name: supervisor, files: vec![("SKILL.md", crate::guide::supervise())] },
+        // 일꾼의 걸음(`references/worker.md`)은 감독의 메시지가 절대 경로로 읽으라고 이른다(2026-10-07 사용자 결정,
+        // moai-fim6) — 일꾼 창도 같은 저장소의 같은 플러그인을 읽어 그 파일이 거기 있다. 32KB 를 매번 손으로 옮겨 붙이던
+        // 판은 보낼 때마다 출력 토큰 8~10k 가 들었고, 줄이거나 바꿔 옮긴 글을 아무것도 못 잡았다.
+        Skill {
+            name: supervisor,
+            files: vec![("SKILL.md", crate::guide::supervise()), ("references/worker.md", crate::guide::worker())],
+            claude_only: true,
+        },
         // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai` 스킬에 섞으면 이슈
         // 하나 세울 때마다 매뉴얼 쓰는 걸음까지 읽는다(moai-bl3x).
-        Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())] },
-        // 일꾼 스킬도 따로 선다(moai-0x59) — 사람이 일꾼으로 삼은 창만 그 걸음을 읽는다. 감독 스킬에 두면 감독이 매
-        // 바퀴 편지로 실어 보내야 하고, `moai` 스킬에 두면 일꾼이 아닌 세션까지 기다림과 보고의 걸음을 읽는다.
-        Skill { name: worker, files: vec![("SKILL.md", crate::guide::work())] },
+        Skill { name: wiki, files: vec![("SKILL.md", crate::guide::wiki())], claude_only: false },
     ]
 }
 
 /// 스킬마다의 글을 `<이름>/<상대 경로>` 로 편다 — 두 트리가 이 차례 그대로 받는다.
-fn skill_files(skills: &[Skill]) -> impl Iterator<Item = (PathBuf, String)> + '_ {
-    skills.iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (PathBuf, String)> + 'a
+where
+    I: IntoIterator<Item = &'a Skill>,
+    I::IntoIter: 'a,
+{
+    skills
+        .into_iter()
+        .flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
 }
 
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
-/// 없다는 것뿐이고, 에이전트마다 다른 걸음은 글 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
+/// 없다는 것과 Claude 에만 서는 스킬([`Skill::claude_only`], 감독)이 빠진다는 것뿐이고, 에이전트마다 다른 걸음은 글
+/// 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
 pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
-    skill_files(skills).collect()
+    skill_files(skills.iter().filter(|s| !s.claude_only)).collect()
 }
 
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
@@ -1273,7 +1292,7 @@ mod tests {
     /// 골랐는데, 그 그물은 `moai show -s todo,review` 를 끌어오고 리뷰
     /// 토막의 문구가 바뀌면 조용히 아무것도 안 고른다.
     fn taught() -> Vec<String> {
-        // AGENTS 블록도 같은 조각에서 나오고, 일꾼 스킬도 리뷰를 세우고 닫는 줄을 같은 조각으로
+        // AGENTS 블록도 같은 조각에서 나오고, 일꾼 글도 리뷰를 세우고 닫는 줄을 같은 조각으로
         // 적으므로 같이 본다.
         let texts = [
             crate::guide::skill(),
@@ -1281,7 +1300,7 @@ mod tests {
             crate::guide::agents(),
             crate::guide::supervise(),
             crate::guide::wiki(),
-            crate::guide::work(),
+            crate::guide::worker(),
         ];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
         // 의 멤버를 옮기는 줄과 에픽에 남기는 노트를 훅 시험 밖에 두었다 — 거기서 무엇을 바꿔도 초록이었다.
@@ -1346,16 +1365,6 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
-                    // 감독과 일꾼이 편지를 주고받는 자리(moai-snyk). 편지 id 는 `mail::is_id` 의 꼴이다 —
-                    // 꼴이 아니면 `send --reply-to` 가 거절해 가르친 줄이 아니라 그 거절을 잰다.
-                    .replace("<worker>", "w1")
-                    .replace("<supervisor>", "boss")
-                    .replace("<from>", "boss")
-                    .replace("<letter id>", "20261004-120000-abcd1234")
-                    .replace("<letter file>", "/tmp/letter.txt")
-                    .replace("<report file>", "/tmp/report.txt")
-                    // Codex 창이 훅이 지어 준 장을 잇는 자리(moai-u5wr.7xr).
-                    .replace("<that name>", "w1")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로
@@ -1405,7 +1414,7 @@ mod tests {
 
     const NOW: &str = "2026-01-01T00:00:00Z";
 
-    /// 심는 것은 여섯이다 — 스킬, 참고, 감독 스킬, 위키 스킬, 그리고 매니페스트 둘.
+    /// 심는 것은 일곱이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, 그리고 매니페스트 둘.
     #[test]
     fn the_tree_has_what_claude_needs() {
         let files = tree_of("/bin/moai", "# 스킬");
@@ -1413,6 +1422,7 @@ mod tests {
             "skills/moai/SKILL.md",
             "skills/moai/references/commands.md",
             "skills/moai-supervise/SKILL.md",
+            "skills/moai-supervise/references/worker.md",
             "skills/moai-wiki/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
@@ -1435,9 +1445,25 @@ mod tests {
         assert_eq!(planted, NAMES);
     }
 
+    /// **스킬 곁에 심는 파일은 그 SKILL.md 가 경로로 부른다.** 감독의 메시지는 일꾼에게 `references/worker.md` 를
+    /// 읽으라고 이르는데(moai-fim6), 여기서 파일 이름만 바꾸면 감독 글은 없는 파일을 가리킨 채 초록이었다 — 일꾼은
+    /// 걸음 없이 맡은 일만 받는다.
+    #[test]
+    fn every_planted_reference_is_named_by_its_skill() {
+        for s in skills() {
+            let (_, body) = s.files.iter().find(|(rel, _)| *rel == "SKILL.md").expect("SKILL.md 가 없다");
+            for (rel, _) in s.files.iter().filter(|(rel, _)| *rel != "SKILL.md") {
+                assert!(body.contains(&format!("`{rel}`")), "{} 의 SKILL.md 가 곁에 심는 {rel} 를 안 부른다", s.name);
+            }
+        }
+    }
+
     /// **`.agents/skills` 는 Claude 의 트리와 같은 글을 같은 이름 밑에 받는다**(moai-xs2h.xgo, 2026-10-04 사용자 결정) —
-    /// 다른 것은 매니페스트가 없다는 것뿐이다. 에이전트마다 글을 따로 내면 같은 것이 세 벌이 되어 갈라지고, 이름이
-    /// [`NAMES`] 밖으로 새면 위키가 그 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    /// 다른 것은 매니페스트가 없다는 것과 감독 스킬이 빠진다는 것뿐이다. 에이전트마다 글을 따로 내면 같은 것이 세 벌이
+    /// 되어 갈라지고, 이름이 [`NAMES`] 밖으로 새면 위키가 그 이름을 다시 이슈 id 로 센다(moai-mdzx.3pm).
+    ///
+    /// **감독 스킬은 Claude 에만 선다**(2026-10-06 사용자 결정, moai-obxm) — 그 글은 Codex·Antigravity 에 없는
+    /// `ListAgents`·`SendMessage` 로 말한다. 거르개를 걷으면 `.agents` 에 `moai-supervise` 가 다시 서서 붉어진다.
     #[test]
     fn the_agents_tree_carries_the_same_skills_without_a_manifest() {
         let all = fake("# 스킬", "감독", "위키");
@@ -1450,11 +1476,14 @@ mod tests {
                 (p.file_name()? == "SKILL.md").then(|| dir.display().to_string())
             })
             .collect();
-        assert_eq!(dirs, NAMES, "심는 스킬이 NAMES 와 다르다 — 차례까지");
+        assert_eq!(dirs, ["moai", "moai-wiki"], "Codex·Antigravity 가 받는 스킬이 다르다 — 차례까지");
+        assert!(!shared.keys().any(|p| p.starts_with("moai-supervise/")), "감독 스킬이 .agents 에 섰다");
         for (path, body) in &shared {
             assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
         }
-        assert_eq!(shared.len() + 2, claude.len(), "매니페스트 둘 말고 다른 것이 갈렸다");
+        let only_claude = claude.keys().filter(|p| p.starts_with("skills/moai-supervise/")).count();
+        assert_eq!(only_claude, 2, "감독 스킬은 SKILL.md 와 references/worker.md 둘이다");
+        assert_eq!(shared.len() + 2 + only_claude, claude.len(), "매니페스트 둘과 감독 스킬 말고 다른 것이 갈렸다");
         assert!(!shared.keys().any(|p| p.contains(".claude-plugin")), "매니페스트가 .agents 에 섰다");
     }
 

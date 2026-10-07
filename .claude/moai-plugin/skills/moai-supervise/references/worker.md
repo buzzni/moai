@@ -1,80 +1,26 @@
----
-name: moai-work
-description: Use when a person makes this window a worker for a moai supervisor — say hello, wait for a letter, do the work it hands over in a worktree, report it, and wait again. Triggers on "be a worker", "wait for work", "take work from the supervisor", "일꾼 해", "일 기다려", "감독 일 받아".
----
+# Worker steps
 
-# moai-work — wait for work from a supervisor and do it
+A supervisor — a Claude Code session running `moai-supervise` on this repository — sent you
+a message that names this file. The message's lines are your assignment; this file is how to
+do it. You know nothing else of the supervisor's conversation and need nothing else. **The
+person comes first** — this window is theirs; when they speak, answer them.
 
-A person calls this skill once, in a window they opened (*Call a skill*). From then on the
-window is a **worker**: it waits for a letter from the supervisor — the session running
-`moai-supervise` — does the work the letter hands over by the steps below, reports, and
-waits again. Nobody launches this window or drives it: the person opened it, and the
-letter is the whole assignment. **The person comes first** — when they speak in this
-window, stop waiting and answer them.
+## The assignment
 
-## The loop
-
-1. **Say who you are**, once per window
-
-       moai hello --role worker
-
-   The name in the reply is the one the supervisor sends to. moai finds this agent among
-   the processes above the command (`claude`, `agy`); a session its hooks already
-   registered keeps its name and gains the role. If this window sets `MOAI_AGENT`, that is
-   its name — `hello`, the wait and the hooks all go by it. In Codex, moai finds this window
-   by the session id Codex sets in its shell (`CODEX_THREAD_ID`) — the row its hooks wrote.
-   If `moai hello` says it cannot tell which session this is, Codex did not set it: say hello
-   as that row, `moai hello --role worker --as <that name>` (its first context names it,
-   `codex-` and eight characters), and pass the same `--as` to every `moai inbox` and
-   `moai send` below
-2. **Wait for a letter**
-
-       moai inbox --ack --wait 540
-
-   While it waits, `moai agents` shows this window `idle` — that is how the supervisor
-   finds it — and once a letter comes, `busy`. If the wait runs out empty, run it again.
-   **If it comes back at once with a non-zero code, no letter and a line naming the mailbox**
-   (`…/.moai/mail: it points at …`), the mailbox cannot be opened — a link the repository
-   holds points out of the checkout or into `.git` — and waiting again will not open it.
-   So do not run it again. A letter to the supervisor is refused the same way: tell the
-   person watching this window (*Ask the person watching*) and stop. A letter that comes with
-   a line on the mailbox is still yours to do — that line is moai failing to mark it read, so
-   the next wait hands the same letter back at once. Do it once, then tell the person watching
-   this window and stop rather than wait again — another wait is the same work twice.
-   Keep one wait inside your own limit for a shell command, and ask for that limit: Claude
-   Code's Bash tool gives a command two minutes unless you pass it a `timeout`, at most ten
-   minutes — pass the ten, and 540 seconds fits. Each wait that runs out costs
-   one short turn of tokens — the price of a worker that needs no tmux and nobody to wake it.
-   With the hooks installed, a letter that comes as a turn ends or a prompt arrives is loaded
-   into the conversation and marked read; it is the same letter, so do it
-3. **Do what the letter hands over** — read it as "The letter" says, then follow "The
-   steps" from where its first line says to start. The steps begin in the root the letter
-   names (`Root:`) — if this window stands anywhere else, go there first: `cd` from a
-   subdirectory, *Come back to the root* from a worktree
-4. **Report it last** (12) and then do what `After the report:` says — wait again (2 here),
-   or end the turn
-
-A letter that hands over no work is not work: if it asks something, answer it with
-`moai send <from> '<subject>' --reply-to <id> -b -`, and wait again.
-
-## The letter
-
-The first line names the work and where to start — `from step 1` for a new backlog,
-`from "Carrying on stalled work"` for work a session left behind, `from step 2` for an epic
-already unfolded whose first-column members are left. The letter's `from` is the supervisor
-you report to, `<supervisor>` below. Every other line fills a slot the steps use; a line the
-supervisor adds beyond those — who already said yes to taking over a row that is not yours,
-say — belongs to the assignment as well.
+The message's first line names the work and the step of this file to start from —
+`from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
+behind, `from step 2` for an epic already unfolded whose first-column members are left.
+The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`. Every
+other line fills a slot the steps use; a line the supervisor adds beyond those — who already
+said yes to taking over a row that is not yours, say — belongs to the assignment as well.
 
 - `Model:` — `<model>` and `<difficulty>`.
   `Model:` is a suggestion picked by difficulty before anyone read the code. The model is
-  changed by the person (*Change the model* — `/model`), never by you — if this window is not on
+  changed by the person with `/model`, never by you — if this window is not on
   that model, ask the person watching the window to match it, and if it reads harder than it
   looked, raise it the same way to the model that pairs with the difficulty you just measured —
   not one step at a time (haiku → sonnet → opus). Handed `low` but it is `high`, the model is `opus`.
-  The grade of the epic-end review (7) is measured on this same rubric, member by member.
-  The ladder is Claude Code's. In Codex and Antigravity `<model>` is `—`: the person picked
-  the model when opening the window, and the difficulty still picks the review grade
+  The grade of the epic-end review (7) is measured on this same rubric, member by member
 - `Work running alongside:` — the worktrees and work beside you, and the files they hold (4-3)
 - `Base branch:` — `<base branch>`. The supervisor read it in the root; do not read it again —
   read inside a worktree, it gives that worktree's own branch
@@ -82,12 +28,16 @@ say — belongs to the assignment as well.
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
-- `After the report:` — `wait again` or `end the turn` (12)
 - `Person:` — `here`, or `away` (below)
+
+The steps begin in the root the message names (`Root:`) — if this window stands anywhere
+else, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from a worktree.
+A message that hands over no work is not work: if it asks something, answer it with
+`SendMessage` to its `from`, and end the turn.
 
 ## When the person is away
 
-When the letter says `Person: away`, decide by recommendation. A design question the notes
+When the message says `Person: away`, decide by recommendation. A design question the notes
 do not settle is not asked (4) — settle it the way you would have recommended, and write it
 on the issue where the next person reads it
 
@@ -95,33 +45,12 @@ on the issue where the next person reads it
 
 Nothing else waits on the person either. A model the window is not on is not asked for —
 work on the window's model and say so in the reason of 9-1. A row that is someone else's or
-nobody's (rule 5) is taken over only on a yes the letter carries; without one, leave that row
+nobody's (rule 5) is taken over only on a yes the message carries; without one, leave that row
 and name it in the report.
 
 **Stop at what cannot be undone** — deleting what is not yours, rewriting history someone
 else has, a release, anything outside this repository — and report that instead of doing
 it. When the person is back in the window, what they say overrides what you decided alone.
-
-## Words per agent
-
-moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them
-are named by what they do — a step written in *italics* is a row of this table. Each agent
-types a step its own way — read your own column.
-
-| Step | Claude Code | Codex | Antigravity |
-|---|---|---|---|
-| Enter the worktree | `EnterWorktree(path)` from the root | `cd` into it and run every command there | `cd` into it and run every command there |
-| Come back to the root | `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
-| Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
-| Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
-| Change the model (the person does it) | `/model` | `/model` | — |
-| Clear the window (the person, or a supervisor on tmux) | `/clear` | `/new` | `/clear` |
-| Call a skill (the person does it) | `/<skill>` | `$<skill>` | ask for the skill by name |
-| Wake a session that sits idle (a bonus) | `moai send --wake`, or `SendMessage` when it says so | `moai send --wake` | `moai send --wake` |
-| Stop what a review left running | `TaskStop` | — | — |
-
-A `—` is a step that agent does not have, or one moai does not know yet: tell the
-person watching and go on without it.
 
 ## Before the steps
 
@@ -132,24 +61,23 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 
 **Ask it where you already are.** Before the first tracker commit you are still in the root, so
 it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
-refused there in Claude Code (the git shapes below): *Come back to the root*, ask, and if
-work is left in that worktree go back in (*Enter the worktree*)
+refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
+worktree go back in with `EnterWorktree(path)`
 
 **Git in a Claude Code worktree session: one plain command per call.** The harness reads each Bash call
 and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
-intent. The counts below were measured over one repository's transcripts on 2026-09-29 — 714
-refusals in all.
-- One command per call. `git add X && git commit …` is refused whole — 608 of those 714 were
-  compound commands (`&&`, `;`, `||`)
-- `-m "…"` on one plain command is fine; a **heredoc** message is the refusal shape (205 cases).
+intent.
+- One command per call. `git add X && git commit …` is refused whole — so is anything with
+  `&&`, `;` or `||`
+- `-m "…"` on one plain command is fine; a **heredoc** message is refused.
   When the message runs past one line, write it with Write and use `git commit -F <that file>`
 - Several git steps in a row: put them in a script file and call it as a bare
-  `bash /abs/path/script.sh` with literal arguments and nothing appended. The only script calls
-  refused had `&&`, a pipe or `$PWD` after them
-- Never build a command or a path with a variable or `$(…)` — that is the second refusal wording,
-  `computed at runtime` (119 cases)
+  `bash /abs/path/script.sh` with literal arguments and nothing appended — `&&`, a pipe or
+  `$PWD` after it is refused
+- Never build a command or a path with a variable or `$(…)` — that is refused as
+  `computed at runtime`
 - **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
-  `symbolic-ref` are refused even as single plain commands (28 cases). Root work happens after
+  `symbolic-ref` are refused even as single plain commands. Root work happens after
   ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
 - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
   commit from sealing someone's open merge, but it cannot keep it from carrying rows another
@@ -171,7 +99,7 @@ refusals in all.
    Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
    release the backlog stood in, and a milestone is inherited, so the epic alone carries it to
    every member and to the members added later in 4-3 and 7-1. Hanging the same one again
-   changes nothing. **Hang only the `<milestone>` in the letter, and nothing else**: work is
+   changes nothing. **Hang only the `<milestone>` in the message, and nothing else**: work is
    never pulled into a running release, so a release you noticed running is not yours to
    attach — not to this epic, not to a member you create later. Inside this epic the release
    is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
@@ -193,23 +121,23 @@ refusals in all.
 
        git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
-   pick-up (rule 5). Ask the person watching this window — a yes the letter already carries
+   pick-up (rule 5). Ask the person watching this window — a yes the message already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
    no leave that member and tell the supervisor
 3. Right after the commit in 2, branch from the local <base branch> with
-   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in
-   (*Enter the worktree*). The name is the unfolded epic's id, not the backlog's. Until the
-   worktree stands, the other sessions in the root read this member as their own focus.
+   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
+   `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
+   Until the worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
    it and work there — standing at the worktree top, `moai` walks up and finds the root's
    `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
-   relative path, filled in by the supervisor; if the letter carries no `Subdir:`, the root
+   relative path, filled in by the supervisor; if the message carries no `Subdir:`, the root
    **is** the top and this step does not exist
 
        cd <subdir>
-4. Do not guess a design decision that is not in the notes — ask (*Ask the person watching*);
-   a person is watching the worker's window. With `Person: away` in the letter, decide by
+4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
+   a person is watching the worker's window. With `Person: away` in the message, decide by
    recommendation instead ("When the person is away")
 
 4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
@@ -236,11 +164,11 @@ refusals in all.
    run it with a wrapper at the front of `PATH` that calls the real `tmux` by absolute path
    and inserts `-L`. Do not send keys into a pane someone else raised. If you raise a test
    agent on that server, keep its cwd outside the root (the scratchpad) — raised in the root,
-   it registers in this repository's `moai agents` beside the real workers.
-   **Give a review subagent these words too** — it was a review subagent that killed a whole server
+   it stands in `ListAgents` as a session of this repository and a supervisor takes it for a worker.
+   **Give a review subagent these words too**
 
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
-   the files named by `Work running alongside` in the letter, or files a sibling branch in
+   the files named by `Work running alongside` in the message, or files a sibling branch in
    `git worktree list` already changed
    (`git diff --name-only <base branch>...<sibling branch>`). When two of them change the
    same place, one waits for the other at the merge. If this epic cannot deliver what it
@@ -253,7 +181,7 @@ refusals in all.
    move to the next — the review looks at the whole epic once, in 7, after every member is
    finished. One review is expensive; do not call it as many times as there are members. The
    cost of member 2 piling onto a bug in member 1 is paid in that one review.
-   `low`·`medium`·`high` is the rubric the model in the letter was picked on, and the same rubric measures
+   `low`·`medium`·`high` is the rubric the model in the message was picked on, and the same rubric measures
    the members when you pick the grade in 7.
    - `low` — text, comments, a one-line fix; behaviour unchanged
    - `medium` — a behaviour change inside one file, ringed by tests
@@ -261,12 +189,9 @@ refusals in all.
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
    conflicts and run the tests. Fix things here — while the worktree stands, rule 2 blocks
    edits in the root
-7. Before merging, review the whole epic (*Review the work*) — the members were not reviewed
-   separately, so this once is the only review. In Claude Code that is
-   `/code-review <grade> --fix`. In Codex and Antigravity it is the review that session has,
-   and where it has none, read the whole diff yourself with the angle and the five places
-   below, and fix what you take in. **It runs inside this session** — never start another
-   agent program for it: `codex review`, `codex exec` and `agy -p` each start one.
+7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
+   not reviewed separately, so this once is the only review. **It runs inside this session** —
+   never start another agent program for it.
    **The grade is one step above the heaviest member's difficulty** — `medium` if the members
    are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
    **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
@@ -274,10 +199,8 @@ refusals in all.
    **A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
    `max` is the top of the ladder: a step above it is still `max`.
    The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
-   If the window is not on that model, ask the person watching it to change it
-   (*Change the model*) before you call — as in `/model opus` in Claude Code (a review agent
-   inherits the window's model). Those models are Claude Code's: in Codex and Antigravity the
-   grade still stands, and the window keeps the model its person picked.
+   If the window is not on that model, ask the person watching it to change it before you
+   call — `/model opus` (a review agent inherits the window's model).
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled it
    in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
@@ -299,13 +222,8 @@ refusals in all.
    does not exist here: leave the members where they stand and go on. If it answers that the
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
-   In Claude Code only: when the worktree's hook cannot see a review issue created or picked
-   up in the root and blocks you — a binary from before the hook moved the tracker to the root
-   reads that worktree's snapshot only — run a review subagent with the same angle, grade and
-   `--fix` scope. A subagent inherits the window's model, so pass the model for the grade
-   above in `Agent`'s `model`. Keep the review issue, the angle (`-b`), the text note and the
-   closing `-m` as they are. Any other refusal, such as a missing angle, is not worked around:
-   fix it the way the refusal's own command says
+   A refusal from the hook, such as a missing angle, is not worked around: fix it the way the
+   refusal's own command says
 
    **Five places the review keeps finding.** They do not stand in for the angle — what this
    epic actually did is the angle, and these go on top of it
@@ -322,21 +240,18 @@ refusals in all.
       it stops on a config that is a FIFO, lock or no lock
 
    **They have to reach the review itself, not only `-b`.** The angle on the issue is what the
-   next person reads; the review command does not read the issue. Going through a subagent,
-   put these five in its prompt; going through the command, hold them against what came back
-   before you take the findings in
+   next person reads; the review command does not read the issue. Hold these five against what
+   came back before you take the findings in
 
    **While the review is running, do not touch this worktree's branch or its working tree.**
    A review that fixes leaves its fixes in the working tree uncommitted, so `reset --hard`,
-   `rebase` and `commit --amend` throw them away — that has happened, told to do it by a
-   supervisor saying "it is before the merge, so it can still be fixed". Nothing blocks it;
-   this line is what holds. Fixing a commit subject waits until the review has returned.
-   **When it returns, stop what it left running before you touch the tree**
-   (*Stop what a review left running* — `TaskStop` in Claude Code) and read the working
-   tree's status. A sweep subagent still alive writes its own version into this same worktree
-   and covers a commit you already made without a word, and a `cargo test` after that
-   measures that agent's files rather than yours — that has happened too, and it also burned
-   an hour and a half in a worktree that was gone.
+   `rebase` and `commit --amend` throw them away — even when it is before the merge and
+   looks fixable. Nothing blocks it; this line is what holds. Fixing a commit subject waits
+   until the review has returned.
+   **When it returns, stop what it left running with `TaskStop` before you touch the tree**
+   and read the working tree's status. A sweep subagent still alive writes its own version
+   into this same worktree and covers a commit you already made without a word, and a
+   `cargo test` after that measures that agent's files rather than yours.
 
 7-1. Before merging, go back over the backlog parked mid-epic
    (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
@@ -374,8 +289,7 @@ refusals in all.
    point: it is a row decided out of this release.
    **Bug-level is measured with the words that already exist** — does a `#bug` tag fit, and
    can a `Regression-of:` line be written (did something already merged break). Those two are
-   inside; the rest is outside. A new axis is not made because it would become a fourth
-   vocabulary beside the column, the kind and the defer
+   inside; the rest is outside. Do not make a new tag or field for it
 
 7-3. **If the repository keeps a CHANGELOG, check that this epic's line stands in the section
    for the release being prepared**, and write it if it does not. Write it **here, in the
@@ -387,13 +301,10 @@ refusals in all.
    This window is the only one that knows what the epic did, and it is the only one that
    knows what was taken out as well as what went in — a section filled in later from commit
    subjects shows what was added and misses what was removed, because a removal stands under
-   a revert subject of its own. It is cheaper here than in the window that closes the
-   section: v0.1.1 stood with 327 commits behind it, four of which touched the CHANGELOG, and
-   three epics named in its section out of the twenty-four the release held; the rest were
-   written by the window that closed it, 91 lines in one go. The release workflow cuts that
-   section by version name and hands it to `--notes-file` as it is, so a missing section
-   reads to whoever receives it as the whole release. **Nothing checks this** — a check here
-   would be a gate, and an empty section must not stop a release
+   a revert subject of its own. The release notes are that section as it stands, so a
+   missing line reads to whoever receives them as a change that never shipped.
+   **Nothing checks this** — a check here would be a gate, and an empty section must not
+   stop a release
 
 7-4. **If the repository keeps a wiki** (`moai wiki ls` lists pages), ask once whether this
    epic changed what a person does — a key, a command, a flag, a file, a format, a procedure.
@@ -404,8 +315,8 @@ refusals in all.
     git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
    If it did not, write nothing. **Nothing checks this**
 
-8. *Come back to the root* — remove the worktree from inside it and this window stands in a
-   directory that is gone.
+8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
+   this window stands in a directory that is gone.
    Before merging, check that the root stands on <base branch> — if it does not, do not merge:
    tell the supervisor
 
@@ -418,22 +329,21 @@ refusals in all.
        git merge --no-ff worktree-<epic> -m "merge: …"
    If the root's `.moai` holds uncommitted rows from another session the merge is refused —
    take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
-   resolve it in the root — undo with `git merge --abort`, go back into the worktree
-   (*Enter the worktree*) and run again from 6
+   resolve it in the root — undo with `git merge --abort`, go back into the worktree with
+   `EnterWorktree(path)` and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
 
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
-   suggestion in the letter but the model that **actually ran** in this window. The line below
+   suggestion in the message but the model that **actually ran** in this window. The line below
    was filled in by the supervisor as a suggestion, so if you raised it, or the window was on
    a different model from the start, correct the model and the difficulty to the real ones and
    write why in the reason — the next person reads "what was put on work of this size" there.
-   It is a note, not a field: the journal is not read to compute state and derived values are
-   not stored. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
-   `anthropic`, `openai` or `google`, and the model is its real name (`opus-5`), not the
-   `/model` alias — the `<model>` the supervisor filled in is an alias (`opus`) or `—`, so
-   write the real name even if you did not change models.
+   It is a note, not a field. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
+   `anthropic`, and the model is its real name (`opus-5`), not the `/model` alias — the
+   `<model>` the supervisor filled in is an alias (`opus`), so write the real name even if you
+   did not change models.
    `<count>` is the tokens this window used. **If you do not know the token count, drop
    `tokens=<count>` whole** — do not write 0 and do not estimate. **One line per id** —
    write the same line on several ids and the tokens multiply by the number of ids. A window's
@@ -445,9 +355,9 @@ refusals in all.
     moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
 
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
-    landed** — a worker moved them before the merge and had to undo it. It closes a member
-    from `review`, where 7 stood it, and from `in_progress` where there is no `review` column
-    alike. Do not close the
+    landed** — closed before it, a merge that stops on a conflict leaves them done on work
+    that is not in. It closes a member from `review`, where 7 stood it, and from
+    `in_progress` where there is no `review` column alike. Do not close the
     members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
     the worktree still stands, the hook reads this work as a sibling worktree's and cannot
     refuse a review closed without `-m`. Close the review issue leaving what came out of it
@@ -463,39 +373,30 @@ refusals in all.
     leaves it in the shared root where someone else's commit sweeps it up. If anything is left
     (a background review, say), finish it before the note — the supervisor reads the note as
     this work being over; what you cannot finish, name in the report (12)
-12. Report with a letter to the supervisor, **last of all**. It carries the merge hash,
+12. Report to the supervisor, **last of all**, with `SendMessage(to: <supervisor>, message: …)`
+    — `report: <epic>` at its head. It carries the merge hash,
     the unfolded epic's id, a line or two of summary, what you handed on and any new backlog,
     the members reclaimed in 7-1 and left in the first column,
     the members left in 4-3 because the work beside you held the file, with that other work
     named, and the wiki pages 7-4 changed — or that it changed none — and anything still
-    running that 11 could not finish: the supervisor does not clear a window whose report
-    says so. Write it to a file outside the repository (your scratchpad, or a temporary
-    file) — nothing is held by now, so a file in the shared root is refused or left behind —
-    and send it
-
-        moai send <supervisor> 'report: <epic>' --reply-to <letter id> -b - < <report file>
+    running that 11 could not finish.
     Then **say when the window can be cleared**, in one line to the person watching. The
     context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
     commit messages. If you can see your own context usage, put that number in the line too.
     **Say the opposite in the same line** — not to clear while a review is running in the
     background, while a merge conflict is being resolved, while waiting on a person's answer,
-    or after the supervisor's next message has arrived in this window. Clearing then loses what
-    is not yet moved into the tracker, or the message that arrived.
-    Then do what `After the report:` says. With `wait again`, go back to waiting (the loop's 2)
-    — a person who wants the window cleared stops the wait, clears it (*Clear the window*) and
-    calls this skill again (*Call a skill*). With `end the turn`, end it — on tmux
-    the supervisor may check the report and clear this window itself once it sees the `Next:`
-    note stand, and then wakes it with the next letter
+    or after the supervisor's next message has arrived in this window. Clearing (`/clear`) then
+    loses what is not yet moved into the tracker, or the message that arrived.
+    Then end the turn. The supervisor's next message is the next work
 
 ## Carrying on stalled work
 
-A session died holding a member of `<epic>`, the epic the letter's first line names; that
+A session died holding a member of `<epic>`, the epic the message's first line names; that
 member still stands picked up. Read how far it got (`moai show <epic>`, its history and
 notes), then
 
-- If the worktree is there, go in (*Enter the worktree*), read how far it got with
-  `git log <base branch>..HEAD` and `git status`, and carry on. One raised before the
-  shared place stands at `.claude/worktrees/<epic>` — remove it from there in 9
+- If the worktree is there, go in with `EnterWorktree(path)`, read how far it got with
+  `git log <base branch>..HEAD` and `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
@@ -503,7 +404,7 @@ notes), then
   monorepo), go into the worktree and then move to the same subdirectory inside it and
   work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
   hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
-  by the supervisor; with no `Subdir:` in the letter, the root is the top and this step
+  by the supervisor; with no `Subdir:` in the message, the root is the top and this step
   does not exist
 
       cd <subdir>

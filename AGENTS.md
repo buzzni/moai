@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.7.0 hash:d878654a -->
+<!-- moai:begin v:0.8.0 hash:3649ec0e -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -514,33 +514,14 @@ person's other sessions and other people's work, and nothing else will.
 
 ### The supervisor and its workers
 
-`moai skill install` also plants `moai-work` and `moai-supervise`. A person calls
-`moai-work` in a window to make it a worker — it says hello, waits for a letter,
-does the work the letter hands over in a worktree, reports and waits again — and
-`moai-supervise` in one window to hand the backlog that have piled up, one at a time,
-to those workers and take their reports. Claude Code, Codex and Antigravity can
-each be either, and every one of them is a session a person opened. The supervisor
-picks, sends and checks; it does not fix and it does not merge.
-
-### Letters between agents
-
-    moai send '<agent>' '<subject>' -b -    leave a letter - one file under .moai/mail
-    moai send any-idle-worker '<subject>'   one agent takes it - not you, not a supervisor
-    moai inbox --ack                        the letters for you, marked read as they are shown
-    moai inbox --ack --wait 600             a worker waits here for its next letter
-    moai agents                             who is here - `moai hello` registers you
-
-A letter is delivery, not record: nothing goes into the tracker, so a decision still goes
-on its issue as a note. With the hooks installed you rarely run `moai inbox` — each prompt
-and the end of each turn load the letters for this session and mark them read, and an
-`any-idle-worker` letter goes, one per load, to whichever agent loads it first. A supervisor
-registers with `moai hello --role supervisor` so it never takes those. Waking is a bonus:
-`--wake` types `moai inbox` into an idle recipient's tmux pane when its row has one, a
-Claude session is woken by the sender with SendMessage, and otherwise nothing happens —
-a worker waiting on `moai inbox --wait` needs no waking, and while it waits `moai agents`
-shows it idle. A Codex shell is found by the session id Codex sets in it
-(`CODEX_THREAD_ID`); where that is missing, pass `--as <name>` — the hooks name the session
-in its first context.
+In Claude Code, `moai skill install` also plants `moai-supervise`. A person calls it in
+one window to hand the backlog that have piled up, one at a time, to the other sessions
+of this repository and take their reports. Every idle session of this repository that
+`ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
+assignment (`SendMessage`) with a line naming the file of the worker's steps to read, and
+the worker reports the same way. moai carries no messaging and never launches a session;
+every one of them is a session a person opened. The supervisor picks, sends and checks; it
+does not fix and it does not merge.
 
 ### The wiki
 

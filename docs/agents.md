@@ -5,7 +5,7 @@ approval gate: an agent creates, moves and closes work without asking, and the
 one thing it asks about is picking up work that belongs to someone else — a
 [take over](glossary.md#take-over). This page covers what makes that work — the
 instructions an agent reads, the skills and hooks planted for Claude Code, Codex
-and Antigravity, the letters agents leave each other,
+and Antigravity, the supervisor that hands work to idle Claude Code sessions,
 and the `--json` surface a session reads its queue from. The commands'
 flags are in [the CLI reference](cli.md), and the words in
 [the glossary](glossary.md).
@@ -103,53 +103,45 @@ this version's (or not moai's) — judged by the moai that file calls, the way t
 plugin is, so a different build running `status` does not ask to plant again —
 and whether `codex` and `agy` are on PATH — and exits 0 whatever it finds.
 
-**One text serves every agent.** Both trees get the same skills. The steps only
-one agent has — entering a worktree, asking the person, calling the review,
-changing the model, clearing the window, calling a skill, waking a session,
+**One text serves every agent.** Both trees get the same `moai` and `moai-wiki`
+skills. The steps only one agent has — entering a worktree, asking the person,
+calling the review, changing the model, clearing the window, calling a skill,
 stopping what a review left running — sit in a "Words per agent" table in the
-`moai`, `moai-supervise` and `moai-work` skills, one column per agent, and each
-agent reads its own; the steps name a row in *italics*. A step an agent does not
-have reads `—`: tell the person and go on.
+`moai` skill, one column per agent, and each agent reads its own. A step an agent
+does not have reads `—`: tell the person and go on. The supervisor skill, planted
+for Claude Code only, names Claude Code's tools directly.
 
-Four skills come with it:
+Three skills come with it:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
-    moai-supervise    hands piled-up backlog items to the workers waiting on the repository
     moai-wiki         keeps this wiki in step with the work
-    moai-work         makes a window a worker that waits for those backlog items
+    moai-supervise    Claude Code only: hands piled-up backlog items to the idle sessions of the repository
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
-- **`moai-supervise`** makes a session the [supervisor](glossary.md#supervisor),
-  which hands the [backlog items](glossary.md#backlog), one at a time, to the
-  [workers](glossary.md#worker) waiting on the same repository and takes their
-  reports. It picks, sends and checks; it does not fix and it does not merge
-- **`moai-work`** makes a window a worker: it waits for a supervisor's letter and
-  does the work by the numbered [brief](glossary.md#brief) the skill carries. Both
-  are in [Hand work to waiting workers](#hand-work-to-waiting-workers), and the
-  worker's way of working is on [the workflow page](workflow.md#work-in-a-worktree)
 - **`moai-wiki`** is followed by the window that did an epic, to fix the page
   that teaches what the epic changed; a person can also call it to sweep
   everything merged since the last release
+- **`moai-supervise`** makes a Claude Code session the
+  [supervisor](glossary.md#supervisor), which hands the
+  [backlog items](glossary.md#backlog), one at a time, to the
+  [workers](glossary.md#worker) idle on the same repository and takes their
+  reports. It picks, sends and checks; it does not fix and it does not merge.
+  It is planted in the Claude plugin only, since it talks through Claude Code's
+  own messaging — [Hand work to idle sessions](#hand-work-to-idle-sessions).
+  The worker's way of working is on
+  [the workflow page](workflow.md#work-in-a-worktree)
 
 ## Open a session for each agent
 
-The supervisor and its workers are sessions a person opened. moai never starts
-one, and nothing runs headless. Open each one interactively in the root of the
-main checkout, after `moai skill install` planted that agent's skills and hooks.
-Each session asks its person before it acts, the way it always does — none is
-opened in a mode that skips the asking.
+moai never starts a session, and nothing runs headless. Open each one
+interactively in the root of the main checkout, after `moai skill install`
+planted that agent's skills and hooks. Each session asks its person before it
+acts, the way it always does — none is opened in a mode that skips the asking.
 
-The root, not a worktree: a worker goes into its own worktree under
+The root, not a worktree: a session goes into its own worktree under
 `.worktrees/` by itself, and that directory sits inside the root, so whatever
 the root was given — Codex's trust, Antigravity's workspace — covers it too.
-
-A window becomes a worker when its person calls the `moai-work` skill once. It
-then says `moai hello --role worker` and waits with `moai inbox --ack --wait`;
-the supervisor finds it with `moai agents --role worker --status idle` and
-hands it work with `moai send`. [Hand work to waiting
-workers](#hand-work-to-waiting-workers) has the whole round. Nobody needs tmux:
-a worker that waits needs no waking, and waking is a bonus.
 
 | | Claude Code | Codex | Antigravity |
 |---|---|---|---|
@@ -157,28 +149,15 @@ a worker that waits needs no waking, and waking is a bonus.
 | Plant | `moai skill install` | `moai skill install --agent codex` | `moai skill install --agent antigravity` |
 | Skills | the plugin in `.claude/moai-plugin/` | `.agents/skills/` | `.agents/skills/` |
 | Hooks | in the plugin | `.codex/hooks.json`, trusted once in `/hooks` | `.agents/hooks.json` |
-| Make it a worker | `/moai-work` | `$moai-work` | ask for `moai-work` by name |
-| Waking | `SendMessage` from a Claude session | none — it waits | its tmux pane, when it has one |
+| Supervisor | `/moai-supervise` | none | none |
 
 ### Claude Code
 
     claude
 
 - **Open it the ordinary way**, not with `--dangerously-skip-permissions`
-- **The plugin's hooks register it** when the session starts, under the name
-  Claude Code shows for it — the name another Claude session's `SendMessage`
-  uses — with a piece of its session id appended when another row holds that
-  name ([below](#when-it-goes-wrong)). `/moai-work` keeps that name and adds the
-  role
-- **`/clear` keeps the row.** The same process takes it up again with its new
-  session, name and role included, so a worker cleared between tasks calls
-  `/moai-work` again and is the same worker
 - **A session opened before the install** keeps the hooks it started with —
   older ones, or none — until it is reopened
-- **Waking**: `moai send --wake` never types into a Claude window. It prints a
-  line telling the sender to wake it with `SendMessage`, which only a Claude
-  session can send — and when Claude Code calls the session by a name other
-  than its row's, that line names the one `SendMessage` reaches
 
 ### Codex
 
@@ -191,23 +170,7 @@ a worker that waits needs no waking, and waking is a bonus.
   rules are words only. Codex keeps that trust per handler, by a hash of each
   one, so after an install that changed some of them the handlers it left alone
   keep running and the changed ones stop until you trust them again — nothing
-  says so, and `moai skill status` does not see the trust. With `Stop`,
-  `Interrupt` and `SessionEnd` the ones left untrusted, `moai agents` shows the
-  session `busy` after its turn ends until 20 quiet minutes turn it `gone`, and
-  keeps its row for a day after it closes
-- **Make it a worker** with `$moai-work`
-- **moai finds it by its session id.** Codex runs every session's shell from
-  one shared `codex app-server`, so `moai` cannot tell sessions apart by their
-  processes. Codex sets the session's id in that shell (`CODEX_THREAD_ID`), and
-  `moai hello`, `moai inbox` and `moai send` find the session's row by it — the
-  one its hooks wrote (`codex-` and the first eight characters of that id). A
-  Codex that does not set it makes `moai hello` stop and say so: then pass
-  `--as` with the row's name, which the hooks give in the session's first
-  context — `moai hello --role worker --as codex-01a107b4` — and the same `--as`
-  to every `moai inbox` and `moai send`
-- **Waking**: nothing is meant to wake a Codex window. Its row carries no tmux
-  pane, so a worker gets its letters by waiting on `moai inbox --ack --wait`, and
-  `--wake` passes it over
+  says so, and `moai skill status` does not see the trust
 
 **Keep the sandbox where it stands.** Codex runs commands in a sandbox of its
 own, and a machine where that works keeps it. `codex sandbox -- true` tells you:
@@ -225,17 +188,6 @@ would run with the sandbox off, and the question does not say so.
 `.codex/hooks.json` in the same directory is committed — the two part ways
 there. Only the sandbox goes: the approval setting is left at Codex's default.
 
-**One row per Codex window.** Because the window says hello on the row its
-hooks wrote, the two are one: its role is on the row its hooks read, so a Codex
-supervisor's own turn end never takes an `any-idle-worker` letter, and two Codex
-windows on one machine keep a row each. Its hooks mark the row alive at every
-prompt, turn end and tool call, and so does a worker's `moai inbox --wait` while
-it waits. A row nothing marked for 20 minutes reads `gone` in `moai agents` —
-`--status idle` and `--wake` pass it over, so a supervisor sends no work to a
-window that died — but it stays, role and name included, and a session that
-comes back picks it up as it was. After a day it is swept; the letters to it
-stay, for that session to read if it comes back.
-
 ### Antigravity
 
     agy
@@ -243,15 +195,9 @@ stay, for that session to read if it comes back.
 - **Open it the ordinary way**, not with `--dangerously-skip-permissions`. It
   asks its person before a command, like the other two
 - **Pick the model as you open it** (`agy --model <model>`). The skills have no
-  step for changing it later, so a supervisor's letter to an Antigravity worker
-  leaves the model to you
+  step for changing it later
 - **Its hooks are `.agents/hooks.json`.** Antigravity has no session start and
-  no prompt event, so the session first shows in `moai agents` once its first
-  turn reaches the model — until then a supervisor cannot see it
-- **Make it a worker** by asking it for the `moai-work` skill by name
-- **Waking**: inside tmux, `moai send --wake` types `moai inbox` into its pane
-  while it sits idle. Outside tmux nothing wakes it, and a worker gets its
-  letters by waiting
+  no prompt event, so the first model call of a turn stands in for both
 
 ## What the hooks do
 
@@ -260,11 +206,10 @@ The hooks catch the same few places in each agent's session. Each calls
 
 | When | What happens |
 |---|---|
-| The session starts | A baseline of the warnings is written and the session's [presence](glossary.md#presence) row is written, idle. After a compaction, what the session was holding is loaded back into it, with any [letters](glossary.md#letter) for it, and busy or idle stays as it was |
-| A person sends a prompt | The `moai status` board is loaded, once per session. The letters for the session are loaded every time, and it is marked busy |
-| Before a tool call | The five rules below are checked, and a subagent is kept from taking its parent's letters ([below](#leave-each-other-letters)); the mailbox is not opened. The session's row is marked as still alive, at most once a minute — a row another machine reads is told by that mark alone |
-| The turn ends | Letters for the session hold the turn first — not the ones it sent itself, which the next prompt loads. Then, if the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. That question fits the same room a letter gets there: open reviews tied to the held work, and held rows that would close their epic if deferred, get the room first; the other held rows fill what is left from the top, those that do not fit are left out whole, and one more line counts them and names `moai prime`, which lists everything held. A turn that ends is marked idle |
-| A turn ends without that | An API error (Claude, or an Antigravity run that stopped on one), an interrupt (Codex) or the session closing marks it idle and loads nothing — a Codex session that closes has its row taken away instead |
+| The session starts | A baseline of the warnings is written. After a compaction, what the session was holding is loaded back into it |
+| A person sends a prompt | The `moai status` board is loaded, once per session |
+| Before a tool call | The five rules below are checked |
+| The turn ends | If the session still holds work, the turn is held once and asks for a [`Next:` note](glossary.md#next-note) for whoever comes after; it is also held when the [warnings](glossary.md#warning) grew. That question has a fixed room: open reviews tied to the held work, and held rows that would close their epic if deferred, get it first; the other held rows fill what is left from the top, those that do not fit are left out whole, and one more line counts them and names `moai prime`, which lists everything held |
 
 **The hook never fails the session.** Whatever goes wrong inside it, it exits 0,
 and the only thing it refuses is the one tool call that broke a rule. A person
@@ -276,19 +221,11 @@ whose they are (`--dialect`), and what differs is only what goes in and out:
 - **Codex** sends hooks only for its shell, `apply_patch` and MCP calls — a
   patch is checked file by file, whether it came through the `apply_patch` tool
   or was typed as `apply_patch <<'EOF'` in the shell, and one file that breaks a
-  rule refuses the patch. Its hooks run from a daemon its sessions share, so a
-  Codex session's presence row follows its session id, carries no tmux pane to
-  wake, and goes away when the session ends. `moai agents` cannot tell by its
-  process whether it still runs, so its hooks and its waits mark it alive: a
-  row nothing marked for 20 minutes reads `gone`, and after a day it is swept
-  — a Codex session killed before its end no longer passes for a live one
+  rule refuses the patch
 - **Antigravity** has no prompt event, so the first model call of each turn
-  loads the board and the letters; it has no session start either, so the
-  baseline is written there too. A line the rules only add to a tool call —
-  fork 1's second question, say — has nowhere to stand in its answer and is
-  not shown
-- **Esc sends no hook** in Claude or Antigravity: a turn broken off that way
-  leaves the session busy until its next prompt
+  loads the board; it has no session start either, so the baseline is written
+  there too. A line the rules only add to a tool call — fork 1's second
+  question, say — has nowhere to stand in its answer and is not shown
 
 **Where no hook stands, the rules are words only** — an agent without them,
 Codex before the trust in `/hooks`, a tool call that sends none. Nothing is
@@ -330,160 +267,62 @@ gets through — run it as given. None of them waits on a person except rule 5.
 `git config`. When none of them says, a write stops and asks for one — reads
 never ask — and rule 5 sets nothing apart.
 
-## Leave each other letters
+## Hand work to idle sessions
 
-Agents talk through a mailbox under `.moai/` — a [letter](glossary.md#letter) is
-one file in its recipient's box (`.moai/mail/<name>/`, and
-`.moai/mail/any-idle-worker/`), and who is around is one
-[presence](glossary.md#presence) file per agent.
+moai carries no messaging between agents. The supervisor is a Claude Code
+session, and it talks to the others with Claude Code's own tools — `ListAgents`
+to see who is here, `SendMessage` to hand over work and to report back. Codex
+and Antigravity have no supervisor; their sessions pick their own work with
+`moai ready`.
 
-    moai hello --role worker                 register this agent (the hooks do it too)
-    moai agents                              who is here, busy or idle; sweeps the gone and old read letters
-    moai agents --role worker --status idle  the workers waiting for work
-    moai send <agent> '<subject>' -b -       leave a letter, the body from stdin
-    moai send any-idle-worker '<subject>'    one agent takes it, not you or a supervisor
-    moai inbox --ack                         the letters for you, marked read
-    moai inbox <id>                          one letter, read or not
-    moai inbox <id> --from <n>               the next page of a long one
-    moai inbox --ack --wait 600              wait up to ten minutes for one
-
-- **A letter is delivery, not record.** Nothing goes into `issues.jsonl` or the
-  journal; a decision still goes on its issue as a note, and a report names the
-  issue it is about. The mailbox follows the tracker into the main checkout, so
-  every session of a repository — in any worktree — sees one mailbox, and
-  `moai init` keeps both directories out of git. Like every other file the
-  repository holds, the mailbox and the presence rows follow a link only inside
-  the checkout ([When it goes wrong](#when-it-goes-wrong))
-- **Names are what you send to.** A Claude session is registered by its hooks
-  under the name Claude Code shows for it (the one `SendMessage` uses); a Codex
-  or Antigravity session as `codex-` or `antigravity-` and the first eight
-  characters of its session id. When another row holds that name, a piece of
-  the session id is appended, and that longer name is the one to send to
-  ([When it goes wrong](#when-it-goes-wrong)) — `moai agents` lists it.
-  `moai hello --name` picks another. A name is letters, digits, `.`, `_` and `-`.
-  `moai send` and `moai inbox` know who you are from `--as`, `MOAI_AGENT`, or the
-  registered agent they run under. A window that sets `MOAI_AGENT` is registered
-  under that name by its hooks and by `moai hello` alike — but `moai hello --pid`
-  and `--as` name another window's row, so they leave it out. A Codex session is
-  found by the session id Codex sets in its shell ([Codex](#codex)), never by
-  `MOAI_AGENT`: its shell and its hooks carry the environment of the app-server
-  all its sessions share
-- **`any-idle-worker`** is a recipient, not a name: the first agent that is
-  neither the sender nor registered as a `supervisor` (`moai hello --role
-  supervisor`) to take the letter keeps it. A hook takes one such letter per
-  load, and so does one `moai inbox --ack`, so several of them spread over
-  several agents; an `--ack` that tried in the same moment is told it was taken
-- **A letter to an agent that left comes back.** When a session goes away
-  before reading what was sent to it — `moai agents` sweeps its row because its
-  process is gone or because it is another machine's row nothing marked for a
-  day, a new session takes over its name, or a Codex session ends —
-  the unread letters go back to their senders and show as returned (`--json`:
-  `"returned":true`, with `to` still naming who left). Whether to send the work
-  on to someone else is the sender's call. A letter sent to a name nobody holds
-  yet waits for the first agent that takes it, and `moai hello --name` carries an
-  agent's letters to its new name
-- **A subagent leaves the mailbox to its parent.** A Claude Code subagent runs its
-  shell under the parent session's process, so `moai` cannot tell the two apart:
-  its `moai inbox --ack` would take the parent's letters and its `moai hello`
-  would rename the parent. The hook refuses those two in a subagent's tool call
-  unless they carry `--as`; looking with a bare `moai inbox` and sending pass.
-  Codex and Antigravity do not say which calls are a subagent's, so there it is
-  words only
-- **The hooks deliver.** With the hooks installed an agent rarely runs
-  `moai inbox`: each prompt and each turn's end load the letters for that session
-  and mark them read — `moai inbox <id>` shows one again and `moai inbox --all`
-  all of them, until `moai agents` sweeps them, a week after they were read
-  (`mail_read_days` in `.moai/config.toml`; `0` keeps them). A letter nobody has
-  read is never swept. One load stays inside the 10,000 characters Claude Code
-  carries per hook — the board included, on the first prompt — and says how
-  many still wait, naming the next one for `moai inbox <id> --ack`; a letter too
-  long for that is cut there, naming `moai inbox <id> --from <n>` for the rest
-  of it. A Codex turn's end carries less: Codex holds the text that keeps a
-  turn going to its default of about 2,500 tokens, which
-  `additionalContextLimit` does not raise, so there one load stays within
-  8,000 bytes, the lines around the letter included — a letter of about 2,400
-  Korean characters or 7,000 English ones still arrives whole. A letter's body
-  holds up to 64 KB, its subject 200 characters
-- **One long letter comes a page at a time.** `moai inbox <id>` stops a body
-  at about 24 KB and its last line names `moai inbox <id> --from <n>` for the
-  next part — run that line as it is until no such line ends the output.
-  Each page stays under an agent's own output cap (30,000 characters in Claude
-  Code, 10,000 tokens in Codex): past it, Codex drops the middle of what a
-  command printed and Claude Code sets it aside in a file, and the letter is
-  read by then. `<n>` counts the characters of the body as shown, from 0, and a hook's
-  cut names the same count, so the page picks up exactly where the cut fell.
-  `--json` is a record, not a page: it gives the whole letter, `--from` or not
-- **A worker waits for its letters.** `moai inbox --ack --wait` at the end of
-  each task is how a worker session — one a person opened — gets its next one;
-  nothing has to wake it. While it waits its row reads idle, and once a letter
-  comes, busy — a wait that runs out leaves it idle. That is what
-  `moai agents --status idle` finds: a worker waits inside its turn, where no
-  hook marks it
-- **Waking is a bonus.** `moai send --wake` knocks once on an idle recipient:
-  when its presence row carries a tmux pane, `moai inbox` is typed into that
-  pane; a Claude session cannot be woken from a command line, so the sender
-  wakes it with `SendMessage`, as the printed line says. With neither, nothing
-  happens and nothing is said — not everyone runs tmux. moai never runs an
-  agent's own program to wake it. An agent at work is left alone, and the line
-  says since when it has been at work — a turn broken off with Esc sends no
-  hook, so a session can look busy while it waits for its next prompt
-
-Every one of these takes `--json`. `moai inbox --json` gives `me`, the `letters`
-(each with `id`, `read` and `returned` besides the letter's own keys) and
-`lost` — the ids another agent took first.
-
-## Hand work to waiting workers
-
-The supervisor and its workers are sessions a person opened — Claude Code, Codex
-or Antigravity in any mix, any of them in either role. moai never launches one or
-runs one headless, and nobody needs tmux.
-
-1. **Make the workers.** In each window that should take work, call the
-   `moai-work` skill once (`/moai-work` in Claude Code, `$moai-work` in Codex,
-   by name in Antigravity). The window says `moai hello --role worker` and waits
-   with `moai inbox --ack --wait`. Each wait that runs out costs one short turn of
-   tokens before it waits again
-2. **Make the supervisor.** In one window, call `moai-supervise`. It says
-   `moai hello --role supervisor`, picks backlog items that do not collide with the work
-   open, finds the waiting workers with `moai agents --role worker --status idle`
-   and sends each one backlog as a letter
-3. **The letter carries the assignment only** — the backlog, the model and
-   difficulty picked for it, the work running alongside, the base branch, the
-   milestone, the root, whether to wait again or end the turn after the report,
-   and whether the person is away. The steps are in the worker's skill
+1. **Open the sessions.** Every Claude Code session a person opened in the
+   repository's root on this machine that sits idle in `ListAgents` is a
+   [worker](glossary.md#worker) — a Remote Control or cloud session cannot read
+   the steps file the supervisor names. `ListAgents` shows no directory, so the
+   supervisor knows a session of this repository by its name, which Claude Code
+   takes from the directory it was opened in (`moa-issue-bc` for `moa-issue`) —
+   a session you renamed is not counted. Nothing registers it, and
+   nobody is asked which ones
+2. **Make the supervisor.** In one of them, call `/moai-supervise`. It picks
+   backlog items that do not collide with the work open, and finds the workers
+   in `ListAgents`: every idle session of this repository except itself
+3. **The message carries the assignment and names the steps.** `SendMessage` to
+   the worker opens with a line naming the work and telling it to read the
+   [brief](glossary.md#brief) — the worker's numbered steps, a file of the
+   supervisor skill (`references/worker.md`) given by its absolute path — and
+   from which step to follow it. The worker is a session of the same repository
+   and loaded the same plugin, so the file is there for it. The lines after that
+   fill this assignment — the backlog, the model and difficulty picked for it,
+   the work running alongside, the base branch, the milestone, the root and
+   whether the person is away. The supervisor
+   sends it with `notify_when_idle` and waits for the report; it does not poll
+   `ListAgents`
 4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
    picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
-   reviewed inside its own session, merges, closes, leaves a `Next:` note and,
-   last of all, reports with `moai send`
+   reviewed with `/code-review` inside its own session, merges, closes, leaves a
+   `Next:` note and, last of all, reports with `SendMessage` to the supervisor
+   that sent the work. Then it tells its person whether the window can be
+   cleared now, and ends its turn; the next message wakes it
 5. **The supervisor checks the report** — the merge is on the base branch, the
-   epic is done, the worktree is gone — and sends the next backlog
+   epic is done, the worktree is gone — and sends the next backlog item
 
-**The review runs inside the worker's own session** — `/code-review` in Claude
-Code, the review the session has in Codex and Antigravity, or the worker reading
-the diff itself. It never starts another agent (`codex review`, `codex exec`,
-`agy -p`).
+**The review runs inside the worker's own session.** It never starts another
+agent program for it.
 
-**Clearing a window is the person's, or the supervisor's on tmux.** A worker
-loaded with one epic's conversation may be cleared between tasks: stop the wait,
-clear it (`/clear`, `/new` in Codex) and call `moai-work` again — the context
-lives in the tracker. A supervisor running inside tmux — any vendor — clears a
-Claude Code worker's window itself once the report checks out: it reads the input
-box first so a person's half-typed text is copied out, never typed over, and the
-letter told that worker to end its turn instead of waiting. Once the clear went
-through it sends the next letter and types `moai inbox` into the emptied box, and
-the hooks load the letter. Codex and Antigravity windows are left to the person —
-their input box is not read yet — and so is a window on another machine sharing
-this repository (its row in `moai agents --json` reads `here: false`): its pane
-and its pid mean something only there, and that worker is told to wait again
-instead.
+**Clearing a window is the person's.** The context lives in the tracker, so a
+worker may be cleared (`/clear`) between tasks — its report says when that is
+safe and when it is not. The supervisor never types into a window.
 
-**A worker that reads `gone` may still be working.** A worker on another machine
-or in Codex is told alive only by what its hooks and waits mark, so 20 quiet
-minutes — a window resting while its person answers a question, say — read
-`gone`. The supervisor does not hand such a worker's worktree to someone else
-until you say that window has ended.
+**What the messages do not do.** A session in a different permission mode
+keeps an incoming message for its person's approval; a subagent's message goes
+out under its parent session's address; an `@path` in a message attaches
+nothing, so the message names the steps file by its absolute path and the
+worker reads it.
 
-**When the person steps away**, they tell the supervisor, and the letters say
+**Stalled work** — a member picked up with no live session working it — the
+supervisor tells apart by the busy and idle rows of `ListAgents`.
+
+**When the person steps away**, they tell the supervisor, and its messages say
 `Person: away`. The worker then settles a design question by its own
 recommendation and leaves `Decided alone: …` on the issue instead of waiting,
 and stops at anything that cannot be undone.
@@ -518,17 +357,10 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   command the refusal hands over. Do not stop to ask a person unless it is rule 5
 - **The rules do not seem to stand.** `moai skill status` says whether the plugin
   is registered and whether the binary the hook calls still runs. A session opened
-  before the install keeps the old hook until it is reopened. The plugin hooks
-  `StopFailure`, which Claude Code knows from 2.1.78 — an older `claude` refuses
-  the plugin's hooks as a whole, so update it
+  before the install keeps the old hook until it is reopened
 - **Codex runs none of moai's hooks.** Codex has not been told to trust them —
   open `/hooks` in a codex session in the repository and trust them. An install
   that changed them asks for that trust again
-- **A Codex session reads `busy` long after its turn ended.** An install changed
-  some of moai's hooks and only those went untrusted — Codex keeps the trust per
-  handler, so the rest run and nothing says so. With `Stop` among them the row
-  stays `busy` until 20 quiet minutes turn it `gone`, and a closed session's row
-  stays for a day. Trust them again in `/hooks` ([Codex](#codex))
 - **`skill install` says a hooks file is not moai's.** It holds hooks someone
   else wrote, and moai will not overwrite them. Merge moai's entries into it by
   hand, or move it aside and install again
@@ -555,86 +387,17 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **The agent keeps writing into a worktree's `.moai/`.** It does not need to: a
   `moai` run inside a linked worktree writes the main checkout's tracker by itself.
   See [the workflow page](workflow.md)
-- **The supervisor finds no worker.** `moai agents --role worker --status idle`
-  lists only windows where a person called `moai-work` and whose row reads idle.
-  A session the hooks registered has no role until it says hello as a worker; a
-  worker busy on its person's work reads busy
-- **A worker never answers.** A letter waits in `.moai/mail/<worker>/` until that
-  worker waits again or its hooks load it — `moai inbox --all --as <worker>` shows
-  what it has. A row reads idle while its window waits, but also once a turn ended
-  without waiting again (its person stopped the wait, or cleared the window); a
-  letter sent then sits until that window's next prompt. Without hooks or tmux
-  nothing wakes a window that is not waiting
-- **A letter came back marked returned.** The agent it was for went away
-  before reading it. Send the work on to another agent if it still needs doing
-- **A letter read last week is gone from `moai inbox --all`.** `moai agents`
-  swept it — read letters stay for `mail_read_days` after they were read (7
-  unless `.moai/config.toml` says otherwise). Raise the number, or set `0` to
-  keep them for good
-- **`moai hello`, `moai send` or `moai inbox` names `.moai/agents` or
-  `.moai/mail` and says it "points at … outside".** That directory — or a box,
-  or a box's `read/` — is a link that leaves the checkout (or lands in `.git`),
-  most often one committed in a repository you received. moai neither writes
-  nor reads through it: the write stops with `broken`, `moai agents` and
-  `moai inbox` name it, and the hooks quietly do nothing for that session.
-  `moai inbox --wait` comes back at once instead of waiting, since waiting will
-  not open it — a worker or the supervisor stops there and tells you rather than
-  waiting again. Replace the link with a real directory
-- **`moai agents` shows a pid as `<pid>@<host>`.** That row was written on
-  another machine — another container sharing this repository, or this
-  container before it was started again — and its pid is that machine's, not one
-  to look for or kill here. Such a row is never swept for its pid: it reads
-  `gone` once nothing has marked it for 20 minutes, and after a day it is swept
-  and its unread letters go back to their senders. Nothing wakes or clears it
-  from here — its tmux and its Claude session are on that machine, and
-  `moai agents --json` says so with `here: false` — and a wait here never
-  marks it alive, so a window that sets the same `MOAI_AGENT` after a restart
-  gets the name back once the old row reads `gone`. A session resumed here
-  (`claude --resume`) takes its row back by its session id — its hooks do, and
-  so does `moai hello` in a window opened without them — and the row moves to
-  this machine with its name and role. A row whose process still runs here
-  stays with that process — the same session open in a second window does not
-  take it over. A machine whose clock runs ahead marks its rows in the future, and that
-  counts as far as it is ahead, from the nearer of the times a row was last
-  marked and last changed status: up to 20 minutes ahead reads alive, further
-  ahead reads `gone`, and more than a day ahead is swept at once — and as this
-  clock passes those times the row reads alive again within 20 minutes of them,
-  a dead one included
-- **A new session came up as `<name>-<eight characters>`.** Another row holds
-  that name — a live one here, or one from another machine. A name the tools
-  made up — a Claude session name, which each container counts on its own,
-  `<vendor>-` and eight characters of the session id, or `moai hello`'s
-  `<vendor>-<pid>` — stays with another machine's row for a day after that row
-  went quiet, even while it reads `gone`: a Claude session resting at its
-  prompt marks nothing, and taking its name would send that live session's
-  letters back. A `moai hello` that has to make the name up refuses it instead
-  and shows the row's `<pid>@<host>` (in Codex it appends the piece, as the
-  hooks do). When that longer name is held too, the whole session id goes on,
-  and past that a number (`<name>-<eight characters>-2`), so a session always
-  gets a row. Claude Code still calls the session by its own name, so
-  `SendMessage` reaches it by that name, not by `<name>-<eight characters>` —
-  `moai send --wake` names it, read from Claude's own session file as it wakes,
-  so the line it prints is the one to follow. It reads that file where the
-  sender's Claude keeps its own, so a session run under another
-  `CLAUDE_CONFIG_DIR` is named by its row instead. A name you ask for —
-  `MOAI_AGENT`, `moai hello --name` — is yours again once the old row reads
-  `gone`, which is how a window started again in a new container gets its name
-  back. Asking for another session's made-up name the same way takes its row
-  over and sends its unread letters back, so do it only for a session you know
-  has ended
-- **`moai hello` in Codex says it cannot tell which session this is.** That
-  Codex set no `CODEX_THREAD_ID` in its shell. Pass `--as` with the row its hooks
-  gave the session — the name in its first context, also in `moai agents` as
-  `codex-` and eight characters — and `--name` beside it to rename that row.
-  `--name` alone writes a second row the hooks never read, so a supervisor's own
-  turn end would take its `any-idle-worker` letters; it is only for a Codex whose
-  hooks do not run
-- **A subagent's `moai inbox --ack` or `moai hello` was refused.** It would have
-  taken its parent session's letters or rewritten its row. Leave the mailbox to
-  the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
-  and `moai send` — a subagent does not say `moai hello`
+- **The supervisor finds no worker.** It counts only Claude Code sessions of
+  this repository that read idle in `ListAgents` — by name: a session opened
+  outside the root, or renamed, does not start with the repository's directory
+  name. A session busy on its person's
+  work is not one, nor is a Remote Control or cloud session, and Codex and
+  Antigravity sessions never show there
+- **A worker never answers.** Its session may run in another permission mode,
+  where an incoming message waits for its person's approval — look at that
+  window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm
 
 ## Archive storage
 
