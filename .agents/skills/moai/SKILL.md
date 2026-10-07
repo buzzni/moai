@@ -197,9 +197,9 @@ person's other sessions and other people's work, and nothing else will.
 
 ## Words per agent
 
-moai plants the same skills for Claude Code, Codex and Antigravity, so the steps in them
-are named by what they do — a step written in *italics* is a row of this table. Each agent
-types a step its own way — read your own column.
+moai plants this skill for Claude Code, Codex and Antigravity alike, so a step that differs
+per agent is named by what it does — each row of this table is one. Each agent types a step
+its own way — read your own column.
 
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
@@ -208,9 +208,8 @@ types a step its own way — read your own column.
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |
-| Clear the window (the person, or a supervisor on tmux) | `/clear` | `/new` | `/clear` |
+| Clear the window (the person does it) | `/clear` | `/new` | `/clear` |
 | Call a skill (the person does it) | `/<skill>` | `$<skill>` | ask for the skill by name |
-| Wake a session that sits idle (a bonus) | `moai send --wake`, or `SendMessage` when it says so | `moai send --wake` | `moai send --wake` |
 | Stop what a review left running | `TaskStop` | — | — |
 
 A `—` is a step that agent does not have, or one moai does not know yet: tell the

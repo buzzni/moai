@@ -18378,9 +18378,11 @@ fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
 
     let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
     assert!(out.status.success(), "{}", text(&out));
-    for skill in ["moai/SKILL.md", "moai/references/commands.md", "moai-supervise/SKILL.md", "moai-wiki/SKILL.md"] {
+    for skill in ["moai/SKILL.md", "moai/references/commands.md", "moai-wiki/SKILL.md"] {
         assert!(shared.join(skill).is_file(), "{skill} 를 안 심었다\n{}", text(&out));
     }
+    // 감독 스킬은 Claude Code 에만 선다(moai-obxm) — 그 글은 Codex 에 없는 ListAgents·SendMessage 로 말한다.
+    assert!(!shared.join("moai-supervise").exists(), "Codex 의 자리에 감독 스킬을 심었다");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
     assert!(!s.path().join(".claude/moai-plugin").exists(), "고르지 않은 Claude 의 트리를 심었다");
 
@@ -18400,7 +18402,8 @@ fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
 }
 
 /// **두 트리는 같은 글을 받는다**(사용자 결정 2026-10-04) — 에이전트마다 다른 걸음은 글 안의 낱말표가 열로 가른다.
-/// 되풀이한 `--agent` 는 하나로 접히고, Codex 와 Antigravity 는 한 자리를 함께 쓴다.
+/// 되풀이한 `--agent` 는 하나로 접히고, Codex 와 Antigravity 는 한 자리를 함께 쓴다. 감독 스킬만 Claude 의 트리에
+/// 선다(moai-obxm).
 #[test]
 fn skill_install_plants_one_text_for_every_agent() {
     let s = init("skillevery");
@@ -18409,11 +18412,16 @@ fn skill_install_plants_one_text_for_every_agent() {
         ["skill", "install", "--agent", "codex", "--agent", "claude", "--agent", "antigravity", "--agent", "codex"];
     let out = c.run(s.path(), &args, true);
     assert!(out.status.success(), "{}", text(&out));
-    for skill in ["moai/SKILL.md", "moai-supervise/SKILL.md", "moai-wiki/SKILL.md"] {
+    for skill in ["moai/SKILL.md", "moai-wiki/SKILL.md"] {
         let claude = std::fs::read_to_string(s.path().join(".claude/moai-plugin/skills").join(skill)).unwrap();
         let shared = std::fs::read_to_string(s.path().join(".agents/skills").join(skill)).unwrap();
         assert_eq!(claude, shared, "{skill} 가 두 트리에서 다르다");
     }
+    let supervisor = s.path().join(".claude/moai-plugin/skills/moai-supervise");
+    for file in ["SKILL.md", "references/worker.md"] {
+        assert!(supervisor.join(file).is_file(), "Claude 의 트리에 감독의 {file} 가 없다");
+    }
+    assert!(!s.path().join(".agents/skills/moai-supervise").exists(), ".agents 에 감독 스킬을 심었다");
     assert!(c.calls().contains("plugin install"), "claude 를 골랐는데 등록을 안 했다\n{}", c.calls());
     let mut json_args = args.to_vec();
     json_args.extend(["--dry-run", "--json"]);
@@ -18539,17 +18547,19 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true);
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
-    for name in ["moai", "moai-supervise", "moai-wiki", "moai-work"] {
+    for name in ["moai", "moai-wiki"] {
         assert!(said.contains(&format!("rm -r {}", shared.join(name).display())), "{name} 을 안 댄다\n{said}");
         assert!(shared.join(name).join("SKILL.md").is_file(), "{name} 을 지웠다");
     }
+    // 심지 않은 감독 스킬은 대지 않는다 — 없는 자리를 `rm -r` 로 대면 사람이 무엇이 있는지 헛갈린다.
+    assert!(!said.contains(&shared.join("moai-supervise").display().to_string()), "심지 않은 감독 스킬을 댄다\n{said}");
     assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
 
     let json =
         String::from_utf8(c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--json"], true).stdout).unwrap();
     one_json_value(&json);
-    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(4), "{json}");
+    assert_eq!(list_in(&json, "agents_left").map(|l| l.len()), Some(2), "{json}");
 
     let said = text(&c.run(s.path(), &["skill", "uninstall"], true));
     assert!(said.contains("걷어낼 것이 없다"), "{said}");

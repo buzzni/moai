@@ -20,6 +20,15 @@ does not tag — see `CONTRIBUTING.md`.
   release `moai hook stop-failure`, `interrupt` and `session-end` stay as
   commands that do nothing, so hooks planted before 0.9 do not print an error.
   (moai-5uwh)
+- **`moai-supervise` is planted for Claude Code only, and talks through Claude
+  Code's own `ListAgents` and `SendMessage`.** It finds the idle sessions of the
+  repository there, sends each one its assignment with a line telling it to
+  read the worker's steps (`references/worker.md`, by absolute path), and takes
+  the report back the same way. It
+  no longer says hello, sends letters or waits on `moai inbox`, and it no longer
+  clears a worker's tmux pane — clearing a window is the person's, and the
+  worker's report says when it is safe. `moai skill install --agent codex` or
+  `antigravity` no longer plants it in `.agents/skills/`. (moai-obxm)
 - **`moai init` no longer writes the `.moai/mail/` and `.moai/agents/` lines
   into `.gitignore`**, and no longer looks for them. Lines an earlier `init`
   wrote stay where they are, and so do the directories — each holds its own
@@ -44,6 +53,10 @@ does not tag — see `CONTRIBUTING.md`.
   left behind (`.moai/mail/`, `.moai/agents/`) are ignored and left as they
   are. A `mail_read_days` key in `.moai/config.toml` is now ignored without a
   word. (moai-5uwh)
+- **The worker skill `moai-work` is gone.** A window no longer becomes a worker
+  by calling a skill and waiting for letters: every idle Claude Code session of
+  the repository is a worker, and the supervisor's message carries the
+  assignment and names the file of the worker's steps for it to read. (moai-obxm)
 
 ## [0.8.0] - 2026-10-07
 
