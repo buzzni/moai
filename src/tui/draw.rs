@@ -1732,8 +1732,9 @@ fn banner(app: &App) -> Option<(String, bool)> {
         parts.push(fill(say(lang, "tui.banner.let_go"), &[("n", &app.let_go.to_string())]));
         urgent = true;
     }
-    if !app.site.unreadable.is_empty() {
-        parts.push(fill(say(lang, "tui.banner.unreadable"), &[("n", &app.site.unreadable.len().to_string())]));
+    // **산 줄만 센다**(moai-e18s) — 아카이브 파일의 못 읽는 줄은 `moai status` 처럼 경고(`archive_unreadable`)로 선다.
+    if app.site.unreadable_live > 0 {
+        parts.push(fill(say(lang, "tui.banner.unreadable"), &[("n", &app.site.unreadable_live.to_string())]));
         urgent = true;
     }
     // 층이 **안 선** 까닭은 프로젝트 안에서도 댄다 — 그 화면에서는 층이 없다는 것 말고
@@ -7363,8 +7364,14 @@ pub(super) mod tests {
     fn load_errors_are_told_inside_the_screen() {
         let mut a = app();
         a.site.unreadable = vec![None; 3];
+        a.site.unreadable_live = 3;
         let lines = render(&mut a, 100, 14).join("\n");
         assert!(lines.contains("읽을 수 없는 줄 3개"), "{lines}");
+
+        // 아카이브 파일의 못 읽는 줄은 목록에 들어도 배너에 안 선다(moai-e18s) — 그것은 경고로 선다.
+        a.site.unreadable_live = 0;
+        let lines = render(&mut a, 100, 14).join("\n");
+        assert!(!lines.contains("읽을 수 없는 줄"), "{lines}");
     }
 
     /// 쓰기의 실패도 같은 자리에 서고, **무엇을 못 했는지는 단 쪽의 말 그대로다** —
@@ -7385,6 +7392,7 @@ pub(super) mod tests {
         let mut a = app();
         a.site.warnings = Surfaced::flat(4);
         a.site.unreadable = vec![None; 2];
+        a.site.unreadable_live = 2;
         a.notice = Some("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다".into());
         let lines = render(&mut a, 80, 12);
         assert!(lines[1].contains("✓ 담김 · argos-0002 — 거름망에 가려 안 보인다"), "{}", lines.join("\n"));
@@ -7392,6 +7400,7 @@ pub(super) mod tests {
 
         a.site.warnings = Surfaced::flat(0);
         a.site.unreadable.clear();
+        a.site.unreadable_live = 0;
         assert_eq!(banner(&a), Some((" ✓ 담김 · argos-0002 — 거름망에 가려 안 보인다 · Esc 로 푼다 ".into(), false)));
         // 다시 읽기가 실패했으면 실패가 앞에 선다.
         a.trouble = Some("다시 읽지 못했다 — 락".into());

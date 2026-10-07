@@ -156,7 +156,9 @@ does not tag — see `CONTRIBUTING.md`.
   archived rows are not counted as work, and an unreadable archive file is
   `archive_unreadable` rather than an unreadable-line warning. Archive
   collisions and bundles waiting for `moai archive` now show in both places,
-  and the layer re-reads a project when its archive changes. (moai-nkwg)
+  and the layer re-reads a project when its archive changes. The banner's
+  urgent "N rows could not be read" counts lines in the active snapshot only; a
+  bad line in an archive file shows as that warning instead. (moai-nkwg, moai-e18s)
 - **An archived deferred epic over a restored member counts as deferred again.**
   When a member of a deferred epic that `moai archive` moved is restored, the
   epic is back on the board as that member's group, and the board now marks it

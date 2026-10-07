@@ -182,7 +182,9 @@ warning and exits non-zero ([Recovery](recovery.md#an-archive-file-cannot-be-rea
 The explorer's banner and each project's `+N` in the overview count all of this
 the way `moai status` does: archived rows are context, not work, the collision
 and unreadable archive files are counted as the same warnings, and bundles
-waiting to move as the same notice (moai-nkwg).
+waiting to move as the same notice (moai-nkwg). The banner's urgent "rows could
+not be read" counts lines in the active snapshot only; a bad line in an archive
+file is that `archive_unreadable` warning instead (moai-e18s).
 
 ## Catch up on what changed
 
