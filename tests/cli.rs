@@ -18704,8 +18704,12 @@ fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
     // 심었다는 줄도 `.codex/hooks.json` 이라 `/hooks` 를 든다 — 믿어 달라는 줄만의 글로 본다(리뷰 moai-u5wr.e74).
     assert!(text(&out).contains("/hooks 를 연다"), "Codex 에 믿어 달라는 줄이 없다\n{}", text(&out));
     let body = std::fs::read_to_string(&codex).unwrap();
-    for word in ["Planted by moai", "--dialect codex", "Bash|apply_patch", "\"Interrupt\"", "\"SessionEnd\""] {
+    for word in ["Planted by moai", "--dialect codex", "Bash|apply_patch", "\"Stop\""] {
         assert!(body.contains(word), "{word} 가 없다\n{body}");
+    }
+    // 출석 전용 이벤트는 0.9 부터 안 심는다(moai-5uwh.e9j).
+    for word in ["\"Interrupt\"", "\"SessionEnd\""] {
+        assert!(!body.contains(word), "{word} 를 심었다\n{body}");
     }
     assert!(!agy.exists(), "고르지 않은 Antigravity 의 훅을 심었다");
 
