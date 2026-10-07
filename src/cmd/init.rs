@@ -927,14 +927,27 @@ fn landed(p: &Path) -> std::path::PathBuf {
 /// **쓰는 길([`run`])과 보는 길([`check`])이 이 하나로 잰다** — `AGENTS.md -> .gitattributes` 에 블록을 심으면 같은
 /// 실행이 덧붙인 병합 규칙이 갈아끼우기에 통째로 지워진다. `.git/info/exclude` 로 가는 링크는 읽기도 쓰기도 이미
 /// 거절하는 자리라(`store::target_of`) 닿을 일이 없지만, 목록을 거르지 않고 다 견준다 — 거르면 그 자리가 바뀌는
-/// 날 여기만 옛 답을 낸다. 링크가 아니면 묻지 않는다: 보통 파일인 AGENTS.md 는 딴 이름의 파일일 수 없다.
+/// 날 여기만 옛 답을 낸다. 링크가 아니면 묻지 않는다: 보통 파일인 AGENTS.md 는 딴 이름의 파일일 수 없다(하드
+/// 링크는 [`plant`] 의 갈아끼우기가 끊어 덧붙인 줄을 안 지운다).
+///
+/// **둘 다 있으면 파일의 자리(장치·inode)로 견준다**(리뷰 moai-8gwh) — `store::into_tracker` 가 스냅샷을 견주는
+/// 것과 같은 자다. 푼 철자로만 견주던 판은 대소문자를 안 가리는 파일 시스템(macOS·Windows 기본)의
+/// `AGENTS.md -> .GITATTRIBUTES` 를 딴 파일로 읽어 블록을 심었고, 같은 실행이 덧붙인 규칙이 지워졌다. 끝 파일이
+/// 아직 없으면 푼 철자로 접는다.
 fn agents_shares(root: &Path, files: &[Dotfile]) -> Option<&'static str> {
     let agents = root.join("AGENTS.md");
     if !agents.is_symlink() {
         return None;
     }
-    let at = landed(&agents);
-    files.iter().find(|d| landed(&d.path) == at).map(|d| d.name)
+    let id = |p: &Path| std::fs::metadata(p).ok().and_then(|m| crate::store::file_id(&m));
+    let (at, at_id) = (landed(&agents), id(&agents));
+    files
+        .iter()
+        .find(|d| match (at_id, id(&d.path)) {
+            (Some(a), Some(b)) => a == b,
+            _ => landed(&d.path) == at,
+        })
+        .map(|d| d.name)
 }
 
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
@@ -1894,14 +1907,20 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     // **덧붙이기 전의 길이를 함께 든다**(moai-8gwh.67q) — 아래에서 `.moai` 를 못 세우면 이 실행이 덧붙인 바이트만 걷어
     // 되돌린다(`None` 이면 이 실행이 그 파일을 지었다). 남겨 두면 트래커도 없는데 `/.moai/` 를 막는 줄이 서, 그 뒤에
     // 고른 커밋 추적이 git 에 물어 그 줄을 "git 밖" 으로 읽는다. 링크는 [`ensure_lines`] 가 안 쓰니 잴 것이 없다.
+    //
+    // **덧붙인 뒤의 길이도 든다**(리뷰 moai-8gwh) — 걷을 때 그 길이 그대로일 때만 걷는다. `.git/info/exclude` 는
+    // 클론의 워크트리가 함께 쓰는 파일이라, 그 사이 남이 덧붙인 줄까지 잘라 내면 이 실행이 지은 것이 아닌 것을 지운다.
+    let len = |p: &Path| std::fs::symlink_metadata(p).ok().map(|m| m.len());
+    let mut early_lens = None;
     let early = match ignored {
         Some(d) if !again && !plan.tracking.tracked() => {
-            let before = std::fs::symlink_metadata(&d.path).ok().map(|m| m.len());
-            Some((write(d), before))
+            let before = len(&d.path);
+            let done = write(d);
+            early_lens = Some((before, len(&d.path)));
+            Some(done)
         }
         _ => None,
     };
-    let (early, early_before) = early.map_or((None, None), |(done, before)| (Some(done), Some(before)));
     if let (Some(d), Some((kind, why))) = (ignored, early.as_ref().and_then(Added::trouble)) {
         return Err(Fail::new(fill(
             say(ctx.lang(), "refuse.init_local_unwritten"),
@@ -1912,9 +1931,13 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     if !again {
         // **못 세우면 이 실행이 한 것을 걷고 그 까닭으로 멈춘다**(moai-8gwh.67q) — 반쯤 지은 `.moai` 와 먼저 덧붙인
         // 무시 줄을 남기면, 다시 부른 `init` 이 그 `.moai` 를 "이미 심겼다" 로 읽어 설정 없는 트래커에서 넘어진다.
+        //
+        // **`create_dir` 로 짓는다**(리뷰 moai-8gwh) — `create_dir_all` 은 이미 선 디렉터리에도 `Ok` 라, `again` 을 잰 뒤
+        // (화면이 사람을 기다리는 사이) 남이 세운 `.moai` 를 이 실행이 지은 것으로 읽어 그 설정과 스냅샷을 덮어쓰고,
+        // 못 세우면 통째로 지웠다. 뿌리는 `current_dir` 라 늘 있다.
         let mut made = false;
         let built =
-            std::fs::create_dir_all(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display()))).and_then(|()| {
+            std::fs::create_dir(&dir).map_err(|e| Fail::new(format!("{}: {e}", dir.display()))).and_then(|()| {
                 made = true;
                 // **저널 파일은 안 짓는다**(moai-nzlo). 새 줄은 `.moai/journal/<메일>.jsonl` 로 가고 그
                 // 자리는 첫 쓰기가 만든다 — 빈 `journal.jsonl` 을 심으면 이력이 거기 사는 것으로 읽히는데,
@@ -1929,10 +1952,13 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
             if made {
                 let _ = std::fs::remove_dir_all(&dir);
             }
-            if let (Some(d), Some(Added::Wrote { .. }), Some(before)) = (ignored, &early, early_before) {
+            if let (Some(d), Some(Added::Wrote { .. }), Some((before, after))) = (ignored, &early, early_lens)
+                && after.is_some()
+                && len(&d.path) == after
+            {
                 let _ = match before {
                     None => std::fs::remove_file(&d.path),
-                    Some(len) => std::fs::OpenOptions::new().write(true).open(&d.path).and_then(|f| f.set_len(len)),
+                    Some(n) => std::fs::OpenOptions::new().write(true).open(&d.path).and_then(|f| f.set_len(n)),
                 };
             }
             return Err(fail);

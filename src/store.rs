@@ -2079,9 +2079,9 @@ pub type Stamp = Option<(std::time::SystemTime, u64)>;
 /// 파일 하나의 자리 — 장치와 inode(moai-itsu.aod). 이름이 둘이어도(하드 링크, 같은 파일로 가는 링크) 같은
 /// 파일이면 같은 값이다. 유닉스 밖에서는 안 선다 — 그때는 푼 자리로 접고([`Repo::journal_files`]), 락은 견줄
 /// 길이 없다고 답한다([`Lock::holds`]).
-type FileId = Option<(u64, u64)>;
+pub(crate) type FileId = Option<(u64, u64)>;
 
-fn file_id(m: &std::fs::Metadata) -> FileId {
+pub(crate) fn file_id(m: &std::fs::Metadata) -> FileId {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
