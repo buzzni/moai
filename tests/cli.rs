@@ -18750,11 +18750,25 @@ fn skill_install_leaves_nothing_an_older_moai_planted() {
     let kept = ["theirs/SKILL.md", "moai-work/SKILL.md", "moai-work/notes.md"];
     assert_eq!(walk(&shared), expect(shared_files, &kept), "{json}");
     assert_eq!(std::fs::read_to_string(shared.join("moai-work/notes.md")).unwrap(), "mine\n");
+    // 0.9.0 이 걷은 것 — 일꾼은 두 트리에서, 감독은 `.agents` 에서만.
+    assert!(!plugin.join("skills/moai-work").exists() && !shared.join("moai-supervise").exists(), "{json}");
+    assert!(plugin.join("skills/moai-supervise/SKILL.md").is_file(), "Claude 의 감독을 걷었다");
+    assert!(
+        json.contains(&format!("\"path\":\"{}\",\"state\":\"foreign\"", shared.join("moai-work").display())),
+        "{json}"
+    );
 
-    // 다시 심어도 같다 — 걷을 것이 없으면 아무것도 안 바뀐다.
+    // 다시 심어도 같다 — 걷을 것이 없으면 아무것도 안 바뀐다. 남긴 것은 한 줄로 댄다.
     let again = walk(&shared);
-    assert!(c.run(s.path(), &["skill", "install", "--agent", "codex"], true).status.success());
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains(&shared.join("moai-work").display().to_string()), "남긴 것을 안 댄다\n{}", text(&out));
     assert_eq!(walk(&shared), again);
+
+    // `uninstall` 은 남은 일꾼 스킬도 손으로 지울 자리로 댄다 — moai 가 심었던 이름이다.
+    let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
+    assert!(said.contains(&format!("rm -r {}", shared.join("moai-work").display())), "{said}");
+    assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
 }
 
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
