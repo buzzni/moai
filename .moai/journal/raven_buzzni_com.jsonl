@@ -5167,3 +5167,5 @@
 {"ts":"2026-10-07T02:11:17Z","id":"moai-e18s.dgp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1, 5, 6 (3ae0aa2b). Kept 2 and 7 as is (issue intent / consistency). Parked 3 as moai-7hks (source per entry instead of a second count) and 4 as moai-8kkr (archive view silent on broken archive lines)."}
 {"ts":"2026-10-07T02:12:07Z","id":"moai-e18s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — banner count split from the mixed unreadable list)"}
 {"ts":"2026-10-07T02:12:07Z","id":"moai-e18s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"merged 9e363fda; xhigh epic-end rerun moai-e18s.dgp found no correctness bug, ideas moai-7hks and moai-8kkr parked"}
+{"ts":"2026-10-07T02:48:52Z","id":"moai-xfvj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wiki: workflow 에 닫힌 일을 아카이브로 옮기는 절"}
+{"ts":"2026-10-07T02:48:53Z","id":"moai-xfvj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
