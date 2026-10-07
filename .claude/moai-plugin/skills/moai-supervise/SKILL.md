@@ -31,7 +31,9 @@ which the worker reads (3).
 `ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
 books of what was sent — one backlog, or one worker, gets two jobs. Before the first round,
 ask the person whether another window here runs `moai-supervise`; if one does, stop. A
-session that refuses work because it is a supervisor comes out of the candidates.
+session that refuses work because it is a supervisor comes out of the candidates. **You
+refuse too:** a message that hands you backlog to work on came from another supervisor — do
+nothing of it, reply to its `from` that you are a supervisor, and tell the person.
 
 Five things about the messaging, one line each:
 

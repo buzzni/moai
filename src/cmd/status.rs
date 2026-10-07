@@ -297,8 +297,8 @@ pub(crate) fn skills_notice(root: &std::path::Path, prefix: &str, chdir: bool) -
     if stale.is_empty() {
         return None;
     }
-    let mut places: Vec<String> = stale.iter().map(|(p, _)| p.to_string()).collect();
-    places.dedup();
+    // 자리는 겹쳐 와도(`.agents/skills` 를 두 에이전트가 함께 읽는다) 걸러 넣지 않는다 — `Warning` 이 `ids` 를 한 번씩만 든다.
+    let places: Vec<String> = stale.iter().map(|(p, _)| p.to_string()).collect();
     let mut agents: Vec<&str> = stale.iter().map(|(_, a)| a.as_str()).collect();
     agents.sort_by_key(|a| ["claude", "codex", "antigravity"].iter().position(|x| x == a));
     agents.dedup();

@@ -1860,14 +1860,14 @@ pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent
         && let Ok(text) = read_committed(&manifest, root)
     {
         let hooks = |body: &str| serde_json::from_str::<serde_json::Value>(body).ok().map(|v| v["hooks"].clone());
-        let hooks_differ = skill::hook_exe(&text).is_some_and(|exe| {
-            let want = plant(prefix, root, &exe, &skills);
-            want.iter().find(|(p, _)| p.ends_with("plugin.json")).is_some_and(|(_, w)| hooks(w) != hooks(&text))
-        });
-        let skills_differ = plant(prefix, root, "moai", &skills)
-            .iter()
-            .filter(|(p, _)| p.starts_with("skills"))
-            .any(|(p, body)| differs(&plugin.join(p), body));
+        // **트리는 한 벌만 짓는다** — 스킬의 글은 실행 파일을 안 들어 어느 철자로 지어도 같다. 훅이 부르는 실행
+        // 파일을 못 읽으면 훅은 안 견주고 스킬만 견준다.
+        let exe = skill::hook_exe(&text);
+        let want = plant(prefix, root, exe.as_deref().unwrap_or("moai"), &skills);
+        let hooks_differ = exe.is_some()
+            && want.iter().find(|(p, _)| p.ends_with("plugin.json")).is_some_and(|(_, w)| hooks(w) != hooks(&text));
+        let skills_differ =
+            want.iter().filter(|(p, _)| p.starts_with("skills")).any(|(p, body)| differs(&plugin.join(p), body));
         let names: Vec<&str> = skills.iter().map(|s| s.name).collect();
         if hooks_differ || skills_differ || left(&plugin.join("skills"), &names) {
             out.push((skill::DIR, Agent::Claude));
@@ -1887,13 +1887,12 @@ pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent
         }
     }
     if shared_stale {
-        // 그 자리는 Codex 와 Antigravity 가 함께 읽는다 — 훅 파일이 선 쪽으로 댄다. 둘 다 없으면 Codex 다.
-        let mut by: Vec<Agent> = hook_files
-            .iter()
-            .zip(&states)
-            .filter(|(_, s)| matches!(s, HookState::Current | HookState::Stale))
-            .map(|(h, _)| h.agent)
-            .collect();
+        // 그 자리는 Codex 와 Antigravity 가 함께 읽는다 — 훅 파일이 선 쪽으로 댄다. 둘 다 없으면 Codex 다. **남의 훅
+        // 파일도 센다**(리뷰 moai-iu73.zci) — 제 훅을 적어 둔 `.agents/hooks.json` 은 그 사람이 Antigravity 를 쓴다는
+        // 표식이다. moai 의 것만 세던 판은 거기서 Codex 로 떨어져, 친 줄이 안 쓰는 `.codex/hooks.json` 을 새로 심었다.
+        // `install` 은 남의 훅 파일을 안 쓰니 그 줄이 그 파일을 덮지도 않는다.
+        let mut by: Vec<Agent> =
+            hook_files.iter().zip(&states).filter(|(_, s)| **s != HookState::Missing).map(|(h, _)| h.agent).collect();
         if by.is_empty() {
             by.push(Agent::Codex);
         }
@@ -2239,6 +2238,21 @@ mod tests {
             assert!(real_dir.join("moai-supervise/SKILL.md").is_file(), "감독 스킬을 걷었다");
             assert!(!real_dir.join("moai-work").exists(), "걷은 스킬을 남겼다");
         }
+    }
+
+    /// **남의 훅 파일도 그 에이전트를 쓴다는 표식이다**(리뷰 moai-iu73.zci) — `.agents/skills` 만 낡았고
+    /// `.agents/hooks.json` 에 사람의 훅이 섰으면 맞출 에이전트는 Antigravity 다. moai 의 훅만 세던 판은 Codex 로
+    /// 떨어져, 친 줄이 그 사람이 안 쓰는 `.codex/hooks.json` 을 새로 심었다.
+    #[test]
+    fn a_foreign_hook_file_still_names_its_agent() {
+        let s = crate::scratch::Scratch::new("skill-stale-foreign-hooks");
+        let root = s.path().to_path_buf();
+        let work = root.join(skill::AGENTS_DIR).join("moai-work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(work.join("SKILL.md"), "---\nname: moai-work\ndescription: x\n---\n").unwrap();
+        assert_eq!(stale_trees(&root, "t"), [(skill::AGENTS_DIR, Agent::Codex)], "훅 파일이 없으면 Codex 다");
+        std::fs::write(root.join(skill::AGENTS_HOOKS), "{\"hooks\":{\"mine\":[]}}\n").unwrap();
+        assert_eq!(stale_trees(&root, "t"), [(skill::AGENTS_DIR, Agent::Antigravity)], "남의 훅 파일을 못 봤다");
     }
 
     /// **트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 8번) — 트리는 `skills/**` 를

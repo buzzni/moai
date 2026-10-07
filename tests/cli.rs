@@ -14354,8 +14354,15 @@ fn a_stale_planted_tree_names_the_install_line() {
     assert_eq!(stale(root), None, "다시 심어도 안 걷혔다");
     assert!(!work.exists());
 
-    // Claude 의 트리만 낡았으면 맨 `install` 이다 — 기본이 Claude 다.
-    let _ = moai(root, &["skill", "install"]);
+    // Claude 의 트리만 낡았으면 맨 `install` 이다 — 기본이 Claude 다. **진짜 `claude` 에 닿지 않는다**(`Claude` 위의
+    // 머리 주석) — 맨 `moai` 는 PATH 를 물려받아, `claude` 가 깔린 기계에서 시험이 함께 쓰는 빈 집에 등록을 적었다.
+    // 트리는 `claude` 가 없어도 심긴다.
+    let planted = staged(&["skill", "install"]).current_dir(root).env("PATH", "/nonexistent").output().unwrap();
+    assert!(
+        root.join(".claude/moai-plugin/.claude-plugin/plugin.json").is_file(),
+        "트리를 안 심었다\n{}",
+        text(&planted)
+    );
     std::fs::write(root.join(".claude/moai-plugin/skills/moai/SKILL.md"), "old\n").unwrap();
     let n = stale(root).expect("낡은 Claude 트리를 안 댔다");
     assert_eq!(n["ids"], serde_json::json!([".claude/moai-plugin"]));

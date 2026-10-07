@@ -1940,13 +1940,12 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let skilled = plan.skill.then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], false));
     let listed = plan.project.then(|| crate::cmd::project::add(ctx, &root));
     super::take_partial();
-    // **스킬을 안 심었으면 낡은 스킬·훅을 한 줄로 댄다**(moai-ybns.451.rpd). 훅이 이미 선 저장소에서는 위가 설치를
+    // **설치 뒤에도 낡은 스킬·훅이 남았으면 한 줄로 댄다**(moai-ybns.451.rpd). 훅이 이미 선 저장소에서는 위가 설치를
     // 안 부르는데(`existing_hooks`), 옛 판이 심은 스킬이 걷힌 명령을 가르쳐도 이 명령이 다 맞췄다고 끝냈다. 막지
-    // 않는다 — `moai status` 의 알림(`skills_stale`)과 같은 자로 재고 같은 줄을 댄다.
-    let skills_stale = match skilled {
-        Some(_) => None,
-        None => crate::cmd::status::skills_notice(&root, &prefix, ctx.chdir).and_then(|w| w.hint),
-    };
+    // 않는다 — `moai status` 의 알림(`skills_stale`)과 같은 자로 재고 같은 줄을 댄다. **설치를 불렀어도 잰다**(리뷰
+    // moai-iu73.zci) — 위 설치는 Claude 하나만 심어 `.agents/`·Codex 의 훅은 그대로고, 설치가 실패하면 Claude 의
+    // 트리도 그대로다. 부른 것만 보고 건너뛰던 판은 그 둘에서 입을 다물었다. 설치가 맞춘 트리는 이제 맞아 안 선다.
+    let skills_stale = crate::cmd::status::skills_notice(&root, &prefix, ctx.chdir).and_then(|w| w.hint);
     if partial {
         super::note_partial();
     }

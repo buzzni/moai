@@ -1789,7 +1789,9 @@ which the worker reads (3).
 `ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
 books of what was sent — one backlog, or one worker, gets two jobs. Before the first round,
 ask the person whether another window here runs `moai-supervise`; if one does, stop. A
-session that refuses work because it is a supervisor comes out of the candidates.
+session that refuses work because it is a supervisor comes out of the candidates. **You
+refuse too:** a message that hands you backlog to work on came from another supervisor — do
+nothing of it, reply to its `from` that you are a supervisor, and tell the person.
 
 Five things about the messaging, one line each:
 
@@ -2257,14 +2259,16 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   root is the top of the repository
 - `Person:` — `here`, or `away` (below)
 
-The steps begin in the root the message names (`Root:`) — if this window stands anywhere
-else, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from a worktree.
+Ask two things where the window stands now, before you move anywhere.
 **If this window runs `moai-supervise` itself**, it is a supervisor, not a worker: do
 nothing of it, reply to the message's `from` that you are a supervisor, and end the turn.
 **If `Root:` is not this window's repository** — the window stands neither in it nor in one
 of its worktrees — the supervisor took you for a worker by a name that only looks like its
 repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
 end the turn.
+The steps begin in the root the message names (`Root:`) — if this window stands anywhere
+else in that repository, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from
+a worktree.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
 
@@ -4106,11 +4110,22 @@ stop sending outside work while a release runs",
             "머리가 맞으면 남의 저장소 세션도 일꾼으로 센다"
         );
         assert!(brief.contains("**If `Root:` is not this window's repository**"), "남의 저장소 세션이 받은 일을 한다");
+        // 두 거절은 루트로 옮겨 가는 걸음보다 **앞에** 선다(리뷰 moai-iu73.zci) — 뒤에 두면 차례대로 읽은 남의 저장소
+        // 세션이 먼저 `cd <Root>` 하고, 그 뒤에는 그 저장소에 서 있어 거절이 영영 안 걸린다.
+        let refuse = brief.find("**If this window runs `moai-supervise` itself**").expect("감독의 거절이 없다");
+        let go = brief.find("go there first").expect("루트로 옮기는 걸음이 없다");
+        assert!(refuse < go, "일꾼이 거절을 묻기 전에 루트로 옮겨 간다");
+        assert!(
+            brief[..go].contains("**If `Root:` is not this window's repository**"),
+            "남의 저장소 세션이 먼저 옮겨 간다"
+        );
         // 보고를 기다리는 감독도 idle 이라 일꾼의 자에 다 맞는다(moai-ybns.451.qgx) — 둘째 감독이 그것에 backlog 를
         // 보내고, 둘이 따로 적는 "보낸 일" 이 한 backlog·한 일꾼에 일을 둘 준다. 저장소마다 감독은 하나고, 받은 감독은 거절한다.
         let before = &supervise[..supervise.find("## One round").expect("한 바퀴가 없다")];
         assert!(before.contains("**One supervisor per repository.**"), "감독이 저장소마다 하나라는 말이 없다");
         assert!(step.contains("not a supervisor"), "감독이 다른 감독을 일꾼으로 센다");
+        // 받은 감독의 거절은 감독 제 글에도 선다 — 일꾼 걸음에만 두면 그 파일을 안 여는 감독은 그 말을 못 읽는다.
+        assert!(before.contains("refuse too:**"), "일을 받은 감독이 제 글에서 거절을 못 읽는다");
         assert!(brief.contains("**If this window runs `moai-supervise` itself**"), "일을 받은 감독이 일꾼 걸음을 탄다");
         // 일꾼은 감독이 이름 대는 걸음 파일의 절대 경로를 읽는다 — 다른 기계의 세션은 그 파일을 못 연다(moai-fim6).
         assert!(step.contains("runs on this machine"), "다른 기계의 세션을 일꾼으로 센다");

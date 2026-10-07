@@ -56,37 +56,6 @@ does not tag — see `CONTRIBUTING.md`.
   removes `moai-work`, the `.agents/` copy of `moai-supervise` and the hook
   events 0.9 no longer listens for. (moai-ybns.451.rpd)
 
-### Fixed
-
-- **`moai skill install --agent codex` no longer deletes the Claude plugin's
-  `moai-supervise`** when `.agents/skills` is a link into
-  `.claude/moai-plugin/skills` (or the other way round) — two skill
-  directories that are one place keep everything either tree plants.
-  (moai-ybns.451.a3o)
-- **`moai skill install` removes the leftover skill directories only after
-  every file it writes has been written**, so a write that fails (a read-only
-  `.codex/`, a full disk) leaves them in place instead of deleting them
-  without a word. (moai-ybns.451.ng7)
-- **A leftover skill directory that could not be removed whole is finished by
-  the next install** instead of being called someone else's forever — its
-  `SKILL.md` now goes last, and a directory holding only empty directories
-  counts as moai's. (moai-ybns.451.fbh)
-- **`moai-supervise` no longer reads a worker as ended because its session
-  name is gone** — a window reopened with `claude --resume` comes back under a
-  new name, so the supervisor finds the work by its worktree and asks the
-  person before handing it on. (moai-ybns.451.ed8)
-- **`moai-supervise` matches workers by Claude Code's own slug of the root
-  directory** (`tvshop_updater` gives `tvshop-updater-…`), and a worker whose
-  repository is not the `Root:` it was sent refuses the work instead of doing
-  it in another checkout. (moai-ybns.451.tf3)
-- **One supervisor per repository** — the supervisor checks with the person
-  before its first round, and a window running `moai-supervise` that is sent
-  an assignment refuses it. (moai-ybns.451.qgx)
-- **A worker report no longer vanishes when the supervisor restarts** — a
-  worker whose send fails leaves the report as a note on the epic, and a
-  supervisor that starts or resumes reads unchecked reports from the tracker
-  before it waits. (moai-ybns.451.3zc)
-
 ### Removed
 
 - **The mailbox and presence are gone: `moai send`, `moai inbox`, `moai hello`
