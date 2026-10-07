@@ -1018,7 +1018,6 @@ pub fn status(
 
     out.push(board(cfg, &st.counts));
 
-    let shelved = crate::report::put_off(issues);
     // **아카이브된 묶음은 수 한 줄로 선다**(moai-47mz) — 목록은 그 줄을 뺐고(`report::Archived`), 그 줄을 보는
     // 명령을 함께 댄다. 마일스톤이 다 아카이브여도 머리글은 선다 — 안 서면 두 수가 어느 목록의 것인지 모른다.
     let labelled = !st.milestones.is_empty() || st.archived.milestones > 0;
@@ -1042,7 +1041,9 @@ pub fn status(
             // **미뤄 둔 묶음은 낱말로 말한다** — 색만으로 뜻을 지는 자리를 만들지
             // 않는다. 물려받은 미룸도 친다. "닫을 때가 됐다" 는 더 안 낸다: 묶음의
             // 칸은 멤버에서 읽으므로 100% 면 곧 닫힌 것이다(moai-j3b3).
-            let put_off = e.id.as_deref().is_some_and(|id| shelved.contains(id));
+            // **판정은 보고서가 든다**([`crate::report::Roll::put_off`], moai-sai2) — 여기 받은 줄은 산 줄뿐이라,
+            // 다시 재면 아카이브의 미룬 에픽이 되살린 멤버의 묶음으로 섰을 때 낱말을 잃는다.
+            let put_off = e.put_off;
             // **접은 묶음은 그렇다고 말한다.** 남은 멤버를 미뤄 닫은 묶음은 막대가
             // `1/2` 인 채로 done 에 서는데(칸은 미룬 멤버를 빼고 센다), 말하지 않으면
             // 세션이 시작하는 이 화면에서 접은 것과 굴러가는 것이 똑같아 보인다.

@@ -157,6 +157,13 @@ does not tag — see `CONTRIBUTING.md`.
   `moai show --archived`, which names each file and line. The hook's `Stop`
   check counts it too, reached by the live rows or not. `moai stats` and
   `moai show --archived` still exit 0. (moai-5y2a)
+- **An archived deferred epic over a restored member counts as deferred again.**
+  When a member of a deferred epic that `moai archive` moved is restored, the
+  epic is back on the board as that member's group, and the board now marks it
+  `deferred` and counts it in the Deferred notice, as it does for a live epic
+  and as the `moai show --deferred` the notice points at lists it. An archived
+  deferred epic with nothing live under it stays out of the count.
+  (moai-sai2)
 
 ### Deprecated
 

@@ -28405,6 +28405,38 @@ fn archive_regressions_an_archived_deferred_epic_can_be_undone() {
     assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
 }
 
+/// **The board counts and marks an archived deferred epic the way it does a live one**(moai-sai2). Restoring a member
+/// brings the epic back onto the board as that member's group, and the member is out of the plan because of it — the
+/// `Deferred` notice said 1 where the live epic says 2, and the epic row lost its `deferred` word, while the
+/// `moai show --deferred` the notice points at listed both. An archived deferred epic with nothing live under it is
+/// history and stays uncounted.
+#[test]
+fn archive_regressions_the_board_counts_an_archived_deferred_epic_over_a_live_member() {
+    let s = init("archive-deferred-board");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "shelved bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok(s.path(), &["defer", &epic, "-m", "not this quarter"]);
+    ok_at(s.path(), later, &["archive"]);
+    let deferred = |board: &serde_json::Value| {
+        board["notices"].as_array().unwrap().iter().find(|w| w["kind"] == "deferred").map(|w| w["count"].clone())
+    };
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(deferred(&board), None, "an archived bundle with nothing live under it was counted\n{board}");
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(deferred(&board), Some(serde_json::json!(2)), "{board}");
+    let text = ok_at(s.path(), later, &["status"]);
+    let row = text.lines().find(|l| l.contains(&epic)).unwrap_or_else(|| panic!("{epic} is not on the board\n{text}"));
+    assert!(row.contains("미룸"), "the archived deferred epic lost its mark\n{text}");
+    let listed = ok_at(s.path(), later, &["show", "--deferred", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&listed).unwrap().as_array().unwrap().len(), 2, "{listed}");
+}
+
 /// **A row in an archive file that cannot be read is not just "not found"**(review of moai-bth3) — the move names the
 /// file it could not read, so nobody concludes the work never existed and raises it again.
 #[test]

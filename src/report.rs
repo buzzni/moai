@@ -51,6 +51,13 @@ pub struct Roll {
     /// 묶음의 칸을 읽는 걸음이 이미 걷는다. 여기서 다시 걸으면 같은 것을 세는 자가 둘이 된다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<usize>,
+    /// 그 묶음 **자신이 계획 밖인가** — 제가 미뤘거나 미룬 것 밑에 있다(moai-sai2). 보드가 줄 꼬리에 미룸 낱말을
+    /// 다는 자다. `column` 과 같은 자리(`status`)에서 아카이브를 겹친 줄로 잰다 — 보드가 산 줄만으로 다시 재던
+    /// 판은 아카이브로 옮긴 미룬 에픽이 되살린 멤버의 묶음으로 도로 섰을 때 그 낱말을 잃었다. 집계만 필요한
+    /// `rollup` 은 비워 둔다(`false`). 기계 출력에는 안 싣는다 — 산 에픽에서도 안 싣던 값이라 여기서 키를 더하면
+    /// 고친 것이 아니라 더한 것이다.
+    #[serde(skip)]
+    pub put_off: bool,
 }
 
 /// 한 줄이 속한 에픽 — 제목이거나, 적힌 id 의 줄이 없거나.
@@ -4024,6 +4031,7 @@ pub fn rollup_of_in(
                 percent,
                 column: None,
                 deferred: None,
+                put_off: false,
             }
         })
         .collect();
@@ -4040,7 +4048,17 @@ pub fn rollup_of_in(
     // 안 딸린 것" 이라는 말이고, 화면에 설 낱말은 `view` 가 제 말묶음에서 고른다
     // (`view::tree` 의 `ready.no_epic`). 여기서 지으면 `report` 가 화면 말을 알아야 하고,
     // 그것은 이 층이 `&[Issue]` 에 대한 순수 함수라는 계약(CLAUDE.md)이 막는 자리다.
-    out.push(Roll { id: None, title: String::new(), counts, total, done, percent, column: None, deferred: None });
+    out.push(Roll {
+        id: None,
+        title: String::new(),
+        counts,
+        total,
+        done,
+        percent,
+        column: None,
+        deferred: None,
+        put_off: false,
+    });
     out
 }
 
@@ -5453,7 +5471,9 @@ fn status_in_scope<'a>(
     let stood = |kind: Kind, r: Roll| {
         let column = r.id.as_deref().and_then(|id| states.get(&(kind, id))).map(|c| c.to_string());
         let deferred = r.id.as_deref().and_then(|id| put_aside.get(id)).copied();
-        Roll { column, deferred, ..r }
+        // 미룸 낱말도 같은 자리에서 — 보드가 산 줄만으로 다시 재면 아카이브의 미룬 묶음이 낱말을 잃는다(moai-sai2).
+        let put_off = r.id.as_deref().is_some_and(|id| out_of_plan.contains(id));
+        Roll { column, deferred, put_off, ..r }
     };
     let mut epics: Vec<Roll> =
         rolls.iter().filter(|r| r.id.is_some()).cloned().map(|r| stood(in_epic.kind(), r)).collect();
@@ -5768,7 +5788,17 @@ fn status_in_scope<'a>(
     //
     //      **줄마다 센다**(moai-u3ta) — 이 수가 가리키는 `moai show --deferred` 도 줄마다
     //      고르므로, id 로 세면 미룬 쌍둥이 하나가 제 짝까지 이 수에 얹는다.
-    let shelved = |(k, i): &(usize, &Issue)| visible(i) && off[*k].is_some();
+    //
+    //      **아카이브의 줄은 보드에 도로 선 것만 센다**(moai-sai2). 산 멤버를 되살리면 옮겨 둔 미룬 에픽이 그
+    //      멤버의 묶음으로 보드에 다시 서고, 그 멤버는 이 에픽의 미룸으로 계획 밖이다 — 산 에픽이면 둘을 세는데
+    //      산 줄만 세던 판은 하나를 댔고, 가리키는 `show --deferred` 는 둘을 냈다. 도로 섰는가는 목록이
+    //      아카이브를 숨기는 자(`query::Where::archived`)와 같은 자로 잰다: 읽은 칸과 그 칸에 든 때를
+    //      [`is_put_away`] 에 댄다. 밑에 산 줄이 없는 미룬 묶음은 칸이 done 이라 지난 일로 빠진다.
+    let back = |i: &Issue| {
+        let since = stands_on(i, |(_, id)| group_entered.get(id).copied()).unwrap_or(i.status_since.as_str());
+        !is_put_away(column(i, &states), since, now, cfg.archive_days, true)
+    };
+    let shelved = |(k, i): &(usize, &Issue)| off[*k].is_some() && (visible(i) || back(i));
     let count = issues.iter().enumerate().filter(shelved).count();
     if count > 0 {
         let oldest = issues
@@ -9078,6 +9108,47 @@ mod tests {
         let w = st.notices.iter().find(|w| w.kind == "deferred").expect("미뤄 둔 에픽이 안 보인다");
         assert_eq!(w.count, 1);
         assert!(w.notice);
+    }
+
+    /// **아카이브로 옮긴 미룬 에픽도 산 멤버가 그 밑에 서면 산 에픽처럼 센다**(moai-sai2). 멤버 하나를 되살리면
+    /// 에픽은 그 멤버의 묶음으로 보드에 도로 서고, 그 멤버는 이 에픽의 미룸으로 계획 밖이다 — 산 줄만 세던 판은
+    /// `미뤄 둔 것` 을 1 로 댔고(산 에픽이면 2) 에픽 줄의 미룸 낱말도 잃었다. 알림이 가리키는 `show --deferred` 는
+    /// 그 에픽을 함께 낸다. 밑에 산 줄이 없는 아카이브의 미룬 에픽은 지난 일이라 안 센다.
+    #[test]
+    fn an_archived_deferred_epic_over_a_live_member_counts_as_deferred() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let restored = member("argos-0002", "argos-0001", "todo");
+        let sibling = member("argos-0003", "argos-0001", "done");
+        let now = "2026-09-11T00:00:00Z";
+        let live = status(&[epic.clone(), restored.clone(), sibling.clone()], &[], &cfg(), now, utc());
+        let stored = status_with_archive(
+            std::slice::from_ref(&restored),
+            &[epic.clone(), sibling.clone()],
+            &[],
+            &cfg(),
+            now,
+            utc(),
+        );
+        for (what, st) in [("산 에픽", &live), ("아카이브의 에픽", &stored)] {
+            let w = st.notices.iter().find(|w| w.kind == "deferred").unwrap_or_else(|| panic!("{what}: 알림이 없다"));
+            assert_eq!((w.count, w.oldest), (2, Some(10)), "{what}: {w:?}");
+            let r = roll_of(&st.epics, Some("argos-0001"));
+            assert!(r.put_off, "{what}: 에픽 줄이 미룸을 잃었다 — {r:?}");
+        }
+        // 밑에 산 줄이 없으면 지난 일이다 — 목록에서도 알림에서도 빠진다.
+        let mut closed = restored;
+        closed.status = Status::new("done");
+        let history = status_with_archive(
+            &[make("argos-0009", Kind::Issue, "todo")],
+            &[epic, closed, sibling],
+            &[],
+            &cfg(),
+            now,
+            utc(),
+        );
+        assert!(!history.notices.iter().any(|w| w.kind == "deferred"), "{:?}", history.notices);
+        assert!(history.epics.is_empty(), "{:?}", history.epics);
     }
 
     /// **미뤘다 끝낸 줄은 끝난 줄이다.** 보드가 그것을 done 칸에서 빼면, 같은
