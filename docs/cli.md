@@ -3075,8 +3075,8 @@ Options:
   means the ignore lines were written to .git/info/exclude. Its driver is
   planted, current (already the same line), off (the repository declares no
   driver, or is not a git repository), failed (driver_trouble says why),
-  skipped (--no-driver, this run only) or untracked (--tracking exclude or
-  gitignore - git never merges the tracker, so there is nothing to drive).
+  skipped (--no-driver, this run only) or untracked (a tracker kept out of
+  git - git never merges it, so there is nothing to drive).
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is
