@@ -89,6 +89,12 @@ does not tag — see `CONTRIBUTING.md`.
 - **The board the hook loads on a session's first prompt says where moai's
   usage lives when AGENTS.md carries no moai block** — one line naming the
   `moai` skill and `moai prime`. Checkouts with the block see no change.
+- **An archive file that cannot be read is broken data.** `archive_unreadable`
+  is now a warning rather than a notice, so `moai status` exits non-zero on it
+  the way it does on an unreadable line in the active snapshot, and points at
+  `moai show --archived`, which names each file and line. The hook's `Stop`
+  check counts it too, reached by the live rows or not. `moai stats` and
+  `moai show --archived` still exit 0. (moai-5y2a)
 
 ### Fixed
 
@@ -151,12 +157,6 @@ does not tag — see `CONTRIBUTING.md`.
   `archive_unreadable` rather than an unreadable-line warning. Archive
   collisions and bundles waiting for `moai archive` now show in both places,
   and the layer re-reads a project when its archive changes. (moai-nkwg)
-- **An archive file that cannot be read is broken data.** `archive_unreadable`
-  is now a warning rather than a notice, so `moai status` exits non-zero on it
-  the way it does on an unreadable line in the active snapshot, and points at
-  `moai show --archived`, which names each file and line. The hook's `Stop`
-  check counts it too, reached by the live rows or not. `moai stats` and
-  `moai show --archived` still exit 0. (moai-5y2a)
 - **An archived deferred epic over a restored member counts as deferred again.**
   When a member of a deferred epic that `moai archive` moved is restored, the
   epic is back on the board as that member's group, and the board now marks it

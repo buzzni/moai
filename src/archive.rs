@@ -242,6 +242,9 @@ pub fn around<'a>(root: &Path, live: &[Issue], opaque: impl IntoIterator<Item = 
             }
         }
     }
+    // A file that could not be read went in before every line above; [`read`] names it in its file's turn. The sort is
+    // stable and the files were walked in path order, so this puts each one back where `read` has it.
+    out.errors.sort_by(|a, b| a.source.cmp(&b.source));
     out.issues.sort_by(|a, b| a.id.cmp(&b.id));
     out
 }
@@ -383,22 +386,7 @@ pub fn collisions(live: &BTreeSet<&str>, archived: &Load) -> Vec<String> {
 
 /// Existing restored rows also need context when their parent or group stayed archived.
 pub fn needs_context(active: &[Issue], wanted: &BTreeSet<String>) -> bool {
-    let by_id: BTreeMap<&str, &Issue> = active.iter().map(|i| (i.id.as_str(), i)).collect();
-    let mut pending: Vec<&str> = wanted.iter().map(String::as_str).collect();
-    let mut seen = BTreeSet::new();
-    while let Some(id) = pending.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        let Some(i) = by_id.get(id) else {
-            return true;
-        };
-        if report::is_group(i) {
-            return true;
-        }
-        pending.extend([crate::id::parent_of(&i.id), i.epic.as_deref(), i.milestone.as_deref()].into_iter().flatten());
-    }
-    false
+    walks_out(active, wanted.iter().map(String::as_str), false, report::is_group)
 }
 
 /// A write's references reach past the live snapshot — `wanted`, or a parent, epic, milestone or blocker above it,
@@ -407,8 +395,19 @@ pub fn needs_context(active: &[Issue], wanted: &BTreeSet<String>) -> bool {
 /// group does not count — reference checks read the row, not its members, and parsing the whole archive under the
 /// lock on every `add -e` is what pushed concurrent writes past the lock timeout (moai-bth3 review).
 pub fn reaches_out(active: &[Issue], wanted: &[&str]) -> bool {
+    walks_out(active, wanted.iter().copied(), true, |_| false)
+}
+
+/// The walk [`needs_context`] and [`reaches_out`] share: from `wanted` up through every parent, epic and milestone
+/// (and every blocker, with `blockers`), true at the first id no live row holds or the first row `stop` picks.
+fn walks_out<'a>(
+    active: &'a [Issue],
+    wanted: impl IntoIterator<Item = &'a str>,
+    blockers: bool,
+    stop: impl Fn(&Issue) -> bool,
+) -> bool {
     let by_id: BTreeMap<&str, &Issue> = active.iter().map(|i| (i.id.as_str(), i)).collect();
-    let mut pending: Vec<&str> = wanted.to_vec();
+    let mut pending: Vec<&str> = wanted.into_iter().collect();
     let mut seen = BTreeSet::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id) {
@@ -417,8 +416,13 @@ pub fn reaches_out(active: &[Issue], wanted: &[&str]) -> bool {
         let Some(i) = by_id.get(id) else {
             return true;
         };
+        if stop(i) {
+            return true;
+        }
         pending.extend([crate::id::parent_of(&i.id), i.epic.as_deref(), i.milestone.as_deref()].into_iter().flatten());
-        pending.extend(i.blocked_by.iter().map(String::as_str));
+        if blockers {
+            pending.extend(i.blocked_by.iter().map(String::as_str));
+        }
     }
     false
 }

@@ -1070,6 +1070,21 @@ pub fn archived_for(
     }
 }
 
+/// [`archived_for`] 에 더해 **고친 줄의 칸을 내는 쓰기**가 부른다 — 고친 줄 가운데 산 묶음이 있으면 늘 읽는다. 묶음의
+/// 칸은 멤버에서 읽는데(`read_of`), 되살린 묶음의 멤버는 아카이브에 남아 있다 — 산 줄로만 읽으면 보드가 done 으로 세는
+/// 그 묶음을 `--json` 의 `derived_status` 가 첫 칸으로 낸다. `mv` 가 묶음이면 늘 읽는 것([`crate::archive::needs_context`])과
+/// 같은 까닭이고, 참조만 재는 `add -e` 는 이 길을 안 지난다(그 묶음의 멤버를 안 읽는다).
+pub fn archived_with_groups(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+) -> R<Vec<crate::model::Issue>> {
+    match issues.iter().any(|i| rows.contains(&i.id.as_str()) && crate::report::is_group(i)) {
+        true => Ok(crate::archive::read(root)?.issues),
+        false => archived_for(root, issues, rows),
+    }
+}
+
 /// 산 줄에 [`archived_for`] 의 줄을 겹친 문맥 — 보드와 같은 자([`crate::report::with_archive`])다. 산 줄이 이기고,
 /// 산 파일에 못 읽는 줄로 선 id 의 아카이브 사본은 안 겹친다. 겹칠 것이 없으면 산 줄을 그대로 빌린다.
 pub fn in_context<'a>(

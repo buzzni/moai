@@ -62,7 +62,8 @@ pub fn run(ctx: &Ctx, args: DeferArgs) -> R<Vec<String>> {
             // 멤버를 계획 밖에 두는 미룸이 그 에픽 줄에 남는다 — 산 줄만 찾던 판은 `defer <에픽> --undo` 를 "없다" 로
             // 거절해 도구 안에 돌아올 길이 없었다. 찾는 길은 `mv` 와 하나다: 산 줄 밖으로 닿을 때만 읽고
             // ([`super::archived_for`]), 고른 줄만 들여와 둔 뒤 실제로 바뀐 줄만 산 파일에 남긴다(아래).
-            let archived = super::archived_for(&repo.root, issues, &asked)?;
+            // 미루는 묶음이 산 줄이어도 그 칸은 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]).
+            let archived = super::archived_with_groups(&repo.root, issues, &asked)?;
             let opaque: std::collections::BTreeSet<&str> = unread.iter().filter_map(|e| e.id.as_deref()).collect();
             let wanted: std::collections::BTreeSet<String> = args.ids.iter().cloned().collect();
             let staged_rows = crate::archive::restoring(issues, &archived, &wanted, &opaque, cfg);

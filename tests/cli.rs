@@ -28351,6 +28351,34 @@ fn archive_regressions_a_restored_group_row_goes_back_with_the_next_run() {
     assert!(!issues(s.path()).contains(&epic));
 }
 
+/// **A restored group reads its column from its archived members in the writes that report it** — `edit` and `defer`
+/// overlay the archive only when a reference reaches past the live rows, and a restored epic reaches nothing: it is
+/// live and its members are not looked up. Read from live rows alone it has no members, so `derived_status` said the
+/// first column where `moai show` and the board say done.
+#[test]
+fn archive_regressions_a_restored_group_reads_its_column_from_archived_members_on_write() {
+    let s = init("archive-group-column");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &epic, "todo"]);
+    assert!(issues(s.path()).contains(&epic) && !issues(s.path()).contains(&member));
+    let shown: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["show", &epic, "--json"])).unwrap();
+    assert_eq!(shown["derived_status"], "done", "{shown}");
+    let edited: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["edit", &epic, "--title", "renamed", "--json"])).unwrap();
+    assert_eq!(edited["derived_status"], "done", "{edited}");
+    let blocker = add(s.path(), &["live blocker"]);
+    let linked: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["link", &blocker, "--blocks", &epic, "--json"])).unwrap();
+    assert_eq!(linked[0]["derived_status"], "done", "{linked}");
+    let deferred: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--json"])).unwrap();
+    assert_eq!(deferred["changed"][0]["derived_status"], "done", "{deferred}");
+}
+
 /// **A deferred epic that went to the archive still has a way back**(moai-b6w3). Restoring one of its members brings
 /// only that member live, and the member stays out of the plan because its epic is deferred — that much is the same as
 /// a live deferred epic. But every road back read live rows only: the move did not say where the deferral stood,

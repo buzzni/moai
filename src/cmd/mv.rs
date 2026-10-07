@@ -305,11 +305,8 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
             // **아카이브를 겹친 문맥으로 잰다**(moai-b6w3) — 미룬 에픽이 멤버와 함께 아카이브로 갔으면, 되살린 멤버를
             // 계획 밖에 두는 미룸은 그 에픽 줄에 있다. 산 줄로만 재면 그 멤버가 왜 보드와 `ready` 에서 빠졌는지를
             // 아무 데서도 못 읽는다. 아카이브를 안 읽었으면 산 줄을 그대로 빌린다 — 옮길 때마다 스냅샷 전부를 베끼지
-            // 않는다.
-            let context: std::borrow::Cow<'_, [model::Issue]> = match archived.issues.is_empty() {
-                true => std::borrow::Cow::Borrowed(&issues[..]),
-                false => std::borrow::Cow::Owned(crate::report::with_archive(issues, &archived.issues, &opaque)),
-            };
+            // 않는다. 겹치는 자는 다른 쓰기와 하나다([`super::in_context`]).
+            let context = super::in_context(issues, &archived.issues, unread);
             if !m.done.is_empty() {
                 let roots = crate::report::deferred_sources(&context);
                 m.shelved = m

@@ -242,7 +242,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 상세의 자식 줄은 산 줄에서 고른다(`live`) — 겹친 문맥은 위로 닿을 때만 서므로, 거기서 고르면 아카이브의
             // 자식이 부름마다 섰다 말았다 한다.
             let live = &issues[..];
-            let archived = super::archived_for(&repo.root, live, &[out.id.as_str()])?;
+            // 고친 줄이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]).
+            let archived = super::archived_with_groups(&repo.root, live, &[out.id.as_str()])?;
             let issues = super::in_context(live, &archived, unread);
             let issues = &issues[..];
             // **`-e none` 이 못 끊는 소속을 묻는다** (moai-w5gz). 이슈의 뜻은 `report` 가

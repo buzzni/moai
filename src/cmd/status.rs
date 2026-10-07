@@ -399,9 +399,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             let (epics, kinds) = match ctx.json {
                 true => {
                     let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
-                    let opaque: std::collections::BTreeSet<&str> =
-                        load.errors.iter().filter_map(|e| e.id.as_deref()).collect();
-                    let context = report::with_archive(&load.issues, &archived.issues, &opaque);
+                    let context = super::in_context(&load.issues, &archived.issues, &load.errors);
                     (super::handed(&context, &ids, true), report::Kinds::of_ids(&load.issues, &ids))
                 }
                 false => Default::default(),

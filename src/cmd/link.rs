@@ -41,9 +41,14 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             // **막는 쪽은 아카이브에 있어도 된다**(moai-tzzt) — `moai archive` 가 옮긴 닫힌 줄도 있는 줄이고, 보드는
             // 그것을 문맥으로 읽어 `dangling_blocked_by` 로 안 센다. 막는 쪽은 읽기만 하므로 되살리지 않는다. 막히는
             // 쪽은 이 쓰기가 고치는 줄이라 산 줄이라야 한다 — `edit`·`note` 가 아카이브의 줄을 안 고치는 것과 같다.
-            let wanted: Vec<&str> =
-                std::iter::once(args.id.as_str()).chain(edits.iter().map(|(t, _)| t.as_str())).collect();
-            let archived = super::archived_for(&repo.root, issues, &wanted)?;
+            // 막히는 쪽이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]) —
+            // 아래 `read_of` 가 내는 칸이다. 막는 쪽은 참조만 잰다.
+            let targets: Vec<&str> = edits.iter().map(|(t, _)| t.as_str()).collect();
+            let wanted: Vec<&str> = std::iter::once(args.id.as_str()).chain(targets.iter().copied()).collect();
+            let archived = match super::archived_with_groups(&repo.root, issues, &targets)? {
+                found if found.is_empty() => super::archived_for(&repo.root, issues, &wanted)?,
+                found => found,
+            };
             let context = super::in_context(issues, &archived, unread);
             // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
             // 이미 지워졌을 수 있고, 그때도 남은 참조는 풀려야 한다 — 아니면

@@ -2059,19 +2059,23 @@ pub fn parse_line(i: usize, line: &str) -> Result<Issue, LoadError> {
 /// 훅의 `Stop` 은 산 줄에 닿는 아카이브만 파싱한다(`archive::around`, moai-i9ji). 그런데 못 읽는 아카이브 줄은 닿든
 /// 안 닿든 `moai status` 를 비영으로 끝내는 경고(`archive_unreadable`)라 `Stop` 도 그 수를 세야 한다. 닿지 않는 줄을
 /// 다 [`parse_line`] 에 넣으면 i9ji 가 걷은 값의 절반이 돌아온다 — [`Issue`] 는 모르는 필드를 지키려고 `flatten` 을
-/// 들어, 줄마다 값을 한 번 통째로 담았다가 다시 푼다. 여기는 같은 필드를 같은 꼴로 받되 글을 짓지 않고 모르는 필드는
-/// 건너뛴다.
+/// 들어, 줄마다 값을 한 번 통째로 담았다가 다시 푼다. 여기는 같은 필드를 같은 꼴로 받되 글을 짓지 않고, 모르는 필드는
+/// `Issue` 와 같은 `flatten` 으로 읽어 값만 버린다([`Shape`]).
 ///
 /// **`Issue` 와 한 몸이다.** 필드를 더하거나 꼴을 바꾸면 [`Shape`] 도 같이 바꾼다 — 안 바꾸면 그 필드가 틀린 줄을
 /// `Stop` 만 못 센다. `the_shape_reads_what_parse_line_reads` 가 `Issue` 를 필드 하나 안 빼고 적어 줄마다 비틀어
 /// 견주므로, 필드가 늘면 그 시험부터 컴파일이 안 된다.
 pub fn readable(line: &str) -> bool {
-    // `Issue` 는 `flatten` 이라 맵으로만 읽힌다. 파생한 구조체는 배열도 받으므로 그 하나를 앞에서 가른다.
-    line.trim_start().starts_with('{') && serde_json::from_str::<Shape>(line).is_ok()
+    // `Issue` 는 `flatten` 이라 맵으로만 읽힌다 — [`Shape`] 도 `flatten` 을 들어 배열을 같이 거절한다.
+    serde_json::from_str::<Shape>(line).is_ok()
 }
 
-/// [`readable`] 이 재는 [`Issue`] 의 꼴 — 필드마다 `Issue` 와 같은 꼴, 같은 `default` 다. 모르는 필드는 serde 가
-/// 건너뛰는데, `Issue` 의 `rest` 도 어떤 값이든 받으므로 답이 같다.
+/// [`readable`] 이 재는 [`Issue`] 의 꼴 — 필드마다 `Issue` 와 같은 꼴, 같은 `default` 다.
+///
+/// **모르는 필드도 `Issue` 처럼 `flatten` 으로 받는다.** 그냥 건너뛰면(`IgnoredAny`) serde_json 은 값을 문법만 보고
+/// 넘겨, 외톨이 서로게이트(`"\ud800"`)·범위 밖의 수(`1e400`)·128 단을 넘는 겹침이 든 줄을 읽힌다고 답한다 —
+/// `Issue` 는 그 값을 `rest` 로 끝까지 읽어 진다. `flatten` 이 모르는 값만 한 번 끝까지 읽고, 아는 필드는 그대로
+/// 짓지 않고 잰다.
 #[derive(serde::Deserialize)]
 #[allow(dead_code)]
 struct Shape {
@@ -2111,6 +2115,8 @@ struct Shape {
     due_on: Option<Text>,
     #[serde(default)]
     starts_on: Option<Text>,
+    #[serde(flatten)]
+    rest: BTreeMap<String, serde::de::IgnoredAny>,
 }
 
 /// 글 하나 — `String` 이 받는 것을 받되 짓지 않는다([`Shape`]).
@@ -4672,6 +4678,12 @@ mod tests {
             "{}".to_string(),
             "<<<<<<< ours".to_string(),
         ]);
+        // **모르는 필드의 값도 `Issue` 처럼 잰다** — `Issue` 는 그 값을 `rest` 로 끝까지 읽어 외톨이 서로게이트·
+        // 범위 밖의 수·너무 깊은 겹침에서 지는데, 건너뛰기(`IgnoredAny`)는 셋 다 그냥 지난다.
+        let deep = format!("{}{}", "[".repeat(200), "]".repeat(200));
+        for extra in [r#""\ud800""#, "1e400", deep.as_str(), r#"{"\ud800":1}"#, r#"["a","\udc00"]"#, r#""ok""#] {
+            lines.push(line.replacen('{', &format!(r#"{{"extra":{extra},"#), 1));
+        }
         for l in &lines {
             assert_eq!(readable(l), parse_line(0, l).is_ok(), "{l}");
         }
