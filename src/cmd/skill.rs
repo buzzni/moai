@@ -1802,6 +1802,44 @@ mod tests {
         }
     }
 
+    /// **이 저장소가 커밋한 두 트리에는 이 판이 심는 파일만 있다**(moai-six5.puc). 커밋된 트리 시험
+    /// (`skill::tests::the_checked_in_plugin_matches_the_guide`)은 심을 파일이 같은지만 보고 남는 파일은 못 본다 — 스킬을
+    /// 걷은 판이 커밋된 사본을 안 지우면, 이 저장소를 받는 세션이 걷힌 스킬을 그대로 읽는다. 훅 파일은 [`skill::AGENTS_DIR`]
+    /// 밖이라 여기 안 든다.
+    #[test]
+    fn the_checked_in_trees_hold_nothing_more_than_is_planted() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let skills = skill::skills();
+        let walk = |dir: &Path| -> Vec<String> {
+            let (mut out, mut todo) = (Vec::new(), vec![dir.to_path_buf()]);
+            while let Some(at) = todo.pop() {
+                for entry in std::fs::read_dir(&at).unwrap_or_else(|e| panic!("{}: {e}", at.display())) {
+                    let path = entry.unwrap().path();
+                    match path.is_dir() {
+                        true => todo.push(path),
+                        false => out.push(path.strip_prefix(dir).unwrap().display().to_string()),
+                    }
+                }
+            }
+            out.sort();
+            out
+        };
+        let named = |files: Vec<(PathBuf, String)>| {
+            let mut v: Vec<String> = files.into_iter().map(|(p, _)| p.display().to_string()).collect();
+            v.sort();
+            v
+        };
+        let trees = [
+            (skill::DIR, named(plant("t", root, "/bin/moai", &skills))),
+            (skill::AGENTS_DIR, named(skill::agents_tree(&skills))),
+        ];
+        for (at, want) in trees {
+            let have = walk(&root.join(at));
+            let extra: Vec<&String> = have.iter().filter(|p| !want.contains(p)).collect();
+            assert!(extra.is_empty(), "{at} 에 이 판이 안 심는 파일이 남았다 — 지운다: {extra:?}");
+        }
+    }
+
     /// **moai 가 심은 꼴 그대로인 디렉터리만 걷는다**(moai-six5.1xz) — 머리의 이름이 다르거나, 사람의 파일이 곁에
     /// 있거나, 링크면 손대지 않는다. 이번 트리가 심는 이름은 대지도 않는다.
     #[cfg(unix)]
