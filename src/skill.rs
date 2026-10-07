@@ -32,11 +32,36 @@ pub const DIR: &str = ".claude/moai-plugin";
 /// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
 /// **위키가 이 이름을 이슈 id 로 안 읽는다**(2026-10-04 사용자 결정, moai-mdzx.3pm) — `moai-wiki` 는 접두어 `moai`
-/// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`).
+/// 뒤 네 글자라 id 의 꼴이고, 페이지가 스킬을 이름으로 대면 없는 id 로 셌다(`wiki::parse`). 위키는 걷은 이름까지 든
+/// [`EVER_PLANTED`] 로 거른다.
 ///
 /// **일꾼 스킬 `moai-work` 는 걷었다**(2026-10-06 사용자 결정, moai-obxm). 일꾼의 걸음은 감독 스킬의
 /// `references/worker.md`([`crate::guide::worker`])에 서고, 감독의 메시지가 그 파일을 읽으라고 이른다(moai-fim6).
 pub const NAMES: [&str; 3] = ["moai", "moai-supervise", "moai-wiki"];
+
+/// **moai 가 한 번이라도 심은 스킬**과 그 디렉터리 안에 심은 파일 — 지금 심는 것([`NAMES`])에 걷은 것이 더해진
+/// 목록이다(moai-six5.1xz). 셋이 이 하나로 잰다.
+///
+/// - `skill install` 이 걷는 남은 디렉터리(`cmd::skill::leftovers`) — 이 목록에 있고 이번 트리에 없는 이름이다. 일꾼 스킬 `moai-work` 는
+///   0.9.0 에서 걷혔고(2026-10-06 사용자 결정, moai-ybns), 감독 스킬은 Claude 의 트리에만 선다 — 옛 판이 심은 그
+///   디렉터리가 남으면 에이전트가 걷힌 명령(`moai hello`·`inbox`·`send`)을 배운다
+/// - `uninstall` 이 손으로 지우라고 대는 `.agents/skills` 의 디렉터리 — 남은 것까지 댄다
+/// - 위키와 새 id 가 스킬 이름을 id 로 안 읽는 거르개([`crate::wiki`]·[`crate::store::taken_ids`], moai-mdzx.3pm) — 걷은
+///   이름이 빠지면 페이지의 `moai-work` 가 없는 id 로 선다
+///
+/// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
+/// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
+pub const EVER_PLANTED: [(&str, &[&str]); 4] = [
+    ("moai", &["SKILL.md", "references/commands.md"]),
+    ("moai-supervise", &["SKILL.md", "references/worker.md"]),
+    ("moai-wiki", &["SKILL.md"]),
+    ("moai-work", &["SKILL.md"]),
+];
+
+/// `name` 이 moai 가 심었던 스킬의 이름인가([`EVER_PLANTED`]).
+pub fn ever_planted(name: &str) -> bool {
+    EVER_PLANTED.iter().any(|(n, _)| *n == name)
+}
 
 /// Codex 와 Antigravity 가 **함께** 읽는 스킬 자리 — 저장소 뿌리부터의 상대다(moai-xs2h, 2026-10-04 사용자 결정).
 /// 두 벤더 문서가 같은 `<저장소>/.agents/skills/<이름>/SKILL.md` 를 들어, 한 벌을 심으면 둘이 다 읽고 커밋돼 팀이
@@ -59,8 +84,8 @@ pub struct Skill {
 /// Claude 의 플러그인([`tree`])과 Codex·Antigravity 의 [`AGENTS_DIR`]([`agents_tree`]). 부르는 자리마다 글을 손으로
 /// 엮던 판은 `install` 과 커밋된 트리 시험이 같은 글 넷을 따로 늘어놓아, 스킬 하나를 더할 때마다 두 자리를 고쳤다.
 pub fn skills() -> Vec<Skill> {
-    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 같은 목록으로 스킬 이름을 id 에서 거르니(moai-mdzx.3pm), 여기 글자를
-    // 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
+    // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 스킬 이름을 id 에서 거르는 [`EVER_PLANTED`] 가 그 목록을 다 들니
+    // (moai-mdzx.3pm, moai-six5.1xz), 여기 글자를 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
     let [main, supervisor, wiki] = NAMES;
     vec![
         Skill {

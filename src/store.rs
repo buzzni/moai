@@ -2064,7 +2064,7 @@ fn first_duplicate(sorted: &[Issue]) -> Option<&str> {
 /// 때문이다. 갈라 두면 부르는 쪽이 언젠가 하나를 잊고, 잊은 그날은 아무
 /// 증상도 없다.
 ///
-/// **심는 스킬의 이름([`crate::skill::NAMES`])도 쓰인 것으로 친다**(moai-mdzx.3pm) — 위키가 그 낱말을 id 로 안 읽어,
+/// **심는 스킬의 이름도 쓰인 것으로 친다**(moai-mdzx.3pm) — 위키가 그 낱말을 id 로 안 읽어,
 /// 접두어가 `moai` 인 저장소에서 `moai-wiki` 를 지으면 그 이슈를 페이지가 댈 길이 없다. 여기서 거르는 것은 `id` 가
 /// std 밖을 안 보기 때문이다(`tests/cli.rs` 가 그 파일을 `#[path]` 로 따로 읽는다).
 pub fn taken_ids(issues: &[Issue], reserved: &BTreeSet<String>) -> BTreeSet<String> {
@@ -2072,7 +2072,8 @@ pub fn taken_ids(issues: &[Issue], reserved: &BTreeSet<String>) -> BTreeSet<Stri
         .iter()
         .map(|i| i.id.clone())
         .chain(reserved.iter().cloned())
-        .chain(crate::skill::NAMES.map(String::from))
+        // 걷은 스킬(`moai-work`)까지 든다 — 위키가 거르는 목록과 한 벌이다(moai-six5.1xz).
+        .chain(crate::skill::EVER_PLANTED.map(|(name, _)| name.to_string()))
         .collect()
 }
 
@@ -4569,7 +4570,7 @@ mod tests {
     #[test]
     fn the_skill_names_are_taken() {
         let taken = taken_ids(&[], &BTreeSet::new());
-        for name in crate::skill::NAMES {
+        for (name, _) in crate::skill::EVER_PLANTED {
             assert!(taken.contains(name), "{name} 를 새 id 로 지을 수 있다");
         }
     }

@@ -3,8 +3,6 @@
 # moai
 .moai/lock
 .moai/*.tmp.*
-.moai/mail/
-.moai/agents/
 
 # 편의용 심볼릭 링크 (-> target/release/moai)
 /moai

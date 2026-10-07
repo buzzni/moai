@@ -18698,6 +18698,79 @@ fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
     assert!(codex.is_file() && agy.is_file(), "파일을 지웠다");
 }
 
+/// **심긴 트리에는 이 판이 심는 것만 남는다**(moai-six5.puc, moai-six5.1xz) — 옛 판이 심고 이 판은 안 심는 스킬
+/// 디렉터리(0.9.0 이 걷은 `moai-work`, `.agents` 의 감독)가 남으면 그 트리를 읽는 에이전트가 걷힌 명령을 배운다.
+/// 걷은 이름을 여기 적지 않고, 심은 뒤의 트리를 `--json` 이 댄 파일 목록과 견준다 — 어느 판이 무엇을 걷든 남는 것이
+/// 있으면 붉다. moai 가 안 심은 이름(`theirs`)과 사람의 파일이 든 디렉터리는 그대로 남는다.
+#[test]
+fn skill_install_leaves_nothing_an_older_moai_planted() {
+    let s = init("skillleftover");
+    let c = Claude::new("skillleftover-home");
+    let (plugin, shared) = (s.path().join(".claude/moai-plugin"), s.path().join(".agents/skills"));
+    let put = |at: PathBuf, body: &str| {
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(at, body).unwrap();
+    };
+    for tree in [plugin.join("skills"), shared.clone()] {
+        for name in ["moai-work", "moai-supervise"] {
+            put(tree.join(name).join("SKILL.md"), &format!("---\nname: {name}\ndescription: old\n---\n"));
+        }
+        put(tree.join("theirs/SKILL.md"), "---\nname: theirs\n---\n");
+    }
+    // 사람이 곁에 둔 파일 — moai 가 아는 이름이어도 그 디렉터리는 안 걷는다.
+    put(shared.join("moai-work/notes.md"), "mine\n");
+
+    let out = c.run(s.path(), &["skill", "install", "--agent", "claude", "--agent", "codex", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    one_json_value(&json);
+    let walk = |dir: &Path| -> Vec<String> {
+        let (mut out, mut todo) = (Vec::new(), vec![dir.to_path_buf()]);
+        while let Some(at) = todo.pop() {
+            for entry in std::fs::read_dir(&at).unwrap() {
+                let path = entry.unwrap().path();
+                match path.is_dir() {
+                    true => todo.push(path),
+                    false => out.push(path.strip_prefix(dir).unwrap().display().to_string()),
+                }
+            }
+        }
+        out.sort();
+        out
+    };
+    let expect = |planted: Vec<String>, kept: &[&str]| {
+        let mut all: Vec<String> = planted.into_iter().chain(kept.iter().map(|k| k.to_string())).collect();
+        all.sort();
+        all.dedup();
+        all
+    };
+    let claude_files = list_in(&json, "files").expect("files 가 없다");
+    assert_eq!(walk(&plugin), expect(claude_files, &["skills/theirs/SKILL.md"]), "{json}");
+    let shared_files = list_in(&json, "agents_files").expect("agents_files 가 없다");
+    let kept = ["theirs/SKILL.md", "moai-work/SKILL.md", "moai-work/notes.md"];
+    assert_eq!(walk(&shared), expect(shared_files, &kept), "{json}");
+    assert_eq!(std::fs::read_to_string(shared.join("moai-work/notes.md")).unwrap(), "mine\n");
+    // 0.9.0 이 걷은 것 — 일꾼은 두 트리에서, 감독은 `.agents` 에서만.
+    assert!(!plugin.join("skills/moai-work").exists() && !shared.join("moai-supervise").exists(), "{json}");
+    assert!(plugin.join("skills/moai-supervise/SKILL.md").is_file(), "Claude 의 감독을 걷었다");
+    assert!(
+        json.contains(&format!("\"path\":\"{}\",\"state\":\"foreign\"", shared.join("moai-work").display())),
+        "{json}"
+    );
+
+    // 다시 심어도 같다 — 걷을 것이 없으면 아무것도 안 바뀐다. 남긴 것은 한 줄로 댄다.
+    let again = walk(&shared);
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(text(&out).contains(&shared.join("moai-work").display().to_string()), "남긴 것을 안 댄다\n{}", text(&out));
+    assert_eq!(walk(&shared), again);
+
+    // `uninstall` 은 남은 일꾼 스킬도 손으로 지울 자리로 댄다 — moai 가 심었던 이름이다.
+    let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
+    assert!(said.contains(&format!("rm -r {}", shared.join("moai-work").display())), "{said}");
+    assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
+}
+
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
 /// 파일로 견주는 것과 같다. 다른 철자(워크트리의 빌드, `cargo run`)로 부른 `status` 가 멀쩡한 파일을 "다시 심는다" 고
 /// 하면, 시킨 대로 심는 순간 커밋된 훅이 그 moai 를 부른다. **Antigravity 의 파일은 무리 안까지 본다** — agy 가 다시

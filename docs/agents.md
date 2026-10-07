@@ -93,8 +93,14 @@ out), `codex`, `antigravity` or `auto` — and can be repeated.
 - **`auto` looks at PATH** for `claude`, `codex` and `agy`, says what it found,
   and plants for Claude when it finds none of them
 
-It is safe to run again: files are only overwritten, never deleted. `moai skill
-uninstall` takes Claude's registration away and leaves the files; with
+It is safe to run again: files are only overwritten. The one thing it deletes is
+a skill directory an earlier moai planted in the same tree and this one no longer
+plants — `skills/moai-work/` (gone in 0.9.0) anywhere, and `skills/moai-supervise/`
+in `.agents/skills/` (it is Claude Code's only) — and only while it holds nothing
+but the files moai planted there. Their text is not compared, so a `SKILL.md` you
+edited goes with it, the way an install overwrites one. A directory with a file of
+yours in it is left, and one line names it. `moai skill uninstall` takes Claude's
+registration away and leaves the files; with
 `--agent codex` or `antigravity` it prints the `rm -r` lines for moai's skills
 in `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
 wrote it, and deletes nothing. `moai skill status` shows Claude's registration,

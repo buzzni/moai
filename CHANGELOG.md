@@ -29,6 +29,20 @@ does not tag — see `CONTRIBUTING.md`.
   clears a worker's tmux pane — clearing a window is the person's, and the
   worker's report says when it is safe. `moai skill install --agent codex` or
   `antigravity` no longer plants it in `.agents/skills/`. (moai-obxm)
+- **`moai init` no longer writes the `.moai/mail/` and `.moai/agents/` lines
+  into `.gitignore`**, and no longer looks for them. Lines an earlier `init`
+  wrote stay where they are, and so do the directories — each holds its own
+  `.gitignore`, so git does not see them either way. (moai-six5.p9p)
+- **`moai skill install` removes the skill directories an earlier moai planted
+  and this one no longer does** — `skills/moai-work/` in the Claude plugin and
+  in `.agents/skills/`, and `skills/moai-supervise/` in `.agents/skills/`
+  (Codex and Antigravity). Only a directory that holds nothing but the files
+  moai planted there goes — their text is not compared, so a `SKILL.md` you
+  edited goes with it, as an install overwrites one; a directory with a file
+  of yours in it is left and named in one line.
+  `moai skill uninstall --agent codex` still names such a leftover for you to
+  delete, and the wiki still does not read `moai-work` as an issue id.
+  (moai-six5.1xz)
 
 ### Removed
 
