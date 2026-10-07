@@ -5261,3 +5261,7 @@
 {"ts":"2026-10-07T08:53:08Z","id":"moai-six5.1xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T08:53:08Z","id":"moai-six5.p9p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T08:53:08Z","id":"moai-six5.puc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T08:53:54Z","id":"moai-six5.1xz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: implementation subagent running in .worktrees/moai-six5; then pull develop, epic-end /code-review xhigh --fix, merge"}
+{"ts":"2026-10-07T08:53:55Z","id":"moai-six5.p9p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: implementation subagent running in .worktrees/moai-six5; then pull develop, epic-end /code-review xhigh --fix, merge"}
+{"ts":"2026-10-07T08:53:56Z","id":"moai-six5.puc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: implementation subagent running in .worktrees/moai-six5; then pull develop, epic-end /code-review xhigh --fix, merge"}
+{"ts":"2026-10-07T09:03:02Z","id":"moai-nx5w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독 스킬이 플러그인 캐시(저장소 밖)에 있으면 일꾼의 worker.md Read 가 권한을 물을 수 있다"}
