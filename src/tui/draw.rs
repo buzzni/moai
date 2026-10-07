@@ -1848,11 +1848,12 @@ fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize
 }
 
 /// 배너 한 줄을 칠한다 — 흐리게 칠할 몫(`dim`)만 [`dim`] 의 글자색을 같은 바탕에 얹는다. **자른 글에서 범위를
-/// 다시 잰다**: [`clip`] 은 앞쪽을 그대로 두고 `…` 만 붙이니, 남은 앞쪽 길이로 범위를 깎으면 된다.
+/// 다시 잰다**: [`clip`] 은 앞쪽을 그대로 두고 `…` 만 붙이니, 남은 앞쪽 길이로 범위를 깎으면 된다. 폭이 0 이면
+/// [`clip`] 이 빈 글을 내고 `…` 도 없다 — 그때 남은 앞쪽은 0 이다(빼기로 재면 넘쳐 터진다).
 fn banner_line(text: &str, width: usize, base: Style, dimmed: Option<std::ops::Range<usize>>) -> Line<'static> {
     let shown = clip(text, width);
     let Some(r) = dimmed else { return Line::from(Span::styled(shown, base)) };
-    let kept = if shown == text { shown.len() } else { shown.len() - '…'.len_utf8() };
+    let kept = if shown == text { shown.len() } else { shown.strip_suffix('…').map_or(0, str::len) };
     let (a, b) = (r.start.min(kept), r.end.min(kept));
     Line::from(vec![
         Span::styled(shown[..a].to_string(), base),
@@ -7436,8 +7437,11 @@ pub(super) mod tests {
         assert!(dimmed.iter().all(|s| s.style.bg == base.bg), "흐린 몫이 바탕을 잃었다");
         // 자른 글에서도 범위가 글자 경계를 안 넘는다 — 흐린 몫 한가운데서 잘려도 앞쪽만 흐리다.
         let cut = crate::text::width(&text[..r.start]) + 4;
-        let line = banner_line(&text, cut, base, Some(r));
+        let line = banner_line(&text, cut, base, Some(r.clone()));
         assert!(line.spans.iter().map(|s| s.content.as_ref()).collect::<String>().ends_with('…'));
+        // 폭이 0 인 칸(창을 접는 동안)에서도 안 터진다 — `clip` 이 `…` 없이 빈 글을 낸다.
+        let line = banner_line(&text, 0, base, Some(r));
+        assert!(line.spans.iter().all(|s| s.content.is_empty()), "폭 0 에 글이 섰다");
 
         a.site.unreadable_archive = 0;
         assert!(!tests_banner(&mut a).contains("아카이브의 못 읽는 줄"), "못 읽는 줄 없이 섰다");

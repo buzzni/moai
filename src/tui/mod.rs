@@ -849,12 +849,12 @@ pub struct Counted {
     pub archive_unreadable: usize,
 }
 
-/// 배너가 대는 수 — 고칠 것(기한 판정은 안 접은 채), 순수한 셈이 낸 알림의 수, 산 줄의 못 읽는 줄 수
-/// ([`Counted`]). 여는 길(`cmd::tui`)과 다시 읽기([`prepare`])가 함께 지난다.
+/// 배너가 대는 수 — 고칠 것(기한 판정은 안 접은 채), 순수한 셈이 낸 알림의 수, 산 줄의 못 읽는 줄 수, 아카이브
+/// 파일의 못 읽는 줄 수([`Counted`]). 여는 길(`cmd::tui`)과 다시 읽기([`prepare`])가 [`counted_beside`] 로 함께 지난다.
 ///
 /// **`moai status` 와 같은 자로 센다**([`crate::cmd::status::archive_board_unjudged`]) — 산 줄(`live`, 옆 워크트리를
 /// 겹쳤으면 겹친 것)만 일로 세고, 아카이브(`archived`)는 부모·막는 줄·마일스톤 롤업의 문맥으로만 읽는다. 아카이브의
-/// 충돌은 경고로, 못 읽은 아카이브와 옮길 묶음은 알림으로 선다. 섞은 줄로 세던 판은 옮긴 줄을 일로 세고 아카이브의
+/// 충돌과 못 읽은 아카이브는 경고로, 옮길 묶음은 알림으로 선다. 섞은 줄로 세던 판은 옮긴 줄을 일로 세고 아카이브의
 /// 못 읽은 줄을 산 줄의 `unreadable_line` 으로 세어, 배너가 `moai status` 와 다른 수를 댔다.
 ///
 /// 충돌과 옮길 수는 **루트의 스냅샷**과 견준다 — `moai status --worktree` 와 같은 까닭으로, 옆의 낡은 사본이 그
@@ -12397,11 +12397,31 @@ mod tests {
         assert_eq!(a.site.unreadable_live, 0);
         assert!(a.site.issues.iter().any(|i| i.id == "argos-a003"), "화면이 아카이브의 줄을 잃었다");
 
-        // `--json` 은 안 센다 — 섞기만 한다.
+        assert_eq!(a.site.unreadable_archive, 0);
+
+        // **아카이브의 못 읽는 줄 수도 여는 길로 든다**(moai-ug6x.bbh) — 다시 읽기만 싣던 판은 띄운 첫 화면에서 아카이브를
+        // 펴도 배너가 말이 없다가, 60초 뒤의 다시 읽기에서야 섰다.
+        let file = crate::archive::path(root, "2026");
+        let mut text = std::fs::read_to_string(&file).unwrap();
+        text.push_str("{\"id\":\"argos-a009\",\"kind\":42}\n");
+        std::fs::write(&file, text).unwrap();
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let stamp = stamp_of(&repo);
+        let (load, counted) = counted_beside(&repo, repo.read().unwrap(), &Default::default(), true, &now).unwrap();
+        let (index, ground) = measure(&load.issues, &repo.config);
+        let a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        assert_eq!(a.site.unreadable_archive, 1, "여는 길이 아카이브의 못 읽는 줄 수를 안 실어 왔다");
+        assert_eq!(a.site.unreadable_live, 0, "아카이브의 못 읽는 줄을 산 줄로 셌다");
+
+        // `--json` 은 안 센다 — 섞기만 한다. 셈은 통째로 빈 값이다.
         let repo = Repo::at(root.to_path_buf(), cfg());
         let (load, counted) = counted_beside(&repo, repo.read().unwrap(), &Default::default(), false, &now).unwrap();
-        assert_eq!((counted.notices, counted.unreadable), (0, 0));
+        assert_eq!(
+            (counted.warnings.count(&now, zone), counted.notices, counted.unreadable, counted.archive_unreadable),
+            (0, 0, 0, 0)
+        );
         assert_eq!(load.issues.len(), 4);
+        assert_eq!(load.errors.len(), 1, "섞은 줄이 아카이브의 못 읽는 줄을 잃었다");
     }
 
     /// **아카이브로 옮긴 미룬 에픽도 산 멤버를 미룬 것으로 세운다**(moai-ug6x.cpq) — 보드의 셈(`report` 의
