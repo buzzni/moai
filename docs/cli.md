@@ -2843,9 +2843,9 @@ Options:
 
   Events:
     session-start       Writes the baseline. Loads what is held after a compact
-    user-prompt-submit  A person asked. Loads letters, and the board once
+    user-prompt-submit  A person asked. Loads the board once
     pre-tool-use        Just before a tool call. The rules stand here
-    stop                The turn ends. Loads letters, then checks the state
+    stop                The turn ends. Checks the state
     stop-failure        An API error ended a turn (Claude). Marks the agent idle
     interrupt           A person broke off a turn (Codex). Marks the agent idle
     session-end         The session closes. Marks it idle; drops a Codex row

@@ -909,9 +909,9 @@ BACKLOG
 
   Events:
     session-start       Writes the baseline. Loads what is held after a compact
-    user-prompt-submit  A person asked. Loads letters, and the board once
+    user-prompt-submit  A person asked. Loads the board once
     pre-tool-use        Just before a tool call. The rules stand here
-    stop                The turn ends. Loads letters, then checks the state
+    stop                The turn ends. Checks the state
     stop-failure        An API error ended a turn (Claude). Marks the agent idle
     interrupt           A person broke off a turn (Codex). Marks the agent idle
     session-end         The session closes. Marks it idle; drops a Codex row
@@ -2318,16 +2318,6 @@ pub enum Dialect {
     Codex,
     /// Antigravity (agy) - camelCase in, a top-level decision out
     Antigravity,
-}
-
-impl Dialect {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Dialect::Claude => "claude",
-            Dialect::Codex => "codex",
-            Dialect::Antigravity => "antigravity",
-        }
-    }
 }
 
 /// 설치 범위. **`--user` 를 못 쓴다** — 그 이름은 이미 "누가 하는가" 다.
