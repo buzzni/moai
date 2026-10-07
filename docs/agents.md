@@ -59,6 +59,14 @@ The first `moai init` in a terminal asks, and `--guide` says it without asking:
   moai hooks mean `hook`, and a plain rerun leaves those hooks installed without
   calling the installer again. Otherwise a tracker kept out of git is left without
   a block and a committed one gets the block
+- **Switching from `file` to `block` takes the guide file away.** Once `AGENTS.md`
+  holds the whole block, `moai init --guide block` removes `.moai/guide.md` and says
+  so. A file there that does not open the way the moai guide does is yours: `init`
+  leaves it and says that too
+- **An `AGENTS.md` that links to a file `init` appends to gets no block.** With
+  `AGENTS.md -> .gitattributes` or `-> .gitignore`, planting the block would replace
+  the rules `init` just wrote. `init` leaves `AGENTS.md` alone and names it, and
+  `--check` names it as well — make `AGENTS.md` a regular file to get the block
 
 ## Plant the skills
 
