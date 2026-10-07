@@ -5579,3 +5579,9 @@
 {"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.ftm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.86j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress","note":"레이븐 (raven@buzzni.com) 이 이 창에서 허락했다"}
 {"ts":"2026-10-07T18:19:54Z","id":"moai-8gwh.86j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Taken-over: minyoung.go (hedone21@gmail.com)"}
+{"ts":"2026-10-07T18:22:22Z","id":"moai-8gwh.esm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 서브에이전트가 워크트리 .worktrees/moai-8gwh 에서 고치는 중 — AGENTS.md 의 real 자리가 딸린 파일과 같으면 안 심는다"}
+{"ts":"2026-10-07T18:22:22Z","id":"moai-8gwh.ftm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 서브에이전트가 고치는 중 — block 으로 바꿀 때 .moai/guide.md 를 걷는다"}
+{"ts":"2026-10-07T18:22:22Z","id":"moai-8gwh.67q","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 서브에이전트가 고치는 중 — .moai 짓기 실패 때 이 판이 덧붙인 무시 줄을 되돌린다"}
+{"ts":"2026-10-07T18:22:22Z","id":"moai-8gwh.86j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 항목별로 아직 서는지 조사 중, 결과 보고 고칠 것을 고른다"}
+{"ts":"2026-10-07T18:26:59Z","id":"moai-8gwh.86j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"항목별 판정(2026-10-07): 2a·2b·2c 는 이미 됐다(ba255c2a·7b7aa994·d551d6a9). 1 의 committed+hook 은 d551d6a9 가 했고 committed+none 은 사람 결정으로 그대로 둔다 — docs/agents.md 의 \"Nothing records which one you picked\" 가 의도이고, 기록하려면 config 에 guide 키가 서야 한다. 3b(접두어 칸 Input)는 src/tui 를 moai-ug6x 가 쥐어 backlog 로 담았다. 이 에픽에서 할 것: 2d 훅의 AGENTS.md 두 번 읽기, 3a ValueEnum, 3c Flags→Choices, 4 driver \"skipped\"→\"untracked\"(사람 결정)"}
+{"ts":"2026-10-07T18:27:28Z","id":"moai-hj1k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 화면의 접두어 칸을 tui::input::Input 으로 — 커서·붙여넣기"}
