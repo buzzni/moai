@@ -51,6 +51,13 @@ pub struct Roll {
     /// 묶음의 칸을 읽는 걸음이 이미 걷는다. 여기서 다시 걸으면 같은 것을 세는 자가 둘이 된다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deferred: Option<usize>,
+    /// 그 묶음 **자신이 계획 밖인가** — 제가 미뤘거나 미룬 것 밑에 있다(moai-sai2). 보드가 줄 꼬리에 미룸 낱말을
+    /// 다는 자다. `column` 과 같은 자리(`status`)에서 아카이브를 겹친 줄로 잰다 — 보드가 산 줄만으로 다시 재던
+    /// 판은 아카이브로 옮긴 미룬 에픽이 되살린 멤버의 묶음으로 도로 섰을 때 그 낱말을 잃었다. 집계만 필요한
+    /// `rollup` 은 비워 둔다(`false`). 기계 출력에는 안 싣는다 — 산 에픽에서도 안 싣던 값이라 여기서 키를 더하면
+    /// 고친 것이 아니라 더한 것이다.
+    #[serde(skip)]
+    pub put_off: bool,
 }
 
 /// 한 줄이 속한 에픽 — 제목이거나, 적힌 id 의 줄이 없거나.
@@ -259,7 +266,7 @@ pub fn deferred_roots_over<'a>(
 /// 미룬 릴리스에 든 앞줄의 미룸이 산 릴리스에 든 뒷줄에 그대로 남는다.
 ///
 /// **id 밖에 없는 표면의 답이 이것이다** — `moai show <id>` 의 `shelved_by`, `defer`·`mv`·
-/// `idea`·`edit` 이 대는 "여기를 푸세요" 말. `moai show <id>` 가 찍는 줄이 `by_id` 가 고르는
+/// `backlog`·`edit` 이 대는 "여기를 푸세요" 말. `moai show <id>` 가 찍는 줄이 `by_id` 가 고르는
 /// 뒷줄이므로, 그 줄의 답이 아닌 것을 곁들이면 한 화면이 제 말을 뒤집는다.
 fn fold_roots<'a>(all: &'a [Issue], shelved: &[Option<&'a str>]) -> BTreeMap<&'a str, &'a str> {
     // **살아 있는 검사다**(리뷰 moai-jk2u.hr4). `debug_assert` 는 릴리스에서 빠지고, 그러면
@@ -732,7 +739,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
             // 또 고르면, 두 축이 딴 줄을 보게 되는 것이 컴파일에 안 걸린다. 걸음마다 `by_id`
             // 를 한 번 더 짚던 값도 함께 빠진다.
             let epic = line.and_then(|i| self.epic_of.at(i));
-            if matches!(here, Some(Kind::Issue | Kind::Idea))
+            if matches!(here, Some(Kind::Issue | Kind::Backlog))
                 && let Some(r) = self.joined(epic, Kind::Epic)
                 && visit(r)
             {
@@ -749,7 +756,7 @@ impl<'a, 'm> Shelf<'a, 'm> {
                 Some(i) if at == start => self.epic_of.stood(i, self.lines),
                 _ => self.mile_of.get(at).copied(),
             };
-            if matches!(here, Some(Kind::Issue | Kind::Idea | Kind::Epic))
+            if matches!(here, Some(Kind::Issue | Kind::Backlog | Kind::Epic))
                 && let Some(r) = self.joined(stone, Kind::Milestone)
                 && visit(r)
             {
@@ -844,7 +851,7 @@ impl<'a> Lines<'a> {
     /// 그 줄이 **뿌리로 올라간 생각**인가([`rooted_thoughts`]) — 트리가 부모 밑에 접을지를 이것과 같은
     /// 자로 가른다(`nav::Ctx::home_of_work`).
     pub(crate) fn rooted(&self, i: &Issue) -> bool {
-        is_idea(i) && self.rooted.contains(i.id.as_str())
+        is_backlog(i) && self.rooted.contains(i.id.as_str())
     }
 
     /// 그 id 를 든 줄이 둘 이상인가([`Twins`]).
@@ -894,14 +901,14 @@ impl<'a> Lines<'a> {
 
 /// 담아 둔 생각인가. **술어를 `cmd/` 에 두지 않는다** — 어떤 줄이 무엇인지
 /// 정하는 코드가 거기 있으면 다음 표면이 같은 판단을 다시 짠다.
-pub fn is_idea(i: &Issue) -> bool {
-    i.kind == Kind::Idea
+pub fn is_backlog(i: &Issue) -> bool {
+    i.kind == Kind::Backlog
 }
 
-/// **아직** 담아 둔 생각인가 — 닫힌 idea(`promote` 로 펼쳤거나 닫은 것)는 담아 둔 것이 아니다. 쌓인 생각의 셈과
-/// 탐색기 보드의 idea 칸(moai-r1ly.91p)이 이 하나로 묻는다.
-pub fn is_open_idea(i: &Issue) -> bool {
-    is_idea(i) && !i.status.is_done()
+/// **아직** 담아 둔 생각인가 — 닫힌 backlog(`promote` 로 펼쳤거나 닫은 것)는 담아 둔 것이 아니다. 쌓인 생각의 셈과
+/// 탐색기 보드의 backlog 칸(moai-r1ly.91p)이 이 하나로 묻는다.
+pub fn is_open_backlog(i: &Issue) -> bool {
+    is_backlog(i) && !i.status.is_done()
 }
 
 /// 그 칸 이름을 **이 저장소가 아는가** — `config` 가 대거나, 어느 줄이 실제로 거기 서
@@ -916,7 +923,7 @@ pub fn knows_column(all: &[Issue], cfg: &Config, name: &str) -> bool {
 }
 
 /// 밑에 무엇을 담는 것인가. **일이 아닌 것이 곧 묶음인 것은 아니다** —
-/// idea 도 일이 아니지만 아무것도 담지 않는다. 둘을 한 술어로 묻던 자리가
+/// backlog 도 일이 아니지만 아무것도 담지 않는다. 둘을 한 술어로 묻던 자리가
 /// 상세에 `멤버 0/0` 을 내, 채울 것이 없는 자리에 채울 것이 있다고 말했다.
 pub fn is_group(i: &Issue) -> bool {
     matches!(i.kind, Kind::Epic | Kind::Milestone)
@@ -2068,12 +2075,20 @@ pub fn column<'x>(i: &'x Issue, states: &BTreeMap<GroupKey<'_>, &'x str>) -> &'x
 ///   물음이 한 줄을 다르게 재지 않는다(사용자 결정). `mv` 로 닫은 줄이면 `done_at` 과 같은 값이고, 그 필드 전에
 ///   닫힌 옛 줄에도 있다. 묶음이면 읽은 칸에 든 때([`Stand::entered`])라, 멤버 하나라도 최근에 끝났으면 묶음도
 ///   안 숨는다 — 속이 빈 폴더가 안 선다. 남은 멤버를 미뤄 닫은 묶음은 미룬 그날부터 센다(moai-23q4). 닫힌
-///   idea 와 묶음도 같은 규칙이다(사용자 결정)
+///   backlog 와 묶음도 같은 규칙이다(사용자 결정)
 /// - **못 읽는 시각은 아카이브가 아니다** — 숨기면 손으로 고친 줄 하나가 말없이 사라진다. 보이는 쪽이 싸다
 ///
 /// "지났다" 는 **온 날로 센다**([`crate::model::days_since`]) — `days` 날이 꼬박 찬 순간부터 숨는다.
 pub fn archived(column: &str, since: &str, now: &str, days: i64) -> bool {
     days > 0 && column == crate::config::DONE && days_since(since, now).is_some_and(|d| d >= days)
+}
+
+/// 목록과 보드가 **숨기는** 아카이브 — [`archived`] 에 더해, `moai archive` 가 이미 `.moai/archive` 로 옮긴 닫힌 줄
+/// (`stored`, moai-bth3 리뷰). 옮긴 것은 시계가 정한 것이 아니라 사람이 옮긴 것이라, `archive_days` 를 0 으로 끄거나
+/// 늘렸다고 목록과 보드로 돌아오지 않는다 — 그 값은 무엇을 옮길지를 정하지 옮긴 것을 되돌리지 않는다. 옮긴 묶음이라도
+/// 되살린 멤버가 있어 닫히지 않았으면(읽은 칸이 done 이 아니면) 보인다: 그 멤버의 묶음이다.
+pub fn is_put_away(column: &str, since: &str, now: &str, days: i64, stored: bool) -> bool {
+    (stored && column == crate::config::DONE) || archived(column, since, now, days)
 }
 
 /// 줄 하나가 입는 **읽은 칸** — `--json` 의 `derived_status` 가 내는 그 값이다. 묶음이
@@ -2775,7 +2790,7 @@ enum Hand<'a> {
 
 /// 줄이 **제 필드로** 넘기는 것 — 에픽 줄은 제 id, 제 `epic` 을 적은 줄은 그것이다. 둘 다 아니면
 /// 부모가 넘기는 것을 그대로 넘긴다(`None` — 더 오른다). 생각은 이보다 먼저 부모 밑에 접히는지를
-/// 잰다([`Handed::idea`]).
+/// 잰다([`Handed::backlog`]).
 fn own_hand(cur: &Issue) -> Option<Hand<'_>> {
     if cur.kind == Kind::Epic {
         return Some(Hand::Given(Some(cur.id.as_str())));
@@ -2807,7 +2822,7 @@ fn own_hand(cur: &Issue) -> Option<Hand<'_>> {
 /// 적으므로, 그 줄과 안 고친 줄이 머지로 함께 서면 그대로 나는 경우다.
 ///
 /// **뿌리 판정을 안 읽는다**(리뷰 moai-mibi.ndh). 생각이 무엇을 넘기는지는 부모 줄마다 여기서 잰다
-/// ([`Handed::idea`]) — id 로 짠 판정([`rooted_thoughts`])은 뒷줄 하나로 재므로, 그것을 읽으면 부모
+/// ([`Handed::backlog`]) — id 로 짠 판정([`rooted_thoughts`])은 뒷줄 하나로 재므로, 그것을 읽으면 부모
 /// 쌍둥이가 갈릴 때 생각 밑의 답이 파일 차례를 탔다. 그래서 이 쪽지는 그 판정보다 먼저 서고,
 /// [`rooted_thoughts`] 가 이것을 빌려 판정을 짓는다.
 struct Handed<'a, 't> {
@@ -2848,8 +2863,8 @@ impl<'a, 't> Handed<'a, 't> {
             if let Some(rows) = twins.get(id) {
                 break self.twins_hand(rows, by_id);
             }
-            if is_idea(cur) {
-                break self.idea(cur, by_id);
+            if is_backlog(cur) {
+                break self.backlog(cur, by_id);
             }
             match own_hand(cur) {
                 Some(hand) => break hand,
@@ -2891,8 +2906,8 @@ impl<'a, 't> Handed<'a, 't> {
     /// 쌍둥이 줄을 견주는 자리([`Handed::twins_hand`])가 부른다 — 그 id 를 [`Handed::from`] 에 되물으면
     /// 제자리를 돈다.
     fn row(&mut self, r: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>) -> Hand<'a> {
-        if is_idea(r) {
-            return self.idea(r, by_id);
+        if is_backlog(r) {
+            return self.backlog(r, by_id);
         }
         match own_hand(r) {
             Some(hand) => hand,
@@ -2911,7 +2926,7 @@ impl<'a, 't> Handed<'a, 't> {
     /// **부모 id 의 줄마다 잰다**(리뷰 moai-mibi.ndh). 부모 쌍둥이의 종류나 넘기는 답이 갈리면 어느 줄을
     /// 고르느냐로 생각이 접히기도 하고 뿌리로 오르기도 한다 — 그렇게 넘기는 것이 갈리면 [`Hand::Twin`]
     /// 이고, 어느 쪽이든 같으면 그 답이다.
-    fn idea(&mut self, t: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>) -> Hand<'a> {
+    fn backlog(&mut self, t: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>) -> Hand<'a> {
         let Some(p) = crate::id::parent_of(&t.id) else { return Hand::Given(None) };
         let Some(last) = by_id.get(p).copied() else { return Hand::Given(None) };
         let twins = self.twins;
@@ -2919,7 +2934,7 @@ impl<'a, 't> Handed<'a, 't> {
         let rows: &[&'a Issue] = twins.get(p).map_or(&one[..], Vec::as_slice);
         let mut first = None;
         for q in rows {
-            let hand = self.idea_under(t, q, by_id);
+            let hand = self.backlog_under(t, q, by_id);
             match first {
                 None => first = Some(hand),
                 // **제 `epic` 을 적은 생각은 갈린 부모 밑에 안 접힌다**(리뷰 moai-mibi.ndh 9번, 2026-09-29
@@ -2934,17 +2949,17 @@ impl<'a, 't> Handed<'a, 't> {
         first.unwrap_or(Hand::Given(None))
     }
 
-    /// 부모가 `q` 줄일 때 생각 `t` 가 넘기는 것([`Handed::idea`]).
-    fn idea_under(&mut self, t: &'a Issue, q: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>) -> Hand<'a> {
+    /// 부모가 `q` 줄일 때 생각 `t` 가 넘기는 것([`Handed::backlog`]).
+    fn backlog_under(&mut self, t: &'a Issue, q: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>) -> Hand<'a> {
         // **이 거르개는 값을 나른다**(리뷰) — 에픽 밑에 바로 담긴 생각이 접히는 것으로 읽히면 그 밑이
         // 통째로 에픽을 물려받는다. 묶음 밑의 생각은 뿌리로 오른다.
-        if !matches!(q.kind, Kind::Issue | Kind::Idea) {
+        if !matches!(q.kind, Kind::Issue | Kind::Backlog) {
             return Hand::Given(None);
         }
         let passed = self.hand_of(q, by_id);
         match t.epic.as_deref() {
             None => passed,
-            // 그 줄 위에서 답이 갈렸어도 제 에픽을 적은 생각은 뿌리로 오른다 — [`Handed::idea`] 와 같은 결정이다.
+            // 그 줄 위에서 답이 갈렸어도 제 에픽을 적은 생각은 뿌리로 오른다 — [`Handed::backlog`] 와 같은 결정이다.
             Some(e) => match passed {
                 Hand::Given(Some(x)) if x == e => passed,
                 _ => Hand::Given(None),
@@ -3133,7 +3148,7 @@ pub(crate) fn stood_at_line<'a>(i: &'a Issue, epic: Option<&'a str>, lines: &Lin
         // 여기서 다시 갈라야 아래 마지막 갈래로 안 떨어진다.
         Kind::Epic => milestone_stood(i),
         Kind::Milestone => None,
-        Kind::Issue | Kind::Idea => match epic {
+        Kind::Issue | Kind::Backlog => match epic {
             // 에픽으로 못 쓸 것을 들었으면 어디에도 안 선다 — 그 줄은 `(길 잃음)` 으로 가므로
             // 제 `milestone` 으로 되돌아가면 머리글은 세는데 목록에 없는 줄이 남는다.
             Some(e) => lines.at(e).filter(|e| e.kind == Kind::Epic).and_then(milestone_stood),
@@ -3251,7 +3266,7 @@ pub fn milestone_from_above<'a>(
     }
 }
 
-/// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 idea 의 id.
+/// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 backlog 의 id.
 ///
 /// 소속·마일스톤·미룸은 이것을 지나 내려오지 않는다. 생각인 부모에서 무조건
 /// 끊으면 자기를 안 그리는 에픽에 세는 일은 사라지지만(moai-14dm), **이슈 밑에
@@ -3265,26 +3280,27 @@ pub fn milestone_from_above<'a>(
 ///
 /// **부모가 넘기는 것은 쌍둥이를 아는 쪽지([`Handed`])가 낸다**(리뷰 moai-mibi.ndh) — 그 쪽지는 이
 /// 판정을 안 읽으므로 먼저 설 수 있다. 부모 줄 위에서 답이 갈렸는데(`Twin`) 그 가운데 제 에픽이 있으면
-/// 뿌리로 안 올린다: 그 밑의 줄은 [`Handed::idea`] 에게서 `Twin` 을 받아 길을 잃으므로, 이 판정으로
+/// 뿌리로 안 올린다: 그 밑의 줄은 [`Handed::backlog`] 에게서 `Twin` 을 받아 길을 잃으므로, 이 판정으로
 /// 물을 것이 없다. 제 에픽이 없으면 어느 쪽을 골라도 뿌리로 오른다.
 fn rooted_thoughts<'a>(by_id: &BTreeMap<&'a str, &'a Issue>, twins: &Twins<'a>) -> BTreeSet<&'a str> {
     let mut handed = Handed::new(twins);
     by_id
         .values()
         .copied()
-        .filter(|t| is_idea(t))
+        .filter(|t| is_backlog(t))
         .filter(|t| {
             let Some(p) = crate::id::parent_of(&t.id).and_then(|p| by_id.get(p).copied()) else { return true };
-            match (matches!(p.kind, Kind::Issue | Kind::Idea), t.epic.as_deref()) {
+            match (matches!(p.kind, Kind::Issue | Kind::Backlog), t.epic.as_deref()) {
                 (false, _) => true,
                 (true, None) => false,
                 // 제 에픽을 적은 생각은 **부모 id 의 줄마다** 그 에픽을 넘겨받을 때만 접힌다 — 한 줄이라도
-                // 딴 것을 넘기면 뿌리로 오른다([`Handed::idea`] 와 같은 자, 리뷰 moai-mibi.ndh 9번). 뒷줄만
+                // 딴 것을 넘기면 뿌리로 오른다([`Handed::backlog`] 와 같은 자, 리뷰 moai-mibi.ndh 9번). 뒷줄만
                 // 보면 접히느냐가 파일 차례로 갈린다.
                 (true, Some(e)) => {
                     let rows = twins.get(p.id.as_str()).map_or_else(|| vec![p], Clone::clone);
                     !rows.into_iter().all(|q| {
-                        matches!(q.kind, Kind::Issue | Kind::Idea) && handed.hand_of(q, by_id) == Hand::Given(Some(e))
+                        matches!(q.kind, Kind::Issue | Kind::Backlog)
+                            && handed.hand_of(q, by_id) == Hand::Given(Some(e))
                     })
                 }
             }
@@ -3327,7 +3343,7 @@ fn epic_through<'a>(i: &'a Issue, by_id: &BTreeMap<&'a str, &'a Issue>, handed: 
 /// 받으면 `moai show -e <바깥 에픽>` 만 트리에 없는 줄을 고른다. 마일스톤은 뿌리에 선다.
 /// 생각은 받되 그 밑에 그려지지는 않는다 — `-e <에픽>` 을 적은 생각과 같은 자리다.
 fn joins(i: &Issue) -> bool {
-    matches!(i.kind, Kind::Issue | Kind::Idea)
+    matches!(i.kind, Kind::Issue | Kind::Backlog)
 }
 
 /// 이슈 id → 그것이 속한 마일스톤 id.
@@ -3462,7 +3478,7 @@ fn fold_top<'a>(i: &'a Issue, pick: &impl Fn(&str) -> Option<&'a Issue>, rooted:
     let mut cur = i;
     // id 가 줄어들며 올라가므로 고리가 없다.
     while let Some(p) =
-        crate::id::parent_of(&cur.id).and_then(pick).filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+        crate::id::parent_of(&cur.id).and_then(pick).filter(|p| matches!(p.kind, Kind::Issue | Kind::Backlog))
     {
         if rooted.contains(p.id.as_str()) {
             return None;
@@ -3740,13 +3756,13 @@ pub(crate) fn misplace_of<'a>(
         // 뿌리에 선다. 가리키는 것이 없다.
         Kind::Milestone => None,
         Kind::Epic => (!usable(milestone_stood(i), Kind::Milestone)).then_some(Misplace::Milestone),
-        // idea 도 같은 자를 받는다. 에픽을 안 적은 idea 는 아무것도 안
+        // backlog 도 같은 자를 받는다. 에픽을 안 적은 backlog 는 아무것도 안
         // 가리키므로 여기 걸릴 것이 없고, 적었는데 그것이 에픽이 아니면
         // 일과 똑같이 드러나야 한다.
         // 쌍둥이 부모 밑에서 소속을 못 정한 줄이 먼저다 — 에픽이 없다고 읽고 조상의 마일스톤을
         // 재면, 못 가른다던 그 부모의 뒷줄을 거기서 다시 입는다.
-        Kind::Issue | Kind::Idea if epic_of.lost(i) => Some(Misplace::Twin),
-        Kind::Issue | Kind::Idea => match epic_of.at(i) {
+        Kind::Issue | Kind::Backlog if epic_of.lost(i) => Some(Misplace::Twin),
+        Kind::Issue | Kind::Backlog => match epic_of.at(i) {
             Some(e) if kind_of.get(e) != Some(&Kind::Epic) => Some(Misplace::Epic),
             // 에픽이 멀쩡하면 그 에픽의 마일스톤을 따르므로 여기서 안 본다.
             Some(_) => None,
@@ -3791,12 +3807,12 @@ pub fn under_lost<'a>(all: &'a [Issue], lines: &Lines<'a>, epic_of: &Handing<'a>
         let mut cur = i;
         while let Some(p) = crate::id::parent_of(&cur.id)
             .and_then(|p| lines.at(p))
-            .filter(|p| matches!(p.kind, Kind::Issue | Kind::Idea))
+            .filter(|p| matches!(p.kind, Kind::Issue | Kind::Backlog))
         {
             // **소속은 줄마다 묻는다**(리뷰, [`joined_in`]) — `nav::Ctx::home_of_work` 가 같은
             // 물음을 `Ctx::epic_at` 으로 옮긴 자리다. 여기만 지도를 짚으면 접는 자와 그리는 자가
             // 갈려, 트리가 `(길 잃음)` 안에 그린 줄을 `no_epic` 이 밖에서 또 센다.
-            let passed = match is_idea(p) && (lines.rooted.contains(p.id.as_str()) || lost_at(p)) {
+            let passed = match is_backlog(p) && (lines.rooted.contains(p.id.as_str()) || lost_at(p)) {
                 true => None,
                 false => epic_of.at(p),
             };
@@ -4015,6 +4031,7 @@ pub fn rollup_of_in(
                 percent,
                 column: None,
                 deferred: None,
+                put_off: false,
             }
         })
         .collect();
@@ -4031,7 +4048,17 @@ pub fn rollup_of_in(
     // 안 딸린 것" 이라는 말이고, 화면에 설 낱말은 `view` 가 제 말묶음에서 고른다
     // (`view::tree` 의 `ready.no_epic`). 여기서 지으면 `report` 가 화면 말을 알아야 하고,
     // 그것은 이 층이 `&[Issue]` 에 대한 순수 함수라는 계약(CLAUDE.md)이 막는 자리다.
-    out.push(Roll { id: None, title: String::new(), counts, total, done, percent, column: None, deferred: None });
+    out.push(Roll {
+        id: None,
+        title: String::new(),
+        counts,
+        total,
+        done,
+        percent,
+        column: None,
+        deferred: None,
+        put_off: false,
+    });
     out
 }
 
@@ -4546,7 +4573,7 @@ fn unblocked_pick(
     // done 에 둔 에픽의 남은 일이 까닭 없이 `ready` 에서 사라진다(moai-j3b3).
     // 자식이 남아 있으면 부모는 직접 하는 일이 아니다. **일만 센다** —
     // 이슈 밑에 담아 둔 생각 하나가 그 이슈를 `ready` 에서 지워 버리는데,
-    // idea 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
+    // backlog 는 어느 목록에도 안 나오므로 왜 사라졌는지 볼 방법이 없다.
     is_work(i)                                   // 묶음도 생각도 집는 게 아니다
         && shelved[at].is_none()                 // 미뤄 둔 것과 그 밑도
         && !eclipsed(i)                          // 쌍둥이에게 자리를 뺏긴 줄도
@@ -4897,13 +4924,41 @@ impl Warning {
         Warning::new("user_config", Vec::new()).count(n).notice()
     }
 
+    pub fn archive_pending(n: usize) -> Warning {
+        Warning::new("archive_pending", Vec::new()).count(n).notice().hint("moai archive --dry-run")
+    }
+
+    /// 못 읽은 아카이브 파일과 줄의 수 — **깨진 데이터다**(moai-5y2a, 2026-10-06 사용자 결정). 산 파일의 못 읽는 줄
+    /// (`unreadable_line`)과 같은 자리라 `moai status` 를 비영으로 끝낸다. 알림이던 판은 충돌 표시가 든 아카이브를
+    /// 둔 채 보드가 0 으로 끝나, 그것을 고칠 일로 읽을 표면이 없었다. 파일째 못 읽은 것(FIFO·UTF-8 아닌 파일)과
+    /// 파일 안의 못 읽는 줄을 하나씩 센다 — 글(`warn.archive_unreadable`)이 "파일·줄" 이라 이른다.
+    ///
+    /// **대는 명령은 자리를 대는 것이다** — `moai show --archived` 가 파일과 줄 번호를 stderr 에 댄다. `rm --line` 은
+    /// 산 파일만 고치므로 대지 않는다(고치는 길은 `docs/recovery.md`). `stats`·`show --archived` 는 이것으로 비영
+    /// 종료하지 않는다(moai-qde9.2hx.yt6) — 그 둘은 읽힌 것으로 답하고 나머지를 말한다.
+    pub fn archive_unreadable(n: usize) -> Warning {
+        Warning::new("archive_unreadable", Vec::new()).count(n).hint("moai show --archived").fatal()
+    }
+
+    pub fn archive_duplicates(ids: Vec<String>, active: &[Issue]) -> Warning {
+        let hint = if ids.iter().all(|id| active.iter().any(|i| i.id == *id)) {
+            match ids.as_slice() {
+                [id] => format!("moai archive --drop {id}"),
+                _ => "moai archive --drop <id>".to_string(),
+            }
+        } else {
+            "moai show --archived".to_string()
+        };
+        Warning::new("archive_duplicate_id", ids).hint(&hint).fatal()
+    }
+
     pub fn agents_stale(root: Option<&str>, edited: bool) -> Warning {
         let kind = if edited { "agents_hand_edited" } else { "agents_stale" };
         Warning::new(kind, Vec::new()).count(1).notice().hint(&Warning::init_hint(root))
     }
 
     /// 딸린 파일(`.gitignore`·`.gitattributes`)에 moai 가 쓰는 규칙이 빠졌다는 **알림**
-    /// (moai-2f99). 재는 쪽은 `cmd::init::dotfile_gaps` 고, `status` 와 훅의 보드가 이것을
+    /// (moai-2f99). 재는 쪽은 `cmd::init::gaps_in` 고, `status` 와 훅의 보드가 이것을
     /// `notices` 에 얹는다 — [`status`] 는 `&[Issue]` 만 받는 순수 함수라 파일을 안 읽는다.
     ///
     /// **파일마다 `kind` 가 다르다**(부르는 쪽이 고른다). 빠졌을 때의 결과가 아주 달라
@@ -4919,7 +4974,7 @@ impl Warning {
     }
 
     /// 딸린 파일(`.gitattributes`·`.gitignore`)이 **링크라는 알림**(moai-yke5). 재는 쪽은
-    /// `cmd::init::linked_dotfiles` 고, `ids` 에 링크인 파일의 이름을 **모두** 든다.
+    /// `cmd::init::linked_in` 고, `ids` 에 링크인 파일의 이름을 **모두** 든다.
     ///
     /// **[`Warning::dotfile_rules`] 와 가른다.** git 은 2.32 부터 체크아웃 안의 링크인 딸린 파일을 안 읽어
     /// 규칙이 하나도 안 서는데, 빠진 줄로 말하면 `moai init` 을 대게 되고 그 `init` 은 링크에 안 쓰므로
@@ -4931,6 +4986,11 @@ impl Warning {
     /// 갈래로 알림을 찾는 쪽은 하나를 잃는다.
     pub fn dotfile_linked(names: &[&str]) -> Warning {
         Warning::new("dotfile_linked", names.iter().map(|n| n.to_string()).collect()).notice()
+    }
+
+    /// git 이 답하지 않아 추적 방식과 빠진 딸린 파일 규칙을 잴 수 없었다.
+    pub fn tracking_unknown() -> Warning {
+        Warning::new("tracking_unknown", Vec::new()).notice()
     }
 
     /// 트래커 파일(`.moai/issues.jsonl`)이 **링크라는 알림**(moai-jo3h, 2026-09-29 사용자 결정). 재는 쪽은
@@ -5069,7 +5129,7 @@ pub struct StatusReport {
     ///
     /// 한때 한 배열에 섞고 `notice` 깃발로만 갈라, 사람 화면과 탐색기는 알림을
     /// 빼고 셌는데 `--json` 을 읽는 쪽과 Stop 훅은 `warnings` 를 통째로 셌다 —
-    /// `moai idea add`·`moai defer` 를 부를 때마다 "경고가 늘었다" 로 세션이
+    /// `moai backlog add`·`moai defer` 를 부를 때마다 "경고가 늘었다" 로 세션이
     /// 붙들렸다(moai-c8lb). 받는 쪽마다 깃발을 기억하게 하느니 자리를 가른다.
     pub warnings: Vec<Warning>,
     /// 알려 주는 것 — 쌓인 생각, 미뤄 둔 것. 고칠 것이 있다는 말이 아니다.
@@ -5244,8 +5304,13 @@ pub struct Unreadable<'a> {
 ///
 /// `zone` 은 **읽는 사람의 시간대**다 — 기한 판정 하나에만 든다([`Dues`]). 이 문은 **낼 것을 그
 /// 자리에서 다 내는** 표면의 것이라 판정까지 접어서 낸다([`StatusReport::judged`]): `moai status`·
-/// `--json`·훅의 셈이 그렇다. 셈을 들고 있다가 나중에 그리는 탐색기는 [`status_in`] 으로 시간대
-/// 없이 세고 [`Dues`] 를 그대로 들었다가 그릴 때 잰다(moai-fgjj).
+/// `--json`·훅의 셈이 그렇다. 셈을 들고 있다가 나중에 그리는 탐색기는 [`status_with_archive_unjudged`] 로
+/// 시간대 없이 세고 [`Dues`] 를 그대로 들었다가 그릴 때 잰다(moai-fgjj).
+///
+/// **시험만 부른다**(moai-nkwg) — 표면들은 아카이브를 곁들인 `cmd::status::archive_board` 로 세고, 판정은
+/// 그 겉에서 접는다. 아카이브 없는 줄의 판을 한 줄로 세우는 시험의 길로 남긴다. 문서에는 선다(`doc`) — 이 이름을
+/// 가리키는 글이 여럿이다.
+#[cfg(any(test, doc))]
 pub fn status(
     issues: &[Issue],
     unreadable: &[Unreadable],
@@ -5264,7 +5329,8 @@ pub fn status(
 /// 손으로 이으면 [`Soil`] 이 아닌 조각에서 지은 지도를 넘겨도 컴파일되고, 그때 수가 조용히
 /// 어긋난다 — 이 문은 `issues` 하나만 받아 그 짝을 못 어긋나게 한다.
 ///
-/// **이미 [`Soil`] 을 들고 있는 쪽은 [`status_in`] 이다.** 탐색기의 적재가 그쪽이다(moai-u5o9).
+/// **이미 [`Soil`] 을 들고 있는 쪽은 [`status_in`] 이다.** 줄만 든 탐색기 화면이 그쪽이다(moai-u5o9) — 저장소에서
+/// 읽은 화면은 아카이브를 곁들인 줄로 세어 [`status_with_archive_unjudged`] 가 제 지도를 잰다(moai-nkwg).
 pub fn status_unjudged(issues: &[Issue], unreadable: &[Unreadable], cfg: &Config, now: &str) -> StatusReport {
     // **파일 전체를 훑어야 아는 것은 한 걸음으로 잰다**(moai-oxup, [`Soil`]). 손으로 이을 때는 `groups`
     // 가 `milestones`·`misplaced`·두 롤업 안에서 저마다 다시 지어 `status` 한 번에 예닐곱 번 돌았다.
@@ -5289,6 +5355,67 @@ pub fn status_in<'a>(
     now: &str,
     soil: &Soil<'a>,
 ) -> StatusReport {
+    status_in_scope(issues, unreadable, cfg, now, soil, &|_| true)
+}
+
+/// Combine reference context without letting a stale archive copy eclipse a live row. A live id is a readable row
+/// or an unreadable live line that still names it (`opaque`) — `archive::context` applies the same rule, so `status`
+/// and `ready` never read one row two ways (moai-bth3 review).
+pub fn with_archive(active: &[Issue], archived_rows: &[Issue], opaque: &BTreeSet<&str>) -> Vec<Issue> {
+    let ids: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    let mut all: Vec<Issue> = archived_rows
+        .iter()
+        .filter(|i| !ids.contains(i.id.as_str()) && !opaque.contains(i.id.as_str()))
+        .cloned()
+        .collect();
+    all.extend_from_slice(active);
+    all
+}
+
+/// Archive rows supply references and rollups, while only active work is counted. Tests only — the surfaces count
+/// through `cmd::status::archive_board`, which judges the dues outside [`status_with_archive_unjudged`] (moai-nkwg).
+/// Built for docs too, so the links that name it resolve.
+#[cfg(any(test, doc))]
+pub fn status_with_archive(
+    active: &[Issue],
+    archived_rows: &[Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    zone: &crate::tz::Zone,
+) -> StatusReport {
+    status_with_archive_unjudged(active, archived_rows, unreadable, cfg, now).judged(now, zone)
+}
+
+/// [`status_with_archive`] 에서 **기한 판정만 뺀 것**(moai-nkwg) — [`status_unjudged`] 가 [`status`] 의 짝인 것과
+/// 같다. 탐색기의 배너와 프로젝트 층이 이것으로 센다: 셈은 스레드에서 돌아 오래 들고 있고, 기한은 그릴 때 읽는
+/// 사람의 달로 잰다([`Dues`], moai-fgjj). 아카이브를 안 읽던 그 두 표면은 다 옮긴 마일스톤을 기한 지난 빈 todo
+/// 로 댔다.
+pub fn status_with_archive_unjudged(
+    active: &[Issue],
+    archived_rows: &[Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+) -> StatusReport {
+    if archived_rows.is_empty() {
+        return status_unjudged(active, unreadable, cfg, now);
+    }
+    let visible: BTreeSet<&str> = active.iter().map(|i| i.id.as_str()).collect();
+    let opaque: BTreeSet<&str> = unreadable.iter().filter_map(|u| u.id).collect();
+    let all = with_archive(active, archived_rows, &opaque);
+    let soil = Soil::of(&all);
+    status_in_scope(&all, unreadable, cfg, now, &soil, &|i| visible.contains(i.id.as_str()))
+}
+
+fn status_in_scope<'a>(
+    issues: &'a [Issue],
+    unreadable: &[Unreadable],
+    cfg: &Config,
+    now: &str,
+    soil: &Soil<'a>,
+    visible: &dyn Fn(&Issue) -> bool,
+) -> StatusReport {
     let group = &soil.epic;
     let by_id: BTreeMap<&str, &Issue> = issues.iter().map(|i| (i.id.as_str(), i)).collect();
     // **여기가 "지금 계획" 의 정의다.** 보드 수·모든 경고·흐름이 이 하나를
@@ -5311,8 +5438,12 @@ pub fn status_in<'a>(
     // id 의 앞줄이 뒷줄의 답을 입는다. 보드 수·경고·흐름이 이 하나를 지나므로 여기서 갈리면
     // 아래가 다 갈린다. **id 로 불리는 자리**(막는 줄, 빈 에픽, 마감)는 그대로 접은 것을 쓴다.
     let off = &soil.shelved;
-    let work: Vec<&Issue> =
-        issues.iter().enumerate().filter(|(k, i)| is_work(i) && off[*k].is_none()).map(|(_, i)| i).collect();
+    let work: Vec<&Issue> = issues
+        .iter()
+        .enumerate()
+        .filter(|(k, i)| visible(i) && is_work(i) && off[*k].is_none())
+        .map(|(_, i)| i)
+        .collect();
     // **한 번만 잰다.** 둘 다 이슈 전부의 물림을 타고 올라가므로, 경고마다
     // 다시 부르면 같은 걸음을 `moai status` 한 번에 여러 벌 걷는다.
     // `placed` 는 자리를 못 정하는 줄(`nav` 의 `(길 잃음)` 과 같은 집합),
@@ -5340,7 +5471,9 @@ pub fn status_in<'a>(
     let stood = |kind: Kind, r: Roll| {
         let column = r.id.as_deref().and_then(|id| states.get(&(kind, id))).map(|c| c.to_string());
         let deferred = r.id.as_deref().and_then(|id| put_aside.get(id)).copied();
-        Roll { column, deferred, ..r }
+        // 미룸 낱말도 같은 자리에서 — 보드가 산 줄만으로 다시 재면 아카이브의 미룬 묶음이 낱말을 잃는다(moai-sai2).
+        let put_off = r.id.as_deref().is_some_and(|id| out_of_plan.contains(id));
+        Roll { column, deferred, put_off, ..r }
     };
     let mut epics: Vec<Roll> =
         rolls.iter().filter(|r| r.id.is_some()).cloned().map(|r| stood(in_epic.kind(), r)).collect();
@@ -5389,7 +5522,7 @@ pub fn status_in<'a>(
     // 줄로 재면 같은 종류 쌍둥이 한 쌍이 `status_no_epic_min` 을 넘겨 놓고 `4건` 을 말한다.
     let open = issues
         .iter()
-        .filter(|i| is_work(i) && !i.status.is_done())
+        .filter(|i| visible(i) && is_work(i) && !i.status.is_done())
         .map(|i| i.id.as_str())
         .collect::<BTreeSet<_>>()
         .len();
@@ -5548,11 +5681,16 @@ pub fn status_in<'a>(
     // 에픽은 `미뤄 둔 것` 으로 세면서 `속이 빈 에픽` 으로도 꾸짖으면 안 된다.
     // 제 미룸을 따로 묻지 않는다: 빈 묶음은 읽은 칸이 첫 칸이라 `deferred_roots`
     // 에서 빠지지 않으므로, 미뤘으면 언제나 `out_of_plan` 에 든다.
+    // **꾸짖는 것은 산 줄뿐이다**(moai-bth3 리뷰) — 아카이브에서 온 줄은 소속·막음·마감을 읽는 재료지 고칠 일이
+    // 아니다. 아래 6번까지 모든 줄을 훑는 경고는 저마다 이 문(`visible`)을 지난다. 한때 다 센 뒤 경고의 id 를
+    // 한 번에 걸렀는데, 그 거르개가 못 읽는 줄의 id 를 산 줄이 아닌 것으로 읽어 `duplicate_id` 를 지웠고,
+    // 기한 줄이 설 자리(`Dues::at`)를 잰 뒤에 경고를 빼 기한 줄이 치명 줄 밑으로 내려갔다.
     let empty: Vec<String> = rolls
         .iter()
         .filter(|r| r.id.is_some() && r.total == 0)
         .filter_map(|r| r.id.clone())
         .filter(|id| !out_of_plan.contains(id.as_str()))
+        .filter(|id| by_id.get(id.as_str()).is_some_and(|i| visible(i)))
         .collect();
     if !empty.is_empty() {
         warnings.push(Warning::new("empty_epic", empty));
@@ -5571,14 +5709,16 @@ pub fn status_in<'a>(
     // 여기서 합친다. 빼면 `moai rm` 이 "끊긴 참조가 남았다" 고 말한 그 줄에
     // 대해 `status` 가 그다음부터 영영 침묵한다.
     for (kind, why) in [("dangling_epic", Misplace::Epic), ("dangling_milestone", Misplace::Milestone)] {
-        let hit: Vec<&Issue> = dangling_by(issues, placed, &held, why).collect();
+        let hit: Vec<&Issue> = dangling_by(issues, placed, &held, why).filter(|i| visible(i)).collect();
         if !hit.is_empty() {
             warnings.push(Warning::new(kind, ids_of(&hit)));
         }
     }
 
-    let orphans: Vec<&Issue> =
-        issues.iter().filter(|i| crate::id::parent_of(&i.id).is_some_and(|p| !known.contains(p))).collect();
+    let orphans: Vec<&Issue> = issues
+        .iter()
+        .filter(|i| visible(i) && crate::id::parent_of(&i.id).is_some_and(|p| !known.contains(p)))
+        .collect();
     if !orphans.is_empty() {
         warnings.push(Warning::new("orphan_child", ids_of(&orphans)));
     }
@@ -5586,24 +5726,24 @@ pub fn status_in<'a>(
     // 결정). 한때 이 줄은 부모의 뒷줄을 조용히 입어, 두 줄의 차례를 바꾸면 에픽이 뒤집혔고
     // `duplicate_id` 는 부모 id 만 댔다 — 자식이 자리를 옮긴 것을 말하는 자가 없었다. **줄마다
     // 묻는다**: `placed` 는 id 로 접은 지도라 같은 id 의 앞줄이 뒷줄의 판정을 입는다.
-    let twin_parent: Vec<&Issue> = issues.iter().filter(|i| in_epic.lost(i)).collect();
+    let twin_parent: Vec<&Issue> = issues.iter().filter(|i| visible(i) && in_epic.lost(i)).collect();
     if !twin_parent.is_empty() {
         warnings.push(Warning::new("twin_parent", ids_of(&twin_parent)));
     }
     let dangling_blockers: Vec<&Issue> =
-        issues.iter().filter(|i| i.blocked_by.iter().any(|b| !known.contains(b.as_str()))).collect();
+        issues.iter().filter(|i| visible(i) && i.blocked_by.iter().any(|b| !known.contains(b.as_str()))).collect();
     if !dangling_blockers.is_empty() {
         warnings.push(Warning::new("dangling_blocked_by", ids_of(&dangling_blockers)));
     }
     // 먼 미래 시각(moai-ugjp). **경고지 깨진 데이터가 아니다** — 줄은 읽히고 고칠 것일 뿐이라
     // 종료 코드를 안 바꾼다(사람이 정했다). 종류를 안 가린다: 시각은 모든 줄이 든다.
-    let ahead: Vec<&Issue> = issues.iter().filter(|i| far_ahead(i, now)).collect();
+    let ahead: Vec<&Issue> = issues.iter().filter(|i| visible(i) && far_ahead(i, now)).collect();
     if !ahead.is_empty() {
         warnings.push(Warning::new("future_timestamp", ids_of(&ahead)));
     }
     // 모르는 필드는 **버리지 않고 들고 있다.** 들고 있다는 사실만 비춘다 —
     // 2단계 바이너리가 쓴 파일을 1단계가 만졌다는 뜻일 수 있다.
-    let carrying: Vec<&Issue> = issues.iter().filter(|i| !i.rest.is_empty()).collect();
+    let carrying: Vec<&Issue> = issues.iter().filter(|i| visible(i) && !i.rest.is_empty()).collect();
     if !carrying.is_empty() {
         warnings.push(Warning::new("unknown_field", ids_of(&carrying)));
     }
@@ -5613,14 +5753,14 @@ pub fn status_in<'a>(
     //
     //      **id 를 싣지 않는다.** 다섯 건이 넘어야 뜨는 줄인데 거기에 제목
     //      셋을 더 달면, 정확히 "담을수록 화면이 시끄러워진다" 는 그 일이
-    //      일어난다. 무엇이 쌓였는지는 `moai idea ls` 가 낸다.
-    //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai idea
+    //      일어난다. 무엇이 쌓였는지는 `moai backlog ls` 가 낸다.
+    //      **미뤄 둔 생각은 안 센다.** 여기 세면 이 줄이 가리키는 `moai backlog
     //      ls` 가 그것을 숨겨, 세어 놓고 못 보여 주는 수가 된다 — 미룬 것은
     //      아래 6-3 이 제 이름으로 말한다.
-    let piled = |(k, i): &(usize, &Issue)| is_open_idea(i) && off[*k].is_none();
+    let piled = |(k, i): &(usize, &Issue)| visible(i) && is_open_backlog(i) && off[*k].is_none();
     let count = issues.iter().enumerate().filter(piled).count();
-    // 문턱 0 으로 `쌓인 idea 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
-    if count > 0 && count >= cfg.status.idea_pile {
+    // 문턱 0 으로 `쌓인 backlog 0건` 이 서지 않게 한다 — 위 `no_epic` 과 같은 까닭이다.
+    if count > 0 && count >= cfg.status.backlog_pile {
         let oldest = issues
             .iter()
             .enumerate()
@@ -5628,10 +5768,12 @@ pub fn status_in<'a>(
             .filter_map(|(_, i)| days_since(&i.created_at, now))
             .max()
             .unwrap_or(0);
-        notices.push(Warning::new("idea_pile", Vec::new()).count(count).oldest(oldest).notice().hint("moai idea ls"));
+        notices.push(
+            Warning::new("backlog_pile", Vec::new()).count(count).oldest(oldest).notice().hint("moai backlog ls"),
+        );
     }
 
-    // 6-3. 미뤄 둔 것. **한 건부터 말한다** — idea 와 달리 미루는 것은 이미
+    // 6-3. 미뤄 둔 것. **한 건부터 말한다** — backlog 와 달리 미루는 것은 이미
     //      있는 일에 대한 한 번의 결정이라 자주 쌓이지 않고, 대신 보드에서
     //      통째로 사라지므로 여기가 그것이 보이는 **유일한 자리**다. 흐린 한
     //      줄이고 알림이라 꾸지람으로 읽히지 않는다.
@@ -5646,7 +5788,17 @@ pub fn status_in<'a>(
     //
     //      **줄마다 센다**(moai-u3ta) — 이 수가 가리키는 `moai show --deferred` 도 줄마다
     //      고르므로, id 로 세면 미룬 쌍둥이 하나가 제 짝까지 이 수에 얹는다.
-    let shelved = |(k, _): &(usize, &Issue)| off[*k].is_some();
+    //
+    //      **아카이브의 줄은 보드에 도로 선 것만 센다**(moai-sai2). 산 멤버를 되살리면 옮겨 둔 미룬 에픽이 그
+    //      멤버의 묶음으로 보드에 다시 서고, 그 멤버는 이 에픽의 미룸으로 계획 밖이다 — 산 에픽이면 둘을 세는데
+    //      산 줄만 세던 판은 하나를 댔고, 가리키는 `show --deferred` 는 둘을 냈다. 도로 섰는가는 목록이
+    //      아카이브를 숨기는 자(`query::Where::archived`)와 같은 자로 잰다: 읽은 칸과 그 칸에 든 때를
+    //      [`is_put_away`] 에 댄다. 밑에 산 줄이 없는 미룬 묶음은 칸이 done 이라 지난 일로 빠진다.
+    let back = |i: &Issue| {
+        let since = stands_on(i, |(_, id)| group_entered.get(id).copied()).unwrap_or(i.status_since.as_str());
+        !is_put_away(column(i, &states), since, now, cfg.archive_days, true)
+    };
+    let shelved = |(k, i): &(usize, &Issue)| off[*k].is_some() && (visible(i) || back(i));
     let count = issues.iter().enumerate().filter(shelved).count();
     if count > 0 {
         let oldest = issues
@@ -5686,7 +5838,7 @@ pub fn status_in<'a>(
             .filter(|i| !in_stone.at(i).is_some_and(|m| running.iter().any(|r| r.id == m)))
             .count();
         // **0 이면 말하지 않는다**(리뷰 6) — "밖에 남은 일 0건은 나중이다" 는 아무것도 안
-        // 말하면서 자리만 차지한다. 위의 `idea_pile`·`deferred` 가 같은 까닭으로 0 을 거른다.
+        // 말하면서 자리만 차지한다. 위의 `backlog_pile`·`deferred` 가 같은 까닭으로 0 을 거른다.
         // 어느 마일스톤이 도는지는 보드의 마일스톤 표가 이미 낸다.
         if outside > 0 {
             notices.push(
@@ -5755,6 +5907,7 @@ pub fn status_in<'a>(
     let mut seen = BTreeSet::new();
     let dups: Vec<String> = issues
         .iter()
+        .filter(|i| visible(i))
         .map(|i| i.id.as_str())
         .chain(unreadable.iter().filter_map(|u| u.id))
         .filter(|id| !seen.insert(*id))
@@ -5791,7 +5944,7 @@ pub fn status_in<'a>(
     // **먼 미래 시각을 든 줄은 통째로 뺀다**(moai-ugjp) — 2099 는 "최근" 이 아니고, 셈에 넣으면
     // 위 `future_timestamp` 가 드러낸 오타가 흐름 숫자로도 새어 나온다.
     let within = |at: &str| days_since(at, now).is_some_and(|d| d < cfg.status.flow_days);
-    let happened: Vec<&Issue> = issues.iter().filter(|i| is_work(i) && !far_ahead(i, now)).collect();
+    let happened: Vec<&Issue> = issues.iter().filter(|i| visible(i) && is_work(i) && !far_ahead(i, now)).collect();
     let created = happened.iter().filter(|i| within(&i.created_at)).count();
     let closed = happened.iter().filter(|i| i.status.is_done() && within(&i.status_since)).count();
 
@@ -5802,10 +5955,14 @@ pub fn status_in<'a>(
     // **경고를 다 센 뒤에 뺀다**(리뷰 moai-47mz.5il) — 아카이브는 보드의 목록을 줄이는 보기의 일이다. 위의 1-2 가
     // "마일스톤을 쓰는 저장소인가" 를 이 목록으로 묻는데, 먼저 빼던 판은 끝난 릴리스만 남은 저장소에서 `no_milestone`
     // 이 시계를 따라 꺼졌다가 새 마일스톤 하나에 도로 켜졌다 — Stop 훅은 그것을 기준선보다 는 경고로 읽는다.
+    //
+    // **아카이브 파일로 옮긴 묶음은 시계를 안 본다**(moai-bth3 리뷰) — 산 줄이 아니면(`visible`) 이미 옮겨 둔 것이라,
+    // `archive_days` 를 0 으로 끄거나 늘려도 보드로 돌아오지 않는다. 같은 자를 목록(`query::Where::archived`)이 쓴다.
     let aged = |r: &Roll| {
         r.id.as_deref().is_some_and(|id| {
             let since = group_entered.get(id).copied().unwrap_or_default();
-            archived(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days)
+            let stored = by_id.get(id).is_some_and(|i| !visible(i));
+            is_put_away(r.column.as_deref().unwrap_or_default(), since, now, cfg.archive_days, stored)
         })
     };
     let before = (stones.len(), epics.len());
@@ -5850,7 +6007,7 @@ mod tests {
 
     /// 아무것도 안 적은 저장소가 받는 문턱. **기본값을 여기 다시 적지 않는다** —
     /// 적으면 기본값을 고칠 때 시험만 옛 수를 든 채 통과한다.
-    const IDEA_PILE: usize = crate::config::Thresholds::DEFAULT.idea_pile;
+    const BACKLOG_PILE: usize = crate::config::Thresholds::DEFAULT.backlog_pile;
 
     fn make(id: &str, kind: Kind, status: &str) -> Issue {
         Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(status), "2026-09-01T00:00:00Z")
@@ -5868,7 +6025,7 @@ mod tests {
     /// 약속을 그 자리에서 어긴다(리뷰).
     #[test]
     fn a_twin_that_is_not_the_member_still_stands_as_a_child() {
-        let mut twin = make("argos-aaaa.b1x", Kind::Idea, "todo");
+        let mut twin = make("argos-aaaa.b1x", Kind::Backlog, "todo");
         twin.title = "가려진 앞줄".into();
         let all = vec![make("argos-aaaa", Kind::Epic, "todo"), twin, make("argos-aaaa.b1x", Kind::Issue, "todo")];
         let kids = children_of(&all, "argos-aaaa");
@@ -6372,7 +6529,7 @@ mod tests {
                 .unwrap_or_default()
         };
         let thought = |id: &str, epic: Option<&str>| {
-            let mut t = make(id, Kind::Idea, "todo");
+            let mut t = make(id, Kind::Backlog, "todo");
             t.epic = epic.map(str::to_string);
             t
         };
@@ -7513,6 +7670,9 @@ mod tests {
         let dup = vec![make("argos-0001", Kind::Issue, "todo"), make("argos-0001", Kind::Issue, "todo")];
         assert!(status(&dup, &[], &cfg(), "2026-09-01T00:00:00Z", utc()).broken());
         assert!(status(&[], &[Unreadable { id: None }], &cfg(), "2026-09-01T00:00:00Z", utc()).broken());
+        // 아카이브도 같다 — 못 읽는 아카이브 파일·줄은 산 파일의 못 읽는 줄과 한 자리다(moai-5y2a).
+        let archive = Warning::archive_unreadable(2);
+        assert!(archive.fatal && !archive.notice && archive.count == 2, "{archive:?}");
     }
 
     /// 만드는 속도가 끝내는 속도를 넘으면 쌓인다.
@@ -7704,6 +7864,30 @@ mod tests {
         assert!(ready(&issues, &cfg()).iter().all(|i| i.id == "argos-0002"));
     }
 
+    #[test]
+    fn archived_rows_are_context_not_diagnostics() {
+        // **아카이브의 줄은 꾸짖지 않고 재료로만 쓴다**(moai-bth3 리뷰). 산 줄의 경고는 그대로 서고 — 못 읽는 쌍둥이의
+        // `duplicate_id` 도 — 기한 줄은 치명 줄 앞에 선다. 경고를 다 센 뒤 id 로 거르던 판은 둘 다 무너뜨렸다: 못 읽는
+        // 줄의 id 는 산 줄이 아니라며 지웠고, 기한 줄이 설 자리를 잰 뒤에 경고를 빼 그 자리가 밀렸다.
+        let now = "2026-10-01T00:00:00Z";
+        let mut stone = make("argos-m001", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-09-20".into());
+        let mut inside = make("argos-0002", Kind::Issue, "todo");
+        inside.milestone = Some("argos-m001".into());
+        let mut newer = make("argos-0009", Kind::Issue, "done");
+        newer.rest.insert("lane".into(), serde_json::json!("x"));
+        let twins = [Unreadable { id: Some("argos-0005") }, Unreadable { id: Some("argos-0005") }];
+        let st = status_with_archive(&[stone, inside], &[newer], &twins, &cfg(), now, utc());
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"unknown_field"), "an archived row was scolded — {kinds:?}");
+        let at = |k: &str| kinds.iter().position(|x| *x == k).unwrap_or_else(|| panic!("{k} missing — {kinds:?}"));
+        assert!(
+            at("milestone_overdue") < at("duplicate_id") && at("duplicate_id") < at("unreadable_line"),
+            "{kinds:?}"
+        );
+        assert_eq!(st.warnings[at("duplicate_id")].ids, ["argos-0005"]);
+    }
+
     /// **아카이브된 묶음은 보드의 목록에서 빠지고 수로만 남는다**(moai-47mz, 2026-10-03 사용자 결정). 묶음은
     /// 멤버가 마지막으로 칸을 옮긴 때로 잰다 — 최근에 끝난 멤버가 하나라도 있으면 남는다. 마일스톤도 같다.
     #[test]
@@ -7789,7 +7973,7 @@ mod tests {
             make("argos-0001.aa1", Kind::Issue, "todo"),
             make("argos-0001.aa1.bb1", Kind::Issue, "todo"),
             own_epic,
-            make("argos-0001.aa3", Kind::Idea, "todo"),
+            make("argos-0001.aa3", Kind::Backlog, "todo"),
             make("argos-0001.ee1", Kind::Epic, "todo"),
             make("argos-0001.aa1.ee2", Kind::Epic, "todo"),
             make("argos-0001.aa2.ee3", Kind::Epic, "todo"),
@@ -7833,7 +8017,7 @@ mod tests {
         stone.title = "v0.1".into();
         let mut epic = make("argos-0002", Kind::Epic, "todo");
         epic.milestone = Some("argos-0001".into());
-        let mut thought = make("argos-0004", Kind::Idea, "todo");
+        let mut thought = make("argos-0004", Kind::Backlog, "todo");
         thought.epic = Some("argos-0002".into());
         // 에픽 줄이 든 `epic` — `nav` 는 에픽을 에픽 밑에 두지 않는다. 그 에픽의
         // 마일스톤도 물려받지 않는다 — 에픽 줄은 제 `milestone` 에만 선다(moai-0prl).
@@ -7983,14 +8167,14 @@ mod tests {
     fn a_milestone_reads_the_same_way() {
         let mut epic = make("argos-0001", Kind::Epic, "done");
         epic.milestone = Some("argos-0009".into());
-        let mut idea = make("argos-0005", Kind::Idea, "in_progress");
-        idea.milestone = Some("argos-0009".into());
+        let mut backlog = make("argos-0005", Kind::Backlog, "in_progress");
+        backlog.milestone = Some("argos-0009".into());
         let issues = vec![
             make("argos-0009", Kind::Milestone, "done"),
             epic,
             member("argos-0002", "argos-0001", "done"),
             make("argos-0002.aaa", Kind::Issue, "todo"),
-            idea,
+            backlog,
         ];
         assert_eq!(state_of(&issues, "argos-0009"), "in_progress");
         assert_eq!(state_of(&issues, "argos-0001"), "in_progress", "물려받은 자식을 안 셌다");
@@ -8232,7 +8416,7 @@ mod tests {
         for _ in 0..3000 {
             let mut issues: Vec<Issue> = Vec::new();
             for n in 0..(2 + roll(10)) {
-                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Backlog][roll(6)];
                 // 중복 id 를 섞는다 — 이 갈래가 갈리는 것은 그 저장소에서뿐이다.
                 let id = match roll(4) {
                     0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
@@ -8301,7 +8485,7 @@ mod tests {
         for _ in 0..3000 {
             let mut issues: Vec<Issue> = Vec::new();
             for n in 0..(2 + roll(10)) {
-                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Backlog][roll(6)];
                 // 쌍둥이는 안 섞는다 — 자식 id 와 새 id 만 짓는다.
                 let id = match roll(3) {
                     0 if !issues.is_empty() => format!("{}.a{n:02}", issues[roll(issues.len())].id),
@@ -8625,36 +8809,36 @@ mod tests {
         assert!(!by_id(group_stands(&issues, &two))["argos-0001"].busy, "첫 칸 멤버를 집은 것으로 셌다");
     }
 
-    // ── idea 는 일이 아니다 ──────────────────────────────────────────
+    // ── backlog 는 일이 아니다 ──────────────────────────────────────────
     //
-    // **여기가 이 에픽에서 제일 조용히 틀어질 자리다.** 경고 하나가 idea 를
+    // **여기가 이 에픽에서 제일 조용히 틀어질 자리다.** 경고 하나가 backlog 를
     // 세기 시작하면 사람이 생각을 담을수록 화면이 시끄러워지고, 그러면
     // 안 담게 된다. 저절로 빠지는 곳이 대부분이라 시험으로 못 박는다.
 
-    fn idea(id: &str) -> Issue {
-        make(id, Kind::Idea, "todo")
+    fn backlog(id: &str) -> Issue {
+        make(id, Kind::Backlog, "todo")
     }
 
     #[test]
-    fn an_idea_never_comes_up_as_ready() {
-        let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
+    fn an_backlog_never_comes_up_as_ready() {
+        let issues = vec![backlog("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
         let picks: Vec<&str> = ready(&issues, &cfg()).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(picks, ["argos-0009"], "담아 둔 생각이 집을 일로 올라왔다");
     }
 
     #[test]
-    fn an_idea_is_not_counted_on_the_board() {
-        let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
+    fn an_backlog_is_not_counted_on_the_board() {
+        let issues = vec![backlog("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
         let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
-        assert_eq!(st.total, 1, "idea 를 이슈로 셌다");
+        assert_eq!(st.total, 1, "backlog 를 이슈로 셌다");
         assert_eq!(st.counts.get("todo"), Some(&1), "{:?}", st.counts);
     }
 
-    /// 에픽에 든 idea 도 진행률을 움직이지 않는다. 움직이면 생각을 담을수록
+    /// 에픽에 든 backlog 도 진행률을 움직이지 않는다. 움직이면 생각을 담을수록
     /// 그 에픽이 덜 끝난 것으로 보인다.
     #[test]
-    fn an_idea_does_not_move_an_epics_rollup() {
-        let mut inside = idea("argos-0003");
+    fn an_backlog_does_not_move_an_epics_rollup() {
+        let mut inside = backlog("argos-0003");
         inside.epic = Some("argos-0001".into());
         let issues = vec![make("argos-0001", Kind::Epic, "todo"), member("argos-0002", "argos-0001", "done"), inside];
         let rolls = rollup(&issues, &cfg());
@@ -8664,8 +8848,8 @@ mod tests {
 
     /// **에픽 없이 사는 것이 정상이다.** 여기 걸리면 담는 족족 잔소리가 는다.
     #[test]
-    fn an_idea_without_an_epic_is_not_a_warning() {
-        let issues: Vec<Issue> = (0..9).map(|n| idea(&format!("argos-000{n}"))).collect();
+    fn an_backlog_without_an_epic_is_not_a_warning() {
+        let issues: Vec<Issue> = (0..9).map(|n| backlog(&format!("argos-000{n}"))).collect();
         let st = status(&issues, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"no_epic"), "{kinds:?}");
@@ -8674,8 +8858,8 @@ mod tests {
     /// 방치 검사에도 안 걸린다. 담아 둔 생각은 오래 있는 것이 정상이라,
     /// 나이로 잔소리하면 오래된 저장소일수록 화면이 시끄러워진다.
     #[test]
-    fn an_old_idea_is_not_rotting() {
-        let mut old = idea("argos-0001");
+    fn an_old_backlog_is_not_rotting() {
+        let mut old = backlog("argos-0001");
         old.status = Status::new("review");
         let issues = vec![old];
         let st = status(&issues, &[], &cfg(), "2026-10-01T00:00:00Z", utc());
@@ -8685,34 +8869,34 @@ mod tests {
         assert!(!kinds.contains(&"wip_overload"), "{kinds:?}");
     }
 
-    /// 흐름도 일만 센다. idea 를 세면 "쌓이는 중" 이 담은 생각 수를 말하게 되고,
+    /// 흐름도 일만 센다. backlog 를 세면 "쌓이는 중" 이 담은 생각 수를 말하게 되고,
     /// 그 숫자를 보고 사람이 담기를 멈춘다.
     #[test]
     fn the_flow_line_counts_work_only() {
-        let issues = vec![idea("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
+        let issues = vec![backlog("argos-0001"), make("argos-0009", Kind::Issue, "todo")];
         let st = status(&issues, &[], &cfg(), "2026-09-02T00:00:00Z", utc());
         assert_eq!(st.flow.created, 1, "{:?}", st.flow);
     }
     /// **쌓이는 것 자체는 문제가 아니고, 쌓인 줄 모르는 것이 문제다.** 담는
     /// 비용을 0 으로 만들었으니 쌓인다 — 그래서 `status` 가 한 줄로 비춘다.
     #[test]
-    fn a_pile_of_ideas_shows_up_in_status() {
-        let quiet: Vec<Issue> = (0..IDEA_PILE - 1).map(|n| idea(&format!("argos-000{n}"))).collect();
+    fn a_pile_of_backlog_shows_up_in_status() {
+        let quiet: Vec<Issue> = (0..BACKLOG_PILE - 1).map(|n| backlog(&format!("argos-000{n}"))).collect();
         let st = status(&quiet, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(
-            !st.notices.iter().any(|w| w.kind == "idea_pile"),
+            !st.notices.iter().any(|w| w.kind == "backlog_pile"),
             "몇 개 안 되는데 벌써 말한다 — 담을 때마다 잔소리가 는다"
         );
 
         let mut piled = quiet;
-        piled.push(idea("argos-0009"));
+        piled.push(backlog("argos-0009"));
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
-        let w = st.notices.iter().find(|w| w.kind == "idea_pile").expect("쌓였는데 아무 말도 안 한다");
-        assert_eq!(w.count, IDEA_PILE);
+        let w = st.notices.iter().find(|w| w.kind == "backlog_pile").expect("쌓였는데 아무 말도 안 한다");
+        assert_eq!(w.count, BACKLOG_PILE);
         assert_eq!(w.oldest, Some(10), "가장 오래된 것의 나이를 안 말한다 — {w:?}");
         assert_eq!(w.days, None, "임계값 자리에 나이를 담았다 — {w:?}");
         assert!(w.notice, "알림이 경고로 선다 — {w:?}");
-        assert_eq!(w.hint.as_deref(), Some("moai idea ls"));
+        assert_eq!(w.hint.as_deref(), Some("moai backlog ls"));
         // **막지 않는다.** 여기가 비영 종료를 하면 이건 린트고, 린트는 게이트다.
         assert!(!w.fatal);
         assert!(!st.broken());
@@ -8721,17 +8905,17 @@ mod tests {
     /// 펼쳐서 닫은 생각은 더 이상 쌓인 것이 아니다. 세면 `promote` 를 쓸수록
     /// 잔소리가 늘어, 시킨 대로 한 사람이 벌을 받는다.
     #[test]
-    fn a_promoted_idea_leaves_the_pile() {
-        let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
+    fn a_promoted_backlog_leaves_the_pile() {
+        let mut piled: Vec<Issue> = (0..BACKLOG_PILE).map(|n| backlog(&format!("argos-000{n}"))).collect();
         piled[0].status = Status::new("done");
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
-        assert!(!st.notices.iter().any(|w| w.kind == "idea_pile"), "{:?}", st.notices);
+        assert!(!st.notices.iter().any(|w| w.kind == "backlog_pile"), "{:?}", st.notices);
     }
     /// **알림은 경고 수에 안 든다.** 배너가 "드러난 것 N건" 이라 말하는데
     /// 담아 둔 생각이 거기 들면, 담을수록 고칠 것이 늘었다고 말하게 된다.
     #[test]
     fn a_notice_is_not_counted_among_the_warnings() {
-        let piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
+        let piled: Vec<Issue> = (0..BACKLOG_PILE).map(|n| backlog(&format!("argos-000{n}"))).collect();
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         assert!(st.warnings.is_empty(), "알림이 고칠 것 자리에 섰다 — {:?}", st.warnings);
         assert_eq!(st.notices.len(), 1, "{:?}", st.notices);
@@ -8799,14 +8983,14 @@ mod tests {
         assert_eq!((r.total, r.done), (2, 1), "미뤘다고 계획이 줄었다 — {r:?}");
     }
     /// **세어 놓고 못 보여 주는 수를 만들지 않는다.** 미뤄 둔 생각을
-    /// `idea_pile` 이 세면, 그 줄이 가리키는 `moai idea ls` 는 그것을 숨긴다.
+    /// `backlog_pile` 이 세면, 그 줄이 가리키는 `moai backlog ls` 는 그것을 숨긴다.
     #[test]
     fn a_deferred_thought_leaves_the_pile_for_its_own_line() {
-        let mut piled: Vec<Issue> = (0..IDEA_PILE).map(|n| idea(&format!("argos-000{n}"))).collect();
+        let mut piled: Vec<Issue> = (0..BACKLOG_PILE).map(|n| backlog(&format!("argos-000{n}"))).collect();
         piled[0].deferred_at = Some("2026-09-01T00:00:00Z".into());
         let st = status(&piled, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         let kinds: Vec<&str> = st.notices.iter().map(|w| w.kind).collect();
-        assert!(!kinds.contains(&"idea_pile"), "숨길 것을 세었다 — {kinds:?}");
+        assert!(!kinds.contains(&"backlog_pile"), "숨길 것을 세었다 — {kinds:?}");
         assert!(kinds.contains(&"deferred"), "제 이름으로도 안 말한다 — {kinds:?}");
     }
 
@@ -8926,6 +9110,47 @@ mod tests {
         assert!(w.notice);
     }
 
+    /// **아카이브로 옮긴 미룬 에픽도 산 멤버가 그 밑에 서면 산 에픽처럼 센다**(moai-sai2). 멤버 하나를 되살리면
+    /// 에픽은 그 멤버의 묶음으로 보드에 도로 서고, 그 멤버는 이 에픽의 미룸으로 계획 밖이다 — 산 줄만 세던 판은
+    /// `미뤄 둔 것` 을 1 로 댔고(산 에픽이면 2) 에픽 줄의 미룸 낱말도 잃었다. 알림이 가리키는 `show --deferred` 는
+    /// 그 에픽을 함께 낸다. 밑에 산 줄이 없는 아카이브의 미룬 에픽은 지난 일이라 안 센다.
+    #[test]
+    fn an_archived_deferred_epic_over_a_live_member_counts_as_deferred() {
+        let mut epic = make("argos-0001", Kind::Epic, "todo");
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let restored = member("argos-0002", "argos-0001", "todo");
+        let sibling = member("argos-0003", "argos-0001", "done");
+        let now = "2026-09-11T00:00:00Z";
+        let live = status(&[epic.clone(), restored.clone(), sibling.clone()], &[], &cfg(), now, utc());
+        let stored = status_with_archive(
+            std::slice::from_ref(&restored),
+            &[epic.clone(), sibling.clone()],
+            &[],
+            &cfg(),
+            now,
+            utc(),
+        );
+        for (what, st) in [("산 에픽", &live), ("아카이브의 에픽", &stored)] {
+            let w = st.notices.iter().find(|w| w.kind == "deferred").unwrap_or_else(|| panic!("{what}: 알림이 없다"));
+            assert_eq!((w.count, w.oldest), (2, Some(10)), "{what}: {w:?}");
+            let r = roll_of(&st.epics, Some("argos-0001"));
+            assert!(r.put_off, "{what}: 에픽 줄이 미룸을 잃었다 — {r:?}");
+        }
+        // 밑에 산 줄이 없으면 지난 일이다 — 목록에서도 알림에서도 빠진다.
+        let mut closed = restored;
+        closed.status = Status::new("done");
+        let history = status_with_archive(
+            &[make("argos-0009", Kind::Issue, "todo")],
+            &[epic, closed, sibling],
+            &[],
+            &cfg(),
+            now,
+            utc(),
+        );
+        assert!(!history.notices.iter().any(|w| w.kind == "deferred"), "{:?}", history.notices);
+        assert!(history.epics.is_empty(), "{:?}", history.epics);
+    }
+
     /// **미뤘다 끝낸 줄은 끝난 줄이다.** 보드가 그것을 done 칸에서 빼면, 같은
     /// 화면의 롤업은 `2/2` 인데 위의 칸은 `done 1` 이라 말한다 — 한 화면이
     /// 같은 두 이슈를 두 수로 세는 것이고, 어느 쪽도 못 믿게 된다.
@@ -9037,7 +9262,7 @@ mod tests {
         let stone = make("argos-0001", Kind::Milestone, "todo");
         let mut epic = make("argos-0002", Kind::Epic, "todo");
         epic.milestone = Some("argos-0001".into());
-        let mut thought = make("argos-0003", Kind::Idea, "todo");
+        let mut thought = make("argos-0003", Kind::Backlog, "todo");
         thought.epic = Some("argos-0002".into());
         let child = make("argos-0003.aaa", Kind::Issue, "todo");
         let mut placed = make("argos-0003.bbb", Kind::Issue, "todo");
@@ -9093,10 +9318,10 @@ mod tests {
     fn a_thought_folded_under_a_rooted_thought_hands_nothing_down() {
         let epic = make("argos-0002", Kind::Epic, "todo");
         // 에픽 바로 밑의 생각은 늘 뿌리로 올라간다 — 부모가 묶음이라 접힐 자리가 없다.
-        let outer = make("argos-0002.aaa", Kind::Idea, "todo");
+        let outer = make("argos-0002.aaa", Kind::Backlog, "todo");
         // 그 밑의 생각이 제 `epic` 으로 같은 에픽을 적으면, 바깥 생각을 아직 안 끊긴 줄로 읽는
         // 때에만 "부모가 넘긴 것과 같다" 가 되어 접힌다.
-        let mut inner = make("argos-0002.aaa.bbb", Kind::Idea, "todo");
+        let mut inner = make("argos-0002.aaa.bbb", Kind::Backlog, "todo");
         inner.epic = Some("argos-0002".into());
         let under = make("argos-0002.aaa.bbb.ccc", Kind::Issue, "todo");
         let issues = vec![under, inner, epic, outer];
@@ -9118,7 +9343,7 @@ mod tests {
         epic.milestone = Some("argos-0001".into());
         let mut work = make("argos-0003", Kind::Issue, "todo");
         work.epic = Some("argos-0002".into());
-        let thought = make("argos-0003.aaa", Kind::Idea, "todo");
+        let thought = make("argos-0003.aaa", Kind::Backlog, "todo");
         let child = make("argos-0003.aaa.bbb", Kind::Issue, "todo");
         let mut issues = vec![stone.clone(), epic, work, thought, child];
 
@@ -9135,7 +9360,7 @@ mod tests {
         let issues = vec![
             stone,
             work,
-            make("argos-0004.aaa", Kind::Idea, "todo"),
+            make("argos-0004.aaa", Kind::Backlog, "todo"),
             make("argos-0004.aaa.bbb", Kind::Issue, "todo"),
         ];
         assert_eq!(milestones(&issues).get("argos-0004.aaa.bbb"), Some(&"argos-0001"));
@@ -9147,7 +9372,7 @@ mod tests {
     fn a_thought_passes_down_only_its_own_deferral() {
         let mut epic = make("argos-0001", Kind::Epic, "todo");
         epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
-        let mut thought = make("argos-0002", Kind::Idea, "todo");
+        let mut thought = make("argos-0002", Kind::Backlog, "todo");
         thought.epic = Some("argos-0001".into());
         let issues = vec![epic, thought.clone(), make("argos-0002.aaa", Kind::Issue, "todo")];
         assert_eq!(picks(&issues), ["argos-0002.aaa"], "세지도 않는 에픽의 미룸을 받았다");
@@ -9223,7 +9448,7 @@ mod tests {
     /// `duplicate_id` 에 그 id 를 두 번 대지 않는다.
     #[test]
     fn a_warning_names_a_duplicated_id_once() {
-        let mut thought = make("argos-0000", Kind::Idea, "todo");
+        let mut thought = make("argos-0000", Kind::Backlog, "todo");
         thought.milestone = Some("argos-zzzz".into());
         let mut stone = make("argos-0000", Kind::Milestone, "todo");
         stone.milestone = Some("argos-zzzz".into());
@@ -9268,7 +9493,7 @@ mod tests {
         let epic = make("argos-e001", Kind::Epic, "todo");
         // 앞줄 이슈는 에픽이 없고, 뒷줄 생각이 그 에픽에 든다 — 에픽 칸이 흐르는 쪽.
         let bare = make("argos-0001", Kind::Issue, "todo");
-        let mut held = make("argos-0001", Kind::Idea, "todo");
+        let mut held = make("argos-0001", Kind::Backlog, "todo");
         held.epic = Some("argos-e001".into());
         let rows = [epic, bare, held];
         let labels = epic_labels(&rows);
@@ -9283,7 +9508,7 @@ mod tests {
         member.epic = Some("argos-e002".into());
         let mut shadowed = make("argos-0003", Kind::Issue, "todo");
         shadowed.epic = Some("argos-e002".into());
-        let loose_thought = make("argos-0003", Kind::Idea, "todo");
+        let loose_thought = make("argos-0003", Kind::Backlog, "todo");
         let rows = vec![stone, placed, member, shadowed, loose_thought];
         let st = status(&rows, &[], &cfg(), "2026-09-11T00:00:00Z", utc());
         for kind in ["no_epic", "no_milestone"] {
@@ -9538,14 +9763,14 @@ mod tests {
     /// 올라간 생각은 아무것도 안 넘기므로 그 밑의 줄은 길을 안 잃고 에픽이 없다 — 두 차례에서 같은 답이다.
     /// 쌍둥이 어느 줄도 못 넘기는 에픽(E7)을 적은 생각도 같은 자리다.
     #[test]
-    fn an_idea_torn_between_twin_parents_is_rooted() {
+    fn an_backlog_torn_between_twin_parents_is_rooted() {
         let parent = |to: &str| {
             let mut i = make("argos-p004", Kind::Issue, "todo");
             i.epic = Some(to.into());
             i
         };
         let thought = |to: &str| {
-            let mut i = make("argos-p004.t01", Kind::Idea, "todo");
+            let mut i = make("argos-p004.t01", Kind::Backlog, "todo");
             i.epic = Some(to.into());
             i
         };
@@ -9579,7 +9804,7 @@ mod tests {
     /// 잃어 파일 차례를 탔다. 이제 그 밑의 줄은 두 차례에서 같은 답을 받는다 — 이슈 줄이 에픽을 넘기면
     /// (접히는 쪽은 E9, 뿌리로 오르는 쪽은 없음) 갈려 길을 잃고, 안 넘기면 어느 쪽이든 없음이라 안 잃는다.
     #[test]
-    fn an_idea_under_an_epic_and_issue_twin_parent_is_judged_row_by_row() {
+    fn an_backlog_under_an_epic_and_issue_twin_parent_is_judged_row_by_row() {
         let epic_row = make("argos-p005", Kind::Epic, "todo");
         for (hands, wrote, lost) in [
             // 제 에픽을 적은 생각은 갈린 부모 밑에서 뿌리로 오른다(9번 결정) — 그 밑은 아무것도 못 받는다.
@@ -9591,7 +9816,7 @@ mod tests {
             let mut issue_row = make("argos-p005", Kind::Issue, "todo");
             issue_row.epic = hands.map(Into::into);
             for (a, b) in [(issue_row.clone(), epic_row.clone()), (epic_row.clone(), issue_row.clone())] {
-                let mut thought = make("argos-p005.t01", Kind::Idea, "todo");
+                let mut thought = make("argos-p005.t01", Kind::Backlog, "todo");
                 thought.epic = wrote.map(Into::into);
                 let rows = vec![
                     make("argos-e009", Kind::Epic, "todo"),
@@ -9613,14 +9838,14 @@ mod tests {
     /// 에픽 밑에 바로 선 생각(늘 뿌리로 오른다)과 이슈 쌍둥이, 이슈 밑에 접히는 생각과 딴 에픽을 적어
     /// 뿌리로 오르는 생각 쌍둥이를 두 차례로 다 잰다.
     #[test]
-    fn idea_twins_are_folded_row_by_row() {
-        let idea = |id: &str, to: Option<&str>| {
-            let mut i = make(id, Kind::Idea, "todo");
+    fn backlog_twins_are_folded_row_by_row() {
+        let backlog = |id: &str, to: Option<&str>| {
+            let mut i = make(id, Kind::Backlog, "todo");
             i.epic = to.map(Into::into);
             i
         };
-        let under_epic = [idea("argos-e001.x01", None), make("argos-e001.x01", Kind::Issue, "todo")];
-        let under_issue = [idea("argos-p001.x01", None), idea("argos-p001.x01", Some("argos-e002"))];
+        let under_epic = [backlog("argos-e001.x01", None), make("argos-e001.x01", Kind::Issue, "todo")];
+        let under_issue = [backlog("argos-p001.x01", None), backlog("argos-p001.x01", Some("argos-e002"))];
         for (twins, child) in [(under_epic, "argos-e001.x01.c01"), (under_issue, "argos-p001.x01.c01")] {
             for flip in [false, true] {
                 let (a, b) = match flip {
@@ -9713,12 +9938,12 @@ mod tests {
     fn an_eclipsed_row_is_given_no_derived_epic() {
         let epic = make("argos-e001", Kind::Epic, "todo");
         let bare = make("argos-0001", Kind::Issue, "todo");
-        let mut held = make("argos-0001", Kind::Idea, "todo");
+        let mut held = make("argos-0001", Kind::Backlog, "todo");
         held.epic = Some("argos-e001".into());
         // 제 `epic` 을 적은 가려진 줄 — `query` 가 그 값으로도 안 고르므로 여기서도 안 낸다.
         let mut wrote = make("argos-0002", Kind::Issue, "todo");
         wrote.epic = Some("argos-e001".into());
-        let plain = make("argos-0002", Kind::Idea, "todo");
+        let plain = make("argos-0002", Kind::Backlog, "todo");
         let rows = [epic, bare, held, wrote, plain];
         let kind_of = Kinds::of(&rows);
         let placed = groups(&rows);
@@ -9754,7 +9979,7 @@ mod tests {
             deferred("argos-0009", "todo"),
             make("argos-0002", Kind::Issue, "todo"),
             shadowed,
-            make("argos-0001", Kind::Idea, "todo"),
+            make("argos-0001", Kind::Backlog, "todo"),
             make("argos-0002", Kind::Epic, "todo"),
         ];
         let rows = &rows[..];

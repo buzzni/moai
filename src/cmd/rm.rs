@@ -109,7 +109,7 @@ pub fn run(ctx: &Ctx, args: RmArgs) -> R<Vec<String>> {
     for id in &missing {
         super::note_partial();
         // 없는 id 는 **어느 명령에서나 한 낱말이다**([`Fail::not_found`], moai-95g1) — 리뷰가
-        // 넷째 사본으로 짚은 자리다. 나머지 `rm` 몸통은 아직 한국어다(idea moai-a7qo).
+        // 넷째 사본으로 짚은 자리다. 나머지 `rm` 몸통은 아직 한국어다(backlog moai-a7qo).
         eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.not_found"), &[("id", id)]));
     }
     if !dangling.is_empty() {
@@ -322,7 +322,7 @@ mod tests {
     use crate::store::LoadError;
 
     fn unread(text: &str) -> LoadError {
-        LoadError { line: 1, message: String::new(), text: text.to_string(), id: None }
+        LoadError { source: None, line: 1, message: String::new(), text: text.to_string(), id: None }
     }
 
     /// 한 벌뿐인 줄의 해시.

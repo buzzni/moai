@@ -12,6 +12,168 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-07
+
+### Added
+
+- **Explicit yearly issue archives.** `moai archive --dry-run` previews eligible
+  closed rows and `moai archive` moves closed issue and epic bundles into
+  `.moai/archive/<year>.jsonl`; `show` and `stats` can read archived rows, while
+  board counts stay on the active snapshot and archived rows supply reference
+  and milestone context. `moai archive --drop <id>` removes the stale archive
+  copies of a live row; it refuses an ID without a live row and an archived row
+  that is another issue under the same ID. (moai-fx9t, moai-bth3)
+- **`moai init --yes` (`-y`) plants without asking.** Choices not settled by
+  flags or existing git rules and guide files take the old defaults.
+- **`moai init --driver` pins the merge-driver row**, the pair of `--no-driver`,
+  so a terminal run that gives every row a flag asks nothing.
+- **`moai init --tracking exclude|gitignore` keeps the tracker out of git.**
+  The ignore rules, `/.moai/` and the hook plugin's directory go into
+  `.git/info/exclude` (no committed file changes) or `.gitignore`, and
+  `.gitattributes` and the merge driver are left alone — there is nothing for
+  git to merge. A tracker planted in a subdirectory gets lines anchored at that
+  subdirectory, and when the lines cannot be written nothing is planted. A
+  linked worktree refuses both — the lines would hide the main checkout's
+  tracker too.
+  `--tracking commit` is what `init` has always done. Run again,
+  `init` asks git which one stands rather than storing it, and refuses to switch.
+  `moai status` and `init --check` follow the same answer: a tracker kept out
+  of git is never told it lacks `.gitattributes` rules or an AGENTS.md block,
+  and a line missing from `.git/info/exclude` is named as that file's.
+- **`moai init --guide file` writes the agent guide to `.moai/guide.md`** and
+  leaves only a few lines in the AGENTS.md block that point at it — with
+  `moai init --print` as the way to the same text where the file is missing.
+  `--guide block` is the full block as before, and `--guide none` is
+  `--no-agents`. `init --check` and `moai status` measure both the link and the
+  file; run again, `init` reads which one stands from the block itself.
+- **`moai init --guide hook` leaves AGENTS.md alone and lets the hooks say it.**
+  It is what the screen picks for a tracker kept out of git, so a file nobody
+  else has is never named in a committed one.
+- **`moai init --skill` and `--register` run `moai skill install --scope local`
+  and `moai project add` once the tracker is planted**, and print what they
+  said under their names. The screen picks both; `--no-skill` and
+  `--no-register` turn them off, and a hooks guide keeps the install on —
+  `--guide hook --no-skill` is refused. A run that fails leaves what was
+  planted and still exits 0.
+
+- **Tab completes keys and values in the explorer's filter field (`SPC f`).**
+  A unique key gains `=` (`mil` becomes `milestone=`), and Tab or Shift-Tab
+  cycles through matching keys in query-table order or the available values
+  for tags, assignees and milestones. Status columns, priorities `p0` to `p3`
+  and kind names also complete; another key keeps the inserted candidate.
+  Enter and Esc keep their existing meanings. (moai-fc97)
+
+### Changed
+
+- **Parked work is called backlog.** The primary command is `moai backlog`
+  (`add`, `ls`, `show`, `promote`), the kind is `backlog` in JSON views, and the
+  board, explorer, guides and translations use the same name. `--type idea`
+  and stored `kind: "idea"` remain readable; the shared file still writes
+  `kind: "idea"` for older binaries. The JSON warning key is `backlog_pile`.
+  `SPC v b` hides backlog items, saved as `[tui] hide_backlog`; legacy
+  `hide_ideas` and `status_idea_pile` settings remain readable, with the new
+  keys taking precedence. The threshold's new name is `status_backlog_pile`.
+  (moai-jtvp)
+- **The first `moai init` in a terminal asks before it plants.** A short screen
+  shows the id prefix, whether git tracks the tracker, where the agent guide
+  goes, whether to install the hooks and skills, the merge driver and whether to
+  add the repository to your project list, each with its default picked; Enter
+  plants and Esc stops with nothing written. **The screen's defaults are not the
+  old `init`:** in a git repository Enter keeps the tracker out of git
+  (`.git/info/exclude`), leaves AGENTS.md alone and lets the hooks say it,
+  installs the hooks and skills for this clone (`claude plugin install`) and adds
+  the repository to your project list. A flag picks its row and locks it, and
+  `--yes` asks nothing and plants the old way. It asks only where a person is
+  watching — when stdin or stdout is not a terminal, or under `--json`, `init`
+  uses the old defaults for choices not settled by flags or existing git rules
+  and guide files; the `--json` line gains `tracking`, `guide`, `guide_file`, `skill`
+  and `project`. Running `init` again where `.moai` already stands never asks.
+- **The board the hook loads on a session's first prompt says where moai's
+  usage lives when AGENTS.md carries no moai block** — one line naming the
+  `moai` skill and `moai prime`. Checkouts with the block see no change.
+- **An archive file that cannot be read is broken data.** `archive_unreadable`
+  is now a warning rather than a notice, so `moai status` exits non-zero on it
+  the way it does on an unreadable line in the active snapshot, and points at
+  `moai show --archived`, which names each file and line. The hook's `Stop`
+  check counts it too, reached by the live rows or not. `moai stats` and
+  `moai show --archived` still exit 0. (moai-5y2a)
+
+### Fixed
+
+- **The first init screen installs the hooks and skills when Enter keeps the
+  default hooks guide.** Only a guide inferred from already installed hooks
+  skips installation; an explicit `--guide hook` or `--skill` still installs.
+  (moai-95do)
+- **Tracker writes compare changed rows through an ID map.** Adding or updating
+  an issue no longer scans the original tracker once for every row. The file
+  format and handling of unchanged rows remain the same. (moai-fx9t.opm)
+- **Initialization preserves the tracking and guide choices already present in a
+  clone**, including global git excludes and installed moai hooks. Git failures
+  or probe timeouts refuse initialization before it writes; status reports the
+  unknown tracking state and retains dotfile symlink notices. A linked worktree
+  reads the guide from the main tracker, and a clone without the local tracker
+  uses the guide link's `init --print` fallback without a false hand-edit notice.
+- **The init chooser skips `TERM=dumb`, checks refusals before opening, and puts
+  the report at the chooser's origin.** All paths validate prefix, git, conflicting
+  flags, and AGENTS.md readability in the same order.
+- **Local tracking ignores both a `.moai` symlink and its target directory.**
+  An explicit `--driver` with excluded tracking is refused; JSON `gitignore`
+  reports writes to `.gitignore`, and `exclude` reports writes to `.git/info/exclude`.
+- **Archive regression repairs.** Shipped milestones and archived blockers keep
+  their meaning after storage moves in `status` inside and outside a repository,
+  `ready` and the hook board, and a restored member retains its parent context
+  without restoring its former bundle. Rows already moved to the archive stay
+  out of `moai show` lists and the status board whatever `archive_days` says
+  now. Unreadable archive files leave writes and board reads available,
+  diagnostics name the archive source, and nothing about them is reported as
+  lost history. Conflicting bundles stay live while other bundles move, and
+  `--dry-run` and the board count only what will move. Restore cleanup failure
+  preserves the successful move and any journal warning; cleanup skips archive
+  files it cannot read. Hook ownership checks include archived pickups, sibling
+  overlays do not create archive collision or eligibility warnings, and archive
+  temporary files stay under the existing ignore rule. (moai-bth3)
+- **Writes can point at archived rows.** `add -e`, `edit -e`, `add --parent`,
+  `link` and `backlog promote -e` accept an epic, parent or blocker that
+  `moai archive` moved, instead of calling it missing; the new or edited row
+  stays live and the archived row stays archived. (moai-tzzt)
+- **A deferred epic in the archive can be taken back.** `moai defer <id> --undo`
+  on an archived row brings that row live, out of the deferral, instead of
+  calling it missing, and a member restored under an archived deferred epic is
+  told — by `mv` and by `defer <member> --undo` — which deferral keeps it out
+  of the plan. (moai-b6w3)
+- **The overview names the archived epic of a restored member.** `status --json`
+  and `ready --json` called outside any `.moai` now carry `derived_epic` on a
+  member restored under an epic that `moai archive` moved, as the in-repo
+  `ready --json` does. (moai-kfjy)
+- **The end of an agent turn no longer parses the whole archive.** The hook's
+  `Stop` check and its session baseline read only the archived rows that reach
+  the live ones — parents, epics, milestones, blockers and their members — and
+  skip the `archive_pending` count, a notice they never counted. The warnings
+  they count are the ones `moai status` counts. (moai-i9ji)
+- **The explorer counts warnings and notices the way `moai status` does when an
+  archive exists.** The project layer's `+N` (and `tui --json` outside a
+  repository) and the banner inside a project read archived rows as context
+  only: a milestone whose members were all archived no longer shows as an
+  overdue empty todo, an archived blocker is no longer a dangling reference,
+  archived rows are not counted as work, and an unreadable archive file is
+  `archive_unreadable` rather than an unreadable-line warning. Archive
+  collisions and bundles waiting for `moai archive` now show in both places,
+  and the layer re-reads a project when its archive changes. The banner's
+  urgent "N rows could not be read" counts lines in the active snapshot only; a
+  bad line in an archive file shows as that warning instead. (moai-nkwg, moai-e18s)
+- **An archived deferred epic over a restored member counts as deferred again.**
+  When a member of a deferred epic that `moai archive` moved is restored, the
+  epic is back on the board as that member's group, and the board now marks it
+  `deferred` and counts it in the Deferred notice, as it does for a live epic
+  and as the `moai show --deferred` the notice points at lists it. An archived
+  deferred epic with nothing live under it stays out of the count.
+  (moai-sai2)
+
+### Deprecated
+
+- **`moai idea` is a hidden alias for `moai backlog` for one release.** It is
+  removed in v0.9.0. (moai-jtvp)
+
 ## [0.7.0] - 2026-10-06
 
 ### Added

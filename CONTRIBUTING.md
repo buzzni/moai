@@ -140,6 +140,10 @@ commit, and a review point you decided not to act on gets a sentence saying why.
 ## Releasing
 
 ```sh
+moai archive --dry-run                            # preview closed bundles eligible to move
+moai archive                                      # refresh .moai/archive/<year>.jsonl
+git add .moai/issues.jsonl .moai/archive
+git commit -m "chore(tracker): archive closed bundles"
 scripts/bump-version.sh --next                    # prints 0.2.0 and why; writes nothing
 scripts/bump-version.sh auto                      # Cargo.toml, Cargo.lock, CHANGELOG.md
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md

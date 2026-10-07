@@ -850,7 +850,7 @@ fn the_issue_command_refusals_stand_in_one_language() {
         let group = field(&ok(s.path(), &["add", "묶음", "--type", "epic", "--json"]), "id");
         // 펼치기 화면을 실제로 세운다. **제목과 계획은 아스키다** — 영어 화면을 재는 잣대가
         // "한글이 한 자도 없다" 라, 여기 한국어를 두면 그 줄이 제 자료 때문에 붉어진다.
-        let idea = ok(s.path(), &["idea", "add", "a parked thought", "-q"]).trim().to_string();
+        let idea = ok(s.path(), &["backlog", "add", "a parked thought", "-q"]).trim().to_string();
         let plan = s.path().join("plan.md");
         std::fs::write(&plan, "# Storage layer\n- [p1] first issue\n").unwrap();
         let plan = plan.display().to_string();
@@ -875,7 +875,7 @@ fn the_issue_command_refusals_stand_in_one_language() {
             // **그 이름의 화면을 실제로 세운다**(리뷰). 여기 `idea add … -q` 를 두던 판은 id 한
             // 줄만 받아, 두 잣대(빈 줄이 아니다·한글이 없다)가 id 를 재고 통과했다 — 줄의 이름이
             // 댄 화면과 그 여섯 키(`idea.will_unfold` 무리)는 한 번도 안 섰다.
-            ("idea promote --dry-run".to_string(), run(&["idea", "promote", &idea, "--dry-run", "--from", &plan])),
+            ("idea promote --dry-run".to_string(), run(&["backlog", "promote", &idea, "--dry-run", "--from", &plan])),
             // 같은 거절을 두 명령이 같은 글로 말하는지 — 한쪽만 말묶음으로 옮겨졌던 자리다.
             ("mv <group> --from".to_string(), run(&["mv", &group, "done", "--from", "todo"])),
             ("defer <group> --from".to_string(), run(&["defer", &group, "--from", "todo", "-m", "why"])),
@@ -1060,7 +1060,7 @@ fn an_old_planting_hears_that_only_the_comments_changed() {
     // 옛 바이너리가 심은 모양 — 규칙은 같고 주석만 한국어다.
     std::fs::write(
         &attrs,
-        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n\
+        "# moai — 이슈 트래커\n.moai/issues.jsonl   text eol=lf merge=moai\n.moai/archive/*.jsonl text eol=lf merge=moai\n\
          .moai/journal.jsonl  text eol=lf merge=union\n.moai/journal/*.jsonl  text eol=lf merge=union\n",
     )
     .unwrap();
@@ -3052,7 +3052,7 @@ fn break_the_install(root: &Path) {
 }
 
 /// **층의 알림 셈은 안쪽 보드의 것과 같은 자다**(moai-prdh) — 설치가 어긋난 것
-/// (`cmd::status::install_notices`)과 순수한 셈이 낸 것(쌓인 idea·미룬 것)을 함께 센다. 한때
+/// (`cmd::status::install_notices`)과 순수한 셈이 낸 것(쌓인 백로그·미룬 것)을 함께 센다. 한때
 /// 층은 경고만 세, "드러난 문제 없다" 를 보고 들어간 사람이 안쪽 `moai status` 에서 알림을
 /// 처음 봤다.
 ///
@@ -3471,8 +3471,8 @@ fn every_way_into_a_column_stamps_the_same() {
         "첫 칸에서 난 줄에 시각을 적었다 — {untouched}"
     );
 
-    let thought = made(&["idea", "add", "펼칠 생각", "-q"]);
-    let out = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-"], "# 펼친 에픽\n- 첫 일\n");
+    let thought = made(&["backlog", "add", "펼칠 생각", "-q"]);
+    let out = from_stdin(s.path(), &["backlog", "promote", &thought, "--from", "-"], "# 펼친 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let line = line_of(s.path(), &thought);
     assert!(
@@ -3748,7 +3748,7 @@ fn edit_says_when_another_milestone_loses_to_the_epic_or_an_ancestor() {
     let json = ok(s.path(), &["edit", &grand, "--milestone", &m2, "--json"]);
     assert!(json.contains(&format!(r#""inherited_milestone":{{"milestone":"{m1}","parent":"{under}"}}"#)), "{json}");
     // 뿌리로 올라간 생각 밑 — 어느 필드로도 못 옮기니 길은 안 대고, 조용하지도 않다.
-    let thought = ok(s.path(), &["idea", "add", "생각", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "생각", "-q"]).trim().to_string();
     let pinned = add(s.path(), &["생각 밑", "--parent", &thought]);
     let err = says(&pinned, &format!("id 가 {thought} 밑에"), "어느 마일스톤에도 안 든다");
     assert!(!err.contains("moai edit"), "고쳐도 안 바뀌는 길을 댔다 — {err:?}");
@@ -4039,7 +4039,7 @@ fn rm_names_the_rows_that_inherited_the_epic_it_removed() {
             row("argos-0001", "에픽 멤버", "issue", ",\"epic\":\"argos-e001\""),
             row("argos-0001.abc", "물려받는 자식", "issue", ""),
             row("argos-0001.abc.def", "물려받는 손자", "issue", ""),
-            row("argos-0001.i01", "물려받는 생각", "idea", ""),
+            row("argos-0001.i01", "물려받는 생각", "backlog", ""),
             row("argos-0002", "전부터 끊긴 멤버", "issue", ",\"epic\":\"argos-zzzz\""),
             row("argos-0002.abc", "전부터 끊긴 자식", "issue", ""),
             row("argos-e001", "지울 에픽", "epic", ""),
@@ -4373,7 +4373,7 @@ fn a_child_under_a_lost_thought_is_not_counted_as_having_no_epic() {
     // 마일스톤을 쓰는 저장소여야 `no_milestone` 도 같은 자로 읽는지 본다.
     let stone = add(s.path(), &["v1", "--type", "milestone"]);
     let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &stone]);
-    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let thought = add(s.path(), &["생각", "--type", "backlog", "-e", &epic]);
     let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
     assert!(moai(s.path(), &["rm", &epic]).status.success());
 
@@ -4407,7 +4407,7 @@ fn none_filters_skip_a_child_under_a_lost_thought_like_status() {
     let s = init("nonelost");
     let mile = add(s.path(), &["마일스톤", "--type", "milestone"]);
     let epic = add(s.path(), &["지울 에픽", "--type", "epic", "--milestone", &mile]);
-    let thought = add(s.path(), &["생각", "--type", "idea", "-e", &epic]);
+    let thought = add(s.path(), &["생각", "--type", "backlog", "-e", &epic]);
     let child = add(s.path(), &["생각 밑의 일", "--parent", &thought]);
     let loose = add(s.path(), &["그냥 소속 없는 일"]);
     assert!(moai(s.path(), &["rm", &epic]).status.success());
@@ -4512,10 +4512,11 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
 
     // **연습이 진짜와 같은 것을 본다**(moai-5229). 연습이 "좋다" 를 받은 뒤에 진짜가 거절하면
     // 그 승인이 뒤늦은 말이 된다 — `add --from` 과 `idea promote` 두 길 모두.
-    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    for args in
-        [vec!["add", "--from", "-", "--dry-run"], vec!["idea", "promote", thought.as_str(), "--from", "-", "--dry-run"]]
-    {
+    let thought = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    for args in [
+        vec!["add", "--from", "-", "--dry-run"],
+        vec!["backlog", "promote", thought.as_str(), "--from", "-", "--dry-run"],
+    ] {
         let out = from_stdin(s.path(), &args, &format!("# 에픽\n- {big}\n"));
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(!out.status.success(), "연습이 진짜가 거절할 계획에 좋다고 했다 — {args:?}");
@@ -4733,9 +4734,9 @@ fn every_surface_that_prints_a_group_reads_its_column() {
         assert!(json.contains(r#""derived_status":"in_progress""#), "{args:?} 가 읽은 칸을 안 낸다 — {json}");
     }
     // 펼친 계획의 에픽도 같다.
-    let idea = ok(s.path(), &["idea", "add", "캐시 층", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["backlog", "add", "캐시 층", "-q"]).trim().to_string();
     let grown =
-        from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-", "--json"], "# 캐시 층\n- [p2] 첫 이슈\n");
+        from_stdin(s.path(), &["backlog", "promote", &idea, "--from", "-", "--json"], "# 캐시 층\n- [p2] 첫 이슈\n");
     let json = String::from_utf8_lossy(&grown.stdout).to_string();
     assert!(json.contains(r#""derived_status":"todo""#), "펼친 에픽이 읽은 칸을 안 낸다 — {json}");
 }
@@ -5195,7 +5196,7 @@ fn prime_never_fails_where_there_is_no_tracker() {
     assert!(moai(s.path(), &["prime", "--json"]).status.success(), "--json 이 실패했다");
     // **두 표면이 같은 것을 낸다.** 사람 쪽만 닫기 전 목록과 명령을 빼면, 훅에 건 쪽이
     // 새 체크아웃에서 규칙 없는 판을 받고 `--json` 쪽은 받는다 — 어느 것이 참인지 못 가린다.
-    assert!(said.contains("moai idea add"), "사람 쪽에만 명령이 빠졌다\n{said}");
+    assert!(said.contains("moai backlog add"), "사람 쪽에만 명령이 빠졌다\n{said}");
     let json = ok(s.path(), &["prime", "--json"]);
     assert!(json.contains("\"no_tracker\":true") && !json.contains("tracker_error"), "{json}");
 }
@@ -5229,7 +5230,7 @@ fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
         "까닭을 판에 안 실었다\n{said}"
     );
     assert!(!said.contains("`.moai` 가 없다"), "못 연 트래커를 없는 것으로 읽었다\n{said}");
-    assert!(said.contains("moai idea add"), "닫기 전 목록과 명령이 빠졌다\n{said}");
+    assert!(said.contains("moai backlog add"), "닫기 전 목록과 명령이 빠졌다\n{said}");
     // 말은 한 번 — 판이 대는 까닭을 stderr 에 또 내지 않는다.
     assert!(!String::from_utf8_lossy(&out.stderr).contains("issues.jsonl"), "{}", String::from_utf8_lossy(&out.stderr));
 
@@ -5571,7 +5572,7 @@ fn show_filters_by_time() {
         ok_at(s.path(), "2026-09-05T00:00:00Z", &["mv", id, "done"]);
     }
     ok_at(s.path(), "2026-09-06T00:00:00Z", &["edit", &old, "--title", "옛 일 고침"]);
-    let idea = ok_at(s.path(), "2026-09-06T00:00:00Z", &["idea", "add", "생각", "-q"]).trim().to_string();
+    let idea = ok_at(s.path(), "2026-09-06T00:00:00Z", &["backlog", "add", "생각", "-q"]).trim().to_string();
     let picked = |extra: &[&str]| {
         let mut args = vec!["show", "--json"];
         args.extend_from_slice(extra);
@@ -6384,7 +6385,7 @@ fn a_rehearsal_measures_the_body_it_would_write() {
 /// **그 거절은 moai 의 것이지 clap 의 것이 아니다**(moai-yhb1).
 ///
 /// `conflicts_with_all` 에 맡기던 판은 둘을 깼다. 하나, `add::run` 이 닿기 전에 터져
-/// 네임스페이스가 지은 거절문을 가렸다 — `moai idea add --from - -b '글'` 이 "`--body` 를 빼라"
+/// 네임스페이스가 지은 거절문을 가렸다 — `moai backlog add --from - -b '글'` 이 "`--body` 를 빼라"
 /// 를 듣고, 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알았다. 둘, 평문 stderr 에 exit 2 라
 /// `--json` 으로 받는 쪽이 `code` 를 못 봤다 — 같은 명령의 형제 거절(`--milestone <모양 틀림>`)은
 /// `{"code": …}` 에 exit 1 이다. 한 기능에 거절 계약이 둘이면 그것은 계약이 아니다.
@@ -6392,7 +6393,7 @@ fn a_rehearsal_measures_the_body_it_would_write() {
 fn a_plan_refusal_is_moais_own_not_claps() {
     let s = init("planrefusal");
     // 네임스페이스가 먼저다 — 깃발 얘기는 한마디도 안 나온다.
-    for verb in [["idea", "add"].as_slice(), ["milestone", "add"].as_slice()] {
+    for verb in [["backlog", "add"].as_slice(), ["milestone", "add"].as_slice()] {
         let mut argv = verb.to_vec();
         argv.extend_from_slice(&["--from", "-", "-b", "글"]);
         let out = from_stdin(s.path(), &argv, PLAN);
@@ -6406,7 +6407,7 @@ fn a_plan_refusal_is_moais_own_not_claps() {
     }
     // 동사가 맞으면 깃발을 댄다 — 그리고 그 거절도 `--json` 으로 갈라진다.
     for (argv, want) in [
-        (["idea", "add", "--from", "-", "-b", "글"].as_slice(), "moai idea promote"),
+        (["backlog", "add", "--from", "-", "-b", "글"].as_slice(), "moai backlog promote"),
         (["add", "--from", "-", "--status", "in_progress"].as_slice(), "--status"),
         (["add", "--from", "-", "-b", "-"].as_slice(), "--body"),
     ] {
@@ -6545,7 +6546,7 @@ fn a_single_add_says_a_milestone_that_is_not_there() {
     assert!(said(&out), "-q: 말없이 지나갔다");
 
     // idea 도 이 길을 지난다.
-    let out = moai(s.path(), &["idea", "add", "나중에 볼 것", "--milestone", "argos-zzzz", "-q"]);
+    let out = moai(s.path(), &["backlog", "add", "나중에 볼 것", "--milestone", "argos-zzzz", "-q"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(said(&out), "idea add 가 말없이 지나갔다\n{}", String::from_utf8_lossy(&out.stderr));
 
@@ -6700,7 +6701,7 @@ fn a_single_add_says_an_epic_that_is_not_there() {
     assert!(status.contains("dangling_epic"), "알린 말의 근거가 없다\n{status}");
 
     // idea 도 이 길을 지난다.
-    let out = moai(s.path(), &["idea", "add", "나중에 볼 것", "-e", "argos-zzzz", "-q"]);
+    let out = moai(s.path(), &["backlog", "add", "나중에 볼 것", "-e", "argos-zzzz", "-q"]);
     assert!(out.status.success(), "{}", text(&out));
     assert!(said(&out, "argos-zzzz"), "idea add 가 말없이 지나갔다\n{}", text(&out));
 
@@ -6815,10 +6816,10 @@ fn a_single_add_says_a_missing_milestone_even_when_the_epic_overrides_it() {
 fn promote_carries_the_milestone_and_the_body() {
     let s = init("promotecarry");
     let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
-    let idea = ok(s.path(), &["idea", "add", "캐시 층", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+    let idea = ok(s.path(), &["backlog", "add", "캐시 층", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
         .trim()
         .to_string();
-    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], "# 캐시 층\n- [p2] 첫 이슈\n");
+    let grown = from_stdin(s.path(), &["backlog", "promote", &idea, "--from", "-"], "# 캐시 층\n- [p2] 첫 이슈\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
 
     let made = issues(s.path());
@@ -6846,11 +6847,11 @@ fn promote_carries_the_milestone_and_the_body() {
 fn a_multi_epic_unfold_copies_the_body_once() {
     let s = init("promotemany");
     let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
-    let idea = ok(s.path(), &["idea", "add", "두 갈래", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
+    let idea = ok(s.path(), &["backlog", "add", "두 갈래", "--milestone", &stone, "-b", "왜 한 묶음인가", "-q"])
         .trim()
         .to_string();
     let plan = "# 앞 에픽\n- [p1] 첫 일\n# 뒤 에픽\n- [p2] 둘째 일\n";
-    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "--from", "-"], plan);
+    let grown = from_stdin(s.path(), &["backlog", "promote", &idea, "--from", "-"], plan);
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
 
     let made = issues(s.path());
@@ -6870,9 +6871,10 @@ fn promote_into_a_standing_epic_carries_nothing() {
     let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
     let m2 = ok(s.path(), &["milestone", "add", "v2", "-q"]).trim().to_string();
     let epic = add(s.path(), &["선 에픽", "--type", "epic", "--milestone", &m1]);
-    let idea =
-        ok(s.path(), &["idea", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"]).trim().to_string();
-    let grown = from_stdin(s.path(), &["idea", "promote", &idea, "-e", &epic, "--from", "-"], "- 멤버 하나\n");
+    let idea = ok(s.path(), &["backlog", "add", "담아 둔 것", "--milestone", &m2, "-b", "idea 의 본문", "-q"])
+        .trim()
+        .to_string();
+    let grown = from_stdin(s.path(), &["backlog", "promote", &idea, "-e", &epic, "--from", "-"], "- 멤버 하나\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
 
     let made = issues(s.path());
@@ -6894,17 +6896,17 @@ fn promote_carries_the_milestone_the_tool_shows_it_under() {
     let epic = add(s.path(), &["담는 에픽", "--type", "epic", "--milestone", &m1]);
 
     // 제 필드는 비었고 에픽이 `m1` 에 선 생각. 화면은 이것을 `m1` 밑에 낸다.
-    let bare = ok(s.path(), &["idea", "add", "필드 없는 생각", "-e", &epic, "-q"]).trim().to_string();
+    let bare = ok(s.path(), &["backlog", "add", "필드 없는 생각", "-e", &epic, "-q"]).trim().to_string();
     // idea 는 목록에서 접히므로 `--type idea` 로 펴서 본다 — 접혔을 뿐 `m1` 밑이다.
     let ideas_under = ok(s.path(), &["show", "--milestone", &m1, "--type", "idea"]);
     assert!(ideas_under.contains("필드 없는 생각"), "화면이 m1 밑에 안 냈다\n{ideas_under}");
-    let grown = from_stdin(s.path(), &["idea", "promote", &bare, "--from", "-"], "# 펼친 하나\n- 첫 일\n");
+    let grown = from_stdin(s.path(), &["backlog", "promote", &bare, "--from", "-"], "# 펼친 하나\n- 첫 일\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 하나"), "릴리스 밖으로 펼쳤다");
 
     // 제 필드가 `m2` 인데 에픽의 `m1` 이 이기는 생각. 이긴 쪽을 데려간다.
-    let lost = ok(s.path(), &["idea", "add", "진 필드", "-e", &epic, "--milestone", &m2, "-q"]).trim().to_string();
-    let grown = from_stdin(s.path(), &["idea", "promote", &lost, "--from", "-"], "# 펼친 둘\n- 둘째 일\n");
+    let lost = ok(s.path(), &["backlog", "add", "진 필드", "-e", &epic, "--milestone", &m2, "-q"]).trim().to_string();
+    let grown = from_stdin(s.path(), &["backlog", "promote", &lost, "--from", "-"], "# 펼친 둘\n- 둘째 일\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
     let under2 = ok(s.path(), &["show", "--milestone", &m2]);
     assert!(!under2.contains("펼친 둘"), "아무 화면에도 없던 값을 데려갔다\n{under2}");
@@ -6921,10 +6923,11 @@ fn promote_says_when_the_milestone_it_carries_is_dead() {
     let s = init("promotedead");
     let put_off = ok(s.path(), &["milestone", "add", "미룬 v", "-q"]).trim().to_string();
     ok(s.path(), &["defer", &put_off, "-m", "다음 분기"]);
-    let idea = ok(s.path(), &["idea", "add", "미룬 릴리스의 생각", "--milestone", &put_off, "-q"]).trim().to_string();
+    let idea =
+        ok(s.path(), &["backlog", "add", "미룬 릴리스의 생각", "--milestone", &put_off, "-q"]).trim().to_string();
 
     for dry in [true, false] {
-        let mut argv = vec!["idea", "promote", &idea, "--from", "-"];
+        let mut argv = vec!["backlog", "promote", &idea, "--from", "-"];
         if dry {
             argv.push("--dry-run");
         }
@@ -6938,8 +6941,8 @@ fn promote_says_when_the_milestone_it_carries_is_dead() {
     let shut = ok(s.path(), &["milestone", "add", "닫힌 v", "-q"]).trim().to_string();
     let done = add(s.path(), &["끝난 멤버", "--milestone", &shut]);
     ok(s.path(), &["mv", &done, "done"]);
-    let late = ok(s.path(), &["idea", "add", "닫힌 릴리스의 생각", "--milestone", &shut, "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &late, "--from", "-"], "# 늦은 것\n- 한 일\n");
+    let late = ok(s.path(), &["backlog", "add", "닫힌 릴리스의 생각", "--milestone", &shut, "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &late, "--from", "-"], "# 늦은 것\n- 한 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stderr).contains(&shut), "닫힌 것을 안 알렸다");
     assert!(ok(s.path(), &["show", "--milestone", &shut]).contains("늦은 것"), "데려가지 않았다");
@@ -7011,15 +7014,15 @@ fn template_vars_that_do_not_fit_are_refused_and_write_nothing() {
 #[test]
 fn promote_fills_a_template_too() {
     let s = init("templatepromote");
-    let idea = ok(s.path(), &["idea", "add", "릴리스를 돌린다", "-q"]).trim().to_string();
+    let idea = ok(s.path(), &["backlog", "add", "릴리스를 돌린다", "-q"]).trim().to_string();
     let tpl = s.path().join("t.md");
     std::fs::write(&tpl, "# 릴리스 {{version}}\n- 올린다\n").unwrap();
-    ok(s.path(), &["idea", "promote", &idea, "--from", tpl.to_str().unwrap(), "--var", "version=2.0"]);
+    ok(s.path(), &["backlog", "promote", &idea, "--from", tpl.to_str().unwrap(), "--var", "version=2.0"]);
     assert!(issues(s.path()).contains("\"title\":\"릴리스 2.0\""), "{}", issues(s.path()));
     // 채우지 않은 템플릿은 펼치지 않는다 — 아직 열린 생각에 대고 불러, 아무것도 안 쓰고 닫지도 않는지 본다.
-    let open = ok(s.path(), &["idea", "add", "다음 릴리스", "-q"]).trim().to_string();
+    let open = ok(s.path(), &["backlog", "add", "다음 릴리스", "-q"]).trim().to_string();
     let before = issues(s.path());
-    let out = moai(s.path(), &["idea", "promote", &open, "--from", tpl.to_str().unwrap()]);
+    let out = moai(s.path(), &["backlog", "promote", &open, "--from", tpl.to_str().unwrap()]);
     assert!(!out.status.success(), "채우지 않은 템플릿을 펼쳤다");
     assert_eq!(issues(s.path()), before, "거절한 펼치기가 썼다");
 }
@@ -7408,7 +7411,7 @@ fn the_json_sweep_covers_every_command() {
     }
 }
 
-/// `moai idea` 의 공통 동사는 `moai issue` 의 것과 **같은 목록**이다(moai-g33x).
+/// `moai backlog` 의 공통 동사는 `moai issue` 의 것과 **같은 목록**이다(moai-g33x).
 ///
 /// 손으로 베껴 두었을 때는 `Typed` 에 동사를 더해도 idea 만 조용히 안 따라왔고 컴파일
 /// 오류도 안 났다. 도움말에서 두 목록을 읽어 견주므로, 다시 베끼면 여기부터 붉어진다.
@@ -7433,9 +7436,9 @@ fn idea_and_issue_share_one_list_of_verbs() {
     let only_idea: Vec<&String> = idea.iter().filter(|v| !issue.contains(v)).collect();
     assert_eq!(only_idea, [&"promote".to_string()], "idea 에만 있어야 할 동사는 promote 하나다 — {idea:?}");
     let missing: Vec<&String> = issue.iter().filter(|v| !idea.contains(v)).collect();
-    assert!(missing.is_empty(), "`moai idea` 가 {missing:?} 를 안 따라왔다 — `Typed` 를 접어 넣는 대신 베꼈나");
+    assert!(missing.is_empty(), "`moai backlog` 가 {missing:?} 를 안 따라왔다 — `Typed` 를 접어 넣는 대신 베꼈나");
     // 별명도 한 자리에서 온다 — 베낀 판에는 `alias = "ls"` 가 두 곳에 섰다.
-    ok(s.path(), &["idea", "ls", "--json"]);
+    ok(s.path(), &["backlog", "ls", "--json"]);
 }
 
 /// `--json` 훑기가 실제로 부르는 명령들. **위 시험이 이 목록을 도움말과 견준다** —
@@ -7449,6 +7452,7 @@ const JSON_SWEEP: &[&str] = &[
     "show",
     // 거르개가 고른 줄을 센다(moai-1hka.k16) — 객체 하나를 낸다.
     "stats",
+    "archive",
     "note",
     "link",
     "defer",
@@ -7463,7 +7467,7 @@ const JSON_SWEEP: &[&str] = &[
     "issue",
     "epic",
     "milestone",
-    "idea",
+    "backlog",
     // 사용자 설정을 고친다. `add`·`rm` 은 제 설정 파일로 따로 부른다 — 공용 집에 쓰면 안 된다.
     "project",
     // 읽음도 사용자 설정에 적는다. 시험의 `MOAI_CONFIG` 는 그 시험만의 임시 자리다.
@@ -7899,6 +7903,7 @@ fn every_command_still_speaks_json() {
         vec!["show", &id, "--json"],
         vec!["show", &epic, "--json"],
         vec!["stats", "--json"],
+        vec!["archive", "--dry-run", "--json"],
         vec!["note", &id, "메모", "--json"],
         vec!["link", &id, "--blocks", &epic, "--json"],
         vec!["defer", &id, "--json"],
@@ -7908,7 +7913,7 @@ fn every_command_still_speaks_json() {
         vec!["issue", "show", "--json"],
         vec!["epic", "show", "--json"],
         vec!["milestone", "show", "--json"],
-        vec!["idea", "show", "--json"],
+        vec!["backlog", "show", "--json"],
         vec!["edit", &id, "--tag", "bug", "--json"],
         vec!["mv", &id, "review", "--json"],
         vec!["rm", &id, "--json"],
@@ -8102,9 +8107,9 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
     assert_eq!(issues(s.path()), "", "거부해 놓고 썼다");
 
     // 빠져나갈 길은 부른 동사로 댄다 — `moai add -- -x` 를 따라 치면 생각 대신 이슈가 선다(리뷰).
-    let out = moai(s.path(), &["idea", "add", "-x"]);
+    let out = moai(s.path(), &["backlog", "add", "-x"]);
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success() && err.contains("moai idea add -- -x"), "{err}");
+    assert!(!out.status.success() && err.contains("moai backlog add -- -x"), "{err}");
 
     // `--from` 과 함께 와도 깃발을 댄다 — `[title]` 을 받지 않는다는 말이 아니다.
     std::fs::write(s.path().join("p.md"), "# 에픽\n- 이슈\n").unwrap();
@@ -8201,7 +8206,7 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     let id = add(s.path(), &["고칠 것"]);
     let out = moai(s.path(), &["edit", &id, "-b", "plan.md"]);
     assert!(out.status.success() && err(&out).contains(said), "edit 이 말없이 지나갔다\n{}", err(&out));
-    let out = moai(s.path(), &["idea", "add", "나중에", "-b", "plan.md", "-q"]);
+    let out = moai(s.path(), &["backlog", "add", "나중에", "-b", "plan.md", "-q"]);
     assert!(out.status.success() && err(&out).contains(said), "idea add 가 말없이 지나갔다\n{}", err(&out));
 
     // `note -b` 도 같은 자로 재고, 노트는 글자 그대로 선다(moai-18so.rnm). `note` 는 빈 stdin 을 제가
@@ -10630,15 +10635,15 @@ fn the_status_thresholds_come_from_the_config() {
     };
     let piled = |dir: &Path| -> bool {
         let json = ok(dir, &["status", "--json"]);
-        json.contains("\"idea_pile\"")
+        json.contains("\"backlog_pile\"")
     };
 
     for n in 1..=2 {
-        ok(s.path(), &["idea", "add", &format!("떠오른 것 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("떠오른 것 {n}"), "-q"]);
     }
     assert!(!piled(s.path()), "기본 문턱은 다섯인데 둘에 벌써 말한다");
 
-    set("status_idea_pile = 2");
+    set("status_backlog_pile = 2");
     assert!(piled(s.path()), "설정한 문턱이 report 까지 안 닿았다");
     // **낮춘 문턱으로도 안 막는다.** `ok` 가 종료 코드 0 을 이미 요구한다.
     ok(s.path(), &["status"]);
@@ -10650,7 +10655,7 @@ fn the_status_thresholds_come_from_the_config() {
     // 오타는 조용히 통과하지 않는다 — 통과하면 왜 문턱이 안 바뀌는지 못 찾는다.
     set("status_idea_pyle = 2");
     let err = String::from_utf8_lossy(&moai(s.path(), &["status"]).stderr).into_owned();
-    assert!(err.contains("status_idea_pile"), "오타를 조용히 넘긴다 — {err}");
+    assert!(err.contains("status_backlog_pile"), "오타를 조용히 넘긴다 — {err}");
 }
 
 // ── idea — 반짝 생각을 담는 칸 ──────────────────────────────────────
@@ -10661,7 +10666,7 @@ fn the_status_thresholds_come_from_the_config() {
 #[test]
 fn an_idea_costs_one_title() {
     let s = init("ideaadd");
-    let id = ok(s.path(), &["idea", "add", "반짝 떠오른 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "반짝 떠오른 것", "-q"]).trim().to_string();
     let line = line_of(s.path(), &id);
     assert!(line.contains(r#""kind":"idea""#), "{line}");
     assert!(!line.contains(r#""epic""#), "안 물은 에픽이 붙었다 — {line}");
@@ -10672,7 +10677,7 @@ fn an_idea_costs_one_title() {
 #[test]
 fn an_idea_takes_a_body_from_stdin() {
     let s = init("ideabody");
-    let out = from_stdin(s.path(), &["idea", "add", "긴 생각", "-b", "-", "--json"], "여러\n줄\n");
+    let out = from_stdin(s.path(), &["backlog", "add", "긴 생각", "-b", "-", "--json"], "여러\n줄\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let made = String::from_utf8(out.stdout).unwrap();
     assert!(made.contains(r#""body":"여러\n줄""#), "{made}");
@@ -10683,10 +10688,10 @@ fn an_idea_takes_a_body_from_stdin() {
 #[test]
 fn idea_ls_is_idea_show() {
     let s = init("idealist");
-    let id = ok(s.path(), &["idea", "add", "담아 둔 것", "-q"]).trim().to_string();
-    let listed = ok(s.path(), &["idea", "ls"]);
+    let id = ok(s.path(), &["backlog", "add", "담아 둔 것", "-q"]).trim().to_string();
+    let listed = ok(s.path(), &["backlog", "ls"]);
     assert!(listed.contains(&id), "{listed}");
-    assert_eq!(listed, ok(s.path(), &["idea", "show"]), "ls 와 show 가 다른 것을 낸다");
+    assert_eq!(listed, ok(s.path(), &["backlog", "show"]), "ls 와 show 가 다른 것을 낸다");
 }
 
 /// 고치고 버리는 것은 이미 있는 동사가 한다. `id` 가 대상을 정확히 가리키므로
@@ -10695,7 +10700,7 @@ fn idea_ls_is_idea_show() {
 #[test]
 fn editing_and_removing_an_idea_uses_the_plain_verbs() {
     let s = init("ideaedit");
-    let id = ok(s.path(), &["idea", "add", "고칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "고칠 것", "-q"]).trim().to_string();
     ok(s.path(), &["edit", &id, "--tag", "parser"]);
     assert!(line_of(s.path(), &id).contains(r#""tags":["parser"]"#));
     ok(s.path(), &["rm", &id]);
@@ -10707,10 +10712,10 @@ fn editing_and_removing_an_idea_uses_the_plain_verbs() {
 #[test]
 fn an_idea_is_not_a_grouping() {
     let s = init("ideadetail");
-    let id = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "반짝", "-q"]).trim().to_string();
     let out = ok(s.path(), &["show", &id]);
     assert!(!out.contains("멤버"), "idea 를 묶음으로 펼쳤다 — {out}");
-    assert!(out.contains("idea"), "무슨 종류인지 안 말한다 — {out}");
+    assert!(out.contains("backlog"), "무슨 종류인지 안 말한다 — {out}");
 }
 
 /// idea 는 일도 아니다 — 보드에도 `ready` 에도 안 든다. 여기가 조용히
@@ -10718,7 +10723,7 @@ fn an_idea_is_not_a_grouping() {
 #[test]
 fn an_idea_stays_out_of_the_board_and_ready() {
     let s = init("ideaquiet");
-    ok(s.path(), &["idea", "add", "반짝", "-q"]);
+    ok(s.path(), &["backlog", "add", "반짝", "-q"]);
     let work = add(s.path(), &["진짜 일"]);
     let st = ok(s.path(), &["status"]);
     assert!(st.contains("이슈 1"), "idea 를 이슈로 셌다 — {st}");
@@ -10732,14 +10737,14 @@ fn an_idea_stays_out_of_the_board_and_ready() {
 #[test]
 fn ideas_stay_out_of_the_plain_list() {
     let s = init("ideafilter");
-    let thought = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "반짝", "-q"]).trim().to_string();
     let work = add(s.path(), &["진짜 일"]);
 
     let plain = ok(s.path(), &["show"]);
     assert!(plain.contains(&work), "{plain}");
     assert!(!plain.contains(&thought), "기본 목록에 idea 가 섞였다 — {plain}");
 
-    for args in [vec!["show", "--type", "idea"], vec!["idea", "ls"]] {
+    for args in [vec!["show", "--type", "idea"], vec!["backlog", "ls"]] {
         let out = ok(s.path(), &args);
         assert!(out.contains(&thought), "{args:?} — {out}");
         assert!(!out.contains(&work), "{args:?} 가 일까지 냈다 — {out}");
@@ -10751,7 +10756,7 @@ fn ideas_stay_out_of_the_plain_list() {
 #[test]
 fn grep_reaches_into_ideas() {
     let s = init("ideagrep");
-    let thought = ok(s.path(), &["idea", "add", "파서를 다시 쓴다", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "파서를 다시 쓴다", "-q"]).trim().to_string();
     let out = ok(s.path(), &["show", "-g", "파서"]);
     assert!(out.contains(&thought), "적어 둔 생각을 못 찾는다 — {out}");
 }
@@ -10762,7 +10767,7 @@ fn grep_reaches_into_ideas() {
 fn the_kind_vocabulary_names_idea() {
     let s = init("ideavocab");
     let err = String::from_utf8_lossy(&moai(s.path(), &["show", "아이디어"]).stderr).into_owned();
-    assert!(err.contains("idea"), "종류 목록이 idea 를 안 댄다 — {err}");
+    assert!(err.contains("backlog"), "종류 목록이 idea 를 안 댄다 — {err}");
 }
 
 /// 쌓인 생각을 `status` 가 한 줄로 비춘다. **막지 않는다** — 종료 코드가
@@ -10772,15 +10777,15 @@ fn the_kind_vocabulary_names_idea() {
 fn status_shows_a_pile_of_ideas_without_blocking() {
     let s = init("ideapile");
     for n in 0..5 {
-        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("생각 {n}"), "-q"]);
     }
     let out = moai(s.path(), &["status"]);
     assert!(out.status.success(), "알림으로 비영 종료했다 — 그러면 이건 게이트다");
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("쌓인 idea 5건"), "{text}");
-    assert!(text.contains("moai idea ls"), "다음에 무엇을 칠지 안 말한다 — {text}");
+    assert!(text.contains("쌓인 백로그 5건"), "{text}");
+    assert!(text.contains("moai backlog ls"), "다음에 무엇을 칠지 안 말한다 — {text}");
     // `?` 는 보드에서 review 칸의 글리프다. 한 글자가 두 뜻을 지면 안 된다.
-    assert!(text.contains("+ 쌓인 idea"), "알림이 경고 글리프를 달았다 — {text}");
+    assert!(text.contains("+ 쌓인 백로그"), "알림이 경고 글리프를 달았다 — {text}");
 }
 
 /// **펼치면 닫힌다.** 에픽과 이슈가 생기고 그 idea 는 `done` 으로 간다 —
@@ -10788,10 +10793,10 @@ fn status_shows_a_pile_of_ideas_without_blocking() {
 #[test]
 fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
     let s = init("ideapromote");
-    let id = ok(s.path(), &["idea", "add", "저장 계층을 다시", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "저장 계층을 다시", "-q"]).trim().to_string();
     let out = from_stdin(
         s.path(),
-        &["idea", "promote", &id, "--from", "-"],
+        &["backlog", "promote", &id, "--from", "-"],
         "# 저장 계층\n- [p1] 원자적으로 쓴다 #bug\n- 잘린 줄을 복구한다\n",
     );
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -10815,13 +10820,13 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     // **꼬리를 알아볼 수 있게 짓는다** — 한 글자만 되풀이하면 어느 쪽에서 잘랐든 단언이 지나가,
     // "앞에서부터 줄인다" 를 못 잰다.
     let big = format!("머리{}꼬리", "가".repeat(limit / 3 - 4));
-    let id = ok(s.path(), &["idea", "add", &big, "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", &big, "-q"]).trim().to_string();
     // 머리말 길이는 접두어를 따르니 **베껴 적지 않고 여기서 잰다**. 제목 자체는 상한 아래고,
     // 머리말을 붙여야 넘는다 — 그 사이가 아니면 이 시험이 `fit` 를 한 번도 안 부른다.
     let head = format!("{id} 에서 펼쳤다 — ").len();
     assert!(big.len() <= limit && big.len() + head > limit, "{} + {head}", big.len());
 
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
     assert!(out.status.success(), "상한 턱밑 idea 를 못 펼쳤다 — {}", String::from_utf8_lossy(&out.stderr));
 
     let notes = journal(s.path());
@@ -10851,8 +10856,8 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
 #[test]
 fn what_came_from_what_lives_in_the_journal() {
     let s = init("ideatrace");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 새 에픽\n- 첫 일\n");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 
     let epic = {
@@ -10869,9 +10874,9 @@ fn what_came_from_what_lives_in_the_journal() {
 #[test]
 fn promote_can_be_rehearsed() {
     let s = init("ideadry");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let before = issues(s.path());
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], "# 새 에픽\n- 첫 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--dry-run"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("새 에픽") && text.contains("첫 일"), "{text}");
@@ -10883,11 +10888,11 @@ fn promote_can_be_rehearsed() {
 #[test]
 fn a_rehearsed_promote_still_speaks_json() {
     let s = init("ideadryjson");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let before = issues(s.path());
     let out = from_stdin(
         s.path(),
-        &["idea", "promote", &id, "--from", "-", "--dry-run", "--json"],
+        &["backlog", "promote", &id, "--from", "-", "--dry-run", "--json"],
         "# 새 에픽\n- [p1] 첫 일\n",
     );
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -10907,10 +10912,10 @@ fn a_rehearsed_promote_still_speaks_json() {
 fn promote_can_pour_into_a_standing_epic() {
     let s = init("ideainto");
     let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
-    let id = ok(s.path(), &["idea", "add", "밖에 나간 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "밖에 나간 것", "-q"]).trim().to_string();
     let before = issues(s.path()).lines().filter(|l| l.contains(r#""kind":"epic""#)).count();
 
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 되찾은 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 되찾은 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let after = issues(s.path());
     assert_eq!(after.lines().filter(|l| l.contains(r#""kind":"epic""#)).count(), before, "새 에픽이 섰다");
@@ -10995,8 +11000,8 @@ fn old_flat_members_keep_their_ids_beside_new_child_members() {
     let s = init("mixedmembers");
     let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
     let flat = add(s.path(), &["옛 멤버", "-e", &epic]);
-    let id = ok(s.path(), &["idea", "add", "되찾을 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 새 멤버\n");
+    let id = ok(s.path(), &["backlog", "add", "되찾을 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "-e", &epic, "--from", "-"], "- [p1] 새 멤버\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 
     // 옛 줄은 id 도 소속도 그대로다 — 없으면 `line_of` 가 그 자리에서 패닉한다.
@@ -11097,7 +11102,7 @@ fn promote_into_refuses_what_it_cannot_honour() {
     let s = init("ideaintobad");
     let epic = ok(s.path(), &["epic", "add", "선 에픽", "-q"]).trim().to_string();
     let work = add(s.path(), &["그냥 일"]);
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let before = issues(s.path());
     for (target, plan, why) in [
         (epic.as_str(), "# 또 에픽\n- 가\n", "`#` 줄"),
@@ -11105,7 +11110,7 @@ fn promote_into_refuses_what_it_cannot_honour() {
         (work.as_str(), "- 가\n", "에픽 아닌 것"),
     ] {
         for dry in [false, true] {
-            let mut args = vec!["idea", "promote", &id, "-e", target, "--from", "-"];
+            let mut args = vec!["backlog", "promote", &id, "-e", target, "--from", "-"];
             if dry {
                 args.push("--dry-run");
             }
@@ -11119,13 +11124,13 @@ fn promote_into_refuses_what_it_cannot_honour() {
 /// idea 가 아닌 것은 펼치지 않는다. 조용히 받아 주면 이슈 하나가 까닭 없이
 /// 닫히고, 그 까닭은 저널에만 남는다.
 #[test]
-fn only_an_idea_can_be_promoted() {
+fn only_a_backlog_item_can_be_promoted() {
     let s = init("ideaonly");
     let work = add(s.path(), &["진짜 일"]);
-    let out = from_stdin(s.path(), &["idea", "promote", &work, "--from", "-"], "# 가\n- 나\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &work, "--from", "-"], "# 가\n- 나\n");
     assert!(!out.status.success(), "일을 펼쳐 버렸다");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("idea"), "{err}");
+    assert!(err.contains("백로그"), "{err}");
 }
 
 /// `promote` 는 훑기 목록의 `idea` 줄이 닿지 않는 길이다 — stdin 을 먹으므로
@@ -11133,8 +11138,8 @@ fn only_an_idea_can_be_promoted() {
 #[test]
 fn promote_speaks_json_too() {
     let s = init("ideapromotejson");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     one_json_value(&String::from_utf8(out.stdout).unwrap());
 }
@@ -11145,7 +11150,7 @@ fn promote_speaks_json_too() {
 fn the_agents_block_teaches_idea() {
     let s = init("agentsidea");
     let block = std::fs::read_to_string(s.path().join("AGENTS.md")).unwrap();
-    for want in ["moai idea add", "moai idea ls", "moai idea promote", "moai defer"] {
+    for want in ["moai backlog add", "moai backlog ls", "moai backlog promote", "moai defer"] {
         assert!(block.contains(want), "{want} 가 없다 — {block}");
     }
 }
@@ -11158,7 +11163,7 @@ fn the_agents_block_teaches_idea() {
 fn a_plan_cannot_be_poured_in_through_idea_add() {
     let s = init("ideafrom");
     let before = issues(s.path());
-    let out = from_stdin(s.path(), &["idea", "add", "--from", "-"], "# 에픽\n- 이슈\n");
+    let out = from_stdin(s.path(), &["backlog", "add", "--from", "-"], "# 에픽\n- 이슈\n");
     assert!(!out.status.success(), "생각 담는 자리로 계획이 들어왔다");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("promote"), "어디로 가야 하는지 안 말한다 — {err}");
@@ -11174,9 +11179,9 @@ fn a_plan_cannot_be_poured_in_through_idea_add() {
 #[test]
 fn promoting_a_closed_thought_forges_no_transition() {
     let s = init("ideatwice");
-    let id = ok(s.path(), &["idea", "add", "두 번 펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "두 번 펼칠 것", "-q"]).trim().to_string();
     for plan in ["# 첫 계획\n- 가\n", "# 둘째 계획\n- 나\n"] {
-        let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+        let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], plan);
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
     let closed = line_of(s.path(), &id);
@@ -11204,8 +11209,8 @@ fn promoting_a_closed_thought_forges_no_transition() {
 #[test]
 fn promote_json_names_the_thought_it_closed() {
     let s = init("ideapromoted");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--json"], "# 새 에픽\n- 첫 일\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains(&id), "무엇을 닫았는지 안 말한다 — {text}");
@@ -11219,7 +11224,7 @@ fn promote_json_names_the_thought_it_closed() {
 #[test]
 fn a_child_of_a_thought_stays_under_it() {
     let s = init("ideachild");
-    let parent = ok(s.path(), &["idea", "add", "부모 생각", "-q"]).trim().to_string();
+    let parent = ok(s.path(), &["backlog", "add", "부모 생각", "-q"]).trim().to_string();
     let child = add(s.path(), &["그 자식", "--parent", &parent]);
     assert!(child.starts_with(&format!("{parent}.")), "{child}");
 
@@ -11238,7 +11243,7 @@ fn a_child_of_a_thought_stays_under_it() {
 fn a_child_of_a_thought_in_an_epic_is_counted_where_it_is_drawn() {
     let s = init("ideachildepic");
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
-    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
     let child = add(s.path(), &["생각의 자식", "--parent", &thought]);
 
     let detail = ok(s.path(), &["show", &epic]);
@@ -11256,7 +11261,7 @@ fn a_child_of_a_thought_in_an_epic_is_counted_where_it_is_drawn() {
 fn a_thought_parked_under_work_does_not_stall_it() {
     let s = init("ideachild");
     let work = add(s.path(), &["진짜 일"]);
-    ok(s.path(), &["idea", "add", "나중에 볼 것", "--parent", &work, "-q"]);
+    ok(s.path(), &["backlog", "add", "나중에 볼 것", "--parent", &work, "-q"]);
     let r = ok(s.path(), &["ready"]);
     assert!(r.contains(&work), "담아 둔 생각이 일을 멈춰 세웠다 — {r}");
 }
@@ -11266,7 +11271,7 @@ fn a_thought_parked_under_work_does_not_stall_it() {
 #[test]
 fn a_thought_cannot_block_work() {
     let s = init("ideablock");
-    let thought = ok(s.path(), &["idea", "add", "먼저 생각", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "먼저 생각", "-q"]).trim().to_string();
     let work = add(s.path(), &["막힐 일"]);
     let out = moai(s.path(), &["link", &thought, "--blocks", &work]);
     assert!(!out.status.success(), "생각이 일을 막게 뒀다");
@@ -11282,7 +11287,7 @@ fn the_rehearsal_checks_what_the_real_run_checks() {
     let s = init("ideadrycheck");
     let work = add(s.path(), &["진짜 일"]);
     for target in [work.as_str(), "argos-zzzz"] {
-        let out = from_stdin(s.path(), &["idea", "promote", target, "--from", "-", "--dry-run"], "# 가\n- 나\n");
+        let out = from_stdin(s.path(), &["backlog", "promote", target, "--from", "-", "--dry-run"], "# 가\n- 나\n");
         assert!(!out.status.success(), "{target} 를 펼치겠다고 했다");
     }
 }
@@ -11292,8 +11297,8 @@ fn the_rehearsal_checks_what_the_real_run_checks() {
 #[test]
 fn promoting_keeps_the_thought_unowned() {
     let s = init("ideaowner");
-    let id = ok(s.path(), &["idea", "add", "임자 없는 생각", "-a", "none", "-q"]).trim().to_string();
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--json"], "# 가\n- 나\n");
+    let id = ok(s.path(), &["backlog", "add", "임자 없는 생각", "-a", "none", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--json"], "# 가\n- 나\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let made = String::from_utf8(out.stdout).unwrap();
     assert!(!made.contains("assignee"), "임자 없이 담은 것에 임자가 붙었다 — {made}");
@@ -11315,10 +11320,10 @@ fn a_plan_cannot_be_poured_in_as_a_type_flag_either() {
 fn an_empty_list_says_the_thoughts_are_hidden() {
     let s = init("ideahiddencount");
     for n in 0..3 {
-        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("생각 {n}"), "-q"]);
     }
     let out = ok(s.path(), &["show"]);
-    assert!(out.contains('3') && out.contains("idea"), "숨긴 것을 안 센다 — {out}");
+    assert!(out.contains('3') && out.contains("backlog"), "숨긴 것을 안 센다 — {out}");
 }
 
 /// **한 화면이 두 말을 하지 않는다.** 에픽에 든 생각을 상세가 줄로 내면서
@@ -11329,14 +11334,14 @@ fn an_empty_list_says_the_thoughts_are_hidden() {
 fn a_thought_does_not_hang_under_an_epic() {
     let s = init("ideaepic");
     let epic = add(s.path(), &["저장 계층", "--type", "epic"]);
-    let thought = ok(s.path(), &["idea", "add", "샤딩을 해 볼까", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩을 해 볼까", "-e", &epic, "-q"]).trim().to_string();
 
     let detail = ok(s.path(), &["show", &epic]);
     assert!(!detail.contains(&thought), "멤버 0/0 밑에 생각을 그렸다 — {detail}");
     assert!(!ok(s.path(), &["show", "--tree"]).contains(&thought));
 
     // 소속은 잃지 않았다.
-    let found = ok(s.path(), &["show", "--type", "idea", "-e", &epic]);
+    let found = ok(s.path(), &["show", "--type", "backlog", "-e", &epic]);
     assert!(found.contains(&thought), "에픽으로 못 찾는다 — {found}");
 }
 
@@ -11512,7 +11517,7 @@ fn status_shows_what_was_put_off_without_blocking() {
 fn a_repo_with_only_notices_still_reads_clean() {
     let s = init("noticeclean");
     let id = add(s.path(), &["지금 할 일"]);
-    ok(s.path(), &["idea", "add", "반짝", "-q"]);
+    ok(s.path(), &["backlog", "add", "반짝", "-q"]);
     let later = add(s.path(), &["나중에"]);
     ok(s.path(), &["defer", &later]);
     ok(s.path(), &["epic", "add", "묶음", "-q"]);
@@ -11796,7 +11801,7 @@ fn a_plan_refuses_a_kind_the_markdown_cannot_make() {
 fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
     let s = init("plantype");
     // 마크다운은 `#` 을 에픽으로 `-` 를 이슈로 내므로 넷 가운데 지킬 수 있는 값이 없다.
-    for kind in ["issue", "epic", "idea", "milestone"] {
+    for kind in ["issue", "epic", "backlog", "milestone"] {
         let out = from_stdin(s.path(), &["add", "--from", "-", "--type", kind], PLAN);
         let err = String::from_utf8_lossy(&out.stderr);
         assert_eq!(out.status.code(), Some(1), "--type {kind}: {err}");
@@ -11804,14 +11809,14 @@ fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
     }
     // **갈 곳을 대는 말은 동사를 안 가린다**(리뷰). `kind_override.or(args.kind)` 로 고르던 판은
     // 동사가 기본값을 들고 오는 순간 사람이 친 `--type` 을 못 봐, `moai issue add --from - --type
-    // idea` 가 `moai idea promote` 를 못 듣고 깃발 얘기만 들었다 — 같은 `--type idea` 를 친 둘이
+    // idea` 가 `moai backlog promote` 를 못 듣고 깃발 얘기만 들었다 — 같은 `--type idea` 를 친 둘이
     // 어느 동사로 들어왔느냐로 다른 말을 듣고, 못 듣는 쪽이 하필 그 길을 가장 알아야 하는 쪽이다.
     for verb in [["add"].as_slice(), ["issue", "add"].as_slice(), ["epic", "add"].as_slice()] {
         let mut argv = verb.to_vec();
         argv.extend_from_slice(&["--from", "-", "--type", "idea"]);
         let out = from_stdin(s.path(), &argv, PLAN);
         let err = String::from_utf8_lossy(&out.stderr);
-        assert!(err.contains("moai idea promote"), "{verb:?}: 갈 곳을 안 댄다\n{err}");
+        assert!(err.contains("moai backlog promote"), "{verb:?}: 갈 곳을 안 댄다\n{err}");
         assert_eq!(issues(s.path()), "", "{verb:?}: 거절해 놓고 썼다");
     }
     // 동사가 들고 온 기본값은 그대로 선다 — 그것은 이 부름에 친 요구가 아니다.
@@ -11834,7 +11839,7 @@ fn a_typed_plan_is_refused_while_the_namespace_default_still_stands() {
 #[test]
 fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     let s = init("promotebig");
-    let id = ok(s.path(), &["idea", "add", "큰 생각", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "큰 생각", "-q"]).trim().to_string();
     // 상한을 넘는 본문은 도구로는 못 쓴다 — 손으로 푼 머지가 남기는 줄을 그대로 짓는다.
     let path = s.path().join(".moai/issues.jsonl");
     let line = issues(s.path());
@@ -11845,8 +11850,8 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     std::fs::write(&path, format!("{swollen}\n")).unwrap();
 
     let plan = "# 펼친 에픽\n- 첫 이슈\n";
-    let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], plan);
-    let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    let rehearsal = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--dry-run"], plan);
+    let real = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], plan);
     let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
     assert_eq!(real.status.code(), Some(1), "{was}");
     assert_eq!(rehearsal.status.code(), Some(1), "연습만 좋다고 했다\n{said}");
@@ -11866,8 +11871,8 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     ok(s.path(), &["defer", &stone, "-m", "접는다"]);
     let big_title = format!("# {}\n- 첫 이슈\n", "나".repeat(30_000));
     for text in [plan, big_title.as_str()] {
-        let rehearsal = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-", "--dry-run"], text);
-        let real = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], text);
+        let rehearsal = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-", "--dry-run"], text);
+        let real = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], text);
         let (said, was) = (String::from_utf8_lossy(&rehearsal.stderr), String::from_utf8_lossy(&real.stderr));
         assert_eq!(said, was, "연습과 진짜가 다른 말을 한다");
         assert_eq!(real.status.code(), Some(1), "{was}");
@@ -11877,7 +11882,7 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
     // 그 길이 실제로 통한다 — 줄이면 같은 부름이 그대로 지난다.
     let out = from_stdin(s.path(), &["edit", &id, "-b", "-"], "짧게 줄인 본문");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], plan);
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], plan);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(issues(s.path()).contains("짧게 줄인 본문"), "본문이 에픽에 안 갔다");
 }
@@ -11888,13 +11893,13 @@ fn an_oversized_carried_body_names_the_idea_and_the_way_out() {
 #[test]
 fn an_unreadable_line_does_not_fail_a_promote() {
     let s = init("promotebroken");
-    let id = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let path = s.path().join(".moai/issues.jsonl");
     let mut text = issues(s.path());
     text.push_str("{\"id\":\"argos-9999\",\"title\":\"몰라\",\"kind\":\"몰라\",\"status\":\"todo\"}\n");
     std::fs::write(&path, text).unwrap();
 
-    let out = from_stdin(s.path(), &["idea", "promote", &id, "--from", "-"], "# 새 에픽\n- [p1] 첫 일\n");
+    let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 새 에픽\n- [p1] 첫 일\n");
     assert!(
         out.status.success(),
         "성공한 promote 가 실패로 끝났다 — 다시 부르면 계획이 두 벌이다\nstderr: {}",
@@ -12245,7 +12250,7 @@ fn an_eclipsed_row_answers_the_same_epic_on_every_surface() {
             "{}{}{}",
             row("argos-0001", "에픽", "epic", ""),
             row("argos-0002", "가려진 이슈", "issue", ",\"epic\":\"argos-0001\""),
-            row("argos-0002", "가리는 생각", "idea", ",\"epic\":\"argos-0001\""),
+            row("argos-0002", "가리는 생각", "backlog", ",\"epic\":\"argos-0001\""),
         ) + &row("argos-0001.aa1", "성한 멤버", "issue", ""),
     )
     .unwrap();
@@ -13233,7 +13238,7 @@ fn a_write_that_touched_nothing_still_names_the_unreadable_line() {
 #[test]
 fn the_deferred_line_points_at_a_command_that_shows_them() {
     let s = init("deferidea");
-    let id = ok(s.path(), &["idea", "add", "미룰 생각", "-q"]).trim().to_string();
+    let id = ok(s.path(), &["backlog", "add", "미룰 생각", "-q"]).trim().to_string();
     ok(s.path(), &["defer", &id]);
     assert!(ok(s.path(), &["status"]).contains("미뤄 둔 것 1건"), "안 센다");
     let out = ok(s.path(), &["show", "--deferred"]);
@@ -13313,15 +13318,15 @@ fn a_grouping_lists_the_same_members_on_both_surfaces() {
 #[test]
 fn the_tree_tail_does_not_count_what_it_drew() {
     let s = init("treetailancestor");
-    let thought = ok(s.path(), &["idea", "add", "반짝", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "반짝", "-q"]).trim().to_string();
     let child = add(s.path(), &["자식", "--parent", &thought]);
 
     let out = ok(s.path(), &["show", "--tree"]);
     assert!(out.contains(&thought) && out.contains(&child), "{out}");
-    assert!(!out.contains("idea 1건 숨김"), "그린 줄을 숨겼다고 말한다 — {out}");
+    assert!(!out.contains("backlog 1건 숨김"), "그린 줄을 숨겼다고 말한다 — {out}");
 
     // 목록은 조상을 안 그리므로 여전히 센다.
-    assert!(ok(s.path(), &["show"]).contains("idea 1건 숨김"), "목록이 숨긴 것을 안 센다");
+    assert!(ok(s.path(), &["show"]).contains("backlog 1건 숨김"), "목록이 숨긴 것을 안 센다");
 }
 
 /// **트리가 조상으로 그린 줄도 계획 밖이면 그렇다고 단다.** 에픽의 미룸을 받은
@@ -13331,7 +13336,7 @@ fn the_tree_tail_does_not_count_what_it_drew() {
 fn the_tree_marks_a_deferred_row_it_draws_as_an_ancestor() {
     let s = init("treedeferredancestor");
     let epic = ok(s.path(), &["epic", "add", "나중", "-q"]).trim().to_string();
-    let thought = ok(s.path(), &["idea", "add", "생각", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "생각", "-e", &epic, "-q"]).trim().to_string();
     let child = add(s.path(), &["자식", "--parent", &thought]);
     ok(s.path(), &["defer", &epic]);
 
@@ -13353,7 +13358,7 @@ fn a_thought_is_not_a_member_on_either_surface() {
     let s = init("epicjsonidea");
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
     let member = add(s.path(), &["진짜 일", "-e", &epic]);
-    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
 
     let json = ok(s.path(), &["show", &epic, "--json"]);
     assert!(json.contains(&member), "멤버를 잃었다 — {json}");
@@ -13370,7 +13375,7 @@ fn a_thought_does_not_hang_under_a_milestone_either() {
     let stone = ok(s.path(), &["milestone", "add", "v0.1", "-q"]).trim().to_string();
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "-q"]).trim().to_string();
     add(s.path(), &["진짜 일", "-e", &epic]);
-    let thought = ok(s.path(), &["idea", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "샤딩", "-e", &epic, "-q"]).trim().to_string();
 
     let out = ok(s.path(), &["show", &stone]);
     assert!(out.contains("멤버   0/1"), "{out}");
@@ -13577,7 +13582,7 @@ fn a_deferred_epic_is_not_nagged_in_the_table_either() {
 
 /// **끝난 묶음은 미뤄 둔 것으로 안 센다.** 세면 `moai status` 가 센 줄을 그 줄이
 /// 가리키는 `moai show --deferred` 가 done 으로 숨겨, 세어 놓고 못 보여 주는 수가
-/// 된다 — `idea_pile` 이 피한 그 덫이다. 남은 일이 생기면 다시 센다.
+/// 된다 — `backlog_pile` 이 피한 그 덫이다. 남은 일이 생기면 다시 센다.
 #[test]
 fn a_finished_grouping_is_not_counted_as_shelved() {
     let s = init("shelvedone");
@@ -13653,7 +13658,7 @@ fn status_says_which_groupings_stand_closed() {
 
 /// **꼬리가 대는 낱말이 실제로 그 줄을 내야 한다.** 첫 까닭으로 갈랐을 때
 /// 닫아 둔 생각이 `idea N건 숨김 — --type idea` 로 섰는데 그 명령은 done 을
-/// 여전히 숨겨 아무것도 안 냈다 — `idea_pile` 이 피한 "세어 놓고 못 보여 주는
+/// 여전히 숨겨 아무것도 안 냈다 — `backlog_pile` 이 피한 "세어 놓고 못 보여 주는
 /// 수" 가 목록 꼬리에 그대로 있었다.
 #[test]
 fn every_hidden_count_names_a_flag_that_opens_it() {
@@ -13661,9 +13666,9 @@ fn every_hidden_count_names_a_flag_that_opens_it() {
     let shelved = add(s.path(), &["닫고 미룬 일"]);
     ok(s.path(), &["mv", &shelved, "done"]);
     ok(s.path(), &["defer", &shelved]);
-    let closed = ok(s.path(), &["idea", "add", "닫은 생각", "-q"]).trim().to_string();
+    let closed = ok(s.path(), &["backlog", "add", "닫은 생각", "-q"]).trim().to_string();
     ok(s.path(), &["mv", &closed, "done"]);
-    let alive = ok(s.path(), &["idea", "add", "산 생각", "-q"]).trim().to_string();
+    let alive = ok(s.path(), &["backlog", "add", "산 생각", "-q"]).trim().to_string();
 
     let out = ok(s.path(), &["show"]);
     // 닫고 미룬 줄은 `--all` 이 연다 — `--deferred` 는 done 을 그대로 숨긴다.
@@ -13671,7 +13676,7 @@ fn every_hidden_count_names_a_flag_that_opens_it() {
     assert!(ok(s.path(), &["show", "--all"]).contains(&shelved), "댄 낱말이 그 줄을 안 낸다");
     // 산 생각 하나만 `--type idea` 가 연다. 닫은 생각은 어느 한 낱말로도
     // 안 열리므로 아예 안 센다 — 못 보여 줄 수를 대느니 말을 안 한다.
-    assert!(out.contains("idea 1건 숨김 — `--type idea`"), "{out}");
+    assert!(out.contains("backlog 1건 숨김 — `--type backlog`"), "{out}");
     let ideas = ok(s.path(), &["show", "--type", "idea"]);
     assert!(ideas.contains(&alive), "{ideas}");
     assert!(!ideas.contains(&closed), "{ideas}");
@@ -13764,7 +13769,7 @@ fn the_detail_draws_exactly_what_it_counts_as_a_member() {
     let s = init("memberdraw");
     let epic = ok(s.path(), &["epic", "add", "저장 계층", "-q"]).trim().to_string();
     let work = add(s.path(), &["파서", "-e", &epic]);
-    let thought = ok(s.path(), &["idea", "add", "이렇게 하면", "--parent", &work, "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "이렇게 하면", "--parent", &work, "-q"]).trim().to_string();
 
     let human = ok(s.path(), &["show", &epic]);
     assert!(human.contains("멤버   0/1"), "{human}");
@@ -13783,11 +13788,11 @@ fn a_child_that_is_not_in_the_plan_says_so() {
     let parent = add(s.path(), &["부모"]);
     let shelved = add(s.path(), &["미룰 자식", "--parent", &parent]);
     ok(s.path(), &["defer", &shelved]);
-    ok(s.path(), &["idea", "add", "자식 생각", "--parent", &parent, "-q"]);
+    ok(s.path(), &["backlog", "add", "자식 생각", "--parent", &parent, "-q"]);
 
     let out = ok(s.path(), &["show", &parent]);
     assert!(out.contains("미룸"), "미뤄 둔 자식이 일과 똑같이 보인다 — {out}");
-    assert!(out.contains("idea"), "담아 둔 자식이 일과 똑같이 보인다 — {out}");
+    assert!(out.contains("backlog"), "담아 둔 자식이 일과 똑같이 보인다 — {out}");
 }
 /// **연습은 진짜와 같은 값을 말한다.** 마크다운은 `# [p1] 제목` 을 받고
 /// `create_drafts` 는 그것을 에픽에도 그대로 쓰는데, 연습만 종류로 잘라 내면
@@ -13812,18 +13817,18 @@ fn a_rehearsal_reports_the_priority_it_will_write() {
 #[test]
 fn a_rehearsal_is_no_stricter_than_the_real_run() {
     let s = init("dryruncarry");
-    let thought = ok(s.path(), &["idea", "add", "펼칠 것", "-q"]).trim().to_string();
+    let thought = ok(s.path(), &["backlog", "add", "펼칠 것", "-q"]).trim().to_string();
     let path = s.path().join(".moai/issues.jsonl");
     let mut raw = std::fs::read_to_string(&path).unwrap();
     raw.push_str("{\"id\":\"argos-zzzz\",\"title\":\"x\",\"kind\":\"몰라\",\"status\":\"todo\",\"created_at\":\"2026-01-01T00:00:00Z\",\"updated_at\":\"2026-01-01T00:00:00Z\",\"status_since\":\"2026-01-01T00:00:00Z\"}\n");
     std::fs::write(&path, raw).unwrap();
 
     let plan = "# 새 에픽\n- 첫 일\n";
-    let rehearsal = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-", "--dry-run"], plan);
+    let rehearsal = from_stdin(s.path(), &["backlog", "promote", &thought, "--from", "-", "--dry-run"], plan);
     assert!(rehearsal.status.success(), "연습만 실패로 끝난다 — {}", String::from_utf8_lossy(&rehearsal.stderr));
     // 어느 줄인지는 그래도 말한다.
     assert!(String::from_utf8_lossy(&rehearsal.stderr).contains("읽을 수 없는 줄"), "조용히 지나갔다");
-    let real = from_stdin(s.path(), &["idea", "promote", &thought, "--from", "-"], plan);
+    let real = from_stdin(s.path(), &["backlog", "promote", &thought, "--from", "-"], plan);
     assert!(real.status.success(), "{}", String::from_utf8_lossy(&real.stderr));
 }
 
@@ -14312,7 +14317,7 @@ fn stop_does_not_count_notices_as_new_warnings() {
     hook_out(&s, "session-start", &event(&s, "s1"));
 
     for n in 0..5 {
-        ok(s.path(), &["idea", "add", &format!("생각 {n}"), "-q"]);
+        ok(s.path(), &["backlog", "add", &format!("생각 {n}"), "-q"]);
     }
     let later = add(s.path(), &["나중에"]);
     ok(s.path(), &["defer", &later]);
@@ -14388,7 +14393,7 @@ fn the_board_and_the_hook_carry_the_same_install_notices() {
     // 실린 글은 JSON 문자열 그대로라 줄바꿈이 두 글자(`\n`)다.
     let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "s-notices")));
     // **설치 알림만 견준다**(리뷰). 알림 줄 전부를 견주면 `moai status` 에만 서는 알림(사용자
-    // 설정의 말 문제·쌓인 idea·미룬 것)이 생기는 날 이 시험이 붉어지고, 그 글은 "설치 알림이
+    // 설정의 말 문제·쌓인 백로그·미룬 것)이 생기는 날 이 시험이 붉어지고, 그 글은 "설치 알림이
     // 갈렸다" 고 말한다 — 엉뚱한 곳을 고치게 만드는 시험이다.
     let mine = |l: &str| {
         let l = l.trim();
@@ -14695,7 +14700,8 @@ fn json_str(s: &str) -> String {
 #[test]
 fn korean_text_going_into_moai_gets_no_notice() {
     let s = init("hookkorean");
-    for cmd in ["moai idea add '떠오른 것'", "moai note x '한글 노트'", "printf '한글' | moai note x -b -"] {
+    for cmd in ["moai backlog add '떠오른 것'", "moai note x '한글 노트'", "printf '한글' | moai note x -b -"]
+    {
         let out = shell_call(&s, cmd);
         assert!(out.trim().is_empty(), "한국어 글에 무언가를 붙였다 — {cmd}\n{out}");
     }
@@ -14744,7 +14750,7 @@ fn creation_is_judged_through_the_contract() {
     }
 
     // 담는 것은 막지 않고 **갈림길 1 의 둘째 물음을 싣는다**(moai-d4e0) — 계약의 `additionalContext` 로.
-    let out = shell_call(&s, "moai idea add \"떠오른 것\"");
+    let out = shell_call(&s, "moai backlog add \"떠오른 것\"");
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "담는 것을 막았다\n{out}");
     assert!(
@@ -16607,14 +16613,14 @@ fn work_an_unnamed_worktree_may_hold_is_not_offered_as_this_sessions_aim() {
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
     let bash = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
 
-    let out = bash("moai idea add \"관찰\"");
+    let out = bash("moai backlog add \"관찰\"");
     assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일의 에픽을 제 물음으로 비춘다\n{out}");
 
     // 갈라진 뒤 main 에서 집은 제 일은 비춘다 — 그것만 댄다.
     let mine = field(&ok(&main, &["add", "제 에픽", "--type", "epic", "--json"]), "id");
     let work = field(&ok(&main, &["add", "main 에서 집은 일", "-e", &mine, "--json"]), "id");
     ok(&main, &["mv", &work, "in_progress"]);
-    let out = bash("moai idea add \"관찰\"");
+    let out = bash("moai backlog add \"관찰\"");
     assert!(out.contains(&format!("can {mine} deliver what it promised")), "제 일의 물음을 안 비춘다\n{out}");
     assert!(!out.contains(&theirs), "옆이 쥐었을 일의 에픽을 댄다\n{out}");
 }
@@ -16792,18 +16798,18 @@ fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
     let bp = b.path().display().to_string();
 
     // 제 자리의 물음이 남의 트래커의 규칙 1 을 가리지 않는다.
-    let why = refusal(&bash(&format!("moai idea add \"a\"; moai -C {bp} add \"딴 일\"")));
+    let why = refusal(&bash(&format!("moai backlog add \"a\"; moai -C {bp} add \"딴 일\"")));
     assert!(why.contains(&wb), "{why}");
 
     // 둘 다 비추면 둘 다 싣는다 — 뒤의 물음을 말없이 버리지 않는다.
-    let out = bash(&format!("moai idea add \"a\"; moai -C {bp} idea add \"b\""));
+    let out = bash(&format!("moai backlog add \"a\"; moai -C {bp} idea add \"b\""));
     one_json_value(&out);
     assert!(!out.contains("permissionDecision"), "{out}");
     // 두 토막이 저마다 제 트래커의 에픽을 대니 물음도 둘이다 — 뒤의 것을 말없이 버리지 않는다.
     assert!(out.contains(&format!("can {ea} deliver what it promised")), "{out}");
     assert!(out.contains(&format!("can {eb} deliver what it promised")), "{out}");
     assert!(
-        out.contains(&format!("moai -C {bp} idea promote <that id> -e {eb}")),
+        out.contains(&format!("moai -C {bp} backlog promote <that id> -e {eb}")),
         "남의 트래커에 되찾을 자리를 안 댄다\n{out}"
     );
 }
@@ -19610,7 +19616,7 @@ fn screens_that_draw_no_time_never_reach_for_the_timezone() {
     let repo = init("screen-tz-repo");
     let id = ok(repo.path(), &["add", "시각 없는 줄", "-q"]);
     let id = id.trim();
-    ok(repo.path(), &["idea", "add", "나중 생각"]);
+    ok(repo.path(), &["backlog", "add", "나중 생각"]);
     project_ok(home.path(), &config, &["project", "add", repo.path().to_str().unwrap()]);
     // 없는 자리를 가리켜 tzdb 를 깨뜨린다 — `TZ` 가 UTC 면 자료 없이 서서 이 판이 안 난다.
     let nowhere = home.path().join("no-zoneinfo");
@@ -19631,7 +19637,7 @@ fn screens_that_draw_no_time_never_reach_for_the_timezone() {
         (repo.path(), &["prime"], id),
         (repo.path(), &["show"], id),
         (repo.path(), &["show", "--tree"], id),
-        (repo.path(), &["idea", "ls"], "나중 생각"),
+        (repo.path(), &["backlog", "ls"], "나중 생각"),
         (home.path(), &["ready"], id),
     ];
     for (dir, args, want) in quiet {
@@ -23045,7 +23051,7 @@ fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
     let put_off = add(s.path(), &["미룬 일"]);
     ok(s.path(), &["defer", &put_off]);
     add(s.path(), &["에픽", "--type", "epic"]);
-    ok(s.path(), &["idea", "add", "생각"]);
+    ok(s.path(), &["backlog", "add", "생각"]);
 
     let json = ok(s.path(), &["stats", "--json"]);
     one_json_value(&json);
@@ -23058,7 +23064,7 @@ fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
     );
     assert_eq!(
         value_at(by, "kind"),
-        r#"[{"key":"issue","rows":3},{"key":"epic","rows":1},{"key":"milestone","rows":0},{"key":"idea","rows":1}]"#,
+        r#"[{"key":"issue","rows":3},{"key":"epic","rows":1},{"key":"milestone","rows":0},{"key":"backlog","rows":1}]"#,
         "kind 축은 고른 줄 전부다"
     );
     assert_eq!(
@@ -23079,13 +23085,13 @@ fn stats_counts_what_the_show_filters_pick_with_done_and_deferred_in() {
     assert!(ok(s.path(), &["stats", "--deferred", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
     assert!(ok(s.path(), &["stats", "-s", "done", "--json"]).starts_with(r#"{"kind":"issue","rows":1,"#));
     assert!(
-        ok(s.path(), &["stats", "--type", "idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        ok(s.path(), &["stats", "--type", "backlog", "--json"]).starts_with(r#"{"kind":"backlog","rows":1,"#),
         "--type 이 센 종류를 바꾼다"
     );
     // **`--filter type=…` 도 같은 말이다** — 센 종류는 지은 거르개에서 읽는다. argv 의 `--type` 만 읽던 판은 생각만
     // 골라 놓고 `issue` 로 세어 `rows:0` 을 냈다(탐색기의 `SPC f type=idea` 는 처음부터 생각을 셌다).
     assert!(
-        ok(s.path(), &["stats", "--filter", "type=idea", "--json"]).starts_with(r#"{"kind":"idea","rows":1,"#),
+        ok(s.path(), &["stats", "--filter", "type=idea", "--json"]).starts_with(r#"{"kind":"backlog","rows":1,"#),
         "--filter type= 이 센 종류를 안 바꿨다"
     );
     // `--all` 은 받고 아무것도 안 바꾼다 — 이미 다 연 채로 센다.
@@ -23563,6 +23569,656 @@ fn a_bom_keeps_the_title_and_an_opened_page_keeps_its_size() {
     assert!(listed.contains(r#""slug":"latin","title":"latin","path":"docs/latin.md","bytes":7,"#), "{listed}");
     let shown = ok(s.path(), &["wiki", "show", "bom", "--json"]);
     assert!(shown.contains("\"body\":\"\u{feff}# Bom title\\n\""), "원문을 고쳐 냈다 — {shown}");
+}
+
+// ── moai-zynt: init 의 선택지 ───────────────────────────────────────────────────────────────
+
+fn read(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// **터미널이 아니면 `init` 은 묻지 않고 지금까지와 같다**(moai-zynt.a7y, 사용자 결정). 시험의 stdin·stdout 은
+/// 파이프라 묻는 순간 이 시험은 끝나지 않는다. 플래그 없이 부른 것과 `--yes` 가 같은 파일을 내고, 그것은 화면의
+/// 기본(git 밖·훅)이 아니라 커밋과 블록이다.
+#[test]
+fn init_without_a_terminal_asks_nothing_and_matches_yes() {
+    let (plain, yes) = (Scratch::new("init-plain"), Scratch::new("init-yes"));
+    for (s, args) in [(&plain, vec!["init", "argos"]), (&yes, vec!["init", "argos", "--yes"])] {
+        git(s.path(), &["init", "-q", "."]);
+        ok(s.path(), &args);
+    }
+    for f in ["AGENTS.md", ".gitattributes", ".gitignore", ".moai/config.toml"] {
+        assert_eq!(read(&plain.path().join(f)), read(&yes.path().join(f)), "{f}");
+    }
+    assert!(read(&plain.path().join("AGENTS.md")).contains("### The three forks"), "블록 전문이 아니다");
+    assert!(!plain.path().join(".moai/guide.md").exists(), "화면의 기본으로 갔다");
+    assert!(!read(&plain.path().join(".git/info/exclude")).contains("/.moai/"), "트래커를 git 밖으로 뺐다");
+    let js = ok(plain.path(), &["init", "--json"]);
+    assert_eq!(field(&js, "tracking"), "commit", "{js}");
+    assert_eq!(field(&js, "guide"), "block", "{js}");
+}
+
+/// 실제 터미널에서 기본값을 Enter 로 고른다 — 플래그에는 없는 훅 안내가 설치를 켜야 한다(moai-95do).
+/// 커서 자리 물음에 답하는 PTY 를 직접 세워 tmux 나 사람의 터미널 없이 화면 길을 지난다.
+#[cfg(unix)]
+#[test]
+fn init_screen_defaults_install_the_hooks_and_skills() {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::process::CommandExt;
+    use std::time::{Duration, Instant};
+
+    let s = Scratch::new("init-screen-hooks");
+    git(s.path(), &["init", "-q", "."]);
+    let c = Claude::new("init-screen-hooks-home");
+    // Claude 의 격리된 PATH 에 git 만 더한다 — 진짜 claude 는 절대 찾지 않는다.
+    let git_bin = git(s.path(), &["--exec-path"]);
+    std::os::unix::fs::symlink(Path::new(git_bin.trim()).join("git"), c.bin.join("git")).unwrap();
+    let (mut master_fd, mut slave_fd) = (-1, -1);
+    let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    // SAFETY: openpty 가 쓰는 두 fd 와 읽는 크기는 살아 있는 값이며, 이름·설정은 필요 없다.
+    assert_eq!(
+        unsafe { libc::openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), std::ptr::null(), &size) },
+        0,
+        "{}",
+        std::io::Error::last_os_error()
+    );
+    // SAFETY: openpty 가 만든 fd 를 File 에 한 번씩 넘겨 닫는 일을 맡긴다.
+    let (mut master, slave) = unsafe { (std::fs::File::from_raw_fd(master_fd), std::fs::File::from_raw_fd(slave_fd)) };
+    // 자식이 master 를 물려받으면 slave 가 닫혀도 EOF 가 안 선다. 읽기는 마감을 지키게 막히지 않는다.
+    for fd in [master.as_raw_fd(), slave.as_raw_fd()] {
+        assert_ne!(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }, -1);
+    }
+    assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
+    let mut command = c.command(Path::new(BIN), s.path(), &["init", "argos"], true);
+    command
+        .env("TERM", "xterm")
+        .env("MOAI_LANG", "en")
+        .env("MOAI_CONFIG", c.home.path().join("config.toml"))
+        .stdin(slave.try_clone().unwrap())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave);
+    // SAFETY: fork 뒤에는 비동기 신호 안전한 시스템 호출만 쓴다. 자식의 stdin 을 제어 터미널로 만든다.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = Child(command.spawn().unwrap());
+    // Command 도 slave 복사본을 쥔다 — 끝난 프로세스의 PTY 를 열어 두지 않는다.
+    drop(command);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let (mut shown, mut answered, mut entered) = (String::new(), 0, false);
+    loop {
+        let mut buf = [0; 8192];
+        match master.read(&mut buf) {
+            Ok(n) => shown.push_str(&String::from_utf8_lossy(&buf[..n])),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {}
+            Err(e) => panic!("PTY: {e}"),
+        }
+        let queries = shown.matches("\x1b[6n").count();
+        while answered < queries {
+            master.write_all(b"\x1b[1;1R").unwrap();
+            answered += 1;
+        }
+        if !entered && shown.contains("Enter plant") {
+            master.write_all(b"\r").unwrap();
+            entered = true;
+        }
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(status.success(), "{shown}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "init 화면이 끝나지 않았다\n{shown}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(entered, "화면 대신 비대화형 길로 갔다\n{shown}");
+    assert!(read(&s.path().join(".git/info/exclude")).contains("/.moai/"));
+    assert!(!s.path().join("AGENTS.md").exists());
+    assert!(s.path().join(".claude/moai-plugin/skills/moai/SKILL.md").is_file(), "스킬을 안 심었다\n{shown}");
+    let plugin: serde_json::Value =
+        serde_json::from_str(&read(&s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json"))).unwrap();
+    assert!(plugin["hooks"]["PreToolUse"].is_array(), "훅을 안 심었다\n{shown}");
+    assert!(c.calls().contains("plugin install ") && c.calls().contains("--scope local"), "{}", c.calls());
+    assert!(read(&c.home.path().join("config.toml")).contains(&s.path().display().to_string()));
+    let calls = c.calls();
+    for args in [vec!["init", "--json"], vec!["init", "--no-skill", "--json"]] {
+        let out = c.run(s.path(), &args, true);
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(text(&out).contains("\"skill\":false"), "{}", text(&out));
+        assert_eq!(c.calls(), calls, "기존 훅을 다시 설치했다");
+    }
+    for args in [vec!["init", "--skill", "--json"], vec!["init", "--guide", "hook", "--json"]] {
+        let before = c.calls();
+        let out = c.run(s.path(), &args, true);
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(c.calls().len() > before.len(), "명시적으로 시킨 설치를 건너뛰었다\n{}", text(&out));
+    }
+}
+
+/// **`--tracking exclude` 는 커밋되는 파일을 하나도 안 바꾼다**(moai-zynt.own). 병합 규칙과 드라이버는 할 일이
+/// 없어 안 심고, `moai status` 는 그 저장소에 커밋 저장소의 잔소리를 안 한다(moai-zynt.zhr). 다시 부르면 추적
+/// 방식은 git 에 묻고, 바꾸려 하면 거절한다.
+#[test]
+fn init_tracking_exclude_leaves_every_committed_file_as_it_was() {
+    let s = Scratch::new("init-exclude");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    let js = ok(root, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
+    assert_eq!(field(&js, "tracking"), "exclude", "{js}");
+    assert_eq!(field(&js, "driver"), "skipped", "{js}");
+    assert!(js.contains("\"gitattributes\":false"), "{js}");
+    assert_eq!(git(root, &["status", "--porcelain", "--untracked-files=all"]), "", "커밋될 파일이 생겼다");
+    let exclude = read(&root.join(".git/info/exclude"));
+    for line in ["/.moai/", "/.claude/moai-plugin/", "/.claude/settings.local.json", "/.claude/worktrees/"] {
+        assert!(exclude.lines().any(|l| l == line), "{line} 이 없다\n{exclude}");
+    }
+    assert!(
+        git(root, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(),
+        "드라이버를 심었다"
+    );
+
+    let st = ok(root, &["status", "--json"]);
+    for kind in ["gitattributes_rules", "gitignore_rules", "exclude_rules", "agents_"] {
+        assert!(!st.contains(kind), "git 밖의 트래커에 {kind} 를 댔다 — {st}");
+    }
+
+    // 다시 부르면 git 에 묻는다 — 적어 둔 곳이 없다.
+    let again = ok(root, &["init", "--json"]);
+    assert_eq!(field(&again, "tracking"), "exclude", "{again}");
+    assert!(!root.join("AGENTS.md").exists(), "다시 부른 init 이 AGENTS.md 를 썼다");
+    let out = moai(root, &["init", "--tracking", "commit", "--json"]);
+    assert!(!out.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "already_exists");
+
+    // 줄이 빠지면 그 파일의 이름으로 댄다.
+    std::fs::write(root.join(".git/info/exclude"), exclude.replace("/.claude/settings.local.json\n", "")).unwrap();
+    assert!(ok(root, &["status", "--json"]).contains("exclude_rules"), "빠진 줄을 안 댔다");
+    ok(root, &["init"]);
+    assert!(!ok(root, &["status", "--json"]).contains("exclude_rules"), "init 이 못 채웠다");
+}
+
+/// **`--tracking gitignore` 는 `.gitignore` 하나만 쓴다.**
+#[test]
+fn init_tracking_gitignore_writes_only_the_gitignore() {
+    let s = Scratch::new("init-gitignore");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--tracking", "gitignore", "--guide", "none"]);
+    assert_eq!(git(root, &["status", "--porcelain", "--untracked-files=all"]), "?? .gitignore\n");
+    assert!(read(&root.join(".gitignore")).lines().any(|l| l == "/.moai/"));
+    assert_eq!(field(&ok(root, &["init", "--json"]), "tracking"), "gitignore");
+}
+
+/// **git 저장소가 아니면 git 밖에 둘 자리가 없다** — 아무것도 안 쓰고 거절한다.
+#[test]
+fn init_refuses_to_keep_a_tracker_out_of_git_without_git() {
+    let s = Scratch::new("init-nogit");
+    let out = moai(s.path(), &["init", "argos", "--tracking", "exclude", "--json"]);
+    assert!(!out.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+    assert!(!s.path().join(".moai").exists(), "거절하고도 심었다");
+}
+
+/// **`--guide file` 은 전문을 `.moai/guide.md` 에, AGENTS.md 에는 링크만 둔다**(moai-cbfz). 그 전문은
+/// `init --print` 가 내는 글과 같고, `--check` 는 링크와 파일을 둘 다 잰다. 다시 부른 `init` 은 블록에서
+/// 모드를 읽어 링크를 지킨다.
+#[test]
+fn init_guide_file_writes_the_guide_and_links_it() {
+    let s = Scratch::new("init-guidefile");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    std::fs::write(root.join("AGENTS.md"), "# mine\n\nmy prose\n").unwrap();
+    let js = ok(root, &["init", "argos", "--guide", "file", "--json"]);
+    assert!(js.contains("\"guide_file\":true"), "{js}");
+    let printed = ok(root, &["init", "--print"]);
+    assert_eq!(read(&root.join(".moai/guide.md")).trim_end(), printed.trim_end(), "--print 와 다른 글을 썼다");
+    let agents = read(&root.join("AGENTS.md"));
+    assert!(agents.starts_with("# mine\n\nmy prose\n"), "사람의 산문을 건드렸다\n{agents}");
+    assert!(agents.contains(".moai/guide.md") && agents.contains("moai init --print"), "{agents}");
+    assert!(!agents.contains("### The three forks"), "전문을 AGENTS.md 에도 썼다");
+    let current = |root: &Path| field(&ok(root, &["init", "--check", "--json"]), "agents");
+    assert_eq!(current(root), "current");
+
+    // 다시 불러도 링크를 지킨다.
+    ok(root, &["init"]);
+    assert_eq!(read(&root.join("AGENTS.md")), agents, "다시 부른 init 이 블록 전문으로 돌렸다");
+    // 파일을 고치면 낡았고, init 이 다시 쓴다.
+    std::fs::write(root.join(".moai/guide.md"), "edited\n").unwrap();
+    assert_eq!(current(root), "stale");
+    assert!(ok(root, &["status", "--json"]).contains("agents_hand_edited"), "status 가 안 댔다");
+    ok(root, &["init"]);
+    assert_eq!(current(root), "current");
+}
+
+/// **훅 안내는 훅이 깔려야 선다** — `--no-skill` 과 함께 주면 조용히 한쪽을 이기게 하지 않고 거절한다(moai-785q).
+#[test]
+fn init_refuses_a_hooks_guide_without_the_hooks() {
+    let s = Scratch::new("init-hooknoskill");
+    git(s.path(), &["init", "-q", "."]);
+    let out = moai(s.path(), &["init", "argos", "--tracking", "exclude", "--guide", "hook", "--no-skill", "--json"]);
+    assert!(!out.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+    assert!(!s.path().join(".moai").exists(), "거절하고도 심었다");
+}
+
+/// **`--register` 는 심은 뒤 `moai project add` 를 부른다**(moai-785q). 그 명령의 `--json` 을 그 키에 싣는다.
+/// 사용자 설정은 이 시험의 자리로 돌린다 — 여럿이 나눠 쓰는 빈 집을 더럽히지 않게.
+#[test]
+fn init_register_adds_the_repository_to_the_project_list() {
+    let s = Scratch::new("init-register");
+    let root = s.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    git(&root, &["init", "-q", "."]);
+    let config = s.path().join("cfg/config.toml");
+    let out = staged(&["init", "argos", "--register", "--json"])
+        .env("MOAI_CONFIG", &config)
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let js = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{js}");
+    assert!(js.contains("\"project\":{") && js.contains("\"added\":true"), "{js}");
+    assert!(js.contains("\"skill\":false"), "안 시킨 설치를 했다 — {js}");
+    let root = std::fs::canonicalize(&root).unwrap();
+    assert!(read(&config).contains(&root.display().to_string()), "목록에 안 올랐다");
+}
+
+/// **AGENTS.md 에 moai 블록이 없는 체크아웃이면 훅의 보드가 사용법이 어디 있는지 한 줄을 싣는다**(moai-6pld).
+/// 블록이 있는 체크아웃에는 안 싣는다.
+#[test]
+fn the_board_says_where_the_usage_is_only_without_an_agents_block() {
+    let bare = Scratch::new("hook-unguided");
+    git(bare.path(), &["init", "-q", "."]);
+    ok(bare.path(), &["init", "argos", "--guide", "none"]);
+    let board = carried_text(&hook_out(&bare, "user-prompt-submit", &event(&bare, "u1")));
+    assert!(board.contains("`moai` 스킬"), "사용법이 어디 있는지 안 댔다 — {board}");
+
+    let block = init("hook-guided");
+    let board = carried_text(&hook_out(&block, "user-prompt-submit", &event(&block, "u2")));
+    assert!(!board.contains("`moai` 스킬"), "블록이 있는데 또 댔다 — {board}");
+}
+
+/// **하위 디렉터리의 트래커를 git 밖에 두면 그 디렉터리가 빠진다**(리뷰 moai-zynt.63u). `.git/info/exclude` 의 줄은
+/// 작업 트리 꼭대기가 뿌리라, `/.moai/` 를 그대로 적던 판은 하위 트래커를 못 막고(`git add -A` 가 담았다) 다시 부른
+/// `init` 이 그것을 커밋으로 읽어 커밋되는 파일을 심었다. `.gitignore` 로 뺀 것은 git 이 `web/.gitignore` 로 대는데,
+/// 이름이 `.gitignore` 인지로 가르던 판은 그것을 `exclude` 로 읽었다.
+#[test]
+fn a_tracker_kept_out_of_git_in_a_subdirectory_stays_out() {
+    let s = Scratch::new("init-sub-local");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    for (dir, tracking) in [("svc", "exclude"), ("web", "gitignore")] {
+        let at = root.join(dir);
+        std::fs::create_dir_all(&at).unwrap();
+        ok(&at, &["init", dir, "--tracking", tracking, "--guide", "none"]);
+        let st = ok(&at, &["status", "--json"]);
+        for kind in ["gitattributes_rules", "gitignore_rules", "exclude_rules", "gitignore_local_rules"] {
+            assert!(!st.contains(kind), "{dir}: 갓 심은 트래커에 {kind} 를 댔다 — {st}");
+        }
+        assert_eq!(field(&ok(&at, &["init", "--json"]), "tracking"), tracking, "{dir}: 다시 부르니 갈렸다");
+    }
+    assert_eq!(git(root, &["status", "--porcelain", "--untracked-files=all"]), "?? web/.gitignore\n");
+    let exclude = read(&root.join(".git/info/exclude"));
+    assert!(exclude.lines().any(|l| l == "/svc/.moai/"), "{exclude}");
+    assert!(!exclude.lines().any(|l| l == "/.moai/"), "꼭대기의 .moai/ 를 막았다\n{exclude}");
+}
+
+/// **되살리는 규칙은 무시가 아니고, 파일 하나에 걸린 남의 규칙은 트래커를 빼지 않는다**(리뷰 moai-zynt.63u).
+/// `check-ignore -v` 는 `!` 패턴에 걸린 경로도 대고 0 으로 끝난다 — 허용 목록 꼴의 `.gitignore` 나 `config.toml`
+/// 을 무시하는 저장소에서 커밋할 트래커를 `.gitignore` 의 것으로 읽던 판은, 보드가 시킨 대로 다시 부른 `init` 이
+/// `/.moai/` 를 그 파일에 적어 트래커를 git 밖으로 뺐다.
+#[test]
+fn a_reincluded_or_partly_ignored_tracker_stays_committed() {
+    for (name, rules) in [("allow", "*\n!*/\n!*.toml\n!*.jsonl\n!*.md\n!.git*\n"), ("cfg", "config.toml\n")] {
+        let s = Scratch::new(&format!("init-reincluded-{name}"));
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        std::fs::write(root.join(".gitignore"), rules).unwrap();
+        ok(root, &["init", "argos"]);
+        let st = ok(root, &["status", "--json"]);
+        assert!(!st.contains("gitignore_rules"), "{name}: 커밋할 트래커에 git 밖의 줄을 요구했다 — {st}");
+        assert_eq!(field(&ok(root, &["init", "--json"]), "tracking"), "commit", "{name}");
+        assert!(!read(&root.join(".gitignore")).lines().any(|l| l == "/.moai/"), "{name}: 트래커를 git 밖으로 뺐다");
+    }
+}
+
+/// **git 밖에 둔 트래커라도 서 있는 블록은 다시 부른 `init` 이 맞춘다**(리뷰 moai-zynt.63u) — 안 건드리던 판은
+/// 낡은 블록을 두고 "다 맞아 있다" 고 해, `moai init` 을 대는 `status` 의 알림이 영영 안 걷혔다.
+#[test]
+fn init_keeps_a_block_current_in_a_tracker_kept_out_of_git() {
+    let s = Scratch::new("init-local-block");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--tracking", "exclude", "--guide", "block"]);
+    let fresh = read(&root.join("AGENTS.md"));
+    assert!(fresh.contains("Start a session"), "시험의 전제 — 고칠 글이 블록에 없다");
+    std::fs::write(root.join("AGENTS.md"), fresh.replace("Start a session", "Begin a session")).unwrap();
+    assert!(ok(root, &["status", "--json"]).contains("agents_hand_edited"));
+    ok(root, &["init"]);
+    assert_eq!(read(&root.join("AGENTS.md")), fresh, "낡은 블록을 그대로 뒀다");
+    assert!(!ok(root, &["status", "--json"]).contains("agents_"));
+}
+
+/// **`.moai/guide.md` 는 AGENTS.md 와 같은 자로 읽는다**(리뷰 moai-zynt.63u) — CRLF 체크아웃은 같은 글이고, 못
+/// 읽으면 `--check` 가 그 파일의 이름을 대며, FIFO 는 건너뛰어 `init` 이 멈추지 않는다.
+#[cfg(unix)]
+#[test]
+fn the_guide_file_is_read_like_agents_md() {
+    let s = Scratch::new("init-guide-read");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--guide", "file"]);
+    let guide = root.join(".moai/guide.md");
+    std::fs::write(&guide, read(&guide).replace('\n', "\r\n")).unwrap();
+    assert_eq!(field(&ok(root, &["init", "--check", "--json"]), "agents"), "current", "CRLF 를 낡았다고 했다");
+    assert!(ok(root, &["init", "--json"]).contains("\"guide_file\":false"), "CRLF 를 LF 로 다시 썼다");
+
+    std::fs::write(&guide, b"caf\xe9\n").unwrap();
+    let out = moai(root, &["init", "--check"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && err.contains("guide.md") && !err.contains("AGENTS.md"), "{err}");
+
+    std::fs::remove_file(&guide).unwrap();
+    assert!(Command::new("mkfifo").arg(&guide).status().unwrap().success(), "FIFO 를 못 지었다");
+    let mut child = staged(&["init", "--json"]).current_dir(root).stdout(Stdio::piped()).spawn().unwrap();
+    for _ in 0..600 {
+        if child.try_wait().unwrap().is_some() {
+            let out = child.wait_with_output().unwrap();
+            let js = String::from_utf8_lossy(&out.stdout);
+            assert!(out.status.success() && js.contains(".moai/guide.md"), "못 건드린 자리로 안 댔다 — {js}");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!("FIFO 인 .moai/guide.md 앞에서 init 이 멈췄다");
+}
+
+/// **git 밖에 둘 줄을 못 쓰면 아무것도 안 심는다**(리뷰 moai-zynt.63u) — 그 줄이 이 트래커가 git 밖이라는 유일한
+/// 기록이다. `.moai/` 만 세우고 넘어가던 판은 시킨 대로 다시 부른 `init` 이 그것을 커밋으로 읽어 커밋되는 파일을 심었다.
+#[cfg(unix)]
+#[test]
+fn init_plants_nothing_when_the_exclude_lines_cannot_be_written() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = Scratch::new("init-exclude-ro");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    let exclude = root.join(".git/info/exclude");
+    std::fs::create_dir_all(root.join(".git/info")).unwrap();
+    std::fs::write(&exclude, "").unwrap();
+    std::fs::set_permissions(&exclude, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&exclude).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+    let out = moai(root, &["init", "argos", "--tracking", "exclude", "--guide", "none"]);
+    std::fs::set_permissions(&exclude, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(!out.status.success(), "못 빼고도 0 으로 끝났다 — {}", String::from_utf8_lossy(&out.stdout));
+    assert!(!root.join(".moai").exists(), "git 밖에 못 두고도 트래커를 심었다");
+}
+
+/// **빈 접두어는 심기 전에 제 말로 거절한다**(리뷰 moai-zynt.63u) — 모양 검사를 지나 설정 검사에서야 멈추면 선택
+/// 상자는 이미 닫혀 고른 것이 사라진다. 플래그도 같은 잣대다.
+#[test]
+fn init_refuses_an_empty_prefix_up_front() {
+    let s = Scratch::new("init-empty-prefix");
+    git(s.path(), &["init", "-q", "."]);
+    let out = moai(s.path(), &["init", "", "--json"]);
+    assert!(!out.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+    assert!(!s.path().join(".moai").exists());
+}
+
+/// **딸린 워크트리에서는 트래커를 git 밖에 두지 않는다**(리뷰 moai-zynt.63u) — `.git/info/exclude` 는 모든 워크트리가
+/// 함께 쓰므로 `/.moai/` 한 줄이 주 체크아웃의 커밋된 트래커까지 가려, 새 사람의 저널 파일이 말없이 커밋에서 빠졌다.
+/// 워크트리 거절문이 대는 `MOAI_HERE=1 moai init` 이 그리로 가는 길이라 그 자리에서 거절하고, 주 체크아웃은 그대로다.
+#[test]
+fn a_linked_worktree_does_not_keep_a_tracker_out_of_git() {
+    let s = Scratch::new("init-linked-local");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "."]);
+    ok(&main, &["init", "argos"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-qm", "tracker"]);
+    let linked = s.path().join("linked");
+    git(&main, &["worktree", "add", "-q", "-b", "side", linked.to_str().unwrap()]);
+    git(&linked, &["rm", "-rq", "--cached", ".moai"]);
+    std::fs::remove_dir_all(linked.join(".moai")).unwrap();
+    let before = std::fs::read_to_string(main.join(".git/info/exclude")).unwrap_or_default();
+    let out = staged(&["init", "wt", "--tracking", "exclude", "--guide", "none", "--json"])
+        .env("MOAI_HERE", "1")
+        .current_dir(&linked)
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+    assert_eq!(std::fs::read_to_string(main.join(".git/info/exclude")).unwrap_or_default(), before);
+    assert!(!linked.join(".moai").exists(), "거절하고도 심었다");
+}
+
+// ── moai-j9nf: PR 20 리뷰의 회귀 ──────────────────────────────────────────────────────────
+
+#[test]
+fn init_unknown_tracking_never_plants_commit_files() {
+    let s = Scratch::new("init-unknown-tracking");
+    git(s.path(), &["init", "-q", "."]);
+    ok(s.path(), &["init", "argos", "--tracking", "exclude", "--guide", "none"]);
+    let before = read(&s.path().join(".git/info/exclude"));
+    std::fs::write(s.path().join(".git/config"), "[broken\n").unwrap();
+    let status = ok(s.path(), &["status", "--json"]);
+    assert!(status.contains("tracking_unknown"), "{status}");
+    assert!(!status.contains("gitattributes_rules"), "Unknown was treated as commit — {status}");
+    let human = staged(&["status"]).env("MOAI_LANG", "en").current_dir(s.path()).output().unwrap();
+    assert!(human.status.success() && String::from_utf8_lossy(&human.stdout).contains("Git did not answer"));
+    for args in
+        [vec!["init", "--json"], vec!["init", "--tracking", "exclude", "--json"], vec!["init", "--check", "--json"]]
+    {
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "Succeeded despite broken git — {args:?}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("git"));
+    }
+    assert!(!s.path().join(".gitattributes").exists());
+    assert!(!s.path().join(".gitignore").exists());
+    assert!(!s.path().join("AGENTS.md").exists());
+    assert_eq!(read(&s.path().join(".git/info/exclude")), before);
+}
+
+#[test]
+fn init_first_run_preserves_ignored_tracking_and_the_standing_link() {
+    let source = Scratch::new("init-clone-source");
+    git(source.path(), &["init", "-q", "."]);
+    ok(source.path(), &["init", "argos", "--tracking", "gitignore", "--guide", "file"]);
+    let link = read(&source.path().join("AGENTS.md"));
+    let clone = Scratch::new("init-clone-first");
+    git(clone.path(), &["init", "-q", "."]);
+    for f in [".gitignore", "AGENTS.md"] {
+        std::fs::copy(source.path().join(f), clone.path().join(f)).unwrap();
+    }
+    assert!(!clone.path().join(".moai").exists());
+    assert!(!moai(clone.path(), &["init", "argos", "--tracking", "commit", "--json"]).status.success());
+    assert!(!clone.path().join(".moai").exists());
+    assert_eq!(field(&ok(clone.path(), &["init", "--check", "--json"]), "agents"), "current");
+    let out = ok(clone.path(), &["init", "argos", "--json"]);
+    assert_eq!(field(&out, "tracking"), "gitignore");
+    assert_eq!(field(&out, "guide"), "file");
+    assert_eq!(read(&clone.path().join("AGENTS.md")), link);
+    assert!(clone.path().join(".moai/guide.md").is_file());
+    assert!(!clone.path().join(".gitattributes").exists());
+}
+
+#[test]
+fn init_uses_the_persons_global_excludes_on_first_and_later_runs() {
+    let s = Scratch::new("init-global-excludes");
+    let root = s.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    git(&root, &["init", "-q", "."]);
+    let ignore = s.path().join("ignore");
+    std::fs::write(&ignore, ".moai/\n").unwrap();
+    let config = s.path().join("global-config");
+    std::fs::write(
+        &config,
+        format!("[core]\nexcludesFile = {}\n[safe]\ndirectory = {}\n", ignore.display(), root.display()),
+    )
+    .unwrap();
+    let run = |args: &[&str]| {
+        staged(args)
+            .env("GIT_CONFIG_GLOBAL", &config)
+            .env("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+            .current_dir(&root)
+            .output()
+            .unwrap()
+    };
+    for args in [vec!["init", "argos", "--json"], vec!["init", "--json"]] {
+        let out = run(&args);
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(field(&text, "tracking"), "exclude");
+        assert!(!root.join(".gitattributes").exists());
+        assert!(!root.join("AGENTS.md").exists());
+    }
+}
+
+#[test]
+fn init_recognizes_installed_hooks_without_replanting_a_block_or_reinstalling() {
+    let s = Scratch::new("init-standing-hooks");
+    git(s.path(), &["init", "-q", "."]);
+    ok(s.path(), &["init", "argos", "--guide", "none"]);
+    ok(s.path(), &["skill", "install", "--agent", "codex"]);
+    let out = ok(s.path(), &["init", "--json"]);
+    assert_eq!(field(&out, "guide"), "hook");
+    assert!(out.contains("\"skill\":false"), "{out}");
+    assert!(!s.path().join("AGENTS.md").exists());
+    assert_eq!(field(&ok(s.path(), &["init", "--no-skill", "--json"]), "guide"), "hook");
+}
+
+#[test]
+fn init_reads_a_linked_worktrees_guide_from_the_main_tracker() {
+    let s = Scratch::new("init-worktree-guide");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q", "."]);
+    ok(&main, &["init", "argos", "--guide", "file"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-qm", "init"]);
+    let side = s.path().join("side");
+    git(&main, &["worktree", "add", "-q", side.to_str().unwrap()]);
+    std::fs::remove_file(side.join(".moai/guide.md")).unwrap();
+    assert_eq!(field(&ok(&side, &["init", "--check", "--json"]), "agents"), "current");
+    assert!(!ok(&side, &["status", "--json"]).contains("agents_hand_edited"));
+    std::fs::write(main.join(".moai/guide.md"), "edited\n").unwrap();
+    assert_eq!(field(&ok(&side, &["init", "--check", "--json"]), "agents"), "stale");
+    std::fs::write(main.join(".moai/guide.md"), b"bad\xff\n").unwrap();
+    let out = moai(&side, &["init", "--check"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&main.join(".moai/guide.md").display().to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn init_local_tracking_ignores_both_a_tracker_link_and_its_target() {
+    use std::os::unix::fs::symlink;
+    for tracking in ["exclude", "gitignore"] {
+        let s = Scratch::new(&format!("init-link-local-{tracking}"));
+        git(s.path(), &["init", "-q", "."]);
+        std::fs::create_dir(s.path().join("tracker")).unwrap();
+        symlink("tracker", s.path().join(".moai")).unwrap();
+        // An existing empty link is a re-run; supply the config that re-runs read.
+        std::fs::write(s.path().join("tracker/config.toml"), "prefix = \"argos\"\n").unwrap();
+        if tracking == "exclude" {
+            std::fs::write(s.path().join(".git/info/exclude"), "/.moai\n").unwrap();
+        } else {
+            std::fs::write(s.path().join(".gitignore"), "/.moai\n").unwrap();
+        }
+        let out = ok(s.path(), &["init", "--guide", "none", "--json"]);
+        assert_eq!(field(&out, "tracking"), tracking);
+        std::fs::write(s.path().join("tracker/issues.jsonl"), "").unwrap();
+        git(s.path(), &["add", "-A"]);
+        let tracked = git(s.path(), &["ls-files"]);
+        assert!(!tracked.contains("tracker/") && !tracked.lines().any(|l| l == ".moai"), "{tracked}");
+        assert_eq!(field(&ok(s.path(), &["init", "--json"]), "tracking"), tracking);
+    }
+}
+
+#[test]
+fn init_explicit_driver_is_refused_when_the_tracker_is_not_tracked() {
+    for tracking in ["exclude", "gitignore"] {
+        let s = Scratch::new(&format!("init-driver-local-{tracking}"));
+        git(s.path(), &["init", "-q", "."]);
+        let out = moai(s.path(), &["init", "argos", "--tracking", tracking, "--driver", "--json"]);
+        assert!(!out.status.success());
+        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
+        assert!(!s.path().join(".moai").exists());
+        assert!(!s.path().join(".gitignore").exists());
+    }
+}
+
+#[test]
+fn init_json_names_the_ignore_file_that_it_actually_wrote() {
+    let s = Scratch::new("init-json-exclude");
+    git(s.path(), &["init", "-q", "."]);
+    let js = ok(s.path(), &["init", "argos", "--tracking", "exclude", "--json"]);
+    assert!(js.contains("\"exclude\":true") && js.contains("\"gitignore\":false"), "{js}");
+    assert!(!s.path().join(".gitignore").exists());
+}
+
+#[test]
+fn init_checks_prefix_before_git_and_reads_agents_even_for_local_tracking() {
+    let s = Scratch::new("init-refusal-order");
+    std::fs::write(s.path().join("AGENTS.md"), b"bad\xff\n").unwrap();
+    let out = moai(s.path(), &["init", "", "--tracking", "exclude", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && !err.contains("AGENTS.md"), "{err}");
+    git(s.path(), &["init", "-q", "."]);
+    std::fs::write(s.path().join(".git/info/exclude"), "/.moai/\n").unwrap();
+    let before = read(&s.path().join(".git/info/exclude"));
+    let out = moai(s.path(), &["init", "argos", "--json"]);
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("AGENTS.md"));
+    assert!(!s.path().join(".moai").exists());
+    assert_eq!(read(&s.path().join(".git/info/exclude")), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn init_slow_git_does_not_hide_linked_dotfile_notices() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let s = Scratch::new("init-slow-git-link");
+    git(s.path(), &["init", "-q", "."]);
+    ok(s.path(), &["init", "argos", "--no-driver"]);
+    std::fs::rename(s.path().join(".gitattributes"), s.path().join("attrs")).unwrap();
+    symlink("attrs", s.path().join(".gitattributes")).unwrap();
+    let bin = s.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let script = bin.join("git");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\ncase \" $* \" in *' check-ignore '*) exec sleep 10;; esac\nexec /usr/bin/git \"$@\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let clock = std::time::Instant::now();
+    let out = staged(&["status", "--json"]).env("PATH", &path).current_dir(s.path()).output().unwrap();
+    let js = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success() && js.contains("tracking_unknown") && js.contains("dotfile_linked"), "{js}");
+    assert!(clock.elapsed() < std::time::Duration::from_secs(8), "probe budget was exceeded");
+    let before = read(&s.path().join(".gitignore"));
+    let clock = std::time::Instant::now();
+    let out = staged(&["init", "--json"]).env("PATH", &path).current_dir(s.path()).output().unwrap();
+    assert!(!out.status.success(), "slow git was treated as commit mode");
+    assert!(clock.elapsed() < std::time::Duration::from_secs(8));
+    assert_eq!(read(&s.path().join(".gitignore")), before);
 }
 
 // ── 우편함과 출석(moai-h8tn) ────────────────────────────────────────
@@ -26696,4 +27352,1199 @@ fn skill_install_refuses_a_tree_it_cannot_build_before_the_first_write() {
     }
     assert_eq!(std::fs::read_to_string(&codex).unwrap(), "사람의 파일\n", "사람의 파일을 고쳤다");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
+}
+
+#[test]
+fn backlog_commands_show_the_new_word_and_keep_the_shared_file_spelling() {
+    let s = init("backlogcommands");
+    for command in ["backlog", "idea"] {
+        let out = ok(s.path(), &[command, "add", "later", "--json"]);
+        assert!(out.starts_with(r#"{"id":""#), "row field order changed: {out}");
+        assert_eq!(field(&out, "kind"), "backlog", "{out}");
+        assert!(!out.contains(r#""kind":"idea""#), "{out}");
+        let id = field(&out, "id");
+        for args in [
+            vec!["show", &id, "--json"],
+            vec!["show", "--type", "backlog", "--json"],
+            vec!["show", "--type", "idea", "--json"],
+            vec!["show", "--filter", "type=backlog", "--json"],
+            vec!["backlog", "ls", "--json"],
+            vec!["idea", "ls", "--json"],
+            vec!["idea", "show", "--json"],
+        ] {
+            let out = ok(s.path(), &args);
+            assert!(out.contains(r#""kind":"backlog""#), "{args:?}: {out}");
+            assert!(!out.contains(r#""kind":"idea""#), "{args:?}: {out}");
+        }
+    }
+    let stored = std::fs::read_to_string(s.path().join(".moai/issues.jsonl")).unwrap();
+    assert_eq!(stored.matches(r#""kind":"idea""#).count(), 2, "{stored}");
+    assert!(!stored.contains(r#""kind":"backlog""#), "{stored}");
+    let help = ok(s.path(), &["--help"]);
+    assert!(help.lines().any(|l| l.trim_start().starts_with("backlog ")), "{help}");
+    assert!(!help.lines().any(|l| l.trim_start().starts_with("idea ")), "old alias is visible: {help}");
+    assert!(ok(s.path(), &["idea", "--help"]).contains("moai backlog"));
+}
+
+#[test]
+fn backlog_spelling_in_a_file_is_read_and_rewritten_for_old_binaries() {
+    let s = init("backlogfile");
+    let out = ok(s.path(), &["backlog", "add", "later", "--json"]);
+    let id = field(&out, "id");
+    let at = s.path().join(".moai/issues.jsonl");
+    let old = std::fs::read_to_string(&at).unwrap();
+    let mut input: serde_json::Value = serde_json::from_str(&old).unwrap();
+    input["kind"] = "backlog".into();
+    input["metadata"] = serde_json::json!({"kind": "idea", "text": "kind stays idea here"});
+    std::fs::write(&at, format!("{}\n", input)).unwrap();
+    let shown = ok(s.path(), &["show", &id, "--json"]);
+    assert!(shown.starts_with(r#"{"id":""#), "row field order changed: {shown}");
+    let shown: serde_json::Value = serde_json::from_str(&shown).unwrap();
+    assert_eq!(shown["kind"], "backlog");
+    assert_eq!(shown["metadata"]["kind"], "idea", "nested user data was renamed");
+    assert_eq!(field(&ok(s.path(), &["edit", &id, "--title", "later again", "--json"]), "kind"), "backlog");
+    let written = std::fs::read_to_string(&at).unwrap();
+    let written: serde_json::Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(written["kind"], "idea");
+    assert_eq!(written["metadata"], input["metadata"], "unknown data did not survive the write");
+}
+
+// Explicit storage archives, as distinct from time-based view hiding.
+#[test]
+fn archive_storage_moves_closed_bundles_and_restores_only_selected_rows() {
+    let s = init("archive-storage-bundle");
+    let has_row =
+        |text: &str, id: &str| text.lines().any(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"] == id);
+    let milestone = ok(s.path(), &["milestone", "add", "release", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "bundle", "--milestone", &milestone, "-q"]).trim().to_string();
+    let a = add(s.path(), &["first", "--parent", &epic]);
+    let b = add(s.path(), &["second", "--parent", &epic]);
+    ok(s.path(), &["mv", &a, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    assert!(ok_at(s.path(), later, &["archive", "--dry-run", "--json"]).contains("\"rows\":0"));
+    ok(s.path(), &["mv", &b, "done"]);
+    let before = issues(s.path());
+    let dry = ok_at(s.path(), later, &["archive", "--dry-run", "--json"]);
+    assert!(dry.contains("\"rows\":3"), "{dry}");
+    assert_eq!(issues(s.path()), before);
+    assert!(!s.path().join(".moai/archive").exists());
+    assert!(ok_at(s.path(), later, &["status"]).contains("아카이브 파일로 옮길 수 있는 닫힌 줄 3건"));
+    ok_at(s.path(), later, &["archive", "--json"]);
+    let active = issues(s.path());
+    assert!(active.contains(&milestone));
+    for id in [&epic, &a, &b] {
+        assert!(!active.contains(id));
+    }
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    let archived = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(archived.lines().count(), 3);
+    assert!(ok_at(s.path(), later, &["show", &a, "--json"]).contains("first"));
+    assert!(ok_at(s.path(), later, &["show", "--archived", "--json"]).contains(&a));
+    assert!(ok_at(s.path(), later, &["show", "-g", "first", "--all", "--json"]).contains(&a));
+    assert!(ok_at(s.path(), later, &["stats", "--json"]).contains(r#"{"key":"done","rows":2}"#));
+    assert!(ok_at(s.path(), later, &["tui", "--path", &epic, "--json"]).contains(&a));
+    assert!(ok_at(s.path(), later, &["show", "--done", "2026-09-01..2026-09-30", "--json"]).contains(&a));
+    let stale = at(s.path(), later, &["mv", &a, "todo", "--from", "todo", "--json"]);
+    assert!(!stale.status.success());
+    assert_eq!(issues(s.path()), active, "failed guard restored a row");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), archived);
+    ok_at(s.path(), later, &["mv", &a, "done", "--json"]);
+    assert_eq!(issues(s.path()), active, "no-op move changed storage");
+    ok_at(s.path(), later, &["mv", &a, "todo", "--from", "done", "--json"]);
+    let active = issues(s.path());
+    assert!(active.contains(&a));
+    assert!(!has_row(&active, &b) && !has_row(&active, &epic));
+    let archived = std::fs::read_to_string(&file).unwrap();
+    assert!(!archived.contains(&a) && archived.contains(&b) && archived.contains(&epic));
+    ok_at(s.path(), later, &["mv", &epic, "todo", "--json"]);
+    assert!(issues(s.path()).contains(&epic));
+    assert!(!has_row(&std::fs::read_to_string(&file).unwrap(), &epic));
+}
+
+#[test]
+fn archive_storage_serializes_concurrent_archive_and_restore_commands() {
+    let s = init("archive-storage-concurrent");
+    let ids: Vec<_> = (0..8).map(|n| add(s.path(), &[&format!("row {n}")])).collect();
+    for id in &ids {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let later = "2026-10-01T00:00:00Z";
+    let children: Vec<_> = (0..4)
+        .map(|_| {
+            staged(&["archive", "--json"])
+                .current_dir(s.path())
+                .env("MOAI_NOW", later)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 8);
+    let children: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            staged(&["mv", id, "todo", "--from", "done", "--json"])
+                .current_dir(s.path())
+                .env("MOAI_NOW", later)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    assert_eq!(issues(s.path()).lines().count(), 8);
+    assert!(std::fs::read_to_string(&file).unwrap().is_empty());
+}
+
+#[test]
+fn archive_storage_reports_cross_file_duplicate_ids_without_dropping_changed_rows() {
+    let s = init("archive-storage-duplicate");
+    let id = add(s.path(), &["original"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let row = issues(s.path());
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    // An old binary can create a duplicate live row. A changed row must not be
+    // discarded merely because its ID is already in the archive.
+    let changed = row.replace("original", "changed live row");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &changed).unwrap();
+    let status = at(s.path(), later, &["status", "--json"]);
+    assert!(!status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("duplicate_id"));
+    let archived_before = std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    assert!(at(s.path(), later, &["archive"]).status.success());
+    assert_eq!(issues(s.path()), changed);
+    assert_eq!(std::fs::read(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived_before);
+}
+
+#[test]
+fn archive_storage_uses_the_installed_merge_driver_for_yearly_files() {
+    let s = init("archive-storage-merge");
+    assert!(
+        std::fs::read_to_string(s.path().join(".gitattributes"))
+            .unwrap()
+            .contains(".moai/archive/*.jsonl text eol=lf merge=moai")
+    );
+    let a = add(s.path(), &["first"]);
+    ok(s.path(), &["mv", &a, "done"]);
+    let base = issues(s.path());
+    let b = add(s.path(), &["second"]);
+    ok(s.path(), &["mv", &b, "done"]);
+    let ours = issues(s.path());
+    let c = add(s.path(), &["third"]);
+    ok(s.path(), &["mv", &c, "done"]);
+    let theirs: String =
+        issues(s.path()).lines().filter(|line| !line.contains(&b)).map(|line| format!("{line}\n")).collect();
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    let paths: Vec<_> = ["base.jsonl", "2026.jsonl", "theirs.jsonl"].iter().map(|n| dir.join(n)).collect();
+    for (p, data) in paths.iter().zip([base, ours, theirs]) {
+        std::fs::write(p, data).unwrap();
+    }
+    let names: Vec<_> = paths.iter().map(|p| p.to_str().unwrap()).collect();
+    ok(s.path(), &["merge-driver", names[0], names[1], names[2]]);
+    let merged = std::fs::read_to_string(&paths[1]).unwrap();
+    assert_eq!(merged.lines().count(), 3);
+    for id in [&a, &b, &c] {
+        assert!(merged.contains(id));
+    }
+}
+
+#[test]
+fn archive_regressions_preserve_reference_and_milestone_context() {
+    let s = init("archive-reference-context");
+    let ms = ok(s.path(), &["milestone", "add", "shipped", "--due", "2026-01-01", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "closed bundle", "--milestone", &ms, "-q"]).trim().to_string();
+    let a = add(s.path(), &["closed blocker", "--parent", &epic]);
+    let b = add(s.path(), &["closed member", "--parent", &epic]);
+    let dependent = add(s.path(), &["live dependent"]);
+    ok(s.path(), &["link", &a, "--blocks", &dependent]);
+    for id in [&a, &b] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(!board.contains("dangling_blocked_by") && !board.contains("milestone_overdue"), "{board}");
+    let parsed: serde_json::Value = serde_json::from_str(&board).unwrap();
+    assert_eq!(parsed["total"], 1);
+    assert_eq!(parsed["archived"]["milestones"], 1);
+    assert!(ok_at(s.path(), later, &["ready", "--json"]).contains(&dependent));
+    // Seen from outside the repository, the overview reads the same context.
+    let out = Scratch::new("archive-reference-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let seen =
+        staged(&["status", "--json"]).current_dir(out.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", later).output();
+    let seen = String::from_utf8(seen.unwrap().stdout).unwrap();
+    assert!(!seen.contains("dangling_blocked_by") && !seen.contains("milestone_overdue"), "{seen}");
+    assert!(seen.contains("\"archived\":{\"milestones\":1"), "{seen}");
+    let restored: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &a, "todo", "--from", "done", "--json"])).unwrap();
+    assert_eq!(restored["moved"][0]["derived_epic"], epic);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(!board.contains("orphan_child") && !board.contains("dangling_epic"), "{board}");
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    let row = ready["ready"].as_array().unwrap().iter().find(|r| r["id"] == a).unwrap();
+    assert_eq!(row["derived_epic"], epic);
+    // `prime` reads the same context as `ready`.
+    let prime: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["prime", "--json"])).unwrap();
+    let row = prime["ready"].as_array().unwrap().iter().find(|r| r["id"] == a).unwrap();
+    assert_eq!(row["derived_epic"], epic, "{prime}");
+    // The member is drawn under its archived epic — `a` itself contains the epic's id, so look at the line above it.
+    let tree = ok_at(s.path(), later, &["show", "--tree"]);
+    let lines: Vec<&str> = tree.lines().collect();
+    let at = lines.iter().position(|l| l.contains(&a)).unwrap_or_else(|| panic!("{tree}"));
+    assert!(at > 0 && lines[at - 1].trim_start().starts_with(&epic) && lines[at].starts_with(' '), "{tree}");
+    // A second move of the restored row still walks to its archived epic.
+    let picked: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &a, "in_progress", "--json"])).unwrap();
+    assert_eq!(picked["moved"][0]["derived_epic"], epic, "{picked}");
+    let active: Vec<serde_json::Value> =
+        issues(s.path()).lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert!(active.iter().all(|row| row["id"] != epic && row["id"] != b));
+}
+
+/// **The overview names the archived epic of a restored member**(moai-kfjy) — `status --json` and `ready --json`
+/// called outside any `.moai` built `derived_epic` from live rows alone, so a member restored under an archived epic
+/// stood in no epic there while the in-repo `ready --json` named it.
+#[test]
+fn archive_regressions_the_overview_names_the_archived_epic_of_a_restored_member() {
+    let s = init("archive-overview-epic");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "archived epic", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let out = Scratch::new("archive-overview-epic-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let outside = |args: &[&str]| -> serde_json::Value {
+        let seen = staged(args).current_dir(out.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", later).output();
+        serde_json::from_str(&String::from_utf8(seen.unwrap().stdout).unwrap()).unwrap()
+    };
+    // The in-repo `ready --json` names it — the overview has to say the same.
+    let inside: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    let row = inside["ready"].as_array().unwrap().iter().find(|r| r["id"] == member).unwrap();
+    assert_eq!(row["derived_epic"], epic, "{inside}");
+    let ready = outside(&["ready", "--json"]);
+    let row = ready["projects"][0]["ready"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["id"] == member))
+        .unwrap_or_else(|| panic!("{ready}"));
+    assert_eq!(row["derived_epic"], epic, "{ready}");
+    // Picked up, it stands under `picked` in the overview `status`.
+    ok_at(s.path(), later, &["mv", &member, "in_progress"]);
+    let board = outside(&["status", "--json"]);
+    let row = board["projects"][0]["picked"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["id"] == member))
+        .unwrap_or_else(|| panic!("{board}"));
+    assert_eq!(row["derived_epic"], epic, "{board}");
+}
+
+/// **The explorer's project layer counts what `moai status` counts**(moai-nkwg) — the layer once read the live rows
+/// alone, so a milestone whose members had all been archived stood as an overdue empty todo, an archived blocker
+/// stood as a dangling reference, and the archive's collision, unreadable file and pending bundles never showed: the
+/// `+N` on the layer disagreed with the board behind it.
+#[test]
+fn archive_regressions_the_project_layer_counts_what_the_board_counts() {
+    let s = init("archive-layer-board");
+    let ms = ok(s.path(), &["milestone", "add", "shipped", "--due", "2026-01-01", "-q"]).trim().to_string();
+    let epic = ok(s.path(), &["epic", "add", "closed bundle", "--milestone", &ms, "-q"]).trim().to_string();
+    let a = add(s.path(), &["closed blocker", "--parent", &epic]);
+    let b = add(s.path(), &["closed member", "--parent", &epic]);
+    let dependent = add(s.path(), &["live dependent"]);
+    ok(s.path(), &["link", &a, "--blocks", &dependent]);
+    for id in [&a, &b] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let twin = add(s.path(), &["archived and live"]);
+    ok(s.path(), &["mv", &twin, "done"]);
+    let twin_line = line_of(s.path(), &twin);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    // A live copy of an archived row, a bundle closed after the move, and an archive file that does not parse.
+    let mut active = issues(s.path());
+    active.push_str(&format!("{twin_line}\n"));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), active).unwrap();
+    let pending = add(s.path(), &["closed after the move"]);
+    ok(s.path(), &["mv", &pending, "done"]);
+    std::fs::write(s.path().join(".moai/archive/2025.jsonl"), "<<<<<<< conflict\n=======\n>>>>>>> other\n").unwrap();
+
+    let board: serde_json::Value =
+        serde_json::from_slice(&at(s.path(), later, &["status", "--json"]).stdout).expect("status --json");
+    let kinds = |key: &str| -> Vec<String> {
+        board[key].as_array().unwrap().iter().map(|w| w["kind"].as_str().unwrap().to_string()).collect()
+    };
+    // The fixture stands: the archive diagnostics are on the board, and the archived context raises nothing.
+    assert!(kinds("warnings").contains(&"archive_duplicate_id".to_string()), "{board}");
+    assert!(kinds("warnings").contains(&"archive_unreadable".to_string()), "{board}");
+    assert!(kinds("notices").contains(&"archive_pending".to_string()), "{board}");
+    for kind in ["milestone_overdue", "dangling_blocked_by"] {
+        assert!(!kinds("warnings").contains(&kind.to_string()), "{kind}: {board}");
+    }
+
+    let out = Scratch::new("archive-layer-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let seen =
+        staged(&["tui", "--json"]).current_dir(out.path()).env("MOAI_CONFIG", &cfg).env("MOAI_NOW", later).output();
+    let layer: serde_json::Value = serde_json::from_slice(&seen.unwrap().stdout).expect("tui --json");
+    let row = &layer["projects"][0];
+    assert_eq!(row["warnings"], board["warnings"].as_array().unwrap().len(), "{layer}\n{board}");
+    assert_eq!(row["notices"], board["notices"].as_array().unwrap().len(), "{layer}\n{board}");
+}
+
+/// **The session board and Stop count what `moai status` counts**(review of moai-bth3) — the hook's archive board
+/// once left out the fatal `archive_duplicate_id`, so a session saw "nothing showing" while `status` exited 1.
+#[test]
+fn archive_regressions_the_hook_board_names_archive_collisions() {
+    let s = init("archive-hook-board");
+    let id = add(s.path(), &["live and archived"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let live = line_of(s.path(), &id);
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    let mut active = issues(s.path());
+    active.push_str(&format!("{live}\n"));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), active).unwrap();
+    let board = carried_text(&hook_out(&s, "user-prompt-submit", &event(&s, "archive-board")));
+    assert!(board.contains(&id) && board.contains("archive --drop"), "{board}");
+}
+
+/// **`Stop` and its baseline count the warnings `moai status` counts over an archive**(moai-i9ji) — they run at the end
+/// of every agent turn, so they read only the archive that reaches the live rows (`archive::around`) instead of
+/// parsing all of it. Every way an archived row feeds a live warning stands here at once: a restored member whose epic
+/// stayed archived, a live row blocked by an archived one, a live row put into an archived epic, a milestone past its
+/// deadline that stands done only through its archived members, and a live twin of an archived row
+/// (`archive_duplicate_id`). Read without them the board would name dangling references and an overdue milestone.
+/// The notice — a bundle `moai archive` would move — is not counted; an unreadable archived line nothing reaches is
+/// broken data and is counted the same on both sides (moai-5y2a).
+#[test]
+fn the_stop_count_matches_the_board_over_an_archive() {
+    let s = init("archive-stop-count");
+    let p = s.path();
+    let epic = ok(p, &["epic", "add", "closed bundle", "-q"]).trim().to_string();
+    let member = add(p, &["closed member", "--parent", &epic]);
+    let restored = add(p, &["restored member", "--parent", &epic]);
+    let stone = add(p, &["shipped", "--type", "milestone", "--due", "2026-09-20"]);
+    let released = ok(p, &["epic", "add", "released bundle", "--milestone", &stone, "-q"]).trim().to_string();
+    let shipped = add(p, &["shipped member", "--parent", &released]);
+    let blocker = add(p, &["closed blocker"]);
+    let twin = add(p, &["archived twin"]);
+    for id in [&member, &restored, &shipped, &blocker, &twin] {
+        ok(p, &["mv", id, "done"]);
+    }
+    let twin_line = line_of(p, &twin);
+    ok_at(p, ARCHIVED_AT, &["archive"]);
+    let archive = std::fs::read_to_string(p.join(".moai/archive/2026.jsonl")).unwrap();
+    for id in [&epic, &member, &restored, &released, &shipped, &blocker, &twin] {
+        assert!(Archived::has(&archive, id), "{id} was not archived\n{archive}");
+    }
+    ok_at(p, ARCHIVED_AT, &["mv", &restored, "todo", "--from", "done"]);
+    let waiting = add(p, &["waits on the archive"]);
+    ok(p, &["link", &blocker, "--blocks", &waiting]);
+    add(p, &["joins the archived epic", "-e", &epic]);
+    let pending = add(p, &["closed since"]);
+    ok(p, &["mv", &pending, "done"]);
+    let mut archive = std::fs::OpenOptions::new().append(true).open(p.join(".moai/archive/2026.jsonl")).unwrap();
+    std::io::Write::write_all(&mut archive, b"{\"id\":\"argos-zzzz\",\"title\":\n").unwrap();
+
+    let counted = |board: &serde_json::Value| -> usize {
+        board["warnings"].as_array().unwrap().iter().map(|w| w["count"].as_u64().unwrap() as usize).sum()
+    };
+    let at_archive = [("MOAI_NOW", ARCHIVED_AT)];
+    let start = |session: &str| hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, session));
+    // The session opens before the live twin, and the twin is what it leaves behind.
+    start("before-twin");
+    let before = baseline(&s, "before-twin").expect("no baseline");
+    let mut active = issues(p);
+    active.push_str(&format!("{twin_line}\n"));
+    std::fs::write(p.join(".moai/issues.jsonl"), active).unwrap();
+
+    let out = at(p, ARCHIVED_AT, &["status", "--json"]);
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<&str> = board["warnings"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
+    let notices: Vec<&str> = board["notices"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
+    assert!(kinds.contains(&"archive_duplicate_id") && kinds.contains(&"archive_unreadable"), "{board}");
+    for kind in ["dangling_epic", "dangling_blocked_by", "orphan_child", "milestone_overdue"] {
+        assert!(!kinds.contains(&kind), "{kind} — the board did not read the archive\n{board}");
+    }
+    assert!(notices.contains(&"archive_pending"), "{board}");
+    let warnings = counted(&board);
+    assert_eq!(before + 1, warnings, "only the twin came in between\n{board}");
+
+    start("after-twin");
+    assert_eq!(baseline(&s, "after-twin"), Some(warnings), "{board}");
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "before-twin"));
+    let held = String::from_utf8_lossy(&stop.stdout);
+    let grew = |n: usize| held.contains(&format!(" {n} "));
+    assert!(held.contains(r#""decision":"block""#) && grew(before) && grew(warnings), "{held}");
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "after-twin"));
+    assert!(stop.stdout.is_empty(), "{}", String::from_utf8_lossy(&stop.stdout));
+}
+
+/// **An archive that cannot be read is broken data**(moai-5y2a, 2026-10-06 the person's decision) — `moai status`
+/// exits non-zero on it, on the same line as an unreadable live row (`unreadable_line`). A file of conflict markers, a
+/// file that is not UTF-8 and a FIFO in a year's place are all `archive_unreadable`, a fatal warning that names the
+/// command listing each source. `stats` and `show --archived` still answer with 0: they read what they can and say the
+/// rest on stderr (moai-qde9.2hx.yt6).
+#[test]
+fn an_unreadable_archive_is_broken_data_for_status_alone() {
+    let mut cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
+        ("conflict", Box::new(|f| std::fs::write(f, "<<<<<<< ours\n=======\n>>>>>>> theirs\n").unwrap())),
+        ("not-utf8", Box::new(|f| std::fs::write(f, [0xff, 0xfe, b'\n']).unwrap())),
+    ];
+    #[cfg(unix)]
+    cases.push(("fifo", Box::new(|f| assert!(Command::new("mkfifo").arg(f).status().unwrap().success()))));
+    for (name, make) in cases {
+        let s = init(&format!("archive-broken-{name}"));
+        add(s.path(), &["live work"]);
+        let dir = s.path().join(".moai/archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        make(&dir.join("2025.jsonl"));
+
+        let out = at(s.path(), NOW, &["status", "--json"]);
+        assert!(!out.status.success(), "{name}: status exited 0 over a broken archive");
+        let board: serde_json::Value = serde_json::from_slice(&out.stdout).expect("status --json");
+        let found = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "archive_unreadable");
+        let w = found.unwrap_or_else(|| panic!("{name}: no archive_unreadable warning\n{board}"));
+        assert_eq!(
+            (&w["fatal"], &w["notice"], &w["hint"]),
+            (&serde_json::json!(true), &serde_json::json!(false), &serde_json::json!("moai show --archived"))
+        );
+        assert!(board["notices"].as_array().unwrap().iter().all(|n| n["kind"] != "archive_unreadable"), "{board}");
+        assert!(!at(s.path(), NOW, &["status"]).status.success(), "{name}: the text board exited 0");
+        for args in [&["stats", "--json"][..], &["show", "--archived"]] {
+            let out = at(s.path(), NOW, args);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "{name}: {args:?} exited non-zero\n{err}");
+            assert!(err.contains("archive/2025.jsonl"), "{name}: {args:?} did not name the source\n{err}");
+        }
+    }
+}
+
+/// **A session that leaves a broken archive behind is held at `Stop`**(moai-5y2a) — `Stop` reads only the archive that
+/// reaches the live rows (`archive::around`, moai-i9ji), yet it counts every unreadable archived line the way `moai
+/// status` does, reached or not. The line here is JSON but not a row (it has no `status`), so a syntax check alone
+/// would miss it, and nothing else names its id.
+#[test]
+fn a_session_that_breaks_the_archive_is_held_at_stop() {
+    let s = init("archive-broken-stop");
+    let p = s.path();
+    let done = add(p, &["closed"]);
+    ok(p, &["mv", &done, "done"]);
+    ok_at(p, ARCHIVED_AT, &["archive"]);
+    add(p, &["live work"]);
+    let at_archive = [("MOAI_NOW", ARCHIVED_AT)];
+    hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, "breaks"));
+    let before = baseline(&s, "breaks").expect("no baseline");
+
+    let mut archive = std::fs::OpenOptions::new().append(true).open(p.join(".moai/archive/2026.jsonl")).unwrap();
+    std::io::Write::write_all(&mut archive, b"{\"id\":\"argos-zzzy\",\"title\":\"no status\"}\n").unwrap();
+    let out = at(p, ARCHIVED_AT, &["status", "--json"]);
+    assert!(!out.status.success());
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let counted: usize =
+        board["warnings"].as_array().unwrap().iter().map(|w| w["count"].as_u64().unwrap() as usize).sum();
+    assert_eq!(counted, before + 1, "{board}");
+
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "breaks"));
+    let held = String::from_utf8_lossy(&stop.stdout);
+    assert!(held.contains(r#""decision":"block""#) && held.contains(&format!(" {counted} ")), "{held}");
+    hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, "after"));
+    assert_eq!(baseline(&s, "after"), Some(counted), "the baseline and the board count apart");
+}
+
+#[test]
+fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
+    let s = init("archive-lenient-read");
+    let id = add(s.path(), &["readable work"]);
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("2024.jsonl"), [0xff, 0xfe]).unwrap();
+    std::fs::write(dir.join("2025.jsonl"), "<<<<<<< conflict\n=======\n>>>>>>> other\n").unwrap();
+    let another = add(s.path(), &["write despite archive damage"]);
+    ok(s.path(), &["mv", &another, "in_progress"]);
+    let board = at(s.path(), NOW, &["status", "--json"]);
+    assert!(!board.status.success() && String::from_utf8_lossy(&board.stdout).contains("archive_unreadable"));
+    for args in [vec!["show", &id], vec!["stats", "--json"]] {
+        let out = at(s.path(), NOW, &args);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{err}");
+        assert!(err.contains("archive/2025.jsonl"), "{err}");
+        assert!(!err.contains("issues.jsonl:") && !err.contains("rm --line"), "{err}");
+    }
+    assert_eq!(std::fs::read(dir.join("2024.jsonl")).unwrap(), [0xff, 0xfe]);
+}
+
+#[test]
+fn archive_regressions_conflicting_bundles_stay_live_and_drop_repairs_them() {
+    let s = init("archive-conflict-repair");
+    let epic = ok(s.path(), &["epic", "add", "original", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    let before = issues(s.path());
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), before.replace("original", "changed live group")).unwrap();
+    let separate = add(s.path(), &["separate closed bundle"]);
+    ok(s.path(), &["mv", &separate, "done"]);
+    // The preview promises what the move does: the conflicting bundle is not on it.
+    let dry = ok_at(s.path(), later, &["archive", "--dry-run", "--json"]);
+    assert!(dry.contains(&separate) && !dry.contains(&epic) && !dry.contains(&member), "{dry}");
+    let out = ok_at(s.path(), later, &["archive", "--json"]);
+    assert!(out.contains(&separate) && !out.contains(&epic) && !out.contains(&member), "{out}");
+    assert!(issues(s.path()).contains(&epic) && issues(s.path()).contains(&member));
+    let status = at(s.path(), later, &["status", "--json"]);
+    let board = String::from_utf8_lossy(&status.stdout);
+    assert!(board.contains("archive_duplicate_id") && board.contains("archive --drop"), "{board}");
+    // Nothing is left that `moai archive` would move, so the board does not say there is.
+    assert!(!board.contains("archive_pending"), "{board}");
+    assert!(!status.status.success());
+    let live = issues(s.path());
+    assert!(!at(s.path(), later, &["archive", "--drop", &separate]).status.success());
+    for id in [&epic, &member] {
+        ok_at(s.path(), later, &["archive", "--drop", id]);
+    }
+    assert_eq!(issues(s.path()), live);
+    let archive = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    assert!(!archive.contains(&epic) && !archive.contains(&member) && archive.contains(&separate));
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+    ok_at(s.path(), later, &["archive"]);
+    assert!(!issues(s.path()).contains(&member));
+}
+
+/// **아카이브로 옮긴 줄도 가리킬 수 있다**(moai-tzzt) — 아카이브는 닫힌 묶음을 파일만 옮긴 것이라, 그 에픽·부모·
+/// 막는 줄은 여전히 있는 줄이다. 쓰기의 참조 검사가 산 줄만 보던 판은 `add -e`·`edit -e` 에 "없는 에픽" 을 알리고,
+/// `--parent`·`link` 는 "없다" 로 거절했다 — 보드는 아카이브를 문맥으로 읽어 같은 줄을 멀쩡하다고 세는데.
+/// 가리킨 줄은 아카이브에 그대로 서고, 새 줄만 산 파일에 선다. 아래 넷이 이 판을 같이 쓴다.
+struct Archived {
+    s: Scratch,
+    epic: String,
+    member: String,
+    blocker: String,
+    /// 산 줄 `live` 에 막혔던 채로 닫혀 아카이브로 간 줄 — 고리가 아카이브를 지나는 판이다.
+    waited: String,
+    live: String,
+    archive: String,
+}
+
+const ARCHIVED_AT: &str = "2026-10-01T00:00:00Z";
+
+impl Archived {
+    fn new(name: &str) -> Archived {
+        let s = init(name);
+        let epic = ok(s.path(), &["epic", "add", "closed bundle", "-q"]).trim().to_string();
+        let member = add(s.path(), &["closed member", "--parent", &epic]);
+        let blocker = add(s.path(), &["closed blocker"]);
+        let live = add(s.path(), &["live row"]);
+        let waited = add(s.path(), &["closed while blocked"]);
+        ok(s.path(), &["link", &live, "--blocks", &waited]);
+        for id in [&member, &blocker, &waited] {
+            ok(s.path(), &["mv", id, "done"]);
+        }
+        ok_at(s.path(), ARCHIVED_AT, &["archive"]);
+        let archive = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+        let a = Archived { s, epic, member, blocker, waited, live, archive };
+        for id in [&a.epic, &a.member, &a.blocker, &a.waited] {
+            assert!(Archived::has(&a.archive, id) && !Archived::has(&issues(a.s.path()), id), "{id} 가 안 옮겨졌다");
+        }
+        a
+    }
+
+    fn has(text: &str, id: &str) -> bool {
+        text.lines().any(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["id"] == id)
+    }
+
+    /// 성공하고 stderr 에 아무 말도 없어야 한다 — "없는 에픽" 알림도 거기 선다.
+    fn quiet(&self, args: &[&str]) -> String {
+        let out = at(self.s.path(), ARCHIVED_AT, args);
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success(), "moai {args:?}\n{err}");
+        assert!(err.is_empty(), "moai {args:?} 가 아카이브의 줄을 없다고 읽었다\n{err}");
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// 보드는 끊긴 참조를 안 세고 `rows`(이 쓰기가 아카이브를 가리키게 한 줄)를 어느 경고에도 안 올린다 — 에픽 없는
+    /// 줄도 고아도 아니다. 가리킨 줄은 아카이브에 그대로다 — 되살린 것이 아니다.
+    fn settled(&self, rows: &[&str]) {
+        let board = ok_at(self.s.path(), ARCHIVED_AT, &["status", "--json"]);
+        assert!(!board.contains("dangling_"), "{board}");
+        let parsed: serde_json::Value = serde_json::from_str(&board).unwrap();
+        for w in parsed["warnings"].as_array().unwrap() {
+            let named = w["ids"].as_array().into_iter().flatten().filter_map(|id| id.as_str());
+            for id in named {
+                assert!(!rows.contains(&id), "{id} 가 {} 로 섰다\n{board}", w["kind"]);
+            }
+        }
+        let active = issues(self.s.path());
+        for id in [&self.epic, &self.member, &self.blocker, &self.waited] {
+            assert!(!Archived::has(&active, id), "{id} 가 산 파일로 돌아왔다\n{active}");
+        }
+        let archive = std::fs::read_to_string(self.s.path().join(".moai/archive/2026.jsonl")).unwrap();
+        assert_eq!(archive, self.archive);
+    }
+}
+
+#[test]
+fn archive_regressions_add_e_points_at_an_archived_epic() {
+    let a = Archived::new("archive-ref-add-e");
+    let made: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "joins the archived epic", "-e", &a.epic, "--json"])).unwrap();
+    assert_eq!(made["derived_epic"], a.epic.as_str(), "{made}");
+    a.settled(&[made["id"].as_str().unwrap()]);
+}
+
+#[test]
+fn archive_regressions_edit_e_points_at_an_archived_epic() {
+    let a = Archived::new("archive-ref-edit-e");
+    let edited: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["edit", &a.live, "-e", &a.epic, "--json"])).unwrap();
+    assert_eq!(edited["derived_epic"], a.epic.as_str(), "{edited}");
+    // 사람 화면의 상세도 그 에픽을 이름으로 댄다 — "(에픽이 없다)" 가 아니다.
+    let shown = a.quiet(&["edit", &a.live, "-e", &a.epic, "--title", "live row again"]);
+    assert!(shown.contains("closed bundle"), "{shown}");
+    a.settled(&[&a.live]);
+}
+
+#[test]
+fn archive_regressions_parent_points_at_archived_rows() {
+    let a = Archived::new("archive-ref-parent");
+    // 아카이브의 에픽과 멤버 밑에 자식이 선다. id 는 그 부모의 것을 잇는다.
+    let child: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "under the archived epic", "--parent", &a.epic, "--json"])).unwrap();
+    assert!(child["id"].as_str().unwrap().starts_with(&format!("{}.", a.epic)), "{child}");
+    let grand: serde_json::Value =
+        serde_json::from_str(&a.quiet(&["add", "under the archived member", "--parent", &a.member, "--json"])).unwrap();
+    assert!(grand["id"].as_str().unwrap().starts_with(&format!("{}.", a.member)), "{grand}");
+    assert_eq!(grand["derived_epic"], a.epic.as_str(), "{grand}");
+    a.settled(&[child["id"].as_str().unwrap(), grand["id"].as_str().unwrap()]);
+}
+
+#[test]
+fn archive_regressions_link_takes_an_archived_blocker() {
+    let a = Archived::new("archive-ref-link");
+    a.quiet(&["link", &a.blocker, "--blocks", &a.live]);
+    // 막힌 쪽(산 줄)에만 적힌다. 닫힌 줄이 막으니 그 줄은 그대로 집을 수 있다.
+    let row: serde_json::Value = serde_json::from_str(&line_of(a.s.path(), &a.live)).unwrap();
+    assert_eq!(row["blocked_by"], serde_json::json!([a.blocker]), "{row}");
+    assert!(ok_at(a.s.path(), ARCHIVED_AT, &["ready", "--json"]).contains(&a.live));
+    // 고리는 아카이브의 줄을 지나서도 잰다 — 아카이브의 `waited` 는 `live` 에 막혀 있으니, 그것이 `live` 를 막으면 고리다.
+    let looped = at(a.s.path(), ARCHIVED_AT, &["link", &a.waited, "--blocks", &a.live, "--json"]);
+    assert!(!looped.status.success());
+    assert_eq!(field(&String::from_utf8_lossy(&looped.stderr), "code"), "bad_input");
+    // 막히는 쪽은 이 쓰기가 고치는 줄이라 산 줄이라야 한다 — 아카이브의 줄은 `edit` 처럼 못 찾는다.
+    let archived = at(a.s.path(), ARCHIVED_AT, &["link", &a.live, "--blocks", &a.blocker, "--json"]);
+    assert_eq!(field(&String::from_utf8_lossy(&archived.stderr), "code"), "not_found");
+    a.settled(&[]);
+}
+
+/// `backlog promote -e` 는 `add -e` 와 같은 에픽을 받는다 — 연습도 진짜도. 없는 에픽을 거절하는 자리라, 산 줄만
+/// 재면 아카이브의 에픽에 펼치는 길이 통째로 막힌다.
+#[test]
+fn archive_regressions_promote_e_unfolds_into_an_archived_epic() {
+    let a = Archived::new("archive-ref-promote-e");
+    let idea = ok(a.s.path(), &["backlog", "add", "a later thought", "-q"]).trim().to_string();
+    let run = |dry: bool| {
+        let mut args = vec!["backlog", "promote", &idea, "-e", &a.epic, "--from", "-", "--json"];
+        if dry {
+            args.push("--dry-run");
+        }
+        let out = from_stdin(a.s.path(), &args, "- unfolded member\n");
+        let err = String::from_utf8_lossy(&out.stderr).to_string();
+        assert!(out.status.success() && err.is_empty(), "dry-run {dry}\n{err}");
+        String::from_utf8(out.stdout).unwrap()
+    };
+    run(true);
+    let made: serde_json::Value = serde_json::from_str(&run(false)).unwrap();
+    let member = made["made"][0]["id"].as_str().unwrap();
+    assert!(member.starts_with(&format!("{}.", a.epic)), "{made}");
+    assert_eq!(made["made"][0]["derived_epic"], a.epic.as_str(), "{made}");
+    a.settled(&[member]);
+}
+
+#[test]
+fn archive_regressions_rule_five_covers_archived_owned_and_unowned_rows() {
+    let s = init("archive-hook-owner");
+    let later = "2026-10-01T00:00:00Z";
+    for owner in ["B (b@x.io)", "none"] {
+        let id = add(s.path(), &["archived pickup", "-a", owner]);
+        ok(s.path(), &["mv", &id, "done"]);
+        ok_at(s.path(), later, &["archive"]);
+        let cmd = format!("{{\"command\":\"moai mv {id} in_progress --from done\"}}");
+        let why = refusal(&call(&s, "Bash", &cmd, "archive-worker"));
+        assert!(why.starts_with("Rule 5") && why.contains("--from done --take"), "{why}");
+        let cmd = format!("{{\"command\":\"moai mv {id} in_progress --from done --take -m 'Person authorized'\"}}");
+        assert!(call(&s, "Bash", &cmd, "archive-worker").trim().is_empty());
+        ok_at(s.path(), later, &["mv", &id, "in_progress", "--from", "done", "--take", "-m", "Person authorized"]);
+        assert!(ok(s.path(), &["show", &id]).contains("Taken-over:"));
+        ok(s.path(), &["mv", &id, "done"]);
+    }
+}
+
+#[test]
+fn archive_regressions_worktree_overlay_does_not_create_archive_collisions_or_pending_rows() {
+    let t = trees("archive-worktree-context");
+    let main = t.main();
+    let independent = add(&main, &["old closed row"]);
+    ok(&main, &["mv", &independent, "done"]);
+    // Give the sibling an edited stale copy which the overlay must display.
+    let copy: String =
+        issues(&main).lines().filter(|line| line.contains(&independent)).map(|line| format!("{line}\n")).collect();
+    let feat = t.s.path().join("feat");
+    let mut side = issues(&feat);
+    side.push_str(&copy.replace("old closed row", "sibling copy"));
+    std::fs::write(feat.join(".moai/issues.jsonl"), side).unwrap();
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(&main, later, &["archive"]);
+    let dry: serde_json::Value =
+        serde_json::from_str(&ok_at(&main, later, &["archive", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["rows"], 0);
+    let board = ok_at(&main, later, &["status", "--worktree", "--json"]);
+    assert!(!board.contains("archive_duplicate_id") && !board.contains("archive_pending"), "{board}");
+    assert!(ok_at(&main, later, &["show", "--worktree", "--archived"]).contains("sibling copy"));
+}
+
+#[cfg(unix)]
+#[test]
+fn archive_regressions_fifos_and_outside_links_never_block_active_operations() {
+    use std::os::unix::fs::symlink;
+    let s = init("archive-special-files");
+    let away = Scratch::new("archive-outside");
+    std::fs::write(away.path().join("outside.jsonl"), "unchanged").unwrap();
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    symlink(away.path().join("outside.jsonl"), dir.join("2024.jsonl")).unwrap();
+    let fifo = dir.join("2025.jsonl");
+    assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+    let id = add(s.path(), &["works with special files"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+    let board = at(s.path(), NOW, &["status", "--json"]);
+    assert!(!board.status.success() && String::from_utf8_lossy(&board.stdout).contains("archive_unreadable"));
+    assert_eq!(std::fs::read_to_string(away.path().join("outside.jsonl")).unwrap(), "unchanged");
+}
+
+/// A cleanup that fails after the restore committed keeps the move, names the repair, and does not claim the history
+/// was lost — the journal holds the move. The copy's directory refuses new names, so the rewrite fails.
+#[cfg(unix)]
+#[test]
+fn archive_regressions_cleanup_failure_keeps_the_successful_move_and_recovery_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("archive-cleanup-failure");
+    let id = add(s.path(), &["restore despite cleanup failure"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let dir = s.path().join(".moai/archive");
+    let mode = |m: u32| std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    if std::fs::File::create(dir.join("probe")).is_ok() {
+        mode(0o755);
+        return; // root 는 권한을 안 본다
+    }
+    let moved = at(s.path(), later, &["mv", &id, "todo", "--from", "done", "--json"]);
+    mode(0o755);
+    let err = String::from_utf8_lossy(&moved.stderr);
+    assert!(moved.status.success(), "{err}");
+    let output: serde_json::Value = serde_json::from_slice(&moved.stdout).unwrap();
+    assert_eq!(output["moved"][0]["id"], id);
+    assert!(err.contains("archive --drop") && !err.contains("이력은 못 남겼다"), "{err}");
+    assert!(std::fs::read_to_string(journal_file(s.path())).unwrap().contains("\"to\":\"todo\""));
+    assert!(issues(s.path()).contains(&id));
+    assert!(std::fs::read_to_string(dir.join("2026.jsonl")).unwrap().contains(&id));
+    let retry = at(s.path(), later, &["mv", &id, "todo", "--from", "done", "--json"]);
+    assert!(!retry.status.success());
+    assert!(String::from_utf8_lossy(&retry.stdout).contains("stale"));
+    ok_at(s.path(), later, &["archive", "--drop", &id]);
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+}
+
+/// **An unrelated archive file that cannot be read stops neither a restore's cleanup nor `--drop`**(review of
+/// moai-bth3) — no reader sees a row in it, and stopping on it left a fatal duplicate whose only repair was outside the
+/// tool. What could not be checked is named.
+#[cfg(unix)]
+#[test]
+fn archive_regressions_an_unrelated_broken_archive_file_blocks_neither_cleanup_nor_drop() {
+    let s = init("archive-unrelated-broken");
+    let later = "2026-10-01T00:00:00Z";
+    let restored = add(s.path(), &["restored row"]);
+    let twin = add(s.path(), &["row with a stale archive copy"]);
+    for id in [&restored, &twin] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let live = line_of(s.path(), &twin);
+    ok_at(s.path(), later, &["archive"]);
+    let dir = s.path().join(".moai/archive");
+    std::fs::write(dir.join("2024.jsonl"), [0xff, 0xfe]).unwrap();
+    assert!(Command::new("mkfifo").arg(dir.join("2023.jsonl")).status().unwrap().success());
+    let moved = at(s.path(), later, &["mv", &restored, "todo", "--from", "done"]);
+    assert!(moved.status.success() && moved.stderr.is_empty(), "{}", String::from_utf8_lossy(&moved.stderr));
+    let archive = std::fs::read_to_string(dir.join("2026.jsonl")).unwrap();
+    assert!(!archive.contains(&restored), "cleanup stopped on an unrelated file: {archive}");
+    let mut active = issues(s.path());
+    active.push_str(&format!("{live}\n"));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), active).unwrap();
+    let dropped = at(s.path(), later, &["archive", "--drop", &twin, "--json"]);
+    let err = String::from_utf8_lossy(&dropped.stderr);
+    assert!(dropped.status.success(), "{err}");
+    assert!(String::from_utf8_lossy(&dropped.stdout).contains("\"removed\":1"));
+    assert!(err.contains("2023.jsonl") && err.contains("2024.jsonl"), "unchecked files went unnamed: {err}");
+    assert!(!std::fs::read_to_string(dir.join("2026.jsonl")).unwrap().contains(&twin));
+    // The broken files are still there, so the board ends non-zero on them alone (moai-5y2a).
+    let board = at(s.path(), later, &["status", "--json"]);
+    let text = String::from_utf8_lossy(&board.stdout);
+    assert!(!board.status.success() && text.contains("archive_unreadable"), "{text}");
+    assert!(!text.contains("archive_duplicate_id"), "{text}");
+}
+
+/// **`--drop` removes copies of the live row only**(review of moai-bth3). An archived row that merely shares the id
+/// is another issue — an id minted while its file could not be read, or by another clone — and removing it would
+/// erase that issue. With no copy nothing is claimed, an unknown id is `not_found`, and an archive-only id stays.
+#[test]
+fn archive_regressions_drop_never_erases_another_issue_under_the_same_id() {
+    let s = init("archive-drop-identity");
+    let later = "2026-10-01T00:00:00Z";
+    let id = add(s.path(), &["archived original"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    let archived = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    let other = archived.replace("archived original", "a different live issue").replace(NOW, later);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &other).unwrap();
+    let refused = at(s.path(), later, &["archive", "--drop", &id, "--json"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("\"code\":\"bad_target\""));
+    assert_eq!(std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived);
+    let fresh = add(s.path(), &["never archived"]);
+    let none = ok_at(s.path(), later, &["archive", "--drop", &fresh, "--json"]);
+    assert!(none.contains("\"removed\":0"), "{none}");
+    let unknown = at(s.path(), later, &["archive", "--drop", "argos-zzzz", "--json"]);
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("\"code\":\"not_found\""));
+    std::fs::write(s.path().join(".moai/issues.jsonl"), "").unwrap();
+    let only = at(s.path(), later, &["archive", "--drop", &id, "--json"]);
+    assert!(String::from_utf8_lossy(&only.stderr).contains("\"code\":\"bad_target\""));
+    assert_eq!(std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived);
+}
+
+/// **An unreadable archive is named where it matters, in its own words**(review of moai-bth3) — once per source, only
+/// by a write that minted an id it could not check, and never as lost history: the journal was written.
+#[cfg(unix)]
+#[test]
+fn archive_regressions_unreadable_archive_files_never_read_as_lost_history() {
+    let s = init("archive-write-notes");
+    let id = add(s.path(), &["first"]);
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("2025.jsonl"), "<<<<<<< ours\n=======\n>>>>>>> theirs\nnot json\n").unwrap();
+    assert!(Command::new("mkfifo").arg(dir.join("2024.jsonl")).status().unwrap().success());
+    let added = at(s.path(), NOW, &["add", "minted beside an unreadable file", "-q"]);
+    let err = String::from_utf8_lossy(&added.stderr);
+    assert!(added.status.success(), "{err}");
+    assert_eq!(err.lines().count(), 1, "one line per unreadable source: {err}");
+    assert!(err.contains("2024.jsonl") && !err.contains("2025.jsonl"), "{err}");
+    assert!(!err.contains("이력은 못 남겼다"), "an archive file was reported as lost history: {err}");
+    for args in [vec!["note", &id, "a memo"], vec!["mv", &id, "todo"], vec!["edit", &id, "-p", "1"]] {
+        let out = at(s.path(), NOW, &args);
+        assert!(out.status.success() && out.stderr.is_empty(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+}
+
+/// **A restore never stages an archive copy beside an unreadable live line of the same id**(review of moai-bth3) —
+/// say a row a newer binary wrote. Restoring the stale copy wrote a live duplicate and shadowed the newer row.
+#[test]
+fn archive_regressions_restore_leaves_an_unreadable_live_twin_alone() {
+    let s = init("archive-opaque-live");
+    let id = add(s.path(), &["archived, then rewritten by a newer binary"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let archived = std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap();
+    let newer = format!("{{\"id\":\"{id}\",\"title\":\"newer\",\"status\":{{\"column\":\"todo\"}}}}\n");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), &newer).unwrap();
+    let out = at(s.path(), later, &["mv", &id, "todo", "--from", "done"]);
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(issues(s.path()), newer, "a stale copy was restored beside the live line");
+    assert_eq!(std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap(), archived);
+}
+
+/// **Taking over an archived row keeps the new assignee**(review of moai-bth3) — `mv <id> done --take` on an archived
+/// row in its column journaled `Taken-over` while the row stayed archived under the old assignee. It comes back live.
+#[test]
+fn archive_regressions_taking_over_an_archived_row_keeps_the_new_assignee() {
+    let s = init("archive-take");
+    let id = add(s.path(), &["someone else's closed row", "-a", "B (b@x.io)"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &id, "done", "--take", "-m", "Person authorized"]);
+    let row = line_of(s.path(), &id);
+    assert!(row.contains("tester@example.com") && row.contains("\"status\":\"done\""), "{row}");
+    assert!(!std::fs::read_to_string(s.path().join(".moai/archive/2026.jsonl")).unwrap().contains(&id));
+}
+
+/// **A close reads the archive as `ready` does**(review of moai-bth3) — the rows it frees keep their archived epic
+/// (`derived_epic`), and its next pick respects a milestone that runs because some of its members were archived.
+#[test]
+fn archive_regressions_a_close_reads_the_same_context_as_ready() {
+    let s = init("archive-close-context");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "archived epic", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    let ms = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let shipped = ok(s.path(), &["epic", "add", "shipped part", "--milestone", &ms, "-q"]).trim().to_string();
+    let done = add(s.path(), &["closed in v1", "--parent", &shipped]);
+    ok(s.path(), &["mv", &done, "done"]);
+    let open = ok(s.path(), &["epic", "add", "open part", "--milestone", &ms, "-q"]).trim().to_string();
+    add(s.path(), &["still to do in v1", "--parent", &open]);
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let blocker = add(s.path(), &["loose blocker"]);
+    ok(s.path(), &["link", &blocker, "--blocks", &member]);
+    let freed: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &blocker, "done", "--json"])).unwrap();
+    let row =
+        freed["unblocked"].as_array().unwrap().iter().find(|r| r["id"] == member).unwrap_or_else(|| panic!("{freed}"));
+    assert_eq!(row["derived_epic"], epic, "{freed}");
+    // v1 runs: one of its members is done (in the archive) and one is not. Work outside it is held back.
+    let outside = ok(s.path(), &["epic", "add", "outside v1", "-q"]).trim().to_string();
+    let x = add(s.path(), &["outside one", "--parent", &outside]);
+    let y = add(s.path(), &["outside two", "--parent", &outside]);
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    assert!(ready["outside"].as_array().unwrap().iter().any(|i| i == &serde_json::json!(y)), "{ready}");
+    let closed: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &x, "done", "--json"])).unwrap();
+    assert_eq!(closed["next"], serde_json::json!([]), "the next pick is work `ready` holds back: {closed}");
+}
+
+/// **A group row restored on its own goes back with the next run**(review of moai-bth3) — its column comes from its
+/// archived members, as on every board. Read from live rows alone it stood in the first column forever, while the
+/// board counted it as archived.
+#[test]
+fn archive_regressions_a_restored_group_row_goes_back_with_the_next_run() {
+    let s = init("archive-group-row");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &epic, "todo"]);
+    assert!(issues(s.path()).contains(&epic));
+    let much_later = "2027-06-01T00:00:00Z";
+    let dry = ok_at(s.path(), much_later, &["archive", "--dry-run", "--json"]);
+    assert!(dry.contains(&epic), "{dry}");
+    ok_at(s.path(), much_later, &["archive"]);
+    assert!(!issues(s.path()).contains(&epic));
+}
+
+/// **A restored group reads its column from its archived members in the writes that report it** — `edit` and `defer`
+/// overlay the archive only when a reference reaches past the live rows, and a restored epic reaches nothing: it is
+/// live and its members are not looked up. Read from live rows alone it has no members, so `derived_status` said the
+/// first column where `moai show` and the board say done.
+#[test]
+fn archive_regressions_a_restored_group_reads_its_column_from_archived_members_on_write() {
+    let s = init("archive-group-column");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["member", "--parent", &epic]);
+    ok(s.path(), &["mv", &member, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &epic, "todo"]);
+    assert!(issues(s.path()).contains(&epic) && !issues(s.path()).contains(&member));
+    let shown: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["show", &epic, "--json"])).unwrap();
+    assert_eq!(shown["derived_status"], "done", "{shown}");
+    let edited: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["edit", &epic, "--title", "renamed", "--json"])).unwrap();
+    assert_eq!(edited["derived_status"], "done", "{edited}");
+    let blocker = add(s.path(), &["live blocker"]);
+    let linked: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["link", &blocker, "--blocks", &epic, "--json"])).unwrap();
+    assert_eq!(linked[0]["derived_status"], "done", "{linked}");
+    let deferred: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--json"])).unwrap();
+    assert_eq!(deferred["changed"][0]["derived_status"], "done", "{deferred}");
+}
+
+/// **A deferred epic that went to the archive still has a way back**(moai-b6w3). Restoring one of its members brings
+/// only that member live, and the member stays out of the plan because its epic is deferred — that much is the same as
+/// a live deferred epic. But every road back read live rows only: the move did not say where the deferral stood,
+/// `defer <member> --undo` answered "already in the plan", and `defer <epic> --undo` answered "not found". Now the
+/// hints name the archived epic, and undoing it brings that row live — the change exists only in the live snapshot.
+#[test]
+fn archive_regressions_an_archived_deferred_epic_can_be_undone() {
+    let s = init("archive-deferred-epic");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "shelved bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok(s.path(), &["defer", &epic, "-m", "not this quarter"]);
+    ok_at(s.path(), later, &["archive"]);
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    assert!(std::fs::read_to_string(&file).unwrap().contains(&epic));
+    // The restore says, as for a live epic, which deferral keeps the member out of the plan.
+    let moved: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done", "--json"])).unwrap();
+    assert_eq!(moved["shelved"], serde_json::json!([{"id": member, "root": epic}]), "{moved}");
+    // Undoing the member alone does not bring it back, and says where to.
+    let said = ok_at(s.path(), later, &["defer", &member, "--undo"]);
+    assert!(said.contains(&format!("moai defer {epic} --undo")), "{said}");
+    let undone: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &member, "--undo", "--json"])).unwrap();
+    assert_eq!(undone["already"], serde_json::json!([]), "{undone}");
+    assert_eq!(undone["shelved"], serde_json::json!([{"id": member, "root": epic}]), "{undone}");
+    // Deferring it again changes nothing, so the epic stays archived.
+    let archive = std::fs::read_to_string(&file).unwrap();
+    let live = issues(s.path());
+    let again: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--json"])).unwrap();
+    assert_eq!(again["already"], serde_json::json!([epic]), "{again}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), archive);
+    assert_eq!(issues(s.path()), live);
+    // Undoing the epic brings it live, out of the deferral, and the member is work again.
+    let back: serde_json::Value =
+        serde_json::from_str(&ok_at(s.path(), later, &["defer", &epic, "--undo", "--json"])).unwrap();
+    assert_eq!(back["changed"][0]["id"], epic, "{back}");
+    let row = issues(s.path())
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .find(|r| r["id"] == epic)
+        .unwrap_or_else(|| panic!("{epic} did not come live\n{}", issues(s.path())));
+    assert!(row.get("deferred_at").is_none(), "{row}");
+    let archive = std::fs::read_to_string(&file).unwrap();
+    assert!(!archive.contains(&format!("\"id\":\"{epic}\"")) && archive.contains(&sibling), "{archive}");
+    let ready: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["ready", "--json"])).unwrap();
+    assert_eq!(ready["ready"][0]["id"], member, "{ready}");
+    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+}
+
+/// **The board counts and marks an archived deferred epic the way it does a live one**(moai-sai2). Restoring a member
+/// brings the epic back onto the board as that member's group, and the member is out of the plan because of it — the
+/// `Deferred` notice said 1 where the live epic says 2, and the epic row lost its `deferred` word, while the
+/// `moai show --deferred` the notice points at listed both. An archived deferred epic with nothing live under it is
+/// history and stays uncounted.
+#[test]
+fn archive_regressions_the_board_counts_an_archived_deferred_epic_over_a_live_member() {
+    let s = init("archive-deferred-board");
+    let later = "2026-10-01T00:00:00Z";
+    let epic = ok(s.path(), &["epic", "add", "shelved bundle", "-q"]).trim().to_string();
+    let member = add(s.path(), &["restored member", "--parent", &epic]);
+    let sibling = add(s.path(), &["archived sibling", "--parent", &epic]);
+    for id in [&member, &sibling] {
+        ok(s.path(), &["mv", id, "done"]);
+    }
+    ok(s.path(), &["defer", &epic, "-m", "not this quarter"]);
+    ok_at(s.path(), later, &["archive"]);
+    let deferred = |board: &serde_json::Value| {
+        board["notices"].as_array().unwrap().iter().find(|w| w["kind"] == "deferred").map(|w| w["count"].clone())
+    };
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(deferred(&board), None, "an archived bundle with nothing live under it was counted\n{board}");
+    ok_at(s.path(), later, &["mv", &member, "todo", "--from", "done"]);
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(deferred(&board), Some(serde_json::json!(2)), "{board}");
+    let text = ok_at(s.path(), later, &["status"]);
+    let row = text.lines().find(|l| l.contains(&epic)).unwrap_or_else(|| panic!("{epic} is not on the board\n{text}"));
+    assert!(row.contains("미룸"), "the archived deferred epic lost its mark\n{text}");
+    let listed = ok_at(s.path(), later, &["show", "--deferred", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&listed).unwrap().as_array().unwrap().len(), 2, "{listed}");
+}
+
+/// **A row in an archive file that cannot be read is not just "not found"**(review of moai-bth3) — the move names the
+/// file it could not read, so nobody concludes the work never existed and raises it again.
+#[test]
+fn archive_regressions_a_row_in_an_unreadable_archive_file_names_that_file() {
+    let s = init("archive-unreadable-missing");
+    let id = add(s.path(), &["archived"]);
+    ok(s.path(), &["mv", &id, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    let file = s.path().join(".moai/archive/2026.jsonl");
+    let mut bytes = std::fs::read(&file).unwrap();
+    bytes.push(0xff);
+    std::fs::write(&file, bytes).unwrap();
+    let out = at(s.path(), later, &["mv", &id, "todo", "--from", "done"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(err.contains("2026.jsonl") && !err.contains("이력은 못 남겼다"), "{err}");
+}
+
+/// **The explorer opens while `.moai/archive` cannot be listed**(review of moai-bth3) — the readers name it; watching
+/// it never stops the explorer.
+#[test]
+fn archive_regressions_the_explorer_opens_beside_a_broken_archive_directory() {
+    let s = init("archive-explorer-dir");
+    add(s.path(), &["visible work"]);
+    std::fs::write(s.path().join(".moai/archive"), "not a directory\n").unwrap();
+    let out = moai(s.path(), &["tui", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// **What is said about an archive file is the file's own words, cleaned**(review of moai-bth3) — a committed file name
+/// carries no terminal control sequence to stderr, and an unreadable archive row names its id like an active one.
+#[test]
+fn archive_regressions_archive_diagnostics_strip_control_characters_and_name_ids() {
+    let s = init("archive-diagnostic-text");
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("x\u{1b}]0;PWNED\u{7}.jsonl"), "{\"id\":\"argos-zzzz\",\"title\":5}\n").unwrap();
+    let out = moai(s.path(), &["status", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains('\u{1b}') && !err.contains('\u{7}'), "{err:?}");
+    assert!(err.contains("(argos-zzzz)"), "{err}");
+}
+
+#[test]
+fn archive_regressions_physical_rows_stay_hidden_when_aging_is_disabled() {
+    let s = init("archive-physical-hidden");
+    let early = "2025-01-01T00:00:00Z";
+    let later = "2025-04-01T00:00:00Z";
+    let id = add_at(s.path(), early, &["old row"]);
+    ok_at(s.path(), early, &["mv", &id, "done"]);
+    let epic = ok_at(s.path(), early, &["epic", "add", "old epic", "-q"]).trim().to_string();
+    let member = add_at(s.path(), early, &["old member", "--parent", &epic]);
+    ok_at(s.path(), early, &["mv", &member, "done"]);
+    ok_at(s.path(), later, &["archive"]);
+    let config = s.path().join(".moai/config.toml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(config, format!("archive_days = 0\n{original}")).unwrap();
+    let ordinary = ok_at(s.path(), later, &["show", "--all", "--json"]);
+    for row in [&id, &epic, &member] {
+        assert!(!ordinary.contains(row.as_str()), "physical archive leaked into --all: {ordinary}");
+    }
+    assert!(ok_at(s.path(), later, &["show", "--archived", "--json"]).contains(&id));
+    // The board leaves moved bundles out whatever `archive_days` says now.
+    let board: serde_json::Value = serde_json::from_str(&ok_at(s.path(), later, &["status", "--json"])).unwrap();
+    assert_eq!(board["epics"], serde_json::json!([]), "a moved epic came back to the board: {board}");
+    assert_eq!(board["archived"]["epics"], 1);
+}
+
+#[test]
+fn archive_regressions_status_keeps_duplicate_ids_from_opaque_active_rows() {
+    let s = init("archive-opaque-duplicates");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), "{\"id\":\"argos-a001\"}\n{\"id\":\"argos-a001\"}\n").unwrap();
+    let out = moai(s.path(), &["status", "--json"]);
+    assert!(
+        !out.status.success(),
+        "opaque twins lost their fatal diagnostic: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let warnings = board["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w["kind"] == "duplicate_id" && w["ids"][0] == "argos-a001"), "{board}");
 }

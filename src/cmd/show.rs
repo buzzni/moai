@@ -27,7 +27,7 @@ fn resolve(target: Option<&str>, lang: crate::i18n::Lang) -> R<Target> {
         Some("issue") => Ok(Target::OfKind(Kind::Issue)),
         Some("epic") => Ok(Target::OfKind(Kind::Epic)),
         Some("milestone") => Ok(Target::OfKind(Kind::Milestone)),
-        Some("idea") => Ok(Target::OfKind(Kind::Idea)),
+        Some("backlog" | "idea") => Ok(Target::OfKind(Kind::Backlog)),
         Some(t) if crate::id::is_valid(t) => Ok(Target::One(t.to_string())),
         // 조용히 0건을 내지 않는다. 모르는 값은 거부하고 있는 것을 나열한다.
         Some(t) => Err(Fail::coded(
@@ -141,7 +141,7 @@ pub(crate) fn filter_of(
         done_at: Vec::new(),
         all: a.all,
         archived: a.archived,
-        ideas: false,
+        backlog: false,
         deferred: a.deferred,
         filter: a.filter,
     })
@@ -190,8 +190,12 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if args.removed {
         return removed(ctx, &repo, args, kind_filter);
     }
-    let crate::worktree::Gathered { load, origin, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, origin, sides, mine, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
+    // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
+    let live: std::collections::BTreeSet<String> =
+        active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect();
+    let load = crate::archive::read_all(&repo.root, active_load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     let target = match kind_filter {
@@ -313,6 +317,9 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         .then(|| journal_of_rows(&repo, &origin, &load.issues, |l| model::may_hold_note(l) || model::may_hold_work(l)));
     let notes = journal.as_ref().map(notes_of);
     let mut wh = crate::query::Where::from_soil(&load.issues, &repo.config, soil);
+    // **옮겨 둔 줄은 시계와 상관없이 아카이브다**(moai-bth3 리뷰) — 소속·막음을 읽으려고 늘 겹쳐 읽지만, `--archived`
+    // 없이 서는 목록에는 안 선다. 시계만 보던 판은 `archive_days = 0` 에서 옮긴 줄을 `--all` 로 도로 냈다.
+    wh.stored = load.issues.iter().map(|i| i.id.as_str()).filter(|id| !live.contains(*id)).collect();
     // **받은 글 그대로 싣는다**(리뷰 moai-wcy8.rbj) — 한 번 거르고 끝나는 이 길은 숨길 줄의 노트까지 미리 접을
     // 까닭이 없다. 키마다 다시 거르는 탐색기는 접어 둔 것을 싣는다([`crate::query::NoteView`]).
     wh.notes = notes.as_ref().map(crate::query::NoteView::Raw);
@@ -775,7 +782,7 @@ fn one(
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
         // **사람 화면과 같은 자로 고른다** (`report::group_members`). 담아 둔
-        // 생각은 거기서 빠진다 — 찾으려면 `moai show --type idea -e <에픽>`. 한때
+        // 생각은 거기서 빠진다 — 찾으려면 `moai show --type backlog -e <에픽>`. 한때
         // 여기만 에픽에 한해 제 `epic` 을 적은 줄을 내, 마일스톤은 키가 없고
         // 물려받은 자식은 화면에만 있었다(moai-qizs).
         let mut extra = vec![

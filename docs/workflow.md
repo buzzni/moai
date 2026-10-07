@@ -8,6 +8,41 @@ in [the CLI reference](cli.md), what to do when something ends up wrong is in
 [Recovery](recovery.md), and the words this page leans on are in
 [the glossary](glossary.md).
 
+## Plant the tracker
+
+`moai init` in a terminal shows a short screen before it writes anything: the id
+prefix (it cannot change later), whether git tracks the tracker, where the agent
+guide goes ([the agents page](agents.md#where-the-guide-goes)), whether to install
+the hooks and skills, the merge driver, and whether to add the repository to your
+project list. Each row comes with its default picked; Enter plants, Esc stops with
+nothing written. A flag picks its row and locks it. `--yes` asks nothing and plants
+the old defaults — committed, with the guide block — for choices that flags and
+existing git rules or guide files have not settled. A script or an agent is never
+asked, and gets the same as `--yes`; `TERM=dumb` also skips the screen.
+
+**Whether git tracks the tracker** is the one choice that changes how everything
+else behaves:
+
+    moai init --tracking commit      shared through git (what init has always done)
+    moai init --tracking exclude     kept in this clone; rules go to .git/info/exclude
+    moai init --tracking gitignore   kept in this clone; rules go to .gitignore
+
+Kept out of git, no committed file changes with `exclude` — use it to track your
+own work in a repository that is not yours. There is nothing for git to merge, so
+`.gitattributes` and the merge driver are left alone, and `moai status` does not
+ask for them. `init` asks git which way stands every time instead of storing it,
+so it will not switch it for you: moving `.moai` in or out of git is a commit you
+make yourself (`git rm --cached`, or dropping the ignore line).
+
+The first initialization reads existing ignore rules too, including your global
+excludes. If git fails or exceeds its probe budget, `init` refuses before writing
+and `status` says that the dotfile rules could not be checked. Repair git or try
+again; symlink notices still appear. A tracker linked to another directory inside
+the checkout is ignored at both the link and the directory it points at.
+
+`--driver` requires commit tracking. In `init --json`, `gitignore` means that
+`.gitignore` was written, and `exclude` means `.git/info/exclude` was written.
+
 ## Pick up work
 
 1. `moai status` — start a session here. The board, the warnings and the flow come
@@ -49,8 +84,8 @@ puts an issue under it. Each issue gets an id under the epic's own,
 - **Do not move an epic or a [milestone](glossary.md#milestone).** A
   [group](glossary.md#group)'s column is read from its members: pick one member
   up and the group stands `in_progress`, finish them all and it stands `done`
-- **Something for later is an [idea](glossary.md#idea)**, not an issue — `moai idea add`. Ideas stay
-  off the board and out of `moai ready`, and `moai idea promote <id> --from -`
+- **Something for later is a [backlog item](glossary.md#backlog)**, not an issue — `moai backlog add`. Backlog items stay
+  off the board and out of `moai ready`, and `moai backlog promote <id> --from -`
   unfolds one into an epic and issues when its time comes
 - **A [running milestone](glossary.md#running-milestone) is the person's to fill.** A milestone runs once any of
   its members has started; from then `moai ready` hands out its work plus anything
@@ -129,6 +164,29 @@ and for an agent the hook refuses a review without them (rule 3 on the
 [agents page](agents.md#the-five-rules)). Before closing any issue, name the AI
 that did the work on it — the [model line](glossary.md#model-line).
 
+## Archive closed work
+
+Closed work stays in `.moai/issues.jsonl` until you move it out. Every command
+reads that file, so a tracker with years of finished rows gets slower and its
+diffs get noisier. Moving old rows into the [archive](glossary.md#archive) is a
+step you take on purpose — no ordinary write archives anything.
+
+1. `moai status` says when there is something to move: a notice counts the closed
+   rows that `moai archive` would move — rows that have stood in `done` for longer
+   than `archive_days` (two weeks unless `.moai/config.toml` says otherwise)
+2. `moai archive --dry-run` — see what would move. An epic moves together with its
+   members, and a parent with its children, only once the whole bundle is old
+   enough. Milestones never move
+3. `moai archive` — move them into `.moai/archive/<year>.jsonl`, then commit
+   `.moai/` like any other tracker change
+
+Archived rows still count as context — a parent, a blocker or a milestone that
+was archived is not "missing" — but the board, `moai ready` and `moai show` lists
+leave them out. To find one, `moai show <id>` reads it directly and
+`moai show --archived` lists the archive. Reopening one with
+`moai mv <id> todo --from done` brings back only that row; the rest of its
+bundle stays archived.
+
 ## In this repository
 
 The above is moai. This repository adds its own conventions on top, written down
@@ -157,5 +215,11 @@ where its contributors read them rather than repeated here:
   in the wrong place" in [Recovery](recovery.md)
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
+- **`moai status` names an `archive_duplicate_id`.** The same id stands live and
+  in the archive — see [An archive copy conflicts with a live
+  row](recovery.md#an-archive-copy-conflicts-with-a-live-row)
+- **`moai status` exits non-zero with `archive_unreadable`.** An archive file is
+  broken data, the same as a broken line in `issues.jsonl` — see [An archive file
+  cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3

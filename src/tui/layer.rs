@@ -155,12 +155,17 @@ impl Told {
 /// 그 답은 워크트리를 띄우거나 치우는 것만으로 바뀐다 — `.moai` 두 파일은 그대로다. 안 재면
 /// 워크트리를 치운 뒤에도 층이 영영 "자리 없는 것 0건" 을 댄다. 모두 `stat` 과 작은
 /// 파일 읽기라 걸음마다 재도 싸다(git 을 안 띄운다).
+///
+/// **아카이브도 잰다**(moai-nkwg) — 요약이 아카이브를 문맥으로 읽으므로([`summarize_with`]), `moai archive` 가
+/// 줄을 옮기면 스냅샷 표식과 함께 이것이 바뀐다. 재는 자는 다시 읽기(`tui::prepare`)와 같은
+/// [`crate::archive::marks`] 다 — 디렉터리와 그 안의 해마다 파일을 `stat` 만 하고 열지 않는다.
 #[derive(Debug, Clone, PartialEq, Default)]
 struct Marks {
     dir: bool,
     issues: Stamp,
     config: Stamp,
     trees: Vec<(PathBuf, Stamp)>,
+    archive: Vec<(PathBuf, Stamp)>,
 }
 
 /// 이만큼 지난 읽기는 표식이 그대로여도 다시 읽는다(moai-al0x·moai-z4r4, 사용자 결정 2026-09-18).
@@ -179,7 +184,7 @@ pub(super) fn due(read_at: Option<std::time::Instant>) -> bool {
 
 /// 설치가 어긋난 것은 이만큼에 한 번만 다시 묻는다(moai-nzyh). **나머지 셈과 자를 따로 두는 까닭은
 /// 값이 다르기 때문이다** — 쓸기 한 벌의 나머지는 파일을 읽는 일이고 이 물음은 프로젝트마다
-/// 하위 프로세스를 셋까지 새로 실행한다(`git check-attr`·`git config`, 심겼으면 probe 하나). 등록 다섯에
+/// 하위 프로세스를 다섯까지 새로 실행한다(`git check-ignore`, git 밖이면 `rev-parse`, `git check-attr`·`git config`, 심겼으면 probe 하나). 등록 다섯에
 /// 57ms 가운데 32ms 가 그것이었다(`moai-nzyh` 의 표). [`REREAD_EVERY`] 로 같이 재면 탐색기가 선
 /// 동안 그 값을 1분마다 다시 치른다.
 ///
@@ -261,7 +266,7 @@ pub enum Shut {
     Unreadable,
 }
 
-/// 연 프로젝트의 셈 — `moai status` 의 한눈 보기와 같은 자(`report::status`·`report::wip`).
+/// 연 프로젝트의 셈 — `moai status` 의 한눈 보기와 같은 자(`cmd::status::archive_board_unjudged`·`report::wip`).
 pub struct Summary {
     /// config 차례로 칸마다 일의 수. 미룬 것은 뺀다 — 한눈 보기의 보드와 같다.
     pub counts: Vec<(String, usize)>,
@@ -273,7 +278,7 @@ pub struct Summary {
     /// 지어 오고 층은 그 답을 [`REREAD_EVERY`] 만큼 들고 있으므로, 그 몫까지 접으면 `SPC o t` 로
     /// 시간대를 바꾼 뒤 최대 그만큼 옛 달로 판정한 `+N` 이 선다. 그리는 쪽이 그때의 달로 센다.
     pub warnings: super::Surfaced,
-    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 `report::status` 의
+    /// 설치가 어긋난 것을 대는 알림의 수(`cmd::status::install_notices` 와 보드의 셈이 낸
     /// `notices`, moai-prdh). 링크인 트래커를 비추는 알림(moai-jo3h)도 같은 부름에서 와 여기 든다.
     /// **수만 센다** — 무엇인지는 들어가서 본다(2026-09-22 사람의 결정).
     /// 층의 줄은 80칸에서 이미 이름·칸·경로로 차 있어, 낱말로 가르면 정작 그 수가 잘린다.
@@ -326,12 +331,15 @@ fn marks_of(dir: &Path) -> Marks {
     // `Repo::open` 이 루트의 트래커를 연다(`Repo::opened_root`). 그 자리의 `.moai` 를 재던 판은 루트에
     // 떨어진 쓰기를 하나도 못 보고 1분 시계가 돌 때까지 낡은 셈을 세웠다 — 표식이 있는 까닭이 그
     // 시계를 안 기다리는 것이다.
-    let moai = crate::store::Repo::opened_root(dir).join(".moai");
+    let root = crate::store::Repo::opened_root(dir);
+    let moai = root.join(".moai");
     Marks {
         dir: dir.is_dir(),
         issues: crate::store::stamp(&moai.join("issues.jsonl")),
         config: crate::store::stamp(&moai.join("config.toml")),
         trees: crate::worktree::place_marks(dir),
+        // 못 펴는 아카이브 디렉터리는 읽는 쪽이 알림으로 댄다 — 재는 것이 층을 멈추지 않는다.
+        archive: crate::archive::marks(&root).unwrap_or_default(),
     }
 }
 
@@ -385,7 +393,20 @@ pub fn summarize_with(
 ) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
-    let st = crate::report::status_unjudged(&load.issues, &unreadable, cfg, now);
+    // **아카이브를 문맥으로 읽는다**(moai-nkwg) — `moai status` 와 같은 자
+    // ([`crate::cmd::status::archive_board_unjudged`])라, 멤버를 다 옮긴 마일스톤이 빈 todo 로 안 서고 옮긴 줄을
+    // 가리키는 참조가 끊긴 것으로 안 선다. 아카이브의 충돌·못 읽은 파일·옮길 묶음도 같은 경고와 알림으로 선다.
+    // 층은 겹쳐 보지 않으므로 견줄 루트의 스냅샷은 이 읽기 그대로다. 못 읽는 아카이브(FIFO·밖을 가리키는
+    // 링크·디렉터리 아닌 자리)는 `archive::read` 가 열지 않고 오류로 돌려주고, 그것은 알림 하나가 된다.
+    let archived = crate::archive::read(&repo.root).unwrap_or_default();
+    let st = crate::cmd::status::archive_board_unjudged(
+        &load.issues,
+        &unreadable,
+        (&load.issues, &unreadable),
+        &archived,
+        cfg,
+        now,
+    );
     // **자리도 여기서 잰다**(moai-p3bs) — `moai status` 와 같은 자(`worktree::stranded_at`). 한때
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
@@ -402,7 +423,7 @@ pub fn summarize_with(
             .map(|i| Picked { id: i.id.clone(), title: i.title.clone(), column: i.status.as_str().to_string() })
             .collect(),
         warnings: super::Surfaced::of(st.warnings.len() + usize::from(lost.is_some()), st.dues),
-        // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 idea·미룬
+        // **알림도 `moai status` 와 같은 자로 센다**(moai-prdh) — 순수한 셈이 낸 것(쌓인 backlog·미룬
         // 것·도는 마일스톤)에 설치가 어긋난 셋을 더한 것이 안쪽 보드가 세우는 알림이다. 층에서
         // "드러난 문제 없다" 를 보고 들어간 사람이 안쪽에서 처음 보는 것이 그 셋이었다.
         //
@@ -718,7 +739,7 @@ impl Layer {
                 // **버리는 줄에도 찍는다**(리뷰) — 아래 세대 견주기보다 **앞이다.** 이 수는 그
                 // 줄의 스냅샷이 아니라 그 디렉터리의 설치 상태라, 사람이 그새 줄을 다시 세웠다고
                 // 낡지 않는다. 뒤에 두던 때는 줄을 펼치는 키 하나가 [`Layer::set_by_hand`] 로
-                // 세대를 올려, 이미 치른 하위 프로세스 셋의 답이 통째로 버려지고
+                // 세대를 올려, 이미 치른 하위 프로세스 다섯의 답이 통째로 버려지고
                 // [`Place::install`] 이 빈 채 남았다 — 그러면 다음 쓸기가 같은 디렉터리에 그 셋을
                 // 또 새로 실행하고, 줄을 자주 건드리는 동안 이 캐시가 아예 안 선다.
                 if let Some(count) = l.asked_install {
@@ -859,7 +880,7 @@ impl App {
     /// "뜨는 스레드가 뜰 때의 시간대를 베껴 간다" 였다.
     pub fn on_projects(layer: Layer) -> App {
         let mut app =
-            App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new());
+            App::build(Vec::new(), Index::of(&[]), Default::default(), blank_config(), Vec::new(), Vec::new(), None);
         // **말은 층이 들고 온 것이다** — 부른 쪽(`cmd::tui::outside`)이 고른 말을 `Layer::of` 에
         // 줘 `problems` 가 이미 그 말로 펴졌고, 화면의 말은 이 줄 뒤에 놓인다. 여기서 화면의
         // 처음값으로 덮으면 `launch` 가 띄우는 읽기가 도구의 기본 말로 `Look::Shut` 의 글을 지어,
@@ -896,7 +917,7 @@ impl App {
         layer.lang = self.site.lang;
         // **띄운 자리의 설치 알림은 이미 물어 두었다**(moai-k6ff, 리뷰) — 여는 읽기
         // ([`super::App::overlaid`])가 그 뿌리에 대고 한 번 물었다. 그 값을 그 줄에 옮겨 두지
-        // 않으면 첫 쓸기가 **같은 디렉터리**에 하위 프로세스 셋을 1초 안에 또 새로 실행한다.
+        // 않으면 첫 쓸기가 **같은 디렉터리**에 하위 프로세스 다섯을 1초 안에 또 새로 실행한다.
         if let Some((root, told)) = self.site.repo.as_ref().map(|r| r.root.clone()).zip(self.site.install)
             && let Some(p) = layer.places.iter_mut().find(|p| same_dir(&p.path, &root))
         {
@@ -1062,7 +1083,7 @@ impl App {
                 let text = super::jotfile::template(into.as_ref(), self.site.lang);
                 self.edit = Some(super::Edit { into, text, editor: editor.clone() });
             }
-            None => self.mode = super::Mode::Idea(Form::new(into)),
+            None => self.mode = super::Mode::Backlog(Form::new(into)),
         }
     }
 
@@ -1170,7 +1191,7 @@ impl App {
                 if let Some(layer) = &mut self.layer {
                     // **물어서 센 값은 그 줄에도 적는다**(리뷰) — 들이는 쪽과 같은 자다
                     // (`App::follow_site` 의 `stamp_install`). 안 적으면 올라와서 도는 첫 쓸기가
-                    // 같은 디렉터리에 하위 프로세스 셋을 또 새로 실행한다.
+                    // 같은 디렉터리에 하위 프로세스 다섯을 또 새로 실행한다.
                     if let Some(count) = fresh.asked_install {
                         layer.stamp_install(&path, count);
                     }
@@ -1223,7 +1244,7 @@ impl App {
                 // [`App::apply_fresh`] 는 물은 때만 찍는다. 그런데 [`App::leave_project`] 가 `Site` 를
                 // 갈아 끼워 그 자리가 비어, 안 옮기면 들어가서 **처음 쓰는 키**의 다시 읽기
                 // ([`App::reload`], 그 자리에서 읽는다)가 같은 것을 다시 묻는다 — 들어가는 키에서
-                // 아낀 하위 프로세스 셋을 그 키가 치르고, 심긴 드라이버의 probe 는 2초까지 기다린다.
+                // 아낀 하위 프로세스 다섯을 그 키가 치르고, 심긴 드라이버의 probe 는 2초까지 기다린다.
                 // 들이는 쪽과 같은 자다(`App::follow_site` 의 `.or(told)`) — 물은 때는 덮지 않는다.
                 self.site.install = self.site.install.or(told);
             }
@@ -2542,7 +2563,7 @@ mod tests {
         // 들어가면 `n` 은 오늘처럼 폼을 연다.
         a.key(key(KeyCode::Enter));
         a.hit("SPC n");
-        assert!(matches!(a.mode, Mode::Idea(_)));
+        assert!(matches!(a.mode, Mode::Backlog(_)));
     }
 
     /// 두 프로젝트의 `issues.jsonl` 바이트.
@@ -2551,12 +2572,12 @@ mod tests {
     }
 
     /// 그 프로젝트 파일에 선 생각들의 제목 — 화면이 아니라 **파일을** 읽는다.
-    fn ideas_at(dir: &Path) -> Vec<String> {
+    fn backlog_at(dir: &Path) -> Vec<String> {
         let repo = match Repo::open(dir, || crate::i18n::Lang::Ko).unwrap() {
             Opened::Repo(r) => r,
             _ => panic!("{} 가 안 열린다", dir.display()),
         };
-        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Idea).map(|i| i.title).collect()
+        repo.read().unwrap().issues.into_iter().filter(|i| i.kind == Kind::Backlog).map(|i| i.title).collect()
     }
 
     fn type_in(a: &mut App, text: &str) {
@@ -2567,7 +2588,7 @@ mod tests {
 
     fn target(a: &App) -> Option<PathBuf> {
         match &a.mode {
-            Mode::Idea(f) => f.into.as_ref().map(|t| t.path.clone()),
+            Mode::Backlog(f) => f.into.as_ref().map(|t| t.path.clone()),
             Mode::Ask(_)
             | Mode::Browse
             | Mode::Grep(..)
@@ -3598,7 +3619,7 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
 
-        assert_eq!(ideas_at(&two), ["two 에 담을 것"]);
+        assert_eq!(backlog_at(&two), ["two 에 담을 것"]);
         assert_eq!(snapshots(&[&one]), before, "선 프로젝트 말고 다른 프로젝트 파일이 바뀌었다");
         // 저널만 새는 것을 잡는 줄이다 — 재는 자리는 `.moai/journal/` 이다(moai-nzlo, 리뷰).
         assert!(!one.join(".moai/journal").exists());
@@ -3627,7 +3648,7 @@ mod tests {
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
         assert_eq!(a.here(), Some(one.clone()), "담은 프로젝트로 안 들어갔다");
-        assert_eq!(ideas_at(&one), ["one 에 담을 것"]);
+        assert_eq!(backlog_at(&one), ["one 에 담을 것"]);
         assert_eq!(snapshots(&[&two])[0], before[1], "커서의 프로젝트 말고 다른 파일이 바뀌었다");
         assert_eq!(titles(&a).iter().filter(|t| *t == "one 에 담을 것").count(), 1);
         let on = a.current().and_then(|r| match r {
@@ -3733,7 +3754,7 @@ mod tests {
 
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        assert_eq!(ideas_at(&one), ["one 의 생각"]);
+        assert_eq!(backlog_at(&one), ["one 의 생각"]);
         assert_eq!(snapshots(&[&two]), before, "커서가 옮겨 간 프로젝트에 담겼다");
 
         // 프로젝트 안에서 연 폼인데 선 곳이 그새 다른 프로젝트면 **쓰지 않는다.**
@@ -3746,7 +3767,7 @@ mod tests {
         let (one_before, two_before) = (snapshots(&[&one]), snapshots(&[&two]));
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(
-            matches!(&a.mode, Mode::Idea(f) if f.title.text() == "one 에만"),
+            matches!(&a.mode, Mode::Backlog(f) if f.title.text() == "one 에만"),
             "선 곳이 다른데 폼이 닫혔다 — {:?}",
             a.mode
         );
@@ -3783,7 +3804,7 @@ mod tests {
 
         a.edited(edit.into, Ok("one 의 생각\n".into()));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        assert_eq!(ideas_at(&one), ["one 의 생각"]);
+        assert_eq!(backlog_at(&one), ["one 의 생각"]);
         assert_eq!(snapshots(&[&two]), before, "커서가 옮겨 간 프로젝트에 담겼다");
     }
 
@@ -3798,7 +3819,7 @@ mod tests {
         a.relayer(None);
         let before = snapshots(&[&one, &two]);
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-        assert!(matches!(a.mode, Mode::Idea(_)), "{:?}", a.mode);
+        assert!(matches!(a.mode, Mode::Backlog(_)), "{:?}", a.mode);
         assert!(a.on_layer());
         assert!(a.trouble.as_deref().is_some_and(|t| t.contains("빠졌다")), "{:?}", a.trouble);
         assert_eq!(snapshots(&[&one, &two]), before);
@@ -3941,7 +3962,7 @@ mod tests {
         type_in(&mut a, "two 의 생각");
         a.key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(matches!(a.mode, Mode::Ask(_)), "{:?}", a.mode);
-        assert!(ideas_at(&two).is_empty(), "묻기 전에 썼다");
+        assert!(backlog_at(&two).is_empty(), "묻기 전에 썼다");
 
         // 묻는 칸을 Esc 로 물리면 폼이 돌아오고 담을 곳은 그대로다.
         a.key(key(KeyCode::Esc));
@@ -3950,7 +3971,7 @@ mod tests {
         type_in(&mut a, "레이븐 (raven@example.com)");
         a.key(key(KeyCode::Enter));
         assert_eq!(a.mode, Mode::Browse, "{:?}", a.trouble);
-        assert_eq!(ideas_at(&two), ["two 의 생각"]);
+        assert_eq!(backlog_at(&two), ["two 의 생각"]);
         assert_eq!(snapshots(&[&one]), before, "묻고 이어진 쓰기가 다른 프로젝트에 닿았다");
         assert_eq!(a.here(), Some(two));
     }
@@ -4519,6 +4540,122 @@ mod tests {
         );
     }
 
+    /// **층의 줄은 아카이브를 문맥으로 읽고, 옮기는 것을 표식으로 안다**(moai-nkwg). 멤버를 다 옮긴 마일스톤이
+    /// 기한 지난 빈 todo 로 서지 않고, 옮긴 막는 줄이 끊긴 참조로 서지 않는다 — 수는 `moai status` 가 짓는 보드
+    /// ([`crate::cmd::status::archive_board`])와 같다. 아카이브에 줄이 떨어지면 표식이 바뀌어, 1분 시계를 안
+    /// 기다리고 다시 읽는다.
+    #[test]
+    fn the_layer_reads_the_archive_as_context_and_watches_it() {
+        let s = Scratch::fenced("layer-archive");
+        let dir = s.project("p", &[]);
+        let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
+        let row = |id: &str, kind: Kind, st: &str| {
+            Issue::new(id.into(), format!("{id} 제목"), kind, Status::new(st), "2026-01-02T00:00:00Z")
+        };
+        let mut stone = row("argos-0001", Kind::Milestone, "todo");
+        stone.due_on = Some("2026-01-10".into());
+        let mut waiting = row("argos-0002", Kind::Issue, "todo");
+        waiting.blocked_by = vec!["argos-a002".into()];
+        std::fs::write(dir.join(".moai/issues.jsonl"), line(&stone) + &line(&waiting)).unwrap();
+        let before = marks_of(&dir);
+        let mut epic = row("argos-a001", Kind::Epic, "done");
+        epic.milestone = Some("argos-0001".into());
+        let mut blocker = row("argos-a002", Kind::Issue, "done");
+        blocker.epic = Some("argos-a001".into());
+        let config = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        crate::archive::append(&dir, &[epic, blocker], &config).unwrap();
+        assert_ne!(marks_of(&dir), before, "아카이브에 줄이 떨어진 것을 표식이 못 본다");
+
+        let now = "2026-09-01T00:00:00Z";
+        let Look::Open { sum } = look_one(&dir, Some(0), now, crate::i18n::Lang::Ko).look else {
+            panic!("못 열었다")
+        };
+        let repo = Repo::at(dir.clone(), config);
+        let live = repo.read().unwrap();
+        let unreadable = live.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let (st, _) =
+            crate::cmd::status::archive_board(&repo, &live.issues, &unreadable, (&live.issues, &unreadable), now, zone);
+        let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(!kinds.contains(&"milestone_overdue") && !kinds.contains(&"dangling_blocked_by"), "{kinds:?}");
+        assert_eq!(sum.warnings.count(now, zone), st.warnings.len(), "층과 보드가 경고를 달리 센다 {kinds:?}");
+        assert_eq!(sum.notices, st.notices.len(), "층과 보드가 알림을 달리 센다");
+    }
+
+    /// **못 읽는 아카이브가 층을 멈추지도 실패시키지도 않는다**(moai-nkwg) — 해마다 파일 자리의 FIFO 는 열지 않고
+    /// 경고 하나로 센다(깨진 데이터다, moai-5y2a). 층은 그 아카이브를 열어 본 적이 없던 길이라, 여는 길이 FIFO 에 매이면 쓸기 스레드가 영영
+    /// 안 돌아온다.
+    #[cfg(unix)]
+    #[test]
+    fn an_archive_fifo_is_a_warning_on_the_layer_not_a_hang() {
+        let s = Scratch::fenced("layer-archive-fifo");
+        let dir = s.project("p", &[("argos-0001", "산 줄", "todo")]);
+        std::fs::create_dir_all(crate::archive::dir(&dir)).unwrap();
+        let fifo = crate::archive::path(&dir, "2026");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let _ = marks_of(&dir);
+        let now = "2026-09-01T00:00:00Z";
+        let Look::Open { sum } = look_one(&dir, Some(0), now, crate::i18n::Lang::Ko).look else {
+            panic!("못 열었다")
+        };
+        let repo = Repo::at(dir.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
+        let live = repo.read().unwrap();
+        let unreadable = live.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let (st, _) =
+            crate::cmd::status::archive_board(&repo, &live.issues, &unreadable, (&live.issues, &unreadable), now, zone);
+        let warnings: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(warnings.contains(&"archive_unreadable"), "전제: 보드가 FIFO 를 경고로 안 셌다 {warnings:?}");
+        assert!(!warnings.contains(&"unreadable_line"), "FIFO 가 산 줄의 못 읽는 줄로 섰다 {warnings:?}");
+        let counted = (sum.warnings.count(now, zone), sum.notices);
+        assert_eq!(counted, (st.warnings.len(), st.notices.len()), "층과 보드가 달리 센다");
+    }
+
+    /// **겹쳐 본 배너도 아카이브를 루트의 스냅샷과 견준다**(moai-nkwg 리뷰) — `moai status --worktree` 와 같은 자다.
+    /// 옆 워크트리의 스냅샷에만 남은 줄이 main 의 아카이브에도 있으면, 겹친 줄로 견주는 판은 그 사본을
+    /// `archive_duplicate_id` 로 세어 배너가 보드보다 하나 많다. 일은 겹친 줄로 세되 충돌과 옮길 수는 루트의
+    /// 스냅샷으로 잰다(`tui::board` 가 다시 읽는 자리).
+    #[test]
+    fn the_overlaid_banner_measures_the_archive_against_the_root_snapshot() {
+        let s = Scratch::fenced("layer-archive-overlay");
+        let main = s.project("main", &[("argos-0001", "산 줄", "todo")]);
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["add", ".moai"]);
+        run(&main, &["commit", "-q", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../wt", "-b", "wt"]);
+        // 옆에서 끝낸 줄 하나가 그 스냅샷에만 남았고, 같은 id 가 main 의 아카이브에도 있다.
+        let config = crate::config::Config::parse("prefix = \"argos\"\n").unwrap();
+        let gone = Issue::new(
+            "argos-0002".into(),
+            "옆에서 끝낸 줄".into(),
+            Kind::Issue,
+            Status::new("done"),
+            "2026-09-01T00:00:00Z",
+        );
+        crate::archive::append(&main, &[gone], &config).unwrap();
+        write_lines(&s.join("wt"), &[("argos-0001", "산 줄", "todo"), ("argos-0002", "옆에서 끝낸 줄", "done")]);
+        let repo = Repo::at(main.clone(), config);
+        let g = crate::worktree::gather(&repo, true).unwrap();
+        assert!(g.origin.branches().contains_key("argos-0002"), "전제: 옆의 줄이 겹친 줄에 안 섰다");
+
+        let f = super::super::prepare(&repo, true, crate::i18n::Lang::Ko, Some(0)).unwrap();
+        let root = repo.read().unwrap();
+        let unreadable = g.load.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let board = |root: (&[Issue], &[crate::report::Unreadable])| {
+            crate::cmd::status::archive_board(&repo, &g.load.issues, &unreadable, root, &f.now, zone).0
+        };
+        let kinds = |st: &crate::report::StatusReport| st.warnings.iter().map(|w| w.kind).collect::<Vec<_>>();
+        // 전제: 겹친 줄로 견주면 충돌이 서고, 루트의 스냅샷으로 견주면 안 선다 — 이 시험이 두 자를 가른다.
+        assert!(kinds(&board((&g.load.issues, &unreadable))).contains(&"archive_duplicate_id"), "전제가 안 섰다");
+        let st = board((&root.issues, &root.unreadable()));
+        assert!(!kinds(&st).contains(&"archive_duplicate_id"), "{:?}", kinds(&st));
+        assert_eq!(f.warnings.count(&f.now, zone), st.warnings.len(), "겹친 배너가 보드와 달리 센다 {:?}", kinds(&st));
+        assert_eq!(f.notices, st.notices.len(), "겹친 배너가 보드와 알림을 달리 센다");
+    }
+
     /// **띄울 때와 다시 읽을 때 지켜보는 목록이 같다**(리뷰 moai-3lul.kt0 다시 본 판). 다르면 조용한
     /// 저장소에서도 첫 다시 읽기(늦어도 1분 시계)가 그것을 "커밋이 섰다" 로 읽어 커밋 표를 통째로 다시
     /// 짓는다. 여는 길(`cmd::tui`)의 차례 그대로 세운다 — 자리 판정의 표식을 먼저 재고 겹쳐 읽는다.
@@ -4538,6 +4675,7 @@ mod tests {
         let places = crate::worktree::place_marks(&repo.root);
         let mut g = crate::worktree::gather(&repo, true).unwrap();
         super::super::watch(&mut g.watched, places);
+        super::super::watch(&mut g.watched, crate::archive::marks(&repo.root).unwrap());
         let (index, ground) = super::super::measure(&g.load.issues, &repo.config);
         let mut a = App::open(repo, g.load, index, ground, NavPath::new(), stamp).overlaid(
             g.origin,
@@ -4567,7 +4705,7 @@ mod tests {
     }
 
     /// 설치가 어긋난 것은 [`ASK_INSTALL_EVERY`] 에 **한 번만 묻는다**(moai-nzyh) — 그사이에 그 줄을
-    /// 몇 번 다시 읽든 들고 있던 수를 그대로 센다. 되돌리면 `tui::layer::summarize` 가 프로젝트 줄마다 하위 프로세스를 셋까지 새로 실행하고
+    /// 몇 번 다시 읽든 들고 있던 수를 그대로 센다. 되돌리면 `tui::layer::summarize` 가 프로젝트 줄마다 하위 프로세스를 다섯까지 새로 실행하고
     /// (`check-attr`·`config`·심긴 줄의 probe), 그 값이 등록 수만큼 더해진다.
     #[test]
     fn the_layer_asks_about_the_install_once_and_carries_the_count_until_the_clock_turns() {
@@ -4695,7 +4833,7 @@ mod tests {
         assert_eq!(a.site.notices, counted, "층이 댄 알림 수와 들어간 화면의 수가 갈렸다");
         // **물어 둔 것도 함께 든다**(리뷰) — 안 들면 들어가서 처음 쓰는 키의 다시 읽기
         // ([`super::App::reload`], 그 자리에서 읽는다)가 같은 것을 다시 물어, 들어가는 키에서
-        // 아낀 하위 프로세스 셋을 그 키가 치른다.
+        // 아낀 하위 프로세스 다섯을 그 키가 치른다.
         assert_eq!(
             a.site.install.map(|t| t.count),
             told.map(|t| t.count),
@@ -4719,7 +4857,7 @@ mod tests {
         }
     }
 
-    /// **칸이 하나도 없어도 한눈 보기의 보드에는 프로젝트 머리줄이 선다**(리뷰) — idea·미룸을 다 숨기고 아직 아무
+    /// **칸이 하나도 없어도 한눈 보기의 보드에는 프로젝트 머리줄이 선다**(리뷰) — backlog·미룸을 다 숨기고 아직 아무
     /// 프로젝트도 안 읽었으면 칸이 없다. 칸이 없다고 그림을 통째로 접던 때는 머리줄까지 안 서 빈 테두리만 남았다.
     #[test]
     fn the_overview_board_stands_its_headers_even_with_no_column() {
@@ -4728,7 +4866,7 @@ mod tests {
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;
-        a.view.hide_ideas = true;
+        a.view.hide_backlog = true;
         a.view.hide_deferred = true;
         assert_eq!(a.rows(), [Row::Project(0), Row::Project(1)], "시험의 전제 — 아무것도 안 폈다");
         let text = super::super::draw::tests::render(&mut a, 120, 24).join("\n");
@@ -4738,13 +4876,16 @@ mod tests {
     }
 
     /// **머리줄의 `j` 는 `k` 로 올라온 그 칸으로 돌아간다 — 칸의 차례가 바뀌어도**(리뷰). 칸을 첨자로 들던 때는
-    /// `SPC v i` 가 idea 칸을 걷어 첨자가 한 칸씩 당겨지자, `in_progress` 에서 올라온 `j` 가 다른 칸으로 내려갔다.
+    /// `SPC v b` 가 backlog 칸을 걷어 첨자가 한 칸씩 당겨지자, `in_progress` 에서 올라온 `j` 가 다른 칸으로 내려갔다.
     #[test]
     fn a_header_returns_to_the_column_it_came_up_from_when_the_columns_shift() {
         let s = Scratch::fenced("layer-board-hint");
         let (one, two) = twins(&s);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&one, Issue::new("argos-0003".into(), "one 의 생각".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &one,
+            Issue::new("argos-0003".into(), "one 의 생각".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let cfg = s.register(&[&one, &two]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;
@@ -4760,7 +4901,7 @@ mod tests {
         assert_eq!(title_at_cursor(&a).as_deref(), Some("one 의 둘째 줄"), "시험의 전제 — in_progress 카드에 섰다");
         a.hit("k");
         assert_eq!(a.rows()[a.cursor], Row::Project(0));
-        a.hit("SPC v i Esc");
+        a.hit("SPC v b Esc");
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "시험의 전제 — 머리줄에 남았다");
         a.hit("j");
         assert_eq!(title_at_cursor(&a).as_deref(), Some("one 의 둘째 줄"), "머리줄의 j 가 올라온 칸으로 안 돌아갔다");
@@ -4806,7 +4947,10 @@ mod tests {
         let s = Scratch::fenced("layer-board-emptied");
         let solo = s.project("solo", &[]);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &solo,
+            Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let other = s.project("other", &[("argos-0001", "other 의 줄", "todo")]);
         let cfg = s.register(&[&solo, &other]);
         let mut a = layered(&cfg);
@@ -4814,8 +4958,8 @@ mod tests {
         a.hit("l");
         settle(&mut a);
         a.hit("j");
-        assert_eq!(title_at_cursor(&a).as_deref(), Some("생각 하나뿐"), "시험의 전제 — idea 카드에 섰다");
-        a.hit("SPC v i Esc");
+        assert_eq!(title_at_cursor(&a).as_deref(), Some("생각 하나뿐"), "시험의 전제 — backlog 카드에 섰다");
+        a.hit("SPC v b Esc");
         assert_eq!(a.rows()[a.cursor], Row::Project(0), "카드가 다 숨은 프로젝트 밖으로 갔다");
     }
 
@@ -4899,27 +5043,30 @@ mod tests {
         assert_eq!(title_at_cursor(&a).as_deref(), Some("three 의 집은 줄"), "빠진 카드의 칸을 떠났다");
     }
 
-    /// **카드를 다 숨긴 보기 토글은 한눈 보기에서도 되돌린다**(리뷰) — 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i`
+    /// **카드를 다 숨긴 보기 토글은 한눈 보기에서도 되돌린다**(리뷰) — 펼친 프로젝트의 카드가 모두 backlog 일 때 `SPC v b`
     /// 를 누르면 줄이 다 빠진다. 줄이 없다고 그 키와 `SPC v a` 까지 끄던 때는 프로젝트에 들어가야만 되돌렸다.
     #[test]
     fn a_view_toggle_that_hid_every_card_can_be_undone_on_the_overview() {
         let s = Scratch::fenced("layer-board-trap");
         let solo = s.project("solo", &[]);
         let at = "2026-09-01T00:00:00Z";
-        append_issue(&solo, Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Idea, Status::new("todo"), at));
+        append_issue(
+            &solo,
+            Issue::new("argos-0001".into(), "생각 하나뿐".into(), Kind::Backlog, Status::new("todo"), at),
+        );
         let cfg = s.register(&[&solo]);
         let mut a = layered(&cfg);
         a.layout = crate::tui::view::Layout::Board;
         a.hit("l");
         settle(&mut a);
         let cards = |a: &App| a.rows().iter().filter(|r| matches!(r, Row::Item(..))).count();
-        assert_eq!(cards(&a), 1, "시험의 전제 — idea 카드 하나: {:?}", a.rows());
-        a.hit("SPC v i Esc");
-        assert_eq!(cards(&a), 0, "시험의 전제 — idea 가 숨었다");
-        a.hit("SPC v i Esc");
-        assert_eq!(cards(&a), 1, "SPC v i 가 숨긴 idea 를 못 되돌렸다");
-        a.hit("SPC v i Esc");
+        assert_eq!(cards(&a), 1, "시험의 전제 — backlog 카드 하나: {:?}", a.rows());
+        a.hit("SPC v b Esc");
+        assert_eq!(cards(&a), 0, "시험의 전제 — backlog 가 숨었다");
+        a.hit("SPC v b Esc");
+        assert_eq!(cards(&a), 1, "SPC v b 가 숨긴 backlog 를 못 되돌렸다");
+        a.hit("SPC v b Esc");
         a.hit("SPC v a Esc");
-        assert_eq!(cards(&a), 1, "SPC v a 가 숨긴 idea 를 못 되돌렸다");
+        assert_eq!(cards(&a), 1, "SPC v a 가 숨긴 backlog 를 못 되돌렸다");
     }
 }

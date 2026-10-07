@@ -38,7 +38,13 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .map(|id| report::Unreadable { id })
         .collect();
     let now = model::now();
-    let mut st = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
+    // 아카이브의 진단은 **루트의 스냅샷**으로 잰다 — 옆 워크트리를 겹친 줄로 재면 옆의 낡은 사본이 충돌과 옮길 수를
+    // 부풀린다(moai-bth3). 겹치지 않았으면 방금 판 그 스냅샷을 빌린다.
+    let reread = if worktree { Some(repo.read()?) } else { None };
+    let root = reread.as_ref().unwrap_or(&load);
+    let (mut st, archived) =
+        archive_board(&repo, &load.issues, &unreadable, (&root.issues, &root.unreadable()), &now, ctx.zone());
+    super::name_load_errors(ctx.lang(), &repo.issues_path(), &archived.errors);
     // **자리 없는 집은 줄은 여기서만 싣는다**(moai-4370) — 까닭은 `report::stranded`. 치명이 아니라
     // 아래 종료 코드는 안 바뀐다. 언제 재는지는 `worktree::workplaces` 가 정한다 — 딸린 워크트리
     // 안에서 겹쳐 보지 않았으면 빈 목록이 오고, 그러면 `stranded` 가 조용하다.
@@ -184,6 +190,62 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     ))
 }
 
+/// 아카이브를 곁들인 보드(moai-bth3) — `moai status`, 등록한 프로젝트의 한눈 보기, 훅의 보드가 **이 하나로** 짓는다.
+/// 훅의 `Stop`·기준선은 같은 경고를 산 줄에 닿는 아카이브로만 센다(`cmd::hook::warned`, moai-i9ji) — 여기 아카이브
+/// 경고를 더하면 그쪽에도 더한다. 저마다 짓던 판은 훅이 `archive_duplicate_id`·`archive_pending` 을 빼먹어
+/// `moai status` 가 1 로 끝나는데 세션의 보드는 "드러난 문제 없다" 를 댔고, 한눈 보기는 아카이브를 아예 안 읽어 낸
+/// 마일스톤을 기한 지난 빈 todo 로 댔다(moai-6k1r 이 [`install_notices`] 를 한 자리에 모은 것과 같은 까닭이다).
+///
+/// `rows`·`unreadable` 은 보드가 세는 줄(옆 워크트리를 겹쳤으면 겹친 것)이고, `root` 는 아카이브와 견줄 **루트의
+/// 스냅샷**(줄과 못 읽는 줄)이다 — 충돌과 옮길 수 있는 수는 옆의 줄로 재지 않는다. 아카이브는 함께 돌려준다: 그
+/// 못 읽은 줄을 대는 것은 부르는 쪽의 일이다(`report` 가 아무것도 안 찍듯 이것도 안 찍는다).
+pub(crate) fn archive_board(
+    repo: &Repo,
+    rows: &[model::Issue],
+    unreadable: &[report::Unreadable],
+    root: (&[model::Issue], &[report::Unreadable]),
+    now: &str,
+    zone: &crate::tz::Zone,
+) -> (report::StatusReport, crate::store::Load) {
+    let archived = crate::archive::read(&repo.root).unwrap_or_default();
+    // 기한은 아카이브의 경고를 더한 뒤에 재도 자리가 같다 — `judged` 는 셈이 적어 둔 자리(`Dues`)에 끼운다.
+    let st = archive_board_unjudged(rows, unreadable, root, &archived, &repo.config, now).judged(now, zone);
+    (st, archived)
+}
+
+/// [`archive_board`] 의 속 — **기한 판정을 안 접는다**(moai-nkwg). 탐색기의 배너(`tui::board`)와 프로젝트 층
+/// (`tui::layer::summarize_with`)이 이것으로 세어 `moai status` 와 같은 수를 낸다. 셈을 들고 있다가 그릴 때 읽는
+/// 사람의 달로 기한을 재는 쪽이라 시간대를 안 받는다(moai-fgjj).
+///
+/// 아카이브는 **부르는 쪽이 읽어 건넨다** — 배너는 같은 아카이브를 산 줄 곁에 놓아 거름망과 `SPC v o` 에도
+/// 쓰므로, 여기서 다시 읽으면 걸음마다 아카이브 파일을 두 벌 푼다.
+pub(crate) fn archive_board_unjudged(
+    rows: &[model::Issue],
+    unreadable: &[report::Unreadable],
+    root: (&[model::Issue], &[report::Unreadable]),
+    archived: &crate::store::Load,
+    cfg: &crate::config::Config,
+    now: &str,
+) -> report::StatusReport {
+    let mut st = report::status_with_archive_unjudged(rows, &archived.issues, unreadable, cfg, now);
+    let live: std::collections::BTreeSet<&str> =
+        root.0.iter().map(|i| i.id.as_str()).chain(root.1.iter().filter_map(|u| u.id)).collect();
+    let collisions = crate::archive::collisions(&live, archived);
+    if !collisions.is_empty() {
+        st.warnings.push(report::Warning::archive_duplicates(collisions, root.0));
+    }
+    // 치명 줄의 끝이다 — 산 줄의 `duplicate_id`·`unreadable_line` 처럼 충돌 다음에 못 읽는 것이 선다(moai-5y2a).
+    if !archived.errors.is_empty() {
+        st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
+    }
+    // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
+    let movable = crate::archive::movable(root.0, archived, cfg, now).len();
+    if movable > 0 {
+        st.notices.push(report::Warning::archive_pending(movable));
+    }
+    st
+}
+
 /// **설치가 어긋난 것을 대는 알림 셋** — 낡은 AGENTS.md 블록(moai-mj45), 빠진 딸린 파일 규칙
 /// (moai-2f99), 머지 드라이버의 상태(moai-2ewr·moai-9khu). **넷째로 링크인 트래커를 비추는 알림이
 /// 함께 선다**(moai-jo3h) — 어긋난 것이 아니라 살아 있는 길이고 칠 명령(`hint`)도 없지만, 링크를 푸는
@@ -205,8 +267,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
 /// 함께 움직이고, 한쪽만 떼면 그 줄들이 먼저 붉어진다.
 ///
 /// **탐색기의 둘은 때를 가린다**(`tui::layer::ASK_INSTALL_EVERY`) — 세는 법은 여기 하나 그대로고,
-/// 갈라 둔 것은 "언제 묻나" 뿐이다. 이 부름은 하위 프로세스를 셋까지 새로 실행하는데
-/// (`git check-attr`·`git config`, 심긴 줄의 probe), 그쪽 두 길은 걸음마다 돈다.
+/// 갈라 둔 것은 "언제 묻나" 뿐이다. 이 부름은 하위 프로세스를 다섯까지 새로 실행하는데
+/// (`git check-ignore`, git 밖이면 `rev-parse`, `git check-attr`·`git config`, 심긴 줄의 probe), 그쪽 두 길은 걸음마다 돈다.
 ///
 /// **알림이지 경고가 아니다** — 계획이 아니라 설치가 어긋난 것이고, 종료 코드를 안 바꾼다
 /// (`moai status` 는 아무것도 막지 않는다, CLAUDE.md).
@@ -303,7 +365,12 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // (`worktree::stranded_at`). 한때 이 화면에만 없어, 프로젝트 밖에서 보드를 보는
             // 사람은 죽은 세션의 일을 영영 못 봤다. 옆 워크트리를 겹치는지는 부른 쪽을 따르되, 재는
             // 자는 **실제로 겹쳤는가**다(`Project::swept`) — 안쪽 `run` 과 같다.
-            let mut status = report::status(&load.issues, &unreadable, &repo.config, &now, ctx.zone());
+            // **아카이브도 안쪽 `moai status` 와 같은 자로 곁들인다**(moai-bth3 리뷰) — 안 곁들이던 판은 옮겨 둔 멤버의
+            // 마일스톤을 기한 지난 빈 todo 로, 옮겨 둔 막음을 끊긴 참조로 댔다. 충돌은 루트의 스냅샷으로 잰다.
+            let reread = if worktree { repo.read().ok() } else { None };
+            let root = reread.as_ref().unwrap_or(load);
+            let (mut status, archived) =
+                archive_board(repo, &load.issues, &unreadable, (&root.issues, &root.unreadable()), &now, ctx.zone());
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
             // **여는 길이 판 것을 받는다**(moai-65ie, `Project::dug`) — 안 받으면 이 줄이 프로젝트
             // 마다 같은 스냅샷을 다시 파, 값이 등록 수만큼 곱해진다. 안쪽 `run` 과 같은 자다.
@@ -323,11 +390,17 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 프로젝트의 줄 목록이 안 따라간다. 다만 **기계 쪽만 짓는다**(리뷰): `Board::epics`
             // 를 읽는 것은 `--json` 뿐이라, 늘 지으면 사람이 보는 보드가 프로젝트마다 저장소
             // 전체의 소속을 한 벌씩 걷고 그대로 버린다.
+            //
+            // **소속은 아카이브를 겹친 문맥으로 짓는다**(moai-kfjy) — 저장소 안의 `ready --json` 과 같은 문맥이다
+            // ([`crate::cmd::ready`] 의 한눈 보기와 같은 자, `report::with_archive`). 산 줄로만 지으면 옮겨 둔 에픽
+            // 밑에서 되살려 집은 멤버가 에픽 없는 줄로 나온다. 가려진 줄을 가르는 지도는 산 줄로 짓는다 — 집은 줄은
+            // 다 산 줄이고 문맥은 산 줄과 같은 id 의 아카이브 사본을 안 들여 답이 같다.
             let picked = report::wip(&load.issues, &repo.config);
             let (epics, kinds) = match ctx.json {
                 true => {
                     let ids: Vec<&str> = picked.iter().map(|i| i.id.as_str()).collect();
-                    (report::handed_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
+                    let context = super::in_context(&load.issues, &archived.issues, &load.errors);
+                    (super::handed(&context, &ids, true), report::Kinds::of_ids(&load.issues, &ids))
                 }
                 false => Default::default(),
             };
@@ -383,7 +456,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                         .picked
                         .iter()
                         .map(|i| {
-                            super::Row::of(i, |_| None, b.epics.get(i.id.as_str()).copied(), &b.kinds).on(&p.origin)
+                            super::Row::of(i, |_| None, b.epics.get(i.id.as_str()).map(String::as_str), &b.kinds)
+                                .on(&p.origin)
                         })
                         .collect(),
                     // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.

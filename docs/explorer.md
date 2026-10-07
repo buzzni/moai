@@ -38,17 +38,21 @@ directories.
 
 **What the list shows is the view.** Done is hidden to begin with, and the path
 line above the list says what is hidden and how it is sorted. The `SPC v` keys
-show or hide [deferred](glossary.md#deferred) work, [ideas](glossary.md#idea),
+show or hide [deferred](glossary.md#deferred) work, [backlog items](glossary.md#backlog),
 each [column](glossary.md#column), the detail and the archive;
 `SPC s` sorts and `SPC c` picks the columns on the right of a row. These choices
 are kept in your user config and carry over to the next run and to every project.
+
+`SPC v b` hides backlog items in the list and their column on the board.
+The choice is saved as `[tui] hide_backlog`. Existing `hide_ideas` settings
+remain readable; if both keys exist, `hide_backlog` wins.
 
 ## Pick a screen
 
 `SPC g` picks which screen stands; the menu's root names the one you are on.
 
 - **`SPC g l` — the list**, described above
-- **`SPC g b` — the board.** The same rows as a kanban board: idea, deferred, then
+- **`SPC g b` — the board.** The same rows as a kanban board: backlog, deferred, then
   your columns, with one lane per milestone at the project root. A card that is
   not yours says whose it is. `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
@@ -134,7 +138,15 @@ kept.
 - **`SPC f` filters** with the same `key=value` words as `moai show --filter`.
   While you type, the keys it takes and a few examples stand above the field, and
   in the value of `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this
-  tracker holds do — `Up` and `Down` pick one and `Enter` puts it in
+  tracker holds do — `Up` and `Down` pick one and `Enter` puts it in.
+  `Tab` completes the key at the cursor: `mil` becomes `milestone=` so you can
+  start typing its value. If several keys match, Tab cycles through them in
+  the order shown in the hint panel, and `Shift-Tab` cycles backwards.
+  Tab also inserts and cycles through matching tag, assignee and milestone
+  values, or status columns, priorities `p0` to `p3` and kind names. The
+  highlighted value follows the candidate inserted into the field. Another
+  key keeps that candidate and ends the cycle; Enter applies the completed
+  filter, while Esc gives up
 - **`Esc` clears** the search or filter you set. It does not touch the view: what
   `SPC v` hides stays hidden, and the two apply together
 
@@ -143,12 +155,36 @@ with `Enter` first.
 
 ## The archive
 
-Work that has sat in done for two weeks is the archive. Nothing is stored for it
-— it is read off the column and the clock each time — and it stays hidden on the
-list and the board even when done is shown; the path line counts what it left
-out. `SPC v o` shows it, and `/` finds it either way. On the CLI it is
-`moai show --archived`. `archive_days` in `.moai/config.toml` sets the two weeks,
-and `0` turns the archive off (moai-47mz).
+Work that has sat in done for two weeks is eligible for the archive. The archive
+is moved explicitly with `moai archive`; use `moai archive --dry-run` first to
+see the rows. Closed epic bundles move together into
+`.moai/archive/<year>.jsonl`, while milestone rows stay live. Normal board and
+ready counts use the active snapshot. Archived rows still supply parent, blocker
+and milestone context, so a shipped release stays closed and a restored member
+keeps its original group. A new or edited row can point at an archived epic,
+parent or blocker (`add -e`, `edit -e`, `add --parent`, `link`,
+`backlog promote -e`) without restoring it. `SPC v o` and `moai show --archived`
+read archived rows too, and `moai show <id>` can open one directly.
+`archive_days` in `.moai/config.toml` sets the two weeks, and `0` turns archive
+eligibility off; `moai show` and `moai status` leave rows already moved to the
+archive out either way. Moving an archived row with `moai mv` restores that selected
+row; its former bundle remains archived (moai-fx9t).
+
+When a live row also has an archive copy, `moai status` names the conflict as
+`archive_duplicate_id`. Keep the live row and run `moai archive --drop <id>` to
+remove its archive copies. This refuses an ID without a live row, and an archived
+row that is a different issue under the same ID (another kind or creation time).
+A conflicting bundle stays live during `moai archive`, while other eligible
+bundles can move; `--dry-run` and the board count only what will move.
+Unreadable archive files are reported by source and readable rows remain available;
+they are broken data, so `moai status` counts them as the `archive_unreadable`
+warning and exits non-zero ([Recovery](recovery.md#an-archive-file-cannot-be-read)).
+The explorer's banner and each project's `+N` in the overview count all of this
+the way `moai status` does: archived rows are context, not work, the collision
+and unreadable archive files are counted as the same warnings, and bundles
+waiting to move as the same notice (moai-nkwg). The banner's urgent "rows could
+not be read" counts lines in the active snapshot only; a bad line in an archive
+file is that `archive_unreadable` warning instead (moai-e18s).
 
 ## Catch up on what changed
 
@@ -162,7 +198,7 @@ nothing anyone else sees; the CLI side is `moai read`.
 ## Park a thought
 
 `SPC n` opens the jot form anywhere inside a project, and what you write is kept
-as an [idea](glossary.md#idea) with no epic — off the board and out of
+as a [backlog item](glossary.md#backlog) with no epic — off the board and out of
 `moai ready` until someone
 unfolds it. With an editor on hand (`$VISUAL`, `$EDITOR`, `vi` or `nano`) it opens
 like a git commit message: the first line is the title. Without one, a built-in
@@ -202,4 +238,4 @@ line that upgrades the moai you are running.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3

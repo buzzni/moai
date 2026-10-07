@@ -1,7 +1,7 @@
 //! 담아 둔 생각을 펼친다.
 //!
-//! `idea add`·`idea show` 는 종류 고정 장치가 그대로 처리한다. 여기 있는 것은
-//! idea 에만 있는 동사 하나다 — 에픽과 마일스톤에는 "펼친다" 가 없다.
+//! `backlog add`·`backlog show` 는 종류 고정 장치가 그대로 처리한다. 여기 있는 것은
+//! backlog 에만 있는 동사 하나다 — 에픽과 마일스톤에는 "펼친다" 가 없다.
 
 use super::{Ctx, Fail, R};
 use crate::cli::PromoteArgs;
@@ -17,20 +17,21 @@ use crate::style::{self, paint};
 ///
 /// 2KB 는 **재고 골랐다** — 이 저장소의 이슈 1,439줄에서 가장 긴 제목이 516바이트다. 네 곱절
 /// 넉넉하니 여태 선 노트도, 사람이 손으로 칠 만한 제목도 여기서 안 잘린다. 잘리는 것은 제목이
-/// 본문 노릇을 하는 줄뿐이고, 그때도 원본은 그 idea 줄에 그대로 있다.
+/// 본문 노릇을 하는 줄뿐이고, 그때도 원본은 그 backlog 줄에 그대로 있다.
 const TITLE_IN_NOTE: usize = 2 * 1024;
 
 /// 펼칠 수 없는 것을 펼치라 했을 때. **한 곳에서 만든다** — 연습과 진짜가
 /// 같은 것을 거절하는데 문장이 둘이면, 어느 쪽을 봤느냐로 말이 달라진다.
-fn not_an_idea(id: &str, i: &Issue, lang: crate::i18n::Lang) -> Fail {
+fn not_a_backlog(id: &str, i: &Issue, lang: crate::i18n::Lang) -> Fail {
     // **곁의 거절과 한 말로 선다**(리뷰) — `Fail::not_found` 와 [`check_epic`] 이 말묶음에서 오는데
     // 이것만 박혀 있으면 같은 명령의 세 거절이 두 말로 갈린다.
-    let said = crate::i18n::fill(crate::i18n::say(lang, "refuse.not_an_idea"), &[("id", id), ("is", i.kind.as_str())]);
+    let said =
+        crate::i18n::fill(crate::i18n::say(lang, "refuse.not_a_backlog"), &[("id", id), ("is", i.kind.as_str())]);
     Fail::coded(said, super::code::BAD_TARGET)
 }
 
 /// `-e` 로 받은 것이 멤버를 받을 수 있는 에픽인가. **없거나 에픽이 아니면 거절한다** —
-/// `add -e` 는 없는 에픽을 알리고 넘어가지만, 여기서는 idea 가 닫히므로 틀린 자리에 펼친
+/// `add -e` 는 없는 에픽을 알리고 넘어가지만, 여기서는 backlog 가 닫히므로 틀린 자리에 펼친
 /// 것을 되돌릴 길이 도구 밖에만 남는다.
 fn check_epic(issues: &[Issue], id: &str, lang: crate::i18n::Lang) -> R<()> {
     let e = issues.iter().find(|i| i.id == id).ok_or_else(|| Fail::not_found(id, lang))?;
@@ -72,13 +73,13 @@ fn stone_of(issues: &[Issue], id: &str, into: Option<&str>) -> Option<String> {
 fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str>, lang: crate::i18n::Lang) {
     let Some(m) = stone else { return };
     if let Some(src) = crate::report::deferred_roots(issues).get(m) {
-        let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_deferred"), &[("id", m), ("src", src)]);
+        let said = crate::i18n::fill(crate::i18n::say(lang, "backlog.milestone_deferred"), &[("id", m), ("src", src)]);
         eprintln!("moai: {said}");
     } else if crate::report::group_states_of(issues, cfg, &[m])
         .get(&(crate::model::Kind::Milestone, m))
         .is_some_and(|col| *col == crate::config::DONE)
     {
-        let said = crate::i18n::fill(crate::i18n::say(lang, "idea.milestone_closed"), &[("id", m)]);
+        let said = crate::i18n::fill(crate::i18n::say(lang, "backlog.milestone_closed"), &[("id", m)]);
         eprintln!("moai: {said}");
     }
 }
@@ -97,7 +98,7 @@ fn carried_body<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
 /// 데려갈 본문이 한 쓰기의 상한 안인가 — **넘으면 그 생각을 가리키며 거절한다**(moai-oejf).
 ///
 /// `promote` 가 데려가는 본문은 `store` 의 쓰기 검사를 다시 지난다. 손으로 푼 머지가 남길 수
-/// 있는 상한 넘는 본문을 든 idea 는 그래서 펼치기가 통째로 막혔는데, 거절문이 가리키는 것은
+/// 있는 상한 넘는 본문을 든 backlog 는 그래서 펼치기가 통째로 막혔는데, 거절문이 가리키는 것은
 /// 그 생각이 아니라 **이 쓰기가 짓는 에픽의 제목**이었다 — 받는 쪽은 제가 방금 친 계획의 첫
 /// 줄을 줄이러 가고, 줄여 봐야 같은 자리에서 또 막힌다.
 ///
@@ -119,7 +120,7 @@ fn check_carried_body(id: &str, body: Option<&str>) -> R<()> {
     })
 }
 
-/// idea 하나를 에픽 하나 + 이슈 여럿으로 펼치고, 그 idea 를 닫는다.
+/// backlog 하나를 에픽 하나 + 이슈 여럿으로 펼치고, 그 backlog 를 닫는다.
 /// `-e <에픽>` 이면 새 에픽 없이 이미 선 에픽의 멤버로 펼친다(moai-f3ml).
 ///
 /// 받는 마크다운은 `add --from` 과 **같은 형식**이다. 형식이 둘이 되면
@@ -128,11 +129,11 @@ fn check_carried_body(id: &str, body: Option<&str>) -> R<()> {
 /// 하는 일은 셋이고, 한 번의 쓰기라 다 되거나 하나도 안 된다.
 ///
 /// 1. 에픽과 이슈를 만든다 (`add --from` 과 같은 길)
-/// 2. 그 idea 를 `done` 으로 옮긴다 — 펼쳐졌으므로 더 볼 것이 없다
+/// 2. 그 backlog 를 `done` 으로 옮긴다 — 펼쳐졌으므로 더 볼 것이 없다
 /// 3. 저널에 무엇이 무엇에서 나왔는지 적는다
 ///
-/// **3번을 필드로 만들지 않는다.** `idea.spawned = [에픽 id]` 를 들면 에픽을
-/// 지울 때 idea 도 고쳐야 하고, 그건 파생값을 저장한 대가다.
+/// **3번을 필드로 만들지 않는다.** `backlog.spawned = [에픽 id]` 를 들면 에픽을
+/// 지울 때 backlog 도 고쳐야 하고, 그건 파생값을 저장한 대가다.
 pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     // `add --from` 과 **한 길**이다 — 읽기·템플릿 채우기·형식 읽기(moai-cypw).
@@ -158,11 +159,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 도구가 기꺼이 해 줄 계획을 버린다. 어느 줄인지는 그대로 말한다.
         super::name_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let thought = load.get(&args.id).ok_or_else(|| Fail::not_found(&args.id, ctx.lang()))?;
-        if !crate::report::is_idea(thought) {
-            return Err(not_an_idea(&args.id, thought, ctx.lang()));
+        if !crate::report::is_backlog(thought) {
+            return Err(not_a_backlog(&args.id, thought, ctx.lang()));
         }
         if let Some(e) = into {
-            check_epic(&load.issues, e, ctx.lang())?;
+            let archived = super::archived_for(&repo.root, &load.issues, &[e])?;
+            check_epic(&super::in_context(&load.issues, &archived, &load.errors), e, ctx.lang())?;
         }
         // **크기도 여기서 잰다**(moai-5229) — 연습이 승인한 계획을 진짜가 거절하면, 그 "좋다" 가
         // 뒤늦은 말이 된다. `add --from --dry-run` 과 한 자리를 지난다.
@@ -198,10 +200,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         if ctx.json {
             crate::cmd::add::say_no_such_milestone(stone.as_deref(), known, ctx.lang());
             // 본문이 설 자리는 안 낸다 — 펼치기가 데려가는 글은 그 생각이 이미 들고 있어
-            // `moai show <idea>` 가 낸다(moai-07v1). `add --from --body` 만 새 글이라 그쪽이 댄다.
+            // `moai show <backlog>` 가 낸다(moai-07v1). `add --from --body` 만 새 글이라 그쪽이 댄다.
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, stone.as_deref(), None);
         }
-        let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "idea.will_unfold"))];
+        let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.will_unfold"))];
         out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
@@ -212,10 +214,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             ctx.lang(),
         ));
         if let Some(e) = into {
-            let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic"), &[("id", e)]);
+            let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "backlog.into_epic"), &[("id", e)]);
             out.push(paint(style::DIM, &said));
         }
-        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.will_close"), &[("id", &args.id)]);
+        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "backlog.will_close"), &[("id", &args.id)]);
         out.push(paint(style::DIM, &said));
         return Ok(out);
     }
@@ -225,30 +227,36 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // 바로 위 `model::actor` 를 밖으로 뺀 것과 같은 자다(`cmd/mv.rs` 의 주석).
     let lang = ctx.lang();
-    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write(
+    let (made, read, known): (Vec<Issue>, super::Read, bool) = repo.with_write_after(
         || ctx.lang(),
-        |issues, cfg, reserved| {
+        |issues, unread, cfg, reserved| {
             // 시각은 **락을 쥔 뒤에** 뜬다 — `mv` 와 같은 까닭이다. 밖에서 뜨면 이 닫기가 옆의 집기보다
             // 늦게 써져도 이른 시각을 들어, 생각의 끝이 시작보다 앞선다(리뷰 moai-u5bk.3wq).
             let at = model::now();
-            // 펼칠 것이 정말 idea 인지 **먼저** 본다. 나중에 보면 만들어진 id 가
+            // 펼칠 것이 정말 backlog 인지 **먼저** 본다. 나중에 보면 만들어진 id 가
             // 오류 메시지에 실려 나가고, 받는 쪽은 그게 남은 줄 안다.
             //
             // 자리를 **한 번만** 찾는다. `create_drafts` 는 뒤에 밀어 넣기만 하니
             // 첨자가 밀리지 않고, 그래야 "방금 찾은 줄이 사라졌다" 같은 있지도
             // 않을 경우를 위한 `expect` 가 필요 없다.
-            let at_idea = issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id, lang))?;
-            let thought = &issues[at_idea];
+            let at_backlog =
+                issues.iter().position(|i| i.id == args.id).ok_or_else(|| Fail::not_found(&args.id, lang))?;
+            let thought = &issues[at_backlog];
             // 연습에서 이미 봤을 수도 있지만 다시 본다 — 그 사이에 누가 지우거나
             // 바꿨을 수 있고, 쓰기가 믿을 것은 락 안에서 읽은 것뿐이다.
-            if !crate::report::is_idea(thought) {
-                return Err(not_an_idea(&args.id, thought, lang));
+            if !crate::report::is_backlog(thought) {
+                return Err(not_a_backlog(&args.id, thought, lang));
             }
             let title = thought.title.clone();
             let was = thought.status.clone();
-            // 들 에픽도 락 안에서 다시 본다 — 연습과 진짜 사이에 지워졌을 수 있다.
+            // 들 에픽도 락 안에서 다시 본다 — 연습과 진짜 사이에 지워졌을 수 있다. **아카이브로 옮긴 에픽도 받는다**
+            // (moai-tzzt) — `add -e` 와 같은 자다. 멤버는 산 파일에 서고 에픽은 아카이브에 그대로 선다.
+            let archived = match into {
+                Some(e) => super::archived_for(&repo.root, issues, &[e])?,
+                None => Vec::new(),
+            };
             if let Some(e) = into {
-                check_epic(issues, e, lang)?;
+                check_epic(&super::in_context(issues, &archived, unread), e, lang)?;
             }
             // 담아 둔 생각의 담당을 **갈라진 채로** 물려준다. 펼친 계획의 임자가
             // 없으면 `ready` 가 집으라고 내면서 누가 집는지는 말하지 않는다.
@@ -264,7 +272,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 둘 다 AGENTS.md 가 "펼친 뒤 손으로" 라고 적어 메우던 자리다.
             //
             // **`-e <에픽>` 이면 안 준다.** 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을
-            // 물려받는다 — 멤버마다 idea 의 것을 적으면 에픽의 것을 덮어 `show --milestone` 이
+            // 물려받는다 — 멤버마다 backlog 의 것을 적으면 에픽의 것을 덮어 `show --milestone` 이
             // 한 묶음을 두 곳에 세운다. 뿌리가 없어 [`create_drafts`] 가 어차피 안 적지만,
             // 안 준다고 여기 적어 두는 편이 그 규칙을 한 자리에서 읽게 한다.
             //
@@ -289,7 +297,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 서로 다른 것을 가리킨다.
             //
             // 선 에픽에 펼치면(`-e`) 뿌리가 없다 — 만든 이슈 하나하나가 머리다. 에픽에는 적지
-            // 않는다: 그 에픽은 이 idea 에서 나온 것이 아니다.
+            // 않는다: 그 에픽은 이 backlog 에서 나온 것이 아니다.
             //
             // **뿌리는 최상위 id 다**(moai-exh7) — 멤버는 에픽의 자식 id 를 받고 제 `epic` 을
             // 안 적으므로(`create_drafts`), 그 필드로 가르던 자는 멤버까지 머리로 읽어 같은
@@ -298,9 +306,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             let grown: Vec<String> =
                 made.iter().filter(|i| into.is_some() || crate::cmd::add::is_root(i)).map(|i| i.id.clone()).collect();
             // **노트에 담는 제목은 넘칠 때만 줄인다**(moai-clta). 이 노트는 도구가 짓는 것이라
-            // 거절할 사람이 없는데, 제목이 상한 턱밑인 idea 는 머리말 몇 바이트 때문에 펼칠
+            // 거절할 사람이 없는데, 제목이 상한 턱밑인 backlog 는 머리말 몇 바이트 때문에 펼칠
             // 길이 통째로 막혔다 — 거절문은 이 쓰기가 남기지도 않을 새 id 를 댔다. 여기 담긴
-            // 제목은 어느 생각에서 왔는지 보이라는 가리킴이고, 원본은 그 idea 줄에 그대로 남는다.
+            // 제목은 어느 생각에서 왔는지 보이라는 가리킴이고, 원본은 그 backlog 줄에 그대로 남는다.
             //
             // **예산은 상한이 아니라 [`TITLE_IN_NOTE`] 다**(리뷰 moai-5lwd.n5l 3번). 상한을 그대로
             // 주면 64KB 짜리 제목이 만든 이슈마다 저널에 한 벌씩 베껴져, `moai show` 의 이력이 그
@@ -335,14 +343,15 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
                 entries.push(JournalEntry::status(&args.id, &was, &done, Some(note), &at, &by));
                 // `mv` 와 **같은 길로** 옮긴다 — 시작·끝 시각까지(`Issue::move_to`, moai-38mh). 손으로
                 // 칸만 옮기던 때는 펼쳐 닫힌 생각에만 `done_at` 이 안 섰다.
-                issues[at_idea].move_to(done, &at, cfg);
+                issues[at_backlog].move_to(done, &at, cfg);
             }
             // 펼치면 에픽이 선다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는 칸을 읽는다.
             let ids: Vec<&str> = made.iter().map(|i| i.id.as_str()).collect();
-            let read = crate::cmd::read_of(issues, cfg, &ids, ctx.json);
+            let read = crate::cmd::read_of(&super::in_context(issues, &archived, unread), cfg, &ids, ctx.json);
             let known = crate::cmd::add::is_milestone(issues, crate::cmd::add::stood_on(&made));
             Ok((entries, (made, read, known)))
         },
+        |_| Ok(()),
     )?;
 
     if ctx.json {
@@ -362,7 +371,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             status: crate::config::DONE,
         });
     }
-    let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "idea.unfolded"))];
+    let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.unfolded"))];
     out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
@@ -371,13 +380,13 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
     let roots = made.iter().filter(|i| crate::cmd::add::is_root(i)).count();
     out.extend(crate::cmd::add::milestone_line(crate::cmd::add::stood_on(&made), known, roots, ctx.lang()));
     if let Some(e) = into {
-        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "idea.into_epic_done"), &[("id", e)]);
+        let said = crate::i18n::fill(crate::i18n::say(ctx.lang(), "backlog.into_epic_done"), &[("id", e)]);
         out.push(paint(style::DIM, &said));
     }
     out.push(format!(
         "{}  {}",
         paint(style::ID, &args.id),
-        paint(style::DIM, crate::i18n::say(ctx.lang(), "idea.closed"))
+        paint(style::DIM, crate::i18n::say(ctx.lang(), "backlog.closed"))
     ));
     Ok(out)
 }

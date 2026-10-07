@@ -8,10 +8,14 @@ in [the CLI reference](cli.md).
 ## Archive
 
 Work that has stood in `done` for longer than `archive_days` (two weeks unless
-`.moai/config.toml` says otherwise; `0` turns it off). Nothing is stored for it —
-it is read off the column and the clock each time. The list, the board and
-`moai show --all` leave it out; `moai show --archived` and `SPC v o` bring it
-back. More in [the explorer](explorer.md#the-archive).
+`.moai/config.toml` says otherwise; `0` turns eligibility off). `moai archive`
+moves eligible closed epic bundles and standalone rows into yearly JSONL files
+under `.moai/archive`; milestones stay live. Board and ready count active work
+and use archived rows as reference context, while `moai show --archived`, `moai show <id>` and `SPC v o`
+read the archive. `moai mv` restores only the selected archived row, and so does
+`moai defer <id> --undo` on an archived deferred epic. A live row
+with a stale archive copy is repaired with `moai archive --drop <id>`. More in
+[the explorer](explorer.md#the-archive).
 
 ## Assignee
 
@@ -25,7 +29,7 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
 They are carried by the `moai-work` skill; the supervisor's
-[letter](#letter) carries only the assignment — the idea, the model, the work
+[letter](#letter) carries only the assignment — the backlog, the model, the work
 running alongside, the base branch, the milestone and the root.
 
 ## Column
@@ -72,13 +76,18 @@ the repository, a review is an issue, never kill the person's tmux server, and
 ask before you [take over](#take-over). A refusal hands over the command that
 gets through. More in [working with agents](agents.md#the-five-rules).
 
-## Idea
+## Backlog
 
-A thought parked for later — a row of kind `idea`, off the board and out of
-`moai ready`, so it does not blur the plan. `moai idea add` parks one (`SPC n`
+A thought parked for later — a row of kind `backlog`, off the board and out of
+`moai ready`, so it does not blur the plan. `moai backlog add` parks one (`SPC n`
 in [the explorer](explorer.md#park-a-thought)), and
-`moai idea promote <id> --from -` unfolds it into an epic
-and issues and closes it. An idea is "not work yet"; [deferred](#deferred) is
+`moai backlog promote <id> --from -` unfolds it into an epic
+and issues and closes it. The shared file still stores `kind: "idea"` so older
+binaries can read it; issue JSON views report `kind: "backlog"`, except
+`rm --json`, which returns the removed rows with the stored spelling.
+The hidden `moai idea`
+command alias remains for one release and is removed in v0.9.0.
+A backlog item is "not work yet"; [deferred](#deferred) is
 "work, but not now".
 
 ## Journal
@@ -92,7 +101,7 @@ edits — and is never read to work out where a row stands; that is the
 ## Kind
 
 What a row is: `issue` (the default, never written to the file), `epic`,
-`milestone` or `idea`. Kind, [column](#column) and [deferred](#deferred) are
+`milestone` or `backlog`. Kind, [column](#column) and [deferred](#deferred) are
 three separate questions — what it is, where it stands, and whether to look at
 it now. A tag such as `bug` or `review` is not a kind.
 
@@ -139,7 +148,7 @@ from `moai show <id>`. The hook holds the end of a turn once to ask for it.
 
 ## Notice
 
-A board line that informs without judging: ideas piling up, work deferred, a
+A board line that informs without judging: backlog items piling up, work deferred, a
 milestone running, a merge driver not installed. It stands apart from the
 [warnings](#warning) under `notices`. `moai wiki ls` uses the same word for a
 page with conflict markers, a link that leads to no page, a link to a heading the
@@ -157,7 +166,7 @@ The first pick-up stamps `started_at`. More in
 
 Markdown that creates an epic and its issues in one go — `# Epic title`, then
 one `- [p1] issue title #tag` line per issue — fed to `moai add --from -`
-(`--dry-run` shows it first) or to `moai idea promote`. Show it to the person
+(`--dry-run` shows it first) or to `moai backlog promote`. Show it to the person
 once, before writing code. More in
 [the workflow](workflow.md#plan-something-bigger).
 
@@ -205,7 +214,7 @@ whole under a lock. More in [Recovery](recovery.md#the-files).
 ## Supervisor
 
 A session running the `moai-supervise` skill, registered with
-`moai hello --role supervisor`. It hands the [ideas](#idea) that have piled up,
+`moai hello --role supervisor`. It hands the [backlog items](#backlog) that have piled up,
 one at a time, to the [workers](#worker) waiting on the repository, sends each
 a [letter](#letter) with the assignment and takes their reports the same way. It picks, sends and checks; it
 does not fix and it does not merge. More in
@@ -247,4 +256,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3

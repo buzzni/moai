@@ -34,8 +34,8 @@ Start a session like this:
 
 When something not for now comes to mind:
 
-  moai idea add 'a passing thought'  jot it. A title is enough - not work yet
-  moai idea promote <id> --from -    unfold it into an epic and issues later
+  moai backlog add 'a passing thought'  jot it. A title is enough - not work yet
+  moai backlog promote <id> --from -    unfold it into an epic and issues later
 
 When you are not doing an existing piece of work right now:
 
@@ -152,7 +152,7 @@ pub enum Cmd {
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
-    status_idea_pile     = 5      when this many thoughts have piled up
+    status_backlog_pile  = 5      when this many thoughts have piled up
     status_due_days      = 3      days before a milestone deadline to say so")]
     Status(WorktreeArg),
 
@@ -203,9 +203,9 @@ pub enum Cmd {
 
     /// Create an issue
     // `-h` 도 설명을 옵션 밑 줄에 둔다(`next_line_help`) — 옆 한 줄 모양이면 옵션 열이
-    // `--type <issue|epic|milestone|idea>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
+    // `--type <issue|epic|milestone|backlog>` 에 맞춰 44칸으로 벌어져 설명이 112칸까지
     // 갔다(moai-x18p). 옵션이 스물이 넘는 명령이라 열을 좁혀도 다음 옵션이 다시 넓힌다.
-    // `Typed::Add` 도 같은 까닭으로 같다 — `moai idea add` 는 그것을 접어 넣어 쓴다(moai-g33x).
+    // `Typed::Add` 도 같은 까닭으로 같다 — `moai backlog add` 는 그것을 접어 넣어 쓴다(moai-g33x).
     #[command(
         next_line_help = true,
         after_help = "\
@@ -254,6 +254,8 @@ reads as a flag — put it after `--` (`moai add -- -x`)."
     /// Count them - spread, flow, lead and cycle time, AI work
     #[command(after_help = STATS_HELP)]
     Stats(StatsArgs),
+    /// Move eligible closed rows into yearly archive files
+    Archive(ArchiveArgs),
     /// Move the status
     #[command(after_help = "  The last argument is the column to go to, everything before it the issues.
   Column names and their order come from statuses in .moai/config.toml
@@ -387,30 +389,31 @@ NOTE
     /// The verbs above, pinned to `--type milestone`
     #[command(subcommand)]
     Milestone(Typed),
-    /// Jot a passing thought down where you are (`--type idea`)
+    /// Jot a passing thought down where you are (`--type backlog`)
     #[command(
         subcommand,
+        alias = "idea",
         after_help = "  One step below todo. **Jotting has to cost nearly nothing** - neither a
   priority nor an epic is asked for. Title and body still go separately: keep
   the title to one short line and pour a long thought into the body with
   `-b -`. That title becomes the issue title when it is unfolded, so a long
   one here carries straight over.
 
-  moai idea add 'a passing thought'   jot it
-  moai idea ls                        what has piled up (same as `idea show`)
+  moai backlog add 'a passing thought'   jot it
+  moai backlog ls                   what has piled up (`backlog show`)
 
-moai idea add 'install the merge driver by hand in every clone' -b - <<'IDEA'
+moai backlog add 'install the merge driver in every clone' -b - <<'BACKLOG'
 Today `moai merge-driver --install` has to be typed once per clone.
-IDEA
+BACKLOG
 
-  An idea is not work - it is in neither `moai ready` nor the board's counts,
+  Backlog items stand outside `moai ready` and the board's counts,
   and living without an epic is normal for it, so it never trips the
   \"issues with no epic\" warning.
 
   Editing and dropping are the verbs you already have: `moai edit <id>`,
   `moai rm <id>`."
     )]
-    Idea(IdeaCmd),
+    Backlog(BacklogCmd),
 
     /// Read the project wiki - the markdown pages under `docs/`
     #[command(
@@ -654,11 +657,16 @@ IDEA
   The search and filter fields take Enter to apply and Esc to give up, the
   search filters the list as you type, and Tab and Shift-Tab pick where it
   looks: everything, id, title, tag, body or note (everything reads the
-  notes too). The filter field lists the keys it takes and a few examples
+  notes too). In the filter field, Tab completes key names and values,
+  Shift-Tab cycles backwards, and another key keeps the current candidate;
+  a unique key gains an equals sign so its value can be typed straight away.
+  The filter field lists the keys it takes and a few examples
   above itself, and with the cursor in the value of assignee=, tag=, no-tag=
   or milestone= it lists the values there instead: typing narrows them, Up
   and Down pick one, and Enter puts it in; with no list standing it applies
-  the filter. The header at the top numbers every registered project, and
+  the filter. Fixed fields also complete status names, priority p0 to p3 and
+  type names with Tab; these fields keep Enter to apply. The header at the
+  top numbers every registered project, and
   pressing that number without SPC jumps straight there — 0 is everything,
   one list of all projects.
 
@@ -679,7 +687,7 @@ IDEA
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
     SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
-    SPC v l  deferred            SPC v i  ideas              SPC v a  show all
+    SPC v l  deferred         SPC v b  backlog        SPC v a  show all
     SPC v o  the archive — done that has sat a while [shown/hidden]; SPC v a
              leaves it as it is
     SPC v 1  first column of the config [shown/hidden] — the next ones count up
@@ -763,11 +771,11 @@ IDEA
   SPC g l brings the list back. It is the list's layout, not another window:
   the cursor, the filter, the view, search, [NEW] and the detail are the
   list's, and the choice is kept under [tui] as layout. The menu's root names
-  the screen that stands, as in +screen [board]. The columns are idea,
-  deferred and the config's columns in order — idea is a kind and deferred
+  the screen that stands, as in +screen [board]. The columns are backlog,
+  deferred and the config's columns in order — backlog is a kind and deferred
   an axis, so nothing is stored for them.
-  SPC v i hides ideas, the idea column here and the idea rows in the list
-  alike, and is kept under [tui] as hide_ideas.
+  SPC v b hides backlog items in both the board and the list, and is kept
+  under [tui] as hide_backlog.
   At the project root every milestone is a lane, with (no milestone) last;
   inside a milestone or an epic there is one lane. Epics and milestones are
   not cards. Each card is two lines, its id, column and priority over its title,
@@ -872,8 +880,8 @@ IDEA
   SPC v r (raw or rendered). The window is read fresh every time and nothing
   of it is kept.
 
-  SPC n opens the jot form anywhere inside a project — it is kept as an idea
-  (with no epic). If an editor is there ($VISUAL, $EDITOR, or vi or nano on
+  SPC n opens the jot form anywhere inside a project. It keeps a backlog item
+  with no epic. If an editor is there ($VISUAL, $EDITOR, or vi or nano on
   PATH) it opens like a git commit message: the first line is the title, then
   a blank line, then the body, and comment lines are guidance to be deleted.
   Leave the title empty, or end the editor with an error, and nothing is
@@ -1021,6 +1029,18 @@ Examples:
 
   The prefix is decided once - every id already issued carries it.
 
+  **In a terminal the first init asks.** It shows the prefix and each choice
+  with its default picked, and Enter plants. A flag picks its row and locks
+  it; give every row a flag and nothing is asked. --yes asks nothing and
+  uses the old defaults - committed, with the guide block - for choices that
+  neither a flag nor existing git rules and guide files settle. Nothing is
+  asked where a script or an agent calls it - stdin or stdout is not a
+  terminal, TERM=dumb, or --json - and there init plants the same as --yes.
+  Running it again where .moai already stands never asks. Esc stops with nothing
+  written. Even a first run reads existing git ignore rules and the moai
+  guide block. A later run also recognizes installed moai hooks when no block
+  stands. If git fails, init refuses rather than guessing commit mode.
+
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
   directory name: dropping hyphens if that fits (moa-issue becomes moaissue),
@@ -1039,28 +1059,56 @@ Examples:
   --no-driver leaves .git/config alone. A repository that wants no driver at
   all says so in `.gitattributes` - a line for the snapshot that settles
   merge itself (`.moai/issues.jsonl   text eol=lf -merge`) is read as the
-  decision and init leaves it alone.
+  decision and init leaves it alone. An explicit --driver with --tracking
+  exclude or gitignore is refused.
+
+  --json reports gitignore=true only when .gitignore was written; exclude=true
+  means the ignore lines were written to .git/info/exclude.
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is
-  non-zero only when a file cannot be read.
+  non-zero when a file cannot be read or git cannot determine tracking.
 
   --print only prints that block. That is where to copy it from when the file
   the agent reads is not AGENTS.md - --print and init write the same text.")]
     Init {
         /// id prefix (up to 8). Made from the directory name when absent
         prefix: Option<String>,
-        /// Leave AGENTS.md alone
-        #[arg(long)]
+        /// Leave AGENTS.md alone (same as --guide none)
+        #[arg(long, conflicts_with = "guide")]
         no_agents: bool,
+        /// block, file (.moai/guide.md + link), hook or none
+        #[arg(long, value_name = "how", value_parser = ["block", "file", "hook", "none"], hide_possible_values = true)]
+        guide: Option<String>,
+        /// Plant the merge driver in .git/config (the default)
+        #[arg(long, conflicts_with = "no_driver")]
+        driver: bool,
         /// Leave .git/config alone (plant no merge driver)
         #[arg(long)]
         no_driver: bool,
+        /// Git tracks it (commit) or not (exclude, gitignore)
+        #[arg(long, value_name = "how", value_parser = ["commit", "exclude", "gitignore"], hide_possible_values = true)]
+        tracking: Option<String>,
+        /// Then run moai skill install --scope local
+        #[arg(long, conflicts_with = "no_skill")]
+        skill: bool,
+        /// Do not install the hooks and skills
+        #[arg(long)]
+        no_skill: bool,
+        /// Then add this repository to your project list
+        #[arg(long, conflicts_with = "no_register")]
+        register: bool,
+        /// Do not add it to your project list
+        #[arg(long)]
+        no_register: bool,
+        /// Ask nothing; unset rows plant as init always did
+        #[arg(short = 'y', long)]
+        yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "no_driver", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes", "check"])]
         print: bool,
     },
 }
@@ -1297,16 +1345,16 @@ pub enum Typed {
     Show(ShowArgs),
 }
 
-/// idea 만 갖는 동사가 하나 있다 — 펼치기. 그래서 `Typed` 를 그대로 쓰지
+/// backlog 만 갖는 동사가 하나 있다 — 펼치기. 그래서 `Typed` 를 그대로 쓰지
 /// 못하고, `Typed` 에 넣으면 `moai epic promote` 가 생긴다.
 ///
 /// **공통 동사는 베끼지 않고 [`Typed`] 를 접어 넣는다**(moai-g33x). 손으로 옮겨 적었을
 /// 때 `#[command(alias = "ls")]` 가 두 곳에 서고, `cmd/mod.rs` 가 `typed()` 를 안 지나고
-/// 같은 두 줄을 다시 적었다 — `Typed` 에 동사를 더하는 날 `moai idea` 만 조용히 안 따라오고
-/// 컴파일 오류도 안 났다. 접어 넣으면 `moai idea <동사>` 의 목록이 `Typed` 하나에서 나온다.
+/// 같은 두 줄을 다시 적었다 — `Typed` 에 동사를 더하는 날 `moai backlog` 만 조용히 안 따라오고
+/// 컴파일 오류도 안 났다. 접어 넣으면 `moai backlog <동사>` 의 목록이 `Typed` 하나에서 나온다.
 #[derive(Subcommand, Debug)]
-pub enum IdeaCmd {
-    /// `moai idea add` and `moai idea show` (`ls`) - the same verbs, kind pinned
+pub enum BacklogCmd {
+    /// `moai backlog add` and `moai backlog show` (`ls`) - the same verbs, kind pinned
     // **`Box` 에 담는다**(moai-efoc) — `ShowArgs` 가 차례·쪽 플래그로 자라 `Typed` 가 `Promote` 의
     // 세 배를 넘었고, clippy 의 `large_enum_variant` 가 그 차이를 잡는다. 실행마다 한 번 짓는 값이라
     // `Box` 하나의 비용은 없는 것과 같다.
@@ -1316,24 +1364,24 @@ pub enum IdeaCmd {
     #[command(after_help = "  The markdown it takes is the same shape as `add --from`. With two shapes,
   you get the grammar wrong every single time.
 
-moai idea promote <id> --from - <<'PLAN'
+moai backlog promote <id> --from - <<'PLAN'
 # Epic title
 - [p1] first issue #enhancement
 - [p2] second issue
 PLAN
 
-  **A line in the plan becomes the issue title as it is.** A long idea title
+  **A line in the plan becomes the issue title as it is.** A long backlog title
   carries its length over to the issue, so write a short title again when
-  unfolding. The original text stays on that idea and the history leads back.
+  unfolding. The original text stays on that backlog and the history leads back.
 
-  Unfolding closes it - that idea goes to `done`. What came from what is kept
+  Unfolding closes it - that backlog goes to `done`. What came from what is kept
   in the journal (the history in `moai show <id>`).
 
   With the epic already standing, `-e <epic>` unfolds into it as members.
   That is where you take back something the epic needs that had gone out as
-  an idea - the plan then holds `- issue` lines only.
+  a backlog item - the plan then holds `- issue` lines only.
 
-moai idea promote <id> -e <epic> --from - <<'PLAN'
+moai backlog promote <id> -e <epic> --from - <<'PLAN'
 - [p1] what the epic set out to do
 PLAN
 
@@ -1343,7 +1391,7 @@ PLAN
 
 #[derive(Args, Debug)]
 pub struct PromoteArgs {
-    /// The idea to unfold
+    /// The backlog to unfold
     #[arg(value_name = "id")]
     pub id: String,
 
@@ -1411,7 +1459,7 @@ pub struct AddArgs {
 
     // 설명이 없으면 `next_line_help` 가 공백만 든 줄을 그린다(리뷰 moai-5yq0).
     /// What kind to create (issue when absent, epic under `epic add`)
-    #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
+    #[arg(long = "type", value_name = "issue|epic|milestone|backlog")]
     pub kind: Option<Kind>,
 
     /// Create it as a child of this issue (the id gets a `.xxx`)
@@ -1420,13 +1468,13 @@ pub struct AddArgs {
 
     // **못 지키는 깃발의 거절은 `clap` 이 아니라 [`crate::cmd::add::run`] 이 낸다**(moai-yhb1).
     // 여기 `conflicts_with_all` 로 달아 두던 자리다. 그것은 `add::run` 이 닿기도 전에 터져
-    // 네임스페이스가 지은 거절문을 가렸다 — `moai idea add --from - -b '글'` 이 "`--body` 를
+    // 네임스페이스가 지은 거절문을 가렸다 — `moai backlog add --from - -b '글'` 이 "`--body` 를
     // 빼라" 를 듣고, 그것을 빼고 다시 친 뒤에야 동사가 틀렸다는 것을 알았다. 게다가 clap 의 글은
     // 평문 stderr 에 exit 2 라, 같은 명령의 형제 거절(`--milestone <모양 틀림>` 은 `code::ERROR`
     // 에 exit 1)과 계약이 갈렸다 — `--json` 으로 받는 쪽이 이 갈래만 아무 `code` 도 못 봤다.
     //
     // **`AddArgs` 는 네임스페이스 다섯이 같이 쓴다**(`add`·`issue add`·`epic add`·
-    // `milestone add`·`idea add`). 한 구조체에 달린 목록은 그 다섯에 똑같이 서므로, clap 에
+    // `milestone add`·`backlog add`). 한 구조체에 달린 목록은 그 다섯에 똑같이 서므로, clap 에
     // 두는 한 어느 거절이 먼저인지를 네임스페이스마다 고를 길이 없다.
     /// Epic and issues from markdown at once. `-` is stdin
     #[arg(long, value_name = "file|-")]
@@ -1515,7 +1563,7 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   group: closed that way it counts from its last finished member, and a
   deferred row moved into a closed group dates it from that row's deferral.
   Asking by time opens what the list hides by default - done, deferred and
-  ideas - because a row closed meanwhile changed too. Narrow it again with
+  backlog items - because a row closed meanwhile changed too. Narrow with
   -s (name the columns you want) or --type; --deferred keeps only what is
   deferred, and no flag leaves deferred rows out. A lone instant given to
   --created or --done is that one second, not a day.
@@ -1538,8 +1586,8 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
   write of its own (a group's column, an inherited epic) and a row merged
   in with an older stamp. A stamp moai cannot read (fractions, an offset)
   falls in no time range. For a complete copy, pull the whole list
-  (--archived, and `moai idea show --archived` for ideas) and compare row
-  by row.
+  (--archived, and `moai backlog show --archived` for backlog items)
+  and compare row by row.
 
     moai show --since 2026-09-29T00:00:00Z --json
     moai show --done 2026-09-01..2026-09-30 --type issue
@@ -1574,8 +1622,8 @@ const SHOW_LIST: &str = "  Order: --sort priority (the default: urgent first, th
 // **`--json` 의 모양을 여기 적는다** — 에이전트가 읽는 계약이라(moai-1hka.k16) 도움말이 그 문서다. 모양을
 // 바꾸면 이 글과 `report::stats::Stats` 를 함께 고치고, `docs/cli.md` 를 다시 짓는다.
 const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters as `moai show` -
-  with done, deferred, ideas and the archive in: it counts what happened,
-  so nothing finished is hidden. Every number counts one kind, issue
+  with done, deferred, backlog items and the archive in: it counts what
+  happened, so nothing finished is hidden. Every number counts one kind, issue
   unless --type names another; a group is measured through its members
   (-e, --milestone). The kind axis alone counts every row picked, to show
   what was left out. --all and --archived are taken and change nothing.
@@ -1589,7 +1637,7 @@ const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters 
   the flow follows them), and without --by the overview shows the first
   three:
     status      the column, a group's read from its members as on the board
-    kind        issue, epic, milestone, idea - every row picked
+    kind        issue, epic, milestone, backlog - every row picked
     priority    0 to 3
     tag         a row counts once per tag it carries
     assignee    name and email
@@ -1662,6 +1710,16 @@ pub struct StatsArgs {
 
     #[command(flatten)]
     pub filter: FilterArgs,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct ArchiveArgs {
+    /// Show what would move without changing files
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Remove archive copies; keep the live row
+    #[arg(long, value_name = "ID", conflicts_with = "dry_run")]
+    pub drop: Option<String>,
 }
 
 /// `--by` 의 낱말 — `report::stats::Axis` 의 이름과 같다. 잇는 것은 `cmd::stats` 다(`report` 는 clap 을 모른다).
@@ -1811,7 +1869,7 @@ pub struct FilterArgs {
     #[arg(long, value_name = "id|none")]
     pub milestone: Vec<String>,
 
-    /// A child of that issue (`none` = top)
+    /// Child of this issue (`none` = top)
     #[arg(long, value_name = "id|none")]
     pub parent: Vec<String>,
 
@@ -1822,7 +1880,7 @@ pub struct FilterArgs {
     #[arg(short, long, value_name = "who|none|me")]
     pub assignee: Vec<String>,
 
-    #[arg(long = "type", value_name = "issue|epic|milestone|idea")]
+    #[arg(long = "type", value_name = "issue|epic|milestone|backlog")]
     pub kind: Option<Kind>,
 
     /// In id, title, tag, body or notes
@@ -1849,7 +1907,7 @@ pub struct FilterArgs {
     #[arg(long)]
     pub deferred: bool,
 
-    /// Include done and deferred, no archive
+    /// Include done/deferred, no archive
     #[arg(long)]
     pub all: bool,
 
@@ -1857,7 +1915,7 @@ pub struct FilterArgs {
     #[arg(long)]
     pub archived: bool,
 
-    /// Filters as one string (`status=todo`)
+    /// One filter string (`status=todo`)
     #[arg(long, value_name = "item=value")]
     pub filter: Vec<String>,
 }

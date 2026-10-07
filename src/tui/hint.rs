@@ -33,12 +33,15 @@ pub const EXAMPLES: &[&str] = &[
     "created_at=2026-10-02 started_at=2026-10-01~",
 ];
 
-/// 값 목록이 서는 항목 — 값이 저장소의 줄에 있는 것. 우선순위(`p0`~`p3`)는 정해져 있어 목록이 없다.
+/// 저장소에서 모으거나 정해진 값으로 완성하는 항목.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Assignee,
     Tag,
     Milestone,
+    Status,
+    Priority,
+    Type,
 }
 
 impl Field {
@@ -48,6 +51,9 @@ impl Field {
             "assignee" => Some(Field::Assignee),
             "tag" | "no-tag" => Some(Field::Tag),
             "milestone" => Some(Field::Milestone),
+            "status" => Some(Field::Status),
+            "priority" => Some(Field::Priority),
+            "type" => Some(Field::Type),
             _ => None,
         }
     }
@@ -159,6 +165,9 @@ pub struct Aim {
 }
 
 impl Aim {
+    fn set(&mut self, input: &Input, row: usize) {
+        *self = Aim { text: input.text().to_string(), at: input.cursor(), row };
+    }
     /// 줄 `n` 개인 목록에서 겨눈 줄.
     pub fn row(&self, input: &Input, n: usize) -> usize {
         if self.text == input.text() && self.at == input.cursor() { self.row.min(n.saturating_sub(1)) } else { 0 }
@@ -172,6 +181,33 @@ impl Aim {
     }
 }
 
+/// One Tab cycle retains the original candidates while its replacement changes the input.
+#[derive(Debug, Clone)]
+pub(super) struct Completion {
+    text: String,
+    at: usize,
+    span: Range<usize>,
+    value: Option<(String, Field, bool)>,
+    offers: Vec<Offer>,
+    row: usize,
+}
+
+impl Completion {
+    fn matches(&self, q: &Input) -> bool {
+        self.text == q.text() && self.at == q.cursor()
+    }
+}
+
+/// Key names use the query table's order. Quoted values never become key slots.
+fn key_span(text: &str, at: usize) -> Option<Range<usize>> {
+    if crate::query::items(text).iter().any(|i| i.eq.is_some_and(|eq| eq < at && at <= i.end)) {
+        return None;
+    }
+    let start = text[..at].rfind(char::is_whitespace).map_or(0, |p| p + text[p..].chars().next().unwrap().len_utf8());
+    let end = text[at..].find(|c: char| c.is_whitespace() || c == '=').map_or(text.len(), |p| at + p);
+    Some(start..end)
+}
+
 /// `rows` 줄 창에 겨눈 줄 `row` 가 들게 굴린 첫 줄. 겨눈 줄이 창 밑으로 내려가면 그 줄을 맨 밑에 둔다.
 pub fn window(row: usize, rows: usize) -> usize {
     (row + 1).saturating_sub(rows)
@@ -182,17 +218,106 @@ use crate::i18n::say;
 use crate::model::{Issue, Kind};
 
 impl App {
+    pub(super) fn completing_value(&self) -> bool {
+        let Mode::Filter(q) = &self.mode else { return false };
+        self.completion.as_ref().is_some_and(|c| c.matches(q) && c.value.is_some())
+    }
+    pub(super) fn completed_key(&self) -> Option<&str> {
+        let Mode::Filter(q) = &self.mode else { return None };
+        let c = self.completion.as_ref().filter(|c| c.matches(q) && c.value.is_none())?;
+        Some(&c.offers[c.row].shown)
+    }
     /// 거름망 칸의 커서가 선 값 자리와 고를 값. **목록이 안 서면 `None`** 이다 — 값 자리가 아니거나, 좁혀 남은
-    /// 것이 없거나, 친 값이 이미 어느 값과 같거나, **창이 낮아 안내 칸이 한 줄도 못 서면**(`hint_room`). 안 보이는
+    /// 것이 없거나, 친 값이 이미 어느 값과 같거나(Tab 순환 중은 원래 후보를 보여 준다), **창이 낮아 안내 칸이 한 줄도 못 서면**(`hint_room`). 안 보이는
     /// 목록이 Enter 를 먹으면 거름망을 걸려던 사람의 칸에 보이지 않던 값이 들어간다.
     pub(super) fn offered(&self) -> Option<(Slot<'_>, Vec<Offer>)> {
         let Mode::Filter(q) = &self.mode else { return None };
         if self.hint_room == Some(0) {
             return None;
         }
+        if let Some(c) = &self.completion
+            && c.matches(q)
+            && let Some((key, field, first)) = &c.value
+        {
+            return Some((
+                Slot { key, field: *field, typed: "", span: c.span.clone(), first: *first },
+                c.offers.clone(),
+            ));
+        }
         let slot = slot(q.text(), q.cursor())?;
+        // Enter retains its existing meaning on fixed fields; Tab opens their cycle.
+        if matches!(slot.field, Field::Status | Field::Priority | Field::Type) {
+            return None;
+        }
         let offers = narrow(offers(slot.field, &self.site.issues, self.site.lang), slot.typed);
         (!offers.is_empty()).then_some((slot, offers))
+    }
+
+    /// Insert a candidate and wrap through the original list on subsequent Tabs.
+    pub(super) fn complete_filter(&mut self, forward: bool) {
+        let Mode::Filter(q) = &self.mode else { return };
+        let continuing = self.completion.as_ref().is_some_and(|c| c.matches(q));
+        let mut c = if continuing {
+            let mut c = self.completion.take().unwrap();
+            c.row = if forward { (c.row + 1) % c.offers.len() } else { (c.row + c.offers.len() - 1) % c.offers.len() };
+            c
+        } else if let Some(sl) = slot(q.text(), q.cursor()) {
+            let values = match sl.field {
+                Field::Status => self.site.cfg.statuses.clone(),
+                Field::Priority => (0..=3).map(|p| format!("p{p}")).collect(),
+                Field::Type => [Kind::Issue, Kind::Epic, Kind::Milestone, Kind::Backlog]
+                    .into_iter()
+                    .map(|k| k.as_str().to_string())
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let all = if values.is_empty() {
+                offers(sl.field, &self.site.issues, self.site.lang)
+            } else {
+                values.into_iter().map(|put| Offer { shown: put.clone(), put, note: None }).collect()
+            };
+            let offers = narrow(all, sl.typed);
+            if offers.is_empty() {
+                return;
+            }
+            let row = self.offer_aim.row(q, offers.len());
+            let row = if forward { row } else { offers.len() - 1 };
+            Completion {
+                text: String::new(),
+                at: 0,
+                span: sl.span.clone(),
+                value: Some((sl.key.into(), sl.field, sl.first)),
+                offers,
+                row,
+            }
+        } else {
+            let Some(mut span) = key_span(q.text(), q.cursor()) else { return };
+            let prefix = &q.text()[span.start..q.cursor()];
+            let names: Vec<_> = crate::query::KEYS.iter().filter(|k| k.starts_with(prefix)).collect();
+            if names.is_empty() {
+                return;
+            }
+            let single = names.len() == 1;
+            if single && q.text().as_bytes().get(span.end) == Some(&b'=') {
+                span.end += 1;
+            }
+            let offers: Vec<_> = names
+                .into_iter()
+                .map(|k| Offer { shown: (*k).into(), put: format!("{k}{}", if single { "=" } else { "" }), note: None })
+                .collect();
+            let row = if forward { 0 } else { offers.len() - 1 };
+            Completion { text: String::new(), at: 0, span, value: None, offers, row }
+        };
+        let text = quoted(&c.offers[c.row].put, c.value.as_ref().is_some_and(|v| v.2));
+        let Mode::Filter(q) = &mut self.mode else { return };
+        let start = c.span.start;
+        q.splice(c.span.clone(), &text);
+        c.span = start..q.cursor();
+        c.text = q.text().into();
+        c.at = q.cursor();
+        self.offer_aim.set(q, c.row);
+        // A unique key ends this cycle so the next Tab can start completing its value.
+        self.completion = if c.value.is_none() && c.offers.len() == 1 { None } else { Some(c) };
     }
 
     /// 값 목록의 겨눈 줄을 옮긴다. 목록이 안 섰으면 아무것도 안 한다.
@@ -273,6 +398,7 @@ fn offers(field: Field, issues: &[Issue], lang: crate::i18n::Lang) -> Vec<Offer>
             });
             std::iter::once(word("none", say(lang, "tui.hint.no_milestone"))).chain(stones).collect()
         }
+        Field::Status | Field::Priority | Field::Type => Vec::new(),
     }
 }
 
@@ -311,7 +437,7 @@ mod tests {
 
     #[test]
     fn no_slot_where_the_key_has_no_list_or_the_cursor_is_not_in_a_value() {
-        for s in ["|", "sta|", "status=to|", "priority=p|", "tag|=bug", "tag=bug |", "tag=bug st|", "assignee=a b|"] {
+        for s in ["|", "sta|", "grep=to|", "epic=p|", "tag|=bug", "tag=bug |", "tag=bug st|", "assignee=a b|"] {
             assert_eq!(slot_of(s), None, "{s}");
         }
     }
@@ -514,6 +640,199 @@ mod tests {
             Mode::Filter(q) => q.text(),
             m => panic!("거름망 칸이 아니다: {m:?}"),
         }
+    }
+
+    #[test]
+    fn tab_completes_unique_keys_then_their_values() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "mil");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "milestone=");
+        assert!(a.offered().is_some());
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "milestone=none");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "milestone=argos-0003");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "milestone=none");
+    }
+
+    #[test]
+    fn key_candidates_cycle_in_table_order_and_other_keys_commit() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "s");
+        for want in ["status", "stale", "since", "started_at", "status"] {
+            press(&mut a, Tab);
+            assert_eq!(typed(&a), want);
+        }
+        press(&mut a, BackTab);
+        assert_eq!(typed(&a), "started_at");
+        press(&mut a, Char('='));
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "started_at=", "date fields have no value candidates");
+        press(&mut a, Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "done");
+        press(&mut a, BackTab);
+        assert_eq!(typed(&a), "done_at");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "done");
+    }
+
+    #[test]
+    fn tab_uses_the_aimed_value_and_keeps_the_list_and_aim_in_sync() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "tag=");
+        press(&mut a, Down);
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "tag=docs");
+        let (_, values) = a.offered().unwrap();
+        let Mode::Filter(q) = &a.mode else { panic!() };
+        assert_eq!(a.offer_aim.row(q, values.len()), 1);
+        press(&mut a, BackTab);
+        assert_eq!(typed(&a), "tag=bug");
+        press(&mut a, BackTab);
+        assert_eq!(typed(&a), "tag=ui");
+        press(&mut a, Enter);
+        assert_eq!(a.mode, Mode::Browse);
+    }
+
+    #[test]
+    fn tab_completes_fixed_fields_without_changing_enter_or_grep() {
+        use ratatui::crossterm::event::KeyCode::*;
+        for (prefix, expected) in [("status=", "todo"), ("priority=p", "p0"), ("type=", "issue")] {
+            let mut a = explorer();
+            a.hit("SPC f");
+            type_in(&mut a, prefix);
+            press(&mut a, Tab);
+            let key = prefix.split_once('=').unwrap().0;
+            assert_eq!(typed(&a), format!("{key}={expected}"));
+            press(&mut a, Tab);
+            assert_ne!(typed(&a), format!("{key}={expected}"));
+        }
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "status=todo");
+        press(&mut a, Enter);
+        assert_eq!(a.mode, Mode::Browse);
+        a.hit("SPC /");
+        type_in(&mut a, "mil");
+        press(&mut a, Tab);
+        assert!(matches!(&a.mode, Mode::Grep(q, _) if q.text() == "mil"));
+    }
+
+    #[test]
+    fn completion_preserves_quotes_commas_suffixes_and_paste_resets_the_cycle() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "tag=docs,b");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "tag=docs,bug");
+        press(&mut a, Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "assignee=Ki");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "assignee=\"Kim Lee\"");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "assignee=\"Kim Lee\"");
+        a.paste(" tag=");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "assignee=\"Kim Lee\" tag=bug");
+        press(&mut a, Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "grep=\"x mil");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "grep=\"x mil");
+    }
+
+    #[test]
+    fn completion_at_the_cursor_keeps_existing_equals_and_other_fields() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "tag=bug milestone=none");
+        for _ in 0..12 {
+            press(&mut a, Left);
+        }
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "tag=bug milestone=none");
+        let Mode::Filter(q) = &a.mode else { panic!() };
+        assert_eq!(q.cursor(), "tag=bug milestone=".len());
+        press(&mut a, Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "assignee=레이 tag=docs");
+        for _ in 0..9 {
+            press(&mut a, Left);
+        }
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "assignee=raven@x.io tag=docs");
+    }
+
+    #[test]
+    fn a_tab_cycle_never_returns_after_escape_or_editing() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "s");
+        press(&mut a, Tab);
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "stale");
+        press(&mut a, Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "stale");
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "stale=");
+        press(&mut a, Esc);
+        a.hit("SPC f");
+        type_in(&mut a, "s");
+        press(&mut a, Tab);
+        press(&mut a, Backspace);
+        press(&mut a, Tab);
+        assert_eq!(typed(&a), "status=");
+    }
+
+    #[test]
+    fn fixed_values_wrap_and_status_uses_this_projects_columns() {
+        use ratatui::crossterm::event::KeyCode::*;
+        for (key, values) in [
+            ("priority", vec!["p0", "p1", "p2", "p3"]),
+            ("type", vec!["issue", "epic", "milestone", "backlog"]),
+            ("status", vec!["queued", "testing", "shipped"]),
+        ] {
+            let mut a = explorer();
+            a.site.cfg.statuses = vec!["queued".into(), "testing".into(), "shipped".into()];
+            a.hit("SPC f");
+            type_in(&mut a, &format!("{key}="));
+            for value in values.iter().chain(values.iter().take(1)) {
+                press(&mut a, Tab);
+                assert_eq!(typed(&a), format!("{key}={value}"));
+            }
+            press(&mut a, BackTab);
+            assert_eq!(typed(&a), format!("{key}={}", values.last().unwrap()));
+        }
+    }
+
+    #[test]
+    fn the_panel_shows_the_inserted_value_and_enter_applies_it() {
+        use ratatui::crossterm::event::KeyCode::*;
+        let mut a = explorer();
+        a.hit("SPC f");
+        type_in(&mut a, "no-tag=");
+        press(&mut a, Tab);
+        press(&mut a, Tab);
+        let screen = super::super::draw::tests::render(&mut a, 100, 30).join("\n");
+        assert!(screen.contains("> docs"), "the inserted candidate is not aimed: {screen}");
+        assert_eq!(typed(&a), "no-tag=docs");
+        assert!(screen.contains("Enter 걸기"), "Enter is advertised as inserting instead of applying: {screen}");
+        press(&mut a, Enter);
+        assert_eq!(a.mode, Mode::Browse);
     }
 
     /// **값 목록이 선 동안 Enter 는 값을 넣고, 안 선 때 거름망을 건다**(사용자 결정).

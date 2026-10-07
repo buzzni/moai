@@ -156,7 +156,7 @@ pub fn tags_of(i: &Issue) -> String {
 }
 
 /// 태그 표기가 정해지는 **한 자리**. 아직 `Issue` 가 아닌 것 — `add --from` 의 연습과
-/// `idea promote` 미리보기가 그리는 초안 — 도 이것을 쓴다. `add` 가 손으로 짓던 판은 표기를
+/// `backlog promote` 미리보기가 그리는 초안 — 도 이것을 쓴다. `add` 가 손으로 짓던 판은 표기를
 /// 바꾸면 show·status·탐색기만 따라가, 방금 만든 줄의 태그가 확인 줄에서 다르게 보였다.
 pub fn tag_line(tags: &[String]) -> String {
     tag_parts(tags).map(|(mark, t)| format!("{mark}{t}")).collect()
@@ -289,7 +289,7 @@ fn title_style(i: &Issue) -> Style {
     // 묶음만 예외다. 계획 계층이 한눈에 떠야 한다.
     //
     // **일이 아닌 것이 곧 묶음인 것은 아니다.** `kind != Issue` 로 물으면
-    // idea 가 묶음 색을 입어 목록에서 에픽처럼 보인다 — `cmd/add.rs` 가
+    // backlog 가 묶음 색을 입어 목록에서 에픽처럼 보인다 — `cmd/add.rs` 가
     // 만드는 순간에는 안 그런데 `show` 에서만 그러면 같은 줄이 두 색이다.
     if is_group(i) { style::EPIC } else { style::PLAIN }
 }
@@ -299,7 +299,7 @@ fn title_style(i: &Issue) -> Style {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Hidden {
     pub done: usize,
-    pub ideas: usize,
+    pub backlog: usize,
     pub deferred: usize,
     /// done 에 든 지 오래된 줄(moai-47mz) — `--all` 이 아니라 `--archived` 가 연다.
     pub archived: usize,
@@ -308,14 +308,14 @@ pub struct Hidden {
 impl Hidden {
     /// "무엇 N건 숨김 — `플래그`" 조각들. 숨긴 것이 없으면 비어 있다.
     ///
-    /// **`done`·`idea` 는 번역하지 않는다** — 칸 이름과 종류는 설정과 자료에서 오는 낱말이고,
-    /// 바로 뒤의 플래그(`--all`·`--type idea`)가 그 글자를 그대로 받는다. 옮기면 화면이 대는
+    /// **`done`·`backlog` 는 번역하지 않는다** — 칸 이름과 종류는 설정과 자료에서 오는 낱말이고,
+    /// 바로 뒤의 플래그(`--all`·`--type backlog`)가 그 글자를 그대로 받는다. 옮기면 화면이 대는
     /// 낱말과 쳐야 할 낱말이 갈린다. 미룸과 아카이브는 낱말이라 말묶음에서 온다(`status.put_off`·`list.archive`).
     fn says(&self, lang: Lang) -> Vec<String> {
         [
             (self.done, "done", "--all"),
             (self.deferred, say(lang, "status.put_off"), "--deferred"),
-            (self.ideas, "idea", "--type idea"),
+            (self.backlog, "backlog", "--type backlog"),
             (self.archived, say(lang, "list.archive"), "--archived"),
         ]
         .into_iter()
@@ -330,7 +330,7 @@ impl Hidden {
         use crate::query::Hide;
         match why {
             Hide::Done => self.done += 1,
-            Hide::Idea => self.ideas += 1,
+            Hide::Backlog => self.backlog += 1,
             Hide::Deferred => self.deferred += 1,
             Hide::Archived => self.archived += 1,
             Hide::Unopenable => {}
@@ -353,7 +353,7 @@ impl Hidden {
 /// 통째로 사라져 계획 밖의 줄이 일과 똑같이 보였다 — 안 물었는데 사라지는 것이 물어서 붙는
 /// 군더더기보다 나쁘다. 물은 것은 부르는 쪽만 안다.
 ///
-/// `idea` 칸은 걷었다(moai-nb6w) — 그 칸이 가르던 것은 줄머리의 `◇` 하나였고 그 표식이 없다.
+/// `backlog` 칸은 걷었다(moai-nb6w) — 그 칸이 가르던 것은 줄머리의 `◇` 하나였고 그 표식이 없다.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Asked {
     /// `--deferred` — 미룬 것만 물었다. 줄마다 같은 낱말이 붙어 봐야 자리만 먹는다.
@@ -865,7 +865,7 @@ fn row(out: &mut Vec<String>, cx: &Ctx, at: usize, depth: usize) {
 ///
 /// **`{d}` 에 넣을 수는 부르는 자리가 고른다.** `days` 는 넘긴 문턱이고 `oldest` 는 실제
 /// 나이라 뜻이 다른데(`report::Warning::oldest`), 도우미가 둘 중 하나를 미리 쥐면 나이를
-/// 말하는 줄이 말없이 문턱을 낸다 — `idea_pile` 은 `days` 가 아예 없어 `0일` 이 된다.
+/// 말하는 줄이 말없이 문턱을 낸다 — `backlog_pile` 은 `days` 가 아예 없어 `0일` 이 된다.
 fn says(w: &Warning, screen: Screen) -> String {
     let lang = screen.lang;
     let n = w.count.to_string();
@@ -922,9 +922,9 @@ fn says(w: &Warning, screen: Screen) -> String {
         // 것을 드러내려는 것인데, 갓 담은 것에까지 괄호가 붙으면 그 괄호가
         // 뜻을 잃는다. **그래서 키가 둘이다** — 괄호를 붙이고 말고는 번역이 정할 것이 아니라
         // 여기서 정하는 것이고, 한 키에 넣으면 그 말에서만 빈 괄호가 남는다.
-        "idea_pile" => match w.oldest {
-            Some(d) if d > 0 => aged(say(lang, "warn.idea_pile_aged"), d),
-            _ => one(say(lang, "warn.idea_pile")),
+        "backlog_pile" => match w.oldest {
+            Some(d) if d > 0 => aged(say(lang, "warn.backlog_pile_aged"), d),
+            _ => one(say(lang, "warn.backlog_pile")),
         },
         "deferred" => match w.oldest {
             Some(d) if d > 0 => aged(say(lang, "warn.deferred_aged"), d),
@@ -936,6 +936,9 @@ fn says(w: &Warning, screen: Screen) -> String {
         // 밀어내므로 부르는 쪽이 stderr 로 이미 한 줄씩 냈다. 여기 서는 뜻은 "그 말을 놓쳤으면
         // 위를 봐라" 다: 이 줄이 없으면 보드가 "드러난 문제 없다" 로 방금 한 말을 뒤집는다.
         "user_config" => one(say(lang, "warn.user_config")),
+        "archive_duplicate_id" => one(say(lang, "warn.archive_duplicate_id")),
+        "archive_unreadable" => one(say(lang, "warn.archive_unreadable")),
+        "archive_pending" => one(say(lang, "warn.archive_pending")),
         "agents_stale" => one(say(lang, "warn.agents_stale")),
         "agents_hand_edited" => one(say(lang, "warn.agents_hand_edited")),
         // **파일마다 결과를 따로 말한다**(moai-2f99) — `.gitignore` 에 `/.claude/worktrees/` 가
@@ -946,6 +949,10 @@ fn says(w: &Warning, screen: Screen) -> String {
         // (`.moai/journal.jsonl  text eol=lf merge=union`) 한 줄에 이어 붙이면 어디서 한 줄이
         // 끝나는지 안 보인다.
         "gitignore_rules" => one(say(lang, "warn.gitignore_rules")),
+        // git 밖에 둔 트래커의 무시 줄(moai-zynt.zhr) — 막는 것이 트래커까지라 결과가 `.gitignore` 의 것과 다르다.
+        "exclude_rules" => one(say(lang, "warn.exclude_rules")),
+        // `.gitignore` 로 git 밖에 둔 트래커의 줄 — 결과는 `exclude_rules` 와 같고 파일만 다르다.
+        "gitignore_local_rules" => one(say(lang, "warn.gitignore_local_rules")),
         "gitattributes_rules" => one(say(lang, "warn.gitattributes_rules")),
         // **"안 심었다" 가 아니라 "못 돈다" 다**(moai-2ewr) — 안 심은 것은 밑의
         // `merge_driver_absent` 가 제 낱말로 말한다. 여기는 심어 놓고 그 자리가 빈 판이고,
@@ -965,6 +972,7 @@ fn says(w: &Warning, screen: Screen) -> String {
         "tracker_linked" => one(say(lang, "warn.tracker_linked")),
         // **링크인 딸린 파일**(moai-yke5). 어느 파일인지는 `preview` 가 한 줄로 낸다 — 칠 줄이 없다.
         "dotfile_linked" => one(say(lang, "warn.dotfile_linked")),
+        "tracking_unknown" => one(say(lang, "warn.tracking_unknown")),
         "unknown_field" => one(say(lang, "warn.unknown_field")),
         // **까닭을 단정하지 않는다.** 머지를 잘못 푼 흔적일 수도, 못 읽는 줄이
         // 산 줄의 id 를 쓰고 있는 것일 수도 있다(moai-4dk4). 둘 다 줄 번호는
@@ -1010,7 +1018,6 @@ pub fn status(
 
     out.push(board(cfg, &st.counts));
 
-    let shelved = crate::report::put_off(issues);
     // **아카이브된 묶음은 수 한 줄로 선다**(moai-47mz) — 목록은 그 줄을 뺐고(`report::Archived`), 그 줄을 보는
     // 명령을 함께 댄다. 마일스톤이 다 아카이브여도 머리글은 선다 — 안 서면 두 수가 어느 목록의 것인지 모른다.
     let labelled = !st.milestones.is_empty() || st.archived.milestones > 0;
@@ -1034,7 +1041,9 @@ pub fn status(
             // **미뤄 둔 묶음은 낱말로 말한다** — 색만으로 뜻을 지는 자리를 만들지
             // 않는다. 물려받은 미룸도 친다. "닫을 때가 됐다" 는 더 안 낸다: 묶음의
             // 칸은 멤버에서 읽으므로 100% 면 곧 닫힌 것이다(moai-j3b3).
-            let put_off = e.id.as_deref().is_some_and(|id| shelved.contains(id));
+            // **판정은 보고서가 든다**([`crate::report::Roll::put_off`], moai-sai2) — 여기 받은 줄은 산 줄뿐이라,
+            // 다시 재면 아카이브의 미룬 에픽이 되살린 멤버의 묶음으로 섰을 때 낱말을 잃는다.
+            let put_off = e.put_off;
             // **접은 묶음은 그렇다고 말한다.** 남은 멤버를 미뤄 닫은 묶음은 막대가
             // `1/2` 인 채로 done 에 서는데(칸은 미룬 멤버를 빼고 센다), 말하지 않으면
             // 세션이 시작하는 이 화면에서 접은 것과 굴러가는 것이 똑같아 보인다.
@@ -1079,7 +1088,7 @@ pub fn status(
     // 글리프(`!`·`+`)가 둘을 가른다.
     for w in st.warnings.iter().chain(&st.notices) {
         out.push(String::new());
-        // **알림은 경고처럼 보이면 안 된다.** `!` 를 달면 "쌓인 idea 6건" 이
+        // **알림은 경고처럼 보이면 안 된다.** `!` 를 달면 "쌓인 backlog 6건" 이
         // 꾸지람으로 읽히고, 그러면 담는 것을 멈춘다 — 담는 비용을 0 으로
         // 만든 뜻이 거기서 사라진다. 그래서 흐린 `+` 다: 쌓였다는 말이지
         // 잘못됐다는 말이 아니고, `+` 는 흐름 줄의 `쌓이는 중 +3` 과 이미 같은
@@ -1172,7 +1181,13 @@ fn preview(w: &Warning, by_id: &BTreeMap<&str, &Issue>, now: &str, screen: Scree
     // 벌여 놓은 것과 깨진 것은 id 만 한 줄에 늘어놓는다 — 제목이 정보를 안 준다.
     if matches!(
         w.kind,
-        "wip_overload" | "duplicate_id" | "orphan_child" | "twin_parent" | "dangling_blocked_by" | "future_timestamp"
+        "wip_overload"
+            | "duplicate_id"
+            | "archive_duplicate_id"
+            | "orphan_child"
+            | "twin_parent"
+            | "dangling_blocked_by"
+            | "future_timestamp"
     ) {
         if !w.ids.is_empty() {
             out.push(format!("    {}", paint(style::DIM, &w.ids.join("   "))));
@@ -1491,7 +1506,7 @@ pub fn prime_commands(lang: Lang) -> Vec<(&'static str, &'static str)> {
         ("moai mv <id> in_progress --from todo", say(lang, "prime.cmd_mv")),
         ("moai note <id> '…'", say(lang, "prime.cmd_note")),
         ("moai mv <id> done -m '…'", say(lang, "prime.cmd_done")),
-        ("moai idea add '…'", say(lang, "prime.cmd_idea")),
+        ("moai backlog add '…'", say(lang, "prime.cmd_backlog")),
     ]
 }
 
@@ -1589,7 +1604,7 @@ pub fn ready(
     // 아래에서 대는 것과 같은 까닭이다.
     //
     // **글리프는 `+` 다.** `!` 는 고칠 것이고 이것은 규칙이 서 있다는 알림이라, 보드가 쌓인
-    // idea 에 `+` 를 쓰는 것과 같은 자리다. 꾸지람으로 읽히면 사람이 규칙을 끄고 싶어진다.
+    // backlog 에 `+` 를 쓰는 것과 같은 자리다. 꾸지람으로 읽히면 사람이 규칙을 끄고 싶어진다.
     // **뺀 것이 없으면 말하지 않는다**(리뷰 6) — "밖의 일 0건은 안 냈다" 는 아무것도 안
     // 말하면서 자리만 차지한다. 보드의 알림도 같은 자로 0 을 거른다.
     if !focus.outside.is_empty() {
@@ -1846,7 +1861,7 @@ pub fn detail(
         paint(st, col),
         paint(style::priority_style(i.priority()), &format!("p{}", i.priority())),
     );
-    // 종류는 이슈가 아닐 때만 적는다. **색은 묶음에만 준다** — idea 에
+    // 종류는 이슈가 아닐 때만 적는다. **색은 묶음에만 준다** — backlog 에
     // 묶음 색을 주면 상세 한 줄이 "이것도 무언가를 담는다" 고 말한다.
     if i.kind != Kind::Issue {
         let mark = if is_group(i) { style::EPIC } else { style::DIM };
@@ -2811,8 +2826,8 @@ pub struct Board<'a> {
     /// 집은 것 (`report::wip`).
     pub picked: Vec<&'a Issue>,
     /// 집은 줄의 id 가 **넘겨받는** 에픽(`report::handed_of`) — [`Picks::epics`] 와 같은 자리,
-    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다.
-    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    /// 같은 까닭이고 같은 주의다: 혼자 짚으면 안 된다. 제 문자열을 쥐는 것도 같은 까닭이다.
+    pub epics: std::collections::BTreeMap<String, String>,
     /// 집은 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::kinds`] 와 같다.
     pub kinds: crate::report::Kinds<'a>,
     /// `--worktree` 로 겹쳤으면 줄마다의 출처 (`Project::origin`).
@@ -2861,10 +2876,13 @@ pub struct Picks<'a> {
     /// **여기서 든다**(moai-wuzi): 이 줄들을 고른 `load.issues` 는 한눈 보기의 `--json` 이
     /// 펴는 자리까지 안 따라와, 거기서는 지도를 지을 수가 없다.
     ///
+    /// **제 문자열을 쥔다**(moai-kfjy) — 지도는 아카이브를 겹친 문맥으로 짓고(`cmd::handed`), 그 문맥은 고르는
+    /// 자리에서 지은 것이라 여기까지 못 산다. 산 줄로만 지으면 옮겨 둔 에픽 밑의 되살린 멤버가 에픽 없는 줄로 나온다.
+    ///
     /// **이 지도만으로는 답이 아니다**(리뷰 moai-jk2u.o78) — 제 `epic` 을 적은 줄은 아예 안 드니
     /// (`report::hands_down`) 혼자 짚으면 그 줄이 에픽 없는 줄로 나온다. 값을 내는 자는
     /// `report::stands_in` 이고 그쪽이 줄의 `epic` 을 먼저 읽는다 — `cmd::Row::of` 를 지난다.
-    pub epics: std::collections::BTreeMap<&'a str, &'a str>,
+    pub epics: std::collections::BTreeMap<String, String>,
     /// 이 목록의 줄 가운데 **가려진 줄을 가르는** 지도(`report::Kinds`) — [`Picks::epics`] 와
     /// 같은 자리, 같은 까닭이다(moai-53s2).
     pub kinds: crate::report::Kinds<'a>,
@@ -3326,6 +3344,13 @@ pub fn store_trouble(lang: Lang, why: &crate::store::Trouble) -> String {
         Trouble::JournalLost { said, ids } if ids.is_empty() => said.clone(),
         Trouble::JournalLost { said, ids } => {
             fill(say(lang, "store.journal_lost"), &[("said", said), ("ids", &ids.join(" "))])
+        }
+        Trouble::ArchiveCleanup { said } => {
+            fill(say(lang, "store.archive_cleanup"), &[("said", &crate::text::one_line(said))])
+        }
+        // 그 파일에 대해 낸 말에 자리가 이미 든다(`archive::reserve`) — 자리를 또 붙이지 않는다.
+        Trouble::ArchiveUnread { said } => {
+            fill(say(lang, "store.archive_unread"), &[("said", &crate::text::one_line(said))])
         }
         Trouble::Invalid { at, why } => invalid(lang, at, why),
         // **고치는 길은 "누군지 모른다" 와 한 벌이다** — 저널 파일 이름이 메일에서 오므로 모자란
@@ -4809,21 +4834,21 @@ mod tests {
         assert_eq!(plain(&[bar(Some(1))])[0].matches('█').count(), 1);
     }
 
-    /// **묶음 색은 묶음만 입는다.** idea 도 이슈가 아니지만 아무것도 담지
+    /// **묶음 색은 묶음만 입는다.** backlog 도 이슈가 아니지만 아무것도 담지
     /// 않으므로, `kind != Issue` 로 칠하면 목록에서 에픽처럼 보인다 —
-    /// `moai idea add` 가 만드는 순간에는 안 그런데 `moai show` 에서만
+    /// `moai backlog add` 가 만드는 순간에는 안 그런데 `moai show` 에서만
     /// 그러면 같은 줄이 두 색이다. 저절로 되돌아갈 자리라 못 박는다.
     #[test]
     fn only_a_grouping_wears_the_grouping_colour() {
         let work = issue("argos-0009", "진짜 일", "todo");
         let mut thought = issue("argos-0001", "반짝", "todo");
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         let mut epic = issue("argos-0002", "저장 계층", "todo");
         epic.kind = Kind::Epic;
         let mut stone = issue("argos-0003", "v0.1", "todo");
         stone.kind = Kind::Milestone;
 
-        assert_eq!(title_style(&thought), title_style(&work), "idea 가 묶음 색을 입었다");
+        assert_eq!(title_style(&thought), title_style(&work), "backlog 가 묶음 색을 입었다");
         assert_eq!(title_style(&epic), style::EPIC);
         assert_eq!(title_style(&stone), style::EPIC);
     }
@@ -4892,7 +4917,7 @@ mod tests {
         assert!(due_of(&stone, now, &z, Lang::Ko).is_some(), "마일스톤의 기한이 빠졌다");
 
         // 같은 값을 든 이슈·에픽·생각 — 어느 쪽도 기한 줄을 안 세운다.
-        for kind in [Kind::Issue, Kind::Epic, Kind::Idea] {
+        for kind in [Kind::Issue, Kind::Epic, Kind::Backlog] {
             let mut row = issue("argos-0002", "손으로 푼 충돌이 남긴 줄", "todo");
             row.kind = kind;
             row.due_on = Some("2026-09-20".into());
@@ -4984,7 +5009,7 @@ mod tests {
     }
 
     /// **`S` 열은 칸 글리프 하나고 줄마다 같은 폭이다**(moai-nb6w, 사용자 결정 2026-09-21). 한때 그
-    /// 곁에 표식 둘(idea `◇`·미룸 `‖`)이 줄마다 붙어 열 폭이 자료에 따라 늘었고, 그만큼 제목이
+    /// 곁에 표식 둘(backlog `◇`·미룸 `‖`)이 줄마다 붙어 열 폭이 자료에 따라 늘었고, 그만큼 제목이
     /// 밀렸다 — 탐색기에서는 그것이 트리 선을 어긋냈다.
     ///
     /// **재는 것은 낱말이 아니라 자리다** — 표식이 안 서는 것만 재면, 폭을 자료에서 다시 재기
@@ -4993,11 +5018,11 @@ mod tests {
     fn the_list_column_is_one_glyph_wide_on_every_row() {
         let plain_work = issue("argos-0001", "일", "todo");
         let mut thought = issue("argos-0002", "생각", "todo");
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         let mut put_off = issue("argos-0003", "미룬 일", "in_progress");
         put_off.deferred_at = Some("2026-09-01T00:00:00Z".into());
         let mut both = issue("argos-0004", "미룬 생각", "todo");
-        both.kind = Kind::Idea;
+        both.kind = Kind::Backlog;
         both.deferred_at = Some("2026-09-01T00:00:00Z".into());
 
         let rows = plain(&list(
@@ -5012,9 +5037,9 @@ mod tests {
         ));
         // 칸 글리프 하나만 선다 — 종류도 미룸도 줄머리를 안 넓힌다.
         assert!(rows[1].contains("·  일"), "일의 줄머리가 달라졌다 — {rows:#?}");
-        assert!(rows[2].contains("·  생각"), "idea 에 표식이 붙었다 — {rows:#?}");
+        assert!(rows[2].contains("·  생각"), "backlog 에 표식이 붙었다 — {rows:#?}");
         assert!(rows[3].contains("▸  미룬 일"), "미룬 줄에 표식이 붙었다 — {rows:#?}");
-        assert!(rows[4].contains("·  미룬 생각"), "미룬 idea 에 표식이 붙었다 — {rows:#?}");
+        assert!(rows[4].contains("·  미룬 생각"), "미룬 backlog 에 표식이 붙었다 — {rows:#?}");
         // **낱말은 그대로다** — 미룸을 말하는 자리는 꼬리의 `status.put_off` 다.
         assert!(rows[3].contains("미룸") && rows[4].contains("미룸"), "미룸 낱말까지 걷었다 — {rows:#?}");
 

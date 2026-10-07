@@ -35,26 +35,44 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
     // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
     // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
     let lang = ctx.lang();
-    let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write(
+    let (touched, read): (Vec<(Issue, bool)>, super::Read) = repo.with_write_after(
         || lang,
-        |issues, cfg, _| {
+        |issues, unread, cfg, _| {
+            // **막는 쪽은 아카이브에 있어도 된다**(moai-tzzt) — `moai archive` 가 옮긴 닫힌 줄도 있는 줄이고, 보드는
+            // 그것을 문맥으로 읽어 `dangling_blocked_by` 로 안 센다. 막는 쪽은 읽기만 하므로 되살리지 않는다. 막히는
+            // 쪽은 이 쓰기가 고치는 줄이라 산 줄이라야 한다 — `edit`·`note` 가 아카이브의 줄을 안 고치는 것과 같다.
+            // 막히는 쪽이 되살린 묶음이면 그 칸도 아카이브에 남은 멤버에서 읽는다([`super::archived_with_groups`]) —
+            // 아래 `read_of` 가 내는 칸이다. 막는 쪽은 참조만 잰다.
+            let targets: Vec<&str> = edits.iter().map(|(t, _)| t.as_str()).collect();
+            let wanted: Vec<&str> = std::iter::once(args.id.as_str()).chain(targets.iter().copied()).collect();
+            let archived = match super::archived_with_groups(&repo.root, issues, &targets)? {
+                found if found.is_empty() => super::archived_for(&repo.root, issues, &wanted)?,
+                found => found,
+            };
+            let context = super::in_context(issues, &archived, unread);
             // 막는 쪽의 존재는 **더할 때만** 따진다. `--unblocks` 만이면 그것이
             // 이미 지워졌을 수 있고, 그때도 남은 참조는 풀려야 한다 — 아니면
             // `status` 가 드러낸 끊긴 참조를 손으로 파일을 고쳐야만 없앨 수 있다.
             if !args.blocks.is_empty() {
-                let Some(blocker) = issues.iter().find(|i| i.id == args.id) else {
+                let Some(blocker) = context.iter().find(|i| i.id == args.id) else {
                     return Err(Fail::not_found(&args.id, lang));
                 };
-                // **담아 둔 생각은 막지 않는다.** idea 는 보통 `done` 에 닿지
+                // **담아 둔 생각은 막지 않는다.** backlog 는 보통 `done` 에 닿지
                 // 않으므로, 막게 두면 막힌 이슈가 영영 안 풀리면서 `status` 는
                 // 그것을 "계획이 멈춘 자리" 로 센다 — 도구가 스스로 만든 막다른
                 // 길이고, 막는 쪽이 목록에 안 나오니 풀 방법도 안 보인다.
-                if crate::report::is_idea(blocker) {
+                if crate::report::is_backlog(blocker) {
                     return Err(Fail::coded(
                         format!(
                             "{}\n      {}",
-                            crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_blocker"), &[("id", &args.id)]),
-                            crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_promote"), &[("id", &args.id)]),
+                            crate::i18n::fill(
+                                crate::i18n::say(lang, "refuse.link_backlog_blocker"),
+                                &[("id", &args.id)]
+                            ),
+                            crate::i18n::fill(
+                                crate::i18n::say(lang, "refuse.link_backlog_promote"),
+                                &[("id", &args.id)]
+                            ),
                         ),
                         super::code::BAD_TARGET,
                     ));
@@ -65,13 +83,14 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
                     return Err(Fail::not_found(target, lang));
                 };
                 // 막히는 쪽도 마찬가지다. 생각은 집는 것이 아니라서 막힐 것도 없다.
-                if *wants_block && crate::report::is_idea(t) {
+                if *wants_block && crate::report::is_backlog(t) {
                     return Err(Fail::coded(
-                        crate::i18n::fill(crate::i18n::say(lang, "refuse.link_idea_blocked"), &[("id", target)]),
+                        crate::i18n::fill(crate::i18n::say(lang, "refuse.link_backlog_blocked"), &[("id", target)]),
                         super::code::BAD_TARGET,
                     ));
                 }
-                if *wants_block && creates_cycle(issues, &args.id, target) {
+                // 고리는 아카이브의 줄을 지나서도 잰다 — 막는 쪽이 아카이브에 있으면 그 위의 막음도 거기 있다.
+                if *wants_block && creates_cycle(&context, &args.id, target) {
                     return Err(Fail::coded(
                         crate::i18n::fill(
                             crate::i18n::say(lang, "refuse.link_cycle"),
@@ -82,6 +101,7 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
                 }
             }
 
+            drop(context);
             let mut out = Vec::new();
             for (target, wants_block) in edits {
                 let t = issues.iter_mut().find(|i| i.id == target).expect("위에서 존재를 확인했다");
@@ -109,9 +129,10 @@ pub fn run(ctx: &Ctx, args: LinkArgs) -> R<Vec<String>> {
             // 막히는 쪽이 묶음일 수 있다 — 적힌 칸을 그대로 내면 받는 쪽이 안 읽히는
             // 칸을 읽는다(`cmd::Row`).
             let ids: Vec<&str> = out.iter().map(|(i, _)| i.id.as_str()).collect();
-            let read = super::read_of(issues, cfg, &ids, ctx.json);
+            let read = super::read_of(&super::in_context(issues, &archived, unread), cfg, &ids, ctx.json);
             Ok((vec![], (out, read)))
         },
+        |_| Ok(()),
     )?;
 
     if ctx.json {

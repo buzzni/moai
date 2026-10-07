@@ -297,8 +297,54 @@ The tag is what the release workflow trusts.
   the digest differs, or when there is no `sha256sum`/`shasum` on the machine.
   Check the release actually carries both files.
 
+## An archive copy conflicts with a live row
+
+`archive_duplicate_id` identifies a row present in both the active snapshot and
+an archive file, or repeated inside the archive. First open it with `moai show <id>`
+and confirm the live version is the one to keep. `moai archive --drop <id>`
+removes its archive copies while preserving the live row, and refuses to delete
+an archive-only row. It also refuses when the archived row is a different issue
+that only shares the ID (another kind or creation time) — compare the two with
+`moai show --archived`; dropping it would erase that issue. For duplicates
+entirely inside the archive, inspect the source file and keep the version you
+want there.
+
+After a restore commits, a failed archive cleanup is reported as a warning with
+the successful move still printed. Do not repeat the move with its old `--from`
+column: it has already moved. Repair the archive copy instead. A failed journal
+write is reported separately so its lost note can also be recorded again.
+
+## An archive file cannot be read
+
+An archive file that cannot be read is broken data, the same as an unreadable
+line in the active snapshot: `moai status` reports `archive_unreadable` as a
+warning and exits non-zero (moai-5y2a). Its count is the files that could not be
+opened at all — a FIFO, a link out of the checkout, a file that is not UTF-8 —
+plus the lines inside readable files that do not parse. Readable rows stay
+available meanwhile, and `moai stats` and `moai show --archived` still answer
+with exit code 0; writes are not blocked.
+
+`moai status` and `moai show --archived` name each source on stderr, with the
+line number and the reason for a line. Repair the file itself:
+
+- **Conflict markers** (`<<<<<<<`, `=======`, `>>>>>>>`) mean a merge stopped in
+  the archive. Install the merge driver (`moai merge-driver --install`) and redo
+  the merge, or resolve the markers by hand — every archive line is one row.
+- **A line that does not parse** — compare it with `git log -p -- .moai/archive/`
+  and restore the version that read, or delete the line if the row is also live
+  or no longer wanted.
+- **A file that is not a regular UTF-8 file** — restore it from git
+  (`git checkout HEAD -- .moai/archive/<year>.jsonl`) or move it out of
+  `.moai/archive/`.
+
+Restore cleanup and `--drop` skip archive files they cannot read and name them.
+`moai rm --line` repairs the active snapshot only; it is never a repair for an
+archive file's line number.
+
 ## When nothing else fits
 
 The state is two text files under version control. `git log -p -- .moai/` shows
 every change anyone made to them, and any commit that had them whole is a
 recovery point.
+
+Decided in: moai-bth3

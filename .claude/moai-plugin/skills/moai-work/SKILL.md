@@ -59,7 +59,7 @@ A letter that hands over no work is not work: if it asks something, answer it wi
 
 ## The letter
 
-The first line names the work and where to start — `from step 1` for a new idea,
+The first line names the work and where to start — `from step 1` for a new backlog,
 `from "Carrying on stalled work"` for work a session left behind, `from step 2` for an epic
 already unfolded whose first-column members are left. The letter's `from` is the supervisor
 you report to, `<supervisor>` below. Every other line fills a slot the steps use; a line the
@@ -157,27 +157,27 @@ refusals in all.
 
 ## The steps
 
-1. Unfold it in the root — the one way to turn an idea into work is
-   `moai idea promote <id> --from -`. Unfold into an epic plus issues even for a single
+1. Unfold it in the root — the one way to turn a backlog item into work is
+   `moai backlog promote <id> --from -`. Unfold into an epic plus issues even for a single
    issue. Look at `--dry-run` first — that is for this window to see, not to show a person
    and ask. Showing a split plan to a person once is a step of work a person asked for
    directly; what a supervisor hands you is work a person already passed on. Design
    decisions are asked in 4.
-   If that idea is already done (someone unfolded it), do not unfold: tell the supervisor —
+   If that backlog is already done (someone unfolded it), do not unfold: tell the supervisor —
    unfolding again puts up two epics. **Write a short new title** — a line in the plan
-   becomes the issue title verbatim, so copying over an idea title that grew long while it
-   was parked spreads that length into the issues. The original text stays on that idea and
+   becomes the issue title verbatim, so copying over a backlog item title that grew long while it
+   was parked spreads that length into the issues. The original text stays on that backlog and
    the history leads back to it.
    Then hang the milestone on the epic you unfolded — `promote` brings over the body and the
-   release the idea stood in, and a milestone is inherited, so the epic alone carries it to
+   release the backlog stood in, and a milestone is inherited, so the epic alone carries it to
    every member and to the members added later in 4-3 and 7-1. Hanging the same one again
    changes nothing. **Hang only the `<milestone>` in the letter, and nothing else**: work is
    never pulled into a running release, so a release you noticed running is not yours to
    attach — not to this epic, not to a member you create later. Inside this epic the release
    is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
-   stands outside every release — that is nothing running, or an idea that stood under none,
+   stands outside every release — that is nothing running, or a backlog item that stood under none,
    or one whose release is already dead, and you cannot tell which from the word alone. What
-   came over is still the release that idea stood in, so read the line `promote` printed and clear a
+   came over is still the release that backlog stood in, so read the line `promote` printed and clear a
    release that has already shipped or been deferred with `moai edit <epic> --milestone none`;
    a dead one is named on stderr. Under a deferred one the whole plan is out of the plan:
    not in `ready`, not in `held`, no warning
@@ -198,7 +198,7 @@ refusals in all.
    no leave that member and tell the supervisor
 3. Right after the commit in 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in
-   (*Enter the worktree*). The name is the unfolded epic's id, not the idea's. Until the
+   (*Enter the worktree*). The name is the unfolded epic's id, not the backlog's. Until the
    worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
@@ -220,7 +220,7 @@ refusals in all.
    in the root, the only thing that stops the move is `MOAI_HERE`, so **do not turn it on** —
    turn it on and that worktree's `.moai` changes, and the snapshots conflict on the merge
    (and merging them overwrites someone else's rows).
-   Put `-e <epic>` on an idea you park mid-epic — it does not keep the epic open, and 7-1
+   Put `-e <epic>` on a backlog item you park mid-epic — it does not keep the epic open, and 7-1
    reclaims it through that even if the window is cleared or the work is taken over.
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
    undo it with `git checkout -- .moai`, and if the row was already committed, undo that
@@ -244,7 +244,7 @@ refusals in all.
    `git worktree list` already changed
    (`git diff --name-only <base branch>...<sibling branch>`). When two of them change the
    same place, one waits for the other at the merge. If this epic cannot deliver what it
-   promised without that, it is not an idea but a member — create it with
+   promised without that, it is not a backlog item but a member — create it with
    `moai -C <root> add '<what>' -e <epic>`, leave it in the first column, and name it in 12
    as **a member left because the work beside it holds the file**, together with that other
    work. The supervisor sends it once that work is done. Do not defer it
@@ -338,19 +338,19 @@ refusals in all.
    measures that agent's files rather than yours — that has happened too, and it also burned
    an hour and a half in a worktree that was gone.
 
-7-1. Before merging, go back over the ideas parked mid-epic
-   (`moai -C <root> show --type idea -e <epic>` and what this window remembers) and what the
+7-1. Before merging, go back over the backlog parked mid-epic
+   (`moai -C <root> show --type backlog -e <epic>` and what this window remembers) and what the
    review handed on — **can the epic deliver what it promised without them.** If not, it is
-   not an idea but an unfinished member. What you sorted as "not for now" while parking has
+   not a backlog item but an unfinished member. What you sorted as "not for now" while parking has
    these mixed in — the one waiting on a person's decision, the one pushed out because a
    worker beside you held that file. This step sits after 7 so that it sees what 7's review
-   handed on too. Unfold such an idea as a member of the epic already standing — write only
-   `- issue` lines in the plan; the idea closes by itself and its source stays. You type this
-   from the worktree, so pin the root into the line (4-1). **If that idea is already done, do
+   handed on too. Unfold such a backlog item as a member of the epic already standing — write only
+   `- issue` lines in the plan; the backlog closes by itself and its source stays. You type this
+   from the worktree, so pin the root into the line (4-1). **If that backlog is already done, do
    not unfold it** — someone unfolded it, or you came back from 8 and are going round again.
-   promote unfolds a closed idea too, and the same member stands twice
+   promote unfolds a closed backlog too, and the same member stands twice
 
-    moai -C <root> idea promote <idea id> -e <epic> --from -
+    moai -C <root> backlog promote <backlog id> -e <epic> --from -
    Do not do a reclaimed member here: merge with it left in the first column — work that has
    not been through 7's review does not get mixed into the merge, and a member still standing
    keeps the epic open. Do not `defer` that member. Deferring it closes the epic without its
@@ -464,7 +464,7 @@ refusals in all.
     (a background review, say), finish it before the note — the supervisor reads the note as
     this work being over; what you cannot finish, name in the report (12)
 12. Report with a letter to the supervisor, **last of all**. It carries the merge hash,
-    the unfolded epic's id, a line or two of summary, what you handed on and any new ideas,
+    the unfolded epic's id, a line or two of summary, what you handed on and any new backlog,
     the members reclaimed in 7-1 and left in the first column,
     the members left in 4-3 because the work beside you held the file, with that other work
     named, and the wiki pages 7-4 changed — or that it changed none — and anything still

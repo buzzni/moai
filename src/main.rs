@@ -4,6 +4,7 @@
 //! `Result` 를 종료 코드로 바꾼다. 계산이 여기 있으면 나중에 TUI 도
 //! 같은 것을 다시 짜야 한다.
 
+mod archive;
 mod cli;
 mod cmd;
 mod config;
@@ -16,6 +17,7 @@ mod held;
 mod hook;
 mod i18n;
 mod id;
+mod init_choice;
 mod latest;
 mod mail;
 mod markdown;
@@ -152,6 +154,7 @@ fn main() -> ExitCode {
             // 무너지면 훅의 판정 앞에 남의 줄이 서고, 그러면 `claude` 가 판정째 버린다.
             carried();
             unjournaled();
+            noted();
             unread_journals();
             redirected(!quiet);
             print(&lines);
@@ -305,6 +308,31 @@ fn unjournaled() {
             style::paint(style::WARN, "moai: "),
             i18n::fill(i18n::say(lang, "warn.unjournaled"), &[("whose", &whose), ("why", &why)])
         );
+    }
+}
+
+/// 쓰기는 담겼고 **이력도 남았는데** 덧붙일 말이 있으면 말한다(moai-bth3 리뷰, `store::write_notes`) — 되살린 뒤
+/// 아카이브 정리가 진 것, 새 id 를 못 읽은 아카이브 파일과 견주지 못한 것.
+///
+/// [`unjournaled`] 의 글("썼지만 이력은 못 남겼다")로 내던 판은 남은 이력을 잃었다고 말했다 — 그 말을 믿은 쪽은
+/// 멀쩡한 메모를 다시 적는다. 종료 코드는 안 바꾼다: 쓰기는 담겼다. **같은 말은 한 번만 낸다** — 탐색기는 한
+/// 프로세스에서 여러 번 쓰고, 같은 아카이브 파일을 쓸 때마다 대면 끝에 같은 줄이 쌓인다.
+fn noted() {
+    let notes = store::write_notes();
+    if notes.is_empty() {
+        return;
+    }
+    let here = store::Repo::find(said_lang).ok().flatten().map(|r| r.root);
+    let mut said = std::collections::BTreeSet::new();
+    for (root, note) in notes {
+        if !said.insert((root.clone(), note.clone())) {
+            continue;
+        }
+        let whose = match &here {
+            Some(h) if *h == root => String::new(),
+            _ => format!(" ({})", root.display()),
+        };
+        let _ = writeln!(anstream::stderr().lock(), "{}{note}{whose}", style::paint(style::WARN, "moai: "));
     }
 }
 

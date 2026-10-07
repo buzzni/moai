@@ -332,8 +332,8 @@ impl Index {
         match issues[at].kind {
             Kind::Milestone => Seg::Milestone(Some(issues[at].id.clone())),
             Kind::Epic => Seg::Epic(issues[at].id.clone()),
-            // idea 는 묶음이 아니다 — 일과 같은 자리에 잎으로 선다.
-            Kind::Issue | Kind::Idea => Seg::Issue(issues[at].id.clone()),
+            // backlog 는 묶음이 아니다 — 일과 같은 자리에 잎으로 선다.
+            Kind::Issue | Kind::Backlog => Seg::Issue(issues[at].id.clone()),
         }
     }
 
@@ -616,8 +616,8 @@ impl<'a> Ctx<'a> {
             Kind::Milestone => Vec::new(),
             // 에픽은 제 마일스톤 밑에. 마일스톤을 안 쓰는 저장소면 뿌리에.
             Kind::Epic => self.under_milestone_of(me),
-            // idea 는 대개 에픽 없이 산다 — 에픽 없는 일과 같은 자리다.
-            Kind::Issue | Kind::Idea => self.home_of_work(at),
+            // backlog 는 대개 에픽 없이 산다 — 에픽 없는 일과 같은 자리다.
+            Kind::Issue | Kind::Backlog => self.home_of_work(at),
         }
     }
 
@@ -689,10 +689,10 @@ impl<'a> Ctx<'a> {
         let me = &self.issues[at];
         // 부모가 실재하고 **같은 에픽**이면 부모 밑에 접힌다. 에픽이 다르면
         // 제 에픽으로 간다 — 롤업이 세는 곳과 화면이 그리는 곳을 맞추기 위해서다.
-        // 부모로 설 수 있는 것은 **잎으로 서는 것** 전부다. idea 도 `seg_of`
-        // 와 `home` 에서 일과 같은 자리를 받으므로 여기서만 빼면, idea 밑에
+        // 부모로 설 수 있는 것은 **잎으로 서는 것** 전부다. backlog 도 `seg_of`
+        // 와 `home` 에서 일과 같은 자리를 받으므로 여기서만 빼면, backlog 밑에
         // 만든 자식이 부모를 잃고 뿌리로 떠오른다 — 그러면 `has_kids` 도
-        // 안 서서 그 idea 는 열리지도 않는다.
+        // 안 서서 그 backlog 는 열리지도 않는다.
         //
         // 생각인 부모는 **그려진 자리의 에픽**으로 견준다. 뿌리로 올라간 생각은
         // 에픽 없이 사는 자리고, 이슈 밑에 접힌 생각은 그 이슈의 에픽 안에 산다 —
@@ -701,7 +701,7 @@ impl<'a> Ctx<'a> {
         // 자리와 다를 때만 제 에픽으로 간다.
         if let Some(p) = crate::id::parent_of(&me.id)
             && let Some(&pat) = self.by_id.get(p)
-            && matches!(self.issues[pat].kind, Kind::Issue | Kind::Idea)
+            && matches!(self.issues[pat].kind, Kind::Issue | Kind::Backlog)
         {
             // **부모가 사는 자리를 그대로 쓴다.** `home_of_work` 로 곧장
             // 내려가면 부모가 제 참조 때문에 `(길 잃음)` 으로 갈라진 것을
@@ -709,7 +709,7 @@ impl<'a> Ctx<'a> {
             // 에픽에서와 같은 실패다.
             let mut path = self.home(pat);
             let rooted_thought =
-                crate::report::is_idea(&self.issues[pat]) && !matches!(path.last(), Some(Seg::Issue(_)));
+                crate::report::is_backlog(&self.issues[pat]) && !matches!(path.last(), Some(Seg::Issue(_)));
             let passed = if rooted_thought { None } else { self.epic_at(&self.issues[pat]) };
             // **뿌리로 올라간 생각은 안 접는다**(리뷰 moai-mibi.ndh 9번) — `report` 가 정한 그대로 묻는다.
             // 제 에픽을 적은 생각이 갈린 부모 쌍둥이 밑에 서면 뒷줄 하나로 견준 이 자리만 파일 차례로
@@ -729,8 +729,8 @@ impl<'a> Ctx<'a> {
         //
         // **세는 쪽은 못 바꾼다.** 진행률이 생각을 세기 시작하면 담을수록 그
         // 묶음이 덜 끝난 것으로 보인다. 그래서 자리를 맞춘다. 소속은 필드로
-        // 그대로 남아 `moai show --type idea -e <에픽>` 이 찾아낸다.
-        if crate::report::is_idea(me) {
+        // 그대로 남아 `moai show --type backlog -e <에픽>` 이 찾아낸다.
+        if crate::report::is_backlog(me) {
             return if self.has_milestones { vec![Seg::Milestone(None)] } else { Vec::new() };
         }
         match self.epic_at(me) {
@@ -935,7 +935,7 @@ mod tests {
             done,
             epic_of("argos-0005", "argos-0002"),
             done_child,
-            make("argos-0005.bb2", Kind::Idea),
+            make("argos-0005.bb2", Kind::Backlog),
             own_milestone,
             epic_of("argos-0008", "argos-zzzz"),
             make("argos-0010", Kind::Issue),
@@ -972,9 +972,9 @@ mod tests {
             epic,
             make("argos-0003", Kind::Epic),
             epic_of("argos-0004", "argos-0002"),
-            make("argos-0004.aa1", Kind::Idea),  // 멤버 밑에 접힌 생각
-            make("argos-0004.bb2", Kind::Issue), // 멤버의 자식 — 에픽을 물려받는다
-            make("argos-0002.in", Kind::Epic),   // `moai epic add --parent argos-0002`
+            make("argos-0004.aa1", Kind::Backlog), // 멤버 밑에 접힌 생각
+            make("argos-0004.bb2", Kind::Issue),   // 멤버의 자식 — 에픽을 물려받는다
+            make("argos-0002.in", Kind::Epic),     // `moai epic add --parent argos-0002`
             elsewhere,
             make("argos-0009", Kind::Issue), // 마일스톤이 있으니 `(마일스톤 없음)` 에 선다
         ];
@@ -1093,12 +1093,12 @@ mod tests {
     /// 견주므로, 제 에픽을 적은 자식은 그 생각의 에픽이 아니라 제 에픽으로 간다.
     #[test]
     fn a_child_of_a_folded_thought_stays_in_its_epic() {
-        let mut thought_in_epic = make("argos-0005", Kind::Idea);
+        let mut thought_in_epic = make("argos-0005", Kind::Backlog);
         thought_in_epic.epic = Some("argos-0002".into());
         let issues = vec![
             make("argos-0002", Kind::Epic),
             epic_of("argos-0004", "argos-0002"),
-            make("argos-0004.aa1", Kind::Idea),          // 이슈 밑에 접힌 생각
+            make("argos-0004.aa1", Kind::Backlog),       // 이슈 밑에 접힌 생각
             make("argos-0004.aa1.bb2", Kind::Issue),     // 에픽을 안 적은 자식
             epic_of("argos-0004.aa1.cc3", "argos-0002"), // 같은 에픽을 적은 자식
             thought_in_epic,                             // 뿌리로 올라간 생각
@@ -1126,7 +1126,7 @@ mod tests {
             i.milestone = Some(stone.into());
             i
         };
-        let mut rooted_thought = own("argos-0006", Kind::Idea, "argos-0001");
+        let mut rooted_thought = own("argos-0006", Kind::Backlog, "argos-0001");
         rooted_thought.epic = Some("argos-0003".into()); // 에픽이 v0.1 이 아니다 → 뿌리로
         let issues = vec![
             make("argos-0001", Kind::Milestone),
@@ -1135,7 +1135,7 @@ mod tests {
             own("argos-0004", Kind::Issue, "argos-0001"),
             own("argos-0004.aa1", Kind::Issue, "argos-0002"), // 부모 밑에 접힌다
             own("argos-0004.aa1.bb2", Kind::Issue, "argos-0002"), // 손자도
-            own("argos-0004.cc3", Kind::Idea, "argos-0002"),  // 이슈 밑에 접힌 생각
+            own("argos-0004.cc3", Kind::Backlog, "argos-0002"), // 이슈 밑에 접힌 생각
             own("argos-0004.cc3.dd4", Kind::Issue, "argos-0002"), // 그 밑의 일
             rooted_thought,
             own("argos-0006.ee5", Kind::Issue, "argos-0001"), // 뿌리로 올라간 생각 밑
@@ -1224,7 +1224,7 @@ mod tests {
         for _ in 0..3000 {
             let mut issues: Vec<Issue> = Vec::new();
             for n in 0..(2 + roll(12)) {
-                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Idea][roll(6)];
+                let kind = [Kind::Milestone, Kind::Epic, Kind::Epic, Kind::Issue, Kind::Issue, Kind::Backlog][roll(6)];
                 // 중복 id 도 섞는다 — 머지를 잘못 푼 파일은 이 도구가 거부하지 않고
                 // 드러내기만 하는 실재 상태(`duplicate_id`)고, 같은 id 의 에픽 줄
                 // 둘이 멤버를 두 번 그린 것(moai-sfml)은 이 더미가 그런 줄을 안
@@ -1265,10 +1265,10 @@ mod tests {
             i
         };
         let issues = vec![
-            with("argos-0000", Kind::Idea, None, None),
+            with("argos-0000", Kind::Backlog, None, None),
             with("argos-0001", Kind::Milestone, Some("argos-zzzz"), None),
             with("argos-0002", Kind::Epic, None, Some("argos-0000")),
-            with("argos-0003", Kind::Idea, Some("argos-0002"), None),
+            with("argos-0003", Kind::Backlog, Some("argos-0002"), None),
             with("argos-0000", Kind::Milestone, None, Some("argos-zzzz")),
             with("argos-0005", Kind::Epic, None, None),
             with("argos-0006", Kind::Epic, None, Some("argos-0003")),
@@ -1295,7 +1295,7 @@ mod tests {
         // 남으면, 그 이슈가 적지도 않은 에픽 밑에 그려지고 세어진다.
         let issues = vec![
             make("argos-0001", Kind::Epic),
-            with("argos-0002", Kind::Idea, Some("argos-0001"), None),
+            with("argos-0002", Kind::Backlog, Some("argos-0001"), None),
             make("argos-0002", Kind::Issue),
         ];
         let index = Index::of(&issues);
@@ -1395,12 +1395,12 @@ mod tests {
         let mut done = epic_of("argos-0004", "argos-0001");
         done.status = Status::new("done");
         // 이슈 밑에 접힌 생각 — 자리로는 에픽 밑에 걸리지만 일이 아니다.
-        let idea = make("argos-0005.aa1", Kind::Idea);
+        let backlog = make("argos-0005.aa1", Kind::Backlog);
         let issues = vec![
             make("argos-0001", Kind::Epic),
             done,
             epic_of("argos-0005", "argos-0001"),
-            idea,
+            backlog,
             make("argos-0002", Kind::Epic),
         ];
         let index = Index::of(&issues);
@@ -1507,8 +1507,8 @@ mod tests {
     /// 그 생각을 부모의 뒷줄 밑에 접었다 말았다 해 파일 차례로 자리가 뒤집혔다. 그 자식은 뿌리에 선
     /// 생각 밑에 접힌다. 두 차례를 다 잰다.
     #[test]
-    fn an_idea_torn_between_twin_parents_stands_at_the_root() {
-        let mut thought = make("argos-0010.t01", Kind::Idea);
+    fn an_backlog_torn_between_twin_parents_stands_at_the_root() {
+        let mut thought = make("argos-0010.t01", Kind::Backlog);
         thought.epic = Some("argos-0002".into());
         for (a, b) in [("argos-0001", "argos-0002"), ("argos-0002", "argos-0001")] {
             let issues = vec![

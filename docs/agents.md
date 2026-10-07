@@ -13,7 +13,7 @@ flags are in [the CLI reference](cli.md), and the words in
 ## Tell the agent how the tracker works
 
 `moai init` writes a managed block into `AGENTS.md`: every command an agent needs
-and the three forks it meets (create or idea, defer or done, split into an epic or
+and the three forks it meets (create or backlog, defer or done, split into an epic or
 not). The block sits between `<!-- moai:begin … -->` and `<!-- moai:end -->`, and
 only the block is rewritten — your own prose around it stays, and the issues and
 the journal are never touched.
@@ -27,6 +27,38 @@ the journal are never touched.
   block is stale — written by another binary (build again, then `init`) or edited
   by hand (`init` throws that edit away). `moai init --check` answers `current`,
   `stale` or `missing` and writes nothing
+
+### Where the guide goes
+
+The first `moai init` in a terminal asks, and `--guide` says it without asking:
+
+| `--guide` | What `init` writes | When to pick it |
+|---|---|---|
+| `block` | the whole guide inside the `AGENTS.md` block | what `init` has always done, and still does when a script or an agent runs it |
+| `file` | the guide in `.moai/guide.md`, and a few lines in the block that point at it | `AGENTS.md` is yours and you want it short — the screen's pick for a committed tracker |
+| `hook` | nothing in `AGENTS.md`; the hooks tell Claude instead | the tracker is kept out of git — the screen's pick there |
+| `none` | nothing (`--no-agents`) | you hand the guide over some other way |
+
+- **`file` keeps one way to the text everywhere.** The link names
+  `moai init --print` as well, so a clone that lacks the file still gets the same
+  guide from the binary. `--check` and `moai status` measure the link and the file
+  both. Linked worktrees read the guide from the main tracker. A clone with no
+  tracker uses the `--print` fallback without a false hand-edit notice; once the
+  tracker exists, a missing or edited guide reads as stale and `init` writes it again.
+  The link ends in a hash of the guide it points at, so a guide another version of
+  moai wrote reads as that binary's, not as a hand edit — rebuild before you plant it again
+- **`hook` needs the hooks installed**, so `init` installs them with it
+  (`moai skill install --scope local`) and refuses `--no-skill` beside it. The
+  first prompt of a session then carries the board and one line saying the usage
+  is in the `moai` skill. That line appears in any checkout whose `AGENTS.md` has
+  no moai block, and only there
+- **Nothing records which one you picked.** Run again, `init` reads it from the
+  block — a link means `file`, any other moai block means `block`, and that block is
+  kept current even in a tracker kept out of git. These checks run on the first
+  initialization too, so a clone keeps an existing link. With no block, installed
+  moai hooks mean `hook`, and a plain rerun leaves those hooks installed without
+  calling the installer again. Otherwise a tracker kept out of git is left without
+  a block and a committed one gets the block
 
 ## Plant the skills
 
@@ -81,15 +113,15 @@ have reads `—`: tell the person and go on.
 
 Four skills come with it:
 
-    moai              the tracker itself — what to pick up, issues, plans, ideas
-    moai-supervise    hands piled-up ideas to the workers waiting on the repository
+    moai              the tracker itself — what to pick up, issues, plans, backlog items
+    moai-supervise    hands piled-up backlog items to the workers waiting on the repository
     moai-wiki         keeps this wiki in step with the work
-    moai-work         makes a window a worker that waits for those ideas
+    moai-work         makes a window a worker that waits for those backlog items
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
 - **`moai-supervise`** makes a session the [supervisor](glossary.md#supervisor),
-  which hands the [ideas](glossary.md#idea), one at a time, to the
+  which hands the [backlog items](glossary.md#backlog), one at a time, to the
   [workers](glossary.md#worker) waiting on the same repository and takes their
   reports. It picks, sends and checks; it does not fix and it does not merge
 - **`moai-work`** makes a window a worker: it waits for a supervisor's letter and
@@ -271,7 +303,7 @@ gets through — run it as given. None of them waits on a person except rule 5.
 1. **New issues stay inside what you picked up.** While an agent holds work (its
    [focus](glossary.md#focus)), a `moai add` must land in the same
    [epic](glossary.md#epic) (`-e <epic>`) or under the held issue
-   (`--parent <id>`). Something for later goes in as `moai idea add`, which this
+   (`--parent <id>`). Something for later goes in as `moai backlog add`, which this
    rule never stops; nor does it stop a whole plan created with `moai add --from`
 2. **Pick something up before you change the repository.** A file edit
    (`Edit`, `Write`, Codex's `apply_patch`, Antigravity's file-writing tools) or
@@ -412,19 +444,19 @@ runs one headless, and nobody needs tmux.
    with `moai inbox --ack --wait`. Each wait that runs out costs one short turn of
    tokens before it waits again
 2. **Make the supervisor.** In one window, call `moai-supervise`. It says
-   `moai hello --role supervisor`, picks ideas that do not collide with the work
+   `moai hello --role supervisor`, picks backlog items that do not collide with the work
    open, finds the waiting workers with `moai agents --role worker --status idle`
-   and sends each one idea as a letter
-3. **The letter carries the assignment only** — the idea, the model and
+   and sends each one backlog as a letter
+3. **The letter carries the assignment only** — the backlog, the model and
    difficulty picked for it, the work running alongside, the base branch, the
    milestone, the root, whether to wait again or end the turn after the report,
    and whether the person is away. The steps are in the worker's skill
-4. **The worker does the work in a worktree** — unfolds the idea into an epic,
+4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
    picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
    reviewed inside its own session, merges, closes, leaves a `Next:` note and,
    last of all, reports with `moai send`
 5. **The supervisor checks the report** — the merge is on the base branch, the
-   epic is done, the worktree is gone — and sends the next idea
+   epic is done, the worktree is gone — and sends the next backlog
 
 **The review runs inside the worker's own session** — `/code-review` in Claude
 Code, the review the session has in Codex and Antigravity, or the worker reading
@@ -602,4 +634,19 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   the parent, or pass `--as` with a name of the subagent's own to `moai inbox`
   and `moai send` — a subagent does not say `moai hello`
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp
+
+## Archive storage
+
+`moai archive --dry-run` previews closed bundles and `moai archive` moves them
+into `.moai/archive/<year>.jsonl`. It is an explicit maintenance command: normal
+writes keep using the active snapshot. Milestones stay live. Statistics, search,
+`show <id>`, `show --archived` and the explorer can read archive files too.
+
+Reopening with `moai mv <id> todo --from done` restores only the selected row.
+Its former bundle remains archived. `moai defer <id> --undo` on an archived row
+brings it back the same way — a member reopened under an archived deferred epic
+stays out of the plan until that epic is undone, and `mv` names it (moai-b6w3).
+Archived IDs stay reserved, and `status`
+reports IDs duplicated across storage files. `init` installs the archive merge
+attributes alongside the active snapshot's rule (moai-fx9t).

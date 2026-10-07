@@ -154,7 +154,7 @@ impl Decision {
     ///
     /// **"안 막는다" 를 `== Pass` 로 읽지 않는다.** `Context` 가 생기기 전에 선 자리가 그렇게 읽어,
     /// 옆 워크트리와 겹쳐 본 판정이 비추기만 하는데도 막힌 것으로 쳐서 낡은 스냅샷의 거절을 도로
-    /// 냈다(moai-dw63.e31) — `idea add` 하나를 곁들인 명령줄이 이미 집은 일을 집으라고 막혔다.
+    /// 냈다(moai-dw63.e31) — `backlog add` 하나를 곁들인 명령줄이 이미 집은 일을 집으라고 막혔다.
     pub fn blocks(&self) -> bool {
         matches!(self, Decision::Deny(_) | Decision::Block(_))
     }
@@ -185,13 +185,28 @@ impl Decision {
 ///
 /// 머리말(`hook.lead`)은 말묶음에서 온다(moai-8d49) — 보드만 실으면 그것이 무엇을 하라는
 /// 뜻인지가 안 붙는데, 그 한 줄만 한국어로 박혀 있으면 영어 화면의 보드가 두 말로 답한다.
-pub fn board(lines: &[String], lang: Lang) -> Decision {
+///
+/// **사용법이 어디 있는지** 한 줄을 더할 수 있다 — `unguided` 는 그 체크아웃의 AGENTS.md 에 moai 블록이
+/// 없다는 뜻이다(moai-6pld). 트래커를 git 밖에 두고 AGENTS.md 를 안 건드린 저장소에서는 이 훅이 에이전트가
+/// moai 를 아는 유일한 길이라, 사용법을 든 스킬을 댄다. 블록이 있는 저장소에는 안 싣는다 — 같은 말을 두 번
+/// 하는 것은 첫 프롬프트마다 치르는 값이다.
+pub fn guided_board(lines: &[String], lang: Lang, unguided: bool) -> Decision {
     // 싣기 전에 색을 걷는다. 까닭은 `style::plain` 에 있다.
     let body = crate::style::plain(&lines.join("\n"));
     if body.trim().is_empty() {
         return Decision::Pass;
     }
-    Decision::Context(format!("{}\n\n{body}", say(lang, "hook.lead")))
+    let lead = match unguided {
+        true => format!("{}\n{}", say(lang, "hook.lead"), say(lang, "hook.unguided")),
+        false => say(lang, "hook.lead").to_string(),
+    };
+    Decision::Context(format!("{lead}\n\n{body}"))
+}
+
+/// 블록이 선 체크아웃의 보드 — 시험이 이 모양으로 부른다.
+#[cfg(test)]
+pub fn board(lines: &[String], lang: Lang) -> Decision {
+    guided_board(lines, lang, false)
 }
 
 /// Claude Code 가 훅의 글 한 칸(`additionalContext`, 평문 stdout)에 싣는 상한 — 1만 자다(리뷰 moai-h8tn.x4l,
@@ -1350,7 +1365,7 @@ impl<'a> Line<'a> {
     ///
     /// 토막을 가르는 데 네 가지를 같이 해야 한다. 넷 다 실제로 틀려 본 자리다.
     ///
-    /// - **제목이 동사로 오해받지 않아야 한다.** `moai add "idea 정리"` 의 `idea`
+    /// - **제목이 동사로 오해받지 않아야 한다.** `moai add "backlog 정리"` 의 `backlog`
     ///   는 제목이지 하위 명령이 아니다.
     /// - **이어 붙인 명령을 버리지 않아야 한다.** `;`·`&&`·`|` 에서 잘라 버리던
     ///   판은 `cd /repo && moai add "딴 일"` 하나로 규칙을 통째로 지나갔다.
@@ -3444,7 +3459,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
         /// 그 줄이다. 맨 위의 `clash_by!` 가 뭉치를 풀기 **전에** 낱말을 통째로 견주니 `-ff` 한
         /// 낱말은 이 표에 그대로 적을 수 있다. 못 드는 것은 같은 뜻을 두 낱말로 쓴 `-f -f` 와
         /// 뭉쳐 쓴 `-cff` 다 — 진짜 strace 는 그 둘도 `-ff` 와 한 뜻으로 막는데, 뭉치 고리는
-        /// 글자를 셀 뿐 **몇 번** 섰는지를 안 든다. 그 축은 idea moai-qqd7 로 남긴다.
+        /// 글자를 셀 뿐 **몇 번** 섰는지를 안 든다. 그 축은 backlog moai-qqd7 로 남긴다.
         exclusive: &'static [(&'static [&'static str], &'static [&'static str])],
     }
     /// 감싸는 명령의 **뒤 낱말이 명령인가** — 셋으로 갈린다.
@@ -3907,10 +3922,10 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // 풀기 **전에** 낱말을 통째로 견주니 `-ff` 한 낱말이 그대로 걸리고, 두 낱말로 쓴
             // `-f -f` 는 글자마다 `-f` 로만 견줘져 여기 안 걸린다.
             //
-            // **남는 것은 두 낱말로 쓴 꼴이다**(idea moai-qqd7) — `strace -c -f -f` 와
+            // **남는 것은 두 낱말로 쓴 꼴이다**(backlog moai-qqd7) — `strace -c -f -f` 와
             // `strace -cff` 도 진짜 strace 는 막는다(같은 날 쟀다 — `-f` 가 두 번 선 것이라
             // `-ff` 와 한 뜻이다). 한때 이 자리에 `-f -f` 는 정말 돈다고 적었는데 틀린 말이었다.
-            // 그 둘을 들려면 글자가 **몇 번** 섰는지를 세야 하고, 그것이 그 idea 의 축이다.
+            // 그 둘을 들려면 글자가 **몇 번** 섰는지를 세야 하고, 그것이 그 backlog 의 축이다.
             exclusive: &[
                 (&["-c", "--summary-only"], &["-C", "--summary"]),
                 (&["-c", "--summary-only", "-C", "--summary"], &["-ff", "--output-separately"]),
@@ -4230,7 +4245,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
             // 없어 안 먹는 쪽에 맞춘다 — 남은 자리는 `parallel --max-lines 5 <쓰기>` 고, 그
             // 쓰기가 아직 안 보인다. 이 칸으로 옮긴 것은 붙여 쓴 꼴(`=5`)을 위해서지 그 자리를
             // 고친 것이 아니다.
-            // **`--shebang`·`--hashbang` 은 여기가 아니라 [`Wrapper::stops`] 다**(idea moai-sdq0,
+            // **`--shebang`·`--hashbang` 은 여기가 아니라 [`Wrapper::stops`] 다**(backlog moai-sdq0,
             // 리뷰가 옮겼다) — 그 둘이 서면 parallel 은 뒤 낱말을 돌릴 명령이 아니라 **읽을
             // 입력 파일**로 본다. 여기 두던 판은 "답이 옛 판과 같다" 고 적었는데 그렇지 않았다:
             // `free` 는 값 붙은 꼴을 거절하는 자리에 서고 여기는 안 서서, `parallel --shebang=1
@@ -4258,7 +4273,7 @@ fn wrapped(head: &str, rest: &[String], spot: &mut bool) -> Option<Wrapped> {
                 "--numberofcpus",
                 "--numberofsockets",
                 "--numberofthreads",
-                // **`--shebang`·`--hashbang` 도 여기다**(idea moai-sdq0, 리뷰가 옮겼다) — 그 둘이
+                // **`--shebang`·`--hashbang` 도 여기다**(backlog moai-sdq0, 리뷰가 옮겼다) — 그 둘이
                 // 서면 parallel 은 뒤 낱말을 돌릴 명령이 아니라 읽을 **입력 파일**로 본다.
                 // 2026-09-23 에 GNU parallel 20231122 으로 쟀다: `parallel --shebang /bin/echo RAN
                 // ::: x` 도 `--shebang=1` 도 `Cannot open input file 'x'` 로 지고 명령은 안 돈다.
@@ -5635,34 +5650,34 @@ fn positionals(args: &[String]) -> Vec<&str> {
 /// `moai add` 와 `moai issue add` 는 같은 일이다. 앞의 것만 보던 판은 뒤의
 /// 것을 그냥 보냈다 — 같은 연산의 두 철자가 다르게 움직이면, 규칙을 아는
 /// 쪽은 그것을 우회로로 쓰고 모르는 쪽은 왜 한 번은 막히고 한 번은 안
-/// 막히는지 모른다. `idea add` 는 여기서도 자유롭다.
+/// 막히는지 모른다. `backlog add` 는 여기서도 자유롭다.
 ///
-/// **`add --type idea` 도 `idea add` 와 같은 연산이다.** 앞의 것만 풀어 주던
+/// **`add --type backlog` 도 `backlog add` 와 같은 연산이다.** 앞의 것만 풀어 주던
 /// 판은 뒤의 것을 생성으로 읽어 막았다 — 위와 같은 까닭의 반대쪽이다. 종류를
-/// 고정한 네임스페이스(`issue add --type idea`)는 고정한 쪽이 이기므로
+/// 고정한 네임스페이스(`issue add --type backlog`)는 고정한 쪽이 이기므로
 /// (`add::run` 의 `kind_override.or(args.kind)`) 그대로 생성이다.
 ///
-/// **`idea promote -e <에픽>` 도 생성이다**(moai-f3ml.lm7). 새 에픽을 세우는 promote 는
+/// **`backlog promote -e <에픽>` 도 생성이다**(moai-f3ml.lm7). 새 에픽을 세우는 promote 는
 /// 그 자체로 한 단위라 자유롭지만, `-e` 는 이미 선 에픽에 멤버를 넣는다 — 안 보면
-/// `idea add` 뒤에 `promote -e <남의 에픽>` 으로 `add -e <남의 에픽>` 이 막히는 자리를 지나간다.
+/// `backlog add` 뒤에 `promote -e <남의 에픽>` 으로 `add -e <남의 에픽>` 이 막히는 자리를 지나간다.
 fn creates(seg: &Seg) -> bool {
     let Some(args) = moai_args(seg) else { return false };
     let verbs = positionals(args);
     match verbs.first().copied() {
-        Some("add") => !adds_idea(args, &verbs),
+        Some("add") => !adds_backlog(args, &verbs),
         Some("issue" | "epic" | "milestone") => verbs.get(1).copied() == Some("add"),
-        Some("idea") => promotes_into(seg),
+        Some("backlog" | "idea") => promotes_into(seg),
         _ => false,
     }
 }
 
-/// `idea add` 나 `add --type idea` — **생각을 담는** 두 철자. [`creates`] 는 이것을 풀어 주고
+/// `backlog add` 나 `add --type backlog` — **생각을 담는** 두 철자. [`creates`] 는 이것을 풀어 주고
 /// [`sets_aside`] 는 이것을 비춘다. 둘이 따로 세던 판은 한쪽에만 철자를 더하면 그 철자가 막히지도
 /// 비치지도 않고 지나가는 자리였다 — 한 셈을 둘이 나눠 쓴다.
-fn adds_idea(args: &[String], verbs: &[&str]) -> bool {
+fn adds_backlog(args: &[String], verbs: &[&str]) -> bool {
     match verbs.first().copied() {
-        Some("idea") => verbs.get(1).copied() == Some("add"),
-        Some("add") => flag_values(args, &["--type"]).last().map(String::as_str) == Some("idea"),
+        Some("backlog" | "idea") => verbs.get(1).copied() == Some("add"),
+        Some("add") => matches!(flag_values(args, &["--type"]).last().map(String::as_str), Some("backlog" | "idea")),
         _ => false,
     }
 }
@@ -5695,11 +5710,12 @@ fn flag_words(args: &[String]) -> impl Iterator<Item = &str> {
     })
 }
 
-/// 선 에픽에 멤버로 펼치는 `idea promote -e` 인가. `--from` 을 늘 들고 오므로 `--from` 을
+/// 선 에픽에 멤버로 펼치는 `backlog promote -e` 인가. `--from` 을 늘 들고 오므로 `--from` 을
 /// 한 단위로 읽어 풀어 주는 자리에서 이것만은 빼야 한다.
 fn promotes_into(seg: &Seg) -> bool {
     let Some(args) = moai_args(seg) else { return false };
-    positionals(args).get(..2) == Some(&["idea", "promote"][..]) && !flag_values(args, &["-e", "--epic"]).is_empty()
+    matches!(positionals(args).get(..2), Some(["backlog" | "idea", "promote"]))
+        && !flag_values(args, &["-e", "--epic"]).is_empty()
 }
 
 /// 지금 집고 있는 것에 매인 단위들 — 그 이슈 자신, 그 에픽, 그 마일스톤, 그 부모.
@@ -5762,6 +5778,9 @@ fn in_unit<'a>(unit: &BTreeSet<&str>, ties: &report::Ties<'a>, i: &'a Issue) -> 
 /// 이름으로 띄운 워크트리에서도 쥐었다(moai-m62u) — 그 세션의 초점이 비어 규칙 2 에 막혔다.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Away {
+    /// 규칙 5 가 산 스냅샷에 없는 id 를 찾는 아카이브(moai-bth3) — **읽는 손은 `cmd/hook.rs` 가 건넨다**([`Archive`]).
+    /// 이 모듈은 저장소를 안 읽는다는 결정(모듈 머리) 그대로다. 집는 id 가 산 스냅샷에 없을 때만 부른다.
+    pub archive: Option<Archive>,
     /// 옆 워크트리들의 이름 후보(`worktree::away`) — 그 줄 자신, 그 밑의 자식, 그 에픽·마일스톤에
     /// 든 줄을 가리킨다.
     pub names: BTreeSet<String>,
@@ -5783,6 +5802,21 @@ pub struct Away {
     /// **모르면 가르지 않는다**(`report::by_owner` 와 같은 약속). **푸는 것은 묻는 자리다**([`Person`]) —
     /// 줄의 담당을 실제로 가르는 규칙만 부른다.
     pub me: Person,
+}
+
+/// 아카이브를 찾는 손 — 그 트래커의 뿌리와, 뿌리를 받아 아카이브의 줄을 내는 함수. 함수는 `cmd/hook.rs` 가 대므로 이
+/// 모듈에는 파일을 여는 자리가 안 선다(`real_path` 하나라는 결정, 모듈 머리). 시험은 파일 없이 줄을 내는 함수를 댄다.
+#[derive(Debug, Clone)]
+pub struct Archive {
+    pub root: PathBuf,
+    pub read: fn(&Path) -> Vec<Issue>,
+}
+
+/// 같은 뿌리를 읽는 손은 같은 아카이브다 — 함수의 주소는 견줄 값이 아니다(코드 단위마다 갈린다).
+impl PartialEq for Archive {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
+    }
 }
 
 impl Away {
@@ -6186,9 +6220,9 @@ fn picked_ids(
 /// 규칙 1 — **집은 것 밖에 새 이슈를 세우지 않는다.**
 ///
 /// 초점 밖에 세우면 그 줄이 어느 일에서 나왔는지를 잃고, 에픽을 닫아도 남은
-/// 것이 어디 있는지 아무도 모른다. 지금 할 일이 아니면 `idea` 로 담는다 —
+/// 것이 어디 있는지 아무도 모른다. 지금 할 일이 아니면 `backlog` 로 담는다 —
 /// 그쪽은 이 규칙에서 언제나 자유롭다. 단 **그 에픽(없으면 그 일)이 내건 것이 이것 없이
-/// 안 이뤄지면 idea 가 아니다**(moai-l288) — 거절문이 그 자를 함께 댄다. 훅이 그것을
+/// 안 이뤄지면 backlog 가 아니다**(moai-l288) — 거절문이 그 자를 함께 댄다. 훅이 그것을
 /// 가를 수는 없으니 막지는 않고 말만 한다. "첫 칸에 두면 안 닫힌다" 는 에픽이 있을 때만
 /// 비친다 — 에픽 없는 일의 자식은 부모를 붙들지 않는다.
 ///
@@ -6233,7 +6267,7 @@ fn create_in<'a>(
     // 이 규칙이 지키려던 단 하나다. 토막마다 제 소속을 댄다
     // ([`tests::every_creating_segment_names_its_own_unit`] 이 그 뜻을 못박는다).
     let makes = line.used().enumerate().filter(|(k, _)| only(*k)).find(|(_, seg)| {
-        // `add` 만 본다. `idea add` 는 담는 자리고, `--from` 은 에픽과 그
+        // `add` 만 본다. `backlog add` 는 담는 자리고, `--from` 은 에픽과 그
         // 자식들을 한 단위로 세우는 자리라 새는 줄이 아니다.
         //
         // **`--from` 도 토큰으로 본다.** 글자로 찾으면 제목이 그 낱말을 담은
@@ -6285,7 +6319,7 @@ fn create_in<'a>(
     // **무엇이 내건 것인지는 갈림길 1 과 같은 자로 댄다 — 에픽이다.** "그 일" 로 적던 판은 집은
     // 이슈가 아니라 에픽이 필요로 하는 것(moai-1k17 이 그 모양)에서 갈림길 1 과 다른 답을 냈다.
     // 에픽이 없는 집은 일만 그 일 자신이다.
-    // 여럿 집어 에픽이 여럿이면 그 모두다 — idea add 에 비추는 줄([`aside_in`])과 같은 꼴이다.
+    // 여럿 집어 에픽이 여럿이면 그 모두다 — backlog add 에 비추는 줄([`aside_in`])과 같은 꼴이다.
     // 이름은 [`aside_in`] 의 같은 값과 맞춘다 — `aim` 으로 적던 판은 겨눌 트래커를 묻는 매개변수
     // (`aim: Toward`)를 이 자리에서 가려, 위의 `echo_moai(aim(at))` 를 한 줄만 내려도 안 되는 글이 됐다.
     let aims = epics.iter().chain(&loose).copied().collect::<Vec<_>>().join(", ");
@@ -6312,7 +6346,7 @@ fn create_in<'a>(
         });
     // **첫 칸에 둔 줄이 일을 열어 두는 것은 에픽뿐이다** — 에픽의 칸은 멤버에서 읽지만, 에픽 없는
     // 일은 자식이 첫 칸에 있어도 그대로 닫힌다. 그때 "첫 칸에 두면 안 닫힌다" 를 비치면 거짓이다.
-    // 가리키는 줄도 이름으로 댄다 — "위의 줄" 바로 위가 `idea add` 줄이고, idea 도 첫 칸에 선다.
+    // 가리키는 줄도 이름으로 댄다 — "위의 줄" 바로 위가 `backlog add` 줄이고, backlog 도 첫 칸에 선다.
     // **에픽 있는 일과 없는 일을 함께 쥐었으면 둘 다 댄다** — 첫 것만 보던 판은 에픽 없는 일의 경고를
     // 말없이 뺐다(리뷰 moai-ju21.70g).
     let mut keep = Vec::new();
@@ -6333,8 +6367,8 @@ fn create_in<'a>(
          Create it inside that unit, or park it if it belongs outside. An issue created\n\
          outside the focus loses which work it came out of.\n\
          {into_epic}{under}{fresh}\
-         \x20 {moai} idea add '<title>'              park it if it is not for now\n\
-         If {aims} {pledge}, it is not an idea — even when you cannot do it now,\n\
+         \x20 {moai} backlog add '<title>'              park it if it is not for now\n\
+         If {aims} {pledge}, it is not a backlog item — even when you cannot do it now,\n\
          {keep}"
         ),
     )
@@ -7519,7 +7553,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // 읽히지만([`exec_of`]), 이 넷은 돌 명령이 없고 파일 하나가 곧 답이라 여기가 자리다.
             // 2026-09-23 에 쟀다: `find . -maxdepth 0 -fprint src/y.rs` 는 그 파일을 정말 만든다.
             //
-            // **`-execdir` 만 선 줄에서는 `off_site` 가 이것까지 버린다**(idea moai-ujfx) —
+            // **`-execdir` 만 선 줄에서는 `off_site` 가 이것까지 버린다**(backlog moai-ujfx) —
             // find 은 이 파일을 **부른 자리**에 만들지 찾은 파일의 디렉터리에 만들지 않는다
             // (2026-09-23 에 쟀다: `find /tmp -maxdepth 0 -execdir true \; -fprint src/w.rs` 는
             // 여기에 만든다). 그런데 [`Cmd::elsewhere`] 는 줄 하나에 한 값이라, find 의 `*spot`
@@ -7569,7 +7603,7 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         // 뒤로 띄운 것은 제 셸에서 돌고 끝난다. 여기만 그 둘을 안 보던 판은 `{ cd /tmp; } & sed -i
         // src/x.rs` 의 뒤 쓰기를 "어디인지 모른다" 며 버려, 집기 없는 쓰기가 샜다. 괄호는 `seg.low`
         // 가 나올 때 걷어 주지만 `{ … } &` 에는 괄호가 없다. `aimed` 는 이미 `sub` 를 읽는다
-        // (idea moai-9abk 가 그 어긋남을 적어 둔 자리다).
+        // (backlog moai-9abk 가 그 어긋남을 적어 둔 자리다).
         if matches!(head, Some("cd" | "pushd" | "popd")) && !seg.sub && !seg.bg {
             open(&mut moved, seg.depth);
         }
@@ -7874,8 +7908,14 @@ fn take_in(
             None => away.me.get().cloned(),
         };
         let Some(me) = me else { continue };
+        // **아카이브는 산 스냅샷에 없는 id 를 집을 때만 읽는다**(moai-bth3) — 되살리는 `mv` 도 집기라, 안 보면 남의 것이나
+        // 담당 없는 아카이브 줄이 묻지 않고 넘어간다. 읽는 손은 `cmd/hook.rs` 의 것이다([`Archive`]).
+        let archived: Vec<Issue> = match (ids.iter().any(|id| !issues.iter().any(|i| i.id == *id)), &away.archive) {
+            (true, Some(a)) => (a.read)(aim(k).and_then(Aimed::standing).unwrap_or(&a.root)),
+            _ => Vec::new(),
+        };
         let Some((row, owner)) = ids.iter().find_map(|id| {
-            let row = issues.iter().find(|i| i.id == *id)?;
+            let row = issues.iter().find(|i| i.id == *id).or_else(|| archived.iter().find(|i| i.id == *id))?;
             report::owner(&me, row).map(|o| (row, o))
         }) else {
             continue;
@@ -7970,21 +8010,21 @@ fn live_epics(all: &[Issue]) -> BTreeSet<&str> {
     all.iter().filter(|g| g.kind == crate::model::Kind::Epic).map(|g| g.id.as_str()).collect()
 }
 
-/// 이 토막이 **생각을 담는가** — [`adds_idea`] 의 두 철자. 도움말은 아무것도 안 담는다.
+/// 이 토막이 **생각을 담는가** — [`adds_backlog`] 의 두 철자. 도움말은 아무것도 안 담는다.
 fn sets_aside(seg: &Seg) -> bool {
     let Some(args) = moai_args(seg) else { return false };
-    adds_idea(args, &positionals(args)) && !asks_help(args)
+    adds_backlog(args, &positionals(args)) && !asks_help(args)
 }
 
 /// 규칙 1 의 옆짝 — **에픽 일을 집은 채 생각을 담으면 갈림길 1 의 둘째 물음을 비춘다**(moai-d4e0).
 ///
 /// 둘째 물음은 `moai add` 의 거절문에만 실렸는데, 실제로 틀리는 자리는 말없이 지나가는
-/// `idea add` 다 — moai-1k17 의 세션은 곧장 그쪽으로 갔다. **막지 않는다**: 에픽이 내건 것인지는
-/// 훅이 못 가르고, idea 는 이 규칙에서 언제나 자유롭다.
+/// `backlog add` 다 — moai-1k17 의 세션은 곧장 그쪽으로 갔다. **막지 않는다**: 에픽이 내건 것인지는
+/// 훅이 못 가르고, backlog 는 이 규칙에서 언제나 자유롭다.
 ///
 /// **이 줄은 생각이 이미 담긴 뒤에 읽힌다.** `PreToolUse` 의 `additionalContext` 는 도구 결과 곁에
 /// 붙는다 — 막지 않으니 명령은 돌고, 모델은 그 다음 요청에서 읽는다. 그래서 새로 세우라고 하지 않고
-/// 담은 것을 되찾는 길(`idea promote -e`)을 댄다. `moai add -e` 를 대던 판은 시킨 대로 치면 같은
+/// 담은 것을 되찾는 길(`backlog promote -e`)을 댄다. `moai add -e` 를 대던 판은 시킨 대로 치면 같은
 /// 것이 에픽 멤버와 담아 둔 생각으로 둘이 섰다. 담은 토막이 `-C` 로 다른 자리를 가리켰으면 그 자리도
 /// 댄다 — 빼고 치면 되찾는 줄이 세션 자리의 트래커에서 헛돈다.
 ///
@@ -8012,9 +8052,9 @@ fn aside_in(
     let moai = echo_moai(aim(at).and_then(Aimed::standing), &seg.words);
     Decision::Context(format!(
         "The second question of fork 1 — can {} deliver what it promised without the thought you just parked? \
-         If not, it is not an idea but this work, unfinished.\n\
+         If not, it is not a backlog item but this work, unfinished.\n\
          Then, even if you cannot do it now, reclaim it as a member of that epic with \
-         `{moai} idea promote <that id> -e {first} --from -` and leave it in the first column — left outside, the \
+         `{moai} backlog promote <that id> -e {first} --from -` and leave it in the first column — left outside, the \
          epic closes without delivering what it promised.",
         aims.join(", ")
     ))
@@ -8731,8 +8771,8 @@ fn shown(at: &Path, root: &Path, typed: &str) -> String {
 /// `moai mv t-r done -m"반영"` 처럼 옳게 친 명령이 막힌다.
 ///
 /// **`--` 뒤는 플래그가 아니다.** clap 은 그 뒤를 자리 인자로 받는다 — 여기서
-/// 계속 훑으면 `moai add -- --type=idea` 가 `idea` 로 읽혀 지나가는데, 실제로는
-/// 제목이 `--type=idea` 인 이슈가 선다.
+/// 계속 훑으면 `moai add -- --type=backlog` 가 `backlog` 로 읽혀 지나가는데, 실제로는
+/// 제목이 `--type=backlog` 인 이슈가 선다.
 fn flag_values(seg: &[String], flags: &[&str]) -> Vec<String> {
     let mut out = Vec::new();
     let mut parts = seg.iter().peekable();
@@ -9639,7 +9679,7 @@ mod tests {
         }
         // **`&` 로 띄운 묶음은 아직 못 가른다** — 렉서가 `&` 와 `;` 를 한 이음사(`Op::Any`)로 읽어,
         // `집기 || { …; exit 1; } & 쓰기` 의 `exit` 가 제 하위 셸만 끝내는 것을 여기서 모른다.
-        // 그 줄은 지금 지나간다(샌다). 흔한 꼴이 아니라 적어 두고 idea 로 넘긴다(moai-ncay 의 노트).
+        // 그 줄은 지금 지나간다(샌다). 흔한 꼴이 아니라 적어 두고 backlog 로 넘긴다(moai-ncay 의 노트).
     }
 
     /// **훅이 싣는 글은 건네받은 말로 선다**(moai-8d49). 화면 기본이 영어가 된 뒤로(moai-bn1j)
@@ -10796,7 +10836,7 @@ mod tests {
             "find /repo/src -execdir bash -c 'sed -i s/a/b/ x' \\;",
             // 바깥의 감싸는 명령이 자리를 안 옮기면 그대로다.
             "sudo find /repo/src -execdir tee x \\;",
-            // **`-fprint` 는 부른 자리에 만든다**(idea moai-ujfx) — 이 줄은 이제 자리를 잃었다고 안
+            // **`-fprint` 는 부른 자리에 만든다**(backlog moai-ujfx) — 이 줄은 이제 자리를 잃었다고 안
             // 적으니, 옛 판이 함께 버리던 그 파일도 여기 것으로 본다.
             "find /repo/src -execdir true \\; -fprint src/w.rs",
             "find /tmp -execdir true \\; -fprint src/w.rs",
@@ -11370,19 +11410,24 @@ mod tests {
     }
 
     /// **에픽 일을 집은 채 생각을 담으면 둘째 물음을 비춘다 — 막지 않는다**(moai-d4e0). 거절문에만
-    /// 실으면 실제로 틀리는 자리인 `idea add` 는 말없이 지나간다.
+    /// 실으면 실제로 틀리는 자리인 `backlog add` 는 말없이 지나간다.
     #[test]
-    fn setting_an_idea_aside_mid_epic_hears_the_second_question() {
+    fn setting_an_backlog_aside_mid_epic_hears_the_second_question() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
         let root = Path::new("/repo");
-        for cmd in ["moai idea add '떠오른 것'", "cd /repo && moai add --type idea \"떠오른 것\""] {
+        for cmd in [
+            "moai backlog add '떠오른 것'",
+            "moai idea add '떠오른 것'",
+            "moai add --type backlog x",
+            "moai add --type idea x",
+        ] {
             let Decision::Context(said) = guard_shell(&all, &cfg(), &here(), root, root, cmd) else {
                 panic!("안 비춘다 — {cmd}");
             };
             assert!(said.contains("can t-e deliver what it promised"), "{said}");
             // **이 줄은 생각이 담긴 뒤에 읽힌다** — 새로 세우라고 하면 같은 것이 둘 선다(moai-dw63.e31).
             assert!(
-                said.contains("moai idea promote <that id> -e t-e --from -"),
+                said.contains("moai backlog promote <that id> -e t-e --from -"),
                 "담은 것을 되찾는 줄을 안 댄다\n{said}"
             );
             assert!(!said.contains("moai add '<title>'"), "담긴 생각 곁에 같은 것을 또 세우라고 한다\n{said}");
@@ -11391,13 +11436,13 @@ mod tests {
         // 친 글자가 아니라 푼 자리다(moai-v9sa).
         let at = Path::new("/repo/sub");
         let all_of = Segs { judges: &|_| true, picks: &|_| true };
-        let aside = guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. idea add \"x\"", &all_of, &|_| {
+        let aside = guard_shell_in(&all, &cfg(), &here(), root, root, "moai -C .. backlog add \"x\"", &all_of, &|_| {
             Some(Aimed::stands(at))
         });
         let Decision::Context(said) = aside else {
             panic!("안 비춘다 — {aside:?}");
         };
-        assert!(said.contains("moai -C /repo/sub idea promote <that id> -e t-e"), "{said}");
+        assert!(said.contains("moai -C /repo/sub backlog promote <that id> -e t-e"), "{said}");
 
         // 집은 것이 없거나, 에픽 없는 일이거나, 도움말이면 조용하다. **에픽 줄이 실제로 안 선
         // 참조**도 조용하다 — 닫힐 에픽이 없고, 그 id 로 되찾게 하면 경고가 하나 는다.
@@ -11406,13 +11451,13 @@ mod tests {
         let not_an_epic = vec![issue("t-x", "todo"), under("t-1", "in_progress", "t-x")];
         let dangling = vec![under("t-1", "in_progress", "t-gone")];
         for (all, cmd) in [
-            (&loose, "moai idea add '떠오른 것'"),
-            (&idle, "moai idea add '떠오른 것'"),
-            (&not_an_epic, "moai idea add '떠오른 것'"),
-            (&dangling, "moai idea add '떠오른 것'"),
-            (&all, "moai idea add --help"),
-            (&all, "moai idea ls"),
-            (&all, "moai note t-1 \"idea add 를 적는다\""),
+            (&loose, "moai backlog add '떠오른 것'"),
+            (&idle, "moai backlog add '떠오른 것'"),
+            (&not_an_epic, "moai backlog add '떠오른 것'"),
+            (&dangling, "moai backlog add '떠오른 것'"),
+            (&all, "moai backlog add --help"),
+            (&all, "moai backlog ls"),
+            (&all, "moai note t-1 \"backlog add 를 적는다\""),
         ] {
             assert_eq!(guard_shell(all, &cfg(), &here(), root, root, cmd), Decision::Pass, "{cmd}");
         }
@@ -11420,7 +11465,7 @@ mod tests {
         // 에픽 둘을 쥐었으면 **집은 차례로** 댄다 — 규칙 1 의 거절문과 같은 에픽을 앞에 둔다.
         let two =
             vec![epic("t-z"), epic("t-a"), under("t-1", "in_progress", "t-z"), under("t-2", "in_progress", "t-a")];
-        let Decision::Context(said) = guard_shell(&two, &cfg(), &here(), root, root, "moai idea add 'x'") else {
+        let Decision::Context(said) = guard_shell(&two, &cfg(), &here(), root, root, "moai backlog add 'x'") else {
             panic!("안 비춘다");
         };
         assert!(said.contains("can t-z, t-a deliver what it promised") && said.contains("-e t-z --from -"), "{said}");
@@ -11428,7 +11473,7 @@ mod tests {
         assert!(denied(&refused).contains("-e t-z"), "두 글이 다른 에픽을 댄다\n{refused:?}");
 
         // **비추는 줄이 막는 것을 가리지 않는다** — 같은 명령줄의 규칙 1·3 이 먼저다.
-        for cmd in ["moai idea add 'a'; moai add '딴 일'", "moai idea add 'a' && /code-review high"] {
+        for cmd in ["moai backlog add 'a'; moai add '딴 일'", "moai backlog add 'a' && /code-review high"] {
             assert!(matches!(guard_shell(&all, &cfg(), &here(), root, root, cmd), Decision::Deny(_)), "{cmd}");
         }
     }
@@ -11680,7 +11725,7 @@ mod tests {
             for line in [
                 "moai -C /repo add '<title>' -e t-e",
                 "moai -C /repo add '<title>' --parent t-1",
-                "moai -C /repo idea add",
+                "moai -C /repo backlog add",
             ] {
                 assert!(why.contains(line), "{cmd} 가 겨눈 트래커를 안 댔다 — {line}\n{why}");
             }
@@ -11807,13 +11852,13 @@ mod tests {
         let why = denied(&guard_create(&all, &cfg(), &here(), "moai add '딴 일'")).to_string();
         assert!(why.contains("-e t-e"), "에픽을 안 가리킨다\n{why}");
         assert!(why.contains("--parent t-1"), "자식으로 다는 길이 없다\n{why}");
-        assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
-        // idea 로 가는 문만 열어 두면 에픽이 내건 것 자체도 그리로 나가 에픽이
+        assert!(why.contains("backlog add"), "담아 두는 길이 없다\n{why}");
+        // backlog 로 가는 문만 열어 두면 에픽이 내건 것 자체도 그리로 나가 에픽이
         // 목적을 못 이룬 채 닫힌다 (moai-l288).
         // 무엇이 내건 것인지는 갈림길 1 처럼 에픽으로 댄다 — 집은 이슈로 대면 에픽만 필요로
         // 하는 것에서 두 글이 다른 답을 낸다 (moai-dw63.gwf 4번).
-        assert!(why.contains("If t-e cannot deliver"), "idea 가 아닌 경우를 에픽으로 안 가른다\n{why}");
-        // 세울 줄은 이름으로 가리킨다 — "위의 줄" 바로 위가 `idea add` 줄이고 idea 도 첫 칸에 선다.
+        assert!(why.contains("If t-e cannot deliver"), "backlog 가 아닌 경우를 에픽으로 안 가른다\n{why}");
+        // 세울 줄은 이름으로 가리킨다 — "위의 줄" 바로 위가 `backlog add` 줄이고 backlog 도 첫 칸에 선다.
         assert!(
             why.contains("create it with the `moai add` line above and leave it in the first column"),
             "에픽이 내건 것을 세울 줄을 안 가리킨다\n{why}"
@@ -11822,16 +11867,24 @@ mod tests {
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add '안의 일' -e t-e"), Decision::Pass);
         assert_eq!(guard_create(&all, &cfg(), &here(), "moai add '자식' --parent t-1"), Decision::Pass);
 
-        // 선 에픽에 펼치는 promote 도 같은 자로 본다 — 안 보면 `idea add` 뒤 `promote -e` 가
+        // 선 에픽에 펼치는 promote 도 같은 자로 본다 — 안 보면 `backlog add` 뒤 `promote -e` 가
         // `add -e` 가 막히는 자리를 지나간다 (moai-f3ml.lm7). 새 에픽을 세우는 promote 는 그대로다.
-        let into = |e: &str| format!("moai idea promote t-i -e {e} --from -");
-        assert!(
-            matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)),
-            "남의 에픽에 promote 로 멤버를 세웠다"
-        );
-        assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
-        assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --epic=t-e --from -"), Decision::Pass);
-        assert_eq!(guard_create(&all, &cfg(), &here(), "moai idea promote t-i --from -"), Decision::Pass);
+        for command in ["backlog", "idea"] {
+            let into = |e: &str| format!("moai {command} promote t-i -e {e} --from -");
+            assert!(
+                matches!(guard_create(&all, &cfg(), &here(), &into("t-x")), Decision::Deny(_)),
+                "{command}: 남의 에픽에 promote 로 멤버를 세웠다"
+            );
+            assert_eq!(guard_create(&all, &cfg(), &here(), &into("t-e")), Decision::Pass);
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), &format!("moai {command} promote t-i --epic=t-e --from -")),
+                Decision::Pass
+            );
+            assert_eq!(
+                guard_create(&all, &cfg(), &here(), &format!("moai {command} promote t-i --from -")),
+                Decision::Pass
+            );
+        }
     }
 
     /// **만드는 토막은 저마다 소속을 댄다**(moai-ean3, 2026-09-19 사용자 결정) — 한 줄에 `moai add`
@@ -11841,7 +11894,7 @@ mod tests {
     ///
     /// `create_in` 이 **첫 만드는 토막만** 재던 자리다 — 리뷰 moai-ju21.70g 의 고침(0de7d49)이
     /// `find` 의 거르개를 토막마다 돌리면서 함께 닫혔고, 이 시험이 그 뜻을 못박는다. 자유로운 둘
-    /// (`idea add`·`add --from`)은 그대로 둔다.
+    /// (`backlog add`·`add --from`)은 그대로 둔다.
     #[test]
     fn every_creating_segment_names_its_own_unit() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -11855,9 +11908,9 @@ mod tests {
             "( moai add '안' -e t-e ); moai add '딴 일'",
             "moai add '안' -e t-e | tee log && moai add '딴 일'",
             // 자유로운 앞 토막도 뒤를 안 풀어 준다.
-            "moai idea add '떠오른 것' && moai add '딴 일'",
+            "moai backlog add '떠오른 것' && moai add '딴 일'",
             "moai add --from - && moai add '딴 일'",
-            "moai idea promote t-i --from - && moai add '딴 일'",
+            "moai backlog promote t-i --from - && moai add '딴 일'",
             // 세우는 철자가 달라도 같다.
             "moai add '안' -e t-e && moai issue add '딴 일'",
             "moai add '안' -e t-e && moai epic add '딴 에픽'",
@@ -11871,9 +11924,9 @@ mod tests {
         // 토막마다 소속을 댔으면 지나간다 — 규칙이 요구하는 것은 그것뿐이다.
         for cmd in [
             "moai add '안' -e t-e && moai add '또 안' --parent t-1",
-            "moai add '안' -e t-e && moai idea add '떠오른 것'",
+            "moai add '안' -e t-e && moai backlog add '떠오른 것'",
             "moai add '안' -e t-e && moai add '딴 일' --from -",
-            "moai add '안' -e t-e && moai add '떠오른 것' --type idea",
+            "moai add '안' -e t-e && moai add '떠오른 것' --type backlog",
         ] {
             assert_eq!(
                 guard_create(&all, &cfg(), &here(), cmd),
@@ -11899,7 +11952,7 @@ mod tests {
     #[test]
     fn asking_for_help_is_not_creating() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
-        for cmd in ["moai add --help", "moai add -h", "moai idea add --help"] {
+        for cmd in ["moai add --help", "moai add -h", "moai backlog add --help"] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "{cmd}");
         }
     }
@@ -11912,20 +11965,20 @@ mod tests {
     #[test]
     fn capturing_and_planning_stay_free() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
-        for cmd in ["moai idea add '떠오른 것'", "moai add --from -", "moai add --from plan.md --dry-run"] {
+        for cmd in ["moai backlog add '떠오른 것'", "moai add --from -", "moai add --from plan.md --dry-run"] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "{cmd}");
         }
     }
 
     /// 동사를 **자리로** 읽는다. 글자로 찾던 판은 메모를 생성으로 보아 막고,
-    /// 제목에 `idea` 가 든 생성은 반대로 통과시켰다.
+    /// 제목에 `backlog` 가 든 생성은 반대로 통과시켰다.
     #[test]
     fn the_verb_is_a_position_not_a_word() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
         for free in ["moai note t-1 \"add 는 나중에\"", "moai show -g add", "moai mv t-1 done"] {
             assert_eq!(guard_create(&all, &cfg(), &here(), free), Decision::Pass, "{free}");
         }
-        assert!(matches!(guard_create(&all, &cfg(), &here(), "moai add 'idea 정리'"), Decision::Deny(_)));
+        assert!(matches!(guard_create(&all, &cfg(), &here(), "moai add 'backlog 정리'"), Decision::Deny(_)));
     }
 
     /// **줄바꿈도 토막을 가른다.** 갈래는 적혀 있었지만 그 앞의 공백 갈래가
@@ -11983,20 +12036,20 @@ mod tests {
             "moai milestone add 'v0.2'",
             "moai add '딴 일' --type epic",
             // 종류를 고정한 쪽이 이긴다 — 이것은 이슈를 만든다.
-            "moai issue add \"딴 일\" --type idea",
+            "moai issue add \"딴 일\" --type backlog",
             // 제목에 든 낱말은 플래그가 아니다.
-            "moai add '--type idea'",
-            // `--` 뒤는 제목이다 — 이슈 `--type=idea` 가 선다.
-            "moai add -- --type=idea",
+            "moai add '--type backlog'",
+            // `--` 뒤는 제목이다 — 이슈 `--type=backlog` 가 선다.
+            "moai add -- --type=backlog",
         ] {
             assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "샜다 — {cmd}");
         }
         // 담아 두는 것은 그 어느 철자로도 자유다.
         for cmd in [
-            "moai idea add '떠오른 것'",
-            "moai add '떠오른 것' --type idea",
-            "moai add --type=idea \"떠오른 것\"",
-            "moai --json add --type idea \"떠오른 것\"",
+            "moai backlog add '떠오른 것'",
+            "moai add '떠오른 것' --type backlog",
+            "moai add --type=backlog \"떠오른 것\"",
+            "moai --json add --type backlog \"떠오른 것\"",
         ] {
             assert_eq!(guard_create(&all, &cfg(), &here(), cmd), Decision::Pass, "막혔다 — {cmd}");
         }
@@ -12269,7 +12322,7 @@ mod tests {
             assert!(matches!(guard_create(&all, &cfg(), &here(), cmd), Decision::Deny(_)), "지나갔다 — {cmd}");
         }
         // 뒷토막이 담아 두는 것이면 그대로 지나간다.
-        assert_eq!(guard_create(&all, &cfg(), &here(), "cd /repo && moai idea add '떠오른 것'"), Decision::Pass);
+        assert_eq!(guard_create(&all, &cfg(), &here(), "cd /repo && moai backlog add '떠오른 것'"), Decision::Pass);
 
         assert!(calls_review("cd /repo && /code-review high"));
     }
@@ -12285,9 +12338,9 @@ mod tests {
         assert!(!why.contains("-e t-1"), "이슈를 에픽이라고 가리킨다\n{why}");
         assert!(!why.contains("-e "), "없는 에픽을 대라고 한다\n{why}");
         assert!(why.contains("--parent t-1"), "자식으로 다는 길이 없다\n{why}");
-        assert!(why.contains("idea add"), "담아 두는 길이 없다\n{why}");
+        assert!(why.contains("backlog add"), "담아 두는 길이 없다\n{why}");
         // 에픽 없는 일의 자식은 부모를 안 붙든다 — 첫 칸에 두면 그 일이 안 닫힌다고 비치지 않는다.
-        assert!(why.contains("it is not an idea"), "일이 이것 없이 안 끝나는 경우를 안 가른다\n{why}");
+        assert!(why.contains("it is not a backlog item"), "일이 이것 없이 안 끝나는 경우를 안 가른다\n{why}");
         assert!(
             !why.contains("leave it in the first column"),
             "에픽 없는 일에 자식이 그 일을 열어 둔다고 비친다\n{why}"
@@ -12993,6 +13046,14 @@ mod tests {
     #[test]
     fn an_empty_board_says_nothing() {
         assert_eq!(board(&[]), Decision::Pass);
+        // AGENTS.md 에 블록이 없는 체크아웃에는 사용법이 어디 있는지 한 줄을 더 싣는다(moai-6pld).
+        let lang = crate::i18n::Lang::En;
+        let Decision::Context(bare) = guided_board(&["todo 3".into()], lang, true) else { panic!("실어야 한다") };
+        assert!(bare.contains(say(lang, "hook.unguided")), "{bare}");
+        let Decision::Context(plain) = guided_board(&["todo 3".into()], lang, false) else {
+            panic!("실어야 한다")
+        };
+        assert!(!plain.contains(say(lang, "hook.unguided")), "{plain}");
         assert_eq!(board(&["   ".into()]), Decision::Pass);
     }
 
@@ -14172,7 +14233,7 @@ mod tests {
             "su -c 'sed -i s/a/b/ /repo/src/x.rs' 남 -l",
             // **`-c` 없는 `-f -f` 는 정말 돈다** — `-ff` 와 한 뜻이지만 막는 짝이 안 섰다.
             // (`-c` 가 함께 선 꼴은 진짜 strace 도 막는데, 두 낱말로 쓴 것은 이 표가 못 든다 —
-            // idea moai-qqd7.)
+            // backlog moai-qqd7.)
             "strace -f -f sed -i s/a/b/ /repo/src/x.rs",
         ] {
             let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
@@ -14221,7 +14282,7 @@ mod tests {
     /// `cannot specify --null (-0) with command` 로 아무것도 안 돌린다. 짧은 `-0` 도 같아
     /// [`Wrapper::stops`] 로 옮겼다.
     ///
-    /// **`parallel --shebang` 은 [`Wrapper::stops`] 다**(idea moai-sdq0, 리뷰가 옮겼다) —
+    /// **`parallel --shebang` 은 [`Wrapper::stops`] 다**(backlog moai-sdq0, 리뷰가 옮겼다) —
     /// 맨 꼴도 붙여 쓴 꼴도 뒤 낱말을 **입력 파일**로 읽어 아무 명령도 안 돌린다.
     #[test]
     fn a_valueless_long_name_with_a_glued_value_stops_every_line() {
@@ -14250,7 +14311,7 @@ mod tests {
             "nice --verbose=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             "setsid --debug=1 moai mv t-1 in_progress --from todo && sed -i s/a/b/ src/store.rs",
             // **`--shebang` 은 뒤 낱말을 입력 파일로 읽는다** — 맨 꼴도 붙여 쓴 꼴도 명령을
-            // 안 돌린다(idea moai-sdq0, 2026-09-23 에 GNU parallel 20231122 으로 쟀다).
+            // 안 돌린다(backlog moai-sdq0, 2026-09-23 에 GNU parallel 20231122 으로 쟀다).
             "parallel --shebang=1 moai mv t-1 in_progress --from todo ::: x && sed -i s/a/b/ src/store.rs",
             "parallel --hashbang moai mv t-1 in_progress --from todo ::: x && sed -i s/a/b/ src/store.rs",
         ] {
@@ -14378,7 +14439,7 @@ mod tests {
     /// **차례가 감싸는 명령마다 다르다**(2026-09-22 에 쟀다 — sudo 로 su 를 불러 찍어 봤다).
     /// `bash -c '<글>' NAME A B` 는 `$0`=NAME·`$1`=A 이고, `su -c '<글>' <사용자> A B` 는 su 가
     /// 사용자를 제 것으로 먹어 `$0`=A 다. `su <사용자> -c '<글>' A B` 도 같은 답이다. 그래서
-    /// 원래 idea 가 적은 `su -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 사실 `$1` 이 비어 있다.
+    /// 원래 backlog 가 적은 `su -c 'sed -i s/a/b/ "$1"' 남 src/x.rs` 는 사실 `$1` 이 비어 있다.
     ///
     /// **따옴표를 가린다** — `'$1'` 은 안 풀리고 `"$1"` 은 풀린다. 글자로 바꿔치기하면 그 둘이
     /// 안 갈려 안 풀릴 것을 풀고, 아무도 안 고치는 파일을 고친다며 **잘못 막는다**.

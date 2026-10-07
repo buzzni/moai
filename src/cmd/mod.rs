@@ -5,10 +5,11 @@
 
 pub mod add;
 pub mod agents;
+pub mod archive;
+pub mod backlog;
 pub mod defer;
 pub mod edit;
 pub mod hook;
-pub mod idea;
 pub mod init;
 pub mod link;
 pub mod mail;
@@ -27,7 +28,7 @@ pub mod status;
 pub mod tui;
 pub mod wiki;
 
-use crate::cli::{Cli, Cmd, IdeaCmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
+use crate::cli::{BacklogCmd, Cli, Cmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
 use crate::model::Kind;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -120,7 +121,7 @@ impl Ctx {
 
     /// 화면에 얹을 시간대 — **아직 안 푼 채로** 준다(moai-s3i7). `view::Screen` 이 시각을 실제로
     /// 그릴 때에만 풀리므로, 화면을 짓기만 하고 시각을 안 그리는 `ready`·`prime`·`show`(목록)·
-    /// `idea ls` 는 tzdb 를 안 만지고 [`Ctx::zone_trouble`] 줄도 안 낸다. 시간대를 셈에 쓰는
+    /// `backlog ls` 는 tzdb 를 안 만지고 [`Ctx::zone_trouble`] 줄도 안 낸다. 시간대를 셈에 쓰는
     /// 자리(`report::status` 의 기한 판정, `show` 와 `show --removed` 의 날로 친 때 거르개 —
     /// `query::Filter::needs_zone`)는 여전히 [`Ctx::zone`] 으로 바로 푼다 — 그 목록은 그때만 tzdb 를 만진다.
     pub fn clock(&self) -> &crate::tz::System {
@@ -280,6 +281,10 @@ pub fn note_partial() {
 pub fn had_partial() -> bool {
     PARTIAL.load(Ordering::Relaxed)
 }
+/// 깃발을 거두며 그때까지의 값을 낸다 — 이어 부른 명령의 부분 실패를 제 종료 코드에 안 싣는 자리(`init`)가 쓴다.
+pub fn take_partial() -> bool {
+    PARTIAL.swap(false, Ordering::Relaxed)
+}
 
 /// 제 저장소를 읽고, `worktree` 면 다른 워크트리를 겹친다(`worktree::gather`).
 ///
@@ -370,7 +375,9 @@ pub fn report_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, error
     if errors.is_empty() {
         return;
     }
-    note_partial();
+    if errors.iter().any(|e| e.source.is_none()) {
+        note_partial();
+    }
     name_load_errors(lang, path, errors);
 }
 
@@ -386,20 +393,38 @@ pub fn name_load_errors(lang: crate::i18n::Lang, path: &std::path::Path, errors:
     if errors.is_empty() {
         return;
     }
-    let at = path.display().to_string();
-    tell(&fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
-    name_capped(lang, errors, |e| {
-        // **그 줄이 쓰는 id 도 댄다**(리뷰 moai-mo9v.1ln) — 산 줄의 깨진 쌍둥이는 번호만으로는 어느 것인지
-        // 모르고, 보드의 `duplicate_id` 가 그 id 를 대며 이 화면으로 보낸다. 둘 다 파일에서 온 글이라
-        // 제어문자를 걷는다(`text::one_line`): 까닭(`why`)은 serde 가 모르는 값을 그대로 옮겨 적는다.
-        let id = e.id.as_deref().map(|id| format!(" ({})", crate::text::one_line(id))).unwrap_or_default();
-        let why = crate::text::one_line(&e.message);
-        fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("id", &id), ("why", &why)])
-    });
-    // 번호를 대고 끝내면 사람은 그 번호로 편집기를 연다 — 도구 안의 길을 곁에 댄다(moai-mo9v.3yp). **둘
-    // 까닭이 없는 줄에만 댄다**(리뷰 moai-mo9v.1ln): 새 바이너리가 쓴 줄도 여기 서는데, 그 줄은 들고 가는
-    // 것이 설계다 — 글이 그 둘을 가른다. 이 자리는 줄의 뜻을 판단하지 않는다.
-    tell(say(lang, "warn.unreadable_rm"));
+    // **파일마다 제 머리 밑에 댄다**(moai-bth3) — 아카이브 파일의 줄을 산 파일의 머리 밑에 그 파일의 번호로 대면,
+    // `moai rm --line <n>` 이 산 파일의 엉뚱한 줄을 겨눈다. 자리(`source`)가 없는 것이 산 파일이고, 그 파일이 맨 뒤다.
+    let mut sources = std::collections::BTreeMap::<Option<&std::path::Path>, Vec<&crate::store::LoadError>>::new();
+    for e in errors {
+        sources.entry(e.source.as_deref()).or_default().push(e);
+    }
+    let active = sources.remove(&None);
+    let groups = sources.into_iter().chain(active.map(|errors| (None, errors)));
+    for (source, errors) in groups {
+        // 자리도 파일 이름이라 남이 커밋한 글자다 — 제어문자를 걷는다(`text::one_line`).
+        let at = crate::text::one_line(&source.unwrap_or(path).display().to_string());
+        tell(&fill(say(lang, "warn.unreadable_file"), &[("at", &at), ("n", &errors.len().to_string())]));
+        name_capped(lang, &errors, |e| {
+            // 파일째 못 읽은 것은 줄 번호가 없다(`line` 0) — 까닭 하나만 댄다.
+            if e.line == 0 {
+                return crate::text::one_line(&e.message);
+            }
+            // **그 줄이 쓰는 id 도 댄다**(리뷰 moai-mo9v.1ln) — 산 줄의 깨진 쌍둥이는 번호만으로는 어느 것인지
+            // 모르고, 보드의 `duplicate_id`·`archive_duplicate_id` 가 그 id 를 대며 이 화면으로 보낸다. 둘 다 파일에서
+            // 온 글이라 제어문자를 걷는다(`text::one_line`): 까닭(`why`)은 serde 가 모르는 값을 그대로 옮겨 적는다.
+            let id = e.id.as_deref().map(|id| format!(" ({})", crate::text::one_line(id))).unwrap_or_default();
+            let why = crate::text::one_line(&e.message);
+            fill(say(lang, "warn.unreadable_at"), &[("line", &e.line.to_string()), ("id", &id), ("why", &why)])
+        });
+        // 번호를 대고 끝내면 사람은 그 번호로 편집기를 연다 — 도구 안의 길을 곁에 댄다(moai-mo9v.3yp). **둘
+        // 까닭이 없는 줄에만 댄다**(리뷰 moai-mo9v.1ln): 새 바이너리가 쓴 줄도 여기 서는데, 그 줄은 들고 가는
+        // 것이 설계다 — 글이 그 둘을 가른다. 이 자리는 줄의 뜻을 판단하지 않는다. **산 파일에만 댄다** — `rm --line`
+        // 은 아카이브 파일을 고치지 않는다.
+        if source.is_none() {
+            tell(say(lang, "warn.unreadable_rm"));
+        }
+    }
 }
 
 /// 못 읽은 줄을 **다섯까지** 대고 나머지는 수로 접는다(`warn.unreadable_more`) — [`name_load_errors`] 와
@@ -461,8 +486,36 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // 붙여 넣을 글을 내는 길도 같은 이름 밑이다 — 까닭은 `init::print` 에 있다.
         Cmd::Init { print: true, .. } => init::print(ctx),
         // 필드를 다 적는다 — `..` 로 받으면 `init` 에 새 플래그를 더해도 여기서 조용히 버려진다.
-        Cmd::Init { prefix, no_agents, no_driver, check: false, print: false } => {
-            init::run(ctx, prefix.as_deref(), no_agents, no_driver)
+        Cmd::Init {
+            prefix,
+            no_agents,
+            driver,
+            no_driver,
+            tracking,
+            guide,
+            skill,
+            no_skill,
+            register,
+            no_register,
+            yes,
+            check: false,
+            print: false,
+        } => {
+            // 낱말은 clap 이 이미 골랐다 — 여기서 못 푸는 값은 오지 않는다.
+            let tracking = tracking.as_deref().and_then(crate::init_choice::Tracking::parse);
+            let guide = guide.as_deref().and_then(crate::init_choice::Guide::parse);
+            let guide = guide.or(no_agents.then_some(crate::init_choice::Guide::None));
+            // 짝 플래그는 clap 이 서로 막는다 — 둘 다 오는 일은 없다.
+            let pair = |on: bool, off: bool| if on { Some(true) } else { off.then_some(false) };
+            let flags = crate::init_choice::Flags {
+                prefix: prefix.as_deref(),
+                tracking,
+                guide,
+                driver: pair(driver, no_driver),
+                skill: pair(skill, no_skill),
+                register: pair(register, no_register),
+            };
+            init::run(ctx, &flags, yes)
         }
         Cmd::Hook { event, dialect } => hook::run(ctx, event, dialect),
         // **저장소를 안 찾는다** — git 이 주는 것은 임시 파일 셋이고, 답을 쓰는 자리도
@@ -481,6 +534,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Add(a) => add::run(ctx, a, None),
         Cmd::Show(a) => show::run(ctx, a, None),
         Cmd::Stats(a) => stats::run(ctx, a),
+        Cmd::Archive(a) => archive::run(ctx, a),
         Cmd::Mv(a) => mv::run(ctx, a),
         Cmd::Edit(a) => edit::run(ctx, a),
         Cmd::Rm(a) => rm::run(ctx, a),
@@ -496,9 +550,9 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Epic(t) => typed(ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
         // **공통 동사는 `typed()` 를 지난다**(moai-g33x) — 여기서 `add`·`show` 를 다시 적으면
-        // `Typed` 에 동사를 더하는 날 idea 만 조용히 안 따라온다.
-        Cmd::Idea(IdeaCmd::Common(t)) => typed(ctx, *t, Kind::Idea),
-        Cmd::Idea(IdeaCmd::Promote(a)) => idea::promote(ctx, a),
+        // `Typed` 에 동사를 더하는 날 backlog 만 조용히 안 따라온다.
+        Cmd::Backlog(BacklogCmd::Common(t)) => typed(ctx, *t, Kind::Backlog),
+        Cmd::Backlog(BacklogCmd::Promote(a)) => backlog::promote(ctx, a),
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
         // 우편함과 출석(moai-h8tn) — 트래커를 안 쓴다. 자리만 [`open_repo`] 로 찾는다.
@@ -557,7 +611,7 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     // **이 꼬리도 말묶음에서 온다**(리뷰) — 바로 위의 `status` 가 통째로 제 말로 나오는데
     // 여기만 한국어로 박혀 있으면, 세션이 가장 많이 치는 맨몸 `moai` 의 **마지막 줄**이
     // 화면과 다른 말로 선다. **키가 둘인 것은 AGENTS.md 를 댈지 말지가 여기서 정하는
-    // 것**이라서다 — 한 키에 넣으면 그 말에서만 빈 꼬리가 남는다(`warn.idea_pile` 과 같다).
+    // 것**이라서다 — 한 키에 넣으면 그 말에서만 빈 꼬리가 남는다(`warn.backlog_pile` 과 같다).
     let lang = ctx.lang();
     let tail = match here {
         true => crate::i18n::say(lang, "opening.commands_here"),
@@ -635,7 +689,7 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
 /// [`refuse_if_flag_like`] 를 부른 자리 — 거절문과 빠져나갈 길이 여기서 갈린다.
 #[derive(Clone, Copy)]
 pub enum FlagLike<'a> {
-    /// `add` 의 제목 자리 인자. 든 것은 부른 동사(`add`·`idea add`…)다 — `moai idea add -x` 에
+    /// `add` 의 제목 자리 인자. 든 것은 부른 동사(`add`·`backlog add`…)다 — `moai backlog add -x` 에
     /// `moai add -- -x` 를 대면 따라 친 사람이 생각 대신 보드에 선 이슈를 얻는다(리뷰).
     Title(&'a str),
     /// `edit <id> --title` 의 값.
@@ -668,7 +722,7 @@ pub fn json_line<T: serde::Serialize>(v: &T) -> R<Vec<String>> {
 /// 안 남는다. 덧붙이는 키도 없으니 한 객체에 같은 키가 둘 서지도 않는다.
 #[derive(serde::Serialize)]
 pub struct Row<'a> {
-    #[serde(flatten)]
+    #[serde(flatten, serialize_with = "surface_issue")]
     pub issue: std::borrow::Cow<'a, crate::model::Issue>,
     /// 줄이 **기본값이라 안 적은** 종류와 우선순위(moai-51it·moai-a4u9). 파일이 기본값을 안 적는
     /// 것은 1만 줄이 통째로 diff 에 뜨는 것을 막으려는 것이고, 그 침묵의 뜻은 파일을 쓰는 쪽만
@@ -709,6 +763,37 @@ pub struct Row<'a> {
     /// "지금 브랜치의 줄" 이다** — `derived_status` 와 같은 약속이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<&'a str>,
+}
+
+/// `Issue` serializes the shared file protocol. JSON rows use the surface spelling.
+/// Only backlog rows need a translated object; other rows keep the borrowed path.
+fn surface_issue<S: serde::Serializer>(issue: &crate::model::Issue, serializer: S) -> Result<S::Ok, S::Error> {
+    if issue.kind != Kind::Backlog {
+        return serde::Serialize::serialize(issue, serializer);
+    }
+    // Keep the file's field order (id first), including unknown nested fields.
+    // Going through a Value map would sort the top-level keys.
+    struct Surface<S>(S);
+    impl<'de, S: serde::Serializer> serde::de::Visitor<'de> for Surface<S> {
+        type Value = S::Ok;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("an issue object")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            use serde::ser::SerializeMap;
+            let mut out = self.0.serialize_map(None).map_err(serde::de::Error::custom)?;
+            while let Some((key, mut value)) = map.next_entry::<String, serde_json::Value>()? {
+                if key == "kind" {
+                    value = Kind::Backlog.as_str().into();
+                }
+                out.serialize_entry(&key, &value).map_err(serde::de::Error::custom)?;
+            }
+            out.end().map_err(serde::de::Error::custom)
+        }
+    }
+    let json = serde_json::to_string(issue).map_err(serde::ser::Error::custom)?;
+    serde::Deserializer::deserialize_map(&mut serde_json::Deserializer::from_str(&json), Surface(serializer))
+        .map_err(serde::ser::Error::custom)
 }
 
 /// **줄 하나의 `--json` 에 moai 가 덧붙이는 키 전부**(moai-qn5d) — 늘 붙이는 것도, 조건에 따라
@@ -943,17 +1028,75 @@ impl Read {
 /// 두고 줄 서는 저장소다 — 락 안에서 `ctx.lang()` 과 `model::actor` 를 뺀 것과 같은 까닭이다.
 /// `ready`·`status` 의 한눈 보기도 같은 문을 쓴다.
 pub fn read_of(issues: &[crate::model::Issue], cfg: &crate::config::Config, ids: &[&str], json: bool) -> Read {
-    let owned = |m: BTreeMap<&str, &str>| m.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     Read {
         states: crate::report::group_states_of(issues, cfg, ids)
             .into_iter()
             .map(|((kind, id), col)| (id.to_string(), (kind, col.to_string())))
             .collect(),
-        epics: match json {
-            true => owned(crate::report::handed_of(issues, ids)),
-            false => BTreeMap::new(),
-        },
+        epics: handed(issues, ids, json),
     }
+}
+
+/// 줄 id → 그 id 의 부모가 **넘기는** 에픽(`report::handed_of`)을 **제 문자열로** 챙긴다 — [`Read::epic`] 과 등록한
+/// 프로젝트의 한눈 보기(`status`·`ready` 의 `.moai` 밖)가 같은 문으로 걷는다. `--json` 이 아니면 안 걷는다([`read_of`]).
+///
+/// **제 문자열을 쥐는 까닭은 `issues` 가 문맥이라서다**(moai-kfjy) — 아카이브를 겹친 줄(`report::with_archive`)은 그
+/// 자리에서 지은 것이라 낼 줄보다 먼저 죽는다. 산 줄로만 짓던 한눈 보기는 옮겨 둔 에픽 밑에서 되살린 멤버를 에픽
+/// 없는 줄로 냈는데, 저장소 안의 `ready --json` 은 그 에픽을 댔다.
+pub fn handed(issues: &[crate::model::Issue], ids: &[&str], json: bool) -> BTreeMap<String, String> {
+    match json {
+        true => {
+            crate::report::handed_of(issues, ids).into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        }
+        false => BTreeMap::new(),
+    }
+}
+
+/// 쓰기가 참조를 잴 때 곁에 둘 **아카이브의 줄** — 참조가 산 줄 밖으로 닿을 때만 읽는다(moai-tzzt).
+///
+/// `moai archive` 가 옮긴 에픽·부모·막는 줄도 있는 줄이고, 보드는 그것을 문맥으로 읽어 멀쩡하다고 센다. 쓰기만
+/// 산 줄로 재던 판은 `add -e`·`edit -e` 에 "없는 에픽" 을 알리고 `--parent`·`link` 를 "없다" 로 거절했다. 읽는
+/// 길은 `mv` 와 하나다 — 락 안에서 [`crate::archive::read`] 로 읽고 [`in_context`] 가 겹친다. 닿는지는
+/// [`crate::archive::reaches_out`] 이 잰다: 늘 읽으면 `add -e` 마다 락을 쥔 채 아카이브 전부를 푼다.
+/// **되살리지 않는다** — 이 줄들은 판단에만 쓰이고, 쓰는 줄은 여전히 산 줄이다.
+pub fn archived_for(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    wanted: &[&str],
+) -> R<Vec<crate::model::Issue>> {
+    match crate::archive::reaches_out(issues, wanted) {
+        true => Ok(crate::archive::read(root)?.issues),
+        false => Ok(Vec::new()),
+    }
+}
+
+/// [`archived_for`] 에 더해 **고친 줄의 칸을 내는 쓰기**가 부른다 — 고친 줄 가운데 산 묶음이 있으면 늘 읽는다. 묶음의
+/// 칸은 멤버에서 읽는데(`read_of`), 되살린 묶음의 멤버는 아카이브에 남아 있다 — 산 줄로만 읽으면 보드가 done 으로 세는
+/// 그 묶음을 `--json` 의 `derived_status` 가 첫 칸으로 낸다. `mv` 가 묶음이면 늘 읽는 것([`crate::archive::needs_context`])과
+/// 같은 까닭이고, 참조만 재는 `add -e` 는 이 길을 안 지난다(그 묶음의 멤버를 안 읽는다).
+pub fn archived_with_groups(
+    root: &std::path::Path,
+    issues: &[crate::model::Issue],
+    rows: &[&str],
+) -> R<Vec<crate::model::Issue>> {
+    match issues.iter().any(|i| rows.contains(&i.id.as_str()) && crate::report::is_group(i)) {
+        true => Ok(crate::archive::read(root)?.issues),
+        false => archived_for(root, issues, rows),
+    }
+}
+
+/// 산 줄에 [`archived_for`] 의 줄을 겹친 문맥 — 보드와 같은 자([`crate::report::with_archive`])다. 산 줄이 이기고,
+/// 산 파일에 못 읽는 줄로 선 id 의 아카이브 사본은 안 겹친다. 겹칠 것이 없으면 산 줄을 그대로 빌린다.
+pub fn in_context<'a>(
+    issues: &'a [crate::model::Issue],
+    archived: &[crate::model::Issue],
+    unread: &[crate::store::LoadError],
+) -> std::borrow::Cow<'a, [crate::model::Issue]> {
+    if archived.is_empty() {
+        return std::borrow::Cow::Borrowed(issues);
+    }
+    let opaque: std::collections::BTreeSet<&str> = unread.iter().filter_map(|e| e.id.as_deref()).collect();
+    std::borrow::Cow::Owned(crate::report::with_archive(issues, archived, &opaque))
 }
 
 /// `--from` 이 받는 칸 — **아는 칸이거나, 어느 줄이 실제로 서 있는 칸**(moai-hym7).

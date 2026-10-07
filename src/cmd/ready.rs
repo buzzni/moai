@@ -19,6 +19,7 @@ pub fn run(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         return overview(ctx, worktree, limit);
     };
     let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, &repo, worktree)?;
+    let load = crate::archive::context(&repo.root, load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
 
     // **겹친 줄로 고른다.** 옆 워크트리에서 집은 일은 거기서 `in_progress` 로 서
@@ -135,7 +136,22 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 // **저장소 안의 `ready` 와 같은 자다.** 도는 마일스톤이 목록을 줄였으면 그
                 // 까닭도 함께 받는다 — 여기서 `ready` 만 부르면 한눈 보기의 목록만 말없이
                 // 짧아지고, 그 짧아짐이 "할 일이 없다" 로 읽힌다.
-                let (picks, focus) = report::ready_in(&load.issues, &repo.config);
+                //
+                // **문맥도 같다**(moai-bth3 리뷰) — 안쪽 `ready` 는 아카이브를 겹쳐 읽는다(`archive::context`). 여기만
+                // 산 줄로 고르면 옮겨 둔 멤버로 도는 마일스톤을 안 도는 것으로 읽어, 안쪽이 밖으로 미룬 일을 집을 것으로
+                // 내민다. 고른 줄은 다 산 줄이라(옮긴 줄은 닫혀 있다) 이 프로젝트의 줄로 되짚어 담는다.
+                let archived = crate::archive::read(&repo.root).map(|l| l.issues).unwrap_or_default();
+                let opaque: std::collections::BTreeSet<&str> =
+                    load.errors.iter().filter_map(|e| e.id.as_deref()).collect();
+                let context = report::with_archive(&load.issues, &archived, &opaque);
+                let (picks, focus) = report::ready_in(&context, &repo.config);
+                let live: std::collections::BTreeMap<&str, &crate::model::Issue> =
+                    load.issues.iter().map(|i| (i.id.as_str(), i)).collect();
+                let picks = live_rows(picks, &live);
+                let focus = report::Focus {
+                    running: live_rows(focus.running, &live),
+                    outside: live_rows(focus.outside, &live),
+                };
                 // **저장소 안과 같은 자로 가른다**(moai-0zjo) — 사람은 그 프로젝트의 뿌리에서 푼다.
                 // 여기서 안 가르면 한눈 보기가 남의 줄을 집을 것으로 내민다.
                 let me = if picks.is_empty() { None } else { super::me_at(ctx, &repo.root) };
@@ -145,12 +161,15 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                 // **지도는 기계 쪽만 짓는다**(리뷰) — `Picks::epics` 를 읽는 것은 `--json` 뿐인데,
                 // 여기서 늘 지으면 사람이 보는 한눈 보기가 등록한 프로젝트마다 저장소 전체의
                 // 소속을 한 벌씩 걷고 그대로 버린다.
-                let (epics, kinds) = match ctx.json {
-                    true => {
-                        let ids: Vec<&str> =
-                            picks.iter().chain(others.iter().map(|(i, _)| i)).map(|i| i.id.as_str()).collect();
-                        (report::handed_of(&load.issues, &ids), report::Kinds::of_ids(&load.issues, &ids))
-                    }
+                //
+                // **소속은 고른 문맥으로 짓는다**(moai-kfjy) — 저장소 안의 `ready` 와 같다. 산 줄로만 지으면 옮겨 둔
+                // 에픽 밑에서 되살린 멤버가 여기서만 에픽 없는 줄로 나온다. 가려진 줄을 가르는 지도는 산 줄로 짓는다:
+                // 물은 id 는 다 산 줄이고 문맥은 산 줄과 같은 id 의 아카이브 사본을 안 들여(`report::with_archive`)
+                // 답이 같다.
+                let ids: Vec<&str> = picks.iter().chain(others.iter().map(|(i, _)| i)).map(|i| i.id.as_str()).collect();
+                let epics = super::handed(&context, &ids, ctx.json);
+                let kinds = match ctx.json {
+                    true => report::Kinds::of_ids(&load.issues, &ids),
                     false => Default::default(),
                 };
                 view::Picks {
@@ -197,14 +216,15 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
                         .picks
                         .iter()
                         .map(|i| {
-                            super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).copied(), &k.kinds).on(&p.origin)
+                            super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).map(String::as_str), &k.kinds)
+                                .on(&p.origin)
                         })
                         .collect(),
                     others: k
                         .others
                         .iter()
                         .map(|(i, owner)| super::Other {
-                            row: super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).copied(), &k.kinds)
+                            row: super::Row::of(i, |_| None, k.epics.get(i.id.as_str()).map(String::as_str), &k.kinds)
                                 .on(&p.origin),
                             owner: *owner,
                         })
@@ -222,4 +242,13 @@ fn overview(ctx: &Ctx, worktree: bool, limit: Option<usize>) -> R<Vec<String>> {
         return super::json_line(&all);
     }
     Ok(view::projects_ready(&projects, &seen, reg, view::Screen::new(ctx.lang()).at(ctx.clock())))
+}
+
+/// 문맥(산 줄 + 아카이브)에서 고른 줄을 그 프로젝트의 산 줄로 되짚는다 — 한눈 보기의 그릇은 프로젝트가 든 줄을
+/// 빌린다. 고르는 줄은 늘 산 줄이라(옮긴 줄은 닫혀 있다) 빠지는 것이 없다.
+fn live_rows<'a>(
+    rows: Vec<&crate::model::Issue>,
+    live: &std::collections::BTreeMap<&str, &'a crate::model::Issue>,
+) -> Vec<&'a crate::model::Issue> {
+    rows.into_iter().filter_map(|i| live.get(i.id.as_str()).copied()).collect()
 }

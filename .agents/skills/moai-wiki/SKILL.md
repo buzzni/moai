@@ -167,6 +167,6 @@ Decided in: <epic>
 - **No page per epic.** Pages follow what a person does, not the order things were
   built in. The history is the tracker and the CHANGELOG
 - **No to-do list in the wiki.** Work not done goes into the tracker — `moai add`, or
-  `moai idea add` for later
+  `moai backlog add` for later
 - **No token counts.** What did the work and what it cost is a note on the issue,
   never a page — and never an estimate

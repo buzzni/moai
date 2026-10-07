@@ -84,6 +84,10 @@ pub struct Where<'a> {
     /// [`Where::from_soil`] 이 설정을 받아 옮기고, 탐색기의 거름망은 적재가 설정에서 옮겨 둔 값을 받는다
     /// (`tui::Ground::here`). 0 이면(`Where::default`) 아카이브가 없다.
     pub archive_days: i64,
+    /// `.moai/archive` 에서만 온 줄의 id — 산 줄이 없는 id 다(moai-bth3 리뷰). 시계와 상관없이 아카이브다
+    /// ([`crate::report::is_put_away`]): `archive_days` 를 0 으로 끄거나 늘려도 `--all` 에 돌아오지 않는다. 아카이브를
+    /// 겹쳐 읽은 쪽(`cmd::show`)이 싣고, 안 실었으면(`Where::default`) 시계만 본다.
+    pub stored: BTreeSet<&'a str>,
 }
 
 /// 이슈 id → 그 이슈에 붙은 노트 글들(`model::note_of` — `moai note` 의 글과 칸 옮김의 `-m`).
@@ -202,6 +206,7 @@ impl<'a> Where<'a> {
             notes: None,
             zone: None,
             archive_days: cfg.archive_days,
+            stored: BTreeSet::new(),
         }
     }
 
@@ -285,7 +290,8 @@ impl<'a> Where<'a> {
     /// [`Where::since`])로 읽어 [`crate::report::archived`] 에 댄다. `-s` 가 고른 칸과 `--done <폭>` 이 잰 때가
     /// 아카이브와 한 줄을 다르게 보지 않는다.
     pub fn archived(&self, i: &Issue, now: &str) -> bool {
-        crate::report::archived(self.column(i), self.since(i), now, self.archive_days)
+        let stored = self.stored.contains(i.id.as_str());
+        crate::report::is_put_away(self.column(i), self.since(i), now, self.archive_days, stored)
     }
 }
 
@@ -412,7 +418,7 @@ pub struct Filter {
     /// 담아 둔 생각까지 포함한다. **`all` 과 같은 자리의 축이다** — 기본으로
     /// 숨는 것을 도로 켜는 스위치가 둘이 되면, 켜는 쪽이 어느 것을 켰는지
     /// 매번 되짚어야 한다.
-    pub ideas: bool,
+    pub backlog: bool,
 }
 
 /// 거르개가 값을 거절한 까닭. **자료만 든다**(moai-2htt) — 말은 [`crate::view::bad_filter`] 가 고른 말로
@@ -548,7 +554,7 @@ pub struct Raw {
     pub all: bool,
     /// `--archived` — 아카이브까지 연다. done 도 연다(`all` 을 품는다).
     pub archived: bool,
-    pub ideas: bool,
+    pub backlog: bool,
     pub deferred: bool,
     pub filter: Vec<String>,
 }
@@ -558,8 +564,8 @@ pub struct Raw {
 pub enum Hide {
     /// `--all` 이 연다.
     Done,
-    /// `--type idea` 가 연다.
-    Idea,
+    /// `--type backlog` 가 연다.
+    Backlog,
     /// `--deferred` 가 연다.
     Deferred,
     /// `--archived` 가 연다 — done 칸에 든 지 오래된 줄(moai-47mz). `--all` 로는 안 열린다.
@@ -577,17 +583,17 @@ impl Filter {
         for one in std::mem::take(&mut raw.filter) {
             desugar(&mut raw, &one)?;
         }
-        // 콕 집어 묻거나(`--type idea`) 글로 찾을 때는 저절로 켜진다.
+        // 콕 집어 묻거나(`--type backlog`) 글로 찾을 때는 저절로 켜진다.
         // **이미 적어 둔 생각을 다시 안 적으려면 찾아져야 한다.**
         //
         // `--deferred` 도 콕 집어 묻는 자리다. **`status` 의 `미뤄 둔 것 N건`
         // 은 종류를 안 가리고 세므로**(미뤄 둔 에픽·생각까지), 그 줄이 가리키는
-        // 명령이 생각을 숨기면 세어 놓고 못 보여 주는 수가 된다 — `idea_pile`
+        // 명령이 생각을 숨기면 세어 놓고 못 보여 주는 수가 된다 — `backlog_pile`
         // 이 미뤄 둔 것을 빼서 피한 바로 그 덫이고, 여기서는 세는 쪽을 못
         // 좁히니(좁히면 미뤄 둔 에픽이 아무 데서도 안 보인다) 보는 쪽을 연다.
         //
         // 때로 물으면 이것도 함께 연다 — 맨 끝의 "숨김을 다 연다" 다.
-        let ideas = raw.ideas || raw.kind == Some(Kind::Idea) || raw.grep.is_some() || raw.deferred;
+        let backlog = raw.backlog || raw.kind == Some(Kind::Backlog) || raw.grep.is_some() || raw.deferred;
         // **`--deferred` 는 그것만 본다.** 목록 자리에서 미룬 것은 done 처럼
         // 기본으로 빠지므로, 켜는 말과 좁히는 말이 하나여야 "미룬 것 보기" 가
         // 한 낱말로 끝난다.
@@ -632,7 +638,7 @@ impl Filter {
             // **`-g` 는 done 은 안 연다** — 찾은 아카이브 줄은 done 처럼 꼬리에 세이고 `--all` 이 연다.
             all: raw.all || raw.archived,
             archived,
-            ideas,
+            backlog,
             deferred,
         };
         // **시간으로 물으면 숨김을 다 연다**(moai-efoc.ip5, 2026-09-30 사용자 결정) — done·미룸·생각·아카이브까지.
@@ -645,7 +651,7 @@ impl Filter {
         // 한 목록이다. 날것(`Raw`)의 이름을 여기 따로 늘어놓던 때는 `updated_at=` 을 빼도 아무 시험이 안 붉어졌다.
         // 빈 값은 `spans` 가 거절하므로 날것이 섰으면 폭도 선다 — 같은 답이다.
         if filter.times().iter().any(|v| !v.is_empty()) {
-            (filter.all, filter.archived, filter.ideas) = (true, true, true);
+            (filter.all, filter.archived, filter.backlog) = (true, true, true);
         }
         Ok(filter)
     }
@@ -678,7 +684,7 @@ impl Filter {
             all: _,
             archived: _,
             deferred: _,
-            ideas: _,
+            backlog: _,
         } = self;
         [updated, created, done, started, done_at]
     }
@@ -704,8 +710,8 @@ impl Filter {
     ///
     /// - **담아 둔 생각은 기본 목록에서 빠진다.** 이 자리는 일을 보는 자리고,
     ///   생각 조각이 섞이면 목록이 흐려져 담기가 꺼려진다. 콕 집어 묻거나
-    ///   (`--type idea`) 글로 찾을 때는 나온다 — 이미 적어 둔 생각을 다시 안
-    ///   적으려면 찾아져야 한다. 탐색기는 `ideas` 를 켜고 들어와 시키지도 않은
+    ///   (`--type backlog`) 글로 찾을 때는 나온다 — 이미 적어 둔 생각을 다시 안
+    ///   적으려면 찾아져야 한다. 탐색기는 `backlog` 를 켜고 들어와 시키지도 않은
     ///   줄을 숨기지 않는다.
     /// - **미뤄 둔 것은 done 과 같은 자리에서 빠진다.** 지금 계획이 아니라는
     ///   뜻이 같고, 켜는 말(`--all`)도 같아야 축이 안 는다. 물려받은 미룸도
@@ -713,9 +719,9 @@ impl Filter {
     ///   것을 목록만 계획으로 낸다.
     ///
     /// 까닭은 **그 줄을 실제로 여는 한 낱말**로 가른다. 첫 까닭으로 가르면
-    /// 닫아 둔 생각이 `idea N건 숨김 — --type idea` 로 서는데 그 명령은 done 을
+    /// 닫아 둔 생각이 `backlog N건 숨김 — --type backlog` 로 서는데 그 명령은 done 을
     /// 여전히 숨겨 아무것도 안 낸다.
-    ///   `--type idea` 는 idea 만 연다 (done·미룸은 그대로 숨긴다)
+    ///   `--type backlog` 는 backlog 만 연다 (done·미룸은 그대로 숨긴다)
     ///   `--deferred`  는 미룸을 열고 생각까지 같이 연다 (done 은 아니다)
     ///   `--all`       은 done 과 미룸을 연다 (생각과 아카이브는 아니다)
     ///   `--archived`  는 아카이브까지 연다 (done·미룸도 연다, 생각은 아니다)
@@ -725,17 +731,17 @@ impl Filter {
     ///   done 이 아니라 아카이브로 센다 — done 으로 세면 꼬리가 대는 `--all` 이 그 줄을 안 낸다.
     ///   잴 때는 부르는 쪽이 건넨 `now` 다
     pub fn hidden_by(&self, i: &Issue, now: &str, wh: &Where) -> Option<Hide> {
-        let idea = crate::report::is_idea(i) && !self.ideas;
+        let backlog = crate::report::is_backlog(i) && !self.backlog;
         if !self.archived && wh.archived(i, now) {
-            return Some(if idea { Hide::Unopenable } else { Hide::Archived });
+            return Some(if backlog { Hide::Unopenable } else { Hide::Archived });
         }
         let deferred = self.deferred.is_none() && !self.all && wh.deferred(i);
         // 묶음은 **읽은 칸**으로 닫혔는지 본다 — 멤버가 남은 에픽을 손으로
         // `done` 에 뒀다고 목록에서 숨기면, 진행 중인 묶음이 사라진다.
         let done = !self.all && self.status.is_empty() && wh.column(i) == crate::config::DONE;
-        match (idea, deferred, done) {
+        match (backlog, deferred, done) {
             (false, false, false) => None,
-            (true, false, false) => Some(Hide::Idea),
+            (true, false, false) => Some(Hide::Backlog),
             (_, true, false) => Some(Hide::Deferred),
             (false, _, true) => Some(Hide::Done),
             _ => Some(Hide::Unopenable),
@@ -747,7 +753,7 @@ impl Filter {
     /// (`report::stats::select`)가 이 하나로 연다 — 저마다 적던 때는 숨김 축이 하나 늘 때마다 두 자리를 다 찾아
     /// 고쳐야 했고, 하나를 빠뜨려도 `..` 가 컴파일을 통과시켰다.
     pub fn unhidden(&self) -> Filter {
-        Filter { all: true, ideas: true, archived: true, ..self.clone() }
+        Filter { all: true, backlog: true, archived: true, ..self.clone() }
     }
 
     pub fn matches(&self, i: &Issue, now: &str, wh: &Where) -> bool {
@@ -1704,7 +1710,7 @@ mod tests {
             plain.hidden_by(i, NOW, &Where::of(&all, &cfg()))
         };
         let mut thought = issue("a-0001", "todo", &[]);
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         let mut closed_thought = thought.clone();
         closed_thought.status = Status::new("done");
         let mut shelved = issue("a-0002", "todo", &[]);
@@ -1714,7 +1720,7 @@ mod tests {
 
         assert_eq!(why(&issue("a-0003", "todo", &[])), None);
         assert_eq!(why(&issue("a-0003", "done", &[])), Some(Hide::Done));
-        assert_eq!(why(&thought), Some(Hide::Idea));
+        assert_eq!(why(&thought), Some(Hide::Backlog));
         assert_eq!(why(&shelved), Some(Hide::Deferred));
         // 닫고 미룬 줄은 `--all` 이 연다 — `--deferred` 는 done 을 그대로 숨긴다.
         assert_eq!(why(&shelved_done), Some(Hide::Done));
@@ -1784,13 +1790,13 @@ mod tests {
         let mut unreadable = aged.clone();
         unreadable.status_since = "언젠가".into();
         assert_eq!(why(&all, &unreadable), None);
-        // 닫은 생각은 아카이브여도 한 낱말로 안 열린다 — `--type idea --archived` 둘이 든다.
+        // 닫은 생각은 아카이브여도 한 낱말로 안 열린다 — `--type backlog --archived` 둘이 든다.
         let mut thought = aged.clone();
-        thought.kind = Kind::Idea;
-        assert_eq!(why(&archived, &thought), Some(Hide::Idea));
+        thought.kind = Kind::Backlog;
+        assert_eq!(why(&archived, &thought), Some(Hide::Backlog));
         assert_eq!(why(&all, &thought), Some(Hide::Unopenable));
-        let ideas = build(Raw { kind: Some(Kind::Idea), all: true, ..Raw::default() });
-        assert_eq!(why(&ideas, &thought), Some(Hide::Archived), "닫힌 idea 도 같은 규칙이다");
+        let backlog = build(Raw { kind: Some(Kind::Backlog), all: true, ..Raw::default() });
+        assert_eq!(why(&backlog, &thought), Some(Hide::Archived), "닫힌 backlog 도 같은 규칙이다");
 
         // `archive_days = 0` 이면 아카이브가 없다.
         let off = crate::config::Config::parse("prefix = \"argos\"\narchive_days = 0\n").unwrap();
@@ -2385,7 +2391,7 @@ mod tests {
         assert_eq!(pick(&["created_at=2026-09-01"]).len(), 3);
         // 때로 물으면 숨김을 다 연다 — 새 키도 옛 키와 같다(done 에 선 멤버가 기본 목록에서 숨는다).
         let f = Filter::build(Raw { filter: s(&["done_at=2026-10-02"]), ..Raw::default() }).unwrap();
-        assert!(f.all && f.archived && f.ideas, "새 시각 키가 숨김을 안 열었다");
+        assert!(f.all && f.archived && f.backlog, "새 시각 키가 숨김을 안 열었다");
 
         // **손으로 옮긴 묶음은 제 필드로 걸린다**(리뷰 moai-97tn.p44) — 위의 묶음은 그 필드가 없어 "안 걸린다" 만
         // 잰다. 묶음을 아예 빼는 고침(통계의 소요처럼)이 와도 그것만으로는 푸르다. 멤버의 때와 다르게 둔다.
@@ -2427,11 +2433,11 @@ mod tests {
         }
         for k in timed {
             let f = build(format!("{k}=2026-10-01")).unwrap();
-            assert!(f.all && f.archived && f.ideas, "`{k}=` 가 숨김을 안 열었다");
+            assert!(f.all && f.archived && f.backlog, "`{k}=` 가 숨김을 안 열었다");
             assert!(f.needs_zone(), "`{k}=` 가 시간대를 안 물었다");
             // 순간으로만 치면 시간대를 안 푼다 — 시각을 안 그리는 목록은 tzdb 를 안 만진다(moai-s3i7).
             let f = build(format!("{k}=2026-10-01T00:00:00Z")).unwrap();
-            assert!(f.all && f.archived && f.ideas, "`{k}=` 순간이 숨김을 안 열었다");
+            assert!(f.all && f.archived && f.backlog, "`{k}=` 순간이 숨김을 안 열었다");
             assert!(!f.needs_zone(), "`{k}=` 순간이 시간대를 물었다");
         }
     }
@@ -2605,7 +2611,7 @@ mod tests {
             at("a-0001", "todo", Kind::Issue, "2026-09-01T00:00:00Z"),
             closed,
             reopened,
-            at("a-0004", "todo", Kind::Idea, "2026-09-05T00:00:00Z"),
+            at("a-0004", "todo", Kind::Backlog, "2026-09-05T00:00:00Z"),
             old_close,
         ];
         let c = cfg();
@@ -2907,7 +2913,7 @@ mod tests {
         let mut epic = issue("argos-0001", "todo", &[]);
         epic.kind = Kind::Epic;
         let mut thought = issue("argos-0002", "todo", &[]);
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         thought.epic = Some("argos-0001".into());
         let all = vec![epic, issue("argos-0002", "todo", &[]), thought];
         let cfg = cfg();
@@ -3000,9 +3006,9 @@ mod tests {
     /// 여기 한 곳에 있어야 화면과 CLI 가 같은 것을 센다 — 이 시험이 그 자리를
     /// 지킨다.
     #[test]
-    fn an_idea_hides_until_it_is_asked_for() {
+    fn an_backlog_hides_until_it_is_asked_for() {
         let mut thought = issue("argos-0001", "todo", &[]);
-        thought.kind = Kind::Idea;
+        thought.kind = Kind::Backlog;
         thought.title = "파서를 다시 쓴다".into();
         let all = vec![thought.clone(), issue("argos-0009", "todo", &[])];
         let cfg = cfg();
@@ -3012,9 +3018,9 @@ mod tests {
             all.iter().filter(|i| f.matches(i, NOW, &wh)).map(|i| i.id.clone()).collect()
         };
 
-        assert_eq!(hits(Raw::default()), ["argos-0009"], "기본 목록에 idea 가 섞였다");
+        assert_eq!(hits(Raw::default()), ["argos-0009"], "기본 목록에 backlog 가 섞였다");
         assert_eq!(
-            hits(Raw { kind: Some(Kind::Idea), ..Raw::default() }),
+            hits(Raw { kind: Some(Kind::Backlog), ..Raw::default() }),
             ["argos-0001"],
             "콕 집어 물었는데 안 나온다"
         );
@@ -3024,7 +3030,7 @@ mod tests {
             "적어 둔 생각을 글로 못 찾는다 — 그러면 같은 것을 또 적는다"
         );
         assert_eq!(
-            hits(Raw { ideas: true, ..Raw::default() }),
+            hits(Raw { backlog: true, ..Raw::default() }),
             ["argos-0001", "argos-0009"],
             "탐색기가 켜고 들어오는 축이 안 듣는다"
         );

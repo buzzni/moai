@@ -2,7 +2,7 @@
   "moai": {
     "PreInvocation": [
       {
-        "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; trap 'exit 0' PIPE; h=\"${TMPDIR:-/tmp}/moai-hook-${ANTIGRAVITY_CONVERSATION_ID:-$PPID}-$$.handoff\"; c=0; o=$(MOAI_HOOK_HANDOFF=\"$h\" \"/home/coder/workspace/moa-issue/target/release/moai\" hook user-prompt-submit --dialect antigravity) || c=$?; set -C; case \"$c\" in 0|1) [ -z \"$o\" ] || { printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] && read -r m 2>>/dev/null < \"$h\" && ! [ -e \"$m\" ] && ! [ -h \"$m\" ] && true 2>>/dev/null > \"$m\"; } || :;; *) case \"$o\" in '{'*'}') printf '%s\\n' \"$o\" || :;; *) ;; esac;; esac; exit 0",
+        "command": "command -v -- \"moai\" >/dev/null 2>&1 || exit 0; trap 'exit 0' PIPE; h=\"${TMPDIR:-/tmp}/moai-hook-${ANTIGRAVITY_CONVERSATION_ID:-$PPID}-$$.handoff\"; c=0; o=$(MOAI_HOOK_HANDOFF=\"$h\" \"moai\" hook user-prompt-submit --dialect antigravity) || c=$?; set -C; case \"$c\" in 0|1) [ -z \"$o\" ] || { printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] && read -r m 2>>/dev/null < \"$h\" && ! [ -e \"$m\" ] && ! [ -h \"$m\" ] && true 2>>/dev/null > \"$m\"; } || :;; *) case \"$o\" in '{'*'}') printf '%s\\n' \"$o\" || :;; *) ;; esac;; esac; exit 0",
         "timeout": 15,
         "type": "command"
       }
@@ -11,7 +11,7 @@
       {
         "hooks": [
           {
-            "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; trap 'exit 0' PIPE; h=\"${TMPDIR:-/tmp}/moai-hook-${ANTIGRAVITY_CONVERSATION_ID:-$PPID}-$$.handoff\"; c=0; o=$(MOAI_HOOK_HANDOFF=\"$h\" \"/home/coder/workspace/moa-issue/target/release/moai\" hook pre-tool-use --dialect antigravity) || c=$?; set -C; case \"$c\" in 0|1) [ -z \"$o\" ] || { printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] && read -r m 2>>/dev/null < \"$h\" && ! [ -e \"$m\" ] && ! [ -h \"$m\" ] && true 2>>/dev/null > \"$m\"; } || :;; *) case \"$o\" in '{'*'}') printf '%s\\n' \"$o\" || :;; *) ;; esac;; esac; exit 0",
+            "command": "command -v -- \"moai\" >/dev/null 2>&1 || exit 0; trap 'exit 0' PIPE; h=\"${TMPDIR:-/tmp}/moai-hook-${ANTIGRAVITY_CONVERSATION_ID:-$PPID}-$$.handoff\"; c=0; o=$(MOAI_HOOK_HANDOFF=\"$h\" \"moai\" hook pre-tool-use --dialect antigravity) || c=$?; set -C; case \"$c\" in 0|1) [ -z \"$o\" ] || { printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] && read -r m 2>>/dev/null < \"$h\" && ! [ -e \"$m\" ] && ! [ -h \"$m\" ] && true 2>>/dev/null > \"$m\"; } || :;; *) case \"$o\" in '{'*'}') printf '%s\\n' \"$o\" || :;; *) ;; esac;; esac; exit 0",
             "timeout": 15,
             "type": "command"
           }
@@ -21,7 +21,7 @@
     ],
     "Stop": [
       {
-        "command": "command -v -- \"/home/coder/workspace/moa-issue/target/release/moai\" >/dev/null 2>&1 || [ -e \"/home/coder/workspace/moa-issue/target/release/moai\" ] || exit 0; trap 'exit 0' PIPE; h=\"${TMPDIR:-/tmp}/moai-hook-${ANTIGRAVITY_CONVERSATION_ID:-$PPID}-$$.handoff\"; c=0; o=$(MOAI_HOOK_HANDOFF=\"$h\" \"/home/coder/workspace/moa-issue/target/release/moai\" hook stop --dialect antigravity) || c=$?; set -C; case \"$c\" in 0|1) [ -z \"$o\" ] || { printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] && read -r m 2>>/dev/null < \"$h\" && ! [ -e \"$m\" ] && ! [ -h \"$m\" ] && true 2>>/dev/null > \"$m\"; } || :;; *) case \"$o\" in '{'*'}') printf '%s\\n' \"$o\" || :;; *) ;; esac;; esac; exit 0",
+        "command": "command -v -- \"moai\" >/dev/null 2>&1 || exit 0; trap 'exit 0' PIPE; h=\"${TMPDIR:-/tmp}/moai-hook-${ANTIGRAVITY_CONVERSATION_ID:-$PPID}-$$.handoff\"; c=0; o=$(MOAI_HOOK_HANDOFF=\"$h\" \"moai\" hook stop --dialect antigravity) || c=$?; set -C; case \"$c\" in 0|1) [ -z \"$o\" ] || { printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] && read -r m 2>>/dev/null < \"$h\" && ! [ -e \"$m\" ] && ! [ -h \"$m\" ] && true 2>>/dev/null > \"$m\"; } || :;; *) case \"$o\" in '{'*'}') printf '%s\\n' \"$o\" || :;; *) ;; esac;; esac; exit 0",
         "timeout": 15,
         "type": "command"
       }

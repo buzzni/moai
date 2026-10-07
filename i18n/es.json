@@ -7,5 +7,10 @@
   "overview.ready": "Listo para tomar",
   "overview.projects": "Proyectos registrados",
   "overview.tally": "Proyectos {places} · {n}",
-  "overview.places": "{places}"
+  "overview.places": "{places}",
+  "warn.backlog_pile": "Pendientes {n}",
+  "warn.backlog_pile_aged": "Pendientes {n} (el más antiguo: {d} días)",
+  "tui.act.backlog": "pendientes",
+  "tui.board.backlog": "pendientes",
+  "tui.jot.as_backlog": "se guarda en pendientes — sin épica"
 }

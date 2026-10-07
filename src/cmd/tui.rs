@@ -25,12 +25,26 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 같은 모양이어야 첫 다시 읽기가 안 바뀐 커밋 표를 다시 짓지 않고, git 을 못 불러도 옆 워크트리를
     // 치운 것을 안다. 화면을 안 켜는 `--json` 은 지켜볼 것이 없다.
     let places = if ctx.json { Vec::new() } else { crate::worktree::place_marks(repo.here()) };
+    let archived_marks = crate::archive::marks(&repo.root)?;
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
-    let crate::worktree::Gathered { load, origin, trouble, mut watched, swept, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, origin, trouble, mut watched, swept, sides, mine, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
+    // The explorer can switch between the live board and archived rows. Keep the
+    // active overlay from the worktree gather, then add the archive beside it so
+    // worktree-only rows remain visible in both views.
+    // **배너의 수는 섞기 전에 센다**(moai-nkwg) — `moai status` 와 같은 자로, 산 줄을 일로 아카이브를 문맥으로
+    // 받는다(`tui::board`). 아카이브는 한 번 읽어 셈과 섞기가 나눠 쓴다. **`--json` 은 안 센다**(리뷰) — 그 길은
+    // 아래에서 화면을 안 켜고 돌아가 배너가 없는데, 셈은 이슈 전체를 한 벌 걷는다.
+    let archived = crate::archive::read(&repo.root)?;
+    let counted = match ctx.json {
+        true => Default::default(),
+        false => crate::tui::board(&repo, &active_load, &origin, &archived, &crate::model::now())?,
+    };
+    let load = crate::tui::beside(archived, active_load);
     crate::tui::watch(&mut watched, places);
+    crate::tui::watch(&mut watched, archived_marks);
     // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
     // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
     // **노트는 여기서 안 읽는다**(리뷰 moai-wcy8.rbj) — `/` 가 노트를 처음 볼 때 읽는다(`tui::Ground::read_notes`).
@@ -73,7 +87,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi). 다시 읽기(`tui::prepare`)도 제 말을 들고
     // 가므로(moai-9it4) 여는 화면과 같은 자로 편다 — 둘이 갈리면 배너가 걸음마다 말을 바꾼다.
     let trouble = crate::tui::said_trouble(&trouble, ctx.lang());
-    let mut app = App::open(repo, load, index, ground, path, stamp);
+    let mut app = App::open_counted(repo, load, index, ground, path, stamp, counted);
     // **탐색기도 고른 말로 선다**(moai-ra67) — 명령 층에서 한 번 푼 것을 화면에 놓는다.
     // **겹치기 전에 놓는다**(moai-9it4) — `overlaid` 가 자리 판정의 글(`tui::placed` 의
     // `view::unread_worktree`)을 화면의 말로 편다. 뒤에 놓던 판은 그 한 줄만 도구의 기본 말로
@@ -187,7 +201,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),
                         // **여기서 달을 입힌다**(moai-fgjj) — 셈은 시간대에 안 닿고, 이 길은 낼
                         // 것을 그 자리에서 다 내는 표면이다. 어느 시계로 셀지는 그대로 `Ctx::zone`
-                        // 이다(탐색기의 `[tui] timezone` 과 갈리는 것은 idea moai-dux7 이 든 자리다).
+                        // 이다(탐색기의 `[tui] timezone` 과 갈리는 것은 backlog moai-dux7 이 든 자리다).
                         warnings: sum.warnings.count(&now, ctx.zone()),
                         notices: sum.notices,
                         stranded: sum.stranded,
@@ -1046,7 +1060,7 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
 /// 짐작한 남이 먼저 둔 파일(심볼릭 링크 포함)을 열면 적은 생각이 그리로 샌다. `create_new` 는
 /// 있는 것을 안 연다. `.md` 는 편집기가 본문을 마크다운으로 칠하게 한다.
 fn scratch_file(dir: &std::path::Path) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
-    private_file(dir, "moai-idea")
+    private_file(dir, "moai-backlog")
 }
 
 /// `dir` 안에 `<stem>-<pid>-<n>.md` 로 **남이 못 읽는 새 파일**을 만든다 — [`scratch_file`] 과
@@ -1629,7 +1643,7 @@ mod tests {
             std::fs::read_dir(self.0.path())
                 .unwrap()
                 .filter_map(|e| e.ok()?.file_name().into_string().ok())
-                .filter(|n| n.starts_with("moai-idea-"))
+                .filter(|n| n.starts_with("moai-backlog-"))
                 .collect()
         }
     }
@@ -1702,7 +1716,7 @@ mod tests {
         // 다음에 고를 이름들을 남이 먼저 둔다 — 카운터만 믿으면 `create_new` 갈래를 한 번도 안 지난다.
         let n: usize = a.to_string_lossy().rsplit('-').next().unwrap().trim_end_matches(".md").parse().unwrap();
         let theirs: Vec<std::path::PathBuf> =
-            (n + 1..=n + 8).map(|k| d.0.join(format!("moai-idea-{}-{k}.md", std::process::id()))).collect();
+            (n + 1..=n + 8).map(|k| d.0.join(format!("moai-backlog-{}-{k}.md", std::process::id()))).collect();
         for p in &theirs {
             std::fs::write(p, "남의 것").unwrap();
         }

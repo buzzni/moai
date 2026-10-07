@@ -326,9 +326,9 @@ pub enum Browse {
     Project(u8),
     /// 미룬 것을 보이고 숨긴다. 칸이 아니라 `deferred_at` 축이다.
     Deferred,
-    /// 담아 둔 생각(idea)을 보이고 숨긴다 — `SPC v i`(moai-oagj.bjr). 칸이 아니라 종류(`kind`)의 축이다: 보드의
-    /// idea 칸도 목록의 idea 줄도 이 하나로 숨는다.
-    Ideas,
+    /// 담아 둔 생각(backlog)을 보이고 숨긴다 — `SPC v b`(moai-oagj.bjr). 칸이 아니라 종류(`kind`)의 축이다: 보드의
+    /// backlog 칸도 목록의 backlog 줄도 이 하나로 숨는다.
+    Backlog,
     /// 아카이브(done 에 든 지 오래된 줄)를 보이고 숨긴다 — `SPC v o`(old, moai-47mz, 2026-10-03 사용자 결정).
     /// 칸이 아니라 시각의 축이라 번호로 못 댄다. 처음에는 숨는다 — done 을 보여도 아카이브는 안 쏟아진다.
     Archived,
@@ -626,10 +626,10 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 줄이다. done 이 글자를 내놓지 않았으면 못 오던 자리라, 두 결정은 한 줄에 매여 있다:
         // `d` 를 다시 done 에 주면 상세 칸이 갈 곳이 없다.
         row!(Deferred, Some("SPC v l"), LEADER, Key::plain('v'), Key::plain('l')),
-        // idea 는 `i`(idea) — 미룸처럼 칸이 아니라 축이라 번호로 못 대고, 어느 줄을 보나의 갈래라 `l` 곁에 선다
+        // backlog 는 `b`(backlog) — 미룸처럼 칸이 아니라 축이라 번호로 못 대고, 어느 줄을 보나의 갈래라 `l` 곁에 선다
         // (moai-oagj.bjr).
-        row!(Ideas, Some("SPC v i"), LEADER, Key::plain('v'), Key::plain('i')),
-        // 아카이브는 `o`(old) — idea·미룸처럼 칸이 아니라 축이라 번호로 못 대고, 어느 줄을 보나의 갈래라 곁에 선다.
+        row!(Backlog, Some("SPC v b"), LEADER, Key::plain('v'), Key::plain('b')),
+        // 아카이브는 `o`(old) — backlog·미룸처럼 칸이 아니라 축이라 번호로 못 대고, 어느 줄을 보나의 갈래라 곁에 선다.
         // **`SPC v a`(모두)는 이것을 안 연다**(moai-47mz, 사용자 결정) — `show --all` 이 아카이브를 안 여는 것과 같다.
         row!(Archived, Some("SPC v o"), LEADER, Key::plain('v'), Key::plain('o')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
@@ -735,8 +735,8 @@ pub struct Ctx {
     /// 숨긴 칸 — n 번째 비트가 설정의 n 번째 칸. 이름을 들지 않는다: 이 값은 복사로 다닌다.
     pub hidden: u16,
     pub deferred_hidden: bool,
-    /// idea 를 숨겼는가(moai-oagj.bjr) — 메뉴 줄이 `[보임]`·`[숨김]` 으로 댄다.
-    pub ideas_hidden: bool,
+    /// backlog 를 숨겼는가(moai-oagj.bjr) — 메뉴 줄이 `[보임]`·`[숨김]` 으로 댄다.
+    pub backlog_hidden: bool,
     /// 아카이브를 숨겼는가(moai-47mz) — 처음에는 참이다.
     pub archived_hidden: bool,
     /// 상세 칸이 지금 선 자리 — 메뉴 줄이 낱말로 댄다(moai-e7r3).
@@ -867,10 +867,10 @@ impl Browse {
             // 그 줄 전부에 걸린다 — 보는 사람의 것이라 화면에 하나뿐이다(moai-1xo5, 사용자 결정
             // 2026-09-19). 줄이 하나도 없으면 눌러도 아무 일이 없어 안 선다: 켜진 것이 하나도 없는
             // `SPC s`·`SPC c` 는 묶음째 안 선다(`menu::live`). **숨긴 것을 도로 보이는 키는 빼고다**(리뷰) — 줄이
-            // 없는 까닭이 바로 그 숨김일 수 있다. 펼친 프로젝트의 카드가 모두 idea 일 때 `SPC v i` 를 누르면 줄이 다
+            // 없는 까닭이 바로 그 숨김일 수 있다. 펼친 프로젝트의 카드가 모두 backlog 일 때 `SPC v b` 를 누르면 줄이 다
             // 빠지는데, 그 키와 `SPC v a` 가 같이 꺼지면 한눈 보기에서는 되돌릴 길이 없다. 보드는 묶음 줄을 안 세워
             // 목록보다 자주 그렇게 된다.
-            Column(_) | Deferred | Ideas | Archived | ShowAll | Sort(_) | Cell(_)
+            Column(_) | Deferred | Backlog | Archived | ShowAll | Sort(_) | Cell(_)
                 if c.layer && !c.rows_here && !self.unhides(c) =>
             {
                 Err(Off::Quiet)
@@ -908,11 +908,11 @@ impl Browse {
     /// 숨긴 것을 **도로 보이는** 보기 토글인가 — 그러면 줄이 하나도 없어도 할 일이 있다([`Browse::enabled`]).
     fn unhides(self, c: &Ctx) -> bool {
         match self {
-            Browse::Ideas => c.ideas_hidden,
+            Browse::Backlog => c.backlog_hidden,
             Browse::Deferred => c.deferred_hidden,
             Browse::Archived => c.archived_hidden,
             Browse::Column(n) => c.hidden & (1 << n) != 0,
-            Browse::ShowAll => c.ideas_hidden || c.deferred_hidden || c.hidden != 0,
+            Browse::ShowAll => c.backlog_hidden || c.deferred_hidden || c.hidden != 0,
             _ => false,
         }
     }
@@ -949,7 +949,7 @@ impl Browse {
             Browse::Raw => Some(say(c.lang, "tui.state.rendered")),
             Browse::Column(n) => Some(shown(c.hidden & (1 << n) != 0, c.lang)),
             Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
-            Browse::Ideas => Some(shown(c.ideas_hidden, c.lang)),
+            Browse::Backlog => Some(shown(c.backlog_hidden, c.lang)),
             Browse::Archived => Some(shown(c.archived_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
             Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed {
@@ -981,7 +981,7 @@ impl Browse {
         use Browse::*;
         matches!(
             self,
-            Worktree | Raw | Column(_) | Deferred | Ideas | Archived | Sort(_) | Cell(_) | Detail | DetailAt | Mouse
+            Worktree | Raw | Column(_) | Deferred | Backlog | Archived | Sort(_) | Cell(_) | Detail | DetailAt | Mouse
         )
     }
 
@@ -1033,7 +1033,7 @@ impl Browse {
             // 어느 프로젝트인지는 헤더가 번호 곁에 이름으로 댄다.
             Project(_) => say(c.lang, "tui.act.project"),
             Deferred => say(c.lang, "tui.act.deferred"),
-            Ideas => say(c.lang, "tui.act.ideas"),
+            Backlog => say(c.lang, "tui.act.backlog"),
             Archived => say(c.lang, "tui.act.archived"),
             ShowAll => say(c.lang, "tui.act.show_all"),
             Sort(_) => say(c.lang, "tui.act.sort"),
@@ -1080,7 +1080,7 @@ pub enum Prompt {
     Apply,
     Cancel,
     /// 검색 칸에서 찾을 자리를 돌린다(moai-kojj) — 전체 → id → 제목 → 태그 → 본문 → 노트(moai-wcy8.3v9).
-    /// 다른 칸은 안 쓴다.
+    /// 거름망 칸에서는 항목·값 후보를 앞뒤로 완성한다(moai-fc97).
     NextScope,
     PrevScope,
     /// 거름망 칸의 값 목록에서 한 줄 위·아래(moai-h2rh). 목록이 안 선 칸에서는 아무것도 안 한다.
@@ -1616,14 +1616,14 @@ mod tests {
     #[test]
     fn unhiding_stands_on_the_overview_even_with_no_row() {
         let bare = Ctx { layer: true, list_focus: true, ..Ctx::default() };
-        for act in [Browse::Ideas, Browse::Deferred, Browse::ShowAll] {
+        for act in [Browse::Backlog, Browse::Deferred, Browse::ShowAll] {
             assert_eq!(act.enabled(&bare), Err(Off::Quiet), "{act:?} 가 숨긴 것도 없이 섰다");
         }
-        assert_eq!(Browse::Ideas.enabled(&Ctx { ideas_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::Backlog.enabled(&Ctx { backlog_hidden: true, ..bare }), Ok(()));
         assert_eq!(Browse::Deferred.enabled(&Ctx { deferred_hidden: true, ..bare }), Ok(()));
-        assert_eq!(Browse::ShowAll.enabled(&Ctx { ideas_hidden: true, ..bare }), Ok(()));
+        assert_eq!(Browse::ShowAll.enabled(&Ctx { backlog_hidden: true, ..bare }), Ok(()));
         assert_eq!(Browse::Column(0).enabled(&Ctx { columns: 1, hidden: 1, ..bare }), Ok(()));
-        assert_eq!(Browse::Sort(Order::Title).enabled(&Ctx { ideas_hidden: true, ..bare }), Err(Off::Quiet));
+        assert_eq!(Browse::Sort(Order::Title).enabled(&Ctx { backlog_hidden: true, ..bare }), Err(Off::Quiet));
     }
 
     /// **보드에서는 `h`·`l` 이 늘 서고 `Tab` 은 조용하다**(moai-9nfw) — 카드는 펼칠 묶음이 아니라, 펼침의 켜짐으로
@@ -1853,7 +1853,7 @@ mod tests {
             assert_eq!(Browse::Go(to).enabled(&Ctx { wiki: true, ..inside() }), Ok(()), "위키 창이 {keys} 를 껐다");
             assert!(!Browse::Go(to).stateful(), "{keys} 가 메뉴를 열어 둔다 — 고르는 키는 한 번에 끝난다");
         }
-        for gone in ["SPC v b", "SPC p s"] {
+        for gone in ["SPC v i", "SPC p s"] {
             assert_eq!(lookup(BROWSE, &parse_seq(gone).unwrap()), Lookup::Unknown, "옛 키 {gone} 가 남았다");
         }
         let stats = Ctx { stats: true, ..inside() };
@@ -2172,7 +2172,14 @@ mod tests {
         for (edits, still, want) in [
             // 다른 문단에만 남은 키 — 검색 칸 문단의 Tab(범위 돌리기).
             (
-                &[("Tab and Shift-Tab pick where it", "it picks where it")][..],
+                &[
+                    ("Tab and Shift-Tab pick where it", "it picks where it"),
+                    (
+                        "Tab completes key names and values,\n  Shift-Tab cycles backwards",
+                        "completion fills key names and values,\n  cycling backwards",
+                    ),
+                    ("type names with Tab", "type names with completion"),
+                ][..],
                 &["Tab"][..],
                 &["PROMPT: Tab", "PROMPT: Shift-Tab"][..],
             ),
@@ -2185,6 +2192,7 @@ mod tests {
                         "The search and filter fields apply and give up",
                     ),
                     ("Enter puts it in", "it goes in"),
+                    ("these fields keep Enter to apply", "these fields apply"),
                 ][..],
                 &["Enter", "Esc"][..],
                 &["PROMPT: Enter", "PROMPT: Esc"][..],
@@ -2261,6 +2269,8 @@ mod tests {
         ("PROMPT", LIST, "The search and filter fields"),
         // 거름망 칸의 값 목록(moai-h2rh) — 여기 적힌 Enter 는 값을 넣는 Enter 다.
         ("PROMPT", LIST, "The filter field lists"),
+        ("PROMPT", LIST, "In the filter field,"),
+        ("PROMPT", LIST, "Fixed fields also complete status names"),
         // 목록(BROWSE)과 Esc·Bksp 를 나눠 쓴다.
         ("MENU", SPC, "stands up only what works"),
         // 메뉴가 언제 열린 채로 기다리는지를 말하는 두 문장도 메뉴의 것이다(moai-68j8) — 여기 적힌
