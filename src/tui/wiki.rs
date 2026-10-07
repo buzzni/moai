@@ -1031,6 +1031,22 @@ pub(super) mod tests {
         assert!(window(&a).page.offset() > 0, "Alt-PageDown 이 본문을 안 굴렸다");
     }
 
+    /// **Ctrl·Alt 를 쥔 `←` 도 되돌아간다**(moai-ug6x.wwg) — 탐색의 `←`(접기)와 이동의 화살표가 수식키를 안 보는데
+    /// 되돌아가는 `←` 만 정확히 견주면 같은 키가 창 안에서 뜻이 갈린다.
+    #[test]
+    fn ctrl_left_goes_back_like_plain_left() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers as M};
+        let (_s, mut a) = wiki_app("ctrl-left", PAGES);
+        a.hit("SPC g w");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        assert!(w.follow("guide"));
+        assert!(w.follow("notes/deep"));
+        a.key(KeyEvent::new(KeyCode::Left, M::CONTROL));
+        assert_eq!(slug(&a), "guide", "Ctrl-Left 가 안 되돌아갔다");
+        a.key(KeyEvent::new(KeyCode::Left, M::NONE));
+        assert_eq!(slug(&a), "README", "Left 가 안 되돌아갔다");
+    }
+
     /// **되돌아가기는 링크로 건너온 길만 되감는다** — 읽던 줄로 돌아온다. 자취가 비면 `Bksp` 는 아무 일도 없고 창은
     /// 남는다. 자취가 있어도 Esc 는 창을 닫는다(2026-10-04 사용자 결정).
     #[test]

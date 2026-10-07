@@ -1231,7 +1231,8 @@ pub enum Wiki {
 
 /// **`q` 는 안 둔다** — 통계 창([`STATS`])과 같은 까닭이다. `l`·`→` 도 안 둔다: 목록에서는 본문 칸으로 가는 것이
 /// `Enter` 하나로 서고, 본문에서는 고를 것이 링크라 창이 뜬다 — 한 글자가 두 칸에서 뜻이 갈리면 손이 헷갈린다.
-/// 이동의 화살표·쪽 키가 수식키를 안 보는 것도 통계 창과 같은 까닭이다.
+/// 이동의 화살표·쪽 키가 수식키를 안 보는 것도 통계 창과 같은 까닭이다. 되돌아가는 `←` 도 그렇다 — 탐색의 `←`
+/// (접기)와 같은 손이다(moai-ug6x.wwg). 글자 `h` 는 정확히 견주는 그대로다.
 pub const WIKI: &[Bind<Wiki>] = {
     use KeyCode as C;
     use Wiki::*;
@@ -1254,7 +1255,7 @@ pub const WIKI: &[Bind<Wiki>] = {
         row!(Enter, Some("Enter"), Key::bare(C::Enter)),
         row!(Back, Some("Bksp"), Key::bare(C::Backspace)),
         row!(Back, None, Key::plain('h')),
-        row!(Back, None, Key::bare(C::Left)),
+        row!(Back, None, Key::any(C::Left)),
         row!(Search, Some("/"), Key::plain('/')),
         // 칸 옮기기는 탐색과 같은 vi 의 창 이동이다([`BROWSE`] 의 `Ctrl-w` 줄) — Ctrl 을 쥔 채 이어 누른 꼴도 받는다.
         row!(FocusNext, Some("Ctrl-w w"), Key::chord('w'), Key::plain('w')),
