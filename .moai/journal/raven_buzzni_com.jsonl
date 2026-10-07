@@ -5509,3 +5509,8 @@
 {"ts":"2026-10-07T15:40:31Z","id":"moai-ltsv.3qk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh 의 다음 안내가 develop 끝에 태그를 단다"}
 {"ts":"2026-10-07T15:40:31Z","id":"moai-ltsv.3qk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-oix7 에서 펼쳤다 — bump-version.sh 끝의 다음 안내가 develop 끝에 태그를 단다"}
 {"ts":"2026-10-07T15:40:31Z","id":"moai-oix7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-ltsv 의 멤버 moai-ltsv.3qk 로 펼쳤다"}
+{"ts":"2026-10-07T15:45:58Z","id":"moai-ug6x.3ip","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:45:59Z","id":"moai-ug6x.a3e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:45:59Z","id":"moai-ug6x.bbh","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:45:59Z","id":"moai-ug6x.cpq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T15:45:59Z","id":"moai-ug6x.hr1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
