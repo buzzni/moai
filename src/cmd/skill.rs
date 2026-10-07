@@ -293,10 +293,8 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     }
     // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기 뒤에 걷는다: 쓰기가 거절되면 아무것도
     // 안 바뀐 채 멈춘다. Claude 의 트리는 등록 앞에서 걷는다([`claude_install`]) — 등록이 그 트리를 캐시로 옮겨 담는다.
-    let mut shared_left: Vec<Leftover> = shared
-        .as_ref()
-        .map(|(dir, files)| leftovers(dir, &planted_names(files, ""), &root))
-        .unwrap_or_default();
+    let mut shared_left: Vec<Leftover> =
+        shared.as_ref().map(|(dir, files)| leftovers(dir, &planted_names(files, ""), &root)).unwrap_or_default();
     // **Claude 보다 먼저 쓴다** — Claude 의 걸음은 `claude` 를 불러 반쪽으로 끝날 수 있고(비영), 파일 쓰기는 거기에
     // 안 기댄다. 훅 파일도 같은 까닭이다(moai-u5wr.kov). 못 쓰면 `claude` 를 부르기 전에 멈춘다.
     //
@@ -957,8 +955,8 @@ pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
     // 링크를 지나 밖의 디렉터리를 지운다.
     let left: Vec<PathBuf> = match outside(&shared, &place.root) {
         Some(_) => Vec::new(),
-        // 걷은 스킬(`moai-work`, `.agents` 의 감독)도 댄다 — 옛 판이 심어 둔 그 디렉터리도 moai 의 것이다([`EVER_PLANTED`]).
-        None => EVER_PLANTED
+        // 걷은 스킬(`moai-work`, `.agents` 의 감독)도 댄다 — 옛 판이 심어 둔 그 디렉터리도 moai 의 것이다([`skill::EVER_PLANTED`]).
+        None => skill::EVER_PLANTED
             .iter()
             .map(|(n, _)| shared.join(n))
             .filter(|p| std::fs::symlink_metadata(p).is_ok())
@@ -1561,30 +1559,6 @@ fn retire(root: &Path, target: &str, installs: &[skill::Install], registering: O
     out
 }
 
-/// **moai 가 한 번이라도 심은 스킬**과 그 디렉터리 안에 심은 파일 — 지금 심는 것([`skill::NAMES`])에 걷은 것이 더해진
-/// 목록이다(moai-six5.1xz). 셋이 이 하나로 잰다.
-///
-/// - `install` 이 걷는 남은 디렉터리([`leftovers`]) — 이 목록에 있고 이번 트리에 없는 이름이다. 일꾼 스킬 `moai-work` 는
-///   0.9.0 에서 걷혔고(2026-10-06 사용자 결정, moai-ybns), 감독 스킬은 Claude 의 트리에만 선다 — 옛 판이 심은 그
-///   디렉터리가 남으면 에이전트가 걷힌 명령(`moai hello`·`inbox`·`send`)을 배운다
-/// - `uninstall` 이 손으로 지우라고 대는 `.agents/skills` 의 디렉터리 — 남은 것까지 댄다
-/// - 위키와 새 id 가 스킬 이름을 id 로 안 읽는 거르개([`crate::wiki`]·[`crate::store::taken_ids`], moai-mdzx.3pm) — 걷은
-///   이름이 빠지면 페이지의 `moai-work` 가 없는 id 로 선다
-///
-/// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
-/// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`every_planted_skill_is_on_the_list`).
-pub const EVER_PLANTED: [(&str, &[&str]); 4] = [
-    ("moai", &["SKILL.md", "references/commands.md"]),
-    ("moai-supervise", &["SKILL.md", "references/worker.md"]),
-    ("moai-wiki", &["SKILL.md"]),
-    ("moai-work", &["SKILL.md"]),
-];
-
-/// `name` 이 moai 가 심었던 스킬의 이름인가([`EVER_PLANTED`]).
-pub fn ever_planted(name: &str) -> bool {
-    EVER_PLANTED.iter().any(|(n, _)| *n == name)
-}
-
 /// 트리 `files`(`under` 밑의 `<이름>/…`)가 심는 스킬 이름.
 fn planted_names<'a>(files: &'a [(PathBuf, String)], under: &str) -> Vec<&'a str> {
     let mut names: Vec<&str> = files
@@ -1638,13 +1612,13 @@ impl Leftover {
     }
 }
 
-/// 스킬 자리 `skills` 에 남은, 이번 트리가 안 심는 moai 의 스킬 디렉터리들 — [`EVER_PLANTED`] 의 차례로. 아무것도 안
+/// 스킬 자리 `skills` 에 남은, 이번 트리가 안 심는 moai 의 스킬 디렉터리들 — [`skill::EVER_PLANTED`] 의 차례로. 아무것도 안
 /// 지운다. **그 자리가 링크로 체크아웃 밖에 닿으면 아무것도 안 댄다**([`outside`]) — moai 는 거기 안 심는다.
 fn leftovers(skills: &Path, planting: &[&str], root: &Path) -> Vec<Leftover> {
     if outside(skills, root).is_some() {
         return Vec::new();
     }
-    EVER_PLANTED
+    skill::EVER_PLANTED
         .iter()
         .filter(|(name, _)| !planting.contains(name))
         .filter_map(|(name, known)| {
@@ -1660,7 +1634,7 @@ fn leftovers(skills: &Path, planting: &[&str], root: &Path) -> Vec<Leftover> {
 /// 사람의 것을 지우지 않으려고 셋을 다 본다. 하나라도 어긋나면 `None` 이고 그 디렉터리는 통째로 남는다.
 ///
 /// - **링크가 아닌 디렉터리**이고 그 안도 디렉터리와 보통 파일뿐이다 — 링크를 따라 지우면 링크 너머의 것이 사라진다
-/// - **파일이 모두 moai 가 그 스킬에 심던 것**이다([`EVER_PLANTED`]) — 사람이 곁에 둔 메모 하나가 있어도 안 지운다
+/// - **파일이 모두 moai 가 그 스킬에 심던 것**이다([`skill::EVER_PLANTED`]) — 사람이 곁에 둔 메모 하나가 있어도 안 지운다
 /// - **`SKILL.md` 머리가 그 이름이다**(`---\nname: <이름>\n`) — moai 가 심는 글은 모두 이 머리로 연다
 fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<PathBuf>, Vec<PathBuf>)> {
     if !std::fs::symlink_metadata(dir).ok()?.is_dir() {
@@ -1674,7 +1648,9 @@ fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<Path
             if kind.is_dir() {
                 dirs.push(path.clone());
                 walk.push(path);
-            } else if kind.is_file() && known.iter().any(|k| path.strip_prefix(dir).is_ok_and(|rel| rel == Path::new(k))) {
+            } else if kind.is_file()
+                && known.iter().any(|k| path.strip_prefix(dir).is_ok_and(|rel| rel == Path::new(k)))
+            {
                 files.push(path);
             } else {
                 return None;
@@ -1779,7 +1755,7 @@ mod tests {
         }
     }
 
-    /// **지금 심는 스킬과 그 파일은 모두 [`EVER_PLANTED`] 에 있다**(moai-six5.1xz). 빠지면 그 스킬을 걷는 날 다음 판이
+    /// **지금 심는 스킬과 그 파일은 모두 [`skill::EVER_PLANTED`] 에 있다**(moai-six5.1xz). 빠지면 그 스킬을 걷는 날 다음 판이
     /// 옛 디렉터리를 못 알아봐 남기고, 위키가 그 이름을 다시 id 로 센다. 두 트리를 다 본다.
     #[test]
     fn every_planted_skill_is_on_the_list() {
@@ -1793,12 +1769,16 @@ mod tests {
                 let mut parts = rel.components();
                 let name = parts.next().unwrap().as_os_str().to_str().unwrap();
                 let file = parts.as_path();
-                let known = EVER_PLANTED.iter().find(|(n, _)| *n == name).map(|(_, f)| *f);
-                assert!(known.is_some_and(|f| f.iter().any(|k| Path::new(k) == file)), "{} 이 목록에 없다", path.display());
+                let known = skill::EVER_PLANTED.iter().find(|(n, _)| *n == name).map(|(_, f)| *f);
+                assert!(
+                    known.is_some_and(|f| f.iter().any(|k| Path::new(k) == file)),
+                    "{} 이 목록에 없다",
+                    path.display()
+                );
             }
         }
         for name in skill::NAMES {
-            assert!(ever_planted(name), "{name} 이 목록에 없다");
+            assert!(skill::ever_planted(name), "{name} 이 목록에 없다");
         }
     }
 

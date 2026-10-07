@@ -2073,7 +2073,7 @@ pub fn taken_ids(issues: &[Issue], reserved: &BTreeSet<String>) -> BTreeSet<Stri
         .map(|i| i.id.clone())
         .chain(reserved.iter().cloned())
         // 걷은 스킬(`moai-work`)까지 든다 — 위키가 거르는 목록과 한 벌이다(moai-six5.1xz).
-        .chain(crate::cmd::skill::EVER_PLANTED.map(|(name, _)| name.to_string()))
+        .chain(crate::skill::EVER_PLANTED.map(|(name, _)| name.to_string()))
         .collect()
 }
 
@@ -4570,7 +4570,7 @@ mod tests {
     #[test]
     fn the_skill_names_are_taken() {
         let taken = taken_ids(&[], &BTreeSet::new());
-        for (name, _) in crate::cmd::skill::EVER_PLANTED {
+        for (name, _) in crate::skill::EVER_PLANTED {
             assert!(taken.contains(name), "{name} 를 새 id 로 지을 수 있다");
         }
     }

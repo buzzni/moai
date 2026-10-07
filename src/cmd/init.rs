@@ -769,8 +769,7 @@ fn gaps_in(files: &[Dotfile]) -> Vec<(&'static str, &'static str, Vec<String>)> 
                 return None;
             };
             let text = text.unwrap_or_default();
-            let missing: Vec<String> =
-                missing_rules(&text, &d.block).into_iter().map(str::to_string).collect();
+            let missing: Vec<String> = missing_rules(&text, &d.block).into_iter().map(str::to_string).collect();
             (!missing.is_empty()).then_some((d.name, d.kind, missing))
         })
         .collect()

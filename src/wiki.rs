@@ -636,7 +636,7 @@ pub struct Parsed {
 ///   이름이지 id 가 아니다
 /// - moai 가 심는 스킬의 이름은 id 가 아니다 — `moai-wiki` 는 접두어 `moai` 뒤 네 글자라
 ///   꼴로는 id 다(2026-10-04 사용자 결정, moai-mdzx.3pm). 그 id 의 줄이 트래커에 있어도 안 센다 — 페이지에서 그
-///   낱말은 스킬이다. **걷은 스킬의 이름도 든다**([`crate::cmd::skill::EVER_PLANTED`], moai-six5.1xz) — 0.9.0 이 걷은
+///   낱말은 스킬이다. **걷은 스킬의 이름도 든다**([`crate::skill::EVER_PLANTED`], moai-six5.1xz) — 0.9.0 이 걷은
 ///   `moai-work` 를 이야기하는 페이지가 그 낱말을 없는 id 로 세면 안 된다
 /// - 링크는 [`target`] 이 페이지 링크로 푸는 것만 든다
 /// - 머리글은 모든 단이 앵커를 받는다([`Anchors`]). 앵커를 짓는 글은 GitHub 이 화면에 그리는 글이다 — 인라인 코드는
@@ -670,7 +670,7 @@ pub fn parse(slug: &str, body: &str, prefix: &str) -> Parsed {
     let ids = |s: &str, out: &mut Vec<String>| {
         for id in crate::git::ids_in(s) {
             if id.rsplit_once('-').is_some_and(|(p, _)| p == prefix)
-                && !crate::cmd::skill::ever_planted(id)
+                && !crate::skill::ever_planted(id)
                 && !out.iter().any(|seen| seen == id)
             {
                 out.push(id.to_string());
@@ -955,7 +955,7 @@ mod tests {
                     moai-supervise and moai hand out moai-wik1 and moai-wiki.x1y.\n";
         assert_eq!(parse("a", body, "moai").ids, ["moai-wik1", "moai-wiki.x1y"]);
         // 걷은 스킬(`moai-work`)의 이름도 든다(moai-six5.1xz).
-        for (name, _) in crate::cmd::skill::EVER_PLANTED {
+        for (name, _) in crate::skill::EVER_PLANTED {
             assert!(!parse("a", &format!("{name}\n"), "moai").ids.iter().any(|id| id == name), "{name} 를 id 로 셌다");
         }
     }
