@@ -5171,3 +5171,11 @@
 {"ts":"2026-10-07T02:48:53Z","id":"moai-xfvj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-07T02:49:49Z","id":"moai-xfvj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — one wiki section, supervisor window)"}
 {"ts":"2026-10-07T02:49:49Z","id":"moai-xfvj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-07T07:09:22Z","id":"moai-cy19","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"inbox --ack 와 Stop 이 여러 통을 가지다 끊기면 앞 편지가 읽음으로 남는다"}
+{"ts":"2026-10-07T07:09:22Z","id":"moai-lvqi","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"send --wake 가 받는 쪽의 다른 CLAUDE_CONFIG_DIR 장부를 못 읽는다"}
+{"ts":"2026-10-07T07:09:22Z","id":"moai-runx","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"시계가 20분 넘게 어긋난 두 산 기계는 서로의 장을 떠난 것으로 읽는다"}
+{"ts":"2026-10-07T07:09:23Z","id":"moai-vb55","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"hello 가 제 장을 찾는 차례가 훅과 거꾸로다"}
+{"ts":"2026-10-07T07:09:23Z","id":"moai-yvev","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"훅 배달을 글을 낸 뒤로 미룬다 — 두 걸음 배달"}
+{"ts":"2026-10-07T07:09:23Z","id":"moai-uha2","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init 의 .gitignore 줄이 / 로 끝나 .moai/mail·agents 링크는 안 가린다"}
+{"ts":"2026-10-07T07:09:23Z","id":"moai-rnta","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"inbox <id> 쪽의 드문 가장자리 셋 — 큰 머리 줄·두 함의 같은 id·끝 줄바꿈"}
+{"ts":"2026-10-07T07:09:24Z","id":"moai-sn1t","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"inbox 목록도 긴 편지를 통째로 내 출력 상한에서 잘린다"}
