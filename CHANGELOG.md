@@ -20,6 +20,10 @@ does not tag — see `CONTRIBUTING.md`.
   release `moai hook stop-failure`, `interrupt` and `session-end` stay as
   commands that do nothing, so hooks planted before 0.9 do not print an error.
   (moai-5uwh)
+- **`moai init` no longer writes the `.moai/mail/` and `.moai/agents/` lines
+  into `.gitignore`**, and no longer looks for them. Lines an earlier `init`
+  wrote stay where they are, and so do the directories — each holds its own
+  `.gitignore`, so git does not see them either way. (moai-six5.p9p)
 
 ### Removed
 
