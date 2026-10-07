@@ -1646,13 +1646,22 @@ impl Leftover {
 
 /// 스킬 자리 `skills` 에 남은, 이번 트리가 안 심는 moai 의 스킬 디렉터리들 — [`skill::EVER_PLANTED`] 의 차례로. 아무것도 안
 /// 지운다. **그 자리가 링크로 체크아웃 밖에 닿으면 아무것도 안 댄다**([`outside`]) — moai 는 거기 안 심는다.
+///
+/// **두 트리가 한 자리에 닿으면 어느 트리든 이 판이 심는 이름은 안 댄다**([`one_place`], 리뷰 moai-ybns.451.a3o).
+/// `.agents/skills -> ../.claude/moai-plugin/skills` 처럼 한쪽이 체크아웃 안의 링크로 다른 쪽을 가리키면, `.agents` 의
+/// 트리가 안 심는 감독 스킬은 Claude 의 트리가 심은 것이다. `planting` 만 보던 판은 `--agent codex` 하나로 그것을 "이 판이
+/// 안 심는 스킬" 로 걷어, 새 Claude 세션이 `/moai-supervise` 를 잃었다(링크가 거꾸로여도 같다). Claude 의 트리는
+/// [`skill::NAMES`] 를 다 심으니 둘을 합친 것이 그 목록이다.
 fn leftovers(skills: &Path, planting: &[&str], root: &Path) -> Vec<Leftover> {
     if outside(skills, root).is_some() {
         return Vec::new();
     }
+    let (agents, claude) = (root.join(skill::AGENTS_DIR), root.join(skill::DIR).join("skills"));
+    let shared = one_place(skills, &agents) && one_place(skills, &claude);
     skill::EVER_PLANTED
         .iter()
         .filter(|(name, _)| !planting.contains(name))
+        .filter(|(name, _)| !(shared && skill::NAMES.contains(name)))
         .filter_map(|&(name, known)| {
             let dir = skills.join(name);
             std::fs::symlink_metadata(&dir).ok()?;
@@ -1663,6 +1672,13 @@ fn leftovers(skills: &Path, planting: &[&str], root: &Path) -> Vec<Leftover> {
             Some(Leftover { dir, name, known, state })
         })
         .collect()
+}
+
+/// 두 자리가 링크를 다 푼 뒤 같은 곳인가 — [`outside`] 와 같은 자로 푼다. 아직 없는 조각은 있는 조상까지 풀고 붙이니
+/// 둘 다 없어도 철자로 견준다.
+fn one_place(a: &Path, b: &Path) -> bool {
+    let landed = |p: &Path| crate::path::real_prefix(&crate::path::lexical(p));
+    landed(a) == landed(b)
 }
 
 /// 디렉터리 `dir` 이 **moai 가 심은 꼴 그대로인가** — 그렇다면 지울 파일과 디렉터리(깊은 것부터)다.
@@ -1943,6 +1959,51 @@ mod tests {
         assert_eq!(states(&left), [Left::Foreign; 2], "링크를 따라 걷으려 했다");
         left.iter_mut().for_each(|l| l.remove(&root));
         assert!(away.join("SKILL.md").is_file(), "링크 너머를 지웠다");
+    }
+
+    /// **두 트리가 링크로 한 자리에 닿으면 다른 트리가 심는 스킬을 안 걷는다**(리뷰 moai-ybns.451.a3o) — `.agents/skills` 가
+    /// Claude 의 `skills` 를 가리키면(또는 거꾸로) `.agents` 가 안 심는 감독 스킬은 Claude 의 것이다. 걷은 스킬(`moai-work`)은
+    /// 어느 트리도 안 심으니 그대로 걷는다.
+    #[cfg(unix)]
+    #[test]
+    fn a_tree_linked_onto_the_other_keeps_what_the_other_plants() {
+        let skill_md = |name: &str| format!("---\nname: {name}\ndescription: x\n---\n");
+        let skills = skill::skills();
+        let shared = skill::agents_tree(&skills);
+        let shared_names = planted_names(&shared, "");
+        let claude_tree = plant("t", Path::new("/repo"), "/bin/moai", &skills);
+        let claude_names = planted_names(&claude_tree, "skills");
+        for (real, link) in
+            [(".claude/moai-plugin/skills", ".agents/skills"), (".agents/skills", ".claude/moai-plugin/skills")]
+        {
+            let s = crate::scratch::Scratch::new("skill-leftovers-linked");
+            let root = s.path().to_path_buf();
+            let real_dir = root.join(real);
+            for name in ["moai", "moai-supervise", "moai-wiki", "moai-work"] {
+                std::fs::create_dir_all(real_dir.join(name)).unwrap();
+                std::fs::write(real_dir.join(name).join("SKILL.md"), skill_md(name)).unwrap();
+            }
+            let link = root.join(link);
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            // 체크아웃 안을 가리키는 상대 링크 — 커밋되는 꼴이다.
+            let up = link.parent().unwrap().strip_prefix(&root).unwrap().components().count();
+            std::os::unix::fs::symlink((0..up).fold(PathBuf::new(), |p, _| p.join("..")).join(real), &link).unwrap();
+            let trees =
+                [(root.join(skill::AGENTS_DIR), &shared_names), (root.join(skill::DIR).join("skills"), &claude_names)];
+            for (dir, planting) in &trees {
+                let named: Vec<&str> = leftovers(dir, planting, &root).iter().map(|l| l.name).collect();
+                assert_eq!(
+                    named,
+                    ["moai-work"],
+                    "{}: 다른 트리가 심는 스킬을 걷으려 했다 ({real} 이 진짜)",
+                    dir.display()
+                );
+            }
+            let (dir, planting) = &trees[0];
+            leftovers(dir, planting, &root).iter_mut().for_each(|l| l.remove(&root));
+            assert!(real_dir.join("moai-supervise/SKILL.md").is_file(), "감독 스킬을 걷었다");
+            assert!(!real_dir.join("moai-work").exists(), "걷은 스킬을 남겼다");
+        }
     }
 
     /// **트리를 다 잰 뒤에 첫 파일을 쓴다**(moai-dj4j.ug2, 리뷰 moai-ml0d.que 8번) — 트리는 `skills/**` 를
