@@ -371,6 +371,22 @@ struct GitPlace {
     linked: bool,
 }
 
+/// 이 공통 디렉터리가 **맨 저장소인가**(moai-r0x8.33p) — 그러면 딸린 워크트리에 주 체크아웃이 없어, 거절문이 "주
+/// 체크아웃의 트래커" 를 대면 없는 자리를 댄다.
+///
+/// **git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 찾기가 옮겨 갈 자리를 재는 [`crate::worktree::main_root`] 로 가르던
+/// 판은 공통 디렉터리의 이름(`.git` 인가)을 읽어, `git init --separate-git-dir` 의 워크트리에는 있는 주 체크아웃을
+/// 없다 하고, `.git` 이라는 이름의 맨 저장소(`git clone --bare <url> bin/.git`)에는 없는 주 체크아웃을 댔다. 이름이
+/// 아니라 `core.bare` 가 답이고, 그것을 읽는 자는 git 이다. git 을 띄우므로 **이 거절의 갈래에서만** 묻는다 —
+/// 딸린 워크트리에서 트래커를 git 밖에 두려 할 때뿐이다. 답을 못 얻으면 맨 저장소가 아니라고 둔다(딸린 워크트리의
+/// 거절이 그대로 선다).
+fn is_bare(common: &Path) -> bool {
+    let args = ["rev-parse", "--is-bare-repository"];
+    crate::git::run_reading_user_config(common, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET))
+        .and_then(Result::ok)
+        .is_some_and(|said| said.trim() == "true")
+}
+
 fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlace> {
     let args = ["rev-parse", "--git-dir", "--git-common-dir", "--show-prefix"];
     let out = crate::git::run_reading_user_config(root, &args, budget)?.ok()?;
@@ -481,12 +497,18 @@ fn clash_said(lang: crate::i18n::Lang, c: crate::init_choice::Conflict) -> Strin
 /// 쓰고 `.gitignore` 의 줄은 머지로 돌아가, 거기 커밋된 트래커의 새 파일(새 사람의 저널)이 말없이 커밋에서 빠진다.
 /// 워크트리 거절문이 대는 `MOAI_HERE=1 moai init` 이 그 자리로 가는 길이다. 처음 심을 때만 잰다 — 이미 선 트래커를
 /// 맞추는 `init` 을 막으면 고칠 길이 도구 밖에만 남는다.
+///
+/// **맨 저장소의 워크트리도 같은 까닭으로 거절하되 말이 다르다**(moai-r0x8.33p) — 주 체크아웃이 없으니 가리는 것은
+/// 같은 `info/exclude` 를 쓰는 다른 워크트리들의 트래커다. "주 체크아웃의 트래커" 를 대던 판은 없는 자리를 댔다.
 fn local_refusal(lang: crate::i18n::Lang, tracking: Tracking, place: Option<&GitPlace>) -> Option<String> {
     if tracking.tracked() {
         return None;
     }
     match place {
         None => Some(say(lang, "refuse.init_local_no_git").to_string()),
+        // 맨 저장소의 워크트리에는 주 체크아웃이 없다(moai-r0x8.33p) — 가리는 것은 같은 `info/exclude` 를 쓰는
+        // 다른 워크트리들의 트래커다.
+        Some(p) if p.linked && is_bare(&p.dir) => Some(say(lang, "refuse.init_local_bare").to_string()),
         Some(p) if p.linked => Some(say(lang, "refuse.init_local_linked").to_string()),
         Some(_) => None,
     }
@@ -953,6 +975,11 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
 /// 선다: 보는 것은 AGENTS.md 하나고, 심기 전에 부르는 것도 자연스럽다.
 pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+    // **디렉터리가 아닌 `.moai` 는 못 읽는 트래커다**(moai-r0x8.e19) — [`run`] 이 그 말로 멈추므로 여기서
+    // `moai init` 을 대면 1 로 끝나는 명령을 권한다. 그 자리를 못 읽는 것이라 0 이 아니다.
+    if let crate::store::Spot::NotADir(stood) = crate::store::spot(&root) {
+        return Err(crate::store::not_a_dir(ctx.lang(), &root, &stood));
+    }
     let (state, text) = agents_state(&root).map_err(|(name, fell)| {
         let at = if name == crate::guide::GUIDE_FILE { crate::store::Repo::opened_root(&root) } else { root.clone() };
         Fail::new(unread_at(ctx.lang(), &at, name, &fell))
@@ -1545,6 +1572,12 @@ fn one_line(message: &str) -> String {
 pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
+    // **디렉터리가 아닌 `.moai` 위에는 안 세운다**(moai-r0x8.e19) — 다른 명령이 멈추는 그 말(`store::not_a_dir`)로
+    // 멈추고 그 자리를 안 건드린다. 묻지 않던 판은 보통 파일이면 "이미 심겼다" 로 들어가 ENOTDIR 로, 끝이 없는
+    // 링크면 `create_dir` 의 EEXIST 로 넘어져 거기 무엇이 섰는지를 못 댔다.
+    if let crate::store::Spot::NotADir(stood) = crate::store::spot(&root) {
+        return Err(crate::store::not_a_dir(ctx.lang(), &root, &stood));
+    }
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
     // 명령이 하는 일은 딸린 파일을 다시 맞추는 것뿐이라 새 트래커가 서지 않는다.
     let elsewhere = if dir.exists() { None } else { crate::store::planted_elsewhere(&root) };

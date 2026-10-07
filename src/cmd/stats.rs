@@ -11,8 +11,10 @@ use crate::report::stats::{self, Ask, Axis, Bucket};
 pub fn run(ctx: &Ctx, args: StatsArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
     // **겹쳐 보지 않는다** — `--worktree` 를 안 받는다(`cli::StatsArgs`).
-    let crate::worktree::Gathered { origin, .. } = super::gather(ctx, &repo, false)?;
-    let load = repo.read_all()?;
+    // 겹치지 않은 `gather` 의 줄은 `repo.read()` 그대로다 — 그 위에 아카이브만 얹는다. `repo.read_all()` 로 다시 읽던
+    // 판은 스냅샷을 두 번 풀었다(moai-r0x8.2kg).
+    let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, &repo, false)?;
+    let load = crate::archive::read_all(&repo.root, load)?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
     let StatsArgs { by, bucket, last, filter } = args;
     let kind = filter.kind;

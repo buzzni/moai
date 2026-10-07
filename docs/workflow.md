@@ -32,7 +32,11 @@ own work in a repository that is not yours. There is nothing for git to merge, s
 `.gitattributes` and the merge driver are left alone, and `moai status` does not
 ask for them. `init` asks git which way stands every time instead of storing it,
 so it will not switch it for you: moving `.moai` in or out of git is a commit you
-make yourself (`git rm --cached`, or dropping the ignore line).
+make yourself (`git rm --cached`, or dropping the ignore line). In a linked
+worktree, `exclude` and `gitignore` are refused: every worktree shares the
+repository's `info/exclude`, so the rule would hide the trackers the others
+commit. In a worktree of a bare repository the refusal says there is no main
+checkout.
 
 The first initialization reads existing ignore rules too, including your global
 excludes. If git fails or exceeds its probe budget, `init` refuses before writing
@@ -110,8 +114,14 @@ and wait on each other to merge.
   worktree reads and writes the main checkout's `.moai/`, and one line on stderr
   says where the write went. Commit tracker changes from the main checkout with
   `git commit -- .moai/`; the worktree's own copy stays as it was when it split
-  off, so the merge never fights over it (moai-y7go). `MOAI_HERE=1` turns this
-  off for one run — almost nobody needs it
+  off, so the merge never fights over it (moai-y7go). This holds wherever the
+  worktree stands — under `.worktrees/` or outside the main checkout
+  (`git worktree add ../side`) — and for one split off before moai came in, with
+  no `.moai` of its own; it holds for every command, `prime`, `status`, `ready`
+  and `project add|ls` included. The main checkout counts as holding a tracker
+  when `.moai/config.toml` is a file there — a `.moai` left with only its `lock`
+  does not (moai-r0x8). `MOAI_HERE=1` turns this off for one run — almost nobody
+  needs it
 - **Pick up first, then make the worktree.** Every session on the clone reads the
   main checkout's tracker, so a pick-up shows to the others the moment it is
   written; commit it there so it also reaches other clones
@@ -213,6 +223,9 @@ where its contributors read them rather than repeated here:
 - **A worktree's `.moai/` changed.** An old binary or `MOAI_HERE=1` wrote there;
   replay the change against the main checkout — see "A worktree wrote the tracker
   in the wrong place" in [Recovery](recovery.md)
+- **A worktree says there is no tracker.** The main checkout holds no
+  `.moai/config.toml` — see [A worktree says there is no
+  tracker](recovery.md#a-worktree-says-there-is-no-tracker)
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
 - **`moai status` names an `archive_duplicate_id`.** The same id stands live and
@@ -222,4 +235,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8

@@ -1242,10 +1242,11 @@ const HELD: &str = "moai-held";
 /// **트래커가 있다는 것은 설정이 있다는 것이다**(리뷰 moai-71ht 셋째 판) — `.moai` 가 디렉터리인
 /// 것만 보던 판은 무시되는 `.moai/lock` 하나만 남은 루트(옛 커밋을 체크아웃하거나 bisect 하면
 /// 남는다)를 트래커로 읽어, 그 저장소의 **모든** 워크트리가 "설정이 없다" 로 넘어졌다. 락은
-/// `Lock::drop` 이 안 지우므로 트래커가 통째로 사라져도 그 파일만 남는다.
+/// `Lock::drop` 이 안 지우므로 트래커가 통째로 사라져도 그 파일만 남는다. 그 자는
+/// [`crate::store::holds_tracker`] 하나고, `init` 의 거절도 같은 자로 묻는다(moai-r0x8.apz).
 pub fn tracker_root(root: &Path) -> Option<PathBuf> {
     let main = main_root(root)?;
-    main.join(".moai").join("config.toml").is_file().then_some(main)
+    crate::store::holds_tracker(&main).then_some(main)
 }
 
 /// 이 트래커가 든 **제** 워크트리의 꼭대기. git 을 띄우지 않는다. 저장소가 아니면 없다.
