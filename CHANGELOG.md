@@ -44,6 +44,18 @@ does not tag — see `CONTRIBUTING.md`.
   delete, and the wiki still does not read `moai-work` as an issue id.
   (moai-six5.1xz)
 
+### Added
+
+- **`moai status` says when the planted skills or hooks differ from this
+  binary's, and names the line that plants them again** — `moai skill install`,
+  with `--agent codex` or `antigravity` where `.codex/` or `.agents/` holds
+  them. It is a notice like the AGENTS.md one: it blocks nothing and never
+  changes the exit code. `moai init` says the same line when it does not run the
+  install itself. **After upgrading from 0.8, run `moai skill install` again**
+  (with `--agent codex` / `--agent antigravity` if you planted for them) — it
+  removes `moai-work`, the `.agents/` copy of `moai-supervise` and the hook
+  events 0.9 no longer listens for. (moai-ybns.451.rpd)
+
 ### Removed
 
 - **The mailbox and presence are gone: `moai send`, `moai inbox`, `moai hello`

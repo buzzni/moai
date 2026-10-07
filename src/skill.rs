@@ -115,9 +115,7 @@ where
     I: IntoIterator<Item = &'a Skill>,
     I::IntoIter: 'a,
 {
-    skills
-        .into_iter()
-        .flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+    skills.into_iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
 }
 
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
@@ -739,10 +737,11 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
 
 /// 심을 파일들. 경로는 `DIR` 부터의 상대다.
 ///
-/// **판(version)은 내용의 해시다.** `claude plugin install` 은 `directory`
-/// 원본이어도 제 캐시로 **복사**하고, 그 복사는 `plugin.json` 의 판이 달라질
-/// 때만 새로 뜬다. 손으로 세는 판은 반드시 어긋난다 — 내용이 같으면 판도
-/// 같아 헛 업데이트가 없고, 한 글자라도 다르면 반드시 달라진다.
+/// **판(version)은 내용의 해시다.** Claude Code 는 디렉터리 마켓플레이스의 플러그인 스킬을 이 자리([`DIR`])에서
+/// 그대로 읽는다 — 세션의 "Base directory for this skill" 이 `<체크아웃>/.claude/moai-plugin/skills/<이름>` 이다.
+/// `claude plugin install`·`update` 는 제 캐시에 사본을 뜨고 설치 장부의 판을 올리지만, 세션은 그 사본의 스킬을
+/// 안 읽는다 — 판이 정하는 것은 `plugin update` 가 새 판을 알아보는 때다. 손으로 세는 판은 반드시 어긋난다 —
+/// 내용이 같으면 판도 같아 헛 업데이트가 없고, 한 글자라도 다르면 반드시 달라진다.
 ///
 /// 판이 **내려가도** 괜찮은 까닭은 [`version_of`] 에 있다. 두 자리에 나눠 적으면
 /// 한쪽만 고쳐져 갈라진다 — 실제로 여기 적혀 있던 까닭이 틀린 채로 남아 있었다.
@@ -2328,6 +2327,29 @@ mod tests {
             assert_eq!(planted_exe(&codex_hooks(exe)).as_deref(), Some(exe), "codex {exe}");
             assert_eq!(planted_exe(&antigravity_hooks(exe)).as_deref(), Some(exe), "antigravity {exe}");
         }
+    }
+
+    /// **Claude 의 플러그인이 거는 이벤트를 손으로 적은 목록에 맨다**(moai-ybns.451.sdk) — 커밋된 plugin.json 을 견주는
+    /// `the_checked_in_plugin_matches_the_guide` 는 `MOAI_BLESS=1` 한 번에 [`HOOKS`] 가 낸 것을 그대로 다시 써서, 표에서
+    /// 이벤트가 빠지거나 걷은 `StopFailure`·`SessionEnd` 가 되돌아와도 아무것도 안 붉어진다. 기대를 표에서 읽지 않는다 —
+    /// 읽으면 표와 함께 움직인다.
+    #[test]
+    fn the_claude_plugin_hooks_exactly_these_events() {
+        const WANT: &[(&str, &str)] = &[
+            ("PreToolUse", "pre-tool-use"),
+            ("SessionStart", "session-start"),
+            ("Stop", "stop"),
+            ("UserPromptSubmit", "user-prompt-submit"),
+        ];
+        let v: serde_json::Value = serde_json::from_str(&plugin_json("/repo/target/release/moai", "0")).unwrap();
+        let hooks = v["hooks"].as_object().unwrap();
+        let events: Vec<&str> = hooks.keys().map(String::as_str).collect();
+        assert_eq!(events, WANT.iter().map(|(at, _)| *at).collect::<Vec<_>>(), "Claude 에 거는 이벤트가 달라졌다");
+        for (at, sub) in WANT {
+            let line = hooks[*at][0]["hooks"][0]["command"].as_str().unwrap();
+            assert!(line.contains(&format!(" hook {sub}")), "{at} 가 hook {sub} 를 안 부른다 — {line}");
+        }
+        assert_eq!(hooks["PreToolUse"][0]["matcher"], WATCHED);
     }
 
     /// Codex 가 추가 맥락을 받는 이벤트 — 그 밖의 처리기에 적힌 `additionalContextLimit` 은 버리고 경고한다(Codex 훅

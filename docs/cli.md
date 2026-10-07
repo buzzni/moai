@@ -2709,7 +2709,8 @@ Options:
   naming either plants it for both. There is nothing to register: commit the
   directory and the team has it. --scope is Claude's registration only. The
   text is the one Claude gets; the steps that differ per agent are in the
-  skills' "Words per agent" table.
+  `moai` skill's "Words per agent" table. The supervisor (moai-supervise) is
+  planted for Claude Code only — Codex and Antigravity get no supervisor.
 
   The hooks are each agent's own: --agent codex plants `.codex/hooks.json`,
   --agent antigravity plants `.agents/hooks.json` - commit them too. Codex

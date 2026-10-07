@@ -286,10 +286,14 @@ and Antigravity have no supervisor; their sessions pick their own work with
    [worker](glossary.md#worker) — a Remote Control or cloud session cannot read
    the steps file the supervisor names. `ListAgents` shows no directory, so the
    supervisor knows a session of this repository by its name, which Claude Code
-   takes from the directory it was opened in (`moa-issue-bc` for `moa-issue`) —
-   a session you renamed is not counted. Nothing registers it, and
-   nobody is asked which ones
-2. **Make the supervisor.** In one of them, call `/moai-supervise`. It picks
+   slugs from the directory it was opened in (`moa-issue-bc` for `moa-issue`,
+   `tvshop-updater-ca` for `tvshop_updater`) — a session you renamed is not
+   counted. A name is only a candidate: a session of another repository whose
+   name happens to start the same way refuses the work when `Root:` is not its
+   repository. Nothing registers it, and nobody is asked which ones
+2. **Make the supervisor — one per repository.** In one of them, call
+   `/moai-supervise`; it asks you first whether another window already runs it,
+   and a supervisor that is sent work refuses it. It picks
    backlog items that do not collide with the work open, and finds the workers
    in `ListAgents`: every idle session of this repository except itself
 3. **The message carries the assignment and names the steps.** `SendMessage` to
@@ -307,7 +311,9 @@ and Antigravity have no supervisor; their sessions pick their own work with
    picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
    reviewed with `/code-review` inside its own session, merges, closes, leaves a
    `Next:` note and, last of all, reports with `SendMessage` to the supervisor
-   that sent the work. Then it tells its person whether the window can be
+   that sent the work — if that send fails because the supervisor restarted, it
+   leaves the report as a `report:` note on the epic, and a supervisor that
+   starts or resumes reads those before it waits. Then it tells its person whether the window can be
    cleared now, and ends its turn; the next message wakes it
 5. **The supervisor checks the report** — the merge is on the base branch, the
    epic is done, the worktree is gone — and sends the next backlog item
@@ -326,7 +332,20 @@ nothing, so the message names the steps file by its absolute path and the
 worker reads it.
 
 **Stalled work** — a member picked up with no live session working it — the
-supervisor tells apart by the busy and idle rows of `ListAgents`.
+supervisor looks for before any new backlog, and it reads it from the tracker,
+not from `ListAgents`. The `stranded` warnings in `moai status --json` name rows
+picked up while no live worktree holds them (a row picked up less than an hour
+ago does not show), and the `Place` line of `moai show <id>` says where each one
+stands. Only Place `none` is handed on to an idle worker; a path, `not showing
+yet` and `unknown` are left alone. `stranded` cannot tell a gone worktree from
+work done in the root with no worktree, so while a `busy` session of the
+repository stands in `ListAgents` the supervisor asks what it holds before
+handing the row on. A worktree that is still there never shows under `stranded`:
+its session has not ended because it reads idle — its person may be answering
+it — nor because its name is gone, since a worker restarted with
+`claude --resume` comes back under a new session name. In both cases the
+supervisor waits for the person to say that window has ended. Whether stalled
+work is carried on or put down is the person's call.
 
 **When the person steps away**, they tell the supervisor, and its messages say
 `Person: away`. The worker then settles a design question by its own
@@ -367,6 +386,10 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
 - **Codex runs none of moai's hooks.** Codex has not been told to trust them —
   open `/hooks` in a codex session in the repository and trust them. An install
   that changed them asks for that trust again
+- **`moai status` says the planted skills or hooks differ from this moai's.**
+  An older moai planted them — most often after upgrading. Run the line the
+  notice names (`moai skill install`, with `--agent codex` or `antigravity`
+  where those trees stand); it also removes what this moai no longer plants
 - **`skill install` says a hooks file is not moai's.** It holds hooks someone
   else wrote, and moai will not overwrite them. Merge moai's entries into it by
   hand, or move it aside and install again
@@ -403,7 +426,7 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73
 
 ## Archive storage
 

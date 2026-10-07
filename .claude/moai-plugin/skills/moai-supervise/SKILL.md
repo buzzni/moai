@@ -23,9 +23,17 @@ workers talk with Claude Code's own tools:
 **Every session here is one a person opened.** moai never launches an agent or runs one
 headless, and neither does the supervisor. **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
-directory's name and a `-`. Nobody registers and nobody is asked which windows count.
+directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
 which the worker reads (3).
+
+**One supervisor per repository.** A supervisor waiting for reports reads `idle` in
+`ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
+books of what was sent — one backlog, or one worker, gets two jobs. Before the first round,
+ask the person whether another window here runs `moai-supervise`; if one does, stop. A
+session that refuses work because it is a supervisor comes out of the candidates. **You
+refuse too:** a message that hands you backlog to work on came from another supervisor — do
+nothing of it, reply to its `from` that you are a supervisor, and tell the person.
 
 Five things about the messaging, one line each:
 
@@ -110,10 +118,15 @@ key does not stand even though one is broken. No key does not mean "nothing is b
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
 died does not show under `stranded`** — it is a worktree in `git worktree list` whose
-worker — the session you sent that work to — no longer stands in `ListAgents`. A session
-that still stands there, idle, has not ended: its person may be answering it, or it may
-be holding your message for approval. Hand its work on
-only once the person says that window has ended; until then it is that worker's.
+worker — the session you sent that work to — no longer answers. **A name gone from
+`ListAgents` is not an ended session**: the name belongs to the process, so a window resumed
+with `claude --resume` comes back under a new name, still in that worktree. A session that
+still stands there, idle, has not ended either: its person may be answering it, or it may be
+holding your message for approval. Look for the worker by its worktree, not its name — ask
+the person which window works in it. Hand its work on
+only once the person says that window has ended; until then it is that worker's. When it
+comes back under a new name, move what you keep under the old one — the work you sent, a
+refusal — to the new name (2).
 
 - When there is such work, hand carrying it on to one idle worker **before any new
   backlog**. Send the message in 3 with its first two lines changed to the two below, and
@@ -178,23 +191,30 @@ such rows apart under `others`.
 **2. Find a worker.** Call `ListAgents` once. A worker is a row that
 
 - belongs to this repository. `ListAgents` shows no directory; a session takes its name from
-  the directory it was opened in — `<root dir name>-` and a short suffix, as in `moa-issue-bc`
-  for a session opened in `moa-issue`. A row whose name does not start that way — renamed, or
-  opened somewhere else — is not one
+  the directory it was opened in, slugged — lowercased, every run of characters other than
+  `a-z` and `0-9` turned into one `-`, cut at 4 words or 40 characters — then `-` and a short
+  hex suffix: `moa-issue-bc` for `moa-issue`, `tvshop-updater-ca` for `tvshop_updater`. A row
+  whose name does not start with the root's slug and a `-` — renamed, or opened somewhere
+  else — is not one. **A name that does start so is still only a candidate**: `api-gateway-1c`
+  starts with `api-`, and a session opened in a clone named `moai-web` starts with `moai-`.
+  The worker confirms it: the message carries `Root:`, and a session standing in
+  another repository refuses the work, so it comes out of the candidates (below)
 - is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
   yours or another session's (they stand under "Subagents", and a message to one resumes that
   subagent instead), and not a `bg` session
 - runs on this machine — a Remote Control or cloud session cannot read the steps file at the
   path you name (3), and sends no idle notice
 - reads `idle`
-- is not you
+- is not you, and not a supervisor (one per repository, above)
 
 Its name is what you send to. Nobody registers: any idle session a person opened here is a
 worker, and the message is the whole assignment.
 
 - **Leave out a worker whose sent work has not had its report checked.** It goes idle
   whenever its turn ends — while it asks its person something, say — and it is still
-  holding your work
+  holding your work. A resumed window comes back under a new name (0): while a worker you
+  sent to is gone from `ListAgents` with its report unchecked, a name you have not sent to
+  may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
   session of another repository
 - **A worker that refused the work comes out of the candidates and is not sent to
@@ -309,6 +329,15 @@ worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 `notify_when_idle` sends is not a report: a worker goes idle whenever its turn ends — while
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you.
+
+**A report reaches only the name it was sent to.** A supervisor that started again —
+restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
+report to the old one fails leaves it on the epic as a note with `report: <epic>` at its
+head. So when you start or resume, before waiting, read what the tracker holds:
+`moai show -s in_progress,review` is the work sent and not done, and
+`moai show -g 'report:' --all` finds the reports nobody received. Check each one you have
+not checked as in 5. A worker holding sent work you have no report for is still left out
+in 2 — ask it, or its person, how it stands.
 
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when

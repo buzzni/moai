@@ -30,8 +30,16 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   root is the top of the repository
 - `Person:` — `here`, or `away` (below)
 
+Ask two things where the window stands now, before you move anywhere.
+**If this window runs `moai-supervise` itself**, it is a supervisor, not a worker: do
+nothing of it, reply to the message's `from` that you are a supervisor, and end the turn.
+**If `Root:` is not this window's repository** — the window stands neither in it nor in one
+of its worktrees — the supervisor took you for a worker by a name that only looks like its
+repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
+end the turn.
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
-else, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from a worktree.
+else in that repository, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from
+a worktree.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
 
@@ -380,6 +388,10 @@ intent.
     the members left in 4-3 because the work beside you held the file, with that other work
     named, and the wiki pages 7-4 changed — or that it changed none — and anything still
     running that 11 could not finish.
+    **If that send fails** — the supervisor restarted, so its old name is gone — the report
+    must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
+    `moai note <epic> -b -` and take it into the root with a commit with a path as in 2. Tell
+    the person watching that the report is on the epic; the next supervisor reads it there.
     Then **say when the window can be cleared**, in one line to the person watching. The
     context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
     commit messages. If you can see your own context usage, put that number in the line too.

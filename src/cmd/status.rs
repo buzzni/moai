@@ -250,6 +250,8 @@ pub(crate) fn archive_board_unjudged(
 /// (moai-2f99), 머지 드라이버의 상태(moai-2ewr·moai-9khu). **넷째로 링크인 트래커를 비추는 알림이
 /// 함께 선다**(moai-jo3h) — 어긋난 것이 아니라 살아 있는 길이고 칠 명령(`hint`)도 없지만, 링크를 푸는
 /// 자리들이 갈릴 때 사람이 볼 곳을 대는 것이라 같은 자리에서 센다. 아래 "셋" 은 설치 알림을 말한다.
+/// 낡은 스킬·훅 트리([`skills_notice`], moai-ybns.451.rpd)도 설치 알림이라 여기 선다 — 하위 프로세스를 안 띄우고,
+/// 아무것도 안 심긴 저장소에서는 `stat` 몇 번이다.
 ///
 /// **한 자리다**(moai-1tcm). `moai status` 와 훅의 보드가 같은 셋을 싣는데, 셋을 표면마다 따로
 /// 적던 때는 그 사실이 "`moai status` 와 같은 알림을 싣는다" 는 주석으로만 서 있었다 — 한쪽에
@@ -278,10 +280,30 @@ pub(crate) fn archive_board_unjudged(
 pub fn install_notices(repo: &crate::store::Repo, chdir: bool) -> Vec<crate::report::Warning> {
     let mut out = Vec::new();
     out.extend(crate::cmd::init::agents_notice(repo.here(), chdir));
+    out.extend(skills_notice(repo.here(), &repo.config.prefix, chdir));
     out.extend(crate::cmd::init::dotfile_notice(repo.here(), chdir));
     out.extend(crate::cmd::merge_driver::notice(repo, chdir));
     out.extend(tracker_linked(repo));
     out
+}
+
+/// 심긴 스킬·훅이 이 판의 것과 다르면 그 알림(moai-ybns.451.rpd). 재는 것은 선 체크아웃이다(`Repo::here`) — 심는 길
+/// (`skill install`)이 거기 심는다. 0.8 이 심은 저장소를 0.9 로 열면 AGENTS.md 의 알림 하나만 서고, 그것을 따라 친
+/// `moai init` 은 스킬을 안 건드려 보드가 "드러난 것 없다" 로 끝났다 — 걷힌 명령을 가르치는 스킬이 그대로인데.
+///
+/// `moai init` 도 이것으로 끝줄을 댄다 — 훅이 이미 선 저장소에서는 `init` 이 스킬을 다시 안 심는다.
+pub(crate) fn skills_notice(root: &std::path::Path, prefix: &str, chdir: bool) -> Option<crate::report::Warning> {
+    let stale = crate::cmd::skill::stale_trees(root, prefix);
+    if stale.is_empty() {
+        return None;
+    }
+    // 자리는 겹쳐 와도(`.agents/skills` 를 두 에이전트가 함께 읽는다) 걸러 넣지 않는다 — `Warning` 이 `ids` 를 한 번씩만 든다.
+    let places: Vec<String> = stale.iter().map(|(p, _)| p.to_string()).collect();
+    let mut agents: Vec<&str> = stale.iter().map(|(_, a)| a.as_str()).collect();
+    agents.sort_by_key(|a| ["claude", "codex", "antigravity"].iter().position(|x| x == a));
+    agents.dedup();
+    let away = crate::cmd::init::away_root(root, chdir);
+    Some(crate::report::Warning::skills_stale(places, &agents, away.as_deref()))
 }
 
 /// 트래커 파일이 링크면 그 알림(moai-jo3h). 재는 파일은 보드가 정말 읽은 루트의 트래커다

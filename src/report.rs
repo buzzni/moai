@@ -4957,6 +4957,25 @@ impl Warning {
         Warning::new(kind, Vec::new()).count(1).notice().hint(&Warning::init_hint(root))
     }
 
+    /// 심긴 스킬·훅 트리가 이 판이 심을 것과 다르다는 **알림**(moai-ybns.451.rpd). 재는 쪽은
+    /// `cmd::skill::stale_trees` 고, `ids` 에 다른 자리(`.claude/moai-plugin`·`.agents/skills`·
+    /// `.codex/hooks.json`·`.agents/hooks.json`)를 든다. 칠 줄은 맞출 에이전트를 모두 든 `skill install` 한 줄이다 —
+    /// Claude 하나면 맨 `install` 이고(기본이 Claude 다), 아니면 `--agent` 를 에이전트마다 단다. `.agents` 를 맞추려면
+    /// `--agent codex|antigravity` 가 있어야 하는데 그것을 아는 사람이 드물다.
+    ///
+    /// **경고가 아니다** — `agents_stale` 과 같은 자리다. 낡은 스킬은 다시 심을 일이고, 이 바이너리가 더 낡았을 수도 있다
+    /// (글이 그 말을 함께 한다).
+    pub fn skills_stale(places: Vec<String>, agents: &[&str], root: Option<&str>) -> Warning {
+        let tail = match agents {
+            ["claude"] => "skill install".to_string(),
+            _ => {
+                let flags: Vec<String> = agents.iter().map(|a| format!("--agent {a}")).collect();
+                format!("skill install {}", flags.join(" "))
+            }
+        };
+        Warning::new("skills_stale", places).notice().hint(&Warning::cli_hint(root, &tail))
+    }
+
     /// 딸린 파일(`.gitignore`·`.gitattributes`)에 moai 가 쓰는 규칙이 빠졌다는 **알림**
     /// (moai-2f99). 재는 쪽은 `cmd::init::gaps_in` 고, `status` 와 훅의 보드가 이것을
     /// `notices` 에 얹는다 — [`status`] 는 `&[Issue]` 만 받는 순수 함수라 파일을 안 읽는다.

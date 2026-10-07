@@ -630,7 +630,7 @@ fn shell_patch(cmd: &str) -> Option<Option<String>> {
 
 /// Antigravity 가 준 것을 [`Input`] 으로 — 판정할 것이 없으면 `None` 이다(2026-10-04 agy 1.2.16 실측).
 ///
-/// - 세션은 `conversationId`, 모델은 `modelName` 이다
+/// - 세션은 `conversationId` 다. 모델(`modelName`)은 안 읽는다 — 판정에 쓰는 데가 없다
 /// - **자리는 그 명령이 도는 자리(`toolCall.args.Cwd`)가 먼저고, 없으면 첫 작업 자리(`workspacePaths`)다** — 훅
 ///   프로세스는 hooks.json 이 놓인 디렉터리에서 돈다. 셸 명령은 `Cwd` 에서 돌고, 판정은 거기서 상대 경로를 푼다
 /// - `run_command` 는 셸(`Bash`)이고, 파일을 쓰는 셋(`write_to_file`·`replace_file_content`·
@@ -1355,6 +1355,20 @@ mod tests {
         // 위의 고리가 붙드는 칸을 실제로 지났는지 — 심은 파일에서 `Stop` 이 빠지면 그 칸을 아무도 안 잰다.
         assert!(hooks.contains_key("Stop") && hooks.contains_key("UserPromptSubmit"), "{:?}", hooks.keys());
         assert_eq!(Carry::of(Dialect::Codex, Event::Stop), Carry::Hold(CODEX_HOLD));
+    }
+
+    /// **Antigravity 의 붙드는 칸은 UTF-16 1만 단위다**(moai-ybns.451.sdk) — 사람이 띄운 agy 창에 한글로만 채운 글을
+    /// 보내 잰 자리다(moai-jzym.4pm, [`Carry::of`]). 그 칸을 재는 시험이 Codex 의 것뿐이라, 표의 Antigravity 줄을 Codex 의
+    /// 바이트 8천으로 바꾸거나 칸 없음으로 걷어도 아무것도 안 붉어졌다. 값을 `Room::CONTEXT` 에서 읽지 않고 손으로 적는다
+    /// — 읽으면 그 상수를 바꿔도 함께 움직인다.
+    #[test]
+    fn antigravity_holds_a_stop_in_ten_thousand_utf16_units() {
+        assert_eq!(
+            Carry::of(Dialect::Antigravity, Event::Stop),
+            Carry::Hold(crate::hook::Room { size: 10_000, unit: Unit::Utf16 })
+        );
+        // 오류로 끝난 실행의 `Stop` 은 붙들지 않는다 — 실패하는 백엔드에 글을 도로 밀어 넣는다(`from_antigravity`).
+        assert_eq!(Carry::of(Dialect::Antigravity, Event::StopFailure), Carry::Nothing);
     }
 
     /// **답은 제 칸에만 선다** — 붙드는 까닭은 `Stop` 에서만, 비추는 줄은 턴 머리와 접힌 뒤, 그리고 Claude·Codex 의 도구
