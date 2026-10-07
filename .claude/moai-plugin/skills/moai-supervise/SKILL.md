@@ -23,7 +23,7 @@ workers talk with Claude Code's own tools:
 **Every session here is one a person opened.** moai never launches an agent or runs one
 headless, and neither does the supervisor. **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
-directory's name and a `-`. Nobody registers and nobody is asked which windows count.
+directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
 which the worker reads (3).
 
@@ -183,9 +183,14 @@ such rows apart under `others`.
 **2. Find a worker.** Call `ListAgents` once. A worker is a row that
 
 - belongs to this repository. `ListAgents` shows no directory; a session takes its name from
-  the directory it was opened in — `<root dir name>-` and a short suffix, as in `moa-issue-bc`
-  for a session opened in `moa-issue`. A row whose name does not start that way — renamed, or
-  opened somewhere else — is not one
+  the directory it was opened in, slugged — lowercased, every run of characters other than
+  `a-z` and `0-9` turned into one `-`, cut at 4 words or 40 characters — then `-` and a short
+  hex suffix: `moa-issue-bc` for `moa-issue`, `tvshop-updater-ca` for `tvshop_updater`. A row
+  whose name does not start with the root's slug and a `-` — renamed, or opened somewhere
+  else — is not one. **A name that does start so is still only a candidate**: `api-gateway-1c`
+  starts with `api-`, and a session opened in a clone named `moai-web` starts with `moai-`.
+  The worker confirms it: the message carries `Root:`, and a session standing in
+  another repository refuses the work, so it comes out of the candidates (below)
 - is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
   yours or another session's (they stand under "Subagents", and a message to one resumes that
   subagent instead), and not a `bg` session

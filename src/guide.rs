@@ -1781,7 +1781,7 @@ workers talk with Claude Code's own tools:
 **Every session here is one a person opened.** moai never launches an agent or runs one
 headless, and neither does the supervisor. **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
-directory's name and a `-`. Nobody registers and nobody is asked which windows count.
+directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
 which the worker reads (3).
 
@@ -1941,9 +1941,14 @@ such rows apart under `others`.
 **2. Find a worker.** Call `ListAgents` once. A worker is a row that
 
 - belongs to this repository. `ListAgents` shows no directory; a session takes its name from
-  the directory it was opened in — `<root dir name>-` and a short suffix, as in `moa-issue-bc`
-  for a session opened in `moa-issue`. A row whose name does not start that way — renamed, or
-  opened somewhere else — is not one
+  the directory it was opened in, slugged — lowercased, every run of characters other than
+  `a-z` and `0-9` turned into one `-`, cut at 4 words or 40 characters — then `-` and a short
+  hex suffix: `moa-issue-bc` for `moa-issue`, `tvshop-updater-ca` for `tvshop_updater`. A row
+  whose name does not start with the root's slug and a `-` — renamed, or opened somewhere
+  else — is not one. **A name that does start so is still only a candidate**: `api-gateway-1c`
+  starts with `api-`, and a session opened in a clone named `moai-web` starts with `moai-`.
+  The worker confirms it: the message carries `Root:`, and a session standing in
+  another repository refuses the work, so it comes out of the candidates (below)
 - is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
   yours or another session's (they stand under "Subagents", and a message to one resumes that
   subagent instead), and not a `bg` session
@@ -2239,6 +2244,10 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
 else, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from a worktree.
+**If `Root:` is not this window's repository** — the window stands neither in it nor in one
+of its worktrees — the supervisor took you for a worker by a name that only looks like its
+repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
+end the turn.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
 
@@ -4064,9 +4073,15 @@ stop sending outside work while a release runs",
         // 그것에 보낸 메시지는 그 서브에이전트를 되살린다. `ListAgents` 는 자리를 안 보이니(2026-10-07 실제 목록) 이름의 머리로 거른다.
         assert!(step.contains("Not a subagent"), "감독이 서브에이전트를 일꾼으로 센다");
         assert!(
-            step.contains("A row whose name does not start that way"),
+            step.contains("whose name does not start with the root's slug"),
             "이름이 이 저장소의 것이 아닌 줄을 일꾼으로 센다"
         );
+        // 이름은 연 디렉터리를 슬러그로 지은 것이다(moai-ybns.451.tf3) — 디렉터리 이름 그대로 견주면 `tvshop_updater`
+        // 의 `tvshop-updater-ca` 를 놓친다. 머리가 맞아도 `api` 는 `api-gateway-1c` 를, `moai` 는
+        // `moai-web` 이라는 다른 클론의 세션을 잡으니, 머리는 후보일 뿐이고 일꾼이 `Root:` 로 제 저장소인지 확인해 거절한다.
+        assert!(step.contains("`tvshop-updater-ca` for `tvshop_updater`"), "감독이 이름을 슬러그로 견주지 않는다");
+        assert!(step.contains("**A name that does start so is still only a candidate**"), "머리가 맞으면 남의 저장소 세션도 일꾼으로 센다");
+        assert!(brief.contains("**If `Root:` is not this window's repository**"), "남의 저장소 세션이 받은 일을 한다");
         // 일꾼은 감독이 이름 대는 걸음 파일의 절대 경로를 읽는다 — 다른 기계의 세션은 그 파일을 못 연다(moai-fim6).
         assert!(step.contains("runs on this machine"), "다른 기계의 세션을 일꾼으로 센다");
         assert!(

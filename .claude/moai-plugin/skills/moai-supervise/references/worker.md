@@ -32,6 +32,10 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
 else, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from a worktree.
+**If `Root:` is not this window's repository** — the window stands neither in it nor in one
+of its worktrees — the supervisor took you for a worker by a name that only looks like its
+repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
+end the turn.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
 
