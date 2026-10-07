@@ -12347,6 +12347,40 @@ mod tests {
         assert!(f.issues.iter().any(|i| i.id == "argos-a002"), "화면이 아카이브의 줄을 잃었다");
     }
 
+    /// **아카이브로 옮긴 미룬 에픽도 산 멤버를 미룬 것으로 세운다**(moai-ug6x.cpq) — 보드의 셈(`report` 의
+    /// `an_archived_deferred_epic_over_a_live_member_counts_as_deferred`)과 같은 자다. 탐색기는 아카이브를 섞은 줄로
+    /// 미룸을 재므로(`Soil::of`), 섞기가 산 줄만 넘기면 에픽이 안 보여 그 멤버가 계획 안의 일로 선다. 상세가 물려받은
+    /// 미룸을 대고, 미룬 것 숨기기(`SPC v l`)가 그 멤버를 숨긴다.
+    #[test]
+    fn an_archived_deferred_epic_defers_its_live_member_in_the_explorer() {
+        let (scratch, mut a) = writable("archived-deferred-epic");
+        let root = scratch.path();
+        let mut epic = make("argos-0009", Kind::Epic);
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut sibling = member("argos-0003", "argos-0009");
+        sibling.status = Status::new("done");
+        crate::archive::append(root, &[epic, sibling], &cfg()).unwrap();
+        let live = root.join(".moai/issues.jsonl");
+        let mut text = std::fs::read_to_string(&live).unwrap();
+        text.push_str(&format!("{}\n", serde_json::to_string(&member("argos-0002", "argos-0009")).unwrap()));
+        std::fs::write(&live, text).unwrap();
+        a.reload();
+
+        let at = a.site.index.find("argos-0002").expect("산 멤버가 없다");
+        assert_eq!(a.site.index.shelved_at(at), Some("argos-0009"), "아카이브의 미룬 에픽을 물려받지 않았다");
+        assert_eq!(a.land("argos-0002"), Landing::Shown, "미룬 것을 안 숨긴 보기에서 멤버가 안 섰다");
+        let screen = draw::tests::render(&mut a, 180, 24).join("\n");
+        assert!(screen.contains("미룸 — argos-0009 밑"), "상세가 물려받은 미룸을 안 댔다\n{screen}");
+
+        a.hit("SPC v l");
+        assert!(a.view.hide_deferred, "시험의 전제 — SPC v l 이 미룬 것을 숨긴다");
+        assert!(!a.site.shown[at], "미룬 것 숨기기가 아카이브의 에픽 밑 멤버를 남겼다");
+        let epic = a.site.index.find("argos-0009").expect("아카이브의 에픽이 화면에 없다");
+        assert_eq!(a.site.index.shelved_at(epic), Some("argos-0009"));
+        assert!(!a.site.shown[epic], "미룬 것 숨기기가 아카이브의 미룬 에픽을 남겼다");
+        assert_eq!(a.land("argos-0002"), Landing::Hidden);
+    }
+
     /// **배너의 "못 읽는 줄 N" 은 산 줄만 센다**(moai-e18s) — 섞은 목록으로 세던 판은 아카이브 파일의 못 읽는 줄까지
     /// 급한 배너로 세웠고, `moai status` 와 층은 그것을 `archive_unreadable` 경고로만 냈다. 섞인 목록은 그대로
     /// 든다 — 거기서 거르면 깨진 아카이브 줄의 id 가 지킬 것에서 빠져 `r` 이 그 이슈의 읽음을 걷는다.
