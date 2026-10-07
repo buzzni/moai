@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-07
+
 ### Changed
 
 - **The planted hooks no longer listen for `StopFailure` and `SessionEnd`
