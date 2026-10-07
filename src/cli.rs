@@ -445,191 +445,6 @@ BACKLOG
     )]
     Wiki(WikiCmd),
 
-    // **우편함 넷은 트래커의 동사가 아니다**(moai-h8tn) — `issues.jsonl`·저널에 한 글자도 안 쓴다. 꼴과 까닭은
-    // `src/mail.rs` 의 머리글에 있다.
-    /// Leave a letter for another agent - one file under .moai/mail
-    #[command(after_help = "  moai send moa-issue-25 'the review is done' -b - < notes.md
-  moai send any-idle-worker 'pick up moai-4aex' --wake
-  moai send moa-issue-b6 'Re: merged' --reply-to <letter id> -b 'as 1a2b3c'
-
-  The recipient is an agent name from `moai agents`, or any-idle-worker -
-  then the first agent that is neither the sender nor a supervisor to take
-  it keeps it, and a hook takes one such letter per load. A name nobody has
-  registered is still taken, with one line on stderr: the letter waits until
-  that agent says hello. Each recipient has a box of its own,
-  .moai/mail/<name>/ (and .moai/mail/any-idle-worker/).
-
-  A letter left unread for an agent that has gone comes back to its sender,
-  marked as returned: when `moai agents` sweeps a row whose process is gone
-  or a row from another machine that nothing marked alive for a day, when a
-  new session takes over the name of a row that has gone, and when a Codex
-  session ends. A new --name in `moai hello` carries the letters along.
-
-  **It is not the tracker.** Nothing goes into issues.jsonl or the journal -
-  a letter is delivery, not record. A decision still goes on its issue as a
-  note. The mailbox follows the tracker: inside a linked worktree it is the
-  main checkout's, so every session of the repository sees one mailbox.
-
-  Who sends is --as, else MOAI_AGENT, else the registered agent this command
-  runs under (`moai hello`). With none of them it stops - a letter with no
-  sender cannot be answered. A Codex shell is found by the session id Codex
-  sets in it (CODEX_THREAD_ID) and never by MOAI_AGENT, which that shell
-  inherits from the app-server all its sessions share; without the id, pass
-  --as with the name its hooks gave the session.
-  The body holds up to 64 KB, the subject one line of up to 200 characters.
-
-  **Waking is a bonus.** The way a worker gets its letters is waiting for them
-  (`moai inbox --ack --wait`) or its hooks. --wake only knocks once on an idle
-  recipient: when its row carries a tmux pane, `moai inbox` is typed into that
-  pane; a Claude session cannot be woken from a command line, so the line
-  printed tells the sender to use SendMessage, and names the session the way
-  Claude Code knows it when that differs from its row (read from Claude's own
-  session file when it wakes). With neither it does nothing
-  and says nothing. moai never runs an agent's own program to wake it. An
-  agent at work is not woken, nor one already waiting in `moai inbox --wait`
-  (Linux tells it from the processes), nor one on another machine sharing
-  this repository - its pane and its session are there (`why` is no_way).
-  For any-idle-worker it knocks on the agent idle the longest, one on this
-  machine first.
-
-  --json gives the letter as written plus `id`, and `wake`
-  ({\"to\",\"via\",\"done\",\"why\"}) when --wake was given. `via` is send_message,
-  tmux or none; `why` names what stood in the way (busy, ask_sender, waiting,
-  no_way, nobody, missing, failed, timeout) - `waiting` is an agent already in
-  `moai inbox --wait`, which takes the letter itself. With ask_sender,
-  `send_message_to` is the name to give SendMessage when it is not `to`.")]
-    Send(SendArgs),
-
-    /// The letters for you - `--ack` marks them read
-    #[command(after_help = "  moai inbox                    the unread letters for you
-  moai inbox --ack              the same, and marks them read
-  moai inbox --all              the ones already read too
-  moai inbox <id>               that one letter, read or not (--ack marks it)
-  moai inbox <id> --from 8000   the same letter, past the first 8000 characters
-  moai inbox --ack --wait 600   waits up to 600 seconds for one to come
-
-  **Waiting is how a worker gets its work** - `moai inbox --ack --wait` at the
-  end of each task, again and again. Nothing has to wake it. While it waits,
-  its row in `moai agents` says idle; once a letter comes it says busy, and a
-  wait that runs out leaves it idle. A name with no row is not registered by
-  this - `moai hello` does that.
-
-  A letter is read when it moves to read/ inside its box. The hooks do this
-  by themselves: UserPromptSubmit and Stop load the letters for the session
-  into the conversation and mark them read, so an agent with the hooks
-  installed rarely needs this command. A letter too long for one load is cut,
-  and the cut names `moai inbox <id> --from <n>` for the rest of it.
-
-  **One letter comes a page at a time.** With an id, a body longer than about
-  24 KB stops there and the last line names `moai inbox <id> --from <n>` for
-  the next part, so each page stays under an agent's own output cap (30,000
-  characters in Claude Code, 10,000 tokens in Codex), past which the agent
-  cuts or sets aside what a command printed. <n> counts the characters of the
-  body as shown, from 0. --json is not paged: it gives the whole letter,
-  --from or not.
-
-  An id or --all shows a read letter again until
-  `moai agents` sweeps it, mail_read_days after it was read (7 unless
-  .moai/config.toml says otherwise; 0 keeps it for good). An unread letter is
-  never swept. A letter marked returned is one you sent: its recipient left
-  before reading it.
-
-  A letter to any-idle-worker shows to every agent but its sender and the
-  supervisors, and the first --ack keeps it; another that tried in the same
-  moment is told it was taken (`lost`). One --ack keeps one such letter, as
-  the hooks do, so several of them spread over the agents that wait.
-
-  Who you are is --as, else MOAI_AGENT, else the registered agent this
-  command runs under (`moai hello`) - in Codex, the row of the session id
-  Codex sets in its shell (CODEX_THREAD_ID); MOAI_AGENT is not read there.
-
-  --json gives {\"me\",\"letters\":[{\"id\",\"read\",\"returned\",\"v\",\"to\",
-  \"from\",\"subject\",\"body\",\"sent_at\",\"reply_to\"}],\"lost\":[ids]}. Keys a
-  letter carries that this build does not know are passed through as they
-  are.")]
-    Inbox(InboxArgs),
-
-    /// Who is here - the agents under .moai/agents (sweeps the gone)
-    #[command(after_help = "  moai agents                               everyone registered here
-  moai agents --role worker --status idle   the workers waiting for work
-
-  An agent is registered by `moai hello`, or by the hooks when its session
-  starts. UserPromptSubmit marks it busy and Stop marks it idle, and
-  `moai inbox --wait` marks it idle while it waits and busy once a letter
-  comes. A row whose process is gone is swept here - on Linux a reused pid is
-  told apart by the time the process started - and the letters left unread
-  for it go back to their senders. A Codex row has no process to look at,
-  and a row from another machine - another container sharing this
-  repository - is not looked at by its pid, which means something only
-  where it was written; the table shows that pid as <pid>@<host>. Those
-  rows are told by `seen`, which every row's hooks and waits write. Once
-  nothing has written it for 20 minutes its status reads gone - --status
-  idle and --wake pass it over - but it stays, role and name included, for
-  that session to come back to. After a day it is swept: a Codex row's
-  letters wait for that session, and another machine's go back to their
-  senders - a later session can be given the same name. A row written on a
-  clock running ahead counts as far ahead as it is: more than 20 minutes
-  ahead reads gone, more than a day ahead is swept. Any other row that
-  cannot be told alive or gone stays.
-
-  The same sweep takes the letters read more than mail_read_days ago (7
-  unless .moai/config.toml says otherwise; 0 turns it off) - see
-  `moai inbox --help`.
-
-  --role and --status keep the rows whose word is exactly that one. A row a
-  hook registered carries no role until the agent says `moai hello --role`.
-  The sweep runs over every row either way.
-
-  --json gives {\"agents\":[{\"v\",\"name\",\"vendor\",\"model\",\"role\",\"status\",
-  \"since\",\"pid\",\"pid_start\",\"machine\",\"host\",\"session\",\"cwd\",\"tmux_pane\",
-  \"tmux_socket\",\"seen\",\"here\"}],\"swept\":[names]}. pid_start, machine,
-  host, session, the two tmux keys and seen are absent when they are not
-  known. machine names where pid means that process; a row without it is
-  looked at by its pid. here says whether the row is this machine's - its
-  machine is this one, or it names none (a Codex row, one written before
-  rows named a machine, or one written where moai cannot name the machine,
-  as off Linux). It is measured as the list is made and never written to
-  the row. status is busy, idle, or gone for a row told by seen that
-  nothing wrote for 20 minutes or that was written more than 20 minutes
-  ahead.")]
-    Agents(AgentsArgs),
-
-    /// Register this agent - name, vendor, model and role
-    #[command(after_help = "  moai hello --role worker
-  moai hello --name reviewer-1 --role supervisor
-  moai hello --as codex-01a107b4 --role worker   a Codex without CODEX_THREAD_ID
-
-  Writes .moai/agents/<name>.json for the agent process this command runs
-  under - found among its parents by name (claude, agy), or --pid. The
-  vendor defaults to what that name says. The name defaults to MOAI_AGENT,
-  then to the one this agent already has here, then to the session name
-  Claude Code shows, then to <vendor>-<pid>. MOAI_AGENT names the window it
-  is set in, so it is not read for a row named by --pid or --as. Saying
-  hello again updates the row; a new --name replaces the old one and
-  carries its letters along.
-
-  In Claude, the row this agent already has is also found by the session id
-  Claude sets in the shell (CLAUDE_CODE_SESSION_ID) when no row runs as this
-  process: a session `claude --resume` continued in a new process, here or
-  in a container started again, takes that row back with its name and role -
-  unless the row's own process still runs on this machine.
-
-  Codex runs its shell under an app-server all its sessions share, so moai
-  tells its sessions apart by the id Codex sets in the shell
-  (CODEX_THREAD_ID): hello takes up the row its hooks wrote for that
-  session, or writes the one they would. MOAI_AGENT is not read there - the
-  shell inherits it from the app-server. Without that id, pass --as with the
-  row its hooks gave the session (named in its first context), and --name
-  with it to rename that row. --name alone writes a row the hooks never
-  read, so it is only for a Codex whose hooks do not run.
-  --as takes up a row already standing under that name, keeping its process,
-  the machine that process runs on, and its session.
-
-  A name is letters, digits, `.`, `_` and `-`, up to 64, not starting with
-  `.` - it becomes a file name. any-idle-worker is not one an agent can take.
-  An agent whose role is supervisor never takes letters to any-idle-worker.")]
-    Hello(HelloArgs),
-
     /// Open the explorer (the one write to an issue is `SPC n`, jot)
     #[command(after_help = "  Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
@@ -909,12 +724,12 @@ BACKLOG
 
   Events:
     session-start       Writes the baseline. Loads what is held after a compact
-    user-prompt-submit  A person asked. Loads letters, and the board once
+    user-prompt-submit  A person asked. Loads the board once
     pre-tool-use        Just before a tool call. The rules stand here
-    stop                The turn ends. Loads letters, then checks the state
-    stop-failure        An API error ended a turn (Claude). Marks the agent idle
-    interrupt           A person broke off a turn (Codex). Marks the agent idle
-    session-end         The session closes. Marks it idle; drops a Codex row
+    stop                The turn ends. Checks the state
+    stop-failure        Kept for hooks planted before 0.9; does nothing
+    interrupt           Kept for hooks planted before 0.9; does nothing
+    session-end         Kept for hooks planted before 0.9; does nothing
 
   --dialect says which agent's shapes come in and go out: claude (the
   default), codex or antigravity. The rules are the same for all three.
@@ -1167,98 +982,6 @@ pub enum WikiCmd {
         #[arg(value_name = "slug")]
         slug: String,
     },
-}
-
-/// `moai send`(moai-h8tn). **보내는 이의 필드를 `from` 으로 짓지 않는다** — 깃발이 `--as` 라 글과 이름이
-/// 갈리면 도움말만 읽은 사람이 `--from` 을 친다. `--from` 은 `mv`·`defer` 에서 "본 칸" 이다.
-#[derive(Args, Debug)]
-pub struct SendArgs {
-    /// An agent name from `moai agents`, or any-idle-worker
-    #[arg(value_name = "to")]
-    pub to: String,
-    /// One line saying what this is
-    #[arg(value_name = "subject")]
-    pub subject: String,
-    /// Text, not a path. `-` reads stdin: `-b - < <file>`
-    #[arg(short, long, value_name = "text", allow_hyphen_values = true)]
-    pub body: Option<String>,
-    /// The id of the letter this answers
-    #[arg(long, value_name = "id")]
-    pub reply_to: Option<String>,
-    /// Knock once on an idle recipient (a bonus)
-    #[arg(long)]
-    pub wake: bool,
-    /// Who sends (else MOAI_AGENT or `moai hello`)
-    #[arg(long = "as", value_name = "name")]
-    pub sender: Option<String>,
-}
-
-/// `moai inbox`(moai-h8tn). id 를 주면 그 편지 하나다(moai-54yc.v70) — 훅이 자른 편지를 다시 볼 길이 함 전체를 내던
-/// `--all` 하나였다. 기다림과는 안 묶는다 — 이미 선 편지 하나를 보는 부름이다.
-///
-/// **편지 하나는 쪽으로 넘겨 본다**(2026-10-05 사용자 결정, moai-m81b) — 그 길도 편지를 통째로 내 에이전트의 출력 상한
-/// (Claude Code 의 Bash 3만 자, Codex 0.160 의 1만 토큰)을 넘으면 통째로 안 닿았다 — Codex 는 가운데를 빼고, Claude
-/// Code 는 판에 따라 가운데를 자르거나 파일로 빼고 앞머리만 보인다. `--from` 은 `mv`·`defer` 의 "본 칸" 과
-/// 이름이 같지만 받는 값이 다르다 — 여기서는 글자 자리다.
-#[derive(Args, Debug)]
-pub struct InboxArgs {
-    /// One letter by its id, read or not
-    #[arg(value_name = "id", conflicts_with = "wait")]
-    pub id: Option<String>,
-    // `conflicts_with = "wait"` 도 건다(리뷰 moai-54yc.fay) — clap 은 `requires` 가 지목한 인자(`id`)가 이미 준 인자
-    // (`wait`)와 `conflicts` 면 그 `requires` 를 조용히 건너뛴다(`RmArgs` 의 `--yes` 와 같은 자리). 안 걸던 판은
-    // `inbox --from 5 --wait 1` 이 id 없이 지나가 빈 id 로 거절하거나(`Letter  has …`) `--from` 을 말없이 버렸다.
-    /// The body from this character, counted from 0
-    #[arg(long, value_name = "n", requires = "id", conflicts_with = "wait")]
-    pub from: Option<usize>,
-    /// Mark what is shown as read
-    #[arg(long)]
-    pub ack: bool,
-    /// The letters already read too
-    #[arg(long)]
-    pub all: bool,
-    /// Wait up to this many seconds for a letter to come
-    #[arg(long, value_name = "seconds")]
-    pub wait: Option<u64>,
-    /// Who you are (else MOAI_AGENT or `moai hello`)
-    #[arg(long = "as", value_name = "name")]
-    pub me: Option<String>,
-}
-
-/// `moai agents`(moai-snyk). 감독이 일꾼을 고르는 거르개다 — 세션 파일을 읽던 파이썬 훑기를 이 두 깃발이 대신한다.
-/// **글자째 맞춘다** — `hello` 가 낱말을 다듬어 적으므로 거르는 쪽도 다듬은 글로 견준다.
-#[derive(Args, Debug)]
-pub struct AgentsArgs {
-    /// Only the agents with this role (worker, supervisor)
-    #[arg(long, value_name = "role")]
-    pub role: Option<String>,
-    /// Only the agents in this state (idle, busy)
-    #[arg(long, value_name = "status")]
-    pub status: Option<String>,
-}
-
-/// `moai hello`(moai-h8tn). 값은 거르지 않고 받는다 — 벤더와 역할의 낱말은 열린 목록이고, 이름만
-/// `cmd` 가 [`crate::mail::is_agent_name`] 으로 잰다(파일 이름이 되므로).
-#[derive(Args, Debug)]
-pub struct HelloArgs {
-    /// claude, codex, antigravity or another word
-    #[arg(long, value_name = "vendor")]
-    pub vendor: Option<String>,
-    /// The model this agent runs (opus-5, gpt-5.5, ...)
-    #[arg(long, value_name = "model")]
-    pub model: Option<String>,
-    /// worker, supervisor or another word
-    #[arg(long, value_name = "role")]
-    pub role: Option<String>,
-    /// The name others send to
-    #[arg(long, value_name = "name")]
-    pub name: Option<String>,
-    /// The agent's process (else found among the parents)
-    #[arg(long, value_name = "pid")]
-    pub pid: Option<u32>,
-    /// Take up the row of that name (Codex: its hook row)
-    #[arg(long = "as", value_name = "name", conflicts_with = "pid")]
-    pub as_: Option<String>,
 }
 
 /// 등록한 프로젝트 목록을 고치고 본다. 이슈의 동사(`add`·`show`·`rm`)와 이름이
@@ -2318,16 +2041,6 @@ pub enum Dialect {
     Codex,
     /// Antigravity (agy) - camelCase in, a top-level decision out
     Antigravity,
-}
-
-impl Dialect {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Dialect::Claude => "claude",
-            Dialect::Codex => "codex",
-            Dialect::Antigravity => "antigravity",
-        }
-    }
 }
 
 /// 설치 범위. **`--user` 를 못 쓴다** — 그 이름은 이미 "누가 하는가" 다.

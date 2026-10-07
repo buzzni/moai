@@ -35,19 +35,6 @@ pub fn rule_head(n: usize) -> String {
     format!("Rule {n} — {}.", RULES[n - 1])
 }
 
-/// 서브에이전트가 부모 세션의 이름으로 우편함을 만질 때 훅이 내는 거절문(moai-ew4o.4fv, [`crate::hook::guard_subagent_mail`]).
-/// **고칠 길을 함께 낸다** — 막힌 쪽이 사람을 안 부르고 제자리에서 푼다.
-///
-/// **`--as` 는 `inbox`·`send` 의 길이다**(리뷰 moai-ew4o.q9f) — `hello --as` 는 이미 선 장을 이어받는 것이라(moai-u5wr.7xr) 새
-/// 이름에는 `not_found` 로 지고, `--name` 은 이 거절이 다시 막는다. 둘을 가리지 않던 글은 `hello` 에 서지 않는 길을 내밀었다.
-/// `--wait` 만으로는 편지를 안 가진다 — 부모의 장을 노는 것으로 적을 뿐이다.
-pub const SUBAGENT_MAIL: &str = "Mailbox — a subagent does not speak as its parent session.\n\
-A subagent runs under the parent session's process, so this `moai hello` would rewrite the parent's presence, this\n\
-`moai inbox --ack` would take the parent's letters before its hooks can load them, and `--wait` would mark the parent\n\
-idle. Leave the mailbox and the registration to the parent session: a subagent does not say `moai hello`. To look\n\
-without taking, run `moai inbox` without --ack or --wait; to work under a name of your own, pass `--as <name>` to\n\
-`moai inbox` and `moai send`.";
-
 /// 리뷰 이슈를 세운 뒤의 세 걸음. **훅의 거절문과 스킬이 이것을 그대로 쓴다.**
 ///
 /// **여기 적힌 명령은 그대로 쳐서 지나가야 한다.** `-m` 없는 `done` 을 일러
@@ -1800,8 +1787,8 @@ Five things about the messaging, one line each:
 
 - A session in a different permission mode holds an incoming message for its person's
   approval — a worker that stays idle after you sent may be waiting on that
-- `notify_when_idle` answers only for a session on this machine — from one elsewhere no
-  idle notice comes, only its report
+- `notify_when_idle` answers only for a session on this machine — one reason a worker is a
+  session on this machine (2)
 - A subagent sends under its parent session's address — a message can come from a session
   that did not write it itself
 - `@path` in a message attaches nothing — a file the worker has to read is named by its
@@ -1953,6 +1940,8 @@ such rows apart under `others`.
 - is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
   yours or another session's (they stand under "Subagents", and a message to one resumes that
   subagent instead), and not a `bg` session
+- runs on this machine — a Remote Control or cloud session cannot read the steps file at the
+  path you name (3), and sends no idle notice
 - reads `idle`
 - is not you
 
@@ -4061,6 +4050,8 @@ stop sending outside work while a release runs",
         // 그것에 보낸 메시지는 그 서브에이전트를 되살린다. `ListAgents` 는 자리를 안 보이니(2026-10-07 실제 목록) 이름의 머리로 거른다.
         assert!(step.contains("Not a subagent"), "감독이 서브에이전트를 일꾼으로 센다");
         assert!(step.contains("A row whose name does not start that way"), "이름이 이 저장소의 것이 아닌 줄을 일꾼으로 센다");
+        // 일꾼은 감독이 이름 대는 걸음 파일의 절대 경로를 읽는다 — 다른 기계의 세션은 그 파일을 못 연다(moai-fim6).
+        assert!(step.contains("runs on this machine"), "다른 기계의 세션을 일꾼으로 센다");
         assert!(step.contains("`interactive`") && step.contains("not a `bg` session"), "사람이 연 세션만 거르지 않는다");
         assert!(step.contains("**A test agent is no worker.**"), "시험용 에이전트를 어떻게 할지 없다");
         assert!(brief.contains("keep its cwd outside the root"), "시험용 에이전트를 루트에서 띄운다");

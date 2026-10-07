@@ -4,7 +4,6 @@
 //! 정하는 코드가 여기 있으면 나중에 TUI 가 그것을 다시 쓴다.
 
 pub mod add;
-pub mod agents;
 pub mod archive;
 pub mod backlog;
 pub mod defer;
@@ -12,7 +11,6 @@ pub mod edit;
 pub mod hook;
 pub mod init;
 pub mod link;
-pub mod mail;
 pub mod merge_driver;
 pub mod mv;
 pub mod note;
@@ -555,11 +553,6 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Backlog(BacklogCmd::Promote(a)) => backlog::promote(ctx, a),
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
-        // 우편함과 출석(moai-h8tn) — 트래커를 안 쓴다. 자리만 [`open_repo`] 로 찾는다.
-        Cmd::Send(a) => mail::send(ctx, a),
-        Cmd::Inbox(a) => mail::inbox(ctx, a),
-        Cmd::Agents(a) => agents::agents(ctx, a),
-        Cmd::Hello(a) => agents::hello(ctx, a),
     }
 }
 

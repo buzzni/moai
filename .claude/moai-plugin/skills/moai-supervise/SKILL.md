@@ -31,8 +31,8 @@ Five things about the messaging, one line each:
 
 - A session in a different permission mode holds an incoming message for its person's
   approval — a worker that stays idle after you sent may be waiting on that
-- `notify_when_idle` answers only for a session on this machine — from one elsewhere no
-  idle notice comes, only its report
+- `notify_when_idle` answers only for a session on this machine — one reason a worker is a
+  session on this machine (2)
 - A subagent sends under its parent session's address — a message can come from a session
   that did not write it itself
 - `@path` in a message attaches nothing — a file the worker has to read is named by its
@@ -184,6 +184,8 @@ such rows apart under `others`.
 - is a session a person opened — under "Peer sessions" and `interactive`. Not a subagent,
   yours or another session's (they stand under "Subagents", and a message to one resumes that
   subagent instead), and not a `bg` session
+- runs on this machine — a Remote Control or cloud session cannot read the steps file at the
+  path you name (3), and sends no idle notice
 - reads `idle`
 - is not you
 
