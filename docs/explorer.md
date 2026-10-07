@@ -90,6 +90,12 @@ remain readable; if both keys exist, `hide_backlog` wins.
   reads the pages afresh each time it opens and writes none of them — a page is
   a file you edit and commit
 
+Over either window, `SPC g s` and `SPC g w` read afresh. When the window you are
+in cannot be read again it closes and a notice says why; when the other one
+cannot be opened, the one you are in stays as it was and only the notice stands.
+In both windows the arrows, `Home`/`End` and the page keys move with `Ctrl` or
+`Alt` held too, as on the list; letter keys do not.
+
 The list or the board you leave on is the one the next run opens with.
 
 ## The menu
@@ -184,7 +190,10 @@ the way `moai status` does: archived rows are context, not work, the collision
 and unreadable archive files are counted as the same warnings, and bundles
 waiting to move as the same notice (moai-nkwg). The banner's urgent "rows could
 not be read" counts lines in the active snapshot only; a bad line in an archive
-file is that `archive_unreadable` warning instead (moai-e18s).
+file is that `archive_unreadable` warning instead (moai-e18s). While the archive
+is shown (`SPC v o`), the banner also names how many archive lines could not be
+read and that the view is without them — dimmed, so it does not make the banner
+urgent (moai-ug6x).
 
 ## Catch up on what changed
 
