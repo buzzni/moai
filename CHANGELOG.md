@@ -12,6 +12,19 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A committed link from a file outside `.moai` into the tracker is no longer
+  followed.** `AGENTS.md -> .moai/issues.jsonl` made `moai init` read the
+  snapshot as AGENTS.md and replace it without the repository lock — racing a
+  `moai add`, it lost rows and exited 0, and left markdown in the snapshot;
+  `-> .moai/config.toml` broke every later command, and a committed `SKILL.md`
+  link let `moai skill install` replace the snapshot with skill text. Such a
+  write — a root file, a planted skill tree, a hook file — is now refused when
+  it would land inside any `.moai` directory or on the snapshot behind its link,
+  naming the path and where it points; nothing is written and the link stays.
+  (moai-r0x8.a42)
+
 ## [0.9.0] - 2026-10-07
 
 ### Changed

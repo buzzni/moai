@@ -2332,8 +2332,57 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
             path.display(),
             crate::text::one_line(&real.display().to_string())
         ))),
-        _ => Ok(real),
+        Some(root) => match into_tracker(path, &real, root) {
+            Some((landed, what)) => Err(Fail::new(format!(
+                "{} points at {}, {what} — nothing is written, so the link and the tracker stay as they are. A file \
+                 outside .moai never follows a link into the tracker: replace the link with a regular file",
+                path.display(),
+                crate::text::one_line(&landed.display().to_string())
+            ))),
+            None => Ok(real),
+        },
+        None => Ok(real),
     }
+}
+
+/// `.moai` 밖에 적힌 쓰기가 링크를 푼 뒤 **트래커 안**에 닿으면 그 자리와 까닭(moai-r0x8.a42). 트래커 안은 뿌리 안의 어느
+/// `.moai` 디렉터리든(하위 트래커도 든다)과, 스냅샷이 링크면 그 너머의 파일이다. 락은 [`on_lock`] 이 앞서 잰다.
+///
+/// **스냅샷·설정·저널을 바꾸는 길은 [`Repo::with_write`] 하나다**(CLAUDE.md). 커밋된 `AGENTS.md -> .moai/issues.jsonl` 은
+/// 체크아웃 안이고 `.git` 도 락도 아니라 [`resolve`]·[`on_lock`] 을 다 지나, `moai init` 이 스냅샷을 AGENTS.md 로 읽어
+/// 블록을 붙이고 저장소 락 없이 갈아끼웠다 — 옆의 `add` 와 겹친 열 판에 일곱 판이 줄을 잃고 0 으로 끝났다.
+/// `-> .moai/config.toml` 이면 뒤의 모든 명령이 설정 줄에서 죽었고, `skill install` 의 커밋된 `SKILL.md` 링크도
+/// 같은 길로 스냅샷을 스킬 글로 갈아끼웠다(리뷰 moai-ml0d.que 3번). 뿌리 파일·심는 트리·훅 파일이 다 여기를 지나니
+/// 한 자리로 막힌다.
+///
+/// **`.moai` 안에 적힌 쓰기는 안 잰다** — 스냅샷·저널·설정·아카이브는 제 자리를 쓰는 것이고, 그 쓰기는 이미 락 안이다.
+/// 흔한 쓰기는 그래서 `stat` 하나 더하지 않는다. 아직 없는 자리(`.agents -> .moai` 밑에 지을 트리)는 있는 조상까지 풀고
+/// 붙여 잰다([`crate::path::real_prefix`]) — 그러지 않으면 디렉터리를 짓는 쪽이 트래커 안에 먼저 짓는다.
+fn into_tracker(path: &Path, real: &Path, root: &Path) -> Option<(PathBuf, &'static str)> {
+    let tracker = |rest: &Path| rest.components().any(|c| c.as_os_str().eq_ignore_ascii_case(".moai"));
+    let spelled = crate::path::lexical(path);
+    let base = crate::path::real(root);
+    let rest = spelled.strip_prefix(root).or_else(|_| spelled.strip_prefix(&base)).unwrap_or(&spelled);
+    if tracker(rest) {
+        return None;
+    }
+    let land = |p: &Path| -> PathBuf {
+        match (std::fs::canonicalize(crate::path::dir_of(p)), p.file_name()) {
+            (Ok(dir), Some(name)) => dir.join(name),
+            _ => crate::path::real_prefix(&crate::path::lexical(p)),
+        }
+    };
+    let landed = land(real);
+    if landed.strip_prefix(&base).is_ok_and(tracker) {
+        return Some((landed, "inside the tracker (.moai)"));
+    }
+    let snapshot = crate::path::follow_links(&root.join(".moai").join("issues.jsonl")).ok()?;
+    let id = |p: &Path| std::fs::metadata(p).ok().and_then(|m| file_id(&m));
+    let same = match (id(real), id(&snapshot)) {
+        (Some(a), Some(b)) => a == b,
+        _ => landed == land(&snapshot),
+    };
+    same.then_some((landed, "the tracker's snapshot beyond its link, inside the tracker"))
 }
 
 /// 쓸 자리 — 링크를 끝까지 푼 자리([`crate::path::follow_links`])이고, **갈아끼워도 되는 자리일 때만**

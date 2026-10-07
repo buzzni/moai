@@ -1460,6 +1460,51 @@ fn init_never_swaps_the_lock_through_agents_md() {
     assert!(said.contains("the lock moai holds"), "왜 안 썼는지를 안 댔다\n{said}");
 }
 
+/// **`.moai` 밖에 적힌 파일은 링크를 따라 트래커로 들지 않는다**(moai-r0x8.a42). 커밋된
+/// `AGENTS.md -> .moai/issues.jsonl` 이면 `init` 이 스냅샷을 AGENTS.md 로 읽어 블록을 붙이고 저장소 락 없이
+/// `rename` 으로 갈아끼웠다 — 옆의 `add` 와 겹치면 줄을 말없이 잃고, 스냅샷에 마크다운이 서 `status` 가 1 로 끝났다.
+/// `-> .moai/config.toml` 이면 뒤의 모든 명령이 설정 줄에서 죽었다. 스냅샷 자체가 링크면 그 너머의 파일도 같다.
+#[cfg(unix)]
+#[test]
+fn init_never_writes_into_the_tracker_through_agents_md() {
+    let s = init("init-agents-tracker");
+    add(s.path(), &["스냅샷에 선 줄"]);
+    let agents = s.path().join("AGENTS.md");
+    let is_link = |p: &Path| std::fs::symlink_metadata(p).unwrap().file_type().is_symlink();
+    for target in [".moai/issues.jsonl", ".moai/config.toml"] {
+        let before = std::fs::read_to_string(s.path().join(target)).unwrap();
+        std::fs::remove_file(&agents).unwrap();
+        std::os::unix::fs::symlink(target, &agents).unwrap();
+        let said = ok(s.path(), &["init"]);
+        assert_eq!(
+            std::fs::read_to_string(s.path().join(target)).unwrap(),
+            before,
+            "{target} 에 AGENTS.md 블록을 썼다\n{said}"
+        );
+        assert!(is_link(&agents), "AGENTS.md 링크를 갈아끼웠다");
+        assert!(said.contains("inside the tracker"), "{target}: 왜 안 썼는지를 안 댔다\n{said}");
+        ok(s.path(), &["status"]);
+        ok(s.path(), &["show", "--all"]);
+    }
+
+    // 스냅샷이 링크면 그 너머의 파일이 스냅샷이다 — `.moai` 밖이라도 거기 닿으면 안 쓴다.
+    let root = s.path();
+    std::fs::create_dir(root.join("shared")).unwrap();
+    std::fs::rename(root.join(".moai/issues.jsonl"), root.join("shared/issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+    std::fs::remove_file(&agents).unwrap();
+    std::os::unix::fs::symlink("shared/issues.jsonl", &agents).unwrap();
+    let before = std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap();
+    let said = ok(root, &["init"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap(),
+        before,
+        "링크 너머의 스냅샷에 썼다\n{said}"
+    );
+    assert!(said.contains("snapshot"), "왜 안 썼는지를 안 댔다\n{said}");
+    ok(root, &["status"]);
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
@@ -18662,6 +18707,38 @@ fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
     std::fs::create_dir_all(away.path().join("skills/moai")).unwrap();
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
     assert!(!said.contains("rm -r"), "밖에 선 남의 디렉터리를 지우라고 한다\n{said}");
+}
+
+/// **심는 트리도 링크를 따라 트래커로 들지 않는다**(moai-r0x8.a42, 리뷰 moai-ml0d.que 3번). 커밋된
+/// `.agents/skills/moai/SKILL.md -> ../../../.moai/issues.jsonl` 은 체크아웃 안이고 `.git` 도 락도 아니라 모든 자를
+/// 지나, `skill install` 이 스냅샷을 스킬 글로 갈아끼우고 0 으로 끝났다. 디렉터리 링크(`.agents -> .moai`)로 드는 것도 같다.
+#[cfg(unix)]
+#[test]
+fn skill_install_never_writes_into_the_tracker_through_a_link() {
+    let s = init("skilltracker");
+    let c = Claude::new("skilltracker-home");
+    add(s.path(), &["스냅샷에 선 줄"]);
+    let snapshot = s.path().join(".moai/issues.jsonl");
+    let before = std::fs::read_to_string(&snapshot).unwrap();
+    let skill = s.path().join(".agents/skills/moai/SKILL.md");
+    std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink("../../../.moai/issues.jsonl", &skill).unwrap();
+    for args in [&["skill", "install", "--agent", "codex", "--dry-run"][..], &["skill", "install", "--agent", "codex"]]
+    {
+        let out = c.run(s.path(), args, true);
+        assert!(!out.status.success(), "{args:?}: 스냅샷에 심고 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains("inside the tracker"), "{args:?}: 왜 안 썼는지 안 댄다\n{}", text(&out));
+        assert_eq!(std::fs::read_to_string(&snapshot).unwrap(), before, "{args:?}: 스냅샷을 스킬 글로 갈아끼웠다");
+        assert!(std::fs::symlink_metadata(&skill).unwrap().file_type().is_symlink(), "링크를 갈아끼웠다");
+    }
+    ok(s.path(), &["status"]);
+
+    std::fs::remove_dir_all(s.path().join(".agents")).unwrap();
+    std::os::unix::fs::symlink(".moai", s.path().join(".agents")).unwrap();
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(!out.status.success(), "트래커 안에 심고 성공으로 끝났다\n{}", text(&out));
+    assert!(!s.path().join(".moai/skills").exists(), "트래커 안에 디렉터리를 지었다");
+    assert_eq!(std::fs::read_to_string(&snapshot).unwrap(), before);
 }
 
 /// **Claude 의 플러그인 트리도 체크아웃 밖 링크를 안 따른다**(moai-ml0d.izy) — `.agents` 와 같은 자다. 맨
