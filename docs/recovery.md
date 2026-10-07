@@ -193,6 +193,58 @@ If the line says the lock points out of the checkout or into `.git/`, it is the
 `.moai/issues.jsonl` points at a lock, the snapshot is the link to fix, the same
 way as in the section above.
 
+## "broken": `.moai` is not a directory
+
+Commands stop with one line naming `.moai` and what stands there — a regular
+file, a link that leads nowhere (`.moai -> /nowhere`), or a link to something
+that is not a directory — and `--json` says `"code":"broken"`. This is an
+unreadable tracker, not a missing one: `moai prime` carries it as
+`"tracker_error":{"code":"broken",…}` instead of `no_tracker`, `moai status` and
+`moai project ls` name it, `moai init` stops on the same line and leaves the
+thing where it is, and `moai init --check` exits non-zero. moai only looks at
+what stands there; it never opens it.
+
+Look at it before you move it — it may be a tracker someone linked from
+elsewhere. Then fix the link, or move the file aside and run `moai init` (or put
+the committed `.moai/` back with `git checkout -- .moai`).
+
+In a linked [worktree](glossary.md#worktree) this does not stop anything: a
+worktree whose `.moai` is not a directory goes to the main checkout's tracker,
+the same as one with no `.moai` at all.
+
+## A write was refused because a link leads into `.moai`
+
+`moai init` (writing the `AGENTS.md` block or another root file) or `moai skill
+install` (a planted skill file, a hooks file) names a path, says it points into
+a `.moai` directory, and writes nothing. The path is spelled outside `.moai`,
+but a link on the way — the file itself (`AGENTS.md -> .moai/issues.jsonl`) or a
+directory above it (`.agents -> .moai`) — would land the write inside a
+`.moai`, its `journal/` or `archive/`, or on the file a linked snapshot points
+at. Such a write would replace the tracker without its lock and lose rows, so it
+is refused, and the link is left alone.
+
+`init` says why and still exits 0, so the rest of it stands; `skill install`
+exits non-zero. Replace the link with a real file or directory — most often
+`git rm` the committed link and let `init` or `skill install` write the file —
+and run the command again. Check `git status -- .moai` first: if an older moai
+already wrote through that link, the snapshot holds markdown — put the
+committed one back with `git checkout -- .moai/issues.jsonl`.
+
+## `moai prime` names a tracker above this checkout
+
+In a checkout with no `.moai` of its own, the search climbs to the directories
+above. When the `.moai` it climbed to cannot be read, `prime` says there is no
+`.moai` in this checkout, names the tracker it climbed to and why that one could
+not be read, and gives both ways out: fix that tracker, or start a separate one
+for this checkout with `moai init` — written as `moai -C <checkout top> init`
+when you called it below the top, since `init` plants where it is called. Under
+`--json`, `climbed_to` names that root beside `tracker_error`, and `init_at`
+says where `init` would plant.
+
+When the climb passed a `.moai` it could not look into (a permission), the page
+says so and does not offer `moai init` — there may be a tracker there already;
+`--json` names it as `unseen_at`. Fix the permission first.
+
 ## A conflicted `issues.jsonl`
 
 Lines are sorted by id, so two branches that touched *different* issues still
@@ -238,6 +290,19 @@ If you find changes in a worktree's `.moai/` — from an older binary, or from a
 run with `MOAI_HERE=1` — the fix is to move them by hand: they are lines in a
 file. Apply the same `moai` commands against the main checkout and drop the
 worktree's copy.
+
+## A worktree says there is no tracker
+
+A linked worktree goes to the main checkout's tracker only when the main
+checkout holds one, and that is judged one way everywhere: **`.moai/config.toml`
+is a file there.** A main checkout left with only `.moai/lock` — after checking
+out a commit from before moai, or mid-`git bisect` — holds no tracker, so the
+worktree is on its own: put the main checkout back on its branch, or, if this
+worktree should have its own tracker, `moai init` in it plants one.
+
+Where the worktree stands does not matter — inside `.worktrees/` or outside the
+main checkout (`git worktree add ../side <commit>`), it finds the main tracker
+all the same.
 
 ## Work that was picked up twice
 
@@ -347,4 +412,4 @@ The state is two text files under version control. `git log -p -- .moai/` shows
 every change anyone made to them, and any commit that had them whole is a
 recovery point.
 
-Decided in: moai-bth3
+Decided in: moai-bth3 moai-r0x8
