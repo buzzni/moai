@@ -5285,3 +5285,10 @@
 {"ts":"2026-10-07T09:07:18Z","id":"moai-fim6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-07T09:07:18Z","id":"moai-obxm.5c6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in: 1,2,5-10,13,14 by the reviewer; worker filter rewritten by name prefix + interactive after a real ListAgents showed no directory (6c? fix commit); 11-12 went to the person, who chose read-the-file + trim (moai-fim6), then a delta review of fim6+merge fixed glossary/agents.md/wrapping. Handed on: 3-4 to moai-six5.1xz (note there); plugin-cache Read permission to backlog moai-nx5w."}
 {"ts":"2026-10-07T09:07:25Z","id":"moai-obxm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: done — merged 6af8dd01. Left for others: moai-six5.1xz should also cover uninstall listing and the wiki id filter for retired skill names (note there); backlog moai-nx5w (plugin-cache Read permission). The develop-merge commit 2d6ddaa1 also carries the step-2 \"runs on this machine\" line (reviewed in the delta review)."}
+{"ts":"2026-10-07T09:16:36Z","id":"moai-six5.xwt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-six5 옛 판이 심은 스킬 걷기·init ignore 줄"}
+{"ts":"2026-10-07T09:16:40Z","id":"moai-six5.xwt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-07T09:16:41Z","id":"moai-six5.1xz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T09:16:42Z","id":"moai-six5.p9p","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T09:16:44Z","id":"moai-six5.puc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-07T09:36:46Z","id":"moai-v4j8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill status 가 걷힌 스킬의 남은 디렉터리를 알리지 않는다"}
+{"ts":"2026-10-07T09:36:47Z","id":"moai-snrk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"checked-in 트리 시험이 작업 트리를 걷는다 — 추적 안 된 파일에 붉어진다"}
