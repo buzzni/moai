@@ -630,7 +630,7 @@ fn shell_patch(cmd: &str) -> Option<Option<String>> {
 
 /// Antigravity 가 준 것을 [`Input`] 으로 — 판정할 것이 없으면 `None` 이다(2026-10-04 agy 1.2.16 실측).
 ///
-/// - 세션은 `conversationId`, 모델은 `modelName` 이다
+/// - 세션은 `conversationId` 다. 모델(`modelName`)은 안 읽는다 — 판정에 쓰는 데가 없다
 /// - **자리는 그 명령이 도는 자리(`toolCall.args.Cwd`)가 먼저고, 없으면 첫 작업 자리(`workspacePaths`)다** — 훅
 ///   프로세스는 hooks.json 이 놓인 디렉터리에서 돈다. 셸 명령은 `Cwd` 에서 돌고, 판정은 거기서 상대 경로를 푼다
 /// - `run_command` 는 셸(`Bash`)이고, 파일을 쓰는 셋(`write_to_file`·`replace_file_content`·
