@@ -164,6 +164,29 @@ and for an agent the hook refuses a review without them (rule 3 on the
 [agents page](agents.md#the-five-rules)). Before closing any issue, name the AI
 that did the work on it — the [model line](glossary.md#model-line).
 
+## Archive closed work
+
+Closed work stays in `.moai/issues.jsonl` until you move it out. Every command
+reads that file, so a tracker with years of finished rows gets slower and its
+diffs get noisier. Moving old rows into the [archive](glossary.md#archive) is a
+step you take on purpose — no ordinary write archives anything.
+
+1. `moai status` says when there is something to move: a notice counts the closed
+   rows that `moai archive` would move — rows that have stood in `done` for longer
+   than `archive_days` (two weeks unless `.moai/config.toml` says otherwise)
+2. `moai archive --dry-run` — see what would move. An epic moves together with its
+   members, and a parent with its children, only once the whole bundle is old
+   enough. Milestones never move
+3. `moai archive` — move them into `.moai/archive/<year>.jsonl`, then commit
+   `.moai/` like any other tracker change
+
+Archived rows still count as context — a parent, a blocker or a milestone that
+was archived is not "missing" — but the board, `moai ready` and `moai show` lists
+leave them out. To find one, `moai show <id>` reads it directly and
+`moai show --archived` lists the archive. Reopening one with
+`moai mv <id> todo --from done` brings back only that row; the rest of its
+bundle stays archived.
+
 ## In this repository
 
 The above is moai. This repository adds its own conventions on top, written down
@@ -192,5 +215,11 @@ where its contributors read them rather than repeated here:
   in the wrong place" in [Recovery](recovery.md)
 - **A command says `locked`.** Another moai is writing right now; wait and run it
   again. Deleting `.moai/lock` releases nothing
+- **`moai status` names an `archive_duplicate_id`.** The same id stands live and
+  in the archive — see [An archive copy conflicts with a live
+  row](recovery.md#an-archive-copy-conflicts-with-a-live-row)
+- **`moai status` exits non-zero with `archive_unreadable`.** An archive file is
+  broken data, the same as a broken line in `issues.jsonl` — see [An archive file
+  cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3
