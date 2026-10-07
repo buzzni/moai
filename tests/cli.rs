@@ -1575,6 +1575,54 @@ fn init_never_plants_the_block_over_a_dotfile_agents_md_leads_to() {
     }
 }
 
+/// **링크인 딸린 파일은 AGENTS.md 와 한 파일이어도 블록을 막지 않는다**(리뷰 moai-8gwh 7번). `init` 은 링크인
+/// `.gitattributes` 에 줄을 안 덧붙여 블록이 지울 것이 없는데, 견주던 판은 `.gitattributes -> x` 와 `AGENTS.md -> x`
+/// 에서 "init 이 함께 쓰는 파일" 이라며 블록을 안 심었다. 링크라는 것은 그 파일의 알림이 따로 댄다.
+#[cfg(unix)]
+#[test]
+fn a_linked_dotfile_does_not_keep_the_block_out_of_agents_md() {
+    let s = Scratch::new("init-agents-linked-dotfile");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    std::fs::write(root.join("x"), "*.png binary\n").unwrap();
+    std::os::unix::fs::symlink("x", root.join(".gitattributes")).unwrap();
+    std::os::unix::fs::symlink("x", root.join("AGENTS.md")).unwrap();
+    let out = staged(&["init", "argos", "--guide", "block", "--no-skill", "--no-register"])
+        .env("MOAI_LANG", "en")
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "0 이 아니다\n{said}\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!said.contains("AGENTS.md leads to"), "링크인 딸린 파일을 함께 쓴다고 댔다\n{said}");
+    assert!(read(&root.join("x")).contains("Start a session"), "블록을 안 심었다\n{said}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(!check.contains("agents_shared"), "--check 가 함께 쓴다고 댔다 — {check}");
+}
+
+/// **`--check` 는 AGENTS.md 에 심는 안내일 때만 딸린 파일과 견준다**(리뷰 moai-8gwh 6번) — `run` 이 그렇게 잰다.
+/// git 밖에 둔 트래커를 `--guide none` 으로 심은 저장소에서 늘 재던 판은 "AGENTS.md 를 안 건드린다" 뒤에 "블록을
+/// 받으려면 보통 파일로 바꾼다" 를 함께 세웠다.
+#[cfg(unix)]
+#[test]
+fn init_check_measures_the_shared_agents_md_only_where_it_would_plant() {
+    let s = Scratch::new("init-check-shared-none");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    std::os::unix::fs::symlink(".gitignore", root.join("AGENTS.md")).unwrap();
+    ok(root, &["init", "argos", "--tracking", "gitignore", "--guide", "none", "--no-skill", "--no-register"]);
+    let out = staged(&["init", "--check"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        said.contains("leaves the committed AGENTS.md alone"),
+        "시험의 전제 — 안내를 안 심는 저장소가 아니다\n{said}"
+    );
+    assert!(!said.contains("AGENTS.md leads to"), "안 심는 안내에 보통 파일로 바꾸라고 했다\n{said}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(!check.contains("agents_shared"), "{check}");
+}
+
 /// **`--guide file` 에서 `--guide block` 으로 바꾸면 `.moai/guide.md` 를 걷는다**(moai-8gwh.ftm). 링크 블록이 전문으로
 /// 갈린 뒤에도 그 파일이 아무도 안 가리킨 채 남았다. AGENTS.md 를 안 건드리는 안내(`none`)로 부르면 링크가 아직
 /// 사니 그대로 둔다.

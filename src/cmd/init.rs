@@ -924,6 +924,10 @@ fn linked_in(files: &[Dotfile]) -> Vec<&'static str> {
 /// 것과 같은 자([`crate::store::same_file`])다. 푼 철자로만 견주던 판은 대소문자를 안 가리는 파일 시스템(macOS·Windows 기본)의
 /// `AGENTS.md -> .GITATTRIBUTES` 를 딴 파일로 읽어 블록을 심었고, 같은 실행이 덧붙인 규칙이 지워졌다. 끝 파일이
 /// 아직 없으면 푼 철자로 접는다.
+///
+/// **링크인 딸린 파일은 견주지 않는다**(리뷰 moai-8gwh 7번) — `init` 은 그 파일에 줄을 안 덧붙여([`ensure_lines`] 의
+/// `Added::Linked`) 블록이 지울 줄이 없고, 고칠 길은 이미 [`linked_in`] 의 알림이 댄다. 견주던 판은
+/// `.gitattributes -> x` 와 `AGENTS.md -> x` 에서 "init 이 함께 쓰는 파일" 이라는 거짓 까닭으로 블록을 안 심었다.
 fn agents_shares(root: &Path, files: &[Dotfile]) -> Option<&'static str> {
     let agents = root.join("AGENTS.md");
     if !agents.is_symlink() {
@@ -932,7 +936,7 @@ fn agents_shares(root: &Path, files: &[Dotfile]) -> Option<&'static str> {
     // 못 풀면(고리) 받은 철자다.
     let end = |p: &Path| crate::path::follow_links(p).unwrap_or_else(|_| p.to_path_buf());
     let at = end(&agents);
-    files.iter().find(|d| crate::store::same_file(&at, &end(&d.path))).map(|d| d.name)
+    files.iter().find(|d| !d.path.is_symlink() && crate::store::same_file(&at, &end(&d.path))).map(|d| d.name)
 }
 
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
@@ -1030,7 +1034,17 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let (gaps, linked) = (gaps_in(&files), linked_in(&files));
     // AGENTS.md 가 딸린 파일에 닿으면 `init` 은 블록을 안 심는다(moai-8gwh.esm) — 블록이 없다는 말만 서면 `init` 을
     // 다시 부르라는 뜻으로 읽힌다. 같은 자([`agents_shares`])로 재어 그 까닭을 함께 댄다.
-    let shared = agents_shares(&root, &files);
+    //
+    // **맨 `init` 이 AGENTS.md 에 심을 때만 잰다**(리뷰 moai-8gwh 6번) — [`run`] 이 그렇게 잰다. 안내를 훅이나 `none`
+    // 으로 둔 저장소에서 늘 재던 판은 "AGENTS.md 를 안 건드린다" 뒤에 "블록을 받으려면 보통 파일로 바꾼다" 를 함께
+    // 세웠다. 모드는 [`run`] 이 플래그 없이 고르는 길 그대로다 — 서 있는 안내([`guide_of`]), 없으면 `PLAIN` 의 기본.
+    let again = root.join(".moai").exists();
+    let guide = guide_of(&root, &Ok(Some(text.clone())), tracking, again).unwrap_or(if tracking.tracked() {
+        crate::init_choice::PLAIN.guide_tracked
+    } else {
+        crate::init_choice::PLAIN.guide_local
+    });
+    let shared = matches!(guide, Guide::Block | Guide::File).then(|| agents_shares(&root, &files)).flatten();
     // **`moai init` 을 대기 전에 그것이 여기 서는지 묻는다**(moai-nppo). 딸린 워크트리에서는 안 선다
     // (moai-mz0e 가 거절을 세웠다) — 그 갈래를 모르던 판은 여기서 `moai init` 을 세 줄로 권하고,
     // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
