@@ -908,6 +908,32 @@ fn linked_in(files: &[Dotfile]) -> Vec<&'static str> {
     files.iter().filter(|d| d.path.is_symlink()).map(|d| d.name).collect()
 }
 
+/// 링크를 끝까지 푼 자리 — **끝 파일은 없어도 된다**(`store::into_tracker` 의 `land` 와 같은 자). 디렉터리는
+/// 풀고 끝 이름은 그대로 붙인다. 못 풀면(고리) 받은 철자다.
+fn landed(p: &Path) -> std::path::PathBuf {
+    let Ok(end) = crate::path::follow_links(p) else { return p.to_path_buf() };
+    match (std::fs::canonicalize(crate::path::dir_of(&end)), end.file_name()) {
+        (Ok(dir), Some(name)) => dir.join(name),
+        _ => crate::path::real_prefix(&crate::path::lexical(&end)),
+    }
+}
+
+/// 이 디렉터리의 AGENTS.md 가 링크를 따라 `files`(이 실행이 줄을 덧붙이는 딸린 파일) 중 하나에 닿으면 그 이름
+/// (moai-8gwh.esm). `CLAUDE.md` 를 견주는 [`run`] 의 자리처럼 이름이 아니라 푼 자리로 견준다.
+///
+/// **쓰는 길([`run`])과 보는 길([`check`])이 이 하나로 잰다** — `AGENTS.md -> .gitattributes` 에 블록을 심으면 같은
+/// 실행이 덧붙인 병합 규칙이 갈아끼우기에 통째로 지워진다. `.git/info/exclude` 로 가는 링크는 읽기도 쓰기도 이미
+/// 거절하는 자리라(`store::target_of`) 닿을 일이 없지만, 목록을 거르지 않고 다 견준다 — 거르면 그 자리가 바뀌는
+/// 날 여기만 옛 답을 낸다. 링크가 아니면 묻지 않는다: 보통 파일인 AGENTS.md 는 딴 이름의 파일일 수 없다.
+fn agents_shares(root: &Path, files: &[Dotfile]) -> Option<&'static str> {
+    let agents = root.join("AGENTS.md");
+    if !agents.is_symlink() {
+        return None;
+    }
+    let at = landed(&agents);
+    files.iter().find(|d| landed(&d.path) == at).map(|d| d.name)
+}
+
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는가 — 그렇다면 셸에 붙여 넣을 모양의 뿌리.
 ///
 /// **부른 사람의 셸이 뿌리에 있지 않을 수 있을 때** 댄다 — 부른 자리가 뿌리가 아니거나
@@ -997,6 +1023,9 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     };
     let files = dotfiles(&root, tracking, place.as_ref());
     let (gaps, linked) = (gaps_in(&files), linked_in(&files));
+    // AGENTS.md 가 딸린 파일에 닿으면 `init` 은 블록을 안 심는다(moai-8gwh.esm) — 블록이 없다는 말만 서면 `init` 을
+    // 다시 부르라는 뜻으로 읽힌다. 같은 자([`agents_shares`])로 재어 그 까닭을 함께 댄다.
+    let shared = agents_shares(&root, &files);
     // **`moai init` 을 대기 전에 그것이 여기 서는지 묻는다**(moai-nppo). 딸린 워크트리에서는 안 선다
     // (moai-mz0e 가 거절을 세웠다) — 그 갈래를 모르던 판은 여기서 `moai init` 을 세 줄로 권하고,
     // 따라 친 사람은 1 로 끝나는 명령을 받았다. 가르는 자는 [`crate::store::init_belongs_at`] 하나고
@@ -1038,6 +1067,10 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
         if !linked.is_empty() {
             v["linked"] = serde_json::json!(linked);
         }
+        // 닿을 때만 키가 선다 — 값은 AGENTS.md 가 닿는 딸린 파일의 이름이다.
+        if let Some(with) = shared {
+            v["agents_shared"] = serde_json::json!(with);
+        }
         if !gaps.is_empty() {
             v["missing"] = serde_json::json!(
                 gaps.iter().map(|(name, _, missing)| (*name, missing)).collect::<std::collections::BTreeMap<_, _>>()
@@ -1073,6 +1106,9 @@ pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     }
     for name in &linked {
         out.push(fill(say(lang, "init.check_linked"), &[("name", name)]));
+    }
+    if let Some(with) = shared {
+        out.push(fill(say(lang, "init.check_agents_shared"), &[("with", with)]));
     }
     // **드라이버도 한 줄로 댄다**(moai-08bo). 안 쓰기로 한 저장소(`off`)와 이미 선 줄(`current`)은
     // 조용하다 — `--check` 가 대는 것은 **남은 일**이고, 그 둘은 남은 일이 아니다.
@@ -1292,6 +1328,11 @@ enum Added {
     /// **못 넣은 줄을 함께 든다.** 읽기는 됐으니 무엇이 빠졌는지 안다 — 못 읽은 자리처럼
     /// 블록을 통째로 내면 이미 있는 줄까지 손으로 붙여 넣게 되고, 그러면 같은 줄이 둘 선다.
     Unwritable { why: String, missing: Vec<String> },
+    /// AGENTS.md 가 링크를 따라 **이 실행이 줄을 덧붙이는 딸린 파일**에 닿아 안 건드렸다(moai-8gwh.esm). 든 것은 그
+    /// 파일의 이름이다. 블록은 처음에 읽은 글에 붙여 맨 끝에 갈아끼우므로([`plant`]), 그대로 심으면 방금 덧붙인
+    /// `merge=moai`·`/.moai/lock` 줄이 통째로 지워지고 그 자리에 마크다운이 규칙으로 선다 — 앞 판은 둘 다 썼다고
+    /// 말하고 0 으로 끝났다.
+    Shared(&'static str),
 }
 
 impl Added {
@@ -1302,6 +1343,7 @@ impl Added {
             Added::Unreadable(why) => Some(("unreadable", why)),
             Added::Unwritable { why, .. } => Some(("unwritable", why)),
             Added::Linked { to, .. } => Some(("linked", to)),
+            Added::Shared(with) => Some(("shared", with)),
         }
     }
 
@@ -1312,7 +1354,7 @@ impl Added {
         match self {
             Added::Unwritable { missing, .. } => missing.iter().map(String::as_str).filter(rule).collect(),
             Added::Wrote { .. } | Added::Already | Added::Unreadable(_) => block.lines().filter(rule).collect(),
-            Added::Linked { .. } => Vec::new(),
+            Added::Linked { .. } | Added::Shared(_) => Vec::new(),
         }
     }
 }
@@ -1795,7 +1837,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     // 규칙을 고치라며 대는 `moai init` 이 막다른 길이 됐다. 그 파일은 못 건드린 자리로 이름과 까닭을 댄다.
     let agents_path = root.join("AGENTS.md");
     let mut agents_unheld = None;
-    let agents_now = if no_agents {
+    let mut agents_now = if no_agents {
         None
     } else {
         match agents_read {
@@ -1821,6 +1863,13 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     // **이 클론에만 두면**(moai-zynt.own) 병합 규칙은 할 일이 없어 `.gitattributes` 가 목록에 없고, 무시 블록에
     // 트래커와 훅 자리를 더해 고른 파일에 쓴다. `.git/info/exclude` 를 고르면 커밋되는 파일은 하나도 안 바뀐다.
     let files = dotfiles(&root, plan.tracking, place.as_ref());
+    // **AGENTS.md 가 딸린 파일에 닿으면 블록을 안 심는다**(moai-8gwh.esm) — 줄을 덧붙이기 **전에** 가른다. 블록은
+    // 위에서 읽은 글에 붙여 맨 끝에 갈아끼우므로, 그대로 두면 이 실행이 방금 덧붙인 규칙이 지워진다. 못 건드린
+    // 자리로 이름과 까닭을 대고 나머지는 심는다(moai-780n — 못 써도 끊지 않는다).
+    let agents_shared = agents_now.as_ref().and_then(|_| agents_shares(&root, &files));
+    if agents_shared.is_some() {
+        agents_now = None;
+    }
     let attributes = files.iter().find(|d| d.kind == "gitattributes_rules");
     let ignored = files.iter().find(|d| d.kind != "gitattributes_rules");
     let ignore_name = ignored.map_or(".gitignore", |d| d.name);
@@ -1888,7 +1937,9 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     // 블록은 다음 `init` 이 채우고, 그 사이는 `init --check` 와 `status` 가 말한다.
     // 안 읽기로 한 AGENTS.md 는 위에서 건너뛰었다 — 못 읽은 자리로 선다. 그 까닭의 말은 그때만 묻는다
     // (`ensure_lines` 와 같다 — `--json` 의 흔한 길은 사용자 설정을 안 연다).
-    let mut agents_trouble = agents_unheld.map(|why| Added::Unreadable(crate::held::said(ctx.lang(), &why)));
+    let mut agents_trouble = agents_unheld
+        .map(|why| Added::Unreadable(crate::held::said(ctx.lang(), &why)))
+        .or(agents_shared.map(Added::Shared));
     let agents = match &agents_now {
         None => false,
         Some(existing) => {
@@ -2117,6 +2168,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         let head = match done {
             Added::Unwritable { why, .. } => fill(say(lang, "init.unwritable"), &[("name", name), ("why", why)]),
             Added::Unreadable(why) => fill(say(lang, "init.unreadable"), &[("name", name), ("why", why)]),
+            Added::Shared(with) => fill(say(lang, "init.agents_shared"), &[("name", name), ("with", with)]),
             // 링크는 **손으로 더할 줄을 안 댄다**([`Added::Linked`]) — 따라 적는 곳이 그 링크다. 고칠 말은
             // 가리키는 곳에 따라 갈린다(리뷰): 체크아웃 안이면 그 내용을 보통 파일로 옮기고, 밖이면
             // (`~/.bashrc`) 옮겨 담는 순간 그 파일이 이 저장소의 커밋에 실리므로 링크만 걷는다.
@@ -2140,6 +2192,7 @@ pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
         if done.hand(block).is_empty() {
             out.push(match done {
                 Added::Unreadable(_) => say(lang, "init.agents_unheld_fix").to_string(),
+                Added::Shared(_) => say(lang, "init.agents_shared_fix").to_string(),
                 _ => say(lang, "init.untouched_fix").to_string(),
             });
             continue;

@@ -14,6 +14,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **`moai init` no longer erases the rules it just wrote through an
+  `AGENTS.md` link.** With a committed `AGENTS.md -> .gitattributes` the block
+  was planted last, over the text read before the rules were appended, so the
+  `merge=moai` lines vanished and AGENTS markdown stood as attribute patterns;
+  `-> .gitignore` lost `.moai/lock` the same way — and the output said both
+  were written. When `AGENTS.md` leads to a file `init` appends to, the block
+  is no longer planted: `AGENTS.md` is named as left alone (`untouched`, kind
+  `shared` under `--json`), and `moai init --check` names it too
+  (`agents_shared`). (moai-8gwh.esm)
 - **A committed link from a file outside `.moai` into the tracker is no longer
   followed.** `AGENTS.md -> .moai/issues.jsonl` made `moai init` read the
   snapshot as AGENTS.md and replace it without the repository lock — racing a

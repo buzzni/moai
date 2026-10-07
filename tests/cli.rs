@@ -1530,6 +1530,42 @@ fn init_never_writes_into_a_tracker_whose_moai_is_a_directory_link() {
     }
 }
 
+/// **AGENTS.md 가 `init` 이 줄을 덧붙이는 딸린 파일로 가는 링크면 블록을 안 심는다**(moai-8gwh.esm). 블록은 처음에
+/// 읽은 글에 붙여 맨 끝에 갈아끼우므로, 커밋된 `AGENTS.md -> .gitattributes` 에서 같은 실행이 덧붙인 `merge=moai`
+/// 줄이 통째로 지워지고 AGENTS 마크다운이 속성 패턴으로 섰다 — 출력은 둘 다 썼다고 하고 0 으로 끝났다.
+/// `-> .gitignore` 면 `.moai/lock` 줄이 같은 길로 사라졌다.
+#[cfg(unix)]
+#[test]
+fn init_never_plants_the_block_over_a_dotfile_agents_md_leads_to() {
+    for (target, rule) in [(".gitattributes", ".moai/issues.jsonl   text eol=lf merge=moai"), (".gitignore", ".moai/lock")]
+    {
+        let s = Scratch::new("init-agents-dotfile");
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        std::fs::write(root.join(target), "*.png binary\n").unwrap();
+        std::os::unix::fs::symlink(target, root.join("AGENTS.md")).unwrap();
+        let out = staged(&["init", "argos", "--no-skill", "--no-register"])
+            .env("MOAI_LANG", "en")
+            .current_dir(root)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert!(out.status.success(), "{target}: 0 이 아니다\n{said}\n{}", String::from_utf8_lossy(&out.stderr));
+        let held = read(&root.join(target));
+        assert!(held.starts_with("*.png binary\n"), "{target}: 사람의 줄을 지웠다\n{held}");
+        assert!(held.lines().any(|l| l == rule), "{target}: 방금 덧붙인 규칙이 지워졌다\n{held}\n{said}");
+        assert!(!held.contains("moai:begin") && !held.contains("Issue tracker"), "{target}: 블록을 심었다\n{held}");
+        assert!(said.contains(&format!("AGENTS.md leads to {target}")), "{target}: 안 썼다고 안 댔다\n{said}");
+        assert!(!said.contains("AGENTS.md block"), "{target}: 블록을 맞췄다고 했다\n{said}");
+
+        let js = ok(root, &["init", "--json"]);
+        assert!(js.contains("\"AGENTS.md\":{\"kind\":\"shared\""), "{target}: 기계에게 안 댔다 — {js}");
+        assert_eq!(read(&root.join(target)), held, "{target}: 다시 부른 init 이 파일을 바꿨다");
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert_eq!(field(&check, "agents_shared"), target, "{target}: --check 가 안 댔다 — {check}");
+    }
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
