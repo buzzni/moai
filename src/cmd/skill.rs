@@ -1879,21 +1879,47 @@ mod tests {
     /// (`skill::tests::the_checked_in_plugin_matches_the_guide`)은 심을 파일이 같은지만 보고 남는 파일은 못 본다 — 스킬을
     /// 걷은 판이 커밋된 사본을 안 지우면, 이 저장소를 받는 세션이 걷힌 스킬을 그대로 읽는다. 훅 파일은 [`skill::AGENTS_DIR`]
     /// 밖이라 여기 안 든다.
+    ///
+    /// **커밋된 파일을 센다**(`git ls-files`, 리뷰 moai-ybns.451.52s) — 작업 트리를 훑던 판은 기여자가 곁에 둔 제 스킬
+    /// (`.git/info/exclude` 에 든 것까지) 하나로 로컬 `cargo test` 가 붉어졌다. 그 자리의 다른 스킬은 남의 것이다
+    /// (`uninstall`, `skill_install_leaves_nothing_an_older_moai_planted`). git 이 없으면(내려받은 크레이트) 작업 트리를
+    /// 훑되 moai 가 심었던 이름([`skill::EVER_PLANTED`])만 센다.
     #[test]
     fn the_checked_in_trees_hold_nothing_more_than_is_planted() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let skills = skill::skills();
-        let walk = |dir: &Path| -> Vec<String> {
-            let (mut out, mut todo) = (Vec::new(), vec![dir.to_path_buf()]);
-            while let Some(at) = todo.pop() {
-                for entry in std::fs::read_dir(&at).unwrap_or_else(|e| panic!("{}: {e}", at.display())) {
+        let tracked = |at: &str| -> Option<Vec<String>> {
+            let out = Command::new("git").args(["ls-files", "-z", "--", at]).current_dir(root).output().ok()?;
+            if !out.status.success() {
+                return None;
+            }
+            let prefix = format!("{at}/");
+            let mut v: Vec<String> = String::from_utf8(out.stdout)
+                .ok()?
+                .split('\0')
+                .filter_map(|p| p.strip_prefix(&prefix).map(str::to_string))
+                .collect();
+            v.sort();
+            Some(v)
+        };
+        // git 이 없을 때 — moai 의 이름 밑만 센다. Claude 의 트리는 `skills/` 밖(매니페스트·훅)이 다 moai 의 것이다.
+        let walk = |at: &str| -> Vec<String> {
+            let dir = root.join(at);
+            let (mut out, mut todo) = (Vec::new(), vec![dir.clone()]);
+            while let Some(here) = todo.pop() {
+                for entry in std::fs::read_dir(&here).unwrap_or_else(|e| panic!("{}: {e}", here.display())) {
                     let path = entry.unwrap().path();
                     match path.is_dir() {
                         true => todo.push(path),
-                        false => out.push(path.strip_prefix(dir).unwrap().display().to_string()),
+                        false => out.push(path.strip_prefix(&dir).unwrap().display().to_string()),
                     }
                 }
             }
+            let under = if at == skill::DIR { "skills/" } else { "" };
+            out.retain(|p| match p.strip_prefix(under) {
+                Some(rest) => rest.split('/').next().is_some_and(skill::ever_planted),
+                None => true,
+            });
             out.sort();
             out
         };
@@ -1907,7 +1933,7 @@ mod tests {
             (skill::AGENTS_DIR, named(skill::agents_tree(&skills))),
         ];
         for (at, want) in trees {
-            let have = walk(&root.join(at));
+            let have = tracked(at).unwrap_or_else(|| walk(at));
             let extra: Vec<&String> = have.iter().filter(|p| !want.contains(p)).collect();
             assert!(extra.is_empty(), "{at} 에 이 판이 안 심는 파일이 남았다 — 지운다: {extra:?}");
         }
