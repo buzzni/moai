@@ -27691,9 +27691,8 @@ fn archive_regressions_the_project_layer_counts_what_the_board_counts() {
     };
     // The fixture stands: the archive diagnostics are on the board, and the archived context raises nothing.
     assert!(kinds("warnings").contains(&"archive_duplicate_id".to_string()), "{board}");
-    for kind in ["archive_pending", "archive_unreadable"] {
-        assert!(kinds("notices").contains(&kind.to_string()), "{kind}: {board}");
-    }
+    assert!(kinds("warnings").contains(&"archive_unreadable".to_string()), "{board}");
+    assert!(kinds("notices").contains(&"archive_pending".to_string()), "{board}");
     for kind in ["milestone_overdue", "dangling_blocked_by"] {
         assert!(!kinds("warnings").contains(&kind.to_string()), "{kind}: {board}");
     }
@@ -27730,7 +27729,8 @@ fn archive_regressions_the_hook_board_names_archive_collisions() {
 /// stayed archived, a live row blocked by an archived one, a live row put into an archived epic, a milestone past its
 /// deadline that stands done only through its archived members, and a live twin of an archived row
 /// (`archive_duplicate_id`). Read without them the board would name dangling references and an overdue milestone.
-/// The notices — a bundle `moai archive` would move, an unreadable archived line nothing reaches — are not counted.
+/// The notice — a bundle `moai archive` would move — is not counted; an unreadable archived line nothing reaches is
+/// broken data and is counted the same on both sides (moai-5y2a).
 #[test]
 fn the_stop_count_matches_the_board_over_an_archive() {
     let s = init("archive-stop-count");
@@ -27777,11 +27777,11 @@ fn the_stop_count_matches_the_board_over_an_archive() {
     let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let kinds: Vec<&str> = board["warnings"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
     let notices: Vec<&str> = board["notices"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
-    assert!(kinds.contains(&"archive_duplicate_id"), "{board}");
+    assert!(kinds.contains(&"archive_duplicate_id") && kinds.contains(&"archive_unreadable"), "{board}");
     for kind in ["dangling_epic", "dangling_blocked_by", "orphan_child", "milestone_overdue"] {
         assert!(!kinds.contains(&kind), "{kind} — the board did not read the archive\n{board}");
     }
-    assert!(notices.contains(&"archive_pending") && notices.contains(&"archive_unreadable"), "{board}");
+    assert!(notices.contains(&"archive_pending"), "{board}");
     let warnings = counted(&board);
     assert_eq!(before + 1, warnings, "only the twin came in between\n{board}");
 
@@ -27795,6 +27795,78 @@ fn the_stop_count_matches_the_board_over_an_archive() {
     assert!(stop.stdout.is_empty(), "{}", String::from_utf8_lossy(&stop.stdout));
 }
 
+/// **An archive that cannot be read is broken data**(moai-5y2a, 2026-10-06 the person's decision) — `moai status`
+/// exits non-zero on it, on the same line as an unreadable live row (`unreadable_line`). A file of conflict markers, a
+/// file that is not UTF-8 and a FIFO in a year's place are all `archive_unreadable`, a fatal warning that names the
+/// command listing each source. `stats` and `show --archived` still answer with 0: they read what they can and say the
+/// rest on stderr (moai-qde9.2hx.yt6).
+#[test]
+fn an_unreadable_archive_is_broken_data_for_status_alone() {
+    let mut cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
+        ("conflict", Box::new(|f| std::fs::write(f, "<<<<<<< ours\n=======\n>>>>>>> theirs\n").unwrap())),
+        ("not-utf8", Box::new(|f| std::fs::write(f, [0xff, 0xfe, b'\n']).unwrap())),
+    ];
+    #[cfg(unix)]
+    cases.push(("fifo", Box::new(|f| assert!(Command::new("mkfifo").arg(f).status().unwrap().success()))));
+    for (name, make) in cases {
+        let s = init(&format!("archive-broken-{name}"));
+        add(s.path(), &["live work"]);
+        let dir = s.path().join(".moai/archive");
+        std::fs::create_dir_all(&dir).unwrap();
+        make(&dir.join("2025.jsonl"));
+
+        let out = at(s.path(), NOW, &["status", "--json"]);
+        assert!(!out.status.success(), "{name}: status exited 0 over a broken archive");
+        let board: serde_json::Value = serde_json::from_slice(&out.stdout).expect("status --json");
+        let found = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "archive_unreadable");
+        let w = found.unwrap_or_else(|| panic!("{name}: no archive_unreadable warning\n{board}"));
+        assert_eq!(
+            (&w["fatal"], &w["notice"], &w["hint"]),
+            (&serde_json::json!(true), &serde_json::json!(false), &serde_json::json!("moai show --archived"))
+        );
+        assert!(board["notices"].as_array().unwrap().iter().all(|n| n["kind"] != "archive_unreadable"), "{board}");
+        assert!(!at(s.path(), NOW, &["status"]).status.success(), "{name}: the text board exited 0");
+        for args in [&["stats", "--json"][..], &["show", "--archived"]] {
+            let out = at(s.path(), NOW, args);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success(), "{name}: {args:?} exited non-zero\n{err}");
+            assert!(err.contains("archive/2025.jsonl"), "{name}: {args:?} did not name the source\n{err}");
+        }
+    }
+}
+
+/// **A session that leaves a broken archive behind is held at `Stop`**(moai-5y2a) — `Stop` reads only the archive that
+/// reaches the live rows (`archive::around`, moai-i9ji), yet it counts every unreadable archived line the way `moai
+/// status` does, reached or not. The line here is JSON but not a row (it has no `status`), so a syntax check alone
+/// would miss it, and nothing else names its id.
+#[test]
+fn a_session_that_breaks_the_archive_is_held_at_stop() {
+    let s = init("archive-broken-stop");
+    let p = s.path();
+    let done = add(p, &["closed"]);
+    ok(p, &["mv", &done, "done"]);
+    ok_at(p, ARCHIVED_AT, &["archive"]);
+    add(p, &["live work"]);
+    let at_archive = [("MOAI_NOW", ARCHIVED_AT)];
+    hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, "breaks"));
+    let before = baseline(&s, "breaks").expect("no baseline");
+
+    let mut archive = std::fs::OpenOptions::new().append(true).open(p.join(".moai/archive/2026.jsonl")).unwrap();
+    std::io::Write::write_all(&mut archive, b"{\"id\":\"argos-zzzy\",\"title\":\"no status\"}\n").unwrap();
+    let out = at(p, ARCHIVED_AT, &["status", "--json"]);
+    assert!(!out.status.success());
+    let board: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let counted: usize =
+        board["warnings"].as_array().unwrap().iter().map(|w| w["count"].as_u64().unwrap() as usize).sum();
+    assert_eq!(counted, before + 1, "{board}");
+
+    let stop = hook_at_home(&s, p, None, &at_archive, "stop", &event(&s, "breaks"));
+    let held = String::from_utf8_lossy(&stop.stdout);
+    assert!(held.contains(r#""decision":"block""#) && held.contains(&format!(" {counted} ")), "{held}");
+    hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, "after"));
+    assert_eq!(baseline(&s, "after"), Some(counted), "the baseline and the board count apart");
+}
+
 #[test]
 fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
     let s = init("archive-lenient-read");
@@ -27805,7 +27877,8 @@ fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
     std::fs::write(dir.join("2025.jsonl"), "<<<<<<< conflict\n=======\n>>>>>>> other\n").unwrap();
     let another = add(s.path(), &["write despite archive damage"]);
     ok(s.path(), &["mv", &another, "in_progress"]);
-    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    let board = at(s.path(), NOW, &["status", "--json"]);
+    assert!(!board.status.success() && String::from_utf8_lossy(&board.stdout).contains("archive_unreadable"));
     for args in [vec!["show", &id], vec!["stats", "--json"]] {
         let out = at(s.path(), NOW, &args);
         let err = String::from_utf8_lossy(&out.stderr);
@@ -28058,7 +28131,8 @@ fn archive_regressions_fifos_and_outside_links_never_block_active_operations() {
     assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
     let id = add(s.path(), &["works with special files"]);
     ok(s.path(), &["mv", &id, "in_progress"]);
-    assert!(ok(s.path(), &["status", "--json"]).contains("archive_unreadable"));
+    let board = at(s.path(), NOW, &["status", "--json"]);
+    assert!(!board.status.success() && String::from_utf8_lossy(&board.stdout).contains("archive_unreadable"));
     assert_eq!(std::fs::read_to_string(away.path().join("outside.jsonl")).unwrap(), "unchanged");
 }
 
@@ -28128,7 +28202,11 @@ fn archive_regressions_an_unrelated_broken_archive_file_blocks_neither_cleanup_n
     assert!(String::from_utf8_lossy(&dropped.stdout).contains("\"removed\":1"));
     assert!(err.contains("2023.jsonl") && err.contains("2024.jsonl"), "unchecked files went unnamed: {err}");
     assert!(!std::fs::read_to_string(dir.join("2026.jsonl")).unwrap().contains(&twin));
-    assert!(!ok_at(s.path(), later, &["status", "--json"]).contains("archive_duplicate_id"));
+    // The broken files are still there, so the board ends non-zero on them alone (moai-5y2a).
+    let board = at(s.path(), later, &["status", "--json"]);
+    let text = String::from_utf8_lossy(&board.stdout);
+    assert!(!board.status.success() && text.contains("archive_unreadable"), "{text}");
+    assert!(!text.contains("archive_duplicate_id"), "{text}");
 }
 
 /// **`--drop` removes copies of the live row only**(review of moai-bth3). An archived row that merely shares the id

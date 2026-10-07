@@ -4583,11 +4583,11 @@ mod tests {
     }
 
     /// **못 읽는 아카이브가 층을 멈추지도 실패시키지도 않는다**(moai-nkwg) — 해마다 파일 자리의 FIFO 는 열지 않고
-    /// 알림 하나로 센다. 층은 그 아카이브를 열어 본 적이 없던 길이라, 여는 길이 FIFO 에 매이면 쓸기 스레드가 영영
+    /// 경고 하나로 센다(깨진 데이터다, moai-5y2a). 층은 그 아카이브를 열어 본 적이 없던 길이라, 여는 길이 FIFO 에 매이면 쓸기 스레드가 영영
     /// 안 돌아온다.
     #[cfg(unix)]
     #[test]
-    fn an_archive_fifo_is_a_notice_on_the_layer_not_a_hang() {
+    fn an_archive_fifo_is_a_warning_on_the_layer_not_a_hang() {
         let s = Scratch::fenced("layer-archive-fifo");
         let dir = s.project("p", &[("argos-0001", "산 줄", "todo")]);
         std::fs::create_dir_all(crate::archive::dir(&dir)).unwrap();
@@ -4605,10 +4605,11 @@ mod tests {
         let zone = crate::tz::Zone::stored();
         let (st, _) =
             crate::cmd::status::archive_board(&repo, &live.issues, &unreadable, (&live.issues, &unreadable), now, zone);
-        let notices: Vec<&str> = st.notices.iter().map(|w| w.kind).collect();
-        assert_eq!(notices, ["archive_unreadable"], "전제: 보드가 FIFO 를 알림으로 안 셌다");
-        assert!(st.warnings.iter().all(|w| w.kind != "unreadable_line"), "FIFO 가 산 줄의 못 읽는 줄로 섰다");
-        assert_eq!((sum.warnings.count(now, zone), sum.notices), (st.warnings.len(), 1), "층과 보드가 달리 센다");
+        let warnings: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
+        assert!(warnings.contains(&"archive_unreadable"), "전제: 보드가 FIFO 를 경고로 안 셌다 {warnings:?}");
+        assert!(!warnings.contains(&"unreadable_line"), "FIFO 가 산 줄의 못 읽는 줄로 섰다 {warnings:?}");
+        let counted = (sum.warnings.count(now, zone), sum.notices);
+        assert_eq!(counted, (st.warnings.len(), st.notices.len()), "층과 보드가 달리 센다");
     }
 
     /// **겹쳐 본 배너도 아카이브를 루트의 스냅샷과 견준다**(moai-nkwg 리뷰) — `moai status --worktree` 와 같은 자다.

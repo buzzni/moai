@@ -1677,6 +1677,11 @@ fn archive_status(
 /// 아카이브를 거의 다 읽어, 아끼는 것은 옮길 묶음 셈뿐이다(같은 2만 줄에 0.75초가 0.63초). 경고를 더는 자는
 /// [`crate::cmd::status::archive_board`] 와 같다 — 저쪽에 아카이브 경고를 더하면 여기도 더한다.
 /// `the_stop_count_matches_the_board_over_an_archive` 가 둘을 견준다.
+///
+/// **못 읽는 아카이브 줄은 닿든 안 닿든 센다**(moai-5y2a) — 깨진 데이터라 `moai status` 를 비영으로 끝내는 경고다.
+/// 닿지 않는 줄은 꼴만 재고 값을 안 지어(`store::readable`) 아끼는 것이 그대로 선다 — 릴리스 빌드로 닿는 줄이 없는 2만
+/// 줄에 0.10초가 0.12초가 되었고, 그 줄을 다 파싱하면 0.135초였다(전부 읽던 판은 0.6초). 세션이 아카이브를 깨 두고 가면
+/// 여기서 붙든다(`a_session_that_breaks_the_archive_is_held_at_stop`).
 fn warned(repo: &Repo, issues: &[model::Issue], unreadable: &[report::Unreadable], zone: &crate::tz::Zone) -> usize {
     let now = model::now();
     let opaque = || unreadable.iter().filter_map(|u| u.id);
@@ -1687,6 +1692,10 @@ fn warned(repo: &Repo, issues: &[model::Issue], unreadable: &[report::Unreadable
     let collisions = crate::archive::collisions(&live, &archived);
     if !collisions.is_empty() {
         st.warnings.push(report::Warning::archive_duplicates(collisions, issues));
+    }
+    // 못 읽는 줄은 닿든 안 닿든 다 돌아온다(`around`) — 보드와 같은 수다(moai-5y2a).
+    if !archived.errors.is_empty() {
+        st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
     }
     st.warnings.iter().map(|w| w.count).sum()
 }

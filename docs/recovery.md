@@ -314,10 +314,32 @@ the successful move still printed. Do not repeat the move with its old `--from`
 column: it has already moved. Repair the archive copy instead. A failed journal
 write is reported separately so its lost note can also be recorded again.
 
-Unreadable archive files and rows name their own source and leave readable rows
-available. Restore cleanup and `--drop` skip archive files they cannot read and
-name them. `moai rm --line` repairs the active snapshot only; it is never a repair
-for an archive file's line number.
+## An archive file cannot be read
+
+An archive file that cannot be read is broken data, the same as an unreadable
+line in the active snapshot: `moai status` reports `archive_unreadable` as a
+warning and exits non-zero (moai-5y2a). Its count is the files that could not be
+opened at all — a FIFO, a link out of the checkout, a file that is not UTF-8 —
+plus the lines inside readable files that do not parse. Readable rows stay
+available meanwhile, and `moai stats` and `moai show --archived` still answer
+with exit code 0; writes are not blocked.
+
+`moai status` and `moai show --archived` name each source on stderr, with the
+line number and the reason for a line. Repair the file itself:
+
+- **Conflict markers** (`<<<<<<<`, `=======`, `>>>>>>>`) mean a merge stopped in
+  the archive. Install the merge driver (`moai merge-driver --install`) and redo
+  the merge, or resolve the markers by hand — every archive line is one row.
+- **A line that does not parse** — compare it with `git log -p -- .moai/archive/`
+  and restore the version that read, or delete the line if the row is also live
+  or no longer wanted.
+- **A file that is not a regular UTF-8 file** — restore it from git
+  (`git checkout HEAD -- .moai/archive/<year>.jsonl`) or move it out of
+  `.moai/archive/`.
+
+Restore cleanup and `--drop` skip archive files they cannot read and name them.
+`moai rm --line` repairs the active snapshot only; it is never a repair for an
+archive file's line number.
 
 ## When nothing else fits
 

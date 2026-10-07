@@ -2054,6 +2054,84 @@ pub fn parse_line(i: usize, line: &str) -> Result<Issue, LoadError> {
     })
 }
 
+/// [`parse_line`] 가 이 줄을 읽는가 — **값을 안 짓고 잰다**(moai-5y2a). 답은 [`parse_line`] 의 `is_ok()` 와 같다.
+///
+/// 훅의 `Stop` 은 산 줄에 닿는 아카이브만 파싱한다(`archive::around`, moai-i9ji). 그런데 못 읽는 아카이브 줄은 닿든
+/// 안 닿든 `moai status` 를 비영으로 끝내는 경고(`archive_unreadable`)라 `Stop` 도 그 수를 세야 한다. 닿지 않는 줄을
+/// 다 [`parse_line`] 에 넣으면 i9ji 가 걷은 값의 절반이 돌아온다 — [`Issue`] 는 모르는 필드를 지키려고 `flatten` 을
+/// 들어, 줄마다 값을 한 번 통째로 담았다가 다시 푼다. 여기는 같은 필드를 같은 꼴로 받되 글을 짓지 않고 모르는 필드는
+/// 건너뛴다.
+///
+/// **`Issue` 와 한 몸이다.** 필드를 더하거나 꼴을 바꾸면 [`Shape`] 도 같이 바꾼다 — 안 바꾸면 그 필드가 틀린 줄을
+/// `Stop` 만 못 센다. `the_shape_reads_what_parse_line_reads` 가 `Issue` 를 필드 하나 안 빼고 적어 줄마다 비틀어
+/// 견주므로, 필드가 늘면 그 시험부터 컴파일이 안 된다.
+pub fn readable(line: &str) -> bool {
+    // `Issue` 는 `flatten` 이라 맵으로만 읽힌다. 파생한 구조체는 배열도 받으므로 그 하나를 앞에서 가른다.
+    line.trim_start().starts_with('{') && serde_json::from_str::<Shape>(line).is_ok()
+}
+
+/// [`readable`] 이 재는 [`Issue`] 의 꼴 — 필드마다 `Issue` 와 같은 꼴, 같은 `default` 다. 모르는 필드는 serde 가
+/// 건너뛰는데, `Issue` 의 `rest` 도 어떤 값이든 받으므로 답이 같다.
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct Shape {
+    id: Text,
+    title: Text,
+    #[serde(default)]
+    kind: crate::model::Kind,
+    status: Text,
+    #[serde(default)]
+    priority: Option<u8>,
+    #[serde(default)]
+    tags: Vec<Text>,
+    #[serde(default)]
+    assignee: Option<Text>,
+    #[serde(default)]
+    assignee_email: Option<Text>,
+    #[serde(default)]
+    epic: Option<Text>,
+    #[serde(default)]
+    milestone: Option<Text>,
+    #[serde(default)]
+    blocked_by: Vec<Text>,
+    #[serde(default)]
+    deferred_at: Option<Text>,
+    #[serde(default)]
+    planned_at: Option<Text>,
+    created_at: Text,
+    updated_at: Text,
+    status_since: Text,
+    #[serde(default)]
+    body: Option<Text>,
+    #[serde(default)]
+    done_at: Option<Text>,
+    #[serde(default)]
+    started_at: Option<Text>,
+    #[serde(default)]
+    due_on: Option<Text>,
+    #[serde(default)]
+    starts_on: Option<Text>,
+}
+
+/// 글 하나 — `String` 이 받는 것을 받되 짓지 않는다([`Shape`]).
+struct Text;
+
+impl<'de> serde::Deserialize<'de> for Text {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Text, D::Error> {
+        struct Any;
+        impl serde::de::Visitor<'_> for Any {
+            type Value = Text;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a string")
+            }
+            fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Text, E> {
+                Ok(Text)
+            }
+        }
+        d.deserialize_str(Any)
+    }
+}
+
 /// 정렬은 `id` 바이트 오름차순이다. `-`(0x2D) < `.`(0x2E) < 숫자 < 소문자 라서
 /// 자식이 부모 바로 밑에 붙고, 랜덤 id 가 삽입 위치를 파일 전체에 흩뿌려
 /// git 충돌 확률을 떨어뜨린다 (파일 끝 append 는 두 브랜치가 **항상** 부딪친다).
@@ -4520,6 +4598,86 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(d.join(".moai/issues.jsonl")).unwrap(), before);
     }
+
+    /// **[`readable`] 은 [`parse_line`] 과 같은 줄을 읽는다**(moai-5y2a). `Issue` 를 **필드 하나 안 빼고** 적는다 —
+    /// `..` 없이 적어야 `Issue` 에 필드가 늘 때 여기서 컴파일이 멈추고, 그 필드를 [`Shape`] 에도 더하게 된다. 값은 모두
+    /// 기본값이 아니어서 줄에 키가 다 서고, 키마다 빼고 꼴을 바꿔 둘의 답을 견준다. 줄 전체를 비트는 판(배열·겹친 키·
+    /// 뒤의 쓰레기·이스케이프한 키·외톨이 서로게이트)도 함께 잰다.
+    #[test]
+    fn the_shape_reads_what_parse_line_reads() {
+        let some = |s: &str| Some(s.to_string());
+        let full = Issue {
+            id: "argos-0001".into(),
+            title: "제목".into(),
+            kind: Kind::Epic,
+            status: Status::new("todo"),
+            priority: Some(1),
+            tags: vec!["t".into()],
+            assignee: some("a"),
+            assignee_email: some("a@x"),
+            epic: some("argos-e001"),
+            milestone: some("argos-m001"),
+            blocked_by: vec!["argos-b001".into()],
+            deferred_at: some("2026-09-01T00:00:00Z"),
+            planned_at: some("2026-09-01T00:00:00Z"),
+            created_at: "2026-09-01T00:00:00Z".into(),
+            updated_at: "2026-09-01T00:00:00Z".into(),
+            status_since: "2026-09-01T00:00:00Z".into(),
+            body: some("본문"),
+            done_at: some("2026-09-01T00:00:00Z"),
+            started_at: some("2026-09-01T00:00:00Z"),
+            due_on: some("2026-09-20"),
+            starts_on: some("2026-09-10"),
+            rest: BTreeMap::from([("lane".to_string(), serde_json::json!({"x": [1]}))]),
+        };
+        let line = serde_json::to_string(&full).unwrap();
+        let object: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&line).unwrap();
+        assert_eq!(object.len(), 22, "a field fell out of the line, so it is never twisted — {line}");
+        let mut lines = vec![line.clone()];
+        let values = [
+            serde_json::json!(null),
+            serde_json::json!(1),
+            serde_json::json!(300),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!(true),
+            serde_json::json!("s"),
+            serde_json::json!("idea"),
+            serde_json::json!([]),
+            serde_json::json!(["s"]),
+            serde_json::json!([1]),
+            serde_json::json!({}),
+        ];
+        for key in object.keys() {
+            let mut gone = object.clone();
+            gone.remove(key);
+            lines.push(serde_json::to_string(&gone).unwrap());
+            for v in &values {
+                let mut twisted = object.clone();
+                twisted.insert(key.clone(), v.clone());
+                lines.push(serde_json::to_string(&twisted).unwrap());
+            }
+            lines.push(line.replacen('{', &format!("{{{}:{},", serde_json::json!(key), object[key]), 1));
+        }
+        lines.extend([
+            format!("  {line}  "),
+            format!("\u{a0}{line}"),
+            format!("{line}x"),
+            format!("[{line}]"),
+            line[..line.len() - 1].to_string(),
+            line.replacen(r#""title":"#, r#""\u0074itle":"#, 1),
+            line.replacen(r#""body":"본문""#, r#""body":"\ud800""#, 1),
+            line.replacen(r#""body":"본문""#, r#""body":"a\"b\\c""#, 1),
+            r#"["argos-0001","t","issue","todo"]"#.to_string(),
+            "{}".to_string(),
+            "<<<<<<< ours".to_string(),
+        ]);
+        for l in &lines {
+            assert_eq!(readable(l), parse_line(0, l).is_ok(), "{l}");
+        }
+        assert!(readable(&line) && lines.iter().any(|l| !readable(l)));
+    }
+
     /// 못 읽는 줄도 **id 는 내놓는다.** 줄을 `Issue` 로 못 읽는 것과 그 안의
     /// `id` 를 못 읽는 것은 다른 일이다 — 한 단 낮게 읽으면 나온다.
     ///

@@ -176,11 +176,13 @@ remove its archive copies. This refuses an ID without a live row, and an archive
 row that is a different issue under the same ID (another kind or creation time).
 A conflicting bundle stays live during `moai archive`, while other eligible
 bundles can move; `--dry-run` and the board count only what will move.
-Unreadable archive files are reported by source and readable rows remain available.
+Unreadable archive files are reported by source and readable rows remain available;
+they are broken data, so `moai status` counts them as the `archive_unreadable`
+warning and exits non-zero ([Recovery](recovery.md#an-archive-file-cannot-be-read)).
 The explorer's banner and each project's `+N` in the overview count all of this
-the way `moai status` does: archived rows are context, not work, and the
-collision, unreadable archive files and bundles waiting to move are counted as
-the same warning and notices (moai-nkwg).
+the way `moai status` does: archived rows are context, not work, the collision
+and unreadable archive files are counted as the same warnings, and bundles
+waiting to move as the same notice (moai-nkwg).
 
 ## Catch up on what changed
 

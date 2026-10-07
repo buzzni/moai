@@ -147,10 +147,16 @@ does not tag — see `CONTRIBUTING.md`.
   repository) and the banner inside a project read archived rows as context
   only: a milestone whose members were all archived no longer shows as an
   overdue empty todo, an archived blocker is no longer a dangling reference,
-  archived rows are not counted as work, and an unreadable archive file is the
-  `archive_unreadable` notice rather than an unreadable-line warning. Archive
+  archived rows are not counted as work, and an unreadable archive file is
+  `archive_unreadable` rather than an unreadable-line warning. Archive
   collisions and bundles waiting for `moai archive` now show in both places,
   and the layer re-reads a project when its archive changes. (moai-nkwg)
+- **An archive file that cannot be read is broken data.** `archive_unreadable`
+  is now a warning rather than a notice, so `moai status` exits non-zero on it
+  the way it does on an unreadable line in the active snapshot, and points at
+  `moai show --archived`, which names each file and line. The hook's `Stop`
+  check counts it too, reached by the live rows or not. `moai stats` and
+  `moai show --archived` still exit 0. (moai-5y2a)
 
 ### Deprecated
 

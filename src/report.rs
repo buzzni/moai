@@ -4910,8 +4910,16 @@ impl Warning {
         Warning::new("archive_pending", Vec::new()).count(n).notice().hint("moai archive --dry-run")
     }
 
+    /// 못 읽은 아카이브 파일과 줄의 수 — **깨진 데이터다**(moai-5y2a, 2026-10-06 사용자 결정). 산 파일의 못 읽는 줄
+    /// (`unreadable_line`)과 같은 자리라 `moai status` 를 비영으로 끝낸다. 알림이던 판은 충돌 표시가 든 아카이브를
+    /// 둔 채 보드가 0 으로 끝나, 그것을 고칠 일로 읽을 표면이 없었다. 파일째 못 읽은 것(FIFO·UTF-8 아닌 파일)과
+    /// 파일 안의 못 읽는 줄을 하나씩 센다 — 글(`warn.archive_unreadable`)이 "파일·줄" 이라 이른다.
+    ///
+    /// **대는 명령은 자리를 대는 것이다** — `moai show --archived` 가 파일과 줄 번호를 stderr 에 댄다. `rm --line` 은
+    /// 산 파일만 고치므로 대지 않는다(고치는 길은 `docs/recovery.md`). `stats`·`show --archived` 는 이것으로 비영
+    /// 종료하지 않는다(moai-qde9.2hx.yt6) — 그 둘은 읽힌 것으로 답하고 나머지를 말한다.
     pub fn archive_unreadable(n: usize) -> Warning {
-        Warning::new("archive_unreadable", Vec::new()).count(n).notice()
+        Warning::new("archive_unreadable", Vec::new()).count(n).hint("moai show --archived").fatal()
     }
 
     pub fn archive_duplicates(ids: Vec<String>, active: &[Issue]) -> Warning {
@@ -7632,6 +7640,9 @@ mod tests {
         let dup = vec![make("argos-0001", Kind::Issue, "todo"), make("argos-0001", Kind::Issue, "todo")];
         assert!(status(&dup, &[], &cfg(), "2026-09-01T00:00:00Z", utc()).broken());
         assert!(status(&[], &[Unreadable { id: None }], &cfg(), "2026-09-01T00:00:00Z", utc()).broken());
+        // 아카이브도 같다 — 못 읽는 아카이브 파일·줄은 산 파일의 못 읽는 줄과 한 자리다(moai-5y2a).
+        let archive = Warning::archive_unreadable(2);
+        assert!(archive.fatal && !archive.notice && archive.count == 2, "{archive:?}");
     }
 
     /// 만드는 속도가 끝내는 속도를 넘으면 쌓인다.

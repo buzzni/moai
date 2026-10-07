@@ -12281,9 +12281,9 @@ mod tests {
         );
         let warnings: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         let notices: Vec<&str> = st.notices.iter().map(|w| w.kind).collect();
-        // 전제: 보드는 충돌을 경고로, 못 읽은 아카이브를 알림으로 세고, 옮긴 문맥으로는 아무것도 안 세운다.
-        assert!(warnings.contains(&"archive_duplicate_id"), "{warnings:?}");
-        assert!(notices.contains(&"archive_unreadable"), "{notices:?}");
+        // 전제: 보드는 충돌과 못 읽은 아카이브를 경고로 세고(moai-5y2a), 옮긴 문맥으로는 아무것도 안 세운다.
+        assert!(warnings.contains(&"archive_duplicate_id") && warnings.contains(&"archive_unreadable"), "{warnings:?}");
+        assert!(!notices.contains(&"archive_unreadable"), "{notices:?}");
         for kind in ["unreadable_line", "duplicate_id", "milestone_overdue", "dangling_blocked_by"] {
             assert!(!warnings.contains(&kind), "{kind}: {warnings:?}");
         }

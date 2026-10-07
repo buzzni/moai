@@ -234,8 +234,9 @@ pub(crate) fn archive_board_unjudged(
     if !collisions.is_empty() {
         st.warnings.push(report::Warning::archive_duplicates(collisions, root.0));
     }
+    // 치명 줄의 끝이다 — 산 줄의 `duplicate_id`·`unreadable_line` 처럼 충돌 다음에 못 읽는 것이 선다(moai-5y2a).
     if !archived.errors.is_empty() {
-        st.notices.push(report::Warning::archive_unreadable(archived.errors.len()));
+        st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
     }
     // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
     let movable = crate::archive::movable(root.0, archived, cfg, now).len();

@@ -151,9 +151,11 @@ fn read_error(file: PathBuf, message: String) -> crate::store::LoadError {
 ///   every milestone row for dues and for whether the repository uses milestones at all.
 ///
 /// A line left out is read for its head id alone, and that id stands on no other line and on no live row, so it can
-/// never collide. **Unreadable lines left out are not counted** — `archive_unreadable` is a notice, which `Stop` does
-/// not count. If it ever becomes a warning, this reader has to parse every line, which is the cost it exists to
-/// avoid. The order of what comes back is [`read`]'s: file, then line, then a stable sort by id.
+/// never collide. **Every unreadable line still comes back in `errors`, reached or not** — `archive_unreadable` is broken
+/// data that `Stop` counts the way `moai status` does (moai-5y2a), so the count here is [`read`]'s. A line left out is
+/// not parsed for that: [`crate::store::readable`] checks its shape without building the row, and only a line that
+/// fails it is parsed for the error. The order of what comes back is [`read`]'s: file, then line, then a stable sort
+/// by id.
 pub fn around<'a>(root: &Path, live: &[Issue], opaque: impl IntoIterator<Item = &'a str>) -> Load {
     let mut out = Load::default();
     let files = match files(root) {
@@ -223,9 +225,17 @@ pub fn around<'a>(root: &Path, live: &[Issue], opaque: impl IntoIterator<Item = 
             ids.extend(lines[k].3.ids.iter().map(String::as_str));
         }
     }
-    for (k, (f, n, text, _)) in lines.iter().enumerate().filter(|(k, _)| picked[*k]) {
-        match parsed.remove(&k).unwrap_or_else(|| crate::store::parse_line(*n, text)) {
-            Ok(issue) => out.issues.push(issue),
+    for (k, (f, n, text, _)) in lines.iter().enumerate() {
+        // A line left out is only asked whether it reads ([`crate::store::readable`]), and parsed only when it does not.
+        // Every line that does not read comes back, reached or not — `archive_unreadable` is broken data.
+        let row = match picked[k] {
+            true => parsed.remove(&k).unwrap_or_else(|| crate::store::parse_line(*n, text)),
+            false if crate::store::readable(text) => continue,
+            false => crate::store::parse_line(*n, text),
+        };
+        match row {
+            Ok(issue) if picked[k] => out.issues.push(issue),
+            Ok(_) => {}
             Err(mut e) => {
                 e.source = Some(sources[*f].0.clone());
                 out.errors.push(e);
@@ -906,6 +916,7 @@ mod tests {
             line(&escaped).replace(r#""epic":"argos-e001""#, r#""epic":"argos-e\u0030\u00301""#),
             line(&row("argos-n001", Kind::Issue, "done")).replacen(r#"{"id":"#, r#"{ "id": "#, 1),
             r#"{"id":"argos-zzzz","title":"#.to_string(),
+            r#"{"id":"argos-zzzy","title":"no status"}"#.to_string(),
         ];
         assert!(text[9].contains(r"\u0030"), "{}", text[9]);
         fs::write(path(&s, "2025"), text.join("\n") + "\n").unwrap();
@@ -925,9 +936,12 @@ mod tests {
             "argos-x001",
         ];
         assert_eq!(ids, want);
-        assert!(near.errors.is_empty(), "{:?}", near.errors);
+        // Every unreadable line comes back, reached or not — `archive_unreadable` is a warning (moai-5y2a). The second
+        // one is JSON but not a row, so only a check of the row's shape sees it.
         let all = read(&s).unwrap();
-        assert_eq!(all.errors.len(), 1, "the broken line is only seen by a full parse");
+        let spots = |l: &Load| l.errors.iter().map(|e| (e.source.clone(), e.line, e.id.clone())).collect::<Vec<_>>();
+        assert_eq!(all.errors.len(), 2, "{:?}", all.errors);
+        assert_eq!(spots(&near), spots(&all));
         let live_ids = BTreeSet::from(["argos-l001", "argos-o001"]);
         assert_eq!(collisions(&live_ids, &near), collisions(&live_ids, &all));
         assert_eq!(collisions(&live_ids, &near), ["argos-o001", "argos-w001"]);
