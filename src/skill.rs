@@ -115,15 +115,13 @@ fn stable(bytes: &[u8]) -> u64 {
 /// 는 걸지 않는다** — `claude` 가 그 출력을 거절한다. 까닭은 `hook::Event` 에
 /// 적혀 있다.
 ///
-/// **`StopFailure`·`SessionEnd` 는 출석만 적는다**(moai-u5wr.f29, 2026-10-04 사용자 결정) — `Stop` 없이 끝난 턴의 장을
-/// `idle` 로 돌린다. 사람이 Esc 로 끊은 턴에는 Claude 가 어느 훅도 안 낸다(문서) — 그 장은 다음 프롬프트까지 `busy` 다.
+/// **`StopFailure`·`SessionEnd` 는 안 건다**(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 옛 판이 심은 훅이
+/// 그 하위명령을 부르는 동안은 `moai hook` 이 빈 명령으로 받는다(`cmd::hook` 의 `decide`).
 const HOOKS: &[(&str, &str, &str)] = &[
     ("SessionStart", "session-start", "counting moai warnings..."),
     ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
     ("PreToolUse", "pre-tool-use", "checking the moai rules..."),
     ("Stop", "stop", "comparing the moai state..."),
-    ("StopFailure", "stop-failure", "marking this session idle for moai..."),
-    ("SessionEnd", "session-end", "marking this session idle for moai..."),
 ];
 
 /// `PreToolUse` 가 볼 도구들. 규칙이 뜻을 두는 것만 적는다 — 전부 받으면
@@ -138,9 +136,8 @@ pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 /// Antigravity 가 읽는 훅 자리 — 스킬과 같은 `.agents/` 밑이다([`AGENTS_DIR`]).
 pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 
-/// Codex 의 훅 — Claude 와 이벤트 이름이 같고, `Stop` 없이 끝난 턴은 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd`
-/// 로 온다. API 오류로 끊긴 턴에 오는 이벤트는 문서에 없다. **`SessionEnd` 는 그 세션의 장을 걷는다** — 장을 `idle` 로
-/// 두는 Claude 와 다르다(`cmd::hook` 의 `rest`).
+/// Codex 의 훅 — Claude 와 이벤트 이름이 같다. `Stop` 없이 끝난 턴의 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd` 는
+/// 안 건다(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 옛 판이 심은 줄은 `moai hook` 이 빈 명령으로 받는다.
 ///
 /// **줄마다 그 이벤트의 상한(초)을 함께 적는다**(moai-t6hl) — 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이
 /// 15초를 받는다. 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).
@@ -148,25 +145,22 @@ pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 /// **`additionalContextLimit` 은 이 표에 없다 — 훅이 싣는 칸의 표([`crate::hook::Carry::of`])에서 읽는다**(moai-dp35).
 /// Codex 는 이벤트가 안 받는 값을 버리고 `/hooks` 에 설정 경고를 내는데(사람의 codex 0.160 이 짚었다 — 그 경고를
 /// `tests/hooks/codex/config/` 에 갈무리해 두고 시험이 이 표가 심는 파일을 그것에 대 본다, moai-o9tg), 그 값을 받는
-/// 이벤트와 편지가 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
-/// `cmd::hook` 의 `hold_room`, `hook::letters_room`)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
-/// 이벤트의 편지를 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
-/// moai-u5wr.6un 5번, moai-rxro 의 잃음).
+/// 이벤트와 글이 드는 자리, 훅이 비추는 줄을 내는 이벤트가 한 사실이다. 셋을 따로 들던 판(이 표의 다섯째 칸,
+/// `cmd::hook` 의 `hold_room`, 그때의 편지 자리)은 한쪽만 고쳐도 컴파일이 되었다 — 줄 하나의 상한을 걷으면 그
+/// 이벤트의 글을 여전히 칸 하나(한국어 30KB 남짓)로 재어, Codex 가 기본 상한을 넘긴 가운데를 파일로 뺀다(리뷰
+/// moai-u5wr.6un 5번, moai-rxro).
 const CODEX: &[(Event, &str, u64)] = &[
     (Event::SessionStart, "counting moai warnings...", TIMEOUT),
     (Event::UserPromptSubmit, "reading the moai board...", TIMEOUT),
     (Event::PreToolUse, "checking the moai rules...", TIMEOUT),
     (Event::Stop, "comparing the moai state...", TIMEOUT),
-    (Event::Interrupt, "marking this session idle for moai...", CODEX_SHORT_TIMEOUT),
-    (Event::SessionEnd, "taking this session off moai's list...", CODEX_SHORT_TIMEOUT),
 ];
 
 /// Codex 의 `PreToolUse` 가 볼 도구 — 셸과 패치다. Codex 는 그 둘과 MCP 에만 훅을 낸다(openai/codex#20204).
 const CODEX_WATCHED: &str = "Bash|apply_patch";
 
 /// Antigravity 의 훅 — **`UserPromptSubmit` 이 없어 `PreInvocation` 이 그 자리에 선다**(턴의 첫 모델 부름만 그
-/// 몫을 한다, `cmd::hook`). `SessionStart` 도 없다. Esc 로 끊긴 턴에는 `Stop` 이 안 온다(2026-10-04 실측) — 그
-/// 장은 다음 턴까지 `busy` 다.
+/// 몫을 한다, `cmd::hook`). `SessionStart` 도 없다. Esc 로 끊긴 턴에는 `Stop` 이 안 온다(2026-10-04 실측).
 const ANTIGRAVITY: &[(&str, &str)] =
     &[("PreInvocation", "user-prompt-submit"), ("PreToolUse", "pre-tool-use"), ("Stop", "stop")];
 
@@ -174,20 +168,9 @@ const ANTIGRAVITY: &[(&str, &str)] =
 const ANTIGRAVITY_WATCHED: &str = "run_command|write_to_file|replace_file_content|multi_replace_file_content";
 
 /// 훅 하나가 기다리는 상한(초) — 세 에이전트의 파일이 이것을 쓴다(Claude 의 매니페스트도). Codex 의 기본은 600초,
-/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. 세션 끝의 이벤트는 에이전트가
-/// 제 손으로 더 짧게 묶는다.
-///
-/// - **Codex** 는 `Interrupt`·`SessionEnd` 를 1~3초에 묶고, 3 보다 크게 적으면 깎으며 `/hooks` 에 경고를 낸다 — 거기는
-///   [`CODEX_SHORT_TIMEOUT`] 을 적는다([`CODEX`])
-/// - **Claude** 는 `SessionEnd` 훅들을 한 통 1.5초에 묶고, 플러그인 훅의 `timeout` 으로는 그 통이 안 는다(Claude Code
-///   훅 문서). 그래도 15 를 둔다 — 사람이 `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS` 로 통을 늘리면 그때는 이 값이 그
-///   훅의 상한이고, Claude 는 경고를 안 낸다. `cmd::hook` 의 `rest` 는 1.5초에 맞춰 쓰였다
+/// Antigravity 는 30초라 손으로 맞춘다: 멈춘 훅이 세션을 10분 세우면 사람이 훅을 끈다. 세션 끝의 이벤트(Codex 는
+/// `Interrupt`·`SessionEnd` 를 1~3초에 묶는다)는 이제 안 건다([`CODEX`]).
 const TIMEOUT: u64 = 15;
-
-/// Codex 가 `Interrupt`·`SessionEnd` 에 주는 상한(초) — 기본 1초에 3초까지만 받는다(Codex 훅 문서). [`TIMEOUT`] 을 적어
-/// 두면 Codex 가 3 으로 깎으며 `/hooks` 에 경고를 내고, 실제 상한이 얼마인지 파일만 봐서는 모른다(moai-t6hl). 그 장을
-/// 걷는 `SessionEnd` 가 1초에 끊기지 않게 상한을 다 쓴다.
-const CODEX_SHORT_TIMEOUT: u64 = 3;
 
 /// moai 가 통째로 쓴 Codex 훅 파일의 표 — 이 글이 `description` 이면 다시 쓴다.
 pub const CODEX_DESCRIPTION: &str = "Planted by moai. Edit it by hand and the next `moai skill install` overwrites it.";
@@ -207,8 +190,8 @@ pub fn codex_hooks(exe: &str) -> String {
             "statusMessage": message,
         });
         // **비추는 줄의 칸에만 상한을 둔다** — 그 칸의 자리를 다 받는 수로 준다. Codex 의 기본은 2,500 토큰 언저리라(Codex
-        // 훅 문서) 보드와 편지가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는데, 편지는 싣는 순간 읽음이라 그 판에서
-        // 아무도 못 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
+        // 훅 문서) 보드가 넘으면 Codex 는 글을 파일로 빼고 미리보기만 싣는다 — 넘긴 뒤쪽은 그 판에서 아무도 못
+        // 본다. Codex 는 UTF-8 네 바이트를 한 토큰으로 어림하니(codex-rs 의 `approx_token_count`) 자리의 한
         // 단위(UTF-16 한 단위는 UTF-8 로 세 바이트까지다)는 한 토큰을 안 넘는다 — 같은 수로 준다. 안 받는 이벤트에는 키를
         // 아예 안 둔다 — `Option` 을 그대로 실으면 `null` 이 적힌다.
         if let crate::hook::Carry::Context(room) = crate::hook::Carry::of(Dialect::Codex, event) {
@@ -2246,7 +2229,7 @@ mod tests {
         let codex: serde_json::Value = serde_json::from_str(&codex_hooks(exe)).unwrap();
         let hooks = codex["hooks"].as_object().unwrap();
         let events: Vec<&str> = hooks.keys().map(String::as_str).collect();
-        assert_eq!(events, ["Interrupt", "PreToolUse", "SessionEnd", "SessionStart", "Stop", "UserPromptSubmit"]);
+        assert_eq!(events, ["PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"]);
         assert_eq!(hooks["PreToolUse"][0]["matcher"], "Bash|apply_patch");
         for (at, group) in hooks {
             let entry = &group[0]["hooks"][0];
@@ -2487,8 +2470,8 @@ mod tests {
         let planted = codex_hooks("/repo/target/release/moai");
         assert_eq!(codex_issues(&planted), Vec::<String>::new(), "심는 파일에 Codex 가 경고한다");
         assert_eq!(codex_shape(&planted, &known), Vec::<String>::new(), "심는 파일이 Codex 가 아는 꼴 밖에 선다");
-        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드와 편지를
-        // 파일로 빼고, 깎이는 상한을 덜 적으면 `SessionEnd` 가 1초에 끊긴다.
+        // 경고가 없는 것만으로는 모자란다 — 상한을 안 적은 이벤트는 Codex 의 기본 2,500 토큰 언저리에서 보드를
+        // 파일로 빼고, 깎이는 상한보다 크게 적으면 Codex 가 깎으며 경고한다.
         let file: serde_json::Value = serde_json::from_str(&planted).unwrap();
         for (event, groups) in file["hooks"].as_object().unwrap() {
             let entry = &groups[0]["hooks"][0];

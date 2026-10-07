@@ -220,17 +220,6 @@ pub(crate) fn here_wanted() -> bool {
     matches!(v.as_deref(), Some("1" | "true" | "yes" | "on"))
 }
 
-/// 트래커 뿌리 `root` 의 우편함 — [`Repo::mail_dir`] 가 이것이다. [`Repo`] 를 안 세우는 자리(훅의 출석과 편지,
-/// [`tracker_in_use`])가 같은 자리를 짚게 한 곳에 둔다.
-pub fn mail_at(root: &Path) -> PathBuf {
-    root.join(".moai").join("mail")
-}
-
-/// 트래커 뿌리 `root` 의 출석부 — [`Repo::agents_dir`] 가 이것이다([`mail_at`] 과 같은 까닭).
-pub fn agents_at(root: &Path) -> PathBuf {
-    root.join(".moai").join("agents")
-}
-
 /// 읽다가 만난 잘못된 줄. **한 줄이 깨졌다고 파일을 통째로 거부하지 않는다** —
 /// 거부하면 무엇이 잘못됐는지 볼 방법까지 같이 사라진다.
 #[derive(Debug, Clone)]
@@ -626,15 +615,6 @@ impl Repo {
 
     pub fn dir(&self) -> PathBuf {
         self.root.join(".moai")
-    }
-    /// 우편함 — `.moai/mail/`(moai-h8tn). **트래커의 뿌리에 선다** — 딸린 워크트리에서 부른 것도 루트로
-    /// 옮겨 간 [`Repo::root`] 밑이라, 저장소의 모든 세션이 한 우편함을 본다. 그 안의 꼴은 [`crate::mail`] 이 든다.
-    pub fn mail_dir(&self) -> PathBuf {
-        mail_at(&self.root)
-    }
-    /// 출석부 — `.moai/agents/`(moai-h8tn). [`Repo::mail_dir`] 와 같은 자리에 선다.
-    pub fn agents_dir(&self) -> PathBuf {
-        agents_at(&self.root)
     }
     pub fn issues_path(&self) -> PathBuf {
         self.dir().join("issues.jsonl")
@@ -2777,11 +2757,6 @@ pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
 /// 묻는다. 딸린 워크트리의 밑자리(`<wt>/src/deep`)가 그 자리다: 손잡이를 켠 셸은 `<wt>/.moai` 를
 /// 읽는데, 그 줄을 따라 치면 `src/deep` 에 아무도 안 읽는 `.moai` 가 서고 원래 줄들은 사라진 것처럼
 /// 보인다.
-///
-/// **훅의 출석과 편지도 이 자로 선다**(moai-jzym.uxa, 리뷰 moai-jzym.a9k) — 설정도 스냅샷도 안 읽으니, 루트의
-/// `config.toml` 에 충돌 표시가 끼어 [`Repo::find_from`] 이 지고 규칙이 이 자리의 트래커로 물러선 날에도
-/// 출석부와 우편함([`agents_at`]·[`mail_at`])은 그 뿌리에 선다. 물러선 트래커에 적던 판은 한 세션의 장이 두
-/// 출석부로 갈렸다 — 끝 이벤트만 뿌리를 보면, 그 창에 연 세션의 장은 `Interrupt` 가 못 돌리고 `SessionEnd` 가 못 걷는다.
 pub(crate) fn tracker_in_use(dir: &Path) -> Option<PathBuf> {
     look(dir).map(|found| Repo::opened_root(&found))
 }
