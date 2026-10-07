@@ -266,6 +266,9 @@ fn unread(lang: crate::i18n::Lang, fell: &Fell) -> String {
     }
 }
 
+/// [`agents_state`] 가 낸 것 — 상태와 읽은 글, 또는 못 읽은 파일의 이름과 까닭.
+pub type AgentsState = Result<(BlockState, String), (&'static str, Fell)>;
+
 /// 이 디렉터리의 AGENTS.md 를 읽어 [`block_state`] 로 가른다 — 그 상태와 **읽은 글**을 함께 낸다(없는 파일은
 /// 빈 글). 없는 파일은 `missing` 이고, 못 읽는 파일(권한·UTF-8 아님, 안 읽기로 한 자리 — [`read_agents`])만
 /// `Err` 다 — 그때는 상태를 지어내지 않는다.
@@ -275,7 +278,7 @@ fn unread(lang: crate::i18n::Lang, fell: &Fell) -> String {
 ///
 /// **못 읽은 자리는 그 파일의 이름과 함께 낸다**(리뷰 moai-zynt.63u) — 링크 모드는 `.moai/guide.md` 도 읽는데, 그
 /// 실패를 AGENTS.md 의 것으로 대던 판은 멀쩡한 AGENTS.md 를 들여다보게 했다.
-pub fn agents_state(root: &Path) -> Result<(BlockState, String), (&'static str, Fell)> {
+pub fn agents_state(root: &Path) -> AgentsState {
     let text = read_agents(root).map_err(|fell| ("AGENTS.md", fell))?.unwrap_or_default();
     if !links_to_guide(&text) {
         return Ok((block_state(&text, &crate::guide::agents()), text));
@@ -987,12 +990,16 @@ pub fn dotfile_notice(root: &Path, chdir: bool) -> Vec<crate::report::Warning> {
 /// 보이면 안 되고, 까닭은 `moai init --check` 가 댄다.
 ///
 /// 고칠 명령이 `-C <뿌리>` 를 대야 하는지는 [`away_root`] 가 정한다.
-pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning> {
-    let Ok((BlockState::Stale, text)) = agents_state(root) else { return None };
+///
+/// **상태는 부르는 쪽이 재어 건넨다**(moai-8gwh.86j) — `root` 의 [`agents_state`] 다. 훅의 첫 보드는 같은 상태로
+/// "사용법이 어디 있나" 한 줄까지 가려서, 여기서 다시 재던 판은 AGENTS.md 를(링크 모드면 `.moai/guide.md` 도)
+/// 두 번 읽었다.
+pub fn agents_notice(state: &AgentsState, root: &Path, chdir: bool) -> Option<crate::report::Warning> {
+    let Ok((BlockState::Stale, text)) = state else { return None };
     // **어느 쪽 낡음인지까지 말한다**(2026-09-15 사용자 결정). 한 낱말로 뭉뚱그려 `moai init` 만
     // 대면, 아직 다시 빌드 안 한 바이너리를 든 세션이 그 말을 따라 새 안내를 옛 글로 되돌린다.
     // 링크가 맞는데 낡았으면 손댄 것은 `.moai/guide.md` 다 — 손질로 알린다: `init` 이 그것을 다시 쓴다.
-    let edited = guide_file_stale(&text) || stale_kind(&text) == Stale::Edited;
+    let edited = guide_file_stale(text) || stale_kind(text) == Stale::Edited;
     Some(crate::report::Warning::agents_stale(away_root(root, chdir).as_deref(), edited))
 }
 
@@ -2957,7 +2964,7 @@ mod tests {
             matches!(got, Err(("AGENTS.md", Fell::Unheld(crate::held::Unheld::Outside { .. })))),
             "밖을 가리키는 AGENTS.md 를 읽었다: {got:?}"
         );
-        assert_eq!(agents_notice(s.path(), false), None);
+        assert_eq!(agents_notice(&agents_state(s.path()), s.path(), false), None);
         let said = agents_unread(en(), s.path(), &got.unwrap_err().1);
         assert!(said.contains("AGENTS.md: ") && said.contains("outside"), "{said}");
     }
@@ -3044,7 +3051,7 @@ mod tests {
         assert_ne!(theirs, crate::guide::agents_link(), "시험의 전제 — 링크가 전문의 해시를 안 든다");
         std::fs::write(s.join("AGENTS.md"), with_block("", &theirs)).unwrap();
         std::fs::write(s.join(crate::guide::GUIDE_FILE), "an older guide\n").unwrap();
-        let kind = |root: &Path| agents_notice(root, false).map(|w| w.kind);
+        let kind = |root: &Path| agents_notice(&agents_state(root), root, false).map(|w| w.kind);
         assert_eq!(kind(s.path()), Some("agents_stale"), "다른 바이너리가 쓴 것을 손질로 댔다");
         std::fs::write(s.join("AGENTS.md"), with_block("", &crate::guide::agents_link())).unwrap();
         assert_eq!(kind(s.path()), Some("agents_hand_edited"));

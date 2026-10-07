@@ -245,7 +245,10 @@ fn decide(
                 // AGENTS.md 를 모르고 시작하는 것이 바로 이 보드를 받는 새 세션이다. 셋을 여기서 따로
                 // 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했다(moai-6k1r). 세션의 셸 자리는 stdin 의
                 // `cwd` 라 이미 여기로 옮겨 왔으므로 `chdir` 은 `false` 다 (`-C` 가 아니다).
-                st.notices.extend(crate::cmd::status::install_notices(&repo, false));
+                //
+                // AGENTS.md 는 **한 번만 잰다**(moai-8gwh.86j) — 아래 "사용법이 어디 있나" 한 줄도 같은 상태로 가린다.
+                let agents = crate::cmd::init::agents_state(repo.here());
+                st.notices.extend(crate::cmd::status::install_notices_with(&repo, false, &agents));
                 // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
                 // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
                 let source = crate::cmd::status::source_of(&repo);
@@ -262,10 +265,7 @@ fn decide(
                 );
                 // AGENTS.md 에 moai 블록이 없으면(git 밖에 둔 트래커의 `--guide hook`) 사용법이 어디 있는지 한 줄을 더한다.
                 // 못 읽으면 더하지 않는다 — 무엇이 들었는지 모른다.
-                let unguided = matches!(
-                    crate::cmd::init::agents_state(repo.here()),
-                    Ok((crate::cmd::init::BlockState::Missing, _))
-                );
+                let unguided = matches!(agents, Ok((crate::cmd::init::BlockState::Missing, _)));
                 crate::hook::guided_board(&lines, ctx.lang(), unguided)
             })
         }
