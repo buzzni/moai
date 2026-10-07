@@ -363,11 +363,15 @@ fn climb(from: &Path) -> Option<(PathBuf, bool)> {
     let mut dir = from.to_path_buf();
     let mut left_a_checkout = false;
     loop {
-        // **못 들여다보는 조상은 건너뛴다** (`is_dir` 이 `false` 로 접는다). 위로 찾는
-        // 길에서는 권한 없는 남의 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`]
-        // 처럼 그것을 실패로 세면 제 저장소 밖 어디서나 넘어진다.
-        if dir.join(".moai").is_dir() {
-            return Some((dir, left_a_checkout));
+        // **못 들여다보는 조상은 건너뛴다** ([`Spot::Unseen`]). 위로 찾는 길에서는 권한 없는 남의
+        // 디렉터리를 지나는 것이 흔한 일이라, [`Repo::open`] 처럼 그것을 실패로 세면 제 저장소 밖
+        // 어디서나 넘어진다.
+        //
+        // **디렉터리가 아닌 `.moai` 에서도 선다**(moai-r0x8.e19) — 거기가 이 자리의 트래커고, 못 읽는
+        // 까닭은 [`Repo::rooted`] 가 댄다. 건너뛰던 판은 그것을 "트래커 없음" 으로 읽어 `init` 을 시켰다.
+        match spot(&dir) {
+            Spot::Dir | Spot::NotADir(_) => return Some((dir, left_a_checkout)),
+            Spot::Absent | Spot::Unseen(_) => {}
         }
         if !left_a_checkout {
             left_a_checkout = dir.join(".git").exists();
@@ -437,11 +441,11 @@ fn governing(mirror: &Path) -> Option<PathBuf> {
 /// 하고, 그 뒤짐은 부르는 곳마다 조금씩 달라진다.
 ///
 /// 설정이 깨졌거나, 스냅샷을 안 읽기로 했거나(체크아웃 밖·`.git/` 으로 가는 링크, 보통 파일이 아닌 것),
-/// 디렉터리를 못 읽는 것은 여기가 아니라 `Err` 다 — 고칠 것이지 상태가 아니다.
+/// `.moai` 가 디렉터리가 아니거나([`Spot::NotADir`]), 디렉터리를 못 읽는 것은 여기가 아니라 `Err` 다 — 고칠 것이지 상태가 아니다.
 #[derive(Clone)]
 pub enum Opened {
     Repo(Repo),
-    /// 디렉터리는 있는데 `.moai/` 가 없다.
+    /// 디렉터리는 있는데 `.moai` 가 아무것도 없다([`Spot::Absent`]).
     Uninit,
     /// 디렉터리가 없다.
     Missing,
@@ -570,7 +574,13 @@ impl Repo {
     /// 그 읽기보다 먼저 [`Repo::far_lock`] 의 [`resolve`] 가 같은 링크를 제 말(`error`)로 거절한다.
     ///
     /// **뿌리는 한 번 푼다**([`crate::held::Home`]) — 설정과 스냅샷을 같은 뿌리로 잰다.
+    ///
+    /// **`.moai` 가 디렉터리가 아니면 그것부터 댄다**(moai-r0x8.e19, [`not_a_dir`]) — 설정을 읽다 ENOTDIR 로
+    /// 넘어지면 그 자리에 무엇이 섰는지를 못 댄다.
     fn rooted(root: PathBuf, lang: impl FnOnce() -> Lang) -> R<Repo> {
+        if let Spot::NotADir(stood) = spot(&root) {
+            return Err(not_a_dir(lang(), &root, &stood));
+        }
         let home = crate::held::Home::of(&root);
         let config = match Config::load_in(&root, &home) {
             Ok(c) => c,
@@ -609,31 +619,32 @@ impl Repo {
             Err(e) if gone(&e) => return Ok(Opened::Missing),
             Err(e) => return Err(Fail::new(format!("{}: {e}", dir.display()))),
         }
-        match std::fs::metadata(dir.join(".moai")) {
+        match spot(dir) {
             // **여기도 루트로 옮겨 간다**(moai-y7go, 리뷰 moai-71ht.jlh 사용자 결정) — 등록한 자리가
             // 딸린 워크트리면 탐색기의 쓰기가 그 워크트리의 스냅샷에 조용히 들어가, 같은 자리를 CLI 로
             // 칠 때와 다른 파일이 바뀐다. **위로 찾지 않는다는 계약은 그대로다** — 옮기는 곳은 위가
             // 아니라 같은 나무의 주 체크아웃이고, 거기에 트래커가 없으면 옮기지 않는다.
-            Ok(m) if m.is_dir() => match Repo::redirect(dir) {
+            Spot::Dir => match Repo::redirect(dir) {
                 Some(root) => {
                     Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root, lang)? }))
                 }
                 None => Repo::rooted(dir.to_path_buf(), lang).map(Opened::Repo),
             },
-            // `.moai` 가 파일이면 저장소가 아니다 — 위로 찾는 [`Repo::find`] 의 `is_dir` 과 같은 자다.
-            Ok(_) => Ok(Opened::Uninit),
+            // **디렉터리가 아닌 `.moai` 는 못 읽는 트래커다**(moai-r0x8.e19) — 위로 찾는 [`Repo::find`] 와 같은
+            // 자([`spot`])다. "init 전" 으로 대던 판은 `init` 이 넘어질 자리에 그것을 시켰다.
+            Spot::NotADir(stood) => Err(not_a_dir(lang(), dir, &stood)),
             // **`.moai` 가 없는 딸린 워크트리도 옮겨 간다**(리뷰 moai-71ht 셋째 판) — moai 를 들이기 전에
             // 갈라진 가지다. "init 전" 으로 대던 판은 `moai -C <워크트리> init` 을 시켰는데, 그 뒤로는
             // 어느 길도 그 트래커를 안 읽고(CLI 는 위로 찾아 루트로 간다) 커밋하면 병합에서 `config.toml`
             // 이 add/add 로 부딪힌다 — 아무도 안 읽는 파일을 만들라고 시킨 셈이었다.
-            Err(e) if gone(&e) => match Repo::redirect(dir) {
+            Spot::Absent => match Repo::redirect(dir) {
                 Some(root) => {
                     Ok(Opened::Repo(Repo { moved_from: Some(dir.to_path_buf()), ..Repo::rooted(root, lang)? }))
                 }
                 None => Ok(Opened::Uninit),
             },
             // 권한 없음 따위는 init 전이 아니다. 접으면 "init 하라" 는 틀린 말을 한다.
-            Err(e) => Err(Fail::new(format!("{}: {e}", dir.join(".moai").display()))),
+            Spot::Unseen(e) => Err(Fail::new(format!("{}: {e}", dir.join(".moai").display()))),
         }
     }
 
@@ -2867,7 +2878,9 @@ pub(crate) fn holds_tracker(dir: &Path) -> bool {
 /// 끝났다 — `MOAI_HERE=1 moai project ls --json` 은 `tracker_at` 을 통째로 뺐다. 지금 프로세스의
 /// 거절은 그대로 꺼진다([`planted_elsewhere`]): 그 손잡이를 켠 사람은 여기 심는 것이 뜻이다.
 pub(crate) fn init_belongs_at(dir: &Path) -> Option<PathBuf> {
-    if dir.join(".moai").exists() {
+    // 무엇이든 서 있으면 묻지 않는다 — 끝이 없는 링크도 섰다([`spot`], moai-r0x8.e19). 그 자리의 `init` 은
+    // 딴 데를 대는 대신 거기 선 것으로 멈춘다.
+    if matches!(spot(dir), Spot::Dir | Spot::NotADir(_)) {
         return None;
     }
     match elsewhere(dir) {
@@ -2903,6 +2916,72 @@ pub(crate) enum Elsewhere {
     Worktree(PathBuf),
     /// 위에서 찾은 트래커의 뿌리. 여기 세운 것도 읽히므로 **알리기만 한다.**
     Above(PathBuf),
+}
+
+/// `<디렉터리>/.moai` 에 **무엇이 섰는가** — [`spot`] 이 낸다.
+pub(crate) enum Spot {
+    /// 아무것도 없다.
+    Absent,
+    /// 디렉터리다 — 링크를 따라 닿은 디렉터리도 든다. 트래커인지는 그 안을 읽어야 안다.
+    Dir,
+    /// 무언가 섰는데 디렉터리가 아니다(moai-r0x8.e19). 트래커가 없는 것이 아니라 **못 읽는 트래커**다.
+    NotADir(Stood),
+    /// 들여다보지 못했다(권한 따위). 있는지 없는지 모른다.
+    Unseen(std::io::Error),
+}
+
+/// [`Spot::NotADir`] 에 선 것 — 거절문이 그대로 댄다.
+pub(crate) enum Stood {
+    File,
+    /// 끝이 없는 링크(끝이 사라졌거나 고리다). 링크가 적은 자리다.
+    LinkNowhere(PathBuf),
+    /// 디렉터리가 아닌 것을 가리키는 링크. 링크가 적은 자리다.
+    LinkNotDir(PathBuf),
+    /// 디렉터리도 보통 파일도 아니다(FIFO·소켓·장치).
+    Other,
+}
+
+/// **`<dir>/.moai` 에 무엇이 섰는지를 가르는 자는 이 하나다**(moai-r0x8.e19) — 위로 찾기([`climb`])·
+/// 그 자리 열기([`Repo::open`])·트래커를 짓는 길([`Repo::rooted`])·`init` 이 함께 쓴다.
+///
+/// `is_dir()` 로 접던 판은 보통 파일과 끝이 없는 링크를 "없다" 로 읽어, `prime` 이 `no_tracker:true` 와
+/// "`moai init` 이 심는다" 를 댔는데 그 `init` 은 ENOTDIR·EEXIST 로 넘어졌다. 끝이 있는 링크는 그 끝을
+/// 읽다 `broken` 으로 섰으니, 같은 자리가 **링크 끝이 있는가**로 다른 답을 냈다. 링크는 끝까지 따르되
+/// 끝이 없으면 그렇다고 댄다.
+///
+/// 파일을 열지 않는다 — `lstat`·`stat` 과 링크면 `readlink` 뿐이다. 훅이 도구 호출마다 지나는 길이다.
+pub(crate) fn spot(dir: &Path) -> Spot {
+    let at = dir.join(".moai");
+    let link_to = || std::fs::read_link(&at).unwrap_or_default();
+    match std::fs::symlink_metadata(&at) {
+        Err(e) if gone(&e) => Spot::Absent,
+        Err(e) => Spot::Unseen(e),
+        Ok(m) if m.file_type().is_symlink() => match std::fs::metadata(&at) {
+            Ok(t) if t.is_dir() => Spot::Dir,
+            Ok(_) => Spot::NotADir(Stood::LinkNotDir(link_to())),
+            // 끝을 못 들여다본 것은 끝이 없는 것이 아니다 — 모른다고 둔다.
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Spot::Unseen(e),
+            Err(_) => Spot::NotADir(Stood::LinkNowhere(link_to())),
+        },
+        Ok(m) if m.is_dir() => Spot::Dir,
+        Ok(m) if m.is_file() => Spot::NotADir(Stood::File),
+        Ok(_) => Spot::NotADir(Stood::Other),
+    }
+}
+
+/// [`Spot::NotADir`] 의 거절 — 그 자리와 거기 선 것을 대고 `broken` 으로 멈춘다. `moai init` 을 시키지 않는다:
+/// 그 `init` 은 같은 자리에서 같은 말로 멈춘다.
+pub(crate) fn not_a_dir(lang: Lang, dir: &Path, stood: &Stood) -> Fail {
+    use crate::i18n::{fill, say};
+    let to = |p: &Path| crate::text::one_line(&p.display().to_string());
+    let what = match stood {
+        Stood::File => say(lang, "refuse.moai_file").to_string(),
+        Stood::LinkNowhere(p) => fill(say(lang, "refuse.moai_link_nowhere"), &[("to", &to(p))]),
+        Stood::LinkNotDir(p) => fill(say(lang, "refuse.moai_link_not_dir"), &[("to", &to(p))]),
+        Stood::Other => say(lang, "refuse.moai_other").to_string(),
+    };
+    let said = fill(say(lang, "refuse.moai_not_a_dir"), &[("at", &to(&dir.join(".moai"))), ("what", &what)]);
+    Fail::coded(said, code::BROKEN)
 }
 
 /// **그 자리가 없다는 뜻인가** — 있고 없고를 가르는 잣대는 도구에 하나다(moai-blvx).

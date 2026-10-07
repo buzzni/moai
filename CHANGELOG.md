@@ -40,6 +40,14 @@ does not tag — see `CONTRIBUTING.md`.
   a write says in one line where it went. One inside the main checkout no longer
   reports that it "climbed up" to that tracker. `MOAI_HERE=1` still keeps the
   worktree on its own. (moai-r0x8.3fi)
+- **A `.moai` that is not a directory is an unreadable tracker, not a missing
+  one.** A regular file or a link that leads nowhere (`.moai -> /nowhere`) was
+  read as "no tracker": `moai prime` said `no_tracker` and to run `moai init`,
+  and `init` then failed with a bare `Not a directory` or `File exists`, while a
+  link to an existing place already stopped with `broken`. Every command —
+  `prime` (`tracker_error`, code `broken`), `status`, `project ls`, `init` and
+  `init --check` — now says what stands there and stops on it, and `init`
+  leaves it untouched. (moai-r0x8.e19)
 
 ## [0.9.0] - 2026-10-07
 

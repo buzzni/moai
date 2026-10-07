@@ -5388,6 +5388,59 @@ fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
     assert!(!json.contains("no_tracker"), "{json}");
 }
 
+/// **디렉터리가 아닌 `.moai` 는 트래커가 없는 것이 아니라 못 읽는 것이다**(moai-r0x8.e19). 위로 찾는 걸음이
+/// `is_dir` 로 접어 보통 파일이나 끝이 없는 링크(`.moai -> /nowhere`)를 "트래커 없음" 으로 읽었고, `prime` 은
+/// `no_tracker:true` 와 "`moai init` 이 심는다" 를 댔는데 그 `init` 은 ENOTDIR·EEXIST 로 넘어졌다. 끝이 있는
+/// 링크는 이미 `tracker_error{code:"broken"}` 였다 — 링크 끝이 있는가로 답이 갈리면 안 된다. 세 꼴 모두 그
+/// 자리에 무엇이 섰는지 대고, `init` 을 시키지 않으며, `init` 도 같은 말로 멈추고 그 자리를 안 건드린다.
+#[cfg(unix)]
+#[test]
+fn a_moai_that_is_not_a_directory_is_an_unreadable_tracker_not_none() {
+    let s = Scratch::new("moai-not-dir");
+    let file = s.path().join("plain");
+    std::fs::create_dir_all(&file).unwrap();
+    std::fs::write(file.join(".moai"), "not a tracker\n").unwrap();
+    let nowhere = s.path().join("nowhere");
+    std::fs::create_dir_all(&nowhere).unwrap();
+    std::os::unix::fs::symlink(s.path().join("gone/away"), nowhere.join(".moai")).unwrap();
+    let to_file = s.path().join("to-file");
+    std::fs::create_dir_all(&to_file).unwrap();
+    std::fs::write(s.path().join("a-file"), "").unwrap();
+    std::os::unix::fs::symlink(s.path().join("a-file"), to_file.join(".moai")).unwrap();
+
+    for (at, what) in [(&file, "보통 파일"), (&nowhere, "아무 데도 안 닿는 링크"), (&to_file, "디렉터리가 아닌 것")]
+    {
+        let out = moai(at, &["prime"]);
+        assert!(out.status.success(), "{}", text(&out));
+        let said = String::from_utf8(out.stdout).unwrap();
+        assert!(said.contains("여기 트래커를 못 읽었다 — "), "못 읽는 트래커로 안 댔다 — {}\n{said}", at.display());
+        assert!(said.contains(".moai") && said.contains(what), "그 자리에 선 것을 안 댔다 — {what}\n{said}");
+        assert!(!said.contains("`moai init` 이 심는다"), "안 서는 init 을 댔다\n{said}");
+
+        let json = ok(at, &["prime", "--json"]);
+        one_json_value(&json);
+        assert!(json.contains("\"tracker_error\":{\"code\":\"broken\",\"said\":\""), "{json}");
+        assert!(!json.contains("no_tracker"), "못 읽는 트래커를 없는 것으로 냈다 — {json}");
+
+        // 다른 명령도 같은 자리에서 같은 코드로 멈춘다 — 한눈 보기로 넘어가 "트래커 없음" 으로 안 읽는다.
+        let out = moai(at, &["status", "--json"]);
+        assert!(!out.status.success(), "{}", text(&out));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("\"code\":\"broken\""), "{}", text(&out));
+
+        // `init` 도 같은 말로 멈추고 그 자리를 그대로 둔다.
+        let before = std::fs::symlink_metadata(at.join(".moai")).unwrap().file_type();
+        let out = moai(at, &["init", "argos"]);
+        assert!(!out.status.success(), "디렉터리가 아닌 .moai 위에 init 이 섰다\n{}", text(&out));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(what), "init 이 그 자리에 선 것을 안 댔다\n{err}");
+        assert_eq!(std::fs::symlink_metadata(at.join(".moai")).unwrap().file_type(), before, "init 이 자리를 바꿨다");
+        // `--check` 도 1 로 끝나는 `moai init` 을 권하지 않는다.
+        let out = moai(at, &["init", "--check", "--json"]);
+        assert!(!out.status.success(), "--check 가 못 읽는 트래커를 지나쳤다\n{}", text(&out));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("\"code\":\"broken\""), "{}", text(&out));
+    }
+}
+
 /// **지금 자리를 못 물으면 그렇다고 댄다**(리뷰 moai-yivo.b5h) — 지운 워크트리에 앉은 채 부른 `prime` 이
 /// "여기 트래커를 못 읽었다 — No such file or directory" 로 고칠 것을 못 댔다. errno 에 무엇을 하다 났는지를
 /// 붙인다(`refuse.no_cwd`). 종료 코드는 그대로 0 이다.

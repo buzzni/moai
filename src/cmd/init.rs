@@ -953,6 +953,11 @@ pub fn agents_notice(root: &Path, chdir: bool) -> Option<crate::report::Warning>
 /// 선다: 보는 것은 AGENTS.md 하나고, 심기 전에 부르는 것도 자연스럽다.
 pub fn check(ctx: &Ctx) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
+    // **디렉터리가 아닌 `.moai` 는 못 읽는 트래커다**(moai-r0x8.e19) — [`run`] 이 그 말로 멈추므로 여기서
+    // `moai init` 을 대면 1 로 끝나는 명령을 권한다. 그 자리를 못 읽는 것이라 0 이 아니다.
+    if let crate::store::Spot::NotADir(stood) = crate::store::spot(&root) {
+        return Err(crate::store::not_a_dir(ctx.lang(), &root, &stood));
+    }
     let (state, text) = agents_state(&root).map_err(|(name, fell)| {
         let at = if name == crate::guide::GUIDE_FILE { crate::store::Repo::opened_root(&root) } else { root.clone() };
         Fail::new(unread_at(ctx.lang(), &at, name, &fell))
@@ -1545,6 +1550,12 @@ fn one_line(message: &str) -> String {
 pub fn run(ctx: &Ctx, flags: &Flags, yes: bool) -> R<Vec<String>> {
     let root = std::env::current_dir().map_err(|e| Fail::new(e.to_string()))?;
     let dir = root.join(".moai");
+    // **디렉터리가 아닌 `.moai` 위에는 안 세운다**(moai-r0x8.e19) — 다른 명령이 멈추는 그 말(`store::not_a_dir`)로
+    // 멈추고 그 자리를 안 건드린다. 묻지 않던 판은 보통 파일이면 "이미 심겼다" 로 들어가 ENOTDIR 로, 끝이 없는
+    // 링크면 `create_dir` 의 EEXIST 로 넘어져 거기 무엇이 섰는지를 못 댔다.
+    if let crate::store::Spot::NotADir(stood) = crate::store::spot(&root) {
+        return Err(crate::store::not_a_dir(ctx.lang(), &root, &stood));
+    }
     // **세우기 전에 한 번 묻는다**(moai-pjrr·moai-mz0e). 이미 여기 심겨 있으면 안 묻는다 — 그때 이
     // 명령이 하는 일은 딸린 파일을 다시 맞추는 것뿐이라 새 트래커가 서지 않는다.
     let elsewhere = if dir.exists() { None } else { crate::store::planted_elsewhere(&root) };
