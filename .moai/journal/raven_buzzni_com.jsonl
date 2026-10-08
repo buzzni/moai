@@ -5773,3 +5773,26 @@
 {"ts":"2026-10-08T07:41:36Z","id":"moai-iu12","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T07:49:11Z","id":"moai-iu12","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — two i18n words and one test line, supervisor window)"}
 {"ts":"2026-10-08T07:49:11Z","id":"moai-iu12","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-dgt7","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"ready·show·prime --worktree 가 gather 의 루트 사본을 버린다 — 안 쓰는 쪽은 베끼지 않게"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-qbgs","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"나눠 쓰는 Soil 길에서도 Ground::in_soil 과 archive::board_in 이 stands 를 저마다 잰다"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-v5xd","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"ready·prime·show·status 가 아카이브 전부를 맥락으로 읽는다"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-hj1k","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"init 화면의 접두어 칸을 tui::input::Input 으로 — 커서·붙여넣기"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-bcfx","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"체크아웃 밖 조상의 디렉터리 아닌 .moai 가 모든 읽기를 broken 으로 세운다"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-tg0n","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"링크된 하위 트래커 스냅샷을 뿌리 init 이 락 없이 갈아끼운다"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-jv0i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.11.0"}
+{"ts":"2026-10-08T08:12:45Z","id":"moai-h64l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.10.0 뒤끝 — show --type·init AGENTS.md·skill status·주 체크아웃·낡은 사본"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.0hr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 이 화면이 열린 동안 고친 AGENTS.md 를 덮어쓴다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.0hr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-jg3j 에서 펼쳤다 — init 이 화면 앞에서 읽은 AGENTS.md 글로 심어 그 사이의 고침을 덮는다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-jg3j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h64l 의 멤버 moai-h64l.0hr 로 펼쳤다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.tx4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"종류 이름 show 가 --type 을 말없이 버린다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.tx4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-i6vu 에서 펼쳤다 — kind show 가 --type 을 말없이 무시한다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-i6vu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h64l 의 멤버 moai-h64l.tx4 로 펼쳤다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.2zi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill status 가 Claude 트리의 남은 디렉터리를 안 알린다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.2zi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pgpk 에서 펼쳤다 — skill status 가 Claude 트리(.claude/moai-plugin/skills)의 남은 디렉터리는 대지 않는다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-pgpk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h64l 의 멤버 moai-h64l.2zi 로 펼쳤다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.wst","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"main_root 가 주 체크아웃을 git 디렉터리 이름으로 짐작한다 — git 에 묻는다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.wst","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-m7up 에서 펼쳤다 — main_root 가 공통 디렉터리 이름으로 주 체크아웃을 가른다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-m7up","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h64l 의 멤버 moai-h64l.wst 로 펼쳤다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.59m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"훅이 연결된 워크트리의 낡은 트래커 사본을 세어 느슨해진다 — 사본을 안 센다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-h64l.59m","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-zo36 에서 펼쳤다 — 에픽 워크트리의 낡은 사본이 held_elsewhere 를 느슨하게 한다"}
+{"ts":"2026-10-08T08:12:46Z","id":"moai-zo36","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-h64l 의 멤버 moai-h64l.59m 로 펼쳤다"}
