@@ -858,6 +858,8 @@
   "backlog.closed": "→ done  (펼쳐졌으므로 더 볼 것이 없다)",
   "refuse.show_target": "`{target}` 는 id 도 종류도 아니다. 종류: issue, epic, milestone, backlog",
   "refuse.show_target_how": "id 로 찾으려면 접두어까지 적는다",
+  "refuse.show_kind_typed": "`{kind}` 가 이미 종류를 골랐다 — `type={type}` 로 다시 고를 수 없다.",
+  "refuse.show_kind_typed_how": "`type=` 을 빼거나, 모든 종류에서 찾으려면 — `moai show --type {type}`",
   "refuse.show_filter_on_one": "`{id}` 하나를 펼치는 자리에는 `{flag}` 를 쓸 수 없다.",
   "refuse.show_filter_how": "거르려면 id 없이 `moai show {flag} …` 다",
   "refuse.show_order_how": "차례를 고르거나 쪽을 나누려면 id 없이 `moai show {flag} …` 다",

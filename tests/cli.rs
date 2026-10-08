@@ -4927,6 +4927,18 @@ fn filters_reach_the_command_line() {
         let err = String::from_utf8_lossy(&e.stderr);
         assert!(!e.status.success() && err.contains(fix), "{args:?} — {err}");
     }
+    // 종류 낱말이 이미 종류를 고른 자리는 `--type` 을 대지 않는다 — `moai epic show --type issue` 는 말없이 에픽을
+    // 낸다(moai-ltsv.auf 리뷰). 같은 값(`type=epic`)도 "epic 이면서 epic" 이 아니라 이 자리의 말로 거절한다.
+    for args in [
+        &["epic", "show", "--filter", "type=issue"][..],
+        &["show", "epic", "--filter", "type=issue"][..],
+        &["epic", "show", "--filter", "type=epic"][..],
+    ] {
+        let e = moai(s.path(), args);
+        let err = String::from_utf8_lossy(&e.stderr);
+        assert!(!e.status.success() && err.contains("`moai show --type "), "{args:?} — {err}");
+        assert!(!err.contains("이면서 동시에"), "되풀이로 읽었다 — {args:?}: {err}");
+    }
     let e = moai(s.path(), &["show", "--filter", "statu=todo"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("status, tag"));
 }
@@ -10615,7 +10627,10 @@ fn a_malformed_git_identity_is_refused_too() {
     let out = staged(&["add", "제목"]).env_remove("MOAI_ACTOR").current_dir(s.path()).output().unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("쓸 수 없는 모양이다") && err.contains("레이븐"), "모양이 아니라 다른 까닭으로 거절했다\n{err}");
+    assert!(
+        err.contains("쓸 수 없는 모양이다") && err.contains("레이븐"),
+        "모양이 아니라 다른 까닭으로 거절했다\n{err}"
+    );
     assert!(!err.contains("누가 하는지 모른다"), "사람이 없는 판으로 읽었다\n{err}");
     assert!(err.contains("git config user.email"), "{err}");
     assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");

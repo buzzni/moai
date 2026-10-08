@@ -523,11 +523,7 @@ fn single(raw: &Raw) -> Result<(), BadFilter> {
             Once::Stale => raw.stale.map(|d| d.to_string()),
             _ => None,
         };
-        // 항목 이름과 값을 자르는 법은 `desugar` 와 같다 — 빈칸을 걷고 첫 `=` 에서 가른다.
-        let typed = raw.filter.iter().filter_map(|one| {
-            let (k, v) = one.trim().split_once('=')?;
-            (k.trim() == field.key()).then(|| v.trim().to_string())
-        });
+        let typed = given_as(&raw.filter, field.key());
         if let [a, b, rest @ ..] = given.into_iter().chain(typed).collect::<Vec<_>>().as_slice() {
             return Err(BadFilter::Twice { field, a: a.clone(), b: b.clone(), rest: rest.to_vec() });
         }
@@ -1111,7 +1107,7 @@ fn spans(raw: &[String], one: fn(&str) -> Result<Span, BadFilter>) -> Result<Vec
 /// `--filter grep=a;b` 의 `;` 가 글자가 아니라 구분자가 되고, 제목에
 /// 세미콜론이 든 이슈를 영영 못 찾는다. 여럿은 플래그를 되풀이한다.
 ///
-/// **항목을 읽는 자는 이것 하나다** — `moai show --removed` 도 `--filter since=…` 를 가려내려고 이것을
+/// **항목을 읽는 자는 이것 하나다**(자르는 것은 [`pair`] 다 — 펴기 전에 되풀이만 세는 [`single`] 도 그것을 지난다) — `moai show --removed` 도 `--filter since=…` 를 가려내려고 이것을
 /// 부른다(`cmd::show`, moai-7dmq 리뷰). 거기서 따로 쪼개던 때는 `--filter since`(`=` 없음)가 목록과
 /// `--removed` 에서 다른 말로 거절됐다.
 pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
@@ -1120,8 +1116,8 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
         if one.is_empty() {
             return Ok(());
         }
-        let (k, v) = one.split_once('=').ok_or_else(|| BadFilter::NotAPair(one.to_string()))?;
-        let (k, v) = (k.trim(), v.trim().to_string());
+        let (k, v) = pair(one).ok_or_else(|| BadFilter::NotAPair(one.to_string()))?;
+        let v = v.to_string();
         match k {
             "status" => raw.status.push(v),
             "tag" => raw.tag.push(v),
@@ -1144,6 +1140,19 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
         }
     }
     Ok(())
+}
+
+/// `--filter` 항목 하나를 이름과 값으로 가른다 — 빈칸을 걷고 첫 `=` 에서. **항목을 자르는 자는 이것 하나다**:
+/// [`desugar`] 와, 펴기 전에 되풀이를 재는 [`single`]·`show <종류>` 가 이것을 지난다 — 따로 자르면 한쪽만
+/// 빈칸을 걷는 날 같은 항목이 두 자리에서 다른 이름으로 읽힌다.
+fn pair(one: &str) -> Option<(&str, &str)> {
+    let (k, v) = one.trim().split_once('=')?;
+    Some((k.trim(), v.trim()))
+}
+
+/// `--filter` 항목들 가운데 이름이 `key` 인 것의 값 — 준 차례대로.
+pub(crate) fn given_as<'a>(filter: &'a [String], key: &'a str) -> impl Iterator<Item = String> + 'a {
+    filter.iter().filter_map(move |one| pair(one).and_then(|(k, v)| (k == key).then(|| v.to_string())))
 }
 
 /// 거르개 글 한 줄을 `--filter` 항목들로 쪼갠다 — 탐색기의 거름망 칸(`SPC f`)이 친 글을 [`desugar`] 에 넘기기
@@ -1987,8 +1996,8 @@ mod tests {
             .unwrap_err();
         assert_eq!(e, twice(Once::Grep, "a", "b", &["c"]));
         // 종류는 준 글 그대로 — 플래그로 온 것은 `Kind` 의 이름으로 돌아온다.
-        let e = Filter::build(Raw { kind: Some(Kind::Epic), filter: s(&["type=issue"]), ..Raw::default() })
-            .unwrap_err();
+        let e =
+            Filter::build(Raw { kind: Some(Kind::Epic), filter: s(&["type=issue"]), ..Raw::default() }).unwrap_err();
         assert_eq!(e, twice(Once::Kind, "epic", "issue", &[]));
         let e = Filter::build(Raw { filter: s(&["type=epic", "type=issue", "type=backlog"]), ..Raw::default() })
             .unwrap_err();

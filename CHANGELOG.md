@@ -43,7 +43,7 @@ does not tag — see `CONTRIBUTING.md`.
   `--filter grep=one --filter grep=two` searched for `two` alone, and a second
   `type=` or `stale=` likewise quietly kept the last value — mixing the flag
   (`-g`, `--type`, `--stale`) with `--filter` too. These now exit non-zero with
-  `bad_input` and name one value to keep. `moai epic show --filter type=issue`
+  `bad_filter` and name one value to keep. `moai epic show --filter type=issue`
   is refused as well, since the namespace already gives the type. (moai-ltsv.auf)
 
 ### Fixed

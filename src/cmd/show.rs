@@ -280,6 +280,25 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         ));
     }
 
+    // **종류 낱말이 이미 종류를 골랐다**(moai-ltsv.auf 리뷰) — `moai epic show --filter type=issue` 를 되풀이의 거절
+    // (`Once::Kind`)로 내면 고칠 글이 `--type issue` 라, 그대로 친 `moai epic show --type issue` 가 말없이 에픽을
+    // 냈고, `type=epic` 에는 "epic 이면서 epic 일 수 없다" 고 했다. 이 자리의 말로 거절한다.
+    if let Target::OfKind(k) = &target
+        && let Some(typed) = crate::query::given_as(&args.filter.filter, "type").next()
+    {
+        let lang = ctx.lang();
+        return Err(Fail::coded(
+            format!(
+                "{}\n      {}",
+                crate::i18n::fill(
+                    crate::i18n::say(lang, "refuse.show_kind_typed"),
+                    &[("kind", k.as_str()), ("type", &typed)]
+                ),
+                crate::i18n::fill(crate::i18n::say(lang, "refuse.show_kind_typed_how"), &[("type", &typed)]),
+            ),
+            super::code::BAD_FILTER,
+        ));
+    }
     let kind = match target {
         Target::OfKind(k) => Some(k),
         _ => args.filter.kind,

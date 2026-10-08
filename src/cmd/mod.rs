@@ -643,6 +643,10 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
 /// 없어 `--` 가 안 듣는다 — 그 자리는 `--title=<값>` 으로 붙여 쓰는 것이 길이다.
 pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lang) -> R<()> {
     use crate::i18n::{fill, say};
+    // **`-` 한 글자는 빠져나갈 길보다 먼저 잰다** — 위 doc 의 둘째 절이다. `--`·`--title=-` 도 이것을 못 연다.
+    if value == "-" {
+        return Err(lone_dash(at, lang));
+    }
     // `--` 를 쓴 사람은 "이 뒤는 플래그가 아니다" 라고 이미 말한 것이다.
     //
     // argv 를 다시 훑는 것이 `--json` 때는 틀렸지만 여기서는 맞다 — `--` 는
@@ -653,9 +657,6 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
     // **`edit` 에는 `--` 가 안 듣는다**(리뷰 moai-pp9i.hrr 7번) — 거절문이 그렇게 말하는데 argv 의 `--`
     // 를 받아 주면 `edit X --title -x --` 가 말한 길을 안 지나고 지나간다. 붙여 쓴 꼴도 **그 값을 든
     // 것**만 센다: 아무 `--title=` 이나 받으면 `-b '--title=…'` 같은 남의 값이 검사를 끈다.
-    if value == "-" {
-        return Err(lone_dash(at, lang));
-    }
     let escaped = |a: &str| match at {
         FlagLike::EditTitle(_) => a.strip_prefix("--title=").is_some_and(|v| v.trim() == value),
         _ => a == "--",
@@ -699,10 +700,9 @@ fn lone_dash(at: FlagLike<'_>, lang: crate::i18n::Lang) -> Fail {
             say(lang, "refuse.title_is_a_dash").to_string(),
             fill(say(lang, "refuse.edit_title_dash_body_stdin"), &[("id", id)]),
         ),
-        FlagLike::Note(id) => (
-            say(lang, "refuse.note_is_a_dash").to_string(),
-            fill(say(lang, "refuse.note_dash_stdin"), &[("id", id)]),
-        ),
+        FlagLike::Note(id) => {
+            (say(lang, "refuse.note_is_a_dash").to_string(), fill(say(lang, "refuse.note_dash_stdin"), &[("id", id)]))
+        }
     };
     Fail::coded(format!("{what}\n                       {how}"), code::BAD_INPUT)
 }

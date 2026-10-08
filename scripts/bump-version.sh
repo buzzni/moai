@@ -269,6 +269,7 @@ if [ "$locked" = 0 ]; then
 다음
   cargo update --workspace                 먼저 Cargo.lock 을 맞추고 자기 줄이 $want 인지 본다
   그 뒤에 커밋하고 태그를 단다 — 릴리스는 \`--locked\` 로 짓는다
+  태그는 develop 끝이 아니라 main 의 머지 커밋에 — 차례는 CONTRIBUTING.md 의 Releasing 에 있다
 NEXT
   exit 0
 fi
