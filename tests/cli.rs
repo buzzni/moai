@@ -4933,12 +4933,36 @@ fn filters_reach_the_command_line() {
         &["epic", "show", "--filter", "type=issue"][..],
         &["show", "epic", "--filter", "type=issue"][..],
         &["epic", "show", "--filter", "type=epic"][..],
+        // **`--type` 도 같은 말로 거절한다**(moai-h64l.tx4) — 한때 0 으로 끝나며 에픽을 냈다. 종류 낱말마다,
+        // 두 꼴(`moai <종류> show`·`moai show <종류>`) 다, 같은 종류도.
+        &["epic", "show", "--type", "issue"][..],
+        &["show", "epic", "--type", "issue"][..],
+        &["epic", "show", "--type", "epic"][..],
+        &["issue", "show", "--type", "epic"][..],
+        &["show", "issue", "--type", "epic"][..],
+        &["milestone", "show", "--type", "issue"][..],
+        &["show", "milestone", "--type", "issue"][..],
+        &["backlog", "show", "--type", "issue"][..],
+        &["idea", "ls", "--type", "issue"][..],
+        &["show", "backlog", "--type", "issue"][..],
+        &["show", "idea", "--type", "backlog"][..],
     ] {
         let e = moai(s.path(), args);
         let err = String::from_utf8_lossy(&e.stderr);
         assert!(!e.status.success() && err.contains("`moai show --type "), "{args:?} — {err}");
         assert!(!err.contains("이면서 동시에"), "되풀이로 읽었다 — {args:?}: {err}");
+        assert!(e.stdout.is_empty(), "거절하며 목록을 냈다 — {args:?}");
     }
+    // `--json` 의 거절도 `type=` 의 것과 같은 꼴이다 — 같은 코드로 멈춘다.
+    let json_code = |args: &[&str]| {
+        let e = moai(s.path(), args);
+        assert!(!e.status.success(), "{args:?}");
+        (e.status.code(), field(&String::from_utf8_lossy(&e.stderr), "code"))
+    };
+    assert_eq!(
+        json_code(&["epic", "show", "--type", "issue", "--json"]),
+        json_code(&["epic", "show", "--filter", "type=issue", "--json"])
+    );
     let e = moai(s.path(), &["show", "--filter", "statu=todo"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("status, tag"));
 }
