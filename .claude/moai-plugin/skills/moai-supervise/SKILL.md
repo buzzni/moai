@@ -52,26 +52,43 @@ worktree convention. Several workers share one root checkout, so fixing things i
 root mixes their edits and commits together. Worktrees stand in
 `<root>/.worktrees/`, and `moai init` writes that path into the gitignore.
 
-**Read the base branch once, at the start of the round.** The place a worker branches
-its worktree from and merges back into is the root checkout, so that checkout's current
-branch is the base branch — the remote's default branch may differ from the root and may
-be stale. The root checkout is the first entry of `git worktree list`, so the line below
-gives the root's branch no matter where in the repository you call it, inside a worktree
-included. If nothing comes out, report the error git gave and stop.
+**Read the root branch once, at the start of the round.** Workers commit the tracker in
+the root checkout and branch their worktrees from the local branches there, so that
+checkout's current branch is the root branch — the remote's default branch may differ from
+the root and may be stale. The root checkout is the first entry of `git worktree list`, so
+the line below gives the root's branch no matter where in the repository you call it,
+inside a worktree included. If nothing comes out, report the error git gave and stop.
 
 ```sh
 if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "the root is detached" >&2; fi; fi
 ```
 
 **If the root is detached, do not send.** The worker's pick-up commit and its merge
-land on a HEAD with no branch, the check (`merge-base <base branch>`) and `worktree add`
+land on a HEAD with no branch, the check (`merge-base`) and `worktree add`
 fail, and `branch -d` deletes that work's only reference. Do not read the remote's
 default branch instead — the root does not stand on that branch, so it is the same
 accident. Ask the person to put the root on a branch, and stop.
 
-Fill the name you read into `<base branch>` in the commands below and in the message you
-send the worker. **The worker does not read it again** — read inside a worktree, it
-gives that worktree's own branch.
+Fill the name you read into `<root branch>` in the message you send the worker.
+
+**Each work has a base branch** — the branch its worktree splits from and merges back
+into. It is decided per work, by the release the work stands under — the one
+`moai show --milestone` lists it under, read in 1:
+
+- **Outside every milestone** — it stands under none, or under one that has shipped or been
+  deferred (a `p0` fix, say) — it is the root branch, as it always was
+- **Inside a live milestone** it is that milestone's own branch, `milestone/<milestone id>`,
+  even while nothing runs yet and `<milestone>` in 3 says `none` — the first epic sent is
+  what starts it. Every epic of the milestone merges there, and the root branch takes the
+  milestone branch in once, at the release, so what a milestone has not shipped yet does
+  not stand on the root branch. The branch is checked out in a long-lived worktree of its
+  own, `.worktrees/milestone-<milestone id>`, because the root stays on the root branch. The
+  worker handed the milestone's first epic raises it when it is missing (its "The milestone
+  branch") — you do not raise it, and you do not remove it; it goes after the release
+
+Fill that into `<base branch>` in the message and in the check of 5. For stalled work (0)
+it is the release its epic stands under (`moai show <epic>`). **The worker does not
+read either again** — asked inside a worktree, git answers with that worktree's own branch.
 
 ## One round
 
@@ -294,7 +311,7 @@ exception. A worker whose person is away waits on that prompt and sends nothing.
 person once, before the first send, and let them choose: a person in the worker's window
 answers it, or `permissions.additionalDirectories` in their settings holding that plugin
 directory lets it through. The settings are theirs — do not write them.
-Fill in `<id>`, `<title>`, `<steps file>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -330,6 +347,7 @@ worker reads in its own window in 9-1.
     Read first: moai show <id>
     Model: <model> (<difficulty> — <why>)
     Work running alongside: <other work> — do not touch those files (4-3)
+    Root branch: <root branch>
     Base branch: <base branch>
     Milestone: <milestone>
     Root: <root>
@@ -369,6 +387,12 @@ defer it, do not put a note on it; just finish the turn.
     git merge-base --is-ancestor <merge hash> <base branch> && echo yes   is the merge on the base branch
     moai show <epic>                       are the unfolded epic and its members done
     git worktree list                      is that worktree gone
+
+`<base branch>` here is the one you sent with that work. For work inside a milestone it is
+`milestone/<milestone id>` — the merge lands there, not on the root branch, which takes it
+in only at the release, so checking the root branch reads a good merge as missing. In
+`git worktree list` the epic's worktree is gone and `.worktrees/milestone-<milestone id>`
+stays — that one is the milestone's, not leftover work.
 
 **A member left because the work beside it holds the file** (the worker's 4-3) goes to an
 idle worker after that other work's report is checked. Send the message of 3 with `<id>`
@@ -416,6 +440,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
   again. A `git commit` without a path seals that merge even when you ran `git status` first
 - Finish your own merge in one call, `git merge --no-ff <branch> -m "…"`. Do not use
   `--no-commit`. If it stops on a conflict, do not resolve it in the root: `git merge --abort`
+- Work inside a milestone does not merge in the root at all — it merges in the milestone's
+  worktree (the worker's 8), and the root branch takes the milestone branch in at the
+  release. Branches go in with `--no-ff` as they stand, never rebased or squashed
 
 ## When to stop
 
