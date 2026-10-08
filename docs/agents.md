@@ -59,6 +59,14 @@ The first `moai init` in a terminal asks, and `--guide` says it without asking:
   moai hooks mean `hook`, and a plain rerun leaves those hooks installed without
   calling the installer again. Otherwise a tracker kept out of git is left without
   a block and a committed one gets the block
+- **Switching from `file` to `block` takes the guide file away.** Once `AGENTS.md`
+  holds the whole block, `moai init --guide block` removes `.moai/guide.md` and says
+  so. A file there that does not open the way the moai guide does is yours: `init`
+  leaves it and says that too
+- **An `AGENTS.md` that links to a file `init` appends to gets no block.** With
+  `AGENTS.md -> .gitattributes` or `-> .gitignore`, planting the block would replace
+  the rules `init` just wrote. `init` leaves `AGENTS.md` alone and names it, and
+  `--check` names it as well — make `AGENTS.md` a regular file to get the block
 
 ## Plant the skills
 
@@ -104,7 +112,8 @@ registration away and leaves the files; with
 `--agent codex` or `antigravity` it prints the `rm -r` lines for moai's skills
 in `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
 wrote it, and deletes nothing. `moai skill status` shows Claude's registration,
-whether `.agents/skills/` holds this version's skills, whether each hooks file is
+whether `.agents/skills/` holds this version's skills (a CRLF checkout counts as
+the same text) and names a retired skill's directory left there, whether each hooks file is
 this version's (or not moai's) — judged by the moai that file calls, the way the
 plugin is, so a different build running `status` does not ask to plant again —
 and whether `codex` and `agy` are on PATH — and exits 0 whatever it finds.
@@ -303,8 +312,8 @@ and Antigravity have no supervisor; their sessions pick their own work with
    from which step to follow it. The worker is a session of the same repository
    and loaded the same plugin, so the file is there for it. The lines after that
    fill this assignment — the backlog, the model and difficulty picked for it,
-   the work running alongside, the base branch, the milestone, the root and
-   whether the person is away. The supervisor
+   the work running alongside, the root branch and the base branch, the
+   milestone, the root and whether the person is away. The supervisor
    sends it with `notify_when_idle` and waits for the report; it does not poll
    `ListAgents`
 4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
@@ -315,7 +324,7 @@ and Antigravity have no supervisor; their sessions pick their own work with
    leaves the report as a `report:` note on the epic, and a supervisor that
    starts or resumes reads those before it waits. Then it tells its person whether the window can be
    cleared now, and ends its turn; the next message wakes it
-5. **The supervisor checks the report** — the merge is on the base branch, the
+5. **The supervisor checks the report** — the merge is on that work's base branch, the
    epic is done, the worktree is gone — and sends the next backlog item
 
 **The review runs inside the worker's own session.** It never starts another
@@ -346,6 +355,19 @@ it — nor because its name is gone, since a worker restarted with
 `claude --resume` comes back under a new session name. In both cases the
 supervisor waits for the person to say that window has ended. Whether stalled
 work is carried on or put down is the person's call.
+
+**Work inside a milestone has a branch of its own** (moai-nvju). The base
+branch the message carries is the root branch for work outside every milestone,
+and `milestone/<milestone id>` for work inside a live one — even one that has
+not started running yet. That branch is checked out in a long-lived worktree,
+`.worktrees/milestone-<milestone id>`, which the worker handed the milestone's
+first epic raises from the root branch when it is missing. Each epic branches
+from it and merges into it — the worker runs that merge, and the `branch -d`
+after it, from the root as `git -C .worktrees/milestone-<milestone id> …` — and
+the supervisor checks a report's merge on that branch, not on the root branch.
+The root branch takes the milestone branch in once, at the release; until then
+a milestone's finished work does not stand on the root branch. Branches go in
+with `git merge --no-ff` as they stand, never rebased or squashed.
 
 **When the person steps away**, they tell the supervisor, and its messages say
 `Person: away`. The worker then settles a design question by its own
@@ -406,6 +428,11 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   not asked to register. `--dry-run` stops with the same line. Replace the link
   with a real file or directory, or move aside what stands there, and install
   again
+- **`init` or `skill install` refused a path that points into `.moai`.** A
+  committed link (`AGENTS.md -> .moai/issues.jsonl`, a `SKILL.md`, a hooks file,
+  or a directory such as `.agents -> .moai`) would land the write in the
+  tracker. Nothing is written there and the link stays; `init` exits 0, `skill
+  install` non-zero. Replace the link with a real file — see [Recovery](recovery.md#a-write-was-refused-because-a-link-leads-into-moai)
 - **`skill install` said it did not read `.claude/settings.json`.** That
   committed file is a link out of the checkout, a FIFO, or unreadable, so the
   marketplaces an earlier moai declared there were not removed. Delete the
@@ -426,7 +453,7 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8
 
 ## Archive storage
 

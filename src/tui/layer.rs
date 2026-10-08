@@ -477,6 +477,7 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
         swept: false,
         sides: Vec::new(),
         mine: crate::worktree::Floor::loose(&[]),
+        root: None,
     };
     // 말은 층이 들고 온다(moai-ra67) — 한눈 보기(`view::unopened`)가 내는 그 글을 그대로 쓴다.
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), lang)).trim().to_string();
@@ -1981,10 +1982,11 @@ mod tests {
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
         // 보기는 사람의 설정이라 **따라간다**(moai-2bzp) — 겹쳐 보기와 반대다.
+        // 처음 보기가 done 을 보이니(moai-muit) `SPC v 4` 는 done 을 숨긴다.
         a.hit("SPC v 4 Esc");
         a.hit("SPC s t Esc");
         let (view, order) = (a.view.clone(), a.order);
-        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v 4 가 done 을 안 보였다");
+        assert!(view.hides(crate::config::DONE), "프로젝트 안에서 SPC v 4 가 done 을 안 숨겼다");
 
         a.key(key(KeyCode::Home));
         a.hit("0");
@@ -2609,6 +2611,25 @@ mod tests {
         (one, two, a)
     }
 
+    /// **펼친 줄도 아카이브의 못 읽는 줄 수를 든다**(moai-ug6x.bbh) — 들어간 화면의 배너가 아카이브를 펴면 그 수를
+    /// 댄다. 펼치며 세운 `Site` 는 처음값 0 으로 서므로, 읽은 것(`Fresh`)에서 옮겨 적지 않으면 들어간 첫 화면이
+    /// 말이 없다.
+    #[test]
+    fn an_opened_row_carries_its_unreadable_archive_lines() {
+        let s = Scratch::fenced("layer-archive-unreadable");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        let file = crate::archive::path(&one, "2026");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "{\"id\":\"argos-a009\",\"kind\":42}\n").unwrap();
+        let at = a.layer.as_ref().unwrap().position(&one).expect("one 이 층에 있다");
+        a.want_site(at);
+        settle(&mut a);
+        let held = a.layer.as_ref().unwrap().places[at].site.as_ref().expect("펼친 줄이 제 Site 를 든다");
+        assert_eq!(held.unreadable_archive, 1, "펼친 줄이 아카이브의 못 읽는 줄 수를 잃었다");
+        assert_eq!(held.unreadable_live, 0, "아카이브의 못 읽는 줄을 산 줄로 셌다");
+        join_threads(&mut a);
+    }
+
     /// **고른 말은 프로젝트를 오가도 그대로다**(moai-ra67, 리뷰). 말은 화면 하나의 것이라
     /// 어느 프로젝트에 서 있는가와 상관이 없는데, 떠나며 비우는 `Site` 와 펼친 줄에 세우는
     /// `Site` 가 제 처음값을 들고 오던 판은 `0` 한 번에 층도 다음 프로젝트도 몽땅 그 처음값으로
@@ -2995,8 +3016,8 @@ mod tests {
         let s = Scratch::fenced("layer-view-on-read");
         let one = s.project("one", &[("argos-0001", "열린 줄", "todo"), ("argos-0002", "끝난 줄", "done")]);
         let cfg = s.register(&[&one]);
-        let mut a = layered(&cfg);
-        assert!(a.view.hides(crate::config::DONE), "시험의 전제 — 탐색기는 done 을 숨긴 채로 뜬다");
+        // 처음 보기는 done 을 보인다(moai-muit) — 펼치기 전에 done 을 숨긴 보기를 걸어 둔다.
+        let mut a = crate::tui::tests::old_look(layered(&cfg));
         a.want_site(0);
         settle(&mut a);
         assert_eq!(titles(&a), ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");

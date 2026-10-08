@@ -12,6 +12,176 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-08
+
+### Added
+
+- **While the archive is shown (`SPC v o`), the explorer's banner names how
+  many lines of the archive files could not be read** and says the view is
+  without them. The line is dimmed — it does not make the banner urgent.
+  (moai-ug6x.bbh)
+
+- **`moai skill status` names a retired skill's directory left behind.** A
+  directory such as `.agents/skills/moai-work` that still holds a file of yours
+  is kept by `moai skill install` and still teaches retired commands; the
+  status now says so and leaves the row current. One that `install` would
+  remove turns the `.agents` row stale, the same as the `skills_stale` notice.
+  `--json` carries `agents.leftovers`, always an array. (moai-9s9s.v0y)
+
+### Changed
+
+- **The supervisor skill sends milestone work to a milestone branch.** Work
+  inside a live milestone now branches from `milestone/<milestone id>` and
+  merges back into it, in a long-lived worktree at
+  `.worktrees/milestone-<milestone id>` that the worker handed the
+  milestone's first epic raises when it is missing; the root branch takes the
+  milestone branch in once, at the release. Work outside every milestone
+  (a `p0` fix) branches from and merges into the root branch as before. The
+  message carries a new `Root branch:` line beside `Base branch:`, and the
+  supervisor checks a report's merge on that work's base branch. Branches
+  merge with `--no-ff` as they stand, never rebased or squashed. (moai-nvju)
+- **The explorer opens with done shown and deferred work hidden.** Before, it
+  opened with the done column hidden and deferred rows shown. The done
+  column's toggle (`SPC v 4` with the default columns) and `SPC v l` still
+  toggle each, and a view you saved in `[tui]` (`hidden`,
+  `hide_deferred`) still wins over this default. (moai-muit)
+- **`moai init --json` says `"driver": "untracked"` for a tracker kept out of
+  git.** With `--tracking exclude` or `gitignore` it said `skipped`, the word
+  `--no-driver` uses for a driver left out this run only — but git never
+  merges an untracked tracker, so there is nothing for a driver to do.
+  `skipped` now stands only for `--no-driver` on a committed tracker.
+  (moai-8gwh.86j)
+- **A lone `-` where text goes is refused instead of written down.** `moai
+  note <id> - < notes.md` wrote a note that read `-` and dropped what came on
+  stdin, and `moai add -`, `moai backlog add -` and `moai edit <id> --title -`
+  took `-` as the title — all with exit 0. They now exit non-zero with
+  `bad_input`, write nothing, and name the flag that does read stdin: `moai
+  note <id> -b - < <file>`, and for a title, that the body is what takes
+  `-b -`. `--` does not let a lone `-` through. (moai-ltsv.4t0)
+- **`moai mv` refuses an empty `-m`, as `moai defer` already did.** `moai mv
+  <id> done -m ''` — or `-m "$(cat missing-file)"`, or a message of blanks —
+  wrote an empty note and exited 0, and on a row already in that column every
+  call piled up another empty note. It now exits non-zero with `bad_input` and
+  moves nothing; leave `-m` out to move without a message. (moai-ltsv.uqw)
+- **A filter that takes one value, given twice, is refused the way `-s` is.**
+  `--filter grep=one --filter grep=two` searched for `two` alone, and a second
+  `type=` or `stale=` likewise quietly kept the last value — mixing the flag
+  (`-g`, `--type`, `--stale`) with `--filter` too. These now exit non-zero with
+  `bad_filter` and name one value to keep. `moai epic show --filter type=issue`
+  is refused as well, since the namespace already gives the type. (moai-ltsv.auf)
+
+- **`moai-supervise` writes what it sent and what it checked into the
+  tracker.** It notes `Sent: <worker>` on the row it sends and
+  `Report-checked: <merge hash>` on the epic once a report holds, so a
+  supervisor that starts again no longer sends a backlog item or an epic nobody
+  has picked up yet a second time, or checks a report again. It also tells the person once when its
+  skill lives outside the repository, where a worker's read of the steps file
+  asks for permission. (moai-9s9s.ctx, moai-9s9s.qmd)
+
+### Removed
+
+- **`moai hook stop-failure`, `interrupt` and `session-end` are gone.** 0.9
+  kept them for one release as commands that do nothing; hooks planted before
+  0.9 that still call them now print an error. Run `moai skill install` again
+  (with `--agent codex` where `.codex/` holds the hooks) — it rewrites the
+  planted hooks without them. (moai-9s9s.vzn)
+
+### Fixed
+
+- **A milestone branch's worktree (`milestone/<id>`) is no longer read as a
+  place where work stands.** Its stale snapshot no longer hides stranded rows
+  from `moai status` and `moai show`, `--worktree` no longer overlays it, and
+  the hook no longer counts its rows as held elsewhere. It is told by its
+  branch, not its directory. (moai-nvju.ztj)
+- **A checkout with CRLF line endings (`core.autocrlf`) no longer reads the
+  planted skills as stale** — the `skills_stale` notice and `moai skill status`
+  now compare the way the install does. (moai-9s9s.x3n)
+
+- **In the statistics and wiki windows the arrow, Home/End and PgUp/PgDn keys
+  move with Ctrl or Alt held too**, the same as in the list and as they already
+  did through the `SPC` menu. In the wiki window `←` goes back with Ctrl or Alt
+  held as well. Letter keys stay exact. (moai-ug6x.3ip)
+- **Re-reading the statistics or wiki window (`SPC g s`, `SPC g w` over
+  itself) that fails closes the window and says why**, instead of leaving the
+  old window under the notice. Failing to open the other window (`SPC g s` over
+  the wiki, `SPC g w` over the statistics) leaves the current one as it was —
+  cursor and link trail included — and only says why. (moai-ug6x.hr1)
+- **`moai init` no longer erases the rules it just wrote through an
+  `AGENTS.md` link.** With a committed `AGENTS.md -> .gitattributes` the block
+  was planted last, over the text read before the rules were appended, so the
+  `merge=moai` lines vanished and AGENTS markdown stood as attribute patterns;
+  `-> .gitignore` lost `.moai/lock` the same way — and the output said both
+  were written. When `AGENTS.md` leads to a file `init` appends to, the block
+  is no longer planted: `AGENTS.md` is named as left alone (`untouched`, kind
+  `shared` under `--json`), and `moai init --check` names it too
+  (`agents_shared`). (moai-8gwh.esm)
+- **Switching `--guide file` to `--guide block` no longer leaves
+  `.moai/guide.md` behind.** Once `AGENTS.md` holds the whole block and no
+  longer links to it, `moai init` removes the guide file it wrote, says so in
+  one line, and `--json` carries `guide_file_removed`. With `--guide none` or
+  `hook` — `AGENTS.md` untouched, its link still standing — or when `AGENTS.md`
+  could not be written, the file stays. So does a `.moai/guide.md` that is not
+  a moai guide — one that does not open with the guide's heading and first
+  sentence: `init` names it as left in one line, and `--json` carries
+  `guide_file_kept`. (moai-8gwh.ftm)
+- **A tracker kept out of git that cannot be created no longer leaves its
+  ignore lines behind.** `moai init --tracking exclude|gitignore` writes those
+  lines before `.moai` on purpose; when creating `.moai` or its files then
+  failed, the lines stayed with no tracker. `init` now takes back exactly what
+  it appended (or removes the file it created) and any `.moai` it made, and
+  still stops with the error. (moai-8gwh.67q)
+- **A committed link from a file outside `.moai` into the tracker is no longer
+  followed.** `AGENTS.md -> .moai/issues.jsonl` made `moai init` read the
+  snapshot as AGENTS.md and replace it without the repository lock — racing a
+  `moai add`, it lost rows and exited 0, and left markdown in the snapshot;
+  `-> .moai/config.toml` broke every later command, and a committed `SKILL.md`
+  link let `moai skill install` replace the snapshot with skill text. Such a
+  write — a root file, a planted skill tree, a hook file — is now refused when
+  it would land inside any `.moai` directory or on the snapshot behind its link,
+  naming the path and where it points; nothing is written and the link stays.
+  (moai-r0x8.a42)
+- **A main checkout left holding only `.moai/lock` no longer traps its linked
+  worktrees.** After checking out an old commit or bisecting, the lookup in a
+  sibling worktree said there was no tracker and to run `moai init`, while
+  `moai init` there refused and pointed at the main checkout. Both now ask the
+  same question — does the main checkout hold `.moai/config.toml` — so `init`
+  in that worktree plants its own tracker. (moai-r0x8.apz)
+- **A linked worktree with no `.moai` of its own reads the main checkout's
+  tracker wherever it stands.** A worktree split off before moai came in and
+  placed outside the main checkout (`git worktree add ../side <old commit>`)
+  found nothing above it: `moai prime` said `no_tracker` and to run
+  `moai init`, `status` and `ready` refused with the same advice, and `init`
+  there refused because the tracker lives in the main checkout. Every command
+  there now opens the main checkout's tracker, as `project add` already did, and
+  a write says in one line where it went. One inside the main checkout no longer
+  reports that it "climbed up" to that tracker. `MOAI_HERE=1` still keeps the
+  worktree on its own. (moai-r0x8.3fi)
+- **A `.moai` that is not a directory is an unreadable tracker, not a missing
+  one.** A regular file or a link that leads nowhere (`.moai -> /nowhere`) was
+  read as "no tracker": `moai prime` said `no_tracker` and to run `moai init`,
+  and `init` then failed with a bare `Not a directory` or `File exists`, while a
+  link to an existing place already stopped with `broken`. Every command —
+  `prime` (`tracker_error`, code `broken`), `status`, `project ls`, `init` and
+  `init --check` — now says what stands there and stops on it, and `init`
+  leaves it untouched. (moai-r0x8.e19)
+- **`moai prime` no longer calls a tracker it climbed to "the tracker here".**
+  In a checkout with no `.moai` whose search climbed to an unreadable tracker
+  above it, the page said it could not read the tracker here and that `moai
+  init` would not help; that it had climbed was only on stderr, which a
+  session-start hook does not carry. The page now says there is no `.moai`
+  in this checkout, names the tracker it climbed to and why it could not be
+  read, and gives both ways out — fix that tracker, or start a separate one
+  for this checkout with `moai init` (as `moai -C <checkout top> init` when
+  called below the top). When the search climbed past a `.moai` it could not
+  look at, the page says so instead and does not offer `moai init`. `--json`
+  adds `climbed_to` with that root beside `tracker_error`, and `init_at` or
+  `unseen_at` for the two cases. (moai-r0x8.ris)
+- **`moai init --tracking exclude|gitignore` in a worktree of a bare repository
+  no longer names a main checkout that does not exist.** The refusal is the
+  same, but it now says the repository has no main checkout and that keeping
+  the tracker out of git would hide the trackers the other worktrees commit.
+  (moai-r0x8.33p)
+
 ## [0.9.0] - 2026-10-07
 
 ### Changed

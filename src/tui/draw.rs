@@ -208,14 +208,13 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     // 번호를 실제로 적었는지도 같이 받는다 — 키 바가 층으로 가는 `0` 을 댈지 그 답으로 가른다.
     let (header_glint, header_numbered) = if header_h > 0 { header(f, app, head) } else { (false, false) };
     crumbs(f, app, &rows, top);
-    if let Some((text, urgent)) = banner(app) {
+    if let Some((text, urgent, dimmed)) = banner_parts(app) {
         let style = if urgent {
             Style::new().fg(Color::Black).bg(Color::LightRed)
         } else {
             Style::new().fg(Color::Black).bg(Color::LightYellow)
         };
-        let text = clip(&text, note.width as usize);
-        f.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), note);
+        f.render_widget(Paragraph::new(banner_line(&text, note.width as usize, style, dimmed)), note);
     }
     // **보드는 목록 자리에 선다**(moai-9nfw) — 새 창이 아니라 목록의 배치라 상세·포커스·마우스의 칸은 그대로다.
     let (rows_at, cards, columns) = if app.board() {
@@ -1705,6 +1704,12 @@ pub(crate) fn tests_banner(app: &mut App) -> String {
 }
 
 fn banner(app: &App) -> Option<(String, bool)> {
+    banner_parts(app).map(|(t, urgent, _)| (t, urgent))
+}
+
+/// [`banner`] 의 글과 급한가, 그리고 **흐리게 칠할 몫**의 바이트 범위 — 아카이브를 보는 동안의 못 읽는 줄
+/// (moai-ug6x.bbh)이 그것이다. 그리는 쪽이 자른 글에서 그 범위를 따로 칠한다.
+fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize>>)> {
     let lang = app.site.lang;
     let mut parts: Vec<String> = Vec::new();
     let mut urgent = false;
@@ -1780,6 +1785,17 @@ fn banner(app: &App) -> Option<(String, bool)> {
     if n > 0 {
         parts.push(fill(say(lang, "tui.banner.warnings"), &[("n", &n.to_string())]));
     }
+    // **아카이브를 보는 동안만 그 못 읽는 줄을 따로 댄다**(moai-ug6x.bbh) — 그 줄은 위의 "드러난 것" 에 `+1` 로만
+    // 들어(`archive_unreadable` 경고), 아카이브를 펼친 사람은 지금 보는 목록에서 줄이 빠졌다는 것을 알 길이 없었다.
+    // 산 목록을 볼 때는 그 줄이 화면과 상관없어 안 선다. 고칠 것은 경고가 이미 대니 **급하지 않고 흐리게** 선다 —
+    // 색만으로 뜻을 지지 않게 글이 "그 줄 없이 보는 중" 을 댄다. 수는 줄마다다(`Counted::archive_unreadable`).
+    let mut dimmed = None;
+    if app.view.show_archived && app.site.unreadable_archive > 0 {
+        dimmed = Some(parts.len());
+        parts
+            .push(fill(say(lang, "tui.banner.archive_unreadable"), &[("n", &app.site.unreadable_archive.to_string())]));
+        soft += 1;
+    }
     // **알림은 경고 뒤, 제 낱말로 선다**(moai-k6ff, 2026-09-22 사용자 결정). 프로젝트 층의 줄이 대는 `+N`
     // 이 여기 짝을 얻는다 — 그 줄에서 Enter 를 치면 여태 아무 말도 없는 화면이 섰다.
     //
@@ -1819,7 +1835,31 @@ fn banner(app: &App) -> Option<(String, bool)> {
     // 잘못된 줄 안다. 세는 자는 위의 `soft` 하나다(쓰기의 알림·담아 둔 것의 수·새 판으로
     // 올리는 줄).
     let lead = if parts.len() == soft { "" } else { "! " };
-    (!parts.is_empty()).then(|| (format!(" {lead}{} ", parts.join("   ·   ")), urgent))
+    if parts.is_empty() {
+        return None;
+    }
+    const SEP: &str = "   ·   ";
+    let head = format!(" {lead}");
+    let range = dimmed.map(|k| {
+        let start = head.len() + parts[..k].iter().map(|p| p.len() + SEP.len()).sum::<usize>();
+        start..start + parts[k].len()
+    });
+    Some((format!("{head}{} ", parts.join(SEP)), urgent, range))
+}
+
+/// 배너 한 줄을 칠한다 — 흐리게 칠할 몫(`dim`)만 [`dim`] 의 글자색을 같은 바탕에 얹는다. **자른 글에서 범위를
+/// 다시 잰다**: [`clip`] 은 앞쪽을 그대로 두고 `…` 만 붙이니, 남은 앞쪽 길이로 범위를 깎으면 된다. 폭이 0 이면
+/// [`clip`] 이 빈 글을 내고 `…` 도 없다 — 그때 남은 앞쪽은 0 이다(빼기로 재면 넘쳐 터진다).
+fn banner_line(text: &str, width: usize, base: Style, dimmed: Option<std::ops::Range<usize>>) -> Line<'static> {
+    let shown = clip(text, width);
+    let Some(r) = dimmed else { return Line::from(Span::styled(shown, base)) };
+    let kept = if shown == text { shown.len() } else { shown.strip_suffix('…').map_or(0, str::len) };
+    let (a, b) = (r.start.min(kept), r.end.min(kept));
+    Line::from(vec![
+        Span::styled(shown[..a].to_string(), base),
+        Span::styled(shown[a..b].to_string(), base.fg(dim().fg.unwrap_or(Color::DarkGray))),
+        Span::styled(shown[b..].to_string(), base),
+    ])
 }
 
 /// 맨 위 여섯 줄 — 로고와, 그 오른쪽을 가르는 파이프.
@@ -2241,7 +2281,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
         Some(o) => room.saturating_sub(crate::text::width(o) + 3),
         None => room,
     };
-    // **보기가 숨긴 것을 댄다**(moai-fmv5) — done 을 숨긴 채 시작하므로, 안 대면 끝난 일이 사라진
+    // **보기가 숨긴 것을 댄다**(moai-fmv5) — 미룬 것을 숨긴 채 시작하므로(moai-muit), 안 대면 미룬 일이 사라진
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
@@ -5280,6 +5320,7 @@ fn mend(prev: &ratatui::buffer::Buffer, next: &mut ratatui::buffer::Buffer) {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::super::tests::old_look;
     use super::*;
     use crate::config::Config;
     use crate::latest::Trouble;
@@ -5421,7 +5462,7 @@ pub(super) mod tests {
     }
 
     /// **다 보이는 채로 세운다.** 그림 시험의 줄에는 끝난 멤버가 있고, 시험은 그 줄을 그리는
-    /// 법을 본다 — 처음 done 을 숨기는 보기(moai-fmv5)는 제 시험이 따로 본다.
+    /// 법을 본다 — 처음 보기(done 보임·미룸 숨김, moai-muit)는 제 시험이 따로 본다.
     fn app() -> App {
         every(issues())
     }
@@ -5448,6 +5489,8 @@ pub(super) mod tests {
         out.push(Issue::new("argos-0090".into(), "떠도는 일".into(), Kind::Issue, Status::new("todo"), at));
         let mut a = App::new(out, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.site.lang = Lang::Ko;
+        // 칸은 backlog · 미룸 · todo · in_progress · review 다 — done 은 바닥이 숨긴다(옛 처음 보기, moai-muit).
+        let mut a = old_look(a);
         a.layout = super::super::view::Layout::Board;
         a.detail_open = false;
         a
@@ -5891,6 +5934,13 @@ pub(super) mod tests {
         a.fields.set(super::super::view::Field::Names, false);
         a.see();
         a
+    }
+
+    /// **옛 처음 보기(done 숨김·미룸 보임)로 세운다**(moai-muit) — 처음 보기가 2026-10-08 에 done 보임·미룸 숨김으로
+    /// 뒤집혔다. 숨긴 done 을 그리는 법을 보는 시험이 그 전제를 제 바닥에 적는다. 거는 자는
+    /// [`super::super::tests::old_look`] 하나다.
+    fn done_hidden(issues: Vec<Issue>) -> App {
+        old_look(App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new()))
     }
 
     /// [`every`] 에서 열 이름 줄만 **안 끈** 것 — 사용자가 처음 띄운 열 그대로다. 둘이 한 뿌리에서
@@ -7191,6 +7241,9 @@ pub(super) mod tests {
             Config::parse("prefix = \"argos\"\n").unwrap(),
             vec![crate::nav::Seg::Epic("argos-0001".into())],
         );
+        // 처음 보기는 미룬 것을 숨긴다(moai-muit) — 이 시험은 보이는 멤버의 상세를 본다.
+        a.view.hide_deferred = false;
+        a.see();
         a.cursor = 1; // 0 은 `..` 줄이다
         let lines = render(&mut a, 180, 24);
         assert!(lines.iter().any(|l| l.contains("미룸 — argos-0001 밑")), "{lines:#?}");
@@ -7372,6 +7425,39 @@ pub(super) mod tests {
         a.site.unreadable_live = 0;
         let lines = render(&mut a, 100, 14).join("\n");
         assert!(!lines.contains("읽을 수 없는 줄"), "{lines}");
+    }
+
+    /// **아카이브를 보는 동안만 아카이브의 못 읽는 줄을 흐리게 댄다**(moai-ug6x.bbh) — 산 목록에서는 안 서고, 그
+    /// 줄이 없으면 아카이브를 봐도 안 선다. 흐린 몫은 그 글만이고 앞뒤는 배너의 글자색 그대로다.
+    #[test]
+    fn the_archive_view_names_its_unreadable_lines_dimmed() {
+        let mut a = app();
+        a.site.unreadable_archive = 2;
+        let part = "아카이브의 못 읽는 줄 2 — 그 줄 없이 보는 중";
+        assert!(!tests_banner(&mut a).contains("아카이브의 못 읽는 줄"), "산 목록에서 섰다");
+        a.view.show_archived = true;
+        let (text, urgent, range) = banner_parts(&a).expect("배너가 안 섰다");
+        assert!(!urgent, "급한 배너로 섰다");
+        let r = range.expect("흐린 몫이 없다");
+        assert_eq!(&text[r.clone()], part);
+        let lines = render(&mut a, 100, 14).join("\n");
+        assert!(lines.contains(part), "{lines}");
+
+        let base = Style::new().fg(Color::Black).bg(Color::LightYellow);
+        let line = banner_line(&text, 100, base, Some(r.clone()));
+        let dimmed: Vec<_> = line.spans.iter().filter(|s| s.style.fg == dim().fg).collect();
+        assert_eq!(dimmed.iter().map(|s| s.content.as_ref()).collect::<String>(), part, "흐린 몫이 그 글이 아니다");
+        assert!(dimmed.iter().all(|s| s.style.bg == base.bg), "흐린 몫이 바탕을 잃었다");
+        // 자른 글에서도 범위가 글자 경계를 안 넘는다 — 흐린 몫 한가운데서 잘려도 앞쪽만 흐리다.
+        let cut = crate::text::width(&text[..r.start]) + 4;
+        let line = banner_line(&text, cut, base, Some(r.clone()));
+        assert!(line.spans.iter().map(|s| s.content.as_ref()).collect::<String>().ends_with('…'));
+        // 폭이 0 인 칸(창을 접는 동안)에서도 안 터진다 — `clip` 이 `…` 없이 빈 글을 낸다.
+        let line = banner_line(&text, 0, base, Some(r));
+        assert!(line.spans.iter().all(|s| s.content.is_empty()), "폭 0 에 글이 섰다");
+
+        a.site.unreadable_archive = 0;
+        assert!(!tests_banner(&mut a).contains("아카이브의 못 읽는 줄"), "못 읽는 줄 없이 섰다");
     }
 
     /// 쓰기의 실패도 같은 자리에 서고, **무엇을 못 했는지는 단 쪽의 말 그대로다** —
@@ -7703,7 +7789,9 @@ pub(super) mod tests {
             let cfg = Config::parse("prefix = \"argos\"\n").unwrap();
             let picked = crate::report::ready(&all, &cfg).iter().any(|i| i.id == "argos-0005");
             let path = vec![crate::nav::Seg::Epic("argos-0001".into())];
-            let mut a = App::new(all, cfg, path);
+            let a = App::new(all, cfg, path);
+            // 옛 처음 보기(done 숨김·미룸 보임)를 바닥으로 둔다(moai-muit) — 이 시험은 보기가 아니라 막음 줄을 본다.
+            let mut a = old_look(a);
             a.cursor = a
                 .rows()
                 .iter()
@@ -8510,7 +8598,7 @@ pub(super) mod tests {
         assert_eq!(near, format!("{mine} · latest not checked (no network) · v0.3.0 seen today"));
         // 까닭마다 글이 갈리던 것(moai-580l)은 그대로다 — 지난 답은 그 뒤에 붙을 뿐이다.
         let limited = line(stale(Trouble::RateLimited, "v0.3.0", heard), "2026-09-21T09:00:00Z");
-        assert!(limited.starts_with(&format!("{mine} · latest not checked (rate limited) · ")), "{limited}");
+        assert!(limited.starts_with(&format!("{mine} · latest not checked (throttled) · ")), "{limited}");
         // 처음 — 지난 답이 없으면 번호를 안 댄다.
         assert_eq!(
             line(unasked_for(Trouble::NotAsked), "2026-09-21T09:00:00Z"),
@@ -9389,7 +9477,7 @@ pub(super) mod tests {
                 .into(),
         );
         for w in [20u16, 24, 30, 40, 60, 80] {
-            // **다 보이는 채로 세운다** — 본문은 끝난 멤버에 있다. 처음 보기(done 숨김)로 세우면 커서가 본문 없는
+            // **다 보이는 채로 세운다** — 본문은 끝난 멤버에 있다. done 을 숨긴 보기로 세우면 커서가 본문 없는
             // 멤버에 서서 이 시험이 본문을 한 번도 안 그리고 지나간다(moai-2kyl 단계 리뷰).
             let mut a = every(issues.clone());
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -10710,7 +10798,7 @@ pub(super) mod tests {
     /// 뺀다 — 한 뱃지로 통째로 재면 차례만 골라도 숨긴 것을 대는 말까지 빠진다.
     #[test]
     fn a_chosen_sort_gives_way_before_the_hidden_badge() {
-        let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(issues());
         a.hit("SPC s u Esc");
         a.hit("SPC s u Esc");
         let badge = |a: &mut App, w: u16| {
@@ -10733,7 +10821,7 @@ pub(super) mod tests {
         for i in &mut finished {
             i.status = Status::new("done");
         }
-        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(finished);
         let lines = render(&mut a, 100, 12).join("\n");
         assert!(lines.contains(" 보기에 가려 비었다 "), "{lines}");
     }
@@ -10746,7 +10834,7 @@ pub(super) mod tests {
         for i in &mut finished {
             i.status = Status::new("done");
         }
-        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(finished);
         a.detail_open = false;
         for c in "/멤".chars() {
             a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
@@ -10773,7 +10861,7 @@ pub(super) mod tests {
     /// 잰다(moai-i5io): 검색이 맞혀 저절로 열린 폴더 밑에서 보기가 숨긴 줄은 `숨김` 이 맞다.
     #[test]
     fn a_search_leaves_plain_rows_unmarked() {
-        let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(issues());
         a.detail_open = false;
         for c in "/멤".chars() {
             a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
@@ -10799,7 +10887,7 @@ pub(super) mod tests {
         for i in &mut finished {
             i.status = Status::new("done");
         }
-        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(finished);
         a.fields.set(super::super::view::Field::Names, false);
         a.see();
         for c in "/argos".chars() {

@@ -52,26 +52,43 @@ worktree convention. Several workers share one root checkout, so fixing things i
 root mixes their edits and commits together. Worktrees stand in
 `<root>/.worktrees/`, and `moai init` writes that path into the gitignore.
 
-**Read the base branch once, at the start of the round.** The place a worker branches
-its worktree from and merges back into is the root checkout, so that checkout's current
-branch is the base branch — the remote's default branch may differ from the root and may
-be stale. The root checkout is the first entry of `git worktree list`, so the line below
-gives the root's branch no matter where in the repository you call it, inside a worktree
-included. If nothing comes out, report the error git gave and stop.
+**Read the root branch once, at the start of the round.** Workers commit the tracker in
+the root checkout and branch their worktrees from the local branches there, so that
+checkout's current branch is the root branch — the remote's default branch may differ from
+the root and may be stale. The root checkout is the first entry of `git worktree list`, so
+the line below gives the root's branch no matter where in the repository you call it,
+inside a worktree included. If nothing comes out, report the error git gave and stop.
 
 ```sh
 if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "the root is detached" >&2; fi; fi
 ```
 
 **If the root is detached, do not send.** The worker's pick-up commit and its merge
-land on a HEAD with no branch, the check (`merge-base <base branch>`) and `worktree add`
+land on a HEAD with no branch, the check (`merge-base`) and `worktree add`
 fail, and `branch -d` deletes that work's only reference. Do not read the remote's
 default branch instead — the root does not stand on that branch, so it is the same
 accident. Ask the person to put the root on a branch, and stop.
 
-Fill the name you read into `<base branch>` in the commands below and in the message you
-send the worker. **The worker does not read it again** — read inside a worktree, it
-gives that worktree's own branch.
+Fill the name you read into `<root branch>` in the message you send the worker.
+
+**Each work has a base branch** — the branch its worktree splits from and merges back
+into. It is decided per work, by the release the work stands under — the one
+`moai show --milestone` lists it under, read in 1:
+
+- **Outside every milestone** — it stands under none, or under one that has shipped or been
+  deferred (a `p0` fix, say) — it is the root branch, as it always was
+- **Inside a live milestone** it is that milestone's own branch, `milestone/<milestone id>`,
+  even while nothing runs yet and `<milestone>` in 3 says `none` — the first epic sent is
+  what starts it. Every epic of the milestone merges there, and the root branch takes the
+  milestone branch in once, at the release, so what a milestone has not shipped yet does
+  not stand on the root branch. The branch is checked out in a long-lived worktree of its
+  own, `.worktrees/milestone-<milestone id>`, because the root stays on the root branch. The
+  worker handed the milestone's first epic raises it when it is missing (its "The milestone
+  branch") — you do not raise it, and you do not remove it; it goes after the release
+
+Fill that into `<base branch>` in the message and in the check of 5. For stalled work (0)
+it is the release its epic stands under (`moai show <epic>`). **The worker does not
+read either again** — asked inside a worktree, git answers with that worktree's own branch.
 
 ## One round
 
@@ -182,6 +199,11 @@ on would make the release grow after it started, and that is the person's call a
 
 **A backlog item you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a second worker.
+So the moment you send it, mark the row you sent — the backlog item, or the epic when the work
+is already unfolded — and take the note into the root with a commit with a path. Without it
+the send lives only in this conversation, and a supervisor that starts again (4) cannot see it.
+
+    moai note <id> 'Sent: <worker>'
 
 **Send only what is yours.** A backlog item or member whose assignee is someone else — or
 nobody — is asked about first: ask the person, and send it only on a yes, writing in the
@@ -282,7 +304,14 @@ is there for it. **Do not copy the file into the message** — name it.
 `<steps file>` is that file's absolute path: this skill's base directory — Claude Code shows
 it as "Base directory for this skill" when the skill loads — followed by
 `/references/worker.md`. Write it out whole; `@path` attaches nothing.
-Fill in `<id>`, `<title>`, `<steps file>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+**If that base directory lies outside `<root>`** — the plugin installed at user scope, in
+Claude Code's plugin cache — the worker's read of it is a read outside its working directory,
+and in the default permission mode Claude Code asks its person first; the plugin cache is no
+exception. A worker whose person is away waits on that prompt and sends nothing. Tell the
+person once, before the first send, and let them choose: a person in the worker's window
+answers it, or `permissions.additionalDirectories` in their settings holding that plugin
+directory lets it through. The settings are theirs — do not write them.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -318,6 +347,7 @@ worker reads in its own window in 9-1.
     Read first: moai show <id>
     Model: <model> (<difficulty> — <why>)
     Work running alongside: <other work> — do not touch those files (4-3)
+    Root branch: <root branch>
     Base branch: <base branch>
     Milestone: <milestone>
     Root: <root>
@@ -334,10 +364,18 @@ until it is answered. **Do not poll `ListAgents`** — the report comes to you.
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
 report to the old one fails leaves it on the epic as a note with `report: <epic>` at its
 head. So when you start or resume, before waiting, read what the tracker holds:
-`moai show -s in_progress,review` is the work sent and not done, and
-`moai show -g 'report:' --all` finds the reports nobody received. Check each one you have
-not checked as in 5. A worker holding sent work you have no report for is still left out
-in 2 — ask it, or its person, how it stands.
+
+    moai show -s in_progress,review        the work sent and picked up, not done
+    moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
+                                           epic not picked up yet; neither is a candidate
+    moai show -g 'report:' --all           the epics carrying a report nobody received
+
+**Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
+note that discusses this protocol carries the same words. Read each match with
+`moai show <id>` and look at its history: a report stands checked once a `Report-checked:`
+note follows it on the same epic. Check each one that does not as in 5. A worker holding
+sent work you have no report for is still left out in 2 — ask it, or its person, how it
+stands.
 
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when
@@ -349,6 +387,12 @@ defer it, do not put a note on it; just finish the turn.
     git merge-base --is-ancestor <merge hash> <base branch> && echo yes   is the merge on the base branch
     moai show <epic>                       are the unfolded epic and its members done
     git worktree list                      is that worktree gone
+
+`<base branch>` here is the one you sent with that work. For work inside a milestone it is
+`milestone/<milestone id>` — the merge lands there, not on the root branch, which takes it
+in only at the release, so checking the root branch reads a good merge as missing. In
+`git worktree list` the epic's worktree is gone and `.worktrees/milestone-<milestone id>`
+stays — that one is the milestone's, not leftover work.
 
 **A member left because the work beside it holds the file** (the worker's 4-3) goes to an
 idle worker after that other work's report is checked. Send the message of 3 with `<id>`
@@ -370,7 +414,12 @@ unfolded and it does not show its members, so `moai show <id>` cannot tell you w
 the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, send the next backlog to an idle worker. **Clearing a window is the
+If the three hold, mark the report checked on the epic and take it into the root with a
+commit with a path — a supervisor that starts again reads that line, not this conversation (4).
+
+    moai note <epic> 'Report-checked: <merge hash>'
+
+Then send the next backlog to an idle worker. **Clearing a window is the
 person's** — the supervisor never types into a window. The report ends with the worker
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
@@ -391,6 +440,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
   again. A `git commit` without a path seals that merge even when you ran `git status` first
 - Finish your own merge in one call, `git merge --no-ff <branch> -m "…"`. Do not use
   `--no-commit`. If it stops on a conflict, do not resolve it in the root: `git merge --abort`
+- Work inside a milestone does not merge in the root at all — it merges in the milestone's
+  worktree (the worker's 8), and the root branch takes the milestone branch in at the
+  release. Branches go in with `--no-ff` as they stand, never rebased or squashed
 
 ## When to stop
 

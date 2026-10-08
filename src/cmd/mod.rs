@@ -499,19 +499,18 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             check: false,
             print: false,
         } => {
-            // 낱말은 clap 이 이미 골랐다 — 여기서 못 푸는 값은 오지 않는다.
-            let tracking = tracking.as_deref().and_then(crate::init_choice::Tracking::parse);
-            let guide = guide.as_deref().and_then(crate::init_choice::Guide::parse);
+            // 낱말은 clap 이 이미 열거형으로 풀었다(`ValueEnum`) — 여기서 다시 풀 것이 없다.
             let guide = guide.or(no_agents.then_some(crate::init_choice::Guide::None));
             // 짝 플래그는 clap 이 서로 막는다 — 둘 다 오는 일은 없다.
             let pair = |on: bool, off: bool| if on { Some(true) } else { off.then_some(false) };
-            let flags = crate::init_choice::Flags {
-                prefix: prefix.as_deref(),
+            // 플래그가 고른 것은 화면이 고른 것과 같은 꼴(`Choices`)이다 — 안 준 칸은 고르지 않은 것이다.
+            let flags = crate::init_choice::Choices {
+                prefix,
                 tracking,
                 guide,
                 driver: pair(driver, no_driver),
                 skill: pair(skill, no_skill),
-                register: pair(register, no_register),
+                project: pair(register, no_register),
             };
             init::run(ctx, &flags, yes)
         }
@@ -633,12 +632,21 @@ fn typed(ctx: &Ctx, cmd: Typed, kind: Kind) -> R<Vec<String>> {
 /// **하이픈 하나로 여는 토막도 같은 판이다**(moai-pp9i.gzl). `--` 만 보던 판은 `moai add -x` 와
 /// `moai add -bWHY` 가 제목이 `-x`·`-bWHY` 인 이슈를 만들고 0 으로 끝났다 — 자리 인자가 하이픈
 /// 값을 받으면 clap 은 아는 짧은 깃발을 붙여 쓴 꼴(`-bWHY`)까지 그 자리로 넘긴다. `-` 한 글자는
-/// 깃발이 아니라 값이라(stdin 을 뜻하는 자리가 많다) 안 막는다.
+/// 깃발이 아니라 값이라 깃발로는 안 잰다.
+///
+/// **그 `-` 한 글자는 따로 막는다**(moai-ltsv.4t0, 2026-10-08 사용자 결정). 자리 인자로 온 `-` 는
+/// stdin 을 뜻하는 줄 알고 친 것인데 이 자리들은 stdin 을 안 읽는다 — `moai note <id> - < f.md` 가
+/// `-` 라는 노트를 남기고 stdin 을 버린 채 0 으로 끝났다. `-` 한 글자인 제목·노트를 바랄 사람은
+/// 없다고 보고 `--`·`--title=-` 로도 안 연다. 거절문은 stdin 을 받는 깃발(`-b -`)을 댄다.
 ///
 /// **빠져나갈 길은 부른 자리마다 다르다**([`FlagLike`]). `edit --title` 은 뒤에 받을 자리 인자가
 /// 없어 `--` 가 안 듣는다 — 그 자리는 `--title=<값>` 으로 붙여 쓰는 것이 길이다.
 pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lang) -> R<()> {
     use crate::i18n::{fill, say};
+    // **`-` 한 글자는 빠져나갈 길보다 먼저 잰다** — 위 doc 의 둘째 절이다. `--`·`--title=-` 도 이것을 못 연다.
+    if value == "-" {
+        return Err(lone_dash(at, lang));
+    }
     // `--` 를 쓴 사람은 "이 뒤는 플래그가 아니다" 라고 이미 말한 것이다.
     //
     // argv 를 다시 훑는 것이 `--json` 때는 틀렸지만 여기서는 맞다 — `--` 는
@@ -677,6 +685,26 @@ pub fn refuse_if_flag_like(value: &str, at: FlagLike<'_>, lang: crate::i18n::Lan
         ),
     };
     Err(Fail::coded(format!("{what}\n                       {how}"), code::BAD_INPUT))
+}
+
+/// 자리에 `-` 한 글자가 왔다 — stdin 을 바란 사람에게 stdin 을 받는 깃발을 댄다.
+fn lone_dash(at: FlagLike<'_>, lang: crate::i18n::Lang) -> Fail {
+    use crate::i18n::{fill, say};
+    // 갈래마다 제 `say` 를 적는다 — 위와 같은 까닭이다.
+    let (what, how) = match at {
+        FlagLike::Title(verb) => (
+            say(lang, "refuse.title_is_a_dash").to_string(),
+            fill(say(lang, "refuse.title_dash_body_stdin"), &[("verb", verb)]),
+        ),
+        FlagLike::EditTitle(id) => (
+            say(lang, "refuse.title_is_a_dash").to_string(),
+            fill(say(lang, "refuse.edit_title_dash_body_stdin"), &[("id", id)]),
+        ),
+        FlagLike::Note(id) => {
+            (say(lang, "refuse.note_is_a_dash").to_string(), fill(say(lang, "refuse.note_dash_stdin"), &[("id", id)]))
+        }
+    };
+    Fail::coded(format!("{what}\n                       {how}"), code::BAD_INPUT)
 }
 
 /// [`refuse_if_flag_like`] 를 부른 자리 — 거절문과 빠져나갈 길이 여기서 갈린다.

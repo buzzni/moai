@@ -219,7 +219,22 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 /// 자리 셈([`workplaces_in`])이 같은 파일을 다시 열지 않는다. 겹쳐 세우는 줄만 베끼므로 베끼는
 /// 수는 보통 몇 줄이다 — 옆 줄은 거의 다 이쪽에도 같은 값으로 있어 그냥 지나간다.
 pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
+    let (shown, origin, _) = overlay_keeping(mine, others, false);
+    (shown, origin)
+}
+
+/// [`overlay`] 에 **겹치기 전의 제 줄**을 곁들인다(moai-ug6x.pi3) — 옆에서 한 줄이라도 들어왔을 때만
+/// `Some` 이고, 아무것도 안 들어왔으면 겹친 줄이 곧 제 줄이라 `None` 이다([`Gathered::root`]).
+///
+/// **처음 바꾸는 순간에 베낀다.** 늘 베끼면 옆이 조용한 보통의 걸음(집기를 main 에 커밋하는 규약에서는
+/// 옆 줄이 거의 안 선다)이 쓰지도 않을 한 벌을 걸음마다 치른다. 바꾼 뒤에는 제 줄을 되찾을 길이 없어
+/// — 덮인 줄은 사라지고 정렬이 자리를 섞는다 — 바꾸기 **전에** 베낀다.
+///
+/// **`keep` 이 아니면 안 베낀다** — 겹친 줄만 쓰는 쪽([`overlay`], 훅이 부르는 [`fresh`])은 `None` 을 받는다.
+/// 거기서 베끼면 옆에서 줄이 들어올 때마다 버릴 한 벌을 치른다.
+fn overlay_keeping(mine: Vec<Issue>, others: &[Side], keep: bool) -> (Vec<Issue>, Origin, Option<Vec<Issue>>) {
     let mut shown = mine;
+    let mut before: Option<Vec<Issue>> = None;
     let mut origin = Origin::default();
     // id → `shown` 의 자리. 제 줄이 둘이면 **뒷자리를** 적는다 — `store::Load::get`·
     // 트리·탐색기가 모두 뒷줄을 연다. 앞자리를 덮으면 `show <id> --worktree` 가 덮지
@@ -236,12 +251,18 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
                 Some(&k)
                     if (i.planned(), i.updated_at.as_str()) > (shown[k].planned(), shown[k].updated_at.as_str()) =>
                 {
+                    if keep {
+                        before.get_or_insert_with(|| shown.clone());
+                    }
                     origin.from.insert(i.id.clone(), tree);
                     shown[k] = i.clone();
                 }
                 Some(_) => {}
                 None if base.get(&i.id).is_some_and(|then| i.updated_at <= *then) => {}
                 None => {
+                    if keep {
+                        before.get_or_insert_with(|| shown.clone());
+                    }
                     at.insert(i.id.clone(), shown.len());
                     origin.added.insert(i.id.clone());
                     origin.from.insert(i.id.clone(), tree);
@@ -253,7 +274,7 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
     // `store::read` 와 같은 차례로 돌려준다. **안정 정렬이다** — 제 파일의 겹친
     // id 두 줄이 읽은 차례를 지킨다.
     shown.sort_by(|a, b| a.id.cmp(&b.id));
-    (shown, origin)
+    (shown, origin, before)
 }
 
 /// 옆 워크트리를 겹치다 만난 것 — **말이 아니라 자료다**(moai-dpbi). 글자는 [`crate::view`] 가
@@ -292,6 +313,14 @@ pub struct Gathered {
     /// — 남의 못 읽는 줄로 `moai status` 가 비영 종료하면, 내 파일은 멀쩡한데
     /// 옆 워크트리 때문에 도구가 실패로 읽힌다.
     pub load: Load,
+    /// **겹치기 전의 제 스냅샷** — 옆에서 줄이 하나라도 들어왔을 때만 서고, 아니면 `None` 이라 `load` 가 곧
+    /// 그것이다(moai-ug6x.pi3) — 읽는 쪽은 `root.as_ref().unwrap_or(&load)` 로 읽는다.
+    ///
+    /// 아카이브의 충돌과 옮길 수는 루트의 스냅샷과 견준다(moai-bth3) — 옆의 낡은 사본이 그 둘을 부풀리지 않게.
+    /// 그 스냅샷을 `moai status --worktree` 와 탐색기의 배너가 저마다 `repo.read()` 로 **다시 풀었는데**, 그것은
+    /// 바로 여기서 방금 판 그 파일이다(리뷰 moai-3nrh.ige 7번). 같은 읽기를 한 번만 하니 겹친 줄과 견줄 줄이 한
+    /// 때의 파일에서 온다 — 다시 읽던 판은 그 사이에 떨어진 쓰기를 한쪽만 봤다.
+    pub root: Option<Load>,
     pub origin: Origin,
     /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다([`Trouble`]).
     pub trouble: Vec<Trouble>,
@@ -512,6 +541,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     if !worktree {
         return Ok(Gathered {
             load,
+            root: None,
             origin: Origin::default(),
             trouble: Vec::new(),
             unfound: None,
@@ -538,6 +568,14 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
             let mut bases = Bases::new();
             for (tree, root) in trees {
+                // **마일스톤 워크트리는 겹치지 않는다**([`is_milestone`]). 트래커를 거기 쓰지 않는 것이
+                // 규약이라 그 스냅샷은 갈라질 때(또는 develop 을 받을 때)의 사본뿐이다 — 겹쳐서 보탤 수 있는
+                // 것은 낡은 줄밖에 없고, 그 줄이 루트보다 늦어 보이는 판(그 자리에서 `MOAI_HERE=1` 로 쓴
+                // 것, 릴리스 머지가 남긴 줄)에는 남의 산 집기처럼 선다. 이름도 안 든다 — 아무 줄을 못 가리킨다.
+                // 가지가 바뀌면 [`heads`] 가 지켜보는 HEAD 가 움직여 다시 읽는다.
+                if is_milestone(&tree) {
+                    continue;
+                }
                 let path = root.join(".moai").join("issues.jsonl");
                 watched.push((path.clone(), crate::store::stamp(&path)));
                 match crate::store::read_snapshot(&root) {
@@ -582,7 +620,9 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
         }
     }
     let Load { issues, errors } = load;
-    let (issues, mut origin) = overlay(issues, &others);
+    let (issues, mut origin, before) = overlay_keeping(issues, &others, true);
+    // 못 읽는 줄은 겹치기가 안 건드린다 — 루트의 것이 곧 겹친 것의 것이다.
+    let root = before.map(|issues| Load { issues, errors: errors.clone() });
     origin.named = named;
     let swept = unfound.is_none();
     // **겹친 뒤에는 옆의 줄을 버린다**(moai-jx70) — 여기부터 그것을 읽는 자는 자리 셈 하나고,
@@ -599,7 +639,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             SideFloor::of(root, &issues, &repo.config)
         })
         .collect();
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched, sides, mine })
+    Ok(Gathered { load: Load { issues, errors }, root, origin, trouble, unfound, swept, watched, sides, mine })
 }
 
 /// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
@@ -657,7 +697,8 @@ pub fn fresh(repo: &Repo, mine: Vec<Issue>) -> Option<(Vec<Issue>, crate::hook::
     {
         let here: std::collections::HashSet<&str> = mine.iter().map(|i| i.id.as_str()).collect();
         let mut bases = Bases::new();
-        for (tree, root) in trees {
+        // 마일스톤 워크트리는 [`gather`] 와 같은 까닭으로 겹치지 않는다([`is_milestone`]).
+        for (tree, root) in trees.into_iter().filter(|(tree, _)| !is_milestone(tree)) {
             let Ok(Some(other)) = crate::store::read_snapshot(&root) else {
                 continue;
             };
@@ -814,7 +855,8 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
     let floor = std::cell::OnceCell::new();
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
-        if *me || !*linked {
+        // 마일스톤 워크트리는 main 처럼 모으는 자리라 쥔 곳으로 안 센다([`is_milestone`]) — 그 집은 표식도.
+        if *me || !*linked || is_milestone(tree) {
             continue;
         }
         // 훅은 겹쳐 본 결과를 들고 오지 않는다 — 판 것이 없으니 제 손으로 연다.
@@ -998,7 +1040,10 @@ pub fn workplaces_in(
     let Some(disk) = on_disk(root) else { return Vec::new() };
     // **거를 자를 한 번만 적는다** — 자리와 그 워크트리를 아래에서 `zip` 으로 맞추므로, 거르는
     // 줄이 둘이면 한쪽만 고쳐졌을 때 자리가 남의 워크트리의 스냅샷을 받아 든다.
-    let linked: Vec<&Tree> = disk.all.iter().filter(|(_, linked, _)| *linked).map(|(tree, ..)| tree).collect();
+    // **마일스톤 워크트리는 자리가 아니다**([`is_milestone`]) — 그 스냅샷은 낡은 사본이라 거기 벌여
+    // 놓인 줄로 자리를 대면 자리를 잃은 줄이 `stranded` 에서 숨는다.
+    let linked: Vec<&Tree> =
+        disk.all.iter().filter(|(tree, linked, _)| *linked && !is_milestone(tree)).map(|(tree, ..)| tree).collect();
     // 딸린 워크트리가 하나도 없으면 여기서 끝이다 — 아래의 문도, main 의 스냅샷도 볼 까닭이 없다
     // (`report::stranded` 도 빈 목록에는 조용하다). 워크트리 규약을 안 쓰는 저장소의 흔한 길이다.
     if linked.is_empty() {
@@ -1242,10 +1287,11 @@ const HELD: &str = "moai-held";
 /// **트래커가 있다는 것은 설정이 있다는 것이다**(리뷰 moai-71ht 셋째 판) — `.moai` 가 디렉터리인
 /// 것만 보던 판은 무시되는 `.moai/lock` 하나만 남은 루트(옛 커밋을 체크아웃하거나 bisect 하면
 /// 남는다)를 트래커로 읽어, 그 저장소의 **모든** 워크트리가 "설정이 없다" 로 넘어졌다. 락은
-/// `Lock::drop` 이 안 지우므로 트래커가 통째로 사라져도 그 파일만 남는다.
+/// `Lock::drop` 이 안 지우므로 트래커가 통째로 사라져도 그 파일만 남는다. 그 자는
+/// [`crate::store::holds_tracker`] 하나고, `init` 의 거절도 같은 자로 묻는다(moai-r0x8.apz).
 pub fn tracker_root(root: &Path) -> Option<PathBuf> {
     let main = main_root(root)?;
-    main.join(".moai").join("config.toml").is_file().then_some(main)
+    crate::store::holds_tracker(&main).then_some(main)
 }
 
 /// 이 트래커가 든 **제** 워크트리의 꼭대기. git 을 띄우지 않는다. 저장소가 아니면 없다.
@@ -1490,8 +1536,12 @@ pub fn place_marks(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
         if let Some(head) = disk.admin.get(&tree.path).map(|dir| dir.join("HEAD")) {
             out.push((head.clone(), crate::store::stamp(&head)));
         }
-        let snapshot = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
-        out.push((snapshot.clone(), crate::store::stamp(&snapshot)));
+        // 마일스톤 워크트리의 스냅샷은 자리 셈이 안 판다([`is_milestone`]) — 릴리스 머지가 그것을 바꿔도
+        // 판정은 그대로라 재지 않는다. 가지가 바뀌면 위의 HEAD 가 움직인다.
+        if !is_milestone(tree) {
+            let snapshot = tree.path.join(&disk.rel).join(".moai").join("issues.jsonl");
+            out.push((snapshot.clone(), crate::store::stamp(&snapshot)));
+        }
         // **딸린 워크트리의 `.git`(`gitdir:` 한 줄)도 든다**([`gather`] 와 같은 까닭). 제거 명령
         // 없이 디렉터리째 치우면 git 이 적어 둔 `worktrees/<이름>` 은 그대로라 위의 둘이 안
         // 움직이고, 목록이 짧아진 것은 **목록째 견주는 쪽**(`layer::Marks`)만 본다 — 경로마다
@@ -1567,6 +1617,33 @@ pub fn names<'a>(trees: impl IntoIterator<Item = &'a Tree>) -> BTreeSet<String> 
 fn from_label(label: &str, out: &mut BTreeSet<String>) {
     out.insert(label.strip_prefix("worktree-").unwrap_or(label).to_string());
     out.insert(label.to_string());
+}
+
+/// 마일스톤 가지의 머리 — `milestone/<마일스톤 id>`(2026-10-08 사용자 결정, moai-nvju).
+pub const MILESTONE_BRANCH: &str = "milestone/";
+
+/// 이 워크트리가 **마일스톤 가지의 체크아웃**인가 — 일하는 자리가 아니라 모으는 자리다(moai-nvju.ztj).
+///
+/// 마일스톤이 도는 동안 그 가지가 `.worktrees/milestone-<id>` 에 서서 에픽 가지를 머지로 받고, 릴리스 때
+/// develop 을 받은 뒤 루트가 그것을 머지한다. 트래커는 루트에만 쓰므로 그 `.moai` 는 갈라질 때(또는
+/// develop 을 받을 때)의 **낡은 사본**이고, 거기 벌여 놓인 줄은 아무도 거기서 하지 않는다. main 을
+/// 자리로 안 세는 것과 같은 까닭이다 — 모두의 일이 모이는 곳이라 세면 갈라질 때 집혀 있던 줄이 다
+/// 거기 선다. 이 이름은 이름 후보([`names`])로도 아무 줄을 못 가리켜(가지에는 `/` 가 들어 id 와 통째로
+/// 같을 수 없고, 디렉터리 이름 `milestone-<id>` 는 id 꼴이 아니다) "이름 없는 워크트리" 로 읽혀 그 사본으로
+/// 갈리던 것이 고친 자리다.
+///
+/// **읽는 자가 모두 이것 하나를 본다** — 자리 셈([`workplaces_in`]: `places`·`stranded`·`show` 의 자리),
+/// 훅의 짐작([`held_elsewhere`]), 겹쳐 보기([`gather`]·[`fresh`]), 층의 표식([`place_marks`]). 한쪽만
+/// 거르면 `status` 는 그 줄을 자리 없다 하는데 훅은 옆이 쥐었다고 푼다.
+///
+/// **가지로만 가른다 — 디렉터리 이름은 안 본다.** 접두어가 `milestone` 인 저장소의 에픽 워크트리가
+/// `.worktrees/milestone-abcd` 로 뜨면 디렉터리 이름이 이 꼴과 같다. 가지(`worktree-milestone-abcd`)는
+/// 안 겹친다. 대가: 마일스톤 워크트리에서 HEAD 를 떼어 내면 그동안은 이름 없는 워크트리로 읽힌다 —
+/// 릴리스 머지 중의 짧은 걸음이고, 가지를 다시 받으면 돌아온다(HEAD 는 [`heads`] 가 지켜본다).
+///
+/// 이름 후보([`names`])에서는 안 뺀다 — 아무 줄도 못 가리키는 후보라 빼도 판정이 안 바뀐다.
+pub fn is_milestone(tree: &Tree) -> bool {
+    tree.label.strip_prefix(MILESTONE_BRANCH).is_some_and(|id| !id.is_empty())
 }
 
 /// 옆 HEAD → 그 HEAD 와 갈라진 자리의 스냅샷([`base_of`]). 한 번 겹치는 동안만 든다 — 그 사이에
@@ -2319,6 +2396,110 @@ mod tests {
         assert!(side.holds.contains("t-0001"), "가려진 집힌 줄을 옆 스냅샷에서 안 셌다 — {:?}", side.holds);
     }
 
+    /// 마일스톤 워크트리는 **가지로만** 가른다 — 접두어가 `milestone` 인 저장소의 에픽 워크트리는 디렉터리
+    /// 이름이 그 꼴과 같다.
+    #[test]
+    fn a_milestone_tree_is_told_by_its_branch_alone() {
+        let t = |path: &str, label: &str| Tree { path: PathBuf::from(path), label: label.into(), head: String::new() };
+        assert!(is_milestone(&t("/r/.worktrees/milestone-moai-zzok", "milestone/moai-zzok")));
+        assert!(is_milestone(&t("/r/anywhere", "milestone/moai-zzok")), "디렉터리 이름에 기댔다");
+        assert!(
+            !is_milestone(&t("/r/.worktrees/milestone-abcd", "worktree-milestone-abcd")),
+            "에픽 워크트리를 마일스톤으로 읽었다"
+        );
+        assert!(!is_milestone(&t("/r/.worktrees/moai-nvju", "worktree-moai-nvju")));
+        assert!(!is_milestone(&t("/r/x", "milestone/")), "id 없는 가지를 마일스톤으로 읽었다");
+        assert!(!is_milestone(&t("/r/x", "milestones/x")));
+    }
+
+    /// **마일스톤 가지의 워크트리는 일하는 자리가 아니다**(moai-nvju.ztj, 2026-10-08 사용자 결정). 그
+    /// 워크트리(`milestone/<id>`)는 마일스톤이 도는 내내 서서 에픽 가지를 머지로 받을 뿐이고 트래커는 루트에만
+    /// 쓴다 — 그 스냅샷은 갈라질 때(또는 develop 을 받을 때)의 낡은 사본이다. 이름이 아무 줄도 안 가리키니
+    /// "이름 없는 워크트리" 로 읽혀, 사본에 벌여 놓인 줄이 거기서 도는 것으로 서던 판은 자리를 잃은 줄을
+    /// `stranded` 에서 감췄고(`places`), 훅은 그 줄을 "옆이 쥐었을 수 있다" 로 풀었고(`held_elsewhere`),
+    /// `--worktree` 는 그 사본의 늦은 줄을 남의 산 집기처럼 겹쳤다(`gather`·`fresh`).
+    #[test]
+    fn a_milestone_worktree_is_not_a_place_where_work_stands() {
+        let scratch = crate::scratch::Scratch::fenced("milestone-tree");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../milestone-t-zzzz", "-b", "milestone/t-zzzz"]);
+        // 볼 워크트리가 하나도 없으면 `places` 가 아무 답도 안 낸다 — 스냅샷 없는 에픽 워크트리 하나를 세운다.
+        run(&main, &["worktree", "add", "-q", "../t-eeee", "-b", "worktree-t-eeee"]);
+        let row = |id: &str, kind: &str, status: &str, at: &str| {
+            format!(
+                "{{\"id\":\"{id}\",\"kind\":\"{kind}\",\"title\":\"일\",\"status\":\"{status}\",\
+                 \"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"{at}\",\"status_since\":\"{at}\"}}\n"
+            )
+        };
+        let old = "2026-09-11T00:00:00Z";
+        // 루트: t-0001 은 갈라진 뒤 루트에서 옮겼고(칸이 늦게 섰다), t-0002 는 아직 첫 칸이다.
+        let root = [
+            row("t-0001", "issue", "in_progress", "2099-01-01T00:00:00Z"),
+            row("t-0002", "issue", "todo", old),
+            row("t-zzzz", "milestone", "todo", old),
+        ]
+        .concat();
+        // 마일스톤 워크트리의 사본: 갈라질 때 t-0001 이 벌여 놓여 있었고, t-0002 는 루트보다 늦은 줄이다.
+        let copy = [
+            row("t-0001", "issue", "in_progress", old),
+            row("t-0002", "issue", "in_progress", "2026-09-12T00:00:00Z"),
+            row("t-zzzz", "milestone", "todo", old),
+        ]
+        .concat();
+        for (dir, rows) in [(main.clone(), &root), (base.join("milestone-t-zzzz"), &copy)] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), rows).unwrap();
+        }
+        let cfg = crate::config::Config::parse("prefix = \"t\"\n").unwrap();
+        let mine = crate::store::read_snapshot(&main).unwrap().unwrap().issues;
+
+        // 세기·그리기 — 자리 목록에 안 서고, 그 사본으로 집은 줄의 자리를 대지 않는다.
+        let trees = workplaces(&main, &cfg, false, &mine);
+        assert!(
+            trees.iter().all(|t| t.branch != "milestone/t-zzzz"),
+            "마일스톤 워크트리를 일하는 자리로 셌다 — {:?}",
+            trees.iter().map(|t| &t.branch).collect::<Vec<_>>()
+        );
+        let at = crate::report::places(&mine, &cfg, &trees, "2099-01-02T00:00:00Z");
+        assert!(
+            matches!(at.get("t-0001"), Some(crate::report::Place::Lost)),
+            "마일스톤 워크트리의 낡은 사본이 자리를 잃은 줄을 감췄다 — {:?}",
+            at.get("t-0001").map(|p| p.word())
+        );
+
+        // 훅의 짐작 — 사본에 벌여 놓인 줄과 사본에서 늦은 줄을 "옆이 쥐었을 수 있다" 로 안 센다.
+        let elsewhere = held_elsewhere(&main, &mine, &cfg);
+        assert!(elsewhere.is_empty(), "마일스톤 워크트리의 사본을 옆의 집기로 셌다 — {elsewhere:?}");
+
+        // 겹쳐 보기 — 사본의 늦은 줄을 남의 산 줄처럼 겹치지 않는다(`--worktree` 와 훅의 `fresh` 둘 다).
+        let crate::store::Opened::Repo(repo) = Repo::open(&main, || crate::i18n::Lang::Ko).unwrap() else {
+            panic!("저장소가 안 열렸다")
+        };
+        let got = gather(&repo, true).unwrap();
+        assert!(
+            !got.origin.labels().contains(&"milestone/t-zzzz"),
+            "마일스톤 워크트리를 겹쳤다 — {:?}",
+            got.origin.labels()
+        );
+        let status = |rows: &[Issue]| rows.iter().find(|i| i.id == "t-0002").map(|i| i.status.as_str().to_string());
+        assert_eq!(status(&got.load.issues).as_deref(), Some("todo"), "사본의 줄이 겹쳐 섰다");
+        let (fresh_rows, _) = fresh(&repo, mine.clone()).expect("git 목록을 못 읽었다");
+        assert_eq!(status(&fresh_rows).as_deref(), Some("todo"), "훅이 사본의 줄을 겹쳤다");
+
+        // 층의 표식 — 안 파는 사본은 안 재되, 가지가 바뀌면 다시 읽도록 HEAD 는 잰다.
+        let marks = place_marks(&main);
+        let copy_path = Path::new("milestone-t-zzzz").join(".moai").join("issues.jsonl");
+        assert!(marks.iter().all(|(p, _)| !p.ends_with(&copy_path)), "안 파는 사본을 잰다 — {marks:#?}");
+        let head = Path::new("worktrees").join("milestone-t-zzzz").join("HEAD");
+        assert!(marks.iter().any(|(p, _)| p.ends_with(&head)), "마일스톤 워크트리의 HEAD 를 안 잰다 — {marks:#?}");
+    }
+
     /// **옆 워크트리의 스냅샷도 그 체크아웃 안에서만 읽는다**(moai-itsu). 밖을 가리키는 링크는 겹치지 않고
     /// 고른 말로 까닭까지 말하며, FIFO 는 열다 멈추지 않는다 — 고침이 없으면 이 시험은 `t-2` 의 FIFO 앞에서
     /// 영영 멈춘다(쓰는 쪽이 없다). 겹쳐 보는 길([`gather`]), 파는 길([`holds`]), 값싼 문
@@ -2389,6 +2570,54 @@ mod tests {
         for t in within("값싼 문", move || workplaces(&main, &cfg, false, &[])) {
             assert!(t.broken && !t.unknown, "{}: 값싼 문 — broken={} unknown={}", t.branch, t.broken, t.unknown);
         }
+    }
+
+    /// **겹치기 전의 제 스냅샷을 실어 보낸다**(moai-ug6x.pi3) — 옆에서 줄이 들어왔을 때만이다. 아카이브의 충돌과 옮길
+    /// 수를 루트와 견주는 자리(`moai status --worktree`·탐색기의 배너·한눈 보기)가 이것을 받아, 방금 판 파일을 걸음마다
+    /// `repo.read()` 로 다시 풀지 않는다. 옆이 조용하면 겹친 줄이 곧 그것이라 베끼지 않는다 — 늘 베끼면 보통의
+    /// 걸음이 안 쓸 한 벌을 치른다.
+    #[test]
+    fn the_gathered_load_keeps_the_root_snapshot_from_before_the_overlay() {
+        let scratch = crate::scratch::Scratch::fenced("gathered-root");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        let row = |status: &str, at: &str| {
+            format!(
+                "{{\"id\":\"t-0001\",\"title\":\"일\",\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\
+                 \"updated_at\":\"{at}\",\"status_since\":\"{at}\"}}\n"
+            )
+        };
+        for dir in [main.clone(), base.join("t-1")] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), row("todo", "2026-09-11T00:00:00Z")).unwrap();
+        }
+        let open = || {
+            let crate::store::Opened::Repo(repo) = Repo::open(&main, || crate::i18n::Lang::Ko).unwrap() else {
+                panic!("저장소가 안 열렸다")
+            };
+            repo
+        };
+        // 옆이 조용하다 — 같은 줄뿐이라 겹친 것이 곧 루트다.
+        let quiet = gather(&open(), true).unwrap();
+        assert!(quiet.origin.branches().is_empty(), "시험의 전제 — 옆에서 온 줄이 없다");
+        assert!(quiet.root.is_none(), "옆에서 온 줄이 없는데 루트를 한 벌 베꼈다");
+
+        // 옆에서 늦게 집었다 — 겹친 줄은 옆의 것, 루트는 제 파일의 것이다.
+        std::fs::write(base.join("t-1/.moai/issues.jsonl"), row("in_progress", "2026-09-12T00:00:00Z")).unwrap();
+        let got = gather(&open(), true).unwrap();
+        assert_eq!(got.load.issues[0].status.as_str(), "in_progress", "시험의 전제 — 옆의 줄이 겹쳐 섰다");
+        let root = got.root.as_ref().expect("옆에서 줄이 들어왔는데 겹치기 전의 스냅샷을 안 실었다");
+        assert_eq!(root.issues, open().read().unwrap().issues, "실은 것이 루트의 스냅샷이 아니다");
+        assert_eq!(root.issues[0].status.as_str(), "todo");
+
+        // 겹쳐 보지 않으면 실을 것이 없다.
+        assert!(gather(&open(), false).unwrap().root.is_none());
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.

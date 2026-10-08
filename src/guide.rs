@@ -256,10 +256,16 @@ const BESIDE: &str = "Work running alongside: <other work> — do not touch thos
 /// 루트 HEAD 를 대조하는 글(moai-gokz, 2026-09-18 사용자 결정). 일꾼 글([`worker`])의 걸음 앞에 한 번 선다 — 새 일과
 /// 거둔 일이 같은 스킬을 읽으니 두 벌이 없다(moai-snyk). 그 전에는 감독 글이 새 일과 거둔 일의 머리에 따로 실어,
 /// 한쪽에 없으면 그 일꾼의 트래커 커밋이 대조 없이 엉뚱한 HEAD 에 섰다.
-const BRANCH_CHECK: &str = r#"Before you commit or merge in the root, **only check** that the root still stands on that
-branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+///
+/// **대조하는 가지는 루트의 가지다**(2026-10-08 사용자 결정, moai-nvju). 마일스톤 일의 `<base branch>` 는
+/// `milestone/<id>` 라 루트가 설 수 없는 가지다 — 그 가지는 마일스톤 워크트리에 체크아웃돼 있다. 그래서 루트는
+/// `<root branch>` 와 견주고, 마일스톤 일의 병합은 그 워크트리에서 같은 대조를 받는다.
+const BRANCH_CHECK: &str = r#"Before you commit or merge in the root, **only check** that the root still stands on
+`<root branch>` — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<root branch>`
 (detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
 stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
+gets the same check before the merge ("The milestone branch").
 
 **Ask it where you already are.** Before the first tracker commit you are still in the root, so
 it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
@@ -1061,6 +1067,12 @@ pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
 /// 추적 여부를 `.moai` 와 함께 따른다.
 pub const GUIDE_FILE: &str = ".moai/guide.md";
 
+/// 안내 전문의 첫머리 — 제목과 첫 문장이다. **`.moai/guide.md` 가 moai 의 안내인지 이 글로 알아본다**(리뷰 moai-8gwh
+/// 5번): `--guide block` 이 그 파일을 걷을 때 사람이 같은 이름으로 둔 메모까지 지우지 않으려는 것이다. 그 파일이
+/// 생긴 판(moai-cbfz)부터 [`agents`] 가 이 두 줄로 열었으니(제목과 첫 문장은 moai-54k2 의 영어 통일부터 그대로다)
+/// 어느 판이 쓴 전문이든 이것으로 연다. 바꾸면 옛 판이 쓴 파일을 못 알아봐 남긴다 — 시험이 [`agents`] 의 첫머리와 맨다.
+pub const GUIDE_OPENING: &str = "## Issue tracker — moai\n\nThis repository's work lives in `.moai/issues.jsonl`.\n";
+
 /// 링크 블록의 끝줄 머리 — **링크 모드는 이 줄로 알아본다**(리뷰 moai-zynt.63u). 블록이 `.moai/guide.md` 라는
 /// 글을 품는지로 가르던 판은 그 경로를 적은 손질 한 줄에 블록 모드 저장소를 링크 모드로 갈아 끼웠다.
 pub const GUIDE_MARK: &str = "<!-- moai:guide";
@@ -1748,9 +1760,14 @@ Decided in: <epic>
 /// `add` 는 집은 것이 있는 세션에서 규칙 1 에 걸린다. `promote` 는 backlog 를 저절로 닫고 출처를 저널에 남긴다.
 ///
 /// **모든 저장소에 심긴다.** 이 저장소의 이슈 id 를 글에 적지 않고, 가지 이름을 박지 않는다 — 감독이 루트
-/// 체크아웃의 지금 가지를 읽어 `<base branch>` 에 채운다(사용자 결정, moai-7ljm). 일꾼이 뜨고 병합하는 곳이 그
+/// 체크아웃의 지금 가지를 읽어 `<root branch>` 에 채운다(사용자 결정, moai-7ljm — 마일스톤 가지 전에는 `<base branch>` 였다). 일꾼이 뜨고 병합하는 곳이 그
 /// 체크아웃이라 원격 기본 가지보다 덜 어긋난다. 루트가 detached 면 감독이 보내지 않고, 바퀴 사이에 루트의 가지가
 /// 바뀌면 일꾼이 루트 커밋·병합 직전의 대조(`BRANCH_CHECK`)로 멈춘다(moai-gokz).
+///
+/// **마일스톤 일은 마일스톤 가지에서 뜨고 거기로 병합한다**(2026-10-08 사용자 결정, moai-nvju). 그래서 감독이 읽는
+/// 루트의 가지는 `<root branch>` 이고, `<base branch>` 는 일마다 갈린다 — 마일스톤 안의 일은 `milestone/<milestone>`,
+/// 밖의 일(`p0` 따위)은 루트의 가지. 병합 확인(5)도 그 일의 `<base branch>` 를 본다 — 마일스톤 일의 병합은 릴리스 전에는
+/// 루트의 가지에 없다. `milestone/` 은 가지 이름이 아니라 이 규약의 앞붙이라 `the_brief_names_no_branch` 에 안 걸린다.
 pub fn supervise() -> String {
     let message = message();
     let table = difficulty_table();
@@ -1810,26 +1827,43 @@ worktree convention. Several workers share one root checkout, so fixing things i
 root mixes their edits and commits together. Worktrees stand in
 `<root>/.worktrees/`, and `moai init` writes that path into the gitignore.
 
-**Read the base branch once, at the start of the round.** The place a worker branches
-its worktree from and merges back into is the root checkout, so that checkout's current
-branch is the base branch — the remote's default branch may differ from the root and may
-be stale. The root checkout is the first entry of `git worktree list`, so the line below
-gives the root's branch no matter where in the repository you call it, inside a worktree
-included. If nothing comes out, report the error git gave and stop.
+**Read the root branch once, at the start of the round.** Workers commit the tracker in
+the root checkout and branch their worktrees from the local branches there, so that
+checkout's current branch is the root branch — the remote's default branch may differ from
+the root and may be stale. The root checkout is the first entry of `git worktree list`, so
+the line below gives the root's branch no matter where in the repository you call it,
+inside a worktree included. If nothing comes out, report the error git gave and stop.
 
 ```sh
 if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "the root is detached" >&2; fi; fi
 ```
 
 **If the root is detached, do not send.** The worker's pick-up commit and its merge
-land on a HEAD with no branch, the check (`merge-base <base branch>`) and `worktree add`
+land on a HEAD with no branch, the check (`merge-base`) and `worktree add`
 fail, and `branch -d` deletes that work's only reference. Do not read the remote's
 default branch instead — the root does not stand on that branch, so it is the same
 accident. Ask the person to put the root on a branch, and stop.
 
-Fill the name you read into `<base branch>` in the commands below and in the message you
-send the worker. **The worker does not read it again** — read inside a worktree, it
-gives that worktree's own branch.
+Fill the name you read into `<root branch>` in the message you send the worker.
+
+**Each work has a base branch** — the branch its worktree splits from and merges back
+into. It is decided per work, by the release the work stands under — the one
+`moai show --milestone` lists it under, read in 1:
+
+- **Outside every milestone** — it stands under none, or under one that has shipped or been
+  deferred (a `p0` fix, say) — it is the root branch, as it always was
+- **Inside a live milestone** it is that milestone's own branch, `milestone/<milestone id>`,
+  even while nothing runs yet and `<milestone>` in 3 says `none` — the first epic sent is
+  what starts it. Every epic of the milestone merges there, and the root branch takes the
+  milestone branch in once, at the release, so what a milestone has not shipped yet does
+  not stand on the root branch. The branch is checked out in a long-lived worktree of its
+  own, `.worktrees/milestone-<milestone id>`, because the root stays on the root branch. The
+  worker handed the milestone's first epic raises it when it is missing (its "The milestone
+  branch") — you do not raise it, and you do not remove it; it goes after the release
+
+Fill that into `<base branch>` in the message and in the check of 5. For stalled work (0)
+it is the release its epic stands under (`moai show <epic>`). **The worker does not
+read either again** — asked inside a worktree, git answers with that worktree's own branch.
 
 ## One round
 
@@ -1940,6 +1974,11 @@ on would make the release grow after it started, and that is the person's call a
 
 **A backlog item you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a second worker.
+So the moment you send it, mark the row you sent — the backlog item, or the epic when the work
+is already unfolded — and take the note into the root with a commit with a path. Without it
+the send lives only in this conversation, and a supervisor that starts again (4) cannot see it.
+
+    moai note <id> 'Sent: <worker>'
 
 **Send only what is yours.** A backlog item or member whose assignee is someone else — or
 nobody — is asked about first: ask the person, and send it only on a yes, writing in the
@@ -2030,7 +2069,14 @@ is there for it. **Do not copy the file into the message** — name it.
 `<steps file>` is that file's absolute path: this skill's base directory — Claude Code shows
 it as "Base directory for this skill" when the skill loads — followed by
 `/references/worker.md`. Write it out whole; `@path` attaches nothing.
-Fill in `<id>`, `<title>`, `<steps file>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+**If that base directory lies outside `<root>`** — the plugin installed at user scope, in
+Claude Code's plugin cache — the worker's read of it is a read outside its working directory,
+and in the default permission mode Claude Code asks its person first; the plugin cache is no
+exception. A worker whose person is away waits on that prompt and sends nothing. Tell the
+person once, before the first send, and let them choose: a person in the worker's window
+answers it, or `permissions.additionalDirectories` in their settings holding that plugin
+directory lets it through. The settings are theirs — do not write them.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -2074,10 +2120,18 @@ until it is answered. **Do not poll `ListAgents`** — the report comes to you.
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
 report to the old one fails leaves it on the epic as a note with `report: <epic>` at its
 head. So when you start or resume, before waiting, read what the tracker holds:
-`moai show -s in_progress,review` is the work sent and not done, and
-`moai show -g 'report:' --all` finds the reports nobody received. Check each one you have
-not checked as in 5. A worker holding sent work you have no report for is still left out
-in 2 — ask it, or its person, how it stands.
+
+    moai show -s in_progress,review        the work sent and picked up, not done
+    moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
+                                           epic not picked up yet; neither is a candidate
+    moai show -g 'report:' --all           the epics carrying a report nobody received
+
+**Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
+note that discusses this protocol carries the same words. Read each match with
+`moai show <id>` and look at its history: a report stands checked once a `Report-checked:`
+note follows it on the same epic. Check each one that does not as in 5. A worker holding
+sent work you have no report for is still left out in 2 — ask it, or its person, how it
+stands.
 
 If the supervisor is in the root, then in the gap after the worker picks the member up
 and before it raises its worktree, the hook holds that member as "still picked up" when
@@ -2089,6 +2143,12 @@ defer it, do not put a note on it; just finish the turn.
     git merge-base --is-ancestor <merge hash> <base branch> && echo yes   is the merge on the base branch
     moai show <epic>                       are the unfolded epic and its members done
     git worktree list                      is that worktree gone
+
+`<base branch>` here is the one you sent with that work. For work inside a milestone it is
+`milestone/<milestone id>` — the merge lands there, not on the root branch, which takes it
+in only at the release, so checking the root branch reads a good merge as missing. In
+`git worktree list` the epic's worktree is gone and `.worktrees/milestone-<milestone id>`
+stays — that one is the milestone's, not leftover work.
 
 **A member left because the work beside it holds the file** (the worker's 4-3) goes to an
 idle worker after that other work's report is checked. Send the message of 3 with `<id>`
@@ -2110,7 +2170,12 @@ unfolded and it does not show its members, so `moai show <id>` cannot tell you w
 the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, send the next backlog to an idle worker. **Clearing a window is the
+If the three hold, mark the report checked on the epic and take it into the root with a
+commit with a path — a supervisor that starts again reads that line, not this conversation (4).
+
+    moai note <epic> 'Report-checked: <merge hash>'
+
+Then send the next backlog to an idle worker. **Clearing a window is the
 person's** — the supervisor never types into a window. The report ends with the worker
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
@@ -2131,6 +2196,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
   again. A `git commit` without a path seals that merge even when you ran `git status` first
 - Finish your own merge in one call, `git merge --no-ff <branch> -m "…"`. Do not use
   `--no-commit`. If it stops on a conflict, do not resolve it in the root: `git merge --abort`
+- Work inside a milestone does not merge in the root at all — it merges in the milestone's
+  worktree (the worker's 8), and the root branch takes the milestone branch in at the
+  release. Branches go in with `--no-ff` as they stand, never rebased or squashed
 
 ## When to stop
 
@@ -2186,6 +2254,7 @@ fn message() -> String {
     Read first: moai show <id>
     {MODEL_SLOT}
     {BESIDE}
+    Root branch: <root branch>
     Base branch: <base branch>
     Milestone: <milestone>
     Root: <root>
@@ -2218,6 +2287,12 @@ fn message() -> String {
 /// **넘칠 때의 길도 여기 적는다**(리뷰 moai-4u6b.5hl). 닫는 걸음이 싣는 것은 `(64KB 를 넘으면 요약)` 한 마디뿐이라,
 /// 이 글만 받은 일꾼은 줄이라는 말은 읽고 **요약이라고 밝히라는 말은** 못 읽었다 — 밝히지 않은 요약은 다음 사람이
 /// 리뷰어의 말로 읽는다.
+///
+/// **마일스톤 일은 마일스톤 가지로 병합한다**(2026-10-08 사용자 결정, moai-nvju). 그 가지는 루트 밖의 오래 사는
+/// 워크트리(`.worktrees/milestone-<id>`)에 체크아웃돼 있어, 병합과 그 HEAD 대조와 `branch -d` 를 **루트에서
+/// `git -C <그 워크트리>`** 로 친다 — 격리 가드는 `EnterWorktree` 로 든 세션에만 서므로 `ExitWorktree(keep)` 뒤의
+/// 루트에서는 한 줄 맨 명령으로 지나간다. 그 워크트리에 `EnterWorktree` 로 드는 판은 충돌을 풀 때만이다.
+/// `branch -d` 를 루트에서 치면 루트의 가지가 아직 그 병합을 안 들어 "not fully merged" 로 거절한다(재 봤다).
 pub fn worker() -> String {
     let rule = indent(&model_rule(), "  ");
     let review = make_review("--parent <epic>");
@@ -2251,8 +2326,11 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 - `Model:` — `<model>` and `<difficulty>`.
 {rule}
 - `Work running alongside:` — the worktrees and work beside you, and the files they hold (4-3)
-- `Base branch:` — `<base branch>`. The supervisor read it in the root; do not read it again —
-  read inside a worktree, it gives that worktree's own branch
+- `Root branch:` — `<root branch>`, the branch the root checkout stands on. The supervisor read
+  it in the root; do not read it again — read inside a worktree, it gives that worktree's own branch
+- `Base branch:` — `<base branch>`, the branch your worktree splits from and merges back into.
+  Outside every milestone it is `<root branch>`; inside a milestone it is that milestone's own
+  branch, `milestone/<milestone id>` ("The milestone branch")
 - `Milestone:` — `<milestone>`, the release the epic hangs (1)
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
@@ -2295,6 +2373,50 @@ it. When the person is back in the window, what they say overrides what you deci
 
 {GIT_SHAPES}
 
+## The milestone branch
+
+When `Base branch:` reads `milestone/<milestone id>`, the work is inside a milestone —
+`<milestone id>` below is the part after `milestone/`. Every epic of that milestone merges
+into that branch, not into `<root branch>`; `<root branch>` takes the milestone branch in
+once, at the release, and the release is the person's, not yours. The branch is checked out
+in a long-lived worktree of its own, `.worktrees/milestone-<milestone id>`, because the root
+stays on `<root branch>` and git checks a branch out in one place only. You do not work in
+it — you merge there (8) and nothing else — and you never remove it: it goes after the
+release. Outside a milestone this section does not exist. `Milestone:` can say `none` while
+`Base branch:` names a milestone — that milestone stands but has not started running, and
+`promote` still carries it over in 1; the branch is where this work goes all the same, and
+in 1 you hang `<milestone id>`, not `none`.
+
+**Raise it if it is missing**, from the root, right before the `worktree add` of 3 — look
+at `git worktree list` first. The first line raises the branch from the local
+`<root branch>`; the second is for a branch that stands while its worktree does not. If
+`worktree add` says the branch or the place already exists, a worker beside you raised it
+first — look at `git worktree list` again and carry on with what stands
+
+    git worktree add -b milestone/<milestone id> .worktrees/milestone-<milestone id> <root branch>
+    git worktree add .worktrees/milestone-<milestone id> milestone/<milestone id>
+If the repository's own worktree convention adds something to a new worktree (a link for
+the build output, say), add it to this one too.
+
+**Git aimed at the milestone's worktree runs from the root**, after `ExitWorktree(keep)` —
+there `git -C .worktrees/milestone-<milestone id> …` is one plain command and goes
+through. From inside your epic's worktree it is refused like any git aimed outside it (the
+git shapes above), so do not try it there. That worktree is shared by every worker of the
+milestone, like the root: if git refuses a merge there because one is already open
+(`MERGE_HEAD`), it is another worker's — never `merge --abort` it; wait for it to finish
+and run yours again. Before you merge into it, check its HEAD the way
+the root's is checked; if it does not stand on the milestone branch, do not merge: tell the
+supervisor
+
+    git -C .worktrees/milestone-<milestone id> symbolic-ref -q HEAD      it has to be refs/heads/milestone/<milestone id>
+**The milestone branch takes `<root branch>` in only at the release.** If this epic needs a
+fix that landed on `<root branch>` after the milestone branch split off, take it in at that
+moment, from the root, and then pull the milestone branch in 6 as usual. If it stops on a
+conflict, resolve it inside the milestone's worktree (`EnterWorktree(path)` from the root),
+never in the root
+
+    git -C .worktrees/milestone-<milestone id> merge --no-ff <root branch> -m "merge: take <root branch> in for <epic>"
+
 ## The steps
 
 1. Unfold it in the root — the one way to turn a backlog item into work is
@@ -2314,7 +2436,10 @@ it. When the person is back in the window, what they say overrides what you deci
    changes nothing. **Hang only the `<milestone>` in the message, and nothing else**: work is
    never pulled into a running release, so a release you noticed running is not yours to
    attach — not to this epic, not to a member you create later. Inside this epic the release
-   is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
+   is inherited, which is the one door that stays open. **If `<milestone>` is `none` but
+   `Base branch:` names `milestone/<milestone id>`**, that milestone stands and has not started
+   running — hang that `<milestone id>` in its place: `none` would clear the release `promote`
+   carried while the merge still lands on its branch. Otherwise, if `<milestone>` is `none`, this work
    stands outside every release — that is nothing running, or a backlog item that stood under none,
    or one whose release is already dead, and you cannot tell which from the word alone. What
    came over is still the release that backlog stood in, so read the line `promote` printed and clear a
@@ -2339,6 +2464,8 @@ it. When the person is back in the window, what they say overrides what you deci
 3. Right after the commit in 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
    `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
+   Inside a milestone the milestone branch has to stand first — raise it if it is missing
+   ("The milestone branch").
    Until the worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
@@ -2398,7 +2525,8 @@ it. When the person is back in the window, what they say overrides what you deci
 {rubric}
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
    conflicts and run the tests. Fix things here — while the worktree stands, rule 2 blocks
-   edits in the root
+   edits in the root. Inside a milestone that is the milestone branch, not `<root branch>`
+   — the epics merged beside you are there
 7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
    not reviewed separately, so this once is the only review. **It runs inside this session** —
    never start another agent program for it.
@@ -2436,6 +2564,12 @@ it. When the person is back in the window, what they say overrides what you deci
    `rebase` and `commit --amend` throw them away — even when it is before the merge and
    looks fixable. Nothing blocks it; this line is what holds. Fixing a commit subject waits
    until the review has returned.
+   **Nor is the branch rebased or squashed when it merges** — it goes in with
+   `git merge --no-ff` as it stands (8). `moai show` finds an issue's commits by the id in
+   their subject, and a squash folds them away; the review's fixes stay as their own `fix:`
+   commits; and rebasing a branch that already holds merges — the milestone branch — changes
+   the merge hashes the `Report-checked:` notes point at. Rewording a subject on this branch
+   before the review starts is fine — nobody else has it yet.
    **When it returns, stop what it left running with `TaskStop` before you touch the tree**
    and read the working tree's status. A sweep subagent still alive writes its own version
    into this same worktree and covers a commit you already made without a word, and a
@@ -2504,22 +2638,31 @@ it. When the person is back in the window, what they say overrides what you deci
 
 8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
    this window stands in a directory that is gone.
-   Before merging, check that the root stands on <base branch> — if it does not, do not merge:
-   tell the supervisor
+   Before merging outside a milestone, check that the root stands on <root branch> — if it
+   does not, do not merge: tell the supervisor
 
-       git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
-   Merge in the root, **in one call**. Overlap with the workers beside you was split when the
+       git symbolic-ref -q HEAD                  it has to be refs/heads/<root branch>
+   **Inside a milestone you merge in the milestone's worktree, not in the root** — check that
+   worktree's HEAD instead, with the line in "The milestone branch", and run the merge and its
+   abort below with `-C .worktrees/milestone-<milestone id>` after `git`, from the root.
+   Merge **in one call**. Overlap with the workers beside you was split when the
    supervisor sent the work, and where it still collides, undo as below and resolve in the
    worktree — do not go looking for the other session to tell it. Do not use `--no-commit`.
    Without `--no-ff` it ends as a fast-forward and no merge commit stands
 
        git merge --no-ff worktree-<epic> -m "merge: …"
+       git -C .worktrees/milestone-<milestone id> merge --no-ff worktree-<epic> -m "merge: …"     inside a milestone
    If the root's `.moai` holds uncommitted rows from another session the merge is refused —
    take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
-   resolve it in the root — undo with `git merge --abort`, go back into the worktree with
+   resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
    `EnterWorktree(path)` and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
-   `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
+   `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
+   **Inside a milestone delete the branch in the milestone's worktree** —
+   `git -C .worktrees/milestone-<milestone id> branch -d worktree-<epic>`. `-d` asks whether
+   the branch is merged into the HEAD it runs in, and `<root branch>` in the root does not
+   hold this merge until the release, so from the root it refuses. Do not reach for `-D`.
+   Leave the milestone's worktree standing
 
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
@@ -2588,7 +2731,8 @@ notes), then
   `git log <base branch>..HEAD` and `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
-  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
+  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
+  raise the milestone branch first if it is missing ("The milestone branch")
 - **If the root is not the top of the repository** (a subdirectory project in a
   monorepo), go into the worktree and then move to the same subdirectory inside it and
   work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
@@ -3110,7 +3254,8 @@ mod tests {
         // 되짚기는 에픽 리뷰 뒤·병합 앞이다 — 앞에 두면 그 리뷰가 넘긴 것을 못 보고, 뒤에 두면
         // 에픽이 이미 닫혔다. 없으면 에픽이 내건 것이 backlog 로 빠진 채 닫힌다(moai-l288).
         let recalled = brief.find("7-1. Before merging").expect("병합 전에 backlog 를 되짚는 걸음이 없다");
-        let merged = brief.find("merge --no-ff").expect("병합 걸음이 없다");
+        // 에픽 가지의 병합으로 찾는다 — 마일스톤 가지 절과 7 의 rebase 금지도 `merge --no-ff` 를 이른다(moai-nvju).
+        let merged = brief.find("merge --no-ff worktree-<epic>").expect("병합 걸음이 없다");
         assert!(reviewed < recalled && recalled < merged, "되짚기가 에픽 리뷰 뒤·병합 앞이 아니다");
         assert!(brief.contains(RECALL), "되짚은 것을 멤버로 세우는 줄이 없다");
         assert!(brief.contains("already done"), "누가 펼친 backlog 를 또 펼쳐 에픽이 둘 선다");
@@ -4224,6 +4369,47 @@ stop sending outside work while a release runs",
         assert_eq!(last, "12", "마지막 걸음을 못 읽었다 — `12.` 가 걸음 표시로 안 섰다");
     }
 
+    /// **마일스톤 일은 마일스톤 가지에서 뜨고 거기로 병합한다**(2026-10-08 사용자 결정, moai-nvju). 감독은 루트의
+    /// 가지와 일마다의 바탕 가지를 따로 싣고, 병합 확인도 그 바탕 가지를 본다 — 루트의 가지를 보면 릴리스 전의 마일스톤
+    /// 병합이 없는 것으로 읽힌다. 일꾼은 그 가지의 워크트리를 세우고, 병합·대조·`branch -d` 를 루트에서 `-C` 로 친다.
+    #[test]
+    fn milestone_work_merges_on_the_milestone_branch() {
+        let (brief, supervise, message) = (worker(), supervise(), message());
+        assert!(message.contains("Root branch: <root branch>"), "메시지에 루트의 가지 자리가 없다");
+        for piece in [
+            "`milestone/<milestone id>`",
+            "`.worktrees/milestone-<milestone id>`",
+            "`<base branch>` here is the one you sent with that work",
+            "even while nothing runs yet and `<milestone>` in 3 says `none`",
+        ] {
+            assert!(supervise.contains(piece), "감독 글에 마일스톤 가지가 빠졌다 — {piece}");
+        }
+        assert!(!supervise.contains("Read the base branch once"), "감독이 아직 바탕 가지를 바퀴마다 한 번만 읽는다");
+        let section = brief.find("## The milestone branch").expect("일꾼 글에 마일스톤 가지 절이 없다");
+        let steps = brief.find("## The steps").expect("일꾼 글에 걸음 절이 없다");
+        assert!(section < steps, "마일스톤 가지 절이 걸음 뒤에 섰다");
+        for piece in [
+            "git worktree add -b milestone/<milestone id> .worktrees/milestone-<milestone id> <root branch>",
+            "git worktree add .worktrees/milestone-<milestone id> milestone/<milestone id>",
+            "git -C .worktrees/milestone-<milestone id> symbolic-ref -q HEAD",
+        ] {
+            assert!(brief[section..steps].contains(piece), "마일스톤 가지 절에 빠졌다 — {piece}");
+        }
+        let merge = step_at(&brief, "8");
+        for piece in [
+            "git -C .worktrees/milestone-<milestone id> merge --no-ff worktree-<epic>",
+            "git -C .worktrees/milestone-<milestone id> branch -d worktree-<epic>",
+        ] {
+            assert!(brief[merge..].contains(piece), "병합 걸음에 마일스톤 가지가 빠졌다 — {piece}");
+        }
+        // 루트의 대조는 루트의 가지와 견준다 — 마일스톤 가지는 루트가 설 수 없는 가지다.
+        assert!(BRANCH_CHECK.contains("refs/heads/<root branch>"), "루트를 바탕 가지와 견준다");
+        assert!(
+            brief.contains("**Nor is the branch rebased or squashed when it merges**"),
+            "rebase·squash 금지가 없다"
+        );
+    }
+
     /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
     /// 저장소에서 워크트리 뜨기부터 실패한다. 감독이 읽어 채울 자리와 읽는 한 줄이 선다.
     ///
@@ -4558,8 +4744,24 @@ stop sending outside work while a release runs",
         // 오지 않을 보고를 기다리고, 그 일꾼은 2 에서 늘 빠진다.
         assert!(brief[step_at(&brief, "12")..].contains("**If that send fails**"), "보고가 실패하면 사라진다");
         assert!(brief[step_at(&brief, "12")..].contains("`moai note <epic> -b -`"), "실패한 보고를 트래커에 안 남긴다");
-        assert!(wait.contains("`moai show -g 'report:' --all`"), "다시 뜬 감독이 트래커의 보고를 안 읽는다");
+        assert!(wait.contains("    moai show -g 'report:' --all "), "다시 뜬 감독이 트래커의 보고를 안 읽는다");
         assert!(wait.contains("when you start or resume"), "다시 뜬 감독이 기다리기만 한다");
+        // 보낸 backlog 와 확인한 보고도 트래커에 줄머리 노트로 남는다(moai-9s9s.ctx) — 없으면 다시 뜬 감독이 아직 안
+        // 펼친 backlog 를 둘째 일꾼에게 또 보내고, 이미 확인한 보고를 다시 확인한다.
+        assert!(supervise.contains("moai note <id> 'Sent: <worker>'"), "보낸 backlog 를 트래커에 안 남긴다");
+        // 펼친 뒤 보낸 에픽도 집히기 전에는 첫 칸이라 `-s in_progress,review` 에 안 선다 — 종류로 거르면 그 에픽을 또 보낸다.
+        assert!(wait.contains("    moai show -g 'Sent:' "), "다시 뜬 감독이 보낸 backlog·에픽을 안 읽는다");
+        assert!(
+            supervise.contains("moai note <epic> 'Report-checked: <merge hash>'"),
+            "확인한 보고를 트래커에 안 남긴다"
+        );
+        assert!(wait.contains("**Only a note that opens with the marker counts**"), "본문의 같은 글까지 보고로 센다");
+        // 스킬이 저장소 밖 플러그인 캐시에 있으면 일꾼의 Read 가 권한을 묻는다(moai-9s9s.qmd) — 사람이 비운 일꾼은 그 물음에서 선다.
+        assert!(
+            supervise.contains("**If that base directory lies outside `<root>`**"),
+            "저장소 밖 단계 파일의 권한 물음을 안 알린다"
+        );
+        assert!(supervise.contains("The settings are theirs — do not write them."), "감독이 사람의 설정을 고친다");
         // 감독은 창에 아무것도 안 친다 — 5-1 을 걷었다.
         assert!(!supervise.contains("**5-1."), "감독이 창을 비우는 5-1 이 남았다");
         assert!(!supervise.contains("send-keys") && !supervise.contains("tmux_pane"), "감독이 tmux 칸을 만진다");

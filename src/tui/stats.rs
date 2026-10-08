@@ -472,6 +472,23 @@ mod tests {
         assert_eq!(window(&a).scroll.offset(), bottom, "메뉴의 Bksp 가 창을 건드렸다");
     }
 
+    /// **바로 친 Ctrl·Alt 화살표와 쪽 키도 창을 굴린다**(moai-ug6x.3ip) — 메뉴를 거친 같은 키는 탐색의 표(`Key::any`)로
+    /// 굴렸는데 창의 표만 `bare` 라 바로 친 것은 아무 일도 없었다. 글자는 정확히 견주는 그대로다(Ctrl-j 는 안 굴린다).
+    #[test]
+    fn ctrl_and_alt_arrows_scroll_the_window_pressed_directly() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers as M};
+        let mut a = app();
+        a.hit("SPC g s");
+        let _ = draw::tests::render(&mut a, 40, 12);
+        a.key(KeyEvent::new(KeyCode::Down, M::CONTROL));
+        assert_eq!(window(&a).scroll.offset(), 1, "Ctrl-Down 이 창을 안 굴렸다");
+        a.key(KeyEvent::new(KeyCode::PageDown, M::ALT));
+        assert!(window(&a).scroll.offset() > 1, "Alt-PageDown 이 창을 안 굴렸다");
+        let at = window(&a).scroll.offset();
+        a.key(KeyEvent::new(KeyCode::Char('j'), M::CONTROL));
+        assert_eq!(window(&a).scroll.offset(), at, "Ctrl-j 가 창을 굴렸다");
+    }
+
     /// **창 위의 메뉴도 알림을 탐색과 같은 자로 다룬다**(moai-g56h·moai-y8v2) — 메뉴만 만진 키(열기·내려가기·Bksp·Esc)와
     /// 메뉴를 닫은 이동키, 둘째 키를 기다리는 창의 `g` 는 알림을 안 걷는다. 걷는 것은 창의 키와 화면을 고른 키다.
     #[test]
@@ -492,6 +509,19 @@ mod tests {
         a.notice = Some(said);
         a.hit("SPC g s");
         assert_eq!(a.notice, None, "화면을 고른 키가 알림을 안 걷었다");
+    }
+
+    /// **창 위에서 다시 못 세면 옛 창을 닫고 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 남은 창의 낡은 수를 방금 센
+    /// 것으로 읽지 않게. 닫힌 자리는 창을 안 연 화면 그대로다. 걸린 거름망이 더는 안 지나는 글이 되는 것이 실패의 한 꼴이다.
+    #[test]
+    fn a_failed_recount_over_the_window_closes_it_and_says_why() {
+        let mut a = app();
+        a.hit("SPC g s");
+        window(&a);
+        a.hung = Some(Hung::Filter { text: "nonsense=1".into(), grep: None });
+        a.hit("SPC g s");
+        assert_eq!(a.mode, Mode::Browse, "다시 못 센 창이 남았다");
+        assert!(a.notice.is_some(), "까닭을 안 댔다");
     }
 
     /// **걸린 거름망으로 좁혀 세고 제목이 그 글을 댄다** — 닫아도 거름망은 그대로 걸려 있다.

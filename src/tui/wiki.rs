@@ -1013,6 +1013,40 @@ pub(super) mod tests {
         assert_eq!(window(&a).page.offset(), 0, "다른 페이지로 갔는데 굴린 자리가 남았다");
     }
 
+    /// **바로 친 Ctrl·Alt 화살표와 쪽 키도 포커스 칸을 움직인다**(moai-ug6x.3ip) — 통계 창과 같은 까닭이다. 메뉴를 거친
+    /// 같은 키는 탐색의 표로 움직였다.
+    #[test]
+    fn ctrl_and_alt_arrows_move_the_focused_pane_pressed_directly() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers as M};
+        let (_s, mut a) = wiki_app("modified-moves", PAGES);
+        a.hit("SPC g w");
+        let _ = draw::tests::render(&mut a, 80, 24);
+        a.key(KeyEvent::new(KeyCode::Down, M::CONTROL));
+        assert_eq!(window(&a).cursor, 1, "Ctrl-Down 이 커서를 안 옮겼다");
+        a.key(KeyEvent::new(KeyCode::End, M::ALT));
+        assert_eq!(window(&a).cursor, 2, "Alt-End 가 커서를 안 옮겼다");
+        a.hit("Enter");
+        let _ = draw::tests::render(&mut a, 80, 6);
+        a.key(KeyEvent::new(KeyCode::PageDown, M::ALT));
+        assert!(window(&a).page.offset() > 0, "Alt-PageDown 이 본문을 안 굴렸다");
+    }
+
+    /// **Ctrl·Alt 를 쥔 `←` 도 되돌아간다**(moai-ug6x.wwg) — 탐색의 `←`(접기)와 이동의 화살표가 수식키를 안 보는데
+    /// 되돌아가는 `←` 만 정확히 견주면 같은 키가 창 안에서 뜻이 갈린다.
+    #[test]
+    fn ctrl_left_goes_back_like_plain_left() {
+        use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers as M};
+        let (_s, mut a) = wiki_app("ctrl-left", PAGES);
+        a.hit("SPC g w");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        assert!(w.follow("guide"));
+        assert!(w.follow("notes/deep"));
+        a.key(KeyEvent::new(KeyCode::Left, M::CONTROL));
+        assert_eq!(slug(&a), "guide", "Ctrl-Left 가 안 되돌아갔다");
+        a.key(KeyEvent::new(KeyCode::Left, M::NONE));
+        assert_eq!(slug(&a), "README", "Left 가 안 되돌아갔다");
+    }
+
     /// **되돌아가기는 링크로 건너온 길만 되감는다** — 읽던 줄로 돌아온다. 자취가 비면 `Bksp` 는 아무 일도 없고 창은
     /// 남는다. 자취가 있어도 Esc 는 창을 닫는다(2026-10-04 사용자 결정).
     #[test]
@@ -1107,6 +1141,63 @@ pub(super) mod tests {
         a.hit("SPC g w");
         assert_eq!(a.mode, Mode::Browse);
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "없는 디렉터리를 안 댔다: {:?}", a.notice);
+    }
+
+    /// **창 위에서 다시 못 읽으면 옛 창을 닫고 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 통계 창과 같은 꼴이다. 위키
+    /// 디렉터리가 사라진 것과 페이지가 다 빠진 것 둘 다 연 적 없는 화면과 같은 알림으로 선다.
+    #[test]
+    fn a_failed_reread_over_the_window_closes_it_and_says_why() {
+        let (s, mut a) = wiki_app("reread", PAGES);
+        a.hit("SPC g w");
+        window(&a);
+        for (file, _) in PAGES {
+            std::fs::remove_file(s.path().join("docs").join(file)).unwrap();
+        }
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse, "빈 위키를 다시 읽은 창이 남았다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("README.md")), "{:?}", a.notice);
+
+        std::fs::write(s.path().join("docs/README.md"), "# Home\n").unwrap();
+        a.hit("SPC g w");
+        window(&a);
+        std::fs::remove_dir_all(s.path().join("docs")).unwrap();
+        a.notice = None;
+        a.hit("SPC g w");
+        assert_eq!(a.mode, Mode::Browse, "디렉터리가 사라진 창이 남았다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "{:?}", a.notice);
+    }
+
+    /// **다른 창을 못 열면 지금 창을 그대로 둔다**(moai-ug6x.wwg, 사용자 결정) — 위키에서 링크를 따라 온 자리와 커서가
+    /// 남고 알림만 선다. 거꾸로 통계 창 위에서 못 읽은 위키도 통계 창의 굴린 자리를 안 건드린다. 같은 창을 다시 못 읽을
+    /// 때만 닫는다(`a_failed_reread_over_the_window_closes_it_and_says_why`).
+    #[test]
+    fn failing_to_open_the_other_window_keeps_this_one_as_it_was() {
+        use super::super::Hung;
+        let (s, mut a) = wiki_app("other", PAGES);
+        a.hit("SPC g w");
+        let Mode::Wiki(w) = &mut a.mode else { unreachable!() };
+        assert!(w.follow("guide"));
+        let before = (slug(&a), window(&a).cursor, window(&a).trail.len());
+        assert_eq!(before.2, 1, "시험의 전제 — 링크 자취가 섰다");
+        a.hung = Some(Hung::Filter { text: "nonsense=1".into(), grep: None });
+        a.hit("SPC g s");
+        assert_eq!((slug(&a), window(&a).cursor, window(&a).trail.len()), before, "못 연 통계가 위키를 건드렸다");
+        assert!(a.notice.is_some(), "까닭을 안 댔다");
+
+        a.hung = None;
+        a.notice = None;
+        a.hit("SPC g s");
+        let _ = draw::tests::render(&mut a, 40, 12);
+        a.hit("j");
+        let offset = |a: &App| match &a.mode {
+            Mode::Stats(w) => w.scroll.offset(),
+            other => panic!("통계 창이 안 섰다 — {other:?}"),
+        };
+        assert_eq!(offset(&a), 1, "시험의 전제 — 통계 창을 굴렸다");
+        std::fs::remove_dir_all(s.path().join("docs")).unwrap();
+        a.hit("SPC g w");
+        assert_eq!(offset(&a), 1, "못 읽은 위키가 통계 창을 건드렸다");
+        assert!(a.notice.as_deref().is_some_and(|n| n.contains("docs/")), "{:?}", a.notice);
     }
 
     /// **창 위의 메뉴도 알림을 탐색과 같은 자로 다룬다** — 메뉴만 만진 키와 기다리는 접두어는 알림을 안 걷고, 창의
@@ -1701,7 +1792,8 @@ pub(super) mod tests {
         let mut done =
             Issue::new("argos-0001".into(), "끝난 일".into(), Kind::Issue, Status::new("done"), "2026-09-01T00:00:00Z");
         done.status_since = "2026-09-30T00:00:00Z".into();
-        let mut b = App::new(vec![done], cfg(), Path::new());
+        // 처음 보기는 done 을 보인다(moai-muit) — 이 시험의 전제인 done 숨김을 손으로 건다.
+        let mut b = crate::tui::tests::old_look(App::new(vec![done], cfg(), Path::new()));
         b.site.repo = a.site.repo.clone();
         let mut a = b;
         a.hit("SPC g w Enter Enter G Enter");

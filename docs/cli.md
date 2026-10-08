@@ -215,9 +215,15 @@ Options:
   open on a failure - and then this is a lint, and a lint is a gate.
 
   With no tracker here it says how to start one (--json: no_tracker). With a
-  tracker it cannot read - a link out of the checkout, a broken config - it
-  says why instead and does not send you to `moai init` (--json: tracker_error,
-  whose code is the one the other commands stop with).
+  tracker it cannot read - a link out of the checkout, a broken config, a
+  `.moai` that is not a directory - it says why instead and does not send you
+  to `moai init` (--json: tracker_error, whose code is the one the other
+  commands stop with). When that tracker is one it climbed to from a checkout
+  with no `.moai`, it says so and names it (--json: climbed_to), and gives both
+  ways out: fix that tracker, or start a separate one for this checkout with
+  `moai init` - named with `-C <checkout top>` when you stand below the top
+  (--json: init_at). When it climbed past a `.moai` it could not look at, it
+  says that instead and does not send you to `moai init` (--json: unseen_at).
 
   Wire it where your editor injects context at session start. For Claude Code
   that is a SessionStart hook, which fires again after a compact:
@@ -2397,9 +2403,10 @@ Options:
   last look carry a [NEW] mark in front of the title. Read marks live in my own
   config and the tracker does not change — on the CLI that is `moai read`.
 
-  The list hides done to begin with — the [done hidden] mark on the path line
-  says so. The view is separate from the filter, so Esc does not clear it and
-  the two apply together.
+  The list shows done and hides deferred work to begin with — the mark on
+  the path line says so, [deferred hidden] or, with the archive below,
+  [deferred·archive 312 hidden]. The view is separate from the filter, so
+  Esc does not clear it and the two apply together.
   Done that has sat in done for a while is the archive (archive_days in
   .moai/config.toml, 14 unless written; 0 turns it off). It stays hidden on
   the list and the board even with done shown, and the path line counts it
@@ -2579,9 +2586,6 @@ Options:
     user-prompt-submit  A person asked. Loads the board once
     pre-tool-use        Just before a tool call. The rules stand here
     stop                The turn ends. Checks the state
-    stop-failure        Kept for hooks planted before 0.9; does nothing
-    interrupt           Kept for hooks planted before 0.9; does nothing
-    session-end         Kept for hooks planted before 0.9; does nothing
 
   --dialect says which agent's shapes come in and go out: claude (the
   default), codex or antigravity. The rules are the same for all three.
@@ -3066,7 +3070,11 @@ Options:
   exclude or gitignore is refused.
 
   --json reports gitignore=true only when .gitignore was written; exclude=true
-  means the ignore lines were written to .git/info/exclude.
+  means the ignore lines were written to .git/info/exclude. Its driver is
+  planted, current (already the same line), off (the repository declares no
+  driver, or is not a git repository), failed (driver_trouble says why),
+  skipped (--no-driver, this run only) or untracked (a tracker kept out of
+  git - git never merges it, so there is nothing to drive).
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is

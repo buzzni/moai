@@ -105,9 +105,9 @@ pub fn run(ctx: &Ctx, event: Event, dialect: Dialect) -> R<Vec<String>> {
         return Ok(Vec::new());
     }
     // **부름 하나가 판정 여럿일 수 있다** — Codex 의 패치 하나가 파일 여럿을 고친다([`arrived`]). 차례는
-    // `Decision::then` 이 정한다: 한 파일이라도 막으면 그 패치를 막고, 뒤의 파일은 묻지 않는다. 이벤트도 말씨가 옮긴
-    // 것을 쓴다 — 오류로 끝난 Antigravity 의 `Stop` 은 `StopFailure` 다([`from_antigravity`]).
-    let (event, inputs) = arrived(dialect, event, &raw);
+    // `Decision::then` 이 정한다: 한 파일이라도 막으면 그 패치를 막고, 뒤의 파일은 묻지 않는다. 판정할 것이 없는
+    // 부름(오류로 끝난 Antigravity 의 `Stop`, [`from_antigravity`])은 비어 아무것도 안 낸다.
+    let inputs = arrived(dialect, event, &raw);
     let decision = inputs.iter().fold(Decision::Pass, |done, input| done.then(|| judge(ctx, event, dialect, input)));
     Ok(answer(event, decision, dialect).into_iter().collect())
 }
@@ -168,16 +168,6 @@ fn decide(
     line: &crate::hook::Line<'_>,
 ) -> Option<Decision> {
     let cwd = std::env::current_dir().ok()?;
-    // **`Stop` 없이 끝난 턴은 아무것도 안 한다** — 트래커도 안 읽는다. 그 셋은 출석을 적던 자리였다(moai-u5wr.f29) —
-    // 출석을 걷었다(moai-5uwh.yhx). **하위명령은 한 판만 빈 명령으로 남는다**(moai-5uwh.e9j) — 0.9 는 그 셋을 더는 안
-    // 심지만, 옛 판이 심은 훅(Claude 의 플러그인, `.codex/hooks.json`)은 다시 심을 때까지 그 하위명령을 부른다. 지우면 clap
-    // 이 2 로 끝나 감싼 셸이 세션마다 "the … hook could not run" 을 낸다. 다음 판에 지운다(backlog). 빈 명령을 가르는
-    // 자리는 여기 하나다 — Antigravity 의 실패한 `Stop` 도 [`from_antigravity`] 가 `StopFailure` 로 옮겨 여기로 온다.
-    // **이벤트를 다 적어 가른다** — 새 이벤트를 더하면 컴파일러가 여기서 어느 쪽인지 묻는다.
-    match event {
-        Event::StopFailure | Event::Interrupt | Event::SessionEnd => return Some(Decision::Pass),
-        Event::SessionStart | Event::UserPromptSubmit | Event::PreToolUse | Event::Stop => {}
-    }
     // **닫기 물음이 드는 자리는 이 칸에서만 읽는다**(moai-dp35·moai-084j) — 답([`answer`])과 심는 Codex 파일이 읽는 표와
     // 같은 것이다.
     let carry = crate::hook::Carry::of(dialect, event);
@@ -245,7 +235,10 @@ fn decide(
                 // AGENTS.md 를 모르고 시작하는 것이 바로 이 보드를 받는 새 세션이다. 셋을 여기서 따로
                 // 적던 때는 한쪽에 알림을 더하면 다른 쪽이 조용했다(moai-6k1r). 세션의 셸 자리는 stdin 의
                 // `cwd` 라 이미 여기로 옮겨 왔으므로 `chdir` 은 `false` 다 (`-C` 가 아니다).
-                st.notices.extend(crate::cmd::status::install_notices(&repo, false));
+                //
+                // AGENTS.md 는 **한 번만 잰다**(moai-8gwh.86j) — 아래 "사용법이 어디 있나" 한 줄도 같은 상태로 가린다.
+                let agents = crate::cmd::init::agents_state(repo.here());
+                st.notices.extend(crate::cmd::status::install_notices_with(&repo, false, &agents));
                 // 보드가 **정말 읽은 파일**을 댄다(`cmd::status::source_of` 와 같은 자) — 워크트리
                 // 세션의 보드는 루트의 트래커에서 온다(moai-y7go).
                 let source = crate::cmd::status::source_of(&repo);
@@ -262,10 +255,7 @@ fn decide(
                 );
                 // AGENTS.md 에 moai 블록이 없으면(git 밖에 둔 트래커의 `--guide hook`) 사용법이 어디 있는지 한 줄을 더한다.
                 // 못 읽으면 더하지 않는다 — 무엇이 들었는지 모른다.
-                let unguided = matches!(
-                    crate::cmd::init::agents_state(repo.here()),
-                    Ok((crate::cmd::init::BlockState::Missing, _))
-                );
+                let unguided = matches!(agents, Ok((crate::cmd::init::BlockState::Missing, _)));
                 crate::hook::guided_board(&lines, ctx.lang(), unguided)
             })
         }
@@ -424,8 +414,6 @@ fn decide(
                 closing_hold(input, &repo, &load.issues, &unreadable, ctx, carry)
             }
         }
-        // 위에서 이미 보냈다 — 트래커를 찾기 전이다.
-        Event::StopFailure | Event::Interrupt | Event::SessionEnd => Decision::Pass,
     };
     Some(decision)
 }
@@ -522,15 +510,12 @@ fn antigravity_answer(decision: Decision) -> Option<String> {
 /// - **Claude** 는 그대로다
 /// - **Codex** 도 키가 같다. 패치(`apply_patch` 도구와 셸로 친 `apply_patch`)만 고치는 파일마다 `Edit` 하나로
 ///   편다([`patched`])
-/// - **Antigravity** 는 [`from_antigravity`] 가 옮긴다 — 이벤트도 옮길 수 있어 함께 낸다
-fn arrived(dialect: Dialect, event: Event, raw: &str) -> (Event, Vec<Input>) {
+/// - **Antigravity** 는 [`from_antigravity`] 가 옮긴다
+fn arrived(dialect: Dialect, event: Event, raw: &str) -> Vec<Input> {
     match dialect {
-        Dialect::Claude => (event, vec![serde_json::from_str(raw).unwrap_or_default()]),
-        Dialect::Codex => (event, patched(serde_json::from_str(raw).unwrap_or_default())),
-        Dialect::Antigravity => match from_antigravity(event, raw) {
-            Some((event, input)) => (event, vec![input]),
-            None => (event, Vec::new()),
-        },
+        Dialect::Claude => vec![serde_json::from_str(raw).unwrap_or_default()],
+        Dialect::Codex => patched(serde_json::from_str(raw).unwrap_or_default()),
+        Dialect::Antigravity => from_antigravity(event, raw).into_iter().collect(),
     }
 }
 
@@ -639,10 +624,11 @@ fn shell_patch(cmd: &str) -> Option<Option<String>> {
 /// - `Stop` 이 이미 한 번 붙들었는지는 `executionNum` 이 댄다(붙든 뒤의 `Stop` 이 1 이었다)
 /// - **턴 머리만 `UserPromptSubmit` 이다** — `PreInvocation` 은 모델을 부를 때마다 오고, 사람이 친 턴의 첫 부름이
 ///   `invocationNum: 0` 이다. 그 뒤의 부름은 판정할 것이 없다
-/// - **오류로 끝난 실행의 `Stop` 은 `StopFailure` 다**(리뷰 moai-u5wr.e74) — agy 는 API 오류로 끝난 실행에도 `Stop` 을
+/// - **오류로 끝난 실행의 `Stop` 은 판정할 것이 없다**(리뷰 moai-u5wr.e74) — agy 는 API 오류로 끝난 실행에도 `Stop` 을
 ///   내고 그 까닭을 `error`(정상 판은 빈 글이다)·`terminationReason` 에 싣는다. 보통 `Stop` 으로 판정하던 판은 세션에
-///   한 번인 닫기 물음을 그 판에 써 버렸다. Claude 의 API 오류(`StopFailure`)처럼 아무것도 안 한다
-fn from_antigravity(event: Event, raw: &str) -> Option<(Event, Input)> {
+///   한 번인 닫기 물음을 그 판에 써 버렸다. 트래커도 안 읽고 아무것도 안 낸다 — 이 이벤트를 따로 두던 `StopFailure` 는
+///   걷었다(moai-9s9s.vzn)
+fn from_antigravity(event: Event, raw: &str) -> Option<Input> {
     use serde_json::Value;
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
     if event == Event::UserPromptSubmit && v.get("invocationNum").and_then(Value::as_u64).is_some_and(|n| n != 0) {
@@ -651,7 +637,9 @@ fn from_antigravity(event: Event, raw: &str) -> Option<(Event, Input)> {
     let text = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
     let failed = text(&v, "error").is_some_and(|e| !e.trim().is_empty())
         || text(&v, "terminationReason").is_some_and(|r| r.eq_ignore_ascii_case("error"));
-    let event = if event == Event::Stop && failed { Event::StopFailure } else { event };
+    if event == Event::Stop && failed {
+        return None;
+    }
     let call = v.get("toolCall").cloned().unwrap_or_default();
     let args = call.get("args").cloned().unwrap_or_default();
     let workspace = v.get("workspacePaths").and_then(Value::as_array).and_then(|a| a.first()).and_then(Value::as_str);
@@ -675,7 +663,7 @@ fn from_antigravity(event: Event, raw: &str) -> Option<(Event, Input)> {
         tool_input,
         stop_hook_active: v.get("executionNum").and_then(Value::as_u64).is_some_and(|n| n > 0),
     };
-    Some((event, input))
+    Some(input)
 }
 
 /// 판정하되, **막으면 옆 워크트리와 겹쳐 한 번 더 본다**(moai-w2iy).
@@ -1367,8 +1355,6 @@ mod tests {
             Carry::of(Dialect::Antigravity, Event::Stop),
             Carry::Hold(crate::hook::Room { size: 10_000, unit: Unit::Utf16 })
         );
-        // 오류로 끝난 실행의 `Stop` 은 붙들지 않는다 — 실패하는 백엔드에 글을 도로 밀어 넣는다(`from_antigravity`).
-        assert_eq!(Carry::of(Dialect::Antigravity, Event::StopFailure), Carry::Nothing);
     }
 
     /// **답은 제 칸에만 선다** — 붙드는 까닭은 `Stop` 에서만, 비추는 줄은 턴 머리와 접힌 뒤, 그리고 Claude·Codex 의 도구

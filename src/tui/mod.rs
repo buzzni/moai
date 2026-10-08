@@ -469,8 +469,9 @@ pub fn measure(issues: &[Issue], cfg: &Config) -> (Index, Ground) {
 
 /// [`measure`] 와 같은 것. **이미 잰 지도를 받는다** — 다시 읽기([`prepare`])가 제 지도를 여기 넘긴다. 그 길이
 /// 이 몸을 제 자리에 한 벌 더 펴면, 색인·칸 지도에 무엇이 들고 나는지가 여는 길과 다시 읽는 길에서 갈린다.
-/// 경고 셈은 이 지도를 안 나눠 쓴다(moai-nkwg) — 이 지도는 아카이브를 섞은 줄의 것이고, 셈은 `moai status`
-/// 처럼 산 줄을 일로, 아카이브를 문맥으로 따로 받는다([`board`]).
+/// 경고 셈은 이 지도를 **문맥이 같을 때만** 나눠 쓴다(moai-nkwg·moai-ug6x.pi3) — 이 지도는 아카이브를 섞은 줄의 것이고,
+/// 셈은 `moai status` 처럼 산 줄을 일로, 아카이브를 문맥으로 따로 받는다([`board`]). 섞은 줄이 그 문맥과 같은 줄들일
+/// 때만 [`counted_beside`] 가 이 지도로 센다.
 fn measure_in(issues: &[Issue], cfg: &Config, soil: &crate::report::Soil<'_>) -> (Index, Ground) {
     (Index::in_soil(issues, soil), Ground::in_soil(issues, cfg, soil))
 }
@@ -647,6 +648,8 @@ pub struct Fresh {
     unreadable: Vec<Option<String>>,
     /// 배너가 대는 못 읽는 줄의 수 — **산 줄만**([`Counted::unreadable`], moai-e18s).
     unreadable_live: usize,
+    /// 아카이브 파일의 못 읽는 줄 수 — 아카이브를 보는 동안만 배너가 댄다([`Counted::archive_unreadable`]).
+    unreadable_archive: usize,
     origin: crate::worktree::Origin,
     elsewhere: Vec<String>,
     /// 옆 워크트리를 못 찾은 까닭(`Gathered::unfound`). 사람이 SPC v w 로 켰을 때만 댄다.
@@ -770,12 +773,13 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     let archived_marks = crate::archive::marks(&repo.root)?;
     let mut g = crate::worktree::gather(repo, worktree)?;
     let now = crate::model::now();
-    // **경고와 알림은 아카이브를 섞기 전에 센다**(moai-nkwg) — 섞은 줄로 세면 옮긴 줄이 일로 서고 아카이브의
-    // 못 읽은 줄이 산 줄의 `unreadable_line` 으로 선다. 아카이브는 한 번만 읽어 셈과 섞기가 나눠 쓴다([`board`]).
-    let archived = crate::archive::read(&repo.root)?;
-    let Counted { mut warnings, notices, unreadable: unreadable_live } =
-        board(repo, &g.load, &g.origin, &archived, &now)?;
-    g.load = beside(archived, g.load);
+    // **경고와 알림은 아카이브를 섞기 전의 두 벌로 센다**(moai-nkwg) — 여는 길과 같은 이음([`counted_beside`])을
+    // 지난다. 색인과 묶음 칸·거름망도 그 이음이 잰다 — 셈과 지도를 나눠 쓸 수 있으면 한 벌로 잰다(moai-ug6x.pi3).
+    let Beside { load: merged, counted, index, ground } =
+        counted_beside(repo, std::mem::take(&mut g.load), g.root.take().as_ref(), &g.origin, true, &now)?;
+    let Counted { mut warnings, notices, unreadable: unreadable_live, archive_unreadable: unreadable_archive } =
+        counted;
+    g.load = merged;
     // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
     let unreadable: Vec<Option<String>> = g
         .origin
@@ -784,11 +788,9 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
         .map(|id| id.map(str::to_string))
         .collect();
     let issues = g.load.issues;
-    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망이 같은 지도를 나눠 쓴다([`measure_in`]).
-    let soil = crate::report::Soil::of(&issues);
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸·거름망이 같은 지도를 나눠 쓴다([`measure_in`], 위의 이음).
     // **노트는 안 읽는다**(리뷰 moai-wcy8.rbj) — 이 길은 쓰기마다 루프에서도 돈다. 노트를 보는 거름망이 걸리면
     // 들인 뒤에 그 걸음이 읽는다([`Ground::notes`]).
-    let (index, ground) = measure_in(&issues, &repo.config, &soil);
     // **알림은 `moai status` 와 같은 자로 센다**(moai-k6ff) — 순수한 셈이 낸 것에 설치가 어긋난
     // 셋을 더한 것이 보드가 세우는 수고, 프로젝트 층의 `+N` 도 그것이다(`layer::summarize`). 들어간 화면이
     // 다른 수를 대면 `+3` 을 보고 Enter 를 친 사람이 그 셋을 어디서도 못 본다.
@@ -818,6 +820,7 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
         issues,
         unreadable,
         unreadable_live,
+        unreadable_archive,
         origin: g.origin,
         elsewhere,
         // 못 찾은 까닭도 여기서 편다(moai-dpbi) — 배너와 알림은 글을 그대로 낸다.
@@ -842,46 +845,121 @@ pub struct Counted {
     /// **산 줄의** 못 읽는 줄 수 — `moai status` 의 `unreadable_line` 과 같은 자다(moai-e18s). 아카이브 파일의
     /// 못 읽는 줄은 안 든다: 보드는 그것을 `archive_unreadable` 로 따로 세고, 배너도 그 경고로 센다.
     pub unreadable: usize,
+    /// **아카이브 파일의** 못 읽는 줄 수 — 줄마다 하나다(moai-ug6x.bbh). 경고는 위의 `warnings` 에 하나로 들고,
+    /// 아카이브를 보는 동안의 배너가 그 수를 따로 댄다 — 지금 보는 목록에서 그만큼 빠졌다는 말이다.
+    pub archive_unreadable: usize,
 }
 
-/// 배너가 대는 수 — 고칠 것(기한 판정은 안 접은 채), 순수한 셈이 낸 알림의 수, 산 줄의 못 읽는 줄 수
-/// ([`Counted`]). 여는 길(`cmd::tui`)과 다시 읽기([`prepare`])가 함께 지난다.
+/// 배너가 대는 수 — 고칠 것(기한 판정은 안 접은 채), 순수한 셈이 낸 알림의 수, 산 줄의 못 읽는 줄 수, 아카이브
+/// 파일의 못 읽는 줄 수([`Counted`]). 여는 길(`cmd::tui`)과 다시 읽기([`prepare`])가 [`counted_beside`] 로 함께 지난다.
 ///
 /// **`moai status` 와 같은 자로 센다**([`crate::cmd::status::archive_board_unjudged`]) — 산 줄(`live`, 옆 워크트리를
 /// 겹쳤으면 겹친 것)만 일로 세고, 아카이브(`archived`)는 부모·막는 줄·마일스톤 롤업의 문맥으로만 읽는다. 아카이브의
-/// 충돌은 경고로, 못 읽은 아카이브와 옮길 묶음은 알림으로 선다. 섞은 줄로 세던 판은 옮긴 줄을 일로 세고 아카이브의
+/// 충돌과 못 읽은 아카이브는 경고로, 옮길 묶음은 알림으로 선다. 섞은 줄로 세던 판은 옮긴 줄을 일로 세고 아카이브의
 /// 못 읽은 줄을 산 줄의 `unreadable_line` 으로 세어, 배너가 `moai status` 와 다른 수를 댔다.
 ///
-/// 충돌과 옮길 수는 **루트의 스냅샷**과 견준다 — `moai status --worktree` 와 같은 까닭으로, 옆의 낡은 사본이 그
-/// 둘을 부풀리지 않게 한다. 옆에서 온 줄이 하나도 없으면 겹친 줄이 곧 루트의 스냅샷이라 다시 안 읽는다.
+/// 충돌과 옮길 수는 **루트의 스냅샷**(`root`)과 견준다 — `moai status --worktree` 와 같은 까닭으로, 옆의 낡은 사본이 그
+/// 둘을 부풀리지 않게 한다. 그 스냅샷은 겹치기가 판 것을 받는다([`crate::worktree::Gathered::root`], moai-ug6x.pi3) —
+/// 옆에서 온 줄이 하나도 없으면 `None` 이고 겹친 줄이 곧 그것이다. 한때 옆에서 온 줄이 있으면 여기서 `repo.read()` 로
+/// 걸음마다 다시 풀었다(리뷰 moai-3nrh.ige 7번).
+///
+/// `unreadable` 은 산 줄의 못 읽는 줄이다([`live_unreadable`]) — [`counted_beside`] 가 지도를 나눠 쓸지 가르려고
+/// 이미 고른 것을 받는다.
 pub(crate) fn board(
     repo: &Repo,
     live: &Load,
-    origin: &crate::worktree::Origin,
+    unreadable: &[crate::report::Unreadable],
+    root: Option<&Load>,
     archived: &Load,
     now: &str,
-) -> crate::fail::R<Counted> {
-    // 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
-    let unreadable: Vec<crate::report::Unreadable> = origin
-        .unreadable(live.errors.iter().map(|e| e.id.as_deref()))
-        .into_iter()
-        .map(|id| crate::report::Unreadable { id })
-        .collect();
-    let reread = if origin.branches().is_empty() { None } else { Some(repo.read()?) };
-    let root = reread.as_ref().unwrap_or(live);
+) -> Counted {
+    let root = root.unwrap_or(live);
     let st = crate::cmd::status::archive_board_unjudged(
         &live.issues,
-        &unreadable,
+        unreadable,
         (&root.issues, &root.unreadable()),
         archived,
         &repo.config,
         now,
     );
-    Ok(Counted {
+    tally(st, unreadable.len(), archived.errors.len())
+}
+
+/// 산 줄의 못 읽는 줄 — 옆에서만 온 줄과 겹친 id 는 중복으로 세지 않는다 (`Origin::unreadable`).
+fn live_unreadable<'a>(live: &'a Load, origin: &'a crate::worktree::Origin) -> Vec<crate::report::Unreadable<'a>> {
+    origin
+        .unreadable(live.errors.iter().map(|e| e.id.as_deref()))
+        .into_iter()
+        .map(|id| crate::report::Unreadable { id })
+        .collect()
+}
+
+/// 센 보드를 배너의 수로 — [`board`] 와 지도를 나눠 쓰는 길([`counted_beside`])이 같은 자로 접는다.
+fn tally(st: crate::report::StatusReport, unreadable: usize, archive_unreadable: usize) -> Counted {
+    Counted {
         warnings: Surfaced::of(st.warnings.len(), st.dues),
         notices: st.notices.len(),
-        unreadable: unreadable.len(),
-    })
+        unreadable,
+        archive_unreadable,
+    }
+}
+
+/// [`counted_beside`] 가 낸 것 — 섞은 줄, 배너의 수, 그 줄로 잰 색인과 [`Ground`].
+pub(crate) struct Beside {
+    pub load: Load,
+    pub counted: Counted,
+    pub index: Index,
+    pub ground: Ground,
+}
+
+/// 아카이브를 읽어 **섞기 전의 두 벌로 세고**(`count` 일 때, [`board`]) 산 줄 곁에 놓은 뒤([`beside`]) 그 줄로 잰다
+/// ([`measure_in`]) — 여는 길(`cmd::tui`)과 다시 읽기([`prepare`])가 함께 지나는 이음이다(moai-ug6x.a3e). 섞은 줄로
+/// 세면 옮긴 줄이 일로 서고 아카이브의 줄마다 `archive_duplicate_id` 가 서며 그 못 읽은 줄이 산 줄의
+/// `unreadable_line` 으로 선다(moai-nkwg). 두 길이 이 셋을 저마다 잇던 때는 여는 길에서 섞은 줄을 건네도 아무 시험이
+/// 안 붉어졌다 — 시험의 여는 길(`App::open`)은 아카이브 없이 센다. 아카이브는 한 번만 읽어 셈과 섞기가 나눠 쓴다.
+/// 안 세면(`--json`) 셈은 빈 값이다. `root` 는 [`board`] 의 그것이다.
+///
+/// **지도(`report::Soil`)도 한 벌이다**(moai-ug6x.pi3). 셈의 문맥(산 줄 곁의 아카이브)과 섞은 줄이 같은 줄들이면
+/// 섞은 줄로 잰 지도로 센다([`crate::archive::board_in`]) — 따로 세던 판은 걸음마다 같은 줄로 지도를 두 벌 지었고
+/// (리뷰 moai-3nrh.ige 8번). 같은 줄인지는 [`crate::archive::shareable`] 이 가르고,
+/// 겹친 옆 줄이 있으면(`root` 가 섰으면) 셈이 견줄 루트가 산 줄과 달라 나눠 쓰지 않는다 — 그때는 예전 길이다.
+/// **세는 것은 여전히 산 줄뿐이다**(위의 moai-nkwg) — 지도가 아카이브를 문맥으로 들 뿐이다.
+///
+/// 나눠 쓰는 길은 산 줄을 한 벌 베낀다 — 섞기가 그 줄을 먹고 셈은 섞은 뒤에 산 줄을 따로 받는다. 이 저장소에서 산 줄
+/// 244 를 베끼는 값은 아카이브 2,528 을 곁들인 지도 한 벌의 서른몇 분의 1 이다(2026-10-08, dev 에서 1ms 대 36ms). 아카이브는 안 베낀다 —
+/// 셈이 아카이브 한 벌에서 묻는 것(충돌·못 읽은 줄·사본과 갈린 줄)은 섞기 전에 묻는다([`ArchiveSide`]).
+///
+/// [`ArchiveSide`]: crate::cmd::status::ArchiveSide
+pub(crate) fn counted_beside(
+    repo: &Repo,
+    live: Load,
+    root: Option<&Load>,
+    origin: &crate::worktree::Origin,
+    count: bool,
+    now: &str,
+) -> crate::fail::R<Beside> {
+    let archived = crate::archive::read(&repo.root)?;
+    let cfg = &repo.config;
+    let unreadable = live_unreadable(&live, origin);
+    if !count || root.is_some() || !crate::archive::shareable(&live.issues, &unreadable, &archived) {
+        let counted = if count { board(repo, &live, &unreadable, root, &archived, now) } else { Counted::default() };
+        let load = beside(archived, live);
+        let (index, ground) = measure(&load.issues, cfg);
+        return Ok(Beside { load, counted, index, ground });
+    }
+    // 여기부터는 루트가 곧 산 줄이다(`root` 가 없다) — [`board`] 가 `root.unwrap_or(live)` 로 고르는 그것.
+    let roots = live.unreadable();
+    let side = crate::cmd::status::ArchiveSide::of((&live.issues, &roots), &archived);
+    let excluded = crate::archive::conflicts(&live.issues, &archived);
+    let archive_unreadable = archived.errors.len();
+    let load = beside(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
+    let soil = crate::report::Soil::of(&load.issues);
+    let (st, movable) = crate::archive::board_in(&load.issues, &soil, &live.issues, &unreadable, &excluded, cfg, now);
+    let st = side.warn(st, movable);
+    let counted = tally(st, unreadable.len(), archive_unreadable);
+    let (index, ground) = measure_in(&load.issues, cfg, &soil);
+    drop(soil);
+    Ok(Beside { load, counted, index, ground })
 }
 
 /// 아카이브의 줄을 산 줄 곁에 놓는다 — `archive::read_all` 과 같은 섞기를 **이미 읽은 아카이브로** 한다
@@ -1123,6 +1201,9 @@ pub struct Site {
     /// 경고로 센다 — 이 수를 따로 든다. **세는 자는 [`board`] 하나다.** 저장소 없이 세운 화면(시험)은 받은 목록을
     /// 다 산 줄로 본다.
     pub unreadable_live: usize,
+    /// 아카이브 파일의 못 읽는 줄 수([`Counted::archive_unreadable`]) — 아카이브를 보는 동안만 배너가 댄다. 저장소
+    /// 없이 세운 화면은 아카이브가 없어 0 이다.
+    pub unreadable_archive: usize,
     /// `moai status` 가 드러낼 것의 수. 자세한 화면은 나중에 얹는다.
     ///
     /// **기한 판정은 안 접혀 있다**([`Surfaced`], moai-fgjj) — 그 몫만 시간대에 닿으므로, 그리는
@@ -1591,6 +1672,7 @@ impl Site {
             me: None,
             now: crate::model::now(),
             unreadable_live: unreadable.len(),
+            unreadable_archive: 0,
             unreadable,
             warnings: Surfaced::default(),
             notices: 0,
@@ -1920,8 +2002,7 @@ impl App {
     /// [`board`] 다. 아카이브를 재는 시험은 [`App::reload`] 로 [`prepare`] 를 지난다.
     #[cfg(test)]
     pub fn open(repo: Repo, load: Load, index: Index, ground: Ground, path: Path, stamp: Stamp) -> App {
-        let counted = board(&repo, &load, &Default::default(), &Load::default(), &crate::model::now())
-            .expect("겹치지 않은 판은 스냅샷을 다시 안 읽는다");
+        let counted = board(&repo, &load, &load.unreadable(), None, &Load::default(), &crate::model::now());
         App::open_counted(repo, load, index, ground, path, stamp, counted)
     }
 
@@ -2025,10 +2106,11 @@ impl App {
             discarded: Vec::new(),
             let_go: 0,
             read: prepare,
-            // **처음에는 done 을 숨긴다**(사람의 결정, 2026-09-14). 끝난 것이 목록을 채워 지금 볼
-            // 것을 덮었고, 걷으려면 `status=todo,in_progress,review` 를 손으로 적어야 했다.
             legacy_read: Default::default(),
-            view: view::View::hiding(crate::config::DONE),
+            // **처음에는 done 을 보이고 미룬 것을 숨긴다**(사람의 결정, 2026-10-08, moai-muit). done 을 숨기던
+            // 처음값(2026-09-14)을 뒤집었다 — 오래 끝난 것은 아카이브가 따로 숨긴다(`show_archived`). 기억한
+            // 보기(`[tui]`)는 `apply_look` 이 뒤에서 덮는다.
+            view: view::View { hide_deferred: true, ..view::View::default() },
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
@@ -2078,8 +2160,9 @@ impl App {
         // moai-fgjj 가 걷었다(moai-ynd6) — 읽는 쪽이 일부러 없앤 것인지 실수로 지워진 것인지
         // 못 가렸다.
         match counted {
-            Some(Counted { warnings, notices, unreadable }) => {
-                (app.site.warnings, app.site.notices, app.site.unreadable_live) = (warnings, notices, unreadable)
+            Some(Counted { warnings, notices, unreadable, archive_unreadable }) => {
+                (app.site.warnings, app.site.notices, app.site.unreadable_live) = (warnings, notices, unreadable);
+                app.site.unreadable_archive = archive_unreadable;
             }
             None => app.count_all(),
         }
@@ -2477,6 +2560,7 @@ impl App {
         self.site.stamp = f.stamp;
         self.site.unreadable = f.unreadable;
         self.site.unreadable_live = f.unreadable_live;
+        self.site.unreadable_archive = f.unreadable_archive;
         self.site.origin = f.origin;
         self.site.elsewhere = f.elsewhere;
         self.site.unfound = f.unfound;
@@ -4378,6 +4462,7 @@ impl App {
                 site.warnings = fresh.warnings;
                 // 들어간 화면의 배너가 대는 못 읽는 줄도 산 줄만이다(moai-e18s) — `Site::of` 는 받은 목록을 다 센다.
                 site.unreadable_live = fresh.unreadable_live;
+                site.unreadable_archive = fresh.unreadable_archive;
                 // **알림도 그 줄과 함께 든다**(moai-k6ff) — 이 줄로 들어가면 그 화면의 배너가
                 // 프로젝트 층에서 본 `+N` 을 그대로 댄다.
                 site.notices = fresh.notices;
@@ -4780,16 +4865,28 @@ impl App {
     ///
     /// **덮는 창(통계·위키) 위에서 고른 목록·보드는 창을 닫고 그 배치로 선다** — 닫는 것이 먼저다. 커서·거름망·상세는
     /// 창이 안 건드렸으니 연 자리 그대로고, 배치만 고른 쪽으로 바뀐다([`App::flip_layout`]).
+    ///
+    /// **같은 창을 다시 못 읽으면 그 창을 닫고 알림으로 까닭을 댄다**(moai-ug6x.hr1, 사용자 결정) — 옛 창을 남기면
+    /// 사람이 방금 다시 읽은 줄 알고 낡은 수와 페이지를 읽는다. 그래서 고르기 전에 닫는다: 여는 자(`open_stats`·
+    /// `open_wiki`)는 실패하면 `mode` 를 안 건드리니, 닫아 둔 자리가 곧 "창 없는 화면" 이다. 실패하는 갈래마다
+    /// 닫기를 흩어 두면 새 갈래 하나가 그것을 잊는다.
+    ///
+    /// **다른 창을 못 열면 지금 창을 그대로 둔다**(moai-ug6x.wwg, 사용자 결정) — 위키 위의 `SPC g s` 가 못 세면 위키의
+    /// 커서와 링크 자취가 그대로 남고 알림만 선다. 그 창의 페이지는 낡지 않았다: 사람이 다시 읽으라 한 것은 다른 창이다.
+    /// 열리면 새 창이 그 자리를 덮는 것은 같다.
     pub(super) fn go(&mut self, to: keys::Screen, rows: &[Row]) {
+        let same =
+            matches!((&self.mode, to), (Mode::Stats(_), keys::Screen::Stats) | (Mode::Wiki(_), keys::Screen::Wiki));
+        let covering = matches!(to, keys::Screen::Stats | keys::Screen::Wiki);
+        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) && (same || !covering) {
+            self.mode = Mode::Browse;
+        }
         let layout = match to {
             keys::Screen::Stats => return self.open_stats(),
             keys::Screen::Wiki => return self.open_wiki(),
             keys::Screen::List => view::Layout::List,
             keys::Screen::Board => view::Layout::Board,
         };
-        if matches!(self.mode, Mode::Stats(_) | Mode::Wiki(_)) {
-            self.mode = Mode::Browse;
-        }
         if self.layout != layout {
             self.flip_layout(rows);
         }
@@ -6229,11 +6326,11 @@ mod tests {
             .collect()
     }
 
-    /// **처음에는 done 을 숨기고 `SPC v` 가 칸·미룸을 켜고 끈다**(moai-fmv5). 보기는 거름망이
-    /// 아니라 Esc 가 안 푼다. 끝난 멤버가 있어도 안 끝난 멤버가 있는 에픽은 선다. 토글 뒤에도
-    /// 커서는 보던 줄에 붙는다.
+    /// **처음에는 done 을 보이고 미룬 것을 숨기며, `SPC v` 가 칸·미룸을 켜고 끈다**(moai-fmv5, 처음 보기는
+    /// 2026-10-08 사람의 결정 moai-muit). 뱃지는 미룸을 숨겼다고 댄다. 보기는 거름망이 아니라 Esc 가 안 푼다.
+    /// 토글 뒤에도 커서는 보던 줄에 붙는다.
     #[test]
-    fn done_starts_hidden_and_the_view_menu_brings_it_back() {
+    fn the_first_view_shows_done_and_hides_deferred() {
         let mut done_member = member("argos-0003", "argos-0001");
         done_member.status = Status::new("done");
         let mut loose_done = make("argos-0009", Kind::Issue);
@@ -6244,25 +6341,54 @@ mod tests {
             vec![make("argos-0001", Kind::Epic), done_member, member("argos-0004", "argos-0001"), loose_done, put_off];
         let mut a = App::new(issues, cfg(), Path::new());
 
-        assert_eq!(row_ids(&a), ["argos-0001", "argos-0010"], "done 이 처음부터 보인다");
+        assert_eq!(a.view, view::View { hide_deferred: true, ..view::View::default() }, "처음 보기가 달라졌다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "done 이 숨었거나 미룬 줄이 처음부터 보인다");
+        let badge = a.view.badge(&a.screen_statuses(), a.aged(), a.site.lang);
+        assert_eq!(badge.as_deref(), Some("미룸 숨김"), "뱃지가 숨긴 미룸을 안 댔다");
         a.hit("Enter");
-        assert_eq!(row_ids(&a), ["argos-0004"], "에픽 안의 끝난 멤버가 보인다");
+        assert_eq!(row_ids(&a), ["argos-0003", "argos-0004"], "에픽 안의 끝난 멤버가 안 보인다");
         a.hit("Bksp");
 
         a.cursor = 1;
-        a.hit("SPC v 4 Esc");
-        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"]);
-        assert_eq!(row_ids(&a)[a.cursor], "argos-0010", "토글이 커서를 딴 줄로 옮겼다");
-        a.hit("Esc");
-        assert_eq!(row_ids(&a).len(), 3, "Esc 가 보기를 풀었다");
-
         a.hit("SPC v l Esc");
-        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "미룸이 안 숨었다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"], "미룸이 안 보였다");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0009", "토글이 커서를 딴 줄로 옮겼다");
+        a.hit("Esc");
+        assert_eq!(row_ids(&a).len(), 3, "Esc 가 보기를 바꿨다");
+
         // 설정의 넷째 칸이 done 이다 — done 을 켜고 끄는 길은 번호 하나다(moai-h6z3).
         a.hit("SPC v 4 Esc");
-        assert_eq!(row_ids(&a), ["argos-0001"]);
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0010"], "done 이 안 숨었다");
         a.hit("SPC v a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// **기억한 보기가 처음 보기를 이긴다**(moai-muit) — `[tui]` 에 적힌 `hidden`·`hide_deferred` 는 처음값(done 보임·
+    /// 미룸 숨김) 위에 그대로 선다.
+    #[test]
+    fn a_remembered_look_wins_over_the_first_view() {
+        let s = scratch("look-over-first");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nhidden = [\"done\"]\nhide_deferred = false\n").unwrap();
+        let mut finished = make("argos-0002", Kind::Issue);
+        finished.status = Status::new("done");
+        let mut put_off = make("argos-0003", Kind::Issue);
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue), finished, put_off], cfg(), Path::new());
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002"], "시험의 전제 — 처음 보기는 done 보임·미룸 숨김이다");
+        a.user_config = Some(user);
+        a.load_look();
+        assert_eq!(a.view, view::View::hiding(crate::config::DONE), "기억한 보기가 처음 보기에 졌다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0003"], "기억한 보기대로 줄이 안 섰다");
+
+        // **적히지 않은 키는 처음값 그대로다** — 다른 키만 든 `[tui]` 가 미룸 숨김까지 걷으면 처음 보기가 그 사람에게만 안 선다.
+        let other = s.join("other.toml");
+        std::fs::write(&other, "[tui]\nsort = \"title\"\nhidden = []\n").unwrap();
+        let mut b = App::new(a.site.issues.clone(), cfg(), Path::new());
+        b.user_config = Some(other);
+        b.load_look();
+        assert!(b.view.hide_deferred, "적히지 않은 hide_deferred 를 처음값에서 걷었다");
+        assert_eq!(row_ids(&b), ["argos-0001", "argos-0002"], "적히지 않은 키가 처음 보기를 따르지 않았다");
     }
 
     /// **done 을 켜도 아카이브는 숨고, 뱃지가 그 수를 대며, `SPC v o` 가 보인다**(moai-47mz, 2026-10-03 사용자 결정).
@@ -6368,7 +6494,8 @@ mod tests {
     }
 
     /// 보드 시험의 바닥(moai-9nfw). 마일스톤 0001 밑에 에픽 0002(멤버 0003 todo·p1, 0004 in_progress·p2),
-    /// 마일스톤 없는 0005(todo·p3)·backlog 0006·미룬 0007(todo·p0).
+    /// 마일스톤 없는 0005(todo·p3)·backlog 0006·미룬 0007(todo·p0). 보기는 옛 처음 보기([`old_look`] — done 숨김·
+    /// 미룸 보임)라 미룸 칸이 선다.
     fn boarded() -> App {
         let mut epic = make("argos-0002", Kind::Epic);
         epic.milestone = Some("argos-0001".into());
@@ -6390,7 +6517,15 @@ mod tests {
             make("argos-0006", Kind::Backlog),
             put_off,
         ];
-        App::new(issues, cfg(), Path::new())
+        old_look(App::new(issues, cfg(), Path::new()))
+    }
+
+    /// **옛 처음 보기(done 숨김·미룬 것 보임)를 손으로 건다**(moai-muit) — 처음 보기가 2026-10-08 에 done 보임·미룸
+    /// 숨김으로 뒤집혔다. 처음 보기가 아니라 다른 것을 재는 시험이 그 전제를 제 바닥에 적는다.
+    pub(crate) fn old_look(mut a: App) -> App {
+        a.view = view::View::hiding("done");
+        a.see();
+        a
     }
 
     /// 지금 커서가 선 줄의 id — 바구니처럼 제 줄이 없으면 빈 글이다.
@@ -6483,7 +6618,7 @@ mod tests {
     fn on_the_board_h_and_l_cross_columns_and_tab_does_nothing() {
         let mut a = boarded();
         a.layout = view::Layout::Board;
-        // 칸은 backlog · 미룸 · todo · in_progress · review 다(done 은 처음에 숨는다). 0003·0005 가 todo 다.
+        // 칸은 backlog · 미룸 · todo · in_progress · review 다(done 은 바닥이 숨긴다). 0003·0005 가 todo 다.
         let at = |a: &App, id: &str| row_ids(a).iter().position(|r| r == id).unwrap();
         a.cursor = at(&a, "argos-0003");
         a.hit("j");
@@ -7225,7 +7360,8 @@ mod tests {
             make("argos-0011", Kind::Issue),
         ];
         let mut a = App::new(issues, cfg(), Path::new());
-        a.hit("SPC v l Esc");
+        a.view = view::View { hidden: vec!["done".into()], hide_deferred: true, ..view::View::default() };
+        a.see();
         a
     }
 
@@ -8376,9 +8512,9 @@ mod tests {
         is[1].status = Status::new("done");
         // 멤버의 우선순위를 에픽보다 세게 둔다 — 형제끼리만 매기면 에픽 밑에 그대로 남는다.
         is[2].priority = Some(0);
-        let mut a = App::new(is, cfg(), Path::new());
+        let mut a = old_look(App::new(is, cfg(), Path::new()));
         a.key(key(KeyCode::Char('l')));
-        // 처음에는 done 을 숨긴다(moai-fmv5) — 펼친 멤버에도 그 보기가 그대로 걸린다.
+        // done 을 숨긴 보기(moai-fmv5)가 펼친 멤버에도 그대로 걸린다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004"], "done 숨김이 펼친 멤버에 안 걸렸다");
         a.hit("SPC v 4 Esc");
         // 형제끼리의 차례는 고른 정렬이 매긴다 — p0 인 0004 가 0003 앞이다.
@@ -11577,9 +11713,9 @@ mod tests {
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
+        // 처음 보기가 done 을 보이니(moai-muit) b 의 `SPC v 4` 는 done 을 숨긴 것이다.
         assert!(
-            !c.view.hides(crate::config::DONE)
-                && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false },
+            c.view.hides(crate::config::DONE) && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false },
             "{text}"
         );
     }
@@ -11601,22 +11737,22 @@ mod tests {
     }
 
     /// **적어 둔 보기를 입힌 뒤에 층을 얹는다**(moai-2kyl 단계 리뷰 — `cmd/tui.rs::run` 의 차례).
-    /// 처음값 보기(done 숨김)로 세우면 끝난 줄뿐인 뿌리가 통째로 비어, 층을 먼저 얹은 화면은
+    /// 처음값 보기(미룸 숨김, moai-muit)로 세우면 미룬 줄뿐인 뿌리가 통째로 비어, 층을 먼저 얹은 화면은
     /// 적어 둔 보기가 그 줄을 도로 보여도 커서가 목록 밖에 남는다. 뿌리의 `..` 을 걷은
     /// 뒤(moai-i784)로 `with_layer` 는 커서를 안 건드리므로, 이 시험이 재는 것은 커서가 **첫
-    /// 줄**(그 끝난 줄)에 서는가다.
+    /// 줄**(그 미룬 줄)에 서는가다.
     #[test]
     fn the_saved_look_is_on_before_the_layer_places_the_first_cursor() {
         let s = scratch("look-layer");
         let user = s.join("user.toml");
-        std::fs::write(&user, "[tui]\nhidden = []\n").unwrap();
-        let mut finished = make("argos-0001", Kind::Issue);
-        finished.status = Status::new("done");
-        let mut a = App::new(vec![finished], cfg(), Path::new());
+        std::fs::write(&user, "[tui]\nhide_deferred = false\n").unwrap();
+        let mut put_off = make("argos-0001", Kind::Issue);
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut a = App::new(vec![put_off], cfg(), Path::new());
         a.user_config = Some(user);
         a.load_look();
         let a = a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
-        assert_eq!(a.rows().len(), 1, "시험의 전제 — 끝난 줄 하나 (뿌리에 `..` 은 없다)");
+        assert_eq!(a.rows().len(), 1, "시험의 전제 — 미룬 줄 하나 (뿌리에 `..` 은 없다)");
         assert_eq!(a.cursor, 0, "첫 화면이 그 줄에 안 섰다");
     }
 
@@ -12328,6 +12464,199 @@ mod tests {
         assert!(f.issues.iter().any(|i| i.id == "argos-a002"), "화면이 아카이브의 줄을 잃었다");
     }
 
+    /// **섞은 줄로 잰 지도로 세도 배너의 수는 같다**(moai-ug6x.pi3) — 이음([`counted_beside`])은 셈의 문맥과 섞은 줄이
+    /// 같은 줄들이면 지도를 한 벌만 짓고 그것으로 센다. 두 줄의 차례는 다르다(id 차례 대 아카이브 다음 산 줄) — 같은
+    /// id 의 줄끼리 차례만 지키면 지도의 답이 같다는 것이 [`crate::archive::shareable`] 의 전제고, 아카이브 안에 같은
+    /// id 가 둘인 판·산 에픽 밑의 아카이브 멤버·아카이브의 막는 줄·옮길 묶음으로 그것을 잰다.
+    ///
+    /// 산 줄이 아카이브의 id 를 들면 두 줄은 **같은 줄들이 아니다** — `beside` 는 두 벌을 다 두고 문맥은 아카이브의
+    /// 사본을 뺀다. 그 판은 따로 센다: 같은 지도로 세면 아카이브의 사본이 일로 서서 수가 달라진다(아래 끝). 산 줄의
+    /// **못 읽는** 줄이 그 id 를 들어도 같다 — 문맥은 그 사본을 뺀다.
+    #[test]
+    fn a_shared_soil_counts_what_the_board_counts() {
+        let s = scratch("shared-soil");
+        let root = s.path();
+        let line = |i: &Issue| format!("{}\n", serde_json::to_string(i).unwrap());
+        let done = |id: &str, kind: Kind| {
+            let mut i = make(id, kind);
+            i.status = Status::new("done");
+            i
+        };
+        let mut waiting = make("argos-0002", Kind::Issue);
+        waiting.blocked_by = vec!["argos-a002".into()];
+        // 오래 닫힌 산 줄 — 옮길 묶음이다.
+        let old = done("argos-0004", Kind::Issue);
+        let epic = make("argos-0005", Kind::Epic);
+        let mut busy = member("argos-0006", "argos-0005");
+        busy.status = Status::new("in_progress");
+        let live = [line(&waiting), line(&old), line(&epic), line(&busy)].concat();
+        std::fs::write(root.join(".moai/issues.jsonl"), &live).unwrap();
+        let archived_epic = done("argos-a001", Kind::Epic);
+        let mut blocker = done("argos-a002", Kind::Issue);
+        blocker.epic = Some("argos-a001".into());
+        let mut gone = done("argos-a003", Kind::Issue);
+        gone.epic = Some("argos-0005".into());
+        let twin = done("argos-a004", Kind::Issue);
+        std::fs::create_dir_all(crate::archive::dir(root)).unwrap();
+        let archive = [line(&archived_epic), line(&blocker), line(&gone), line(&twin), line(&twin)].concat();
+        std::fs::write(crate::archive::path(root, "2026"), archive).unwrap();
+        std::fs::write(crate::archive::path(root, "2025"), "<<<<<<< conflict\n").unwrap();
+
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let now = crate::model::now();
+        let zone = crate::tz::Zone::stored();
+        let nums = |c: &Counted| (c.warnings.count(&now, zone), c.notices, c.unreadable, c.archive_unreadable);
+        let alone = |repo: &Repo| {
+            let live = repo.read().unwrap();
+            let archived = crate::archive::read(&repo.root).unwrap();
+            let shared = crate::archive::shareable(&live.issues, &live.unreadable(), &archived);
+            (board(repo, &live, &live.unreadable(), None, &archived, &now), shared)
+        };
+        let (want, shared) = alone(&repo);
+        assert!(shared, "시험의 전제 — 지도를 나눠 쓰는 판이다");
+        // 전제: 센 것이 비지 않았다 — 0 끼리 견주면 무엇이 갈려도 안 붉어진다.
+        let (warned, noticed, _, _) = nums(&want);
+        assert!(warned >= 2 && noticed >= 1, "{:?}", nums(&want));
+        let got = counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        assert_eq!(nums(&got.counted), nums(&want), "나눠 쓴 지도로 센 수가 보드와 다르다");
+        let ids: Vec<&str> = got.load.issues.iter().map(|i| i.id.as_str()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted, "섞은 줄의 차례가 바뀌었다 — 화면은 id 차례로 든다");
+        assert_eq!(ids.len(), 9, "섞은 줄이 아카이브의 줄을 잃었다 — {ids:?}");
+
+        // 산 줄의 **못 읽는** 줄이 아카이브의 id 를 든다 — 문맥은 그 사본을 빼고(`report::with_archive` 의 `opaque`)
+        // 섞은 줄은 둔다. 나눠 쓰면 `argos-0002` 를 막는 줄이 닫힌 사본으로 풀려 수가 갈린다.
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{live}{{\"id\":\"argos-a002\",\"title\":7}}\n"))
+            .unwrap();
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        assert_eq!(repo.read().unwrap().unreadable().iter().filter_map(|u| u.id).collect::<Vec<_>>(), ["argos-a002"]);
+        let (want, shared) = alone(&repo);
+        assert!(!shared, "못 읽는 산 줄이 아카이브의 id 를 드는데 같은 줄들로 봤다");
+        let got = counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        assert_eq!(nums(&got.counted), nums(&want), "못 읽는 줄 곁에서 센 수가 보드와 다르다");
+
+        // 산 줄이 아카이브의 id 를 든다 — 나눠 쓰지 않고 예전 길로 센다.
+        let reopened = make("argos-a003", Kind::Issue);
+        std::fs::write(root.join(".moai/issues.jsonl"), live + &line(&reopened)).unwrap();
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let (want, shared) = alone(&repo);
+        assert!(!shared, "산 줄과 아카이브가 같은 id 를 드는데 같은 줄들로 봤다");
+        let got = counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        assert_eq!(nums(&got.counted), nums(&want), "예전 길로 센 수가 보드와 다르다");
+        // 왜 나눠 쓰면 안 되는지 — 섞은 줄로 잰 지도로 세면 아카이브의 사본이 산 줄의 id 로 일로 선다.
+        let live = repo.read().unwrap();
+        let archived = crate::archive::read(&repo.root).unwrap();
+        let excluded = crate::archive::conflicts(&live.issues, &archived);
+        let mixed = beside(archived, Load { issues: live.issues.clone(), errors: Vec::new() });
+        let soil = crate::report::Soil::of(&mixed.issues);
+        let unreadable = live.unreadable();
+        let (wrong, _) =
+            crate::archive::board_in(&mixed.issues, &soil, &live.issues, &unreadable, &excluded, &repo.config, &now);
+        let again = crate::archive::read(&repo.root).unwrap();
+        let (right, _) = crate::archive::board(&live.issues, &unreadable, &live.issues, &again, &repo.config, &now);
+        assert_ne!(wrong.counts, right.counts, "사본이 섞인 지도로 세도 같다 — 이 시험이 가르는 것이 없다");
+    }
+
+    /// **여는 길은 산 줄만 일로 센다**(moai-ug6x.a3e) — `cmd::tui::run` 이 지나는 이음([`counted_beside`])을 그대로
+    /// 지나 [`App::open_counted`] 로 연다. 셈에 섞은 줄을 건네면 아카이브의 줄마다 `archive_duplicate_id` 가 서고
+    /// 옮긴 줄이 일로 서서 배너의 수가 `moai status` 보다 커진다. 시험의 여는 길(`App::open`)은 아카이브 없이 세어
+    /// 그 갈림을 못 본다.
+    #[test]
+    fn the_open_path_counts_only_live_work_beside_an_archive() {
+        let (scratch, a) = writable("open-path-archive");
+        let root = scratch.path();
+        let zone = crate::tz::Zone::stored();
+        let before = a.site.warnings.count(&a.site.now, zone);
+        let mut done = make("argos-a001", Kind::Issue);
+        done.status = Status::new("done");
+        let mut epic = make("argos-a002", Kind::Epic);
+        epic.status = Status::new("done");
+        let mut closed = member("argos-a003", "argos-a002");
+        closed.status = Status::new("done");
+        crate::archive::append(root, &[done, epic, closed], &cfg()).unwrap();
+
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let stamp = stamp_of(&repo);
+        let live = repo.read().unwrap();
+        let now = crate::model::now();
+        let Beside { load, counted, index, ground } =
+            counted_beside(&repo, live, None, &Default::default(), true, &now).unwrap();
+        assert!(load.issues.iter().any(|i| i.id == "argos-a001"), "섞은 줄에 아카이브가 없다");
+        let a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        assert_eq!(
+            a.site.warnings.count(&a.site.now, zone),
+            before,
+            "아카이브의 닫힌 줄이 여는 길의 경고로 섰다 — 셈이 섞은 줄을 받았다"
+        );
+        assert_eq!(a.site.unreadable_live, 0);
+        assert!(a.site.issues.iter().any(|i| i.id == "argos-a003"), "화면이 아카이브의 줄을 잃었다");
+
+        assert_eq!(a.site.unreadable_archive, 0);
+
+        // **아카이브의 못 읽는 줄 수도 여는 길로 든다**(moai-ug6x.bbh) — 다시 읽기만 싣던 판은 띄운 첫 화면에서 아카이브를
+        // 펴도 배너가 말이 없다가, 60초 뒤의 다시 읽기에서야 섰다.
+        let file = crate::archive::path(root, "2026");
+        let mut text = std::fs::read_to_string(&file).unwrap();
+        text.push_str("{\"id\":\"argos-a009\",\"kind\":42}\n");
+        std::fs::write(&file, text).unwrap();
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let stamp = stamp_of(&repo);
+        let Beside { load, counted, index, ground } =
+            counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        let a = App::open_counted(repo, load, index, ground, Path::new(), stamp, counted);
+        assert_eq!(a.site.unreadable_archive, 1, "여는 길이 아카이브의 못 읽는 줄 수를 안 실어 왔다");
+        assert_eq!(a.site.unreadable_live, 0, "아카이브의 못 읽는 줄을 산 줄로 셌다");
+
+        // `--json` 은 안 센다 — 섞기만 한다. 셈은 통째로 빈 값이다.
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        let Beside { load, counted, .. } =
+            counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), false, &now).unwrap();
+        assert_eq!(
+            (counted.warnings.count(&now, zone), counted.notices, counted.unreadable, counted.archive_unreadable),
+            (0, 0, 0, 0)
+        );
+        assert_eq!(load.issues.len(), 4);
+        assert_eq!(load.errors.len(), 1, "섞은 줄이 아카이브의 못 읽는 줄을 잃었다");
+    }
+
+    /// **아카이브로 옮긴 미룬 에픽도 산 멤버를 미룬 것으로 세운다**(moai-ug6x.cpq) — 보드의 셈(`report` 의
+    /// `an_archived_deferred_epic_over_a_live_member_counts_as_deferred`)과 같은 자다. 탐색기는 아카이브를 섞은 줄로
+    /// 미룸을 재므로(`Soil::of`), 섞기가 산 줄만 넘기면 에픽이 안 보여 그 멤버가 계획 안의 일로 선다. 상세가 물려받은
+    /// 미룸을 대고, 미룬 것 숨기기(`SPC v l`)가 그 멤버를 숨긴다.
+    #[test]
+    fn an_archived_deferred_epic_defers_its_live_member_in_the_explorer() {
+        let (scratch, mut a) = writable("archived-deferred-epic");
+        let root = scratch.path();
+        let mut epic = make("argos-0009", Kind::Epic);
+        epic.deferred_at = Some("2026-09-01T00:00:00Z".into());
+        let mut sibling = member("argos-0003", "argos-0009");
+        sibling.status = Status::new("done");
+        crate::archive::append(root, &[epic, sibling], &cfg()).unwrap();
+        let live = root.join(".moai/issues.jsonl");
+        let mut text = std::fs::read_to_string(&live).unwrap();
+        text.push_str(&format!("{}\n", serde_json::to_string(&member("argos-0002", "argos-0009")).unwrap()));
+        std::fs::write(&live, text).unwrap();
+        a.reload();
+        // 처음 보기는 미룬 것을 숨긴다(moai-muit) — 이 시험은 보이는 데서 `SPC v l` 로 숨기는 것을 잰다.
+        a.view.hide_deferred = false;
+        a.see();
+
+        let at = a.site.index.find("argos-0002").expect("산 멤버가 없다");
+        assert_eq!(a.site.index.shelved_at(at), Some("argos-0009"), "아카이브의 미룬 에픽을 물려받지 않았다");
+        assert_eq!(a.land("argos-0002"), Landing::Shown, "미룬 것을 안 숨긴 보기에서 멤버가 안 섰다");
+        let screen = draw::tests::render(&mut a, 180, 24).join("\n");
+        assert!(screen.contains("미룸 — argos-0009 밑"), "상세가 물려받은 미룸을 안 댔다\n{screen}");
+
+        a.hit("SPC v l");
+        assert!(a.view.hide_deferred, "시험의 전제 — SPC v l 이 미룬 것을 숨긴다");
+        assert!(!a.site.shown[at], "미룬 것 숨기기가 아카이브의 에픽 밑 멤버를 남겼다");
+        let epic = a.site.index.find("argos-0009").expect("아카이브의 에픽이 화면에 없다");
+        assert_eq!(a.site.index.shelved_at(epic), Some("argos-0009"));
+        assert!(!a.site.shown[epic], "미룬 것 숨기기가 아카이브의 미룬 에픽을 남겼다");
+        assert_eq!(a.land("argos-0002"), Landing::Hidden);
+    }
+
     /// **배너의 "못 읽는 줄 N" 은 산 줄만 센다**(moai-e18s) — 섞은 목록으로 세던 판은 아카이브 파일의 못 읽는 줄까지
     /// 급한 배너로 세웠고, `moai status` 와 층은 그것을 `archive_unreadable` 경고로만 냈다. 섞인 목록은 그대로
     /// 든다 — 거기서 거르면 깨진 아카이브 줄의 id 가 지킬 것에서 빠져 `r` 이 그 이슈의 읽음을 걷는다.
@@ -12361,6 +12690,13 @@ mod tests {
         );
         let said = draw::tests_banner(&mut a);
         assert!(!said.contains("읽을 수 없는 줄"), "{said}");
+        // **아카이브를 보는 동안만 그 줄을 따로 댄다**(moai-ug6x.bbh) — 수는 다시 읽기가 실어 온 줄마다의 수다.
+        assert_eq!(a.site.unreadable_archive, 1, "다시 읽기가 아카이브의 못 읽는 줄 수를 안 실어 왔다");
+        assert!(!said.contains("아카이브의 못 읽는 줄"), "산 목록에서 아카이브의 줄을 댔다: {said}");
+        a.view.show_archived = true;
+        let said = draw::tests_banner(&mut a);
+        assert!(said.contains("아카이브의 못 읽는 줄 1 — 그 줄 없이 보는 중"), "{said}");
+        a.view.show_archived = false;
 
         // 산 줄이 깨지면 그 수만큼 선다 — 아카이브의 것은 여전히 안 든다.
         let live = root.join(".moai/issues.jsonl");

@@ -1133,6 +1133,14 @@ fn init_plants_the_merge_driver_too() {
     assert!(git(&other, &["config", "--get", "--default", "", "merge.moai.driver"]).trim().is_empty(), "줄이 섰다");
     // 안 심었으니 이제 알림이 선다 — 그 갈래는 그대로다.
     assert!(ok(&other, &["status"]).contains("안 심었다"), "안 심었는데 조용하다");
+
+    // **기계에게는 `skipped` 다** — 커밋하는 트래커에서 이번만 건너뛴 것이라, git 밖의 트래커(`untracked`,
+    // moai-8gwh.86j)와 낱말이 갈린다.
+    let third = s.path().join("셋째");
+    std::fs::create_dir_all(&third).unwrap();
+    git(&third, &["init", "-q", "."]);
+    let js = ok(&third, &["init", "argos", "--no-driver", "--json"]);
+    assert_eq!(field(&js, "driver"), "skipped", "{js}");
 }
 
 /// **`moai init --check` 는 드라이버의 자리도 답하고 아무것도 안 쓴다**(moai-08bo).
@@ -1460,6 +1468,245 @@ fn init_never_swaps_the_lock_through_agents_md() {
     assert!(said.contains("the lock moai holds"), "왜 안 썼는지를 안 댔다\n{said}");
 }
 
+/// **`.moai` 밖에 적힌 파일은 링크를 따라 트래커로 들지 않는다**(moai-r0x8.a42). 커밋된
+/// `AGENTS.md -> .moai/issues.jsonl` 이면 `init` 이 스냅샷을 AGENTS.md 로 읽어 블록을 붙이고 저장소 락 없이
+/// `rename` 으로 갈아끼웠다 — 옆의 `add` 와 겹치면 줄을 말없이 잃고, 스냅샷에 마크다운이 서 `status` 가 1 로 끝났다.
+/// `-> .moai/config.toml` 이면 뒤의 모든 명령이 설정 줄에서 죽었다. 스냅샷 자체가 링크면 그 너머의 파일도 같다.
+#[cfg(unix)]
+#[test]
+fn init_never_writes_into_the_tracker_through_agents_md() {
+    let s = init("init-agents-tracker");
+    add(s.path(), &["스냅샷에 선 줄"]);
+    let agents = s.path().join("AGENTS.md");
+    let is_link = |p: &Path| std::fs::symlink_metadata(p).unwrap().file_type().is_symlink();
+    for target in [".moai/issues.jsonl", ".moai/config.toml"] {
+        let before = std::fs::read_to_string(s.path().join(target)).unwrap();
+        std::fs::remove_file(&agents).unwrap();
+        std::os::unix::fs::symlink(target, &agents).unwrap();
+        let said = ok(s.path(), &["init"]);
+        assert_eq!(
+            std::fs::read_to_string(s.path().join(target)).unwrap(),
+            before,
+            "{target} 에 AGENTS.md 블록을 썼다\n{said}"
+        );
+        assert!(is_link(&agents), "AGENTS.md 링크를 갈아끼웠다");
+        assert!(said.contains("inside the tracker"), "{target}: 왜 안 썼는지를 안 댔다\n{said}");
+        ok(s.path(), &["status"]);
+        ok(s.path(), &["show", "--all"]);
+    }
+
+    // 스냅샷이 링크면 그 너머의 파일이 스냅샷이다 — `.moai` 밖이라도 거기 닿으면 안 쓴다.
+    let root = s.path();
+    std::fs::create_dir(root.join("shared")).unwrap();
+    std::fs::rename(root.join(".moai/issues.jsonl"), root.join("shared/issues.jsonl")).unwrap();
+    std::os::unix::fs::symlink("../shared/issues.jsonl", root.join(".moai/issues.jsonl")).unwrap();
+    std::fs::remove_file(&agents).unwrap();
+    std::os::unix::fs::symlink("shared/issues.jsonl", &agents).unwrap();
+    let before = std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap();
+    let said = ok(root, &["init"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join("shared/issues.jsonl")).unwrap(),
+        before,
+        "링크 너머의 스냅샷에 썼다\n{said}"
+    );
+    assert!(said.contains("snapshot"), "왜 안 썼는지를 안 댔다\n{said}");
+    ok(root, &["status"]);
+}
+
+/// `.moai` 자체가 체크아웃 안의 딴 디렉터리로 가는 링크여도 그 안은 트래커다(리뷰 moai-r0x8 1번) — 푼 자리의 철자에
+/// `.moai` 가 없어 조각으로만 재던 판은 `AGENTS.md -> .moai/config.toml` 을 지나보내 `init` 이 설정을 블록으로 갈아끼웠다.
+#[cfg(unix)]
+#[test]
+fn init_never_writes_into_a_tracker_whose_moai_is_a_directory_link() {
+    let s = init("init-agents-dir-link");
+    let root = s.path();
+    std::fs::rename(root.join(".moai"), root.join("data")).unwrap();
+    std::os::unix::fs::symlink("data", root.join(".moai")).unwrap();
+    let agents = root.join("AGENTS.md");
+    for target in [".moai/config.toml", "data/config.toml"] {
+        let before = std::fs::read_to_string(root.join("data/config.toml")).unwrap();
+        std::fs::remove_file(&agents).unwrap();
+        std::os::unix::fs::symlink(target, &agents).unwrap();
+        let said = ok(root, &["init"]);
+        assert_eq!(
+            std::fs::read_to_string(root.join("data/config.toml")).unwrap(),
+            before,
+            "{target}: 설정에 AGENTS.md 블록을 썼다\n{said}"
+        );
+        assert!(said.contains("inside the tracker"), "{target}: 왜 안 썼는지를 안 댔다\n{said}");
+        ok(root, &["status"]);
+    }
+}
+
+/// **AGENTS.md 가 `init` 이 줄을 덧붙이는 딸린 파일로 가는 링크면 블록을 안 심는다**(moai-8gwh.esm). 블록은 처음에
+/// 읽은 글에 붙여 맨 끝에 갈아끼우므로, 커밋된 `AGENTS.md -> .gitattributes` 에서 같은 실행이 덧붙인 `merge=moai`
+/// 줄이 통째로 지워지고 AGENTS 마크다운이 속성 패턴으로 섰다 — 출력은 둘 다 썼다고 하고 0 으로 끝났다.
+/// `-> .gitignore` 면 `.moai/lock` 줄이 같은 길로 사라졌다.
+#[cfg(unix)]
+#[test]
+fn init_never_plants_the_block_over_a_dotfile_agents_md_leads_to() {
+    for (target, rule) in
+        [(".gitattributes", ".moai/issues.jsonl   text eol=lf merge=moai"), (".gitignore", ".moai/lock")]
+    {
+        let s = Scratch::new("init-agents-dotfile");
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        std::fs::write(root.join(target), "*.png binary\n").unwrap();
+        std::os::unix::fs::symlink(target, root.join("AGENTS.md")).unwrap();
+        let out = staged(&["init", "argos", "--no-skill", "--no-register"])
+            .env("MOAI_LANG", "en")
+            .current_dir(root)
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        assert!(out.status.success(), "{target}: 0 이 아니다\n{said}\n{}", String::from_utf8_lossy(&out.stderr));
+        let held = read(&root.join(target));
+        assert!(held.starts_with("*.png binary\n"), "{target}: 사람의 줄을 지웠다\n{held}");
+        assert!(held.lines().any(|l| l == rule), "{target}: 방금 덧붙인 규칙이 지워졌다\n{held}\n{said}");
+        assert!(!held.contains("moai:begin") && !held.contains("Issue tracker"), "{target}: 블록을 심었다\n{held}");
+        assert!(said.contains(&format!("AGENTS.md leads to {target}")), "{target}: 안 썼다고 안 댔다\n{said}");
+        assert!(!said.contains("AGENTS.md block"), "{target}: 블록을 맞췄다고 했다\n{said}");
+
+        let js = ok(root, &["init", "--json"]);
+        assert!(js.contains("\"AGENTS.md\":{\"kind\":\"shared\""), "{target}: 기계에게 안 댔다 — {js}");
+        assert_eq!(read(&root.join(target)), held, "{target}: 다시 부른 init 이 파일을 바꿨다");
+        let check = ok(root, &["init", "--check", "--json"]);
+        assert_eq!(field(&check, "agents_shared"), target, "{target}: --check 가 안 댔다 — {check}");
+    }
+}
+
+/// **링크인 딸린 파일은 AGENTS.md 와 한 파일이어도 블록을 막지 않는다**(리뷰 moai-8gwh 7번). `init` 은 링크인
+/// `.gitattributes` 에 줄을 안 덧붙여 블록이 지울 것이 없는데, 견주던 판은 `.gitattributes -> x` 와 `AGENTS.md -> x`
+/// 에서 "init 이 함께 쓰는 파일" 이라며 블록을 안 심었다. 링크라는 것은 그 파일의 알림이 따로 댄다.
+#[cfg(unix)]
+#[test]
+fn a_linked_dotfile_does_not_keep_the_block_out_of_agents_md() {
+    let s = Scratch::new("init-agents-linked-dotfile");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    std::fs::write(root.join("x"), "*.png binary\n").unwrap();
+    std::os::unix::fs::symlink("x", root.join(".gitattributes")).unwrap();
+    std::os::unix::fs::symlink("x", root.join("AGENTS.md")).unwrap();
+    let out = staged(&["init", "argos", "--guide", "block", "--no-skill", "--no-register"])
+        .env("MOAI_LANG", "en")
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.status.success(), "0 이 아니다\n{said}\n{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!said.contains("AGENTS.md leads to"), "링크인 딸린 파일을 함께 쓴다고 댔다\n{said}");
+    assert!(read(&root.join("x")).contains("Start a session"), "블록을 안 심었다\n{said}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(!check.contains("agents_shared"), "--check 가 함께 쓴다고 댔다 — {check}");
+}
+
+/// **`--check` 는 AGENTS.md 에 심는 안내일 때만 딸린 파일과 견준다**(리뷰 moai-8gwh 6번) — `run` 이 그렇게 잰다.
+/// git 밖에 둔 트래커를 `--guide none` 으로 심은 저장소에서 늘 재던 판은 "AGENTS.md 를 안 건드린다" 뒤에 "블록을
+/// 받으려면 보통 파일로 바꾼다" 를 함께 세웠다.
+#[cfg(unix)]
+#[test]
+fn init_check_measures_the_shared_agents_md_only_where_it_would_plant() {
+    let s = Scratch::new("init-check-shared-none");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+    std::os::unix::fs::symlink(".gitignore", root.join("AGENTS.md")).unwrap();
+    ok(root, &["init", "argos", "--tracking", "gitignore", "--guide", "none", "--no-skill", "--no-register"]);
+    let out = staged(&["init", "--check"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        said.contains("leaves the committed AGENTS.md alone"),
+        "시험의 전제 — 안내를 안 심는 저장소가 아니다\n{said}"
+    );
+    assert!(!said.contains("AGENTS.md leads to"), "안 심는 안내에 보통 파일로 바꾸라고 했다\n{said}");
+    let check = ok(root, &["init", "--check", "--json"]);
+    assert!(!check.contains("agents_shared"), "{check}");
+}
+
+/// **`--guide file` 에서 `--guide block` 으로 바꾸면 `.moai/guide.md` 를 걷는다**(moai-8gwh.ftm). 링크 블록이 전문으로
+/// 갈린 뒤에도 그 파일이 아무도 안 가리킨 채 남았다. AGENTS.md 를 안 건드리는 안내(`none`)로 부르면 링크가 아직
+/// 사니 그대로 둔다.
+#[test]
+fn switching_the_guide_to_a_block_removes_the_guide_file() {
+    let s = Scratch::new("init-guide-switch");
+    let root = s.path();
+    git(root, &["init", "-q", "."]);
+    ok(root, &["init", "argos", "--guide", "file", "--no-skill", "--no-register"]);
+    let guide = root.join(".moai/guide.md");
+    assert!(guide.is_file(), "시험의 전제 — 링크 모드가 전문 파일을 안 썼다");
+
+    let kept = ok(root, &["init", "--guide", "none", "--json"]);
+    assert!(guide.is_file(), "AGENTS.md 의 링크가 아직 가리키는 파일을 걷었다 — {kept}");
+    assert!(!kept.contains("guide_file_removed"), "{kept}");
+
+    let js = ok(root, &["init", "--guide", "block", "--json"]);
+    assert!(!guide.exists(), "블록으로 바꿨는데 전문 파일이 남았다 — {js}");
+    assert_eq!(field(&js, "guide_file_removed"), ".moai/guide.md", "{js}");
+    assert!(read(&root.join("AGENTS.md")).contains("Start a session"), "AGENTS.md 에 전문이 안 섰다");
+    assert_eq!(field(&ok(root, &["init", "--check", "--json"]), "agents"), "current");
+
+    // 이미 블록인 저장소에 남은 옛 판의 전문도 걷는다 — 첫머리로 알아본다. 사람에게는 한 줄로 댄다.
+    let old =
+        "## Issue tracker — moai\r\n\r\nThis repository's work lives in `.moai/issues.jsonl`.\r\nan older guide\r\n";
+    std::fs::write(&guide, old).unwrap();
+    let said = staged(&["init"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&said.stdout);
+    assert!(!guide.exists(), "{said}");
+    assert!(said.contains("removed .moai/guide.md"), "걷은 것을 안 댔다\n{said}");
+    let again = ok(root, &["init", "--json"]);
+    assert!(!again.contains("guide_file_removed"), "없는 파일을 걷었다고 했다 — {again}");
+
+    // **moai 의 안내가 아닌 파일은 남긴다**(리뷰 moai-8gwh 5번) — 늘 블록 모드였던 저장소에서 사람이 그 이름으로 둔
+    // 메모를 `init` 이 묻지 않고 지웠다. 남긴 것은 한 줄로, 기계에게는 키로 댄다.
+    std::fs::write(&guide, "my notes\n").unwrap();
+    let said = staged(&["init"]).env("MOAI_LANG", "en").current_dir(root).output().unwrap();
+    let said = String::from_utf8_lossy(&said.stdout);
+    assert_eq!(read(&guide), "my notes\n", "사람의 파일을 지웠다\n{said}");
+    assert!(said.contains("left .moai/guide.md — it is not a moai guide"), "남긴 것을 안 댔다\n{said}");
+    let js = ok(root, &["init", "--json"]);
+    assert_eq!(field(&js, "guide_file_kept"), ".moai/guide.md", "{js}");
+    assert!(!js.contains("guide_file_removed"), "{js}");
+}
+
+/// **트래커를 못 세우면 먼저 덧붙인 무시 줄을 걷는다**(moai-8gwh.67q). git 밖에 둔 트래커는 무시 줄을 `.moai`
+/// 보다 먼저 쓰는데, `.moai` 를 못 지어 멈춘 판이 그 줄을 남겼다. 뿌리를 읽기 전용으로 두면 덧붙이기(쓸 수 있는
+/// 파일, 또는 `.git/info/` 안)는 되고 `.moai` 짓기만 진다. 권한을 안 따지는 사용자(root)면 그 자리를 못 지어 건너뛴다.
+#[cfg(unix)]
+#[test]
+fn a_tracker_that_cannot_be_created_takes_its_ignore_lines_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &Path, m: u32| std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap();
+    for tracking in ["gitignore", "exclude"] {
+        let s = Scratch::new("init-local-rollback");
+        let root = s.path();
+        git(root, &["init", "-q", "."]);
+        let (file, before) = match tracking {
+            "gitignore" => (root.join(".gitignore"), Some("target/\n")),
+            _ => (root.join(".git/info/exclude"), None),
+        };
+        match before {
+            Some(text) => std::fs::write(&file, text).unwrap(),
+            None => {
+                let _ = std::fs::remove_file(&file);
+            }
+        }
+        mode(root, 0o555);
+        if std::fs::write(root.join("probe"), "").is_ok() {
+            mode(root, 0o755);
+            return;
+        }
+        let out =
+            moai(root, &["init", "argos", "--tracking", tracking, "--guide", "none", "--no-skill", "--no-register"]);
+        mode(root, 0o755);
+        assert!(!out.status.success(), "{tracking}: 트래커를 못 세웠는데 0 으로 끝났다");
+        assert!(!root.join(".moai").exists(), "{tracking}: 반쯤 지은 .moai 를 남겼다");
+        match before {
+            Some(text) => assert_eq!(read(&file), text, "{tracking}: 덧붙인 무시 줄을 안 걷었다"),
+            None => assert!(!file.exists(), "{tracking}: 이 실행이 지은 무시 파일을 남겼다 — {}", read(&file)),
+        }
+    }
+}
+
 /// 접두어는 처음 한 번만. 바꾸면 이미 발급된 id 가 제 접두어를 잃는다.
 #[test]
 fn init_refuses_to_change_the_prefix() {
@@ -1554,6 +1801,21 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     assert!(err.contains("MOAI_HERE=1 moai init argos"), "친 접두어를 빠뜨린 줄을 댔다 — {err}");
     assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
 
+    // **깃발도 친 대로 도로 낸다** — 값을 받는 깃발은 정한 낱말로, 짝 깃발은 준 쪽으로. `--register` 는 고른 값의
+    // `project` 칸에서 되살아난다(moai-8gwh.86j) — 칸 이름이 깃발과 달라 빠뜨리기 쉬운 자리다.
+    let out = moai(
+        &deep,
+        &["init", "argos", "--tracking", "commit", "--no-agents", "--no-driver", "--no-skill", "--register", "--yes"],
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(
+        err.contains(
+            "MOAI_HERE=1 moai init argos --tracking commit --guide none --yes --no-driver --no-skill --register\n"
+        ),
+        "친 깃발을 그대로 안 되살렸다 — {err}"
+    );
+
     // **`-C` 로 왔으면 그것도 도로 낸다** — `-C` 는 `set_current_dir` 로 따르므로 "여기" 는 `-C` 가
     // 가리킨 자리고 사람의 셸은 딴 데 있다. 빠뜨린 줄을 그대로 베끼면 그 셸 자리에 트래커가 하나
     // 더 선다 — 나머지를 친 대로 되살린 줄일수록 더 그대로 베낀다.
@@ -1603,6 +1865,78 @@ fn a_worktree_split_before_moai_still_refuses_to_plant_a_tracker() {
     // 꼭대기도 같다 — 거기 `.moai` 가 없는 것은 이 워크트리가 처음이다.
     let out = moai(&wt, &["init", "argos"]);
     assert!(!out.status.success(), "워크트리 꼭대기에 세웠다 — {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// **주 체크아웃에 트래커가 있는가를 가르는 자는 하나다**(moai-r0x8.apz). 옛 커밋을 체크아웃하거나 bisect 하면
+/// 주 체크아웃에 `.moai/lock` 하나만 남는다(`Lock::drop` 은 락 파일을 안 지운다). 찾기(`worktree::tracker_root`)는
+/// `config.toml` 이 없으니 트래커가 아니라 하고, `init` 의 거절(`store::elsewhere`)은 `.moai` 디렉터리가 있으니
+/// 트래커라 했다 — 옆 워크트리의 `prime` 은 "`moai init` 이 심는다" 를 대고, 그 `init` 은 주 체크아웃을 대며
+/// 거절했다. 막다른 길이다. 이제 둘 다 `store::holds_tracker` 로 묻는다.
+#[test]
+fn a_main_checkout_holding_only_a_lock_is_no_tracker_to_either_judge() {
+    let s = Scratch::new("initwt-lockonly");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "before"]);
+    git(&main, &["worktree", "add", "-q", "../side", "-b", "side"]);
+    std::fs::create_dir_all(main.join(".moai")).unwrap();
+    std::fs::write(main.join(".moai/lock"), "").unwrap();
+    let side = s.path().join("side");
+
+    let json = ok(&side, &["prime", "--json"]);
+    assert!(json.contains("\"no_tracker\":true"), "시험의 전제 — 찾기는 락만 남은 자리를 트래커로 안 센다\n{json}");
+    let json = ok(&side, &["init", "--check", "--json"]);
+    assert!(!json.contains("tracker_at"), "init --check 가 락만 남은 주 체크아웃을 댔다\n{json}");
+
+    // prime 이 댄 `moai init` 이 실제로 선다 — 막다른 길이 없다.
+    ok(&side, &["init", "argos"]);
+    assert!(side.join(".moai/config.toml").is_file(), "워크트리에 트래커가 안 섰다");
+    let id = field(&ok(&side, &["add", "이 가지의 일", "--json"]), "id");
+    assert!(issues(&side).contains(&format!("\"id\":\"{id}\"")), "세운 트래커를 안 읽었다");
+    assert!(!main.join(".moai/issues.jsonl").exists(), "락만 남은 주 체크아웃에 썼다");
+}
+
+/// **주 체크아웃 밖에 선, `.moai` 없는 딸린 워크트리도 주 체크아웃의 트래커를 읽는다**(moai-r0x8.3fi).
+/// `git worktree add ../side <moai 전 커밋>` 에서 `prime` 은 `no_tracker:true` 와 "`moai init` 이 심는다" 를
+/// 냈는데, 그 `init` 은 "트래커는 주 체크아웃에 있다" 로 거절했다. `init --check` 와 `project add|ls` 는 이미
+/// 주 체크아웃을 댔다 — 위로만 찾던 `Repo::find` 하나가 옮겨 가지 않았다. 밑자리도 같다.
+#[test]
+fn a_worktree_outside_the_main_checkout_without_moai_reads_the_main_tracker() {
+    let s = Scratch::new("wt-outside-pre");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    git(&main, &["commit", "-q", "--allow-empty", "-m", "before"]);
+    git(&main, &["branch", "pre"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "주 체크아웃의 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "--detach", "../side", "pre"]);
+    let side = s.path().join("side");
+    assert!(!side.join(".moai").exists(), "시험의 전제 — 워크트리가 트래커를 들고 왔다");
+    let deep = side.join("src/deep");
+    std::fs::create_dir_all(&deep).unwrap();
+
+    for at in [&side, &deep] {
+        let json = ok(at, &["prime", "--json"]);
+        assert!(!json.contains("no_tracker"), "주 체크아웃의 트래커를 두고 없다 했다 — {}\n{json}", at.display());
+        assert!(json.contains(&id), "주 체크아웃의 일을 안 냈다 — {}\n{json}", at.display());
+        let said = ok(at, &["prime"]);
+        assert!(!said.contains("moai init"), "안 서는 init 을 댔다 — {}\n{said}", at.display());
+        // status·ready 도 `.moai` 를 못 찾았다는 거절(`refuse.not_a_repo`) 없이 그 트래커를 연다.
+        assert!(ok(at, &["status"]).contains(&id), "status 가 주 체크아웃의 트래커를 안 열었다");
+        assert!(ok(at, &["ready"]).contains(&id), "ready 가 주 체크아웃의 트래커를 안 열었다");
+    }
+
+    // 쓰기도 주 체크아웃에 들고, 어디에 썼는지 한 줄로 댄다.
+    let out = moai(&side, &["add", "워크트리에서 친 일", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let later = field(&String::from_utf8_lossy(&out.stdout), "id");
+    assert!(issues(&main).contains(&format!("\"id\":\"{later}\"")), "주 체크아웃에 안 썼다");
+    assert!(!side.join(".moai").exists(), "워크트리에 트래커를 세웠다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("루트의 트래커에 썼다"), "{}", text(&out));
 }
 
 /// **알리는 표면은 `MOAI_HERE` 를 안 물려받는다**(moai-ko4y, 2026-09-21 사용자 결정). `--check` 의
@@ -4581,6 +4915,30 @@ fn filters_reach_the_command_line() {
 
     let e = moai(s.path(), &["show", "-s", "todo", "-s", "review"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("-s todo,review"));
+    // **값 하나만 드는 셋은 두 번째 값을 거절한다**(moai-ltsv.auf) — 한때 뒤의 값이 말없이 앞의 값을 덮었다.
+    // 또는이 없으니 쉼표로 잇지 않고 하나를 남기라고 이른다.
+    for (args, fix) in [
+        (&["show", "--filter", "grep=one", "--filter", "grep=two"][..], "`-g two`"),
+        (&["show", "-g", "a", "--filter", "grep=b"][..], "`-g b`"),
+        (&["show", "--type", "epic", "--filter", "type=issue"][..], "`--type issue`"),
+        (&["show", "--stale", "3", "--filter", "stale=7", "--filter", "stale=9"][..], "`--stale 9`"),
+    ] {
+        let e = moai(s.path(), args);
+        let err = String::from_utf8_lossy(&e.stderr);
+        assert!(!e.status.success() && err.contains(fix), "{args:?} — {err}");
+    }
+    // 종류 낱말이 이미 종류를 고른 자리는 `--type` 을 대지 않는다 — `moai epic show --type issue` 는 말없이 에픽을
+    // 낸다(moai-ltsv.auf 리뷰). 같은 값(`type=epic`)도 "epic 이면서 epic" 이 아니라 이 자리의 말로 거절한다.
+    for args in [
+        &["epic", "show", "--filter", "type=issue"][..],
+        &["show", "epic", "--filter", "type=issue"][..],
+        &["epic", "show", "--filter", "type=epic"][..],
+    ] {
+        let e = moai(s.path(), args);
+        let err = String::from_utf8_lossy(&e.stderr);
+        assert!(!e.status.success() && err.contains("`moai show --type "), "{args:?} — {err}");
+        assert!(!err.contains("이면서 동시에"), "되풀이로 읽었다 — {args:?}: {err}");
+    }
     let e = moai(s.path(), &["show", "--filter", "statu=todo"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("status, tag"));
 }
@@ -5269,6 +5627,154 @@ fn prime_tells_a_tracker_it_cannot_open_from_no_tracker() {
         "{code} 가 아니다 — {json}"
     );
     assert!(!json.contains("no_tracker"), "{json}");
+    // 올라가 잡은 것이 아니면 그 키는 안 선다.
+    assert!(!json.contains("climbed_to"), "{json}");
+}
+
+/// **올라가 잡은 못 읽는 트래커를 여기 것이라 하지 않는다**(moai-r0x8.ris, 2026-10-07 사용자 결정). `.moai` 없는
+/// 체크아웃(`top/proj`)에서 위의 `top/.moai` 를 못 읽으면 `prime` 은 "여기 트래커를 못 읽었다 — <top 의 자리>" 를
+/// 냈고, 올라갔다는 말은 세션 시작 훅이 안 싣는 stderr 에만 섰다. 이제 판이 여기에는 `.moai` 가 없다고 대고 길
+/// 둘을 함께 댄다 — 그 트래커를 고치거나 여기 따로 `moai init` 으로 세운다. `--json` 은 `tracker_error` 곁에
+/// `climbed_to` 로 그 뿌리를 싣는다. 대는 `moai init` 은 실제로 선다.
+#[test]
+fn prime_says_the_unreadable_tracker_was_climbed_to_and_gives_both_ways() {
+    let s = init("primeclimbed");
+    std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
+    let proj = s.path().join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    git(&proj, &["init", "-q"]);
+    let top = std::fs::canonicalize(s.path()).unwrap().display().to_string();
+
+    let out = moai(&proj, &["prime"]);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(said.contains("이 체크아웃엔 `.moai` 가 없고, 올라가 잡은"), "올라가 잡은 것을 안 댔다\n{said}");
+    assert!(said.contains(&format!("{top} 의 트래커")), "잡은 뿌리를 안 댔다\n{said}");
+    assert!(said.contains("config.toml"), "못 읽은 까닭을 안 댔다\n{said}");
+    assert!(said.contains("그 트래커를 고친") && said.contains("`moai init`"), "길 둘을 안 댔다\n{said}");
+    assert!(!said.contains("여기 트래커를 못 읽었다"), "올라가 잡은 트래커를 여기 것이라 했다\n{said}");
+    // 판이 댄 것을 stderr 가 또 대지 않는다.
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("올라가"), "{}", text(&out));
+
+    let json = ok(&proj, &["prime", "--json"]);
+    one_json_value(&json);
+    assert!(json.contains("\"tracker_error\":{\"code\":\""), "{json}");
+    assert!(json.contains(&format!("\"climbed_to\":{top:?}")), "잡은 뿌리를 안 실었다\n{json}");
+    assert!(!json.contains("no_tracker"), "{json}");
+
+    // 대는 둘째 길이 실제로 선다 — 여기 따로 세우면 prime 이 그것을 읽는다.
+    ok(&proj, &["init", "argos"]);
+    let json = ok(&proj, &["prime", "--json"]);
+    assert!(!json.contains("tracker_error") && !json.contains("climbed_to"), "{json}");
+}
+
+/// **올라간 판이 대는 자리는 실제 자리다**(리뷰 moai-r0x8.qbh 9번). 둘이 틀렸다.
+///
+/// - 체크아웃의 밑자리(`proj/src`)에서 부르면 `moai init` 은 **거기**(`proj/src/.moai`)에 심는다 — 이 체크아웃의
+///   트래커를 세우는 길은 꼭대기를 대는 `moai -C <proj> init` 이다. `--json` 은 그 자리를 `init_at` 으로 싣는다
+/// - 찾기는 들여다보지 못한 `.moai`(권한)를 건너뛰고 올라간다. 그 자리에서 "여기엔 `.moai` 가 없다" 는 거짓이고
+///   `moai init` 도 길이 아니다 — 들여다보지 못했다고 댄다(`--json`: `unseen_at`)
+#[cfg(unix)]
+#[test]
+fn prime_names_the_real_place_after_climbing() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let s = init("primeclimbplace");
+    std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
+    let top = std::fs::canonicalize(s.path()).unwrap();
+    let proj = top.join("proj");
+    let src = proj.join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&proj, &["init", "-q"]);
+
+    let said = String::from_utf8_lossy(&moai(&src, &["prime"]).stdout).into_owned();
+    let go = format!("`moai -C {} init`", proj.display());
+    assert!(said.contains(&go), "밑자리에 심을 `moai init` 을 댔다 — {go} 가 없다\n{said}");
+    let json = ok(&src, &["prime", "--json"]);
+    assert!(json.contains(&format!("\"init_at\":{:?}", proj.display().to_string())), "{json}");
+    // 댄 줄이 실제로 이 체크아웃의 트래커를 세운다.
+    ok(&src, &["-C", proj.to_str().unwrap(), "init", "argos"]);
+    assert!(proj.join(".moai").is_dir() && !src.join(".moai").exists());
+    let json = ok(&src, &["prime", "--json"]);
+    assert!(!json.contains("tracker_error") && !json.contains("climbed_to"), "{json}");
+
+    // 들여다보지 못한 `.moai` — 링크 끝이 권한 없는 디렉터리 안이다.
+    let other = top.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    git(&other, &["init", "-q"]);
+    let locked = top.join("locked");
+    std::fs::create_dir_all(locked.join("x")).unwrap();
+    std::os::unix::fs::symlink(locked.join("x"), other.join(".moai")).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = std::fs::metadata(other.join(".moai")).is_ok();
+    if !readable {
+        let out = moai(&other, &["prime"]);
+        let said = String::from_utf8_lossy(&out.stdout).into_owned();
+        let json = ok(&other, &["prime", "--json"]);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(out.status.success(), "{}", text(&out));
+        assert!(!said.contains("`.moai` 가 없"), "들여다보지 못한 자리를 없다 했다\n{said}");
+        assert!(said.contains("들여다보지 못했다"), "들여다보지 못했다고 안 댔다\n{said}");
+        assert!(said.contains(&other.join(".moai").display().to_string()), "그 자리를 안 댔다\n{said}");
+        assert!(!said.contains("init`"), "길이 아닌 `moai init` 을 댔다\n{said}");
+        assert!(json.contains(&format!("\"unseen_at\":{:?}", other.join(".moai").display().to_string())), "{json}");
+        assert!(json.contains("\"climbed_to\":") && !json.contains("init_at"), "{json}");
+    } else {
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // root 는 권한을 안 본다
+    }
+}
+
+/// **디렉터리가 아닌 `.moai` 는 트래커가 없는 것이 아니라 못 읽는 것이다**(moai-r0x8.e19). 위로 찾는 걸음이
+/// `is_dir` 로 접어 보통 파일이나 끝이 없는 링크(`.moai -> /nowhere`)를 "트래커 없음" 으로 읽었고, `prime` 은
+/// `no_tracker:true` 와 "`moai init` 이 심는다" 를 댔는데 그 `init` 은 ENOTDIR·EEXIST 로 넘어졌다. 끝이 있는
+/// 링크는 이미 `tracker_error{code:"broken"}` 였다 — 링크 끝이 있는가로 답이 갈리면 안 된다. 세 꼴 모두 그
+/// 자리에 무엇이 섰는지 대고, `init` 을 시키지 않으며, `init` 도 같은 말로 멈추고 그 자리를 안 건드린다.
+#[cfg(unix)]
+#[test]
+fn a_moai_that_is_not_a_directory_is_an_unreadable_tracker_not_none() {
+    let s = Scratch::new("moai-not-dir");
+    let file = s.path().join("plain");
+    std::fs::create_dir_all(&file).unwrap();
+    std::fs::write(file.join(".moai"), "not a tracker\n").unwrap();
+    let nowhere = s.path().join("nowhere");
+    std::fs::create_dir_all(&nowhere).unwrap();
+    std::os::unix::fs::symlink(s.path().join("gone/away"), nowhere.join(".moai")).unwrap();
+    let to_file = s.path().join("to-file");
+    std::fs::create_dir_all(&to_file).unwrap();
+    std::fs::write(s.path().join("a-file"), "").unwrap();
+    std::os::unix::fs::symlink(s.path().join("a-file"), to_file.join(".moai")).unwrap();
+
+    for (at, what) in [(&file, "보통 파일"), (&nowhere, "아무 데도 안 닿는 링크"), (&to_file, "디렉터리가 아닌 것")]
+    {
+        let out = moai(at, &["prime"]);
+        assert!(out.status.success(), "{}", text(&out));
+        let said = String::from_utf8(out.stdout).unwrap();
+        assert!(said.contains("여기 트래커를 못 읽었다 — "), "못 읽는 트래커로 안 댔다 — {}\n{said}", at.display());
+        assert!(said.contains(".moai") && said.contains(what), "그 자리에 선 것을 안 댔다 — {what}\n{said}");
+        assert!(!said.contains("`moai init` 이 심는다"), "안 서는 init 을 댔다\n{said}");
+
+        let json = ok(at, &["prime", "--json"]);
+        one_json_value(&json);
+        assert!(json.contains("\"tracker_error\":{\"code\":\"broken\",\"said\":\""), "{json}");
+        assert!(!json.contains("no_tracker"), "못 읽는 트래커를 없는 것으로 냈다 — {json}");
+
+        // 다른 명령도 같은 자리에서 같은 코드로 멈춘다 — 한눈 보기로 넘어가 "트래커 없음" 으로 안 읽는다.
+        let out = moai(at, &["status", "--json"]);
+        assert!(!out.status.success(), "{}", text(&out));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("\"code\":\"broken\""), "{}", text(&out));
+
+        // `init` 도 같은 말로 멈추고 그 자리를 그대로 둔다.
+        let before = std::fs::symlink_metadata(at.join(".moai")).unwrap().file_type();
+        let out = moai(at, &["init", "argos"]);
+        assert!(!out.status.success(), "디렉터리가 아닌 .moai 위에 init 이 섰다\n{}", text(&out));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(what), "init 이 그 자리에 선 것을 안 댔다\n{err}");
+        assert_eq!(std::fs::symlink_metadata(at.join(".moai")).unwrap().file_type(), before, "init 이 자리를 바꿨다");
+        // `--check` 도 1 로 끝나는 `moai init` 을 권하지 않는다.
+        let out = moai(at, &["init", "--check", "--json"]);
+        assert!(!out.status.success(), "--check 가 못 읽는 트래커를 지나쳤다\n{}", text(&out));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("\"code\":\"broken\""), "{}", text(&out));
+    }
 }
 
 /// **지금 자리를 못 물으면 그렇다고 댄다**(리뷰 moai-yivo.b5h) — 지운 워크트리에 앉은 채 부른 `prime` 이
@@ -8127,6 +8633,48 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
     assert!(moai(s.path(), &["note", &id, "-b", "-x"]).status.success());
 }
 
+/// **자리에 온 `-` 한 글자는 글이 아니다**(moai-ltsv.4t0, 2026-10-08 사용자 결정). `moai note <id> - < f.md`
+/// 가 `-` 라는 노트를 남기고 stdin 을 버린 채 0 으로 끝났다 — `add` 의 제목과 `edit --title` 도 같았다.
+/// 거절하고, 아무것도 안 쓰고, stdin 을 받는 깃발(`-b -`)을 댄다. `--` 로도 안 열린다.
+#[test]
+fn a_lone_dash_in_a_text_place_is_refused() {
+    let s = init("lonedash");
+    let id = add(s.path(), &["평범한 제목"]);
+    let (snap, log) = (issues(s.path()), journal(s.path()));
+    let calls: [&[&str]; 8] = [
+        &["note", &id, "-"],
+        &["note", &id, " - "],
+        &["note", &id, "--", "-"],
+        &["add", "-"],
+        &["add", "--", "-"],
+        &["backlog", "add", "-"],
+        &["edit", &id, "--title", "-"],
+        &["edit", &id, "--title=-"],
+    ];
+    for argv in calls {
+        let out = from_stdin(s.path(), argv, "stdin 에 부은 글\n");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{argv:?}: {err}");
+        assert!(err.contains("-b - <"), "stdin 을 받는 길을 안 댔다 — {argv:?}: {err}");
+        assert_eq!(issues(s.path()), snap, "거부해 놓고 썼다 — {argv:?}");
+        assert_eq!(journal(s.path()), log, "거부해 놓고 저널에 적었다 — {argv:?}");
+    }
+    // 노트의 길은 그 id 를 댄 채로, 제목의 길은 부른 동사로 댄다.
+    let err = |argv: &[&str]| String::from_utf8_lossy(&moai(s.path(), argv).stderr).into_owned();
+    assert!(err(&["note", &id, "-"]).contains(&format!("moai note {id} -b - <")));
+    assert!(err(&["backlog", "add", "-"]).contains("moai backlog add '"));
+    assert!(err(&["edit", &id, "--title", "-"]).contains(&format!("moai edit {id} -b - <")));
+    let out = moai(s.path(), &["note", &id, "-", "--json"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_input""#));
+
+    // 말한 길은 실제로 stdin 을 받는다 — 그리고 `-` 가 든 글은 그대로 받는다.
+    let out = from_stdin(s.path(), &["note", &id, "-b", "-"], "부은 글\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(journal(s.path()).contains("부은 글"));
+    assert!(moai(s.path(), &["note", &id, "- 목록 한 줄"]).status.success());
+    assert!(moai(s.path(), &["add", "-q", "a - b"]).status.success());
+}
+
 /// 본문을 stdin 으로 준다고 하고 아무것도 안 온 판은 한 줄로 말한다(moai-pp9i.kj2). 막지는 않는다 —
 /// 2026-09-29 사람이 정했다. `add`·`add --from`·`edit` 셋이 같은 말을 한다.
 #[test]
@@ -8387,6 +8935,34 @@ fn mv_says_what_is_missing() {
 
     // 그리고 `-m` 이 가운데 있어도 읽는다
     assert!(ok(s.path(), &["mv", &id, "-m", "메모", "review"]).contains("todo → review"));
+}
+
+/// **argv 로 비워 준 `-m` 도 거절하고 아무것도 안 옮긴다**(moai-ltsv.uqw, 2026-10-08 사용자 결정) — `defer` 와
+/// 한 자다. `mv X done -m ''` 이 `"note":""` 를 적고 0 으로 끝났고, 이미 그 칸인 줄에는 빈 노트가 쌓였다.
+#[test]
+fn mv_refuses_a_blank_message_and_moves_nothing() {
+    let s = init("mv-blank-msg");
+    let id = add(s.path(), &["제목"]);
+    ok(s.path(), &["mv", &id, "review"]);
+    let (before, notes) = (issues(s.path()), journal(s.path()));
+    // 옮길 줄과 이미 그 칸인 줄 둘 다 — 뒤의 것이 빈 노트를 쌓던 갈래다.
+    for to in ["done", "review"] {
+        for blank in ["", "   ", "\n\t"] {
+            let out = moai(s.path(), &["mv", &id, to, "-m", blank, "--json"]);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{to} {blank:?}: {err}");
+            assert!(err.contains(r#""code":"bad_input""#), "{to} {blank:?}: {err}");
+        }
+    }
+    assert_eq!(issues(s.path()), before, "빈 `-m` 으로 옮겼다");
+    assert_eq!(journal(s.path()), notes, "빈 `-m` 이 저널에 남았다");
+    assert!(!journal(s.path()).contains(r#""note":"""#));
+    // 사람 화면은 `-m` 을 빼는 길을 댄다.
+    let err = String::from_utf8_lossy(&moai(s.path(), &["mv", &id, "done", "-m", ""]).stderr).into_owned();
+    assert!(err.contains("-m"), "{err}");
+
+    // `-m` 을 빼면 그대로 옮긴다.
+    ok(s.path(), &["mv", &id, "done"]);
 }
 
 /// **`mv -m -` 는 stdin 을 읽는다**(moai-m1za) — 글자 그대로 받던 판은 `moai mv <리뷰> done -m - < 파일` 의
@@ -9955,26 +10531,15 @@ fn bare_moai_inside_names_a_broken_repo_config() {
 
 // ── 누가 하는가 ───────────────────────────────────────────────────────
 
-/// `MOAI_ACTOR` 를 걷고 git 이 읽을 설정을 통째로 지정해 돌린다. moai 는 git
-/// 저장소를 요구하지 않으므로 전역·시스템 설정까지 막아야 사람을 못 찾는
-/// 상황을 실제로 만들 수 있다.
-fn with_git_config(dir: &Path, cfg: &str, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
-        .current_dir(dir)
-        .env_remove("MOAI_ACTOR")
-        .env("GIT_CONFIG_GLOBAL", cfg)
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap()
-}
-
-/// 아무 데서도 사람을 못 찾는 자리.
+/// 아무 데서도 사람을 못 찾는 자리 — `MOAI_ACTOR` 를 걷고 돌린다.
+///
+/// **사람이 없는 것은 [`isolated`] 의 빈 집과 git 저장소가 아닌 자리 덕이다.** git 이 읽을 설정을 파일로
+/// 돌리는 길(`GIT_CONFIG_GLOBAL`)은 여기서 못 쓴다 — moai 가 사람을 묻기 전에 그 변수를 걷는다
+/// (`git_leaks::REPO`, moai-ztdf). 한때 그 변수로 설정 파일을 대던 도우미가 있었는데, 그 파일은 한 번도
+/// 안 읽혀 그것을 쓴 시험이 사람이 없는 판만 쟀다(moai-ltsv.y10). 사람을 주려면 그 프로젝트의 git 설정에
+/// 적는다 — [`an_email_with_brackets_still_owns_its_rows`] 가 그 꼴이다.
 fn without_user(dir: &Path, args: &[&str]) -> Output {
-    with_git_config(dir, "/dev/null", args)
+    staged(args).env_remove("MOAI_ACTOR").current_dir(dir).output().unwrap()
 }
 
 /// 이름만으로는 같은 이름이 둘일 때 갈라지지 않는다. 저널에 메일까지 남는다.
@@ -10053,11 +10618,20 @@ fn with_no_user_anywhere_it_says_what_to_set() {
 #[test]
 fn a_malformed_git_identity_is_refused_too() {
     let s = init("badgit");
-    let cfg = s.path().join("gitconfig");
-    std::fs::write(&cfg, "[user]\n\tname = 레이븐\n\temail = raven\n").unwrap();
-    let out = with_git_config(s.path(), cfg.to_str().unwrap(), &["add", "제목"]);
+    // 사람은 그 프로젝트의 git 설정에서 온다 — 전역 설정을 돌리는 변수는 moai 가 걷는다(`git_leaks`). 그 변수로
+    // 설정을 대던 판은 이 값이 한 번도 안 읽혀 "사람이 없다" 로 거절되고도 초록이었다(moai-ltsv.y10) — 두 거절문이
+    // 다 `git config user.email` 을 대기 때문이다. 그래서 잡는 글은 모양이 어긋났을 때만 서는 것이다.
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "레이븐"]);
+    git(s.path(), &["config", "user.email", "raven"]);
+    let out = staged(&["add", "제목"]).env_remove("MOAI_ACTOR").current_dir(s.path()).output().unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("쓸 수 없는 모양이다") && err.contains("레이븐"),
+        "모양이 아니라 다른 까닭으로 거절했다\n{err}"
+    );
+    assert!(!err.contains("누가 하는지 모른다"), "사람이 없는 판으로 읽었다\n{err}");
     assert!(err.contains("git config user.email"), "{err}");
     assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
 }
@@ -14369,6 +14943,88 @@ fn a_stale_planted_tree_names_the_install_line() {
     assert_eq!(n["hint"], "moai skill install");
 }
 
+/// **`core.autocrlf` 로 받은 스킬 글은 지금 판이다**(moai-9s9s.x3n). 남은 디렉터리의 머리를 재는 `ours` 는 `\r\n` 을
+/// 받는데, `skills_stale` 알림과 `skill status` 의 `.agents` 줄은 바이트째 견줘 그런 클론에서 알림이 영영 안 걷혔다 —
+/// 다시 심어도 체크아웃이 같은 `\r\n` 으로 되돌린다. 두 트리(Claude·`.agents`)와 두 읽는 자를 다 잰다.
+#[test]
+fn a_crlf_checkout_of_the_planted_skills_is_current() {
+    let s = init("crlfskills");
+    let root = s.path();
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    // 맨 `install` 이 진짜 `claude` 에 닿지 않게 PATH 를 끊는다(위 시험과 같은 까닭). 트리는 그래도 심긴다.
+    staged(&["skill", "install"]).current_dir(root).env("PATH", "/nonexistent").output().unwrap();
+    let mut turned = 0;
+    for tree in [".agents/skills", ".claude/moai-plugin/skills"] {
+        let mut walk = vec![root.join(tree)];
+        while let Some(at) = walk.pop() {
+            for entry in std::fs::read_dir(&at).unwrap() {
+                let p = entry.unwrap().path();
+                if p.is_dir() {
+                    walk.push(p);
+                } else {
+                    let body = std::fs::read_to_string(&p).unwrap();
+                    std::fs::write(&p, body.replace('\n', "\r\n")).unwrap();
+                    turned += 1;
+                }
+            }
+        }
+    }
+    assert!(turned >= 4, "바꿀 글이 안 심겼다 — {turned}");
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["status", "--json"])).unwrap();
+    let stale: Vec<_> = v["notices"].as_array().unwrap().iter().filter(|n| n["kind"] == "skills_stale").collect();
+    assert!(stale.is_empty(), "`\\r\\n` 체크아웃을 낡았다고 했다 — {stale:?}");
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["skill", "status", "--json"])).unwrap();
+    assert_eq!(v["agents"]["state"], "current", "`\\r\\n` 체크아웃을 낡았다고 했다 — {}", v["agents"]);
+    assert_eq!(v["agents"]["stale"], serde_json::json!([]));
+
+    // 글이 정말 다르면 여전히 낡았다 — 줄 끝만 접는다.
+    std::fs::write(root.join(".agents/skills/moai/SKILL.md"), "old\r\n").unwrap();
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["skill", "status", "--json"])).unwrap();
+    assert_eq!(v["agents"]["state"], "stale");
+}
+
+/// **`skill status` 는 걷힌 스킬의 남은 디렉터리를 이름과 까닭째 댄다**(moai-9s9s.v0y). 사람의 파일이 든 디렉터리는
+/// `install` 이 남기는데(`foreign`) 그 안의 `SKILL.md` 가 걷힌 명령을 계속 가르쳤고, `skill status` 는 `.agents` 를 "지금
+/// 판" 이라고만 했다. **아무것도 안 막는다** — 종료 코드는 0 이고, 사람의 것이 든 자리는 `install` 이 못 고치니 낡았다고
+/// 하지 않는다. 걷을 꼴(`planned`)은 `skills_stale` 알림과 같은 자로 낡았다고 한다.
+#[test]
+fn skill_status_names_a_retired_skill_left_behind() {
+    let s = init("skillleft");
+    let root = s.path();
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    let status = || -> serde_json::Value { serde_json::from_str(&ok(root, &["skill", "status", "--json"])).unwrap() };
+    assert_eq!(status()["agents"]["leftovers"], serde_json::json!([]), "빈 자리에서도 키는 늘 선다");
+
+    let work = root.join(".agents/skills/moai-work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("SKILL.md"), "---\nname: moai-work\n---\nmoai hello\n").unwrap();
+    let v = status();
+    assert_eq!(v["agents"]["state"], "stale", "`install` 이 걷을 디렉터리를 두고 지금 판이라 했다");
+    assert_eq!(v["agents"]["leftovers"][0]["state"], "planned");
+    // 글은 영어로 견준다 — `init argos` 의 저장소는 한국어로 말한다.
+    let english = || staged(&["skill", "status"]).current_dir(root).env("MOAI_LANG", "en").output().unwrap();
+    let said = String::from_utf8(english().stdout).unwrap();
+    assert!(said.contains("! remove:") && said.contains("moai-work"), "걷을 디렉터리를 안 댄다\n{said}");
+    // 다른 파일은 없다 — 디렉터리 하나를 "파일 1개가 다르다" 로 세지 않는다.
+    assert!(!said.contains("files differ") && said.contains("left behind"), "남은 디렉터리를 파일 수로 셌다\n{said}");
+
+    // 사람의 메모가 들면 `install` 이 안 걷는다 — 그래도 그 자리를 댄다.
+    std::fs::write(work.join("notes.md"), "mine\n").unwrap();
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    assert!(work.join("SKILL.md").is_file(), "사람의 것이 든 디렉터리를 걷었다");
+    let v = status();
+    assert_eq!(v["agents"]["state"], "current", "`install` 이 못 고치는 자리를 낡았다고 했다");
+    let left = v["agents"]["leftovers"].as_array().unwrap();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0]["state"], "foreign");
+    assert!(left[0]["path"].as_str().unwrap().ends_with("moai-work"), "{left:?}");
+    let out = english();
+    assert!(out.status.success(), "남은 디렉터리가 종료 코드를 바꿨다");
+    let said = String::from_utf8(out.stdout).unwrap();
+    let line = said.lines().find(|l| l.contains("moai-work")).unwrap_or_else(|| panic!("이름을 안 댄다\n{said}"));
+    assert!(line.contains("left as it is"), "왜 남겼는지 안 댄다 — {line}");
+}
+
 /// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.
 #[test]
 fn the_hook_works_where_stdin_says() {
@@ -18664,6 +19320,38 @@ fn skill_install_for_codex_builds_nothing_through_a_link_outside() {
     assert!(!said.contains("rm -r"), "밖에 선 남의 디렉터리를 지우라고 한다\n{said}");
 }
 
+/// **심는 트리도 링크를 따라 트래커로 들지 않는다**(moai-r0x8.a42, 리뷰 moai-ml0d.que 3번). 커밋된
+/// `.agents/skills/moai/SKILL.md -> ../../../.moai/issues.jsonl` 은 체크아웃 안이고 `.git` 도 락도 아니라 모든 자를
+/// 지나, `skill install` 이 스냅샷을 스킬 글로 갈아끼우고 0 으로 끝났다. 디렉터리 링크(`.agents -> .moai`)로 드는 것도 같다.
+#[cfg(unix)]
+#[test]
+fn skill_install_never_writes_into_the_tracker_through_a_link() {
+    let s = init("skilltracker");
+    let c = Claude::new("skilltracker-home");
+    add(s.path(), &["스냅샷에 선 줄"]);
+    let snapshot = s.path().join(".moai/issues.jsonl");
+    let before = std::fs::read_to_string(&snapshot).unwrap();
+    let skill = s.path().join(".agents/skills/moai/SKILL.md");
+    std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink("../../../.moai/issues.jsonl", &skill).unwrap();
+    for args in [&["skill", "install", "--agent", "codex", "--dry-run"][..], &["skill", "install", "--agent", "codex"]]
+    {
+        let out = c.run(s.path(), args, true);
+        assert!(!out.status.success(), "{args:?}: 스냅샷에 심고 성공으로 끝났다\n{}", text(&out));
+        assert!(text(&out).contains("inside the tracker"), "{args:?}: 왜 안 썼는지 안 댄다\n{}", text(&out));
+        assert_eq!(std::fs::read_to_string(&snapshot).unwrap(), before, "{args:?}: 스냅샷을 스킬 글로 갈아끼웠다");
+        assert!(std::fs::symlink_metadata(&skill).unwrap().file_type().is_symlink(), "링크를 갈아끼웠다");
+    }
+    ok(s.path(), &["status"]);
+
+    std::fs::remove_dir_all(s.path().join(".agents")).unwrap();
+    std::os::unix::fs::symlink(".moai", s.path().join(".agents")).unwrap();
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex"], true);
+    assert!(!out.status.success(), "트래커 안에 심고 성공으로 끝났다\n{}", text(&out));
+    assert!(!s.path().join(".moai/skills").exists(), "트래커 안에 디렉터리를 지었다");
+    assert_eq!(std::fs::read_to_string(&snapshot).unwrap(), before);
+}
+
 /// **Claude 의 플러그인 트리도 체크아웃 밖 링크를 안 따른다**(moai-ml0d.izy) — `.agents` 와 같은 자다. 맨
 /// `create_dir_all`·`fs::write` 로 쓰던 판은 받은 저장소가 커밋한 `.claude-plugin/plugin.json -> <밖>` 하나로 그 파일을
 /// 플러그인 JSON 으로 통째로 덮었고, 링크는 링크로 남아 티가 안 났다. 트리 자체가 밖을 가리키는 링크면 밖에
@@ -22828,8 +23516,10 @@ fn bumping_moves_the_lock_line_with_the_manifest() {
     assert!(after.contains("name = \"moai\"\nversion = \"0.2.0\"\n"), "Cargo.lock 의 자기 줄을 안 움직였다\n{after}");
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(said.contains("자기 줄을 0.2.0 로 다시 적었다"), "움직인 것을 안 댔다\n{}", text(&out));
-    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다.
-    assert!(said.contains("git tag v0.2.0"), "태그 자리를 안 댔다\n{}", text(&out));
+    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다 — develop 끝이 아니라 main 의 머지 커밋에
+    // (moai-ltsv.3qk, CONTRIBUTING.md 의 Releasing).
+    assert!(said.contains("git tag v0.2.0 origin/main"), "태그 자리를 main 에 안 댔다\n{}", text(&out));
+    assert!(!said.contains("git push && git push origin"), "develop 끝에 단 태그를 밀라고 했다\n{}", text(&out));
 }
 
 /// **작은따옴표 `Cargo.toml` 도 읽고 고친다**(moai-kyp7.269). TOML 의 literal string 이라 cargo 는
@@ -23766,7 +24456,8 @@ fn init_tracking_exclude_leaves_every_committed_file_as_it_was() {
     git(root, &["init", "-q", "."]);
     let js = ok(root, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
     assert_eq!(field(&js, "tracking"), "exclude", "{js}");
-    assert_eq!(field(&js, "driver"), "skipped", "{js}");
+    // **`skipped` 가 아니라 `untracked` 다**(moai-8gwh.86j) — `skipped` 는 `--no-driver` 로 이번만 건너뛴 것이다.
+    assert_eq!(field(&js, "driver"), "untracked", "{js}");
     assert!(js.contains("\"gitattributes\":false"), "{js}");
     assert_eq!(git(root, &["status", "--porcelain", "--untracked-files=all"]), "", "커밋될 파일이 생겼다");
     let exclude = read(&root.join(".git/info/exclude"));
@@ -24056,6 +24747,74 @@ fn a_linked_worktree_does_not_keep_a_tracker_out_of_git() {
     assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "bad_input");
     assert_eq!(std::fs::read_to_string(main.join(".git/info/exclude")).unwrap_or_default(), before);
     assert!(!linked.join(".moai").exists(), "거절하고도 심었다");
+    // 주 체크아웃이 있는 저장소의 말은 그대로다.
+    assert!(field(&String::from_utf8_lossy(&out.stderr), "error").contains("주 체크아웃"));
+}
+
+/// **맨 저장소의 워크트리에는 주 체크아웃이 없다**(moai-r0x8.33p). 위의 거절은 맞지만 그 말이 "주 체크아웃의
+/// 트래커까지 가린다" 라, `git clone --bare` 로 받아 워크트리만 띄운 저장소에서는 없는 자리를 댔다. 가리는 것은
+/// 같은 `info/exclude` 를 함께 쓰는 **다른 워크트리들**의 커밋된 트래커다. 맨 저장소인가는 git 에게 묻는다 — 아래
+/// 시험이 그 까닭이다.
+#[test]
+fn a_bare_repository_worktree_refusal_names_no_main_checkout() {
+    let s = Scratch::new("init-bare-local");
+    let src = s.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git(&src, &["init", "-q", "."]);
+    git(&src, &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-q", "--allow-empty", "-m", "처음"]);
+    git(s.path(), &["clone", "-q", "--bare", "src", "repo.git"]);
+    let repo = s.path().join("repo.git");
+    let wt = s.path().join("wt");
+    git(&repo, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let before = std::fs::read_to_string(repo.join("info/exclude")).unwrap_or_default();
+
+    let out = moai(&wt, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
+    assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(field(&err, "code"), "bad_input", "{err}");
+    let said = field(&err, "error");
+    assert!(said.contains("맨 저장소"), "맨 저장소라고 안 댔다 — {said}");
+    assert!(
+        !said.contains("주 체크아웃의 트래커") && said.contains("주 체크아웃이 없다"),
+        "없는 주 체크아웃을 댔다 — {said}"
+    );
+    assert!(said.contains("--tracking commit"), "고칠 길을 안 댔다 — {said}");
+    assert_eq!(std::fs::read_to_string(repo.join("info/exclude")).unwrap_or_default(), before);
+    assert!(!wt.join(".moai").exists(), "거절하고도 심었다");
+}
+
+/// **맨 저장소인가는 git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 공통 디렉터리의 이름이 `.git` 인가로 가르던 판은
+/// 두 자리에서 틀렸다 — `git init --separate-git-dir` 로 띄운 저장소(공통 디렉터리가 `sep.git`)의 워크트리에는
+/// 주 체크아웃이 있는데 "없다" 고 했고, `.git` 이라는 이름의 맨 저장소(`git clone --bare <url> bin/.git`)의
+/// 워크트리에는 주 체크아웃이 없는데 "주 체크아웃의 트래커" 를 댔다.
+#[test]
+fn a_worktree_refusal_asks_git_whether_the_repository_is_bare() {
+    let s = Scratch::new("init-bare-truth");
+    let refusal = |wt: &std::path::Path| {
+        let out = moai(wt, &["init", "argos", "--tracking", "exclude", "--guide", "none", "--json"]);
+        assert!(!out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+        assert!(!wt.join(".moai").exists(), "거절하고도 심었다");
+        field(&String::from_utf8_lossy(&out.stderr), "error")
+    };
+
+    // 주 체크아웃이 딴 데 선 저장소 — 맨 저장소가 아니다.
+    let main = s.path().join("main");
+    let sep = s.path().join("sep.git");
+    git(s.path(), &["init", "-q", "--separate-git-dir", sep.to_str().unwrap(), "main"]);
+    git(&main, &["-c", "user.name=T", "-c", "user.email=t@e.x", "commit", "-q", "--allow-empty", "-m", "처음"]);
+    let wt = s.path().join("wt-sep");
+    git(&main, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let said = refusal(&wt);
+    assert!(!said.contains("맨 저장소") && said.contains("주 체크아웃"), "있는 주 체크아웃을 없다 했다 — {said}");
+
+    // 이름이 `.git` 인 맨 저장소 — 주 체크아웃이 없다.
+    let bin = s.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    git(s.path(), &["clone", "-q", "--bare", main.to_str().unwrap(), bin.join(".git").to_str().unwrap()]);
+    let wt = s.path().join("wt-bin");
+    git(&bin.join(".git"), &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let said = refusal(&wt);
+    assert!(said.contains("맨 저장소") && !said.contains("주 체크아웃의 트래커"), "없는 주 체크아웃을 댔다 — {said}");
 }
 
 // ── moai-j9nf: PR 20 리뷰의 회귀 ──────────────────────────────────────────────────────────
@@ -24479,11 +25238,11 @@ fn antigravity_holds_the_turn_with_continue() {
     assert!(stop(&held).trim().is_empty(), "붙든 뒤에 또 붙들었다");
 }
 
-/// **오류로 끝난 Antigravity 의 실행은 `StopFailure` 처럼 다룬다**(리뷰 moai-u5wr.e74) — agy 는 API 오류에도 `Stop` 을
+/// **오류로 끝난 Antigravity 의 실행은 판정할 것이 없다**(리뷰 moai-u5wr.e74) — agy 는 API 오류에도 `Stop` 을
 /// 내고 까닭을 `error` 에 싣는다. 실패하는 백엔드에 `continue` 로 밀어 넣지 않고, 세션에 한 번인 닫기 물음도 그 판에
 /// 안 쓴다 — 다음의 멀쩡한 `Stop` 이 묻는다.
 #[test]
-fn an_antigravity_run_that_failed_is_a_stop_failure() {
+fn an_antigravity_run_that_failed_is_not_judged() {
     let s = init("agy-failed");
     let id = add(s.path(), &["락을 잡는다"]);
     ok(s.path(), &["mv", &id, "in_progress"]);
@@ -24563,8 +25322,7 @@ fn a_codex_stop_holds_its_closing_question_inside_codexs_limit() {
 fn every_dialect_and_event_never_fails() {
     let s = init("hooksafe-dialects");
     let outside = Scratch::new("hooksafe-dialects-outside");
-    let events =
-        ["session-start", "user-prompt-submit", "pre-tool-use", "stop", "stop-failure", "interrupt", "session-end"];
+    let events = ["session-start", "user-prompt-submit", "pre-tool-use", "stop"];
     for input in [event(&outside, "s1"), "not json at all".into(), String::new(), "{\"toolCall\":7}".into()] {
         for dialect in ["claude", "codex", "antigravity"] {
             for ev in events {
@@ -24575,74 +25333,25 @@ fn every_dialect_and_event_never_fails() {
     }
 }
 
-/// **0.9 전에 심은 훅이 부르는 셋은 저장소 안에서도 빈 명령이다**(moai-5uwh.e9j) — 다시 심기 전의 Claude 플러그인은
-/// `stop-failure`·`session-end` 를, Codex 의 `.codex/hooks.json` 은 `interrupt`·`session-end` 를 부른다. 기록한 Codex
-/// 입력과 Claude 의 세션 하나로 저장소 안에서 부른다 — 아무것도 안 내고, 출석이 적던 자리(`.moai/agents`·`.moai/mail`)를
-/// 안 세우며, 그 세션의 기준선도 안 고친다. 저장소 밖의 입력만 재는 [`every_dialect_and_event_never_fails`] 는 그 셋이
-/// 트래커를 읽고 무엇을 적어도 푸르다.
+/// **0.9 전에 심은 훅이 부르던 셋은 이제 없는 이벤트다**(moai-9s9s.vzn) — 0.9 는 `stop-failure`·`interrupt`·
+/// `session-end` 를 한 판 빈 명령으로 남겼고 이 판에 지웠다. 다시 심기 전의 훅은 오류를 내고, `skill install` 이 그
+/// 훅을 걷는다. 빈 명령으로 되돌리면 0 으로 끝나 붉어진다 — 다른 이벤트는 무엇이 와도 0 이다
+/// ([`every_dialect_and_event_never_fails`]).
 #[test]
-fn the_events_planted_before_0_9_do_nothing_inside_a_repository() {
+fn the_events_planted_before_0_9_are_gone() {
     let s = init("hook-legacy-events");
-    let sid = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
-    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
-    let before = baseline(&s, sid);
-    assert!(before.is_some(), "Codex 의 여는 훅이 기준선을 안 적었다");
-    // 경고를 늘린다 — 빈 명령이 기준선을 다시 적으면 그 수가 달라진다.
-    ok(s.path(), &["add", "에픽 없는 일"]);
-    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
-        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
-        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
+    let input = event(&s, "sessLGCY-0001");
+    for dialect in ["claude", "codex", "antigravity"] {
+        for ev in ["stop-failure", "interrupt", "session-end"] {
+            let out = from_stdin(s.path(), &["hook", ev, "--dialect", dialect], &input);
+            assert!(!out.status.success(), "{dialect} {ev} 가 아직 명령으로 선다");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(err.contains(ev), "{dialect} {ev} 의 오류가 그 이름을 안 댄다\n{err}");
+        }
     }
-    let claude = event(&s, "sessLGCY-0001");
-    for ev in ["session-start", "stop-failure", "session-end"] {
-        let out = hook_out(&s, ev, &claude);
-        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
-    }
-    assert_eq!(baseline(&s, sid), before, "빈 명령이 Codex 세션의 기준선을 고쳤다");
-    for gone in [".moai/agents", ".moai/mail"] {
-        assert!(!s.path().join(gone).exists(), "훅이 {gone} 를 세웠다");
-    }
-}
-
-/// **0.9 전에 심은 셋은 스냅샷을 읽기 전에 돌아간다**(moai-ybns.451.sdk) — 위 시험은 그 셋이 아무것도 안 내고 안 적는
-/// 것만 잰다. `decide` 의 빈 명령 갈래를 트래커를 읽은 뒤로 내려도 푸르다 — 그 갈래가 서는 까닭은 세션이 끝날 때마다
-/// 스냅샷 전체를 읽고 버리지 않는 것이다. 그래서 `.moai/issues.jsonl` 의 atime 을 2000-01-01 로 돌려 두고 부른 뒤
-/// 그대로인지 본다.
-///
-/// **대조로 여는 훅이 그 값을 움직이는 것을 먼저 본다** — atime 을 안 적는 파일 시스템(`noatime`)이면 이 시험은 아무것도
-/// 못 재니, 그때는 조용히 푸르지 않고 붉어진다. `relatime` 은 24시간보다 낡은 atime 을 고치므로 2000 년이면 선다.
-#[cfg(target_os = "linux")]
-#[test]
-fn the_events_planted_before_0_9_return_before_reading_the_snapshot() {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-    let s = init("hook-legacy-atime");
-    ok(s.path(), &["add", "읽히는지 볼 줄"]);
-    let snapshot = s.path().join(".moai/issues.jsonl");
-    let old = UNIX_EPOCH + Duration::from_secs(946_684_800); // 2000-01-01T00:00:00Z
-    let rewind = || {
-        let f = std::fs::File::options().write(true).open(&snapshot).unwrap();
-        f.set_times(std::fs::FileTimes::new().set_accessed(old)).unwrap();
-        assert_eq!(std::fs::metadata(&snapshot).unwrap().accessed().unwrap(), old, "atime 을 못 돌렸다");
-    };
-    let accessed = || std::fs::metadata(&snapshot).unwrap().accessed().unwrap();
-
-    let claude = event(&s, "sessATIM-0001");
-    rewind();
-    hook_out(&s, "session-start", &claude);
-    let moved: SystemTime = accessed();
-    assert_ne!(moved, old, "여는 훅이 읽어도 atime 이 그대로다 — 이 파일 시스템에서는 이 시험이 아무것도 못 잰다");
-
-    for ev in ["stop-failure", "session-end"] {
-        rewind();
-        let out = hook_out(&s, ev, &claude);
-        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
-        assert_eq!(accessed(), old, "claude {ev} 가 스냅샷을 읽었다");
-    }
-    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
-        rewind();
-        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
-        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
-        assert_eq!(accessed(), old, "codex {ev} 가 스냅샷을 읽었다");
+    let help = ok(s.path(), &["hook", "--help"]);
+    for ev in ["stop-failure", "interrupt", "session-end"] {
+        assert!(!help.contains(ev), "도움말이 걷은 {ev} 를 아직 적는다\n{help}");
     }
 }
 
@@ -25227,6 +25936,41 @@ fn a_session_that_breaks_the_archive_is_held_at_stop() {
     assert!(held.contains(r#""decision":"block""#) && held.contains(&format!(" {counted} ")), "{held}");
     hook_at_home(&s, p, None, &at_archive, "session-start", &event(&s, "after"));
     assert_eq!(baseline(&s, "after"), Some(counted), "the baseline and the board count apart");
+}
+
+/// **아카이브의 id 는 다시 안 짓는다 — 아카이브를 물을 때만 훑게 한 뒤에도**(moai-r0x8.2kg). 쓰기는 이제 id 를 지을
+/// 때만 아카이브를 연다(`store::Reserved`). 그 문이 어긋나 짓는 쓰기가 아카이브를 안 보면, 부모 밑 자식 자리
+/// 46,656개 가운데 하나만 비워 둔 여기서 새 자식이 아카이브의 id 를 받는다 — 우연히 빈 자리를 맞힐 확률은 1/46,656 이다.
+/// 옮기기는 그 사이에 아카이브를 안 열어도 같은 판을 쓴다.
+#[test]
+fn an_archived_id_is_never_minted_again_while_moves_skip_the_archive() {
+    let s = init("archive-reserved-ids");
+    let parent = add(s.path(), &["parent"]);
+    let row = issues(s.path());
+    let row = row.lines().next().unwrap();
+    let digits = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let free = "q7x";
+    let mut archived = String::new();
+    for a in digits {
+        for b in digits {
+            for c in digits {
+                let body = String::from_utf8(vec![*a, *b, *c]).unwrap();
+                if body == free {
+                    continue;
+                }
+                archived.push_str(&row.replacen(&parent, &format!("{parent}.{body}"), 1));
+                archived.push('\n');
+            }
+        }
+    }
+    let dir = s.path().join(".moai/archive");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("2025.jsonl"), &archived).unwrap();
+    // 옮기기는 id 를 안 짓는다 — 아카이브를 안 열어도 그대로 지난다.
+    ok(s.path(), &["mv", &parent, "in_progress"]);
+    let child = add(s.path(), &["the one free child", "--parent", &parent]);
+    assert_eq!(child, format!("{parent}.{free}"), "an archived id was minted again");
+    assert_eq!(std::fs::read_to_string(dir.join("2025.jsonl")).unwrap(), archived);
 }
 
 #[test]

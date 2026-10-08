@@ -36,7 +36,8 @@ directories.
 - The detail describes the row under the cursor. `Ctrl-w w` moves the focus there
   so the same keys scroll it, and back again
 
-**What the list shows is the view.** Done is hidden to begin with, and the path
+**What the list shows is the view.** To begin with every column is shown,
+done included, and [deferred](glossary.md#deferred) work is hidden; the path
 line above the list says what is hidden and how it is sorted. The `SPC v` keys
 show or hide [deferred](glossary.md#deferred) work, [backlog items](glossary.md#backlog),
 each [column](glossary.md#column), the detail and the archive;
@@ -53,7 +54,8 @@ remain readable; if both keys exist, `hide_backlog` wins.
 
 - **`SPC g l` — the list**, described above
 - **`SPC g b` — the board.** The same rows as a kanban board: backlog, deferred, then
-  your columns, with one lane per milestone at the project root. A card that is
+  your columns, with one lane per milestone at the project root. The deferred column
+  follows the view — hidden to begin with, back with `SPC v l`. A card that is
   not yours says whose it is. `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
@@ -89,6 +91,12 @@ remain readable; if both keys exist, `hide_backlog` wins.
   `SPC v r` shows the page as written, where no link is marked for `Tab`. It
   reads the pages afresh each time it opens and writes none of them — a page is
   a file you edit and commit
+
+Over either window, `SPC g s` and `SPC g w` read afresh. When the window you are
+in cannot be read again it closes and a notice says why; when the other one
+cannot be opened, the one you are in stays as it was and only the notice stands.
+In both windows the arrows, `Home`/`End` and the page keys move with `Ctrl` or
+`Alt` held too, as on the list; letter keys do not.
 
 The list or the board you leave on is the one the next run opens with.
 
@@ -184,7 +192,10 @@ the way `moai status` does: archived rows are context, not work, the collision
 and unreadable archive files are counted as the same warnings, and bundles
 waiting to move as the same notice (moai-nkwg). The banner's urgent "rows could
 not be read" counts lines in the active snapshot only; a bad line in an archive
-file is that `archive_unreadable` warning instead (moai-e18s).
+file is that `archive_unreadable` warning instead (moai-e18s). While the archive
+is shown (`SPC v o`), the banner also names how many archive lines could not be
+read and that the view is without them — dimmed, so it does not make the banner
+urgent (moai-ug6x).
 
 ## Catch up on what changed
 
@@ -228,7 +239,8 @@ line that upgrades the moai you are running.
 - **"Not a terminal"** — the output is piped or redirected. A script wants
   `moai tui --json`
 - **A row you expected is not there.** Read the path line: done or the archive
-  may be hidden, or a filter or search may be set. `Esc` clears the filter,
+  may be hidden, deferred work is hidden to begin with, or a filter or search
+  may be set. `Esc` clears the filter,
   `SPC v a` shows everything but the archive, and `SPC v o` adds the archive
 - **The terminal will not select text** — hold `Shift` (`Option` in iTerm2), or
   turn the mouse off with `SPC o m`

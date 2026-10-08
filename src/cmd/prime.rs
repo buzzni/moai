@@ -61,6 +61,21 @@ struct Said<'a> {
     /// `commits_error` 처럼 객체 하나다.
     #[serde(skip_serializing_if = "Option::is_none")]
     tracker_error: Option<TrackerError>,
+    /// **못 연 트래커가 이 체크아웃 밖으로 올라가 잡은 것일 때만 선다**(moai-r0x8.ris, 2026-10-07 사용자 결정) —
+    /// 그 트래커의 뿌리다. 여기에는 `.moai` 가 없으니 길이 둘이다: 그 트래커를 고치거나, 여기 따로 `moai init`
+    /// 으로 세운다. 이 키 없이는 `tracker_error` 가 "여기 트래커" 를 대는 것처럼 읽혀, 받는 쪽이 여기 없는
+    /// 것을 고치러 든다. `tracker_error` 곁에 따로 두는 것은 그 꼴(`{code,said}`)을 안 바꾸려서다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    climbed_to: Option<String>,
+    /// **올라가 잡았을 때 이 체크아웃의 트래커를 세울 자리**(리뷰 moai-r0x8.qbh 9번) — 체크아웃의 꼭대기다.
+    /// 밑자리(`proj/src`)에서 친 `moai init` 은 거기에 심으므로, 판은 꼭대기가 여기와 다르면 `moai -C <꼭대기> init`
+    /// 을 댄다. 들여다보지 못한 `.moai` 가 있으면 안 선다 — 그때 `init` 은 길이 아니다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    init_at: Option<String>,
+    /// **찾기가 들여다보지 못하고 건너뛴 이 체크아웃의 `.moai`**(리뷰 moai-r0x8.qbh 9번) — 권한 따위로 있는지조차
+    /// 모르는 자리다. 이것이 서면 "여기엔 `.moai` 가 없다" 가 아니다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unseen_at: Option<String>,
 }
 
 /// [`Said::tracker_error`] 의 값. **가르는 것은 `code` 다** — 다른 명령의 `--json` 거절(`{"error","code"}`)과
@@ -157,7 +172,10 @@ impl<'a> Brief<'a> {
 /// 없다, `moai init` 이 심는다")으로 내던 때는 세션을 여는 에이전트가 `init` 을 불렀고, 링크나 못 읽는
 /// 스냅샷이면 `init` 은 다 괜찮다고 답했다. 까닭은 **판에 싣고 stderr 에는 안 낸다** — 세션 시작 훅은
 /// stdout 만 맥락에 싣고, 터미널의 사람에게는 같은 글이 두 번 선다.
+///
+/// **못 연 트래커가 올라가 잡은 것이면 그렇다고 댄다**(moai-r0x8.ris, 2026-10-07 사용자 결정) — [`climbed_away`].
 fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<Vec<String>> {
+    let climbed = refused.and_then(|_| climbed_away());
     if ctx.json {
         return super::json_line(&Said {
             picked: Vec::new(),
@@ -171,9 +189,56 @@ fn bare(ctx: &Ctx, lang: crate::i18n::Lang, refused: Option<&super::Fail>) -> R<
             commands: lines(lang),
             no_tracker: refused.is_none(),
             tracker_error: refused.map(|e| TrackerError { code: e.code, said: crate::text::one_line(&e.message) }),
+            climbed_to: climbed.as_ref().map(|c| c.root().display().to_string()),
+            init_at: match &climbed {
+                Some(view::Climbed::Fresh { top, .. }) => Some(top.display().to_string()),
+                _ => None,
+            },
+            unseen_at: match &climbed {
+                Some(view::Climbed::Unseen { at, .. }) => Some(at.display().to_string()),
+                _ => None,
+            },
         });
     }
-    Ok(view::prime_bare(lang, refused.map(|e| e.message.as_str())))
+    Ok(view::prime_bare(lang, refused.map(|e| e.message.as_str()), climbed.as_ref()))
+}
+
+/// 못 연 트래커가 **이 체크아웃 밖으로 올라가 잡은 것**이면 그 뿌리 — 아니면 `None`.
+///
+/// "여기 트래커를 못 읽었다" 로 대던 판은 `.moai` 없는 체크아웃(`top/proj`)에서 위의 `top/.moai` 를 여기 것이라
+/// 했다. 올라갔다는 말은 stderr 한 줄(`warn.tracker_climbed`)에만 섰는데, 세션 시작 훅은 stdout 만 싣는다.
+/// 판에 실으므로 그 줄은 꺼낸다([`crate::store::take_climb`]) — 터미널에서 같은 말이 두 번 서지 않는다.
+///
+/// **여기서 `moai init` 이 안 서면 이 갈래로 안 든다** — 딸린 워크트리의 밑자리라 `init` 이 주 체크아웃을 대며
+/// 거절하는 자리([`crate::store::init_belongs_at`])다. 둘째 길로 그것을 대면 1 로 끝나는 명령을 권한다.
+///
+/// **대는 자리는 실제 자리다**(리뷰 moai-r0x8.qbh 9번). 잡은 뿌리 아래로 이 체크아웃의 꼭대기(가장 가까운 `.git`)
+/// 까지를 다시 잰다.
+/// - 찾기([`crate::store::spot`] 의 `Unseen`)는 들여다보지 못한 `.moai` 를 건너뛰고 올라간다. 그 자리가 있으면
+///   "여기엔 `.moai` 가 없다" 는 거짓이고 `init` 도 길이 아니다 — [`view::Climbed::Unseen`]
+/// - `moai init` 은 **부른 자리**에 심는다(`cmd::init::run` 의 `current_dir`). 밑자리(`proj/src`)에서 그대로 대면
+///   이 체크아웃이 아니라 `src` 에 트래커가 선다 — 꼭대기가 여기와 다르면 `moai -C <꼭대기> init` 을 댄다
+fn climbed_away() -> Option<view::Climbed> {
+    let here = std::env::current_dir().ok()?;
+    if crate::store::init_belongs_at(&here).is_some() {
+        return None;
+    }
+    let root = crate::store::take_climb(&here)?;
+    let below: Vec<&std::path::Path> = here.ancestors().take_while(|d| *d != root).collect();
+    // 올라갔다는 것은 오는 길에 `.git` 을 지났다는 뜻이다(`store::climb`) — 없으면 여기를 꼭대기로 둔다.
+    let reach = below.iter().position(|d| d.join(".git").exists()).unwrap_or(0);
+    for d in below.iter().take(reach + 1) {
+        if let crate::store::Spot::Unseen(e) = crate::store::spot(d) {
+            return Some(view::Climbed::Unseen { root, at: d.join(".moai"), err: e.to_string() });
+        }
+    }
+    let top = below.get(reach).map_or_else(|| here.clone(), |d| d.to_path_buf());
+    let go = if top == here {
+        crate::report::Warning::cli_hint(None, "init")
+    } else {
+        crate::report::Warning::cli_hint(Some(&crate::text::shell_word(&top.display().to_string())), "init")
+    };
+    Some(view::Climbed::Fresh { root, top, go })
 }
 
 fn lines(lang: crate::i18n::Lang) -> Vec<Line<'static>> {
@@ -264,6 +329,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             commands: lines(lang),
             no_tracker: false,
             tracker_error: None,
+            climbed_to: None,
+            init_at: None,
+            unseen_at: None,
         });
     }
 
