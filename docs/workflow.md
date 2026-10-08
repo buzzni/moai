@@ -112,6 +112,11 @@ and wait on each other to merge.
   root's path. Claude Code enters one from the root (`EnterWorktree` with its
   path) — come back to the root before entering another. Worktrees made earlier
   under `.claude/worktrees/` keep working
+- **Work a supervisor hands out inside a milestone branches from that
+  milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
+  and merges back into it; the branch lives in its own worktree,
+  `.worktrees/milestone-<milestone id>`, until the release takes it in
+  (moai-nvju). See [handing work to idle sessions](agents.md#hand-work-to-idle-sessions)
 
 - **The [tracker](glossary.md#tracker) stays in the main checkout.** A `moai` run inside a linked
   worktree reads and writes the main checkout's `.moai/`, and one line on stderr
@@ -205,7 +210,8 @@ bundle stays archived.
 The above is moai. This repository adds its own conventions on top, written down
 where its contributors read them rather than repeated here:
 
-- **`CLAUDE.md`** — the worktree recipe (the base branch is `develop`, branches
+- **`CLAUDE.md`** — the worktree recipe (the base branch is `develop`, or
+  `milestone/<id>` for work inside a milestone, moai-nvju; branches
   are `worktree-moai-<id>`, and `target/` is a link to `/tmp/cargo-target/<name>`
   because `/home` stalls under parallel builds, moai-c5xo), the review grade table
   (which `/code-review` level an epic gets, moai-9793, moai-bx6t), the
@@ -215,7 +221,8 @@ where its contributors read them rather than repeated here:
 - **`CONTRIBUTING.md`** — building and testing, regenerating
   [the CLI reference](cli.md), and Releasing: the sections under `[Unreleased]` in
   `CHANGELOG.md` pick the next version, through `scripts/bump-version.sh`
-  (moai-ug3j). moai itself does not number versions
+  (moai-ug3j), after a milestone branch has taken `develop` in and gone into
+  `develop` with `--no-ff` (moai-nvju). moai itself does not number versions
 
 ## When it goes wrong
 

@@ -28,6 +28,16 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- **The supervisor skill sends milestone work to a milestone branch.** Work
+  inside a live milestone now branches from `milestone/<milestone id>` and
+  merges back into it, in a long-lived worktree at
+  `.worktrees/milestone-<milestone id>` that the worker handed the
+  milestone's first epic raises when it is missing; the root branch takes the
+  milestone branch in once, at the release. Work outside every milestone
+  (a `p0` fix) branches from and merges into the root branch as before. The
+  message carries a new `Root branch:` line beside `Base branch:`, and the
+  supervisor checks a report's merge on that work's base branch. Branches
+  merge with `--no-ff` as they stand, never rebased or squashed. (moai-nvju)
 - **The explorer opens with done shown and deferred work hidden.** Before, it
   opened with the done column hidden and deferred rows shown. The done
   column's toggle (`SPC v 4` with the default columns) and `SPC v l` still
@@ -76,6 +86,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **A milestone branch's worktree (`milestone/<id>`) is no longer read as a
+  place where work stands.** Its stale snapshot no longer hides stranded rows
+  from `moai status` and `moai show`, `--worktree` no longer overlays it, and
+  the hook no longer counts its rows as held elsewhere. It is told by its
+  branch, not its directory. (moai-nvju.ztj)
 - **A checkout with CRLF line endings (`core.autocrlf`) no longer reads the
   planted skills as stale** — the `skills_stale` notice and `moai skill status`
   now compare the way the install does. (moai-9s9s.x3n)

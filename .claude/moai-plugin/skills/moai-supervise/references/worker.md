@@ -22,8 +22,11 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   not one step at a time (haiku → sonnet → opus). Handed `low` but it is `high`, the model is `opus`.
   The grade of the epic-end review (7) is measured on this same rubric, member by member
 - `Work running alongside:` — the worktrees and work beside you, and the files they hold (4-3)
-- `Base branch:` — `<base branch>`. The supervisor read it in the root; do not read it again —
-  read inside a worktree, it gives that worktree's own branch
+- `Root branch:` — `<root branch>`, the branch the root checkout stands on. The supervisor read
+  it in the root; do not read it again — read inside a worktree, it gives that worktree's own branch
+- `Base branch:` — `<base branch>`, the branch your worktree splits from and merges back into.
+  Outside every milestone it is `<root branch>`; inside a milestone it is that milestone's own
+  branch, `milestone/<milestone id>` ("The milestone branch")
 - `Milestone:` — `<milestone>`, the release the epic hangs (1)
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
@@ -62,10 +65,12 @@ it. When the person is back in the window, what they say overrides what you deci
 
 ## Before the steps
 
-Before you commit or merge in the root, **only check** that the root still stands on that
-branch — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<base branch>`
+Before you commit or merge in the root, **only check** that the root still stands on
+`<root branch>` — run `git symbolic-ref -q HEAD` **in the root**. If it is not `refs/heads/<root branch>`
 (detached, or someone switched the branch), do not run that commit or merge: tell the supervisor and
 stop. A merge that lands on the wrong HEAD leaves no reference at all once `branch -d` runs.
+Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
+gets the same check before the merge ("The milestone branch").
 
 **Ask it where you already are.** Before the first tracker commit you are still in the root, so
 it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
@@ -91,6 +96,50 @@ intent.
   commit from sealing someone's open merge, but it cannot keep it from carrying rows another
   session has not committed yet
 
+## The milestone branch
+
+When `Base branch:` reads `milestone/<milestone id>`, the work is inside a milestone —
+`<milestone id>` below is the part after `milestone/`. Every epic of that milestone merges
+into that branch, not into `<root branch>`; `<root branch>` takes the milestone branch in
+once, at the release, and the release is the person's, not yours. The branch is checked out
+in a long-lived worktree of its own, `.worktrees/milestone-<milestone id>`, because the root
+stays on `<root branch>` and git checks a branch out in one place only. You do not work in
+it — you merge there (8) and nothing else — and you never remove it: it goes after the
+release. Outside a milestone this section does not exist. `Milestone:` can say `none` while
+`Base branch:` names a milestone — that milestone stands but has not started running, and
+`promote` still carries it over in 1; the branch is where this work goes all the same, and
+in 1 you hang `<milestone id>`, not `none`.
+
+**Raise it if it is missing**, from the root, right before the `worktree add` of 3 — look
+at `git worktree list` first. The first line raises the branch from the local
+`<root branch>`; the second is for a branch that stands while its worktree does not. If
+`worktree add` says the branch or the place already exists, a worker beside you raised it
+first — look at `git worktree list` again and carry on with what stands
+
+    git worktree add -b milestone/<milestone id> .worktrees/milestone-<milestone id> <root branch>
+    git worktree add .worktrees/milestone-<milestone id> milestone/<milestone id>
+If the repository's own worktree convention adds something to a new worktree (a link for
+the build output, say), add it to this one too.
+
+**Git aimed at the milestone's worktree runs from the root**, after `ExitWorktree(keep)` —
+there `git -C .worktrees/milestone-<milestone id> …` is one plain command and goes
+through. From inside your epic's worktree it is refused like any git aimed outside it (the
+git shapes above), so do not try it there. That worktree is shared by every worker of the
+milestone, like the root: if git refuses a merge there because one is already open
+(`MERGE_HEAD`), it is another worker's — never `merge --abort` it; wait for it to finish
+and run yours again. Before you merge into it, check its HEAD the way
+the root's is checked; if it does not stand on the milestone branch, do not merge: tell the
+supervisor
+
+    git -C .worktrees/milestone-<milestone id> symbolic-ref -q HEAD      it has to be refs/heads/milestone/<milestone id>
+**The milestone branch takes `<root branch>` in only at the release.** If this epic needs a
+fix that landed on `<root branch>` after the milestone branch split off, take it in at that
+moment, from the root, and then pull the milestone branch in 6 as usual. If it stops on a
+conflict, resolve it inside the milestone's worktree (`EnterWorktree(path)` from the root),
+never in the root
+
+    git -C .worktrees/milestone-<milestone id> merge --no-ff <root branch> -m "merge: take <root branch> in for <epic>"
+
 ## The steps
 
 1. Unfold it in the root — the one way to turn a backlog item into work is
@@ -110,7 +159,10 @@ intent.
    changes nothing. **Hang only the `<milestone>` in the message, and nothing else**: work is
    never pulled into a running release, so a release you noticed running is not yours to
    attach — not to this epic, not to a member you create later. Inside this epic the release
-   is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
+   is inherited, which is the one door that stays open. **If `<milestone>` is `none` but
+   `Base branch:` names `milestone/<milestone id>`**, that milestone stands and has not started
+   running — hang that `<milestone id>` in its place: `none` would clear the release `promote`
+   carried while the merge still lands on its branch. Otherwise, if `<milestone>` is `none`, this work
    stands outside every release — that is nothing running, or a backlog item that stood under none,
    or one whose release is already dead, and you cannot tell which from the word alone. What
    came over is still the release that backlog stood in, so read the line `promote` printed and clear a
@@ -135,6 +187,8 @@ intent.
 3. Right after the commit in 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
    `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
+   Inside a milestone the milestone branch has to stand first — raise it if it is missing
+   ("The milestone branch").
    Until the worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
    worktree stands for the whole repository, so once inside, move to the same subdirectory in
@@ -196,7 +250,8 @@ intent.
    - `high` — several files, the write path, concurrency, the storage format, hooks; hard to undo
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
    conflicts and run the tests. Fix things here — while the worktree stands, rule 2 blocks
-   edits in the root
+   edits in the root. Inside a milestone that is the milestone branch, not `<root branch>`
+   — the epics merged beside you are there
 7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
    not reviewed separately, so this once is the only review. **It runs inside this session** —
    never start another agent program for it.
@@ -256,6 +311,12 @@ intent.
    `rebase` and `commit --amend` throw them away — even when it is before the merge and
    looks fixable. Nothing blocks it; this line is what holds. Fixing a commit subject waits
    until the review has returned.
+   **Nor is the branch rebased or squashed when it merges** — it goes in with
+   `git merge --no-ff` as it stands (8). `moai show` finds an issue's commits by the id in
+   their subject, and a squash folds them away; the review's fixes stay as their own `fix:`
+   commits; and rebasing a branch that already holds merges — the milestone branch — changes
+   the merge hashes the `Report-checked:` notes point at. Rewording a subject on this branch
+   before the review starts is fine — nobody else has it yet.
    **When it returns, stop what it left running with `TaskStop` before you touch the tree**
    and read the working tree's status. A sweep subagent still alive writes its own version
    into this same worktree and covers a commit you already made without a word, and a
@@ -325,22 +386,31 @@ intent.
 
 8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
    this window stands in a directory that is gone.
-   Before merging, check that the root stands on <base branch> — if it does not, do not merge:
-   tell the supervisor
+   Before merging outside a milestone, check that the root stands on <root branch> — if it
+   does not, do not merge: tell the supervisor
 
-       git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
-   Merge in the root, **in one call**. Overlap with the workers beside you was split when the
+       git symbolic-ref -q HEAD                  it has to be refs/heads/<root branch>
+   **Inside a milestone you merge in the milestone's worktree, not in the root** — check that
+   worktree's HEAD instead, with the line in "The milestone branch", and run the merge and its
+   abort below with `-C .worktrees/milestone-<milestone id>` after `git`, from the root.
+   Merge **in one call**. Overlap with the workers beside you was split when the
    supervisor sent the work, and where it still collides, undo as below and resolve in the
    worktree — do not go looking for the other session to tell it. Do not use `--no-commit`.
    Without `--no-ff` it ends as a fast-forward and no merge commit stands
 
        git merge --no-ff worktree-<epic> -m "merge: …"
+       git -C .worktrees/milestone-<milestone id> merge --no-ff worktree-<epic> -m "merge: …"     inside a milestone
    If the root's `.moai` holds uncommitted rows from another session the merge is refused —
    take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
-   resolve it in the root — undo with `git merge --abort`, go back into the worktree with
+   resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
    `EnterWorktree(path)` and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
-   `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`
+   `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
+   **Inside a milestone delete the branch in the milestone's worktree** —
+   `git -C .worktrees/milestone-<milestone id> branch -d worktree-<epic>`. `-d` asks whether
+   the branch is merged into the HEAD it runs in, and `<root branch>` in the root does not
+   hold this merge until the release, so from the root it refuses. Do not reach for `-D`.
+   Leave the milestone's worktree standing
 
 9-1. Before closing, leave one line per member **on what did this work** in this window —
    leaving out the members left in the first column by 7-1 and 4-3, which nobody did. Not the
@@ -411,7 +481,8 @@ notes), then
   `git log <base branch>..HEAD` and `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
-  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>`
+  `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
+  raise the milestone branch first if it is missing ("The milestone branch")
 - **If the root is not the top of the repository** (a subdirectory project in a
   monorepo), go into the worktree and then move to the same subdirectory inside it and
   work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
