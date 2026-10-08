@@ -8621,6 +8621,48 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
     assert!(moai(s.path(), &["note", &id, "-b", "-x"]).status.success());
 }
 
+/// **자리에 온 `-` 한 글자는 글이 아니다**(moai-ltsv.4t0, 2026-10-08 사용자 결정). `moai note <id> - < f.md`
+/// 가 `-` 라는 노트를 남기고 stdin 을 버린 채 0 으로 끝났다 — `add` 의 제목과 `edit --title` 도 같았다.
+/// 거절하고, 아무것도 안 쓰고, stdin 을 받는 깃발(`-b -`)을 댄다. `--` 로도 안 열린다.
+#[test]
+fn a_lone_dash_in_a_text_place_is_refused() {
+    let s = init("lonedash");
+    let id = add(s.path(), &["평범한 제목"]);
+    let (snap, log) = (issues(s.path()), journal(s.path()));
+    let calls: [&[&str]; 8] = [
+        &["note", &id, "-"],
+        &["note", &id, " - "],
+        &["note", &id, "--", "-"],
+        &["add", "-"],
+        &["add", "--", "-"],
+        &["backlog", "add", "-"],
+        &["edit", &id, "--title", "-"],
+        &["edit", &id, "--title=-"],
+    ];
+    for argv in calls {
+        let out = from_stdin(s.path(), argv, "stdin 에 부은 글\n");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{argv:?}: {err}");
+        assert!(err.contains("-b - <"), "stdin 을 받는 길을 안 댔다 — {argv:?}: {err}");
+        assert_eq!(issues(s.path()), snap, "거부해 놓고 썼다 — {argv:?}");
+        assert_eq!(journal(s.path()), log, "거부해 놓고 저널에 적었다 — {argv:?}");
+    }
+    // 노트의 길은 그 id 를 댄 채로, 제목의 길은 부른 동사로 댄다.
+    let err = |argv: &[&str]| String::from_utf8_lossy(&moai(s.path(), argv).stderr).into_owned();
+    assert!(err(&["note", &id, "-"]).contains(&format!("moai note {id} -b - <")));
+    assert!(err(&["backlog", "add", "-"]).contains("moai backlog add '"));
+    assert!(err(&["edit", &id, "--title", "-"]).contains(&format!("moai edit {id} -b - <")));
+    let out = moai(s.path(), &["note", &id, "-", "--json"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_input""#));
+
+    // 말한 길은 실제로 stdin 을 받는다 — 그리고 `-` 가 든 글은 그대로 받는다.
+    let out = from_stdin(s.path(), &["note", &id, "-b", "-"], "부은 글\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(journal(s.path()).contains("부은 글"));
+    assert!(moai(s.path(), &["note", &id, "- 목록 한 줄"]).status.success());
+    assert!(moai(s.path(), &["add", "-q", "a - b"]).status.success());
+}
+
 /// 본문을 stdin 으로 준다고 하고 아무것도 안 온 판은 한 줄로 말한다(moai-pp9i.kj2). 막지는 않는다 —
 /// 2026-09-29 사람이 정했다. `add`·`add --from`·`edit` 셋이 같은 말을 한다.
 #[test]

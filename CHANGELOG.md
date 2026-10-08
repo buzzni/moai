@@ -27,6 +27,13 @@ does not tag — see `CONTRIBUTING.md`.
   merges an untracked tracker, so there is nothing for a driver to do.
   `skipped` now stands only for `--no-driver` on a committed tracker.
   (moai-8gwh.86j)
+- **A lone `-` where text goes is refused instead of written down.** `moai
+  note <id> - < notes.md` wrote a note that read `-` and dropped what came on
+  stdin, and `moai add -`, `moai backlog add -` and `moai edit <id> --title -`
+  took `-` as the title — all with exit 0. They now exit non-zero with
+  `bad_input`, write nothing, and name the flag that does read stdin: `moai
+  note <id> -b - < <file>`, and for a title, that the body is what takes
+  `-b -`. `--` does not let a lone `-` through. (moai-ltsv.4t0)
 
 ### Fixed
 
