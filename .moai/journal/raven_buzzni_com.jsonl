@@ -5739,3 +5739,4 @@
 {"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.qgs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.ztj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.qhy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T07:01:32Z","id":"moai-9s9s.hs8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Codex 를 지금 쓰지 않는다(사람 결정 2026-10-08) — 실제 exec_command workdir 페이로드가 기록되면 다시 연다"}
