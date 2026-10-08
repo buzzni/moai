@@ -5878,3 +5878,11 @@
 {"ts":"2026-10-08T12:45:32Z","id":"moai-1po5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T12:45:52Z","id":"moai-1po5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — cargo fmt only, supervisor window)"}
 {"ts":"2026-10-08T12:45:52Z","id":"moai-1po5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-08T13:09:02Z","id":"moai-2d70","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"reach() 가 트래커 없는 루트에도 is_bare 를 물어 git 을 띄운다"}
+{"ts":"2026-10-08T13:09:02Z","id":"moai-4vp2","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"skill status 가 .agents/skills 링크 아래 남은 디렉터리를 두 번 댄다"}
+{"ts":"2026-10-08T13:09:02Z","id":"moai-e9j9","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"--separate-git-dir 주 체크아웃을 딸린 워크트리에서 못 찾는다"}
+{"ts":"2026-10-08T13:09:02Z","id":"moai-l92t","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.12.0"}
+{"ts":"2026-10-08T13:09:03Z","id":"moai-jn4d","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"자리 판정이 집기 표식만 읽는다"}
+{"ts":"2026-10-08T13:09:03Z","id":"moai-jn4d.ewm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show 의 place·stranded·ready --worktree 도 옆 사본 대신 집기 표식만 읽는다"}
+{"ts":"2026-10-08T13:09:03Z","id":"moai-jn4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-g4je 에서 펼쳤다 — places 도 옆 워크트리의 낡은 사본 대신 집기 표식만 읽을까"}
+{"ts":"2026-10-08T13:09:03Z","id":"moai-g4je","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-jn4d 로 펼쳤다 (이슈 1건)"}
