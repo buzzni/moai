@@ -5813,3 +5813,7 @@
 {"ts":"2026-10-08T10:07:37Z","id":"moai-h64l.59m","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: queued after 2zi in this window; held_elsewhere reads only held_here markers (person decision)"}
 {"ts":"2026-10-08T10:07:39Z","id":"moai-h64l.wst","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: queued after 59m in this window; main_root asks git (worktree list --porcelain / --is-bare-repository)"}
 {"ts":"2026-10-08T10:07:51Z","id":"moai-zsfr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-3e"}
+{"ts":"2026-10-08T10:08:09Z","id":"moai-zsfr.2em","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T10:08:09Z","id":"moai-zsfr.2p9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T10:08:09Z","id":"moai-zsfr.o3s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T10:08:10Z","id":"moai-zsfr.shu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
