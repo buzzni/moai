@@ -11715,8 +11715,7 @@ mod tests {
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
         // 처음 보기가 done 을 보이니(moai-muit) b 의 `SPC v 4` 는 done 을 숨긴 것이다.
         assert!(
-            c.view.hides(crate::config::DONE)
-                && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false },
+            c.view.hides(crate::config::DONE) && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false },
             "{text}"
         );
     }
