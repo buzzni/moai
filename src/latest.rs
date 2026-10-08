@@ -129,6 +129,10 @@ pub fn upgrade_of(repo: &str) -> String {
     format!("curl -fsSL {script} | {REPO_VAR}={repo} sh")
 }
 
+/// 도는 바이너리를 제 손으로 올리는 줄(moai-zsfr.o3s) — [`upgrade_here`] 가 `moai update` 가 설
+/// 자리에서 [`upgrade_line`] 대신 낸다. 그리는 쪽은 이 값과 견줘 배너 글을 고른다.
+pub const SELF_UPDATE: &str = "moai update";
+
 /// `owner/name` 꼴인가(moai-zsfr.2em). **엄하게 잰다** — 이 글은 URL 의 길 조각이 되고 `sh` 에
 /// 흘릴 스크립트를 고른다. GitHub 의 이름 글자(`[A-Za-z0-9._-]`)만 받고, 조각은 둘이며, 어느 조각도
 /// 점이나 줄표로 시작하지 않는다 — `..` 는 길을 거슬러 오르고, `-` 로 시작하는 낱말은 그것을 받는
@@ -240,11 +244,19 @@ pub fn built_by_cargo(dir: &Path) -> bool {
     dir.join(".fingerprint").is_dir() || dir.parent().is_some_and(cargo_put_moai_under)
 }
 
-/// [`upgrade_line`] 을 이 프로세스에 — 도는 바이너리의 푼 자리와 `HOME` 을 넣는다. 파일 시스템을
+/// 도는 이 바이너리를 올리는 한 줄 — `moai update` 가 설 자리면 [`SELF_UPDATE`], 아니면
+/// [`upgrade_line`](moai-zsfr.o3s). 도는 바이너리의 푼 자리와 `HOME` 을 넣는다. 파일 시스템을
 /// 보므로 **여는 걸음에 한 번만 부른다**(`tui::App::ask_latest`). 그리는 걸음에서 부르면
 /// 프레임마다 디스크를 두드린다.
+///
+/// **`moai update` 가 서는지는 그 명령이 거절하는 자로 잰다**([`crate::update::refusal`]) — 안내가
+/// `moai update` 를 대고 그 명령은 거절하는 판을 안 만든다. 못 서는 자리에는 긴 줄을 그대로 댄다
+/// (그 줄도 못 서면 `None`).
 pub fn upgrade_here(repo: &str) -> Option<String> {
     let exe = crate::path::real(&std::env::current_exe().ok()?);
+    if crate::update::refusal(&exe, SERVED, crate::update::writable).is_none() {
+        return Some(SELF_UPDATE.to_string());
+    }
     let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
     upgrade_line(&exe, home.as_deref(), SERVED, repo)
 }

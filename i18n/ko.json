@@ -444,6 +444,7 @@
   "tui.banner.let_go": "멈춘 다시 읽기 {n}개를 놓았다 — 그것이 터지면 화면이 걷힌다 · 나갔다 다시 연다",
   "tui.banner.unreadable": "읽을 수 없는 줄 {n}개 — 그 줄은 빠진 채로 보고 있다",
   "tui.banner.upgrade": "새 판 {tag} 이 나왔다 — 올리는 줄은 나갈 때 찍는다",
+  "tui.banner.update": "새 판 {tag} 이 나왔다 — `moai update` 로 올린다",
   "tui.banner.warnings": "드러난 것 {n}건 — `moai status` 가 자세히 낸다",
   "tui.header.all": "전체",
   "tui.header.journal": "{n}개 못 읽음 — {at} ({kind})",

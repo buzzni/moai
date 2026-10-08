@@ -2394,11 +2394,12 @@ Options:
   `moai project add` in another terminal, land without a keypress.
 
   The version line in the header says whether a newer release is out. When
-  one is, the banner says so, and on quitting the explorer prints the
-  install.sh line that upgrades the moai you are running — with --dir when it
-  lives under your home but not in ~/.local/bin. No line is shown for a build
-  from source, for a moai outside your home, or on a machine the releases do
-  not cover.
+  one is, the banner says so and names `moai update`, which upgrades the moai
+  you are running in place; quitting prints it again. Where `moai update`
+  cannot run but install.sh can (a directory under your home you cannot
+  write), quitting prints the install.sh line instead, with --dir when it is
+  not ~/.local/bin. No line is shown for a build from source, for a binary not
+  named moai, or on a machine the releases do not cover.
 
   Of what came to me (assigned to me or under it), rows changed since the
   last look carry a [NEW] mark in front of the title. Read marks live in my own

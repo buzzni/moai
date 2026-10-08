@@ -1444,7 +1444,8 @@ pub struct App {
     /// 새 판을 묻는 딴 실 — **한 판에 하나만 띄운다.** 손잡이를 드는 것이 그 하나를 세는 자다
     /// ([`crate::latest::spawn`]). 끝에서 기다리지는 않는다.
     latest_job: Option<crate::latest::Job>,
-    /// 도는 이 바이너리를 올리는 한 줄([`crate::latest::upgrade_line`], 리뷰). 새 판이 나왔을 때
+    /// 도는 이 바이너리를 올리는 한 줄([`crate::latest::upgrade_here`], 리뷰) — `moai update` 가 서면 그 명령
+    /// ([`crate::latest::SELF_UPDATE`], moai-zsfr.o3s), 아니면 `install.sh` 의 줄이다. 새 판이 나왔을 때
     /// 배너가 댄다. `None` 이면 그 줄로는 이 바이너리를 못 올린다 — 소스에서 지었거나, 판을 안
     /// 내는 기계거나, 누가 채웠는지 모르는 자리다. 파일 시스템을 보므로 [`App::ask_latest`] 가
     /// 여는 걸음에 한 번 채운다.
