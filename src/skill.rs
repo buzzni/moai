@@ -157,8 +157,8 @@ fn stable(bytes: &[u8]) -> u64 {
 /// 는 걸지 않는다** — `claude` 가 그 출력을 거절한다. 까닭은 `hook::Event` 에
 /// 적혀 있다.
 ///
-/// **`StopFailure`·`SessionEnd` 는 안 건다**(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 옛 판이 심은 훅이
-/// 그 하위명령을 부르는 동안은 `moai hook` 이 빈 명령으로 받는다(`cmd::hook` 의 `decide`).
+/// **`StopFailure`·`SessionEnd` 는 안 건다**(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 그 하위명령도
+/// 지웠다(moai-9s9s.vzn) — 옛 판이 심은 훅은 clap 의 오류를 내고, 다시 심으면 걷힌다(`hook::Event`).
 const HOOKS: &[(&str, &str, &str)] = &[
     ("SessionStart", "session-start", "counting moai warnings..."),
     ("UserPromptSubmit", "user-prompt-submit", "reading the moai board..."),
@@ -179,7 +179,8 @@ pub const CODEX_HOOKS: &str = ".codex/hooks.json";
 pub const AGENTS_HOOKS: &str = ".agents/hooks.json";
 
 /// Codex 의 훅 — Claude 와 이벤트 이름이 같다. `Stop` 없이 끝난 턴의 `Interrupt`(Esc, 2026-10-04 실측)·`SessionEnd` 는
-/// 안 건다(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 옛 판이 심은 줄은 `moai hook` 이 빈 명령으로 받는다.
+/// 안 건다(moai-5uwh.e9j) — 출석을 적던 자리였고 출석을 걷었다. 그 하위명령도 지웠다(moai-9s9s.vzn) — 옛 판이 심은
+/// 줄은 clap 의 오류를 내고, 다시 심으면 걷힌다.
 ///
 /// **줄마다 그 이벤트의 상한(초)을 함께 적는다**(moai-t6hl) — 줄 밖의 목록에 두면 줄을 더할 때 목록을 잊은 줄이 말없이
 /// 15초를 받는다. 줄에 두면 안 적고는 컴파일이 안 된다(리뷰 moai-t6hl.00z).

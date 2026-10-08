@@ -735,10 +735,13 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     }
     // **Claude 의 줄 밑에 `.agents` 한 줄과 그것을 읽는 둘의 PATH 줄**(사용자 결정 2026-10-04).
     let shared_row = say(lang, "skill.row_agents");
-    out.push(match (shared.planted, shared.due()) {
-        (false, _) => row(false, shared_row, say(lang, "skill.agents_missing")),
-        (true, n @ 1..) => row(false, shared_row, &fill(say(lang, "skill.agents_stale"), &[("n", &n.to_string())])),
-        (true, 0) => row(true, shared_row, say(lang, "skill.agents_current")),
+    // **파일 수는 파일만 센다** — 걷을 디렉터리만 남은 자리에서 "파일 1개가 다르다" 고 하면 다른 파일이 없는데 그 수를
+    // 댄다. 그 디렉터리는 아래 줄이 이름째 댄다.
+    out.push(match (shared.planted, shared.stale.len(), shared.due()) {
+        (false, _, _) => row(false, shared_row, say(lang, "skill.agents_missing")),
+        (true, 0, 0) => row(true, shared_row, say(lang, "skill.agents_current")),
+        (true, 0, _) => row(false, shared_row, say(lang, "skill.agents_leftover")),
+        (true, n, _) => row(false, shared_row, &fill(say(lang, "skill.agents_stale"), &[("n", &n.to_string())])),
     });
     // **남은 디렉터리는 이름과 까닭을 댄다**(moai-9s9s.v0y) — `install` 이 사람의 것이 든 디렉터리를 남기면(`Foreign`) 그
     // 안의 `SKILL.md` 가 걷힌 명령을 계속 가르치는데, 위 줄은 "지금 판" 이라 아무 화면도 그것을 안 댔다.
@@ -779,16 +782,16 @@ impl Shared {
         let home = crate::held::Home::of(root);
         let mut stale = Vec::new();
         let mut planted = false;
-        for (path, body) in skill::agents_tree(skills) {
-            let at = dir.join(&path);
+        let tree = skill::agents_tree(skills);
+        for (path, body) in &tree {
+            let at = dir.join(path);
             planted |= std::fs::symlink_metadata(&at).is_ok();
-            if !crate::held::read_inside(&at, &home).is_ok_and(|text| planted_as(&text, &body)) {
+            if !crate::held::read_inside(&at, &home).is_ok_and(|text| planted_as(&text, body)) {
                 stale.push(path.display().to_string());
             }
         }
-        // 견주는 이름은 [`stale_trees`] 와 같다 — 그 자리에 심는 것은 Claude 전용이 아닌 스킬뿐이다.
-        let names: Vec<&str> = skills.iter().filter(|s| !s.claude_only).map(|s| s.name).collect();
-        let left = leftovers(&dir, &names, root);
+        // 견주는 이름은 `install` 이 걷는 자와 같다 — 심는 트리에서 읽는다([`planted_names`]).
+        let left = leftovers(&dir, &planted_names(&tree, ""), root);
         Shared { dir, stale, planted, left }
     }
 
@@ -1910,9 +1913,9 @@ pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent
 
     let shared_stale = outside(&shared_dir, root).is_none() && {
         let tree = skill::agents_tree(&skills);
-        let names: Vec<&str> = skills.iter().filter(|s| !s.claude_only).map(|s| s.name).collect();
         let planted = tree.iter().any(|(p, _)| seen(&shared_dir.join(p)));
-        (planted && tree.iter().any(|(p, body)| differs(&shared_dir.join(p), body))) || left(&shared_dir, &names)
+        (planted && tree.iter().any(|(p, body)| differs(&shared_dir.join(p), body)))
+            || left(&shared_dir, &planted_names(&tree, ""))
     };
     let states: Vec<HookState> = hook_files.iter().map(|h| h.seen(root)).collect();
     for (h, state) in hook_files.iter().zip(&states) {

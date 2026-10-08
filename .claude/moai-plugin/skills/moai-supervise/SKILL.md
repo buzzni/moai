@@ -184,7 +184,7 @@ on would make the release grow after it started, and that is the person's call a
 worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a second worker.
 So the moment you send it, mark the row you sent — the backlog item, or the epic when the work
 is already unfolded — and take the note into the root with a commit with a path. Without it
-the send lives only in this conversation, and a supervisor that starts again (4) cannot see it
+the send lives only in this conversation, and a supervisor that starts again (4) cannot see it.
 
     moai note <id> 'Sent: <worker>'
 
@@ -293,7 +293,7 @@ and in the default permission mode Claude Code asks its person first; the plugin
 exception. A worker whose person is away waits on that prompt and sends nothing. Tell the
 person once, before the first send, and let them choose: a person in the worker's window
 answers it, or `permissions.additionalDirectories` in their settings holding that plugin
-directory lets it through. The settings are theirs — do not write them
+directory lets it through. The settings are theirs — do not write them.
 Fill in `<id>`, `<title>`, `<steps file>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -348,7 +348,8 @@ report to the old one fails leaves it on the epic as a note with `report: <epic>
 head. So when you start or resume, before waiting, read what the tracker holds:
 
     moai show -s in_progress,review        the work sent and picked up, not done
-    moai show --type backlog -g 'Sent:'    a backlog sent and not unfolded yet — not a candidate
+    moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
+                                           epic not picked up yet; neither is a candidate
     moai show -g 'report:' --all           the epics carrying a report nobody received
 
 **Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
@@ -390,7 +391,7 @@ the work finished — when the report does not carry it, read it from that backl
 line about being unfolded.
 
 If the three hold, mark the report checked on the epic and take it into the root with a
-commit with a path — a supervisor that starts again reads that line, not this conversation (4)
+commit with a path — a supervisor that starts again reads that line, not this conversation (4).
 
     moai note <epic> 'Report-checked: <merge hash>'
 

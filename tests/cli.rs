@@ -15005,6 +15005,8 @@ fn skill_status_names_a_retired_skill_left_behind() {
     let english = || staged(&["skill", "status"]).current_dir(root).env("MOAI_LANG", "en").output().unwrap();
     let said = String::from_utf8(english().stdout).unwrap();
     assert!(said.contains("! remove:") && said.contains("moai-work"), "걷을 디렉터리를 안 댄다\n{said}");
+    // 다른 파일은 없다 — 디렉터리 하나를 "파일 1개가 다르다" 로 세지 않는다.
+    assert!(!said.contains("files differ") && said.contains("left behind"), "남은 디렉터리를 파일 수로 셌다\n{said}");
 
     // 사람의 메모가 들면 `install` 이 안 걷는다 — 그래도 그 자리를 댄다.
     std::fs::write(work.join("notes.md"), "mine\n").unwrap();
@@ -25240,7 +25242,7 @@ fn antigravity_holds_the_turn_with_continue() {
 /// 내고 까닭을 `error` 에 싣는다. 실패하는 백엔드에 `continue` 로 밀어 넣지 않고, 세션에 한 번인 닫기 물음도 그 판에
 /// 안 쓴다 — 다음의 멀쩡한 `Stop` 이 묻는다.
 #[test]
-fn an_antigravity_run_that_failed_is_a_stop_failure() {
+fn an_antigravity_run_that_failed_is_not_judged() {
     let s = init("agy-failed");
     let id = add(s.path(), &["락을 잡는다"]);
     ok(s.path(), &["mv", &id, "in_progress"]);

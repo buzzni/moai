@@ -1948,7 +1948,7 @@ on would make the release grow after it started, and that is the person's call a
 worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a second worker.
 So the moment you send it, mark the row you sent — the backlog item, or the epic when the work
 is already unfolded — and take the note into the root with a commit with a path. Without it
-the send lives only in this conversation, and a supervisor that starts again (4) cannot see it
+the send lives only in this conversation, and a supervisor that starts again (4) cannot see it.
 
     moai note <id> 'Sent: <worker>'
 
@@ -2047,7 +2047,7 @@ and in the default permission mode Claude Code asks its person first; the plugin
 exception. A worker whose person is away waits on that prompt and sends nothing. Tell the
 person once, before the first send, and let them choose: a person in the worker's window
 answers it, or `permissions.additionalDirectories` in their settings holding that plugin
-directory lets it through. The settings are theirs — do not write them
+directory lets it through. The settings are theirs — do not write them.
 Fill in `<id>`, `<title>`, `<steps file>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -2094,7 +2094,8 @@ report to the old one fails leaves it on the epic as a note with `report: <epic>
 head. So when you start or resume, before waiting, read what the tracker holds:
 
     moai show -s in_progress,review        the work sent and picked up, not done
-    moai show --type backlog -g 'Sent:'    a backlog sent and not unfolded yet — not a candidate
+    moai show -g 'Sent:'                   sent and not done — a backlog not unfolded yet, or an
+                                           epic not picked up yet; neither is a candidate
     moai show -g 'report:' --all           the epics carrying a report nobody received
 
 **Only a note that opens with the marker counts** — `-g` matches any text, and a body or a
@@ -2136,7 +2137,7 @@ the work finished — when the report does not carry it, read it from that backl
 line about being unfolded.
 
 If the three hold, mark the report checked on the epic and take it into the root with a
-commit with a path — a supervisor that starts again reads that line, not this conversation (4)
+commit with a path — a supervisor that starts again reads that line, not this conversation (4).
 
     moai note <epic> 'Report-checked: <merge hash>'
 
@@ -4593,12 +4594,19 @@ stop sending outside work while a release runs",
         // 보낸 backlog 와 확인한 보고도 트래커에 줄머리 노트로 남는다(moai-9s9s.ctx) — 없으면 다시 뜬 감독이 아직 안
         // 펼친 backlog 를 둘째 일꾼에게 또 보내고, 이미 확인한 보고를 다시 확인한다.
         assert!(supervise.contains("moai note <id> 'Sent: <worker>'"), "보낸 backlog 를 트래커에 안 남긴다");
-        assert!(wait.contains("moai show --type backlog -g 'Sent:'"), "다시 뜬 감독이 보낸 backlog 를 안 읽는다");
-        assert!(supervise.contains("moai note <epic> 'Report-checked: <merge hash>'"), "확인한 보고를 트래커에 안 남긴다");
+        // 펼친 뒤 보낸 에픽도 집히기 전에는 첫 칸이라 `-s in_progress,review` 에 안 선다 — 종류로 거르면 그 에픽을 또 보낸다.
+        assert!(wait.contains("    moai show -g 'Sent:' "), "다시 뜬 감독이 보낸 backlog·에픽을 안 읽는다");
+        assert!(
+            supervise.contains("moai note <epic> 'Report-checked: <merge hash>'"),
+            "확인한 보고를 트래커에 안 남긴다"
+        );
         assert!(wait.contains("**Only a note that opens with the marker counts**"), "본문의 같은 글까지 보고로 센다");
         // 스킬이 저장소 밖 플러그인 캐시에 있으면 일꾼의 Read 가 권한을 묻는다(moai-9s9s.qmd) — 사람이 비운 일꾼은 그 물음에서 선다.
-        assert!(supervise.contains("**If that base directory lies outside `<root>`**"), "저장소 밖 단계 파일의 권한 물음을 안 알린다");
-        assert!(supervise.contains("The settings are theirs — do not write them"), "감독이 사람의 설정을 고친다");
+        assert!(
+            supervise.contains("**If that base directory lies outside `<root>`**"),
+            "저장소 밖 단계 파일의 권한 물음을 안 알린다"
+        );
+        assert!(supervise.contains("The settings are theirs — do not write them."), "감독이 사람의 설정을 고친다");
         // 감독은 창에 아무것도 안 친다 — 5-1 을 걷었다.
         assert!(!supervise.contains("**5-1."), "감독이 창을 비우는 5-1 이 남았다");
         assert!(!supervise.contains("send-keys") && !supervise.contains("tmux_pane"), "감독이 tmux 칸을 만진다");

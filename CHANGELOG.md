@@ -22,8 +22,9 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai skill status` names a retired skill's directory left behind.** A
   directory such as `.agents/skills/moai-work` that still holds a file of yours
   is kept by `moai skill install` and still teaches retired commands; the
-  status now says so and leaves the row current. `--json` carries
-  `agents.leftovers`, always an array. (moai-9s9s.v0y)
+  status now says so and leaves the row current. One that `install` would
+  remove turns the `.agents` row stale, the same as the `skills_stale` notice.
+  `--json` carries `agents.leftovers`, always an array. (moai-9s9s.v0y)
 
 ### Changed
 
@@ -55,8 +56,8 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai-supervise` writes what it sent and what it checked into the
   tracker.** It notes `Sent: <worker>` on the row it sends and
   `Report-checked: <merge hash>` on the epic once a report holds, so a
-  supervisor that starts again no longer sends a backlog item still waiting to
-  be unfolded a second time, or checks a report again. It also tells the person once when its
+  supervisor that starts again no longer sends a backlog item or an epic nobody
+  has picked up yet a second time, or checks a report again. It also tells the person once when its
   skill lives outside the repository, where a worker's read of the steps file
   asks for permission. (moai-9s9s.ctx, moai-9s9s.qmd)
 
