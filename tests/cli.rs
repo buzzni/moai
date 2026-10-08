@@ -15049,6 +15049,42 @@ fn skill_status_names_a_retired_skill_left_behind() {
     assert!(line.contains("left as it is"), "왜 남겼는지 안 댄다 — {line}");
 }
 
+/// **Claude 의 트리에 남은 디렉터리도 댄다**(moai-h64l.2zi). `.agents` 만 대던 판은 `.claude/moai-plugin/skills` 에 남은
+/// 걷힌 스킬을 아무 화면도 안 댔다 — Claude Code 는 그 자리에서 스킬을 읽으니 다음 세션이 걷힌 명령을 배운다. 자는
+/// `install` 이 걷는 것과 하나다. **아무것도 안 막는다** — 종료 코드는 0 이다.
+#[test]
+fn skill_status_names_a_retired_skill_left_in_claudes_tree() {
+    let s = init("skillleftclaude");
+    let root = s.path();
+    let status = || -> serde_json::Value { serde_json::from_str(&ok(root, &["skill", "status", "--json"])).unwrap() };
+    assert_eq!(status()["leftovers"], serde_json::json!([]), "빈 자리에서도 키는 늘 선다");
+
+    let work = root.join(".claude/moai-plugin/skills/moai-work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("SKILL.md"), "---\nname: moai-work\n---\nmoai hello\n").unwrap();
+    let v = status();
+    let left = v["leftovers"].as_array().unwrap();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0]["state"], "planned");
+    assert!(left[0]["path"].as_str().unwrap().ends_with("moai-plugin/skills/moai-work"), "{left:?}");
+    assert_eq!(v["agents"]["leftovers"], serde_json::json!([]), "Claude 의 트리를 `.agents` 로 셌다");
+    let english = || staged(&["skill", "status"]).current_dir(root).env("MOAI_LANG", "en").output().unwrap();
+    let out = english();
+    assert!(out.status.success(), "남은 디렉터리가 종료 코드를 바꿨다");
+    let said = String::from_utf8(out.stdout).unwrap();
+    assert!(said.contains("left in Claude's tree"), "고칠 명령을 안 댄다\n{said}");
+    let line = said.lines().find(|l| l.contains("moai-work")).unwrap_or_else(|| panic!("이름을 안 댄다\n{said}"));
+    assert!(line.contains("! remove:"), "{line}");
+
+    // 사람의 메모가 들면 `install` 이 안 걷는 꼴이다 — 그래도 이름과 까닭을 댄다.
+    std::fs::write(work.join("notes.md"), "mine\n").unwrap();
+    assert_eq!(status()["leftovers"][0]["state"], "foreign");
+    let said = String::from_utf8(english().stdout).unwrap();
+    assert!(!said.contains("left in Claude's tree"), "`install` 이 못 걷는 자리에 그 명령을 댔다\n{said}");
+    let line = said.lines().find(|l| l.contains("moai-work")).unwrap_or_else(|| panic!("이름을 안 댄다\n{said}"));
+    assert!(line.contains("left as it is"), "왜 남겼는지 안 댄다 — {line}");
+}
+
 /// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.
 #[test]
 fn the_hook_works_where_stdin_says() {

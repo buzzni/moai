@@ -762,6 +762,7 @@
   "skill.claude_on_path": "on PATH",
   "skill.claude_off_path": "not on PATH — nothing can be planted or removed",
   "skill.stale_copies": "    {n} old copies are left in the claude cache (clearing them is claude's job)",
+  "skill.claude_leftover": "    a skill this version no longer plants is left in Claude's tree (below) — `moai skill install` removes it",
   "skill.row_agents": ".agents",
   "skill.agents_current": "current — codex and antigravity read it",
   "skill.agents_stale": "{n} files differ from this version — `moai skill install --agent codex` plants them again",
