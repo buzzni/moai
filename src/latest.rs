@@ -2355,8 +2355,16 @@ mod tests {
             Some(SELF_UPDATE),
             "집 밖이어도 쓸 수 있으면 moai update 가 선다"
         );
-        assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, no), None, "쓸 수 없는 자리 — install.sh 도 못 쓴다");
-        assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, no), None, "저장소 값이 틀려도 쓸 수 없으면 줄이 없다");
+        assert_eq!(
+            upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, no),
+            None,
+            "쓸 수 없는 자리 — install.sh 도 못 쓴다"
+        );
+        assert_eq!(
+            upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, no),
+            None,
+            "저장소 값이 틀려도 쓸 수 없으면 줄이 없다"
+        );
         assert_eq!(
             upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, yes),
             Some(up),
