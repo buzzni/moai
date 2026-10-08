@@ -46,7 +46,7 @@ Commands:
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
-  update        Upgrade the moai you are running with its repository's install.sh
+  update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
   help          Print this message or the help of the given subcommand(s)
 
@@ -3005,13 +3005,13 @@ Examples:
 ## `moai update`
 
 ```
-Upgrade the moai you are running with its repository's install.sh
+Upgrade the moai you are running with install.sh
 
 Usage: moai update [OPTIONS]
 
 Options:
-      --version <tag>        Install this release tag instead of the latest (handed to install.sh)
-      --dry-run              Print the script's address and the command, and touch nothing
+      --version <tag>        Release tag to install instead of the latest
+      --dry-run              Print what would be fetched and run; touch nothing
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)

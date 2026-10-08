@@ -844,7 +844,7 @@ Examples:
 
     // **받고 돌리는 길은 `cmd::update`, 고르는 길은 `update` 다**(moai-zsfr.2p9). 저장소의 `.moai` 를 안
     // 찾는다 — 올리는 것은 이 바이너리지 트래커가 아니다.
-    /// Upgrade the moai you are running with its repository's install.sh
+    /// Upgrade the moai you are running with install.sh
     #[command(after_help = "  moai update                    the latest release, over this binary
   moai update --version v0.9.0   that release instead
   moai update --dry-run          print what would be fetched and run
@@ -1863,10 +1863,10 @@ pub struct MergeDriverArgs {
 /// 정해진다. 다른 자리에 깔고 싶은 사람은 `install.sh --dir` 를 친다.
 #[derive(Args, Debug)]
 pub struct UpdateArgs {
-    /// Install this release tag instead of the latest (handed to install.sh)
+    /// Release tag to install instead of the latest
     #[arg(long, value_name = "tag")]
     pub version: Option<String>,
-    /// Print the script's address and the command, and touch nothing
+    /// Print what would be fetched and run; touch nothing
     #[arg(long)]
     pub dry_run: bool,
 }
