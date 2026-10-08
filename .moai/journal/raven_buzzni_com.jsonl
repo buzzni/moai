@@ -5767,3 +5767,5 @@
 {"ts":"2026-10-08T07:26:56Z","id":"moai-nvju","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 80924c4a"}
 {"ts":"2026-10-08T07:30:50Z","id":"moai-wh0u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"develop 의 cargo fmt 차이 두 곳 (guide.rs·tui/mod.rs)"}
 {"ts":"2026-10-08T07:30:50Z","id":"moai-wh0u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T07:31:44Z","id":"moai-wh0u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — cargo fmt only, supervisor window)"}
+{"ts":"2026-10-08T07:31:44Z","id":"moai-wh0u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
