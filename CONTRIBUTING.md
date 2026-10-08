@@ -140,6 +140,9 @@ commit, and a review point you decided not to act on gets a sentence saying why.
 ## Releasing
 
 ```sh
+git -C .worktrees/milestone-<id> merge --no-ff develop -m "merge: take develop into milestone/<id>"
+cargo test                                        # in .worktrees/milestone-<id>
+git merge --no-ff milestone/<id> -m "merge: <milestone title> (<id>)"   # in the root, on develop
 moai archive --dry-run                            # preview closed bundles eligible to move
 moai archive                                      # refresh .moai/archive/<year>.jsonl
 git add .moai/issues.jsonl .moai/archive
@@ -151,7 +154,45 @@ git push origin develop
 gh pr create --base main --head develop --title "v0.2.0"   # merge it, no squash
 git fetch origin && git tag v0.2.0 origin/main
 git push origin v0.2.0
+git worktree remove .worktrees/milestone-<id>     # once the release is out
+git branch -d milestone/<id>
+rm -rf /tmp/cargo-target/milestone-<id>
 ```
+
+**A milestone's work waits on its own branch until the release** (moai-nvju,
+2026-10-08). Work inside a milestone branches from `milestone/<id>` and merges
+back into it, not into `develop`. The branch is raised from the local `develop`
+when the milestone's first epic is sent, by the worker that receives it, and it
+is checked out in a long-lived worktree at `.worktrees/milestone-<id>` because
+the root stays on `develop`:
+
+```sh
+git worktree add -b milestone/<id> .worktrees/milestone-<id> develop   # no branch yet
+git worktree add .worktrees/milestone-<id> milestone/<id>               # branch, no worktree
+git worktree add -b worktree-<epic> .worktrees/<epic> milestone/<id>    # an epic of it
+git -C .worktrees/milestone-<id> merge --no-ff worktree-<epic> -m "merge: … (<epic>)"
+```
+
+The epic's merge runs in the milestone worktree, after checking that it still
+stands on `refs/heads/milestone/<id>`; a conflict there is aborted, resolved in
+the epic's worktree after taking the milestone branch in, and merged again. Work
+outside every milestone — a `p0` hotfix — branches from `develop` and merges
+into `develop`, as before. The milestone branch takes `develop` in **once, at
+the release**, before `auto` — the first three lines of the block above, left
+out when the release has no milestone branch — so
+the changelog `auto` reads holds the milestone's entries, and anything that
+landed on `develop` meanwhile, a `p0` included, ships with it. Conflicts are
+resolved in the milestone worktree, never in the root. If an epic needs a fix
+that landed on `develop` earlier, the milestone branch takes `develop` in at
+that moment instead of waiting. After the release the milestone worktree and
+branch are removed.
+
+**Nothing is rebased or squashed on the way in** — epic branches and the
+milestone branch go in with `git merge --no-ff` as they stand. `moai show <id>`
+finds an issue's commits by the id in their subject and a squash folds them
+away; a review's fixes stay as their own `fix:` commits; and a rebase changes
+the merge hashes that `Report-checked:` notes point at. Rewording a subject on
+your own unshared branch before its review starts is fine; never during one.
 
 Before `auto`, the `moai-wiki` skill's sweep can be called once: it walks the work
 closed since the last tag and lists the wiki pages it left behind. It is not a

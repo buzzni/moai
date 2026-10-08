@@ -213,6 +213,34 @@
   들어간다. 옛 자리에 선 워크트리는 그대로 돌고, `.gitignore` 의 옛 줄도 그것이 다 걷힐 때까지 둔다
 - **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
   GitHub 의 기본 가지 둘 다. 옛 `main` 주소는 GitHub 가 새 이름으로 이어 준다
+- **마일스톤 안의 일은 마일스톤 가지에서 뜨고 거기로 병합한다**(2026-10-08 사용자 결정, `moai-nvju`).
+  가지는 `milestone/<마일스톤 id>` 이고, 루트는 develop 에 서 있어야 하니 오래 사는 워크트리
+  `.worktrees/milestone-<마일스톤 id>` 에 체크아웃해 둔다. 위 차례의 `develop` 자리가 그 가지가 된다
+
+      git worktree add -b milestone/<id> .worktrees/milestone-<id> develop     첫 에픽을 받은 일꾼이, 없으면 루트에서
+      git worktree add .worktrees/milestone-<id> milestone/<id>                가지는 있고 워크트리만 없으면
+      git worktree add -b worktree-moai-<에픽> .worktrees/moai-<에픽> milestone/<id>
+      git -C .worktrees/milestone-<id> symbolic-ref -q HEAD                    refs/heads/milestone/<id> 여야 병합한다
+      git -C .worktrees/milestone-<id> merge --no-ff worktree-moai-<에픽> -m "merge: … (<에픽>)"
+      git -C .worktrees/milestone-<id> branch -d worktree-moai-<에픽>
+
+  - 마일스톤 워크트리도 `target/` 을 `/tmp/cargo-target/milestone-<id>` 로 가는 링크로 둔다(아래)
+  - 가지는 그 워크트리를 처음 세울 때 **로컬 develop 에서** 뜬다 — 감독이 그 마일스톤의 첫 에픽을 보낼 때다.
+    감독은 그 일의 메시지에 `Base branch: milestone/<id>` 를 싣고, 보고의 병합도 그 가지에서 확인한다
+  - 병합은 루트가 아니라 **마일스톤 워크트리에서** 한다. 일꾼은 `ExitWorktree(keep)` 로 루트에 나와
+    `git -C .worktrees/milestone-<id> …` 를 친다 — 격리 가드는 워크트리에 든 세션에만 선다. 충돌이 나면 그
+    자리에서 `merge --abort` 하고, 에픽 워크트리로 돌아가 마일스톤 가지를 받아 풀고 다시 친다
+  - 에픽 가지를 지우는 `branch -d` 도 마일스톤 워크트리에서 친다. 루트의 develop 은 릴리스 전까지 그 병합을
+    안 들어, 루트에서 치면 "not fully merged" 로 거절한다. `-D` 로 밀지 않는다
+  - **마일스톤 밖의 일**(`p0` 핫픽스, `Milestone: none` 인 일)은 지금처럼 develop 에서 뜨고 develop 으로 병합한다
+  - 마일스톤 가지는 develop 을 **릴리스 때 한 번** 받는다(아래 "릴리스와 판 번호"). 에픽이 develop 에 먼저 든
+    핫픽스를 써야 하면 그때 마일스톤 워크트리에서 develop 을 받는다. 충돌은 마일스톤 워크트리에서 풀지 루트에서
+    풀지 않는다
+  - **에픽 가지도 마일스톤 가지도 rebase·squash 하지 않는다** — `git merge --no-ff` 로 선 그대로 들인다.
+    `moai show` 는 커밋을 제목의 id 로 찾는데 squash 가 그것을 접고, 리뷰의 고침은 제 `fix:` 커밋으로 남아야
+    하고, rebase 는 `Report-checked: <병합 해시>` 노트가 가리키는 병합 해시를 바꾼다. 남과 나누지 않은 제 가지의
+    커밋 제목을 리뷰 전에 고치는 것은 된다. 리뷰가 도는 동안은 안 된다
+  - 트래커 커밋은 그대로 루트의 develop 에서 `git commit … -- .moai/` 로 한다
 - 워크트리마다 `target/` 이 따로다. 처음 한 번 `cargo build --release` 가 든다(3~7분)
 - **`target/` 은 `/tmp/cargo-target/<이름>` 으로 가는 링크다**(2026-10-02 사용자 결정, `moai-c5xo`).
   `/home/coder` 는 Ceph RBD 라, 빌드가 겹치면 장치가 포화해 ext4 저널이 멈추고 `/home` 에 쓰는
@@ -273,6 +301,21 @@
   무엇이 나가는지를 그대로 담은 것은 CHANGELOG 하나다
 - 판 번호는 moai 의 기능이 아니라 이 저장소의 규약이다. moai 는 범용 트래커라 semver 를
   모르고, 알 까닭도 없다
+
+**마일스톤 가지는 판을 올리기 전에 develop 에 든다**(2026-10-08 사용자 결정, `moai-nvju`). 마일스톤의 에픽은
+`milestone/<id>` 에 쌓여 있으니(위 "워크트리"), `auto` 가 고르는 CHANGELOG 의 줄도 그 가지가 들어야 develop 에 선다.
+
+    git -C .worktrees/milestone-<id> merge --no-ff develop -m "merge: develop 을 milestone/<id> 에 받는다"
+    (마일스톤 워크트리에서 cargo test)
+    git merge --no-ff milestone/<id> -m "merge: <마일스톤 제목> (<id>)"      루트(develop)에서
+    scripts/bump-version.sh auto                                          그다음에 판을 올린다
+    git worktree remove .worktrees/milestone-<id>                         릴리스가 나간 뒤
+    git branch -d milestone/<id>
+    rm -rf /tmp/cargo-target/milestone-<id>
+
+- 충돌은 develop 을 받는 첫 줄에서, **마일스톤 워크트리에서** 푼다. 루트에서 풀지 않는다
+- 둘 다 `--no-ff` 다. 마일스톤 가지를 develop 위로 rebase 하거나 squash 하지 않는다 — 까닭은 위 "워크트리" 와 같다
+- 마일스톤 밖에서 develop 에 바로 든 일(`p0`)은 첫 줄로 마일스톤 가지에 들고, 둘째 줄로 함께 그 판에 실린다
 
 ## 일한 AI 를 남긴다
 
