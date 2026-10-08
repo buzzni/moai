@@ -10519,26 +10519,15 @@ fn bare_moai_inside_names_a_broken_repo_config() {
 
 // ── 누가 하는가 ───────────────────────────────────────────────────────
 
-/// `MOAI_ACTOR` 를 걷고 git 이 읽을 설정을 통째로 지정해 돌린다. moai 는 git
-/// 저장소를 요구하지 않으므로 전역·시스템 설정까지 막아야 사람을 못 찾는
-/// 상황을 실제로 만들 수 있다.
-fn with_git_config(dir: &Path, cfg: &str, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
-        .current_dir(dir)
-        .env_remove("MOAI_ACTOR")
-        .env("GIT_CONFIG_GLOBAL", cfg)
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap()
-}
-
-/// 아무 데서도 사람을 못 찾는 자리.
+/// 아무 데서도 사람을 못 찾는 자리 — `MOAI_ACTOR` 를 걷고 돌린다.
+///
+/// **사람이 없는 것은 [`isolated`] 의 빈 집과 git 저장소가 아닌 자리 덕이다.** git 이 읽을 설정을 파일로
+/// 돌리는 길(`GIT_CONFIG_GLOBAL`)은 여기서 못 쓴다 — moai 가 사람을 묻기 전에 그 변수를 걷는다
+/// (`git_leaks::REPO`, moai-ztdf). 한때 그 변수로 설정 파일을 대던 도우미가 있었는데, 그 파일은 한 번도
+/// 안 읽혀 그것을 쓴 시험이 사람이 없는 판만 쟀다(moai-ltsv.y10). 사람을 주려면 그 프로젝트의 git 설정에
+/// 적는다 — [`an_email_with_brackets_still_owns_its_rows`] 가 그 꼴이다.
 fn without_user(dir: &Path, args: &[&str]) -> Output {
-    with_git_config(dir, "/dev/null", args)
+    staged(args).env_remove("MOAI_ACTOR").current_dir(dir).output().unwrap()
 }
 
 /// 이름만으로는 같은 이름이 둘일 때 갈라지지 않는다. 저널에 메일까지 남는다.
@@ -10617,11 +10606,17 @@ fn with_no_user_anywhere_it_says_what_to_set() {
 #[test]
 fn a_malformed_git_identity_is_refused_too() {
     let s = init("badgit");
-    let cfg = s.path().join("gitconfig");
-    std::fs::write(&cfg, "[user]\n\tname = 레이븐\n\temail = raven\n").unwrap();
-    let out = with_git_config(s.path(), cfg.to_str().unwrap(), &["add", "제목"]);
+    // 사람은 그 프로젝트의 git 설정에서 온다 — 전역 설정을 돌리는 변수는 moai 가 걷는다(`git_leaks`). 그 변수로
+    // 설정을 대던 판은 이 값이 한 번도 안 읽혀 "사람이 없다" 로 거절되고도 초록이었다(moai-ltsv.y10) — 두 거절문이
+    // 다 `git config user.email` 을 대기 때문이다. 그래서 잡는 글은 모양이 어긋났을 때만 서는 것이다.
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "레이븐"]);
+    git(s.path(), &["config", "user.email", "raven"]);
+    let out = staged(&["add", "제목"]).env_remove("MOAI_ACTOR").current_dir(s.path()).output().unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("쓸 수 없는 모양이다") && err.contains("레이븐"), "모양이 아니라 다른 까닭으로 거절했다\n{err}");
+    assert!(!err.contains("누가 하는지 모른다"), "사람이 없는 판으로 읽었다\n{err}");
     assert!(err.contains("git config user.email"), "{err}");
     assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
 }
