@@ -5691,3 +5691,4 @@
 {"ts":"2026-10-08T05:13:51Z","id":"moai-nvju.qhy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 워크트리·릴리스 절과 CONTRIBUTING Releasing 에 마일스톤 가지를 적는다"}
 {"ts":"2026-10-08T05:13:51Z","id":"moai-muit","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 첫 보기 — done 보임·미룬 줄 숨김"}
 {"ts":"2026-10-08T05:13:51Z","id":"moai-muit.tut","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 첫 보기에서 done(SPC v 4)을 보이고 미룬 줄은 숨긴다"}
+{"ts":"2026-10-08T05:14:17Z","id":"moai-muit.tut","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
