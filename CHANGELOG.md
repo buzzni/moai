@@ -34,6 +34,11 @@ does not tag — see `CONTRIBUTING.md`.
   `bad_input`, write nothing, and name the flag that does read stdin: `moai
   note <id> -b - < <file>`, and for a title, that the body is what takes
   `-b -`. `--` does not let a lone `-` through. (moai-ltsv.4t0)
+- **`moai mv` refuses an empty `-m`, as `moai defer` already did.** `moai mv
+  <id> done -m ''` — or `-m "$(cat missing-file)"`, or a message of blanks —
+  wrote an empty note and exited 0, and on a row already in that column every
+  call piled up another empty note. It now exits non-zero with `bad_input` and
+  moves nothing; leave `-m` out to move without a message. (moai-ltsv.uqw)
 
 ### Fixed
 

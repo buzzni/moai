@@ -8925,6 +8925,34 @@ fn mv_says_what_is_missing() {
     assert!(ok(s.path(), &["mv", &id, "-m", "메모", "review"]).contains("todo → review"));
 }
 
+/// **argv 로 비워 준 `-m` 도 거절하고 아무것도 안 옮긴다**(moai-ltsv.uqw, 2026-10-08 사용자 결정) — `defer` 와
+/// 한 자다. `mv X done -m ''` 이 `"note":""` 를 적고 0 으로 끝났고, 이미 그 칸인 줄에는 빈 노트가 쌓였다.
+#[test]
+fn mv_refuses_a_blank_message_and_moves_nothing() {
+    let s = init("mv-blank-msg");
+    let id = add(s.path(), &["제목"]);
+    ok(s.path(), &["mv", &id, "review"]);
+    let (before, notes) = (issues(s.path()), journal(s.path()));
+    // 옮길 줄과 이미 그 칸인 줄 둘 다 — 뒤의 것이 빈 노트를 쌓던 갈래다.
+    for to in ["done", "review"] {
+        for blank in ["", "   ", "\n\t"] {
+            let out = moai(s.path(), &["mv", &id, to, "-m", blank, "--json"]);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{to} {blank:?}: {err}");
+            assert!(err.contains(r#""code":"bad_input""#), "{to} {blank:?}: {err}");
+        }
+    }
+    assert_eq!(issues(s.path()), before, "빈 `-m` 으로 옮겼다");
+    assert_eq!(journal(s.path()), notes, "빈 `-m` 이 저널에 남았다");
+    assert!(!journal(s.path()).contains(r#""note":"""#));
+    // 사람 화면은 `-m` 을 빼는 길을 댄다.
+    let err = String::from_utf8_lossy(&moai(s.path(), &["mv", &id, "done", "-m", ""]).stderr).into_owned();
+    assert!(err.contains("-m"), "{err}");
+
+    // `-m` 을 빼면 그대로 옮긴다.
+    ok(s.path(), &["mv", &id, "done"]);
+}
+
 /// **`mv -m -` 는 stdin 을 읽는다**(moai-m1za) — 글자 그대로 받던 판은 `moai mv <리뷰> done -m - < 파일` 의
 /// 닫는 줄을 `-` 한 글자로 적었다(moai-tl3k.wx7). 여러 줄 닫는 글(받은 것·넘긴 것)이 노트를 따로 안 붙이고
 /// 옮김의 말로 선다. **빈 stdin 은 거절하고 아무것도 안 옮긴다** — 훅 규칙 3 은 명령줄만 읽어 `-m -` 의 글을
