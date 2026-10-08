@@ -5853,3 +5853,4 @@
 {"ts":"2026-10-08T11:03:56Z","id":"moai-h64l.wst","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-08T11:03:56Z","id":"moai-h64l.nym","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 1-6 (is_bare caches a failure, CHANGELOG, wiki, three doc fixes) as 2f48c1bc/99589b97/ace44c5d. Handed on 7 as moai-2d70, 8 as moai-4vp2; wst separate-git-dir gap as moai-e9j9; places divergence from 59m as moai-g4je."}
 {"ts":"2026-10-08T11:04:00Z","id":"moai-h64l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: merged into milestone/moai-jv0i as af75865f; nothing left on this epic. Open follow-ups are backlog moai-g4je, moai-2d70, moai-4vp2, moai-e9j9."}
+{"ts":"2026-10-08T11:04:18Z","id":"moai-h64l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: af75865f"}
