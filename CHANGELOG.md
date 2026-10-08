@@ -19,6 +19,12 @@ does not tag — see `CONTRIBUTING.md`.
   without them. The line is dimmed — it does not make the banner urgent.
   (moai-ug6x.bbh)
 
+- **`moai skill status` names a retired skill's directory left behind.** A
+  directory such as `.agents/skills/moai-work` that still holds a file of yours
+  is kept by `moai skill install` and still teaches retired commands; the
+  status now says so and leaves the row current. `--json` carries
+  `agents.leftovers`, always an array. (moai-9s9s.v0y)
+
 ### Changed
 
 - **`moai init --json` says `"driver": "untracked"` for a tracker kept out of
@@ -46,7 +52,27 @@ does not tag — see `CONTRIBUTING.md`.
   `bad_filter` and name one value to keep. `moai epic show --filter type=issue`
   is refused as well, since the namespace already gives the type. (moai-ltsv.auf)
 
+- **`moai-supervise` writes what it sent and what it checked into the
+  tracker.** It notes `Sent: <worker>` on the row it sends and
+  `Report-checked: <merge hash>` on the epic once a report holds, so a
+  supervisor that starts again no longer sends a backlog item still waiting to
+  be unfolded a second time, or checks a report again. It also tells the person once when its
+  skill lives outside the repository, where a worker's read of the steps file
+  asks for permission. (moai-9s9s.ctx, moai-9s9s.qmd)
+
+### Removed
+
+- **`moai hook stop-failure`, `interrupt` and `session-end` are gone.** 0.9
+  kept them for one release as commands that do nothing; hooks planted before
+  0.9 that still call them now print an error. Run `moai skill install` again
+  (with `--agent codex` where `.codex/` holds the hooks) — it rewrites the
+  planted hooks without them. (moai-9s9s.vzn)
+
 ### Fixed
+
+- **A checkout with CRLF line endings (`core.autocrlf`) no longer reads the
+  planted skills as stale** — the `skills_stale` notice and `moai skill status`
+  now compare the way the install does. (moai-9s9s.x3n)
 
 - **In the statistics and wiki windows the arrow, Home/End and PgUp/PgDn keys
   move with Ctrl or Alt held too**, the same as in the list and as they already
