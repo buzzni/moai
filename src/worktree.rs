@@ -1272,7 +1272,8 @@ const HELD: &str = "moai-held";
 ///
 /// **옮길 곳에 트래커가 있어야 옮긴다** — 이 가지에서 처음 `init` 한 워크트리는 루트에 `.moai` 가
 /// 없다. 딸린 워크트리가 아닌 것과 주 체크아웃이 없는 것(git 밖·서브모듈·맨 저장소에 딸린
-/// 워크트리)은 [`main_root`] 가 이미 `None` 으로 가른다 — 여기서 [`is_linked`] 로 한 번 더 물으면
+/// 워크트리)은 [`main_root`] 와 같은 자([`mirror`]·[`is_bare`])가 이미 `None` 으로 가른다 — 여기서
+/// [`is_linked`] 로 한 번 더 물으면
 /// 같은 조상 훑기를 두 번 하고, 두 자가 갈리면(중간에 선 `.git` 파일) 안 본 자리를 옮겨 준다.
 ///
 /// **찾은 자리를 되돌려 주지 않는다**(리뷰 moai-71ht.jlh) — 그러면 부르는 쪽이 `root != found`
@@ -1287,7 +1288,7 @@ pub fn tracker_root(root: &Path) -> Option<PathBuf> {
     // 트래커가 있는가(`stat` 몇 번)를 먼저 본다 — 맨 저장소인가([`is_bare`])는 git 을 띄우므로, 옮길 것이
     // 없는 자리에서는 안 묻는다. 답은 [`main_root`] 와 같다.
     let (main, common) = mirror(root)?;
-    (crate::store::holds_tracker(&main) && (!is_bare(&common))).then_some(main)
+    (crate::store::holds_tracker(&main) && !is_bare(&common)).then_some(main)
 }
 
 /// 이 트래커가 든 **제** 워크트리의 꼭대기. git 을 띄우지 않는다. 저장소가 아니면 없다.
@@ -1482,7 +1483,7 @@ pub fn is_linked(root: &Path) -> bool {
 /// 딸린 워크트리의 트래커에 대응하는 **주 워크트리의 트래커 자리** — 주 워크트리이거나 git 밖이면
 /// `None`.
 ///
-/// [`tracker_root`] 가 이것으로 트래커를 루트로 옮긴다(moai-y7go) — 워크트리의 `.moai` 를 고치면
+/// [`tracker_root`] 가 같은 자([`mirror`]·[`is_bare`])로 트래커를 루트로 옮긴다(moai-y7go) — 워크트리의 `.moai` 를 고치면
 /// 병합에서 스냅샷이 충돌하기 때문이다.
 ///
 /// **맨 저장소인가는 git 에게 묻는다**(moai-h64l.wst, 리뷰 moai-r0x8.qbh 4번의 남은 반). 자리는
@@ -1527,7 +1528,9 @@ fn mirror(root: &Path) -> Option<(PathBuf, PathBuf)> {
 /// **값**: git 한 번(이 기계에서 약 3ms)이다. 딸린 워크트리 안에서만 들고([`main_root`]), 한 프로세스
 /// 안에서는 공용 디렉터리마다 한 번만 묻는다 — 한 명령이 찾기·`init`·훅의 자리 셈에서 여러 번 묻고,
 /// 탐색기는 걸음마다 다시 묻는다. `core.bare` 는 저장소를 다시 만들기 전에는 안 바뀌는 값이라 담아 둬도
-/// 낡지 않는다. 모르는 답은 안 담는다.
+/// 낡지 않는다. **못 얻은 답(아래의 `false`)도 담는다**(리뷰 moai-h64l) — 안 담던 판은 git 이 멈춘 기계에서
+/// 한 훅 프로세스가 찾기·집기 기록마다 [`PROBE_BUDGET`] 을 다시 기다렸고, 탐색기는 걸음마다 그만큼 섰다. 담는
+/// 값은 어차피 내는 그 `false` 라 답은 안 바뀐다.
 ///
 /// **답을 못 얻으면 맨 저장소가 아니라고 둔다**(git 이 없거나, 실패하거나, [`PROBE_BUDGET`] 안에 안
 /// 끝났다). 안 옮기는 쪽(`None`)이 얼핏 조심스러워 보이지만, 그러면 git 이 잠깐 늦은 한 번에 흔한
@@ -1545,11 +1548,8 @@ pub fn is_bare(common: &Path) -> bool {
         return said;
     }
     let args = ["rev-parse", "--is-bare-repository"];
-    let Some(Ok(said)) = crate::git::run_reading_user_config(&key, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET))
-    else {
-        return false;
-    };
-    let bare = said.trim() == "true";
+    let said = crate::git::run_reading_user_config(&key, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET));
+    let bare = matches!(said, Some(Ok(said)) if said.trim() == "true");
     if let Ok(mut m) = SAID.lock() {
         m.insert(key, bare);
     }
