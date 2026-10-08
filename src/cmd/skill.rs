@@ -611,6 +611,9 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     let hook_path = hooked.as_deref().and_then(|h| runs(h, on_path.as_deref()));
     let stale = stale_copies(&installs);
     let shared = Shared::read(&root, &skills);
+    // **Claude 의 트리에 남은 디렉터리도 댄다**(moai-h64l.2zi) — `.agents` 만 대던 판은 `install` 이 [`claude_install`] 에서
+    // 걷는 것과 걷지 못해 남기는 것(`Foreign`)을 아무 화면도 안 댔다. 자는 `install` 과 하나다 — 같은 트리에서 이름을 읽는다.
+    let claude_left = leftovers(&dir.join("skills"), &planted_names(&files, "skills"), &root);
     // Claude 는 위의 `claude` 줄이 이미 댄다 — 여기는 `.agents/skills` 를 읽는 둘이다.
     let others: Vec<(&str, bool)> =
         ON_PATH.iter().filter(|(a, _)| *a != Agent::Claude).map(|(_, bin)| (*bin, which(bin).is_some())).collect();
@@ -646,6 +649,9 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
             "hook_exe_path": hook_path.as_ref().map(|p| p.display().to_string()),
             "stale_copies": stale,
             "claude": claude,
+            // Claude 의 트리에 남은 디렉터리 — `install --json` 의 머리 `leftovers` 와 같은 자리·같은 꼴이다(머리의 `dir` 이
+            // Claude 의 트리다). **늘 서는 배열이다.**
+            "leftovers": claude_left.iter().map(Leftover::json).collect::<Vec<_>>(),
             "agents": shared.json(&others),
             "hooks": hook_files
                 .iter()
@@ -733,6 +739,11 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
         // 하나를 물고 있을 수 있다. 수만 비춘다.
         out.push(fill(say(lang, "skill.stale_copies"), &[("n", &stale.to_string())]));
     }
+    // 걷을 꼴이 있을 때만 머리 한 줄로 고칠 명령을 댄다 — 사람의 것이 든 꼴(`Foreign`)은 제 줄이 까닭까지 댄다.
+    if claude_left.iter().any(|l| l.state == Left::Planned) {
+        out.push(say(lang, "skill.claude_leftover").to_string());
+    }
+    out.extend(claude_left.iter().map(|l| l.status_line(lang)));
     // **Claude 의 줄 밑에 `.agents` 한 줄과 그것을 읽는 둘의 PATH 줄**(사용자 결정 2026-10-04).
     let shared_row = say(lang, "skill.row_agents");
     // **파일 수는 파일만 센다** — 걷을 디렉터리만 남은 자리에서 "파일 1개가 다르다" 고 하면 다른 파일이 없는데 그 수를

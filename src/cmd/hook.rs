@@ -769,7 +769,7 @@ fn away_of(repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> cr
 /// 있거나 다른 세션이 마지막으로 집은 줄이다. 이 세션이 마지막으로 집은 줄도 함께 싣는다(`Away::picked`) —
 /// 모르는 줄 밑에 있어도 제 것이다. 제 이름은 `away` 의 것을 쓴다. 더한 것이 없으면 거짓이다.
 fn add_unsure(input: &Input, repo: &Repo, issues: &[model::Issue], away: &mut crate::hook::Away) -> bool {
-    let elsewhere = crate::worktree::held_elsewhere(repo.here(), issues, &repo.config);
+    let elsewhere = crate::worktree::held_elsewhere(repo.here());
     let picks = read_picks(input, repo, issues);
     let unsure = crate::hook::unsure(issues, &repo.config, &elsewhere, &away.own, &picks);
     if unsure.is_empty() {

@@ -35,6 +35,7 @@ mod style;
 mod text;
 mod tui;
 mod tz;
+mod update;
 mod user_config;
 mod view;
 mod wiki;
@@ -157,7 +158,11 @@ fn main() -> ExitCode {
             unread_journals();
             redirected(!quiet);
             print(&lines);
-            if cmd::had_partial() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+            match cmd::chosen_exit() {
+                0 if cmd::had_partial() => ExitCode::FAILURE,
+                0 => ExitCode::SUCCESS,
+                code => ExitCode::from(code),
+            }
         }
         // **넘어진 길에서도 어느 트래커를 봤는지는 댄다**(moai-a2kn) — 올라가 잡은 자리는
         // *찾기*의 결과라 실패한 명령도 이미 그것을 썼다. 안 대던 판은 `~/.moai` 를 잡은 `show`

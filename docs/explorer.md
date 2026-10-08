@@ -231,8 +231,16 @@ and once more straight away when the answer it holds is older than the moai you
 are running — as after an upgrade. An answer that says your moai is ahead of the
 latest release is checked again after an hour. It asks only when a person is
 watching; `MOAI_NO_UPDATE_CHECK=1`, or `check = false` under `[update]` in your
-user config, stops it asking. When a new release is out, quitting prints the
-line that upgrades the moai you are running.
+user config, stops it asking. It asks the repository releases come from —
+`buzzni/moai` unless `repo = "owner/name"` under `[update]` says otherwise, and
+`MOAI_REPO` wins over both.
+
+When a new release is out, the banner names `moai update`, which upgrades the
+moai you are running in place, and quitting prints it again. Where `moai update`
+refuses only because of the repository setting (a malformed `[update] repo` or
+`MOAI_REPO`, or a user config it cannot read), quitting prints the installer's
+line instead. A directory you cannot write gets no line — the installer cannot
+write there either.
 
 ## When it goes wrong
 

@@ -26,6 +26,9 @@ pub mod code {
     pub const ALREADY_EXISTS: &str = "already_exists";
     pub const LOCKED: &str = "locked";
     pub const BROKEN: &str = "broken";
+    /// 도는 바이너리를 `moai update` 로 못 올린다(moai-zsfr.2p9) — cargo 가 지은 자리, 쓸 수 없는 자리,
+    /// 판을 안 내는 기계. 고칠 곳이 argv 가 아니라 그 바이너리가 선 자리라 `bad_input` 과 가른다.
+    pub const NOT_UPDATABLE: &str = "not_updatable";
 }
 
 impl Fail {

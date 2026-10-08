@@ -725,8 +725,14 @@ in `latest.toml`. Ask somewhere else and the answer from the other place is not 
 
     [update]
     check = false        # in your user config: never ask on this machine
+    repo = "owner/name"  # where releases come from — buzzni/moai unless written
 
-    MOAI_NO_UPDATE_CHECK=1 moai tui     # or just for this run"#;
+    MOAI_NO_UPDATE_CHECK=1 moai tui     # or just for this run
+
+`moai update` upgrades the moai that is running: it runs that repository's
+`install.sh` over the binary's own directory. `MOAI_REPO` wins over `repo` for one
+run, and the repository's `.moai/config.toml` is never read for it. A build from
+source and a directory you cannot write are refused before anything is fetched."#;
 
 /// 커밋과 이슈를 잇는 고리(moai-wqm7). **새 저장소는 이 저장소의 CLAUDE.md 규약을 모른다** —
 /// 여기 안 적으면 커밋 칸(`show <id>`·탐색기 상세)이 늘 빈다.

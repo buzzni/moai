@@ -128,7 +128,11 @@ pub struct Registry {
     /// 새 판 묻기를 설정이 껐는가 — `[update] check`(moai-d74q). 적힌 것이 없으면 `None` 이고
     /// 그때는 켠 것이다([`crate::latest::gate`]).
     pub update_check: Option<bool>,
-    /// 그 값을 읽다 만난 것 — **말이 아니라 자료다**([`UpdateTrouble`]). 대는 자리는
+    /// 받을 저장소 — `[update] repo`(moai-zsfr.2em). **꼴이 맞는 값만 든다**([`crate::latest::repo_ok`]) —
+    /// 틀린 값은 `None` 이고 까닭은 `update_problems` 에 선다. 적힌 것이 없어도 `None` 이고, 그때는
+    /// [`crate::latest::DEFAULT_REPO`] 다([`crate::latest::repo_from`]).
+    pub update_repo: Option<String>,
+    /// 그 값들을 읽다 만난 것 — **말이 아니라 자료다**([`UpdateTrouble`]). 대는 자리는
     /// [`crate::view::look_problems`] 다: 이 설정이 서는 표면이 탐색기 하나라, 보기 설정의
     /// 알림과 같은 자리에 선다.
     pub update_problems: Vec<UpdateTrouble>,
@@ -187,6 +191,18 @@ pub enum UpdateTrouble {
     NotATable { found: String },
     /// `update.check` 가 `true`·`false` 가 아니다 — 그 자리에 선 것.
     NotABool { found: String },
+    /// `update.repo` 가 글이 아니다 — 그 자리에 선 것(moai-zsfr.2em).
+    RepoNotAWord { found: String },
+    /// `update.repo` 가 `owner/name` 꼴이 아니다 — 적힌 값([`crate::latest::repo_ok`]).
+    BadRepo { raw: String },
+}
+
+impl UpdateTrouble {
+    /// 받을 저장소를 읽다 만난 것인가 — `moai update` 는 이 탈이 서면 **돌리지 않는다**(moai-zsfr.2p9).
+    /// 틀린 값을 건너뛰고 기본 저장소의 스크립트를 돌리면, 포크를 고른 사람이 본가의 판을 깐다.
+    pub fn about_repo(&self) -> bool {
+        matches!(self, UpdateTrouble::RepoNotAWord { .. } | UpdateTrouble::BadRepo { .. })
+    }
 }
 
 /// [`LookTrouble::Want`] 가 바라는 꼴. **낱말이 아니라 갈래로 든다** — 글로 들면 말묶음이
@@ -446,8 +462,11 @@ pub fn read(path: Option<&Path>) -> Registry {
             let (read, problems) = doc.read_marks();
             reg.read = read;
             reg.read_problems = problems;
-            let (check, problems) = doc.update_check();
+            let (check, mut problems) = doc.update_check();
             reg.update_check = check;
+            let (repo, repo_problems) = doc.update_repo();
+            reg.update_repo = repo;
+            problems.extend(repo_problems);
             reg.update_problems = problems;
         }
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
@@ -997,6 +1016,29 @@ impl Doc {
         (Some(on), problems)
     }
 
+    /// 받을 저장소 — `[update] repo`(moai-zsfr.2em). 없으면 `None` 이고 그때는 기본 저장소다.
+    ///
+    /// **[`Doc::update_check`] 와 같은 자로 읽는다** — 관대하게 읽고 탈은 자료로 낸다. 다만 꼴이 아닌
+    /// 값은 **들이지 않는다**: 이 값은 `sh` 에 흘릴 스크립트를 고르므로, 반만 맞는 값을 고쳐 쓰면
+    /// 고른 사람이 안 고른 저장소가 선다.
+    ///
+    /// **`[update]` 가 표가 아닌 탈은 여기서 안 낸다** — [`Doc::update_check`] 가 이미 냈다. 한 탈을
+    /// 두 줄로 대지 않는다.
+    pub fn update_repo(&self) -> (Option<String>, Vec<UpdateTrouble>) {
+        let mut problems = Vec::new();
+        let Some(t) = self.doc.get(UPDATE).and_then(|i| i.as_table_like()) else { return (None, problems) };
+        let Some(item) = t.get(REPO) else { return (None, problems) };
+        let Some(raw) = item.as_str() else {
+            problems.push(UpdateTrouble::RepoNotAWord { found: item.type_name().to_string() });
+            return (None, problems);
+        };
+        if !crate::latest::repo_ok(raw) {
+            problems.push(UpdateTrouble::BadRepo { raw: raw.to_string() });
+            return (None, problems);
+        }
+        (Some(raw.to_string()), problems)
+    }
+
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
     /// 나머지 보기를 버리게 두지 않는다. `[tui]` 가 없으면 빈 `Look` 이다.
     pub fn look(&self) -> (Look, Vec<LookTrouble>) {
@@ -1232,7 +1274,7 @@ impl Doc {
 
 // 새 판 묻기를 끄는 자리 — 이름은 `crate::latest` 한자리에 있다(moai-d74q). 두 벌로 적으면
 // 이름을 고치는 날 읽는 쪽만 따라간다.
-use crate::latest::{CHECK, UPDATE};
+use crate::latest::{CHECK, REPO, UPDATE};
 
 /// 화면 언어가 사는 표(moai-slfv). **키 이름은 여기 하나다** — 그 탈을 펴는 쪽([`crate::view::problem`])
 /// 도 이것을 읽는다. 말묶음의 글에 박으면 번역마다 키 이름이 한 벌씩 서서, 키를 고치는 날 다섯
@@ -3296,6 +3338,34 @@ mod tests {
         assert_eq!(bad.update_problems, [UpdateTrouble::NotABool { found: "string".into() }]);
         let said = crate::view::look_problems(&bad, crate::i18n::Lang::Ko);
         assert_eq!(said, [format!("{}: `update.check` 는 true·false 여야 한다 — 지금은 string", path.display())]);
+    }
+
+    /// **받을 저장소도 같은 파싱에 얹히고, 꼴이 아닌 값은 들이지 않는다**(moai-zsfr.2em). 이 값은 `sh` 에
+    /// 흘릴 스크립트를 고르므로 틀린 값을 고쳐 쓰지 않고, 까닭은 `[update] check` 와 같은 자리에 선다.
+    #[test]
+    fn the_repo_is_read_in_the_same_parse() {
+        let repo = |src: &str| Doc::parse(src).unwrap().update_repo();
+        assert_eq!(repo("[update]\nrepo = \"fork/moai\"\n"), (Some("fork/moai".into()), vec![]));
+        assert_eq!(repo("[update]\ncheck = false\n"), (None, vec![]));
+        assert_eq!(repo("repo = \"fork/moai\"\n"), (None, vec![]), "표 밖의 같은 이름을 읽었다");
+        assert_eq!(repo("update = 3\n"), (None, vec![]), "표가 아닌 탈은 check 쪽이 이미 댄다");
+        assert_eq!(repo("[update]\nrepo = 3\n"), (None, vec![UpdateTrouble::RepoNotAWord { found: "integer".into() }]));
+        assert_eq!(
+            repo("[update]\nrepo = \"../evil\"\n"),
+            (None, vec![UpdateTrouble::BadRepo { raw: "../evil".into() }])
+        );
+
+        let d = scratch("update-repo");
+        let path = d.join("config.toml");
+        std::fs::write(&path, "[update]\ncheck = false\nrepo = \"fork/moai\"\n").unwrap();
+        let both = read(Some(&path));
+        assert_eq!((both.update_check, both.update_repo.as_deref()), (Some(false), Some("fork/moai")));
+        std::fs::write(&path, "[update]\nrepo = \"a/b/c\"\n").unwrap();
+        let bad = read(Some(&path));
+        assert_eq!(bad.update_repo, None, "틀린 값을 들였다");
+        assert_eq!(bad.update_problems, [UpdateTrouble::BadRepo { raw: "a/b/c".into() }]);
+        let said = crate::view::look_problems(&bad, crate::i18n::Lang::Ko);
+        assert_eq!(said, [format!("{}: `update.repo` 는 owner/name 꼴이어야 한다 — 지금은 \"a/b/c\"", path.display())]);
     }
 
     /// **틀린 보기 키는 알리고 나머지는 읽는다**(moai-2bzp). `tui` 가 표가 아니면 읽기는 비고 쓰기는 멈춘다.

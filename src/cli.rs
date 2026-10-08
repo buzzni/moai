@@ -559,11 +559,12 @@ BACKLOG
   `moai project add` in another terminal, land without a keypress.
 
   The version line in the header says whether a newer release is out. When
-  one is, the banner says so, and on quitting the explorer prints the
-  install.sh line that upgrades the moai you are running — with --dir when it
-  lives under your home but not in ~/.local/bin. No line is shown for a build
-  from source, for a moai outside your home, or on a machine the releases do
-  not cover.
+  one is, the banner says so and names `moai update`, which upgrades the moai
+  you are running in place; quitting prints it again. Where `moai update`
+  cannot run but install.sh can (a directory under your home you cannot
+  write), quitting prints the install.sh line instead, with --dir when it is
+  not ~/.local/bin. No line is shown for a build from source, for a binary not
+  named moai, or on a machine the releases do not cover.
 
   Of what came to me (assigned to me or under it), rows changed since the
   last look carry a [NEW] mark in front of the title. Read marks live in my own
@@ -840,6 +841,40 @@ Examples:
   It does not ask who did it. This is not a file that keeps history."
     )]
     Project(ProjectCmd),
+
+    // **받고 돌리는 길은 `cmd::update`, 고르는 길은 `update` 다**(moai-zsfr.2p9). 저장소의 `.moai` 를 안
+    // 찾는다 — 올리는 것은 이 바이너리지 트래커가 아니다.
+    /// Upgrade the moai you are running with install.sh
+    #[command(after_help = "  moai update                    the latest release, over this binary
+  moai update --version v0.9.0   that release instead
+  moai update --dry-run          print what would be fetched and run
+
+  It fetches install.sh from the main branch of the repository releases come
+  from and runs it with sh, installing into the directory of the binary that is
+  running, with --force:
+
+    MOAI_REPO=<owner/name> sh -s -- --dir <that directory> --force
+
+  install.sh's output streams through, and the exit code is sh's. The script
+  is fetched by moai itself, not by curl; install.sh then downloads the
+  release with curl or wget and checks it against the release checksums.
+
+  The repository is `buzzni/moai` unless your user config says otherwise -
+  `repo = \"owner/name\"` under [update] - and MOAI_REPO wins over both. The
+  repository's own .moai/config.toml is never read for it: what it names is
+  piped into a shell, and a repository you cloned must not choose that. A
+  value that is not owner/name is refused, not replaced with the default.
+
+  Nothing is fetched where it cannot work, and it stops with one line:
+  a binary cargo built (target/ or cargo install - rebuild from source
+  instead), a binary not named moai, a directory you cannot write (run it as a
+  user who can, or reinstall with install.sh --dir), and a machine the releases
+  do not cover. A directory outside your home is fine when you can write it.
+
+  --dry-run fetches nothing and runs nothing. --json prints {repo, script,
+  dir, command, dry_run} and, after a run, `code` - sh's exit code; install.sh's
+  own output then goes to stderr so stdout stays one JSON value.")]
+    Update(UpdateArgs),
 
     /// Put a .moai/ into this repository (safe to run again)
     #[command(after_help = "  Run again where it is already installed and only the attached files
@@ -1822,6 +1857,18 @@ pub struct MergeDriverArgs {
     /// The command to install with (default: this binary)
     #[arg(long = "as", value_name = "command", requires = "install")]
     pub as_command: Option<String>,
+}
+
+/// `moai update` 의 인자(moai-zsfr.2p9). **자리를 받는 인자가 없다** — 깔 자리는 도는 바이너리의 자리로
+/// 정해진다. 다른 자리에 깔고 싶은 사람은 `install.sh --dir` 를 친다.
+#[derive(Args, Debug)]
+pub struct UpdateArgs {
+    /// Release tag to install instead of the latest
+    #[arg(long, value_name = "tag")]
+    pub version: Option<String>,
+    /// Print what would be fetched and run; touch nothing
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug)]

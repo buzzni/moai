@@ -62,7 +62,32 @@ curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
 
 ### Upgrade
 
-The same line upgrades. When the `moai` already in that directory is this moai,
+```sh
+moai update                     # the latest release, over the moai you are running
+moai update --version v0.1.0    # that release instead
+moai update --dry-run           # print what it would fetch and run
+```
+
+`moai update` fetches `install.sh` from the repository's `main` branch and runs
+it with `--dir <the directory of the running moai> --force`, so it upgrades the
+binary you are running wherever you put it. It stops before fetching anything,
+with one line saying what to do instead, for a build from source (cargo built it
+— rebuild), for a binary not named `moai`, for a directory you cannot write, and
+on a machine the releases do not cover.
+
+Releases come from `buzzni/moai`. A fork, or the project after a move, is picked
+in your user config, and `MOAI_REPO` wins over it for one run:
+
+```toml
+[update]
+repo = "owner/name"
+```
+
+The repository's own `.moai/config.toml` is never read for this — what it names
+is piped into a shell, and a repository you cloned must not choose that. The
+version check in the explorer asks the same repository.
+
+The install line upgrades too. When the `moai` already in that directory is this moai,
 the installer replaces it without `--force` and says which version it went from
 and to — to tell, it runs that `moai` (`--version`, then `merge-driver --help`)
 before downloading anything. When it is already the version it would install,
@@ -82,10 +107,12 @@ form:
 curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh -s -- --force
 ```
 
-When a newer release is out, `moai tui` says so in its header and banner, and
-when you quit it prints the line that upgrades the `moai` you are running — with
-`--dir` when it lives under your home but not in `~/.local/bin`. A build from source, a `moai`
-outside your home and a machine the releases do not cover get no line.
+When a newer release is out, `moai tui` says so in its header and its banner
+names `moai update`. Where `moai update` refuses only because of the repository
+setting (a malformed `[update] repo` or `MOAI_REPO`, or a user config it cannot
+read), quitting prints the install line instead, with `--dir` when it is not
+`~/.local/bin`. A build from source, a directory you cannot write and a machine
+the releases do not cover get no line.
 
 Prebuilt binaries are published for `x86_64-unknown-linux-musl` and
 `aarch64-apple-darwin`. On anything else, build from source:
@@ -281,8 +308,8 @@ no human-shaped output mixed in.
   to stdout. Human output disappears entirely; it is not interleaved.
 - Failures are JSON too, with a stable `code` you can branch on — `not_found`,
   `bad_status`, `bad_filter`, `bad_target`, `bad_input`, `no_actor`,
-  `already_exists`, `locked`, `broken`, and `error` as the catch-all. The human
-  sentence beside it is not something to match on.
+  `already_exists`, `locked`, `broken`, `not_updatable`, and `error` as the
+  catch-all. The human sentence beside it is not something to match on.
 - Keys that are always present stay present. `moai ready --json` is
   `{"ready":[…],"others":[…],"held":[…]}`, never a bare array — `others` is ready
   work that is someone else's or nobody's (`owner` says which), and `held` is work
