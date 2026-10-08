@@ -8514,7 +8514,7 @@ pub(super) mod tests {
     #[test]
     fn a_newer_release_says_so_on_the_banner_and_leaves_the_line_for_the_quit() {
         use crate::latest::Seen;
-        let line = format!("{} -s -- --dir /home/u/bin", crate::latest::UPGRADE);
+        let line = format!("{} -s -- --dir /home/u/bin", crate::latest::upgrade_of(crate::latest::DEFAULT_REPO));
         // (배너, 나갈 때 글)
         let both = |seen: Seen, upgrade: Option<&str>| {
             let mut a = app();

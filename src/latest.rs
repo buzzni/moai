@@ -79,19 +79,105 @@ pub const ASKED_BY: &str = "asked_by";
 /// [`ask_within`] 이 받는 256KB 를 그대로 파일에 적어 둘 까닭도 없다.
 const MAX_TAG: usize = 128;
 
-/// 묻는 자리. `MOAI_API_URL` 이 있으면 그것을 쓴다 — `install.sh` 가 이미 같은 이름으로 같은
-/// 자리를 돌린다. 시험이 제 서버를 띄워 붙는 자리이기도 하다.
+/// 받을 저장소의 기본값(moai-zsfr.2em). 바꾸는 자리는 사용자 설정의 `[update] repo` 와
+/// [`REPO_VAR`] 다 — [`repo_from`].
+pub const DEFAULT_REPO: &str = "buzzni/moai";
+
+/// 설정에서 받을 저장소를 고르는 키 — `[update] repo = "owner/name"`. [`CHECK`] 와 같은 표에 서고,
+/// **읽는 자도 같다**([`crate::user_config::Doc::update_repo`]).
+///
+/// **사용자 설정에만 둔다**(2026-10-08 사용자 결정). 저장소의 `.moai/config.toml` 은 이 키를 안
+/// 읽는다 — `moai update` 는 이 값이 가리키는 스크립트를 `sh` 에 흘리는데, 클론한 저장소가 그
+/// 스크립트를 고르게 두면 `git clone` 한 번이 남의 셸 한 줄이 된다.
+pub const REPO: &str = "repo";
+
+/// 환경에서 받을 저장소를 고르는 자리. **설정을 이긴다** — `install.sh` 가 이미 같은 이름으로 같은
+/// 자리를 돌리므로(`repo=${MOAI_REPO:-buzzni/moai}`), 둘이 한 이름을 읽어야 한 저장소를 본다.
+pub const REPO_VAR: &str = "MOAI_REPO";
+
+/// 묻는 자리 — 기본 저장소의 것. **시험만 쓴다** — 진짜 길은 [`url_from`] 이 받을 저장소로 짓는다
+/// ([`api_of`]). `MOAI_API_URL` 이 있으면 그것을 쓴다 — `install.sh` 가 이미 같은 이름으로 같은 자리를
+/// 돌린다. 시험이 제 서버를 띄워 붙는 자리이기도 하다.
+#[cfg(test)]
 pub const API: &str = "https://api.github.com/repos/buzzni/moai/releases/latest";
+
+/// `repo` 의 최신 릴리스를 묻는 자리. **저장소가 곧 자리라** 다른 저장소로 바꾸면 [`Held::url`] 이
+/// 달라지고, 그러면 앞 저장소의 답을 이 저장소의 답으로 안 읽는다([`Held::asked_here`]).
+pub fn api_of(repo: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/latest")
+}
+
+/// `repo` 의 `install.sh` — **늘 `main` 의 것이다**(2026-10-08 사용자 결정). 받는 사람이 밟는 가지가
+/// `main` 이고(moai-vqmx), 판을 고르는 것은 스크립트가 아니라 그 스크립트에 넘기는 `--version` 이다.
+pub fn script_of(repo: &str) -> String {
+    format!("https://raw.githubusercontent.com/{repo}/main/install.sh")
+}
 
 /// 판을 올리는 한 줄 — 처음 까는 줄과 같다(moai-8rmw). `install.sh` 는 깔 자리에 선 것이
 /// 이 moai 면 `--force` 없이 덮는다. 받는 사람이 밟는 가지는 `main` 이다(moai-vqmx).
 ///
+/// **기본 저장소가 아니면 `MOAI_REPO` 를 함께 싣는다.** 스크립트만 그 저장소의 것이면 바이너리는
+/// `install.sh` 의 기본값(`buzzni/moai`)에서 받는다 — 포크의 스크립트로 본가의 판을 까는 줄이 된다.
+///
 /// **이 줄이 올리는 것은 `~/.local/bin` 의 moai 다.** 탐색기가 댈 줄은 [`upgrade_line`] 이 도는
 /// 바이너리의 자리를 보고 고른다.
-pub const UPGRADE: &str = "curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh";
+pub fn upgrade_of(repo: &str) -> String {
+    let script = script_of(repo);
+    if repo == DEFAULT_REPO {
+        return format!("curl -fsSL {script} | sh");
+    }
+    format!("curl -fsSL {script} | {REPO_VAR}={repo} sh")
+}
+
+/// `owner/name` 꼴인가(moai-zsfr.2em). **엄하게 잰다** — 이 글은 URL 의 길 조각이 되고 `sh` 에
+/// 흘릴 스크립트를 고른다. GitHub 의 이름 글자(`[A-Za-z0-9._-]`)만 받고, 조각은 둘이며, 어느 조각도
+/// 점이나 줄표로 시작하지 않는다 — `..` 는 길을 거슬러 오르고, `-` 로 시작하는 낱말은 그것을 받는
+/// 명령이 플래그로 읽는다.
+pub fn repo_ok(repo: &str) -> bool {
+    let Some((owner, name)) = repo.split_once('/') else { return false };
+    let part = |p: &str| {
+        !p.is_empty()
+            && p.len() <= 100
+            && !p.starts_with(['.', '-'])
+            && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    };
+    part(owner) && part(name)
+}
+
+/// [`REPO_VAR`] 에 적힌, 꼴이 아닌 값([`repo_ok`]) — **말이 아니라 자료다**. 설정의 틀린 값은 이것이
+/// 아니라 [`crate::user_config::UpdateTrouble`] 로 선다 — 읽는 자리가 달라 대는 자리도 다르다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BadRepo {
+    pub raw: String,
+}
+
+/// 받을 저장소 — [`REPO_VAR`] 가 먼저, 그다음이 설정(`config`), 둘 다 없으면 [`DEFAULT_REPO`].
+///
+/// **틀린 값은 쓰지 않고 댄다.** 환경의 값이 꼴이 아니면 설정으로 내려가지 않고 `Err` 다 —
+/// 고른 사람이 있는 값을 말없이 다른 저장소로 바꾸면, 포크를 쓰려던 사람이 본가의 스크립트를
+/// 돌린다. 설정의 틀린 값은 읽는 자리([`crate::user_config::Doc::update_repo`])가 이미 걸러
+/// `config` 에 안 오고, 까닭은 [`crate::user_config::UpdateTrouble`] 로 선다 — 그것을 막을지는
+/// 부르는 쪽이 정한다(`moai update` 는 막고, 판 묻기는 기본 저장소로 묻는다).
+pub fn repo_from(env: impl Fn(&str) -> Option<OsString>, config: Option<&str>) -> Result<String, BadRepo> {
+    if let Some(v) = env(REPO_VAR).filter(|v| !v.is_empty()) {
+        let raw = v.to_string_lossy().into_owned();
+        return match v.into_string() {
+            Ok(repo) if repo_ok(&repo) => Ok(repo),
+            _ => Err(BadRepo { raw }),
+        };
+    }
+    Ok(config.unwrap_or(DEFAULT_REPO).to_string())
+}
+
+/// [`repo_from`] 이되 **막지 않는다** — 판 묻기와 안내 줄이 쓴다. 틀린 환경 값은 설정으로, 그것도
+/// 없으면 기본으로 내려간다. 이 길은 화면 한 줄이고 아무것도 안 돌리므로 틀린 값 하나로 판 줄을
+/// 잃게 두지 않는다 — 막는 쪽은 `sh` 에 무언가를 흘리는 `moai update` 다.
+pub fn repo_lenient(env: impl Fn(&str) -> Option<OsString>, config: Option<&str>) -> String {
+    repo_from(env, config).unwrap_or_else(|_| config.unwrap_or(DEFAULT_REPO).to_string())
+}
 
 /// `install.sh` 가 판을 내는 기계인가 — 그 스크립트의 플랫폼 표, `release.yml` 의 빌드 행렬과
-/// 같은 둘이다. 다른 기계에서 [`UPGRADE`] 는 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
+/// 같은 둘이다. 다른 기계에서 [`upgrade_of`] 의 줄은 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
 ///
 /// **행렬에 칸이 늘면 여기도 는다.** 안 늘리면 그 기계의 탐색기가 올리는 줄을 안 댈 뿐이다 —
 /// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다.
@@ -100,7 +186,7 @@ pub const SERVED: bool =
 
 /// **도는 이 바이너리를 올리는 한 줄**(리뷰). 못 올리는 줄은 안 낸다 — 그때는 `None` 이다.
 ///
-/// [`UPGRADE`] 는 `~/.local/bin` 에 까는 줄이다. 다른 자리에 선 moai 에게 그대로 대면 그 줄을
+/// [`upgrade_of`] 는 `~/.local/bin` 에 까는 줄이다. 다른 자리에 선 moai 에게 그대로 대면 그 줄을
 /// 친 사람은 새 판을 `~/.local/bin` 에 하나 더 깔거나 "이미 … 이다" 를 듣고, 도는 것은 옛 판
 /// 그대로라 배너가 다음에도 선다. 그래서 자리를 본다.
 ///
@@ -110,7 +196,7 @@ pub const SERVED: bool =
 ///   `.crates2.json` 이 `"moai"` 를 적었다)는 소스로 다시 짓는 쪽이 올린다. **그 파일이 있다는
 ///   것만으로는 안 가른다**(리뷰) — `cargo install` 의 뿌리를 `~/.local` 로 둔 사람은 딴 도구를
 ///   한 번만 깔아도 `~/.local/.crates.toml` 이 생기고, 그러면 `install.sh` 로 깐 moai 가 줄을 잃는다
-/// - `home` 밑의 `.local/bin` 이면 [`UPGRADE`] 그대로, `home` 밑의 다른 자리면
+/// - `home` 밑의 `.local/bin` 이면 [`upgrade_of`] 그대로, `home` 밑의 다른 자리면
 ///   `-s -- --dir <자리>` 를 붙인다 — `install.sh` 의 `--dir` 로 깐 자리다
 /// - `home` 밖(`/usr/local/bin` 따위)이면 `None` — 그 자리를 누가 채웠는지(root, 패키지 관리자)
 ///   이 바이너리는 모르고, 모르는 자리를 덮으라고 권하지 않는다. **`home` 이 뿌리(`/`)면 집을
@@ -119,11 +205,12 @@ pub const SERVED: bool =
 ///
 /// **`exe` 와 `home` 은 푼 경로를 받는다**([`upgrade_here`]). 링크로 선 철자끼리 견주면 같은
 /// 자리가 다른 자리로 읽힌다.
-pub fn upgrade_line(exe: &Path, home: Option<&Path>, served: bool) -> Option<String> {
+pub fn upgrade_line(exe: &Path, home: Option<&Path>, served: bool, repo: &str) -> Option<String> {
     if !served || exe.file_name()? != std::ffi::OsStr::new("moai") {
         return None;
     }
     let dir = exe.parent()?;
+    let home = home.filter(|h| h.parent().is_some())?;
     let cargo_put_moai_under = |root: &Path| {
         [".crates.toml", ".crates2.json"]
             .iter()
@@ -134,23 +221,23 @@ pub fn upgrade_line(exe: &Path, home: Option<&Path>, served: bool) -> Option<Str
             })
     };
     let built = dir.join(".fingerprint").is_dir() || dir.parent().is_some_and(cargo_put_moai_under);
-    let home = home.filter(|h| h.parent().is_some())?;
     if built || !dir.starts_with(home) {
         return None;
     }
+    let line = upgrade_of(repo);
     if dir == home.join(".local").join("bin") {
-        return Some(UPGRADE.to_string());
+        return Some(line);
     }
-    Some(format!("{UPGRADE} -s -- --dir {}", crate::text::shell_word(dir.to_str()?)))
+    Some(format!("{line} -s -- --dir {}", crate::text::shell_word(dir.to_str()?)))
 }
 
 /// [`upgrade_line`] 을 이 프로세스에 — 도는 바이너리의 푼 자리와 `HOME` 을 넣는다. 파일 시스템을
 /// 보므로 **여는 걸음에 한 번만 부른다**(`tui::App::ask_latest`). 그리는 걸음에서 부르면
 /// 프레임마다 디스크를 두드린다.
-pub fn upgrade_here() -> Option<String> {
+pub fn upgrade_here(repo: &str) -> Option<String> {
     let exe = crate::path::real(&std::env::current_exe().ok()?);
     let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
-    upgrade_line(&exe, home.as_deref(), SERVED)
+    upgrade_line(&exe, home.as_deref(), SERVED, repo)
 }
 
 /// 한 번 물으면 이만큼은 안 묻는다 — 들어 둔 답이 낡은 것이 확실할 때만 빼고([`Held::outdated`]).
@@ -938,9 +1025,9 @@ fn tag_in(body: &str) -> Option<String> {
     sane.then(|| tag.to_string())
 }
 
-/// 물을 자리 — `MOAI_API_URL` 이 있으면 그것, 없으면 [`API`].
-pub fn url_from(env: impl Fn(&str) -> Option<OsString>) -> String {
-    env("MOAI_API_URL").filter(|v| !v.is_empty()).and_then(|v| v.into_string().ok()).unwrap_or_else(|| API.to_string())
+/// 물을 자리 — `MOAI_API_URL` 이 있으면 그것, 없으면 `repo` 의 릴리스 자리([`api_of`]).
+pub fn url_from(env: impl Fn(&str) -> Option<OsString>, repo: &str) -> String {
+    env("MOAI_API_URL").filter(|v| !v.is_empty()).and_then(|v| v.into_string().ok()).unwrap_or_else(|| api_of(repo))
 }
 
 /// 창이 열렸으면 묻고 적는다. 창 안이면 적어 둔 것을 그대로 쓴다 — **낡은 것이 확실한 답만은 창 안이어도
@@ -2191,9 +2278,91 @@ mod tests {
 
     #[test]
     fn the_place_it_asks_can_be_turned() {
-        assert_eq!(url_from(|_| None), API);
-        assert_eq!(url_from(|k| (k == "MOAI_API_URL").then(|| OsString::from("http://x/y"))), "http://x/y");
-        assert_eq!(url_from(|k| (k == "MOAI_API_URL").then(OsString::new)), API, "빈 값은 없는 것이다");
+        assert_eq!(url_from(|_| None, DEFAULT_REPO), API);
+        assert_eq!(
+            url_from(|k| (k == "MOAI_API_URL").then(|| OsString::from("http://x/y")), "o/n"),
+            "http://x/y",
+            "MOAI_API_URL 은 저장소보다 먼저다"
+        );
+        assert_eq!(url_from(|k| (k == "MOAI_API_URL").then(OsString::new), DEFAULT_REPO), API, "빈 값은 없는 것이다");
+        // **저장소가 바뀌면 묻는 자리가 바뀐다**(moai-zsfr.2em) — 그래서 앞 저장소의 답을 이 저장소의
+        // 답으로 안 읽는다([`Held::asked_here`]).
+        assert_eq!(url_from(|_| None, "fork/moai"), "https://api.github.com/repos/fork/moai/releases/latest");
+        let other = Held {
+            asked_at: "2026-09-21T00:00:00Z".into(),
+            tag: Some("v9.9.9".into()),
+            heard_at: None,
+            url: Some(place_of(API)),
+            trouble: None,
+            asked_by: None,
+        };
+        assert!(!other.asked_here(&url_from(|_| None, "fork/moai")), "본가의 답을 포크의 답으로 읽었다");
+    }
+
+    /// **받을 저장소는 엄하게 잰다**(moai-zsfr.2em). 이 글은 URL 의 길 조각이 되고 `sh` 에 흘릴
+    /// 스크립트를 고른다 — 꼴이 아닌 값은 쓰지 않고 댄다.
+    #[test]
+    fn the_repo_has_one_shape() {
+        for good in ["buzzni/moai", "a/b", "Some-Org/my.repo_2", "o/n.", "0/9"] {
+            assert!(repo_ok(good), "{good} 를 거절했다");
+        }
+        for bad in [
+            "",
+            "moai",
+            "/moai",
+            "buzzni/",
+            "a/b/c",
+            "../moai",
+            "a/..",
+            ".a/b",
+            "a/.b",
+            "-a/b",
+            "a/-b",
+            "a b/c",
+            "a/b?x",
+            "a/b#x",
+            "a\\b/c",
+            "a/b\n",
+            "한글/moai",
+            "a:b/c",
+        ] {
+            assert!(!repo_ok(bad), "{bad:?} 를 받았다");
+        }
+        assert!(!repo_ok(&format!("{}/x", "a".repeat(101))), "너무 긴 이름을 받았다");
+    }
+
+    /// **환경이 설정을 이기고, 틀린 환경 값은 막는다**(moai-zsfr.2em). 막지 않는 쪽([`repo_lenient`])은
+    /// 판 줄이 쓴다 — 거기서 틀린 값 하나로 판 줄을 잃지 않는다.
+    #[test]
+    fn the_repo_comes_from_the_env_then_the_config() {
+        let none = |_: &str| None;
+        let env = |v: &'static str| move |k: &str| (k == REPO_VAR).then(|| OsString::from(v));
+        assert_eq!(repo_from(none, None), Ok(DEFAULT_REPO.to_string()));
+        assert_eq!(repo_from(none, Some("fork/moai")), Ok("fork/moai".to_string()));
+        assert_eq!(repo_from(env("env/moai"), Some("fork/moai")), Ok("env/moai".to_string()), "환경이 이긴다");
+        assert_eq!(repo_from(env(""), Some("fork/moai")), Ok("fork/moai".to_string()), "빈 값은 없는 것이다");
+        assert_eq!(
+            repo_from(env("../x"), Some("fork/moai")),
+            Err(BadRepo { raw: "../x".into() }),
+            "틀린 환경 값을 설정으로 바꿔 썼다"
+        );
+        assert_eq!(repo_lenient(env("../x"), Some("fork/moai")), "fork/moai");
+        assert_eq!(repo_lenient(env("../x"), None), DEFAULT_REPO);
+    }
+
+    /// **올리는 줄은 받을 저장소를 따른다**(moai-zsfr.2em). 기본이 아닌 저장소는 `MOAI_REPO` 를 함께 싣는다 —
+    /// 스크립트만 포크의 것이면 바이너리는 본가에서 받는다.
+    #[test]
+    fn the_upgrade_line_follows_the_repo() {
+        assert_eq!(api_of(DEFAULT_REPO), API, "기본 저장소의 자리가 갈렸다");
+        assert_eq!(
+            upgrade_of(DEFAULT_REPO),
+            "curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh"
+        );
+        assert_eq!(
+            upgrade_of("fork/moai"),
+            "curl -fsSL https://raw.githubusercontent.com/fork/moai/main/install.sh | MOAI_REPO=fork/moai sh"
+        );
     }
 
     #[test]
@@ -2231,41 +2400,35 @@ mod tests {
         std::fs::create_dir_all(&local).unwrap();
         std::fs::create_dir_all(&given).unwrap();
 
-        assert_eq!(upgrade_line(&local.join("moai"), Some(&home), true).as_deref(), Some(UPGRADE), "기본 자리");
+        let up = upgrade_of(DEFAULT_REPO);
+        let line = |exe: &Path, home: Option<&Path>, served: bool| upgrade_line(exe, home, served, DEFAULT_REPO);
+        assert_eq!(line(&local.join("moai"), Some(&home), true), Some(up.clone()), "기본 자리");
         assert_eq!(
-            upgrade_line(&given.join("moai"), Some(&home), true),
-            Some(format!("{UPGRADE} -s -- --dir {}", crate::text::shell_word(given.to_str().unwrap()))),
+            line(&given.join("moai"), Some(&home), true),
+            Some(format!("{up} -s -- --dir {}", crate::text::shell_word(given.to_str().unwrap()))),
             "`--dir` 로 깐 자리는 그 자리를 싣고, 셸이 가르는 글자는 싼다"
         );
 
-        assert_eq!(upgrade_line(&local.join("moai"), Some(&home), false), None, "판을 안 내는 기계");
-        assert_eq!(upgrade_line(&local.join("moai-dev"), Some(&home), true), None, "install.sh 가 깐 이름이 아니다");
-        assert_eq!(upgrade_line(Path::new("/usr/local/bin/moai"), Some(&home), true), None, "집 밖");
-        assert_eq!(upgrade_line(&local.join("moai"), None, true), None, "집을 모른다");
-        assert_eq!(
-            upgrade_line(Path::new("/usr/local/bin/moai"), Some(Path::new("/")), true),
-            None,
-            "뿌리는 집이 아니다"
-        );
+        assert_eq!(line(&local.join("moai"), Some(&home), false), None, "판을 안 내는 기계");
+        assert_eq!(line(&local.join("moai-dev"), Some(&home), true), None, "install.sh 가 깐 이름이 아니다");
+        assert_eq!(line(Path::new("/usr/local/bin/moai"), Some(&home), true), None, "집 밖");
+        assert_eq!(line(&local.join("moai"), None, true), None, "집을 모른다");
+        assert_eq!(line(Path::new("/usr/local/bin/moai"), Some(Path::new("/")), true), None, "뿌리는 집이 아니다");
 
         // cargo 가 지은 자리 — `target/<프로필>` 과 `cargo install` 이 moai 를 깐 뿌리.
         let profile = home.join("src").join("moai").join("target").join("release");
         std::fs::create_dir_all(profile.join(".fingerprint")).unwrap();
-        assert_eq!(upgrade_line(&profile.join("moai"), Some(&home), true), None, "소스에서 지은 판");
+        assert_eq!(line(&profile.join("moai"), Some(&home), true), None, "소스에서 지은 판");
         let cargo = home.join(".cargo");
         std::fs::create_dir_all(cargo.join("bin")).unwrap();
         std::fs::write(cargo.join(".crates.toml"), "[v1]\n\"moai 0.1.3 (path+file:///src/moai)\" = [\"moai\"]\n")
             .unwrap();
-        assert_eq!(upgrade_line(&cargo.join("bin").join("moai"), Some(&home), true), None, "cargo install");
+        assert_eq!(line(&cargo.join("bin").join("moai"), Some(&home), true), None, "cargo install");
 
         // **cargo 가 딴 도구만 깐 뿌리는 cargo 의 moai 자리가 아니다** — `install.root` 를
         // `~/.local` 로 둔 사람의 `install.sh` moai 가 줄을 잃지 않는다.
         std::fs::write(home.join(".local").join(".crates.toml"), "[v1]\n\"ripgrep 14.1.0 (registry+x)\" = [\"rg\"]\n")
             .unwrap();
-        assert_eq!(
-            upgrade_line(&local.join("moai"), Some(&home), true).as_deref(),
-            Some(UPGRADE),
-            "딴 도구의 cargo 뿌리"
-        );
+        assert_eq!(line(&local.join("moai"), Some(&home), true).as_deref(), Some(up.as_str()), "딴 도구의 cargo 뿌리");
     }
 }

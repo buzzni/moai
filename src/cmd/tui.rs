@@ -124,7 +124,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = app.user_config.clone();
     // 설정이 무엇이라 했는지는 **위에서 한 번 읽은 것**을 그대로 든다(moai-d74q). `reg.read` 가
     // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
-    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check);
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref());
     screen(app)
 }
 
@@ -137,11 +137,21 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 /// **답을 둘 자리가 없으면 안 묻는다.** 설정 파일의 자리를 모르는 기계(`HOME` 도 `XDG_CONFIG_HOME`
 /// 도 없다)에서 묻기 시작하면 창을 닫을 자리가 없어 **부를 때마다** 바깥을 두드리는데, 그것이 이
 /// 기능이 피하려던 바로 그 일이다.
-fn ask_latest(ctx: &Ctx, app: &mut crate::tui::App, config: Option<&std::path::Path>, says: Option<bool>) {
+///
+/// **받을 저장소는 막지 않고 고른다**([`crate::latest::repo_lenient`], moai-zsfr.2em) — 판 줄은 화면 한
+/// 줄이라 틀린 값 하나로 그것을 잃게 두지 않는다. 설정의 틀린 값은 보기 알림이 이미 댄다.
+fn ask_latest(
+    ctx: &Ctx,
+    app: &mut crate::tui::App,
+    config: Option<&std::path::Path>,
+    says: Option<bool>,
+    repo: Option<&str>,
+) {
     let Some(dir) = asking_from(config, says, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
         return;
     };
-    app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k)));
+    let repo = crate::latest::repo_lenient(|k| std::env::var_os(k), repo);
+    app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k), &repo), &repo);
 }
 
 /// 물을 것인가, 물으면 답을 어디에 둘 것인가 — **판단만 한다**(리뷰).
@@ -247,7 +257,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check);
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref());
     screen(app)
 }
 

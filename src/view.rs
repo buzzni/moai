@@ -3417,20 +3417,23 @@ pub fn look_trouble(lang: Lang, why: &crate::user_config::LookTrouble) -> String
     }
 }
 
-/// `[update] check` 를 읽다 만난 한 줄([`crate::user_config::UpdateTrouble`], moai-d74q).
+/// `[update]` 를 읽다 만난 한 줄([`crate::user_config::UpdateTrouble`], moai-d74q · moai-zsfr.2em).
 ///
 /// **보기 설정과 같은 글을 쓴다** — 물음이 같기 때문이다("이 자리에 저 모양이 서야 하는데 이것이
 /// 섰다"). 말묶음에 같은 뜻의 키를 한 벌 더 두면 옮기는 사람이 둘을 따로 옮기고, 그러다
 /// 한쪽만 고쳐진다.
 pub fn update_trouble(lang: Lang, why: &crate::user_config::UpdateTrouble) -> String {
-    use crate::latest::{CHECK, UPDATE};
+    use crate::latest::{CHECK, REPO, UPDATE};
     use crate::user_config::UpdateTrouble;
+    let want = |key: &str, want: &str, found: &str| {
+        fill(say(lang, "look.want"), &[("key", &format!("{UPDATE}.{key}")), ("want", want), ("found", found)])
+    };
     match why {
         UpdateTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", UPDATE), ("found", found)]),
-        UpdateTrouble::NotABool { found } => fill(
-            say(lang, "look.want"),
-            &[("key", &format!("{UPDATE}.{CHECK}")), ("want", say(lang, "look.want_bool")), ("found", found)],
-        ),
+        UpdateTrouble::NotABool { found } => want(CHECK, say(lang, "look.want_bool"), found),
+        UpdateTrouble::RepoNotAWord { found } => want(REPO, say(lang, "look.want_word"), found),
+        // 적힌 값은 따옴표로 싸 댄다 — 빈 글이나 공백이 든 값도 화면에서 보이게.
+        UpdateTrouble::BadRepo { raw } => want(REPO, say(lang, "look.want_repo"), &format!("{raw:?}")),
     }
 }
 

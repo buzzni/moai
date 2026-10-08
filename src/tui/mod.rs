@@ -2966,12 +2966,13 @@ impl App {
     ///
     /// **첫 값은 물어보기 전에 선다** — 적어 둔 답([`crate::latest::held`])이라 그물이 없어도
     /// 판 줄이 곧바로 무언가를 말한다.
-    pub fn ask_latest(&mut self, dir: std::path::PathBuf, url: String) {
+    /// `repo` 는 받을 저장소다(moai-zsfr.2em) — 올리는 줄이 그 저장소의 스크립트를 댄다.
+    pub fn ask_latest(&mut self, dir: std::path::PathBuf, url: String, repo: &str) {
         if self.latest_job.is_some() {
             return;
         }
         self.latest = crate::latest::held(&dir, &url);
-        self.upgrade = crate::latest::upgrade_here();
+        self.upgrade = crate::latest::upgrade_here(repo);
         let now = self.site.now.clone();
         self.latest_job = crate::latest::spawn(dir, url, now, crate::latest::WINDOW);
     }
