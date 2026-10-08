@@ -249,16 +249,30 @@ pub fn built_by_cargo(dir: &Path) -> bool {
 /// 보므로 **여는 걸음에 한 번만 부른다**(`tui::App::ask_latest`). 그리는 걸음에서 부르면
 /// 프레임마다 디스크를 두드린다.
 ///
-/// **`moai update` 가 서는지는 그 명령이 거절하는 자로 잰다**([`crate::update::refusal`]) — 안내가
-/// `moai update` 를 대고 그 명령은 거절하는 판을 안 만든다. 못 서는 자리에는 긴 줄을 그대로 댄다
-/// (그 줄도 못 서면 `None`).
-pub fn upgrade_here(repo: &str) -> Option<String> {
+/// **`moai update` 가 서는지는 그 명령이 거절하는 자로 잰다** — 자리는 [`crate::update::refusal`] 로,
+/// 받을 저장소는 부르는 쪽이 `cmd::update::chosen_repo` 로 재어 `repo_ok` 에 싣는다. 안내가 `moai update` 를
+/// 대고 그 명령은 거절하는 판을 안 만든다. 못 서는 자리에는 긴 줄을 그대로 댄다(그 줄도 못 서면 `None`).
+pub fn upgrade_here(repo: &str, repo_ok: bool) -> Option<String> {
     let exe = crate::path::real(&std::env::current_exe().ok()?);
-    if crate::update::refusal(&exe, SERVED, crate::update::writable).is_none() {
+    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
+    upgrade_for(&exe, home.as_deref(), SERVED, repo, repo_ok, crate::update::writable)
+}
+
+/// [`upgrade_here`] 의 판단 — **파일 시스템의 권한만 받아서 잰다**(시험이 `chmod` 없이 갈래를 잰다, root 로
+/// 도는 기계에서도). `repo_ok` 가 거짓이면(받을 저장소 값이 틀렸거나 설정을 못 읽었다) `moai update` 가
+/// 거절하므로 그 명령을 안 댄다.
+pub fn upgrade_for(
+    exe: &Path,
+    home: Option<&Path>,
+    served: bool,
+    repo: &str,
+    repo_ok: bool,
+    writable: impl Fn(&Path) -> bool,
+) -> Option<String> {
+    if repo_ok && crate::update::refusal(exe, served, writable).is_none() {
         return Some(SELF_UPDATE.to_string());
     }
-    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
-    upgrade_line(&exe, home.as_deref(), SERVED, repo)
+    upgrade_line(exe, home, served, repo)
 }
 
 /// 한 번 물으면 이만큼은 안 묻는다 — 들어 둔 답이 낡은 것이 확실할 때만 빼고([`Held::outdated`]).
@@ -663,7 +677,8 @@ impl Held {
     /// 그러면 아래 둘이 함께 닫히지만, 둘 다 좁은 경우라 꼴을 한 번 더 바꾸지 않기로 했다.
     ///
     /// - `MOAI_API_URL` 을 **오가는** 사람은 부를 때마다 묻게 된다(창이 안 닫힌다). 그 값은
-    ///   거울이나 시험을 위한 손잡이라 한 기계에서 오가는 일이 드물다
+    ///   거울이나 시험을 위한 손잡이라 한 기계에서 오가는 일이 드물다. 받을 저장소(`[update] repo`·
+    ///   `MOAI_REPO`, moai-zsfr.2em)도 자리를 바꾸므로 그것을 오가는 사람도 같다
     /// - 옛 바이너리가 이 파일을 쓰면 `tag` 만 갈리고 [`Held::url`] 은 그대로 남아, 남의
     ///   자리에서 들은 태그가 이 자리의 답으로 읽힐 수 있다. 옛 바이너리와 `MOAI_API_URL` 이
     ///   **함께** 서야 하는 자리다
@@ -2315,6 +2330,33 @@ mod tests {
         assert!(!is_loopback(API));
         assert!(!is_loopback("http://127.0.0.1.example.com/x"), "이름 속의 숫자는 되돌이가 아니다");
         assert!(!is_loopback("http://10.0.0.1/x"));
+    }
+
+    /// **안내는 `moai update` 가 서는 자리에서만 그 명령을 댄다**(moai-zsfr.o3s). 못 쓰는 자리·틀린 저장소 값에는
+    /// 그 명령이 거절하므로 긴 줄로(그것도 못 서면 `None`) 내려간다.
+    #[test]
+    fn the_hint_names_moai_update_only_where_it_runs() {
+        let s = Scratch::new("upgrade-for");
+        let home = s.path().join("home");
+        let local = home.join(".local").join("bin");
+        std::fs::create_dir_all(&local).unwrap();
+        let exe = local.join("moai");
+        let yes = |_: &Path| true;
+        let no = |_: &Path| false;
+        let up = upgrade_of(DEFAULT_REPO);
+        assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, yes).as_deref(), Some(SELF_UPDATE));
+        assert_eq!(
+            upgrade_for(Path::new("/opt/tools/moai"), Some(&home), true, DEFAULT_REPO, true, yes).as_deref(),
+            Some(SELF_UPDATE),
+            "집 밖이어도 쓸 수 있으면 moai update 가 선다"
+        );
+        assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, no), Some(up.clone()), "쓸 수 없는 자리");
+        assert_eq!(
+            upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, yes),
+            Some(up),
+            "moai update 가 거절할 저장소 값"
+        );
+        assert_eq!(upgrade_for(&exe, Some(&home), false, DEFAULT_REPO, true, yes), None, "판을 안 내는 기계");
     }
 
     #[test]

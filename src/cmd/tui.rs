@@ -115,6 +115,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // **말은 화면이 이미 든 것이다**(`App::site.lang`) — 여기서 `ctx.lang()` 을 다시 물으면 밖에서 띄운
     // 길(`outside`)이 같은 설정을 한 번 더 판다(`super::lang_of` 가 적어 둔 그 까닭이다).
     app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
+    // `reg.read` 가 옮겨 가기 전에 잰다 — 통째로 빌리는 자리다.
+    let repo_ok = super::update::chosen_repo(app.site.lang, &reg, |k| std::env::var_os(k)).is_ok();
     // 읽음은 이 저장소의 제 파일에 산다(moai-omx7) — 설정에서 오는 것은 겹쳐 볼 옛 `[read]` 뿐이다.
     app.legacy_read = reg.read;
     app.load_read();
@@ -124,7 +126,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let config = app.user_config.clone();
     // 설정이 무엇이라 했는지는 **위에서 한 번 읽은 것**을 그대로 든다(moai-d74q). `reg.read` 가
     // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
-    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref());
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref(), repo_ok);
     screen(app)
 }
 
@@ -140,18 +142,21 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 ///
 /// **받을 저장소는 막지 않고 고른다**([`crate::latest::repo_lenient`], moai-zsfr.2em) — 판 줄은 화면 한
 /// 줄이라 틀린 값 하나로 그것을 잃게 두지 않는다. 설정의 틀린 값은 보기 알림이 이미 댄다.
+/// `repo_ok` 는 `moai update` 가 그 저장소를 받는가다([`super::update::chosen_repo`]) — 아니면 안내가
+/// `moai update` 를 안 댄다.
 fn ask_latest(
     ctx: &Ctx,
     app: &mut crate::tui::App,
     config: Option<&std::path::Path>,
     says: Option<bool>,
     repo: Option<&str>,
+    repo_ok: bool,
 ) {
     let Some(dir) = asking_from(config, says, ctx.json, crate::latest::on_screen(), |k| std::env::var_os(k)) else {
         return;
     };
     let repo = crate::latest::repo_lenient(|k| std::env::var_os(k), repo);
-    app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k), &repo), &repo);
+    app.ask_latest(dir, crate::latest::url_from(|k| std::env::var_os(k), &repo), &repo, repo_ok);
 }
 
 /// 물을 것인가, 물으면 답을 어디에 둘 것인가 — **판단만 한다**(리뷰).
@@ -252,12 +257,13 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.config_tried.saw(reg.trouble);
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
+    let repo_ok = super::update::chosen_repo(app.site.lang, &reg, |k| std::env::var_os(k)).is_ok();
     app.legacy_read = reg.read;
     app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
     let config = app.user_config.clone();
-    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref());
+    ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref(), repo_ok);
     screen(app)
 }
 

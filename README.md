@@ -72,8 +72,8 @@ moai update --dry-run           # print what it would fetch and run
 it with `--dir <the directory of the running moai> --force`, so it upgrades the
 binary you are running wherever you put it. It stops before fetching anything,
 with one line saying what to do instead, for a build from source (cargo built it
-— rebuild), for a directory you cannot write, and on a machine the releases do
-not cover.
+— rebuild), for a binary not named `moai`, for a directory you cannot write, and
+on a machine the releases do not cover.
 
 Releases come from `buzzni/moai`. A fork, or the project after a move, is picked
 in your user config, and `MOAI_REPO` wins over it for one run:

@@ -26803,12 +26803,12 @@ fn serving_script(body: String, n: usize) -> (String, std::thread::JoinHandle<()
     (url, handle)
 }
 
-/// 받은 인자와 `MOAI_REPO` 를 `record` 에 적고 `code` 로 끝나는 가짜 `install.sh`. 표준 출력에 한 줄을 내어
+/// 받은 인자와 `MOAI_VERSION`·`MOAI_REPO` 를 `record` 에 적고 `code` 로 끝나는 가짜 `install.sh`. 표준 출력에 한 줄을 내어
 /// 흘림이 어디로 가는지도 재게 한다.
 fn recording_script(record: &Path, code: i32) -> String {
     let at = record.to_str().unwrap();
     format!(
-        "printf '%s\\n' \"$@\" > '{at}'\nprintf 'MOAI_REPO=%s\\n' \"${{MOAI_REPO-}}\" >> '{at}'\necho 'fake install ran'\nexit {code}\n"
+        "printf '%s\\n' \"$@\" > '{at}'\nprintf 'MOAI_VERSION=%s\\n' \"${{MOAI_VERSION-}}\" >> '{at}'\nprintf 'MOAI_REPO=%s\\n' \"${{MOAI_REPO-}}\" >> '{at}'\necho 'fake install ran'\nexit {code}\n"
     )
 }
 
@@ -26838,10 +26838,12 @@ fn update_runs_install_sh_over_the_running_binary() {
     let cfg = s.path().join("config.toml");
     let (url, server) = serving_script(recording_script(&record, 3), 2);
 
-    let out = update_with(&exe, s.path(), &cfg, &[("MOAI_INSTALL_URL", &url)], &["--version", "v0.9.0"]);
+    // 셸에 선 `MOAI_VERSION` 은 스크립트에 안 샌다 — 판은 `--version` 하나로 고른다.
+    let env = [("MOAI_INSTALL_URL", url.as_str()), ("MOAI_VERSION", "v0.0.1")];
+    let out = update_with(&exe, s.path(), &cfg, &env, &["--version", "v0.9.0"]);
     assert_eq!(out.status.code(), Some(3), "종료 코드가 sh 의 것이 아니다\n{}", text(&out));
     let said = std::fs::read_to_string(&record).expect("스크립트가 안 돌았다");
-    let want = format!("--dir\n{}\n--force\n--version\nv0.9.0\nMOAI_REPO=buzzni/moai\n", dir.display());
+    let want = format!("--dir\n{}\n--force\n--version\nv0.9.0\nMOAI_VERSION=\nMOAI_REPO=buzzni/moai\n", dir.display());
     assert_eq!(said, want, "스크립트가 받은 인자가 다르다");
     assert!(String::from_utf8_lossy(&out.stdout).contains("fake install ran"), "스크립트의 출력을 안 흘렸다");
 
@@ -26932,6 +26934,22 @@ fn update_refuses_a_repo_that_is_not_owner_slash_name() {
         assert_eq!(field(&err, "code"), "bad_input", "{args:?}\n{err}");
         assert!(err.contains("update.repo"), "{err}");
     }
+
+    // **못 읽은 설정은 저장소를 골랐는지조차 모른다** — 기본 저장소로 내려가지 않고 막는다. `MOAI_REPO` 를 준
+    // 판은 설정을 안 보므로 돈다.
+    std::fs::write(&cfg, "[update]\nrepo = \"fork/moai\"\n[update\n").unwrap();
+    let out = update_with(&exe, s.path(), &cfg, &[nowhere], &["--dry-run", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(field(&err, "code"), "bad_input", "깨진 설정을 지나 기본 저장소로 갔다\n{err}");
+    let out = update_with(&exe, s.path(), &cfg, &[nowhere, ("MOAI_REPO", "env/moai")], &["--dry-run", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()["repo"], "env/moai");
+
+    // 판은 태그다 — `-` 로 시작하면 `install.sh` 가 플래그로 읽는다.
+    std::fs::remove_file(&cfg).unwrap();
+    let out = update_with(&exe, s.path(), &cfg, &[nowhere], &["--version=--force", "--json"]);
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(field(&err, "code"), "bad_input", "{err}");
 }
 
 /// **cargo 가 지은 자리는 그물 전에 멈춘다**(사람 결정 2026-10-08) — 시험의 바이너리가 바로 그 자리
