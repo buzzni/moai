@@ -12,6 +12,31 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai update` upgrades the moai you are running.** It fetches `install.sh`
+  from the `main` branch of the repository releases come from and runs it with
+  `--dir <the running binary's directory> --force`, passing `--version <tag>`
+  through; install.sh's output streams and the exit code is sh's. `--dry-run`
+  prints the script's address and the command and touches nothing. It stops
+  before fetching, with one line and the code `not_updatable`, for a binary
+  cargo built, a binary not named `moai`, a directory you cannot write, and a
+  machine the releases do not cover. (moai-zsfr.2p9)
+
+- **`[update] repo = "owner/name"` in your user config picks the repository
+  releases come from** — `buzzni/moai` unless written, and `MOAI_REPO` wins
+  over it. `moai update`, the explorer's version check and the upgrade line all
+  follow it. The repository's `.moai/config.toml` is not read for it. A value
+  that is not `owner/name` is reported, and `moai update` refuses it rather
+  than falling back to `buzzni/moai`. (moai-zsfr.2em)
+
+### Changed
+
+- **The explorer's new-release banner names `moai update`** where that command
+  can run, instead of saying an install line is printed on quitting; quitting
+  prints `moai update` too. The install line is kept where only the installer
+  can upgrade. (moai-zsfr.o3s)
+
 ## [0.10.0] - 2026-10-08
 
 ### Added

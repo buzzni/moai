@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.8.0 hash:3649ec0e -->
+<!-- moai:begin v:0.10.0 hash:eb4ae23f -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -330,8 +330,14 @@ in `latest.toml`. Ask somewhere else and the answer from the other place is not 
 
     [update]
     check = false        # in your user config: never ask on this machine
+    repo = "owner/name"  # where releases come from — buzzni/moai unless written
 
     MOAI_NO_UPDATE_CHECK=1 moai tui     # or just for this run
+
+`moai update` upgrades the moai that is running: it runs that repository's
+`install.sh` over the binary's own directory. `MOAI_REPO` wins over `repo` for one
+run, and the repository's `.moai/config.toml` is never read for it. A build from
+source and a directory you cannot write are refused before anything is fetched.
 
 ### When a feature request comes in
 
