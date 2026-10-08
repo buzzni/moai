@@ -59,6 +59,14 @@ The first `moai init` in a terminal asks, and `--guide` says it without asking:
   moai hooks mean `hook`, and a plain rerun leaves those hooks installed without
   calling the installer again. Otherwise a tracker kept out of git is left without
   a block and a committed one gets the block
+- **Switching from `file` to `block` takes the guide file away.** Once `AGENTS.md`
+  holds the whole block, `moai init --guide block` removes `.moai/guide.md` and says
+  so. A file there that does not open the way the moai guide does is yours: `init`
+  leaves it and says that too
+- **An `AGENTS.md` that links to a file `init` appends to gets no block.** With
+  `AGENTS.md -> .gitattributes` or `-> .gitignore`, planting the block would replace
+  the rules `init` just wrote. `init` leaves `AGENTS.md` alone and names it, and
+  `--check` names it as well — make `AGENTS.md` a regular file to get the block
 
 ## Plant the skills
 
@@ -406,6 +414,11 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   not asked to register. `--dry-run` stops with the same line. Replace the link
   with a real file or directory, or move aside what stands there, and install
   again
+- **`init` or `skill install` refused a path that points into `.moai`.** A
+  committed link (`AGENTS.md -> .moai/issues.jsonl`, a `SKILL.md`, a hooks file,
+  or a directory such as `.agents -> .moai`) would land the write in the
+  tracker. Nothing is written there and the link stays; `init` exits 0, `skill
+  install` non-zero. Replace the link with a real file — see [Recovery](recovery.md#a-write-was-refused-because-a-link-leads-into-moai)
 - **`skill install` said it did not read `.claude/settings.json`.** That
   committed file is a link out of the checkout, a FIFO, or unreadable, so the
   marketplaces an earlier moai declared there were not removed. Delete the
@@ -426,7 +439,7 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8
 
 ## Archive storage
 

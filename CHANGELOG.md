@@ -19,6 +19,15 @@ does not tag — see `CONTRIBUTING.md`.
   without them. The line is dimmed — it does not make the banner urgent.
   (moai-ug6x.bbh)
 
+### Changed
+
+- **`moai init --json` says `"driver": "untracked"` for a tracker kept out of
+  git.** With `--tracking exclude` or `gitignore` it said `skipped`, the word
+  `--no-driver` uses for a driver left out this run only — but git never
+  merges an untracked tracker, so there is nothing for a driver to do.
+  `skipped` now stands only for `--no-driver` on a committed tracker.
+  (moai-8gwh.86j)
+
 ### Fixed
 
 - **In the statistics and wiki windows the arrow, Home/End and PgUp/PgDn keys
@@ -30,6 +39,81 @@ does not tag — see `CONTRIBUTING.md`.
   old window under the notice. Failing to open the other window (`SPC g s` over
   the wiki, `SPC g w` over the statistics) leaves the current one as it was —
   cursor and link trail included — and only says why. (moai-ug6x.hr1)
+- **`moai init` no longer erases the rules it just wrote through an
+  `AGENTS.md` link.** With a committed `AGENTS.md -> .gitattributes` the block
+  was planted last, over the text read before the rules were appended, so the
+  `merge=moai` lines vanished and AGENTS markdown stood as attribute patterns;
+  `-> .gitignore` lost `.moai/lock` the same way — and the output said both
+  were written. When `AGENTS.md` leads to a file `init` appends to, the block
+  is no longer planted: `AGENTS.md` is named as left alone (`untouched`, kind
+  `shared` under `--json`), and `moai init --check` names it too
+  (`agents_shared`). (moai-8gwh.esm)
+- **Switching `--guide file` to `--guide block` no longer leaves
+  `.moai/guide.md` behind.** Once `AGENTS.md` holds the whole block and no
+  longer links to it, `moai init` removes the guide file it wrote, says so in
+  one line, and `--json` carries `guide_file_removed`. With `--guide none` or
+  `hook` — `AGENTS.md` untouched, its link still standing — or when `AGENTS.md`
+  could not be written, the file stays. So does a `.moai/guide.md` that is not
+  a moai guide — one that does not open with the guide's heading and first
+  sentence: `init` names it as left in one line, and `--json` carries
+  `guide_file_kept`. (moai-8gwh.ftm)
+- **A tracker kept out of git that cannot be created no longer leaves its
+  ignore lines behind.** `moai init --tracking exclude|gitignore` writes those
+  lines before `.moai` on purpose; when creating `.moai` or its files then
+  failed, the lines stayed with no tracker. `init` now takes back exactly what
+  it appended (or removes the file it created) and any `.moai` it made, and
+  still stops with the error. (moai-8gwh.67q)
+- **A committed link from a file outside `.moai` into the tracker is no longer
+  followed.** `AGENTS.md -> .moai/issues.jsonl` made `moai init` read the
+  snapshot as AGENTS.md and replace it without the repository lock — racing a
+  `moai add`, it lost rows and exited 0, and left markdown in the snapshot;
+  `-> .moai/config.toml` broke every later command, and a committed `SKILL.md`
+  link let `moai skill install` replace the snapshot with skill text. Such a
+  write — a root file, a planted skill tree, a hook file — is now refused when
+  it would land inside any `.moai` directory or on the snapshot behind its link,
+  naming the path and where it points; nothing is written and the link stays.
+  (moai-r0x8.a42)
+- **A main checkout left holding only `.moai/lock` no longer traps its linked
+  worktrees.** After checking out an old commit or bisecting, the lookup in a
+  sibling worktree said there was no tracker and to run `moai init`, while
+  `moai init` there refused and pointed at the main checkout. Both now ask the
+  same question — does the main checkout hold `.moai/config.toml` — so `init`
+  in that worktree plants its own tracker. (moai-r0x8.apz)
+- **A linked worktree with no `.moai` of its own reads the main checkout's
+  tracker wherever it stands.** A worktree split off before moai came in and
+  placed outside the main checkout (`git worktree add ../side <old commit>`)
+  found nothing above it: `moai prime` said `no_tracker` and to run
+  `moai init`, `status` and `ready` refused with the same advice, and `init`
+  there refused because the tracker lives in the main checkout. Every command
+  there now opens the main checkout's tracker, as `project add` already did, and
+  a write says in one line where it went. One inside the main checkout no longer
+  reports that it "climbed up" to that tracker. `MOAI_HERE=1` still keeps the
+  worktree on its own. (moai-r0x8.3fi)
+- **A `.moai` that is not a directory is an unreadable tracker, not a missing
+  one.** A regular file or a link that leads nowhere (`.moai -> /nowhere`) was
+  read as "no tracker": `moai prime` said `no_tracker` and to run `moai init`,
+  and `init` then failed with a bare `Not a directory` or `File exists`, while a
+  link to an existing place already stopped with `broken`. Every command —
+  `prime` (`tracker_error`, code `broken`), `status`, `project ls`, `init` and
+  `init --check` — now says what stands there and stops on it, and `init`
+  leaves it untouched. (moai-r0x8.e19)
+- **`moai prime` no longer calls a tracker it climbed to "the tracker here".**
+  In a checkout with no `.moai` whose search climbed to an unreadable tracker
+  above it, the page said it could not read the tracker here and that `moai
+  init` would not help; that it had climbed was only on stderr, which a
+  session-start hook does not carry. The page now says there is no `.moai`
+  in this checkout, names the tracker it climbed to and why it could not be
+  read, and gives both ways out — fix that tracker, or start a separate one
+  for this checkout with `moai init` (as `moai -C <checkout top> init` when
+  called below the top). When the search climbed past a `.moai` it could not
+  look at, the page says so instead and does not offer `moai init`. `--json`
+  adds `climbed_to` with that root beside `tracker_error`, and `init_at` or
+  `unseen_at` for the two cases. (moai-r0x8.ris)
+- **`moai init --tracking exclude|gitignore` in a worktree of a bare repository
+  no longer names a main checkout that does not exist.** The refusal is the
+  same, but it now says the repository has no main checkout and that keeping
+  the tracker out of git would hide the trackers the other worktrees commit.
+  (moai-r0x8.33p)
 
 ## [0.9.0] - 2026-10-07
 

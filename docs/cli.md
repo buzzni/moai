@@ -215,9 +215,15 @@ Options:
   open on a failure - and then this is a lint, and a lint is a gate.
 
   With no tracker here it says how to start one (--json: no_tracker). With a
-  tracker it cannot read - a link out of the checkout, a broken config - it
-  says why instead and does not send you to `moai init` (--json: tracker_error,
-  whose code is the one the other commands stop with).
+  tracker it cannot read - a link out of the checkout, a broken config, a
+  `.moai` that is not a directory - it says why instead and does not send you
+  to `moai init` (--json: tracker_error, whose code is the one the other
+  commands stop with). When that tracker is one it climbed to from a checkout
+  with no `.moai`, it says so and names it (--json: climbed_to), and gives both
+  ways out: fix that tracker, or start a separate one for this checkout with
+  `moai init` - named with `-C <checkout top>` when you stand below the top
+  (--json: init_at). When it climbed past a `.moai` it could not look at, it
+  says that instead and does not send you to `moai init` (--json: unseen_at).
 
   Wire it where your editor injects context at session start. For Claude Code
   that is a SessionStart hook, which fires again after a compact:
@@ -3066,7 +3072,11 @@ Options:
   exclude or gitignore is refused.
 
   --json reports gitignore=true only when .gitignore was written; exclude=true
-  means the ignore lines were written to .git/info/exclude.
+  means the ignore lines were written to .git/info/exclude. Its driver is
+  planted, current (already the same line), off (the repository declares no
+  driver, or is not a git repository), failed (driver_trouble says why),
+  skipped (--no-driver, this run only) or untracked (a tracker kept out of
+  git - git never merges it, so there is nothing to drive).
 
   --check writes nothing and only answers whether the AGENTS.md block is
   current, stale or missing, and where the merge driver stands. It is

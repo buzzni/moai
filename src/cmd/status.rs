@@ -227,7 +227,8 @@ pub(crate) fn archive_board_unjudged(
     cfg: &crate::config::Config,
     now: &str,
 ) -> report::StatusReport {
-    let mut st = report::status_with_archive_unjudged(rows, &archived.issues, unreadable, cfg, now);
+    // 보드와 옮길 수를 함께 센다 — 문맥이 같으면 묶음 칸을 한 번만 잰다([`crate::archive::board`], moai-r0x8.2kg).
+    let (mut st, movable) = crate::archive::board(rows, unreadable, root.0, archived, cfg, now);
     let live: std::collections::BTreeSet<&str> =
         root.0.iter().map(|i| i.id.as_str()).chain(root.1.iter().filter_map(|u| u.id)).collect();
     let collisions = crate::archive::collisions(&live, archived);
@@ -239,7 +240,6 @@ pub(crate) fn archive_board_unjudged(
         st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
     }
     // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
-    let movable = crate::archive::movable(root.0, archived, cfg, now).len();
     if movable > 0 {
         st.notices.push(report::Warning::archive_pending(movable));
     }
@@ -278,8 +278,19 @@ pub(crate) fn archive_board_unjudged(
 /// `chdir` 은 **부르는 쪽이 그 저장소로 옮겨 와 있지 않은가** 다 — 대는 명령에 `-C` 를 얹을지를
 /// 가른다(`init::away_root`). 훅의 세션은 셸 자리가 이미 그 저장소라 `false` 다.
 pub fn install_notices(repo: &crate::store::Repo, chdir: bool) -> Vec<crate::report::Warning> {
+    install_notices_with(repo, chdir, &crate::cmd::init::agents_state(repo.here()))
+}
+
+/// [`install_notices`] 를 이미 잰 AGENTS.md 상태로. **훅의 첫 보드가 부른다** — 그쪽은 같은 상태로 "사용법은 스킬에
+/// 있다" 한 줄까지 가려서, 저마다 재던 판은 AGENTS.md 를(링크 모드면 `.moai/guide.md` 도) 두 번 읽었다
+/// (moai-8gwh.86j). 상태는 `repo.here()` 의 것이어야 한다.
+pub fn install_notices_with(
+    repo: &crate::store::Repo,
+    chdir: bool,
+    agents: &crate::cmd::init::AgentsState,
+) -> Vec<crate::report::Warning> {
     let mut out = Vec::new();
-    out.extend(crate::cmd::init::agents_notice(repo.here(), chdir));
+    out.extend(crate::cmd::init::agents_notice(agents, repo.here(), chdir));
     out.extend(skills_notice(repo.here(), &repo.config.prefix, chdir));
     out.extend(crate::cmd::init::dotfile_notice(repo.here(), chdir));
     out.extend(crate::cmd::merge_driver::notice(repo, chdir));
