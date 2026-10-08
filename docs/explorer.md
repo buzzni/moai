@@ -237,8 +237,10 @@ user config, stops it asking. It asks the repository releases come from —
 
 When a new release is out, the banner names `moai update`, which upgrades the
 moai you are running in place, and quitting prints it again. Where `moai update`
-cannot run but the installer can (a directory under your home you cannot write),
-quitting prints the installer's line instead.
+refuses only because of the repository setting (a malformed `[update] repo` or
+`MOAI_REPO`, or a user config it cannot read), quitting prints the installer's
+line instead. A directory you cannot write gets no line — the installer cannot
+write there either.
 
 ## When it goes wrong
 

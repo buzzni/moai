@@ -251,7 +251,7 @@ pub fn built_by_cargo(dir: &Path) -> bool {
 ///
 /// **`moai update` 가 서는지는 그 명령이 거절하는 자로 잰다** — 자리는 [`crate::update::refusal`] 로,
 /// 받을 저장소는 부르는 쪽이 `cmd::update::chosen_repo` 로 재어 `repo_ok` 에 싣는다. 안내가 `moai update` 를
-/// 대고 그 명령은 거절하는 판을 안 만든다. 못 서는 자리에는 긴 줄을 그대로 댄다(그 줄도 못 서면 `None`).
+/// 대고 그 명령은 거절하는 판을 안 만든다. 저장소 값 때문에만 못 서면 긴 줄을 댄다 — 자리를 못 쓰면 그 줄도 못 서니 `None` 이다.
 pub fn upgrade_here(repo: &str, repo_ok: bool) -> Option<String> {
     let exe = crate::path::real(&std::env::current_exe().ok()?);
     let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
@@ -269,8 +269,13 @@ pub fn upgrade_for(
     repo_ok: bool,
     writable: impl Fn(&Path) -> bool,
 ) -> Option<String> {
-    if repo_ok && crate::update::refusal(exe, served, writable).is_none() {
+    if repo_ok && crate::update::refusal(exe, served, &writable).is_none() {
         return Some(SELF_UPDATE.to_string());
+    }
+    // **쓸 수 없는 자리에는 긴 줄도 안 댄다**(리뷰 `moai-zsfr.ed1` 7번). 그 줄을 치는 것은 같은
+    // 사용자이고, `install.sh` 도 같은 까닭(`[ -w "$dir" ]`)으로 멈춘다 — 못 서는 줄을 권하지 않는다.
+    if exe.parent().is_some_and(|dir| !writable(dir)) {
+        return None;
     }
     upgrade_line(exe, home, served, repo)
 }
@@ -2350,7 +2355,8 @@ mod tests {
             Some(SELF_UPDATE),
             "집 밖이어도 쓸 수 있으면 moai update 가 선다"
         );
-        assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, no), Some(up.clone()), "쓸 수 없는 자리");
+        assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, no), None, "쓸 수 없는 자리 — install.sh 도 못 쓴다");
+        assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, no), None, "저장소 값이 틀려도 쓸 수 없으면 줄이 없다");
         assert_eq!(
             upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, yes),
             Some(up),

@@ -41,8 +41,9 @@ does not tag — see `CONTRIBUTING.md`.
 
 - **The explorer's new-release banner names `moai update`** where that command
   can run, instead of saying an install line is printed on quitting; quitting
-  prints `moai update` too. The install line is kept where only the installer
-  can upgrade. (moai-zsfr.o3s)
+  prints `moai update` too. The install line is kept where only the repository
+  setting stops `moai update`; a directory you cannot write gets no line.
+  (moai-zsfr.o3s)
 
 ### Fixed
 

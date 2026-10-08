@@ -108,10 +108,11 @@ curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh -s
 ```
 
 When a newer release is out, `moai tui` says so in its header and its banner
-names `moai update`. Where `moai update` cannot run but the installer can — a
-directory under your home you cannot write — quitting prints the install line
-instead, with `--dir` when it is not `~/.local/bin`. A build from source and a
-machine the releases do not cover get no line.
+names `moai update`. Where `moai update` refuses only because of the repository
+setting (a malformed `[update] repo` or `MOAI_REPO`, or a user config it cannot
+read), quitting prints the install line instead, with `--dir` when it is not
+`~/.local/bin`. A build from source, a directory you cannot write and a machine
+the releases do not cover get no line.
 
 Prebuilt binaries are published for `x86_64-unknown-linux-musl` and
 `aarch64-apple-darwin`. On anything else, build from source:
