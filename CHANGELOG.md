@@ -12,6 +12,56 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai update` upgrades the moai you are running.** It fetches `install.sh`
+  from the `main` branch of the repository releases come from and runs it with
+  `--dir <the running binary's directory> --force`, passing `--version <tag>`
+  through; install.sh's output streams and the exit code is sh's. `--dry-run`
+  prints the script's address and the command and touches nothing. It stops
+  before fetching, with one line and the code `not_updatable`, for a binary
+  cargo built, a binary not named `moai`, a directory you cannot write, and a
+  machine the releases do not cover. (moai-zsfr.2p9)
+
+- **`[update] repo = "owner/name"` in your user config picks the repository
+  releases come from** — `buzzni/moai` unless written, and `MOAI_REPO` wins
+  over it. `moai update`, the explorer's version check and the upgrade line all
+  follow it. The repository's `.moai/config.toml` is not read for it. A value
+  that is not `owner/name` is reported, and `moai update` refuses it rather
+  than falling back to `buzzni/moai`. (moai-zsfr.2em)
+
+- **`moai skill status` names a retired skill's directory left in Claude's
+  tree** (`.claude/moai-plugin/skills/`), the way it already did for
+  `.agents/skills/`. One that `moai skill install` would remove comes with
+  that command; one holding a file of yours says it is left as it is. `--json`
+  carries a top-level `leftovers`, always an array. The exit code stays 0.
+  (moai-h64l.2zi)
+
+### Changed
+
+- **The explorer's new-release banner names `moai update`** where that command
+  can run, instead of saying an install line is printed on quitting; quitting
+  prints `moai update` too. The install line is kept where only the repository
+  setting stops `moai update`; a directory you cannot write gets no line.
+  (moai-zsfr.o3s)
+
+### Fixed
+
+- **`moai init` no longer overwrites an AGENTS.md that changed while its
+  screen was open.** It reads the file again just before planting the block;
+  if a person or another session edited (or removed) it meanwhile, nothing is
+  written and one line says to call `moai init` again. (moai-h64l.0hr)
+- **`moai epic show --type issue` (and every kind word with `--type`) is
+  refused** instead of quietly listing the kind word's rows, the same way
+  `--filter type=…` already was. (moai-h64l.tx4)
+- **The hook no longer counts a sibling worktree's stale tracker copy as work
+  held there.** Only what was picked up inside that worktree counts, so a row
+  closed and picked up again at the root is the root session's focus again.
+  (moai-h64l.59m)
+- **A worktree of a bare repository whose directory is named `.git` no longer
+  moves to a main checkout that does not exist.** Whether the repository is
+  bare is asked of git, not read off the directory name. (moai-h64l.wst)
+
 ## [0.10.0] - 2026-10-08
 
 ### Added

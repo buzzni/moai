@@ -1444,7 +1444,8 @@ pub struct App {
     /// 새 판을 묻는 딴 실 — **한 판에 하나만 띄운다.** 손잡이를 드는 것이 그 하나를 세는 자다
     /// ([`crate::latest::spawn`]). 끝에서 기다리지는 않는다.
     latest_job: Option<crate::latest::Job>,
-    /// 도는 이 바이너리를 올리는 한 줄([`crate::latest::upgrade_line`], 리뷰). 새 판이 나왔을 때
+    /// 도는 이 바이너리를 올리는 한 줄([`crate::latest::upgrade_here`], 리뷰) — `moai update` 가 서면 그 명령
+    /// ([`crate::latest::SELF_UPDATE`], moai-zsfr.o3s), 아니면 `install.sh` 의 줄이다. 새 판이 나왔을 때
     /// 배너가 댄다. `None` 이면 그 줄로는 이 바이너리를 못 올린다 — 소스에서 지었거나, 판을 안
     /// 내는 기계거나, 누가 채웠는지 모르는 자리다. 파일 시스템을 보므로 [`App::ask_latest`] 가
     /// 여는 걸음에 한 번 채운다.
@@ -2966,12 +2967,14 @@ impl App {
     ///
     /// **첫 값은 물어보기 전에 선다** — 적어 둔 답([`crate::latest::held`])이라 그물이 없어도
     /// 판 줄이 곧바로 무언가를 말한다.
-    pub fn ask_latest(&mut self, dir: std::path::PathBuf, url: String) {
+    /// `repo` 는 받을 저장소다(moai-zsfr.2em) — 올리는 줄이 그 저장소의 스크립트를 댄다. `repo_ok` 가 거짓이면
+    /// `moai update` 가 그 값을 거절하므로 안내가 그 명령을 안 댄다([`crate::latest::upgrade_for`]).
+    pub fn ask_latest(&mut self, dir: std::path::PathBuf, url: String, repo: &str, repo_ok: bool) {
         if self.latest_job.is_some() {
             return;
         }
         self.latest = crate::latest::held(&dir, &url);
-        self.upgrade = crate::latest::upgrade_here();
+        self.upgrade = crate::latest::upgrade_here(repo, repo_ok);
         let now = self.site.now.clone();
         self.latest_job = crate::latest::spawn(dir, url, now, crate::latest::WINDOW);
     }

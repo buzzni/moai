@@ -1827,9 +1827,19 @@ fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize
     // 창의 배너에서 늘 잘렸고, 앞에 경고가 서면 162칸이 들었다. 배너는 새 판과 나갈 때 줄이
     // 선다는 것만 말하고, 줄은 터미널을 걷은 뒤 셸에 남는다([`App::upgrade_note`]) — 거기서는
     // 잘리지 않고 그대로 복사된다.
-    if let (Some(tag), Some(_)) = (app.latest().newer(), app.upgrade()) {
-        parts.push(fill(say(lang, "tui.banner.upgrade"), &[("tag", tag)]));
-        soft += 1;
+    //
+    // **`moai update` 가 서는 바이너리면 배너가 그 명령을 그대로 댄다**(moai-zsfr.o3s). 열한 칸이라 80칸에서도
+    // 안 잘리고, 나가서 줄을 찾을 까닭이 없다. 나갈 때 글도 그대로 선다 — 같은 명령을 한 번 더 댈 뿐이다.
+    match (app.latest().newer(), app.upgrade()) {
+        (Some(tag), Some(crate::latest::SELF_UPDATE)) => {
+            parts.push(fill(say(lang, "tui.banner.update"), &[("tag", tag)]));
+            soft += 1;
+        }
+        (Some(tag), Some(_)) => {
+            parts.push(fill(say(lang, "tui.banner.upgrade"), &[("tag", tag)]));
+            soft += 1;
+        }
+        _ => {}
     }
     // 급하지 않은 것만 섰으면 `!` 를 안 붙인다 — 담긴 것을 경보처럼 말하면 담을 때마다 무언가
     // 잘못된 줄 안다. 세는 자는 위의 `soft` 하나다(쓰기의 알림·담아 둔 것의 수·새 판으로
@@ -8514,7 +8524,7 @@ pub(super) mod tests {
     #[test]
     fn a_newer_release_says_so_on_the_banner_and_leaves_the_line_for_the_quit() {
         use crate::latest::Seen;
-        let line = format!("{} -s -- --dir /home/u/bin", crate::latest::UPGRADE);
+        let line = format!("{} -s -- --dir /home/u/bin", crate::latest::upgrade_of(crate::latest::DEFAULT_REPO));
         // (배너, 나갈 때 글)
         let both = |seen: Seen, upgrade: Option<&str>| {
             let mut a = app();
@@ -8546,6 +8556,23 @@ pub(super) mod tests {
         assert!(note.is_some_and(|n| n.contains(&line)), "네트워크가 끊겼다고 올리는 줄을 잃었다");
         let (banner, note) = both(Seen::Newer { tag: "v9.9.9".into() }, None);
         assert!(banner.is_empty() && note.is_none(), "그 줄로 못 올리는 바이너리에 올리라고 한다\n{banner}");
+    }
+
+    /// **`moai update` 가 서는 바이너리면 배너가 그 명령을 댄다**(moai-zsfr.o3s). 긴 `curl` 줄은 그 명령이 못
+    /// 서는 자리에만 남는다 — 그때 배너는 여전히 "나갈 때 찍는다" 다.
+    #[test]
+    fn the_banner_names_moai_update_where_it_can_run() {
+        use crate::latest::{SELF_UPDATE, Seen};
+        let mut a = app();
+        a.site.warnings = crate::tui::Surfaced::default();
+        a.set_latest(Seen::Newer { tag: "v9.9.9".into() });
+        a.set_upgrade(Some(SELF_UPDATE.into()));
+        let banner = tests_banner(&mut a);
+        assert!(banner.contains("v9.9.9") && banner.contains(SELF_UPDATE), "배너가 moai update 를 안 댄다\n{banner}");
+        assert!(!banner.contains('!') && !banner.contains("curl"), "{banner}");
+        assert!(banner.chars().count() <= 80, "80칸에서 잘린다 — {}칸\n{banner}", banner.chars().count());
+        let note = a.upgrade_note().expect("나갈 때 글이 없다");
+        assert!(note.contains(&format!("  {SELF_UPDATE}\n")), "나갈 때 글이 moai update 를 안 댄다\n{note}");
     }
 
     /// 갈래 하나짜리 "못 물었다" — `said` 는 화면이 안 쓰므로 비워 둔다.
