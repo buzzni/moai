@@ -439,6 +439,7 @@
   "tui.jot.body_field": "본문 · 여러 줄 · 없어도 된다",
   "tui.jot.discard": " 적던 것을 버릴까 — {yes} 버린다 · 다른 키는 폼으로 돌아간다 ",
   "tui.jot.as_backlog": "백로그 로 담긴다 — 에픽 없이",
+  "tui.banner.archive_unreadable": "아카이브의 못 읽는 줄 {n} — 그 줄 없이 보는 중",
   "tui.banner.let_go": "멈춘 다시 읽기 {n}개를 놓았다 — 그것이 터지면 화면이 걷힌다 · 나갔다 다시 연다",
   "tui.banner.unreadable": "읽을 수 없는 줄 {n}개 — 그 줄은 빠진 채로 보고 있다",
   "tui.banner.upgrade": "새 판 {tag} 이 나왔다 — 올리는 줄은 나갈 때 찍는다",

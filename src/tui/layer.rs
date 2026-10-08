@@ -2609,6 +2609,25 @@ mod tests {
         (one, two, a)
     }
 
+    /// **펼친 줄도 아카이브의 못 읽는 줄 수를 든다**(moai-ug6x.bbh) — 들어간 화면의 배너가 아카이브를 펴면 그 수를
+    /// 댄다. 펼치며 세운 `Site` 는 처음값 0 으로 서므로, 읽은 것(`Fresh`)에서 옮겨 적지 않으면 들어간 첫 화면이
+    /// 말이 없다.
+    #[test]
+    fn an_opened_row_carries_its_unreadable_archive_lines() {
+        let s = Scratch::fenced("layer-archive-unreadable");
+        let (one, _two, mut a) = on_layer_with_twins(&s);
+        let file = crate::archive::path(&one, "2026");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "{\"id\":\"argos-a009\",\"kind\":42}\n").unwrap();
+        let at = a.layer.as_ref().unwrap().position(&one).expect("one 이 층에 있다");
+        a.want_site(at);
+        settle(&mut a);
+        let held = a.layer.as_ref().unwrap().places[at].site.as_ref().expect("펼친 줄이 제 Site 를 든다");
+        assert_eq!(held.unreadable_archive, 1, "펼친 줄이 아카이브의 못 읽는 줄 수를 잃었다");
+        assert_eq!(held.unreadable_live, 0, "아카이브의 못 읽는 줄을 산 줄로 셌다");
+        join_threads(&mut a);
+    }
+
     /// **고른 말은 프로젝트를 오가도 그대로다**(moai-ra67, 리뷰). 말은 화면 하나의 것이라
     /// 어느 프로젝트에 서 있는가와 상관이 없는데, 떠나며 비우는 `Site` 와 펼친 줄에 세우는
     /// `Site` 가 제 처음값을 들고 오던 판은 `0` 한 번에 층도 다음 프로젝트도 몽땅 그 처음값으로

@@ -12,6 +12,13 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **While the archive is shown (`SPC v o`), the explorer's banner names how
+  many lines of the archive files could not be read** and says the view is
+  without them. The line is dimmed — it does not make the banner urgent.
+  (moai-ug6x.bbh)
+
 ### Changed
 
 - **`moai init --json` says `"driver": "untracked"` for a tracker kept out of
@@ -23,6 +30,15 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **In the statistics and wiki windows the arrow, Home/End and PgUp/PgDn keys
+  move with Ctrl or Alt held too**, the same as in the list and as they already
+  did through the `SPC` menu. In the wiki window `←` goes back with Ctrl or Alt
+  held as well. Letter keys stay exact. (moai-ug6x.3ip)
+- **Re-reading the statistics or wiki window (`SPC g s`, `SPC g w` over
+  itself) that fails closes the window and says why**, instead of leaving the
+  old window under the notice. Failing to open the other window (`SPC g s` over
+  the wiki, `SPC g w` over the statistics) leaves the current one as it was —
+  cursor and link trail included — and only says why. (moai-ug6x.hr1)
 - **`moai init` no longer erases the rules it just wrote through an
   `AGENTS.md` link.** With a committed `AGENTS.md -> .gitattributes` the block
   was planted last, over the text read before the rules were appended, so the

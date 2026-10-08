@@ -439,6 +439,7 @@
   "tui.jot.body_field": "body · many lines · may be empty",
   "tui.jot.discard": " throw away what you typed — {yes} throws it away · any other key goes back to the form ",
   "tui.jot.as_backlog": "kept as a backlog item — with no epic",
+  "tui.banner.archive_unreadable": "{n} unreadable archive lines — viewing without them",
   "tui.banner.let_go": "{n} stopped re-reads were let go — if one blows up the screen is torn down · leave and open again",
   "tui.banner.unreadable": "{n} rows could not be read — you are looking at the list without them",
   "tui.banner.upgrade": "{tag} is out — the line that upgrades is printed when you quit",
