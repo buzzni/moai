@@ -269,14 +269,20 @@ if [ "$locked" = 0 ]; then
 다음
   cargo update --workspace                 먼저 Cargo.lock 을 맞추고 자기 줄이 $want 인지 본다
   그 뒤에 커밋하고 태그를 단다 — 릴리스는 \`--locked\` 로 짓는다
+  태그는 develop 끝이 아니라 main 의 머지 커밋에 — 차례는 CONTRIBUTING.md 의 Releasing 에 있다
 NEXT
   exit 0
 fi
 
+# **태그는 develop 끝이 아니라 main 의 머지 커밋에 단다**(moai-ltsv.3qk) — CONTRIBUTING.md 의
+# Releasing 과 같은 차례다. 앞의 판은 커밋 바로 뒤 지금 가지 끝에 태그를 달라고 일러, 그대로
+# 친 사람이 main 에 없는 것을 릴리스로 지었다.
 cat <<NEXT
 
-다음
+다음 — 차례 전체는 CONTRIBUTING.md 의 Releasing 에 있다
   git commit -m "chore(release): $want" -- Cargo.toml Cargo.lock CHANGELOG.md
-  git tag v$want
-  git push && git push origin v$want
+  git push origin develop
+  gh pr create --base main --head develop --title "v$want"    머지한다, squash 하지 않는다
+  git fetch origin && git tag v$want origin/main
+  git push origin v$want
 NEXT

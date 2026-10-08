@@ -145,6 +145,13 @@ pub fn run(ctx: &Ctx, args: MvArgs) -> R<Vec<String>> {
     // argv 에 적힌 그대로를 곁에 둔다 — 파일 이름이면 쓰기가 선 뒤에 알린다(아래).
     let typed = args.msg.clone();
     let msg = super::add::read_msg(args.msg, ctx.lang())?;
+    // **argv 로 비워 준 말도 안 적는다**(moai-ltsv.uqw, 2026-10-08 사용자 결정) — `defer` 와 한 자다.
+    // `-m ''`·`-m "$(cat 없는파일)"` 이 `"note":""` 를 적고 0 으로 끝났고, 이미 그 칸인 줄에는 부를
+    // 때마다 빈 노트가 쌓였다. **아무것도 안 옮긴다** — 빈 말만 걷고 옮기면 닫는 줄을 적으려던 사람이
+    // 그것이 빠진 것을 모른다. 훅 규칙 3 도 빈 `-m` 을 안 적은 것으로 읽어 왔으니 둘이 한 말이다.
+    if msg.as_deref().is_some_and(|m| m.trim().is_empty()) {
+        return Err(Fail::coded(crate::i18n::say(ctx.lang(), "refuse.mv_empty_msg"), super::code::BAD_INPUT));
+    }
 
     // **누구인지는 락 밖에서 묻는다.** `model::actor` 는 `git` 을 두 번 띄운다 — 그것을
     // 락 안에 두면 같은 `.moai` 를 쓰는 옆 세션들이 그 subprocess 만큼 더 기다린다.

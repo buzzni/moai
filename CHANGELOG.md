@@ -27,6 +27,24 @@ does not tag — see `CONTRIBUTING.md`.
   merges an untracked tracker, so there is nothing for a driver to do.
   `skipped` now stands only for `--no-driver` on a committed tracker.
   (moai-8gwh.86j)
+- **A lone `-` where text goes is refused instead of written down.** `moai
+  note <id> - < notes.md` wrote a note that read `-` and dropped what came on
+  stdin, and `moai add -`, `moai backlog add -` and `moai edit <id> --title -`
+  took `-` as the title — all with exit 0. They now exit non-zero with
+  `bad_input`, write nothing, and name the flag that does read stdin: `moai
+  note <id> -b - < <file>`, and for a title, that the body is what takes
+  `-b -`. `--` does not let a lone `-` through. (moai-ltsv.4t0)
+- **`moai mv` refuses an empty `-m`, as `moai defer` already did.** `moai mv
+  <id> done -m ''` — or `-m "$(cat missing-file)"`, or a message of blanks —
+  wrote an empty note and exited 0, and on a row already in that column every
+  call piled up another empty note. It now exits non-zero with `bad_input` and
+  moves nothing; leave `-m` out to move without a message. (moai-ltsv.uqw)
+- **A filter that takes one value, given twice, is refused the way `-s` is.**
+  `--filter grep=one --filter grep=two` searched for `two` alone, and a second
+  `type=` or `stale=` likewise quietly kept the last value — mixing the flag
+  (`-g`, `--type`, `--stale`) with `--filter` too. These now exit non-zero with
+  `bad_filter` and name one value to keep. `moai epic show --filter type=issue`
+  is refused as well, since the namespace already gives the type. (moai-ltsv.auf)
 
 ### Fixed
 

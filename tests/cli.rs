@@ -4915,6 +4915,30 @@ fn filters_reach_the_command_line() {
 
     let e = moai(s.path(), &["show", "-s", "todo", "-s", "review"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("-s todo,review"));
+    // **값 하나만 드는 셋은 두 번째 값을 거절한다**(moai-ltsv.auf) — 한때 뒤의 값이 말없이 앞의 값을 덮었다.
+    // 또는이 없으니 쉼표로 잇지 않고 하나를 남기라고 이른다.
+    for (args, fix) in [
+        (&["show", "--filter", "grep=one", "--filter", "grep=two"][..], "`-g two`"),
+        (&["show", "-g", "a", "--filter", "grep=b"][..], "`-g b`"),
+        (&["show", "--type", "epic", "--filter", "type=issue"][..], "`--type issue`"),
+        (&["show", "--stale", "3", "--filter", "stale=7", "--filter", "stale=9"][..], "`--stale 9`"),
+    ] {
+        let e = moai(s.path(), args);
+        let err = String::from_utf8_lossy(&e.stderr);
+        assert!(!e.status.success() && err.contains(fix), "{args:?} — {err}");
+    }
+    // 종류 낱말이 이미 종류를 고른 자리는 `--type` 을 대지 않는다 — `moai epic show --type issue` 는 말없이 에픽을
+    // 낸다(moai-ltsv.auf 리뷰). 같은 값(`type=epic`)도 "epic 이면서 epic" 이 아니라 이 자리의 말로 거절한다.
+    for args in [
+        &["epic", "show", "--filter", "type=issue"][..],
+        &["show", "epic", "--filter", "type=issue"][..],
+        &["epic", "show", "--filter", "type=epic"][..],
+    ] {
+        let e = moai(s.path(), args);
+        let err = String::from_utf8_lossy(&e.stderr);
+        assert!(!e.status.success() && err.contains("`moai show --type "), "{args:?} — {err}");
+        assert!(!err.contains("이면서 동시에"), "되풀이로 읽었다 — {args:?}: {err}");
+    }
     let e = moai(s.path(), &["show", "--filter", "statu=todo"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("status, tag"));
 }
@@ -8609,6 +8633,48 @@ fn a_single_dash_token_is_a_flag_not_a_title() {
     assert!(moai(s.path(), &["note", &id, "-b", "-x"]).status.success());
 }
 
+/// **자리에 온 `-` 한 글자는 글이 아니다**(moai-ltsv.4t0, 2026-10-08 사용자 결정). `moai note <id> - < f.md`
+/// 가 `-` 라는 노트를 남기고 stdin 을 버린 채 0 으로 끝났다 — `add` 의 제목과 `edit --title` 도 같았다.
+/// 거절하고, 아무것도 안 쓰고, stdin 을 받는 깃발(`-b -`)을 댄다. `--` 로도 안 열린다.
+#[test]
+fn a_lone_dash_in_a_text_place_is_refused() {
+    let s = init("lonedash");
+    let id = add(s.path(), &["평범한 제목"]);
+    let (snap, log) = (issues(s.path()), journal(s.path()));
+    let calls: [&[&str]; 8] = [
+        &["note", &id, "-"],
+        &["note", &id, " - "],
+        &["note", &id, "--", "-"],
+        &["add", "-"],
+        &["add", "--", "-"],
+        &["backlog", "add", "-"],
+        &["edit", &id, "--title", "-"],
+        &["edit", &id, "--title=-"],
+    ];
+    for argv in calls {
+        let out = from_stdin(s.path(), argv, "stdin 에 부은 글\n");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{argv:?}: {err}");
+        assert!(err.contains("-b - <"), "stdin 을 받는 길을 안 댔다 — {argv:?}: {err}");
+        assert_eq!(issues(s.path()), snap, "거부해 놓고 썼다 — {argv:?}");
+        assert_eq!(journal(s.path()), log, "거부해 놓고 저널에 적었다 — {argv:?}");
+    }
+    // 노트의 길은 그 id 를 댄 채로, 제목의 길은 부른 동사로 댄다.
+    let err = |argv: &[&str]| String::from_utf8_lossy(&moai(s.path(), argv).stderr).into_owned();
+    assert!(err(&["note", &id, "-"]).contains(&format!("moai note {id} -b - <")));
+    assert!(err(&["backlog", "add", "-"]).contains("moai backlog add '"));
+    assert!(err(&["edit", &id, "--title", "-"]).contains(&format!("moai edit {id} -b - <")));
+    let out = moai(s.path(), &["note", &id, "-", "--json"]);
+    assert!(String::from_utf8_lossy(&out.stderr).contains(r#""code":"bad_input""#));
+
+    // 말한 길은 실제로 stdin 을 받는다 — 그리고 `-` 가 든 글은 그대로 받는다.
+    let out = from_stdin(s.path(), &["note", &id, "-b", "-"], "부은 글\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(journal(s.path()).contains("부은 글"));
+    assert!(moai(s.path(), &["note", &id, "- 목록 한 줄"]).status.success());
+    assert!(moai(s.path(), &["add", "-q", "a - b"]).status.success());
+}
+
 /// 본문을 stdin 으로 준다고 하고 아무것도 안 온 판은 한 줄로 말한다(moai-pp9i.kj2). 막지는 않는다 —
 /// 2026-09-29 사람이 정했다. `add`·`add --from`·`edit` 셋이 같은 말을 한다.
 #[test]
@@ -8869,6 +8935,34 @@ fn mv_says_what_is_missing() {
 
     // 그리고 `-m` 이 가운데 있어도 읽는다
     assert!(ok(s.path(), &["mv", &id, "-m", "메모", "review"]).contains("todo → review"));
+}
+
+/// **argv 로 비워 준 `-m` 도 거절하고 아무것도 안 옮긴다**(moai-ltsv.uqw, 2026-10-08 사용자 결정) — `defer` 와
+/// 한 자다. `mv X done -m ''` 이 `"note":""` 를 적고 0 으로 끝났고, 이미 그 칸인 줄에는 빈 노트가 쌓였다.
+#[test]
+fn mv_refuses_a_blank_message_and_moves_nothing() {
+    let s = init("mv-blank-msg");
+    let id = add(s.path(), &["제목"]);
+    ok(s.path(), &["mv", &id, "review"]);
+    let (before, notes) = (issues(s.path()), journal(s.path()));
+    // 옮길 줄과 이미 그 칸인 줄 둘 다 — 뒤의 것이 빈 노트를 쌓던 갈래다.
+    for to in ["done", "review"] {
+        for blank in ["", "   ", "\n\t"] {
+            let out = moai(s.path(), &["mv", &id, to, "-m", blank, "--json"]);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{to} {blank:?}: {err}");
+            assert!(err.contains(r#""code":"bad_input""#), "{to} {blank:?}: {err}");
+        }
+    }
+    assert_eq!(issues(s.path()), before, "빈 `-m` 으로 옮겼다");
+    assert_eq!(journal(s.path()), notes, "빈 `-m` 이 저널에 남았다");
+    assert!(!journal(s.path()).contains(r#""note":"""#));
+    // 사람 화면은 `-m` 을 빼는 길을 댄다.
+    let err = String::from_utf8_lossy(&moai(s.path(), &["mv", &id, "done", "-m", ""]).stderr).into_owned();
+    assert!(err.contains("-m"), "{err}");
+
+    // `-m` 을 빼면 그대로 옮긴다.
+    ok(s.path(), &["mv", &id, "done"]);
 }
 
 /// **`mv -m -` 는 stdin 을 읽는다**(moai-m1za) — 글자 그대로 받던 판은 `moai mv <리뷰> done -m - < 파일` 의
@@ -10437,26 +10531,15 @@ fn bare_moai_inside_names_a_broken_repo_config() {
 
 // ── 누가 하는가 ───────────────────────────────────────────────────────
 
-/// `MOAI_ACTOR` 를 걷고 git 이 읽을 설정을 통째로 지정해 돌린다. moai 는 git
-/// 저장소를 요구하지 않으므로 전역·시스템 설정까지 막아야 사람을 못 찾는
-/// 상황을 실제로 만들 수 있다.
-fn with_git_config(dir: &Path, cfg: &str, args: &[&str]) -> Output {
-    isolated(BIN)
-        .args(args)
-        .current_dir(dir)
-        .env_remove("MOAI_ACTOR")
-        .env("GIT_CONFIG_GLOBAL", cfg)
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("MOAI_NOW", NOW)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap()
-}
-
-/// 아무 데서도 사람을 못 찾는 자리.
+/// 아무 데서도 사람을 못 찾는 자리 — `MOAI_ACTOR` 를 걷고 돌린다.
+///
+/// **사람이 없는 것은 [`isolated`] 의 빈 집과 git 저장소가 아닌 자리 덕이다.** git 이 읽을 설정을 파일로
+/// 돌리는 길(`GIT_CONFIG_GLOBAL`)은 여기서 못 쓴다 — moai 가 사람을 묻기 전에 그 변수를 걷는다
+/// (`git_leaks::REPO`, moai-ztdf). 한때 그 변수로 설정 파일을 대던 도우미가 있었는데, 그 파일은 한 번도
+/// 안 읽혀 그것을 쓴 시험이 사람이 없는 판만 쟀다(moai-ltsv.y10). 사람을 주려면 그 프로젝트의 git 설정에
+/// 적는다 — [`an_email_with_brackets_still_owns_its_rows`] 가 그 꼴이다.
 fn without_user(dir: &Path, args: &[&str]) -> Output {
-    with_git_config(dir, "/dev/null", args)
+    staged(args).env_remove("MOAI_ACTOR").current_dir(dir).output().unwrap()
 }
 
 /// 이름만으로는 같은 이름이 둘일 때 갈라지지 않는다. 저널에 메일까지 남는다.
@@ -10535,11 +10618,20 @@ fn with_no_user_anywhere_it_says_what_to_set() {
 #[test]
 fn a_malformed_git_identity_is_refused_too() {
     let s = init("badgit");
-    let cfg = s.path().join("gitconfig");
-    std::fs::write(&cfg, "[user]\n\tname = 레이븐\n\temail = raven\n").unwrap();
-    let out = with_git_config(s.path(), cfg.to_str().unwrap(), &["add", "제목"]);
+    // 사람은 그 프로젝트의 git 설정에서 온다 — 전역 설정을 돌리는 변수는 moai 가 걷는다(`git_leaks`). 그 변수로
+    // 설정을 대던 판은 이 값이 한 번도 안 읽혀 "사람이 없다" 로 거절되고도 초록이었다(moai-ltsv.y10) — 두 거절문이
+    // 다 `git config user.email` 을 대기 때문이다. 그래서 잡는 글은 모양이 어긋났을 때만 서는 것이다.
+    git(s.path(), &["init", "-q"]);
+    git(s.path(), &["config", "user.name", "레이븐"]);
+    git(s.path(), &["config", "user.email", "raven"]);
+    let out = staged(&["add", "제목"]).env_remove("MOAI_ACTOR").current_dir(s.path()).output().unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("쓸 수 없는 모양이다") && err.contains("레이븐"),
+        "모양이 아니라 다른 까닭으로 거절했다\n{err}"
+    );
+    assert!(!err.contains("누가 하는지 모른다"), "사람이 없는 판으로 읽었다\n{err}");
     assert!(err.contains("git config user.email"), "{err}");
     assert_eq!(issues(s.path()).lines().count(), 0, "거절했는데 줄이 남았다");
 }
@@ -23342,8 +23434,10 @@ fn bumping_moves_the_lock_line_with_the_manifest() {
     assert!(after.contains("name = \"moai\"\nversion = \"0.2.0\"\n"), "Cargo.lock 의 자기 줄을 안 움직였다\n{after}");
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(said.contains("자기 줄을 0.2.0 로 다시 적었다"), "움직인 것을 안 댔다\n{}", text(&out));
-    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다.
-    assert!(said.contains("git tag v0.2.0"), "태그 자리를 안 댔다\n{}", text(&out));
+    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다 — develop 끝이 아니라 main 의 머지 커밋에
+    // (moai-ltsv.3qk, CONTRIBUTING.md 의 Releasing).
+    assert!(said.contains("git tag v0.2.0 origin/main"), "태그 자리를 main 에 안 댔다\n{}", text(&out));
+    assert!(!said.contains("git push && git push origin"), "develop 끝에 단 태그를 밀라고 했다\n{}", text(&out));
 }
 
 /// **작은따옴표 `Cargo.toml` 도 읽고 고친다**(moai-kyp7.269). TOML 의 literal string 이라 cargo 는

@@ -3682,7 +3682,16 @@ pub fn bad_filter_on(lang: Lang, why: &crate::query::BadFilter, on: Surface) -> 
                 Once::Milestone => fill(say(lang, "refuse.filter_twice_milestone"), &v),
                 Once::Parent => fill(say(lang, "refuse.filter_twice_parent"), &v),
                 Once::Priority => fill(say(lang, "refuse.filter_twice_priority"), &v),
+                Once::Grep => fill(say(lang, "refuse.filter_twice_grep"), &v),
+                Once::Kind => fill(say(lang, "refuse.filter_twice_type"), &v),
+                Once::Stale => fill(say(lang, "refuse.filter_twice_stale"), &v),
             };
+            // **또는이 없는 거르개는 쉼표로 잇지 않는다**(moai-ltsv.auf) — `type=epic,issue` 는 다시 거절되고
+            // `grep=a,b` 는 쉼표가 든 글을 찾는다. 하나만 남기라고 이르고, 마지막 값(덮어쓰던 판이 고르던 것)을 댄다.
+            if !field.joins() {
+                let last = rest.last().unwrap_or(b);
+                return two(head, fill(say(lang, "refuse.filter_once_how"), &[("fix", &on.spell(*field, last))]));
+            }
             // 고칠 글은 준 값을 다 잇는다 — 말(`{a}`·`{b}`)은 앞의 둘로 서지만, 셋째를 빼면 그대로 친 사람이 그 줄을 잃는다.
             let all = [a, b].into_iter().chain(rest).map(String::as_str).collect::<Vec<_>>().join(",");
             let fix = on.spell(*field, &all);
@@ -4070,6 +4079,9 @@ mod tests {
             twice(Once::Milestone),
             twice(Once::Parent),
             twice(Once::Priority),
+            twice(Once::Grep),
+            twice(Once::Kind),
+            twice(Once::Stale),
             BadFilter::DoneOutside { asked: "review".into() },
             BadFilter::Endless("..".into()),
             BadFilter::Backwards("2026-09-03..2026-09-02".into()),
@@ -4105,6 +4117,18 @@ mod tests {
             assert!(pairs.starts_with(&format!("the {noun} cannot be")), "{field:?} — {pairs}");
             assert!(pairs.contains(&format!("`{noun}=todo,review`")), "{field:?} — {pairs}");
             assert!(!pairs.contains(&format!("{flag} ")), "거름망에 CLI 꼴을 댔다 — {pairs}");
+        }
+        // **또는이 없는 셋은 쉼표로 잇지 않는다**(moai-ltsv.auf) — `--type epic,issue` 를 대면 그대로 친 사람이 또
+        // 거절되고, `-g a,b` 는 쉼표가 든 글을 찾는다. 하나만 남기라고 이르고 마지막 값을 댄다.
+        for (field, flag) in [(Once::Grep, "-g"), (Once::Kind, "--type"), (Once::Stale, "--stale")] {
+            let three = BadFilter::Twice { field, a: "1".into(), b: "2".into(), rest: vec!["3".into()] };
+            for lang in [Lang::En, Lang::Ko] {
+                let said = bad_filter(lang, &three);
+                assert!(said.contains(&format!("`{flag} 3`")), "{lang:?} {field:?} — {said}");
+                assert!(!said.contains("1,2") && !said.contains("2,3"), "{lang:?} 쉼표로 이었다 — {said}");
+                let pairs = bad_filter_on(lang, &three, Surface::Pairs);
+                assert!(pairs.contains(&format!("`{}=3`", field.key())), "{lang:?} {field:?} — {pairs}");
+            }
         }
         // `--done` 과 `-s` 를 박아 넣던 갈래도 표면을 따른다.
         let outside = BadFilter::DoneOutside { asked: "review".into() };
