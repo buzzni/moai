@@ -48,11 +48,10 @@ use std::path::{Path, PathBuf};
 /// `PreCompact` 가 없다. 훅은 돌았고 id 도 옳게 골랐지만 한 줄도 안 붙었고,
 /// stdout 만 보던 시험은 초록이었다.
 ///
-/// **뒤의 셋은 `Stop` 없이 끝난 턴이다**(moai-u5wr.f29) — 출석을 `idle` 로 적던 자리였고, 출석을 걷은 뒤로
-/// 아무것도 안 한다(moai-5uwh.yhx). `skill install` 도 더는 안 건다(moai-5uwh.e9j) — 하위명령은 옛 판이 심은 훅이
-/// 부르는 동안만 빈 명령으로 남는다(`cmd::hook` 의 `decide`). Antigravity 의 실패한 `Stop` 은 안에서 `StopFailure` 로
-/// 옮긴다(`cmd::hook` 의 `from_antigravity`). 벤더의 이름을 그대로 쓴다 — 심은 설정을 읽는 사람이 어느 이벤트가
-/// 어느 것인지 맞춰 볼 수 있게.
+/// **`Stop` 없이 끝난 턴의 셋(`StopFailure`·`Interrupt`·`SessionEnd`)은 없다**(moai-9s9s.vzn) — 출석을 적던 자리였고
+/// 출석을 걷었다(moai-5uwh.yhx). 0.9 는 빈 하위명령으로 한 판 남겼고 이 판에 지웠다 — 0.9 전에 심은 훅은 clap 의 오류를
+/// 내고, `skill install` 이 다시 심어 걷는다. Antigravity 의 실패한 `Stop` 은 판정할 것이 없는 부름이다(`cmd::hook` 의
+/// `from_antigravity`). 벤더의 이름을 그대로 쓴다 — 심은 설정을 읽는 사람이 어느 이벤트가 어느 것인지 맞춰 볼 수 있게.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Event {
     // **`hook --help` 의 이벤트 목록이 이 글을 옮겨 적는다**(moai-h0r2) — clap 이 붙이는 값 목록은
@@ -65,12 +64,6 @@ pub enum Event {
     PreToolUse,
     /// The turn ends. Checks the state
     Stop,
-    /// Kept for hooks planted before 0.9; does nothing
-    StopFailure,
-    /// Kept for hooks planted before 0.9; does nothing
-    Interrupt,
-    /// Kept for hooks planted before 0.9; does nothing
-    SessionEnd,
 }
 
 impl Event {
@@ -81,9 +74,6 @@ impl Event {
             Event::UserPromptSubmit => "UserPromptSubmit",
             Event::PreToolUse => "PreToolUse",
             Event::Stop => "Stop",
-            Event::StopFailure => "StopFailure",
-            Event::Interrupt => "Interrupt",
-            Event::SessionEnd => "SessionEnd",
         }
     }
 }
@@ -278,10 +268,8 @@ impl Carry {
     ///   다 섰다). agy 1.2.16 은 영문이 섞인 편지 UTF-16 9,665·9,874 단위(UTF-8 21KB 남짓), agy 1.2.17 은 **한글로만
     ///   채운** 편지 UTF-16 9,822·10,024 단위(UTF-8 28.2·28.4KB)다. 칸은 UTF-16 으로 세므로 바이트로 가장 큰 편지가 이
     ///   꼴이다 — agy 의 선이 Codex 처럼 바이트로 서 있다면 여기서 드러났다(리뷰 moai-jzym.a9k). 그 위의 선은 안 쟀다
-    /// - **`Stop` 없이 끝난 턴의 셋은 칸이 없다** — 아무것도 안 한다. 실을 글이 없어서다 — 에이전트가 그 출력을 안
-    ///   읽어서가 아니다(리뷰 moai-dp35.gag). Antigravity 의 `StopFailure` 는 오류로 끝난 실행의 `Stop` 이라 agy 가 그 답을
-    ///   읽는다 — 붙들면 실패하는 백엔드에 글을 도로 밀어 넣는다(`cmd::hook` 의 `from_antigravity`, 리뷰 moai-u5wr.e74).
-    ///   Codex 의 `Interrupt` 도 `systemMessage` 하나는 읽는다
+    /// - **Antigravity 의 오류로 끝난 실행의 `Stop` 은 이 표에 안 온다** — 판정할 것이 없는 부름이라 답이 없다. 붙들면
+    ///   실패하는 백엔드에 글을 도로 밀어 넣는다(`cmd::hook` 의 `from_antigravity`, 리뷰 moai-u5wr.e74)
     pub fn of(dialect: crate::cli::Dialect, event: Event) -> Carry {
         use crate::cli::Dialect::{Antigravity, Claude, Codex};
         match (event, dialect) {
@@ -292,7 +280,6 @@ impl Carry {
             (Event::PreToolUse, Antigravity) => Carry::Nothing,
             (Event::Stop, Codex) => Carry::Hold(CODEX_HOLD),
             (Event::Stop, Claude | Antigravity) => Carry::Hold(Room::CONTEXT),
-            (Event::StopFailure | Event::Interrupt | Event::SessionEnd, Claude | Codex | Antigravity) => Carry::Nothing,
         }
     }
 

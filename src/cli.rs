@@ -733,9 +733,6 @@ BACKLOG
     user-prompt-submit  A person asked. Loads the board once
     pre-tool-use        Just before a tool call. The rules stand here
     stop                The turn ends. Checks the state
-    stop-failure        Kept for hooks planted before 0.9; does nothing
-    interrupt           Kept for hooks planted before 0.9; does nothing
-    session-end         Kept for hooks planted before 0.9; does nothing
 
   --dialect says which agent's shapes come in and go out: claude (the
   default), codex or antigravity. The rules are the same for all three.
