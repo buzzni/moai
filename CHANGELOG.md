@@ -39,6 +39,12 @@ does not tag — see `CONTRIBUTING.md`.
   wrote an empty note and exited 0, and on a row already in that column every
   call piled up another empty note. It now exits non-zero with `bad_input` and
   moves nothing; leave `-m` out to move without a message. (moai-ltsv.uqw)
+- **A filter that takes one value, given twice, is refused the way `-s` is.**
+  `--filter grep=one --filter grep=two` searched for `two` alone, and a second
+  `type=` or `stale=` likewise quietly kept the last value — mixing the flag
+  (`-g`, `--type`, `--stale`) with `--filter` too. These now exit non-zero with
+  `bad_input` and name one value to keep. `moai epic show --filter type=issue`
+  is refused as well, since the namespace already gives the type. (moai-ltsv.auf)
 
 ### Fixed
 
