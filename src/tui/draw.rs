@@ -8598,7 +8598,7 @@ pub(super) mod tests {
         assert_eq!(near, format!("{mine} · latest not checked (no network) · v0.3.0 seen today"));
         // 까닭마다 글이 갈리던 것(moai-580l)은 그대로다 — 지난 답은 그 뒤에 붙을 뿐이다.
         let limited = line(stale(Trouble::RateLimited, "v0.3.0", heard), "2026-09-21T09:00:00Z");
-        assert!(limited.starts_with(&format!("{mine} · latest not checked (rate limited) · ")), "{limited}");
+        assert!(limited.starts_with(&format!("{mine} · latest not checked (throttled) · ")), "{limited}");
         // 처음 — 지난 답이 없으면 번호를 안 댄다.
         assert_eq!(
             line(unasked_for(Trouble::NotAsked), "2026-09-21T09:00:00Z"),
