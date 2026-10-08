@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-08
+
 ### Added
 
 - **While the archive is shown (`SPC v o`), the explorer's banner names how
