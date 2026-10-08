@@ -86,6 +86,11 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Fixed
 
+- **A milestone branch's worktree (`milestone/<id>`) is no longer read as a
+  place where work stands.** Its stale snapshot no longer hides stranded rows
+  from `moai status` and `moai show`, `--worktree` no longer overlays it, and
+  the hook no longer counts its rows as held elsewhere. It is told by its
+  branch, not its directory. (moai-nvju.ztj)
 - **A checkout with CRLF line endings (`core.autocrlf`) no longer reads the
   planted skills as stale** — the `skills_stale` notice and `moai skill status`
   now compare the way the install does. (moai-9s9s.x3n)
