@@ -3417,21 +3417,66 @@ pub fn look_trouble(lang: Lang, why: &crate::user_config::LookTrouble) -> String
     }
 }
 
-/// `[update] check` 를 읽다 만난 한 줄([`crate::user_config::UpdateTrouble`], moai-d74q).
+/// `[update]` 를 읽다 만난 한 줄([`crate::user_config::UpdateTrouble`], moai-d74q · moai-zsfr.2em).
 ///
 /// **보기 설정과 같은 글을 쓴다** — 물음이 같기 때문이다("이 자리에 저 모양이 서야 하는데 이것이
 /// 섰다"). 말묶음에 같은 뜻의 키를 한 벌 더 두면 옮기는 사람이 둘을 따로 옮기고, 그러다
 /// 한쪽만 고쳐진다.
 pub fn update_trouble(lang: Lang, why: &crate::user_config::UpdateTrouble) -> String {
-    use crate::latest::{CHECK, UPDATE};
+    use crate::latest::{CHECK, REPO, UPDATE};
     use crate::user_config::UpdateTrouble;
+    let want = |key: &str, want: &str, found: &str| {
+        fill(say(lang, "look.want"), &[("key", &format!("{UPDATE}.{key}")), ("want", want), ("found", found)])
+    };
     match why {
         UpdateTrouble::NotATable { found } => fill(say(lang, "look.not_a_table"), &[("key", UPDATE), ("found", found)]),
-        UpdateTrouble::NotABool { found } => fill(
-            say(lang, "look.want"),
-            &[("key", &format!("{UPDATE}.{CHECK}")), ("want", say(lang, "look.want_bool")), ("found", found)],
-        ),
+        UpdateTrouble::NotABool { found } => want(CHECK, say(lang, "look.want_bool"), found),
+        UpdateTrouble::RepoNotAWord { found } => want(REPO, say(lang, "look.want_word"), found),
+        // 적힌 값은 따옴표로 싸 댄다 — 빈 글이나 공백이 든 값도 화면에서 보이게.
+        UpdateTrouble::BadRepo { raw } => want(REPO, say(lang, "look.want_repo"), &format!("{raw:?}")),
     }
+}
+
+/// `moai update` 가 못 올리는 까닭 한 줄([`crate::update::Refusal`], moai-zsfr.2p9). **고칠 길을 함께 댄다** —
+/// 이 거절은 그물을 타기 전에 서는 것이라, 사람이 할 일이 이 줄 말고는 어디에도 없다.
+pub fn update_refused(lang: Lang, why: &crate::update::Refusal) -> String {
+    use crate::update::Refusal;
+    match why {
+        Refusal::NotServed => say(lang, "update.refuse.not_served").to_string(),
+        Refusal::NotNamedMoai { name } => fill(say(lang, "update.refuse.not_named"), &[("name", name)]),
+        Refusal::BuiltByCargo { dir } => fill(say(lang, "update.refuse.cargo"), &[("dir", &dir.display().to_string())]),
+        Refusal::NotWritable { dir } => {
+            fill(say(lang, "update.refuse.unwritable"), &[("dir", &dir.display().to_string())])
+        }
+    }
+}
+
+/// `MOAI_REPO` 에 적힌 꼴이 아닌 값(moai-zsfr.2p9). 값은 따옴표로 싸 댄다 — 빈 칸이 든 값도 보이게.
+pub fn bad_repo_env(lang: Lang, why: &crate::latest::BadRepo) -> String {
+    fill(say(lang, "update.bad_repo_env"), &[("raw", &format!("{:?}", why.raw))])
+}
+
+/// 사용자 설정의 꼴이 아닌 `[update] repo`(moai-zsfr.2p9) — 탐색기 알림과 **같은 글**에 거절의 꼬리를 단다.
+pub fn bad_repo_config(
+    lang: Lang,
+    reg: &crate::user_config::Registry,
+    why: &crate::user_config::UpdateTrouble,
+) -> String {
+    let said = update_trouble(lang, why);
+    let said = match reg.path.as_deref() {
+        Some(at) => format!("{}: {said}", at.display()),
+        None => said,
+    };
+    fill(say(lang, "update.bad_repo_config"), &[("said", &said)])
+}
+
+/// `moai update --dry-run` 의 두 줄(moai-zsfr.2p9) — 받을 자리와 돌릴 명령. 돌릴 명령은 셸에 그대로 칠 수
+/// 있는 꼴이다([`crate::update::Plan::line`]).
+pub fn update_dry(lang: Lang, plan: &crate::update::Plan) -> Vec<String> {
+    vec![
+        fill(say(lang, "update.dry_fetch"), &[("url", &plan.script)]),
+        fill(say(lang, "update.dry_run"), &[("line", &plan.line())]),
+    ]
 }
 
 /// 시간대를 풀다 만난 한 줄([`crate::tz::Trouble`], moai-77ap).
