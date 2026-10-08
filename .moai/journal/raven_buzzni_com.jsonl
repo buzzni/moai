@@ -5672,3 +5672,12 @@
 {"ts":"2026-10-08T02:35:42Z","id":"moai-ug6x.pi3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-08T02:35:42Z","id":"moai-ug6x.tde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·2·3·4 를 4f42f6ba 로 들였다. 5(빈 아카이브도 나눠 쓰기)는 규칙을 바꾸고 이득이 작아 안 한다. 6 은 cmd/mod.rs 를 moai-ltsv 가 쥐어 moai-dgt7 로 넘겼다. 7 은 CLI 시험이 덮어 둔다. 남은 stands 두 번 셈은 moai-qbgs"}
 {"ts":"2026-10-08T02:35:46Z","id":"moai-ug6x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 일곱 다 닫혔다(397d5aee 머지). 남은 것은 backlog 둘 — moai-qbgs(나눠 쓰는 길에서 stands 두 번 셈), moai-dgt7(--worktree 읽기가 gather 루트 사본을 버림, cmd/mod.rs 를 쥔 moai-ltsv 뒤)"}
+{"ts":"2026-10-08T02:38:09Z","id":"moai-9s9s.ctx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided by the person (2026-10-08): line-head note markers. The supervisor notes `Sent: <worker>` on a backlog item it sends, and `Report-checked:` on the epic once it has checked a report. Skill text only, no field; restart reads only notes that open with the marker."}
+{"ts":"2026-10-08T02:38:09Z","id":"moai-9s9s.ctx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T02:38:09Z","id":"moai-9s9s.hs8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T02:38:09Z","id":"moai-9s9s.qmd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T02:38:09Z","id":"moai-9s9s.v0y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T02:38:09Z","id":"moai-9s9s.vzn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T02:38:10Z","id":"moai-9s9s.x3n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T02:38:10Z","id":"moai-9s9s.89e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress","note":"레이븐 (raven@buzzni.com) said yes in this window, 2026-10-08"}
+{"ts":"2026-10-08T02:38:10Z","id":"moai-9s9s.89e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Taken-over: minyoung.go (hedone21@gmail.com)"}
