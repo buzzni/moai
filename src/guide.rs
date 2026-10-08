@@ -4404,7 +4404,10 @@ stop sending outside work while a release runs",
         }
         // 루트의 대조는 루트의 가지와 견준다 — 마일스톤 가지는 루트가 설 수 없는 가지다.
         assert!(BRANCH_CHECK.contains("refs/heads/<root branch>"), "루트를 바탕 가지와 견준다");
-        assert!(brief.contains("**Nor is the branch rebased or squashed when it merges**"), "rebase·squash 금지가 없다");
+        assert!(
+            brief.contains("**Nor is the branch rebased or squashed when it merges**"),
+            "rebase·squash 금지가 없다"
+        );
     }
 
     /// **일꾼에게 싣는 글은 가지 이름을 박지 않는다.** `main` 을 박으면 `develop`·`trunk`
