@@ -5874,3 +5874,7 @@
 {"ts":"2026-10-08T11:42:44Z","id":"moai-zsfr.ed1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받아들임: 9건 전부 — 1~6·8·9 는 리뷰가 고쳐 fix 커밋, 7(쓸 수 없는 자리의 설치 줄)은 이 창이 줄을 안 내도록 고쳐 따로 fix 커밋. 넘긴 것 없음"}
 {"ts":"2026-10-08T11:42:45Z","id":"moai-zsfr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 없음 — milestone/moai-jv0i 에 37571b3e 로 머지, 멤버 넷과 리뷰 moai-zsfr.ed1 닫음. 릴리스 때 develop 으로 간다"}
 {"ts":"2026-10-08T11:43:03Z","id":"moai-zsfr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 37571b3e"}
+{"ts":"2026-10-08T12:45:31Z","id":"moai-1po5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"milestone/moai-jv0i 의 cargo fmt 차이 (latest.rs 시험)"}
+{"ts":"2026-10-08T12:45:32Z","id":"moai-1po5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T12:45:52Z","id":"moai-1po5","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — cargo fmt only, supervisor window)"}
+{"ts":"2026-10-08T12:45:52Z","id":"moai-1po5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
