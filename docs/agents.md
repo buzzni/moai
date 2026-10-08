@@ -312,8 +312,8 @@ and Antigravity have no supervisor; their sessions pick their own work with
    from which step to follow it. The worker is a session of the same repository
    and loaded the same plugin, so the file is there for it. The lines after that
    fill this assignment — the backlog, the model and difficulty picked for it,
-   the work running alongside, the base branch, the milestone, the root and
-   whether the person is away. The supervisor
+   the work running alongside, the root branch and the base branch, the
+   milestone, the root and whether the person is away. The supervisor
    sends it with `notify_when_idle` and waits for the report; it does not poll
    `ListAgents`
 4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
@@ -324,7 +324,7 @@ and Antigravity have no supervisor; their sessions pick their own work with
    leaves the report as a `report:` note on the epic, and a supervisor that
    starts or resumes reads those before it waits. Then it tells its person whether the window can be
    cleared now, and ends its turn; the next message wakes it
-5. **The supervisor checks the report** — the merge is on the base branch, the
+5. **The supervisor checks the report** — the merge is on that work's base branch, the
    epic is done, the worktree is gone — and sends the next backlog item
 
 **The review runs inside the worker's own session.** It never starts another
@@ -355,6 +355,19 @@ it — nor because its name is gone, since a worker restarted with
 `claude --resume` comes back under a new session name. In both cases the
 supervisor waits for the person to say that window has ended. Whether stalled
 work is carried on or put down is the person's call.
+
+**Work inside a milestone has a branch of its own** (moai-nvju). The base
+branch the message carries is the root branch for work outside every milestone,
+and `milestone/<milestone id>` for work inside a live one — even one that has
+not started running yet. That branch is checked out in a long-lived worktree,
+`.worktrees/milestone-<milestone id>`, which the worker handed the milestone's
+first epic raises from the root branch when it is missing. Each epic branches
+from it and merges into it — the worker runs that merge, and the `branch -d`
+after it, from the root as `git -C .worktrees/milestone-<milestone id> …` — and
+the supervisor checks a report's merge on that branch, not on the root branch.
+The root branch takes the milestone branch in once, at the release; until then
+a milestone's finished work does not stand on the root branch. Branches go in
+with `git merge --no-ff` as they stand, never rebased or squashed.
 
 **When the person steps away**, they tell the supervisor, and its messages say
 `Person: away`. The worker then settles a design question by its own

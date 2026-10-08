@@ -30,7 +30,8 @@ The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
 They stand in a file of the supervisor skill, `references/worker.md`. Each
 assignment message carries the lines for this assignment — the backlog, the
-model, the work running alongside, the base branch, the milestone, the root and
+model, the work running alongside, the root branch and the base branch (a
+[milestone branch](#milestone-branch) for work inside a milestone), the milestone, the root and
 whether the person is away — and one line telling the worker to read that file,
 by its absolute path, and from which step to follow it.
 
@@ -119,6 +120,16 @@ closing by itself.
 A [group](#group) that carries dates — `--start` and `--due` — and is usually a
 release. A deadline that has passed or falls due soon is one [warning](#warning)
 line, nothing more. See [running milestone](#running-milestone).
+
+## Milestone branch
+
+`milestone/<milestone id>` — the branch a [milestone](#milestone)'s work
+branches from and merges into when a [supervisor](#supervisor) hands it out,
+checked out in a long-lived [worktree](#worktree) at
+`.worktrees/milestone-<milestone id>`. The [worker](#worker) handed the
+milestone's first epic raises it from the root branch; the root branch takes it
+in once, at the release, and then it is removed. Work outside every milestone
+uses the root branch. See [handing work to idle sessions](agents.md#hand-work-to-idle-sessions).
 
 ## Model line
 
