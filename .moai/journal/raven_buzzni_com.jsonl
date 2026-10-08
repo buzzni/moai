@@ -5734,3 +5734,8 @@
 {"ts":"2026-10-08T05:53:45Z","id":"moai-muit.ido","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in 8 of 9 findings: the as_opened doc comment, one old_look for the six copies, comments/help/wiki/CHANGELOG brought to the new default, and a test that a [tui] without hide_deferred keeps it. The 9th (SPC v 4 in CHANGELOG) I took in myself. Nothing handed on."}
 {"ts":"2026-10-08T05:53:45Z","id":"moai-muit","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: none — merged in 01d4d6c4; members tut, esvv and review ido closed."}
 {"ts":"2026-10-08T06:54:15Z","id":"moai-nvju","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-29"}
+{"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.2e6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.yc2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.qgs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.ztj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.qhy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
