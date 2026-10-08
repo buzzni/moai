@@ -25,7 +25,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find(|| ctx.lang())? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, origin, trouble, unfound, swept, sides, mine, .. } =
+    let crate::worktree::Gathered { load, root, origin, trouble, unfound, swept, sides, mine, .. } =
         super::gather(ctx, &repo, worktree)?;
     // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
     let trouble = trouble.len() + usize::from(unfound.is_some());
@@ -39,9 +39,9 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         .collect();
     let now = model::now();
     // 아카이브의 진단은 **루트의 스냅샷**으로 잰다 — 옆 워크트리를 겹친 줄로 재면 옆의 낡은 사본이 충돌과 옮길 수를
-    // 부풀린다(moai-bth3). 겹치지 않았으면 방금 판 그 스냅샷을 빌린다.
-    let reread = if worktree { Some(repo.read()?) } else { None };
-    let root = reread.as_ref().unwrap_or(&load);
+    // 부풀린다(moai-bth3). 그 스냅샷은 `gather` 가 겹치기 전에 판 것이다(moai-ug6x.pi3) — 다시 풀지 않는다. 옆에서
+    // 들어온 줄이 없으면 겹친 줄이 곧 그것이라 `root` 가 비고, 그 줄을 빌린다.
+    let root = root.as_ref().unwrap_or(&load);
     let (mut st, archived) =
         archive_board(&repo, &load.issues, &unreadable, (&root.issues, &root.unreadable()), &now, ctx.zone());
     super::name_load_errors(ctx.lang(), &repo.issues_path(), &archived.errors);
@@ -228,22 +228,49 @@ pub(crate) fn archive_board_unjudged(
     now: &str,
 ) -> report::StatusReport {
     // 보드와 옮길 수를 함께 센다 — 문맥이 같으면 묶음 칸을 한 번만 잰다([`crate::archive::board`], moai-r0x8.2kg).
-    let (mut st, movable) = crate::archive::board(rows, unreadable, root.0, archived, cfg, now);
-    let live: std::collections::BTreeSet<&str> =
-        root.0.iter().map(|i| i.id.as_str()).chain(root.1.iter().filter_map(|u| u.id)).collect();
-    let collisions = crate::archive::collisions(&live, archived);
-    if !collisions.is_empty() {
-        st.warnings.push(report::Warning::archive_duplicates(collisions, root.0));
+    let (st, movable) = crate::archive::board(rows, unreadable, root.0, archived, cfg, now);
+    ArchiveSide::of(root, archived).warn(st, movable, root.0)
+}
+
+/// 보드에 더하는 아카이브의 경고 가운데 **아카이브와 루트의 스냅샷만 보고 재는 것** — 충돌과 못 읽은 줄 수.
+///
+/// 따로 잰다(moai-ug6x.pi3). 탐색기의 다시 읽기는 아카이브를 산 줄 곁에 **옮겨 놓은 뒤에** 그 줄로 지은 지도로
+/// 보드를 센다([`crate::archive::board_in`]) — 옮기고 나면 아카이브 한 벌이 따로 없으니 이 둘은 옮기기 전에 잰다.
+/// 경고를 세우는 자리는 [`ArchiveSide::warn`] 하나다: `moai status` 와 배너가 저마다 세우면 한쪽에 경고를 더한
+/// 날 다른 쪽이 조용하다.
+pub(crate) struct ArchiveSide {
+    collisions: Vec<String>,
+    unreadable: usize,
+}
+
+impl ArchiveSide {
+    /// `root` 는 아카이브와 견줄 루트의 스냅샷 — 줄과 못 읽는 줄([`archive_board_unjudged`] 의 그것).
+    pub(crate) fn of(root: (&[model::Issue], &[report::Unreadable]), archived: &crate::store::Load) -> ArchiveSide {
+        let live: std::collections::BTreeSet<&str> =
+            root.0.iter().map(|i| i.id.as_str()).chain(root.1.iter().filter_map(|u| u.id)).collect();
+        ArchiveSide { collisions: crate::archive::collisions(&live, archived), unreadable: archived.errors.len() }
     }
-    // 치명 줄의 끝이다 — 산 줄의 `duplicate_id`·`unreadable_line` 처럼 충돌 다음에 못 읽는 것이 선다(moai-5y2a).
-    if !archived.errors.is_empty() {
-        st.warnings.push(report::Warning::archive_unreadable(archived.errors.len()));
+
+    /// 센 보드(`st`)와 옮길 수(`movable`)에 아카이브의 경고와 알림을 세운다. `root` 는 [`ArchiveSide::of`] 에 준 그 줄이다.
+    pub(crate) fn warn(
+        self,
+        mut st: report::StatusReport,
+        movable: usize,
+        root: &[model::Issue],
+    ) -> report::StatusReport {
+        if !self.collisions.is_empty() {
+            st.warnings.push(report::Warning::archive_duplicates(self.collisions, root));
+        }
+        // 치명 줄의 끝이다 — 산 줄의 `duplicate_id`·`unreadable_line` 처럼 충돌 다음에 못 읽는 것이 선다(moai-5y2a).
+        if self.unreadable > 0 {
+            st.warnings.push(report::Warning::archive_unreadable(self.unreadable));
+        }
+        // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
+        if movable > 0 {
+            st.notices.push(report::Warning::archive_pending(movable));
+        }
+        st
     }
-    // `moai archive` 가 실제로 옮길 수 — 아카이브 사본과 갈린 묶음은 빼고 센다([`crate::archive::movable`]).
-    if movable > 0 {
-        st.notices.push(report::Warning::archive_pending(movable));
-    }
-    st
 }
 
 /// **설치가 어긋난 것을 대는 알림 셋** — 낡은 AGENTS.md 블록(moai-mj45), 빠진 딸린 파일 규칙
@@ -400,8 +427,8 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             // 자는 **실제로 겹쳤는가**다(`Project::swept`) — 안쪽 `run` 과 같다.
             // **아카이브도 안쪽 `moai status` 와 같은 자로 곁들인다**(moai-bth3 리뷰) — 안 곁들이던 판은 옮겨 둔 멤버의
             // 마일스톤을 기한 지난 빈 todo 로, 옮겨 둔 막음을 끊긴 참조로 댔다. 충돌은 루트의 스냅샷으로 잰다.
-            let reread = if worktree { repo.read().ok() } else { None };
-            let root = reread.as_ref().unwrap_or(load);
+            // 그 스냅샷은 여는 길(`worktree::gather`)이 겹치기 전에 판 것이다(moai-ug6x.pi3, [`Project::root`]).
+            let root = p.root.as_ref().unwrap_or(load);
             let (mut status, archived) =
                 archive_board(repo, &load.issues, &unreadable, (&root.issues, &root.unreadable()), &now, ctx.zone());
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.

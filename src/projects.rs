@@ -52,6 +52,9 @@ pub struct Project {
     pub sides: Vec<crate::worktree::SideFloor>,
     /// 겹치기 전에 잰 제 바닥 — 위 `sides` 와 한 짝이다.
     pub mine: crate::worktree::Floor,
+    /// 겹치기 전의 제 스냅샷([`crate::worktree::Gathered::root`]) — 옆에서 줄이 들어왔을 때만 선다(moai-ug6x.pi3).
+    /// 한눈 보기가 아카이브의 충돌을 이것과 견준다. 한때 버리고 프로젝트마다 `repo.read()` 로 다시 풀었다.
+    pub root: Option<Load>,
 }
 
 pub enum State {
@@ -134,8 +137,8 @@ pub fn open_one(
     worktree: bool,
     lang: crate::i18n::Lang,
 ) -> Project {
-    let Dig { state, origin, trouble, swept, sides, mine } = State::at_with(path, worktree, lang);
-    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept, sides, mine }
+    let Dig { state, origin, trouble, swept, sides, mine, root } = State::at_with(path, worktree, lang);
+    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept, sides, mine, root }
 }
 
 /// [`State::at_with`] 이 낸 것 — 상태와, 여는 길이 함께 판 것. **튜플로 내지 않는다**: 여섯이
@@ -147,6 +150,7 @@ struct Dig {
     swept: bool,
     sides: Vec<crate::worktree::SideFloor>,
     mine: crate::worktree::Floor,
+    root: Option<Load>,
 }
 
 /// **여는 데까지만** 본다 — 스냅샷은 안 읽는다(moai-m59y). 줄을 곧 스레드가 읽을 자리가 쓴다
@@ -189,6 +193,7 @@ impl State {
             // 못 연 프로젝트에는 잰 바닥이 없다. **자리 없는 바닥**은 어떤 스냅샷 자리와도 안
             // 같아(`Floor::loose`), 실려도 자리 셈이 안 집어 든다 — 건네받은 것이 없던 때와 같다.
             mine: crate::worktree::Floor::loose(&[]),
+            root: None,
         };
         let repo = match open_shallow(dir, lang) {
             Ok(repo) => repo,
@@ -205,6 +210,7 @@ impl State {
                     swept: g.swept,
                     sides: g.sides,
                     mine: g.mine,
+                    root: g.root,
                 }
             }
             Err(e) => lone(State::Unreadable(e)),

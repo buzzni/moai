@@ -477,6 +477,7 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
         swept: false,
         sides: Vec::new(),
         mine: crate::worktree::Floor::loose(&[]),
+        root: None,
     };
     // 말은 층이 들고 온다(moai-ra67) — 한눈 보기(`view::unopened`)가 내는 그 글을 그대로 쓴다.
     let said = crate::style::plain(&crate::view::unopened(&p, &p.seen(|_, _| ()), lang)).trim().to_string();
