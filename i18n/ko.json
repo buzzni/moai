@@ -639,6 +639,8 @@
   "init.agents_unheld_fix": "    블록을 받으려면 그 자리에 보통 파일을 두고, 그대로 두려면 `--no-agents` 로 부른다",
   "init.agents_shared": "  {name} 는 init 이 함께 쓰는 {with} 에 닿아 안 건드렸다 — 거기 블록을 심으면 {with} 의 규칙이 지워진다",
   "init.agents_shared_fix": "    블록을 받으려면 보통 파일로 바꾸고, 그대로 두려면 `--no-agents` 로 부른다",
+  "init.agents_changed": "init 이 읽은 뒤에 바뀌어(화면이 열린 사이, 또는 옆 세션이 썼다) 블록을 안 심었다 — 덮어쓴 것은 없다",
+  "init.agents_changed_fix": "    `moai init` 을 다시 부른다 — 지금 선 AGENTS.md 를 읽어 블록을 붙인다",
   "init.check_agents_shared": "AGENTS.md 는 init 이 함께 쓰는 {with} 에 닿는다 — init 은 그것을 안 건드린다. 블록을 받으려면 보통 파일로 바꾼다",
   "init.linked_fix": "    링크가 가리키는 내용을 담은 보통 파일로 바꾸고 `moai init` 을 다시 부른다",
   "init.linked_fix_outside": "    체크아웃 밖을 가리킨다 — 그 파일을 옮겨 담지 않는다. 링크를 지우고 `moai init` 을 다시 부르면 보통 파일로 새로 선다",

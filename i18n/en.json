@@ -639,6 +639,8 @@
   "init.agents_unheld_fix": "    put a regular file there to get the block, or call with `--no-agents` to leave it be",
   "init.agents_shared": "  {name} leads to {with}, which init also writes, so it was left alone — planting the block there would erase the rules in {with}",
   "init.agents_shared_fix": "    make it a regular file to get the block, or call with `--no-agents` to leave it be",
+  "init.agents_changed": "it changed after init read it (while its screen was open, or another session wrote it), so the block was not planted — nothing was overwritten",
+  "init.agents_changed_fix": "    call `moai init` again — it reads AGENTS.md as it stands now",
   "init.check_agents_shared": "AGENTS.md leads to {with}, which init also writes — init leaves it alone. Make it a regular file to get the block",
   "init.linked_fix": "    replace it with a regular file that holds what the link points at, then call `moai init` again",
   "init.linked_fix_outside": "    it points outside this checkout — do not copy that file in: remove the link and call `moai init` again, which starts a regular file",
