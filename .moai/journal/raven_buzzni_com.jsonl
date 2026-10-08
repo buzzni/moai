@@ -5807,3 +5807,9 @@
 {"ts":"2026-10-08T09:58:41Z","id":"moai-h64l.59m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T09:58:41Z","id":"moai-h64l.tx4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T09:58:41Z","id":"moai-h64l.wst","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T10:07:30Z","id":"moai-h64l.0hr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: opus subagent implementing in .worktrees/moai-h64l; then tx4, 2zi, 59m, wst in sequence"}
+{"ts":"2026-10-08T10:07:35Z","id":"moai-h64l.tx4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: queued after 0hr in this window (worker on moai-h64l)"}
+{"ts":"2026-10-08T10:07:36Z","id":"moai-h64l.2zi","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: queued after tx4 in this window (worker on moai-h64l)"}
+{"ts":"2026-10-08T10:07:37Z","id":"moai-h64l.59m","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: queued after 2zi in this window; held_elsewhere reads only held_here markers (person decision)"}
+{"ts":"2026-10-08T10:07:39Z","id":"moai-h64l.wst","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: queued after 59m in this window; main_root asks git (worktree list --porcelain / --is-bare-repository)"}
+{"ts":"2026-10-08T10:07:51Z","id":"moai-zsfr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-3e"}
