@@ -5681,3 +5681,14 @@
 {"ts":"2026-10-08T02:38:10Z","id":"moai-9s9s.x3n","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T02:38:10Z","id":"moai-9s9s.89e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress","note":"레이븐 (raven@buzzni.com) said yes in this window, 2026-10-08"}
 {"ts":"2026-10-08T02:38:10Z","id":"moai-9s9s.89e","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Taken-over: minyoung.go (hedone21@gmail.com)"}
+{"ts":"2026-10-08T03:03:25Z","id":"moai-9s9s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: members 89e ctx hs8 qmd v0y vzn x3n in progress in .worktrees/moai-9s9s — subagents implementing skill (89e x3n v0y) and hook (vzn hs8), qmd being measured; ctx text edited in src/guide.rs, uncommitted"}
+{"ts":"2026-10-08T03:05:47Z","id":"moai-9s9s.qmd","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Measured (2026-10-08, claude-code-guide over code.claude.com/docs permissions.md, settings-reference.md, skills.md): a Read outside the working directory and additionalDirectories prompts in default mode; the plugin cache gets no special treatment. ${CLAUDE_PLUGIN_ROOT} exists only inside plugin SKILL.md. Fix is text: the supervisor tells the person once when its base directory lies outside the root, and the person chooses — answer in the window, or additionalDirectories. Not measured live: this window runs in auto mode, which hides the prompt."}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-nvju","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 가지 — milestone/<id> 아래서 에픽 워크트리를 띄운다"}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-nvju.2e6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"마일스톤 가지를 띄우고 develop 에 들이는 때를 정한다"}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-nvju.yc2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"감독이 마일스톤 일의 Base branch 를 milestone/<id> 로 준다"}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-nvju.qgs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼 걸음이 마일스톤 가지에서 뜨고 거기로 머지한다"}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-nvju.ztj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"place·stranded·ready --worktree 가 milestone 가지를 일로 잘못 세지 않는다"}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-nvju.qhy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CLAUDE.md 워크트리·릴리스 절과 CONTRIBUTING Releasing 에 마일스톤 가지를 적는다"}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-muit","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 첫 보기 — done 보임·미룬 줄 숨김"}
+{"ts":"2026-10-08T05:13:51Z","id":"moai-muit.tut","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기 첫 보기에서 done(SPC v 4)을 보이고 미룬 줄은 숨긴다"}
+{"ts":"2026-10-08T05:14:17Z","id":"moai-muit.tut","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
