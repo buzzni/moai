@@ -111,7 +111,8 @@ yours in it is left, and one line names it. `moai skill uninstall` takes Claude'
 registration away and leaves the files; with
 `--agent codex` or `antigravity` it prints the `rm -r` lines for moai's skills
 in `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
-wrote it, and deletes nothing. `moai skill status` shows Claude's registration,
+wrote it, and deletes nothing. `moai skill status` shows Claude's registration
+and names a retired skill's directory left in Claude's tree,
 whether `.agents/skills/` holds this version's skills (a CRLF checkout counts as
 the same text) and names a retired skill's directory left there, whether each hooks file is
 this version's (or not moai's) — judged by the moai that file calls, the way the

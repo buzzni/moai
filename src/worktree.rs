@@ -391,7 +391,7 @@ impl Floor {
         Floor { at, rows: rows_of(mine) }
     }
 
-    /// 자리 없이 — 그 파일과 견줄 일이 없는 부르는 쪽(훅의 [`held_elsewhere`])이 쓴다. 빈 자리는
+    /// 자리 없이 — 그 파일과 견줄 일이 없는 부르는 쪽(한눈 보기·층)이 쓴다. 빈 자리는
     /// 어떤 스냅샷 자리와도 안 같아([`Dug::floor`]), [`Dug`] 에 실려도 자리 셈이 안 집어 든다.
     pub fn loose(mine: &[Issue]) -> Floor {
         Floor::of(PathBuf::new(), mine)
@@ -495,9 +495,11 @@ pub struct Dug<'a> {
 }
 
 impl<'a> Dug<'a> {
-    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길이 쓴다: 훅([`held_elsewhere`])과 시험의 짧은
-    /// 길([`workplaces`]). [`stranded_at`] 은 **부르는 쪽이 준다** — 제 손으로 파는 짧은 길을 따로
-    /// 두지 않기로 한 뒤로(moai-65ie) 이것을 스스로 짓지 않는다.
+    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길이 쓴다: 시험의 짧은 길([`workplaces`]).
+    /// [`stranded_at`] 은 **부르는 쪽이 준다** — 제 손으로 파는 짧은 길을 따로
+    /// 두지 않기로 한 뒤로(moai-65ie) 이것을 스스로 짓지 않는다. 훅([`held_elsewhere`])도 쓰던 때가
+    /// 있었는데, 옆 스냅샷을 안 열게 된 뒤로(moai-h64l.59m) 바이너리에서 부르는 곳이 없다.
+    #[cfg(test)]
     pub fn new() -> Dug<'a> {
         Dug::default()
     }
@@ -835,39 +837,31 @@ impl Disk {
 /// 옆 **딸린** 워크트리가 쥐었을 수 있는 줄 id (moai-ntl6, 사용자 결정 B). 제 이름은 훅이 이미 든
 /// [`away`] 의 것을 쓴다(`hook::unsure`) — 여기서 한 벌 더 재던 판은 한 판정의 두 쪽이 제 이름을 따로 읽었다.
 ///
-/// 이름이 id 가 아닌 워크트리(에이전트 격리 `worktree-agent-<해시>`, 옛 id 로 뜬 워크트리)가
-/// 쥔 일은 이름으로 못 가른다. 대신 **갈라진 자리**로 짐작한다 — 규약상 집기는 main 에서 커밋한
-/// 뒤 워크트리가 뜨므로, 그 워크트리의 스냅샷 파일에 벌여 놓인 줄은 갈라질 때 이미 집혀 있던
-/// 일이다. 그 워크트리에서 main 보다 늦게 옮긴 줄(`planned`·`updated_at`)도 든다. 갈라진 **뒤에**
-/// main 에서 집은 일은 그 파일에 없어 들지 않는다.
+/// **읽는 것은 집은 표식([`held_here`]) 하나다 — 옆의 스냅샷은 안 연다**(moai-h64l.59m, 사용자 결정).
+/// moai-y7go 뒤로 트래커는 루트에만 쓰이므로, 딸린 워크트리의 `.moai` 는 그 가지가 갈라질 때의 낡은
+/// 사본이다. 그 사본에 벌여 놓인 줄(과 거기서 루트보다 늦은 줄)을 "옆이 쥐었을 수 있다" 로 세던 판은,
+/// 마일스톤 가지에서 뜬 에픽 워크트리처럼 몇 주 낡은 사본이 그때 열려 있던 줄을 영영 든 채라 — 그 뒤
+/// 닫았다가 오늘 루트에서 다시 집은 줄까지 의심해 규칙 1 과 `Stop` 이 그 줄을 덜 붙들었다(moai-zo36).
+///
+/// 이름이 id 가 아닌 워크트리(에이전트 격리 `worktree-agent-<해시>`, 옛 id 로 뜬 워크트리)가 쥔 일은
+/// 이름으로 못 가른다. 스냅샷을 읽던 까닭이 그것이었는데, 이제 그 자리는 표식이 맡는다 — `moai mv` 가
+/// 시작 칸으로 옮길 때 **친 자리**의 표식에 적으므로([`note_held`]), 그 워크트리 안에서(또는 거기서
+/// `-C <루트>` 로) 집은 일은 스냅샷 없이도 여기 든다. **남는 틈은 하나다** — 루트에서 집은 뒤에 그
+/// 일을 이름 없는 워크트리로 가져간 것(루트에서 집고 `worktree-agent-<해시>` 를 띄우는 길)은 어느
+/// 표식에도 없어 루트 세션의 초점으로 선다. 이름으로 뜨는 워크트리(`moai-<id>`)는 그 길이라도 [`away`]
+/// 가 이름으로 가른다.
 ///
 /// **main 워크트리는 쥔 곳으로 안 센다** — 모두의 집기가 모이는 자리라, 세면 모든 줄이 든다.
-/// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들거나 비추지 않기만 한다(`hook::unsure`). git 을
-/// 띄우지 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길, 비추는 길(`backlog add` 의 물음),
-/// `Stop` 에서만 부른다.
-pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> BTreeSet<String> {
+/// 마일스톤 워크트리도 같다([`is_milestone`]). **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들거나
+/// 비추지 않기만 한다(`hook::unsure`). git 을 띄우지 않고 워크트리마다 작은 파일 하나만 읽는다.
+pub fn held_elsewhere(root: &Path) -> BTreeSet<String> {
     let Some(disk) = on_disk(root) else { return BTreeSet::new() };
-    // 견줄 바닥은 **워크트리 수와 상관없이 한 벌이다** — 워크트리마다 지으면 제 줄을 그만큼 다시
-    // 훑는다. 훅은 제 손으로 읽은 줄을 그대로 주므로 자리는 안 든다([`Floor::loose`]).
-    // **첫 옆을 만날 때 짓는다**(리뷰) — 딸린 워크트리가 하나도 없는 흔한 체크아웃에서는 아래 고리가
-    // 한 번도 안 도는데, 미리 지으면 그 판이 줄마다 짧은 글 셋을 헛되이 베낀다. 훅은 툴 부름마다
-    // 도는 길이라(`hook::unsure`) 그 헛일이 제일 자주 걸린다.
-    let floor = std::cell::OnceCell::new();
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
-        // 마일스톤 워크트리는 main 처럼 모으는 자리라 쥔 곳으로 안 센다([`is_milestone`]) — 그 집은 표식도.
         if *me || !*linked || is_milestone(tree) {
             continue;
         }
-        // 훅은 겹쳐 본 결과를 들고 오지 않는다 — 판 것이 없으니 제 손으로 연다.
-        let (open, later) =
-            holds(&disk, tree, floor.get_or_init(|| Floor::loose(mine)), cfg, &Dug::new()).unwrap_or_default();
-        out.extend(open);
-        out.extend(later);
-        // **그 워크트리가 적어 둔 집기도 든다**(moai-y7go, 리뷰 moai-71ht 셋째 판) — 쓰기가 루트로
-        // 옮겨 가 옆 스냅샷이 안 움직이므로, 훅이 스냅샷만 보면 옆이 방금 집은 줄을 제 것으로 읽는다.
-        // 그러면 `Stop` 이 남의 산 일을 닫으라고 붙들고 규칙 1 이 그 단위로 생성을 좁힌다. 자리 셈
-        // ([`workplaces`])과 **같은 표식을 같은 자로** 읽어야 두 표면이 한 답을 낸다.
+        // 자리 셈([`workplaces`])과 **같은 표식을 같은 자로** 읽는다(리뷰 moai-71ht 셋째 판).
         if let Some(dir) = disk.admin.get(&tree.path) {
             out.extend(held_here(dir));
         }
@@ -875,7 +869,7 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
     out
 }
 
-/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. (벌여 놓인 줄,
+/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — 자리 셈([`workplaces_in`])의 한 워크트리 몫. (벌여 놓인 줄,
 /// 여기보다 늦게 만진 줄). 앞의 것에는 갈라질 때 물려받은 줄도 들고, 뒤의 것은 그 워크트리가
 /// 실제로 만진 흔적이다 — [`workplaces`] 가 둘을 따로 싣는다.
 ///
@@ -1278,7 +1272,8 @@ const HELD: &str = "moai-held";
 ///
 /// **옮길 곳에 트래커가 있어야 옮긴다** — 이 가지에서 처음 `init` 한 워크트리는 루트에 `.moai` 가
 /// 없다. 딸린 워크트리가 아닌 것과 주 체크아웃이 없는 것(git 밖·서브모듈·맨 저장소에 딸린
-/// 워크트리)은 [`main_root`] 가 이미 `None` 으로 가른다 — 여기서 [`is_linked`] 로 한 번 더 물으면
+/// 워크트리)은 [`main_root`] 와 같은 자([`mirror`]·[`is_bare`])가 이미 `None` 으로 가른다 — 여기서
+/// [`is_linked`] 로 한 번 더 물으면
 /// 같은 조상 훑기를 두 번 하고, 두 자가 갈리면(중간에 선 `.git` 파일) 안 본 자리를 옮겨 준다.
 ///
 /// **찾은 자리를 되돌려 주지 않는다**(리뷰 moai-71ht.jlh) — 그러면 부르는 쪽이 `root != found`
@@ -1290,8 +1285,10 @@ const HELD: &str = "moai-held";
 /// `Lock::drop` 이 안 지우므로 트래커가 통째로 사라져도 그 파일만 남는다. 그 자는
 /// [`crate::store::holds_tracker`] 하나고, `init` 의 거절도 같은 자로 묻는다(moai-r0x8.apz).
 pub fn tracker_root(root: &Path) -> Option<PathBuf> {
-    let main = main_root(root)?;
-    crate::store::holds_tracker(&main).then_some(main)
+    // 트래커가 있는가(`stat` 몇 번)를 먼저 본다 — 맨 저장소인가([`is_bare`])는 git 을 띄우므로, 옮길 것이
+    // 없는 자리에서는 안 묻는다. 답은 [`main_root`] 와 같다.
+    let (main, common) = mirror(root)?;
+    (crate::store::holds_tracker(&main) && !is_bare(&common)).then_some(main)
 }
 
 /// 이 트래커가 든 **제** 워크트리의 꼭대기. git 을 띄우지 않는다. 저장소가 아니면 없다.
@@ -1385,7 +1382,7 @@ pub struct Unread {
 ///
 /// **부르는 쪽이 이미 판 것을 받는다**([`Dug`], moai-kos1·moai-65ie) — 겹치며 옆 스냅샷을 연
 /// 쪽(탐색기·`status --worktree`)도, 제 바닥을 잰 쪽(`projects::Project::dug`)도 바로 앞에서 그
-/// 파일들을 열어 풀었다. 건네받은 것이 없는 길(훅·시험)은 [`Dug::new`] 를 준다.
+/// 파일들을 열어 풀었다. 건네받은 것이 없는 길(시험)은 [`Dug::new`] 를 준다.
 ///
 /// **제 손으로 파는 짧은 길을 따로 두지 않는다**(moai-65ie). 한때 그 꼴이 있었는데, 건네줄 것을
 /// 손에 쥔 자리(한눈 보기·층)가 인자 하나가 적다는 까닭으로 그것을 불러 같은 스냅샷을 프로젝트
@@ -1484,12 +1481,28 @@ pub fn is_linked(root: &Path) -> bool {
 }
 
 /// 딸린 워크트리의 트래커에 대응하는 **주 워크트리의 트래커 자리** — 주 워크트리이거나 git 밖이면
-/// `None`. git 을 띄우지 않는다.
+/// `None`.
 ///
-/// [`tracker_root`] 가 이것으로 트래커를 루트로 옮긴다(moai-y7go) — 워크트리의 `.moai` 를 고치면
+/// [`tracker_root`] 가 같은 자([`mirror`]·[`is_bare`])로 트래커를 루트로 옮긴다(moai-y7go) — 워크트리의 `.moai` 를 고치면
 /// 병합에서 스냅샷이 충돌하기 때문이다.
-/// 공용 디렉터리가 `.git` 이 아니면(맨 저장소에 딸린 워크트리) 주 체크아웃이 없다 — `None`.
+///
+/// **맨 저장소인가는 git 에게 묻는다**(moai-h64l.wst, 리뷰 moai-r0x8.qbh 4번의 남은 반). 자리는
+/// [`mirror`] 가 git 이 적어 둔 파일로 재고, 그 공용 디렉터리가 맨 저장소면 주 체크아웃이 없다 —
+/// [`is_bare`]. git 을 띄우는 것은 **딸린 워크트리 안에서, 공용 디렉터리의 이름이 `.git` 일 때뿐**이다.
+/// 주 체크아웃(`.git` 이 디렉터리)과 git 밖은 지금처럼 파일 하나 안 읽고 답한다.
 pub fn main_root(root: &Path) -> Option<PathBuf> {
+    let (main, common) = mirror(root)?;
+    (!is_bare(&common)).then_some(main)
+}
+
+/// [`main_root`] 의 **git 을 안 띄우는 반** — 비친 자리와 공용 디렉터리. 맨 저장소인가는 아직 안 물었다.
+///
+/// 공용 디렉터리의 **이름**은 여기서 자리를 재는 데만 쓴다 — git 도 주 워크트리의 경로를 그렇게 잰다
+/// (`worktree list` 의 첫 줄은 공용 디렉터리에서 `/.git` 을 뗀 자리다). 그 이름이 `.git` 이 아니면 잴
+/// 자리가 없다: `git init --separate-git-dir` 의 공용 디렉터리(`sep.git`)는 주 체크아웃을 되가리키는
+/// 줄을 어디에도 안 두어, git 에게 물어도 `worktree list` 가 주 워크트리로 `sep.git` 자체를 댄다. 그래서
+/// 그 꼴은 전처럼 `None` 이다 — 지어낸 자리로 옮기느니 안 옮긴다.
+fn mirror(root: &Path) -> Option<(PathBuf, PathBuf)> {
     let (top, common) = git_dirs(root)?;
     if top.join(".git").is_dir() || common.file_name()? != ".git" {
         return None;
@@ -1499,7 +1512,48 @@ pub fn main_root(root: &Path) -> Option<PathBuf> {
     let rel = real(root).strip_prefix(real(top)).ok()?.to_path_buf();
     let main = common.parent()?;
     // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
-    Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
+    let main = if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) };
+    Some((main, common))
+}
+
+/// 이 공용 git 디렉터리가 **맨 저장소인가** — 그러면 딸린 워크트리에 주 체크아웃이 없다.
+///
+/// **이름이 아니라 git 에게 묻는다**(moai-h64l.wst, 2026-10-08 사용자 결정). 공용 디렉터리의 이름이
+/// `.git` 인가로 가르던 판은 `git clone --bare <url> bin/.git` 에 딸린 워크트리에서 없는 주 체크아웃
+/// `bin` 을 댔다 — 거기 트래커가 있으면 모든 명령이 그리로 옮겨 갔고, `init` 의 거절은 없는 자리를
+/// 댔다. 답은 `core.bare` 고, 그것을 읽는 자는 git 이다(`rev-parse --is-bare-repository` 를 공용
+/// 디렉터리에서). `init` 의 거절문([`crate::cmd::init`])도 이 하나로 묻는다 — 자가 둘이면 찾기가 옮겨
+/// 가는 자리와 거절이 대는 자리가 갈린다.
+///
+/// **값**: git 한 번(이 기계에서 약 3ms)이다. 딸린 워크트리 안에서만 들고([`main_root`]), 한 프로세스
+/// 안에서는 공용 디렉터리마다 한 번만 묻는다 — 한 명령이 찾기·`init`·훅의 자리 셈에서 여러 번 묻고,
+/// 탐색기는 걸음마다 다시 묻는다. `core.bare` 는 저장소를 다시 만들기 전에는 안 바뀌는 값이라 담아 둬도
+/// 낡지 않는다. **못 얻은 답(아래의 `false`)도 담는다**(리뷰 moai-h64l) — 안 담던 판은 git 이 멈춘 기계에서
+/// 한 훅 프로세스가 찾기·집기 기록마다 [`PROBE_BUDGET`] 을 다시 기다렸고, 탐색기는 걸음마다 그만큼 섰다. 담는
+/// 값은 어차피 내는 그 `false` 라 답은 안 바뀐다.
+///
+/// **답을 못 얻으면 맨 저장소가 아니라고 둔다**(git 이 없거나, 실패하거나, [`PROBE_BUDGET`] 안에 안
+/// 끝났다). 안 옮기는 쪽(`None`)이 얼핏 조심스러워 보이지만, 그러면 git 이 잠깐 늦은 한 번에 흔한
+/// 저장소의 모든 워크트리가 갈라질 때 들고 온 **낡은 스냅샷**을 읽고 거기 써서 병합에서 겨룬다 —
+/// moai-y7go 가 막으려던 바로 그 조용한 갈림이다. 틀리는 것은 `.git` 이라는 이름의 맨 저장소에 트래커까지
+/// 선 드문 꼴에서 git 까지 못 물을 때뿐이고, 그때는 이 결정 전과 같다. `init` 의 거절도 이전부터 같은
+/// 쪽으로 접었다.
+///
+/// [`PROBE_BUDGET`]: crate::cmd::merge_driver::PROBE_BUDGET
+pub fn is_bare(common: &Path) -> bool {
+    use std::sync::Mutex;
+    static SAID: Mutex<BTreeMap<PathBuf, bool>> = Mutex::new(BTreeMap::new());
+    let key = real(common);
+    if let Some(said) = SAID.lock().ok().and_then(|m| m.get(&key).copied()) {
+        return said;
+    }
+    let args = ["rev-parse", "--is-bare-repository"];
+    let said = crate::git::run_reading_user_config(&key, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET));
+    let bare = matches!(said, Some(Ok(said)) if said.trim() == "true");
+    if let Ok(mut m) = SAID.lock() {
+        m.insert(key, bare);
+    }
+    bare
 }
 
 /// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.
@@ -2177,6 +2231,48 @@ mod tests {
         assert_eq!(tracker_root(&main), None, "주 워크트리를 옮겼다");
     }
 
+    /// **맨 저장소인가는 이름이 아니라 git 에게 묻는다**(moai-h64l.wst, 리뷰 moai-r0x8.qbh 4번의 남은 반).
+    /// 공용 디렉터리의 이름이 `.git` 인가로 가르던 판은 `git clone --bare <url> bin/.git` 에 딸린 워크트리에서
+    /// 없는 주 체크아웃 `bin` 을 댔다 — 거기 트래커가 있으면 모든 명령이 그리로 옮겨 갔다.
+    /// `--separate-git-dir` 의 주 체크아웃은 git 도 모른다(`worktree list` 가 `sep.git` 을 주 워크트리로 댄다) —
+    /// 지어낸 자리로 옮기지 않고 전처럼 `None` 이다.
+    #[test]
+    fn a_bare_dot_git_has_no_main_checkout_to_move_to() {
+        let scratch = crate::scratch::Scratch::fenced("main-root-bare");
+        let base = real(scratch.path());
+        let run = |dir: &Path, args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        let src = base.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        run(&src, &["init", "-q"]);
+        run(&src, &["commit", "-q", "--allow-empty", "-m", "a"]);
+
+        // 이름이 `.git` 인 맨 저장소 — 그 부모 `bin` 은 체크아웃이 아니다. 트래커가 거기 서 있어도 안 옮긴다.
+        let bin = base.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        run(&base, &["clone", "-q", "--bare", "src", "bin/.git"]);
+        run(&bin.join(".git"), &["worktree", "add", "-q", "../../wt-bin"]);
+        let wt = base.join("wt-bin");
+        std::fs::create_dir_all(bin.join(".moai")).unwrap();
+        std::fs::write(bin.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        assert_eq!(main_root(&wt), None, "맨 저장소의 부모를 주 체크아웃으로 댔다");
+        assert_eq!(tracker_root(&wt), None, "없는 주 체크아웃의 트래커로 옮겨 갔다");
+
+        // 주 체크아웃이 공용 디렉터리를 딴 데 둔 저장소 — git 도 주 체크아웃을 모른다.
+        let sep = base.join("sep.git");
+        run(&base, &["init", "-q", "--separate-git-dir", sep.to_str().unwrap(), "main"]);
+        let main = base.join("main");
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../wt-sep"]);
+        assert_eq!(main_root(&base.join("wt-sep")), None, "git 도 모르는 주 체크아웃을 지어냈다");
+
+        // 흔한 꼴은 그대로다 — 이름이 `.git` 이고 맨 저장소가 아니다.
+        run(&src, &["worktree", "add", "-q", "../wt-src"]);
+        assert_eq!(main_root(&base.join("wt-src")), Some(src.clone()));
+    }
+
     /// **자리 판정을 바꾸는 것은 층의 표식도 바꾼다**(moai-al0x) — 워크트리를 띄우거나, 가지를
     /// 옮기거나, 옆 스냅샷을 쓰거나, 제거 명령 없이 디렉터리째 치우는 것. 아무것도 안 하면 그대로다.
     #[test]
@@ -2474,7 +2570,7 @@ mod tests {
         );
 
         // 훅의 짐작 — 사본에 벌여 놓인 줄과 사본에서 늦은 줄을 "옆이 쥐었을 수 있다" 로 안 센다.
-        let elsewhere = held_elsewhere(&main, &mine, &cfg);
+        let elsewhere = held_elsewhere(&main);
         assert!(elsewhere.is_empty(), "마일스톤 워크트리의 사본을 옆의 집기로 셌다 — {elsewhere:?}");
 
         // 겹쳐 보기 — 사본의 늦은 줄을 남의 산 줄처럼 겹치지 않는다(`--worktree` 와 훅의 `fresh` 둘 다).
@@ -2498,6 +2594,57 @@ mod tests {
         assert!(marks.iter().all(|(p, _)| !p.ends_with(&copy_path)), "안 파는 사본을 잰다 — {marks:#?}");
         let head = Path::new("worktrees").join("milestone-t-zzzz").join("HEAD");
         assert!(marks.iter().any(|(p, _)| p.ends_with(&head)), "마일스톤 워크트리의 HEAD 를 안 잰다 — {marks:#?}");
+    }
+
+    /// **훅의 짐작은 옆의 낡은 사본을 안 세고 집은 표식만 읽는다**(moai-h64l.59m, 사용자 결정). 트래커는
+    /// 루트에만 쓰이므로(moai-y7go) 딸린 워크트리의 `.moai` 는 갈라질 때의 사본이다 — 거기 벌여 놓인 채
+    /// 남은 줄(그 뒤 닫았다가 오늘 루트에서 다시 집은 일)을 "옆이 쥐었을 수 있다" 로 세면 규칙 1 과
+    /// `Stop` 이 그 줄을 덜 붙든다(moai-zo36). 사본에서 루트보다 늦은 줄도 안 센다. 표식에 적힌 줄은 든다.
+    #[test]
+    fn held_elsewhere_reads_the_marks_not_a_siblings_stale_copy() {
+        let scratch = crate::scratch::Scratch::fenced("held-marks-only");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        // 이름이 아무 id 도 안 가리키는 워크트리 — 스냅샷을 읽던 판은 이것의 사본을 셌다.
+        run(&main, &["worktree", "add", "-q", "../agent-x", "-b", "worktree-agent-x"]);
+        let row = |id: &str, status: &str, at: &str| {
+            format!(
+                "{{\"id\":\"{id}\",\"kind\":\"issue\",\"title\":\"일\",\"status\":\"{status}\",\
+                 \"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"{at}\",\"status_since\":\"{at}\"}}\n"
+            )
+        };
+        let old = "2026-09-11T00:00:00Z";
+        // 루트: t-0001 은 오늘 다시 집었고, t-0002 는 첫 칸, t-0003 은 옆 워크트리에서 집은 일이다.
+        let root = [
+            row("t-0001", "in_progress", "2099-01-01T00:00:00Z"),
+            row("t-0002", "todo", old),
+            row("t-0003", "in_progress", old),
+        ]
+        .concat();
+        // 사본: 갈라질 때 t-0001 이 벌여 놓여 있었고, t-0002 는 사본에서 루트보다 늦게 옮겼다.
+        let copy = [
+            row("t-0001", "in_progress", old),
+            row("t-0002", "in_progress", "2026-09-12T00:00:00Z"),
+            row("t-0003", "todo", old),
+        ]
+        .concat();
+        for (dir, rows) in [(main.clone(), &root), (base.join("agent-x"), &copy)] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), rows).unwrap();
+        }
+        std::fs::write(main.join(".git/worktrees/agent-x").join(HELD), "t-0003\n").unwrap();
+
+        let elsewhere = held_elsewhere(&main);
+        assert_eq!(
+            elsewhere,
+            BTreeSet::from(["t-0003".to_string()]),
+            "옆의 낡은 사본을 옆의 집기로 셌거나 표식을 놓쳤다"
+        );
     }
 
     /// **옆 워크트리의 스냅샷도 그 체크아웃 안에서만 읽는다**(moai-itsu). 밖을 가리키는 링크는 겹치지 않고
