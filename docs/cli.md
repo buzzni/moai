@@ -46,6 +46,7 @@ Commands:
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
+  update        Upgrade the moai you are running with its repository's install.sh
   init          Put a .moai/ into this repository (safe to run again)
   help          Print this message or the help of the given subcommand(s)
 
@@ -2998,6 +2999,54 @@ Examples:
   It is written as `color = "green"` under `[[project]]` in the user config.
   Writing it by hand is fine - a wrong value is shown in one line by
   `moai project ls`, which then uses the colour picked by path.
+```
+
+## `moai update`
+
+```
+Upgrade the moai you are running with its repository's install.sh
+
+Usage: moai update [OPTIONS]
+
+Options:
+      --version <tag>        Install this release tag instead of the latest (handed to install.sh)
+      --dry-run              Print the script's address and the command, and touch nothing
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai update                    the latest release, over this binary
+  moai update --version v0.9.0   that release instead
+  moai update --dry-run          print what would be fetched and run
+
+  It fetches install.sh from the main branch of the repository releases come
+  from and runs it with sh, installing into the directory of the binary that is
+  running, with --force:
+
+    MOAI_REPO=<owner/name> sh -s -- --dir <that directory> --force
+
+  install.sh's output streams through, and the exit code is sh's. The script
+  is fetched by moai itself, not by curl; install.sh then downloads the
+  release with curl or wget and checks it against the release checksums.
+
+  The repository is `buzzni/moai` unless your user config says otherwise -
+  `repo = "owner/name"` under [update] - and MOAI_REPO wins over both. The
+  repository's own .moai/config.toml is never read for it: what it names is
+  piped into a shell, and a repository you cloned must not choose that. A
+  value that is not owner/name is refused, not replaced with the default.
+
+  Nothing is fetched where it cannot work, and it stops with one line:
+  a binary cargo built (target/ or cargo install - rebuild from source
+  instead), a binary not named moai, a directory you cannot write (run it as a
+  user who can, or reinstall with install.sh --dir), and a machine the releases
+  do not cover. A directory outside your home is fine when you can write it.
+
+  --dry-run fetches nothing and runs nothing. --json prints {repo, script,
+  dir, command, dry_run} and, after a run, `code` - sh's exit code; install.sh's
+  own output then goes to stderr so stdout stays one JSON value.
 ```
 
 ## `moai init`

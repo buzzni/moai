@@ -191,11 +191,8 @@ pub const SERVED: bool =
 /// 그대로라 배너가 다음에도 선다. 그래서 자리를 본다.
 ///
 /// - `served` 가 거짓이면(`install.sh` 가 판을 안 내는 기계) `None`
-/// - 이름이 `moai` 가 아니거나 cargo 가 지은 자리면 `None` — `target/<프로필>`(곁에
-///   `.fingerprint` 가 있다)과, `cargo install` 이 moai 를 깐 뿌리(위의 `.crates.toml`·
-///   `.crates2.json` 이 `"moai"` 를 적었다)는 소스로 다시 짓는 쪽이 올린다. **그 파일이 있다는
-///   것만으로는 안 가른다**(리뷰) — `cargo install` 의 뿌리를 `~/.local` 로 둔 사람은 딴 도구를
-///   한 번만 깔아도 `~/.local/.crates.toml` 이 생기고, 그러면 `install.sh` 로 깐 moai 가 줄을 잃는다
+/// - 이름이 `moai` 가 아니거나 cargo 가 지은 자리([`built_by_cargo`])면 `None` — 그 바이너리는
+///   소스로 다시 짓는 쪽이 올린다
 /// - `home` 밑의 `.local/bin` 이면 [`upgrade_of`] 그대로, `home` 밑의 다른 자리면
 ///   `-s -- --dir <자리>` 를 붙인다 — `install.sh` 의 `--dir` 로 깐 자리다
 /// - `home` 밖(`/usr/local/bin` 따위)이면 `None` — 그 자리를 누가 채웠는지(root, 패키지 관리자)
@@ -211,6 +208,26 @@ pub fn upgrade_line(exe: &Path, home: Option<&Path>, served: bool, repo: &str) -
     }
     let dir = exe.parent()?;
     let home = home.filter(|h| h.parent().is_some())?;
+    if built_by_cargo(dir) || !dir.starts_with(home) {
+        return None;
+    }
+    let line = upgrade_of(repo);
+    if dir == home.join(".local").join("bin") {
+        return Some(line);
+    }
+    Some(format!("{line} -s -- --dir {}", crate::text::shell_word(dir.to_str()?)))
+}
+
+/// `dir`(바이너리가 선 자리)이 cargo 가 지은 자리인가 — 그 바이너리는 소스로 다시 짓는 쪽이 올린다.
+/// [`upgrade_line`] 과 `moai update`([`crate::update::refusal`])가 **한 자로 잰다**(moai-zsfr.2p9) —
+/// 둘이 따로 재면 안내 줄은 안 서는데 `moai update` 는 `target/` 을 덮는 판이 선다.
+///
+/// - `target/<프로필>` — 곁에 `.fingerprint` 가 있다
+/// - `cargo install` 이 moai 를 깐 뿌리 — 위의 `.crates.toml`·`.crates2.json` 이 `"moai"` 를 적었다.
+///   **그 파일이 있다는 것만으로는 안 가른다**(리뷰) — `cargo install` 의 뿌리를 `~/.local` 로 둔
+///   사람은 딴 도구를 한 번만 깔아도 `~/.local/.crates.toml` 이 생기고, 그러면 `install.sh` 로 깐
+///   moai 가 줄을 잃는다
+pub fn built_by_cargo(dir: &Path) -> bool {
     let cargo_put_moai_under = |root: &Path| {
         [".crates.toml", ".crates2.json"]
             .iter()
@@ -220,15 +237,7 @@ pub fn upgrade_line(exe: &Path, home: Option<&Path>, served: bool, repo: &str) -
                 at.is_file() && std::fs::read_to_string(at).is_ok_and(|said| said.contains("\"moai\""))
             })
     };
-    let built = dir.join(".fingerprint").is_dir() || dir.parent().is_some_and(cargo_put_moai_under);
-    if built || !dir.starts_with(home) {
-        return None;
-    }
-    let line = upgrade_of(repo);
-    if dir == home.join(".local").join("bin") {
-        return Some(line);
-    }
-    Some(format!("{line} -s -- --dir {}", crate::text::shell_word(dir.to_str()?)))
+    dir.join(".fingerprint").is_dir() || dir.parent().is_some_and(cargo_put_moai_under)
 }
 
 /// [`upgrade_line`] 을 이 프로세스에 — 도는 바이너리의 푼 자리와 `HOME` 을 넣는다. 파일 시스템을
@@ -961,11 +970,36 @@ fn agent_for(url: &str, timeout: Duration) -> ureq::Agent {
 /// [`ask`] 되 기다리는 상한을 받는다. **시험이 그 상한을 짧게 줘서 실제로 끊기는지 잰다** —
 /// 상한을 상수로만 두면 그것이 서는지를 5초씩 기다려야만 볼 수 있고, 그러면 아무도 안 잰다.
 pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
+    let body = fetch(url, timeout, 256 * 1024, "application/vnd.github+json")?;
+    // 글자가 깨져도 읽는다 — 어차피 `tag_name` 하나만 집고, 못 집으면 "못 물었다" 다.
+    let body = String::from_utf8_lossy(&body);
+    // **읽다 끊긴 것과 못 읽는 답은 다른 갈래다** — [`fetch`] 가 앞엣것을, 여기가 뒤엣것을
+    // 든다. `said` 에 답을 싣지 않는 것은 그것이 256KB 까지 가는 남의 글이기 때문이다.
+    tag_in(&body).ok_or_else(|| Why { kind: Trouble::Garbled, said: String::new() })
+}
+
+/// `install.sh` 를 받는 데 기다리는 상한(moai-zsfr.2p9). 판 묻기([`TIMEOUT`])보다 길다 — 이쪽은
+/// 사람이 `moai update` 를 쳐 놓고 기다리는 자리라, 느린 그물에서 5초에 끊으면 할 일을 못 한다.
+pub const SCRIPT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// `install.sh` 의 크기 상한(바이트). 그 스크립트는 십몇 KB 다 — 몇 MB 를 뱉는 자리는 스크립트가 아니다.
+const SCRIPT_LIMIT: u64 = 1024 * 1024;
+
+/// `moai update` 가 돌릴 스크립트를 받는다(moai-zsfr.2p9, 사람 결정 2026-10-08) — **`curl` 을 안 부른다.**
+/// 판 묻기와 같은 길([`fetch`])이라, 되돌림이 평문으로 내려가지 못하게 막는 문도 그대로 선다 —
+/// `sh` 에 흘릴 글이라 그 문이 판 묻기보다 더 든다.
+pub fn fetch_script(url: &str) -> Result<Vec<u8>, Why> {
+    fetch(url, SCRIPT_TIMEOUT, SCRIPT_LIMIT, "*/*")
+}
+
+/// 한 번 받는다 — [`ask_within`] 과 [`fetch_script`] 가 한 길을 쓴다(moai-zsfr.2p9). 둘이 따로 서면
+/// 상한과 평문 문 가운데 하나를 한쪽만 고치는 날이 온다.
+fn fetch(url: &str, timeout: Duration, limit: u64, accept: &str) -> Result<Vec<u8>, Why> {
     let agent = agent_for(url, timeout);
-    let body = agent
+    agent
         .get(url)
         .header("User-Agent", concat!("moai/", env!("CARGO_PKG_VERSION")))
-        .header("Accept", "application/vnd.github+json")
+        .header("Accept", accept)
         .call()
         .map_err(|e| Why::from_ureq(&e))?
         .body_mut()
@@ -974,7 +1008,7 @@ pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
         // 아니라 **다시 거는 것**이다. 이 답은 몇 KB 고, `MOAI_API_URL` 이 가리키는 자리가
         // 끝없이 뱉을 때 그것을 다 받아 줄 까닭이 없다.
         .with_config()
-        .limit(256 * 1024)
+        .limit(limit)
         // **바이트로 받아 우리가 씻는다**(리뷰, moai-580l 이 연 자리). `read_to_string` 에
         // `lossy_utf8(true)` 를 주던 판은 이 자리에서 아무 일도 안 했다 — ureq 는 그 설정을
         // `Content-Type` 이 `text/` 로 시작할 때만 입히는데(`body::ResponseInfo::is_text`),
@@ -984,12 +1018,7 @@ pub fn ask_within(url: &str, timeout: Duration) -> Result<String, Why> {
         // 갈아 끼우는 프록시 뒤라 영영 못 쓴다는 뜻이라(moai-uwuw), 고칠 것이 없는 사람을
         // 고치러 보낸다.
         .read_to_vec()
-        .map_err(|e| Why::from_ureq(&e))?;
-    // 글자가 깨져도 읽는다 — 어차피 `tag_name` 하나만 집고, 못 집으면 "못 물었다" 다.
-    let body = String::from_utf8_lossy(&body);
-    // **읽다 끊긴 것과 못 읽는 답은 다른 갈래다** — 위의 `map_err` 가 앞엣것을, 여기가 뒤엣것을
-    // 든다. `said` 에 답을 싣지 않는 것은 그것이 256KB 까지 가는 남의 글이기 때문이다.
-    tag_in(&body).ok_or_else(|| Why { kind: Trouble::Garbled, said: String::new() })
+        .map_err(|e| Why::from_ureq(&e))
 }
 
 /// 이 자리가 이 기계 자신인가 — `http://127.0.0.1:…`·`localhost`·`[::1]`.

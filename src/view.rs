@@ -3437,6 +3437,48 @@ pub fn update_trouble(lang: Lang, why: &crate::user_config::UpdateTrouble) -> St
     }
 }
 
+/// `moai update` 가 못 올리는 까닭 한 줄([`crate::update::Refusal`], moai-zsfr.2p9). **고칠 길을 함께 댄다** —
+/// 이 거절은 그물을 타기 전에 서는 것이라, 사람이 할 일이 이 줄 말고는 어디에도 없다.
+pub fn update_refused(lang: Lang, why: &crate::update::Refusal) -> String {
+    use crate::update::Refusal;
+    match why {
+        Refusal::NotServed => say(lang, "update.refuse.not_served").to_string(),
+        Refusal::NotNamedMoai { name } => fill(say(lang, "update.refuse.not_named"), &[("name", name)]),
+        Refusal::BuiltByCargo { dir } => fill(say(lang, "update.refuse.cargo"), &[("dir", &dir.display().to_string())]),
+        Refusal::NotWritable { dir } => {
+            fill(say(lang, "update.refuse.unwritable"), &[("dir", &dir.display().to_string())])
+        }
+    }
+}
+
+/// `MOAI_REPO` 에 적힌 꼴이 아닌 값(moai-zsfr.2p9). 값은 따옴표로 싸 댄다 — 빈 칸이 든 값도 보이게.
+pub fn bad_repo_env(lang: Lang, why: &crate::latest::BadRepo) -> String {
+    fill(say(lang, "update.bad_repo_env"), &[("raw", &format!("{:?}", why.raw))])
+}
+
+/// 사용자 설정의 꼴이 아닌 `[update] repo`(moai-zsfr.2p9) — 탐색기 알림과 **같은 글**에 거절의 꼬리를 단다.
+pub fn bad_repo_config(
+    lang: Lang,
+    reg: &crate::user_config::Registry,
+    why: &crate::user_config::UpdateTrouble,
+) -> String {
+    let said = update_trouble(lang, why);
+    let said = match reg.path.as_deref() {
+        Some(at) => format!("{}: {said}", at.display()),
+        None => said,
+    };
+    fill(say(lang, "update.bad_repo_config"), &[("said", &said)])
+}
+
+/// `moai update --dry-run` 의 두 줄(moai-zsfr.2p9) — 받을 자리와 돌릴 명령. 돌릴 명령은 셸에 그대로 칠 수
+/// 있는 꼴이다([`crate::update::Plan::line`]).
+pub fn update_dry(lang: Lang, plan: &crate::update::Plan) -> Vec<String> {
+    vec![
+        fill(say(lang, "update.dry_fetch"), &[("url", &plan.script)]),
+        fill(say(lang, "update.dry_run"), &[("line", &plan.line())]),
+    ]
+}
+
 /// 시간대를 풀다 만난 한 줄([`crate::tz::Trouble`], moai-77ap).
 ///
 /// **막는 말이 아니다** — 어느 갈래든 화면은 UTC 로 서고 일은 그대로 돈다. 그래서 고치는 법을

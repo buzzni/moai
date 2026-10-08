@@ -7982,7 +7982,29 @@ const JSON_SWEEP: &[&str] = &[
     "merge-driver",
     // 위키를 읽기만 한다(moai-ihu4). 훑는 판에는 `docs/` 가 없다 — 없는 위키도 객체 하나와 0 이다.
     "wiki",
+    // `--dry-run` 으로만 부른다(moai-zsfr.2p9) — 받지도 돌리지도 않는다. 시험의 바이너리는 cargo 가 지은
+    // 자리(`target/`)에 서서 거절되므로, 그 밖에 걸어 둔 한 벌([`hoisted`])로 부른다.
+    "update",
 ];
+
+/// `install.sh` 가 판을 내는 기계인가 — `latest::SERVED` 와 같은 자다. 다른 기계에서 `moai update` 는 무엇보다
+/// 먼저 그것으로 거절된다.
+fn served() -> bool {
+    cfg!(any(all(target_os = "linux", target_arch = "x86_64"), all(target_os = "macos", target_arch = "aarch64")))
+}
+
+/// 시험의 바이너리를 `target/` 밖 `dir/bin/moai` 에 한 벌 세운다(moai-zsfr.2p9) — `moai update` 는 cargo 가
+/// 지은 자리를 그물 전에 거절하므로, 그 명령이 실제로 도는 길은 이 자리에서만 잰다. **걸어 둔다**(하드
+/// 링크) — 바이너리가 백몇십 MB 라 시험마다 베끼면 디스크를 그만큼 태운다. 다른 파일 시스템이면 베낀다.
+fn hoisted(dir: &Path) -> PathBuf {
+    let bin = dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let exe = bin.join("moai");
+    if std::fs::hard_link(BIN, &exe).is_err() {
+        std::fs::copy(BIN, &exe).unwrap_or_else(|e| panic!("{BIN} → {}: {e}", exe.display()));
+    }
+    exe
+}
 
 /// 그 설정 곁의 읽음 파일들을 이어 읽는다(moai-omx7) — 읽음은 이제 설정이 아니라
 /// `<설정 디렉터리>/read/<뿌리 해시>.toml` 에 프로젝트마다 하나씩 산다. 아직 아무것도 안 적었으면 빈 글이다.
@@ -8442,7 +8464,15 @@ fn every_command_still_speaks_json() {
         .collect();
     let three: Vec<&str> = three.iter().map(|p| p.to_str().unwrap()).collect();
     one_json_value(&ok(s.path(), &["merge-driver", three[0], three[1], three[2], "--json"]));
-    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read", "merge-driver"].contains(c)) {
+    // `update` 는 `target/` 밖의 한 벌로 — 시험의 바이너리는 cargo 가 지은 자리라 거절된다. 판을 안 내는
+    // 기계에서는 그 거절이 계약이라 훑지 않는다.
+    if served() {
+        let exe = hoisted(s.path());
+        let out = isolated(&exe).args(["update", "--dry-run", "--json"]).current_dir(s.path()).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        one_json_value(&String::from_utf8(out.stdout).unwrap());
+    }
+    for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read", "merge-driver", "update"].contains(c)) {
         assert!(cases.iter().any(|a| a[0] == *cmd), "`{cmd}` 가 JSON_SWEEP 에는 있는데 실제로 부르지 않는다");
     }
     for args in &cases {

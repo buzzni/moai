@@ -197,6 +197,14 @@ pub enum UpdateTrouble {
     BadRepo { raw: String },
 }
 
+impl UpdateTrouble {
+    /// 받을 저장소를 읽다 만난 것인가 — `moai update` 는 이 탈이 서면 **돌리지 않는다**(moai-zsfr.2p9).
+    /// 틀린 값을 건너뛰고 기본 저장소의 스크립트를 돌리면, 포크를 고른 사람이 본가의 판을 깐다.
+    pub fn about_repo(&self) -> bool {
+        matches!(self, UpdateTrouble::RepoNotAWord { .. } | UpdateTrouble::BadRepo { .. })
+    }
+}
+
 /// [`LookTrouble::Want`] 가 바라는 꼴. **낱말이 아니라 갈래로 든다** — 글로 들면 말묶음이
 /// 반쪽만 옮겨진다(`낱말이어야` 를 영어 문장에 끼울 자리가 없다).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

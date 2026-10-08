@@ -24,6 +24,7 @@ pub mod skill;
 pub mod stats;
 pub mod status;
 pub mod tui;
+pub mod update;
 pub mod wiki;
 
 use crate::cli::{BacklogCmd, Cli, Cmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
@@ -271,6 +272,18 @@ pub fn runnable(path: &std::path::Path) -> bool {
     {
         path.is_file()
     }
+}
+
+/// 명령이 고른 종료 코드 — 0 이면 안 고른 것이다. **남의 프로그램의 종료 코드를 그대로 옮기는 자리**가
+/// 쓴다(`moai update` 가 `sh` 의 것을, moai-zsfr.2p9). [`PARTIAL`] 의 1 로 접으면 `install.sh` 가 고른
+/// 코드를 부른 쪽이 못 읽는다.
+static EXIT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn exit_with(code: u8) {
+    EXIT.store(code, Ordering::Relaxed);
+}
+pub fn chosen_exit() -> u8 {
+    EXIT.load(Ordering::Relaxed)
 }
 
 pub fn note_partial() {
@@ -528,6 +541,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
+        // 트래커를 안 찾는다 — 올리는 것은 이 바이너리다(moai-zsfr.2p9).
+        Cmd::Update(a) => update::run(ctx, a),
         Cmd::Add(a) => add::run(ctx, a, None),
         Cmd::Show(a) => show::run(ctx, a, None),
         Cmd::Stats(a) => stats::run(ctx, a),

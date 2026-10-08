@@ -281,8 +281,8 @@ no human-shaped output mixed in.
   to stdout. Human output disappears entirely; it is not interleaved.
 - Failures are JSON too, with a stable `code` you can branch on — `not_found`,
   `bad_status`, `bad_filter`, `bad_target`, `bad_input`, `no_actor`,
-  `already_exists`, `locked`, `broken`, and `error` as the catch-all. The human
-  sentence beside it is not something to match on.
+  `already_exists`, `locked`, `broken`, `not_updatable`, and `error` as the
+  catch-all. The human sentence beside it is not something to match on.
 - Keys that are always present stay present. `moai ready --json` is
   `{"ready":[…],"others":[…],"held":[…]}`, never a bare array — `others` is ready
   work that is someone else's or nobody's (`owner` says which), and `held` is work
