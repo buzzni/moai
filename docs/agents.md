@@ -112,7 +112,8 @@ registration away and leaves the files; with
 `--agent codex` or `antigravity` it prints the `rm -r` lines for moai's skills
 in `.agents/skills/`, and the `rm` line for that agent's hooks file when moai
 wrote it, and deletes nothing. `moai skill status` shows Claude's registration,
-whether `.agents/skills/` holds this version's skills, whether each hooks file is
+whether `.agents/skills/` holds this version's skills (a CRLF checkout counts as
+the same text) and names a retired skill's directory left there, whether each hooks file is
 this version's (or not moai's) — judged by the moai that file calls, the way the
 plugin is, so a different build running `status` does not ask to plant again —
 and whether `codex` and `agy` are on PATH — and exits 0 whatever it finds.

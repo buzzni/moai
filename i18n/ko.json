@@ -763,6 +763,7 @@
   "skill.row_agents": ".agents",
   "skill.agents_current": "지금 판 — codex 와 antigravity 가 읽는다",
   "skill.agents_stale": "파일 {n}개가 지금 판과 다르다 — `moai skill install --agent codex` 로 다시 심는다",
+  "skill.agents_leftover": "이 판이 더는 안 심는 스킬이 남았다(아래) — `moai skill install --agent codex` 가 걷는다",
   "skill.agents_missing": "안 심겼다 — `moai skill install --agent codex` 가 codex 와 antigravity 몫으로 심는다",
   "skill.on_path": "PATH 에 있다",
   "skill.not_on_path": "PATH 에 없다",

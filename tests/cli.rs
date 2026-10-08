@@ -14943,6 +14943,88 @@ fn a_stale_planted_tree_names_the_install_line() {
     assert_eq!(n["hint"], "moai skill install");
 }
 
+/// **`core.autocrlf` 로 받은 스킬 글은 지금 판이다**(moai-9s9s.x3n). 남은 디렉터리의 머리를 재는 `ours` 는 `\r\n` 을
+/// 받는데, `skills_stale` 알림과 `skill status` 의 `.agents` 줄은 바이트째 견줘 그런 클론에서 알림이 영영 안 걷혔다 —
+/// 다시 심어도 체크아웃이 같은 `\r\n` 으로 되돌린다. 두 트리(Claude·`.agents`)와 두 읽는 자를 다 잰다.
+#[test]
+fn a_crlf_checkout_of_the_planted_skills_is_current() {
+    let s = init("crlfskills");
+    let root = s.path();
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    // 맨 `install` 이 진짜 `claude` 에 닿지 않게 PATH 를 끊는다(위 시험과 같은 까닭). 트리는 그래도 심긴다.
+    staged(&["skill", "install"]).current_dir(root).env("PATH", "/nonexistent").output().unwrap();
+    let mut turned = 0;
+    for tree in [".agents/skills", ".claude/moai-plugin/skills"] {
+        let mut walk = vec![root.join(tree)];
+        while let Some(at) = walk.pop() {
+            for entry in std::fs::read_dir(&at).unwrap() {
+                let p = entry.unwrap().path();
+                if p.is_dir() {
+                    walk.push(p);
+                } else {
+                    let body = std::fs::read_to_string(&p).unwrap();
+                    std::fs::write(&p, body.replace('\n', "\r\n")).unwrap();
+                    turned += 1;
+                }
+            }
+        }
+    }
+    assert!(turned >= 4, "바꿀 글이 안 심겼다 — {turned}");
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["status", "--json"])).unwrap();
+    let stale: Vec<_> = v["notices"].as_array().unwrap().iter().filter(|n| n["kind"] == "skills_stale").collect();
+    assert!(stale.is_empty(), "`\\r\\n` 체크아웃을 낡았다고 했다 — {stale:?}");
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["skill", "status", "--json"])).unwrap();
+    assert_eq!(v["agents"]["state"], "current", "`\\r\\n` 체크아웃을 낡았다고 했다 — {}", v["agents"]);
+    assert_eq!(v["agents"]["stale"], serde_json::json!([]));
+
+    // 글이 정말 다르면 여전히 낡았다 — 줄 끝만 접는다.
+    std::fs::write(root.join(".agents/skills/moai/SKILL.md"), "old\r\n").unwrap();
+    let v: serde_json::Value = serde_json::from_str(&ok(root, &["skill", "status", "--json"])).unwrap();
+    assert_eq!(v["agents"]["state"], "stale");
+}
+
+/// **`skill status` 는 걷힌 스킬의 남은 디렉터리를 이름과 까닭째 댄다**(moai-9s9s.v0y). 사람의 파일이 든 디렉터리는
+/// `install` 이 남기는데(`foreign`) 그 안의 `SKILL.md` 가 걷힌 명령을 계속 가르쳤고, `skill status` 는 `.agents` 를 "지금
+/// 판" 이라고만 했다. **아무것도 안 막는다** — 종료 코드는 0 이고, 사람의 것이 든 자리는 `install` 이 못 고치니 낡았다고
+/// 하지 않는다. 걷을 꼴(`planned`)은 `skills_stale` 알림과 같은 자로 낡았다고 한다.
+#[test]
+fn skill_status_names_a_retired_skill_left_behind() {
+    let s = init("skillleft");
+    let root = s.path();
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    let status = || -> serde_json::Value { serde_json::from_str(&ok(root, &["skill", "status", "--json"])).unwrap() };
+    assert_eq!(status()["agents"]["leftovers"], serde_json::json!([]), "빈 자리에서도 키는 늘 선다");
+
+    let work = root.join(".agents/skills/moai-work");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(work.join("SKILL.md"), "---\nname: moai-work\n---\nmoai hello\n").unwrap();
+    let v = status();
+    assert_eq!(v["agents"]["state"], "stale", "`install` 이 걷을 디렉터리를 두고 지금 판이라 했다");
+    assert_eq!(v["agents"]["leftovers"][0]["state"], "planned");
+    // 글은 영어로 견준다 — `init argos` 의 저장소는 한국어로 말한다.
+    let english = || staged(&["skill", "status"]).current_dir(root).env("MOAI_LANG", "en").output().unwrap();
+    let said = String::from_utf8(english().stdout).unwrap();
+    assert!(said.contains("! remove:") && said.contains("moai-work"), "걷을 디렉터리를 안 댄다\n{said}");
+    // 다른 파일은 없다 — 디렉터리 하나를 "파일 1개가 다르다" 로 세지 않는다.
+    assert!(!said.contains("files differ") && said.contains("left behind"), "남은 디렉터리를 파일 수로 셌다\n{said}");
+
+    // 사람의 메모가 들면 `install` 이 안 걷는다 — 그래도 그 자리를 댄다.
+    std::fs::write(work.join("notes.md"), "mine\n").unwrap();
+    ok(root, &["skill", "install", "--agent", "codex"]);
+    assert!(work.join("SKILL.md").is_file(), "사람의 것이 든 디렉터리를 걷었다");
+    let v = status();
+    assert_eq!(v["agents"]["state"], "current", "`install` 이 못 고치는 자리를 낡았다고 했다");
+    let left = v["agents"]["leftovers"].as_array().unwrap();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!(left[0]["state"], "foreign");
+    assert!(left[0]["path"].as_str().unwrap().ends_with("moai-work"), "{left:?}");
+    let out = english();
+    assert!(out.status.success(), "남은 디렉터리가 종료 코드를 바꿨다");
+    let said = String::from_utf8(out.stdout).unwrap();
+    let line = said.lines().find(|l| l.contains("moai-work")).unwrap_or_else(|| panic!("이름을 안 댄다\n{said}"));
+    assert!(line.contains("left as it is"), "왜 남겼는지 안 댄다 — {line}");
+}
+
 /// 자리는 stdin 이 정한다. 훅 프로세스가 어디서 도는지는 아무도 약속하지 않았다.
 #[test]
 fn the_hook_works_where_stdin_says() {
@@ -25156,11 +25238,11 @@ fn antigravity_holds_the_turn_with_continue() {
     assert!(stop(&held).trim().is_empty(), "붙든 뒤에 또 붙들었다");
 }
 
-/// **오류로 끝난 Antigravity 의 실행은 `StopFailure` 처럼 다룬다**(리뷰 moai-u5wr.e74) — agy 는 API 오류에도 `Stop` 을
+/// **오류로 끝난 Antigravity 의 실행은 판정할 것이 없다**(리뷰 moai-u5wr.e74) — agy 는 API 오류에도 `Stop` 을
 /// 내고 까닭을 `error` 에 싣는다. 실패하는 백엔드에 `continue` 로 밀어 넣지 않고, 세션에 한 번인 닫기 물음도 그 판에
 /// 안 쓴다 — 다음의 멀쩡한 `Stop` 이 묻는다.
 #[test]
-fn an_antigravity_run_that_failed_is_a_stop_failure() {
+fn an_antigravity_run_that_failed_is_not_judged() {
     let s = init("agy-failed");
     let id = add(s.path(), &["락을 잡는다"]);
     ok(s.path(), &["mv", &id, "in_progress"]);
@@ -25240,8 +25322,7 @@ fn a_codex_stop_holds_its_closing_question_inside_codexs_limit() {
 fn every_dialect_and_event_never_fails() {
     let s = init("hooksafe-dialects");
     let outside = Scratch::new("hooksafe-dialects-outside");
-    let events =
-        ["session-start", "user-prompt-submit", "pre-tool-use", "stop", "stop-failure", "interrupt", "session-end"];
+    let events = ["session-start", "user-prompt-submit", "pre-tool-use", "stop"];
     for input in [event(&outside, "s1"), "not json at all".into(), String::new(), "{\"toolCall\":7}".into()] {
         for dialect in ["claude", "codex", "antigravity"] {
             for ev in events {
@@ -25252,74 +25333,25 @@ fn every_dialect_and_event_never_fails() {
     }
 }
 
-/// **0.9 전에 심은 훅이 부르는 셋은 저장소 안에서도 빈 명령이다**(moai-5uwh.e9j) — 다시 심기 전의 Claude 플러그인은
-/// `stop-failure`·`session-end` 를, Codex 의 `.codex/hooks.json` 은 `interrupt`·`session-end` 를 부른다. 기록한 Codex
-/// 입력과 Claude 의 세션 하나로 저장소 안에서 부른다 — 아무것도 안 내고, 출석이 적던 자리(`.moai/agents`·`.moai/mail`)를
-/// 안 세우며, 그 세션의 기준선도 안 고친다. 저장소 밖의 입력만 재는 [`every_dialect_and_event_never_fails`] 는 그 셋이
-/// 트래커를 읽고 무엇을 적어도 푸르다.
+/// **0.9 전에 심은 훅이 부르던 셋은 이제 없는 이벤트다**(moai-9s9s.vzn) — 0.9 는 `stop-failure`·`interrupt`·
+/// `session-end` 를 한 판 빈 명령으로 남겼고 이 판에 지웠다. 다시 심기 전의 훅은 오류를 내고, `skill install` 이 그
+/// 훅을 걷는다. 빈 명령으로 되돌리면 0 으로 끝나 붉어진다 — 다른 이벤트는 무엇이 와도 0 이다
+/// ([`every_dialect_and_event_never_fails`]).
 #[test]
-fn the_events_planted_before_0_9_do_nothing_inside_a_repository() {
+fn the_events_planted_before_0_9_are_gone() {
     let s = init("hook-legacy-events");
-    let sid = "01a107b4-ee4b-7b13-9ae8-269f43b5a38f";
-    dialect_out(&s, "codex", "session-start", &recorded(&s, "codex/session-start.json"));
-    let before = baseline(&s, sid);
-    assert!(before.is_some(), "Codex 의 여는 훅이 기준선을 안 적었다");
-    // 경고를 늘린다 — 빈 명령이 기준선을 다시 적으면 그 수가 달라진다.
-    ok(s.path(), &["add", "에픽 없는 일"]);
-    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
-        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
-        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
+    let input = event(&s, "sessLGCY-0001");
+    for dialect in ["claude", "codex", "antigravity"] {
+        for ev in ["stop-failure", "interrupt", "session-end"] {
+            let out = from_stdin(s.path(), &["hook", ev, "--dialect", dialect], &input);
+            assert!(!out.status.success(), "{dialect} {ev} 가 아직 명령으로 선다");
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(err.contains(ev), "{dialect} {ev} 의 오류가 그 이름을 안 댄다\n{err}");
+        }
     }
-    let claude = event(&s, "sessLGCY-0001");
-    for ev in ["session-start", "stop-failure", "session-end"] {
-        let out = hook_out(&s, ev, &claude);
-        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
-    }
-    assert_eq!(baseline(&s, sid), before, "빈 명령이 Codex 세션의 기준선을 고쳤다");
-    for gone in [".moai/agents", ".moai/mail"] {
-        assert!(!s.path().join(gone).exists(), "훅이 {gone} 를 세웠다");
-    }
-}
-
-/// **0.9 전에 심은 셋은 스냅샷을 읽기 전에 돌아간다**(moai-ybns.451.sdk) — 위 시험은 그 셋이 아무것도 안 내고 안 적는
-/// 것만 잰다. `decide` 의 빈 명령 갈래를 트래커를 읽은 뒤로 내려도 푸르다 — 그 갈래가 서는 까닭은 세션이 끝날 때마다
-/// 스냅샷 전체를 읽고 버리지 않는 것이다. 그래서 `.moai/issues.jsonl` 의 atime 을 2000-01-01 로 돌려 두고 부른 뒤
-/// 그대로인지 본다.
-///
-/// **대조로 여는 훅이 그 값을 움직이는 것을 먼저 본다** — atime 을 안 적는 파일 시스템(`noatime`)이면 이 시험은 아무것도
-/// 못 재니, 그때는 조용히 푸르지 않고 붉어진다. `relatime` 은 24시간보다 낡은 atime 을 고치므로 2000 년이면 선다.
-#[cfg(target_os = "linux")]
-#[test]
-fn the_events_planted_before_0_9_return_before_reading_the_snapshot() {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-    let s = init("hook-legacy-atime");
-    ok(s.path(), &["add", "읽히는지 볼 줄"]);
-    let snapshot = s.path().join(".moai/issues.jsonl");
-    let old = UNIX_EPOCH + Duration::from_secs(946_684_800); // 2000-01-01T00:00:00Z
-    let rewind = || {
-        let f = std::fs::File::options().write(true).open(&snapshot).unwrap();
-        f.set_times(std::fs::FileTimes::new().set_accessed(old)).unwrap();
-        assert_eq!(std::fs::metadata(&snapshot).unwrap().accessed().unwrap(), old, "atime 을 못 돌렸다");
-    };
-    let accessed = || std::fs::metadata(&snapshot).unwrap().accessed().unwrap();
-
-    let claude = event(&s, "sessATIM-0001");
-    rewind();
-    hook_out(&s, "session-start", &claude);
-    let moved: SystemTime = accessed();
-    assert_ne!(moved, old, "여는 훅이 읽어도 atime 이 그대로다 — 이 파일 시스템에서는 이 시험이 아무것도 못 잰다");
-
-    for ev in ["stop-failure", "session-end"] {
-        rewind();
-        let out = hook_out(&s, ev, &claude);
-        assert!(out.trim().is_empty(), "claude {ev} 가 무언가 냈다\n{out}");
-        assert_eq!(accessed(), old, "claude {ev} 가 스냅샷을 읽었다");
-    }
-    for (ev, input) in [("interrupt", "codex/interrupt.json"), ("session-end", "codex/session-end.json")] {
-        rewind();
-        let out = dialect_out(&s, "codex", ev, &recorded(&s, input));
-        assert!(out.trim().is_empty(), "codex {ev} 가 무언가 냈다\n{out}");
-        assert_eq!(accessed(), old, "codex {ev} 가 스냅샷을 읽었다");
+    let help = ok(s.path(), &["hook", "--help"]);
+    for ev in ["stop-failure", "interrupt", "session-end"] {
+        assert!(!help.contains(ev), "도움말이 걷은 {ev} 를 아직 적는다\n{help}");
     }
 }
 

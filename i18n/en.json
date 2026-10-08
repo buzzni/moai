@@ -763,6 +763,7 @@
   "skill.row_agents": ".agents",
   "skill.agents_current": "current — codex and antigravity read it",
   "skill.agents_stale": "{n} files differ from this version — `moai skill install --agent codex` plants them again",
+  "skill.agents_leftover": "a skill this version no longer plants is left behind (below) — `moai skill install --agent codex` removes it",
   "skill.agents_missing": "not planted — `moai skill install --agent codex` plants it for codex and antigravity",
   "skill.on_path": "on PATH",
   "skill.not_on_path": "not on PATH",
