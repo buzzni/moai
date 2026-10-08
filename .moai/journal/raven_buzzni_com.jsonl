@@ -5665,3 +5665,4 @@
 {"ts":"2026-10-08T02:33:36Z","id":"moai-ltsv.y10","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-08T02:33:37Z","id":"moai-ltsv.o0j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 다섯(kind show 의 type= 거절, CHANGELOG 코드 bad_filter, - 검사 자리, 잠금 실패 길의 태그 안내, query::pair 로 자름 하나) — c5fc4fb5. 넘긴 것: kind show 가 --type 을 말없이 무시 → moai-i6vu(에픽 전부터, 릴리스 밖). 안 받은 것: BOM(defer 와 같은 자), gh 줄 설명(스크립트 꼴), 시험 준비 중복(without_user 이름이 그르다)"}
 {"ts":"2026-10-08T02:33:43Z","id":"moai-ltsv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 다 끝났다 — develop 1855cb22 에 머지, 멤버 다섯과 리뷰 닫음. 남은 것은 릴리스 밖 backlog moai-i6vu(kind show 가 --type 을 무시)"}
+{"ts":"2026-10-08T02:35:05Z","id":"moai-dgt7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ready·show·prime --worktree 가 gather 의 루트 사본을 버린다 — 안 쓰는 쪽은 베끼지 않게"}
