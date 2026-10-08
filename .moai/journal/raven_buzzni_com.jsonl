@@ -5740,3 +5740,13 @@
 {"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.ztj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T06:54:35Z","id":"moai-nvju.qhy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T07:01:32Z","id":"moai-9s9s.hs8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Codex 를 지금 쓰지 않는다(사람 결정 2026-10-08) — 실제 exec_command workdir 페이로드가 기록되면 다시 연다"}
+{"ts":"2026-10-08T07:01:34Z","id":"moai-nvju.2e6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사람이 정한 것(2026-10-08, 일꾼 창에서 물음):\n- 마일스톤 밖 일(p0 핫픽스)은 develop 에서 뜨고 develop 으로 머지한다. 감독은 그 일의 Base branch 를 develop 으로 준다\n- 마일스톤 가지는 develop 을 릴리스 때 한 번 받는다 — 마일스톤 워크트리에서 develop 을 머지하고 시험한 뒤, 루트(develop)에서 --no-ff 로 들인다. 충돌은 루트가 아니라 마일스톤 워크트리에서 푼다. 에픽이 develop 의 핫픽스가 필요하면 그때 받는다\n- 에픽을 마일스톤 가지로 머지하는 자리는 .worktrees/milestone-<마일스톤 id> 다. 마일스톤이 도는 동안 서 있고, 첫 에픽의 일꾼이 그것이 없으면 develop 에서 가지와 워크트리를 띄운다. 릴리스 뒤 지운다\n- 에픽 가지도 마일스톤 가지도 rebase·squash 없이 merge --no-ff 로 그대로 머지한다(감독 권장을 받음). 리뷰 전 제 가지의 커밋 제목 고치기는 괜찮고, 리뷰 중에는 안 된다"}
+{"ts":"2026-10-08T07:02:52Z","id":"moai-nvju","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 서브에이전트 둘(ztj 코드, yc2·qgs·qhy 글)이 .worktrees/moai-nvju 에서 도는 중. 끝나면 검토, cargo test, /code-review high --fix, 머지"}
+{"ts":"2026-10-08T07:16:49Z","id":"moai-nvju.lon","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 마일스톤 가지 에픽 전체"}
+{"ts":"2026-10-08T07:16:57Z","id":"moai-nvju.lon","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T07:16:59Z","id":"moai-nvju.2e6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-08T07:17:01Z","id":"moai-nvju.yc2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-08T07:17:02Z","id":"moai-nvju.qgs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-08T07:17:04Z","id":"moai-nvju.ztj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-08T07:17:06Z","id":"moai-nvju.qhy","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-08T07:25:50Z","id":"moai-zo36","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에픽 워크트리의 낡은 사본이 held_elsewhere 를 느슨하게 한다"}
