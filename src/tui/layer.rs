@@ -1982,10 +1982,11 @@ mod tests {
         a.hit("SPC v w Esc");
         assert!(!a.worktree, "프로젝트 안에서 w 가 안 껐다");
         // 보기는 사람의 설정이라 **따라간다**(moai-2bzp) — 겹쳐 보기와 반대다.
+        // 처음 보기가 done 을 보이니(moai-muit) `SPC v 4` 는 done 을 숨긴다.
         a.hit("SPC v 4 Esc");
         a.hit("SPC s t Esc");
         let (view, order) = (a.view.clone(), a.order);
-        assert!(!view.hides(crate::config::DONE), "프로젝트 안에서 SPC v 4 가 done 을 안 보였다");
+        assert!(view.hides(crate::config::DONE), "프로젝트 안에서 SPC v 4 가 done 을 안 숨겼다");
 
         a.key(key(KeyCode::Home));
         a.hit("0");
@@ -3015,8 +3016,8 @@ mod tests {
         let s = Scratch::fenced("layer-view-on-read");
         let one = s.project("one", &[("argos-0001", "열린 줄", "todo"), ("argos-0002", "끝난 줄", "done")]);
         let cfg = s.register(&[&one]);
-        let mut a = layered(&cfg);
-        assert!(a.view.hides(crate::config::DONE), "시험의 전제 — 탐색기는 done 을 숨긴 채로 뜬다");
+        // 처음 보기는 done 을 보인다(moai-muit) — 펼치기 전에 done 을 숨긴 보기를 걸어 둔다.
+        let mut a = crate::tui::tests::old_look(layered(&cfg));
         a.want_site(0);
         settle(&mut a);
         assert_eq!(titles(&a), ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");

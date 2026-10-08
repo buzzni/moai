@@ -2106,10 +2106,11 @@ impl App {
             discarded: Vec::new(),
             let_go: 0,
             read: prepare,
-            // **처음에는 done 을 숨긴다**(사람의 결정, 2026-09-14). 끝난 것이 목록을 채워 지금 볼
-            // 것을 덮었고, 걷으려면 `status=todo,in_progress,review` 를 손으로 적어야 했다.
             legacy_read: Default::default(),
-            view: view::View::hiding(crate::config::DONE),
+            // **처음에는 done 을 보이고 미룬 것을 숨긴다**(사람의 결정, 2026-10-08, moai-muit). done 을 숨기던
+            // 처음값(2026-09-14)을 뒤집었다 — 오래 끝난 것은 아카이브가 따로 숨긴다(`show_archived`). 기억한
+            // 보기(`[tui]`)는 `apply_look` 이 뒤에서 덮는다.
+            view: view::View { hide_deferred: true, ..view::View::default() },
             order: Default::default(),
             fields: Default::default(),
             detail_open: true,
@@ -6325,11 +6326,11 @@ mod tests {
             .collect()
     }
 
-    /// **처음에는 done 을 숨기고 `SPC v` 가 칸·미룸을 켜고 끈다**(moai-fmv5). 보기는 거름망이
-    /// 아니라 Esc 가 안 푼다. 끝난 멤버가 있어도 안 끝난 멤버가 있는 에픽은 선다. 토글 뒤에도
-    /// 커서는 보던 줄에 붙는다.
+    /// **처음에는 done 을 보이고 미룬 것을 숨기며, `SPC v` 가 칸·미룸을 켜고 끈다**(moai-fmv5, 처음 보기는
+    /// 2026-10-08 사람의 결정 moai-muit). 뱃지는 미룸을 숨겼다고 댄다. 보기는 거름망이 아니라 Esc 가 안 푼다.
+    /// 토글 뒤에도 커서는 보던 줄에 붙는다.
     #[test]
-    fn done_starts_hidden_and_the_view_menu_brings_it_back() {
+    fn the_first_view_shows_done_and_hides_deferred() {
         let mut done_member = member("argos-0003", "argos-0001");
         done_member.status = Status::new("done");
         let mut loose_done = make("argos-0009", Kind::Issue);
@@ -6340,25 +6341,54 @@ mod tests {
             vec![make("argos-0001", Kind::Epic), done_member, member("argos-0004", "argos-0001"), loose_done, put_off];
         let mut a = App::new(issues, cfg(), Path::new());
 
-        assert_eq!(row_ids(&a), ["argos-0001", "argos-0010"], "done 이 처음부터 보인다");
+        assert_eq!(a.view, view::View { hide_deferred: true, ..view::View::default() }, "처음 보기가 달라졌다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "done 이 숨었거나 미룬 줄이 처음부터 보인다");
+        let badge = a.view.badge(&a.screen_statuses(), a.aged(), a.site.lang);
+        assert_eq!(badge.as_deref(), Some("미룸 숨김"), "뱃지가 숨긴 미룸을 안 댔다");
         a.hit("Enter");
-        assert_eq!(row_ids(&a), ["argos-0004"], "에픽 안의 끝난 멤버가 보인다");
+        assert_eq!(row_ids(&a), ["argos-0003", "argos-0004"], "에픽 안의 끝난 멤버가 안 보인다");
         a.hit("Bksp");
 
         a.cursor = 1;
-        a.hit("SPC v 4 Esc");
-        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"]);
-        assert_eq!(row_ids(&a)[a.cursor], "argos-0010", "토글이 커서를 딴 줄로 옮겼다");
-        a.hit("Esc");
-        assert_eq!(row_ids(&a).len(), 3, "Esc 가 보기를 풀었다");
-
         a.hit("SPC v l Esc");
-        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009"], "미룸이 안 숨었다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0009", "argos-0010"], "미룸이 안 보였다");
+        assert_eq!(row_ids(&a)[a.cursor], "argos-0009", "토글이 커서를 딴 줄로 옮겼다");
+        a.hit("Esc");
+        assert_eq!(row_ids(&a).len(), 3, "Esc 가 보기를 바꿨다");
+
         // 설정의 넷째 칸이 done 이다 — done 을 켜고 끄는 길은 번호 하나다(moai-h6z3).
         a.hit("SPC v 4 Esc");
-        assert_eq!(row_ids(&a), ["argos-0001"]);
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0010"], "done 이 안 숨었다");
         a.hit("SPC v a");
         assert_eq!(row_ids(&a).len(), 3, "모두 보이기가 다 안 보인다");
+    }
+
+    /// **기억한 보기가 처음 보기를 이긴다**(moai-muit) — `[tui]` 에 적힌 `hidden`·`hide_deferred` 는 처음값(done 보임·
+    /// 미룸 숨김) 위에 그대로 선다.
+    #[test]
+    fn a_remembered_look_wins_over_the_first_view() {
+        let s = scratch("look-over-first");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\nhidden = [\"done\"]\nhide_deferred = false\n").unwrap();
+        let mut finished = make("argos-0002", Kind::Issue);
+        finished.status = Status::new("done");
+        let mut put_off = make("argos-0003", Kind::Issue);
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue), finished, put_off], cfg(), Path::new());
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0002"], "시험의 전제 — 처음 보기는 done 보임·미룸 숨김이다");
+        a.user_config = Some(user);
+        a.load_look();
+        assert_eq!(a.view, view::View::hiding(crate::config::DONE), "기억한 보기가 처음 보기에 졌다");
+        assert_eq!(row_ids(&a), ["argos-0001", "argos-0003"], "기억한 보기대로 줄이 안 섰다");
+
+        // **적히지 않은 키는 처음값 그대로다** — 다른 키만 든 `[tui]` 가 미룸 숨김까지 걷으면 처음 보기가 그 사람에게만 안 선다.
+        let other = s.join("other.toml");
+        std::fs::write(&other, "[tui]\nsort = \"title\"\nhidden = []\n").unwrap();
+        let mut b = App::new(a.site.issues.clone(), cfg(), Path::new());
+        b.user_config = Some(other);
+        b.load_look();
+        assert!(b.view.hide_deferred, "적히지 않은 hide_deferred 를 처음값에서 걷었다");
+        assert_eq!(row_ids(&b), ["argos-0001", "argos-0002"], "적히지 않은 키가 처음 보기를 따르지 않았다");
     }
 
     /// **done 을 켜도 아카이브는 숨고, 뱃지가 그 수를 대며, `SPC v o` 가 보인다**(moai-47mz, 2026-10-03 사용자 결정).
@@ -6464,7 +6494,8 @@ mod tests {
     }
 
     /// 보드 시험의 바닥(moai-9nfw). 마일스톤 0001 밑에 에픽 0002(멤버 0003 todo·p1, 0004 in_progress·p2),
-    /// 마일스톤 없는 0005(todo·p3)·backlog 0006·미룬 0007(todo·p0).
+    /// 마일스톤 없는 0005(todo·p3)·backlog 0006·미룬 0007(todo·p0). 보기는 옛 처음 보기([`old_look`] — done 숨김·
+    /// 미룸 보임)라 미룸 칸이 선다.
     fn boarded() -> App {
         let mut epic = make("argos-0002", Kind::Epic);
         epic.milestone = Some("argos-0001".into());
@@ -6486,7 +6517,15 @@ mod tests {
             make("argos-0006", Kind::Backlog),
             put_off,
         ];
-        App::new(issues, cfg(), Path::new())
+        old_look(App::new(issues, cfg(), Path::new()))
+    }
+
+    /// **옛 처음 보기(done 숨김·미룬 것 보임)를 손으로 건다**(moai-muit) — 처음 보기가 2026-10-08 에 done 보임·미룸
+    /// 숨김으로 뒤집혔다. 처음 보기가 아니라 다른 것을 재는 시험이 그 전제를 제 바닥에 적는다.
+    pub(crate) fn old_look(mut a: App) -> App {
+        a.view = view::View::hiding("done");
+        a.see();
+        a
     }
 
     /// 지금 커서가 선 줄의 id — 바구니처럼 제 줄이 없으면 빈 글이다.
@@ -6579,7 +6618,7 @@ mod tests {
     fn on_the_board_h_and_l_cross_columns_and_tab_does_nothing() {
         let mut a = boarded();
         a.layout = view::Layout::Board;
-        // 칸은 backlog · 미룸 · todo · in_progress · review 다(done 은 처음에 숨는다). 0003·0005 가 todo 다.
+        // 칸은 backlog · 미룸 · todo · in_progress · review 다(done 은 바닥이 숨긴다). 0003·0005 가 todo 다.
         let at = |a: &App, id: &str| row_ids(a).iter().position(|r| r == id).unwrap();
         a.cursor = at(&a, "argos-0003");
         a.hit("j");
@@ -7321,7 +7360,8 @@ mod tests {
             make("argos-0011", Kind::Issue),
         ];
         let mut a = App::new(issues, cfg(), Path::new());
-        a.hit("SPC v l Esc");
+        a.view = view::View { hidden: vec!["done".into()], hide_deferred: true, ..view::View::default() };
+        a.see();
         a
     }
 
@@ -8472,9 +8512,9 @@ mod tests {
         is[1].status = Status::new("done");
         // 멤버의 우선순위를 에픽보다 세게 둔다 — 형제끼리만 매기면 에픽 밑에 그대로 남는다.
         is[2].priority = Some(0);
-        let mut a = App::new(is, cfg(), Path::new());
+        let mut a = old_look(App::new(is, cfg(), Path::new()));
         a.key(key(KeyCode::Char('l')));
-        // 처음에는 done 을 숨긴다(moai-fmv5) — 펼친 멤버에도 그 보기가 그대로 걸린다.
+        // done 을 숨긴 보기(moai-fmv5)가 펼친 멤버에도 그대로 걸린다.
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0004"], "done 숨김이 펼친 멤버에 안 걸렸다");
         a.hit("SPC v 4 Esc");
         // 형제끼리의 차례는 고른 정렬이 매긴다 — p0 인 0004 가 0003 앞이다.
@@ -11673,8 +11713,9 @@ mod tests {
         let c = open();
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
+        // 처음 보기가 done 을 보이니(moai-muit) b 의 `SPC v 4` 는 done 을 숨긴 것이다.
         assert!(
-            !c.view.hides(crate::config::DONE)
+            c.view.hides(crate::config::DONE)
                 && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false },
             "{text}"
         );
@@ -11697,22 +11738,22 @@ mod tests {
     }
 
     /// **적어 둔 보기를 입힌 뒤에 층을 얹는다**(moai-2kyl 단계 리뷰 — `cmd/tui.rs::run` 의 차례).
-    /// 처음값 보기(done 숨김)로 세우면 끝난 줄뿐인 뿌리가 통째로 비어, 층을 먼저 얹은 화면은
+    /// 처음값 보기(미룸 숨김, moai-muit)로 세우면 미룬 줄뿐인 뿌리가 통째로 비어, 층을 먼저 얹은 화면은
     /// 적어 둔 보기가 그 줄을 도로 보여도 커서가 목록 밖에 남는다. 뿌리의 `..` 을 걷은
     /// 뒤(moai-i784)로 `with_layer` 는 커서를 안 건드리므로, 이 시험이 재는 것은 커서가 **첫
-    /// 줄**(그 끝난 줄)에 서는가다.
+    /// 줄**(그 미룬 줄)에 서는가다.
     #[test]
     fn the_saved_look_is_on_before_the_layer_places_the_first_cursor() {
         let s = scratch("look-layer");
         let user = s.join("user.toml");
-        std::fs::write(&user, "[tui]\nhidden = []\n").unwrap();
-        let mut finished = make("argos-0001", Kind::Issue);
-        finished.status = Status::new("done");
-        let mut a = App::new(vec![finished], cfg(), Path::new());
+        std::fs::write(&user, "[tui]\nhide_deferred = false\n").unwrap();
+        let mut put_off = make("argos-0001", Kind::Issue);
+        put_off.deferred_at = Some("2026-09-02T00:00:00Z".into());
+        let mut a = App::new(vec![put_off], cfg(), Path::new());
         a.user_config = Some(user);
         a.load_look();
         let a = a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
-        assert_eq!(a.rows().len(), 1, "시험의 전제 — 끝난 줄 하나 (뿌리에 `..` 은 없다)");
+        assert_eq!(a.rows().len(), 1, "시험의 전제 — 미룬 줄 하나 (뿌리에 `..` 은 없다)");
         assert_eq!(a.cursor, 0, "첫 화면이 그 줄에 안 섰다");
     }
 
@@ -12598,6 +12639,9 @@ mod tests {
         text.push_str(&format!("{}\n", serde_json::to_string(&member("argos-0002", "argos-0009")).unwrap()));
         std::fs::write(&live, text).unwrap();
         a.reload();
+        // 처음 보기는 미룬 것을 숨긴다(moai-muit) — 이 시험은 보이는 데서 `SPC v l` 로 숨기는 것을 잰다.
+        a.view.hide_deferred = false;
+        a.see();
 
         let at = a.site.index.find("argos-0002").expect("산 멤버가 없다");
         assert_eq!(a.site.index.shelved_at(at), Some("argos-0009"), "아카이브의 미룬 에픽을 물려받지 않았다");
