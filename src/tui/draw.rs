@@ -5461,7 +5461,7 @@ pub(super) mod tests {
     }
 
     /// **다 보이는 채로 세운다.** 그림 시험의 줄에는 끝난 멤버가 있고, 시험은 그 줄을 그리는
-    /// 법을 본다 — 처음 done 을 숨기는 보기(moai-fmv5)는 제 시험이 따로 본다.
+    /// 법을 본다 — 처음 보기(done 보임·미룸 숨김, moai-muit)는 제 시험이 따로 본다.
     fn app() -> App {
         every(issues())
     }
@@ -5488,6 +5488,9 @@ pub(super) mod tests {
         out.push(Issue::new("argos-0090".into(), "떠도는 일".into(), Kind::Issue, Status::new("todo"), at));
         let mut a = App::new(out, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.site.lang = Lang::Ko;
+        // 칸은 backlog · 미룸 · todo · in_progress · review 다 — done 은 바닥이 숨긴다(옛 처음 보기, moai-muit).
+        a.view = super::super::view::View::hiding("done");
+        a.see();
         a.layout = super::super::view::Layout::Board;
         a.detail_open = false;
         a
@@ -5936,6 +5939,15 @@ pub(super) mod tests {
     /// [`every`] 에서 열 이름 줄만 **안 끈** 것 — 사용자가 처음 띄운 열 그대로다. 둘이 한 뿌리에서
     /// 나와야 폭 훑기(`the_column_names_stand_over_their_values_at_every_width`)가 보는 그림이 다른
     /// 그림 시험과 이름 줄 하나만큼만 다르다.
+    /// **옛 처음 보기(done 숨김·미룸 보임)로 세운다**(moai-muit) — 처음 보기가 2026-10-08 에 done 보임·미룸 숨김으로
+    /// 뒤집혔다. 숨긴 done 을 그리는 법을 보는 시험이 그 전제를 제 바닥에 적는다.
+    fn done_hidden(issues: Vec<Issue>) -> App {
+        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        a.view = super::super::view::View::hiding("done");
+        a.see();
+        a
+    }
+
     fn as_opened(issues: Vec<Issue>) -> App {
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.view = super::super::view::View::default();
@@ -7231,6 +7243,9 @@ pub(super) mod tests {
             Config::parse("prefix = \"argos\"\n").unwrap(),
             vec![crate::nav::Seg::Epic("argos-0001".into())],
         );
+        // 처음 보기는 미룬 것을 숨긴다(moai-muit) — 이 시험은 보이는 멤버의 상세를 본다.
+        a.view.hide_deferred = false;
+        a.see();
         a.cursor = 1; // 0 은 `..` 줄이다
         let lines = render(&mut a, 180, 24);
         assert!(lines.iter().any(|l| l.contains("미룸 — argos-0001 밑")), "{lines:#?}");
@@ -7777,6 +7792,9 @@ pub(super) mod tests {
             let picked = crate::report::ready(&all, &cfg).iter().any(|i| i.id == "argos-0005");
             let path = vec![crate::nav::Seg::Epic("argos-0001".into())];
             let mut a = App::new(all, cfg, path);
+            // 옛 처음 보기(done 숨김·미룸 보임)를 바닥으로 둔다(moai-muit) — 이 시험은 보기가 아니라 막음 줄을 본다.
+            a.view = super::super::view::View::hiding("done");
+            a.see();
             a.cursor = a
                 .rows()
                 .iter()
@@ -9462,7 +9480,7 @@ pub(super) mod tests {
                 .into(),
         );
         for w in [20u16, 24, 30, 40, 60, 80] {
-            // **다 보이는 채로 세운다** — 본문은 끝난 멤버에 있다. 처음 보기(done 숨김)로 세우면 커서가 본문 없는
+            // **다 보이는 채로 세운다** — 본문은 끝난 멤버에 있다. done 을 숨긴 보기로 세우면 커서가 본문 없는
             // 멤버에 서서 이 시험이 본문을 한 번도 안 그리고 지나간다(moai-2kyl 단계 리뷰).
             let mut a = every(issues.clone());
             a.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -10783,7 +10801,7 @@ pub(super) mod tests {
     /// 뺀다 — 한 뱃지로 통째로 재면 차례만 골라도 숨긴 것을 대는 말까지 빠진다.
     #[test]
     fn a_chosen_sort_gives_way_before_the_hidden_badge() {
-        let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(issues());
         a.hit("SPC s u Esc");
         a.hit("SPC s u Esc");
         let badge = |a: &mut App, w: u16| {
@@ -10806,7 +10824,7 @@ pub(super) mod tests {
         for i in &mut finished {
             i.status = Status::new("done");
         }
-        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(finished);
         let lines = render(&mut a, 100, 12).join("\n");
         assert!(lines.contains(" 보기에 가려 비었다 "), "{lines}");
     }
@@ -10819,7 +10837,7 @@ pub(super) mod tests {
         for i in &mut finished {
             i.status = Status::new("done");
         }
-        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(finished);
         a.detail_open = false;
         for c in "/멤".chars() {
             a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
@@ -10846,7 +10864,7 @@ pub(super) mod tests {
     /// 잰다(moai-i5io): 검색이 맞혀 저절로 열린 폴더 밑에서 보기가 숨긴 줄은 `숨김` 이 맞다.
     #[test]
     fn a_search_leaves_plain_rows_unmarked() {
-        let mut a = App::new(issues(), Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(issues());
         a.detail_open = false;
         for c in "/멤".chars() {
             a.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
@@ -10872,7 +10890,7 @@ pub(super) mod tests {
         for i in &mut finished {
             i.status = Status::new("done");
         }
-        let mut a = App::new(finished, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
+        let mut a = done_hidden(finished);
         a.fields.set(super::super::view::Field::Names, false);
         a.see();
         for c in "/argos".chars() {

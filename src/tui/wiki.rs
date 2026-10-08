@@ -1793,6 +1793,9 @@ pub(super) mod tests {
             Issue::new("argos-0001".into(), "끝난 일".into(), Kind::Issue, Status::new("done"), "2026-09-01T00:00:00Z");
         done.status_since = "2026-09-30T00:00:00Z".into();
         let mut b = App::new(vec![done], cfg(), Path::new());
+        // 처음 보기는 done 을 보인다(moai-muit) — 이 시험의 전제인 done 숨김을 손으로 건다.
+        b.view = crate::tui::view::View::hiding(crate::config::DONE);
+        b.see();
         b.site.repo = a.site.repo.clone();
         let mut a = b;
         a.hit("SPC g w Enter Enter G Enter");
