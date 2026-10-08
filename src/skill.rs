@@ -1696,7 +1696,7 @@ mod tests {
     ///
     /// **못 도는 판은 실행 비트를 빼서 짓는다 — 126 을 내는 글이 아니다**(리뷰 moai-j4ie).
     /// `0o755` 로 심고 `exit 126` 하는 글은 어느 껍데기에서나 `command -v` 를 지나므로 겨눈 그
-    /// 판(껍데기가 exec 을 거절하는 판)을 안 잰다. 로더가 내는 127 은 없는 해석기로 짓는다.
+    /// 판(껍데기가 exec 을 거절하는 판)을 안 잰다. 없는 해석기의 판은 그 값이 껍데기마다 갈려(126·127) 그 껍데기에게 묻는다.
     ///
     /// **껍데기를 하나로 두지 않는다.** `command -v` 의 답이 dash 와 bash 에서 갈려(`[ -e ]` 를
     /// 곁들인 까닭, [`command`] 참조), `sh` 하나로 재면 `/bin/sh` 가 dash 인 기계에서만 푸르다.
@@ -1776,7 +1776,7 @@ mod tests {
         }
         // 껍데기는 [`shells`] 가 고른다 — `dash` 를 이름으로 부르는 까닭도 거기 있다.
 
-        // 못 도는 판 둘 — 실행 비트가 빠진 파일(껍데기가 126)과 없는 해석기(로더가 127).
+        // 못 도는 판 둘 — 실행 비트가 빠진 파일(껍데기가 126)과 없는 해석기(껍데기마다 126 이나 127, 아래).
         let dead = plant("dead", "#!/bin/sh\nexit 0\n", 0o644);
         let gone = plant("gone", "#!/nowhere/interp\nexit 0\n", 0o755);
         // **판정을 못 낸 나머지 값들**(moai-wnnb) — clap 이 모르는 부명령에 내는 2, 패닉의 101,
@@ -1803,9 +1803,24 @@ mod tests {
         let space = plant("space", "#!/bin/sh\nprintf ' '\nexit 2\n", 0o755);
 
         for sh in shells() {
+            // **없는 해석기의 값은 그 껍데기에게 묻는다**(moai-9s9s.89e). POSIX 는 "못 찾았다"(127)와
+            // "찾았는데 못 돈다"(126)만 가르고, 파일은 있는데 `#!` 줄이 가리키는 해석기가 없는 판이
+            // 어느 쪽인지는 정하지 않는다 — dash 와 bash 5.2 는 127, Arch 의 `sh`(bash)는 126 을 냈다.
+            // 훅이 지키는 계약은 "껍데기가 낸 값을 그대로 옮긴다" 이니, 같은 껍데기로 맨 실행을 한 번
+            // 재어 그 값을 기대한다. 126·127 밖이면 그 판이 못 도는 판을 안 지었다는 뜻이라 멈춘다.
+            let asked = std::process::Command::new(sh)
+                .args(["-c", &crate::text::single_quoted(&gone)])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap_or_else(|e| panic!("{sh}: {e}"))
+                .code();
+            let unrun = match asked {
+                Some(c @ (126 | 127)) => c.to_string(),
+                other => panic!("{sh}: 없는 해석기가 못 도는 판을 안 지었다 — {other:?}"),
+            };
             for (exe, code) in [
                 (&dead, "126"),
-                (&gone, "127"),
+                (&gone, unrun.as_str()),
                 (&clap, "2"),
                 (&panic, "101"),
                 (&killed, "137"),

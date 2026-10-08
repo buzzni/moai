@@ -735,13 +735,14 @@ pub fn status(ctx: &Ctx) -> R<Vec<String>> {
     }
     // **Claude 의 줄 밑에 `.agents` 한 줄과 그것을 읽는 둘의 PATH 줄**(사용자 결정 2026-10-04).
     let shared_row = say(lang, "skill.row_agents");
-    out.push(match (shared.planted, shared.stale.is_empty()) {
+    out.push(match (shared.planted, shared.due()) {
         (false, _) => row(false, shared_row, say(lang, "skill.agents_missing")),
-        (true, false) => {
-            row(false, shared_row, &fill(say(lang, "skill.agents_stale"), &[("n", &shared.stale.len().to_string())]))
-        }
-        (true, true) => row(true, shared_row, say(lang, "skill.agents_current")),
+        (true, n @ 1..) => row(false, shared_row, &fill(say(lang, "skill.agents_stale"), &[("n", &n.to_string())])),
+        (true, 0) => row(true, shared_row, say(lang, "skill.agents_current")),
     });
+    // **남은 디렉터리는 이름과 까닭을 댄다**(moai-9s9s.v0y) — `install` 이 사람의 것이 든 디렉터리를 남기면(`Foreign`) 그
+    // 안의 `SKILL.md` 가 걷힌 명령을 계속 가르치는데, 위 줄은 "지금 판" 이라 아무 화면도 그것을 안 댔다.
+    out.extend(shared.left.iter().map(|l| l.status_line(lang)));
     for h in &hook_files {
         let (ok, said) = h.row(&root, lang);
         out.push(row(ok, h.label(), &said));
@@ -763,6 +764,9 @@ struct Shared {
     stale: Vec<String>,
     /// 심을 파일 가운데 하나라도 서 있는가 — 없으면 "안 심겼다" 고, 있는데 다르면 "낡았다" 다.
     planted: bool,
+    /// 이 판이 안 심는 moai 의 스킬 디렉터리([`leftovers`], moai-9s9s.v0y) — `install` 이 걷는 꼴(`Left::Planned`)은
+    /// 낡은 것으로 세고, 사람의 것이 든 꼴(`Left::Foreign`)은 `install` 이 영영 남기니 낡았다고 안 하고 한 줄로 댄다.
+    left: Vec<Leftover>,
 }
 
 impl Shared {
@@ -778,24 +782,35 @@ impl Shared {
         for (path, body) in skill::agents_tree(skills) {
             let at = dir.join(&path);
             planted |= std::fs::symlink_metadata(&at).is_ok();
-            if crate::held::read_inside(&at, &home).ok().as_deref() != Some(body.as_str()) {
+            if !crate::held::read_inside(&at, &home).is_ok_and(|text| planted_as(&text, &body)) {
                 stale.push(path.display().to_string());
             }
         }
-        Shared { dir, stale, planted }
+        // 견주는 이름은 [`stale_trees`] 와 같다 — 그 자리에 심는 것은 Claude 전용이 아닌 스킬뿐이다.
+        let names: Vec<&str> = skills.iter().filter(|s| !s.claude_only).map(|s| s.name).collect();
+        let left = leftovers(&dir, &names, root);
+        Shared { dir, stale, planted, left }
     }
 
-    /// `--json` 의 `agents` — 자리·상태(`current`·`stale`·`missing`)·낡은 파일·PATH 에 선 둘.
+    /// `install` 이 고칠 것의 수 — 다른 파일과, 걷을 남은 디렉터리. **`skills_stale` 알림([`stale_trees`])과 같은 자다** —
+    /// 걷을 디렉터리 하나만 남은 자리에서 알림은 "낡았다" 고 하는데 이 줄이 "지금 판" 이라고 하면 둘이 갈린다.
+    fn due(&self) -> usize {
+        self.stale.len() + self.left.iter().filter(|l| l.state == Left::Planned).count()
+    }
+
+    /// `--json` 의 `agents` — 자리·상태(`current`·`stale`·`missing`)·낡은 파일·남은 디렉터리·PATH 에 선 둘.
+    /// `leftovers` 는 **늘 서는 배열이다** — 비었으면 남은 것이 없다.
     fn json(&self, others: &[(&str, bool)]) -> serde_json::Value {
-        let state = match (self.planted, self.stale.is_empty()) {
+        let state = match (self.planted, self.due()) {
             (false, _) => "missing",
-            (true, false) => "stale",
-            (true, true) => "current",
+            (true, 1..) => "stale",
+            (true, 0) => "current",
         };
         let mut v = serde_json::json!({
             "dir": self.dir.display().to_string(),
             "state": state,
             "stale": self.stale,
+            "leftovers": self.left.iter().map(Leftover::json).collect::<Vec<_>>(),
         });
         for (bin, on) in others {
             v[*bin] = serde_json::json!(on);
@@ -1634,6 +1649,15 @@ impl Leftover {
         fill(text, &[("dir", &dir)])
     }
 
+    /// `skill status` 의 한 줄 — 걷을 꼴은 `install` 이 걷는다고 댄다. 나머지는 [`Leftover::line`] 그대로다(`status` 는
+    /// 안 지우니 `Foreign` 뿐이다 — 왜 남겼는지까지 그 글이 댄다).
+    fn status_line(&self, lang: crate::i18n::Lang) -> String {
+        match self.state {
+            Left::Planned => format!("  ! {}", self.line(lang)),
+            _ => self.line(lang),
+        }
+    }
+
     /// 지운다 — 파일을 하나씩, 그 뒤 빈 디렉터리를 깊은 것부터. 통째로 지우지 않는다(`remove_dir_all`).
     ///
     /// - **지우기 바로 앞에서 다시 잰다**([`ours`]) — [`leftovers`] 가 잰 뒤 트리 한 벌을 fsync 하며 쓰는 동안 사람이 그 안에
@@ -1761,6 +1785,16 @@ fn ours(dir: &Path, name: &str, known: &[&str], root: &Path) -> Option<(Vec<Path
     Some((files, dirs))
 }
 
+/// 심긴 글 `text` 가 이 판이 심을 글 `want` 와 같은가 — **줄 끝이 `\r\n` 이어도 같다**(moai-9s9s.x3n).
+///
+/// `core.autocrlf` 로 받은 체크아웃은 커밋된 글을 `\r\n` 으로 푼다. [`ours`] 는 그 머리를 moai 의 것으로 받는데, 낡았는가를
+/// 재는 둘([`stale_trees`] 의 `skills_stale` 알림과 `skill status` 의 `.agents` 줄)은 바이트째 견줘, 그런 클론에서는
+/// 다시 심어도 체크아웃이 같은 `\r\n` 으로 되돌려 알림이 영영 안 걷혔다. 셋이 한 자로 재도록 둘은 이 하나를 부른다.
+/// 거꾸로(`want` 쪽의 `\r`)는 안 접는다 — moai 가 짓는 글은 늘 `\n` 이다.
+fn planted_as(text: &str, want: &str) -> bool {
+    text == want || (text.contains('\r') && text.replace("\r\n", "\n") == want)
+}
+
 /// 커밋된 파일 하나를 읽는다 — **보통 파일만, 체크아웃 `root` 안에서만**(`held::read_inside`, moai-ml0d.21i). 받은
 /// 저장소가 커밋한 자리라 링크나 FIFO 일 수 있다 — 맨 `fs::read_to_string` 으로 읽던 판은 그 자리의 FIFO 하나로
 /// `skill status`·`install`·`uninstall` 이 쓰는 쪽을 영영 기다렸고, `-> /dev/zero` 하나로 메모리를 다 썼다. 체크아웃 밖을
@@ -1849,7 +1883,7 @@ pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent
     let home = crate::held::Home::of(root);
     // 없는 파일은 다르다. 못 읽는 파일은 모른다 — 세지 않는다.
     let differs = |at: &Path, body: &str| match crate::held::read_inside(at, &home) {
-        Ok(text) => text != body,
+        Ok(text) => !planted_as(&text, body),
         Err(_) => std::fs::symlink_metadata(at).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound),
     };
     let left = |dir: &Path, planting: &[&str]| leftovers(dir, planting, root).iter().any(|l| l.state == Left::Planned);
