@@ -391,7 +391,7 @@ impl Floor {
         Floor { at, rows: rows_of(mine) }
     }
 
-    /// 자리 없이 — 그 파일과 견줄 일이 없는 부르는 쪽(훅의 [`held_elsewhere`])이 쓴다. 빈 자리는
+    /// 자리 없이 — 그 파일과 견줄 일이 없는 부르는 쪽(한눈 보기·층)이 쓴다. 빈 자리는
     /// 어떤 스냅샷 자리와도 안 같아([`Dug::floor`]), [`Dug`] 에 실려도 자리 셈이 안 집어 든다.
     pub fn loose(mine: &[Issue]) -> Floor {
         Floor::of(PathBuf::new(), mine)
@@ -495,9 +495,11 @@ pub struct Dug<'a> {
 }
 
 impl<'a> Dug<'a> {
-    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길이 쓴다: 훅([`held_elsewhere`])과 시험의 짧은
-    /// 길([`workplaces`]). [`stranded_at`] 은 **부르는 쪽이 준다** — 제 손으로 파는 짧은 길을 따로
-    /// 두지 않기로 한 뒤로(moai-65ie) 이것을 스스로 짓지 않는다.
+    /// 아무것도 안 건네받은 것 — 제 손으로 파는 길이 쓴다: 시험의 짧은 길([`workplaces`]).
+    /// [`stranded_at`] 은 **부르는 쪽이 준다** — 제 손으로 파는 짧은 길을 따로
+    /// 두지 않기로 한 뒤로(moai-65ie) 이것을 스스로 짓지 않는다. 훅([`held_elsewhere`])도 쓰던 때가
+    /// 있었는데, 옆 스냅샷을 안 열게 된 뒤로(moai-h64l.59m) 바이너리에서 부르는 곳이 없다.
+    #[cfg(test)]
     pub fn new() -> Dug<'a> {
         Dug::default()
     }
@@ -835,39 +837,31 @@ impl Disk {
 /// 옆 **딸린** 워크트리가 쥐었을 수 있는 줄 id (moai-ntl6, 사용자 결정 B). 제 이름은 훅이 이미 든
 /// [`away`] 의 것을 쓴다(`hook::unsure`) — 여기서 한 벌 더 재던 판은 한 판정의 두 쪽이 제 이름을 따로 읽었다.
 ///
-/// 이름이 id 가 아닌 워크트리(에이전트 격리 `worktree-agent-<해시>`, 옛 id 로 뜬 워크트리)가
-/// 쥔 일은 이름으로 못 가른다. 대신 **갈라진 자리**로 짐작한다 — 규약상 집기는 main 에서 커밋한
-/// 뒤 워크트리가 뜨므로, 그 워크트리의 스냅샷 파일에 벌여 놓인 줄은 갈라질 때 이미 집혀 있던
-/// 일이다. 그 워크트리에서 main 보다 늦게 옮긴 줄(`planned`·`updated_at`)도 든다. 갈라진 **뒤에**
-/// main 에서 집은 일은 그 파일에 없어 들지 않는다.
+/// **읽는 것은 집은 표식([`held_here`]) 하나다 — 옆의 스냅샷은 안 연다**(moai-h64l.59m, 사용자 결정).
+/// moai-y7go 뒤로 트래커는 루트에만 쓰이므로, 딸린 워크트리의 `.moai` 는 그 가지가 갈라질 때의 낡은
+/// 사본이다. 그 사본에 벌여 놓인 줄(과 거기서 루트보다 늦은 줄)을 "옆이 쥐었을 수 있다" 로 세던 판은,
+/// 마일스톤 가지에서 뜬 에픽 워크트리처럼 몇 주 낡은 사본이 그때 열려 있던 줄을 영영 든 채라 — 그 뒤
+/// 닫았다가 오늘 루트에서 다시 집은 줄까지 의심해 규칙 1 과 `Stop` 이 그 줄을 덜 붙들었다(moai-zo36).
+///
+/// 이름이 id 가 아닌 워크트리(에이전트 격리 `worktree-agent-<해시>`, 옛 id 로 뜬 워크트리)가 쥔 일은
+/// 이름으로 못 가른다. 스냅샷을 읽던 까닭이 그것이었는데, 이제 그 자리는 표식이 맡는다 — `moai mv` 가
+/// 시작 칸으로 옮길 때 **친 자리**의 표식에 적으므로([`note_held`]), 그 워크트리 안에서(또는 거기서
+/// `-C <루트>` 로) 집은 일은 스냅샷 없이도 여기 든다. **남는 틈은 하나다** — 루트에서 집은 뒤에 그
+/// 일을 이름 없는 워크트리로 가져간 것(루트에서 집고 `worktree-agent-<해시>` 를 띄우는 길)은 어느
+/// 표식에도 없어 루트 세션의 초점으로 선다. 이름으로 뜨는 워크트리(`moai-<id>`)는 그 길이라도 [`away`]
+/// 가 이름으로 가른다.
 ///
 /// **main 워크트리는 쥔 곳으로 안 센다** — 모두의 집기가 모이는 자리라, 세면 모든 줄이 든다.
-/// **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들거나 비추지 않기만 한다(`hook::unsure`). git 을
-/// 띄우지 않고 파일만 읽지만 옆 스냅샷을 다 풀어 싸지 않다 — 거절 길, 비추는 길(`backlog add` 의 물음),
-/// `Stop` 에서만 부른다.
-pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) -> BTreeSet<String> {
+/// 마일스톤 워크트리도 같다([`is_milestone`]). **답은 짐작이다** — 받는 쪽은 이 줄로 막거나 붙들거나
+/// 비추지 않기만 한다(`hook::unsure`). git 을 띄우지 않고 워크트리마다 작은 파일 하나만 읽는다.
+pub fn held_elsewhere(root: &Path) -> BTreeSet<String> {
     let Some(disk) = on_disk(root) else { return BTreeSet::new() };
-    // 견줄 바닥은 **워크트리 수와 상관없이 한 벌이다** — 워크트리마다 지으면 제 줄을 그만큼 다시
-    // 훑는다. 훅은 제 손으로 읽은 줄을 그대로 주므로 자리는 안 든다([`Floor::loose`]).
-    // **첫 옆을 만날 때 짓는다**(리뷰) — 딸린 워크트리가 하나도 없는 흔한 체크아웃에서는 아래 고리가
-    // 한 번도 안 도는데, 미리 지으면 그 판이 줄마다 짧은 글 셋을 헛되이 베낀다. 훅은 툴 부름마다
-    // 도는 길이라(`hook::unsure`) 그 헛일이 제일 자주 걸린다.
-    let floor = std::cell::OnceCell::new();
     let mut out = BTreeSet::new();
     for (tree, linked, me) in &disk.all {
-        // 마일스톤 워크트리는 main 처럼 모으는 자리라 쥔 곳으로 안 센다([`is_milestone`]) — 그 집은 표식도.
         if *me || !*linked || is_milestone(tree) {
             continue;
         }
-        // 훅은 겹쳐 본 결과를 들고 오지 않는다 — 판 것이 없으니 제 손으로 연다.
-        let (open, later) =
-            holds(&disk, tree, floor.get_or_init(|| Floor::loose(mine)), cfg, &Dug::new()).unwrap_or_default();
-        out.extend(open);
-        out.extend(later);
-        // **그 워크트리가 적어 둔 집기도 든다**(moai-y7go, 리뷰 moai-71ht 셋째 판) — 쓰기가 루트로
-        // 옮겨 가 옆 스냅샷이 안 움직이므로, 훅이 스냅샷만 보면 옆이 방금 집은 줄을 제 것으로 읽는다.
-        // 그러면 `Stop` 이 남의 산 일을 닫으라고 붙들고 규칙 1 이 그 단위로 생성을 좁힌다. 자리 셈
-        // ([`workplaces`])과 **같은 표식을 같은 자로** 읽어야 두 표면이 한 답을 낸다.
+        // 자리 셈([`workplaces`])과 **같은 표식을 같은 자로** 읽는다(리뷰 moai-71ht 셋째 판).
         if let Some(dir) = disk.admin.get(&tree.path) {
             out.extend(held_here(dir));
         }
@@ -875,7 +869,7 @@ pub fn held_elsewhere(root: &Path, mine: &[Issue], cfg: &crate::config::Config) 
     out
 }
 
-/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — [`held_elsewhere`] 의 한 워크트리 몫. (벌여 놓인 줄,
+/// 딸린 워크트리 하나의 스냅샷이 쥔 줄 — 자리 셈([`workplaces_in`])의 한 워크트리 몫. (벌여 놓인 줄,
 /// 여기보다 늦게 만진 줄). 앞의 것에는 갈라질 때 물려받은 줄도 들고, 뒤의 것은 그 워크트리가
 /// 실제로 만진 흔적이다 — [`workplaces`] 가 둘을 따로 싣는다.
 ///
@@ -1385,7 +1379,7 @@ pub struct Unread {
 ///
 /// **부르는 쪽이 이미 판 것을 받는다**([`Dug`], moai-kos1·moai-65ie) — 겹치며 옆 스냅샷을 연
 /// 쪽(탐색기·`status --worktree`)도, 제 바닥을 잰 쪽(`projects::Project::dug`)도 바로 앞에서 그
-/// 파일들을 열어 풀었다. 건네받은 것이 없는 길(훅·시험)은 [`Dug::new`] 를 준다.
+/// 파일들을 열어 풀었다. 건네받은 것이 없는 길(시험)은 [`Dug::new`] 를 준다.
 ///
 /// **제 손으로 파는 짧은 길을 따로 두지 않는다**(moai-65ie). 한때 그 꼴이 있었는데, 건네줄 것을
 /// 손에 쥔 자리(한눈 보기·층)가 인자 하나가 적다는 까닭으로 그것을 불러 같은 스냅샷을 프로젝트
@@ -2474,7 +2468,7 @@ mod tests {
         );
 
         // 훅의 짐작 — 사본에 벌여 놓인 줄과 사본에서 늦은 줄을 "옆이 쥐었을 수 있다" 로 안 센다.
-        let elsewhere = held_elsewhere(&main, &mine, &cfg);
+        let elsewhere = held_elsewhere(&main);
         assert!(elsewhere.is_empty(), "마일스톤 워크트리의 사본을 옆의 집기로 셌다 — {elsewhere:?}");
 
         // 겹쳐 보기 — 사본의 늦은 줄을 남의 산 줄처럼 겹치지 않는다(`--worktree` 와 훅의 `fresh` 둘 다).
@@ -2498,6 +2492,57 @@ mod tests {
         assert!(marks.iter().all(|(p, _)| !p.ends_with(&copy_path)), "안 파는 사본을 잰다 — {marks:#?}");
         let head = Path::new("worktrees").join("milestone-t-zzzz").join("HEAD");
         assert!(marks.iter().any(|(p, _)| p.ends_with(&head)), "마일스톤 워크트리의 HEAD 를 안 잰다 — {marks:#?}");
+    }
+
+    /// **훅의 짐작은 옆의 낡은 사본을 안 세고 집은 표식만 읽는다**(moai-h64l.59m, 사용자 결정). 트래커는
+    /// 루트에만 쓰이므로(moai-y7go) 딸린 워크트리의 `.moai` 는 갈라질 때의 사본이다 — 거기 벌여 놓인 채
+    /// 남은 줄(그 뒤 닫았다가 오늘 루트에서 다시 집은 일)을 "옆이 쥐었을 수 있다" 로 세면 규칙 1 과
+    /// `Stop` 이 그 줄을 덜 붙든다(moai-zo36). 사본에서 루트보다 늦은 줄도 안 센다. 표식에 적힌 줄은 든다.
+    #[test]
+    fn held_elsewhere_reads_the_marks_not_a_siblings_stale_copy() {
+        let scratch = crate::scratch::Scratch::fenced("held-marks-only");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        // 이름이 아무 id 도 안 가리키는 워크트리 — 스냅샷을 읽던 판은 이것의 사본을 셌다.
+        run(&main, &["worktree", "add", "-q", "../agent-x", "-b", "worktree-agent-x"]);
+        let row = |id: &str, status: &str, at: &str| {
+            format!(
+                "{{\"id\":\"{id}\",\"kind\":\"issue\",\"title\":\"일\",\"status\":\"{status}\",\
+                 \"created_at\":\"2026-09-11T00:00:00Z\",\"updated_at\":\"{at}\",\"status_since\":\"{at}\"}}\n"
+            )
+        };
+        let old = "2026-09-11T00:00:00Z";
+        // 루트: t-0001 은 오늘 다시 집었고, t-0002 는 첫 칸, t-0003 은 옆 워크트리에서 집은 일이다.
+        let root = [
+            row("t-0001", "in_progress", "2099-01-01T00:00:00Z"),
+            row("t-0002", "todo", old),
+            row("t-0003", "in_progress", old),
+        ]
+        .concat();
+        // 사본: 갈라질 때 t-0001 이 벌여 놓여 있었고, t-0002 는 사본에서 루트보다 늦게 옮겼다.
+        let copy = [
+            row("t-0001", "in_progress", old),
+            row("t-0002", "in_progress", "2026-09-12T00:00:00Z"),
+            row("t-0003", "todo", old),
+        ]
+        .concat();
+        for (dir, rows) in [(main.clone(), &root), (base.join("agent-x"), &copy)] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), rows).unwrap();
+        }
+        std::fs::write(main.join(".git/worktrees/agent-x").join(HELD), "t-0003\n").unwrap();
+
+        let elsewhere = held_elsewhere(&main);
+        assert_eq!(
+            elsewhere,
+            BTreeSet::from(["t-0003".to_string()]),
+            "옆의 낡은 사본을 옆의 집기로 셌거나 표식을 놓쳤다"
+        );
     }
 
     /// **옆 워크트리의 스냅샷도 그 체크아웃 안에서만 읽는다**(moai-itsu). 밖을 가리키는 링크는 겹치지 않고

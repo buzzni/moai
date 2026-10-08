@@ -15895,12 +15895,17 @@ fn old_pick_records_are_pruned_when_a_new_pick_is_written() {
     assert!(alive.join("now").exists(), "옆 트래커의 새 기록까지 지웠다");
 }
 
-/// **이름이 id 가 아닌 워크트리가 갈라질 때 이미 집혀 있던 일은 그 워크트리의 것일 수 있다**
-/// (moai-ntl6, 사용자 결정 B). 에이전트 격리 워크트리(`worktree-agent-<해시>`)와 옛 id 로 뜬
-/// 워크트리가 실제로 그랬다(moai-apsa·nt0h). 누구의 것인지 모르는 줄로는 막지도 붙들지도
-/// 않는다. 갈라진 **뒤에** main 에서 집은 일은 여전히 main 의 초점이다.
+/// **이름이 id 가 아닌 워크트리에서 집은 일은 그 워크트리의 것일 수 있다**(moai-ntl6, 사용자 결정 B).
+/// 에이전트 격리 워크트리(`worktree-agent-<해시>`)와 옛 id 로 뜬 워크트리가 실제로 그랬다
+/// (moai-apsa·nt0h). 누구의 것인지 모르는 줄로는 막지도 붙들지도 않는다. main 에서 집은 일은
+/// main 의 초점이다.
+///
+/// **그 짐작은 집은 표식으로만 선다**(moai-h64l.59m, 사용자 결정). 트래커는 루트에만 쓰이므로
+/// (moai-y7go) 옆의 `.moai` 는 갈라질 때의 낡은 사본이다. 그 사본에 벌여 놓여 있었다는 것만으로 옆의
+/// 것으로 치던 판은, 갈라진 뒤 main 에서 닫았다가 다시 집은 줄(`back`)을 의심해 규칙 1 과 `Stop` 이
+/// 그 줄을 덜 붙들었다(moai-zo36).
 #[test]
-fn work_picked_before_an_unnamed_worktree_branched_is_left_to_it() {
+fn work_picked_inside_an_unnamed_worktree_is_left_to_it() {
     let s = Scratch::new("hookbranchpoint");
     let main = s.path().join("main");
     std::fs::create_dir_all(&main).unwrap();
@@ -15908,12 +15913,22 @@ fn work_picked_before_an_unnamed_worktree_branched_is_left_to_it() {
     ok(&main, &["init", "argos"]);
     let agent = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
     let renamed = field(&ok(&main, &["add", "옛 id 에서 옮긴 일", "--json"]), "id");
-    ok(&main, &["mv", &agent, "in_progress"]);
-    ok(&main, &["mv", &renamed, "in_progress"]);
+    let back = field(&ok(&main, &["add", "닫았다가 다시 집을 일", "--json"]), "id");
+    ok(&main, &["mv", &back, "in_progress"]);
     git(&main, &["add", "-A"]);
     git(&main, &["commit", "-q", "-m", "집는다"]);
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-old1", "-b", "worktree-argos-old1"]);
+    // 그 워크트리 안에서 집는다 — 쓰기는 루트로 가고, 친 자리의 표식에 적힌다.
+    ok(&main.join(".claude/worktrees/agent-a04acfb3"), &["mv", &agent, "in_progress"]);
+    ok(&main.join(".claude/worktrees/argos-old1"), &["mv", &renamed, "in_progress"]);
+    // 갈라질 때 벌여 놓여 있던 줄을 main 에서 닫는다 — 옆의 사본에는 아직 벌여 놓여 있다.
+    ok(&main, &["mv", &back, "done"]);
+    assert!(
+        issues(&main.join(".claude/worktrees/agent-a04acfb3"))
+            .contains(&format!("\"id\":\"{back}\",\"title\":\"닫았다가 다시 집을 일\",\"status\":\"in_progress\"")),
+        "옆의 사본에 갈라질 때의 줄이 없다 — 이 시험이 견줄 것이 없다"
+    );
 
     let at_main = |event: &str, session: &str, tool: Option<&str>| {
         let body = tool.map_or(String::new(), |cmd| {
@@ -15923,21 +15938,25 @@ fn work_picked_before_an_unnamed_worktree_branched_is_left_to_it() {
         String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
     };
 
-    // 갈라질 때 집혀 있던 일로는 막지도 붙들지도 않는다.
+    // 옆 워크트리에서 집은 일로는 막지도 붙들지도 않는다.
     let out = at_main("pre-tool-use", "s1", Some("moai add \"딴 일\""));
     assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 의 생성을 막는다\n{out}");
     let out = at_main("stop", "s1", None);
     assert!(out.trim().is_empty(), "옆 워크트리가 쥐었을 일로 main 세션을 붙든다\n{out}");
 
-    // 갈라진 뒤 main 에서 집은 일은 main 의 초점이다 — 막고, 붙들고, 그것만 댄다.
+    // main 에서 집은 일은 main 의 초점이다 — 막고, 붙들고, 그것만 댄다. 옆의 낡은 사본이 벌여 놓인
+    // 채 든 줄(`back`)도 main 에서 다시 집으면 그렇다.
     let mine = field(&ok(&main, &["add", "main 에서 집은 일", "--json"]), "id");
     ok(&main, &["mv", &mine, "in_progress"]);
+    ok(&main, &["mv", &back, "in_progress"]);
     let why = refusal(&at_main("pre-tool-use", "s2", Some("moai add \"딴 일\"")));
+    assert!(why.contains(&back), "옆의 낡은 사본을 옆의 집기로 셌다\n{why}");
     assert!(why.contains(&mine) && !why.contains(&agent) && !why.contains(&renamed), "{why}");
     let out = at_main("pre-tool-use", "s2", Some(&format!("moai add \"자식\" --parent {mine}")));
     assert!(out.trim().is_empty(), "main 의 일의 자식을 막았다\n{out}");
     let held = at_main("stop", "s2", None);
     assert!(held.contains(&format!("moai mv {mine}")), "main 에서 집은 일을 안 붙든다\n{held}");
+    assert!(held.contains(&format!("moai mv {back}")), "main 에서 다시 집은 일을 안 붙든다\n{held}");
     assert!(!held.contains(&agent) && !held.contains(&renamed), "옆이 쥐었을 일을 옮기라고 한다\n{held}");
 }
 
@@ -17249,7 +17268,8 @@ fn a_stale_snapshot_and_an_unsure_row_are_settled_in_one_pass() {
     std::fs::create_dir_all(&main).unwrap();
     git(&main, &["init", "-q"]);
     ok(&main, &["init", "argos"]);
-    // 갈라지기 전부터 벌여 놓인 남의 줄 — 이름이 id 가 아닌 워크트리가 쥐어 "모름" 이 된다.
+    // 갈라지기 전부터 벌여 놓인 남의 줄 — 제 낡은 스냅샷에 벌여 놓여 첫 판정을 막고, 이름이 id 가 아닌
+    // 옆 워크트리가 그 안에서 다시 집어 그 표식으로 "모름" 이 된다(moai-h64l.59m — 옆의 사본은 안 센다).
     let theirs = field(&ok(&main, &["add", "옆이 쥐었을 일", "--json"]), "id");
     ok(&main, &["mv", &theirs, "in_progress"]);
     git(&main, &["add", "-A"]);
@@ -17258,6 +17278,9 @@ fn a_stale_snapshot_and_an_unsure_row_are_settled_in_one_pass() {
     git(&main, &["worktree", "add", "-q", dir, "-b", "worktree-here"]);
     let inside = main.join(dir);
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/side", "-b", "worktree-side"]);
+    for to in ["todo", "in_progress"] {
+        ok(&main.join(".claude/worktrees/side"), &["mv", &theirs, to]);
+    }
 
     // 갈라진 뒤 main 에 선 제 일 — 워크트리의 스냅샷은 이 줄을 모르고, 집은 것은 이 세션이다.
     let mine = field(&ok(&main, &["add", "갈라진 뒤에 집은 내 일", "--json"]), "id");
@@ -17275,8 +17298,8 @@ fn a_stale_snapshot_and_an_unsure_row_are_settled_in_one_pass() {
 }
 
 /// **옆이 쥐었을 일로는 비추지도 않는다**(moai-ntl6 의 자, moai-dw63.e31). 이름이 id 가 아닌
-/// 워크트리가 갈라질 때 집혀 있던 일은 그 워크트리의 것일 수 있다 — 막지도 붙들지도 않기로 한 그
-/// 줄의 에픽을 제 물음으로 비추면, main 세션을 남의 에픽에 세우는 길로 보낸다.
+/// 워크트리에서 집은 일(그 표식, moai-h64l.59m)은 그 워크트리의 것일 수 있다 — 막지도 붙들지도 않기로
+/// 한 그 줄의 에픽을 제 물음으로 비추면, main 세션을 남의 에픽에 세우는 길로 보낸다.
 #[test]
 fn work_an_unnamed_worktree_may_hold_is_not_offered_as_this_sessions_aim() {
     let s = Scratch::new("hooknoteunsure");
@@ -17286,10 +17309,10 @@ fn work_an_unnamed_worktree_may_hold_is_not_offered_as_this_sessions_aim() {
     ok(&main, &["init", "argos"]);
     let theirs = field(&ok(&main, &["add", "옆의 에픽", "--type", "epic", "--json"]), "id");
     let agent = field(&ok(&main, &["add", "에이전트가 할 일", "-e", &theirs, "--json"]), "id");
-    ok(&main, &["mv", &agent, "in_progress"]);
     git(&main, &["add", "-A"]);
-    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/agent-a04acfb3", "-b", "worktree-agent-a04acfb3"]);
+    ok(&main.join(".claude/worktrees/agent-a04acfb3"), &["mv", &agent, "in_progress"]);
     let bash = |cmd: &str| tool_at(&s, &main, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
 
     let out = bash("moai backlog add \"관찰\"");
