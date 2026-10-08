@@ -5619,3 +5619,8 @@
 {"ts":"2026-10-08T01:40:46Z","id":"moai-ug6x.wwg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"7건 모두 받아들였다. 1·3·4·5·6 은 리뷰가 고친 대로 f41eeea7 에 받았다. 2 는 사용자 결정으로 같은 창을 다시 열 때만 닫게 좁혔다(53bdfa64). 7 도 사용자 결정으로 위키의 ← 되돌아가기가 수식키를 안 보게 했다(a7862468). 넘긴 것 없음"}
 {"ts":"2026-10-08T01:40:58Z","id":"moai-ug6x","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: pi3 만 남았다(첫 칸). worktree.rs gather 가 루트 Load 를 들고 cmd/status.rs archive_board_unjudged·report.rs status_with_archive_unjudged 가 부르는 쪽 Soil 을 받게 해야 한다 — moai-r0x8 가 쥔 파일이 풀렸으니 감독이 다시 보낸다. 그 창은 pi3 만 보는 에픽 끝 리뷰를 다시 부른다"}
 {"ts":"2026-10-08T01:43:39Z","id":"moai-ug6x.pi3","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T01:43:45Z","id":"moai-ltsv.3qk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T01:43:45Z","id":"moai-ltsv.4t0","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T01:43:45Z","id":"moai-ltsv.auf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T01:43:45Z","id":"moai-ltsv.uqw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-08T01:43:45Z","id":"moai-ltsv.y10","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
