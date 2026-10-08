@@ -384,17 +384,14 @@ struct GitPlace {
 /// 이 공통 디렉터리가 **맨 저장소인가**(moai-r0x8.33p) — 그러면 딸린 워크트리에 주 체크아웃이 없어, 거절문이 "주
 /// 체크아웃의 트래커" 를 대면 없는 자리를 댄다.
 ///
-/// **git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 찾기가 옮겨 갈 자리를 재는 [`crate::worktree::main_root`] 로 가르던
-/// 판은 공통 디렉터리의 이름(`.git` 인가)을 읽어, `git init --separate-git-dir` 의 워크트리에는 있는 주 체크아웃을
-/// 없다 하고, `.git` 이라는 이름의 맨 저장소(`git clone --bare <url> bin/.git`)에는 없는 주 체크아웃을 댔다. 이름이
-/// 아니라 `core.bare` 가 답이고, 그것을 읽는 자는 git 이다. git 을 띄우므로 **이 거절의 갈래에서만** 묻는다 —
-/// 딸린 워크트리에서 트래커를 git 밖에 두려 할 때뿐이다. 답을 못 얻으면 맨 저장소가 아니라고 둔다(딸린 워크트리의
-/// 거절이 그대로 선다).
+/// **git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 공통 디렉터리의 이름(`.git` 인가)으로 가르던 판은
+/// `git init --separate-git-dir` 의 워크트리에는 있는 주 체크아웃을 없다 하고, `.git` 이라는 이름의 맨
+/// 저장소(`git clone --bare <url> bin/.git`)에는 없는 주 체크아웃을 댔다. **묻는 자는 찾기가 옮겨 갈 자리를 재는
+/// 것과 같은 [`crate::worktree::is_bare`] 하나다**(moai-h64l.wst) — 둘이 갈리면 찾기는 옮겨 가는데 거절은 "주
+/// 체크아웃이 없다" 를 댄다. 이 거절의 갈래(딸린 워크트리에서 트래커를 git 밖에 두려 할 때)에서만 부른다. 답을
+/// 못 얻으면 맨 저장소가 아니라고 둔다(딸린 워크트리의 거절이 그대로 선다).
 fn is_bare(common: &Path) -> bool {
-    let args = ["rev-parse", "--is-bare-repository"];
-    crate::git::run_reading_user_config(common, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET))
-        .and_then(Result::ok)
-        .is_some_and(|said| said.trim() == "true")
+    crate::worktree::is_bare(common)
 }
 
 fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlace> {
@@ -1359,6 +1356,11 @@ enum Added {
     /// `merge=moai`·`/.moai/lock` 줄이 통째로 지워지고 그 자리에 마크다운이 규칙으로 선다 — 앞 판은 둘 다 썼다고
     /// 말하고 0 으로 끝났다.
     Shared(&'static str),
+    /// AGENTS.md 가 처음 읽은 뒤에 바뀌어 안 건드렸다(moai-h64l.0hr). 든 것은 고른 말로 편 까닭이다. 블록은 처음 읽은
+    /// 글에 붙여 갈아끼우므로([`plant`]), 화면이 사람을 기다리는 사이 사람이나 옆 세션이 고친 글을 그대로 심으면 그
+    /// 고침이 말없이 사라진다. `--json` 의 갈래는 `unwritable` 이다 — 이 실행이 그 파일을 못 쓴 것은 같고, 고칠 말만
+    /// 다르다(권한을 열 일이 아니라 다시 부를 일이다).
+    Changed(String),
 }
 
 impl Added {
@@ -1370,6 +1372,7 @@ impl Added {
             Added::Unwritable { why, .. } => Some(("unwritable", why)),
             Added::Linked { to, .. } => Some(("linked", to)),
             Added::Shared(with) => Some(("shared", with)),
+            Added::Changed(why) => Some(("unwritable", why)),
         }
     }
 
@@ -1380,7 +1383,7 @@ impl Added {
         match self {
             Added::Unwritable { missing, .. } => missing.iter().map(String::as_str).filter(rule).collect(),
             Added::Wrote { .. } | Added::Already | Added::Unreadable(_) => block.lines().filter(rule).collect(),
-            Added::Linked { .. } | Added::Shared(_) => Vec::new(),
+            Added::Linked { .. } | Added::Shared(_) | Added::Changed(_) => Vec::new(),
         }
     }
 }
@@ -1492,6 +1495,25 @@ fn plant(path: &Path, text: &str) -> Result<(), String> {
     // 것보다 찌꺼기가 남을 수 있는 쪽이 낫다.
     let checkout = crate::path::dir_of(path);
     crate::store::write_staged(path, text.as_bytes(), checkout).map_err(|e| e.message)
+}
+
+/// AGENTS.md 에 `next` 를 심는다 — **처음 읽은 글(`read`)이 아직 그 자리에 있을 때만**(moai-h64l.0hr).
+///
+/// `next` 는 `read` 에 블록을 붙인 글이다. `read` 는 [`run`] 이 화면을 띄우고 딸린 파일에 덧붙이기 **전에** 읽은
+/// 것이라, 화면이 사람을 기다리는 사이 사람이나 옆 세션이 AGENTS.md(링크면 그 끝)를 고쳤으면 그대로 갈아끼울 때
+/// 그 고침이 말없이 사라졌다. 그래서 심기 바로 앞에서 같은 자([`read_held`])로 다시 읽어 견주고, 갈렸으면 안
+/// 쓰고 [`Added::Changed`] 로 돌아간다 — 다시 부른 `init` 이 지금 글에 블록을 붙인다. 다시 못 읽은 것도
+/// 갈린 것으로 친다: 처음 읽은 글이 그 자리에 있는지 모르면 덮어쓸 수 없다. 이 실행이 덧붙인 딸린 파일에 닿은
+/// 링크도 여기서 걸리지만, 그 자리는 [`agents_shares`] 가 먼저 더 바른 까닭으로 거른다.
+///
+/// 다시 읽은 뒤 갈아끼우기까지의 틈은 남는다 — 사람이 기다리는 몇 분을 시스템 호출 몇 개로 줄인 것이다.
+/// 까닭의 말은 그때만 묻는다(`lang`) — `--json` 의 흔한 길은 사용자 설정을 안 연다.
+fn plant_agents(path: &Path, read: &str, next: &str, lang: impl FnOnce() -> crate::i18n::Lang) -> Result<(), Added> {
+    let now = read_held(path, &crate::held::Home::of(crate::path::dir_of(path)));
+    if !now.is_ok_and(|t| t.unwrap_or_default() == read) {
+        return Err(Added::Changed(say(lang(), "init.agents_changed").to_string()));
+    }
+    plant(path, next).map_err(|why| Added::Unwritable { why, missing: Vec::new() })
 }
 
 /// 이미 있는 줄 `have` 가 넣으려는 줄 `want` 를 **이미 막고 있는가**(moai-mxtb).
@@ -2019,13 +2041,13 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
                 agents_holds = Some(next);
                 false
             } else {
-                match plant(&agents_path, &next) {
+                match plant_agents(&agents_path, existing, &next, || ctx.lang()) {
                     Ok(()) => {
                         agents_holds = Some(next);
                         true
                     }
-                    Err(why) => {
-                        agents_trouble = Some(Added::Unwritable { why, missing: Vec::new() });
+                    Err(trouble) => {
+                        agents_trouble = Some(trouble);
                         false
                     }
                 }
@@ -2271,7 +2293,9 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         // 갈래를 빠짐없이 적는다: `_` 로 받던 때는 갈래가 하나 느는 날 그것이 말없이 "못 읽어"
         // 로 서고 까닭 자리가 빈 채 나갔다(리뷰 moai-humk).
         let head = match done {
-            Added::Unwritable { why, .. } => fill(say(lang, "init.unwritable"), &[("name", name), ("why", why)]),
+            Added::Unwritable { why, .. } | Added::Changed(why) => {
+                fill(say(lang, "init.unwritable"), &[("name", name), ("why", why)])
+            }
             Added::Unreadable(why) => fill(say(lang, "init.unreadable"), &[("name", name), ("why", why)]),
             Added::Shared(with) => fill(say(lang, "init.agents_shared"), &[("name", name), ("with", with)]),
             // 링크는 **손으로 더할 줄을 안 댄다**([`Added::Linked`]) — 따라 적는 곳이 그 링크다. 고칠 말은
@@ -2298,6 +2322,7 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
             out.push(match done {
                 Added::Unreadable(_) => say(lang, "init.agents_unheld_fix").to_string(),
                 Added::Shared(_) => say(lang, "init.agents_shared_fix").to_string(),
+                Added::Changed(_) => say(lang, "init.agents_changed_fix").to_string(),
                 _ => say(lang, "init.untouched_fix").to_string(),
             });
             continue;
@@ -3060,6 +3085,31 @@ mod tests {
             assert_eq!(left(&moai), Vec::<std::ffi::OsString>::new());
             assert_eq!(left(s.path()).len(), 2, "옆자리로 물러선 임시 파일이 남았다: {:?}", left(s.path()));
         }
+    }
+
+    /// **처음 읽은 뒤 바뀐 AGENTS.md 는 덮어쓰지 않는다**(moai-h64l.0hr). [`run`] 은 화면을 띄우기 전에 읽은 글에 블록을
+    /// 붙여 끝에 갈아끼우는데, 그 사이 사람이 고친 글이 Enter 에 말없이 사라졌다. 읽은 뒤 파일을 고쳐 두고 심어 본다 —
+    /// 고친 글이 그대로 남고, 못 건드린 자리의 갈래는 `unwritable` 이다. 그대로인 파일에는 심는다.
+    #[test]
+    fn agents_edited_after_the_first_read_is_not_overwritten() {
+        let s = crate::scratch::Scratch::new("init-agents-race");
+        let agents = s.join("AGENTS.md");
+        std::fs::write(&agents, "처음 글\n").unwrap();
+        let read = read_agents(s.path()).unwrap().unwrap();
+        let next = with_block(&read, &crate::guide::agents());
+        // 화면이 사람을 기다리는 사이 옆 세션이 고쳤다.
+        std::fs::write(&agents, "처음 글\n사람이 더한 줄\n").unwrap();
+        let got = plant_agents(&agents, &read, &next, en).unwrap_err();
+        assert!(matches!(got, Added::Changed(_)), "갈린 글을 다른 갈래로 댔다");
+        assert_eq!(got.trouble().map(|(kind, _)| kind), Some("unwritable"));
+        assert_eq!(std::fs::read_to_string(&agents).unwrap(), "처음 글\n사람이 더한 줄\n", "고친 글을 덮어썼다");
+        // 지워진 것도 갈린 것이다 — 처음 읽은 글이 없는데 심으면 지운 사람의 뜻을 되돌린다.
+        std::fs::remove_file(&agents).unwrap();
+        assert!(matches!(plant_agents(&agents, &read, &next, en), Err(Added::Changed(_))));
+        assert!(!agents.exists(), "지운 파일을 되살렸다");
+        // 그대로면 심는다 — 처음부터 없던 파일도 빈 글로 읽은 그대로다.
+        plant_agents(&agents, "", &next, en).expect("없던 파일에 못 심었다");
+        assert_eq!(std::fs::read_to_string(&agents).unwrap(), next);
     }
 
     /// **`check-ignore -v` 의 한 줄을 그 뜻대로 읽는다**(리뷰 moai-zynt.63u) — 되살리는 패턴(`!…`)은 무시가 아니고,

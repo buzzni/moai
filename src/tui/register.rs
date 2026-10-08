@@ -560,7 +560,8 @@ mod tests {
     /// 이 주 체크아웃으로 옮겨 열어(moai-71ht 셋째 판) 아예 "init 전" 이 아니다. 모노레포의 하위
     /// 디렉터리를 워크트리 안에서 등록하는 자리가 그 갈래에 남는다.
     ///
-    /// git 을 안 띄운다 — 자리를 가르는 자(`store::init_belongs_at`)가 파일만 읽는다.
+    /// 자리는 파일로 잰다(`store::init_belongs_at`) — 맨 저장소인가만 git 에게 묻는데(`worktree::is_bare`,
+    /// moai-h64l.wst), 여기 `.git` 은 손으로 지은 것이라 그 물음이 실패하고 실패는 맨 저장소가 아닌 쪽으로 접힌다.
     #[test]
     fn registering_a_linked_worktree_says_where_the_tracker_lives() {
         let s = Scratch::real("wt-register");

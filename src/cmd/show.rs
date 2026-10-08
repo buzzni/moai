@@ -283,21 +283,36 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     // **종류 낱말이 이미 종류를 골랐다**(moai-ltsv.auf 리뷰) — `moai epic show --filter type=issue` 를 되풀이의 거절
     // (`Once::Kind`)로 내면 고칠 글이 `--type issue` 라, 그대로 친 `moai epic show --type issue` 가 말없이 에픽을
     // 냈고, `type=epic` 에는 "epic 이면서 epic 일 수 없다" 고 했다. 이 자리의 말로 거절한다.
-    if let Target::OfKind(k) = &target
-        && let Some(typed) = crate::query::given_as(&args.filter.filter, "type").next()
-    {
-        let lang = ctx.lang();
-        return Err(Fail::coded(
-            format!(
-                "{}\n      {}",
-                crate::i18n::fill(
-                    crate::i18n::say(lang, "refuse.show_kind_typed"),
-                    &[("kind", k.as_str()), ("type", &typed)]
+    //
+    // **`--type` 도 같은 말로 거절한다**(moai-h64l.tx4) — `type=` 만 막던 때 `moai epic show --type issue` 와
+    // `moai show epic --type issue` 는 0 으로 끝나며 에픽을 냈다. 아래 `kind` 가 대상의 종류를 먼저 집어
+    // `--type` 을 말없이 먹었다. 같은 종류(`--type epic`)도 `type=epic` 처럼 거절한다 — 한 자리에서 두 표현이
+    // 다른 답을 내지 않게.
+    if let Target::OfKind(k) = &target {
+        let typed = args
+            .filter
+            .kind
+            .map(|t| (format!("--type {}", t.as_str()), "--type", t.as_str().to_string()))
+            .or_else(|| {
+                crate::query::given_as(&args.filter.filter, "type").next().map(|t| (format!("type={t}"), "type=", t))
+            });
+        if let Some((given, flag, typed)) = typed {
+            let lang = ctx.lang();
+            return Err(Fail::coded(
+                format!(
+                    "{}\n      {}",
+                    crate::i18n::fill(
+                        crate::i18n::say(lang, "refuse.show_kind_typed"),
+                        &[("kind", k.as_str()), ("given", &given)]
+                    ),
+                    crate::i18n::fill(
+                        crate::i18n::say(lang, "refuse.show_kind_typed_how"),
+                        &[("flag", flag), ("type", &typed)]
+                    ),
                 ),
-                crate::i18n::fill(crate::i18n::say(lang, "refuse.show_kind_typed_how"), &[("type", &typed)]),
-            ),
-            super::code::BAD_FILTER,
-        ));
+                super::code::BAD_FILTER,
+            ));
+        }
     }
     let kind = match target {
         Target::OfKind(k) => Some(k),

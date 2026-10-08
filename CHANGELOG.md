@@ -30,12 +30,36 @@ does not tag — see `CONTRIBUTING.md`.
   that is not `owner/name` is reported, and `moai update` refuses it rather
   than falling back to `buzzni/moai`. (moai-zsfr.2em)
 
+- **`moai skill status` names a retired skill's directory left in Claude's
+  tree** (`.claude/moai-plugin/skills/`), the way it already did for
+  `.agents/skills/`. One that `moai skill install` would remove comes with
+  that command; one holding a file of yours says it is left as it is. `--json`
+  carries a top-level `leftovers`, always an array. The exit code stays 0.
+  (moai-h64l.2zi)
+
 ### Changed
 
 - **The explorer's new-release banner names `moai update`** where that command
   can run, instead of saying an install line is printed on quitting; quitting
   prints `moai update` too. The install line is kept where only the installer
   can upgrade. (moai-zsfr.o3s)
+
+### Fixed
+
+- **`moai init` no longer overwrites an AGENTS.md that changed while its
+  screen was open.** It reads the file again just before planting the block;
+  if a person or another session edited (or removed) it meanwhile, nothing is
+  written and one line says to call `moai init` again. (moai-h64l.0hr)
+- **`moai epic show --type issue` (and every kind word with `--type`) is
+  refused** instead of quietly listing the kind word's rows, the same way
+  `--filter type=…` already was. (moai-h64l.tx4)
+- **The hook no longer counts a sibling worktree's stale tracker copy as work
+  held there.** Only what was picked up inside that worktree counts, so a row
+  closed and picked up again at the root is the root session's focus again.
+  (moai-h64l.59m)
+- **A worktree of a bare repository whose directory is named `.git` no longer
+  moves to a main checkout that does not exist.** Whether the repository is
+  bare is asked of git, not read off the directory name. (moai-h64l.wst)
 
 ## [0.10.0] - 2026-10-08
 
