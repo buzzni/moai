@@ -36,7 +36,8 @@ directories.
 - The detail describes the row under the cursor. `Ctrl-w w` moves the focus there
   so the same keys scroll it, and back again
 
-**What the list shows is the view.** Done is hidden to begin with, and the path
+**What the list shows is the view.** To begin with every column is shown,
+done included, and [deferred](glossary.md#deferred) work is hidden; the path
 line above the list says what is hidden and how it is sorted. The `SPC v` keys
 show or hide [deferred](glossary.md#deferred) work, [backlog items](glossary.md#backlog),
 each [column](glossary.md#column), the detail and the archive;
@@ -237,7 +238,8 @@ line that upgrades the moai you are running.
 - **"Not a terminal"** — the output is piped or redirected. A script wants
   `moai tui --json`
 - **A row you expected is not there.** Read the path line: done or the archive
-  may be hidden, or a filter or search may be set. `Esc` clears the filter,
+  may be hidden, deferred work is hidden to begin with, or a filter or search
+  may be set. `Esc` clears the filter,
   `SPC v a` shows everything but the archive, and `SPC v o` adds the archive
 - **The terminal will not select text** — hold `Shift` (`Option` in iTerm2), or
   turn the mouse off with `SPC o m`
