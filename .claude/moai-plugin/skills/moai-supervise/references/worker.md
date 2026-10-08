@@ -107,11 +107,14 @@ stays on `<root branch>` and git checks a branch out in one place only. You do n
 it — you merge there (8) and nothing else — and you never remove it: it goes after the
 release. Outside a milestone this section does not exist. `Milestone:` can say `none` while
 `Base branch:` names a milestone — that milestone stands but has not started running, and
-`promote` still carries it over in 1; the branch is where this work goes all the same.
+`promote` still carries it over in 1; the branch is where this work goes all the same, and
+in 1 you hang `<milestone id>`, not `none`.
 
 **Raise it if it is missing**, from the root, right before the `worktree add` of 3 — look
 at `git worktree list` first. The first line raises the branch from the local
-`<root branch>`; the second is for a branch that stands while its worktree does not
+`<root branch>`; the second is for a branch that stands while its worktree does not. If
+`worktree add` says the branch or the place already exists, a worker beside you raised it
+first — look at `git worktree list` again and carry on with what stands
 
     git worktree add -b milestone/<milestone id> .worktrees/milestone-<milestone id> <root branch>
     git worktree add .worktrees/milestone-<milestone id> milestone/<milestone id>
@@ -121,7 +124,10 @@ the build output, say), add it to this one too.
 **Git aimed at the milestone's worktree runs from the root**, after `ExitWorktree(keep)` —
 there `git -C .worktrees/milestone-<milestone id> …` is one plain command and goes
 through. From inside your epic's worktree it is refused like any git aimed outside it (the
-git shapes above), so do not try it there. Before you merge into it, check its HEAD the way
+git shapes above), so do not try it there. That worktree is shared by every worker of the
+milestone, like the root: if git refuses a merge there because one is already open
+(`MERGE_HEAD`), it is another worker's — never `merge --abort` it; wait for it to finish
+and run yours again. Before you merge into it, check its HEAD the way
 the root's is checked; if it does not stand on the milestone branch, do not merge: tell the
 supervisor
 
@@ -153,7 +159,10 @@ never in the root
    changes nothing. **Hang only the `<milestone>` in the message, and nothing else**: work is
    never pulled into a running release, so a release you noticed running is not yours to
    attach — not to this epic, not to a member you create later. Inside this epic the release
-   is inherited, which is the one door that stays open. If `<milestone>` is `none`, this work
+   is inherited, which is the one door that stays open. **If `<milestone>` is `none` but
+   `Base branch:` names `milestone/<milestone id>`**, that milestone stands and has not started
+   running — hang that `<milestone id>` in its place: `none` would clear the release `promote`
+   carried while the merge still lands on its branch. Otherwise, if `<milestone>` is `none`, this work
    stands outside every release — that is nothing running, or a backlog item that stood under none,
    or one whose release is already dead, and you cannot tell which from the word alone. What
    came over is still the release that backlog stood in, so read the line `promote` printed and clear a
@@ -377,10 +386,10 @@ never in the root
 
 8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
    this window stands in a directory that is gone.
-   Before merging outside a milestone, check that the root stands on <base branch> — if it
+   Before merging outside a milestone, check that the root stands on <root branch> — if it
    does not, do not merge: tell the supervisor
 
-       git symbolic-ref -q HEAD                  it has to be refs/heads/<base branch>
+       git symbolic-ref -q HEAD                  it has to be refs/heads/<root branch>
    **Inside a milestone you merge in the milestone's worktree, not in the root** — check that
    worktree's HEAD instead, with the line in "The milestone branch", and run the merge and its
    abort below with `-C .worktrees/milestone-<milestone id>` after `git`, from the root.
