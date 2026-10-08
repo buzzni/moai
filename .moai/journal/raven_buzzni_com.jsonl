@@ -5769,3 +5769,5 @@
 {"ts":"2026-10-08T07:30:50Z","id":"moai-wh0u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-08T07:31:44Z","id":"moai-wh0u","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — cargo fmt only, supervisor window)"}
 {"ts":"2026-10-08T07:31:44Z","id":"moai-wh0u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-08T07:41:36Z","id":"moai-iu12","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"판 0.10.0 에서 탐색기 판 줄이 80칸을 넘는다"}
+{"ts":"2026-10-08T07:41:36Z","id":"moai-iu12","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
