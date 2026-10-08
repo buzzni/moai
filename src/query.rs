@@ -464,6 +464,12 @@ pub enum Once {
     Milestone,
     Parent,
     Priority,
+    /// `-g`·`grep=` — 또는이 없는 거르개다. 쉼표는 찾을 글의 글자라 고칠 글을 쉼표로 잇지 않는다(moai-ltsv.auf).
+    Grep,
+    /// `--type`·`type=` — 한 줄의 종류는 하나라, 둘을 함께 주면 늘 0건이었다.
+    Kind,
+    /// `--stale`·`stale=` — 날수 하나다.
+    Stale,
 }
 
 impl Once {
@@ -475,6 +481,9 @@ impl Once {
             Once::Milestone => "--milestone",
             Once::Parent => "--parent",
             Once::Priority => "-p",
+            Once::Grep => "-g",
+            Once::Kind => "--type",
+            Once::Stale => "--stale",
         }
     }
 
@@ -487,8 +496,43 @@ impl Once {
             Once::Milestone => "milestone",
             Once::Parent => "parent",
             Once::Priority => "priority",
+            Once::Grep => "grep",
+            Once::Kind => "type",
+            Once::Stale => "stale",
         }
     }
+
+    /// 값을 쉼표로 이어 "어느 것이든" 을 물을 수 있는가. `false` 인 셋은 한 값만 받는다 — 거절문이 쉼표로 이은
+    /// 글을 대면 그대로 친 사람이 또 거절되거나(`type=`·`stale=`) 쉼표가 든 글을 찾는다(`grep=`).
+    pub fn joins(self) -> bool {
+        !matches!(self, Once::Grep | Once::Kind | Once::Stale)
+    }
+}
+
+/// 값 하나만 드는 거르개(`-g`·`--type`·`--stale`)를 플래그와 `--filter` 를 아울러 두 번 넘게 줬는가(moai-ltsv.auf).
+///
+/// **[`desugar`] 를 돌기 전에 잰다.** 그 셋은 [`Raw`] 에 `Option` 하나로 서서, 거르개 글을 펴는 동안에는 뒤의 값이
+/// 앞의 값을 말없이 덮었다 — `--filter grep=one --filter grep=two` 가 two 의 줄만 냈다. 펴는 중에 거절하면
+/// 셋째부터의 값이 `rest` 에 못 든다. `Raw` 를 `Vec` 로 바꾸지 않는 까닭은 탐색기의 `/` 검색이 `grep` 을 그 꼴로
+/// 채우기 때문이다 — 그쪽에는 두 번째 값이 올 길이 없다.
+fn single(raw: &Raw) -> Result<(), BadFilter> {
+    for field in [Once::Grep, Once::Kind, Once::Stale] {
+        let given = match field {
+            Once::Grep => raw.grep.clone(),
+            Once::Kind => raw.kind.map(|k| k.as_str().to_string()),
+            Once::Stale => raw.stale.map(|d| d.to_string()),
+            _ => None,
+        };
+        // 항목 이름과 값을 자르는 법은 `desugar` 와 같다 — 빈칸을 걷고 첫 `=` 에서 가른다.
+        let typed = raw.filter.iter().filter_map(|one| {
+            let (k, v) = one.trim().split_once('=')?;
+            (k.trim() == field.key()).then(|| v.trim().to_string())
+        });
+        if let [a, b, rest @ ..] = given.into_iter().chain(typed).collect::<Vec<_>>().as_slice() {
+            return Err(BadFilter::Twice { field, a: a.clone(), b: b.clone(), rest: rest.to_vec() });
+        }
+    }
+    Ok(())
 }
 
 /// 한 번만 쓸 수 있는 플래그를 두 번 썼을 때. 규칙(반복=그리고)을 지키면서도
@@ -580,6 +624,7 @@ impl Filter {
         // 아래 한 곳뿐이라야 두 표현이 갈라지지 않는다 — 예전처럼 `Filter` 에
         // 직접 쓰면 `--filter` 가 플래그를 조용히 덮어썼고, `-s` 를 두 번 썼을
         // 때 나오는 친절한 오류도 그 길에서만 사라졌다.
+        single(&raw)?;
         for one in std::mem::take(&mut raw.filter) {
             desugar(&mut raw, &one)?;
         }
@@ -1915,11 +1960,47 @@ mod tests {
     #[test]
     fn each_once_key_reads_back_as_its_own_filter() {
         use Once::*;
-        for field in [Status, Epic, Milestone, Parent, Priority] {
+        for field in [Status, Epic, Milestone, Parent, Priority, Grep, Kind, Stale] {
             let pairs = [format!("{}=1", field.key()), format!("{}=2", field.key())];
             let e = Filter::build(Raw { filter: pairs.to_vec(), ..Raw::default() }).unwrap_err();
             assert_eq!(e, BadFilter::Twice { field, a: "1".into(), b: "2".into(), rest: vec![] }, "{field:?}");
         }
+    }
+
+    /// **값 하나만 드는 셋도 두 번 주면 거절한다**(moai-ltsv.auf, 사람이 정했다) — 한때 뒤의 값이 앞의 값을 말없이
+    /// 덮어 `--filter grep=one --filter grep=two` 가 two 의 줄만 냈다. 플래그와 `--filter` 를 섞어도, 셋째부터는
+    /// `rest` 에 든다. `grep` 을 그리고로 읽지 않는 것도 그날 정했다.
+    #[test]
+    fn a_single_value_filter_refuses_a_second_value() {
+        let twice = |field, a: &str, b: &str, rest: &[&str]| BadFilter::Twice {
+            field,
+            a: a.into(),
+            b: b.into(),
+            rest: rest.iter().map(|r| r.to_string()).collect(),
+        };
+        let e = Filter::build(Raw { filter: s(&["grep=one", "grep=two"]), ..Raw::default() }).unwrap_err();
+        assert_eq!(e, twice(Once::Grep, "one", "two", &[]));
+        // 플래그가 앞이다 — `-g a --filter grep=b`.
+        let e = Filter::build(Raw { grep: Some("a".into()), filter: s(&["grep=b"]), ..Raw::default() }).unwrap_err();
+        assert_eq!(e, twice(Once::Grep, "a", "b", &[]));
+        let e = Filter::build(Raw { grep: Some("a".into()), filter: s(&["grep=b", " grep = c "]), ..Raw::default() })
+            .unwrap_err();
+        assert_eq!(e, twice(Once::Grep, "a", "b", &["c"]));
+        // 종류는 준 글 그대로 — 플래그로 온 것은 `Kind` 의 이름으로 돌아온다.
+        let e = Filter::build(Raw { kind: Some(Kind::Epic), filter: s(&["type=issue"]), ..Raw::default() })
+            .unwrap_err();
+        assert_eq!(e, twice(Once::Kind, "epic", "issue", &[]));
+        let e = Filter::build(Raw { filter: s(&["type=epic", "type=issue", "type=backlog"]), ..Raw::default() })
+            .unwrap_err();
+        assert_eq!(e, twice(Once::Kind, "epic", "issue", &["backlog"]));
+        let e = Filter::build(Raw { stale: Some(3), filter: s(&["stale=7"]), ..Raw::default() }).unwrap_err();
+        assert_eq!(e, twice(Once::Stale, "3", "7", &[]));
+        let e = Filter::build(Raw { filter: s(&["stale=3", "stale=7", "stale=9"]), ..Raw::default() }).unwrap_err();
+        assert_eq!(e, twice(Once::Stale, "3", "7", &["9"]));
+        // 하나씩이면 그대로 선다 — 플래그만, 거르개 글만, 서로 다른 셋을 하나씩.
+        let f = Filter::build(Raw { grep: Some("A".into()), filter: s(&["type=epic", "stale=2"]), ..Raw::default() })
+            .unwrap();
+        assert_eq!((f.grep.as_deref(), f.kind, f.stale), (Some("a"), Some(Kind::Epic), Some(2)));
     }
 
     #[test]

@@ -4915,6 +4915,18 @@ fn filters_reach_the_command_line() {
 
     let e = moai(s.path(), &["show", "-s", "todo", "-s", "review"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("-s todo,review"));
+    // **값 하나만 드는 셋은 두 번째 값을 거절한다**(moai-ltsv.auf) — 한때 뒤의 값이 말없이 앞의 값을 덮었다.
+    // 또는이 없으니 쉼표로 잇지 않고 하나를 남기라고 이른다.
+    for (args, fix) in [
+        (&["show", "--filter", "grep=one", "--filter", "grep=two"][..], "`-g two`"),
+        (&["show", "-g", "a", "--filter", "grep=b"][..], "`-g b`"),
+        (&["show", "--type", "epic", "--filter", "type=issue"][..], "`--type issue`"),
+        (&["show", "--stale", "3", "--filter", "stale=7", "--filter", "stale=9"][..], "`--stale 9`"),
+    ] {
+        let e = moai(s.path(), args);
+        let err = String::from_utf8_lossy(&e.stderr);
+        assert!(!e.status.success() && err.contains(fix), "{args:?} — {err}");
+    }
     let e = moai(s.path(), &["show", "--filter", "statu=todo"]);
     assert!(String::from_utf8_lossy(&e.stderr).contains("status, tag"));
 }
