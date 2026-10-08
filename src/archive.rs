@@ -597,12 +597,51 @@ pub fn board(
     }
     let all = report::with_archive(rows, &archived.issues, &opaque);
     let soil = report::Soil::of(&all);
-    let stands = soil.stands(&all, cfg);
+    board_in(&all, &soil, rows, unreadable, &conflicts(root, archived), cfg, now)
+}
+
+/// Whether `rows` laid beside the archive (both kept whole, in any order) is the very context [`board`] would read —
+/// so a caller that already built that join and its [`report::Soil`] can count with [`board_in`] instead of letting
+/// [`board`] build both again (moai-ug6x.pi3). The explorer's reread built one soil over `tui::beside` and the banner a
+/// second over [`report::with_archive`] on every step (review moai-3nrh.ige 8).
+///
+/// The two joins differ in what they keep: [`report::with_archive`] drops an archived row whose id a live row or an
+/// unreadable live line holds, `tui::beside` keeps both copies (diagnostics and the archive view read them). They hold
+/// the same rows only when no archived id is taken — so that is asked here, and anything else counts the old way.
+/// `rows` must be the root snapshot itself (no sibling worktree overlaid) — that is [`board`]'s own condition for
+/// reading one context, and the caller vouches for it, since only the caller knows what it overlaid.
+///
+/// Order is not asked. The joins order rows differently (sorted by id, against archive-then-live), and every answer
+/// the soil folds by id takes the last row of that id — rows of one id keep their order in both, because no id
+/// stands on both sides. `a_shared_soil_counts_what_the_board_counts` holds the two counts together.
+pub fn shareable(rows: &[Issue], unreadable: &[report::Unreadable], archived: &Load) -> bool {
+    if archived.issues.is_empty() {
+        return false;
+    }
+    let taken: HashSet<&str> =
+        rows.iter().map(|i| i.id.as_str()).chain(unreadable.iter().filter_map(|u| u.id)).collect();
+    !archived.issues.iter().any(|i| taken.contains(i.id.as_str()))
+}
+
+/// [`board`] over a context the caller already joined — `all` is `rows` beside the archive with nothing dropped and
+/// `soil` was measured over `all` ([`shareable`] says when that holds). `rows` is the root snapshot here, so the move
+/// is counted from it; `excluded` is [`conflicts`] of `rows` against the archive, asked before the archive was moved
+/// into `all`.
+pub fn board_in<'a>(
+    all: &'a [Issue],
+    soil: &report::Soil<'a>,
+    rows: &[Issue],
+    unreadable: &[report::Unreadable],
+    excluded: &BTreeSet<String>,
+    cfg: &Config,
+    now: &str,
+) -> (report::StatusReport, usize) {
+    let stands = soil.stands(all, cfg);
     let moving = match cfg.archive_days <= 0 {
         true => 0,
-        false => eligible_except(root, &stands, cfg, now, &conflicts(root, archived)).len(),
+        false => eligible_except(rows, &stands, cfg, now, excluded).len(),
     };
-    (report::status_of_context(&all, rows, unreadable, cfg, now, &soil, stands), moving)
+    (report::status_of_context(all, rows, unreadable, cfg, now, soil, stands), moving)
 }
 
 /// Keep connected epic/member and parent/child bundles together. Milestones

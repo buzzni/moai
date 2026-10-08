@@ -29,7 +29,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
-    let crate::worktree::Gathered { load: active_load, origin, trouble, mut watched, swept, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, root, origin, trouble, mut watched, swept, sides, mine, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
     // The explorer can switch between the live board and archived rows. Keep the
     // active overlay from the worktree gather, then add the archive beside it so
@@ -37,14 +37,16 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // **배너의 수는 섞기 전에 센다**(moai-nkwg) — `moai status` 와 같은 자로, 산 줄을 일로 아카이브를 문맥으로
     // 받는다. 다시 읽기와 같은 이음(`tui::counted_beside`)이라 그 시험이 이 길도 잰다. **`--json` 은 안 센다**(리뷰)
     // — 그 길은 아래에서 화면을 안 켜고 돌아가 배너가 없는데, 셈은 이슈 전체를 한 벌 걷는다.
-    let (load, counted) = crate::tui::counted_beside(&repo, active_load, &origin, !ctx.json, &crate::model::now())?;
-    crate::tui::watch(&mut watched, places);
-    crate::tui::watch(&mut watched, archived_marks);
-    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸을 한 지도에서 짓는다. 따로 부르면 첫 화면 앞에서
-    // 소속 지도를 두 번 잰다(moai-xemz 리뷰).
+    // 충돌과 옮길 수를 견줄 루트의 스냅샷은 `gather` 가 겹치기 전에 판 것이다(moai-ug6x.pi3) — 다시 안 푼다.
+    // **한 걸음으로 잰다**(moai-fbdg) — 색인과 묶음 칸도 그 이음이 한 지도에서 짓고, 문맥이 같으면 배너의 셈도 그
+    // 지도로 센다(moai-ug6x.pi3). 따로 부르면 첫 화면 앞에서 소속 지도를 두 번 잰다(moai-xemz 리뷰).
     // **노트는 여기서 안 읽는다**(리뷰 moai-wcy8.rbj) — `/` 가 노트를 처음 볼 때 읽는다(`tui::Ground::read_notes`).
     // 여기서 읽던 판은 첫 화면 앞에서, 터미널이 없어 거절될 판에서도 저널 전체를 풀었다.
-    let (index, ground) = crate::tui::measure(&load.issues, &repo.config);
+    let crate::tui::Beside { load, counted, index, ground } =
+        crate::tui::counted_beside(&repo, active_load, root.as_ref(), &origin, !ctx.json, &crate::model::now())?;
+    drop(root);
+    crate::tui::watch(&mut watched, places);
+    crate::tui::watch(&mut watched, archived_marks);
     let path = resolve(&index, &load.issues, args.path.as_deref(), ctx.lang())?;
 
     // `--json` 은 화면을 켜지 않는다. 기계로 읽는 쪽과 통합 시험이 이 길로 온다.

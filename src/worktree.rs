@@ -219,7 +219,22 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 /// 자리 셈([`workplaces_in`])이 같은 파일을 다시 열지 않는다. 겹쳐 세우는 줄만 베끼므로 베끼는
 /// 수는 보통 몇 줄이다 — 옆 줄은 거의 다 이쪽에도 같은 값으로 있어 그냥 지나간다.
 pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
+    let (shown, origin, _) = overlay_keeping(mine, others, false);
+    (shown, origin)
+}
+
+/// [`overlay`] 에 **겹치기 전의 제 줄**을 곁들인다(moai-ug6x.pi3) — 옆에서 한 줄이라도 들어왔을 때만
+/// `Some` 이고, 아무것도 안 들어왔으면 겹친 줄이 곧 제 줄이라 `None` 이다([`Gathered::root`]).
+///
+/// **처음 바꾸는 순간에 베낀다.** 늘 베끼면 옆이 조용한 보통의 걸음(집기를 main 에 커밋하는 규약에서는
+/// 옆 줄이 거의 안 선다)이 쓰지도 않을 한 벌을 걸음마다 치른다. 바꾼 뒤에는 제 줄을 되찾을 길이 없어
+/// — 덮인 줄은 사라지고 정렬이 자리를 섞는다 — 바꾸기 **전에** 베낀다.
+///
+/// **`keep` 이 아니면 안 베낀다** — 겹친 줄만 쓰는 쪽([`overlay`], 훅이 부르는 [`fresh`])은 `None` 을 받는다.
+/// 거기서 베끼면 옆에서 줄이 들어올 때마다 버릴 한 벌을 치른다.
+fn overlay_keeping(mine: Vec<Issue>, others: &[Side], keep: bool) -> (Vec<Issue>, Origin, Option<Vec<Issue>>) {
     let mut shown = mine;
+    let mut before: Option<Vec<Issue>> = None;
     let mut origin = Origin::default();
     // id → `shown` 의 자리. 제 줄이 둘이면 **뒷자리를** 적는다 — `store::Load::get`·
     // 트리·탐색기가 모두 뒷줄을 연다. 앞자리를 덮으면 `show <id> --worktree` 가 덮지
@@ -236,12 +251,18 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
                 Some(&k)
                     if (i.planned(), i.updated_at.as_str()) > (shown[k].planned(), shown[k].updated_at.as_str()) =>
                 {
+                    if keep {
+                        before.get_or_insert_with(|| shown.clone());
+                    }
                     origin.from.insert(i.id.clone(), tree);
                     shown[k] = i.clone();
                 }
                 Some(_) => {}
                 None if base.get(&i.id).is_some_and(|then| i.updated_at <= *then) => {}
                 None => {
+                    if keep {
+                        before.get_or_insert_with(|| shown.clone());
+                    }
                     at.insert(i.id.clone(), shown.len());
                     origin.added.insert(i.id.clone());
                     origin.from.insert(i.id.clone(), tree);
@@ -253,7 +274,7 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
     // `store::read` 와 같은 차례로 돌려준다. **안정 정렬이다** — 제 파일의 겹친
     // id 두 줄이 읽은 차례를 지킨다.
     shown.sort_by(|a, b| a.id.cmp(&b.id));
-    (shown, origin)
+    (shown, origin, before)
 }
 
 /// 옆 워크트리를 겹치다 만난 것 — **말이 아니라 자료다**(moai-dpbi). 글자는 [`crate::view`] 가
@@ -292,6 +313,14 @@ pub struct Gathered {
     /// — 남의 못 읽는 줄로 `moai status` 가 비영 종료하면, 내 파일은 멀쩡한데
     /// 옆 워크트리 때문에 도구가 실패로 읽힌다.
     pub load: Load,
+    /// **겹치기 전의 제 스냅샷** — 옆에서 줄이 하나라도 들어왔을 때만 서고, 아니면 `None` 이라 `load` 가 곧
+    /// 그것이다(moai-ug6x.pi3) — 읽는 쪽은 `root.as_ref().unwrap_or(&load)` 로 읽는다.
+    ///
+    /// 아카이브의 충돌과 옮길 수는 루트의 스냅샷과 견준다(moai-bth3) — 옆의 낡은 사본이 그 둘을 부풀리지 않게.
+    /// 그 스냅샷을 `moai status --worktree` 와 탐색기의 배너가 저마다 `repo.read()` 로 **다시 풀었는데**, 그것은
+    /// 바로 여기서 방금 판 그 파일이다(리뷰 moai-3nrh.ige 7번). 같은 읽기를 한 번만 하니 겹친 줄과 견줄 줄이 한
+    /// 때의 파일에서 온다 — 다시 읽던 판은 그 사이에 떨어진 쓰기를 한쪽만 봤다.
+    pub root: Option<Load>,
     pub origin: Origin,
     /// 남의 워크트리에서 만난 문제. **막지 않는다** — 부르는 쪽이 한 줄씩 알린다([`Trouble`]).
     pub trouble: Vec<Trouble>,
@@ -512,6 +541,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     if !worktree {
         return Ok(Gathered {
             load,
+            root: None,
             origin: Origin::default(),
             trouble: Vec::new(),
             unfound: None,
@@ -582,7 +612,9 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
         }
     }
     let Load { issues, errors } = load;
-    let (issues, mut origin) = overlay(issues, &others);
+    let (issues, mut origin, before) = overlay_keeping(issues, &others, true);
+    // 못 읽는 줄은 겹치기가 안 건드린다 — 루트의 것이 곧 겹친 것의 것이다.
+    let root = before.map(|issues| Load { issues, errors: errors.clone() });
     origin.named = named;
     let swept = unfound.is_none();
     // **겹친 뒤에는 옆의 줄을 버린다**(moai-jx70) — 여기부터 그것을 읽는 자는 자리 셈 하나고,
@@ -599,7 +631,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             SideFloor::of(root, &issues, &repo.config)
         })
         .collect();
-    Ok(Gathered { load: Load { issues, errors }, origin, trouble, unfound, swept, watched, sides, mine })
+    Ok(Gathered { load: Load { issues, errors }, root, origin, trouble, unfound, swept, watched, sides, mine })
 }
 
 /// 옆 워크트리 하나의 줄을 겹칠 모양으로 — 옆에만 있는 줄이 있으면 갈라진 자리([`Side::base`])를 댄다.
@@ -2390,6 +2422,54 @@ mod tests {
         for t in within("값싼 문", move || workplaces(&main, &cfg, false, &[])) {
             assert!(t.broken && !t.unknown, "{}: 값싼 문 — broken={} unknown={}", t.branch, t.broken, t.unknown);
         }
+    }
+
+    /// **겹치기 전의 제 스냅샷을 실어 보낸다**(moai-ug6x.pi3) — 옆에서 줄이 들어왔을 때만이다. 아카이브의 충돌과 옮길
+    /// 수를 루트와 견주는 자리(`moai status --worktree`·탐색기의 배너·한눈 보기)가 이것을 받아, 방금 판 파일을 걸음마다
+    /// `repo.read()` 로 다시 풀지 않는다. 옆이 조용하면 겹친 줄이 곧 그것이라 베끼지 않는다 — 늘 베끼면 보통의
+    /// 걸음이 안 쓸 한 벌을 치른다.
+    #[test]
+    fn the_gathered_load_keeps_the_root_snapshot_from_before_the_overlay() {
+        let scratch = crate::scratch::Scratch::fenced("gathered-root");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        let row = |status: &str, at: &str| {
+            format!(
+                "{{\"id\":\"t-0001\",\"title\":\"일\",\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\
+                 \"updated_at\":\"{at}\",\"status_since\":\"{at}\"}}\n"
+            )
+        };
+        for dir in [main.clone(), base.join("t-1")] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), row("todo", "2026-09-11T00:00:00Z")).unwrap();
+        }
+        let open = || {
+            let crate::store::Opened::Repo(repo) = Repo::open(&main, || crate::i18n::Lang::Ko).unwrap() else {
+                panic!("저장소가 안 열렸다")
+            };
+            repo
+        };
+        // 옆이 조용하다 — 같은 줄뿐이라 겹친 것이 곧 루트다.
+        let quiet = gather(&open(), true).unwrap();
+        assert!(quiet.origin.branches().is_empty(), "시험의 전제 — 옆에서 온 줄이 없다");
+        assert!(quiet.root.is_none(), "옆에서 온 줄이 없는데 루트를 한 벌 베꼈다");
+
+        // 옆에서 늦게 집었다 — 겹친 줄은 옆의 것, 루트는 제 파일의 것이다.
+        std::fs::write(base.join("t-1/.moai/issues.jsonl"), row("in_progress", "2026-09-12T00:00:00Z")).unwrap();
+        let got = gather(&open(), true).unwrap();
+        assert_eq!(got.load.issues[0].status.as_str(), "in_progress", "시험의 전제 — 옆의 줄이 겹쳐 섰다");
+        let root = got.root.as_ref().expect("옆에서 줄이 들어왔는데 겹치기 전의 스냅샷을 안 실었다");
+        assert_eq!(root.issues, open().read().unwrap().issues, "실은 것이 루트의 스냅샷이 아니다");
+        assert_eq!(root.issues[0].status.as_str(), "todo");
+
+        // 겹쳐 보지 않으면 실을 것이 없다.
+        assert!(gather(&open(), false).unwrap().root.is_none());
     }
 
     /// 동률이면 제 줄, 남끼리는 앞선 워크트리.
