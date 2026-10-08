@@ -23342,8 +23342,10 @@ fn bumping_moves_the_lock_line_with_the_manifest() {
     assert!(after.contains("name = \"moai\"\nversion = \"0.2.0\"\n"), "Cargo.lock 의 자기 줄을 안 움직였다\n{after}");
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(said.contains("자기 줄을 0.2.0 로 다시 적었다"), "움직인 것을 안 댔다\n{}", text(&out));
-    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다.
-    assert!(said.contains("git tag v0.2.0"), "태그 자리를 안 댔다\n{}", text(&out));
+    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다 — develop 끝이 아니라 main 의 머지 커밋에
+    // (moai-ltsv.3qk, CONTRIBUTING.md 의 Releasing).
+    assert!(said.contains("git tag v0.2.0 origin/main"), "태그 자리를 main 에 안 댔다\n{}", text(&out));
+    assert!(!said.contains("git push && git push origin"), "develop 끝에 단 태그를 밀라고 했다\n{}", text(&out));
 }
 
 /// **작은따옴표 `Cargo.toml` 도 읽고 고친다**(moai-kyp7.269). TOML 의 literal string 이라 cargo 는
