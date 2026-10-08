@@ -54,7 +54,8 @@ remain readable; if both keys exist, `hide_backlog` wins.
 
 - **`SPC g l` — the list**, described above
 - **`SPC g b` — the board.** The same rows as a kanban board: backlog, deferred, then
-  your columns, with one lane per milestone at the project root. A card that is
+  your columns, with one lane per milestone at the project root. The deferred column
+  follows the view — hidden to begin with, back with `SPC v l`. A card that is
   not yours says whose it is. `h` and `l` go across the columns, `j` and `k` along
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps

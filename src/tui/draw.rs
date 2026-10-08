@@ -2281,7 +2281,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
         Some(o) => room.saturating_sub(crate::text::width(o) + 3),
         None => room,
     };
-    // **보기가 숨긴 것을 댄다**(moai-fmv5) — done 을 숨긴 채 시작하므로, 안 대면 끝난 일이 사라진
+    // **보기가 숨긴 것을 댄다**(moai-fmv5) — 미룬 것을 숨긴 채 시작하므로(moai-muit), 안 대면 미룬 일이 사라진
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
@@ -5320,6 +5320,7 @@ fn mend(prev: &ratatui::buffer::Buffer, next: &mut ratatui::buffer::Buffer) {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::super::tests::old_look;
     use super::*;
     use crate::config::Config;
     use crate::latest::Trouble;
@@ -5489,8 +5490,7 @@ pub(super) mod tests {
         let mut a = App::new(out, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.site.lang = Lang::Ko;
         // 칸은 backlog · 미룸 · todo · in_progress · review 다 — done 은 바닥이 숨긴다(옛 처음 보기, moai-muit).
-        a.view = super::super::view::View::hiding("done");
-        a.see();
+        let mut a = old_look(a);
         a.layout = super::super::view::Layout::Board;
         a.detail_open = false;
         a
@@ -5936,18 +5936,16 @@ pub(super) mod tests {
         a
     }
 
+    /// **옛 처음 보기(done 숨김·미룸 보임)로 세운다**(moai-muit) — 처음 보기가 2026-10-08 에 done 보임·미룸 숨김으로
+    /// 뒤집혔다. 숨긴 done 을 그리는 법을 보는 시험이 그 전제를 제 바닥에 적는다. 거는 자는
+    /// [`super::super::tests::old_look`] 하나다.
+    fn done_hidden(issues: Vec<Issue>) -> App {
+        old_look(App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new()))
+    }
+
     /// [`every`] 에서 열 이름 줄만 **안 끈** 것 — 사용자가 처음 띄운 열 그대로다. 둘이 한 뿌리에서
     /// 나와야 폭 훑기(`the_column_names_stand_over_their_values_at_every_width`)가 보는 그림이 다른
     /// 그림 시험과 이름 줄 하나만큼만 다르다.
-    /// **옛 처음 보기(done 숨김·미룸 보임)로 세운다**(moai-muit) — 처음 보기가 2026-10-08 에 done 보임·미룸 숨김으로
-    /// 뒤집혔다. 숨긴 done 을 그리는 법을 보는 시험이 그 전제를 제 바닥에 적는다.
-    fn done_hidden(issues: Vec<Issue>) -> App {
-        let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
-        a.view = super::super::view::View::hiding("done");
-        a.see();
-        a
-    }
-
     fn as_opened(issues: Vec<Issue>) -> App {
         let mut a = App::new(issues, Config::parse("prefix = \"argos\"\n").unwrap(), Path::new());
         a.view = super::super::view::View::default();
@@ -7791,10 +7789,9 @@ pub(super) mod tests {
             let cfg = Config::parse("prefix = \"argos\"\n").unwrap();
             let picked = crate::report::ready(&all, &cfg).iter().any(|i| i.id == "argos-0005");
             let path = vec![crate::nav::Seg::Epic("argos-0001".into())];
-            let mut a = App::new(all, cfg, path);
+            let a = App::new(all, cfg, path);
             // 옛 처음 보기(done 숨김·미룸 보임)를 바닥으로 둔다(moai-muit) — 이 시험은 보기가 아니라 막음 줄을 본다.
-            a.view = super::super::view::View::hiding("done");
-            a.see();
+            let mut a = old_look(a);
             a.cursor = a
                 .rows()
                 .iter()

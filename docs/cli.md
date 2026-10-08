@@ -2403,9 +2403,10 @@ Options:
   last look carry a [NEW] mark in front of the title. Read marks live in my own
   config and the tracker does not change — on the CLI that is `moai read`.
 
-  The list shows done and hides deferred work to begin with — the
-  [deferred hidden] mark on the path line says so. The view is separate from
-  the filter, so Esc does not clear it and the two apply together.
+  The list shows done and hides deferred work to begin with — the mark on
+  the path line says so, [deferred hidden] or, with the archive below,
+  [deferred·archive 312 hidden]. The view is separate from the filter, so
+  Esc does not clear it and the two apply together.
   Done that has sat in done for a while is the archive (archive_days in
   .moai/config.toml, 14 unless written; 0 turns it off). It stays hidden on
   the list and the board even with done shown, and the path line counts it

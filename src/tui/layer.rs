@@ -3016,10 +3016,8 @@ mod tests {
         let s = Scratch::fenced("layer-view-on-read");
         let one = s.project("one", &[("argos-0001", "열린 줄", "todo"), ("argos-0002", "끝난 줄", "done")]);
         let cfg = s.register(&[&one]);
-        let mut a = layered(&cfg);
         // 처음 보기는 done 을 보인다(moai-muit) — 펼치기 전에 done 을 숨긴 보기를 걸어 둔다.
-        a.view = crate::tui::view::View::hiding(crate::config::DONE);
-        a.see();
+        let mut a = crate::tui::tests::old_look(layered(&cfg));
         a.want_site(0);
         settle(&mut a);
         assert_eq!(titles(&a), ["열린 줄"], "펼치며 읽은 프로젝트가 걸려 있던 보기를 안 따랐다");

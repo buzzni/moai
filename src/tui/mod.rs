@@ -6380,6 +6380,15 @@ mod tests {
         a.load_look();
         assert_eq!(a.view, view::View::hiding(crate::config::DONE), "기억한 보기가 처음 보기에 졌다");
         assert_eq!(row_ids(&a), ["argos-0001", "argos-0003"], "기억한 보기대로 줄이 안 섰다");
+
+        // **적히지 않은 키는 처음값 그대로다** — 다른 키만 든 `[tui]` 가 미룸 숨김까지 걷으면 처음 보기가 그 사람에게만 안 선다.
+        let other = s.join("other.toml");
+        std::fs::write(&other, "[tui]\nsort = \"title\"\nhidden = []\n").unwrap();
+        let mut b = App::new(a.site.issues.clone(), cfg(), Path::new());
+        b.user_config = Some(other);
+        b.load_look();
+        assert!(b.view.hide_deferred, "적히지 않은 hide_deferred 를 처음값에서 걷었다");
+        assert_eq!(row_ids(&b), ["argos-0001", "argos-0002"], "적히지 않은 키가 처음 보기를 따르지 않았다");
     }
 
     /// **done 을 켜도 아카이브는 숨고, 뱃지가 그 수를 대며, `SPC v o` 가 보인다**(moai-47mz, 2026-10-03 사용자 결정).
@@ -6485,7 +6494,8 @@ mod tests {
     }
 
     /// 보드 시험의 바닥(moai-9nfw). 마일스톤 0001 밑에 에픽 0002(멤버 0003 todo·p1, 0004 in_progress·p2),
-    /// 마일스톤 없는 0005(todo·p3)·backlog 0006·미룬 0007(todo·p0).
+    /// 마일스톤 없는 0005(todo·p3)·backlog 0006·미룬 0007(todo·p0). 보기는 옛 처음 보기([`old_look`] — done 숨김·
+    /// 미룸 보임)라 미룸 칸이 선다.
     fn boarded() -> App {
         let mut epic = make("argos-0002", Kind::Epic);
         epic.milestone = Some("argos-0001".into());

@@ -29,8 +29,9 @@ does not tag — see `CONTRIBUTING.md`.
 ### Changed
 
 - **The explorer opens with done shown and deferred work hidden.** Before, it
-  opened with the done column hidden and deferred rows shown. `SPC v 4` and
-  `SPC v l` still toggle each, and a view you saved in `[tui]` (`hidden`,
+  opened with the done column hidden and deferred rows shown. The done
+  column's toggle (`SPC v 4` with the default columns) and `SPC v l` still
+  toggle each, and a view you saved in `[tui]` (`hidden`,
   `hide_deferred`) still wins over this default. (moai-muit)
 - **`moai init --json` says `"driver": "untracked"` for a tracker kept out of
   git.** With `--tracking exclude` or `gitignore` it said `skipped`, the word
