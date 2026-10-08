@@ -1284,8 +1284,10 @@ const HELD: &str = "moai-held";
 /// `Lock::drop` 이 안 지우므로 트래커가 통째로 사라져도 그 파일만 남는다. 그 자는
 /// [`crate::store::holds_tracker`] 하나고, `init` 의 거절도 같은 자로 묻는다(moai-r0x8.apz).
 pub fn tracker_root(root: &Path) -> Option<PathBuf> {
-    let main = main_root(root)?;
-    crate::store::holds_tracker(&main).then_some(main)
+    // 트래커가 있는가(`stat` 몇 번)를 먼저 본다 — 맨 저장소인가([`is_bare`])는 git 을 띄우므로, 옮길 것이
+    // 없는 자리에서는 안 묻는다. 답은 [`main_root`] 와 같다.
+    let (main, common) = mirror(root)?;
+    (crate::store::holds_tracker(&main) && (!is_bare(&common))).then_some(main)
 }
 
 /// 이 트래커가 든 **제** 워크트리의 꼭대기. git 을 띄우지 않는다. 저장소가 아니면 없다.
@@ -1478,12 +1480,28 @@ pub fn is_linked(root: &Path) -> bool {
 }
 
 /// 딸린 워크트리의 트래커에 대응하는 **주 워크트리의 트래커 자리** — 주 워크트리이거나 git 밖이면
-/// `None`. git 을 띄우지 않는다.
+/// `None`.
 ///
 /// [`tracker_root`] 가 이것으로 트래커를 루트로 옮긴다(moai-y7go) — 워크트리의 `.moai` 를 고치면
 /// 병합에서 스냅샷이 충돌하기 때문이다.
-/// 공용 디렉터리가 `.git` 이 아니면(맨 저장소에 딸린 워크트리) 주 체크아웃이 없다 — `None`.
+///
+/// **맨 저장소인가는 git 에게 묻는다**(moai-h64l.wst, 리뷰 moai-r0x8.qbh 4번의 남은 반). 자리는
+/// [`mirror`] 가 git 이 적어 둔 파일로 재고, 그 공용 디렉터리가 맨 저장소면 주 체크아웃이 없다 —
+/// [`is_bare`]. git 을 띄우는 것은 **딸린 워크트리 안에서, 공용 디렉터리의 이름이 `.git` 일 때뿐**이다.
+/// 주 체크아웃(`.git` 이 디렉터리)과 git 밖은 지금처럼 파일 하나 안 읽고 답한다.
 pub fn main_root(root: &Path) -> Option<PathBuf> {
+    let (main, common) = mirror(root)?;
+    (!is_bare(&common)).then_some(main)
+}
+
+/// [`main_root`] 의 **git 을 안 띄우는 반** — 비친 자리와 공용 디렉터리. 맨 저장소인가는 아직 안 물었다.
+///
+/// 공용 디렉터리의 **이름**은 여기서 자리를 재는 데만 쓴다 — git 도 주 워크트리의 경로를 그렇게 잰다
+/// (`worktree list` 의 첫 줄은 공용 디렉터리에서 `/.git` 을 뗀 자리다). 그 이름이 `.git` 이 아니면 잴
+/// 자리가 없다: `git init --separate-git-dir` 의 공용 디렉터리(`sep.git`)는 주 체크아웃을 되가리키는
+/// 줄을 어디에도 안 두어, git 에게 물어도 `worktree list` 가 주 워크트리로 `sep.git` 자체를 댄다. 그래서
+/// 그 꼴은 전처럼 `None` 이다 — 지어낸 자리로 옮기느니 안 옮긴다.
+fn mirror(root: &Path) -> Option<(PathBuf, PathBuf)> {
     let (top, common) = git_dirs(root)?;
     if top.join(".git").is_dir() || common.file_name()? != ".git" {
         return None;
@@ -1493,7 +1511,49 @@ pub fn main_root(root: &Path) -> Option<PathBuf> {
     let rel = real(root).strip_prefix(real(top)).ok()?.to_path_buf();
     let main = common.parent()?;
     // 빈 `rel` 을 붙이면 끝에 `/` 가 선다 — 내미는 줄이 제 자리를 두 꼴로 쓰게 된다.
-    Some(if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) })
+    let main = if rel.as_os_str().is_empty() { main.to_path_buf() } else { main.join(rel) };
+    Some((main, common))
+}
+
+/// 이 공용 git 디렉터리가 **맨 저장소인가** — 그러면 딸린 워크트리에 주 체크아웃이 없다.
+///
+/// **이름이 아니라 git 에게 묻는다**(moai-h64l.wst, 2026-10-08 사용자 결정). 공용 디렉터리의 이름이
+/// `.git` 인가로 가르던 판은 `git clone --bare <url> bin/.git` 에 딸린 워크트리에서 없는 주 체크아웃
+/// `bin` 을 댔다 — 거기 트래커가 있으면 모든 명령이 그리로 옮겨 갔고, `init` 의 거절은 없는 자리를
+/// 댔다. 답은 `core.bare` 고, 그것을 읽는 자는 git 이다(`rev-parse --is-bare-repository` 를 공용
+/// 디렉터리에서). `init` 의 거절문([`crate::cmd::init`])도 이 하나로 묻는다 — 자가 둘이면 찾기가 옮겨
+/// 가는 자리와 거절이 대는 자리가 갈린다.
+///
+/// **값**: git 한 번(이 기계에서 약 3ms)이다. 딸린 워크트리 안에서만 들고([`main_root`]), 한 프로세스
+/// 안에서는 공용 디렉터리마다 한 번만 묻는다 — 한 명령이 찾기·`init`·훅의 자리 셈에서 여러 번 묻고,
+/// 탐색기는 걸음마다 다시 묻는다. `core.bare` 는 저장소를 다시 만들기 전에는 안 바뀌는 값이라 담아 둬도
+/// 낡지 않는다. 모르는 답은 안 담는다.
+///
+/// **답을 못 얻으면 맨 저장소가 아니라고 둔다**(git 이 없거나, 실패하거나, [`PROBE_BUDGET`] 안에 안
+/// 끝났다). 안 옮기는 쪽(`None`)이 얼핏 조심스러워 보이지만, 그러면 git 이 잠깐 늦은 한 번에 흔한
+/// 저장소의 모든 워크트리가 갈라질 때 들고 온 **낡은 스냅샷**을 읽고 거기 써서 병합에서 겨룬다 —
+/// moai-y7go 가 막으려던 바로 그 조용한 갈림이다. 틀리는 것은 `.git` 이라는 이름의 맨 저장소에 트래커까지
+/// 선 드문 꼴에서 git 까지 못 물을 때뿐이고, 그때는 이 결정 전과 같다. `init` 의 거절도 이전부터 같은
+/// 쪽으로 접었다.
+///
+/// [`PROBE_BUDGET`]: crate::cmd::merge_driver::PROBE_BUDGET
+pub fn is_bare(common: &Path) -> bool {
+    use std::sync::Mutex;
+    static SAID: Mutex<BTreeMap<PathBuf, bool>> = Mutex::new(BTreeMap::new());
+    let key = real(common);
+    if let Some(said) = SAID.lock().ok().and_then(|m| m.get(&key).copied()) {
+        return said;
+    }
+    let args = ["rev-parse", "--is-bare-repository"];
+    let Some(Ok(said)) = crate::git::run_reading_user_config(&key, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET))
+    else {
+        return false;
+    };
+    let bare = said.trim() == "true";
+    if let Ok(mut m) = SAID.lock() {
+        m.insert(key, bare);
+    }
+    bare
 }
 
 /// [`workplaces`] 의 답을 바꿀 수 있는 파일과 **지금 잰** 표식 — git 을 띄우지 않는다.
@@ -2169,6 +2229,48 @@ mod tests {
         std::fs::write(main.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
         assert_eq!(tracker_root(&feat), Some(main.clone()), "설정이 있는데 안 옮겼다");
         assert_eq!(tracker_root(&main), None, "주 워크트리를 옮겼다");
+    }
+
+    /// **맨 저장소인가는 이름이 아니라 git 에게 묻는다**(moai-h64l.wst, 리뷰 moai-r0x8.qbh 4번의 남은 반).
+    /// 공용 디렉터리의 이름이 `.git` 인가로 가르던 판은 `git clone --bare <url> bin/.git` 에 딸린 워크트리에서
+    /// 없는 주 체크아웃 `bin` 을 댔다 — 거기 트래커가 있으면 모든 명령이 그리로 옮겨 갔다.
+    /// `--separate-git-dir` 의 주 체크아웃은 git 도 모른다(`worktree list` 가 `sep.git` 을 주 워크트리로 댄다) —
+    /// 지어낸 자리로 옮기지 않고 전처럼 `None` 이다.
+    #[test]
+    fn a_bare_dot_git_has_no_main_checkout_to_move_to() {
+        let scratch = crate::scratch::Scratch::fenced("main-root-bare");
+        let base = real(scratch.path());
+        let run = |dir: &Path, args: &[&str]| {
+            let out = crate::git::isolated(dir).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        };
+        let src = base.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        run(&src, &["init", "-q"]);
+        run(&src, &["commit", "-q", "--allow-empty", "-m", "a"]);
+
+        // 이름이 `.git` 인 맨 저장소 — 그 부모 `bin` 은 체크아웃이 아니다. 트래커가 거기 서 있어도 안 옮긴다.
+        let bin = base.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        run(&base, &["clone", "-q", "--bare", "src", "bin/.git"]);
+        run(&bin.join(".git"), &["worktree", "add", "-q", "../../wt-bin"]);
+        let wt = base.join("wt-bin");
+        std::fs::create_dir_all(bin.join(".moai")).unwrap();
+        std::fs::write(bin.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+        assert_eq!(main_root(&wt), None, "맨 저장소의 부모를 주 체크아웃으로 댔다");
+        assert_eq!(tracker_root(&wt), None, "없는 주 체크아웃의 트래커로 옮겨 갔다");
+
+        // 주 체크아웃이 공용 디렉터리를 딴 데 둔 저장소 — git 도 주 체크아웃을 모른다.
+        let sep = base.join("sep.git");
+        run(&base, &["init", "-q", "--separate-git-dir", sep.to_str().unwrap(), "main"]);
+        let main = base.join("main");
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../wt-sep"]);
+        assert_eq!(main_root(&base.join("wt-sep")), None, "git 도 모르는 주 체크아웃을 지어냈다");
+
+        // 흔한 꼴은 그대로다 — 이름이 `.git` 이고 맨 저장소가 아니다.
+        run(&src, &["worktree", "add", "-q", "../wt-src"]);
+        assert_eq!(main_root(&base.join("wt-src")), Some(src.clone()));
     }
 
     /// **자리 판정을 바꾸는 것은 층의 표식도 바꾼다**(moai-al0x) — 워크트리를 띄우거나, 가지를

@@ -384,17 +384,14 @@ struct GitPlace {
 /// 이 공통 디렉터리가 **맨 저장소인가**(moai-r0x8.33p) — 그러면 딸린 워크트리에 주 체크아웃이 없어, 거절문이 "주
 /// 체크아웃의 트래커" 를 대면 없는 자리를 댄다.
 ///
-/// **git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 찾기가 옮겨 갈 자리를 재는 [`crate::worktree::main_root`] 로 가르던
-/// 판은 공통 디렉터리의 이름(`.git` 인가)을 읽어, `git init --separate-git-dir` 의 워크트리에는 있는 주 체크아웃을
-/// 없다 하고, `.git` 이라는 이름의 맨 저장소(`git clone --bare <url> bin/.git`)에는 없는 주 체크아웃을 댔다. 이름이
-/// 아니라 `core.bare` 가 답이고, 그것을 읽는 자는 git 이다. git 을 띄우므로 **이 거절의 갈래에서만** 묻는다 —
-/// 딸린 워크트리에서 트래커를 git 밖에 두려 할 때뿐이다. 답을 못 얻으면 맨 저장소가 아니라고 둔다(딸린 워크트리의
-/// 거절이 그대로 선다).
+/// **git 에게 묻는다**(리뷰 moai-r0x8.qbh 4번). 공통 디렉터리의 이름(`.git` 인가)으로 가르던 판은
+/// `git init --separate-git-dir` 의 워크트리에는 있는 주 체크아웃을 없다 하고, `.git` 이라는 이름의 맨
+/// 저장소(`git clone --bare <url> bin/.git`)에는 없는 주 체크아웃을 댔다. **묻는 자는 찾기가 옮겨 갈 자리를 재는
+/// 것과 같은 [`crate::worktree::is_bare`] 하나다**(moai-h64l.wst) — 둘이 갈리면 찾기는 옮겨 가는데 거절은 "주
+/// 체크아웃이 없다" 를 댄다. 이 거절의 갈래(딸린 워크트리에서 트래커를 git 밖에 두려 할 때)에서만 부른다. 답을
+/// 못 얻으면 맨 저장소가 아니라고 둔다(딸린 워크트리의 거절이 그대로 선다).
 fn is_bare(common: &Path) -> bool {
-    let args = ["rev-parse", "--is-bare-repository"];
-    crate::git::run_reading_user_config(common, &args, Some(crate::cmd::merge_driver::PROBE_BUDGET))
-        .and_then(Result::ok)
-        .is_some_and(|said| said.trim() == "true")
+    crate::worktree::is_bare(common)
 }
 
 fn git_place(root: &Path, budget: Option<std::time::Duration>) -> Option<GitPlace> {
