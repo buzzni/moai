@@ -862,19 +862,21 @@ pub struct Counted {
 /// 둘을 부풀리지 않게 한다. 그 스냅샷은 겹치기가 판 것을 받는다([`crate::worktree::Gathered::root`], moai-ug6x.pi3) —
 /// 옆에서 온 줄이 하나도 없으면 `None` 이고 겹친 줄이 곧 그것이다. 한때 옆에서 온 줄이 있으면 여기서 `repo.read()` 로
 /// 걸음마다 다시 풀었다(리뷰 moai-3nrh.ige 7번).
+///
+/// `unreadable` 은 산 줄의 못 읽는 줄이다([`live_unreadable`]) — [`counted_beside`] 가 지도를 나눠 쓸지 가르려고
+/// 이미 고른 것을 받는다.
 pub(crate) fn board(
     repo: &Repo,
     live: &Load,
+    unreadable: &[crate::report::Unreadable],
     root: Option<&Load>,
-    origin: &crate::worktree::Origin,
     archived: &Load,
     now: &str,
 ) -> Counted {
-    let unreadable = live_unreadable(live, origin);
     let root = root.unwrap_or(live);
     let st = crate::cmd::status::archive_board_unjudged(
         &live.issues,
-        &unreadable,
+        unreadable,
         (&root.issues, &root.unreadable()),
         archived,
         &repo.config,
@@ -940,7 +942,7 @@ pub(crate) fn counted_beside(
     let cfg = &repo.config;
     let unreadable = live_unreadable(&live, origin);
     if !count || root.is_some() || !crate::archive::shareable(&live.issues, &unreadable, &archived) {
-        let counted = if count { board(repo, &live, root, origin, &archived, now) } else { Counted::default() };
+        let counted = if count { board(repo, &live, &unreadable, root, &archived, now) } else { Counted::default() };
         let load = beside(archived, live);
         let (index, ground) = measure(&load.issues, cfg);
         return Ok(Beside { load, counted, index, ground });
@@ -953,7 +955,7 @@ pub(crate) fn counted_beside(
     let load = beside(archived, Load { issues: live.issues.clone(), errors: live.errors.clone() });
     let soil = crate::report::Soil::of(&load.issues);
     let (st, movable) = crate::archive::board_in(&load.issues, &soil, &live.issues, &unreadable, &excluded, cfg, now);
-    let st = side.warn(st, movable, &live.issues);
+    let st = side.warn(st, movable);
     let counted = tally(st, unreadable.len(), archive_unreadable);
     let (index, ground) = measure_in(&load.issues, cfg, &soil);
     drop(soil);
@@ -2000,7 +2002,7 @@ impl App {
     /// [`board`] 다. 아카이브를 재는 시험은 [`App::reload`] 로 [`prepare`] 를 지난다.
     #[cfg(test)]
     pub fn open(repo: Repo, load: Load, index: Index, ground: Ground, path: Path, stamp: Stamp) -> App {
-        let counted = board(&repo, &load, None, &Default::default(), &Load::default(), &crate::model::now());
+        let counted = board(&repo, &load, &load.unreadable(), None, &Load::default(), &crate::model::now());
         App::open_counted(repo, load, index, ground, path, stamp, counted)
     }
 
@@ -12428,7 +12430,8 @@ mod tests {
     /// id 가 둘인 판·산 에픽 밑의 아카이브 멤버·아카이브의 막는 줄·옮길 묶음으로 그것을 잰다.
     ///
     /// 산 줄이 아카이브의 id 를 들면 두 줄은 **같은 줄들이 아니다** — `beside` 는 두 벌을 다 두고 문맥은 아카이브의
-    /// 사본을 뺀다. 그 판은 따로 센다: 같은 지도로 세면 아카이브의 사본이 일로 서서 수가 달라진다(아래 끝).
+    /// 사본을 뺀다. 그 판은 따로 센다: 같은 지도로 세면 아카이브의 사본이 일로 서서 수가 달라진다(아래 끝). 산 줄의
+    /// **못 읽는** 줄이 그 id 를 들어도 같다 — 문맥은 그 사본을 뺀다.
     #[test]
     fn a_shared_soil_counts_what_the_board_counts() {
         let s = scratch("shared-soil");
@@ -12467,7 +12470,7 @@ mod tests {
             let live = repo.read().unwrap();
             let archived = crate::archive::read(&repo.root).unwrap();
             let shared = crate::archive::shareable(&live.issues, &live.unreadable(), &archived);
-            (board(repo, &live, None, &Default::default(), &archived, &now), shared)
+            (board(repo, &live, &live.unreadable(), None, &archived, &now), shared)
         };
         let (want, shared) = alone(&repo);
         assert!(shared, "시험의 전제 — 지도를 나눠 쓰는 판이다");
@@ -12481,6 +12484,17 @@ mod tests {
         sorted.sort();
         assert_eq!(ids, sorted, "섞은 줄의 차례가 바뀌었다 — 화면은 id 차례로 든다");
         assert_eq!(ids.len(), 9, "섞은 줄이 아카이브의 줄을 잃었다 — {ids:?}");
+
+        // 산 줄의 **못 읽는** 줄이 아카이브의 id 를 든다 — 문맥은 그 사본을 빼고(`report::with_archive` 의 `opaque`)
+        // 섞은 줄은 둔다. 나눠 쓰면 `argos-0002` 를 막는 줄이 닫힌 사본으로 풀려 수가 갈린다.
+        std::fs::write(root.join(".moai/issues.jsonl"), format!("{live}{{\"id\":\"argos-a002\",\"title\":7}}\n"))
+            .unwrap();
+        let repo = Repo::at(root.to_path_buf(), cfg());
+        assert_eq!(repo.read().unwrap().unreadable().iter().filter_map(|u| u.id).collect::<Vec<_>>(), ["argos-a002"]);
+        let (want, shared) = alone(&repo);
+        assert!(!shared, "못 읽는 산 줄이 아카이브의 id 를 드는데 같은 줄들로 봤다");
+        let got = counted_beside(&repo, repo.read().unwrap(), None, &Default::default(), true, &now).unwrap();
+        assert_eq!(nums(&got.counted), nums(&want), "못 읽는 줄 곁에서 센 수가 보드와 다르다");
 
         // 산 줄이 아카이브의 id 를 든다 — 나눠 쓰지 않고 예전 길로 센다.
         let reopened = make("argos-a003", Kind::Issue);

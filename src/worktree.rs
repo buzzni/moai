@@ -219,7 +219,7 @@ pub fn parse(porcelain: &str) -> Vec<Tree> {
 /// 자리 셈([`workplaces_in`])이 같은 파일을 다시 열지 않는다. 겹쳐 세우는 줄만 베끼므로 베끼는
 /// 수는 보통 몇 줄이다 — 옆 줄은 거의 다 이쪽에도 같은 값으로 있어 그냥 지나간다.
 pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
-    let (shown, origin, _) = overlay_keeping(mine, others);
+    let (shown, origin, _) = overlay_keeping(mine, others, false);
     (shown, origin)
 }
 
@@ -229,7 +229,10 @@ pub fn overlay(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin) {
 /// **처음 바꾸는 순간에 베낀다.** 늘 베끼면 옆이 조용한 보통의 걸음(집기를 main 에 커밋하는 규약에서는
 /// 옆 줄이 거의 안 선다)이 쓰지도 않을 한 벌을 걸음마다 치른다. 바꾼 뒤에는 제 줄을 되찾을 길이 없어
 /// — 덮인 줄은 사라지고 정렬이 자리를 섞는다 — 바꾸기 **전에** 베낀다.
-fn overlay_keeping(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin, Option<Vec<Issue>>) {
+///
+/// **`keep` 이 아니면 안 베낀다** — 겹친 줄만 쓰는 쪽([`overlay`], 훅이 부르는 [`fresh`])은 `None` 을 받는다.
+/// 거기서 베끼면 옆에서 줄이 들어올 때마다 버릴 한 벌을 치른다.
+fn overlay_keeping(mine: Vec<Issue>, others: &[Side], keep: bool) -> (Vec<Issue>, Origin, Option<Vec<Issue>>) {
     let mut shown = mine;
     let mut before: Option<Vec<Issue>> = None;
     let mut origin = Origin::default();
@@ -248,14 +251,18 @@ fn overlay_keeping(mine: Vec<Issue>, others: &[Side]) -> (Vec<Issue>, Origin, Op
                 Some(&k)
                     if (i.planned(), i.updated_at.as_str()) > (shown[k].planned(), shown[k].updated_at.as_str()) =>
                 {
-                    before.get_or_insert_with(|| shown.clone());
+                    if keep {
+                        before.get_or_insert_with(|| shown.clone());
+                    }
                     origin.from.insert(i.id.clone(), tree);
                     shown[k] = i.clone();
                 }
                 Some(_) => {}
                 None if base.get(&i.id).is_some_and(|then| i.updated_at <= *then) => {}
                 None => {
-                    before.get_or_insert_with(|| shown.clone());
+                    if keep {
+                        before.get_or_insert_with(|| shown.clone());
+                    }
                     at.insert(i.id.clone(), shown.len());
                     origin.added.insert(i.id.clone());
                     origin.from.insert(i.id.clone(), tree);
@@ -605,7 +612,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
         }
     }
     let Load { issues, errors } = load;
-    let (issues, mut origin, before) = overlay_keeping(issues, &others);
+    let (issues, mut origin, before) = overlay_keeping(issues, &others, true);
     // 못 읽는 줄은 겹치기가 안 건드린다 — 루트의 것이 곧 겹친 것의 것이다.
     let root = before.map(|issues| Load { issues, errors: errors.clone() });
     origin.named = named;

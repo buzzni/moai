@@ -229,7 +229,7 @@ pub(crate) fn archive_board_unjudged(
 ) -> report::StatusReport {
     // 보드와 옮길 수를 함께 센다 — 문맥이 같으면 묶음 칸을 한 번만 잰다([`crate::archive::board`], moai-r0x8.2kg).
     let (st, movable) = crate::archive::board(rows, unreadable, root.0, archived, cfg, now);
-    ArchiveSide::of(root, archived).warn(st, movable, root.0)
+    ArchiveSide::of(root, archived).warn(st, movable)
 }
 
 /// 보드에 더하는 아카이브의 경고 가운데 **아카이브와 루트의 스냅샷만 보고 재는 것** — 충돌과 못 읽은 줄 수.
@@ -238,28 +238,30 @@ pub(crate) fn archive_board_unjudged(
 /// 보드를 센다([`crate::archive::board_in`]) — 옮기고 나면 아카이브 한 벌이 따로 없으니 이 둘은 옮기기 전에 잰다.
 /// 경고를 세우는 자리는 [`ArchiveSide::warn`] 하나다: `moai status` 와 배너가 저마다 세우면 한쪽에 경고를 더한
 /// 날 다른 쪽이 조용하다.
-pub(crate) struct ArchiveSide {
+pub(crate) struct ArchiveSide<'a> {
     collisions: Vec<String>,
     unreadable: usize,
+    /// 견준 루트의 줄 — 충돌 경고가 산 줄 쪽 사본을 이것에서 찾는다. 받아 두는 까닭은 [`ArchiveSide::warn`] 이
+    /// 따로 받으면 다른 줄을 건네도 컴파일되어서다.
+    root: &'a [model::Issue],
 }
 
-impl ArchiveSide {
+impl<'a> ArchiveSide<'a> {
     /// `root` 는 아카이브와 견줄 루트의 스냅샷 — 줄과 못 읽는 줄([`archive_board_unjudged`] 의 그것).
-    pub(crate) fn of(root: (&[model::Issue], &[report::Unreadable]), archived: &crate::store::Load) -> ArchiveSide {
+    pub(crate) fn of(
+        root: (&'a [model::Issue], &[report::Unreadable]),
+        archived: &crate::store::Load,
+    ) -> ArchiveSide<'a> {
         let live: std::collections::BTreeSet<&str> =
             root.0.iter().map(|i| i.id.as_str()).chain(root.1.iter().filter_map(|u| u.id)).collect();
-        ArchiveSide { collisions: crate::archive::collisions(&live, archived), unreadable: archived.errors.len() }
+        let collisions = crate::archive::collisions(&live, archived);
+        ArchiveSide { collisions, unreadable: archived.errors.len(), root: root.0 }
     }
 
-    /// 센 보드(`st`)와 옮길 수(`movable`)에 아카이브의 경고와 알림을 세운다. `root` 는 [`ArchiveSide::of`] 에 준 그 줄이다.
-    pub(crate) fn warn(
-        self,
-        mut st: report::StatusReport,
-        movable: usize,
-        root: &[model::Issue],
-    ) -> report::StatusReport {
+    /// 센 보드(`st`)와 옮길 수(`movable`)에 아카이브의 경고와 알림을 세운다.
+    pub(crate) fn warn(self, mut st: report::StatusReport, movable: usize) -> report::StatusReport {
         if !self.collisions.is_empty() {
-            st.warnings.push(report::Warning::archive_duplicates(self.collisions, root));
+            st.warnings.push(report::Warning::archive_duplicates(self.collisions, self.root));
         }
         // 치명 줄의 끝이다 — 산 줄의 `duplicate_id`·`unreadable_line` 처럼 충돌 다음에 못 읽는 것이 선다(moai-5y2a).
         if self.unreadable > 0 {
