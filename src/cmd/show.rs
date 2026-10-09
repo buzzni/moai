@@ -190,7 +190,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if args.removed {
         return removed(ctx, &repo, args, kind_filter);
     }
-    let crate::worktree::Gathered { load: active_load, origin, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, origin, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
     let live: std::collections::BTreeSet<String> =
@@ -232,10 +232,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다 — 자리를 물을 때 같은 파일을 다시 안 판다(moai-kos1).
-        // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 바로 위에서 판 그 파일이다.
-        let dug = crate::worktree::dug(&sides, &mine);
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &dug);
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree);
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -736,7 +733,6 @@ fn one(
     raw: bool,
     origin: &crate::worktree::Origin,
     worktree: bool,
-    dug: &crate::worktree::Dug<'_>,
 ) -> R<Vec<String>> {
     let twins = report::duplicate_lines(all, &issue.id);
     let children = report::children_of(all, &issue.id);
@@ -750,17 +746,16 @@ fn one(
     // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
     // 저장소 전부의 소속과 미룸을 걷는 것은 통째로 헛일이다(`group_states_of`).
     let near: Vec<&str> = std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
-    // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
-    // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
+    // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 워크트리의 표식과
+    // 스냅샷을 열 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
     // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
     //
     // 경로는 **main 워크트리의 꼭대기**에서 잰 것이다(moai-fygk, `worktree::workplaces` 가 잰다):
     // 규약의 자리(`.claude/worktrees/<id>`)가 어느 자리에서 펼치든 같은 글자로 나와, 그대로
     // `EnterWorktree` 에 옮길 수 있다. `status` 의 못 읽은 워크트리와 같은 자다 — 부르는 쪽마다
     // 따로 재던 때는 빈 경로를 다루는 법이 갈렸다.
-    // **자리 판정의 재료는 한 벌이다**([`report::Footing`], moai-rviv) — 문(`placeable`), 스냅샷을
-    // 팔지 고르는 문(`workplaces`), 그리고 판정(`places`)이 저마다 집은 줄을 고르고 소속 지도를
-    // 지었다. 게을러서, 아래 문이 닫히면 한 벌도 안 짓는다.
+    // **자리 판정의 재료는 한 벌이다**([`report::Footing`], moai-rviv) — 문(`placeable`)과 판정(`places`)이
+    // 저마다 집은 줄을 고르고 소속 지도를 지었다. 게을러서, 아래 문이 닫히면 한 벌도 안 짓는다.
     let footing = report::Footing::of(all, &repo.config);
     // **적힌 소속이 없으면 물려받은 것을 댄다**(리뷰). 계획이 세우는 멤버는 소속을 id 에 지고
     // `epic` 을 안 적으므로(moai-exh7), 필드만 보던 이 줄은 그 멤버의 `에픽` 줄을 통째로
@@ -779,7 +774,7 @@ fn one(
         // 옮겨 가지만(`Repo::find_from`) "여기가 어디냐" 는 여전히 이 체크아웃이다. 루트로 재던 판은
         // 워크트리 안에서도 자리를 파고 제 워크트리를 옆으로 세어, 겹쳐 보지 않을 때는 안 판다는
         // 결정(moai-6opu)이 조용히 꺼졌다.
-        crate::worktree::workplaces_in(repo.here(), worktree, &footing, dug)
+        crate::worktree::workplaces(repo.here(), worktree)
     } else {
         Vec::new()
     };
