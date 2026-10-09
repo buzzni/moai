@@ -16338,11 +16338,21 @@ fn a_row_picked_in_the_root_stands_in_a_nameless_worktree_only_once_picked_there
     git(&main, &["init", "-q"]);
     ok(&main, &["init", "argos"]);
     let id = field(&ok(&main, &["add", "에이전트가 할 일", "--json"]), "id");
-    let wall = |ahead: &str| {
-        let out = std::process::Command::new("date").args(["-u", "-d", ahead, "+%Y-%m-%dT%H:%M:%SZ"]).output().unwrap();
-        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    // 벽시계를 RFC3339 로 — `date -d` 는 GNU 에만 있어 손으로 접는다(일 수 → 그레고리력, Hinnant 의 셈).
+    let wall = |ahead: i64| {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 + ahead;
+        let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let (d, m) = (doy - (153 * mp + 2) / 5 + 1, if mp < 10 { mp + 3 } else { mp - 9 });
+        let y = yoe + era * 400 + i64::from(m <= 2);
+        format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rest / 3600, rest % 3600 / 60, rest % 60)
     };
-    let (now, later) = (wall("now"), wall("+2 hours"));
+    let (now, later) = (wall(0), wall(2 * 3600));
     ok_at(&main, &now, &["mv", &id, "in_progress"]);
     git(&main, &["add", "-A"]);
     git(&main, &["commit", "-q", "-m", "집는다"]);

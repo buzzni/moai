@@ -97,9 +97,11 @@ impl Origin {
     /// 줄은 이름으로는 안 잡힌다. 훅([`held_elsewhere`])과 자리 셈([`workplaces`])이 그 표식을 읽는데
     /// 이 자만 안 보면 `moai show` 의 `자리` 는 그 워크트리를 대는데 탐색기 목록에는 `⎇` 가 없다.
     ///
-    /// **훅과 같은 자다**(moai-nxt4 리뷰) — `hook::held` 가 옆의 일을 초점에서 뺄 때 쓰는 [`away`]
-    /// 와 같은 후보를 본다. 자가 둘이면 화면은 ⎇ 를 다는데 훅은 "옆이 쥐었다" 를 모르는 줄이 생긴다.
-    /// 후보는 **통째로 같아야** 한다 — 자식 id(`부모.자식`)의 가지가 부모 줄에 붙지 않는다.
+    /// **훅이 읽는 두 가지를 다 본다**(moai-nxt4 리뷰) — 이름 후보는 `hook::held` 가 옆의 일을 초점에서
+    /// 뺄 때 쓰는 [`away`] 와 같고, 표식은 훅이 "옆이 쥐었을 수 있다" 로 읽는 [`held_elsewhere`] 의 것이다
+    /// (훅은 그 표식으로 막지 않고 풀기만 한다 — `hook::unsure`). 이름 후보를 안 맞추면 화면은 ⎇ 를 다는데
+    /// 훅은 "옆이 쥐었다" 를 모르는 줄이 생긴다. 후보는 **통째로 같아야** 한다 — 자식 id(`부모.자식`)의 가지가
+    /// 부모 줄에 붙지 않는다.
     ///
     /// [`Origin::branch`] 와 가르는 것: 그쪽은 **줄이 어디서 왔나**(스냅샷의 출처)이고, 집기를
     /// main 에 커밋하는 지금 규약에서는 양쪽 줄이 같아 거의 안 선다 — 목록의 ⎇ 가 사라진 까닭이다.
@@ -790,12 +792,19 @@ pub fn workplaces(root: &Path, worktree: bool) -> Vec<crate::report::Workplace> 
     let Some(disk) = on_disk(root) else { return Vec::new() };
     // **마일스톤 워크트리는 자리가 아니다**([`is_milestone`]) — 트래커를 거기 쓰지 않는 것이 규약이라
     // 그 자리의 표식은 비어 있고, 이름은 아무 집은 줄도 못 가리킨다.
-    let linked = disk.all.iter().filter(|(tree, linked, _)| *linked && !is_milestone(tree)).map(|(tree, ..)| tree);
+    let linked: Vec<&Tree> =
+        disk.all.iter().filter(|(tree, linked, _)| *linked && !is_milestone(tree)).map(|(tree, ..)| tree).collect();
+    // 딸린 워크트리가 하나도 없으면 여기서 끝이다 — 아래의 꼭대기 재기([`main_top`], 디스크를 묻는
+    // [`real`])를 치를 까닭이 없다. 워크트리 규약을 안 쓰는 저장소의 흔한 길이다.
+    if linked.is_empty() {
+        return Vec::new();
+    }
     // **경로는 여기서 한 번 잰다**([`main_top`]) — 이미 읽은 목록으로 재므로 git 이 적어 둔
     // 파일을 다시 안 읽는다. 부르는 쪽마다 따로 재던 때는 자가 둘이라 빈 경로를 다루는 법이
     // 갈렸고, 둘 다 같은 목록을 한 벌 더 읽었다.
     let top = main_top(&disk);
     linked
+        .into_iter()
         .map(|tree| crate::report::Workplace {
             path: from_top(&top, &tree.path),
             branch: tree.label.clone(),

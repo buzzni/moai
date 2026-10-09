@@ -1911,7 +1911,8 @@ you are hunting for the worktree to fix.
 
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
-died does not show under `stranded`** — it is a worktree in `git worktree list` whose
+died does not show under `stranded`** as long as its name or mark points at the row (the
+gap above aside) — it is a worktree in `git worktree list` whose
 worker — the session you sent that work to — no longer answers. **A name gone from
 `ListAgents` is not an ended session**: the name belongs to the process, so a window resumed
 with `claude --resume` comes back under a new name, still in that worktree. A session that

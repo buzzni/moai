@@ -1423,18 +1423,19 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
     // 멤버가 `At` 이든 `Lost` 든 키를 받는다. 한때 이 줄 위에서 일찍 돌아, 문서와 `placeable` 은
     // "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
     let rolls = rollups(footing.all(), picked, ties);
+    // 자리는 그 자리가 제 손으로 적어 둔 집기와 이름 둘뿐이다 — 그 밖의 것은 안 본다(moai-jn4d.ewm).
+    // 먼저 표식을 모은다. 이름이 가리키는 줄은 아래에서 그 이름의 워크트리로 다시 세운다.
     for t in trees {
-        for (&id, &i) in picked {
-            // 이름이 가리키거나 그 자리가 제 손으로 적어 둔 집기다 — 그 밖의 것은 안 본다(moai-jn4d.ewm).
-            let here = claims(ties, &t.names, i) || t.marked.contains(id);
-            if here && let Some(at) = found.get_mut(id) {
+        for &id in picked.keys() {
+            if t.marked.contains(id)
+                && let Some(at) = found.get_mut(id)
+            {
                 at.push(t);
             }
         }
     }
-    // **이름이 가리키는 줄은 그 이름의 워크트리만 낸다**(사용자 결정, 리뷰 moai-ya06.44t).
-    // 위에서 이름이 가리키는 워크트리를 다 모았으니, 안 좁히면 에픽 이름의 워크트리와 멤버 이름의
-    // 워크트리가 한 줄에 함께 선다.
+    // **이름이 가리키는 줄은 그 이름의 워크트리만 낸다**(사용자 결정, 리뷰 moai-ya06.44t) — 이름이
+    // 가리키는 워크트리를 다 들면 에픽 이름의 워크트리와 멤버 이름의 워크트리가 한 줄에 함께 선다.
     // **가장 가까운 이름만 낸다**(moai-m62u) — 안 치운 에픽 워크트리와 그 멤버를 제 이름으로 띄운
     // 워크트리가 같이 서면 일하는 곳은 뒤의 것이다. 훅의 초점([`claims_over`])과 같은 자다.
     for (&id, &i) in picked {
