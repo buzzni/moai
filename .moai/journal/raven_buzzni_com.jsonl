@@ -5926,3 +5926,4 @@
 {"ts":"2026-10-09T23:08:23Z","id":"moai-jn4d.adc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기가 제 워크트리의 줄에 ⎇ 를 단다 — gather 가 부른 쪽의 워크트리를 옆으로 센다"}
 {"ts":"2026-10-09T23:08:23Z","id":"moai-jn4d.adc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-uixs 에서 펼쳤다 — gather 가 제 워크트리를 옆으로 세어 탐색기가 제 줄에 ⎇ 를 단다"}
 {"ts":"2026-10-09T23:08:23Z","id":"moai-uixs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-jn4d 의 멤버 moai-jn4d.adc 로 펼쳤다"}
+{"ts":"2026-10-09T23:08:39Z","id":"moai-jn4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-3e (adc only; bl4d waits for moai-r170)"}
