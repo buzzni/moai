@@ -963,9 +963,7 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
 /// 결정). 머지가 같은 id 의 에픽 뒷줄을 남기면 앞줄의 집힌 이슈는 가려지는데, 그 세션이 죽었으면 그
 /// 줄을 대는 것은 [`stranded`] 뿐이다 — 여기서 걸렀다면 `duplicate_id` 하나 때문에 버려진 칸이 영영
 /// 안 보인다(리뷰 moai-ya06). 자리 셈은 넷(`places`·`blinding`·`placeable`·`stranded`)이 **이 하나**로
-/// 되짚는다 — 하나라도 `wip` 을 쓰면 `stranded` 가 센 줄의 자리를 `show` 가 모른다. 그 넷에 스냅샷을
-/// 대는 쪽(`worktree::workplaces` 의 문과 옆 스냅샷이 쥔 줄)도 이것으로 잰다(리뷰 moai-r8gw.b4s) —
-/// 거기서 `wip` 으로 재면 문이 닫히거나 쥔 줄에서 빠져, 스냅샷으로만 찾을 수 있는 그 줄이 자리를 잃는다.
+/// 되짚는다 — 하나라도 `wip` 을 쓰면 `stranded` 가 센 줄의 자리를 `show` 가 모른다.
 pub fn started<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // **값싼 것을 먼저 거른다.** 훅이 도구 호출마다 여기를 지나므로, 집은 것이
     // 없으면 조상을 타는 셈(`put_off`)도 종류 지도(`eclipsed`)도 아예 안 돌린다.
@@ -1217,6 +1215,11 @@ pub(crate) fn claims_over<'a>(ties: &Ties<'a>, away: &BTreeSet<String>, own: &BT
 /// 치운 뒤에도 적힌 자리는 남아 거짓말한다 — 그러면 그것을 바로잡는 명령이 필요해진다. 그래서
 /// 부르는 쪽(`worktree::workplaces`)이 git 이 적어 둔 파일에서 그때그때 읽어 여기 담고, 판정은
 /// 이 자료와 `&[Issue]` 만 받는 순수 함수([`places`]·[`stranded`])가 한다.
+///
+/// **자리를 가르는 것은 이름([`Workplace::names`])과 집은 표식([`Workplace::marked`]) 둘뿐이다**
+/// (moai-jn4d.ewm, 사용자 결정). 그 워크트리의 `.moai/issues.jsonl` 은 안 본다 — moai-y7go 뒤로
+/// 트래커는 루트에만 쓰여 그 파일은 가지가 갈라질 때의 낡은 사본이고, 거기 벌여 놓인 줄로 자리를
+/// 대던 판은 훅(`worktree::held_elsewhere`, 표식만 읽는다)과 같은 줄을 두고 다른 답을 냈다.
 #[derive(Debug, Clone, Serialize)]
 pub struct Workplace {
     /// 워크트리의 꼭대기 — **main 워크트리의 꼭대기에서 잰 상대 경로**다(`worktree::workplaces`).
@@ -1233,44 +1236,22 @@ pub struct Workplace {
     /// 이름이 가리키는 id 후보 — 디렉터리 이름, 브랜치, `worktree-` 를 뗀 브랜치.
     #[serde(skip)]
     pub names: BTreeSet<String>,
-    /// 그 워크트리의 스냅샷에 벌여 놓인 줄. 이름이 id 가 아닌 워크트리(에이전트 격리 따위)가 쥔
-    /// 일을 가른다. **이름이 집은 줄을 하나라도 가리키는 워크트리에는 안 쓴다**([`places`]) —
-    /// 갈라질 때 main 에 벌여 놓였던 남의 일이 다 물려 들어와 있어서다.
-    #[serde(skip)]
-    pub holds: BTreeSet<String>,
-    /// 그 워크트리에서 **main 보다** 늦게 옮기거나 고친 줄. 물려받은 것이 아니라 그 워크트리가
-    /// 실제로 만진 흔적이라 이름과 상관없이 쓴다.
-    #[serde(skip)]
-    pub touched: BTreeSet<String>,
     /// 그 워크트리가 **제 손으로 적어 둔 집기**(`worktree::note_held` 의 `moai-held`). 짐작이 아니라
     /// 기록이라 [`places`] 에서 **이름에게 지지 않는다** — 이름은 "이 일은 저 워크트리 것이겠다" 는
     /// 짐작이고, 이것은 "여기서 집었다" 는 그 자리의 말이다. 안 치운 에픽 워크트리가 있다는 까닭으로
     /// 이것을 버리던 판은, 그 에픽의 멤버를 집은 에이전트 격리 워크트리를 화면에서 통째로 지웠다
     /// (리뷰 moai-71ht 셋째 판의 훑기).
     ///
-    /// **언제나 읽는다** — 옆 스냅샷과 달리 작은 파일 하나라(`crate::worktree::workplaces` 의 문)
-    /// 이름으로 자리가 다 잡히는 빠른 길에서도 읽는다. 그래야 답이 남의 줄에 따라 흔들리지 않는다.
+    /// **이름 없는 워크트리가 쥔 일은 이것으로만 보인다**(moai-jn4d.ewm) — 에이전트 격리
+    /// (`worktree-agent-<해시>`)처럼 이름이 id 가 아닌 워크트리는 `moai mv` 를 그 안에서(또는 거기서
+    /// `-C <루트>` 로) 쳐야 여기 적힌다. 루트에서 집은 뒤에 그런 워크트리로 가져간 일은 어디에도 안
+    /// 적혀 `Lost` 로 선다 — 훅(`worktree::held_elsewhere`)이 적어 둔 틈과 같은 하나다.
     #[serde(skip)]
     pub marked: BTreeSet<String>,
-    /// 워크트리가 뜬 시각(RFC3339). 이름이 id 가 아닌 워크트리의 `holds` 에서 **뜨기 직전에 집은
-    /// 줄만** 고르는 데 쓴다([`places`]). 못 읽었으면 `None` 이고, 그러면 `holds` 를 다 믿는다.
-    #[serde(skip)]
-    pub born: Option<String>,
-    /// 그 워크트리의 스냅샷을 **열어 보려 했는데 못 읽었다**(moai-lt7h) — 권한이 없거나 파일
-    /// 자리에 엉뚱한 것이 섰다. `holds`·`touched` 가 비어 있는 것이 "아무도 거기서 일 안 한다" 가
-    /// 아니라 "모른다" 라는 뜻이다. 안 열어 봤으면 거짓이다 — 열어 볼 까닭이 없으면 안 연다
-    /// ([`crate::worktree::workplaces`]). **스냅샷이 아예 없는 워크트리도 거짓이다** — 거기 적힐
-    /// 수 있는 줄이 없어 "안 쥐었다" 가 사실이다(`crate::worktree::holds`). **열리는데 줄이 안
-    /// 풀리는 것도 거짓이다** — 머지 충돌이 그렇다. 까닭과 값은 `crate::worktree::holds` 에 있다.
-    #[serde(skip)]
-    pub unknown: bool,
-    /// **그 스냅샷을 못 읽었다** — 파일 자체의 사실이다. [`Workplace::unknown`] 과 가른다
-    /// (moai-giz3): 저것은 *그래서 무엇을 쥐었는지 모른다* 는 판정 쪽 사실이라, 이름만으로 자리가
-    /// 다 잡혀 스냅샷을 아예 안 파는 길([`crate::worktree::workplaces_in`] 의 문)에서는 깨진
-    /// 파일이 있어도 서지 않았다. 그러면 같은 저장소를 `moai status` 는 조용히 지나고
-    /// `moai status --worktree` 는 그 워크트리를 대, 두 화면이 같은 상태를 달리 말한다
-    /// (moai-7p48 의 재현). 깨진 것은 고칠 사람이 있어야 고쳐지므로 그 사실은 판정과 무관하게
-    /// 선다 — `crate::worktree::Unread::all` 이 이것으로 센다.
+    /// **그 스냅샷을 못 읽었다** — 파일 자체의 사실이고 **자리 판정과는 상관이 없다**(moai-giz3,
+    /// moai-jn4d.ewm). 자리는 스냅샷을 안 보고 가르지만, 깨진 파일은 고칠 사람이 있어야 고쳐지므로
+    /// 값싸게 열어 보고(`worktree::unreadable_snapshot`) 그 사실을 세운다 —
+    /// `crate::worktree::Unread::all` 이 이것으로 센다.
     ///
     /// **`--json` 에 안 싣는다** — 이 값을 싣는 자리(`status --json` 의 `broken_worktrees`)가
     /// 이미 "깨진 것들" 이라, 줄마다 참을 한 번 더 적는 셈이다. 늘린 키는 되무를 수 없다.
@@ -1287,8 +1268,6 @@ pub enum Place<'a> {
     At(Vec<&'a Workplace>),
     /// 자리는 안 보이지만 **방금 집었다** — 규약은 집기를 커밋한 뒤 워크트리를 띄운다.
     Fresh,
-    /// 자리는 안 보이는데 **못 읽은 워크트리가 있다.** 거기일 수 있다.
-    Unknown,
     /// 집었는데 일하는 워크트리가 없다. [`stranded`] 가 세는 것이 이것뿐이다.
     Lost,
 }
@@ -1299,21 +1278,19 @@ impl<'a> Place<'a> {
         match self {
             Place::At(_) => "at",
             Place::Fresh => "fresh",
-            Place::Unknown => "unknown",
             Place::Lost => "lost",
         }
     }
 
     /// 얼마나 확실한 자리인가 — **작을수록 확실하다.** 줄 하나를 가르는 자리([`settle`] 의
     /// `match`)와 묶음이 멤버 여럿에서 하나를 고르는 자리가 **같은 차례를 써야 한다** — 갈리면
-    /// 에픽이 `모른다` 라고 하는데 그 멤버는 `방금 집었다` 라고 한다. 차례를 저쪽에 한 벌 더
+    /// 에픽이 `자리 없다` 라고 하는데 그 멤버는 `방금 집었다` 라고 한다. 차례를 저쪽에 한 벌 더
     /// 적어 두었더니 변형을 더할 때 `match` 만 컴파일 오류로 잡히고 이쪽은 조용히 지나갔다.
     fn rank(&self) -> u8 {
         match self {
             Place::At(_) => 0,
-            Place::Unknown => 1,
-            Place::Fresh => 2,
-            Place::Lost => 3,
+            Place::Fresh => 1,
+            Place::Lost => 2,
         }
     }
 
@@ -1334,9 +1311,8 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
 
 /// 자리 판정이 재는 것 **한 벌** — 집은 줄([`started`], id 로 접은 것)과 소속 지도([`ties`]).
 ///
-/// 자리를 묻는 넷([`places`]·[`blinding`]·[`stranded`]·[`placeable_in`])과 스냅샷을 팔지 고르는 문
-/// (`worktree::workplaces`)이 저마다 이 둘을 지어, `moai status`·`moai show` 한 번에 같은 걸음을
-/// 네댓 벌 걸었다(moai-rviv). 걸음이 값싸지 않다 — 집은 줄을 고르는 데 미룸이 조상과 소속을 타고
+/// 자리를 묻는 넷([`places`]·[`blinding`]·[`stranded`]·[`placeable_in`])이 저마다 이 둘을 지어,
+/// `moai status`·`moai show` 한 번에 같은 걸음을 네댓 벌 걸었다(moai-rviv). 걸음이 값싸지 않다 — 집은 줄을 고르는 데 미룸이 조상과 소속을 타고
 /// ([`put_off`]), 그 미룸이 다시 소속 지도를 재료로 쓴다.
 ///
 /// **쓸 때 짓는다.** 자리를 묻는 길에는 재료를 하나도 안 보고 끝나는 흔한 갈래가 있다 — 볼
@@ -1402,18 +1378,6 @@ impl<'a, 'c> Footing<'a, 'c> {
     pub fn epic_of(&self, i: &'a Issue) -> Option<&'a str> {
         self.laid().ties.epic_of(i)
     }
-
-    /// 어느 칸이 시작한 칸인가를 아는 설정 — **옆 워크트리의 스냅샷을 재는 쪽**
-    /// (`worktree::holds`)이 제 줄이 아닌 목록에 같은 자를 대려고 받는다.
-    pub fn cfg(&self) -> &'c Config {
-        self.cfg
-    }
-
-    /// 이 줄이 `names` 가 가리키는 일인가([`claims`]) — 워크트리마다 바뀌는 것은 이름뿐이라
-    /// 지도는 한 벌이다.
-    pub fn claims(&self, names: &BTreeSet<String>, i: &'a Issue) -> bool {
-        claims(&self.laid().ties, names, i)
-    }
 }
 
 // 바이너리는 재료를 든 `_in` 을 부른다([`Footing`], moai-rviv) — 이 꼴은 시험의 짧은 길이다.
@@ -1428,16 +1392,15 @@ impl<'a, 'c> Footing<'a, 'c> {
 /// 두 벌로만 서 있어, 이 순수 함수를 새로 부르는 표면은 그 가드를 세 벌째 적어야 했다.
 ///
 /// **자리가 안 보이는 까닭까지 여기서 가른다**(moai-xn9n) — 방금 집어 아직 워크트리가 안 뜬
-/// 것(`STRANDED_GRACE_SECS`, `Place::Fresh`), 못 읽은 워크트리가 있어 모르는 것(`Place::Unknown`),
-/// 정말 자리를 잃은 것(`Place::Lost`)이다. `now` 를 받는 까닭이 이것이다. 한때 이 셋을 [`stranded`]
-/// 만 갈라, `show` 의 `자리` 줄이 방금 집은 줄을 버려진 것처럼 냈다 — 두 표면이 한 답을 내려면
-/// 가르는 자가 하나여야 한다.
+/// 것(`STRANDED_GRACE_SECS`, `Place::Fresh`)과 정말 자리를 잃은 것(`Place::Lost`)이다. `now` 를 받는
+/// 까닭이 이것이다. 한때 이 둘을 [`stranded`] 만 갈라, `show` 의 `자리` 줄이 방금 집은 줄을 버려진
+/// 것처럼 냈다 — 두 표면이 한 답을 내려면 가르는 자가 하나여야 한다.
 ///
-/// **이름이 집은 줄을 하나라도 가리키는 워크트리는 스냅샷의 벌여 놓인 줄([`Workplace::holds`])로
-/// 안 가른다.** 규약상
-/// 워크트리는 main 에서 뜨므로 그 스냅샷에는 갈라질 때 main 에 벌여 놓였던 줄이 전부 있다 —
-/// 그것을 세면 세션이 죽어 자리를 잃은 줄도 그 뒤에 뜬 워크트리 아무 데나 "자리" 로 잡혀,
-/// 새 워크트리가 하나 뜨는 순간 `stranded` 에서 사라진다.
+/// **자리는 이름과 집은 표식으로만 가른다**(moai-jn4d.ewm, 사용자 결정) — [`Workplace`] 가 든 그
+/// 둘이다. 옆 워크트리의 스냅샷(벌여 놓인 줄, 루트보다 늦게 만진 줄)으로 가르던 판은 그 파일이
+/// moai-y7go 뒤로 갈라질 때의 낡은 사본이라, 몇 주 낡은 워크트리가 그때 열려 있던 줄을 영영 "자리"
+/// 로 들었고 훅(`worktree::held_elsewhere`)은 같은 줄을 두고 다른 답을 냈다. 그 파일을 못 읽어
+/// "모른다" 로 접던 셋째 답(`unknown`)도 그 판과 함께 걷혔다.
 pub fn places<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace], now: &str) -> BTreeMap<String, Place<'a>> {
     places_in(&Footing::of(issues, cfg), trees, now)
 }
@@ -1449,56 +1412,30 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
     // 낸다. 계약을 쥔 자는 거기 하나고, 여기는 헛일을 아낄 뿐이라 갈릴 것이 없다. **워크트리를
     // 먼저 본다** — 재료를 아직 안 지었으면(게으른 [`Footing`]) 이 길은 그것을 안 짓고 지난다.
     if trees.is_empty() {
-        return settle(&BTreeMap::new(), BTreeMap::new(), trees, now, &BTreeMap::new(), &BTreeMap::new(), false);
+        return settle(&BTreeMap::new(), BTreeMap::new(), trees, now, &BTreeMap::new(), &BTreeMap::new());
     }
     let Laid { picked, ties } = footing.laid();
     let mut found: BTreeMap<&str, Vec<&Workplace>> = picked.keys().map(|id| (*id, Vec::new())).collect();
     if picked.is_empty() {
-        return settle(picked, found, trees, now, &BTreeMap::new(), &BTreeMap::new(), false);
+        return settle(picked, found, trees, now, &BTreeMap::new(), &BTreeMap::new());
     }
     // **굴릴 곳은 어느 워크트리가 있느냐와 무관하다**(moai-oepz) — 집은 멤버를 둔 묶음은 그
     // 멤버가 `At` 이든 `Lost` 든 키를 받는다. 한때 이 줄 위에서 일찍 돌아, 문서와 `placeable` 은
     // "집은 멤버를 둔 묶음은 키를 받는다" 라고 하는데 그 길에서만 안 받는 셋째 답이 있었다.
     let rolls = rollups(footing.all(), picked, ties);
-    // 못 읽은 워크트리가 판정을 가리는가 — [`blinding`] 과 같은 자(`nameless`)로 워크트리마다 잰다.
-    let mut blind = false;
+    // 자리는 그 자리가 제 손으로 적어 둔 집기와 이름 둘뿐이다 — 그 밖의 것은 안 본다(moai-jn4d.ewm).
+    // 먼저 표식을 모은다. 이름이 가리키는 줄은 아래에서 그 이름의 워크트리로 다시 세운다.
     for t in trees {
-        let named = |i: &Issue| claims(ties, &t.names, i);
-        let nameless = nameless(ties, picked.values().copied(), t);
-        blind |= t.unknown && nameless;
-        let born = t.born.as_deref().and_then(crate::model::parse_rfc3339);
-        // 이름 없는 워크트리가 쥔 일은 **뜨기 한 시간 전부터 그 뒤로 움직인 줄**이다(사용자 결정,
-        // moai-ir8q.beq 와 moai-40ht.hom). 규약은 집고 곧바로 워크트리를 띄우므로 그보다 한참 전에
-        // 집혀 물려 들어온 줄은 그 워크트리의 일이 아니다.
-        //
-        // **윗금은 두지 않는다.** `status_since` 는 집은 때가 아니라 **칸이 선 때**라 칸을 옮길
-        // 때마다 새로 선다 — 윗금을 두면 워크트리가 뜬 뒤 main 에서 `in_progress → review` 로
-        // 옮긴 산 일이 그 자리를 잃고, 세션을 시작할 때 떠 놓고 일을 나중에 받는 에이전트
-        // 격리 워크트리는 아예 아무것도 못 쥔다.
-        //
-        // **`started_at` 으로 재지 않는다**(moai-hav1, 2026-09-19에 재고 그대로 두기로 했다).
-        // 그 필드(moai-u5bk)는 줄이 **처음** 첫 칸을 떠난 때라 되돌렸다 다시 집어도 안 바뀐다 —
-        // 여기서 묻는 것은 "이 워크트리가 뜰 무렵 이 줄이 움직였나" 이므로, 옛 줄을 오늘 다시 집어
-        // 에이전트 워크트리에서 하는 흔한 길이 통째로 자리를 잃는다. 되돌리기 어려운 쪽은 그쪽이다.
-        // 이 필드 전에 집힌 줄이 `None` 인 것도 그대로다 — 모르는 값으로 자리를 가를 수는 없다.
-        let fresh = |i: &Issue| match (born, crate::model::parse_rfc3339(&i.status_since)) {
-            (Some(b), Some(s)) => b - s <= STRANDED_GRACE_SECS,
-            _ => true,
-        };
-        for (&id, &i) in picked {
-            let here = named(i)
-                || t.marked.contains(id)
-                || t.touched.contains(id)
-                || (nameless && t.holds.contains(id) && fresh(i));
-            if here && let Some(at) = found.get_mut(id) {
+        for &id in picked.keys() {
+            if t.marked.contains(id)
+                && let Some(at) = found.get_mut(id)
+            {
                 at.push(t);
             }
         }
     }
-    // **이름이 가리키는 줄은 그 이름의 워크트리만 낸다**(사용자 결정, 리뷰 moai-ya06.44t).
-    // 스냅샷은 자리를 못 찾은 줄이 있을 때만 파므로(`worktree::workplaces` 의 문), 안 좁히면 한
-    // 저장소의 같은 상태에 두 답이 난다 — 상관없는 딴 줄 하나가 자리를 잃으면 그때부터 이 줄에
-    // 둘째 자리가 붙는다. 답이 남의 줄에 따라 흔들리느니, 이름이 답한 줄은 이름만으로 답한다.
+    // **이름이 가리키는 줄은 그 이름의 워크트리만 낸다**(사용자 결정, 리뷰 moai-ya06.44t) — 이름이
+    // 가리키는 워크트리를 다 들면 에픽 이름의 워크트리와 멤버 이름의 워크트리가 한 줄에 함께 선다.
     // **가장 가까운 이름만 낸다**(moai-m62u) — 안 치운 에픽 워크트리와 그 멤버를 제 이름으로 띄운
     // 워크트리가 같이 서면 일하는 곳은 뒤의 것이다. 훅의 초점([`claims_over`])과 같은 자다.
     for (&id, &i) in picked {
@@ -1510,8 +1447,7 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
             continue;
         }
         // **제 손으로 적어 둔 집기는 이름에게 안 밀린다**([`Workplace::marked`], 리뷰 moai-71ht 셋째
-        // 판의 훑기). 좁히는 까닭은 스냅샷으로 **짐작한** 둘째 자리가 남의 줄에 따라 흔들리는 것이었다
-        // — 표식은 짐작이 아니고 늘 읽으므로 흔들릴 것이 없다. 버리던 판은 안 치운 에픽 워크트리
+        // 판의 훑기). 이름은 짐작이고 표식은 그 자리의 기록이다 — 버리던 판은 안 치운 에픽 워크트리
         // 하나가 그 에픽의 멤버를 집은 에이전트 격리 워크트리를 화면에서 지워, 이어받는 세션을 아무도
         // 없는 자리로 보냈다.
         for t in trees.iter().filter(|t| t.marked.contains(id)) {
@@ -1531,32 +1467,23 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
             (!here.is_empty()).then_some((*g, here))
         })
         .collect();
-    settle(picked, found, trees, now, &rolls, &named, blind)
+    settle(picked, found, trees, now, &rolls, &named)
 }
 
-/// **이름이 집은 줄을 하나도 못 가리키는 워크트리인가** — 그러면 스냅샷으로 가르고([`places`]),
-/// 못 읽었으면 판정을 가린다([`blinding`]). 가리키는지는 [`claims`] 로 잰다 — 줄 자신·조상·그
-/// 에픽·마일스톤이다. 규약의 워크트리 이름이 에픽 id 라(CLAUDE.md "워크트리") 집은 id 와 바로 같은
-/// 이름만 보면, 멤버를 쥔 에픽 워크트리 하나를 못 읽는 것만으로 저장소 전체가 "모른다" 로 접혀
-/// 자리를 잃은 딴 줄이 `stranded` 에서 빠진다(moai-1i9d).
-///
-/// "이 이름을 쓰는 줄이 있는가" 로 묻지 않는다 — 끝난 일의 이름으로 뜬 워크트리가 그 자리에서
-/// 다른 일을 하고 있어도 이름 있는 것으로 세어져 스냅샷으로 가르는 길이 통째로 닫힌다.
+/// **이름이 집은 줄을 하나도 못 가리키는 워크트리인가** — [`blinding`] 이 깨진 워크트리 가운데 그런
+/// 것만 고른다. 가리키는지는 [`claims`] 로 잰다 — 줄 자신·조상·그 에픽·마일스톤이다(moai-1i9d).
 fn nameless<'a>(ties: &Ties<'a>, mut picked: impl Iterator<Item = &'a Issue>, t: &Workplace) -> bool {
     !picked.any(|i| claims(ties, &t.names, i))
 }
 
-/// **자리 판정을 가리는 못 읽은 워크트리들** — 못 읽었고([`Workplace::unknown`]) 이름이 집은 줄을
-/// 하나도 못 가리키는 것이다(사용자 결정, 리뷰 moai-ya06.44t). 이름이 집은 줄을 가리키는 워크트리는
-/// 못 읽어도 그 줄이 이미 `At` 이라 가릴 것이 없다.
+/// **깨진 워크트리 가운데 이름이 집은 줄을 하나도 못 가리키는 것** — 탐색기 층의 셈
+/// (`tui::layer::Summary::blind`)만 이것을 읽는다.
 ///
-/// **"자리를 다 못 셌다" 를 대는 자리만 이것을 센다** — `status --json` 의 `unreadable_worktrees`,
-/// `tui --json` 의 같은 키, 층 상세의 꼬리말이다. "이 스냅샷이 깨졌다" 를 대는 자리(`status` 의
-/// stderr·한눈 보기의 `옆 워크트리 문제`·층의 `!`)는 못 읽은 것 **전부**를 센다
-/// (`worktree::Unread::all`, 사용자 결정 2026-09-18) — 두 수는 다르다.
-///
-/// [`places`] 가 `Unknown` 을 세우는 자와 **같아야** 한다(moai-rgz9). 한때 못 읽은 워크트리를
-/// 다 세어, 판정을 안 가리는 제 이름 워크트리 하나로 화면마다 "다 못 셌다" 가 섰다.
+/// **자리 판정은 이제 가리지 않는다**(moai-jn4d.ewm) — 자리는 스냅샷을 안 보고 이름과 집은 표식으로만
+/// 가르므로, 깨진 스냅샷이 "자리를 다 못 셌다" 를 만들 길이 없다. `status --json` 의
+/// `unreadable_worktrees` 도 그래서 걷었다. 이것이 남은 것은 탐색기(`src/tui/`)가 그 수를 아직 읽어서다 —
+/// 그 파일을 다른 일(moai-r170)이 쥔 동안 손대지 않고, 그것이 머지된 뒤 moai-bl4d 가 이 함수와 함께 걷는다.
+/// 그때까지 층의 수가 예전과 같은 워크트리를 세도록 예전 자(깨졌고 이름이 집은 줄을 안 가리킨다)를 둔다.
 // 바이너리는 재료를 든 `_in` 을 부른다([`Footing`], moai-rviv) — 이 꼴은 시험의 짧은 길이다.
 #[cfg(test)]
 pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> Vec<&'a Workplace> {
@@ -1566,26 +1493,17 @@ pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> V
 /// [`blinding`] 과 같은 것. **이미 잰 재료를 받는다**([`Footing`]) — `worktree::stranded_at` 은
 /// 바로 앞에서 [`places`] 로 같은 줄을 세므로, 여기서 다시 지으면 한 셈에 재료가 두 벌 선다.
 pub fn blinding_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace]) -> Vec<&'a Workplace> {
-    // 값싼 것을 먼저 — 못 읽은 워크트리가 없으면 재료([`Footing`])를 안 짓는다. 자리를 잃은 줄이
-    // 없어 [`stranded_in`] 이 재료를 안 지은 채 지나가는 길이 흔하다.
-    if !trees.iter().any(|t| t.unknown) {
+    // 값싼 것을 먼저 — 깨진 워크트리가 없으면 재료([`Footing`])를 안 짓는다.
+    if !trees.iter().any(|t| t.broken) {
         return Vec::new();
     }
-    // 집은 줄이 없으면 가릴 판정도 없다 — [`places`] 의 빠른 길(`blind = false`)과 같은 답이다.
-    // 안 거르면 `nameless` 가 빈 목록에 참을 내, 못 읽은 워크트리를 다 "가린다" 로 센다.
-    //
-    // **같은 id 의 줄은 접어 센다 — 남는 것은 집은 줄이다.** [`claims`] 가 줄에 묻게 된 뒤로
-    // (moai-jk2u.ipf) 접은 것과 안 접은 것의 답은 **늘 같지는 않다**: `picked` 는 `by_id` 가 고르는
-    // 뒷줄이 아니라 **시작한 칸에 선 마지막 줄**이라(`started_over`), 뒷줄이 `done` 이면 앞줄이
-    // 남는다 — `the_hook_reads_belonging_from_the_row_not_the_id_map` 의 파일이 그 꼴이다.
-    // 그래도 여기서는 그 줄이 맞는 줄이다. 묻는 것이 "이 워크트리가 **집은 일**을 가리키는가" 라,
-    // 집히지도 않은 뒷줄의 소속으로 재면 안 된다. 갈리는 것은 쌍둥이 **둘 다** 시작한 칸에 설
-    // 때뿐이고, 그때는 어느 쪽을 남겨도 집은 줄이다(리뷰 moai-jk2u.35i).
+    // 집은 줄이 없으면 가리킬 것도 없다 — 안 거르면 `nameless` 가 빈 목록에 참을 내, 깨진 워크트리를
+    // 다 센다. 같은 id 의 줄은 접어 센다(`picked`) — 묻는 것이 "이 워크트리가 **집은 일**을 가리키는가" 다.
     let Laid { picked, ties } = footing.laid();
     if picked.is_empty() {
         return Vec::new();
     }
-    trees.iter().filter(|t| t.unknown && nameless(ties, picked.values().copied(), t)).collect()
+    trees.iter().filter(|t| t.broken && nameless(ties, picked.values().copied(), t)).collect()
 }
 
 /// 묶음 id → **그 묶음으로 자리를 굴려 올릴 집은 멤버들**([`settle`]).
@@ -1638,7 +1556,7 @@ fn rollups<'a>(
 ///
 /// 워크트리 이름은 규약상 **에픽 id** 라(`CLAUDE.md` "워크트리"), 이어받는 세션이 `moai show <에픽>`
 /// 을 먼저 읽는다 — 거기 자리가 없으면 어디로 들어갈지 못 정한다. 묶음 자체는 집히지 않으므로
-/// (`wip` 은 일만 낸다) 멤버의 답을 합친다: 하나라도 서 있으면 거기고, 아니면 모름·방금·잃음 차례다.
+/// (`wip` 은 일만 낸다) 멤버의 답을 합친다: 하나라도 서 있으면 거기고, 아니면 방금·잃음 차례다.
 fn settle<'a>(
     picked: &BTreeMap<&str, &Issue>,
     found: BTreeMap<&str, Vec<&'a Workplace>>,
@@ -1646,17 +1564,12 @@ fn settle<'a>(
     now: &str,
     rolls: &BTreeMap<&str, Vec<&str>>,
     named: &BTreeMap<&str, Vec<&'a Workplace>>,
-    blind: bool,
 ) -> BTreeMap<String, Place<'a>> {
     // **볼 워크트리가 없으면 아무 답도 안 낸다**([`places`]) — "없다" 는 찾아보고 못 찾았을 때의
     // 말이다. 판정이 여기 있어야 부르는 표면마다 같은 가드를 다시 적지 않는다.
     if trees.is_empty() {
         return BTreeMap::new();
     }
-    // `blind` 는 [`places`] 가 [`blinding`] 과 같은 자(`nameless`)로 잰 것이다 — 못 읽은 워크트리가
-    // 가리는 것은 그 이름이 아무 집은 줄도 안 가리킬 때뿐이다(사용자 결정, 리뷰 moai-ya06.44t).
-    // 못 읽었다고 저장소의 다른 줄까지 "모른다" 로 덮으면 치우지 않은 깨진 워크트리 하나가 경고를
-    // 영영 잠재운다.
     let now_s = crate::model::parse_rfc3339(now);
     // **틈은 한 곳에서 잰다**(moai-xn9n). 시각을 못 읽으면 틈을 줄 까닭도 못 재니 안 준다.
     let just_picked = |i: &Issue| match (now_s, crate::model::parse_rfc3339(&i.status_since)) {
@@ -1666,14 +1579,10 @@ fn settle<'a>(
     let mut out: BTreeMap<String, Place> = found
         .into_iter()
         .map(|(id, at)| {
-            // **모름이 방금보다 앞이다**(사용자 결정, 리뷰 moai-ya06.44t). 못 읽은 워크트리가
-            // 있는데 "방금 집었다" 고 하면, 이어받는 세션이 "아직 안 뜨었구나" 하고 이미 거기서
-            // 도는 일에 둘째 워크트리를 띄운다. 모르는 것은 모른다고 한다.
-            let place = match (at.is_empty(), blind, just_picked(picked[id])) {
-                (false, ..) => Place::At(at),
-                (true, true, _) => Place::Unknown,
-                (true, false, true) => Place::Fresh,
-                (true, false, false) => Place::Lost,
+            let place = match (at.is_empty(), just_picked(picked[id])) {
+                (false, _) => Place::At(at),
+                (true, true) => Place::Fresh,
+                (true, false) => Place::Lost,
             };
             (id.to_string(), place)
         })
@@ -1683,7 +1592,7 @@ fn settle<'a>(
         .filter_map(|(g, members)| {
             let mine: Vec<&Place> = members.iter().filter_map(|m| out.get(*m)).collect();
             // 차례는 줄 하나를 가르는 자(위의 `match`)와 같다 — 한 벌 더 적으면 갈려, 에픽이
-            // `모른다` 라고 하는데 그 멤버는 `방금 집었다` 라고 한다([`Place::rank`]).
+            // `자리 없다` 라고 하는데 그 멤버는 `방금 집었다` 라고 한다([`Place::rank`]).
             let best = mine.iter().copied().min_by_key(|p| p.rank())?;
             // 그 묶음 이름의 워크트리(거리 0)는 멤버가 어디 섰든 함께 낸다(moai-t3yj) — 멤버가 다 제
             // 이름 워크트리로 가도 묶음의 자리에서 안 빠진다.
@@ -1720,7 +1629,7 @@ fn settle<'a>(
 /// 이 줄에 **자리를 물을 수 있는가** — 집은 일이거나, 집은 멤버를 둔 묶음이다([`places`]).
 ///
 /// 부르는 쪽(`cmd/show`)이 워크트리를 읽기 전에 이것으로 판다. 안 집은 줄 하나를 펼치는 흔한 길이
-/// 옆 스냅샷을 다 푸는 값을 치르지 않게 하는 문인데, 그 판정은 이슈의 뜻이라 여기 둔다.
+/// 옆 워크트리의 표식과 스냅샷을 열지 않게 하는 문인데, 그 판정은 이슈의 뜻이라 여기 둔다.
 ///
 /// **재료를 든 꼴 하나뿐이다**([`Footing`], moai-rviv) — 곁의 `places`·`blinding`·`stranded` 는
 /// 시험이 부르는 짧은 길을 곁에 두지만, 이쪽은 부르는 시험이 없어 `#[cfg(test)]` 짝이 그대로
@@ -1754,7 +1663,7 @@ pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) 
 }
 
 /// [`stranded`] 와 같은 것. **이미 잰 재료를 받는다**([`Footing`]) — `worktree::stranded_at` 은
-/// 스냅샷을 팔지 고르는 문(`workplaces`)에서 같은 줄을 이미 셌다(moai-rviv).
+/// 곁의 [`blinding_in`] 과 재료 한 벌을 나눠 쓴다(moai-rviv).
 pub fn stranded_in(footing: &Footing<'_, '_>, trees: &[Workplace], now: &str) -> Option<Warning> {
     // 워크트리가 없으면 [`places`] 가 아무 키도 안 낸다 — 가드를 여기 다시 적지 않는다(moai-tbin).
     let at = places_in(footing, trees, now);
@@ -1769,8 +1678,8 @@ pub fn stranded_in(footing: &Footing<'_, '_>, trees: &[Workplace], now: &str) ->
     // 묶음 id 는 애초에 없어 거를 것도 없다 — 거르는 자가 하나다. `wip` 이 아니다: 그쪽은 가려진
     // 줄을 뺀다(moai-es40). 되짚는 그 집합이 [`places`] 가 방금 센 바로 그것이다([`Footing::picked`]).
     let picked = footing.picked();
-    // **`Lost` 만 센다.** 방금 집은 것(`Fresh`)과 못 읽은 워크트리가 있어 모르는 것(`Unknown`)은
-    // 자리 없음이 아니다 — 둘을 세면 산 일을 남에게 다시 주는 쪽으로 틀린다.
+    // **`Lost` 만 센다.** 방금 집은 것(`Fresh`)은 자리 없음이 아니다 — 세면 산 일을 남에게 다시
+    // 주는 쪽으로 틀린다.
     let lost: Vec<&Issue> = at
         .iter()
         .filter(|(_, p)| matches!(p, Place::Lost))
@@ -6083,17 +5992,13 @@ mod tests {
 
     /// 이름 후보는 **`worktree::names` 에게 묻는다** — 여기 베껴 두면 그쪽에 후보가 하나 늘어도
     /// 아래 시험들이 옛 규칙에 대고 푸르게 지나간다.
-    fn tree(path: &str, branch: &str, holds: &[&str]) -> Workplace {
+    fn tree(path: &str, branch: &str, marked: &[&str]) -> Workplace {
         let t = crate::worktree::Tree { path: path.into(), label: branch.into(), head: String::new() };
         Workplace {
             names: crate::worktree::names([&t]),
             path: t.path,
             branch: t.label,
-            holds: holds.iter().map(|s| s.to_string()).collect(),
-            touched: BTreeSet::new(),
-            marked: BTreeSet::new(),
-            born: None,
-            unknown: false,
+            marked: marked.iter().map(|s| s.to_string()).collect(),
             broken: false,
         }
     }
@@ -6281,27 +6186,6 @@ mod tests {
         assert_eq!(w.count, 2);
     }
 
-    /// **이름이 id 인 워크트리는 물려받은 벌여 놓인 줄로 자리를 안 댄다.** main 에서 뜬 워크트리의
-    /// 스냅샷에는 갈라질 때 main 에 집혀 있던 줄이 다 있다 — 그것을 세면 세션이 죽은 줄도 그 뒤에
-    /// 뜬 워크트리 아무 데나 자리가 잡혀 `stranded` 가 영영 안 선다. 그 워크트리에서 늦게 만진 줄은
-    /// 이름과 상관없이 자리로 센다.
-    #[test]
-    fn a_named_worktree_does_not_place_rows_it_merely_inherited() {
-        let issues = vec![
-            make("argos-0001", Kind::Issue, "in_progress"),
-            make("argos-0002", Kind::Issue, "in_progress"),
-            make("argos-0003", Kind::Issue, "in_progress"),
-        ];
-        let mut named =
-            tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &["argos-0001", "argos-0002", "argos-0003"]);
-        named.touched.insert("argos-0003".into());
-        let trees = vec![named];
-        let at = places(&issues, &cfg(), &trees, LATER);
-        assert_eq!(at["argos-0001"].at().len(), 0, "물려받은 줄을 이름 있는 워크트리의 자리로 셌다");
-        assert_eq!(at["argos-0002"].at().len(), 1);
-        assert_eq!(at["argos-0003"].at().len(), 1, "늦게 만진 줄을 자리로 안 셌다");
-    }
-
     /// **제 손으로 적어 둔 집기는 이름에게 안 밀린다**(리뷰 moai-71ht 셋째 판의 훑기). 규약은 에픽
     /// 이름으로 워크트리를 띄우고 머지 뒤에도 한동안 두는데, 그 멤버를 실제로 집은 것은 이름이 id 가
     /// 아닌 에이전트 격리 워크트리다 — 이름으로만 좁히던 판은 그 자리를 화면에서 통째로 지워,
@@ -6338,9 +6222,9 @@ mod tests {
         assert_eq!(w.ids, ["argos-0002"]);
     }
 
-    /// **자리가 안 보이는 까닭 넷이 다 서는지 본다**(리뷰 moai-ya06). 한때 시험이 `At` 과 `Lost`
-    /// 만 짚어, `blind` 를 통째로 지워도 — 그러면 `Place::Unknown` 이 영영 안 선다 — 단위 시험이
-    /// 하나도 안 깨졌다. 굴림도 같은 차례를 쓰므로(`Place::rank`) 에픽에서 한 번 더 본다.
+    /// **자리가 안 보이는 까닭 둘이 다 서는지 본다**(리뷰 moai-ya06). 한때 시험이 `At` 과 `Lost`
+    /// 만 짚어 갈래 하나를 통째로 지워도 단위 시험이 하나도 안 깨졌다. 굴림도 같은 차례를 쓰므로
+    /// (`Place::rank`) 에픽에서 한 번 더 본다.
     #[test]
     fn a_place_says_why_it_is_not_seen() {
         let fresh_at = |id: &str, at: &str| {
@@ -6360,76 +6244,50 @@ mod tests {
         // 방금 집은 멤버가 있으면 에픽도 그렇게 선다 — 굴림의 차례가 줄 하나의 차례와 같다.
         assert!(matches!(at["argos-0001"], Place::Fresh), "{:?}", at["argos-0001"]);
 
-        // 못 읽은 워크트리가 하나 끼면 `없다` 도 `방금` 도 아니라 `모른다` 다(사용자 결정) —
-        // 이름이 아무 줄도 안 가리키는 워크트리라야 그렇게 가린다.
-        let mut blind = lost.clone();
-        blind[0].unknown = true;
-        let at = places(&issues, &cfg(), &blind, LATER);
-        assert!(matches!(at["argos-0003"], Place::Unknown), "{:?}", at["argos-0003"]);
-        assert!(matches!(at["argos-0002"], Place::Unknown), "방금 집었다고 단정했다 — {:?}", at["argos-0002"]);
-        assert!(matches!(at["argos-0001"], Place::Unknown), "굴림이 모름을 버렸다");
-
-        // **이름이 집은 줄을 가리키는 워크트리는 못 읽어도 남을 안 가린다** — 그 줄은 이미 제
-        // 자리가 있고, 나머지 줄까지 덮으면 치우지 않은 깨진 워크트리 하나가 경고를 잠재운다.
-        let mut named_blind = vec![tree("/r/.claude/worktrees/argos-0002", "worktree-argos-0002", &[])];
-        named_blind[0].unknown = true;
-        let at = places(&issues, &cfg(), &named_blind, LATER);
-        assert!(matches!(at["argos-0002"], Place::At(_)), "{:?}", at["argos-0002"]);
-        assert!(matches!(at["argos-0003"], Place::Lost), "이름이 가리키는 워크트리가 남의 줄을 덮었다");
-        assert!(stranded(&issues, &cfg(), &blind, LATER).is_none(), "모르는 것을 자리 없음으로 셌다");
         assert!(stranded(&issues, &cfg(), &lost, LATER).is_some(), "자리 잃은 줄을 안 비췄다");
     }
 
-    /// **에픽 이름 워크트리도 이름이 집은 줄을 가리킨다**(moai-1i9d). 규약의 워크트리 이름은 에픽
-    /// id 인데(`worktree-<에픽>`), 가리는 자가 이름을 집은 id 와 바로 견주기만 하면 에픽은 집히지
-    /// 않으니 그 워크트리는 "아무 줄도 안 가리키는" 것으로 읽힌다 — 그것 하나를 못 읽는 것만으로
-    /// 딴 에픽의 자리 잃은 줄이 `Unknown` 으로 덮여 `stranded` 에서 빠진다. 가리는 워크트리를
-    /// 세는 자([`blinding`])도 같은 답을 내야 한다 — 갈리면 화면이 "다 못 셌다" 라고 하는데 판정은
-    /// 다 셌다.
+    /// **깨진 스냅샷은 자리를 안 바꾼다**(moai-jn4d.ewm) — 자리는 이름과 집은 표식으로만 가르므로, 깨진
+    /// 워크트리 하나가 남의 줄을 "모른다" 로 덮어 `stranded` 를 재우는 길이 없다. 탐색기 층만 읽는 셈
+    /// ([`blinding`])은 moai-bl4d 까지 예전 자(깨졌고 이름이 집은 줄을 안 가리킨다)로 센다 — 에픽 이름의
+    /// 워크트리도 그 에픽의 멤버를 가리킨다(moai-1i9d).
     #[test]
-    fn an_unreadable_epic_worktree_does_not_blind_the_rest() {
+    fn a_broken_worktree_does_not_change_any_place() {
         let issues = vec![
             make("argos-0001", Kind::Epic, "todo"),
             member("argos-0002", "argos-0001", "in_progress"),
             make("argos-0005", Kind::Epic, "todo"),
             member("argos-0003", "argos-0005", "in_progress"), // 9월 1일에 집혔다 — 자리를 잃었다
         ];
-        let mut trees = vec![tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[])];
-        trees[0].unknown = true;
-        let at = places(&issues, &cfg(), &trees, LATER);
-        assert!(matches!(at["argos-0002"], Place::At(_)), "{:?}", at["argos-0002"]);
-        assert!(
-            matches!(at["argos-0003"], Place::Lost),
-            "에픽 이름 워크트리가 남의 줄을 덮었다 — {:?}",
-            at["argos-0003"]
-        );
-        let w = stranded(&issues, &cfg(), &trees, LATER).expect("에픽 이름 워크트리 하나가 stranded 를 재웠다");
-        assert_eq!(w.ids, ["argos-0003"]);
-        assert!(blinding(&issues, &cfg(), &trees).is_empty(), "판정을 안 가리는 워크트리를 가린다고 셌다");
-
-        // 이름이 아무 집은 줄도 안 가리키면 그때는 가린다 — 두 자가 같은 답이다.
-        let mut stray = vec![tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &[])];
-        stray[0].unknown = true;
-        assert!(matches!(places(&issues, &cfg(), &stray, LATER)["argos-0003"], Place::Unknown));
-        assert_eq!(blinding(&issues, &cfg(), &stray).len(), 1);
-
-        // **둘이 섞여 있으면 가린 것만 든다.** 화면은 깨진 스냅샷 둘을 다 대지만
-        // (`worktree::Unread::all`) `unreadable_worktrees` 와 층의 셈은 뒤엣것 하나다 — 두 목록이
-        // 다시 하나로 합쳐지면 여기가 먼저 깨진다.
         let mut mixed = vec![
             tree("/r/.claude/worktrees/argos-0001", "worktree-argos-0001", &[]),
             tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &[]),
         ];
-        mixed[0].unknown = true;
-        mixed[1].unknown = true;
-        let only: Vec<&str> = blinding(&issues, &cfg(), &mixed).iter().map(|t| t.branch.as_str()).collect();
-        assert_eq!(only, ["worktree-agent-x"], "판정을 안 가리는 에픽 워크트리까지 셌다");
-        assert!(matches!(places(&issues, &cfg(), &mixed, LATER)["argos-0003"], Place::Unknown));
+        let whole =
+            places(&issues, &cfg(), &mixed, LATER).into_iter().map(|(id, p)| (id, p.word())).collect::<Vec<_>>();
+        mixed[0].broken = true;
+        mixed[1].broken = true;
+        let broken = places(&issues, &cfg(), &mixed, LATER);
+        assert!(matches!(broken["argos-0002"], Place::At(_)), "{:?}", broken["argos-0002"]);
+        assert!(
+            matches!(broken["argos-0003"], Place::Lost),
+            "깨진 워크트리가 남의 줄을 덮었다 — {:?}",
+            broken["argos-0003"]
+        );
+        assert_eq!(
+            broken.into_iter().map(|(id, p)| (id, p.word())).collect::<Vec<_>>(),
+            whole,
+            "깨진 것이 자리를 바꿨다"
+        );
+        let w = stranded(&issues, &cfg(), &mixed, LATER).expect("깨진 워크트리가 stranded 를 재웠다");
+        assert_eq!(w.ids, ["argos-0003"]);
 
-        // 집은 줄이 없으면 가릴 판정도 없다 — `places` 는 빈 지도를 내고, 세는 자도 비어야 한다.
+        let only: Vec<&str> = blinding(&issues, &cfg(), &mixed).iter().map(|t| t.branch.as_str()).collect();
+        assert_eq!(only, ["worktree-agent-x"], "이름이 집은 줄을 가리키는 에픽 워크트리까지 셌다");
+        // 집은 줄이 없으면 셀 것도 없다.
         let idle = vec![make("argos-0001", Kind::Epic, "todo")];
-        assert!(places(&idle, &cfg(), &stray, LATER).is_empty());
-        assert!(blinding(&idle, &cfg(), &stray).is_empty(), "집은 줄이 없는데 가린다고 셌다");
+        assert!(places(&idle, &cfg(), &mixed, LATER).is_empty());
+        assert!(blinding(&idle, &cfg(), &mixed).is_empty(), "집은 줄이 없는데 셌다");
     }
 
     /// **워크트리가 없으면 아무 키도 없다**(moai-tbin) — "없다" 는 찾아보고 못 찾았을 때의 말이다.
@@ -6467,48 +6325,33 @@ mod tests {
         assert_eq!(branches("argos-0001"), ["worktree-argos-0003", "worktree-argos-0002"], "멤버 id 차례로 냈다");
     }
 
-    /// **이름 없는 워크트리는 뜨기 한 시간 전부터 그 뒤로 움직인 줄을 쥔다**(사용자 결정). 그보다
-    /// 먼저 집혀 물려 들어온 줄은 그 워크트리의 자리가 아니다 — 안 그러면 에이전트 격리 워크트리
-    /// 하나가 자리 잃은 줄을 전부 가린다. 윗금은 없다: `status_since` 는 칸이 선 때라 뜬 뒤에
-    /// 칸을 옮긴 산 일이 제 자리를 잃으면 안 된다. 뜬 시각을 못 읽으면 전처럼 다 믿는다.
+    /// **이름 없는 워크트리는 표식으로만 줄을 쥔다**(moai-jn4d.ewm) — 그 표식은 `moai mv` 를 친 자리가
+    /// 적으므로, 언제 집었는지(`status_since`)와 상관없이 거기 적힌 줄이 그 자리의 일이다. 한때 그 워크트리의
+    /// 스냅샷에 벌여 놓인 줄을 뜬 때 무렵으로 골라 쥐었는데, 그것은 루트에서 집어 거기로 가져간 일과
+    /// 갈라질 때 물려받은 남의 일을 못 가르는 짐작이었다. 표식에 없는 줄은 그 워크트리가 이름으로도 못
+    /// 가리키면 `Lost` 다 — 같은 상태를 훅([`crate::worktree::held_elsewhere`])도 그렇게 읽는다.
     #[test]
-    fn a_nameless_worktree_holds_what_moved_around_the_time_it_was_made() {
+    fn a_nameless_worktree_holds_only_what_its_marks_hold() {
         let picked_at = |id: &str, at: &str| {
             let mut i = make(id, Kind::Issue, "in_progress");
             i.status_since = at.into();
             i
         };
         let issues = vec![
-            picked_at("argos-0001", "2026-09-15T08:00:00Z"), // 세 시간 전 — 물려받았다
-            picked_at("argos-0002", "2026-09-15T10:40:00Z"), // 이십 분 전 — 이 워크트리의 일
-            picked_at("argos-0003", "2026-09-15T11:30:00Z"), // 뜬 뒤에 칸이 움직였다 — 여전히 이 워크트리의 일
+            picked_at("argos-0001", "2026-09-01T08:00:00Z"), // 두 주 전에 루트에서 집었다
+            picked_at("argos-0002", "2026-09-15T08:00:00Z"), // 네 시간 전 — 표식에 없다
         ];
-        let mut agent =
-            tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &["argos-0001", "argos-0002", "argos-0003"]);
-        agent.born = Some("2026-09-15T11:00:00Z".into());
-        let trees = vec![agent.clone()];
+        let trees = vec![tree("/r/.claude/worktrees/agent-x", "worktree-agent-x", &["argos-0001"])];
         let at = places(&issues, &cfg(), &trees, LATER);
-        let counts: Vec<usize> =
-            ["argos-0001", "argos-0002", "argos-0003"].iter().map(|id| at[*id].at().len()).collect();
-        assert_eq!(counts, [0, 1, 1]);
-
-        // **되돌렸다 다시 집은 줄은 지금 집은 줄이다**(moai-hav1) — `started_at` 은 처음 뗀 때라
-        // 옛날인데, 이 워크트리가 뜰 무렵 움직인 것은 `status_since` 가 안다.
-        //
-        // **양쪽을 다 잰다.** 빠지는 쪽만 재던 판은 `started_at.or(status_since)` 로 바꾸는
-        // 되돌림을 초록으로 지났다(리뷰 moai-71ht.rv0) — 물려받은 줄이 최근 `started_at` 하나로
-        // 이 워크트리의 것이 되어, 격리 워크트리 하나가 자리 잃은 줄을 도로 다 가린다.
-        let mut repicked = issues.clone();
-        repicked[0].started_at = Some("2026-09-15T10:50:00Z".into());
-        repicked[1].started_at = Some("2026-08-01T00:00:00Z".into());
-        let at = places(&repicked, &cfg(), &trees, LATER);
-        assert_eq!(at["argos-0002"].at().len(), 1, "다시 집은 줄을 처음 뗀 때로 재 자리를 잃었다");
-        assert_eq!(at["argos-0001"].at().len(), 0, "물려받은 줄을 처음 뗀 때로 재 이 워크트리에 붙였다");
-
-        agent.born = None;
-        let trees = vec![agent];
-        let at = places(&issues, &cfg(), &trees, LATER);
-        assert!(at.values().all(|p| p.at().len() == 1), "뜬 시각을 모르는데 쥔 줄을 버렸다");
+        let paths = |id: &str| at[id].at().iter().filter_map(|w| w.path.to_str()).collect::<Vec<_>>();
+        assert_eq!(paths("argos-0001"), ["/r/.claude/worktrees/agent-x"], "표식이 쥔 오래된 줄을 자리로 안 셌다");
+        assert!(
+            matches!(at["argos-0002"], Place::Lost),
+            "표식에 없는 줄을 이름 없는 워크트리에 붙였다 — {:?}",
+            at["argos-0002"]
+        );
+        let w = stranded(&issues, &cfg(), &trees, LATER).expect("표식에 없는 줄을 안 비췄다");
+        assert_eq!(w.ids, ["argos-0002"]);
     }
 
     /// **자리 없는 집은 줄을 경고로 비춘다**(moai-4370). 워크트리를 하나도 안 쓰는 저장소는 조용하고,

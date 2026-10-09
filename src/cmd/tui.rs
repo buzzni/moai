@@ -91,12 +91,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 서서, 바로 위에서 고른 말로 편 `trouble` 과 한 배너에 두 말이 섞였다.
     app.site.lang = ctx.lang();
     let mut app = app.overlaid(origin, trouble, watched, swept, &sides, &mine);
-    // **판 것은 여기서 버린다**(moai-kos1) — 옆 스냅샷의 줄은 이미 `load` 에 겹쳐 들어왔고,
-    // 쓰는 자리는 바로 위 하나다. 안 버리면 탐색기가 도는 내내 워크트리마다 한 벌씩 그대로
-    // 남아, 겹쳐 본 저장소의 줄을 두 번 들고 산다(다시 읽기는 `tui::prepare` 가 제 것을 판다).
-    // 겹치기 전에 잰 바닥(moai-mafv)도 같은 자리에서 버린다 — 다시 읽기는 제 것을 잰다.
-    drop(sides);
-    drop(mine);
+    // `sides`·`mine` 은 껍데기다(moai-jn4d.ewm) — 탐색기의 `overlaid` 가 이 꼴을 받아 넘길 뿐이고,
+    // moai-bl4d 가 그 꼴과 함께 걷는다.
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
@@ -217,7 +213,6 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         warnings: sum.warnings.count(&now, ctx.zone()),
                         notices: sum.notices,
                         stranded: sum.stranded,
-                        unreadable_worktrees: sum.blind,
                         broken_worktrees: sum.unread,
                         unreadable: sum.unreadable,
                     }
@@ -310,13 +305,6 @@ struct Counted {
     /// 없으면 키를 안 단다: 늘 `0` 을 달면 옛 판과 견주는 쪽이 새 뜻을 얻은 줄 모른다.
     #[serde(skip_serializing_if = "is_zero")]
     stranded: usize,
-    /// 스냅샷을 못 읽어 **자리 판정을 가린** 워크트리의 수(`report::blinding`) — 있으면 위의 수는
-    /// "센 결과 0" 이 아니라 "못 셌다" 다. **못 읽은 것 전부가 아니다**(moai-rgz9): 이름이 집은 줄을
-    /// 가리키는 워크트리는 못 읽어도 판정을 안 가리니 안 든다. 키 이름은 이미 나간 값이라 그대로
-    /// 둔다 — 안쪽 `status --json` 의 같은 키와 같은 뜻이다. 사람 화면의 층은 깨진 스냅샷 자체를
-    /// 따로 대므로(`layer::Summary::unread`) 그 둘이 여기서 갈린다.
-    #[serde(skip_serializing_if = "is_zero")]
-    unreadable_worktrees: usize,
     /// 스냅샷을 못 읽은 워크트리 **전부**의 수(moai-zah3) — 화면의 층이 `layer::Summary::unread` 로
     /// 대는 그 수다. `status --json` 의 `broken_worktrees` 와 같은 뜻이고, 없으면 키를 안 단다.
     #[serde(skip_serializing_if = "is_zero")]

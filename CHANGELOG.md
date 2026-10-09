@@ -12,6 +12,23 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Where picked-up work stands is read from worktree names and pick-up marks
+  only, the way the hook reads it.** The `Place` line of `moai show` (`place`
+  and `workplaces` under `--json`) and the `stranded` warning of `moai status`
+  no longer read sibling worktrees' `.moai/issues.jsonl` — those are stale
+  copies, since every write goes to the main checkout. A worktree counts for a
+  row when its name points at the row or when `moai mv` picked the row up
+  inside it, and the explorer's `⎇` beside a row someone else holds now names
+  such a worktree too. A row picked up in
+  the main checkout and carried into a worktree whose name is not its id now
+  shows `none` and stands under `stranded`. `place` has three values — `at`,
+  `fresh`, `lost`; `unknown` no longer appears, and neither does
+  `unreadable_worktrees` under `status --json` or `tui --json`: a broken
+  sibling snapshot is still named by `broken_worktrees` but no longer hides a
+  verdict. (moai-jn4d.ewm)
+
 ## [0.11.0] - 2026-10-08
 
 ### Added
