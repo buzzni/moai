@@ -3660,9 +3660,10 @@ mod tests {
         // 글자 단위로 자른다 — 바이트로 자르면 한글 한가운데서 끊겨, 실패를 알리려던
         // 자리가 제가 먼저 죽는다.
         let head: String = skill.chars().take(40).collect();
-        // 이름은 `skill::NAMES` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그 목록을 다
-        // 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
-        let [moai, supervisor, wiki_skill, tmux_skill, recover_skill] = crate::skill::NAMES;
+        // 이름은 `skill::NAMES`·`skill::OPTIONAL` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그
+        // 목록을 다 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
+        let [moai, supervisor, wiki_skill, recover_skill] = crate::skill::NAMES;
+        let [crate::skill::Optional { name: tmux_skill, .. }] = crate::skill::OPTIONAL;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");

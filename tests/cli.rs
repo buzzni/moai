@@ -19269,10 +19269,10 @@ fn skill_install_plants_one_text_for_every_agent() {
         assert!(supervisor.join(file).is_file(), "Claude 의 트리에 감독의 {file} 가 없다");
     }
     assert!(!s.path().join(".agents/skills/moai-supervise").exists(), ".agents 에 감독 스킬을 심었다");
-    // 감독의 tmux 손(moai-u99i)도 Claude 의 트리에만 선다.
+    // 감독의 tmux 손(moai-u99i)은 고른 사람에게만 선다(moai-3r7l) — 고르지 않은 이 심기에는 어느 트리에도 없다.
     assert!(
-        s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(),
-        "Claude 의 트리에 tmux 스킬이 없다"
+        !s.path().join(".claude/moai-plugin/skills/moai-tmux").exists(),
+        "고르지 않은 tmux 스킬을 Claude 의 트리에 심었다"
     );
     assert!(!s.path().join(".agents/skills/moai-tmux").exists(), ".agents 에 tmux 스킬을 심었다");
     // 죽은 세션을 되살리는 스킬(moai-uqf7)도 Claude 의 트리에만 선다 — 읽는 기록이 Claude Code 의 것이다.
@@ -19665,6 +19665,53 @@ fn skill_install_leaves_nothing_an_older_moai_planted() {
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
     assert!(said.contains(&format!("rm -r {}", shared.join("moai-work").display())), "{said}");
     assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
+}
+
+/// **선택 스킬은 지금 심긴 자리에만 다시 심는다**(moai-3r7l.ey2, 2026-10-10 사용자 결정) — 고른 것은 어디에도 안 적고
+/// "그 트리에 moai 의 머리로 선 `SKILL.md` 가 있는가" 가 답이다. 처음 심는 저장소에는 `moai-tmux` 가 안 서고, 심긴
+/// 저장소의 맨 `install` 은 그것을 지금 판의 글로 다시 심는다. 머리가 남의 것이면 심긴 것이 아니다.
+#[test]
+fn skill_install_refreshes_an_optional_skill_only_where_it_stands() {
+    let s = init("skilloptional");
+    let c = Claude::new("skilloptional-home");
+    let tmux = s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md");
+    let files = |json: &str| list_in(json, "files").expect("files 가 없다");
+
+    let out = c.run(s.path(), &["skill", "install", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(!files(&json).iter().any(|f| f.contains("moai-tmux")), "처음 심는 자리에 선택 스킬을 심었다\n{json}");
+    assert!(!tmux.exists(), "처음 심는 자리에 moai-tmux 를 심었다");
+    assert!(files(&json).iter().any(|f| f == "skills/moai-recover/SKILL.md"), "늘 심는 스킬을 뺐다\n{json}");
+
+    // 옛 판이 심은 글 — 맨 `install` 이 지금 판의 글로 다시 심는다.
+    std::fs::create_dir_all(tmux.parent().unwrap()).unwrap();
+    std::fs::write(&tmux, "---\nname: moai-tmux\ndescription: old\n---\n").unwrap();
+    let json = String::from_utf8(c.run(s.path(), &["skill", "install", "--json"], true).stdout).unwrap();
+    assert!(files(&json).iter().any(|f| f == "skills/moai-tmux/SKILL.md"), "심긴 선택 스킬을 안 심었다\n{json}");
+    let now = std::fs::read_to_string(&tmux).unwrap();
+    assert!(now.starts_with("---\nname: moai-tmux\n") && !now.contains("description: old"), "다시 안 심었다\n{now}");
+
+    // 머리가 남의 것이면 moai 가 심은 것이 아니다 — 다시 심지 않고, 그 디렉터리도 안 지운다.
+    std::fs::write(&tmux, "---\nname: my-tmux\n---\n").unwrap();
+    let json = String::from_utf8(c.run(s.path(), &["skill", "install", "--json"], true).stdout).unwrap();
+    assert!(!files(&json).iter().any(|f| f.contains("moai-tmux")), "남의 머리를 심긴 것으로 읽었다\n{json}");
+    assert_eq!(std::fs::read_to_string(&tmux).unwrap(), "---\nname: my-tmux\n---\n", "남의 글을 고쳤다");
+}
+
+/// **`skill status` 의 판도 심을 그 트리로 잰다**(moai-3r7l.h36) — 선택 스킬을 안 고른 저장소에 심은 판이 지금 판이고,
+/// 모두를 바라던 판이면 그 설치를 "다시 심는다" 고 했다. 그 저장소의 커밋된 매니페스트가 든 판을 장부에 적는다.
+#[test]
+fn skill_status_wants_the_version_of_what_is_planted_here() {
+    let s = init("skillstatusoptional");
+    let c = Claude::new("skillstatusoptional-home");
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    let manifest = std::fs::read_to_string(s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json")).unwrap();
+    let version = field(&manifest.replace("\": \"", "\":\""), "version");
+    installed(&s, &c, &version);
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    assert_eq!(field(&json, "want_version"), version, "선택 스킬을 안 고른 저장소에 다른 판을 바란다\n{json}");
+    assert!(json.contains("\"current\":true"), "{json}");
 }
 
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
