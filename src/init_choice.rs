@@ -8,16 +8,20 @@
 //! 기본값·보이는가·잠겼는가는 고른 값에서 그때마다 다시 셈한다 — 파생값을 저장하지 않는다는 저장소의
 //! 규약을 화면에도 그대로 건다.
 //!
-//! **칸 사이의 규칙은 한 방향으로만 흐른다**: 추적 → 안내 → 설치 → 드라이버(moai-zynt.a7y 노트,
-//! 2026-10-06 사용자 결정). 앞 칸은 뒤 칸의 기본값·보임·잠김을 정할 수 있고 뒤 칸은 앞 칸을 못
+//! **칸 사이의 규칙은 한 방향으로만 흐른다**: 추적 → 안내 → 설치 → 선택 스킬 → 드라이버(moai-zynt.a7y 노트,
+//! 2026-10-06 사용자 결정. 선택 스킬은 moai-3r7l.ocn 이 설치 바로 뒤에 넣었다 — 설치 칸만 읽는다). 앞 칸은 뒤 칸의 기본값·보임·잠김을 정할 수 있고 뒤 칸은 앞 칸을 못
 //! 건드린다 — 그래서 [`resolve`] 는 그 차례로 한 번 훑으면 답이 난다. 거스르는 규칙이 필요해지면
 //! 그때가 설계를 다시 볼 때다.
 //!
 //! 사람이 고른 값이 앞 칸 때문에 무효가 되면 **지우지 않는다**. 화면은 그 칸을 숨기거나 잠그고 실제
 //! 값은 `resolve` 가 정한다 — 앞 칸을 되돌리면 고른 값이 그대로 돌아온다.
 
+use crate::skill::OPTIONAL;
 use clap::ValueEnum;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+/// 선택 스킬의 수([`crate::skill::OPTIONAL`]) — 칸 하나가 스킬 하나다.
+const N: usize = OPTIONAL.len();
 
 /// 트래커를 git 이 추적하는가(moai-zynt.own).
 ///
@@ -99,6 +103,9 @@ pub struct Choices {
     pub driver: Option<bool>,
     /// 끝에 `moai project add` 로 사용자 설정의 프로젝트 목록에 올리는가(moai-785q). `--register`·`--no-register`.
     pub project: Option<bool>,
+    /// 선택 스킬([`crate::skill::OPTIONAL`] 의 차례)마다 심는가(moai-3r7l.ocn). `--with <이름>` 이 `Some(true)` 다 —
+    /// 끄는 플래그는 없다(빼는 것은 `moai skill install --without`). 칸은 설치 칸이 켜졌을 때만 선다.
+    pub optional: [Option<bool>; N],
 }
 
 impl Choices {
@@ -111,6 +118,7 @@ impl Choices {
             skill: self.skill.or(under.skill),
             driver: self.driver.or(under.driver),
             project: self.project.or(under.project),
+            optional: std::array::from_fn(|i| self.optional[i].or(under.optional[i])),
         }
     }
 
@@ -127,6 +135,9 @@ impl Choices {
             Field::Skill => self.skill.is_some() || plan.guide == Guide::Hook,
             Field::Driver => self.driver.is_some(),
             Field::Project => self.project.is_some(),
+            // **선택 스킬 칸은 혼자 화면을 열지 않는다** — 다른 칸을 다 플래그로 준 사람은 묻지 말라는 것이고, 그때 심는
+            // 것은 `--with` 와 이미 심긴 것뿐이다([`PLAIN`]). 화면이 서면 그 칸도 함께 묻는다.
+            Field::Optional(_) => true,
         })
     }
 }
@@ -142,6 +153,10 @@ pub struct Defaults {
     pub skill: bool,
     pub driver: bool,
     pub project: bool,
+    /// 선택 스킬마다 미리 골라 둔 값 — **`None` 은 지금 심긴 그대로 둔다**(`skill install` 을 맨으로 부른다). 화면의 값은
+    /// `init` 이 그때마다 채운다: 이미 심긴 것과 쓰는 사람이라는 표식이 선 것([`crate::skill::detected`])이 켜진다.
+    /// 상수 둘은 채우지 않는다 — 사람이 안 보는 `init` 은 표식으로 심지 않는다(moai-3r7l, 사용자 결정).
+    pub optional: [Option<bool>; N],
 }
 
 /// 선택 상자가 미리 골라 두는 값. 추적은 안 한다 — 이 클론에만 두고 커밋되는 파일을 하나도 안
@@ -156,6 +171,7 @@ pub const SCREEN: Defaults = Defaults {
     skill: true,
     driver: true,
     project: true,
+    optional: [Some(false); N],
 };
 
 /// 터미널이 아닌 곳(에이전트·스크립트)과 `--yes` 의 값. **지금까지의 `init` 과 바이트째 같아야 한다**
@@ -171,6 +187,7 @@ pub const PLAIN: Defaults = Defaults {
     skill: false,
     driver: true,
     project: false,
+    optional: [None; N],
 };
 
 /// 빈칸 없는 계획. `init::run` 은 이것만 받고 판단하지 않는다.
@@ -183,6 +200,21 @@ pub struct Plan {
     pub skill: bool,
     pub driver: bool,
     pub project: bool,
+    /// `skill install --with` 에 건넬 선택 스킬 — 설치를 안 하면 비었다.
+    pub with: Vec<&'static str>,
+    /// `skill install --without` 에 건넬 선택 스킬 — **미리 켜 둔 것을 끈 것만이다.** 미리 안 켠 것은 심긴 것이 아니라
+    /// 걷을 것이 없다. 미리 켜 둔 까닭이 표식뿐이면(심기지 않았다) 이것도 걷을 것이 없어 아무것도 안 바뀐다. 설치를 안 하면
+    /// 비었다.
+    pub without: Vec<&'static str>,
+}
+
+impl Plan {
+    /// 고른 선택 스킬이 지금 심긴 것(`planted`)을 바꾸는가 — 심기지 않은 것을 켰거나, 켜 둔 것을 껐다. 이미 선 훅으로 읽은
+    /// 안내에서 `init` 이 설치를 거둘 때 이것이 참이면 거두지 않는다(리뷰 moai-3r7l) — 그 칸은 설치 칸이 켜졌을 때 서서
+    /// "함께 심는다" 를 보이는데, 설치를 거두면 고른 값이 말없이 버려진다.
+    pub fn changes_optional(&self, planted: &[&str]) -> bool {
+        !self.without.is_empty() || self.with.iter().any(|n| !planted.contains(n))
+    }
 }
 
 /// 고른 값과 기본값으로 계획을 낸다. 머리글의 차례(추적 → 안내 → 설치 → 드라이버)로 적는다 — 앞 칸을
@@ -195,7 +227,16 @@ pub fn resolve(c: &Choices, d: &Defaults) -> Plan {
     // 추적하지 않으면 머지 드라이버는 할 일이 없다 — git 이 그 파일을 병합할 일이 없다. 고른 값은 두고 끈다.
     let driver = tracking.tracked() && c.driver.unwrap_or(d.driver);
     let project = c.project.unwrap_or(d.project);
-    Plan { prefix: c.prefix.clone(), tracking, guide, skill, driver, project }
+    // 선택 스킬은 설치 칸만 읽는다 — 설치를 안 하면 건넬 것이 없다.
+    let (mut with, mut without) = (Vec::new(), Vec::new());
+    for (i, o) in OPTIONAL.iter().enumerate().filter(|_| skill) {
+        match (c.optional[i], d.optional[i]) {
+            (Some(true), _) | (None, Some(true)) => with.push(o.name),
+            (Some(false), Some(true)) => without.push(o.name),
+            _ => {}
+        }
+    }
+    Plan { prefix: c.prefix.clone(), tracking, guide, skill, driver, project, with, without }
 }
 
 /// 플래그로 준 것이 계획과 부딪히는가 — 뒤 칸에 준 플래그가 앞 칸이 정한 것을 뒤집으려 할 때다. 화면은 그 칸을
@@ -226,18 +267,33 @@ pub enum Field {
     Tracking,
     Guide,
     Skill,
+    /// 선택 스킬 하나 — [`crate::skill::OPTIONAL`] 의 자리다(moai-3r7l.ocn).
+    Optional(usize),
     Driver,
     Project,
 }
 
-/// 화면에 서는 차례. 규칙의 차례(머리글)와 맞춘다 — 앞 칸을 고르면 아래 칸이 바뀌는 쪽이 읽기 쉽다.
-pub const FIELDS: [Field; 6] =
-    [Field::Prefix, Field::Tracking, Field::Guide, Field::Skill, Field::Driver, Field::Project];
+/// 화면에 서는 차례. 규칙의 차례(머리글)와 맞춘다 — 앞 칸을 고르면 아래 칸이 바뀌는 쪽이 읽기 쉽다. 선택 스킬은 그것을
+/// 세우는 설치 칸 바로 밑이다.
+pub const FIELDS: [Field; 6 + N] = fields();
 
-/// 이 계획에서 그 칸이 서는가. 숨는 칸은 앞 칸이 이미 답을 정한 칸이다.
+const fn fields() -> [Field; 6 + N] {
+    let mut out = [Field::Prefix; 6 + N];
+    (out[1], out[2], out[3]) = (Field::Tracking, Field::Guide, Field::Skill);
+    let mut i = 0;
+    while i < N {
+        out[4 + i] = Field::Optional(i);
+        i += 1;
+    }
+    (out[4 + N], out[5 + N]) = (Field::Driver, Field::Project);
+    out
+}
+
+/// 이 계획에서 그 칸이 서는가. 숨는 칸은 앞 칸이 이미 답을 정한 칸이다 — 설치를 안 하면 고를 선택 스킬이 없다.
 pub fn shown(f: Field, plan: &Plan) -> bool {
     match f {
         Field::Driver => plan.tracking.tracked(),
+        Field::Optional(_) => plan.skill,
         Field::Prefix | Field::Tracking | Field::Guide | Field::Skill | Field::Project => true,
     }
 }
@@ -310,6 +366,7 @@ impl Form {
             Field::Skill => self.fixed.skill.is_some(),
             Field::Driver => self.fixed.driver.is_some(),
             Field::Project => self.fixed.project.is_some(),
+            Field::Optional(i) => self.fixed.optional[i].is_some(),
         };
         if fixed {
             return Some(Lock::Flag);
@@ -354,6 +411,11 @@ impl Form {
             Field::Skill => Some((2, usize::from(!self.fixed.skill.unwrap_or(plan.skill)))),
             Field::Driver => Some((2, usize::from(!plan.driver))),
             Field::Project => Some((2, usize::from(!plan.project))),
+            // 켜졌는가는 계획이 아니라 고른 값에서 읽는다 — 계획은 미리 켜 둔 것을 끈 것만 `without` 에 든다.
+            Field::Optional(i) => {
+                let on = self.choices().optional[i].or(self.defaults.optional[i]).unwrap_or(false);
+                Some((2, usize::from(!on)))
+            }
         }
     }
 
@@ -365,6 +427,7 @@ impl Form {
             Field::Skill => self.picked.skill = Some(at == 0),
             Field::Driver => self.picked.driver = Some(at == 0),
             Field::Project => self.picked.project = Some(at == 0),
+            Field::Optional(i) => self.picked.optional[i] = Some(at == 0),
         }
     }
 
@@ -475,6 +538,7 @@ mod tests {
                             driver: no_driver.then_some(false),
                             skill: Some(true),
                             project: Some(false),
+                            optional: [None; N],
                         };
                         let by_flags = resolve(&flags, &SCREEN);
                         let mut f = form(Choices::default());
@@ -524,7 +588,9 @@ mod tests {
                 guide: Guide::Block,
                 skill: false,
                 driver: true,
-                project: false
+                project: false,
+                with: Vec::new(),
+                without: Vec::new(),
             }
         );
     }
@@ -565,7 +631,7 @@ mod tests {
                 for driver in [None, Some(true), Some(false)] {
                     for d in [SCREEN, PLAIN] {
                         for skill in [None, Some(true), Some(false)] {
-                            let c = Choices { prefix: None, tracking, guide, skill, driver, project: None };
+                            let c = Choices { prefix: None, tracking, guide, skill, driver, ..Choices::default() };
                             let plan = resolve(&c, &d);
                             assert!(plan.tracking.tracked() || !plan.driver, "{c:?} {d:?}");
                             assert!(plan.guide != Guide::Hook || plan.skill, "hooks without the skill: {c:?} {d:?}");
@@ -628,6 +694,7 @@ mod tests {
             driver: Some(true),
             skill: Some(false),
             project: Some(false),
+            optional: [None; N],
         };
         assert!(all.complete(&SCREEN));
         assert!(!Choices { driver: None, ..all }.complete(&SCREEN));
@@ -701,10 +768,72 @@ mod tests {
             skill: Some(true),
             driver,
             project: Some(true),
+            optional: [None; N],
         };
         assert!(full(Tracking::Exclude, None).complete(&SCREEN), "the driver row is hidden");
         assert!(!full(Tracking::Commit, None).complete(&SCREEN));
         assert!(full(Tracking::Commit, Some(false)).complete(&SCREEN));
         assert!(!Choices::default().complete(&SCREEN));
+    }
+
+    /// **선택 스킬 칸은 설치 칸이 켜졌을 때만 선다**(moai-3r7l.ocn) — 설치를 안 하면 고를 것이 없고, 건넬 것도 없다.
+    /// 미리 켜 둔 칸(이미 심긴 것, 표식이 선 것)은 그대로 `--with` 로 가고, 그것을 끄면 `--without` 으로 간다. 미리 안 켠
+    /// 칸을 그대로 두면 아무것도 안 건넨다 — 심긴 것이 아니라 걷을 것이 없다.
+    #[test]
+    fn the_optional_rows_stand_under_the_skill_row_and_pass_their_pick_on() {
+        let mut f = form(Choices { guide: Some(Guide::None), ..Choices::default() });
+        assert!(f.rows().contains(&Field::Optional(0)), "설치 칸이 켜졌는데 선택 스킬 칸이 없다");
+        assert_eq!((f.plan().with, f.plan().without), (vec![], vec![]), "미리 안 켠 칸이 무엇을 건넸다");
+        choose(&mut f, Field::Optional(0), 0);
+        assert_eq!(f.plan().with, ["moai-tmux"]);
+        f.cursor = Field::Prefix;
+        choose(&mut f, Field::Skill, 1);
+        assert!(!f.rows().contains(&Field::Optional(0)), "설치를 껐는데 선택 스킬 칸이 섰다");
+        assert_eq!(f.plan().with, Vec::<&str>::new(), "설치를 안 하는데 건넸다");
+        assert_eq!(f.picked.optional[0], Some(true), "hidden, not forgotten");
+
+        // 미리 켜 둔 칸 — 끄면 `--without` 이다.
+        let pre = Defaults { optional: [Some(true); N], ..SCREEN };
+        let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
+        assert_eq!(f.plan().with, ["moai-tmux"], "미리 켜 둔 칸을 안 건넸다");
+        choose(&mut f, Field::Optional(0), 1);
+        assert_eq!((f.plan().with, f.plan().without), (vec![], vec!["moai-tmux"]));
+    }
+
+    /// **`--with` 는 그 칸을 잠그고, 사람이 안 보는 `init` 은 표식으로 심지 않는다**(moai-3r7l.ocn) — [`PLAIN`] 의 선택
+    /// 스킬은 비어 맨 `skill install` 이 이미 심긴 것만 다시 심는다. 선택 스킬 칸은 혼자 화면을 열지 않는다.
+    #[test]
+    fn a_with_flag_locks_its_row_and_plain_plants_nothing_by_itself() {
+        let mut with = Choices { skill: Some(true), ..Choices::default() };
+        with.optional[0] = Some(true);
+        let f = form(with.clone());
+        assert_eq!(f.locked_by(Field::Optional(0)), Some(Lock::Flag));
+        assert_eq!(resolve(&with, &PLAIN).with, ["moai-tmux"]);
+        let plain = resolve(&Choices { skill: Some(true), ..Choices::default() }, &PLAIN);
+        assert_eq!((plain.with, plain.without), (vec![], vec![]), "사람이 안 보는 init 이 선택 스킬을 골랐다");
+        let all = Choices {
+            prefix: Some("abc".into()),
+            tracking: Some(Tracking::Exclude),
+            guide: Some(Guide::None),
+            skill: Some(true),
+            project: Some(false),
+            ..Choices::default()
+        };
+        assert!(all.complete(&SCREEN), "선택 스킬 칸 하나가 화면을 열었다");
+    }
+
+    /// **고른 선택 스킬이 심긴 것을 바꾸면 그것이 시킨 설치다**(리뷰 moai-3r7l) — 이미 선 훅으로 읽은 안내에서 `init` 이
+    /// 설치를 거둘 때 이것으로 잰다. 심긴 것을 그대로 켜 둔 칸은 바꾼 것이 아니다.
+    #[test]
+    fn an_optional_pick_that_changes_what_is_planted_asks_for_the_install() {
+        let mut f = form(Choices { guide: Some(Guide::None), ..Choices::default() });
+        assert!(!f.plan().changes_optional(&[]), "고른 것이 없는데 바꿨다고 읽었다");
+        choose(&mut f, Field::Optional(0), 0);
+        assert!(f.plan().changes_optional(&[]), "심기지 않은 것을 켠 것을 안 읽었다");
+        assert!(!f.plan().changes_optional(&["moai-tmux"]), "심긴 것을 그대로 켜 둔 것을 바꿨다고 읽었다");
+        let pre = Defaults { optional: [Some(true); N], ..SCREEN };
+        let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
+        choose(&mut f, Field::Optional(0), 1);
+        assert!(f.plan().changes_optional(&["moai-tmux"]), "심긴 것을 끈 것을 안 읽었다");
     }
 }

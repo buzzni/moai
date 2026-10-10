@@ -2699,6 +2699,8 @@ Usage: moai skill install [OPTIONS]
 Options:
       --scope <scope>        Where to register: local (default), project, user
       --agent <agent>        Agent: claude (default), codex, antigravity, auto
+      --with <skill>         Also plant this optional skill (repeatable)
+      --without <skill>      Remove this optional skill (repeatable)
       --dry-run              Change nothing; only say what would be done
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -2720,6 +2722,14 @@ Options:
   (moai-recover) are planted for Claude Code only — Codex and Antigravity get
   no supervisor.
 
+  Optional skills are planted only where you choose them: today moai-tmux,
+  the supervisor's hands on tmux panes. --with <skill> plants one and
+  --without <skill> removes it; both repeat, and a comma separates names.
+  What you chose is not written down anywhere - a skill planted in the tree
+  is the answer. So a plain install refreshes the optional skills already
+  planted and plants no new one, and a first install plants none. Naming a
+  skill that is always planted, or one name in both, is refused.
+
   The hooks are each agent's own: --agent codex plants `.codex/hooks.json`,
   --agent antigravity plants `.agents/hooks.json` - commit them too. Codex
   runs project hooks only once you trust them: open /hooks in a codex session
@@ -2736,9 +2746,9 @@ Options:
   holds would block every tool call of that session. The one thing deleted
   is a skill directory an earlier moai planted in the same tree and this one
   no longer plants (skills/moai-work/, and skills/moai-supervise/ in
-  .agents/skills/), and only while it holds nothing but the files moai
-  planted there; one with a file of yours in it is left, and one line names
-  it.
+  .agents/skills/), or an optional skill left out with --without, and only
+  while it holds nothing but the files moai planted there; one with a file
+  of yours in it is left, and one line names it.
 
   The version is a hash of what is installed. Same content, same version, so
   there are no empty updates.
@@ -2774,6 +2784,8 @@ Options:
   moai skill install --dry-run        only show what would be done
   moai skill install --agent codex    .agents/skills/ for Codex and Antigravity
   moai skill install --agent auto     whichever agent is on PATH
+  moai skill install --with moai-tmux     plant the tmux skill too
+  moai skill install --without moai-tmux  take it out again
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.
@@ -2822,6 +2834,7 @@ Usage: moai skill uninstall [OPTIONS]
 
 Options:
       --agent <agent>        Agent: claude (default), codex, antigravity, auto
+      --only <skill>         Remove only this optional skill (repeatable)
       --dry-run              Call nothing; only say what would be called
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -2858,8 +2871,19 @@ Options:
   wrote it, are printed, to run once no session holds them. Without that
   --agent, one line says when moai's skills are still there.
 
+  --only <skill> removes one optional skill and nothing else: it is
+  `moai skill install --without <skill>` under another name. That skill's
+  directory goes (only while it holds nothing but moai's files) and the
+  plugin is planted again; the registration and the other skills stay.
+  A tree moai has not planted is left alone - no file and no hooks file
+  is made there. Where this repository's moai is registered, that scope is
+  brought up to the new version; where it is registered nowhere, only the
+  files change - no registration is made. A skill that is always planted
+  is refused.
+
   moai skill uninstall --dry-run      only show what would be called
   moai skill uninstall --agent codex  name what to delete in .agents/skills/
+  moai skill uninstall --only moai-tmux   take the tmux skill out
 ```
 
 ## `moai project`
@@ -3070,6 +3094,7 @@ Options:
       --tracking <how>       Git tracks it (commit) or not (exclude, gitignore)
       --skill                Then run moai skill install --scope local
       --no-skill             Do not install the hooks and skills
+      --with <skill>         Plant this optional skill too (repeatable)
       --register             Then add this repository to your project list
       --no-register          Do not add it to your project list
   -y, --yes                  Ask nothing; unset rows plant as init always did
@@ -3099,6 +3124,16 @@ Options:
   written. Even a first run reads existing git ignore rules and the moai
   guide block. A later run also recognizes installed moai hooks when no block
   stands. If git fails, init refuses rather than guessing commit mode.
+
+  **Optional skills** (today moai-tmux, the supervisor's hands on tmux panes)
+  get a row each under hooks · skills, shown while that row installs. The
+  screen checks one when it is already planted here, or when your shell
+  says you use it ($TMUX set for moai-tmux); Enter passes the checked ones on
+  to `moai skill install --with`, and unchecking one already planted passes
+  --without. --with <skill> (repeatable, or names with a comma) checks and
+  locks that row and turns installing on; it cannot go with --no-skill.
+  Where nothing is asked, only what --with names is planted - nothing by
+  what your shell says - and optional skills already planted are refreshed.
 
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the

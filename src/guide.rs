@@ -1202,7 +1202,8 @@ the worker reports the same way. moai carries no messaging, and the moai binary 
 launches or drives a session. When the supervisor runs inside tmux, its companion skill
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says
-yes. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+yes. That skill is planted only where it is chosen: `moai skill install --with moai-tmux`
+plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki
@@ -1846,7 +1847,10 @@ worker panes when no worker is idle (2), label the pane you send to and deliver 
 `SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
 window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
-step below goes through messages and the person, as written.
+step below goes through messages and the person, as written. `moai-tmux` is an optional skill:
+it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
+init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
+outside tmux.
 
 **When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
 and the person asks to bring them back, load `moai-recover`, inside tmux or not.
@@ -2296,7 +2300,24 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY"#;
 
-/// 넷째 스킬 `moai-tmux` 의 SKILL.md — tmux 안에서 도는 감독의 손이다(2026-10-10 사용자 결정, moai-u99i).
+/// **빈 입력 칸의 잣대는 이 글 하나다.** `moai-tmux` 와 `moai-recover` 가 `format!` 으로 같은 글을 싣는다 —
+/// 되살리기는 모두에게 심기고 `moai-tmux` 는 고른 사람에게만 서니(moai-3r7l), 되살리기가 `moai-tmux` 의 절을 가리키면
+/// 그것이 없는 자리에서 없는 글을 댄다(moai-o9je). 둘째 잣대를 적으면 Claude Code 의 입력 칸 꼴이 바뀌는 날 한쪽만
+/// 고쳐진다. 비었을 때 무엇을 하는가(안 친다·사람에게 말한다)는 스킬마다 제 글이 잇는다.
+pub const EMPTY_BOX: &str = "    tmux display -p -t <pane> '#{pane_in_mode}'
+    tmux capture-pane -p -e -t <pane>
+
+The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
+then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
+Claude Code's input box is the line that starts with `❯`, under the conversation, between two
+`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
+keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
+person's text is not. Anything else — a word, a pasted block, a half-typed command — is the
+person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
+no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.";
+
+/// 선택 스킬 `moai-tmux` 의 SKILL.md — tmux 안에서 도는 감독의 손이다(2026-10-10 사용자 결정, moai-u99i). 고른 사람에게만
+/// 심는다(`skill::OPTIONAL`, moai-3r7l).
 ///
 /// **moai-obxm 의 두 결정을 tmux 쓰는 사람에게만 뒤집는다.** "창을 비우는 것은 사람의 몫 — 감독은 칸에 아무것도 치지
 /// 않는다" 와 "감독도 에이전트를 띄우지 않는다" 였다. 이제 `$TMUX` 가 서 있으면 감독이 칸을 비우고, 닿지 않은
@@ -2376,19 +2397,10 @@ Run it when a step below needs a pane, once.
 
 ## Is the input box empty
 
-    tmux display -p -t <pane> '#{{pane_in_mode}}'
-    tmux capture-pane -p -e -t <pane>
+{EMPTY_BOX}
 
-The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
-then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
-Claude Code's input box is the line that starts with `❯`, under the conversation, between two
-`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
-keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
-person's text is not. Anything
-else — a word, a pasted block, a half-typed command — is the person's, and if you cannot tell
-the placeholder from their draft, it is theirs. **Then do not type. Tell the person which pane
-holds what, and go on as if this skill were not here.** A pane with no `❯` box at all (a shell
-prompt, a dialog) is not a box to type into either.
+**Then do not type. Tell the person which pane holds what, and go on as if this skill were not
+here.**
 
 ## Label the pane
 
@@ -2497,7 +2509,7 @@ stands in the new pane (trusting the folder, say), tell the person — it is the
     )
 }
 
-/// 다섯째 스킬 `moai-recover` 의 SKILL.md — 죽은 세션을 되살려 이어 가게 한다(2026-10-10 사용자 결정, moai-uqf7).
+/// 넷째 늘 심는 스킬 `moai-recover` 의 SKILL.md — 죽은 세션을 되살려 이어 가게 한다(2026-10-10 사용자 결정, moai-uqf7).
 ///
 /// **2026-10-10 에 실제로 걸은 길을 글로 옮긴 것이다.** 컨테이너가 다시 서며 감독(루트)과 일꾼 둘(워크트리)이 한꺼번에
 /// 죽었고, 사람이 손으로 기록을 뒤져 `split-window … claude --resume` 으로 셋을 되살렸다. 일꾼 둘은 백그라운드
@@ -2542,12 +2554,19 @@ the person can watch.
   or `killall` aimed at tmux (hook rule 4). A session that is alive is left alone
 - **Only the panes you opened.** Type only into a pane this skill opened, by the `%N` that
   `split-window` printed — every call names it, `-t <pane>`
-- **Never over the person's words.** Paste only into an empty input box (`moai-tmux`, "Is the
-  input box empty"); otherwise tell the person
+- **Never over the person's words.** Paste only into an empty input box ("Is the input box
+  empty" below); otherwise tell the person
 - **No polling.** Every look is one look; the next comes after your next step, as its own
   call — never a loop, never a `sleep`
 - **Their work stays as it is.** No commit, no checkout, no stash, no build, no `moai` write —
   what a dead session left is for that session to pick up
+
+## Is the input box empty
+
+{EMPTY_BOX}
+
+**When it is not empty, do not paste.** Tell the person which pane holds what — the words in it
+are theirs.
 
 ## 1. Find the dead
 
@@ -2655,7 +2674,7 @@ has to see the workers when it starts.
 
 **No other flag.** The first line prints the new pane's `%N`; `exec bash` keeps a shell there
 when `claude` exits. Then, as a separate call, look once: when its `❯` box shows and is empty
-(`moai-tmux`, "Is the input box empty"), paste the block:
+("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
     tmux paste-buffer -p -d -b moai-recover -t <pane>
@@ -3660,9 +3679,10 @@ mod tests {
         // 글자 단위로 자른다 — 바이트로 자르면 한글 한가운데서 끊겨, 실패를 알리려던
         // 자리가 제가 먼저 죽는다.
         let head: String = skill.chars().take(40).collect();
-        // 이름은 `skill::NAMES` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그 목록을 다
-        // 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
-        let [moai, supervisor, wiki_skill, tmux_skill, recover_skill] = crate::skill::NAMES;
+        // 이름은 `skill::NAMES`·`skill::OPTIONAL` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그
+        // 목록을 다 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
+        let [moai, supervisor, wiki_skill, recover_skill] = crate::skill::NAMES;
+        let [crate::skill::Optional { name: tmux_skill, .. }] = crate::skill::OPTIONAL;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
@@ -5503,9 +5523,17 @@ stop sending outside work while a release runs",
         let open = &open[..open.find("## 6. Outside tmux").unwrap()];
         assert!(open.contains("paste-buffer -p -d -b moai-recover -t <pane>"), "여러 줄을 붙이기로 안 싣는다");
         assert!(outside.contains("open nothing"), "tmux 밖에서도 칸을 연다");
-        // 빈 입력 칸의 잣대는 `moai-tmux` 의 절이다 — 절 이름을 바꾸면 이 글이 없는 절을 가리킨다.
-        assert!(tmux().contains("\n## Is the input box empty\n"), "되살리기가 대는 tmux 절이 없다");
-        assert!(open.contains("(`moai-tmux`, \"Is the input box empty\")"), "붙이기 전에 입력 칸을 안 본다");
+        // 빈 입력 칸의 잣대는 제 글 안에 선다 — `moai-tmux` 는 고른 사람에게만 심기니(moai-3r7l) 그 절을 대면 없는
+        // 글을 가리킨다(moai-o9je). 잣대는 `moai-tmux` 와 한 상수다.
+        assert!(!text.contains("`moai-tmux`, \"Is the"), "되살리기가 심기지 않았을 수 있는 moai-tmux 의 절을 댄다");
+        let rule = &text[text.find("\n## Is the input box empty\n").expect("되살리기에 빈 입력 칸의 절이 없다")..];
+        let rule = &rule[..rule.find("\n## 1. Find the dead").expect("빈 입력 칸의 절이 1 앞에 안 선다")];
+        assert!(rule.contains(EMPTY_BOX) && tmux().contains(EMPTY_BOX), "두 스킬이 빈 입력 칸의 잣대를 따로 적는다");
+        assert!(
+            EMPTY_BOX.contains("#{pane_in_mode}") && EMPTY_BOX.contains("capture-pane -p -e"),
+            "잣대가 칸을 안 본다"
+        );
+        assert!(open.contains("(\"Is the input box empty\" above)"), "붙이기 전에 입력 칸을 안 본다");
         assert!(text.contains("**Their asking is the yes:**"), "되살려 달라는 말을 허락으로 안 읽는다");
         assert!(text.contains("**Workers first, the supervisor last**"), "일꾼 먼저·감독 마지막의 차례가 없다");
         assert!(

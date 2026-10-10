@@ -506,6 +506,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             guide,
             skill,
             no_skill,
+            with,
             register,
             no_register,
             yes,
@@ -516,14 +517,20 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             let guide = guide.or(no_agents.then_some(crate::init_choice::Guide::None));
             // 짝 플래그는 clap 이 서로 막는다 — 둘 다 오는 일은 없다.
             let pair = |on: bool, off: bool| if on { Some(true) } else { off.then_some(false) };
-            // 플래그가 고른 것은 화면이 고른 것과 같은 꼴(`Choices`)이다 — 안 준 칸은 고르지 않은 것이다.
+            // **`--with` 의 이름은 `skill install` 과 같은 자로 잰다**(moai-3r7l.ocn) — 무엇을 쓰기 전에, 같은 거절문으로.
+            skill::Pick { with: with.clone(), without: Vec::new() }.check(ctx.lang())?;
+            let optional =
+                std::array::from_fn(|i| with.iter().any(|w| w == crate::skill::OPTIONAL[i].name).then_some(true));
+            // 플래그가 고른 것은 화면이 고른 것과 같은 꼴(`Choices`)이다 — 안 준 칸은 고르지 않은 것이다. `--with` 는
+            // 설치를 켠다 — 심으라고 한 스킬을 설치 없이 둘 수 없다(`--no-skill` 과는 clap 이 막는다).
             let flags = crate::init_choice::Choices {
                 prefix,
                 tracking,
                 guide,
                 driver: pair(driver, no_driver),
-                skill: pair(skill, no_skill),
+                skill: pair(skill || !with.is_empty(), no_skill),
                 project: pair(register, no_register),
+                optional,
             };
             init::run(ctx, &flags, yes)
         }
@@ -532,9 +539,11 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // 그중 하나다. `.moai` 를 찾으러 가면 `git worktree` 안이나 서브모듈에서
         // 엉뚱한 트래커를 열고, 사람이 누구인지도 여기서는 물을 일이 없다.
         Cmd::MergeDriver(a) => merge_driver::run(ctx, a),
-        Cmd::Skill(SkillCmd::Install { scope, agents, dry_run }) => skill::install(ctx, scope, &agents, dry_run),
+        Cmd::Skill(SkillCmd::Install { scope, agents, with, without, dry_run }) => {
+            skill::install(ctx, scope, &agents, &skill::Pick { with, without }, dry_run)
+        }
         Cmd::Skill(SkillCmd::Status) => skill::status(ctx),
-        Cmd::Skill(SkillCmd::Uninstall { agents, dry_run }) => skill::uninstall(ctx, &agents, dry_run),
+        Cmd::Skill(SkillCmd::Uninstall { agents, only, dry_run }) => skill::uninstall(ctx, &agents, &only, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),

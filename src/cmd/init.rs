@@ -1781,6 +1781,8 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         agents: &agents_read,
         tracking: now,
     };
+    // 화면을 열 때 읽은 지금 심긴 선택 스킬 — 화면이 안 서면 비었다(사람이 안 보는 `init` 은 그 트리를 안 연다).
+    let mut planted_optional: Vec<&'static str> = Vec::new();
     let mut plan = if !again
         && !yes
         && !ctx.json
@@ -1801,6 +1803,17 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         if fixed.skill == Some(false) {
             defaults.guide_local = Guide::None;
         }
+        // **선택 스킬 칸은 이미 심긴 것과 쓰는 사람이라는 표식이 선 것을 켜 둔다**(moai-3r7l.ocn, 사용자 결정) — tmux 안의
+        // 셸이면 `moai-tmux` 다. 표식은 여기, 사람이 보는 화면에서만 읽는다: 사람이 안 보는 `init` 은 `PLAIN` 이라 표식으로
+        // 심지 않는다. 고른 것은 어디에도 안 적으니 "이미 심겼는가" 는 그 트리를 읽어 답한다.
+        let vars: Vec<(String, String)> =
+            std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect();
+        let seen = crate::skill::detected(&vars);
+        planted_optional = crate::cmd::skill::planted_optional(&root);
+        defaults.optional = std::array::from_fn(|i| {
+            let name = crate::skill::OPTIONAL[i].name;
+            Some(seen.contains(&name) || planted_optional.contains(&name))
+        });
         checker.refusal(&crate::init_choice::resolve(&fixed, &defaults), true)?;
         let form = crate::init_choice::Form::new(fixed, defaults, suggested.clone());
         let check = |plan: &Plan| checker.refusal(plan, false).err().map(|f| one_line(&f.message));
@@ -1817,8 +1830,13 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         checker.refusal(&plan, false)?;
         plan
     };
-    // 이미 설치된 훅으로 읽은 안내는 설치를 다시 부르지 않는다. 명시적으로 시키면 부른다.
-    if existing_hooks && plan.guide == Guide::Hook && flags.skill != Some(true) {
+    // 이미 설치된 훅으로 읽은 안내는 설치를 다시 부르지 않는다. 명시적으로 시키면 부른다 — 화면의 선택 스킬 칸이 지금 심긴
+    // 것을 바꾸는 것도 시킨 것이다([`crate::init_choice::Plan::changes_optional`]).
+    if existing_hooks
+        && plan.guide == Guide::Hook
+        && flags.skill != Some(true)
+        && !plan.changes_optional(&planted_optional)
+    {
         plan.skill = false;
     }
     // 훅으로 알리는 것도 AGENTS.md 를 안 건드린다 — 알리는 일은 훅(`hook::guided_board`)이 한다.
@@ -2135,7 +2153,14 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     // 읽는다. 못 한 것은 그 명령의 말(`!` 줄, `--json` 의 `registered: false`)이 이미 댄다. 이 명령이 앞서 세운
     // 깃발은 그대로 둔다.
     let partial = super::take_partial();
-    let skilled = plan.skill.then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], false));
+    // 선택 스킬은 계획이 고른 그대로 건넨다(moai-3r7l.ocn) — 화면이 켠 것은 `--with`, 미리 켜 둔 것을 끈 것은 `--without`.
+    // 사람이 안 보는 `init` 은 `--with` 로 준 것뿐이라, 나머지는 맨 `install` 처럼 이미 심긴 것만 다시 심는다.
+    let pick = crate::cmd::skill::Pick {
+        with: plan.with.iter().map(|n| n.to_string()).collect(),
+        without: plan.without.iter().map(|n| n.to_string()).collect(),
+    };
+    let skilled =
+        plan.skill.then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], &pick, false));
     let listed = plan.project.then(|| crate::cmd::project::add(ctx, &root));
     super::take_partial();
     // **설치 뒤에도 낡은 스킬·훅이 남았으면 한 줄로 댄다**(moai-ybns.451.rpd). 훅이 이미 선 저장소에서는 위가 설치를
@@ -2356,7 +2381,14 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     // moai-zynt.63u). 맨 `moai project add .` 를 대던 판은 따라 친 셸의 자리를 목록에 올렸다. `-C` 를 붙이는 규칙은
     // [`crate::report::Warning::cli_hint`] 하나다.
     let away = away_root(&root, ctx.chdir);
-    let ran = [("skill install --scope local", &skilled), ("project add .", &listed)];
+    // 고른 선택 스킬도 그 줄에 싣는다(moai-3r7l.ocn) — 빼면 따라 친 줄이 고른 것을 안 심고, 끈 것을 안 걷는다.
+    let picked = |flag: &str, names: &[String]| match names.is_empty() {
+        true => String::new(),
+        false => format!(" {flag} {}", names.join(",")),
+    };
+    let install =
+        format!("skill install --scope local{}{}", picked("--with", &pick.with), picked("--without", &pick.without));
+    let ran = [(install.as_str(), &skilled), ("project add .", &listed)];
     for (tail, done) in ran {
         let cmd = crate::report::Warning::cli_hint(away.as_deref(), tail);
         match done {

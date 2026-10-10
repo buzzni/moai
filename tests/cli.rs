@@ -19269,12 +19269,37 @@ fn skill_install_plants_one_text_for_every_agent() {
         assert!(supervisor.join(file).is_file(), "Claude 의 트리에 감독의 {file} 가 없다");
     }
     assert!(!s.path().join(".agents/skills/moai-supervise").exists(), ".agents 에 감독 스킬을 심었다");
-    // 감독의 tmux 손(moai-u99i)도 Claude 의 트리에만 선다.
+    // 감독의 tmux 손(moai-u99i)은 고른 사람에게만 선다(moai-3r7l) — 고르지 않은 이 심기에는 어느 트리에도 없다.
     assert!(
-        s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(),
-        "Claude 의 트리에 tmux 스킬이 없다"
+        !s.path().join(".claude/moai-plugin/skills/moai-tmux").exists(),
+        "고르지 않은 tmux 스킬을 Claude 의 트리에 심었다"
     );
     assert!(!s.path().join(".agents/skills/moai-tmux").exists(), ".agents 에 tmux 스킬을 심었다");
+    // 골라도 Claude 의 트리에만 선다.
+    let mut with = args.to_vec();
+    with.extend(["--with", "moai-tmux"]);
+    assert!(c.run(s.path(), &with, true).status.success());
+    assert!(s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(), "고른 tmux 스킬이 없다");
+    assert!(!s.path().join(".agents/skills/moai-tmux").exists(), ".agents 에 tmux 스킬을 심었다");
+    // `.agents` 의 선택 스킬은 그 트리가 심는 것만이다 — Claude 에만 서는 `moai-tmux` 를 거기 심었다고 안 한다(리뷰 moai-3r7l).
+    let mut with_json = with.clone();
+    with_json.extend(["--dry-run", "--json"]);
+    let json = String::from_utf8(c.run(s.path(), &with_json, true).stdout).unwrap();
+    let agents_optional = &json[json.find("\"agents_optional\":{").expect("agents_optional 이 없다")..];
+    assert_eq!(list_in(agents_optional, "planted"), Some(Vec::new()), ".agents 에 없는 선택 스킬을 댄다\n{json}");
+    // Claude 를 안 고른 `--without` 은 Claude 에만 서는 스킬을 못 걷는다 — 그렇다고 한 줄로 댄다.
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex", "--without", "moai-tmux"], true);
+    assert!(out.status.success() && text(&out).contains("걷으려면 --agent claude"), "{}", text(&out));
+    assert!(s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(), "고르지 않은 트리를 걷었다");
+    // 기계도 그 줄을 받는다(리뷰 moai-3r7l.4qq) — 사람의 줄만 서던 판은 `--json` 이 아무 키 없이 0 으로 끝났다.
+    for pick in ["--with", "--without"] {
+        let args = ["skill", "install", "--agent", "codex", pick, "moai-tmux", "--json"];
+        let json = String::from_utf8(c.run(s.path(), &args, true).stdout).unwrap();
+        assert_eq!(list_in(&json, "claude_only"), Some(vec!["moai-tmux".to_string()]), "{pick}\n{json}");
+    }
+    let json =
+        String::from_utf8(c.run(s.path(), &["skill", "install", "--agent", "codex", "--json"], true).stdout).unwrap();
+    assert_eq!(list_in(&json, "claude_only"), Some(Vec::new()), "{json}");
     // 죽은 세션을 되살리는 스킬(moai-uqf7)도 Claude 의 트리에만 선다 — 읽는 기록이 Claude Code 의 것이다.
     assert!(
         s.path().join(".claude/moai-plugin/skills/moai-recover/SKILL.md").is_file(),
@@ -19665,6 +19690,203 @@ fn skill_install_leaves_nothing_an_older_moai_planted() {
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
     assert!(said.contains(&format!("rm -r {}", shared.join("moai-work").display())), "{said}");
     assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
+}
+
+/// **선택 스킬은 지금 심긴 자리에만 다시 심는다**(moai-3r7l.ey2, 2026-10-10 사용자 결정) — 고른 것은 어디에도 안 적고
+/// "그 트리에 moai 의 머리로 선 `SKILL.md` 가 있는가" 가 답이다. 처음 심는 저장소에는 `moai-tmux` 가 안 서고, 심긴
+/// 저장소의 맨 `install` 은 그것을 지금 판의 글로 다시 심는다. 머리가 남의 것이면 심긴 것이 아니다.
+#[test]
+fn skill_install_refreshes_an_optional_skill_only_where_it_stands() {
+    let s = init("skilloptional");
+    let c = Claude::new("skilloptional-home");
+    let tmux = s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md");
+    let files = |json: &str| list_in(json, "files").expect("files 가 없다");
+
+    let out = c.run(s.path(), &["skill", "install", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert!(!files(&json).iter().any(|f| f.contains("moai-tmux")), "처음 심는 자리에 선택 스킬을 심었다\n{json}");
+    assert!(!tmux.exists(), "처음 심는 자리에 moai-tmux 를 심었다");
+    assert!(files(&json).iter().any(|f| f == "skills/moai-recover/SKILL.md"), "늘 심는 스킬을 뺐다\n{json}");
+
+    // 옛 판이 심은 글 — 맨 `install` 이 지금 판의 글로 다시 심는다.
+    std::fs::create_dir_all(tmux.parent().unwrap()).unwrap();
+    std::fs::write(&tmux, "---\nname: moai-tmux\ndescription: old\n---\n").unwrap();
+    let json = String::from_utf8(c.run(s.path(), &["skill", "install", "--json"], true).stdout).unwrap();
+    assert!(files(&json).iter().any(|f| f == "skills/moai-tmux/SKILL.md"), "심긴 선택 스킬을 안 심었다\n{json}");
+    let now = std::fs::read_to_string(&tmux).unwrap();
+    assert!(now.starts_with("---\nname: moai-tmux\n") && !now.contains("description: old"), "다시 안 심었다\n{now}");
+
+    // 머리가 남의 것이면 moai 가 심은 것이 아니다 — 다시 심지 않고, 그 디렉터리도 안 지운다.
+    std::fs::write(&tmux, "---\nname: my-tmux\n---\n").unwrap();
+    let json = String::from_utf8(c.run(s.path(), &["skill", "install", "--json"], true).stdout).unwrap();
+    assert!(!files(&json).iter().any(|f| f.contains("moai-tmux")), "남의 머리를 심긴 것으로 읽었다\n{json}");
+    assert_eq!(std::fs::read_to_string(&tmux).unwrap(), "---\nname: my-tmux\n---\n", "남의 글을 고쳤다");
+}
+
+/// **`--with` 가 심고 `--without` 이 걷는다**(moai-3r7l.5ja) — 심긴 선택 스킬은 맨 `install` 이 그대로 다시 심고,
+/// `--without` 은 moai 의 파일만 든 디렉터리를 걷는다. 연습은 걷지 않고 걷을 것을 댄다. 사람의 파일이 든 디렉터리는
+/// 남기고 한 줄로 댄다. 되풀이와 쉼표가 같다.
+#[test]
+fn skill_install_with_plants_and_without_removes_an_optional_skill() {
+    let s = init("skillwith");
+    let c = Claude::new("skillwith-home");
+    let tmux = s.path().join(".claude/moai-plugin/skills/moai-tmux");
+    let run = |args: &[&str]| -> String {
+        let out = c.run(s.path(), args, true);
+        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    // Claude 의 트리의 것(`optional`)이다 — 곁의 `agents_optional` 을 읽지 않게 그 키에서 자른다.
+    let optional = |json: &str| json[json.find("\"optional\":{").expect("optional 이 없다")..].to_string();
+    let planted = |json: &str| list_in(&optional(json), "planted").expect("optional.planted 가 없다");
+    let removed = |json: &str| list_in(&optional(json), "removed").expect("optional.removed 가 없다");
+
+    let json = run(&["skill", "install", "--with", "moai-tmux,moai-tmux", "--json"]);
+    assert_eq!(planted(&json), ["moai-tmux"], "{json}");
+    assert!(tmux.join("SKILL.md").is_file(), "--with 가 안 심었다");
+    let said = text(&c.run(s.path(), &["skill", "install"], true));
+    assert!(said.contains("moai-tmux"), "심긴 선택 스킬을 안 댄다\n{said}");
+    assert!(tmux.join("SKILL.md").is_file(), "맨 install 이 심긴 선택 스킬을 걷었다");
+
+    let plan = run(&["skill", "install", "--without", "moai-tmux", "--dry-run", "--json"]);
+    assert_eq!((planted(&plan), removed(&plan)), (vec![], vec!["moai-tmux".to_string()]), "{plan}");
+    assert!(tmux.join("SKILL.md").is_file(), "연습이 걷었다");
+    let json = run(&["skill", "install", "--without", "moai-tmux", "--json"]);
+    assert_eq!(removed(&json), ["moai-tmux"], "{json}");
+    assert!(!tmux.exists(), "--without 이 안 걷었다");
+    assert!(!list_in(&json, "files").unwrap().iter().any(|f| f.contains("moai-tmux")), "{json}");
+
+    // 사람의 파일이 든 디렉터리는 남긴다 — 걷었다고 세지 않는다.
+    run(&["skill", "install", "--with", "moai-tmux"]);
+    std::fs::write(tmux.join("notes.md"), "mine\n").unwrap();
+    // **못 걷는 걷기는 안 걷은 것이다**(사용자 결정, 리뷰 moai-3r7l.4qq) — moai 의 `SKILL.md` 가 남아 Claude 는 그 스킬을
+    // 그대로 읽으니 심는 셈에 남긴다. 매니페스트는 그것을 든 판이고(`skill status` 가 바라는 판과 같다), `planted` 에 서고,
+    // `removed` 에 안 서며, 옮길 파일을 댄다. 그것 없이 매니페스트를 쓰던 판은 `status` 가 낡았다고 했다.
+    let manifest = s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json");
+    let version = || field(&std::fs::read_to_string(&manifest).unwrap().replace("\": \"", "\":\""), "version");
+    let with_tmux = version();
+    let plan = run(&["skill", "install", "--without", "moai-tmux", "--dry-run", "--json"]);
+    assert_eq!((planted(&plan), removed(&plan)), (vec!["moai-tmux".to_string()], vec![]), "{plan}");
+    let json = run(&["skill", "install", "--without", "moai-tmux", "--json"]);
+    assert_eq!((planted(&json), removed(&json)), (vec!["moai-tmux".to_string()], vec![]), "{json}");
+    let held = &optional(&json)[optional(&json).find("\"held\":").expect("optional.held 가 없다")..];
+    assert_eq!(list_in(held, "files"), Some(vec!["notes.md".to_string()]), "{json}");
+    assert!(list_in(&json, "files").unwrap().iter().any(|f| f == "skills/moai-tmux/SKILL.md"), "{json}");
+    assert_eq!(version(), with_tmux, "못 걷은 스킬 없이 매니페스트를 썼다");
+    let status = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    assert_eq!(field(&status, "want_version"), with_tmux, "status 가 다른 판을 바란다\n{status}");
+    let out = c.run(s.path(), &["skill", "install", "--without", "moai-tmux"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains(&tmux.display().to_string()) && said.contains("notes.md"), "옮길 파일을 안 댄다\n{said}");
+    assert!(!said.contains("이번에 안 심는"), "못 걷은 것을 걷는다고 한다\n{said}");
+    assert!(tmux.join("SKILL.md").is_file(), "사람의 파일 곁의 moai 의 글을 지웠다");
+    assert_eq!(std::fs::read_to_string(tmux.join("notes.md")).unwrap(), "mine\n");
+    // 옮기면 다음 `--without` 이 걷는다.
+    std::fs::remove_file(tmux.join("notes.md")).unwrap();
+    let json = run(&["skill", "install", "--without", "moai-tmux", "--json"]);
+    assert_eq!((planted(&json), removed(&json)), (vec![], vec!["moai-tmux".to_string()]), "{json}");
+    assert!(!tmux.exists(), "옮긴 뒤에도 안 걷었다");
+}
+
+/// **고른 이름은 무엇을 쓰기 전에 잰다**(moai-3r7l.5ja) — 늘 심는 이름은 "늘 심는다" 로, 모르는 이름은 고를 수 있는
+/// 이름을 대며, 한 이름을 심고 걷으라는 것은 그것대로 거절한다. 셋 다 `bad_input` 이고 아무것도 안 심는다.
+#[test]
+fn skill_install_refuses_a_pick_it_cannot_take() {
+    let s = init("skillwithbad");
+    let c = Claude::new("skillwithbad-home");
+    for (args, said) in [
+        (&["--with", "moai-wiki"][..], "늘 심는"),
+        (&["--without", "moai-recover"][..], "늘 심는"),
+        (&["--with", "tmux"][..], "moai-tmux"),
+        (&["--with", "moai-tmux", "--without", "moai-tmux"][..], "--without"),
+    ] {
+        let mut argv = vec!["skill", "install"];
+        argv.extend(args);
+        let out = c.run(s.path(), &argv, true);
+        assert!(!out.status.success(), "{args:?} 를 받았다\n{}", text(&out));
+        assert!(text(&out).contains(said), "{args:?}: 까닭을 안 댄다\n{}", text(&out));
+        argv.push("--json");
+        let err = String::from_utf8(c.run(s.path(), &argv, true).stderr).unwrap();
+        assert!(err.contains("\"code\":\"bad_input\""), "{args:?}\n{err}");
+    }
+    assert!(!s.path().join(".claude/moai-plugin").exists(), "거절한 고르기에 심었다");
+    assert_eq!(c.calls(), "", "거절한 고르기에 claude 를 불렀다");
+}
+
+/// **`uninstall --only` 는 `install --without` 이다**(2026-10-10 사용자 결정, moai-3r7l.xr1) — 그 스킬만 걷고 다른 스킬은
+/// 둔다. 등록이 선 범위는 새 판으로 올리기만 하고(`plugin update`), 등록을 세우는 걸음(`marketplace add`·`plugin install`)도
+/// 걷는 걸음(`plugin uninstall`)도 안 부른다. 어디에도 등록이 없으면 `claude` 를 아예 안 부르고 파일만 고친다.
+#[test]
+fn skill_uninstall_only_removes_one_optional_skill_and_makes_no_registration() {
+    let s = init("skillonly");
+    let c = Claude::new("skillonly-home");
+    let skills = s.path().join(".claude/moai-plugin/skills");
+    let since = |before: usize| c.calls()[before..].to_string();
+
+    // **걷는 명령은 심긴 트리만 다시 심는다**(리뷰 moai-3r7l) — 아무것도 안 심긴 저장소에 플러그인도 `.agents/skills` 도 훅
+    // 파일도 짓지 않고, 그 자리에 moai 의 것이 없다고 댄다.
+    for args in [
+        &["skill", "uninstall", "--only", "moai-tmux"][..],
+        &["skill", "uninstall", "--only", "moai-tmux", "--agent", "codex"],
+    ] {
+        let out = c.run(s.path(), args, true);
+        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+        assert!(text(&out).contains("moai 의 것이 없다"), "{args:?}\n{}", text(&out));
+        for planted in [".claude/moai-plugin", ".agents", ".codex"] {
+            assert!(!s.path().join(planted).exists(), "{args:?} 가 {planted} 를 지었다");
+        }
+    }
+    assert_eq!(c.calls(), "", "심긴 것이 없는데 claude 를 불렀다");
+
+    // 등록이 어디에도 없다 — 가짜 `claude` 는 장부를 안 쓰므로 `install` 뒤에도 그렇다.
+    assert!(c.run(s.path(), &["skill", "install", "--with", "moai-tmux"], true).status.success());
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "uninstall", "--only", "moai-tmux"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(since(before), "", "등록이 없는데 claude 를 불렀다");
+    assert!(!skills.join("moai-tmux").exists(), "--only 가 안 걷었다");
+    assert!(skills.join("moai-recover/SKILL.md").is_file(), "다른 스킬까지 걷었다");
+    // 걷은 줄은 부른 명령을 잘못 대지 않는다(리뷰 moai-3r7l.4qq) — `--only` 에 "(--without)" 을 대던 판이 있었다.
+    assert!(text(&out).contains("이번에 안 심는 선택 스킬") && !text(&out).contains("--without"), "{}", text(&out));
+    assert!(text(&out).contains("파일만 고친다"), "등록이 없다고 안 댄다\n{}", text(&out));
+
+    // 로컬 범위에 등록이 섰다 — 그 범위만 올린다.
+    assert!(c.run(s.path(), &["skill", "install", "--with", "moai-tmux"], true).status.success());
+    let (market, _) = installed(&s, &c, "0.0.1");
+    assert!(skills.join("moai-tmux/SKILL.md").is_file(), "맨 install 이 심긴 선택 스킬을 걷었다");
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "uninstall", "--only", "moai-tmux", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(list_in(&json, "refreshed"), Some(vec!["local".to_string()]), "{json}");
+    let calls = since(before);
+    assert!(calls.contains(&format!("plugin update moai@{market} --scope local -y")), "{calls}");
+    for never in ["plugin install", "marketplace add", "plugin uninstall", "marketplace remove"] {
+        assert!(!calls.contains(never), "--only 가 `{never}` 를 불렀다\n{calls}");
+    }
+    assert!(!skills.join("moai-tmux").exists(), "--only 가 안 걷었다");
+
+    // 늘 심는 스킬은 `--without` 과 같은 한 줄로 거절한다.
+    let out = c.run(s.path(), &["skill", "uninstall", "--only", "moai-wiki"], true);
+    assert!(!out.status.success() && text(&out).contains("늘 심는"), "{}", text(&out));
+    assert!(skills.join("moai-wiki/SKILL.md").is_file());
+}
+
+/// **`skill status` 의 판도 심을 그 트리로 잰다**(moai-3r7l.h36) — 선택 스킬을 안 고른 저장소에 심은 판이 지금 판이고,
+/// 모두를 바라던 판이면 그 설치를 "다시 심는다" 고 했다. 그 저장소의 커밋된 매니페스트가 든 판을 장부에 적는다.
+#[test]
+fn skill_status_wants_the_version_of_what_is_planted_here() {
+    let s = init("skillstatusoptional");
+    let c = Claude::new("skillstatusoptional-home");
+    assert!(c.run(s.path(), &["skill", "install"], true).status.success());
+    let manifest = std::fs::read_to_string(s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json")).unwrap();
+    let version = field(&manifest.replace("\": \"", "\":\""), "version");
+    installed(&s, &c, &version);
+    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    assert_eq!(field(&json, "want_version"), version, "선택 스킬을 안 고른 저장소에 다른 판을 바란다\n{json}");
+    assert!(json.contains("\"current\":true"), "{json}");
 }
 
 /// **`status` 는 훅 파일을 그 파일이 부르는 moai 로 견준다**(리뷰 moai-u5wr.e74) — Claude 의 줄이 설치본의 훅이 부르는
@@ -24507,10 +24729,12 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     }
     assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
     let mut command = c.command(Path::new(BIN), s.path(), &["init", "argos"], true);
+    // tmux 안의 셸이다 — 화면이 `moai-tmux` 칸을 켜 두고, Enter 가 그것을 심는다(moai-3r7l.ocn).
     command
         .env("TERM", "xterm")
         .env("MOAI_LANG", "en")
         .env("MOAI_CONFIG", c.home.path().join("config.toml"))
+        .env("TMUX", "/tmp/tmux-1000/default,1,0")
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(slave);
@@ -24562,6 +24786,11 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     assert!(read(&s.path().join(".git/info/exclude")).contains("/.moai/"));
     assert!(!s.path().join("AGENTS.md").exists());
     assert!(s.path().join(".claude/moai-plugin/skills/moai/SKILL.md").is_file(), "스킬을 안 심었다\n{shown}");
+    assert!(shown.contains("moai-tmux"), "선택 스킬 칸이 안 섰다\n{shown}");
+    assert!(
+        s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(),
+        "$TMUX 가 선 화면이 moai-tmux 를 켜 두지 않았다\n{shown}"
+    );
     let plugin: serde_json::Value =
         serde_json::from_str(&read(&s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json"))).unwrap();
     assert!(plugin["hooks"]["PreToolUse"].is_array(), "훅을 안 심었다\n{shown}");
@@ -24580,6 +24809,38 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
         assert!(out.status.success(), "{}", text(&out));
         assert!(c.calls().len() > before.len(), "명시적으로 시킨 설치를 건너뛰었다\n{}", text(&out));
     }
+}
+
+/// **사람이 안 보는 `init` 은 `--with` 로 준 선택 스킬만 심는다**(moai-3r7l.ocn, 사용자 결정) — `$TMUX` 가 선 셸에서도
+/// 표식으로 심지 않고, 이미 심긴 것은 다시 심는다. `--with` 는 설치를 켜고, `--no-skill` 과는 함께 못 서고, 늘 심는
+/// 이름은 `skill install` 과 같은 한 줄로 거절한다.
+#[test]
+fn init_plants_only_the_optional_skills_it_is_given_where_nothing_is_asked() {
+    let s = Scratch::new("init-with");
+    git(s.path(), &["init", "-q", "."]);
+    let c = Claude::new("init-with-home");
+    let git_bin = git(s.path(), &["--exec-path"]);
+    std::os::unix::fs::symlink(Path::new(git_bin.trim()).join("git"), c.bin.join("git")).unwrap();
+    let tmux = s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md");
+    let run =
+        |args: &[&str]| c.command(Path::new(BIN), s.path(), args, true).env("TMUX", "/tmp/t,1,0").output().unwrap();
+
+    let out = run(&["init", "argos", "--skill", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(s.path().join(".claude/moai-plugin/skills/moai/SKILL.md").is_file(), "{}", text(&out));
+    assert!(!tmux.exists(), "사람이 안 보는 init 이 $TMUX 로 moai-tmux 를 심었다");
+
+    let out = run(&["init", "--with", "moai-tmux"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(tmux.is_file(), "--with 가 안 심었다\n{}", text(&out));
+    assert!(text(&out).contains("skill install --scope local --with moai-tmux"), "{}", text(&out));
+    let out = run(&["init", "--skill"]);
+    assert!(out.status.success() && tmux.is_file(), "다시 부른 init 이 심긴 선택 스킬을 걷었다\n{}", text(&out));
+
+    let out = run(&["init", "--with", "moai-tmux", "--no-skill"]);
+    assert!(!out.status.success(), "--with 와 --no-skill 을 함께 받았다");
+    let out = run(&["init", "--with", "moai-wiki"]);
+    assert!(!out.status.success() && text(&out).contains("늘 심는"), "{}", text(&out));
 }
 
 /// **`--tracking exclude` 는 커밋되는 파일을 하나도 안 바꾼다**(moai-zynt.own). 병합 규칙과 드라이버는 할 일이
