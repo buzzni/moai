@@ -6062,3 +6062,11 @@
 {"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.obl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.e7z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.wqr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T05:53:08Z","id":"moai-3r7l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"선택 스킬 — tmux·cmux 는 고른 사람에게만 심는다"}
+{"ts":"2026-10-10T05:53:08Z","id":"moai-3r7l.ey2","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"선택 스킬 목록과 \"지금 심겨 있는가\" 를 읽는 자리"}
+{"ts":"2026-10-10T05:53:08Z","id":"moai-3r7l.5ja","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill install --with/--without 로 선택 스킬을 심고 걷는다"}
+{"ts":"2026-10-10T05:53:08Z","id":"moai-3r7l.ocn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"init 선택 상자에 선택 스킬 칸과 --with 플래그"}
+{"ts":"2026-10-10T05:53:08Z","id":"moai-3r7l.h36","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"심긴 스킬 어긋남 알림이 선택 스킬을 어긋남으로 안 센다"}
+{"ts":"2026-10-10T05:53:08Z","id":"moai-3r7l.xr1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"skill uninstall --only 로 스킬 하나만 걷는다"}
+{"ts":"2026-10-10T05:53:08Z","id":"moai-3r7l.0wy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"선택 스킬의 위키·도움말·CHANGELOG"}
+{"ts":"2026-10-10T05:53:13Z","id":"moai-p5sz.lz0","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Plant moai-cmux as an optional skill through moai-3r7l (--with cmux), not by adding it to skill::NAMES."}
