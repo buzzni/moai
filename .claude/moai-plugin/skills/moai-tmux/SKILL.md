@@ -95,11 +95,12 @@ then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: 
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
 `─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
-person's text is not. Anything
-else — a word, a pasted block, a half-typed command — is the person's, and if you cannot tell
-the placeholder from their draft, it is theirs. **Then do not type. Tell the person which pane
-holds what, and go on as if this skill were not here.** A pane with no `❯` box at all (a shell
-prompt, a dialog) is not a box to type into either.
+person's text is not. Anything else — a word, a pasted block, a half-typed command — is the
+person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
+no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.
+
+**Then do not type. Tell the person which pane holds what, and go on as if this skill were not
+here.**
 
 ## Label the pane
 

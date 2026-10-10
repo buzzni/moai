@@ -20,12 +20,29 @@ the person can watch.
   or `killall` aimed at tmux (hook rule 4). A session that is alive is left alone
 - **Only the panes you opened.** Type only into a pane this skill opened, by the `%N` that
   `split-window` printed — every call names it, `-t <pane>`
-- **Never over the person's words.** Paste only into an empty input box (`moai-tmux`, "Is the
-  input box empty"); otherwise tell the person
+- **Never over the person's words.** Paste only into an empty input box ("Is the input box
+  empty" below); otherwise tell the person
 - **No polling.** Every look is one look; the next comes after your next step, as its own
   call — never a loop, never a `sleep`
 - **Their work stays as it is.** No commit, no checkout, no stash, no build, no `moai` write —
   what a dead session left is for that session to pick up
+
+## Is the input box empty
+
+    tmux display -p -t <pane> '#{pane_in_mode}'
+    tmux capture-pane -p -e -t <pane>
+
+The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
+then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
+Claude Code's input box is the line that starts with `❯`, under the conversation, between two
+`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
+keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
+person's text is not. Anything else — a word, a pasted block, a half-typed command — is the
+person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
+no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.
+
+**When it is not empty, do not paste.** Tell the person which pane holds what — the words in it
+are theirs.
 
 ## 1. Find the dead
 
@@ -162,7 +179,7 @@ has to see the workers when it starts.
 
 **No other flag.** The first line prints the new pane's `%N`; `exec bash` keeps a shell there
 when `claude` exits. Then, as a separate call, look once: when its `❯` box shows and is empty
-(`moai-tmux`, "Is the input box empty"), paste the block:
+("Is the input box empty" above), paste the block:
 
     tmux load-buffer -b moai-recover <file>
     tmux paste-buffer -p -d -b moai-recover -t <pane>
