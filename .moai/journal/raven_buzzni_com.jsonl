@@ -6100,3 +6100,4 @@
 {"ts":"2026-10-10T06:37:47Z","id":"moai-uqf7.wqr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-10T06:37:48Z","id":"moai-uqf7.n6b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in findings 1-8 (b9ac76be). Handed on: 9 as backlog moai-37ps, 10 as backlog moai-zduz (both outside v0.13.0: edge cases of a new skill, not regressions)."}
 {"ts":"2026-10-10T06:37:52Z","id":"moai-uqf7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: done — merged into milestone/moai-xit3 as 7e746055. Handed on: moai-37ps (resumed-then-cleared record stays a candidate), moai-zduz (quote cwd in launch lines, both skills)."}
+{"ts":"2026-10-10T06:38:05Z","id":"moai-uqf7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 7e746055"}
