@@ -5928,3 +5928,30 @@
 {"ts":"2026-10-09T23:08:23Z","id":"moai-uixs","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-jn4d 의 멤버 moai-jn4d.adc 로 펼쳤다"}
 {"ts":"2026-10-09T23:08:39Z","id":"moai-jn4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-3e (adc only; bl4d waits for moai-r170)"}
 {"ts":"2026-10-09T23:08:55Z","id":"moai-jn4d.adc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-09T23:10:45Z","id":"moai-jn4d.adc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: opus subagent is fixing gather (skip the caller worktree from siblings) and the read.rs prune path (skip marker reads) in .worktrees/moai-jn4d; then check its diff, commit, epic-end review at high, merge into milestone/moai-l92t"}
+{"ts":"2026-10-10T03:26:28Z","id":"moai-r170.f65","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: container restart killed the first subagent; partial uncommitted work in the worktree (query.rs, show.rs, tui/mod.rs) was handed back to the resumed subagent, which continues f65 then 9es"}
+{"ts":"2026-10-10T03:26:32Z","id":"moai-r170.9es","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: done by the resumed f65 subagent right after f65 (comma list with :asc/:desc)"}
+{"ts":"2026-10-10T03:26:37Z","id":"moai-r170.8dz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: after f65+9es land — [tui] order list and [tui.project.\"<path>\"] tables (see epic notes)"}
+{"ts":"2026-10-10T03:26:42Z","id":"moai-r170.x22","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: after 8dz — SPC s <Upper> append, SPC s e editor (see epic notes)"}
+{"ts":"2026-10-10T03:26:46Z","id":"moai-r170.zp6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: no code; close with the other members after the epic merge (finding is in the note above)"}
+{"ts":"2026-10-10T03:34:02Z","id":"moai-jn4d.x92","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — gather 가 제 워크트리를 옆으로 세지 않는다 (adc)"}
+{"ts":"2026-10-10T03:34:05Z","id":"moai-jn4d.adc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T03:34:05Z","id":"moai-jn4d.x92","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T03:34:14Z","id":"moai-jn4d.adc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: fix committed eee2a232 + changelog cb2158c7 on worktree-moai-jn4d; review moai-jn4d.x92 (high) running in background. After it: take fixes in, merge into milestone/moai-l92t, close adc and x92, report to supervisor moa-issue-2f. Root target/ was wiped by the restart — rebuild before relying on ./target/release/moai."}
+{"ts":"2026-10-10T03:34:24Z","id":"moai-jn4d.x92","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review high --fix is running in the background on e5f128de..HEAD of worktree-moai-jn4d; when it returns, save its text here, commit its fixes as fix:, close with -m"}
+{"ts":"2026-10-10T03:39:17Z","id":"moai-r170.8dz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: f65+9es committed (02eb6ed0, bd037afd); a subagent now does 8dz then x22 on the branch"}
+{"ts":"2026-10-10T03:43:01Z","id":"moai-xit3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.13.0"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tmux 사용자용 스킬 — 감독이 tmux 를 쓴다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i.xo8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"세션 기록의 tmux 필드로 일꾼 이름과 pane 을 잇는다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i.lhb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-tmux 스킬을 심는다 (Claude 전용, $TMUX 일 때 감독이 읽는다)"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i.ijq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"pane 화면으로 멈춘 일꾼을 찾아 사람에게 알린다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i.50e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"배정 전 idle 일꾼 pane 에 /clear 를 되살린다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i.2pg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"pane 제목에 일꾼 이름과 이슈 id 를 단다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i.74b","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SendMessage 가 안 닿으면 send-keys 로 보낸다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-u99i.inx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쉬는 일꾼이 없으면 물은 뒤 pane 을 나눠 일꾼을 띄운다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-uqf7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"recovery 스킬 — 끊긴 세션을 되살려 이어 가게 한다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-uqf7.k8w","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"죽은 세션을 찾아 직전 상태를 그린다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-uqf7.9nw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-recover 스킬을 심는다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-uqf7.obl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tmux 면 pane 을 나눠 claude --resume 하고 상황을 알린다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-uqf7.wqr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tmux 가 아니면 세션마다 되살릴 명령과 붙여 넣을 글을 낸다"}
+{"ts":"2026-10-10T03:43:25Z","id":"moai-uqf7.e7z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"죽은 백그라운드 서브에이전트와 끊긴 링크를 짚는다"}
