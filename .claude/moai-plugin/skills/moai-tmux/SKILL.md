@@ -36,12 +36,13 @@ they have lives on it, and every pane you touch is one they are looking at.
 `ListAgents` names a session; tmux needs a pane. Claude Code keeps one record per process
 under `~/.claude/sessions/`, and the lines below print one row per record, tab-separated:
 
-    state  name  pane  status  cwd  sessionId
+    state  name  pane  status  cwd  sessionId  saycode
 
 ```sh
 python3 - <<'PY'
 import glob, json, os
 mine = os.environ.get("TMUX", "").split(",")[0]
+rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -55,19 +56,24 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
     except (OSError, ValueError, IndexError):
         alive = False
-    tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and pane and mine:
+    env = {}
+    if alive:
         try:
             with open(f"/proc/{pid}/environ", "rb") as f:
                 env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
         except OSError:
-            theirs = ""
-        if theirs != mine:
-            pane = ""
-    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
-    print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
+            pass
+    tmux = r.get("tmux") or ""
+    pane = tmux.rpartition(".")[2] if "%" in tmux and r.get("entrypoint") != "remote_mobile" else ""
+    if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
+        pane = ""
+    saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
+    rows.append([alive, r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode])
+panes = [row[2] for row in rows if row[0] and row[2]]
+for row in rows:
+    if row[0] and row[2] and panes.count(row[2]) > 1:
+        row[2] = ""
+    print("\t".join(["alive" if row[0] else "dead"] + [str(c or "-") for c in row[1:]]))
 PY
 ```
 
@@ -77,11 +83,19 @@ PY
   is not in tmux or runs on another tmux server than yours (pane ids are counted per server,
   so another server's `%4` is a different pane here), and then this skill has nothing for
   that worker
+- **A session Saycode's daemon started has no pane** — it prints `-`. Its record carries the
+  pane the daemon was started from, and typing there would type into that pane, not the
+  worker's. **A pane two alive rows name belongs to neither** either — both print `-`, so
+  leave both alone
+- **A row whose `saycode` is not `-` is a Saycode session.** Inside Saycode (`moai-saycode`) it
+  is driven through Saycode, not its pane — you type nothing into it, and only label it
 - `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
-- Your own row is the one whose pane is `$TMUX_PANE`
+- Your own row is the one whose pane is `$TMUX_PANE`; a row of yours that prints `-` has no
+  pane this skill can use. Inside a session Saycode's daemon started, `$TMUX_PANE` is the
+  daemon's pane, handed down — not yours
 
 Run it when a step below needs a pane, once.
 

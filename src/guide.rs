@@ -1203,7 +1203,8 @@ launches or drives a session. When the supervisor runs inside tmux, its companio
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says
 yes. That skill is planted only where it is chosen: `moai skill install --with moai-tmux`
-plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+plants it and `--without` takes it out. Inside a Saycode session, `moai-saycode` does the
+same through Saycode's `happy agent` and comes first; it is chosen the same way. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki
@@ -1772,6 +1773,10 @@ Decided in: <epic>
 /// 무엇이든 있으면 치지 않고 사람에게 말한다 — 그 하나로 둔다. **바이너리는 여전히 아무것도 띄우거나 몰지 않고**,
 /// 헤드리스·`-p`·`--dangerously-*`·권한 모드 바꾸기도 없다. 연 칸은 사람이 보고 칠 수 있는 보통의 대화형 `claude` 다.
 ///
+/// **Saycode 안의 감독은 `happy agent` 로 같은 다섯 자리를 한다**(2026-10-10 사용자 결정, moai-l244) — [`saycode`] 스킬이다.
+/// tmux 와 함께 서면 Saycode 가 먼저고, tmux 는 Saycode 가 안 대는 일꾼과 칸 이름표에만 쓴다. tmux 와 같은 까닭으로 감독
+/// 글에는 `happy agent` 줄을 하나도 안 싣는다 — 명령은 스킬에만 선다.
+///
 /// **backlog 를 일감으로 바꾸는 길은 `promote` 하나다** (사용자 결정). `moai edit` 에 `--type` 이 없어 제자리에서 못
 /// 바꾸는데, 첫 실행의 일꾼은 `add` 로 새 줄을 세우고 backlog 를 손으로 닫았다. 길이 둘이면 일꾼마다 다르게 고르고,
 /// `add` 는 집은 것이 있는 세션에서 규칙 1 에 걸린다. `promote` 는 backlog 를 저절로 닫고 출처를 저널에 남긴다.
@@ -1813,9 +1818,10 @@ workers talk with Claude Code's own tools:
 - A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
 
 **Every session here is an interactive one the person can see.** The moai binary never
-launches or drives an agent, and nothing here runs headless. Outside tmux the supervisor
-launches nothing either; inside tmux it may open a worker pane, only after the person says
-yes (`moai-tmux`, below). **A worker is every idle session of this
+launches or drives an agent, and nothing here runs headless. Outside tmux and Saycode the
+supervisor launches nothing either; inside them it may open a worker pane or session, only
+after the person says yes (`moai-tmux` and `moai-saycode`, below).
+**A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
@@ -1851,6 +1857,15 @@ step below goes through messages and the person, as written. `moai-tmux` is an o
 it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
 init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
 outside tmux.
+
+**Inside Saycode, load `moai-saycode` too — it comes first.** When `SAYCODE_AGENT_ENV` is `1`
+in your shell and Saycode's `whoami` answers ok, the skill `moai-saycode` drives every worker
+Saycode lists at the same five points, through Saycode instead of a pane: it opens new worker
+sessions (2), sends the work as a prompt and is told when the turn ends (3), reads a stalled
+worker's state (4), and clears a reported worker (5). A Saycode session often runs inside tmux
+as well; then `moai-tmux` is only for a worker Saycode does not list, and for the pane labels
+(the person's decision). `moai-saycode` is optional the same way (`moai skill install --with
+moai-saycode`); inside Saycode without it, tell the person that one line plants it.
 
 **When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
 and the person asks to bring them back, load `moai-recover`, inside tmux or not.
@@ -2043,8 +2058,10 @@ worker, and the message is the whole assignment.
   sent to is gone from `ListAgents` with its report unchecked, a name you have not sent to
   may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
-  session of another repository. Inside tmux, ask the person first whether to open new worker
-  panes (`moai-tmux`, "No idle worker left"); on a no, stop
+  session of another repository. Inside Saycode, ask the person first whether to open new
+  worker sessions (`moai-saycode`, "No idle worker left"); on a no, stop. Otherwise, inside
+  tmux, ask the person first whether to open new worker panes
+  (`moai-tmux`, "No idle worker left"); on a no, stop
 - **A worker that refused the work comes out of the candidates and is not sent to
   again.** Some sessions take work only from their own person
 - **A test agent is no worker.** One raised for a test is opened outside the repository (a
@@ -2109,6 +2126,8 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
+Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
+`moai-saycode`, "Send work".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -2149,7 +2168,8 @@ worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you. Inside tmux, an
 idle notice with no report is the moment to read that worker's pane once (`moai-tmux`, "When a
-worker stalls") and tell the person what it shows.
+worker stalls") and tell the person what it shows. Inside Saycode, that moment is the wait
+ending with no report — `moai-saycode`, "Take the report" and "When a worker stalls".
 
 **A report reaches only the name it was sent to.** A supervisor that started again —
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
@@ -2220,6 +2240,8 @@ not — a clear does not show from here, so ask the person — or send to anothe
 is written, only while `ListAgents` and its session record read `idle`, and only when its input
 box is empty (`moai-tmux`, "Clear a worker's window"). If any of these fails, do as the
 paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`).
+Inside Saycode, a worker Saycode lists is cleared through it, on the same report check
+(`moai-saycode`, "Clear a worker").
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.
@@ -2264,11 +2286,27 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// `/proc/<pid>/environ` 의 `TMUX` 소켓이 부르는 쪽의 소켓과 같을 때만 칸을 내고 아니면 `-` 다. 죽은 줄과 `$TMUX` 없이
 /// 부른 판은 기록의 칸을 그대로 낸다. 죽은 줄의 칸은 아무도 겨누지 않는다 — 되살리기(moai-uqf7)는 제가 연 칸에만 친다.
 ///
+/// **두 산 줄이 대는 칸은 어느 쪽 것도 아니다 — 둘 다 `-` 다**(moai-l244). Saycode 가 띄운 세션의 기록은 `tmux` 에
+/// 띄운 쪽의 칸을 든다 — 데몬이 제 `TMUX_PANE` 을 물려줘서, 2026-10-10 에 띄운 일꾼의 기록이 감독 제 칸 `%8` 을 댔다.
+/// 그 칸을 믿으면 일꾼에게 보낼 `/clear` 를 감독 제 칸에 친다. 어느 줄이 참 임자인지 기록으로는 못 가르니 둘 다 버린다.
+/// 죽은 줄은 세지 않는다 — 아무도 겨누지 않는다.
+///
+/// **데몬이 띄운 세션은 칸이 없다 — 기록의 `entrypoint` 가 `remote_mobile` 이면 늘 `-` 다**(리뷰 moai-l244). 위의 둘째 짝
+/// 규칙은 그 칸을 대는 산 줄이 둘일 때만 잡는다. 데몬을 띄운 칸에 Claude Code 가 없으면(2026-10-10 리뷰 때 `%8` 에는
+/// bash 가 돌았다) 데몬이 띄운 세션 하나만 그 칸을 대어 그대로 나갔다 — 그 세션의 표준 입력은 소켓이고 칸에 없다.
+/// happy 는 데몬으로 띄운 claude 의 `CLAUDE_CODE_ENTRYPOINT` 를 `remote_mobile` 로 세우고, 터미널에서 띄운 세션은 `cli`
+/// 다. 둘째 짝 규칙은 남긴다 — 제 `TMUX_PANE` 을 물려주는 다른 감싸개는 그 표가 없다.
+///
+/// **일곱째 칸 `saycode` 는 그 프로세스 환경의 `APLUS_SESSION_ID` 다**(moai-l244) — Saycode 가 띄운 세션이면 그
+/// 세션의 Saycode id, 아니면 `-`. `ListAgents` 의 이름과 `happy agent` 의 id 를 잇는 다리가 이것이고, 둘째 짝을 안
+/// 적으려고 이 상수에 붙였다. 죽은 줄은 환경을 못 읽어 늘 `-` 다.
+///
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
-/// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
+/// `state  name  pane  status  cwd  sessionId  saycode`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
 pub const SESSIONS: &str = r#"python3 - <<'PY'
 import glob, json, os
 mine = os.environ.get("TMUX", "").split(",")[0]
+rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -2282,19 +2320,24 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
     except (OSError, ValueError, IndexError):
         alive = False
-    tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and pane and mine:
+    env = {}
+    if alive:
         try:
             with open(f"/proc/{pid}/environ", "rb") as f:
                 env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
         except OSError:
-            theirs = ""
-        if theirs != mine:
-            pane = ""
-    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
-    print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
+            pass
+    tmux = r.get("tmux") or ""
+    pane = tmux.rpartition(".")[2] if "%" in tmux and r.get("entrypoint") != "remote_mobile" else ""
+    if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
+        pane = ""
+    saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
+    rows.append([alive, r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode])
+panes = [row[2] for row in rows if row[0] and row[2]]
+for row in rows:
+    if row[0] and row[2] and panes.count(row[2]) > 1:
+        row[2] = ""
+    print("\t".join(["alive" if row[0] else "dead"] + [str(c or "-") for c in row[1:]]))
 PY"#;
 
 /// **빈 입력 칸의 잣대는 이 글 하나다.** `moai-tmux` 와 `moai-recover` 가 `format!` 으로 같은 글을 싣는다 —
@@ -2372,7 +2415,7 @@ they have lives on it, and every pane you touch is one they are looking at.
 `ListAgents` names a session; tmux needs a pane. Claude Code keeps one record per process
 under `~/.claude/sessions/`, and the lines below print one row per record, tab-separated:
 
-    state  name  pane  status  cwd  sessionId
+    state  name  pane  status  cwd  sessionId  saycode
 
 ```sh
 {SESSIONS}
@@ -2384,11 +2427,19 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
   is not in tmux or runs on another tmux server than yours (pane ids are counted per server,
   so another server's `%4` is a different pane here), and then this skill has nothing for
   that worker
+- **A session Saycode's daemon started has no pane** — it prints `-`. Its record carries the
+  pane the daemon was started from, and typing there would type into that pane, not the
+  worker's. **A pane two alive rows name belongs to neither** either — both print `-`, so
+  leave both alone
+- **A row whose `saycode` is not `-` is a Saycode session.** Inside Saycode (`moai-saycode`) it
+  is driven through Saycode, not its pane — you type nothing into it, and only label it
 - `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
-- Your own row is the one whose pane is `$TMUX_PANE`
+- Your own row is the one whose pane is `$TMUX_PANE`; a row of yours that prints `-` has no
+  pane this skill can use. Inside a session Saycode's daemon started, `$TMUX_PANE` is the
+  daemon's pane, handed down — not yours
 
 Run it when a step below needs a pane, once.
 
@@ -2506,6 +2557,253 @@ stands in the new pane (trusting the folder, say), tell the person — it is the
     )
 }
 
+/// 선택 스킬 `moai-saycode` 의 SKILL.md — Saycode 세션 안에서 도는 감독의 손이다(2026-10-10 사용자 결정, moai-l244).
+/// 고른 사람에게만 심는다(`skill::OPTIONAL`, moai-3r7l). [`tmux`] 의 짝이고, 꼴도 그것을 따랐다.
+///
+/// **사람의 결정 넷이 글의 뼈다.** Saycode 와 tmux 가 함께 서면(Saycode 세션도 tmux 안에서 돌아 `$TMUX` 가 선다)
+/// Saycode 가 먼저고, tmux 는 Saycode 가 안 대는 일꾼과 Saycode 가 못 하는 것(칸 이름표)에만 쓴다. `happy agent spawn`
+/// 으로 일꾼을 여는 것은 사람에게 물은 뒤다 — tmux 의 `split-window` 와 같다. 에이전트·모델·노력은 사람의 것이라
+/// `whoami` 의 `spawnModelOptions` 와 견줄 뿐 빠진 값을 지어내지 않는다. 연 일꾼은 권한 묻기를 건너뛰고 돈다
+/// (`--dangerously-skip-permissions`, spawn 이 권한 모드를 안 보낸다) — 사람이 허락했고, 물을 때마다 그렇다고 말한다.
+///
+/// **글의 사실은 2026-10-10 에 이 컨테이너에서 잰 것이다**(moai-l244.xw9 노트). `prompt --wait` 는 메시지가 닿고도
+/// `prompt_stalled` 로 실패해서 쓰지 않는다. `wait --until turn-end` 는 저보다 뒤에 끝난 턴만 세어, 보내기 **전에**
+/// 백그라운드로 띄운다. 도는 턴 뒤에 보낸 prompt 는 둘째 턴으로 줄을 선다. `prompt <id> /clear` 는 맥락을 비우고 claude
+/// 프로세스를 다시 띄워 `ListAgents` 의 이름이 바뀐다 — Saycode id 는 그대로라 그것이 열쇠다. `spawn` 의 worktree 는
+/// `.aplus/worktrees/<무작위>` 에 서서 `.worktrees/moai-<id>` 와 안 맞아 안 쓴다.
+///
+/// **spawn 의 `--model` 은 별칭을 안 받는다**(리뷰 moai-l244) — `validateExplicitSelection` 이 `spawnModelOptions` 의
+/// id(`claude-opus-5-5`)만 알아, 2-1 의 `opus` 를 그대로 주면 `invalid_spawn_options` 다. tmux 의 `claude --model opus`
+/// 와 달리 그 낱말이 든 첫 id 로 옮긴다. 기다림의 `--timeout 3600000` 은 Bash 의 백그라운드 기본 상한(30분)보다 길어
+/// 그 호출에 `timeout` 을 함께 준다.
+///
+/// **이름과 Saycode id 를 잇는 다리는 [`SESSIONS`] 의 `saycode` 칸이다** — 둘째 짝을 안 적는다.
+///
+/// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
+pub fn saycode() -> String {
+    format!(
+        r#"---
+name: moai-saycode
+description: Use in Claude Code together with moai-supervise when the supervisor runs inside a Saycode session (SAYCODE_AGENT_ENV is set) — to list the workers' Saycode sessions and their state, send a worker its work and be told when its turn ends, read what it said, clear a reported worker, find a worker stalled on a question or a permission, and open new worker sessions once the person says yes. Triggers on "saycode", "worker session", "open a worker", "일꾼 세션", "일꾼 열어", "세이코드".
+---
+
+# moai-saycode — the supervisor's hands on the workers' Saycode sessions
+
+This is the supervisor's (`moai-supervise`) companion **when it runs inside a Saycode
+session** — `SAYCODE_AGENT_ENV` is `1` in its shell. Saycode runs each session under its
+daemon and lets a session see and drive the others in the same scope directory. The binary
+on `PATH` is `happy` (its help calls itself `saycode`). Every `happy agent` verb prints one
+JSON line on stdout; on failure it exits 3 with `{{"ok":false,"error":…}}`.
+
+Once, before the round:
+
+    happy agent whoami
+
+If it does not answer `"ok":true`, this skill has nothing here — go on as if it were not
+loaded. Its `sessionId` is your own Saycode id, and `spawnsRemaining` and
+`spawnModelOptions` are for "No idle worker left".
+
+**Saycode first, tmux second** (the person's decision). A Saycode session often runs inside
+tmux too, so `$TMUX` stands as well. A worker that `happy agent ls --status` lists is driven
+through this skill. `moai-tmux`, where it is planted, is for a worker Saycode does not list,
+and for what Saycode cannot do — the pane labels.
+
+## What never happens
+
+- **No headless run.** A worker is an interactive session the person can open in Saycode.
+  Never `claude -p`, never `--permission-mode`. The moai binary launches and drives nothing;
+  this skill is you typing `happy agent` verbs the person can see in your conversation
+- **Never `steer` or `stop` a worker** unless the person asks for it. A response that runs is
+  theirs to stop
+- **Only a worker of this repository.** Never a session whose `directory` lies outside it, and
+  never your own
+- **Never a second turn behind a running one.** Do not `prompt` a session whose `state` is
+  `responding` or `waiting-input` — the prompt queues as its next turn and runs after what
+  runs now, after the person's answer if it waits on one
+- **Never in their place.** A pending question, plan approval or permission request is the
+  person's to answer — you read it and tell them
+- **Never `prompt --wait`.** It fails with `prompt_stalled` after five seconds though the
+  message arrived, and a second send runs it twice
+- **No polling.** Every look below is one look. What you wait for, a background
+  `happy agent wait` tells you — never a loop and never a `sleep`
+- **A new session only after the person's yes** ("No idle worker left")
+
+## Which session is which worker
+
+    happy agent ls --status
+
+It answers `{{"sessions":[…],"ok":true}}`, one object per session in Saycode's scope: `id`,
+`directory`, `summary`, `state` (`idle`, `responding`, `waiting-input` or `ended`),
+`pending` (`askUserQuestion`, `exitPlanMode`, and `permissionRequests` — a count),
+`lastAgentText`, `turnEndedAt` and `lastSeq`.
+
+- A worker's row is one whose `directory` is the root or one of the worktrees
+  `git worktree list` names. Any other directory is not this repository's
+- Skip your own (`whoami`'s `sessionId`) and every `ended` row. An ended session is dead —
+  bringing it back is `moai-recover`, once the person asks
+- **The Saycode id is the key.** `/clear` restarts a worker's process under the same Saycode
+  session: its `ListAgents` name changes, its Saycode id does not. Keep your book of what
+  you sent by Saycode id
+- `lastSeq` is the cursor of its messages ("Take the report")
+
+The supervisor's 2 picks workers from `ListAgents`, and a worker reports with `SendMessage`,
+so one worker stands in both lists. Claude Code keeps one record per process under
+`~/.claude/sessions/`, and the lines below pair them — `saycode` is the Saycode id read from
+that process's environment (`APLUS_SESSION_ID`), tab-separated:
+
+    state  name  pane  status  cwd  sessionId  saycode
+
+```sh
+{SESSIONS}
+```
+
+- Read only `alive` rows. `name` is the `ListAgents` name and `saycode` the Saycode id, `-`
+  when that process is not a Saycode session
+- A `ListAgents` row and a Saycode row the map pairs are **one worker** — count it once
+- A worker `ListAgents` shows whose `saycode` is `-` is not a Saycode session: it goes
+  through `moai-tmux` where that stands, otherwise through messages and the person, as the
+  supervisor's steps say
+- A Saycode row the map pairs with nothing is not Claude Code — a `codex` or `gemini` worker
+  the person asked for. It cannot `SendMessage`; its report is its last turn ("Take the
+  report"). **It is still a worker:** `ListAgents` never shows it, so the supervisor's 2 counts
+  it from this list — a candidate while it reads `idle` and the report of the work you last
+  sent it is checked. Its `Sent:` note names it `saycode <id>`, with no name
+- **Never trust `pane` for a Saycode row.** Saycode's daemon hands its own pane down to the
+  sessions it starts, so the record names a pane that is not theirs — the map prints `-` for
+  a session the daemon started, and for a pane two alive rows name
+
+Run each of these when a step below needs it, once.
+
+## Send work
+
+The supervisor's 3, for a worker Saycode lists. Send only to a row that reads `state: idle`
+with `askUserQuestion` and `exitPlanMode` false and `permissionRequests` 0.
+
+1. Write the message of the supervisor's 3 to a file in your scratchpad, with one line at
+   the end naming you — a prompt carries no sender, and the worker reports to the message's
+   `from`. The first line stays the message's own, which names the work and the step to
+   start from: `from: <your ListAgents name>`
+2. Note the worker's `lastSeq` from `ls --status`
+3. Start the wait **in the background** (Bash `run_in_background`), before you send:
+
+       happy agent wait <id> --until turn-end --timeout 3600000
+
+   `wait` counts only a turn that ends after it started. Started after the prompt, it can miss
+   a short turn and block until its timeout. Give that Bash call a `timeout` above the wait's
+   own, `3660000` — Bash stops a background command after 30 minutes unless told otherwise,
+   and a stopped wait is neither of the two endings below
+4. Send it, without `--wait`:
+
+       happy agent prompt <id> "$(cat <file>)"
+
+   It answers `"ok":true` with `delivered: true` once Saycode took it. On `"ok":false` it did
+   not go — do not send it again blind; tell the person
+
+The `Sent:` note of the supervisor's 3 names the worker as `<name> (saycode <id>)`, so a
+supervisor that starts again finds it after a `/clear` renamed it. Leave `notify_when_idle`
+out: the background wait ending is the notice that the turn ended. It ends `satisfied` when
+the turn ended, or `wait_timeout` after an hour — then look once with `ls --status`, and start
+another wait only while the row still reads `responding`.
+
+## Take the report
+
+The report still comes by `SendMessage`, `report: <epic>` at its head, as the supervisor's 4
+says. When the wait ended and no report came, read what the worker said, once:
+
+    happy agent read <id> --since <the lastSeq you noted>
+
+It holds the worker's messages only — not your prompt, and a step that only ran tools has
+empty text. A worker that asked its person something is in "When a worker stalls". A worker
+that is not Claude Code cannot `SendMessage`: its report is this last turn — check it as the
+supervisor's 5 says.
+
+## Clear a worker
+
+Before you send a worker its next work, you may clear it yourself — all of these first:
+
+1. **Its report is checked** — the supervisor's 5 held all three checks and the
+   `Report-checked:` note is written
+2. **Its row reads `idle`** in `ls --status`, with `askUserQuestion` and `exitPlanMode` false
+   and `permissionRequests` 0
+3. **The person is not talking to it.** You cannot see the box where they type in Saycode —
+   if they said they are working with that worker, do not clear it
+
+Then:
+
+    happy agent prompt <id> /clear
+
+and, as a separate call, look once with `ls --status`: it should read `idle`. Until it does,
+send it nothing — look again after your next step. The context is gone
+and its process started again, so its `ListAgents` name has changed — run `ListAgents` and
+the map again before anything goes to it by name. Its Saycode id is the same, and "Send work"
+needs no name. **If any condition fails, do not clear it** — do what the supervisor's 5 says:
+ask the person, or send to another idle worker.
+
+## When a worker stalls
+
+When the wait ends with no report, or the person asks about a worker, look at its row in
+`ls --status` once:
+
+- **`waiting-input`** — `askUserQuestion` or `exitPlanMode` is true, or `permissionRequests`
+  is above 0: the worker waits on its person. Read the question once — `lastAgentText`, or
+
+      happy agent read <id> --last 3
+
+  and **tell the person** which session (its id and `summary`) waits for what. Do not answer it
+  and do not prompt that session
+- **`ended`** while your work was out — the session died. Bringing it back is
+  `moai-recover`, once the person asks
+- **`responding`** far longer than the work should take — read its last messages once,
+  `happy agent read <id> --last 5`, and tell the person what they show
+
+To be told when a worker starts waiting, without polling, start in the background, with the
+same Bash `timeout` as in "Send work":
+
+    happy agent wait <id> --until waiting-input --timeout 3600000
+
+## No idle worker left
+
+When the supervisor's 2 finds no worker, ask the person **once** whether to open new worker
+sessions, and how many — one question covers several. Open one only on their yes, or when
+they asked you for it. The question says, for each session:
+
+- it opens as a Saycode session in the root and shows in Saycode's session list — not under
+  this conversation
+- **it runs with permission prompts bypassed.** Saycode starts it with
+  `--dangerously-skip-permissions`, and spawn sends no permission mode. The person allowed
+  that on 2026-10-10; say it every time anyway
+- it uses one of your spawn budget — `whoami`'s `spawnsRemaining`, failed attempts included
+
+**Agent, model and effort are the person's.** They may name a worker that is not Claude Code
+(`codex`, `gemini`). Take exactly what they name, check it against `whoami`'s
+`spawnModelOptions` (each `agent` with its `models`, each model with the `efforts` it takes),
+and never fill in a value they left out — leave that flag off. When they name nothing, it is
+`claude` with the model picked in the supervisor's 2-1. Spawn takes no alias — `--model opus`
+fails as an unknown model — so `<model>` is the first id under `claude` in `spawnModelOptions`
+that carries that word (`claude-opus-…` for `opus`); when none does, leave `--model` off.
+
+On a yes, for each session:
+
+    happy agent spawn --prompt "$(cat <file>)" --agent <agent> --model <model> --effort <effort>
+
+`<file>` is the message of "Send work" with its `from:` line — the first prompt **is** the
+assignment. Drop `--effort` when no effort was named. **No other flag.** Saycode's own
+worktree lands in `.aplus/worktrees/<random name>`, not where the worker's steps put it; without
+one the session starts in the root and makes its worktree itself. Right after it answers with
+the new session's `sessionId`, start the background wait of "Send work" on it — its first turn ends on
+its own.
+
+- `invalid_spawn_options` — ask the person again. Never fall back to another agent or model
+- `spawn_limit_exceeded` — the budget is spent; tell the person, with `whoami`'s
+  `budgetResetsAt`
+- `spawn_depth_exceeded` — this session cannot open sessions; tell the person
+
+A new Claude Code worker shows in `ListAgents` too, and the map pairs it. A worker that is not
+Claude Code reports through its last turn ("Take the report").
+"#
+    )
+}
+
 /// 넷째 늘 심는 스킬 `moai-recover` 의 SKILL.md — 죽은 세션을 되살려 이어 가게 한다(2026-10-10 사용자 결정, moai-uqf7).
 ///
 /// **2026-10-10 에 실제로 걸은 길을 글로 옮긴 것이다.** 컨테이너가 다시 서며 감독(루트)과 일꾼 둘(워크트리)이 한꺼번에
@@ -2527,6 +2825,18 @@ stands in the new pane (trusting the folder, say), tell the person — it is the
 /// 같다: 헤드리스·`--dangerously-*`·권한 모드가 없고, 아무것도 죽이지 않고, 한 번에 한 번 보고, 빈 입력 칸에만
 /// 붙인다. tmux 밖이면 아무것도 안 띄우고 칠 줄과 붙일 글만 낸다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
 /// `ListAgents` 가 일꾼을 보고 시작해야 한다.
+///
+/// **Saycode 가 돌린 세션은 칸에서 되살리지 않는다**(moai-l244.nj6). `claude --resume` 으로 칸에 띄우면 대화는
+/// Saycode 밖에서 돌고 Saycode 세션은 `ended` 로 남는다. `happy agent` 에는 끝난 세션을 되살리는 낱말이 없고,
+/// `happy resume <id>` 는 저장된 자리에서 `claude --resume` 을 **앞에서** 돌려 부른 셸을 쥔다 — 그래서 스킬은 그 줄을
+/// 치지 않고 사람에게 낸다(tmux 밖의 길과 같다). 짝은 `ls --status` 의 `lastAgentText` 와 대화 기록의 마지막 말로
+/// 맞춘다 — 죽은 프로세스의 환경은 못 읽어 [`SESSIONS`] 의 `saycode` 칸이 비기 때문이다. 같은 Saycode id 로
+/// 돌아오는지는 재 보지 못했다.
+///
+/// **Saycode 세션인지는 짝이 아니라 대화 기록이 가른다**(리뷰 moai-l244) — 줄마다 `entrypoint` 가 서고, happy 의 데몬이
+/// 띄운 세션은 `remote_mobile`, 터미널에서 띄운 세션은 `cli` 다. `lastAgentText` 는 도는 턴 동안 비어(2026-10-10 에
+/// `responding` 줄이 `null` 이었다) 턴 가운데 죽은 일꾼 — OOM 의 흔한 꼴 — 은 짝이 안 지어지고, Saycode 밖에서 부른
+/// 되살리기는 `ls` 를 못 부른다. 짝으로만 가르던 판은 그 둘을 칸에서 `claude --resume` 으로 되살렸다.
 pub fn recover() -> String {
     format!(
         r#"---
@@ -2570,7 +2880,7 @@ are theirs.
 Claude Code keeps one record per process under `~/.claude/sessions/`, and a process that dies
 leaves its record behind. The lines below print one row per record, tab-separated:
 
-    state  name  pane  status  cwd  sessionId
+    state  name  pane  status  cwd  sessionId  saycode
 
 ```sh
 {SESSIONS}
@@ -2589,6 +2899,26 @@ leaves its record behind. The lines below print one row per record, tab-separate
   and bring it back only if they say so
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
+
+**A Saycode session** comes back through Saycode (7), never in a pane — resumed in a pane, its
+conversation would run outside Saycode while the Saycode session stays ended. Its transcript
+(below) says which candidate is one: its lines carry `"entrypoint":"remote_mobile"`, where a
+session opened in a terminal carries `"cli"`. That holds outside Saycode too, and for a
+session that died in the middle of a turn.
+
+Its Saycode id comes from Saycode. **Inside Saycode** — `SAYCODE_AGENT_ENV` is `1` in your
+shell and `happy agent whoami` answers `"ok":true` — a session Saycode ran leaves a row behind:
+
+    happy agent ls --status
+
+A row whose `state` is `ended` and whose `directory` is the root or one of the worktrees is a
+Saycode session that died. Pair it with a Saycode candidate by what it last said: its
+`lastAgentText` is the start of the last assistant text in that candidate's transcript (2).
+It is empty for a session that died in the middle of a turn — pair that one by its `summary`
+against what the transcript was doing, and ask the person when two rows could match. Name an
+ended row that pairs with no candidate to the person apart, with its `summary`. A Saycode
+candidate left without an id — outside Saycode, or paired with no row — is still never
+resumed in a pane: the person reopens it from Saycode's session list (7).
 
 **A session's transcript** is `~/.claude/projects/<slug>/<sessionId>.jsonl`, one JSON object
 per line. The slug is a directory with every character that is not a letter or a digit
@@ -2620,7 +2950,7 @@ line — and look at where it stood:
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
-waiting for, died at, uncommitted files. Then go on — they asked for recovery already.
+waiting for, died at, uncommitted files — and the Saycode id of a Saycode session. Then go on — they asked for recovery already.
 
 ## 3. Point out what died with it
 
@@ -2659,12 +2989,16 @@ Leave out a line that does not hold. The supervisor's block adds one line: **the
 back in new sessions and their names may have changed — run `ListAgents` again** before you
 send or wait for a report.
 
-**Workers first, the supervisor last**, in both ways below — the supervisor's `ListAgents`
-has to see the workers when it starts.
+**Workers first, the supervisor last**, in every way below — the supervisor's `ListAgents`
+has to see the workers when it starts. A Saycode session is back only once the person
+reopens it (7), so when a worker is one, give the person its line first and open the
+supervisor's pane — or print its line — only after they say that worker is back.
 
 ## 5. Inside tmux — open a pane each
 
-`$TMUX` is set in your shell. For each session, in that order:
+`$TMUX` is set in your shell. For each session that is not a Saycode session (7), in that
+order. The panes open in the window of `$TMUX_PANE` — inside a session Saycode's daemon
+started, that is the daemon's pane, not yours — so say which window they are in:
 
     tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
     tmux select-layout -t "$TMUX_PANE" tiled
@@ -2687,6 +3021,23 @@ person which pane is which session.
 types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd <cwd> && claude --resume <sessionId>
+
+A Saycode session gets the line of 7 instead.
+
+## 7. Saycode sessions — say how to reopen them
+
+No `happy agent` verb brings an ended session back, and you open none in its place — a new
+session from `spawn` is not the one that died. The person reopens each, in the same order as
+above: in Saycode's session list, or in a terminal of their own:
+
+    happy resume <saycode id>
+
+It resumes the conversation in the path Saycode saved, **in the foreground of the terminal
+that runs it** — so never run it yourself; print it, and under it the block of 4 to paste once
+its box shows. A session with no Saycode id (1) has only the session list: name it by its
+`cwd`, its `sessionId` and what it was doing. Whether it comes back under the same Saycode id
+is not verified: add to the supervisor's block that it reads `happy agent ls --status` again
+before it sends.
 "#
     )
 }
@@ -2801,7 +3152,8 @@ The message's first line names the work and the step of this file to start from 
 `from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
 behind, `from step 2` for an epic already unfolded whose first-column members are left.
 The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`.
-A message the supervisor pasted into this window (`moai-tmux`) carries no `from`; its last line,
+A message the supervisor pasted into this window (`moai-tmux`) or sent as a Saycode prompt
+(`moai-saycode`) carries no `from`; its last line,
 `from: <name>`, names the supervisor instead. Every
 other line fills a slot the steps use; a line the supervisor adds beyond those — who already
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.
@@ -3397,6 +3749,7 @@ mod tests {
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
             ("tmux 스킬", tmux()),
+            ("Saycode 스킬", saycode()),
             ("일꾼 글", worker()),
         ] {
             for gone in ["examples/bash-agent", "examples/python-agents", "runs without a person"] {
@@ -3437,6 +3790,7 @@ mod tests {
             ("규칙 셋", rules()),
             ("감독 스킬", supervise()),
             ("tmux 스킬", tmux()),
+            ("Saycode 스킬", saycode()),
             ("일꾼 글", worker()),
         ] {
             for spawn in spawns {
@@ -3656,6 +4010,8 @@ mod tests {
             ("moai-wiki", head(&wiki()), ["위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리"].as_slice()),
             // tmux 스킬(moai-u99i)은 감독이 `$TMUX` 안에서 부른다 — 사람이 칸을 이름으로 부를 때도 서야 한다.
             ("moai-tmux", head(&tmux()), ["일꾼 칸", "일꾼 창 열어", "칸 비워"].as_slice()),
+            // Saycode 스킬(moai-l244)도 감독이 Saycode 안에서 부르고, 사람이 일꾼 세션을 이름으로 부를 때도 선다.
+            ("moai-saycode", head(&saycode()), ["일꾼 세션", "일꾼 열어", "saycode"].as_slice()),
             // 되살리기 스킬(moai-uqf7)은 사람이 부를 때만 선다 — 2026-10-10 에 사람이 쓴 말이 "되살려" 였다.
             ("moai-recover", head(&recover()), ["되살려", "세션 복구", "이어 가게 해"].as_slice()),
         ] {
@@ -3679,11 +4035,16 @@ mod tests {
         // 이름은 `skill::NAMES`·`skill::OPTIONAL` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그
         // 목록을 다 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
         let [moai, supervisor, wiki_skill, recover_skill] = crate::skill::NAMES;
-        let [crate::skill::Optional { name: tmux_skill, .. }] = crate::skill::OPTIONAL;
+        let [crate::skill::Optional { name: tmux_skill, .. }, crate::skill::Optional { name: saycode_skill, .. }] =
+            crate::skill::OPTIONAL;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
         assert!(tmux().starts_with(&format!("---\nname: {tmux_skill}\ndescription: ")), "tmux 스킬의 머리가 없다");
+        assert!(
+            saycode().starts_with(&format!("---\nname: {saycode_skill}\ndescription: ")),
+            "Saycode 스킬의 머리가 없다"
+        );
         assert!(
             recover().starts_with(&format!("---\nname: {recover_skill}\ndescription: ")),
             "되살리기 스킬의 머리가 없다"
@@ -5321,6 +5682,7 @@ stop sending outside work while a release runs",
     fn the_session_map_reads_the_records() {
         assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
         assert!(recover().contains(SESSIONS), "되살리기 스킬이 짝을 그대로 안 싣는다");
+        assert!(saycode().contains(SESSIONS), "Saycode 스킬이 짝을 그대로 안 싣는다");
         assert!(SESSIONS.contains("procStart") && SESSIONS.contains("/proc/{pid}/stat"), "짝이 pid 재사용을 안 거른다");
         if std::process::Command::new("python3").arg("-c").arg("pass").output().is_err() {
             return; // python3 가 없는 기계 — 글만 잰다.
@@ -5332,19 +5694,51 @@ stop sending outside work while a release runs",
         let dir = s.path().join(".claude/sessions");
         std::fs::create_dir_all(&dir).unwrap();
         // 이 시험 프로세스는 살아 있다 — 그 시작 시각이 `procStart` 다.
+        let start_of = |pid: u32| {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+            stat[stat.rfind(')').unwrap() + 2..].split_whitespace().nth(19).unwrap().to_string()
+        };
         let me = std::process::id();
-        let stat = std::fs::read_to_string(format!("/proc/{me}/stat")).unwrap();
-        let start = stat[stat.rfind(')').unwrap() + 2..].split_whitespace().nth(19).unwrap().to_string();
+        let start = start_of(me);
         let record = |pid: u32, start: &str, name: &str, tmux: Option<&str>| {
             let tmux = tmux.map_or(String::new(), |t| format!(r#","tmux":"{t}""#));
             format!(
                 r#"{{"pid":{pid},"sessionId":"s-{name}","cwd":"/repo","kind":"interactive","procStart":"{start}","name":"{name}","status":"idle"{tmux}}}"#
             )
         };
+        // Saycode 가 띄운 일꾼 — 환경에 `APLUS_SESSION_ID` 를 들고, 기록은 띄운 쪽(감독)의 칸을 댄다(moai-l244).
+        struct Kill(std::process::Child);
+        impl Drop for Kill {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let child = Kill(
+            std::process::Command::new("sleep").arg("60").env_clear().env("APLUS_SESSION_ID", "say-1").spawn().unwrap(),
+        );
+        let pid = child.0.id();
+        let child_start = start_of(pid);
+        // 이 시험 프로세스의 `saycode` 칸은 돌리는 사람의 환경을 따른다 — Saycode 안에서 돌리면 그 id 다.
+        let own = std::fs::read("/proc/self/environ")
+            .unwrap()
+            .split(|b| *b == 0)
+            .find_map(|v| v.strip_prefix(b"APLUS_SESSION_ID=").map(|id| String::from_utf8_lossy(id).into_owned()))
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| "-".to_string());
         std::fs::write(dir.join("1.json"), record(me, &start, "here", Some("Shop Work:@16.%39"))).unwrap();
         std::fs::write(dir.join("2.json"), record(me, "1", "reused", Some("moai:@0.%4"))).unwrap();
         std::fs::write(dir.join("3.json"), record(me, &start, "plain", None)).unwrap();
         std::fs::write(dir.join("4.json"), "not json").unwrap();
+        // 두 산 줄이 한 칸을 댄다 — 어느 쪽 것도 아니다.
+        std::fs::write(dir.join("5.json"), record(me, &start, "twin-a", Some("moai:@1.%7"))).unwrap();
+        std::fs::write(dir.join("6.json"), record(pid, &child_start, "twin-b", Some("moai:@1.%7"))).unwrap();
+        // 죽은 줄은 칸을 나눠 쥔 것으로 안 센다 — `here` 의 `%39` 는 그대로다.
+        std::fs::write(dir.join("7.json"), record(me, "1", "ghost", Some("Shop Work:@16.%39"))).unwrap();
+        // 데몬이 띄운 세션은 혼자 그 칸을 대도 칸이 없다 — 표준 입력이 소켓이고, 칸은 데몬을 띄운 쪽의 것이다(리뷰 moai-l244).
+        let remote = record(me, &start, "lone", Some("moai:@1.%11"));
+        let remote = remote.replace(r#""kind":"interactive""#, r#""kind":"interactive","entrypoint":"remote_mobile""#);
+        std::fs::write(dir.join("8.json"), remote).unwrap();
         let shell = SESSIONS.replace("~/.claude/sessions", &dir.display().to_string());
         let run = |tmux: Option<&str>| {
             let mut cmd = std::process::Command::new("sh");
@@ -5359,19 +5753,53 @@ stop sending outside work while a release runs",
         };
         assert_eq!(
             run(None),
-            "alive\there\t%39\tidle\t/repo\ts-here\n\
-             dead\treused\t%4\tidle\t/repo\ts-reused\n\
-             alive\tplain\t-\tidle\t/repo\ts-plain\n",
+            format!(
+                "alive\there\t%39\tidle\t/repo\ts-here\t{own}\n\
+                 dead\treused\t%4\tidle\t/repo\ts-reused\t-\n\
+                 alive\tplain\t-\tidle\t/repo\ts-plain\t{own}\n\
+                 alive\ttwin-a\t-\tidle\t/repo\ts-twin-a\t{own}\n\
+                 alive\ttwin-b\t-\tidle\t/repo\ts-twin-b\tsay-1\n\
+                 dead\tghost\t%39\tidle\t/repo\ts-ghost\t-\n\
+                 alive\tlone\t-\tidle\t/repo\ts-lone\t{own}\n"
+            ),
             "짝의 줄 꼴이 바뀌었다"
         );
         // 부르는 쪽이 이 시험 프로세스와 다른 tmux 서버에 서 있다 — 산 세션의 칸은 `-`, 죽은 줄은 기록 그대로다.
         assert_eq!(
             run(Some("/nonexistent/moai-other-server,1,0")),
-            "alive\there\t-\tidle\t/repo\ts-here\n\
-             dead\treused\t%4\tidle\t/repo\ts-reused\n\
-             alive\tplain\t-\tidle\t/repo\ts-plain\n",
+            format!(
+                "alive\there\t-\tidle\t/repo\ts-here\t{own}\n\
+                 dead\treused\t%4\tidle\t/repo\ts-reused\t-\n\
+                 alive\tplain\t-\tidle\t/repo\ts-plain\t{own}\n\
+                 alive\ttwin-a\t-\tidle\t/repo\ts-twin-a\t{own}\n\
+                 alive\ttwin-b\t-\tidle\t/repo\ts-twin-b\tsay-1\n\
+                 dead\tghost\t%39\tidle\t/repo\ts-ghost\t-\n\
+                 alive\tlone\t-\tidle\t/repo\ts-lone\t{own}\n"
+            ),
             "다른 tmux 서버의 칸 id 를 그대로 낸다"
         );
+        drop(child);
+        // 글도 그 둘을 이른다 — 칸을 나눠 쥔 줄은 둘 다 놔두고, Saycode 세션은 칸이 아니라 Saycode 로 몬다.
+        let text = tmux();
+        assert!(
+            text.contains("**A pane two alive rows name belongs to neither**"),
+            "tmux 스킬이 나눠 쥔 칸을 안 이른다"
+        );
+        assert!(
+            text.contains("**A session Saycode's daemon started has no pane**"),
+            "tmux 스킬이 데몬이 띄운 세션의 칸을 믿는다"
+        );
+        assert!(
+            text.contains("**A row whose `saycode` is not `-` is a Saycode session.**")
+                && text.contains("`moai-saycode`"),
+            "tmux 스킬이 Saycode 세션을 칸으로 몬다"
+        );
+        for skill in [tmux(), recover(), saycode()] {
+            assert!(
+                skill.contains("state  name  pane  status  cwd  sessionId  saycode"),
+                "짝의 머리가 일곱 칸이 아니다"
+            );
+        }
     }
 
     /// 글이 가르치는 `tmux` 줄을 세며 하나하나 잰다 — 칸을 `-t` 로 겨누거나, 칸을 안 건드리는 넷(설정 읽기 `show`·
@@ -5481,12 +5909,149 @@ stop sending outside work while a release runs",
         }
         assert!(named >= 5, "감독 글이 tmux 스킬의 절을 안 댄다 — {named}");
         for (step, line) in [
-            ("2", "Inside tmux, ask the person first whether to open new worker"),
+            ("2", "inside\n  tmux, ask the person first whether to open new worker"),
             ("3", "Inside tmux, label the worker's pane as you send"),
             ("4", "Inside tmux, an\nidle notice with no report"),
         ] {
             assert!(supervise.contains(line), "감독의 {step} 에 tmux 갈래가 없다");
         }
+    }
+
+    /// **되살리기는 Saycode 세션을 칸에서 되살리지 않고, `happy resume` 을 제가 치지 않는다**(moai-l244.nj6). 그 줄은
+    /// 부른 셸을 앞에서 쥐어 사람이 제 터미널에서 친다. 끝난 세션 대신 새 세션을 여는 것(`spawn`)은 되살리기가 아니다.
+    #[test]
+    fn the_recover_skill_hands_saycode_sessions_to_the_person() {
+        let text = recover();
+        let saycode = &text[text.find("## 7. Saycode sessions").expect("Saycode 절이 없다")..];
+        assert!(!text.contains("happy agent spawn"), "되살리기가 새 세션을 연다");
+        let resumes: Vec<&str> = text.lines().filter(|l| l.contains("happy resume")).collect();
+        assert_eq!(resumes, ["    happy resume <saycode id>"], "happy resume 이 사람에게 낼 줄 밖에도 섰다");
+        assert!(saycode.contains("happy resume <saycode id>"), "happy resume 줄이 Saycode 절 밖에 섰다");
+        assert!(saycode.contains("so never run it yourself"), "happy resume 을 제가 친다");
+        assert!(saycode.contains("not verified"), "같은 Saycode id 로 돌아온다고 단정한다");
+        assert!(text.contains("`ended`") && text.contains("happy agent ls --status"), "끝난 Saycode 세션을 안 찾는다");
+        // 짝을 `lastAgentText` 로만 지으면 턴 가운데 죽은 세션(그 값이 빈다)과 Saycode 밖의 되살리기가 칸으로 샌다 —
+        // 대화 기록의 `entrypoint` 가 Saycode 세션을 가른다(리뷰 moai-l244).
+        assert!(text.contains(r#""entrypoint":"remote_mobile""#), "Saycode 세션을 대화 기록으로 안 가른다");
+        assert!(text.contains("is still never\nresumed in a pane"), "짝을 못 지은 Saycode 세션을 칸에서 되살린다");
+        assert!(
+            text.contains("open the\nsupervisor's pane — or print its line — only after they say that worker is back"),
+            "Saycode 일꾼보다 감독을 먼저 되살린다"
+        );
+        let open = &text[text.find("## 5. Inside tmux").unwrap()..text.find("## 6. Outside tmux").unwrap()];
+        assert!(open.contains("not a Saycode session (7)"), "tmux 칸이 Saycode 세션도 되살린다");
+    }
+
+    /// **`moai-saycode` 는 Saycode 가 대는 일꾼만 `happy agent` 로 몬다**(2026-10-10 사용자 결정, moai-l244). 줄은 여섯 낱말
+    /// (`whoami`·`ls`·`prompt`·`wait`·`read`·`spawn`)뿐이고 `steer`·`stop` 은 하지 말라는 줄에만 선다. `prompt --wait` 는
+    /// 닿고도 `prompt_stalled` 로 실패해(xw9) 쓰지 않고, 기다림은 보내기 **전에** 백그라운드로 띄운다. 여는 줄은 "No idle
+    /// worker left" 에만 서고, 묻기·권한 건너뛰기를 말하기·사람이 고른 값만 쓰기가 그 절에 선다. Saycode 의 worktree 는
+    /// `.worktrees/moai-<id>` 에 안 서서 그 깃발이 글에 없다. 감독 글은 그 절들을 이름으로 대되 `happy agent` 줄은 안 든다.
+    #[test]
+    fn the_saycode_skill_drives_only_the_workers_saycode_lists() {
+        let text = saycode();
+        let section = |heading: &str| -> &str {
+            let at = text.find(&format!("\n## {heading}\n")).unwrap_or_else(|| panic!("{heading} 절이 없다")) + 1;
+            let rest = &text[at..];
+            &rest[..rest[3..].find("\n## ").map_or(rest.len(), |end| end + 3)]
+        };
+        let never = section("What never happens");
+        for word in ["`claude -p`", "`--permission-mode`", "`steer`", "`stop`", "`prompt --wait`", "`sleep`"] {
+            assert!(never.contains(word), "하지 않는 것에 {word} 가 없다");
+        }
+        for flag in ["claude -p", "--permission-mode", "prompt --wait"] {
+            assert_eq!(text.matches(flag).count(), never.matches(flag).count(), "{flag} 가 하지 않는 것 밖에도 섰다");
+        }
+        assert!(!text.contains("--worktree"), "Saycode 의 worktree 깃발을 가르친다");
+        let commands: Vec<&str> = text.lines().map(str::trim).filter(|l| l.starts_with("happy ")).collect();
+        assert!(commands.len() >= 8, "happy agent 줄을 못 셌다 — {commands:?}");
+        for cmd in &commands {
+            let verb = cmd.strip_prefix("happy agent ").and_then(|c| c.split_whitespace().next());
+            assert!(
+                verb.is_some_and(|v| ["whoami", "ls", "prompt", "wait", "read", "spawn"].contains(&v)),
+                "가르치지 않는 낱말의 줄 — {cmd}"
+            );
+            assert!(!cmd.contains("--wait"), "prompt 를 --wait 로 친다 — {cmd}");
+        }
+        // 여는 줄은 하나고, 묻는 절에만 선다.
+        let open = section("No idle worker left");
+        let spawns: Vec<&&str> = commands.iter().filter(|c| c.starts_with("happy agent spawn")).collect();
+        assert_eq!(
+            spawns,
+            [&"happy agent spawn --prompt \"$(cat <file>)\" --agent <agent> --model <model> --effort <effort>"],
+            "여는 줄이 하나가 아니거나 다른 깃발이 섰다"
+        );
+        assert!(open.contains(*spawns[0]), "여는 줄이 묻는 절 밖에 섰다");
+        assert!(open.contains("ask the person **once**") && open.contains("only on their yes"), "묻지 않고 연다");
+        assert!(
+            open.contains("**it runs with permission prompts bypassed.**")
+                && open.contains("`--dangerously-skip-permissions`"),
+            "권한 묻기를 건너뛴다고 안 말한다"
+        );
+        assert_eq!(
+            text.matches("--dangerously").count(),
+            open.matches("--dangerously").count(),
+            "권한 건너뛰기가 밖에 섰다"
+        );
+        assert!(
+            open.contains("`spawnModelOptions`")
+                && open.contains("never fill in a value they left out")
+                && open.contains("Never fall back"),
+            "사람이 안 고른 에이전트·모델을 지어낸다"
+        );
+        // 기다림은 보내기 전에 백그라운드로 — 뒤에 띄우면 짧은 턴을 놓치고 시간이 다할 때까지 선다.
+        let send = section("Send work");
+        let wait_at = send.find("happy agent wait <id> --until turn-end").expect("보내기 절에 기다림이 없다");
+        let prompt_at = send.find("happy agent prompt <id> \"$(cat <file>)\"").expect("보내기 절에 prompt 가 없다");
+        assert!(
+            wait_at < prompt_at && send.contains("run_in_background"),
+            "기다림을 보내기 전에 백그라운드로 안 띄운다"
+        );
+        // Bash 는 백그라운드 명령을 따로 이르지 않으면 30분에 멈춘다 — 한 시간 기다림이 그 전에 죽는다(리뷰 moai-l244).
+        assert!(send.contains("`3660000`"), "백그라운드 기다림의 Bash timeout 을 안 이른다");
+        // spawn 은 별칭을 안 받는다 — 2-1 의 `opus` 를 그대로 주면 `invalid_spawn_options` 다(리뷰 moai-l244).
+        assert!(open.contains("Spawn takes no alias"), "2-1 의 모델 낱말을 spawn 에 그대로 준다");
+        assert!(send.contains("`from: <your ListAgents name>`"), "prompt 에 보낸 이를 안 싣는다");
+        assert!(send.contains("`<name> (saycode <id>)`"), "보낸 노트가 /clear 로 바뀌는 이름만 든다");
+        let clear = section("Clear a worker");
+        for gate in [
+            "**Its report is checked**",
+            "`Report-checked:`",
+            "**Its row reads `idle`**",
+            "**The person is not talking to it.**",
+        ] {
+            assert!(clear.contains(gate), "비우기 전의 조건 {gate} 가 없다");
+        }
+        assert!(clear.contains("    happy agent prompt <id> /clear\n"), "비우는 줄이 없다");
+        assert!(clear.contains("run `ListAgents`"), "비운 뒤 바뀐 이름을 다시 안 읽는다");
+        let stall = section("When a worker stalls");
+        assert!(stall.contains("**tell the person**") && stall.contains("Do not answer it"), "멈춘 일꾼에 대신 답한다");
+        assert!(stall.contains("`moai-recover`"), "죽은 세션을 되살리기로 안 보낸다");
+        assert!(text.contains("If it does not answer `\"ok\":true`"), "whoami 가 실패하면 물러서지 않는다");
+        assert!(text.contains("**Saycode first, tmux second**"), "Saycode 가 먼저라는 사람의 결정이 없다");
+        // 감독 글이 대는 절은 이 스킬에 서 있고, 감독 글은 `happy agent` 를 직접 안 친다.
+        let supervise = supervise();
+        assert!(
+            supervise.contains("**Inside Saycode, load `moai-saycode` too — it comes first.**"),
+            "감독이 moai-saycode 를 안 읽는다"
+        );
+        assert!(!supervise.contains("happy agent"), "감독 글이 happy agent 를 직접 친다");
+        let mut named = 0;
+        for piece in supervise.split("`moai-saycode`, ").skip(1) {
+            let mut rest = piece;
+            while let Some(after) = rest.strip_prefix('"') {
+                let (heading, tail) = after.split_once('"').expect("닫는 따옴표가 없다");
+                let heading = heading.replace('\n', " ");
+                named += 1;
+                assert!(text.contains(&format!("\n## {heading}\n")), "감독 글이 없는 절 \"{heading}\" 을 댄다");
+                rest = tail.strip_prefix(" and ").unwrap_or("");
+            }
+        }
+        assert!(named >= 5, "감독 글이 Saycode 스킬의 절을 안 댄다 — {named}");
+        assert!(
+            worker().contains("sent as a Saycode prompt\n(`moai-saycode`)"),
+            "일꾼이 prompt 의 보낸 이를 못 읽는다"
+        );
     }
 
     /// **`moai-recover` 는 제가 연 칸만 만지고, 되살리는 줄은 `--resume` 하나다**(2026-10-10 사용자 결정, moai-uqf7).

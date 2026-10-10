@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.11.0 hash:67fc4353 -->
+<!-- moai:begin v:0.13.0 hash:855317e1 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -531,7 +531,8 @@ launches or drives a session. When the supervisor runs inside tmux, its companio
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says
 yes. That skill is planted only where it is chosen: `moai skill install --with moai-tmux`
-plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+plants it and `--without` takes it out. Inside a Saycode session, `moai-saycode` does the
+same through Saycode's `happy agent` and comes first; it is chosen the same way. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki

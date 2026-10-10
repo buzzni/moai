@@ -142,6 +142,9 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 걷어 두는 값이 그 날을 막는다.
         .env_remove("TMUX")
         .env_remove("TMUX_PANE")
+        // Saycode 가 제 세션의 셸에 세우는 표식(moai-l244) — 새면 Saycode 안에서 돌린 `init` 화면이 `moai-saycode` 칸을
+        // 켜 둔다.
+        .env_remove("SAYCODE_AGENT_ENV")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr).
         .env_remove("CODEX_THREAD_ID")
@@ -19240,6 +19243,7 @@ fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
     // 감독 스킬은 Claude Code 에만 선다(moai-obxm) — 그 글은 Codex 에 없는 ListAgents·SendMessage 로 말한다.
     assert!(!shared.join("moai-supervise").exists(), "Codex 의 자리에 감독 스킬을 심었다");
     assert!(!shared.join("moai-tmux").exists(), "Codex 의 자리에 tmux 스킬을 심었다");
+    assert!(!shared.join("moai-saycode").exists(), "Codex 의 자리에 Saycode 스킬을 심었다");
     assert!(!shared.join("moai-recover").exists(), "Codex 의 자리에 되살리기 스킬을 심었다");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
     assert!(!s.path().join(".claude/moai-plugin").exists(), "고르지 않은 Claude 의 트리를 심었다");
@@ -19286,7 +19290,23 @@ fn skill_install_plants_one_text_for_every_agent() {
         "고르지 않은 tmux 스킬을 Claude 의 트리에 심었다"
     );
     assert!(!s.path().join(".agents/skills/moai-tmux").exists(), ".agents 에 tmux 스킬을 심었다");
-    // 골라도 Claude 의 트리에만 선다.
+    assert!(
+        !s.path().join(".claude/moai-plugin/skills/moai-saycode").exists(),
+        "고르지 않은 Saycode 스킬을 Claude 의 트리에 심었다"
+    );
+    // 골라도 Claude 의 트리에만 선다 — Saycode 스킬(moai-l244)도 같다.
+    let mut with_saycode = args.to_vec();
+    with_saycode.extend(["--with", "moai-saycode"]);
+    assert!(c.run(s.path(), &with_saycode, true).status.success());
+    assert!(s.path().join(".claude/moai-plugin/skills/moai-saycode/SKILL.md").is_file(), "고른 Saycode 스킬이 없다");
+    assert!(!s.path().join(".agents/skills/moai-saycode").exists(), ".agents 에 Saycode 스킬을 심었다");
+    let mut without_saycode = args.to_vec();
+    without_saycode.extend(["--without", "moai-saycode"]);
+    assert!(c.run(s.path(), &without_saycode, true).status.success());
+    assert!(
+        !s.path().join(".claude/moai-plugin/skills/moai-saycode").exists(),
+        "--without 이 Saycode 스킬을 안 걷었다"
+    );
     let mut with = args.to_vec();
     with.extend(["--with", "moai-tmux"]);
     assert!(c.run(s.path(), &with, true).status.success());
@@ -24778,12 +24798,14 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     }
     assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
     let mut command = c.command(Path::new(BIN), s.path(), &["init", "argos"], true);
-    // tmux 안의 셸이다 — 화면이 `moai-tmux` 칸을 켜 두고, Enter 가 그것을 심는다(moai-3r7l.ocn).
+    // tmux 안의 셸이다 — 화면이 `moai-tmux` 칸을 켜 두고, Enter 가 그것을 심는다(moai-3r7l.ocn). Saycode 세션도 tmux 안에서
+    // 돌아 둘이 함께 선다 — `moai-saycode` 칸도 켜진다(moai-l244).
     command
         .env("TERM", "xterm")
         .env("MOAI_LANG", "en")
         .env("MOAI_CONFIG", c.home.path().join("config.toml"))
         .env("TMUX", "/tmp/tmux-1000/default,1,0")
+        .env("SAYCODE_AGENT_ENV", "1")
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(slave);
@@ -24839,6 +24861,10 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     assert!(
         s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(),
         "$TMUX 가 선 화면이 moai-tmux 를 켜 두지 않았다\n{shown}"
+    );
+    assert!(
+        s.path().join(".claude/moai-plugin/skills/moai-saycode/SKILL.md").is_file(),
+        "SAYCODE_AGENT_ENV 가 선 화면이 moai-saycode 를 켜 두지 않았다\n{shown}"
     );
     let plugin: serde_json::Value =
         serde_json::from_str(&read(&s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json"))).unwrap();

@@ -295,7 +295,9 @@ moai carries no messaging between agents. In Claude Code, one session that calls
 `/moai-supervise` hands piled-up backlog items to the other idle sessions of the
 repository it sees in `ListAgents`, through Claude Code's own `SendMessage`, and
 takes their reports back the same way. Inside tmux the supervisor can also clear,
-paste into and — once the person says yes — open worker panes (`moai-tmux`).
+paste into and — once the person says yes — open worker panes (`moai-tmux`);
+inside a Saycode session it does the same through Saycode's sessions
+(`moai-saycode`).
 When the sessions die together — a restart, an OOM kill — and the person asks to
 bring them back, `moai-recover` finds them, says what each was doing and resumes
 each one (`claude --resume`, in a new tmux pane or as a line to type).
