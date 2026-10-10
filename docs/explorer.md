@@ -42,7 +42,43 @@ line above the list says what is hidden and how it is sorted. The `SPC v` keys
 show or hide [deferred](glossary.md#deferred) work, [backlog items](glossary.md#backlog),
 each [column](glossary.md#column), the detail and the archive;
 `SPC s` sorts and `SPC c` picks the columns on the right of a row. These choices
-are kept in your user config and carry over to the next run and to every project.
+are kept in your user config and carry over to the next run and to every project —
+except the sort, which each project can keep for itself (below).
+
+## Sort by several fields
+
+The sort is a list of fields, like `ORDER BY`: the second field decides only where
+the first ties, and each field has its own direction.
+
+| Keys | What it does |
+|---|---|
+| `SPC s p` `c` `u` `s` `a` `t` | sort by that one field (priority, created, updated, status, assignee, title); the same key again turns it around |
+| `SPC s P` `C` `U` `S` `A` `T` | add that field at the end of the order; if it is already there, turn it around |
+| `SPC s e` | open the sort window |
+
+In the sort window the fields in the order come first, numbered and marked
+`↑ asc` or `↓ desc`; the rest are marked `·`. `j`/`k` move the cursor, `J`/`K`
+move a field down or up the order, `SPC` puts a field in or takes it out, `d`
+turns its direction, `Enter` applies it, `D` also keeps it as the default, and
+`Esc` leaves without a change. The path line names the whole order
+(`sort priority↑, updated↓`).
+
+**Where the sort is kept.** A sort picked inside a project is written for that
+project; one picked in the all-projects list (`0`) is the default for every
+project that has none of its own. A worktree counts as the project it belongs to.
+
+```toml
+[tui]
+order = ["priority", "updated:desc"]        # the default
+
+[tui.project."/home/me/work/app"]
+order = ["status", "title"]                 # wins in that project
+```
+
+`order` takes the words of `moai show --sort` except `id`. An older config with
+`sort = "…"` and `sort_reversed = …` is still read where `order` is absent, and
+writing the default also writes that pair from the first field, so an older moai
+on the same config shows the nearest order.
 
 `SPC v b` hides backlog items in the list and their column on the board.
 The choice is saved as `[tui] hide_backlog`. Existing `hide_ideas` settings
