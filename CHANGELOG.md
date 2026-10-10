@@ -12,6 +12,43 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai show --sort` takes several fields, each with a direction, like
+  ORDER BY** — `--sort priority,updated:desc`, `--sort status:asc,title`. The
+  next field decides only where the ones before it tie; a field without
+  `:asc`/`:desc` keeps the direction it always had (newest first for created
+  and updated, urgent first for priority), so `--sort id` and every one-word
+  `--sort` order exactly as before. `--reverse` still turns the whole order
+  around, and `-n`/`--after` page through a multi-field order the same way. An
+  unknown field or direction, an empty field, or a field given twice is refused
+  with the words that are allowed. (moai-r170.9es)
+- **The explorer keeps its sort per project, as a list of fields** — a sort
+  picked inside a project is written for that project alone, as
+  `order = [...]` under `[tui.project."<project root>"]` in the user config —
+  the root the project's tracker lives in, so a linked worktree shares its
+  project's sort — and one picked in the all-projects list (`0`) is written as `order` under
+  `[tui]`, the default for every project without its own. Entering a project
+  puts its own sort back; one sort no longer follows you from project to
+  project. `order` takes the words of `moai show --sort` (`"updated:asc"`)
+  except `id`, which the explorer does not sort by.
+  Where `order` is absent the older `sort`/`sort_reversed` pair is read as
+  before, and every write of `[tui] order` also writes that pair from its
+  first field, so an older moai on the same config shows the nearest order.
+  An `order` that cannot be read is named in one line and the older pair
+  stands. (moai-r170.8dz)
+- **The explorer sorts by several fields** — `SPC s P`, `C`, `U`, `S`, `A`
+  and `T` (uppercase) add that field at the end of the order with its own
+  direction, and pressing the same key again turns that field around; the
+  lowercase keys still make the order that one field. `SPC s e` opens a sort
+  window with all six fields, the ones in the order numbered and marked
+  `↑ asc` or `↓ desc`: `j`/`k` move, `J`/`K` move a field down or up the order,
+  `SPC` puts a field in or takes it out, `d` turns its direction, `Enter`
+  applies it where you stand, `D` also keeps it as the default (`[tui] order`)
+  even inside a project, and `Esc` leaves without a change. The path line
+  names the whole order, every field with `↑` or `↓`
+  (`sort priority↑, updated↓`). (moai-r170.x22)
+
 ### Changed
 
 - **Where picked-up work stands is read from worktree names and pick-up marks

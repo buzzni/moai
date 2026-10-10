@@ -273,6 +273,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
+        Mode::Sort(e) => sort_edit(f, e, body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
         Mode::Ask(ask) => {
@@ -383,6 +384,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
+        Mode::Sort(_) => sort_keys(f, keys, app.site.lang),
         Mode::Stats(w) => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => stats_keys(f, w, keys, app.site.lang),
@@ -508,6 +510,71 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
         &mut state,
     );
     scroll_mark(f, &p.list, at, "", true, lang);
+}
+
+/// 차례 목록을 뱃지의 한 토막으로 — `priority↑, updated↓`(moai-r170). **필드마다 방향 글리프를 단다** — 한쪽에만
+/// 달면 맨 낱말이 "제 방향" 인지 "오름" 인지 읽는 사람이 필드마다 외워야 한다(생성·수정은 제 방향이 내림이다).
+/// 방향을 지는 것이 글리프라 색이 혼자 뜻을 지지 않는다. 낱말까지 대는 편집 창(`SPC s e`)과 달리 머리줄은 좁아
+/// 글리프로만 적는다. 옛 뱃지의 ` 거꾸로` 는 걷었다 — 뒤집기는 이제 필드의 방향이다.
+pub(super) fn sort_words(s: &super::keys::Sorting, lang: Lang) -> String {
+    let one = |o: &super::keys::Ordered| format!("{}{}", o.by.word(lang), if o.down { "↓" } else { "↑" });
+    s.fields().iter().map(one).collect::<Vec<_>>().join(", ")
+}
+
+/// 차례 편집 창(`SPC s e`, moai-r170.x22) — 필드 여섯이 늘 다 선다. 차례에 든 것은 번호와 방향을 **글리프와 낱말로**
+/// (`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다. 목록·상세 자리를 통째로 덮는다
+/// ([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의 것인지 안 읽힌다).
+fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
+    f.render_widget(Clear, at);
+    let rows = e.rows();
+    let wide = rows.iter().map(|r| crate::text::width(r.by.word(lang))).max().unwrap_or(0);
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|r| {
+            let word = r.by.word(lang);
+            let pad = " ".repeat(wide.saturating_sub(crate::text::width(word)));
+            ListItem::new(Line::from(match r.at {
+                Some((n, o)) => {
+                    let (glyph, dir) = if o.down {
+                        ("↓", say(lang, "tui.sorter.desc"))
+                    } else {
+                        ("↑", say(lang, "tui.sorter.asc"))
+                    };
+                    vec![Span::raw(format!("{:>2}  {word}{pad}  {glyph} {dir}", n + 1))]
+                }
+                None => vec![Span::styled(format!(" ·  {word}"), dim())],
+            }))
+        })
+        .collect();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(format!(" {} ", say(lang, "tui.sorter.title")))
+        .title_bottom(Line::from(Span::styled(
+            clip(&format!(" {} ", say(lang, "tui.sorter.note")), at.width.saturating_sub(2) as usize),
+            dim(),
+        )));
+    let mut state = ListState::default().with_selected(Some(e.cursor));
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(CURSOR)
+            .highlight_spacing(HighlightSpacing::Always),
+        at,
+        &mut state,
+    );
+}
+
+/// 차례 편집 창의 키 바 — 키 이름은 표([`super::keys::SORTER`])에서 읽는다. 좁으면 걷기·옮기기부터 뺀다 — 입히고
+/// 그만두는 길이 끝까지 선다.
+fn sort_keys(f: &mut Frame, at: Rect, lang: Lang) {
+    use super::keys::{SORTER, Sorter};
+    let hint = |a: Sorter| key(&label(SORTER, a), a.what(lang));
+    let pair = |a: Sorter, b: Sorter| key(&labels(SORTER, &[a, b]), a.what(lang));
+    let optional = vec![pair(Sorter::Down, Sorter::Up), pair(Sorter::Lower, Sorter::Raise), hint(Sorter::Flip)];
+    bar(f, at, optional, vec![hint(Sorter::Toggle), hint(Sorter::Apply), hint(Sorter::Default), hint(Sorter::Close)]);
 }
 
 /// 시간대 고르는 창(moai-3oz2) — 이름 목록과, 지금 쓰는 것에 붙는 낱말.
@@ -2295,10 +2362,8 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
-    let sorted = (app.order != Default::default()).then(|| {
-        fill(say(app.site.lang, "tui.badge.sorted"), &[("by", app.order.by.word(app.site.lang))])
-            + if app.order.reversed { say(app.site.lang, "tui.badge.reversed") } else { "" }
-    });
+    let sorted = (app.order != Default::default())
+        .then(|| fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.order, app.site.lang))]));
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
     let hidden = app.view.badge(&app.screen_statuses(), app.aged(), app.site.lang);
@@ -10832,7 +10897,7 @@ pub(super) mod tests {
             render(a, w, 12).into_iter().find(|l| l.contains("숨김") || l.contains("정렬")).unwrap_or_default()
         };
         let wide = badge(&mut a, 120);
-        assert!(wide.contains("[done 숨김 · 정렬 수정 거꾸로]"), "{wide:?}");
+        assert!(wide.contains("[done 숨김 · 정렬 수정↑]"), "{wide:?}");
         let narrow = badge(&mut a, 30);
         assert!(
             narrow.contains("[done 숨김]") && !narrow.contains("정렬"),

@@ -925,6 +925,9 @@ impl App {
             p.install = Some(told);
         }
         self.layer = Some(layer);
+        // **차례는 선 자리의 것이다**(moai-r170.8dz) — 층이 서면 선 자리가 층(`0`)이나 그 프로젝트로 정해진다. 띄우는
+        // 길은 보기를 먼저 입혀(`cmd::tui`) 그때의 자리로 이미 골랐지만, 얹는 문이 여기 하나라 여기서 한 번 더 맞춘다.
+        self.rescope_order();
         self
     }
 
@@ -1206,6 +1209,10 @@ impl App {
                 self.site.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
+                // **차례는 그 프로젝트의 것으로 선다**(moai-r170.8dz, 2026-10-09 사용자 결정) — 제 차례가 없으면 기본이다.
+                // 선 자리(`layer.at`)와 `repo` 가 다 바뀐 뒤다 — 차례의 열쇠는 그 `repo` 의 뿌리라([`App::order_home`],
+                // 리뷰 moai-r170.9ou) 앞에 두면 들어가는 줄의 경로로 잰다. 들이기(`apply_fresh`)가 줄을 세우기 전이다.
+                self.rescope_order();
                 // **그 줄이 이미 들고 있던 읽음을 베껴 든다**(moai-2gep) — 펼쳐 본 프로젝트는 제 표를
                 // 들고 선다. 아래의 `load_read` 가 그 파일을 못 읽으면(옛 `sudo moai read` 가 남긴
                 // root 의 파일) 들일 것이 없어 내게 온 줄이 모두 [NEW] 로 서고, 그 화면의 `SPC m a`
@@ -1276,6 +1283,8 @@ impl App {
         layer.forget(&from);
         layer.launch();
         let at = layer.position(&from).unwrap_or(0);
+        // 층의 차례는 기본 차례다(moai-r170.8dz) — 떠난 프로젝트의 것을 들고 올라오면 `0` 의 모든 프로젝트가 그 차례로 선다.
+        self.rescope_order();
         self.stand_on_place(at);
     }
 
@@ -1993,10 +2002,91 @@ mod tests {
         assert!(a.on_layer());
         assert!(a.worktree, "층에 올라왔는데 끈 것이 따라왔다 — 되켤 키가 여기 없다");
 
+        // **차례는 따라가지 않는다**(moai-r170.8dz, 2026-10-09 사용자 결정) — 프로젝트 안에서 고른 차례는 그
+        // 프로젝트의 것이고, 층(`0`)은 기본 차례로 선다.
+        assert_eq!(a.order, super::super::keys::Sorting::default(), "프로젝트에서 고른 차례가 층으로 따라 올라왔다");
+
         a.key(key(KeyCode::Down));
         a.key(key(KeyCode::Enter));
         assert!(a.worktree, "다음 프로젝트가 시키지 않은 끈 화면으로 읽혔다");
-        assert_eq!((a.view.clone(), a.order), (view, order), "보기·정렬이 층을 오가며 처음으로 돌아갔다");
+        assert_eq!(a.view.clone(), view, "보기가 층을 오가며 처음으로 돌아갔다");
+
+        // 옆 프로젝트로 건너가면(헤더의 번호, moai-o133) 그 프로젝트의 차례다 — 제 것이 없으면 기본이다.
+        a.hit("2");
+        assert_eq!(a.here(), Some(two.clone()), "시험의 전제 — 둘째 프로젝트에 들었다");
+        assert_eq!(
+            a.order,
+            super::super::keys::Sorting::default(),
+            "제 차례가 없는 프로젝트가 옆 프로젝트의 차례로 섰다"
+        );
+
+        // 처음 프로젝트로 돌아가면 거기서 고른 차례가 다시 선다.
+        a.hit("1");
+        assert_eq!(a.here(), Some(one.clone()));
+        assert_eq!(a.order, order, "돌아온 프로젝트가 제 차례를 잃었다");
+    }
+
+    /// **차례는 고른 자리에 적힌다**(moai-r170.8dz, 2026-10-09 사용자 결정) — 프로젝트 안의 `SPC s` 는 그 프로젝트의
+    /// 표(`[tui.project."<경로>"] order`)에, 층(`0`)의 `SPC s` 는 `[tui] order` 에. 프로젝트 안에서 고른 것은 `[tui]` 를
+    /// 한 글자도 안 건드리고, 다음 실행은 그 프로젝트에서 제 것을, 다른 프로젝트에서 기본을 읽는다.
+    #[test]
+    fn a_sort_pick_is_written_where_it_was_made() {
+        let s = Scratch::fenced("layer-sort-scope");
+        let (one, two) = twins(&s);
+        let cfg = s.register(&[&one, &two]);
+        std::fs::write(&cfg, format!("{}\n[tui]\nsort = \"title\"  # 옛 줄\n", std::fs::read_to_string(&cfg).unwrap()))
+            .unwrap();
+        let open = || {
+            let mut a = layered(&cfg);
+            a.user_config = Some(cfg.clone());
+            a.load_look();
+            a
+        };
+        let mut a = open();
+        let title = super::super::keys::Sorting::by(super::super::keys::Order::Title);
+        assert_eq!(a.order, title, "옛 한 쌍이 층의 기본으로 안 섰다");
+
+        a.key(key(KeyCode::Enter));
+        assert_eq!(a.here(), Some(one.clone()));
+        assert_eq!(a.order, title, "제 차례가 없는 프로젝트가 기본을 안 따랐다");
+        let before = std::fs::read_to_string(&cfg).unwrap();
+        a.hit("SPC s c Esc");
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        let home = std::fs::canonicalize(&one).unwrap().display().to_string();
+        assert!(
+            text.starts_with(&before) && text.contains(&format!("[tui.project.\"{home}\"]\norder = [\"created\"]\n")),
+            "프로젝트 안의 고르기가 그 프로젝트의 표에만 적히지 않았다\n{text}"
+        );
+
+        // 층에서 고른 것은 `[tui]` 에 — 옛 한 쌍도 첫 필드를 비춘다. 프로젝트의 표는 그대로다.
+        a.key(key(KeyCode::Home));
+        a.hit("0");
+        assert_eq!(a.order, title, "층이 프로젝트의 차례로 섰다");
+        a.hit("SPC s u Esc");
+        a.hit("SPC s u Esc");
+        let text = std::fs::read_to_string(&cfg).unwrap();
+        assert!(
+            text.contains("order = [\"updated:asc\"]")
+                && text.contains("sort = \"updated\"  # 옛 줄")
+                && text.contains("sort_reversed = true")
+                && text.contains(&format!("[tui.project.\"{home}\"]\norder = [\"created\"]\n")),
+            "층의 고르기가 [tui] 에 안 적혔다\n{text}"
+        );
+
+        // 다음 실행 — 층은 기본, 첫 프로젝트는 제 것, 둘째는 기본.
+        let mut b = open();
+        let updated_up = super::super::keys::Sorting::by(super::super::keys::Order::Updated)
+            .press(super::super::keys::Order::Updated);
+        assert_eq!(b.order, updated_up);
+        b.hit("1");
+        assert_eq!(
+            b.order,
+            super::super::keys::Sorting::by(super::super::keys::Order::Created),
+            "프로젝트의 차례가 안 이겼다"
+        );
+        b.hit("2");
+        assert_eq!(b.here(), Some(two.clone()));
+        assert_eq!(b.order, updated_up, "제 차례가 없는 프로젝트가 기본을 안 따랐다");
     }
 
     /// **층에서 띄운 읽기는 방금 잰 줄을 덮지 않는다**(moai-800o). 들어가려다 못 열면 그 줄을
@@ -2598,6 +2688,7 @@ mod tests {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => None,
         }
