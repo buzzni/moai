@@ -2824,18 +2824,23 @@ theirs to answer.
 /// 같다: 헤드리스·`--dangerously-*`·권한 모드가 없고, 아무것도 죽이지 않고, 한 번에 한 번 보고, 빈 입력 칸에만
 /// 붙인다. tmux 밖이면 아무것도 안 띄우고 칠 줄과 붙일 글만 낸다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
 /// `ListAgents` 가 일꾼을 보고 시작해야 한다.
+///
+/// **cmux 안이면 탭을 연다**(moai-p5sz.kfi) — `moai-cmux` 의 새 칸 줄에 `--resume` 을 실은 꼴이다. 판(0.65.0)은 이
+/// 글이 스스로 잰다: 되살리기는 모두에게 심기고 `moai-cmux` 는 고른 사람에게만 서니, 그 스킬의 판 절을 대면 없는 글을
+/// 가리킨다([`EMPTY_BOX`] 를 제 글에 싣는 것과 같은 까닭, moai-o9je). 빈 입력 칸의 잣대도 [`CMUX_EMPTY_BOX`] 를 싣는다.
 pub fn recover() -> String {
     format!(
         r#"---
 name: moai-recover
-description: Use in Claude Code when the person asks to bring back the sessions of this repository that died — after a restart, an OOM kill or a crash — so the supervisor and its workers carry on where they stopped. Finds the dead sessions, draws the state each was in, points out background work that never returned and broken target links, and resumes each one in a new tmux pane, or prints the command to type. Triggers on "recover the sessions", "bring the sessions back", "resume the dead sessions", "되살려", "세션 복구", "이어 가게 해".
+description: Use in Claude Code when the person asks to bring back the sessions of this repository that died — after a restart, an OOM kill or a crash — so the supervisor and its workers carry on where they stopped. Finds the dead sessions, draws the state each was in, points out background work that never returned and broken target links, and resumes each one in a new tmux pane or cmux tab, or prints the command to type. Triggers on "recover the sessions", "bring the sessions back", "resume the dead sessions", "되살려", "세션 복구", "이어 가게 해".
 ---
 
 # moai-recover — bring back the sessions that died
 
 Use this when the person asks for it: the sessions of this repository — a supervisor, its
 workers — died together, after a restart, an OOM kill or a crash, and the person wants them
-to carry on. **Their asking is the yes:** inside tmux you open the panes without asking again.
+to carry on. **Their asking is the yes:** inside tmux or cmux you open the panes without asking
+again.
 None of this is a moai command; it is you reading Claude Code's own records and typing where
 the person can watch.
 
@@ -2845,9 +2850,11 @@ the person can watch.
   the person can see and type into. Never `claude -p`, never a `--dangerously-*` flag, never
   `--permission-mode`
 - **Nothing is killed.** Never `kill-server`, `kill-session` or `kill-pane`, never `pkill`
-  or `killall` aimed at tmux (hook rule 4). A session that is alive is left alone
+  or `killall` aimed at tmux (hook rule 4); inside cmux never `close-surface`, `close-workspace`
+  or `close-window`, and never `--force`. A session that is alive is left alone
 - **Only the panes you opened.** Type only into a pane this skill opened, by the `%N` that
-  `split-window` printed — every call names it, `-t <pane>`
+  `split-window` printed — every call names it, `-t <pane>`. Inside cmux it is the surface UUID
+  `new-split` printed, `--surface <surface>`
 - **Never over the person's words.** Paste only into an empty input box ("Is the input box
   empty" below); otherwise tell the person
 - **No polling.** Every look is one look; the next comes after your next step, as its own
@@ -2857,7 +2864,13 @@ the person can watch.
 
 ## Is the input box empty
 
+Inside tmux:
+
 {EMPTY_BOX}
+
+Inside cmux:
+
+{CMUX_EMPTY_BOX}
 
 **When it is not empty, do not paste.** Tell the person which pane holds what — the words in it
 are theirs.
@@ -2956,7 +2969,7 @@ Leave out a line that does not hold. The supervisor's block adds one line: **the
 back in new sessions and their names may have changed — run `ListAgents` again** before you
 send or wait for a report.
 
-**Workers first, the supervisor last**, in both ways below — the supervisor's `ListAgents`
+**Workers first, the supervisor last**, in every way below — the supervisor's `ListAgents`
 has to see the workers when it starts.
 
 ## 5. Inside tmux — open a pane each
@@ -2978,10 +2991,35 @@ If the box has not shown yet, look again after your next step. A prompt in the p
 the folder, say) is the person's to answer — tell them which pane. When all are open, tell the
 person which pane is which session.
 
-## 6. Outside tmux — say what to type
+## 6. Inside cmux — open a tab each
 
-`$TMUX` is not set: open nothing. Print, per session in the same order, the line the person
-types in a terminal of their own, and under it the block to paste once its box shows:
+`CMUX_SURFACE_ID` is set in your shell and `$TMUX` is not — and the cmux is 0.65.0 or later:
+`cmux capabilities` lists `surface.input_state` in its `methods`. On an older cmux, tell the
+person that this way needs cmux 0.65.0, and go to 7. For each session, in that order:
+
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
+
+**No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+is the new tab, the second your workspace. The command is typed into the tab's shell, so the
+shell stays when `claude` exits, and the split does not take focus. When all are open, even
+the splits out once:
+
+    cmux rpc workspace.equalize_splits '{{"workspace_id":"<workspace UUID>"}}'
+
+Then, as a separate call per tab, look once: when its box is empty ("Is the input box empty"
+above), paste the block:
+
+    cmux paste --surface <surface> --submit -- - < <file>
+
+If cmux refuses — someone's words or a dialog in the box — do not try again; tell the person.
+If the box has not shown yet, look again after your next step. A prompt in the tab (trusting
+the folder, say) is the person's to answer — tell them which tab. When all are open, tell the
+person which tab is which session.
+
+## 7. Outside tmux and cmux — say what to type
+
+Neither way above stands: open nothing. Print, per session in the same order, the line the
+person types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd <cwd> && claude --resume <sessionId>
 "#
@@ -6042,34 +6080,46 @@ stop sending outside work while a release runs",
         let text = recover();
         let calls = tmux_calls(&text);
         assert!(calls >= 5, "되살리기 스킬의 tmux 명령을 못 셌다 — {calls}");
+        let calls = cmux_calls(&text);
+        assert!(calls >= 4, "되살리기 스킬의 cmux 명령을 못 셌다 — {calls}");
         never_kills_nor_runs_headless(&text);
         // 짝은 하나다 — `~/.claude/sessions` 를 읽는 둘째 파이썬이 서면 기록의 꼴이 바뀌는 날 한쪽만 고쳐진다.
         assert_eq!(text.matches("~/.claude/sessions/*.json").count(), 1, "세션 기록을 읽는 짝이 둘이다");
-        // 띄우는 줄은 둘 — tmux 칸과, tmux 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서 `claude ` 를 든
-        // 줄을 다 센다 — `--resume` 앞에 다른 깃발(`--model …`)을 끼운 줄도 걸려야 한다.
+        // 띄우는 줄은 셋 — tmux 칸, cmux 탭(moai-p5sz.kfi), 둘 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서
+        // `claude ` 를 든 줄을 다 센다 — `--resume` 앞에 다른 깃발(`--model …`)을 끼운 줄도 걸려야 한다.
         let launches: Vec<&str> = text.lines().filter(|l| l.starts_with("    ") && l.contains("claude ")).collect();
         assert_eq!(
             launches,
             [
                 "    tmux split-window -P -F '#{pane_id}' -t \"$TMUX_PANE\" -c <cwd> 'claude --resume <sessionId>; exec bash'",
+                "    cmux --id-format both new-split right --surface \"$CMUX_SURFACE_ID\" --command 'cd <cwd> && claude --resume <sessionId>'",
                 "    cd <cwd> && claude --resume <sessionId>",
             ],
-            "claude 를 띄우는 줄이 둘이 아니거나 다른 깃발이 섰다"
+            "claude 를 띄우는 줄이 셋이 아니거나 다른 깃발이 섰다"
         );
         for flag in ["claude -p", "--dangerously", "--permission-mode"] {
             assert_eq!(text.matches(flag).count(), 1, "{flag} 가 하지 않는 것 밖에도 섰다");
         }
-        let open = &text[text.find("## 5. Inside tmux").expect("tmux 안의 절이 없다")..];
-        let outside = &open[open.find("## 6. Outside tmux").expect("tmux 밖의 절이 없다")..];
-        let open = &open[..open.find("## 6. Outside tmux").unwrap()];
+        let open = section(&text, "## 5. Inside tmux — open a pane each");
+        let tabs = section(&text, "## 6. Inside cmux — open a tab each");
+        let outside = section(&text, "## 7. Outside tmux and cmux — say what to type");
         assert!(open.contains("paste-buffer -p -d -b moai-recover -t <pane>"), "여러 줄을 붙이기로 안 싣는다");
-        assert!(outside.contains("open nothing"), "tmux 밖에서도 칸을 연다");
+        assert!(outside.contains("open nothing"), "tmux·cmux 밖에서도 칸을 연다");
+        // cmux 의 판은 제 글이 잰다 — `moai-cmux` 는 고른 사람에게만 서서 그 절을 대면 없는 글을 가리킨다.
+        assert!(tabs.contains("`cmux capabilities` lists `surface.input_state`"), "되살리기가 cmux 의 판을 안 잰다");
+        assert!(
+            tabs.contains("    cmux paste --surface <surface> --submit -- - < <file>"),
+            "cmux 탭에 한 덩이로 안 붙인다"
+        );
+        assert!(tabs.contains("(\"Is the input box empty\"\nabove)"), "cmux 탭에 붙이기 전에 입력 칸을 안 본다");
+        assert!(!text.contains("`moai-cmux`"), "되살리기가 심기지 않았을 수 있는 moai-cmux 를 댄다");
         // 빈 입력 칸의 잣대는 제 글 안에 선다 — `moai-tmux` 는 고른 사람에게만 심기니(moai-3r7l) 그 절을 대면 없는
         // 글을 가리킨다(moai-o9je). 잣대는 `moai-tmux` 와 한 상수다.
         assert!(!text.contains("`moai-tmux`, \"Is the"), "되살리기가 심기지 않았을 수 있는 moai-tmux 의 절을 댄다");
         let rule = &text[text.find("\n## Is the input box empty\n").expect("되살리기에 빈 입력 칸의 절이 없다")..];
         let rule = &rule[..rule.find("\n## 1. Find the dead").expect("빈 입력 칸의 절이 1 앞에 안 선다")];
         assert!(rule.contains(EMPTY_BOX) && tmux().contains(EMPTY_BOX), "두 스킬이 빈 입력 칸의 잣대를 따로 적는다");
+        assert!(rule.contains(CMUX_EMPTY_BOX) && cmux().contains(CMUX_EMPTY_BOX), "cmux 의 빈 입력 칸 잣대가 갈렸다");
         assert!(
             EMPTY_BOX.contains("#{pane_in_mode}") && EMPTY_BOX.contains("capture-pane -p -e"),
             "잣대가 칸을 안 본다"

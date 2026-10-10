@@ -1,13 +1,14 @@
 ---
 name: moai-recover
-description: Use in Claude Code when the person asks to bring back the sessions of this repository that died — after a restart, an OOM kill or a crash — so the supervisor and its workers carry on where they stopped. Finds the dead sessions, draws the state each was in, points out background work that never returned and broken target links, and resumes each one in a new tmux pane, or prints the command to type. Triggers on "recover the sessions", "bring the sessions back", "resume the dead sessions", "되살려", "세션 복구", "이어 가게 해".
+description: Use in Claude Code when the person asks to bring back the sessions of this repository that died — after a restart, an OOM kill or a crash — so the supervisor and its workers carry on where they stopped. Finds the dead sessions, draws the state each was in, points out background work that never returned and broken target links, and resumes each one in a new tmux pane or cmux tab, or prints the command to type. Triggers on "recover the sessions", "bring the sessions back", "resume the dead sessions", "되살려", "세션 복구", "이어 가게 해".
 ---
 
 # moai-recover — bring back the sessions that died
 
 Use this when the person asks for it: the sessions of this repository — a supervisor, its
 workers — died together, after a restart, an OOM kill or a crash, and the person wants them
-to carry on. **Their asking is the yes:** inside tmux you open the panes without asking again.
+to carry on. **Their asking is the yes:** inside tmux or cmux you open the panes without asking
+again.
 None of this is a moai command; it is you reading Claude Code's own records and typing where
 the person can watch.
 
@@ -17,9 +18,11 @@ the person can watch.
   the person can see and type into. Never `claude -p`, never a `--dangerously-*` flag, never
   `--permission-mode`
 - **Nothing is killed.** Never `kill-server`, `kill-session` or `kill-pane`, never `pkill`
-  or `killall` aimed at tmux (hook rule 4). A session that is alive is left alone
+  or `killall` aimed at tmux (hook rule 4); inside cmux never `close-surface`, `close-workspace`
+  or `close-window`, and never `--force`. A session that is alive is left alone
 - **Only the panes you opened.** Type only into a pane this skill opened, by the `%N` that
-  `split-window` printed — every call names it, `-t <pane>`
+  `split-window` printed — every call names it, `-t <pane>`. Inside cmux it is the surface UUID
+  `new-split` printed, `--surface <surface>`
 - **Never over the person's words.** Paste only into an empty input box ("Is the input box
   empty" below); otherwise tell the person
 - **No polling.** Every look is one look; the next comes after your next step, as its own
@@ -28,6 +31,8 @@ the person can watch.
   what a dead session left is for that session to pick up
 
 ## Is the input box empty
+
+Inside tmux:
 
     tmux display -p -t <pane> '#{pane_in_mode}'
     tmux capture-pane -p -e -t <pane>
@@ -40,6 +45,18 @@ keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foregrou
 person's text is not. Anything else — a word, a pasted block, a half-typed command — is the
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.
+
+Inside cmux:
+
+    cmux rpc surface.input_state '{"surface_id":"<surface>"}'
+
+cmux reads Claude Code's input box off that surface's screen. The box is **empty** only when
+the answer reads `"state": "empty"` and `"waiting_on_human": false`. `draft` is text someone
+typed or pasted — the person's, even a half-typed word. `dialog` is a prompt or a menu standing
+where the box was. `unknown` is a screen cmux cannot read as Claude Code's — a shell prompt, a
+process that ended. `waiting_on_human` is a permission prompt or a question waiting for the
+person. None of these is a box to type into, and neither is an error or an answer without
+`state`.
 
 **When it is not empty, do not paste.** Tell the person which pane holds what — the words in it
 are theirs.
@@ -191,7 +208,7 @@ Leave out a line that does not hold. The supervisor's block adds one line: **the
 back in new sessions and their names may have changed — run `ListAgents` again** before you
 send or wait for a report.
 
-**Workers first, the supervisor last**, in both ways below — the supervisor's `ListAgents`
+**Workers first, the supervisor last**, in every way below — the supervisor's `ListAgents`
 has to see the workers when it starts.
 
 ## 5. Inside tmux — open a pane each
@@ -213,9 +230,34 @@ If the box has not shown yet, look again after your next step. A prompt in the p
 the folder, say) is the person's to answer — tell them which pane. When all are open, tell the
 person which pane is which session.
 
-## 6. Outside tmux — say what to type
+## 6. Inside cmux — open a tab each
 
-`$TMUX` is not set: open nothing. Print, per session in the same order, the line the person
-types in a terminal of their own, and under it the block to paste once its box shows:
+`CMUX_SURFACE_ID` is set in your shell and `$TMUX` is not — and the cmux is 0.65.0 or later:
+`cmux capabilities` lists `surface.input_state` in its `methods`. On an older cmux, tell the
+person that this way needs cmux 0.65.0, and go to 7. For each session, in that order:
+
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
+
+**No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+is the new tab, the second your workspace. The command is typed into the tab's shell, so the
+shell stays when `claude` exits, and the split does not take focus. When all are open, even
+the splits out once:
+
+    cmux rpc workspace.equalize_splits '{"workspace_id":"<workspace UUID>"}'
+
+Then, as a separate call per tab, look once: when its box is empty ("Is the input box empty"
+above), paste the block:
+
+    cmux paste --surface <surface> --submit -- - < <file>
+
+If cmux refuses — someone's words or a dialog in the box — do not try again; tell the person.
+If the box has not shown yet, look again after your next step. A prompt in the tab (trusting
+the folder, say) is the person's to answer — tell them which tab. When all are open, tell the
+person which tab is which session.
+
+## 7. Outside tmux and cmux — say what to type
+
+Neither way above stands: open nothing. Print, per session in the same order, the line the
+person types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd <cwd> && claude --resume <sessionId>
