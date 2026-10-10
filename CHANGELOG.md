@@ -29,6 +29,14 @@ does not tag — see `CONTRIBUTING.md`.
   sibling snapshot is still named by `broken_worktrees` but no longer hides a
   verdict. (moai-jn4d.ewm)
 
+### Fixed
+
+- **The explorer no longer marks your own rows `⎇ <your branch>` when it runs
+  inside a linked worktree.** That worktree was counted as a sibling of
+  itself, so its stale `.moai` copy was overlaid on the main checkout's rows
+  and its name and pick-up marks hung `⎇` on the work you hold there. The same
+  applies to `--worktree` on `status`, `show` and `ready`. (moai-jn4d.adc)
+
 ## [0.11.0] - 2026-10-08
 
 ### Added
