@@ -55,7 +55,10 @@ worker panes when no worker is idle (2), label the pane you send to and deliver 
 `SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
 window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
-step below goes through messages and the person, as written.
+step below goes through messages and the person, as written. `moai-tmux` is an optional skill:
+it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
+init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
+outside tmux.
 
 **When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
 and the person asks to bring them back, load `moai-recover`, inside tmux or not.

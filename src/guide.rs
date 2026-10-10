@@ -1202,7 +1202,8 @@ the worker reports the same way. moai carries no messaging, and the moai binary 
 launches or drives a session. When the supervisor runs inside tmux, its companion skill
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says
-yes. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+yes. That skill is planted only where it is chosen: `moai skill install --with moai-tmux`
+plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki
@@ -1846,7 +1847,10 @@ worker panes when no worker is idle (2), label the pane you send to and deliver 
 `SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
 window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
-step below goes through messages and the person, as written.
+step below goes through messages and the person, as written. `moai-tmux` is an optional skill:
+it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
+init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
+outside tmux.
 
 **When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
 and the person asks to bring them back, load `moai-recover`, inside tmux or not.

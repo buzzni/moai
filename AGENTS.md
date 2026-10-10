@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.11.0 hash:f1f2dc9b -->
+<!-- moai:begin v:0.11.0 hash:67fc4353 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -530,7 +530,8 @@ the worker reports the same way. moai carries no messaging, and the moai binary 
 launches or drives a session. When the supervisor runs inside tmux, its companion skill
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says
-yes. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+yes. That skill is planted only where it is chosen: `moai skill install --with moai-tmux`
+plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki
