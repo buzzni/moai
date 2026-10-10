@@ -6182,3 +6182,9 @@
 {"ts":"2026-10-10T15:37:36Z","id":"moai-l244","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Person decision (2026-10-10): a worker opened with happy agent spawn runs with --dangerously-skip-permissions (spawn sends no permission mode). Allowed, and the question asked before opening says so. Findings for every member: moai show moai-l244.xw9."}
 {"ts":"2026-10-10T15:37:36Z","id":"moai-l244.xw9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — source reading plus a live test with one spawned worker)"}
 {"ts":"2026-10-10T15:37:36Z","id":"moai-l244.xw9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Open questions answered: prompt reaches siblings, /clear works via prompt, spawn --worktree does not fit .worktrees/; see the findings note."}
+{"ts":"2026-10-10T15:39:57Z","id":"moai-l244.mqc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T15:39:57Z","id":"moai-l244.ab4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T15:39:57Z","id":"moai-l244.oos","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T15:39:57Z","id":"moai-l244.r2b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T15:39:57Z","id":"moai-l244.nj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T15:39:57Z","id":"moai-l244.08k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
