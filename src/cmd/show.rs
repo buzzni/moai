@@ -181,7 +181,7 @@ fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
         Some(SortArg::Title) => SortKey::Title,
         Some(SortArg::Id) => SortKey::Id,
     };
-    crate::query::Sort { key, reversed: p.reverse }
+    crate::query::Sort { reversed: p.reverse, ..crate::query::Sort::by(key) }
 }
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
@@ -409,7 +409,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         })?),
     };
     let more =
-        crate::query::page(&mut shown, &load.issues, &wh, &repo.config, sort_of(&args.page), cursor, args.page.limit);
+        crate::query::page(&mut shown, &load.issues, &wh, &repo.config, &sort_of(&args.page), cursor, args.page.limit);
 
     if ctx.json {
         // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
@@ -1039,7 +1039,12 @@ mod tests {
             let arg = crate::cli::SortArg::from_str(o.name(), false)
                 .unwrap_or_else(|_| panic!("탐색기의 `{}` 가 `--sort` 에 없다", o.name()));
             let page = crate::cli::PageArgs { sort: Some(arg), ..Default::default() };
-            assert_eq!(sort_of(&page).key, crate::tui::App::sort_key(o), "`{}` 가 두 표면에서 다른 차례다", o.name());
+            assert_eq!(
+                sort_of(&page).fields,
+                [crate::query::Field::of(crate::tui::App::sort_key(o))],
+                "`{}` 가 두 표면에서 다른 차례다",
+                o.name()
+            );
         }
         // 거꾸로 — `--sort` 에만 있는 낱말은 쪽을 넘기는 커서의 `id` 하나다(`query::SortKey::Id`).
         for v in crate::cli::SortArg::value_variants() {

@@ -4703,9 +4703,12 @@ impl App {
 
     /// 목록의 차례 — 고른 것(`SPC s`)과 그 방향. 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다.
     /// 담당은 화면에 선 이름으로. 목록과 보드가 이 하나로 줄을 세운다.
+    ///
+    /// **견주는 자는 `moai show --sort` 와 하나다**(moai-r170.f65) — 고른 하나를 필드 하나짜리 차례 목록으로 넘긴다.
+    /// 목록은 스택의 배열이라 견줄 때마다 짓지 않는다.
     fn order_in(&self, site: &Site, a: usize, b: usize) -> std::cmp::Ordering {
         crate::query::order_by(
-            Self::sort_key(self.order.by),
+            &[crate::query::Field::of(Self::sort_key(self.order.by))],
             self.order.reversed,
             (&site.issues[a], site.column(a)),
             (&site.issues[b], site.column(b)),
