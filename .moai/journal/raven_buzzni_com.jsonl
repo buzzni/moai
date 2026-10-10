@@ -5988,3 +5988,5 @@
 {"ts":"2026-10-10T04:50:21Z","id":"moai-r170","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: b2ca95f3"}
 {"ts":"2026-10-10T04:50:31Z","id":"moai-jn4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moai-jn4d-18 (bl4d)"}
 {"ts":"2026-10-10T04:50:39Z","id":"moai-bl4d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T04:59:17Z","id":"moai-bl4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: opus subagent removing Dug/Floor/SideFloor, stranded_at dug param, Unread::blinding, layer blind and tui.place.blind_* in .worktrees/moai-jn4d (from milestone b2ca95f3); then check, commit, epic-end review high, merge into milestone/moai-l92t, report to moa-issue-2f"}
+{"ts":"2026-10-10T05:04:20Z","id":"moai-u99i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moai-r170-c1"}
