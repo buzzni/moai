@@ -6188,3 +6188,6 @@
 {"ts":"2026-10-10T15:39:57Z","id":"moai-l244.r2b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-10T15:39:57Z","id":"moai-l244.nj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-10T15:39:57Z","id":"moai-l244.08k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T15:41:05Z","id":"moai-l244","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: an opus subagent is implementing mqc, ab4, oos, r2b, nj6 and 08k in .worktrees/moai-l244 (brief in this window scratchpad). Then cargo test, /code-review xhigh --fix (members reach high: several files), merge into milestone/moai-2o4o in .worktrees/milestone-moai-2o4o."}
+{"ts":"2026-10-10T16:15:41Z","id":"moai-l244.na1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-l244 moai-saycode skill"}
+{"ts":"2026-10-10T16:15:41Z","id":"moai-l244.na1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
