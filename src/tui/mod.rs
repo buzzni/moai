@@ -4101,10 +4101,12 @@ impl App {
         // - **id 를 못 읽은 줄**(`site.unreadable` 의 `None`). 무엇을 지킬지 모른다
         // - **줄이 낡았다.** 옆 세션이 방금 세운 이슈를 옆 터미널이 읽음으로 적어도, 이 화면은 다음
         //   걸음(최대 700ms)까지 그 줄을 모른다 — 그 틈에 누른 `r` 이 그 도장을 걷는다
+        // - **딸린 워크트리에서 열었다**(`worktree::callers`, moai-jn4d.adc). 겹쳐 보기가 제 워크트리의 사본을
+        //   안 겹치는데, 루트에서 연 탐색기는 그것을 옆으로 겹쳐 거기에만 있는 줄에 도장을 찍는다
         let fresh_enough = self.worktree
             && site.elsewhere.is_empty()
             && site.unreadable.iter().all(Option::is_some)
-            && site.repo.as_ref().is_some_and(|r| stamp_of(r) == site.stamp);
+            && site.repo.as_ref().is_some_and(|r| stamp_of(r) == site.stamp && crate::worktree::callers(r).is_empty());
         let known: std::collections::BTreeSet<&str> = site
             .issues
             .iter()
