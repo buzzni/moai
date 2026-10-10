@@ -29,7 +29,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
     // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
-    let crate::worktree::Gathered { load: active_load, root, origin, trouble, mut watched, swept, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, root, origin, trouble, mut watched, swept, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
     // The explorer can switch between the live board and archived rows. Keep the
     // active overlay from the worktree gather, then add the archive beside it so
@@ -90,9 +90,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // `view::unread_worktree`)을 화면의 말로 편다. 뒤에 놓던 판은 그 한 줄만 도구의 기본 말로
     // 서서, 바로 위에서 고른 말로 편 `trouble` 과 한 배너에 두 말이 섞였다.
     app.site.lang = ctx.lang();
-    let mut app = app.overlaid(origin, trouble, watched, swept, &sides, &mine);
-    // `sides`·`mine` 은 껍데기다(moai-jn4d.ewm) — 탐색기의 `overlaid` 가 이 꼴을 받아 넘길 뿐이고,
-    // moai-bl4d 가 그 꼴과 함께 걷는다.
+    let mut app = app.overlaid(origin, trouble, watched, swept);
     app.user = ctx.user.clone();
     // 누군지는 **띄울 때** 푼다(moai-z9pc) — 못 풀면 [NEW] 가 안 설 뿐이고, 탐색기는 그대로 뜬다. 헤더와
     // 같은 자(`App::whoami`)라 `--user` 도 같이 먹는다. 프로젝트를 옮기면 그 뿌리에서 다시 푼다.
@@ -203,7 +201,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
             .iter()
             .map(|p| {
                 let seen = p.seen(|repo, load| {
-                    let sum = crate::tui::layer::summarize(repo, load, &now, &p.dug());
+                    let sum = crate::tui::layer::summarize(repo, load, &now);
                     Counted {
                         counts: sum.counts.into_iter().collect(),
                         picked: sum.picked.into_iter().map(|i| i.id).collect(),

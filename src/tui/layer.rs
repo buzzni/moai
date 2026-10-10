@@ -293,16 +293,10 @@ pub struct Summary {
     /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
     pub stranded: usize,
     /// 스냅샷을 **못 읽은** 워크트리의 수(`worktree::Unread::all`) — 층의 `!` 와 "스냅샷을 못 읽은
-    /// 워크트리 N곳" 이 이것으로 선다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). **판 것 가운데
-    /// 센다** — 이름만으로 자리가 다 잡히면 옆 스냅샷을 아예 안 연다(`worktree::Unread`). 판정을 안 가려도
-    /// 깨진 파일은 고칠 사람이 알아야 하고, 한눈 보기가 같은 것을 `옆 워크트리 문제 N건` 으로 센다 —
+    /// 워크트리 N곳" 이 이것으로 선다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). 자리 판정은 그
+    /// 스냅샷을 안 보지만(moai-jn4d.ewm) 깨진 파일은 고칠 사람이 알아야 하고, 한눈 보기가 같은 것을 `옆 워크트리 문제 N건` 으로 센다 —
     /// 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
     pub unread: usize,
-    /// 그중 자리 판정을 **가린** 것(`report::blinding`). 그런 워크트리가 있으면 위의 `stranded` 가
-    /// "센 결과 0" 이 아니라 "못 셌다" 인데, 이것이 없으면 층이 그 둘을 같은 화면으로 낸다.
-    /// 못 읽어도 이름이 집은 줄을 가리키는 워크트리는 판정을 안 가리므로 여기 안 든다(moai-rgz9) —
-    /// 들면 다 세고도 "자리를 다 못 셌다" 가 선다.
-    pub blind: usize,
     pub unreadable: usize,
 }
 
@@ -367,8 +361,8 @@ fn registry_of<'a>(
 
 /// 연 프로젝트 하나를 센다 — **설치가 어긋난 것은 여기서 물어서 센다.** 한 번 부르고 마는 자리
 /// (`cmd::tui` 의 `--json`)가 여기로 든다.
-pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate::worktree::Dug<'_>) -> Summary {
-    summarize_with(repo, load, now, dug, crate::cmd::status::install_notices(repo, false).len())
+pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str) -> Summary {
+    summarize_with(repo, load, now, crate::cmd::status::install_notices(repo, false).len())
 }
 
 /// [`summarize`] 의 속 — `install` 은 **설치가 어긋난 것의 수**다(moai-nzyh). 부르는 쪽이 건네는
@@ -384,13 +378,7 @@ pub fn summarize(repo: &Repo, load: &crate::store::Load, now: &str, dug: &crate:
 ///
 /// **시간대는 안 받는다**(moai-fgjj) — 기한 판정은 [`Summary::warnings`] 에 접지 않고 그리는 쪽에
 /// 맡긴다. 그래서 쓸기를 띄우는 스레드도 시간대를 안 들고 간다.
-pub fn summarize_with(
-    repo: &Repo,
-    load: &crate::store::Load,
-    now: &str,
-    dug: &crate::worktree::Dug<'_>,
-    install: usize,
-) -> Summary {
+pub fn summarize_with(repo: &Repo, load: &crate::store::Load, now: &str, install: usize) -> Summary {
     let cfg = &repo.config;
     let unreadable = load.unreadable();
     // **아카이브를 문맥으로 읽는다**(moai-nkwg) — `moai status` 와 같은 자
@@ -411,10 +399,7 @@ pub fn summarize_with(
     // 그 한 명령에만 있어, 층에서 "드러난 문제 없다" 를 보고 들어가면 경고가 서 있었다.
     // 층은 겹쳐 보지 않는다(`projects::open`) — 그 자리의 스냅샷 그대로 잰다.
     // 자리를 재는 뿌리는 **등록한 그 체크아웃**이다(`repo.here()`) — `moai status` 와 같은 자.
-    // **판 것은 연 길에서 받는다**(moai-65ie, `projects::Project::dug`) — 층은 겹쳐 보지 않지만
-    // 제 바닥(`Gathered::mine`)은 겹쳐 보지 않아도 서고(moai-mafv), 그것이 곧 자리 판정이 다시
-    // 파던 그 파일이다. 줄마다 그것을 다시 파면 값이 줄 수만큼 더해진다.
-    let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now, dug);
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), cfg, &load.issues, false, now);
     let stranded = lost.as_ref().map_or(0, |w| w.count);
     Summary {
         counts: cfg.statuses.iter().map(|s| (s.clone(), st.counts.get(s).copied().unwrap_or(0))).collect(),
@@ -454,7 +439,6 @@ pub fn summarize_with(
         notices: st.notices.len() + install,
         stranded,
         unread: unread.all.len(),
-        blind: unread.blinding.len(),
         unreadable: load.errors.len(),
     }
 }
@@ -475,8 +459,6 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
         origin: Default::default(),
         trouble: Vec::new(),
         swept: false,
-        sides: Vec::new(),
-        mine: crate::worktree::Floor::loose(&[]),
         root: None,
     };
     // 말은 층이 들고 온다(moai-ra67) — 한눈 보기(`view::unopened`)가 내는 그 글을 그대로 쓴다.
@@ -486,9 +468,8 @@ fn shut(path: &Path, name: &str, state: State, lang: crate::i18n::Lang) -> Look 
 
 /// 경로들을 연다. **프로젝트마다 제 스레드에서** 읽고, **닿는 대로 하나씩 보낸다**(moai-ezwu).
 ///
-/// 한 줄의 값은 거의 자리 판정(`worktree::stranded_at`)이 옆 워크트리의 스냅샷을 파는 데 들고
-/// (이슈 745·워크트리 일곱에 ~170ms, 판정을 빼면 ~40ms), 줄마다 디스크를 따로 만지므로 서로
-/// 기다릴 까닭이 없다. 차례대로 읽으면 층이 멈추는 값이 프로젝트 수만큼 더해진다.
+/// 한 줄의 값은 거의 디스크를 읽는 데 든다 — 스냅샷과 자리 판정(`worktree::stranded_at`)이 옆 워크트리의
+/// 이름과 표식을 읽는 것. 줄마다 디스크를 따로 만지므로 서로 기다릴 까닭이 없다. 차례대로 읽으면 층이 멈추는 값이 프로젝트 수만큼 더해진다.
 ///
 /// **한 벌로 묶어 보내지 않는다**(리뷰 moai-3lul.kt0) — 묶으면 빠른 줄까지 가장 느린 줄을
 /// 기다려 첫 화면이 통째로 `읽는 중` 으로 서고, 한 줄이 멈춘 마운트에 걸리면 나머지가 영영 안
@@ -529,13 +510,7 @@ fn look_one(path: &Path, held: Option<usize>, now: &str, lang: crate::i18n::Lang
     let marks = marks_of(path);
     // 여는 길은 한눈 보기와 같다(`projects::open_one`) — 상태를 가르는 셈을 두 벌 두지 않는다.
     // 이름은 여기서 안 쓴다(층이 목록 전체로 이미 정했다). 말에 이름은 안 든다.
-    // **한 자리에서 헤친다**(moai-65ie, 리뷰) — `p.dug()` 로 `Project` 를 통째로 빌리면 아래에서
-    // 상태를 꺼낼 수 없어 `worktree::dug` 를 여기서 다시 부르게 되는데, 그러면 "`Project` 에서
-    // `Dug` 를 짓는 법" 이 두 벌이 되어 [`projects::Project::dug`] 가 나중에 무엇을 배워도 이
-    // 줄만 옛 뜻으로 남는다. 헤쳐 놓으면 그 매임이 한 문장에 보인다.
-    let projects::Project { path, name, state, sides, mine, .. } =
-        projects::open_one(path, String::new(), None, false, lang);
-    let dug = crate::worktree::dug(&sides, &mine);
+    let projects::Project { path, name, state, .. } = projects::open_one(path, String::new(), None, false, lang);
     // **묻는 자리는 여기 하나다**(moai-nzyh) — 들고 있던 값이 있으면 그것을 세고 git 을 안 띄운다.
     // 물었는지를 [`Looked`] 에 실어 보내는 까닭은 들이는 쪽이 어느 답에 때를 찍을지를 가려야 해서다.
     let mut asked_install = None;
@@ -546,7 +521,7 @@ fn look_one(path: &Path, held: Option<usize>, now: &str, lang: crate::i18n::Lang
                 asked_install = Some(counted);
                 counted
             });
-            Look::Open { sum: summarize_with(&repo, &load, now, &dug, install) }
+            Look::Open { sum: summarize_with(&repo, &load, now, install) }
         }
         state => shut(&path, &name, state, lang),
     };
@@ -4570,8 +4545,9 @@ mod tests {
     }
 
     /// **겹쳐 보기를 꺼도 스냅샷을 못 읽은 옆 워크트리를 댄다**(리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정
-    /// moai-rgz9.7vt). 자리 판정은 끈 채로도 옆 스냅샷을 파는데, 못 읽은 것을 안 대면 판정이 가려진 0 이
-    /// "없다" 로 읽힌다 — 층은 같은 저장소에 `!` 를 세운다. 켰을 때는 겹치는 읽기가 이미 대므로 두 번 안 댄다.
+    /// moai-rgz9.7vt). 자리 판정은 그 스냅샷을 안 보지만(moai-jn4d.ewm) 깨진 파일은 고칠 사람이 알아야 한다 —
+    /// 끈 채로 안 대면 층은 같은 저장소에 `!` 를 세우는데 안쪽 배너는 조용하다. 켰을 때는 겹치는 읽기가 이미
+    /// 대므로 두 번 안 댄다.
     #[test]
     fn turning_the_overlay_off_still_names_a_sibling_snapshot_it_could_not_read() {
         let s = Scratch::fenced("layer-unread-sibling");
@@ -4585,7 +4561,7 @@ mod tests {
         let cfg = s.register(&[&main]);
         let mut a = layered(&cfg);
         let Look::Open { sum } = look(&a, "main") else { panic!("main 이 안 열렸다") };
-        assert_eq!((sum.unread, sum.blind), (1, 1), "층이 못 읽은 옆 스냅샷을 안 댄다");
+        assert_eq!(sum.unread, 1, "층이 못 읽은 옆 스냅샷을 안 댄다");
 
         let named = |a: &App| a.site.elsewhere.iter().filter(|l| l.contains("wt-x")).count();
         a.key(key(KeyCode::Enter));
@@ -4617,8 +4593,7 @@ mod tests {
         // 전제: 겹친 것으로 재면 끝난 일이 자리 없다로 선다. 시계는 줄의 때(2026-09-01)에서 한참 지난
         // 것으로 준다 — 방금 집은 줄의 틈에 걸리면 전제가 안 선다.
         assert_eq!(
-            super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", &Default::default(), crate::i18n::Lang::Ko)
-                .0,
+            super::super::placed(&repo, &own, true, "2026-09-10T00:00:00Z", crate::i18n::Lang::Ko).0,
             1,
             "전제가 안 섰다"
         );
@@ -4642,8 +4617,6 @@ mod tests {
             crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko),
             g.watched,
             g.swept,
-            &g.sides,
-            &g.mine,
         );
         assert_eq!(
             a.site.warnings.shown(),
@@ -4794,8 +4767,6 @@ mod tests {
             crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko),
             g.watched,
             g.swept,
-            &g.sides,
-            &g.mine,
         );
         let paths: std::collections::BTreeSet<PathBuf> = a.site.watched.iter().map(|(p, _)| p.clone()).collect();
         assert_eq!(paths.len(), a.site.watched.len(), "같은 파일을 두 번 지켜본다");

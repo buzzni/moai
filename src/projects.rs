@@ -40,13 +40,6 @@ pub struct Project {
     /// 옆 워크트리를 빠짐없이 열어 봤는가 (`worktree::Gathered::swept`) — 그러면 못 읽은 옆
     /// 스냅샷은 `trouble` 에 이미 섰다.
     pub swept: bool,
-    /// 여는 길이 넘기던 것([`crate::worktree::Gathered::sides`]·[`crate::worktree::Gathered::mine`]) —
-    /// **이제 껍데기다**(moai-jn4d.ewm). 자리 판정이 옆 스냅샷을 안 파게 되어 실어 보낼 것이 없는데, 층
-    /// (`tui::layer::look_one`)이 이 둘을 빌려 [`crate::worktree::dug`] 로 넘기므로 남는다 — 그 파일을
-    /// moai-r170 이 쥔 동안이고, 머지된 뒤 moai-bl4d 가 걷는다.
-    pub sides: Vec<crate::worktree::SideFloor>,
-    /// 위 `sides` 와 한 짝인 껍데기다.
-    pub mine: crate::worktree::Floor,
     /// 겹치기 전의 제 스냅샷([`crate::worktree::Gathered::root`]) — 옆에서 줄이 들어왔을 때만 선다(moai-ug6x.pi3).
     /// 한눈 보기가 아카이브의 충돌을 이것과 견준다. 한때 버리고 프로젝트마다 `repo.read()` 로 다시 풀었다.
     pub root: Option<Load>,
@@ -132,8 +125,8 @@ pub fn open_one(
     worktree: bool,
     lang: crate::i18n::Lang,
 ) -> Project {
-    let Dig { state, origin, trouble, swept, sides, mine, root } = State::at_with(path, worktree, lang);
-    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept, sides, mine, root }
+    let Dig { state, origin, trouble, swept, root } = State::at_with(path, worktree, lang);
+    Project { path: path.to_path_buf(), name, hue, state, origin, trouble, swept, root }
 }
 
 /// [`State::at_with`] 이 낸 것 — 상태와, 여는 길이 함께 판 것. **튜플로 내지 않는다**: 여섯이
@@ -143,8 +136,6 @@ struct Dig {
     origin: crate::worktree::Origin,
     trouble: Vec<crate::worktree::Trouble>,
     swept: bool,
-    sides: Vec<crate::worktree::SideFloor>,
-    mine: crate::worktree::Floor,
     root: Option<Load>,
 }
 
@@ -184,8 +175,6 @@ impl State {
             origin: crate::worktree::Origin::default(),
             trouble: Vec::new(),
             swept: false,
-            sides: Vec::new(),
-            mine: crate::worktree::Floor::loose(&[]),
             root: None,
         };
         let repo = match open_shallow(dir, lang) {
@@ -200,8 +189,6 @@ impl State {
                     origin: g.origin,
                     trouble,
                     swept: g.swept,
-                    sides: g.sides,
-                    mine: g.mine,
                     root: g.root,
                 }
             }
@@ -211,12 +198,6 @@ impl State {
 }
 
 impl Project {
-    /// [`crate::worktree::stranded_at`] 이 받는 껍데기([`crate::worktree::Dug`]) — 탐색기가 이 꼴로 부르므로
-    /// moai-bl4d 까지 남는다(moai-jn4d.ewm).
-    pub fn dug(&self) -> crate::worktree::Dug<'_> {
-        crate::worktree::dug(&self.sides, &self.mine)
-    }
-
     /// 연 프로젝트면 `f` 로 그 프로젝트 하나만 본 것을 들고, 아니면 그 상태를 든다.
     ///
     /// 받는 쪽이 넷을 매번 `match` 하지 않고 **연 것에 대해서만** 말하게 한다 —

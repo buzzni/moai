@@ -352,40 +352,6 @@ pub struct Gathered {
     /// 워크트리들의 HEAD 가 움직인 것을 알리는 git 파일도 든다([`heads`]) — 갈라진 자리가
     /// 바뀌면 지운 줄 숨김의 답이 바뀐다(moai-pqrq).
     pub watched: Vec<(PathBuf, crate::store::Stamp)>,
-    /// **늘 비어 있다**(moai-jn4d.ewm) — 자리 셈([`workplaces`])이 옆 스냅샷을 안 보게 된 뒤로 실어
-    /// 보낼 것이 없다. 탐색기(`src/tui/`)가 이 이름을 읽어 [`dug`] 로 넘기므로 껍데기로 남긴다 — 그
-    /// 파일을 다른 일(moai-r170)이 쥔 동안이고, 그것이 머지된 뒤 moai-bl4d 가 걷는다.
-    pub sides: Vec<SideFloor>,
-    /// 아래 `sides` 와 같은 껍데기([`Floor`]) — 같은 까닭으로 남고 같은 일이 걷는다.
-    pub mine: Floor,
-}
-
-/// 자리 셈에 건넬 것이 없는 **껍데기**(moai-jn4d.ewm). 한때 제 스냅샷의 줄마다 견줄 값을 들어,
-/// 자리 셈이 "옆이 여기보다 늦게 만졌는가" 를 그것으로 쟀다. 자리를 이름과 집은 표식으로만 가르게 된
-/// 뒤로 잴 것이 없다 — 탐색기(`src/tui/`, moai-r170 이 쥐고 있다)가 이 이름과 [`Floor::loose`] 를
-/// 부르므로 남기고, moai-bl4d 가 [`SideFloor`]·[`Dug`]·[`dug`] 와 함께 걷는다.
-pub struct Floor;
-
-impl Floor {
-    /// 받는 줄은 안 본다 — 부르는 쪽의 꼴을 그대로 두려고 받는다.
-    pub fn loose(_mine: &[Issue]) -> Floor {
-        Floor
-    }
-}
-
-/// [`Floor`] 와 같은 껍데기 — 한때 옆 워크트리의 스냅샷에서 자리 셈이 쓸 만큼을 떴다([`Gathered::sides`]).
-pub type SideFloor = ();
-
-/// 부르는 쪽이 이미 판 것을 실어 보내던 그릇의 **껍데기**([`Floor`] 와 같은 까닭, moai-jn4d.ewm) —
-/// [`stranded_at`] 이 받기는 하지만 안 본다.
-#[derive(Default)]
-pub struct Dug<'a> {
-    _handed: std::marker::PhantomData<&'a ()>,
-}
-
-/// [`Gathered::sides`]·[`Gathered::mine`] 을 [`Dug`] 로 — 껍데기라 아무것도 안 든다.
-pub fn dug<'a>(_sides: &'a [SideFloor], _mine: &'a Floor) -> Dug<'a> {
-    Dug::default()
 }
 
 /// 제 저장소를 읽고, `worktree` 면 다른 워크트리의 스냅샷을 겹친다.
@@ -422,8 +388,6 @@ fn gather_with(repo: &Repo, worktree: bool, screen: bool) -> crate::fail::R<Gath
             unfound: None,
             swept: false,
             watched: Vec::new(),
-            sides: Vec::new(),
-            mine: Floor,
         });
     }
     let mut trouble = Vec::new();
@@ -519,17 +483,7 @@ fn gather_with(repo: &Repo, worktree: bool, screen: bool) -> crate::fail::R<Gath
     let root = before.map(|issues| Load { issues, errors: errors.clone() });
     origin.named = named;
     let swept = unfound.is_none();
-    Ok(Gathered {
-        load: Load { issues, errors },
-        root,
-        origin,
-        trouble,
-        unfound,
-        swept,
-        watched,
-        sides: Vec::new(),
-        mine: Floor,
-    })
+    Ok(Gathered { load: Load { issues, errors }, root, origin, trouble, unfound, swept, watched })
 }
 
 /// 이 화면을 **부른 쪽의 딸린 워크트리** 꼭대기들(링크를 푼 자리) — [`gather`] 가 옆에서 빼는 자리다(moai-jn4d.adc).
@@ -1088,11 +1042,6 @@ pub struct Unread {
     /// 스냅샷을 못 읽은 워크트리 전부 — 사람 화면이 `⎇ <가지>: <경로>` 로 한 줄씩 대고
     /// `옆 워크트리 문제 N건` 이 센다. 기계에는 `status --json` 의 `broken_worktrees` 다(moai-zah3).
     pub all: Vec<crate::report::Workplace>,
-    /// 그중 이름이 집은 줄을 하나도 못 가리키는 것([`crate::report::blinding_in`]) — **탐색기 층의 셈만
-    /// 읽는다.** 한때 "자리 판정을 가렸다" 는 뜻이었는데, 자리가 스냅샷을 안 보게 되어(moai-jn4d.ewm)
-    /// 가릴 판정이 없다. `status --json` 의 `unreadable_worktrees` 는 그래서 걷었고, 탐색기(`src/tui/`)가
-    /// 이 수를 아직 읽어 남는다 — moai-r170 이 그 파일을 쥔 동안이고, 머지된 뒤 moai-bl4d 가 걷는다.
-    pub blinding: Vec<crate::report::Workplace>,
 }
 
 /// 자리 없는 줄 경고와, 못 읽은 워크트리들 — **표면 셋이 같은 자를 쓴다**(moai-p3bs).
@@ -1101,25 +1050,21 @@ pub struct Unread {
 /// 셌고, 그래서 **죽은 세션을 찾으러 돌아온 사람이 보는 화면**(층과 밖 한눈 보기)에만 그 말이
 /// 없었다. 경로는 [`workplaces`] 가 이미 [`main_top`] 에서 잰 것이다 — `show` 와 같은 자다.
 ///
-/// `dug` 는 **안 본다** — 자리 셈이 옆 스냅샷을 파던 때 부르는 쪽이 판 것을 건네던 자리고([`Dug`]), 탐색기가
-/// 이 꼴로 부르므로 moai-bl4d 까지 남는다.
+/// 자리는 워크트리 이름과 집은 표식으로만 잰다(moai-jn4d.ewm) — 옆 스냅샷을 안 판다. 깨진 스냅샷은
+/// 어느 자리도 가리지 않고 `Unread::all` 에 들어 말만 된다.
 pub fn stranded_at(
     root: &Path,
     cfg: &crate::config::Config,
     issues: &[Issue],
     worktree: bool,
     now: &str,
-    _dug: &Dug<'_>,
 ) -> (Option<crate::report::Warning>, Unread) {
-    // **재료는 한 벌이다**([`crate::report::Footing`], moai-rviv) — 판정과 곁의 셈이 같은 줄을 세고
-    // 같은 소속 지도를 읽는다. 게을러서, 볼 워크트리가 없으면 안 짓는다.
+    // 재료([`crate::report::Footing`], moai-rviv)는 게을러서, 볼 워크트리가 없으면 안 짓는다.
     let footing = crate::report::Footing::of(issues, cfg);
     let trees = workplaces(root, worktree);
     let warning = crate::report::stranded_in(&footing, &trees, now);
-    let blinding: Vec<crate::report::Workplace> =
-        crate::report::blinding_in(&footing, &trees).into_iter().cloned().collect();
     let all = trees.into_iter().filter(|t| t.broken).collect();
-    (warning, Unread { all, blinding })
+    (warning, Unread { all })
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.

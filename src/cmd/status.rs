@@ -58,9 +58,8 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 자다. 트래커의 자리로 재던 판은 루트로 옮겨 간 워크트리 안에서 `status` 만 자리를 파, 같은
     // 자리에서 `show` 는 아무 말도 안 하는데 보드는 `자리 없다` 를 댔다(moai-6opu.p65 가 한 곳에
     // 모아 둔 판단이 부르는 쪽마다 다른 뿌리를 받아 또 갈렸다).
-    // 자리는 이름과 집은 표식으로만 잰다(moai-jn4d.ewm) — 넘기는 `Dug` 는 탐색기 때문에 남은 껍데기다.
-    let (lost, unread) =
-        crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, swept, &now, &Default::default());
+    // 자리는 이름과 집은 표식으로만 잰다(moai-jn4d.ewm).
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, swept, &now);
     st.warnings.extend(lost);
     // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정은 그 스냅샷을 안 보지만
     // (moai-jn4d.ewm) 깨진 파일은 고칠 사람이 있어야 고쳐진다. 옆 워크트리의 문제로 세는 자리는
@@ -404,8 +403,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             let (mut status, archived) =
                 archive_board(repo, &load.issues, &unreadable, (&root.issues, &root.unreadable()), &now, ctx.zone());
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
-            let (lost, unread) =
-                crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now, &p.dug());
+            let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now);
             status.warnings.extend(lost);
             // **설치가 어긋난 것도 여기서 센다**(moai-zog5, 2026-09-22 사용자 결정) — 안쪽
             // `moai status` 와 탐색기의 프로젝트 층이 이미 세는 그 셋이다([`install_notices`]).

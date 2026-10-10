@@ -804,12 +804,9 @@ fn prepare(repo: &Repo, worktree: bool, lang: crate::i18n::Lang, held: Option<us
     watch(&mut watched, heads);
     watch(&mut watched, places);
     watch(&mut watched, archived_marks);
-    // 옆을 **실제로 겹쳤는가**로 잰다 — 켠 깃발이 아니다([`placed`]).
-    // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다(moai-kos1) — 자리 판정이 바로 앞에서 푼 같은
-    // 파일을 다시 열어 파고 있었다. 걸음마다 치르던 값이라 쓰기·`SPC r`·프로젝트 들어가기가
-    // 그것을 그대로 물었다(이 저장소에서 ~130ms).
-    // **제 스냅샷도 그대로 넘긴다**(moai-mafv) — 걸음마다 다시 파던 마지막 한 벌이다.
-    let (lost, said) = placed(repo, &issues, g.swept, &now, &crate::worktree::dug(&g.sides, &g.mine), lang);
+    // 옆을 **실제로 겹쳤는가**로 잰다 — 켠 깃발이 아니다([`placed`]). 자리 판정은 이름과 집은
+    // 표식만 읽어(moai-jn4d.ewm) 겹치며 판 스냅샷을 건네받을 것이 없다.
+    let (lost, said) = placed(repo, &issues, g.swept, &now, lang);
     // 순수한 셈이 못 내는 몫은 여기서 더한다 — 자리 판정은 디스크를 읽어야 안다.
     warnings.add(lost);
     // 옆 워크트리의 문제는 **펴서** 싣는다(moai-dpbi) — 여는 화면(`cmd::tui`)과 같은 자다.
@@ -997,7 +994,7 @@ pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::pat
 /// 0 을 봤다(사용자 결정 2026-09-18 — 안쪽이 `moai status` 에 맞춘다).
 ///
 /// [`board`] 에 안 넣고 따로 둔 까닭: 그것은 줄과 아카이브에 대한 셈인데, 이것은 디스크의 워크트리를
-/// 읽는다(이름으로 안 잡히는 집은 줄이 있으면 옆 스냅샷을 판다). 그래서 읽을 때마다 한 번 재어 더한다
+/// 읽는다(워크트리 이름과 집은 표식, moai-jn4d.ewm). 그래서 읽을 때마다 한 번 재어 더한다
 /// ([`prepare`]·[`App::overlaid`]).
 ///
 /// **`overlaid` 는 옆을 실제로 겹쳤는가다**(`Gathered::swept`), 켠 깃발이 아니다. 탐색기의 기본값(켬)
@@ -1010,19 +1007,12 @@ pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::pat
 /// **못 읽은 옆 스냅샷은 겹치지 못했을 때만 댄다** — 겹쳤으면 `gather` 가 같은 워크트리를 `elsewhere`
 /// 에 이미 댔다(`moai status` 의 `swept` 와 같은 자). 안 대면 판정이 가려진 0 이 "없다" 로 읽히고,
 /// 층은 같은 저장소에 `!` 를 세운다(리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정 moai-rgz9.7vt).
-fn placed(
-    repo: &Repo,
-    issues: &[Issue],
-    overlaid: bool,
-    now: &str,
-    dug: &crate::worktree::Dug<'_>,
-    lang: crate::i18n::Lang,
-) -> (usize, Vec<String>) {
+fn placed(repo: &Repo, issues: &[Issue], overlaid: bool, now: &str, lang: crate::i18n::Lang) -> (usize, Vec<String>) {
     // **자리는 세션이 선 체크아웃에서 잰다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 지켜볼 것을
     // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
     // 워크트리 안에서 자리를 파면서 그 자리들을 하나도 안 지켜봐, 옆 워크트리를 치워도 배너가
     // 옛 수로 섰다(moai-al0x 가 고친 자리다).
-    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, issues, overlaid, now, dug);
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, issues, overlaid, now);
     let said = match overlaid {
         true => Vec::new(),
         false => unread
@@ -2031,11 +2021,6 @@ impl App {
         mut elsewhere: Vec<String>,
         watched: Vec<(std::path::PathBuf, Stamp)>,
         swept: bool,
-        // 겹치며 이미 판 옆 스냅샷([`crate::worktree::Gathered::sides`]) — 자리 판정이 같은
-        // 파일을 다시 열어 파지 않게 넘긴다(moai-kos1). 첫 화면이 바로 이 값을 물었다.
-        sides: &[crate::worktree::SideFloor],
-        // 겹치기 전에 잰 제 스냅샷([`crate::worktree::Gathered::mine`], moai-mafv) — 같은 까닭이다.
-        mine: &crate::worktree::Floor,
     ) -> App {
         self.site.unreadable = origin
             .unreadable(self.site.unreadable.iter().map(Option::as_deref))
@@ -2046,9 +2031,7 @@ impl App {
         // `prepare` 가 같은 자로 세어 [`Fresh::warnings`] 에 실어 온다. 위의 셈에 **한 번만** 더한다 —
         // 이 길은 여는 읽기 하나가 한 번 지난다.
         if let Some(repo) = &self.site.repo {
-            let dug = crate::worktree::dug(sides, mine);
-            let (lost, said) =
-                placed(repo, &self.site.issues, self.worktree && swept, &self.site.now, &dug, self.site.lang);
+            let (lost, said) = placed(repo, &self.site.issues, self.worktree && swept, &self.site.now, self.site.lang);
             // **더한 몫을 따로 안 들고 있는다**(moai-fgjj) — 이 합을 다시 셀 일이 없어졌다.
             // 한때 시간대를 입히는 걸음이 [`App::count_all`] 을 다시 불러 이 줄을 배너에서 통째로
             // 지웠고(리뷰 moai-pmhv.x3r 1번), 그래서 더한 몫을 [`Site`] 에 들고 도로 얹었다.
@@ -10589,8 +10572,6 @@ mod tests {
             Vec::new(),
             g.watched,
             g.swept,
-            &g.sides,
-            &g.mine,
         );
         let (warnings, notices) = (a.site.warnings.shown(), a.site.notices);
         assert_eq!(notices, install, "여는 읽기가 설치 알림을 안 더했다 — 아래 줄이 헛돈다");
@@ -10628,8 +10609,6 @@ mod tests {
             crate::tui::said_trouble(&g.trouble, crate::i18n::Lang::Ko),
             g.watched,
             g.swept,
-            &g.sides,
-            &g.mine,
         );
         assert!(a.site.commits_of("argos-0001").is_empty(), "여는 읽기가 git 을 기다렸다");
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
