@@ -3366,6 +3366,24 @@ mod tests {
         assert!(!text.contains("hidden") && text.contains("sort = \"title\"") && text.contains("extra = 1"), "{text}");
     }
 
+    /// **같은 차례 목록은 다시 안 쓴다**(moai-r170.8dz, `write_value` 의 배열 견주기) — 옆 탐색기가 같은 차례를 이미
+    /// 적었으면 이 세션의 차이가 실려도 파일은 바이트째 그대로고, 손으로 벌인 여러 줄 모양도 남는다. 낱말이 하나라도
+    /// 다르거나 낱말 아닌 원소가 섰으면 갈아 끼운다.
+    #[test]
+    fn the_same_order_list_is_not_written_again() {
+        let src = "[tui]\norder = [\n  \"status\",  # 칸 먼저\n  \"title:desc\",\n]\n";
+        let new = Look { order: Some(vec!["status".into(), "title:desc".into()]), ..Look::default() };
+        let mut doc = Doc::parse(src).unwrap();
+        doc.merge_look(&Look::default(), &new).unwrap();
+        assert!(!doc.changed(), "같은 차례를 다시 적었다\n{}", doc.render());
+        assert_eq!(doc.render(), src);
+        for other in ["[tui]\norder = [\"status\"]\n", "[tui]\norder = [\"status\", 3]\n"] {
+            let mut doc = Doc::parse(other).unwrap();
+            doc.merge_look(&Look::default(), &new).unwrap();
+            assert!(doc.render().contains("order = [\"status\", \"title:desc\"]"), "{other}\n{}", doc.render());
+        }
+    }
+
     /// **프로젝트마다의 차례는 그 프로젝트의 `order` 하나만 고친다**(moai-r170.8dz). 그 표의 다른 키·주석·옆 프로젝트의
     /// 표는 그대로고, 안 바꾼 것은 한 바이트도 안 움직인다. 표 모양이 아닌 자리는 읽기가 알리고 쓰기가 건너뛴다.
     #[test]
@@ -3614,6 +3632,7 @@ mod tests {
         let fields = Look { fields: Some(vec!["id".into()]), ..Look::default() };
         let deferred = Look { hide_deferred: Some(true), ..Look::default() };
         let detail = Look { detail: Some(true), ..Look::default() };
+        let ordered = Look { order: Some(vec!["title".into()]), ..Look::default() };
         // 탐색기는 저장마다 `fields_known` 을 싣는다 — 다른 키 하나만 바꿔도 이 키를 본다.
         let toggle = Look { fields_known: Some(vec!["id".into()]), ..detail.clone() };
         for (src, new, key) in [
@@ -3621,6 +3640,9 @@ mod tests {
             ("[tui]\nsort = { by = \"created\" }\n", &title, "sort"),
             ("[tui]\nsort = [\"created\"]\n", &title, "sort"),
             ("[tui]\nsort_reversed.x = true\n", &title, "sort_reversed"),
+            // 차례 목록(moai-r170.8dz)도 차례와 한 벌이다 — 표 모양이면 그것도, 옛 한 쌍도 안 적는다.
+            ("[tui]\norder = { by = \"created\" }\n", &ordered, "order"),
+            ("[tui.order]\nby = \"created\"\n", &ordered, "order"),
             ("[tui.sort]\nby = \"created\"\n", &title, "sort"),
             ("[tui]\nhidden = { done = true }\n", &hide, "hidden"),
             ("[tui]\nhidden.done = true\n", &hide, "hidden"),

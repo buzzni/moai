@@ -29,7 +29,8 @@ does not tag — see `CONTRIBUTING.md`.
   and one picked in the all-projects list (`0`) is written as `order` under
   `[tui]`, the default for every project without its own. Entering a project
   puts its own sort back; one sort no longer follows you from project to
-  project. `order` takes the words of `moai show --sort` (`"updated:asc"`).
+  project. `order` takes the words of `moai show --sort` (`"updated:asc"`)
+  except `id`, which the explorer does not sort by.
   Where `order` is absent the older `sort`/`sort_reversed` pair is read as
   before, and every write of `[tui] order` also writes that pair from its
   first field, so an older moai on the same config shows the nearest order.
@@ -40,7 +41,7 @@ does not tag — see `CONTRIBUTING.md`.
   direction, and pressing the same key again turns that field around; the
   lowercase keys still make the order that one field. `SPC s e` opens a sort
   window with all six fields, the ones in the order numbered and marked
-  `↑ asc` or `↓ desc`: `j`/`k` move, `J`/`K` move a field up or down the order,
+  `↑ asc` or `↓ desc`: `j`/`k` move, `J`/`K` move a field down or up the order,
   `SPC` puts a field in or takes it out, `d` turns its direction, `Enter`
   applies it where you stand, `D` also keeps it as the default (`[tui] order`)
   even inside a project, and `Esc` leaves without a change. The path line

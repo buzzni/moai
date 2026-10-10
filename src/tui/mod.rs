@@ -3375,10 +3375,12 @@ impl App {
         if let Some(k) = self.order_projects.keys().find(spelled) {
             return Some(k.clone());
         }
+        // 지금 자리는 한 번만 푼다 — `same_dir` 은 두 쪽을 다 풀어, 열쇠마다 부르면 같은 자리를 열쇠 수만큼 다시 판다.
         let real = std::fs::canonicalize(&here).unwrap_or(here);
-        if let Some(k) =
-            self.order_projects.keys().find(|k| crate::user_config::same_dir(std::path::Path::new(k.as_str()), &real))
-        {
+        if let Some(k) = self.order_projects.keys().find(|k| {
+            let k = std::path::Path::new(k.as_str());
+            k == real || std::fs::canonicalize(k).is_ok_and(|k| k == real)
+        }) {
             return Some(k.clone());
         }
         Some(real.display().to_string())

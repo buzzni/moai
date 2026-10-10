@@ -422,10 +422,11 @@ Order and paging:
   (the column order of .moai/config.toml), assignee (the name the screen
   shows, unowned last), title (ignoring case), id. A field without a
   direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger. A field is
-  given once. When every field ties, a last field of created or updated
-  falls to id alone, and any other to priority, then id. --reverse turns
-  the whole order around, ties included.
+  (p0, the oldest, the first column, A) and :desc the larger - unowned
+  rows go first under assignee:desc. A field is given once. When every
+  field ties, a last field of created or updated falls to id alone, and
+  any other to priority, then id. --reverse turns the whole order around,
+  ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -1188,10 +1189,11 @@ Order and paging:
   (the column order of .moai/config.toml), assignee (the name the screen
   shows, unowned last), title (ignoring case), id. A field without a
   direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger. A field is
-  given once. When every field ties, a last field of created or updated
-  falls to id alone, and any other to priority, then id. --reverse turns
-  the whole order around, ties included.
+  (p0, the oldest, the first column, A) and :desc the larger - unowned
+  rows go first under assignee:desc. A field is given once. When every
+  field ties, a last field of created or updated falls to id alone, and
+  any other to priority, then id. --reverse turns the whole order around,
+  ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -1464,10 +1466,11 @@ Order and paging:
   (the column order of .moai/config.toml), assignee (the name the screen
   shows, unowned last), title (ignoring case), id. A field without a
   direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger. A field is
-  given once. When every field ties, a last field of created or updated
-  falls to id alone, and any other to priority, then id. --reverse turns
-  the whole order around, ties included.
+  (p0, the oldest, the first column, A) and :desc the larger - unowned
+  rows go first under assignee:desc. A field is given once. When every
+  field ties, a last field of created or updated falls to id alone, and
+  any other to priority, then id. --reverse turns the whole order around,
+  ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -1740,10 +1743,11 @@ Order and paging:
   (the column order of .moai/config.toml), assignee (the name the screen
   shows, unowned last), title (ignoring case), id. A field without a
   direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger. A field is
-  given once. When every field ties, a last field of created or updated
-  falls to id alone, and any other to priority, then id. --reverse turns
-  the whole order around, ties included.
+  (p0, the oldest, the first column, A) and :desc the larger - unowned
+  rows go first under assignee:desc. A field is given once. When every
+  field ties, a last field of created or updated falls to id alone, and
+  any other to priority, then id. --reverse turns the whole order around,
+  ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -2037,10 +2041,11 @@ Order and paging:
   (the column order of .moai/config.toml), assignee (the name the screen
   shows, unowned last), title (ignoring case), id. A field without a
   direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger. A field is
-  given once. When every field ties, a last field of created or updated
-  falls to id alone, and any other to priority, then id. --reverse turns
-  the whole order around, ties included.
+  (p0, the oldest, the first column, A) and :desc the larger - unowned
+  rows go first under assignee:desc. A field is given once. When every
+  field ties, a last field of created or updated falls to id alone, and
+  any other to priority, then id. --reverse turns the whole order around,
+  ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -2403,7 +2408,7 @@ Options:
     SPC s P, SPC s C, SPC s U, SPC s S, SPC s A, SPC s T  the same field
              added at the end of the order [↑ asc/↓ desc]
     SPC s e  edit the order in a window — described below
-    SPC c i  id                 SPC c p  priority           SPC c a  assignee
+    SPC c i  id                  SPC c p  priority           SPC c a  assignee
     SPC c c  created             SPC c u  updated            SPC c n  counts
     SPC c t  tag                 SPC c h  column names [shown/hidden]
     SPC c e  epic — the name of the epic the row is in; off to begin with
@@ -2479,9 +2484,10 @@ Options:
   inside a project is kept for that project alone, as order under
   [tui.project."<project path>"], and one picked in 0 is kept as order under
   [tui] — the default for every project without its own. order is a list in
-  the words of `moai show --sort`, such as ["priority", "updated:asc"], and
-  the older sort and sort_reversed pair is still read where order is absent
-  and written beside it from the first field, for an older moai.
+  the words of `moai show --sort` but id, such as
+  ["priority", "updated:asc"], and the older sort and sort_reversed pair
+  is still read where order is absent and written beside it from the first
+  field, for an older moai.
 
   SPC s e opens the sort window over the list. All six fields stand in it:
   the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
