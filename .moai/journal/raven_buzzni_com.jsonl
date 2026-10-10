@@ -6017,3 +6017,23 @@
 {"ts":"2026-10-10T05:18:55Z","id":"moai-u99i.74b","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: an opus subagent is implementing this in .worktrees/moai-u99i (uncommitted); this window then checks, commits and runs the epic-end review"}
 {"ts":"2026-10-10T05:18:55Z","id":"moai-u99i.ijq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: an opus subagent is implementing this in .worktrees/moai-u99i (uncommitted); this window then checks, commits and runs the epic-end review"}
 {"ts":"2026-10-10T05:18:55Z","id":"moai-u99i.inx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: an opus subagent is implementing this in .worktrees/moai-u99i (uncommitted); this window then checks, commits and runs the epic-end review"}
+{"ts":"2026-10-10T05:37:19Z","id":"moai-u99i.0pq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-u99i moai-tmux skill and reversed supervisor texts"}
+{"ts":"2026-10-10T05:37:19Z","id":"moai-u99i.lhb","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T05:37:19Z","id":"moai-u99i.xo8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T05:37:20Z","id":"moai-u99i.2pg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T05:37:20Z","id":"moai-u99i.50e","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T05:37:20Z","id":"moai-u99i.74b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T05:37:20Z","id":"moai-u99i.ijq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T05:37:21Z","id":"moai-u99i.inx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-10T05:37:25Z","id":"moai-u99i.0pq","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T05:37:33Z","id":"moai-u99i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: implementation committed on worktree-moai-u99i (5210c79f, 5d5efc22, 77fde610); epic-end /code-review high --fix running in background (review moai-u99i.0pq). Then take findings in as fix: commits, merge into milestone/moai-xit3, close."}
+{"ts":"2026-10-10T05:39:05Z","id":"moai-0fkd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.14.0"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"cmux 사용자용 스킬 — 감독이 cmux 를 쓴다"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.6uv","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"cmux 실기 조사: 감지 env(CMUX_*), 명령 이름, Claude 세션→surface 다리"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.lz0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai-cmux 스킬을 심는다 (Claude 전용, cmux 안일 때만)"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.7q3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"일꾼 이름과 cmux surface 를 잇는다"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.io4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크스페이스·탭 제목에 일꾼 이름과 이슈 id 를 단다"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.cwj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"idle 일꾼에 /clear·SendMessage 대체를 cmux send 로"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.6ud","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"read-screen 으로 멈춘 일꾼을 찾아 사람에게 알린다"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.vxb","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"쉬는 일꾼이 없으면 물은 뒤 new-split 으로 일꾼을 띄운다"}
+{"ts":"2026-10-10T05:39:19Z","id":"moai-p5sz.kfi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"recovery 스킬(moai-uqf7)에 cmux 길을 더한다"}
