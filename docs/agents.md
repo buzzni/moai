@@ -124,14 +124,15 @@ skills. The steps only one agent has — entering a worktree, asking the person,
 calling the review, changing the model, clearing the window, calling a skill,
 stopping what a review left running — sit in a "Words per agent" table in the
 `moai` skill, one column per agent, and each agent reads its own. A step an agent
-does not have reads `—`: tell the person and go on. The supervisor skill, planted
-for Claude Code only, names Claude Code's tools directly.
+does not have reads `—`: tell the person and go on. The supervisor skill and its
+tmux companion, planted for Claude Code only, name Claude Code's tools directly.
 
-Three skills come with it:
+Four skills come with it:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
     moai-wiki         keeps this wiki in step with the work
     moai-supervise    Claude Code only: hands piled-up backlog items to the idle sessions of the repository
+    moai-tmux         Claude Code only: the supervisor's hands on the workers' tmux panes
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
@@ -147,11 +148,16 @@ Three skills come with it:
   own messaging — [Hand work to idle sessions](#hand-work-to-idle-sessions).
   The worker's way of working is on
   [the workflow page](workflow.md#work-in-a-worktree)
+- **`moai-tmux`** is what the supervisor loads when it runs inside tmux: it maps
+  a worker's `ListAgents` name to its pane and lets the supervisor label, clear
+  and paste into that pane, and open new worker panes once you say yes —
+  [In tmux](#in-tmux)
 
 ## Open a session for each agent
 
-moai never starts a session, and nothing runs headless. Open each one
-interactively in the root of the main checkout, after `moai skill install`
+The moai binary never starts a session, and nothing runs headless. Open each one
+interactively in the root of the main checkout (inside tmux the supervisor may
+open more Claude Code panes for you, once you say yes — [In tmux](#in-tmux)), after `moai skill install`
 planted that agent's skills and hooks. Each session asks its person before it
 acts, the way it always does — none is opened in a mode that skips the asking.
 
@@ -331,9 +337,10 @@ and Antigravity have no supervisor; their sessions pick their own work with
 **The review runs inside the worker's own session.** It never starts another
 agent program for it.
 
-**Clearing a window is the person's.** The context lives in the tracker, so a
-worker may be cleared (`/clear`) between tasks — its report says when that is
-safe and when it is not. The supervisor never types into a window.
+**Outside tmux, clearing a window is the person's.** The context lives in the
+tracker, so a worker may be cleared (`/clear`) between tasks — its report says
+when that is safe and when it is not. Without tmux the supervisor never types
+into a window.
 
 **What the messages do not do.** A session in a different permission mode
 keeps an incoming message for its person's approval; a subagent's message goes
@@ -375,6 +382,37 @@ with `git merge --no-ff` as they stand, never rebased or squashed.
 recommendation and leaves `Decided alone: …` on the issue instead of waiting,
 and stops at anything that cannot be undone.
 
+### In tmux
+
+When the supervisor runs inside tmux (`$TMUX` is set), it also loads the
+`moai-tmux` skill and works on the workers' panes of your own tmux server
+(moai-u99i). Without tmux nothing of this happens.
+
+- **Which pane is which worker.** Claude Code keeps a record per process under
+  `~/.claude/sessions/`; the skill reads the live ones (the pid alive and its
+  start time matching) and pairs each `ListAgents` name with its pane `%N`.
+  Every tmux call names that pane
+- **A label on the pane.** When it sends work, it writes `<worker> <id>` into the
+  pane option `@moai`, and removes it once the report is checked. Once a round
+  it asks whether you want the labels on the pane borders; on a yes it puts
+  `#{@moai}` in front of the running server's `pane-border-format`. Your tmux
+  config file is never edited
+- **Clearing a reported worker.** After the report is checked, while the worker
+  reads idle and its input box is empty, it types `/clear` into that pane before
+  sending the next work
+- **A message that did not arrive.** When `SendMessage` fails or is held, it
+  pastes the message into the worker's empty input box and tells you
+- **A stalled worker.** When a worker goes idle with no report, it reads the
+  pane once and tells you what stands there — a permission prompt, a question,
+  an error. It never answers in your place
+- **No idle worker.** It asks you whether to open new worker panes; on a yes it
+  splits a pane running `claude --model <model>` in the root — an ordinary
+  interactive session you can see and type into
+
+**If anything stands in a worker's input box, it does not type** — it tells you.
+It never kills a pane, a session or the server, and never runs `claude -p` or a
+`--dangerously-*` flag.
+
 ## Work the queue from a session
 
 Every command takes `--json`. Three are enough for a session to take its next row:
@@ -388,8 +426,9 @@ Every command takes `--json`. Three are enough for a session to take its next ro
 - `moai prime` — what this session holds and what is next, short enough to load
   into a prompt
 
-moai never launches a session or runs one headless. A person opens each one, and
-the session reads these the way that person would.
+The moai binary never launches a session or runs one headless. A person opens
+each one — or, inside tmux, says yes to the supervisor opening one — and the
+session reads these the way that person would.
 
 **Name the AI that did the work** before closing an issue — one note, the
 [model line](glossary.md#model-line), one line per issue, read back as `work` in
