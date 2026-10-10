@@ -520,7 +520,10 @@ BACKLOG
   letter — only title (SPC s t) and tag (SPC c t) split one letter:
     SPC s p  priority            SPC s c  created            SPC s u  updated
     SPC s s  column              SPC s a  assignee           SPC s t  title
-    SPC c i  id                  SPC c p  priority           SPC c a  assignee
+    SPC s P, SPC s C, SPC s U, SPC s S, SPC s A, SPC s T  the same field
+             added at the end of the order [↑ asc/↓ desc]
+    SPC s e  edit the order in a window — described below
+    SPC c i  id                 SPC c p  priority           SPC c a  assignee
     SPC c c  created             SPC c u  updated            SPC c n  counts
     SPC c t  tag                 SPC c h  column names [shown/hidden]
     SPC c e  epic — the name of the epic the row is in; off to begin with
@@ -579,9 +582,13 @@ BACKLOG
   the list and the board even with done shown, and the path line counts it
   — [archive 312 hidden]. SPC v o shows it and is kept under [tui] as
   show_archived; SPC v a (all) leaves it hidden. / search finds it anyway.
-  Sorting puts urgent, new, earlier column and alphabetical on top, and
-  pressing the chosen one again turns it around. When it is not the default
-  (priority) the path line says which order it is.
+  Sorting puts urgent, new, earlier column and alphabetical on top. The order
+  is a list of fields, like ORDER BY: the next field decides only where the
+  ones before it tie. Each lowercase SPC s key makes the order that one field,
+  and pressing it again turns it around; an uppercase one adds its field at
+  the end, and pressing it again turns that field around. When the order is
+  not the default (priority) the path line says which it is, every field with
+  ↑ or ↓, as in sort priority↑, updated↓.
   Columns (SPC c) turn on and off with [shown/hidden]. Tag, epic, assignee,
   created and updated dates stand on the right of the row, and when it gets
   narrow they are dropped in that order — dates, then epic, then assignee,
@@ -595,6 +602,16 @@ BACKLOG
   the words of `moai show --sort`, such as [\"priority\", \"updated:asc\"], and
   the older sort and sort_reversed pair is still read where order is absent
   and written beside it from the first field, for an older moai.
+
+  SPC s e opens the sort window over the list. All six fields stand in it:
+  the ones in the order first, numbered and marked ↑ asc or ↓ desc, then the
+  rest marked with a dot. j and k move, J and K move the field down or up the
+  order, SPC puts it in at the end or takes it out (the last one stays), and
+  d turns its direction. Enter applies the order where you stand and keeps it
+  there — inside a project for that project, in 0 as the default. D applies
+  it and keeps it as the default, the order under [tui], even inside a
+  project; a project that has an order of its own gets this one too. Esc
+  leaves without a change.
 
   SPC g b lays the same rows out as a kanban board instead of a list, and
   SPC g l brings the list back. It is the list's layout, not another window:

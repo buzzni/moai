@@ -335,6 +335,10 @@ pub enum Browse {
     ShowAll,
     /// 목록 차례를 고른다(moai-55cp). 이미 고른 것을 다시 누르면 거꾸로 선다.
     Sort(Order),
+    /// 차례의 끝에 그 필드를 더한다 — `SPC s <대문자>`(moai-r170.x22). 이미 차례에 있으면 그 필드의 방향을 뒤집는다.
+    SortAdd(Order),
+    /// 차례 편집 창을 연다 — `SPC s e`(moai-r170.x22). 차례를 옮기고 빼는 것은 거기서 한다.
+    SortEdit,
     /// 목록 줄의 열 하나를 켜고 끈다(moai-g7p8).
     Cell(super::view::Field),
     /// 오른쪽 상세 칸을 보이고 숨긴다(moai-ymnu).
@@ -464,6 +468,19 @@ impl Order {
     pub fn falls(self) -> bool {
         matches!(self, Order::Created | Order::Updated)
     }
+
+    /// 대문자 키(`SPC s <대문자>`)의 메뉴 낱말 — "그다음 우선순위". **필드마다 말묶음의 키가 따로다** — 메뉴의 낱말은
+    /// `&'static str` 라 낱말을 이어 지을 자리가 없고, 말마다 "그다음" 이 필드 앞에 서는지 뒤에 서는지도 다르다.
+    pub fn then(self, lang: Lang) -> &'static str {
+        match self {
+            Order::Priority => say(lang, "tui.order_then.priority"),
+            Order::Created => say(lang, "tui.order_then.created"),
+            Order::Updated => say(lang, "tui.order_then.updated"),
+            Order::Column => say(lang, "tui.order_then.column"),
+            Order::Assignee => say(lang, "tui.order_then.assignee"),
+            Order::Title => say(lang, "tui.order_then.title"),
+        }
+    }
 }
 
 /// 차례의 한 칸 — 필드와 그 방향(moai-r170). `query::Field` 의 조각 쪽 짝이다: `down` 이 참이면 값이 큰 것이 먼저다.
@@ -544,6 +561,24 @@ impl Sorting {
             [only] if only.by == by => Sorting::of(&[only.flipped()]).expect("필드 하나"),
             _ => Sorting::by(by),
         }
+    }
+
+    /// 대문자 차례 키(`SPC s <대문자>`, moai-r170.x22)를 눌렀을 때 — 그 필드를 **끝에** 제 방향으로 더한다. 이미 차례에
+    /// 있으면 자리는 두고 그 필드의 방향만 뒤집는다. 소문자 키의 "다시 누르면 거꾸로" 와 같은 손이다: 같은 키를 두 번
+    /// 누르면 더한 필드가 거꾸로 선다. 빼고 앞뒤를 바꾸는 것은 편집 창(`SPC s e`)이 한다 — 키 하나에 "빼기" 까지
+    /// 실으면 세 번째 누름이 무엇을 할지 외워야 한다.
+    pub fn append(self, by: Order) -> Sorting {
+        let mut fields = self.fields().to_vec();
+        match fields.iter_mut().find(|f| f.by == by) {
+            Some(f) => *f = f.flipped(),
+            None => fields.push(Ordered::of(by)),
+        }
+        Sorting::of(&fields).expect("한 필드는 한 번만 선다")
+    }
+
+    /// 그 필드가 차례의 몇째인가(0부터)와 그 방향 — 메뉴의 줄(`SPC s <대문자>`)과 편집 창이 읽는다.
+    pub fn place(&self, by: Order) -> Option<(usize, Ordered)> {
+        self.fields().iter().position(|f| f.by == by).map(|at| (at, self.slots[at]))
     }
 }
 
@@ -752,6 +787,16 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Sort(Order::Column), Some("SPC s s"), LEADER, Key::plain('s'), Key::plain('s')),
         row!(Sort(Order::Assignee), Some("SPC s a"), LEADER, Key::plain('s'), Key::plain('a')),
         row!(Sort(Order::Title), Some("SPC s t"), LEADER, Key::plain('s'), Key::plain('t')),
+        // **대문자는 끝에 더한다**(moai-r170.x22, 2026-10-09 사용자 결정) — 소문자가 차례를 그 하나로 갈아 끼우는 것과
+        // 한 글자로 짝을 짓는다. 터미널은 대문자를 SHIFT 와 함께 보내지만 글자 키는 SHIFT 를 떼고 견준다([`Key`]).
+        row!(SortAdd(Order::Priority), Some("SPC s P"), LEADER, Key::plain('s'), Key::plain('P')),
+        row!(SortAdd(Order::Created), Some("SPC s C"), LEADER, Key::plain('s'), Key::plain('C')),
+        row!(SortAdd(Order::Updated), Some("SPC s U"), LEADER, Key::plain('s'), Key::plain('U')),
+        row!(SortAdd(Order::Column), Some("SPC s S"), LEADER, Key::plain('s'), Key::plain('S')),
+        row!(SortAdd(Order::Assignee), Some("SPC s A"), LEADER, Key::plain('s'), Key::plain('A')),
+        row!(SortAdd(Order::Title), Some("SPC s T"), LEADER, Key::plain('s'), Key::plain('T')),
+        // 편집 창은 `e`(edit) — 차례 필드의 글자(p·c·u·s·a·t)와 안 겹친다.
+        row!(SortEdit, Some("SPC s e"), LEADER, Key::plain('s'), Key::plain('e')),
         row!(Cell(super::view::Field::Id), Some("SPC c i"), LEADER, Key::plain('c'), Key::plain('i')),
         row!(Cell(super::view::Field::Priority), Some("SPC c p"), LEADER, Key::plain('c'), Key::plain('p')),
         row!(Cell(super::view::Field::Assignee), Some("SPC c a"), LEADER, Key::plain('c'), Key::plain('a')),
@@ -964,7 +1009,7 @@ impl Browse {
             // 없는 까닭이 바로 그 숨김일 수 있다. 펼친 프로젝트의 카드가 모두 backlog 일 때 `SPC v b` 를 누르면 줄이 다
             // 빠지는데, 그 키와 `SPC v a` 가 같이 꺼지면 한눈 보기에서는 되돌릴 길이 없다. 보드는 묶음 줄을 안 세워
             // 목록보다 자주 그렇게 된다.
-            Column(_) | Deferred | Backlog | Archived | ShowAll | Sort(_) | Cell(_)
+            Column(_) | Deferred | Backlog | Archived | ShowAll | Sort(_) | SortAdd(_) | SortEdit | Cell(_)
                 if c.layer && !c.rows_here && !self.unhides(c) =>
             {
                 Err(Off::Quiet)
@@ -1028,6 +1073,8 @@ impl Browse {
             ReadAll => say(c.lang, "tui.menu.read_all"),
             ReadGroup => say(c.lang, "tui.menu.read_group"),
             Sort(o) => o.word(c.lang),
+            SortAdd(o) => o.then(c.lang),
+            SortEdit => say(c.lang, "tui.menu.sort_edit"),
             Cell(f) => f.word(c.lang),
             _ => self.what(c),
         }
@@ -1045,12 +1092,18 @@ impl Browse {
             Browse::Deferred => Some(shown(c.deferred_hidden, c.lang)),
             Browse::Backlog => Some(shown(c.backlog_hidden, c.lang)),
             Browse::Archived => Some(shown(c.archived_hidden, c.lang)),
-            // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
-            Browse::Sort(o) if o == c.sorting.first().by => Some(if c.sorting.first().reversed() {
-                say(c.lang, "tui.state.reversed")
-            } else {
-                say(c.lang, "tui.state.sorted")
-            }),
+            // 차례가 **그 필드 하나뿐일 때만** 붙는다 — 그때 이 키가 방향을 뒤집는다([`Sorting::press`]). 여러 필드의
+            // 첫째에 붙이면 누른 뒤 나머지 필드가 사라지는 것을 표시가 숨긴다. 방향은 낱말로 댄다.
+            Browse::Sort(o) => match c.sorting.fields() {
+                [only] if only.by == o && only.reversed() => Some(say(c.lang, "tui.state.reversed")),
+                [only] if only.by == o => Some(say(c.lang, "tui.state.sorted")),
+                _ => None,
+            },
+            // 차례에 든 필드면 어느 자리에 있든 방향을 댄다 — 글리프와 낱말 둘 다(색이 혼자 뜻을 지지 않는다).
+            Browse::SortAdd(o) => c
+                .sorting
+                .place(o)
+                .map(|(_, f)| if f.down { say(c.lang, "tui.state.desc") } else { say(c.lang, "tui.state.asc") }),
             Browse::Cell(f) => Some(shown(!c.fields.shows(f), c.lang)),
             Browse::Detail => Some(shown(!c.detail, c.lang)),
             // **지금 자리를 낱말로 댄다** — 색도 글리프도 안 쓴다. 돌리는 키라 다음이 무엇인지는
@@ -1075,7 +1128,18 @@ impl Browse {
         use Browse::*;
         matches!(
             self,
-            Worktree | Raw | Column(_) | Deferred | Backlog | Archived | Sort(_) | Cell(_) | Detail | DetailAt | Mouse
+            Worktree
+                | Raw
+                | Column(_)
+                | Deferred
+                | Backlog
+                | Archived
+                | Sort(_)
+                | SortAdd(_)
+                | Cell(_)
+                | Detail
+                | DetailAt
+                | Mouse
         )
     }
 
@@ -1130,7 +1194,8 @@ impl Browse {
             Backlog => say(c.lang, "tui.act.backlog"),
             Archived => say(c.lang, "tui.act.archived"),
             ShowAll => say(c.lang, "tui.act.show_all"),
-            Sort(_) => say(c.lang, "tui.act.sort"),
+            Sort(_) | SortAdd(_) => say(c.lang, "tui.act.sort"),
+            SortEdit => say(c.lang, "tui.act.sort_edit"),
             Cell(_) => say(c.lang, "tui.act.cell"),
             Detail => say(c.lang, "tui.act.detail"),
             DetailAt => say(c.lang, "tui.act.detail_at"),
@@ -1190,6 +1255,59 @@ pub const PROMPT: &[Bind<Prompt>] = &[
     row!(Prompt::Up, Some("Up"), Key::bare(KeyCode::Up)),
     row!(Prompt::Down, Some("Down"), Key::bare(KeyCode::Down)),
 ];
+
+/// 차례 편집 창 — `SPC s e`(moai-r170.x22). 창의 상태는 조각 `sorter::Editor` 가 든다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sorter {
+    /// 커서를 한 줄 아래·위로.
+    Down,
+    Up,
+    /// 커서가 선 필드를 차례에서 한 칸 뒤·앞으로.
+    Lower,
+    Raise,
+    /// 차례에 넣고 뺀다 — 넣으면 끝에 제 방향으로 선다.
+    Toggle,
+    /// 방향을 뒤집는다.
+    Flip,
+    /// 지금 선 자리에 입힌다 — 프로젝트 안이면 그 프로젝트의 차례로 적힌다.
+    Apply,
+    /// 입히고 **기본 차례(`[tui] order`)로도** 적는다 — 프로젝트 안에서도.
+    Default,
+    Close,
+}
+
+/// 편집 창의 키(2026-10-09 사용자 결정) — `j`·`k` 가 걷고, 대문자 `J`·`K` 가 그 필드를 차례에서 옮긴다(vi 의 "같은
+/// 글자를 세게"). 넣고 빼기는 `SPC`, 방향은 `d`(direction). **기본으로 적기는 대문자 `D`** 다 — 지금 자리에만
+/// 입히는 Enter 와 갈라, 프로젝트 안에서 모든 프로젝트의 기본을 바꾸는 일이 손에 걸려서 일어나지 않게 한다.
+/// 창은 **Ctrl·Alt 붙은 키를 거른다**(`bare`) — 고르기 창([`PICK`])과 같은 까닭이다.
+pub const SORTER: &[Bind<Sorter>] = &[
+    row!(Sorter::Down, Some("j"), Key::plain('j')),
+    row!(Sorter::Down, None, Key::bare(KeyCode::Down)),
+    row!(Sorter::Up, Some("k"), Key::plain('k')),
+    row!(Sorter::Up, None, Key::bare(KeyCode::Up)),
+    row!(Sorter::Lower, Some("J"), Key::plain('J')),
+    row!(Sorter::Raise, Some("K"), Key::plain('K')),
+    row!(Sorter::Toggle, Some("SPC"), Key::plain(' ')),
+    row!(Sorter::Flip, Some("d"), Key::plain('d')),
+    row!(Sorter::Apply, Some("Enter"), Key::bare(KeyCode::Enter)),
+    row!(Sorter::Default, Some("D"), Key::plain('D')),
+    row!(Sorter::Close, Some("Esc"), Key::bare(KeyCode::Esc)),
+];
+
+impl Sorter {
+    /// 바의 낱말.
+    pub fn what(self, lang: Lang) -> &'static str {
+        match self {
+            Sorter::Down | Sorter::Up => say(lang, "tui.act.move"),
+            Sorter::Lower | Sorter::Raise => say(lang, "tui.sorter.shift"),
+            Sorter::Toggle => say(lang, "tui.sorter.toggle"),
+            Sorter::Flip => say(lang, "tui.sorter.flip"),
+            Sorter::Apply => say(lang, "tui.sorter.apply"),
+            Sorter::Default => say(lang, "tui.sorter.default"),
+            Sorter::Close => say(lang, "tui.sorter.close"),
+        }
+    }
+}
 
 /// 고르기 창(moai-plvy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1763,7 +1881,7 @@ mod tests {
         // 거꾸로 — stateful 이면 어느 자리에선가 상태를 댄다. 정렬은 고른 차례에서만 댄다.
         for b in BROWSE.iter().filter(|b| b.act.stateful()) {
             let c = match b.act {
-                Browse::Sort(o) => Ctx { sorting: Sorting::by(o), ..base },
+                Browse::Sort(o) | Browse::SortAdd(o) => Ctx { sorting: Sorting::by(o), ..base },
                 _ => base,
             };
             assert!(b.act.state(&c).is_some(), "{:?} 가 stateful 인데 상태를 안 댄다", b.act);
@@ -2119,6 +2237,9 @@ mod tests {
             (vec![sp, ch('s'), ch('p')], B::Sort(Order::Priority)),
             (vec![sp, ch('s'), ch('u')], B::Sort(Order::Updated)),
             (vec![sp, ch('s'), ch('t')], B::Sort(Order::Title)),
+            (vec![sp, ch('s'), ch('T')], B::SortAdd(Order::Title)),
+            (vec![sp, ch('s'), ch('C')], B::SortAdd(Order::Created)),
+            (vec![sp, ch('s'), ch('e')], B::SortEdit),
             (vec![sp, ch('c'), ch('t')], B::Cell(super::super::view::Field::Tags)),
             (vec![sp, ch('c'), ch('a')], B::Cell(super::super::view::Field::Assignee)),
         ];
@@ -2354,6 +2475,8 @@ mod tests {
     const STATISTICS: &str = "SPC g s opens the statistics window";
     /// 위키 창 문단(moai-o3cb).
     const WIKIWIN: &str = "SPC g w opens the wiki window";
+    /// 차례 편집 창(SORTER)을 말하는 문단(moai-r170.x22).
+    const SORTEDIT: &str = "SPC s e opens the sort window";
 
     /// 같은 문단을 **같은 키로** 나눠 쓰는 표 → (그 문단, 그 표를 말하는 문장의 첫머리 말). 문장은
     /// 그 말부터 첫 `.` 까지이고 **그 문단 안에서만** 찾는다 — 도움말 어디든 찾으면 같은 말이 앞선
@@ -2403,6 +2526,7 @@ mod tests {
         ("CONFIRM", &[PICKER, JOTTING]),
         ("STATS", &[STATISTICS]),
         ("WIKI", &[WIKIWIN]),
+        ("SORTER", &[SORTEDIT]),
     ];
 
     /// `head` 로 시작하는 문단.
@@ -2439,7 +2563,7 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 11] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 12] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
             ("MENU", named(MENU)),
@@ -2451,6 +2575,7 @@ mod tests {
             ("STATS", named(STATS)),
             ("WIKI", named(WIKI)),
             ("LINKS", named(LINKS)),
+            ("SORTER", named(SORTER)),
         ];
         // 고르기 창이 목록 문단에서 빌리는 이동 키 — 표와 같은 매크로에서 읽는다.
         // `const` 로 받는다 — 매크로의 `&[…]` 는 상수 자리에서만 `'static` 이다(표도 그렇게 받는다).
@@ -2511,7 +2636,25 @@ mod tests {
 
     /// 어느 표에서든 그 열의 뜻. 모르면 `Unknown`.
     fn known(k: &[KeyEvent]) -> Lookup<()> {
-        let tables = [
+        let tables = every(k);
+        if tables.contains(&Lookup::Run(())) {
+            Lookup::Run(())
+        } else if tables.contains(&Lookup::Pending) {
+            Lookup::Pending
+        } else {
+            Lookup::Unknown
+        }
+    }
+
+    /// **어느 표에서든 접두어로 읽히는가** — [`known`] 이 `Run` 을 먼저 고르는 것과 따로 묻는다. 차례 편집 창
+    /// (`SORTER`, moai-r170.x22)의 `SPC` 는 한 키로 듣는 동작이라, `known` 으로 물으면 메뉴의 `SPC` 까지 `Run` 으로
+    /// 읽혀 `SPC g l` 이 `SPC`·`g`·`l` 셋으로 흩어진다.
+    fn prefix(k: &[KeyEvent]) -> bool {
+        every(k).contains(&Lookup::Pending)
+    }
+
+    fn every(k: &[KeyEvent]) -> [Lookup<()>; 12] {
+        [
             bare(lookup(ANYWHERE, k)),
             bare(lookup(MENU, k)),
             bare(lookup(BROWSE, k)),
@@ -2523,14 +2666,8 @@ mod tests {
             bare(lookup(STATS, k)),
             bare(lookup(WIKI, k)),
             bare(lookup(LINKS, k)),
-        ];
-        if tables.contains(&Lookup::Run(())) {
-            Lookup::Run(())
-        } else if tables.contains(&Lookup::Pending) {
-            Lookup::Pending
-        } else {
-            Lookup::Unknown
-        }
+            bare(lookup(SORTER, k)),
+        ]
     }
 
     /// 도움말에서 키 이름으로 읽히는 낱말을 전부 뽑는다 — (적힌 낱말, 키 열).
@@ -2563,7 +2700,7 @@ mod tests {
         while i < words.len() {
             let mut word = words[i].to_string();
             if let Some(mut k) = parse_seq(&word) {
-                while known(&k) == Lookup::Pending
+                while prefix(&k)
                     && let Some(next) = words.get(i + 1).filter(|w| w.len() == 1 && w.is_ascii())
                     && let Some(more) = parse(next)
                 {

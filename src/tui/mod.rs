@@ -18,6 +18,7 @@ mod mouse;
 pub mod picker;
 pub mod register;
 pub mod scroll;
+mod sorter;
 mod stats;
 pub mod view;
 mod wiki;
@@ -193,6 +194,9 @@ pub enum Mode {
     /// `SPC o t` 가 연 시간대 고르는 창(moai-3oz2). **돌리지 않고 창이다** — 이 기계의 tzdb 는
     /// 이름을 천 개 넘게 들어, 눌러 돌리는 길로는 고를 수가 없다.
     Zone(zones::Zones),
+    /// `SPC s e` 가 연 차례 편집 창(moai-r170.x22). 필드를 넣고 빼고 앞뒤를 바꾸고 방향을 뒤집는다 — 키 하나로는
+    /// 차례를 갈아 끼우거나(`SPC s <소문자>`) 끝에 더하는 것(`SPC s <대문자>`)만 된다.
+    Sort(sorter::Editor),
     /// `SPC g s` 가 연 통계 창(moai-1hka.bq9). 목록·상세 자리를 통째로 덮고 Esc 로 닫는다 — 창 위의 `SPC g l`·`b` 도
     /// 닫고 그 배치로 선다(moai-z46r, [`App::go`]). **상자에 담는다** —
     /// 센 것 두 벌(주·날)을 들어, 그대로 두면 모드 하나가 다른 갈래 전부의 크기로 부푼다.
@@ -3181,6 +3185,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => String::new(),
         };
@@ -3248,6 +3253,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => Raw::default(),
         };
@@ -3387,6 +3393,46 @@ impl App {
     /// ([`App::climb`]). 한 차례를 화면 하나가 들던 때는 A 에서 고른 것이 B 로 따라갔다(moai-r170.zp6 의 진단).
     pub(super) fn rescope_order(&mut self) {
         self.order = self.scoped_order();
+    }
+
+    /// 차례 편집 창(`SPC s e`, moai-r170.x22)의 키 하나. 창이 고친 차례를 내면 입히고 적는다.
+    pub(super) fn edit_sort(&mut self, k: KeyEvent) {
+        let Mode::Sort(e) = &mut self.mode else { return };
+        let Lookup::Run(act) = keys::lookup(keys::SORTER, &[k]) else { return };
+        match e.act(act) {
+            sorter::Done::Stay => {}
+            sorter::Done::Cancel => self.mode = Mode::Browse,
+            sorter::Done::Apply(s) => {
+                self.mode = Mode::Browse;
+                self.set_order(s, false);
+            }
+            sorter::Done::Default(s) => {
+                self.mode = Mode::Browse;
+                self.set_order(s, true);
+            }
+        }
+    }
+
+    /// 편집 창이 고친 차례를 입힌다 — 커서는 보던 줄을 붙든다([`App::look`] 과 같은 자).
+    ///
+    /// `as_default` 는 **기본 차례(`[tui] order`)로도 적는다**(사용자 결정 2026-10-09 — 편집 창의 "기본으로 적기").
+    /// 프로젝트 안에서 누르면 그 프로젝트는 제 차례가 **있을 때만** 같이 고친다 — 그러면 지금 화면과 다음에 열 화면이
+    /// 같고, 제 차례가 없던 프로젝트는 여전히 기본을 따른다. 없던 프로젝트에 같은 값을 새로 박으면 그 프로젝트가 다음
+    /// 기본을 안 따르게 묶인다.
+    fn set_order(&mut self, s: keys::Sorting, as_default: bool) {
+        let rows = self.rows();
+        let (held, stood) = self.grip_of(&rows);
+        self.order = s;
+        if as_default {
+            self.order_default = s;
+            if let Some(k) = self.order_home().filter(|k| self.order_projects.contains_key(k)) {
+                self.order_projects.insert(k, s);
+            }
+        } else {
+            self.keep_order();
+        }
+        self.regrip(held, stood);
+        self.save_look();
     }
 
     /// 방금 고른 차례를 **지금 선 자리에** 든다 — 프로젝트 안이면 그 프로젝트의 것, 층이면 기본(사용자 결정
@@ -4367,6 +4413,10 @@ impl App {
             B::ShowAll => self.view.show_all(&self.screen_statuses()),
             B::Sort(o) => {
                 self.order = self.order.press(o);
+                self.keep_order();
+            }
+            B::SortAdd(o) => {
+                self.order = self.order.append(o);
                 self.keep_order();
             }
             _ => return,
@@ -5544,7 +5594,9 @@ impl App {
                     });
                 }
             }
-            B::Column(_) | B::Deferred | B::Backlog | B::Archived | B::ShowAll | B::Sort(_) => self.look(act, &rows),
+            B::Column(_) | B::Deferred | B::Backlog | B::Archived | B::ShowAll | B::Sort(_) | B::SortAdd(_) => {
+                self.look(act, &rows)
+            }
             // 열은 줄을 더하거나 빼지 않는다 — 커서를 붙들 까닭이 없다.
             B::Cell(f) => {
                 self.fields.toggle(f);
@@ -5576,6 +5628,8 @@ impl App {
             // **여는 자리에서 tzdb 를 읽는다**(moai-3oz2) — 띄울 때 읽으면 시간대를 한 번도
             // 안 고르는 사람이 매번 천 몇백 개의 파일 머리를 내는 값을 치른다. 못 읽은 까닭은
             // 창이 들고 제 자리에서 한 줄로 댄다(moai-77ap).
+            // 차례 편집 창은 지금 차례로 연다(moai-r170.x22). 고친 것은 Enter 가 입힌다 — Esc 는 아무것도 안 바꾼다.
+            B::SortEdit => self.mode = Mode::Sort(sorter::Editor::open(self.order)),
             B::Timezone => {
                 let (all, why) = crate::tz::names();
                 self.mode = Mode::Zone(zones::Zones::open(all, why, self.zone.name()));
@@ -5779,6 +5833,7 @@ impl App {
             Mode::Pick(_) => return self.pick(k),
             Mode::Unregister(_) => return self.settle_unregister(k),
             Mode::Zone(_) => return self.pick_zone(k),
+            Mode::Sort(_) => return self.edit_sort(k),
             _ => {}
         }
         let eaten = match &mut self.mode {
@@ -5795,6 +5850,7 @@ impl App {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => {
                 return;
@@ -6059,6 +6115,8 @@ impl App {
             Mode::Pick(picker) => picker.paste(s),
             // 거르는 글에 붙여 넣는다 — 목록이 그만큼 좁아지고 커서가 도로 안으로 든다.
             Mode::Zone(z) => z.paste(s),
+            // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다.
+            Mode::Sort(_) => {}
             Mode::Unregister(_) => self.mode = Mode::Browse,
             // 글칸이 없다 — 붙여 넣을 자리가 없으니 아무 일도 안 한다. 창을 닫으면 보던 것을 잃는다.
             Mode::Stats(_) => {}
@@ -11788,6 +11846,119 @@ mod tests {
         a.hit("Esc");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(text.contains("sort.by = \"created\"") && text.contains("hidden"), "숨김이 안 적혔다\n{text}");
+    }
+
+    /// **대문자 차례 키는 끝에 더하고, 다시 누르면 그 필드를 뒤집는다**(moai-r170.x22, 2026-10-09 사용자 결정). 소문자는
+    /// 여전히 차례를 그 하나로 갈아 끼우고 다시 누르면 뒤집는다. 메뉴의 대문자 줄은 차례에 든 필드의 방향을 글리프와
+    /// 낱말로 대고, 머리줄의 뱃지는 목록을 그린다.
+    #[test]
+    fn uppercase_sort_keys_append_a_field_and_flip_it() {
+        use keys::{Order, Ordered, Sorting};
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.hit("SPC s s Esc");
+        a.hit("SPC s T Esc");
+        let up = |o| Ordered::of(o);
+        assert_eq!(a.order, Sorting::of(&[up(Order::Column), up(Order::Title)]).unwrap(), "끝에 안 더했다");
+        a.hit("SPC s T Esc");
+        assert_eq!(
+            a.order,
+            Sorting::of(&[up(Order::Column), up(Order::Title).flipped()]).unwrap(),
+            "다시 눌러 안 뒤집혔다"
+        );
+        // 이미 든 필드는 자리를 두고 방향만 뒤집는다 — 첫 필드여도 그대로 첫째다.
+        a.hit("SPC s S Esc");
+        assert_eq!(a.order, Sorting::of(&[up(Order::Column).flipped(), up(Order::Title).flipped()]).unwrap());
+        let ctx = a.key_ctx(&a.rows());
+        assert_eq!(keys::Browse::SortAdd(Order::Title).state(&ctx), Some("[● ↓ 내림]"));
+        assert_eq!(keys::Browse::SortAdd(Order::Created).state(&ctx), None, "차례에 없는 필드에 표시가 붙었다");
+        assert_eq!(
+            keys::Browse::Sort(Order::Column).state(&ctx),
+            None,
+            "여러 필드의 차례에서 소문자 줄이 표시를 달았다"
+        );
+        let shown = super::draw::tests::render(&mut a, 120, 12).join("\n");
+        assert!(shown.contains("정렬 칸↓, 제목↓"), "머리줄이 차례 목록을 안 그렸다\n{shown}");
+        // 소문자는 그 하나로 갈아 끼운다.
+        a.hit("SPC s u Esc");
+        assert_eq!(a.order, Sorting::by(Order::Updated));
+        a.hit("SPC s u Esc");
+        assert_eq!(a.order, Sorting::of(&[up(Order::Updated).flipped()]).unwrap());
+    }
+
+    /// **차례 편집 창**(`SPC s e`, moai-r170.x22) — `j`·`k` 로 걷고, `SPC` 로 넣고 빼고, `d` 로 방향을, `J`·`K` 로 자리를
+    /// 바꾼다. Enter 는 선 자리에 입히고 적으며, Esc 는 아무것도 안 바꾼다. 창은 여섯 필드를 번호·글리프·낱말로 그린다.
+    #[test]
+    fn the_sort_window_edits_applies_and_cancels() {
+        use keys::{Order, Ordered, Sorting};
+        let s = scratch("sort-window");
+        let user = s.join("user.toml");
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.hit("SPC s e");
+        assert!(matches!(a.mode, Mode::Sort(_)), "SPC s e 가 창을 안 열었다 — {:?}", a.mode);
+        let shown = super::draw::tests::render(&mut a, 80, 16).join("\n");
+        assert!(
+            shown.contains("정렬 차례") && shown.contains(" 1  우선순위  ↑ 오름") && shown.contains("·  생성"),
+            "창이 차례를 안 그렸다\n{shown}"
+        );
+        // 생성에 내려가 넣고(끝에, 제 방향 = 내림), 뒤집고(오름), 앞으로 올린다.
+        a.hit("j SPC d K");
+        let shown = super::draw::tests::render(&mut a, 80, 16).join("\n");
+        assert!(shown.contains(" 1  생성      ↑ 오름") && shown.contains(" 2  우선순위  ↑ 오름"), "{shown}");
+        assert_eq!(a.order, Sorting::default(), "Enter 전에 차례가 바뀌었다");
+        a.hit("Enter");
+        assert_eq!(a.mode, Mode::Browse);
+        let want = Sorting::of(&[Ordered::of(Order::Created).flipped(), Ordered::of(Order::Priority)]).unwrap();
+        assert_eq!(a.order, want);
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(
+            text.contains("order = [\"created:asc\", \"priority\"]")
+                && text.contains("sort = \"created\"")
+                && text.contains("sort_reversed = true"),
+            "{text}"
+        );
+        // Esc 는 고친 것을 버린다 — 차례도 파일도 그대로다.
+        a.hit("SPC s e j j SPC J d Esc");
+        assert_eq!((a.mode.clone(), a.order), (Mode::Browse, want));
+        assert_eq!(std::fs::read_to_string(&user).unwrap(), text, "그만둔 편집이 적혔다");
+    }
+
+    /// **편집 창의 `D` 는 프로젝트 안에서도 기본(`[tui] order`)에 적는다**(사용자 결정 2026-10-09). Enter 는 그 프로젝트의
+    /// 표에 적는다. 제 차례가 없는 프로젝트는 `D` 뒤에도 표가 안 생겨 기본을 따르고, 제 차례가 있는 프로젝트는 같은 값으로
+    /// 함께 고쳐진다 — 지금 화면과 다음에 열 화면이 같다.
+    #[test]
+    fn save_as_default_writes_the_tui_table_from_inside_a_project() {
+        use keys::{Order, Sorting};
+        let s = scratch("sort-window-default");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\norder = [\"title\"]\n").unwrap();
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        let mut a =
+            a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
+        assert_eq!(a.order, Sorting::by(Order::Title), "제 차례가 없는 프로젝트가 기본을 안 따랐다");
+        // 칸(`status`, 안 든 필드 가운데 넷째)을 넣고 `D` — 기본만 적힌다. 프로젝트의 표는 안 생긴다.
+        a.hit("SPC s e j j j j SPC D");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("order = [\"title\", \"status\"]") && !text.contains("[tui.project"), "{text}");
+        // 프로젝트 안의 Enter 는 그 프로젝트의 표에 적는다 — 기본은 그대로다.
+        a.hit("SPC s a Esc");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(
+            text.contains("order = [\"title\", \"status\"]")
+                && text.contains("[tui.project.\"/x\"]\norder = [\"assignee\"]"),
+            "{text}"
+        );
+        // 제 차례가 있는 프로젝트에서 `D` — 기본과 그 프로젝트의 것이 함께 고쳐진다.
+        a.hit("SPC s e d D");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(
+            text.contains("order = [\"assignee:desc\"]")
+                && text.contains("sort = \"assignee\"")
+                && text.contains("[tui.project.\"/x\"]\norder = [\"assignee:desc\"]"),
+            "{text}"
+        );
     }
 
     /// **차례 목록이 옛 한 쌍을 이기고, 목록이 없으면 옛 한 쌍을 그대로 읽는다**(moai-r170.8dz, 2026-10-09 사용자 결정).

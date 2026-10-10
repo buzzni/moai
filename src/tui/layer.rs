@@ -925,6 +925,9 @@ impl App {
             p.install = Some(told);
         }
         self.layer = Some(layer);
+        // **차례는 선 자리의 것이다**(moai-r170.8dz) — 층이 서면 선 자리가 층(`0`)이나 그 프로젝트로 정해진다. 띄우는
+        // 길은 보기를 먼저 입혀(`cmd::tui`) 그때의 자리로 이미 골랐지만, 얹는 문이 여기 하나라 여기서 한 번 더 맞춘다.
+        self.rescope_order();
         self
     }
 
@@ -2684,6 +2687,7 @@ mod tests {
             | Mode::Pick(_)
             | Mode::Unregister(_)
             | Mode::Zone(_)
+            | Mode::Sort(_)
             | Mode::Stats(_)
             | Mode::Wiki(_) => None,
         }
