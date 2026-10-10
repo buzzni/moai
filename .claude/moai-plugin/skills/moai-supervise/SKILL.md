@@ -335,7 +335,8 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
-Inside cmux, label the worker's tab as you send — `moai-cmux`, "Label the tab".
+Inside cmux, label the worker's tab as you send and, if the message does not arrive, deliver it
+into the tab — `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -446,16 +447,16 @@ commit with a path — a supervisor that starts again reads that line, not this 
 
     moai note <epic> 'Report-checked: <merge hash>'
 
-Then send the next backlog to an idle worker. **Outside tmux, clearing a window is the
-person's** — the supervisor never types into a window. The report ends with the worker
+Then send the next backlog to an idle worker. **Outside tmux and cmux, clearing a window is
+the person's** — the supervisor never types into a window. The report ends with the worker
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
 report that never comes. Send to that window once the person has cleared it or said they will
 not — a clear does not show from here, so ask the person — or send to another idle worker.
-**Inside tmux you may clear it yourself** — only after the report is checked and the note above
-is written, only while `ListAgents` and its session record read `idle`, and only when its input
-box is empty (`moai-tmux`, "Clear a worker's window"). If any of these fails, do as the
-paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`), or
+**Inside tmux or cmux you may clear it yourself** — only after the report is checked and the note
+above is written, only while `ListAgents` and its session record read `idle`, and only when its
+input box is empty (`moai-tmux`, "Clear a worker's window"; `moai-cmux`, "Clear a worker's
+window"). If any of these fails, do as the paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`), or
 that tab's (`moai-cmux`).
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in

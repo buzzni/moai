@@ -2118,7 +2118,8 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
-Inside cmux, label the worker's tab as you send — `moai-cmux`, "Label the tab".
+Inside cmux, label the worker's tab as you send and, if the message does not arrive, deliver it
+into the tab — `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -2220,16 +2221,16 @@ commit with a path — a supervisor that starts again reads that line, not this 
 
     moai note <epic> 'Report-checked: <merge hash>'
 
-Then send the next backlog to an idle worker. **Outside tmux, clearing a window is the
-person's** — the supervisor never types into a window. The report ends with the worker
+Then send the next backlog to an idle worker. **Outside tmux and cmux, clearing a window is
+the person's** — the supervisor never types into a window. The report ends with the worker
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
 report that never comes. Send to that window once the person has cleared it or said they will
 not — a clear does not show from here, so ask the person — or send to another idle worker.
-**Inside tmux you may clear it yourself** — only after the report is checked and the note above
-is written, only while `ListAgents` and its session record read `idle`, and only when its input
-box is empty (`moai-tmux`, "Clear a worker's window"). If any of these fails, do as the
-paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`), or
+**Inside tmux or cmux you may clear it yourself** — only after the report is checked and the note
+above is written, only while `ListAgents` and its session record read `idle`, and only when its
+input box is empty (`moai-tmux`, "Clear a worker's window"; `moai-cmux`, "Clear a worker's
+window"). If any of these fails, do as the paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`), or
 that tab's (`moai-cmux`).
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
@@ -2707,6 +2708,56 @@ Code's own titles open with a status glyph: `✳`, or a spinner frame such as `�
 that is neither that nor a label you wrote this round may be a name the person gave the tab, and
 `clear-name` would erase it along with yours — leave that tab unlabelled. Rename no workspace:
 the names in the sidebar are the person's.
+
+## Clear a worker's window
+
+Before you send a worker its next work, you may clear its window (`/clear`) yourself — all of
+these first:
+
+1. **Its report is checked** — the supervisor's 5 held all three checks and the
+   `Report-checked:` note is written
+2. **It reads `idle`** — in `ListAgents` and in its row of the session map
+3. **Its input box is empty** (above)
+
+Then:
+
+    cmux send --surface <surface> -- '/clear\n'
+
+To `send`, `\n` is the Enter key: this types `/clear` and presses it, in one call. Then, as a
+separate call, look once: the session map reads `idle` for it and
+
+    cmux read-screen --surface <surface> --lines 20
+
+shows the cleared screen — the conversation gone, an empty box. Then send with `SendMessage`
+as the supervisor's 3 says. **If any condition fails, cmux refuses to type, or the look does not
+show it cleared, do not type again** — do what the supervisor's 5 says without cmux: ask the
+person, or send to another idle worker. When it was the look that failed, tell the person that
+`/clear` may stand typed in that tab's box: pressed later, it would erase the next message
+sent there.
+
+## When a message does not arrive
+
+When `SendMessage` to a worker fails — an error, no such session — and that worker has a surface
+whose input box is empty (above), you may put the message into the box yourself. **A message
+held for the person's approval is not one that failed:** that hold is the person's gate, like
+a permission prompt, and the held message still arrives once they approve it — pasting it too
+skips their gate and hands the worker the same work twice. Tell the person it waits for them
+instead. Typed keys submit at every newline, so paste it as one block:
+
+1. Write the message to a file in your scratchpad, with one line at the end naming you — a
+   pasted message carries no sender, and the worker reports to the message's `from`. The
+   first line stays the message's own, which names the work and the step to start from:
+   `from: <your ListAgents name>`
+2. Paste and submit it:
+
+       cmux paste --surface <surface> --submit -- - < <file>
+
+   It goes in as one paste, and cmux presses the key that submits it. If cmux refuses —
+   someone's words or a dialog in the box — do not try again
+3. **Tell the person** you did, and into which tab
+
+The worker still answers with `SendMessage`. A worker that answered your message by refusing
+the work is not a delivery that failed — it comes out of the candidates (the supervisor's 2).
 "#
     )
 }
@@ -3006,7 +3057,7 @@ The message's first line names the work and the step of this file to start from 
 `from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
 behind, `from step 2` for an epic already unfolded whose first-column members are left.
 The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`.
-A message the supervisor pasted into this window (`moai-tmux`) carries no `from`; its last line,
+A message the supervisor pasted into this window (`moai-tmux` or `moai-cmux`) carries no `from`; its last line,
 `from: <name>`, names the supervisor instead. Every
 other line fills a slot the steps use; a line the supervisor adds beyond those — who already
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.
@@ -5508,20 +5559,23 @@ stop sending outside work while a release runs",
         );
         let check = &supervise[supervise.find("**5. Check the report").unwrap()..];
         assert!(
-            check.contains("**Outside tmux, clearing a window is the\nperson's**"),
+            check.contains("**Outside tmux and cmux, clearing a window is\nthe person's**"),
             "tmux 밖에서 창을 비우는 것이 사람의 몫이라는 말이 없다"
         );
         assert!(
-            check.contains("**Inside tmux you may clear it yourself**"),
+            check.contains("**Inside tmux or cmux you may clear it yourself**"),
             "tmux 안의 감독이 칸을 비운다는 갈래가 없다"
         );
         // 비우는 조건 셋 — 보고 확인·idle·빈 입력 칸. 하나라도 빠지면 옛 5-1 처럼 사람의 초안이나 보낸 일을 지운다.
-        for gate in ["only after the report is checked", "read `idle`", "its input\nbox is empty"] {
+        for gate in ["only after the report is checked", "read `idle`", "its\ninput box is empty"] {
             assert!(check.contains(gate), "감독의 5 가 칸을 비우는 조건 `{gate}` 를 안 댄다");
         }
         let head = &supervise[..round];
         assert!(head.contains("**Inside tmux, load `moai-tmux` too.**"), "감독이 tmux 안에서 moai-tmux 를 안 읽는다");
         assert!(head.contains("**Without `$TMUX` nothing of it applies**"), "tmux 없는 감독의 걸음이 바뀐다고 읽힌다");
+        // cmux 안의 감독은 `moai-cmux` 를 읽고, 둘 다 서면 tmux 가 이긴다(moai-p5sz).
+        assert!(head.contains("**Inside cmux, load `moai-cmux` instead.**"), "감독이 cmux 안에서 moai-cmux 를 안 읽는다");
+        assert!(head.contains("so it is\n`moai-tmux`"), "tmux 를 cmux 안에서 돌릴 때 tmux 가 이긴다는 말이 없다");
     }
 
     /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로
@@ -5794,6 +5848,29 @@ stop sending outside work while a release runs",
         assert!(label.contains("**Ask the person once per round**"), "묻지 않고 탭 제목을 바꾼다");
         assert!(label.contains("**A tab the person named stays theirs.**"), "사람이 붙인 탭 이름을 덮는다");
         assert!(!text.contains("rename-workspace"), "사람의 워크스페이스 이름을 바꾼다");
+        // 비우기는 보고 확인·`idle`·빈 입력 칸 셋이 다 선 뒤에, 한 번 보고, 안 보이면 다시 안 친다.
+        let clear = section(&text, "## Clear a worker's window");
+        assert!(clear.contains("**Its input box is empty**"), "비우기 전에 입력 칸을 안 본다");
+        assert!(
+            clear.contains("**Its report is checked**") && clear.contains("`Report-checked:`"),
+            "보고 확인 전에 비운다"
+        );
+        assert!(clear.contains("    cmux send --surface <surface> -- '/clear\\n'"), "/clear 를 한 번에 치지 않는다");
+        assert!(clear.contains("do not type again"), "안 보이면 또 친다");
+        assert!(clear.contains("`/clear` may stand typed in that tab's box"), "남았을지 모를 `/clear` 를 안 알린다");
+        // 붙이기는 한 덩이로, 사람의 허락을 기다리는 메시지는 안 붙이고, 거절에 `--force` 로 밀지 않는다.
+        let paste = section(&text, "## When a message does not arrive");
+        assert!(paste.contains("input box is empty"), "붙이기 전에 입력 칸을 안 본다");
+        assert!(paste.contains("    cmux paste --surface <surface> --submit -- - < <file>"), "한 덩이로 안 붙인다");
+        assert!(
+            paste.contains("**A message\nheld for the person's approval is not one that failed:**"),
+            "허락을 기다리는 메시지를 붙인다"
+        );
+        assert!(paste.contains("`from: <your ListAgents name>`"), "붙인 메시지가 보낸 이를 안 댄다");
+        assert!(
+            paste.contains("**Tell the person**") && paste.contains("do not try again"),
+            "붙인 것을 안 알리거나 거절에 또 친다"
+        );
         // **감독 글이 대는 절은 이 스킬에 서 있다.** 절 이름을 바꾸면 감독 글이 없는 절을 가리킨다.
         let supervise = supervise();
         let mut named = 0;

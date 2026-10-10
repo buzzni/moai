@@ -166,3 +166,53 @@ Code's own titles open with a status glyph: `✳`, or a spinner frame such as `�
 that is neither that nor a label you wrote this round may be a name the person gave the tab, and
 `clear-name` would erase it along with yours — leave that tab unlabelled. Rename no workspace:
 the names in the sidebar are the person's.
+
+## Clear a worker's window
+
+Before you send a worker its next work, you may clear its window (`/clear`) yourself — all of
+these first:
+
+1. **Its report is checked** — the supervisor's 5 held all three checks and the
+   `Report-checked:` note is written
+2. **It reads `idle`** — in `ListAgents` and in its row of the session map
+3. **Its input box is empty** (above)
+
+Then:
+
+    cmux send --surface <surface> -- '/clear\n'
+
+To `send`, `\n` is the Enter key: this types `/clear` and presses it, in one call. Then, as a
+separate call, look once: the session map reads `idle` for it and
+
+    cmux read-screen --surface <surface> --lines 20
+
+shows the cleared screen — the conversation gone, an empty box. Then send with `SendMessage`
+as the supervisor's 3 says. **If any condition fails, cmux refuses to type, or the look does not
+show it cleared, do not type again** — do what the supervisor's 5 says without cmux: ask the
+person, or send to another idle worker. When it was the look that failed, tell the person that
+`/clear` may stand typed in that tab's box: pressed later, it would erase the next message
+sent there.
+
+## When a message does not arrive
+
+When `SendMessage` to a worker fails — an error, no such session — and that worker has a surface
+whose input box is empty (above), you may put the message into the box yourself. **A message
+held for the person's approval is not one that failed:** that hold is the person's gate, like
+a permission prompt, and the held message still arrives once they approve it — pasting it too
+skips their gate and hands the worker the same work twice. Tell the person it waits for them
+instead. Typed keys submit at every newline, so paste it as one block:
+
+1. Write the message to a file in your scratchpad, with one line at the end naming you — a
+   pasted message carries no sender, and the worker reports to the message's `from`. The
+   first line stays the message's own, which names the work and the step to start from:
+   `from: <your ListAgents name>`
+2. Paste and submit it:
+
+       cmux paste --surface <surface> --submit -- - < <file>
+
+   It goes in as one paste, and cmux presses the key that submits it. If cmux refuses —
+   someone's words or a dialog in the box — do not try again
+3. **Tell the person** you did, and into which tab
+
+The worker still answers with `SendMessage`. A worker that answered your message by refusing
+the work is not a delivery that failed — it comes out of the candidates (the supervisor's 2).
