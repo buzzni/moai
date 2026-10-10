@@ -268,8 +268,8 @@ moai init --check          # writes nothing, says current / stale / missing
 ```
 
 `moai skill install` plants the skills for the agents you name — the tracker's
-rules and the wiki for each of them, and the supervisor (with its tmux companion)
-for Claude Code only.
+rules and the wiki for each of them, and the supervisor (with its tmux companion
+and the recovery of sessions that died) for Claude Code only.
 Claude Code gets a plugin in
 `.claude/moai-plugin/`, with the hooks, registered with `claude`. Codex and
 Antigravity both read `.agents/skills/`, so naming either plants it for both,
@@ -296,6 +296,9 @@ moai carries no messaging between agents. In Claude Code, one session that calls
 repository it sees in `ListAgents`, through Claude Code's own `SendMessage`, and
 takes their reports back the same way. Inside tmux the supervisor can also clear,
 paste into and — once the person says yes — open worker panes (`moai-tmux`).
+When the sessions die together — a restart, an OOM kill — and the person asks to
+bring them back, `moai-recover` finds them, says what each was doing and resumes
+each one (`claude --resume`, in a new tmux pane or as a line to type).
 Codex and Antigravity have no supervisor.
 What each agent needs first — Codex's trust in `/hooks`, and its sandbox on a
 machine where that cannot stand — is in

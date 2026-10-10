@@ -183,7 +183,8 @@ has read `busy` far longer than its work should take, look at its pane once:
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
 rate-limit error, or a process that ended (a shell prompt where the box was). **Tell the
 person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
-key, and do not look again in a loop.
+key, and do not look again in a loop. A process that ended is a dead session: bringing it
+back is `moai-recover`, once the person asks for it.
 
 ## No idle worker left
 
