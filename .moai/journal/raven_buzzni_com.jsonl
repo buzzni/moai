@@ -5987,3 +5987,4 @@
 {"ts":"2026-10-10T04:50:08Z","id":"moai-r170","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — merged into milestone/moai-l92t at b2ca95f3; all five members and the review closed. Ships with v0.12.0 when the milestone branch goes into develop."}
 {"ts":"2026-10-10T04:50:21Z","id":"moai-r170","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: b2ca95f3"}
 {"ts":"2026-10-10T04:50:31Z","id":"moai-jn4d","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moai-jn4d-18 (bl4d)"}
+{"ts":"2026-10-10T04:50:39Z","id":"moai-bl4d","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
