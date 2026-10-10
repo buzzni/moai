@@ -5528,7 +5528,10 @@ stop sending outside work while a release runs",
         let rule = &text[text.find("\n## Is the input box empty\n").expect("되살리기에 빈 입력 칸의 절이 없다")..];
         let rule = &rule[..rule.find("\n## 1. Find the dead").expect("빈 입력 칸의 절이 1 앞에 안 선다")];
         assert!(rule.contains(EMPTY_BOX) && tmux().contains(EMPTY_BOX), "두 스킬이 빈 입력 칸의 잣대를 따로 적는다");
-        assert!(EMPTY_BOX.contains("#{pane_in_mode}") && EMPTY_BOX.contains("capture-pane -p -e"), "잣대가 칸을 안 본다");
+        assert!(
+            EMPTY_BOX.contains("#{pane_in_mode}") && EMPTY_BOX.contains("capture-pane -p -e"),
+            "잣대가 칸을 안 본다"
+        );
         assert!(open.contains("(\"Is the input box empty\" above)"), "붙이기 전에 입력 칸을 안 본다");
         assert!(text.contains("**Their asking is the yes:**"), "되살려 달라는 말을 허락으로 안 읽는다");
         assert!(text.contains("**Workers first, the supervisor last**"), "일꾼 먼저·감독 마지막의 차례가 없다");
