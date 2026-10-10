@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-10
+
 ### Added
 
 - **`moai show --sort` takes several fields, each with a direction, like
