@@ -77,7 +77,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         except OSError:
             pass
     tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    pane = tmux.rpartition(".")[2] if "%" in tmux and r.get("entrypoint") != "remote_mobile" else ""
     if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
         pane = ""
     saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
@@ -104,17 +104,25 @@ PY
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
 
-**Inside Saycode** — `SAYCODE_AGENT_ENV` is `1` in your shell and `happy agent whoami` answers
-`"ok":true` — a session Saycode ran leaves a row behind as well:
+**A Saycode session** comes back through Saycode (7), never in a pane — resumed in a pane, its
+conversation would run outside Saycode while the Saycode session stays ended. Its transcript
+(below) says which candidate is one: its lines carry `"entrypoint":"remote_mobile"`, where a
+session opened in a terminal carries `"cli"`. That holds outside Saycode too, and for a
+session that died in the middle of a turn.
+
+Its Saycode id comes from Saycode. **Inside Saycode** — `SAYCODE_AGENT_ENV` is `1` in your
+shell and `happy agent whoami` answers `"ok":true` — a session Saycode ran leaves a row behind:
 
     happy agent ls --status
 
 A row whose `state` is `ended` and whose `directory` is the root or one of the worktrees is a
-Saycode session that died. Pair it with a candidate by what it last said: its `lastAgentText`
-is the start of the last assistant text in that candidate's transcript (2). A candidate so
-paired is a **Saycode session** and comes back through Saycode (7) — resumed in a pane, its
-conversation would run outside Saycode while the Saycode session stays ended. Name an ended
-row that pairs with no candidate to the person apart, with its `summary`.
+Saycode session that died. Pair it with a Saycode candidate by what it last said: its
+`lastAgentText` is the start of the last assistant text in that candidate's transcript (2).
+It is empty for a session that died in the middle of a turn — pair that one by its `summary`
+against what the transcript was doing, and ask the person when two rows could match. Name an
+ended row that pairs with no candidate to the person apart, with its `summary`. A Saycode
+candidate left without an id — outside Saycode, or paired with no row — is still never
+resumed in a pane: the person reopens it from Saycode's session list (7).
 
 **A session's transcript** is `~/.claude/projects/<slug>/<sessionId>.jsonl`, one JSON object
 per line. The slug is a directory with every character that is not a letter or a digit
@@ -186,12 +194,15 @@ back in new sessions and their names may have changed — run `ListAgents` again
 send or wait for a report.
 
 **Workers first, the supervisor last**, in every way below — the supervisor's `ListAgents`
-has to see the workers when it starts.
+has to see the workers when it starts. A Saycode session is back only once the person
+reopens it (7), so when a worker is one, give the person its line first and open the
+supervisor's pane — or print its line — only after they say that worker is back.
 
 ## 5. Inside tmux — open a pane each
 
 `$TMUX` is set in your shell. For each session that is not a Saycode session (7), in that
-order:
+order. The panes open in the window of `$TMUX_PANE` — inside a session Saycode's daemon
+started, that is the daemon's pane, not yours — so say which window they are in:
 
     tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
     tmux select-layout -t "$TMUX_PANE" tiled
@@ -227,5 +238,7 @@ above: in Saycode's session list, or in a terminal of their own:
 
 It resumes the conversation in the path Saycode saved, **in the foreground of the terminal
 that runs it** — so never run it yourself; print it, and under it the block of 4 to paste once
-its box shows. Whether it comes back under the same Saycode id is not verified: add to the
-supervisor's block that it reads `happy agent ls --status` again before it sends.
+its box shows. A session with no Saycode id (1) has only the session list: name it by its
+`cwd`, its `sessionId` and what it was doing. Whether it comes back under the same Saycode id
+is not verified: add to the supervisor's block that it reads `happy agent ls --status` again
+before it sends.

@@ -95,7 +95,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         except OSError:
             pass
     tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    pane = tmux.rpartition(".")[2] if "%" in tmux and r.get("entrypoint") != "remote_mobile" else ""
     if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
         pane = ""
     saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
@@ -116,10 +116,12 @@ PY
   supervisor's steps say
 - A Saycode row the map pairs with nothing is not Claude Code — a `codex` or `gemini` worker
   the person asked for. It cannot `SendMessage`; its report is its last turn ("Take the
-  report")
+  report"). **It is still a worker:** `ListAgents` never shows it, so the supervisor's 2 counts
+  it from this list — a candidate while it reads `idle` and the report of the work you last
+  sent it is checked. Its `Sent:` note names it `saycode <id>`, with no name
 - **Never trust `pane` for a Saycode row.** Saycode's daemon hands its own pane down to the
   sessions it starts, so the record names a pane that is not theirs — the map prints `-` for
-  a pane two alive rows name
+  a session the daemon started, and for a pane two alive rows name
 
 Run each of these when a step below needs it, once.
 
@@ -138,7 +140,9 @@ with `askUserQuestion` and `exitPlanMode` false and `permissionRequests` 0.
        happy agent wait <id> --until turn-end --timeout 3600000
 
    `wait` counts only a turn that ends after it started. Started after the prompt, it can miss
-   a short turn and block until its timeout
+   a short turn and block until its timeout. Give that Bash call a `timeout` above the wait's
+   own, `3660000` — Bash stops a background command after 30 minutes unless told otherwise,
+   and a stopped wait is neither of the two endings below
 4. Send it, without `--wait`:
 
        happy agent prompt <id> "$(cat <file>)"
@@ -179,7 +183,8 @@ Then:
 
     happy agent prompt <id> /clear
 
-and, as a separate call, look once with `ls --status`: it reads `idle`. The context is gone
+and, as a separate call, look once with `ls --status`: it should read `idle`. Until it does,
+send it nothing — look again after your next step. The context is gone
 and its process started again, so its `ListAgents` name has changed — run `ListAgents` and
 the map again before anything goes to it by name. Its Saycode id is the same, and "Send work"
 needs no name. **If any condition fails, do not clear it** — do what the supervisor's 5 says:
@@ -202,7 +207,8 @@ When the wait ends with no report, or the person asks about a worker, look at it
 - **`responding`** far longer than the work should take — read its last messages once,
   `happy agent read <id> --last 5`, and tell the person what they show
 
-To be told when a worker starts waiting, without polling, start in the background:
+To be told when a worker starts waiting, without polling, start in the background, with the
+same Bash `timeout` as in "Send work":
 
     happy agent wait <id> --until waiting-input --timeout 3600000
 
@@ -223,7 +229,9 @@ they asked you for it. The question says, for each session:
 (`codex`, `gemini`). Take exactly what they name, check it against `whoami`'s
 `spawnModelOptions` (each `agent` with its `models`, each model with the `efforts` it takes),
 and never fill in a value they left out — leave that flag off. When they name nothing, it is
-`claude` with the model picked in the supervisor's 2-1.
+`claude` with the model picked in the supervisor's 2-1. Spawn takes no alias — `--model opus`
+fails as an unknown model — so `<model>` is the first id under `claude` in `spawnModelOptions`
+that carries that word (`claude-opus-…` for `opus`); when none does, leave `--model` off.
 
 On a yes, for each session:
 

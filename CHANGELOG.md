@@ -30,11 +30,12 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
-- **`moai-tmux` leaves alone a pane that two live sessions name.** A session
-  Saycode started carries in its record the pane of whoever started Saycode's
-  daemon — the supervisor's own pane, when it was measured — so the session map
-  now prints `-` for such a pane instead of handing it out, and gains a
-  seventh column, the session's Saycode id. (moai-l244)
+- **`moai-tmux` no longer hands out the pane of a session Saycode's daemon
+  started, nor a pane that two live sessions name.** Such a session carries in
+  its record the pane the daemon was started from — the supervisor's own pane,
+  when it was measured — so the session map now prints `-` for it instead of
+  handing it out, and gains a seventh column, the session's Saycode id.
+  (moai-l244)
 
 ## [0.13.0] - 2026-10-10
 

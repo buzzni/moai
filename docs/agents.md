@@ -466,10 +466,11 @@ this happens.
 It never kills a pane, a session or the server, and never runs `claude -p` or a
 `--dangerously-*` flag.
 
-- **A pane two live sessions name is left alone.** A session Saycode started
-  carries in its record the pane of whoever started Saycode's daemon — often
-  the supervisor's own — so the skill reads such a pane as nobody's and types
-  nothing into it. A Saycode session is driven through `moai-saycode` instead
+- **A session Saycode's daemon started has no pane, and a pane two live
+  sessions name is left alone.** Such a session carries in its record the pane
+  the daemon was started from, so the skill reads that pane as nobody's and
+  types nothing into it. A Saycode session is driven through `moai-saycode`
+  instead
 
 ### In Saycode
 
@@ -531,9 +532,11 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
   `cd <dir> && claude --resume <id>` and the note to paste
 
 A session Saycode ran is not resumed in a pane — that would run its
-conversation outside Saycode. It finds it as an `ended` row in
-`happy agent ls --status` and prints `happy resume <saycode id>` for you to run
-in a terminal of your own, or you reopen it from Saycode's session list.
+conversation outside Saycode. It tells such a session from its transcript,
+finds its id as an `ended` row in `happy agent ls --status` and prints
+`happy resume <saycode id>` for you to run in a terminal of your own, or you
+reopen it from Saycode's session list. A worker that is one comes back before
+the supervisor does.
 
 It changes nothing in the sessions' work — no commit, no build, no `moai` write.
 

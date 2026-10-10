@@ -64,7 +64,7 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         except OSError:
             pass
     tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    pane = tmux.rpartition(".")[2] if "%" in tmux and r.get("entrypoint") != "remote_mobile" else ""
     if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
         pane = ""
     saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
@@ -83,9 +83,10 @@ PY
   is not in tmux or runs on another tmux server than yours (pane ids are counted per server,
   so another server's `%4` is a different pane here), and then this skill has nothing for
   that worker
-- **A pane two alive rows name belongs to neither** — both print `-`, so leave both alone. A
-  session Saycode started carries in its record the pane of whoever started Saycode's daemon,
-  your own pane included: typing there would type into that pane, not the worker's
+- **A session Saycode's daemon started has no pane** — it prints `-`. Its record carries the
+  pane the daemon was started from, and typing there would type into that pane, not the
+  worker's. **A pane two alive rows name belongs to neither** either — both print `-`, so
+  leave both alone
 - **A row whose `saycode` is not `-` is a Saycode session.** Inside Saycode (`moai-saycode`) it
   is driven through Saycode, not its pane — you type nothing into it, and only label it
 - `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
@@ -93,7 +94,8 @@ PY
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
 - Your own row is the one whose pane is `$TMUX_PANE`; a row of yours that prints `-` has no
-  pane this skill can use
+  pane this skill can use. Inside a session Saycode's daemon started, `$TMUX_PANE` is the
+  daemon's pane, handed down — not yours
 
 Run it when a step below needs a pane, once.
 
