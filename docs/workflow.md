@@ -13,8 +13,9 @@ in [the CLI reference](cli.md), what to do when something ends up wrong is in
 `moai init` in a terminal shows a short screen before it writes anything: the id
 prefix (it cannot change later), whether git tracks the tracker, where the agent
 guide goes ([the agents page](agents.md#where-the-guide-goes)), whether to install
-the hooks and skills, the merge driver, and whether to add the repository to your
-project list. Each row comes with its default picked; Enter plants, Esc stops with
+the hooks and skills — with a row under it for each
+[optional skill](agents.md#optional-skills) — the merge driver, and whether to add
+the repository to your project list. Each row comes with its default picked; Enter plants, Esc stops with
 nothing written. A flag picks its row and locks it. `--yes` asks nothing and plants
 the old defaults — committed, with the guide block — for choices that flags and
 existing git rules or guide files have not settled. A script or an agent is never

@@ -75,6 +75,7 @@ The first `moai init` in a terminal asks, and `--guide` says it without asking:
     moai skill install --agent codex       Codex: the committed .agents/skills/ and .codex/hooks.json
     moai skill install --agent antigravity Antigravity: the same .agents/skills/ and .agents/hooks.json
     moai skill install --agent auto        whichever of claude, codex and agy is on PATH
+    moai skill install --with moai-tmux    plant an optional skill too (--without takes it out)
     moai skill status                      what is planted where, and what differs
 
 `--agent` names who the skills are for — `claude` (what you get when it is left
@@ -128,13 +129,13 @@ does not have reads `—`: tell the person and go on. The supervisor skill, its
 tmux companion and the recovery skill, planted for Claude Code only, name Claude
 Code's tools directly.
 
-Five skills come with it:
+Four skills are always planted, and one more is yours to choose:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
     moai-wiki         keeps this wiki in step with the work
     moai-supervise    Claude Code only: hands piled-up backlog items to the idle sessions of the repository
-    moai-tmux         Claude Code only: the supervisor's hands on the workers' tmux panes
     moai-recover      Claude Code only: brings back the sessions of the repository that died
+    moai-tmux         optional, Claude Code only: the supervisor's hands on the workers' tmux panes
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
@@ -150,13 +151,38 @@ Five skills come with it:
   own messaging — [Hand work to idle sessions](#hand-work-to-idle-sessions).
   The worker's way of working is on
   [the workflow page](workflow.md#work-in-a-worktree)
-- **`moai-tmux`** is what the supervisor loads when it runs inside tmux: it maps
-  a worker's `ListAgents` name to its pane and lets the supervisor label, clear
-  and paste into that pane, and open new worker panes once you say yes —
-  [In tmux](#in-tmux)
 - **`moai-recover`** is what you call when the sessions died together — a
   restart, an OOM kill — to bring them back where they stopped —
   [Bring back sessions that died](#bring-back-sessions-that-died)
+- **`moai-tmux`** is what the supervisor loads when it runs inside tmux: it maps
+  a worker's `ListAgents` name to its pane and lets the supervisor label, clear
+  and paste into that pane, and open new worker panes once you say yes —
+  [In tmux](#in-tmux). It is planted only where you choose it
+
+### Optional skills
+
+An optional skill is planted only where you ask for it — today that is
+`moai-tmux`, for a person who runs the supervisor inside tmux.
+
+    moai skill install --with moai-tmux       plant it
+    moai skill install --without moai-tmux    take it out again
+    moai skill uninstall --only moai-tmux     the same, under the uninstall name
+    moai init --with moai-tmux                plant it with the rest on the first init
+
+- **Nothing writes the choice down.** A skill planted in the tree is the answer.
+  So a plain `moai skill install` refreshes the optional skills already planted
+  and plants no new one, and a first install plants none
+- **The first `moai init` in a terminal offers a row per optional skill** under
+  the hooks and skills row. A row starts checked when the skill is already
+  planted, or when your shell says you use it (`$TMUX` set, for `moai-tmux`).
+  Where nothing is asked — a script, an agent, `--yes` — only what `--with`
+  names is planted, never what the shell suggests
+- **`uninstall --only` keeps the registration.** It removes that skill's
+  directory (only while it holds nothing but moai's files) and brings Claude's
+  registration up to the new version where it already stands; where none stands
+  it changes the files and registers nothing
+- **A skill you left out is not drift.** The notice that the planted skills
+  differ from this moai's does not count an optional skill you did not plant
 
 ## Open a session for each agent
 
@@ -389,9 +415,11 @@ and stops at anything that cannot be undone.
 
 ### In tmux
 
-When the supervisor runs inside tmux (`$TMUX` is set), it also loads the
-`moai-tmux` skill and works on the workers' panes of your own tmux server
-(moai-u99i). Without tmux nothing of this happens.
+When the supervisor runs inside tmux (`$TMUX` is set) and the `moai-tmux`
+skill is planted ([optional skills](#optional-skills) — `moai skill install
+--with moai-tmux`), it also loads that skill and works on the workers' panes of
+your own tmux server (moai-u99i). Without tmux, or without the skill, nothing of
+this happens.
 
 - **Which pane is which worker.** Claude Code keeps a record per process under
   `~/.claude/sessions/`; the skill reads the live ones (the pid alive and its
