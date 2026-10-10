@@ -2053,7 +2053,8 @@ worker, and the message is the whole assignment.
   may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
   session of another repository. Inside tmux, ask the person first whether to open new worker
-  panes (`moai-tmux`, "No idle worker left"); on a no, stop
+  panes (`moai-tmux`, "No idle worker left"); inside cmux, whether to open new worker tabs
+  (`moai-cmux`, "No idle worker left"). On a no, stop
 - **A worker that refused the work comes out of the candidates and is not sent to
   again.** Some sessions take work only from their own person
 - **A test agent is no worker.** One raised for a test is opened outside the repository (a
@@ -2160,7 +2161,8 @@ worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you. Inside tmux, an
 idle notice with no report is the moment to read that worker's pane once (`moai-tmux`, "When a
-worker stalls") and tell the person what it shows.
+worker stalls") and tell the person what it shows — inside cmux, its tab (`moai-cmux`, "When a
+worker stalls").
 
 **A report reaches only the name it was sent to.** A supervisor that started again —
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
@@ -2758,6 +2760,45 @@ instead. Typed keys submit at every newline, so paste it as one block:
 
 The worker still answers with `SendMessage`. A worker that answered your message by refusing
 the work is not a delivery that failed — it comes out of the candidates (the supervisor's 2).
+
+## When a worker stalls
+
+When a `notify_when_idle` notice comes with no report, or the person asks about a worker that
+has read `busy` far longer than its work should take, look at its tab once:
+
+    cmux read-screen --surface <surface> --lines 40
+
+and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
+rate-limit error, or a process that ended (a shell prompt where the box was). The input box
+check above says it in a word when you have it: `waiting_on_human` is a prompt waiting for the
+person, `unknown` a screen that is no longer Claude Code's. **Tell the person** what the tab
+shows and which tab it is. Do not answer the prompt, do not press a key, and do not look again
+in a loop. A process that ended is a dead session: bringing it back is `moai-recover`, once
+the person asks for it.
+
+## No idle worker left
+
+When the supervisor's 2 finds no worker, ask the person **once** whether to open new worker
+tabs, and how many — one question covers several. Open one only on their yes, or when they
+asked you for it. On a yes, for each:
+
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && claude --model <model>'
+
+`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
+other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
+UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
+shell, so the shell stays when `claude` exits and what it said stays readable, and the split
+does not take focus. When all are open, even the splits out once:
+
+    cmux rpc workspace.equalize_splits '{{"workspace_id":"<workspace UUID>"}}'
+
+The tab belongs to the same person — it is their interactive session like any other.
+
+Once it has started (a separate call: the input box check above reads `empty` for the new
+surface), look at `ListAgents` once more. The new row is a worker like any other (the
+supervisor's 2) — send to it as in 3. If it does not show yet, look once more after your next
+step; if a prompt stands in the new tab (trusting the folder, say), tell the person — it is
+theirs to answer.
 "#
     )
 }
@@ -5574,7 +5615,10 @@ stop sending outside work while a release runs",
         assert!(head.contains("**Inside tmux, load `moai-tmux` too.**"), "감독이 tmux 안에서 moai-tmux 를 안 읽는다");
         assert!(head.contains("**Without `$TMUX` nothing of it applies**"), "tmux 없는 감독의 걸음이 바뀐다고 읽힌다");
         // cmux 안의 감독은 `moai-cmux` 를 읽고, 둘 다 서면 tmux 가 이긴다(moai-p5sz).
-        assert!(head.contains("**Inside cmux, load `moai-cmux` instead.**"), "감독이 cmux 안에서 moai-cmux 를 안 읽는다");
+        assert!(
+            head.contains("**Inside cmux, load `moai-cmux` instead.**"),
+            "감독이 cmux 안에서 moai-cmux 를 안 읽는다"
+        );
         assert!(head.contains("so it is\n`moai-tmux`"), "tmux 를 cmux 안에서 돌릴 때 tmux 가 이긴다는 말이 없다");
     }
 
@@ -5814,7 +5858,7 @@ stop sending outside work while a release runs",
     fn the_cmux_skill_touches_only_named_surfaces() {
         let text = cmux();
         let calls = cmux_calls(&text);
-        assert!(calls >= 6, "cmux 스킬의 명령을 못 셌다 — {calls}");
+        assert!(calls >= 12, "cmux 스킬의 명령을 못 셌다 — {calls}");
         let never = &text[text.find("## What never happens").expect("하지 않는 것 절이 없다")..];
         let never = &never[..3 + never[3..].find("\n## ").unwrap()];
         for gone in ["`close-surface`", "`close-workspace`", "`close-window`", "`--force`", "`pkill`", "`focus-*`"] {
@@ -5871,6 +5915,20 @@ stop sending outside work while a release runs",
             paste.contains("**Tell the person**") && paste.contains("do not try again"),
             "붙인 것을 안 알리거나 거절에 또 친다"
         );
+        // 멈춘 일꾼은 한 번 읽고 사람에게 말한다 — 대신 답하지 않는다.
+        let stall = section(&text, "## When a worker stalls");
+        assert!(stall.contains("    cmux read-screen --surface <surface> --lines 40"), "멈춘 탭을 안 읽는다");
+        assert!(stall.contains("**Tell the person**") && stall.contains("do not press a key"), "멈춘 탭에 대신 답한다");
+        // 새 칸은 물은 뒤에만, `claude` 의 깃발은 모델 하나다. 포커스는 안 뺏는다.
+        let open = section(&text, "## No idle worker left");
+        assert!(open.contains("ask the person **once**") && open.contains("only on their yes"), "묻지 않고 탭을 연다");
+        let launches: Vec<&str> = text.lines().filter(|l| l.contains("claude ") && l.contains("--command")).collect();
+        assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
+        assert!(
+            launches[0].ends_with("--command 'cd <root> && claude --model <model>'"),
+            "띄우는 줄에 다른 깃발이 섰다"
+        );
+        assert!(launches[0].contains("--surface \"$CMUX_SURFACE_ID\""), "새 칸이 감독 곁에 안 선다");
         // **감독 글이 대는 절은 이 스킬에 서 있다.** 절 이름을 바꾸면 감독 글이 없는 절을 가리킨다.
         let supervise = supervise();
         let mut named = 0;
@@ -5967,6 +6025,9 @@ stop sending outside work while a release runs",
             ("2", "Inside tmux, ask the person first whether to open new worker"),
             ("3", "Inside tmux, label the worker's pane as you send"),
             ("4", "Inside tmux, an\nidle notice with no report"),
+            ("2", "inside cmux, whether to open new worker tabs"),
+            ("3", "Inside cmux, label the worker's tab as you send"),
+            ("4", "inside cmux, its tab (`moai-cmux`"),
         ] {
             assert!(supervise.contains(line), "감독의 {step} 에 tmux 갈래가 없다");
         }

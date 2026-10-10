@@ -216,3 +216,42 @@ instead. Typed keys submit at every newline, so paste it as one block:
 
 The worker still answers with `SendMessage`. A worker that answered your message by refusing
 the work is not a delivery that failed — it comes out of the candidates (the supervisor's 2).
+
+## When a worker stalls
+
+When a `notify_when_idle` notice comes with no report, or the person asks about a worker that
+has read `busy` far longer than its work should take, look at its tab once:
+
+    cmux read-screen --surface <surface> --lines 40
+
+and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
+rate-limit error, or a process that ended (a shell prompt where the box was). The input box
+check above says it in a word when you have it: `waiting_on_human` is a prompt waiting for the
+person, `unknown` a screen that is no longer Claude Code's. **Tell the person** what the tab
+shows and which tab it is. Do not answer the prompt, do not press a key, and do not look again
+in a loop. A process that ended is a dead session: bringing it back is `moai-recover`, once
+the person asks for it.
+
+## No idle worker left
+
+When the supervisor's 2 finds no worker, ask the person **once** whether to open new worker
+tabs, and how many — one question covers several. Open one only on their yes, or when they
+asked you for it. On a yes, for each:
+
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <root> && claude --model <model>'
+
+`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
+other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
+UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
+shell, so the shell stays when `claude` exits and what it said stays readable, and the split
+does not take focus. When all are open, even the splits out once:
+
+    cmux rpc workspace.equalize_splits '{"workspace_id":"<workspace UUID>"}'
+
+The tab belongs to the same person — it is their interactive session like any other.
+
+Once it has started (a separate call: the input box check above reads `empty` for the new
+surface), look at `ListAgents` once more. The new row is a worker like any other (the
+supervisor's 2) — send to it as in 3. If it does not show yet, look once more after your next
+step; if a prompt stands in the new tab (trusting the folder, say), tell the person — it is
+theirs to answer.

@@ -260,7 +260,8 @@ worker, and the message is the whole assignment.
   may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
   session of another repository. Inside tmux, ask the person first whether to open new worker
-  panes (`moai-tmux`, "No idle worker left"); on a no, stop
+  panes (`moai-tmux`, "No idle worker left"); inside cmux, whether to open new worker tabs
+  (`moai-cmux`, "No idle worker left"). On a no, stop
 - **A worker that refused the work comes out of the candidates and is not sent to
   again.** Some sessions take work only from their own person
 - **A test agent is no worker.** One raised for a test is opened outside the repository (a
@@ -386,7 +387,8 @@ worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you. Inside tmux, an
 idle notice with no report is the moment to read that worker's pane once (`moai-tmux`, "When a
-worker stalls") and tell the person what it shows.
+worker stalls") and tell the person what it shows — inside cmux, its tab (`moai-cmux`, "When a
+worker stalls").
 
 **A report reaches only the name it was sent to.** A supervisor that started again —
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
