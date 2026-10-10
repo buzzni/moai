@@ -2249,8 +2249,8 @@ subject — that has actually happened. So in the root, supervisor and worker al
     )
 }
 
-/// 살아 있는 Claude Code 세션마다 `ListAgents` 의 이름과 tmux 칸을 잇는 짝 — **한 자리에만 선다**(moai-u99i.xo8).
-/// `moai-tmux`([`tmux`])가 `format!` 으로 싣고, 되살리기 스킬([`recover`], moai-uqf7)이 죽은 세션까지 읽으려고 같은
+/// 살아 있는 Claude Code 세션마다 `ListAgents` 의 이름과 tmux 칸(cmux 안에서는 surface)을 잇는 짝 — **한 자리에만
+/// 선다**(moai-u99i.xo8). `moai-tmux`([`tmux`])와 `moai-cmux`([`cmux`])가 `format!` 으로 싣고, 되살리기 스킬([`recover`], moai-uqf7)이 죽은 세션까지 읽으려고 같은
 /// 상수를 싣는다. 그래서 거르지 않고 첫 칸에 `alive`·`dead` 를 적는다 — 읽는 쪽이 고른다. 두 벌로 적으면 기록의 꼴이
 /// 바뀌는 날 한쪽만 고쳐진다.
 ///
@@ -2270,6 +2270,20 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// 소켓을 견줬는데 macOS 에는 그 파일이 없고, 남의 프로세스 환경을 읽는 일은 자동 모드의 분류기가 비밀 뒤지기로 막았다
 /// (2026-10-11) — tty 와 시작 시각은 환경을 안 읽는다. 죽은 줄과 `$TMUX` 없이 부른 판은 기록의 칸을 그대로 낸다. 죽은
 /// 줄의 칸은 아무도 겨누지 않는다 — 되살리기(moai-uqf7)는 제가 연 칸에만 친다.
+///
+/// **cmux 안에서 부르면 같은 칸에 surface 의 UUID 가 선다**(moai-p5sz.7q3) — 부르는 셸에 `$TMUX` 는 없고
+/// `CMUX_SURFACE_ID` 가 서 있을 때다. `moai-cmux` 의 명령은 모두 `--surface <UUID>` 로 겨누니 칸 하나가 둘 다 받는다.
+/// 다리는 `cmux --json --id-format both top --all` 의 surface 별 `cmux_process_pids` 다(사람 결정 2026-10-10) — 그
+/// surface 의 `CMUX_SURFACE_ID` 를 환경에 든 프로세스를 cmux 가 스스로 센 것이라, 짝은 남의 환경을 안 읽는다.
+/// `--id-format both` 가 없으면 cmux 가 JSON 에서 UUID(`id`)를 지운다. 이렇게 정한 까닭이 셋이다.
+///
+/// - **tty 는 못 쓴다** — `tree` 가 surface 마다 대는 `tty` 에 낡은 값이 섞여(2026-10-11 Mac 에서 `ttys023` 을 두
+///   surface 가 함께 댔고 실제 주인은 하나였다) 엉뚱한 surface 에 칠 수 있다
+/// - **tmux 가 이긴다** — tmux 를 cmux 안에서 돌리면 둘 다 서는데, 그 셸에서 친 것은 tmux 칸으로 가니 tmux 의 짝을
+///   낸다. 거꾸로 cmux 쪽에서는 기록에 `tmux` 가 선 산 세션을 `-` 로 낸다 — tmux 서버가 cmux 안에서 섰다면 그
+///   환경의 `CMUX_SURFACE_ID` 는 tmux 를 띄운 surface 의 것이라, 거기 치면 그 세션이 아니라 tmux 의 지금 칸에 간다
+/// - **cmux 가 `top` 을 모르면 칸이 모두 `-` 다** — `top` 은 v0.64.0, `moai-cmux` 가 기대는 나머지는 v0.65.0 부터다.
+///   판을 재는 것은 스킬의 몫이고(`moai-cmux` 의 첫 절), 짝은 모르는 판에서 아무 surface 도 대지 않는다
 ///
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
@@ -2293,6 +2307,20 @@ def tty(pid):
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return "/dev/" + t if t.strip("?") else ""
 mine = os.environ.get("TMUX")
+cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
+surfaces = {}
+def walk(o):
+    if isinstance(o, dict):
+        for p in o.get("cmux_process_pids") or []:
+            surfaces[p] = o.get("id")
+        o = list(o.values())
+    for v in o if isinstance(o, list) else []:
+        walk(v)
+if cmux:
+    try:
+        walk(json.loads(out("cmux", "--json", "--id-format", "both", "top", "--all")))
+    except ValueError:
+        pass
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -2308,6 +2336,8 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         here = tty(pid)
         if not here or here != out("tmux", "display", "-p", "-t", pane, "#{pane_tty}"):
             pane = ""
+    if alive and cmux:
+        pane = "" if tmux else surfaces.get(pid)
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY"##;
@@ -5331,7 +5361,8 @@ stop sending outside work while a release runs",
     /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로
     /// 싣고, 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
     /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다. 다른 tmux 서버에서 도는 산 세션의
-    /// 칸은 `-` 다 — `%N` 은 서버마다 따로 세어, 그대로 내면 부르는 쪽 서버의 엉뚱한 칸에 친다.
+    /// 칸은 `-` 다 — `%N` 은 서버마다 따로 세어, 그대로 내면 부르는 쪽 서버의 엉뚱한 칸에 친다. cmux 안에서 부르면 같은
+    /// 칸에 surface 의 UUID 가 선다(moai-p5sz.7q3).
     #[test]
     fn the_session_map_reads_the_records() {
         assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
@@ -5357,17 +5388,33 @@ stop sending outside work while a release runs",
         std::fs::write(dir.join("3.json"), record(me, &start, "plain", None)).unwrap();
         std::fs::write(dir.join("4.json"), "not json").unwrap();
         let shell = SESSIONS.replace("~/.claude/sessions", &dir.display().to_string());
-        let run = |tmux: Option<&str>| {
+        // cmux 를 흉내 내는 `cmux` — 짝이 부르는 꼴 그대로일 때만 `top` 의 JSON 꼴(windows → workspaces → panes →
+        // surfaces)을 내고, 이 시험 프로세스를 `CMUX-SURFACE-A` 에 둔다.
+        let bin = s.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let top = format!(
+            r#"{{"windows":[{{"workspaces":[{{"panes":[{{"surfaces":[{{"id":"CMUX-SURFACE-B","ref":"surface:2","cmux_process_pids":[]}},{{"id":"CMUX-SURFACE-A","ref":"surface:3","cmux_process_pids":[{me}],"processes":[{{"pid":{me}}}]}}]}}]}}]}}]}}"#
+        );
+        let fake = format!("#!/bin/sh\n[ \"$*\" = '--json --id-format both top --all' ] || exit 1\necho '{top}'\n");
+        std::fs::write(bin.join("cmux"), fake).unwrap();
+        std::fs::set_permissions(bin.join("cmux"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+        // 시험은 사람의 cmux 안에서 돌 수 있다 — 물려받은 `CMUX_SURFACE_ID` 는 늘 걷고, cmux 를 재는 판만 세운다.
+        let run_in = |tmux: Option<&str>, cmux: bool| {
             let mut cmd = std::process::Command::new("sh");
-            cmd.arg("-c").arg(&shell);
+            cmd.arg("-c").arg(&shell).env_remove("CMUX_SURFACE_ID");
             match tmux {
                 Some(t) => cmd.env("TMUX", t),
                 None => cmd.env_remove("TMUX"),
             };
+            if cmux {
+                cmd.env("CMUX_SURFACE_ID", "CMUX-SURFACE-SUPERVISOR").env("PATH", &path);
+            }
             let out = cmd.output().unwrap();
             assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
             String::from_utf8(out.stdout).unwrap()
         };
+        let run = |tmux: Option<&str>| run_in(tmux, false);
         assert_eq!(
             run(None),
             "alive\there\t%39\tidle\t/repo\ts-here\n\
@@ -5382,6 +5429,21 @@ stop sending outside work while a release runs",
              dead\treused\t%4\tidle\t/repo\ts-reused\n\
              alive\tplain\t-\tidle\t/repo\ts-plain\n",
             "다른 tmux 서버의 칸 id 를 그대로 낸다"
+        );
+        // cmux 안(tmux 밖)에서는 칸 자리에 그 세션이 도는 surface 의 UUID 가 선다. 기록에 `tmux` 가 선 세션은 tmux 안에서
+        // 도는 것이라 cmux 로는 못 겨눈다 — `-` 다. 죽은 줄은 기록 그대로다.
+        assert_eq!(
+            run_in(None, true),
+            "alive\there\t-\tidle\t/repo\ts-here\n\
+             dead\treused\t%4\tidle\t/repo\ts-reused\n\
+             alive\tplain\tCMUX-SURFACE-A\tidle\t/repo\ts-plain\n",
+            "cmux 안에서 세션의 surface 를 못 찾았다"
+        );
+        // tmux 를 cmux 안에서 돌리면 둘 다 선다 — 그 셸에서 친 것은 tmux 로 가니 tmux 의 짝이 이긴다.
+        assert_eq!(
+            run_in(Some("/nonexistent/moai-other-server,1,0"), true),
+            run(Some("/nonexistent/moai-other-server,1,0")),
+            "tmux 안의 감독에게 cmux 의 surface 를 냈다"
         );
         // 부르는 쪽 서버의 칸에서 실제로 도는 프로세스는 그 칸을 받는다 — 칸의 tty 와 프로세스의 tty 가 같다. 시험 서버는
         // 제 소켓(`-S`)으로 따로 띄운다: 사람의 서버에 붙지 않는다.
