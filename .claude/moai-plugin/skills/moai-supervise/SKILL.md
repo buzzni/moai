@@ -335,6 +335,7 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
+Inside cmux, label the worker's tab as you send — `moai-cmux`, "Label the tab".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -454,7 +455,8 @@ not — a clear does not show from here, so ask the person — or send to anothe
 **Inside tmux you may clear it yourself** — only after the report is checked and the note above
 is written, only while `ListAgents` and its session record read `idle`, and only when its input
 box is empty (`moai-tmux`, "Clear a worker's window"). If any of these fails, do as the
-paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`).
+paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`), or
+that tab's (`moai-cmux`).
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.

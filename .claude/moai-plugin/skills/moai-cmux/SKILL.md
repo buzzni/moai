@@ -145,3 +145,24 @@ person. None of these is a box to type into, and neither is an error or an answe
 
 **Then do not type. Tell the person which tab holds what, and go on as if this skill were not
 here.**
+
+## Label the tab
+
+When you send work (the supervisor's 3), you may write the worker and the work onto its tab.
+**Ask the person once per round** whether worker tabs should carry labels — unlike a pane option
+in tmux, a label takes the tab's title where they look. On a yes:
+
+    cmux rename-tab --surface <surface> --title '<worker> <id>'
+
+`<id>` is the backlog or epic you sent. A name given this way stays over the title Claude Code
+keeps writing (`✳ <topic>`) until it is taken off. Take it off when that work's report is checked
+(the supervisor's 5):
+
+    cmux tab-action --surface <surface> --action clear-name
+
+**A tab the person named stays theirs.** Before you label one, read its title —
+`cmux --json --id-format both tree --all` gives each surface's `title` beside its `id`. Claude
+Code's own titles open with a status glyph: `✳`, or a spinner frame such as `◑` or `⠂`. A title
+that is neither that nor a label you wrote this round may be a name the person gave the tab, and
+`clear-name` would erase it along with yours — leave that tab unlabelled. Rename no workspace:
+the names in the sidebar are the person's.

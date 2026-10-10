@@ -2118,6 +2118,7 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
+Inside cmux, label the worker's tab as you send — `moai-cmux`, "Label the tab".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -2228,7 +2229,8 @@ not — a clear does not show from here, so ask the person — or send to anothe
 **Inside tmux you may clear it yourself** — only after the report is checked and the note above
 is written, only while `ListAgents` and its session record read `idle`, and only when its input
 box is empty (`moai-tmux`, "Clear a worker's window"). If any of these fails, do as the
-paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`).
+paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`), or
+that tab's (`moai-cmux`).
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.
@@ -2684,6 +2686,27 @@ Run it when a step below needs a surface, once.
 
 **Then do not type. Tell the person which tab holds what, and go on as if this skill were not
 here.**
+
+## Label the tab
+
+When you send work (the supervisor's 3), you may write the worker and the work onto its tab.
+**Ask the person once per round** whether worker tabs should carry labels — unlike a pane option
+in tmux, a label takes the tab's title where they look. On a yes:
+
+    cmux rename-tab --surface <surface> --title '<worker> <id>'
+
+`<id>` is the backlog or epic you sent. A name given this way stays over the title Claude Code
+keeps writing (`✳ <topic>`) until it is taken off. Take it off when that work's report is checked
+(the supervisor's 5):
+
+    cmux tab-action --surface <surface> --action clear-name
+
+**A tab the person named stays theirs.** Before you label one, read its title —
+`cmux --json --id-format both tree --all` gives each surface's `title` beside its `id`. Claude
+Code's own titles open with a status glyph: `✳`, or a spinner frame such as `◑` or `⠂`. A title
+that is neither that nor a label you wrote this round may be a name the person gave the tab, and
+`clear-name` would erase it along with yours — leave that tab unlabelled. Rename no workspace:
+the names in the sidebar are the person's.
 "#
     )
 }
@@ -5737,7 +5760,7 @@ stop sending outside work while a release runs",
     fn the_cmux_skill_touches_only_named_surfaces() {
         let text = cmux();
         let calls = cmux_calls(&text);
-        assert!(calls >= 2, "cmux 스킬의 명령을 못 셌다 — {calls}");
+        assert!(calls >= 6, "cmux 스킬의 명령을 못 셌다 — {calls}");
         let never = &text[text.find("## What never happens").expect("하지 않는 것 절이 없다")..];
         let never = &never[..3 + never[3..].find("\n## ").unwrap()];
         for gone in ["`close-surface`", "`close-workspace`", "`close-window`", "`--force`", "`pkill`", "`focus-*`"] {
@@ -5760,6 +5783,41 @@ stop sending outside work while a release runs",
         assert!(text.contains("**Then do not type. Tell the person"), "빈 입력 칸이 아닐 때 안 멈춘다");
         // tmux 안이면 이 글이 안 선다 — 친 것이 tmux 로 간다.
         assert!(text.contains("CMUX_SURFACE_ID` is set in its shell and `$TMUX` is not"), "tmux 가 이긴다는 말이 없다");
+        // 이름표는 탭 제목이라 사람이 보는 자리를 바꾼다 — 바퀴마다 묻고, 사람이 붙인 이름은 안 덮는다. 걷는 길은
+        // `clear-name` 이다(빈 제목은 cmux 가 거절한다).
+        let label = section(&text, "## Label the tab");
+        assert!(
+            label.contains("    cmux rename-tab --surface <surface> --title '<worker> <id>'"),
+            "탭 이름표 줄이 없다"
+        );
+        assert!(label.contains("    cmux tab-action --surface <surface> --action clear-name"), "탭 이름표를 안 걷는다");
+        assert!(label.contains("**Ask the person once per round**"), "묻지 않고 탭 제목을 바꾼다");
+        assert!(label.contains("**A tab the person named stays theirs.**"), "사람이 붙인 탭 이름을 덮는다");
+        assert!(!text.contains("rename-workspace"), "사람의 워크스페이스 이름을 바꾼다");
+        // **감독 글이 대는 절은 이 스킬에 서 있다.** 절 이름을 바꾸면 감독 글이 없는 절을 가리킨다.
+        let supervise = supervise();
+        let mut named = 0;
+        for piece in supervise.split("`moai-cmux`, ").skip(1) {
+            let mut rest = piece;
+            while let Some(after) = rest.strip_prefix('"') {
+                let (heading, tail) = after.split_once('"').expect("닫는 따옴표가 없다");
+                let heading = heading.replace('\n', " ");
+                named += 1;
+                assert!(
+                    text.contains(&format!("\n## {heading}\n")),
+                    "감독 글이 cmux 스킬에 없는 절 \"{heading}\" 을 댄다"
+                );
+                rest = tail.strip_prefix(" and ").unwrap_or("");
+            }
+        }
+        assert!(named >= 1, "감독 글이 cmux 스킬의 절을 안 댄다 — {named}");
+    }
+
+    /// `text` 에서 `heading` 줄부터 다음 `## ` 절 앞까지 — 없으면 붉다.
+    fn section<'a>(text: &'a str, heading: &str) -> &'a str {
+        let at = text.find(&format!("{heading}\n")).unwrap_or_else(|| panic!("{heading} 절이 없다"));
+        let rest = &text[at + heading.len()..];
+        &text[at..at + heading.len() + rest.find("\n## ").map_or(rest.len(), |end| end + 1)]
     }
 
     #[test]
