@@ -6172,3 +6172,4 @@
 {"ts":"2026-10-10T14:59:42Z","id":"moai-l244.nj6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"recovery 스킬(moai-uqf7)에 saycode 길을 더한다"}
 {"ts":"2026-10-10T14:59:42Z","id":"moai-l244.08k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"선택 스킬의 위키·도움말·CHANGELOG 에 saycode 를 더한다"}
 {"ts":"2026-10-10T14:59:48Z","id":"moai-l244","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Order: xw9 first (it can be tested here, in a Saycode session). mqc adds a row to skill::OPTIONAL beside the cmux row that moai-p5sz (v0.14.0) adds; milestone/moai-2o4o takes develop at release and the conflict is solved there, in the milestone worktree."}
+{"ts":"2026-10-10T15:01:30Z","id":"moai-l244.xw9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
