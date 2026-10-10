@@ -6203,3 +6203,4 @@
 {"ts":"2026-10-10T16:34:25Z","id":"moai-l244.08k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-10T16:34:26Z","id":"moai-l244","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 0fa117d3"}
 {"ts":"2026-10-10T16:34:26Z","id":"moai-l244","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: done — merged into milestone/moai-2o4o as 0fa117d3. Unverified live: happy resume keeping the Saycode id; SendMessage to a Saycode-spawned worker. moai-p5sz (cmux) adds its own skill::OPTIONAL row; solve the conflict when v0.15.0 takes develop."}
+{"ts":"2026-10-10T16:34:33Z","id":"moai-l244.mqc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Correction: the implementation subagent was launched with the \"opus\" alias; the exact version behind it (opus-5 or opus-5.5) is not confirmed."}
