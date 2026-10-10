@@ -309,6 +309,27 @@ fn outside(dir: &Path, root: &Path) -> Option<PathBuf> {
 /// 이 판이 안 심는 다른 스킬처럼 [`leftovers`] 가 걷는다 — moai 의 파일만 든 디렉터리만이다. 고른 이름은 무엇을 읽기
 /// 전에 잰다([`Pick::check`]).
 pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], pick: &Pick, dry_run: bool) -> R<Vec<String>> {
+    plant_trees(ctx, scope, false, agents, pick, dry_run)
+}
+
+/// Claude 의 등록을 어떻게 맞추는가 — `install` 은 그 범위에 등록하고, `uninstall --only` 는 이미 선 등록만 새 판으로
+/// 올린다([`refresh`], moai-3r7l.xr1).
+#[derive(Clone, Copy)]
+enum Reg<'a> {
+    At(&'a str),
+    Refresh,
+}
+
+/// [`install`] 과 `uninstall --only` 의 몸통 — 트리를 다 재고, 쓰고, 걷고, Claude 의 등록을 `refresh` 에 따라 맞춘다.
+/// 두 명령이 이 하나를 지나 `--only` 가 `install --without` 과 같은 길이 된다.
+fn plant_trees(
+    ctx: &Ctx,
+    scope: Option<Scope>,
+    refresh: bool,
+    agents: &[Agent],
+    pick: &Pick,
+    dry_run: bool,
+) -> R<Vec<String>> {
     pick.check(ctx.lang())?;
     let chosen = Chosen::of(agents);
     let place = place(ctx, pick)?;
@@ -343,8 +364,6 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], pick: &Pick, d
     if chosen.claude {
         measure(&place.dir, &place.files, &root)?;
     }
-    // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기가 다 된 뒤에 걷는다([`write_then_sweep`]).
-    // Claude 의 트리는 [`claude_install`] 이 제 트리를 쓴 뒤 등록 앞에서 걷는다 — 까닭은 거기 있다.
     // Claude 를 안 고르고 `--with` 로 댄 Claude 에만 서는 스킬 — 어느 트리도 안 심는다(아래 사람의 줄).
     let stranded: Vec<&'static str> = match chosen.claude {
         true => Vec::new(),
@@ -355,13 +374,19 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], pick: &Pick, d
             .map(|s| s.name)
             .collect(),
     };
+    // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기가 다 된 뒤에 걷는다([`write_then_sweep`]).
+    // Claude 의 트리는 [`claude_install`] 이 제 트리를 쓴 뒤 등록 앞에서 걷는다 — 까닭은 거기 있다.
     let mut shared_left: Vec<Leftover> = shared
         .as_ref()
         .map(|(dir, files)| leftovers(dir, &planted_names(files, ""), &shared_kept, &root))
         .unwrap_or_default();
+    let reg = match refresh {
+        true => Reg::Refresh,
+        false => Reg::At(scope.unwrap_or(Scope::Local).as_str()),
+    };
     let (mut json, claude) =
         write_then_sweep(shared.as_ref(), &mut shared_left, &mut hooks, &root, dry_run, || match chosen.claude {
-            true => claude_install(ctx, place, scope.unwrap_or(Scope::Local).as_str(), dry_run),
+            true => claude_install(ctx, place, reg, dry_run),
             false => Ok((serde_json::json!({ "dry_run": dry_run }), Vec::new())),
         })?;
 
@@ -469,7 +494,11 @@ fn plan_lines<'a>(lang: crate::i18n::Lang, files: &'a [(PathBuf, String)]) -> im
 
 /// Claude 의 플러그인을 심고 등록한다. `--json` 이면 값만, 아니면 사람의 줄만 낸다 — 고른 에이전트를 함께 싣는
 /// 것은 [`install`] 이다.
-fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
+///
+/// **`Reg::Refresh` 는 새 등록을 세우지 않는다**(moai-3r7l.xr1) — `uninstall --only` 가 스킬 하나를 걷고 이미 선 등록만
+/// 새 판으로 올린다([`refresh`]). 옛 판이 곁에 깐 것을 걷는 일([`retire`])도 안 한다 — 그 일은 등록하는 `install` 의 몫이고,
+/// 스킬 하나를 걷는 명령이 남의 플러그인까지 걷으면 친 사람이 바란 것보다 넓다.
+fn claude_install(ctx: &Ctx, place: Place, reg: Reg, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
     let Place { root, dir, market, exe, files, skills, .. } = place;
     let skills_dir = dir.join("skills");
     let optional = optional_of(&skills);
@@ -483,10 +512,19 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
     // 서는 범위가 섞인다. 이름이 남의 저장소를 가리키면 `uninstall` 처럼 아무것도 안 부른다. 이번 `--scope` 밖에서
     // 옛 판으로 선 moai 는 걷기 전에 새 판으로 올린다([`Lift`]).
     let target = format!("moai@{market}");
-    let mut retiring = if clash.is_none() {
-        retire(&root, &target, &installs_here(&target, &root), Some(scope))
-    } else {
-        Retired::default()
+    let installs = installs_here(&target, &root);
+    let mut retiring = match (&clash, reg) {
+        (None, Reg::At(scope)) => retire(&root, &target, &installs, Some(scope)),
+        _ => Retired::default(),
+    };
+    // 새 판으로 올릴 범위 — `Reg::Refresh` 일 때만 선다. 장부에 이 저장소의 moai 가 선 범위다([`installs_here`]).
+    let refreshing: Vec<String> = match reg {
+        Reg::Refresh => scopes_of(&installs).into_iter().map(str::to_string).collect(),
+        Reg::At(_) => Vec::new(),
+    };
+    let scope = match reg {
+        Reg::At(scope) => Some(scope),
+        Reg::Refresh => None,
     };
 
     if dry_run {
@@ -496,6 +534,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                     "dir": dir.display().to_string(),
                     "market": market,
                     "scope": scope,
+                    "refreshed": refreshing,
                     "exe": exe,
                     "dry_run": true,
                     "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
@@ -517,16 +556,22 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         out.extend(optional_line(lang, &optional));
         out.extend(left.iter().map(|l| l.line(lang)));
         out.push(String::new());
-        out.push(match &clash {
-            Some(other) => fill(
+        match (&clash, scope) {
+            (Some(other), _) => out.push(fill(
                 say(lang, "skill.plan_register_skipped"),
                 &[("market", &market), ("at", &other.display().to_string())],
-            ),
-            None => fill(
+            )),
+            (None, Some(scope)) => out.push(fill(
                 say(lang, "skill.plan_register"),
                 &[("cmd", &format!("claude plugin install moai@{market} --scope {scope} -y"))],
+            )),
+            (None, None) if refreshing.is_empty() => out.push(say(lang, "skill.refresh_nowhere").to_string()),
+            (None, None) => out.extend(
+                refreshing
+                    .iter()
+                    .map(|s| fill(say(lang, "skill.plan_refresh"), &[("cmd", &shown(&update_argv(&target, s)))])),
             ),
-        });
+        }
         for lift in &retiring.lifts {
             out.push(fill(say(lang, "skill.plan_lift"), &[("cmd", &lift.shown())]));
         }
@@ -556,7 +601,10 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
             fill(say(lang, "skill.market_taken"), &[("market", &market), ("at", &other.display().to_string())]),
             false,
         )],
-        None => register(lang, &root, &dir, &market, scope, known_at(&market).is_some()),
+        None => match scope {
+            Some(scope) => register(lang, &root, &dir, &market, scope, known_at(&market).is_some()),
+            None => refresh(lang, &root, &market, &refreshing, known_at(&market).is_some()),
+        },
     };
 
     // **등록이 안 됐으면 비영으로 끝낸다.** 파일은 심었어도 훅은 안 선다 —
@@ -583,6 +631,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                 "dir": dir.display().to_string(),
                 "market": market,
                 "scope": scope,
+                "refreshed": refreshing,
                 "exe": exe,
                 "files": files.iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>(),
                 "registered": registered,
@@ -625,7 +674,10 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
     }
     out.extend(retiring.undeclare.iter().map(|u| u.line(lang)));
     out.extend(retiring.left_lines(lang));
-    if registered {
+    if registered && scope.is_none() && steps.is_empty() {
+        // 어디에도 등록이 없다 — 파일만 고쳤다. 등록을 세우는 것은 `install` 이다.
+        out.push(say(lang, "skill.refresh_nowhere").to_string());
+    } else if registered {
         out.push(String::new());
         out.push(say(lang, "skill.reopen_claude").to_string());
     } else if clash.is_some() {
@@ -637,7 +689,11 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         // 어느 범위로 심어도 같은 자리에서 걸려 아무것도 안 바뀐다.
         out.push(fill(say(lang, "skill.market_drop_first"), &[("market", &market)]));
         out.push(say(lang, "skill.market_one_place").to_string());
-    } else {
+    } else if let (None, false) = (scope, refreshing.is_empty()) {
+        out.push(String::new());
+        out.push(say(lang, "skill.refresh_by_hand").to_string());
+        out.extend(refreshing.iter().map(|s| format!("  {}", shown(&update_argv(&target, s)))));
+    } else if let Some(scope) = scope {
         out.push(String::new());
         out.push(say(lang, "skill.register_by_hand").to_string());
         // **절대 경로를 낸다.** 저장소 뿌리를 기준으로 한 `./.claude/moai-plugin` 은
@@ -1077,7 +1133,16 @@ fn label(what: &str) -> String {
 ///
 /// **고르지 않은 자리에 moai 의 스킬이 남았으면 한 줄로 댄다.** `--agent codex` 로 심은 사람이 맨 `uninstall` 을 부르면
 /// Claude 쪽은 "걷을 것이 없다" 고 끝나는데, 그 줄만으로는 `.agents/skills` 가 그대로라는 것이 안 보인다.
-pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
+///
+/// **`only` 를 주면 그 선택 스킬만 걷는다**(2026-10-10 사용자 결정, moai-3r7l.xr1) — `install --without <이름>` 의 다른
+/// 이름이고 같은 길([`plant_trees`])을 지난다: 그 디렉터리를 걷고 플러그인을 다시 심는다. 등록과 다른 스킬은 그대로다.
+/// 다른 것은 등록 하나다 — 이 저장소의 moai 가 이미 선 범위만 새 판으로 올리고([`refresh`]), 어디에도 없으면 파일만
+/// 고친다. 스킬 하나를 걷는 명령이 없던 등록을 세우면 안 된다. 늘 심는 이름은 `--without` 과 같은 한 줄로 거절한다.
+pub fn uninstall(ctx: &Ctx, agents: &[Agent], only: &[String], dry_run: bool) -> R<Vec<String>> {
+    if !only.is_empty() {
+        let pick = Pick { with: Vec::new(), without: only.to_vec() };
+        return plant_trees(ctx, None, true, agents, &pick, dry_run);
+    }
     let chosen = Chosen::of(agents);
     let place = place(ctx, &Pick::default())?;
     let shared = place.root.join(skill::AGENTS_DIR);
@@ -1989,7 +2054,35 @@ fn register(
     steps
 }
 
-/// 한 범위의 moai 를 새 판으로 올리는 줄 — 등록([`register`])과 [`Lift`] 가 이 하나를 부른다. 둘이 따로 적으면
+/// **이미 선 등록만 새 판으로 올린다**(moai-3r7l.xr1) — `uninstall --only` 의 걸음이다. 범위 `scopes` 는 장부에 이 저장소의
+/// moai 가 선 자리고, 비면 아무것도 안 부른다(파일만 고쳤다).
+///
+/// [`register`] 를 안 지나는 까닭: 그 길은 `marketplace add`(안 알려졌으면)와 `plugin install` 을 불러, 등록이 없던 범위에
+/// 새로 세운다 — 스킬 하나를 걷으라는 명령이 등록을 만들면 안 된다. 이미 선 범위에서 `plugin install` 은 0 을 내고 아무것도
+/// 안 해(claude 2.1.287 로 쟀다, [`retire`]) 새 판을 뜨는 것은 `update` 뿐이니, 이 길은 그 둘만 부른다 — 마켓플레이스를
+/// 다시 읽히고(`marketplace update`, 알려졌을 때만), 범위마다 `plugin update` 다.
+fn refresh(lang: crate::i18n::Lang, root: &Path, market: &str, scopes: &[String], listed: bool) -> Vec<(String, bool)> {
+    if scopes.is_empty() {
+        return Vec::new();
+    }
+    let mut steps = Vec::new();
+    if listed {
+        steps.push((
+            say(lang, "skill.step_market_updated").to_string(),
+            run(root, &argv(&["plugin", "marketplace", "update", market])),
+        ));
+    }
+    let target = format!("moai@{market}");
+    for scope in scopes {
+        steps.push((
+            fill(say(lang, "skill.step_plugin_refreshed"), &[("scope", scope)]),
+            run(root, &update_argv(&target, scope)),
+        ));
+    }
+    steps
+}
+
+/// 한 범위의 moai 를 새 판으로 올리는 줄 — 등록([`register`])·[`refresh`]·[`Lift`] 가 이 하나를 부른다. 따로 적으면
 /// 등록하는 범위와 함께 올리는 범위가 다른 명령으로 오른다. `-y` 의 까닭은 [`register`] 에 있다.
 fn update_argv(target: &str, scope: &str) -> Vec<String> {
     argv(&["plugin", "update", target, "--scope", scope, "-y"])

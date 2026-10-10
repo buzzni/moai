@@ -536,7 +536,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             skill::install(ctx, scope, &agents, &skill::Pick { with, without }, dry_run)
         }
         Cmd::Skill(SkillCmd::Status) => skill::status(ctx),
-        Cmd::Skill(SkillCmd::Uninstall { agents, dry_run }) => skill::uninstall(ctx, &agents, dry_run),
+        Cmd::Skill(SkillCmd::Uninstall { agents, only, dry_run }) => skill::uninstall(ctx, &agents, &only, dry_run),
         // 저장소가 아니라 사람의 설정을 고친다 — `cmd::open_repo` 를 안 지나므로
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),

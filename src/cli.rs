@@ -2073,12 +2073,26 @@ pub enum SkillCmd {
   wrote it, are printed, to run once no session holds them. Without that
   --agent, one line says when moai's skills are still there.
 
+  --only <skill> removes one optional skill and nothing else: it is
+  `moai skill install --without <skill>` under another name. That skill's
+  directory goes (only while it holds nothing but moai's files) and the
+  plugin is planted again; the registration and the other skills stay.
+  Where this repository's moai is registered, that scope is brought up to
+  the new version; where it is registered nowhere, only the files change -
+  no registration is made. A skill that is always planted is refused.
+
   moai skill uninstall --dry-run      only show what would be called
-  moai skill uninstall --agent codex  name what to delete in .agents/skills/")]
+  moai skill uninstall --agent codex  name what to delete in .agents/skills/
+  moai skill uninstall --only moai-tmux   take the tmux skill out")]
     Uninstall {
         /// Agent: claude (default), codex, antigravity, auto
         #[arg(long = "agent", value_name = "agent", hide_possible_values = true)]
         agents: Vec<Agent>,
+
+        // `install --without` 의 다른 이름이다(moai-3r7l.xr1) — 되풀이와 쉼표도 같다.
+        /// Remove only this optional skill (repeatable)
+        #[arg(long = "only", value_name = "skill", value_delimiter = ',')]
+        only: Vec<String>,
 
         /// Call nothing; only say what would be called
         #[arg(long)]

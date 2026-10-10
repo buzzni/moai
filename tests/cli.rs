@@ -19772,6 +19772,48 @@ fn skill_install_refuses_a_pick_it_cannot_take() {
     assert_eq!(c.calls(), "", "거절한 고르기에 claude 를 불렀다");
 }
 
+/// **`uninstall --only` 는 `install --without` 이다**(2026-10-10 사용자 결정, moai-3r7l.xr1) — 그 스킬만 걷고 다른 스킬은
+/// 둔다. 등록이 선 범위는 새 판으로 올리기만 하고(`plugin update`), 등록을 세우는 걸음(`marketplace add`·`plugin install`)도
+/// 걷는 걸음(`plugin uninstall`)도 안 부른다. 어디에도 등록이 없으면 `claude` 를 아예 안 부르고 파일만 고친다.
+#[test]
+fn skill_uninstall_only_removes_one_optional_skill_and_makes_no_registration() {
+    let s = init("skillonly");
+    let c = Claude::new("skillonly-home");
+    let skills = s.path().join(".claude/moai-plugin/skills");
+    let since = |before: usize| c.calls()[before..].to_string();
+
+    // 등록이 어디에도 없다 — 가짜 `claude` 는 장부를 안 쓰므로 `install` 뒤에도 그렇다.
+    assert!(c.run(s.path(), &["skill", "install", "--with", "moai-tmux"], true).status.success());
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "uninstall", "--only", "moai-tmux"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(since(before), "", "등록이 없는데 claude 를 불렀다");
+    assert!(!skills.join("moai-tmux").exists(), "--only 가 안 걷었다");
+    assert!(skills.join("moai-recover/SKILL.md").is_file(), "다른 스킬까지 걷었다");
+    assert!(text(&out).contains("파일만 고쳤다"), "등록이 없다고 안 댄다\n{}", text(&out));
+
+    // 로컬 범위에 등록이 섰다 — 그 범위만 올린다.
+    assert!(c.run(s.path(), &["skill", "install", "--with", "moai-tmux"], true).status.success());
+    let (market, _) = installed(&s, &c, "0.0.1");
+    assert!(skills.join("moai-tmux/SKILL.md").is_file(), "맨 install 이 심긴 선택 스킬을 걷었다");
+    let before = c.calls().len();
+    let out = c.run(s.path(), &["skill", "uninstall", "--only", "moai-tmux", "--json"], true);
+    assert!(out.status.success(), "{}", text(&out));
+    let json = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(list_in(&json, "refreshed"), Some(vec!["local".to_string()]), "{json}");
+    let calls = since(before);
+    assert!(calls.contains(&format!("plugin update moai@{market} --scope local -y")), "{calls}");
+    for never in ["plugin install", "marketplace add", "plugin uninstall", "marketplace remove"] {
+        assert!(!calls.contains(never), "--only 가 `{never}` 를 불렀다\n{calls}");
+    }
+    assert!(!skills.join("moai-tmux").exists(), "--only 가 안 걷었다");
+
+    // 늘 심는 스킬은 `--without` 과 같은 한 줄로 거절한다.
+    let out = c.run(s.path(), &["skill", "uninstall", "--only", "moai-wiki"], true);
+    assert!(!out.status.success() && text(&out).contains("늘 심는"), "{}", text(&out));
+    assert!(skills.join("moai-wiki/SKILL.md").is_file());
+}
+
 /// **`skill status` 의 판도 심을 그 트리로 잰다**(moai-3r7l.h36) — 선택 스킬을 안 고른 저장소에 심은 판이 지금 판이고,
 /// 모두를 바라던 판이면 그 설치를 "다시 심는다" 고 했다. 그 저장소의 커밋된 매니페스트가 든 판을 장부에 적는다.
 #[test]
