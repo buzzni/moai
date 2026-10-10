@@ -35,7 +35,8 @@ does not tag — see `CONTRIBUTING.md`.
   inside a linked worktree.** That worktree was counted as a sibling of
   itself, so its stale `.moai` copy was overlaid on the main checkout's rows
   and its name and pick-up marks hung `⎇` on the work you hold there. The same
-  applies to `--worktree` on `status`, `show` and `ready`. (moai-jn4d.adc)
+  applies to `--worktree` on `status`, `show` and `ready`, run there or through
+  `moai -C <main checkout>`. (moai-jn4d.adc)
 
 ## [0.11.0] - 2026-10-08
 

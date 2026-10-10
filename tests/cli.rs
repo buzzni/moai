@@ -19877,6 +19877,44 @@ fn worktree_overlays_the_latest_line_and_names_its_branch() {
     assert!(tree.contains("⎇ feat/x 옆에서 만든 일"), "{tree}");
 }
 
+/// **선 워크트리의 사본은 옆이 아니다**(moai-jn4d.adc) — 거기서 친 그대로든, 규약이 권하는 `moai -C <루트>`
+/// 로 쳤든 같다(리뷰 — 트래커를 찾은 자리만 보던 판은 `-C` 로 친 것에서 제 워크트리를 다시 옆으로 셌다). 루트에서
+/// 부르면 그 워크트리는 그대로 옆이다(위 시험).
+#[test]
+fn the_worktree_you_stand_in_is_not_overlaid_even_through_dash_c() {
+    let t = trees("wtself");
+    let (main, feat) = (t.main(), t.feat());
+    let root = main.to_str().unwrap();
+    for args in [&["show", "--worktree", "--json"][..], &["-C", root, "show", "--worktree", "--json"][..]] {
+        let rows = ok(&feat, args);
+        assert!(!rows.contains("\"branch\":\"feat/x\""), "{args:?}: 제 워크트리를 옆으로 겹쳤다\n{rows}");
+        assert!(!rows.contains(&t.made), "{args:?}: 제 사본에만 있는 줄을 겹쳤다\n{rows}");
+    }
+}
+
+/// **읽음을 걷는 자는 선 워크트리의 사본도 센다**(리뷰 moai-jn4d.adc) — 루트에서 연 탐색기는 그 워크트리를
+/// 옆으로 겹쳐 거기에만 있는 줄에 도장을 찍는다. 화면처럼 그 사본을 빼면 그 워크트리에서 친 `moai read` 한
+/// 번이 그 도장을 조용히 걷는다.
+#[test]
+fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
+    let t = trees("wtprune");
+    let (main, feat) = (t.main(), t.feat());
+    let cfg = t.s.path().join("user.toml");
+    ok_with(&main, &cfg, &["read", &t.tied]);
+    // 탐색기가 겹쳐 보며 찍은 도장을 손으로 앉힌다 — `moai read` 는 루트에 없는 id 를 안 받는다.
+    let (sheet, text) = read_sheets(&cfg, &main).pop().expect("읽음 파일이 섰다");
+    // 끝에 이어 적으므로 `[read]` 가 마지막 표여야 그 표에 든다 — 아니면 걷기가 안 볼 자리에 앉아 헛 초록이다.
+    let table = text.split_once("[read]").map(|(_, rest)| rest).unwrap_or_else(|| panic!("읽음 표가 없다\n{text}"));
+    assert!(!table.lines().any(|l| l.trim_start().starts_with('[')), "시험의 전제 — `[read]` 가 마지막 표다\n{text}");
+    std::fs::write(&sheet, format!("{}\n\"{}\" = \"{LATER}\"\n", text.trim_end(), t.made)).unwrap();
+    assert!(read_sheet(&cfg, &main).contains(&t.made), "시험의 전제 — 도장을 앉혔다");
+
+    ok_with(&feat, &cfg, &["read", &t.picked]);
+    let after = read_sheet(&cfg, &main);
+    assert!(after.contains(&t.picked), "{after}");
+    assert!(after.contains(&t.made), "워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
+}
+
 /// `ready` 는 옆에서 이미 집은 일을 **집을 수 있다고 내지 않고**, 잡고 있는 것에
 /// 어느 워크트리에서 잡았는지 댄다. `status` 는 겹쳐 봤다고 머리에서 말한다.
 #[test]
