@@ -35,7 +35,7 @@ struct Place {
     /// [`skill::skills`] 를 다시 지으면 `guide` 의 글 넷을 명령 한 번에 몇 벌씩 짓는다.
     all: Vec<skill::Skill>,
     /// Claude 의 트리에 심는 스킬 — `all` 에서 이번에 심을 선택 스킬만 남긴 것이고(moai-3r7l), `files` 가 이것으로
-    /// 지어진다. 심을 선택 스킬은 지금 그 트리에 심긴 것이다([`optional_in`]).
+    /// 지어진다. 심을 선택 스킬은 지금 그 트리에 심긴 것에 고른 것을 더하고 뺀 것이다([`Pick::kept`]).
     skills: Vec<skill::Skill>,
     /// 커밋된 매니페스트(`plugin.json`)를 읽었는가 — `status` 의 `written` 이다. 철자를 잇는 읽기([`kept`])와 같은
     /// 읽기라, 심는 길([`write_committed`])이 거절하는 자리(체크아웃 밖을 가리키는 링크, 보통 파일이 아닌 것)를 심겼다고
@@ -43,7 +43,42 @@ struct Place {
     written: bool,
 }
 
-fn place(ctx: &Ctx) -> R<Place> {
+/// `install --with`·`--without` 으로 고른 선택 스킬(moai-3r7l.5ja) — `uninstall --only` 와 `init --with` 도 이것으로
+/// 건넨다. 둘 다 비면 맨 `install` 이다: 지금 심긴 것만 다시 심는다([`skill::kept`]).
+#[derive(Default)]
+pub struct Pick {
+    pub with: Vec<String>,
+    pub without: Vec<String>,
+}
+
+impl Pick {
+    /// 이번에 심을 선택 스킬 — 스킬 자리 `skills` 에 지금 심긴 것([`optional_in`])에서 센다.
+    fn kept(&self, skills: &Path, root: &Path) -> Vec<&'static str> {
+        let (with, without) = self.names();
+        skill::kept(&optional_in(skills, root), &with, &without)
+    }
+
+    fn names(&self) -> (Vec<&str>, Vec<&str>) {
+        (self.with.iter().map(String::as_str).collect(), self.without.iter().map(String::as_str).collect())
+    }
+
+    /// 고른 이름이 서는가 — **무엇을 읽거나 쓰기 전에** 잰다. 늘 심는 이름·모르는 이름·`--with` 와 `--without` 에 함께
+    /// 든 이름은 거절하고, 거절문이 고를 수 있는 이름을 댄다.
+    fn check(&self, lang: crate::i18n::Lang) -> R<()> {
+        let (with, without) = self.names();
+        let Some(why) = skill::misnamed(&with, &without) else { return Ok(()) };
+        let names = skill::optional_names().collect::<Vec<_>>().join(", ");
+        let (text, name) = match why {
+            skill::Misnamed::Core(n) => (say(lang, "skill.pick_core"), n),
+            skill::Misnamed::Unknown(n) => (say(lang, "skill.pick_unknown"), n),
+            skill::Misnamed::Both(n) => (say(lang, "skill.pick_both"), n),
+        };
+        let said = fill(text, &[("name", &crate::text::one_line(name)), ("names", &names)]);
+        Err(Fail::coded(said, crate::fail::code::BAD_INPUT))
+    }
+}
+
+fn place(ctx: &Ctx, pick: &Pick) -> R<Place> {
     let repo = super::open_repo(ctx)?;
     // **선 체크아웃에 심는다**(리뷰 moai-71ht.jlh) — 트래커만 루트로 옮겨 간다(`Repo::here`).
     // `repo.root` 로 심던 판은 워크트리에서 친 `skill install` 이 루트의 `.claude/` 를 고쳐,
@@ -63,8 +98,7 @@ fn place(ctx: &Ctx) -> R<Place> {
     let prefix = repo.config.prefix.clone();
     // **누구인지 묻지 않는다.** 심는 것은 이력이 남는 일이 아니라 설정이다.
     let all = skill::skills();
-    let kept = skill::kept(&optional_in(&dir.join("skills"), &root), &[], &[]);
-    let skills = skill::picked(&all, &kept);
+    let skills = skill::picked(&all, &pick.kept(&dir.join("skills"), &root));
     let files = plant(&prefix, &root, &exe, &skills);
     Ok(Place {
         dir,
@@ -270,16 +304,21 @@ fn outside(dir: &Path, root: &Path) -> Option<PathBuf> {
 ///
 /// **`--scope` 는 Claude 의 등록 범위다.** Claude 를 안 고르고 준 범위는 아무것도 안 바꾸니 한 줄로 그렇게 말한다 —
 /// 안 말하면 `--scope user` 로 모든 저장소에 심었다고 믿는다. 막지는 않는다.
-pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
+///
+/// **선택 스킬은 `pick` 이 고른다**(moai-3r7l.5ja) — 트리마다 (지금 심긴 것 ∪ `--with`) − `--without` 을 심는다. 뺀 것은
+/// 이 판이 안 심는 다른 스킬처럼 [`leftovers`] 가 걷는다 — moai 의 파일만 든 디렉터리만이다. 고른 이름은 무엇을 읽기
+/// 전에 잰다([`Pick::check`]).
+pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], pick: &Pick, dry_run: bool) -> R<Vec<String>> {
+    pick.check(ctx.lang())?;
     let chosen = Chosen::of(agents);
-    let place = place(ctx)?;
+    let place = place(ctx, pick)?;
     let root = place.root.clone();
     // 선택 스킬은 **트리마다** 그 트리에 지금 심긴 것으로 잰다(moai-3r7l) — Claude 의 트리에 심긴 것이 `.agents` 에 서는
     // 까닭이 아니다. 지금 선택 스킬은 다 Claude 에만 서지만, 아닌 것이 오면 같은 셈으로 선다.
     let shared_dir = root.join(skill::AGENTS_DIR);
     let shared_kept = match chosen.shared.is_empty() {
         true => Vec::new(),
-        false => skill::kept(&optional_in(&shared_dir, &root), &[], &[]),
+        false => pick.kept(&shared_dir, &root),
     };
     let shared =
         (!chosen.shared.is_empty()).then(|| (shared_dir, skill::agents_tree(&skill::picked(&place.all, &shared_kept))));
@@ -306,6 +345,16 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
     }
     // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기가 다 된 뒤에 걷는다([`write_then_sweep`]).
     // Claude 의 트리는 [`claude_install`] 이 제 트리를 쓴 뒤 등록 앞에서 걷는다 — 까닭은 거기 있다.
+    // Claude 를 안 고르고 `--with` 로 댄 Claude 에만 서는 스킬 — 어느 트리도 안 심는다(아래 사람의 줄).
+    let stranded: Vec<&'static str> = match chosen.claude {
+        true => Vec::new(),
+        false => place
+            .all
+            .iter()
+            .filter(|s| s.claude_only && pick.with.iter().any(|w| w == s.name))
+            .map(|s| s.name)
+            .collect(),
+    };
     let mut shared_left: Vec<Leftover> = shared
         .as_ref()
         .map(|(dir, files)| leftovers(dir, &planted_names(files, ""), &shared_kept, &root))
@@ -326,6 +375,8 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
             o.insert("agents_files".into(), serde_json::json!(listed));
             let left: Vec<serde_json::Value> = shared_left.iter().map(Leftover::json).collect();
             o.insert("agents_leftovers".into(), serde_json::json!(left));
+            // `.agents` 의 선택 스킬 — Claude 의 트리의 것은 머리의 `optional` 이다([`optional_json`]).
+            o.insert("agents_optional".into(), optional_json(&shared_kept, &shared_left));
             // 쓰기 **전의** 상태다 — `missing`·`stale` 이면 (연습이 아닐 때) 이번에 썼고, `foreign` 은 안 썼다.
             let hooked: Vec<serde_json::Value> = hooks
                 .iter()
@@ -345,6 +396,9 @@ pub fn install(ctx: &Ctx, scope: Option<Scope>, agents: &[Agent], dry_run: bool)
 
     let lang = ctx.lang();
     let mut out: Vec<String> = chosen.found_line(lang).into_iter().collect();
+    // **Claude 에만 서는 스킬을 Claude 없이 고르면 한 줄로 댄다** — 안 말하면 `--agent codex --with moai-tmux` 가 0 으로
+    // 끝나 심었다고 믿는다. 막지는 않는다(`--scope` 와 같은 셈).
+    out.extend(stranded.iter().map(|n| fill(say(lang, "skill.optional_claude_only"), &[("name", n)])));
     if let Some((dir, files)) = &shared {
         let at = dir.display().to_string();
         if dry_run {
@@ -418,7 +472,8 @@ fn plan_lines<'a>(lang: crate::i18n::Lang, files: &'a [(PathBuf, String)]) -> im
 fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(serde_json::Value, Vec<String>)> {
     let Place { root, dir, market, exe, files, skills, .. } = place;
     let skills_dir = dir.join("skills");
-    let mut left = leftovers(&skills_dir, &planted_names(&files, "skills"), &optional_of(&skills), &root);
+    let optional = optional_of(&skills);
+    let mut left = leftovers(&skills_dir, &planted_names(&files, "skills"), &optional, &root);
     // **같은 이름이 남의 저장소를 가리키면 등록하지 않는다.** 덮어쓰면 그
     // 저장소의 규칙이 이쪽에 걸린다 — 조용히 엉뚱해지는 쪽이라 더 나쁘다.
     // 연습도 같은 답을 낸다. 진짜 실행이 건너뛸 등록을 연습이 약속하면 안 된다.
@@ -451,6 +506,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                     "settings_unread": retiring.unread_json(ctx.lang()),
                     "kept": retiring.kept,
                     "leftovers": left.iter().map(Leftover::json).collect::<Vec<_>>(),
+                    "optional": optional_json(&optional, &left),
                 }),
                 Vec::new(),
             ));
@@ -458,6 +514,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
         let lang = ctx.lang();
         let mut out = vec![fill(say(lang, "skill.plan_head"), &[("dir", &dir.display().to_string())])];
         out.extend(plan_lines(lang, &files));
+        out.extend(optional_line(lang, &optional));
         out.extend(left.iter().map(|l| l.line(lang)));
         out.push(String::new());
         out.push(match &clash {
@@ -538,12 +595,14 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
                 "settings_unread": retiring.unread_json(ctx.lang()),
                 "kept": retiring.kept,
                 "leftovers": left.iter().map(Leftover::json).collect::<Vec<_>>(),
+                "optional": optional_json(&optional, &left),
             }),
             Vec::new(),
         ));
     }
 
     let mut out = vec![fill(say(lang, "skill.planted"), &[("dir", &dir.display().to_string())])];
+    out.extend(optional_line(lang, &optional));
     out.extend(left.iter().map(|l| l.line(lang)));
     out.push(fill(say(lang, "skill.hook_call"), &[("cmd", &format!("{exe} hook <event>"))]));
     for (what, ok) in &steps {
@@ -598,7 +657,7 @@ fn claude_install(ctx: &Ctx, place: Place, scope: &str, dry_run: bool) -> R<(ser
 /// 어긋남을 비영 종료로 알리면 에이전트가 이것을 "실패" 로 읽는다 —
 /// `moai status` 가 아무것도 막지 않는 것과 같은 까닭이다.
 pub fn status(ctx: &Ctx) -> R<Vec<String>> {
-    let Place { root, dir, market, prefix, exe, on_path, files, all, skills, written } = place(ctx)?;
+    let Place { root, dir, market, prefix, exe, on_path, files, all, skills, written } = place(ctx, &Pick::default())?;
     let want = skill::version_in(&files).unwrap_or_default();
     let listed = known_at(&market);
     let clash = listed.clone().filter(|other| !crate::user_config::same_dir(other, &dir));
@@ -1020,7 +1079,7 @@ fn label(what: &str) -> String {
 /// Claude 쪽은 "걷을 것이 없다" 고 끝나는데, 그 줄만으로는 `.agents/skills` 가 그대로라는 것이 안 보인다.
 pub fn uninstall(ctx: &Ctx, agents: &[Agent], dry_run: bool) -> R<Vec<String>> {
     let chosen = Chosen::of(agents);
-    let place = place(ctx)?;
+    let place = place(ctx, &Pick::default())?;
     let shared = place.root.join(skill::AGENTS_DIR);
     // moai 가 심는 이름만 댄다 — 그 자리의 다른 스킬은 남의 것이다. **그 자리가 링크로 체크아웃 밖에 닿으면 아무것도
     // 안 댄다**([`outside`]) — moai 는 거기 심지 않으므로(`write_committed`) 거기 선 것은 남의 것이고, 낸 `rm -r` 은 그
@@ -1648,6 +1707,24 @@ pub(crate) fn optional_in(skills: &Path, root: &Path) -> Vec<&'static str> {
         .collect()
 }
 
+/// `--json` 의 `optional`·`agents_optional` — 그 트리에 이번 실행 뒤 심겨 있을 선택 스킬(`planted`)과 이번에 걷는 것
+/// (`removed`). 걷는 것은 그 트리의 남은 디렉터리([`leftovers`]) 가운데 선택 스킬이고, 연습이면 걷을 것(`planned`)을,
+/// 실행이면 걷은 것(`removed`)을 센다 — 사람의 파일이 들어 남긴 것(`foreign`)은 안 센다. 처지는 곁의 `leftovers` 가 댄다.
+/// **두 배열은 늘 선다.**
+fn optional_json(planted: &[&str], left: &[Leftover]) -> serde_json::Value {
+    let removed: Vec<&str> = left
+        .iter()
+        .filter(|l| skill::is_optional(l.name) && matches!(l.state, Left::Planned | Left::Removed))
+        .map(|l| l.name)
+        .collect();
+    serde_json::json!({ "planted": planted, "removed": removed })
+}
+
+/// 그 트리에 심는 선택 스킬을 대는 한 줄 — 없으면 안 선다.
+fn optional_line(lang: crate::i18n::Lang, planted: &[&str]) -> Option<String> {
+    (!planted.is_empty()).then(|| fill(say(lang, "skill.optional_planted"), &[("names", &planted.join(", "))]))
+}
+
 /// 고른 스킬 `skills`([`skill::picked`]) 가운데 선택 스킬의 이름.
 fn optional_of(skills: &[skill::Skill]) -> Vec<&'static str> {
     skills.iter().map(|s| s.name).filter(|n| skill::is_optional(n)).collect()
@@ -1702,11 +1779,16 @@ impl Leftover {
     /// 사람의 한 줄. 연습이면 지울 것을 댄다.
     fn line(&self, lang: crate::i18n::Lang) -> String {
         let dir = crate::text::shell_word(&self.dir.display().to_string());
-        let text = match self.state {
-            Left::Foreign => say(lang, "skill.leftover_foreign"),
-            Left::Planned => say(lang, "skill.leftover_plan"),
-            Left::Removed => say(lang, "skill.leftover_removed"),
-            Left::Failed => say(lang, "skill.leftover_failed"),
+        // 선택 스킬은 이 판이 안 심는 것이 아니라 고른 사람이 뺀 것이다(moai-3r7l) — 같은 길로 걷되 까닭을 달리 댄다.
+        let text = match (skill::is_optional(self.name), self.state) {
+            (false, Left::Foreign) => say(lang, "skill.leftover_foreign"),
+            (false, Left::Planned) => say(lang, "skill.leftover_plan"),
+            (false, Left::Removed) => say(lang, "skill.leftover_removed"),
+            (false, Left::Failed) => say(lang, "skill.leftover_failed"),
+            (true, Left::Foreign) => say(lang, "skill.optional_foreign"),
+            (true, Left::Planned) => say(lang, "skill.optional_plan"),
+            (true, Left::Removed) => say(lang, "skill.optional_removed"),
+            (true, Left::Failed) => say(lang, "skill.optional_failed"),
         };
         fill(text, &[("dir", &dir)])
     }

@@ -2699,6 +2699,8 @@ Usage: moai skill install [OPTIONS]
 Options:
       --scope <scope>        Where to register: local (default), project, user
       --agent <agent>        Agent: claude (default), codex, antigravity, auto
+      --with <skill>         Also plant this optional skill (repeatable)
+      --without <skill>      Remove this optional skill (repeatable)
       --dry-run              Change nothing; only say what would be done
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -2720,6 +2722,14 @@ Options:
   (moai-recover) are planted for Claude Code only — Codex and Antigravity get
   no supervisor.
 
+  Optional skills are planted only where you choose them: today moai-tmux,
+  the supervisor's hands on tmux panes. --with <skill> plants one and
+  --without <skill> removes it; both repeat, and a comma separates names.
+  What you chose is not written down anywhere - a skill planted in the tree
+  is the answer. So a plain install refreshes the optional skills already
+  planted and plants no new one, and a first install plants none. Naming a
+  skill that is always planted, or one name in both, is refused.
+
   The hooks are each agent's own: --agent codex plants `.codex/hooks.json`,
   --agent antigravity plants `.agents/hooks.json` - commit them too. Codex
   runs project hooks only once you trust them: open /hooks in a codex session
@@ -2736,9 +2746,9 @@ Options:
   holds would block every tool call of that session. The one thing deleted
   is a skill directory an earlier moai planted in the same tree and this one
   no longer plants (skills/moai-work/, and skills/moai-supervise/ in
-  .agents/skills/), and only while it holds nothing but the files moai
-  planted there; one with a file of yours in it is left, and one line names
-  it.
+  .agents/skills/), or an optional skill left out with --without, and only
+  while it holds nothing but the files moai planted there; one with a file
+  of yours in it is left, and one line names it.
 
   The version is a hash of what is installed. Same content, same version, so
   there are no empty updates.
@@ -2774,6 +2784,8 @@ Options:
   moai skill install --dry-run        only show what would be done
   moai skill install --agent codex    .agents/skills/ for Codex and Antigravity
   moai skill install --agent auto     whichever agent is on PATH
+  moai skill install --with moai-tmux     plant the tmux skill too
+  moai skill install --without moai-tmux  take it out again
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.

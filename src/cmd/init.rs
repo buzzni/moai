@@ -2135,7 +2135,9 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
     // 읽는다. 못 한 것은 그 명령의 말(`!` 줄, `--json` 의 `registered: false`)이 이미 댄다. 이 명령이 앞서 세운
     // 깃발은 그대로 둔다.
     let partial = super::take_partial();
-    let skilled = plan.skill.then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], false));
+    let skilled = plan
+        .skill
+        .then(|| crate::cmd::skill::install(ctx, Some(crate::cli::Scope::Local), &[], &Default::default(), false));
     let listed = plan.project.then(|| crate::cmd::project::add(ctx, &root));
     super::take_partial();
     // **설치 뒤에도 낡은 스킬·훅이 남았으면 한 줄로 댄다**(moai-ybns.451.rpd). 훅이 이미 선 저장소에서는 위가 설치를
