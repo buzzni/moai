@@ -14,14 +14,26 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
-- **`moai skill install` plants a fourth Claude Code skill, `moai-tmux`.** When
-  the supervisor runs inside tmux it finds each worker's pane from
+- **A fourth Claude Code skill, `moai-tmux`, planted only where you choose it.**
+  When the supervisor runs inside tmux it finds each worker's pane from
   `~/.claude/sessions/`, labels it (pane option `@moai`), clears a reported
   worker's window, pastes a message `SendMessage` could not deliver, reads why a
   worker stalled and tells the person, and — only after asking — opens new
   worker panes running an ordinary interactive `claude`. It never types over a
   non-empty input box and never kills anything. Without `$TMUX` nothing
-  changes. (moai-u99i)
+  changes. It is the first *optional* skill: a plain `moai skill install`
+  plants it nowhere new, and only refreshes it where it is already planted.
+  (moai-u99i, moai-3r7l)
+- **Optional skills are chosen per repository.** `moai skill install --with
+  <skill>` plants one and `--without <skill>` removes it (both repeat, and take
+  names separated by commas); `moai skill uninstall --only <skill>` is the same
+  removal under the uninstall name, and brings up only the registrations that
+  already stand. `moai init --with <skill>` plants one with the rest, and the
+  first-init picker gets a row per optional skill under hooks · skills —
+  checked when it is already planted, or when your shell says you use it
+  (`$TMUX` for `moai-tmux`). Nothing records the choice: the planted skill is
+  the answer, and "the planted skills differ" no longer counts a left-out
+  optional skill as drift. (moai-3r7l)
 - **A fifth Claude Code skill, `moai-recover`, brings back the sessions that
   died.** Asked by the person after a restart or an OOM kill, it finds the dead
   sessions of the repository in `~/.claude/sessions/`, draws what each was doing
@@ -33,9 +45,10 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
-- **The supervisor may type into worker panes inside tmux.** This reverses the
-  0.9.0 rule that the supervisor types nothing into a window; outside tmux,
-  clearing a window is still the person's. The AGENTS block now says the moai
+- **The supervisor may type into worker panes inside tmux** where `moai-tmux`
+  is planted. This reverses the 0.9.0 rule that the supervisor types nothing
+  into a window; outside tmux, or without that skill, clearing a window is
+  still the person's. The AGENTS block now says the moai
   *binary* never launches or drives a session. (moai-u99i)
 
 ## [0.11.0] - 2026-10-08
