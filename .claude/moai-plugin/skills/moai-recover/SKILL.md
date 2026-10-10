@@ -104,6 +104,18 @@ PY
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
 
+**Inside Saycode** — `SAYCODE_AGENT_ENV` is `1` in your shell and `happy agent whoami` answers
+`"ok":true` — a session Saycode ran leaves a row behind as well:
+
+    happy agent ls --status
+
+A row whose `state` is `ended` and whose `directory` is the root or one of the worktrees is a
+Saycode session that died. Pair it with a candidate by what it last said: its `lastAgentText`
+is the start of the last assistant text in that candidate's transcript (2). A candidate so
+paired is a **Saycode session** and comes back through Saycode (7) — resumed in a pane, its
+conversation would run outside Saycode while the Saycode session stays ended. Name an ended
+row that pairs with no candidate to the person apart, with its `summary`.
+
 **A session's transcript** is `~/.claude/projects/<slug>/<sessionId>.jsonl`, one JSON object
 per line. The slug is a directory with every character that is not a letter or a digit
 turned into `-` (`/home/me/repo/.worktrees/moai-ab12` is `-home-me-repo--worktrees-moai-ab12`).
@@ -134,7 +146,7 @@ line — and look at where it stood:
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
-waiting for, died at, uncommitted files. Then go on — they asked for recovery already.
+waiting for, died at, uncommitted files — and the Saycode id of a Saycode session. Then go on — they asked for recovery already.
 
 ## 3. Point out what died with it
 
@@ -173,12 +185,13 @@ Leave out a line that does not hold. The supervisor's block adds one line: **the
 back in new sessions and their names may have changed — run `ListAgents` again** before you
 send or wait for a report.
 
-**Workers first, the supervisor last**, in both ways below — the supervisor's `ListAgents`
+**Workers first, the supervisor last**, in every way below — the supervisor's `ListAgents`
 has to see the workers when it starts.
 
 ## 5. Inside tmux — open a pane each
 
-`$TMUX` is set in your shell. For each session, in that order:
+`$TMUX` is set in your shell. For each session that is not a Saycode session (7), in that
+order:
 
     tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
     tmux select-layout -t "$TMUX_PANE" tiled
@@ -201,3 +214,18 @@ person which pane is which session.
 types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd <cwd> && claude --resume <sessionId>
+
+A Saycode session gets the line of 7 instead.
+
+## 7. Saycode sessions — say how to reopen them
+
+No `happy agent` verb brings an ended session back, and you open none in its place — a new
+session from `spawn` is not the one that died. The person reopens each, in the same order as
+above: in Saycode's session list, or in a terminal of their own:
+
+    happy resume <saycode id>
+
+It resumes the conversation in the path Saycode saved, **in the foreground of the terminal
+that runs it** — so never run it yourself; print it, and under it the block of 4 to paste once
+its box shows. Whether it comes back under the same Saycode id is not verified: add to the
+supervisor's block that it reads `happy agent ls --status` again before it sends.

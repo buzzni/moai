@@ -2804,6 +2804,13 @@ Claude Code reports through its last turn ("Take the report").
 /// 같다: 헤드리스·`--dangerously-*`·권한 모드가 없고, 아무것도 죽이지 않고, 한 번에 한 번 보고, 빈 입력 칸에만
 /// 붙인다. tmux 밖이면 아무것도 안 띄우고 칠 줄과 붙일 글만 낸다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
 /// `ListAgents` 가 일꾼을 보고 시작해야 한다.
+///
+/// **Saycode 가 돌린 세션은 칸에서 되살리지 않는다**(moai-l244.nj6). `claude --resume` 으로 칸에 띄우면 대화는
+/// Saycode 밖에서 돌고 Saycode 세션은 `ended` 로 남는다. `happy agent` 에는 끝난 세션을 되살리는 낱말이 없고,
+/// `happy resume <id>` 는 저장된 자리에서 `claude --resume` 을 **앞에서** 돌려 부른 셸을 쥔다 — 그래서 스킬은 그 줄을
+/// 치지 않고 사람에게 낸다(tmux 밖의 길과 같다). 짝은 `ls --status` 의 `lastAgentText` 와 대화 기록의 마지막 말로
+/// 맞춘다 — 죽은 프로세스의 환경은 못 읽어 [`SESSIONS`] 의 `saycode` 칸이 비기 때문이다. 같은 Saycode id 로
+/// 돌아오는지는 재 보지 못했다.
 pub fn recover() -> String {
     format!(
         r#"---
@@ -2867,6 +2874,18 @@ leaves its record behind. The lines below print one row per record, tab-separate
 - When several candidates stand in the same `cwd`, ask the person **once** — one question
   for all of them — which to bring back
 
+**Inside Saycode** — `SAYCODE_AGENT_ENV` is `1` in your shell and `happy agent whoami` answers
+`"ok":true` — a session Saycode ran leaves a row behind as well:
+
+    happy agent ls --status
+
+A row whose `state` is `ended` and whose `directory` is the root or one of the worktrees is a
+Saycode session that died. Pair it with a candidate by what it last said: its `lastAgentText`
+is the start of the last assistant text in that candidate's transcript (2). A candidate so
+paired is a **Saycode session** and comes back through Saycode (7) — resumed in a pane, its
+conversation would run outside Saycode while the Saycode session stays ended. Name an ended
+row that pairs with no candidate to the person apart, with its `summary`.
+
 **A session's transcript** is `~/.claude/projects/<slug>/<sessionId>.jsonl`, one JSON object
 per line. The slug is a directory with every character that is not a letter or a digit
 turned into `-` (`/home/me/repo/.worktrees/moai-ab12` is `-home-me-repo--worktrees-moai-ab12`).
@@ -2897,7 +2916,7 @@ line — and look at where it stood:
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
-waiting for, died at, uncommitted files. Then go on — they asked for recovery already.
+waiting for, died at, uncommitted files — and the Saycode id of a Saycode session. Then go on — they asked for recovery already.
 
 ## 3. Point out what died with it
 
@@ -2936,12 +2955,13 @@ Leave out a line that does not hold. The supervisor's block adds one line: **the
 back in new sessions and their names may have changed — run `ListAgents` again** before you
 send or wait for a report.
 
-**Workers first, the supervisor last**, in both ways below — the supervisor's `ListAgents`
+**Workers first, the supervisor last**, in every way below — the supervisor's `ListAgents`
 has to see the workers when it starts.
 
 ## 5. Inside tmux — open a pane each
 
-`$TMUX` is set in your shell. For each session, in that order:
+`$TMUX` is set in your shell. For each session that is not a Saycode session (7), in that
+order:
 
     tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
     tmux select-layout -t "$TMUX_PANE" tiled
@@ -2964,6 +2984,21 @@ person which pane is which session.
 types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd <cwd> && claude --resume <sessionId>
+
+A Saycode session gets the line of 7 instead.
+
+## 7. Saycode sessions — say how to reopen them
+
+No `happy agent` verb brings an ended session back, and you open none in its place — a new
+session from `spawn` is not the one that died. The person reopens each, in the same order as
+above: in Saycode's session list, or in a terminal of their own:
+
+    happy resume <saycode id>
+
+It resumes the conversation in the path Saycode saved, **in the foreground of the terminal
+that runs it** — so never run it yourself; print it, and under it the block of 4 to paste once
+its box shows. Whether it comes back under the same Saycode id is not verified: add to the
+supervisor's block that it reads `happy agent ls --status` again before it sends.
 "#
     )
 }
@@ -5829,6 +5864,23 @@ stop sending outside work while a release runs",
         ] {
             assert!(supervise.contains(line), "감독의 {step} 에 tmux 갈래가 없다");
         }
+    }
+
+    /// **되살리기는 Saycode 세션을 칸에서 되살리지 않고, `happy resume` 을 제가 치지 않는다**(moai-l244.nj6). 그 줄은
+    /// 부른 셸을 앞에서 쥐어 사람이 제 터미널에서 친다. 끝난 세션 대신 새 세션을 여는 것(`spawn`)은 되살리기가 아니다.
+    #[test]
+    fn the_recover_skill_hands_saycode_sessions_to_the_person() {
+        let text = recover();
+        let saycode = &text[text.find("## 7. Saycode sessions").expect("Saycode 절이 없다")..];
+        assert!(!text.contains("happy agent spawn"), "되살리기가 새 세션을 연다");
+        let resumes: Vec<&str> = text.lines().filter(|l| l.contains("happy resume")).collect();
+        assert_eq!(resumes, ["    happy resume <saycode id>"], "happy resume 이 사람에게 낼 줄 밖에도 섰다");
+        assert!(saycode.contains("happy resume <saycode id>"), "happy resume 줄이 Saycode 절 밖에 섰다");
+        assert!(saycode.contains("so never run it yourself"), "happy resume 을 제가 친다");
+        assert!(saycode.contains("not verified"), "같은 Saycode id 로 돌아온다고 단정한다");
+        assert!(text.contains("`ended`") && text.contains("happy agent ls --status"), "끝난 Saycode 세션을 안 찾는다");
+        let open = &text[text.find("## 5. Inside tmux").unwrap()..text.find("## 6. Outside tmux").unwrap()];
+        assert!(open.contains("not a Saycode session (7)"), "tmux 칸이 Saycode 세션도 되살린다");
     }
 
     /// **`moai-saycode` 는 Saycode 가 대는 일꾼만 `happy agent` 로 몬다**(2026-10-10 사용자 결정, moai-l244). 줄은 여섯 낱말
