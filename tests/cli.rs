@@ -19228,6 +19228,7 @@ fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
     }
     // 감독 스킬은 Claude Code 에만 선다(moai-obxm) — 그 글은 Codex 에 없는 ListAgents·SendMessage 로 말한다.
     assert!(!shared.join("moai-supervise").exists(), "Codex 의 자리에 감독 스킬을 심었다");
+    assert!(!shared.join("moai-tmux").exists(), "Codex 의 자리에 tmux 스킬을 심었다");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
     assert!(!s.path().join(".claude/moai-plugin").exists(), "고르지 않은 Claude 의 트리를 심었다");
 
@@ -19267,6 +19268,12 @@ fn skill_install_plants_one_text_for_every_agent() {
         assert!(supervisor.join(file).is_file(), "Claude 의 트리에 감독의 {file} 가 없다");
     }
     assert!(!s.path().join(".agents/skills/moai-supervise").exists(), ".agents 에 감독 스킬을 심었다");
+    // 감독의 tmux 손(moai-u99i)도 Claude 의 트리에만 선다.
+    assert!(
+        s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(),
+        "Claude 의 트리에 tmux 스킬이 없다"
+    );
+    assert!(!s.path().join(".agents/skills/moai-tmux").exists(), ".agents 에 tmux 스킬을 심었다");
     assert!(c.calls().contains("plugin install"), "claude 를 골랐는데 등록을 안 했다\n{}", c.calls());
     let mut json_args = args.to_vec();
     json_args.extend(["--dry-run", "--json"]);
@@ -19398,6 +19405,7 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     }
     // 심지 않은 감독 스킬은 대지 않는다 — 없는 자리를 `rm -r` 로 대면 사람이 무엇이 있는지 헛갈린다.
     assert!(!said.contains(&shared.join("moai-supervise").display().to_string()), "심지 않은 감독 스킬을 댄다\n{said}");
+    assert!(!said.contains(&shared.join("moai-tmux").display().to_string()), "심지 않은 tmux 스킬을 댄다\n{said}");
     assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
     assert_eq!(c.calls(), "", "codex 만 골랐는데 claude 를 불렀다");
 

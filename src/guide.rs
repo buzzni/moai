@@ -354,7 +354,8 @@ Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…
 `ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
 to pick it up again. A session a person opened reads that shape to choose its next row —
-moai never launches or drives a session itself.
+the moai binary never launches or drives a session itself. Only the supervisor skill, inside
+tmux, may clear a worker's pane, paste into it, or open one once the person says yes.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -1197,9 +1198,12 @@ one window to hand the backlog that have piled up, one at a time, to the other s
 of this repository and take their reports. Every idle session of this repository that
 `ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
 assignment (`SendMessage`) with a line naming the file of the worker's steps to read, and
-the worker reports the same way. moai carries no messaging and never launches a session;
-every one of them is a session a person opened. The supervisor picks, sends and checks; it
-does not fix and it does not merge.
+the worker reports the same way. moai carries no messaging, and the moai binary never
+launches or drives a session. When the supervisor runs inside tmux, its companion skill
+`moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
+panes — an ordinary interactive `claude` the person sees, opened only after the person says
+yes. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+does not merge.
 
 ### The wiki
 
@@ -1758,8 +1762,14 @@ Decided in: <epic>
 /// 보내던 판은 32KB 를 보낼 때마다 손으로 옮겨 출력 토큰 8~10k 가 들었고, 줄이거나 바꿔 옮긴 글을 아무것도 못 잡았다.
 /// `@path` 는 아무것도 안 붙이므로 경로는 일꾼이 `Read` 로 연다.
 ///
-/// **창을 비우는 것은 사람의 몫이다.** tmux 칸에 `/clear` 를 쳐 넣던 5-1(약 480줄)을 통째로 걷었다 — 일꾼이 보고
-/// 끝에 언제 비워도 되는지를 사람에게 한 줄로 말한다. 감독은 칸에 아무것도 치지 않는다.
+/// **tmux 밖에서는 창을 비우는 것이 사람의 몫이다.** tmux 칸에 `/clear` 를 쳐 넣던 5-1(약 480줄)을 통째로 걷었다 —
+/// 일꾼이 보고 끝에 언제 비워도 되는지를 사람에게 한 줄로 말한다(moai-obxm).
+///
+/// **tmux 안의 감독은 칸을 만진다**(2026-10-10 사용자 결정, moai-u99i). `$TMUX` 가 서 있으면 [`tmux`] 스킬을 읽고,
+/// 보고를 확인한 일꾼의 칸을 비우고(5), 닿지 않은 메시지를 칸에 붙이고(3), 멈춘 칸을 한 번 읽고(4), 놀고 있는 일꾼이
+/// 없으면 사람에게 물어 새 칸을 연다(2). 옛 5-1 이 초안을 건지느라 480줄이 된 것을 되풀이하지 않으려고, 입력 칸에
+/// 무엇이든 있으면 치지 않고 사람에게 말한다 — 그 하나로 둔다. **바이너리는 여전히 아무것도 띄우거나 몰지 않고**,
+/// 헤드리스·`-p`·`--dangerously-*`·권한 모드 바꾸기도 없다. 연 칸은 사람이 보고 칠 수 있는 보통의 대화형 `claude` 다.
 ///
 /// **backlog 를 일감으로 바꾸는 길은 `promote` 하나다** (사용자 결정). `moai edit` 에 `--type` 이 없어 제자리에서 못
 /// 바꾸는데, 첫 실행의 일꾼은 `add` 로 새 줄을 세우고 backlog 를 손으로 닫았다. 길이 둘이면 일꾼마다 다르게 고르고,
@@ -1801,8 +1811,10 @@ workers talk with Claude Code's own tools:
   subscribes
 - A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
 
-**Every session here is one a person opened.** moai never launches an agent or runs one
-headless, and neither does the supervisor. **A worker is every idle session of this
+**Every session here is an interactive one the person can see.** The moai binary never
+launches or drives an agent, and nothing here runs headless. Outside tmux the supervisor
+launches nothing either; inside tmux it may open a worker pane, only after the person says
+yes (`moai-tmux`, below). **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
@@ -1827,6 +1839,14 @@ Five things about the messaging, one line each:
 - `@path` in a message attaches nothing — a file the worker has to read is named by its
   absolute path, and the worker reads it itself (3)
 - Never poll `ListAgents` in a loop — the report comes to you (4)
+
+**Inside tmux, load `moai-tmux` too.** When `$TMUX` is set in your shell, the skill
+`moai-tmux` gives you hands on the workers' panes, at five points of the round: offer new
+worker panes when no worker is idle (2), label the pane you send to and deliver a message
+`SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
+window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
+never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
+step below goes through messages and the person, as written.
 
 **Work you send out is always done in a worktree** — even if the repository has no
 worktree convention. Several workers share one root checkout, so fixing things in the
@@ -2019,7 +2039,8 @@ worker, and the message is the whole assignment.
   sent to is gone from `ListAgents` with its report unchecked, a name you have not sent to
   may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
-  session of another repository
+  session of another repository. Inside tmux, ask the person first whether to open new worker
+  panes (`moai-tmux`, "No idle worker left"); on a no, stop
 - **A worker that refused the work comes out of the candidates and is not sent to
   again.** Some sessions take work only from their own person
 - **A test agent is no worker.** One raised for a test is opened outside the repository (a
@@ -2082,6 +2103,8 @@ exception. A worker whose person is away waits on that prompt and sends nothing.
 person once, before the first send, and let them choose: a person in the worker's window
 answers it, or `permissions.additionalDirectories` in their settings holding that plugin
 directory lets it through. The settings are theirs — do not write them.
+Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
+it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -2120,7 +2143,9 @@ worker reads in its own window in 9-1.
 worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 `notify_when_idle` sends is not a report: a worker goes idle whenever its turn ends — while
 it waits on its person's answer, say — and one that asked its person something sends nothing
-until it is answered. **Do not poll `ListAgents`** — the report comes to you.
+until it is answered. **Do not poll `ListAgents`** — the report comes to you. Inside tmux, an
+idle notice with no report is the moment to read that worker's pane once (`moai-tmux`, "When a
+worker stalls") and tell the person what it shows.
 
 **A report reaches only the name it was sent to.** A supervisor that started again —
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
@@ -2181,12 +2206,16 @@ commit with a path — a supervisor that starts again reads that line, not this 
 
     moai note <epic> 'Report-checked: <merge hash>'
 
-Then send the next backlog to an idle worker. **Clearing a window is the
+Then send the next backlog to an idle worker. **Outside tmux, clearing a window is the
 person's** — the supervisor never types into a window. The report ends with the worker
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
 report that never comes. Send to that window once the person has cleared it or said they will
 not — a clear does not show from here, so ask the person — or send to another idle worker.
+**Inside tmux you may clear it yourself** — only after the report is checked and the note above
+is written, only while `ListAgents` and its session record read `idle`, and only when its input
+box is empty (`moai-tmux`, "Clear a worker's window"). If any of these fails, do as the
+paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`).
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.
@@ -2212,6 +2241,227 @@ subject — that has actually happened. So in the root, supervisor and worker al
   stop — do not force a colliding backlog out
 - If a worker is waiting on a person's decision, the supervisor does not answer in their
   place. The decision is the person's
+"#
+    )
+}
+
+/// 살아 있는 Claude Code 세션마다 `ListAgents` 의 이름과 tmux 칸을 잇는 짝 — **한 자리에만 선다**(moai-u99i.xo8).
+/// `moai-tmux`([`tmux`])가 `format!` 으로 싣고, 다음 에픽의 되살리기 스킬(moai-uqf7)이 죽은 세션까지 읽으려고 같은
+/// 상수를 싣는다. 그래서 거르지 않고 첫 칸에 `alive`·`dead` 를 적는다 — 읽는 쪽이 고른다. 두 벌로 적으면 기록의 꼴이
+/// 바뀌는 날 한쪽만 고쳐진다.
+///
+/// **읽는 것은 Claude Code 가 프로세스마다 남기는 `~/.claude/sessions/<pid>.json` 이다.** 죽은 프로세스의 파일도,
+/// 다른 pid 이름공간(`pidDomain`)의 파일도 거기 남는다. 그래서 pid 가 살아 있는 것만으로는 모자라고 — pid 는 다시
+/// 쓰인다 — 기록의 `procStart` 가 `/proc/<pid>/stat` 의 22번째 칸(프로세스 시작 시각)과 같아야 `alive` 다. `tmux` 는
+/// `"<세션>:@<창>.%<칸>"` 이고, `-t` 가 받는 것은 끝의 `%<칸>` 이다. tmux 밖의 세션은 칸이 `-` 다.
+///
+/// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
+/// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
+pub const SESSIONS: &str = r#"python3 - <<'PY'
+import glob, json, os
+for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
+    try:
+        with open(path) as f:
+            r = json.load(f)
+        pid = int(r["pid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        continue
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            stat = f.read()
+        alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
+    except (OSError, ValueError, IndexError):
+        alive = False
+    tmux = r.get("tmux") or ""
+    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
+    print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
+PY"#;
+
+/// 넷째 스킬 `moai-tmux` 의 SKILL.md — tmux 안에서 도는 감독의 손이다(2026-10-10 사용자 결정, moai-u99i).
+///
+/// **moai-obxm 의 두 결정을 tmux 쓰는 사람에게만 뒤집는다.** "창을 비우는 것은 사람의 몫 — 감독은 칸에 아무것도 치지
+/// 않는다" 와 "감독도 에이전트를 띄우지 않는다" 였다. 이제 `$TMUX` 가 서 있으면 감독이 칸을 비우고, 닿지 않은
+/// 메시지를 붙이고, 사람이 그러라고 한 뒤에 새 일꾼 칸을 연다. 참인 쪽은 그대로다 — **바이너리는 아무것도 띄우거나
+/// 몰지 않고**(이 글은 스킬의 말일 뿐 새 명령이 없다), 헤드리스·`-p`·`--dangerously-*`·권한 모드 바꾸기는 없다.
+///
+/// **치기 전의 잣대는 하나다 — 입력 칸에 무엇이든 있으면 안 친다.** 옛 5-1 은 사람이 쓰던 초안을 건지느라 480줄이
+/// 되었다. 초안인지 자리글(placeholder)인지 못 가르면 있는 것으로 읽고 사람에게 말한다.
+///
+/// **칸은 언제나 짝([`SESSIONS`])에서 찾은 `%id` 로 겨눈다.** 사람의 tmux 서버라, 맨 `kill-*` 하나가 그 서버의 모든
+/// 세션을 죽인다(2026-09-18). 감독 제 칸·다른 저장소의 칸·시험 서버의 칸에는 치지 않는다.
+///
+/// **칸 이름표는 칸 사용자 옵션 `@moai` 다.** Claude Code 가 `pane_title` 을 제 화제로 덮어 써서 제목은 못 쓴다.
+/// 보일지는 바퀴마다 사람에게 묻고, 그렇다고 하면 **도는 서버의** `pane-border-format` 앞에 붙인다 — 사람의 설정
+/// 파일은 안 고친다.
+///
+/// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
+pub fn tmux() -> String {
+    format!(
+        r#"---
+name: moai-tmux
+description: Use in Claude Code together with moai-supervise when the supervisor runs inside tmux ($TMUX is set) — to find a worker's pane from its ListAgents name, label it, clear a reported worker's window, deliver a message SendMessage could not, read why a worker stalled, and open new worker panes once the person says yes. Triggers on "worker pane", "open a worker", "clear the worker", "일꾼 칸", "일꾼 창 열어", "칸 비워".
+---
+
+# moai-tmux — the supervisor's hands on the workers' panes
+
+This is the supervisor's (`moai-supervise`) companion **when it runs inside tmux** — `$TMUX`
+is set in its shell. Without `$TMUX` none of this applies: the supervisor works through
+messages and the person alone. The tmux server here is **the person's own**: every session
+they have lives on it, and every pane you touch is one they are looking at.
+
+## What never happens
+
+- **No headless run.** A worker you open is an ordinary interactive `claude` the person can
+  see and type into. Never `claude -p`, never a `--dangerously-*` flag, never
+  `--permission-mode`. The moai binary launches and drives nothing; this skill is you
+  typing tmux commands where the person can watch
+- **Nothing is killed.** Never `kill-server`, `kill-session` or `kill-pane`, never `pkill`
+  or `killall` aimed at tmux — one bare `kill-server` once took down every session the
+  person had (hook rule 4, and the person's own guard hook refuses it too). A worker that
+  is done stays open; closing a pane is the person's
+- **Only a worker's pane.** Type only into a pane found through the session map below for a
+  worker of this repository — never your own pane (`$TMUX_PANE`), never a session of another
+  repository, never a test server's pane. Every call names its pane, `-t <pane>`, as `%N`
+- **Never over the person's words.** If a worker's input box holds anything, do not type into
+  it — tell the person
+- **Never in their place.** A permission prompt or a question in a worker's pane is the
+  person's to answer — you read it and tell them; you press no key
+- **No polling.** Every look below is one look. A second one comes after your next step, as
+  its own call — never a loop and never a `sleep`
+- **The person's tmux config file stays theirs.** What you set is on the running server
+
+## Which pane is which worker
+
+`ListAgents` names a session; tmux needs a pane. Claude Code keeps one record per process
+under `~/.claude/sessions/`, and the lines below print one row per record, tab-separated:
+
+    state  name  pane  status  cwd  sessionId
+
+```sh
+{SESSIONS}
+```
+
+- **Read only `alive` rows.** A `dead` row is a record a process left behind — its pid is gone,
+  or now belongs to another process (the start time differs)
+- `name` is the `ListAgents` name, `pane` the `%N` that `-t` takes — `-` when that session
+  is not in tmux, and then this skill has nothing for that worker
+- `cwd` is where the session stands: the root, or a worktree under `<root>/.worktrees/`. A
+  row standing elsewhere is not a worker of this repository, whatever its name
+- `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
+  below asks for `idle`
+- Your own row is the one whose pane is `$TMUX_PANE`
+
+Run it when a step below needs a pane, once.
+
+## Is the input box empty
+
+    tmux capture-pane -p -t <pane>
+
+Claude Code's input box is the line that starts with `❯`, under the conversation, between two
+`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder. Anything
+else — a word, a pasted block, a half-typed command — is the person's, and if you cannot tell
+the placeholder from their draft, it is theirs. **Then do not type. Tell the person which pane
+holds what, and go on as if this skill were not here.** A pane with no `❯` box at all (a shell
+prompt, a dialog) is not a box to type into either.
+
+## Label the pane
+
+When you send work (the supervisor's 3), write the worker and the work onto its pane:
+
+    tmux set-option -p -t <pane> @moai '<worker> <id>'
+
+`<id>` is the backlog or epic you sent. Claude Code writes its own topic into the pane title,
+so the label lives in the pane option `@moai`. Remove it when that work's report is checked
+(the supervisor's 5):
+
+    tmux set-option -p -u -t <pane> @moai
+
+**Showing it is the person's choice, asked once per round.** Ask whether the labels should
+show on the pane borders. On a yes, read the running server's two settings:
+
+    tmux show -gv pane-border-format
+    tmux show -gv pane-border-status
+
+and put the label in front of the format you read:
+
+    tmux set -g pane-border-format '#{{?@moai,#{{@moai}} ,}}<the value you read>'
+    tmux set -g pane-border-status top
+
+Set `pane-border-status` only when it read `off`. If the format you read already starts with
+`#{{?@moai,`, it is shown already — leave it. If that value holds a single quote, do not build
+the line; tell the person what to add. Never write the person's tmux config file.
+
+## Clear a worker's window
+
+Before you send a worker its next work, you may clear its window (`/clear`) yourself — all of
+these first:
+
+1. **Its report is checked** — the supervisor's 5 held all three checks and the
+   `Report-checked:` note is written
+2. **It reads `idle`** — in `ListAgents` and in its row of the session map
+3. **Its input box is empty** (above)
+
+Then:
+
+    tmux send-keys -t <pane> /clear Enter
+
+and, as a separate call, look once: the session map reads `idle` for it and `capture-pane`
+shows the cleared screen — the conversation gone, an empty box. Then send with `SendMessage`
+as the supervisor's 3 says. **If any condition fails, or the look does not show it cleared,
+do not type again** — do what the supervisor's 5 says without tmux: ask the person, or send
+to another idle worker.
+
+## When a message does not arrive
+
+When `SendMessage` to a worker fails, or the delivery notice says it was refused or is held for
+approval, and that worker has a pane whose input box is empty (above), you may put the message
+into the box yourself. Typed keys submit at every newline, so paste it as one block:
+
+1. Write the message to a file in your scratchpad, with one line at the top naming you — a
+   pasted message carries no sender, and the worker reports to the message's `from`:
+   `from: <your ListAgents name>`
+2. Paste and submit it:
+
+       tmux load-buffer -b moai-send <file>
+       tmux paste-buffer -p -d -b moai-send -t <pane>
+       tmux send-keys -t <pane> Enter
+
+3. **Tell the person** you did, and into which pane
+
+The worker still answers with `SendMessage`. A worker that answered your message by refusing
+the work is not a delivery that failed — it comes out of the candidates (the supervisor's 2).
+
+## When a worker stalls
+
+When a `notify_when_idle` notice comes with no report, or the person asks about a worker that
+has read `busy` far longer than its work should take, look at its pane once:
+
+    tmux capture-pane -p -t <pane> -S -40
+
+and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
+rate-limit error, or a process that ended (a shell prompt where the box was). **Tell the
+person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
+key, and do not look again in a loop.
+
+## No idle worker left
+
+When the supervisor's 2 finds no worker, ask the person **once** whether to open new worker
+panes, and how many — one question covers several panes. Open a pane only on their yes, or
+when they asked you for it. On a yes, for each pane:
+
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <root> 'claude --model <model>; exec bash'
+    tmux select-layout -t "$TMUX_PANE" tiled
+
+`<root>` is the `root dir` of the supervisor's 2 and `<model>` the model picked in 2-1. **No
+other flag.** The first line prints the new pane's id; `exec bash` keeps a shell in the pane
+when `claude` exits, so what it said stays readable. The pane belongs to the same person —
+it is their interactive session like any other.
+
+Once it has started (a separate call: `capture-pane` of the new pane shows the `❯` box), look
+at `ListAgents` once more. The new row is a worker like any other (the supervisor's 2) — send
+to it as in 3. If it does not show yet, look once more after your next step; if a prompt
+stands in the new pane (trusting the folder, say), tell the person — it is theirs to answer.
 "#
     )
 }
@@ -2883,8 +3133,9 @@ mod tests {
     #[test]
     fn the_style_piece_obeys_itself() {
         assert!(WRITING.contains("emoji"), "글 스타일에 이모지 이야기가 없다");
+        // `❯` 도 뺀다 — Claude Code 의 입력 칸 머리라 tmux 스킬이 그 글자로 칸을 알아본다(moai-u99i). 한 칸 너비의 딩뱃이다.
         let emoji = |c: char| {
-            c != '✓'
+            !matches!(c, '✓' | '❯')
                 && (c >= '\u{1F300}' || matches!(c, '\u{FE0F}' | '\u{2600}'..='\u{27BF}' | '\u{2B00}'..='\u{2BFF}'))
         };
         for (surface, text) in [
@@ -2892,6 +3143,7 @@ mod tests {
             ("스킬", skill()),
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
+            ("tmux 스킬", tmux()),
             ("일꾼 글", worker()),
         ] {
             let found: String = text.chars().filter(|c| emoji(*c)).collect();
@@ -2899,13 +3151,17 @@ mod tests {
         }
     }
 
-    /// **심는 글은 사람 없이 도는 고리를 가르치지 않는다**(moai-jo1u). moai 는 세션을 띄우지도
+    /// **심는 글은 사람 없이 도는 고리를 가르치지 않는다**(moai-jo1u). moai 바이너리는 세션을 띄우지도
     /// 헤드리스로 몰지도 않는다(2026-10-04 사용자 결정) — 그래서 그 고리를 보이던
     /// `examples/bash-agent`·`examples/python-agents` 를 걷었다. 글에 경로가 남으면 모든 저장소에
     /// 없는 파일을 가리키고, 사람 없이 돌리라는 말을 그대로 심는다.
     ///
     /// **바꾼 말이 서 있는지도 본다.** 걷은 낱말만 재면 문단이 통째로 빠져도 초록이다 —
     /// `ready --json` 의 꼴을 읽는 쪽이 사람이 띄운 세션이라는 것이 이 문단이 남긴 뜻이다.
+    ///
+    /// **tmux 안의 감독은 칸을 비우고, 붙이고, 사람이 그러라면 연다**(2026-10-10 사용자 결정, moai-u99i) — 그래서 "moai 는
+    /// 세션을 띄우거나 몰지 않는다" 를 **바이너리**의 말로 좁히고 그 곁에 감독의 tmux 갈래를 적었다. 둘 중 하나만 서면
+    /// 블록과 스킬이 다른 말을 한다.
     #[test]
     fn the_planted_text_teaches_no_headless_loop() {
         for (surface, text) in [
@@ -2913,6 +3169,7 @@ mod tests {
             ("스킬", skill()),
             ("참고 문서", reference()),
             ("감독 스킬", supervise()),
+            ("tmux 스킬", tmux()),
             ("일꾼 글", worker()),
         ] {
             for gone in ["examples/bash-agent", "examples/python-agents", "runs without a person"] {
@@ -2921,17 +3178,40 @@ mod tests {
         }
         for (surface, text) in [("AGENTS 블록", agents()), ("스킬", skill())] {
             assert!(
-                text.contains("moai never launches or drives a session itself"),
-                "{surface} 이 세션을 띄우는 쪽이 사람이라는 말을 잃었다"
+                text.contains("the moai binary never launches or drives a session itself"),
+                "{surface} 이 바이너리가 세션을 띄우지 않는다는 말을 잃었다"
+            );
+            assert!(
+                text.contains("Only the supervisor skill, inside\ntmux,") && text.contains("once the person says yes"),
+                "{surface} 이 tmux 안의 감독이 칸을 만진다는 말을 안 한다"
+            );
+            assert!(
+                !text.contains("moai never launches or drives"),
+                "{surface} 이 옛 말(감독도 안 만진다)을 들고 있다"
             );
         }
+        let block = agents();
+        let team = &block[block.find("### The supervisor and its workers").expect("감독 절이 없다")..];
+        assert!(
+            team.contains("the moai binary never\nlaunches or drives a session"),
+            "감독 절이 바이너리의 말을 잃었다"
+        );
+        assert!(
+            team.contains("`moai-tmux`") && team.contains("after the person says\nyes"),
+            "감독 절에 tmux 갈래가 없다"
+        );
+        assert!(!team.contains("never launches a session;"), "감독 절이 옛 말을 들고 있다");
         // **리뷰는 일꾼의 세션 안에서 돈다**(moai-5kk1) — 새 에이전트를 띄우는 명령이 리뷰의 낱말로 서면 감독도
         // 일꾼도 에이전트를 안 띄운다는 결정이 깨진다. 일꾼 글은 Claude Code 만 받으니(moai-obxm) 다른 벤더의 그
         // 명령을 이름으로 댈 까닭도 없다.
         let spawns = ["codex review", "codex exec", "agy -p"];
-        for (surface, text) in
-            [("낱말표", verbs_section()), ("규칙 셋", rules()), ("감독 스킬", supervise()), ("일꾼 글", worker())]
-        {
+        for (surface, text) in [
+            ("낱말표", verbs_section()),
+            ("규칙 셋", rules()),
+            ("감독 스킬", supervise()),
+            ("tmux 스킬", tmux()),
+            ("일꾼 글", worker()),
+        ] {
             for spawn in spawns {
                 assert!(!text.contains(spawn), "{surface} 이 새 에이전트를 띄우는 {spawn} 를 가르친다");
             }
@@ -3147,6 +3427,8 @@ mod tests {
             ),
             // 위키 스킬(moai-bl3x)의 발동어. 사람이 "위키 갱신" 이라고 불러야 훑기가 선다.
             ("moai-wiki", head(&wiki()), ["위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리"].as_slice()),
+            // tmux 스킬(moai-u99i)은 감독이 `$TMUX` 안에서 부른다 — 사람이 칸을 이름으로 부를 때도 서야 한다.
+            ("moai-tmux", head(&tmux()), ["일꾼 칸", "일꾼 창 열어", "칸 비워"].as_slice()),
         ] {
             for trigger in triggers {
                 assert!(said.contains(trigger), "{whose} 의 발동어에서 {trigger} 가 빠졌다 — {said}");
@@ -3167,10 +3449,11 @@ mod tests {
         let head: String = skill.chars().take(40).collect();
         // 이름은 `skill::NAMES` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그 목록을 다
         // 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
-        let [moai, supervisor, wiki_skill] = crate::skill::NAMES;
+        let [moai, supervisor, wiki_skill, tmux_skill] = crate::skill::NAMES;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
+        assert!(tmux().starts_with(&format!("---\nname: {tmux_skill}\ndescription: ")), "tmux 스킬의 머리가 없다");
         // 일꾼 글은 스킬이 아니라 감독 스킬의 참고 파일이다(moai-obxm) — 머리가 서면 그 글이 메시지 한가운데 YAML 로 선다.
         assert!(worker().starts_with("# Worker steps\n"), "일꾼 글이 제목으로 안 연다");
     }
@@ -3985,15 +4268,18 @@ stop sending outside work while a release runs",
     /// **tmux 시험은 떼어 낸 서버에서만 가르친다**(2026-09-18 사용자 규칙). 스킬이 맨
     /// `tmux new-session -d` 를 가르치던 날, 그 길을 따른 리뷰 서브에이전트가 맨 `kill-server` 로
     /// 사람의 tmux 서버를 통째로 죽였다 — tmux 안에서는 `$TMUX` 가 `TMUX_TMPDIR` 를 이긴다.
-    /// 일꾼이 받는 글에 서야 한다: 시험을 실제로 치는 것은 일꾼과 그 리뷰 서브에이전트다. 감독은
-    /// tmux 를 안 만지니(moai-obxm) 감독 글에는 규칙이 안 선다.
+    /// 일꾼이 받는 글에 서야 한다: 시험을 실제로 치는 것은 일꾼과 그 리뷰 서브에이전트다.
+    ///
+    /// **감독의 tmux 는 사람의 서버다**(2026-10-10 사용자 결정, moai-u99i) — 일꾼의 칸을 비우고 붙이고 여는 것이 일이라
+    /// 떼어 낸 서버로는 할 수 없다. 그래서 그 명령은 감독 글이 아니라 `moai-tmux` 에만 서고, 감독 글은 여전히 기본 서버의
+    /// tmux 명령을 하나도 안 든다. `moai-tmux` 에는 제 금이 선다 — 아래 `the_tmux_skill_touches_only_named_panes`.
     #[test]
     fn tmux_tests_are_taught_on_a_separate_server() {
         let (supervise, brief) = (supervise(), worker());
         // 감독 스킬은 걸음을 안 품는다(moai-snyk) — 두 글을 따로 잰다. 품던 판은 통째로 재면 브리프의 같은
         // 줄이 감독 쪽에서 빠진 자리를 메웠다.
         assert!(!supervise.contains(&brief), "감독 스킬이 일꾼의 걸음을 품는다");
-        // 감독은 tmux 를 안 만진다 — 창을 비우던 5-1 을 걷었다(moai-obxm). 시험하는 것은 일꾼이라 규칙은 일꾼 글에 선다.
+        // 감독 글은 tmux 명령을 안 든다 — 칸을 만지는 걸음은 `moai-tmux` 에 있다(moai-u99i). 시험하는 것은 일꾼이라 규칙은 일꾼 글에 선다.
         assert!(brief.contains("env -u TMUX tmux -L"), "일꾼 걸음: 떼어 낸 서버로 시험하라는 말이 없다");
         assert!(brief.contains("without `-L`/`-S`"), "일꾼 걸음: 맨 kill-server 를 막는 말이 없다");
         assert!(brief.contains("TMUX_TMPDIR"), "일꾼 걸음: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
@@ -4768,12 +5054,131 @@ stop sending outside work while a release runs",
             "저장소 밖 단계 파일의 권한 물음을 안 알린다"
         );
         assert!(supervise.contains("The settings are theirs — do not write them."), "감독이 사람의 설정을 고친다");
-        // 감독은 창에 아무것도 안 친다 — 5-1 을 걷었다.
+        // **tmux 밖의 감독은 창에 아무것도 안 친다**(moai-obxm) — 5-1 을 걷었다. tmux 안에서는 칸을 만지되(2026-10-10 사용자
+        // 결정, moai-u99i) 그 명령은 `moai-tmux` 에만 선다 — 감독 글이 `send-keys` 를 들면 tmux 없는 감독도 그 줄을 친다.
         assert!(!supervise.contains("**5-1."), "감독이 창을 비우는 5-1 이 남았다");
-        assert!(!supervise.contains("send-keys") && !supervise.contains("tmux_pane"), "감독이 tmux 칸을 만진다");
         assert!(
-            supervise.contains("**Clearing a window is the\nperson's**"),
-            "창을 비우는 것이 사람의 몫이라는 말이 없다"
+            !supervise.contains("send-keys") && !supervise.contains("tmux_pane"),
+            "감독 글이 tmux 칸을 직접 만진다"
         );
+        let check = &supervise[supervise.find("**5. Check the report").unwrap()..];
+        assert!(
+            check.contains("**Outside tmux, clearing a window is the\nperson's**"),
+            "tmux 밖에서 창을 비우는 것이 사람의 몫이라는 말이 없다"
+        );
+        assert!(
+            check.contains("**Inside tmux you may clear it yourself**"),
+            "tmux 안의 감독이 칸을 비운다는 갈래가 없다"
+        );
+        // 비우는 조건 셋 — 보고 확인·idle·빈 입력 칸. 하나라도 빠지면 옛 5-1 처럼 사람의 초안이나 보낸 일을 지운다.
+        for gate in ["only after the report is checked", "read `idle`", "its input\nbox is empty"] {
+            assert!(check.contains(gate), "감독의 5 가 칸을 비우는 조건 `{gate}` 를 안 댄다");
+        }
+        let head = &supervise[..round];
+        assert!(head.contains("**Inside tmux, load `moai-tmux` too.**"), "감독이 tmux 안에서 moai-tmux 를 안 읽는다");
+        assert!(head.contains("**Without `$TMUX` nothing of it applies**"), "tmux 없는 감독의 걸음이 바뀐다고 읽힌다");
+    }
+
+    /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로
+    /// 싣고, 다음의 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
+    /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다.
+    #[test]
+    fn the_session_map_reads_the_records() {
+        assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
+        assert!(SESSIONS.contains("procStart") && SESSIONS.contains("/proc/{pid}/stat"), "짝이 pid 재사용을 안 거른다");
+        if std::process::Command::new("python3").arg("-c").arg("pass").output().is_err() {
+            return; // python3 가 없는 기계 — 글만 잰다.
+        }
+        let s = crate::scratch::Scratch::new("tmux-session-map");
+        let dir = s.path().join(".claude/sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        // 이 시험 프로세스는 살아 있다 — 그 시작 시각이 `procStart` 다.
+        let me = std::process::id();
+        let stat = std::fs::read_to_string(format!("/proc/{me}/stat")).unwrap();
+        let start = stat[stat.rfind(')').unwrap() + 2..].split_whitespace().nth(19).unwrap().to_string();
+        let record = |pid: u32, start: &str, name: &str, tmux: Option<&str>| {
+            let tmux = tmux.map_or(String::new(), |t| format!(r#","tmux":"{t}""#));
+            format!(
+                r#"{{"pid":{pid},"sessionId":"s-{name}","cwd":"/repo","kind":"interactive","procStart":"{start}","name":"{name}","status":"idle"{tmux}}}"#
+            )
+        };
+        std::fs::write(dir.join("1.json"), record(me, &start, "here", Some("Shop Work:@16.%39"))).unwrap();
+        std::fs::write(dir.join("2.json"), record(me, "1", "reused", Some("moai:@0.%4"))).unwrap();
+        std::fs::write(dir.join("3.json"), record(me, &start, "plain", None)).unwrap();
+        std::fs::write(dir.join("4.json"), "not json").unwrap();
+        let shell = SESSIONS.replace("~/.claude/sessions", &dir.display().to_string());
+        let out = std::process::Command::new("sh").arg("-c").arg(&shell).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let got = String::from_utf8(out.stdout).unwrap();
+        assert_eq!(
+            got,
+            "alive\there\t%39\tidle\t/repo\ts-here\n\
+             dead\treused\t%4\tidle\t/repo\ts-reused\n\
+             alive\tplain\t-\tidle\t/repo\ts-plain\n",
+            "짝의 줄 꼴이 바뀌었다"
+        );
+    }
+
+    /// **`moai-tmux` 는 이름 댄 칸만 만진다**(2026-10-10 사용자 결정, moai-u99i). 사람의 tmux 서버라 맨 `kill-server` 하나가
+    /// 그 사람의 세션을 다 죽인다(2026-09-18). 그래서 `tmux` 를 부르는 줄은 모두 칸을 `-t` 로 겨누거나, 칸을 안 건드리는
+    /// 넷(설정 읽기 `show`·테두리 둘을 쓰는 `set -g`·버퍼에 싣는 `load-buffer`) 중 하나다. `kill-*` 은 하지 말라는 줄에만
+    /// 선다. 칸을 열 때 `claude` 에 붙는 깃발은 `--model` 하나다 — `-p`·`--dangerously-*`·권한 모드가 서면 헤드리스가 된다.
+    /// 치기 전의 잣대(빈 입력 칸)와 열기 전에 묻기도 글로 선다.
+    #[test]
+    fn the_tmux_skill_touches_only_named_panes() {
+        let text = tmux();
+        let mut calls = 0;
+        // 짝의 파이썬은 `tmux = r.get(…)` 처럼 낱말 `tmux` 로 여는 줄을 든다 — 명령이 아니라 빼고 센다.
+        for line in text.replace(SESSIONS, "").lines() {
+            let spans: Vec<&str> = line.split('`').skip(1).step_by(2).collect();
+            let commands = std::iter::once(line.trim()).chain(spans.iter().copied());
+            for cmd in commands.filter(|c| c.starts_with("tmux ")) {
+                calls += 1;
+                let words: Vec<&str> = cmd.split_whitespace().collect();
+                assert!(!words[1].starts_with("kill"), "tmux 스킬이 kill 을 가르친다 — {cmd}");
+                let free = matches!(words[1], "show" | "load-buffer")
+                    || (words[1] == "set" && words.get(3).is_some_and(|w| w.starts_with("pane-border-")));
+                assert!(free || words.contains(&"-t"), "칸을 안 겨눈 tmux 줄 — {cmd}");
+                // 하위 명령 앞의 깃발(`-L`·`-S`)이 서버를 고른다 — 뒤의 `-S` 는 `capture-pane` 의 시작 줄이다.
+                assert!(!words[1].starts_with('-'), "하위 명령 앞에 깃발이 섰다 — {cmd}");
+            }
+        }
+        assert!(calls >= 8, "tmux 스킬의 명령을 못 셌다 — {calls}");
+        let never = &text[text.find("## What never happens").expect("하지 않는 것 절이 없다")..];
+        let never = &never[..3 + never[3..].find("\n## ").unwrap()];
+        for kill in ["`kill-server`", "`kill-session`", "`kill-pane`", "`pkill`"] {
+            assert!(never.contains(kill), "하지 않는 것에 {kill} 가 없다");
+        }
+        for flag in ["`claude -p`", "`--dangerously-*`", "`--permission-mode`"] {
+            assert!(never.contains(flag), "하지 않는 것에 {flag} 가 없다");
+        }
+        // 띄우는 줄은 하나고, 깃발은 모델 하나다.
+        let launches: Vec<&str> = text.lines().filter(|l| l.contains("'claude ")).collect();
+        assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
+        assert!(launches[0].contains("'claude --model <model>; exec bash'"), "띄우는 줄에 다른 깃발이 섰다");
+        // 입력 칸이 비어야 친다 — 옛 5-1 이 사람의 초안을 건지느라 480줄이었다.
+        assert!(text.contains("**Then do not type. Tell the person"), "빈 입력 칸의 잣대가 없다");
+        let clear = &text[text.find("## Clear a worker's window").unwrap()..text.find("## When a message").unwrap()];
+        assert!(clear.contains("**Its input box is empty**"), "비우기 전에 입력 칸을 안 본다");
+        assert!(
+            clear.contains("**Its report is checked**") && clear.contains("`Report-checked:`"),
+            "보고 확인 전에 비운다"
+        );
+        let paste = &text[text.find("## When a message").unwrap()..text.find("## When a worker stalls").unwrap()];
+        assert!(paste.contains("input box is empty"), "붙이기 전에 입력 칸을 안 본다");
+        assert!(paste.contains("paste-buffer -p"), "여러 줄을 붙이기(bracketed paste)로 안 싣는다");
+        assert!(paste.contains("**Tell the person**"), "붙인 것을 사람에게 안 알린다");
+        let stall = &text[text.find("## When a worker stalls").unwrap()..text.find("## No idle worker").unwrap()];
+        assert!(
+            stall.contains("**Tell the\nperson**") && stall.contains("do not press a\nkey"),
+            "멈춘 칸에 대신 답한다"
+        );
+        let open = &text[text.find("## No idle worker").unwrap()..];
+        assert!(open.contains("ask the person **once**") && open.contains("only on their yes"), "묻지 않고 칸을 연다");
+        // 이름표는 칸 옵션이고, 보이기는 도는 서버에만 — 사람의 설정 파일은 안 고친다.
+        assert!(text.contains("tmux set-option -p -t <pane> @moai '<worker> <id>'"), "칸 이름표 줄이 없다");
+        assert!(text.contains("tmux set-option -p -u -t <pane> @moai"), "칸 이름표를 안 지운다");
+        assert!(text.contains("#{?@moai,#{@moai} ,}<the value you read>"), "테두리 꼴에 이름표를 안 붙인다");
+        assert!(!text.contains("tmux.conf") && !text.contains("source-file"), "사람의 tmux 설정 파일을 고친다");
     }
 }
