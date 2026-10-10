@@ -4676,7 +4676,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 ]));
             }
             out.push(Line::from(""));
-            // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
+            // **못 읽은 워크트리가 있으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
             // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
             let n = surfaced(app, &sum.warnings);
             if n == 0 && sum.unread == 0 {

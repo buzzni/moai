@@ -1251,7 +1251,7 @@ pub struct Workplace {
     /// **그 스냅샷을 못 읽었다** — 파일 자체의 사실이고 **자리 판정과는 상관이 없다**(moai-giz3,
     /// moai-jn4d.ewm). 자리는 스냅샷을 안 보고 가르지만, 깨진 파일은 고칠 사람이 있어야 고쳐지므로
     /// 값싸게 열어 보고(`worktree::unreadable_snapshot`) 그 사실을 세운다 —
-    /// `crate::worktree::Unread::all` 이 이것으로 센다.
+    /// `crate::worktree::stranded_at` 이 이것으로 센다.
     ///
     /// **`--json` 에 안 싣는다** — 이 값을 싣는 자리(`status --json` 의 `broken_worktrees`)가
     /// 이미 "깨진 것들" 이라, 줄마다 참을 한 번 더 적는 셈이다. 늘린 키는 되무를 수 없다.

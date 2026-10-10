@@ -988,8 +988,8 @@ pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::pat
     }
 }
 
-/// 자리 판정이 배너에 싣는 것 — 자리 없는 집은 줄의 경고 수(0 이나 1)와, 판 것 가운데 스냅샷을 못
-/// 읽은 옆 워크트리를 대는 말(moai-al0x). `moai status` 와 프로젝트 층이 싣는 그 셈이다
+/// 자리 판정이 배너에 싣는 것 — 자리 없는 집은 줄의 경고 수(0 이나 1)와, 스냅샷을 못 읽은 옆
+/// 워크트리를 대는 말(moai-al0x). `moai status` 와 프로젝트 층이 싣는 그 셈이다
 /// (`worktree::stranded_at`). 한때 여기만 안 세어, 층에서 `! 1` 을 보고 들어온 사람이 안쪽 배너에서
 /// 0 을 봤다(사용자 결정 2026-09-18 — 안쪽이 `moai status` 에 맞춘다).
 ///
@@ -1005,8 +1005,9 @@ pub fn watch(watched: &mut Vec<(std::path::PathBuf, Stamp)>, more: Vec<(std::pat
 /// (리뷰 moai-3lul.kt0), 화면이 "지금 겹쳐 보는 것" 을 말하는 쪽이 맞다.
 ///
 /// **못 읽은 옆 스냅샷은 겹치지 못했을 때만 댄다** — 겹쳤으면 `gather` 가 같은 워크트리를 `elsewhere`
-/// 에 이미 댔다(`moai status` 의 `swept` 와 같은 자). 안 대면 판정이 가려진 0 이 "없다" 로 읽히고,
-/// 층은 같은 저장소에 `!` 를 세운다(리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정 moai-rgz9.7vt).
+/// 에 이미 댔다(`moai status` 의 `swept` 와 같은 자). 자리 판정은 그 스냅샷을 안 보지만(moai-jn4d.ewm)
+/// 깨진 파일은 고칠 사람이 알아야 하고, 안 대면 층은 같은 저장소에 `!` 를 세우는데 안쪽 배너는 조용하다
+/// (리뷰 moai-3lul.kt0 다시 본 판, 사용자 결정 moai-rgz9.7vt).
 fn placed(repo: &Repo, issues: &[Issue], overlaid: bool, now: &str, lang: crate::i18n::Lang) -> (usize, Vec<String>) {
     // **자리는 세션이 선 체크아웃에서 잰다**(`repo.here()`, 리뷰 moai-71ht 셋째 판) — 지켜볼 것을
     // 재는 자(`place_marks(repo.here())`)와 같은 뿌리여야 한다. 트래커의 자리로 재던 판은 딸린
@@ -1016,7 +1017,6 @@ fn placed(repo: &Repo, issues: &[Issue], overlaid: bool, now: &str, lang: crate:
     let said = match overlaid {
         true => Vec::new(),
         false => unread
-            .all
             .iter()
             // 글은 [`crate::view::unread_worktree`] 한 자리에서 짓는다(리뷰) — `moai status` 의
             // stderr·밖 한눈 보기와 **같은 줄**이어야 한다. 갈라 적으면 말묶음을 고치는 날 여기만 남는다.

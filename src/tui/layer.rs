@@ -292,7 +292,7 @@ pub struct Summary {
     /// 그중 집었는데 일하는 워크트리가 없는 줄(moai-p3bs) — 층은 이것을 낱말로 따로 댄다.
     /// 죽은 세션을 찾으러 돌아온 사람이 보는 첫 화면이 여기다.
     pub stranded: usize,
-    /// 스냅샷을 **못 읽은** 워크트리의 수(`worktree::Unread::all`) — 층의 `!` 와 "스냅샷을 못 읽은
+    /// 스냅샷을 **못 읽은** 워크트리의 수(`worktree::stranded_at` 의 둘째 값) — 층의 `!` 와 "스냅샷을 못 읽은
     /// 워크트리 N곳" 이 이것으로 선다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). 자리 판정은 그
     /// 스냅샷을 안 보지만(moai-jn4d.ewm) 깨진 파일은 고칠 사람이 알아야 하고, 한눈 보기가 같은 것을 `옆 워크트리 문제 N건` 으로 센다 —
     /// 여기만 조용하면 두 화면이 같은 저장소를 달리 말한다.
@@ -438,7 +438,7 @@ pub fn summarize_with(repo: &Repo, load: &crate::store::Load, now: &str, install
         // 스냅샷을 통째로 파게 된다.
         notices: st.notices.len() + install,
         stranded,
-        unread: unread.all.len(),
+        unread: unread.len(),
         unreadable: load.errors.len(),
     }
 }

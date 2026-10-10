@@ -1037,13 +1037,6 @@ pub fn told_from(here: &Path, path: &Path) -> String {
     from_top(&real(here), path).display().to_string()
 }
 
-/// 스냅샷이 깨진 워크트리들(moai-giz3) — 자리를 재며 값싸게 열어 본 것이다([`workplaces`]).
-pub struct Unread {
-    /// 스냅샷을 못 읽은 워크트리 전부 — 사람 화면이 `⎇ <가지>: <경로>` 로 한 줄씩 대고
-    /// `옆 워크트리 문제 N건` 이 센다. 기계에는 `status --json` 의 `broken_worktrees` 다(moai-zah3).
-    pub all: Vec<crate::report::Workplace>,
-}
-
 /// 자리 없는 줄 경고와, 못 읽은 워크트리들 — **표면 셋이 같은 자를 쓴다**(moai-p3bs).
 ///
 /// `moai status`·`.moai` 밖 한눈 보기·탐색기의 프로젝트 층이 이것을 부른다. 한때 첫째만 자리를
@@ -1051,20 +1044,23 @@ pub struct Unread {
 /// 없었다. 경로는 [`workplaces`] 가 이미 [`main_top`] 에서 잰 것이다 — `show` 와 같은 자다.
 ///
 /// 자리는 워크트리 이름과 집은 표식으로만 잰다(moai-jn4d.ewm) — 옆 스냅샷을 안 판다. 깨진 스냅샷은
-/// 어느 자리도 가리지 않고 `Unread::all` 에 들어 말만 된다.
+/// 어느 자리도 가리지 않고 둘째 값에 들어 말만 된다.
+///
+/// 둘째 값은 **스냅샷이 깨진 워크트리 전부**다(moai-giz3) — 자리를 재며 값싸게 열어 본 것이고
+/// ([`workplaces`]), 사람 화면이 `⎇ <가지>: <경로>` 로 한 줄씩 대고 `옆 워크트리 문제 N건` 이 센다.
+/// 기계에는 `status --json` 의 `broken_worktrees` 다(moai-zah3).
 pub fn stranded_at(
     root: &Path,
     cfg: &crate::config::Config,
     issues: &[Issue],
     worktree: bool,
     now: &str,
-) -> (Option<crate::report::Warning>, Unread) {
+) -> (Option<crate::report::Warning>, Vec<crate::report::Workplace>) {
     // 재료([`crate::report::Footing`], moai-rviv)는 게을러서, 볼 워크트리가 없으면 안 짓는다.
     let footing = crate::report::Footing::of(issues, cfg);
     let trees = workplaces(root, worktree);
     let warning = crate::report::stranded_in(&footing, &trees, now);
-    let all = trees.into_iter().filter(|t| t.broken).collect();
-    (warning, Unread { all })
+    (warning, trees.into_iter().filter(|t| t.broken).collect())
 }
 
 /// 제 워크트리가 아닌 워크트리들을 **git 을 띄우지 않고** 읽는다 — 이름 후보([`away`])만 쓴다.

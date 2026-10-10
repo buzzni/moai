@@ -85,13 +85,13 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // `workplaces` 가 워크트리마다 파일을 값싸게 열어 보고 깨진 것을 세운다(moai-giz3).
     let said_already = swept;
     if !said_already {
-        for t in &unread.all {
+        for t in &unread {
             // 글은 `view` 한 자리에서 짓는다(moai-dpbi) — 밖 한눈 보기가 같은 줄을 낸다.
             eprintln!("{}", view::unread_worktree(ctx.lang(), &t.branch, &t.path));
         }
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
-    let trouble = trouble + if said_already { 0 } else { unread.all.len() };
+    let trouble = trouble + if said_already { 0 } else { unread.len() };
     // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). **CLI 한눈 보기(`.moai` 밖)도 이제
     // 싣는다**(moai-zog5, 2026-09-22 사용자 결정) — [`overview`] 가 같은 자로 더한다. 한때 그
     // 화면만 안 세어, 같은 디렉터리를 두고 보드는 알림 1건, 탐색기의 프로젝트 층은 3건을 댔다.
@@ -129,10 +129,10 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         // 곁에 서던 `unreadable_worktrees`("그래서 자리를 다 못 셌다")는 걷었다(moai-jn4d.ewm) — 자리가
         // 스냅샷을 안 보고 이름과 집은 표식으로만 갈라, 깨진 파일이 판정을 가릴 길이 없다.
         let mut extra = Vec::new();
-        if !unread.all.is_empty() {
+        if !unread.is_empty() {
             extra.push((
                 "broken_worktrees",
-                serde_json::to_string(&unread.all).map_err(|e| super::Fail::new(e.to_string()))?,
+                serde_json::to_string(&unread).map_err(|e| super::Fail::new(e.to_string()))?,
             ));
         }
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
@@ -445,7 +445,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
                 // 사람 화면은 못 읽은 것 전부를 한 줄씩 대고, `--json` 은 `broken_worktrees` 로 낸다 —
                 // 안쪽 `status` 와 같다. `trouble` 이 이미 낸 것인지는 `swept` 가 가른다.
-                unread: unread.all,
+                unread,
                 swept: p.swept,
             }
         })
