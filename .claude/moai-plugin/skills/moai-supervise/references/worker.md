@@ -11,7 +11,8 @@ The message's first line names the work and the step of this file to start from 
 `from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
 behind, `from step 2` for an epic already unfolded whose first-column members are left.
 The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`.
-A message the supervisor pasted into this window (`moai-tmux`) carries no `from`; its last line,
+A message the supervisor pasted into this window (`moai-tmux`) or sent as a Saycode prompt
+(`moai-saycode`) carries no `from`; its last line,
 `from: <name>`, names the supervisor instead. Every
 other line fills a slot the steps use; a line the supervisor adds beyond those — who already
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.

@@ -49,12 +49,13 @@ are theirs.
 Claude Code keeps one record per process under `~/.claude/sessions/`, and a process that dies
 leaves its record behind. The lines below print one row per record, tab-separated:
 
-    state  name  pane  status  cwd  sessionId
+    state  name  pane  status  cwd  sessionId  saycode
 
 ```sh
 python3 - <<'PY'
 import glob, json, os
 mine = os.environ.get("TMUX", "").split(",")[0]
+rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -68,19 +69,24 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
     except (OSError, ValueError, IndexError):
         alive = False
-    tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and pane and mine:
+    env = {}
+    if alive:
         try:
             with open(f"/proc/{pid}/environ", "rb") as f:
                 env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
         except OSError:
-            theirs = ""
-        if theirs != mine:
-            pane = ""
-    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
-    print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
+            pass
+    tmux = r.get("tmux") or ""
+    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
+        pane = ""
+    saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
+    rows.append([alive, r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode])
+panes = [row[2] for row in rows if row[0] and row[2]]
+for row in rows:
+    if row[0] and row[2] and panes.count(row[2]) > 1:
+        row[2] = ""
+    print("\t".join(["alive" if row[0] else "dead"] + [str(c or "-") for c in row[1:]]))
 PY
 ```
 

@@ -52,8 +52,14 @@ pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-recov
 ///   표식으로 심지 않는다 — 심는 것은 `--with` 와 이미 심긴 것뿐이다([`kept`])
 ///
 /// 하나를 더하는 것은 이 목록의 한 줄과 [`skills`] 의 글 한 칸이다. cmux(moai-p5sz)는 제 셸에 `CMUX_*` 여럿을 세우니
-/// `Optional { name: "moai-cmux", sign: |var| var.starts_with("CMUX_") }` 로 선다.
-pub const OPTIONAL: [Optional; 1] = [Optional { name: "moai-tmux", sign: |var| var == "TMUX" }];
+/// `Optional { name: "moai-cmux", sign: |var| var.starts_with("CMUX_") }` 로 선다. Saycode(moai-l244)는 제가 띄운 세션의
+/// 셸에 `SAYCODE_AGENT_ENV=1` 을 세운다 — 같은 머리의 `SAYCODE_AGENT_ID`·`_ROOT` 따위도 서지만, `happy agent` 가 도는지를
+/// 그 하나로 가르니(`Only works inside a session Saycode started (SAYCODE_AGENT_ENV)`) 이름째 잰다. tmux 가 먼저 선다 —
+/// 차례가 `init` 의 칸 차례고, 앞서 고른 사람들의 화면을 안 흔든다.
+pub const OPTIONAL: [Optional; 2] = [
+    Optional { name: "moai-tmux", sign: |var| var == "TMUX" },
+    Optional { name: "moai-saycode", sign: |var| var == "SAYCODE_AGENT_ENV" },
+];
 
 /// 고를 수 있는 스킬 하나 — 이름과 표식.
 pub struct Optional {
@@ -129,11 +135,12 @@ pub fn picked(all: &[Skill], optional: &[&str]) -> Vec<Skill> {
 ///
 /// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
 /// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
-pub const EVER_PLANTED: [(&str, &[&str]); 6] = [
+pub const EVER_PLANTED: [(&str, &[&str]); 7] = [
     ("moai", &["SKILL.md", "references/commands.md"]),
     ("moai-supervise", &["SKILL.md", "references/worker.md"]),
     ("moai-wiki", &["SKILL.md"]),
     ("moai-tmux", &["SKILL.md"]),
+    ("moai-saycode", &["SKILL.md"]),
     ("moai-recover", &["SKILL.md"]),
     ("moai-work", &["SKILL.md"]),
 ];
@@ -169,7 +176,7 @@ pub fn skills() -> Vec<Skill> {
     // 디렉터리 이름은 [`NAMES`]·[`OPTIONAL`] 에서 온다 — 위키가 스킬 이름을 id 에서 거르는 [`EVER_PLANTED`] 가 그 목록을
     // 다 들니(moai-mdzx.3pm, moai-six5.1xz), 여기 글자를 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
     let [main, supervisor, wiki, recover] = NAMES;
-    let [Optional { name: tmux, .. }] = OPTIONAL;
+    let [Optional { name: tmux, .. }, Optional { name: saycode, .. }] = OPTIONAL;
     vec![
         Skill {
             name: main,
@@ -196,6 +203,10 @@ pub fn skills() -> Vec<Skill> {
         // 안 쓰는 감독도 칸을 만지는 걸음을 매번 읽는다. 감독 스킬과 같은 까닭으로 Claude Code 에만 선다. 고른 사람에게만
         // 심는다([`OPTIONAL`], moai-3r7l).
         Skill { name: tmux, files: vec![("SKILL.md", crate::guide::tmux())], claude_only: true },
+        // Saycode 스킬은 감독이 Saycode 세션 안에서 돌 때만 읽는다(2026-10-10 사용자 결정, moai-l244) — tmux 스킬과 같은
+        // 까닭으로 따로 서고, Saycode 를 안 쓰는 감독은 `happy agent` 의 걸음을 읽지 않는다. 감독이 Claude Code 에만 서니
+        // 이것도 Claude Code 에만 선다. 고른 사람에게만 심는다([`OPTIONAL`]).
+        Skill { name: saycode, files: vec![("SKILL.md", crate::guide::saycode())], claude_only: true },
     ]
 }
 
@@ -1416,6 +1427,7 @@ mod tests {
             crate::guide::supervise(),
             crate::guide::wiki(),
             crate::guide::tmux(),
+            crate::guide::saycode(),
             crate::guide::recover(),
             crate::guide::worker(),
         ];
@@ -1531,7 +1543,8 @@ mod tests {
 
     const NOW: &str = "2026-01-01T00:00:00Z";
 
-    /// 심는 것은 아홉이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, tmux 스킬, 되살리기 스킬, 그리고 매니페스트 둘.
+    /// 심는 것은 열이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, tmux 스킬, Saycode 스킬, 되살리기 스킬, 그리고
+    /// 매니페스트 둘.
     #[test]
     fn the_tree_has_what_claude_needs() {
         let files = tree_of("/bin/moai", "# 스킬");
@@ -1542,6 +1555,7 @@ mod tests {
             "skills/moai-supervise/references/worker.md",
             "skills/moai-wiki/SKILL.md",
             "skills/moai-tmux/SKILL.md",
+            "skills/moai-saycode/SKILL.md",
             "skills/moai-recover/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
@@ -1567,7 +1581,9 @@ mod tests {
         let every: Vec<&str> = NAMES.into_iter().chain(optional_names()).collect();
         assert_eq!(dirs(&all), every);
         assert_eq!(dirs(&picked(&all, &[])), NAMES, "고르지 않은 선택 스킬을 심었다");
-        assert_eq!(dirs(&picked(&all, &["moai-tmux"])), every);
+        assert_eq!(dirs(&picked(&all, &["moai-tmux", "moai-saycode"])), every);
+        let tmux_only: Vec<&str> = NAMES.into_iter().chain(["moai-tmux"]).collect();
+        assert_eq!(dirs(&picked(&all, &["moai-tmux"])), tmux_only, "고르지 않은 Saycode 스킬을 심었다");
     }
 
     /// **두 목록은 겹치지 않고, 선택 스킬도 [`EVER_PLANTED`] 에 든다**(moai-3r7l) — 겹치면 늘 심는 스킬을 `--without` 으로
@@ -1592,6 +1608,14 @@ mod tests {
         assert_eq!(detected(&env(&[("TMUX", "/tmp/tmux-1000/default,1,0")])), ["moai-tmux"]);
         assert_eq!(detected(&env(&[("TMUX", "")])), Vec::<&str>::new(), "빈 $TMUX 를 tmux 로 읽었다");
         assert_eq!(detected(&env(&[("TMUX_PANE", "%1")])), Vec::<&str>::new(), "이름의 머리로 tmux 를 읽었다");
+        // Saycode 는 제가 띄운 셸에 `SAYCODE_AGENT_ENV=1` 을 세운다(moai-l244) — 같은 머리의 다른 변수로는 안 읽는다.
+        assert_eq!(detected(&env(&[("SAYCODE_AGENT_ENV", "1")])), ["moai-saycode"]);
+        assert_eq!(detected(&env(&[("SAYCODE_AGENT_ID", "x"), ("APLUS_SESSION_ID", "y")])), Vec::<&str>::new());
+        assert_eq!(
+            detected(&env(&[("SAYCODE_AGENT_ENV", "1"), ("TMUX", "/tmp/t,1,0")])),
+            ["moai-tmux", "moai-saycode"],
+            "둘이 함께 선 셸(Saycode 세션도 tmux 안에서 돈다)에서 하나만 읽었다"
+        );
         let list = [Optional { name: "moai-cmux", sign: |var| var.starts_with("CMUX_") }];
         assert_eq!(detected_in(&list, &env(&[("CMUX_SOCKET_PATH", "/tmp/s")])), ["moai-cmux"]);
         assert_eq!(detected_in(&list, &env(&[("CMUX_X", ""), ("XCMUX_Y", "1")])), Vec::<&str>::new());
@@ -1607,6 +1631,8 @@ mod tests {
         assert_eq!(kept(&none, &["moai-tmux"], &none), ["moai-tmux"]);
         assert_eq!(kept(&["moai-tmux"], &none, &["moai-tmux"]), none);
         assert_eq!(kept(&["moai-work"], &none, &none), none, "선택 스킬이 아닌 이름을 남겼다");
+        // 차례는 준 차례가 아니라 [`OPTIONAL`] 의 차례다.
+        assert_eq!(kept(&["moai-saycode"], &["moai-tmux"], &none), ["moai-tmux", "moai-saycode"]);
     }
 
     /// **고른 이름은 셋으로 거절한다**(moai-3r7l) — 늘 심는 이름, 모르는 이름, 심고 걷으라고 함께 이른 이름.
@@ -1639,7 +1665,8 @@ mod tests {
     ///
     /// **감독 스킬은 Claude 에만 선다**(2026-10-06 사용자 결정, moai-obxm) — 그 글은 Codex·Antigravity 에 없는
     /// `ListAgents`·`SendMessage` 로 말한다. 거르개를 걷으면 `.agents` 에 `moai-supervise` 가 다시 서서 붉어진다.
-    /// 감독의 tmux 손(`moai-tmux`, moai-u99i)과 되살리기(`moai-recover`, moai-uqf7)도 같은 까닭으로 Claude 에만 선다.
+    /// 감독의 tmux 손(`moai-tmux`, moai-u99i)·Saycode 손(`moai-saycode`, moai-l244)과 되살리기(`moai-recover`, moai-uqf7)도
+    /// 같은 까닭으로 Claude 에만 선다.
     #[test]
     fn the_agents_tree_carries_the_same_skills_without_a_manifest() {
         let all = fake("# 스킬", "감독", "위키");
@@ -1655,6 +1682,7 @@ mod tests {
         assert_eq!(dirs, ["moai", "moai-wiki"], "Codex·Antigravity 가 받는 스킬이 다르다 — 차례까지");
         assert!(!shared.keys().any(|p| p.starts_with("moai-supervise/")), "감독 스킬이 .agents 에 섰다");
         assert!(!shared.keys().any(|p| p.starts_with("moai-tmux/")), "tmux 스킬이 .agents 에 섰다");
+        assert!(!shared.keys().any(|p| p.starts_with("moai-saycode/")), "Saycode 스킬이 .agents 에 섰다");
         assert!(!shared.keys().any(|p| p.starts_with("moai-recover/")), "되살리기 스킬이 .agents 에 섰다");
         for (path, body) in &shared {
             assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
@@ -1662,12 +1690,14 @@ mod tests {
         let only_claude = claude
             .keys()
             .filter(|p| {
-                ["skills/moai-supervise/", "skills/moai-tmux/", "skills/moai-recover/"].iter().any(|d| p.starts_with(d))
+                ["skills/moai-supervise/", "skills/moai-tmux/", "skills/moai-saycode/", "skills/moai-recover/"]
+                    .iter()
+                    .any(|d| p.starts_with(d))
             })
             .count();
         assert_eq!(
-            only_claude, 4,
-            "감독 스킬은 SKILL.md 와 references/worker.md 둘, tmux 스킬과 되살리기 스킬은 SKILL.md 하나씩이다"
+            only_claude, 5,
+            "감독 스킬은 SKILL.md 와 references/worker.md 둘, tmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
         );
         assert_eq!(
             shared.len() + 2 + only_claude,
