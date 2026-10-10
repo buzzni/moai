@@ -75,6 +75,7 @@ The first `moai init` in a terminal asks, and `--guide` says it without asking:
     moai skill install --agent codex       Codex: the committed .agents/skills/ and .codex/hooks.json
     moai skill install --agent antigravity Antigravity: the same .agents/skills/ and .agents/hooks.json
     moai skill install --agent auto        whichever of claude, codex and agy is on PATH
+    moai skill install --with moai-tmux    plant an optional skill too (--without takes it out)
     moai skill status                      what is planted where, and what differs
 
 `--agent` names who the skills are for — `claude` (what you get when it is left
@@ -124,14 +125,17 @@ skills. The steps only one agent has — entering a worktree, asking the person,
 calling the review, changing the model, clearing the window, calling a skill,
 stopping what a review left running — sit in a "Words per agent" table in the
 `moai` skill, one column per agent, and each agent reads its own. A step an agent
-does not have reads `—`: tell the person and go on. The supervisor skill, planted
-for Claude Code only, names Claude Code's tools directly.
+does not have reads `—`: tell the person and go on. The supervisor skill, its
+tmux companion and the recovery skill, planted for Claude Code only, name Claude
+Code's tools directly.
 
-Three skills come with it:
+Four skills are always planted, and one more is yours to choose:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
     moai-wiki         keeps this wiki in step with the work
     moai-supervise    Claude Code only: hands piled-up backlog items to the idle sessions of the repository
+    moai-recover      Claude Code only: brings back the sessions of the repository that died
+    moai-tmux         optional, Claude Code only: the supervisor's hands on the workers' tmux panes
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
@@ -147,11 +151,45 @@ Three skills come with it:
   own messaging — [Hand work to idle sessions](#hand-work-to-idle-sessions).
   The worker's way of working is on
   [the workflow page](workflow.md#work-in-a-worktree)
+- **`moai-recover`** is what you call when the sessions died together — a
+  restart, an OOM kill — to bring them back where they stopped —
+  [Bring back sessions that died](#bring-back-sessions-that-died)
+- **`moai-tmux`** is what the supervisor loads when it runs inside tmux: it maps
+  a worker's `ListAgents` name to its pane and lets the supervisor label, clear
+  and paste into that pane, and open new worker panes once you say yes —
+  [In tmux](#in-tmux). It is planted only where you choose it
+
+### Optional skills
+
+An optional skill is planted only where you ask for it — today that is
+`moai-tmux`, for a person who runs the supervisor inside tmux.
+
+    moai skill install --with moai-tmux       plant it
+    moai skill install --without moai-tmux    take it out again
+    moai skill uninstall --only moai-tmux     the same, under the uninstall name
+    moai init --with moai-tmux                plant it with the rest on the first init
+
+- **Nothing writes the choice down.** A skill planted in the tree is the answer.
+  So a plain `moai skill install` refreshes the optional skills already planted
+  and plants no new one, and a first install plants none
+- **The first `moai init` in a terminal offers a row per optional skill** under
+  the hooks and skills row. A row starts checked when the skill is already
+  planted, or when your shell says you use it (`$TMUX` set, for `moai-tmux`).
+  Where nothing is asked — a script, an agent, `--yes` — only what `--with`
+  names is planted, never what the shell suggests
+- **`uninstall --only` keeps the registration.** It removes that skill's
+  directory (only while it holds nothing but moai's files) and brings Claude's
+  registration up to the new version where it already stands; where none stands
+  it changes the files and registers nothing. A tree moai has not planted
+  stays as it is — no plugin, no `.agents/skills/`, no hooks file is made
+- **A skill you left out is not drift.** The notice that the planted skills
+  differ from this moai's does not count an optional skill you did not plant
 
 ## Open a session for each agent
 
-moai never starts a session, and nothing runs headless. Open each one
-interactively in the root of the main checkout, after `moai skill install`
+The moai binary never starts a session, and nothing runs headless. Open each one
+interactively in the root of the main checkout (inside tmux the supervisor may
+open more Claude Code panes for you, once you say yes — [In tmux](#in-tmux)), after `moai skill install`
 planted that agent's skills and hooks. Each session asks its person before it
 acts, the way it always does — none is opened in a mode that skips the asking.
 
@@ -331,9 +369,10 @@ and Antigravity have no supervisor; their sessions pick their own work with
 **The review runs inside the worker's own session.** It never starts another
 agent program for it.
 
-**Clearing a window is the person's.** The context lives in the tracker, so a
-worker may be cleared (`/clear`) between tasks — its report says when that is
-safe and when it is not. The supervisor never types into a window.
+**Outside tmux, clearing a window is the person's.** The context lives in the
+tracker, so a worker may be cleared (`/clear`) between tasks — its report says
+when that is safe and when it is not. Without tmux the supervisor never types
+into a window.
 
 **What the messages do not do.** A session in a different permission mode
 keeps an incoming message for its person's approval; a subagent's message goes
@@ -379,6 +418,67 @@ with `git merge --no-ff` as they stand, never rebased or squashed.
 recommendation and leaves `Decided alone: …` on the issue instead of waiting,
 and stops at anything that cannot be undone.
 
+### In tmux
+
+When the supervisor runs inside tmux (`$TMUX` is set) and the `moai-tmux`
+skill is planted ([optional skills](#optional-skills) — `moai skill install
+--with moai-tmux`), it also loads that skill and works on the workers' panes of
+your own tmux server (moai-u99i). Without tmux, or without the skill, nothing of
+this happens.
+
+- **Which pane is which worker.** Claude Code keeps a record per process under
+  `~/.claude/sessions/`; the skill reads the live ones (the pid alive and its
+  start time matching) and pairs each `ListAgents` name with its pane `%N`.
+  Every tmux call names that pane
+- **A label on the pane.** When it sends work, it writes `<worker> <id>` into the
+  pane option `@moai`, and removes it once the report is checked. Once a round
+  it asks whether you want the labels on the pane borders; on a yes it puts
+  `#{@moai}` in front of the running server's `pane-border-format`. Your tmux
+  config file is never edited
+- **Clearing a reported worker.** After the report is checked, while the worker
+  reads idle and its input box is empty, it types `/clear` into that pane before
+  sending the next work
+- **A message that did not arrive.** When `SendMessage` fails, it pastes the
+  message into the worker's empty input box and tells you. A message held for
+  your approval is not pasted — it waits for you, and it tells you so
+- **A stalled worker.** When a worker goes idle with no report, it reads the
+  pane once and tells you what stands there — a permission prompt, a question,
+  an error. It never answers in your place
+- **No idle worker.** It asks you whether to open new worker panes; on a yes it
+  splits a pane running `claude --model <model>` in the root — an ordinary
+  interactive session you can see and type into
+
+**If anything stands in a worker's input box, or you are scrolling that pane
+(copy mode), it does not type** — it tells you.
+It never kills a pane, a session or the server, and never runs `claude -p` or a
+`--dangerously-*` flag.
+
+### Bring back sessions that died
+
+When the supervisor and its workers died together — the machine restarted, the
+container was OOM-killed — open one Claude Code session in the root and ask it
+to bring them back ("recover the sessions", "되살려"). It loads `moai-recover`
+(moai-uqf7); your asking is the yes.
+
+- **Which died.** It reads the same records under `~/.claude/sessions/` and
+  takes the dead ones standing in the root or a worktree, leaving out any that
+  is already back and older crashes you did not name. When several stand in one
+  directory it asks you once which to bring back
+- **What each was doing.** From each session's transcript under
+  `~/.claude/projects/` it reads its role (supervisor or worker), the issue it
+  held and what it was waiting for, adds the uncommitted files and the issue's
+  `Next:` note, and shows you one table
+- **What died with it.** A background subagent or command that never reported
+  back, and a `target` link whose `/tmp/cargo-target/<name>` was wiped — it
+  makes that directory again; the build output is gone, so the session rebuilds
+- **Bringing them back, workers first and the supervisor last.** Inside tmux it
+  splits a pane per session running `claude --resume <id>` and pastes a short
+  note on what happened once the input box is empty; the supervisor is told its
+  workers' names may have changed. Outside tmux it prints, per session,
+  `cd <dir> && claude --resume <id>` and the note to paste
+
+It changes nothing in the sessions' work — no commit, no build, no `moai` write.
+
 ## Work the queue from a session
 
 Every command takes `--json`. Three are enough for a session to take its next row:
@@ -392,8 +492,9 @@ Every command takes `--json`. Three are enough for a session to take its next ro
 - `moai prime` — what this session holds and what is next, short enough to load
   into a prompt
 
-moai never launches a session or runs one headless. A person opens each one, and
-the session reads these the way that person would.
+The moai binary never launches a session or runs one headless. A person opens
+each one — or, inside tmux, says yes to the supervisor opening one — and the
+session reads these the way that person would.
 
 **Name the AI that did the work** before closing an issue — one note, the
 [model line](glossary.md#model-line), one line per issue, read back as `work` in

@@ -118,6 +118,12 @@ fn names(f: Field, lang: Lang) -> (&'static str, Vec<&'static str>) {
         Field::Skill => {
             (say(lang, "init.ask_skill"), vec![say(lang, "init.ask_skill_on"), say(lang, "init.ask_skill_off")])
         }
+        // 선택 스킬 칸의 이름은 그 스킬의 이름이다(moai-3r7l.ocn) — 옮기지 않는 고유한 이름이고, 화면이 대는 그 이름을
+        // 그대로 `--with` 에 준다.
+        Field::Optional(i) => (
+            crate::skill::OPTIONAL[i].name,
+            vec![say(lang, "init.ask_optional_on"), say(lang, "init.ask_optional_off")],
+        ),
         Field::Driver => {
             (say(lang, "init.ask_driver"), vec![say(lang, "init.ask_driver_on"), say(lang, "init.ask_driver_off")])
         }

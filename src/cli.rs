@@ -919,6 +919,16 @@ Examples:
   guide block. A later run also recognizes installed moai hooks when no block
   stands. If git fails, init refuses rather than guessing commit mode.
 
+  **Optional skills** (today moai-tmux, the supervisor's hands on tmux panes)
+  get a row each under hooks · skills, shown while that row installs. The
+  screen checks one when it is already planted here, or when your shell
+  says you use it ($TMUX set for moai-tmux); Enter passes the checked ones on
+  to `moai skill install --with`, and unchecking one already planted passes
+  --without. --with <skill> (repeatable, or names with a comma) checks and
+  locks that row and turns installing on; it cannot go with --no-skill.
+  Where nothing is asked, only what --with names is planted - nothing by
+  what your shell says - and optional skills already planted are refreshed.
+
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
   directory name: dropping hyphens if that fits (moa-issue becomes moaissue),
@@ -977,6 +987,10 @@ Examples:
         /// Do not install the hooks and skills
         #[arg(long)]
         no_skill: bool,
+        // `skill install --with` 으로 그대로 건넨다(moai-3r7l.ocn) — 설치를 켜고 그 칸을 잠근다. 끄는 짝은 없다.
+        /// Plant this optional skill too (repeatable)
+        #[arg(long = "with", value_name = "skill", value_delimiter = ',', conflicts_with = "no_skill")]
+        with: Vec<String>,
         /// Then add this repository to your project list
         #[arg(long, conflicts_with = "no_register")]
         register: bool,
@@ -987,10 +1001,10 @@ Examples:
         #[arg(short = 'y', long)]
         yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes", "check"])]
         print: bool,
     },
 }
@@ -1957,8 +1971,18 @@ pub enum SkillCmd {
   naming either plants it for both. There is nothing to register: commit the
   directory and the team has it. --scope is Claude's registration only. The
   text is the one Claude gets; the steps that differ per agent are in the
-  `moai` skill's \"Words per agent\" table. The supervisor (moai-supervise) is
-  planted for Claude Code only — Codex and Antigravity get no supervisor.
+  `moai` skill's \"Words per agent\" table. The supervisor (moai-supervise),
+  its hands on tmux panes (moai-tmux) and the recovery of sessions that died
+  (moai-recover) are planted for Claude Code only — Codex and Antigravity get
+  no supervisor.
+
+  Optional skills are planted only where you choose them: today moai-tmux,
+  the supervisor's hands on tmux panes. --with <skill> plants one and
+  --without <skill> removes it; both repeat, and a comma separates names.
+  What you chose is not written down anywhere - a skill planted in the tree
+  is the answer. So a plain install refreshes the optional skills already
+  planted and plants no new one, and a first install plants none. Naming a
+  skill that is always planted, or one name in both, is refused.
 
   The hooks are each agent's own: --agent codex plants `.codex/hooks.json`,
   --agent antigravity plants `.agents/hooks.json` - commit them too. Codex
@@ -1976,9 +2000,9 @@ pub enum SkillCmd {
   holds would block every tool call of that session. The one thing deleted
   is a skill directory an earlier moai planted in the same tree and this one
   no longer plants (skills/moai-work/, and skills/moai-supervise/ in
-  .agents/skills/), and only while it holds nothing but the files moai
-  planted there; one with a file of yours in it is left, and one line names
-  it.
+  .agents/skills/), or an optional skill left out with --without, and only
+  while it holds nothing but the files moai planted there; one with a file
+  of yours in it is left, and one line names it.
 
   The version is a hash of what is installed. Same content, same version, so
   there are no empty updates.
@@ -2014,6 +2038,8 @@ pub enum SkillCmd {
   moai skill install --dry-run        only show what would be done
   moai skill install --agent codex    .agents/skills/ for Codex and Antigravity
   moai skill install --agent auto     whichever agent is on PATH
+  moai skill install --with moai-tmux     plant the tmux skill too
+  moai skill install --without moai-tmux  take it out again
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.")]
@@ -2030,6 +2056,16 @@ pub enum SkillCmd {
         /// Agent: claude (default), codex, antigravity, auto
         #[arg(long = "agent", value_name = "agent", hide_possible_values = true)]
         agents: Vec<Agent>,
+
+        // **되풀이도 쉼표도 받는다**(moai-3r7l.5ja) — `--with moai-tmux,moai-cmux` 와 `--with a --with b` 가 같다. 이름은
+        // 글로 받아 `cmd::skill::Pick::check` 가 잰다 — clap 의 값 목록으로 두면 늘 심는 이름에 "늘 심는다" 를 못 댄다.
+        /// Also plant this optional skill (repeatable)
+        #[arg(long = "with", value_name = "skill", value_delimiter = ',')]
+        with: Vec<String>,
+
+        /// Remove this optional skill (repeatable)
+        #[arg(long = "without", value_name = "skill", value_delimiter = ',')]
+        without: Vec<String>,
 
         /// Change nothing; only say what would be done
         #[arg(long)]
@@ -2085,12 +2121,28 @@ pub enum SkillCmd {
   wrote it, are printed, to run once no session holds them. Without that
   --agent, one line says when moai's skills are still there.
 
+  --only <skill> removes one optional skill and nothing else: it is
+  `moai skill install --without <skill>` under another name. That skill's
+  directory goes (only while it holds nothing but moai's files) and the
+  plugin is planted again; the registration and the other skills stay.
+  A tree moai has not planted is left alone - no file and no hooks file
+  is made there. Where this repository's moai is registered, that scope is
+  brought up to the new version; where it is registered nowhere, only the
+  files change - no registration is made. A skill that is always planted
+  is refused.
+
   moai skill uninstall --dry-run      only show what would be called
-  moai skill uninstall --agent codex  name what to delete in .agents/skills/")]
+  moai skill uninstall --agent codex  name what to delete in .agents/skills/
+  moai skill uninstall --only moai-tmux   take the tmux skill out")]
     Uninstall {
         /// Agent: claude (default), codex, antigravity, auto
         #[arg(long = "agent", value_name = "agent", hide_possible_values = true)]
         agents: Vec<Agent>,
+
+        // `install --without` 의 다른 이름이다(moai-3r7l.xr1) — 되풀이와 쉼표도 같다.
+        /// Remove only this optional skill (repeatable)
+        #[arg(long = "only", value_name = "skill", value_delimiter = ',')]
+        only: Vec<String>,
 
         /// Call nothing; only say what would be called
         #[arg(long)]
