@@ -273,6 +273,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         Mode::Backlog(form) => jot(f, form, body, true, tint, lang),
         Mode::Pick(p) => pick(f, p, body, lang),
         Mode::Zone(z) => zone_pick(f, z, body, lang),
+        Mode::Sort(e) => sort_edit(f, e, body, lang),
         Mode::Stats(w) => stats_window(f, w, body, lang),
         Mode::Wiki(w) => wiki_at = Some(wiki_window(f, w, body, raw, share, lang)),
         Mode::Ask(ask) => {
@@ -383,6 +384,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
+        Mode::Sort(_) => sort_keys(f, keys, app.site.lang),
         Mode::Stats(w) => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => stats_keys(f, w, keys, app.site.lang),
@@ -508,6 +510,71 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
         &mut state,
     );
     scroll_mark(f, &p.list, at, "", true, lang);
+}
+
+/// 차례 목록을 뱃지의 한 토막으로 — `priority↑, updated↓`(moai-r170). **필드마다 방향 글리프를 단다** — 한쪽에만
+/// 달면 맨 낱말이 "제 방향" 인지 "오름" 인지 읽는 사람이 필드마다 외워야 한다(생성·수정은 제 방향이 내림이다).
+/// 방향을 지는 것이 글리프라 색이 혼자 뜻을 지지 않는다. 낱말까지 대는 편집 창(`SPC s e`)과 달리 머리줄은 좁아
+/// 글리프로만 적는다. 옛 뱃지의 ` 거꾸로` 는 걷었다 — 뒤집기는 이제 필드의 방향이다.
+pub(super) fn sort_words(s: &super::keys::Sorting, lang: Lang) -> String {
+    let one = |o: &super::keys::Ordered| format!("{}{}", o.by.word(lang), if o.down { "↓" } else { "↑" });
+    s.fields().iter().map(one).collect::<Vec<_>>().join(", ")
+}
+
+/// 차례 편집 창(`SPC s e`, moai-r170.x22) — 필드 여섯이 늘 다 선다. 차례에 든 것은 번호와 방향을 **글리프와 낱말로**
+/// (`1  우선순위  ↑ 오름`), 안 든 것은 `·` 로 선다 — 색이 혼자 뜻을 지지 않는다. 목록·상세 자리를 통째로 덮는다
+/// ([`zone_pick`] 과 같은 까닭: 뒤 칸의 커서가 비치면 어느 `>` 가 이 창의 것인지 안 읽힌다).
+fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
+    f.render_widget(Clear, at);
+    let rows = e.rows();
+    let wide = rows.iter().map(|r| crate::text::width(r.by.word(lang))).max().unwrap_or(0);
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|r| {
+            let word = r.by.word(lang);
+            let pad = " ".repeat(wide.saturating_sub(crate::text::width(word)));
+            ListItem::new(Line::from(match r.at {
+                Some((n, o)) => {
+                    let (glyph, dir) = if o.down {
+                        ("↓", say(lang, "tui.sorter.desc"))
+                    } else {
+                        ("↑", say(lang, "tui.sorter.asc"))
+                    };
+                    vec![Span::raw(format!("{:>2}  {word}{pad}  {glyph} {dir}", n + 1))]
+                }
+                None => vec![Span::styled(format!(" ·  {word}"), dim())],
+            }))
+        })
+        .collect();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(from_anstyle(style::FOCUS))
+        .title(format!(" {} ", say(lang, "tui.sorter.title")))
+        .title_bottom(Line::from(Span::styled(
+            clip(&format!(" {} ", say(lang, "tui.sorter.note")), at.width.saturating_sub(2) as usize),
+            dim(),
+        )));
+    let mut state = ListState::default().with_selected(Some(e.cursor));
+    f.render_stateful_widget(
+        List::new(items)
+            .block(block)
+            .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(CURSOR)
+            .highlight_spacing(HighlightSpacing::Always),
+        at,
+        &mut state,
+    );
+}
+
+/// 차례 편집 창의 키 바 — 키 이름은 표([`super::keys::SORTER`])에서 읽는다. 좁으면 걷기·옮기기부터 뺀다 — 입히고
+/// 그만두는 길이 끝까지 선다.
+fn sort_keys(f: &mut Frame, at: Rect, lang: Lang) {
+    use super::keys::{SORTER, Sorter};
+    let hint = |a: Sorter| key(&label(SORTER, a), a.what(lang));
+    let pair = |a: Sorter, b: Sorter| key(&labels(SORTER, &[a, b]), a.what(lang));
+    let optional = vec![pair(Sorter::Down, Sorter::Up), pair(Sorter::Lower, Sorter::Raise), hint(Sorter::Flip)];
+    bar(f, at, optional, vec![hint(Sorter::Toggle), hint(Sorter::Apply), hint(Sorter::Default), hint(Sorter::Close)]);
 }
 
 /// 시간대 고르는 창(moai-3oz2) — 이름 목록과, 지금 쓰는 것에 붙는 낱말.
@@ -2295,10 +2362,8 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
-    let sorted = (app.order != Default::default()).then(|| {
-        fill(say(app.site.lang, "tui.badge.sorted"), &[("by", app.order.by.word(app.site.lang))])
-            + if app.order.reversed { say(app.site.lang, "tui.badge.reversed") } else { "" }
-    });
+    let sorted = (app.order != Default::default())
+        .then(|| fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.order, app.site.lang))]));
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
     let hidden = app.view.badge(&app.screen_statuses(), app.aged(), app.site.lang);
@@ -4611,7 +4676,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 ]));
             }
             out.push(Line::from(""));
-            // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
+            // **못 읽은 워크트리가 있으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
             // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
             let n = surfaced(app, &sum.warnings);
             if n == 0 && sum.unread == 0 {
@@ -4636,22 +4701,13 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 out.extend(wrapped(&said, w, from_anstyle(style::WARN)));
             }
             // **못 읽은 워크트리도 댄다**(리뷰 moai-p3bs.op2) — 안 대면 층이 "드러난 문제 없다" 로
-            // 깨진 스냅샷을 덮고, 그 파일은 고칠 사람이 영영 모른다. **두 사실을 한 줄에 가른다**
-            // (사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) — 판 것 가운데 못 읽은 것은 다 대고
-            // (`unread`, 한눈 보기의 `옆 워크트리 문제 N건` 과 같은 수), "그래서 자리를 다 못 셌다"
-            // 는 판정을 가린 것이 있을 때만 붙인다(`blind`). 가린 것이 없으면 위의 `stranded` 는
-            // "센 결과" 라 그대로 믿어도 된다.
+            // 깨진 스냅샷을 덮고, 그 파일은 고칠 사람이 영영 모른다. 수는 한눈 보기의 `옆 워크트리 문제
+            // N건` 과 같다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt).
             //
-            // **꼬리말을 못 읽은 총수에 붙이지 않는다** — 셋이 깨졌는데 하나만 판정을 가렸으면
-            // "3곳 — 자리를 다 못 셌다" 는 셋 다 가린 것으로 읽힌다. 가린 수가 총수보다 적으면
-            // 그 수를 대고, 같을 때만 "다" 라고 한다.
+            // **"자리를 다 못 셌다" 는 안 붙인다**(moai-bl4d) — 자리 판정이 이름과 집은 표식으로만 가르게 된
+            // 뒤로(moai-jn4d.ewm) 깨진 스냅샷이 가릴 자리가 없다. 위의 `stranded` 는 언제나 센 결과다.
             if sum.unread > 0 {
-                let why = match sum.blind {
-                    0 => String::new(),
-                    n if n == sum.unread => say(lang, "tui.place.blind_all").to_string(),
-                    n => fill(say(lang, "tui.place.blind_some"), &[("n", &n.to_string())]),
-                };
-                let said = fill(say(lang, "tui.place.unread"), &[("n", &sum.unread.to_string()), ("why", &why)]);
+                let said = fill(say(lang, "tui.place.unread"), &[("n", &sum.unread.to_string())]);
                 out.extend(wrapped(&said, w, from_anstyle(style::WARN)));
             }
             if sum.unreadable > 0 {
@@ -6323,7 +6379,7 @@ pub(super) mod tests {
                             &[crate::worktree::Side::new("worktree-argos-0005", "/wt/argos-0005", vec![])],
                         );
                         a.adopt(shown);
-                        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+                        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
                     }
                     _ => {}
                 }
@@ -6622,7 +6678,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("worktree-argos-0004", "/wt/argos-0004", vec![])],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         let seen = |a: &mut App| render(a, 120, 12).join("\n");
         // 가지 없는 줄에는 안 붙는다 — 뿌리의 에픽 줄로 본다.
         let root = seen(&mut a);
@@ -6690,7 +6746,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("feat/x", "/wt/feat-x", theirs)],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
 
         // 에픽 안으로 들어가 멤버에 선다 — 상세가 그 멤버의 에픽·마일스톤 줄을 낸다.
         // 마일스톤 → 에픽 → 멤버. 상세는 그 멤버의 에픽·마일스톤 줄을 낸다.
@@ -6742,7 +6798,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("worktree-moai-hela2", "/wt/hela2", theirs)],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         a.hit("j Enter j");
 
         let label = crate::i18n::say(crate::i18n::Lang::Ko, "tui.about.epic");
@@ -6785,7 +6841,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("worktree-argos-0004", "/wt/argos-0004", vec![])],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         a.hit("Enter");
         let text = render(&mut a, 120, 12).join("\n");
         let row = text.lines().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("줄이 없다\n{text}"));
@@ -9004,7 +9060,6 @@ pub(super) mod tests {
                 notices: 0,
                 stranded: 0,
                 unread: 0,
-                blind: 0,
                 unreadable: 0,
             },
         };
@@ -9267,59 +9322,39 @@ pub(super) mod tests {
         lines.iter().filter_map(|l| detail_pane(l)).map(str::trim).collect::<Vec<_>>().join(" ")
     }
 
-    /// **층은 자리 없는 줄과 못 읽은 워크트리를 낱말로 댄다**(moai-p3bs) — 그리고 못 셌으면 "문제
+    /// **층은 자리 없는 줄과 못 읽은 워크트리를 낱말로 댄다**(moai-p3bs) — 그리고 깨진 스냅샷이 있으면 "문제
     /// 없다" 를 안 세운다. 아래에 `!` 가 서는데 위에서 ✓ 를 대면 덩어리가 제 말을 뒤집고, 줄의
     /// `!` 가 조용하면 한눈 보기(`옆 워크트리 문제 N건`)와 같은 저장소를 달리 말한다.
     ///
-    /// **깨진 스냅샷과 "다 못 셌다" 는 다른 말이다**(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) —
-    /// 못 읽은 것은 판정을 가렸든 아니든 언제나 대고(`unread`), 꼬리말은 가린 것이 있을 때만 붙는다
-    /// (`blind`). 한때 층만 `blind` 로 둘 다 재, 이름이 집은 줄을 가리키는 깨진 워크트리 하나가
-    /// 한눈 보기에서는 `옆 워크트리 문제 1건` 인데 층에서는 "드러난 문제 없다" 로 섰다.
+    /// **"자리를 다 못 셌다" 는 안 붙는다**(moai-bl4d) — 자리 판정이 스냅샷을 안 보게 된 뒤로
+    /// (moai-jn4d.ewm) 깨진 스냅샷이 가릴 자리가 없어, 그 꼬리말은 거짓이 됐다. 못 읽은 것은 수만 댄다.
     #[test]
     fn the_layer_names_stranded_work_and_never_calls_an_uncounted_repo_clean() {
         use super::super::layer::{At, Look};
         let mut a = layered(At::Layer);
-        let set = |a: &mut App, warnings: usize, stranded: usize, unread: usize, blind: usize| {
+        let set = |a: &mut App, warnings: usize, stranded: usize, unread: usize| {
             let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else {
                 panic!("one 이 안 열렸다")
             };
-            (sum.warnings, sum.stranded, sum.unread, sum.blind) = (Surfaced::flat(warnings), stranded, unread, blind);
+            (sum.warnings, sum.stranded, sum.unread) = (Surfaced::flat(warnings), stranded, unread);
         };
 
-        set(&mut a, 1, 1, 0, 0);
+        set(&mut a, 1, 1, 0);
         let lines = render(&mut a, 80, 22);
         let pane = about_text(&lines);
         assert!(pane.contains("워크트리가 없는 것 1건"), "80칸에서 수가 잘렸다\n{}", lines.join("\n"));
 
-        set(&mut a, 0, 0, 1, 1);
-        let lines = render(&mut a, 80, 22);
-        let screen = lines.join("\n");
-        assert!(about_text(&lines).contains("워크트리 1곳 — 자리를 다 못 셌다"), "80칸에서 수가 잘렸다\n{screen}");
-        assert!(!screen.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{screen}");
-        let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
-        assert!(row.contains(" !"), "못 읽은 워크트리가 있는데 줄이 조용하다 — {row:?}");
-
-        // **판정을 안 가려도 깨진 것은 댄다** — 꼬리말만 빠진다. 여기가 조용하면 한눈 보기가
-        // `옆 워크트리 문제 1건` 이라고 하는 저장소를 층은 "문제 없다" 로 낸다.
-        set(&mut a, 0, 0, 1, 0);
+        // **깨진 것은 댄다** — 여기가 조용하면 한눈 보기가 `옆 워크트리 문제 1건` 이라고 하는 저장소를
+        // 층은 "문제 없다" 로 낸다.
+        set(&mut a, 0, 0, 2);
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
         let pane = about_text(&lines);
-        assert!(
-            pane.contains("워크트리 1곳") && !pane.contains("다 못 셌다"),
-            "안 가린 것에 꼬리말이 붙었다\n{screen}"
-        );
+        assert!(pane.contains("워크트리 2곳"), "80칸에서 수가 잘렸다\n{screen}");
+        assert!(!pane.contains("못 셌다"), "자리를 가리지 않는 깨진 스냅샷에 꼬리말이 붙었다\n{screen}");
         assert!(!screen.contains("드러난 문제 없다"), "깨진 스냅샷을 두고 문제 없다고 했다\n{screen}");
         let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
         assert!(row.contains(" !"), "깨진 스냅샷이 있는데 줄이 조용하다 — {row:?}");
-
-        // **섞여 있으면 가린 수를 댄다** — 꼬리말이 총수에 붙으면 둘 중 하나만 가렸는데 둘 다
-        // 가린 것으로 읽힌다. "다" 는 못 읽은 것이 모두 가렸을 때만 쓴다.
-        set(&mut a, 0, 0, 2, 1);
-        let lines = render(&mut a, 80, 22);
-        let screen = lines.join("\n");
-        let pane = about_text(&lines);
-        assert!(pane.contains("워크트리 2곳 — 그중 1곳이 자리를 가려"), "가린 수를 안 댔다\n{screen}");
     }
 
     /// **층은 알림을 수로만 대고, 그것으로 "문제 있다" 고 하지 않는다**(moai-prdh, 2026-09-22
@@ -9338,7 +9373,7 @@ pub(super) mod tests {
                 panic!("one 이 안 열렸다")
             };
             // 알림만 선 저장소다 — 경고도 못 읽은 워크트리도 없다.
-            (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (Surfaced::flat(0), 0, 0, 0, notices);
+            (sum.warnings, sum.unread, sum.unreadable, sum.notices) = (Surfaced::flat(0), 0, 0, notices);
         };
 
         set(&mut a, 3);
@@ -10832,7 +10867,7 @@ pub(super) mod tests {
             render(a, w, 12).into_iter().find(|l| l.contains("숨김") || l.contains("정렬")).unwrap_or_default()
         };
         let wide = badge(&mut a, 120);
-        assert!(wide.contains("[done 숨김 · 정렬 수정 거꾸로]"), "{wide:?}");
+        assert!(wide.contains("[done 숨김 · 정렬 수정↑]"), "{wide:?}");
         let narrow = badge(&mut a, 30);
         assert!(
             narrow.contains("[done 숨김]") && !narrow.contains("정렬"),
@@ -10982,7 +11017,6 @@ pub(super) mod tests {
                 notices: 0,
                 stranded: 0,
                 unread: 0,
-                blind: 0,
                 unreadable: 0,
             },
         };

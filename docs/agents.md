@@ -346,11 +346,15 @@ supervisor looks for before any new backlog, and it reads it from the tracker,
 not from `ListAgents`. The `stranded` warnings in `moai status --json` name rows
 picked up while no live worktree holds them (a row picked up less than an hour
 ago does not show), and the `Place` line of `moai show <id>` says where each one
-stands. Only Place `none` is handed on to an idle worker; a path, `not showing
-yet` and `unknown` are left alone. `stranded` cannot tell a gone worktree from
+stands. Only Place `none` is handed on to an idle worker; a path and `not
+showing yet` are left alone. A place is read from the worktree's name and the
+pick-up mark `moai mv` leaves where it was typed — never from a sibling's
+snapshot — so a row picked up in the root and carried into a worktree whose
+name is not its id shows `none`. `stranded` cannot tell a gone worktree from
 work done in the root with no worktree, so while a `busy` session of the
 repository stands in `ListAgents` the supervisor asks what it holds before
-handing the row on. A worktree that is still there never shows under `stranded`:
+handing the row on. A worktree that is still there and whose name or mark points
+at the row never shows under `stranded`:
 its session has not ended because it reads idle — its person may be answering
 it — nor because its name is gone, since a worker restarted with
 `claude --resume` comes back under a new session name. In both cases the

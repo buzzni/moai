@@ -196,6 +196,15 @@ pub fn remember_invoked() {
     let _ = INVOKED.set(std::env::current_dir().ok());
 }
 
+/// [`remember_invoked`] 가 적어 둔 자리 **그대로** — `main` 을 안 지난 부름(단위 시험)에서는 없다.
+///
+/// "명령을 친 체크아웃이 어디인가" 를 묻는 자리가 이것을 읽는다 — 집은 표식([`Repo::note_held`])과 겹쳐 보기가
+/// 제 워크트리를 옆에서 빼는 자리(`worktree::callers`). 지금 자리로 물러서지 않는다: 시험의 현재 디렉터리는
+/// 이 저장소의 체크아웃이라, 물러서면 시험이 만든 적 없는 워크트리가 "친 자리" 로 선다.
+pub(crate) fn invoked_checkout() -> Option<PathBuf> {
+    INVOKED.get().cloned().flatten()
+}
+
 /// [`remember_invoked`] 가 적어 둔 자리 — `-C` 가 옮기기 **전의** 현재 디렉터리다(리뷰 moai-gu5m.ke0).
 ///
 /// 상대 철자로 부른 실행 파일(`argv[0]`)은 커널이 이 자리에서 찾았다. 그 철자를 되짚는 쪽(`cmd::skill` 의
@@ -766,7 +775,7 @@ impl Repo {
             return;
         }
         // 친 자리를 모르는 길(`main` 을 안 지나는 시험)은 트래커를 찾은 자리로 가늠한다.
-        let at = INVOKED.get().cloned().flatten().or_else(|| self.moved_from.clone());
+        let at = invoked_checkout().or_else(|| self.moved_from.clone());
         crate::worktree::note_held(&self.root, at.as_deref(), &claimed, &released);
     }
 

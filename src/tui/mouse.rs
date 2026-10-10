@@ -1139,7 +1139,11 @@ mod tests {
             said.contains("list_height") && said.contains(crate::i18n::say(a.site.lang, "look.want_number")),
             "{said}"
         );
-        assert_eq!(a.order.by, super::super::keys::Order::Title, "틀린 키 하나로 나머지를 버렸다");
+        assert_eq!(
+            a.order,
+            super::super::keys::Sorting::by(super::super::keys::Order::Title),
+            "틀린 키 하나로 나머지를 버렸다"
+        );
         a.hit("SPC v l Esc");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(
