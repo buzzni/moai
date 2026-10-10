@@ -3369,8 +3369,15 @@ impl App {
     /// 차례는 기본(`[tui] order`)이다. **그 프로젝트를 가리키는 열쇠가 이미 있으면 그 철자를 쓴다** — 손으로 적은
     /// 링크 철자를 두고 푼 경로로 새 표를 세우면 한 디렉터리의 차례가 두 벌 선다. 없으면 등록 목록과 같은 자로
     /// 푼 경로다(`user_config::resolve_dir` 가 `canonicalize` 로 적는다).
+    ///
+    /// **자리는 트래커의 뿌리(`Repo::root`)다 — 선 체크아웃(`Repo::here`)이 아니다**(리뷰 moai-r170.9ou). 등록 목록
+    /// (`[[project]]`)이 이름 대는 것이 그 뿌리이고, 딸린 워크트리는 그 뿌리의 트래커를 쓰니 같은 프로젝트다. 체크아웃
+    /// 으로 묶으면 워크트리마다 표가 하나씩 쌓여 `git worktree remove` 뒤에도 남고, 뿌리에 적어 둔 차례를 워크트리 안에서
+    /// 못 본다. 층에 선 프로젝트도 들어간 뒤에는 `repo` 가 그 프로젝트의 것이라 같은 자로 잰다 — 들어가기 전(`repo` 가
+    /// 없을 때)만 층 줄의 경로다.
     fn order_home(&self) -> Option<String> {
         let here = self.here()?;
+        let here = self.site.repo.as_ref().map_or(here, |r| r.root.clone());
         let spelled = |k: &&String| std::path::Path::new(k.as_str()) == here;
         if let Some(k) = self.order_projects.keys().find(spelled) {
             return Some(k.clone());
@@ -3406,7 +3413,11 @@ impl App {
             sorter::Done::Cancel => self.mode = Mode::Browse,
             sorter::Done::Apply(s) => {
                 self.mode = Mode::Browse;
-                self.set_order(s, false);
+                // **안 고친 Enter 는 안 적는다**(리뷰 moai-r170.9ou) — 제 차례가 없는 프로젝트에서 창을 열고 닫기만 해도
+                // 기본과 같은 표가 박혀, 그 프로젝트가 다음 기본을 안 따르게 묶인다. 고친 것만 지금 자리에 적는다.
+                if s != self.order {
+                    self.set_order(s, false);
+                }
             }
             sorter::Done::Default(s) => {
                 self.mode = Mode::Browse;
@@ -11962,6 +11973,61 @@ mod tests {
                 && text.contains("sort = \"assignee\"")
                 && text.contains("[tui.project.\"/x\"]\norder = [\"assignee:desc\"]"),
             "{text}"
+        );
+    }
+
+    /// **창을 열고 안 고친 채 Enter 하면 아무것도 안 적는다**(리뷰 moai-r170.9ou). 제 차례가 없는 프로젝트에 기본과 같은
+    /// 표가 박히면 그 프로젝트가 다음 기본을 안 따르게 묶인다. 고친 Enter 는 여전히 그 프로젝트의 표에 적는다.
+    #[test]
+    fn an_untouched_enter_in_the_sort_window_writes_nothing() {
+        use keys::{Order, Sorting};
+        let s = scratch("sort-window-untouched");
+        let user = s.join("user.toml");
+        std::fs::write(&user, "[tui]\norder = [\"title\"]\n").unwrap();
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.user_config = Some(user.clone());
+        a.load_look();
+        let mut a =
+            a.with_layer(layer::fake(vec![("argos", "/x", layer::Look::Unread)], layer::At::Project("/x".into())));
+        a.hit("SPC s e Enter");
+        assert_eq!(a.mode, Mode::Browse);
+        assert!(a.order_projects.is_empty(), "안 고친 Enter 가 프로젝트의 차례를 세웠다 — {:?}", a.order_projects);
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(!text.contains("[tui.project"), "안 고친 Enter 가 표를 박았다\n{text}");
+        // 기본이 바뀌면 그 프로젝트가 따라간다 — 박혔으면 옛 기본에 묶여 있다.
+        a.hit("SPC s e d D");
+        assert_eq!(a.order, Sorting::of(&[keys::Ordered::of(Order::Title).flipped()]).unwrap());
+        // 고친 Enter 는 그 프로젝트의 표에 적는다.
+        a.hit("SPC s e d Enter");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(text.contains("[tui.project.\"/x\"]\norder = [\"title\"]"), "{text}");
+    }
+
+    /// **프로젝트마다의 차례는 트래커의 뿌리로 묶는다 — 선 체크아웃이 아니다**(리뷰 moai-r170.9ou). 딸린 워크트리에서
+    /// 띄우면 `App::here()` 는 그 워크트리고 `repo.root` 는 뿌리다. 체크아웃으로 묶던 판은 워크트리마다 표를 세워
+    /// `git worktree remove` 뒤에도 남기고, 뿌리에 적어 둔 차례를 워크트리 안에서 못 봤다.
+    #[test]
+    fn the_project_order_is_keyed_by_the_tracker_root_not_the_checkout() {
+        use keys::{Order, Sorting};
+        let s = scratch("sort-worktree");
+        let user = s.join("user.toml");
+        let (root, worktree) = (s.join("proj"), s.join("proj/.worktrees/moai-x"));
+        std::fs::create_dir_all(&worktree).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+        let worktree = std::fs::canonicalize(&worktree).unwrap();
+        std::fs::write(&user, format!("[tui.project.\"{}\"]\norder = [\"title\"]\n", root.display())).unwrap();
+        let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
+        a.site.repo = Some(crate::store::Repo::moved(root.clone(), cfg(), worktree.clone()));
+        assert_eq!(a.here().as_deref(), Some(worktree.as_path()), "시험의 전제 — 선 자리와 뿌리가 갈렸다");
+        a.user_config = Some(user.clone());
+        a.load_look();
+        assert_eq!(a.order, Sorting::by(Order::Title), "워크트리 안에서 뿌리의 차례를 못 봤다");
+        a.hit("SPC s c Esc");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(
+            text.contains(&format!("[tui.project.\"{}\"]\norder = [\"created\"]", root.display()))
+                && !text.contains(".worktrees"),
+            "뿌리가 아닌 자리에 적었다\n{text}"
         );
     }
 

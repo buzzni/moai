@@ -25,8 +25,9 @@ does not tag — see `CONTRIBUTING.md`.
   with the words that are allowed. (moai-r170.9es)
 - **The explorer keeps its sort per project, as a list of fields** — a sort
   picked inside a project is written for that project alone, as
-  `order = [...]` under `[tui.project."<project path>"]` in the user config,
-  and one picked in the all-projects list (`0`) is written as `order` under
+  `order = [...]` under `[tui.project."<project root>"]` in the user config —
+  the root the project's tracker lives in, so a linked worktree shares its
+  project's sort — and one picked in the all-projects list (`0`) is written as `order` under
   `[tui]`, the default for every project without its own. Entering a project
   puts its own sort back; one sort no longer follows you from project to
   project. `order` takes the words of `moai show --sort` (`"updated:asc"`)

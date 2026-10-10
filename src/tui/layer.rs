@@ -1202,9 +1202,6 @@ impl App {
                     layer.at = At::Project(path);
                 }
                 self.worktree = overlay;
-                // **차례는 그 프로젝트의 것으로 선다**(moai-r170.8dz, 2026-10-09 사용자 결정) — 제 차례가 없으면 기본이다.
-                // 선 자리(`layer.at`)가 바로 위에서 바뀌었으니 그 뒤다. 들이기(`apply_fresh`)가 줄을 세우기 전이다.
-                self.rescope_order();
                 // 누군지도 **그 프로젝트의 뿌리에서** 다시 푼다(moai-j038.vna) — 헤더(`told_user`)가 뿌리마다
                 // 다시 푸는 것과 같은 까닭이다(moai-d3sy): 프로젝트마다 git 설정이 다를 수 있고, 안 풀면 [NEW]
                 // 가 띄운 자리의 사람으로 서서 `moai -C <그 프로젝트> read --all` 과 다른 줄을 센다. 안 읽음은
@@ -1212,6 +1209,10 @@ impl App {
                 self.site.me = self.whoami(&repo.root);
                 self.site.cfg = repo.config.clone();
                 self.site.repo = Some(repo);
+                // **차례는 그 프로젝트의 것으로 선다**(moai-r170.8dz, 2026-10-09 사용자 결정) — 제 차례가 없으면 기본이다.
+                // 선 자리(`layer.at`)와 `repo` 가 다 바뀐 뒤다 — 차례의 열쇠는 그 `repo` 의 뿌리라([`App::order_home`],
+                // 리뷰 moai-r170.9ou) 앞에 두면 들어가는 줄의 경로로 잰다. 들이기(`apply_fresh`)가 줄을 세우기 전이다.
+                self.rescope_order();
                 // **그 줄이 이미 들고 있던 읽음을 베껴 든다**(moai-2gep) — 펼쳐 본 프로젝트는 제 표를
                 // 들고 선다. 아래의 `load_read` 가 그 파일을 못 읽으면(옛 `sudo moai read` 가 남긴
                 // root 의 파일) 들일 것이 없어 내게 온 줄이 모두 [NEW] 로 서고, 그 화면의 `SPC m a`
