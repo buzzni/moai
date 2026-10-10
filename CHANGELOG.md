@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-10
+
 ### Added
 
 - **A fourth Claude Code skill, `moai-tmux`, planted only where you choose it.**
