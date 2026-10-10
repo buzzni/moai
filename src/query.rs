@@ -1371,7 +1371,6 @@ impl SortKey {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "moai-r170.9es 가 --sort 에 잇는다"))]
     pub fn named(word: &str) -> Option<SortKey> {
         SortKey::ALL.into_iter().find(|k| k.name() == word)
     }
@@ -1449,7 +1448,6 @@ impl Default for Sort {
 
 /// 차례 글을 못 읽은 까닭. 글은 clap 이 `--sort` 의 오류로 그대로 싣는다.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(not(test), expect(dead_code, reason = "moai-r170.9es 가 --sort 에 잇는다"))]
 pub enum BadSort {
     /// 빈 칸 — 빈 글이나 `priority,,id`.
     Empty,
@@ -1479,7 +1477,6 @@ impl std::fmt::Display for BadSort {
 /// **한 필드가 두 번 서면 거절한다** — 앞의 것만 살리는 길도 있지만, 뒤의 것은 아무 차례도 못 가르므로
 /// (앞 필드가 같으면 뒤도 같다) `priority,priority:desc` 는 사람이 방향을 둘 중 어느 쪽으로 믿었는지 모르는 글이다.
 /// 말없이 하나를 버리면 그 사람은 제가 고른 방향이 안 선 까닭을 못 찾는다. 거절해도 잃는 차례가 없다.
-#[cfg_attr(not(test), expect(dead_code, reason = "moai-r170.9es 가 --sort 에 잇는다"))]
 pub fn parse_order(raw: &str) -> Result<Vec<Field>, BadSort> {
     let mut fields: Vec<Field> = Vec::new();
     for part in raw.split(',').map(str::trim) {

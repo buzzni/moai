@@ -168,20 +168,11 @@ pub(crate) fn filter_of(
     Ok(filter)
 }
 
-/// argv 의 낱말을 `query` 의 차례로 잇는다 — `query` 는 clap 을 모른다(`tui::App::sort_key` 와 같은 자리).
+/// argv 의 차례를 `query` 의 차례로 잇는다 — 필드 목록은 clap 이 이미 읽었다(`cli::SortFields`). 안 준
+/// `--sort` 는 기본 차례(우선순위)다.
 fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
-    use crate::cli::SortArg;
-    use crate::query::SortKey;
-    let key = match p.sort {
-        None | Some(SortArg::Priority) => SortKey::Priority,
-        Some(SortArg::Created) => SortKey::Created,
-        Some(SortArg::Updated) => SortKey::Updated,
-        Some(SortArg::Status) => SortKey::Status,
-        Some(SortArg::Assignee) => SortKey::Assignee,
-        Some(SortArg::Title) => SortKey::Title,
-        Some(SortArg::Id) => SortKey::Id,
-    };
-    crate::query::Sort { reversed: p.reverse, ..crate::query::Sort::by(key) }
+    let fields = p.sort.as_ref().map_or_else(|| crate::query::Sort::default().fields, |f| f.0.clone());
+    crate::query::Sort { fields, reversed: p.reverse }
 }
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
@@ -1029,28 +1020,31 @@ mod tests {
     }
 
     /// **`--sort` 의 낱말은 탐색기가 설정에 적는 이름과 같고 같은 차례를 가리킨다**(moai-efoc 리뷰) —
-    /// [`crate::cli::SortArg`] 가 적어 둔 약속을 여기서 맨다. 한쪽만 이름이나 잇는 곳을 바꾸면 한 낱말이 두
-    /// 표면에서 다른 차례를 가리키는데, 그때 붉어질 시험이 없었다.
+    /// [`crate::cli::SortFields`] 가 적어 둔 약속을 여기서 맨다. 한쪽만 이름이나 잇는 곳을 바꾸면 한 낱말이 두
+    /// 표면에서 다른 차례를 가리키는데, 그때 붉어질 시험이 없었다. argv 를 실제로 지나 clap 이 읽은 것을 본다.
     #[test]
     fn every_explorer_order_is_the_same_sort_word() {
         use crate::tui::keys::Order;
-        use clap::ValueEnum;
+        use clap::Parser;
+        let read = |word: &str| -> crate::query::Sort {
+            let cli = crate::cli::Cli::try_parse_from(["moai", "show", "--sort", word])
+                .unwrap_or_else(|e| panic!("`--sort {word}` 를 못 읽었다 — {e}"));
+            match cli.cmd {
+                Some(crate::cli::Cmd::Show(args)) => sort_of(&args.page),
+                other => panic!("show 가 아니다 — {other:?}"),
+            }
+        };
         for o in Order::ALL {
-            let arg = crate::cli::SortArg::from_str(o.name(), false)
-                .unwrap_or_else(|_| panic!("탐색기의 `{}` 가 `--sort` 에 없다", o.name()));
-            let page = crate::cli::PageArgs { sort: Some(arg), ..Default::default() };
             assert_eq!(
-                sort_of(&page).fields,
+                read(o.name()).fields,
                 [crate::query::Field::of(crate::tui::App::sort_key(o))],
                 "`{}` 가 두 표면에서 다른 차례다",
                 o.name()
             );
         }
         // 거꾸로 — `--sort` 에만 있는 낱말은 쪽을 넘기는 커서의 `id` 하나다(`query::SortKey::Id`).
-        for v in crate::cli::SortArg::value_variants() {
-            let word = v.to_possible_value().expect("숨긴 낱말이 없다");
-            let word = word.get_name();
-            assert!(word == "id" || Order::named(word).is_some(), "탐색기가 모르는 `--sort {word}`");
+        for k in crate::query::SortKey::ALL {
+            assert!(k.name() == "id" || Order::named(k.name()).is_some(), "탐색기가 모르는 `--sort {}`", k.name());
         }
     }
 }

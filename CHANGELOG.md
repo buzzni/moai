@@ -12,6 +12,18 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai show --sort` takes several fields, each with a direction, like
+  ORDER BY** — `--sort priority,updated:desc`, `--sort status:asc,title`. The
+  next field decides only where the ones before it tie; a field without
+  `:asc`/`:desc` keeps the direction it always had (newest first for created
+  and updated, urgent first for priority), so `--sort id` and every one-word
+  `--sort` order exactly as before. `--reverse` still turns the whole order
+  around, and `-n`/`--after` page through a multi-field order the same way. An
+  unknown field or direction, an empty field, or a field given twice is refused
+  with the words that are allowed. (moai-r170.9es)
+
 ## [0.11.0] - 2026-10-08
 
 ### Added

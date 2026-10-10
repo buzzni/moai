@@ -411,23 +411,32 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <key>     Order the list by that key (priority when absent)
+      --sort <fields>  Order the list by these fields (priority when absent)
       --reverse        Turn the order around, ties included
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort priority (the default: urgent first, then id), created and
-  updated (newest first), status (the column order of .moai/config.toml),
-  assignee (the name the screen shows, unowned last), title (ignoring case),
-  id. Ties under created and updated fall to id alone, and under every
-  other order to priority, then id. --reverse turns the whole order around.
+  Order: --sort takes fields separated by commas, like ORDER BY - the next
+  field decides only where the ones before it tie. The fields: priority
+  (the default: urgent first), created and updated (newest first), status
+  (the column order of .moai/config.toml), assignee (the name the screen
+  shows, unowned last), title (ignoring case), id. A field without a
+  direction keeps the one named here; :asc puts the smaller value first
+  (p0, the oldest, the first column, A) and :desc the larger. A field is
+  given once. When every field ties, a last field of created or updated
+  falls to id alone, and any other to priority, then id. --reverse turns
+  the whole order around, ties included.
+
+    moai show --sort priority,updated:desc
+    moai show --sort status:asc,title
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
-  last id of the page before. The cursor is that row's value in the order,
+  last id of the page before. The cursor is that row's values in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
-  any other, a priority edit included - can repeat or be skipped; --sort id
-  and --sort created are the orders no edit moves. Lines sharing one id
+  any other, a priority edit included - can repeat or be skipped; id,
+  created and lists of those two alone are the orders no edit moves.
+  Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
   -n means the list has ended.
@@ -1168,23 +1177,32 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <key>     Order the list by that key (priority when absent)
+      --sort <fields>  Order the list by these fields (priority when absent)
       --reverse        Turn the order around, ties included
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort priority (the default: urgent first, then id), created and
-  updated (newest first), status (the column order of .moai/config.toml),
-  assignee (the name the screen shows, unowned last), title (ignoring case),
-  id. Ties under created and updated fall to id alone, and under every
-  other order to priority, then id. --reverse turns the whole order around.
+  Order: --sort takes fields separated by commas, like ORDER BY - the next
+  field decides only where the ones before it tie. The fields: priority
+  (the default: urgent first), created and updated (newest first), status
+  (the column order of .moai/config.toml), assignee (the name the screen
+  shows, unowned last), title (ignoring case), id. A field without a
+  direction keeps the one named here; :asc puts the smaller value first
+  (p0, the oldest, the first column, A) and :desc the larger. A field is
+  given once. When every field ties, a last field of created or updated
+  falls to id alone, and any other to priority, then id. --reverse turns
+  the whole order around, ties included.
+
+    moai show --sort priority,updated:desc
+    moai show --sort status:asc,title
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
-  last id of the page before. The cursor is that row's value in the order,
+  last id of the page before. The cursor is that row's values in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
-  any other, a priority edit included - can repeat or be skipped; --sort id
-  and --sort created are the orders no edit moves. Lines sharing one id
+  any other, a priority edit included - can repeat or be skipped; id,
+  created and lists of those two alone are the orders no edit moves.
+  Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
   -n means the list has ended.
@@ -1435,23 +1453,32 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <key>     Order the list by that key (priority when absent)
+      --sort <fields>  Order the list by these fields (priority when absent)
       --reverse        Turn the order around, ties included
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort priority (the default: urgent first, then id), created and
-  updated (newest first), status (the column order of .moai/config.toml),
-  assignee (the name the screen shows, unowned last), title (ignoring case),
-  id. Ties under created and updated fall to id alone, and under every
-  other order to priority, then id. --reverse turns the whole order around.
+  Order: --sort takes fields separated by commas, like ORDER BY - the next
+  field decides only where the ones before it tie. The fields: priority
+  (the default: urgent first), created and updated (newest first), status
+  (the column order of .moai/config.toml), assignee (the name the screen
+  shows, unowned last), title (ignoring case), id. A field without a
+  direction keeps the one named here; :asc puts the smaller value first
+  (p0, the oldest, the first column, A) and :desc the larger. A field is
+  given once. When every field ties, a last field of created or updated
+  falls to id alone, and any other to priority, then id. --reverse turns
+  the whole order around, ties included.
+
+    moai show --sort priority,updated:desc
+    moai show --sort status:asc,title
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
-  last id of the page before. The cursor is that row's value in the order,
+  last id of the page before. The cursor is that row's values in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
-  any other, a priority edit included - can repeat or be skipped; --sort id
-  and --sort created are the orders no edit moves. Lines sharing one id
+  any other, a priority edit included - can repeat or be skipped; id,
+  created and lists of those two alone are the orders no edit moves.
+  Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
   -n means the list has ended.
@@ -1702,23 +1729,32 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <key>     Order the list by that key (priority when absent)
+      --sort <fields>  Order the list by these fields (priority when absent)
       --reverse        Turn the order around, ties included
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort priority (the default: urgent first, then id), created and
-  updated (newest first), status (the column order of .moai/config.toml),
-  assignee (the name the screen shows, unowned last), title (ignoring case),
-  id. Ties under created and updated fall to id alone, and under every
-  other order to priority, then id. --reverse turns the whole order around.
+  Order: --sort takes fields separated by commas, like ORDER BY - the next
+  field decides only where the ones before it tie. The fields: priority
+  (the default: urgent first), created and updated (newest first), status
+  (the column order of .moai/config.toml), assignee (the name the screen
+  shows, unowned last), title (ignoring case), id. A field without a
+  direction keeps the one named here; :asc puts the smaller value first
+  (p0, the oldest, the first column, A) and :desc the larger. A field is
+  given once. When every field ties, a last field of created or updated
+  falls to id alone, and any other to priority, then id. --reverse turns
+  the whole order around, ties included.
+
+    moai show --sort priority,updated:desc
+    moai show --sort status:asc,title
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
-  last id of the page before. The cursor is that row's value in the order,
+  last id of the page before. The cursor is that row's values in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
-  any other, a priority edit included - can repeat or be skipped; --sort id
-  and --sort created are the orders no edit moves. Lines sharing one id
+  any other, a priority edit included - can repeat or be skipped; id,
+  created and lists of those two alone are the orders no edit moves.
+  Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
   -n means the list has ended.
@@ -1990,23 +2026,32 @@ Filters  (comma = or,  repeated = and):
       --filter <item=value>                  One filter string (`status=todo`)
 
 Order and paging:
-      --sort <key>     Order the list by that key (priority when absent)
+      --sort <fields>  Order the list by these fields (priority when absent)
       --reverse        Turn the order around, ties included
   -n, --limit <count>  Give at most this many rows
       --after <id>     Start after this row: the last id of the page before
 
-  Order: --sort priority (the default: urgent first, then id), created and
-  updated (newest first), status (the column order of .moai/config.toml),
-  assignee (the name the screen shows, unowned last), title (ignoring case),
-  id. Ties under created and updated fall to id alone, and under every
-  other order to priority, then id. --reverse turns the whole order around.
+  Order: --sort takes fields separated by commas, like ORDER BY - the next
+  field decides only where the ones before it tie. The fields: priority
+  (the default: urgent first), created and updated (newest first), status
+  (the column order of .moai/config.toml), assignee (the name the screen
+  shows, unowned last), title (ignoring case), id. A field without a
+  direction keeps the one named here; :asc puts the smaller value first
+  (p0, the oldest, the first column, A) and :desc the larger. A field is
+  given once. When every field ties, a last field of created or updated
+  falls to id alone, and any other to priority, then id. --reverse turns
+  the whole order around, ties included.
+
+    moai show --sort priority,updated:desc
+    moai show --sort status:asc,title
 
   Paging: -n cuts the list, and --after <id> starts the next page after the
-  last id of the page before. The cursor is that row's value in the order,
+  last id of the page before. The cursor is that row's values in the order,
   not a position, so rows created or removed meanwhile never shift a page.
   A row whose place in the order changes between pages - the cursor row or
-  any other, a priority edit included - can repeat or be skipped; --sort id
-  and --sort created are the orders no edit moves. Lines sharing one id
+  any other, a priority edit included - can repeat or be skipped; id,
+  created and lists of those two alone are the orders no edit moves.
+  Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
   -n means the list has ended.

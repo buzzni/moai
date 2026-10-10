@@ -5986,6 +5986,64 @@ fn show_orders_the_list_by_the_key_it_is_given() {
     );
 }
 
+/// **`--sort` 는 필드의 쉼표 목록이다**(moai-r170.9es) — 앞 필드가 같을 때만 다음 필드를 보고, 방향은 필드마다
+/// `:asc`·`:desc` 이며, `--reverse` 는 그 위에서 통째로 뒤집는다. 쪽도 그 차례 그대로 넘는다. 낱말 하나를 받던 때는
+/// 쉼표 목록을 모르는 낱말로 거절했다.
+#[test]
+fn show_sorts_by_several_fields_each_with_a_direction() {
+    let s = init("multisort");
+    let a = add_at(s.path(), "2026-09-01T00:00:00Z", &["a", "-p", "1"]);
+    let b = add_at(s.path(), "2026-09-02T00:00:00Z", &["b", "-p", "2"]);
+    let c = add_at(s.path(), "2026-09-03T00:00:00Z", &["c", "-p", "1"]);
+    let d = add_at(s.path(), "2026-09-04T00:00:00Z", &["d", "-p", "2"]);
+    let order = |extra: &[&str]| {
+        let mut args = vec!["show", "--json"];
+        args.extend_from_slice(extra);
+        ids_in(&ok(s.path(), &args))
+    };
+    let v = |ids: [&String; 4]| ids.map(String::clone).to_vec();
+    // 방향을 안 준 생성은 새것이 먼저다.
+    assert_eq!(order(&["--sort", "priority,created"]), v([&c, &a, &d, &b]), "둘째 필드가 우선순위의 동점을 안 갈랐다");
+    assert_eq!(order(&["--sort", "priority,created:asc"]), v([&a, &c, &b, &d]), "둘째 필드의 방향이 안 섰다");
+    assert_eq!(order(&["--sort", "priority:desc,created"]), v([&d, &b, &c, &a]), "첫 필드의 방향이 안 섰다");
+    assert_eq!(
+        order(&["--sort", "priority,created", "--reverse"]),
+        v([&b, &d, &a, &c]),
+        "`--reverse` 가 통째로 안 뒤집었다"
+    );
+    // 첫 필드가 다 다르면 둘째는 아무 일도 안 한다 — 한 필드로 고른 것과 같다.
+    assert_eq!(order(&["--sort", "created,priority"]), order(&["--sort", "created"]));
+    assert_eq!(order(&["--sort", " title:desc , id "]), v([&d, &c, &b, &a]), "칸 앞뒤의 빈칸을 못 벗겼다");
+
+    // 쪽을 넘겨 받은 것이 한 번에 받은 차례와 같다 — 커서는 그 줄의 값 전부로 넘는다.
+    for sort in ["priority,created", "priority:desc,created:asc", "status,title:desc"] {
+        let whole = order(&["--sort", sort]);
+        let mut got: Vec<String> = Vec::new();
+        for _ in 0..4 {
+            let mut args = vec!["show", "--sort", sort, "-n", "1", "--json"];
+            if let Some(last) = got.last() {
+                args.extend(["--after", last.as_str()]);
+            }
+            got.extend(ids_in(&ok(s.path(), &args)));
+        }
+        assert_eq!(got, whole, "--sort {sort} 를 쪽으로 걸었다");
+    }
+
+    // 못 읽은 글은 clap 이 거절하며 까닭을 댄다 — 모르는 낱말이면 고를 낱말을 다 댄다.
+    let refused = |raw: &str| {
+        let out = moai(s.path(), &["show", "--sort", raw]);
+        assert!(!out.status.success(), "`--sort {raw}` 를 받았다");
+        String::from_utf8_lossy(&out.stderr).to_string()
+    };
+    let err = refused("priority,nope");
+    for word in ["priority", "created", "updated", "status", "assignee", "title", "id"] {
+        assert!(err.contains(word), "모르는 낱말의 거절이 `{word}` 를 안 댔다 — {err}");
+    }
+    assert!(refused("title:up").contains("asc or desc"), "모르는 방향의 까닭을 안 댔다");
+    assert!(refused("title,title:desc").contains("twice"), "두 번 선 필드의 까닭을 안 댔다");
+    assert!(refused("priority,,id").contains("empty"), "빈 칸의 까닭을 안 댔다");
+}
+
 /// **쪽은 커서의 값으로 넘는다**(moai-efoc.ku7) — `-n` 으로 자르고 `--after <앞 쪽의 마지막 id>` 로
 /// 이어 받으면 빠지는 줄도 겹치는 줄도 없고, 그사이 앞 쪽의 줄이 지워져도 밀리지 않는다. `--json` 은
 /// 배열 그대로다 — 받은 수가 `-n` 보다 적으면 끝이다.
