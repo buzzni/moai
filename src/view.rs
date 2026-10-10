@@ -2861,7 +2861,7 @@ pub struct Board<'a> {
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
     pub trouble: &'a [crate::worktree::Trouble],
-    /// 스냅샷을 **못 읽은 워크트리 전부**(`worktree::Unread::all`, moai-p3bs.op2) — 사람 화면이 한 줄씩
+    /// 스냅샷을 **못 읽은 워크트리 전부**(`worktree::stranded_at` 의 둘째 값, moai-p3bs.op2) — 사람 화면이 한 줄씩
     /// 대고(아래 `projects_status`), `--json` 은 안쪽 `status` 와 같은 모양(`broken_worktrees`)으로 이 목록을
     /// 그대로 낸다. 자리 판정은 그 스냅샷을 안 보지만(moai-jn4d.ewm) 깨진 파일은 고칠 사람이 알아야 한다 —
     /// 여기서 세지 않으면 이 덩어리가 "드러난 문제 없다" 로 그것을 덮는다.

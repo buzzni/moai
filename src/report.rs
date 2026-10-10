@@ -962,7 +962,7 @@ pub fn wip<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
 /// "지금 하는 일" 을 묻고 이것은 "그 칸을 옮겨 놓은 줄이 어디서 일하나" 를 묻는다(moai-es40, 사용자
 /// 결정). 머지가 같은 id 의 에픽 뒷줄을 남기면 앞줄의 집힌 이슈는 가려지는데, 그 세션이 죽었으면 그
 /// 줄을 대는 것은 [`stranded`] 뿐이다 — 여기서 걸렀다면 `duplicate_id` 하나 때문에 버려진 칸이 영영
-/// 안 보인다(리뷰 moai-ya06). 자리 셈은 넷(`places`·`blinding`·`placeable`·`stranded`)이 **이 하나**로
+/// 안 보인다(리뷰 moai-ya06). 자리 셈은 셋(`places`·`placeable`·`stranded`)이 **이 하나**로
 /// 되짚는다 — 하나라도 `wip` 을 쓰면 `stranded` 가 센 줄의 자리를 `show` 가 모른다.
 pub fn started<'a>(issues: &'a [Issue], cfg: &Config) -> Vec<&'a Issue> {
     // **값싼 것을 먼저 거른다.** 훅이 도구 호출마다 여기를 지나므로, 집은 것이
@@ -1251,7 +1251,7 @@ pub struct Workplace {
     /// **그 스냅샷을 못 읽었다** — 파일 자체의 사실이고 **자리 판정과는 상관이 없다**(moai-giz3,
     /// moai-jn4d.ewm). 자리는 스냅샷을 안 보고 가르지만, 깨진 파일은 고칠 사람이 있어야 고쳐지므로
     /// 값싸게 열어 보고(`worktree::unreadable_snapshot`) 그 사실을 세운다 —
-    /// `crate::worktree::Unread::all` 이 이것으로 센다.
+    /// `crate::worktree::stranded_at` 이 이것으로 센다.
     ///
     /// **`--json` 에 안 싣는다** — 이 값을 싣는 자리(`status --json` 의 `broken_worktrees`)가
     /// 이미 "깨진 것들" 이라, 줄마다 참을 한 번 더 적는 셈이다. 늘린 키는 되무를 수 없다.
@@ -1311,7 +1311,7 @@ fn lossy_path<S: serde::Serializer>(p: &std::path::Path, s: S) -> Result<S::Ok, 
 
 /// 자리 판정이 재는 것 **한 벌** — 집은 줄([`started`], id 로 접은 것)과 소속 지도([`ties`]).
 ///
-/// 자리를 묻는 넷([`places`]·[`blinding`]·[`stranded`]·[`placeable_in`])이 저마다 이 둘을 지어,
+/// 자리를 묻는 셋([`places`]·[`stranded`]·[`placeable_in`])이 저마다 이 둘을 지어,
 /// `moai status`·`moai show` 한 번에 같은 걸음을 네댓 벌 걸었다(moai-rviv). 걸음이 값싸지 않다 — 집은 줄을 고르는 데 미룸이 조상과 소속을 타고
 /// ([`put_off`]), 그 미룸이 다시 소속 지도를 재료로 쓴다.
 ///
@@ -1470,42 +1470,6 @@ pub fn places_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace], now: &st
     settle(picked, found, trees, now, &rolls, &named)
 }
 
-/// **이름이 집은 줄을 하나도 못 가리키는 워크트리인가** — [`blinding`] 이 깨진 워크트리 가운데 그런
-/// 것만 고른다. 가리키는지는 [`claims`] 로 잰다 — 줄 자신·조상·그 에픽·마일스톤이다(moai-1i9d).
-fn nameless<'a>(ties: &Ties<'a>, mut picked: impl Iterator<Item = &'a Issue>, t: &Workplace) -> bool {
-    !picked.any(|i| claims(ties, &t.names, i))
-}
-
-/// **깨진 워크트리 가운데 이름이 집은 줄을 하나도 못 가리키는 것** — 탐색기 층의 셈
-/// (`tui::layer::Summary::blind`)만 이것을 읽는다.
-///
-/// **자리 판정은 이제 가리지 않는다**(moai-jn4d.ewm) — 자리는 스냅샷을 안 보고 이름과 집은 표식으로만
-/// 가르므로, 깨진 스냅샷이 "자리를 다 못 셌다" 를 만들 길이 없다. `status --json` 의
-/// `unreadable_worktrees` 도 그래서 걷었다. 이것이 남은 것은 탐색기(`src/tui/`)가 그 수를 아직 읽어서다 —
-/// 그 파일을 다른 일(moai-r170)이 쥔 동안 손대지 않고, 그것이 머지된 뒤 moai-bl4d 가 이 함수와 함께 걷는다.
-/// 그때까지 층의 수가 예전과 같은 워크트리를 세도록 예전 자(깨졌고 이름이 집은 줄을 안 가리킨다)를 둔다.
-// 바이너리는 재료를 든 `_in` 을 부른다([`Footing`], moai-rviv) — 이 꼴은 시험의 짧은 길이다.
-#[cfg(test)]
-pub fn blinding<'a>(issues: &[Issue], cfg: &Config, trees: &'a [Workplace]) -> Vec<&'a Workplace> {
-    blinding_in(&Footing::of(issues, cfg), trees)
-}
-
-/// [`blinding`] 과 같은 것. **이미 잰 재료를 받는다**([`Footing`]) — `worktree::stranded_at` 은
-/// 바로 앞에서 [`places`] 로 같은 줄을 세므로, 여기서 다시 지으면 한 셈에 재료가 두 벌 선다.
-pub fn blinding_in<'a>(footing: &Footing<'_, '_>, trees: &'a [Workplace]) -> Vec<&'a Workplace> {
-    // 값싼 것을 먼저 — 깨진 워크트리가 없으면 재료([`Footing`])를 안 짓는다.
-    if !trees.iter().any(|t| t.broken) {
-        return Vec::new();
-    }
-    // 집은 줄이 없으면 가리킬 것도 없다 — 안 거르면 `nameless` 가 빈 목록에 참을 내, 깨진 워크트리를
-    // 다 센다. 같은 id 의 줄은 접어 센다(`picked`) — 묻는 것이 "이 워크트리가 **집은 일**을 가리키는가" 다.
-    let Laid { picked, ties } = footing.laid();
-    if picked.is_empty() {
-        return Vec::new();
-    }
-    trees.iter().filter(|t| t.broken && nameless(ties, picked.values().copied(), t)).collect()
-}
-
 /// 묶음 id → **그 묶음으로 자리를 굴려 올릴 집은 멤버들**([`settle`]).
 ///
 /// 멤버를 고르는 자는 [`group_members`] 와 **같아야 한다** — `placeable` 이 그것으로 `show` 의
@@ -1631,7 +1595,7 @@ fn settle<'a>(
 /// 부르는 쪽(`cmd/show`)이 워크트리를 읽기 전에 이것으로 판다. 안 집은 줄 하나를 펼치는 흔한 길이
 /// 옆 워크트리의 표식과 스냅샷을 열지 않게 하는 문인데, 그 판정은 이슈의 뜻이라 여기 둔다.
 ///
-/// **재료를 든 꼴 하나뿐이다**([`Footing`], moai-rviv) — 곁의 `places`·`blinding`·`stranded` 는
+/// **재료를 든 꼴 하나뿐이다**([`Footing`], moai-rviv) — 곁의 `places`·`stranded` 는
 /// 시험이 부르는 짧은 길을 곁에 두지만, 이쪽은 부르는 시험이 없어 `#[cfg(test)]` 짝이 그대로
 /// 죽은 코드 경고가 됐다. 시험이 필요해지면 그때 `Footing::of` 를 그 시험에서 부른다.
 pub fn placeable_in(footing: &Footing<'_, '_>, i: &Issue) -> bool {
@@ -1662,8 +1626,8 @@ pub fn stranded(issues: &[Issue], cfg: &Config, trees: &[Workplace], now: &str) 
     stranded_in(&Footing::of(issues, cfg), trees, now)
 }
 
-/// [`stranded`] 와 같은 것. **이미 잰 재료를 받는다**([`Footing`]) — `worktree::stranded_at` 은
-/// 곁의 [`blinding_in`] 과 재료 한 벌을 나눠 쓴다(moai-rviv).
+/// [`stranded`] 와 같은 것. **이미 잰 재료를 받는다**([`Footing`], moai-rviv) — 부르는 쪽
+/// (`worktree::stranded_at`)이 지은 한 벌을 [`places_in`] 에 그대로 건넨다.
 pub fn stranded_in(footing: &Footing<'_, '_>, trees: &[Workplace], now: &str) -> Option<Warning> {
     // 워크트리가 없으면 [`places`] 가 아무 키도 안 낸다 — 가드를 여기 다시 적지 않는다(moai-tbin).
     let at = places_in(footing, trees, now);
@@ -6248,9 +6212,7 @@ mod tests {
     }
 
     /// **깨진 스냅샷은 자리를 안 바꾼다**(moai-jn4d.ewm) — 자리는 이름과 집은 표식으로만 가르므로, 깨진
-    /// 워크트리 하나가 남의 줄을 "모른다" 로 덮어 `stranded` 를 재우는 길이 없다. 탐색기 층만 읽는 셈
-    /// ([`blinding`])은 moai-bl4d 까지 예전 자(깨졌고 이름이 집은 줄을 안 가리킨다)로 센다 — 에픽 이름의
-    /// 워크트리도 그 에픽의 멤버를 가리킨다(moai-1i9d).
+    /// 워크트리 하나가 남의 줄을 "모른다" 로 덮어 `stranded` 를 재우는 길이 없다.
     #[test]
     fn a_broken_worktree_does_not_change_any_place() {
         let issues = vec![
@@ -6282,12 +6244,9 @@ mod tests {
         let w = stranded(&issues, &cfg(), &mixed, LATER).expect("깨진 워크트리가 stranded 를 재웠다");
         assert_eq!(w.ids, ["argos-0003"]);
 
-        let only: Vec<&str> = blinding(&issues, &cfg(), &mixed).iter().map(|t| t.branch.as_str()).collect();
-        assert_eq!(only, ["worktree-agent-x"], "이름이 집은 줄을 가리키는 에픽 워크트리까지 셌다");
         // 집은 줄이 없으면 셀 것도 없다.
         let idle = vec![make("argos-0001", Kind::Epic, "todo")];
         assert!(places(&idle, &cfg(), &mixed, LATER).is_empty());
-        assert!(blinding(&idle, &cfg(), &mixed).is_empty(), "집은 줄이 없는데 셌다");
     }
 
     /// **워크트리가 없으면 아무 키도 없다**(moai-tbin) — "없다" 는 찾아보고 못 찾았을 때의 말이다.

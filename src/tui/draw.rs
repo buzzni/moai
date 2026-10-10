@@ -4676,7 +4676,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 ]));
             }
             out.push(Line::from(""));
-            // **못 셌으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
+            // **못 읽은 워크트리가 있으면 "문제 없다" 를 안 세운다** — 아래에 `!` 못 읽은 워크트리 줄이 서는데 위에서
             // ✓ 를 대면 덩어리가 제 말을 뒤집는다(moai-cuw2, 한눈 보기와 같은 자).
             let n = surfaced(app, &sum.warnings);
             if n == 0 && sum.unread == 0 {
@@ -4701,22 +4701,13 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 out.extend(wrapped(&said, w, from_anstyle(style::WARN)));
             }
             // **못 읽은 워크트리도 댄다**(리뷰 moai-p3bs.op2) — 안 대면 층이 "드러난 문제 없다" 로
-            // 깨진 스냅샷을 덮고, 그 파일은 고칠 사람이 영영 모른다. **두 사실을 한 줄에 가른다**
-            // (사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) — 판 것 가운데 못 읽은 것은 다 대고
-            // (`unread`, 한눈 보기의 `옆 워크트리 문제 N건` 과 같은 수), "그래서 자리를 다 못 셌다"
-            // 는 판정을 가린 것이 있을 때만 붙인다(`blind`). 가린 것이 없으면 위의 `stranded` 는
-            // "센 결과" 라 그대로 믿어도 된다.
+            // 깨진 스냅샷을 덮고, 그 파일은 고칠 사람이 영영 모른다. 수는 한눈 보기의 `옆 워크트리 문제
+            // N건` 과 같다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt).
             //
-            // **꼬리말을 못 읽은 총수에 붙이지 않는다** — 셋이 깨졌는데 하나만 판정을 가렸으면
-            // "3곳 — 자리를 다 못 셌다" 는 셋 다 가린 것으로 읽힌다. 가린 수가 총수보다 적으면
-            // 그 수를 대고, 같을 때만 "다" 라고 한다.
+            // **"자리를 다 못 셌다" 는 안 붙인다**(moai-bl4d) — 자리 판정이 이름과 집은 표식으로만 가르게 된
+            // 뒤로(moai-jn4d.ewm) 깨진 스냅샷이 가릴 자리가 없다. 위의 `stranded` 는 언제나 센 결과다.
             if sum.unread > 0 {
-                let why = match sum.blind {
-                    0 => String::new(),
-                    n if n == sum.unread => say(lang, "tui.place.blind_all").to_string(),
-                    n => fill(say(lang, "tui.place.blind_some"), &[("n", &n.to_string())]),
-                };
-                let said = fill(say(lang, "tui.place.unread"), &[("n", &sum.unread.to_string()), ("why", &why)]);
+                let said = fill(say(lang, "tui.place.unread"), &[("n", &sum.unread.to_string())]);
                 out.extend(wrapped(&said, w, from_anstyle(style::WARN)));
             }
             if sum.unreadable > 0 {
@@ -6388,7 +6379,7 @@ pub(super) mod tests {
                             &[crate::worktree::Side::new("worktree-argos-0005", "/wt/argos-0005", vec![])],
                         );
                         a.adopt(shown);
-                        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+                        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
                     }
                     _ => {}
                 }
@@ -6687,7 +6678,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("worktree-argos-0004", "/wt/argos-0004", vec![])],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         let seen = |a: &mut App| render(a, 120, 12).join("\n");
         // 가지 없는 줄에는 안 붙는다 — 뿌리의 에픽 줄로 본다.
         let root = seen(&mut a);
@@ -6755,7 +6746,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("feat/x", "/wt/feat-x", theirs)],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
 
         // 에픽 안으로 들어가 멤버에 선다 — 상세가 그 멤버의 에픽·마일스톤 줄을 낸다.
         // 마일스톤 → 에픽 → 멤버. 상세는 그 멤버의 에픽·마일스톤 줄을 낸다.
@@ -6807,7 +6798,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("worktree-moai-hela2", "/wt/hela2", theirs)],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         a.hit("j Enter j");
 
         let label = crate::i18n::say(crate::i18n::Lang::Ko, "tui.about.epic");
@@ -6850,7 +6841,7 @@ pub(super) mod tests {
             &[crate::worktree::Side::new("worktree-argos-0004", "/wt/argos-0004", vec![])],
         );
         a.adopt(shown);
-        a = a.overlaid(origin, Vec::new(), Vec::new(), true, &[], &crate::worktree::Floor::loose(&[]));
+        a = a.overlaid(origin, Vec::new(), Vec::new(), true);
         a.hit("Enter");
         let text = render(&mut a, 120, 12).join("\n");
         let row = text.lines().find(|l| l.contains("집은 멤버")).unwrap_or_else(|| panic!("줄이 없다\n{text}"));
@@ -9069,7 +9060,6 @@ pub(super) mod tests {
                 notices: 0,
                 stranded: 0,
                 unread: 0,
-                blind: 0,
                 unreadable: 0,
             },
         };
@@ -9332,59 +9322,39 @@ pub(super) mod tests {
         lines.iter().filter_map(|l| detail_pane(l)).map(str::trim).collect::<Vec<_>>().join(" ")
     }
 
-    /// **층은 자리 없는 줄과 못 읽은 워크트리를 낱말로 댄다**(moai-p3bs) — 그리고 못 셌으면 "문제
+    /// **층은 자리 없는 줄과 못 읽은 워크트리를 낱말로 댄다**(moai-p3bs) — 그리고 깨진 스냅샷이 있으면 "문제
     /// 없다" 를 안 세운다. 아래에 `!` 가 서는데 위에서 ✓ 를 대면 덩어리가 제 말을 뒤집고, 줄의
     /// `!` 가 조용하면 한눈 보기(`옆 워크트리 문제 N건`)와 같은 저장소를 달리 말한다.
     ///
-    /// **깨진 스냅샷과 "다 못 셌다" 는 다른 말이다**(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) —
-    /// 못 읽은 것은 판정을 가렸든 아니든 언제나 대고(`unread`), 꼬리말은 가린 것이 있을 때만 붙는다
-    /// (`blind`). 한때 층만 `blind` 로 둘 다 재, 이름이 집은 줄을 가리키는 깨진 워크트리 하나가
-    /// 한눈 보기에서는 `옆 워크트리 문제 1건` 인데 층에서는 "드러난 문제 없다" 로 섰다.
+    /// **"자리를 다 못 셌다" 는 안 붙는다**(moai-bl4d) — 자리 판정이 스냅샷을 안 보게 된 뒤로
+    /// (moai-jn4d.ewm) 깨진 스냅샷이 가릴 자리가 없어, 그 꼬리말은 거짓이 됐다. 못 읽은 것은 수만 댄다.
     #[test]
     fn the_layer_names_stranded_work_and_never_calls_an_uncounted_repo_clean() {
         use super::super::layer::{At, Look};
         let mut a = layered(At::Layer);
-        let set = |a: &mut App, warnings: usize, stranded: usize, unread: usize, blind: usize| {
+        let set = |a: &mut App, warnings: usize, stranded: usize, unread: usize| {
             let Look::Open { sum } = &mut a.layer.as_mut().unwrap().places[0].look else {
                 panic!("one 이 안 열렸다")
             };
-            (sum.warnings, sum.stranded, sum.unread, sum.blind) = (Surfaced::flat(warnings), stranded, unread, blind);
+            (sum.warnings, sum.stranded, sum.unread) = (Surfaced::flat(warnings), stranded, unread);
         };
 
-        set(&mut a, 1, 1, 0, 0);
+        set(&mut a, 1, 1, 0);
         let lines = render(&mut a, 80, 22);
         let pane = about_text(&lines);
         assert!(pane.contains("워크트리가 없는 것 1건"), "80칸에서 수가 잘렸다\n{}", lines.join("\n"));
 
-        set(&mut a, 0, 0, 1, 1);
-        let lines = render(&mut a, 80, 22);
-        let screen = lines.join("\n");
-        assert!(about_text(&lines).contains("워크트리 1곳 — 자리를 다 못 셌다"), "80칸에서 수가 잘렸다\n{screen}");
-        assert!(!screen.contains("드러난 문제 없다"), "못 셌는데 문제 없다고 했다\n{screen}");
-        let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
-        assert!(row.contains(" !"), "못 읽은 워크트리가 있는데 줄이 조용하다 — {row:?}");
-
-        // **판정을 안 가려도 깨진 것은 댄다** — 꼬리말만 빠진다. 여기가 조용하면 한눈 보기가
-        // `옆 워크트리 문제 1건` 이라고 하는 저장소를 층은 "문제 없다" 로 낸다.
-        set(&mut a, 0, 0, 1, 0);
+        // **깨진 것은 댄다** — 여기가 조용하면 한눈 보기가 `옆 워크트리 문제 1건` 이라고 하는 저장소를
+        // 층은 "문제 없다" 로 낸다.
+        set(&mut a, 0, 0, 2);
         let lines = render(&mut a, 80, 22);
         let screen = lines.join("\n");
         let pane = about_text(&lines);
-        assert!(
-            pane.contains("워크트리 1곳") && !pane.contains("다 못 셌다"),
-            "안 가린 것에 꼬리말이 붙었다\n{screen}"
-        );
+        assert!(pane.contains("워크트리 2곳"), "80칸에서 수가 잘렸다\n{screen}");
+        assert!(!pane.contains("못 셌다"), "자리를 가리지 않는 깨진 스냅샷에 꼬리말이 붙었다\n{screen}");
         assert!(!screen.contains("드러난 문제 없다"), "깨진 스냅샷을 두고 문제 없다고 했다\n{screen}");
         let row = lines.iter().find(|l| l.contains("one/")).unwrap_or_else(|| panic!("{screen}"));
         assert!(row.contains(" !"), "깨진 스냅샷이 있는데 줄이 조용하다 — {row:?}");
-
-        // **섞여 있으면 가린 수를 댄다** — 꼬리말이 총수에 붙으면 둘 중 하나만 가렸는데 둘 다
-        // 가린 것으로 읽힌다. "다" 는 못 읽은 것이 모두 가렸을 때만 쓴다.
-        set(&mut a, 0, 0, 2, 1);
-        let lines = render(&mut a, 80, 22);
-        let screen = lines.join("\n");
-        let pane = about_text(&lines);
-        assert!(pane.contains("워크트리 2곳 — 그중 1곳이 자리를 가려"), "가린 수를 안 댔다\n{screen}");
     }
 
     /// **층은 알림을 수로만 대고, 그것으로 "문제 있다" 고 하지 않는다**(moai-prdh, 2026-09-22
@@ -9403,7 +9373,7 @@ pub(super) mod tests {
                 panic!("one 이 안 열렸다")
             };
             // 알림만 선 저장소다 — 경고도 못 읽은 워크트리도 없다.
-            (sum.warnings, sum.unread, sum.blind, sum.unreadable, sum.notices) = (Surfaced::flat(0), 0, 0, 0, notices);
+            (sum.warnings, sum.unread, sum.unreadable, sum.notices) = (Surfaced::flat(0), 0, 0, notices);
         };
 
         set(&mut a, 3);
@@ -11047,7 +11017,6 @@ pub(super) mod tests {
                 notices: 0,
                 stranded: 0,
                 unread: 0,
-                blind: 0,
                 unreadable: 0,
             },
         };

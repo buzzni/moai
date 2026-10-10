@@ -64,7 +64,9 @@ does not tag — see `CONTRIBUTING.md`.
   `fresh`, `lost`; `unknown` no longer appears, and neither does
   `unreadable_worktrees` under `status --json` or `tui --json`: a broken
   sibling snapshot is still named by `broken_worktrees` but no longer hides a
-  verdict. (moai-jn4d.ewm)
+  verdict, and the explorer's project layer gives the number of such
+  worktrees without saying they hid places from the count. (moai-jn4d.ewm,
+  moai-bl4d)
 
 ### Fixed
 
