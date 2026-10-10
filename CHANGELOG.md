@@ -12,6 +12,30 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **A second optional Claude Code skill, `moai-saycode`.** When the supervisor
+  runs inside a Saycode session (`SAYCODE_AGENT_ENV` set), it drives the workers
+  Saycode lists through `happy agent`: it sends each worker its work as a
+  prompt and is told in the background when the turn ends, reads what a worker
+  said when no report came, clears a reported worker with a `/clear` prompt,
+  names a worker waiting on a question or a permission, and — only after asking
+  — opens new worker sessions, saying that Saycode starts them with permission
+  prompts bypassed. The agent, model and effort are the person's, checked
+  against what Saycode offers. Where tmux stands too, Saycode comes first.
+  `moai-recover` hands a dead Saycode session back as a `happy resume` line
+  instead of resuming it in a pane. Plant it with `moai skill install --with
+  moai-saycode`; the first-init picker checks it when `SAYCODE_AGENT_ENV` is
+  set. (moai-l244)
+
+### Changed
+
+- **`moai-tmux` leaves alone a pane that two live sessions name.** A session
+  Saycode started carries in its record the pane of whoever started Saycode's
+  daemon — the supervisor's own pane, when it was measured — so the session map
+  now prints `-` for such a pane instead of handing it out, and gains a
+  seventh column, the session's Saycode id. (moai-l244)
+
 ## [0.13.0] - 2026-10-10
 
 ### Added
