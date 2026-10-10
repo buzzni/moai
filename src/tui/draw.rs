@@ -510,6 +510,15 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
     scroll_mark(f, &p.list, at, "", true, lang);
 }
 
+/// 차례 목록을 뱃지의 한 토막으로 — `priority↑, updated↓`(moai-r170). **필드마다 방향 글리프를 단다** — 한쪽에만
+/// 달면 맨 낱말이 "제 방향" 인지 "오름" 인지 읽는 사람이 필드마다 외워야 한다(생성·수정은 제 방향이 내림이다).
+/// 방향을 지는 것이 글리프라 색이 혼자 뜻을 지지 않는다. 낱말까지 대는 편집 창(`SPC s e`)과 달리 머리줄은 좁아
+/// 글리프로만 적는다. 옛 뱃지의 ` 거꾸로` 는 걷었다 — 뒤집기는 이제 필드의 방향이다.
+pub(super) fn sort_words(s: &super::keys::Sorting, lang: Lang) -> String {
+    let one = |o: &super::keys::Ordered| format!("{}{}", o.by.word(lang), if o.down { "↓" } else { "↑" });
+    s.fields().iter().map(one).collect::<Vec<_>>().join(", ")
+}
+
 /// 시간대 고르는 창(moai-3oz2) — 이름 목록과, 지금 쓰는 것에 붙는 낱말.
 ///
 /// **빈 목록에는 까닭이 선다**(moai-77ap). 까닭 없이 비면 이 창이 "시간대가 없다" 로 서서
@@ -2295,10 +2304,8 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     // 줄 안다. 거름망 뱃지와 달리 **늘 서 있는 것**이라 경로의 몫을 굶기지 않는다: 경로에 여덟 칸이
     // 안 남으면 뺀다. 키는 안 적는다 — 메뉴의 `SPC v`(숨김)·`SPC s`(정렬)가 댄다. 층에서는 보기가 뜻이 없다.
     // 기본이 아닌 차례도 같은 뱃지에 댄다(moai-55cp) — 차례가 바뀐 줄 모르면 줄이 뒤섞인 줄 안다.
-    let sorted = (app.order != Default::default()).then(|| {
-        fill(say(app.site.lang, "tui.badge.sorted"), &[("by", app.order.by.word(app.site.lang))])
-            + if app.order.reversed { say(app.site.lang, "tui.badge.reversed") } else { "" }
-    });
+    let sorted = (app.order != Default::default())
+        .then(|| fill(say(app.site.lang, "tui.badge.sorted"), &[("by", &sort_words(&app.order, app.site.lang))]));
     // **모자라면 차례부터 뺀다**(moai-2kyl 단계 리뷰). 한 뱃지로 통째로 재면 차례를 고른 것만으로 뱃지가
     // 길어져 `[done 숨김]` 까지 사라진다 — 숨긴 줄이 사라진 줄 아는 것이 줄이 뒤섞인 줄 아는 것보다 크다.
     let hidden = app.view.badge(&app.screen_statuses(), app.aged(), app.site.lang);
@@ -10832,7 +10839,7 @@ pub(super) mod tests {
             render(a, w, 12).into_iter().find(|l| l.contains("숨김") || l.contains("정렬")).unwrap_or_default()
         };
         let wide = badge(&mut a, 120);
-        assert!(wide.contains("[done 숨김 · 정렬 수정 거꾸로]"), "{wide:?}");
+        assert!(wide.contains("[done 숨김 · 정렬 수정↑]"), "{wide:?}");
         let narrow = badge(&mut a, 30);
         assert!(
             narrow.contains("[done 숨김]") && !narrow.contains("정렬"),

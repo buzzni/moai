@@ -23,6 +23,18 @@ does not tag — see `CONTRIBUTING.md`.
   around, and `-n`/`--after` page through a multi-field order the same way. An
   unknown field or direction, an empty field, or a field given twice is refused
   with the words that are allowed. (moai-r170.9es)
+- **The explorer keeps its sort per project, as a list of fields** — a sort
+  picked inside a project is written for that project alone, as
+  `order = [...]` under `[tui.project."<project path>"]` in the user config,
+  and one picked in the all-projects list (`0`) is written as `order` under
+  `[tui]`, the default for every project without its own. Entering a project
+  puts its own sort back; one sort no longer follows you from project to
+  project. `order` takes the words of `moai show --sort` (`"updated:asc"`).
+  Where `order` is absent the older `sort`/`sort_reversed` pair is read as
+  before, and every write of `[tui] order` also writes that pair from its
+  first field, so an older moai on the same config shows the nearest order.
+  An `order` that cannot be read is named in one line and the older pair
+  stands. (moai-r170.8dz)
 
 ## [0.11.0] - 2026-10-08
 

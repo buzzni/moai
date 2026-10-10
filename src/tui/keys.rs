@@ -458,18 +458,112 @@ impl Order {
     }
 }
 
-/// 고른 차례와 그 방향 — **한 벌이다**(moai-zrzo). `(Order, bool)` 튜플로 들면 `.0`·`.1` 이 무엇인지
-/// 부르는 자리마다 다시 읽어야 한다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Sorting {
+impl Order {
+    /// 방향을 안 고른 필드가 **내림**인가 — 생성·수정만이다(새것이 위). `query::SortKey::default_dir` 와 같은
+    /// 자다 — 조각이라 그쪽을 못 불러 한 벌 더 적고, 둘이 같은 말을 하는지는 `App::sort_key` 곁의 시험이 잰다.
+    pub fn falls(self) -> bool {
+        matches!(self, Order::Created | Order::Updated)
+    }
+}
+
+/// 차례의 한 칸 — 필드와 그 방향(moai-r170). `query::Field` 의 조각 쪽 짝이다: `down` 이 참이면 값이 큰 것이 먼저다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ordered {
     pub by: Order,
-    pub reversed: bool,
+    pub down: bool,
+}
+
+impl Ordered {
+    /// 제 방향으로 선 필드.
+    pub fn of(by: Order) -> Ordered {
+        Ordered { by, down: by.falls() }
+    }
+
+    pub fn flipped(self) -> Ordered {
+        Ordered { down: !self.down, ..self }
+    }
+
+    /// 제 방향과 반대로 섰는가 — 옛 `sort_reversed` 의 뜻이다. 설정에 옛 한 쌍을 비춰 적을 때(`App::look_now`)와
+    /// 메뉴의 `[● 거꾸로]` 가 이것을 읽는다.
+    pub fn reversed(self) -> bool {
+        self.down != self.by.falls()
+    }
+}
+
+/// 고른 차례 — **필드의 차례 목록**이다(moai-r170). 앞 필드가 같을 때만 다음 필드를 본다(SQL 의 `ORDER BY`).
+///
+/// **전체 뒤집기는 안 든다.** 한 필드로 고르던 때의 `reversed` 는 이제 그 필드의 방향이다 — `SPC s <키>` 를 다시
+/// 누르면 그 필드의 방향이 뒤집힌다. 옛 설정의 `sort_reversed = true` 도 첫 필드의 방향으로 읽는다(`App::apply_look`).
+///
+/// **크기가 정해진 배열로 든다** — 한 필드는 한 번만 서니(`query::parse_order` 가 거절한다) 칸은 [`Order::ALL`] 의
+/// 수를 못 넘는다. 그래서 `Copy` 로 남는다: 키 처리의 [`Ctx`] 와 굴린 화면의 기억(`Adrift`)이 이것을 값으로 들어,
+/// `Vec` 이면 그 둘이 통째로 `Copy` 를 잃는다. 쓰지 않는 칸은 견주지 않는다(손으로 적은 `PartialEq`).
+#[derive(Clone, Copy)]
+pub struct Sorting {
+    slots: [Ordered; Order::ALL.len()],
+    len: usize,
 }
 
 impl Sorting {
-    /// 차례 키를 눌렀을 때 — 고른 것을 다시 누르면 거꾸로, 다른 것을 누르면 그것의 제 방향으로.
+    /// 그 필드 하나를 제 방향으로.
+    pub fn by(by: Order) -> Sorting {
+        let mut slots = [Ordered::of(Order::Priority); Order::ALL.len()];
+        slots[0] = Ordered::of(by);
+        Sorting { slots, len: 1 }
+    }
+
+    /// 필드 목록으로 — 비었거나 한 필드가 두 번 서면 `None` 이다. 두 번 선 필드는 아무것도 못 가르고, 빈 차례는
+    /// 차례가 아니다(`query::parse_order` 와 같은 자).
+    pub fn of(fields: &[Ordered]) -> Option<Sorting> {
+        let (first, rest) = fields.split_first()?;
+        let mut s = Sorting::by(first.by);
+        s.slots[0] = *first;
+        for f in rest {
+            if s.fields().iter().any(|g| g.by == f.by) {
+                return None;
+            }
+            s.slots[s.len] = *f;
+            s.len += 1;
+        }
+        Some(s)
+    }
+
+    pub fn fields(&self) -> &[Ordered] {
+        &self.slots[..self.len]
+    }
+
+    /// 첫 필드 — 옛 바이너리가 읽는 `sort`·`sort_reversed` 한 쌍이 이것을 비춘다.
+    pub fn first(&self) -> Ordered {
+        self.slots[0]
+    }
+
+    /// 차례 키(`SPC s <키>`)를 눌렀을 때 — **차례를 그 필드 하나로 갈아 끼운다.** 차례가 이미 그 필드 하나뿐이면
+    /// 방향을 뒤집는다. 한 필드로 고르던 때의 손 그대로다: 다른 것을 누르면 그것의 제 방향, 같은 것을 다시 누르면 거꾸로.
     pub fn press(self, by: Order) -> Sorting {
-        Sorting { by, reversed: self.by == by && !self.reversed }
+        match self.fields() {
+            [only] if only.by == by => Sorting::of(&[only.flipped()]).expect("필드 하나"),
+            _ => Sorting::by(by),
+        }
+    }
+}
+
+impl Default for Sorting {
+    fn default() -> Sorting {
+        Sorting::by(Order::Priority)
+    }
+}
+
+impl PartialEq for Sorting {
+    fn eq(&self, other: &Sorting) -> bool {
+        self.fields() == other.fields()
+    }
+}
+
+impl Eq for Sorting {}
+
+impl std::fmt::Debug for Sorting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.fields()).finish()
     }
 }
 
@@ -952,7 +1046,7 @@ impl Browse {
             Browse::Backlog => Some(shown(c.backlog_hidden, c.lang)),
             Browse::Archived => Some(shown(c.archived_hidden, c.lang)),
             // 고른 차례에만 붙는다 — 방향은 낱말로 댄다.
-            Browse::Sort(o) if o == c.sorting.by => Some(if c.sorting.reversed {
+            Browse::Sort(o) if o == c.sorting.first().by => Some(if c.sorting.first().reversed() {
                 say(c.lang, "tui.state.reversed")
             } else {
                 say(c.lang, "tui.state.sorted")
@@ -1661,7 +1755,7 @@ mod tests {
         let base = Ctx::default();
         // 차례는 [`Order::ALL`] 에서 읽는다 — 손으로 적으면 새 차례를 더한 날 이 시험만 옛 여섯 개를 돈다.
         for o in Order::ALL {
-            let c = Ctx { sorting: Sorting { by: o, reversed: false }, ..base };
+            let c = Ctx { sorting: Sorting::by(o), ..base };
             for b in BROWSE.iter().filter(|b| b.act.state(&c).is_some()) {
                 assert!(b.act.stateful(), "{:?} 가 상태를 대는데 stateful 이 아니다", b.act);
             }
@@ -1669,7 +1763,7 @@ mod tests {
         // 거꾸로 — stateful 이면 어느 자리에선가 상태를 댄다. 정렬은 고른 차례에서만 댄다.
         for b in BROWSE.iter().filter(|b| b.act.stateful()) {
             let c = match b.act {
-                Browse::Sort(o) => Ctx { sorting: Sorting { by: o, reversed: false }, ..base },
+                Browse::Sort(o) => Ctx { sorting: Sorting::by(o), ..base },
                 _ => base,
             };
             assert!(b.act.state(&c).is_some(), "{:?} 가 stateful 인데 상태를 안 댄다", b.act);

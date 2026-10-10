@@ -2468,7 +2468,13 @@ Options:
   then tag — to leave room for the title.
   View, sort and columns are written into the [tui] table of the user config
   on every press and carry over to the next run and to other projects (the
-  same file `moai project add` writes).
+  same file `moai project add` writes). The sort is the exception: one picked
+  inside a project is kept for that project alone, as order under
+  [tui.project."<project path>"], and one picked in 0 is kept as order under
+  [tui] — the default for every project without its own. order is a list in
+  the words of `moai show --sort`, such as ["priority", "updated:asc"], and
+  the older sort and sort_reversed pair is still read where order is absent
+  and written beside it from the first field, for an older moai.
 
   SPC g b lays the same rows out as a kanban board instead of a list, and
   SPC g l brings the list back. It is the list's layout, not another window:

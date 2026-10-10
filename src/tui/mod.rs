@@ -1469,8 +1469,15 @@ pub struct App {
     read: fn(&Repo, bool, crate::i18n::Lang, Option<usize>) -> crate::fail::R<Fresh>,
     /// 무엇을 보일까(moai-fmv5) — 칸·미룸 토글. 거름망과 따로 들어 Esc 가 안 푼다.
     pub view: view::View,
-    /// 목록 차례와 그 방향(moai-55cp). 기본은 우선순위 차례다.
+    /// 목록 차례 — 필드의 차례 목록(moai-55cp·moai-r170). 기본은 우선순위 차례다. **지금 선 자리의 것이다** —
+    /// 층(`0`)이면 [`App::order_default`], 프로젝트 안이면 그 프로젝트의 것(없으면 기본)이고, 자리를 옮길 때
+    /// [`App::rescope_order`] 가 갈아 끼운다.
     pub order: keys::Sorting,
+    /// 기본 차례 — `[tui] order`(moai-r170.8dz). 층과 제 차례가 없는 프로젝트가 이것으로 선다.
+    order_default: keys::Sorting,
+    /// 프로젝트마다의 차례 — `[tui.project."<경로>"] order`. 열쇠는 **설정에 적힌 경로 글 그대로**다
+    /// (`Look::project_order`) — 새로 적을 때만 푼 경로로 짓는다([`App::order_home`]).
+    order_projects: std::collections::BTreeMap<String, keys::Sorting>,
     /// 목록 줄에 켜 둔 열(moai-g7p8). 처음에는 원래 줄 그대로(id·우선순위·셈)에 열 이름 줄이 얹힌다.
     pub fields: view::Fields,
     /// **옛 `[read]`** — 설정 한 파일에 모여 있던 읽음(moai-bwce, 사용자 결정 3). 이 바이너리는 여기
@@ -2113,6 +2120,8 @@ impl App {
             // 보기(`[tui]`)는 `apply_look` 이 뒤에서 덮는다.
             view: view::View { hide_deferred: true, ..view::View::default() },
             order: Default::default(),
+            order_default: Default::default(),
+            order_projects: Default::default(),
             fields: Default::default(),
             detail_open: true,
             detail_at: view::DetailAt::default(),
@@ -3310,6 +3319,87 @@ impl App {
         }
     }
 
+    /// 탐색기의 차례 한 칸을 `query` 의 필드로 — 견주는 자([`crate::query::order_by`])와 적는 꼴(`Field` 의 Display)이
+    /// 그쪽에 있다.
+    pub(crate) fn query_field(o: keys::Ordered) -> crate::query::Field {
+        use crate::query::Dir;
+        crate::query::Field { key: Self::sort_key(o.by), dir: if o.down { Dir::Desc } else { Dir::Asc } }
+    }
+
+    /// 설정의 차례 낱말(`["priority", "updated:desc"]`)을 탐색기의 차례로(moai-r170.8dz). **`moai show --sort` 와 한
+    /// 자로 읽는다**([`crate::query::parse_order`]) — 같은 글이 두 표면에서 다른 차례가 되면 안 된다. 못 읽으면
+    /// `None`: 모르는 필드·방향, 두 번 선 필드, 빈 목록, 그리고 **탐색기에 없는 필드**(`id`) — 그것을 빼고 나머지로
+    /// 서면 사람이 적은 차례가 말없이 다른 차례가 된다.
+    pub(crate) fn sorting_of(words: &[String]) -> Option<keys::Sorting> {
+        let fields = crate::query::parse_order(&words.join(",")).ok()?;
+        let mine = fields
+            .iter()
+            .map(|f| {
+                let by = keys::Order::ALL.into_iter().find(|o| Self::sort_key(*o) == f.key)?;
+                Some(keys::Ordered { by, down: f.dir == crate::query::Dir::Desc })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        keys::Sorting::of(&mine)
+    }
+
+    /// 설정에 적을 차례 낱말 — 필드마다 가장 짧은 꼴(제 방향이면 낱말만). [`App::sorting_of`] 가 같은 차례로 되읽는다.
+    pub(crate) fn order_words(s: &keys::Sorting) -> Vec<String> {
+        s.fields().iter().map(|o| Self::query_field(*o).to_string()).collect()
+    }
+
+    /// 못 읽은 차례 목록의 알림 한 줄 — `key` 는 `[tui]` 밑의 자리(`order`·`project."/a".order`).
+    fn bad_order(&self, key: &str, words: &[String]) -> String {
+        fill(
+            say(self.site.lang, "tui.look.bad_order"),
+            &[
+                ("key", key),
+                ("value", &words.join(", ")),
+                ("known", &keys::Order::ALL.map(keys::Order::name).join("·")),
+            ],
+        )
+    }
+
+    /// 지금 선 프로젝트의 차례 열쇠(moai-r170.8dz) — 층(`0`)에 섰거나 프로젝트가 없는 화면이면 `None` 이고, 그때의
+    /// 차례는 기본(`[tui] order`)이다. **그 프로젝트를 가리키는 열쇠가 이미 있으면 그 철자를 쓴다** — 손으로 적은
+    /// 링크 철자를 두고 푼 경로로 새 표를 세우면 한 디렉터리의 차례가 두 벌 선다. 없으면 등록 목록과 같은 자로
+    /// 푼 경로다(`user_config::resolve_dir` 가 `canonicalize` 로 적는다).
+    fn order_home(&self) -> Option<String> {
+        let here = self.here()?;
+        let spelled = |k: &&String| std::path::Path::new(k.as_str()) == here;
+        if let Some(k) = self.order_projects.keys().find(spelled) {
+            return Some(k.clone());
+        }
+        let real = std::fs::canonicalize(&here).unwrap_or(here);
+        if let Some(k) =
+            self.order_projects.keys().find(|k| crate::user_config::same_dir(std::path::Path::new(k.as_str()), &real))
+        {
+            return Some(k.clone());
+        }
+        Some(real.display().to_string())
+    }
+
+    /// 지금 선 자리의 차례 — 그 프로젝트의 것이 기본을 이긴다(2026-10-09 사용자 결정).
+    fn scoped_order(&self) -> keys::Sorting {
+        self.order_home().and_then(|k| self.order_projects.get(&k).copied()).unwrap_or(self.order_default)
+    }
+
+    /// 자리를 옮긴 뒤 그 자리의 차례로 선다 — 프로젝트에 들어갈 때([`App::enter_project`])와 층으로 올라올 때
+    /// ([`App::climb`]). 한 차례를 화면 하나가 들던 때는 A 에서 고른 것이 B 로 따라갔다(moai-r170.zp6 의 진단).
+    pub(super) fn rescope_order(&mut self) {
+        self.order = self.scoped_order();
+    }
+
+    /// 방금 고른 차례를 **지금 선 자리에** 든다 — 프로젝트 안이면 그 프로젝트의 것, 층이면 기본(사용자 결정
+    /// 2026-10-09). 적는 것은 뒤의 [`App::save_look`] 이 차이로 한다.
+    fn keep_order(&mut self) {
+        match self.order_home() {
+            Some(k) => {
+                self.order_projects.insert(k, self.order);
+            }
+            None => self.order_default = self.order,
+        }
+    }
+
     /// 줄마다 보기에 보이는지 다시 센다. 칸은 **목록의 글리프와 같은 자**([`App::column`])로,
     /// 미룸은 물려받은 것까지(`Index::deferred_root`) 읽는다 — 미룬 에픽 밑의 일도 같이 빠진다.
     /// 칸 숨김은 **이 프로젝트의 칸에만** 건다(`View::shows`).
@@ -3441,27 +3531,50 @@ impl App {
         if let Some(a) = look.show_archived {
             self.view.show_archived = a;
         }
-        // **차례와 방향은 한 벌이다**(moai-2kyl 단계 리뷰) — 모르는 차례의 방향을 처음 차례(우선순위)에
-        // 입히면 아무도 안 고른 거꾸로가 선다. 모르는 차례면 방향도 두고, 파일의 둘은 그대로 남는다.
-        let sort_known = match look.sort.as_deref() {
-            None => true,
-            Some(s) => match keys::Order::named(s) {
-                Some(o) => {
-                    self.order.by = o;
-                    true
-                }
-                None => {
-                    problems.push(fill(
+        // **차례 목록이 옛 한 쌍을 이긴다**(moai-r170.8dz, 2026-10-09 사용자 결정). 못 읽은 목록은 알리고 옛 한 쌍으로
+        // 떨어진다 — 그 한 쌍은 이 바이너리가 목록과 함께 첫 필드를 비춰 적은 것이라, 버리고 처음값으로 서는 것보다
+        // 사람이 고른 차례에 가깝다. 파일의 목록은 이 세션이 차례를 고르기 전까지 그대로 남는다(`App::saved`).
+        let listed = look.order.as_deref().and_then(|words| {
+            let s = Self::sorting_of(words);
+            if s.is_none() {
+                problems.push(self.bad_order(crate::user_config::ORDER, words));
+            }
+            s
+        });
+        if let Some(s) = listed {
+            self.order_default = s;
+        } else {
+            // **차례와 방향은 한 벌이다**(moai-2kyl 단계 리뷰) — 모르는 차례의 방향을 처음 차례(우선순위)에
+            // 입히면 아무도 안 고른 거꾸로가 선다. 모르는 차례면 방향도 두고, 파일의 둘은 그대로 남는다.
+            // 옛 `sort_reversed` 는 이제 그 필드의 방향이다 — 제 방향을 뒤집는다.
+            match look.sort.as_deref() {
+                None => {}
+                Some(s) => match keys::Order::named(s) {
+                    Some(o) => {
+                        let one = keys::Ordered::of(o);
+                        let one = if look.sort_reversed == Some(true) { one.flipped() } else { one };
+                        self.order_default = keys::Sorting::of(&[one]).expect("필드 하나");
+                    }
+                    None => problems.push(fill(
                         say(self.site.lang, "tui.look.bad_sort"),
                         &[("word", s), ("known", &keys::Order::ALL.map(keys::Order::name).join("·"))],
-                    ));
-                    false
-                }
-            },
-        };
-        if sort_known && let Some(r) = look.sort_reversed {
-            self.order.reversed = r;
+                    )),
+                },
+            }
         }
+        // 프로젝트마다의 차례 — 못 읽은 것은 그 프로젝트만 알리고 건너뛴다. 그 프로젝트는 기본 차례로 선다.
+        for (path, words) in &look.project_order {
+            match Self::sorting_of(words) {
+                Some(s) => {
+                    self.order_projects.insert(path.clone(), s);
+                }
+                None => {
+                    let at = format!("{}.{}", crate::user_config::project_key(path), crate::user_config::ORDER);
+                    problems.push(self.bad_order(&at, words));
+                }
+            }
+        }
+        self.order = self.scoped_order();
         if let Some(words) = &look.fields {
             // **적은 쪽이 알던 열만 그대로 따른다**(사용자 결정 2026-09-15) — `fields` 에 안 적힌 것이
             // "껐다" 인지 "그 열을 몰랐다" 인지 가르는 것이 `fields_known` 이다. 그 목록에 없는 열은
@@ -3548,8 +3661,13 @@ impl App {
             hide_deferred: Some(self.view.hide_deferred),
             hide_backlog: Some(self.view.hide_backlog),
             show_archived: Some(self.view.show_archived),
-            sort: Some(self.order.by.name().to_string()),
-            sort_reversed: Some(self.order.reversed),
+            // **옛 한 쌍은 기본 차례의 첫 필드를 비춘다**(moai-r170.8dz) — 옛 바이너리는 `order` 를 모르고 이 둘만 읽어,
+            // 안 비추면 그쪽은 이 판이 고른 차례와 무관한 옛 값으로 선다. 낱말은 탐색기의 여섯 필드뿐이라 옛
+            // 바이너리가 못 읽는 값이 여기 안 선다(`id` 는 탐색기의 차례에 없다 — `App::sorting_of`).
+            order: Some(Self::order_words(&self.order_default)),
+            sort: Some(self.order_default.first().by.name().to_string()),
+            sort_reversed: Some(self.order_default.first().reversed()),
+            project_order: self.order_projects.iter().map(|(k, s)| (k.clone(), Self::order_words(s))).collect(),
             fields: Some(
                 view::Field::ALL.into_iter().filter(|f| self.fields.shows(*f)).map(|f| f.name().to_string()).collect(),
             ),
@@ -4247,7 +4365,10 @@ impl App {
             // 이 프로젝트의 칸만 걷는다 — 다른 프로젝트에만 있는 칸 이름은 여기서 아무것도 안 숨겼으니
             // 들고 있는다(`View::show_all`).
             B::ShowAll => self.view.show_all(&self.screen_statuses()),
-            B::Sort(o) => self.order = self.order.press(o),
+            B::Sort(o) => {
+                self.order = self.order.press(o);
+                self.keep_order();
+            }
             _ => return,
         }
         self.regrip(held, stood);
@@ -4704,12 +4825,17 @@ impl App {
     /// 목록의 차례 — 고른 것(`SPC s`)과 그 방향. 칸은 목록의 글리프와 같은 자로 — 묶음은 멤버에서 읽은 칸이다.
     /// 담당은 화면에 선 이름으로. 목록과 보드가 이 하나로 줄을 세운다.
     ///
-    /// **견주는 자는 `moai show --sort` 와 하나다**(moai-r170.f65) — 고른 하나를 필드 하나짜리 차례 목록으로 넘긴다.
-    /// 목록은 스택의 배열이라 견줄 때마다 짓지 않는다.
+    /// **견주는 자는 `moai show --sort` 와 하나다**(moai-r170.f65) — 고른 차례 목록을 `query` 의 필드로 옮겨 넘긴다.
+    /// 목록은 스택의 배열이라 견줄 때마다 힙에 짓지 않는다. 전체 뒤집기는 안 쓴다 — 방향은 필드마다다(`keys::Sorting`).
     fn order_in(&self, site: &Site, a: usize, b: usize) -> std::cmp::Ordering {
+        let mut fields = [crate::query::Field::of(crate::query::SortKey::Priority); keys::Order::ALL.len()];
+        let mine = self.order.fields();
+        for (slot, o) in fields.iter_mut().zip(mine) {
+            *slot = Self::query_field(*o);
+        }
         crate::query::order_by(
-            &[crate::query::Field::of(Self::sort_key(self.order.by))],
-            self.order.reversed,
+            &fields[..mine.len()],
+            false,
             (&site.issues[a], site.column(a)),
             (&site.issues[b], site.column(b)),
             &site.cfg.statuses,
@@ -7865,7 +7991,7 @@ mod tests {
         );
         assert_eq!(keys::Browse::Sort(keys::Order::Priority).state(&ctx), None, "고르지 않은 차례에 표시가 붙었다");
         a.hit("SPC s t Esc");
-        assert_eq!(a.order, keys::Sorting { by: keys::Order::Title, reversed: false }, "다른 키가 거꾸로를 물려받았다");
+        assert_eq!(a.order, keys::Sorting::by(keys::Order::Title), "다른 키가 거꾸로를 물려받았다");
         a.hit("SPC s p Esc");
         assert_eq!(a.order, Default::default());
     }
@@ -11664,6 +11790,81 @@ mod tests {
         assert!(text.contains("sort.by = \"created\"") && text.contains("hidden"), "숨김이 안 적혔다\n{text}");
     }
 
+    /// **차례 목록이 옛 한 쌍을 이기고, 목록이 없으면 옛 한 쌍을 그대로 읽는다**(moai-r170.8dz, 2026-10-09 사용자 결정).
+    /// 옛 `sort_reversed` 는 그 필드의 방향이다. 못 읽은 목록은 알리고 옛 한 쌍으로 떨어지며, 파일의 줄은 이 세션이
+    /// 차례를 고르기 전까지 그대로다. **적을 때는 목록과 함께 옛 한 쌍이 첫 필드를 비춘다** — 옛 바이너리가 가장 가까운
+    /// 차례로 선다.
+    #[test]
+    fn the_order_list_wins_over_the_old_pair_and_mirrors_into_it() {
+        use keys::{Order, Ordered, Sorting};
+        let s = scratch("look-order");
+        let user = s.join("user.toml");
+        let open = |text: &str| {
+            std::fs::write(&user, text).unwrap();
+            let mut a = App::new(Vec::new(), cfg(), Path::new());
+            a.user_config = Some(user.clone());
+            a.load_look();
+            a
+        };
+        let created_up = Sorting::of(&[Ordered::of(Order::Created).flipped()]).unwrap();
+        let a = open("[tui]\nsort = \"created\"\nsort_reversed = true\n");
+        assert_eq!(a.order, created_up, "목록이 없는데 옛 한 쌍을 안 읽었다");
+
+        let a = open("[tui]\norder = [\"status\", \"title:desc\"]\nsort = \"created\"\nsort_reversed = true\n");
+        let listed = Sorting::of(&[Ordered::of(Order::Column), Ordered::of(Order::Title).flipped()]).unwrap();
+        assert_eq!(a.order, listed, "목록이 옛 한 쌍을 못 이겼다");
+        assert_eq!(a.notice, None);
+
+        // 못 읽은 목록 — `id` 는 탐색기의 차례에 없고, 두 번 선 필드는 거절이다. 알리고 옛 한 쌍으로 선다.
+        for bad in ["[\"priority\", \"id\"]", "[\"title\", \"title:desc\"]", "[]", "[\"nope\"]"] {
+            let text = format!("[tui]\norder = {bad}\nsort = \"created\"\nsort_reversed = true\n");
+            let mut a = open(&text);
+            assert_eq!(a.order, created_up, "{bad}");
+            assert!(a.notice.clone().unwrap_or_default().contains("tui.order"), "{bad}: {:?}", a.notice);
+            // 고르기 전까지는 파일의 줄이 그대로다 — 다른 보기 토글은 그 줄을 안 건드린다.
+            a.hit("SPC v 4 Esc");
+            let now = std::fs::read_to_string(&user).unwrap();
+            assert!(now.contains(&format!("order = {bad}")), "못 읽은 목록을 토글이 지웠다\n{now}");
+        }
+
+        // 고르면 목록과 옛 한 쌍을 함께 적는다 — 첫 필드가 제 방향과 반대면 `sort_reversed = true`.
+        let mut a = open("[tui]\nhidden = []\n");
+        a.hit("SPC s c Esc");
+        a.hit("SPC s c Esc");
+        let text = std::fs::read_to_string(&user).unwrap();
+        assert!(
+            text.contains("order = [\"created:asc\"]")
+                && text.contains("sort = \"created\"")
+                && text.contains("sort_reversed = true"),
+            "{text}"
+        );
+        // 옛 바이너리가 읽는 것은 옛 한 쌍뿐이다 — 그 둘만 남겨도 같은 차례로 선다.
+        let old = text.lines().filter(|l| !l.starts_with("order")).collect::<Vec<_>>().join("\n");
+        assert_eq!(open(&old).order, created_up, "옛 한 쌍이 고른 차례를 안 비췄다");
+    }
+
+    /// **탐색기의 차례 낱말은 `query` 의 차례와 한 말을 한다**(moai-r170.8dz) — 제 방향(`Order::falls` 대
+    /// `SortKey::default_dir`)이 같고, 적은 낱말을 같은 차례로 되읽는다. 조각이라 한 벌 더 적은 것이 갈리면 설정에 적힌
+    /// `created` 가 탐색기와 `moai show --sort` 에서 다른 방향이 된다.
+    #[test]
+    fn explorer_sort_words_round_trip_through_query() {
+        use keys::{Order, Ordered, Sorting};
+        for o in Order::ALL {
+            let dir = App::sort_key(o).default_dir();
+            assert_eq!(o.falls(), dir == crate::query::Dir::Desc, "{o:?} 의 제 방향이 두 벌로 갈렸다");
+        }
+        let s = Sorting::of(&[
+            Ordered::of(Order::Column),
+            Ordered::of(Order::Updated).flipped(),
+            Ordered::of(Order::Title),
+            Ordered::of(Order::Created),
+        ])
+        .unwrap();
+        let words = App::order_words(&s);
+        assert_eq!(words, ["status", "updated:asc", "title", "created"]);
+        assert_eq!(App::sorting_of(&words), Some(s));
+    }
+
     /// **깨진 설정은 한 곳에서만 말한다**(moai-5jsn) — 층이 없다는 배너가 파싱 오류를 대므로 보기 알림은 같은
     /// 말을 다시 안 한다. 띄우는 길(`cmd::tui`)과 같은 차례로 보기를 입히고 층을 얹는다.
     #[test]
@@ -11720,10 +11921,7 @@ mod tests {
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(c.fields.shows(view::Field::Assignee), "옆 탐색기가 켠 열을 지웠다\n{text}");
         // 처음 보기가 done 을 보이니(moai-muit) b 의 `SPC v 4` 는 done 을 숨긴 것이다.
-        assert!(
-            c.view.hides(crate::config::DONE) && c.order == keys::Sorting { by: keys::Order::Updated, reversed: false },
-            "{text}"
-        );
+        assert!(c.view.hides(crate::config::DONE) && c.order == keys::Sorting::by(keys::Order::Updated), "{text}");
     }
 
     /// **숨김은 이 프로젝트의 칸에만 건다**(moai-2kyl 단계 리뷰). 다른 프로젝트에서 숨긴 칸 이름이 이 프로젝트의

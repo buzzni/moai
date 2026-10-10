@@ -217,6 +217,8 @@ pub enum Want {
     Words,
     /// 정수 — 목록이 가져가는 몫(`list_width`·`list_height`, moai-irrj.mhr)과 위키 창의 몫(`wiki_width`, moai-p61w)
     Number,
+    /// 표 — 프로젝트마다의 보기(`[tui.project."<경로>"]`, moai-r170.8dz)
+    Table,
 }
 
 /// 설정을 읽다 만난 것([`Registry::problems`], moai-aiid) — **말이 아니라 자료다**
@@ -1064,6 +1066,8 @@ impl Doc {
             show_archived: look_one(t, SHOW_ARCHIVED, Want::Bool, Item::as_bool, &mut problems),
             sort: look_one(t, SORT, Want::Word, word, &mut problems),
             sort_reversed: look_one(t, SORT_REVERSED, Want::Bool, Item::as_bool, &mut problems),
+            order: look_words(t, ORDER, &mut problems),
+            project_order: look_project_orders(t, &mut problems),
             fields: look_words(t, FIELDS, &mut problems),
             fields_known: look_words(t, FIELDS_KNOWN, &mut problems),
             detail: look_one(t, DETAIL, Want::Bool, Item::as_bool, &mut problems),
@@ -1091,7 +1095,10 @@ impl Doc {
     /// 락 안에서 다시 읽는 까닭이 사라지는 조용한 손실이다. 그래서
     /// - **이 세션이 안 바꾼 키는 건드리지 않는다.** 모르는 낱말·모르는 모양(`sort = { … }`)·틀린 값도 그대로다
     /// - **낱말 배열(`hidden`·`fields`)은 뺀 낱말만 빼고 더한 낱말만 끝에 더한다** — 남이 더한 낱말은 남는다
-    /// - **차례와 방향(`sort`·`sort_reversed`)은 한 벌이다** — 하나를 고르면 둘을 함께 적는다
+    /// - **차례와 방향(`order`·`sort`·`sort_reversed`)은 한 벌이다** — 하나를 고르면 셋을 함께 적는다. `order` 는
+    ///   낱말 배열이지만 차례가 뜻이라 통째로 갈아 끼운다(남이 더한 낱말을 지키는 `merge_words` 를 안 지난다)
+    /// - **프로젝트마다의 차례(`[tui.project."<경로>"] order`)는 이 세션이 바꾼 그 프로젝트만 적는다** — 그 표의 다른
+    ///   키는 그대로다. 옛 한 쌍을 그 표에는 안 비춘다: 옛 바이너리는 그 표를 아예 안 읽는다
     /// - **값만 바꾼다** — 키 위의 주석·값 뒤의 주석·여러 줄로 벌인 배열은 그대로다(`put_value`)
     /// - **바꿀 키가 표 모양이면 그 키만 안 적는다**(moai-j7r3, moai-jr3z) — 낱값으로 덮으면 무엇을 적어 둔 것인지
     ///   사라진다. 나머지 키는 적고, 건너뛴 키의 까닭을 낸다
@@ -1120,7 +1127,7 @@ impl Doc {
         let mut hide_deferred = base.hide_deferred != new.hide_deferred;
         let mut hide_backlog = base.hide_backlog != new.hide_backlog;
         let mut show_archived = base.show_archived != new.show_archived;
-        let mut sort = (&base.sort, base.sort_reversed) != (&new.sort, new.sort_reversed);
+        let mut sort = (&base.sort, base.sort_reversed, &base.order) != (&new.sort, new.sort_reversed, &new.order);
         let mut fields = base.fields != new.fields;
         // **`fields_known` 도 `base != new` 로 잰다**(moai-fdq2). 한때 이 키만 "적을 것이 있으면 늘
         // 본다"(`is_some()`)였다 — 더하기로만 적는 키라 `base` 를 안 쓰는 것과 같은 결로 둔 것인데,
@@ -1181,6 +1188,8 @@ impl Doc {
         odd(&[if t.contains_key(HIDE_BACKLOG) { HIDE_BACKLOG } else { HIDE_IDEAS_LEGACY }], false, &mut hide_backlog);
         odd(&[SHOW_ARCHIVED], false, &mut show_archived);
         odd(&[SORT, SORT_REVERSED], false, &mut sort);
+        // `order` 는 배열이 제 모양이다 — 위의 둘이 이미 막았으면 안 본다(`odd` 가 꺼진 깃발에서 돌아선다).
+        odd(&[ORDER], true, &mut sort);
         odd(&[FIELDS], true, &mut fields);
         odd(&[FIELDS_KNOWN], true, &mut known);
         odd(&[DETAIL], false, &mut detail);
@@ -1216,6 +1225,7 @@ impl Doc {
             changed |= put_value(t, SHOW_ARCHIVED, new.show_archived.map(toml_edit::Value::from), &mut left);
         }
         if sort {
+            changed |= put_value(t, ORDER, new.order.as_deref().map(words_value), &mut left);
             changed |= put_value(t, SORT, new.sort.as_deref().map(toml_edit::Value::from), &mut left);
             changed |= put_value(t, SORT_REVERSED, new.sort_reversed.map(toml_edit::Value::from), &mut left);
         }
@@ -1253,6 +1263,18 @@ impl Doc {
         }
         if wiki_width {
             changed |= put_value(t, WIKI_WIDTH, new.wiki_width.map(toml_edit::Value::from), &mut left);
+        }
+        // 프로젝트마다의 차례 — 이 세션이 바꾼 프로젝트만. **지우지 않는다**: 탐색기는 한 프로젝트의 차례를 걷는
+        // 길을 안 내니(`App::keep_order`), `new` 에 없는 열쇠는 이 세션이 안 읽은(못 읽은) 표다.
+        let tui = self.doc.get_mut(TUI).expect("방금 섰다");
+        for (path, words) in &new.project_order {
+            if base.project_order.get(path) == Some(words) {
+                continue;
+            }
+            match put_project_order(tui, path, words) {
+                Ok(c) => changed |= c,
+                Err(why) => skipped.push(why),
+            }
         }
         self.dirty |= changed;
         // 끝 줄을 지워 표 밖으로 나갈 주석(moai-liij).
@@ -1295,6 +1317,15 @@ const HIDE_IDEAS_LEGACY: &str = "hide_ideas";
 const SHOW_ARCHIVED: &str = "show_archived";
 const SORT: &str = "sort";
 const SORT_REVERSED: &str = "sort_reversed";
+/// 차례 목록(moai-r170.8dz) — `["priority", "updated:desc"]`. 낱말은 `moai show --sort` 와 같은 글이다
+/// (`query::parse_order`·`query::Field` 의 Display). **있으면 [`SORT`]·[`SORT_REVERSED`] 를 이긴다** — 그 한 쌍은
+/// 옛 바이너리가 읽도록 첫 필드를 비춰 함께 적는다(`App::look_now`).
+pub(crate) const ORDER: &str = "order";
+/// 프로젝트마다의 보기 — `[tui.project."<프로젝트 경로>"]`(moai-r170.8dz). 그 프로젝트 안에서는 그 표의 값이
+/// `[tui]` 의 것을 이긴다. 지금 그 표에 사는 것은 [`ORDER`] 하나고, 모르는 키는 그대로 둔다.
+///
+/// 뿌리의 `[[project]]`([`PROJECT`])와 **같은 낱말이지만 다른 자리다** — 그쪽은 등록 목록, 이쪽은 `[tui]` 밑의 보기다.
+const PER_PROJECT: &str = "project";
 const FIELDS: &str = "fields";
 const DETAIL: &str = "detail";
 /// 상세 칸이 서는 자리(moai-2g7d) — [`DETAIL`] 과 **따로다**. 그쪽은 보이나 마나고 이것은 어디에
@@ -1331,6 +1362,8 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// detail_at = "right"
 /// layout = "board"
 /// timezone = "Asia/Seoul"
+/// # 차례 목록 — 있으면 아래 옛 한 쌍을 이긴다. 그 한 쌍은 옛 바이너리가 읽도록 첫 필드를 비춰 함께 적힌다.
+/// order = ["updated", "priority"]
 /// sort = "updated"
 /// sort_reversed = false
 /// fields = ["id", "priority", "tally", "assignee"]
@@ -1342,6 +1375,10 @@ const FIELDS_KNOWN: &str = "fields_known";
 /// list_height = 70
 /// # 위키 창의 페이지 목록이 가져가는 몫(%) — 그 창의 선을 끈 적이 있을 때만 선다. 없으면 list_width 를 따른다.
 /// wiki_width = 30
+///
+/// # 그 프로젝트 안에서는 이 차례가 이긴다(moai-r170.8dz).
+/// [tui.project."/home/me/work/argos"]
+/// order = ["status", "title"]
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Look {
@@ -1352,6 +1389,13 @@ pub struct Look {
     pub show_archived: Option<bool>,
     pub sort: Option<String>,
     pub sort_reversed: Option<bool>,
+    /// 차례 목록 — [`ORDER`](moai-r170.8dz). **낱말로 든다**: 읽는 것은 탐색기다(`App::apply_look` 이
+    /// `query::parse_order` 로). 있으면 `sort`·`sort_reversed` 를 이기고, 못 읽으면 알리고 그 한 쌍으로 떨어진다.
+    pub order: Option<Vec<String>>,
+    /// 프로젝트마다의 차례 — `[tui.project."<경로>"] order`([`PER_PROJECT`]). 열쇠는 **파일에 적힌 경로 글 그대로**다 —
+    /// 손으로 적은 철자를 이 바이너리가 고쳐 쓰면 같은 디렉터리의 표가 두 벌 선다. 그 프로젝트를 찾는 것은
+    /// 탐색기가 [`same_dir`] 로 한다. 못 읽은 표는 여기 없다(알림이 대고, 파일의 그 표는 그대로 남는다).
+    pub project_order: BTreeMap<String, Vec<String>>,
     pub fields: Option<Vec<String>>,
     /// **적은 쪽이 알던 열 전부**(moai-3fnf 리뷰, 사용자 결정 2026-09-15). `fields` 는 켠 것만 담아
     /// "안 적혔다" 가 "껐다" 와 "그 열을 몰랐다" 둘 다를 뜻했다 — 그래서 새 열이 옛 설정을 가진
@@ -1408,6 +1452,38 @@ pub struct Look {
 pub fn read_look(path: Option<&Path>) -> (Look, Vec<LookTrouble>) {
     let reg = read(path);
     (reg.look, reg.look_problems)
+}
+
+/// `[tui.project."<경로>"]` 들의 차례(moai-r170.8dz). **관대하게 읽는다** — 표가 아닌 자리·틀린 `order` 는 그 프로젝트만
+/// 건너뛰고 까닭을 낸다. 까닭의 키는 `project."<경로>".order` 꼴로 달아, 알림이 `tui.` 를 붙이면 파일의 자리가 그대로
+/// 읽힌다([`crate::view::look_trouble`]).
+fn look_project_orders(t: &dyn toml_edit::TableLike, problems: &mut Vec<LookTrouble>) -> BTreeMap<String, Vec<String>> {
+    let mut out = BTreeMap::new();
+    let Some(projects) = look_one(t, PER_PROJECT, Want::Table, Item::as_table_like, problems) else {
+        return out;
+    };
+    for (path, entry) in projects.iter() {
+        let at = project_key(path);
+        let Some(entry) = entry.as_table_like() else {
+            problems.push(LookTrouble::Want { key: at, want: Want::Table, found: entry.type_name().to_string() });
+            continue;
+        };
+        let mut mine = Vec::new();
+        if let Some(words) = look_words(entry, ORDER, &mut mine) {
+            out.insert(path.to_string(), words);
+        }
+        problems.extend(mine.into_iter().map(|p| match p {
+            LookTrouble::Want { key, want, found } => LookTrouble::Want { key: format!("{at}.{key}"), want, found },
+            LookTrouble::NotAWord { key, value } => LookTrouble::NotAWord { key: format!("{at}.{key}"), value },
+            other => other,
+        }));
+    }
+    out
+}
+
+/// 알림이 대는 그 프로젝트 표의 자리 — `project."/a/b"`. 경로는 늘 따옴표 열쇠다(`/`·`.` 가 든다).
+pub(crate) fn project_key(path: &str) -> String {
+    format!("{PER_PROJECT}.{}", toml_edit::Key::new(path).display_repr())
 }
 
 fn look_words(t: &dyn toml_edit::TableLike, key: &str, problems: &mut Vec<LookTrouble>) -> Option<Vec<String>> {
@@ -1493,6 +1569,54 @@ fn plain(item: &Item, arrays: bool) -> bool {
     matches!(item, Item::Value(v) if !v.is_inline_table() && (arrays || !v.is_array()))
 }
 
+/// 낱말 배열 값 — 낱말마다 [`quoted`] 를 지나 안 보이는 글자도 읽히게 적는다(`merge_words` 가 새로 적을 때와 같다).
+fn words_value(words: &[String]) -> toml_edit::Value {
+    words.iter().map(|w| quoted(None, w)).collect::<toml_edit::Array>().into()
+}
+
+/// `[tui.project."<경로>"] order` 를 적는다(moai-r170.8dz, `Doc::merge_look`). 바뀐 것이 있으면 참.
+///
+/// **없는 표는 세우고, 있는 표는 그 키만 고친다** — 그 표의 다른 키(새 바이너리가 더할 보기)는 그대로다. 사이의
+/// `[tui.project]` 는 머리 없는 표로 세워(`set_implicit`) 파일에는 `[tui.project."/a"]` 한 줄만 선다. `[tui]` 가
+/// 인라인 표(`tui = { … }`)면 그 밑도 인라인 표로 세운다 — 표 머리를 인라인 표 안에 둘 수는 없다.
+///
+/// **자리가 표 모양이 아니면 그 프로젝트만 안 적는다**(`project = 3`·`"/a" = "x"`·`order = { … }`) — 무엇을 적어
+/// 둔 것인지 모르는 채 덮으면 되돌릴 수 없다. `[tui]` 의 다른 키를 건너뛸 때와 같은 까닭을 낸다.
+fn put_project_order(tui: &mut Item, path: &str, words: &[String]) -> Result<bool, WriteTrouble> {
+    fn table<'a>(parent: &'a mut Item, key: &str, at: &str) -> Result<&'a mut Item, WriteTrouble> {
+        let inline = parent.is_inline_table();
+        let parent = parent.as_table_like_mut().expect("부르는 쪽이 표인 것을 봤다");
+        if !parent.contains_key(key) {
+            let item = if inline {
+                Item::Value(toml_edit::Value::InlineTable(toml_edit::InlineTable::new()))
+            } else {
+                let mut t = Table::new();
+                t.set_implicit(true);
+                Item::Table(t)
+            };
+            parent.insert(key, item);
+        }
+        let item = parent.get_mut(key).expect("방금 섰다");
+        // 점 키(`project.x = 1`)는 표처럼 읽히지만 그 밑에 표 머리를 세우면 모양이 바뀐다 — 사람의 것이라 안 덮는다.
+        let dotted = item.as_table_like().is_some_and(|t| t.is_dotted());
+        if item.is_table_like() && !dotted {
+            return Ok(item);
+        }
+        Err(WriteTrouble::LookKeyNotPlain { key: at.to_string(), found: item.type_name().to_string() })
+    }
+    let projects = table(tui, PER_PROJECT, PER_PROJECT)?;
+    let at = project_key(path);
+    let entry = table(projects, path, &at)?;
+    let entry = entry.as_table_like_mut().expect("방금 표인 것을 봤다");
+    if let Some(item) = entry.get(ORDER).filter(|i| !plain(i, true)) {
+        return Err(WriteTrouble::LookKeyNotPlain {
+            key: format!("{at}.{ORDER}"),
+            found: item.type_name().to_string(),
+        });
+    }
+    Ok(write_value(entry, ORDER, words_value(words)))
+}
+
 /// 값 하나를 적거나(`Some`, [`write_value`]) 키를 지운다(`None`, [`drop_key`] — 표 밖으로 내보낼 주석은 `left` 에
 /// 쌓는다). 바뀐 것이 있으면 참(`Doc::merge_look`·`Doc::set_hue`).
 fn put_value(t: &mut dyn toml_edit::TableLike, key: &str, v: Option<toml_edit::Value>, left: &mut String) -> bool {
@@ -1529,6 +1653,12 @@ pub(crate) fn write_value(t: &mut dyn toml_edit::TableLike, key: &str, mut v: to
             // 목록의 몫(`list_width`·`list_height`, moai-irrj.mhr)이 처음 든 수다 — 없으면 같은 몫을 다시 적어도
             // 파일을 다시 쓴다.
             (toml_edit::Value::Integer(a), toml_edit::Value::Integer(b)) => a.value() == b.value(),
+            // 차례 목록(`order`, moai-r170.8dz)이 처음 통째로 적는 배열이다 — 옆 탐색기가 같은 차례를 이미 적었으면
+            // 다시 안 쓴다. 낱말 배열만 견준다: 낱말 아닌 원소가 섰으면 다르다고 보고 갈아 끼운다.
+            (toml_edit::Value::Array(a), toml_edit::Value::Array(b)) => {
+                a.len() == b.len()
+                    && a.iter().zip(b.iter()).all(|(x, y)| x.as_str().is_some() && x.as_str() == y.as_str())
+            }
             _ => false,
         };
         if same {
@@ -3201,6 +3331,9 @@ mod tests {
             show_archived: Some(true),
             sort: Some("updated".into()),
             sort_reversed: Some(false),
+            // 차례 목록과 프로젝트마다의 차례도 같은 길로 돈다(moai-r170.8dz) — 낱말과 차례가 그대로 되읽혀야 한다.
+            order: Some(vec!["updated".into(), "title:desc".into()]),
+            project_order: [("/w/argos".to_string(), vec!["status".to_string(), "title".to_string()])].into(),
             fields: Some(vec!["id".into(), "assignee".into()]),
             fields_known: None,
             detail: Some(false),
@@ -3231,6 +3364,64 @@ mod tests {
         upd(&path, |doc| doc.merge_look(&look, &Look { sort: Some("title".into()), ..Look::default() })).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("hidden") && text.contains("sort = \"title\"") && text.contains("extra = 1"), "{text}");
+    }
+
+    /// **프로젝트마다의 차례는 그 프로젝트의 `order` 하나만 고친다**(moai-r170.8dz). 그 표의 다른 키·주석·옆 프로젝트의
+    /// 표는 그대로고, 안 바꾼 것은 한 바이트도 안 움직인다. 표 모양이 아닌 자리는 읽기가 알리고 쓰기가 건너뛴다.
+    #[test]
+    fn a_project_order_touches_only_its_own_key() {
+        let d = scratch("look-project-order");
+        let path = d.join("config.toml");
+        let src = "[tui]\nsort = \"title\"\n\n[tui.project.\"/w/a\"]\nzoom = 2  # 새 바이너리의 키\norder = [\n  \"title\",\n]\n\n[tui.project.\"/w/b\"]\norder = [\"created\"]\n";
+        std::fs::write(&path, src).unwrap();
+        let (look, problems) = read_look(Some(&path));
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(look.project_order.get("/w/a"), Some(&vec!["title".to_string()]));
+        assert_eq!(look.project_order.get("/w/b"), Some(&vec!["created".to_string()]));
+        assert_eq!(look.order, None);
+
+        // 읽은 그대로 다시 적으면 파일이 안 바뀐다 — 다른 키 하나를 바꿔도 프로젝트의 표는 바이트째 그대로다.
+        upd(&path, |doc| doc.merge_look(&look, &look)).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+        upd(&path, |doc| doc.merge_look(&look, &Look { hide_deferred: Some(true), ..look.clone() })).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(&src["[tui]\nsort = \"title\"\n".len()..]), "프로젝트의 표가 움직였다\n{text}");
+
+        // `/w/a` 의 차례만 바꾼다 — `zoom` 과 옆 표는 그대로다. 옛 한 쌍은 프로젝트의 표로 안 비춘다.
+        let mut new = look.clone();
+        new.project_order.insert("/w/a".into(), vec!["status".into(), "updated:asc".into()]);
+        new.project_order.insert("/w/c".into(), vec!["assignee".into()]);
+        upd(&path, |doc| doc.merge_look(&look, &new)).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("zoom = 2  # 새 바이너리의 키")
+                && text.contains("[tui.project.\"/w/b\"]\norder = [\"created\"]\n")
+                && text.contains("[tui.project.\"/w/c\"]\norder = [\"assignee\"]\n")
+                && !text.contains("[tui.project]")
+                && text.matches("sort").count() == 1,
+            "{text}"
+        );
+        assert_eq!(read_look(Some(&path)).0.project_order, new.project_order, "{text}");
+
+        // 표 모양이 아닌 자리 — 읽기는 그 자리를 대고, 쓰기는 그 프로젝트만 건너뛰고 나머지 보기는 적는다.
+        for odd in [
+            "[tui]\nproject = 3\n",
+            "[tui]\nproject.\"/w/a\" = \"x\"\n",
+            "[tui.project.\"/w/a\"]\norder = { by = \"title\" }\n",
+        ] {
+            std::fs::write(&path, odd).unwrap();
+            let (look, problems) = read_look(Some(&path));
+            assert!(!problems.is_empty() && look.project_order.is_empty(), "{odd}: {problems:?}");
+            let mut new = Look { hidden: Some(vec!["done".into()]), ..look.clone() };
+            new.project_order.insert("/w/a".into(), vec!["title".into()]);
+            let skipped = upd(&path, |doc| doc.merge_look(&look, &new)).unwrap();
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                matches!(skipped.as_slice(), [WriteTrouble::LookKeyNotPlain { .. }]) && text.contains("hidden"),
+                "{odd}: {skipped:?}\n{text}"
+            );
+            assert!(text.contains(odd.lines().last().unwrap()), "손으로 적은 모양을 덮었다\n{text}");
+        }
     }
 
     /// **한 번의 읽기가 등록과 보기를 함께 낸다**(moai-u8cs) — 보기의 까닭은 따로 읽던 때의 글 그대로 보기에만
@@ -3489,6 +3680,8 @@ mod tests {
             show_archived: None,
             sort: Some("updated".into()),
             sort_reversed: Some(false),
+            order: None,
+            project_order: Default::default(),
             fields: Some(vec!["id".into()]),
             fields_known: None,
             detail: Some(true),
