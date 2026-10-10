@@ -394,6 +394,19 @@ pub fn dug<'a>(_sides: &'a [SideFloor], _mine: &'a Floor) -> Dug<'a> {
 /// 제 스냅샷은 그대로 낸다 — 그런 것은 `trouble` 로 말만 한다. 스냅샷 파일이
 /// 없는 워크트리는 moai 를 들이기 전에 갈라진 브랜치라 **말하지도 않는다.**
 pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
+    gather_with(repo, worktree, true)
+}
+
+/// 옆을 겹치되 **집은 표식은 안 읽는** [`gather`] — 겹친 줄의 id 와 `trouble`·`unfound` 만 쓰는 쪽
+/// (`moai read` 의 걷기가 지킬 id, `cmd::read::keep_for_prune`)이 부른다. 표식은 [`Origin`] 의 `⎇`
+/// 이름에만 들고 겹치는 줄은 안 바꾸니, 그쪽이 옆 워크트리마다 표식 파일을 여는 값을 치를 까닭이 없다.
+/// 그래서 여기서 낸 [`Origin::working`] 은 이름으로만 답한다 — 화면에 넘기지 않는다.
+pub fn gather_unmarked(repo: &Repo) -> crate::fail::R<Gathered> {
+    gather_with(repo, true, false)
+}
+
+/// [`gather`] 와 [`gather_unmarked`] 의 몸 — `marks` 가 거짓이면 [`marks_of`] 를 안 부른다.
+fn gather_with(repo: &Repo, worktree: bool, marks: bool) -> crate::fail::R<Gathered> {
     let load = repo.read()?;
     if !worktree {
         return Ok(Gathered {
@@ -415,6 +428,15 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
     let mut named = Vec::new();
     // HEAD 가 움직인 것도 다시 읽을 까닭이다 — **`others_of` 가 HEAD 를 읽기 전에** 잰다.
     let mut watched = heads(&repo.root);
+    // **부른 자리가 딸린 워크트리면 그 워크트리는 옆이 아니다**(moai-jn4d.adc). moai-y7go 뒤로 거기서 친
+    // `moai` 는 루트의 트래커를 읽어 `repo.root` 가 주 체크아웃이 되고, [`others_of`] 는 그 꼭대기로 가르니
+    // 제 워크트리가 옆 목록에 든다 — 그러면 갈라질 때의 낡은 사본이 겹치고, 제 이름과 집은 표식이
+    // [`Origin`] 에 들어 탐색기가 제 줄에 `⎇ <제 가지>` 를 단다. 그 꼭대기는 git 을 더 띄우지 않고 `.git`
+    // 이 선 첫 조상([`own_git`])으로 찾는다. 루트에서 불렀으면 그 꼭대기는 이미 `others_of` 가 뺐다.
+    // [`fresh`] 는 다른 설계라(거기서는 주 체크아웃이 옆이다) 이 자를 안 쓰고, [`workplaces`] 는 제
+    // 워크트리도 자리로 대야 하니 거기도 안 쓴다.
+    let caller =
+        (repo.here() != repo.root.as_path()).then(|| own_git(repo.here()).map(|(top, ..)| real(top))).flatten();
     match others_of(&repo.root) {
         Err(why) => unfound = Some(why),
         Ok((me, trees)) => {
@@ -422,6 +444,10 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
             let here: std::collections::HashSet<&str> = load.issues.iter().map(|i| i.id.as_str()).collect();
             let mut bases = Bases::new();
             for (tree, root) in trees {
+                // 겹치지도, 이름을 들지도, 스냅샷을 지켜보지도 않는다 — 위 `caller` 의 까닭이다.
+                if caller.as_ref().is_some_and(|top| real(&tree.path) == *top) {
+                    continue;
+                }
                 // **마일스톤 워크트리는 겹치지 않는다**([`is_milestone`]). 트래커를 거기 쓰지 않는 것이
                 // 규약이라 그 스냅샷은 갈라질 때(또는 develop 을 받을 때)의 사본뿐이다 — 겹쳐서 보탤 수 있는
                 // 것은 낡은 줄밖에 없고, 그 줄이 루트보다 늦어 보이는 판(그 자리에서 `MOAI_HERE=1` 로 쓴
@@ -436,7 +462,7 @@ pub fn gather(repo: &Repo, worktree: bool) -> crate::fail::R<Gathered> {
                 // 훅([`held_elsewhere`])이 읽는 그 표식이다. 이름이 id 가 아닌 워크트리(에이전트 격리)가
                 // 집은 줄은 이것으로만 `⎇` 를 단다. 표식 파일은 지켜보지 않는다 — 그것을 고치는 것은
                 // 시작 칸을 드나드는 `moai mv` 뿐이고, 그 쓰기가 이미 지켜보는 루트의 트래커를 바꾼다.
-                let marked = marks_of(&tree);
+                let marked = if marks { marks_of(&tree) } else { BTreeSet::new() };
                 match crate::store::read_snapshot(&root) {
                     unread @ (Err(_) | Ok(None)) => {
                         match unread {
@@ -2030,6 +2056,79 @@ mod tests {
         assert_eq!(got.origin.working("t-0001"), Some("worktree-agent-x"), "겹친 워크트리의 표식을 안 봤다");
         assert_eq!(got.origin.working("t-0002"), Some("worktree-agent-y"), "이름만 든 워크트리의 표식을 안 봤다");
         assert_eq!(got.origin.working("t-0003"), None, "적지도 않은 줄을 옆이 쥐었다고 했다");
+    }
+
+    /// **딸린 워크트리에서 부르면 그 워크트리는 옆이 아니다**(moai-jn4d.adc). moai-y7go 뒤로 거기서 연
+    /// 저장소는 루트의 트래커를 읽어 `repo.root` 가 주 체크아웃이고, 옆을 그 꼭대기로만 가르던 판은 제
+    /// 워크트리를 옆으로 셌다 — 갈라질 때의 낡은 사본이 루트보다 늦어 보이면 제 줄 위에 겹치고, 제 이름과
+    /// 집은 표식이 [`Origin`] 에 들어 탐색기가 제 줄에 `⎇ worktree-t-1` 을 달았다. 진짜 옆(`t-2`)은 그대로
+    /// 겹치고 이름을 단다. 사본을 못 읽는 갈래(이름만 드는 길)도 같다.
+    #[test]
+    fn the_callers_own_worktree_is_not_a_sibling() {
+        let scratch = crate::scratch::Scratch::fenced("gather-own-tree");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../t-1", "-b", "worktree-t-1"]);
+        run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);
+        let row = |id: &str, status: &str, at: &str| {
+            format!(
+                "{{\"id\":\"{id}\",\"title\":\"일\",\"status\":\"{status}\",\"created_at\":\"2026-09-11T00:00:00Z\",\
+                 \"updated_at\":\"{at}\",\"status_since\":\"{at}\"}}\n"
+            )
+        };
+        let (old, late) = ("2026-09-11T00:00:00Z", "2026-09-12T00:00:00Z");
+        let root = [row("t-0001", "todo", old), row("t-0003", "todo", old)].concat();
+        // 제 사본은 t-0001 을, 옆 사본은 t-0003 을 루트보다 늦게 고친 것으로 보인다.
+        let mine = [row("t-0001", "in_progress", late), row("t-0003", "todo", old)].concat();
+        let theirs = [row("t-0001", "todo", old), row("t-0003", "in_progress", late)].concat();
+        for (dir, rows) in [(main.clone(), &root), (base.join("t-1"), &mine), (base.join("t-2"), &theirs)] {
+            std::fs::create_dir_all(dir.join(".moai")).unwrap();
+            std::fs::write(dir.join(".moai/config.toml"), "prefix = \"t\"\n").unwrap();
+            std::fs::write(dir.join(".moai/issues.jsonl"), rows).unwrap();
+        }
+        std::fs::write(main.join(".git/worktrees/t-1").join(HELD), "t-0005\n").unwrap();
+        std::fs::write(main.join(".git/worktrees/t-2").join(HELD), "t-0004\n").unwrap();
+
+        let open = || {
+            let crate::store::Opened::Repo(repo) = Repo::open(&base.join("t-1"), || crate::i18n::Lang::Ko).unwrap()
+            else {
+                panic!("저장소가 안 열렸다")
+            };
+            assert_eq!(real(&repo.root), real(&main), "시험의 전제 — 트래커가 루트로 옮겨 갔다");
+            assert_eq!(real(repo.here()), real(&base.join("t-1")), "시험의 전제 — 부른 자리는 t-1 이다");
+            repo
+        };
+        let got = gather(&open(), true).unwrap();
+        let status = |g: &Gathered, id: &str| {
+            g.load.issues.iter().find(|i| i.id == id).map(|i| i.status.as_str().to_string()).unwrap()
+        };
+        assert_eq!(got.origin.branch("t-0001"), None, "제 워크트리의 낡은 사본을 겹쳤다");
+        assert_eq!(status(&got, "t-0001"), "todo", "제 사본의 줄이 루트의 줄을 덮었다");
+        assert!(!got.origin.labels().contains(&"worktree-t-1"), "{:?}", got.origin.labels());
+        assert!(!got.origin.named_only().contains(&"worktree-t-1"), "{:?}", got.origin.named_only());
+        for id in ["t-0001", "t-0005"] {
+            assert_eq!(got.origin.working(id), None, "{id}: 제 이름이나 표식으로 `⎇` 를 단다");
+        }
+        assert!(
+            got.watched.iter().all(|(p, _)| !p.starts_with(base.join("t-1"))),
+            "제 사본을 지켜본다 — {:#?}",
+            got.watched
+        );
+        // 진짜 옆은 그대로다.
+        assert_eq!(got.origin.branch("t-0003"), Some("worktree-t-2"), "옆의 줄을 안 겹쳤다");
+        assert_eq!(got.origin.working("t-0004"), Some("worktree-t-2"), "옆의 표식을 안 봤다");
+
+        // 사본을 못 읽는 갈래 — 이름만 드는 길로도 제 이름이 안 든다.
+        std::fs::remove_file(base.join("t-1/.moai/issues.jsonl")).unwrap();
+        std::fs::create_dir_all(base.join("t-1/.moai/issues.jsonl")).unwrap();
+        let got = gather(&open(), true).unwrap();
+        assert!(!got.origin.named_only().contains(&"worktree-t-1"), "{:?}", got.origin.named_only());
+        assert_eq!(got.origin.working("t-0005"), None, "이름만 드는 길로 제 표식을 들었다");
+        assert!(got.trouble.is_empty(), "제 사본을 옆의 깨진 사본으로 말한다 — {:?}", got.trouble);
     }
 
     /// 마일스톤 워크트리는 **가지로만** 가른다 — 접두어가 `milestone` 인 저장소의 에픽 워크트리는 디렉터리
