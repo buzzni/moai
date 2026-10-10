@@ -41,6 +41,7 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
 ```sh
 python3 - <<'PY'
 import glob, json, os
+mine = os.environ.get("TMUX", "").split(",")[0]
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -56,6 +57,15 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         alive = False
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    if alive and pane and mine:
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
+            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
+        except OSError:
+            theirs = ""
+        if theirs != mine:
+            pane = ""
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
@@ -64,9 +74,11 @@ PY
 - **Read only `alive` rows.** A `dead` row is a record a process left behind — its pid is gone,
   or now belongs to another process (the start time differs)
 - `name` is the `ListAgents` name, `pane` the `%N` that `-t` takes — `-` when that session
-  is not in tmux, and then this skill has nothing for that worker
-- `cwd` is where the session stands: the root, or a worktree under `<root>/.worktrees/`. A
-  row standing elsewhere is not a worker of this repository, whatever its name
+  is not in tmux or runs on another tmux server than yours (pane ids are counted per server,
+  so another server's `%4` is a different pane here), and then this skill has nothing for
+  that worker
+- `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
+  names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
 - Your own row is the one whose pane is `$TMUX_PANE`
@@ -75,10 +87,15 @@ Run it when a step below needs a pane, once.
 
 ## Is the input box empty
 
-    tmux capture-pane -p -t <pane>
+    tmux display -p -t <pane> '#{pane_in_mode}'
+    tmux capture-pane -p -e -t <pane>
 
+The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
+then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
-`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder. Anything
+`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
+keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
+person's text is not. Anything
 else — a word, a pasted block, a half-typed command — is the person's, and if you cannot tell
 the placeholder from their draft, it is theirs. **Then do not type. Tell the person which pane
 holds what, and go on as if this skill were not here.** A pane with no `❯` box at all (a shell
@@ -129,16 +146,21 @@ and, as a separate call, look once: the session map reads `idle` for it and `cap
 shows the cleared screen — the conversation gone, an empty box. Then send with `SendMessage`
 as the supervisor's 3 says. **If any condition fails, or the look does not show it cleared,
 do not type again** — do what the supervisor's 5 says without tmux: ask the person, or send
-to another idle worker.
+to another idle worker. When it was the look that failed, tell the person that `/clear` may
+stand typed in that pane's box: pressed later, it would erase the next message sent there.
 
 ## When a message does not arrive
 
-When `SendMessage` to a worker fails, or the delivery notice says it was refused or is held for
-approval, and that worker has a pane whose input box is empty (above), you may put the message
-into the box yourself. Typed keys submit at every newline, so paste it as one block:
+When `SendMessage` to a worker fails — an error, no such session — and that worker has a pane
+whose input box is empty (above), you may put the message into the box yourself. **A message
+held for the person's approval is not one that failed:** that hold is the person's gate, like
+a permission prompt, and the held message still arrives once they approve it — pasting it too
+skips their gate and hands the worker the same work twice. Tell the person it waits for them
+instead. Typed keys submit at every newline, so paste it as one block:
 
-1. Write the message to a file in your scratchpad, with one line at the top naming you — a
-   pasted message carries no sender, and the worker reports to the message's `from`:
+1. Write the message to a file in your scratchpad, with one line at the end naming you — a
+   pasted message carries no sender, and the worker reports to the message's `from`. The
+   first line stays the message's own, which names the work and the step to start from:
    `from: <your ListAgents name>`
 2. Paste and submit it:
 

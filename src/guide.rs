@@ -926,7 +926,7 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 /// 건너뛴다)이 받는다.
 ///
 /// **세션 사이 통신은 표에 없다**(moai-obxm) — moai 는 통신을 안 든다. 깨우기 줄(`moai send --wake`)은 우편함과 함께
-/// 걷었고, 창을 비우는 것은 사람의 몫이다.
+/// 걷었고, tmux 밖에서는 창을 비우는 것이 사람의 몫이다(tmux 안의 감독은 [`tmux`] 스킬로 칸을 비운다, moai-u99i).
 ///
 /// 표를 싣는 것은 `moai` 스킬 하나다([`verbs_section`]) — 세 벤더에 다 심기는 스킬이다. 감독 스킬과 그 일꾼 글은
 /// Claude Code 에만 가니(moai-obxm) 도구를 바로 적는다.
@@ -2255,10 +2255,16 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// 쓰인다 — 기록의 `procStart` 가 `/proc/<pid>/stat` 의 22번째 칸(프로세스 시작 시각)과 같아야 `alive` 다. `tmux` 는
 /// `"<세션>:@<창>.%<칸>"` 이고, `-t` 가 받는 것은 끝의 `%<칸>` 이다. tmux 밖의 세션은 칸이 `-` 다.
 ///
+/// **`%<칸>` 은 tmux 서버마다 따로 센다** — 기록에는 서버가 없어서, 다른 서버(`tmux -L …`)에서 도는 세션의 `%4` 를
+/// 그대로 내면 부르는 쪽 서버의 엉뚱한 칸 `%4` 에 친다. 그래서 부르는 셸에 `$TMUX` 가 서 있으면, 산 세션의
+/// `/proc/<pid>/environ` 의 `TMUX` 소켓이 부르는 쪽의 소켓과 같을 때만 칸을 내고 아니면 `-` 다. 죽은 줄과 `$TMUX` 없이
+/// 부른 판은 기록의 칸을 그대로 낸다 — 되살리기(moai-uqf7)가 읽는 자리다.
+///
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
 pub const SESSIONS: &str = r#"python3 - <<'PY'
 import glob, json, os
+mine = os.environ.get("TMUX", "").split(",")[0]
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -2274,6 +2280,15 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         alive = False
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    if alive and pane and mine:
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
+            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
+        except OSError:
+            theirs = ""
+        if theirs != mine:
+            pane = ""
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY"#;
@@ -2345,9 +2360,11 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
 - **Read only `alive` rows.** A `dead` row is a record a process left behind — its pid is gone,
   or now belongs to another process (the start time differs)
 - `name` is the `ListAgents` name, `pane` the `%N` that `-t` takes — `-` when that session
-  is not in tmux, and then this skill has nothing for that worker
-- `cwd` is where the session stands: the root, or a worktree under `<root>/.worktrees/`. A
-  row standing elsewhere is not a worker of this repository, whatever its name
+  is not in tmux or runs on another tmux server than yours (pane ids are counted per server,
+  so another server's `%4` is a different pane here), and then this skill has nothing for
+  that worker
+- `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
+  names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
 - Your own row is the one whose pane is `$TMUX_PANE`
@@ -2356,10 +2373,15 @@ Run it when a step below needs a pane, once.
 
 ## Is the input box empty
 
-    tmux capture-pane -p -t <pane>
+    tmux display -p -t <pane> '#{{pane_in_mode}}'
+    tmux capture-pane -p -e -t <pane>
 
+The first line prints `1` while the person is scrolling the pane (copy mode) — keys you send
+then go to tmux's copy mode, not to Claude Code, so a pane in a mode is theirs: do not type.
 Claude Code's input box is the line that starts with `❯`, under the conversation, between two
-`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder. Anything
+`─` rules. **Empty** is `❯` followed by nothing, or by Claude Code's dim placeholder — `-e`
+keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
+person's text is not. Anything
 else — a word, a pasted block, a half-typed command — is the person's, and if you cannot tell
 the placeholder from their draft, it is theirs. **Then do not type. Tell the person which pane
 holds what, and go on as if this skill were not here.** A pane with no `❯` box at all (a shell
@@ -2410,16 +2432,21 @@ and, as a separate call, look once: the session map reads `idle` for it and `cap
 shows the cleared screen — the conversation gone, an empty box. Then send with `SendMessage`
 as the supervisor's 3 says. **If any condition fails, or the look does not show it cleared,
 do not type again** — do what the supervisor's 5 says without tmux: ask the person, or send
-to another idle worker.
+to another idle worker. When it was the look that failed, tell the person that `/clear` may
+stand typed in that pane's box: pressed later, it would erase the next message sent there.
 
 ## When a message does not arrive
 
-When `SendMessage` to a worker fails, or the delivery notice says it was refused or is held for
-approval, and that worker has a pane whose input box is empty (above), you may put the message
-into the box yourself. Typed keys submit at every newline, so paste it as one block:
+When `SendMessage` to a worker fails — an error, no such session — and that worker has a pane
+whose input box is empty (above), you may put the message into the box yourself. **A message
+held for the person's approval is not one that failed:** that hold is the person's gate, like
+a permission prompt, and the held message still arrives once they approve it — pasting it too
+skips their gate and hands the worker the same work twice. Tell the person it waits for them
+instead. Typed keys submit at every newline, so paste it as one block:
 
-1. Write the message to a file in your scratchpad, with one line at the top naming you — a
-   pasted message carries no sender, and the worker reports to the message's `from`:
+1. Write the message to a file in your scratchpad, with one line at the end naming you — a
+   pasted message carries no sender, and the worker reports to the message's `from`. The
+   first line stays the message's own, which names the work and the step to start from:
    `from: <your ListAgents name>`
 2. Paste and submit it:
 
@@ -2575,7 +2602,9 @@ person comes first** — this window is theirs; when they speak, answer them.
 The message's first line names the work and the step of this file to start from —
 `from step 1` for a new backlog, `from "Carrying on stalled work"` for work a session left
 behind, `from step 2` for an epic already unfolded whose first-column members are left.
-The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`. Every
+The message's `from` is the supervisor — `<supervisor>` below; "tell the supervisor" is `SendMessage(to: <supervisor>, …)`.
+A message the supervisor pasted into this window (`moai-tmux`) carries no `from`; its last line,
+`from: <name>`, names the supervisor instead. Every
 other line fills a slot the steps use; a line the supervisor adds beyond those — who already
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.
 
@@ -5081,13 +5110,17 @@ stop sending outside work while a release runs",
 
     /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로
     /// 싣고, 다음의 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
-    /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다.
+    /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다. 다른 tmux 서버에서 도는 산 세션의
+    /// 칸은 `-` 다 — `%N` 은 서버마다 따로 세어, 그대로 내면 부르는 쪽 서버의 엉뚱한 칸에 친다.
     #[test]
     fn the_session_map_reads_the_records() {
         assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
         assert!(SESSIONS.contains("procStart") && SESSIONS.contains("/proc/{pid}/stat"), "짝이 pid 재사용을 안 거른다");
         if std::process::Command::new("python3").arg("-c").arg("pass").output().is_err() {
             return; // python3 가 없는 기계 — 글만 잰다.
+        }
+        if !std::path::Path::new("/proc/self/stat").exists() {
+            return; // `/proc` 가 없는 기계(macOS) — 짝은 리눅스의 것이다. 글만 잰다.
         }
         let s = crate::scratch::Scratch::new("tmux-session-map");
         let dir = s.path().join(".claude/sessions");
@@ -5107,15 +5140,31 @@ stop sending outside work while a release runs",
         std::fs::write(dir.join("3.json"), record(me, &start, "plain", None)).unwrap();
         std::fs::write(dir.join("4.json"), "not json").unwrap();
         let shell = SESSIONS.replace("~/.claude/sessions", &dir.display().to_string());
-        let out = std::process::Command::new("sh").arg("-c").arg(&shell).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        let got = String::from_utf8(out.stdout).unwrap();
+        let run = |tmux: Option<&str>| {
+            let mut cmd = std::process::Command::new("sh");
+            cmd.arg("-c").arg(&shell);
+            match tmux {
+                Some(t) => cmd.env("TMUX", t),
+                None => cmd.env_remove("TMUX"),
+            };
+            let out = cmd.output().unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+            String::from_utf8(out.stdout).unwrap()
+        };
         assert_eq!(
-            got,
+            run(None),
             "alive\there\t%39\tidle\t/repo\ts-here\n\
              dead\treused\t%4\tidle\t/repo\ts-reused\n\
              alive\tplain\t-\tidle\t/repo\ts-plain\n",
             "짝의 줄 꼴이 바뀌었다"
+        );
+        // 부르는 쪽이 이 시험 프로세스와 다른 tmux 서버에 서 있다 — 산 세션의 칸은 `-`, 죽은 줄은 기록 그대로다.
+        assert_eq!(
+            run(Some("/nonexistent/moai-other-server,1,0")),
+            "alive\there\t-\tidle\t/repo\ts-here\n\
+             dead\treused\t%4\tidle\t/repo\ts-reused\n\
+             alive\tplain\t-\tidle\t/repo\ts-plain\n",
+            "다른 tmux 서버의 칸 id 를 그대로 낸다"
         );
     }
 
@@ -5180,5 +5229,44 @@ stop sending outside work while a release runs",
         assert!(text.contains("tmux set-option -p -u -t <pane> @moai"), "칸 이름표를 안 지운다");
         assert!(text.contains("#{?@moai,#{@moai} ,}<the value you read>"), "테두리 꼴에 이름표를 안 붙인다");
         assert!(!text.contains("tmux.conf") && !text.contains("source-file"), "사람의 tmux 설정 파일을 고친다");
+        // 사람이 칸을 훑는 중(copy mode)이면 친 키가 tmux 에 간다 — 입력 칸을 보기 전에 그것부터 본다.
+        let empty = &text[text.find("## Is the input box empty").unwrap()..text.find("## Label the pane").unwrap()];
+        assert!(empty.contains("#{pane_in_mode}") && empty.contains("copy mode"), "칸이 copy mode 인지 안 본다");
+        assert!(empty.contains("capture-pane -p -e"), "자리글을 사람의 초안과 가를 색을 안 본다");
+        // 사람의 허락을 기다리는 메시지는 붙이지 않는다 — 그 문을 건너뛰고, 허락하면 같은 일이 두 번 간다.
+        assert!(
+            paste.contains("**A message\nheld for the person's approval is not one that failed:**"),
+            "허락을 기다리는 메시지를 칸에 붙인다"
+        );
+        assert!(!paste.contains("is held for\napproval, and"), "허락을 기다리는 메시지를 붙이던 옛 말이 남았다");
+        assert!(paste.contains("one line at the end naming you"), "붙인 메시지의 첫 줄을 `from:` 이 빼앗는다");
+        assert!(
+            worker().contains("its last line,\n`from: <name>`, names the supervisor"),
+            "일꾼이 붙여 넣은 메시지의 보낸 이를 못 읽는다"
+        );
+        // 비운 것이 안 보이면 `/clear` 가 칸에 쳐진 채 남았을 수 있다 — 사람이 나중에 누르면 다음 메시지를 지운다.
+        assert!(clear.contains("`/clear` may\nstand typed in that pane's box"), "남았을지 모를 `/clear` 를 안 알린다");
+        // **감독 글이 대는 절은 이 스킬에 서 있다.** 절 이름을 바꾸면 감독 글이 없는 절을 가리킨다.
+        let supervise = supervise();
+        let mut named = 0;
+        for piece in supervise.split("`moai-tmux`, ").skip(1) {
+            // `"절"` 하나, 또는 `"절" and "절"` — 그 뒤의 따옴표는 다른 글이다.
+            let mut rest = piece;
+            while let Some(after) = rest.strip_prefix('"') {
+                let (heading, tail) = after.split_once('"').expect("닫는 따옴표가 없다");
+                let heading = heading.replace('\n', " ");
+                named += 1;
+                assert!(text.contains(&format!("\n## {heading}\n")), "감독 글이 없는 절 \"{heading}\" 을 댄다");
+                rest = tail.strip_prefix(" and ").unwrap_or("");
+            }
+        }
+        assert!(named >= 5, "감독 글이 tmux 스킬의 절을 안 댄다 — {named}");
+        for (step, line) in [
+            ("2", "Inside tmux, ask the person first whether to open new worker"),
+            ("3", "Inside tmux, label the worker's pane as you send"),
+            ("4", "Inside tmux, an\nidle notice with no report"),
+        ] {
+            assert!(supervise.contains(line), "감독의 {step} 에 tmux 갈래가 없다");
+        }
     }
 }

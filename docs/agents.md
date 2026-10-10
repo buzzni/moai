@@ -400,8 +400,9 @@ When the supervisor runs inside tmux (`$TMUX` is set), it also loads the
 - **Clearing a reported worker.** After the report is checked, while the worker
   reads idle and its input box is empty, it types `/clear` into that pane before
   sending the next work
-- **A message that did not arrive.** When `SendMessage` fails or is held, it
-  pastes the message into the worker's empty input box and tells you
+- **A message that did not arrive.** When `SendMessage` fails, it pastes the
+  message into the worker's empty input box and tells you. A message held for
+  your approval is not pasted — it waits for you, and it tells you so
 - **A stalled worker.** When a worker goes idle with no report, it reads the
   pane once and tells you what stands there — a permission prompt, a question,
   an error. It never answers in your place
@@ -409,7 +410,8 @@ When the supervisor runs inside tmux (`$TMUX` is set), it also loads the
   splits a pane running `claude --model <model>` in the root — an ordinary
   interactive session you can see and type into
 
-**If anything stands in a worker's input box, it does not type** — it tells you.
+**If anything stands in a worker's input box, or you are scrolling that pane
+(copy mode), it does not type** — it tells you.
 It never kills a pane, a session or the server, and never runs `claude -p` or a
 `--dangerously-*` flag.
 
