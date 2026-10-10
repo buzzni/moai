@@ -19291,6 +19291,15 @@ fn skill_install_plants_one_text_for_every_agent() {
     let out = c.run(s.path(), &["skill", "install", "--agent", "codex", "--without", "moai-tmux"], true);
     assert!(out.status.success() && text(&out).contains("걷으려면 --agent claude"), "{}", text(&out));
     assert!(s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(), "고르지 않은 트리를 걷었다");
+    // 기계도 그 줄을 받는다(리뷰 moai-3r7l.4qq) — 사람의 줄만 서던 판은 `--json` 이 아무 키 없이 0 으로 끝났다.
+    for pick in ["--with", "--without"] {
+        let args = ["skill", "install", "--agent", "codex", pick, "moai-tmux", "--json"];
+        let json = String::from_utf8(c.run(s.path(), &args, true).stdout).unwrap();
+        assert_eq!(list_in(&json, "claude_only"), Some(vec!["moai-tmux".to_string()]), "{pick}\n{json}");
+    }
+    let json =
+        String::from_utf8(c.run(s.path(), &["skill", "install", "--agent", "codex", "--json"], true).stdout).unwrap();
+    assert_eq!(list_in(&json, "claude_only"), Some(Vec::new()), "{json}");
     // 죽은 세션을 되살리는 스킬(moai-uqf7)도 Claude 의 트리에만 선다 — 읽는 기록이 Claude Code 의 것이다.
     assert!(
         s.path().join(".claude/moai-plugin/skills/moai-recover/SKILL.md").is_file(),
@@ -19751,10 +19760,34 @@ fn skill_install_with_plants_and_without_removes_an_optional_skill() {
     // 사람의 파일이 든 디렉터리는 남긴다 — 걷었다고 세지 않는다.
     run(&["skill", "install", "--with", "moai-tmux"]);
     std::fs::write(tmux.join("notes.md"), "mine\n").unwrap();
+    // **못 걷는 걷기는 안 걷은 것이다**(사용자 결정, 리뷰 moai-3r7l.4qq) — moai 의 `SKILL.md` 가 남아 Claude 는 그 스킬을
+    // 그대로 읽으니 심는 셈에 남긴다. 매니페스트는 그것을 든 판이고(`skill status` 가 바라는 판과 같다), `planted` 에 서고,
+    // `removed` 에 안 서며, 옮길 파일을 댄다. 그것 없이 매니페스트를 쓰던 판은 `status` 가 낡았다고 했다.
+    let manifest = s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json");
+    let version = || field(&std::fs::read_to_string(&manifest).unwrap().replace("\": \"", "\":\""), "version");
+    let with_tmux = version();
+    let plan = run(&["skill", "install", "--without", "moai-tmux", "--dry-run", "--json"]);
+    assert_eq!((planted(&plan), removed(&plan)), (vec!["moai-tmux".to_string()], vec![]), "{plan}");
+    let json = run(&["skill", "install", "--without", "moai-tmux", "--json"]);
+    assert_eq!((planted(&json), removed(&json)), (vec!["moai-tmux".to_string()], vec![]), "{json}");
+    let held = &optional(&json)[optional(&json).find("\"held\":").expect("optional.held 가 없다")..];
+    assert_eq!(list_in(held, "files"), Some(vec!["notes.md".to_string()]), "{json}");
+    assert!(list_in(&json, "files").unwrap().iter().any(|f| f == "skills/moai-tmux/SKILL.md"), "{json}");
+    assert_eq!(version(), with_tmux, "못 걷은 스킬 없이 매니페스트를 썼다");
+    let status = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+    assert_eq!(field(&status, "want_version"), with_tmux, "status 가 다른 판을 바란다\n{status}");
     let out = c.run(s.path(), &["skill", "install", "--without", "moai-tmux"], true);
     assert!(out.status.success(), "{}", text(&out));
-    assert!(text(&out).contains(&tmux.display().to_string()), "남긴 디렉터리를 안 댄다\n{}", text(&out));
+    let said = text(&out);
+    assert!(said.contains(&tmux.display().to_string()) && said.contains("notes.md"), "옮길 파일을 안 댄다\n{said}");
+    assert!(!said.contains("이번에 안 심는"), "못 걷은 것을 걷는다고 한다\n{said}");
+    assert!(tmux.join("SKILL.md").is_file(), "사람의 파일 곁의 moai 의 글을 지웠다");
     assert_eq!(std::fs::read_to_string(tmux.join("notes.md")).unwrap(), "mine\n");
+    // 옮기면 다음 `--without` 이 걷는다.
+    std::fs::remove_file(tmux.join("notes.md")).unwrap();
+    let json = run(&["skill", "install", "--without", "moai-tmux", "--json"]);
+    assert_eq!((planted(&json), removed(&json)), (vec![], vec!["moai-tmux".to_string()]), "{json}");
+    assert!(!tmux.exists(), "옮긴 뒤에도 안 걷었다");
 }
 
 /// **고른 이름은 무엇을 쓰기 전에 잰다**(moai-3r7l.5ja) — 늘 심는 이름은 "늘 심는다" 로, 모르는 이름은 고를 수 있는
@@ -19815,6 +19848,8 @@ fn skill_uninstall_only_removes_one_optional_skill_and_makes_no_registration() {
     assert_eq!(since(before), "", "등록이 없는데 claude 를 불렀다");
     assert!(!skills.join("moai-tmux").exists(), "--only 가 안 걷었다");
     assert!(skills.join("moai-recover/SKILL.md").is_file(), "다른 스킬까지 걷었다");
+    // 걷은 줄은 부른 명령을 잘못 대지 않는다(리뷰 moai-3r7l.4qq) — `--only` 에 "(--without)" 을 대던 판이 있었다.
+    assert!(text(&out).contains("이번에 안 심는 선택 스킬") && !text(&out).contains("--without"), "{}", text(&out));
     assert!(text(&out).contains("파일만 고친다"), "등록이 없다고 안 댄다\n{}", text(&out));
 
     // 로컬 범위에 등록이 섰다 — 그 범위만 올린다.
