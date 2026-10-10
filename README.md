@@ -268,7 +268,8 @@ moai init --check          # writes nothing, says current / stale / missing
 ```
 
 `moai skill install` plants the skills for the agents you name — the tracker's
-rules and the wiki for each of them, and the supervisor for Claude Code only.
+rules and the wiki for each of them, and the supervisor (with its tmux companion
+and the recovery of sessions that died) for Claude Code only.
 Claude Code gets a plugin in
 `.claude/moai-plugin/`, with the hooks, registered with `claude`. Codex and
 Antigravity both read `.agents/skills/`, so naming either plants it for both,
@@ -285,7 +286,7 @@ moai skill install --agent auto            # whichever of claude, codex, agy is 
 moai skill status                          # what is planted where, and what is stale
 ```
 
-moai never launches an agent or runs one headless. A person opens each session
+The moai binary never launches an agent or runs one headless. A person opens each session
 (`claude`, `codex` or `agy`) in the repository root, the ordinary way — it asks
 that person before it acts, as it always does — and the session reads
 `moai ready --json` to choose its next row.
@@ -293,7 +294,12 @@ that person before it acts, as it always does — and the session reads
 moai carries no messaging between agents. In Claude Code, one session that calls
 `/moai-supervise` hands piled-up backlog items to the other idle sessions of the
 repository it sees in `ListAgents`, through Claude Code's own `SendMessage`, and
-takes their reports back the same way. Codex and Antigravity have no supervisor.
+takes their reports back the same way. Inside tmux the supervisor can also clear,
+paste into and — once the person says yes — open worker panes (`moai-tmux`).
+When the sessions die together — a restart, an OOM kill — and the person asks to
+bring them back, `moai-recover` finds them, says what each was doing and resumes
+each one (`claude --resume`, in a new tmux pane or as a line to type).
+Codex and Antigravity have no supervisor.
 What each agent needs first — Codex's trust in `/hooks`, and its sandbox on a
 machine where that cannot stand — is in
 [working with agents](docs/agents.md#open-a-session-for-each-agent).

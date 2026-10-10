@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.10.0 hash:eb4ae23f -->
+<!-- moai:begin v:0.11.0 hash:67fc4353 -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -28,7 +28,8 @@ Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…
 `ready` is yours to pick up, `others` is ready work that is someone else's or nobody's
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
 to pick it up again. A session a person opened reads that shape to choose its next row —
-moai never launches or drives a session itself.
+the moai binary never launches or drives a session itself. Only the supervisor skill, inside
+tmux, may clear a worker's pane, paste into it, or open one once the person says yes.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -525,9 +526,13 @@ one window to hand the backlog that have piled up, one at a time, to the other s
 of this repository and take their reports. Every idle session of this repository that
 `ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
 assignment (`SendMessage`) with a line naming the file of the worker's steps to read, and
-the worker reports the same way. moai carries no messaging and never launches a session;
-every one of them is a session a person opened. The supervisor picks, sends and checks; it
-does not fix and it does not merge.
+the worker reports the same way. moai carries no messaging, and the moai binary never
+launches or drives a session. When the supervisor runs inside tmux, its companion skill
+`moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
+panes — an ordinary interactive `claude` the person sees, opened only after the person says
+yes. That skill is planted only where it is chosen: `moai skill install --with moai-tmux`
+plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+does not merge.
 
 ### The wiki
 
