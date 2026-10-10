@@ -16,7 +16,7 @@ use crate::view;
 /// `status --json` 이 보고서에 덧붙이는 키(`run`). 보고서는 필드가 선언된 것뿐이라 걷을 것이
 /// 없다 — 덧붙이는 자리 곁에 목록을 둔다.
 impl super::Appendable for report::StatusReport {
-    const APPENDED: &'static [&'static str] = &["unreadable_worktrees", "broken_worktrees", "branches"];
+    const APPENDED: &'static [&'static str] = &["broken_worktrees", "branches"];
 }
 
 pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
@@ -25,7 +25,7 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     let Some(repo) = Repo::find(|| ctx.lang())? else {
         return overview(ctx, worktree);
     };
-    let crate::worktree::Gathered { load, root, origin, trouble, unfound, swept, sides, mine, .. } =
+    let crate::worktree::Gathered { load, root, origin, trouble, unfound, swept, .. } =
         super::gather(ctx, &repo, worktree)?;
     // stderr 에 한 줄씩 낸 것의 수 — 보드가 "문제 없다" 로 그 말을 뒤집지 않게 넘긴다(moai-cuw2).
     let trouble = trouble.len() + usize::from(unfound.is_some());
@@ -58,22 +58,12 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // 자다. 트래커의 자리로 재던 판은 루트로 옮겨 간 워크트리 안에서 `status` 만 자리를 파, 같은
     // 자리에서 `show` 는 아무 말도 안 하는데 보드는 `자리 없다` 를 댔다(moai-6opu.p65 가 한 곳에
     // 모아 둔 판단이 부르는 쪽마다 다른 뿌리를 받아 또 갈렸다).
-    // 겹치며 이미 판 옆 스냅샷을 넘긴다(moai-kos1) — `--worktree` 면 `gather` 가 그 파일을
-    // 방금 열어 풀었고, 안 겹쳐 봤으면 비어 있어 예전 그대로다.
-    // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 그것은 `--worktree` 와 상관없이 방금 판 것이다.
-    let (lost, unread) = crate::worktree::stranded_at(
-        repo.here(),
-        &repo.config,
-        &load.issues,
-        swept,
-        &now,
-        &crate::worktree::dug(&sides, &mine),
-    );
+    // 자리는 이름과 집은 표식으로만 잰다(moai-jn4d.ewm).
+    let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, swept, &now);
     st.warnings.extend(lost);
-    // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정에서 그 워크트리는 "아무도
-    // 없다" 가 아니라 "모른다" 로 빠지므로(`report::Place::Unknown`), 말이 없으면 경고가 조용한
-    // 까닭을 알 길이 없다. 옆 워크트리의 문제로 세는 자리는 `gather` 와 같다 — 종료 코드는
-    // 안 바꾸고, 보드가 "문제 없다" 로 이 말을 뒤집지 않게만 한다.
+    // **못 읽은 워크트리는 한 줄씩 말한다**(moai-lt7h) — 자리 판정은 그 스냅샷을 안 보지만
+    // (moai-jn4d.ewm) 깨진 파일은 고칠 사람이 있어야 고쳐진다. 옆 워크트리의 문제로 세는 자리는
+    // `gather` 와 같다 — 종료 코드는 안 바꾸고, 보드가 "문제 없다" 로 이 말을 뒤집지 않게만 한다.
     //
     // **가지와 경로를 함께 댄다.** 가지만 대면 떼어 낸 HEAD 의 이름은 커밋 앞 일곱 자라
     // (`Workplace::branch`) 같은 커밋에 선 워크트리 둘이 글자까지 같아져 보는 쪽이 하나로 읽고,
@@ -87,24 +77,21 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
     // **`--worktree` 만으로는 못 가른다**(리뷰 moai-ya06) — `gather` 는 git 을 불러 옆을 세고
     // (`others_of`), 여기 `trees` 는 git 이 적어 둔 파일만 읽는다(`on_disk`). git 이 없거나
     // `worktree list` 가 실패하면 `gather` 는 `unfound` 하나만 내고 워크트리를 **한 곳도**
-    // 대지 않는데, 이쪽은 그대로 찾아 낸다 — 그때 입을 다물면 깨진 워크트리를 아무도 안 말하고
-    // `stranded` 까지 조용해진다. 그쪽이 실제로 셌을 때만 접는다 — 그 자는 `Gathered::swept` 하나고,
+    // 대지 않는데, 이쪽은 그대로 찾아 낸다 — 그때 입을 다물면 깨진 워크트리를 아무도 안 말한다.
+    // 그쪽이 실제로 셌을 때만 접는다 — 그 자는 `Gathered::swept` 하나고,
     // 밖 한눈 보기(`view::projects_status`)도 같은 것을 읽는다.
     //
-    // **여기서 대는 것은 판정을 가렸는지와 상관없이 못 읽은 것 전부다**(사용자 결정 2026-09-18,
-    // 리뷰 moai-rgz9.7vt). 깨진 스냅샷은 고칠 사람이 있어야 고쳐지는데, 이름이 집은 줄을 가리킨다는
-    // 까닭으로 입을 다물면 그 워크트리는 어느 화면에도 안 선다. "못 셌다" 쪽은 `Unread::blinding`
-    // 이 따로 센다. **판 것에 매이지 않는다**(moai-giz3) — 이름만으로 자리가 다 잡혀 스냅샷을
-    // 안 푸는 길에서도 `workplaces_in` 이 파일을 열어 보고 깨진 것을 세운다.
+    // **여기서 대는 것은 못 읽은 것 전부다**(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt) —
+    // `workplaces` 가 워크트리마다 파일을 값싸게 열어 보고 깨진 것을 세운다(moai-giz3).
     let said_already = swept;
     if !said_already {
-        for t in &unread.all {
+        for t in &unread {
             // 글은 `view` 한 자리에서 짓는다(moai-dpbi) — 밖 한눈 보기가 같은 줄을 낸다.
             eprintln!("{}", view::unread_worktree(ctx.lang(), &t.branch, &t.path));
         }
     }
     // 센 것은 **낸 것뿐이다** — `gather` 가 이미 낸 줄은 `trouble` 에 이미 들어 있다.
-    let trouble = trouble + if said_already { 0 } else { unread.all.len() };
+    let trouble = trouble + if said_already { 0 } else { unread.len() };
     // 설치가 어긋난 것을 대는 알림 셋([`install_notices`]). **CLI 한눈 보기(`.moai` 밖)도 이제
     // 싣는다**(moai-zog5, 2026-09-22 사용자 결정) — [`overview`] 가 같은 자로 더한다. 한때 그
     // 화면만 안 세어, 같은 디렉터리를 두고 보드는 알림 1건, 탐색기의 프로젝트 층은 3건을 댔다.
@@ -134,36 +121,18 @@ pub fn run(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
         super::note_partial();
     }
     if ctx.json {
-        // **못 읽은 워크트리는 기계에게도 댄다**(리뷰 moai-ya06). 그런 워크트리가 하나라도 있으면
-        // 자리 판정이 통째로 `모른다` 로 접혀 `stranded` 가 조용해지는데(`report::places` 의
-        // `blind`), 여기 키가 없으면 받는 쪽은 "자리 잃은 일이 없다" 와 "못 셌다" 를 못 가른다 —
-        // 감독 스킬이 이 목록의 `stranded` 로 죽은 세션의 일을 거두므로, 그 침묵이 곧 일을
-        // 영영 안 거두는 것이 된다. 사람 화면은 `옆 워크트리 문제 N건` 으로 이미 가르고, `show
-        // --json` 도 같은 사실을 `place` 로 낸다 — 가르는 것을 받는 쪽도 가를 수 있어야 한다.
+        // **깨진 스냅샷은 기계에게도 댄다**(moai-zah3, 2026-09-18 사용자 결정) — 고칠 사람이 있어야
+        // 고쳐지는데 감독 스킬과 세션은 그것을 `--json` 으로 읽는다. 없으면 키를 안 단다 — 빈 목록을
+        // 늘 달면 "다 읽었다" 와 "안 재 봤다" 가 다시 두 뜻이 된다. `--worktree` 여부와 무관하게 단다:
+        // `gather` 의 `⎇` 줄은 stderr 라 기계가 읽는 자리에는 어느 쪽에서도 이 사실이 없었다.
         //
-        // **여기 드는 것은 판정을 가린 워크트리뿐이다**(`Unread::blinding`, moai-rgz9) — 못 읽어도
-        // 이름이 집은 줄을 가리키는 워크트리는 판정을 안 가리니 안 든다. 키 이름은 이미 나간
-        // 값이라 그대로 두지만 "못 읽은 워크트리 전부" 가 아니다 — 그쪽은 위에서 stderr 에 한
-        // 줄씩 내고 기계에는 아래 `broken_worktrees` 가 댄다.
-        //
-        // **없으면 키를 안 단다** — 빈 목록을 늘 달면 그것이 "다 읽었다" 인지 "안 재 봤다" 인지가
-        // 다시 두 뜻이 된다. `--worktree` 여부와 무관하게 단다: `gather` 의 `⎇` 줄은 stderr 라
-        // 기계가 읽는 자리에는 어느 쪽에서도 이 사실이 없었다.
+        // 곁에 서던 `unreadable_worktrees`("그래서 자리를 다 못 셌다")는 걷었다(moai-jn4d.ewm) — 자리가
+        // 스냅샷을 안 보고 이름과 집은 표식으로만 갈라, 깨진 파일이 판정을 가릴 길이 없다.
         let mut extra = Vec::new();
-        if !unread.blinding.is_empty() {
-            extra.push((
-                "unreadable_worktrees",
-                serde_json::to_string(&unread.blinding).map_err(|e| super::Fail::new(e.to_string()))?,
-            ));
-        }
-        // **깨진 스냅샷 전부는 곁의 키로 댄다**(moai-zah3, 2026-09-18 사용자 결정). 위의 키는 판정을
-        // 가린 것만 담아, 이름이 집은 줄을 가리키는 워크트리의 깨진 스냅샷은 어느 JSON 에도 안
-        // 섰다 — 고칠 사람이 있어야 고쳐지는데 감독 스킬과 세션은 그것을 `--json` 으로
-        // 읽는다. 위 키의 뜻은 이미 나간 값이라 안 바꾼다. 없으면 키를 안 다는 것도 같은 까닭이다.
-        if !unread.all.is_empty() {
+        if !unread.is_empty() {
             extra.push((
                 "broken_worktrees",
-                serde_json::to_string(&unread.all).map_err(|e| super::Fail::new(e.to_string()))?,
+                serde_json::to_string(&unread).map_err(|e| super::Fail::new(e.to_string()))?,
             ));
         }
         // **겹쳐 봤을 때만 키를 단다.** 늘 달면 `--worktree` 없이 부른 쪽도 빈
@@ -434,10 +403,7 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             let (mut status, archived) =
                 archive_board(repo, &load.issues, &unreadable, (&root.issues, &root.unreadable()), &now, ctx.zone());
             // 자리를 재는 자리는 **등록한 그 체크아웃**이다(`repo.here()`) — 안쪽 `run` 과 같다.
-            // **여는 길이 판 것을 받는다**(moai-65ie, `Project::dug`) — 안 받으면 이 줄이 프로젝트
-            // 마다 같은 스냅샷을 다시 파, 값이 등록 수만큼 곱해진다. 안쪽 `run` 과 같은 자다.
-            let (lost, unread) =
-                crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now, &p.dug());
+            let (lost, unread) = crate::worktree::stranded_at(repo.here(), &repo.config, &load.issues, p.swept, &now);
             status.warnings.extend(lost);
             // **설치가 어긋난 것도 여기서 센다**(moai-zog5, 2026-09-22 사용자 결정) — 안쪽
             // `moai status` 와 탐색기의 프로젝트 층이 이미 세는 그 셋이다([`install_notices`]).
@@ -477,12 +443,9 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                 // **못 읽은 워크트리는 여기서도 센다**(리뷰 moai-p3bs.op2) — 밖에서는 `gather`
                 // 가 겹쳐 보지 않으면 옆 스냅샷을 아예 안 열어 `trouble` 이 비고, 그러면 죽은
                 // 세션과 못 읽는 워크트리가 함께 있는 저장소가 "드러난 문제 없다" 로 선다.
-                // 목록 둘을 넘긴다 — 사람 화면은 못 읽은 것 전부를 한 줄씩 대고(`unread`),
-                // `--json` 은 둘을 따로 낸다(`unreadable_worktrees` 는 판정을 가린 것 `blind`,
-                // `broken_worktrees` 는 전부 `unread`). 안쪽 `status` 와 같은 가름이다.
-                // `trouble` 이 이미 낸 것인지는 `swept` 가 가른다 — 이것도 안쪽과 같은 자다.
-                unread: unread.all,
-                blind: unread.blinding,
+                // 사람 화면은 못 읽은 것 전부를 한 줄씩 대고, `--json` 은 `broken_worktrees` 로 낸다 —
+                // 안쪽 `status` 와 같다. `trouble` 이 이미 낸 것인지는 `swept` 가 가른다.
+                unread,
                 swept: p.swept,
             }
         })
@@ -495,13 +458,6 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
             picked: Vec<super::Row<'a>>,
             #[serde(skip_serializing_if = "Vec::is_empty")]
             trouble: Vec<String>,
-            /// **못 읽은 워크트리는 기계에게도 댄다** — 안쪽 `status --json` 과 같은 키·같은 모양
-            /// (리뷰 moai-ya06). 그런 워크트리가 있으면 자리 판정이 통째로 `모른다` 로 접혀
-            /// `stranded` 가 조용해지는데, 여기 키가 없으면 밖에서 읽는 쪽은 "자리 잃은 일이
-            /// 없다" 와 "못 셌다" 를 못 가른다 — 감독 스킬이 이 목록으로 죽은 세션의 일을 거두므로
-            /// 그 침묵이 곧 일을 영영 안 거두는 것이 된다. 없으면 키를 안 단다.
-            #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
-            unreadable_worktrees: &'a [report::Workplace],
             /// 깨진 스냅샷 **전부** — 안쪽 `status --json` 의 같은 키와 같다(moai-zah3). 없으면 안 단다.
             #[serde(skip_serializing_if = "<[report::Workplace]>::is_empty")]
             broken_worktrees: &'a [report::Workplace],
@@ -524,7 +480,6 @@ fn overview(ctx: &Ctx, worktree: bool) -> R<Vec<String>> {
                         .collect(),
                     // 옆 워크트리의 문제도 **편 뒤에** 싣는다(moai-dpbi) — 사람 화면과 같은 글이다.
                     trouble: p.trouble.iter().map(|t| view::trouble_line(ctx.lang(), t)).collect(),
-                    unreadable_worktrees: &b.blind,
                     broken_worktrees: &b.unread,
                 }),
             })

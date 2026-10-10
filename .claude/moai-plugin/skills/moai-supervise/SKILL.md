@@ -97,7 +97,7 @@ up stays `in_progress` and nobody carries it on. Look at this before picking new
 
     moai status --json                     the ids of warnings whose kind is "stranded"
                                            (inside a worktree it stands only with `--worktree`)
-    moai show <id>                         the `Place` line — one of the four words below
+    moai show <id>                         the `Place` line — one of the three words below
                                            (inside a worktree this too needs `--worktree`)
 
 `stranded` is a row that was picked up while no live worktree holds that work — either
@@ -106,35 +106,32 @@ row alone does not tell the two apart: if `ListAgents` shows a `busy` session of
 repository, it may be that one, so ask what it is holding before handing the work on —
 a worker with a message, any other window through the person.
 
-The `Place` line (`place` under `--json`) has four values. **Only `none` is handed on.**
+The `Place` line (`place` under `--json`) has three values. **Only `none` is handed on.**
 
     <path> (<branch>)  at        it runs there. Go in and carry on
     not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
-    unknown            unknown   **a sibling worktree could not be read.** It may be there, so do not hand it on
     none               lost      it lost its place — only this one is reclaimed
 
-**`stranded` being quiet does not mean there is nothing to reclaim.** If a sibling
-snapshot that names no picked-up row cannot be read, the place verdict folds into
-`unknown` for everything and this warning is locked for the whole repository. When the
-`unreadable_worktrees` key stands under `status --json`, **fix that worktree and look
-again** — an empty list read before that is not "none", it is "not counted".
+**A place is read from two things only** — the worktree's name (a directory named `<id>`,
+or a branch `<id>` or `worktree-<id>`, the row's epic counting too) and the pick-up mark
+`moai mv` leaves in the worktree it was typed in. Sibling snapshots are not read for it, so
+a broken one never hides a verdict. **One gap remains:** a row picked up in the root and then
+carried into a worktree whose name is not its id (an agent's `worktree-agent-<hash>`) has
+no mark there and shows `none` while that session may still be at work — the hook reads
+the same two things and has the same gap. A worker that follows its steps raises the
+worktree under its epic's name, so the name already points at the row.
 
-**The `Trouble in sibling worktrees <n>` on the person's screen is a different number.**
-That one counts **every** worktree it could not read among the snapshots it opened, and
-counts the other problems met while overlaying too (a snapshot with unparseable rows,
-a worktree list that could not be read) — a worktree that could not be read but whose
-name points at a picked-up row does not hide the verdict, because that row already
-stands in its own place, so while only such rows stand you can trust `stranded` as it
-is. It says there is something to fix, not that it could not count — whether it could
-count is answered by `unreadable_worktrees` alone. A worktree with a broken snapshot is
-named to machines too, by `broken_worktrees` under `status --json` — look at that key
-when you are hunting for the worktree to fix. But it is **among the snapshots opened**:
-if the names point at every picked-up row, not one sibling snapshot is opened and the
-key does not stand even though one is broken. No key does not mean "nothing is broken".
+**The `Trouble in sibling worktrees <n>` on the person's screen is a different matter.**
+That one counts every worktree whose snapshot could not be read, and the other problems
+met while overlaying too (a snapshot with unparseable rows, a worktree list that could not
+be read). It says there is something to fix and leaves `stranded` as it is. Machines see
+the broken worktrees by `broken_worktrees` under `status --json` — look at that key when
+you are hunting for the worktree to fix.
 
 A row picked up less than an hour ago does not show (that is the gap while a worker
 raises its worktree). **A worktree that is still there while the session working in it
-died does not show under `stranded`** — it is a worktree in `git worktree list` whose
+died does not show under `stranded`** as long as its name or mark points at the row (the
+gap above aside) — it is a worktree in `git worktree list` whose
 worker — the session you sent that work to — no longer answers. **A name gone from
 `ListAgents` is not an ended session**: the name belongs to the process, so a window resumed
 with `claude --resume` comes back under a new name, still in that worktree. A session that
