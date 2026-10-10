@@ -2316,7 +2316,8 @@ person's text is not. Anything else — a word, a pasted block, a half-typed com
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.";
 
-/// 넷째 스킬 `moai-tmux` 의 SKILL.md — tmux 안에서 도는 감독의 손이다(2026-10-10 사용자 결정, moai-u99i).
+/// 선택 스킬 `moai-tmux` 의 SKILL.md — tmux 안에서 도는 감독의 손이다(2026-10-10 사용자 결정, moai-u99i). 고른 사람에게만
+/// 심는다(`skill::OPTIONAL`, moai-3r7l).
 ///
 /// **moai-obxm 의 두 결정을 tmux 쓰는 사람에게만 뒤집는다.** "창을 비우는 것은 사람의 몫 — 감독은 칸에 아무것도 치지
 /// 않는다" 와 "감독도 에이전트를 띄우지 않는다" 였다. 이제 `$TMUX` 가 서 있으면 감독이 칸을 비우고, 닿지 않은
@@ -2508,7 +2509,7 @@ stands in the new pane (trusting the folder, say), tell the person — it is the
     )
 }
 
-/// 다섯째 스킬 `moai-recover` 의 SKILL.md — 죽은 세션을 되살려 이어 가게 한다(2026-10-10 사용자 결정, moai-uqf7).
+/// 넷째 늘 심는 스킬 `moai-recover` 의 SKILL.md — 죽은 세션을 되살려 이어 가게 한다(2026-10-10 사용자 결정, moai-uqf7).
 ///
 /// **2026-10-10 에 실제로 걸은 길을 글로 옮긴 것이다.** 컨테이너가 다시 서며 감독(루트)과 일꾼 둘(워크트리)이 한꺼번에
 /// 죽었고, 사람이 손으로 기록을 뒤져 `split-window … claude --resume` 으로 셋을 되살렸다. 일꾼 둘은 백그라운드

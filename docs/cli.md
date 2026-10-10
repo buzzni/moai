@@ -2875,9 +2875,11 @@ Options:
   `moai skill install --without <skill>` under another name. That skill's
   directory goes (only while it holds nothing but moai's files) and the
   plugin is planted again; the registration and the other skills stay.
-  Where this repository's moai is registered, that scope is brought up to
-  the new version; where it is registered nowhere, only the files change -
-  no registration is made. A skill that is always planted is refused.
+  A tree moai has not planted is left alone - no file and no hooks file
+  is made there. Where this repository's moai is registered, that scope is
+  brought up to the new version; where it is registered nowhere, only the
+  files change - no registration is made. A skill that is always planted
+  is refused.
 
   moai skill uninstall --dry-run      only show what would be called
   moai skill uninstall --agent codex  name what to delete in .agents/skills/

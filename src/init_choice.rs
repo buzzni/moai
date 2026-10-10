@@ -203,8 +203,18 @@ pub struct Plan {
     /// `skill install --with` 에 건넬 선택 스킬 — 설치를 안 하면 비었다.
     pub with: Vec<&'static str>,
     /// `skill install --without` 에 건넬 선택 스킬 — **미리 켜 둔 것을 끈 것만이다.** 미리 안 켠 것은 심긴 것이 아니라
-    /// 걷을 것이 없다. 설치를 안 하면 비었다.
+    /// 걷을 것이 없다. 미리 켜 둔 까닭이 표식뿐이면(심기지 않았다) 이것도 걷을 것이 없어 아무것도 안 바뀐다. 설치를 안 하면
+    /// 비었다.
     pub without: Vec<&'static str>,
+}
+
+impl Plan {
+    /// 고른 선택 스킬이 지금 심긴 것(`planted`)을 바꾸는가 — 심기지 않은 것을 켰거나, 켜 둔 것을 껐다. 이미 선 훅으로 읽은
+    /// 안내에서 `init` 이 설치를 거둘 때 이것이 참이면 거두지 않는다(리뷰 moai-3r7l) — 그 칸은 설치 칸이 켜졌을 때 서서
+    /// "함께 심는다" 를 보이는데, 설치를 거두면 고른 값이 말없이 버려진다.
+    pub fn changes_optional(&self, planted: &[&str]) -> bool {
+        !self.without.is_empty() || self.with.iter().any(|n| !planted.contains(n))
+    }
 }
 
 /// 고른 값과 기본값으로 계획을 낸다. 머리글의 차례(추적 → 안내 → 설치 → 드라이버)로 적는다 — 앞 칸을
@@ -810,5 +820,20 @@ mod tests {
             ..Choices::default()
         };
         assert!(all.complete(&SCREEN), "선택 스킬 칸 하나가 화면을 열었다");
+    }
+
+    /// **고른 선택 스킬이 심긴 것을 바꾸면 그것이 시킨 설치다**(리뷰 moai-3r7l) — 이미 선 훅으로 읽은 안내에서 `init` 이
+    /// 설치를 거둘 때 이것으로 잰다. 심긴 것을 그대로 켜 둔 칸은 바꾼 것이 아니다.
+    #[test]
+    fn an_optional_pick_that_changes_what_is_planted_asks_for_the_install() {
+        let mut f = form(Choices { guide: Some(Guide::None), ..Choices::default() });
+        assert!(!f.plan().changes_optional(&[]), "고른 것이 없는데 바꿨다고 읽었다");
+        choose(&mut f, Field::Optional(0), 0);
+        assert!(f.plan().changes_optional(&[]), "심기지 않은 것을 켠 것을 안 읽었다");
+        assert!(!f.plan().changes_optional(&["moai-tmux"]), "심긴 것을 그대로 켜 둔 것을 바꿨다고 읽었다");
+        let pre = Defaults { optional: [Some(true); N], ..SCREEN };
+        let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
+        choose(&mut f, Field::Optional(0), 1);
+        assert!(f.plan().changes_optional(&["moai-tmux"]), "심긴 것을 끈 것을 안 읽었다");
     }
 }

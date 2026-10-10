@@ -341,11 +341,33 @@ fn plant_trees(
         true => Vec::new(),
         false => pick.kept(&shared_dir, &root),
     };
-    let shared =
-        (!chosen.shared.is_empty()).then(|| (shared_dir, skill::agents_tree(&skill::picked(&place.all, &shared_kept))));
-    // 남의 훅 파일은 안 쓰고 한 줄로 댄다([`HookFile`]) — 쓸 것은 없거나 moai 의 것인 파일뿐이다.
+    let shared_skills = skill::picked(&place.all, &shared_kept);
+    // `.agents` 에 이번 실행 뒤 심겨 있을 선택 스킬 — 그 트리가 심는 것만이다. `shared_kept` 는 `--with` 와 그 자리의 머리를
+    // 들어 Claude 에만 서는 스킬까지 든다: 그것을 `agents_optional.planted` 로 내던 판은 `.agents` 에 없는 `moai-tmux` 를
+    // 심었다고 했고, 같은 이름을 `removed` 에도 냈다(리뷰 moai-3r7l).
+    let shared_optional: Vec<&'static str> =
+        shared_skills.iter().filter(|s| !s.claude_only && skill::is_optional(s.name)).map(|s| s.name).collect();
+    // **`uninstall --only` 은 걷는 명령이다**(리뷰 moai-3r7l) — 심긴 트리만 다시 심고, 없던 트리와 훅 파일은 새로 안 짓는다.
+    // 다 심던 판은 아무것도 안 심긴 저장소에서 플러그인 한 벌을, `--agent codex` 면 `.agents/skills` 와 `.codex/hooks.json`
+    // 까지 지었다. Claude 의 트리는 커밋된 매니페스트를 읽었을 때(`written`) 심긴 것이다.
+    let shared = (!chosen.shared.is_empty())
+        .then(|| skill::agents_tree(&shared_skills))
+        .filter(|files| !refresh || files.iter().any(|(p, _)| std::fs::symlink_metadata(shared_dir.join(p)).is_ok()))
+        .map(|files| (shared_dir.clone(), files));
+    let claude = chosen.claude && (!refresh || place.written);
+    // 걷는 명령이 건너뛴 트리 — 사람의 줄이 "moai 의 것이 없다" 로 댄다.
+    let skipped: Vec<PathBuf> = [
+        (refresh && !chosen.shared.is_empty() && shared.is_none()).then(|| shared_dir.clone()),
+        (chosen.claude && !claude).then(|| place.dir.clone()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // 남의 훅 파일은 안 쓰고 한 줄로 댄다([`HookFile`]) — 쓸 것은 없거나 moai 의 것인 파일뿐이다. 걷는 명령은 훅 파일을
+    // 안 쓴다.
     let mut hooks: Vec<(HookFile, HookState)> = HookFile::chosen(&root, &place.exe, &chosen)
         .into_iter()
+        .filter(|_| !refresh)
         .map(|h| {
             let state = h.state(&root);
             (h, state)
@@ -361,19 +383,23 @@ fn plant_trees(
         measure(dir, files, &root)?;
     }
     measure(&root, &due, &root)?;
-    if chosen.claude {
+    if claude {
         measure(&place.dir, &place.files, &root)?;
     }
-    // Claude 를 안 고르고 `--with` 로 댄 Claude 에만 서는 스킬 — 어느 트리도 안 심는다(아래 사람의 줄).
-    let stranded: Vec<&'static str> = match chosen.claude {
-        true => Vec::new(),
-        false => place
-            .all
-            .iter()
-            .filter(|s| s.claude_only && pick.with.iter().any(|w| w == s.name))
-            .map(|s| s.name)
-            .collect(),
+    // Claude 를 안 고르고 `--with`·`--without` 으로 댄 Claude 에만 서는 스킬 — 어느 트리도 그것을 안 심고 안 걷는다(아래
+    // 사람의 줄). `--without` 을 안 세던 판은 `--agent codex --without moai-tmux` 가 0 으로 끝나 걷었다고 믿게 했다.
+    let stranded = |names: &[String]| -> Vec<&'static str> {
+        match chosen.claude {
+            true => Vec::new(),
+            false => place
+                .all
+                .iter()
+                .filter(|s| s.claude_only && names.iter().any(|w| w == s.name))
+                .map(|s| s.name)
+                .collect(),
+        }
     };
+    let (stranded_with, stranded_without) = (stranded(&pick.with), stranded(&pick.without));
     // **이 판이 안 심는 moai 의 스킬 디렉터리는 걷는다**(moai-six5.1xz) — 쓰기가 다 된 뒤에 걷는다([`write_then_sweep`]).
     // Claude 의 트리는 [`claude_install`] 이 제 트리를 쓴 뒤 등록 앞에서 걷는다 — 까닭은 거기 있다.
     let mut shared_left: Vec<Leftover> = shared
@@ -385,7 +411,7 @@ fn plant_trees(
         false => Reg::At(scope.unwrap_or(Scope::Local).as_str()),
     };
     let (mut json, claude) =
-        write_then_sweep(shared.as_ref(), &mut shared_left, &mut hooks, &root, dry_run, || match chosen.claude {
+        write_then_sweep(shared.as_ref(), &mut shared_left, &mut hooks, &root, dry_run, || match claude {
             true => claude_install(ctx, place, reg, dry_run),
             false => Ok((serde_json::json!({ "dry_run": dry_run }), Vec::new())),
         })?;
@@ -401,7 +427,7 @@ fn plant_trees(
             let left: Vec<serde_json::Value> = shared_left.iter().map(Leftover::json).collect();
             o.insert("agents_leftovers".into(), serde_json::json!(left));
             // `.agents` 의 선택 스킬 — Claude 의 트리의 것은 머리의 `optional` 이다([`optional_json`]).
-            o.insert("agents_optional".into(), optional_json(&shared_kept, &shared_left));
+            o.insert("agents_optional".into(), optional_json(&shared_optional, &shared_left));
             // 쓰기 **전의** 상태다 — `missing`·`stale` 이면 (연습이 아닐 때) 이번에 썼고, `foreign` 은 안 썼다.
             let hooked: Vec<serde_json::Value> = hooks
                 .iter()
@@ -423,7 +449,9 @@ fn plant_trees(
     let mut out: Vec<String> = chosen.found_line(lang).into_iter().collect();
     // **Claude 에만 서는 스킬을 Claude 없이 고르면 한 줄로 댄다** — 안 말하면 `--agent codex --with moai-tmux` 가 0 으로
     // 끝나 심었다고 믿는다. 막지는 않는다(`--scope` 와 같은 셈).
-    out.extend(stranded.iter().map(|n| fill(say(lang, "skill.optional_claude_only"), &[("name", n)])));
+    out.extend(stranded_with.iter().map(|n| fill(say(lang, "skill.optional_claude_only"), &[("name", n)])));
+    out.extend(stranded_without.iter().map(|n| fill(say(lang, "skill.optional_claude_only_without"), &[("name", n)])));
+    out.extend(skipped.iter().map(|d| fill(say(lang, "skill.agents_nothing"), &[("dir", &d.display().to_string())])));
     if let Some((dir, files)) = &shared {
         let at = dir.display().to_string();
         if dry_run {
@@ -926,7 +954,7 @@ impl Shared {
         let home = crate::held::Home::of(root);
         let mut stale = Vec::new();
         let mut planted = false;
-        let kept = skill::kept(&optional_in(&dir, root), &[], &[]);
+        let kept = optional_in(&dir, root);
         let tree = skill::agents_tree(&skill::picked(all, &kept));
         for (path, body) in &tree {
             let at = dir.join(path);
@@ -2145,7 +2173,7 @@ pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent
     {
         // 바라는 트리는 `install` 이 심을 그 트리다 — 늘 심는 것과 지금 심긴 선택 스킬(moai-3r7l.h36). 일부러 뺀 선택
         // 스킬은 어긋남이 아니고, 심긴 선택 스킬의 글이 낡았으면 어긋남이다.
-        let kept = skill::kept(&optional_in(&plugin.join("skills"), root), &[], &[]);
+        let kept = optional_in(&plugin.join("skills"), root);
         let skills = skill::picked(&all, &kept);
         let hooks = |body: &str| serde_json::from_str::<serde_json::Value>(body).ok().map(|v| v["hooks"].clone());
         // **트리는 한 벌만 짓는다** — 스킬의 글은 실행 파일을 안 들어 어느 철자로 지어도 같다. 훅이 부르는 실행
@@ -2163,7 +2191,7 @@ pub(crate) fn stale_trees(root: &Path, prefix: &str) -> Vec<(&'static str, Agent
     }
 
     let shared_stale = outside(&shared_dir, root).is_none() && {
-        let kept = skill::kept(&optional_in(&shared_dir, root), &[], &[]);
+        let kept = optional_in(&shared_dir, root);
         let tree = skill::agents_tree(&skill::picked(&all, &kept));
         let planted = tree.iter().any(|(p, _)| seen(&shared_dir.join(p)));
         (planted && tree.iter().any(|(p, body)| differs(&shared_dir.join(p), body)))

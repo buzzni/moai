@@ -1781,6 +1781,8 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         agents: &agents_read,
         tracking: now,
     };
+    // 화면을 열 때 읽은 지금 심긴 선택 스킬 — 화면이 안 서면 비었다(사람이 안 보는 `init` 은 그 트리를 안 연다).
+    let mut planted_optional: Vec<&'static str> = Vec::new();
     let mut plan = if !again
         && !yes
         && !ctx.json
@@ -1806,10 +1808,11 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         // 심지 않는다. 고른 것은 어디에도 안 적으니 "이미 심겼는가" 는 그 트리를 읽어 답한다.
         let vars: Vec<(String, String)> =
             std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect();
-        let (seen, planted) = (crate::skill::detected(&vars), crate::cmd::skill::planted_optional(&root));
+        let seen = crate::skill::detected(&vars);
+        planted_optional = crate::cmd::skill::planted_optional(&root);
         defaults.optional = std::array::from_fn(|i| {
             let name = crate::skill::OPTIONAL[i].name;
-            Some(seen.contains(&name) || planted.contains(&name))
+            Some(seen.contains(&name) || planted_optional.contains(&name))
         });
         checker.refusal(&crate::init_choice::resolve(&fixed, &defaults), true)?;
         let form = crate::init_choice::Form::new(fixed, defaults, suggested.clone());
@@ -1827,8 +1830,13 @@ pub fn run(ctx: &Ctx, flags: &Choice, yes: bool) -> R<Vec<String>> {
         checker.refusal(&plan, false)?;
         plan
     };
-    // 이미 설치된 훅으로 읽은 안내는 설치를 다시 부르지 않는다. 명시적으로 시키면 부른다.
-    if existing_hooks && plan.guide == Guide::Hook && flags.skill != Some(true) {
+    // 이미 설치된 훅으로 읽은 안내는 설치를 다시 부르지 않는다. 명시적으로 시키면 부른다 — 화면의 선택 스킬 칸이 지금 심긴
+    // 것을 바꾸는 것도 시킨 것이다([`crate::init_choice::Plan::changes_optional`]).
+    if existing_hooks
+        && plan.guide == Guide::Hook
+        && flags.skill != Some(true)
+        && !plan.changes_optional(&planted_optional)
+    {
         plan.skill = false;
     }
     // 훅으로 알리는 것도 AGENTS.md 를 안 건드린다 — 알리는 일은 훅(`hook::guided_board`)이 한다.

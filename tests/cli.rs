@@ -19281,6 +19281,16 @@ fn skill_install_plants_one_text_for_every_agent() {
     assert!(c.run(s.path(), &with, true).status.success());
     assert!(s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(), "고른 tmux 스킬이 없다");
     assert!(!s.path().join(".agents/skills/moai-tmux").exists(), ".agents 에 tmux 스킬을 심었다");
+    // `.agents` 의 선택 스킬은 그 트리가 심는 것만이다 — Claude 에만 서는 `moai-tmux` 를 거기 심었다고 안 한다(리뷰 moai-3r7l).
+    let mut with_json = with.clone();
+    with_json.extend(["--dry-run", "--json"]);
+    let json = String::from_utf8(c.run(s.path(), &with_json, true).stdout).unwrap();
+    let agents_optional = &json[json.find("\"agents_optional\":{").expect("agents_optional 이 없다")..];
+    assert_eq!(list_in(agents_optional, "planted"), Some(Vec::new()), ".agents 에 없는 선택 스킬을 댄다\n{json}");
+    // Claude 를 안 고른 `--without` 은 Claude 에만 서는 스킬을 못 걷는다 — 그렇다고 한 줄로 댄다.
+    let out = c.run(s.path(), &["skill", "install", "--agent", "codex", "--without", "moai-tmux"], true);
+    assert!(out.status.success() && text(&out).contains("걷으려면 --agent claude"), "{}", text(&out));
+    assert!(s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(), "고르지 않은 트리를 걷었다");
     // 죽은 세션을 되살리는 스킬(moai-uqf7)도 Claude 의 트리에만 선다 — 읽는 기록이 Claude Code 의 것이다.
     assert!(
         s.path().join(".claude/moai-plugin/skills/moai-recover/SKILL.md").is_file(),
@@ -19782,6 +19792,21 @@ fn skill_uninstall_only_removes_one_optional_skill_and_makes_no_registration() {
     let skills = s.path().join(".claude/moai-plugin/skills");
     let since = |before: usize| c.calls()[before..].to_string();
 
+    // **걷는 명령은 심긴 트리만 다시 심는다**(리뷰 moai-3r7l) — 아무것도 안 심긴 저장소에 플러그인도 `.agents/skills` 도 훅
+    // 파일도 짓지 않고, 그 자리에 moai 의 것이 없다고 댄다.
+    for args in [
+        &["skill", "uninstall", "--only", "moai-tmux"][..],
+        &["skill", "uninstall", "--only", "moai-tmux", "--agent", "codex"],
+    ] {
+        let out = c.run(s.path(), args, true);
+        assert!(out.status.success(), "{args:?}\n{}", text(&out));
+        assert!(text(&out).contains("moai 의 것이 없다"), "{args:?}\n{}", text(&out));
+        for planted in [".claude/moai-plugin", ".agents", ".codex"] {
+            assert!(!s.path().join(planted).exists(), "{args:?} 가 {planted} 를 지었다");
+        }
+    }
+    assert_eq!(c.calls(), "", "심긴 것이 없는데 claude 를 불렀다");
+
     // 등록이 어디에도 없다 — 가짜 `claude` 는 장부를 안 쓰므로 `install` 뒤에도 그렇다.
     assert!(c.run(s.path(), &["skill", "install", "--with", "moai-tmux"], true).status.success());
     let before = c.calls().len();
@@ -19790,7 +19815,7 @@ fn skill_uninstall_only_removes_one_optional_skill_and_makes_no_registration() {
     assert_eq!(since(before), "", "등록이 없는데 claude 를 불렀다");
     assert!(!skills.join("moai-tmux").exists(), "--only 가 안 걷었다");
     assert!(skills.join("moai-recover/SKILL.md").is_file(), "다른 스킬까지 걷었다");
-    assert!(text(&out).contains("파일만 고쳤다"), "등록이 없다고 안 댄다\n{}", text(&out));
+    assert!(text(&out).contains("파일만 고친다"), "등록이 없다고 안 댄다\n{}", text(&out));
 
     // 로컬 범위에 등록이 섰다 — 그 범위만 올린다.
     assert!(c.run(s.path(), &["skill", "install", "--with", "moai-tmux"], true).status.success());

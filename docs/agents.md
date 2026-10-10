@@ -180,7 +180,8 @@ An optional skill is planted only where you ask for it — today that is
 - **`uninstall --only` keeps the registration.** It removes that skill's
   directory (only while it holds nothing but moai's files) and brings Claude's
   registration up to the new version where it already stands; where none stands
-  it changes the files and registers nothing
+  it changes the files and registers nothing. A tree moai has not planted
+  stays as it is — no plugin, no `.agents/skills/`, no hooks file is made
 - **A skill you left out is not drift.** The notice that the planted skills
   differ from this moai's does not count an optional skill you did not plant
 
