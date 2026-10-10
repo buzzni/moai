@@ -74,6 +74,10 @@ does not tag — see `CONTRIBUTING.md`.
   and its name and pick-up marks hung `⎇` on the work you hold there. The same
   applies to `--worktree` on `status`, `show` and `ready`, run there or through
   `moai -C <main checkout>`. (moai-jn4d.adc)
+- **The explorer's project layer no longer says a broken sibling snapshot hid
+  places from the count.** Since places are read from worktree names and
+  pick-up marks only, a snapshot that cannot be read hides nothing; the line
+  now gives the number of such worktrees alone. (moai-bl4d)
 
 ## [0.11.0] - 2026-10-08
 
