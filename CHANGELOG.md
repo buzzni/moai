@@ -51,6 +51,73 @@ does not tag — see `CONTRIBUTING.md`.
   still the person's. The AGENTS block now says the moai
   *binary* never launches or drives a session. (moai-u99i)
 
+## [0.12.0] - 2026-10-10
+
+### Added
+
+- **`moai show --sort` takes several fields, each with a direction, like
+  ORDER BY** — `--sort priority,updated:desc`, `--sort status:asc,title`. The
+  next field decides only where the ones before it tie; a field without
+  `:asc`/`:desc` keeps the direction it always had (newest first for created
+  and updated, urgent first for priority), so `--sort id` and every one-word
+  `--sort` order exactly as before. `--reverse` still turns the whole order
+  around, and `-n`/`--after` page through a multi-field order the same way. An
+  unknown field or direction, an empty field, or a field given twice is refused
+  with the words that are allowed. (moai-r170.9es)
+- **The explorer keeps its sort per project, as a list of fields** — a sort
+  picked inside a project is written for that project alone, as
+  `order = [...]` under `[tui.project."<project root>"]` in the user config —
+  the root the project's tracker lives in, so a linked worktree shares its
+  project's sort — and one picked in the all-projects list (`0`) is written as `order` under
+  `[tui]`, the default for every project without its own. Entering a project
+  puts its own sort back; one sort no longer follows you from project to
+  project. `order` takes the words of `moai show --sort` (`"updated:asc"`)
+  except `id`, which the explorer does not sort by.
+  Where `order` is absent the older `sort`/`sort_reversed` pair is read as
+  before, and every write of `[tui] order` also writes that pair from its
+  first field, so an older moai on the same config shows the nearest order.
+  An `order` that cannot be read is named in one line and the older pair
+  stands. (moai-r170.8dz)
+- **The explorer sorts by several fields** — `SPC s P`, `C`, `U`, `S`, `A`
+  and `T` (uppercase) add that field at the end of the order with its own
+  direction, and pressing the same key again turns that field around; the
+  lowercase keys still make the order that one field. `SPC s e` opens a sort
+  window with all six fields, the ones in the order numbered and marked
+  `↑ asc` or `↓ desc`: `j`/`k` move, `J`/`K` move a field down or up the order,
+  `SPC` puts a field in or takes it out, `d` turns its direction, `Enter`
+  applies it where you stand, `D` also keeps it as the default (`[tui] order`)
+  even inside a project, and `Esc` leaves without a change. The path line
+  names the whole order, every field with `↑` or `↓`
+  (`sort priority↑, updated↓`). (moai-r170.x22)
+
+### Changed
+
+- **Where picked-up work stands is read from worktree names and pick-up marks
+  only, the way the hook reads it.** The `Place` line of `moai show` (`place`
+  and `workplaces` under `--json`) and the `stranded` warning of `moai status`
+  no longer read sibling worktrees' `.moai/issues.jsonl` — those are stale
+  copies, since every write goes to the main checkout. A worktree counts for a
+  row when its name points at the row or when `moai mv` picked the row up
+  inside it, and the explorer's `⎇` beside a row someone else holds now names
+  such a worktree too. A row picked up in
+  the main checkout and carried into a worktree whose name is not its id now
+  shows `none` and stands under `stranded`. `place` has three values — `at`,
+  `fresh`, `lost`; `unknown` no longer appears, and neither does
+  `unreadable_worktrees` under `status --json` or `tui --json`: a broken
+  sibling snapshot is still named by `broken_worktrees` but no longer hides a
+  verdict, and the explorer's project layer gives the number of such
+  worktrees without saying they hid places from the count. (moai-jn4d.ewm,
+  moai-bl4d)
+
+### Fixed
+
+- **The explorer no longer marks your own rows `⎇ <your branch>` when it runs
+  inside a linked worktree.** That worktree was counted as a sibling of
+  itself, so its stale `.moai` copy was overlaid on the main checkout's rows
+  and its name and pick-up marks hung `⎇` on the work you hold there. The same
+  applies to `--worktree` on `status`, `show` and `ready`, run there or through
+  `moai -C <main checkout>`. (moai-jn4d.adc)
+
 ## [0.11.0] - 2026-10-08
 
 ### Added

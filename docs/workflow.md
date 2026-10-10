@@ -137,8 +137,11 @@ and wait on each other to merge.
 - **See what the neighbours hold.** `moai ready --worktree` and
   `moai status --worktree` overlay what the sibling worktrees picked up. A
   worktree whose directory is named `<id>`, or on a branch `<id>` or
-  `worktree-<id>`, counts as the place that work is being done, and `moai status`
-  warns about work that was picked up with no worktree at work on it
+  `worktree-<id>`, counts as the place that work is being done, and so does the
+  worktree `moai mv` was typed in when the row was picked up. `moai status` warns
+  about work that was picked up with no worktree at work on it — a row picked up
+  in the main checkout and carried into a worktree with some other name is one
+  of them, so pick it up from inside that worktree
 - **The wiki rides the branch.** Unlike `.moai/`, the wiki pages (`docs/` unless
   `wiki_dir` in `.moai/config.toml` says otherwise) are read from the worktree you
   are in and merge like any other file — write them on the branch, before the merge

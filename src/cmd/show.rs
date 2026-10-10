@@ -168,20 +168,11 @@ pub(crate) fn filter_of(
     Ok(filter)
 }
 
-/// argv 의 낱말을 `query` 의 차례로 잇는다 — `query` 는 clap 을 모른다(`tui::App::sort_key` 와 같은 자리).
+/// argv 의 차례를 `query` 의 차례로 잇는다 — 필드 목록은 clap 이 이미 읽었다(`cli::SortFields`). 안 준
+/// `--sort` 는 기본 차례(우선순위)다.
 fn sort_of(p: &crate::cli::PageArgs) -> crate::query::Sort {
-    use crate::cli::SortArg;
-    use crate::query::SortKey;
-    let key = match p.sort {
-        None | Some(SortArg::Priority) => SortKey::Priority,
-        Some(SortArg::Created) => SortKey::Created,
-        Some(SortArg::Updated) => SortKey::Updated,
-        Some(SortArg::Status) => SortKey::Status,
-        Some(SortArg::Assignee) => SortKey::Assignee,
-        Some(SortArg::Title) => SortKey::Title,
-        Some(SortArg::Id) => SortKey::Id,
-    };
-    crate::query::Sort { key, reversed: p.reverse }
+    let fields = p.sort.as_ref().map_or_else(|| crate::query::Sort::default().fields, |f| f.0.clone());
+    crate::query::Sort { fields, reversed: p.reverse }
 }
 
 pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String>> {
@@ -190,7 +181,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
     if args.removed {
         return removed(ctx, &repo, args, kind_filter);
     }
-    let crate::worktree::Gathered { load: active_load, origin, sides, mine, .. } =
+    let crate::worktree::Gathered { load: active_load, origin, .. } =
         super::gather(ctx, &repo, args.worktree.worktree)?;
     // 산 줄의 id — 읽힌 줄과, 못 읽어도 id 를 대는 줄. 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`).
     let live: std::collections::BTreeSet<String> =
@@ -232,10 +223,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         if args.as_plan {
             return plan(ctx, &load.issues, issue, args.raw);
         }
-        // 겹치며 이미 판 옆 스냅샷을 그대로 넘긴다 — 자리를 물을 때 같은 파일을 다시 안 판다(moai-kos1).
-        // **제 스냅샷도 같이 넘긴다**(moai-mafv) — 바로 위에서 판 그 파일이다.
-        let dug = crate::worktree::dug(&sides, &mine);
-        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree, &dug);
+        return one(ctx, &repo, &load.issues, issue, args.raw, &origin, args.worktree.worktree);
     }
 
     // **`--raw` 도 조용히 버리지 않는다.** 본문은 하나를 펼칠 때만 나오므로
@@ -409,7 +397,7 @@ pub fn run(ctx: &Ctx, args: ShowArgs, kind_filter: Option<Kind>) -> R<Vec<String
         })?),
     };
     let more =
-        crate::query::page(&mut shown, &load.issues, &wh, &repo.config, sort_of(&args.page), cursor, args.page.limit);
+        crate::query::page(&mut shown, &load.issues, &wh, &repo.config, &sort_of(&args.page), cursor, args.page.limit);
 
     if ctx.json {
         // **일한 AI 는 목록에서도 나온다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고
@@ -736,7 +724,6 @@ fn one(
     raw: bool,
     origin: &crate::worktree::Origin,
     worktree: bool,
-    dug: &crate::worktree::Dug<'_>,
 ) -> R<Vec<String>> {
     let twins = report::duplicate_lines(all, &issue.id);
     let children = report::children_of(all, &issue.id);
@@ -750,17 +737,16 @@ fn one(
     // 묶음의 읽은 칸은 **이 줄과 자식에 대해서만** 센다 — 일 하나를 펼치는 흔한 길에서
     // 저장소 전부의 소속과 미룸을 걷는 것은 통째로 헛일이다(`group_states_of`).
     let near: Vec<&str> = std::iter::once(issue.id.as_str()).chain(children.iter().map(|c| c.id.as_str())).collect();
-    // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 스냅샷을 다
-    // 풀 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
+    // **집은 줄만 워크트리를 읽는다**(moai-6opu) — 안 집은 줄을 펼치는 흔한 길에서 옆 워크트리의 표식과
+    // 스냅샷을 열 까닭이 없다. 언제 재는지(딸린 워크트리에서는 겹쳐 볼 때만)는 `worktree::workplaces` 가
     // 한 곳에서 정한다 — 명령마다 두었더니 `status` 와 여기가 서로 다른 답을 냈다(moai-6opu.p65).
     //
     // 경로는 **main 워크트리의 꼭대기**에서 잰 것이다(moai-fygk, `worktree::workplaces` 가 잰다):
     // 규약의 자리(`.claude/worktrees/<id>`)가 어느 자리에서 펼치든 같은 글자로 나와, 그대로
     // `EnterWorktree` 에 옮길 수 있다. `status` 의 못 읽은 워크트리와 같은 자다 — 부르는 쪽마다
     // 따로 재던 때는 빈 경로를 다루는 법이 갈렸다.
-    // **자리 판정의 재료는 한 벌이다**([`report::Footing`], moai-rviv) — 문(`placeable`), 스냅샷을
-    // 팔지 고르는 문(`workplaces`), 그리고 판정(`places`)이 저마다 집은 줄을 고르고 소속 지도를
-    // 지었다. 게을러서, 아래 문이 닫히면 한 벌도 안 짓는다.
+    // **자리 판정의 재료는 한 벌이다**([`report::Footing`], moai-rviv) — 문(`placeable`)과 판정(`places`)이
+    // 저마다 집은 줄을 고르고 소속 지도를 지었다. 게을러서, 아래 문이 닫히면 한 벌도 안 짓는다.
     let footing = report::Footing::of(all, &repo.config);
     // **적힌 소속이 없으면 물려받은 것을 댄다**(리뷰). 계획이 세우는 멤버는 소속을 id 에 지고
     // `epic` 을 안 적으므로(moai-exh7), 필드만 보던 이 줄은 그 멤버의 `에픽` 줄을 통째로
@@ -779,7 +765,7 @@ fn one(
         // 옮겨 가지만(`Repo::find_from`) "여기가 어디냐" 는 여전히 이 체크아웃이다. 루트로 재던 판은
         // 워크트리 안에서도 자리를 파고 제 워크트리를 옆으로 세어, 겹쳐 보지 않을 때는 안 판다는
         // 결정(moai-6opu)이 조용히 꺼졌다.
-        crate::worktree::workplaces_in(repo.here(), worktree, &footing, dug)
+        crate::worktree::workplaces(repo.here(), worktree)
     } else {
         Vec::new()
     };
@@ -1029,23 +1015,31 @@ mod tests {
     }
 
     /// **`--sort` 의 낱말은 탐색기가 설정에 적는 이름과 같고 같은 차례를 가리킨다**(moai-efoc 리뷰) —
-    /// [`crate::cli::SortArg`] 가 적어 둔 약속을 여기서 맨다. 한쪽만 이름이나 잇는 곳을 바꾸면 한 낱말이 두
-    /// 표면에서 다른 차례를 가리키는데, 그때 붉어질 시험이 없었다.
+    /// [`crate::cli::SortFields`] 가 적어 둔 약속을 여기서 맨다. 한쪽만 이름이나 잇는 곳을 바꾸면 한 낱말이 두
+    /// 표면에서 다른 차례를 가리키는데, 그때 붉어질 시험이 없었다. argv 를 실제로 지나 clap 이 읽은 것을 본다.
     #[test]
     fn every_explorer_order_is_the_same_sort_word() {
         use crate::tui::keys::Order;
-        use clap::ValueEnum;
+        use clap::Parser;
+        let read = |word: &str| -> crate::query::Sort {
+            let cli = crate::cli::Cli::try_parse_from(["moai", "show", "--sort", word])
+                .unwrap_or_else(|e| panic!("`--sort {word}` 를 못 읽었다 — {e}"));
+            match cli.cmd {
+                Some(crate::cli::Cmd::Show(args)) => sort_of(&args.page),
+                other => panic!("show 가 아니다 — {other:?}"),
+            }
+        };
         for o in Order::ALL {
-            let arg = crate::cli::SortArg::from_str(o.name(), false)
-                .unwrap_or_else(|_| panic!("탐색기의 `{}` 가 `--sort` 에 없다", o.name()));
-            let page = crate::cli::PageArgs { sort: Some(arg), ..Default::default() };
-            assert_eq!(sort_of(&page).key, crate::tui::App::sort_key(o), "`{}` 가 두 표면에서 다른 차례다", o.name());
+            assert_eq!(
+                read(o.name()).fields,
+                [crate::query::Field::of(crate::tui::App::sort_key(o))],
+                "`{}` 가 두 표면에서 다른 차례다",
+                o.name()
+            );
         }
         // 거꾸로 — `--sort` 에만 있는 낱말은 쪽을 넘기는 커서의 `id` 하나다(`query::SortKey::Id`).
-        for v in crate::cli::SortArg::value_variants() {
-            let word = v.to_possible_value().expect("숨긴 낱말이 없다");
-            let word = word.get_name();
-            assert!(word == "id" || Order::named(word).is_some(), "탐색기가 모르는 `--sort {word}`");
+        for k in crate::query::SortKey::ALL {
+            assert!(k.name() == "id" || Order::named(k.name()).is_some(), "탐색기가 모르는 `--sort {}`", k.name());
         }
     }
 }

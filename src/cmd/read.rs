@@ -212,7 +212,9 @@ fn keep_for_prune(repo: &Repo, load: &crate::store::Load) -> Option<BTreeSet<Str
     if load.errors.iter().any(|e| e.id.is_none()) {
         return None;
     }
-    let beside = crate::worktree::gather(repo, true).ok()?;
+    // 집은 표식은 `⎇` 이름에만 들고 겹치는 줄은 안 바꾼다 — 여기는 id 만 세니 안 읽는다. **제 워크트리의
+    // 사본도 센다** — 화면은 그것을 빼지만, 루트의 탐색기는 그것을 옆으로 겹쳐 도장을 찍는다(`gather_unmarked`).
+    let beside = crate::worktree::gather_unmarked(repo).ok()?;
     // **못 찾은 것도 못 읽은 것이다**(리뷰) — `unfound` 는 "옆을 아예 못 셌다"(git 이 없거나 저장소가
     // 아니다)는 뜻이라, 이때 `trouble` 은 빌 수밖에 없고 `sides` 도 비어 제 줄만 남는다. 그것을 걷을
     // 기준으로 삼으면 옆에만 있는 줄의 도장이 조용히 지워진다 — 조용한 손실은 이 도구가 못 견디는
