@@ -47,6 +47,32 @@ does not tag — see `CONTRIBUTING.md`.
   names the whole order, every field with `↑` or `↓`
   (`sort priority↑, updated↓`). (moai-r170.x22)
 
+### Changed
+
+- **Where picked-up work stands is read from worktree names and pick-up marks
+  only, the way the hook reads it.** The `Place` line of `moai show` (`place`
+  and `workplaces` under `--json`) and the `stranded` warning of `moai status`
+  no longer read sibling worktrees' `.moai/issues.jsonl` — those are stale
+  copies, since every write goes to the main checkout. A worktree counts for a
+  row when its name points at the row or when `moai mv` picked the row up
+  inside it, and the explorer's `⎇` beside a row someone else holds now names
+  such a worktree too. A row picked up in
+  the main checkout and carried into a worktree whose name is not its id now
+  shows `none` and stands under `stranded`. `place` has three values — `at`,
+  `fresh`, `lost`; `unknown` no longer appears, and neither does
+  `unreadable_worktrees` under `status --json` or `tui --json`: a broken
+  sibling snapshot is still named by `broken_worktrees` but no longer hides a
+  verdict. (moai-jn4d.ewm)
+
+### Fixed
+
+- **The explorer no longer marks your own rows `⎇ <your branch>` when it runs
+  inside a linked worktree.** That worktree was counted as a sibling of
+  itself, so its stale `.moai` copy was overlaid on the main checkout's rows
+  and its name and pick-up marks hung `⎇` on the work you hold there. The same
+  applies to `--worktree` on `status`, `show` and `ready`, run there or through
+  `moai -C <main checkout>`. (moai-jn4d.adc)
+
 ## [0.11.0] - 2026-10-08
 
 ### Added

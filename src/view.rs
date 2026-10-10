@@ -1969,9 +1969,6 @@ pub fn detail(
         Some(crate::report::Place::Fresh) => {
             out.push(format!("  {place}   {}", paint(style::DIM, say(lang, "detail.place_fresh"))))
         }
-        Some(crate::report::Place::Unknown) => {
-            out.push(format!("  {place}   {}", paint(style::DIM, say(lang, "detail.place_unknown"))))
-        }
         Some(crate::report::Place::Lost) => {
             out.push(format!("  {place}   {}", paint(style::WARN, say(lang, "detail.place_lost"))))
         }
@@ -2864,20 +2861,13 @@ pub struct Board<'a> {
     pub origin: &'a Origin,
     /// 옆 워크트리를 겹치다 만난 것 (`Project::trouble`).
     pub trouble: &'a [crate::worktree::Trouble],
-    /// 자리를 재다 **못 읽어 판정을 가린** 워크트리들(moai-p3bs.op2, `report::blinding`). 그런
-    /// 워크트리가 있으면 자리 판정이 `모른다` 로 접혀 경고가 조용해지는데, 여기서 세지 않으면
-    /// 이 덩어리가 "드러난 문제 없다" 로 그 침묵을 덮는다 — 안쪽 `moai status` 는 같은 사실을
-    /// stderr 와 `옆 워크트리 문제` 로 이미 말한다.
-    ///
-    /// **수가 아니라 목록으로 든다** — 사람 화면은 한 줄씩 대고(아래 `projects_status`), `--json` 은
-    /// 안쪽 `status` 와 같은 모양으로 이 목록을 그대로 낸다.
-    pub blind: Vec<crate::report::Workplace>,
-    /// 판 것 가운데 스냅샷을 **못 읽은 워크트리 전부**(`worktree::Unread::all`) — 사람 화면이 한 줄씩 대는 것은
-    /// 이쪽이다(사용자 결정 2026-09-18, 리뷰 moai-rgz9.7vt). 판정을 안 가려도 깨진 파일은 고칠
-    /// 사람이 알아야 하고, `blind` 는 "그래서 자리를 다 못 셌다" 라는 다른 말이다.
+    /// 스냅샷을 **못 읽은 워크트리 전부**(`worktree::Unread::all`, moai-p3bs.op2) — 사람 화면이 한 줄씩
+    /// 대고(아래 `projects_status`), `--json` 은 안쪽 `status` 와 같은 모양(`broken_worktrees`)으로 이 목록을
+    /// 그대로 낸다. 자리 판정은 그 스냅샷을 안 보지만(moai-jn4d.ewm) 깨진 파일은 고칠 사람이 알아야 한다 —
+    /// 여기서 세지 않으면 이 덩어리가 "드러난 문제 없다" 로 그것을 덮는다.
     pub unread: Vec<crate::report::Workplace>,
     /// 옆 워크트리를 빠짐없이 열어 봤는가 (`Project::swept`) — 그러면 `unread` 는 `trouble` 이 이미
-    /// 말했다. 사람 화면은 두 번 안 세고, `--json` 은 `blind`·`unread` 를 그대로 낸다(안쪽 `status` 와 같다).
+    /// 말했다. 사람 화면은 두 번 안 세고, `--json` 은 `unread` 를 그대로 낸다(안쪽 `status` 와 같다).
     pub swept: bool,
 }
 
