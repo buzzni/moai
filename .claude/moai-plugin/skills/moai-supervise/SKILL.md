@@ -22,8 +22,8 @@ workers talk with Claude Code's own tools:
 
 **Every session here is an interactive one the person can see.** The moai binary never
 launches or drives an agent, and nothing here runs headless. Outside tmux the supervisor
-launches nothing either; inside tmux it may open a worker pane, only after the person says
-yes (`moai-tmux`, below). **A worker is every idle session of this
+launches nothing either; inside tmux or cmux it may open a worker pane, only after the person
+says yes (`moai-tmux` or `moai-cmux`, below). **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
@@ -59,6 +59,14 @@ step below goes through messages and the person, as written. `moai-tmux` is an o
 it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
 init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
 outside tmux.
+
+**Inside cmux, load `moai-cmux` instead.** When `CMUX_SURFACE_ID` is set in your shell and
+`$TMUX` is not, `moai-cmux` gives you the same hands on the workers' cmux tabs, at the same
+five points, and reads the same session map. It needs cmux 0.65.0 or later and says so itself.
+When both are set you run in tmux inside a cmux tab — what you type goes to tmux, so it is
+`moai-tmux`. **With neither, nothing of either applies.** `moai-cmux` is optional the same
+way (`moai skill install --with moai-cmux`); inside cmux without it, tell the person that one
+line plants it, and carry on as if outside cmux.
 
 **When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
 and the person asks to bring them back, load `moai-recover`, inside tmux or not.

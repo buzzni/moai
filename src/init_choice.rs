@@ -795,9 +795,9 @@ mod tests {
         // 미리 켜 둔 칸 — 끄면 `--without` 이다.
         let pre = Defaults { optional: [Some(true); N], ..SCREEN };
         let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
-        assert_eq!(f.plan().with, ["moai-tmux"], "미리 켜 둔 칸을 안 건넸다");
+        assert_eq!(f.plan().with, ["moai-tmux", "moai-cmux"], "미리 켜 둔 칸을 안 건넸다");
         choose(&mut f, Field::Optional(0), 1);
-        assert_eq!((f.plan().with, f.plan().without), (vec![], vec!["moai-tmux"]));
+        assert_eq!((f.plan().with, f.plan().without), (vec!["moai-cmux"], vec!["moai-tmux"]));
     }
 
     /// **`--with` 는 그 칸을 잠그고, 사람이 안 보는 `init` 은 표식으로 심지 않는다**(moai-3r7l.ocn) — [`PLAIN`] 의 선택

@@ -53,8 +53,39 @@ leaves its record behind. The lines below print one row per record, tab-separate
 
 ```sh
 python3 - <<'PY'
-import glob, json, os
-mine = os.environ.get("TMUX", "").split(",")[0]
+import glob, json, os, subprocess
+def out(*cmd, **env):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, **env)).stdout.strip()
+    except OSError:
+        return ""
+def started(pid):
+    if not os.path.isdir("/proc/self"):
+        return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            stat = f.read()
+        return stat[stat.rindex(")") + 2:].split()[19]
+    except (OSError, ValueError, IndexError):
+        return ""
+def tty(pid):
+    t = out("ps", "-p", str(pid), "-o", "tty=")
+    return "/dev/" + t if t.strip("?") else ""
+mine = os.environ.get("TMUX")
+cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
+surfaces = {}
+def walk(o):
+    if isinstance(o, dict):
+        for p in o.get("cmux_process_pids") or []:
+            surfaces[p] = o.get("id")
+        o = list(o.values())
+    for v in o if isinstance(o, list) else []:
+        walk(v)
+if cmux:
+    try:
+        walk(json.loads(out("cmux", "--json", "--id-format", "both", "top", "--all")))
+    except ValueError:
+        pass
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -62,23 +93,16 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         pid = int(r["pid"])
     except (OSError, ValueError, KeyError, TypeError):
         continue
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            stat = f.read()
-        alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
-    except (OSError, ValueError, IndexError):
-        alive = False
+    start = started(pid)
+    alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
     if alive and pane and mine:
-        try:
-            with open(f"/proc/{pid}/environ", "rb") as f:
-                env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
-        except OSError:
-            theirs = ""
-        if theirs != mine:
+        here = tty(pid)
+        if not here or here != out("tmux", "display", "-p", "-t", pane, "#{pane_tty}"):
             pane = ""
+    if alive and cmux:
+        pane = "" if tmux else surfaces.get(pid)
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
