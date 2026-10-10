@@ -24669,10 +24669,12 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     }
     assert_ne!(unsafe { libc::fcntl(master.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) }, -1);
     let mut command = c.command(Path::new(BIN), s.path(), &["init", "argos"], true);
+    // tmux 안의 셸이다 — 화면이 `moai-tmux` 칸을 켜 두고, Enter 가 그것을 심는다(moai-3r7l.ocn).
     command
         .env("TERM", "xterm")
         .env("MOAI_LANG", "en")
         .env("MOAI_CONFIG", c.home.path().join("config.toml"))
+        .env("TMUX", "/tmp/tmux-1000/default,1,0")
         .stdin(slave.try_clone().unwrap())
         .stdout(slave.try_clone().unwrap())
         .stderr(slave);
@@ -24724,6 +24726,11 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     assert!(read(&s.path().join(".git/info/exclude")).contains("/.moai/"));
     assert!(!s.path().join("AGENTS.md").exists());
     assert!(s.path().join(".claude/moai-plugin/skills/moai/SKILL.md").is_file(), "스킬을 안 심었다\n{shown}");
+    assert!(shown.contains("moai-tmux"), "선택 스킬 칸이 안 섰다\n{shown}");
+    assert!(
+        s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md").is_file(),
+        "$TMUX 가 선 화면이 moai-tmux 를 켜 두지 않았다\n{shown}"
+    );
     let plugin: serde_json::Value =
         serde_json::from_str(&read(&s.path().join(".claude/moai-plugin/.claude-plugin/plugin.json"))).unwrap();
     assert!(plugin["hooks"]["PreToolUse"].is_array(), "훅을 안 심었다\n{shown}");
@@ -24742,6 +24749,38 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
         assert!(out.status.success(), "{}", text(&out));
         assert!(c.calls().len() > before.len(), "명시적으로 시킨 설치를 건너뛰었다\n{}", text(&out));
     }
+}
+
+/// **사람이 안 보는 `init` 은 `--with` 로 준 선택 스킬만 심는다**(moai-3r7l.ocn, 사용자 결정) — `$TMUX` 가 선 셸에서도
+/// 표식으로 심지 않고, 이미 심긴 것은 다시 심는다. `--with` 는 설치를 켜고, `--no-skill` 과는 함께 못 서고, 늘 심는
+/// 이름은 `skill install` 과 같은 한 줄로 거절한다.
+#[test]
+fn init_plants_only_the_optional_skills_it_is_given_where_nothing_is_asked() {
+    let s = Scratch::new("init-with");
+    git(s.path(), &["init", "-q", "."]);
+    let c = Claude::new("init-with-home");
+    let git_bin = git(s.path(), &["--exec-path"]);
+    std::os::unix::fs::symlink(Path::new(git_bin.trim()).join("git"), c.bin.join("git")).unwrap();
+    let tmux = s.path().join(".claude/moai-plugin/skills/moai-tmux/SKILL.md");
+    let run =
+        |args: &[&str]| c.command(Path::new(BIN), s.path(), args, true).env("TMUX", "/tmp/t,1,0").output().unwrap();
+
+    let out = run(&["init", "argos", "--skill", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(s.path().join(".claude/moai-plugin/skills/moai/SKILL.md").is_file(), "{}", text(&out));
+    assert!(!tmux.exists(), "사람이 안 보는 init 이 $TMUX 로 moai-tmux 를 심었다");
+
+    let out = run(&["init", "--with", "moai-tmux"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(tmux.is_file(), "--with 가 안 심었다\n{}", text(&out));
+    assert!(text(&out).contains("skill install --scope local --with moai-tmux"), "{}", text(&out));
+    let out = run(&["init", "--skill"]);
+    assert!(out.status.success() && tmux.is_file(), "다시 부른 init 이 심긴 선택 스킬을 걷었다\n{}", text(&out));
+
+    let out = run(&["init", "--with", "moai-tmux", "--no-skill"]);
+    assert!(!out.status.success(), "--with 와 --no-skill 을 함께 받았다");
+    let out = run(&["init", "--with", "moai-wiki"]);
+    assert!(!out.status.success() && text(&out).contains("늘 심는"), "{}", text(&out));
 }
 
 /// **`--tracking exclude` 는 커밋되는 파일을 하나도 안 바꾼다**(moai-zynt.own). 병합 규칙과 드라이버는 할 일이

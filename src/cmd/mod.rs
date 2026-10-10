@@ -506,6 +506,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             guide,
             skill,
             no_skill,
+            with,
             register,
             no_register,
             yes,
@@ -516,14 +517,20 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
             let guide = guide.or(no_agents.then_some(crate::init_choice::Guide::None));
             // 짝 플래그는 clap 이 서로 막는다 — 둘 다 오는 일은 없다.
             let pair = |on: bool, off: bool| if on { Some(true) } else { off.then_some(false) };
-            // 플래그가 고른 것은 화면이 고른 것과 같은 꼴(`Choices`)이다 — 안 준 칸은 고르지 않은 것이다.
+            // **`--with` 의 이름은 `skill install` 과 같은 자로 잰다**(moai-3r7l.ocn) — 무엇을 쓰기 전에, 같은 거절문으로.
+            skill::Pick { with: with.clone(), without: Vec::new() }.check(ctx.lang())?;
+            let optional =
+                std::array::from_fn(|i| with.iter().any(|w| w == crate::skill::OPTIONAL[i].name).then_some(true));
+            // 플래그가 고른 것은 화면이 고른 것과 같은 꼴(`Choices`)이다 — 안 준 칸은 고르지 않은 것이다. `--with` 는
+            // 설치를 켠다 — 심으라고 한 스킬을 설치 없이 둘 수 없다(`--no-skill` 과는 clap 이 막는다).
             let flags = crate::init_choice::Choices {
                 prefix,
                 tracking,
                 guide,
                 driver: pair(driver, no_driver),
-                skill: pair(skill, no_skill),
+                skill: pair(skill || !with.is_empty(), no_skill),
                 project: pair(register, no_register),
+                optional,
             };
             init::run(ctx, &flags, yes)
         }

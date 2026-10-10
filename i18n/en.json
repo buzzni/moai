@@ -655,6 +655,8 @@
   "init.ask_skill": "hooks · skills",
   "init.ask_skill_on": "install (this clone)",
   "init.ask_skill_off": "skip",
+  "init.ask_optional_on": "plant it too",
+  "init.ask_optional_off": "leave it out",
   "init.ask_project": "project list",
   "init.ask_project_on": "add it",
   "init.ask_project_off": "skip",

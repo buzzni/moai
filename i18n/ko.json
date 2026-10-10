@@ -655,6 +655,8 @@
   "init.ask_skill": "훅 · 스킬",
   "init.ask_skill_on": "설치 (이 클론)",
   "init.ask_skill_off": "건너뛴다",
+  "init.ask_optional_on": "함께 심는다",
+  "init.ask_optional_off": "뺀다",
   "init.ask_project": "프로젝트 목록",
   "init.ask_project_on": "올린다",
   "init.ask_project_off": "건너뛴다",

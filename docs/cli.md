@@ -3092,6 +3092,7 @@ Options:
       --tracking <how>       Git tracks it (commit) or not (exclude, gitignore)
       --skill                Then run moai skill install --scope local
       --no-skill             Do not install the hooks and skills
+      --with <skill>         Plant this optional skill too (repeatable)
       --register             Then add this repository to your project list
       --no-register          Do not add it to your project list
   -y, --yes                  Ask nothing; unset rows plant as init always did
@@ -3121,6 +3122,16 @@ Options:
   written. Even a first run reads existing git ignore rules and the moai
   guide block. A later run also recognizes installed moai hooks when no block
   stands. If git fails, init refuses rather than guessing commit mode.
+
+  **Optional skills** (today moai-tmux, the supervisor's hands on tmux panes)
+  get a row each under hooks · skills, shown while that row installs. The
+  screen checks one when it is already planted here, or when your shell
+  says you use it ($TMUX set for moai-tmux); Enter passes the checked ones on
+  to `moai skill install --with`, and unchecking one already planted passes
+  --without. --with <skill> (repeatable, or names with a comma) checks and
+  locks that row and turns installing on; it cannot go with --no-skill.
+  Where nothing is asked, only what --with names is planted - nothing by
+  what your shell says - and optional skills already planted are refreshed.
 
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the

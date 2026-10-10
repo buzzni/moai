@@ -895,6 +895,16 @@ Examples:
   guide block. A later run also recognizes installed moai hooks when no block
   stands. If git fails, init refuses rather than guessing commit mode.
 
+  **Optional skills** (today moai-tmux, the supervisor's hands on tmux panes)
+  get a row each under hooks · skills, shown while that row installs. The
+  screen checks one when it is already planted here, or when your shell
+  says you use it ($TMUX set for moai-tmux); Enter passes the checked ones on
+  to `moai skill install --with`, and unchecking one already planted passes
+  --without. --with <skill> (repeatable, or names with a comma) checks and
+  locks that row and turns installing on; it cannot go with --no-skill.
+  Where nothing is asked, only what --with names is planted - nothing by
+  what your shell says - and optional skills already planted are refreshed.
+
   A new prefix is up to 8 characters - you type it with every id. A longer
   one is refused with shorter candidates. Without one it is made from the
   directory name: dropping hyphens if that fits (moa-issue becomes moaissue),
@@ -953,6 +963,10 @@ Examples:
         /// Do not install the hooks and skills
         #[arg(long)]
         no_skill: bool,
+        // `skill install --with` 으로 그대로 건넨다(moai-3r7l.ocn) — 설치를 켜고 그 칸을 잠근다. 끄는 짝은 없다.
+        /// Plant this optional skill too (repeatable)
+        #[arg(long = "with", value_name = "skill", value_delimiter = ',', conflicts_with = "no_skill")]
+        with: Vec<String>,
         /// Then add this repository to your project list
         #[arg(long, conflicts_with = "no_register")]
         register: bool,
@@ -963,10 +977,10 @@ Examples:
         #[arg(short = 'y', long)]
         yes: bool,
         /// Write nothing; say if the AGENTS.md block is stale
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes"])]
         check: bool,
         /// Write nothing; print that block (to paste it)
-        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "register", "no_register", "yes", "check"])]
+        #[arg(long, conflicts_with_all = ["prefix", "no_agents", "driver", "no_driver", "tracking", "guide", "skill", "no_skill", "with", "register", "no_register", "yes", "check"])]
         print: bool,
     },
 }

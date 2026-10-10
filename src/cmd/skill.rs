@@ -64,7 +64,7 @@ impl Pick {
 
     /// 고른 이름이 서는가 — **무엇을 읽거나 쓰기 전에** 잰다. 늘 심는 이름·모르는 이름·`--with` 와 `--without` 에 함께
     /// 든 이름은 거절하고, 거절문이 고를 수 있는 이름을 댄다.
-    fn check(&self, lang: crate::i18n::Lang) -> R<()> {
+    pub(crate) fn check(&self, lang: crate::i18n::Lang) -> R<()> {
         let (with, without) = self.names();
         let Some(why) = skill::misnamed(&with, &without) else { return Ok(()) };
         let names = skill::optional_names().collect::<Vec<_>>().join(", ");
@@ -1770,6 +1770,14 @@ pub(crate) fn optional_in(skills: &Path, root: &Path) -> Vec<&'static str> {
     skill::optional_names()
         .filter(|name| read_committed(&skills.join(name).join("SKILL.md"), root).is_ok_and(|text| headed(&text, name)))
         .collect()
+}
+
+/// 이 체크아웃의 두 트리 어디든 지금 심긴 선택 스킬 — `init` 의 고르는 상자가 미리 켜 두는 값이다([`optional_in`],
+/// moai-3r7l.ocn). 심긴 것을 끈 채 보이면 그대로 Enter 친 사람이 그것을 걷는다.
+pub(crate) fn planted_optional(root: &Path) -> Vec<&'static str> {
+    let (claude, agents) =
+        (optional_in(&root.join(skill::DIR).join("skills"), root), optional_in(&root.join(skill::AGENTS_DIR), root));
+    skill::optional_names().filter(|n| claude.contains(n) || agents.contains(n)).collect()
 }
 
 /// `--json` 의 `optional`·`agents_optional` — 그 트리에 이번 실행 뒤 심겨 있을 선택 스킬(`planted`)과 이번에 걷는 것
