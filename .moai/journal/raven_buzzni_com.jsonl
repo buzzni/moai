@@ -6057,3 +6057,8 @@
 {"ts":"2026-10-10T05:48:47Z","id":"moai-u99i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: done — merged into milestone/moai-xit3 as dbcfc49e. moai-uqf7 reuses guide::SESSIONS (state name pane status cwd sessionId; dead rows keep their pane; a live pane on another tmux server prints -)."}
 {"ts":"2026-10-10T05:48:59Z","id":"moai-u99i","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: dbcfc49e"}
 {"ts":"2026-10-10T05:49:10Z","id":"moai-uqf7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moai-jn4d-18"}
+{"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.9nw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.k8w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.obl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.e7z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-10T05:49:32Z","id":"moai-uqf7.wqr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
