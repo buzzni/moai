@@ -57,6 +57,9 @@ window before its next work (5). It finds each worker's pane from its `ListAgent
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
 step below goes through messages and the person, as written.
 
+**When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
+and the person asks to bring them back, load `moai-recover`, inside tmux or not.
+
 **Work you send out is always done in a worktree** — even if the repository has no
 worktree convention. Several workers share one root checkout, so fixing things in the
 root mixes their edits and commits together. Worktrees stand in

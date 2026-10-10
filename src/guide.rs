@@ -1848,6 +1848,9 @@ window before its next work (5). It finds each worker's pane from its `ListAgent
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
 step below goes through messages and the person, as written.
 
+**When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
+and the person asks to bring them back, load `moai-recover`, inside tmux or not.
+
 **Work you send out is always done in a worktree** — even if the repository has no
 worktree convention. Several workers share one root checkout, so fixing things in the
 root mixes their edits and commits together. Worktrees stand in
@@ -2246,7 +2249,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 }
 
 /// 살아 있는 Claude Code 세션마다 `ListAgents` 의 이름과 tmux 칸을 잇는 짝 — **한 자리에만 선다**(moai-u99i.xo8).
-/// `moai-tmux`([`tmux`])가 `format!` 으로 싣고, 다음 에픽의 되살리기 스킬(moai-uqf7)이 죽은 세션까지 읽으려고 같은
+/// `moai-tmux`([`tmux`])가 `format!` 으로 싣고, 되살리기 스킬([`recover`], moai-uqf7)이 죽은 세션까지 읽으려고 같은
 /// 상수를 싣는다. 그래서 거르지 않고 첫 칸에 `alive`·`dead` 를 적는다 — 읽는 쪽이 고른다. 두 벌로 적으면 기록의 꼴이
 /// 바뀌는 날 한쪽만 고쳐진다.
 ///
@@ -2258,7 +2261,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// **`%<칸>` 은 tmux 서버마다 따로 센다** — 기록에는 서버가 없어서, 다른 서버(`tmux -L …`)에서 도는 세션의 `%4` 를
 /// 그대로 내면 부르는 쪽 서버의 엉뚱한 칸 `%4` 에 친다. 그래서 부르는 셸에 `$TMUX` 가 서 있으면, 산 세션의
 /// `/proc/<pid>/environ` 의 `TMUX` 소켓이 부르는 쪽의 소켓과 같을 때만 칸을 내고 아니면 `-` 다. 죽은 줄과 `$TMUX` 없이
-/// 부른 판은 기록의 칸을 그대로 낸다 — 되살리기(moai-uqf7)가 읽는 자리다.
+/// 부른 판은 기록의 칸을 그대로 낸다. 죽은 줄의 칸은 아무도 겨누지 않는다 — 되살리기(moai-uqf7)는 제가 연 칸에만 친다.
 ///
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
@@ -2469,7 +2472,8 @@ has read `busy` far longer than its work should take, look at its pane once:
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
 rate-limit error, or a process that ended (a shell prompt where the box was). **Tell the
 person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
-key, and do not look again in a loop.
+key, and do not look again in a loop. A process that ended is a dead session: bringing it
+back is `moai-recover`, once the person asks for it.
 
 ## No idle worker left
 
@@ -2489,6 +2493,184 @@ Once it has started (a separate call: `capture-pane` of the new pane shows the `
 at `ListAgents` once more. The new row is a worker like any other (the supervisor's 2) — send
 to it as in 3. If it does not show yet, look once more after your next step; if a prompt
 stands in the new pane (trusting the folder, say), tell the person — it is theirs to answer.
+"#
+    )
+}
+
+/// 다섯째 스킬 `moai-recover` 의 SKILL.md — 죽은 세션을 되살려 이어 가게 한다(2026-10-10 사용자 결정, moai-uqf7).
+///
+/// **2026-10-10 에 실제로 걸은 길을 글로 옮긴 것이다.** 컨테이너가 다시 서며 감독(루트)과 일꾼 둘(워크트리)이 한꺼번에
+/// 죽었고, 사람이 손으로 기록을 뒤져 `split-window … claude --resume` 으로 셋을 되살렸다. 일꾼 둘은 백그라운드
+/// 서브에이전트가 끝나지 못한 채 커밋 안 된 고침을 워크트리에 남겼고, `/tmp` 가 비어 `target` 링크가 끊겼다. 그 걸음을
+/// 다음 사람이 다시 짓지 않게 한다.
+///
+/// **새 moai 명령이 없다**(사람 결정) — Claude Code 의 세션 기록을 읽는 일은 Claude 만의 것이고 바이너리는 범용
+/// 트래커다. 그래서 Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]).
+///
+/// **세션과 칸을 잇는 짝은 [`SESSIONS`] 하나다.** `moai-tmux` 와 같은 상수를 `format!` 으로 싣는다 — 둘째 짝을
+/// 적으면 기록의 꼴이 바뀌는 날 한쪽만 고쳐진다. 짝에 없는 것(역할·죽은 때·끝나지 못한 백그라운드 일)은 기록이 아니라
+/// 대화 기록(`~/.claude/projects/…/<sessionId>.jsonl`)에서 읽는다. 워크트리에 든 일꾼의 대화 기록은 그 세션이 **처음
+/// 선 자리**(루트)의 슬러그 밑에 남아 있었고(2026-10-10 에 본 `~/.claude/projects` — 일꾼 워크트리의 슬러그
+/// 디렉터리는 비어 있었다), 같은 날 다른 판(2.1.296)에서는 워크트리의 슬러그 밑에 섰다. 판마다 갈리니 슬러그를 셈하지
+/// 않고 id 로 찾는다.
+///
+/// **되살려 달라는 말이 곧 허락이다**(사람 결정) — tmux 안이면 묻지 않고 칸을 연다. 그 밖의 금은 `moai-tmux` 와
+/// 같다: 헤드리스·`--dangerously-*`·권한 모드가 없고, 아무것도 죽이지 않고, 한 번에 한 번 보고, 빈 입력 칸에만
+/// 붙인다. tmux 밖이면 아무것도 안 띄우고 칠 줄과 붙일 글만 낸다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
+/// `ListAgents` 가 일꾼을 보고 시작해야 한다.
+pub fn recover() -> String {
+    format!(
+        r#"---
+name: moai-recover
+description: Use in Claude Code when the person asks to bring back the sessions of this repository that died — after a restart, an OOM kill or a crash — so the supervisor and its workers carry on where they stopped. Finds the dead sessions, draws the state each was in, points out background work that never returned and broken target links, and resumes each one in a new tmux pane, or prints the command to type. Triggers on "recover the sessions", "bring the sessions back", "resume the dead sessions", "되살려", "세션 복구", "이어 가게 해".
+---
+
+# moai-recover — bring back the sessions that died
+
+Use this when the person asks for it: the sessions of this repository — a supervisor, its
+workers — died together, after a restart, an OOM kill or a crash, and the person wants them
+to carry on. **Their asking is the yes:** inside tmux you open the panes without asking again.
+None of this is a moai command; it is you reading Claude Code's own records and typing where
+the person can watch.
+
+## What never happens
+
+- **No headless run.** A session you bring back is an ordinary interactive `claude --resume`
+  the person can see and type into. Never `claude -p`, never a `--dangerously-*` flag, never
+  `--permission-mode`
+- **Nothing is killed.** Never `kill-server`, `kill-session` or `kill-pane`, never `pkill`
+  or `killall` aimed at tmux (hook rule 4). A session that is alive is left alone
+- **Only the panes you opened.** Type only into a pane this skill opened, by the `%N` that
+  `split-window` printed — every call names it, `-t <pane>`
+- **Never over the person's words.** Paste only into an empty input box (`moai-tmux`, "Is the
+  input box empty"); otherwise tell the person
+- **No polling.** Every look is one look; the next comes after your next step, as its own
+  call — never a loop, never a `sleep`
+- **Their work stays as it is.** No commit, no checkout, no stash, no build, no `moai` write —
+  what a dead session left is for that session to pick up
+
+## 1. Find the dead
+
+Claude Code keeps one record per process under `~/.claude/sessions/`, and a process that dies
+leaves its record behind. The lines below print one row per record, tab-separated:
+
+    state  name  pane  status  cwd  sessionId
+
+```sh
+{SESSIONS}
+```
+
+- A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
+  worktrees `git worktree list` names
+- **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
+  keeps the id), **your own row included**: a session the person resumed first and then asked
+  for this is back already, and resuming it again puts one conversation in two windows. In a
+  worktree, also drop it when a live row other than your own stands in that same `cwd`. The
+  root is not such a place — several live sessions stand there at once, and one of them being
+  alive says nothing about the dead one
+- **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
+  transcript (below) last moved around the same time; name an older one to the person apart,
+  and bring it back only if they say so
+- When several candidates stand in the same `cwd`, ask the person **once** — one question
+  for all of them — which to bring back
+
+**A session's transcript** is `~/.claude/projects/<slug>/<sessionId>.jsonl`, one JSON object
+per line. The slug is a directory with every character that is not a letter or a digit
+turned into `-` (`/home/me/repo/.worktrees/moai-ab12` is `-home-me-repo--worktrees-moai-ab12`).
+Which directory is not fixed: a worker that entered its worktree from the root has kept its
+transcript under the root's slug on one Claude Code version and under the worktree's on
+another, so do not work the slug out — find it by id:
+
+    ls ~/.claude/projects/*/<sessionId>.jsonl
+
+**When the records are gone too**, look under the root's slug and under each worktree's slug
+for every `*.jsonl` that last moved around the time they died — the root's slug may hold the
+supervisor's and a worker's both, so not only the newest one. A line's `cwd` and `sessionId`
+say where that session last stood and which id to resume; its `timestamp` says when it last
+moved.
+
+## 2. Draw the state each was in
+
+Read each candidate's transcript from the end — the last user line and the last assistant
+line — and look at where it stood:
+
+- **Role.** The supervisor's transcript runs `moai-supervise`; a worker's holds the
+  supervisor's message naming `references/worker.md`. A session that is neither is brought
+  back the same way, as a worker
+- **Work.** The issue or epic id it held, and what it was doing or waiting for — a report,
+  a review, a person's decision, a build
+- **Died at** — the `timestamp` of its last line
+- `git -C <cwd> status --short` — what it left uncommitted
+- `moai show <id>` — a `Next:` note on that id says where the session meant to go on
+
+Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
+waiting for, died at, uncommitted files. Then go on — they asked for recovery already.
+
+## 3. Point out what died with it
+
+- **Background work that never returned.** A background launch is an `Agent` or `Bash`
+  `tool_use` whose result reads `Async agent launched` (with its `agentId`), `Command running
+  in background with ID: <id>`, or — a command that ran past its timeout —
+  `moved to the background (ID: <id>)`. Whether the input carries
+  `"run_in_background": true` differs by version and the timeout case carries nothing, so read
+  the result; when it ends, a later user line carries a
+  `<task-notification>` whose `<task-id>` is that id. A launch with no such line after it died
+  with the session — the resumed session will never hear from it, and what it
+  changed is uncommitted in that session's `cwd`
+- **A broken target link.** In the root and each worktree, `target` may be a link to
+  `/tmp/cargo-target/<name>`, and a restart can empty `/tmp`:
+
+      readlink <cwd>/target
+      test -e <cwd>/target || echo dangling
+
+  Make the directory again, `mkdir -p /tmp/cargo-target/<name>`, so builds land there. The
+  build output is gone: `./target/release/moai` needs `cargo build --release` before anything
+  calls it. Do not build it yourself — the resumed session does
+
+## 4. The text each one gets
+
+One block per session, written to a file in your scratchpad:
+
+    Recovery: this session died at <time> (<what happened>) and was resumed.
+    - Background work that never returned: <each launch and what it was for>. It is dead,
+      do not wait for it; what it changed is uncommitted in <cwd>.
+    - git status --short in <cwd>: <files, or clean>.
+    - target -> /tmp/cargo-target/<name> was gone and is made again; build before you
+      call ./target/release/moai.
+    Go on from where you stopped: <work id>, <what it was waiting for>.
+
+Leave out a line that does not hold. The supervisor's block adds one line: **the workers are
+back in new sessions and their names may have changed — run `ListAgents` again** before you
+send or wait for a report.
+
+**Workers first, the supervisor last**, in both ways below — the supervisor's `ListAgents`
+has to see the workers when it starts.
+
+## 5. Inside tmux — open a pane each
+
+`$TMUX` is set in your shell. For each session, in that order:
+
+    tmux split-window -P -F '#{{pane_id}}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
+    tmux select-layout -t "$TMUX_PANE" tiled
+
+**No other flag.** The first line prints the new pane's `%N`; `exec bash` keeps a shell there
+when `claude` exits. Then, as a separate call, look once: when its `❯` box shows and is empty
+(`moai-tmux`, "Is the input box empty"), paste the block:
+
+    tmux load-buffer -b moai-recover <file>
+    tmux paste-buffer -p -d -b moai-recover -t <pane>
+    tmux send-keys -t <pane> Enter
+
+If the box has not shown yet, look again after your next step. A prompt in the pane (trusting
+the folder, say) is the person's to answer — tell them which pane. When all are open, tell the
+person which pane is which session.
+
+## 6. Outside tmux — say what to type
+
+`$TMUX` is not set: open nothing. Print, per session in the same order, the line the person
+types in a terminal of their own, and under it the block to paste once its box shows:
+
+    cd <cwd> && claude --resume <sessionId>
 "#
     )
 }
@@ -3458,6 +3640,8 @@ mod tests {
             ("moai-wiki", head(&wiki()), ["위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리"].as_slice()),
             // tmux 스킬(moai-u99i)은 감독이 `$TMUX` 안에서 부른다 — 사람이 칸을 이름으로 부를 때도 서야 한다.
             ("moai-tmux", head(&tmux()), ["일꾼 칸", "일꾼 창 열어", "칸 비워"].as_slice()),
+            // 되살리기 스킬(moai-uqf7)은 사람이 부를 때만 선다 — 2026-10-10 에 사람이 쓴 말이 "되살려" 였다.
+            ("moai-recover", head(&recover()), ["되살려", "세션 복구", "이어 가게 해"].as_slice()),
         ] {
             for trigger in triggers {
                 assert!(said.contains(trigger), "{whose} 의 발동어에서 {trigger} 가 빠졌다 — {said}");
@@ -3478,11 +3662,15 @@ mod tests {
         let head: String = skill.chars().take(40).collect();
         // 이름은 `skill::NAMES` 의 것이다 — 위키가 스킬 이름을 id 에서 거르는 `skill::EVER_PLANTED` 는 그 목록을 다
         // 든다(moai-mdzx.3pm, moai-six5.1xz). 머리의 이름이 그 목록과 갈리면 고친 이름이 다시 없는 id 로 선다.
-        let [moai, supervisor, wiki_skill, tmux_skill] = crate::skill::NAMES;
+        let [moai, supervisor, wiki_skill, tmux_skill, recover_skill] = crate::skill::NAMES;
         assert!(skill.starts_with(&format!("---\nname: {moai}\ndescription: ")), "{head}");
         assert!(supervise().starts_with(&format!("---\nname: {supervisor}\ndescription: ")), "감독 스킬의 머리가 없다");
         assert!(wiki().starts_with(&format!("---\nname: {wiki_skill}\ndescription: ")), "위키 스킬의 머리가 없다");
         assert!(tmux().starts_with(&format!("---\nname: {tmux_skill}\ndescription: ")), "tmux 스킬의 머리가 없다");
+        assert!(
+            recover().starts_with(&format!("---\nname: {recover_skill}\ndescription: ")),
+            "되살리기 스킬의 머리가 없다"
+        );
         // 일꾼 글은 스킬이 아니라 감독 스킬의 참고 파일이다(moai-obxm) — 머리가 서면 그 글이 메시지 한가운데 YAML 로 선다.
         assert!(worker().starts_with("# Worker steps\n"), "일꾼 글이 제목으로 안 연다");
     }
@@ -5109,12 +5297,13 @@ stop sending outside work while a release runs",
     }
 
     /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로
-    /// 싣고, 다음의 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
+    /// 싣고, 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
     /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다. 다른 tmux 서버에서 도는 산 세션의
     /// 칸은 `-` 다 — `%N` 은 서버마다 따로 세어, 그대로 내면 부르는 쪽 서버의 엉뚱한 칸에 친다.
     #[test]
     fn the_session_map_reads_the_records() {
         assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
+        assert!(recover().contains(SESSIONS), "되살리기 스킬이 짝을 그대로 안 싣는다");
         assert!(SESSIONS.contains("procStart") && SESSIONS.contains("/proc/{pid}/stat"), "짝이 pid 재사용을 안 거른다");
         if std::process::Command::new("python3").arg("-c").arg("pass").output().is_err() {
             return; // python3 가 없는 기계 — 글만 잰다.
@@ -5168,14 +5357,10 @@ stop sending outside work while a release runs",
         );
     }
 
-    /// **`moai-tmux` 는 이름 댄 칸만 만진다**(2026-10-10 사용자 결정, moai-u99i). 사람의 tmux 서버라 맨 `kill-server` 하나가
-    /// 그 사람의 세션을 다 죽인다(2026-09-18). 그래서 `tmux` 를 부르는 줄은 모두 칸을 `-t` 로 겨누거나, 칸을 안 건드리는
-    /// 넷(설정 읽기 `show`·테두리 둘을 쓰는 `set -g`·버퍼에 싣는 `load-buffer`) 중 하나다. `kill-*` 은 하지 말라는 줄에만
-    /// 선다. 칸을 열 때 `claude` 에 붙는 깃발은 `--model` 하나다 — `-p`·`--dangerously-*`·권한 모드가 서면 헤드리스가 된다.
-    /// 치기 전의 잣대(빈 입력 칸)와 열기 전에 묻기도 글로 선다.
-    #[test]
-    fn the_tmux_skill_touches_only_named_panes() {
-        let text = tmux();
+    /// 글이 가르치는 `tmux` 줄을 세며 하나하나 잰다 — 칸을 `-t` 로 겨누거나, 칸을 안 건드리는 넷(설정 읽기 `show`·
+    /// 테두리 둘을 쓰는 `set -g`·버퍼에 싣는 `load-buffer`) 중 하나이고, `kill-*` 이 아니고, 하위 명령 앞에 서버를 고르는
+    /// 깃발이 없다. `moai-tmux` 와 `moai-recover` 가 같은 잣대로 잰다 — 둘 다 사람의 tmux 서버에 친다.
+    fn tmux_calls(text: &str) -> usize {
         let mut calls = 0;
         // 짝의 파이썬은 `tmux = r.get(…)` 처럼 낱말 `tmux` 로 여는 줄을 든다 — 명령이 아니라 빼고 센다.
         for line in text.replace(SESSIONS, "").lines() {
@@ -5192,7 +5377,11 @@ stop sending outside work while a release runs",
                 assert!(!words[1].starts_with('-'), "하위 명령 앞에 깃발이 섰다 — {cmd}");
             }
         }
-        assert!(calls >= 8, "tmux 스킬의 명령을 못 셌다 — {calls}");
+        calls
+    }
+
+    /// "하지 않는 것" 절이 죽이는 명령 넷과 헤드리스로 만드는 깃발 셋을 이름째 댄다.
+    fn never_kills_nor_runs_headless(text: &str) {
         let never = &text[text.find("## What never happens").expect("하지 않는 것 절이 없다")..];
         let never = &never[..3 + never[3..].find("\n## ").unwrap()];
         for kill in ["`kill-server`", "`kill-session`", "`kill-pane`", "`pkill`"] {
@@ -5201,6 +5390,19 @@ stop sending outside work while a release runs",
         for flag in ["`claude -p`", "`--dangerously-*`", "`--permission-mode`"] {
             assert!(never.contains(flag), "하지 않는 것에 {flag} 가 없다");
         }
+    }
+
+    /// **`moai-tmux` 는 이름 댄 칸만 만진다**(2026-10-10 사용자 결정, moai-u99i). 사람의 tmux 서버라 맨 `kill-server` 하나가
+    /// 그 사람의 세션을 다 죽인다(2026-09-18). 그래서 `tmux` 를 부르는 줄은 모두 칸을 `-t` 로 겨누거나, 칸을 안 건드리는
+    /// 넷(설정 읽기 `show`·테두리 둘을 쓰는 `set -g`·버퍼에 싣는 `load-buffer`) 중 하나다. `kill-*` 은 하지 말라는 줄에만
+    /// 선다. 칸을 열 때 `claude` 에 붙는 깃발은 `--model` 하나다 — `-p`·`--dangerously-*`·권한 모드가 서면 헤드리스가 된다.
+    /// 치기 전의 잣대(빈 입력 칸)와 열기 전에 묻기도 글로 선다.
+    #[test]
+    fn the_tmux_skill_touches_only_named_panes() {
+        let text = tmux();
+        let calls = tmux_calls(&text);
+        assert!(calls >= 8, "tmux 스킬의 명령을 못 셌다 — {calls}");
+        never_kills_nor_runs_headless(&text);
         // 띄우는 줄은 하나고, 깃발은 모델 하나다.
         let launches: Vec<&str> = text.lines().filter(|l| l.contains("'claude ")).collect();
         assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
@@ -5268,5 +5470,67 @@ stop sending outside work while a release runs",
         ] {
             assert!(supervise.contains(line), "감독의 {step} 에 tmux 갈래가 없다");
         }
+    }
+
+    /// **`moai-recover` 는 제가 연 칸만 만지고, 되살리는 줄은 `--resume` 하나다**(2026-10-10 사용자 결정, moai-uqf7).
+    /// 되살려 달라는 말이 곧 허락이라 묻지 않고 칸을 열지만, 금은 `moai-tmux` 와 같다 — 이름 댄 칸, 죽이지 않기, 헤드리스
+    /// 없음, 빈 입력 칸에만 붙이기. tmux 밖이면 칠 줄을 내기만 한다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
+    /// `ListAgents` 가 일꾼을 봐야 한다. 짝에 없는 것은 대화 기록에서 읽고, 둘째 짝은 적지 않는다.
+    #[test]
+    fn the_recover_skill_resumes_into_its_own_panes() {
+        let text = recover();
+        let calls = tmux_calls(&text);
+        assert!(calls >= 5, "되살리기 스킬의 tmux 명령을 못 셌다 — {calls}");
+        never_kills_nor_runs_headless(&text);
+        // 짝은 하나다 — `~/.claude/sessions` 를 읽는 둘째 파이썬이 서면 기록의 꼴이 바뀌는 날 한쪽만 고쳐진다.
+        assert_eq!(text.matches("~/.claude/sessions/*.json").count(), 1, "세션 기록을 읽는 짝이 둘이다");
+        // 띄우는 줄은 둘 — tmux 칸과, tmux 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서 `claude ` 를 든
+        // 줄을 다 센다 — `--resume` 앞에 다른 깃발(`--model …`)을 끼운 줄도 걸려야 한다.
+        let launches: Vec<&str> = text.lines().filter(|l| l.starts_with("    ") && l.contains("claude ")).collect();
+        assert_eq!(
+            launches,
+            [
+                "    tmux split-window -P -F '#{pane_id}' -t \"$TMUX_PANE\" -c <cwd> 'claude --resume <sessionId>; exec bash'",
+                "    cd <cwd> && claude --resume <sessionId>",
+            ],
+            "claude 를 띄우는 줄이 둘이 아니거나 다른 깃발이 섰다"
+        );
+        for flag in ["claude -p", "--dangerously", "--permission-mode"] {
+            assert_eq!(text.matches(flag).count(), 1, "{flag} 가 하지 않는 것 밖에도 섰다");
+        }
+        let open = &text[text.find("## 5. Inside tmux").expect("tmux 안의 절이 없다")..];
+        let outside = &open[open.find("## 6. Outside tmux").expect("tmux 밖의 절이 없다")..];
+        let open = &open[..open.find("## 6. Outside tmux").unwrap()];
+        assert!(open.contains("paste-buffer -p -d -b moai-recover -t <pane>"), "여러 줄을 붙이기로 안 싣는다");
+        assert!(outside.contains("open nothing"), "tmux 밖에서도 칸을 연다");
+        // 빈 입력 칸의 잣대는 `moai-tmux` 의 절이다 — 절 이름을 바꾸면 이 글이 없는 절을 가리킨다.
+        assert!(tmux().contains("\n## Is the input box empty\n"), "되살리기가 대는 tmux 절이 없다");
+        assert!(open.contains("(`moai-tmux`, \"Is the input box empty\")"), "붙이기 전에 입력 칸을 안 본다");
+        assert!(text.contains("**Their asking is the yes:**"), "되살려 달라는 말을 허락으로 안 읽는다");
+        assert!(text.contains("**Workers first, the supervisor last**"), "일꾼 먼저·감독 마지막의 차례가 없다");
+        assert!(
+            text.contains("their names may have changed — run `ListAgents` again**"),
+            "감독에게 일꾼의 이름이 바뀌었을 수 있다고 안 이른다"
+        );
+        // 이미 되살아난 것은 거른다 — 같은 세션을 두 칸에서 되살리면 두 창이 한 대화를 이어 쓴다.
+        assert!(text.contains("**Drop it when it is back already**"), "이미 되살아난 세션을 안 거른다");
+        // 사람이 감독을 먼저 되살려 그 창에서 부르면 제 줄이 그 id 를 든다 — 제 줄을 빼면 제 대화를 한 번 더 연다.
+        assert!(text.contains("**your own row included**"), "제 줄이 든 id 를 이미 되살아난 것으로 안 읽는다");
+        // 루트에는 산 세션이 여럿 선다 — 같은 cwd 로 거르면 루트의 죽은 감독이 늘 빠진다.
+        assert!(text.contains("The\n  root is not such a place"), "루트에서도 같은 cwd 로 거른다");
+        // 끝나지 못한 백그라운드 일과 끊긴 target 링크(moai-uqf7.e7z).
+        assert!(
+            text.contains("`<task-notification>`")
+                && text.contains("`Async agent launched`")
+                && text.contains("`moved to the background (ID: <id>)`"),
+            "끝나지 못한 서브에이전트를 결과 글로 안 찾는다"
+        );
+        assert!(text.contains("mkdir -p /tmp/cargo-target/<name>"), "끊긴 target 링크를 다시 안 세운다");
+        assert!(text.contains("Do not build it yourself"), "되살리는 쪽이 빌드한다");
+        // 일꾼의 대화 기록은 처음 선 자리(루트)의 슬러그 밑에 남는다 — id 로 찾는다.
+        assert!(text.contains("ls ~/.claude/projects/*/<sessionId>.jsonl"), "대화 기록을 id 로 안 찾는다");
+        // 감독과 tmux 의 글이 죽은 세션의 자리에서 이 스킬을 댄다.
+        assert!(supervise().contains("load `moai-recover`"), "감독 글이 되살리기를 안 댄다");
+        assert!(tmux().contains("back is `moai-recover`"), "tmux 스킬의 멈춘 일꾼 절이 되살리기를 안 댄다");
     }
 }

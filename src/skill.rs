@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 pub const DIR: &str = ".claude/moai-plugin";
 
 /// 심는 스킬의 이름 — 스킬마다 `skills/<이름>/` 디렉터리고 그 `SKILL.md` 머리의 `name:` 이다. 차례는 [`tree`] 가
-/// 심는 차례(이슈 트래커·감독·위키·tmux)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
+/// 심는 차례(이슈 트래커·감독·위키·tmux·되살리기)고, [`tree`] 는 디렉터리 이름을 이 목록에서 짓는다. 머리의 `name:` 은 글에 적혀
 /// 있어 시험이 이 목록과 견주고(`guide::tests::the_frontmatter_opens_the_skill`), 트리가 이 목록 밖의 스킬을 심으면
 /// `the_tree_plants_every_skill_name` 이 붉어진다.
 ///
@@ -40,7 +40,10 @@ pub const DIR: &str = ".claude/moai-plugin";
 ///
 /// **넷째 `moai-tmux` 는 tmux 안에서 도는 감독의 손이다**(2026-10-10 사용자 결정, moai-u99i) — 감독 스킬처럼
 /// Claude Code 에만 선다.
-pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-tmux"];
+///
+/// **다섯째 `moai-recover` 는 죽은 세션을 되살린다**(2026-10-10 사용자 결정, moai-uqf7) — Claude Code 의 세션 기록을
+/// 읽는 글이라 Claude Code 에만 선다.
+pub const NAMES: [&str; 5] = ["moai", "moai-supervise", "moai-wiki", "moai-tmux", "moai-recover"];
 
 /// **moai 가 한 번이라도 심은 스킬**과 그 디렉터리 안에 심은 파일 — 지금 심는 것([`NAMES`])에 걷은 것이 더해진
 /// 목록이다(moai-six5.1xz). 셋이 이 하나로 잰다.
@@ -54,11 +57,12 @@ pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-tmux"
 ///
 /// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
 /// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
-pub const EVER_PLANTED: [(&str, &[&str]); 5] = [
+pub const EVER_PLANTED: [(&str, &[&str]); 6] = [
     ("moai", &["SKILL.md", "references/commands.md"]),
     ("moai-supervise", &["SKILL.md", "references/worker.md"]),
     ("moai-wiki", &["SKILL.md"]),
     ("moai-tmux", &["SKILL.md"]),
+    ("moai-recover", &["SKILL.md"]),
     ("moai-work", &["SKILL.md"]),
 ];
 
@@ -90,7 +94,7 @@ pub struct Skill {
 pub fn skills() -> Vec<Skill> {
     // 디렉터리 이름은 [`NAMES`] 에서 온다 — 위키가 스킬 이름을 id 에서 거르는 [`EVER_PLANTED`] 가 그 목록을 다 들니
     // (moai-mdzx.3pm, moai-six5.1xz), 여기 글자를 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
-    let [main, supervisor, wiki, tmux] = NAMES;
+    let [main, supervisor, wiki, tmux, recover] = NAMES;
     vec![
         Skill {
             name: main,
@@ -113,6 +117,9 @@ pub fn skills() -> Vec<Skill> {
         // tmux 스킬은 감독이 `$TMUX` 안에서 돌 때만 읽는다(2026-10-10 사용자 결정, moai-u99i) — 감독 스킬에 섞으면 tmux 를
         // 안 쓰는 감독도 칸을 만지는 걸음을 매번 읽는다. 감독 스킬과 같은 까닭으로 Claude Code 에만 선다.
         Skill { name: tmux, files: vec![("SKILL.md", crate::guide::tmux())], claude_only: true },
+        // 되살리기 스킬은 사람이 죽은 세션을 되살려 달라고 할 때만 읽는다(2026-10-10 사용자 결정, moai-uqf7) — 기록을
+        // 읽는 곳이 Claude Code 의 `~/.claude/` 라 Claude Code 에만 선다. 새 moai 명령은 없다.
+        Skill { name: recover, files: vec![("SKILL.md", crate::guide::recover())], claude_only: true },
     ]
 }
 
@@ -1333,6 +1340,7 @@ mod tests {
             crate::guide::supervise(),
             crate::guide::wiki(),
             crate::guide::tmux(),
+            crate::guide::recover(),
             crate::guide::worker(),
         ];
         // **걸음 글 안에 박힌 `` `moai …` `` 도 뽑는다**(moai-8na5). 줄 머리만 보던 판은 브리프 2·10·12
@@ -1447,7 +1455,7 @@ mod tests {
 
     const NOW: &str = "2026-01-01T00:00:00Z";
 
-    /// 심는 것은 여덟이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, tmux 스킬, 그리고 매니페스트 둘.
+    /// 심는 것은 아홉이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, tmux 스킬, 되살리기 스킬, 그리고 매니페스트 둘.
     #[test]
     fn the_tree_has_what_claude_needs() {
         let files = tree_of("/bin/moai", "# 스킬");
@@ -1458,6 +1466,7 @@ mod tests {
             "skills/moai-supervise/references/worker.md",
             "skills/moai-wiki/SKILL.md",
             "skills/moai-tmux/SKILL.md",
+            "skills/moai-recover/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
         ] {
@@ -1498,7 +1507,7 @@ mod tests {
     ///
     /// **감독 스킬은 Claude 에만 선다**(2026-10-06 사용자 결정, moai-obxm) — 그 글은 Codex·Antigravity 에 없는
     /// `ListAgents`·`SendMessage` 로 말한다. 거르개를 걷으면 `.agents` 에 `moai-supervise` 가 다시 서서 붉어진다.
-    /// 감독의 tmux 손(`moai-tmux`, moai-u99i)도 같은 까닭으로 Claude 에만 선다.
+    /// 감독의 tmux 손(`moai-tmux`, moai-u99i)과 되살리기(`moai-recover`, moai-uqf7)도 같은 까닭으로 Claude 에만 선다.
     #[test]
     fn the_agents_tree_carries_the_same_skills_without_a_manifest() {
         let all = fake("# 스킬", "감독", "위키");
@@ -1514,14 +1523,20 @@ mod tests {
         assert_eq!(dirs, ["moai", "moai-wiki"], "Codex·Antigravity 가 받는 스킬이 다르다 — 차례까지");
         assert!(!shared.keys().any(|p| p.starts_with("moai-supervise/")), "감독 스킬이 .agents 에 섰다");
         assert!(!shared.keys().any(|p| p.starts_with("moai-tmux/")), "tmux 스킬이 .agents 에 섰다");
+        assert!(!shared.keys().any(|p| p.starts_with("moai-recover/")), "되살리기 스킬이 .agents 에 섰다");
         for (path, body) in &shared {
             assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
         }
         let only_claude = claude
             .keys()
-            .filter(|p| p.starts_with("skills/moai-supervise/") || p.starts_with("skills/moai-tmux/"))
+            .filter(|p| {
+                ["skills/moai-supervise/", "skills/moai-tmux/", "skills/moai-recover/"].iter().any(|d| p.starts_with(d))
+            })
             .count();
-        assert_eq!(only_claude, 3, "감독 스킬은 SKILL.md 와 references/worker.md 둘, tmux 스킬은 SKILL.md 하나다");
+        assert_eq!(
+            only_claude, 4,
+            "감독 스킬은 SKILL.md 와 references/worker.md 둘, tmux 스킬과 되살리기 스킬은 SKILL.md 하나씩이다"
+        );
         assert_eq!(
             shared.len() + 2 + only_claude,
             claude.len(),

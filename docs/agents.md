@@ -124,15 +124,17 @@ skills. The steps only one agent has — entering a worktree, asking the person,
 calling the review, changing the model, clearing the window, calling a skill,
 stopping what a review left running — sit in a "Words per agent" table in the
 `moai` skill, one column per agent, and each agent reads its own. A step an agent
-does not have reads `—`: tell the person and go on. The supervisor skill and its
-tmux companion, planted for Claude Code only, name Claude Code's tools directly.
+does not have reads `—`: tell the person and go on. The supervisor skill, its
+tmux companion and the recovery skill, planted for Claude Code only, name Claude
+Code's tools directly.
 
-Four skills come with it:
+Five skills come with it:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
     moai-wiki         keeps this wiki in step with the work
     moai-supervise    Claude Code only: hands piled-up backlog items to the idle sessions of the repository
     moai-tmux         Claude Code only: the supervisor's hands on the workers' tmux panes
+    moai-recover      Claude Code only: brings back the sessions of the repository that died
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
@@ -152,6 +154,9 @@ Four skills come with it:
   a worker's `ListAgents` name to its pane and lets the supervisor label, clear
   and paste into that pane, and open new worker panes once you say yes —
   [In tmux](#in-tmux)
+- **`moai-recover`** is what you call when the sessions died together — a
+  restart, an OOM kill — to bring them back where they stopped —
+  [Bring back sessions that died](#bring-back-sessions-that-died)
 
 ## Open a session for each agent
 
@@ -414,6 +419,32 @@ When the supervisor runs inside tmux (`$TMUX` is set), it also loads the
 (copy mode), it does not type** — it tells you.
 It never kills a pane, a session or the server, and never runs `claude -p` or a
 `--dangerously-*` flag.
+
+### Bring back sessions that died
+
+When the supervisor and its workers died together — the machine restarted, the
+container was OOM-killed — open one Claude Code session in the root and ask it
+to bring them back ("recover the sessions", "되살려"). It loads `moai-recover`
+(moai-uqf7); your asking is the yes.
+
+- **Which died.** It reads the same records under `~/.claude/sessions/` and
+  takes the dead ones standing in the root or a worktree, leaving out any that
+  is already back and older crashes you did not name. When several stand in one
+  directory it asks you once which to bring back
+- **What each was doing.** From each session's transcript under
+  `~/.claude/projects/` it reads its role (supervisor or worker), the issue it
+  held and what it was waiting for, adds the uncommitted files and the issue's
+  `Next:` note, and shows you one table
+- **What died with it.** A background subagent or command that never reported
+  back, and a `target` link whose `/tmp/cargo-target/<name>` was wiped — it
+  makes that directory again; the build output is gone, so the session rebuilds
+- **Bringing them back, workers first and the supervisor last.** Inside tmux it
+  splits a pane per session running `claude --resume <id>` and pastes a short
+  note on what happened once the input box is empty; the supervisor is told its
+  workers' names may have changed. Outside tmux it prints, per session,
+  `cd <dir> && claude --resume <id>` and the note to paste
+
+It changes nothing in the sessions' work — no commit, no build, no `moai` write.
 
 ## Work the queue from a session
 

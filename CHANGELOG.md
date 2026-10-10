@@ -22,6 +22,14 @@ does not tag — see `CONTRIBUTING.md`.
   worker panes running an ordinary interactive `claude`. It never types over a
   non-empty input box and never kills anything. Without `$TMUX` nothing
   changes. (moai-u99i)
+- **A fifth Claude Code skill, `moai-recover`, brings back the sessions that
+  died.** Asked by the person after a restart or an OOM kill, it finds the dead
+  sessions of the repository in `~/.claude/sessions/`, draws what each was doing
+  from its transcript, points out background work that never returned and a
+  `target` link whose `/tmp/cargo-target` directory was wiped, and resumes each
+  one — workers first, the supervisor last — in a new tmux pane running
+  `claude --resume <id>`, or, outside tmux, prints the line to type and the note
+  to paste. No new moai command. (moai-uqf7)
 
 ### Changed
 
