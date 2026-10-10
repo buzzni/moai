@@ -1971,6 +1971,7 @@ mod tests {
             ("skills/moai/references/commands.md", "# Every command"),
             ("skills/moai-supervise/SKILL.md", "---\nname: moai-supervise\n"),
             ("skills/moai-wiki/SKILL.md", "---\nname: moai-wiki\n"),
+            ("skills/moai-tmux/SKILL.md", "---\nname: moai-tmux\n"),
         ] {
             assert!(files[path].starts_with(head), "{path} 에 엉뚱한 글이 섰다");
         }

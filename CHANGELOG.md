@@ -12,6 +12,24 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai skill install` plants a fourth Claude Code skill, `moai-tmux`.** When
+  the supervisor runs inside tmux it finds each worker's pane from
+  `~/.claude/sessions/`, labels it (pane option `@moai`), clears a reported
+  worker's window, pastes a message `SendMessage` could not deliver, reads why a
+  worker stalled and tells the person, and — only after asking — opens new
+  worker panes running an ordinary interactive `claude`. It never types over a
+  non-empty input box and never kills anything. Without `$TMUX` nothing
+  changes. (moai-u99i)
+
+### Changed
+
+- **The supervisor may type into worker panes inside tmux.** This reverses the
+  0.9.0 rule that the supervisor types nothing into a window; outside tmux,
+  clearing a window is still the person's. The AGENTS block now says the moai
+  *binary* never launches or drives a session. (moai-u99i)
+
 ## [0.11.0] - 2026-10-08
 
 ### Added
