@@ -69,8 +69,12 @@ PY
 
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
   worktrees `git worktree list` names
-- **Drop it when it is back already** — a live row other than your own carries the same
-  `sessionId`, or stands in the same `cwd`
+- **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
+  keeps the id), **your own row included**: a session the person resumed first and then asked
+  for this is back already, and resuming it again puts one conversation in two windows. In a
+  worktree, also drop it when a live row other than your own stands in that same `cwd`. The
+  root is not such a place — several live sessions stand there at once, and one of them being
+  alive says nothing about the dead one
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -78,16 +82,19 @@ PY
   for all of them — which to bring back
 
 **A session's transcript** is `~/.claude/projects/<slug>/<sessionId>.jsonl`, one JSON object
-per line. The slug is the directory the session *started* in, with every character that is
-not a letter or a digit turned into `-` (`/home/me/repo/.worktrees/moai-ab12` is
-`-home-me-repo--worktrees-moai-ab12`). A worker that entered its worktree from the root keeps
-its transcript under the root's slug, so find it by id:
+per line. The slug is a directory with every character that is not a letter or a digit
+turned into `-` (`/home/me/repo/.worktrees/moai-ab12` is `-home-me-repo--worktrees-moai-ab12`).
+Which directory is not fixed: a worker that entered its worktree from the root has kept its
+transcript under the root's slug on one Claude Code version and under the worktree's on
+another, so do not work the slug out — find it by id:
 
     ls ~/.claude/projects/*/<sessionId>.jsonl
 
-**When the records are gone too**, take the newest `*.jsonl` under the root's slug and under
-each worktree's slug. A line's `cwd` and `sessionId` say where that session last stood and
-which id to resume; its `timestamp` says when it last moved.
+**When the records are gone too**, look under the root's slug and under each worktree's slug
+for every `*.jsonl` that last moved around the time they died — the root's slug may hold the
+supervisor's and a worker's both, so not only the newest one. A line's `cwd` and `sessionId`
+say where that session last stood and which id to resume; its `timestamp` says when it last
+moved.
 
 ## 2. Draw the state each was in
 
@@ -109,9 +116,11 @@ waiting for, died at, uncommitted files. Then go on — they asked for recovery 
 ## 3. Point out what died with it
 
 - **Background work that never returned.** A background launch is an `Agent` or `Bash`
-  `tool_use` whose result reads `Async agent launched` (with its `agentId`) or `Command running
-  in background with ID: <id>` — an `Agent` launch carries no `"run_in_background": true` in
-  its input, so read the result; when it ends, a later user line carries a
+  `tool_use` whose result reads `Async agent launched` (with its `agentId`), `Command running
+  in background with ID: <id>`, or — a command that ran past its timeout —
+  `moved to the background (ID: <id>)`. Whether the input carries
+  `"run_in_background": true` differs by version and the timeout case carries nothing, so read
+  the result; when it ends, a later user line carries a
   `<task-notification>` whose `<task-id>` is that id. A launch with no such line after it died
   with the session — the resumed session will never hear from it, and what it
   changed is uncommitted in that session's `cwd`

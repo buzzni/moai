@@ -2249,7 +2249,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 }
 
 /// 살아 있는 Claude Code 세션마다 `ListAgents` 의 이름과 tmux 칸을 잇는 짝 — **한 자리에만 선다**(moai-u99i.xo8).
-/// `moai-tmux`([`tmux`])가 `format!` 으로 싣고, 다음 에픽의 되살리기 스킬(moai-uqf7)이 죽은 세션까지 읽으려고 같은
+/// `moai-tmux`([`tmux`])가 `format!` 으로 싣고, 되살리기 스킬([`recover`], moai-uqf7)이 죽은 세션까지 읽으려고 같은
 /// 상수를 싣는다. 그래서 거르지 않고 첫 칸에 `alive`·`dead` 를 적는다 — 읽는 쪽이 고른다. 두 벌로 적으면 기록의 꼴이
 /// 바뀌는 날 한쪽만 고쳐진다.
 ///
@@ -2261,7 +2261,7 @@ subject — that has actually happened. So in the root, supervisor and worker al
 /// **`%<칸>` 은 tmux 서버마다 따로 센다** — 기록에는 서버가 없어서, 다른 서버(`tmux -L …`)에서 도는 세션의 `%4` 를
 /// 그대로 내면 부르는 쪽 서버의 엉뚱한 칸 `%4` 에 친다. 그래서 부르는 셸에 `$TMUX` 가 서 있으면, 산 세션의
 /// `/proc/<pid>/environ` 의 `TMUX` 소켓이 부르는 쪽의 소켓과 같을 때만 칸을 내고 아니면 `-` 다. 죽은 줄과 `$TMUX` 없이
-/// 부른 판은 기록의 칸을 그대로 낸다 — 되살리기(moai-uqf7)가 읽는 자리다.
+/// 부른 판은 기록의 칸을 그대로 낸다. 죽은 줄의 칸은 아무도 겨누지 않는다 — 되살리기(moai-uqf7)는 제가 연 칸에만 친다.
 ///
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
@@ -2510,8 +2510,9 @@ stands in the new pane (trusting the folder, say), tell the person — it is the
 /// **세션과 칸을 잇는 짝은 [`SESSIONS`] 하나다.** `moai-tmux` 와 같은 상수를 `format!` 으로 싣는다 — 둘째 짝을
 /// 적으면 기록의 꼴이 바뀌는 날 한쪽만 고쳐진다. 짝에 없는 것(역할·죽은 때·끝나지 못한 백그라운드 일)은 기록이 아니라
 /// 대화 기록(`~/.claude/projects/…/<sessionId>.jsonl`)에서 읽는다. 워크트리에 든 일꾼의 대화 기록은 그 세션이 **처음
-/// 선 자리**(루트)의 슬러그 밑에 남아 있었다(2026-10-10 에 본 `~/.claude/projects` — 일꾼 워크트리의 슬러그
-/// 디렉터리는 비어 있었다). 그래서 슬러그를 셈하지 않고 id 로 찾는다.
+/// 선 자리**(루트)의 슬러그 밑에 남아 있었고(2026-10-10 에 본 `~/.claude/projects` — 일꾼 워크트리의 슬러그
+/// 디렉터리는 비어 있었다), 같은 날 다른 판(2.1.296)에서는 워크트리의 슬러그 밑에 섰다. 판마다 갈리니 슬러그를 셈하지
+/// 않고 id 로 찾는다.
 ///
 /// **되살려 달라는 말이 곧 허락이다**(사람 결정) — tmux 안이면 묻지 않고 칸을 연다. 그 밖의 금은 `moai-tmux` 와
 /// 같다: 헤드리스·`--dangerously-*`·권한 모드가 없고, 아무것도 죽이지 않고, 한 번에 한 번 보고, 빈 입력 칸에만
@@ -2561,8 +2562,12 @@ leaves its record behind. The lines below print one row per record, tab-separate
 
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
   worktrees `git worktree list` names
-- **Drop it when it is back already** — a live row other than your own carries the same
-  `sessionId`, or stands in the same `cwd`
+- **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
+  keeps the id), **your own row included**: a session the person resumed first and then asked
+  for this is back already, and resuming it again puts one conversation in two windows. In a
+  worktree, also drop it when a live row other than your own stands in that same `cwd`. The
+  root is not such a place — several live sessions stand there at once, and one of them being
+  alive says nothing about the dead one
 - **Drop old crashes.** Records of earlier deaths stay too. Keep the candidates whose
   transcript (below) last moved around the same time; name an older one to the person apart,
   and bring it back only if they say so
@@ -2570,16 +2575,19 @@ leaves its record behind. The lines below print one row per record, tab-separate
   for all of them — which to bring back
 
 **A session's transcript** is `~/.claude/projects/<slug>/<sessionId>.jsonl`, one JSON object
-per line. The slug is the directory the session *started* in, with every character that is
-not a letter or a digit turned into `-` (`/home/me/repo/.worktrees/moai-ab12` is
-`-home-me-repo--worktrees-moai-ab12`). A worker that entered its worktree from the root keeps
-its transcript under the root's slug, so find it by id:
+per line. The slug is a directory with every character that is not a letter or a digit
+turned into `-` (`/home/me/repo/.worktrees/moai-ab12` is `-home-me-repo--worktrees-moai-ab12`).
+Which directory is not fixed: a worker that entered its worktree from the root has kept its
+transcript under the root's slug on one Claude Code version and under the worktree's on
+another, so do not work the slug out — find it by id:
 
     ls ~/.claude/projects/*/<sessionId>.jsonl
 
-**When the records are gone too**, take the newest `*.jsonl` under the root's slug and under
-each worktree's slug. A line's `cwd` and `sessionId` say where that session last stood and
-which id to resume; its `timestamp` says when it last moved.
+**When the records are gone too**, look under the root's slug and under each worktree's slug
+for every `*.jsonl` that last moved around the time they died — the root's slug may hold the
+supervisor's and a worker's both, so not only the newest one. A line's `cwd` and `sessionId`
+say where that session last stood and which id to resume; its `timestamp` says when it last
+moved.
 
 ## 2. Draw the state each was in
 
@@ -2601,9 +2609,11 @@ waiting for, died at, uncommitted files. Then go on — they asked for recovery 
 ## 3. Point out what died with it
 
 - **Background work that never returned.** A background launch is an `Agent` or `Bash`
-  `tool_use` whose result reads `Async agent launched` (with its `agentId`) or `Command running
-  in background with ID: <id>` — an `Agent` launch carries no `"run_in_background": true` in
-  its input, so read the result; when it ends, a later user line carries a
+  `tool_use` whose result reads `Async agent launched` (with its `agentId`), `Command running
+  in background with ID: <id>`, or — a command that ran past its timeout —
+  `moved to the background (ID: <id>)`. Whether the input carries
+  `"run_in_background": true` differs by version and the timeout case carries nothing, so read
+  the result; when it ends, a later user line carries a
   `<task-notification>` whose `<task-id>` is that id. A launch with no such line after it died
   with the session — the resumed session will never hear from it, and what it
   changed is uncommitted in that session's `cwd`
@@ -5287,7 +5297,7 @@ stop sending outside work while a release runs",
     }
 
     /// **`ListAgents` 의 이름과 tmux 칸을 잇는 짝은 한 자리에 선다**(moai-u99i.xo8). 감독의 tmux 스킬이 그 상수를 그대로
-    /// 싣고, 다음의 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
+    /// 싣고, 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
     /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다. 다른 tmux 서버에서 도는 산 세션의
     /// 칸은 `-` 다 — `%N` 은 서버마다 따로 세어, 그대로 내면 부르는 쪽 서버의 엉뚱한 칸에 친다.
     #[test]
@@ -5474,8 +5484,9 @@ stop sending outside work while a release runs",
         never_kills_nor_runs_headless(&text);
         // 짝은 하나다 — `~/.claude/sessions` 를 읽는 둘째 파이썬이 서면 기록의 꼴이 바뀌는 날 한쪽만 고쳐진다.
         assert_eq!(text.matches("~/.claude/sessions/*.json").count(), 1, "세션 기록을 읽는 짝이 둘이다");
-        // 띄우는 줄은 둘 — tmux 칸과, tmux 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다.
-        let launches: Vec<&str> = text.lines().filter(|l| l.contains("claude --resume <")).collect();
+        // 띄우는 줄은 둘 — tmux 칸과, tmux 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서 `claude ` 를 든
+        // 줄을 다 센다 — `--resume` 앞에 다른 깃발(`--model …`)을 끼운 줄도 걸려야 한다.
+        let launches: Vec<&str> = text.lines().filter(|l| l.starts_with("    ") && l.contains("claude ")).collect();
         assert_eq!(
             launches,
             [
@@ -5503,9 +5514,15 @@ stop sending outside work while a release runs",
         );
         // 이미 되살아난 것은 거른다 — 같은 세션을 두 칸에서 되살리면 두 창이 한 대화를 이어 쓴다.
         assert!(text.contains("**Drop it when it is back already**"), "이미 되살아난 세션을 안 거른다");
+        // 사람이 감독을 먼저 되살려 그 창에서 부르면 제 줄이 그 id 를 든다 — 제 줄을 빼면 제 대화를 한 번 더 연다.
+        assert!(text.contains("**your own row included**"), "제 줄이 든 id 를 이미 되살아난 것으로 안 읽는다");
+        // 루트에는 산 세션이 여럿 선다 — 같은 cwd 로 거르면 루트의 죽은 감독이 늘 빠진다.
+        assert!(text.contains("The\n  root is not such a place"), "루트에서도 같은 cwd 로 거른다");
         // 끝나지 못한 백그라운드 일과 끊긴 target 링크(moai-uqf7.e7z).
         assert!(
-            text.contains("`<task-notification>`") && text.contains("`Async agent launched`"),
+            text.contains("`<task-notification>`")
+                && text.contains("`Async agent launched`")
+                && text.contains("`moved to the background (ID: <id>)`"),
             "끝나지 못한 서브에이전트를 결과 글로 안 찾는다"
         );
         assert!(text.contains("mkdir -p /tmp/cargo-target/<name>"), "끊긴 target 링크를 다시 안 세운다");
