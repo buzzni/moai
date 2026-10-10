@@ -205,7 +205,9 @@ A Claude Code session running the `moai-supervise` skill. It hands the
 and takes their reports the same way. It picks, sends and checks; it does not fix and it does
 not merge. Inside tmux, where the optional `moai-tmux` skill is planted, it also
 loads it to label, clear and paste into the workers' panes, and to open new ones
-once the person says yes. Codex and
+once the person says yes. Inside a Saycode session, where the optional
+`moai-saycode` skill is planted, it drives the workers through Saycode's
+`happy agent` the same way, and that comes first. Codex and
 Antigravity have none. More in
 [working with agents](agents.md#hand-work-to-idle-sessions).
 
