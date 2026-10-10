@@ -2256,19 +2256,43 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ///
 /// **읽는 것은 Claude Code 가 프로세스마다 남기는 `~/.claude/sessions/<pid>.json` 이다.** 죽은 프로세스의 파일도,
 /// 다른 pid 이름공간(`pidDomain`)의 파일도 거기 남는다. 그래서 pid 가 살아 있는 것만으로는 모자라고 — pid 는 다시
-/// 쓰인다 — 기록의 `procStart` 가 `/proc/<pid>/stat` 의 22번째 칸(프로세스 시작 시각)과 같아야 `alive` 다. `tmux` 는
-/// `"<세션>:@<창>.%<칸>"` 이고, `-t` 가 받는 것은 끝의 `%<칸>` 이다. tmux 밖의 세션은 칸이 `-` 다.
+/// 쓰인다 — 기록의 `procStart` 가 그 프로세스의 시작 시각과 같아야 `alive` 다. 시작 시각을 적는 꼴이 OS 마다 다르다
+/// (moai-p5sz.7q3, 2026-10-11 macOS 에서 잼) — 리눅스는 `/proc/<pid>/stat` 의 22번째 칸(부팅 뒤 틱), macOS(`pidDomain`
+/// `darwin`)는 `/proc` 가 없고 `LC_ALL=C TZ=UTC ps -o lstart=` 가 내는 글(`Fri Oct  9 17:24:58 2026`)이다. 그 글은 날이 한
+/// 자리면 빈칸이 둘이라 빈칸을 하나로 접어 견준다. `/proc` 만 읽던 판은 macOS 에서 모든 세션을 `dead` 로 읽어
+/// `moai-tmux`·`moai-recover` 가 Mac 에서 아무 칸도 못 찾았다. `tmux` 는 `"<세션>:@<창>.%<칸>"` 이고, `-t` 가 받는 것은
+/// 끝의 `%<칸>` 이다. tmux 밖의 세션은 칸이 `-` 다.
 ///
 /// **`%<칸>` 은 tmux 서버마다 따로 센다** — 기록에는 서버가 없어서, 다른 서버(`tmux -L …`)에서 도는 세션의 `%4` 를
-/// 그대로 내면 부르는 쪽 서버의 엉뚱한 칸 `%4` 에 친다. 그래서 부르는 셸에 `$TMUX` 가 서 있으면, 산 세션의
-/// `/proc/<pid>/environ` 의 `TMUX` 소켓이 부르는 쪽의 소켓과 같을 때만 칸을 내고 아니면 `-` 다. 죽은 줄과 `$TMUX` 없이
-/// 부른 판은 기록의 칸을 그대로 낸다. 죽은 줄의 칸은 아무도 겨누지 않는다 — 되살리기(moai-uqf7)는 제가 연 칸에만 친다.
+/// 그대로 내면 부르는 쪽 서버의 엉뚱한 칸 `%4` 에 친다. 그래서 부르는 셸에 `$TMUX` 가 서 있으면, 부르는 쪽 서버의
+/// `%<칸>` 의 `#{pane_tty}` 가 산 세션 프로세스의 tty(`ps -o tty=`)와 같을 때만 칸을 내고 아니면 `-` 다. 같은 tty 면
+/// 그 칸에서 도는 프로세스라는 뜻이라, 서버가 같은지보다 한 걸음 더 잰다. 옛 판은 `/proc/<pid>/environ` 의 `TMUX`
+/// 소켓을 견줬는데 macOS 에는 그 파일이 없고, 남의 프로세스 환경을 읽는 일은 자동 모드의 분류기가 비밀 뒤지기로 막았다
+/// (2026-10-11) — tty 와 시작 시각은 환경을 안 읽는다. 죽은 줄과 `$TMUX` 없이 부른 판은 기록의 칸을 그대로 낸다. 죽은
+/// 줄의 칸은 아무도 겨누지 않는다 — 되살리기(moai-uqf7)는 제가 연 칸에만 친다.
 ///
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
-pub const SESSIONS: &str = r#"python3 - <<'PY'
-import glob, json, os
-mine = os.environ.get("TMUX", "").split(",")[0]
+pub const SESSIONS: &str = r##"python3 - <<'PY'
+import glob, json, os, subprocess
+def out(*cmd, **env):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, **env)).stdout.strip()
+    except OSError:
+        return ""
+def started(pid):
+    if not os.path.isdir("/proc/self"):
+        return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            stat = f.read()
+        return stat[stat.rindex(")") + 2:].split()[19]
+    except (OSError, ValueError, IndexError):
+        return ""
+def tty(pid):
+    t = out("ps", "-p", str(pid), "-o", "tty=")
+    return "/dev/" + t if t.strip("?") else ""
+mine = os.environ.get("TMUX")
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -2276,26 +2300,17 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         pid = int(r["pid"])
     except (OSError, ValueError, KeyError, TypeError):
         continue
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            stat = f.read()
-        alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
-    except (OSError, ValueError, IndexError):
-        alive = False
+    start = started(pid)
+    alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
     if alive and pane and mine:
-        try:
-            with open(f"/proc/{pid}/environ", "rb") as f:
-                env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
-        except OSError:
-            theirs = ""
-        if theirs != mine:
+        here = tty(pid)
+        if not here or here != out("tmux", "display", "-p", "-t", pane, "#{pane_tty}"):
             pane = ""
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
-PY"#;
+PY"##;
 
 /// **빈 입력 칸의 잣대는 이 글 하나다.** `moai-tmux` 와 `moai-recover` 가 `format!` 으로 같은 글을 싣는다 —
 /// 되살리기는 모두에게 심기고 `moai-tmux` 는 고른 사람에게만 서니(moai-3r7l), 되살리기가 `moai-tmux` 의 절을 가리키면
@@ -5325,16 +5340,12 @@ stop sending outside work while a release runs",
         if std::process::Command::new("python3").arg("-c").arg("pass").output().is_err() {
             return; // python3 가 없는 기계 — 글만 잰다.
         }
-        if !std::path::Path::new("/proc/self/stat").exists() {
-            return; // `/proc` 가 없는 기계(macOS) — 짝은 리눅스의 것이다. 글만 잰다.
-        }
         let s = crate::scratch::Scratch::new("tmux-session-map");
         let dir = s.path().join(".claude/sessions");
         std::fs::create_dir_all(&dir).unwrap();
-        // 이 시험 프로세스는 살아 있다 — 그 시작 시각이 `procStart` 다.
+        // 이 시험 프로세스는 살아 있다 — 그 시작 시각이 `procStart` 다. macOS 의 글은 빈칸을 둘로 늘려도 같은 시각이다.
         let me = std::process::id();
-        let stat = std::fs::read_to_string(format!("/proc/{me}/stat")).unwrap();
-        let start = stat[stat.rfind(')').unwrap() + 2..].split_whitespace().nth(19).unwrap().to_string();
+        let start = proc_start(me).replace(' ', "  ");
         let record = |pid: u32, start: &str, name: &str, tmux: Option<&str>| {
             let tmux = tmux.map_or(String::new(), |t| format!(r#","tmux":"{t}""#));
             format!(
@@ -5372,6 +5383,60 @@ stop sending outside work while a release runs",
              alive\tplain\t-\tidle\t/repo\ts-plain\n",
             "다른 tmux 서버의 칸 id 를 그대로 낸다"
         );
+        // 부르는 쪽 서버의 칸에서 실제로 도는 프로세스는 그 칸을 받는다 — 칸의 tty 와 프로세스의 tty 가 같다. 시험 서버는
+        // 제 소켓(`-S`)으로 따로 띄운다: 사람의 서버에 붙지 않는다.
+        let sock = s.path().join("tmux.sock");
+        let tmux = |args: &[&str]| {
+            std::process::Command::new("tmux").arg("-S").arg(&sock).args(args).env_remove("TMUX").output()
+        };
+        if !tmux(&["-V"]).is_ok_and(|o| o.status.success()) {
+            return; // tmux 가 없는 기계 — 남의 서버를 거르는 것까지만 잰다.
+        }
+        struct Server<'a>(&'a dyn Fn(&[&str]) -> std::io::Result<std::process::Output>);
+        impl Drop for Server<'_> {
+            fn drop(&mut self) {
+                let _ = (self.0)(&["kill-server"]);
+            }
+        }
+        let started = tmux(&["new-session", "-d", "-s", "map", "sleep 60"]).unwrap();
+        assert!(started.status.success(), "{}", String::from_utf8_lossy(&started.stderr));
+        let _server = Server(&tmux);
+        let shown = tmux(&["display", "-p", "-t", "map", "#{pane_id} #{pane_pid} #{pid}"]).unwrap();
+        let shown = String::from_utf8(shown.stdout).unwrap();
+        let [pane, pane_pid, server]: [&str; 3] = shown.split_whitespace().collect::<Vec<_>>().try_into().unwrap();
+        let pane_pid: u32 = pane_pid.parse().unwrap();
+        std::fs::write(
+            dir.join("5.json"),
+            record(pane_pid, &proc_start(pane_pid), "worker", Some(&format!("map:@0.{pane}"))),
+        )
+        .unwrap();
+        assert_eq!(
+            run(Some(&format!("{},{server},0", sock.display()))),
+            format!(
+                "alive\there\t-\tidle\t/repo\ts-here\n\
+                 dead\treused\t%4\tidle\t/repo\ts-reused\n\
+                 alive\tplain\t-\tidle\t/repo\ts-plain\n\
+                 alive\tworker\t{pane}\tidle\t/repo\ts-worker\n"
+            ),
+            "부르는 쪽 서버의 칸에서 도는 세션의 칸을 못 찾았다"
+        );
+    }
+
+    /// 프로세스 `pid` 의 시작 시각을 Claude Code 가 기록의 `procStart` 에 적는 꼴로 — 리눅스는 `/proc/<pid>/stat` 의
+    /// 22번째 칸, `/proc` 가 없는 macOS 는 `LC_ALL=C TZ=UTC ps -o lstart=` 의 글(2026-10-11 실제 기록과 견줘 잼).
+    fn proc_start(pid: u32) -> String {
+        match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            Ok(stat) => stat[stat.rfind(')').unwrap() + 2..].split_whitespace().nth(19).unwrap().to_string(),
+            Err(_) => {
+                let out = std::process::Command::new("ps")
+                    .args(["-p", &pid.to_string(), "-o", "lstart="])
+                    .env("LC_ALL", "C")
+                    .env("TZ", "UTC")
+                    .output()
+                    .unwrap();
+                String::from_utf8(out.stdout).unwrap().trim().to_string()
+            }
+        }
     }
 
     /// 글이 가르치는 `tmux` 줄을 세며 하나하나 잰다 — 칸을 `-t` 로 겨누거나, 칸을 안 건드리는 넷(설정 읽기 `show`·
