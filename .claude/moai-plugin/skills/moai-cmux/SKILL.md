@@ -8,9 +8,9 @@ description: Use in Claude Code together with moai-supervise when the supervisor
 This is the supervisor's (`moai-supervise`) companion **when it runs inside cmux** —
 `CMUX_SURFACE_ID` is set in its shell and `$TMUX` is not. Inside tmux — tmux running in a cmux
 tab included — what you type goes to tmux: that is `moai-tmux`, and none of this applies.
-Without `CMUX_SURFACE_ID` none of this applies either: the supervisor works through messages and
-the person alone. The cmux app here is **the person's own**: every workspace they have lives in
-it, and every surface you touch is a tab they are looking at.
+Outside both tmux and cmux none of this applies either: the supervisor works through messages
+and the person alone. The cmux app here is **the person's own**: every workspace they have lives
+in it, and every surface you touch is a tab they are looking at.
 
 cmux's words: a window holds workspaces (the rows of its sidebar), a workspace holds panes (its
 splits), and a pane holds surfaces (the tabs of that split). A surface is one terminal — what you
@@ -24,7 +24,9 @@ This needs cmux 0.65.0 or later. Look once, at the start of the round:
 
 If its `methods` do not list `surface.input_state`, the cmux here is older: tell the person once
 that `moai-cmux` needs cmux 0.65.0 or later, and go on as if this skill were not here. Updating
-restarts cmux, and with it every session inside — yours too — so when is theirs to choose.
+restarts cmux, and with it every session inside — yours too — so when is theirs to choose. If it
+prints an error instead of a `methods` list — a socket it cannot reach, a sandbox — that says
+nothing about the version: tell the person what it said, and go on as if this skill were not here.
 
 ## What never happens
 
@@ -36,7 +38,8 @@ restarts cmux, and with it every session inside — yours too — so when is the
   `respawn-pane`, never `pkill` or `killall` aimed at cmux. A worker that is done stays open;
   closing a tab is the person's
 - **Never `--force`.** cmux refuses to type into a Claude Code box that holds someone's words or a
-  dialog, and `--force` skips that refusal. A refusal is an answer — tell the person
+  dialog — but only for a session its own Claude hook knows, which is why you read the box
+  yourself first — and `--force` skips that refusal. A refusal is an answer — tell the person
 - **Only a worker's surface.** Type only into a surface found through the session map below for
   a worker of this repository — never your own (`$CMUX_SURFACE_ID`), never a session of another
   repository. Every call names its surface by UUID, `--surface <surface>`: left out, cmux types
@@ -62,24 +65,38 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
 
 ```sh
 python3 - <<'PY'
-import glob, json, os, subprocess
+import glob, json, os, subprocess, sys
 def out(*cmd, **env):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, **env)).stdout.strip()
-    except OSError:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
         return ""
-def started(pid):
-    if not os.path.isdir("/proc/self"):
-        return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+linux = os.path.isdir("/proc/self")
+def stat(pid):
     try:
         with open(f"/proc/{pid}/stat") as f:
-            stat = f.read()
-        return stat[stat.rindex(")") + 2:].split()[19]
-    except (OSError, ValueError, IndexError):
-        return ""
+            text = f.read()
+        return text[text.rindex(")") + 2:].split()
+    except (OSError, ValueError):
+        return []
+def started(pid):
+    if linux:
+        fields = stat(pid)
+        return fields[19] if len(fields) > 19 else ""
+    return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+def device(path):
+    try:
+        return os.stat(path).st_rdev if path else 0
+    except OSError:
+        return 0
 def tty(pid):
+    if linux:
+        try:
+            return int(stat(pid)[4]) & 0xFFFFFFFF
+        except (IndexError, ValueError):
+            return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
-    return "/dev/" + t if t.strip("?") else ""
+    return device("/dev/" + t) if t.strip("?") else 0
 mine = os.environ.get("TMUX")
 cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
 surfaces = {}
@@ -94,7 +111,8 @@ if cmux:
     try:
         walk(json.loads(out("cmux", "--json", "--id-format", "both", "top", "--all")))
     except ValueError:
-        pass
+        print("cmux top gave no answer, so no session is matched to a surface", file=sys.stderr)
+rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -106,12 +124,21 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and pane and mine:
+    if alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
+        pane = ""
+    elif alive and pane and mine:
         here = tty(pid)
-        if not here or here != out("tmux", "display", "-p", "-t", pane, "#{pane_tty}"):
+        if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
-    if alive and cmux:
+    elif alive and cmux:
         pane = "" if tmux else surfaces.get(pid)
+    rows.append((alive, pane, r))
+if rows and not any(alive for alive, _, _ in rows):
+    sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
+claimed = [pane for alive, pane, _ in rows if alive and pane and (mine or cmux)]
+for alive, pane, r in rows:
+    if alive and claimed.count(pane) > 1:
+        pane = ""
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
@@ -121,8 +148,11 @@ PY
   or now belongs to another process (the start time differs)
 - `name` is the `ListAgents` name, `pane` the surface UUID that `--surface` takes. cmux itself
   answers which processes run in which surface (`cmux top`). It is `-` when that session is not
-  in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — and then
-  this skill has nothing for that worker
+  in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — when it
+  shares its tab with another live session, or when cmux gave no answer (a line on its own says
+  so), and then this skill has nothing for that worker
+- **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
+  dead — act on no row, and tell the person what it said
 - `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
@@ -136,12 +166,15 @@ Run it when a step below needs a surface, once.
     cmux rpc surface.input_state '{"surface_id":"<surface>"}'
 
 cmux reads Claude Code's input box off that surface's screen. The box is **empty** only when
-the answer reads `"state": "empty"` and `"waiting_on_human": false`. `draft` is text someone
-typed or pasted — the person's, even a half-typed word. `dialog` is a prompt or a menu standing
-where the box was. `unknown` is a screen cmux cannot read as Claude Code's — a shell prompt, a
-process that ended. `waiting_on_human` is a permission prompt or a question waiting for the
-person. None of these is a box to type into, and neither is an error or an answer without
-`state`.
+the answer's `state` is `empty` and its `waiting_on_human` is `false`, and the session map, run
+again just before, still reads that session `alive` in that tab — cmux reads the screen alone,
+and a tab whose Claude Code has ended can still show its last box, and read `empty`, while a
+shell has the keyboard. `draft` is text someone typed or pasted — the person's, even a half-typed
+word. `dialog` is a prompt or a menu standing where the box was. `unknown` is a screen cmux
+cannot read as Claude Code's — a shell prompt, a process that ended. `waiting_on_human` is cmux's
+note that the session last asked the person something — a permission prompt, a question — and
+it can stay `true` after an API error or an interrupt. None of these is a box to type into, and
+neither is an error or an answer without `state`.
 
 **Then do not type. Tell the person which tab holds what, and go on as if this skill were not
 here.**
@@ -152,20 +185,23 @@ When you send work (the supervisor's 3), you may write the worker and the work o
 **Ask the person once per round** whether worker tabs should carry labels — unlike a pane option
 in tmux, a label takes the tab's title where they look. On a yes:
 
-    cmux rename-tab --surface <surface> --title '<worker> <id>'
+    cmux rpc tab.action '{"surface_id":"<surface>","action":"rename","title":"<worker> <id>"}'
 
-`<id>` is the backlog or epic you sent. A name given this way stays over the title Claude Code
-keeps writing (`✳ <topic>`) until it is taken off. Take it off when that work's report is checked
-(the supervisor's 5):
+`<id>` is the backlog or epic you sent. Go through `rpc`, not `rename-tab`: the CLI's tab words
+add your own workspace to the call, and cmux then cannot find a worker tab that stands in
+another workspace. A name given this way stays over the title Claude Code keeps writing
+(`✳ <topic>`) until it is taken off. Take it off when that work's report is checked (the
+supervisor's 5):
 
-    cmux tab-action --surface <surface> --action clear-name
+    cmux rpc tab.action '{"surface_id":"<surface>","action":"clear_name"}'
 
-**A tab the person named stays theirs.** Before you label one, read its title —
-`cmux --json --id-format both tree --all` gives each surface's `title` beside its `id`. Claude
-Code's own titles open with a status glyph: `✳`, or a spinner frame such as `◑` or `⠂`. A title
-that is neither that nor a label you wrote this round may be a name the person gave the tab, and
-`clear-name` would erase it along with yours — leave that tab unlabelled. Rename no workspace:
-the names in the sidebar are the person's.
+**A tab the person named stays theirs.** Read its title before you label it and again before you
+take the label off — `cmux --id-format both tree --all` prints each surface's title, in quotes,
+beside its UUID. Claude Code's own titles open with a status glyph: `✳`, or a spinner frame such
+as `◑` or `⠂`; a label reads `<worker> <id>` — that tab's worker and a backlog or epic id, yours
+or one a supervisor before you left. Any other title may be a name the person gave the tab, and
+`clear_name` would erase it — do not label that tab, and do not take off a name the person gave it
+after your label. Rename no workspace: the names in the sidebar are the person's.
 
 ## Clear a worker's window
 
@@ -206,13 +242,17 @@ instead. Typed keys submit at every newline, so paste it as one block:
    pasted message carries no sender, and the worker reports to the message's `from`. The
    first line stays the message's own, which names the work and the step to start from:
    `from: <your ListAgents name>`
-2. Paste and submit it:
+2. Paste and submit it — the lone `-` reads the file from stdin; after a `--` it would be pasted
+   as the text itself:
 
-       cmux paste --surface <surface> --submit -- - < <file>
+       cmux paste --surface <surface> --submit - < <file>
 
    It goes in as one paste, and cmux presses the key that submits it. If cmux refuses —
-   someone's words or a dialog in the box — do not try again
-3. **Tell the person** you did, and into which tab
+   someone's words or a dialog in the box — do not try again. If it warns that the text was
+   pasted but the submit key was not sent, do not paste again either: the message stands in
+   that box unsent
+3. **Tell the person** you did, and into which tab — and, after that warning, that the message
+   waits there unsent
 
 The worker still answers with `SendMessage`. A worker that answered your message by refusing
 the work is not a delivery that failed — it comes out of the candidates (the supervisor's 2).
@@ -225,9 +265,11 @@ has read `busy` far longer than its work should take, look at its tab once:
     cmux read-screen --surface <surface> --lines 40
 
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
-rate-limit error, or a process that ended (a shell prompt where the box was). The input box
-check above says it in a word when you have it: `waiting_on_human` is a prompt waiting for the
-person, `unknown` a screen that is no longer Claude Code's. **Tell the person** what the tab
+rate-limit error, or a process that ended (a shell prompt where the box was, or under its last
+box). The input box check above gives a hint when you have it: `waiting_on_human` says the
+session last asked the person something — it can outlast an API error, so the screen decides —
+and `unknown` is a screen that is no longer Claude Code's; whether the session is still alive,
+the session map says. **Tell the person** what the tab
 shows and which tab it is. Do not answer the prompt, do not press a key, and do not look again
 in a loop. A process that ended is a dead session: bringing it back is `moai-recover`, once
 the person asks for it.
@@ -244,7 +286,10 @@ asked you for it. On a yes, for each:
 other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
 UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
 shell, so the shell stays when `claude` exits and what it said stays readable, and the split
-does not take focus. When all are open, even the splits out once:
+does not take focus. **If cmux refuses the split** — no space for a new pane, as every split
+lands in your row, or it cannot find your tab in the workspace this session started in — open
+no more: tell the person how many opened and what it said. When all are open, even the splits
+out once:
 
     cmux rpc workspace.equalize_splits '{"workspace_id":"<workspace UUID>"}'
 

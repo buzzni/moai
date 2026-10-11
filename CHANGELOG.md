@@ -27,7 +27,15 @@ does not tag — see `CONTRIBUTING.md`.
   older cmux it says so and does nothing. Running tmux inside a cmux tab stays
   `moai-tmux`'s case. Plant it with `moai skill install --with moai-cmux`, or
   its row in the first `moai init` (checked when `$CMUX_SURFACE_ID` is set).
-  `moai-recover` opens a tab per session inside cmux the same way. (moai-p5sz)
+  (moai-p5sz)
+
+### Changed
+
+- **`moai-recover` opens a tab per session inside cmux 0.65.0 or later**, the
+  way it opens a pane per session inside tmux, and pastes its note once the
+  tab's input box reads empty. It is planted everywhere, so this reaches every
+  cmux user, `moai-cmux` or not; outside tmux and cmux it still prints the line
+  to type. (moai-p5sz.kfi)
 
 ### Fixed
 

@@ -84,7 +84,8 @@ pub fn detected(vars: &[(String, String)]) -> Vec<&'static str> {
     detected_in(&OPTIONAL, vars)
 }
 
-/// [`detected`] 의 몸통 — 목록을 받아, 아직 목록에 없는 꼴의 표식(머리로 재는 cmux)도 시험이 잰다.
+/// [`detected`] 의 몸통 — 목록을 받아, 목록에 없는 꼴의 표식(이름의 머리로 재는 것)도 시험이 잰다. cmux 는 그 꼴로
+/// 재려다 탭을 겨누는 이름 하나(`CMUX_SURFACE_ID`)로 섰다([`OPTIONAL`]).
 fn detected_in(list: &[Optional], vars: &[(String, String)]) -> Vec<&'static str> {
     list.iter().filter(|o| vars.iter().any(|(k, v)| (o.sign)(k) && !v.is_empty())).map(|o| o.name).collect()
 }
@@ -1615,9 +1616,10 @@ mod tests {
         assert_eq!(detected(&env(&[("CMUX_SURFACE_ID", "")])), Vec::<&str>::new(), "빈 표식을 cmux 로 읽었다");
         // tmux 를 cmux 탭 안에서 돌리는 사람 — 둘 다 그 사람의 것이다. 차례는 [`OPTIONAL`] 의 것이다.
         assert_eq!(detected(&env(&[surface, ("TMUX", "/tmp/tmux-501/default,1,0")])), ["moai-tmux", "moai-cmux"]);
-        let list = [Optional { name: "moai-cmux", sign: |var| var.starts_with("CMUX_") }];
-        assert_eq!(detected_in(&list, &env(&[("CMUX_SOCKET_PATH", "/tmp/s")])), ["moai-cmux"]);
-        assert_eq!(detected_in(&list, &env(&[("CMUX_X", ""), ("XCMUX_Y", "1")])), Vec::<&str>::new());
+        // 머리로 재는 표식 — 지금 목록에는 없는 꼴이다(cmux 는 이름 하나로 섰다). 머리에서 시작하고 값이 차야 선다.
+        let list = [Optional { name: "moai-other", sign: |var| var.starts_with("OTHER_") }];
+        assert_eq!(detected_in(&list, &env(&[("OTHER_SOCKET", "/tmp/s")])), ["moai-other"]);
+        assert_eq!(detected_in(&list, &env(&[("OTHER_X", ""), ("XOTHER_Y", "1")])), Vec::<&str>::new());
     }
 
     /// **심을 선택 스킬은 (심긴 것 ∪ `with`) − `without` 이다**(moai-3r7l) — 맨 `install` 은 심긴 것만 다시 심고, 처음 심는

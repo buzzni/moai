@@ -1203,8 +1203,8 @@ launches or drives a session. When the supervisor runs inside tmux, its companio
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says
 yes. Inside cmux (0.65.0 or later) `moai-cmux` does the same with cmux's tabs. Each is planted
-only where it is chosen: `moai skill install --with moai-tmux` plants it and `--without`
-takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+only where it is chosen: `moai skill install --with moai-tmux` (or `--with moai-cmux`) plants
+it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki
@@ -1814,9 +1814,9 @@ workers talk with Claude Code's own tools:
 - A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
 
 **Every session here is an interactive one the person can see.** The moai binary never
-launches or drives an agent, and nothing here runs headless. Outside tmux the supervisor
-launches nothing either; inside tmux or cmux it may open a worker pane, only after the person
-says yes (`moai-tmux` or `moai-cmux`, below). **A worker is every idle session of this
+launches or drives an agent, and nothing here runs headless. Outside tmux and cmux the
+supervisor launches nothing either; inside either it may open a worker pane, only after the
+person says yes (`moai-tmux` or `moai-cmux`, below). **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
@@ -1848,7 +1848,8 @@ worker panes when no worker is idle (2), label the pane you send to and deliver 
 `SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
 window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
-step below goes through messages and the person, as written. `moai-tmux` is an optional skill:
+step below goes through messages and the person, as written, unless you are inside cmux (the
+next paragraph). `moai-tmux` is an optional skill:
 it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
 init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
 outside tmux.
@@ -2119,8 +2120,9 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
-Inside cmux, label the worker's tab as you send and, if the message does not arrive, deliver it
-into the tab — `moai-cmux`, "Label the tab" and "When a message does not arrive".
+Inside cmux, label the worker's tab as you send, once the person said yes to labels this round,
+and if the message does not arrive, deliver it into the tab —
+`moai-cmux`, "Label the tab" and "When a message does not arrive".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -2279,11 +2281,20 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ///
 /// **`%<칸>` 은 tmux 서버마다 따로 센다** — 기록에는 서버가 없어서, 다른 서버(`tmux -L …`)에서 도는 세션의 `%4` 를
 /// 그대로 내면 부르는 쪽 서버의 엉뚱한 칸 `%4` 에 친다. 그래서 부르는 셸에 `$TMUX` 가 서 있으면, 부르는 쪽 서버의
-/// `%<칸>` 의 `#{pane_tty}` 가 산 세션 프로세스의 tty(`ps -o tty=`)와 같을 때만 칸을 내고 아니면 `-` 다. 같은 tty 면
-/// 그 칸에서 도는 프로세스라는 뜻이라, 서버가 같은지보다 한 걸음 더 잰다. 옛 판은 `/proc/<pid>/environ` 의 `TMUX`
-/// 소켓을 견줬는데 macOS 에는 그 파일이 없고, 남의 프로세스 환경을 읽는 일은 자동 모드의 분류기가 비밀 뒤지기로 막았다
-/// (2026-10-11) — tty 와 시작 시각은 환경을 안 읽는다. 죽은 줄과 `$TMUX` 없이 부른 판은 기록의 칸을 그대로 낸다. 죽은
-/// 줄의 칸은 아무도 겨누지 않는다 — 되살리기(moai-uqf7)는 제가 연 칸에만 친다.
+/// `%<칸>` 의 `#{pane_tty}` 가 산 세션 프로세스의 tty 와 같은 장치(`st_rdev`)일 때만 칸을 내고 아니면 `-` 다. 같은 tty
+/// 면 그 칸에서 도는 프로세스라는 뜻이라, 서버가 같은지보다 한 걸음 더 잰다. 프로세스의 tty 는 리눅스에서
+/// `/proc/<pid>/stat` 의 7번째 칸(`tty_nr` — 커널이 `st_rdev` 와 같은 꼴로 적는다), macOS 에서 `ps -o tty=` 로 읽는다.
+/// 리눅스까지 `ps` 에 기대던 판은 procps 가 없는 이미지(debian slim, `-p` 가 없는 BusyBox 의 `ps`)에서 모든 칸을 `-`
+/// 로 냈다(리뷰 moai-p5sz.tkn). 옛 판은 `/proc/<pid>/environ` 의 `TMUX` 소켓을 견줬는데 macOS 에는 그 파일이 없고, 남의
+/// 프로세스 환경을 읽는 일은 자동 모드의 분류기가 비밀 뒤지기로 막았다(2026-10-11) — tty 와 시작 시각은 환경을 안
+/// 읽는다. 죽은 줄과 `$TMUX` 없이 부른 판은 기록의 칸을 그대로 낸다. 죽은 줄의 칸은 아무도 겨누지 않는다 —
+/// 되살리기(moai-uqf7)는 제가 연 칸에만 친다. 파이썬은 3.6 에서도 돈다 — `subprocess.run` 의 `capture_output`·`text` 는
+/// 3.7 의 것이라 RHEL 8 의 `python3` 에서 잡히지 않는 `TypeError` 로 줄 중간에 죽는다.
+///
+/// **산 줄이 하나도 없으면 아무 줄도 내지 않고 1 로 끝난다**(리뷰 moai-p5sz.tkn). 짝을 부르는 것은 살아 있는 Claude
+/// Code 세션이라 제 기록 하나는 늘 `alive` 여야 한다 — 그것까지 `dead` 면 이 셸이 시작 시각을 못 읽는 것이다(macOS 의
+/// Bash 샌드박스가 `ps` 에게 남의 프로세스를 안 보이고, 리눅스의 샌드박스는 제 pid 이름공간만 본다). 그 판의 `dead` 를
+/// 믿으면 되살리기가 산 세션을 `claude --resume` 으로 한 번 더 띄워 한 대화를 두 창이 잇는다.
 ///
 /// **cmux 안에서 부르면 같은 칸에 surface 의 UUID 가 선다**(moai-p5sz.7q3) — 부르는 셸에 `$TMUX` 는 없고
 /// `CMUX_SURFACE_ID` 가 서 있을 때다. `moai-cmux` 의 명령은 모두 `--surface <UUID>` 로 겨누니 칸 하나가 둘 다 받는다.
@@ -2297,29 +2308,50 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ///   낸다. 거꾸로 cmux 쪽에서는 기록에 `tmux` 가 선 산 세션을 `-` 로 낸다 — tmux 서버가 cmux 안에서 섰다면 그
 ///   환경의 `CMUX_SURFACE_ID` 는 tmux 를 띄운 surface 의 것이라, 거기 치면 그 세션이 아니라 tmux 의 지금 칸에 간다
 /// - **cmux 가 `top` 을 모르면 칸이 모두 `-` 다** — `top` 은 v0.64.0, `moai-cmux` 가 기대는 나머지는 v0.65.0 부터다.
-///   판을 재는 것은 스킬의 몫이고(`moai-cmux` 의 첫 절), 짝은 모르는 판에서 아무 surface 도 대지 않는다
+///   판을 재는 것은 스킬의 몫이고(`moai-cmux` 의 첫 절), 짝은 모르는 판에서 아무 surface 도 대지 않는다. 답이 없으면
+///   (옛 판, 닿지 않는 소켓, 샌드박스) stderr 에 한 줄을 남긴다 — 모든 칸의 `-` 가 "cmux 탭 밖" 이 아니라 "cmux 가 답하지
+///   않았다" 임을 읽는 쪽이 가르게(리뷰 moai-p5sz.tkn). 짝이 부르는 프로세스(`ps`·`tmux`·`cmux`)는 모두 10초에 끊는다 —
+///   응답 없는 소켓 하나가 짝 전체를, 그것을 부른 감독의 차례까지 세운다
+/// - **한 칸을 둘이 대면 둘 다 `-` 다**(리뷰 moai-p5sz.tkn) — cmux 의 다리는 물려받은 환경뿐이라, cmux 탭 안에서 돈
+///   zellij·screen 처럼 기록에 `tmux` 가 안 서는 멀티플렉서의 세션은 모두 그 탭으로 읽히고, 그 탭에 친 것은 앞에 선 세션
+///   하나에만 간다. 확인한 tmux 칸도 같은 잣대다. `interactive` 가 아닌 기록(`ListAgents` 의 `bg`)은 띄운 세션의 탭과
+///   tty 를 물려받을 뿐 그 입력을 받지 않아, 확인하는 판(tmux·cmux 안)에서는 칸 없이 `-` 다
 ///
 /// 칸은 탭으로 가른다 — tmux 세션 이름에 빈칸이 들 수 있다(`Shopping Crawler:@16.%39`). 줄의 꼴이 계약이다:
 /// `state  name  pane  status  cwd  sessionId`. `the_session_map_reads_the_records` 가 실제 기록 꼴로 돌려 잰다.
 pub const SESSIONS: &str = r##"python3 - <<'PY'
-import glob, json, os, subprocess
+import glob, json, os, subprocess, sys
 def out(*cmd, **env):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, **env)).stdout.strip()
-    except OSError:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
         return ""
-def started(pid):
-    if not os.path.isdir("/proc/self"):
-        return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+linux = os.path.isdir("/proc/self")
+def stat(pid):
     try:
         with open(f"/proc/{pid}/stat") as f:
-            stat = f.read()
-        return stat[stat.rindex(")") + 2:].split()[19]
-    except (OSError, ValueError, IndexError):
-        return ""
+            text = f.read()
+        return text[text.rindex(")") + 2:].split()
+    except (OSError, ValueError):
+        return []
+def started(pid):
+    if linux:
+        fields = stat(pid)
+        return fields[19] if len(fields) > 19 else ""
+    return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+def device(path):
+    try:
+        return os.stat(path).st_rdev if path else 0
+    except OSError:
+        return 0
 def tty(pid):
+    if linux:
+        try:
+            return int(stat(pid)[4]) & 0xFFFFFFFF
+        except (IndexError, ValueError):
+            return 0
     t = out("ps", "-p", str(pid), "-o", "tty=")
-    return "/dev/" + t if t.strip("?") else ""
+    return device("/dev/" + t) if t.strip("?") else 0
 mine = os.environ.get("TMUX")
 cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
 surfaces = {}
@@ -2334,7 +2366,8 @@ if cmux:
     try:
         walk(json.loads(out("cmux", "--json", "--id-format", "both", "top", "--all")))
     except ValueError:
-        pass
+        print("cmux top gave no answer, so no session is matched to a surface", file=sys.stderr)
+rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -2346,12 +2379,21 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and pane and mine:
+    if alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
+        pane = ""
+    elif alive and pane and mine:
         here = tty(pid)
-        if not here or here != out("tmux", "display", "-p", "-t", pane, "#{pane_tty}"):
+        if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
-    if alive and cmux:
+    elif alive and cmux:
         pane = "" if tmux else surfaces.get(pid)
+    rows.append((alive, pane, r))
+if rows and not any(alive for alive, _, _ in rows):
+    sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
+claimed = [pane for alive, pane, _ in rows if alive and pane and (mine or cmux)]
+for alive, pane, r in rows:
+    if alive and claimed.count(pane) > 1:
+        pane = ""
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY"##;
@@ -2402,8 +2444,9 @@ description: Use in Claude Code together with moai-supervise when the supervisor
 
 This is the supervisor's (`moai-supervise`) companion **when it runs inside tmux** — `$TMUX`
 is set in its shell. Without `$TMUX` none of this applies: the supervisor works through
-messages and the person alone. The tmux server here is **the person's own**: every session
-they have lives on it, and every pane you touch is one they are looking at.
+messages and the person — or, inside cmux, through `moai-cmux`. The tmux server here is **the
+person's own**: every session they have lives on it, and every pane you touch is one they are
+looking at.
 
 ## What never happens
 
@@ -2573,15 +2616,29 @@ stands in the new pane (trusting the folder, say), tell the person — it is the
 /// **초안 가드에 기대지 않는다.** `paste`·`send` 는 초안 앞에서 스스로 멈추지만, 그 거절은 `blocks_typing` 에 서고 그것은
 /// cmux 의 Claude 훅이 `agent` 를 채운 surface 에서만 참이다(v0.65.0 소스) — 훅 없이 띄운 `claude` 는 `state` 가 `draft`
 /// 여도 막히지 않는다. 그래서 `state` 를 스스로 읽는다. 가드는 둘째 울타리다.
+///
+/// **잣대는 값으로 적고 JSON 글자로 적지 않는다**(리뷰 moai-p5sz.tkn) — `cmux rpc` 는 Foundation 의 pretty JSON 이라
+/// 콜론 앞에 빈칸이 선다(`"state" : "empty"`). `"state": "empty"` 를 글자째 찾으면 어떤 칸도 비지 않는다.
+/// `waiting_on_human` 은 화면이 아니라 cmux 훅이 적은 때(`lifecycle == needsInput`)라 API 오류·끊긴 차례 뒤에도 참으로
+/// 남는다(v0.65.0 `TerminalController+SurfaceInputState.swift`) — 막는 쪽으로만 틀리니 잣대로 두되, 뜻은 그대로 적는다.
+///
+/// **`state` 는 화면만 읽는다 — 그 탭의 세션이 살아 있는지는 짝이 댄다**(리뷰 moai-p5sz.tkn). cmux 는 화면의 마지막
+/// `❯`+NBSP 줄을 입력 칸으로 읽어서(`AgentPromptInputState.swift`, "callers should only act on the result for a surface
+/// known to run an agent"), 죽은(OOM·SIGKILL) Claude Code 가 남긴 마지막 칸 아래에 셸 프롬프트가 선 탭도 `empty` 다.
+/// 거기에 `paste --submit` 하면 메시지나 되살리기 글이 셸의 명령으로 돈다. `SendMessage` 가 "no such session" 으로
+/// 실패한 때가 바로 그 일꾼이 죽은 때다. 그래서 치기 바로 전에 짝을 다시 돌려 그 세션이 그 탭에서 `alive` 인지 본다.
 pub const CMUX_EMPTY_BOX: &str = r#"    cmux rpc surface.input_state '{"surface_id":"<surface>"}'
 
 cmux reads Claude Code's input box off that surface's screen. The box is **empty** only when
-the answer reads `"state": "empty"` and `"waiting_on_human": false`. `draft` is text someone
-typed or pasted — the person's, even a half-typed word. `dialog` is a prompt or a menu standing
-where the box was. `unknown` is a screen cmux cannot read as Claude Code's — a shell prompt, a
-process that ended. `waiting_on_human` is a permission prompt or a question waiting for the
-person. None of these is a box to type into, and neither is an error or an answer without
-`state`."#;
+the answer's `state` is `empty` and its `waiting_on_human` is `false`, and the session map, run
+again just before, still reads that session `alive` in that tab — cmux reads the screen alone,
+and a tab whose Claude Code has ended can still show its last box, and read `empty`, while a
+shell has the keyboard. `draft` is text someone typed or pasted — the person's, even a half-typed
+word. `dialog` is a prompt or a menu standing where the box was. `unknown` is a screen cmux
+cannot read as Claude Code's — a shell prompt, a process that ended. `waiting_on_human` is cmux's
+note that the session last asked the person something — a permission prompt, a question — and
+it can stay `true` after an API error or an interrupt. None of these is a box to type into, and
+neither is an error or an answer without `state`."#;
 
 /// 선택 스킬 `moai-cmux` 의 SKILL.md — cmux 안에서 도는 감독의 손이다(2026-10-10 사용자 결정, moai-p5sz). `moai-tmux`
 /// ([`tmux`])의 cmux 짝이라 그 글과 결정을 그대로 옮긴다 — 칸을 비우고, 닿지 않은 메시지를 붙이고, 사람이 그러라고 한
@@ -2600,6 +2657,14 @@ person. None of these is a box to type into, and neither is an error or an answe
 /// 친다. `surface:N` 은 cmux 가 물을 때마다 짓는 이름이라 다시 서면 안 남는다. 닫기(`close-*`)·`--force`·포커스 옮기기는
 /// 하지 말라는 줄에만 선다 — `the_cmux_skill_touches_only_named_surfaces` 가 cmux 를 부르는 줄을 하나하나 잰다.
 ///
+/// **v0.65.0 소스로 잰 덫 둘**(리뷰 moai-p5sz.tkn). `paste` 는 `--` 뒤의 `-` 를 글자로 읽는다 — stdin 은 `--` 앞의 홀로 선
+/// `-` 일 때만 읽으니(`CMUXCLI+Paste.swift` 의 `parsePasteCommandArguments`), `--submit -- -` 는 메시지 대신 `-` 한 자를
+/// 쳐 넣고 누른다. 이름표의 CLI 낱말 `rename-tab`·`tab-action` 은 부르는 쪽의 `$CMUX_WORKSPACE_ID` 를 함께 실어(`runTabAction`),
+/// 서버가 그 워크스페이스에서 surface 를 찾다가 다른 워크스페이스의 일꾼 탭을 "Tab not found" 로 거절한다 — `rpc
+/// tab.action` 에 `surface_id` 만 주면 서버가 surface 로 워크스페이스를 찾는다. `new-split` 도 같은 꼴로 세션이 선 때의
+/// `$CMUX_WORKSPACE_ID` 를 싣고, 칸 하나가 160pt 아래로 줄 자리에서는 split 을 거절한다(`Workspace+SplitSpace.swift`) —
+/// 감독 곁에 한 줄로 쪼개는 새 칸은 대여섯에서 막히니, 거절되면 더 열지 않는 갈래를 글이 든다.
+///
 /// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
 pub fn cmux() -> String {
     format!(
@@ -2613,9 +2678,9 @@ description: Use in Claude Code together with moai-supervise when the supervisor
 This is the supervisor's (`moai-supervise`) companion **when it runs inside cmux** —
 `CMUX_SURFACE_ID` is set in its shell and `$TMUX` is not. Inside tmux — tmux running in a cmux
 tab included — what you type goes to tmux: that is `moai-tmux`, and none of this applies.
-Without `CMUX_SURFACE_ID` none of this applies either: the supervisor works through messages and
-the person alone. The cmux app here is **the person's own**: every workspace they have lives in
-it, and every surface you touch is a tab they are looking at.
+Outside both tmux and cmux none of this applies either: the supervisor works through messages
+and the person alone. The cmux app here is **the person's own**: every workspace they have lives
+in it, and every surface you touch is a tab they are looking at.
 
 cmux's words: a window holds workspaces (the rows of its sidebar), a workspace holds panes (its
 splits), and a pane holds surfaces (the tabs of that split). A surface is one terminal — what you
@@ -2629,7 +2694,9 @@ This needs cmux 0.65.0 or later. Look once, at the start of the round:
 
 If its `methods` do not list `surface.input_state`, the cmux here is older: tell the person once
 that `moai-cmux` needs cmux 0.65.0 or later, and go on as if this skill were not here. Updating
-restarts cmux, and with it every session inside — yours too — so when is theirs to choose.
+restarts cmux, and with it every session inside — yours too — so when is theirs to choose. If it
+prints an error instead of a `methods` list — a socket it cannot reach, a sandbox — that says
+nothing about the version: tell the person what it said, and go on as if this skill were not here.
 
 ## What never happens
 
@@ -2641,7 +2708,8 @@ restarts cmux, and with it every session inside — yours too — so when is the
   `respawn-pane`, never `pkill` or `killall` aimed at cmux. A worker that is done stays open;
   closing a tab is the person's
 - **Never `--force`.** cmux refuses to type into a Claude Code box that holds someone's words or a
-  dialog, and `--force` skips that refusal. A refusal is an answer — tell the person
+  dialog — but only for a session its own Claude hook knows, which is why you read the box
+  yourself first — and `--force` skips that refusal. A refusal is an answer — tell the person
 - **Only a worker's surface.** Type only into a surface found through the session map below for
   a worker of this repository — never your own (`$CMUX_SURFACE_ID`), never a session of another
   repository. Every call names its surface by UUID, `--surface <surface>`: left out, cmux types
@@ -2673,8 +2741,11 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
   or now belongs to another process (the start time differs)
 - `name` is the `ListAgents` name, `pane` the surface UUID that `--surface` takes. cmux itself
   answers which processes run in which surface (`cmux top`). It is `-` when that session is not
-  in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — and then
-  this skill has nothing for that worker
+  in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — when it
+  shares its tab with another live session, or when cmux gave no answer (a line on its own says
+  so), and then this skill has nothing for that worker
+- **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
+  dead — act on no row, and tell the person what it said
 - `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
@@ -2696,20 +2767,23 @@ When you send work (the supervisor's 3), you may write the worker and the work o
 **Ask the person once per round** whether worker tabs should carry labels — unlike a pane option
 in tmux, a label takes the tab's title where they look. On a yes:
 
-    cmux rename-tab --surface <surface> --title '<worker> <id>'
+    cmux rpc tab.action '{{"surface_id":"<surface>","action":"rename","title":"<worker> <id>"}}'
 
-`<id>` is the backlog or epic you sent. A name given this way stays over the title Claude Code
-keeps writing (`✳ <topic>`) until it is taken off. Take it off when that work's report is checked
-(the supervisor's 5):
+`<id>` is the backlog or epic you sent. Go through `rpc`, not `rename-tab`: the CLI's tab words
+add your own workspace to the call, and cmux then cannot find a worker tab that stands in
+another workspace. A name given this way stays over the title Claude Code keeps writing
+(`✳ <topic>`) until it is taken off. Take it off when that work's report is checked (the
+supervisor's 5):
 
-    cmux tab-action --surface <surface> --action clear-name
+    cmux rpc tab.action '{{"surface_id":"<surface>","action":"clear_name"}}'
 
-**A tab the person named stays theirs.** Before you label one, read its title —
-`cmux --json --id-format both tree --all` gives each surface's `title` beside its `id`. Claude
-Code's own titles open with a status glyph: `✳`, or a spinner frame such as `◑` or `⠂`. A title
-that is neither that nor a label you wrote this round may be a name the person gave the tab, and
-`clear-name` would erase it along with yours — leave that tab unlabelled. Rename no workspace:
-the names in the sidebar are the person's.
+**A tab the person named stays theirs.** Read its title before you label it and again before you
+take the label off — `cmux --id-format both tree --all` prints each surface's title, in quotes,
+beside its UUID. Claude Code's own titles open with a status glyph: `✳`, or a spinner frame such
+as `◑` or `⠂`; a label reads `<worker> <id>` — that tab's worker and a backlog or epic id, yours
+or one a supervisor before you left. Any other title may be a name the person gave the tab, and
+`clear_name` would erase it — do not label that tab, and do not take off a name the person gave it
+after your label. Rename no workspace: the names in the sidebar are the person's.
 
 ## Clear a worker's window
 
@@ -2750,13 +2824,17 @@ instead. Typed keys submit at every newline, so paste it as one block:
    pasted message carries no sender, and the worker reports to the message's `from`. The
    first line stays the message's own, which names the work and the step to start from:
    `from: <your ListAgents name>`
-2. Paste and submit it:
+2. Paste and submit it — the lone `-` reads the file from stdin; after a `--` it would be pasted
+   as the text itself:
 
-       cmux paste --surface <surface> --submit -- - < <file>
+       cmux paste --surface <surface> --submit - < <file>
 
    It goes in as one paste, and cmux presses the key that submits it. If cmux refuses —
-   someone's words or a dialog in the box — do not try again
-3. **Tell the person** you did, and into which tab
+   someone's words or a dialog in the box — do not try again. If it warns that the text was
+   pasted but the submit key was not sent, do not paste again either: the message stands in
+   that box unsent
+3. **Tell the person** you did, and into which tab — and, after that warning, that the message
+   waits there unsent
 
 The worker still answers with `SendMessage`. A worker that answered your message by refusing
 the work is not a delivery that failed — it comes out of the candidates (the supervisor's 2).
@@ -2769,9 +2847,11 @@ has read `busy` far longer than its work should take, look at its tab once:
     cmux read-screen --surface <surface> --lines 40
 
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
-rate-limit error, or a process that ended (a shell prompt where the box was). The input box
-check above says it in a word when you have it: `waiting_on_human` is a prompt waiting for the
-person, `unknown` a screen that is no longer Claude Code's. **Tell the person** what the tab
+rate-limit error, or a process that ended (a shell prompt where the box was, or under its last
+box). The input box check above gives a hint when you have it: `waiting_on_human` says the
+session last asked the person something — it can outlast an API error, so the screen decides —
+and `unknown` is a screen that is no longer Claude Code's; whether the session is still alive,
+the session map says. **Tell the person** what the tab
 shows and which tab it is. Do not answer the prompt, do not press a key, and do not look again
 in a loop. A process that ended is a dead session: bringing it back is `moai-recover`, once
 the person asks for it.
@@ -2788,7 +2868,10 @@ asked you for it. On a yes, for each:
 other flag** on `claude`. It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first
 UUID is the new surface, the second your workspace. `--command` is typed into the new tab's
 shell, so the shell stays when `claude` exits and what it said stays readable, and the split
-does not take focus. When all are open, even the splits out once:
+does not take focus. **If cmux refuses the split** — no space for a new pane, as every split
+lands in your row, or it cannot find your tab in the workspace this session started in — open
+no more: tell the person how many opened and what it said. When all are open, even the splits
+out once:
 
     cmux rpc workspace.equalize_splits '{{"workspace_id":"<workspace UUID>"}}'
 
@@ -2822,8 +2905,8 @@ theirs to answer.
 ///
 /// **되살려 달라는 말이 곧 허락이다**(사람 결정) — tmux 안이면 묻지 않고 칸을 연다. 그 밖의 금은 `moai-tmux` 와
 /// 같다: 헤드리스·`--dangerously-*`·권한 모드가 없고, 아무것도 죽이지 않고, 한 번에 한 번 보고, 빈 입력 칸에만
-/// 붙인다. tmux 밖이면 아무것도 안 띄우고 칠 줄과 붙일 글만 낸다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
-/// `ListAgents` 가 일꾼을 보고 시작해야 한다.
+/// 붙인다. tmux 와 cmux 둘 다의 밖이면 아무것도 안 띄우고 칠 줄과 붙일 글만 낸다. 차례는 일꾼 먼저, 감독 마지막이다 —
+/// 감독의 `ListAgents` 가 일꾼을 보고 시작해야 한다.
 ///
 /// **cmux 안이면 탭을 연다**(moai-p5sz.kfi) — `moai-cmux` 의 새 칸 줄에 `--resume` 을 실은 꼴이다. 판(0.65.0)은 이
 /// 글이 스스로 잰다: 되살리기는 모두에게 심기고 `moai-cmux` 는 고른 사람에게만 서니, 그 스킬의 판 절을 대면 없는 글을
@@ -2886,6 +2969,9 @@ leaves its record behind. The lines below print one row per record, tab-separate
 {SESSIONS}
 ```
 
+- **No row at all, and a line saying no record reads alive** — not even your own: this shell
+  cannot tell live from dead (a sandbox that hides other processes, say). Bring nothing back;
+  tell the person what it said
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
   worktrees `git worktree list` names
 - **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
@@ -2995,24 +3081,30 @@ person which pane is which session.
 
 `CMUX_SURFACE_ID` is set in your shell and `$TMUX` is not — and the cmux is 0.65.0 or later:
 `cmux capabilities` lists `surface.input_state` in its `methods`. On an older cmux, tell the
-person that this way needs cmux 0.65.0, and go to 7. For each session, in that order:
+person that this way needs cmux 0.65.0, and go to 7; when it prints an error instead of a
+`methods` list, tell them what it said, and go to 7. For each session, in that order:
 
     cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
 
 **No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
 is the new tab, the second your workspace. The command is typed into the tab's shell, so the
-shell stays when `claude` exits, and the split does not take focus. When all are open, even
-the splits out once:
+shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
+— no space for a new pane, as every split lands in your row, or it cannot find your tab in the
+workspace this session started in — open no more: the sessions left, the supervisor among them,
+get the lines of 7, and tell the person what it said. When all are open, even the splits out
+once:
 
     cmux rpc workspace.equalize_splits '{{"workspace_id":"<workspace UUID>"}}'
 
 Then, as a separate call per tab, look once: when its box is empty ("Is the input box empty"
-above), paste the block:
+above — the session map reads the resumed session `alive` in that tab), paste the block:
 
-    cmux paste --surface <surface> --submit -- - < <file>
+    cmux paste --surface <surface> --submit - < <file>
 
-If cmux refuses — someone's words or a dialog in the box — do not try again; tell the person.
-If the box has not shown yet, look again after your next step. A prompt in the tab (trusting
+The lone `-` reads the file from stdin. If cmux refuses — someone's words or a dialog in the
+box — do not try again; tell the person. If it warns that the text was pasted but the submit key
+was not sent, do not paste again either: tell the person the block stands unsent in that tab's
+box. If the box has not shown yet, look again after your next step. A prompt in the tab (trusting
 the folder, say) is the person's to answer — tell them which tab. When all are open, tell the
 person which tab is which session.
 
@@ -5664,7 +5756,8 @@ stop sending outside work while a release runs",
     /// 싣고, 되살리기 스킬(moai-uqf7)도 같은 것을 싣는다. 실제 기록의 꼴로 돌려, 산 기록과 죽은 기록(pid 가 없거나
     /// 다른 프로세스가 그 pid 를 다시 쓴 것)을 가르는지, 칸 id 를 `%N` 으로 뽑는지 잰다. 다른 tmux 서버에서 도는 산 세션의
     /// 칸은 `-` 다 — `%N` 은 서버마다 따로 세어, 그대로 내면 부르는 쪽 서버의 엉뚱한 칸에 친다. cmux 안에서 부르면 같은
-    /// 칸에 surface 의 UUID 가 선다(moai-p5sz.7q3).
+    /// 칸에 surface 의 UUID 가 선다(moai-p5sz.7q3). 한 칸을 둘이 대면 둘 다 `-` 고, 산 줄이 하나도 없으면 아무 줄도 안
+    /// 낸다(리뷰 moai-p5sz.tkn).
     #[test]
     fn the_session_map_reads_the_records() {
         assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
@@ -5690,22 +5783,23 @@ stop sending outside work while a release runs",
         std::fs::write(dir.join("2.json"), record(me, "1", "reused", Some("moai:@0.%4"))).unwrap();
         std::fs::write(dir.join("3.json"), record(me, &start, "plain", None)).unwrap();
         std::fs::write(dir.join("4.json"), "not json").unwrap();
-        let shell = SESSIONS.replace("~/.claude/sessions", &dir.display().to_string());
         // cmux 를 흉내 내는 `cmux` — 짝이 부르는 꼴 그대로일 때만 `top` 의 JSON 꼴(windows → workspaces → panes →
-        // surfaces)을 내고, 이 시험 프로세스를 `CMUX-SURFACE-A` 에 둔다.
+        // surfaces)을 내고, 이 시험 프로세스와 그 부모를 `CMUX-SURFACE-A` 에 둔다. 부모는 아래에서 한 탭을 둘이 대는 판에 쓴다.
+        let parent = std::os::unix::process::parent_id();
         let bin = s.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let top = format!(
-            r#"{{"windows":[{{"workspaces":[{{"panes":[{{"surfaces":[{{"id":"CMUX-SURFACE-B","ref":"surface:2","cmux_process_pids":[]}},{{"id":"CMUX-SURFACE-A","ref":"surface:3","cmux_process_pids":[{me}],"processes":[{{"pid":{me}}}]}}]}}]}}]}}]}}"#
+            r#"{{"windows":[{{"workspaces":[{{"panes":[{{"surfaces":[{{"id":"CMUX-SURFACE-B","ref":"surface:2","cmux_process_pids":[]}},{{"id":"CMUX-SURFACE-A","ref":"surface:3","cmux_process_pids":[{me},{parent}],"processes":[{{"pid":{me}}}]}}]}}]}}]}}]}}"#
         );
         let fake = format!("#!/bin/sh\n[ \"$*\" = '--json --id-format both top --all' ] || exit 1\necho '{top}'\n");
         std::fs::write(bin.join("cmux"), fake).unwrap();
         std::fs::set_permissions(bin.join("cmux"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
         // 시험은 사람의 cmux 안에서 돌 수 있다 — 물려받은 `CMUX_SURFACE_ID` 는 늘 걷고, cmux 를 재는 판만 세운다.
-        let run_in = |tmux: Option<&str>, cmux: bool| {
+        let map = |records: &std::path::Path, tmux: Option<&str>, cmux: bool| {
             let mut cmd = std::process::Command::new("sh");
-            cmd.arg("-c").arg(&shell).env_remove("CMUX_SURFACE_ID");
+            let shell = SESSIONS.replace("~/.claude/sessions", &records.display().to_string());
+            cmd.arg("-c").arg(shell).env_remove("CMUX_SURFACE_ID");
             match tmux {
                 Some(t) => cmd.env("TMUX", t),
                 None => cmd.env_remove("TMUX"),
@@ -5713,7 +5807,10 @@ stop sending outside work while a release runs",
             if cmux {
                 cmd.env("CMUX_SURFACE_ID", "CMUX-SURFACE-SUPERVISOR").env("PATH", &path);
             }
-            let out = cmd.output().unwrap();
+            cmd.output().unwrap()
+        };
+        let run_in = |tmux: Option<&str>, cmux: bool| {
+            let out = map(&dir, tmux, cmux);
             assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
             String::from_utf8(out.stdout).unwrap()
         };
@@ -5748,11 +5845,52 @@ stop sending outside work while a release runs",
             run(Some("/nonexistent/moai-other-server,1,0")),
             "tmux 안의 감독에게 cmux 의 surface 를 냈다"
         );
+        // 한 탭을 둘이 대면 둘 다 `-` 다 — 다리는 물려받은 환경뿐이라(cmux 탭 안의 zellij·screen) 그 탭에 친 것은 앞에 선
+        // 세션 하나에만 간다. `bg` 기록은 띄운 세션의 탭을 물려받을 뿐 그 입력을 받지 않아 탭을 안 대고, 대는 쪽도 막지 않는다.
+        let shared = s.path().join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let theirs = proc_start(parent);
+        std::fs::write(shared.join("1.json"), record(me, &start, "plain", None)).unwrap();
+        std::fs::write(shared.join("2.json"), record(parent, &theirs, "job", None).replace("interactive", "bg"))
+            .unwrap();
+        let out = map(&shared, None, true);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\tCMUX-SURFACE-A\tidle\t/repo\ts-plain\n\
+             alive\tjob\t-\tidle\t/repo\ts-job\n",
+            "bg 기록이 탭을 댔거나 대는 세션을 막았다"
+        );
+        std::fs::write(shared.join("3.json"), record(parent, &theirs, "twin", None)).unwrap();
+        let out = map(&shared, None, true);
+        assert_eq!(
+            String::from_utf8(out.stdout).unwrap(),
+            "alive\tplain\t-\tidle\t/repo\ts-plain\n\
+             alive\tjob\t-\tidle\t/repo\ts-job\n\
+             alive\ttwin\t-\tidle\t/repo\ts-twin\n",
+            "한 탭을 둘이 대는데 한쪽에 그 탭을 냈다"
+        );
+        // 산 줄이 하나도 없으면 — 부르는 세션 제 기록까지 `dead` 로 읽히면 — 이 셸은 시작 시각을 못 읽는 것이다. 아무 줄도
+        // 안 내고 0 아닌 코드로 끝난다: 그 판의 `dead` 를 믿은 되살리기가 산 세션을 한 번 더 띄운다.
+        let blind = s.path().join("blind");
+        std::fs::create_dir_all(&blind).unwrap();
+        std::fs::write(blind.join("1.json"), record(me, "1", "reused", None)).unwrap();
+        let out = map(&blind, None, false);
+        assert!(!out.status.success() && out.stdout.is_empty(), "산 줄 없이 죽은 줄을 믿으라고 냈다");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("act on no row"), "왜 아무 줄도 없는지 안 댔다");
         // 부르는 쪽 서버의 칸에서 실제로 도는 프로세스는 그 칸을 받는다 — 칸의 tty 와 프로세스의 tty 가 같다. 시험 서버는
-        // 제 소켓(`-S`)으로 따로 띄운다: 사람의 서버에 붙지 않는다.
-        let sock = s.path().join("tmux.sock");
+        // 제 소켓(`-S`)으로 따로 띄운다: 사람의 서버에 붙지 않는다. 소켓은 짧은 자리에 둔다 — macOS 의 소켓 경로는 103
+        // 바이트까지라, `TMPDIR`(`/var/folders/…`) 밑의 스크래치 이름에 붙이면 숫자 한 자리에 `new-session` 이 넘친다.
+        let short = crate::scratch::Scratch::in_place(std::path::Path::new("/tmp"), "sm");
+        let sock = short.path().join("tmux.sock");
+        // 사람의 `~/.tmux.conf` 는 안 읽는다(`-f /dev/null`) — 그 설정의 플러그인(tmux-continuum 의 되살리기)과
+        // `run-shell`·훅이 시험 서버 안에서 돌아, 저장해 둔 세션을 거기 되살렸다가 `kill-server` 로 함께 죽인다.
         let tmux = |args: &[&str]| {
-            std::process::Command::new("tmux").arg("-S").arg(&sock).args(args).env_remove("TMUX").output()
+            std::process::Command::new("tmux")
+                .args(["-f", "/dev/null", "-S"])
+                .arg(&sock)
+                .args(args)
+                .env_remove("TMUX")
+                .output()
         };
         if !tmux(&["-V"]).is_ok_and(|o| o.status.success()) {
             return; // tmux 가 없는 기계 — 남의 서버를 거르는 것까지만 잰다.
@@ -5839,15 +5977,12 @@ stop sending outside work while a release runs",
         }
     }
 
-    /// **`moai-tmux` 는 이름 댄 칸만 만진다**(2026-10-10 사용자 결정, moai-u99i). 사람의 tmux 서버라 맨 `kill-server` 하나가
-    /// 그 사람의 세션을 다 죽인다(2026-09-18). 그래서 `tmux` 를 부르는 줄은 모두 칸을 `-t` 로 겨누거나, 칸을 안 건드리는
-    /// 넷(설정 읽기 `show`·테두리 둘을 쓰는 `set -g`·버퍼에 싣는 `load-buffer`) 중 하나다. `kill-*` 은 하지 말라는 줄에만
-    /// 선다. 칸을 열 때 `claude` 에 붙는 깃발은 `--model` 하나다 — `-p`·`--dangerously-*`·권한 모드가 서면 헤드리스가 된다.
-    /// 치기 전의 잣대(빈 입력 칸)와 열기 전에 묻기도 글로 선다.
     /// 글이 가르치는 `cmux` 줄을 세며 하나하나 잰다 — 셋 중 하나다: surface 를 `--surface` 로 겨누거나, `rpc` 의 JSON 이
     /// `surface_id`·`workspace_id` 를 대거나, 아무것도 안 건드리는 읽기(`capabilities`·`top`·`tree`)다. 하위 명령 앞의
     /// 깃발은 `--json`·`--id-format <꼴>` 둘만 선다 — `--socket`·`--password` 는 다른 cmux 에 붙는다. 닫기·`--force`·포커스
-    /// 옮기기는 서지 않는다. `moai-cmux` 와 `moai-recover` 가 같은 잣대로 잰다 — 둘 다 사람의 cmux 에 친다.
+    /// 옮기기는 서지 않는다. `moai-cmux` 와 `moai-recover` 가 같은 잣대로 잰다 — 둘 다 사람의 cmux 에 친다. v0.65.0 의 덫
+    /// 둘도 여기서 잰다(리뷰 moai-p5sz.tkn): `paste` 는 `--` 뒤의 `-` 를 글자로 치고, `rename-tab`·`tab-action` 은 부르는
+    /// 쪽의 워크스페이스를 실어 다른 워크스페이스의 탭을 못 찾는다.
     fn cmux_calls(text: &str) -> usize {
         let mut calls = 0;
         // 짝의 파이썬은 `cmux = not mine …` 처럼 낱말 `cmux` 로 여는 줄을 든다 — 명령이 아니라 빼고 센다.
@@ -5877,6 +6012,8 @@ stop sending outside work while a release runs",
                 );
                 assert!(!words.contains(&"--force"), "초안 가드를 건너뛴다 — {cmd}");
                 assert!(!cmd.contains("--focus true"), "새 칸이 포커스를 뺏는다 — {cmd}");
+                assert!(!(sub == "paste" && cmd.contains(" -- -")), "paste 가 파일 대신 `-` 한 자를 친다 — {cmd}");
+                assert!(sub != "rename-tab" && sub != "tab-action", "부르는 쪽 워크스페이스에 매인 탭 명령 — {cmd}");
                 let named = match sub {
                     "capabilities" | "top" | "tree" => true,
                     "rpc" => cmd.contains("\"surface_id\"") || cmd.contains("\"workspace_id\""),
@@ -5897,38 +6034,56 @@ stop sending outside work while a release runs",
         let text = cmux();
         let calls = cmux_calls(&text);
         assert!(calls >= 12, "cmux 스킬의 명령을 못 셌다 — {calls}");
-        let never = &text[text.find("## What never happens").expect("하지 않는 것 절이 없다")..];
-        let never = &never[..3 + never[3..].find("\n## ").unwrap()];
+        let never = section(&text, "## What never happens");
         for gone in ["`close-surface`", "`close-workspace`", "`close-window`", "`--force`", "`pkill`", "`focus-*`"] {
             assert!(never.contains(gone), "하지 않는 것에 {gone} 가 없다");
         }
         for flag in ["`claude -p`", "`--dangerously-*`", "`--permission-mode`"] {
             assert!(never.contains(flag), "하지 않는 것에 {flag} 가 없다");
         }
-        let version = &text[text.find("## First, the version").expect("판을 재는 절이 없다")..];
+        let version = section(&text, "## First, the version");
         assert!(
             version.contains("    cmux capabilities")
                 && version.contains("`surface.input_state`")
                 && version.contains("0.65.0"),
             "판을 안 잰다"
         );
+        // 판을 못 잰 것은 옛 판이 아니다 — 닿지 않는 소켓을 "올려라" 로 읽으면 사람이 cmux 와 그 안의 세션을 다 다시 세운다.
+        assert!(version.contains("that says\nnothing about the version"), "판을 재는 줄의 오류를 옛 판으로 읽는다");
         assert!(text.contains(CMUX_EMPTY_BOX), "빈 입력 칸의 잣대를 그대로 안 싣는다");
+        // 잣대는 값으로 적는다 — `cmux rpc` 의 pretty JSON 은 `"state" : "empty"` 라 JSON 글자로 찾으면 늘 빗나간다.
         assert!(
-            CMUX_EMPTY_BOX.contains(r#""state": "empty""#) && CMUX_EMPTY_BOX.contains(r#""waiting_on_human": false"#)
+            CMUX_EMPTY_BOX.contains("`state` is `empty`") && CMUX_EMPTY_BOX.contains("`waiting_on_human` is `false`"),
+            "빈 입력 칸의 잣대가 값을 안 댄다"
+        );
+        assert!(!CMUX_EMPTY_BOX.contains(r#""state": "#), "빈 입력 칸의 잣대가 JSON 글자를 댄다");
+        // `state` 는 화면만 읽는다 — 죽은 Claude Code 의 마지막 칸 밑에 셸이 선 탭도 `empty` 라, 짝이 그 세션을 그 탭에서
+        // 살아 있다고 읽어야 친다. 아니면 붙인 메시지가 셸의 명령으로 돈다.
+        assert!(
+            CMUX_EMPTY_BOX
+                .contains("the session map, run\nagain just before, still reads that session `alive` in that tab"),
+            "빈 입력 칸의 잣대가 그 탭의 세션이 살아 있는지 안 본다"
         );
         assert!(text.contains("**Then do not type. Tell the person"), "빈 입력 칸이 아닐 때 안 멈춘다");
         // tmux 안이면 이 글이 안 선다 — 친 것이 tmux 로 간다.
         assert!(text.contains("CMUX_SURFACE_ID` is set in its shell and `$TMUX` is not"), "tmux 가 이긴다는 말이 없다");
         // 이름표는 탭 제목이라 사람이 보는 자리를 바꾼다 — 바퀴마다 묻고, 사람이 붙인 이름은 안 덮는다. 걷는 길은
-        // `clear-name` 이다(빈 제목은 cmux 가 거절한다).
+        // `clear_name` 이다(빈 제목은 cmux 가 거절한다). 둘 다 `rpc tab.action` 이다 — CLI 낱말은 제 워크스페이스에 매인다.
         let label = section(&text, "## Label the tab");
         assert!(
-            label.contains("    cmux rename-tab --surface <surface> --title '<worker> <id>'"),
+            label.contains(
+                r#"    cmux rpc tab.action '{"surface_id":"<surface>","action":"rename","title":"<worker> <id>"}'"#
+            ),
             "탭 이름표 줄이 없다"
         );
-        assert!(label.contains("    cmux tab-action --surface <surface> --action clear-name"), "탭 이름표를 안 걷는다");
+        assert!(
+            label.contains(r#"    cmux rpc tab.action '{"surface_id":"<surface>","action":"clear_name"}'"#),
+            "탭 이름표를 안 걷는다"
+        );
         assert!(label.contains("**Ask the person once per round**"), "묻지 않고 탭 제목을 바꾼다");
         assert!(label.contains("**A tab the person named stays theirs.**"), "사람이 붙인 탭 이름을 덮는다");
+        // 이름표와 사람의 이름은 한 자리(cmux 의 custom title)다 — 걷기 전에도 제목을 다시 읽는다.
+        assert!(label.contains("again before you\ntake the label off"), "이름표를 단 뒤 사람이 바꾼 이름을 걷는다");
         assert!(!text.contains("rename-workspace"), "사람의 워크스페이스 이름을 바꾼다");
         // 비우기는 보고 확인·`idle`·빈 입력 칸 셋이 다 선 뒤에, 한 번 보고, 안 보이면 다시 안 친다.
         let clear = section(&text, "## Clear a worker's window");
@@ -5943,7 +6098,9 @@ stop sending outside work while a release runs",
         // 붙이기는 한 덩이로, 사람의 허락을 기다리는 메시지는 안 붙이고, 거절에 `--force` 로 밀지 않는다.
         let paste = section(&text, "## When a message does not arrive");
         assert!(paste.contains("input box is empty"), "붙이기 전에 입력 칸을 안 본다");
-        assert!(paste.contains("    cmux paste --surface <surface> --submit -- - < <file>"), "한 덩이로 안 붙인다");
+        assert!(paste.contains("    cmux paste --surface <surface> --submit - < <file>"), "한 덩이로 안 붙인다");
+        // 누르는 키를 못 보낸 붙이기는 칸에 선 채다 — 다시 붙이면 같은 글이 두 벌 선다.
+        assert!(paste.contains("do not paste again either"), "못 누른 붙이기를 또 붙인다");
         assert!(
             paste.contains("**A message\nheld for the person's approval is not one that failed:**"),
             "허락을 기다리는 메시지를 붙인다"
@@ -5960,6 +6117,7 @@ stop sending outside work while a release runs",
         // 새 칸은 물은 뒤에만, `claude` 의 깃발은 모델 하나다. 포커스는 안 뺏는다.
         let open = section(&text, "## No idle worker left");
         assert!(open.contains("ask the person **once**") && open.contains("only on their yes"), "묻지 않고 탭을 연다");
+        assert!(open.contains("**If cmux refuses the split**"), "자리가 다해 거절된 칸을 안 다룬다");
         let launches: Vec<&str> = text.lines().filter(|l| l.contains("claude ") && l.contains("--command")).collect();
         assert_eq!(launches.len(), 1, "claude 를 띄우는 줄이 하나가 아니다 — {launches:?}");
         assert!(
@@ -5983,7 +6141,8 @@ stop sending outside work while a release runs",
                 rest = tail.strip_prefix(" and ").unwrap_or("");
             }
         }
-        assert!(named >= 1, "감독 글이 cmux 스킬의 절을 안 댄다 — {named}");
+        // 감독 글은 다섯 자리에서 이 스킬의 절을 댄다(2·3 둘·4·5) — tmux 쪽과 같은 수다.
+        assert!(named >= 5, "감독 글이 cmux 스킬의 절을 다 안 댄다 — {named}");
     }
 
     /// `text` 에서 `heading` 줄부터 다음 `## ` 절 앞까지 — 없으면 붉다.
@@ -5993,6 +6152,11 @@ stop sending outside work while a release runs",
         &text[at..at + heading.len() + rest.find("\n## ").map_or(rest.len(), |end| end + 1)]
     }
 
+    /// **`moai-tmux` 는 이름 댄 칸만 만진다**(2026-10-10 사용자 결정, moai-u99i). 사람의 tmux 서버라 맨 `kill-server` 하나가
+    /// 그 사람의 세션을 다 죽인다(2026-09-18). 그래서 `tmux` 를 부르는 줄은 모두 칸을 `-t` 로 겨누거나, 칸을 안 건드리는
+    /// 넷(설정 읽기 `show`·테두리 둘을 쓰는 `set -g`·버퍼에 싣는 `load-buffer`) 중 하나다. `kill-*` 은 하지 말라는 줄에만
+    /// 선다. 칸을 열 때 `claude` 에 붙는 깃발은 `--model` 하나다 — `-p`·`--dangerously-*`·권한 모드가 서면 헤드리스가 된다.
+    /// 치기 전의 잣대(빈 입력 칸)와 열기 전에 묻기도 글로 선다.
     #[test]
     fn the_tmux_skill_touches_only_named_panes() {
         let text = tmux();
@@ -6064,7 +6228,8 @@ stop sending outside work while a release runs",
             ("3", "Inside tmux, label the worker's pane as you send"),
             ("4", "Inside tmux, an\nidle notice with no report"),
             ("2", "inside cmux, whether to open new worker tabs"),
-            ("3", "Inside cmux, label the worker's tab as you send"),
+            // cmux 의 이름표는 사람이 보는 탭 제목을 바꾼다 — 감독의 3 도 `moai-cmux` 처럼 물은 뒤에만 단다.
+            ("3", "Inside cmux, label the worker's tab as you send, once the person said yes to labels"),
             ("4", "inside cmux, its tab (`moai-cmux`"),
         ] {
             assert!(supervise.contains(line), "감독의 {step} 에 tmux 갈래가 없다");
@@ -6073,7 +6238,7 @@ stop sending outside work while a release runs",
 
     /// **`moai-recover` 는 제가 연 칸만 만지고, 되살리는 줄은 `--resume` 하나다**(2026-10-10 사용자 결정, moai-uqf7).
     /// 되살려 달라는 말이 곧 허락이라 묻지 않고 칸을 열지만, 금은 `moai-tmux` 와 같다 — 이름 댄 칸, 죽이지 않기, 헤드리스
-    /// 없음, 빈 입력 칸에만 붙이기. tmux 밖이면 칠 줄을 내기만 한다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
+    /// 없음, 빈 입력 칸에만 붙이기. tmux 와 cmux 밖이면 칠 줄을 내기만 한다. 차례는 일꾼 먼저, 감독 마지막이다 — 감독의
     /// `ListAgents` 가 일꾼을 봐야 한다. 짝에 없는 것은 대화 기록에서 읽고, 둘째 짝은 적지 않는다.
     #[test]
     fn the_recover_skill_resumes_into_its_own_panes() {
@@ -6083,8 +6248,16 @@ stop sending outside work while a release runs",
         let calls = cmux_calls(&text);
         assert!(calls >= 4, "되살리기 스킬의 cmux 명령을 못 셌다 — {calls}");
         never_kills_nor_runs_headless(&text);
+        // cmux 안에서도 아무것도 닫지 않고 초안 가드를 건너뛰지 않는다(moai-p5sz.kfi).
+        let never = section(&text, "## What never happens");
+        for gone in ["`close-surface`", "`close-workspace`", "`close-window`", "`--force`"] {
+            assert!(never.contains(gone), "되살리기의 하지 않는 것에 {gone} 가 없다");
+        }
         // 짝은 하나다 — `~/.claude/sessions` 를 읽는 둘째 파이썬이 서면 기록의 꼴이 바뀌는 날 한쪽만 고쳐진다.
         assert_eq!(text.matches("~/.claude/sessions/*.json").count(), 1, "세션 기록을 읽는 짝이 둘이다");
+        // 산 줄이 하나도 없다고 짝이 멈추면 아무것도 안 되살린다 — 그 판의 `dead` 를 믿으면 산 세션을 한 번 더 띄운다.
+        let dead = section(&text, "## 1. Find the dead");
+        assert!(dead.contains("Bring nothing back"), "짝이 산 줄을 못 읽는 판에도 되살린다");
         // 띄우는 줄은 셋 — tmux 칸, cmux 탭(moai-p5sz.kfi), 둘 밖에서 사람이 칠 줄. 깃발은 `--resume` 하나다. 코드 줄에서
         // `claude ` 를 든 줄을 다 센다 — `--resume` 앞에 다른 깃발(`--model …`)을 끼운 줄도 걸려야 한다.
         let launches: Vec<&str> = text.lines().filter(|l| l.starts_with("    ") && l.contains("claude ")).collect();
@@ -6108,10 +6281,25 @@ stop sending outside work while a release runs",
         // cmux 의 판은 제 글이 잰다 — `moai-cmux` 는 고른 사람에게만 서서 그 절을 대면 없는 글을 가리킨다.
         assert!(tabs.contains("`cmux capabilities` lists `surface.input_state`"), "되살리기가 cmux 의 판을 안 잰다");
         assert!(
-            tabs.contains("    cmux paste --surface <surface> --submit -- - < <file>"),
+            tabs.contains("    cmux paste --surface <surface> --submit - < <file>"),
             "cmux 탭에 한 덩이로 안 붙인다"
         );
-        assert!(tabs.contains("(\"Is the input box empty\"\nabove)"), "cmux 탭에 붙이기 전에 입력 칸을 안 본다");
+        assert!(tabs.contains("do not paste again either"), "못 누른 붙이기를 cmux 탭에 또 붙인다");
+        assert!(
+            tabs.contains("when it prints an error instead of a\n`methods` list"),
+            "판을 재는 줄의 오류를 옛 판으로 읽는다"
+        );
+        assert!(tabs.contains("(\"Is the input box empty\"\nabove"), "cmux 탭에 붙이기 전에 입력 칸을 안 본다");
+        // 죽은 Claude Code 가 남긴 칸도 `empty` 로 읽힌다 — 되살린 세션이 그 탭에서 살아 있어야 붙인다.
+        assert!(
+            tabs.contains("the session map reads the resumed session `alive` in that tab"),
+            "죽은 탭의 셸에 붙인다"
+        );
+        // 한 줄로 쪼개는 칸은 자리가 다하면 거절된다 — 남은 세션은 감독까지 7 의 줄을 받는다.
+        assert!(
+            tabs.contains("**If cmux refuses a split**") && tabs.contains("the supervisor among them"),
+            "칸이 더 안 열릴 때 남은 세션을 버린다"
+        );
         assert!(!text.contains("`moai-cmux`"), "되살리기가 심기지 않았을 수 있는 moai-cmux 를 댄다");
         // 빈 입력 칸의 잣대는 제 글 안에 선다 — `moai-tmux` 는 고른 사람에게만 심기니(moai-3r7l) 그 절을 대면 없는
         // 글을 가리킨다(moai-o9je). 잣대는 `moai-tmux` 와 한 상수다.

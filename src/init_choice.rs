@@ -834,6 +834,7 @@ mod tests {
         let pre = Defaults { optional: [Some(true); N], ..SCREEN };
         let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
         choose(&mut f, Field::Optional(0), 1);
-        assert!(f.plan().changes_optional(&["moai-tmux"]), "심긴 것을 끈 것을 안 읽었다");
+        // 미리 켠 칸은 둘 다 심긴 것이다 — 하나만 대면 켜 둔 다른 하나가 `with` 로 읽혀, 끈 것을 안 재도 참이다.
+        assert!(f.plan().changes_optional(&["moai-tmux", "moai-cmux"]), "심긴 것을 끈 것을 안 읽었다");
     }
 }

@@ -482,22 +482,25 @@ every session in it, so when to update is yours.
   cmux the map asks `cmux top` which surface each live session runs in. Every
   cmux call names that surface by its UUID, `--surface <UUID>`
 - **A label on the tab.** Once a round it asks whether worker tabs should carry
-  labels; on a yes it names the tab `<worker> <id>` (`cmux rename-tab`), and
-  takes the name off once the report is checked (`tab-action --action
-  clear-name`). Claude Code's own title does not overwrite such a name. A tab
+  labels; on a yes it names the tab `<worker> <id>` (`cmux rpc tab.action`,
+  action `rename`), and takes the name off once the report is checked (action
+  `clear_name`). Claude Code's own title does not overwrite such a name. A tab
   whose title is not Claude Code's — one you named — is left alone, and no
   workspace is renamed
 - **Clearing a reported worker.** The same three conditions as in tmux, read
-  from cmux's own view of the input box (`surface.input_state`); then it sends
-  `/clear` and looks once
+  from cmux's own view of the input box (`surface.input_state`) and from the
+  session map, which has to show that worker still alive in that tab — a tab
+  whose Claude Code ended can still show its last box; then it sends `/clear`
+  and looks once
 - **A message that did not arrive.** It pastes the message as one block with
-  `cmux paste --submit`. cmux itself refuses to type over someone's words in a
-  Claude Code box; that refusal is never forced
+  `cmux paste --submit`, after the same look at the box. cmux also refuses to
+  type over someone's words in a Claude Code box its own Claude hook knows;
+  that refusal is never forced
 - **A stalled worker.** It reads the tab once (`cmux read-screen`) and tells you
   what stands there
 - **No idle worker.** On your yes it opens a split beside its own tab running
   `cd <root> && claude --model <model>`, without taking focus, and evens the
-  splits out
+  splits out. When cmux has no room for another pane it stops and tells you
 
 It never closes a tab, a workspace or a window, never moves focus, and never
 passes `--force`.
@@ -524,7 +527,8 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
   splits a pane per session running `claude --resume <id>` and pastes a short
   note on what happened once the input box is empty; the supervisor is told its
   workers' names may have changed. Inside cmux (0.65.0 or later) it does the
-  same with a split tab per session. Outside both it prints, per session,
+  same with a split tab per session, and when cmux has no room for another pane
+  the sessions left get the lines to type. Outside both it prints, per session,
   `cd <dir> && claude --resume <id>` and the note to paste
 
 It changes nothing in the sessions' work — no commit, no build, no `moai` write.

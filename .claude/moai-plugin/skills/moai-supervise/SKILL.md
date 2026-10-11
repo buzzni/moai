@@ -21,9 +21,9 @@ workers talk with Claude Code's own tools:
 - A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
 
 **Every session here is an interactive one the person can see.** The moai binary never
-launches or drives an agent, and nothing here runs headless. Outside tmux the supervisor
-launches nothing either; inside tmux or cmux it may open a worker pane, only after the person
-says yes (`moai-tmux` or `moai-cmux`, below). **A worker is every idle session of this
+launches or drives an agent, and nothing here runs headless. Outside tmux and cmux the
+supervisor launches nothing either; inside either it may open a worker pane, only after the
+person says yes (`moai-tmux` or `moai-cmux`, below). **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
@@ -55,7 +55,8 @@ worker panes when no worker is idle (2), label the pane you send to and deliver 
 `SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
 window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
-step below goes through messages and the person, as written. `moai-tmux` is an optional skill:
+step below goes through messages and the person, as written, unless you are inside cmux (the
+next paragraph). `moai-tmux` is an optional skill:
 it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
 init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
 outside tmux.
@@ -336,8 +337,9 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
-Inside cmux, label the worker's tab as you send and, if the message does not arrive, deliver it
-into the tab — `moai-cmux`, "Label the tab" and "When a message does not arrive".
+Inside cmux, label the worker's tab as you send, once the person said yes to labels this round,
+and if the message does not arrive, deliver it into the tab —
+`moai-cmux`, "Label the tab" and "When a message does not arrive".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
