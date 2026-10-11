@@ -183,7 +183,7 @@ here.**
 
 When you send work (the supervisor's 3), you may write the worker and the work onto its tab.
 **Ask the person once per round** whether worker tabs should carry labels — unlike a pane option
-in tmux, a label takes the tab's title where they look. On a yes:
+in tmux, a label replaces the tab's name where they look, a name they gave it included. On a yes:
 
     cmux rpc tab.action '{"surface_id":"<surface>","action":"rename","title":"<worker> <id>"}'
 
@@ -195,13 +195,16 @@ supervisor's 5):
 
     cmux rpc tab.action '{"surface_id":"<surface>","action":"clear_name"}'
 
-**A tab the person named stays theirs.** Read its title before you label it and again before you
-take the label off — `cmux --id-format both tree --all` prints each surface's title, in quotes,
-beside its UUID. Claude Code's own titles open with a status glyph: `✳`, or a spinner frame such
-as `◑` or `⠂`; a label reads `<worker> <id>` — that tab's worker and a backlog or epic id, yours
-or one a supervisor before you left. Any other title may be a name the person gave the tab, and
-`clear_name` would erase it — do not label that tab, and do not take off a name the person gave it
-after your label. Rename no workspace: the names in the sidebar are the person's.
+**A tab the person named stays theirs.** cmux does not say whether a tab's name came from the
+person: its title is one field, and Claude Code's own title takes several forms — `Claude Code`
+on a fresh session, then the topic of the conversation, with or without a status glyph (`✳`, a
+spinner frame such as `◑`). So the round's question says it plainly, and a tab whose name the
+person tells you is theirs gets no label. Before you take a label off, read the title once more —
+`cmux --id-format both tree --all` prints each surface's title, in quotes, beside its UUID — and
+take it off only while it still reads a label: `<worker> <id>`, that tab's worker and a backlog
+or epic id, yours or one a supervisor before you left. Any other title is a name someone gave the
+tab after your label, and `clear_name` would erase it. Rename no workspace: the names in the
+sidebar are the person's.
 
 ## Clear a worker's window
 

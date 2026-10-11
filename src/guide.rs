@@ -2665,6 +2665,23 @@ neither is an error or an answer without `state`."#;
 /// `$CMUX_WORKSPACE_ID` 를 싣고, 칸 하나가 160pt 아래로 줄 자리에서는 split 을 거절한다(`Workspace+SplitSpace.swift`) —
 /// 감독 곁에 한 줄로 쪼개는 새 칸은 대여섯에서 막히니, 거절되면 더 열지 않는 갈래를 글이 든다.
 ///
+/// **cmux 0.65.0 실기로 잰 것**(2026-10-11, moai-p5sz.6uv). 글의 줄을 그대로 쳐서 —
+///
+/// - `new-split --command` 는 `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` 를 내고 포커스를 안 뺏으며 `cd` 가 먹는다.
+///   짝은 새 세션을 그 UUID 에 잇는다
+/// - 갓 뜬 Claude 의 흐린 자리글(`Try "…"`)이 선 칸과 `/clear` 뒤의 칸은 `state` 가 `empty`, 친 초안은 `draft` 다. 부분
+///   슬래시 명령(`/cle`)도 `draft` 라 `/clear` 를 두 번에 나눠 치면 둘째 앞에서 칸이 초안이 된다 — 한 번에 친다
+/// - 초안 앞의 `paste` 는 "nothing was sent" 로 1 을 낸다(cmux 의 Claude 훅이 선 탭). 여러 줄 `paste --submit` 은 한 덩이로
+///   제출된다. `send … '/clear\n'` 은 치고 눌러 대화를 비운다. `equalize_splits` 는 `equalized: true` 다
+/// - `rpc tab.action` 의 이름은 Claude 의 차례가 도는 동안에도 남고, `clear_name` 이 Claude 의 제목으로 돌려놓는다. 그런데
+///   Claude 의 제목은 한 꼴이 아니다 — 갓 뜨면 `Claude Code`, 차례 뒤에는 화제를 글리프 없이도 쓴다. cmux 는 사람이 준
+///   이름을 따로 대지 않는다(`tree`·`surface.list` 모두 `title` 하나). 그래서 제목 글자로 사람의 이름을 가리던 규칙을
+///   걷고, 바퀴마다 묻는 질문에 그 사실을 담고, 걷기 직전 제목이 이름표 꼴일 때만 걷는다
+/// - `kill -9` 로 죽인 탭은 마지막 화면을 남긴다(그때는 zsh 의 `%` 가 칸에 서서 `draft` 로 읽혔다). 짝은 그 줄을 `dead`·`-`
+///   로 내니, 빈 칸 판정이 짝을 새로 보게 한 리뷰의 고침이 이 자리를 막는다. 깨끗한 `/exit` 뒤에는 `unknown` 이다
+/// - 못 잰 것: 권한 물음의 `waiting_on_human`, `dialog` — 열린 대화상자에서는 cmux 가 홀로 선 키도 거절해 `--force` 없이
+///   닫을 길이 없어 시험 탭에 띄우지 않았다
+///
 /// Claude Code 에만 심는다([`crate::skill::Skill::claude_only`]) — 감독 스킬과 같은 까닭이다.
 pub fn cmux() -> String {
     format!(
@@ -2765,7 +2782,7 @@ here.**
 
 When you send work (the supervisor's 3), you may write the worker and the work onto its tab.
 **Ask the person once per round** whether worker tabs should carry labels — unlike a pane option
-in tmux, a label takes the tab's title where they look. On a yes:
+in tmux, a label replaces the tab's name where they look, a name they gave it included. On a yes:
 
     cmux rpc tab.action '{{"surface_id":"<surface>","action":"rename","title":"<worker> <id>"}}'
 
@@ -2777,13 +2794,16 @@ supervisor's 5):
 
     cmux rpc tab.action '{{"surface_id":"<surface>","action":"clear_name"}}'
 
-**A tab the person named stays theirs.** Read its title before you label it and again before you
-take the label off — `cmux --id-format both tree --all` prints each surface's title, in quotes,
-beside its UUID. Claude Code's own titles open with a status glyph: `✳`, or a spinner frame such
-as `◑` or `⠂`; a label reads `<worker> <id>` — that tab's worker and a backlog or epic id, yours
-or one a supervisor before you left. Any other title may be a name the person gave the tab, and
-`clear_name` would erase it — do not label that tab, and do not take off a name the person gave it
-after your label. Rename no workspace: the names in the sidebar are the person's.
+**A tab the person named stays theirs.** cmux does not say whether a tab's name came from the
+person: its title is one field, and Claude Code's own title takes several forms — `Claude Code`
+on a fresh session, then the topic of the conversation, with or without a status glyph (`✳`, a
+spinner frame such as `◑`). So the round's question says it plainly, and a tab whose name the
+person tells you is theirs gets no label. Before you take a label off, read the title once more —
+`cmux --id-format both tree --all` prints each surface's title, in quotes, beside its UUID — and
+take it off only while it still reads a label: `<worker> <id>`, that tab's worker and a backlog
+or epic id, yours or one a supervisor before you left. Any other title is a name someone gave the
+tab after your label, and `clear_name` would erase it. Rename no workspace: the names in the
+sidebar are the person's.
 
 ## Clear a worker's window
 
@@ -6083,7 +6103,15 @@ stop sending outside work while a release runs",
         assert!(label.contains("**Ask the person once per round**"), "묻지 않고 탭 제목을 바꾼다");
         assert!(label.contains("**A tab the person named stays theirs.**"), "사람이 붙인 탭 이름을 덮는다");
         // 이름표와 사람의 이름은 한 자리(cmux 의 custom title)다 — 걷기 전에도 제목을 다시 읽는다.
-        assert!(label.contains("again before you\ntake the label off"), "이름표를 단 뒤 사람이 바꾼 이름을 걷는다");
+        // 걷기 직전 제목을 다시 읽어 이름표 꼴일 때만 걷는다. cmux 는 사람이 준 이름을 따로 대지 않고 Claude 의 제목은
+        // 한 꼴이 아니라(`Claude Code`·글리프 없는 화제, 2026-10-11 실기), 제목 글자로 사람의 이름을 가리지 않는다.
+        assert!(
+            label.contains("Before you take a label off, read the title once more"),
+            "이름표를 단 뒤 사람이 바꾼 이름을 걷는다"
+        );
+        assert!(label.contains("take it off only while it still reads a label"), "이름표가 아닌 제목도 걷는다");
+        assert!(label.contains("`Claude Code`\non a fresh session"), "갓 뜬 Claude 의 제목을 사람의 이름으로 읽는다");
+        assert!(!label.contains("open with a status glyph"), "Claude 의 제목이 늘 글리프로 연다는 옛 규칙이 남았다");
         assert!(!text.contains("rename-workspace"), "사람의 워크스페이스 이름을 바꾼다");
         // 비우기는 보고 확인·`idle`·빈 입력 칸 셋이 다 선 뒤에, 한 번 보고, 안 보이면 다시 안 친다.
         let clear = section(&text, "## Clear a worker's window");
