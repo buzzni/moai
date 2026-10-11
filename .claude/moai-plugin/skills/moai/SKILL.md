@@ -30,7 +30,7 @@ Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
 to pick it up again. A session a person opened reads that shape to choose its next row —
 the moai binary never launches or drives a session itself. Only the supervisor skill, inside
-tmux, may clear a worker's pane, paste into it, or open one once the person says yes.
+tmux or cmux, may clear a worker's pane, paste into it, or open one once the person says yes.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`

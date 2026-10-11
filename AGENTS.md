@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.11.0 hash:67fc4353 -->
+<!-- moai:begin v:0.13.0 hash:373e19ab -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -29,7 +29,7 @@ Every command takes `--json`. `ready --json` gives `{"ready":[…],"others":[…
 (ask first), and `held` is what is deferred or blocked behind an empty group, and where
 to pick it up again. A session a person opened reads that shape to choose its next row —
 the moai binary never launches or drives a session itself. Only the supervisor skill, inside
-tmux, may clear a worker's pane, paste into it, or open one once the person says yes.
+tmux or cmux, may clear a worker's pane, paste into it, or open one once the person says yes.
 
 **A key that cannot be absent is never absent.** `kind` and `priority` hold a default,
 and the file leaves a default out, but `--json` fills it back in — `jq -r .priority`
@@ -530,8 +530,9 @@ the worker reports the same way. moai carries no messaging, and the moai binary 
 launches or drives a session. When the supervisor runs inside tmux, its companion skill
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says
-yes. That skill is planted only where it is chosen: `moai skill install --with moai-tmux`
-plants it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
+yes. Inside cmux (0.65.0 or later) `moai-cmux` does the same with cmux's tabs. Each is planted
+only where it is chosen: `moai skill install --with moai-tmux` (or `--with moai-cmux`) plants
+it and `--without` takes it out. Nothing runs headless. The supervisor picks, sends and checks; it does not fix and it
 does not merge.
 
 ### The wiki

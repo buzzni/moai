@@ -51,9 +51,14 @@ pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-recov
 /// - **표식은 `moai init` 의 고르는 상자가 미리 고를 때만 쓴다**([`detected`]). 사람 없이 도는 `init`·`skill install` 은
 ///   표식으로 심지 않는다 — 심는 것은 `--with` 와 이미 심긴 것뿐이다([`kept`])
 ///
-/// 하나를 더하는 것은 이 목록의 한 줄과 [`skills`] 의 글 한 칸이다. cmux(moai-p5sz)는 제 셸에 `CMUX_*` 여럿을 세우니
-/// `Optional { name: "moai-cmux", sign: |var| var.starts_with("CMUX_") }` 로 선다.
-pub const OPTIONAL: [Optional; 1] = [Optional { name: "moai-tmux", sign: |var| var == "TMUX" }];
+/// 하나를 더하는 것은 이 목록의 한 줄과 [`skills`] 의 글 한 칸이다. 둘째 `moai-cmux`(moai-p5sz.lz0)의 표식은
+/// `CMUX_SURFACE_ID` 다 — cmux 는 제 탭의 셸마다 `CMUX_*` 여럿을 세우는데, 그 가운데 스킬이 실제로 기대는 것이 이것이다
+/// (그 탭을 겨누는 이름). 머리(`CMUX_`)로 재면 cmux 가 깔아 둔 `CMUX_BUNDLED_CLI_PATH` 따위가 cmux 밖의 셸에 새어도
+/// 쓰는 사람으로 읽는다. tmux 를 cmux 탭 안에서 돌리는 사람에게는 둘 다 켜진다 — 둘 다 그 사람의 것이다.
+pub const OPTIONAL: [Optional; 2] = [
+    Optional { name: "moai-tmux", sign: |var| var == "TMUX" },
+    Optional { name: "moai-cmux", sign: |var| var == "CMUX_SURFACE_ID" },
+];
 
 /// 고를 수 있는 스킬 하나 — 이름과 표식.
 pub struct Optional {
@@ -79,7 +84,8 @@ pub fn detected(vars: &[(String, String)]) -> Vec<&'static str> {
     detected_in(&OPTIONAL, vars)
 }
 
-/// [`detected`] 의 몸통 — 목록을 받아, 아직 목록에 없는 꼴의 표식(머리로 재는 cmux)도 시험이 잰다.
+/// [`detected`] 의 몸통 — 목록을 받아, 목록에 없는 꼴의 표식(이름의 머리로 재는 것)도 시험이 잰다. cmux 는 그 꼴로
+/// 재려다 탭을 겨누는 이름 하나(`CMUX_SURFACE_ID`)로 섰다([`OPTIONAL`]).
 fn detected_in(list: &[Optional], vars: &[(String, String)]) -> Vec<&'static str> {
     list.iter().filter(|o| vars.iter().any(|(k, v)| (o.sign)(k) && !v.is_empty())).map(|o| o.name).collect()
 }
@@ -129,11 +135,12 @@ pub fn picked(all: &[Skill], optional: &[&str]) -> Vec<Skill> {
 ///
 /// **이름은 지우지 않는다.** 스킬을 걷어도 줄은 남긴다 — 빼면 그 판이 심은 디렉터리를 다음 판이 못 알아본다. 지금 심는
 /// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
-pub const EVER_PLANTED: [(&str, &[&str]); 6] = [
+pub const EVER_PLANTED: [(&str, &[&str]); 7] = [
     ("moai", &["SKILL.md", "references/commands.md"]),
     ("moai-supervise", &["SKILL.md", "references/worker.md"]),
     ("moai-wiki", &["SKILL.md"]),
     ("moai-tmux", &["SKILL.md"]),
+    ("moai-cmux", &["SKILL.md"]),
     ("moai-recover", &["SKILL.md"]),
     ("moai-work", &["SKILL.md"]),
 ];
@@ -169,7 +176,7 @@ pub fn skills() -> Vec<Skill> {
     // 디렉터리 이름은 [`NAMES`]·[`OPTIONAL`] 에서 온다 — 위키가 스킬 이름을 id 에서 거르는 [`EVER_PLANTED`] 가 그 목록을
     // 다 들니(moai-mdzx.3pm, moai-six5.1xz), 여기 글자를 따로 적으면 이름을 바꿀 때 두 자리가 갈린다.
     let [main, supervisor, wiki, recover] = NAMES;
-    let [Optional { name: tmux, .. }] = OPTIONAL;
+    let [Optional { name: tmux, .. }, Optional { name: cmux, .. }] = OPTIONAL;
     vec![
         Skill {
             name: main,
@@ -196,6 +203,9 @@ pub fn skills() -> Vec<Skill> {
         // 안 쓰는 감독도 칸을 만지는 걸음을 매번 읽는다. 감독 스킬과 같은 까닭으로 Claude Code 에만 선다. 고른 사람에게만
         // 심는다([`OPTIONAL`], moai-3r7l).
         Skill { name: tmux, files: vec![("SKILL.md", crate::guide::tmux())], claude_only: true },
+        // cmux 스킬은 감독이 cmux 탭 안에서(tmux 밖) 돌 때만 읽는다(2026-10-10 사용자 결정, moai-p5sz) — tmux 스킬의 짝이라
+        // 같은 까닭으로 따로 서고, Claude Code 에만 서고, 고른 사람에게만 심는다.
+        Skill { name: cmux, files: vec![("SKILL.md", crate::guide::cmux())], claude_only: true },
     ]
 }
 
@@ -1531,7 +1541,8 @@ mod tests {
 
     const NOW: &str = "2026-01-01T00:00:00Z";
 
-    /// 심는 것은 아홉이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, tmux 스킬, 되살리기 스킬, 그리고 매니페스트 둘.
+    /// 심는 것은 열이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, tmux 스킬, cmux 스킬, 되살리기 스킬, 그리고
+    /// 매니페스트 둘.
     #[test]
     fn the_tree_has_what_claude_needs() {
         let files = tree_of("/bin/moai", "# 스킬");
@@ -1542,6 +1553,7 @@ mod tests {
             "skills/moai-supervise/references/worker.md",
             "skills/moai-wiki/SKILL.md",
             "skills/moai-tmux/SKILL.md",
+            "skills/moai-cmux/SKILL.md",
             "skills/moai-recover/SKILL.md",
             ".claude-plugin/plugin.json",
             ".claude-plugin/marketplace.json",
@@ -1567,7 +1579,12 @@ mod tests {
         let every: Vec<&str> = NAMES.into_iter().chain(optional_names()).collect();
         assert_eq!(dirs(&all), every);
         assert_eq!(dirs(&picked(&all, &[])), NAMES, "고르지 않은 선택 스킬을 심었다");
-        assert_eq!(dirs(&picked(&all, &["moai-tmux"])), every);
+        assert_eq!(dirs(&picked(&all, &["moai-tmux", "moai-cmux"])), every);
+        assert_eq!(
+            dirs(&picked(&all, &["moai-cmux"])),
+            [&NAMES[..], &["moai-cmux"]].concat(),
+            "고른 하나만 심지 않았다"
+        );
     }
 
     /// **두 목록은 겹치지 않고, 선택 스킬도 [`EVER_PLANTED`] 에 든다**(moai-3r7l) — 겹치면 늘 심는 스킬을 `--without` 으로
@@ -1592,9 +1609,17 @@ mod tests {
         assert_eq!(detected(&env(&[("TMUX", "/tmp/tmux-1000/default,1,0")])), ["moai-tmux"]);
         assert_eq!(detected(&env(&[("TMUX", "")])), Vec::<&str>::new(), "빈 $TMUX 를 tmux 로 읽었다");
         assert_eq!(detected(&env(&[("TMUX_PANE", "%1")])), Vec::<&str>::new(), "이름의 머리로 tmux 를 읽었다");
-        let list = [Optional { name: "moai-cmux", sign: |var| var.starts_with("CMUX_") }];
-        assert_eq!(detected_in(&list, &env(&[("CMUX_SOCKET_PATH", "/tmp/s")])), ["moai-cmux"]);
-        assert_eq!(detected_in(&list, &env(&[("CMUX_X", ""), ("XCMUX_Y", "1")])), Vec::<&str>::new());
+        // cmux 는 탭을 겨누는 이름 하나로 선다 — cmux 가 깔아 둔 다른 `CMUX_*` 만 새어 든 셸은 cmux 의 탭이 아니다.
+        let surface = ("CMUX_SURFACE_ID", "E5935ECA-E168-4AC2-B54D-8E65AC132DE7");
+        assert_eq!(detected(&env(&[surface])), ["moai-cmux"]);
+        assert_eq!(detected(&env(&[("CMUX_BUNDLED_CLI_PATH", "/Applications/cmux.app/x")])), Vec::<&str>::new());
+        assert_eq!(detected(&env(&[("CMUX_SURFACE_ID", "")])), Vec::<&str>::new(), "빈 표식을 cmux 로 읽었다");
+        // tmux 를 cmux 탭 안에서 돌리는 사람 — 둘 다 그 사람의 것이다. 차례는 [`OPTIONAL`] 의 것이다.
+        assert_eq!(detected(&env(&[surface, ("TMUX", "/tmp/tmux-501/default,1,0")])), ["moai-tmux", "moai-cmux"]);
+        // 머리로 재는 표식 — 지금 목록에는 없는 꼴이다(cmux 는 이름 하나로 섰다). 머리에서 시작하고 값이 차야 선다.
+        let list = [Optional { name: "moai-other", sign: |var| var.starts_with("OTHER_") }];
+        assert_eq!(detected_in(&list, &env(&[("OTHER_SOCKET", "/tmp/s")])), ["moai-other"]);
+        assert_eq!(detected_in(&list, &env(&[("OTHER_X", ""), ("XOTHER_Y", "1")])), Vec::<&str>::new());
     }
 
     /// **심을 선택 스킬은 (심긴 것 ∪ `with`) − `without` 이다**(moai-3r7l) — 맨 `install` 은 심긴 것만 다시 심고, 처음 심는
@@ -1639,7 +1664,8 @@ mod tests {
     ///
     /// **감독 스킬은 Claude 에만 선다**(2026-10-06 사용자 결정, moai-obxm) — 그 글은 Codex·Antigravity 에 없는
     /// `ListAgents`·`SendMessage` 로 말한다. 거르개를 걷으면 `.agents` 에 `moai-supervise` 가 다시 서서 붉어진다.
-    /// 감독의 tmux 손(`moai-tmux`, moai-u99i)과 되살리기(`moai-recover`, moai-uqf7)도 같은 까닭으로 Claude 에만 선다.
+    /// 감독의 tmux·cmux 손(`moai-tmux`, moai-u99i · `moai-cmux`, moai-p5sz)과 되살리기(`moai-recover`, moai-uqf7)도 같은
+    /// 까닭으로 Claude 에만 선다.
     #[test]
     fn the_agents_tree_carries_the_same_skills_without_a_manifest() {
         let all = fake("# 스킬", "감독", "위키");
@@ -1655,6 +1681,7 @@ mod tests {
         assert_eq!(dirs, ["moai", "moai-wiki"], "Codex·Antigravity 가 받는 스킬이 다르다 — 차례까지");
         assert!(!shared.keys().any(|p| p.starts_with("moai-supervise/")), "감독 스킬이 .agents 에 섰다");
         assert!(!shared.keys().any(|p| p.starts_with("moai-tmux/")), "tmux 스킬이 .agents 에 섰다");
+        assert!(!shared.keys().any(|p| p.starts_with("moai-cmux/")), "cmux 스킬이 .agents 에 섰다");
         assert!(!shared.keys().any(|p| p.starts_with("moai-recover/")), "되살리기 스킬이 .agents 에 섰다");
         for (path, body) in &shared {
             assert_eq!(claude.get(&format!("skills/{path}")), Some(body), "{path} 가 Claude 의 트리와 다르다");
@@ -1662,12 +1689,14 @@ mod tests {
         let only_claude = claude
             .keys()
             .filter(|p| {
-                ["skills/moai-supervise/", "skills/moai-tmux/", "skills/moai-recover/"].iter().any(|d| p.starts_with(d))
+                ["skills/moai-supervise/", "skills/moai-tmux/", "skills/moai-cmux/", "skills/moai-recover/"]
+                    .iter()
+                    .any(|d| p.starts_with(d))
             })
             .count();
         assert_eq!(
-            only_claude, 4,
-            "감독 스킬은 SKILL.md 와 references/worker.md 둘, tmux 스킬과 되살리기 스킬은 SKILL.md 하나씩이다"
+            only_claude, 5,
+            "감독 스킬은 SKILL.md 와 references/worker.md 둘, tmux·cmux 스킬과 되살리기 스킬은 SKILL.md 하나씩이다"
         );
         assert_eq!(
             shared.len() + 2 + only_claude,
