@@ -484,9 +484,11 @@ every session in it, so when to update is yours.
 - **A label on the tab.** Once a round it asks whether worker tabs should carry
   labels; on a yes it names the tab `<worker> <id>` (`cmux rpc tab.action`,
   action `rename`), and takes the name off once the report is checked (action
-  `clear_name`). Claude Code's own title does not overwrite such a name. A tab
-  whose title is not Claude Code's — one you named — is left alone, and no
-  workspace is renamed
+  `clear_name`). Claude Code's own title does not overwrite such a name. cmux
+  cannot tell a name you gave a tab from Claude Code's title, so the question
+  says a label replaces it; tell the supervisor which tab names are yours and
+  those tabs get none. A label comes off only while the tab still reads it —
+  a name you gave the tab meanwhile stays — and no workspace is renamed
 - **Clearing a reported worker.** The same three conditions as in tmux, read
   from cmux's own view of the input box (`surface.input_state`) and from the
   session map, which has to show that worker still alive in that tab — a tab
