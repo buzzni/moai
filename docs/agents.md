@@ -76,6 +76,7 @@ The first `moai init` in a terminal asks, and `--guide` says it without asking:
     moai skill install --agent antigravity Antigravity: the same .agents/skills/ and .agents/hooks.json
     moai skill install --agent auto        whichever of claude, codex and agy is on PATH
     moai skill install --with moai-tmux    plant an optional skill too (--without takes it out)
+    moai skill install --with moai-saycode the same, for the Saycode one
     moai skill status                      what is planted where, and what differs
 
 `--agent` names who the skills are for — `claude` (what you get when it is left
@@ -126,10 +127,10 @@ calling the review, changing the model, clearing the window, calling a skill,
 stopping what a review left running — sit in a "Words per agent" table in the
 `moai` skill, one column per agent, and each agent reads its own. A step an agent
 does not have reads `—`: tell the person and go on. The supervisor skill, its
-tmux and cmux companions and the recovery skill, planted for Claude Code only,
+tmux, cmux and Saycode companions and the recovery skill, planted for Claude Code only,
 name Claude Code's tools directly.
 
-Four skills are always planted, and two more are yours to choose:
+Four skills are always planted, and three more are yours to choose:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
     moai-wiki         keeps this wiki in step with the work
@@ -137,6 +138,7 @@ Four skills are always planted, and two more are yours to choose:
     moai-recover      Claude Code only: brings back the sessions of the repository that died
     moai-tmux         optional, Claude Code only: the supervisor's hands on the workers' tmux panes
     moai-cmux         optional, Claude Code only: the same on the workers' cmux tabs (cmux 0.65.0 or later)
+    moai-saycode      optional, Claude Code only: the supervisor's hands on the workers' Saycode sessions
 
 - **`moai`** is the tracker skill — what an agent reaches for instead of a
   to-do list of its own
@@ -163,12 +165,18 @@ Four skills are always planted, and two more are yours to choose:
   [cmux](https://github.com/manaflow-ai/cmux) tab: it maps a worker to its cmux
   surface, labels the tab, clears and pastes, and opens new worker splits once
   you say yes — [In cmux](#in-cmux). It is planted only where you choose it
+- **`moai-saycode`** is what the supervisor loads when it runs inside a Saycode
+  session: it lists the workers through `happy agent`, sends their work as a
+  prompt, clears a reported worker, reads a stalled one, and opens new worker
+  sessions once you say yes — [In Saycode](#in-saycode). It is planted only
+  where you choose it
 
 ### Optional skills
 
 An optional skill is planted only where you ask for it — today that is
-`moai-tmux`, for a person who runs the supervisor inside tmux, and `moai-cmux`,
-for one who runs it inside cmux.
+`moai-tmux`, for a person who runs the supervisor inside tmux, `moai-cmux`,
+for one who runs it inside cmux, and `moai-saycode`, for one who runs it inside
+a Saycode session. Each takes the same lines with its own name.
 
     moai skill install --with moai-tmux       plant it
     moai skill install --without moai-tmux    take it out again
@@ -182,7 +190,8 @@ for one who runs it inside cmux.
 - **The first `moai init` in a terminal offers a row per optional skill** under
   the hooks and skills row. A row starts checked when the skill is already
   planted, or when your shell says you use it (`$TMUX` set, for `moai-tmux`;
-  `$CMUX_SURFACE_ID` set, for `moai-cmux`).
+  `$CMUX_SURFACE_ID` set, for `moai-cmux`; `SAYCODE_AGENT_ENV` set, for
+  `moai-saycode`).
   Where nothing is asked — a script, an agent, `--yes` — only what `--with`
   names is planted, never what the shell suggests
 - **`uninstall --only` keeps the registration.** It removes that skill's
@@ -200,7 +209,10 @@ interactively in the root of the main checkout (inside tmux or cmux the supervis
 open more Claude Code panes for you, once you say yes — [In tmux](#in-tmux),
 [In cmux](#in-cmux)), after `moai skill install`
 planted that agent's skills and hooks. Each session asks its person before it
-acts, the way it always does — none is opened in a mode that skips the asking.
+acts, the way it always does — none is opened in a mode that skips the asking,
+with one exception you are told of before you say yes: a worker session the
+supervisor opens through Saycode, which Saycode starts with permission prompts
+bypassed ([In Saycode](#in-saycode)).
 
 The root, not a worktree: a session goes into its own worktree under
 `.worktrees/` by itself, and that directory sits inside the root, so whatever
@@ -462,6 +474,12 @@ this happens.
 It never kills a pane, a session or the server, and never runs `claude -p` or a
 `--dangerously-*` flag.
 
+- **A session Saycode's daemon started has no pane, and a pane two live
+  sessions name is left alone.** Such a session carries in its record the pane
+  the daemon was started from, so the skill reads that pane as nobody's and
+  types nothing into it. A Saycode session is driven through `moai-saycode`
+  instead
+
 **On a Mac** the same works: the session records there carry the process start
 time in another form (`ps -o lstart`), and a pane is matched to a session by its
 terminal (`#{pane_tty}`), never by reading another process's environment
@@ -507,6 +525,45 @@ every session in it, so when to update is yours.
 It never closes a tab, a workspace or a window, never moves focus, and never
 passes `--force`.
 
+### In Saycode
+
+When the supervisor runs inside a Saycode session (`SAYCODE_AGENT_ENV` is set,
+and `happy agent whoami` answers) and the `moai-saycode` skill is planted
+([optional skills](#optional-skills) — `moai skill install --with
+moai-saycode`), it drives the workers Saycode lists through `happy agent`
+(moai-l244). A Saycode session often runs inside tmux or cmux too; then Saycode
+comes first, and `moai-tmux` or `moai-cmux` is only for a worker Saycode does
+not list and for the pane labels.
+
+- **Which session is which worker.** `happy agent ls --status` lists the
+  sessions standing in the root or a worktree, with their state and what they
+  wait on. The Saycode id is the key — a `/clear` changes a worker's
+  `ListAgents` name, not its Saycode id. Nothing pairs the two: the session map
+  marks a session Saycode started (its record's entrypoint, `remote_mobile`),
+  and the supervisor leaves those out of the `ListAgents` workers it counts, so
+  no worker is counted twice. A report still comes by `SendMessage`; the
+  supervisor ties it to the work by the issue id it carries and the `Sent:`
+  note (`saycode <id>`)
+- **Sending work.** It starts `happy agent wait … --until turn-end` in the
+  background and then sends the assignment with `happy agent prompt` (never
+  `--wait`, which reports a failure though the message arrived). The wait ending
+  is the notice that the turn ended; the report still comes by `SendMessage`
+- **Clearing a reported worker.** After the report is checked, while the worker
+  reads `idle` with nothing pending and you have not said you are talking to
+  it, it sends `/clear` as a prompt
+- **A stalled worker.** A worker in `waiting-input` — a question, a plan
+  approval, a permission request — is named to you with what it waits for. It
+  never answers in your place
+- **No idle worker.** It asks you whether to open new worker sessions, and says
+  each one runs with permission prompts bypassed (Saycode starts it with
+  `--dangerously-skip-permissions`) and uses your spawn budget. The agent, model
+  and effort are yours — a Codex or Gemini worker too — checked against what
+  Saycode offers; nothing you left out is filled in. It opens them in the root,
+  without Saycode's own worktree, and they show in Saycode's session list
+
+It never `steer`s or `stop`s a worker unless you ask, and never prompts a
+session that is still responding or waiting on you.
+
 ### Bring back sessions that died
 
 When the supervisor and its workers died together — the machine restarted, the
@@ -532,6 +589,13 @@ to bring them back ("recover the sessions", "되살려"). It loads `moai-recover
   same with a split tab per session, and when cmux has no room for another pane
   the sessions left get the lines to type. Outside both it prints, per session,
   `cd <dir> && claude --resume <id>` and the note to paste
+
+A session Saycode ran is not resumed in a pane — that would run its
+conversation outside Saycode. It tells such a session from its transcript,
+finds its id as an `ended` row in `happy agent ls --status` and prints
+`happy resume <saycode id>` for you to run in a terminal of your own, or you
+reopen it from Saycode's session list. A worker that is one comes back before
+the supervisor does.
 
 It changes nothing in the sessions' work — no commit, no build, no `moai` write.
 

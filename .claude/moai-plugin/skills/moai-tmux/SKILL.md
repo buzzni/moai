@@ -37,7 +37,7 @@ looking at.
 `ListAgents` names a session; tmux needs a pane. Claude Code keeps one record per process
 under `~/.claude/sessions/`, and the lines below print one row per record, tab-separated:
 
-    state  name  pane  status  cwd  sessionId
+    state  name  pane  status  cwd  sessionId  saycode
 
 ```sh
 python3 - <<'PY'
@@ -100,7 +100,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
+    if r.get("entrypoint") == "remote_mobile":
+        pane = ""
+    elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
         pane = ""
     elif alive and pane and mine:
         here = tty(pid)
@@ -115,7 +117,8 @@ claimed = [pane for alive, pane, _ in rows if alive and pane and (mine or cmux)]
 for alive, pane, r in rows:
     if alive and claimed.count(pane) > 1:
         pane = ""
-    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
+    saycode = "saycode" if r.get("entrypoint") == "remote_mobile" else ""
+    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
 ```
@@ -126,11 +129,19 @@ PY
   is not in tmux or runs on another tmux server than yours (pane ids are counted per server,
   so another server's `%4` is a different pane here), and then this skill has nothing for
   that worker
+- **A session Saycode's daemon started has no pane** — it prints `-`. Its record carries the
+  pane the daemon was started from, and typing there would type into that pane, not the
+  worker's. **A pane two alive rows name belongs to neither** either — both print `-`, so
+  leave both alone
+- **A row whose `saycode` is not `-` is a Saycode session.** Inside Saycode (`moai-saycode`) it
+  is driven through Saycode, not its pane — you type nothing into it, and only label it
 - `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
-- Your own row is the one whose pane is `$TMUX_PANE`
+- Your own row is the one whose pane is `$TMUX_PANE`; a row of yours that prints `-` has no
+  pane this skill can use. Inside a session Saycode's daemon started, `$TMUX_PANE` is the
+  daemon's pane, handed down — not yours
 
 Run it when a step below needs a pane, once.
 
