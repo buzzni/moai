@@ -795,9 +795,25 @@ mod tests {
         // 미리 켜 둔 칸 — 끄면 `--without` 이다.
         let pre = Defaults { optional: [Some(true); N], ..SCREEN };
         let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
-        assert_eq!(f.plan().with, ["moai-tmux", "moai-cmux"], "미리 켜 둔 칸을 안 건넸다");
+        assert_eq!(f.plan().with, ["moai-tmux", "moai-cmux", "moai-saycode"], "미리 켜 둔 칸을 안 건넸다");
         choose(&mut f, Field::Optional(0), 1);
-        assert_eq!((f.plan().with, f.plan().without), (vec!["moai-cmux"], vec!["moai-tmux"]));
+        assert_eq!((f.plan().with, f.plan().without), (vec!["moai-cmux", "moai-saycode"], vec!["moai-tmux"]));
+    }
+
+    /// **셋째 칸은 `moai-saycode` 다**(moai-l244) — 칸 차례가 [`OPTIONAL`] 의 차례(tmux·cmux 다음)고, 표식
+    /// (`SAYCODE_AGENT_ENV`)으로 미리 켜 둔 칸은 다른 칸과 따로 건넨다. Saycode 세션은 tmux 안에서도 돌아 함께 켜지는
+    /// 일이 흔하다.
+    #[test]
+    fn the_saycode_row_stands_third_and_passes_its_pick_on() {
+        let mut f = form(Choices { guide: Some(Guide::None), ..Choices::default() });
+        assert!(f.rows().contains(&Field::Optional(2)), "Saycode 칸이 없다");
+        choose(&mut f, Field::Optional(2), 0);
+        assert_eq!(f.plan().with, ["moai-saycode"]);
+        let all = Defaults { optional: [Some(true); N], ..SCREEN };
+        let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, all, "moai".into());
+        assert_eq!(f.plan().with, ["moai-tmux", "moai-cmux", "moai-saycode"], "다 켜 둔 칸을 다 안 건넸다");
+        choose(&mut f, Field::Optional(2), 1);
+        assert_eq!((f.plan().with, f.plan().without), (vec!["moai-tmux", "moai-cmux"], vec!["moai-saycode"]));
     }
 
     /// **`--with` 는 그 칸을 잠그고, 사람이 안 보는 `init` 은 표식으로 심지 않는다**(moai-3r7l.ocn) — [`PLAIN`] 의 선택
@@ -834,7 +850,7 @@ mod tests {
         let pre = Defaults { optional: [Some(true); N], ..SCREEN };
         let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
         choose(&mut f, Field::Optional(0), 1);
-        // 미리 켠 칸은 둘 다 심긴 것이다 — 하나만 대면 켜 둔 다른 하나가 `with` 로 읽혀, 끈 것을 안 재도 참이다.
-        assert!(f.plan().changes_optional(&["moai-tmux", "moai-cmux"]), "심긴 것을 끈 것을 안 읽었다");
+        // 미리 켠 칸은 다 심긴 것이다 — 하나만 대면 켜 둔 다른 것이 `with` 로 읽혀, 끈 것을 안 재도 참이다.
+        assert!(f.plan().changes_optional(&["moai-tmux", "moai-cmux", "moai-saycode"]), "심긴 것을 끈 것을 안 읽었다");
     }
 }

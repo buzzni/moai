@@ -61,7 +61,7 @@ nothing about the version: tell the person what it said, and go on as if this sk
 `ListAgents` names a session; cmux needs a surface. Claude Code keeps one record per process
 under `~/.claude/sessions/`, and the lines below print one row per record, tab-separated:
 
-    state  name  pane  status  cwd  sessionId
+    state  name  pane  status  cwd  sessionId  saycode
 
 ```sh
 python3 - <<'PY'
@@ -124,7 +124,9 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
+    if r.get("entrypoint") == "remote_mobile":
+        pane = ""
+    elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
         pane = ""
     elif alive and pane and mine:
         here = tty(pid)
@@ -139,7 +141,8 @@ claimed = [pane for alive, pane, _ in rows if alive and pane and (mine or cmux)]
 for alive, pane, r in rows:
     if alive and claimed.count(pane) > 1:
         pane = ""
-    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
+    saycode = "saycode" if r.get("entrypoint") == "remote_mobile" else ""
+    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
 ```
@@ -153,6 +156,8 @@ PY
   so), and then this skill has nothing for that worker
 - **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
   dead — act on no row, and tell the person what it said
+- **A row whose `saycode` is not `-` is a Saycode session** — one Saycode started, so its pane
+  is `-`. Inside Saycode (`moai-saycode`) it is driven through Saycode, not a tab
 - `cwd` is where the session stands: the root, or one of the worktrees `git worktree list`
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
