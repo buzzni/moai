@@ -145,6 +145,8 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // Saycode 가 제 세션의 셸에 세우는 표식(moai-l244) — 새면 Saycode 안에서 돌린 `init` 화면이 `moai-saycode` 칸을
         // 켜 둔다.
         .env_remove("SAYCODE_AGENT_ENV")
+        // cmux 가 제 탭의 셸에 세우는 표식(moai-p5sz) — 새면 cmux 탭 안에서 돌린 `init` 화면이 `moai-cmux` 칸을 켜 둔다.
+        .env_remove("CMUX_SURFACE_ID")
         .env_remove("CLAUDE_CODE_SESSION_ID")
         // Codex 가 셸에 세우는 세션 id(moai-u5wr.7xr).
         .env_remove("CODEX_THREAD_ID")

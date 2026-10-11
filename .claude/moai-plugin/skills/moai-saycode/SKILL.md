@@ -21,8 +21,8 @@ loaded. Its `sessionId` is your own Saycode id, and `spawnsRemaining` and
 
 **Saycode first, tmux second** (the person's decision). A Saycode session often runs inside
 tmux too, so `$TMUX` stands as well. A worker that `happy agent ls --status` lists is driven
-through this skill. `moai-tmux`, where it is planted, is for a worker Saycode does not list,
-and for what Saycode cannot do — the pane labels.
+through this skill. `moai-tmux` (or `moai-cmux` in a cmux tab), where it is planted, is for a
+worker Saycode does not list, and for what Saycode cannot do — the pane labels.
 
 ## What never happens
 
@@ -62,17 +62,66 @@ It answers `{"sessions":[…],"ok":true}`, one object per session in Saycode's s
   you sent by Saycode id
 - `lastSeq` is the cursor of its messages ("Take the report")
 
-The supervisor's 2 picks workers from `ListAgents`, and a worker reports with `SendMessage`,
-so one worker stands in both lists. Claude Code keeps one record per process under
-`~/.claude/sessions/`, and the lines below pair them — `saycode` is the Saycode id read from
-that process's environment (`APLUS_SESSION_ID`), tab-separated:
+The supervisor's 2 picks workers from `ListAgents`, and a Claude Code worker Saycode runs shows
+there too. **Nothing pairs a `ListAgents` name with a Saycode id**, so the two lists are kept
+apart: a worker driven through Saycode is a row of `happy agent ls --status`, and the
+`ListAgents` candidates the supervisor's 2 counts are only those the map below does not mark
+`saycode`. The two sets do not overlap, so no worker is counted twice. Claude Code keeps one
+record per process under `~/.claude/sessions/`, and the map reads them — `saycode` is the
+record's own marker: a session Saycode started (in its app, or by its daemon) carries the
+entrypoint `remote_mobile`, a terminal session `cli`. Tab-separated:
 
     state  name  pane  status  cwd  sessionId  saycode
 
 ```sh
 python3 - <<'PY'
-import glob, json, os
-mine = os.environ.get("TMUX", "").split(",")[0]
+import glob, json, os, subprocess, sys
+def out(*cmd, **env):
+    try:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+linux = os.path.isdir("/proc/self")
+def stat(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            text = f.read()
+        return text[text.rindex(")") + 2:].split()
+    except (OSError, ValueError):
+        return []
+def started(pid):
+    if linux:
+        fields = stat(pid)
+        return fields[19] if len(fields) > 19 else ""
+    return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+def device(path):
+    try:
+        return os.stat(path).st_rdev if path else 0
+    except OSError:
+        return 0
+def tty(pid):
+    if linux:
+        try:
+            return int(stat(pid)[4]) & 0xFFFFFFFF
+        except (IndexError, ValueError):
+            return 0
+    t = out("ps", "-p", str(pid), "-o", "tty=")
+    return device("/dev/" + t) if t.strip("?") else 0
+mine = os.environ.get("TMUX")
+cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
+surfaces = {}
+def walk(o):
+    if isinstance(o, dict):
+        for p in o.get("cmux_process_pids") or []:
+            surfaces[p] = o.get("id")
+        o = list(o.values())
+    for v in o if isinstance(o, list) else []:
+        walk(v)
+if cmux:
+    try:
+        walk(json.loads(out("cmux", "--json", "--id-format", "both", "top", "--all")))
+    except ValueError:
+        print("cmux top gave no answer, so no session is matched to a surface", file=sys.stderr)
 rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
@@ -81,47 +130,52 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         pid = int(r["pid"])
     except (OSError, ValueError, KeyError, TypeError):
         continue
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            stat = f.read()
-        alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
-    except (OSError, ValueError, IndexError):
-        alive = False
-    env = {}
-    if alive:
-        try:
-            with open(f"/proc/{pid}/environ", "rb") as f:
-                env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-        except OSError:
-            pass
+    start = started(pid)
+    alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux and r.get("entrypoint") != "remote_mobile" else ""
-    if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
+    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    if r.get("entrypoint") == "remote_mobile":
         pane = ""
-    saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
-    rows.append([alive, r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode])
-panes = [row[2] for row in rows if row[0] and row[2]]
-for row in rows:
-    if row[0] and row[2] and panes.count(row[2]) > 1:
-        row[2] = ""
-    print("\t".join(["alive" if row[0] else "dead"] + [str(c or "-") for c in row[1:]]))
+    elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
+        pane = ""
+    elif alive and pane and mine:
+        here = tty(pid)
+        if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
+            pane = ""
+    elif alive and cmux:
+        pane = "" if tmux else surfaces.get(pid)
+    rows.append((alive, pane, r))
+if rows and not any(alive for alive, _, _ in rows):
+    sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
+claimed = [pane for alive, pane, _ in rows if alive and pane and (mine or cmux)]
+for alive, pane, r in rows:
+    if alive and claimed.count(pane) > 1:
+        pane = ""
+    saycode = "saycode" if r.get("entrypoint") == "remote_mobile" else ""
+    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode]
+    print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
 ```
 
-- Read only `alive` rows. `name` is the `ListAgents` name and `saycode` the Saycode id, `-`
-  when that process is not a Saycode session
-- A `ListAgents` row and a Saycode row the map pairs are **one worker** — count it once
-- A worker `ListAgents` shows whose `saycode` is `-` is not a Saycode session: it goes
-  through `moai-tmux` where that stands, otherwise through messages and the person, as the
-  supervisor's steps say
-- A Saycode row the map pairs with nothing is not Claude Code — a `codex` or `gemini` worker
-  the person asked for. It cannot `SendMessage`; its report is its last turn ("Take the
-  report"). **It is still a worker:** `ListAgents` never shows it, so the supervisor's 2 counts
-  it from this list — a candidate while it reads `idle` and the report of the work you last
-  sent it is checked. Its `Sent:` note names it `saycode <id>`, with no name
+- Read only `alive` rows. `name` is the `ListAgents` name; `saycode` reads `saycode` for a
+  session Saycode started and `-` for any other
+- A `ListAgents` row the map marks `saycode` is **left out of the supervisor's 2** — that
+  worker is counted, sent to and cleared here, by its Saycode id
+- A `ListAgents` row whose `saycode` is `-` is not a Saycode session: it goes through
+  `moai-tmux` (or `moai-cmux`) where that stands, otherwise through messages and the person,
+  as the supervisor's steps say
+- **Every Saycode row of this repository is a worker** — a candidate while it reads `idle`
+  and the report of the work you last sent it is checked. It may be a `codex` or `gemini`
+  worker the person asked for, which `ListAgents` never shows. Its `Sent:` note names it
+  `saycode <id>`
+- **A report is tied to the work, not to a name.** A Claude Code worker reports with
+  `SendMessage`, and its `from:` is a `ListAgents` name nothing pairs with an id — the
+  report's `report: <epic>` and the epic's `Sent:` note (`saycode <id>`) say which worker it
+  was. A worker that is not Claude Code cannot `SendMessage`; its report is its last turn
+  ("Take the report")
 - **Never trust `pane` for a Saycode row.** Saycode's daemon hands its own pane down to the
   sessions it starts, so the record names a pane that is not theirs — the map prints `-` for
-  a session the daemon started, and for a pane two alive rows name
+  a session the daemon started, and, inside tmux or cmux, for a pane two alive rows name
 
 Run each of these when a step below needs it, once.
 
@@ -150,8 +204,8 @@ with `askUserQuestion` and `exitPlanMode` false and `permissionRequests` 0.
    It answers `"ok":true` with `delivered: true` once Saycode took it. On `"ok":false` it did
    not go — do not send it again blind; tell the person
 
-The `Sent:` note of the supervisor's 3 names the worker as `<name> (saycode <id>)`, so a
-supervisor that starts again finds it after a `/clear` renamed it. Leave `notify_when_idle`
+The `Sent:` note of the supervisor's 3 names the worker as `saycode <id>` — a `/clear` renames
+it in `ListAgents` but not here, so a supervisor that starts again finds it. Leave `notify_when_idle`
 out: the background wait ending is the notice that the turn ended. It ends `satisfied` when
 the turn ended, or `wait_timeout` after an hour — then look once with `ls --status`, and start
 another wait only while the row still reads `responding`.
@@ -185,9 +239,8 @@ Then:
 
 and, as a separate call, look once with `ls --status`: it should read `idle`. Until it does,
 send it nothing — look again after your next step. The context is gone
-and its process started again, so its `ListAgents` name has changed — run `ListAgents` and
-the map again before anything goes to it by name. Its Saycode id is the same, and "Send work"
-needs no name. **If any condition fails, do not clear it** — do what the supervisor's 5 says:
+and its process started again, so its `ListAgents` name has changed; its Saycode id is the
+same, and "Send work" needs no name. **If any condition fails, do not clear it** — do what the supervisor's 5 says:
 ask the person, or send to another idle worker.
 
 ## When a worker stalls
@@ -249,5 +302,6 @@ its own.
   `budgetResetsAt`
 - `spawn_depth_exceeded` — this session cannot open sessions; tell the person
 
-A new Claude Code worker shows in `ListAgents` too, and the map pairs it. A worker that is not
-Claude Code reports through its last turn ("Take the report").
+A new Claude Code worker shows in `ListAgents` too, and the map marks it `saycode`, so the
+supervisor's 2 leaves it out there. A worker that is not Claude Code reports through its last
+turn ("Take the report").

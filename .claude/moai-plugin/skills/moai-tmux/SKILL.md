@@ -7,8 +7,9 @@ description: Use in Claude Code together with moai-supervise when the supervisor
 
 This is the supervisor's (`moai-supervise`) companion **when it runs inside tmux** — `$TMUX`
 is set in its shell. Without `$TMUX` none of this applies: the supervisor works through
-messages and the person alone. The tmux server here is **the person's own**: every session
-they have lives on it, and every pane you touch is one they are looking at.
+messages and the person — or, inside cmux, through `moai-cmux`. The tmux server here is **the
+person's own**: every session they have lives on it, and every pane you touch is one they are
+looking at.
 
 ## What never happens
 
@@ -40,8 +41,53 @@ under `~/.claude/sessions/`, and the lines below print one row per record, tab-s
 
 ```sh
 python3 - <<'PY'
-import glob, json, os
-mine = os.environ.get("TMUX", "").split(",")[0]
+import glob, json, os, subprocess, sys
+def out(*cmd, **env):
+    try:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+linux = os.path.isdir("/proc/self")
+def stat(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            text = f.read()
+        return text[text.rindex(")") + 2:].split()
+    except (OSError, ValueError):
+        return []
+def started(pid):
+    if linux:
+        fields = stat(pid)
+        return fields[19] if len(fields) > 19 else ""
+    return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+def device(path):
+    try:
+        return os.stat(path).st_rdev if path else 0
+    except OSError:
+        return 0
+def tty(pid):
+    if linux:
+        try:
+            return int(stat(pid)[4]) & 0xFFFFFFFF
+        except (IndexError, ValueError):
+            return 0
+    t = out("ps", "-p", str(pid), "-o", "tty=")
+    return device("/dev/" + t) if t.strip("?") else 0
+mine = os.environ.get("TMUX")
+cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
+surfaces = {}
+def walk(o):
+    if isinstance(o, dict):
+        for p in o.get("cmux_process_pids") or []:
+            surfaces[p] = o.get("id")
+        o = list(o.values())
+    for v in o if isinstance(o, list) else []:
+        walk(v)
+if cmux:
+    try:
+        walk(json.loads(out("cmux", "--json", "--id-format", "both", "top", "--all")))
+    except ValueError:
+        print("cmux top gave no answer, so no session is matched to a surface", file=sys.stderr)
 rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
@@ -50,30 +96,30 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         pid = int(r["pid"])
     except (OSError, ValueError, KeyError, TypeError):
         continue
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            stat = f.read()
-        alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
-    except (OSError, ValueError, IndexError):
-        alive = False
-    env = {}
-    if alive:
-        try:
-            with open(f"/proc/{pid}/environ", "rb") as f:
-                env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-        except OSError:
-            pass
+    start = started(pid)
+    alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
-    pane = tmux.rpartition(".")[2] if "%" in tmux and r.get("entrypoint") != "remote_mobile" else ""
-    if alive and pane and mine and env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace") != mine:
+    pane = tmux.rpartition(".")[2] if "%" in tmux else ""
+    if r.get("entrypoint") == "remote_mobile":
         pane = ""
-    saycode = env.get(b"APLUS_SESSION_ID", b"").decode(errors="replace")
-    rows.append([alive, r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode])
-panes = [row[2] for row in rows if row[0] and row[2]]
-for row in rows:
-    if row[0] and row[2] and panes.count(row[2]) > 1:
-        row[2] = ""
-    print("\t".join(["alive" if row[0] else "dead"] + [str(c or "-") for c in row[1:]]))
+    elif alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
+        pane = ""
+    elif alive and pane and mine:
+        here = tty(pid)
+        if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
+            pane = ""
+    elif alive and cmux:
+        pane = "" if tmux else surfaces.get(pid)
+    rows.append((alive, pane, r))
+if rows and not any(alive for alive, _, _ in rows):
+    sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
+claimed = [pane for alive, pane, _ in rows if alive and pane and (mine or cmux)]
+for alive, pane, r in rows:
+    if alive and claimed.count(pane) > 1:
+        pane = ""
+    saycode = "saycode" if r.get("entrypoint") == "remote_mobile" else ""
+    cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId"), saycode]
+    print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
 ```
 

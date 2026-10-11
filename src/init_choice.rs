@@ -792,27 +792,28 @@ mod tests {
         assert_eq!(f.plan().with, Vec::<&str>::new(), "설치를 안 하는데 건넸다");
         assert_eq!(f.picked.optional[0], Some(true), "hidden, not forgotten");
 
-        // 미리 켜 둔 칸 — 끄면 `--without` 이다. 첫 칸(`moai-tmux`)만 켜 둔다.
-        let pre = Defaults { optional: std::array::from_fn(|i| Some(i == 0)), ..SCREEN };
+        // 미리 켜 둔 칸 — 끄면 `--without` 이다.
+        let pre = Defaults { optional: [Some(true); N], ..SCREEN };
         let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
-        assert_eq!(f.plan().with, ["moai-tmux"], "미리 켜 둔 칸을 안 건넸다");
+        assert_eq!(f.plan().with, ["moai-tmux", "moai-cmux", "moai-saycode"], "미리 켜 둔 칸을 안 건넸다");
         choose(&mut f, Field::Optional(0), 1);
-        assert_eq!((f.plan().with, f.plan().without), (vec![], vec!["moai-tmux"]));
+        assert_eq!((f.plan().with, f.plan().without), (vec!["moai-cmux", "moai-saycode"], vec!["moai-tmux"]));
     }
 
-    /// **둘째 칸은 `moai-saycode` 다**(moai-l244) — 칸 차례가 [`OPTIONAL`] 의 차례고, 표식(`SAYCODE_AGENT_ENV`)으로 미리
-    /// 켜 둔 칸은 첫 칸과 따로 건넨다. Saycode 세션은 tmux 안에서도 돌아 둘이 함께 켜지는 일이 흔하다.
+    /// **셋째 칸은 `moai-saycode` 다**(moai-l244) — 칸 차례가 [`OPTIONAL`] 의 차례(tmux·cmux 다음)고, 표식
+    /// (`SAYCODE_AGENT_ENV`)으로 미리 켜 둔 칸은 다른 칸과 따로 건넨다. Saycode 세션은 tmux 안에서도 돌아 함께 켜지는
+    /// 일이 흔하다.
     #[test]
-    fn the_saycode_row_stands_second_and_passes_its_pick_on() {
+    fn the_saycode_row_stands_third_and_passes_its_pick_on() {
         let mut f = form(Choices { guide: Some(Guide::None), ..Choices::default() });
-        assert!(f.rows().contains(&Field::Optional(1)), "Saycode 칸이 없다");
-        choose(&mut f, Field::Optional(1), 0);
+        assert!(f.rows().contains(&Field::Optional(2)), "Saycode 칸이 없다");
+        choose(&mut f, Field::Optional(2), 0);
         assert_eq!(f.plan().with, ["moai-saycode"]);
-        let both = Defaults { optional: [Some(true); N], ..SCREEN };
-        let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, both, "moai".into());
-        assert_eq!(f.plan().with, ["moai-tmux", "moai-saycode"], "둘 다 켜 둔 칸을 다 안 건넸다");
-        choose(&mut f, Field::Optional(1), 1);
-        assert_eq!((f.plan().with, f.plan().without), (vec!["moai-tmux"], vec!["moai-saycode"]));
+        let all = Defaults { optional: [Some(true); N], ..SCREEN };
+        let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, all, "moai".into());
+        assert_eq!(f.plan().with, ["moai-tmux", "moai-cmux", "moai-saycode"], "다 켜 둔 칸을 다 안 건넸다");
+        choose(&mut f, Field::Optional(2), 1);
+        assert_eq!((f.plan().with, f.plan().without), (vec!["moai-tmux", "moai-cmux"], vec!["moai-saycode"]));
     }
 
     /// **`--with` 는 그 칸을 잠그고, 사람이 안 보는 `init` 은 표식으로 심지 않는다**(moai-3r7l.ocn) — [`PLAIN`] 의 선택
@@ -846,9 +847,10 @@ mod tests {
         choose(&mut f, Field::Optional(0), 0);
         assert!(f.plan().changes_optional(&[]), "심기지 않은 것을 켠 것을 안 읽었다");
         assert!(!f.plan().changes_optional(&["moai-tmux"]), "심긴 것을 그대로 켜 둔 것을 바꿨다고 읽었다");
-        let pre = Defaults { optional: std::array::from_fn(|i| Some(i == 0)), ..SCREEN };
+        let pre = Defaults { optional: [Some(true); N], ..SCREEN };
         let mut f = Form::new(Choices { guide: Some(Guide::None), ..Choices::default() }, pre, "moai".into());
         choose(&mut f, Field::Optional(0), 1);
-        assert!(f.plan().changes_optional(&["moai-tmux"]), "심긴 것을 끈 것을 안 읽었다");
+        // 미리 켠 칸은 다 심긴 것이다 — 하나만 대면 켜 둔 다른 것이 `with` 로 읽혀, 끈 것을 안 재도 참이다.
+        assert!(f.plan().changes_optional(&["moai-tmux", "moai-cmux", "moai-saycode"]), "심긴 것을 끈 것을 안 읽었다");
     }
 }
