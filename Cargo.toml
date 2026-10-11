@@ -1,6 +1,6 @@
 [package]
 name = "moai"
-version = "0.14.0"
+version = "0.15.0"
 edition = "2024"
 description = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다."
 license = "MIT"
