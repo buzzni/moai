@@ -157,6 +157,10 @@ fi
 # `mktemp` 이 낸 파일은 0600 이고 `mv` 가 그 모드를 그대로 얹는다 — 그대로 두면
 # 판을 올린 커밋에서 `Cargo.toml` 이 주인만 읽는 파일이 되고, git 은 실행 비트만
 # 보므로 아무도 못 본다. 옮기기 전에 되돌린다.
+#
+# **`chmod` 에는 `--` 를 안 준다**(moai-fzq7) — BSD `chmod`(macOS)는 그것을 파일 이름으로 읽어
+# 멈추고, `set -e` 라 아무것도 안 옮긴 채 끝났다. `$tmp` 는 `mktemp` 이 지은 `<파일>.tmp.XXXXXX`
+# 라 `-` 로 시작하지 않는다.
 tmp=$(mktemp "$manifest.tmp.XXXXXX")
 trap 'rm -f -- "$tmp"' EXIT
 awk -v want="$want" '
@@ -168,7 +172,7 @@ awk -v want="$want" '
   }
   { print }
 ' "$manifest" >"$tmp"
-chmod 644 -- "$tmp"
+chmod 644 "$tmp"
 mv -- "$tmp" "$manifest"
 printf 'bump-version: Cargo.toml  %s → %s\n' "$have" "$want"
 
@@ -253,7 +257,7 @@ if [ -f "$changelog" ]; then
     { print }
     END { if (!done) exit 3 }
   ' "$changelog" >"$tmp" || die 'CHANGELOG.md 에 ## [Unreleased] 줄이 없다'
-  chmod 644 -- "$tmp"
+  chmod 644 "$tmp"
   mv -- "$tmp" "$changelog"
   printf 'bump-version: CHANGELOG.md  [%s] - %s 를 열었다\n' "$want" "$today"
 else
