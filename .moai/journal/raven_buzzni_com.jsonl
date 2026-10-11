@@ -6223,3 +6223,5 @@
 {"ts":"2026-10-11T03:57:17Z","id":"moai-kccu.l73","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"고침은 moai-p5sz.7q3(macOS 생존 판정·tty 대조)과 리뷰 moai-p5sz.tkn 의 짝 고침으로 v0.14.0 에 실린다. 2026-10-11 사람 결정: v0.14.0 을 내고 v0.13.1 은 접는다."}
 {"ts":"2026-10-11T03:57:17Z","id":"moai-kccu.l73","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"v0.14.0 에 실려 고쳐짐(moai-p5sz.7q3)"}
 {"ts":"2026-10-11T03:57:17Z","id":"moai-abnb","kind":"note","by":"Raven","by_email":"raven@buzzni.com","text":"접음 — 고침이 v0.14.0 에 실려 따로 낼 패치가 없다(2026-10-11 사람 결정)"}
+{"ts":"2026-10-11T03:59:37Z","id":"moai-fzq7","kind":"create","by":"Raven","by_email":"raven@buzzni.com","title":"bump-version.sh 가 macOS 의 chmod 에서 멈춘다"}
+{"ts":"2026-10-11T03:59:43Z","id":"moai-fzq7","kind":"status","by":"Raven","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
