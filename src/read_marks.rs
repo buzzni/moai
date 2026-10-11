@@ -2452,7 +2452,13 @@ mod tests {
         let s = Scratch::new("read-marks-nonutf8");
         let cfg = s.join("config.toml");
         let root = s.path().join(std::ffi::OsStr::from_bytes(b"re\xffpo"));
-        std::fs::create_dir_all(&root).unwrap();
+        match std::fs::create_dir_all(&root) {
+            Ok(()) => {}
+            // macOS 의 APFS 는 UTF-8 이 아닌 이름을 만들지 못하게 한다(EILSEQ) — 그 기계에는 이 뿌리가 설 수
+            // 없으니 지킬 것도 없다(moai-xpa8.q9x). 리눅스는 그대로 잰다. 다른 까닭의 실패는 붉힌다.
+            Err(e) if e.raw_os_error() == Some(libc::EILSEQ) => return,
+            Err(e) => panic!("{}: {e}", root.display()),
+        }
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
         upd(&cfg, &root, |sh| sh.mark(&marks(&[("argos-0002", "B")]))).expect("제가 지은 파일을 남의 것으로 읽었다");
         assert_eq!(read(&cfg, &root, &BTreeMap::new()).seen, marks(&[("argos-0001", "A"), ("argos-0002", "B")]));

@@ -1,13 +1,16 @@
 ---
 name: moai-cmux
-description: Use in Claude Code together with moai-supervise when the supervisor runs inside cmux (CMUX_SURFACE_ID is set and $TMUX is not) — to find a worker's surface from its ListAgents name, label its tab, clear a reported worker's window, deliver a message SendMessage could not, read why a worker stalled, and open new worker splits once the person says yes. Triggers on "worker surface", "worker tab", "open a worker", "clear the worker", "일꾼 탭", "일꾼 창 열어", "탭 비워".
+description: Use in Claude Code together with moai-supervise when the supervisor runs inside cmux (CMUX_SURFACE_ID is set and $TMUX is not, or is the /tmp/cmux- stand-in that cmux claude-teams sets) — to find a worker's surface from its ListAgents name, label its tab, clear a reported worker's window, deliver a message SendMessage could not, read why a worker stalled, and open new worker splits once the person says yes. Triggers on "worker surface", "worker tab", "open a worker", "clear the worker", "일꾼 탭", "일꾼 창 열어", "탭 비워".
 ---
 
 # moai-cmux — the supervisor's hands on the workers' surfaces
 
 This is the supervisor's (`moai-supervise`) companion **when it runs inside cmux** —
-`CMUX_SURFACE_ID` is set in its shell and `$TMUX` is not. Inside tmux — tmux running in a cmux
-tab included — what you type goes to tmux: that is `moai-tmux`, and none of this applies.
+`CMUX_SURFACE_ID` is set in its shell and `$TMUX` is not. A `$TMUX` that starts with
+`/tmp/cmux-` counts as not set: it is cmux's own stand-in, which cmux's `claude-teams` sets for
+Claude Code's agent teams, and the `tmux` on that `PATH` is cmux in disguise — it passes
+`set-option` by and refuses `load-buffer`. Inside a real tmux — one running in a cmux tab
+included — what you type goes to tmux: that is `moai-tmux`, and none of this applies.
 Outside both tmux and cmux none of this applies either: the supervisor works through messages
 and the person alone. The cmux app here is **the person's own**: every workspace they have lives
 in it, and every surface you touch is a tab they are looking at.
@@ -98,6 +101,8 @@ def tty(pid):
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
 mine = os.environ.get("TMUX")
+if mine and mine.startswith("/tmp/cmux-"):
+    mine = None
 cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
 surfaces = {}
 def walk(o):
@@ -153,7 +158,9 @@ PY
   answers which processes run in which surface (`cmux top`). It is `-` when that session is not
   in a cmux tab of yours — another terminal, or tmux, tmux inside a cmux tab included — when it
   shares its tab with another live session, or when cmux gave no answer (a line on its own says
-  so), and then this skill has nothing for that worker
+  so), and then this skill has nothing for that worker. A session started with cmux's
+  `claude-teams` can read `-` too: its record may carry the tmux that launcher's stand-in
+  answered, and a record with tmux in it is not matched to a surface
 - **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
   dead — act on no row, and tell the person what it said
 - **A row whose `saycode` is not `-` is a Saycode session** — one Saycode started, so its pane
@@ -162,9 +169,11 @@ PY
   names — wherever they stand. A row standing elsewhere is not a worker of this repository, whatever its name
 - `status` is `idle`, `busy` or another word. It has to agree with `ListAgents` where a step
   below asks for `idle`
-- Your own row is the one whose pane is `$CMUX_SURFACE_ID`
+- Your own row is the one whose pane is `$CMUX_SURFACE_ID` — when you were started with cmux's
+  `claude-teams` it may read `-` instead (above)
 
-Run it when a step below needs a surface, once.
+Run it when a step below needs a surface, and once more just before you type into one — a
+reading from earlier in the round may be a worker that has died since (the next section).
 
 ## Is the input box empty
 

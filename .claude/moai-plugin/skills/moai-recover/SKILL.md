@@ -44,7 +44,11 @@ Claude Code's input box is the line that starts with `❯`, under the conversati
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
 person's text is not. Anything else — a word, a pasted block, a half-typed command — is the
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
-no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.
+no `❯` box at all (a shell prompt, a dialog) is not a box to type into either. **Even an empty
+box counts only while the session map, run again just before, still reads that session
+`alive` in that pane** — the screen alone cannot tell: a pane whose Claude Code was killed keeps
+its last frame, box and all, above the shell `exec bash` started, and the keys go to that
+shell.
 
 Inside cmux:
 
@@ -60,6 +64,8 @@ cannot read as Claude Code's — a shell prompt, a process that ended. `waiting_
 note that the session last asked the person something — a permission prompt, a question — and
 it can stay `true` after an API error or an interrupt. None of these is a box to type into, and
 neither is an error or an answer without `state`.
+
+The session map is the lines of 1 below, run again.
 
 **When it is not empty, do not paste.** Tell the person which pane holds what — the words in it
 are theirs.
@@ -106,6 +112,8 @@ def tty(pid):
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
 mine = os.environ.get("TMUX")
+if mine and mine.startswith("/tmp/cmux-"):
+    mine = None
 cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
 surfaces = {}
 def walk(o):
@@ -268,9 +276,10 @@ supervisor's pane — or print its line — only after they say that worker is b
 
 ## 5. Inside tmux — open a pane each
 
-`$TMUX` is set in your shell. For each session that is not a Saycode session (8), in that
-order. The panes open in the window of `$TMUX_PANE` — inside a session Saycode's daemon
-started, that is the daemon's pane, not yours — so say which window they are in:
+`$TMUX` is set in your shell and does not start with `/tmp/cmux-` (that one is cmux's stand-in —
+6 below). For each session that is not a Saycode session (8), in that order. The panes open in
+the window of `$TMUX_PANE` — inside a session Saycode's daemon started, that is the daemon's
+pane, not yours — so say which window they are in:
 
     tmux split-window -P -F '#{pane_id}' -t "$TMUX_PANE" -c <cwd> 'claude --resume <sessionId>; exec bash'
     tmux select-layout -t "$TMUX_PANE" tiled
@@ -283,13 +292,17 @@ when `claude` exits. Then, as a separate call, look once: when its `❯` box sho
     tmux paste-buffer -p -d -b moai-recover -t <pane>
     tmux send-keys -t <pane> Enter
 
-If the box has not shown yet, look again after your next step. A prompt in the pane (trusting
-the folder, say) is the person's to answer — tell them which pane. When all are open, tell the
-person which pane is which session.
+In a pane you opened here, the session map's `pane` for the resumed session may stay `-`:
+Claude Code records its tmux pane once, as it starts, and can miss it under load. There its row
+reading that `sessionId` `alive` is what "alive in that pane" asks — the `%N` is the one
+`split-window` printed. If the box has not shown yet, look again after your next step. A prompt
+in the pane (trusting the folder, say) is the person's to answer — tell them which pane. When
+all are open, tell the person which pane is which session.
 
 ## 6. Inside cmux — open a tab each
 
-`CMUX_SURFACE_ID` is set in your shell and `$TMUX` is not — and the cmux is 0.65.0 or later:
+`CMUX_SURFACE_ID` is set in your shell and `$TMUX` is not, or is cmux's stand-in
+(`/tmp/cmux-…`) — and the cmux is 0.65.0 or later:
 `cmux capabilities` lists `surface.input_state` in its `methods`. On an older cmux, tell the
 person that this way needs cmux 0.65.0, and go to 7; when it prints an error instead of a
 `methods` list, tell them what it said, and go to 7. For each session that is not a Saycode

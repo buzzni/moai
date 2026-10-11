@@ -56,22 +56,30 @@ pub const NAMES: [&str; 4] = ["moai", "moai-supervise", "moai-wiki", "moai-recov
 /// (그 탭을 겨누는 이름). 머리(`CMUX_`)로 재면 cmux 가 깔아 둔 `CMUX_BUNDLED_CLI_PATH` 따위가 cmux 밖의 셸에 새어도
 /// 쓰는 사람으로 읽는다. tmux 를 cmux 탭 안에서 돌리는 사람에게는 둘 다 켜진다 — 둘 다 그 사람의 것이다.
 ///
+/// **[`CMUX_STAND_IN`] 으로 여는 `$TMUX` 는 tmux 의 표식이 아니다**(moai-xpa8.1vt) — `cmux claude-teams` 가 세우는 가짜라,
+/// 짝·감독 글·두 스킬의 첫 줄이 그 값을 없는 것으로 읽는다. 여기만 이름으로 재면 그 셸의 `init` 이 쓰지 못할 `moai-tmux`
+/// 를 미리 골라, 그 발동어가 그 사람의 모든 세션에 실린다.
+///
 /// 셋째 `moai-saycode`(moai-l244)의 표식은 `SAYCODE_AGENT_ENV` 다 — Saycode 는 제가 띄운 세션의 셸에
 /// `SAYCODE_AGENT_ENV=1` 을 세운다. 같은 머리의 `SAYCODE_AGENT_ID`·`_ROOT` 따위도 서지만, `happy agent` 가 도는지를 그
 /// 하나로 가르니(`Only works inside a session Saycode started (SAYCODE_AGENT_ENV)`) 이름째 잰다. 차례가 `init` 의 칸
 /// 차례라 먼저 선 둘 뒤에 붙인다 — 앞서 고른 사람들의 화면을 안 흔든다.
 pub const OPTIONAL: [Optional; 3] = [
-    Optional { name: "moai-tmux", sign: |var| var == "TMUX" },
-    Optional { name: "moai-cmux", sign: |var| var == "CMUX_SURFACE_ID" },
-    Optional { name: "moai-saycode", sign: |var| var == "SAYCODE_AGENT_ENV" },
+    Optional { name: "moai-tmux", sign: |var, value| var == "TMUX" && !value.starts_with(CMUX_STAND_IN) },
+    Optional { name: "moai-cmux", sign: |var, _| var == "CMUX_SURFACE_ID" },
+    Optional { name: "moai-saycode", sign: |var, _| var == "SAYCODE_AGENT_ENV" },
 ];
+
+/// `cmux claude-teams`(그리고 `omo`·`omx`·`omc`)가 세우는 가짜 `$TMUX` 의 머리 — 까닭은 `guide::SESSIONS` 에 있다. 스킬
+/// 글은 같은 글자를 손으로 적는다(`/tmp/cmux-`).
+pub const CMUX_STAND_IN: &str = "/tmp/cmux-";
 
 /// 고를 수 있는 스킬 하나 — 이름과 표식.
 pub struct Optional {
     pub name: &'static str,
-    /// 그 스킬을 쓰는 사람이라는 환경 변수의 이름인가 — 그 이름의 변수가 **비지 않게** 하나라도 서면 쓰는 사람이다
-    /// ([`detected`]). tmux 는 제 안에서 도는 셸에 `$TMUX` 를 세운다.
-    pub sign: fn(&str) -> bool,
+    /// 그 스킬을 쓰는 사람이라는 환경 변수인가 — 이름과 값을 받는다. 그런 변수가 **비지 않게** 하나라도 서면 쓰는
+    /// 사람이다([`detected`]). tmux 는 제 안에서 도는 셸에 `$TMUX` 를 세운다.
+    pub sign: fn(&str, &str) -> bool,
 }
 
 /// `name` 이 고를 수 있는 스킬인가([`OPTIONAL`]).
@@ -93,7 +101,7 @@ pub fn detected(vars: &[(String, String)]) -> Vec<&'static str> {
 /// [`detected`] 의 몸통 — 목록을 받아, 목록에 없는 꼴의 표식(이름의 머리로 재는 것)도 시험이 잰다. cmux 는 그 꼴로
 /// 재려다 탭을 겨누는 이름 하나(`CMUX_SURFACE_ID`)로 섰다([`OPTIONAL`]).
 fn detected_in(list: &[Optional], vars: &[(String, String)]) -> Vec<&'static str> {
-    list.iter().filter(|o| vars.iter().any(|(k, v)| (o.sign)(k) && !v.is_empty())).map(|o| o.name).collect()
+    list.iter().filter(|o| vars.iter().any(|(k, v)| (o.sign)(k, v) && !v.is_empty())).map(|o| o.name).collect()
 }
 
 /// 이번에 심을 선택 스킬 — **(지금 심긴 것 ∪ `with`) − `without`**, [`OPTIONAL`] 의 차례로(moai-3r7l). 맨 `install` 은 둘이
@@ -546,6 +554,12 @@ pub fn planted_exe(text: &str) -> Option<String> {
 /// 훅 한 번은 `moai` 자신이 28ms 를 쓰므로(`pre-tool-use` 30회 평균) 그 1.1~1.7% 다.
 /// 아래 "정상 갈래" 문단의 **프로세스를 안 늘린다는 말은 그대로 선다.**
 ///
+/// **치환 머리의 `set +e &&`([`shell_line`], moai-xpa8.q9x)로 단순 명령이 아니게 됐다.** 그래도 dash·zsh 는 마지막
+/// 명령을 그 자식에서 그대로 exec 한다(2026-10-11 macOS 에서 잼 — 안쪽 프로세스의 부모가 바깥 껍데기다). bash 5.1 뒤와
+/// 5.0 은 `&&` 목록의 마지막 명령을 그 자리에서 exec 한다(`;` 로 이었던 첫 판은 5.0 에서 하나를 더 띄웠다 — 리뷰
+/// moai-xpa8.yv6 이 소스로 빌드해 잼). bash 4.4 뒤와 macOS 의 bash 3.2 는 `-c` 안의 치환에서 **원래부터** 한 번 더 띄운다
+/// — 그 둘에서 "프로세스를 안 늘린다" 는 위 말은 이 줄 전부터 맞지 않았다.
+///
 /// **그 +0.30ms 는 바닥값이다** — `/bin/true` 는 0바이트를 낸다. 껍데기가 바이트를 읽어 다시
 /// 쓰므로 비용이 출력 크기를 따라 는다: dash 로 60번씩 재니(2026-09-23) 0B 와 17.5KB 는
 /// +0.5ms 언저리인데 1MB 는 +36ms 였다. 지금 가장 큰 출력은 보드(`user-prompt-submit`, 17KB)라
@@ -815,6 +829,20 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     // **갈래는 셋이고 종료 값은 한 번만 가른다**(리뷰 moai-45hf.nab) — `moai` 가 스스로 끝냈으면(0·1)
     // 받은 것을 흘려보내고 표식을 세우고, 아니면 판정의 꼴일 때 흘려보내기만 하고, 꼴이 아니면 알림을
     // 낸다. 0·1 을 두 자리에 적던 줄은 한쪽만 넓히는 날 토막을 판정으로 흘리거나 알림을 삼킨다.
+    //
+    // **치환 안에서 `set +e` 를 준다**(moai-xpa8.q9x). macOS 의 `/bin/sh`(bash 3.2)는 `-e` 가 선 껍데기의 `$( … )`
+    // 안에서 실행 비트가 빠진 파일을 만나면 126 이 아니라 **1** 을 낸다(2026-10-11 실측 — `set +e;` 를 주면 126
+    // 이다). 1 은 "moai 가 스스로 끝냈다" 의 갈래라 그 판의 알림이 말없이 사라졌다 — 이 줄이 겨눈 첫 판이
+    // 바로 실행 비트가 빠진 판이다. dash 와 bash 5 는 원래 126 이라 바뀌는 것이 없다.
+    //
+    // **`;` 가 아니라 `&&` 로 잇는다**(리뷰 moai-xpa8.yv6). 리눅스의 bash 5.0 은 치환 몸통이 `;` 목록이면 자식을 하나 더
+    // 띄우고(`optimize_fork` 가 `&&`·`||` 만 본다 — 5.1 부터 `;` 도 본다), `&&` 면 마지막 명령을 그 자리에서 exec 한다.
+    // 나오는 값은 셋 다 같다(dash·bash 3.2·bash 5·zsh 에서 `-c`·`-ec` 로 잼).
+    //
+    // **Codex 의 줄에는 안 넣는다**(리뷰 moai-xpa8.yv6) — 그 줄은 [`command_for`] 가 새 `sh -c '…'` 로 싸서 안쪽 껍데기에
+    // `-e` 가 설 길이 없다. 그런데 Codex 는 훅 손잡이마다 그 글의 해시로 믿음을 기억해(`/hooks`), 바뀌는 것 없이 글자만
+    // 달라지면 사람이 믿어 준 moai 의 훅 넷이 다시 믿을 때까지 하나도 안 돈다.
+    let errexit_off = if dialect == Dialect::Codex { "" } else { "set +e && " };
     let handoff = crate::cmd::hook::HANDOFF;
     // 세션을 가르는 값과 `moai` 에 붙일 말씨 — 까닭은 [`command_for`] 에 있다.
     let (sid, flag) = match dialect {
@@ -836,7 +864,7 @@ fn shell_line(exe: &str, event: &str, dialect: Dialect) -> String {
     format!(
         "command -v -- \"{exe}\" >/dev/null 2>&1{there} || exit 0; trap 'exit 0' PIPE; \
          h=\"${{TMPDIR:-/tmp}}/moai-hook-{sid}-$$.handoff\"; \
-         c=0; o=$({handoff}=\"$h\" \"{exe}\" hook {event}{flag}) || c=$?; \
+         c=0; o=$({errexit_off}{handoff}=\"$h\" \"{exe}\" hook {event}{flag}) || c=$?; \
          set -C; \
          case \"$c\" in \
          0|1) [ -z \"$o\" ] || {{ printf '%s\\n' \"$o\" && [ -O \"$h\" ] && ! [ -h \"$h\" ] \
@@ -1631,6 +1659,9 @@ mod tests {
         assert_eq!(detected(&env(&[("CMUX_SURFACE_ID", "")])), Vec::<&str>::new(), "빈 표식을 cmux 로 읽었다");
         // tmux 를 cmux 탭 안에서 돌리는 사람 — 둘 다 그 사람의 것이다. 차례는 [`OPTIONAL`] 의 것이다.
         assert_eq!(detected(&env(&[surface, ("TMUX", "/tmp/tmux-501/default,1,0")])), ["moai-tmux", "moai-cmux"]);
+        // `cmux claude-teams` 의 가짜 `$TMUX` 는 tmux 가 아니다 — 그 셸은 cmux 의 것이다(moai-xpa8.1vt).
+        let stand_in = ("TMUX", "/tmp/cmux-claude-teams/WS-UUID,WIN-UUID,6958867214691921188");
+        assert_eq!(detected(&env(&[surface, stand_in])), ["moai-cmux"], "cmux 의 가짜 TMUX 를 tmux 로 읽었다");
         // Saycode 는 제가 띄운 셸에 `SAYCODE_AGENT_ENV=1` 을 세운다(moai-l244) — 같은 머리의 다른 변수로는 안 읽는다.
         assert_eq!(detected(&env(&[("SAYCODE_AGENT_ENV", "1")])), ["moai-saycode"]);
         assert_eq!(detected(&env(&[("SAYCODE_AGENT_ID", "x"), ("APLUS_SESSION_ID", "y")])), Vec::<&str>::new());
@@ -1640,7 +1671,7 @@ mod tests {
             "둘이 함께 선 셸(Saycode 세션도 tmux 안에서 돈다)에서 하나만 읽었다"
         );
         // 머리로 재는 표식 — 지금 목록에는 없는 꼴이다(cmux 는 이름 하나로 섰다). 머리에서 시작하고 값이 차야 선다.
-        let list = [Optional { name: "moai-other", sign: |var| var.starts_with("OTHER_") }];
+        let list = [Optional { name: "moai-other", sign: |var, _| var.starts_with("OTHER_") }];
         assert_eq!(detected_in(&list, &env(&[("OTHER_SOCKET", "/tmp/s")])), ["moai-other"]);
         assert_eq!(detected_in(&list, &env(&[("OTHER_X", ""), ("XOTHER_Y", "1")])), Vec::<&str>::new());
     }
@@ -1931,6 +1962,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_binary_that_cannot_run_says_so_without_blocking() {
+        // **치환 안의 `set +e` 는 글로도 맨다**(moai-xpa8.q9x) — 아래 `-ec` 의 126 이 그것 없이 1 로 무너지는 것은
+        // bash 3.2(macOS 의 `/bin/sh`)뿐이라, 리눅스의 CI 껍데기(dash·bash 5)는 그 토막을 걷어도 푸르다. 아래의
+        // 실행 비트 문지기가 일찍 돌아가는 기계에서도 서도록 맨 앞에 둔다.
+        assert!(command("/bin/moai", "pre-tool-use").contains("o=$(set +e && "), "치환 안의 `set +e` 가 빠졌다");
+        // Codex 의 줄은 새 `sh -c` 에 싸여 `-e` 가 안 서니 안 넣는다 — 넣으면 Codex 가 기억한 훅의 믿음이 글자째 풀린다.
+        assert!(!command_for("/bin/moai", "pre-tool-use", Dialect::Codex).contains("set +e"), "Codex 의 줄이 바뀌었다");
         let scratch = crate::scratch::Scratch::new("skill-hookline");
         let at = scratch.path();
         // **복사로 심는다** — 까닭(ETXTBSY)은 [`planted`] 에 있다.
@@ -2113,7 +2150,9 @@ mod tests {
             assert_eq!(got, Some(0), "{sh}: `set -e` 에서 게이트가 됐다 — {said}");
             let (got, said) = run(sh, "-ec", &dead);
             assert_eq!(got, Some(0), "{sh}: `set -e` 에서 못 도는 판이 게이트가 됐다 — {said}");
-            assert!(said.contains("126"), "{sh}: `set -e` 에서 알림이 빠졌다 — {said}");
+            // 꼴째로 견준다 — 알림에 실린 스크래치 경로의 숫자(pid·ThreadId)가 `126` 을 품으면 맨 숫자는 `(exit 1)` 로
+            // 무너진 판도 지나간다(리뷰 moai-xpa8.yv6). 위 `-c` 갈래가 같은 까닭으로 `(exit {code})` 를 찾는다.
+            assert!(said.contains("(exit 126)"), "{sh}: `set -e` 에서 알림이 빠졌다 — {said}");
         }
     }
 

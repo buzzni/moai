@@ -1,13 +1,15 @@
 ---
 name: moai-tmux
-description: Use in Claude Code together with moai-supervise when the supervisor runs inside tmux ($TMUX is set) — to find a worker's pane from its ListAgents name, label it, clear a reported worker's window, deliver a message SendMessage could not, read why a worker stalled, and open new worker panes once the person says yes. Triggers on "worker pane", "open a worker", "clear the worker", "일꾼 칸", "일꾼 창 열어", "칸 비워".
+description: Use in Claude Code together with moai-supervise when the supervisor runs inside tmux ($TMUX is set and is not the /tmp/cmux- stand-in that cmux claude-teams sets) — to find a worker's pane from its ListAgents name, label it, clear a reported worker's window, deliver a message SendMessage could not, read why a worker stalled, and open new worker panes once the person says yes. Triggers on "worker pane", "open a worker", "clear the worker", "일꾼 칸", "일꾼 창 열어", "칸 비워".
 ---
 
 # moai-tmux — the supervisor's hands on the workers' panes
 
 This is the supervisor's (`moai-supervise`) companion **when it runs inside tmux** — `$TMUX`
 is set in its shell. Without `$TMUX` none of this applies: the supervisor works through
-messages and the person — or, inside cmux, through `moai-cmux`. The tmux server here is **the
+messages and the person — or, inside cmux, through `moai-cmux`. Nor does it apply when `$TMUX`
+starts with `/tmp/cmux-`: that is cmux's own stand-in (`cmux claude-teams` sets it), and its
+`tmux` is cmux in disguise — that is `moai-cmux`'s. The tmux server here is **the
 person's own**: every session they have lives on it, and every pane you touch is one they are
 looking at.
 
@@ -74,6 +76,8 @@ def tty(pid):
     t = out("ps", "-p", str(pid), "-o", "tty=")
     return device("/dev/" + t) if t.strip("?") else 0
 mine = os.environ.get("TMUX")
+if mine and mine.startswith("/tmp/cmux-"):
+    mine = None
 cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
 surfaces = {}
 def walk(o):
@@ -129,6 +133,8 @@ PY
   is not in tmux or runs on another tmux server than yours (pane ids are counted per server,
   so another server's `%4` is a different pane here), and then this skill has nothing for
   that worker
+- **No row at all, and a line saying no record reads alive:** this shell cannot tell live from
+  dead — act on no row, and tell the person what it said
 - **A session Saycode's daemon started has no pane** — it prints `-`. Its record carries the
   pane the daemon was started from, and typing there would type into that pane, not the
   worker's. **A pane two alive rows name belongs to neither** either — both print `-`, so
@@ -143,7 +149,8 @@ PY
   pane this skill can use. Inside a session Saycode's daemon started, `$TMUX_PANE` is the
   daemon's pane, handed down — not yours
 
-Run it when a step below needs a pane, once.
+Run it when a step below needs a pane, and once more just before you type into one — a reading
+from earlier in the round may be a worker that has died since (the next section).
 
 ## Is the input box empty
 
@@ -157,7 +164,11 @@ Claude Code's input box is the line that starts with `❯`, under the conversati
 keeps the colours, and the placeholder is drawn dim (SGR `2`, or a grey foreground) where the
 person's text is not. Anything else — a word, a pasted block, a half-typed command — is the
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
-no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.
+no `❯` box at all (a shell prompt, a dialog) is not a box to type into either. **Even an empty
+box counts only while the session map, run again just before, still reads that session
+`alive` in that pane** — the screen alone cannot tell: a pane whose Claude Code was killed keeps
+its last frame, box and all, above the shell `exec bash` started, and the keys go to that
+shell.
 
 **Then do not type. Tell the person which pane holds what, and go on as if this skill were not
 here.**
@@ -242,8 +253,9 @@ has read `busy` far longer than its work should take, look at its pane once:
     tmux capture-pane -p -t <pane> -S -40
 
 and read why it stopped — a permission prompt, a question (`AskUserQuestion`), an API or
-rate-limit error, or a process that ended (a shell prompt where the box was). **Tell the
-person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
+rate-limit error, or a process that ended (a shell prompt where the box was, or under its last
+box — a killed Claude Code leaves its last screen behind); whether the session is still alive,
+the session map says. **Tell the person** what the pane shows and which pane it is. Do not answer the prompt, do not press a
 key, and do not look again in a loop. A process that ended is a dead session: bringing it
 back is `moai-recover`, once the person asks for it.
 

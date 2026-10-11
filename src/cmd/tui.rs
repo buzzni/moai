@@ -1616,14 +1616,15 @@ mod tests {
         }
 
         /// 가짜 편집기 — 받은 인자와 파일의 권한·글을 옆에 적고, `script` 를 돈다. **진짜 편집기는
-        /// 안 띄운다.** `"$@"` 의 마지막이 파일이다.
+        /// 안 띄운다.** `"$@"` 의 마지막이 파일이다. 권한은 GNU `stat -c %a` 로, 안 되면 BSD 의
+        /// `stat -f %Lp` 로 읽는다 — GNU 것 하나만 쓰던 판은 macOS 에서 빈 글을 적어 붉었다(moai-xpa8.q9x).
         fn editor(&self, script: &str) -> String {
             let path = self.0.join("fake editor.sh");
             let seen = self.0.join("seen");
             std::fs::write(
                 &path,
                 format!(
-                    "for a in \"$@\"; do f=\"$a\"; done\nprintf '%s\\n' \"$@\" > '{seen}/args'\nstat -c %a \"$f\" > '{seen}/mode'\ncp \"$f\" '{seen}/text'\n{script}\n",
+                    "for a in \"$@\"; do f=\"$a\"; done\nprintf '%s\\n' \"$@\" > '{seen}/args'\n{{ stat -c %a \"$f\" 2>/dev/null || stat -f %Lp \"$f\"; }} > '{seen}/mode'\ncp \"$f\" '{seen}/text'\n{script}\n",
                     seen = seen.display()
                 ),
             )

@@ -189,9 +189,9 @@ a Saycode session. Each takes the same lines with its own name.
   and plants no new one, and a first install plants none
 - **The first `moai init` in a terminal offers a row per optional skill** under
   the hooks and skills row. A row starts checked when the skill is already
-  planted, or when your shell says you use it (`$TMUX` set, for `moai-tmux`;
-  `$CMUX_SURFACE_ID` set, for `moai-cmux`; `SAYCODE_AGENT_ENV` set, for
-  `moai-saycode`).
+  planted, or when your shell says you use it (`$TMUX` set and not cmux's
+  `/tmp/cmux-…` stand-in, for `moai-tmux`; `$CMUX_SURFACE_ID` set, for
+  `moai-cmux`; `SAYCODE_AGENT_ENV` set, for `moai-saycode`).
   Where nothing is asked — a script, an agent, `--yes` — only what `--with`
   names is planted, never what the shell suggests
 - **`uninstall --only` keeps the registration.** It removes that skill's
@@ -441,7 +441,8 @@ and stops at anything that cannot be undone.
 
 ### In tmux
 
-When the supervisor runs inside tmux (`$TMUX` is set) and the `moai-tmux`
+When the supervisor runs inside tmux (`$TMUX` is set, and is not cmux's
+`/tmp/cmux-…` stand-in — [In cmux](#in-cmux)) and the `moai-tmux`
 skill is planted ([optional skills](#optional-skills) — `moai skill install
 --with moai-tmux`), it also loads that skill and works on the workers' panes of
 your own tmux server (moai-u99i). Without tmux, or without the skill, nothing of
@@ -470,7 +471,9 @@ this happens.
   interactive session you can see and type into
 
 **If anything stands in a worker's input box, or you are scrolling that pane
-(copy mode), it does not type** — it tells you.
+(copy mode), or the session map no longer reads that pane's session alive, it
+does not type** — it tells you. A killed Claude Code leaves its last screen, box
+and all, above the shell, so the screen alone is not enough (moai-xpa8.p56).
 It never kills a pane, a session or the server, and never runs `claude -p` or a
 `--dangerously-*` flag.
 
@@ -491,7 +494,9 @@ When the supervisor runs inside a [cmux](https://github.com/manaflow-ai/cmux)
 tab (`$CMUX_SURFACE_ID` is set and `$TMUX` is not) and the `moai-cmux` skill is
 planted (`moai skill install --with moai-cmux`), it loads that skill and works on
 the workers' tabs of your cmux (moai-p5sz). Running tmux inside a cmux tab is
-tmux's case — what is typed there goes to tmux. **It needs cmux 0.65.0 or
+tmux's case — what is typed there goes to tmux; a supervisor started with
+`cmux claude-teams` is cmux's case all the same, since that launcher's `$TMUX`
+(`/tmp/cmux-…`) is cmux's own stand-in. **It needs cmux 0.65.0 or
 later**: the skill checks `cmux capabilities` once a round, and on an older cmux
 it tells you and goes on as if it were not there. Updating restarts cmux and
 every session in it, so when to update is yours.
@@ -679,7 +684,7 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8
 
 ## Archive storage
 

@@ -923,11 +923,12 @@ Examples:
   supervisor's hands on tmux panes, cmux tabs and Saycode sessions) get a
   row each under hooks · skills, shown while that row installs. The screen
   checks one when it is already planted here, or when your shell says you
-  use it ($TMUX set for moai-tmux, $CMUX_SURFACE_ID for moai-cmux,
-  SAYCODE_AGENT_ENV for moai-saycode); Enter passes the checked ones on to
-  `moai skill install --with`, and unchecking one already planted passes
-  --without. --with <skill> (repeatable, or names with a comma) checks and
-  locks that row and turns installing on; it cannot go with --no-skill.
+  use it ($TMUX set for moai-tmux, unless it is cmux's /tmp/cmux-… stand-in;
+  $CMUX_SURFACE_ID for moai-cmux; SAYCODE_AGENT_ENV for moai-saycode); Enter
+  passes the checked ones on to `moai skill install --with`, and unchecking
+  one already planted passes --without. --with <skill> (repeatable, or
+  names with a comma) checks and locks that row and turns installing on; it
+  cannot go with --no-skill.
   Where nothing is asked, only what --with names is planted - nothing by
   what your shell says - and optional skills already planted are refreshed.
 

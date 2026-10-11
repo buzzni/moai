@@ -12,6 +12,29 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-11
+
+### Fixed
+
+- **`moai-tmux` and `moai-recover` could read a dead pane as an empty input
+  box.** A pane whose Claude Code was killed keeps its last frame, box and all,
+  above the shell, so a message `SendMessage` could not deliver — a dead session
+  is the usual reason it fails — could be pasted into that shell. The box now
+  counts as empty only while the session map, run again just before, still
+  reads that session alive in that pane, as `moai-cmux` already does.
+  (moai-xpa8.p56)
+- **A hook whose `moai` could not run said nothing on a Mac when the hook ran
+  under `sh -e`.** macOS's `/bin/sh` (bash 3.2) reports a file without its
+  execute bit as exit 1 inside a command substitution under `set -e`, which the
+  hook line read as `moai` ending by itself. The hook line now turns `-e` off
+  inside that substitution, so the notice that the five rules are not standing
+  shows again. Reinstall with `moai skill install` to pick it up. (moai-xpa8.q9x)
+- **A supervisor started with `cmux claude-teams` had no hands on the workers.**
+  That launcher sets a stand-in `$TMUX` (`/tmp/cmux-…`) whose `tmux` is cmux in
+  disguise, so the supervisor took `moai-tmux`'s way, its labels went nowhere
+  and the session map found no pane. A `$TMUX` that starts with `/tmp/cmux-` now
+  counts as cmux, and the supervisor uses `moai-cmux`. (moai-xpa8.1vt)
+
 ## [0.15.0] - 2026-10-11
 
 ### Added

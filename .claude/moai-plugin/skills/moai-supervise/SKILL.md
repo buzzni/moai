@@ -50,22 +50,25 @@ Five things about the messaging, one line each:
   absolute path, and the worker reads it itself (3)
 - Never poll `ListAgents` in a loop — the report comes to you (4)
 
-**Inside tmux, load `moai-tmux` too.** When `$TMUX` is set in your shell, the skill
-`moai-tmux` gives you hands on the workers' panes, at five points of the round: offer new
-worker panes when no worker is idle (2), label the pane you send to and deliver a message
-`SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
-window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
-never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
-step below goes through messages and the person, as written, unless you are inside cmux (the
-next paragraph). `moai-tmux` is an optional skill:
-it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
+**Inside tmux, load `moai-tmux` too.** When `$TMUX` is set in your shell — and is not cmux's
+stand-in (the next paragraph) — the skill `moai-tmux` gives you hands on the workers' panes,
+at five points of the round: offer new worker panes when no worker is idle (2), label the
+pane you send to and deliver a message `SendMessage` could not (3), read a stalled worker's
+pane (4), and clear a reported worker's window before its next work (5). It finds each
+worker's pane from its `ListAgents` name, and never types into a box that holds anything.
+**Without `$TMUX` nothing of it applies** — every step below goes through messages and the
+person, as written, unless you are inside cmux (the next paragraph). `moai-tmux` is an optional
+skill: it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
 init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
 outside tmux.
 
 **Inside cmux, load `moai-cmux` instead.** When `CMUX_SURFACE_ID` is set in your shell and
 `$TMUX` is not, `moai-cmux` gives you the same hands on the workers' cmux tabs, at the same
 five points, and reads the same session map. It needs cmux 0.65.0 or later and says so itself.
-When both are set you run in tmux inside a cmux tab — what you type goes to tmux, so it is
+**A `$TMUX` that starts with `/tmp/cmux-` is cmux's own stand-in**, not a tmux server —
+`cmux claude-teams` sets it for Claude Code's agent teams, and the `tmux` on its `PATH` is cmux
+in disguise — so with it you are inside cmux: `moai-cmux`. When both are set otherwise you run in
+tmux inside a cmux tab — what you type goes to tmux, so it is
 `moai-tmux`. **With neither, nothing of either applies.** `moai-cmux` is optional the same
 way (`moai skill install --with moai-cmux`); inside cmux without it, tell the person that one
 line plants it, and carry on as if outside cmux.

@@ -21183,6 +21183,16 @@ fn write_exe(dst: &Path, body: &str) {
     place_exe(&source, dst);
 }
 
+/// **막 내놓은 실행 파일을 한 번 띄운다**(moai-xpa8.egv) — 그 파일을 2초 한도(`PROBE_BUDGET`) 안에 재는 시험이 부른다.
+/// macOS 는 새 실행 파일의 첫 exec 을 검사하느라 늦다(2026-10-11 쉬는 Mac 에서 스크립트 160~200ms, 바이너리 1초 — 둘째부터는
+/// 5ms 남짓). 시험 천여 개가 함께 도는 부하에서는 그 첫 exec 이 한도를 넘겨 `Unknown` 이 되고, 재려던 갈래(같은 판·딴 도구·
+/// 흘려 듣는 래퍼)를 못 잰 채 붉다. 재려는 것은 첫 실행이 아니라 그 셈이다. **도는 것만으로 무언가 남기는 몸이면 그것을 걷고
+/// 잰다** — 안 걷으면 돌았는지를 재는 시험(`: > ran`)이 이 부름을 probe 로 읽는다.
+#[cfg(unix)]
+fn warm_exe(path: &Path, args: &[&str]) -> Output {
+    Command::new(path).args(args).stdin(Stdio::null()).output().unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
 /// **집기는 본 칸이 그대로일 때만 먹는다** (moai-f8q1). `ready` 와 `mv` 사이에 옆
 /// 에이전트가 같은 줄을 집고 닫기까지 하면, 뒤늦은 `mv` 가 `done` 을 `in_progress` 로
 /// 되연다. `--from <칸>` 을 적으면 락 안에서 다시 보고 칸이 달라졌으면 안 옮긴다.
@@ -22019,6 +22029,10 @@ fn install_prefers_a_moai_on_path_when_it_is_the_same_build() {
     std::fs::create_dir_all(&bin).unwrap();
     let shim = bin.join("moai");
     place_exe(std::path::Path::new(BIN), &shim);
+    // **한 번 먼저 띄운다**([`warm_exe`], moai-xpa8.egv) — 안 띄우면 첫 실행이 `probe` 의 2초를 넘겨 `Unknown` 이 되고,
+    // 도구는 덜 이르는 쪽(지금 바이너리)을 골라 이 시험이 셋에 둘꼴로 붉었다. 사람의 `PATH` 에 선 `moai` 는 이미 돈 파일이다.
+    let warmed = warm_exe(&shim, &["--version"]);
+    assert!(warmed.status.success(), "{}", String::from_utf8_lossy(&warmed.stderr));
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
     let planted = |path: &str| {
         let mut cmd = isolated(BIN);
@@ -22058,6 +22072,8 @@ fn status_names_a_wrapper_that_swallows_what_it_does_not_know() {
     // 자리도 있고 0 으로 끝나는데 이 명령을 모른다 — 흘려 듣는 래퍼다.
     let wrap = root.join("래퍼");
     write_exe(&wrap, "#!/bin/sh\nexit 0\n");
+    // `status` 가 이 파일을 2초 한도로 잰다 — 첫 exec 을 먼저 치른다([`warm_exe`]).
+    warm_exe(&wrap, &["merge-driver", "--help"]);
     ok(root, &["merge-driver", "--install", "--as", &wrap.display().to_string()]);
     let json = ok(root, &["status", "--json"]);
     assert!(json.contains("merge_driver_alien"), "흘려 듣는 래퍼가 그냥 지나갔다\n{json}");
@@ -22099,6 +22115,9 @@ fn undeclaring_the_snapshot_silences_every_merge_driver_notice() {
     let ran = root.join("불렸다");
     let other = root.join("옛moai");
     write_exe(&other, &format!("#!/bin/sh\n: > '{}'\nexit 2\n", ran.display()));
+    // `status` 가 이 파일을 2초 한도로 잰다 — 첫 exec 을 먼저 치르고([`warm_exe`]) 그것이 남긴 표식은 걷는다.
+    warm_exe(&other, &["merge-driver", "--help"]);
+    std::fs::remove_file(&ran).unwrap();
     ok(root, &["merge-driver", "--install", "--as", &other.display().to_string()]);
     let json = ok(root, &["status", "--json"]);
     assert!(json.contains("merge_driver_alien"), "{json}");
@@ -22205,6 +22224,8 @@ fn status_names_another_tool_of_that_name() {
     // 옆 시험의 fork 와 겹쳐 ETXTBSY 로 거절된다 — [`place_exe`] 가 2,400번으로 잰 자리다.
     let other = root.join("옛moai");
     write_exe(&other, "#!/bin/sh\necho '모르는 부명령' >&2\nexit 2\n");
+    // `status` 가 이 파일을 2초 한도로 잰다 — 첫 exec 을 먼저 치른다([`warm_exe`]).
+    warm_exe(&other, &["merge-driver", "--help"]);
     ok(root, &["merge-driver", "--install", "--as", &other.display().to_string()]);
 
     let said = ok(root, &["status"]);
@@ -24786,8 +24807,11 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     let (mut master_fd, mut slave_fd) = (-1, -1);
     let size = libc::winsize { ws_row: 30, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
     // SAFETY: openpty 가 쓰는 두 fd 와 읽는 크기는 살아 있는 값이며, 이름·설정은 필요 없다.
+    // 설정·크기는 `*mut` 로 넘긴다 — macOS 의 libc 는 둘을 `*mut` 로, 리눅스는 `*const` 로 받고 `*mut` 는 `*const` 로
+    // 저절로 바뀐다(moai-xpa8.f0b). openpty 는 둘을 읽기만 한다.
+    let (termp, winp) = (std::ptr::null_mut::<libc::termios>(), &size as *const libc::winsize as *mut libc::winsize);
     assert_eq!(
-        unsafe { libc::openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), std::ptr::null(), &size) },
+        unsafe { libc::openpty(&mut master_fd, &mut slave_fd, std::ptr::null_mut(), termp, winp) },
         0,
         "{}",
         std::io::Error::last_os_error()
@@ -24814,7 +24838,8 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
     // SAFETY: fork 뒤에는 비동기 신호 안전한 시스템 호출만 쓴다. 자식의 stdin 을 제어 터미널로 만든다.
     unsafe {
         command.pre_exec(|| {
-            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY, 0) == -1 {
+            // 요청의 꼴은 OS 마다 다르다(macOS 는 `c_ulong`) — 받는 쪽의 꼴로 맞춘다(moai-xpa8.f0b).
+            if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())
