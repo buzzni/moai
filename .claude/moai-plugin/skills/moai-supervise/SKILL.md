@@ -21,9 +21,9 @@ workers talk with Claude Code's own tools:
 - A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
 
 **Every session here is an interactive one the person can see.** The moai binary never
-launches or drives an agent, and nothing here runs headless. Outside tmux the supervisor
-launches nothing either; inside tmux it may open a worker pane, only after the person says
-yes (`moai-tmux`, below). **A worker is every idle session of this
+launches or drives an agent, and nothing here runs headless. Outside tmux and cmux the
+supervisor launches nothing either; inside either it may open a worker pane, only after the
+person says yes (`moai-tmux` or `moai-cmux`, below). **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
@@ -55,10 +55,19 @@ worker panes when no worker is idle (2), label the pane you send to and deliver 
 `SendMessage` could not (3), read a stalled worker's pane (4), and clear a reported worker's
 window before its next work (5). It finds each worker's pane from its `ListAgents` name, and
 never types into a box that holds anything. **Without `$TMUX` nothing of it applies** — every
-step below goes through messages and the person, as written. `moai-tmux` is an optional skill:
+step below goes through messages and the person, as written, unless you are inside cmux (the
+next paragraph). `moai-tmux` is an optional skill:
 it stands only where it was chosen (`moai skill install --with moai-tmux`, or its row in `moai
 init`). Inside tmux without it, tell the person that one line plants it, and carry on as if
 outside tmux.
+
+**Inside cmux, load `moai-cmux` instead.** When `CMUX_SURFACE_ID` is set in your shell and
+`$TMUX` is not, `moai-cmux` gives you the same hands on the workers' cmux tabs, at the same
+five points, and reads the same session map. It needs cmux 0.65.0 or later and says so itself.
+When both are set you run in tmux inside a cmux tab — what you type goes to tmux, so it is
+`moai-tmux`. **With neither, nothing of either applies.** `moai-cmux` is optional the same
+way (`moai skill install --with moai-cmux`); inside cmux without it, tell the person that one
+line plants it, and carry on as if outside cmux.
 
 **When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
 and the person asks to bring them back, load `moai-recover`, inside tmux or not.
@@ -252,7 +261,8 @@ worker, and the message is the whole assignment.
   may be that worker — ask the person before sending to it
 - **If no row is left, nobody is free here.** Tell the person, and stop — do not send to a
   session of another repository. Inside tmux, ask the person first whether to open new worker
-  panes (`moai-tmux`, "No idle worker left"); on a no, stop
+  panes (`moai-tmux`, "No idle worker left"); inside cmux, whether to open new worker tabs
+  (`moai-cmux`, "No idle worker left"). On a no, stop
 - **A worker that refused the work comes out of the candidates and is not sent to
   again.** Some sessions take work only from their own person
 - **A test agent is no worker.** One raised for a test is opened outside the repository (a
@@ -327,6 +337,9 @@ answers it, or `permissions.additionalDirectories` in their settings holding tha
 directory lets it through. The settings are theirs — do not write them.
 Inside tmux, label the worker's pane as you send and, if the message does not arrive, deliver
 it into the pane — `moai-tmux`, "Label the pane" and "When a message does not arrive".
+Inside cmux, label the worker's tab as you send, once the person said yes to labels this round,
+and if the message does not arrive, deliver it into the tab —
+`moai-cmux`, "Label the tab" and "When a message does not arrive".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
@@ -376,7 +389,8 @@ worker, `report: <epic>` at its head, and it wakes you. The idle notice that
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you. Inside tmux, an
 idle notice with no report is the moment to read that worker's pane once (`moai-tmux`, "When a
-worker stalls") and tell the person what it shows.
+worker stalls") and tell the person what it shows — inside cmux, its tab (`moai-cmux`, "When a
+worker stalls").
 
 **A report reaches only the name it was sent to.** A supervisor that started again —
 restarted, or resumed with `claude --resume` — stands under a new name, and a worker whose
@@ -437,16 +451,17 @@ commit with a path — a supervisor that starts again reads that line, not this 
 
     moai note <epic> 'Report-checked: <merge hash>'
 
-Then send the next backlog to an idle worker. **Outside tmux, clearing a window is the
-person's** — the supervisor never types into a window. The report ends with the worker
+Then send the next backlog to an idle worker. **Outside tmux and cmux, clearing a window is
+the person's** — the supervisor never types into a window. The report ends with the worker
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
 report that never comes. Send to that window once the person has cleared it or said they will
 not — a clear does not show from here, so ask the person — or send to another idle worker.
-**Inside tmux you may clear it yourself** — only after the report is checked and the note above
-is written, only while `ListAgents` and its session record read `idle`, and only when its input
-box is empty (`moai-tmux`, "Clear a worker's window"). If any of these fails, do as the
-paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`).
+**Inside tmux or cmux you may clear it yourself** — only after the report is checked and the note
+above is written, only while `ListAgents` and its session record read `idle`, and only when its
+input box is empty (`moai-tmux`, "Clear a worker's window"; `moai-cmux`, "Clear a worker's
+window"). If any of these fails, do as the paragraph above says. Remove that pane's label once the report is checked (`moai-tmux`), or
+that tab's (`moai-cmux`).
 
 If they do not hold, ask that worker with a message what is left, and do not finish it in
 its place.

@@ -1,13 +1,14 @@
 ---
 name: moai-recover
-description: Use in Claude Code when the person asks to bring back the sessions of this repository that died — after a restart, an OOM kill or a crash — so the supervisor and its workers carry on where they stopped. Finds the dead sessions, draws the state each was in, points out background work that never returned and broken target links, and resumes each one in a new tmux pane, or prints the command to type. Triggers on "recover the sessions", "bring the sessions back", "resume the dead sessions", "되살려", "세션 복구", "이어 가게 해".
+description: Use in Claude Code when the person asks to bring back the sessions of this repository that died — after a restart, an OOM kill or a crash — so the supervisor and its workers carry on where they stopped. Finds the dead sessions, draws the state each was in, points out background work that never returned and broken target links, and resumes each one in a new tmux pane or cmux tab, or prints the command to type. Triggers on "recover the sessions", "bring the sessions back", "resume the dead sessions", "되살려", "세션 복구", "이어 가게 해".
 ---
 
 # moai-recover — bring back the sessions that died
 
 Use this when the person asks for it: the sessions of this repository — a supervisor, its
 workers — died together, after a restart, an OOM kill or a crash, and the person wants them
-to carry on. **Their asking is the yes:** inside tmux you open the panes without asking again.
+to carry on. **Their asking is the yes:** inside tmux or cmux you open the panes without asking
+again.
 None of this is a moai command; it is you reading Claude Code's own records and typing where
 the person can watch.
 
@@ -17,9 +18,11 @@ the person can watch.
   the person can see and type into. Never `claude -p`, never a `--dangerously-*` flag, never
   `--permission-mode`
 - **Nothing is killed.** Never `kill-server`, `kill-session` or `kill-pane`, never `pkill`
-  or `killall` aimed at tmux (hook rule 4). A session that is alive is left alone
+  or `killall` aimed at tmux (hook rule 4); inside cmux never `close-surface`, `close-workspace`
+  or `close-window`, and never `--force`. A session that is alive is left alone
 - **Only the panes you opened.** Type only into a pane this skill opened, by the `%N` that
-  `split-window` printed — every call names it, `-t <pane>`
+  `split-window` printed — every call names it, `-t <pane>`. Inside cmux it is the surface UUID
+  `new-split` printed, `--surface <surface>`
 - **Never over the person's words.** Paste only into an empty input box ("Is the input box
   empty" below); otherwise tell the person
 - **No polling.** Every look is one look; the next comes after your next step, as its own
@@ -28,6 +31,8 @@ the person can watch.
   what a dead session left is for that session to pick up
 
 ## Is the input box empty
+
+Inside tmux:
 
     tmux display -p -t <pane> '#{pane_in_mode}'
     tmux capture-pane -p -e -t <pane>
@@ -41,6 +46,21 @@ person's text is not. Anything else — a word, a pasted block, a half-typed com
 person's, and if you cannot tell the placeholder from their draft, it is theirs. A pane with
 no `❯` box at all (a shell prompt, a dialog) is not a box to type into either.
 
+Inside cmux:
+
+    cmux rpc surface.input_state '{"surface_id":"<surface>"}'
+
+cmux reads Claude Code's input box off that surface's screen. The box is **empty** only when
+the answer's `state` is `empty` and its `waiting_on_human` is `false`, and the session map, run
+again just before, still reads that session `alive` in that tab — cmux reads the screen alone,
+and a tab whose Claude Code has ended can still show its last box, and read `empty`, while a
+shell has the keyboard. `draft` is text someone typed or pasted — the person's, even a half-typed
+word. `dialog` is a prompt or a menu standing where the box was. `unknown` is a screen cmux
+cannot read as Claude Code's — a shell prompt, a process that ended. `waiting_on_human` is cmux's
+note that the session last asked the person something — a permission prompt, a question — and
+it can stay `true` after an API error or an interrupt. None of these is a box to type into, and
+neither is an error or an answer without `state`.
+
 **When it is not empty, do not paste.** Tell the person which pane holds what — the words in it
 are theirs.
 
@@ -53,8 +73,54 @@ leaves its record behind. The lines below print one row per record, tab-separate
 
 ```sh
 python3 - <<'PY'
-import glob, json, os
-mine = os.environ.get("TMUX", "").split(",")[0]
+import glob, json, os, subprocess, sys
+def out(*cmd, **env):
+    try:
+        return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=dict(os.environ, **env), timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+linux = os.path.isdir("/proc/self")
+def stat(pid):
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            text = f.read()
+        return text[text.rindex(")") + 2:].split()
+    except (OSError, ValueError):
+        return []
+def started(pid):
+    if linux:
+        fields = stat(pid)
+        return fields[19] if len(fields) > 19 else ""
+    return " ".join(out("ps", "-p", str(pid), "-o", "lstart=", LC_ALL="C", TZ="UTC").split())
+def device(path):
+    try:
+        return os.stat(path).st_rdev if path else 0
+    except OSError:
+        return 0
+def tty(pid):
+    if linux:
+        try:
+            return int(stat(pid)[4]) & 0xFFFFFFFF
+        except (IndexError, ValueError):
+            return 0
+    t = out("ps", "-p", str(pid), "-o", "tty=")
+    return device("/dev/" + t) if t.strip("?") else 0
+mine = os.environ.get("TMUX")
+cmux = not mine and bool(os.environ.get("CMUX_SURFACE_ID"))
+surfaces = {}
+def walk(o):
+    if isinstance(o, dict):
+        for p in o.get("cmux_process_pids") or []:
+            surfaces[p] = o.get("id")
+        o = list(o.values())
+    for v in o if isinstance(o, list) else []:
+        walk(v)
+if cmux:
+    try:
+        walk(json.loads(out("cmux", "--json", "--id-format", "both", "top", "--all")))
+    except ValueError:
+        print("cmux top gave no answer, so no session is matched to a surface", file=sys.stderr)
+rows = []
 for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
     try:
         with open(path) as f:
@@ -62,28 +128,33 @@ for path in sorted(glob.glob(os.path.expanduser("~/.claude/sessions/*.json"))):
         pid = int(r["pid"])
     except (OSError, ValueError, KeyError, TypeError):
         continue
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            stat = f.read()
-        alive = stat[stat.rindex(")") + 2:].split()[19] == str(r.get("procStart"))
-    except (OSError, ValueError, IndexError):
-        alive = False
+    start = started(pid)
+    alive = bool(start) and start == " ".join(str(r.get("procStart")).split())
     tmux = r.get("tmux") or ""
     pane = tmux.rpartition(".")[2] if "%" in tmux else ""
-    if alive and pane and mine:
-        try:
-            with open(f"/proc/{pid}/environ", "rb") as f:
-                env = dict(v.split(b"=", 1) for v in f.read().split(b"\0") if b"=" in v)
-            theirs = env.get(b"TMUX", b"").split(b",")[0].decode(errors="replace")
-        except OSError:
-            theirs = ""
-        if theirs != mine:
+    if alive and (mine or cmux) and r.get("kind") not in (None, "interactive"):
+        pane = ""
+    elif alive and pane and mine:
+        here = tty(pid)
+        if not here or here != device(out("tmux", "display", "-p", "-t", pane, "#{pane_tty}")):
             pane = ""
+    elif alive and cmux:
+        pane = "" if tmux else surfaces.get(pid)
+    rows.append((alive, pane, r))
+if rows and not any(alive for alive, _, _ in rows):
+    sys.exit("no record reads alive, not even this session's own: this shell cannot read process start times (a sandbox, or no ps), so act on no row")
+claimed = [pane for alive, pane, _ in rows if alive and pane and (mine or cmux)]
+for alive, pane, r in rows:
+    if alive and claimed.count(pane) > 1:
+        pane = ""
     cols = [r.get("name"), pane, r.get("status"), r.get("cwd"), r.get("sessionId")]
     print("\t".join(["alive" if alive else "dead"] + [str(c or "-") for c in cols]))
 PY
 ```
 
+- **No row at all, and a line saying no record reads alive** — not even your own: this shell
+  cannot tell live from dead (a sandbox that hides other processes, say). Bring nothing back;
+  tell the person what it said
 - A **candidate** is a `dead` row with a `sessionId` whose `cwd` is the root or one of the
   worktrees `git worktree list` names
 - **Drop it when it is back already** — a live row carries the same `sessionId` (`--resume`
@@ -167,7 +238,7 @@ Leave out a line that does not hold. The supervisor's block adds one line: **the
 back in new sessions and their names may have changed — run `ListAgents` again** before you
 send or wait for a report.
 
-**Workers first, the supervisor last**, in both ways below — the supervisor's `ListAgents`
+**Workers first, the supervisor last**, in every way below — the supervisor's `ListAgents`
 has to see the workers when it starts.
 
 ## 5. Inside tmux — open a pane each
@@ -189,9 +260,40 @@ If the box has not shown yet, look again after your next step. A prompt in the p
 the folder, say) is the person's to answer — tell them which pane. When all are open, tell the
 person which pane is which session.
 
-## 6. Outside tmux — say what to type
+## 6. Inside cmux — open a tab each
 
-`$TMUX` is not set: open nothing. Print, per session in the same order, the line the person
-types in a terminal of their own, and under it the block to paste once its box shows:
+`CMUX_SURFACE_ID` is set in your shell and `$TMUX` is not — and the cmux is 0.65.0 or later:
+`cmux capabilities` lists `surface.input_state` in its `methods`. On an older cmux, tell the
+person that this way needs cmux 0.65.0, and go to 7; when it prints an error instead of a
+`methods` list, tell them what it said, and go to 7. For each session, in that order:
+
+    cmux --id-format both new-split right --surface "$CMUX_SURFACE_ID" --command 'cd <cwd> && claude --resume <sessionId>'
+
+**No other flag.** It prints `OK surface:<n> (<UUID>) workspace:<n> (<UUID>)` — the first UUID
+is the new tab, the second your workspace. The command is typed into the tab's shell, so the
+shell stays when `claude` exits, and the split does not take focus. **If cmux refuses a split**
+— no space for a new pane, as every split lands in your row, or it cannot find your tab in the
+workspace this session started in — open no more: the sessions left, the supervisor among them,
+get the lines of 7, and tell the person what it said. When all are open, even the splits out
+once:
+
+    cmux rpc workspace.equalize_splits '{"workspace_id":"<workspace UUID>"}'
+
+Then, as a separate call per tab, look once: when its box is empty ("Is the input box empty"
+above — the session map reads the resumed session `alive` in that tab), paste the block:
+
+    cmux paste --surface <surface> --submit - < <file>
+
+The lone `-` reads the file from stdin. If cmux refuses — someone's words or a dialog in the
+box — do not try again; tell the person. If it warns that the text was pasted but the submit key
+was not sent, do not paste again either: tell the person the block stands unsent in that tab's
+box. If the box has not shown yet, look again after your next step. A prompt in the tab (trusting
+the folder, say) is the person's to answer — tell them which tab. When all are open, tell the
+person which tab is which session.
+
+## 7. Outside tmux and cmux — say what to type
+
+Neither way above stands: open nothing. Print, per session in the same order, the line the
+person types in a terminal of their own, and under it the block to paste once its box shows:
 
     cd <cwd> && claude --resume <sessionId>

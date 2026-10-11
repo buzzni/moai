@@ -2792,12 +2792,14 @@ Options:
   directory and the team has it. --scope is Claude's registration only. The
   text is the one Claude gets; the steps that differ per agent are in the
   `moai` skill's "Words per agent" table. The supervisor (moai-supervise),
-  its hands on tmux panes (moai-tmux) and the recovery of sessions that died
+  its hands on tmux panes and cmux tabs (moai-tmux, moai-cmux) and the
+  recovery of sessions that died
   (moai-recover) are planted for Claude Code only — Codex and Antigravity get
   no supervisor.
 
-  Optional skills are planted only where you choose them: today moai-tmux,
-  the supervisor's hands on tmux panes. --with <skill> plants one and
+  Optional skills are planted only where you choose them: moai-tmux and
+  moai-cmux, the supervisor's hands on tmux panes and on cmux tabs (cmux
+  0.65.0 or later). --with <skill> plants one and
   --without <skill> removes it; both repeat, and a comma separates names.
   What you chose is not written down anywhere - a skill planted in the tree
   is the answer. So a plain install refreshes the optional skills already
@@ -2860,6 +2862,7 @@ Options:
   moai skill install --agent auto     whichever agent is on PATH
   moai skill install --with moai-tmux     plant the tmux skill too
   moai skill install --without moai-tmux  take it out again
+  moai skill install --with moai-cmux     plant the cmux skill
 
   A Claude session already open keeps the old version - reopen it to pick
   this one up.
@@ -3199,10 +3202,11 @@ Options:
   guide block. A later run also recognizes installed moai hooks when no block
   stands. If git fails, init refuses rather than guessing commit mode.
 
-  **Optional skills** (today moai-tmux, the supervisor's hands on tmux panes)
-  get a row each under hooks · skills, shown while that row installs. The
-  screen checks one when it is already planted here, or when your shell
-  says you use it ($TMUX set for moai-tmux); Enter passes the checked ones on
+  **Optional skills** (moai-tmux and moai-cmux, the supervisor's hands on
+  tmux panes and cmux tabs) get a row each under hooks · skills, shown while
+  that row installs. The screen checks one when it is already planted here,
+  or when your shell says you use it ($TMUX set for moai-tmux,
+  $CMUX_SURFACE_ID for moai-cmux); Enter passes the checked ones on
   to `moai skill install --with`, and unchecking one already planted passes
   --without. --with <skill> (repeatable, or names with a comma) checks and
   locks that row and turns installing on; it cannot go with --no-skill.

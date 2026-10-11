@@ -12,6 +12,41 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **A second optional Claude Code skill, `moai-cmux`, for a supervisor running
+  inside [cmux](https://github.com/manaflow-ai/cmux).** It is `moai-tmux` for
+  cmux tabs: it finds each worker's surface (`cmux top` says which surface a
+  session runs in), labels its tab once you say labels are wanted, clears a
+  reported worker's window, pastes a message `SendMessage` could not deliver
+  (`cmux paste --submit`), reads why a worker stalled, and — only after asking —
+  opens new worker splits running an ordinary interactive `claude`. It reads the
+  input box through cmux's own `surface.input_state` and never types over
+  anything in it, never closes a tab, never moves focus and never passes
+  `--force`. **It needs cmux 0.65.0 or later** and checks that itself; on an
+  older cmux it says so and does nothing. Running tmux inside a cmux tab stays
+  `moai-tmux`'s case. Plant it with `moai skill install --with moai-cmux`, or
+  its row in the first `moai init` (checked when `$CMUX_SURFACE_ID` is set).
+  (moai-p5sz)
+
+### Changed
+
+- **`moai-recover` opens a tab per session inside cmux 0.65.0 or later**, the
+  way it opens a pane per session inside tmux, and pastes its note once the
+  tab's input box reads empty. It is planted everywhere, so this reaches every
+  cmux user, `moai-cmux` or not; outside tmux and cmux it still prints the line
+  to type. (moai-p5sz.kfi)
+
+### Fixed
+
+- **`moai-tmux` and `moai-recover` found no session on a Mac.** Their session
+  map read the process start time from `/proc`, which macOS does not have, so
+  every session read as dead. It now compares the start time Claude Code writes
+  on a Mac (`ps -o lstart`), and matches a session to a tmux pane by its
+  terminal (`#{pane_tty}`) instead of reading the process's environment — which
+  also no longer trips Claude Code's auto-mode guard against reading other
+  processes' environments. (moai-p5sz.7q3)
+
 ## [0.13.0] - 2026-10-10
 
 ### Added
