@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-11
+
 ### Added
 
 - **A second optional Claude Code skill, `moai-cmux`, for a supervisor running
