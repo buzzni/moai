@@ -211,6 +211,12 @@
   Claude Code 의 `EnterWorktree(path)` 는 루트에서 들어갈 때 이 자리를 받지만, 워크트리에서 다른 워크트리로
   바로 옮기는 것은 `.claude/worktrees/` 밑만 받는다 — 그래서 늘 `ExitWorktree(keep)` 로 루트에 나왔다가
   들어간다. 옛 자리에 선 워크트리는 그대로 돌고, `.gitignore` 의 옛 줄도 그것이 다 걷힐 때까지 둔다
+- **서브에이전트 일꾼은 워크트리에 들지 않고 절대 경로로 다룬다**(`moai-9tqo`). 서브에이전트는
+  `EnterWorktree` 를 못 쓰고, Bash 의 자리가 부름마다 루트로 돌아간다(`moai-9tqo.fxp`) —
+  `cd <루트>/.worktrees/moai-<에픽> && …` 나 `git -C <루트>/.worktrees/moai-<에픽> …` 로 겨눈다.
+  걸음은 감독 스킬의 `references/worker.md` "In a subagent" 에 있다. 훅은 그 서브에이전트를
+  감독과 한 세션으로 읽는다 — 그 세션이 확실히 집은 줄은 워크트리 이름이 가리켜도 제 것이다(`moai-pxui`).
+  `&&` 뒤에 친 집기처럼 돌았는지 모르는 것은 안 센다
 - **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
   GitHub 의 기본 가지 둘 다. 옛 `main` 주소는 GitHub 가 새 이름으로 이어 준다
 - **마일스톤 안의 일은 마일스톤 가지에서 뜨고 거기로 병합한다**(2026-10-08 사용자 결정, `moai-nvju`).
@@ -325,24 +331,30 @@
 닫기 전에 그 일을 실제로 한 AI 를 이슈에 한 줄 남긴다(`moai-olaj` 가 정한 자리,
 꼴은 `moai-8f2g` 가 정했다). 통계로 쓰려고 **꼴을 못박는다.**
 
-    moai note <id> 'model: anthropic/opus-5 tokens=182000 (high — 쓰기 경로)'
+    moai note <id> 'model: anthropic/opus-5.5 (high — 쓰기 경로)'
 
-- `model: <회사>/<모델> tokens=<수> (<등급> — <까닭>)`. 회사는 `anthropic`·`openai`·
-  `google`, 모델은 실제 이름(`opus-5`·`sonnet-5`·`gemini-3.8`), 등급은 리뷰 등급과 같은 낱말
-- **토큰을 모르면 `tokens=` 를 뺀다.** 0 을 적으면 통계가 "공짜로 했다" 로 읽는다. 어림값도
-  적지 않는다 — 안 적은 것과 0 과 거짓 값은 셋 다 다르다
-- 리뷰 서브에이전트가 쓴 것은 **리뷰 이슈에** 적는다. 부모의 합은 읽는 쪽이 자식까지 더한다
+- `model: <회사>/<모델> (<등급> — <까닭>)`. 회사는 `anthropic`·`openai`·`google`, 모델은 실제
+  이름(`opus-5.5`·`sonnet-5.5`·`fable-5.1`·`gpt-6.1-sol`), 등급은 리뷰 등급과 같은 낱말.
+  `/model` 의 별칭(`opus`)이 아니라 시스템 프롬프트가 대는 이름이다
+- **토큰은 적지 않는다**(2026-10-12 사용자 결정, `moai-9tqo`). 창이나 서브에이전트의 알림이
+  보이는 수는 일의 값이 아니었다 — 과금 합이 아니라 마지막 맥락 크기에 가깝고, 중첩 리뷰의
+  몫이 빠진다(`moai-9tqo.fxp`). `moai stats` 도 토큰을 더하지 않는다(`moai-w9ui`). 이 결정 전에
+  적은 줄의 `tokens=` 는 그대로 읽혀 `show --json` 의 `work[].tokens` 에 남는다. 그 전의 규칙
+  ("모르면 `tokens=` 를 뺀다, 0 도 어림값도 안 적는다", "토큰이 불어나니 id 하나에 적는다")은
+  이 결정으로 걷혔다
+- **서브에이전트 일꾼의 줄은 감독이 적는다**(`moai-9tqo`) — 서브에이전트는 걸음 9-1 을
+  건너뛰고 보고에 `Model ran:` 줄로 제 실명을 대고, 감독이 그 이름으로 한 멤버마다 적는다
+- 리뷰 서브에이전트가 한 것은 **리뷰 이슈에** 적는다 — 그 서브에이전트를 세운 일꾼이, 그것이
+  돌려준 실명으로
 - 한 이슈에 여러 줄이 서도 된다 — 세션이 바뀌었거나 모델을 올렸으면 그 줄마다 하나
-- **id 하나에 적는다.** `moai mv a b done -m 'model: …'` 은 같은 글을 id 마다 적어, 토큰이
-  id 수만큼 불어난다
 - `moai show <id> --json` 의 `work` 가 그것을 읽어 낸다. **늘 서는 배열**이고, 꼴에 안 맞는
   줄은 값이 안 될 뿐 노트로 그대로 남는다. 옛 줄(`model: opus-5 (medium — …)`)은 회사 없이
   읽힌다. 줄 머리에서 시작한 줄만 세고, 들여 쓴 줄과 울타리(```` ``` ````) 안의 줄은 꼴을
   옮겨 적은 예로 읽는다 — 리뷰 원문이 이 꼴을 그대로 옮긴다
 - 목록 `moai show [거르개] --json` 도 줄마다 같은 `work` 를 낸다(`moai-p8qj`) — 여러 이슈를
   더할 때는 id 마다 부르지 말고 목록을 한 번 부른다. **`--archived` 를 함께 준다** — `--all` 은
-  done 에 든 지 `archive_days`(14일) 지난 줄을 빼서, 오래전에 닫은 일의 토큰이 말없이 빠진다
-  (`moai-47mz`). 더한 값만 필요하면 `moai stats --json` 의 `work` 가 아카이브까지 센다
+  done 에 든 지 `archive_days`(14일) 지난 줄을 빼서, 오래전에 닫은 일의 줄이 말없이 빠진다
+  (`moai-47mz`). 센 값만 필요하면 `moai stats --json` 의 `work` 가 아카이브까지 센다
 
 **저장하지 않는다.** 스냅샷에도 저널에도 새 필드가 없다 — 적는 것은 여전히 `note` 이고
 `work` 는 그 글을 읽은 값이다. 꼴이 틀린 것으로 드러나면 규약 문서와 `model::parse_work` 만
@@ -384,18 +396,19 @@
 ## 리뷰
 
 **에픽의 멤버는 따로 보지 않는다. 멤버가 다 끝나면 에픽 끝에서 한 번 본다.**
-`/code-review <등급> --fix` 의 등급은 **가장 무거운 멤버의 난이도에서 한 칸 위**다.
-범위는 `git merge-base develop HEAD` 부터 에픽 전체의 diff 다. 에픽에 안 든 이슈
-하나는 끝날 때 에픽 밖 이슈 하나 줄(`low`·`medium`·`high`)에서 골라 본다.
+에픽 끝은 **`review` 모델(기본 opus)로 `review_grade`(기본 `xhigh`)** 의 `/code-review <등급> --fix`
+다. 쓰기 경로·동시성·저장 형식·훅을 건드린 멤버가 들면 `max` 다. 범위는
+`git merge-base develop HEAD` 부터 에픽 전체의 diff 다. 에픽에 안 든 이슈 하나는 끝날 때 에픽 밖
+이슈 하나 줄(`low`·`medium`·`high`)에서 골라 본다.
 
 | 무엇을 | 등급 | 고르는 자 |
 |---|---|---|
-| 에픽 끝 | 한 칸 위 | `low` 뿐이면 `medium`, `medium` 이 있으면 `high`, `high` 가 있으면 `xhigh` — 멤버를 아래 세 줄로 잰다 |
+| 에픽 끝 | `xhigh` | `review` 모델로 — 사람의 `[models]` 의 `review_grade` 가 바꾼다. 아래 `max` 줄은 멤버를 아래 세 줄로 잰다 |
 | | `max` | **any member touched the write path, concurrency, the storage format or hooks** 인 에픽 |
 | 에픽 밖 이슈 하나 | `low` | text, comments, a one-line fix; behaviour unchanged |
 | | `medium` | a behaviour change inside one file, ringed by tests |
 | | `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo |
-| 에픽 둘에 걸친 묶음 | 두 칸 위 | **A worktree that carries members of two epics is measured as one epic and then raised one more step** |
+| 에픽 둘에 걸친 묶음 | `xhigh` 에서 한 칸 위 = `max` | **A worktree that carries members of two epics is measured as one epic and then raised one more step** |
 
 **잣대 칸이 영어인 것은 계약이다** — `moai init` 이 써 넣는 블록과 감독 스킬이 영어로 통일된
 2026-09-20 사용자 결정(`moai-54k2`)에 따라 `guide::DIFFICULTY`·`EPIC_MAX` 가 영어가 되었고,
@@ -411,10 +424,38 @@
 올리는 칸의 천장은 `max` 다 — 쓰기 경로를 건드린 멤버가 든 묶음처럼 이미 `max` 인 자리에서는
 한 칸 더가 갈 곳이 없으니 그대로 `max` 다(리뷰 `moai-9tlp.67r` 13번).
 
-표면을 가로지르거나 설계 결정이 여럿 섞인 에픽은 한 칸 더 올린다. 망설여지면 한
-칸 올린다. 리뷰 모델은 그 등급을 따른다 — `medium` 이면 sonnet, `high` 부터 opus.
-고른 등급과 까닭은 리뷰 이슈의 관점(`-b`)에 한 줄로 적는다 — 다음 사람이
-"왜 high 였나" 를 거기서 읽는다.
+**에픽 끝 리뷰는 `review` 모델과 `review_grade` 다**(2026-10-12 사용자 결정, `moai-9tqo`). 기본은
+opus 로 `xhigh`, 위 `max` 줄이나 묶음이면 `max` — 사다리는 `xhigh`·`max` 둘이다. 바닥을 올린
+까닭은 "한 칸 위" 의 아래 칸이 리뷰를 싼 모델에 맡긴 데 있다 — `medium` 이면 sonnet 이었고,
+sonnet 일꾼 창에서 부른 리뷰는 창의 모델을 물려받았다. 에픽 밖 이슈 하나는 난이도 사다리를
+그대로 둔다 — 등급은 `low`·`medium`·`high`, 모델은 `low`·`medium` 이면 `develop` 의 모델,
+`high` 면 `review` 의 모델이다. 고른 등급과 까닭은 리뷰 이슈의 관점(`-b`)에 한 줄로 적는다 —
+다음 사람이 "왜 max 였나" 를 거기서 읽는다.
+
+**모델은 역할로 고르고, 역할의 모델은 사람의 것이다**(2026-10-12 사용자 결정, `moai-9tqo`).
+감독은 일꾼을 역할의 모델로 띄운 서브에이전트로 세우고(세션 일꾼 길은 사람이 창을 보고 싶을 때와
+Codex 일꾼에 남는다), 역할마다의 모델은 사람의 사용자 설정 `[models]` 에 있다 — `moai models` 가
+보이고, 감독은 바퀴마다 `moai models --json` 으로 읽는다. 이 저장소에 굽지 않는다. 아래는
+기본값이다.
+
+| 역할 | 무엇 | 기본 모델 | effort / 등급 |
+|---|---|---|---|
+| `plan` | 계획 — 요청을 에픽과 이슈로 가른다 | fable | — |
+| `develop` | 개발 — 대부분의 일 | sonnet | `medium` |
+| `complex` | 쓰기 경로·동시성·저장 형식·훅·여러 파일의 계약을 함께 바꾸는 것 | opus | `high` |
+| `review` | 에픽 끝 리뷰, 에픽마다 한 번 | opus | `xhigh` (위 `max` 줄이면 `max`) |
+| `docs` | 위키·CHANGELOG 만 고치는 것 | sonnet | `medium` |
+| `bulk` | 분류·요약, 64KB 넘는 리뷰 원문 줄이기, 같은 꼴의 기계적 고침 | haiku | `medium` |
+| `codex` | Codex 일꾼 — 서브에이전트가 아니다 | gpt-6.1-sol | — |
+
+haiku 는 개발·문서에 배정하지 않는다. 그래서 난이도의 둘째 칸이 모델에서 역할로 바뀌었다 —
+`low`·`medium` 은 `develop`, `high` 는 `complex` 다(`guide::DIFFICULTY`). 잣대 글은 그대로라 위
+표와 글자째 견주는 시험이 그대로 선다.
+
+아래는 그 전의 규칙과 그 까닭이다 — 2026-09-18 부터 2026-10-12 까지 에픽 끝의 등급은 **가장
+무거운 멤버의 난이도에서 한 칸 위**(`low` 뿐이면 `medium`, `medium` 이 있으면 `high`, `high` 가
+있으면 `xhigh`)였고, 표면을 가로지르거나 설계 결정이 여럿 섞인 에픽은 한 칸 더, 망설여지면 한 칸
+올렸으며, 리뷰 모델은 그 등급을 따라 `medium` 이면 sonnet, `high` 부터 opus 였다.
 
 **등급을 "한 칸 위" 로 둔 것도 사용자가 정했다**(2026-09-18). 첫 회차에는 모든 에픽을
 `xhigh` 이상 opus 로 봤다 — 글 한 줄 고친 멤버 하나짜리 에픽까지 13만~21만 토큰짜리
@@ -456,7 +497,7 @@
     Regression-of: <에픽 id>
 
 - 여러 에픽이면 줄을 더한다. **어느 에픽인지 모르면 안 적는다** — 어림으로 적은 줄은
-  적힌 값과 안 갈려, `tokens=` 에 어림값을 안 적는 것과 같은 까닭이다
+  적힌 값과 안 갈린다. 거짓 값은 빈 값보다 나쁘다
 - 이미 있는 이슈에 붙일 때 `moai edit <id> -b` 는 본문을 **통째로 바꾼다** — 지금 본문
   끝에 이어 붙인다. backlog 로 담았다가 펼치면 본문이 안 따라가니 펼친 이슈에 다시 적는다
 

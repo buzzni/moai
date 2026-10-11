@@ -406,10 +406,17 @@ Restore cleanup and `--drop` skip archive files they cannot read and name them.
 `moai rm --line` repairs the active snapshot only; it is never a repair for an
 archive file's line number.
 
+## An agent session died
+
+Follow [Bring back sessions that died](agents.md#bring-back-sessions-that-died)
+for Claude Code; a Saycode session is reopened through Saycode. Codex sessions
+are not in the session map and `moai-recover` does not resume them. Open a Codex
+session yourself and read its epic notes to continue (moai-uzhx).
+
 ## When nothing else fits
 
 The state is two text files under version control. `git log -p -- .moai/` shows
 every change anyone made to them, and any commit that had them whole is a
 recovery point.
 
-Decided in: moai-bth3 moai-r0x8
+Decided in: moai-uzhx moai-bth3 moai-r0x8

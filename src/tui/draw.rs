@@ -1023,7 +1023,7 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
     out.push(lines(counts));
     out.push(stat_gap());
 
-    // AI 작업 — 회사·모델마다 줄 수를 막대로, 토큰을 글로.
+    // AI 작업 — 회사·모델마다 줄 수를 막대로. 토큰은 안 낸다(moai-w9ui).
     out.push(lines(vec![Line::from(vec![
         stat_head(say(lang, "stats.work")),
         Span::raw("  "),
@@ -1039,7 +1039,7 @@ fn stats_parts(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<
                 name: Line::from(crate::view::model_name(m)),
                 value: m.tally.lines as u64,
                 look: from_anstyle(style::BAR),
-                side: Line::from(format!("{count} · {}", plain(crate::view::tally_said(&m.tally, lang)))),
+                side: Line::from(count),
             }
         })
         .collect();

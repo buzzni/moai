@@ -46,6 +46,7 @@ Commands:
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
+  models        Read the model per role from your user config
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
   help          Print this message or the help of the given subcommand(s)
@@ -148,7 +149,7 @@ Options:
     status_review_days   = 3      days in review before it counts as rot
     status_wip_days      = 2      days untouched after pickup before forgotten
     status_blocked_days  = 3      days blocked before it counts as stuck
-    status_wip_limit     = 3      more than this opened at once
+    status_wip_limit     = 3      more than this opened at once, an epic as one
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
@@ -600,10 +601,10 @@ Filters  (comma = or,  repeated = and):
   unknown are counted apart, and the median and p90 cover the measured
   ones only. It is wall clock, not effort.
 
-  AI work sums the `model:` lines, and recorded counts the rows that carry
-  one. Tokens add up over the lines that carry them (tokened), and tokens
-  is null when none does - unknown, not 0. Reviews are the rows tagged
-  review; the grade on their lines is the review grade.
+  AI work counts the `model:` lines, and recorded counts the rows that carry
+  one. Tokens are not added up: what a window or an agent shows was not
+  what the work cost. Reviews are the rows tagged review; the grade on
+  their lines is the review grade.
 
   moai stats                           the overview
   moai stats -e moai-1hka              one epic's members
@@ -629,9 +630,9 @@ Filters  (comma = or,  repeated = and):
      "lead_time":{"done":30,"measured":30,"unknown":0,
                   "median":95,"p90":4100},
      "cycle_time":{...the same keys...},
-     "work":{"recorded":25,"lines":31,"tokened":28,"tokens":5100000,
+     "work":{"recorded":25,"lines":31,
              "by_model":[{"provider":"anthropic","model":"opus-5",
-                          "lines":31,"tokened":28,"tokens":5100000}],
+                          "lines":31}],
              "by_grade":[{"grade":"high","lines":12,...},...]},
      "reviews":{"rows":6,"work":{...the same keys as work...}}}
 ```
@@ -3105,6 +3106,34 @@ Examples:
   It is written as `color = "green"` under `[[project]]` in the user config.
   Writing it by hand is fine - a wrong value is shown in one line by
   `moai project ls`, which then uses the colour picked by path.
+```
+
+## `moai models`
+
+```
+Read the model per role from your user config
+
+Usage: moai models [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai models           the model per role, with defaults marked
+  moai models --json    one object for skills, including written keys and path
+
+  Reads [models] in your user config. No .moai is needed; repository config
+  is not read. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
+  then ~/.config/moai/config.toml. Missing files use the built-in defaults.
+
+  Model names are strings. review_grade, effort and effort_complex accept
+  low, medium, high, xhigh or max. Invalid values fall back per key and warn;
+  unknown keys warn. written lists only valid, known keys from the config.
+  This command only reads; edit the user config by hand to change the table.
 ```
 
 ## `moai update`

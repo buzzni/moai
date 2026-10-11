@@ -28,9 +28,11 @@ where `owner` says `theirs` or `unowned` — see [take over](#take-over).
 
 The numbered steps a [worker](#worker) follows for work a
 [supervisor](#supervisor) sent, from [pick up](#pick-up) to merge and report.
-They stand in a file of the supervisor skill, `references/worker.md`. Each
+They stand in a file of the supervisor skill, `references/worker.md`, and a step
+that goes differently for a subagent worker says so in a line of its own. Each
 assignment message carries the lines for this assignment — the backlog, the
-model, the work running alongside, the root branch and the base branch (a
+model and the effort, whether the worker is a subagent or a session, the work
+running alongside, the root branch and the base branch (a
 [milestone branch](#milestone-branch) for work inside a milestone), the milestone, the root and
 whether the person is away — and one line telling the worker to read that file,
 by its absolute path, and from which step to follow it.
@@ -129,14 +131,19 @@ checked out in a long-lived [worktree](#worktree) at
 `.worktrees/milestone-<milestone id>`. The [worker](#worker) handed the
 milestone's first epic raises it from the root branch; the root branch takes it
 in once, at the release, and then it is removed. Work outside every milestone
-uses the root branch. See [handing work to idle sessions](agents.md#hand-work-to-idle-sessions).
+uses the root branch. See [handing work to workers](agents.md#hand-work-to-workers).
 
 ## Model line
 
 The note that names the AI that did the work, left before an issue is closed:
-`model: <vendor>/<model> tokens=<count> (<grade> — <why>)`. Leave `tokens=` out
-when the count is unknown, and write it on one id only. `--json` reads it back as
-`work`, and `moai stats` adds it up. More in
+`model: <vendor>/<model> (<grade> — <why>)`, the model by its real name
+(`opus-5.5`), not the `/model` alias. It carries no token count — what a window
+or an agent shows is not what the work cost — though a line written with
+`tokens=` before still reads. A subagent [worker](#worker)'s line is written by
+the [supervisor](#supervisor). `--json` reads it back as
+`work`, and `moai stats` counts the lines — folding the case of the vendor, model and
+grade, so `GPT-6.1-Sol` and `gpt-6.1-sol` are one model shown in lower case,
+while `work` keeps the spelling that was written. More in
 [working with agents](agents.md#work-the-queue-from-a-session).
 
 ## `Next:` note
@@ -196,21 +203,32 @@ says so.
 every command reads where things stand from it, and every write rewrites it
 whole under a lock. More in [Recovery](recovery.md#the-files).
 
+## Models table
+
+`[models]` in your user config: which model each role runs on — `plan`,
+`develop`, `complex`, `review`, `docs`, `bulk`, `codex` — with `review_grade`,
+`effort` and `effort_complex` beside them. A key left out keeps its default.
+`moai models` shows it and the [supervisor](#supervisor) reads
+`moai models --json` once a round; the repository's config does not carry it.
+More in [working with agents](agents.md#the-models-are-yours).
+
 ## Supervisor
 
 A Claude Code session running the `moai-supervise` skill. It hands the
-[backlog items](#backlog) that have piled up, one at a time, to the
-[workers](#worker) idle on the repository, sends each one a message with
-`SendMessage` carrying the assignment and naming the [brief](#brief) to read,
-and takes their reports the same way. It picks, sends and checks; it does not fix and it does
+[backlog items](#backlog) that have piled up, one at a time, to
+[workers](#worker) — by default subagents it raises with `Agent` on the model
+each role calls for ([models table](#models-table)), or, when the person wants to
+watch their windows and for Codex, the sessions idle on the repository, sent a
+message with `SendMessage`. The assignment names the [brief](#brief) to read, and
+the reports come back the same way. It picks, sends and checks; it does not fix and it does
 not merge. Inside tmux, where the optional `moai-tmux` skill is planted, it also
 loads it to label, clear and paste into the workers' panes, and to open new ones
 once the person says yes; inside cmux, `moai-cmux` does the same with tabs.
 Inside a Saycode session, where the optional `moai-saycode` skill is planted, it
 drives the workers through Saycode's `happy agent` the same way, and that comes
-first. Codex and
-Antigravity have none. More in
-[working with agents](agents.md#hand-work-to-idle-sessions).
+first. Codex and Antigravity have no supervisor skill; a Codex session can
+still be a worker in a tab or pane. More in
+[working with agents](agents.md#hand-work-to-workers).
 
 ## Take over
 
@@ -229,17 +247,22 @@ writes the main checkout's tracker.
 ## Warning
 
 A board line on `moai status` about how the plan stands — such as issues with no
-epic, a review stalled, too much started at once, work picked up and forgotten,
-or a milestone falling due. Warnings block nothing and never change the exit code;
+epic, a review stalled, too much started at once (the members of one epic count as
+one), work picked up and forgotten, or a milestone falling due. Warnings block nothing and never change the exit code;
 only broken data does that. Compare [notice](#notice).
 
 ## Worker
 
-Any idle Claude Code session of the repository other than the
-[supervisor](#supervisor) — nothing registers it. On the supervisor's message it
-follows the [brief](#brief) — picks the work up, does it in a
-[worktree](#worktree), has it reviewed, merges it — reports back with
+What does a piece of work the [supervisor](#supervisor) hands out — by default a
+subagent it raises on the model the work's role calls for, otherwise any idle
+Claude Code session of the repository other than the supervisor; nothing
+registers it. It follows the [brief](#brief) — picks the work up, does it in a
+[worktree](#worktree), has it reviewed, merges it — and reports back: a subagent
+leaves the report on the epic and hands it back, a session sends it with
 `SendMessage` and says when its window can be cleared.
+
+A Codex session in a tmux pane or cmux tab can also be a worker. It reports by
+epic note and stops at `Review-ready:` for the supervisor's review subagent.
 
 ## Worktree
 
@@ -248,4 +271,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx

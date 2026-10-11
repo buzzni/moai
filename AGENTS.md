@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.14.0 hash:767f4717 -->
+<!-- moai:begin v:0.15.1 hash:c499129f -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -207,6 +207,12 @@ prints one line on stderr naming it, and nothing is blocked.
 The id in that line is the release `moai show --milestone` stands that backlog under. Only its shape is checked, so `moai-zzzz`
 goes in with exit 0 — but one line on stderr says there is no such milestone,
 and `moai status` counts the row as `dangling_milestone`.
+
+**A milestone inherited from an epic is said out loud too.** When the one it carries is
+not the backlog item's own field — it stood inside an epic, and that epic's release won —
+`promote` prints one line on stderr naming the milestone and that epic, living or dead
+(a dead one gets its own line as well), and `--dry-run` prints the same. Nothing is
+blocked and the exit code stays 0; `moai edit <epic> --milestone none` takes the epic you unfolded out of that release.
 
 ### When work already created is not for now
 
@@ -433,11 +439,10 @@ Yearly archive files use the same `merge=moai` driver as the active snapshot.
 Before you close it, leave one line on the issue naming the AI that actually did the
 work. It is a note, not a field.
 
-    moai note <id> 'model: <vendor>/<model> tokens=<count> (<grade> — <why>)'
+    moai note <id> 'model: <vendor>/<model> (<grade> — <why>)'
 
-- The vendor is `anthropic`, `openai` or `google`; the model is its real name (`opus-5`, `sonnet-5`); the grade uses the same words as the review grades
-- **If you do not know the token count, drop `tokens=`.** Do not write 0 and do not estimate — blank, 0 and a false number are three different things
-- **One line per id.** Write the same line on several ids and the tokens multiply by the number of ids
+- The vendor is `anthropic`, `openai` or `google`; the model is its real name (`opus-5.5`, `sonnet-5.5`); the grade uses the same words as the review grades
+- **No token count.** The line carries no `tokens=` — what a window or an agent shows is not what the work cost, and a false number is worse than none. A line written with one before still reads
 - **Quote free text with single quotes** — inside double quotes the shell expands
   backticks and `$(…)` as commands, so the text is cut off and the call ends in 0.
   If the text itself contains a single quote, stream it from stdin with `-b -`
@@ -448,8 +453,8 @@ work. It is a note, not a field.
 - A list, `moai show [filters] --json`, gives the same `work` on every row — when you
   are adding several issues up, call the list once instead of calling per id, with
   `--archived` so every closed row is in (`--all` leaves out what has stood in done
-  for `archive_days`), or let `moai stats --json` add them up: its `work` sums tokens
-  by model and by grade and counts the lines that carry none apart
+  for `archive_days`), or let `moai stats --json` add them up: its `work` counts the
+  lines by model and by grade
 
 ### The five things the hook actually watches
 
@@ -522,11 +527,14 @@ person's other sessions and other people's work, and nothing else will.
 ### The supervisor and its workers
 
 In Claude Code, `moai skill install` also plants `moai-supervise`. A person calls it in
-one window to hand the backlog that have piled up, one at a time, to the other sessions
-of this repository and take their reports. Every idle session of this repository that
-`ListAgents` shows is a worker — nobody registers. The supervisor sends each one its
-assignment (`SendMessage`) with a line naming the file of the worker's steps to read, and
-the worker reports the same way. moai carries no messaging, and the moai binary never
+one window to hand the backlog that have piled up, one at a time, to workers and take
+their reports. A worker is a subagent the supervisor raises with Claude Code's `Agent`, on
+the model its role calls for — which model each role runs on is the person's, `[models]` in
+their user config, and `moai models` shows it. When the person wants to watch the workers'
+windows, and for a Codex worker, the workers are the idle sessions of this repository that
+`ListAgents` shows instead — nobody registers. Either way the supervisor sends each one its
+assignment with a line naming the file of the worker's steps to read, and the worker
+reports back. moai carries no messaging, and the moai binary never
 launches or drives a session. When the supervisor runs inside tmux, its companion skill
 `moai-tmux` lets it clear a worker's pane, paste a message into it, and open new worker
 panes — an ordinary interactive `claude` the person sees, opened only after the person says

@@ -43,7 +43,10 @@ show or hide [deferred](glossary.md#deferred) work, [backlog items](glossary.md#
 each [column](glossary.md#column), the detail and the archive;
 `SPC s` sorts and `SPC c` picks the columns on the right of a row. These choices
 are kept in your user config and carry over to the next run and to every project —
-except the sort, which each project can keep for itself (below).
+except the sort, which each project can keep for itself (below). The same file holds
+`[models]`, the model each role of a supervisor's workers runs on — taught on
+[working with agents](agents.md#the-models-are-yours); a value there that cannot be
+read is named among the explorer's problems.
 
 ## Sort by several fields
 
@@ -294,4 +297,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo

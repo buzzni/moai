@@ -321,6 +321,12 @@ The id in that line is the release `moai show --milestone` stands that backlog u
 goes in with exit 0 — but one line on stderr says there is no such milestone,
 and `moai status` counts the row as `dangling_milestone`.
 
+**A milestone inherited from an epic is said out loud too.** When the one it carries is
+not the backlog item's own field — it stood inside an epic, and that epic's release won —
+`promote` prints one line on stderr naming the milestone and that epic, living or dead
+(a dead one gets its own line as well), and `--dry-run` prints the same. Nothing is
+blocked and the exit code stays 0; `moai edit <epic> --milestone none` takes the epic you unfolded out of that release.
+
 ## Deferring
 
     moai defer <id> -m '<next quarter>'    take it out of the plan for a while
@@ -452,11 +458,10 @@ Yearly archive files use the same `merge=moai` driver as the active snapshot.
 Before you close it, leave one line on the issue naming the AI that actually did the
 work. It is a note, not a field.
 
-    moai note <id> 'model: <vendor>/<model> tokens=<count> (<grade> — <why>)'
+    moai note <id> 'model: <vendor>/<model> (<grade> — <why>)'
 
-- The vendor is `anthropic`, `openai` or `google`; the model is its real name (`opus-5`, `sonnet-5`); the grade uses the same words as the review grades
-- **If you do not know the token count, drop `tokens=`.** Do not write 0 and do not estimate — blank, 0 and a false number are three different things
-- **One line per id.** Write the same line on several ids and the tokens multiply by the number of ids
+- The vendor is `anthropic`, `openai` or `google`; the model is its real name (`opus-5.5`, `sonnet-5.5`); the grade uses the same words as the review grades
+- **No token count.** The line carries no `tokens=` — what a window or an agent shows is not what the work cost, and a false number is worse than none. A line written with one before still reads
 - **Quote free text with single quotes** — inside double quotes the shell expands
   backticks and `$(…)` as commands, so the text is cut off and the call ends in 0.
   If the text itself contains a single quote, stream it from stdin with `-b -`
@@ -467,8 +472,8 @@ work. It is a note, not a field.
 - A list, `moai show [filters] --json`, gives the same `work` on every row — when you
   are adding several issues up, call the list once instead of calling per id, with
   `--archived` so every closed row is in (`--all` leaves out what has stood in done
-  for `archive_days`), or let `moai stats --json` add them up: its `work` sums tokens
-  by model and by grade and counts the lines that carry none apart
+  for `archive_days`), or let `moai stats --json` add them up: its `work` counts the
+  lines by model and by grade
 
 ## Statistics
 
@@ -484,9 +489,9 @@ count of history that hides what closed would say nothing closed. In the explore
 `SPC g s` opens the same numbers as bars, narrowed by the filter that is hung.
 
 - **Unknown is not zero.** A done row with no `started_at` (it closed before that
-  field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes;
-  `tokens` is `null` when no line carried a count, and the lines without one are
-  counted apart. Durations are wall clock in minutes, not effort
+  field existed) is counted under `unknown` in `cycle_time`, never as 0 minutes.
+  Durations are wall clock in minutes, not effort. AI work is counted in lines;
+  tokens are not added up
 - **When a row closed** is the time `--done` reads — rows standing in done now, at
   the time they got there. A reopened row is not counted as closed
 - **Flow buckets are cut in the screen's time zone**, the zone `--created <day>`

@@ -613,7 +613,7 @@
   "prime.close_pick": "Pick one up before touching the repo — `moai mv <id> in_progress --from todo`",
   "prime.close_scope": "Found something outside what you hold? Ask first — can this epic deliver what it promised without it? If not it is a member: same epic (`-e`) or a child (`--parent`). Only otherwise `moai backlog add`. Leaving it unwritten is the worst",
   "prime.close_review": "A review is an issue too — raise one before `/code-review`. `-b` says what you are looking at and `-m` closes it; without either the write is refused",
-  "prime.close_model": "Leave the AI that did the work — `moai note <id> 'model: <vendor>/<model> tokens=<n> (<grade> — <why>)'`",
+  "prime.close_model": "Leave the AI that did the work — `moai note <id> 'model: <vendor>/<model> (<grade> — <why>)'`",
   "prime.close_handoff": "Closing while still holding it? Leave the next session a line — `moai note <id> 'next: …'`",
   "prime.close_status": "Run `moai status` once more and see the warnings did not grow",
   "prime.commands": "Commands",
@@ -894,6 +894,7 @@
   "backlog.will_close": "{id} goes to done",
   "backlog.milestone_deferred": "milestone {id} is deferred — the epic unfolded stands deferred with it, so it shows in `moai show --deferred`, not in `moai ready`. `moai defer {src} --undo` brings it back",
   "backlog.milestone_closed": "milestone {id} is already closed — the epic unfolded re-opens that release, since a group's column is read from its members",
+  "backlog.milestone_inherited": "milestone {id} comes from the epic {epic} this backlog stood under — the epic unfolded stands in that release; `moai edit <epic> --milestone none` takes it out",
   "backlog.closed": "→ done  (unfolded, so there is nothing left to look at)",
   "refuse.show_target": "`{target}` is neither an id nor a kind. Kinds: issue, epic, milestone, backlog",
   "refuse.show_target_how": "to look one up by id, write the prefix too",
@@ -1096,9 +1097,6 @@
   "stats.work": "AI work",
   "stats.work_lines": "{lines} lines on {rows} rows",
   "stats.lines": "{n} lines",
-  "stats.tokens": "{tokens} tokens over {tokened} lines",
-  "stats.tokens_without": "({n} without)",
-  "stats.tokens_none": "no tokens written",
   "stats.no_work": "no `model:` lines",
   "stats.grade": "grade",
   "stats.reviews": "Reviews",
@@ -1181,5 +1179,10 @@
   "wiki.linked_from_partial": "Unread in the wiki {n} — links from there are not counted here; `moai wiki ls` names them",
   "warn.tracking_unknown": "Git did not answer whether it tracks this tracker — dotfile rules could not be checked. Fix git or try again",
   "refuse.init_tracking_unknown": "Cannot determine whether git tracks this tracker. Fix git and run init again; nothing was planted",
-  "refuse.init_driver_without_tracking": "--driver requires --tracking commit; a tracker kept out of git has nothing for git to merge"
+  "refuse.init_driver_without_tracking": "--driver requires --tracking commit; a tracker kept out of git has nothing for git to merge",
+  "models.want_level": "one of {known}",
+  "models.unknown_key": "`{key}` is not a known model key — ignored",
+  "models.default": "default",
+  "models.path": "Config  {path}",
+  "models.no_path": "unknown"
 }

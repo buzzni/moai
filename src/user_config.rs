@@ -44,6 +44,51 @@ pub const COLOUR: &str = "colour";
 /// 적혀 있어도 같은 뜻으로 읽는다.
 pub const AUTO: &str = "auto";
 
+/// 역할별 모델은 사람의 비용 선택이라 사용자 설정에만 둔다(moai-9tqo.3la).
+/// 나중에 저장소 표가 생겨도 사용자 설정이 이긴다. 기본값과 사람 화면(`view::models`)의 차례는 이 한 자리다 —
+/// `--json` 의 키 차례는 [`Models::values`] 의 `BTreeMap` 이라 이름순이다.
+pub const MODELS_DEFAULT: &[(&str, &str)] = &[
+    ("plan", "fable"),
+    ("develop", "sonnet"),
+    ("complex", "opus"),
+    ("review", "opus"),
+    ("docs", "sonnet"),
+    ("bulk", "haiku"),
+    ("codex", "gpt-6.1-sol"),
+    ("review_grade", "xhigh"),
+    ("effort", "medium"),
+    ("effort_complex", "high"),
+];
+pub const MODELS: &str = "models";
+pub const MODEL_LEVELS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+
+/// 유효한 키만 덮어쓴 완성된 표. `written`은 유효하게 읽힌 키만 담는다.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Models {
+    #[serde(flatten)]
+    pub values: BTreeMap<&'static str, String>,
+    pub written: Vec<String>,
+}
+
+impl Default for Models {
+    fn default() -> Self {
+        Self {
+            values: MODELS_DEFAULT.iter().map(|&(key, value)| (key, value.to_string())).collect(),
+            written: Vec::new(),
+        }
+    }
+}
+
+/// `[models]`의 탈도 말이 아니라 자료다. 키 하나가 틀려도 나머지는 산다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelsTrouble {
+    NotATable { found: String },
+    NotAWord { key: String, found: String },
+    NotAGrade { key: String, raw: String },
+    NotAnEffort { key: String, raw: String },
+    UnknownKey { key: String },
+}
+
 /// 설정 파일의 자리. `MOAI_CONFIG` → `$XDG_CONFIG_HOME/moai/config.toml` →
 /// `$HOME/.config/moai/config.toml`. 셋 다 없으면 `None`.
 ///
@@ -136,6 +181,9 @@ pub struct Registry {
     /// [`crate::view::look_problems`] 다: 이 설정이 서는 표면이 탐색기 하나라, 보기 설정의
     /// 알림과 같은 자리에 선다.
     pub update_problems: Vec<UpdateTrouble>,
+    /// 한 파싱에서 읽은 역할별 모델과 까닭. 쓰는 길은 없다(moai-9tqo.3la).
+    pub models: Models,
+    pub models_problems: Vec<ModelsTrouble>,
     /// 읽다 만난 탈. 멀쩡하면 `None` 이다. 까닭 글은 `problems` 에 있고 여기는 **그 탈의 갈래**뿐이다
     /// — 글로 가르면 말이 바뀔 때마다 가르는 쪽이 따라 깨진다.
     ///
@@ -470,6 +518,9 @@ pub fn read(path: Option<&Path>) -> Registry {
             reg.update_repo = repo;
             problems.extend(repo_problems);
             reg.update_problems = problems;
+            let (models, problems) = doc.models();
+            reg.models = models;
+            reg.models_problems = problems;
         }
         // 못 읽었거나 깨진 까닭은 **층만 댄다**(moai-5jsn). 보기에도 실으면 탐색기가 같은 파싱 오류를 층 없음
         // 배너와 보기 알림으로 두 번 댔다. 층은 늘 댄다 — 밖에서는 층 화면이, 안에서는 층을 못 세운 배너
@@ -1039,6 +1090,41 @@ impl Doc {
             return (None, problems);
         }
         (Some(raw.to_string()), problems)
+    }
+
+    /// 모델 이름은 moai가 모른다. 등급·effort만 닫힌 집합으로 읽고, 틀린 키만 기본값으로 둔다.
+    pub fn models(&self) -> (Models, Vec<ModelsTrouble>) {
+        let mut models = Models::default();
+        let mut problems = Vec::new();
+        let Some(item) = self.doc.get(MODELS) else { return (models, problems) };
+        let Some(table) = item.as_table_like() else {
+            problems.push(ModelsTrouble::NotATable { found: item.type_name().to_string() });
+            return (models, problems);
+        };
+        for (key, item) in table.iter() {
+            let Some(&(key, _)) = MODELS_DEFAULT.iter().find(|&&(known, _)| known == key) else {
+                problems.push(ModelsTrouble::UnknownKey { key: key.to_string() });
+                continue;
+            };
+            let raw = item.as_str();
+            let level = matches!(key, "review_grade" | "effort" | "effort_complex");
+            if level && !raw.is_some_and(|word| MODEL_LEVELS.contains(&word)) {
+                let raw = raw.map_or_else(|| item.to_string().trim().to_string(), String::from);
+                problems.push(if key == "review_grade" {
+                    ModelsTrouble::NotAGrade { key: key.into(), raw }
+                } else {
+                    ModelsTrouble::NotAnEffort { key: key.into(), raw }
+                });
+                continue;
+            }
+            let Some(raw) = raw else {
+                problems.push(ModelsTrouble::NotAWord { key: key.into(), found: item.type_name().to_string() });
+                continue;
+            };
+            models.values.insert(key, raw.to_string());
+            models.written.push(key.to_string());
+        }
+        (models, problems)
     }
 
     /// 적어 둔 탐색기 보기와, 못 읽은 키의 까닭(moai-2bzp). **관대하게 읽는다** — 틀린 키 하나가
@@ -3547,6 +3633,77 @@ mod tests {
         assert_eq!(bad.update_problems, [UpdateTrouble::NotABool { found: "string".into() }]);
         let said = crate::view::look_problems(&bad, crate::i18n::Lang::Ko);
         assert_eq!(said, [format!("{}: `update.check` 는 true·false 여야 한다 — 지금은 string", path.display())]);
+    }
+
+    #[test]
+    fn models_defaults_and_independent_keys() {
+        let parse = |src: &str| Doc::parse(src).unwrap().models();
+        assert_eq!(parse(""), (Models::default(), vec![]));
+        assert_eq!(parse("[models]\n"), (Models::default(), vec![]));
+        let (models, problems) = parse("[models]\ndevelop = \"opus-6\"\n");
+        assert!(problems.is_empty());
+        let mut want = Models::default();
+        want.values.insert("develop", "opus-6".into());
+        want.written.push("develop".into());
+        assert_eq!(models, want);
+
+        assert_eq!(
+            parse("models = 3\n"),
+            (Models::default(), vec![ModelsTrouble::NotATable { found: "integer".into() }])
+        );
+        let (models, problems) = parse(
+            "[models]\nreview_grade = \"ultra\"\neffort = 3\ndevelop = false\nfuture = \"x\"\ncodex = \"custom-model\"\n",
+        );
+        assert_eq!(models.values["review_grade"], "xhigh");
+        assert_eq!(models.values["effort"], "medium");
+        assert_eq!(models.values["develop"], "sonnet");
+        assert_eq!(models.values["codex"], "custom-model");
+        assert_eq!(models.written, ["codex"]);
+        assert_eq!(
+            problems,
+            [
+                ModelsTrouble::NotAGrade { key: "review_grade".into(), raw: "ultra".into() },
+                ModelsTrouble::NotAnEffort { key: "effort".into(), raw: "3".into() },
+                ModelsTrouble::NotAWord { key: "develop".into(), found: "boolean".into() },
+                ModelsTrouble::UnknownKey { key: "future".into() },
+            ]
+        );
+        // 인라인 표·점 키도 TOML의 같은 표다. 모델 이름은 낱말의 내용까지 검증하지 않는다.
+        let (models, problems) = parse("models = { plan = \"\", effort_complex = \"max\" }\n");
+        assert!(problems.is_empty());
+        assert_eq!(models.values["plan"], "");
+        assert_eq!(models.values["effort_complex"], "max");
+        for level in MODEL_LEVELS {
+            let (models, problems) = parse(&format!(
+                "[models]\nreview_grade = \"{level}\"\neffort = \"{level}\"\neffort_complex = \"{level}\"\n"
+            ));
+            assert!(problems.is_empty());
+            assert_eq!(models.written.len(), 3);
+        }
+        let (models, problems) = parse("models.develop = \"sonnet\"\nmodels.effort_complex = \"ultra\"\n");
+        assert_eq!(models.written, ["develop"]);
+        assert_eq!(problems, [ModelsTrouble::NotAnEffort { key: "effort_complex".into(), raw: "ultra".into() }]);
+    }
+
+    #[test]
+    fn models_are_read_once_and_warn_in_the_explorer() {
+        let dir = scratch("models");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[models]\ndevelop = \"opus-6\"\nreview_grade = \"ultra\"\n").unwrap();
+        let reg = read(Some(&path));
+        assert_eq!(reg.models.values["develop"], "opus-6");
+        assert_eq!(reg.models.written, ["develop"]);
+        let said = crate::view::models_problems(&reg, crate::i18n::Lang::En);
+        assert_eq!(said.len(), 1);
+        assert!(said[0].contains("models.review_grade"));
+        assert!(said[0].contains("ultra"));
+        assert_eq!(crate::view::look_problems(&reg, crate::i18n::Lang::En), said);
+        let ko = crate::view::look_problems(&reg, crate::i18n::Lang::Ko);
+        assert!(ko[0].contains("중 하나"));
+        assert_eq!(read(Some(&dir.join("missing.toml"))).models, Models::default());
+        let no_path = read(None);
+        assert_eq!(no_path.models, Models::default());
+        assert_eq!(no_path.path, None);
     }
 
     /// **받을 저장소도 같은 파싱에 얹히고, 꼴이 아닌 값은 들이지 않는다**(moai-zsfr.2em). 이 값은 `sh` 에

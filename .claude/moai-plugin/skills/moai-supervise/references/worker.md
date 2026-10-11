@@ -18,12 +18,22 @@ other line fills a slot the steps use; a line the supervisor adds beyond those �
 said yes to taking over a row that is not yours, say — belongs to the assignment as well.
 
 - `Model:` — `<model>` and `<difficulty>`.
-  `Model:` is a suggestion picked by difficulty before anyone read the code. The model is
-  changed by the person with `/model`, never by you — if this window is not on
-  that model, ask the person watching the window to match it, and if it reads harder than it
+  `Model:` is a suggestion picked by difficulty before anyone read the code; it is the model
+  of a role in the person's table (`moai models --json`), and `Effort:` goes with it.
+  **In a session** the model is changed by the person with `/model`, never by you — if this
+  window is not on that model, ask the person watching the window to match it, and if it reads harder than it
   looked, raise it the same way to the model that pairs with the difficulty you just measured —
-  not one step at a time (haiku → sonnet → opus). Handed `low` but it is `high`, the model is `opus`.
-  The grade of the epic-end review (7) is measured on this same rubric, member by member
+  the model of that role, not one step at a time. Handed `low` but it is `high`, the role is `complex`.
+  **In a subagent** the model and the effort were fixed when you were raised, and nobody can
+  change them. If it reads heavier than `Model:` says, stop before you pick anything up and hand
+  back one line, `Model: raise to complex — <why>`; the supervisor raises a new worker on the `complex` model
+  with the same message, its `Model:` and `Effort:` lines changed to that role's. What shows only
+  after you picked up, you carry on and name in the report.
+  Whether the epic-end review (7) goes to `max` is measured on this same rubric, member by member
+- `Effort:` — `<effort>`, the reasoning effort that goes with the model. Like the model, a
+  subagent was raised on it and a session's person sets it — you do not
+- `Worker:` — `subagent` or `session`, how you were raised. A step that differs between the
+  two says so in the step
 - `Work running alongside:` — the worktrees and work beside you, and the files they hold (4-3)
 - `Root branch:` — `<root branch>`, the branch the root checkout stands on. The supervisor read
   it in the root; do not read it again — read inside a worktree, it gives that worktree's own branch
@@ -48,6 +58,29 @@ else in that repository, go there first: `cd` from a subdirectory, `ExitWorktree
 a worktree.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
+
+## In a subagent
+
+When `Worker:` says `subagent`, the supervisor raised you with `Agent` inside its own session,
+and four things a session has are not yours. The rule for each stands here once; a step that
+needs more says so in a line of its own, **In a subagent**.
+
+- **No `EnterWorktree` or `ExitWorktree`.** You stay in the root — every Bash call starts
+  there again, whatever an earlier call moved into. So where a step goes into the worktree,
+  aim at it instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`,
+  and every Read and Edit takes an absolute path under it. Where a step comes back to the root
+  with `ExitWorktree(keep)`, you are there already. The git shapes in "Before the steps" bind a
+  session that went into a worktree, not you
+- **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
+  instead and end (4). `Person: away` still decides by recommendation, as below
+- **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
+- **What you hand back is the report** (12) — `SubagentHandback`, and your turn ends with it.
+  Where a step says to tell the supervisor and stop, that is your hand-back; where it says to
+  tell the supervisor and go on, it goes in the report. A message that hands over no work is
+  answered the same way
+- **Your tool calls carry the supervisor's session.** The hook reads you two as one: your
+  pick-ups are recorded as the supervisor's, its rules see what the supervisor's other workers
+  hold, and the supervisor's turn-end holds what you hold
 
 ## When the person is away
 
@@ -151,6 +184,9 @@ never in the root
    and ask. Showing a split plan to a person once is a step of work a person asked for
    directly; what a supervisor hands you is work a person already passed on. Design
    decisions are asked in 4.
+   **In a subagent, measure before you unfold** — read the backlog against the rubric in 5
+   first, and if it reads heavier than `Model:` says, hand back `Model: raise to complex — <why>` and end.
+   Nothing is unfolded yet, so the worker raised after you starts from step 1 as you did.
    If that backlog is already done (someone unfolded it), do not unfold: tell the supervisor —
    unfolding again puts up two epics. **Write a short new title** — a line in the plan
    becomes the issue title verbatim, so copying over a backlog item title that grew long while it
@@ -186,7 +222,10 @@ never in the root
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
    pick-up (rule 5). Ask the person watching this window — a yes the message already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
-   no leave that member and tell the supervisor
+   no leave that member and tell the supervisor.
+   **In a subagent** there is nobody to ask: without a yes in the message, leave that member
+   and name it in the report. Handed an epic `from step 2`, measure first as 1 does, before
+   you pick anything up
 3. Right after the commit in 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
    `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
@@ -201,9 +240,17 @@ never in the root
    **is** the top and this step does not exist
 
        cd <subdir>
+   **In a subagent** raise it with the same line — you are in the root — and do not go in:
+   from here on aim every command at `<root>/.worktrees/<epic>` ("In a subagent"), or at
+   `<root>/.worktrees/<epic>/<subdir>` for a subdirectory project. If the repository's
+   CLAUDE.md says what a new worktree gets (a link for the build output, say), do that first
 4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
-   recommendation instead ("When the person is away")
+   recommendation instead ("When the person is away").
+   **In a subagent** there is no `AskUserQuestion`: hand back with `SubagentHandback`, its
+   head `decision needed: <id>`, then the situation, options A and B, and your recommendation —
+   and end. The supervisor asks the person and wakes you with the answer (`SendMessage`);
+   carry on from where you stopped
 
 4-1. **The tracker you edit is always the root's.** `<root>` is the root checkout's place,
    filled in by the supervisor — do not guess it from inside the worktree. **The tool moves
@@ -252,21 +299,32 @@ never in the root
    - `medium` — a behaviour change inside one file, ringed by tests
    - `high` — several files, the write path, concurrency, the storage format, hooks; hard to undo
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
-   conflicts and run the tests. Fix things here — while the worktree stands, rule 2 blocks
-   edits in the root. Inside a milestone that is the milestone branch, not `<root branch>`
+   conflicts and run the tests. Fix things here, never in the root — the root is shared and
+   stands on `<root branch>`, and the hook does not stop the session that holds this work
+   from editing there. Inside a milestone that is the milestone branch, not `<root branch>`
    — the epics merged beside you are there
 7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
    not reviewed separately, so this once is the only review. **It runs inside this session** —
    never start another agent program for it.
-   **The grade is one step above the heaviest member's difficulty** — `medium` if the members
-   are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
-   **If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
-   Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
+   **The epic-end review runs on the `review` model at `review_grade`** — read both from
+   `moai models --json` (defaults `opus` and `xhigh`).
+   **If any member touched the write path, concurrency, the storage format or hooks**, the grade is `max`.
    **A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
-   `max` is the top of the ladder: a step above it is still `max`.
-   The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
+   A step above the default `xhigh` is `max`, and `max` is the top of the ladder: a step above it is still `max`.
    If the window is not on that model, ask the person watching it to change it before you
-   call — `/model opus` (a review agent inherits the window's model).
+   call — `/model <that model>` (a review agent inherits the window's model).
+   **In a subagent** the review is a subagent of your own — still this session, not another
+   agent program — because a review called from you runs on your model. Read the `review`
+   model from `moai models --json`, create the review issue and stand the members in `review`
+   as below, **pick the review issue up** —
+   `moai -C <root> mv <review id> in_progress --from todo` — and only then raise it on the
+   review brief (the last section of this file), every slot filled. You stand in the root, so
+   the hook reads a review issue nobody picked up under `.worktrees/<epic>` as that worktree's,
+   and rule 3 refuses the review it raises. It leaves its fixes uncommitted and the reviewer's
+   words on the review issue, and hands back what it fixed and what it left — take that in as
+   below
+
+       Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
    where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled it
    in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
@@ -321,8 +379,8 @@ never in the root
    the merge hashes the `Report-checked:` notes point at. Rewording a subject on this branch
    before the review starts is fine — nobody else has it yet.
    **When it returns, stop what it left running with `TaskStop` before you touch the tree**
-   and read the working tree's status. A sweep subagent still alive writes its own version
-   into this same worktree and covers a commit you already made without a word, and a
+   — in a subagent, the review subagent too if it still runs — and read the working tree's
+   status. A sweep subagent still alive writes its own version into this same worktree and covers a commit you already made without a word, and a
    `cargo test` after that measures that agent's files rather than yours.
 
 7-1. Before merging, go back over the backlog parked mid-epic
@@ -421,32 +479,38 @@ never in the root
    was filled in by the supervisor as a suggestion, so if you raised it, or the window was on
    a different model from the start, correct the model and the difficulty to the real ones and
    write why in the reason — the next person reads "what was put on work of this size" there.
-   It is a note, not a field. The supervisor does not fill `<vendor>` or `<count>` — the vendor is
-   `anthropic`, and the model is its real name (`opus-5`), not the `/model` alias — the
+   It is a note, not a field. The supervisor does not fill `<vendor>` — the vendor is
+   `anthropic`, and the model is its real name (`opus-5.5`), not the `/model` alias — the
    `<model>` the supervisor filled in is an alias (`opus`), so write the real name even if you
-   did not change models.
-   `<count>` is the tokens this window used. **If you do not know the token count, drop
-   `tokens=<count>` whole** — do not write 0 and do not estimate. **One line per id** —
-   write the same line on several ids and the tokens multiply by the number of ids. A window's
-   tokens cannot be split per member, so write them on **one member only** and leave
-   `tokens=<count>` out of the other members' lines.
+   did not change models. **No token count**: the line carries no `tokens=` — what a window
+   shows is not what the work cost, and a false number is worse than none.
    Quote free text with single quotes — inside double quotes the shell expands backticks and
    `$(…)` as commands. If the text itself contains a single quote, stream it from stdin with `-b -`
 
-    moai note <member> 'model: <vendor>/<model> tokens=<count> (<difficulty> — <why>)'
+    moai note <member> 'model: <vendor>/<model> (<difficulty> — <why>)'
+   **In a subagent, skip this step** — the supervisor writes these lines from your report's
+   `Model ran:` (12)
 
 10. Close them after that. **Run `moai mv <member> done` only once that merge has really
     landed** — closed before it, a merge that stops on a conflict leaves them done on work
     that is not in. It closes a member from `review`, where 7 stood it, and from
     `in_progress` where there is no `review` column alike. Do not close the
     members left in the first column by 7-1 and 4-3 — those members keep the epic open. While
-    the worktree still stands, the hook reads this work as a sibling worktree's and cannot
-    refuse a review closed without `-m`. Close the review issue leaving what came out of it
+    the worktree still stands, the hook reads what this session did not pick up as a sibling
+    worktree's and cannot refuse such a review closed without `-m`. Close the review issue
+    leaving what came out of it
 
         moai note <review id> -b - < <review text>   the reviewer's own words (summarize past 64KB)
         moai mv <review id> done -m '<what you took in, what you handed on>'
     If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
     the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
+
+    **In a subagent** the review subagent already left the reviewer's words on the review
+    issue, so write only your own call (`mv … done -m`), and one line naming the model it ran on —
+    `<model it ran>` is the name after `anthropic/` on the first line of its hand-back, so the
+    vendor stands once
+
+        moai note <review id> 'model: anthropic/<model it ran> (<grade> — epic-end review)'
 
     Leave the tests passing in the root with a commit with a path, as in 2
 11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and take it into the root
@@ -472,7 +536,14 @@ never in the root
     background, while a merge conflict is being resolved, while waiting on a person's answer,
     or after the supervisor's next message has arrived in this window. Clearing (`/clear`) then
     loses what is not yet moved into the tracker, or the message that arrived.
-    Then end the turn. The supervisor's next message is the next work
+    Then end the turn. The supervisor's next message is the next work.
+    **In a subagent** the report goes two ways, the note first: leave the text on the epic
+    with `moai note <epic> -b -`, `report: <epic>` at its head, and take it into the root with
+    a commit with a path as in 2 — a supervisor that restarted has lost the notification and
+    reads the note. Then hand back the same text with `SubagentHandback`, and your turn ends.
+    Its second line is `Model ran: anthropic/<your real model name>` — the name in your own
+    system prompt (`opus-5.5`), not the alias in `Model:`; the supervisor writes 9-1's line
+    from it. Nothing about clearing a window is yours
 
 ## Carrying on stalled work
 
@@ -480,8 +551,9 @@ A session died holding a member of `<epic>`, the epic the message's first line n
 member still stands picked up. Read how far it got (`moai show <epic>`, its history and
 notes), then
 
-- If the worktree is there, go in with `EnterWorktree(path)`, read how far it got with
-  `git log <base branch>..HEAD` and `git status`, and carry on
+- If the worktree is there, go in with `EnterWorktree(path)` — in a subagent, aim at it
+  ("In a subagent") — read how far it got with `git log <base branch>..HEAD` and
+  `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
@@ -499,6 +571,34 @@ notes), then
   a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
   column stays, the assignee becomes you, and a note keeps whose it was
 - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
-  session's share is unknown` to the end of the reason — the previous session's model and
-  tokens are written nowhere, and without it the whole member reads as this window's work
+  session's share is unknown` to the end of the reason — the previous session's model is
+  written nowhere, and without it the whole member reads as this window's work
 - Then go on with the steps from 4-1 to the end
+
+## The review brief
+
+In a subagent, 7 raises the review on this prompt — copy it whole and fill every slot.
+
+    You run the epic-end review of <epic> — <title> — for the worker that raised you. You are a
+    subagent of the same session, so the hook reads you as that worker.
+    Worktree: <root>/.worktrees/<epic>, on branch worktree-<epic>
+    Range: from <merge-base hash> (where the branch left <base branch>) to HEAD
+    Review issue: <review id>, picked up already; its body is the angle — moai -C <root> show <review id>
+    Grade: <grade>
+    Root: <root>
+
+    1. Run the review on that worktree: Skill(code-review, "<grade> --fix <root>/.worktrees/<epic>").
+       It runs as a background fork of its own — wait for the notice that it ended, and do not
+       hand back before it
+    2. Its fixes stay in the worktree's working tree, uncommitted. Do not commit, reset, rebase
+       or amend there — the worker takes them in. If anything you started still runs, stop it
+       with TaskStop
+    3. Hold what came back against "Five places the review keeps finding" in <steps file>, and
+       look yourself at any of the five the review left out
+    4. Leave the reviewer's own words on the review issue — write them to a file in your
+       scratchpad and run moai -C <root> note <review id> -b - < <that file>
+       If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
+       the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
+    5. Hand back with SubagentHandback. The first line is Model ran: anthropic/<your real model
+       name> — the name in your system prompt, not an alias. Then what was fixed (finding number,
+       file) and what was left, by finding number

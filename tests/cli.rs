@@ -7500,17 +7500,81 @@ fn promote_carries_the_milestone_the_tool_shows_it_under() {
     // idea 는 목록에서 접히므로 `--type idea` 로 펴서 본다 — 접혔을 뿐 `m1` 밑이다.
     let ideas_under = ok(s.path(), &["show", "--milestone", &m1, "--type", "idea"]);
     assert!(ideas_under.contains("필드 없는 생각"), "화면이 m1 밑에 안 냈다\n{ideas_under}");
+    // 연습도 같은 줄을 낸다 — 물려받은 마일스톤과 담겨 있던 에픽을 stderr 로 댄다(moai-rs3o.fg4).
+    let dry =
+        from_stdin(s.path(), &["backlog", "promote", &bare, "--from", "-", "--dry-run"], "# 펼친 하나\n- 첫 일\n");
+    let said = String::from_utf8_lossy(&dry.stderr).to_string();
+    assert!(dry.status.success() && said.contains(&m1) && said.contains(&epic), "연습이 물려받음을 안 댔다\n{said}");
     let grown = from_stdin(s.path(), &["backlog", "promote", &bare, "--from", "-"], "# 펼친 하나\n- 첫 일\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+    let said = String::from_utf8_lossy(&grown.stderr).to_string();
+    assert!(said.contains(&m1) && said.contains(&epic), "물려받은 마일스톤을 안 댔다\n{said}");
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 하나"), "릴리스 밖으로 펼쳤다");
 
     // 제 필드가 `m2` 인데 에픽의 `m1` 이 이기는 생각. 이긴 쪽을 데려간다.
     let lost = ok(s.path(), &["backlog", "add", "진 필드", "-e", &epic, "--milestone", &m2, "-q"]).trim().to_string();
+    let dry =
+        from_stdin(s.path(), &["backlog", "promote", &lost, "--from", "-", "--dry-run"], "# 펼친 둘\n- 둘째 일\n");
+    let said = String::from_utf8_lossy(&dry.stderr).to_string();
+    assert!(said.contains(&m1) && said.contains(&epic), "연습이 이긴 쪽을 안 댔다\n{said}");
     let grown = from_stdin(s.path(), &["backlog", "promote", &lost, "--from", "-"], "# 펼친 둘\n- 둘째 일\n");
     assert!(grown.status.success(), "{}", String::from_utf8_lossy(&grown.stderr));
+    let said = String::from_utf8_lossy(&grown.stderr).to_string();
+    assert!(said.contains(&m1) && said.contains(&epic), "이긴 마일스톤을 안 댔다\n{said}");
     let under2 = ok(s.path(), &["show", "--milestone", &m2]);
     assert!(!under2.contains("펼친 둘"), "아무 화면에도 없던 값을 데려갔다\n{under2}");
     assert!(ok(s.path(), &["show", "--milestone", &m1]).contains("펼친 둘"), "이긴 마일스톤을 안 데려갔다");
+}
+
+/// **물려받은 마일스톤만 알린다**(moai-rs3o.fg4) — 제 필드와 같은 값(사람이 고른 것)과 `-e <에픽>`(아무것도 안
+/// 데려간다)은 침묵하고, 물려받은 값이 죽은 릴리스면 두 사실이라 두 줄이 선다. `--json` 에서도 stderr 로 나가고
+/// 종료 코드는 0 이다. 둘 다 stderr 에서 `moai edit … --milestone none` 을 가리키는 `inherited` 글 하나로 센다.
+#[test]
+fn promote_says_an_inherited_milestone_only_when_it_was_inherited() {
+    let s = init("promoteinherited");
+    let m1 = ok(s.path(), &["milestone", "add", "v1", "-q"]).trim().to_string();
+    let inherited = |err: &str| err.matches("--milestone none").count();
+
+    // 제 필드가 `m1` 이고 에픽이 없는 생각 — 사람이 고른 값이라 침묵한다.
+    let own = ok(s.path(), &["backlog", "add", "제 필드", "--milestone", &m1, "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &own, "--from", "-"], "# 제 것\n- 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(inherited(&String::from_utf8_lossy(&out.stderr)), 0, "사람이 고른 값을 물려받았다고 댔다");
+
+    // `-e <에픽>` 으로 펼치면 아무것도 안 데려가니 침묵한다.
+    let epic = add(s.path(), &["담는 에픽", "--type", "epic", "--milestone", &m1]);
+    let held = ok(s.path(), &["backlog", "add", "에픽 안", "-e", &epic, "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &held, "-e", &epic, "--from", "-"], "- 멤버\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(inherited(&String::from_utf8_lossy(&out.stderr)), 0, "-e 인데 물려받았다고 댔다");
+
+    // `--json` 에서도 stderr 로 서고, 연습(`--dry-run --json`)도 같다. 종료 코드는 0 이다.
+    let bare = ok(s.path(), &["backlog", "add", "필드 없음", "-e", &epic, "-q"]).trim().to_string();
+    for dry in [true, false] {
+        let mut argv = vec!["backlog", "promote", &bare, "--from", "-", "--json"];
+        if dry {
+            argv.push("--dry-run");
+        }
+        let out = from_stdin(s.path(), &argv, "# 펼친 것\n- 일\n");
+        assert!(out.status.success(), "막았다 — {}", String::from_utf8_lossy(&out.stderr));
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            err.contains(&m1) && err.contains(&epic) && inherited(&err) == 1,
+            "dry={dry}: --json 에서 안 댔다\n{err}"
+        );
+    }
+
+    // 에픽에서 물려받은 마일스톤이 미뤄졌으면 두 줄 — 물려받음과 죽음은 다른 사실이다.
+    let put_off = ok(s.path(), &["milestone", "add", "미룬 v", "-q"]).trim().to_string();
+    ok(s.path(), &["defer", &put_off, "-m", "다음 분기"]);
+    let sleeping = add(s.path(), &["잠든 에픽", "--type", "epic", "--milestone", &put_off]);
+    let child = ok(s.path(), &["backlog", "add", "잠든 안", "-e", &sleeping, "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &child, "--from", "-"], "# 깨울 것\n- 일\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(inherited(&err), 1, "물려받음을 안 댔다\n{err}");
+    assert!(err.contains("--undo"), "미뤄진 것을 안 댔다\n{err}");
+    assert_eq!(err.lines().filter(|l| l.contains(&put_off)).count(), 2, "두 줄이 안 섰다\n{err}");
 }
 
 /// **죽은 릴리스로 데려갈 때는 한 줄 알린다. 막지는 않는다**(같은 결정).
@@ -8080,6 +8144,7 @@ const JSON_SWEEP: &[&str] = &[
     // `--dry-run` 으로만 부른다(moai-zsfr.2p9) — 받지도 돌리지도 않는다. 시험의 바이너리는 cargo 가 지은
     // 자리(`target/`)에 서서 거절되므로, 그 밖에 걸어 둔 한 벌([`hoisted`])로 부른다.
     "update",
+    "models",
 ];
 
 /// `install.sh` 가 판을 내는 기계인가 — `latest::SERVED` 와 같은 자다. 다른 기계에서 `moai update` 는 무엇보다
@@ -8536,6 +8601,7 @@ fn every_command_still_speaks_json() {
         vec!["project", "ls", "--json"],
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
+        vec!["models", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
@@ -10942,6 +11008,34 @@ fn show_json_reads_who_did_the_work_from_model_notes() {
     assert_eq!(some.matches(r#""provider":"#).count(), 3, "오타 줄을 값으로 읽었다\n{some}");
     // 값이 안 된 줄도 이력에서 빠지지 않는다.
     assert!(ok(s.path(), &["show", &id]).contains("tokens 12"), "꼴에 안 맞는 노트가 이력에서 사라졌다");
+}
+
+/// **`stats` 는 모델 이름과 등급을 대소문자 없이 센다**(moai-rs3o.j6v) — 노트는 사람이 손으로 치니 철자가
+/// 갈린다. 세는 쪽만 접는다: 저장값과 `show --json` 의 `work` 는 적은 철자 그대로다(노트 원문 보존).
+#[test]
+fn stats_folds_the_case_of_model_names_but_show_keeps_what_was_written() {
+    let s = init("statscase");
+    let a = add(s.path(), &["하나"]);
+    let b = add(s.path(), &["둘"]);
+    ok(s.path(), &["note", &a, "model: OpenAI/GPT-6.1-Sol tokens=100 (High — 첫 철자)"]);
+    ok(s.path(), &["note", &b, "model: openai/gpt-6.1-sol tokens=50 (high — 둘째 철자)"]);
+
+    let json: serde_json::Value = serde_json::from_str(&ok(s.path(), &["stats", "--json"])).unwrap();
+    let by_model = json["work"]["by_model"].as_array().unwrap();
+    assert_eq!(by_model.len(), 1, "철자만 다른 둘이 두 모델로 섰다\n{json}");
+    assert_eq!(by_model[0]["provider"], "openai");
+    assert_eq!(by_model[0]["model"], "gpt-6.1-sol");
+    // 토큰은 더하지 않는다(moai-w9ui) — 줄 수만 접힌 철자로 센다.
+    assert_eq!((by_model[0]["lines"].as_u64(), by_model[0].get("tokens")), (Some(2), None));
+    let by_grade = json["work"]["by_grade"].as_array().unwrap();
+    assert_eq!(by_grade.len(), 1, "(High) 와 (high) 가 두 등급으로 섰다\n{json}");
+    assert_eq!(by_grade[0]["grade"], "high");
+
+    // 노트 원문은 그대로 — `work` 는 적은 철자를 든다.
+    let shown: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", &a, "--json"])).unwrap();
+    assert_eq!(shown["work"][0]["model"], "GPT-6.1-Sol");
+    assert_eq!(shown["work"][0]["provider"], "OpenAI");
+    assert_eq!(shown["work"][0]["grade"], "High");
 }
 
 /// **목록도 `work` 를 낸다**(moai-p8qj). 닫힌 500건의 토큰을 더하려고 `show <id> --json` 을
@@ -14916,6 +15010,46 @@ fn stop_does_not_count_notices_as_new_warnings() {
     assert!(!out.contains("경고가"), "알림을 경고로 셌다 — {out}");
 }
 
+/// **에픽의 멤버를 다 집어도 `wip_overload` 가 안 서고, `Stop` 이 경고가 늘었다고 붙들지 않는다**(moai-rs3o.nmu) —
+/// 일꾼 걸음이 멤버를 모두 집으라 하니, 줄마다 세면 멤버 넷짜리 에픽을 집는 순간 경고가 하나 늘었다.
+/// 에픽 없는 줄 넷은 여전히 넷이다 — 같은 보드에서 경고가 서고, `count` 는 묶음 수고 `ids` 는 줄 전부다.
+#[test]
+fn picking_up_a_whole_epic_is_not_started_at_once() {
+    let s = init("wipepic");
+    let plan = from_stdin(s.path(), &["add", "--from", "-", "--json"], "# 한 에픽\n- 하나\n- 둘\n- 셋\n- 넷\n");
+    assert!(plan.status.success(), "{}", String::from_utf8_lossy(&plan.stderr));
+    let made: serde_json::Value = serde_json::from_slice(&plan.stdout).unwrap();
+    let members: Vec<String> = made
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["kind"] == "issue")
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(members.len(), 4);
+    hook_out(&s, "session-start", &event(&s, "s1"));
+
+    for id in &members {
+        ok(s.path(), &["mv", id, "in_progress", "--from", "todo"]);
+    }
+    let board: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
+    let kinds: Vec<&str> = board["warnings"].as_array().unwrap().iter().map(|w| w["kind"].as_str().unwrap()).collect();
+    assert!(!kinds.contains(&"wip_overload"), "에픽 하나의 멤버 넷을 넷으로 셌다 — {kinds:?}");
+
+    // 붙든다면 집은 줄이 있어서다(위 `the_close_holds_once_and_then_lets_go`) — 경고가 늘었다는 말은 없어야 한다.
+    let out = hook_out(&s, "stop", &event(&s, "s1"));
+    assert!(!out.contains("경고가"), "에픽의 멤버를 집은 것을 늘어난 경고로 셌다 — {out}");
+
+    // 에픽 없는 줄 넷은 넷이다. 기존 에픽 멤버 넷까지 집은 채여도 묶음은 다섯이고, `ids` 는 줄 여덟이다.
+    for n in 0..4 {
+        let id = add(s.path(), &[&format!("떠도는 {n}")]);
+        ok(s.path(), &["mv", &id, "in_progress", "--from", "todo"]);
+    }
+    let board: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
+    let w = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "wip_overload").expect("경고가 없다");
+    assert_eq!((w["count"].as_u64(), w["ids"].as_array().unwrap().len()), (Some(5), 8), "{w}");
+}
+
 /// `SessionStart` 는 아무것도 싣지 않고 기준선만 적는다.
 ///
 /// 재개에서 그 출력이 대화에 안 붙는 것을 확인하고 옮긴 자리다. 안 붙는 자리에
@@ -15801,6 +15935,81 @@ fn a_child_this_session_picked_stays_its_own_under_a_parent_another_session_pick
     let held = at("a", "stop", None);
     assert!(held.contains(&format!("moai defer {review} ")), "제가 집은 자식을 안 붙든다\n{held}");
     assert!(!held.contains(&format!("moai defer {parent} ")), "남이 집은 부모로 붙든다\n{held}");
+}
+
+/// **이 세션이 집은 줄은 옆 워크트리의 이름이 가리켜도 제 것이다**(moai-pxui, 2026-10-12 사용자 결정 "집은 줄이
+/// 이긴다"). 서브에이전트 일꾼은 `EnterWorktree` 를 못 써 루트에 서고, 그 집기는 부모의 세션 id 로 적힌다 —
+/// `.worktrees/<에픽>` 이 서는 순간 훅은 그 에픽을 옆의 일로 보아, 규칙 1 이 그 일꾼을 안 지키고 규칙 3 은 관점
+/// 적힌 리뷰를 집은 뒤에도 "You are holding nothing" 으로 리뷰를 막았다(moai-9tqo.fxp). 집기 기록을 읽는
+/// 배선(막는 판정에도 싣는가)은 단위 시험이 못 밟아 여기서 본다. 남의 세션이 집은 줄과 아무도 안 집은 세션은
+/// 전처럼 이름이 가른다.
+#[test]
+fn a_row_this_session_picked_stays_its_own_beside_its_epics_worktree() {
+    let s = Scratch::new("hookpickname");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 멤버", "-e", &epic, "--json"]), "id");
+    let theirs = field(&ok(&main, &["add", "남이 할 멤버", "-e", &epic, "--json"]), "id");
+    let maybe = field(&ok(&main, &["add", "돌았는지 모르게 집은 멤버", "-e", &epic, "--json"]), "id");
+    let review = field(
+        &ok(&main, &["add", "리뷰 — 에픽", "-t", "review", "--parent", &epic, "-b", "무엇을 왜 보는가", "--json"]),
+        "id",
+    );
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let at = |session: &str, event: &str, tool: Option<(&str, String)>| {
+        let body =
+            tool.map_or(String::new(), |(name, input)| format!(",\"tool_name\":\"{name}\",\"tool_input\":{input}"));
+        let input = format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&main.display().to_string()));
+        String::from_utf8(hook_in(&s, &main, event, &input).stdout).unwrap()
+    };
+    let bash = |c: &str| Some(("Bash", format!("{{\"command\":{}}}", json_str(c))));
+    let skill = || Some(("Skill", "{\"skill\":\"code-review\",\"args\":\"high\"}".to_string()));
+    for (session, id) in [("a", &mine), ("b", &theirs)] {
+        let pick = format!("moai mv {id} in_progress --from todo");
+        assert!(at(session, "pre-tool-use", bash(&pick)).trim().is_empty());
+        ok(&main, &["mv", id, "in_progress", "--from", "todo"]);
+    }
+    // d 는 `&&` 뒤에서 집는다 — 훅은 그 집기를 "돌았는지 모른다"(`?`)로 적는다(moai-hze6).
+    let pick = format!("true && moai mv {maybe} in_progress --from todo");
+    assert!(at("d", "pre-tool-use", bash(&pick)).trim().is_empty());
+    ok(&main, &["mv", &maybe, "in_progress", "--from", "todo"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "집는다"]);
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+
+    // 규칙 1 — 루트에 선 a 에게 다시 선다. 거절문은 a 가 집은 멤버만 대고, 남(b)이 집은 멤버는 옆의 것이다.
+    let why = refusal(&at("a", "pre-tool-use", bash("moai add '딴 일'")));
+    assert!(why.contains(&mine) && !why.contains(&theirs), "옆 이름에 제 집기를 내줬다\n{why}");
+    let made = at("a", "pre-tool-use", bash(&format!("moai add '딴 일' -e {epic}")));
+    assert!(made.trim().is_empty(), "제 에픽 안의 생성을 막는다\n{made}");
+    // 아무것도 안 집은 세션에게는 전처럼 옆 워크트리의 일이다.
+    let made = at("c", "pre-tool-use", bash("moai add '딴 일'"));
+    assert!(made.trim().is_empty(), "옆 워크트리의 일로 남의 생성을 막는다\n{made}");
+    // **돌았는지 모르는 집기는 옆 이름을 못 이긴다**(리뷰 moai-9tqo.jdi 5번) — 이기면 안 돈 집기 하나가 규칙 1 을
+    // 새로 세운다. 기록은 풀기만 한다(moai-hze6).
+    let made = at("d", "pre-tool-use", bash("moai add '딴 일'"));
+    assert!(made.trim().is_empty(), "돌았는지 모르는 집기로 옆 워크트리의 줄을 붙들어 막았다\n{made}");
+
+    // 규칙 3 — 관점 적힌 리뷰 줄을 집은 a 의 리뷰는 지나간다. 집기 전에는 막힌다.
+    assert!(refusal(&at("a", "pre-tool-use", skill())).contains("--parent"), "리뷰 줄 없이 리뷰를 넘겼다");
+    let pick = format!("moai mv {review} in_progress --from todo");
+    assert!(at("a", "pre-tool-use", bash(&pick)).trim().is_empty());
+    ok(&main, &["mv", &review, "in_progress", "--from", "todo"]);
+    let out = at("a", "pre-tool-use", skill());
+    assert!(out.trim().is_empty(), "제가 집은 리뷰를 옆 이름에 내주고 리뷰를 막았다\n{out}");
+
+    // `Stop` 도 제 줄을 붙든다(받아들인 대가 — 감독이 서브에이전트 일꾼의 줄을 붙든다). 남의 줄은 안 댄다.
+    let held = at("a", "stop", None);
+    assert!(
+        held.contains(&mine) && !held.contains(&theirs) && !held.contains(&maybe),
+        "제가 집은 멤버를 안 붙든다\n{held}"
+    );
+    let held = at("c", "stop", None);
+    assert!(held.trim().is_empty(), "옆 워크트리의 일로 남을 붙든다\n{held}");
 }
 
 /// **겨루다 질 집기는 적지 않는다**(리뷰 moai-3k2d.1df). 훅은 명령이 돌기 전에 적으므로, 낡은 `--from` 으로
@@ -24322,20 +24531,22 @@ fn stats_measures_time_and_work_without_turning_unknown_into_zero() {
         value_at(&json, "flow"),
         r#"{"bucket":"week","zone":"UTC","buckets":[{"start":"2026-08-31","created":1,"done":0},{"start":"2026-09-07","created":2,"done":2}]}"#
     );
+    // **토큰은 더하지 않는다**(moai-w9ui, 2026-10-12 사용자 결정) — 옛 줄의 `tokens=1000` 도 합으로 안 선다.
     let work = value_at(&json, "work");
-    assert!(work.starts_with(r#"{"recorded":2,"lines":2,"tokened":1,"tokens":1000,"#), "{work}");
+    assert!(work.starts_with(r#"{"recorded":2,"lines":2,"by_model":"#), "{work}");
+    assert!(!work.contains("token"), "stats 가 토큰을 다시 더한다\n{work}");
     let reviews = value_at(&json, "reviews");
-    assert!(
-        reviews.starts_with(r#"{"rows":1,"work":{"recorded":1,"lines":1,"tokened":0,"tokens":null,"#),
-        "토큰을 안 적은 줄만 있으면 합은 0 이 아니라 null 이다\n{reviews}"
-    );
-    assert!(value_at(reviews, "by_grade").contains(r#"{"grade":"max","lines":1,"tokened":0,"tokens":null}"#));
+    assert!(reviews.starts_with(r#"{"rows":1,"work":{"recorded":1,"lines":1,"by_model":"#), "{reviews}");
+    assert!(value_at(reviews, "by_grade").contains(r#"{"grade":"max","lines":1}"#));
+    // 파서는 옛 줄을 그대로 읽는다 — 이력의 `work[].tokens` 는 남는다.
+    let row = ok(s.path(), &["show", "argos-0001", "--json"]);
+    assert!(value_at(&row, "work").contains(r#""tokens":1000"#), "옛 줄의 토큰을 못 읽는다\n{row}");
 
     // 사람 화면도 같은 수를 낸다 — 모르는 것을 따로 댄다.
     let screen = ok(s.path(), &["stats"]);
     assert!(screen.contains("중앙값 2시간 · p90 2시간"), "{screen}");
     assert!(screen.contains("모름 1"), "모르는 수를 안 댄다\n{screen}");
-    assert!(screen.contains("토큰 1,000"), "{screen}");
+    assert!(!screen.contains("토큰"), "화면이 토큰을 낸다\n{screen}");
 }
 
 /// **흐름의 날은 읽는 사람의 날이고, `--created <날>` 이 그날을 읽는 시간대와 같다.** 그래서 칸 하나의 수가 그날로
@@ -27380,4 +27591,131 @@ fn update_refuses_a_directory_it_cannot_write() {
     let real = std::fs::canonicalize(&bin).unwrap();
     assert!(err.contains(&real.display().to_string()), "못 쓰는 자리를 안 댄다\n{err}");
     assert!(err.contains("install.sh --dir"), "다시 까는 길을 안 댄다\n{err}");
+}
+
+#[test]
+fn models_json_reads_user_config_outside_a_tracker_and_only_reads() {
+    let s = Scratch::new("models-json");
+    let cfg = s.path().join("config.toml");
+    let src = "# keep this\n[models]\ndevelop = \"opus-6\"\ncodex = \"future-model\"\neffort = \"max\"\n";
+    std::fs::write(&cfg, src).unwrap();
+    let out = moai_with(s.path(), &cfg, &["models", "--json"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty());
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        got,
+        serde_json::json!({
+            "plan": "fable", "develop": "opus-6", "complex": "opus", "review": "opus",
+            "docs": "sonnet", "bulk": "haiku", "codex": "future-model",
+            "review_grade": "xhigh", "effort": "max", "effort_complex": "high",
+            "written": ["develop", "codex", "effort"], "path": cfg,
+        })
+    );
+    assert_eq!(std::fs::read_to_string(&cfg).unwrap(), src);
+    assert!(!s.path().join(".moai").exists());
+
+    // 저장소 설정과 -C는 모델의 선택에 닿지 않는다.
+    let other = s.path().join("other");
+    std::fs::create_dir_all(other.join(".moai")).unwrap();
+    std::fs::write(other.join(".moai/config.toml"), "invalid = [\n").unwrap();
+    let there = ok_with(s.path(), &cfg, &["-C", other.to_str().unwrap(), "models", "--json"]);
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&there).unwrap(), got);
+}
+
+#[test]
+fn models_missing_file_uses_all_defaults_and_keeps_the_path() {
+    let s = Scratch::new("models-missing");
+    let cfg = s.path().join("not-created.toml");
+    let out = moai_with(s.path(), &cfg, &["models", "--json"]);
+    assert!(out.status.success());
+    assert!(out.stderr.is_empty());
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        got,
+        serde_json::json!({
+            "plan": "fable", "develop": "sonnet", "complex": "opus", "review": "opus",
+            "docs": "sonnet", "bulk": "haiku", "codex": "gpt-6.1-sol",
+            "review_grade": "xhigh", "effort": "medium", "effort_complex": "high",
+            "written": [], "path": cfg,
+        })
+    );
+    assert!(!cfg.exists());
+}
+
+#[test]
+fn models_bad_values_warn_once_and_preserve_the_other_keys() {
+    let s = Scratch::new("models-bad");
+    let cfg = s.path().join("config.toml");
+    for (bad, key, fallback) in [
+        ("review_grade = \"ultra\"", "review_grade", "xhigh"),
+        ("effort = 3", "effort", "medium"),
+        ("effort_complex = \"ultra\"", "effort_complex", "high"),
+        ("develop = false", "develop", "sonnet"),
+        ("future = \"x\"", "future", ""),
+    ] {
+        let src = format!("[models]\ncodex = \"custom\"\n{bad}\n");
+        std::fs::write(&cfg, &src).unwrap();
+        let out = moai_with(s.path(), &cfg, &["models", "--json"]);
+        assert!(out.status.success());
+        let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(got["codex"], "custom");
+        assert_eq!(got["written"], serde_json::json!(["codex"]));
+        if key == "future" {
+            assert!(got.get(key).is_none());
+        } else {
+            assert_eq!(got[key], fallback);
+        }
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.contains(&format!("models.{key}")), "{err}");
+        assert!(err.contains(cfg.to_str().unwrap()), "{err}");
+        assert_eq!(std::fs::read_to_string(&cfg).unwrap(), src);
+    }
+    for src in ["models = 3\n", "[models]\neffort = [\n"] {
+        std::fs::write(&cfg, src).unwrap();
+        let out = moai_with(s.path(), &cfg, &["models", "--json"]);
+        assert!(out.status.success());
+        let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(got["written"], serde_json::json!([]));
+        assert_eq!(got["develop"], "sonnet");
+        assert_eq!(String::from_utf8_lossy(&out.stderr).lines().count(), 1);
+    }
+}
+
+#[test]
+fn models_human_output_marks_defaults_and_shows_efforts_and_path() {
+    let s = Scratch::new("models-human");
+    let cfg = s.path().join("config.toml");
+    std::fs::write(&cfg, "[models]\ndevelop = \"sonnet\"\neffort = \"high\"\n").unwrap();
+    let out = ok_with(s.path(), &cfg, &["models"]);
+    assert_eq!(out.lines().count(), 11, "{out}");
+    assert_eq!(out.matches("default").count(), 8, "{out}");
+    let develop = out.lines().find(|line| line.starts_with("develop ")).unwrap();
+    assert!(develop.contains("sonnet  (high)"));
+    assert!(!develop.contains("default"), "기본값과 같아도 사람이 적은 키다");
+    assert!(out.lines().find(|line| line.starts_with("complex ")).unwrap().contains("opus  (high)"));
+    assert!(out.lines().find(|line| line.starts_with("review ")).unwrap().contains("opus  (xhigh)"));
+    assert!(out.lines().last().unwrap().contains(cfg.to_str().unwrap()));
+
+    // 허용한 모델 이름의 줄바꿈도 표에서는 한 줄로 그린다.
+    std::fs::write(&cfg, "[models]\nplan = \"a\\nb\"\n").unwrap();
+    let out = ok_with(s.path(), &cfg, &["models"]);
+    assert_eq!(out.lines().count(), 11, "{out}");
+}
+
+#[test]
+fn models_json_has_null_path_when_no_config_place_is_known() {
+    let s = Scratch::new("models-no-place");
+    let out = staged(&["models", "--json"])
+        .current_dir(s.path())
+        .env_remove("MOAI_CONFIG")
+        .env_remove("HOME")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(got["path"], serde_json::Value::Null);
+    assert_eq!(got["written"], serde_json::json!([]));
+    assert_eq!(got["codex"], "gpt-6.1-sol");
 }

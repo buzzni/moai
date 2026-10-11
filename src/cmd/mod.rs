@@ -12,6 +12,7 @@ pub mod hook;
 pub mod init;
 pub mod link;
 pub mod merge_driver;
+pub mod models;
 pub mod mv;
 pub mod note;
 pub mod prime;
@@ -548,6 +549,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         // `.moai` 밖에서도 선다.
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
+        Cmd::Models => models::run(ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
         // 트래커를 안 찾는다 — 올리는 것은 이 바이너리다(moai-zsfr.2p9).

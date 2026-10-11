@@ -1,16 +1,60 @@
 ---
 name: moai-supervise
-description: Use in Claude Code when handing the backlog piled up on one repository, one at a time, to the idle Claude Code sessions of that repository as workers, and taking their reports. Triggers on "supervise", "hand out the backlog", "put the idle sessions to work", "감독해 줘", "backlog 나눠 줘", "놀고 있는 세션에 일 시켜".
+description: Use in Claude Code when handing the backlog piled up on one repository, one at a time, to workers — subagents raised on the model each role calls for, or the idle Claude Code sessions of that repository — and taking their reports. Triggers on "supervise", "hand out the backlog", "put the idle sessions to work", "감독해 줘", "backlog 나눠 줘", "놀고 있는 세션에 일 시켜".
 ---
 
-# moai-supervise — hand backlog out to the idle sessions of this repository
+# moai-supervise — hand backlog out to workers on this repository
 
 The supervisor **picks, sends and checks.** It does not fix code, it does not merge,
 and it does not settle design in a worker's place. The workers merge. Overlapping
 merges are prevented by splitting the files when the supervisor sends (1), and where
 they still collide the worker goes back into its worktree and resolves them.
 
-**This skill is for Claude Code, and moai carries no messaging.** The supervisor and its
+**A worker is a subagent you raise, by default.** Claude Code's `Agent` raises a subagent
+with a model and an effort of its own, so each piece of work runs on the model its role
+calls for (2-1) — a session runs on whatever its window was opened with. A worker is a
+session of this repository instead in two cases: **the person asked to watch the workers'
+windows**, or **the work goes to Codex**. Those are "Workers in sessions", below — that path
+stays as it was. The moai binary never launches or drives an agent, and nothing here runs
+headless: `Agent` is Claude Code's tool, and this skill is what calls it.
+
+**A Codex worker is never a subagent — it lives in a cmux tab or a tmux pane: `moai-cmux` /
+`moai-tmux`, section "Codex workers".**
+
+**The models are the person's, read once a round.** Which model each role runs on is the
+person's own choice, kept in their user config (`[models]`), so it is not written into this
+skill — a skill planted at project scope is committed and shared. Read it at the start of
+every round; a value changed mid-round counts from the next one.
+
+    moai models --json      one object: a model per role (plan, develop, complex, review,
+                            docs, bulk, codex), review_grade, effort, effort_complex, and
+                            written — the keys the person set; the rest are defaults
+
+**One supervisor per repository.** A supervisor waiting for reports reads `idle` in
+`ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
+books of what was sent — one backlog, or one worker, gets two jobs. Before the first round,
+ask the person whether another window here runs `moai-supervise`; if one does, stop. A
+session that refuses work because it is a supervisor comes out of the candidates. **You
+refuse too:** a message that hands you backlog to work on came from another supervisor — do
+nothing of it, reply to its `from` that you are a supervisor, and tell the person.
+
+**The hook reads your subagent workers as you.** A subagent's tool calls carry your session,
+so its pick-ups are recorded as yours: the rows it holds are your focus (hook rule 1 reads
+them for what you create, too), and when your turn ends the hook's `Stop` holds them —
+once a session. Those rows are the worker's: do not move them, do not defer them, do not put
+a note on them; just finish the turn.
+
+**When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
+and the person asks to bring them back, load `moai-recover`, inside tmux or not. A subagent
+worker lives inside your session and ends with it. Its rows stay picked up and its worktree
+stays, so 0 does not list them as `stranded` — the place still reads that worktree, and no
+window is there to ask about. So when you start again, a `Sent: subagent <agentId>` (1) with no
+`report:` after it is work whose worker has ended: hand it on from "Carrying on stalled work"
+as 0 does, once the person agrees that the session it ran in is gone.
+
+## Workers in sessions
+
+When the workers are sessions, **moai carries no messaging.** The supervisor and its
 workers talk with Claude Code's own tools:
 
 - `ListAgents` lists the live sessions, and subagents too — each row's name, its kind
@@ -20,23 +64,14 @@ workers talk with Claude Code's own tools:
   subscribes
 - A reply comes in as a cross-session message. Answer it by copying its `from` as `to`
 
-**Every session here is an interactive one the person can see.** The moai binary never
-launches or drives an agent, and nothing here runs headless. Outside tmux, cmux and Saycode
-the supervisor launches nothing either; inside one of them it may open a worker pane or
+**Every session here is an interactive one the person can see.** Outside tmux, cmux and Saycode
+the supervisor launches no session; inside one of them it may open a worker pane or
 session, only after the person says yes (`moai-tmux`, `moai-cmux` or `moai-saycode`, below).
 **A worker is every idle session of this
 repository in `ListAgents`, except you** — a row whose name starts with the root
 directory's slug and a `-` (2). Nobody registers and nobody is asked which windows count.
 The message you send is the whole assignment, and it names the file of the worker's steps,
 which the worker reads (3).
-
-**One supervisor per repository.** A supervisor waiting for reports reads `idle` in
-`ListAgents` like any worker, so a second one sends it backlog, and the two keep separate
-books of what was sent — one backlog, or one worker, gets two jobs. Before the first round,
-ask the person whether another window here runs `moai-supervise`; if one does, stop. A
-session that refuses work because it is a supervisor comes out of the candidates. **You
-refuse too:** a message that hands you backlog to work on came from another supervisor — do
-nothing of it, reply to its `from` that you are a supervisor, and tell the person.
 
 Five things about the messaging, one line each:
 
@@ -84,8 +119,7 @@ then tmux, then cmux** (tmux in a cmux tab is tmux, above). `moai-saycode`
 is optional the same way (`moai skill install --with moai-saycode`); inside Saycode without
 it, tell the person that one line plants it.
 
-**When sessions died** — a restart or an OOM kill took the workers or a supervisor down —
-and the person asks to bring them back, load `moai-recover`, inside tmux or not.
+## Before the round
 
 **Work you send out is always done in a worktree** — even if the repository has no
 worktree convention. Several workers share one root checkout, so fixing things in the
@@ -242,12 +276,35 @@ the send lives only in this conversation, and a supervisor that starts again (4)
 
     moai note <id> 'Sent: <worker>'
 
+`<worker>` is the session's name, or for a subagent `subagent <agentId>` — its address (2).
+
 **Send only what is yours.** A backlog item or member whose assignee is someone else — or
 nobody — is asked about first: ask the person, and send it only on a yes, writing in the
 message who said yes so the worker takes it over (`--take`, hook rule 5). `moai ready` sets
 such rows apart under `others`.
 
-**2. Find a worker.** Call `ListAgents` once. A worker is a row that
+**2. Raise a worker.** A subagent, unless the person asked to watch the workers' windows or
+the work goes to Codex — then a session (below).
+
+**A subagent.** One `Agent` call per backlog:
+
+    Agent(subagent_type: "general-purpose", model: <model>, effort: <effort>, description: "<id>", prompt: <the message of 3>)
+
+`<model>` goes in as the person's table has it, and `Agent` takes only the model names its
+`model` parameter lists. **If `Agent` refuses the value**, the table holds a name Claude Code
+does not raise a subagent on — tell the person which role and value, and do not swap in a model
+of your own choosing: the table is theirs.
+It runs in the background, and a notification comes when it ends (4). **How many run side by
+side is the person's** — ask once a round (two unless they say otherwise); the ceiling is how
+many backlog items do not collide (1). Do not pass `isolation: "worktree"`: the worker raises
+its own worktree at `.worktrees/<epic>` from the base branch (its step 3), where this
+repository's convention and the hook look for it — an isolated agent's worktree stands
+somewhere else, on a branch of its own. **`Agent` takes no name**, so the `agentId` in its
+result is the only address to wake that worker again (`SendMessage(to: <agentId>)`, 4) —
+keep it in the send mark (1). Your own subagents stand in `ListAgents` under "Subagents";
+they are not session workers.
+
+**A session.** Call `ListAgents` once. A worker is a row that
 
 - belongs to this repository. `ListAgents` shows no directory; a session takes its name from
   the directory it was opened in, slugged — lowercased, every run of characters other than
@@ -287,8 +344,8 @@ worker, and the message is the whole assignment.
 - **A test agent is no worker.** One raised for a test is opened outside the repository (a
   scratchpad), so its name is not this repository's
 
-The root checkout and, for a subdirectory project in a monorepo, the path down to it come
-from the lines below. The root is where `.moai` stands, so for a monorepo it is the
+Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
+to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
 subdirectory that has `.moai`, and a worktree stands for the whole repository — the worker
 has to go into the same subdirectory inside it (its step 3). The first line is `root dir`;
 a `subdir` line stands only when the root is not the top of the repository.
@@ -308,41 +365,66 @@ if os.path.relpath(here, top) != ".":
 PY
 ```
 
-**2-1. Pick a model — by one word of difficulty.** The grade of the epic-end review
-(the worker's 7) is measured on this same rubric, member by member. Keep two axes and the
-message carries two sets of judgement, and on the day they differ the cheap model takes the
-write path.
+**2-1. Pick the role, then read its model.** Each backlog goes to one role, and that role's
+model and effort come from the `moai models --json` you read at the start of the round.
 
-| Level | How it is measured | Model |
+| Role | What it is for | Effort key |
 |---|---|---|
-| `low` | text, comments, a one-line fix; behaviour unchanged | `haiku` |
-| `medium` | a behaviour change inside one file, ringed by tests | `sonnet` |
-| `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo | `opus` |
+| `plan` | planning — splitting a request into an epic and its issues | — |
+| `develop` | development — most work | `effort` |
+| `complex` | the write path, concurrency, the storage format, hooks, or a contract across several files | `effort_complex` |
+| `review` | the epic-end review, once per epic | `review_grade` (the grade) |
+| `docs` | a backlog that only touches the wiki or the CHANGELOG | `effort` |
+| `bulk` | sorting and summing up, a review text past 64KB, the same mechanical fix many times | `effort` |
+| `codex` | a Codex worker — never a subagent ("Codex workers") | — |
+
+With nothing written, the defaults are `plan` `fable` · `develop` `sonnet` · `complex` `opus` · `review` `opus` · `docs` `sonnet` · `bulk` `haiku` · `codex` `gpt-6.1-sol` · `review_grade` `xhigh` · `effort` `medium` · `effort_complex` `high`.
+
+Development is split by one word of difficulty — `develop` or `complex`. The same rubric
+decides, member by member, whether the epic-end review goes to `max` (the worker's 7). Keep
+two axes and the message carries two sets of judgement, and on the day they differ the cheap
+model takes the write path.
+
+| Level | How it is measured | Role |
+|---|---|---|
+| `low` | text, comments, a one-line fix; behaviour unchanged | `develop` |
+| `medium` | a behaviour change inside one file, ringed by tests | `develop` |
+| `high` | several files, the write path, concurrency, the storage format, hooks; hard to undo | `complex` |
+
+A backlog that only touches the wiki or the CHANGELOG is `docs`; sorting, summing up, or the
+same mechanical fix many times is `bulk`. **If the planner wrote `Model:` and `Effort:` lines
+in the issue body, read the model there as the role whose default it is** — the person's table
+still decides which model that role runs on. `<effort>` is `effort_complex` for `complex` and
+`effort` for the rest. The Codex worker's role is `codex`, and its sections say how it is sent.
 
 The epic-end review is that epic's only review, because the members are not reviewed
 separately (the worker's 5 and 7).
 
-**The grade is one step above the heaviest member's difficulty** — `medium` if the members
-are all `low`, `high` if one is `medium`, `xhigh` if one is `high`.
-**If any member touched the write path, concurrency, the storage format or hooks**, it is `max`.
-Raise it one more step if the epic crosses surfaces or carries several design decisions. If you hesitate, raise it.
+**The epic-end review runs on the `review` model at `review_grade`** — read both from
+`moai models --json` (defaults `opus` and `xhigh`).
+**If any member touched the write path, concurrency, the storage format or hooks**, the grade is `max`.
 **A worktree that carries members of two epics is measured as one epic and then raised one more step** — the review has to read both epics' contracts at once.
-`max` is the top of the ladder: a step above it is still `max`.
-The model follows that grade — `medium` means `sonnet`, `high` and up means `opus`.
+A step above the default `xhigh` is `max`, and `max` is the top of the ladder: a step above it is still `max`.
 
 The supervisor picks before reading any code, so this is a suggestion; the last word
-belongs to the worker who read the issue. A running session's model cannot be changed by
-a message and cannot be changed by config — the person in that window changes it with
-`/model`.
+belongs to the worker who read the issue. A session's model cannot be changed by a message
+and cannot be changed by config — the person in that window changes it with `/model`. A
+subagent's model is fixed when you raise it: a worker that finds the work heavier hands back
+`Model: raise to complex` before it picks anything up (4).
 
-**3. Send.** Send **one** backlog to one idle worker. The message is the lines below, every
+**3. Send.** Send **one** backlog to one worker. The message is the lines below, every
 slot filled. The worker knows nothing of this conversation, so what is not in the message
 does not reach it — except the worker's steps: they stand in this skill's
 `references/worker.md`, and the first line tells the worker to `Read` that file and follow
-it. The worker is a session of this same repository and loaded the same plugin, so the file
-is there for it. **Do not copy the file into the message** — name it.
+it. The worker stands in this same repository with the same plugin loaded, so the file is
+there for it. **Do not copy the file into the message** — name it.
+
+To a subagent the message is the `prompt` of the `Agent` call in 2, with `Worker: subagent`.
+To a session it goes with `Worker: session`:
 
     SendMessage(to: <worker>, message: <the lines below>, notify_when_idle: true)
+
+`notify_when_idle` is for a session only — a subagent's end comes as a notification by itself.
 
 `<steps file>` is that file's absolute path: this skill's base directory — Claude Code shows
 it as "Base directory for this skill" when the skill loads — followed by
@@ -361,7 +443,7 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -376,9 +458,11 @@ refuse** — the check is the shape, not whether that milestone stands, so a sta
 in with exit 0: one line on stderr says there is no such milestone, and `moai status`
 counts the epic as `dangling_milestone`. Copy it off
 the release `moai show --milestone` stands that backlog under; do not write it from memory.
-`<model>`, `<difficulty>` and `<why>` are the pair you picked in 2-1 and your reason.
-**Leave them unfilled** and those placeholders travel as they are, so the note the worker
-leaves when it closes says `<model>` instead of what actually did the work.
+`<model>`, `<difficulty>` and `<why>` are the role's model you read in 2-1, the difficulty
+you measured and your reason; `<effort>` is that role's effort (2-1), the same value you pass
+to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
+left at the close says `<model>` instead of what actually did the work.
+`<worker kind>` is `subagent` or `session` — how you raised it in 2.
 Do not use a single quote inside `<why>` — it closes the single quote in the worker's 9-1
 and the rest of the text leaks into the shell.
 `<other work>` is the sibling worktrees you measured in 1, the work you send in this same
@@ -390,12 +474,14 @@ the worker meets such a file it does not fix it: it leaves it as a member and re
 worker then settles a design question by its own recommendation instead of waiting on an
 answer, writes down what it decided, and stops at what cannot be undone.
 Do not fill `<grade>` — that is the review grade the worker picks in 7, after developing.
-Do not fill `<vendor>` or `<count>` either — those are the vendor and the token count the
-worker reads in its own window in 9-1.
+Do not fill `<vendor>` either — it belongs to the `model:` line written at the close (5, and
+a session worker's 9-1).
 
     You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
     Read first: moai show <id>
     Model: <model> (<difficulty> — <why>)
+    Effort: <effort>
+    Worker: <worker kind>
     Work running alongside: <other work> — do not touch those files (4-3)
     Root branch: <root branch>
     Base branch: <base branch>
@@ -404,8 +490,29 @@ worker reads in its own window in 9-1.
     Subdir: <subdir>
     Person: <person>
 
-**4. Wait.** End your turn. The report comes back as a cross-session message from the
-worker, `report: <epic>` at its head, and it wakes you. The idle notice that
+**4. Wait.** End your turn.
+
+**A subagent's report is the notification that it ended.** Its text comes as a message from
+it (`<agent-message from="<agentId>">`) with `report: <epic>` at its head, and the
+notification carries only numbers. Two other heads stop it before the work is done:
+
+- `decision needed: <id>` — it met a design decision the notes do not settle and stopped there,
+  with the situation, the options and its recommendation (a subagent has no
+  `AskUserQuestion`). Ask the person with `AskUserQuestion`, and send the answer with
+  `SendMessage(to: <agentId>)` — the same worker wakes and carries on from its own record.
+  With `Person: away` it settles that by its recommendation instead and does not stop
+- `Model: raise to complex — <why>` — it read the work as heavier than its model and picked nothing
+  up. Leave it, and raise a new worker on the `complex` model and `effort_complex` with the same
+  message (2) — but with its `Model:` line naming that model and the difficulty the worker measured,
+  and its `Effort:` line the `effort_complex` value. Sent unchanged, the new worker reads the work as heavier
+  than `Model:` says too and hands the same line back
+
+Every wake ends in another notification; read the last. A subagent worker also leaves its
+report on the epic as a note before it hands back — a supervisor that started again has lost
+the notification, and reads that note (below).
+
+**A session's report comes back as a cross-session message** from the worker,
+`report: <epic>` at its head, and it wakes you. The idle notice that
 `notify_when_idle` sends is not a report: a worker goes idle whenever its turn ends — while
 it waits on its person's answer, say — and one that asked its person something sends nothing
 until it is answered. **Do not poll `ListAgents`** — the report comes to you. Inside tmux, an
@@ -431,8 +538,8 @@ note follows it on the same epic. Check each one that does not as in 5. A worker
 sent work you have no report for is still left out in 2 — ask it, or its person, how it
 stands.
 
-If the supervisor is in the root, then in the gap after the worker picks the member up
-and before it raises its worktree, the hook holds that member as "still picked up" when
+For a session worker, if the supervisor is in the root, then in the gap after the worker
+picks the member up and before it raises its worktree, the hook may hold that member as "still picked up" when
 the supervisor's turn ends. **That member is the worker's** — do not move it, do not
 defer it, do not put a note on it; just finish the turn.
 
@@ -473,7 +580,22 @@ commit with a path — a supervisor that starts again reads that line, not this 
 
     moai note <epic> 'Report-checked: <merge hash>'
 
-Then send the next backlog to an idle worker. **Outside tmux and cmux, clearing a window is
+**For a subagent worker, write the `model:` line yourself**, one per member it did — not the
+members it left in the first column — and take them into the root the same way. `<model ran>` is
+the name after `anthropic/` on the report's `Model ran:` line — the real name the worker read in
+its own system prompt, not the alias you passed. Copy the vendor once: `anthropic/anthropic/…`
+is a line `work` never reads. Leave `tokens=` out: the count a
+subagent's notification carries is not what the work cost (the person's decision), and a
+false number is worse than none. A session worker writes its own line (its 9-1), and the
+review issue's line is the worker's either way (its 10).
+
+    moai note <member> 'model: anthropic/<model ran> (<difficulty> — <why>)'
+
+Then send the next backlog to a worker. **A subagent needs no clearing** — it ended with its
+hand-back. Raise a new one for the next backlog rather than waking a finished one with new
+work: its record is the old epic's.
+
+A session worker's window is different. **Outside tmux and cmux, clearing a window is
 the person's** — the supervisor never types into a window. The report ends with the worker
 telling its person when its window can be cleared, so a message you send to that same window
 right away can be erased by a clear that comes after it, and that backlog then waits for a
@@ -487,8 +609,8 @@ that tab's (`moai-cmux`).
 Inside Saycode, a worker Saycode lists is cleared through it, on the same report check
 (`moai-saycode`, "Clear a worker").
 
-If they do not hold, ask that worker with a message what is left, and do not finish it in
-its place.
+If they do not hold, ask that worker with a message what is left — a subagent by
+`SendMessage(to: <agentId>)` — and do not finish it in its place.
 
 ## The shared root
 

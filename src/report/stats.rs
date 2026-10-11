@@ -24,8 +24,10 @@
 //!   목록의 `derived_status`·`derived_epic` 과 같은 답이다
 //! - **닫힌 때는 `--done` 이 읽는 그 값이다**([`closed_at`]) — 지금 done 에 선 줄이 그 칸에 든 때. 되돌린 줄의
 //!   `done_at` 은 남아 있어도 지금 닫힌 줄이 아니다
-//! - **모르는 것은 0 이 아니다** — `started_at` 이 없는 줄은 `unknown` 으로 따로 세고(`Spent` 와 같은 금),
-//!   `tokens=` 가 없는 `model:` 줄은 토큰 합에 안 든다. 하나도 없으면 합은 `None` 이다
+//! - **모르는 것은 0 이 아니다** — `started_at` 이 없는 줄은 `unknown` 으로 따로 센다(`Spent` 와 같은 금)
+//! - **토큰은 더하지 않는다**(2026-10-12 사용자 결정, moai-w9ui) — `model:` 줄의 `tokens=` 는 창이나 서브에이전트의
+//!   알림이 보인 수였고 일의 값이 아니었다(moai-9tqo.fxp). 파서는 옛 줄의 그 값을 그대로 읽어 `show --json` 의
+//!   `work[].tokens` 에는 남지만, 여기서 더하면 거짓 값을 합으로 세운다. AI 작업은 줄의 수로 센다
 
 use crate::config::{Config, DONE};
 use crate::model::{Issue, Kind, MAX_PRIORITY, Work, parse_rfc3339};
@@ -210,25 +212,17 @@ pub struct Spans {
     pub p90: Option<i64>,
 }
 
-/// `model:` 줄의 합. **줄과 토큰을 따로 센다** — 토큰을 안 적은 줄은 토큰 합에 안 들고, 그 수는
-/// `lines - tokened` 다.
+/// `model:` 줄의 수. **토큰은 더하지 않는다**(moai-w9ui) — 한때 `tokened`·`tokens` 로 토큰을 든 줄만 더했는데,
+/// 그 수가 일의 값이 아니어서 `tokens=` 를 적지 않기로 했다(2026-10-12 사용자 결정). 새 줄은 토큰이 없으니 합은
+/// 옛 줄만의 낡은 값이 된다 — 그래서 걷었다. 구조로 둔 것은 축(모델·등급)마다 같은 꼴로 싣기 위해서다.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Tally {
     pub lines: usize,
-    /// 그 가운데 `tokens=` 를 든 줄.
-    pub tokened: usize,
-    /// 토큰을 든 줄만 더한 값. **든 줄이 없으면 `None`** — 0 은 "공짜로 했다" 로 읽힌다(CLAUDE.md "일한 AI 를
-    /// 남긴다").
-    pub tokens: Option<u64>,
 }
 
 impl Tally {
-    fn add(&mut self, w: &Work) {
+    fn add(&mut self) {
         self.lines += 1;
-        if let Some(t) = w.tokens {
-            self.tokened += 1;
-            self.tokens = Some(self.tokens.unwrap_or(0).saturating_add(t));
-        }
     }
 }
 
@@ -517,8 +511,14 @@ fn spans<'x>(counted: &[&'x Issue], wh: &'x Where, now: &str, from: impl Fn(&'x 
 /// 같은 토큰이 두 번 선다.
 fn spend(rows: &[&Issue], work: &BTreeMap<String, Vec<Work>>) -> Spend {
     let mut out = Spend::default();
-    let mut models: BTreeMap<(Option<&str>, &str), Tally> = BTreeMap::new();
-    let mut grades: BTreeMap<Option<&str>, Tally> = BTreeMap::new();
+    // **키는 소문자로 접은 값이다**(moai-rs3o.j6v) — `model:` 노트는 사람이 손으로 쳐 `GPT-6.1-Sol` 과
+    // `gpt-6.1-sol` 이 갈리고, 등급도 `(High — …)` 와 `(high — …)` 로 갈린다. 둘을 다른 모델·다른 등급으로
+    // 세면 같은 모델이 두 줄로 서서 줄 수도 토큰도 반으로 쪼개진다. 모델·회사 이름은 ASCII 라
+    // `to_ascii_lowercase` 면 된다. **화면에는 접은 값이 선다** — "처음 본 철자" 를 보이면 줄의 차례(id 순)에
+    // 따라 같은 데이터가 다른 이름으로 서고, 규약이 적는 꼴(`anthropic/opus-5`)은 이미 소문자다.
+    // 저장값은 그대로다: `model::parse_work` 와 `moai show --json` 의 `work` 는 노트 원문의 철자를 든다.
+    let mut models: BTreeMap<(Option<String>, String), Tally> = BTreeMap::new();
+    let mut grades: BTreeMap<Option<String>, Tally> = BTreeMap::new();
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     for i in rows {
         if !seen.insert(i.id.as_str()) {
@@ -527,23 +527,16 @@ fn spend(rows: &[&Issue], work: &BTreeMap<String, Vec<Work>>) -> Spend {
         let Some(lines) = work.get(&i.id).filter(|l| !l.is_empty()) else { continue };
         out.recorded += 1;
         for w in lines {
-            out.all.add(w);
-            models.entry((w.provider.as_deref(), w.model.as_str())).or_default().add(w);
-            grades.entry(w.grade.as_deref()).or_default().add(w);
+            out.all.add();
+            let key = (w.provider.as_deref().map(str::to_ascii_lowercase), w.model.to_ascii_lowercase());
+            models.entry(key).or_default().add();
+            grades.entry(w.grade.as_deref().map(str::to_ascii_lowercase)).or_default().add();
         }
     }
-    out.by_model = models
-        .into_iter()
-        .map(|((provider, model), tally)| ModelTally {
-            provider: provider.map(str::to_string),
-            model: model.to_string(),
-            tally,
-        })
-        .collect();
+    out.by_model = models.into_iter().map(|((provider, model), tally)| ModelTally { provider, model, tally }).collect();
     // 이름 차례로 모은 것을 **줄 수로** 다시 세운다 — 안정 정렬이라 같은 수는 이름 차례가 남는다.
     out.by_model.sort_by_key(|m| std::cmp::Reverse(m.tally.lines));
-    out.by_grade =
-        grades.into_iter().map(|(grade, tally)| GradeTally { grade: grade.map(str::to_string), tally }).collect();
+    out.by_grade = grades.into_iter().map(|(grade, tally)| GradeTally { grade, tally }).collect();
     out.by_grade.sort_by(|a, b| a.grade.is_none().cmp(&b.grade.is_none()).then(b.tally.lines.cmp(&a.tally.lines)));
     out
 }
@@ -812,10 +805,10 @@ mod tests {
         assert!(st.flow.buckets.is_empty());
     }
 
-    /// **토큰은 든 줄만 더하고, 하나도 없으면 합이 없다** — 0 이 아니다. 같은 id 의 줄이 둘이어도 한 번만 센다.
-    /// 리뷰는 `review` 태그를 단 줄이고, 그 줄의 등급이 리뷰 등급이다.
+    /// **줄을 세고 토큰은 안 더한다**(moai-w9ui) — 옛 줄이 `tokens=` 를 들어도 합이 안 선다. 같은 id 의 줄이 둘이어도
+    /// 한 번만 센다. 리뷰는 `review` 태그를 단 줄이고, 그 줄의 등급이 리뷰 등급이다.
     #[test]
-    fn work_sums_tokens_only_where_written_and_reviews_carry_their_grade() {
+    fn work_counts_lines_not_tokens_and_reviews_carry_their_grade() {
         let mut review = row("argos-0001.r1v", "done", "2026-09-01T00:00:00Z");
         review.tags = vec!["review".into()];
         let all = vec![
@@ -841,25 +834,47 @@ mod tests {
         .collect();
         let st = count(&all, &Ask::default(), &work);
         assert_eq!(st.work.recorded, 3, "같은 id 의 둘째 줄은 다시 안 센다");
-        assert_eq!(st.work.all, Tally { lines: 4, tokened: 2, tokens: Some(1500) });
+        assert_eq!(st.work.all, Tally { lines: 4 });
         let models: Vec<(Option<&str>, &str, &Tally)> =
             st.work.by_model.iter().map(|m| (m.provider.as_deref(), m.model.as_str(), &m.tally)).collect();
         assert_eq!(
             models,
-            [
-                (Some("anthropic"), "opus-5", &Tally { lines: 3, tokened: 2, tokens: Some(1500) }),
-                (None, "opus-5", &Tally { lines: 1, tokened: 0, tokens: None }),
-            ],
+            [(Some("anthropic"), "opus-5", &Tally { lines: 3 }), (None, "opus-5", &Tally { lines: 1 }),],
             "회사를 모르는 옛 줄은 짐작해 합치지 않는다"
         );
         let grades: Vec<Option<&str>> = st.work.by_grade.iter().map(|g| g.grade.as_deref()).collect();
         assert_eq!(grades, [Some("high"), Some("max"), None], "등급 없는 줄은 맨 뒤다");
         assert_eq!(st.reviews.rows, 1);
         assert_eq!(st.reviews.work.by_grade[0].grade.as_deref(), Some("max"));
-        assert_eq!(st.reviews.work.all.tokens, Some(500));
+        assert_eq!(st.reviews.work.all.lines, 1);
 
-        let json = serde_json::to_string(&st.work.by_model[1]).unwrap();
-        assert_eq!(json, r#"{"provider":null,"model":"opus-5","lines":1,"tokened":0,"tokens":null}"#);
+        // `--json` 에 토큰 키가 안 선다 — 되살리면 옛 줄만의 합이 다시 선다.
+        let json = serde_json::to_string(&st.work.by_model[0]).unwrap();
+        assert_eq!(json, r#"{"provider":"anthropic","model":"opus-5","lines":3}"#);
+        let all = serde_json::to_string(&st.work).unwrap();
+        assert!(!all.contains("token"), "stats 가 토큰을 싣는다 — {all}");
+    }
+
+    /// **모델 이름과 등급은 대소문자를 접어 센다**(moai-rs3o.j6v) — `model:` 노트는 사람이 손으로 치니 철자가
+    /// 갈린다. 화면(과 `--json`)에는 접은 소문자가 선다. 회사 없는 줄은 여전히 따로다.
+    #[test]
+    fn model_names_and_grades_fold_their_case() {
+        let all =
+            vec![row("argos-0001", "todo", "2026-09-01T00:00:00Z"), row("argos-0002", "todo", "2026-09-01T00:00:00Z")];
+        let work: BTreeMap<String, Vec<Work>> = [
+            ("argos-0001".to_string(), vec![line(Some("OpenAI"), "GPT-6.1-Sol", Some(100), Some("High"))]),
+            ("argos-0002".to_string(), vec![line(Some("openai"), "gpt-6.1-sol", Some(50), Some("high"))]),
+        ]
+        .into_iter()
+        .collect();
+        let st = count(&all, &Ask::default(), &work);
+        assert_eq!(st.work.by_model.len(), 1, "철자만 다른 둘이 두 모델로 섰다");
+        let m = &st.work.by_model[0];
+        assert_eq!((m.provider.as_deref(), m.model.as_str()), (Some("openai"), "gpt-6.1-sol"));
+        assert_eq!(m.tally, Tally { lines: 2 });
+        assert_eq!(st.work.by_grade.len(), 1, "(High) 와 (high) 가 두 등급으로 섰다");
+        assert_eq!(st.work.by_grade[0].grade.as_deref(), Some("high"));
+        assert_eq!(st.work.by_grade[0].tally.lines, 2);
     }
 
     /// **앞날로 멀리 적힌 줄은 소요도 흐름도 안 끌고 간다** — 보드가 `future_timestamp` 로 짚는 그 줄이다

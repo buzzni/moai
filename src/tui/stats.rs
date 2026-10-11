@@ -555,7 +555,7 @@ mod tests {
         )];
         a.site.ground.hand_notes(notes.into_iter().collect());
         a.hit("SPC g s");
-        assert_eq!(window(&a).stats().work.all, Tally { lines: 1, tokened: 1, tokens: Some(1000) });
+        assert_eq!(window(&a).stats().work.all, Tally { lines: 1 });
     }
 
     /// **어떤 크기에서도 터지지 않는다** — 좁으면 차트 대신 글로 떨어지고, 낮으면 굴린다. 넓으면 막대마다 수와
@@ -615,25 +615,30 @@ mod tests {
         assert!(narrow.contains("적혔다"), "좁은 창이 소요 줄의 까닭을 잘랐다\n{narrow}");
     }
 
-    /// **수가 막대보다 먼저 자리를 얻는다** — 이름 열과 막대 몇 칸을 먼저 떼어 두던 판은 긴 모델 이름 곁의 토큰 합을
-    /// 통째로 빼거나(이 폭에서는 `2줄 · 토큰` 까지만 섰다) `40,957` 처럼 그럴듯한 다른 수로 잘랐다. 이름은 `…` 로
-    /// 잘려도 수는 온전히 선다.
+    /// **수가 막대보다 먼저 자리를 얻는다** — 이름 열과 막대 몇 칸을 먼저 떼어 두던 판은 긴 모델 이름 곁의 수를
+    /// 통째로 빼거나 그럴듯한 다른 수로 잘랐다. 이름은 `…` 로 잘려도 수는 온전히 선다. 그 곁에 서던 토큰 합은
+    /// 걷었다(moai-w9ui) — 옛 줄이 `tokens=` 를 들어도 안 선다.
     #[test]
     fn numbers_keep_their_digits_beside_a_long_model_name() {
         let mut a = app();
         let notes = [(
             "argos-0001".to_string(),
             vec![
-                "model: anthropic/claude-sonnet-4-5-20250929 tokens=40957750 (high — x)\nmodel: anthropic/claude-sonnet-4-5-20250929 (high — y)"
+                "model: anthropic/claude-sonnet-4-5-20250929-extended-preview tokens=40957750 (high — x)\nmodel: anthropic/claude-sonnet-4-5-20250929-extended-preview (high — y)"
                     .to_string(),
             ],
         )];
         a.site.ground.hand_notes(notes.into_iter().collect());
         a.hit("SPC g s");
-        // 안쪽 폭 58 — 이 폭에서 이름이 `anthr…` 로 잘린다. 창 폭은 그 안쪽에 [`edge`] 를 더한 것이다.
+        // 안쪽 폭 58 — 이 폭에서 이름이 `…` 로 잘린다. 창 폭은 그 안쪽에 [`edge`] 를 더한 것이다. 이름이 긴 것은
+        // 곁의 글이 줄 수 하나로 짧아져서다(moai-w9ui) — 그 전의 이름은 이제 이 폭에 다 든다.
         let screen = draw::tests::render(&mut a, 58 + edge(), 80).join("\n");
-        // 막대 곁의 글 통째로 — 머리 줄(`AI 작업 …`)에도 같은 합이 서므로 막대 쪽에만 있는 머리(`2줄 · `)부터 잰다.
-        assert!(screen.contains("2줄 · 토큰 40,957,750 — 1줄의 합 (안 적은 줄 1)"), "막대 곁의 수가 잘렸다\n{screen}");
-        assert!(screen.contains("anthr…"), "넘친 모델 이름을 잘렸다고 안 댔다\n{screen}");
+        // 막대 곁의 수는 잘린 이름과 **같은 줄**에서 잰다 — 머리 줄(`AI 작업 …`)에도 같은 수가 선다.
+        let row = screen
+            .lines()
+            .find(|l| l.contains("anthropic/") && l.contains('…'))
+            .unwrap_or_else(|| panic!("넘친 모델 이름을 잘렸다고 안 댔다\n{screen}"));
+        assert!(row.contains("█ 2줄 "), "막대 곁의 수가 잘렸다\n{screen}");
+        assert!(!screen.contains("토큰"), "토큰 합이 다시 섰다\n{screen}");
     }
 }

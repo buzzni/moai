@@ -5529,11 +5529,26 @@ pub struct Away {
     /// 누구의 것인지 모르는 줄([`unsure`]) — 거리와 상관없이 그 밑의 자식까지 뺀다. **풀기만 하는
     /// 판정**에만 싣는다(`cmd/hook.rs` 의 `settle`·`Stop`·접힌 뒤 싣는 것) — 막지도 붙들지도 않기로 한 줄이다.
     pub unsure: BTreeSet<String>,
-    /// 이 세션이 마지막으로 **확실히** 집은 줄([`Picks::mine`]) — `unsure` 가 그 조상을 가리켜도 빼지 않는다(리뷰
+    /// 이 세션이 마지막으로 집은 줄([`Picks::mine`]) — `unsure` 가 그 조상을 가리켜도 빼지 않는다(리뷰
     /// moai-3k2d.1df). 남이 부모를 집고 이 세션이 그 자식(`--parent` 로 세운 리뷰 줄 따위)을 집으면, 자식까지
     /// 빼던 판은 제 일을 통째로 놓아 `Stop` 이 안 붙들고 접힌 뒤에도 안 실었고, 좁힌 판정이 `-m` 없는 리뷰
-    /// 닫기를 넘겼다. `unsure` 와 함께만 싣는다.
+    /// 닫기를 넘겼다. `unsure` 와 함께만 싣는다 — 둘 다 풀기만 하는 판정의 것이다.
     pub picked: BTreeSet<String>,
+    /// 이 세션이 **확실히** 집은 줄([`Picks::sure`]) — **옆 이름(`names`)이 가리켜도 빼지 않는다**([`theirs`]).
+    ///
+    /// moai-pxui 다(2026-10-12 사용자 결정, "집은 줄이 이긴다"). 서브에이전트 일꾼은 `EnterWorktree` 를 못 써 늘
+    /// 루트에 서고, 그 집기는 부모의 세션 id 로 적힌다. 이름만 보던 판은 `.worktrees/<에픽>` 이 서는 순간 그
+    /// 에픽을 옆의 일로 보아 — 규칙 1 이 그 일꾼을 안 지키고, 규칙 3 은 관점 적힌 리뷰를 집은 뒤에도 "You are
+    /// holding nothing" 으로 리뷰를 막았다(moai-9tqo.fxp). 그래서 **막는 판정에도 싣는다** — `cmd/hook.rs` 의
+    /// `away_of` 가 옆 이름이 설 때 읽는다.
+    ///
+    /// **확실한 것만이다**(리뷰 moai-9tqo.jdi 5번). 막는 판정에 싣는 순간, 돌았는지 모르는 `?` 집기 하나가
+    /// 옆 워크트리가 쥔 줄을 이 세션의 초점에 세워 규칙 1 이 새로 막고 `Stop` 이 붙든다 — 기록은 풀기만
+    /// 한다는 moai-hze6 의 자를 어긴다. 사람의 결정도 "확실히 집은 줄" 이었다. 남의 세션이 마지막으로 집은
+    /// 줄은 여기 안 들어 전처럼 이름이 가른다. 받아들인 대가 둘: 감독의 `Stop` 이 서브에이전트 일꾼이 집은
+    /// 줄까지 붙들고(같은 세션 id), 그 줄을 집은 세션은 워크트리가 선 동안에도 루트를 고친다 — 규칙 2 가
+    /// 그것을 "빈손" 으로 막던 것은 이름이 낳은 부산물이었다(사용자 결정, 초점은 한 자다).
+    pub sure: BTreeSet<String>,
     /// 이 세션의 사람(moai-0zjo, 2026-10-02 사용자 결정) — **담당이 내가 아닌 줄**은 초점([`held`])에서 뺀다.
     /// 남이 집은 줄도, 담당 없이 시작 칸에 선 줄도 내 일이 아니다. 담당은 줄마다 보고 묶음에서 물려받지
     /// 않는다. 규칙 5 가 남의 줄 집기를 가르는 자도 이것이다.
@@ -5653,7 +5668,8 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
     wip.into_iter().filter(|i| !theirs(i) && !not_mine(away, i)).collect()
 }
 
-/// 이 줄이 **옆의 일**인가 — 옆 이름이 제 이름보다 가까이 가리키거나, 누구의 것인지 모른다.
+/// 이 줄이 **옆의 일**인가 — 옆 이름이 제 이름보다 가까이 가리키거나, 누구의 것인지 모른다. 다만 이 세션이
+/// 확실히 집은 줄([`Away::sure`])은 옆 이름을, 이 세션이 집은 줄([`Away::picked`])은 모름을 이긴다(moai-pxui).
 /// [`held`] 와 그 초점을 쓰는 규칙이 같은 자로 재야 한다 — 초점에서는
 /// 뺀 옆의 리뷰 줄을 규칙 3 이 "집으라" 고 대면, 이미 옆에서 집은 줄이라 시킨 대로 해도
 /// 안 풀린다.
@@ -5668,7 +5684,7 @@ pub fn held<'a>(issues: &'a [Issue], cfg: &Config, away: &Away) -> Vec<&'a Issue
 fn theirs<'a>(issues: &'a [Issue], away: &'a Away) -> impl Fn(&'a Issue) -> bool + 'a {
     let ties = if away.nameless() { report::Ties::default() } else { report::Ties::of(issues) };
     move |i: &'a Issue| {
-        report::claims_over(&ties, &away.names, &away.own, i)
+        (report::claims_over(&ties, &away.names, &away.own, i) && !away.sure.contains(&i.id))
             || (report::claims(&ties, &away.unsure, i) && !away.picked.contains(&i.id))
     }
 }
@@ -5695,6 +5711,10 @@ fn not_mine(away: &Away, i: &Issue) -> bool {
 pub struct Picks {
     pub mine: BTreeSet<String>,
     pub theirs: BTreeSet<String>,
+    /// `mine` 가운데 **이긴 기록이 확실한** 줄 — `?` 가 안 붙은 이 세션의 집기가 남의 확실한 집기보다 늦다.
+    /// `?` 끼리 겨뤄 이긴 줄(moai-kjeh)은 `mine` 에만 든다. 옆 이름을 이기는 것은 이것뿐이다([`Away::sure`],
+    /// moai-pxui 리뷰 — 돌았는지 모르는 집기는 풀기만 한다는 moai-hze6 의 자를 지킨다).
+    pub sure: BTreeSet<String>,
 }
 
 impl Picks {
@@ -5813,6 +5833,9 @@ impl Picks {
                 (None, None) => m > t,
                 _ => sure > st,
             };
+            if mine && sure.is_some() {
+                out.sure.insert(id.clone());
+            }
             match mine {
                 true => out.mine.insert(id),
                 false => out.theirs.insert(id),
@@ -8921,6 +8944,14 @@ mod tests {
 
         // 확실히 도는 집기는 남의 기록을 지운다 — 마지막으로 집은 세션이 이긴다(moai-4jsy).
         assert_eq!(read(&[theirs.clone(), sure.clone()]).mine, set(&["t-1"]), "넘겨받은 줄을 제 것으로 안 든다");
+        assert_eq!(
+            read(&[theirs.clone(), sure.clone()]).sure,
+            set(&["t-1"]),
+            "확실히 넘겨받은 줄을 확실하다고 안 든다"
+        );
+        // `?` 한 줄로 든 제 줄은 `mine` 이지만 확실하지 않다 — 옆 이름을 못 이긴다(moai-pxui 리뷰).
+        let alone = read(std::slice::from_ref(&maybe));
+        assert!(alone.sure.is_empty(), "돌았는지 모르는 집기를 확실하다고 들었다 — {alone:?}");
         // **돌았는지 모르는 집기는 안 지운다**(moai-hze6, 사용자 결정) — 남이 쥔 줄을 제 초점에 세우면
         // 규칙 1 이 막고 `Stop` 이 그것을 닫으라고 붙든다. 기록은 풀기만 한다.
         let read_maybe = read(&[theirs.clone(), maybe.clone()]);
@@ -9009,7 +9040,7 @@ mod tests {
     #[test]
     fn a_pick_another_session_recorded_is_not_mine() {
         let all = vec![issue("t-1", "in_progress"), issue("t-2", "in_progress"), issue("t-3", "in_progress")];
-        let picks = Picks { mine: set(&["t-2"]), theirs: set(&["t-1", "t-2"]) };
+        let picks = Picks { mine: set(&["t-2"]), theirs: set(&["t-1", "t-2"]), ..Picks::default() };
         let got: Vec<String> =
             unsure(&all, &cfg(), &set(&["t-2", "t-3"]), &set(&["t-1"]), &picks).into_iter().collect();
         assert_eq!(got, ["t-2", "t-3"], "제 이름 자리의 줄을 기록에 넘겼거나, 옆이 쥔 줄을 제 기록으로 지웠다");
@@ -9319,6 +9350,44 @@ mod tests {
         let mine = Away { picked: set(&["t-1.aa"]), ..unsure };
         let focus: Vec<&str> = held(&all, &cfg(), &mine).iter().map(|i| i.id.as_str()).collect();
         assert_eq!(focus, ["t-1.aa"], "제가 집은 자식을 부모의 모름에 딸려 보냈다");
+    }
+
+    /// **이 세션이 집은 줄은 옆 이름이 가리켜도 제 것이다**(moai-pxui, 2026-10-12 사용자 결정 "집은 줄이
+    /// 이긴다"). 서브에이전트 일꾼은 루트에 서고 그 집기는 부모의 세션 id 로 적힌다 — 이름만 보던 판은
+    /// `.worktrees/<에픽>` 이 서는 순간 그 에픽을 통째로 옆의 일로 보아, 규칙 1 이 그 일꾼을 안 지키고 규칙 3 은
+    /// 관점 적힌 리뷰를 집은 뒤에도 리뷰를 막았다. 집지 않은 줄은 전처럼 이름이 가른다.
+    #[test]
+    fn a_row_this_session_picked_stays_mine_under_a_sibling_worktrees_name() {
+        let all = vec![
+            epic("t-e"),
+            under("t-e.aa", "in_progress", "t-e"),
+            under("t-e.bb", "in_progress", "t-e"),
+            review("t-e.r", "in_progress", Some("t-e")),
+        ];
+        let root = Away { names: set(&["t-e"]), own: set(&["develop"]), ..Away::default() };
+        assert!(held(&all, &cfg(), &root).is_empty(), "이름이 가리킨 에픽을 제 초점으로 셌다");
+        assert_eq!(guard_create(&all, &cfg(), &root, "moai add '딴 일'"), Decision::Pass);
+        assert!(denied(&guard_review(&all, &cfg(), &root)).contains("holding nothing"));
+
+        // **확실히 집은 줄만 이긴다**(리뷰 moai-9tqo.jdi 5번) — 돌았는지 모르는 집기(`picked` 에만 든 줄)는 옆 이름에
+        // 그대로 진다. 이기면 안 돈 집기 하나가 옆 워크트리의 줄로 규칙 1 을 새로 세운다(moai-hze6).
+        let maybe = Away { picked: set(&["t-e.aa", "t-e.r"]), ..root.clone() };
+        assert!(held(&all, &cfg(), &maybe).is_empty(), "돌았는지 모르는 집기가 옆 이름을 이겼다");
+        assert_eq!(guard_create(&all, &cfg(), &maybe, "moai add '딴 일'"), Decision::Pass);
+        let mine = Away { sure: set(&["t-e.aa", "t-e.r"]), ..root };
+        let focus: Vec<&str> = held(&all, &cfg(), &mine).iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(focus, ["t-e.aa", "t-e.r"], "제가 집은 줄을 옆 이름에 내줬다");
+        // 규칙 1 이 다시 선다 — 맨 `add` 는 막고, 그 에픽 안은 지난다.
+        let why = denied(&guard_create(&all, &cfg(), &mine, "moai add '딴 일'")).to_string();
+        assert!(why.contains("t-e.aa") && !why.contains("t-e.bb"), "남의 집기를 초점으로 댄다\n{why}");
+        assert_eq!(guard_create(&all, &cfg(), &mine, "moai add '딴 일' -e t-e"), Decision::Pass);
+        // 규칙 3 — 관점 적힌 리뷰를 집었으니 리뷰가 돈다.
+        assert_eq!(guard_review(&all, &cfg(), &mine), Decision::Pass, "제가 집은 리뷰를 옆의 것으로 봤다");
+        // `Stop` 도 제 줄을 붙든다 — 감독이 서브에이전트 일꾼의 줄을 붙드는 것이 받아들인 대가다.
+        let Decision::Block(why) = closing(&all, &all, &cfg(), &mine, 0, None) else {
+            panic!("제가 집은 줄을 안 붙든다");
+        };
+        assert!(why.contains("t-e.aa") && !why.contains("t-e.bb"), "{why}");
     }
 
     /// **집기가 지면 끝내는 묶음을 지나면 집기가 이긴 채다**(moai-ncay) — `집기 || { …; exit 1; }` 와

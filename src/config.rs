@@ -210,7 +210,8 @@ pub struct Thresholds {
     pub wip_days: i64,
     /// 막힌 채로 이 날수를 넘겨 서 있으면 "계획이 멈춘 자리" 로 본다.
     pub blocked_days: i64,
-    /// 한 번에 이보다 많이 벌이면 알린다(`count > wip_limit`).
+    /// 한 번에 이보다 많이 벌이면 알린다(`count > wip_limit`). 세는 것은 묶음이다 — 같은 에픽의 멤버는 하나다
+    /// (moai-rs3o.nmu, `report::status` 의 3번).
     pub wip_limit: usize,
     /// 에픽 없는 이슈가 **이 비율부터** 알린다(`ratio >= no_epic_ratio`).
     pub no_epic_ratio: f64,

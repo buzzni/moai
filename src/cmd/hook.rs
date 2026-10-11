@@ -298,7 +298,8 @@ fn decide(
             };
             // **사람은 묻는 자리에서 푼다**(moai-0zjo 리뷰, [`crate::hook::Person`]) — 여기서는 푸는 길만 건넨다.
             let me = person_at(&repo, ctx);
-            let decision = settle(input, &repo, &load.issues, away_of(&repo, &load.issues, &me), &|issues, away| {
+            let base = away_of(input, &repo, &load.issues, &me);
+            let decision = settle(input, &repo, &load.issues, base, &|issues, away| {
                 match call {
                     // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
                     // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
@@ -321,7 +322,7 @@ fn decide(
                         let Ok(load) = other.read() else { return Decision::Pass };
                         let only = |k: usize| routes.get(k) == Some(&Route::There(n));
                         // 사람은 **그 트래커의 뿌리에서** 푼다 — 남의 저장소의 git 설정이 그 저장소의 사람이다.
-                        let away = away_of(other, &load.issues, &person_at(other, ctx));
+                        let away = away_of(input, other, &load.issues, &person_at(other, ctx));
                         settle(input, other, &load.issues, away, &|issues, away| {
                             crate::hook::guard_moai(issues, &other.config, away, line, &only, &|_| {
                                 Some(crate::hook::Aimed::stands(other.root.as_path()))
@@ -703,11 +704,16 @@ fn settle(
     let seen = overlaid.is_some();
     // **빌려 쓴다** — 겹치지 않은 판의 줄은 부르는 쪽의 것 그대로다. 통째로 베끼던 판은 막거나 비추는
     // 호출마다 스냅샷 전체를 복제했고, 훅은 도구 호출마다 돈다.
+    //
+    // **겹친 판도 이 세션의 집기를 싣는다**(moai-pxui) — 옆 이름을 다시 읽으니 집기도 그 줄로 다시 잰다.
+    // `base` 의 것을 옮기지 않는 까닭: `base` 는 제 스냅샷에 집은 줄이 없으면 이름을 안 읽어 집기도 비고,
+    // 기록이 끝났는지는 겹친 줄의 칸 시각으로 재야 맞다.
     let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
-        Some((fresh, beside)) => (
-            std::borrow::Cow::Owned(fresh),
-            crate::hook::Away { me: base.me.clone(), archive: base.archive.clone(), ..beside },
-        ),
+        Some((fresh, beside)) => {
+            let mut away = crate::hook::Away { me: base.me.clone(), archive: base.archive.clone(), ..beside };
+            add_picked(input, repo, &fresh, &mut away);
+            (std::borrow::Cow::Owned(fresh), away)
+        }
         None => (std::borrow::Cow::Borrowed(issues), base),
     };
     // **겹쳐 보기만으로 풀리면 거기서 끝낸다** — 모름을 재는 값(옆 스냅샷을 다시 읽고 세션의 기록을
@@ -748,7 +754,12 @@ fn person_at(repo: &Repo, ctx: &Ctx) -> crate::hook::Person {
 ///
 /// **담당이 내가 아닌 줄도 뺀다**(moai-0zjo) — 사람은 늘 싣되 묻는 자리에서 푼다([`person_at`]). 집은 것이
 /// 없어도 싣는다 — 규칙 5 는 집은 것이 없는 세션의 첫 집기에서 가장 자주 선다.
-fn away_of(repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> crate::hook::Away {
+///
+/// **옆 이름이 서면 이 세션의 집기도 싣는다**(moai-pxui, [`crate::hook::Away::picked`]) — 이 세션이 확실히
+/// 집은 줄은 옆 이름이 가리켜도 제 것이다. 막는 판정에도 실어야 루트에 선 서브에이전트 일꾼에게 규칙 1 이
+/// 다시 선다 — 이름이 그 줄을 빼면 첫 판정이 지나가 [`settle`] 이 다시 볼 일도 없다. 옆 이름이 없으면 이길
+/// 것이 없으니 기록을 안 읽는다.
+fn away_of(input: &Input, repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> crate::hook::Away {
     // 규칙 5 가 아카이브의 줄을 찾는 손(moai-bth3) — 읽는 것은 여기(`cmd/`)고, `hook` 은 집는 id 가 산 스냅샷에 없을
     // 때만 이 손을 부른다. 못 읽는 아카이브 파일은 건너뛴다(`archive::read` 가 너그럽다).
     let archive = Some(crate::hook::Archive {
@@ -762,7 +773,18 @@ fn away_of(repo: &Repo, issues: &[model::Issue], me: &crate::hook::Person) -> cr
     // 찾는 길이 딸린 워크트리를 루트로 옮기므로(`Repo::find_from`) `repo.root` 는 늘 루트다. 거기서
     // 이름을 읽으면 워크트리 안에서 도는 세션이 제 이름을 잃고, 제 워크트리가 쥔 일이 통째로 "옆의
     // 것" 이 되어 규칙 2 가 그 자리의 쓰기를 막는다.
-    crate::hook::Away { me: me.clone(), archive, ..crate::worktree::away(repo.here()) }
+    let mut away = crate::hook::Away { me: me.clone(), archive, ..crate::worktree::away(repo.here()) };
+    add_picked(input, repo, issues, &mut away);
+    away
+}
+
+/// 옆 이름이 서면 이 세션이 **확실히** 집은 줄을 `away` 에 싣는다(moai-pxui, [`crate::hook::Away::sure`]) —
+/// [`away_of`] 와 겹쳐 본 판([`settle`])이 같은 자로 잰다. 겹친 판의 이름은 옆 스냅샷에서 다시 읽으므로, 거기서
+/// 처음 이름이 서면 그때 읽는다.
+fn add_picked(input: &Input, repo: &Repo, issues: &[model::Issue], away: &mut crate::hook::Away) {
+    if !away.names.is_empty() {
+        away.sure.extend(read_picks(input, repo, issues).sure);
+    }
 }
 
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
@@ -792,7 +814,7 @@ fn releasing(
     issues: &[model::Issue],
     me: &crate::hook::Person,
 ) -> (crate::hook::Away, Option<Vec<model::Issue>>) {
-    let mut away = away_of(repo, issues, me);
+    let mut away = away_of(input, repo, issues, me);
     if crate::hook::held(issues, &repo.config, &away).is_empty() {
         return (away, None);
     }

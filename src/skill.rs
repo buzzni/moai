@@ -151,7 +151,7 @@ pub fn picked(all: &[Skill], optional: &[&str]) -> Vec<Skill> {
 /// 스킬과 그 파일이 모두 여기 들었는지는 시험이 잰다(`cmd::skill::tests::every_planted_skill_is_on_the_list`).
 pub const EVER_PLANTED: [(&str, &[&str]); 8] = [
     ("moai", &["SKILL.md", "references/commands.md"]),
-    ("moai-supervise", &["SKILL.md", "references/worker.md"]),
+    ("moai-supervise", &["SKILL.md", "references/worker.md", "references/worker-codex.md"]),
     ("moai-wiki", &["SKILL.md"]),
     ("moai-tmux", &["SKILL.md"]),
     ("moai-cmux", &["SKILL.md"]),
@@ -205,7 +205,11 @@ pub fn skills() -> Vec<Skill> {
         // 판은 보낼 때마다 출력 토큰 8~10k 가 들었고, 줄이거나 바꿔 옮긴 글을 아무것도 못 잡았다.
         Skill {
             name: supervisor,
-            files: vec![("SKILL.md", crate::guide::supervise()), ("references/worker.md", crate::guide::worker())],
+            files: vec![
+                ("SKILL.md", crate::guide::supervise()),
+                ("references/worker.md", crate::guide::worker()),
+                ("references/worker-codex.md", crate::guide::worker_codex()),
+            ],
             claude_only: true,
         },
         // 위키 스킬도 따로 선다 — 부르는 자리가 에픽 끝(브리프 7-4)과 사람이 청한 훑기라, `moai` 스킬에 섞으면 이슈
@@ -1581,7 +1585,7 @@ mod tests {
 
     const NOW: &str = "2026-01-01T00:00:00Z";
 
-    /// 심는 것은 열하나다 — 스킬, 참고, 감독 스킬과 그 일꾼 글, 위키 스킬, tmux 스킬, cmux 스킬, Saycode 스킬, 되살리기
+    /// 심는 것은 열둘이다 — 스킬, 참고, 감독 스킬과 그 일꾼 글 둘, 위키 스킬, tmux 스킬, cmux 스킬, Saycode 스킬, 되살리기
     /// 스킬, 그리고 매니페스트 둘.
     #[test]
     fn the_tree_has_what_claude_needs() {
@@ -1591,6 +1595,7 @@ mod tests {
             "skills/moai/references/commands.md",
             "skills/moai-supervise/SKILL.md",
             "skills/moai-supervise/references/worker.md",
+            "skills/moai-supervise/references/worker-codex.md",
             "skills/moai-wiki/SKILL.md",
             "skills/moai-tmux/SKILL.md",
             "skills/moai-cmux/SKILL.md",
@@ -1709,6 +1714,14 @@ mod tests {
         for s in skills() {
             let (_, body) = s.files.iter().find(|(rel, _)| *rel == "SKILL.md").expect("SKILL.md 가 없다");
             for (rel, _) in s.files.iter().filter(|(rel, _)| *rel != "SKILL.md") {
+                // Codex 차이 글은 cmux/tmux 손이 보낸다. 감독 본문은 Claude 의 걸음을 그대로 둔다.
+                if s.name == "moai-supervise" && *rel == "references/worker-codex.md" {
+                    assert!(s.claude_only, "Codex 차이 글이 감독 스킬로 .agents 에 섰다");
+                    for (hand, text) in [("moai-tmux", crate::guide::tmux()), ("moai-cmux", crate::guide::cmux())] {
+                        assert!(text.contains(*rel), "{hand} 가 Codex 일꾼에게 {rel} 를 안 댄다");
+                    }
+                    continue;
+                }
                 assert!(body.contains(&format!("`{rel}`")), "{} 의 SKILL.md 가 곁에 심는 {rel} 를 안 부른다", s.name);
             }
         }
@@ -1758,8 +1771,8 @@ mod tests {
             })
             .count();
         assert_eq!(
-            only_claude, 6,
-            "감독 스킬은 SKILL.md 와 references/worker.md 둘, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
+            only_claude, 7,
+            "감독 스킬은 SKILL.md 와 일꾼 글 둘, tmux·cmux·Saycode·되살리기 스킬은 SKILL.md 하나씩이다"
         );
         assert_eq!(
             shared.len() + 2 + only_claude,

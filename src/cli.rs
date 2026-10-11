@@ -148,7 +148,7 @@ pub enum Cmd {
     status_review_days   = 3      days in review before it counts as rot
     status_wip_days      = 2      days untouched after pickup before forgotten
     status_blocked_days  = 3      days blocked before it counts as stuck
-    status_wip_limit     = 3      more than this opened at once
+    status_wip_limit     = 3      more than this opened at once, an epic as one
     status_no_epic_ratio = 0.15   issues with no epic from this ratio up
     status_no_epic_min   = 5      from this count up, even at a low ratio
     status_flow_days     = 7      the window the flow is measured over
@@ -866,6 +866,20 @@ Examples:
     )]
     Project(ProjectCmd),
 
+    /// Read the model per role from your user config
+    #[command(after_help = "  moai models           the model per role, with defaults marked
+  moai models --json    one object for skills, including written keys and path
+
+  Reads [models] in your user config. No .moai is needed; repository config
+  is not read. The place is MOAI_CONFIG, then $XDG_CONFIG_HOME/moai/config.toml,
+  then ~/.config/moai/config.toml. Missing files use the built-in defaults.
+
+  Model names are strings. review_grade, effort and effort_complex accept
+  low, medium, high, xhigh or max. Invalid values fall back per key and warn;
+  unknown keys warn. written lists only valid, known keys from the config.
+  This command only reads; edit the user config by hand to change the table.")]
+    Models,
+
     // **받고 돌리는 길은 `cmd::update`, 고르는 길은 `update` 다**(moai-zsfr.2p9). 저장소의 `.moai` 를 안
     // 찾는다 — 올리는 것은 이 바이너리지 트래커가 아니다.
     /// Upgrade the moai you are running with install.sh
@@ -1472,10 +1486,10 @@ const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters 
   unknown are counted apart, and the median and p90 cover the measured
   ones only. It is wall clock, not effort.
 
-  AI work sums the `model:` lines, and recorded counts the rows that carry
-  one. Tokens add up over the lines that carry them (tokened), and tokens
-  is null when none does - unknown, not 0. Reviews are the rows tagged
-  review; the grade on their lines is the review grade.
+  AI work counts the `model:` lines, and recorded counts the rows that carry
+  one. Tokens are not added up: what a window or an agent shows was not
+  what the work cost. Reviews are the rows tagged review; the grade on
+  their lines is the review grade.
 
   moai stats                           the overview
   moai stats -e moai-1hka              one epic's members
@@ -1501,9 +1515,9 @@ const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters 
      \"lead_time\":{\"done\":30,\"measured\":30,\"unknown\":0,
                   \"median\":95,\"p90\":4100},
      \"cycle_time\":{...the same keys...},
-     \"work\":{\"recorded\":25,\"lines\":31,\"tokened\":28,\"tokens\":5100000,
+     \"work\":{\"recorded\":25,\"lines\":31,
              \"by_model\":[{\"provider\":\"anthropic\",\"model\":\"opus-5\",
-                          \"lines\":31,\"tokened\":28,\"tokens\":5100000}],
+                          \"lines\":31}],
              \"by_grade\":[{\"grade\":\"high\",\"lines\":12,...},...]},
      \"reviews\":{\"rows\":6,\"work\":{...the same keys as work...}}}";
 

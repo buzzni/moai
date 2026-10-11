@@ -84,6 +84,23 @@ fn say_if_dead(issues: &[Issue], cfg: &crate::config::Config, stone: Option<&str
     }
 }
 
+/// 데려갈 마일스톤이 **에픽에서 물려받은 것**이면 stderr 에 한 줄(moai-rs3o.fg4). 막지는 않는다.
+///
+/// 담긴 생각은 제 필드가 비어도, 혹은 다른 값을 들어도 그 에픽의 마일스톤 밑에 선다([`stone_of`]) — 규칙은 그대로
+/// 두고 **왜 그 마일스톤인지**만 댄다. 안 대면 사람은 생각의 필드가 비었는데 릴리스에 든 에픽이 서는 것을 보고서야
+/// 안다(사용후기 2026-10-12). 물려받았는지는 [`crate::report::inherited_from`] 이 가른다 — 제 필드와 같으면 사람이
+/// 고른 것이라 침묵하고, 에픽이 없는데 값이 다르면 조상 이슈에서 받은 것이라 이 글이 말하는 "에픽" 이 아니다.
+/// `-e <에픽>` 이면 [`stone_of`] 가 아무것도 안 데려가니 여기도 없다.
+///
+/// 펼친 에픽의 id 는 연습에서 모르니 `<epic>` 자리글로 둔다 — **연습과 진짜가 같은 줄을 낸다**는 [`say_if_dead`]
+/// 의 약속이 이유다. 죽은 릴리스의 줄과는 따로다: 물려받았고 죽었으면 두 사실이라 두 줄이 선다.
+fn say_if_inherited(issues: &[Issue], thought: &Issue, stone: Option<&str>, lang: crate::i18n::Lang) {
+    let Some(m) = stone else { return };
+    let Some(epic) = crate::report::inherited_from(issues, thought, m) else { return };
+    let said = crate::i18n::fill(crate::i18n::say(lang, "backlog.milestone_inherited"), &[("id", m), ("epic", epic)]);
+    eprintln!("moai: {said}");
+}
+
 /// 펼치기가 에픽에 데려갈 본문 — **`-e <에픽>` 이면 없다**(moai-07v1).
 ///
 /// 그 에픽이 이미 임자고, 멤버는 거기서 마일스톤을 물려받는다. **한 자리에서 고른다**: 연습과
@@ -186,6 +203,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // 약속("연습과 진짜가 같은 줄을 낸다")과 어긋난다.
         check_carried_body(&args.id, carried_body(thought, into))?;
         let stone = stone_of(&load.issues, &args.id, into);
+        say_if_inherited(&load.issues, thought, stone.as_deref(), ctx.lang());
         say_if_dead(&load.issues, &repo.config, stone.as_deref(), ctx.lang());
         // **순서도 진짜와 같다.** 맨 앞에 두면 없는 id 에 큰 계획을 준 부름에 `bad_input` 을
         // 내는데 진짜는 `not_found` 를 낸다 — 제목을 줄여 다시 부르고서야 id 가 없다는 것을 알고,
@@ -283,6 +301,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 짓는 에픽의 제목을 대고, 받는 쪽은 제 계획의 첫 줄을 줄이러 간다.
             check_carried_body(&args.id, text.as_deref())?;
             let stone = stone_of(issues, &args.id, into);
+            say_if_inherited(issues, thought, stone.as_deref(), lang);
             say_if_dead(issues, cfg, stone.as_deref(), lang);
             let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref() };
 

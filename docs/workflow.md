@@ -94,7 +94,9 @@ puts an issue under it. Each issue gets an id under the epic's own,
   up and the group stands `in_progress`, finish them all and it stands `done`
 - **Something for later is a [backlog item](glossary.md#backlog)**, not an issue — `moai backlog add`. Backlog items stay
   off the board and out of `moai ready`, and `moai backlog promote <id> --from -`
-  unfolds one into an epic and issues when its time comes
+  unfolds one into an epic and issues when its time comes. When the milestone
+  it carries came from the epic the backlog item stood under, `promote` says so on
+  stderr in one line
 - **A [running milestone](glossary.md#running-milestone) is the person's to fill.** A milestone runs once any of
   its members has started; from then `moai ready` hands out its work plus anything
   `p0`, and nothing else is pulled into it unless the person says so
@@ -117,7 +119,7 @@ and wait on each other to merge.
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,
   `.worktrees/milestone-<milestone id>`, until the release takes it in
-  (moai-nvju). See [handing work to idle sessions](agents.md#hand-work-to-idle-sessions)
+  (moai-nvju). See [handing work to workers](agents.md#hand-work-to-workers)
 
 - **The [tracker](glossary.md#tracker) stays in the main checkout.** A `moai` run inside a linked
   worktree reads and writes the main checkout's `.moai/`, and one line on stderr
@@ -218,7 +220,9 @@ where its contributors read them rather than repeated here:
   `milestone/<id>` for work inside a milestone, moai-nvju; branches
   are `worktree-moai-<id>`, and `target/` is a link to `/tmp/cargo-target/<name>`
   because `/home` stalls under parallel builds, moai-c5xo), the review grade table
-  (which `/code-review` level an epic gets, moai-9793, moai-bx6t), the
+  (which `/code-review` level an epic gets — `xhigh` on the review model, `max` for
+  the write path and hooks, moai-9793, moai-bx6t, moai-9tqo), the roles' default
+  models, the
   [`Regression-of:` line](glossary.md#regression-of) on bugs a merged epic caused
   (moai-21zt), and how a
   milestone is named before and after a release
@@ -249,4 +253,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo

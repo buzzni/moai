@@ -134,7 +134,7 @@ Four skills are always planted, and three more are yours to choose:
 
     moai              the tracker itself — what to pick up, issues, plans, backlog items
     moai-wiki         keeps this wiki in step with the work
-    moai-supervise    Claude Code only: hands piled-up backlog items to the idle sessions of the repository
+    moai-supervise    Claude Code only: hands piled-up backlog items to workers, one at a time
     moai-recover      Claude Code only: brings back the sessions of the repository that died
     moai-tmux         optional, Claude Code only: the supervisor's hands on the workers' tmux panes
     moai-cmux         optional, Claude Code only: the same on the workers' cmux tabs (cmux 0.65.0 or later)
@@ -147,11 +147,13 @@ Four skills are always planted, and three more are yours to choose:
   everything merged since the last release
 - **`moai-supervise`** makes a Claude Code session the
   [supervisor](glossary.md#supervisor), which hands the
-  [backlog items](glossary.md#backlog), one at a time, to the
-  [workers](glossary.md#worker) idle on the same repository and takes their
+  [backlog items](glossary.md#backlog), one at a time, to
+  [workers](glossary.md#worker) — subagents it raises on the model each role
+  calls for, or the idle sessions of the same repository — and takes their
   reports. It picks, sends and checks; it does not fix and it does not merge.
-  It is planted in the Claude plugin only, since it talks through Claude Code's
-  own messaging — [Hand work to idle sessions](#hand-work-to-idle-sessions).
+  It is planted in the Claude plugin only, since it raises Claude Code's
+  subagents and talks through Claude Code's own messaging —
+  [Hand work to workers](#hand-work-to-workers).
   The worker's way of working is on
   [the workflow page](workflow.md#work-in-a-worktree)
 - **`moai-recover`** is what you call when the sessions died together — a
@@ -263,6 +265,17 @@ would run with the sandbox off, and the question does not say so.
 `.codex/hooks.json` in the same directory is committed — the two part ways
 there. Only the sandbox goes: the approval setting is left at Codex's default.
 
+A Codex session can also be a supervisor's worker in a [tmux pane](#in-tmux)
+or [cmux tab](#in-cmux), with `Worker: codex` in its assignment. The assignment
+names `references/worker-codex.md` by its absolute path; Codex reads `worker.md`
+beside it, then those differences. Reports are epic notes, committed from the
+root — after unfolding a backlog, Codex first names the new epic on that backlog
+with an `Unfolded:` note. After tests and commits, Codex writes `Review-ready:`
+and stops; the supervisor's review subagent reviews the work before a second
+"merge and close" assignment, and Codex then takes the review's fixes in itself.
+Record the model that actually ran in the issue's `model:` note, without a token
+count. Hook trust in `/hooks` is still required as above.
+
 ### Antigravity
 
     agy
@@ -342,64 +355,99 @@ gets through — run it as given. None of them waits on a person except rule 5.
 `git config`. When none of them says, a write stops and asks for one — reads
 never ask — and rule 5 sets nothing apart.
 
-## Hand work to idle sessions
+## Hand work to workers
 
-moai carries no messaging between agents. The supervisor is a Claude Code
-session, and it talks to the others with Claude Code's own tools — `ListAgents`
-to see who is here, `SendMessage` to hand over work and to report back. Codex
-and Antigravity have no supervisor; their sessions pick their own work with
-`moai ready`.
+moai carries no messaging between agents, and the moai binary never launches one.
+The supervisor is a Claude Code session, and by default its
+[workers](glossary.md#worker) are **subagents** it raises with Claude Code's
+`Agent` tool — each on the model its role calls for. When you want to watch the
+workers' windows, or the worker is Codex, the workers are **sessions** instead
+([In a session](#in-a-session)). Codex and Antigravity have no supervisor skill; a Codex session can still be a
+worker in a tab or pane. Sessions working independently pick their own work
+with `moai ready`.
 
-1. **Open the sessions.** Every Claude Code session a person opened in the
-   repository's root on this machine that sits idle in `ListAgents` is a
-   [worker](glossary.md#worker) — a Remote Control or cloud session cannot read
-   the steps file the supervisor names. `ListAgents` shows no directory, so the
-   supervisor knows a session of this repository by its name, which Claude Code
-   slugs from the directory it was opened in (`moa-issue-bc` for `moa-issue`,
-   `tvshop-updater-ca` for `tvshop_updater`) — a session you renamed is not
-   counted. A name is only a candidate: a session of another repository whose
-   name happens to start the same way refuses the work when `Root:` is not its
-   repository. Nothing registers it, and nobody is asked which ones
-2. **Make the supervisor — one per repository.** In one of them, call
-   `/moai-supervise`; it asks you first whether another window already runs it,
-   and a supervisor that is sent work refuses it. It picks
-   backlog items that do not collide with the work open, and finds the workers
-   in `ListAgents`: every idle session of this repository except itself
-3. **The message carries the assignment and names the steps.** `SendMessage` to
-   the worker opens with a line naming the work and telling it to read the
+### The models are yours
+
+Which model each role runs on is your own choice, kept in your user config under
+`[models]` — the file `moai models` names on its last line. These are the
+defaults; write only the keys you change:
+
+```toml
+[models]
+plan    = "fable"
+develop = "sonnet"        # development — most work
+complex = "opus"          # the write path, concurrency, the storage format, hooks, several files' contract
+review  = "opus"          # the epic-end review
+docs    = "sonnet"        # a backlog item that only touches the wiki or the CHANGELOG
+bulk    = "haiku"         # sorting, summing up, a review text past 64KB, the same mechanical fix
+codex   = "gpt-6.1-sol"   # a Codex worker
+review_grade   = "xhigh"  # low|medium|high|xhigh|max
+effort         = "medium" # develop, docs, bulk
+effort_complex = "high"   # complex
+```
+
+`moai models` shows the table with the defaults marked; `moai models --json` is
+what the supervisor reads at the start of every round, so a change counts from the
+next one. A grade or an effort that is not one of the five words falls back to its
+default with one line on stderr, and an unknown key is named and skipped. A
+model name is not checked: the Claude roles go to Claude Code's `Agent` as written,
+so write a name it raises a subagent on, and the supervisor tells you when one is
+refused. The repository's `.moai/config.toml` does not carry models — what each
+one costs is yours.
+
+### One round
+
+1. **Make the supervisor — one per repository.** In one Claude Code session in
+   the repository's root, call `/moai-supervise`; it asks you first whether
+   another window already runs it, and a supervisor that is sent work refuses
+   it. It reads `moai models --json` and picks backlog items that do not collide
+   with the work open
+2. **It picks a role and raises a worker.** Each backlog item goes to one role —
+   `develop` or `complex` by one word of difficulty, `docs` for the wiki and the
+   CHANGELOG, `bulk` for mechanical work — and the supervisor raises a subagent
+   on that role's model and effort. How many run side by side it asks you once a
+   round. Raised inside the supervisor's session, the worker stands in the root,
+   so it works its worktree by absolute paths
+3. **The prompt carries the assignment and names the steps.** It opens with a
+   line naming the work and telling the worker to read the
    [brief](glossary.md#brief) — the worker's numbered steps, a file of the
    supervisor skill (`references/worker.md`) given by its absolute path — and
-   from which step to follow it. The worker is a session of the same repository
-   and loaded the same plugin, so the file is there for it. The lines after that
-   fill this assignment — the backlog, the model and difficulty picked for it,
-   the work running alongside, the root branch and the base branch, the
-   milestone, the root and whether the person is away. The supervisor
-   sends it with `notify_when_idle` and waits for the report; it does not poll
-   `ListAgents`
+   from which step to follow it. The lines after that fill this assignment — the
+   backlog, the model, the effort and the difficulty, whether the worker is a
+   subagent or a session, the work running alongside, the root branch and the
+   base branch, the milestone, the root and whether the person is away
 4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
    picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
-   reviewed with `/code-review` inside its own session, merges, closes, leaves a
-   `Next:` note and, last of all, reports with `SendMessage` to the supervisor
-   that sent the work — if that send fails because the supervisor restarted, it
-   leaves the report as a `report:` note on the epic, and a supervisor that
-   starts or resumes reads those before it waits. Then it tells its person whether the window can be
-   cleared now, and ends its turn; the next message wakes it
+   reviewed, merges, closes, leaves a `Next:` note and, last of all, reports. A
+   subagent leaves the report on the epic as a `report:` note first and then
+   hands it back — the notice that it ended is the report, and the note is what
+   a supervisor that restarted reads. A design question the notes do not settle
+   comes back as `decision needed: <id>`; the supervisor asks you and wakes the
+   same worker with your answer. Work that reads heavier than the model it was
+   raised on comes back, before anything is picked up, as
+   `Model: raise to complex`, and the supervisor raises a new worker on that model,
+   its message's `Model:` and `Effort:` lines changed to match
 5. **The supervisor checks the report** — the merge is on that work's base branch, the
-   epic is done, the worktree is gone — and sends the next backlog item
+   epic is done, the worktree is gone — writes the
+   [model line](glossary.md#model-line) of a subagent worker from the report's
+   `Model ran:` line, and sends the next backlog item to a new worker
 
-**The review runs inside the worker's own session.** It never starts another
-agent program for it.
+**The epic-end review is the epic's only one, on the review model.** The worker
+reviews the whole epic once, at the end, with `/code-review` at `review_grade` —
+`xhigh` by default, `max` when a member touched the write path, concurrency, the
+storage format or hooks, or when the worktree carries members of two epics. A
+subagent worker raises that review as a subagent of its own on the `review`
+model, because a review called from a worker runs on the worker's model. It
+never starts another agent program.
 
-**Outside tmux and cmux, clearing a window is the person's.** The context lives
-in the tracker, so a worker may be cleared (`/clear`) between tasks — its report
-says when that is safe and when it is not. Without tmux or cmux the supervisor
-never types into a window.
-
-**What the messages do not do.** A session in a different permission mode
-keeps an incoming message for its person's approval; a subagent's message goes
-out under its parent session's address; an `@path` in a message attaches
-nothing, so the message names the steps file by its absolute path and the
-worker reads it.
+**The hook reads a subagent worker as the supervisor.** A subagent's tool calls
+carry the supervisor's session, so the rows it picks up are the supervisor's
+[focus](glossary.md#focus) as well, and the hook holds the supervisor's turn end on
+them — once a session, as it holds any session's. A row a session picked up
+for certain stays its own even when a sibling worktree's name points at it — that
+is what keeps rule 1 guarding a subagent in the root and lets its review through
+rule 3 once the worker has picked the review issue up (moai-pxui). A pick written
+after `&&`, which may not have run, does not count: the name still wins.
 
 **Stalled work** — a member picked up with no live session working it — the
 supervisor looks for before any new backlog, and it reads it from the tracker,
@@ -438,6 +486,45 @@ with `git merge --no-ff` as they stand, never rebased or squashed.
 `Person: away`. The worker then settles a design question by its own
 recommendation and leaves `Decided alone: …` on the issue instead of waiting,
 and stops at anything that cannot be undone.
+
+### In a session
+
+When you ask to watch the workers' windows, and for a Codex worker, the workers
+are sessions. The supervisor talks to them with Claude Code's own tools —
+`ListAgents` to see who is here, `SendMessage` to hand over work and to report
+back.
+
+- **Open the sessions.** Every Claude Code session a person opened in the
+  repository's root on this machine that sits idle in `ListAgents` is a worker —
+  a Remote Control or cloud session cannot read the steps file the supervisor
+  names. `ListAgents` shows no directory, so the supervisor knows a session of
+  this repository by its name, which Claude Code slugs from the directory it was
+  opened in (`moa-issue-bc` for `moa-issue`, `tvshop-updater-ca` for
+  `tvshop_updater`) — a session you renamed is not counted. A name is only a
+  candidate: a session of another repository whose name happens to start the
+  same way refuses the work when `Root:` is not its repository. Nothing
+  registers it, and nobody is asked which ones
+- **The message goes by `SendMessage`** with `notify_when_idle`, and the
+  supervisor waits for the report; it does not poll `ListAgents`. The worker
+  reports with `SendMessage` too — if that send fails because the supervisor
+  restarted, it leaves the report as a `report:` note on the epic, and a
+  supervisor that starts or resumes reads those before it waits. Then it tells
+  its person whether the window can be cleared now, and ends its turn; the next
+  message wakes it
+- **A session asks you itself.** It puts a design question to you with its own
+  question box, and it asks you to switch its model with `/model` when the work
+  reads heavier — a running session's model changes only that way
+
+**Outside tmux and cmux, clearing a window is the person's.** The context lives
+in the tracker, so a worker may be cleared (`/clear`) between tasks — its report
+says when that is safe and when it is not. Without tmux or cmux the supervisor
+never types into a window.
+
+**What the messages do not do.** A session in a different permission mode
+keeps an incoming message for its person's approval; a subagent's message goes
+out under its parent session's address; an `@path` in a message attaches
+nothing, so the message names the steps file by its absolute path and the
+worker reads it.
 
 ### In tmux
 
@@ -488,6 +575,19 @@ time in another form (`ps -o lstart`), and a pane is matched to a session by its
 terminal (`#{pane_tty}`), never by reading another process's environment
 (moai-p5sz.7q3).
 
+**Codex workers.** The skill finds Codex from the running server's pane
+command, path and live process, including a shell launcher's child; it does not
+add Codex to the Claude session map. It checks the screen, live PID and completed
+report together, leaving copy mode, drafts and dialogs to you. `/new` text and
+Enter are separate calls; you handle any work directory menu. Assignments use
+`load-buffer`, `paste-buffer -p` and a separate Enter. New panes require your
+yes and use `[models] codex`, read from `moai models --json`; once a round the
+supervisor checks official models with `WebSearch` and tells you if that value
+is outdated. A `Monitor` watches epic notes every 30 seconds for up to 30 minutes,
+then is rearmed if needed; a backlog sent before its epic exists is watched until
+its `Unfolded:` note names the epic. `Review-ready:` goes to the supervisor's
+review subagent; the second assignment follows its completed review (moai-uzhx).
+
 ### In cmux
 
 When the supervisor runs inside a [cmux](https://github.com/manaflow-ai/cmux)
@@ -529,6 +629,20 @@ every session in it, so when to update is yours.
 
 It never closes a tab, a workspace or a window, never moves focus, and never
 passes `--force`.
+
+**Codex workers.** The skill uses `cmux top` and live Codex PIDs whose cwd is
+the root or a named worktree, rather than the Claude session map. Before input,
+it checks the screen, live PID and completed report together; cmux's input state
+alone does not establish an idle, empty Codex composer. It sends `/new` text,
+reads the screen and sends Enter separately; you handle the work directory menu.
+It pastes a multiline assignment with `cmux paste --surface <UUID> --submit -`
+from a file. New tabs require your yes and use `[models] codex`; the supervisor
+reads `moai models --json` and checks official models with `WebSearch` once a
+round. A `Monitor` watches epic notes every 30 seconds for up to 30 minutes,
+then is rearmed if needed; a backlog sent before its epic exists is watched until
+its `Unfolded:` note names the epic. Codex stops at `Review-ready:` for the supervisor's
+review subagent and waits for its second assignment. Refused input is never
+forced, and drafts and permission prompts remain yours (moai-uzhx).
 
 ### In Saycode
 
@@ -602,6 +716,9 @@ finds its id as an `ended` row in `happy agent ls --status` and prints
 reopen it from Saycode's session list. A worker that is one comes back before
 the supervisor does.
 
+Codex sessions are not in this map and are not resumed by `moai-recover`;
+open a Codex session yourself and read its epic notes to continue (moai-uzhx).
+
 It changes nothing in the sessions' work — no commit, no build, no `moai` write.
 
 ## Work the queue from a session
@@ -623,11 +740,13 @@ session reads these the way that person would.
 
 **Name the AI that did the work** before closing an issue — one note, the
 [model line](glossary.md#model-line), one line per issue, read back as `work` in
-`--json` and summed by `moai stats`:
+`--json` and counted by `moai stats`:
 
-    moai note <id> 'model: anthropic/opus-5 tokens=182000 (high — the write path)'
+    moai note <id> 'model: anthropic/opus-5.5 (high — the write path)'
 
-Leave `tokens=` out when the count is unknown; never write 0 or a guess.
+The model is its real name, not the `/model` alias. The line carries no token
+count: what a window or an agent shows is not what the work cost. A subagent
+worker's line is written by the supervisor.
 
 ## When it goes wrong
 
@@ -684,7 +803,7 @@ Leave `tokens=` out when the count is unknown; never write 0 or a guess.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx
 
 ## Archive storage
 
