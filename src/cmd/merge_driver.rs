@@ -1586,7 +1586,10 @@ fn chosen_command(here: &Path) -> Result<String, String> {
     // **까닭은 자료로 낸다** — 부르는 두 자리(`install` 과 `plant_for_init`)가 저마다 제 말로
     // 편다(moai-uzgp). 여기서 글을 지으면 이 함수가 화면 말을 알아야 한다.
     let mine = std::env::current_exe().map_err(|e| e.to_string())?;
-    let Some(found) = on_path(DRIVER) else { return Ok(mine.display().to_string()) };
+    // 심는 줄은 git 이 제 `sh -c` 로 돌린다 — Windows 의 `\` 는 `/` 로 적는다([`crate::path::slashed`],
+    // moai-j9gv.4c1). 사람이 `--as` 로 준 것은 손대지 않는다: 준 것이 이긴다.
+    let spelt = |p: &Path| crate::path::slashed(&p.display().to_string(), cfg!(windows));
+    let Some(found) = on_path(DRIVER) else { return Ok(spelt(&mine)) };
     // 같은 파일이면 고를 것이 없다 — 이름으로 적으면 git 이 병합에서 쓸 `PATH` 에 기대는 것이
     // 하나 늘 뿐이다.
     //
@@ -1597,14 +1600,10 @@ fn chosen_command(here: &Path) -> Result<String, String> {
     // 푸는 자는 [`crate::path::real`] 하나다(moai-8csx) — 이 줄도 그 다섯과 같은 꼴이었는데
     // 목록에서 빠져, 나중에 정할 것(윈도의 `\\?\` 접두어)이 여기만 옛 답으로 남았다(리뷰).
     if crate::path::real(&found) == crate::path::real(&mine) {
-        return Ok(mine.display().to_string());
+        return Ok(spelt(&mine));
     }
-    let word = found.display().to_string();
-    if same_bytes(&found, &mine) && matches!(probe(here, &word), Probe::Runs) {
-        Ok(word)
-    } else {
-        Ok(mine.display().to_string())
-    }
+    let word = spelt(&found);
+    if same_bytes(&found, &mine) && matches!(probe(here, &word), Probe::Runs) { Ok(word) } else { Ok(spelt(&mine)) }
 }
 
 /// 두 파일이 **바이트째 같은가** — 못 읽으면 거짓이다(모르면 덜 이르는 쪽).

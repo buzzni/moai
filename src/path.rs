@@ -145,6 +145,28 @@ pub(crate) fn dir_of(path: &Path) -> &Path {
     path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."))
 }
 
+/// 껍데기 한 줄에 적을 실행 파일의 철자 — **Windows 에서는 `\` 를 `/` 로 바꿔 적는다**(moai-j9gv.4c1).
+///
+/// 훅 한 줄과 머지 드라이버 줄은 껍데기가 돌린다(Windows 에서는 Git for Windows 의 `sh`). `\` 는 그
+/// 글에서 막음 글자라 [`crate::skill`] 의 `quotable` 이 거절하고, 그러면 절대 경로를 버리고 이름(`moai`)만
+/// 적어 `PATH` 에 moai 가 없는 기계에서 훅이 `|| exit 0` 으로 말없이 꺼진다. `C:/Users/…/moai.exe` 는 그
+/// 껍데기도 Windows 의 API 도 같은 파일로 읽는다.
+///
+/// `canonicalize` 가 붙이는 `\\?\` 접두어는 걷는다 — `//?/C:/…` 는 껍데기가 못 연다. `\\?\UNC\` 는 원래의
+/// `\\server\share` 로 돌린다. 유닉스에서는 글자 하나 안 바꾼다 — 거기서 `\` 는 파일 이름의 글자다.
+///
+/// `windows` 를 받는 까닭은 리눅스에서도 그 갈래를 재려는 것이다. 부르는 쪽은 `cfg!(windows)` 를 준다.
+pub(crate) fn slashed(p: &str, windows: bool) -> String {
+    if !windows {
+        return p.to_string();
+    }
+    let p = match p.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => p.strip_prefix(r"\\?\").unwrap_or(p).to_string(),
+    };
+    p.replace('\\', "/")
+}
+
 /// **재는 자는 재는 것 곁에 선다**(리뷰 moai-47yo.era). 이 셋을 여기로 옮기던 날(moai-xvyz) 재는
 /// 시험은 `store` 에 남아, `store` 에 남긴 다리 한 줄을 타고서야 이름이 풀렸다 — 리뷰가 그것을
 /// 짚어 시험도 이리로 왔다. 그 덕에 다리를 걷는 날(moai-fnd0) 그것이 지고 있던 것은
@@ -169,6 +191,16 @@ mod tests {
     /// **재는 것은 뜻이지 고침이 아니다.** `/..` 이 `/` 로 서는 것은 `PathBuf::pop` 이 뿌리에서
     /// 이미 아무것도 안 해서이지, 모으면서 더한 막음 덕이 아니다 — 그 줄을 걷어도 이 네 줄은
     /// 그대로 푸르다. 그래도 세워 두는 까닭은 뜻이 바뀌면(std 가 아니라 이 함수가) 잡으라는 것이다.
+    /// **Windows 의 철자는 `/` 로, 유닉스의 것은 그대로**(moai-j9gv.4c1).
+    #[test]
+    fn the_shell_spelling_turns_backslashes_on_windows_only() {
+        assert_eq!(slashed(r"C:\Users\me\bin\moai.exe", true), "C:/Users/me/bin/moai.exe");
+        assert_eq!(slashed(r"\\?\C:\Users\me\moai.exe", true), "C:/Users/me/moai.exe", "접두어를 안 걷었다");
+        assert_eq!(slashed(r"\\?\UNC\srv\share\moai.exe", true), "//srv/share/moai.exe");
+        assert_eq!(slashed("C:/already/moai.exe", true), "C:/already/moai.exe");
+        assert_eq!(slashed(r"/home/me/a\b/moai", false), r"/home/me/a\b/moai", "유닉스의 이름 글자를 바꿨다");
+    }
+
     #[test]
     fn folding_dots_never_climbs_past_the_root() {
         assert_eq!(lexical(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
