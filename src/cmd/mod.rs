@@ -275,6 +275,48 @@ pub fn runnable(path: &std::path::Path) -> bool {
     }
 }
 
+/// **유닉스가 아닌 데서 이름으로 `PATH` 를 묻는 자**(moai-j9gv.cl6). 위의 `skill`·`tui` 두 물음은
+/// 껍데기와 답을 맞추려고 갈라 두었는데, 거기에는 맞출 `sh` 가 없어 둘이 이리로 모인다.
+#[cfg(not(unix))]
+pub fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
+    let dirs = std::env::var_os("PATH")?;
+    let exts = path_exts(std::env::var_os("PATHEXT").as_deref());
+    found_in(std::env::split_paths(&dirs), name, &exts, runnable)
+}
+
+/// [`find_on_path`] 의 몸통 — 환경을 안 읽어 리눅스에서도 잰다. `dirs` 의 차례대로 첫 것을 낸다.
+///
+/// - 이름에 `exts` 의 확장자가 이미 붙었으면(`moai.exe`) 그대로 찾는다. 아니면 `exts` 를 차례로 붙여
+///   본다 — `cmd` 가 찾는 차례이고, npm 이 까는 `claude.cmd` 가 그렇게 잡힌다
+/// - **빈 자리는 뺀다.** Windows 는 그것을 "지금 자리" 로 읽지 않는다
+#[cfg_attr(unix, allow(dead_code))]
+pub fn found_in(
+    dirs: impl IntoIterator<Item = std::path::PathBuf>,
+    name: &str,
+    exts: &[String],
+    runs: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    let has_ext = std::path::Path::new(name).extension().is_some_and(|e| {
+        let e = e.to_string_lossy();
+        exts.iter().any(|x| x.trim_start_matches('.').eq_ignore_ascii_case(&e))
+    });
+    dirs.into_iter().filter(|d| !d.as_os_str().is_empty()).find_map(|d| {
+        if has_ext || exts.is_empty() {
+            let p = d.join(name);
+            return runs(&p).then_some(p);
+        }
+        exts.iter().map(|x| d.join(format!("{name}{x}"))).find(|p| runs(p))
+    })
+}
+
+/// `PATHEXT` 를 쪼갠다. 없거나 비었으면 Windows 의 기본값 `.COM;.EXE;.BAT;.CMD` 다.
+#[cfg_attr(unix, allow(dead_code))]
+pub fn path_exts(raw: Option<&std::ffi::OsStr>) -> Vec<String> {
+    let raw = raw.map(|r| r.to_string_lossy().into_owned()).filter(|r| !r.trim().is_empty());
+    let raw = raw.as_deref().unwrap_or(".COM;.EXE;.BAT;.CMD");
+    raw.split(';').map(str::trim).filter(|x| !x.is_empty()).map(str::to_string).collect()
+}
+
 /// 명령이 고른 종료 코드 — 0 이면 안 고른 것이다. **남의 프로그램의 종료 코드를 그대로 옮기는 자리**가
 /// 쓴다(`moai update` 가 `sh` 의 것을, moai-zsfr.2p9). [`PARTIAL`] 의 1 로 접으면 `install.sh` 가 고른
 /// 코드를 부른 쪽이 못 읽는다.
@@ -1359,6 +1401,32 @@ pub fn shelved(pairs: &[(String, Vec<String>)]) -> Vec<Shelved<'_>> {
 mod tests {
     use super::*;
     use crate::model::{Issue, Kind, Status};
+
+    /// **Windows 의 `PATH` 찾기를 리눅스에서 잰다**(moai-j9gv.cl6) — 있는 파일은 손으로 준 목록이다.
+    #[test]
+    fn the_windows_path_walk_tries_pathext_in_order() {
+        use std::path::{Path, PathBuf};
+        let exts = path_exts(Some(std::ffi::OsStr::new(".COM;.EXE;;.CMD ")));
+        assert_eq!(exts, [".COM", ".EXE", ".CMD"], "빈 칸과 빈칸을 안 걸렀다");
+        assert_eq!(path_exts(None), [".COM", ".EXE", ".BAT", ".CMD"]);
+        assert_eq!(path_exts(Some(std::ffi::OsStr::new(" "))), [".COM", ".EXE", ".BAT", ".CMD"]);
+
+        let have = |files: &'static [&'static str]| move |p: &Path| files.iter().any(|f| Path::new(f) == p);
+        let dirs = || [PathBuf::from(""), PathBuf::from("/a"), PathBuf::from("/b")];
+        // 자리의 차례가 확장자의 차례보다 앞선다 — `/a` 의 `.CMD` 가 `/b` 의 `.EXE` 를 이긴다.
+        let found = found_in(dirs(), "claude", &exts, have(&["/a/claude.CMD", "/b/claude.EXE"]));
+        assert_eq!(found, Some(PathBuf::from("/a/claude.CMD")));
+        // 한 자리 안에서는 `PATHEXT` 의 차례다.
+        let found = found_in(dirs(), "claude", &exts, have(&["/b/claude.CMD", "/b/claude.EXE"]));
+        assert_eq!(found, Some(PathBuf::from("/b/claude.EXE")));
+        // 확장자가 붙은 이름은 그대로 찾는다 — 대소문자를 안 가린다.
+        let found = found_in(dirs(), "moai.exe", &exts, have(&["/b/moai.exe", "/b/moai.exe.EXE"]));
+        assert_eq!(found, Some(PathBuf::from("/b/moai.exe")));
+        // 확장자 없는 이름 그 자체는 안 고른다 — Windows 는 그것을 못 띄운다.
+        assert_eq!(found_in(dirs(), "claude", &exts, have(&["/a/claude"])), None);
+        // 빈 자리는 "지금 자리" 가 아니다.
+        assert_eq!(found_in(dirs(), "x", &exts, have(&["x.EXE"])), None, "빈 자리를 지금 자리로 읽었다");
+    }
 
     /// **실행 비트가 답을 가른다.** `is_file` 만 보던 판은 권한이 빠진 파일을 "돈다" 고 했고,
     /// 훅은 그때 권한 오류를 `|| exit 0` 으로 삼켜 아무 말 없이 아무것도 안 했다.

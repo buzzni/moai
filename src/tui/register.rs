@@ -107,8 +107,8 @@ fn shown(path: &Path) -> String {
 /// 홈을 모르면 준 철자 그대로 두고, 없는 디렉터리라는 말이 그대로 선다.
 fn expand_home(p: &Path) -> PathBuf {
     let Ok(rest) = p.strip_prefix("~") else { return p.to_path_buf() };
-    match std::env::var_os("HOME").filter(|h| !h.is_empty()) {
-        Some(home) => PathBuf::from(home).join(rest),
+    match crate::user_config::home() {
+        Some(home) => home.join(rest),
         None => p.to_path_buf(),
     }
 }

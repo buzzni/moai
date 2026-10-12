@@ -79,8 +79,18 @@ pub fn pick(visual: Option<&str>, editor: Option<&str>, found: impl Fn(&str) -> 
 /// `"`·`$`·`` ` `` 를 다시 막아야 하고, 하나를 빠뜨리면 임시 경로가 명령이 된다. 편집기
 /// 글은 셸 규칙으로 쪼갠다 — `EDITOR="code --wait"` 가 그대로 선다. 둘째 인자(`$0`)는
 /// 셸이 오류를 댈 때 쓰는 이름이다.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn argv(editor: &str, file: &std::path::Path) -> Vec<OsString> {
     vec!["-c".into(), format!("{editor} \"$@\"").into(), editor.into(), file.as_os_str().to_owned()]
+}
+
+/// `sh` 가 없는 데서 편집기 글을 쪼갠 것 — 첫 낱말과 나머지(moai-j9gv.cl6). **빈칸으로만 쪼갠다** —
+/// 따옴표를 풀려면 껍데기 규칙을 반쯤 흉내 내야 하고([`pick`] 이 안 하는 까닭과 같다), 빈칸이 든
+/// 자리의 편집기는 `PATH` 에 그 디렉터리를 두면 이름 하나로 선다. 빈 글이면 첫 낱말도 빈 글이다.
+#[cfg_attr(unix, allow(dead_code))]
+pub fn words(editor: &str) -> (&str, Vec<&str>) {
+    let mut all = editor.split_whitespace();
+    (all.next().unwrap_or(""), all.collect())
 }
 
 #[cfg(test)]
@@ -173,5 +183,14 @@ mod tests {
         let file = std::path::Path::new("/tmp/a b/\"$(rm)\".md");
         let args = argv("code --wait", file);
         assert_eq!(args, ["-c", "code --wait \"$@\"", "code --wait", "/tmp/a b/\"$(rm)\".md"].map(OsString::from));
+    }
+
+    /// `sh` 가 없는 데서는 빈칸으로만 쪼갠다 — 첫 낱말이 프로그램, 나머지가 인자다(moai-j9gv.cl6).
+    #[test]
+    fn without_sh_the_editor_splits_on_blanks() {
+        assert_eq!(words("code --wait"), ("code", vec!["--wait"]));
+        assert_eq!(words("  notepad  "), ("notepad", vec![]));
+        assert_eq!(words("vim -u NONE -n"), ("vim", vec!["-u", "NONE", "-n"]));
+        assert_eq!(words(""), ("", vec![]));
     }
 }

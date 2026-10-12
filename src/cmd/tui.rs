@@ -981,9 +981,16 @@ fn editor() -> Option<String> {
 ///
 /// 여기서 `PATH` 를 제 손으로 훑는 것은 껍데기를 띄우지 않으려는 것이다. 편집기 후보가 여럿이고
 /// 띄울 때 한 번 고르는 자리라, 이름마다 `sh -c 'command -v'` 를 띄우면 그 값이 얻는 값보다 크다.
+#[cfg(unix)]
 fn on_path(name: &str) -> bool {
     let Some(dirs) = std::env::var_os("PATH") else { return false };
     std::env::split_paths(&dirs).any(|d| super::runnable(&d.join(name)))
+}
+
+/// 유닉스가 아닌 판의 [`on_path`] — `PATHEXT` 를 붙여 찾는다([`super::find_on_path`]).
+#[cfg(not(unix))]
+fn on_path(name: &str) -> bool {
+    super::find_on_path(name).is_some()
 }
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
@@ -1040,8 +1047,7 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
     let got = written
         .map_err(|e| fill(say(lang, "tui.editor_no_write"), &[("why", &e.to_string())]))
         .and_then(|()| {
-            std::process::Command::new("sh")
-                .args(crate::tui::jotfile::argv(editor, &path))
+            editor_command(editor, &path)
                 .status()
                 .map_err(|e| fill(say(lang, "tui.editor_not_started"), &[("editor", editor), ("why", &e.to_string())]))
         })
@@ -1053,6 +1059,26 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
         });
     let _ = std::fs::remove_file(&path);
     got
+}
+
+/// 편집기를 띄우는 명령 — 유닉스에서는 `sh` 가 편집기 글을 껍데기 규칙으로 쪼갠다([`crate::tui::jotfile::argv`]).
+#[cfg(unix)]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new("sh");
+    cmd.args(crate::tui::jotfile::argv(editor, path));
+    cmd
+}
+
+/// 유닉스가 아닌 판의 [`editor_command`] — 거기에는 `sh` 가 없다(moai-j9gv.cl6). 편집기 글을 빈칸으로
+/// 쪼개([`crate::tui::jotfile::words`]) 첫 낱말을 프로그램으로 띄운다. 그 낱말은 `PATH` 에서 찾아 둔
+/// 자리로 바꾼다 — 러스트의 `Command` 는 이름에 `.exe` 만 붙여 `code.cmd` 같은 편집기를 못 찾는다.
+#[cfg(not(unix))]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    let (program, rest) = crate::tui::jotfile::words(editor);
+    let found = super::find_on_path(program).map(std::path::PathBuf::into_os_string);
+    let mut cmd = std::process::Command::new(found.unwrap_or_else(|| program.into()));
+    cmd.args(rest).arg(path);
+    cmd
 }
 
 /// 편집기에 넘길 새 파일. **남이 못 읽게(0600) 새로 만든다** — 공유 임시 디렉터리라 이름을

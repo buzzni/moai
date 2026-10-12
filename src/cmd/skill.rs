@@ -1402,6 +1402,7 @@ fn shown(args: &[String]) -> String {
 
 /// PATH 에서 찾아지는 그 이름. 훅에 이름을 적어도 되는지, `claude` 를 부를 수
 /// 있는지를 이것이 정한다.
+#[cfg(unix)]
 fn which(name: &str) -> Option<PathBuf> {
     let out = Command::new("sh").args(["-c", "command -v -- \"$1\"", "sh", name]).output().ok()?;
     if !out.status.success() {
@@ -1409,6 +1410,12 @@ fn which(name: &str) -> Option<PathBuf> {
     }
     let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!found.is_empty()).then(|| crate::path::real(Path::new(&found)))
+}
+
+/// 유닉스가 아닌 판의 [`which`] — 물을 `sh` 가 없으니 `PATH` 를 제 손으로 훑는다([`super::find_on_path`]).
+#[cfg(not(unix))]
+fn which(name: &str) -> Option<PathBuf> {
+    super::find_on_path(name).map(|p| crate::path::real(&p))
 }
 
 /// 훅이 부르는 것이 **실제로 도는 파일.** 이름이면 PATH 에서 찾은 것이고, 경로면
@@ -1440,7 +1447,7 @@ fn plugins_dir() -> Option<PathBuf> {
     let set = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     set("CLAUDE_CODE_PLUGIN_CACHE_DIR")
         .or_else(|| set("CLAUDE_CONFIG_DIR").map(|d| d.join("plugins")))
-        .or_else(|| set("HOME").map(|h| h.join(".claude/plugins")))
+        .or_else(|| crate::user_config::home().map(|h| h.join(".claude/plugins")))
 }
 
 /// `claude` 의 장부 하나. **읽기만** 한다. 쓰는 것은 `claude` 의 몫이다.

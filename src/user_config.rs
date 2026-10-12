@@ -90,7 +90,7 @@ pub enum ModelsTrouble {
 }
 
 /// 설정 파일의 자리. `MOAI_CONFIG` → `$XDG_CONFIG_HOME/moai/config.toml` →
-/// `$HOME/.config/moai/config.toml`. 셋 다 없으면 `None`.
+/// `<홈>/.config/moai/config.toml`. 셋 다 없으면 `None`. 홈은 [`home_from`] 이 고른다.
 ///
 /// **환경을 직접 읽지 않고 조회 함수를 받는다.** 시험이 `set_var` 로 프로세스
 /// 환경을 바꾸면 병렬로 도는 옆 시험이 그것을 본다.
@@ -107,12 +107,29 @@ pub fn path_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     if let Some(x) = set("XDG_CONFIG_HOME").filter(|p| p.is_absolute()) {
         return Some(x.join("moai/config.toml"));
     }
-    set("HOME").map(|h| h.join(".config/moai/config.toml"))
+    home_from(&env, cfg!(windows)).map(|h| h.join(".config/moai/config.toml"))
 }
 
 /// 이 프로세스의 환경으로 [`path_from`].
 pub fn path() -> Option<PathBuf> {
     path_from(|k| std::env::var_os(k))
+}
+
+/// 사람의 홈 — `HOME`, **Windows 에서는 그다음 `USERPROFILE`**(moai-j9gv.cl6). cmd·PowerShell 에는
+/// `HOME` 이 없어, 그것만 보던 판은 사용자 설정·`[models]`·`moai project add` 가 통째로 "자리 없음" 이었다.
+/// `HOME` 을 세워 주는 껍데기(Git for Windows 의 bash)에서는 그 값이 먼저다 — 껍데기마다 다른 파일을
+/// 읽지 않게 차례를 고정한다. `APPDATA` 는 안 본다: 자리를 둘로 가르면 어느 쪽에 적었는지를 사람이
+/// 찾아야 한다.
+///
+/// `windows` 를 받는 까닭은 [`path_from`] 이 환경을 받는 까닭과 같다 — 리눅스에서도 두 갈래를 다 잰다.
+pub fn home_from(env: impl Fn(&str) -> Option<OsString>, windows: bool) -> Option<PathBuf> {
+    let set = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    set("HOME").or_else(|| windows.then(|| set("USERPROFILE")).flatten())
+}
+
+/// 이 프로세스의 환경으로 [`home_from`].
+pub fn home() -> Option<PathBuf> {
+    home_from(|k| std::env::var_os(k), cfg!(windows))
 }
 
 /// 등록한 프로젝트 하나. 이름은 파생값이라 여기 없다. 파일에 있는 모르는 필드는
@@ -2405,6 +2422,18 @@ mod tests {
         assert_eq!(path_from(env(&all[1..])), Some("/x/moai/config.toml".into()));
         assert_eq!(path_from(env(&all[2..])), Some("/h/.config/moai/config.toml".into()));
         assert_eq!(path_from(env(&[])), None);
+    }
+
+    /// **`USERPROFILE` 은 Windows 에서만, `HOME` 다음에 본다**(moai-j9gv.cl6). 유닉스에서 그것을 보면
+    /// `HOME` 을 일부러 비운 격리(시험·`env -i`)가 사람의 설정을 주워 온다.
+    #[test]
+    fn userprofile_stands_in_for_home_on_windows_only() {
+        let both = [("HOME", "/h"), ("USERPROFILE", "/u")];
+        assert_eq!(home_from(env(&both), true), Some("/h".into()), "HOME 이 있는데 USERPROFILE 을 골랐다");
+        assert_eq!(home_from(env(&both[1..]), true), Some("/u".into()));
+        assert_eq!(home_from(env(&both[1..]), false), None, "유닉스가 USERPROFILE 을 읽었다");
+        assert_eq!(home_from(env(&[("HOME", ""), ("USERPROFILE", "")]), true), None);
+        assert_eq!(home_from(env(&[("HOME", ""), ("USERPROFILE", "/u")]), true), Some("/u".into()));
     }
 
     /// 빈 값은 없는 것이고, 상대 `XDG_CONFIG_HOME` 은 XDG 명세대로 무시한다.
