@@ -30,8 +30,13 @@ use std::path::{Path, PathBuf};
 /// **떨어지는 자를 하나로 둔다**(moai-8csx). 이 여섯 줄이 저마다 적혀 있었다 —
 /// `worktree::canonical`, `cmd::hook` 의 `picks_key`, `cmd::skill` 의 `which` 와 `same_dir`,
 /// `scratch` 의 `Scratch::real`·`inside_checkout`, 그리고 `cmd::merge_driver` 의 `chosen_command`
-/// (목록에서 빠져 있던 여섯째다, 리뷰). 나중에 정할 것(윈도의 `\\?\` 접두어를 걷을 것인가, 못 푼
-/// 자리를 어떻게 셀 것인가)이 여섯 중 하나에만 닿으면 나머지 다섯은 옛 답을 낸다.
+/// (목록에서 빠져 있던 여섯째다, 리뷰). 나중에 정할 것(못 푼 자리를 어떻게 셀 것인가)이 여섯 중
+/// 하나에만 닿으면 나머지 다섯은 옛 답을 낸다.
+///
+/// **윈도의 `\\?\` 접두어는 여기서 안 걷는다**(moai-vaj4, 리뷰 moai-j9gv.8gr). `store::resolve`·`held`·
+/// `cmd::init` 이 `canonicalize` 를 바로 부른 철자를 이것과 `starts_with`·`strip_prefix` 로 견주어, 여기서만 걷으면
+/// Windows 에서 스냅샷이 저장소 "밖" 으로 읽혀 모든 쓰기가 선다. 걷는 것은 밖으로 내보내는 자리의 [`unverbatim`]
+/// 하나다.
 ///
 /// **까닭을 대야 하는 자리는 따로 선다**([`crate::read_marks::settle`]). 거기는 못 푼 까닭이
 /// 사람에게 가는 값이라 [`Settled`](crate::read_marks::Settled) 로 갈라 내고, 여기는 **자리를 못
@@ -152,19 +157,41 @@ pub(crate) fn dir_of(path: &Path) -> &Path {
 /// 적어 `PATH` 에 moai 가 없는 기계에서 훅이 `|| exit 0` 으로 말없이 꺼진다. `C:/Users/…/moai.exe` 는 그
 /// 껍데기도 Windows 의 API 도 같은 파일로 읽는다.
 ///
-/// `canonicalize` 가 붙이는 `\\?\` 접두어는 걷는다 — `//?/C:/…` 는 껍데기가 못 연다. `\\?\UNC\` 는 원래의
-/// `\\server\share` 로 돌린다. 유닉스에서는 글자 하나 안 바꾼다 — 거기서 `\` 는 파일 이름의 글자다.
+/// `canonicalize` 가 붙이는 `\\?\` 접두어는 [`unverbatim`] 으로 걷는다 — `//?/C:/…` 는 껍데기가 못 연다. 유닉스에서는
+/// 글자 하나 안 바꾼다 — 거기서 `\` 는 파일 이름의 글자다.
 ///
 /// `windows` 를 받는 까닭은 리눅스에서도 그 갈래를 재려는 것이다. 부르는 쪽은 `cfg!(windows)` 를 준다.
 pub(crate) fn slashed(p: &str, windows: bool) -> String {
     if !windows {
         return p.to_string();
     }
-    let p = match p.strip_prefix(r"\\?\UNC\") {
-        Some(rest) => format!(r"\\{rest}"),
-        None => p.strip_prefix(r"\\?\").unwrap_or(p).to_string(),
+    // `&str` 에서 ASCII 접두어만 뗀 것이라 도로 UTF-8 이다 — `to_string_lossy` 는 글자를 안 바꾼다.
+    unverbatim(std::ffi::OsStr::new(p)).to_string_lossy().replace('\\', "/")
+}
+
+/// `canonicalize` 가 Windows 에서 붙이는 `\\?\` 접두어를 걷는다 — `\\?\UNC\서버\…` 는 `\\서버\…` 로 되돌리고, 그
+/// 밖의 철자는 그대로다. 구분자는 안 바꾼다(그것은 [`slashed`] 의 몫이다). **걷는 자는 여기 하나다**(moai-vaj4) —
+/// 훅 줄의 철자와 `moai update` 가 PowerShell 에 넘기는 자리(`update::plain`)가 같은 규칙으로 걷는다. 글자만
+/// 보는 것이라 리눅스에서도 잰다.
+///
+/// **바이트로 걷는다**(리뷰 moai-j9gv.8gr) — UTF-8 이 아닌 철자(Windows 의 짝 없는 서로게이트)도 접두어만 떼고 나머지는
+/// 받은 그대로다. `&str` 로 받던 판은 그런 자리를 `update::plain` 이 걷지 못해 PowerShell 5.1 이 못 읽는 `\\?\` 꼴이
+/// 거절 문을 지나 `-Dir` 에 실렸고, 그 앞의 `to_string_lossy` 판은 글자를 U+FFFD 로 바꿔 없는 자리를 댔다.
+pub(crate) fn unverbatim(p: &std::ffi::OsStr) -> std::ffi::OsString {
+    let spelt = p.as_encoded_bytes();
+    let (head, rest) = match spelt.strip_prefix(br"\\?\UNC\") {
+        Some(rest) => (r"\\", rest),
+        None => match spelt.strip_prefix(br"\\?\") {
+            Some(rest) => ("", rest),
+            None => return p.to_owned(),
+        },
     };
-    p.replace('\\', "/")
+    let mut out = std::ffi::OsString::from(head);
+    // SAFETY: `rest` 는 `p.as_encoded_bytes()` 를 비지 않은 ASCII 조각(`\\?\`·`\\?\UNC\`) 바로 뒤에서 자른 것이다 —
+    // `from_encoded_bytes_unchecked` 가 받는 꼴(같은 판·같은 플랫폼의 바이트를 유효한 UTF-8 조각 바로 뒤에서 자른
+    // 것)이다.
+    out.push(unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(rest) });
+    out
 }
 
 /// **재는 자는 재는 것 곁에 선다**(리뷰 moai-47yo.era). 이 셋을 여기로 옮기던 날(moai-xvyz) 재는
@@ -209,6 +236,25 @@ mod tests {
         assert_eq!(slashed(r"\\?\UNC\srv\share\moai.exe", true), "//srv/share/moai.exe");
         assert_eq!(slashed("C:/already/moai.exe", true), "C:/already/moai.exe");
         assert_eq!(slashed(r"/home/me/a\b/moai", false), r"/home/me/a\b/moai", "유닉스의 이름 글자를 바꿨다");
+    }
+
+    /// **접두어만 걷고 구분자는 안 바꾼다**(moai-vaj4) — PowerShell 에 넘기는 자리(`update::plain`)가 이것을 탄다.
+    /// UTF-8 이 아닌 철자는 바이트째 남는다(리뷰 moai-j9gv.8gr) — 리눅스의 바이트가 Windows 의 짝 없는 서로게이트를
+    /// 대신한다.
+    #[test]
+    fn the_verbatim_prefix_comes_off_and_separators_stay() {
+        let off = |p: &str| unverbatim(std::ffi::OsStr::new(p));
+        assert_eq!(off(r"\\?\C:\Users\me"), r"C:\Users\me");
+        assert_eq!(off(r"\\?\UNC\srv\share\bin"), r"\\srv\share\bin");
+        assert_eq!(off(r"C:\plain"), r"C:\plain");
+        assert_eq!(off(r"\\srv\share"), r"\\srv\share", "접두어 없는 UNC 는 그대로다");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let raw = |b: &'static [u8]| std::ffi::OsStr::from_bytes(b);
+            assert_eq!(unverbatim(raw(b"\\\\?\\C:\\Users\\\xff\\bin")), raw(b"C:\\Users\\\xff\\bin"));
+            assert_eq!(unverbatim(raw(b"\\\\?\\UNC\\srv\\\xfe\\bin")), raw(b"\\\\srv\\\xfe\\bin"));
+        }
     }
 
     /// **아직 없는 파일도 있는 윗자리까지는 같게 풀린다.** 통째로 `canonicalize` 하면 없는

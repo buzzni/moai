@@ -38,6 +38,27 @@ does not tag — see `CONTRIBUTING.md`.
   program. The explorer's new-release banner names `moai update` there too.
   (moai-l3mn, moai-j9gv.3fl)
 
+- **moai runs on Windows without `sh` or `HOME`.** (moai-j9gv)
+  - Unless `MOAI_CONFIG` or an absolute `XDG_CONFIG_HOME` says otherwise (as
+    on Unix), the user config is `.config\moai\config.toml` under `HOME`, or
+    under `%USERPROFILE%` when `HOME` is not set. A shell that sets its own
+    `HOME` (MSYS2, Cygwin, Git Bash on a domain account) reads a different
+    file than PowerShell; set `MOAI_CONFIG` to pin one.
+  - The explorer's editor (`SPC n`) starts through `sh -c` inside Git Bash.
+    Elsewhere the value is split on blanks, a double-quoted first word
+    is the program (`"C:\Program Files\…\notepad++.exe" -multiInst`), and
+    editors installed as `.cmd` are found through `PATHEXT`.
+  - The hooks and the merge driver write the binary's path as `C:/…/moai.exe`,
+    with `/`, so Git's `sh` and Claude Code's Git Bash can run it; the hooks
+    write just `moai` when the `moai` on `PATH` is the same file. The hooks
+    need Git for Windows — without Git Bash, Claude Code runs them in
+    PowerShell, which cannot.
+  - Claude Code's plugin records are read from `%USERPROFILE%\.claude`, where
+    `claude` itself keeps them, even when `HOME` points elsewhere (unless
+    `CLAUDE_CODE_PLUGIN_CACHE_DIR` or `CLAUDE_CONFIG_DIR` names another place).
+  - CI builds and lints the Windows target on every pull request that touches
+    code. The tests are built there, not yet run.
+
 ## [0.16.0] - 2026-10-11
 
 ### Added

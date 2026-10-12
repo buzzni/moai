@@ -2,8 +2,8 @@
 
 moai ships a Windows build, `x86_64-pc-windows-msvc`, with the C runtime linked
 in — `moai.exe` starts on a clean machine without the Visual C++
-redistributable. This page covers installing it, upgrading it, and building it
-yourself.
+redistributable. This page covers installing it, upgrading it, its config,
+editor and hooks, and building it yourself.
 
 ## Install
 
@@ -63,6 +63,44 @@ running `moai.exe` to `moai.exe.old` and puts the new one in its place. That
 (`C:\Program Files`) is caught by the installer itself, before it downloads —
 Windows ignores the read-only mark on a folder, so moai does not read it.
 
+## Config, editor and hooks
+
+moai itself does not need `sh` or `HOME` on Windows; the hooks need Git for
+Windows (below).
+
+- **Your user config** is `.config\moai\config.toml` under `HOME`, or under
+  `%USERPROFILE%` when `HOME` is not set — so in cmd and PowerShell it is
+  `%USERPROFILE%\.config\moai\config.toml`. A shell that sets its own `HOME`
+  (MSYS2, Cygwin, Git Bash on a domain account where `HOME` is `H:\`) reads the
+  file under that `HOME` instead. As on Unix, two variables come before both
+  homes: `MOAI_CONFIG` names the file itself and wins over everything, then
+  `XDG_CONFIG_HOME` puts it at `moai\config.toml` under that directory. To use
+  one file from every shell, set `MOAI_CONFIG` to a full path with its drive
+  letter, such as `C:\Users\you\moai.toml`. `XDG_CONFIG_HOME` counts only when
+  it is a full Windows path (`C:\…` or `\\server\share\…`); any other value is
+  ignored and the homes above are used
+- **The explorer's editor** (`SPC n`) comes from `VISUAL`, then `EDITOR`, then
+  `vi` or `nano` if one is on `PATH`
+  - Inside Git Bash it starts through `sh -c`, so the value follows shell
+    quoting: `EDITOR="'C:/Program Files/Microsoft VS Code/bin/code' --wait"`
+  - Elsewhere there is no shell. The value is split on blanks; a first word in
+    double quotes is taken whole, which is how a path with spaces is written:
+    `$env:EDITOR = '"C:\Program Files\Notepad++\notepad++.exe" -multiInst -nosession'`.
+    The program is looked up on `PATH` with `PATHEXT`, so `code --wait` finds
+    `code.cmd`
+- **Hooks and the merge driver** write the path of `moai.exe` with forward
+  slashes (`C:/Users/you/AppData/Local/Programs/moai/moai.exe`): Git runs the
+  merge driver with its own `sh` and Claude Code runs hooks with Git Bash, and
+  both read `\` as an escape. The hooks write just `moai` instead when the
+  `moai` on `PATH` is this same file; a path you pass to
+  `merge-driver --install --as` is kept as you typed it. **The hooks need Git
+  for Windows** — without Git Bash, Claude Code runs hooks in PowerShell, which
+  cannot run them
+- **Claude Code's plugin records** are read from `%USERPROFILE%\.claude`, the
+  place `claude` itself uses, even when `HOME` points somewhere else — unless
+  `CLAUDE_CODE_PLUGIN_CACHE_DIR` or `CLAUDE_CONFIG_DIR` names another place, as
+  for `claude` itself
+
 ## Build from source
 
 `scripts/windows-dev.ps1` checks for Git for Windows, the Visual Studio C++
@@ -76,3 +114,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-dev.ps1
 It installs nothing on its own and never edits `PATH`. What it does step by step,
 and what to check on a real machine, is in `CONTRIBUTING.md` under "Developing on
 Windows".
+
+Decided in: moai-l3mn moai-j9gv

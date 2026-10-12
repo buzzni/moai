@@ -140,8 +140,9 @@ pub fn home() -> Option<PathBuf> {
 /// 이 플랫폼의 [`home_from`] — **[`path_from`] 과 [`home`] 이 플랫폼을 고르는 자리는 여기 하나다**(리뷰 moai-j9gv.4s3).
 /// 둘이 저마다 `cfg!(windows)` 를 박던 판은 어느 한쪽을 `true` 로 바꿔도 리눅스의 시험이 하나도 안 붉어졌다 — 여기
 /// 하나로 모으면 [`path_from`] 을 재는 시험이 [`home`] 의 차례까지 잰다. `claude` 의 장부는 제 차례로 따로 고른다
-/// (`cmd::skill` 의 `claude_home_here`).
-fn home_here(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+/// (`cmd::skill` 의 `claude_home_here`). 새 판 안내 줄의 집(`latest::upgrade_here`)도 환경을 받아 이것으로 고른다
+/// (리뷰 moai-j9gv.8gr) — 그래야 그 시험이 프로세스 환경 없이 집의 차례를 잰다.
+pub(crate) fn home_here(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     home_from(env, cfg!(windows))
 }
 
