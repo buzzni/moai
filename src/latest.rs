@@ -254,24 +254,21 @@ pub fn built_by_cargo(dir: &Path) -> bool {
 }
 
 /// 도는 이 바이너리를 올리는 한 줄 — `moai update` 가 설 자리면 [`SELF_UPDATE`], 아니면
-/// [`upgrade_line`](moai-zsfr.o3s). 도는 바이너리의 푼 자리와 `HOME` 을 넣는다. 파일 시스템을
+/// [`upgrade_line`](moai-zsfr.o3s). 도는 바이너리의 푼 자리와 사람의 집을 넣는다. 파일 시스템을
 /// 보므로 **여는 걸음에 한 번만 부른다**(`tui::App::ask_latest`). 그리는 걸음에서 부르면
 /// 프레임마다 디스크를 두드린다.
+///
+/// **집은 사용자 설정이 찾는 자([`crate::user_config::home`])로 찾는다**(moai-vaj4) — `HOME`, Windows 에서만 그다음
+/// `USERPROFILE`. 여기 따로 둔 자는 리눅스에서도 `USERPROFILE` 을 읽어, 두 자가 갈리면 안내 줄이 고른 집과 설정이
+/// 사는 집이 달랐다.
 ///
 /// **`moai update` 가 서는지는 그 명령이 거절하는 자로 잰다** — 자리는 [`crate::update::refusal`] 로,
 /// 받을 저장소는 부르는 쪽이 `cmd::update::chosen_repo` 로 재어 `repo_ok` 에 싣는다. 안내가 `moai update` 를
 /// 대고 그 명령은 거절하는 판을 안 만든다. 저장소 값 때문에만 못 서면 긴 줄을 댄다 — 자리를 못 쓰면 그 줄도 못 서니 `None` 이다.
 pub fn upgrade_here(repo: &str, repo_ok: bool) -> Option<String> {
     let exe = crate::path::real(&std::env::current_exe().ok()?);
-    let home = home_from(|k| std::env::var_os(k)).map(|h| crate::path::real(&h));
+    let home = crate::user_config::home().map(|h| crate::path::real(&h));
     upgrade_for(&exe, home.as_deref(), SERVED, repo, repo_ok, crate::update::writable)
-}
-
-/// 집 — `HOME` 이 먼저, 없거나 비었으면 `USERPROFILE`(moai-j9gv.3fl). Windows 에는 `HOME` 이 보통 없다.
-/// moai-j9gv.cl6 이 사용자 설정 자리(`user_config::path_from`)에 세우는 것과 같은 차례다 — 둘이 다른
-/// 집을 보면 안내 줄이 고른 자리와 설정이 사는 자리가 갈린다.
-fn home_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
-    ["HOME", "USERPROFILE"].into_iter().find_map(|k| env(k).filter(|h| !h.is_empty())).map(PathBuf::from)
 }
 
 /// [`upgrade_here`] 의 판단 — **파일 시스템의 권한만 받아서 잰다**(시험이 `chmod` 없이 갈래를 잰다, root 로
@@ -2461,19 +2458,6 @@ mod tests {
         );
         assert_eq!(repo_lenient(env("../x"), Some("fork/moai")), "fork/moai");
         assert_eq!(repo_lenient(env("../x"), None), DEFAULT_REPO);
-    }
-
-    /// **집은 `HOME` 이 먼저, 없으면 `USERPROFILE`**(moai-j9gv.3fl) — Windows 에는 `HOME` 이 보통 없어,
-    /// `HOME` 만 읽던 판은 그 기계의 집을 늘 몰랐다. 빈 값은 없는 것이다.
-    #[test]
-    fn home_falls_back_to_userprofile() {
-        let env = |pairs: &'static [(&'static str, &'static str)]| {
-            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| OsString::from(v))
-        };
-        assert_eq!(home_from(env(&[("HOME", "/h"), ("USERPROFILE", r"C:\u")])), Some(PathBuf::from("/h")));
-        assert_eq!(home_from(env(&[("USERPROFILE", r"C:\u")])), Some(PathBuf::from(r"C:\u")));
-        assert_eq!(home_from(env(&[("HOME", ""), ("USERPROFILE", r"C:\u")])), Some(PathBuf::from(r"C:\u")));
-        assert_eq!(home_from(env(&[])), None);
     }
 
     /// **올리는 줄은 받을 저장소를 따른다**(moai-zsfr.2em). 기본이 아닌 저장소는 `MOAI_REPO` 를 함께 싣는다 —

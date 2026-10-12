@@ -334,7 +334,9 @@ jobs:
   #
   # **껍데기는 bash 다**(Git for Windows 의 것). 툴체인 판을 읽는 `sed` 가 `ci-gate` 와 한 글이다 —
   # 시험을 돌리는 날 시험이 띄울 `sh`·`git` 도 그것이다. 툴체인·cargo 캐시의 열쇠는 `ci-gate` 의 것과 같은
-  # 꼴이다 — `runner.os` 가 이미 갈라, 리눅스 판이 담은 것을 풀지 않는다.
+  # 꼴이다 — `runner.os` 가 이미 갈라, 리눅스 판이 담은 것을 풀지 않는다. cargo 캐시의 열쇠에만
+  # `.cargo/config.toml` 이 더 든다(moai-vaj4) — 그 파일의 `rustflags` 가 msvc 타깃의 산출물을 통째로 바꾸는데,
+  # 열쇠가 그것을 모르면 바뀐 판에도 옛 산출물을 풀고 새로 안 담는다. 리눅스 잡에는 아무 일도 안 하는 파일이다.
   #
   # **디버그 정보는 안 짓는다**(`CARGO_PROFILE_DEV_DEBUG`, 리뷰 moai-j9gv.4s3). 이 잡은 아무것도 안 돌리니 읽을
   # 이가 없고, MSVC 는 링크마다 PDB 를 써 짓는 값과 캐시에 담기는 덩치만 는다. 재는 것(cfg·타입·링크)은 그대로다.
@@ -392,7 +394,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
           restore-keys: cargo-dev-${{ runner.os }}-
 
       - name: clippy

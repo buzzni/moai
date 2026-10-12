@@ -160,11 +160,18 @@ pub(crate) fn slashed(p: &str, windows: bool) -> String {
     if !windows {
         return p.to_string();
     }
-    let p = match p.strip_prefix(r"\\?\UNC\") {
+    unverbatim(p).replace('\\', "/")
+}
+
+/// `canonicalize` 가 Windows 에서 붙이는 `\\?\` 접두어를 걷는다 — `\\?\UNC\서버\…` 는 `\\서버\…` 로 되돌리고, 그
+/// 밖의 철자는 그대로다. 구분자는 안 바꾼다(그것은 [`slashed`] 의 몫이다). **걷는 자는 여기 하나다**(moai-vaj4) —
+/// 훅 줄의 철자와 `moai update` 가 PowerShell 에 넘기는 자리(`update::plain`)가 같은 규칙으로 걷는다. 글자만
+/// 보는 것이라 리눅스에서도 잰다.
+pub(crate) fn unverbatim(p: &str) -> String {
+    match p.strip_prefix(r"\\?\UNC\") {
         Some(rest) => format!(r"\\{rest}"),
         None => p.strip_prefix(r"\\?\").unwrap_or(p).to_string(),
-    };
-    p.replace('\\', "/")
+    }
 }
 
 /// **재는 자는 재는 것 곁에 선다**(리뷰 moai-47yo.era). 이 셋을 여기로 옮기던 날(moai-xvyz) 재는
@@ -209,6 +216,10 @@ mod tests {
         assert_eq!(slashed(r"\\?\UNC\srv\share\moai.exe", true), "//srv/share/moai.exe");
         assert_eq!(slashed("C:/already/moai.exe", true), "C:/already/moai.exe");
         assert_eq!(slashed(r"/home/me/a\b/moai", false), r"/home/me/a\b/moai", "유닉스의 이름 글자를 바꿨다");
+        // 접두어만 걷는 자는 구분자를 안 바꾼다 — PowerShell 에 넘기는 자리(`update::plain`)가 이것을 탄다(moai-vaj4).
+        assert_eq!(unverbatim(r"\\?\C:\Users\me"), r"C:\Users\me");
+        assert_eq!(unverbatim(r"\\?\UNC\srv\share\bin"), r"\\srv\share\bin");
+        assert_eq!(unverbatim(r"C:\plain"), r"C:\plain");
     }
 
     /// **아직 없는 파일도 있는 윗자리까지는 같게 풀린다.** 통째로 `canonicalize` 하면 없는

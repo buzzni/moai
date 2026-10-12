@@ -229,17 +229,14 @@ pub fn plan(repo: &str, script: String, dir: &Path, version: Option<&str>, runne
 
 /// Windows 의 푼 경로에서 `\\?\` 접두어를 걷는다 — `canonicalize` 가 붙이는 것인데, Windows
 /// PowerShell 5.1 의 `New-Item`·`Test-Path` 가 그 꼴을 제대로 못 읽는다. `\\?\UNC\서버\…` 는
-/// `\\서버\…` 로 되돌린다. 그 밖의 철자는 그대로다 — 글자만 보는 것이라 리눅스에서도 잰다.
+/// `\\서버\…` 로 되돌린다. 그 밖의 철자는 그대로다 — 걷는 규칙은 훅 줄의 철자와 한 자([`crate::path::unverbatim`],
+/// moai-vaj4)다. 글자만 보는 것이라 리눅스에서도 잰다.
 ///
 /// **푼 자리를 받는 곳에서 한 번 걷는다**(`cmd::update`, 리뷰) — 인자 하나에서만 걷던 판은 `--json` 의
 /// `dir` 과 거절문이 `\\?\C:\…` 를, 인자는 `C:\…` 를 대 한 자리를 두 철자로 말했다.
 pub fn plain(dir: &Path) -> PathBuf {
-    let spelt = dir.to_string_lossy();
-    if let Some(rest) = spelt.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{rest}"));
-    }
-    match spelt.strip_prefix(r"\\?\") {
-        Some(rest) => PathBuf::from(rest),
+    match dir.to_str() {
+        Some(spelt) => PathBuf::from(crate::path::unverbatim(spelt)),
         None => dir.to_path_buf(),
     }
 }
