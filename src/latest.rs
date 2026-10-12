@@ -110,7 +110,12 @@ pub fn api_of(repo: &str) -> String {
 /// `repo` 의 `install.sh` — **늘 `main` 의 것이다**(2026-10-08 사용자 결정). 받는 사람이 밟는 가지가
 /// `main` 이고(moai-vqmx), 판을 고르는 것은 스크립트가 아니라 그 스크립트에 넘기는 `--version` 이다.
 pub fn script_of(repo: &str) -> String {
-    format!("https://raw.githubusercontent.com/{repo}/main/install.sh")
+    script_named(repo, "install.sh")
+}
+
+/// `repo` 의 `main` 에 선 설치 스크립트 `name` — `install.sh` 나 `install.ps1`([`crate::update::Runner::script`]).
+pub fn script_named(repo: &str, name: &str) -> String {
+    format!("https://raw.githubusercontent.com/{repo}/main/{name}")
 }
 
 /// 판을 올리는 한 줄 — 처음 까는 줄과 같다(moai-8rmw). `install.sh` 는 깔 자리에 선 것이
@@ -180,13 +185,17 @@ pub fn repo_lenient(env: impl Fn(&str) -> Option<OsString>, config: Option<&str>
     repo_from(env, config).unwrap_or_else(|_| config.unwrap_or(DEFAULT_REPO).to_string())
 }
 
-/// `install.sh` 가 판을 내는 기계인가 — 그 스크립트의 플랫폼 표, `release.yml` 의 빌드 행렬과
-/// 같은 둘이다. 다른 기계에서 [`upgrade_of`] 의 줄은 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
+/// 설치 스크립트가 판을 내는 기계인가 — `install.sh`·`install.ps1` 의 플랫폼 표, `release.yml` 의
+/// 빌드 행렬과 같은 셋이다. 다른 기계에서 [`upgrade_of`] 의 줄은 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
 ///
 /// **행렬에 칸이 늘면 여기도 는다.** 안 늘리면 그 기계의 탐색기가 올리는 줄을 안 댈 뿐이다 —
-/// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다.
-pub const SERVED: bool =
-    cfg!(any(all(target_os = "linux", target_arch = "x86_64"), all(target_os = "macos", target_arch = "aarch64")));
+/// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다. Windows 칸이 는 날(moai-j9gv.3fl) 함께 늘었다 —
+/// 그 기계의 탐색기는 [`upgrade_for`] 로 `moai update` 를 댄다.
+pub const SERVED: bool = cfg!(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_arch = "x86_64")
+));
 
 /// **도는 이 바이너리를 올리는 한 줄**(리뷰). 못 올리는 줄은 안 낸다 — 그때는 `None` 이다.
 ///
@@ -254,8 +263,15 @@ pub fn built_by_cargo(dir: &Path) -> bool {
 /// 대고 그 명령은 거절하는 판을 안 만든다. 저장소 값 때문에만 못 서면 긴 줄을 댄다 — 자리를 못 쓰면 그 줄도 못 서니 `None` 이다.
 pub fn upgrade_here(repo: &str, repo_ok: bool) -> Option<String> {
     let exe = crate::path::real(&std::env::current_exe().ok()?);
-    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
+    let home = home_from(|k| std::env::var_os(k)).map(|h| crate::path::real(&h));
     upgrade_for(&exe, home.as_deref(), SERVED, repo, repo_ok, crate::update::writable)
+}
+
+/// 집 — `HOME` 이 먼저, 없거나 비었으면 `USERPROFILE`(moai-j9gv.3fl). Windows 에는 `HOME` 이 보통 없다.
+/// moai-j9gv.cl6 이 사용자 설정 자리(`user_config::path_from`)에 세우는 것과 같은 차례다 — 둘이 다른
+/// 집을 보면 안내 줄이 고른 자리와 설정이 사는 자리가 갈린다.
+fn home_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    ["HOME", "USERPROFILE"].into_iter().find_map(|k| env(k).filter(|h| !h.is_empty())).map(PathBuf::from)
 }
 
 /// [`upgrade_here`] 의 판단 — **파일 시스템의 권한만 받아서 잰다**(시험이 `chmod` 없이 갈래를 잰다, root 로
@@ -2445,6 +2461,19 @@ mod tests {
         );
         assert_eq!(repo_lenient(env("../x"), Some("fork/moai")), "fork/moai");
         assert_eq!(repo_lenient(env("../x"), None), DEFAULT_REPO);
+    }
+
+    /// **집은 `HOME` 이 먼저, 없으면 `USERPROFILE`**(moai-j9gv.3fl) — Windows 에는 `HOME` 이 보통 없어,
+    /// `HOME` 만 읽던 판은 그 기계의 집을 늘 몰랐다. 빈 값은 없는 것이다.
+    #[test]
+    fn home_falls_back_to_userprofile() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| OsString::from(v))
+        };
+        assert_eq!(home_from(env(&[("HOME", "/h"), ("USERPROFILE", r"C:\u")])), Some(PathBuf::from("/h")));
+        assert_eq!(home_from(env(&[("USERPROFILE", r"C:\u")])), Some(PathBuf::from(r"C:\u")));
+        assert_eq!(home_from(env(&[("HOME", ""), ("USERPROFILE", r"C:\u")])), Some(PathBuf::from(r"C:\u")));
+        assert_eq!(home_from(env(&[])), None);
     }
 
     /// **올리는 줄은 받을 저장소를 따른다**(moai-zsfr.2em). 기본이 아닌 저장소는 `MOAI_REPO` 를 함께 싣는다 —
