@@ -3,7 +3,7 @@
 //!
 //! **조각이다.** 환경변수도 파일도 프로세스도 모른다: 무엇을 쓸지(`template`), 받은 글을
 //! 어떻게 읽을지(`parse`), 어느 편집기를 어떤 인자로 띄울지(`pick`·`argv`·`words`), 그 인자를 Git Bash 의
-//! `sh` 에 어떻게 싸 넘길지(`msys_quoted`)만 정한다.
+//! `sh` 에 어떻게 싸 넘길지(`msys_quoted`), 어느 낱말이 싸지 않아도 MSYS2 를 그대로 지나는지(`msys_word`)만 정한다.
 //! 파일을 만들고 편집기를 띄우고 터미널을 내리는 것은 루프(`cmd::tui`)가 한다 — 그래야
 //! 이 규칙들이 터미널 없이 시험된다.
 
@@ -106,7 +106,7 @@ pub fn argv(editor: &str, file: &std::path::Path) -> Vec<OsString> {
 #[cfg(any(not(unix), test))]
 pub fn msys_quoted(arg: impl IntoIterator<Item = u16>) -> Vec<u16> {
     let arg: Vec<u16> = arg.into_iter().collect();
-    let special = |u: u16| u8::try_from(u).is_ok_and(|b| b" \t\n\r\\\"{'?*~".contains(&b));
+    let special = |u: u16| u8::try_from(u).is_ok_and(|b| MSYS2_SPECIAL.contains(&b) || b == b'~');
     if !arg.is_empty() && !arg.iter().any(|&u| special(u)) {
         return arg;
     }
@@ -120,6 +120,31 @@ pub fn msys_quoted(arg: impl IntoIterator<Item = u16>) -> Vec<u16> {
     }
     out.push(u16::from(b'"'));
     out
+}
+
+/// MSYS2 의 런타임에 넘길 낱말에서 [`msys_quoted`] 가 쓰는 git 의 목록과 [`msys_word`] 가 쓰는 잰 목록이 함께 고르는
+/// 글자 — 빈칸 넷(git 의 `isspace`)·`\`·`"`·`{`·`'`·`?`·`*`. 앞의 것은 여기에 `~` 를 더하고 뒤의 것은 `[` 를 더한다.
+/// 둘이 따로 적으면 한쪽만 고쳐진다(리뷰 moai-j9gv.8oh).
+#[cfg(any(not(unix), test))]
+const MSYS2_SPECIAL: &[u8] = b" \t\n\r\\\"{'?*";
+
+/// 이 낱말이 **싸지 않아도 MSYS2 의 런타임을 그대로 지나는가**(moai-l3pp). 거기서 지어진 프로그램(Git 의 `sh.exe`·
+/// `nano.exe`)은 명령 줄을 제 규칙으로 다시 쪼갠다. 2026-10-12 MinGit 2.56 의 `sh.exe` 로 wine 에서 잰 것이다.
+///
+/// - 어디 있든 바뀌는 글자 — 빈칸·`'`·`"`·`{`(따옴표와 중괄호를 먹는다), `*`·`?`·`[`(맞는 파일이 있으면 펼친다), `\`(glob
+///   이 그 낱말을 읽으면 둘을 하나로 준다 — 드라이브·UNC 꼴은 피하지만 가리지 않고 막는다)
+/// - 맨 앞에서만 바뀌는 글자 — `~`(그 자리가 있으면 집 디렉터리로 펼친다), `@`(그 이름의 파일이 있으면 그 글로 바뀐다).
+///   빈 낱말은 사라진다. 처음 잰 `~/x` 는 없는 자리라 지났다(리뷰 moai-j9gv.8oh)
+/// - 그대로 지난 것 — 가운데의 `~`(8.3 짧은 이름의 `JOHNSM~1`)·한글·`$`·`%`·`&`·`(`·`;`·`]`·`}`·`^`·맨 앞의 `-`
+///
+/// 편집기에 넘길 임시 경로는 이것이 참인 자리에서 고른다 — 그 낱말은 MSVC 의 꼴로도 MSYS2 의 꼴로도 안 싸여, 어느 편집기가
+/// 받든 옛 `LANG` 문자셋에서든 그대로 닿는다(2026-10-12 사람 결정). [`msys_quoted`] 와 갈리는 것은 가운데의 `~`(그쪽은
+/// 싼다)와 `[`·맨 앞의 `@`(그쪽은 안 싼다)다 — 그쪽은 git 과 같은 답을 내려고 git 의 목록을 그대로 쓴다.
+#[cfg(any(not(unix), test))]
+pub fn msys_word(arg: impl IntoIterator<Item = u16>) -> bool {
+    let mut arg = arg.into_iter().peekable();
+    arg.peek().is_some_and(|&u| u != u16::from(b'~') && u != u16::from(b'@'))
+        && !arg.any(|u| u8::try_from(u).is_ok_and(|b| MSYS2_SPECIAL.contains(&b) || b == b'['))
 }
 
 /// `sh` 없이 띄우는 데서 편집기 글을 쪼갠 것 — 첫 낱말과 나머지(moai-j9gv.cl6). **빈칸으로 쪼갠다** —
@@ -278,5 +303,34 @@ mod tests {
         // 짝 없는 서로게이트(Windows 의 낱말에 설 수 있다)는 단위째 지나간다.
         assert_eq!(msys_quoted([0xD800, u16::from(b'a')]), [0xD800, u16::from(b'a')]);
         assert_eq!(msys_quoted([0xD800, u16::from(b' ')]), [34, 0xD800, 32, 34]);
+    }
+
+    /// **싸지 않아도 MSYS2 를 그대로 지나는 낱말**(moai-l3pp) — 2026-10-12 MinGit 의 `sh.exe` 로 잰 표다. 고르는 글자는
+    /// 하나씩 잰다 — 하나를 빼도 붉어진다. 맨 앞의 `~`·`@` 는 그 자리·파일이 있으면 바뀌고 빈 낱말은 사라진다(리뷰
+    /// moai-j9gv.8oh). `/` 로 쓴 임시 경로와 8.3 짧은 이름의 `~` 는 지난다.
+    #[test]
+    fn some_words_pass_msys2_unquoted() {
+        let w = |s: &str| msys_word(s.encode_utf16());
+        for passes in [
+            "C:/Users/OBRIEN~1/AppData/Local/Temp/moai-backlog-1-0.md",
+            "//srv/share/T/moai-backlog-1-0.md",
+            "moai-backlog-1-0.md",
+            "C:/Users/레이븐/T",
+            "a$b%c&d(e);f",
+            "C:/a]b}c^d",
+            "-x",
+            "x@y",
+        ] {
+            assert!(w(passes), "{passes}: 지나는 낱말을 막았다");
+        }
+        for fails in [
+            "a b", "a\tb", "a\nb", "a\rb", "o'brien", "a\"b", "a{b}", r"C:\x", "a*b", "a?b", "a[b]", "~/x", "~",
+            "@resp", "",
+        ] {
+            assert!(!w(fails), "{fails:?}: MSYS2 가 바꾸는 낱말을 그대로 넘긴다");
+        }
+        // 짝 없는 서로게이트는 단위째 본다 — 고르는 글자가 모두 ASCII 다.
+        assert!(msys_word([0xD800, u16::from(b'a')]));
+        assert!(!msys_word([0xD800, u16::from(b' ')]));
     }
 }
