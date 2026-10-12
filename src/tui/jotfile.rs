@@ -84,6 +84,35 @@ pub fn argv(editor: &str, file: &std::path::Path) -> Vec<OsString> {
     vec!["-c".into(), format!("{editor} \"$@\"").into(), editor.into(), file.as_os_str().to_owned()]
 }
 
+/// Git for Windows 의 `sh` 에 넘길 낱말 하나를 **MSYS2 의 규칙으로** 싼다(moai-6kbo) — Git 의 `quote_arg_msys2`
+/// (`compat/mingw.c`)를 옮긴 것이다. 러스트의 `Command` 는 낱말을 MSVC 의 규칙으로 싸는데, MSYS2 의 런타임은 명령
+/// 줄을 제 규칙으로 다시 쪼개 `'` 를 따옴표로 먹고 `\\` 를 반으로 줄인다 — `C:\Users\o'brien\…` 의 임시 경로가
+/// 없는 파일이 되어 적은 생각이 "제목이 비었다" 로 사라졌다. 그래서 부르는 쪽은 이것을 `raw_arg` 로 넘긴다.
+///
+/// - 빈칸·`\`·`"`·`{`·`'`·`?`·`*`·`~` 가 없으면 그대로다. 있으면 큰따옴표로 싸고, 그 안의 `\` 와 `"` 앞에만 `\` 를 둔다
+/// - 빈 낱말은 `""` 다 — 안 싸면 낱말 하나가 사라진다
+///
+/// UTF-16 단위로 받는 까닭은 Windows 의 낱말이 그것이라서다(`encode_wide`) — 짝 없는 서로게이트도 그대로 지나고,
+/// 리눅스에서는 `str::encode_utf16` 으로 잰다. 고르는 글자가 모두 ASCII 라 단위 하나씩 봐도 된다.
+#[cfg(any(not(unix), test))]
+pub fn msys_quoted(arg: impl IntoIterator<Item = u16>) -> Vec<u16> {
+    let arg: Vec<u16> = arg.into_iter().collect();
+    let special = |u: u16| u8::try_from(u).is_ok_and(|b| b.is_ascii_whitespace() || br#"\"{'?*~"#.contains(&b));
+    if !arg.is_empty() && !arg.iter().any(|&u| special(u)) {
+        return arg;
+    }
+    let mut out = Vec::with_capacity(arg.len() + 2);
+    out.push(u16::from(b'"'));
+    for u in arg {
+        if u == u16::from(b'\\') || u == u16::from(b'"') {
+            out.push(u16::from(b'\\'));
+        }
+        out.push(u);
+    }
+    out.push(u16::from(b'"'));
+    out
+}
+
 /// `sh` 없이 띄우는 데서 편집기 글을 쪼갠 것 — 첫 낱말과 나머지(moai-j9gv.cl6). **빈칸으로 쪼갠다** —
 /// 따옴표를 풀려면 껍데기 규칙을 반쯤 흉내 내야 하고([`pick`] 이 안 하는 까닭과 같다), 빈칸이 든
 /// 자리의 편집기는 `PATH` 에 그 디렉터리를 두면 이름 하나로 선다. 빈 글이면 첫 낱말도 빈 글이다.
@@ -207,5 +236,28 @@ mod tests {
         assert_eq!(words(r#"  "C:\a b\ed.exe""#), (r"C:\a b\ed.exe", vec![]));
         // 닫는 따옴표가 없으면 예외가 아니다 — 빈칸으로 쪼갠다.
         assert_eq!(words(r#""C:\a b\ed.exe -w"#), (r#""C:\a"#, vec![r"b\ed.exe", "-w"]));
+    }
+
+    /// **Git Bash 의 `sh` 에는 MSYS2 의 규칙으로 싼다**(moai-6kbo) — Git 의 `quote_arg_msys2` 와 같은 답이다. `'` 든 임시
+    /// 경로가 큰따옴표 안에 들어 그 `sh` 가 따옴표로 안 먹고, `\` 는 둘로 적혀 반으로 줄어도 하나가 남는다.
+    #[test]
+    fn the_msys_sh_gets_its_own_quoting() {
+        let q = |s: &str| String::from_utf16(&msys_quoted(s.encode_utf16())).unwrap();
+        assert_eq!(q("-c"), "-c", "쌀 것 없는 낱말을 쌌다");
+        assert_eq!(q("code"), "code");
+        assert_eq!(q(""), r#""""#, "빈 낱말이 사라진다");
+        assert_eq!(q(r#"code --wait "$@""#), r#""code --wait \"$@\"""#);
+        assert_eq!(
+            q(r"C:\Users\o'brien\AppData\Local\Temp\moai-backlog.md"),
+            r#""C:\\Users\\o'brien\\AppData\\Local\\Temp\\moai-backlog.md""#,
+            "`'` 든 임시 경로를 그 `sh` 가 쪼갠다"
+        );
+        assert_eq!(q(r"C:/a\\b"), r#""C:/a\\\\b""#, "`\\\\` 가 반으로 줄어 하나가 된다");
+        for glob in ["~/x", "a?b", "a*b", "{a,b}"] {
+            assert_eq!(q(glob), format!("\"{glob}\""), "{glob}: 그 `sh` 가 펼친다");
+        }
+        // 짝 없는 서로게이트(Windows 의 낱말에 설 수 있다)는 단위째 지나간다.
+        assert_eq!(msys_quoted([0xD800, u16::from(b'a')]), [0xD800, u16::from(b'a')]);
+        assert_eq!(msys_quoted([0xD800, u16::from(b' ')]), [34, 0xD800, 32, 34]);
     }
 }

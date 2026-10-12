@@ -1088,7 +1088,8 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
 /// 유닉스가 아닌 판의 [`editor_command`](moai-j9gv.cl6) — **Git Bash 안이면 유닉스와 같은 길이다**(리뷰
 /// moai-j9gv.4s3). 그 껍데기(`MSYSTEM` 이 선다)의 사람은 편집기 글을 `sh` 의 말로 적고(`'C:/Program Files/…/code'
 /// --wait`), git 도 거기서 편집기를 `sh -c` 로 띄운다. 이 에픽 전에는 어디서나 `sh` 로 띄워 그 글이 섰으니, 빈칸으로만
-/// 쪼개면 거기서 되던 것이 안 된다. 그 `sh` 는 [`msys_sh`] 가 `PATH` 에서 찾고, 못 찾으면 아래 길로 간다.
+/// 쪼개면 거기서 되던 것이 안 된다. 그 `sh` 는 [`msys_sh`] 가 `PATH` 에서 찾고, 못 찾으면 아래 길로 간다. 인자의
+/// 모양은 유닉스와 같고, 명령 줄에 싸는 규칙만 MSYS2 의 것이다(moai-6kbo) — git 이 그 `sh` 를 띄우는 꼴과 같다.
 ///
 /// 그 밖(cmd·PowerShell)에는 물을 `sh` 가 없거나, 있어도 그 사람의 글(`C:\tools\nvim.exe`)의 `\` 를 `sh` 가 먹는다.
 /// 거기서는 편집기 글을 쪼개([`crate::tui::jotfile::words`]) 첫 낱말을 프로그램으로 띄우고, 그 낱말은
@@ -1097,8 +1098,14 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
 #[cfg(not(unix))]
 fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
     if let Some(sh) = msys_sh() {
+        use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+        use std::os::windows::process::CommandExt as _;
+        // **낱말은 MSYS2 의 규칙으로 싸 그대로 넘긴다**(moai-6kbo) — `args` 가 싸는 MSVC 의 꼴을 그 `sh` 가 다시 쪼개
+        // `'` 든 임시 경로를 잃었다([`crate::tui::jotfile::msys_quoted`]).
         let mut cmd = std::process::Command::new(sh);
-        cmd.args(crate::tui::jotfile::argv(editor, path));
+        for arg in crate::tui::jotfile::argv(editor, path) {
+            cmd.raw_arg(std::ffi::OsString::from_wide(&crate::tui::jotfile::msys_quoted(arg.encode_wide())));
+        }
         return cmd;
     }
     let (program, rest) = crate::tui::jotfile::words(editor);
