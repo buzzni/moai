@@ -88,6 +88,11 @@ Windows (below).
     `$env:EDITOR = '"C:\Program Files\Notepad++\notepad++.exe" -multiInst -nosession'`.
     The program is looked up on `PATH` with `PATHEXT`, so `code --wait` finds
     `code.cmd`
+  - The editor gets the temporary file as `C:/…/moai-backlog-<n>.md`. When
+    that path holds a space, `'`, `"`, `{`, `*`, `?` or `[` (a profile named
+    `o'brien`), it gets only the file name and starts in the temporary
+    directory instead — editors built on Git's runtime, such as Git's own
+    `nano.exe`, would otherwise split the path and open a file that is not there
 - **Hooks and the merge driver** write the path of `moai.exe` with forward
   slashes (`C:/Users/you/AppData/Local/Programs/moai/moai.exe`): Git runs the
   merge driver with its own `sh` and Claude Code runs hooks with Git Bash, and
