@@ -8961,6 +8961,8 @@ fn a_one_line_body_naming_a_file_is_said_and_kept() {
     assert!(err(&out).contains("--body - < 'my plan.md'"), "{}", err(&out));
 
     // **파일은 열지 않는다** — stat 만 한다. 읽을 권한이 없어도 알림은 선다(root 면 이 줄은 늘 지난다).
+    // 권한 비트로 못 읽게 만드는 것은 유닉스에서만 선다.
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
         let locked = s.path().join("locked.md");
@@ -15374,6 +15376,7 @@ fn a_broken_line_rides_the_board_too() {
 ///
 /// 표의 키가 세션 id 뿐이면 둘째 저장소는 첫째의 표를 보고 영영 조용해진다.
 #[test]
+#[cfg(unix)]
 fn two_repos_in_one_session_each_get_a_board() {
     let one = init("hooktwo-a");
     let two = init("hooktwo-b");
@@ -17871,13 +17874,18 @@ impl Claude {
         // 갈라 문법 오류가 나고, 가짜가 **모든** 부름에 비영으로 끝난다.
         let fail = word.map(|w| format!("case \"$*\" in *\"{w}\"*) exit 1;; esac\n")).unwrap_or_default();
         std::fs::write(&source, format!("#!/bin/sh\necho \"$@\" >> \"{}\"\n{fail}exit 0\n", log.display())).unwrap();
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // 가짜는 `#!/bin/sh` 라 실행 비트도 `sh` 링크도 유닉스에서만 선다.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         place_exe(&source, &bin.join("claude"));
         std::fs::create_dir_all(home.path().join(".claude/plugins")).unwrap();
         // moai 가 PATH 에서 찾는 것은 `sh` 뿐이다 (`command -v` 로 이름을 찾는다).
         let sys = home.path().join("sysbin");
         std::fs::create_dir_all(&sys).unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink("/bin/sh", sys.join("sh")).unwrap();
         Claude { home, bin, log }
     }
@@ -17897,6 +17905,7 @@ impl Claude {
 
     /// [`Claude::run`] 이되 **멈추면 죽이고 진다** — 커밋된 자리의 FIFO 를 막히지 않게 열지 않은 `moai` 는 쓰는 쪽을
     /// 영영 기다린다. 마감은 60초고, 그때까지 안 끝나면 시험이 그 인자를 대며 진다.
+    #[cfg(unix)]
     fn bounded(&self, dir: &Path, args: &[&str]) -> Output {
         let mut child = self
             .command(Path::new(BIN), dir, args, true)
@@ -18114,6 +18123,7 @@ fn skill_status_from_another_binary_keeps_a_current_install_current() {
 ///
 /// `argv[0]` 은 **같은 파일일 때만** 믿는다 — `exec -a` 로 엉뚱한 철자를 주면 푼 자리를 적는다.
 #[test]
+#[cfg(unix)]
 fn skill_install_writes_the_spelling_it_was_called_by() {
     use std::os::unix::process::CommandExt as _;
     let s = init("skillspelled");
@@ -18157,6 +18167,7 @@ fn skill_install_writes_the_spelling_it_was_called_by() {
 /// 심겼고(moai-gu5m 전의 판) 체크아웃의 `plugin.json` 은 커밋된 링크 철자로 되돌린 자리 — 루트가 실제로
 /// 그렇게 섰다. 지금 부른 쪽은 심긴 철자를 잇고 설치본의 훅은 푼 철자라 글자만 갈린다 — 견주는 것은 자리다.
 #[test]
+#[cfg(unix)]
 fn skill_status_through_another_spelling_of_the_same_binary_says_nothing() {
     let s = init("skillsamefile");
     let c = Claude::new("skillsamefile-home");
@@ -18183,6 +18194,7 @@ fn skill_status_through_another_spelling_of_the_same_binary_says_nothing() {
 /// 철자만 따르면 같은 파일을 다른 철자로 불러 심을 때마다 커밋된 `plugin.json` 이 바뀌었다. 다른 파일이면
 /// 부른 철자다 — 그때는 훅이 부를 것이 실제로 바뀐다.
 #[test]
+#[cfg(unix)]
 fn skill_install_keeps_the_planted_spelling_of_the_same_file() {
     let s = init("skillkeep");
     let c = Claude::new("skillkeep-home");
@@ -18586,6 +18598,7 @@ fn skill_install_counts_retiring_apart_and_leaves_a_shared_user_install() {
 /// 판에 안 걷는다. 공용 가짜 `claude` 는 받은 인자만 적어 장부가 등록 앞뒤로 같으므로, 이 시험의 가짜는 moai 를
 /// 등록할 때 그 범위를 장부에 적는다 — 등록 뒤에 재는 판이 돌아오면 여기가 붉어진다.
 #[test]
+#[cfg(unix)]
 fn skill_install_measures_the_scopes_before_registering() {
     let s = init("skillkoreanbefore");
     let c = Claude::new("skillkoreanbefore-home");
@@ -18755,6 +18768,7 @@ fn skill_retires_only_from_the_old_marketplace_source() {
 /// 안 부른 걸음은 `--json` 에서 `ok` 가 `null` 이고, 사람 출력은 안 불렀다고 밝힌다. 설치본이 옛 판으로 남으니
 /// 다시 부르면 또 걷는다.
 #[test]
+#[cfg(unix)]
 fn skill_install_retires_nothing_when_moai_is_not_registered() {
     let s = init("skillkoreannoreg");
     let c = Claude::new("skillkoreannoreg-home");
@@ -19006,6 +19020,7 @@ const OLD_MARKETS: [(&str, &str); 2] =
 /// 걷는다. 다른 바이트는 그대로 남는다. 선언 지우기는 플러그인 걸음 **뒤에** 그 파일을 다시 읽는다 — 이 시험의
 /// 가짜는 `plugin uninstall … --scope project` 때 `enabledPlugins` 의 줄을 걷는다(진짜 `claude` 가 하는 일이다).
 #[test]
+#[cfg(unix)]
 fn skill_install_undeclares_the_old_marketplaces_at_project_scope() {
     let s = init("skillundeclare");
     let c = Claude::new("skillundeclare-home");
@@ -19110,6 +19125,7 @@ fn skill_install_keeps_a_declaration_whose_plugin_stays() {
 /// 2026-10-05, moai-ml0d.que 2번) — 그 자리와 까닭을 한 줄(`--json` 의 `settings_unread`)로 대고, 없는 파일은 조용하다.
 /// 종료 코드는 등록만 따른다.
 #[test]
+#[cfg(unix)]
 fn skill_install_does_not_follow_a_settings_link_out_of_the_checkout() {
     let s = init("skillundeclarelink");
     let c = Claude::new("skillundeclarelink-home");
@@ -19428,8 +19444,11 @@ impl Claude {
     fn tool(&self, name: &str) {
         let source = self.home.path().join(format!("{name}.sh"));
         std::fs::write(&source, "#!/bin/sh\nexit 0\n").unwrap();
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         place_exe(&source, &self.bin.join(name));
     }
 }
@@ -20598,6 +20617,7 @@ fn an_unreadable_journal_is_named_and_only_my_own_fails_the_run() {
 }
 
 /// 그 체크아웃의 `.moai/journal/` 에 하나뿐인 저널 파일. 시험이 심는 사람은 하나다.
+#[cfg(unix)]
 fn only_journal(root: &Path) -> PathBuf {
     let mut split: Vec<PathBuf> = std::fs::read_dir(root.join(".moai/journal"))
         .unwrap_or_else(|e| panic!("{}: {e}", root.display()))
@@ -25128,6 +25148,7 @@ fn init_screen_defaults_install_the_hooks_and_skills() {
 /// 표식으로 심지 않고, 이미 심긴 것은 다시 심는다. `--with` 는 설치를 켜고, `--no-skill` 과는 함께 못 서고, 늘 심는
 /// 이름은 `skill install` 과 같은 한 줄로 거절한다.
 #[test]
+#[cfg(unix)]
 fn init_plants_only_the_optional_skills_it_is_given_where_nothing_is_asked() {
     let s = Scratch::new("init-with");
     git(s.path(), &["init", "-q", "."]);
@@ -26583,6 +26604,7 @@ fn the_stop_count_matches_the_board_over_an_archive() {
 /// rest on stderr (moai-qde9.2hx.yt6).
 #[test]
 fn an_unreadable_archive_is_broken_data_for_status_alone() {
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
         ("conflict", Box::new(|f| std::fs::write(f, "<<<<<<< ours\n=======\n>>>>>>> theirs\n").unwrap())),
         ("not-utf8", Box::new(|f| std::fs::write(f, [0xff, 0xfe, b'\n']).unwrap())),

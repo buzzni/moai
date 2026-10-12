@@ -2791,6 +2791,8 @@ fn torn_tail(f: &mut std::fs::File) -> std::io::Result<bool> {
 /// 링크가 바뀐 경우에 임시 자리와 갈아끼울 자리가 서로 다른 풀이에서 온다.
 fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
+    // 부모를 묻는 것은 어디서나 한다(없으면 실패) — 그 값을 쓰는 것은 아래 유닉스 fsync 뿐이다.
+    #[cfg_attr(not(unix), allow(unused_variables))]
     let dir = parent_of(path, path)?;
     let (tmp, mut f) = open_tmp(path, tmp_dir)?;
     // **어디서 실패하든 임시 파일을 치운다.** `rename` 에서만 치우던 때는 디스크가 찬(ENOSPC)
@@ -3699,11 +3701,13 @@ mod tests {
 
     /// 이 저장소의 자리만 골라 센 것 — [`UNREAD`] 는 프로세스 하나의 것이라 병렬 시험끼리
     /// 섞인다. 수를 세지 말고 제 뿌리 밑의 짝만 본다.
+    #[cfg(unix)]
     fn unread_under(root: &Path) -> Vec<Unread> {
         journal_unread().into_iter().filter(|u| u.at.starts_with(root)).collect()
     }
 
     /// [`unread_under`] 와 같되 탐색기 머리의 줄이 읽는 [`UNREAD_NOW`] 에서 고른다 — 다시 재는 걸음이 걷는 쪽이다.
+    #[cfg(unix)]
     fn unread_now_under(root: &Path) -> Vec<Unread> {
         journal_unread_now().into_iter().filter(|u| u.at.starts_with(root)).collect()
     }
@@ -3713,6 +3717,7 @@ mod tests {
     /// 읽던 것을 내고, 못 연 자리를 [`journal_unread`] 에 세운다 — 그것을 대는 자가 `cmd::run`
     /// 이고, 거기서 종료 코드도 0 이 아니게 된다.
     #[test]
+    #[cfg(unix)]
     fn an_unreadable_journal_dir_is_carried_and_told() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("nojournaldir");
@@ -3756,6 +3761,7 @@ mod tests {
     /// 접어 **모든** 저널 파일이 말없이 빠졌다 — 이력 없는 화면이 stderr 한 줄 없이 0 으로
     /// 끝났다. 조용한 손실이 이 도구가 못 견디는 하나다.
     #[test]
+    #[cfg(unix)]
     fn a_journal_dir_that_cannot_be_stat_ed_is_told_not_swallowed() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("nostatjournal");
@@ -3794,6 +3800,7 @@ mod tests {
     /// 관대해진 읽기가 조용해지지 않는 것까지 한 자리에서 잰다: 읽은 것은 나오고, 못 읽은
     /// 파일은 [`journal_unread`] 에 선다.
     #[test]
+    #[cfg(unix)]
     fn an_unreadable_journal_file_is_skipped_and_told() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("nojournalfile");
@@ -3843,6 +3850,7 @@ mod tests {
     /// [`UNREAD`] 는 고쳐도 그대로다. **목록에 없던 파일은 안 연다** — 내 파일은 읽혔던 자리라, 그 뒤에 못 읽게 되어도
     /// 다시 재는 걸음은 그것을 안 열어 새로 세지 않는다.
     #[test]
+    #[cfg(unix)]
     fn a_fixed_journal_place_is_dropped_on_reopen_and_a_broken_one_stays() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("reopenjournal");

@@ -1324,6 +1324,9 @@ fn planted_word(planted: &str) -> Option<String> {
 ///
 /// **셋을 가른다.** 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르고, 뭉치면 그 중 하나는 반드시
 /// 거짓말이 된다(`agents_stale` 을 둘로 가른 것과 같은 까닭).
+///
+/// 유닉스가 아니면 [`probe`] 가 `Runs` 하나만 내니 나머지 셋은 그 판에서 안 선다.
+#[cfg_attr(not(unix), allow(dead_code))]
 enum Probe {
     /// 이 명령을 알고 0 으로 끝났다 — 도움말이 제 이름을 댄다([`Said`]).
     Runs,
@@ -1442,6 +1445,47 @@ pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_s
 /// 멀쩡한 `--as bin/moai` 를 "썩었다" 고 불렀다. 절대 경로면 `join` 이 그대로 낸다. 자리에
 /// 구분자가 없으면 이름이므로 `PATH` 에 맡긴다 — 그 `PATH` 는 이 프로세스의 것이고 git 이 병합에서
 /// 쓸 것과 꼭 같지는 않지만, 이름으로 심은 것은 그만큼만 믿는 것이 맞다.
+#[cfg(unix)]
+fn probe(root: &Path, cmd: &str) -> Probe {
+    use std::io::ErrorKind;
+    use std::process::{Command, Stdio};
+    let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
+    let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
+    // **못 열면 안 잰다** — 도움말을 못 받아 놓고 "제 이름을 안 댔다" 로 읽으면 멀쩡한
+    // 드라이버가 `Alien` 이 된다. 못 잰 것은 말하지 않는 자리다.
+    let Some((said, sink)) = Said::new() else { return Probe::Unknown };
+    let spawned = Command::new(program)
+        .args([SUB, "--help"])
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(sink))
+        .stderr(Stdio::null())
+        .spawn();
+    let mut child = match spawned {
+        Ok(c) => c,
+        // 이 둘만 그 **자리**에 대한 말이다.
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Probe::Dead,
+        // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
+        Err(_) => return Probe::Unknown,
+    };
+    let Some(st) = reaped(&mut child) else { return Probe::Unknown };
+    match st.code() {
+        // **0 으로 끝난 것만으로는 모자라다**(moai-wwbi, 2026-09-21 사용자 결정). 모르는 인자를
+        // 흘려 듣고 0 을 내는 래퍼(`#!/bin/sh` 두 줄짜리)는 `merge-driver` 를 모른 채 그대로
+        // 지나갔고, 그 저장소의 매 병합이 말없이 내려앉는다. 도움말에 제 이름이 서는지까지 본다.
+        Some(0) if said.read().contains(SUB) => Probe::Runs,
+        Some(0) => Probe::Alien,
+        // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
+        // 딴 도구가 아니라 그 자리가 못 도는 것이다.
+        Some(126 | 127) => Probe::Dead,
+        Some(_) => Probe::Alien,
+        // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
+        None => Probe::Unknown,
+    }
+}
+
+/// 유닉스가 아닌 판의 [`probe`].
+#[cfg(not(unix))]
 fn probe(root: &Path, cmd: &str) -> Probe {
     // **유닉스가 아니면 재지 않는다**(리뷰 moai-vbmn.spv 가 짚은, 조용히 사라진 결정). 앞 판은
     // `\` 와 `PATHEXT` 규칙을 여기 다시 적지 않으려고 입을 다물었고, 부르는 쪽으로 옮겨도 그
@@ -1449,49 +1493,8 @@ fn probe(root: &Path, cmd: &str) -> Probe {
     // `sh -c` 로 돌려 `moai.cmd` 도 찾아낸다. 그 판을 `Dead` 로 읽으면 git 이 잘 부르는 드라이버에
     // 걷을 길 없는 알림이 선다. **줄의 모양은 그대로 본다** — 여기서 지나가는 것은 "돌 수
     // 있는가" 하나뿐이고, 그것이 이 에픽 전에 `runnable` 이 하던 일이다.
-    #[cfg(not(unix))]
-    {
-        let _ = (root, cmd);
-        return Probe::Runs;
-    }
-    #[cfg(unix)]
-    {
-        use std::io::ErrorKind;
-        use std::process::{Command, Stdio};
-        let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
-        let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
-        // **못 열면 안 잰다** — 도움말을 못 받아 놓고 "제 이름을 안 댔다" 로 읽으면 멀쩡한
-        // 드라이버가 `Alien` 이 된다. 못 잰 것은 말하지 않는 자리다.
-        let Some((said, sink)) = Said::new() else { return Probe::Unknown };
-        let spawned = Command::new(program)
-            .args([SUB, "--help"])
-            .current_dir(root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(sink))
-            .stderr(Stdio::null())
-            .spawn();
-        let mut child = match spawned {
-            Ok(c) => c,
-            // 이 둘만 그 **자리**에 대한 말이다.
-            Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Probe::Dead,
-            // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
-            Err(_) => return Probe::Unknown,
-        };
-        let Some(st) = reaped(&mut child) else { return Probe::Unknown };
-        match st.code() {
-            // **0 으로 끝난 것만으로는 모자라다**(moai-wwbi, 2026-09-21 사용자 결정). 모르는 인자를
-            // 흘려 듣고 0 을 내는 래퍼(`#!/bin/sh` 두 줄짜리)는 `merge-driver` 를 모른 채 그대로
-            // 지나갔고, 그 저장소의 매 병합이 말없이 내려앉는다. 도움말에 제 이름이 서는지까지 본다.
-            Some(0) if said.read().contains(SUB) => Probe::Runs,
-            Some(0) => Probe::Alien,
-            // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
-            // 딴 도구가 아니라 그 자리가 못 도는 것이다.
-            Some(126 | 127) => Probe::Dead,
-            Some(_) => Probe::Alien,
-            // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
-            None => Probe::Unknown,
-        }
-    }
+    let _ = (root, cmd);
+    Probe::Runs
 }
 
 /// 재는 동안 아이가 쓴 stdout 을 받아 둘 자리 — **파이프가 아니라 파일이다**(리뷰).
@@ -1508,8 +1511,10 @@ fn probe(root: &Path, cmd: &str) -> Probe {
 ///
 /// 파일로 받으면 쓰는 쪽이 안 막히고, 읽는 쪽은 손자를 안 기다린다. 한도는 다시 [`reaped`]
 /// 하나가 쥔다. **값은 자리 하나 열고 지우는 것**이라 프로세스 하나 띄우는 값에 묻힌다.
+#[cfg(unix)]
 struct Said(std::path::PathBuf);
 
+#[cfg(unix)]
 impl Said {
     /// 자리를 하나 열어 **읽을 쪽과 아이에게 물려줄 쪽**을 함께 낸다. 못 열면 `None`.
     fn new() -> Option<(Said, std::fs::File)> {
@@ -1533,6 +1538,7 @@ impl Said {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Said {
     /// **재고 나면 치운다.** 손자가 아직 그 fd 를 쥐고 있어도 유닉스에서는 지워진다.
     fn drop(&mut self) {
@@ -1544,6 +1550,7 @@ impl Drop for Said {
 ///
 /// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다. 기다리는 자는
 /// [`crate::git::waited`] 와 한 벌이다 — 기다리는 간격을 늘려 가는 까닭도 거기 적혀 있다.
+#[cfg(unix)]
 fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
     crate::git::waited(child, PROBE_BUDGET).or_else(|| {
         let _ = child.kill();

@@ -355,6 +355,7 @@ mod tests {
         // **링크는 일부러 짓는다**(리뷰 moai-xpa8.yv6) — 뿌리가 이제 늘 풀린 철자라 `away` 를 그대로 넘기면 `pick` 이
         // 링크를 안 풀어도 같은 값이 나와, 리눅스 CI 에서는 두 단언이 아무것도 못 지켰다.
         let links = Scratch::new("pick-links");
+        #[cfg_attr(not(unix), allow(unused_variables))]
         let link = links.join("to-away");
         #[cfg(unix)]
         std::os::unix::fs::symlink(away.path(), &link).unwrap();

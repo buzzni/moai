@@ -160,6 +160,7 @@ pub(crate) fn dir_of(path: &Path) -> &Path {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::scratch::Scratch;
 
     /// **글자로만 접는다** — 파일 시스템을 안 본다. 셋이 저마다 적고 있던 것을 여기로 모았으니
