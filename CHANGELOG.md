@@ -47,7 +47,9 @@ does not tag — see `CONTRIBUTING.md`.
   - The explorer's editor (`SPC n`) starts through `sh -c` inside Git Bash.
     Elsewhere the value is split on blanks, a double-quoted first word
     is the program (`"C:\Program Files\…\notepad++.exe" -multiInst`), and
-    editors installed as `.cmd` are found through `PATHEXT`.
+    editors installed as `.cmd` are found through `PATHEXT`. The editor gets
+    the temporary file as `C:/…`; when that path holds a space, `'`, `{` or
+    `[`, it gets only the file name and starts in the temporary directory.
   - The hooks and the merge driver write the binary's path as `C:/…/moai.exe`,
     with `/`, so Git's `sh` and Claude Code's Git Bash can run it; the hooks
     write just `moai` when the `moai` on `PATH` is the same file. The hooks

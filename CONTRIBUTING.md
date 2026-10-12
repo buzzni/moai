@@ -134,6 +134,10 @@ command, what it printed, and the Windows and PowerShell versions
 - `moai-j9gv.ae7` — the test failures counted under wine (about 150); count them
   again with `cargo test --no-fail-fast` (the script runs that) and note the
   summary lines
+- `moai-l3pp` — `SPC n` with `code --wait`, and with Git's `nano.exe` from
+  PowerShell and from Git Bash, on a profile whose temporary directory holds a
+  space or `'`: the jot comes back. A temporary directory on a share
+  (`\\server\…`) with `code --wait` is a known gap (review `moai-j9gv.8oh`)
 
 ## If you change a command's help
 

@@ -160,19 +160,33 @@ pub(crate) fn dir_of(path: &Path) -> &Path {
 /// `canonicalize` 가 붙이는 `\\?\` 접두어는 [`unverbatim`] 으로 걷는다 — `//?/C:/…` 는 껍데기가 못 연다. 유닉스에서는
 /// 글자 하나 안 바꾼다 — 거기서 `\` 는 파일 이름의 글자다.
 ///
-/// `windows` 를 받는 까닭은 리눅스에서도 그 갈래를 재려는 것이다. 부르는 쪽은 `cfg!(windows)` 를 준다.
+/// `windows` 를 받는 까닭은 리눅스에서도 그 갈래를 재려는 것이다. 부르는 쪽은 `cfg!(windows)` 를 준다. 바꾸는 몸통은
+/// [`slashed_os`] 하나다 — 편집기에 넘기는 임시 경로도 그것을 탄다.
 pub(crate) fn slashed(p: &str, windows: bool) -> String {
     if !windows {
         return p.to_string();
     }
-    // `&str` 에서 ASCII 접두어만 뗀 것이라 도로 UTF-8 이다 — `to_string_lossy` 는 글자를 안 바꾼다.
-    unverbatim(std::ffi::OsStr::new(p)).to_string_lossy().replace('\\', "/")
+    // `&str` 에서 ASCII 만 떼고 바꾼 것이라 도로 UTF-8 이다 — `to_string_lossy` 는 글자를 안 바꾼다.
+    slashed_os(std::ffi::OsStr::new(p)).to_string_lossy().into_owned()
+}
+
+/// [`slashed`] 의 몸통 — `\\?\` 를 걷고([`unverbatim`]) `\` 를 `/` 로 바꾼다. 늘 Windows 의 규칙이다. **바이트로
+/// 바꾼다** — UTF-8 이 아닌 철자(Windows 의 짝 없는 서로게이트)도 `\` 말고는 받은 그대로다. 편집기에 넘기는 임시
+/// 경로(`cmd::tui` 의 `editor_target`, moai-l3pp)가 이것을 바로 탄다 — `\` 는 MSYS2 의 런타임이 명령 줄을 다시 쪼갤
+/// 때도 막음 글자라, Git 의 `nano.exe` 같은 편집기에 싸지 않고 넘기려면 `/` 여야 한다.
+pub(crate) fn slashed_os(p: &std::ffi::OsStr) -> std::ffi::OsString {
+    let spelt: Vec<u8> =
+        unverbatim(p).into_encoded_bytes().into_iter().map(|b| if b == b'\\' { b'/' } else { b }).collect();
+    // SAFETY: `unverbatim` 이 낸 바이트에서 ASCII `\` 만 ASCII `/` 로 바꿨다 — 바꾼 자리마다 유효한 UTF-8 조각(`\`)
+    // 바로 앞뒤에서 잘라 유효한 UTF-8(`/`)을 이은 것이라 `from_encoded_bytes_unchecked` 가 받는 꼴(같은 판·같은
+    // 플랫폼의 바이트를 유효한 UTF-8 조각 앞뒤에서 자르고 유효한 UTF-8 과 이은 것)이다.
+    unsafe { std::ffi::OsString::from_encoded_bytes_unchecked(spelt) }
 }
 
 /// `canonicalize` 가 Windows 에서 붙이는 `\\?\` 접두어를 걷는다 — `\\?\UNC\서버\…` 는 `\\서버\…` 로 되돌리고, 그
-/// 밖의 철자는 그대로다. 구분자는 안 바꾼다(그것은 [`slashed`] 의 몫이다). **걷는 자는 여기 하나다**(moai-vaj4) —
-/// 훅 줄의 철자와 `moai update` 가 PowerShell 에 넘기는 자리(`update::plain`)가 같은 규칙으로 걷는다. 글자만
-/// 보는 것이라 리눅스에서도 잰다.
+/// 밖의 철자는 그대로다. 구분자는 안 바꾼다(그것은 [`slashed_os`] 의 몫이다). **걷는 자는 여기 하나다**(moai-vaj4) —
+/// 훅 줄의 철자, 편집기에 넘기는 임시 경로, `moai update` 가 PowerShell 에 넘기는 자리(`update::plain`)가 같은 규칙으로
+/// 걷는다. 글자만 보는 것이라 리눅스에서도 잰다.
 ///
 /// **바이트로 걷는다**(리뷰 moai-j9gv.8gr) — UTF-8 이 아닌 철자(Windows 의 짝 없는 서로게이트)도 접두어만 떼고 나머지는
 /// 받은 그대로다. `&str` 로 받던 판은 그런 자리를 `update::plain` 이 걷지 못해 PowerShell 5.1 이 못 읽는 `\\?\` 꼴이
@@ -236,6 +250,32 @@ mod tests {
         assert_eq!(slashed(r"\\?\UNC\srv\share\moai.exe", true), "//srv/share/moai.exe");
         assert_eq!(slashed("C:/already/moai.exe", true), "C:/already/moai.exe");
         assert_eq!(slashed(r"/home/me/a\b/moai", false), r"/home/me/a\b/moai", "유닉스의 이름 글자를 바꿨다");
+    }
+
+    /// **몸통은 바이트로 바꾼다**(moai-l3pp) — 편집기에 넘기는 임시 경로가 이것을 탄다. UTF-8 이 아닌 철자는 `\` 말고는
+    /// 바이트째 남는다 — 리눅스의 바이트가 Windows 의 짝 없는 서로게이트를 대신하고, Windows 에서는 서로게이트로 잰다.
+    #[test]
+    fn the_os_spelling_turns_backslashes_bytewise() {
+        let os = |p: &str| slashed_os(std::ffi::OsStr::new(p));
+        assert_eq!(os(r"C:\Users\OBRIEN~1\AppData\Local\Temp"), "C:/Users/OBRIEN~1/AppData/Local/Temp");
+        assert_eq!(
+            os(r"\\?\C:\Users\me\T\moai-backlog-1-0.md"),
+            "C:/Users/me/T/moai-backlog-1-0.md",
+            "접두어를 안 걷었다"
+        );
+        assert_eq!(os(r"\\?\UNC\srv\share\T"), "//srv/share/T");
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let raw = |b: &'static [u8]| std::ffi::OsStr::from_bytes(b);
+            assert_eq!(slashed_os(raw(b"\\\\?\\C:\\Users\\\xff\\T")), raw(b"C:/Users/\xff/T"));
+        }
+        #[cfg(not(unix))]
+        {
+            use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+            let odd = std::ffi::OsString::from_wide(&[0xD800, u16::from(b'\\'), u16::from(b'x')]);
+            assert_eq!(slashed_os(&odd).encode_wide().collect::<Vec<_>>(), [0xD800, u16::from(b'/'), u16::from(b'x')]);
+        }
     }
 
     /// **접두어만 걷고 구분자는 안 바꾼다**(moai-vaj4) — PowerShell 에 넘기는 자리(`update::plain`)가 이것을 탄다.
