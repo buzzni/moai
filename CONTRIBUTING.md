@@ -89,8 +89,7 @@ formatting commit.
 ## Developing on Windows
 
 Windows is a release target (`x86_64-pc-windows-msvc`), and you can build, test
-and keep developing on it. Until the Windows work ships, it lives on the
-`milestone/moai-c12a` branch — check that out.
+and keep developing on it.
 
 `scripts/windows-dev.ps1` gets a clean machine ready and is safe to run again:
 
@@ -104,8 +103,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-dev.ps1
 - rustup reads `rust-toolchain.toml` and fetches the pinned toolchain for the
   host target by itself; the script only checks `cargo --version`
 - It runs `cargo build --release`, `cargo clippy --all-targets -- -D warnings`
-  and `cargo test`, prints one line each, and keeps the full output in
-  `target\windows-dev\*.log`. `-SkipTest` stops after clippy, `-SkipBuild`
+  and `cargo test --no-fail-fast`, prints one line each (plus the
+  `test result: FAILED` line of every test binary that failed), and keeps the
+  full output in `target\windows-dev\*.log`. `-SkipTest` stops after clippy, `-SkipBuild`
   only checks the tools
 - It installs the merge driver with the `moai.exe` it just built
   (`merge-driver --install --as <that path>`), so keep that build where it is or
@@ -131,7 +131,8 @@ command, what it printed, and the Windows and PowerShell versions
 - `moai-j9gv.ukd` — installing with `install.ps1`, and that a tampered zip or a
   missing `SHA256SUMS` is refused
 - `moai-j9gv.ae7` — the test failures counted under wine (about 150); count them
-  again with `cargo test` and note the summary line
+  again with `cargo test --no-fail-fast` (the script runs that) and note the
+  summary lines
 
 ## If you change a command's help
 

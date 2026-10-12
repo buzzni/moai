@@ -73,6 +73,31 @@ impl Runner {
             Runner::PowerShell { .. } => "-Dir",
         }
     }
+
+    /// 선 것을 묻지 않고 덮는 플래그 — [`plan`] 이 늘 단다.
+    pub fn force_flag(&self) -> &'static str {
+        match self {
+            Runner::Sh => "--force",
+            Runner::PowerShell { .. } => "-Force",
+        }
+    }
+
+    /// 판을 주는 플래그.
+    pub fn version_flag(&self) -> &'static str {
+        match self {
+            Runner::Sh => "--version",
+            Runner::PowerShell { .. } => "-Version",
+        }
+    }
+
+    /// 띄울 프로그램 — `sh` 나 `powershell`. **값으로 들지 않는다** — 이것으로 정해지는 것을 [`Plan`] 에
+    /// 따로 적으면 둘이 갈리는 날이 온다.
+    pub fn program(&self) -> &'static str {
+        match self {
+            Runner::Sh => "sh",
+            Runner::PowerShell { .. } => "powershell",
+        }
+    }
 }
 
 /// 받을 스크립트의 자리 — [`SCRIPT_VAR`] 가 있으면 그것, 없으면 `repo` 의 `main` 의 그 스크립트
@@ -118,7 +143,10 @@ pub fn refusal_named(exe: &Path, served: bool, want: &str, writable: impl Fn(&Pa
         return Some(Refusal::NotServed);
     }
     let name = exe.file_name().unwrap_or_default();
-    if name != OsStr::new(want) {
+    // **Windows 의 이름은 대소문자를 안 가린다**(리뷰) — `Moai.exe` 위에 `install.ps1` 이 `moai.exe` 를
+    // 놓으면 같은 파일을 덮는다. 가리면 올릴 수 있는 자리를 "이름이 다르다" 로 거절한다.
+    let same = if cfg!(windows) { name.eq_ignore_ascii_case(want) } else { name == OsStr::new(want) };
+    if !same {
         return Some(Refusal::NotNamedMoai { name: name.to_string_lossy().into_owned() });
     }
     let dir = exe.parent().unwrap_or(Path::new("/"));
@@ -134,10 +162,11 @@ pub fn refusal_named(exe: &Path, served: bool, want: &str, writable: impl Fn(&Pa
 /// 이 프로세스가 `dir` 에 파일을 만들고 바꿀 수 있는가 — `access(2)` 의 `W_OK` 로 묻는다. **만들어
 /// 보지 않는다**: 묻는 쪽(탐색기를 여는 걸음)은 아무것도 안 쓰는 자리다.
 ///
-/// **unix 밖에서는 읽기 전용 표시만 본다.** Windows 의 디렉터리에서 그 표시는 거의 안 서서,
-/// `C:\Program Files` 처럼 ACL 이 막는 자리도 참이 된다 — 그때는 `install.ps1` 이 받기 전에 제
-/// 손으로 써 보고 "쓸 수 없다" 로 멈춘다(moai-j9gv.3fl). 여기서 ACL 을 읽으려면 Win32 보안 API 를
-/// 끌어와야 하고, 써 보는 길은 위의 "만들어 보지 않는다" 를 깬다.
+/// **unix 밖에서는 디렉터리인지만 본다.** Windows 는 디렉터리의 읽기 전용 표시를 쓰기에 안 쓴다 —
+/// 탐색기가 폴더 꾸미기(`desktop.ini`)에 그 표시를 세우는 자리도 쓸 수 있다(리뷰). 그것을 읽던 판은 쓸
+/// 수 있는 자리를 "쓸 수 없다" 로 거절했다. `C:\Program Files` 처럼 ACL 이 막는 자리는 `install.ps1`
+/// 이 받기 전에 제 손으로 써 보고 "쓸 수 없다" 로 멈춘다(moai-j9gv.3fl). 여기서 ACL 을 읽으려면 Win32
+/// 보안 API 를 끌어와야 하고, 써 보는 길은 위의 "만들어 보지 않는다" 를 깬다.
 pub fn writable(dir: &Path) -> bool {
     #[cfg(unix)]
     {
@@ -149,7 +178,7 @@ pub fn writable(dir: &Path) -> bool {
     }
     #[cfg(not(unix))]
     {
-        std::fs::metadata(dir).is_ok_and(|m| m.is_dir() && !m.permissions().readonly())
+        std::fs::metadata(dir).is_ok_and(|m| m.is_dir())
     }
 }
 
@@ -162,12 +191,11 @@ pub struct Plan {
     pub repo: String,
     /// 스크립트의 자리.
     pub script: String,
-    /// 깔 자리 — 도는 바이너리가 선 디렉터리.
+    /// 깔 자리 — 도는 바이너리가 선 디렉터리. `\\?\` 는 걷었다([`plain`]) — `--json` 의 `dir` 과
+    /// 인자의 자리가 한 철자다.
     pub dir: PathBuf,
-    /// 무엇으로 돌리나.
+    /// 무엇으로 돌리나. 띄울 프로그램은 [`Runner::program`] 이다.
     pub runner: Runner,
-    /// 띄울 프로그램 — `sh` 나 `powershell`.
-    pub program: &'static str,
     /// 프로그램 뒤의 인자. `sh` 면 `-s --` 로 시작한다 — 스크립트는 표준 입력으로 흘린다.
     pub args: Vec<OsString>,
 }
@@ -176,13 +204,9 @@ pub struct Plan {
 /// 그래야 같은 판을 다시 받는 것도 이 명령 하나로 된다. 판(`version`)은 스크립트가 아니라 스크립트의
 /// 인자로 고른다 — 스크립트는 늘 `main` 의 것이다.
 pub fn plan(repo: &str, script: String, dir: &Path, version: Option<&str>, runner: Runner) -> Plan {
-    let (program, mut args): (&'static str, Vec<OsString>) = match &runner {
-        Runner::Sh => {
-            let mut args: Vec<OsString> = ["-s", "--", "--dir"].map(OsString::from).into();
-            args.push(dir.as_os_str().to_owned());
-            args.push("--force".into());
-            ("sh", args)
-        }
+    let dir = plain(dir);
+    let mut args: Vec<OsString> = match &runner {
+        Runner::Sh => ["-s", "--"].map(OsString::from).into(),
         Runner::PowerShell { file } => {
             // **사람의 프로필을 안 읽고, 묻지도 않는다.** 프로필은 남의 코드를 이 길에 끼우고, 실행
             // 정책(기본 Restricted)은 받은 스크립트를 이 프로세스 하나에서만 돌게 연다 — 기계의 정책은 안
@@ -190,26 +214,26 @@ pub fn plan(repo: &str, script: String, dir: &Path, version: Option<&str>, runne
             let mut args: Vec<OsString> =
                 ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"].map(OsString::from).into();
             args.push(file.as_os_str().to_owned());
-            args.push("-Dir".into());
-            args.push(plain(dir).into_os_string());
-            args.push("-Force".into());
-            ("powershell", args)
+            args
         }
     };
+    args.push(runner.dir_flag().into());
+    args.push(dir.as_os_str().to_owned());
+    args.push(runner.force_flag().into());
     if let Some(v) = version {
-        args.push(match runner {
-            Runner::Sh => "--version".into(),
-            Runner::PowerShell { .. } => "-Version".into(),
-        });
+        args.push(runner.version_flag().into());
         args.push(v.into());
     }
-    Plan { repo: repo.to_string(), script, dir: dir.to_path_buf(), runner, program, args }
+    Plan { repo: repo.to_string(), script, dir, runner, args }
 }
 
 /// Windows 의 푼 경로에서 `\\?\` 접두어를 걷는다 — `canonicalize` 가 붙이는 것인데, Windows
 /// PowerShell 5.1 의 `New-Item`·`Test-Path` 가 그 꼴을 제대로 못 읽는다. `\\?\UNC\서버\…` 는
 /// `\\서버\…` 로 되돌린다. 그 밖의 철자는 그대로다 — 글자만 보는 것이라 리눅스에서도 잰다.
-fn plain(dir: &Path) -> PathBuf {
+///
+/// **푼 자리를 받는 곳에서 한 번 걷는다**(`cmd::update`, 리뷰) — 인자 하나에서만 걷던 판은 `--json` 의
+/// `dir` 과 거절문이 `\\?\C:\…` 를, 인자는 `C:\…` 를 대 한 자리를 두 철자로 말했다.
+pub fn plain(dir: &Path) -> PathBuf {
     let spelt = dir.to_string_lossy();
     if let Some(rest) = spelt.strip_prefix(r"\\?\UNC\") {
         return PathBuf::from(format!(r"\\{rest}"));
@@ -220,12 +244,19 @@ fn plain(dir: &Path) -> PathBuf {
     }
 }
 
-/// PowerShell 이 도로 그 낱말 하나로 읽게 싼다 — 작은따옴표 안에서는 `''` 만 가른다. 싸지 않아도
-/// 되는 낱말은 그대로 둔다(`install.ps1` 의 `Quote` 와 같은 자).
+/// PowerShell 이 도로 그 낱말 하나로 읽게 싼다. 싸지 않아도 되는 낱말은 그대로 둔다(`install.ps1` 의
+/// `Quote` 와 같은 자). **`,` 와 `@` 는 싼다**(리뷰) — 인자 자리의 `a,b` 는 배열이라 바깥 프로그램에
+/// `a b` 두 낱말로 가고, 앞머리의 `@` 는 펼치기(splatting)다. `sh` 의 자([`crate::text::quoted`])를 옮겨
+/// 오면 그 둘이 샌다.
 fn ps_quoted(s: &str) -> String {
-    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "_./:\\@%+=,-".contains(c)) {
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "_./:\\%+=-".contains(c)) {
         return s.to_string();
     }
+    ps_literal(s)
+}
+
+/// 늘 작은따옴표로 싼다 — 그 안에서는 `''` 만 가른다.
+fn ps_literal(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
@@ -233,6 +264,9 @@ impl Plan {
     /// 사람이 셸에 그대로 칠 수 있는 꼴의 한 줄 — `sh` 면 `MOAI_REPO=<저장소> sh -s -- --dir <자리> --force …`,
     /// PowerShell 이면 `$env:MOAI_REPO='<저장소>'; powershell … -File <자리> -Dir <자리> -Force …`. 그 셸이
     /// 가르는 글자는 싼다.
+    ///
+    /// **PowerShell 의 저장소 값은 늘 싼다**(리뷰). 대입의 오른쪽은 명령 자리라, 싸지 않은 `fork/moai` 는
+    /// 그 이름의 명령을 부르다 실패하고 변수는 안 선다 — 뒤의 `powershell` 은 기본 저장소에서 받는다.
     pub fn line(&self) -> String {
         match self.runner {
             Runner::Sh => {
@@ -244,8 +278,8 @@ impl Plan {
                 format!(
                     "$env:{}={}; {} {}",
                     crate::latest::REPO_VAR,
-                    ps_quoted(&self.repo),
-                    self.program,
+                    ps_literal(&self.repo),
+                    self.runner.program(),
                     words.join(" ")
                 )
             }
@@ -318,6 +352,8 @@ mod tests {
             refusal_named(&bin.join("moai.exe"), true, Runner::Sh.binary(), yes),
             Some(Refusal::NotNamedMoai { name: "moai.exe".into() })
         );
+        // Windows 의 이름은 대소문자를 안 가린다 — 그 기계에서만 같은 이름으로 받는다.
+        assert_eq!(refusal_named(&bin.join("Moai.EXE"), true, want, yes).is_none(), cfg!(windows));
     }
 
     /// **찍는 줄과 도는 인자가 한 값에서 나온다.** `--force` 는 늘 서고, 판은 스크립트의 인자로 간다.
@@ -326,7 +362,7 @@ mod tests {
         let dir = Path::new("/home/u/my bin");
         let p = plan("fork/moai", "https://x/install.sh".into(), dir, None, Runner::Sh);
         let args: Vec<String> = p.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(p.program, "sh");
+        assert_eq!(p.runner.program(), "sh");
         assert_eq!(args, ["-s", "--", "--dir", "/home/u/my bin", "--force"]);
         assert_eq!(p.line(), "MOAI_REPO=fork/moai sh -s -- --dir '/home/u/my bin' --force");
         let p = plan("fork/moai", "https://x/install.sh".into(), dir, Some("v0.9.0"), Runner::Sh);
@@ -342,7 +378,8 @@ mod tests {
         let p =
             plan("fork/moai", "https://x/install.ps1".into(), Path::new(r"\\?\C:\Users\u\My Tools"), None, ps(file));
         let args: Vec<String> = p.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(p.program, "powershell");
+        assert_eq!(p.runner.program(), "powershell");
+        assert_eq!(p.dir, Path::new(r"C:\Users\u\My Tools"), "--json 의 dir 도 걷은 철자다");
         assert_eq!(
             args,
             [
@@ -359,7 +396,8 @@ mod tests {
         );
         assert_eq!(
             p.line(),
-            r"$env:MOAI_REPO=fork/moai; powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\Users\u\AppData\Local\Temp\moai-update-42.ps1 -Dir 'C:\Users\u\My Tools' -Force"
+            r"$env:MOAI_REPO='fork/moai'; powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File C:\Users\u\AppData\Local\Temp\moai-update-42.ps1 -Dir 'C:\Users\u\My Tools' -Force",
+            "대입의 오른쪽은 명령 자리라 저장소 값은 늘 싼다"
         );
         let p = plan("o/it's", "u".into(), Path::new(r"\\?\UNC\srv\share\bin"), Some("v0.17.0"), ps(file));
         let args: Vec<String> = p.args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
@@ -368,6 +406,9 @@ mod tests {
             "{args:?}"
         );
         assert!(p.line().starts_with("$env:MOAI_REPO='o/it''s'; "), "{}", p.line());
+        // 인자 자리의 `,` 는 배열이고 앞머리의 `@` 는 펼치기다 — 둘 다 싸야 한 낱말로 간다.
+        let p = plan("o/m", "u".into(), Path::new(r"C:\a,b"), None, ps(r"@x.ps1"));
+        assert!(p.line().ends_with(r"-File '@x.ps1' -Dir 'C:\a,b' -Force"), "{}", p.line());
     }
 
     #[test]

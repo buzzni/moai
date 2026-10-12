@@ -59,9 +59,9 @@ running `moai.exe` to `moai.exe.old` and puts the new one in its place. That
 `.old` is removed by the next install.
 
 `moai update` stops before fetching anything when the binary is not named
-`moai.exe`, when cargo built it, or when the directory is marked read-only. A
-directory your account cannot write for another reason (`C:\Program Files`) is
-caught by the installer itself, before it downloads.
+`moai.exe` or when cargo built it. A directory your account cannot write
+(`C:\Program Files`) is caught by the installer itself, before it downloads —
+Windows ignores the read-only mark on a folder, so moai does not read it.
 
 ## Build from source
 

@@ -11,7 +11,8 @@
 # 2. `cargo --version` from the clone -- rustup reads rust-toolchain.toml and fetches
 #    the pinned toolchain for the host target (x86_64-pc-windows-msvc) by itself.
 # 3. `cargo build --release`, `cargo clippy --all-targets -- -D warnings` and
-#    `cargo test`, one line each. Full output goes to target\windows-dev\*.log.
+#    `cargo test --no-fail-fast`, one line each. Full output goes to
+#    target\windows-dev\*.log.
 # 4. `moai merge-driver --install --as <the moai.exe it just built>` -- once per
 #    clone, as CONTRIBUTING.md asks on every machine.
 #
@@ -109,11 +110,14 @@ $built = (Step 'build' 'cargo build --release') -eq 0
 if (-not $built) { $failed++ }
 if ((Step 'clippy' 'cargo clippy --all-targets -- -D warnings') -ne 0) { $failed++ }
 if (-not $SkipTest) {
-  if ((Step 'test' 'cargo test') -ne 0) {
+  # --no-fail-fast: without it cargo stops at the first test binary that fails, so a red unit
+  # test hides every integration test behind it and the count below comes out short.
+  if ((Step 'test' 'cargo test --no-fail-fast') -ne 0) {
     $failed++
-    # The summary line is what a note on the tracker needs.
-    $summary = Select-String -LiteralPath (Join-Path $logs 'test.log') -Pattern '^test result:' | Select-Object -Last 1
-    if ($summary) { Say "  $($summary.Line)" }
+    # The summary lines are what a note on the tracker needs -- one per test binary that failed.
+    foreach ($m in Select-String -LiteralPath (Join-Path $logs 'test.log') -Pattern '^test result: FAILED') {
+      Say "  $($m.Line)"
+    }
   }
 }
 

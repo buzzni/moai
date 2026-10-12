@@ -36,8 +36,9 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
             code::ERROR,
         )
     })?;
-    // **푼 자리다** — 링크로 선 `~/bin/moai` 를 올리면 링크가 아니라 그 끝의 파일을 갈아야 한다.
-    let exe = crate::path::real(&exe);
+    // **푼 자리다** — 링크로 선 `~/bin/moai` 를 올리면 링크가 아니라 그 끝의 파일을 갈아야 한다. Windows 의
+    // 푼 철자에 붙는 `\\?\` 는 여기서 한 번 걷는다 — 거절문·`--json` 의 `dir`·인자가 한 철자를 댄다.
+    let exe = crate::update::plain(&crate::path::real(&exe));
     let runner = crate::update::Runner::native(&std::env::temp_dir());
     if let Some(why) = crate::update::refusal(&exe, crate::latest::SERVED, crate::update::writable) {
         return Err(Fail::coded(crate::view::update_refused(lang, &why, &runner), code::NOT_UPDATABLE));
@@ -71,7 +72,7 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
         Fail::coded(
             crate::i18n::fill(
                 crate::i18n::say(lang, "update.no_sh"),
-                &[("program", plan.program), ("said", &e.to_string())],
+                &[("program", plan.runner.program()), ("said", &e.to_string())],
             ),
             code::ERROR,
         )
@@ -128,7 +129,7 @@ pub(crate) fn chosen_repo(
 /// **스크립트는 딴 실에서 쓴다.** `sh -s` 는 읽으며 돌리므로, 스크립트가 파이프 한 칸보다 크면 쓰는 쪽이
 /// 막혀 기다리기 전에 서로를 붙든다.
 fn sh(plan: &crate::update::Plan, script: Vec<u8>, json: bool) -> std::io::Result<std::process::ExitStatus> {
-    let mut cmd = Command::new(plan.program);
+    let mut cmd = Command::new(plan.runner.program());
     cmd.args(&plan.args).env(crate::latest::REPO_VAR, &plan.repo);
     // **판은 `--version` 하나로 고른다** — 설치 스크립트는 `MOAI_VERSION` 도 읽으므로, 셸에 그것이 서 있으면
     // `--version` 없이 부른 판이 "최신" 이 아니라 그 판을 깔고 `--dry-run` 의 줄과도 갈린다.
@@ -137,7 +138,17 @@ fn sh(plan: &crate::update::Plan, script: Vec<u8>, json: bool) -> std::io::Resul
         cmd.stdout(std::io::stderr());
     }
     if let crate::update::Runner::PowerShell { file } = &plan.runner {
-        std::fs::write(file, &script)?;
+        // **새로 만든 파일에만 적는다**(리뷰). 이름이 프로세스 번호라 미리 알 수 있다 — `fs::write` 는 그 자리에
+        // 먼저 선 파일이나 링크를 따라가 덮는다. 앞 판이 남긴 같은 이름은 걷고, 그래도 서 있으면 멈춘다. 못 적은
+        // 것은 자리를 대어 "띄우지 못했다" 와 가른다.
+        let at = |e: std::io::Error| std::io::Error::new(e.kind(), format!("{}: {e}", file.display()));
+        let _ = std::fs::remove_file(file);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(file)
+            .and_then(|mut f| f.write_all(&script))
+            .map_err(at)?;
         // `install.ps1` 은 표준 입력을 안 읽는다 — 이 프로세스의 것을 물려주면 묻는 것이 없어도 쥔다.
         let status = cmd.stdin(Stdio::null()).status();
         // 받은 스크립트는 이번 한 번의 것이다. 못 지워도 임시 자리라 막지 않는다.
@@ -167,7 +178,7 @@ fn sh(plan: &crate::update::Plan, script: Vec<u8>, json: bool) -> std::io::Resul
 
 /// `--json` 의 값 하나 — 돌릴 것과, 돌렸으면 그 셸의 종료 코드.
 fn said(plan: &crate::update::Plan, code: Option<i32>) -> serde_json::Value {
-    let mut command = vec![plan.program.to_string()];
+    let mut command = vec![plan.runner.program().to_string()];
     command.extend(plan.args.iter().map(|a| a.to_string_lossy().into_owned()));
     let mut v = serde_json::json!({
         "repo": plan.repo,

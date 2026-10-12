@@ -216,9 +216,10 @@ function Order([string]$a, [string]$b) {
 }
 
 # Quotes a value so PowerShell reads it back as given. Plain values stay bare -- quoting
-# everything makes the common line hard to copy.
+# everything makes the common line hard to copy. `,` and `@` are quoted: in an argument `a,b`
+# is an array that reaches a program as two words, and a leading `@` splats.
 function Quote([string]$v) {
-  if ($v -match '^[A-Za-z0-9_./:\\@%+=,-]+$') { return $v }
+  if ($v -match '^[A-Za-z0-9_./:\\%+=-]+$') { return $v }
   return "'" + $v.Replace("'", "''") + "'"
 }
 
@@ -230,7 +231,10 @@ function Refuse([string]$what) {
   if ($givenDir) { $again += ' -Dir ' + (Quote $givenDir) }
   if ($givenVersion) { $again += ' -Version ' + (Quote $givenVersion) }
   $from = ''
-  if ($repo -ne 'buzzni/moai') { $from = '$env:MOAI_REPO=' + (Quote $repo) + '; ' }
+  # The value is always quoted: the right side of an assignment is a command position, so a
+  # bare `fork/moai` runs a command of that name, the variable stays unset, and the line then
+  # installs from the default repo with -Force.
+  if ($repo -ne 'buzzni/moai') { $from = '$env:MOAI_REPO=''' + $repo.Replace("'", "''") + '''; ' }
   [Console]::Error.WriteLine("moai: $what -- not overwriting. Pass -Dir to install elsewhere")
   [Console]::Error.WriteLine('moai: to overwrite, pass -Force. Run this as is:')
   [Console]::Error.WriteLine('')
@@ -259,7 +263,10 @@ try {
   $had = $null
   if ((Test-Path -LiteralPath $dest) -and -not $Force) {
     $item = Get-Item -LiteralPath $dest -Force
-    if ($item.LinkType) { Refuse "$dest is a link to another place" }
+    # A symbolic link or junction points elsewhere. `HardLink` is not that -- it is a file with a
+    # second name, which stepping aside replaces just as install.sh's `mv` does (install.sh only
+    # refuses `-L`). Reparse points as such are not the test: OneDrive's cloud files carry one.
+    if ($item.LinkType -and $item.LinkType -ne 'HardLink') { Refuse "$dest is a link to another place" }
     $had = Ours $dest
     if ($null -eq $had) { Refuse "$dest is not this moai" }
   }
@@ -350,6 +357,11 @@ try {
 
   # **Step the standing one aside, then take its name** (moai-j9gv.3fl). A `.old` left by an
   # earlier run goes first; when something still runs it, this run's copy gets its own name.
+  # Those `.<pid>.old` names are swept here too once nothing holds them -- only `.old` was looked
+  # at before, so each one stayed in a directory on PATH for good.
+  foreach ($stale in @(Get-ChildItem -LiteralPath $Dir -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^moai\.exe\.[0-9]+\.old$' })) {
+    try { Remove-Item -LiteralPath $stale.FullName -Force } catch {}
+  }
   $old = $null
   if (Test-Path -LiteralPath $dest) {
     $old = "$dest.old"
@@ -361,7 +373,10 @@ try {
   try {
     Move-Item -LiteralPath $half -Destination $dest
   } catch {
-    if ($old) { Move-Item -LiteralPath $old -Destination $dest -Force }
+    # The way back can fail too; then say where the old one is instead of a bare error.
+    if ($old) {
+      try { Move-Item -LiteralPath $old -Destination $dest -Force } catch { Die "could not place $dest -- the old one is at $old" }
+    }
     Die "could not place $dest"
   }
   $half = $null

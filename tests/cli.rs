@@ -8163,7 +8163,9 @@ fn served() -> bool {
 fn hoisted(dir: &Path) -> PathBuf {
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
-    let exe = bin.join("moai");
+    // **이름은 그 기계의 설치 스크립트가 까는 것이다**(리뷰) — Windows 가 `served()` 에 든 뒤로 그 기계의
+    // `every_command_still_speaks_json` 이 이 한 벌을 부르는데, `moai` 로 두면 "이름이 다르다" 로 거절된다.
+    let exe = bin.join(format!("moai{}", std::env::consts::EXE_SUFFIX));
     if std::fs::hard_link(BIN, &exe).is_err() {
         std::fs::copy(BIN, &exe).unwrap_or_else(|e| panic!("{BIN} → {}: {e}", exe.display()));
     }
