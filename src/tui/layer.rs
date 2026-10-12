@@ -4485,6 +4485,7 @@ mod tests {
     /// 때도 길이도 안 바꿔, 표식만 보면 층이 "못 읽는다" 를 영영 댄다. init 전 줄은 표식이 다
     /// 보므로 시계에 안 건다.
     #[test]
+    #[cfg(unix)]
     fn a_row_that_could_not_be_read_is_retried_by_the_clock() {
         use std::os::unix::fs::PermissionsExt;
         let s = Scratch::fenced("layer-unreadable-clock");

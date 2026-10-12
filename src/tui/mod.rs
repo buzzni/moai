@@ -10791,6 +10791,7 @@ mod tests {
     }
 
     /// 그 파일 끝에 한 줄을 붙인다 — 없으면 새로 선다. 저널은 덧붙여 쓰는 파일이다.
+    #[cfg(unix)]
     fn append(path: &std::path::Path, line: &str) {
         let had = std::fs::read_to_string(path).unwrap_or_default();
         std::fs::write(path, had + line).unwrap();

@@ -1124,18 +1124,21 @@ pub(super) mod tests {
             a.notice
         );
         // **못 걸은 자리만 있는 위키는 그 수를 함께 댄다** — 창이 안 서니 목록 밑의 수도 없다. 빼면 "첫 페이지는
-        // README.md" 만 남아 페이지가 정말 없는 줄 안다.
-        std::fs::create_dir_all(s.path().join("elsewhere")).unwrap();
-        std::os::unix::fs::symlink(s.path().join("elsewhere"), s.path().join("docs/linked")).unwrap();
-        a.notice = None;
-        a.hit("SPC g w");
-        assert_eq!(a.mode, Mode::Browse);
-        assert!(
-            a.notice.as_deref().is_some_and(|n| n.contains("README.md") && n.contains("moai wiki ls")),
-            "못 걸은 자리를 안 댔다: {:?}",
-            a.notice
-        );
-        std::fs::remove_file(s.path().join("docs/linked")).unwrap();
+        // README.md" 만 남아 페이지가 정말 없는 줄 안다. 링크를 짓는 것은 유닉스에서만 선다.
+        #[cfg(unix)]
+        {
+            std::fs::create_dir_all(s.path().join("elsewhere")).unwrap();
+            std::os::unix::fs::symlink(s.path().join("elsewhere"), s.path().join("docs/linked")).unwrap();
+            a.notice = None;
+            a.hit("SPC g w");
+            assert_eq!(a.mode, Mode::Browse);
+            assert!(
+                a.notice.as_deref().is_some_and(|n| n.contains("README.md") && n.contains("moai wiki ls")),
+                "못 걸은 자리를 안 댔다: {:?}",
+                a.notice
+            );
+            std::fs::remove_file(s.path().join("docs/linked")).unwrap();
+        }
         std::fs::remove_dir(s.path().join("docs")).unwrap();
         a.notice = None;
         a.hit("SPC g w");
