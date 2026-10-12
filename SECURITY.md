@@ -36,9 +36,10 @@ behaviour:
   email, so that folding is a path-safety boundary too.
 - `moai merge-driver`, which git invokes with paths during a merge.
 - `moai hook`, which reads events on stdin and decides what to answer.
-- `install.sh` and the release artifacts: a downloaded archive that does not
-  match `SHA256SUMS` must never be installed, and there is deliberately no flag
-  to skip that check.
+- `install.sh`, `install.ps1` and the release artifacts (the Linux and macOS
+  `.tar.gz`, the Windows `.zip`): a downloaded archive that does not match
+  `SHA256SUMS` must never be installed, and there is deliberately no flag to
+  skip that check.
 - The release check the explorer makes once a day, once more after an upgrade
   while the answer it kept is older than the running moai, and at most hourly
   while that answer says the running moai is ahead of every release. One field
@@ -77,3 +78,13 @@ tool of the same name; they are not a proof, since any program can give them.
 A symlink or a directory at that path is never taken for this moai. Anything it
 does not recognise is refused unless you pass `--force`, which replaces it
 without running it; a directory is refused even then.
+
+`install.ps1`, the Windows installer, makes the same guarantees with
+`Get-FileHash` and `-Force`. It asks the existing `moai.exe` the same two
+questions with stdin closed and a ten-second limit, and it reads `file://`
+release locations off the disk. It steps a running `moai.exe` aside as
+`moai.exe.old` rather than writing over it. `moai update` on Windows writes the
+fetched `install.ps1` to a temporary file and runs it with
+`powershell -NoProfile -ExecutionPolicy Bypass -File`: the bypass applies to
+that one process, not to the machine's execution policy, and your PowerShell
+profile is not loaded into it.

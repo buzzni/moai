@@ -3461,15 +3461,21 @@ pub fn models(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
 
 /// `moai update` 가 못 올리는 까닭 한 줄([`crate::update::Refusal`], moai-zsfr.2p9). **고칠 길을 함께 댄다** —
 /// 이 거절은 그물을 타기 전에 서는 것이라, 사람이 할 일이 이 줄 말고는 어디에도 없다.
-pub fn update_refused(lang: Lang, why: &crate::update::Refusal) -> String {
+pub fn update_refused(lang: Lang, why: &crate::update::Refusal, runner: &crate::update::Runner) -> String {
     use crate::update::Refusal;
+    // 설치 스크립트와 그것이 까는 이름은 기계마다 다르다(moai-j9gv.3fl) — Windows 는 `install.ps1` 과 `moai.exe`.
+    let script = runner.script();
     match why {
-        Refusal::NotServed => say(lang, "update.refuse.not_served").to_string(),
-        Refusal::NotNamedMoai { name } => fill(say(lang, "update.refuse.not_named"), &[("name", name)]),
+        Refusal::NotServed => fill(say(lang, "update.refuse.not_served"), &[("script", script)]),
+        Refusal::NotNamedMoai { name } => fill(
+            say(lang, "update.refuse.not_named"),
+            &[("name", name), ("script", script), ("binary", runner.binary())],
+        ),
         Refusal::BuiltByCargo { dir } => fill(say(lang, "update.refuse.cargo"), &[("dir", &dir.display().to_string())]),
-        Refusal::NotWritable { dir } => {
-            fill(say(lang, "update.refuse.unwritable"), &[("dir", &dir.display().to_string())])
-        }
+        Refusal::NotWritable { dir } => fill(
+            say(lang, "update.refuse.unwritable"),
+            &[("dir", &dir.display().to_string()), ("script", script), ("dir_flag", runner.dir_flag())],
+        ),
     }
 }
 
