@@ -23370,13 +23370,44 @@ fn the_install_table_and_the_release_matrix_name_the_same_targets() {
 /// 굽은 따옴표로 읽히고 PowerShell 은 그것을 문자열의 끝으로 받는다. 이 저장소의 다른 글처럼
 /// 한국어 주석 한 줄을 얹는 순간 받는 사람의 기계에서만 깨지고, 이 컨테이너의 pwsh 7 은 UTF-8
 /// 로 읽어 아무것도 안 붉어진다. 그래서 바이트로 맨다.
+///
+/// 개발 준비 스크립트(`scripts/windows-dev.ps1`, moai-e8gx)도 같은 셸이 읽어 함께 맨다.
 #[cfg(unix)]
 #[test]
 fn install_ps1_is_ascii() {
-    let bytes = std::fs::read(at_root("install.ps1")).unwrap();
-    if let Some(at) = bytes.iter().position(|b| !b.is_ascii()) {
-        let line = bytes[..at].iter().filter(|&&b| b == b'\n').count() + 1;
-        panic!("install.ps1:{line} 에 ASCII 밖의 바이트가 있다 — Windows PowerShell 5.1 이 깨뜨린다");
+    for name in POWERSHELL_SCRIPTS {
+        let bytes = std::fs::read(at_root(name)).unwrap();
+        if let Some(at) = bytes.iter().position(|b| !b.is_ascii()) {
+            let line = bytes[..at].iter().filter(|&&b| b == b'\n').count() + 1;
+            panic!("{name}:{line} 에 ASCII 밖의 바이트가 있다 — Windows PowerShell 5.1 이 깨뜨린다");
+        }
+    }
+}
+
+/// 저장소의 PowerShell 스크립트 — Windows 에서 사람이 돌린다.
+#[cfg(unix)]
+const POWERSHELL_SCRIPTS: [&str; 2] = ["install.ps1", "scripts/windows-dev.ps1"];
+
+/// **PowerShell 스크립트는 파싱이 선다**(moai-e8gx). `windows-dev.ps1` 은 Windows 에서만 돌아 이 컨테이너가 끝까지
+/// 돌려 볼 길이 없다 — 적어도 문법 오류 하나로 사람의 첫 실행이 죽지 않게, pwsh 가 있으면 파서에 통째로 먹인다.
+#[cfg(unix)]
+#[test]
+fn powershell_scripts_parse() {
+    let Some(pw) = pwsh("powershell_scripts_parse") else { return };
+    let s = Scratch::new("ps1-parse");
+    for name in POWERSHELL_SCRIPTS {
+        let out = isolated(&pw)
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(format!(
+                "$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('{}', [ref]$null, [ref]$e); \
+                 $e | ForEach-Object {{ $_.ToString() }}; exit $e.Count",
+                at_root(name).display().to_string().replace('\'', "''")
+            ))
+            .env("HOME", s.path().join("pwsh-home"))
+            .env("POWERSHELL_TELEMETRY_OPTOUT", "1")
+            .output()
+            .expect("pwsh 를 실행하지 못했다");
+        assert!(out.status.success(), "{name} 이 파싱되지 않는다\n{}", text(&out));
     }
 }
 

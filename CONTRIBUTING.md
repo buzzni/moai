@@ -86,6 +86,53 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 A clone that skips this is no worse off than before; `blame` just stops at the
 formatting commit.
 
+## Developing on Windows
+
+Windows is a release target (`x86_64-pc-windows-msvc`), and you can build, test
+and keep developing on it. Until the Windows work ships, it lives on the
+`milestone/moai-c12a` branch — check that out.
+
+`scripts/windows-dev.ps1` gets a clean machine ready and is safe to run again:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-dev.ps1
+```
+
+- It looks for Git for Windows, the Visual Studio C++ build tools (the `ring`
+  crate builds C with `cl.exe`) and rustup. **It installs nothing**: what is
+  missing is printed as a `winget` command for you to run, and it stops there
+- rustup reads `rust-toolchain.toml` and fetches the pinned toolchain for the
+  host target by itself; the script only checks `cargo --version`
+- It runs `cargo build --release`, `cargo clippy --all-targets -- -D warnings`
+  and `cargo test`, prints one line each, and keeps the full output in
+  `target\windows-dev\*.log`. `-SkipTest` stops after clippy, `-SkipBuild`
+  only checks the tools
+- It installs the merge driver with the `moai.exe` it just built
+  (`merge-driver --install --as <that path>`), so keep that build where it is or
+  install again with a path that stays. `-SkipDriver` leaves it out
+- It never edits `PATH`, the registry or anyone's config
+
+`.ps1` files in this repository are ASCII only — Windows PowerShell 5.1 reads a
+script without a BOM in the system code page, and `install_ps1_is_ascii` holds
+the line.
+
+### What to check on a real machine
+
+The container that builds this repository cannot run these. Check them on
+Windows and leave what you saw on the issue with `moai note <id> '…'` — the
+command, what it printed, and the Windows and PowerShell versions
+(`$PSVersionTable.PSVersion`):
+
+- `moai-j9gv.4c1` — which shell Claude Code starts hooks with; whether Git's
+  `sh` can exec `'C:/…/moai.exe'` as the merge driver records it; whether the
+  hooks' `${TMPDIR:-/tmp}` is writable
+- `moai-j9gv.3fl` — `moai update --dry-run`, one real upgrade, and that
+  `moai.exe.old` is gone after the next install
+- `moai-j9gv.ukd` — installing with `install.ps1`, and that a tampered zip or a
+  missing `SHA256SUMS` is refused
+- `moai-j9gv.ae7` — the test failures counted under wine (about 150); count them
+  again with `cargo test` and note the summary line
+
 ## If you change a command's help
 
 `docs/cli.md` is generated from `--help`, and a test compares the two. When you
