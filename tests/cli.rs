@@ -27693,6 +27693,10 @@ fn archive_regressions_status_keeps_duplicate_ids_from_opaque_active_rows() {
 
 /// 가짜 `install.sh` 를 한 번에 `n` 판까지 내주는 서버 — 받는 길(ureq)을 그대로 지나게 한다. **dev 의존을 안
 /// 들이고** `std::net` 하나로 선다. 돌려주는 것은 스크립트의 자리다(`MOAI_INSTALL_URL` 에 준다).
+///
+/// **유닉스에서만 짓는다**(moai-g1a7) — 내주는 것이 `sh` 의 글([`recording_script`])이고, Windows 의 `update` 는
+/// `install.ps1` 을 PowerShell 로 돌려 이 가짜를 못 탄다. 부르는 시험도 모두 유닉스의 것이다.
+#[cfg(unix)]
 fn serving_script(body: String, n: usize) -> (String, std::thread::JoinHandle<()>) {
     use std::io::{BufRead, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("못 띄웠다");
@@ -27721,7 +27725,8 @@ fn serving_script(body: String, n: usize) -> (String, std::thread::JoinHandle<()
 }
 
 /// 받은 인자와 `MOAI_VERSION`·`MOAI_REPO` 를 `record` 에 적고 `code` 로 끝나는 가짜 `install.sh`. 표준 출력에 한 줄을 내어
-/// 흘림이 어디로 가는지도 재게 한다.
+/// 흘림이 어디로 가는지도 재게 한다. `sh` 의 글이라 유닉스에서만 짓는다([`serving_script`] 와 같은 까닭).
+#[cfg(unix)]
 fn recording_script(record: &Path, code: i32) -> String {
     let at = record.to_str().unwrap();
     format!(
@@ -27826,8 +27831,7 @@ fn update_takes_the_repo_from_the_user_config_and_moai_repo_wins() {
 }
 
 /// **틀린 저장소 값은 쓰지 않고 막는다**(moai-zsfr.2em) — 기본 저장소로 바꿔 돌리면 포크를 고른 사람이 본가의
-/// 판을 깐다. `--dry-run` 도 같은 문을 지난다.
-#[cfg(unix)]
+/// 판을 깐다. `--dry-run` 도 같은 문을 지난다. 스크립트를 받기 전에 막으니 Windows 에서도 짓는다(moai-g1a7).
 #[test]
 fn update_refuses_a_repo_that_is_not_owner_slash_name() {
     if !served() {
