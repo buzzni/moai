@@ -354,8 +354,8 @@ The tag is what the release workflow trusts.
   commit, delete the bad tag locally and on the remote, and tag again.
 - **Artifacts are wrong but published** — delete the release and its tag, fix,
   and release a new patch version rather than replacing artifacts under a tag
-  someone may already have downloaded. `install.sh` verifies against
-  `SHA256SUMS`, so a replaced artifact under an old tag is not a silent
+  someone may already have downloaded. `install.sh` and `install.ps1` verify
+  against `SHA256SUMS`, so a replaced artifact under an old tag is not a silent
   failure for users, but it is a confusing one.
 - **A user reports the installer refusing** — that is the installer working. It
   stops when `SHA256SUMS` is missing, when it has no line for the archive, when
