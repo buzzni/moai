@@ -27694,8 +27694,9 @@ fn archive_regressions_status_keeps_duplicate_ids_from_opaque_active_rows() {
 /// 가짜 `install.sh` 를 한 번에 `n` 판까지 내주는 서버 — 받는 길(ureq)을 그대로 지나게 한다. **dev 의존을 안
 /// 들이고** `std::net` 하나로 선다. 돌려주는 것은 스크립트의 자리다(`MOAI_INSTALL_URL` 에 준다).
 ///
-/// **유닉스에서만 짓는다**(moai-g1a7) — 내주는 것이 `sh` 의 글([`recording_script`])이고, Windows 의 `update` 는
-/// `install.ps1` 을 PowerShell 로 돌려 이 가짜를 못 탄다. 부르는 시험도 모두 유닉스의 것이다.
+/// **유닉스에서만 짓는다**(moai-g1a7) — 서버는 받은 `body` 를 그대로 내줄 뿐이라 Windows 의 `update` 도 이것을 탈 수
+/// 있지만(`MOAI_INSTALL_URL` 은 어느 셸에서나 그대로 받는다), 부르는 시험이 모두 `sh` 의 글([`recording_script`])을
+/// 내주는 유닉스의 것이라 Windows 에서는 dead_code 가 된다(리뷰 moai-j9gv.8gr).
 #[cfg(unix)]
 fn serving_script(body: String, n: usize) -> (String, std::thread::JoinHandle<()>) {
     use std::io::{BufRead, Write};
@@ -27725,7 +27726,8 @@ fn serving_script(body: String, n: usize) -> (String, std::thread::JoinHandle<()
 }
 
 /// 받은 인자와 `MOAI_VERSION`·`MOAI_REPO` 를 `record` 에 적고 `code` 로 끝나는 가짜 `install.sh`. 표준 출력에 한 줄을 내어
-/// 흘림이 어디로 가는지도 재게 한다. `sh` 의 글이라 유닉스에서만 짓는다([`serving_script`] 와 같은 까닭).
+/// 흘림이 어디로 가는지도 재게 한다. `sh` 의 글이라 유닉스에서만 짓는다 — Windows 의 `update` 는 받은 것을
+/// PowerShell 로 돌린다.
 #[cfg(unix)]
 fn recording_script(record: &Path, code: i32) -> String {
     let at = record.to_str().unwrap();

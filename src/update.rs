@@ -227,18 +227,16 @@ pub fn plan(repo: &str, script: String, dir: &Path, version: Option<&str>, runne
     Plan { repo: repo.to_string(), script, dir, runner, args }
 }
 
-/// Windows 의 푼 경로에서 `\\?\` 접두어를 걷는다 — `canonicalize` 가 붙이는 것인데, Windows
-/// PowerShell 5.1 의 `New-Item`·`Test-Path` 가 그 꼴을 제대로 못 읽는다. `\\?\UNC\서버\…` 는
-/// `\\서버\…` 로 되돌린다. 그 밖의 철자는 그대로다 — 걷는 규칙은 훅 줄의 철자와 한 자([`crate::path::unverbatim`],
-/// moai-vaj4)다. 글자만 보는 것이라 리눅스에서도 잰다.
+/// Windows 의 푼 경로에서 `canonicalize` 가 붙인 `\\?\` 접두어를 걷는다 — Windows PowerShell 5.1 의
+/// `New-Item`·`Test-Path` 가 그 꼴을 제대로 못 읽는다. 걷는 규칙은 훅 줄의 철자와 한 자다
+/// ([`crate::path::unverbatim`], moai-vaj4). **UTF-8 이 아닌 자리도 걷는다**(리뷰 moai-j9gv.8gr) — `to_str` 로 걷던
+/// 판은 그런 자리를 접두어째 넘겨, 그 앞의 `to_string_lossy` 판이 없는 자리로 거절하던 것을 거절 문을 지나 PowerShell
+/// 까지 보냈다.
 ///
 /// **푼 자리를 받는 곳에서 한 번 걷는다**(`cmd::update`, 리뷰) — 인자 하나에서만 걷던 판은 `--json` 의
 /// `dir` 과 거절문이 `\\?\C:\…` 를, 인자는 `C:\…` 를 대 한 자리를 두 철자로 말했다.
 pub fn plain(dir: &Path) -> PathBuf {
-    match dir.to_str() {
-        Some(spelt) => PathBuf::from(crate::path::unverbatim(spelt)),
-        None => dir.to_path_buf(),
-    }
+    PathBuf::from(crate::path::unverbatim(dir.as_os_str()))
 }
 
 /// PowerShell 이 도로 그 낱말 하나로 읽게 싼다. 싸지 않아도 되는 낱말은 그대로 둔다(`install.ps1` 의
@@ -406,6 +404,21 @@ mod tests {
         // 인자 자리의 `,` 는 배열이고 앞머리의 `@` 는 펼치기다 — 둘 다 싸야 한 낱말로 간다.
         let p = plan("o/m", "u".into(), Path::new(r"C:\a,b"), None, ps(r"@x.ps1"));
         assert!(p.line().ends_with(r"-File '@x.ps1' -Dir 'C:\a,b' -Force"), "{}", p.line());
+    }
+
+    /// **UTF-8 이 아닌 자리도 접두어만 걷는다**(리뷰 moai-j9gv.8gr) — `to_str` 로 걷던 판은 그런 자리를 접두어째 넘겨
+    /// PowerShell 5.1 이 못 읽는 꼴이 `-Dir` 에 실렸고, 그 앞의 `to_string_lossy` 판은 글자를 U+FFFD 로 바꿔 없는 자리를
+    /// 댔다. 리눅스의 바이트가 Windows 의 짝 없는 서로게이트 자리를 대신한다.
+    #[cfg(unix)]
+    #[test]
+    fn a_dir_that_is_not_utf8_loses_only_the_prefix() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = |b: &'static [u8]| Path::new(OsStr::from_bytes(b));
+        assert_eq!(plain(raw(b"\\\\?\\C:\\Users\\\xff\\bin")).as_os_str(), raw(b"C:\\Users\\\xff\\bin").as_os_str());
+        assert_eq!(plain(raw(b"\\\\?\\UNC\\srv\\\xfe\\bin")).as_os_str(), raw(b"\\\\srv\\\xfe\\bin").as_os_str());
+        assert_eq!(plain(raw(b"/home/\xff/bin")).as_os_str(), raw(b"/home/\xff/bin").as_os_str(), "접두어 없는 자리");
+        let p = plan("o/m", "u".into(), raw(b"\\\\?\\C:\\Users\\\xff\\bin"), None, ps("x.ps1"));
+        assert_eq!(p.args[p.args.len() - 2], OsStr::from_bytes(b"C:\\Users\\\xff\\bin"), "-Dir 에 접두어가 남았다");
     }
 
     #[test]
