@@ -1002,11 +1002,17 @@ fn on_path(name: &str) -> bool {
         .any(|d| super::runnable(&d.join(name)) || super::runnable(&d.join(format!("{name}.exe"))))
 }
 
-/// Git Bash(`MSYSTEM` 이 선다) 안에서 `PATH` 에 선 `sh` — 편집기를 그 껍데기로 띄울지와 기본 편집기를 어떻게 찾을지를
+/// Git Bash(`MSYSTEM` 이 선다) 안에서 `PATH` 에 선 `sh.exe` — 편집기를 그 껍데기로 띄울지와 기본 편집기를 어떻게 찾을지를
 /// 이것 하나가 가른다([`editor_command`]·[`on_path`]). 둘이 따로 물으면 찾은 것과 띄우는 길이 갈린다.
+///
+/// **`PATH` 의 자리마다 `sh.exe` 만 찾는다**(리뷰 moai-j9gv.g3t) — git 도 그렇게 찾는다. `PATHEXT` 로 찾으면 앞 자리의
+/// `sh.cmd`·`sh.bat` 가 잡히는데, 러스트는 그것을 `cmd.exe` 로 넘기고 [`msys_command`] 가 MSYS2 의 규칙으로 싼 날것을
+/// `cmd.exe` 가 다시 읽어 따옴표가 어긋난다(러스트가 보통 낱말에 하는 `cmd.exe` 용 막음도 날것에는 안 한다).
 #[cfg(not(unix))]
 fn msys_sh() -> Option<std::path::PathBuf> {
-    std::env::var_os("MSYSTEM").filter(|v| !v.is_empty()).and_then(|_| super::find_on_path("sh"))
+    std::env::var_os("MSYSTEM").filter(|v| !v.is_empty())?;
+    let dirs = std::env::var_os("PATH")?;
+    super::found_in(std::env::split_paths(&dirs), "sh.exe", &[], super::runnable)
 }
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
@@ -1088,7 +1094,8 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
 /// 유닉스가 아닌 판의 [`editor_command`](moai-j9gv.cl6) — **Git Bash 안이면 유닉스와 같은 길이다**(리뷰
 /// moai-j9gv.4s3). 그 껍데기(`MSYSTEM` 이 선다)의 사람은 편집기 글을 `sh` 의 말로 적고(`'C:/Program Files/…/code'
 /// --wait`), git 도 거기서 편집기를 `sh -c` 로 띄운다. 이 에픽 전에는 어디서나 `sh` 로 띄워 그 글이 섰으니, 빈칸으로만
-/// 쪼개면 거기서 되던 것이 안 된다. 그 `sh` 는 [`msys_sh`] 가 `PATH` 에서 찾고, 못 찾으면 아래 길로 간다.
+/// 쪼개면 거기서 되던 것이 안 된다. 그 `sh` 는 [`msys_sh`] 가 `PATH` 에서 찾고, 못 찾으면 아래 길로 간다. 인자의
+/// 모양은 유닉스와 같고, 명령 줄에 싸는 규칙만 MSYS2 의 것이다(moai-6kbo) — git 이 그 `sh` 를 띄우는 꼴과 같다.
 ///
 /// 그 밖(cmd·PowerShell)에는 물을 `sh` 가 없거나, 있어도 그 사람의 글(`C:\tools\nvim.exe`)의 `\` 를 `sh` 가 먹는다.
 /// 거기서는 편집기 글을 쪼개([`crate::tui::jotfile::words`]) 첫 낱말을 프로그램으로 띄우고, 그 낱말은
@@ -1097,13 +1104,25 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
 #[cfg(not(unix))]
 fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
     if let Some(sh) = msys_sh() {
-        let mut cmd = std::process::Command::new(sh);
-        cmd.args(crate::tui::jotfile::argv(editor, path));
-        return cmd;
+        return msys_command(&sh, editor, path);
     }
     let (program, rest) = crate::tui::jotfile::words(editor);
     let mut cmd = std::process::Command::new(super::program(program));
     cmd.args(rest).arg(path);
+    cmd
+}
+
+/// Git Bash 의 `sh` 로 편집기를 띄우는 명령 — **낱말은 MSYS2 의 규칙으로 싸 그대로 넘긴다**(moai-6kbo). `args` 가 싸는
+/// MSVC 의 꼴을 그 `sh` 가 다시 쪼개 `'` 든 임시 경로를 잃었다([`crate::tui::jotfile::msys_quoted`]). `sh` 를 받는 것은
+/// 시험이 환경 없이 부르게 하려는 것이다(리뷰 moai-j9gv.g3t).
+#[cfg(not(unix))]
+fn msys_command(sh: &std::path::Path, editor: &str, path: &std::path::Path) -> std::process::Command {
+    use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+    use std::os::windows::process::CommandExt as _;
+    let mut cmd = std::process::Command::new(sh);
+    for arg in crate::tui::jotfile::argv(editor, path) {
+        cmd.raw_arg(std::ffi::OsString::from_wide(&crate::tui::jotfile::msys_quoted(arg.encode_wide())));
+    }
     cmd
 }
 
@@ -1732,6 +1751,27 @@ mod tests {
             .expect_err("없는 편집기인데 글을 돌려줬다");
         assert!(why.contains("127"), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
+    }
+
+    /// **Git Bash 의 `sh` 는 네 낱말을 MSYS2 의 규칙으로 싼 날것으로 받는다**(moai-6kbo, 리뷰 moai-j9gv.g3t). `args` 로
+    /// 되돌리면 낱말이 안 싸이고, `arg` 로 바꾸면 싼 글을 러스트가 MSVC 의 규칙으로 한 번 더 싸 — 어느 쪽이든 그 `sh` 가
+    /// `'` 든 임시 경로를 잃는다. 둘째는 낱말이 같아 `get_args` 로는 안 갈리고, 러스트의 `Debug` 가 날것은 그대로,
+    /// 보통 낱말은 `{:?}` 로 찍어 가른다. 리눅스는 이 갈래를 짓지 않아 Windows 에서만 돈다.
+    #[cfg(not(unix))]
+    #[test]
+    fn the_git_bash_sh_gets_raw_msys2_words() {
+        let path = std::path::Path::new(r"C:\Users\o'brien\AppData\Local\Temp\moai-backlog-1-0.md");
+        let cmd = msys_command(std::path::Path::new("sh.exe"), r"C:\\tools\\ed.exe --wait", path);
+        let want = [
+            "-c",
+            r#""C:\\\\tools\\\\ed.exe --wait \"$@\"""#,
+            r#""C:\\\\tools\\\\ed.exe --wait""#,
+            r#""C:\\Users\\o'brien\\AppData\\Local\\Temp\\moai-backlog-1-0.md""#,
+        ];
+        let got: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(got, want, "낱말을 MSYS2 의 규칙으로 안 쌌다");
+        let shown = format!("{cmd:?}");
+        assert!(shown.ends_with(&format!(" {}", want.join(" "))), "날것으로 안 넘겼다 — {shown}");
     }
 
     /// **루프가 오류로 끝나며 버릴 뻔한 글은 파일로 남는다**(moai-y3r7). 편집기 글과 같은 모양이라
