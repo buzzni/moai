@@ -63,6 +63,32 @@ running `moai.exe` to `moai.exe.old` and puts the new one in its place. That
 (`C:\Program Files`) is caught by the installer itself, before it downloads —
 Windows ignores the read-only mark on a folder, so moai does not read it.
 
+## Config, editor and hooks
+
+moai does not need `sh` or `HOME` on Windows.
+
+- **Your user config** is `.config\moai\config.toml` under `HOME`, or under
+  `%USERPROFILE%` when `HOME` is not set — so in cmd and PowerShell it is
+  `%USERPROFILE%\.config\moai\config.toml`. A shell that sets its own `HOME`
+  (MSYS2, Cygwin, Git Bash on a domain account where `HOME` is `H:\`) reads the
+  file under that `HOME` instead. To use one file from every shell, set
+  `MOAI_CONFIG` to its path. `XDG_CONFIG_HOME`, when set, wins over both
+  homes, as on Unix
+- **The explorer's editor** (`SPC n`) comes from `VISUAL`, then `EDITOR`, then
+  `vi` or `nano` if one is on `PATH`
+  - Inside Git Bash it starts through `sh -c`, exactly as on Unix, so the value
+    follows shell quoting: `EDITOR="'C:/Program Files/Microsoft VS Code/bin/code' --wait"`
+  - Elsewhere there is no shell. The value is split on blanks; a first word in
+    double quotes is taken whole, which is how a path with spaces is written:
+    `$env:EDITOR = '"C:\Program Files\Notepad++\notepad++.exe" -multiInst -nosession'`.
+    The program is looked up on `PATH` with `PATHEXT`, so `code --wait` finds
+    `code.cmd`
+- **Hooks and the merge driver** record the binary with forward slashes
+  (`C:/Users/you/AppData/Local/Programs/moai/moai.exe`). Claude Code and Git
+  run those lines with Git for Windows' `sh`, which reads `\` as an escape
+- **Claude Code's plugin records** are read from `%USERPROFILE%\.claude`, the
+  place `claude` itself uses, even when `HOME` points somewhere else
+
 ## Build from source
 
 `scripts/windows-dev.ps1` checks for Git for Windows, the Visual Studio C++
