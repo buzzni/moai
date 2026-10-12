@@ -23276,7 +23276,7 @@ fn the_cli_reference_matches_the_help() {
 #[cfg(unix)]
 #[test]
 fn the_files_the_release_packs_are_all_there() {
-    for name in ["README.md", "CHANGELOG.md", "LICENSE", "install.sh"] {
+    for name in ["README.md", "CHANGELOG.md", "LICENSE", "install.sh", "install.ps1", ".cargo/config.toml"] {
         assert!(at_root(name).is_file(), "{name} 이 없다 — 릴리스가 태그에서 죽는다");
     }
 }
@@ -23289,7 +23289,7 @@ fn the_files_the_release_packs_are_all_there() {
 #[test]
 fn what_the_receiver_curls_is_main() {
     // `src/latest.rs` 는 탐색기가 새 판을 알릴 때 대는 한 줄을 든다(moai-8rmw.665).
-    for name in ["README.md", "install.sh", "src/latest.rs"] {
+    for name in ["README.md", "install.sh", "install.ps1", "src/latest.rs"] {
         let text = std::fs::read_to_string(at_root(name)).unwrap();
         for (n, line) in text.lines().enumerate() {
             let Some(rest) = line.split("raw.githubusercontent.com/buzzni/moai/").nth(1) else { continue };
@@ -23306,33 +23306,71 @@ fn what_the_receiver_curls_is_main() {
 /// 출력으로 행렬을 지으면 진실은 하나가 되지만 `release.yml` 만 보고는 무엇을 짓는지 못
 /// 읽는다 — 두 파일은 혼자 읽히고, 갈라지는 순간 이 시험이 이름을 대며 붉어진다.
 /// 못 내는 기계에 대는 말도 같은 이름을 든 셋째 자리라 함께 본다.
+///
+/// **설치 스크립트가 둘이다**(moai-j9gv.ukd). Windows 칸은 `install.ps1` 이 깔고, 두 표는
+/// 겹치지 않고 합쳐서 행렬이 된다 — 한 칸을 두 스크립트가 다 대면 어느 쪽이 그 판을 까는지
+/// 받는 사람이 모른다. 못 내는 기계에 대는 말은 두 스크립트 다 **세 이름 전부**를 댄다 —
+/// 리눅스에서 받은 사람이 Windows 판이 있다는 것을, 그 반대도 알아야 한다.
 #[cfg(unix)]
 #[test]
 fn the_install_table_and_the_release_matrix_name_the_same_targets() {
     let matrix = release_matrix();
 
     let sh = std::fs::read_to_string(at_root("install.sh")).unwrap();
-    let table: std::collections::BTreeSet<String> = sh
+    let sh_table: std::collections::BTreeSet<String> = sh
         .lines()
         .filter_map(|l| l.split_once(") target="))
         .map(|(_, rest)| rest.trim().trim_end_matches(";;").trim().to_owned())
         .collect();
-    assert_eq!(table, matrix, "install.sh 의 플랫폼 표와 release.yml 의 빌드 행렬이 갈라졌다");
+    let ps1 = std::fs::read_to_string(at_root("install.ps1")).unwrap();
+    // `'AMD64' { $target = 'x86_64-pc-windows-msvc' }` — 따옴표로 싼 값만 집는다. 시험이 쓰는
+    // `$target = $env:MOAI_TARGET` 는 표가 아니다.
+    let ps1_table: std::collections::BTreeSet<String> = ps1
+        .lines()
+        .filter_map(|l| l.split_once("$target = '"))
+        .filter_map(|(_, rest)| rest.split_once('\''))
+        .map(|(name, _)| name.to_owned())
+        .collect();
+    assert!(!ps1_table.is_empty(), "install.ps1 에서 플랫폼 표를 못 읽었다 — 표의 꼴이 바뀌었으면 이 시험도 같이 고친다");
+    assert!(sh_table.is_disjoint(&ps1_table), "두 설치 스크립트가 같은 칸을 댄다\n{sh_table:?}\n{ps1_table:?}");
+    let table: std::collections::BTreeSet<String> = sh_table.union(&ps1_table).cloned().collect();
+    assert_eq!(table, matrix, "설치 스크립트 둘의 플랫폼 표와 release.yml 의 빌드 행렬이 갈라졌다");
 
     // **주석이 아니라 `die` 줄을 집는다** (리뷰 moai-6mk3.lgj) — 그 말을 그대로 옮겨 적은
     // 주석이 위에 서면 첫 줄 집기가 그것을 답으로 내, 시험이 이름을 하나도 못 보고 붉어진다.
     let said =
         sh.lines().find(|l| l.contains("die \"이 기계에 맞는 판이 없다")).expect("못 내는 기계에 대는 말이 없다");
+    let ps1_said = ps1
+        .lines()
+        .find(|l| l.contains("Die \"no build for this machine"))
+        .expect("install.ps1 에 못 내는 기계에 대는 말이 없다");
     // **양쪽으로 본다** (같은 리뷰). 이름마다 `contains` 로 훑던 판은 한 칸을 **뺀** 자리를 못
     // 봤다 — 표와 행렬에서 같이 뺀 이름이 이 말에는 그대로 남아, 안 내는 판을 계속 댄다.
     // 앞가지가 겹치는 이름(`…-darwin` 과 `…-darwin20`)도 `contains` 로는 안 갈린다. 이음표
     // 둘 이상이 타깃 세 마디의 꼴이고, `$(uname -s)` 의 `-s` 는 거기서 빠진다.
-    let named: std::collections::BTreeSet<String> = said
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-        .filter(|w| w.matches('-').count() >= 2)
-        .map(str::to_owned)
-        .collect();
-    assert_eq!(named, matrix, "못 내는 기계에 대는 말이 행렬과 갈라졌다\n{said}");
+    let named = |said: &str| -> std::collections::BTreeSet<String> {
+        said.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .filter(|w| w.matches('-').count() >= 2)
+            .map(str::to_owned)
+            .collect()
+    };
+    assert_eq!(named(said), matrix, "못 내는 기계에 대는 말이 행렬과 갈라졌다\n{said}");
+    assert_eq!(named(ps1_said), matrix, "install.ps1 이 못 내는 기계에 대는 말이 행렬과 갈라졌다\n{ps1_said}");
+}
+
+/// **`install.ps1` 은 ASCII 로만 쓴다**(moai-j9gv.ukd). Windows PowerShell 5.1 은 BOM 없는
+/// 스크립트를 시스템 코드 페이지로 읽어, UTF-8 한국어가 깨진 글자가 된다 — 그 바이트 일부는
+/// 굽은 따옴표로 읽히고 PowerShell 은 그것을 문자열의 끝으로 받는다. 이 저장소의 다른 글처럼
+/// 한국어 주석 한 줄을 얹는 순간 받는 사람의 기계에서만 깨지고, 이 컨테이너의 pwsh 7 은 UTF-8
+/// 로 읽어 아무것도 안 붉어진다. 그래서 바이트로 맨다.
+#[cfg(unix)]
+#[test]
+fn install_ps1_is_ascii() {
+    let bytes = std::fs::read(at_root("install.ps1")).unwrap();
+    if let Some(at) = bytes.iter().position(|b| !b.is_ascii()) {
+        let line = bytes[..at].iter().filter(|&&b| b == b'\n').count() + 1;
+        panic!("install.ps1:{line} 에 ASCII 밖의 바이트가 있다 — Windows PowerShell 5.1 이 깨뜨린다");
+    }
 }
 
 /// `release.yml` 의 빌드 행렬. **한 자리에서 읽는다** — 이름을 대는 시험이 둘이라, 행렬의
@@ -23435,6 +23473,12 @@ fn install_cmd(base: &Path, dir: &Path, more: &[&str]) -> Command {
 /// 남의 것으로 읽혀 거절되는데, 그것이 바로 이 시험들이 재는 답이라 가끔만 붉어진다.
 #[cfg(unix)]
 fn placed_moai(dir: &Path, version: &str, ours: bool) -> String {
+    placed_moai_as(dir, "moai", version, ours)
+}
+
+/// [`placed_moai`] 를 `file` 이름으로 놓는다 — `install.ps1` 이 보는 자리는 `moai.exe` 다.
+#[cfg(unix)]
+fn placed_moai_as(dir: &Path, file: &str, version: &str, ours: bool) -> String {
     std::fs::create_dir_all(dir).unwrap();
     let answer = if ours {
         "echo 'Called by git. Merges issues.jsonl per issue, three-way'"
@@ -23444,7 +23488,7 @@ fn placed_moai(dir: &Path, version: &str, ours: bool) -> String {
     let body = format!(
         "#!/bin/sh\ncase $1 in\n--version) echo 'moai {version}' ;;\nmerge-driver) {answer} ;;\n*) exit 2 ;;\nesac\n"
     );
-    write_exe(&dir.join("moai"), &body);
+    write_exe(&dir.join(file), &body);
     body
 }
 
@@ -23538,6 +23582,191 @@ fn without_a_sums_file_nothing_is_installed() {
     let out = install(&base, &dir, &[]);
     assert!(!out.status.success(), "합계 없이 깔았다\n{}", text(&out));
     assert!(!dir.join("moai").exists(), "합계가 없는데 자리에 놓였다");
+}
+
+// ── install.ps1 — 같은 규칙을 PowerShell 로 ────────────────────────
+
+/// `PATH` 의 `pwsh`. **없으면 이 묶음은 건너뛴다**(moai-j9gv.ukd) — `ubuntu-latest` 러너에는 서
+/// 있어 CI 에서는 늘 돌고, 이 저장소를 짓는 컨테이너에는 없다. 건너뛴 것은 한 줄로 찍는다 —
+/// 초록이 "돌아서 맞았다" 인지 "안 돌았다" 인지를 로그에서 가른다.
+#[cfg(unix)]
+fn pwsh(test: &str) -> Option<PathBuf> {
+    let found = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .map(|d| d.join("pwsh"))
+        .find(|p| p.is_file());
+    if found.is_none() {
+        eprintln!("{test}: pwsh 가 PATH 에 없다 — install.ps1 시험을 건너뛴다");
+    }
+    found
+}
+
+/// `install.ps1` 을 돌린다 — [`install_cmd`] 와 같은 가짜 릴리스, 같은 환경이다.
+///
+/// **pwsh 의 집은 시험마다 따로다.** [`isolated`] 가 주는 빈 집은 "아무도 안 쓴다" 가 전제인데
+/// pwsh 는 처음 뜰 때 집 밑에 캐시와 모듈 자리를 만든다.
+#[cfg(unix)]
+fn install_ps1(pw: &Path, s: &Scratch, base: &Path, dir: &Path, more: &[&str]) -> Output {
+    isolated(pw)
+        .args(["-NoProfile", "-NonInteractive", "-File"])
+        .arg(at_root("install.ps1"))
+        .args(more)
+        .env("HOME", s.path().join("pwsh-home"))
+        .env("POWERSHELL_TELEMETRY_OPTOUT", "1")
+        .env("POWERSHELL_UPDATECHECK", "Off")
+        .env("MOAI_BASE_URL", format!("file://{}", base.display()))
+        .env("MOAI_VERSION", "v9.9.9")
+        .env("MOAI_INSTALL_DIR", dir)
+        .env("MOAI_TARGET", FAKE_TARGET)
+        .env("MOAI_API_URL", format!("file://{NOWHERE}/latest.json"))
+        .env_remove("MOAI_REPO")
+        .output()
+        .expect("pwsh 를 실행하지 못했다")
+}
+
+/// [`fake_release`] 의 zip 판 — `<이름>/moai.exe` 를 싼 zip 하나와 그 합계. 싸는 것도 pwsh 다
+/// (`Compress-Archive`) — 이 묶음은 pwsh 가 있을 때만 돌고, `zip` 은 러너마다 있는지 모른다.
+#[cfg(unix)]
+fn fake_zip_release(pw: &Path, s: &Scratch) -> (PathBuf, PathBuf) {
+    let base = s.path().join("rel");
+    let here = base.join("v9.9.9");
+    let name = release_name();
+    std::fs::create_dir_all(here.join(&name)).unwrap();
+    std::fs::write(here.join(&name).join("moai.exe"), "가짜 moai.exe\n").unwrap();
+    let packed = isolated(pw)
+        .args(["-NoProfile", "-NonInteractive", "-Command"])
+        .arg(format!("Compress-Archive -Path '{name}' -DestinationPath '{name}.zip'"))
+        .env("HOME", s.path().join("pwsh-home"))
+        .env("POWERSHELL_TELEMETRY_OPTOUT", "1")
+        .current_dir(&here)
+        .output()
+        .expect("pwsh 를 실행하지 못했다");
+    assert!(packed.status.success(), "가짜 zip 을 못 쌌다\n{}", text(&packed));
+    let summed = shell(
+        &here,
+        &format!("rm -rf {name} && {{ sha256sum *.zip 2>/dev/null || shasum -a 256 *.zip; }} > SHA256SUMS"),
+    );
+    assert!(summed.status.success(), "합계를 못 냈다\n{}", text(&summed));
+    (base, here.join(format!("{name}.zip")))
+}
+
+/// 합계가 맞으면 깔고, 다르거나 합계 파일이 없으면 안 깐다(moai-j54h) — `install.sh` 의 세
+/// 시험을 한 자리에서 잰다. pwsh 를 띄우는 값이 커서 묶었다.
+#[cfg(unix)]
+#[test]
+fn install_ps1_checks_the_sum_before_placing_moai_exe() {
+    let Some(pw) = pwsh("install_ps1_checks_the_sum_before_placing_moai_exe") else { return };
+    let s = Scratch::new("ps1-sum");
+    let (base, zip) = fake_zip_release(&pw, &s);
+
+    let dir = s.path().join("bin");
+    let out = install_ps1(&pw, &s, &base, &dir, &[]);
+    assert!(out.status.success(), "맞는 산출물을 안 깔았다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai.exe")).unwrap(), "가짜 moai.exe\n", "받은 것이 안 놓였다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("checksums"), "무엇을 쟀는지 안 말한다\n{}", text(&out));
+    let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left, ["moai.exe"], "깔 자리에 부스러기가 남았다");
+
+    std::fs::rename(&zip, s.path().join("kept.zip")).unwrap();
+    std::fs::write(&zip, "이건 산출물이 아니다").unwrap();
+    let elsewhere = s.path().join("tampered");
+    let out = install_ps1(&pw, &s, &base, &elsewhere, &[]);
+    assert!(!out.status.success(), "다른 것을 깔았다\n{}", text(&out));
+    assert!(!elsewhere.join("moai.exe").exists(), "확인에 걸렸는데 자리에 남았다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not installing"), "왜 멈췄는지 안 말한다\n{}", text(&out));
+
+    std::fs::rename(s.path().join("kept.zip"), &zip).unwrap();
+    std::fs::remove_file(base.join("v9.9.9/SHA256SUMS")).unwrap();
+    let nosums = s.path().join("nosums");
+    let out = install_ps1(&pw, &s, &base, &nosums, &[]);
+    assert!(!out.status.success(), "합계 없이 깔았다\n{}", text(&out));
+    assert!(!nosums.join("moai.exe").exists(), "합계가 없는데 자리에 놓였다");
+}
+
+/// **남의 moai.exe 는 안 덮고, 이 moai 면 `-Force` 없이 올린다**(moai-8rmw) — 거절문은 그대로
+/// 칠 줄을 주고, 올린 뒤에는 비켜 둔 `.old` 가 안 남는다(아무도 안 돌리고 있으니). 앞 판이 남긴
+/// `.old` 도 이번에 걷힌다 — `moai update` 가 도는 바이너리를 비켜 둔 뒤의 다음 판이 그 자리다.
+#[cfg(unix)]
+#[test]
+fn install_ps1_upgrades_this_moai_and_refuses_someone_elses() {
+    let Some(pw) = pwsh("install_ps1_upgrades_this_moai_and_refuses_someone_elses") else { return };
+    let s = Scratch::new("ps1-upgrade");
+    let (base, _) = fake_zip_release(&pw, &s);
+    let dir = s.path().join("bin");
+
+    let theirs = placed_moai_as(&dir, "moai.exe", "9.9.1", false);
+    let out = install_ps1(&pw, &s, &base, &dir, &[]);
+    assert!(!out.status.success(), "남의 것을 덮었다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai.exe")).unwrap(), theirs, "말없이 덮었다");
+    let said = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(said.contains("-File install.ps1 -Force -Dir"), "그대로 칠 줄을 안 준다\n{said}");
+
+    placed_moai_as(&dir, "moai.exe", "9.9.1", true);
+    std::fs::write(dir.join("moai.exe.old"), "앞 판이 비켜 둔 것").unwrap();
+    let out = install_ps1(&pw, &s, &base, &dir, &[]);
+    assert!(out.status.success(), "이 moai 를 안 올렸다\n{}", text(&out));
+    assert_eq!(std::fs::read_to_string(dir.join("moai.exe")).unwrap(), "가짜 moai.exe\n", "새 판이 안 놓였다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains("from 9.9.1 to 9.9.9"), "판이 어떻게 바뀌었는지 안 말한다\n{}", text(&out));
+    // [`write_exe`] 가 곁에 두는 `.src` 는 시험의 것이다 — 스크립트가 남긴 것만 센다.
+    let left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.ends_with(".src"))
+        .collect();
+    assert_eq!(left, ["moai.exe"], "비켜 둔 것이 남았다");
+
+    // 같은 판이면 안 받는다 — 받을 자리를 지워도 0 으로 끝나는 것이 그 증거다. 방금 놓인 것을
+    // 먼저 걷는다: zip 에서 나온 파일은 실행 비트가 없고, [`place_exe`] 의 `cp` 는 그 위에 쓰면서
+    // 비트를 그대로 둔다.
+    std::fs::remove_file(dir.join("moai.exe")).unwrap();
+    placed_moai_as(&dir, "moai.exe", "9.9.9", true);
+    std::fs::remove_dir_all(&base).unwrap();
+    let out = install_ps1(&pw, &s, &base, &dir, &[]);
+    assert!(out.status.success(), "같은 판인데 받으러 갔다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("already 9.9.9"), "왜 안 받았는지 안 말한다\n{}", text(&out));
+}
+
+/// **표는 덮개 없이 돈다** — [`printing_the_target_runs_the_platform_table`] 의 짝이다. 리눅스의
+/// pwsh 에는 `PROCESSOR_ARCHITECTURE` 가 없어 "맞는 판이 없다" 로 1 이 나고, 덮개는 가짜 릴리스를
+/// 가리킬 때만 듣는다. 이름에 든 길 조각은 거절한다.
+#[cfg(unix)]
+#[test]
+fn install_ps1_prints_the_target_from_its_table() {
+    let Some(pw) = pwsh("install_ps1_prints_the_target_from_its_table") else { return };
+    let s = Scratch::new("ps1-target");
+    let run = |vars: &[(&str, &str)], arch: Option<&str>| {
+        let mut cmd = isolated(&pw);
+        cmd.args(["-NoProfile", "-NonInteractive", "-File"])
+            .arg(at_root("install.ps1"))
+            .arg("-PrintTarget")
+            .env("HOME", s.path().join("pwsh-home"))
+            .env("POWERSHELL_TELEMETRY_OPTOUT", "1")
+            .env_remove("MOAI_TARGET")
+            .env_remove("MOAI_BASE_URL")
+            .env_remove("PROCESSOR_ARCHITEW6432");
+        match arch {
+            Some(a) => cmd.env("PROCESSOR_ARCHITECTURE", a),
+            None => cmd.env_remove("PROCESSOR_ARCHITECTURE"),
+        };
+        cmd.envs(vars.iter().copied());
+        cmd.output().expect("pwsh 를 실행하지 못했다")
+    };
+    let out = run(&[], Some("AMD64"));
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "x86_64-pc-windows-msvc");
+    assert!(release_matrix().contains("x86_64-pc-windows-msvc"), "표가 행렬에 없는 이름을 찍었다");
+
+    let out = run(&[], Some("ARM64"));
+    assert_eq!(out.status.code(), Some(1), "판이 없는 기계에서 엉뚱한 코드로 끝났다\n{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no build for this machine"), "{}", text(&out));
+
+    let alone = run(&[("MOAI_TARGET", FAKE_TARGET)], Some("AMD64"));
+    assert_eq!(String::from_utf8_lossy(&alone.stdout).trim(), "x86_64-pc-windows-msvc", "덮개가 받는 사람의 길에서도 들었다");
+    let both = run(&[("MOAI_TARGET", FAKE_TARGET), ("MOAI_BASE_URL", "file:///moai-nowhere")], None);
+    assert_eq!(String::from_utf8_lossy(&both.stdout).trim(), FAKE_TARGET, "덮개가 준 이름을 안 찍었다\n{}", text(&both));
+    for crooked in ["../../moai-pwn", "a\\b"] {
+        let out = run(&[("MOAI_TARGET", crooked), ("MOAI_BASE_URL", "file:///moai-nowhere")], None);
+        assert!(!out.status.success(), "길 조각이 든 이름을 받았다 — {crooked}\n{}", text(&out));
+    }
 }
 
 /// **이미 있는 moai 를 말없이 덮지 않는다.** 이 이름의 바이너리가 다른 뿌리에서

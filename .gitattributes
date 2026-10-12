@@ -20,3 +20,8 @@
 # that diff in review instead of asking every reader to scroll past it; the file
 # itself says the same thing in prose for anyone reading it outside GitHub.
 docs/cli.md          linguist-generated=true
+# Shell scripts stay LF on every checkout (moai-j9gv.ukd). GitHub's Windows
+# runners check out with core.autocrlf=true, and bash then reads
+# `set -euo pipefail\r` -- the release's Windows column calls these scripts.
+*.sh                 text eol=lf
+scripts/git-hooks/*  text eol=lf
