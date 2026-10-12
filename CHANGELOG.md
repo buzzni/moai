@@ -12,6 +12,32 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Windows releases.** A tag now also builds `x86_64-pc-windows-msvc` on a
+  Windows runner, with the C runtime linked in (`.cargo/config.toml`) so
+  `moai.exe` starts on a clean machine without the Visual C++ redistributable.
+  It ships as `moai-v<version>-x86_64-pc-windows-msvc.zip`, listed in the same
+  `SHA256SUMS` as the two `.tar.gz` archives. (moai-l3mn, moai-j9gv.ukd)
+
+- **`install.ps1`, the Windows installer.** Download it and run it with
+  `powershell -File install.ps1`; it keeps `install.sh`'s rules — nothing is
+  installed that `SHA256SUMS` does not vouch for, this moai is upgraded without
+  `-Force`, the same version is not fetched again, and someone else's
+  `moai.exe` is left alone without `-Force`. It installs to
+  `%LOCALAPPDATA%\Programs\moai` unless `-Dir` says otherwise, takes `-Version`
+  and the same `MOAI_*` variables, and says in one line when that directory is
+  not on `PATH` without editing it. A running `moai.exe` is renamed to
+  `moai.exe.old` rather than overwritten. The release carries it next to
+  `install.sh`. (moai-l3mn, moai-j9gv.ukd)
+
+- **`moai update` upgrades on Windows.** It fetches `install.ps1` from the
+  repository's `main` branch, writes it to a temporary file and runs it with
+  Windows PowerShell over the directory of the running `moai.exe`;
+  `--dry-run` prints that command and `--json` names `powershell` as the
+  program. The explorer's new-release banner names `moai update` there too.
+  (moai-l3mn, moai-j9gv.3fl)
+
 ## [0.16.0] - 2026-10-11
 
 ### Added
