@@ -1069,8 +1069,12 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
     let got = written
         .map_err(|e| fill(say(lang, "tui.editor_no_write"), &[("why", &e.to_string())]))
         .and_then(|()| {
-            editor_command(editor, &path)
-                .status()
+            let (spelt, cwd) = editor_target(&path);
+            let mut cmd = editor_command(editor, &spelt);
+            if let Some(cwd) = cwd {
+                cmd.current_dir(cwd);
+            }
+            cmd.status()
                 .map_err(|e| fill(say(lang, "tui.editor_not_started"), &[("editor", editor), ("why", &e.to_string())]))
         })
         .and_then(|status| match status.code() {
@@ -1117,13 +1121,52 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
 /// 시험이 환경 없이 부르게 하려는 것이다(리뷰 moai-j9gv.g3t).
 #[cfg(not(unix))]
 fn msys_command(sh: &std::path::Path, editor: &str, path: &std::path::Path) -> std::process::Command {
+    use crate::tui::jotfile::{msys_quoted, msys_word};
     use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
     use std::os::windows::process::CommandExt as _;
     let mut cmd = std::process::Command::new(sh);
     for arg in crate::tui::jotfile::argv(editor, path) {
-        cmd.raw_arg(std::ffi::OsString::from_wide(&crate::tui::jotfile::msys_quoted(arg.encode_wide())));
+        // 싸지 않아도 지나는 낱말은 그대로 넘긴다(moai-l3pp) — [`editor_target`] 이 고른 임시 경로가 그렇다. git 의 목록은
+        // `~` 도 싸는데, 싼 낱말은 옛 `LANG` 문자셋에 없는 글자가 들면 따옴표째 넘어간다(리뷰 moai-j9gv.g3t).
+        let raw = if msys_word(arg.encode_wide()) {
+            arg
+        } else {
+            std::ffi::OsString::from_wide(&msys_quoted(arg.encode_wide()))
+        };
+        cmd.raw_arg(raw);
     }
     cmd
+}
+
+/// 편집기가 받을 임시 파일의 철자와, 바꿀 지금 자리 — 유닉스에서는 그대로이고 자리를 안 바꾼다.
+#[cfg(unix)]
+fn editor_target(path: &std::path::Path) -> (std::path::PathBuf, Option<std::path::PathBuf>) {
+    (path.to_path_buf(), None)
+}
+
+/// 유닉스가 아닌 판의 [`editor_target`] — **편집기는 싸지 않아도 MSYS2 를 지나는 철자를 받는다**(moai-l3pp, 2026-10-12
+/// 사람 결정). Git 의 `nano.exe` 처럼 MSYS2 의 런타임으로 지은 편집기는 명령 줄을 다시 쪼개, 프로필 이름에 `'` 가 든
+/// 임시 경로(`C:\Users\o'brien\…`)를 없는 자리로 읽고 적은 생각이 사라졌다. 어느 편집기인지 가리지 않고 철자로 푼다.
+///
+/// - 먼저 `\` 를 `/` 로 쓴 `C:/…` 다([`crate::tui::jotfile::forward_slashed`], `\\?\` 는 걷는다). 그 철자가
+///   [`crate::tui::jotfile::msys_word`] 면 그대로 넘기고 자리는 안 바꾼다
+/// - 아니면 **파일 이름만** 넘기고 편집기의 지금 자리를 그 디렉터리로 둔다. 이름(`moai-backlog-<pid>-<n>.md`)은 moai 가
+///   지어 걸릴 글자가 없고, 지금 자리는 명령 줄이 아니라 쪼개지지 않는다
+///
+/// 8.3 짧은 이름은 안 쓴다 — `'`·`{`·`}` 는 짧은 이름에도 그대로 남는다(`O'BRIE~1`, wine 에서 `O'BR~DML` 로 쟀다).
+#[cfg(not(unix))]
+fn editor_target(path: &std::path::Path) -> (std::path::PathBuf, Option<std::path::PathBuf>) {
+    use crate::tui::jotfile::{forward_slashed, msys_word};
+    use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+    let plain = crate::path::unverbatim(path.as_os_str());
+    let spelt: Vec<u16> = forward_slashed(plain.encode_wide());
+    if msys_word(spelt.iter().copied()) {
+        return (std::ffi::OsString::from_wide(&spelt).into(), None);
+    }
+    match (path.file_name(), path.parent()) {
+        (Some(name), Some(dir)) => (name.into(), Some(dir.to_path_buf())),
+        _ => (std::ffi::OsString::from_wide(&spelt).into(), None),
+    }
 }
 
 /// 편집기에 넘길 새 파일. **남이 못 읽게(0600) 새로 만든다** — 공유 임시 디렉터리라 이름을
@@ -1772,6 +1815,38 @@ mod tests {
         assert_eq!(got, want, "낱말을 MSYS2 의 규칙으로 안 쌌다");
         let shown = format!("{cmd:?}");
         assert!(shown.ends_with(&format!(" {}", want.join(" "))), "날것으로 안 넘겼다 — {shown}");
+        // [`editor_target`] 이 고른 `/` 철자는 싸지 않는다(moai-l3pp) — git 의 목록이 싸는 `~` 가 들어도 그대로다.
+        let (spelt, _) =
+            editor_target(std::path::Path::new(r"C:\Users\JOHNSM~1\AppData\Local\Temp\moai-backlog-1-0.md"));
+        let cmd = msys_command(std::path::Path::new("sh.exe"), "vim", &spelt);
+        let got: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(got, ["-c", r#""vim \"$@\"""#, "vim", "C:/Users/JOHNSM~1/AppData/Local/Temp/moai-backlog-1-0.md"]);
+    }
+
+    /// **편집기는 싸지 않아도 지나는 철자를 받는다**(moai-l3pp, 2026-10-12 사람 결정) — 보통 자리는 `C:/…` 로, `'`·빈칸이
+    /// 든 자리는 파일 이름만 받고 지금 자리를 그 디렉터리로 둔다. 어느 쪽이든 같은 파일을 연다.
+    #[cfg(not(unix))]
+    #[test]
+    fn the_editor_gets_a_spelling_msys2_does_not_split() {
+        use std::os::windows::ffi::OsStrExt as _;
+        let word = |p: &std::path::Path| crate::tui::jotfile::msys_word(p.as_os_str().encode_wide());
+        let (spelt, cwd) =
+            editor_target(std::path::Path::new(r"\\?\C:\Users\me\AppData\Local\Temp\moai-backlog-1-0.md"));
+        assert_eq!(
+            spelt,
+            std::path::Path::new("C:/Users/me/AppData/Local/Temp/moai-backlog-1-0.md"),
+            "접두어를 안 걷었다"
+        );
+        assert_eq!(cwd, None, "보통 자리에서 지금 자리를 바꿨다");
+        let d = Dir::new("quoted");
+        let dir = d.0.join("o'brien {x}");
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join("moai-backlog-1-0.md");
+        std::fs::write(&file, "x").unwrap();
+        let (spelt, cwd) = editor_target(&file);
+        assert!(word(&spelt), "MSYS2 가 쪼개는 철자를 넘긴다 — {spelt:?}");
+        let cwd = cwd.expect("파일 이름만 넘기면서 지금 자리를 안 줬다");
+        assert_eq!(std::fs::read_to_string(cwd.join(&spelt)).unwrap(), "x", "다른 파일을 댔다");
     }
 
     /// **루프가 오류로 끝나며 버릴 뻔한 글은 파일로 남는다**(moai-y3r7). 편집기 글과 같은 모양이라

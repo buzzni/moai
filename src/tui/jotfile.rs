@@ -122,6 +122,27 @@ pub fn msys_quoted(arg: impl IntoIterator<Item = u16>) -> Vec<u16> {
     out
 }
 
+/// 이 낱말이 **싸지 않아도 MSYS2 의 런타임을 그대로 지나는가**(moai-l3pp). 거기서 지어진 프로그램(Git 의 `sh.exe`·
+/// `nano.exe`)은 명령 줄을 제 규칙으로 다시 쪼개는데, 싸지 않은 낱말에서 바뀌는 글자는 빈칸·`'`·`"`·`{`(따옴표와 중괄호를
+/// 먹는다), `\`(둘이면 하나로 준다), `*`·`?`·`[`(맞는 파일이 있으면 펼친다)다. 2026-10-12 MinGit 2.56 의 `sh.exe` 로
+/// wine 에서 쟀다 — `~`(8.3 짧은 이름의 `JOHNSM~1`, 앞머리의 `~/x`)·한글·`$`·`%`·`&`·`(`·`;` 는 그대로 지났다.
+///
+/// 편집기에 넘길 임시 경로는 이것이 참인 자리에서 고른다 — 그 낱말은 MSVC 의 꼴로도 MSYS2 의 꼴로도 안 싸여, 어느 편집기가
+/// 받든 옛 `LANG` 문자셋에서든 그대로 닿는다(2026-10-12 사람 결정). [`msys_quoted`] 가 고르는 글자와 다른 것은 `~`·`[`
+/// 둘이다 — 그쪽은 git 과 같은 답을 내려고 git 의 목록을 그대로 쓴다.
+#[cfg(any(not(unix), test))]
+pub fn msys_word(arg: impl IntoIterator<Item = u16>) -> bool {
+    !arg.into_iter().any(|u| u8::try_from(u).is_ok_and(|b| b" \t\n\r\\\"{'?*[".contains(&b)))
+}
+
+/// Windows 의 자리를 편집기에 넘길 철자 — `\` 를 `/` 로 바꾼다(moai-l3pp). 그 철자는 Windows 의 API 도 MSYS2 의 런타임도
+/// 같은 파일로 읽는데, `\` 는 MSYS2 가 다시 쪼갤 때 막음 글자라 낱말을 [`msys_quoted`] 로 싸게 만든다. UTF-16 단위로 받는
+/// 까닭은 [`msys_quoted`] 와 같다.
+#[cfg(any(not(unix), test))]
+pub fn forward_slashed(path: impl IntoIterator<Item = u16>) -> Vec<u16> {
+    path.into_iter().map(|u| if u == u16::from(b'\\') { u16::from(b'/') } else { u }).collect()
+}
+
 /// `sh` 없이 띄우는 데서 편집기 글을 쪼갠 것 — 첫 낱말과 나머지(moai-j9gv.cl6). **빈칸으로 쪼갠다** —
 /// 따옴표를 풀려면 껍데기 규칙을 반쯤 흉내 내야 하고([`pick`] 이 안 하는 까닭과 같다), 빈칸이 든
 /// 자리의 편집기는 `PATH` 에 그 디렉터리를 두면 이름 하나로 선다. 빈 글이면 첫 낱말도 빈 글이다.
@@ -275,6 +296,21 @@ mod tests {
         assert_eq!(q("a\x0Cb\x0Bc"), "a\x0Cb\x0Bc", "git 이 안 싸는 글자를 쌌다");
         // 끝의 `\` 도 둘로 적는다 — 닫는 따옴표를 먹지 않는다.
         assert_eq!(q(r"C:\dir\"), r#""C:\\dir\\""#);
+        // 싸지 않아도 지나는 낱말(moai-l3pp) — 2026-10-12 MinGit 의 `sh.exe` 로 잰 표다. `/` 로 쓴 임시 경로, 8.3 짧은
+        // 이름의 `~`, 한글은 지나고, 빈칸·`'`·`"`·`{`·`\`·`*`·`?`·`[` 는 안 지난다.
+        let w = |s: &str| msys_word(s.encode_utf16());
+        for passes in
+            ["C:/Users/OBRIEN~1/AppData/Local/Temp/moai-backlog-1-0.md", "~/x", "C:/Users/레이븐/T", "a$b%c&d(e);f"]
+        {
+            assert!(w(passes), "{passes}: 지나는 낱말을 막았다");
+        }
+        for fails in ["a b", "a\tb", "o'brien", "a\"b", "a{b}", r"C:\x", "a*b", "a?b", "a[b]"] {
+            assert!(!w(fails), "{fails:?}: MSYS2 가 바꾸는 낱말을 그대로 넘긴다");
+        }
+        let fwd = |s: &str| String::from_utf16(&forward_slashed(s.encode_utf16())).unwrap();
+        assert_eq!(fwd(r"C:\Users\OBRIEN~1\AppData\Local\Temp"), "C:/Users/OBRIEN~1/AppData/Local/Temp");
+        assert!(w(&fwd(r"C:\Users\me\AppData\Local\Temp\moai-backlog-1-0.md")), "`/` 로 쓴 보통 임시 경로가 안 지난다");
+        assert_eq!(forward_slashed([0xD800, u16::from(b'\\')]), [0xD800, u16::from(b'/')]);
         // 짝 없는 서로게이트(Windows 의 낱말에 설 수 있다)는 단위째 지나간다.
         assert_eq!(msys_quoted([0xD800, u16::from(b'a')]), [0xD800, u16::from(b'a')]);
         assert_eq!(msys_quoted([0xD800, u16::from(b' ')]), [34, 0xD800, 32, 34]);
