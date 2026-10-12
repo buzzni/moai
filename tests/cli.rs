@@ -8150,7 +8150,11 @@ const JSON_SWEEP: &[&str] = &[
 /// `install.sh` 가 판을 내는 기계인가 — `latest::SERVED` 와 같은 자다. 다른 기계에서 `moai update` 는 무엇보다
 /// 먼저 그것으로 거절된다.
 fn served() -> bool {
-    cfg!(any(all(target_os = "linux", target_arch = "x86_64"), all(target_os = "macos", target_arch = "aarch64")))
+    cfg!(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "windows", target_arch = "x86_64")
+    ))
 }
 
 /// 시험의 바이너리를 `target/` 밖 `dir/bin/moai` 에 한 벌 세운다(moai-zsfr.2p9) — `moai update` 는 cargo 가
@@ -23331,7 +23335,10 @@ fn the_install_table_and_the_release_matrix_name_the_same_targets() {
         .filter_map(|(_, rest)| rest.split_once('\''))
         .map(|(name, _)| name.to_owned())
         .collect();
-    assert!(!ps1_table.is_empty(), "install.ps1 에서 플랫폼 표를 못 읽었다 — 표의 꼴이 바뀌었으면 이 시험도 같이 고친다");
+    assert!(
+        !ps1_table.is_empty(),
+        "install.ps1 에서 플랫폼 표를 못 읽었다 — 표의 꼴이 바뀌었으면 이 시험도 같이 고친다"
+    );
     assert!(sh_table.is_disjoint(&ps1_table), "두 설치 스크립트가 같은 칸을 댄다\n{sh_table:?}\n{ps1_table:?}");
     let table: std::collections::BTreeSet<String> = sh_table.union(&ps1_table).cloned().collect();
     assert_eq!(table, matrix, "설치 스크립트 둘의 플랫폼 표와 release.yml 의 빌드 행렬이 갈라졌다");
@@ -23705,7 +23712,11 @@ fn install_ps1_upgrades_this_moai_and_refuses_someone_elses() {
     let out = install_ps1(&pw, &s, &base, &dir, &[]);
     assert!(out.status.success(), "이 moai 를 안 올렸다\n{}", text(&out));
     assert_eq!(std::fs::read_to_string(dir.join("moai.exe")).unwrap(), "가짜 moai.exe\n", "새 판이 안 놓였다");
-    assert!(String::from_utf8_lossy(&out.stdout).contains("from 9.9.1 to 9.9.9"), "판이 어떻게 바뀌었는지 안 말한다\n{}", text(&out));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("from 9.9.1 to 9.9.9"),
+        "판이 어떻게 바뀌었는지 안 말한다\n{}",
+        text(&out)
+    );
     // [`write_exe`] 가 곁에 두는 `.src` 는 시험의 것이다 — 스크립트가 남긴 것만 센다.
     let left: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
@@ -23760,9 +23771,18 @@ fn install_ps1_prints_the_target_from_its_table() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("no build for this machine"), "{}", text(&out));
 
     let alone = run(&[("MOAI_TARGET", FAKE_TARGET)], Some("AMD64"));
-    assert_eq!(String::from_utf8_lossy(&alone.stdout).trim(), "x86_64-pc-windows-msvc", "덮개가 받는 사람의 길에서도 들었다");
+    assert_eq!(
+        String::from_utf8_lossy(&alone.stdout).trim(),
+        "x86_64-pc-windows-msvc",
+        "덮개가 받는 사람의 길에서도 들었다"
+    );
     let both = run(&[("MOAI_TARGET", FAKE_TARGET), ("MOAI_BASE_URL", "file:///moai-nowhere")], None);
-    assert_eq!(String::from_utf8_lossy(&both.stdout).trim(), FAKE_TARGET, "덮개가 준 이름을 안 찍었다\n{}", text(&both));
+    assert_eq!(
+        String::from_utf8_lossy(&both.stdout).trim(),
+        FAKE_TARGET,
+        "덮개가 준 이름을 안 찍었다\n{}",
+        text(&both)
+    );
     for crooked in ["../../moai-pwn", "a\\b"] {
         let out = run(&[("MOAI_TARGET", crooked), ("MOAI_BASE_URL", "file:///moai-nowhere")], None);
         assert!(!out.status.success(), "길 조각이 든 이름을 받았다 — {crooked}\n{}", text(&out));

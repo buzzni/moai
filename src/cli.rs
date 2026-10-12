@@ -784,7 +784,7 @@ BACKLOG
         dialect: Dialect,
     },
 
-    // **이 첫 줄은 `install.sh` 가 읽는 계약이다**(moai-8rmw, 리뷰). 깔린 moai 가 이 moai 인지를
+    // **이 첫 줄은 `install.sh`·`install.ps1` 이 읽는 계약이다**(moai-8rmw, 리뷰). 깔린 moai 가 이 moai 인지를
     // `merge-driver --help` 가 이 글을 내는지로 가르고(`ours`), 나간 판마다 이 글이 박혀 있다.
     // 고치려면 `install.sh` 가 옛 글과 새 글을 다 받게 먼저 고친다 — 안 그러면 새 글을 단 판부터
     // 올리기가 모두 "이 moai 가 아니다" 로 거절된다. 진짜 바이너리로 재는 시험이
@@ -897,6 +897,16 @@ Examples:
   is fetched by moai itself, not by curl; install.sh then downloads the
   release with curl or wget and checks it against the release checksums.
 
+  On Windows it fetches install.ps1 instead, writes it to a temporary file and
+  runs it with Windows PowerShell, removing the file afterwards:
+
+    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File <that file> -Dir <that directory> -Force
+
+  The running moai.exe cannot be overwritten, so install.ps1 renames it to
+  moai.exe.old and puts the new one in its place; the next install removes
+  that .old.
+
   The repository is `buzzni/moai` unless your user config says otherwise -
   `repo = \"owner/name\"` under [update] - and MOAI_REPO wins over both. The
   repository's own .moai/config.toml is never read for it: what it names is
@@ -908,10 +918,11 @@ Examples:
   instead), a binary not named moai, a directory you cannot write (run it as a
   user who can, or reinstall with install.sh --dir), and a machine the releases
   do not cover. A directory outside your home is fine when you can write it.
+  On Windows the binary has to be named moai.exe.
 
   --dry-run fetches nothing and runs nothing. --json prints {repo, script,
-  dir, command, dry_run} and, after a run, `code` - sh's exit code; install.sh's
-  own output then goes to stderr so stdout stays one JSON value.")]
+  dir, command, dry_run} and, after a run, `code` - the shell's exit code; the
+  script's own output then goes to stderr so stdout stays one JSON value.")]
     Update(UpdateArgs),
 
     /// Put a .moai/ into this repository (safe to run again)
