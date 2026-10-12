@@ -381,6 +381,7 @@ pub fn spelled(at: &Path, why: &Unheld) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::scratch::Scratch;
 
     /// 안을 가리키는 링크는 따르고, 밖·`.git/` 으로 가는 링크는 안 따른다. **끝이 없는 링크도 잰다** — 끝의

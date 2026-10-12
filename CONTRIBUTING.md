@@ -44,12 +44,13 @@ cargo fmt --all --check    # or `cargo fmt --all` to fix
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
-minutes. CI has four jobs: one runs clippy and the tests on the dev profile,
+minutes. CI has five jobs: one runs clippy and the tests on the dev profile,
 one works out whether anything outside the docs changed, one builds the crate
-with the `rust-version` written in `Cargo.toml`, and the last builds the release
-binary and checks it against the 15 MB budget. Only the first is a required
-check, and the last two show as skipped - not failed - on a pull request that
-touched documentation alone.
+with the `rust-version` written in `Cargo.toml`, one runs clippy and builds the
+tests on Windows without running them, and the last builds the release binary
+and checks it against the 15 MB budget. Only the first is a required check, and
+the last three show as skipped - not failed - on a pull request that touched
+documentation alone.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in

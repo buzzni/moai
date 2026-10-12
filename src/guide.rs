@@ -5981,6 +5981,7 @@ stop sending outside work while a release runs",
     /// 말이라 가르면 안 되며("Branch on `kind`, not on the words beside it"), `body` 는 원문이라 페이지 파일을 읽는
     /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
     /// 여기 둘지를 그때 정한다.
+    #[cfg(unix)]
     const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
 
     /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
@@ -7332,6 +7333,7 @@ stop sending outside work while a release runs",
     /// 낸다(리뷰 moai-p5sz.tkn). 일곱째 칸 `saycode` 는 기록의 `entrypoint` 가 `remote_mobile` 인 세션의 표고, 그 세션은 칸이
     /// 늘 `-` 다 — 짝은 남의 프로세스 환경을 안 읽는다(moai-l244, develop 머지).
     #[test]
+    #[cfg(unix)]
     fn the_session_map_reads_the_records() {
         assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
         assert!(cmux().contains(SESSIONS), "cmux 스킬이 짝을 그대로 안 싣는다");
@@ -7578,6 +7580,7 @@ stop sending outside work while a release runs",
 
     /// 프로세스 `pid` 의 시작 시각을 Claude Code 가 기록의 `procStart` 에 적는 꼴로 — 리눅스는 `/proc/<pid>/stat` 의
     /// 22번째 칸, `/proc` 가 없는 macOS 는 `LC_ALL=C TZ=UTC ps -o lstart=` 의 글(2026-10-11 실제 기록과 견줘 잼).
+    #[cfg(unix)]
     fn proc_start(pid: u32) -> String {
         match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
             Ok(stat) => stat[stat.rfind(')').unwrap() + 2..].split_whitespace().nth(19).unwrap().to_string(),

@@ -970,7 +970,8 @@ impl Gate {
 
 /// 생각 담기를 적을 편집기(moai-08af). **환경과 PATH 를 읽는 것은 여기다** — 고르는 차례는
 /// 조각([`crate::tui::jotfile::pick`])이 정한다. 띄울 때 한 번 고른다: 도는 중에 `$EDITOR` 가
-/// 바뀔 길은 없고, 키마다 PATH 를 훑을 까닭도 없다.
+/// 바뀔 길은 없고, 키마다 PATH 를 훑을 까닭도 없다. 다만 유닉스가 아닌 판은 편집기를 띄울 때마다 `sh`·첫 낱말을
+/// `PATH`·`PATHEXT` 에서 한 번 더 찾는다([`editor_command`]).
 fn editor() -> Option<String> {
     let var = |k: &str| std::env::var(k).ok();
     crate::tui::jotfile::pick(var("VISUAL").as_deref(), var("EDITOR").as_deref(), on_path)
@@ -981,9 +982,31 @@ fn editor() -> Option<String> {
 ///
 /// 여기서 `PATH` 를 제 손으로 훑는 것은 껍데기를 띄우지 않으려는 것이다. 편집기 후보가 여럿이고
 /// 띄울 때 한 번 고르는 자리라, 이름마다 `sh -c 'command -v'` 를 띄우면 그 값이 얻는 값보다 크다.
+#[cfg(unix)]
 fn on_path(name: &str) -> bool {
     let Some(dirs) = std::env::var_os("PATH") else { return false };
     std::env::split_paths(&dirs).any(|d| super::runnable(&d.join(name)))
+}
+
+/// 유닉스가 아닌 판의 [`on_path`] — **편집기를 띄울 길([`editor_command`])의 찾기를 그대로 탄다**(리뷰
+/// moai-j9gv.4s3). Git Bash 안이면 그 `sh` 가 띄우니 그 껍데기처럼 이름 그대로와 `.exe` 를 본다 — Git for Windows 의
+/// `vi` 는 확장자 없는 스크립트(`exec vim "$@"`)라 `PATHEXT` 로는 영영 안 잡혀, 이 에픽 전에 고르던 `vi` 를 놓친다.
+/// 그 밖에서는 `PATHEXT` 를 붙여 찾는다([`super::find_on_path`]).
+#[cfg(not(unix))]
+fn on_path(name: &str) -> bool {
+    if msys_sh().is_none() {
+        return super::find_on_path(name).is_some();
+    }
+    let Some(dirs) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&dirs)
+        .any(|d| super::runnable(&d.join(name)) || super::runnable(&d.join(format!("{name}.exe"))))
+}
+
+/// Git Bash(`MSYSTEM` 이 선다) 안에서 `PATH` 에 선 `sh` — 편집기를 그 껍데기로 띄울지와 기본 편집기를 어떻게 찾을지를
+/// 이것 하나가 가른다([`editor_command`]·[`on_path`]). 둘이 따로 물으면 찾은 것과 띄우는 길이 갈린다.
+#[cfg(not(unix))]
+fn msys_sh() -> Option<std::path::PathBuf> {
+    std::env::var_os("MSYSTEM").filter(|v| !v.is_empty()).and_then(|_| super::find_on_path("sh"))
 }
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
@@ -1040,8 +1063,7 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
     let got = written
         .map_err(|e| fill(say(lang, "tui.editor_no_write"), &[("why", &e.to_string())]))
         .and_then(|()| {
-            std::process::Command::new("sh")
-                .args(crate::tui::jotfile::argv(editor, &path))
+            editor_command(editor, &path)
                 .status()
                 .map_err(|e| fill(say(lang, "tui.editor_not_started"), &[("editor", editor), ("why", &e.to_string())]))
         })
@@ -1053,6 +1075,36 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
         });
     let _ = std::fs::remove_file(&path);
     got
+}
+
+/// 편집기를 띄우는 명령 — 유닉스에서는 `sh` 가 편집기 글을 껍데기 규칙으로 쪼갠다([`crate::tui::jotfile::argv`]).
+#[cfg(unix)]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new("sh");
+    cmd.args(crate::tui::jotfile::argv(editor, path));
+    cmd
+}
+
+/// 유닉스가 아닌 판의 [`editor_command`](moai-j9gv.cl6) — **Git Bash 안이면 유닉스와 같은 길이다**(리뷰
+/// moai-j9gv.4s3). 그 껍데기(`MSYSTEM` 이 선다)의 사람은 편집기 글을 `sh` 의 말로 적고(`'C:/Program Files/…/code'
+/// --wait`), git 도 거기서 편집기를 `sh -c` 로 띄운다. 이 에픽 전에는 어디서나 `sh` 로 띄워 그 글이 섰으니, 빈칸으로만
+/// 쪼개면 거기서 되던 것이 안 된다. 그 `sh` 는 [`msys_sh`] 가 `PATH` 에서 찾고, 못 찾으면 아래 길로 간다.
+///
+/// 그 밖(cmd·PowerShell)에는 물을 `sh` 가 없거나, 있어도 그 사람의 글(`C:\tools\nvim.exe`)의 `\` 를 `sh` 가 먹는다.
+/// 거기서는 편집기 글을 쪼개([`crate::tui::jotfile::words`]) 첫 낱말을 프로그램으로 띄우고, 그 낱말은
+/// [`super::program`] 이 고른 자리로 바꾼다 — 러스트의 `Command` 는 이름에 `.exe` 만 붙여 `code.cmd` 같은 편집기를 못
+/// 찾는다.
+#[cfg(not(unix))]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    if let Some(sh) = msys_sh() {
+        let mut cmd = std::process::Command::new(sh);
+        cmd.args(crate::tui::jotfile::argv(editor, path));
+        return cmd;
+    }
+    let (program, rest) = crate::tui::jotfile::words(editor);
+    let mut cmd = std::process::Command::new(super::program(program));
+    cmd.args(rest).arg(path);
+    cmd
 }
 
 /// 편집기에 넘길 새 파일. **남이 못 읽게(0600) 새로 만든다** — 공유 임시 디렉터리라 이름을
