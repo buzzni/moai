@@ -73,6 +73,10 @@ impl Drop for Scratch {
 ///
 /// 걷는 것은 moai 와 **시험이 띄우는 셸**이 실제로 기계에서 읽는 자리뿐이다.
 /// - `HOME`·`CLAUDE_CONFIG_DIR`·`CLAUDE_CODE_PLUGIN_CACHE_DIR` — `claude` 의 장부
+/// - `USERPROFILE` — Windows 에서 `HOME` 다음의 집이고 `claude` 의 장부 자리다(`user_config::home_from`,
+///   moai-j9gv.cl6). `HOME` 을 일부러 걷는 시험(설정 자리를 모르는 판)이 그것을 물려받으면 돌리는 사람의
+///   `%USERPROFILE%\.config\moai\config.toml` 에 등록을 적는다 — wine 에서 실제로 적혔다(리뷰 moai-j9gv.4s3).
+///   유닉스의 moai 는 이 이름을 안 읽는다
 /// - git 전역·시스템 설정 — 사람 이름이 `MOAI_ACTOR` 다음에 여기서 온다.
 ///   `GIT_CONFIG_GLOBAL` 을 주면 git 은 `~/.gitconfig` 도 `XDG_CONFIG_HOME` 도 안 본다.
 ///   환경으로 넣는 설정(`GIT_CONFIG_COUNT`·`GIT_CONFIG_PARAMETERS`)과 저장소를
@@ -111,6 +115,7 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         cmd.env_remove(var);
     }
     cmd.env("HOME", &home)
+        .env_remove("USERPROFILE")
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("CLAUDE_CODE_PLUGIN_CACHE_DIR")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -17955,11 +17960,18 @@ fn the_fake_claude_command_starts_from_the_isolated_one() {
     // 설정 파일을 가리키는 둘은 **걷은 뒤 제 값으로 박는다**(`isolated`) — 돌리는 사람의 `~/.gitconfig`
     // 를 안 읽게 하려면 비우는 것만으로는 모자라 `/dev/null` 을 대야 한다. 그것은 아래에서 따로 본다.
     let pinned = ["GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"];
-    for var in
-        ["MOAI_ACTOR", "MOAI_NOW", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "XDG_CONFIG_HOME", "BASH_ENV"]
-            .iter()
-            .chain(git_leaks::swept(true))
-            .filter(|var| !pinned.contains(&&***var))
+    for var in [
+        "MOAI_ACTOR",
+        "MOAI_NOW",
+        "CLAUDE_CONFIG_DIR",
+        "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+        "XDG_CONFIG_HOME",
+        "BASH_ENV",
+        "USERPROFILE",
+    ]
+    .iter()
+    .chain(git_leaks::swept(true))
+    .filter(|var| !pinned.contains(&&***var))
     {
         assert!(removed(var), "{var} 를 안 걷었다");
     }
@@ -18598,7 +18610,6 @@ fn skill_install_counts_retiring_apart_and_leaves_a_shared_user_install() {
 /// 판에 안 걷는다. 공용 가짜 `claude` 는 받은 인자만 적어 장부가 등록 앞뒤로 같으므로, 이 시험의 가짜는 moai 를
 /// 등록할 때 그 범위를 장부에 적는다 — 등록 뒤에 재는 판이 돌아오면 여기가 붉어진다.
 #[test]
-#[cfg(unix)]
 fn skill_install_measures_the_scopes_before_registering() {
     let s = init("skillkoreanbefore");
     let c = Claude::new("skillkoreanbefore-home");
@@ -18640,8 +18651,12 @@ fn skill_install_measures_the_scopes_before_registering() {
         ),
     )
     .unwrap();
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // 가짜는 `#!/bin/sh` 라 실행 비트는 유닉스에서만 선다 — 나머지는 Windows 에서도 짓는다(moai-j9gv.mbp 의 규칙).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     std::fs::remove_file(c.bin.join("claude")).unwrap();
     place_exe(&source, &c.bin.join("claude"));
 
@@ -18768,7 +18783,6 @@ fn skill_retires_only_from_the_old_marketplace_source() {
 /// 안 부른 걸음은 `--json` 에서 `ok` 가 `null` 이고, 사람 출력은 안 불렀다고 밝힌다. 설치본이 옛 판으로 남으니
 /// 다시 부르면 또 걷는다.
 #[test]
-#[cfg(unix)]
 fn skill_install_retires_nothing_when_moai_is_not_registered() {
     let s = init("skillkoreannoreg");
     let c = Claude::new("skillkoreannoreg-home");
@@ -18790,8 +18804,12 @@ fn skill_install_retires_nothing_when_moai_is_not_registered() {
         ),
     )
     .unwrap();
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // 가짜는 `#!/bin/sh` 라 실행 비트는 유닉스에서만 선다 — 나머지는 Windows 에서도 짓는다(moai-j9gv.mbp 의 규칙).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     std::fs::remove_file(c.bin.join("claude")).unwrap();
     place_exe(&source, &c.bin.join("claude"));
 
@@ -19020,7 +19038,6 @@ const OLD_MARKETS: [(&str, &str); 2] =
 /// 걷는다. 다른 바이트는 그대로 남는다. 선언 지우기는 플러그인 걸음 **뒤에** 그 파일을 다시 읽는다 — 이 시험의
 /// 가짜는 `plugin uninstall … --scope project` 때 `enabledPlugins` 의 줄을 걷는다(진짜 `claude` 가 하는 일이다).
 #[test]
-#[cfg(unix)]
 fn skill_install_undeclares_the_old_marketplaces_at_project_scope() {
     let s = init("skillundeclare");
     let c = Claude::new("skillundeclare-home");
@@ -19043,8 +19060,12 @@ fn skill_install_undeclares_the_old_marketplaces_at_project_scope() {
         ),
     )
     .unwrap();
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // 가짜는 `#!/bin/sh` 라 실행 비트는 유닉스에서만 선다 — 나머지는 Windows 에서도 짓는다(moai-j9gv.mbp 의 규칙).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     std::fs::remove_file(c.bin.join("claude")).unwrap();
     place_exe(&source, &c.bin.join("claude"));
 
@@ -26604,13 +26625,12 @@ fn the_stop_count_matches_the_board_over_an_archive() {
 /// rest on stderr (moai-qde9.2hx.yt6).
 #[test]
 fn an_unreadable_archive_is_broken_data_for_status_alone() {
-    #[cfg_attr(not(unix), allow(unused_mut))]
-    let mut cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
+    let cases: Vec<(&str, Box<dyn Fn(&Path)>)> = vec![
         ("conflict", Box::new(|f| std::fs::write(f, "<<<<<<< ours\n=======\n>>>>>>> theirs\n").unwrap())),
         ("not-utf8", Box::new(|f| std::fs::write(f, [0xff, 0xfe, b'\n']).unwrap())),
+        #[cfg(unix)]
+        ("fifo", Box::new(|f| assert!(Command::new("mkfifo").arg(f).status().unwrap().success()))),
     ];
-    #[cfg(unix)]
-    cases.push(("fifo", Box::new(|f| assert!(Command::new("mkfifo").arg(f).status().unwrap().success()))));
     for (name, make) in cases {
         let s = init(&format!("archive-broken-{name}"));
         add(s.path(), &["live work"]);

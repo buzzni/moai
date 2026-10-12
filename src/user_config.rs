@@ -107,7 +107,7 @@ pub fn path_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     if let Some(x) = set("XDG_CONFIG_HOME").filter(|p| p.is_absolute()) {
         return Some(x.join("moai/config.toml"));
     }
-    home_from(&env, cfg!(windows)).map(|h| h.join(".config/moai/config.toml"))
+    home_here(&env).map(|h| h.join(".config/moai/config.toml"))
 }
 
 /// 이 프로세스의 환경으로 [`path_from`].
@@ -117,9 +117,14 @@ pub fn path() -> Option<PathBuf> {
 
 /// 사람의 홈 — `HOME`, **Windows 에서는 그다음 `USERPROFILE`**(moai-j9gv.cl6). cmd·PowerShell 에는
 /// `HOME` 이 없어, 그것만 보던 판은 사용자 설정·`[models]`·`moai project add` 가 통째로 "자리 없음" 이었다.
-/// `HOME` 을 세워 주는 껍데기(Git for Windows 의 bash)에서는 그 값이 먼저다 — 껍데기마다 다른 파일을
-/// 읽지 않게 차례를 고정한다. `APPDATA` 는 안 본다: 자리를 둘로 가르면 어느 쪽에 적었는지를 사람이
-/// 찾아야 한다.
+/// **준 `HOME` 이 이긴다** — 유닉스와 같고, 그 껍데기의 `~` 와도 같다. 값은 껍데기마다 갈리는 파일이다(리뷰
+/// moai-j9gv.4s3): `HOME` 을 제 손으로 세우는 껍데기(MSYS2·Cygwin 의 `/home/<이름>`, 도메인 계정의 Git Bash 가
+/// `HOMEDRIVE`+`HOMEPATH` 로 세운 `H:\`)는 PowerShell 과 다른 설정을 읽는다. 한 파일로 묶으려면 `MOAI_CONFIG` 를
+/// 준다. 깔린 그대로의 Git for Windows 에서는 `HOME` 이 곧 `USERPROFILE` 이라 안 갈린다. `APPDATA` 는 안 본다:
+/// 자리를 둘로 가르면 어느 쪽에 적었는지를 사람이 찾아야 한다.
+///
+/// **남의 프로그램이 두는 자리는 이 자로 안 찾는다** — `claude` 의 장부는 `claude` 의 차례로 찾는다
+/// (`cmd::skill` 의 `claude_home_from`, Windows 에서는 `USERPROFILE` 이 먼저).
 ///
 /// `windows` 를 받는 까닭은 [`path_from`] 이 환경을 받는 까닭과 같다 — 리눅스에서도 두 갈래를 다 잰다.
 pub fn home_from(env: impl Fn(&str) -> Option<OsString>, windows: bool) -> Option<PathBuf> {
@@ -129,7 +134,15 @@ pub fn home_from(env: impl Fn(&str) -> Option<OsString>, windows: bool) -> Optio
 
 /// 이 프로세스의 환경으로 [`home_from`].
 pub fn home() -> Option<PathBuf> {
-    home_from(|k| std::env::var_os(k), cfg!(windows))
+    home_here(|k| std::env::var_os(k))
+}
+
+/// 이 플랫폼의 [`home_from`] — **[`path_from`] 과 [`home`] 이 플랫폼을 고르는 자리는 여기 하나다**(리뷰 moai-j9gv.4s3).
+/// 둘이 저마다 `cfg!(windows)` 를 박던 판은 어느 한쪽을 `true` 로 바꿔도 리눅스의 시험이 하나도 안 붉어졌다 — 여기
+/// 하나로 모으면 [`path_from`] 을 재는 시험이 [`home`] 의 차례까지 잰다. `claude` 의 장부는 제 차례로 따로 고른다
+/// (`cmd::skill` 의 `claude_home_here`).
+fn home_here(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    home_from(env, cfg!(windows))
 }
 
 /// 등록한 프로젝트 하나. 이름은 파생값이라 여기 없다. 파일에 있는 모르는 필드는
@@ -2434,6 +2447,13 @@ mod tests {
         assert_eq!(home_from(env(&both[1..]), false), None, "유닉스가 USERPROFILE 을 읽었다");
         assert_eq!(home_from(env(&[("HOME", ""), ("USERPROFILE", "")]), true), None);
         assert_eq!(home_from(env(&[("HOME", ""), ("USERPROFILE", "/u")]), true), Some("/u".into()));
+        // **플랫폼의 갈래도 잰다**(리뷰 moai-j9gv.4s3) — 위의 줄은 `windows` 를 손으로 주어, `path_from`·`home` 이 고르는
+        // 자리(`home_here`)를 `true` 로 바꿔도 리눅스에서 안 붉어졌다. `USERPROFILE` 만 선 환경에 유닉스는 자리가 없다.
+        assert_eq!(
+            path_from(env(&both[1..])),
+            cfg!(windows).then(|| PathBuf::from("/u/.config/moai/config.toml")),
+            "설정 자리가 이 플랫폼의 집 차례를 안 탔다"
+        );
     }
 
     /// 빈 값은 없는 것이고, 상대 `XDG_CONFIG_HOME` 은 XDG 명세대로 무시한다.

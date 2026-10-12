@@ -2,7 +2,7 @@
 //! 모양 그대로다 — 첫 줄이 제목, 한 줄 띄우고 본문, `#` 줄은 안내라 걷는다.
 //!
 //! **조각이다.** 환경변수도 파일도 프로세스도 모른다: 무엇을 쓸지(`template`), 받은 글을
-//! 어떻게 읽을지(`parse`), 어느 편집기를 어떤 인자로 띄울지(`pick`·`argv`)만 정한다.
+//! 어떻게 읽을지(`parse`), 어느 편집기를 어떤 인자로 띄울지(`pick`·`argv`·`words`)만 정한다.
 //! 파일을 만들고 편집기를 띄우고 터미널을 내리는 것은 루프(`cmd::tui`)가 한다 — 그래야
 //! 이 규칙들이 터미널 없이 시험된다.
 
@@ -60,7 +60,8 @@ pub fn parse(text: &str) -> Option<(String, Option<String>)> {
 ///
 /// 환경변수로 **준 것은 찾지 않고 믿는다** — git 과 같다. 인자가 붙은 것(`code --wait`)은
 /// 찾을 방법부터 셸 규칙이라, 여기서 반쯤 흉내 내면 되는 것을 못 된다고 한다. 없는
-/// 명령이면 셸이 127 로 끝나고 루프가 "담지 않았다" 로 말한다. 빈칸뿐인 값은 없는 것이다.
+/// 명령이면 셸이 127 로 끝나고(셸 없이 띄우는 판은 못 띄웠다는 오류다) 루프가 "담지 않았다" 로 말한다.
+/// 빈칸뿐인 값은 없는 것이다.
 /// 기본 편집기 둘은 `found` 가 참일 때만 고른다 — PATH 를 읽는 것은 부르는 쪽이다.
 pub fn pick(visual: Option<&str>, editor: Option<&str>, found: impl Fn(&str) -> bool) -> Option<String> {
     [visual, editor]
@@ -79,16 +80,23 @@ pub fn pick(visual: Option<&str>, editor: Option<&str>, found: impl Fn(&str) -> 
 /// `"`·`$`·`` ` `` 를 다시 막아야 하고, 하나를 빠뜨리면 임시 경로가 명령이 된다. 편집기
 /// 글은 셸 규칙으로 쪼갠다 — `EDITOR="code --wait"` 가 그대로 선다. 둘째 인자(`$0`)는
 /// 셸이 오류를 댈 때 쓰는 이름이다.
-#[cfg_attr(not(unix), allow(dead_code))]
 pub fn argv(editor: &str, file: &std::path::Path) -> Vec<OsString> {
     vec!["-c".into(), format!("{editor} \"$@\"").into(), editor.into(), file.as_os_str().to_owned()]
 }
 
-/// `sh` 가 없는 데서 편집기 글을 쪼갠 것 — 첫 낱말과 나머지(moai-j9gv.cl6). **빈칸으로만 쪼갠다** —
+/// `sh` 없이 띄우는 데서 편집기 글을 쪼갠 것 — 첫 낱말과 나머지(moai-j9gv.cl6). **빈칸으로 쪼갠다** —
 /// 따옴표를 풀려면 껍데기 규칙을 반쯤 흉내 내야 하고([`pick`] 이 안 하는 까닭과 같다), 빈칸이 든
 /// 자리의 편집기는 `PATH` 에 그 디렉터리를 두면 이름 하나로 선다. 빈 글이면 첫 낱말도 빈 글이다.
-#[cfg_attr(unix, allow(dead_code))]
+///
+/// **하나만 예외다 — 큰따옴표로 싼 첫 낱말은 다음 큰따옴표까지가 프로그램이다**(리뷰 moai-j9gv.4s3). Windows 가
+/// 명령 줄에서 프로그램 이름을 읽는 규칙이고, 편집기가 사는 `C:\Program Files\…` 를 적는 흔한 꼴이다
+/// (`"C:\Program Files\Notepad++\notepad++.exe" -multiInst`). `"` 는 파일 이름에 못 들어, 지금 못 뜨는 글만 바뀐다.
+/// 닫는 따옴표가 없으면 예외가 아니다.
+#[cfg(any(not(unix), test))]
 pub fn words(editor: &str) -> (&str, Vec<&str>) {
+    if let Some((program, rest)) = editor.trim_start().strip_prefix('"').and_then(|r| r.split_once('"')) {
+        return (program, rest.split_whitespace().collect());
+    }
     let mut all = editor.split_whitespace();
     (all.next().unwrap_or(""), all.collect())
 }
@@ -185,12 +193,19 @@ mod tests {
         assert_eq!(args, ["-c", "code --wait \"$@\"", "code --wait", "/tmp/a b/\"$(rm)\".md"].map(OsString::from));
     }
 
-    /// `sh` 가 없는 데서는 빈칸으로만 쪼갠다 — 첫 낱말이 프로그램, 나머지가 인자다(moai-j9gv.cl6).
+    /// `sh` 없이 띄우는 데서는 빈칸으로 쪼갠다 — 첫 낱말이 프로그램, 나머지가 인자다(moai-j9gv.cl6). 큰따옴표로 싼
+    /// 첫 낱말만 통째로 프로그램이다.
     #[test]
     fn without_sh_the_editor_splits_on_blanks() {
         assert_eq!(words("code --wait"), ("code", vec!["--wait"]));
         assert_eq!(words("  notepad  "), ("notepad", vec![]));
         assert_eq!(words("vim -u NONE -n"), ("vim", vec!["-u", "NONE", "-n"]));
         assert_eq!(words(""), ("", vec![]));
+        // 큰따옴표로 싼 첫 낱말은 다음 큰따옴표까지가 프로그램이다 — 빈칸이 든 자리를 그대로 적은 꼴이다(리뷰 moai-j9gv.4s3).
+        let quoted = r#""C:\Program Files\Notepad++\notepad++.exe" -multiInst -nosession"#;
+        assert_eq!(words(quoted), (r"C:\Program Files\Notepad++\notepad++.exe", vec!["-multiInst", "-nosession"]));
+        assert_eq!(words(r#"  "C:\a b\ed.exe""#), (r"C:\a b\ed.exe", vec![]));
+        // 닫는 따옴표가 없으면 예외가 아니다 — 빈칸으로 쪼갠다.
+        assert_eq!(words(r#""C:\a b\ed.exe -w"#), (r#""C:\a"#, vec![r"b\ed.exe", "-w"]));
     }
 }

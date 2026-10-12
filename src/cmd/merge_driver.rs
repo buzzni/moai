@@ -1486,14 +1486,13 @@ fn probe(root: &Path, cmd: &str) -> Probe {
 
 /// 유닉스가 아닌 판의 [`probe`].
 #[cfg(not(unix))]
-fn probe(root: &Path, cmd: &str) -> Probe {
-    // **유닉스가 아니면 재지 않는다**(리뷰 moai-vbmn.spv 가 짚은, 조용히 사라진 결정). 앞 판은
-    // `\` 와 `PATHEXT` 규칙을 여기 다시 적지 않으려고 입을 다물었고, 부르는 쪽으로 옮겨도 그
-    // 까닭은 그대로다 — 러스트의 `Command` 는 이름에 `.exe` 만 붙이는데 git 은 심은 줄을
-    // `sh -c` 로 돌려 `moai.cmd` 도 찾아낸다. 그 판을 `Dead` 로 읽으면 git 이 잘 부르는 드라이버에
-    // 걷을 길 없는 알림이 선다. **줄의 모양은 그대로 본다** — 여기서 지나가는 것은 "돌 수
-    // 있는가" 하나뿐이고, 그것이 이 에픽 전에 `runnable` 이 하던 일이다.
-    let _ = (root, cmd);
+fn probe(_root: &Path, _cmd: &str) -> Probe {
+    // **유닉스가 아니면 재지 않는다**(리뷰 moai-vbmn.spv 가 짚은, 조용히 사라진 결정). `\`·`PATHEXT` 를
+    // 푸는 자(`crate::path::slashed`·`super::find_on_path`)가 이제 있어도 그것으로는 못 잰다(리뷰
+    // moai-j9gv.4s3) — git 은 심은 줄을 제 `sh -c` 로 돌리고, 그 껍데기는 러스트의 `Command`(이름에 `.exe`
+    // 만 붙인다)와도 `find_on_path`(확장자 없는 이름은 안 고른다)와도 딴 규칙으로 찾는다. 이쪽 규칙으로 잰
+    // 판을 `Dead` 로 읽으면 git 이 잘 부르는 드라이버에 걷을 길 없는 알림이 선다. **줄의 모양은 그대로
+    // 본다** — 여기서 지나가는 것은 "돌 수 있는가" 하나뿐이고, 그것이 moai-vbmn 전에 `runnable` 이 하던 일이다.
     Probe::Runs
 }
 
@@ -1636,9 +1635,19 @@ fn same_bytes(a: &Path, b: &Path) -> bool {
 /// **돌릴 수 있는가는 [`super::runnable`] 하나가 답한다**(moai-p3kb, 리뷰). 여기 있던 셋째 벌은
 /// `skill`·`tui` 의 것과 글자째 같았는데 모으는 판에서 빠져, 이식성 고침 하나가 저 둘에만 들 뻔했다.
 /// 빈 자리를 거르는 **위의 한 줄이 이 자리만의 것**이고, 그것은 재는 자가 아니라 고르는 자에 붙는다.
+///
+/// **훑는 몸통도 하나다 — [`super::found_in`]**(리뷰 moai-j9gv.4s3). `PATHEXT` 고침(moai-j9gv.cl6)이 `skill`·`tui`
+/// 에만 들어 위 문단의 일이 한 번 더 났다 — 이 자리만 이름 그대로 이어 Windows 에서 `moai.exe` 를 영영 못 찾았고,
+/// [`chosen_command`] 의 PATH 갈래가 그 판에서 죽어 같은 기계의 `skill install` 과 답이 갈렸다. 유닉스에서는 확장자
+/// 목록이 비어 이름 그대로 잇는다 — 이 문 앞과 바이트째 같은 훑기다. 찾은 것이 `.cmd` 여도 심기지는 않는다:
+/// [`chosen_command`] 는 바이트가 같은 파일만 고른다.
 fn on_path(name: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).filter(|d| d.is_absolute()).map(|d| d.join(name)).find(|p| super::runnable(p))
+    #[cfg(unix)]
+    let exts: Vec<String> = Vec::new();
+    #[cfg(not(unix))]
+    let exts = super::path_exts(std::env::var_os("PATHEXT").as_deref());
+    super::found_in(std::env::split_paths(&path).filter(|d| d.is_absolute()), name, &exts, super::runnable)
 }
 
 /// 설정의 세 줄을 적는다 — 심은 드라이버 줄을 낸다.

@@ -970,7 +970,8 @@ impl Gate {
 
 /// 생각 담기를 적을 편집기(moai-08af). **환경과 PATH 를 읽는 것은 여기다** — 고르는 차례는
 /// 조각([`crate::tui::jotfile::pick`])이 정한다. 띄울 때 한 번 고른다: 도는 중에 `$EDITOR` 가
-/// 바뀔 길은 없고, 키마다 PATH 를 훑을 까닭도 없다.
+/// 바뀔 길은 없고, 키마다 PATH 를 훑을 까닭도 없다. 다만 유닉스가 아닌 판은 편집기를 띄울 때마다 `sh`·첫 낱말을
+/// `PATH`·`PATHEXT` 에서 한 번 더 찾는다([`editor_command`]).
 fn editor() -> Option<String> {
     let var = |k: &str| std::env::var(k).ok();
     crate::tui::jotfile::pick(var("VISUAL").as_deref(), var("EDITOR").as_deref(), on_path)
@@ -987,10 +988,25 @@ fn on_path(name: &str) -> bool {
     std::env::split_paths(&dirs).any(|d| super::runnable(&d.join(name)))
 }
 
-/// 유닉스가 아닌 판의 [`on_path`] — `PATHEXT` 를 붙여 찾는다([`super::find_on_path`]).
+/// 유닉스가 아닌 판의 [`on_path`] — **편집기를 띄울 길([`editor_command`])의 찾기를 그대로 탄다**(리뷰
+/// moai-j9gv.4s3). Git Bash 안이면 그 `sh` 가 띄우니 그 껍데기처럼 이름 그대로와 `.exe` 를 본다 — Git for Windows 의
+/// `vi` 는 확장자 없는 스크립트(`exec vim "$@"`)라 `PATHEXT` 로는 영영 안 잡혀, 이 에픽 전에 고르던 `vi` 를 놓친다.
+/// 그 밖에서는 `PATHEXT` 를 붙여 찾는다([`super::find_on_path`]).
 #[cfg(not(unix))]
 fn on_path(name: &str) -> bool {
-    super::find_on_path(name).is_some()
+    if msys_sh().is_none() {
+        return super::find_on_path(name).is_some();
+    }
+    let Some(dirs) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&dirs)
+        .any(|d| super::runnable(&d.join(name)) || super::runnable(&d.join(format!("{name}.exe"))))
+}
+
+/// Git Bash(`MSYSTEM` 이 선다) 안에서 `PATH` 에 선 `sh` — 편집기를 그 껍데기로 띄울지와 기본 편집기를 어떻게 찾을지를
+/// 이것 하나가 가른다([`editor_command`]·[`on_path`]). 둘이 따로 물으면 찾은 것과 띄우는 길이 갈린다.
+#[cfg(not(unix))]
+fn msys_sh() -> Option<std::path::PathBuf> {
+    std::env::var_os("MSYSTEM").filter(|v| !v.is_empty()).and_then(|_| super::find_on_path("sh"))
 }
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
@@ -1069,14 +1085,24 @@ fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command
     cmd
 }
 
-/// 유닉스가 아닌 판의 [`editor_command`] — 거기에는 `sh` 가 없다(moai-j9gv.cl6). 편집기 글을 빈칸으로
-/// 쪼개([`crate::tui::jotfile::words`]) 첫 낱말을 프로그램으로 띄운다. 그 낱말은 `PATH` 에서 찾아 둔
-/// 자리로 바꾼다 — 러스트의 `Command` 는 이름에 `.exe` 만 붙여 `code.cmd` 같은 편집기를 못 찾는다.
+/// 유닉스가 아닌 판의 [`editor_command`](moai-j9gv.cl6) — **Git Bash 안이면 유닉스와 같은 길이다**(리뷰
+/// moai-j9gv.4s3). 그 껍데기(`MSYSTEM` 이 선다)의 사람은 편집기 글을 `sh` 의 말로 적고(`'C:/Program Files/…/code'
+/// --wait`), git 도 거기서 편집기를 `sh -c` 로 띄운다. 이 에픽 전에는 어디서나 `sh` 로 띄워 그 글이 섰으니, 빈칸으로만
+/// 쪼개면 거기서 되던 것이 안 된다. 그 `sh` 는 [`msys_sh`] 가 `PATH` 에서 찾고, 못 찾으면 아래 길로 간다.
+///
+/// 그 밖(cmd·PowerShell)에는 물을 `sh` 가 없거나, 있어도 그 사람의 글(`C:\tools\nvim.exe`)의 `\` 를 `sh` 가 먹는다.
+/// 거기서는 편집기 글을 쪼개([`crate::tui::jotfile::words`]) 첫 낱말을 프로그램으로 띄우고, 그 낱말은
+/// [`super::program`] 이 고른 자리로 바꾼다 — 러스트의 `Command` 는 이름에 `.exe` 만 붙여 `code.cmd` 같은 편집기를 못
+/// 찾는다.
 #[cfg(not(unix))]
 fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    if let Some(sh) = msys_sh() {
+        let mut cmd = std::process::Command::new(sh);
+        cmd.args(crate::tui::jotfile::argv(editor, path));
+        return cmd;
+    }
     let (program, rest) = crate::tui::jotfile::words(editor);
-    let found = super::find_on_path(program).map(std::path::PathBuf::into_os_string);
-    let mut cmd = std::process::Command::new(found.unwrap_or_else(|| program.into()));
+    let mut cmd = std::process::Command::new(super::program(program));
     cmd.args(rest).arg(path);
     cmd
 }

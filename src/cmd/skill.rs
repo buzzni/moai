@@ -1447,7 +1447,27 @@ fn plugins_dir() -> Option<PathBuf> {
     let set = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     set("CLAUDE_CODE_PLUGIN_CACHE_DIR")
         .or_else(|| set("CLAUDE_CONFIG_DIR").map(|d| d.join("plugins")))
-        .or_else(|| crate::user_config::home().map(|h| h.join(".claude/plugins")))
+        .or_else(|| claude_home_here(|k| std::env::var_os(k)).map(|h| h.join(".claude/plugins")))
+}
+
+/// 이 플랫폼의 [`claude_home_from`] — `cfg!(windows)` 를 여기 하나에 둬 시험이 플랫폼의 갈래까지 잰다(`home_here` 와 같은
+/// 까닭이다).
+fn claude_home_here(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    claude_home_from(env, cfg!(windows))
+}
+
+/// `claude` 의 집 — **`claude` 가 고르는 차례를 따른다**(리뷰 moai-j9gv.4s3). `claude` 는 `os.homedir()` 로 집을 찾고,
+/// 그 자(libuv `uv_os_homedir`)는 Windows 에서 `USERPROFILE` 을 보고 `HOME` 은 안 본다. moai 제 설정의 집
+/// ([`crate::user_config::home_from`], `HOME` 이 먼저)으로 찾던 판은 `HOME` 이 따로 선 Windows — 도메인 계정의 Git
+/// Bash 가 `HOMEDRIVE`+`HOMEPATH` 로 `HOME=H:\` 를 세운다 — 에서 `claude` 가 안 쓰는 장부를 읽어 "걷어낼 것이 없다"
+/// 고 0 으로 끝났다. 유닉스에서는 둘 다 `HOME` 이다. `windows` 는 리눅스에서 그 갈래를 재려고 받는다.
+///
+/// **하나만 다르다** — `USERPROFILE` 마저 없는 Windows 에서 `claude` 는 계정의 프로필 자리(`GetUserProfileDirectoryW`)로
+/// 가지만 moai 는 그 물음을 안 하고 moai 의 집([`crate::user_config::home_from`])으로 물러선다. 환경을 걷어 낸 판에만 서는
+/// 자리라 그 값은 묻지 않는다.
+fn claude_home_from(env: impl Fn(&str) -> Option<std::ffi::OsString>, windows: bool) -> Option<PathBuf> {
+    let set = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    windows.then(|| set("USERPROFILE")).flatten().or_else(|| crate::user_config::home_from(&env, windows))
 }
 
 /// `claude` 의 장부 하나. **읽기만** 한다. 쓰는 것은 `claude` 의 몫이다.
@@ -2243,8 +2263,17 @@ fn update_argv(target: &str, scope: &str) -> Vec<String> {
 /// `claude` 를 **저장소 뿌리에서** 부른다. `local`·`project` 범위는 `claude` 가
 /// 제 자리로 프로젝트를 정하므로, 하위 디렉터리에서 부르면 엉뚱한 프로젝트에
 /// 적거나 못 찾는다.
+///
+/// **띄우는 것은 [`super::program`] 이 고른 것이다**(리뷰 moai-j9gv.4s3) — Windows 에서 [`which`] 가 `PATHEXT` 로 찾는
+/// npm 의 `claude.cmd` 를 러스트의 `Command` 는 이름만으로 못 띄워, "있다" 고 한 `claude` 의 모든 걸음이 띄우지도
+/// 못한 채 "졌다" 로 섰다. 유닉스에서는 이름 그대로다.
 fn run(root: &Path, args: &[String]) -> bool {
-    Command::new("claude").args(args).current_dir(root).output().map(|o| o.status.success()).unwrap_or(false)
+    Command::new(super::program("claude"))
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// 이 체크아웃에 심긴 트리 가운데 **이 판이 심을 것과 다른 자리**와, 그것을 맞출 에이전트(moai-ybns.451.rpd) —
@@ -2340,6 +2369,24 @@ mod tests {
     #[cfg(unix)]
     use crate::scratch::names;
     use std::collections::BTreeMap;
+
+    /// **`claude` 의 집은 `claude` 의 차례다**(리뷰 moai-j9gv.4s3) — Windows 에서는 `USERPROFILE` 이 먼저(`os.homedir()`),
+    /// 유닉스에서는 `HOME` 하나다. moai 제 설정의 집(`HOME` 이 먼저)으로 찾으면 `HOME` 이 따로 선 Windows 에서 `claude` 가
+    /// 안 쓰는 장부를 읽는다.
+    #[test]
+    fn claudes_home_follows_claudes_own_order() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| pairs.iter().find(|(name, _)| *name == k).map(|(_, v)| std::ffi::OsString::from(v))
+        };
+        let both: &'static [(&str, &str)] = &[("HOME", "/h"), ("USERPROFILE", "/u")];
+        assert_eq!(claude_home_from(env(both), true), Some(PathBuf::from("/u")), "Windows 에서 HOME 을 먼저 봤다");
+        assert_eq!(claude_home_from(env(both), false), Some(PathBuf::from("/h")));
+        assert_eq!(claude_home_from(env(&[("USERPROFILE", "/u")]), false), None, "유닉스가 USERPROFILE 을 읽었다");
+        assert_eq!(claude_home_from(env(&[("HOME", "/h"), ("USERPROFILE", "")]), true), Some(PathBuf::from("/h")));
+        // **이 플랫폼의 갈래도 잰다** — `plugins_dir` 가 고르는 자리(`claude_home_here`)를 `true` 로 바꾸면 리눅스에서 붉어진다.
+        let only_profile: &'static [(&str, &str)] = &[("USERPROFILE", "/u")];
+        assert_eq!(claude_home_here(env(only_profile)), cfg!(windows).then(|| PathBuf::from("/u")));
+    }
 
     /// **글마다 제 자리에 선다.** `skill::tree` 는 같은 `&str` 넷을 자리로 받아, 여기서 둘을
     /// 바꿔 적어도 컴파일되고 판도 제 자신과 맞는다 — 커밋된 트리 시험은 `tree_named` 를

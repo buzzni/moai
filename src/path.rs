@@ -191,16 +191,6 @@ mod tests {
     /// **재는 것은 뜻이지 고침이 아니다.** `/..` 이 `/` 로 서는 것은 `PathBuf::pop` 이 뿌리에서
     /// 이미 아무것도 안 해서이지, 모으면서 더한 막음 덕이 아니다 — 그 줄을 걷어도 이 네 줄은
     /// 그대로 푸르다. 그래도 세워 두는 까닭은 뜻이 바뀌면(std 가 아니라 이 함수가) 잡으라는 것이다.
-    /// **Windows 의 철자는 `/` 로, 유닉스의 것은 그대로**(moai-j9gv.4c1).
-    #[test]
-    fn the_shell_spelling_turns_backslashes_on_windows_only() {
-        assert_eq!(slashed(r"C:\Users\me\bin\moai.exe", true), "C:/Users/me/bin/moai.exe");
-        assert_eq!(slashed(r"\\?\C:\Users\me\moai.exe", true), "C:/Users/me/moai.exe", "접두어를 안 걷었다");
-        assert_eq!(slashed(r"\\?\UNC\srv\share\moai.exe", true), "//srv/share/moai.exe");
-        assert_eq!(slashed("C:/already/moai.exe", true), "C:/already/moai.exe");
-        assert_eq!(slashed(r"/home/me/a\b/moai", false), r"/home/me/a\b/moai", "유닉스의 이름 글자를 바꿨다");
-    }
-
     #[test]
     fn folding_dots_never_climbs_past_the_root() {
         assert_eq!(lexical(Path::new("/a/./b/../c")), PathBuf::from("/a/c"));
@@ -209,6 +199,16 @@ mod tests {
         // **절대 경로를 받는다.** 상대 철자에서 위로 넘치는 `..` 은 남지 않고 사라지므로
         // (`a/../../b` 는 `../b` 가 아니라 `b`), 부르는 쪽이 먼저 뿌리나 `cwd` 를 붙인다.
         assert_eq!(lexical(Path::new("a/../../b")), PathBuf::from("b"));
+    }
+
+    /// **Windows 의 철자는 `/` 로, 유닉스의 것은 그대로**(moai-j9gv.4c1).
+    #[test]
+    fn the_shell_spelling_turns_backslashes_on_windows_only() {
+        assert_eq!(slashed(r"C:\Users\me\bin\moai.exe", true), "C:/Users/me/bin/moai.exe");
+        assert_eq!(slashed(r"\\?\C:\Users\me\moai.exe", true), "C:/Users/me/moai.exe", "접두어를 안 걷었다");
+        assert_eq!(slashed(r"\\?\UNC\srv\share\moai.exe", true), "//srv/share/moai.exe");
+        assert_eq!(slashed("C:/already/moai.exe", true), "C:/already/moai.exe");
+        assert_eq!(slashed(r"/home/me/a\b/moai", false), r"/home/me/a\b/moai", "유닉스의 이름 글자를 바꿨다");
     }
 
     /// **아직 없는 파일도 있는 윗자리까지는 같게 풀린다.** 통째로 `canonicalize` 하면 없는

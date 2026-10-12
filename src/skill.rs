@@ -1033,6 +1033,12 @@ fn exe_name_for(spelling: &Path, resolved: &Path, on_path: Option<&Path>, window
 /// **이 값이 이 실행 파일을 가리키는지는 묻지 않는다.** `argv[0]` 은 부른 쪽 마음대로라(`exec -a`)
 /// 부르는 쪽이 푼 자리를 `current_exe` 와 견준 뒤에만 쓴다.
 pub fn spelled(argv0: Option<&Path>, cwd: Option<&Path>) -> Option<PathBuf> {
+    spelled_for(argv0, cwd, cfg!(windows))
+}
+
+/// [`spelled`] 의 몸통 — `windows` 는 [`exe_name_for`] 처럼 리눅스에서 그 갈래를 재려고 받는다(리뷰 moai-j9gv.4s3).
+/// 박아 두면 리눅스에서 [`crate::path::slashed`] 가 그대로 돌려줘, 이 갈래를 걷어도 어느 시험도 안 붉어진다.
+fn spelled_for(argv0: Option<&Path>, cwd: Option<&Path>, windows: bool) -> Option<PathBuf> {
     let argv0 = argv0?;
     if argv0.parent().is_none_or(|p| p.as_os_str().is_empty()) {
         return None;
@@ -1043,7 +1049,7 @@ pub fn spelled(argv0: Option<&Path>, cwd: Option<&Path>) -> Option<PathBuf> {
     };
     let per_process = full.starts_with("/proc") || full.starts_with("/dev");
     // 견주는 것은 **적을 철자**다 — Windows 의 `\` 는 [`exe_name`] 이 `/` 로 바꿔 적는다(moai-j9gv.4c1).
-    let writable = full.to_str().is_some_and(|s| quotable(&crate::path::slashed(s, cfg!(windows))));
+    let writable = full.to_str().is_some_and(|s| quotable(&crate::path::slashed(s, windows)));
     (!per_process && writable).then_some(full)
 }
 
@@ -2217,6 +2223,8 @@ mod tests {
         let verbatim = Path::new(r"\\?\C:\Users\me\moai.exe");
         assert_eq!(exe_name_for(verbatim, verbatim, None, true), "C:/Users/me/moai.exe");
         assert_eq!(exe_name_for(here, here, None, false), "moai", "유닉스에서 `\\` 를 바꿔 적었다");
+        // 부르는 쪽(`exe_name`)이 넘기는 이 플랫폼의 갈래도 잰다 — `true` 로 박히면 리눅스에서 붉어진다(리뷰 moai-j9gv.4s3).
+        assert_eq!(exe_name(here, here, None), if cfg!(windows) { "C:/Users/me/bin/moai.exe" } else { "moai" });
     }
 
     /// **부른 철자는 링크를 안 풀고 `.`·`..` 만 접는다**(moai-gu5m). 이름뿐인 `argv[0]` 은 철자를 안
@@ -2250,9 +2258,16 @@ mod tests {
         for unwritable in ["/home/we$ird/moai", "../we\"ird/moai", "/home/tick`/moai"] {
             assert_eq!(at(Path::new(unwritable)), None, "{unwritable}: 못 적는 철자를 냈다");
         }
-        // 유닉스에서 `\` 는 이름의 글자라 못 적는다. Windows 에서는 구분자라 `/` 로 적는다(moai-j9gv.4c1).
+        // 유닉스에서 `\` 는 이름의 글자라 못 적는다. Windows 에서는 구분자라 `/` 로 적는다(moai-j9gv.4c1) — 그 갈래는
+        // `windows` 를 받는 몸통으로 리눅스에서 잰다(리뷰 moai-j9gv.4s3). 셋 다 유닉스에서만 선다 — Windows 에서는 이
+        // 철자가 절대 경로가 아니고 `\` 가 구분자라, 같은 글이 다른 것을 잰다.
         #[cfg(unix)]
-        assert_eq!(at(Path::new("/home/back\\slash/moai")), None, "`\\` 가 든 철자를 냈다");
+        {
+            let back = Path::new("/home/back\\slash/moai");
+            assert_eq!(at(back), None, "`\\` 가 든 철자를 냈다");
+            assert_eq!(spelled_for(Some(back), Some(cwd), false), None, "유닉스에서 `\\` 가 든 철자를 냈다");
+            assert!(spelled_for(Some(back), Some(cwd), true).is_some(), "Windows 에서 `/` 로 적을 철자를 버렸다");
+        }
         for per_process in ["/proc/self/exe", "/proc/4242/exe", "/dev/fd/9", "/proc/self/cwd/target/release/moai"] {
             assert_eq!(at(Path::new(per_process)), None, "{per_process}: 프로세스마다 다른 자리를 냈다");
         }

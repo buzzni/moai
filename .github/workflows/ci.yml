@@ -178,16 +178,17 @@ jobs:
       - name: test
         run: cargo test --locked
 
-  # 바이너리에 닿는 것이 하나라도 바뀌었나 — 밑의 `size-budget` 만 이 답을 쓴다
-  # (moai-bn0y). 문서 한 줄만 바뀐 판도 LTO 빌드를 통째로 돌았다.
+  # 바이너리에 닿는 것이 하나라도 바뀌었나 — 밑의 `msrv`·`windows`·`size-budget` 이 이 답을 쓴다
+  # (moai-bn0y 는 `size-budget` 때문에 세웠다). 문서 한 줄만 바뀐 판도 LTO 빌드를 통째로 돌았다.
   #
   # **걷는 것은 한 판 5분이 아니라 65~84초다** (리뷰 moai-6mk3.lgj 가 재 왔다 — 최근 여섯
   # 판의 `size-budget` 이 65·68·70·72·79·84초다). 5분은 `Cargo.lock` 이나 툴체인이 움직여
   # 캐시가 식은 판의 값이고, 문서만 바뀐 PR 은 바로 그 둘을 안 건드려 늘 더운 쪽이다.
   # 이 잡이 더하는 것은 러너 하나와 전체 이력 체크아웃(10~13초)인데, 그것은 언제나
   # `ci-gate` 와 나란히 돌아 벽시계에는 `ci-gate` 가 남는다 — 그래서 이 꼴로 둔다.
-  # 값이 뒤집히면(이 잡이 벽시계의 느린 쪽이 되면) 길은 하나다 — 이 갈래를 `size-budget`
-  # 안의 스텝으로 접고 스텝마다 `if:` 를 다는 것.
+  # 값이 뒤집히면(이 잡이 벽시계의 느린 쪽이 되면) 길은 하나다 — 이 갈래를 이 답을 쓰는
+  # 잡마다의 스텝으로 접고 스텝마다 `if:` 를 다는 것. 이 잡만 걷으면 `needs: changes` 를 든
+  # 셋이 워크플로 오류로 서서 `ci-gate` 까지 안 돈다.
   #
   # **이 잡을 required check 로 삼지 않는다.** required 는 `ci-gate` 하나고, 그것은
   # 무엇이 바뀌었든 언제나 돈다 — 여기서 갈라도 문서 PR 이 보고를 못 받아 영영
@@ -331,9 +332,15 @@ jobs:
   # `msrv`·`size-budget` 과 같은 `if:` 를 쓴다 — 글만 바뀐 판은 잴 것이 없고, 못 잰 판은
   # 도는 쪽으로 선다.
   #
-  # **껍데기는 bash 다**(Git for Windows 의 것). 툴체인 판을 읽는 `sed` 가 `ci-gate` 와 한 글이고,
-  # 시험이 띄우는 `sh`·`git` 도 그것이다. 툴체인·cargo 캐시의 열쇠는 `ci-gate` 의 것과 같은
+  # **껍데기는 bash 다**(Git for Windows 의 것). 툴체인 판을 읽는 `sed` 가 `ci-gate` 와 한 글이다 —
+  # 시험을 돌리는 날 시험이 띄울 `sh`·`git` 도 그것이다. 툴체인·cargo 캐시의 열쇠는 `ci-gate` 의 것과 같은
   # 꼴이다 — `runner.os` 가 이미 갈라, 리눅스 판이 담은 것을 풀지 않는다.
+  #
+  # **디버그 정보는 안 짓는다**(`CARGO_PROFILE_DEV_DEBUG`, 리뷰 moai-j9gv.4s3). 이 잡은 아무것도 안 돌리니 읽을
+  # 이가 없고, MSVC 는 링크마다 PDB 를 써 짓는 값과 캐시에 담기는 덩치만 는다. 재는 것(cfg·타입·링크)은 그대로다.
+  # `RUSTFLAGS` 가 아니라 프로필 값이다 — 환경의 `RUSTFLAGS` 는 설정 파일이 타깃에 단 `rustflags` 를 통째로 덮는다.
+  # 이 잡의 캐시가 한 번이라도 담긴 뒤에 바꾸면 그 열쇠가 그대로 맞아 못 쓰는 것을 풀고 새로 안 담으니, 그때는
+  # 열쇠의 머리도 함께 바꾼다.
   #
   # **시험은 짓기만 하고 돌리지 않는다**(2026-10-12 사용자 결정). wine 에서 재 보니 단위 시험
   # 1,907개 중 150, cli 671개 중 222 가 졌다 — 훅의 경로 판정·유닉스 꼴 경로·시간대처럼 Windows 와 정말
@@ -341,11 +348,13 @@ jobs:
   # 것은 "유닉스 전용 API 하나가 든 PR 이 초록으로 들어가지 않는다" 하나고, 그것은 clippy 와
   # `--no-run` 이 잡는다. 시험을 Windows 에서 돌리는 일은 실기에서 잰 뒤 따로 연다.
   windows:
-    name: Windows 에서 clippy · test
+    name: Windows 에서 clippy · 시험 컴파일
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
     defaults:
       run:
         shell: bash
