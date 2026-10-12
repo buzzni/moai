@@ -2,7 +2,8 @@
 //! 모양 그대로다 — 첫 줄이 제목, 한 줄 띄우고 본문, `#` 줄은 안내라 걷는다.
 //!
 //! **조각이다.** 환경변수도 파일도 프로세스도 모른다: 무엇을 쓸지(`template`), 받은 글을
-//! 어떻게 읽을지(`parse`), 어느 편집기를 어떤 인자로 띄울지(`pick`·`argv`·`words`)만 정한다.
+//! 어떻게 읽을지(`parse`), 어느 편집기를 어떤 인자로 띄울지(`pick`·`argv`·`words`), 그 인자를 Git Bash 의
+//! `sh` 에 어떻게 싸 넘길지(`msys_quoted`)만 정한다.
 //! 파일을 만들고 편집기를 띄우고 터미널을 내리는 것은 루프(`cmd::tui`)가 한다 — 그래야
 //! 이 규칙들이 터미널 없이 시험된다.
 
@@ -89,15 +90,23 @@ pub fn argv(editor: &str, file: &std::path::Path) -> Vec<OsString> {
 /// 줄을 제 규칙으로 다시 쪼개 `'` 를 따옴표로 먹고 `\\` 를 반으로 줄인다 — `C:\Users\o'brien\…` 의 임시 경로가
 /// 없는 파일이 되어 적은 생각이 "제목이 비었다" 로 사라졌다. 그래서 부르는 쪽은 이것을 `raw_arg` 로 넘긴다.
 ///
-/// - 빈칸·`\`·`"`·`{`·`'`·`?`·`*`·`~` 가 없으면 그대로다. 있으면 큰따옴표로 싸고, 그 안의 `\` 와 `"` 앞에만 `\` 를 둔다
+/// - 빈칸(` `·`\t`·`\n`·`\r`)·`\`·`"`·`{`·`'`·`?`·`*`·`~` 가 없으면 그대로다. 있으면 큰따옴표로 싸고, 그 안의 `\` 와
+///   `"` 앞에만 `\` 를 둔다. 빈칸은 git 의 `isspace` 넷이고 MSYS2 가 낱말을 가르는 글자도 그 넷이다 — 러스트의
+///   `is_ascii_whitespace` 는 `\x0C` 를 더 쳐 git 과 답이 갈린다(리뷰 moai-j9gv.g3t)
 /// - 빈 낱말은 `""` 다 — 안 싸면 낱말 하나가 사라진다
 ///
 /// UTF-16 단위로 받는 까닭은 Windows 의 낱말이 그것이라서다(`encode_wide`) — 짝 없는 서로게이트도 그대로 지나고,
 /// 리눅스에서는 `str::encode_utf16` 으로 잰다. 고르는 글자가 모두 ASCII 라 단위 하나씩 봐도 된다.
+///
+/// **큰따옴표 안의 `\"`·`\\` 를 푸는 것은 MSYS2 의 glob 이라, 이 꼴은 glob 이 그 낱말을 읽을 때만 선다**(리뷰
+/// moai-j9gv.g3t). `MSYS=noglob` 이면 런타임이 따옴표만 걷고 `\` 를 안 풀어 `-c` 글이 깨지고, `LANG` 이 옛
+/// 문자셋(`ja_JP.SJIS` 따위)인데 그 문자셋에 없는 글자가 든 낱말은 glob 이 못 읽어 따옴표째 넘어간다. `args` 가 싸던
+/// MSVC 의 꼴(moai-6kbo 전)도 git 이 그 `sh` 에 넘기는 꼴도 같은 데서 깨진다 — 다만 빈칸 없는 임시 경로는 그때 안 싸여
+/// 뒤의 것을 피했다.
 #[cfg(any(not(unix), test))]
 pub fn msys_quoted(arg: impl IntoIterator<Item = u16>) -> Vec<u16> {
     let arg: Vec<u16> = arg.into_iter().collect();
-    let special = |u: u16| u8::try_from(u).is_ok_and(|b| b.is_ascii_whitespace() || br#"\"{'?*~"#.contains(&b));
+    let special = |u: u16| u8::try_from(u).is_ok_and(|b| b" \t\n\r\\\"{'?*~".contains(&b));
     if !arg.is_empty() && !arg.iter().any(|&u| special(u)) {
         return arg;
     }
@@ -256,6 +265,16 @@ mod tests {
         for glob in ["~/x", "a?b", "a*b", "{a,b}"] {
             assert_eq!(q(glob), format!("\"{glob}\""), "{glob}: 그 `sh` 가 펼친다");
         }
+        // 고르는 글자 하나만 든 낱말도 싼다 — 위의 경로·편집기 글은 `\`·빈칸이 함께 들어 `'`·`"`·빈칸 하나를 빼도 붉어지지
+        // 않는다. 빈칸은 git 의 `isspace` 넷이고, `\x0C`·`\x0B` 는 MSYS2 가 낱말을 안 가르는 글자라 git 처럼 안 싼다(리뷰
+        // moai-j9gv.g3t).
+        for one in ["a b", "a\tb", "a\nb", "a\rb", "a'b"] {
+            assert_eq!(q(one), format!("\"{one}\""), "{one:?}: 그 `sh` 가 쪼갠다");
+        }
+        assert_eq!(q(r#"a"b"#), r#""a\"b""#);
+        assert_eq!(q("a\x0Cb\x0Bc"), "a\x0Cb\x0Bc", "git 이 안 싸는 글자를 쌌다");
+        // 끝의 `\` 도 둘로 적는다 — 닫는 따옴표를 먹지 않는다.
+        assert_eq!(q(r"C:\dir\"), r#""C:\\dir\\""#);
         // 짝 없는 서로게이트(Windows 의 낱말에 설 수 있다)는 단위째 지나간다.
         assert_eq!(msys_quoted([0xD800, u16::from(b'a')]), [0xD800, u16::from(b'a')]);
         assert_eq!(msys_quoted([0xD800, u16::from(b' ')]), [34, 0xD800, 32, 34]);
