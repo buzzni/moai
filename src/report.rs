@@ -5024,6 +5024,10 @@ pub struct Flow {
 #[derive(Debug, Serialize)]
 pub struct StatusReport {
     pub counts: BTreeMap<String, usize>,
+    /// 설정의 칸 이름을 **설정에 적힌 차례대로**(moai-wk7i.7yy). `counts` 는 이름순 맵이라 칸반의
+    /// 칸 차례가 거기서 사라진다 — 웹 패널이 보드를 그리려면 그 차례가 필요했다. `counts` 를 배열로
+    /// 바꾸지 않고 곁에 두는 까닭은 이미 `counts.todo` 로 읽는 쪽이 있어서다. **늘 선다.**
+    pub statuses: Vec<String>,
     pub total: usize,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub milestones: Vec<Roll>,
@@ -5916,6 +5920,7 @@ fn status_in_scope<'a, 'c>(
 
     StatusReport {
         counts,
+        statuses: cfg.statuses.clone(),
         total: work.len(),
         milestones: stones,
         epics,

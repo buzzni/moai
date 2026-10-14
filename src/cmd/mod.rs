@@ -6,6 +6,7 @@
 pub mod add;
 pub mod archive;
 pub mod backlog;
+pub mod config;
 pub mod defer;
 pub mod edit;
 pub mod hook;
@@ -550,6 +551,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
         Cmd::Models => models::run(ctx),
+        Cmd::Config => config::run(ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
         // 트래커를 안 찾는다 — 올리는 것은 이 바이너리다(moai-zsfr.2p9).
@@ -879,6 +881,11 @@ pub const OURS: &[&str] = &[
     "journal_error",
     "work",
     "spent",
+    // `show --json`(목록도 하나도)이 안 읽은 줄에 다는 것(moai-cqwy).
+    "unread",
+    // `show --json`(목록도 하나도)이 곁들이는 선 마일스톤과 아카이브(moai-wk7i.rmc).
+    "derived_milestone",
+    "archived",
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",

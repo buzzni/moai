@@ -737,7 +737,21 @@ BACKLOG
   keeps it. Esc closes it, asking once if you had typed something (y throws
   it away). This is the one write to an issue — editing is done on the CLI.
   `--json` prints only that directory's listing, with no screen (outside a
-  `.moai`, the rows of the layer).
+  `.moai`, the rows of the layer). Each folder row (a milestone, an epic,
+  an issue with children) carries progress, {\"done\": 3, \"total\": 5} —
+  what the counts column shows as 3/5, read from every row under it whatever
+  the filters keep. The filters of `moai show` (-s, -t, -e, -g, --filter,
+  --all, --archived, --deferred and the rest; the time filters read as in
+  `moai show --help`) shape that listing: given any, a row stands when
+  `moai show` with the same filters would list it, and a folder stands too
+  when something under it does — so done is hidden unless asked for, as in
+  `moai show`. Without them the listing is every row, as before. --sort and
+  --reverse order it in the words of `moai show --sort`, and folders still come
+  first and the baskets last. These shape --json only, and only inside a
+  `.moai`.
+
+    moai tui --path <milestone> -g parser --all --json
+    moai tui --sort updated --json
 
   `--path` takes an issue id, or one of the two baskets by the word this
   tool uses for them: none (no milestone) and lost.")]
@@ -865,6 +879,19 @@ Examples:
   It does not ask who did it. This is not a file that keeps history."
     )]
     Project(ProjectCmd),
+
+    /// Read this repository's settings, defaults filled in
+    #[command(after_help = "  moai config           every setting, as you would write it in the file
+  moai config --json    one object - the keys of .moai/config.toml
+
+  Reads .moai/config.toml and fills in what it leaves out with the values moai
+  uses: prefix, statuses (in board order), naming, archive_days, wiki_dir and
+  the status_* thresholds. These are the values this binary acts on, so a
+  surface drawing the board reads them here instead of parsing the file
+  again. --json adds path, the file it read.
+
+  It only reads; edit the file by hand to change a setting.")]
+    Config,
 
     /// Read the model per role from your user config
     #[command(after_help = "  moai models           the model per role, with defaults marked
@@ -1360,6 +1387,9 @@ const SHOW_LIST: &str = "  Order: --sort takes fields separated by commas, like 
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -1441,9 +1471,29 @@ const SHOW_LIST: &str = "  Order: --sort takes fields separated by commas, like 
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // \"none\"' | sort | uniq -c
@@ -1595,6 +1645,11 @@ pub struct ShowArgs {
     /// Removed issues, from the journal (see below)
     #[arg(long)]
     pub removed: bool,
+
+    // **거르개가 아니다** — 무엇을 고르는지는 안 바꾸고 줄마다 어느 키를 내는지만 정한다(moai-wk7i.vsk).
+    /// Keep only these keys of each --json row
+    #[arg(long, value_name = "keys", value_delimiter = ',')]
+    pub fields: Vec<String>,
 
     #[command(flatten)]
     pub worktree: WorktreeArg,
@@ -1944,6 +1999,26 @@ pub struct TuiArgs {
     /// Open here - a directory opens inside it
     #[arg(long, value_name = "id|basket")]
     pub path: Option<String>,
+
+    // **`--json` 의 목록만 거르고 늘어놓는다**(moai-wk7i.5wx) — 화면은 `SPC f`·`SPC s` 가 한다. 말은 `show` 의 것이다.
+    #[command(flatten)]
+    pub filter: FilterArgs,
+
+    #[command(flatten)]
+    pub order: OrderArgs,
+}
+
+/// 차례만 — 쪽(`-n`·`--after`)은 없다. 디렉터리 목록은 한 자리를 통째로 낸다(moai-wk7i.5wx).
+#[derive(Args, Debug, Default)]
+#[command(next_help_heading = "Order")]
+pub struct OrderArgs {
+    /// Order the listing by these fields (as `show --sort`)
+    #[arg(long, value_name = "fields", value_parser = sort_fields)]
+    pub sort: Option<SortFields>,
+
+    /// Turn the order around, ties included
+    #[arg(long)]
+    pub reverse: bool,
 }
 
 #[derive(Args, Debug)]

@@ -46,6 +46,7 @@ Commands:
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
+  config        Read this repository's settings, defaults filled in
   models        Read the model per role from your user config
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
@@ -383,6 +384,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -438,6 +440,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -519,9 +524,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -1150,6 +1175,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1205,6 +1231,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -1286,9 +1315,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -1427,6 +1476,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1482,6 +1532,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -1563,9 +1616,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -1704,6 +1777,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1759,6 +1833,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -1840,9 +1917,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -2002,6 +2099,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -2057,6 +2155,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -2138,9 +2239,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -2337,6 +2458,30 @@ Options:
   -C, --dir <path>           Run in this directory (same as `git -C`)
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
+
+Filters  (comma = or,  repeated = and):
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
+
+Order:
+      --sort <fields>  Order the listing by these fields (as `show --sort`)
+      --reverse        Turn the order around, ties included
 
   Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
@@ -2623,7 +2768,21 @@ Options:
   keeps it. Esc closes it, asking once if you had typed something (y throws
   it away). This is the one write to an issue — editing is done on the CLI.
   `--json` prints only that directory's listing, with no screen (outside a
-  `.moai`, the rows of the layer).
+  `.moai`, the rows of the layer). Each folder row (a milestone, an epic,
+  an issue with children) carries progress, {"done": 3, "total": 5} —
+  what the counts column shows as 3/5, read from every row under it whatever
+  the filters keep. The filters of `moai show` (-s, -t, -e, -g, --filter,
+  --all, --archived, --deferred and the rest; the time filters read as in
+  `moai show --help`) shape that listing: given any, a row stands when
+  `moai show` with the same filters would list it, and a folder stands too
+  when something under it does — so done is hidden unless asked for, as in
+  `moai show`. Without them the listing is every row, as before. --sort and
+  --reverse order it in the words of `moai show --sort`, and folders still come
+  first and the baskets last. These shape --json only, and only inside a
+  `.moai`.
+
+    moai tui --path <milestone> -g parser --all --json
+    moai tui --sort updated --json
 
   `--path` takes an issue id, or one of the two baskets by the word this
   tool uses for them: none (no milestone) and lost.
@@ -3106,6 +3265,33 @@ Examples:
   It is written as `color = "green"` under `[[project]]` in the user config.
   Writing it by hand is fine - a wrong value is shown in one line by
   `moai project ls`, which then uses the colour picked by path.
+```
+
+## `moai config`
+
+```
+Read this repository's settings, defaults filled in
+
+Usage: moai config [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai config           every setting, as you would write it in the file
+  moai config --json    one object - the keys of .moai/config.toml
+
+  Reads .moai/config.toml and fills in what it leaves out with the values moai
+  uses: prefix, statuses (in board order), naming, archive_days, wiki_dir and
+  the status_* thresholds. These are the values this binary acts on, so a
+  surface drawing the board reads them here instead of parsing the file
+  again. --json adds path, the file it read.
+
+  It only reads; edit the file by hand to change a setting.
 ```
 
 ## `moai models`

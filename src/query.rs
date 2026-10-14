@@ -1677,6 +1677,37 @@ pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>
         .collect()
 }
 
+/// **[NEW] 가 서는 줄** — 누구인지와 읽음의 형편까지 받아 [`unread`] 를 부른다(moai-cqwy). 탐색기의
+/// [NEW](`App::recount_unread_in`)와 `moai show --json` 의 `unread` 키가 **이 하나로** 가른다 — 둘이
+/// 저마다 가르면 같은 줄이 화면에는 [NEW] 로 서고 기계에는 읽은 것으로 나간다.
+///
+/// - **누군지 모르면(`me` 가 `None`) 아무것도 안 센다** — 읽기는 사람을 묻지 않는다(CLAUDE.md).
+///   그러면 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 답이다.
+/// - **읽음을 못 들었고 들고 있는 표가 비었으면 아무것도 안 센다**(moai-2gep). 빈 표로 세면 내게 온
+///   줄이 모두 서는데, 그것은 "다 안 읽었다" 가 아니라 "모른다" 다 — 탐색기의 `SPC m a` 한 번이
+///   모르는 것을 다 읽음으로 찍는다. 들고 있는 표가 있으면 그것으로 센다.
+/// - 읽음 파일이 **없는** 것은 탈이 아니다 — 아직 아무것도 안 읽은 프로젝트의 정상이라 내게 온 줄이
+///   모두 선다. **[`crate::user_config::Trouble::Gone`] 도 그 자리에 든다**(리뷰) — 읽기는 그 갈래를 혼자
+///   안 세운다([`crate::read_marks::Marks::trouble`]). 세우는 것은 탐색기(`App::read_marks_of`)고 뜻은
+///   "**곁의 설정이** 사라졌다" 인데, 설정을 아직 안 만든 기계가 그대로 그 갈래로 온다 — 막으면 처음
+///   띄운 사람에게 [NEW] 가 한 줄도 안 서고 까닭도 없다. 홈이 끊긴 쪽은 들고 있던 표가 지킨다.
+///
+/// `held` 는 **부르는 쪽이 들고 있는 표**다. 탐색기는 제 `Site::seen` 이다 — 못 읽은 걸음에는 앞서 든
+/// 것을 그대로 둔다(`App::take_read`). 앞서 든 것이 없는 CLI 는 그 자로 처음 든 표를 넘긴다
+/// ([`crate::read_marks::Marks::held`]).
+pub fn unread_held<'a>(
+    issues: &'a [Issue],
+    me: Option<&str>,
+    trouble: Option<crate::user_config::Trouble>,
+    held: &BTreeMap<String, String>,
+) -> BTreeSet<&'a str> {
+    let Some(me) = me else { return BTreeSet::new() };
+    if trouble.is_some_and(|t| t != crate::user_config::Trouble::Gone) && held.is_empty() {
+        return BTreeSet::new();
+    }
+    unread(issues, me, held)
+}
+
 /// 그 줄이 **내가 마지막으로 본 뒤에 바뀌었나** — 한 번도 안 봤거나(`seen` 에 없다) 적힌 값보다 늦게
 /// 고쳐졌다. 때는 스냅샷의 `updated_at` 이다(사용자 결정 2026-09-15). 안 읽음([`unread`])도, 읽음을 적을
 /// 때 이미 읽은 줄을 거르는 것(`moai read`·탐색기의 `r`)도 이 하나로 잰다(moai-j038.vna).
@@ -1795,6 +1826,44 @@ mod tests {
         assert_eq!(ids("raven@buzzni.com", &none).len(), 4);
         // 담당이 나인 줄이 하나도 없으면 아무것도 안 센다.
         assert!(ids("아무개", &none).is_empty());
+    }
+
+    /// **[NEW] 의 가장자리는 한 자리에 있다**(moai-cqwy) — 탐색기와 `show --json` 이 함께 부르는
+    /// [`unread_held`]. 누군지 모르면 안 세고, 읽음을 못 들었는데 들고 있는 표가 비면 안 세며("모른다"
+    /// 이지 "다 안 읽었다" 가 아니다), 들고 있는 표가 있으면 탈이 있어도 그것으로 센다. 없는 읽음 파일과
+    /// `Gone` 은 탈이 아니라 내게 온 것이 모두 선다. 마일스톤의 멤버는 안 센다.
+    #[test]
+    fn unread_held_keeps_the_explorers_edges() {
+        use crate::user_config::Trouble;
+        let at = |id: &str, who: Option<&str>| {
+            let mut i =
+                Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+            i.assignee = who.map(String::from);
+            i.updated_at = "2026-09-14T00:00:00Z".into();
+            i
+        };
+        let mut stone = at("a-0001", Some("레이븐"));
+        stone.kind = Kind::Milestone;
+        let mut in_stone = at("a-0002", None);
+        in_stone.milestone = Some("a-0001".into());
+        let issues = vec![stone, in_stone, at("a-0003", Some("레이븐")), at("a-0004", Some("나래"))];
+        let none = BTreeMap::new();
+        let held: BTreeMap<String, String> = [("a-0003".to_string(), "2026-09-14T00:00:00Z".to_string())].into();
+        let ids = |me: Option<&str>, t: Option<Trouble>, seen: &BTreeMap<String, String>| {
+            unread_held(&issues, me, t, seen).into_iter().collect::<Vec<_>>()
+        };
+
+        // 읽음 파일이 없다 — 내게 온 것이 모두 선다. 마일스톤의 멤버와 남의 줄은 빠진다.
+        assert_eq!(ids(Some("레이븐"), None, &none), ["a-0001", "a-0003"]);
+        assert_eq!(ids(Some("레이븐"), Some(Trouble::Gone), &none), ["a-0001", "a-0003"], "`Gone` 을 탈로 셌다");
+        // 누군지 모른다 — 아무것도 안 선다.
+        assert!(ids(None, None, &none).is_empty());
+        // 못 들었고 들고 있는 것도 없다 — "모른다" 라 안 선다.
+        assert!(ids(Some("레이븐"), Some(Trouble::Unreadable), &none).is_empty());
+        assert!(ids(Some("레이븐"), Some(Trouble::Reading), &none).is_empty());
+        // 들고 있는 표가 있으면 탈이 있어도 그것으로 센다.
+        assert_eq!(ids(Some("레이븐"), Some(Trouble::Broken), &held), ["a-0001"]);
+        assert_eq!(ids(Some("레이븐"), None, &held), ["a-0001"]);
     }
 
     /// **고른 차례는 제 방향이 있고, 같으면 기본 차례로 가르며, 뒤집으면 통째로 뒤집는다**(moai-55cp).

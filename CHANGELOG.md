@@ -12,6 +12,81 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-14
+
+### Added
+
+- **`moai show --json` puts `"unread": true` on the rows the explorer marks [NEW].**
+  It holds for the list and for `show <id>`: a row near you — yours, their
+  children, and the members of your epics (milestones are not counted) — that
+  changed since you last read it. The key is absent otherwise. When moai cannot
+  tell who you are, or cannot read your read marks, no row carries the key and
+  the exit code stays 0. The explorer and the CLI share one helper, so the two
+  never disagree. (moai-cqwy)
+- **`moai config` prints this repository's settings with the defaults filled in.**
+  prefix, statuses in board order, naming, archive_days, wiki_dir and the
+  `status_*` thresholds, under the names `.moai/config.toml` uses; `--json`
+  gives one object with `path` added. A surface drawing the board reads the
+  values this binary acts on instead of parsing the file again. It only reads.
+  (moai-wk7i.qtq)
+- **`moai status --json` carries `statuses`, the columns in the order the config
+  lists them.** `counts` is a map in name order, so the board's order was lost
+  there. (moai-wk7i.7yy)
+- **`moai show --json` names where a row stands without it being written on the
+  row** — `derived_milestone` (the milestone `--milestone` stands it under,
+  inherited from its epic included), `shelved_by` on the list as well as on
+  `show <id>` (the nearest row that took it out of the plan, its own id when it
+  was deferred itself — a closed row is in no plan, so `--deferred` picks it by
+  `deferred_at` alone) and `archived: true` on a row `--all` hides as the
+  archive. Each stands only when it holds. (moai-wk7i.rmc)
+- **`moai show --fields id,title,… --json` keeps only those keys of each row**, in
+  that order and each once; a key a row does not carry stays out. The costly
+  keys it leaves out are not worked out — without `work` a list skips the
+  journals, and `show <id>` asks git only for `commits` — so
+  `moai show -g <word> --all --fields id --json` is a small list of the ids a
+  search found, notes included. It refuses to run without `--json`.
+  (moai-wk7i.vsk, moai-wk7i.3it)
+- **`moai tui --json` puts `progress` (`done`, `total`) on every folder row — a
+  milestone, an epic, an issue with children — and takes the filters and
+  `--sort` of `moai show`.** Given filters, a row
+  stands when `moai show` would list it and a folder stands when something
+  under it does; without them the listing is every row, as before. The flags
+  are refused on the screen and outside a `.moai`. (moai-wk7i.5wx)
+- **`moai show --help` says `--archived` pages like any list**: archived and live
+  rows share one order, so `--sort id -n <count> --after <last id>` reads a long
+  list whole. A test now holds that. (moai-wk7i.gkd)
+
+### Changed
+
+- **A rule 1 or rule 3 refusal and the turn-end hold say why each held row is this
+  session's.** One line per row — this session picked it up, this worktree's name
+  points at it, or no session recorded the pick — so a session that is blocked can
+  tell which row did it without a separate command. The lines are dropped when they
+  would not fit the hold. (moai-pyi4.w47)
+- **`moai-supervise` and the worker steps cover five places a round had to patch by
+  hand.** In a repository whose `.moai` is kept out of git, the supervisor and the
+  worker ask `git ls-files` once and skip the tracker commits. A member the hook
+  refuses to create (rule 1) is parked as a backlog item under the epic and reported
+  as `member refused:`, so the supervisor unfolds it. An epic-end review rule 3 keeps
+  refusing is run by hand and says so on its first line (`Manual review:`). A session
+  worker writes the review issue's `model:` line too, and the worker and the
+  supervisor look for members closed without one. The message gains a `Subagents:`
+  line naming the model and effort per role a worker may hand pieces of its work to.
+  (moai-nzmp)
+
+### Fixed
+
+- **Several sessions of one person no longer block each other over rows nobody
+  recorded.** Once another session has recorded a pick in the same tracker within
+  the last 12 hours, a started row no session's hook recorded picking up — moved in
+  a terminal, by a session running without the moai hook, or through a shell
+  variable such as `moai mv "$R" review` — is no longer every session's focus, so
+  it stops refusing rule 1 and rule 3 and stops holding the turn end. It stays
+  yours when this worktree's name points at it, or when it sits under a row this
+  session picked up or in that row's epic. Working alone is unchanged. A word the
+  shell would expand is no longer recorded as an issue id. (moai-pyi4.cu3,
+  moai-pyi4.ewi, moai-pyi4.hkn, moai-pyi4.m8o)
+
 ## [0.16.0] - 2026-10-11
 
 ### Added

@@ -17,6 +17,20 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let Some(repo) = Repo::find(|| ctx.lang())? else {
         return outside(ctx, args);
     };
+    // **거르개와 차례는 `--json` 의 목록 것이다**(moai-wk7i.5wx). 화면은 `SPC f`·`SPC s` 가 하니, 화면을 켜는 판에서
+    // 말없이 먹으면 부른 쪽은 걸러진 화면이라 믿는다 — `show` 가 하나를 펼칠 때 거르개를 거절하는 것과 같은 까닭이다.
+    // **저장소를 찾은 뒤에 묻는다**(리뷰) — 밖에서 먼저 물으면 "--json 을 더하라" 를 대고, 그대로 친 판이 다시
+    // "`.moai` 안에서" 로 거절됐다. 밖은 [`outside`] 가 화면이든 아니든 그 말 하나로 거절한다.
+    if let Some(flag) = shaped(&args).filter(|_| !ctx.json) {
+        return Err(Fail::coded(
+            format!(
+                "{}\n      {}",
+                crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen"), &[("flag", flag)]),
+                crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen_how"), &[("flag", flag)]),
+            ),
+            super::code::BAD_FILTER,
+        ));
+    }
     // **재는 것이 읽는 것보다 먼저다.** 읽고 나서 재면 그 사이에 떨어진 쓰기가
     // "이미 본 것" 으로 적혀 그 뒤로 영영 바뀐 줄 모른다. 먼저 재면 최악이
     // 헛 알림 하나고, 빠진 알림보다 헛 알림이 싸다.
@@ -31,6 +45,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
     let crate::worktree::Gathered { load: active_load, root, origin, trouble, mut watched, swept, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
+    // 산 줄의 id — 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`). 거르개를 받은 `--json` 만 쓴다.
+    let live: std::collections::BTreeSet<String> = match ctx.json && shaped(&args).is_some() {
+        true => active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect(),
+        false => Default::default(),
+    };
     // The explorer can switch between the live board and archived rows. Keep the
     // active overlay from the worktree gather, then add the archive beside it so
     // worktree-only rows remain visible in both views.
@@ -56,11 +75,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
-        let rows: Vec<Row> = index
-            .entries(&load.issues, &path)
-            .iter()
-            .map(|e| Row::of(&index, &load.issues, &states, e, ctx.lang()))
-            .collect();
+        let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
+        let rows: Vec<Row> = entries.iter().map(|e| Row::of(&index, &load.issues, &states, e, ctx.lang())).collect();
         return super::json_line(&rows);
     }
 
@@ -192,6 +208,13 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         return Err(Fail::coded(
             crate::i18n::say(super::lang_of(&reg), "refuse.tui_path_outside"),
             super::code::BAD_INPUT,
+        ));
+    }
+    // 거르개와 차례도 한 프로젝트 안의 말이다(moai-wk7i.5wx) — 층의 줄은 프로젝트라 거를 칸도 태그도 없다.
+    if let Some(flag) = shaped(&args) {
+        return Err(Fail::coded(
+            crate::i18n::fill(crate::i18n::say(super::lang_of(&reg), "refuse.tui_shape_outside"), &[("flag", flag)]),
+            super::code::BAD_FILTER,
         ));
     }
     if ctx.json {
@@ -420,6 +443,72 @@ fn resolve(index: &Index, issues: &[Issue], want: Option<&str>, lang: crate::i18
     Ok(path)
 }
 
+/// 거르개나 차례를 받았으면 그 첫 플래그(moai-wk7i.5wx). 거르개 이름은 `show` 가 대는 그 자다.
+fn shaped(args: &TuiArgs) -> Option<&'static str> {
+    super::show::first_given(&args.filter)
+        .or_else(|| args.order.sort.is_some().then_some("--sort"))
+        .or_else(|| args.order.reverse.then_some("--reverse"))
+}
+
+/// `--json` 이 낼 그 자리의 목록(moai-wk7i.5wx).
+///
+/// **고르는 자는 `moai show` 의 목록이다** — 같은 거르개로 `show` 가 낼 줄이 선다: `Filter::matches` 에 걸린
+/// 줄(`show` 가 숨김을 연 거름망과 `Filter::hidden_by` 로 갈라 묻는 것과 같은 답). 여기서 따로 고르면 같은 말이 두 명령에서
+/// 다른 줄을 낸다. 폴더는 밑에 걸린 것이 있으면 선다 — 그 자는 탐색기와 같은 `Index::entries_sorted` 다.
+/// 거르개가 없으면 전처럼 다 낸다.
+///
+/// **거름망은 적재가 잰 지도를 빌린다**([`crate::tui::Ground::here`], 리뷰) — 탐색기의 `SPC f` 가 거는 그
+/// 꼴이다. `Where::from_soil` 로 다시 지으면 색인을 짓느라 방금 잰 소속·미룸·묶음 칸을 저장소 전부에서 한 벌
+/// 더 잰다. 옮겨 둔 줄(`stored`)·노트·시간대는 이 판이 얹는다 — `show` 의 목록이 얹는 그 셋이다.
+fn listing(
+    ctx: &Ctx,
+    repo: &Repo,
+    issues: &[Issue],
+    origin: &crate::worktree::Origin,
+    live: &std::collections::BTreeSet<String>,
+    (index, ground): (&Index, &crate::tui::Ground),
+    path: &Path,
+    args: TuiArgs,
+) -> R<Vec<Entry>> {
+    let TuiArgs { path: _, filter, order } = args;
+    let given = super::show::first_given(&filter).is_some();
+    if !given && order.sort.is_none() && !order.reverse {
+        return Ok(index.entries(issues, path));
+    }
+    let kind = filter.kind;
+    let filter = super::show::filter_of(ctx, repo, issues, filter, kind)?;
+    let notes = filter.grep.is_some().then(|| {
+        super::show::notes_of(&super::show::journal_of_rows(repo, origin, issues, crate::model::may_hold_note))
+    });
+    let mut wh = ground.here(issues);
+    wh.stored = issues.iter().map(|i| i.id.as_str()).filter(|id| !live.contains(*id)).collect();
+    wh.notes = notes.as_ref().map(crate::query::NoteView::Raw);
+    if filter.needs_zone() {
+        wh.zone = Some(ctx.zone());
+    }
+    let now = crate::model::now();
+    // **고르는 자는 `Filter::matches` 하나다**(리뷰) — `show` 의 목록이 숨김을 연 거름망과 `hidden_by` 를 따로
+    // 묻는 것은 숨긴 수를 세려는 것이고, 셀 것이 없는 여기서 그 둘을 이으면 `matches` 를 손으로 다시 적는 셈이다.
+    let keep = |at: usize| !given || filter.matches(&issues[at], &now, &wh);
+    let fields = order.sort.map(|f| f.0);
+    let cfg = &repo.config;
+    let by = |a: usize, b: usize| match &fields {
+        Some(fields) => crate::query::order_by(
+            fields,
+            order.reverse,
+            (&issues[a], wh.column(&issues[a])),
+            (&issues[b], wh.column(&issues[b])),
+            &cfg.statuses,
+            cfg.naming,
+        ),
+        None => {
+            let o = crate::query::display_order(&issues[a], &issues[b]);
+            if order.reverse { o.reverse() } else { o }
+        }
+    };
+    Ok(index.entries_sorted(issues, path, &keep, &by))
+}
+
 /// `--json` 한 줄의 원소. 파일의 키 순서와 같은 뜻으로 앞에서부터 읽힌다.
 #[derive(serde::Serialize)]
 struct Row {
@@ -441,6 +530,18 @@ struct Row {
     derived_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     priority: Option<u8>,
+    /// 폴더 줄의 끝난/일 셈 — 탐색기 셈 열의 `n/n` 이다(moai-wk7i.5wx). **id 가 있는 폴더 줄이면 늘 선다**(셀 일이
+    /// 없으면 0/0) — 묶음만이 아니라 자식을 둔 이슈도 폴더라 선다(탐색기의 `tally_of` 가 그렇다). 바구니와, 종류가
+    /// 다른 쌍둥이에게 가려져 잎으로 선 묶음 줄에는 없다. 자는 탐색기와 같은 `Index::tally` 고, 거르개와 상관없이
+    /// 그 밑의 줄 전부로 센다 — 화면의 셈이 그렇다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    progress: Option<Tally>,
+}
+
+#[derive(serde::Serialize)]
+struct Tally {
+    done: usize,
+    total: usize,
 }
 
 impl Row {
@@ -465,6 +566,11 @@ impl Row {
                 // 자다(moai-7iyc.5fz). 판정을 여기 베끼면 `show --json` 의 같은 키와 갈린다.
                 derived_status: crate::report::stands_on(&issues[at], |k| states.get(&k).copied()).map(str::to_string),
                 priority: Some(issues[at].priority()),
+                // 탐색기의 `tally_of` 와 같은 자리를 센다 — 자리를 정하는 자는 `dir_path` 하나다.
+                progress: dir.then(|| {
+                    let (done, total) = index.tally(&index.dir_path(issues, at));
+                    Tally { done, total }
+                }),
             },
             None => Row {
                 id: None,
@@ -478,6 +584,7 @@ impl Row {
                 status: None,
                 derived_status: None,
                 priority: None,
+                progress: None,
             },
         }
     }

@@ -67,6 +67,22 @@ The work a session holds: rows assigned to you that have left the first
 [column](#column) and are not closed yet. While you hold something, new issues
 go inside it — rule 1 of the [hook rules](#hook-rules).
 
+It is counted per session, not per person. A row a sibling worktree's name points
+at is that worktree's, unless this worktree's name points at it as closely or this
+session picked it up for certain. A row another session picked up last is not
+counted, and nor — once another session has recorded a pick in the same tracker
+within the last 12 hours — is a started row no session's hook recorded picking up:
+moved in a terminal, by a session that runs without the moai hook, or through a
+shell variable such as `moai mv "$id" …`. Such an unrecorded row still counts when
+this worktree's name points at it, or when it sits under a row this session
+picked up or in that row's epic. Leaving rows out only ever lets a call through
+or holds the turn end less — it never adds a refusal. The session before a
+`/clear` counts as another session; with no other session's pick recorded in that
+window, an unrecorded row is still yours. A rule 1 or rule 3 refusal and the
+turn-end question end with one line per held row on why this session holds it —
+it picked the row up, this worktree's name points at it, or nobody recorded the
+pick — when the lines fit.
+
 ## Group
 
 An [epic](#epic) or a [milestone](#milestone). Belonging is inherited: a child
@@ -271,4 +287,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4

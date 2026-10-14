@@ -414,7 +414,8 @@ one costs is yours.
    supervisor skill (`references/worker.md`) given by its absolute path — and
    from which step to follow it. The lines after that fill this assignment — the
    backlog, the model, the effort and the difficulty, whether the worker is a
-   subagent or a session, the work running alongside, the root branch and the
+   subagent or a session, the models and efforts per role it may hand pieces of
+   its work to (`Subagents:` — `none` for a Codex worker), the work running alongside, the root branch and the
    base branch, the milestone, the root and whether the person is away
 4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
    picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
@@ -430,7 +431,9 @@ one costs is yours.
 5. **The supervisor checks the report** — the merge is on that work's base branch, the
    epic is done, the worktree is gone — writes the
    [model line](glossary.md#model-line) of a subagent worker from the report's
-   `Model ran:` line, and sends the next backlog item to a new worker
+   `Model ran:` and `Subagent ran:` lines, looks for members a session worker
+   closed without one, unfolds a `member refused:` backlog item into its epic, and
+   sends the next backlog item to a new worker
 
 **The epic-end review is the epic's only one, on the review model.** The worker
 reviews the whole epic once, at the end, with `/code-review` at `review_grade` —
@@ -438,7 +441,20 @@ reviews the whole epic once, at the end, with `/code-review` at `review_grade` �
 storage format or hooks, or when the worktree carries members of two epics. A
 subagent worker raises that review as a subagent of its own on the `review`
 model, because a review called from a worker runs on the worker's model. It
-never starts another agent program.
+never starts another agent program. When rule 3 keeps refusing the review after
+the review issue is picked up, the worker reviews the diff by hand in its own
+session and opens the review text with `Manual review:`, so the next reader does
+not take its sweep for what the review command found.
+
+**When the hook refuses a member the worker needs** (rule 1, a file held beside
+it), the worker does not create it under the other epic the refusal offers. It
+parks it as a backlog item under its own epic and reports `member refused:`; the
+supervisor unfolds it into that epic.
+
+**A repository can keep `.moai` out of git** (`.gitignore`, `.git/info/exclude`).
+The supervisor and the worker ask `git -C <root> ls-files --error-unmatch --
+.moai/issues.jsonl` once; on a non-zero code they skip every tracker commit and
+the tracker lives in the root's file alone.
 
 **The hook reads a subagent worker as the supervisor.** A subagent's tool calls
 carry the supervisor's session, so the rows it picks up are the supervisor's
@@ -734,6 +750,10 @@ Every command takes `--json`. Three are enough for a session to take its next ro
 - `moai prime` — what this session holds and what is next, short enough to load
   into a prompt
 
+A program that draws the tracker rather than works it — a web panel, a dashboard —
+reads the settings, the explorer's directories and the inherited values described in
+[Draw the tracker from another program](json.md).
+
 The moai binary never launches a session or runs one headless. A person opens
 each one — or, inside tmux or cmux, says yes to the supervisor opening one — and the
 session reads these the way that person would.
@@ -803,7 +823,7 @@ worker's line is written by the supervisor.
   where an incoming message waits for its person's approval — look at that
   window
 
-Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx
+Decided in: moai-2w0s moai-hxma moai-0zjo moai-nqdc moai-bl3x moai-gelm moai-tllo moai-mdzx moai-xs2h moai-h8tn moai-snyk moai-u5wr moai-b6cw moai-ew4o moai-dhxm moai-ml0d moai-nas5 moai-kxkw moai-dj4j moai-54yc moai-bkn4 moai-084j moai-keka moai-zynt moai-j9nf moai-jtvp moai-obxm moai-six5 moai-iu73 moai-r0x8 moai-u99i moai-uqf7 moai-p5sz moai-xpa8 moai-9tqo moai-pxui moai-uzhx moai-wk7i
 
 ## Archive storage
 

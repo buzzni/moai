@@ -6693,6 +6693,235 @@ fn status_json_is_machine_shaped() {
     assert!(out.contains(&epic), "{out}");
 }
 
+/// `counts` 는 이름순 맵이라 칸 차례를 잃는다 — `statuses` 가 설정에 적힌 차례 그대로 낸다(moai-wk7i.7yy).
+/// 이름순과 갈리는 차례를 골라야 되돌리면 붉어진다.
+#[test]
+fn status_json_keeps_the_column_order_of_the_config() {
+    let s = init("statusorder");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"todo,wip,blocked,done\"\n")
+        .unwrap();
+    add(s.path(), &["하나"]);
+    let v: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
+    assert_eq!(v["statuses"], serde_json::json!(["todo", "wip", "blocked", "done"]), "{v}");
+    assert_eq!(v["counts"]["todo"], 1, "{v}");
+}
+
+/// `moai config --json` 은 이 바이너리가 실제로 쓰는 값이다(moai-wk7i.qtq) — 적은 키는 적은 대로, 안 적은 키는
+/// 기본값으로. 키는 파일의 이름 그대로다.
+#[test]
+fn config_json_fills_defaults_and_keeps_written_values() {
+    let s = init("configjson");
+    std::fs::write(
+        s.path().join(".moai/config.toml"),
+        "prefix = \"argos\"\nstatuses = \"todo,wip,done\"\narchive_days = 5\nstatus_wip_limit = 7\n",
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&ok(s.path(), &["config", "--json"])).unwrap();
+    assert_eq!(v["prefix"], "argos", "{v}");
+    assert_eq!(v["statuses"], serde_json::json!(["todo", "wip", "done"]), "{v}");
+    assert_eq!(v["archive_days"], 5, "{v}");
+    assert_eq!(v["status_wip_limit"], 7, "{v}");
+    // 안 적은 키는 바이너리의 기본값이다.
+    assert_eq!(v["naming"], "full", "{v}");
+    assert_eq!(v["wiki_dir"], "docs", "{v}");
+    assert_eq!(v["status_review_days"], 3, "{v}");
+    assert!(v["path"].as_str().is_some_and(|p| p.ends_with("config.toml")), "{v}");
+    // 사람 화면은 파일에 옮겨 적을 수 있는 꼴이다.
+    let human = ok(s.path(), &["config"]);
+    assert!(human.contains("statuses             = \"todo,wip,done\""), "{human}");
+    assert!(human.contains("archive_days         = 5"), "{human}");
+}
+
+/// `show --json` 은 파일에 안 적힌 자리 셋을 낸다(moai-wk7i.rmc) — 물려받은 마일스톤, 계획에서 뺀 줄,
+/// 아카이브. 목록과 하나를 펼칠 때가 같은 답이어야 한다.
+#[test]
+fn show_json_names_the_inherited_milestone_the_shelf_and_the_archive() {
+    let s = init("derivedjson");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\narchive_days = 1\n").unwrap();
+    let stone = field(&ok(s.path(), &["milestone", "add", "v0.1", "--json"]), "id");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "--json"]), "id");
+    let member = field(&ok(s.path(), &["add", "안의 일", "-e", &epic, "--json"]), "id");
+    let shelf = field(&ok(s.path(), &["epic", "add", "미룬 에픽", "--json"]), "id");
+    let parked = field(&ok(s.path(), &["add", "미룬 것 밑", "-e", &shelf, "--json"]), "id");
+    ok(s.path(), &["defer", &shelf, "-m", "다음 판"]);
+    let old = add(s.path(), &["오래 닫힌 것"]);
+    assert!(at(s.path(), "2026-01-01T00:00:00Z", &["mv", &old, "done"]).status.success());
+
+    let one = |id: &str| -> serde_json::Value { serde_json::from_str(&ok(s.path(), &["show", id, "--json"])).unwrap() };
+    let list: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &["show", "--archived", "--json"])).unwrap();
+    let row = |id: &str| list.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 목록에 없다")).clone();
+
+    // 마일스톤은 에픽에서 물려받는다 — 줄의 `milestone` 은 비어 있다.
+    for r in [one(&member), row(&member)] {
+        assert_eq!(r["derived_milestone"], stone.as_str(), "{r}");
+        assert!(r.get("milestone").is_none(), "{r}");
+        assert!(r.get("archived").is_none() && r.get("shelved_by").is_none(), "{r}");
+    }
+    // 미룬 에픽 밑의 줄은 그 에픽이 계획에서 뺐다.
+    for r in [one(&parked), row(&parked)] {
+        assert_eq!(r["shelved_by"], shelf.as_str(), "{r}");
+        assert!(r.get("derived_milestone").is_none(), "{r}");
+    }
+    // done 에 archive_days 넘게 선 줄은 아카이브다.
+    assert_eq!(one(&old)["archived"], true);
+    assert_eq!(row(&old)["archived"], true);
+}
+
+/// **아카이브 파일로 옮긴 줄은 시계와 상관없이 `archived` 다**(리뷰) — `--all` 이 그 줄을 안 내는 자
+/// (`Where::stored`)와 같은 답이어야 한다. 하나를 펼치는 길은 그 집합을 따로 싣는데, 시계로 아카이브인 줄만 재던
+/// 시험은 그 한 줄을 빼도 푸르렀다. `archive_days = 0` 으로 시계를 꺼서 옮긴 것만으로 서게 한다.
+#[test]
+fn show_json_marks_a_moved_row_archived_with_the_clock_off() {
+    let s = init("storedjson");
+    let old = add(s.path(), &["옮길 것"]);
+    let kept = add(s.path(), &["남길 것"]);
+    assert!(at(s.path(), "2026-01-01T00:00:00Z", &["mv", &old, "done"]).status.success());
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    let config = s.path().join(".moai/config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("archive_days = 0\n");
+    std::fs::write(&config, text).unwrap();
+
+    let one: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", &old, "--json"])).unwrap();
+    assert_eq!(one["archived"], true, "{one}");
+    let list: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &["show", "--archived", "--json"])).unwrap();
+    let row = list.iter().find(|r| r["id"] == old.as_str()).unwrap_or_else(|| panic!("{old} 가 목록에 없다"));
+    assert_eq!(row["archived"], true, "{row}");
+    // 산 줄에는 안 선다 — 그리고 `--all` 은 옮긴 줄을 안 낸다.
+    let live: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", &kept, "--json"])).unwrap();
+    assert!(live.get("archived").is_none(), "{live}");
+    let all = ok(s.path(), &["show", "--all", "--fields", "id", "--json"]);
+    assert!(!all.contains(&old), "{all}");
+}
+
+/// `--fields` 는 줄마다 고른 키만 고른 차례로 낸다(moai-wk7i.vsk) — 없는 키는 안 세운다. 노트로 찾은 줄의
+/// id 목록이 그 한 꼴로 나온다(moai-wk7i.3it).
+#[test]
+fn show_fields_keeps_only_the_keys_asked_for() {
+    let s = init("fieldsjson");
+    let a = add(s.path(), &["첫째"]);
+    let b = add(s.path(), &["둘째"]);
+    ok(s.path(), &["note", &b, "노트에만 적힌 낱말 qzxv"]);
+
+    // 차례는 고른 차례다 — 파일의 차례(id 먼저)와 갈리게 골라야 되돌리면 붉어진다.
+    let out = ok(s.path(), &["show", "--fields", "title,id,nope", "--json"]);
+    one_json_value(&out);
+    assert!(out.contains(&format!("{{\"title\":\"첫째\",\"id\":\"{a}\"}}")), "{out}");
+    assert!(!out.contains("nope") && !out.contains("status"), "{out}");
+    // 키는 한 번씩만, 앞뒤 빈칸은 벗긴다 — 한 객체에 같은 키가 둘 서지 않는다(리뷰).
+    let twice = ok(s.path(), &["show", "--fields", "id, title,id", "--json"]);
+    assert!(twice.contains(&format!("{{\"id\":\"{a}\",\"title\":\"첫째\"}}")), "{twice}");
+
+    // 노트로 찾은 줄의 id 목록.
+    let found = ok(s.path(), &["show", "-g", "qzxv", "--all", "--fields", "id", "--json"]);
+    assert_eq!(found.trim(), format!("[{{\"id\":\"{b}\"}}]"), "{found}");
+
+    // 하나를 펼칠 때도 같다.
+    let one = ok(s.path(), &["show", &a, "--fields", "id,derived_status,priority", "--json"]);
+    assert_eq!(one.trim(), format!("{{\"id\":\"{a}\",\"priority\":2}}"), "{one}");
+
+    // 키는 --json 에만 있다 — 말없이 먹지 않는다.
+    let refused = moai(s.path(), &["show", "--fields", "id"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--fields"), "{refused:?}");
+}
+
+/// `--archived` 를 쪽으로 넘겨 받은 것이 한 번에 받은 것과 같다(moai-wk7i.gkd) — 아카이브 파일의 줄과 산 줄이
+/// 한 차례에 섞이고, 쪽 사이에 산 줄 하나를 고쳐도 `--sort id` 의 쪽은 밀리지 않는다. 웹 패널이 2 MB 넘는
+/// 목록을 나눠 받는 길이다.
+#[test]
+fn archived_pages_in_id_order_join_into_the_whole_list() {
+    let s = init("archivedpages");
+    let ids: Vec<String> = (0..6).map(|n| add(s.path(), &[&format!("줄 {n}")])).collect();
+    for id in &ids[..3] {
+        assert!(at(s.path(), "2026-01-01T00:00:00Z", &["mv", id, "done"]).status.success());
+    }
+    // 셋은 아카이브 파일로 옮기고 셋은 산 줄로 둔다.
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    assert!(s.path().join(".moai/archive/2026.jsonl").is_file(), "아카이브 파일이 안 섰다");
+
+    let page = |extra: &[&str]| {
+        let mut args = vec!["show", "--archived", "--sort", "id", "--fields", "id", "--json"];
+        args.extend(extra);
+        ids_in(&ok(s.path(), &args))
+    };
+    let whole = page(&[]);
+    let mut sorted = ids.clone();
+    sorted.sort();
+    assert_eq!(whole, sorted, "아카이브 파일의 줄과 산 줄이 한 차례에 안 섰다");
+
+    let mut got: Vec<String> = Vec::new();
+    loop {
+        let mut extra = vec!["-n", "2"];
+        let last = got.last().cloned();
+        if let Some(last) = &last {
+            extra.extend(["--after", last.as_str()]);
+        }
+        let next = page(&extra);
+        // 쪽 사이에 산 줄 하나를 고친다 — id 차례는 고침에 안 움직인다.
+        ok(s.path(), &["edit", &ids[5], "-p", "0"]);
+        let done = next.len() < 2;
+        got.extend(next);
+        if done {
+            break;
+        }
+    }
+    assert_eq!(got, whole, "쪽으로 받은 것이 한 번에 받은 것과 다르다");
+}
+
+/// `tui --json` 의 목록은 묶음 줄에 `n/n` 셈을 늘 달고, `show` 의 거르개와 차례를 받는다(moai-wk7i.5wx).
+/// 거르개를 주면 `show` 가 고를 줄이 서고 그 밑에 걸린 것이 있는 폴더가 선다 — 셈은 거르개와 상관없이 다 센다.
+#[test]
+fn tui_json_counts_groups_and_takes_the_show_filters() {
+    let s = init("tuishape");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--json"]), "id");
+    let done = field(&ok(s.path(), &["add", "끝난 일", "-e", &epic, "--json"]), "id");
+    let open = field(&ok(s.path(), &["add", "남은 일 zqx", "-e", &epic, "-p", "0", "--json"]), "id");
+    let other = field(&ok(s.path(), &["add", "에픽 밖", "-p", "3", "--json"]), "id");
+    ok(s.path(), &["mv", &done, "done"]);
+    let rows = |args: &[&str]| -> Vec<serde_json::Value> {
+        let mut all = vec!["tui", "--json"];
+        all.extend(args);
+        serde_json::from_str(&ok(s.path(), &all)).unwrap()
+    };
+    let ids = |rows: &[serde_json::Value]| -> Vec<String> {
+        rows.iter().filter_map(|r| r["id"].as_str().map(str::to_string)).collect()
+    };
+
+    // 거르개 없이는 전처럼 다 — 묶음 줄에는 셈이 선다.
+    let top = rows(&[]);
+    let e = top.iter().find(|r| r["id"] == epic.as_str()).unwrap();
+    assert_eq!(e["progress"], serde_json::json!({"done": 1, "total": 2}), "{e}");
+    assert!(top.iter().find(|r| r["id"] == other.as_str()).unwrap().get("progress").is_none());
+    assert_eq!(ids(&rows(&["--path", &epic])), vec![open.clone(), done.clone()]);
+
+    // `show` 의 말 — 기본으로 done 을 숨기고, `-g` 에 걸린 줄의 폴더가 선다. 셈은 그대로다.
+    assert_eq!(ids(&rows(&["--path", &epic, "-s", "todo"])), vec![open.clone()]);
+    assert_eq!(ids(&rows(&["--path", &epic, "--all", "-s", "done"])), vec![done.clone()]);
+    let found = rows(&["-g", "zqx"]);
+    assert_eq!(ids(&found), vec![epic.clone()], "걸린 줄의 폴더만 서야 한다");
+    assert_eq!(found[0]["progress"], serde_json::json!({"done": 1, "total": 2}));
+
+    // 차례는 `show --sort` 의 말이다. `--reverse` 만 주면 기본 차례(우선순위)를 뒤집는다.
+    assert_eq!(ids(&rows(&["--path", &epic, "--sort", "priority:desc"])), vec![done.clone(), open.clone()]);
+    assert_eq!(ids(&rows(&["--path", &epic, "--reverse"])), vec![done.clone(), open.clone()]);
+
+    // 화면에서는 말없이 먹지 않는다.
+    let refused = moai(s.path(), &["tui", "-s", "todo"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("-s"), "{refused:?}");
+
+    // `.moai` 밖에서는 화면이든 `--json` 이든 **같은 말로** 거절한다(리뷰) — 화면의 거절이 "--json 을 더하라" 를
+    // 대면, 그대로 친 판이 다시 거절된다.
+    let outside = Scratch::new("tuishape-outside");
+    for args in [&["tui", "-s", "todo"][..], &["tui", "-s", "todo", "--json"][..]] {
+        let out = moai(outside.path(), args);
+        assert!(!out.status.success(), "{args:?}");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        assert!(said.contains("moai -C <dir> tui"), "{args:?}: {said}");
+    }
+}
+
 /// 시계가 가는 것만으로 드러나는 것들 — 고정 시계 없이는 시험할 수 없다.
 #[test]
 fn time_alone_surfaces_rot() {
@@ -8109,6 +8338,8 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
     "init",
+    // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
+    "config",
     "add",
     "status",
     "ready",
@@ -8297,6 +8528,98 @@ fn read_names_the_ids_a_hand_written_value_held_back() {
     assert!(said.contains(&format!(r#""held":["{b}"]"#)), "막힌 id 를 이름으로 안 냈다 — {said}");
     assert!(said.contains(r#""read":[]"#) && said.contains(r#""missing":[]"#), "{said}");
     assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("\"{b}\" = 3")), "사람이 적은 값을 덮었다");
+}
+
+/// **`show --json` 은 탐색기의 [NEW] 를 `unread: true` 로 싣는다**(moai-cqwy) — 같은 자(`query::unread_held`)다.
+/// 내게 온 줄(담당·자식·내 에픽의 멤버)만 서고 마일스톤의 멤버와 남의 줄은 안 선다. `moai read` 가 내리고,
+/// 목록과 하나를 펼친 것이 같은 답을 낸다. 키는 설 때만 단다 — 없는 것이 곧 읽은 것이다.
+/// **누군지 모르면 키가 하나도 없고 명령은 0 으로 끝난다** — 읽기는 사람을 묻지 않는다.
+#[test]
+fn show_json_marks_the_rows_unread_for_me() {
+    let s = init("showunread");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let own = field(&mine(&["add", "내 일", "--json"]), "id");
+    let other = field(&mine(&["add", "남의 일", "-a", "Kim (kim@example.com)", "--json"]), "id");
+    let stone = field(&mine(&["milestone", "add", "v1", "--json"]), "id");
+    let in_stone =
+        field(&mine(&["add", "마일 멤버", "--milestone", &stone, "-a", "Kim (kim@example.com)", "--json"]), "id");
+    let epic = field(&mine(&["add", "내 에픽", "--type", "epic", "--json"]), "id");
+    let in_epic = field(&mine(&["add", "에픽 멤버", "-e", &epic, "-a", "Kim (kim@example.com)", "--json"]), "id");
+    let unread_in = |json: &str| -> Vec<String> {
+        let rows: Vec<serde_json::Value> = serde_json::from_str(json.trim()).unwrap();
+        let mut ids: Vec<String> = rows
+            .iter()
+            .filter(|r| {
+                // 키는 설 때만 — `false` 로 서면 안 된다.
+                assert_ne!(r.get("unread"), Some(&serde_json::Value::Bool(false)), "{r}");
+                r.get("unread") == Some(&serde_json::Value::Bool(true))
+            })
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+    let one_unread = |id: &str| -> Option<serde_json::Value> {
+        let v: serde_json::Value = serde_json::from_str(mine(&["show", id, "--json"]).trim()).unwrap();
+        v.get("unread").cloned()
+    };
+
+    // 아직 아무것도 안 읽었다 — 읽음 파일이 없는 것은 정상이고 내게 온 것이 모두 선다.
+    let mut want = vec![own.clone(), stone.clone(), epic.clone(), in_epic.clone()];
+    want.sort();
+    assert_eq!(unread_in(&mine(&["show", "--all", "--json"])), want, "마일스톤 멤버·남의 줄이 섰거나 내 것이 빠졌다");
+    assert_eq!(one_unread(&own), Some(serde_json::Value::Bool(true)));
+    assert_eq!(one_unread(&other), None, "남의 줄에 섰다");
+    assert_eq!(one_unread(&in_stone), None, "마일스톤의 멤버를 셌다");
+    // 목록과 하나를 펼친 것이 **줄마다** 같은 답이다.
+    let listed: Vec<serde_json::Value> = serde_json::from_str(mine(&["show", "--all", "--json"]).trim()).unwrap();
+    for r in &listed {
+        let id = r["id"].as_str().unwrap();
+        assert_eq!(one_unread(id), r.get("unread").cloned(), "{id} 에서 목록과 하나가 갈렸다");
+    }
+    // 걸러 낸 목록도 같은 자다 — **소속은 걸러지기 전의 줄로 잰다**. 남의 멤버는 내 에픽에 들어 서는데,
+    // 그 에픽 줄은 `-e` 의 목록에 없다 — 보이는 줄만으로 재면 이 줄이 빠진다.
+    assert_eq!(unread_in(&mine(&["show", "-e", &epic, "--json"])), vec![in_epic.clone()], "보이는 줄로만 쟀다");
+
+    // 읽으면 내린다 — 목록에서도, 하나를 펼쳐도.
+    mine(&["read", &own, &in_epic]);
+    let mut want = vec![stone.clone(), epic.clone()];
+    want.sort();
+    assert_eq!(unread_in(&mine(&["show", "--all", "--json"])), want, "읽은 줄이 그대로 섰다");
+    assert_eq!(one_unread(&own), None, "읽은 줄을 펼쳤는데 섰다");
+    assert_eq!(unread_in(&mine(&["show", "-e", &epic, "--json"])), Vec::<String>::new(), "읽은 멤버가 그대로 섰다");
+
+    // 누군지 모른다 — 키가 하나도 없고 명령은 넘어지지 않는다.
+    let bare = |args: &[&str]| {
+        let out = isolated(BIN)
+            .args(args)
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &cfg)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "누군지 몰라 show 가 넘어졌다 — {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let list = bare(&["show", "--all", "--json"]);
+    assert!(!list.contains("\"unread\""), "누군지 모르는데 안 읽음을 셌다 — {list}");
+    let one = bare(&["show", &stone, "--json"]);
+    assert!(!one.contains("\"unread\""), "누군지 모르는데 안 읽음을 셌다 — {one}");
+
+    // 읽음을 못 든다 — "모른다" 라 키가 하나도 없고(빈 표로 세면 내 줄이 모두 선다) 명령은 0 으로 끝난다.
+    let sheets: Vec<std::path::PathBuf> = std::fs::read_dir(s.path().join("read"))
+        .expect("`moai read` 가 읽음 파일을 설정 곁에 안 지었다")
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    assert_eq!(sheets.len(), 1, "읽음 파일을 못 골랐다 — {sheets:?}");
+    std::fs::write(&sheets[0], "garbage [[[\n").unwrap();
+    let list = mine(&["show", "--all", "--json"]);
+    assert!(!list.contains("\"unread\""), "못 든 읽음을 빈 표로 셌다 — {list}");
+    let one = mine(&["show", &stone, "--json"]);
+    assert!(!one.contains("\"unread\""), "못 든 읽음을 빈 표로 셌다 — {one}");
 }
 
 /// **읽음은 본 때가 아니라 본 줄의 `updated_at` 을 적는다**(moai-lyc1, 사용자 결정 2026-09-19). 본 때를
@@ -8602,6 +8925,7 @@ fn every_command_still_speaks_json() {
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
         vec!["models", "--json"],
+        vec!["config", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
@@ -15758,6 +16082,73 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     // 겨눌 것이 없다. `-C <루트>` 를 붙이던 것은 그 옮김이 없던 때의 일이다(moai-gyqh).
     assert!(own.contains(&format!("moai mv {there}")), "제 워크트리에서 제 일을 놓친다\n{own}");
     assert!(!own.contains("-C "), "이제 겨눌 것이 없는데 -C 를 붙인다\n{own}");
+}
+
+/// **여러 세션이 도는 판에서는 아무도 적지 않은 집힌 줄이 누구의 것인지 모른다**(moai-pyi4, 2026-10-14 사용자 결정).
+/// 같은 사람의 감독과 일꾼 세션이 한 트래커를 쓸 때, 훅이 안 돈 자리(워크트리 안에서 띄운 세션)에서 집은 줄이 감독의
+/// 초점에 서서 감독의 `add -e`·`backlog promote -e` 를 막고 `Stop` 이 그것을 닫으라고 붙들었다. 다른 세션이 최근에
+/// 집기를 적었으면 그 줄은 풀기만 하는 판정에서 빠진다. 혼자 쓰는 판은 전과 같다 — 터미널 집기는 이 세션의 일이다.
+#[test]
+fn another_running_session_frees_rows_nobody_recorded() {
+    let s = init("hookcrowd");
+    let loose = add(s.path(), &["훅 없이 집은 줄"]);
+    ok(s.path(), &["mv", &loose, "in_progress"]);
+    let mine = field(&ok(s.path(), &["epic", "add", "감독이 펼칠 에픽", "--json"]), "id");
+    let made = |session: &str| call(&s, "Bash", &format!("{{\"command\":\"moai add 'x' -e {mine}\"}}"), session);
+    let stop = |session: &str| hook_out(&s, "stop", &event(&s, session));
+
+    // 혼자 쓰는 판 — 기록 없는 집힌 줄은 이 세션의 일이다.
+    assert!(refusal(&made("sup")).contains(&loose), "혼자 쓰는 판의 터미널 집기를 놓았다");
+    let alone = stop("sup");
+    assert!(alone.contains(&format!("moai mv {loose}")), "혼자 쓰는 판에서 안 붙든다");
+    // 붙든 줄마다 왜 이 세션의 것인지 댄다(moai-pyi4.w47) — 막힌 자리에서 근거가 읽혀야 한다. 붙드는 글은 말묶음에서
+    // 오니(이 시험은 한국어 화면이다) 근거도 그 말이다 — 한국어 붙듦에 영어 꼬리를 달던 판이 있었다(리뷰 moai-pyi4.7g5).
+    assert!(
+        alone.contains("이 세션이 쥔 까닭:")
+            && alone.contains(&format!("{loose}  집었다고 적은 세션이 없다"))
+            && alone.contains("지난 12시간 동안 다른 세션이 여기 적은 집기도 없다"),
+        "붙든 근거를 안 댄다\n{alone}"
+    );
+    assert!(!alone.contains("Why this session holds them"), "한국어 붙듦에 영어 근거를 달았다\n{alone}");
+    // 규칙의 거절문은 아직 영어 하나라 근거도 영어다.
+    assert!(refusal(&made("sup2-early")).contains("Why this session holds them"), "거절문이 근거를 안 댄다");
+
+    // 다른 세션이 제 줄을 훅으로 집는다 — 이제 여러 세션이 도는 판이다.
+    let theirs = add(s.path(), &["일꾼의 줄"]);
+    let picked = call(&s, "Bash", &format!("{{\"command\":\"moai mv {theirs} in_progress --from todo\"}}"), "worker");
+    assert!(picked.trim().is_empty(), "일꾼의 집기를 막았다\n{picked}");
+    ok(s.path(), &["mv", &theirs, "in_progress", "--from", "todo"]);
+
+    let free = made("sup2");
+    assert!(free.trim().is_empty(), "아무도 안 적은 줄과 일꾼의 줄로 감독의 생성을 막았다\n{free}");
+    let held = stop("sup2");
+    assert!(held.trim().is_empty(), "감독에게 남의 줄을 닫으라고 붙든다\n{held}");
+    // 일꾼은 제가 적은 줄을 그대로 쥔다.
+    let own = stop("worker");
+    assert!(own.contains(&format!("moai mv {theirs}")), "일꾼이 제 줄을 놓았다");
+    assert!(own.contains(&format!("{theirs}  이 세션이 집었다")), "제 기록을 근거로 안 댄다\n{own}");
+
+    // 규칙 3 — 감독의 리뷰는 남의 줄 밑에 리뷰 이슈를 세우라고 안 한다. 일꾼에게는 제 줄만 댄다(일꾼에게 그 판은
+    // 붐비지 않는다 — 다른 세션이 기록을 안 적었으니, 아래 둘째 일꾼이 붐비게 한다).
+    let review = |session: &str| call(&s, "Skill", "{\"skill\":\"code-review\",\"args\":\"high\"}", session);
+    // 빈손의 감독은 "무엇을 보는지부터 정하라" 를 듣는다 — 남의 줄을 대지 않는다.
+    let sup = refusal(&review("sup2"));
+    assert!(!sup.contains(&loose) && !sup.contains(&theirs), "빈손의 감독에게 남의 줄 밑 리뷰를 시킨다 — {sup}");
+    let other = add(s.path(), &["둘째 일꾼의 줄"]);
+    // 둘째 일꾼의 집기가 적혀야 일꾼에게 그 판이 붐빈다 — 안 적히면 아래 거절은 초점의 첫 줄을 대고, 그 첫 줄은 무른
+    // id 의 차례라 셋에 하나꼴로 우연히 맞는다(리뷰 moai-pyi4.7g5).
+    let second = call(&s, "Bash", &format!("{{\"command\":\"moai mv {other} in_progress --from todo\"}}"), "worker2");
+    assert!(second.trim().is_empty(), "둘째 일꾼의 집기를 막았다\n{second}");
+    ok(s.path(), &["mv", &other, "in_progress", "--from", "todo"]);
+    // 붐비는 판에서 일꾼의 거절은 제 줄만 대고, 아무도 안 적은 줄과 둘째 일꾼의 줄은 모르는 줄로 뺀다.
+    let freed = refusal(&made("worker"));
+    assert!(
+        freed.contains(&theirs) && !freed.contains(&loose) && !freed.contains(&other),
+        "붐비는 판에서 일꾼이 남의 줄로 막혔다 — {freed}"
+    );
+    let why = refusal(&review("worker"));
+    assert!(why.contains(&theirs), "일꾼의 리뷰 거절이 제 줄을 안 댄다 — {why}");
+    assert!(!why.contains(&loose) && !why.contains(&other), "일꾼에게 남의 줄 밑 리뷰를 시킨다 — {why}");
 }
 
 /// **제 이름 워크트리가 옆 에픽 워크트리를 이긴다**(moai-m62u·moai-cle9, 사용자 결정). 에픽
