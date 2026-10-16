@@ -43,7 +43,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Scratch {
-        let dir = scratch::base().join(format!(
+        let dir = plain(scratch::base()).join(format!(
             "moai-cli-{}-{}-{name}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -64,6 +64,36 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+/// `canonicalize` 가 Windows 에서 붙이는 `\\?\` 를 걷는다(moai-lag7.rrm). 제품의 `path::unverbatim` 과 같은 규칙이다 —
+/// 시험 크레이트라 그것을 못 들여 글로 맨다.
+/// - 그 꼴은 `sh` 가 `\` 를 먹어 `cp '\?C:Users…'` 가 되고, git 은 `worktree add` 에서 받지 못하며, 손으로 짓는 JSON 은
+///   그 자리에서 깨진다. 사람이 손에 드는 철자는 `C:\…` 다
+/// - 유닉스에서는 그런 철자가 없어 받은 그대로다 — 리눅스의 판은 한 글자도 안 바뀐다
+fn plain(p: PathBuf) -> PathBuf {
+    let Some(s) = p.to_str() else { return p };
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        p
+    }
+}
+
+/// 링크를 푼 자리 — `std::fs::canonicalize` 에 [`plain`] 을 씌운 것. 시험이 도구의 철자와 견줄 때 쓴다.
+fn canon(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(p).map(plain)
+}
+
+/// JSON 문자열 안에 넣을 글 — 따옴표 없이 푼 몸만 낸다(moai-lag7.rrm). 손으로 짓는 JSON 과 도구가 낸 JSON 에서
+/// 찾을 조각이 이것을 거친다.
+/// - Windows 의 자리는 늘 `\` 를 품어, 날것으로 넣으면 깨진 JSON 이 되고 도구가 낸 `\\` 와도 안 맞는다
+/// - 유닉스의 시험 자리에는 풀 글자가 없어 받은 그대로다
+fn js(text: impl std::fmt::Display) -> String {
+    let quoted = serde_json::to_string(&text.to_string()).unwrap();
+    quoted[1..quoted.len() - 1].to_string()
 }
 
 /// **시험이 띄우는 프로세스는 시험을 돌리는 사람의 기계를 읽지 않는다.** 모든
@@ -1980,7 +2010,7 @@ fn saying_where_init_goes_does_not_inherit_moai_here() {
     let here = |args: &[&str]| ok_env(&deep, NOW, &[("MOAI_HERE", "1")], args);
     let json = here(&["init", "--check", "--json"]);
     assert!(json.contains("tracker_at"), "손잡이를 켰다고 댈 자리를 통째로 뺐다\n{json}");
-    let real = std::fs::canonicalize(&main).unwrap().display().to_string();
+    let real = canon(&main).unwrap().display().to_string();
     assert!(json.contains(&real), "주 체크아웃이 아닌 자리를 댔다\n{json}");
 
     // 거절은 그대로 꺼진다 — 켠 사람의 `init` 은 여기 심는다([`ok_env`] 가 0 을 잰다).
@@ -2030,7 +2060,7 @@ fn every_surface_that_says_init_points_at_the_main_checkout() {
     let run = |dir: &Path, args: &[&str]| ok_with(dir, &cfg, args);
     // **푼 경로로 견준다** — 등록도 자리 판정도 링크를 풀므로(`user_config::resolve_dir`·
     // `worktree::main_root`), 스크래치 철자로 재면 기계마다 갈린다.
-    let real = |p: &Path| std::fs::canonicalize(p).unwrap().display().to_string();
+    let real = |p: &Path| canon(p).unwrap().display().to_string();
     let (there, here) = (real(&main), real(&deep));
     let go = |at: &str| format!("moai -C {at} init");
     // 등록 쪽이 대야 할 것은 `init` 이 아니라 등록이다 — 위의 다섯째 문단이 그 까닭이다.
@@ -5685,7 +5715,7 @@ fn prime_says_the_unreadable_tracker_was_climbed_to_and_gives_both_ways() {
     let proj = s.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
     git(&proj, &["init", "-q"]);
-    let top = std::fs::canonicalize(s.path()).unwrap().display().to_string();
+    let top = canon(s.path()).unwrap().display().to_string();
 
     let out = moai(&proj, &["prime"]);
     assert!(out.status.success(), "{}", text(&out));
@@ -5722,7 +5752,7 @@ fn prime_names_the_real_place_after_climbing() {
     use std::os::unix::fs::PermissionsExt as _;
     let s = init("primeclimbplace");
     std::fs::write(s.path().join(".moai/config.toml"), "<<<<<<< HEAD\n").unwrap();
-    let top = std::fs::canonicalize(s.path()).unwrap();
+    let top = canon(s.path()).unwrap();
     let proj = top.join("proj");
     let src = proj.join("src");
     std::fs::create_dir_all(&src).unwrap();
@@ -7887,7 +7917,7 @@ fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
 
     let sub = s.path().join("src").join("deep");
     std::fs::create_dir_all(&sub).unwrap();
-    let root = std::fs::canonicalize(s.path()).unwrap();
+    let root = canon(s.path()).unwrap();
     let below = ok(&sub, &["status"]);
     assert!(below.contains(&format!("`moai -C {} init`", root.display())), "하위에서 뿌리를 안 댄다 — {below}");
     assert!(!sub.join(".moai").exists());
@@ -8201,7 +8231,7 @@ fn read_sheets(cfg: &std::path::Path, root: &std::path::Path) -> Vec<(PathBuf, S
     // **링크를 푼 철자로 견준다.** 적는 쪽이 뿌리를 `canonicalize` 로 모으므로(`read_marks::settle`),
     // `TMPDIR` 이 링크인 기계에서는 시험이 든 철자와 파일에 적힌 철자가 갈린다 — 여기서 풀지 않으면
     // 다섯 단언이 제품이 아니라 임시 자리의 철자 때문에 붉다. 어느 뿌리의 것인지를 보는 힘은 그대로다.
-    let real = std::fs::canonicalize(root).unwrap_or_else(|e| panic!("{}: {e}", root.display()));
+    let real = canon(root).unwrap_or_else(|e| panic!("{}: {e}", root.display()));
     let mine = format!("path = {:?}", real.display().to_string());
     files
         .into_iter()
@@ -8692,7 +8722,7 @@ fn tests_do_not_read_the_runners_home() {
     }
 
     let s = init("leakprobe");
-    let root = s.path().canonicalize().unwrap();
+    let root = canon(s.path()).unwrap();
     let market = field(&ok(s.path(), &["skill", "install", "--dry-run", "--json"]), "market");
     let leak = Scratch::new("leakprobe-home");
     let ledger = |plugins: &Path| {
@@ -12973,7 +13003,7 @@ fn rm_line_preview_command_keeps_the_dir_it_was_given() {
     add(s.path(), &["산 줄"]);
     let path = s.path().join(".moai/issues.jsonl");
     std::fs::write(&path, format!("{}쓰레기\n", issues(s.path()))).unwrap();
-    let root = std::fs::canonicalize(s.path()).unwrap();
+    let root = canon(s.path()).unwrap();
     let dir = s.path().display().to_string();
     let away = Scratch::new("rmlinedir-away");
 
@@ -14762,8 +14792,9 @@ fn carried_text(out: &str) -> String {
 }
 
 fn event(s: &Scratch, session: &str) -> String {
-    let cwd = s.path().display().to_string();
-    assert!(!cwd.contains(['"', '\\']), "시험 경로에 따옴표가 있다 — {cwd}");
+    // JSON 글로 짓는다(moai-lag7.rrm) — Windows 의 자리는 늘 `\` 를 품어, 손으로 이어 붙이면 깨진 JSON 이 된다.
+    // 유닉스의 자리에는 풀 글자가 없어 이어 붙이던 글과 바이트째 같다.
+    let cwd = js(s.path().display());
     format!("{{\"session_id\":\"{session}\",\"cwd\":\"{cwd}\"}}")
 }
 
@@ -15416,7 +15447,7 @@ fn refusal(out: &str) -> String {
 }
 
 fn call(s: &Scratch, tool: &str, body: &str, session: &str) -> String {
-    let cwd = s.path().display().to_string();
+    let cwd = js(s.path().display());
     hook_out(
         s,
         "pre-tool-use",
@@ -17859,6 +17890,29 @@ fn reviews_are_judged_through_the_contract() {
 fn place_exe(src: &Path, dst: &Path) {
     let out = Command::new("cp").arg(src).arg(dst).output().unwrap();
     assert!(out.status.success(), "{}", text(&out));
+    // **Windows 는 `#!` 줄을 안 읽는다**(moai-lag7.rrm) — 셸 글이면 곁에 `<이름>.cmd` 를 세워 `sh` 로 넘긴다. moai 는
+    // `PATHEXT` 로 그 `.cmd` 를 찾아 띄우므로(`cmd::program`) 가짜 `claude` 가 유닉스에서처럼 불린다. 몸은 `dst` 에
+    // 그대로 남아, 그것을 지우고 다시 내놓는 시험도 같은 자리를 짚는다.
+    #[cfg(windows)]
+    if std::fs::read(src).is_ok_and(|body| body.starts_with(b"#!")) {
+        let mut shim = dst.as_os_str().to_owned();
+        shim.push(".cmd");
+        std::fs::write(&shim, format!("@\"{}\" \"{}\" %*\r\n", sh_exe().display(), dst.display())).unwrap();
+    }
+}
+
+/// 시험을 돌리는 셸의 `sh.exe`(Git for Windows 의 것) — `.cmd` 받침이 셸 글을 넘길 곳이다. 가짜를 띄우는 시험은
+/// PATH 를 제 것으로 좁히므로 이름이 아니라 자리로 적는다.
+#[cfg(windows)]
+fn sh_exe() -> PathBuf {
+    static SH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    SH.get_or_init(|| {
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|d| d.join("sh.exe"))
+            .find(|p| p.is_file())
+            .expect("PATH 에 sh.exe 가 없다 — Git Bash 에서 돌린다")
+    })
+    .clone()
 }
 
 struct Claude {
@@ -17942,8 +17996,9 @@ impl Claude {
         // PATH 에는 가짜 `claude` 와 `sh` 하나만 둔다. `/usr/bin:/bin` 을 통째로 두면
         // 그 자리에 진짜 `claude` 가 깔린 기계에서 시험이 사람의 등록을 부른다.
         let sys = self.home.path().join("sysbin");
-        let path =
-            if with_claude { format!("{}:{}", self.bin.display(), sys.display()) } else { sys.display().to_string() };
+        // 가름 글자는 OS 의 것이다(moai-lag7.rrm) — Windows 는 `;` 로 가르고 `C:` 의 `:` 를 안 가른다.
+        let dirs: &[&Path] = if with_claude { &[&self.bin, &sys] } else { &[&sys] };
+        let path = std::env::join_paths(dirs).unwrap();
         let mut cmd = isolated(bin);
         cmd.args(args).current_dir(dir).env("HOME", self.home.path()).env("PATH", path).env("NO_COLOR", "1");
         cmd
@@ -18161,7 +18216,7 @@ fn skill_install_writes_the_spelling_it_was_called_by() {
     // 상대 철자는 `cwd` 에 붙여 `..` 만 접는다. `cwd` 는 커널이 푼 자리라 견줄 값도 푼 자리에서 짓는다.
     let mut up = c.command(Path::new(BIN), &s.path().join(".moai"), &plan, false);
     up.arg0("../via/moai");
-    let real_root = std::fs::canonicalize(s.path()).unwrap();
+    let real_root = canon(s.path()).unwrap();
     assert_eq!(exe(&mut up), real_root.join("via/moai").display().to_string(), "상대 철자를 그대로 적었다");
 
     let mut lied = c.command(Path::new(BIN), s.path(), &plan, false);
@@ -20934,8 +20989,8 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
     let argos = init("project-argos");
     let bare = home.path().join("bare");
     std::fs::create_dir_all(&bare).unwrap();
-    let argos_real = argos.path().canonicalize().unwrap();
-    let bare_real = bare.canonicalize().unwrap();
+    let argos_real = canon(argos.path()).unwrap();
+    let bare_real = canon(&bare).unwrap();
 
     let added = project_ok(home.path(), &config, &["project", "add", argos.path().to_str().unwrap()]);
     assert!(added.contains("등록함") && !added.contains("init 전"), "{added}");
@@ -21228,7 +21283,7 @@ fn project_registers_monorepo_subdirs_separately() {
     project_ok(repo.path(), &config, &["project", "add", "."]);
 
     let json = project_ok(repo.path(), &config, &["project", "ls", "--json"]);
-    let root = repo.path().canonicalize().unwrap();
+    let root = canon(repo.path()).unwrap();
     for (name, path) in [("apps/a", root.join("apps/a")), ("b", root.join("apps/b")), ("libs/a", root.join("libs/a"))] {
         let row = format!("{{\"name\":\"{name}\",\"path\":\"{}\",\"state\":\"uninitialized\"", path.display());
         assert!(json.contains(&row), "{row} 가 없다 — 루트의 .moai 를 제 것으로 읽었거나 이름을 못 갈랐다\n{json}");
@@ -25605,7 +25660,7 @@ fn init_register_adds_the_repository_to_the_project_list() {
     assert!(out.status.success(), "{js}");
     assert!(js.contains("\"project\":{") && js.contains("\"added\":true"), "{js}");
     assert!(js.contains("\"skill\":false"), "안 시킨 설치를 했다 — {js}");
-    let root = std::fs::canonicalize(&root).unwrap();
+    let root = canon(&root).unwrap();
     assert!(read(&config).contains(&root.display().to_string()), "목록에 안 올랐다");
 }
 
@@ -26105,8 +26160,9 @@ const RECORDED_AT: &str = "/home/coder/workspace/moa-issue";
 fn recorded(s: &Scratch, rel: &str) -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/hooks").join(rel);
     let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let here = s.path().display().to_string();
-    assert!(!here.contains(['"', '\\']), "시험 경로에 따옴표가 있다 — {here}");
+    // JSON 글 안에 바꿔 넣으니 그 글의 규칙으로 푼다(moai-lag7.rrm) — Windows 의 `\` 가 날것으로 들면 JSON 이
+    // 깨진다. 유닉스의 자리에는 풀 글자가 없어 그대로다.
+    let here = js(s.path().display());
     assert!(raw.contains(RECORDED_AT), "{rel} 에 기록한 자리가 없다 — 바꿔 넣을 것이 없으면 시험이 헛돈다");
     raw.replace(RECORDED_AT, &here)
 }
@@ -27757,7 +27813,7 @@ fn update_runs_install_sh_over_the_running_binary() {
     }
     let s = Scratch::new("update-runs");
     let exe = hoisted(s.path());
-    let dir = std::fs::canonicalize(exe.parent().unwrap()).unwrap();
+    let dir = canon(exe.parent().unwrap()).unwrap();
     let record = s.path().join("argv.txt");
     let cfg = s.path().join("config.toml");
     let (url, server) = serving_script(recording_script(&record, 3), 2);
@@ -27918,7 +27974,7 @@ fn update_refuses_a_directory_it_cannot_write() {
     let Some(out) = out else { return };
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr).into_owned();
-    let real = std::fs::canonicalize(&bin).unwrap();
+    let real = canon(&bin).unwrap();
     assert!(err.contains(&real.display().to_string()), "못 쓰는 자리를 안 댄다\n{err}");
     assert!(err.contains("install.sh --dir"), "다시 까는 길을 안 댄다\n{err}");
 }
