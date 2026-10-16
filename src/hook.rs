@@ -6098,10 +6098,8 @@ fn create_in<'a>(
     // `route_one` 에서 **아직 있지도 않은** 자리뿐이고(`!dir.is_dir()` 가지에서만 그 표가 선다),
     // `moai -C <없는 자리>` 는 [`crate::main`] 의 `set_current_dir` 에서 곧바로 진다. 맨 `init` 만
     // 대던 판은 안 도는 줄을 안 도는 줄로 바꿨을 뿐이다 — 이 이슈(moai-bt1f)가 고치려던 그 모양이다.
-    let fresh: String = aim(at)
-        .filter(|a| !a.tracker)
-        .and_then(|a| a.at.to_str().map(dir_word))
-        .map_or_else(String::new, |d| {
+    let fresh: String =
+        aim(at).filter(|a| !a.tracker).and_then(|a| a.at.to_str().map(dir_word)).map_or_else(String::new, |d| {
             format!(
                 "\x20 mkdir -p {d} && moai -C {d} init\n\
                  \x20 moai -C {d} add '<title>'   if it really belongs over there — nothing stands at {d} yet\n"
