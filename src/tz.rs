@@ -324,15 +324,9 @@ fn name_under(at: &Path, dir: &Path) -> Option<String> {
 
 /// tzdb 밑의 상대 경로를 이름으로 — **마디는 늘 `/` 로 잇는다**(moai-lag7.951). Windows 의 `Path` 는
 /// `\` 로 이어 `Asia\Seoul` 을 냈고, 그 이름은 고르는 창에서 설정에 적히면 다른 기계에서 못 읽는 글이 된다.
+/// 바꾸는 자는 셸 줄의 철자와 같은 [`crate::path::slashed`] 다 — 유닉스에서는 받은 글 그대로다.
 fn slashed(rel: &Path) -> Option<String> {
-    let parts = rel
-        .components()
-        .map(|c| match c {
-            std::path::Component::Normal(s) => s.to_str(),
-            _ => None,
-        })
-        .collect::<Option<Vec<&str>>>()?;
-    Some(parts.join("/"))
+    Some(crate::path::slashed(rel.to_str()?, cfg!(windows)))
 }
 
 /// 화면이 설 시간대와, **그때 할 말 하나**. 고른 이름이 있으면 그것이 답이고, 없으면 시스템이다

@@ -237,21 +237,22 @@ pub fn skills() -> Vec<Skill> {
 /// **가르는 금은 어느 플랫폼에서나 `/` 다**(moai-lag7.951). `Path::join` 은 Windows 에서 `\` 를 끼워,
 /// [`version_of`] 가 셈하는 경로 글이 플랫폼마다 달라진다 — 같은 트리를 Linux 와 Windows 가 번갈아 심으면
 /// 커밋된 `plugin.json` 의 판이 매번 뒤집힌다. Windows 의 파일 API 는 `/` 를 그대로 받는다.
-fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (PathBuf, String)> + 'a
+///
+/// 경로를 글로 낸다 — 받는 쪽이 앞에 `skills/` 를 더 붙이므로(`tree_named`), `PathBuf` 로 냈다가 `display()` 로 도로
+/// 펴는 한 겹이 없다.
+fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (String, String)> + 'a
 where
     I: IntoIterator<Item = &'a Skill>,
     I::IntoIter: 'a,
 {
-    skills
-        .into_iter()
-        .flat_map(|s| s.files.iter().map(move |(rel, body)| (PathBuf::from(format!("{}/{rel}", s.name)), body.clone())))
+    skills.into_iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (format!("{}/{rel}", s.name), body.clone())))
 }
 
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
 /// 없다는 것과 Claude 에만 서는 스킬([`Skill::claude_only`], 감독)이 빠진다는 것뿐이고, 에이전트마다 다른 걸음은 글
 /// 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
 pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
-    skill_files(skills.iter().filter(|s| !s.claude_only)).collect()
+    skill_files(skills.iter().filter(|s| !s.claude_only)).map(|(p, b)| (PathBuf::from(p), b)).collect()
 }
 
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
@@ -904,7 +905,7 @@ pub fn tree(prefix: &str, root: &Path, exe: &str, skills: &[Skill]) -> Vec<(Path
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
 fn tree_named(market: &str, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
     let mut files: Vec<(PathBuf, String)> =
-        skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{}", p.display())), b)).collect();
+        skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{p}")), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
