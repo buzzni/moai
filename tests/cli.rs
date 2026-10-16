@@ -108,7 +108,7 @@ fn unjs(body: &str) -> String {
 
 /// 도구가 셸에 붙여 넣을 줄로 낸 자리 — 셸이 달리 읽을 글자가 있으면 `'…'` 로 싼다(Windows 의 `\` 가 늘 그렇다).
 /// 그 글자가 없는 유닉스의 시험 자리는 날것 그대로다. 두 꼴을 다 찾는다.
-/// 사람에게 보이는 상대 자리 — 도구는 그것을 OS 의 가름 글자로 잇는다(moai-lag7.rrm). 유닉스에서는 받은 그대로다.
+/// 도구가 화면·JSON 에 내는 상대 자리 — 도구는 그것을 OS 의 가름 글자로 잇는다(moai-lag7.rrm). 유닉스에서는 받은 그대로다.
 fn native(rel: &str) -> String {
     rel.replace('/', std::path::MAIN_SEPARATOR_STR)
 }
@@ -1876,7 +1876,8 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     git(&main, &["add", "-A"]);
     git(&main, &["commit", "-q", "-m", "init"]);
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
-    let deep = main.join(".claude/worktrees/argos-wt/src/deep");
+    // 도구는 `-C` 로 받은 자리를 OS 의 철자로 도로 낸다(moai-lag7.rrm) — 견줄 자리도 그 철자로 짓는다.
+    let deep = main.join(native(".claude/worktrees/argos-wt/src/deep"));
     std::fs::create_dir_all(&deep).unwrap();
 
     let out = moai(&deep, &["init", "argos"]);
@@ -14983,12 +14984,17 @@ fn a_relative_slip_or_mark_takes_the_old_path() {
     let again = prompt("rel", &tmp, Path::new("slip"));
     assert!(again.trim().is_empty(), "상대 쪽지 자리에서 표식이 안 섰다 — 보드가 매 프롬프트에 실린다\n{again}");
 
-    let absolute = tmp.join("slip");
-    let first = prompt("empty", Path::new(""), &absolute);
-    assert!(carried_text(&first).contains("락을 잡는다"), "보드가 안 실렸다\n{first}");
-    assert!(!absolute.exists(), "상대 표식 이름을 넘겼다 — 셸은 그것을 제 자리에 세운다");
-    let again = prompt("empty", Path::new(""), &absolute);
-    assert!(again.trim().is_empty(), "빈 TMPDIR 에서 표식이 안 섰다 — 보드가 매 프롬프트에 실린다\n{again}");
+    // 빈 `TMPDIR` 이 상대 표식 이름을 낳는 것은 유닉스의 `temp_dir` 뿐이다 — Windows 는 빈 `TMP`·`TEMP` 를 건너뛰어
+    // 사용자 자리나 Windows 디렉터리로 간다(`GetTempPath2W`). 그 판을 Windows 에서는 못 짓는다.
+    #[cfg(unix)]
+    {
+        let absolute = tmp.join("slip");
+        let first = prompt("empty", Path::new(""), &absolute);
+        assert!(carried_text(&first).contains("락을 잡는다"), "보드가 안 실렸다\n{first}");
+        assert!(!absolute.exists(), "상대 표식 이름을 넘겼다 — 셸은 그것을 제 자리에 세운다");
+        let again = prompt("empty", Path::new(""), &absolute);
+        assert!(again.trim().is_empty(), "빈 TMPDIR 에서 표식이 안 섰다 — 보드가 매 프롬프트에 실린다\n{again}");
+    }
 }
 
 /// **다 쓴 쪽지는 다음 쪽지를 쓸 때 걷는다**(리뷰 moai-45hf.nab). 셸은 내장만 써서 읽은 쪽지를 못 지우고
@@ -15664,7 +15670,7 @@ fn the_close_holds_once_and_then_lets_go() {
     let s = init("hookstop");
     let id = field(&ok(s.path(), &["add", "락을 잡는다", "--json"]), "id");
     ok(s.path(), &["mv", &id, "in_progress"]);
-    let cwd = s.path().display().to_string();
+    let cwd = js(s.path().display());
     let ev = format!("{{\"session_id\":\"s1\",\"cwd\":\"{cwd}\"}}");
 
     let held = hook_out(&s, "stop", &ev);
@@ -15677,7 +15683,7 @@ fn the_close_holds_once_and_then_lets_go() {
     let s2 = init("hookstop2");
     let id2 = field(&ok(s2.path(), &["add", "락을 잡는다", "--json"]), "id");
     ok(s2.path(), &["mv", &id2, "in_progress"]);
-    let cwd2 = s2.path().display().to_string();
+    let cwd2 = js(s2.path().display());
     let out = hook_out(&s2, "stop", &format!("{{\"session_id\":\"s1\",\"cwd\":\"{cwd2}\",\"stop_hook_active\":true}}"));
     assert!(out.trim().is_empty(), "이미 붙든 턴을 또 붙들었다 — {out}");
 }
@@ -16758,7 +16764,7 @@ fn a_row_picked_in_the_root_stands_in_a_nameless_worktree_only_once_picked_there
     // 그 워크트리 안에서 집으면(다음 칸으로 옮겨도 된다) 표식에 적혀 자리로 선다.
     ok_at(&side, &later, &["mv", &id, "review"]);
     let shown = ok_at(&main, &later, &["show", &id, "--json"]);
-    assert!(shown.contains(r#""place":"at""#) && shown.contains(dir), "표식에 적힌 자리를 못 봤다\n{shown}");
+    assert!(shown.contains(r#""place":"at""#) && shown.contains(&js(native(dir))), "표식에 적힌 자리를 못 봤다\n{shown}");
     assert!(!ok_at(&main, &later, &["status", "--json"]).contains("\"stranded\""), "산 일을 자리 없다고 했다");
 }
 
@@ -17030,7 +17036,7 @@ fn an_eclipsed_picked_row_is_not_stranded_while_a_side_works_it() {
     assert!(json.contains("\"duplicate_id\""), "쌍둥이를 못 세웠다 — 이 시험이 견줄 것이 없다\n{json}");
     assert!(!json.contains("\"stranded\""), "옆에서 도는 가려진 줄을 자리 없다고 했다\n{json}");
     let shown = ok_at(&main, LATER, &["show", &id, "--json"]);
-    assert!(shown.contains("\"place\":\"at\"") && shown.contains(dir), "{shown}");
+    assert!(shown.contains("\"place\":\"at\"") && shown.contains(&js(native(dir))), "{shown}");
 }
 
 /// **못 읽은 에픽 워크트리는 말은 하되 자리를 안 가린다**(moai-rgz9·moai-1i9d, 사용자 결정 2026-09-18).
@@ -17239,7 +17245,7 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     let dir2 = format!(".claude/worktrees/{other}");
     git(&main, &["worktree", "add", "-q", &dir2, "-b", &format!("worktree-{other}")]);
     let line = place(&ok(&inside, &["show", &other, "--worktree"]));
-    assert!(line.contains(&dir2), "main 에서 잰 상대 경로가 아니다\n{line}");
+    assert!(line.contains(&native(&dir2)), "main 에서 잰 상대 경로가 아니다\n{line}");
     assert!(!line.contains(&main.display().to_string()), "옆 워크트리가 절대 경로로 샜다\n{line}");
 
     // **제 워크트리 안에서 펼쳐도 자리는 빈 칸이 아니다** — 뿌리와 같은 자리라 잘라 내면 아무것도
@@ -20121,7 +20127,7 @@ fn skill_install_leaves_nothing_an_older_moai_planted() {
 
     // `uninstall` 은 남은 일꾼 스킬도 손으로 지울 자리로 댄다 — moai 가 심었던 이름이다.
     let said = text(&c.run(s.path(), &["skill", "uninstall", "--agent", "codex"], true));
-    assert!(said.contains(&format!("rm -r {}", shared.join("moai-work").display())), "{said}");
+    assert!(shell_spelt(&said, "rm -r ", shared.join("moai-work").display(), ""), "{said}");
     assert!(!said.contains("theirs"), "남의 스킬까지 댄다\n{said}");
 }
 
@@ -26072,9 +26078,12 @@ fn init_uses_the_persons_global_excludes_on_first_and_later_runs() {
     let ignore = s.path().join("ignore");
     std::fs::write(&ignore, ".moai/\n").unwrap();
     let config = s.path().join("global-config");
+    // git 설정의 값에서 `\` 는 풀이 글자다(moai-lag7.rrm) — Windows 의 자리는 `\\` 로 적어야 그 글자로 읽힌다. 유닉스의
+    // 시험 자리에는 `\` 가 없어 그대로다.
+    let value = |p: &Path| p.display().to_string().replace('\\', "\\\\");
     std::fs::write(
         &config,
-        format!("[core]\nexcludesFile = {}\n[safe]\ndirectory = {}\n", ignore.display(), root.display()),
+        format!("[core]\nexcludesFile = {}\n[safe]\ndirectory = {}\n", value(&ignore), value(&root)),
     )
     .unwrap();
     let run = |args: &[&str]| {
@@ -26127,7 +26136,8 @@ fn init_reads_a_linked_worktrees_guide_from_the_main_tracker() {
     std::fs::write(main.join(".moai/guide.md"), b"bad\xff\n").unwrap();
     let out = moai(&side, &["init", "--check"]);
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains(&main.join(".moai/guide.md").display().to_string()));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&main.join(native(".moai/guide.md")).display().to_string()), "{err}");
 }
 
 #[cfg(unix)]
