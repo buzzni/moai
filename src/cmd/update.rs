@@ -37,8 +37,8 @@ pub fn run(ctx: &Ctx, a: UpdateArgs) -> R<Vec<String>> {
         )
     })?;
     // **푼 자리다** — 링크로 선 `~/bin/moai` 를 올리면 링크가 아니라 그 끝의 파일을 갈아야 한다. Windows 의
-    // 푼 철자에 붙는 `\\?\` 는 여기서 한 번 걷는다 — 거절문·`--json` 의 `dir`·인자가 한 철자를 댄다.
-    let exe = crate::update::plain(&crate::path::real(&exe));
+    // `\\?\` 는 푸는 자가 걷는다([`crate::path::canonical`]) — 거절문·`--json` 의 `dir`·인자가 한 철자를 댄다.
+    let exe = crate::path::real(&exe);
     let runner = crate::update::Runner::native(&std::env::temp_dir());
     if let Some(why) = crate::update::refusal(&exe, crate::latest::SERVED, crate::update::writable) {
         return Err(Fail::coded(crate::view::update_refused(lang, &why, &runner), code::NOT_UPDATABLE));

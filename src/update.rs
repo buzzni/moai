@@ -233,8 +233,9 @@ pub fn plan(repo: &str, script: String, dir: &Path, version: Option<&str>, runne
 /// 판은 그런 자리를 접두어째 넘겨, 그 앞의 `to_string_lossy` 판이 없는 자리로 거절하던 것을 거절 문을 지나 PowerShell
 /// 까지 보냈다.
 ///
-/// **푼 자리를 받는 곳에서 한 번 걷는다**(`cmd::update`, 리뷰) — 인자 하나에서만 걷던 판은 `--json` 의
-/// `dir` 과 거절문이 `\\?\C:\…` 를, 인자는 `C:\…` 를 대 한 자리를 두 철자로 말했다.
+/// **푼 자리는 푸는 자가 이미 걷어 온다**([`crate::path::canonical`], moai-lag7.951) — `cmd::update` 가 넘기는
+/// 자리에는 걷을 것이 없고, 이것은 [`plan`] 이 받은 자리를 제 손으로 한 번 더 지키는 자다. 인자 하나에서만 걷던
+/// 판은 `--json` 의 `dir` 과 거절문이 `\\?\C:\…` 를, 인자는 `C:\…` 를 대 한 자리를 두 철자로 말했다(리뷰).
 pub fn plain(dir: &Path) -> PathBuf {
     PathBuf::from(crate::path::unverbatim(dir.as_os_str()))
 }

@@ -266,7 +266,8 @@ pub fn built_by_cargo(dir: &Path) -> bool {
 /// **`moai update` 가 서는지는 그 명령이 거절하는 자로 잰다** — 자리는 [`crate::update::refusal`] 로,
 /// 받을 저장소는 부르는 쪽이 `cmd::update::chosen_repo` 로 재어 `repo_ok` 에 싣는다. 안내가 `moai update` 를
 /// 대고 그 명령은 거절하는 판을 안 만든다. 저장소 값 때문에만 못 서면 긴 줄을 댄다 — 자리를 못 쓰면 그 줄도 못 서니 `None` 이다.
-/// 바이너리의 자리도 그 명령과 **같은 철자로** 잰다(`update::plain`, 리뷰 moai-j9gv.8gr) — 푼 철자 그대로 재던 판은
+/// 바이너리의 자리도 그 명령과 **같은 철자로** 잰다(접두어를 걷은 [`crate::path::real`], 리뷰 moai-j9gv.8gr) — 푼
+/// 철자를 `\\?\` 째 재던 판은
 /// 이름 끝이 빈칸이거나 장치 이름(`aux`)인 Windows 디렉터리에서 안내는 `moai update` 를 대고 명령은 거절했다.
 pub fn upgrade_here(repo: &str, repo_ok: bool) -> Option<String> {
     upgrade_in(|k| std::env::var_os(k), &std::env::current_exe().ok()?, repo, repo_ok)
@@ -277,10 +278,9 @@ pub fn upgrade_here(repo: &str, repo_ok: bool) -> Option<String> {
 /// 안 붉어졌다.
 fn upgrade_in(env: impl Fn(&str) -> Option<OsString>, exe: &Path, repo: &str, repo_ok: bool) -> Option<String> {
     // 둘을 같은 철자로 푼다 — [`upgrade_line`] 이 `starts_with` 로 견주는데, Windows 에서 `C:\…` 와 `\\?\C:\…` 는
-    // 같은 자리여도 안 맞는다.
-    let plain = |p: &Path| crate::update::plain(&crate::path::real(p));
-    let exe = plain(exe);
-    let home = crate::user_config::home_here(env).map(|h| plain(&h));
+    // 같은 자리여도 안 맞는다. 푸는 자가 접두어까지 걷는다([`crate::path::canonical`]).
+    let exe = crate::path::real(exe);
+    let home = crate::user_config::home_here(env).map(|h| crate::path::real(&h));
     upgrade_for(&exe, home.as_deref(), SERVED, repo, repo_ok, crate::update::writable)
 }
 

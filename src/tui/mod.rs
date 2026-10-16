@@ -3366,7 +3366,7 @@ impl App {
             return Some(k.clone());
         }
         // 지금 자리는 한 번만 푼다 — `same_dir` 은 두 쪽을 다 풀어, 열쇠마다 부르면 같은 자리를 열쇠 수만큼 다시 판다.
-        let real = crate::path::canonical(&here).unwrap_or(here);
+        let real = crate::path::real(&here);
         if let Some(k) = self.order_projects.keys().find(|k| {
             let k = std::path::Path::new(k.as_str());
             k == real || crate::path::canonical(k).is_ok_and(|k| k == real)
