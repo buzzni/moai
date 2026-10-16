@@ -2810,7 +2810,9 @@ mod tests {
         let main = Path::new("/main");
         let said = check_worktree(crate::i18n::Lang::En, main, None, true, Some(Path::new("/main/wt")));
         assert_eq!(said.len(), 2, "밑자리에서 둘째 줄이 없다 — {said:?}");
-        assert!(said[1].contains("/main/wt/.moai"), "읽고 있는 트래커를 안 댔다 — {}", said[1]);
+        // 잇는 가름선은 이 기계의 것이다 — 표본의 `/` 와 섞여도 사람이 읽는 철자는 그 기계의 것이다(moai-lag7.vva).
+        let reading = Path::new("/main/wt").join(".moai").display().to_string();
+        assert!(said[1].contains(&reading), "읽고 있는 트래커를 안 댔다 — {}", said[1]);
         assert!(!said[1].contains("MOAI_HERE=1 moai init"), "가릴 명령을 그대로 댔다 — {}", said[1]);
     }
 
