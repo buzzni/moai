@@ -6100,8 +6100,7 @@ fn create_in<'a>(
     // 대던 판은 안 도는 줄을 안 도는 줄로 바꿨을 뿐이다 — 이 이슈(moai-bt1f)가 고치려던 그 모양이다.
     let fresh: String = aim(at)
         .filter(|a| !a.tracker)
-        // 철자는 [`aim_flag`] 와 같은 자다 — Windows 에서 `C:/…`(moai-lag7.951). 한 거절문 안에서 같은 뜻의 `-C` 가 두 꼴로 서지 않는다.
-        .and_then(|a| a.at.to_str().map(|d| crate::text::shell_word(&crate::path::slashed(d, cfg!(windows)))))
+        .and_then(|a| a.at.to_str().map(dir_word))
         .map_or_else(String::new, |d| {
             format!(
                 "\x20 mkdir -p {d} && moai -C {d} init\n\
@@ -8125,14 +8124,22 @@ fn echo_moai(dir: Option<&Path>, seg: &[String]) -> String {
 /// 않은 자리를 겨눈다. 빈 글을 내면 받는 쪽의 맨 `moai` 가 적어도 이 자리에서 돈다.
 fn aim_flag(dir: Option<&Path>, seg: &[String]) -> String {
     if let Some(d) = dir.and_then(Path::to_str) {
-        // **Windows 에서는 `/` 철자로 댄다**(moai-lag7.951) — 뿌리는 `canonicalize` 를 지나 `\\?\C:\…` 로 오는데,
-        // 그대로 내밀면 Git Bash 에 옮겨 칠 줄이 그 접두어를 달고 선다. 훅 줄의 철자와 같은 자다([`crate::path::slashed`]).
-        return format!(" -C {}", crate::text::shell_word(&crate::path::slashed(d, cfg!(windows))));
+        return format!(" -C {}", dir_word(d));
     }
     moai_flagged(seg)
         .and_then(|args| flag_values(args, &["-C", "--dir"]).pop())
         .filter(|d| dir.is_none() && unknowable(d))
         .map_or_else(String::new, |d| format!(" -C {}", echo_dir(&d)))
+}
+
+/// 푼 자리를 거절문의 `-C` 에 댈 한 낱말로 — **Windows 에서는 `/` 철자(`C:/…`)다**(moai-lag7.951).
+///
+/// 거절문이 내미는 줄은 Git Bash 에 옮겨 칠 줄이라 `\` 를 안 남긴다. 훅 줄의 철자와 같은 자다
+/// ([`crate::path::slashed`]). [`aim_flag`] 와 겨눈 자리에 트래커가 없을 때의 `init` 안내([`create_in`])가 이 하나로
+/// 적는다 — 둘이 따로 적던 판은 한 거절문 안에서 같은 뜻의 `-C` 가 두 꼴로 설 수 있었다. 유닉스에서는
+/// [`crate::text::shell_word`] 그대로다.
+fn dir_word(d: &str) -> String {
+    crate::text::shell_word(&crate::path::slashed(d, cfg!(windows)))
 }
 
 /// 막힌 토막에 적힌 `-C` 값을 내미는 줄에 옮겨 적는다 — 셸이 한 낱말로 읽게. 거절문이 내미는 줄
