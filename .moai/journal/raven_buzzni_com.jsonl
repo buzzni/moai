@@ -7036,3 +7036,4 @@
 {"ts":"2026-10-16T20:23:12Z","id":"moai-4ysn.gna","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — epic-end review)"}
 {"ts":"2026-10-16T20:23:18Z","id":"moai-4ysn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left — merged 737efebe into milestone/moai-c12a (v0.19); branch worktree-moai-4ysn pushed and kept until the release. Rides milestone/moai-c12a into develop at the release."}
 {"ts":"2026-10-16T20:23:34Z","id":"moai-4ysn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 737efebe in milestone/moai-c12a (the person chose c12a in the worker window), origin/worktree-moai-4ysn pushed, members closed"}
+{"ts":"2026-10-16T20:36:37Z","id":"moai-c12a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-6d (take develop in after v0.18.1, fix, test, push; supervisor releases)"}
