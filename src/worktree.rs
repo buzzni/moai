@@ -1681,8 +1681,9 @@ mod tests {
         assert!(away(dir.path()).names.is_empty(), "울타리 위의 저장소가 새어 나왔다 — {:?}", away(dir.path()));
         assert!(away(&dir.join("nowhere")).names.is_empty(), "없는 자리에서도 위의 저장소를 읽었다");
         assert!(!is_linked(dir.path()), "울타리를 딸린 워크트리로 읽었다");
+        // git 은 `C:/…` 로, 자리는 `\\?\C:\…` 로 댄다 — 제품(`others_of`)처럼 풀어서 견준다(moai-lag7.951).
         let git_top =
-            crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| PathBuf::from(t.trim_end()));
+            crate::git::run(dir.path(), &["rev-parse", "--show-toplevel"]).map(|t| real(Path::new(t.trim_end())));
         assert_eq!(git_top.ok(), Some(real(dir.path())), "git 이 울타리를 지나쳐 위의 저장소를 잡았다");
     }
 
