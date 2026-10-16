@@ -29,6 +29,10 @@ fn recorded_bin() -> &'static str {
     SPELLED.get_or_init(|| {
         if cfg!(target_os = "linux") {
             std::fs::canonicalize(BIN).unwrap_or_else(|e| panic!("{BIN}: {e}")).display().to_string()
+        } else if cfg!(windows) {
+            // Windows 의 moai 는 제 자리를 `/` 로 이어 적는다(`path::slashed` — git 의 `sh -c` 가 `\` 를 먹는다). cargo 가
+            // 이어 지은 `BIN` 은 `C:/…\debug\moai.exe` 처럼 섞여 있어(moai-lag7.rrm) 같은 꼴로 바꿔 견준다.
+            canon(BIN).unwrap_or_else(|e| panic!("{BIN}: {e}")).display().to_string().replace('\\', "/")
         } else {
             BIN.to_string()
         }
@@ -107,6 +111,14 @@ fn unjs(body: &str) -> String {
 /// 사람에게 보이는 상대 자리 — 도구는 그것을 OS 의 가름 글자로 잇는다(moai-lag7.rrm). 유닉스에서는 받은 그대로다.
 fn native(rel: &str) -> String {
     rel.replace('/', std::path::MAIN_SEPARATOR_STR)
+}
+
+/// 시험이 짓는 셸 줄에 넣을 자리(moai-lag7.rrm) — `\` 가 들면 `'…'` 로 싼다. Claude Code 의 Bash 는 Windows 에서도
+/// POSIX 껍데기라 날것의 `C:\Users` 는 `C:Users` 로 읽히고, 훅도 그 껍데기의 규칙으로 낱말을 가른다. 유닉스의 시험
+/// 자리에는 `\` 가 없어 받은 그대로다.
+fn sh_path(p: &Path) -> String {
+    let s = p.display().to_string();
+    if s.contains('\\') { format!("'{s}'") } else { s }
 }
 
 fn shell_spelt(said: &str, before: &str, path: impl std::fmt::Display, after: &str) -> bool {
@@ -1176,13 +1188,16 @@ fn init_plants_the_merge_driver_too() {
     assert!(!said.contains("머지 드라이버를 심었다"), "안 썼는데 썼다고 한다\n{said}");
 
     // **다시 부르면 죽은 경로를 고친다.** 워크트리의 `target/` 을 심고 그 워크트리를 지운
-    // 자리가 이것이다.
-    let gone = root.join("없는/자리/moai");
-    git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
-    assert!(ok(root, &["status"]).contains("안 돈다"), "썩은 줄을 안 댔다");
-    let said = ok(root, &["init"]);
-    assert!(said.contains("머지 드라이버를 심었다"), "죽은 경로를 안 고쳤다\n{said}");
-    assert!(!ok(root, &["status"]).contains("머지 드라이버"), "고치고도 알림이 남았다");
+    // 자리가 이것이다. Windows 의 moai 는 드라이버가 도는지 안 잰다(`merge_driver::probe`) — 유닉스에서만 선다.
+    #[cfg(unix)]
+    {
+        let gone = root.join("없는/자리/moai");
+        git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
+        assert!(ok(root, &["status"]).contains("안 돈다"), "썩은 줄을 안 댔다");
+        let said = ok(root, &["init"]);
+        assert!(said.contains("머지 드라이버를 심었다"), "죽은 경로를 안 고쳤다\n{said}");
+        assert!(!ok(root, &["status"]).contains("머지 드라이버"), "고치고도 알림이 남았다");
+    }
 
     // **도는 줄은 안 덮는다**(리뷰). `--as <늘 있는 자리>` 는 워크트리의 `target/` 이 죽는 것을
     // 막으려고 사람이 일부러 고른 줄인데, 적힌 값이 지금 고를 것과 다르다는 이유만으로 덮던
@@ -1897,7 +1912,7 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "{err}");
     let hatch = err.lines().find(|l| l.contains("MOAI_HERE=1")).unwrap_or_default();
-    assert!(hatch.contains(&format!("-C {}", deep.display())), "`-C` 를 빠뜨린 줄을 댔다 — {hatch}");
+    assert!(shell_spelt(hatch, "-C ", deep.display(), ""), "`-C` 를 빠뜨린 줄을 댔다 — {hatch}");
     assert!(!away.join(".moai").exists(), "거절하고도 셸 자리에 .moai 를 만들었다");
 }
 
@@ -2857,7 +2872,7 @@ fn the_overview_counts_work_with_no_live_worktree() {
         .unwrap();
     let machine = String::from_utf8(machine.stdout).unwrap();
     assert!(
-        machine.contains("\"broken_worktrees\":[{\"path\":\".claude/worktrees/agent-x\""),
+        machine.contains(&format!("\"broken_worktrees\":[{{\"path\":\"{}\"", js(native(".claude/worktrees/agent-x")))),
         "밖 한눈 보기의 기계 출력이 못 읽은 워크트리를 안 댔다\n{machine}"
     );
     // **"그래서 자리를 다 못 셌다" 는 걷혔다**(moai-jn4d.ewm) — 자리가 스냅샷을 안 보니 깨진 파일이 판정을
@@ -3057,7 +3072,7 @@ fn a_colour_chosen_in_the_user_config_beats_the_hash_and_only_colour_changes() {
         let o = run(&["project", "color", one_arg, word, "--json"], false);
         let err = String::from_utf8_lossy(&o.stderr);
         assert!(
-            !o.status.success() && err.contains("손으로") && err.contains("config.toml") && err.contains(one_arg),
+            !o.status.success() && err.contains("손으로") && err.contains("config.toml") && err.contains(&js(one_arg)),
             "{word} → {}",
             text(&o)
         );
@@ -3255,7 +3270,10 @@ fn outside_a_repo_a_path_cannot_repaint_the_screen() {
     for verb in ["status", "ready"] {
         let shown = ok_with(&out, &cfg, &[verb]);
         assert!(!shown.contains('\u{1b}'), "{verb}: {shown:?}");
-        assert!(shown.contains("gone[2Jx") && shown.contains("디렉터리가 없다"), "{verb}: {shown}");
+        // 제어문자가 든 이름은 NTFS 에서 "없다" 가 아니라 "못 읽는다"(os error 123)로 선다 — 재는 것은 화면을 다시 칠하지
+        // 않는 것이고, 어느 탈로 서는지는 OS 의 말이다.
+        let why = if cfg!(unix) { "디렉터리가 없다" } else { "못 읽는다" };
+        assert!(shown.contains("gone[2Jx") && shown.contains(why), "{verb}: {shown}");
     }
 }
 
@@ -16163,7 +16181,7 @@ fn a_pick_aimed_at_another_tracker_reads_its_from_race_there() {
             format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&where_.display().to_string()));
         String::from_utf8(hook_in(&s, run_in, event, &input).stdout).unwrap()
     };
-    let pick = format!("moai -C {} mv {id} in_progress --from todo", other.display());
+    let pick = format!("moai -C {} mv {id} in_progress --from todo", sh_path(&other));
     // 이긴 쪽 — 옆 트래커에서 아직 `todo` 라 정말 옮긴다. 그 집기는 이 세션의 것으로 적힌다.
     assert!(at("winner", "pre-tool-use", Some(&pick), &main).trim().is_empty());
     ok(&other, &["mv", &id, "in_progress", "--from", "todo"]);
@@ -16796,13 +16814,13 @@ fn a_worktree_outside_main_is_named_relative_to_main() {
 
     let json = ok(&main, &["show", &id, "--json"]);
     assert!(
-        json.contains(&format!(r#""workplaces":[{{"path":"../{id}","#)),
+        json.contains(&format!(r#""workplaces":[{{"path":"{}","#, js(native(&format!("../{id}"))))),
         "main 밖 워크트리를 ../ 로 안 쟀다\n{json}"
     );
     let root = s.path().to_str().unwrap();
     assert!(!json.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{json}");
     let line = ok(&main, &["show", &id]);
-    assert!(line.contains(&format!("../{id}")) && !line.contains(root), "사람 화면의 자리가 다른 자로 쟀다\n{line}");
+    assert!(line.contains(&native(&format!("../{id}"))) && !line.contains(root), "사람 화면의 자리가 다른 자로 쟀다\n{line}");
 
     // 맨몸 저장소 — main 이 없다. 딸린 워크트리 둘 가운데 어디서 불러도 같은 글자다.
     let bare = s.path().join("repo.git");
@@ -16811,7 +16829,7 @@ fn a_worktree_outside_main_is_named_relative_to_main() {
     git(&bare, &["worktree", "add", "-q", &format!("../b-{id}"), &format!("worktree-{id}")]);
     for at in ["w1".to_string(), format!("b-{id}")] {
         let json = ok(&s.path().join(&at), &["show", &id, "--json", "--worktree"]);
-        assert!(json.contains(&format!(r#""path":"../b-{id}""#)), "{at} 에서 부르니 다른 자로 쟀다\n{json}");
+        assert!(json.contains(&format!(r#""path":"{}""#, js(native(&format!("../b-{id}"))))), "{at} 에서 부르니 다른 자로 쟀다\n{json}");
     }
 }
 
@@ -16920,7 +16938,10 @@ fn a_broken_side_snapshot_is_told_of_but_never_hides_a_lost_row() {
     assert!(said.contains("못 읽었다") && said.contains("agent-x"), "깨진 스냅샷이 아무 데도 안 섰다\n{said}");
     let json = String::from_utf8(out.stdout).unwrap();
     assert!(
-        json.contains(r#""broken_worktrees":[{"path":".claude/worktrees/agent-x","branch":"worktree-agent-x"}]"#),
+        json.contains(&format!(
+            r#""broken_worktrees":[{{"path":"{}","branch":"worktree-agent-x"}}]"#,
+            js(native(".claude/worktrees/agent-x"))
+        )),
         "기계에게는 안 댔다\n{json}"
     );
 
@@ -16947,7 +16968,10 @@ fn a_broken_side_snapshot_is_told_of_but_never_hides_a_lost_row() {
     assert!(!json.contains("unreadable_worktrees"), "걷은 키가 다시 섰다\n{json}");
     // 가지와 **경로를 함께** 낸다 — 떼어 낸 HEAD 는 이름이 커밋 앞 일곱 자라 가지만으로는 두
     // 워크트리가 글자까지 같아진다. 경로는 `show` 와 같이 꼭대기에서 줄여 절대 경로를 안 낸다.
-    assert!(json.contains(r#""broken_worktrees":[{"path":".claude/worktrees/agent-x","branch":"worktree-agent-x"}]"#));
+    assert!(json.contains(&format!(
+            r#""broken_worktrees":[{{"path":"{}","branch":"worktree-agent-x"}}]"#,
+            js(native(".claude/worktrees/agent-x"))
+        )));
     assert!(!json.contains(&main.display().to_string()), "기계의 절대 경로가 그대로 나갔다\n{json}");
 
     // **겹쳐 볼 때는 같은 워크트리를 두 번 말하지 않는다** — `--worktree` 면 `gather` 가 옆 스냅샷을
@@ -17051,7 +17075,8 @@ fn an_unreadable_epic_worktree_is_told_of_but_does_not_blind() {
     // **기계도 깨진 스냅샷을 듣는다**(moai-zah3).
     assert!(
         json.contains(&format!(
-            r#""broken_worktrees":[{{"path":".claude/worktrees/{epic}","branch":"worktree-{epic}"}}]"#
+            r#""broken_worktrees":[{{"path":"{}","branch":"worktree-{epic}"}}]"#,
+            js(native(&format!(".claude/worktrees/{epic}")))
         )),
         "깨진 스냅샷이 기계가 읽는 자리에 없다\n{json}"
     );
@@ -17392,7 +17417,7 @@ fn a_moai_call_is_judged_by_the_tracker_it_points_at() {
     let held = field(&ok(a.path(), &["add", "여기서 할 일", "--json"]), "id");
     ok(a.path(), &["mv", &held, "in_progress"]);
     let bash = |s: &Scratch, cmd: &str| tool_at(s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
-    let bp = b.path().display().to_string();
+    let bp = sh_path(b.path());
 
     // A 가 쥔 것으로 B 에 세우는 줄을 막지 않는다.
     for cmd in [
@@ -17852,7 +17877,7 @@ fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
     let wb = field(&ok(b.path(), &["add", "B 의 일", "-e", &eb, "--json"]), "id");
     ok(b.path(), &["mv", &wb, "in_progress"]);
     let bash = |cmd: &str| tool_at(&a, a.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
-    let bp = b.path().display().to_string();
+    let bp = sh_path(b.path());
 
     // 제 자리의 물음이 남의 트래커의 규칙 1 을 가리지 않는다.
     let why = refusal(&bash(&format!("moai backlog add \"a\"; moai -C {bp} add \"딴 일\"")));
@@ -17866,7 +17891,7 @@ fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
     assert!(out.contains(&format!("can {ea} deliver what it promised")), "{out}");
     assert!(out.contains(&format!("can {eb} deliver what it promised")), "{out}");
     assert!(
-        out.contains(&format!("moai -C {bp} backlog promote <that id> -e {eb}")),
+        out.contains(&js(format!("moai -C {bp} backlog promote <that id> -e {eb}"))),
         "남의 트래커에 되찾을 자리를 안 댄다\n{out}"
     );
 }
@@ -22289,6 +22314,8 @@ fn a_project_on_a_dead_mount_does_not_hold_the_overview() {
 ///
 /// 돈다고 믿는데 안 도는 자리다. 둘을 한 자리에서 잰다: 썩었을 때 대는가, 제대로 심으면
 /// 걷히는가. 안 심은 클론은 [`status_names_a_clone_that_never_planted_the_driver`] 가 잰다.
+// Windows 의 moai 는 드라이버가 도는지 안 잰다(`merge_driver::probe`) — 못 도는 줄을 대는 것은 유닉스의 일이다.
+#[cfg(unix)]
 #[test]
 fn status_names_a_planted_driver_that_cannot_run() {
     let s = init("mergenotice");
@@ -22660,11 +22687,15 @@ fn status_tells_an_old_planted_line_to_be_replanted() {
     ok(root, &["merge-driver", "--install", "--as", BIN]);
     assert!(!ok(root, &["status"]).contains("머지 드라이버"), "다시 심었는데 알림이 남았다");
 
-    // **못 도는 것이 먼저다.** 옛 줄이면서 자리까지 비었으면 자리가 빈 쪽을 말한다.
-    let gone = root.join("없는/자리/moai");
-    git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
-    let said = ok(root, &["status"]);
-    assert!(said.contains("안 돈다") && !said.contains("옛 판이다"), "{said}");
+    // **못 도는 것이 먼저다.** 옛 줄이면서 자리까지 비었으면 자리가 빈 쪽을 말한다. Windows 의 moai 는 드라이버가
+    // 도는지 안 잰다(`merge_driver::probe`) — 유닉스에서만 선다.
+    #[cfg(unix)]
+    {
+        let gone = root.join("없는/자리/moai");
+        git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
+        let said = ok(root, &["status"]);
+        assert!(said.contains("안 돈다") && !said.contains("옛 판이다"), "{said}");
+    }
 }
 
 /// 못 읽는 바이트를 파일 끝에 덧붙인다 — 손으로 푼 충돌이 남기는 자리다.
@@ -27067,7 +27098,7 @@ fn an_unreadable_archive_is_broken_data_for_status_alone() {
             let out = at(s.path(), NOW, args);
             let err = String::from_utf8_lossy(&out.stderr);
             assert!(out.status.success(), "{name}: {args:?} exited non-zero\n{err}");
-            assert!(err.contains("archive/2025.jsonl"), "{name}: {args:?} did not name the source\n{err}");
+            assert!(err.contains(&native("archive/2025.jsonl")), "{name}: {args:?} did not name the source\n{err}");
         }
     }
 }
@@ -27155,7 +27186,7 @@ fn archive_regressions_bad_files_do_not_stop_writes_or_mislabel_repairs() {
         let out = at(s.path(), NOW, &args);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(out.status.success(), "{err}");
-        assert!(err.contains("archive/2025.jsonl"), "{err}");
+        assert!(err.contains(&native("archive/2025.jsonl")), "{err}");
         assert!(!err.contains("issues.jsonl:") && !err.contains("rm --line"), "{err}");
     }
     assert_eq!(std::fs::read(dir.join("2024.jsonl")).unwrap(), [0xff, 0xfe]);
