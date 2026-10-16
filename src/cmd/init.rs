@@ -462,8 +462,14 @@ fn ignored_by(said: &str) -> Tracking {
     if pattern.starts_with('!') {
         return Tracking::Commit;
     }
-    let source = Path::new(source.trim_matches('"'));
-    match source.is_relative() && source.file_name().is_some_and(|n| n == ".gitignore") {
+    let source = source.trim_matches('"');
+    // **`/` 로 선 자리는 작업 트리 밖이다**(moai-lag7.951) — git 은 작업 트리 안을 늘 상대 경로로 대고, `/` 로 선
+    // 자리는 Windows 에서도 MSYS·Cygwin 의 git 이 댄 전역 무시 파일(`/home/u/.gitignore`)이다. Windows 의
+    // `is_relative` 는 드라이브 없는 그 철자를 상대로 읽어, 사람의 전역 파일을 이 저장소의 `.gitignore` 로 셌다.
+    // `has_root` 로 묻지 않는다 — git 이 따옴표로 싼 `\355\225\234/.gitignore` 가 Windows 에서는 `\` 로 선 뿌리다.
+    // 유닉스에서는 `/` 로 서는 것이 곧 절대 경로라 같은 물음이다.
+    let outside = source.starts_with('/') || Path::new(source).is_absolute();
+    match !outside && Path::new(source).file_name().is_some_and(|n| n == ".gitignore") {
         true => Tracking::Gitignore,
         false => Tracking::Exclude,
     }
