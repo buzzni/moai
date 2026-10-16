@@ -121,8 +121,17 @@ impl Hue {
         // 두 자리에 서고, 한쪽만 고치는 날 모든 프로젝트의 색이 바뀐다.
         let mut h = crate::text::FNV64_OFFSET;
         for part in path.components() {
+            // **뿌리와 드라이브는 철자를 하나로 센다**(moai-lag7.951) — Windows 의 `RootDir` 조각은 `\` 고, `canonicalize`
+            // 를 지난 등록(`\\?\C:`)과 손으로 적은 줄(`C:`)은 `Prefix` 조각의 글자가 갈려, 같은 프로젝트가 철자마다
+            // 다른 색을 냈다. 뿌리는 늘 `/` 로, 접두어는 `\\?\` 를 걷고 센다. 유닉스의 뿌리는 원래 `/` 고 접두어가
+            // 없어 바이트 하나 안 바뀐다 — 사용자의 색이 그대로다.
+            let spelt: std::borrow::Cow<'_, std::ffi::OsStr> = match part {
+                std::path::Component::RootDir => std::ffi::OsStr::new("/").into(),
+                std::path::Component::Prefix(p) => crate::path::unverbatim(p.as_os_str()).into(),
+                other => other.as_os_str().into(),
+            };
             // 조각 사이에 0 을 끼운다 — `a/bc` 와 `ab/c` 가 같은 바이트열로 섞이지 않게.
-            h = crate::text::fnv1a64_from(h, part.as_os_str().as_encoded_bytes());
+            h = crate::text::fnv1a64_from(h, spelt.as_encoded_bytes());
             h = crate::text::fnv1a64_from(h, &[0]);
         }
         h ^= h >> 33;
@@ -306,6 +315,13 @@ mod tests {
         };
         assert_eq!(hue("/home/me/work/api"), hue("/home/me/work/api/"));
         assert_eq!(hue("/home/me/work/api"), hue("/home/me//work/api"));
+        // Windows 의 `canonicalize` 철자와 손으로 적은 철자도 같은 색이다(moai-lag7.951). 유닉스에서는 둘 다
+        // 상대 경로라 견줄 것이 없다.
+        if cfg!(windows) {
+            assert_eq!(hue(r"\\?\C:\work\api"), hue(r"C:\work\api"));
+            assert_eq!(hue(r"\\?\C:\work\api"), hue("C:/work/api"));
+            assert_eq!(hue(r"\\?\UNC\srv\share\api"), hue(r"\\srv\share\api"));
+        }
         // **값을 못 박는다.** 해시나 팔레트 차례를 바꾸면 사용자의 모든 프로젝트가 색을
         // 바꾼다 — 일부러 바꿀 때만 이 줄을 고친다.
         use AnsiColor as A;
