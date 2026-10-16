@@ -8,14 +8,17 @@
 //! 형식은 규칙 넷뿐이다.
 //!
 //! ```text
-//! # 에픽 제목                     `#` 줄은 에픽
+//! # 에픽 제목 @2026-10-31         `#` 줄은 에픽
 //! - [p1] 이슈 제목 #bug           `-` 줄은 바로 위 에픽의 이슈
-//! - 이슈 제목                     [pN] 과 #태그 는 없어도 된다
-//! - \[WIP] 제목 \#12              `[`·끝의 `#낱말` 이 제목이면 `\` 를 앞에 둔다
+//! - 이슈 제목                     [pN] 과 #태그 와 @기한 은 없어도 된다
+//! - \[WIP] 제목 \#12              `[`·끝의 `#낱말`·`@숫자…` 가 제목이면 `\` 를 앞에 둔다
 //! ```
 //!
-//! **이스케이프는 세 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz), 그리고 템플릿
-//! 변수로 안 읽힐 글자 `\{{`(moai-xqxu). `{{` 바로 앞의 역슬래시는 쌍으로 센다 — `\\{{이름}}` 은 글자
+//! **기한은 줄 끝의 `@YYYY-MM-DD` 하나다**(moai-ghkp.u1w) — 태그와 섞여 끝쪽에 선다. `@` 뒤가
+//! 숫자일 때만 기한으로 읽는다: `@raven` 같은 끝 낱말은 제목이다. 꼴이 틀리면 줄 번호와 거절한다.
+//!
+//! **이스케이프는 네 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz)·`\@숫자…`(moai-ghkp.u1w),
+//! 그리고 템플릿 변수로 안 읽힐 글자 `\{{`(moai-xqxu). `{{` 바로 앞의 역슬래시는 쌍으로 센다 — `\\{{이름}}` 은 글자
 //! 역슬래시 하나와 변수다(moai-nqk5). 오타(`[P1]`·`[x]`)는 조용히 제목이 되지 않고 전처럼 줄
 //! 번호와 거절한다.
 //!
@@ -34,13 +37,23 @@ pub struct Draft {
     pub tags: Vec<String>,
     /// 몇 번째 에픽에 속하는가. 에픽 자신은 `None`.
     pub epic: Option<usize>,
+    /// 줄 끝의 `@YYYY-MM-DD`(moai-ghkp.u1w). 꼴은 [`crate::model::parse_date`] 가 이미 쟀다.
+    pub due: Option<String>,
 }
 
-/// 줄 끝의 `#태그` 들과 앞머리의 `[pN]` 을 떼어 낸다.
+/// 끝 낱말이 기한 자리인가 — `@` 뒤가 숫자다. 읽는 자와 되뽑는 자가 이 하나로 가른다.
+fn is_due_word(w: &str) -> bool {
+    w.strip_prefix('@').is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// 떼어 낸 한 줄 — 제목·우선순위·태그·기한.
+type Parts = (String, Option<u8>, Vec<String>, Option<String>);
+
+/// 줄 끝의 `#태그`·`@기한` 들과 앞머리의 `[pN]` 을 떼어 낸다.
 ///
-/// 태그는 **끝에서부터** 뗀다 — 제목 가운데의 `#` 은 제목의 일부다
+/// 태그와 기한은 **끝에서부터** 뗀다 — 제목 가운데의 `#`·`@` 은 제목의 일부다
 /// (`--json 이 #1 에서 깨진다`).
-fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<(String, Option<u8>, Vec<String>), String> {
+fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<Parts, String> {
     // **거절할 때만 짓는다**(`store::with_write` 가 같은 자로 적어 둔 규칙, 리뷰) — 줄머리에서
     // 미리 지으면 8,000줄 계획이 제 줄을 8,000번 `Debug` 로 베껴 놓고 전부 버린다.
     let at = || n.to_string();
@@ -72,7 +85,20 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<(String, Option<u8>, V
     }
 
     let mut tags = Vec::new();
+    let mut due: Option<String> = None;
     while let Some((head, last)) = rest.rsplit_once(char::is_whitespace) {
+        if is_due_word(last) {
+            let day = &last[1..];
+            if crate::model::parse_date(day).is_none() {
+                return Err(say_fill(say(lang, "draft.not_a_due"), &[("line", &at()), ("due", last)]));
+            }
+            if due.is_some() {
+                return Err(say_fill(say(lang, "draft.two_dues"), &[("line", &at()), ("raw", &format!("{raw:?}"))]));
+            }
+            due = Some(day.to_string());
+            rest = head.trim_end();
+            continue;
+        }
         match last.strip_prefix('#') {
             Some(t) if !t.is_empty() => {
                 tags.push(normalize_tag(t));
@@ -88,8 +114,12 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<(String, Option<u8>, V
     }
     // 제목 끝쪽에 이어진 `\#낱말` 은 태그가 아니라 제목의 `#낱말` 이다(moai-a5pz). 가운데
     // 것은 원래 태그로 안 읽히므로 이스케이프도 안 하고 풀지도 않는다 — render 와 같은 자리.
-    let title = map_trailing_words(rest, |w| w.strip_prefix("\\#").filter(|t| !t.is_empty()).map(|t| format!("#{t}")));
-    Ok((title, priority, tags))
+    // `\@숫자…` 도 같다 — 기한으로 안 읽힐 제목의 끝 낱말이다(moai-ghkp.u1w).
+    let title = map_trailing_words(rest, |w| match w.strip_prefix('\\') {
+        Some(t) if t.strip_prefix('#').is_some_and(|x| !x.is_empty()) || is_due_word(t) => Some(t.to_string()),
+        _ => None,
+    });
+    Ok((title, priority, tags, due))
 }
 
 /// 끝쪽에 이어진 낱말을 `f` 가 `None` 을 낼 때까지 바꾼다 — 이스케이프의 두 짝이 같이 쓴다.
@@ -287,11 +317,18 @@ pub fn parse_as(src: &str, shape: Shape, lang: Lang) -> Result<Vec<Draft>, Strin
         }
         match split_parts(body, n, lang) {
             Err(e) => errors.push(e),
-            Ok((title, priority, tags)) => {
+            Ok((title, priority, tags, due)) => {
                 if kind == Kind::Epic {
                     epic = Some(out.len());
                 }
-                out.push(Draft { kind, title, priority, tags, epic: (kind == Kind::Issue).then_some(epic).flatten() });
+                out.push(Draft {
+                    kind,
+                    title,
+                    priority,
+                    tags,
+                    epic: (kind == Kind::Issue).then_some(epic).flatten(),
+                    due,
+                });
             }
         }
     }
@@ -316,7 +353,7 @@ pub fn parse_as(src: &str, shape: Shape, lang: Lang) -> Result<Vec<Draft>, Strin
 /// **이 파일에 둔다.** 형식을 아는 자리가 둘이 되면 되뽑은 것을 도로 넣을 때
 /// 한쪽만 바뀐 형식에서 깨진다 — 짝을 같은 파일에 두고 되돌려 읽는 시험으로 묶는다.
 ///
-/// - 형식이 받는 것만 낸다: 제목·`[pN]`·`#태그`. 막음(`blocked_by`)·담당·본문·
+/// - 형식이 받는 것만 낸다: 제목·`[pN]`·`#태그`·`@기한`. 막음(`blocked_by`)·담당·본문·
 ///   부모는 형식에 자리가 없어 빠진다 — 자식 이슈는 형제로 평평하게 선다. 없는 문법을 지어내면 `add --from` 이 그 줄을
 ///   거부해 되뽑은 것이 도로 안 들어간다 (막음은 moai-quxo 의 단계 의존과 함께)
 /// - 우선순위는 **적힌 것만** 낸다. 기본값을 채워 쓰면 템플릿이 설정의 기본값을
@@ -343,8 +380,9 @@ fn body(i: &Issue) -> String {
     // 안 쓰면 제목의 `{{version}}` 같은 글자가 채우지 않은 변수로 거절되고, `{{` 앞 역슬래시가 쌍으로
     // 먹혀 `C:\{{dir}}` 가 제자리로 안 돌아온다.
     let title = escape_braces(&crate::text::one_line(&i.title));
-    let title =
-        map_trailing_words(&title, |w| w.strip_prefix('#').filter(|t| !t.is_empty()).map(|t| format!("\\#{t}")));
+    let title = map_trailing_words(&title, |w| {
+        (w.strip_prefix('#').is_some_and(|t| !t.is_empty()) || is_due_word(w)).then(|| format!("\\{w}"))
+    });
     if title.starts_with('[') {
         s.push('\\');
     }
@@ -353,6 +391,10 @@ fn body(i: &Issue) -> String {
     // 거절돼 되뽑은 계획이 도로 안 들어간다.
     for t in &i.tags {
         s.push_str(&format!(" #{}", escape_braces(t)));
+    }
+    // 기한은 형식이 받는 자리라 낸다(moai-ghkp.u1w) — 꼴이 틀린 값은 도로 안 들어가므로 안 낸다([`lossy`] 가 댄다).
+    if let Some(d) = i.deadline() {
+        s.push_str(&format!(" @{d}"));
     }
     s
 }
@@ -384,6 +426,11 @@ fn escape_braces(s: &str) -> String {
 ///
 /// 판정은 짝이 직접 한다 — 쓴 줄을 도로 읽어 견준다. 규칙을 따로 적으면 parse 가
 /// 바뀌는 날 이쪽만 옛 규칙으로 남는다.
+///
+/// **기한도 견준다**(리뷰, moai-ghkp.u1w) — 꼴이 틀린 기한은 되뽑기가 안 내므로(`body`) 도로 넣으면 사라진다.
+/// 그리고 **에픽보다 늦은 멤버**도 댄다: 에픽을 당긴 쓰기는 멤버를 안 막으므로(moai-ghkp.cb3) 도구가 받는 상태인데,
+/// 그 틀을 그대로 `add --from` 에 넣으면 같은 쓰기 안의 위계가 계획째 물린다. 위계를 재는 자는 쓰기의 것이라
+/// 여기서는 되뽑은 두 날만 견준다 — 틀에 남는 조상은 그 에픽 하나다.
 pub fn lossy<'a>(epic: &'a Issue, members: &[&'a Issue]) -> Vec<&'a str> {
     std::iter::once(epic)
         .chain(members.iter().copied())
@@ -395,8 +442,10 @@ pub fn lossy<'a>(epic: &'a Issue, members: &[&'a Issue]) -> Vec<&'a str> {
             let read = fill_as(&format!("# {}\n", body(i)), &[], Shape::Plan, Lang::default())
                 .ok()
                 .and_then(|d| d.into_iter().next());
-            read.map(|d| (d.title, d.priority, d.tags))
-                != Some((crate::text::one_line(&i.title), i.priority, i.tags.clone()))
+            let over =
+                !std::ptr::eq(*i, epic) && i.deadline().zip(epic.deadline()).is_some_and(|(mine, above)| mine > above);
+            over || read.map(|d| (d.title, d.priority, d.tags, d.due))
+                != Some((crate::text::one_line(&i.title), i.priority, i.tags.clone(), i.due_on.clone()))
         })
         .map(|i| i.id.as_str())
         .collect()
@@ -416,6 +465,33 @@ mod tests {
         i.priority = priority;
         i.tags = tags.iter().map(|t| t.to_string()).collect();
         i
+    }
+
+    /// **줄 끝의 `@YYYY-MM-DD` 가 기한이다**(moai-ghkp.u1w) — 태그와 섞여 선다. `@` 뒤가 숫자일 때만
+    /// 기한으로 읽고, 꼴이 틀리면 줄 번호와 거절한다. `\@` 는 제목의 글자다. 되뽑아도 돌아온다.
+    #[test]
+    fn a_trailing_at_date_is_the_deadline() {
+        let d = one("# 에픽 @2026-10-31\n- [p1] 이슈 #bug @2026-10-20 #parser\n- 사람에게 @raven\n- 이슈 \\@2026\n");
+        assert_eq!(d[0].due.as_deref(), Some("2026-10-31"));
+        assert_eq!((d[1].title.as_str(), d[1].due.as_deref()), ("이슈", Some("2026-10-20")));
+        assert_eq!(d[1].tags, vec!["bug", "parser"]);
+        assert_eq!((d[2].title.as_str(), d[2].due.as_deref()), ("사람에게 @raven", None));
+        assert_eq!((d[3].title.as_str(), d[3].due.as_deref()), ("이슈 @2026", None));
+
+        let bad = parse("# 에픽\n- 이슈 @2026-02-30\n- 둘 @2026-10-01 @2026-10-02\n").unwrap_err();
+        assert!(bad.contains("2줄") && bad.contains("@2026-02-30"), "{bad}");
+        assert!(bad.contains("3줄"), "{bad}");
+
+        let mut epic = issue("릴리스", Kind::Epic, None, &[]);
+        epic.due_on = Some("2026-10-31".into());
+        let mut a = issue("끝이 @2026 인 제목", Kind::Issue, None, &["t"]);
+        a.due_on = Some("2026-10-20".into());
+        let back = parse(&render(&epic, &[&a])).unwrap();
+        assert_eq!(back[0].due.as_deref(), Some("2026-10-31"));
+        assert_eq!((back[1].title.as_str(), back[1].due.as_deref()), ("끝이 @2026 인 제목", Some("2026-10-20")));
+        let mut tail = issue("마감 @2026", Kind::Issue, None, &[]);
+        tail.due_on = None;
+        assert_eq!(parse(&render(&epic, &[&tail])).unwrap()[1].title, "마감 @2026");
     }
 
     /// **되뽑은 것은 도로 들어가야 한다.** 이 짝이 어긋나면 `--as-plan` 은
@@ -438,7 +514,8 @@ mod tests {
                 title: "릴리스".into(),
                 priority: Some(1),
                 tags: vec!["release".into()],
-                epic: None
+                epic: None,
+                due: None
             }
         );
         assert_eq!(
@@ -448,12 +525,13 @@ mod tests {
                 title: a.title.clone(),
                 priority: Some(0),
                 tags: vec!["bug".into(), "parser".into()],
-                epic: Some(0)
+                epic: Some(0),
+                due: None
             }
         );
         assert_eq!(
             got[2],
-            Draft { kind: Kind::Issue, title: b.title.clone(), priority: None, tags: vec![], epic: Some(0) }
+            Draft { kind: Kind::Issue, title: b.title.clone(), priority: None, tags: vec![], epic: Some(0), due: None }
         );
     }
 
@@ -748,7 +826,9 @@ mod tests {
         assert_eq!(got.len(), 3);
         assert_eq!(
             got[0],
-            Draft { kind: Kind::Epic, title: "저장 계층".into(), priority: None, tags: vec![], epic: None }
+            Draft {
+                kind: Kind::Epic, title: "저장 계층".into(), priority: None, tags: vec![], epic: None, due: None
+            }
         );
         assert_eq!(
             got[1],
@@ -757,7 +837,8 @@ mod tests {
                 title: "원자적으로 쓴다".into(),
                 priority: Some(1),
                 tags: vec!["enhancement".into()],
-                epic: Some(0)
+                epic: Some(0),
+                due: None
             }
         );
         assert_eq!(got[2].epic, Some(0));

@@ -510,15 +510,21 @@ fn is_trailer(line: &str) -> bool {
         .any(|head| line.get(..head.len()).is_some_and(|h| h.eq_ignore_ascii_case(head)))
 }
 
+/// id 낱말에 드는 글자인가 — ASCII 영숫자·`_`·`-`·`.`. id 는 ASCII 다(접두어는 `config::check_prefix`, 본체는
+/// 36진수). [`words`] 가 이 자로 글을 가르고, 훅이 집기로 적을 낱말도 이 자로 고른다(`hook::picked_in`) — 자를
+/// 자리마다 손으로 적던 판은 한쪽이 유니코드 영숫자를 받아 두 자리가 같은 낱말을 다르게 읽었다(리뷰 moai-pyi4.7g5).
+pub(crate) fn id_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')
+}
+
 /// 글을 id 가 될 수 있는 낱말로 가른다 — **경계를 정하는 자는 이것 하나다.**
 ///
-/// 낱말은 id 에 드는 글자(영숫자·`_`·`-`·`.`)가 이어진 한 덩어리고, 끝의 `.` 은 문장 부호로 떼어 낸다.
+/// 낱말은 id 에 드는 글자([`id_char`])가 이어진 한 덩어리고, 끝의 `.` 은 문장 부호로 떼어 낸다.
 /// 그래서 앞뒤가 id 의 일부로 이어지면 다른 낱말이다 — `moai-rvcb` 는 자식 `moai-rvcb.7u5` 도, 가지 이름
 /// `worktree-moai-rvcb` 도 아니고, 문장 끝 `(moai-rvcb).` 는 그 id 다. 한글 조사가 붙어도 그 id 다.
-fn words(text: &str) -> impl Iterator<Item = &str> {
-    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
-        .map(|t| t.trim_end_matches('.'))
-        .filter(|t| !t.is_empty())
+/// 훅이 막는 답에 근거를 붙일 줄을 고를 때도 이것으로 읽는다(`hook::vouch`).
+pub(crate) fn words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| !id_char(c)).map(|t| t.trim_end_matches('.')).filter(|t| !t.is_empty())
 }
 
 /// 글에 적힌 **형식에 맞는** id 낱말들 — [`words`] 중 `id::is_valid` 를 지나는 것.

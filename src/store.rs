@@ -1192,9 +1192,31 @@ impl Repo {
         // 막자는 결정이 알림 한 줄로 주저앉는다.
         let filed = file_entries(&entries).map_err(Stop::Refused)?;
 
+        // 기한의 위계(moai-ghkp.33i)를 잴 줄 — 아래 고리가 줄마다 고르고, 고리 뒤에 한꺼번에 잰다.
+        let mut due_measured: Vec<String> = Vec::new();
         for i in issues.iter_mut() {
             i.normalize();
             let was = original_by_id.get(i.id.as_str()).copied();
+            // **이번에 쓴 기한과 자리만 잰다**(2026-10-16 사용자 결정) — `due_on`·`epic`·`milestone` 이
+            // 바뀐 줄이다. 기한 든 줄을 더 이른 에픽으로 옮기는 것도 이 줄의 쓰기다. 부모를 당겨 넘친
+            // 자식은 남의 줄이라 막지 않는다 — `status` 의 `due_beyond_parent` 가 비춘다.
+            //
+            // **아카이브에서 되살린 줄은 이번에 쓴 줄이 아니다**(리뷰) — `mv --from done`·`defer --undo` 가 아카이브의
+            // 줄을 산 파일로 옮기면 원본에 없어 새 줄처럼 보이지만 기한도 자리도 안 바뀐다. 재면 아카이브에 있는 동안
+            // 당겨진 조상 때문에 다시 여는 길이 막히는데, 아카이브의 줄은 `edit` 으로 못 고친다 — 도구 안에 빠져나갈
+            // 길이 없다. 묻는 자는 `minted` 와 같다([`Reserved`]): 새로 짓는 id 는 아카이브에 없다.
+            //
+            // 마일스톤 줄은 조상이 없으니 안 잰다([`crate::report::DueLadder`]) — 기한을 드는 쓰기가 가장 흔한 줄이라,
+            // 재면 락을 쥔 채 지도를 짓고 늘 `None` 을 받는다.
+            let measured = i.due_on.is_some()
+                && i.kind != crate::model::Kind::Milestone
+                && match was {
+                    Some(o) => o.due_on != i.due_on || o.epic != i.epic || o.milestone != i.milestone,
+                    None => !reserved.contains(&i.id),
+                };
+            if measured {
+                due_measured.push(i.id.clone());
+            }
             if was != Some(&*i) {
                 // 제목과 본문은 **이번에 바뀌었을 때만** 잰다 — 이미 큰 것을 든 줄도 옮기고 고칠 수 있다.
                 //
@@ -1247,6 +1269,23 @@ impl Repo {
         if let Some(dup) = first_duplicate(&issues) {
             // 락을 쥔 자리라 **글이 아니라 자료로** 물러난다 — 펴는 자는 [`Repo::with_write_lines`] 다.
             return Err(Stop::Refused(Trouble::DuplicateId { id: dup.to_string() }));
+        }
+        // **줄 사이의 검사는 고리 뒤에 한 번 지은 지도로 한다**(moai-ghkp.33i). 겹친 id 를 물린 뒤에 잰다 —
+        // 쌍둥이가 선 파일에서는 어느 줄이 조상인지부터 못 정한다. 조상이 같은 쓰기에서
+        // 바뀌었으면(계획이 에픽과 멤버를 함께 짓는 판) 바뀐 뒤의 값으로 재야 한다. 판정은 `report` 의
+        // 순수 함수다(CLAUDE.md) — 여기는 거절의 자료만 짓는다.
+        if !due_measured.is_empty() {
+            let measured: Vec<&str> = due_measured.iter().map(String::as_str).collect();
+            if let Some((i, c)) = crate::report::first_beyond(&issues, &measured) {
+                let at = match original_by_id.contains_key(i.id.as_str()) {
+                    true => At::Id(i.id.clone()),
+                    false => At::Unwritten(crate::model::fit_title(&i.title)),
+                };
+                // **조상도 같은 자로 가리킨다**(moai-1rkl, 리뷰) — 이번 쓰기가 짓는 조상(계획의 에픽)의 id 는 거절
+                // 뒤에 어디에도 안 남는다. 그 id 를 "먼저 옮기라" 고 대면 따라 친 쪽이 없는 줄을 본다.
+                let why = c.refusal(i, !original_by_id.contains_key(c.above.id.as_str()));
+                return Err(Stop::Refused(Trouble::Invalid { at, why }));
+            }
         }
 
         // 내용이 그대로면 스냅샷은 건드리지 않는다 (헛 diff 방지).

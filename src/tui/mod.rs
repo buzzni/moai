@@ -596,7 +596,9 @@ impl Ground {
     /// `Ground` 의 `String` 지도로는 못 담고, 줄과 함께 사는 `Site` 에 담으면 제 필드를 빌리는
     /// 구조체가 된다. 그래서 줄만 건네고 **읽는 거르개(`--milestone`)가 물을 때** 짓는다
     /// (`query::Lined`, moai-6mnm). 한때 키마다 지어 1만 줄에서 이 자리 값의 여섯 분의 다섯이었다.
-    fn here<'i>(&'i self, issues: &'i [Issue]) -> crate::query::Where<'i> {
+    ///
+    /// `tui --json` 의 거르개(`cmd::tui::listing`)도 이것을 빌린다 — 같은 적재를 두 번 재지 않는다.
+    pub(crate) fn here<'i>(&'i self, issues: &'i [Issue]) -> crate::query::Where<'i> {
         fn borrow(m: &std::collections::BTreeMap<String, String>) -> std::collections::BTreeMap<&str, &str> {
             m.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
         }
@@ -1054,7 +1056,8 @@ pub struct Surfaced {
     /// [`warnings_in`] 의 `warnings`)에, 그 셈이 못 내는 몫(자리 없는 집은 줄)까지 더한 값이다. 그 몫을 얹는 자는 [`Surfaced::add`] 하나고
     /// (`prepare`·`App::overlaid` 가 부른다), 디스크를 읽어야 아는 값이라 `report` 가 못 낸다.
     free: usize,
-    /// 아직 판정 안 한 기한. 마일스톤만 드는 값이라 줄이 몇 개다([`crate::report::Dues`]).
+    /// 아직 판정 안 한 기한([`crate::report::Dues`]) — 마일스톤의 기한, 줄의 제 기한, 뒤처질 수 있는 우선순위. 셋째는
+    /// 물려받은 기한을 따르는 멤버까지 들어 열린 줄 대부분일 수 있다 — 프레임마다 세는 자리는 첫 답에서 멈춘다.
     dues: crate::report::Dues,
 }
 
@@ -1074,6 +1077,14 @@ impl Surfaced {
     /// 그만큼은 그대로고, 이 자리를 `crate::model::now()` 로 바꾸면 그 틈까지 사라진다.
     pub fn count(&self, now: &str, zone: &crate::tz::Zone) -> usize {
         self.free + self.dues.count(now, zone)
+    }
+
+    /// 든 알림 수(`free`)에 **읽는 사람의 달로 잰** 기한 알림을 더한다(moai-dr8a.rl4) — 기한에 뒤처진 우선순위는
+    /// 날 판정에 닿으므로 셈이 접지 않고 [`crate::report::Dues`] 에 들었다. 알림 수는 `usize` 로 따로 드니, 그것을
+    /// 대는 자리는 모두 이것으로 더한다 — 그리는 쪽은 `draw::noticed`, 기계에게 내는 `moai tui --json` 은 그 자리에서.
+    /// 안 더한 표면은 `moai status` 보다 하나 적게 센다(리뷰가 `tui --json` 에서 찾았다).
+    pub fn notices(&self, free: usize, now: &str, zone: &crate::tz::Zone) -> usize {
+        free + self.dues.notice_count(now, zone)
     }
 
     /// 순수한 셈이 못 내는 몫을 더한다 — 자리 없는 집은 줄이 그것이다(디스크를 읽어야 안다).
@@ -3305,6 +3316,7 @@ impl App {
             keys::Order::Column => SortKey::Status,
             keys::Order::Assignee => SortKey::Assignee,
             keys::Order::Title => SortKey::Title,
+            keys::Order::Due => SortKey::Due,
         }
     }
 
@@ -4114,34 +4126,19 @@ impl App {
         // `event::poll` 사이에서 돌아 그대로 화면이 멈췄다. 푸는 자리는 그 프로젝트를 **읽는** 자리다.
         let Some(me) = self.site_of_seat(seat).map(|s| s.me.clone()) else { return };
         let Some(site) = self.site_mut(seat) else { return };
-        let Some(me) = me else {
-            site.unread.clear();
-            return;
-        };
-        // **읽음을 못 들었으면 아무것도 안 센다**(moai-2gep) — 위의 "누군지 모르면 안 센다" 와 같은
-        // 자다. 빈 표로 세면 **내게 온 줄이 모두** [NEW] 로 서는데, 그것은 "다 안 읽었다" 가 아니라
-        // "모른다" 다 — 그 화면의 `SPC m a` 한 번이 모르는 것을 다 읽음으로 찍는다. 들고 있는 표가
-        // 있으면 그것으로 센다(`App::enter_project` 가 옮겨 든 것이 그것이다).
+        // **가르는 자는 [`crate::query::unread_held`] 하나다**(moai-cqwy) — 누군지 모를 때, 읽음을 못
+        // 들었는데 들고 있는 표가 빌 때 아무것도 안 세는 것(moai-2gep)과 `Gone` 을 탈로 안 치는 것(리뷰)이
+        // 다 거기 있다. `moai show --json` 의 `unread` 키가 같은 자로 서므로 여기서 따로 가르면 화면의
+        // [NEW] 와 기계의 키가 갈린다. 여기 남는 것은 **들고 있는 표**다 — 탈 앞에서 `seen` 을 안 덮는
+        // 것은 [`App::take_read`] 이고, `App::enter_project` 가 옮겨 든 표도 이것이다.
         //
-        // 읽음 파일이 **없는** 것은 여기 안 든다 — 탈이 아니라 아직 아무것도 안 읽은 프로젝트의
-        // 정상이고, 그때 모든 줄이 [NEW] 인 것이 맞는 답이다.
-        //
-        // **[`crate::user_config::Trouble::Gone`] 도 안 든다**(리뷰) — 읽기는 그 갈래를 혼자 안 세운다
-        // ([`crate::read_marks::Marks::trouble`]). 세우는 자리는 [`App::read_marks_of`] 하나고 거기서
-        // 서는 뜻은 "**곁의 설정이** 사라졌다" 다 — 읽음 파일 쪽은 멀쩡히 없는 것으로 읽혔다. **설정을
-        // 아직 안 만든 기계가 그 자리에 그대로 든다**(`user_config::read` 가 없는 파일에 `Gone` 을
-        // 남기고 `cmd::tui` 가 그것을 `App::config_tried` 에 적는다) — 그것까지 세면 처음 띄운 사람에게
-        // **[NEW] 가 한 줄도 안 서고** 까닭도 없다(`Gone` 은 `problems` 가 빈다). 홈이 끊긴 쪽은 들고
-        // 있던 표가 지킨다([`App::take_read`] 가 탈 앞에서 `seen` 을 안 덮는다) — 그 표가 비어 있으면
-        // 애초에 잃을 것이 없어 모든 줄이 [NEW] 인 것이 맞다.
-        if site.read_tried.trouble.is_some_and(|t| t != crate::user_config::Trouble::Gone) && site.seen.is_empty() {
-            site.unread.clear();
-            return;
-        }
         // **그 프로젝트의 표로 센다**(moai-bwce) — `App` 의 맵 하나로 세던 판은 한눈 보기의 모든
         // 프로젝트를 남의 읽음으로 셌다.
-        let Site { issues, seen, unread, .. } = site;
-        *unread = crate::query::unread(issues, &me, seen).into_iter().map(str::to_string).collect();
+        let Site { issues, seen, unread, read_tried, .. } = site;
+        *unread = crate::query::unread_held(issues, me.as_deref(), read_tried.trouble, seen)
+            .into_iter()
+            .map(str::to_string)
+            .collect();
     }
 
     /// 층에 표를 든 줄마다 누구인지를 **다시 풀고** [NEW] 를 다시 센다 — 묻는 칸이 사람을 받은
@@ -12885,7 +12882,11 @@ mod tests {
             assert!(!warnings.contains(&kind), "{kind}: {warnings:?}");
         }
         assert_eq!(f.warnings.count(&f.now, zone), st.warnings.len(), "배너와 보드가 경고를 달리 센다 {warnings:?}");
-        assert_eq!(f.notices, st.notices.len(), "배너와 보드가 알림을 달리 센다 {notices:?}");
+        assert_eq!(
+            f.warnings.notices(f.notices, &f.now, zone),
+            st.notices.len(),
+            "배너와 보드가 알림을 달리 센다 {notices:?}"
+        );
         assert!(f.issues.iter().any(|i| i.id == "argos-a002"), "화면이 아카이브의 줄을 잃었다");
     }
 

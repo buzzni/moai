@@ -5705,8 +5705,9 @@ fn not_mine(away: &Away, i: &Issue) -> bool {
 ///
 /// **트래커에 적지 않는다.** 세션은 이슈의 뜻이 아니라 이 기계의 사정이다 — 사용자 설정 곁
 /// (`<설정 디렉터리>/picks/`)에 둔다. 누구나 쓰는 임시 디렉터리에 두던 때는 남이 심은 기록 하나가
-/// 규칙 1·2 를 조용히 껐다(moai-59k3.yo6). 훅 밖(사람의 터미널)에서 집은 줄은 아무 데도 안 적혀 전과
-/// 같이 판정한다.
+/// 규칙 1·2 를 조용히 껐다(moai-59k3.yo6). 훅 밖(사람의 터미널)에서 집은 줄은 아무 데도 안 적힌다 —
+/// 다른 세션의 기록이 없는 판에서는 전과 같이 판정하고, 있는 판에서는 누구의 것인지 모르는 줄이다
+/// ([`Picks::crowded`]).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Picks {
     pub mine: BTreeSet<String>,
@@ -5715,12 +5716,35 @@ pub struct Picks {
     /// `?` 끼리 겨뤄 이긴 줄(moai-kjeh)은 `mine` 에만 든다. 옆 이름을 이기는 것은 이것뿐이다([`Away::sure`],
     /// moai-pxui 리뷰 — 돌았는지 모르는 집기는 풀기만 한다는 moai-hze6 의 자를 지킨다).
     pub sure: BTreeSet<String>,
+    /// **다른 세션이 이 트래커에 최근 집기를 적었다**([`Picks::LIVE_NANOS`]) — 여러 세션이 한 트래커를 쓰는 판이다.
+    ///
+    /// 그 판에서는 **아무도 적지 않은 집힌 줄**이 누구의 것인지 모른다([`unsure`], moai-pyi4 사용자 결정 2026-10-14).
+    /// 기록이 없는 길은 사람의 터미널만이 아니었다 — 딸린 워크트리 안에서 띄운 세션은 그 체크아웃에 플러그인
+    /// 설정이 없어 훅이 아예 안 돌고, `moai mv $R review` 처럼 id 를 글자로 못 읽은 옮김은 앞선 기록을 끝난
+    /// 것으로 만든다. 그 줄을 "모든 세션의 것" 으로 세던 판은 감독과 일꾼 모두의 초점에 세워 규칙 1·3 이 막고
+    /// `Stop` 이 붙들었다. 다른 세션의 기록이 그 창 안에 없으면 이것이 거짓이라 전과 같다.
+    ///
+    /// **"다른 세션" 은 세션 id 로 가른다** — `/clear` 앞의 제 세션도 다른 세션이고(새 세션은 앞 세션의 기록을 못
+    /// 물려받는다), 훅 없이 도는 세션은 기록을 안 남겨 안 센다. 기록이 말하는 것은 "그 창 안에 다른 세션이 집기를
+    /// 적었다" 이지 "지금 다른 세션이 돈다" 가 아니다.
+    pub crowded: bool,
 }
 
 impl Picks {
     /// 기록이 줄의 **지금 칸보다 이만큼 앞서면** 그 뒤 훅 밖에서 옮긴 줄의 것으로 본다([`Picks::fold`]).
     /// 칸의 때(`status_since`)는 명령이 돈 때라 기록보다 조금 늦고, 락을 기다리면 더 늦는다 — 그 틈을 준다.
     const SLACK_SECS: i64 = 60;
+
+    /// 다른 세션의 기록이 **이만큼 안에** 적혔으면 여러 세션이 함께 도는 판이다([`Picks::crowded`]) — 12시간.
+    /// 한나절이면 같이 돌던 세션이 다 끝났다고 본다. 길게 두면 어제 닫은 세션 하나가 혼자 쓰는 저장소의
+    /// 터미널 집기를 모르는 줄로 만든다.
+    pub const LIVE_NANOS: u128 = 12 * 60 * 60 * 1_000_000_000;
+
+    /// **이름을 못 읽은 집기**의 표 — `moai mv "$id" in_progress` 처럼 껍데기가 풀 낱말로 집었다([`picked_in`]).
+    /// id 에 못 드는 글자라 어느 줄도 안 가리킨다. [`Picks::fold`] 는 이 줄을 [`Picks::crowded`] 로만 센다 — 이 세션이
+    /// 돈다는 표이지 무엇을 쥐었다는 표가 아니다(리뷰 moai-pyi4.7g5). 아예 안 적던 판은 이 저장소의 참고 글이
+    /// 일러 주는 다툼 집기(`claim=$(moai mv "$id" …)`)로만 집는 세션을 다른 세션의 눈에서 지웠다.
+    pub const UNNAMED: &'static str = "$";
 
     /// 집기 한 번을 적는 줄 — `때\tid\t초\t?`. `때` 는 차례를 가르는 벽시계 나노초, `초` 는 줄의 칸
     /// 시각과 견줄 `model::now` 의 초다(못 읽었으면 빈 칸). 끝의 `?` 는 **돌았는지 모르는 집기**다
@@ -5753,10 +5777,20 @@ impl Picks {
     /// 초)보다 [`Picks::SLACK_SECS`] 넘게 앞서면 버린다. 집기를 놓는 것(`mv todo`·`done`)도, 훅 밖(사람의
     /// 터미널·`moai tui`)에서 다시 집는 것도 안 적히는데, 버리지 않으면 죽은 세션의 옛 기록이 그 줄을 언제까지나
     /// 쥐었다 — 남의 것으로 풀리거나, 제 것으로 붙들고 막았다. 버린 줄은 기록이 없던 때처럼 판정한다.
+    ///
+    /// `now` 는 벽시계 나노초다([`Picks::line`] 의 `때` 와 같은 시계) — 다른 세션의 기록이 [`Picks::LIVE_NANOS`]
+    /// 안에 섰는지를 잰다([`Picks::crowded`]). 0 은 시계를 못 읽은 것이라 아무 기록도 최근이 아니다. **버린
+    /// 기록도 센다** — 버리는 것은 그 줄의 주인이지 그 세션이 돌았다는 사실이 아니다. 이름을 못 읽은 집기
+    /// ([`Picks::UNNAMED`])도 여기서만 센다.
+    ///
+    /// **앞선 때도 그 창만큼만 받는다**(리뷰 moai-pyi4.7g5) — 읽는 사이에 옆이 덧붙인 줄은 `now` 보다 조금 늦지만,
+    /// 시계가 뒤로 돈 기계의 줄이나 망가진 줄의 큰 수는 그 창을 넘는다. 늦은 쪽을 0 으로 접던 판은 그런 줄 하나로
+    /// 한나절이 아니라 시계가 따라잡을 때까지 붐빈다고 했다.
     pub fn fold<S: AsRef<str>, T: AsRef<str>>(
         me: &str,
         files: impl IntoIterator<Item = (S, T)>,
         since: &dyn Fn(&str) -> Option<i64>,
+        now: u128,
     ) -> Picks {
         /// 줄 하나에 쌓인 마지막 기록 — 이름을 달아 둔다([`Bailout`] 과 같은 까닭이다).
         /// `None` 은 어느 때보다 이르다.
@@ -5773,6 +5807,7 @@ impl Picks {
             theirs: Option<u128>,
         }
         let mut last: std::collections::BTreeMap<String, Seen> = Default::default();
+        let mut crowded = false;
         for (sid, text) in files {
             let mine = sid.as_ref() == me;
             for line in text.as_ref().split_inclusive('\n') {
@@ -5780,6 +5815,10 @@ impl Picks {
                 let mut parts = line.split('\t');
                 let (Some(at), Some(id)) = (parts.next(), parts.next()) else { continue };
                 let Ok(at) = at.parse::<u128>() else { continue };
+                crowded |= !mine && now != 0 && now.abs_diff(at) <= Self::LIVE_NANOS;
+                if id == Self::UNNAMED {
+                    continue;
+                }
                 let stamp = parts.next().and_then(|s| s.parse::<i64>().ok());
                 if let (Some(stamp), Some(since)) = (stamp, since(id))
                     && stamp + Self::SLACK_SECS < since
@@ -5805,7 +5844,7 @@ impl Picks {
                 }
             }
         }
-        let mut out = Picks::default();
+        let mut out = Picks { crowded, ..Picks::default() };
         for (id, Seen { sure, mine: m, sure_theirs: st, theirs: t }) in last {
             // **돌았는지 모르는 집기는 남의 기록을 안 지운다**(moai-hze6, 사용자 결정). 적기는 적는다 —
             // 기록은 "이 세션이 집었을 수 있다" 를 모으는 자리다. 다만 그것으로 남이 쥔 줄을 제 것으로
@@ -5868,6 +5907,9 @@ impl Picks {
 /// 가르는 자는 [`Picks::fold`] 다 — **마지막으로 확실히 집은** 세션이 이기고, 아무도 확실하지 않으면
 /// **마지막에 적은** 쪽이다(moai-kjeh). "마지막으로 집었으면" 으로만 적던 판은 `?` 가 선 뒤로 틀렸다
 /// (moai-dbzs).
+///
+/// **다른 세션이 최근 집기를 적었으면 아무도 적지 않은 집힌 줄도 모른다**(moai-pyi4, [`Picks::crowded`]). 제
+/// 이름이 가리키는 줄은 위와 같이 제 것이다. 혼자 쓰는 판의 터미널 집기는 전과 같이 이 세션의 초점이다.
 pub fn unsure(
     issues: &[Issue],
     cfg: &Config,
@@ -5875,9 +5917,12 @@ pub fn unsure(
     own: &BTreeSet<String>,
     picks: &Picks,
 ) -> BTreeSet<String> {
-    if elsewhere.is_empty() && picks.theirs.is_empty() {
+    if elsewhere.is_empty() && picks.theirs.is_empty() && !picks.crowded {
         return BTreeSet::new();
     }
+    // **여러 세션이 도는 판에서는 아무도 적지 않은 집힌 줄도 모른다**(moai-pyi4 사용자 결정, [`Picks::crowded`]).
+    // 묶음은 여기 안 선다 — 아래가 훑는 [`report::wip`] 는 일 줄만 낸다(묶음의 칸은 멤버에서 읽는다).
+    let unrecorded = |i: &Issue| picks.crowded && !picks.mine.contains(&i.id) && !picks.theirs.contains(&i.id);
     // **값싼 것을 먼저 거른다** — 기록은 지금은 안 집힌 줄까지 들고 오므로 위의 빠른 길은 곧 안 선다.
     // 모를 만한 줄이 없으면 소속 지도(`named_mine`)를 안 짓는다.
     //
@@ -5888,15 +5933,42 @@ pub fn unsure(
     let maybe: Vec<&Issue> = report::wip(issues, cfg)
         .into_iter()
         .filter(|i| !own.contains(&i.id))
-        .filter(|i| (picks.theirs.contains(&i.id) && !picks.mine.contains(&i.id)) || elsewhere.contains(&i.id))
+        .filter(|i| {
+            (picks.theirs.contains(&i.id) && !picks.mine.contains(&i.id)) || elsewhere.contains(&i.id) || unrecorded(i)
+        })
         .collect();
     if maybe.is_empty() {
         return BTreeSet::new();
     }
     let named_mine = report::claimed(issues, own);
+    // **아무도 안 적은 줄이 이 세션의 집기 밑에 서면 제 것이다**(리뷰 moai-pyi4.7g5 의 1번, 사용자 결정 2026-10-14).
+    // 기록은 이 세션이 실제로 하는 줄에서도 빠진다 — `moai mv "$R" in_progress` 로 집은 리뷰는 이름이 안 적히고,
+    // `cargo test && moai mv X review` 가 60초를 넘으면 그 기록은 칸보다 앞서 버려진다([`Picks::fold`]). 그 줄을
+    // 모른다고 빼던 판은 규칙 3 이 제 리뷰를 `-m` 없이 닫게 두고 `Stop` 이 그것을 안 붙들었다. 재는 자는 워크트리
+    // 이름과 같은 꼴이다 — 집은 줄과 그 에픽이 이름이고, 그 밑의 줄이 든다. 마일스톤 축은 안 센다: 릴리스 하나에
+    // 여러 세션의 에픽이 든다. 에픽 밖에 홀로 선 줄은 여전히 모른다 — 근본 고침(`moai mv` 가 제 집기를 적기)은 backlog 다.
+    let under_mine = || {
+        let ties = report::Ties::epics_only(issues);
+        let mut scope = picks.mine.clone();
+        scope.extend(picks.mine.iter().filter_map(|id| ties.epic_at(id)).map(str::to_string));
+        (ties, scope)
+    };
+    let mut scoped = None;
     maybe
         .into_iter()
-        .filter(|i| (picks.theirs.contains(&i.id) && !picks.mine.contains(&i.id)) || !named_mine(i))
+        .filter(|i| {
+            if picks.theirs.contains(&i.id) && !picks.mine.contains(&i.id) {
+                return true;
+            }
+            if named_mine(i) {
+                return false;
+            }
+            if elsewhere.contains(&i.id) || picks.mine.is_empty() {
+                return true;
+            }
+            let (ties, scope) = scoped.get_or_insert_with(under_mine);
+            !report::claims(ties, scope, i)
+        })
         .map(|i| i.id.clone())
         .collect()
 }
@@ -5959,11 +6031,31 @@ pub fn picked_in(
         let seen = flag_values(args, &["--from"]).pop();
         let verbs = positionals(args);
         let Some((_, ids)) = verbs.get(1..).and_then(<[&str]>::split_last) else { continue };
-        out.extend(
-            ids.iter()
-                .filter(|id| seen.as_deref().is_none_or(|from| stands(k, id).is_none_or(|now| now == from)))
-                .map(|id| (id.to_string(), sure)),
-        );
+        // **껍데기가 풀 낱말은 id 로 안 적는다**(moai-pyi4) — `moai mv $R review` 의 `$R` 는 훅이 못 푼 값이다.
+        // 그것을 id 로 적던 판은 아무 줄도 안 가리키는 기록을 남겼다 — `since` 가 없어 끝난 것으로도 안 버려지고
+        // 다른 세션의 `theirs` 에 두 주를 섰다. **그 자리에는 [`Picks::UNNAMED`] 를 적는다** — 이 세션이 무언가를
+        // 집었다는 표라 다른 세션의 [`Picks::crowded`] 가 센다. 이것으로 안 풀리는 것이 있다: 옮긴 줄의 앞선 기록은
+        // 칸이 기록보다 늦어 여전히 끝난 것이 되고, 그 줄은 기록 없는 줄이다(리뷰 moai-pyi4.7g5).
+        // 낱말의 자는 id 의 글자([`crate::git::id_char`])다 — `id::is_valid` 로 재지 않는다: 접두어 뒤 네 글자가 아닌
+        // 옛 id 와 손으로 지은 id 도 집힌다. 빈 낱말(`''`)과 ASCII 밖의 글자는 id 가 아니다 — 적던 판은 `''` 를 빈 id
+        // 로 적었고, 덧붙는 중에 읽힌 여러 바이트 글자는 그 세션의 파일을 통째로 못 읽게 할 수 있었다.
+        //
+        // **본 칸도 껍데기가 풀면 겨룬 답을 모른다**(리뷰 moai-pyi4.7g5) — `--from "$col"` 의 `$col` 은 지금 칸과 견줄
+        // 글자가 아니다. 진 집기로 보고 버리던 판은 이 저장소의 참고 글이 일러 주는 다툼 집기에서 이긴 집기까지 버려,
+        // 다른 세션이 도는 판에서 그 줄이 집은 세션에게도 모르는 줄이 됐다. 버리지 않고 **돌았는지 모르는 집기**로 적는다
+        // — 그 표는 남이 확실히 쥔 줄을 안 가져온다([`Picks::fold`]).
+        let open = seen.as_deref().is_some_and(|from| from.contains(['$', '`']));
+        out.extend(ids.iter().filter_map(|&id| {
+            if id.is_empty() || !id.chars().all(crate::git::id_char) {
+                return Some((Picks::UNNAMED.to_string(), sure));
+            }
+            if open {
+                return Some((id.to_string(), false));
+            }
+            seen.as_deref()
+                .is_none_or(|from| stands(k, id).is_none_or(|now| now == from))
+                .then(|| (id.to_string(), sure))
+        }));
     }
     out
 }
@@ -6443,8 +6535,157 @@ pub fn guard_shell_in(
 /// 트래커 밖이어도 선다.
 /// 토막 안의 **어느 낱말이든** `tmux` 면 본다: `env -u TMUX tmux …`·`sudo tmux …` 의 tmux 는
 /// 명령 자리에 있지 않다. 따옴표로 묶인 글(`moai note … "tmux kill-server"`)은 낱말 하나라
-/// `tmux` 가 아니다. 창·칸을 닫는 `kill-window`·`kill-pane` 은 서버를 안 끝내 안 본다.
+/// `tmux` 가 아니다. 창·칸을 닫는 `kill-window`·`kill-pane` 은 서버를 안 끝내 **보통은** 안 본다.
+///
+/// **cmux 의 가짜 `$TMUX` 아래에서는 이 말이 뒤집힌다**(moai-e7vm, 리뷰 moai-xpa8.yv6). `cmux
+/// claude-teams`(와 omo·omx·omc)는 `$TMUX` 를 [`crate::skill::CMUX_STAND_IN`] 으로 시작하는 가짜로 세우고
+/// `PATH` 앞에 cmux 의 shim `tmux` 를 둔다 — 그 shim 은 `-L`·`-S`·`-f` 를 **버리고** `new-session` 을 사람의
+/// cmux 에 워크스페이스로, `kill-session`·`kill-window` 를 `workspace.close`(`-t` 가 없으면 부른 쪽 자기
+/// 워크스페이스), `kill-pane` 을 `surface.close` 로 옮긴다. 그래서 `env -u TMUX tmux -L x kill-session` 이
+/// 제 서버가 아니라 사람의 워크스페이스를 닫는다. 그 아래에서는 shim 으로 읽히는 `tmux` 의 만들기·죽이기를
+/// `-L`·`-S` 와 무관하게 막고, 가짜 아래의 **규칙 4 거절문은 모두**([`own_line`]) shim 이 아닌 진짜 tmux 의
+/// 절대 경로를 낸다 — 절대 경로의 `kill-server` 와 `pkill tmux` 의 거절문이 shim 이 막을 줄을 대던 것을 고쳤다
+/// (리뷰 moai-e7vm.rl8 10번).
+///
+/// **환경은 판정이 그것에 달렸을 때만 읽는다** — 규칙 4 는 [`Line`] 처럼 게을러야 한다. `tmux` 뒤에 shim 이
+/// 사람의 cmux 에 옮길 하위 명령이 섰을 때([`cmux_hit`])와, 막기로 정해 거절문의 줄([`own_line`])을 지을 때뿐이다 —
+/// `tmux ls`·`type -a tmux`·`grep tmux` 는 안 읽는다. 읽는 것은 [`TmuxEnv::read`] 하나고, 판정은 순수한
+/// [`guard_tmux_in`] 이다. 게으름은 [`std::cell::LazyCell`] 이 진다 — 판정 앞에 낱말을 따로 훑는 문을 두던 판은
+/// 판정과 같은 낱말 목록을 두 벌 들어, 한쪽에만 낱말을 더하는 날 그 낱말이 말없이 안 보였다(리뷰 moai-e7vm.rl8).
+/// 훅은 이 함수를 한 부름에 여러 번 부른다(`cmd/hook.rs` 의 앞문과 [`guard_shell_in`]) — 그래서 지나가는 줄에서
+/// 안 읽는 것이 값이다.
 pub fn guard_tmux(line: &Line<'_>) -> Decision {
+    guard_tmux_in(line, &std::cell::LazyCell::new(TmuxEnv::read))
+}
+
+/// 규칙 4 가 보는 **환경**(moai-e7vm) — `guard_tmux` 가 게으른 칸에 담아 [`guard_tmux_in`] 에 넘긴다. 판정이
+/// 그것에 달린 줄에서 한 번 읽히고, 지나가는 줄에서는 안 읽힌다.
+pub struct TmuxEnv {
+    /// `$TMUX` 가 cmux 의 가짜([`crate::skill::CMUX_STAND_IN`])로 시작하는가.
+    pub stand_in: bool,
+    /// shim 의 정규 경로 — `PATH` 의 `tmux` 가운데 정규 경로에 `cmux` 가 든 첫 것, 없으면 첫 것.
+    /// `None` 이면 못 풀었다 — 모든 `tmux` 를 shim 으로 읽는다.
+    pub shim: Option<std::path::PathBuf>,
+    /// shim 이 아닌 진짜 tmux — `PATH` 에서 정규 경로가 shim 과 다르고 `cmux` 가 안 든 첫 `tmux`(절대 경로).
+    pub real: Option<String>,
+    /// 절대 경로 낱말을 정규 경로로 푸는 자 — 시험이 가짜로 갈아 끼운다.
+    pub canon: fn(&str) -> Option<std::path::PathBuf>,
+}
+
+/// 이 정규 경로가 cmux 의 것으로 보이는가 — `PATH` 의 차례가 틀려도 거절문이 shim 을 "진짜 tmux" 로 내지 않게
+/// 하는 둘째 잣대다([`TmuxEnv::read`]).
+fn cmux_path(c: &std::path::Path) -> bool {
+    c.to_string_lossy().to_ascii_lowercase().contains("cmux")
+}
+
+impl TmuxEnv {
+    fn canon_fs(w: &str) -> Option<std::path::PathBuf> {
+        std::fs::canonicalize(w).ok()
+    }
+
+    /// 환경을 읽는다. 가짜 `$TMUX` 가 아니면 파일 시스템을 건드리지 않는다.
+    ///
+    /// - **껍데기가 고르는 것만 센다** — 돌릴 수 있는 파일([`crate::cmd::runnable`])이고 절대 자리의 것이다. 실행
+    ///   비트 없는 `tmux` 를 shim 으로 세면 진짜 shim 이 `real` 로 나가, 거절문이 댄 줄이 사람의 cmux 를 닫는다.
+    ///   상대 자리는 훅이 세션의 자리로 옮기기 전에 풀리고(`cmd/hook.rs`), 그 자리의 `tmux` 를 `real` 로 내면
+    ///   거절문이 댄 줄이 다시 shim 으로 읽힌다
+    /// - **shim 을 `PATH` 의 차례 하나로만 가리지 않는다** — 훅의 `PATH` 에서 첫 `tmux` 가 진짜이고 cmux 의 것이
+    ///   뒤에 서면, 차례로만 가리는 판은 그 cmux 의 것을 `real` 로 내 거절문이 바로 그 shim 을 지나가는 줄로 건넨다
+    pub fn read() -> Self {
+        let stand_in = std::env::var("TMUX").is_ok_and(|t| t.starts_with(crate::skill::CMUX_STAND_IN));
+        let mut env = TmuxEnv { stand_in, shim: None, real: None, canon: Self::canon_fs };
+        if !stand_in {
+            return env;
+        }
+        let found: Vec<(std::path::PathBuf, std::path::PathBuf)> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                .filter(|dir| dir.is_absolute())
+                .map(|dir| dir.join("tmux"))
+                .filter(|cand| crate::cmd::runnable(cand))
+                .filter_map(|cand| std::fs::canonicalize(&cand).ok().map(|c| (cand, c)))
+                .collect();
+        env.shim = found.iter().find(|(_, c)| cmux_path(c)).or(found.first()).map(|(_, c)| c.clone());
+        env.real = found
+            .iter()
+            .find(|(_, c)| Some(c) != env.shim.as_ref() && !cmux_path(c))
+            .map(|(cand, _)| cand.display().to_string());
+        env
+    }
+
+    /// 이 `tmux` 낱말이 shim 인가 — 맨 이름·상대 경로는 shim 이고, 절대 경로는 정규 경로가 shim 과 같거나
+    /// cmux 의 것으로 보일 때다.
+    fn is_shim(&self, word: &str) -> bool {
+        if !word.starts_with('/') {
+            return true;
+        }
+        let Some(shim) = &self.shim else { return true };
+        (self.canon)(word).is_some_and(|c| c == *shim || cmux_path(&c))
+    }
+}
+
+/// 가짜 `$TMUX` 아래에서 shim 이 사람의 cmux 를 건드리게 하는 하위 명령인가 — 만들기(`new-session`·`new`)와
+/// 죽이기(`kill-server`·`kill-session`·`kill-window`·`kill-pane` 과 `killw`·`killp`). tmux 는 모호하지 않은
+/// 앞머리도 받으니 `kill-w`·`new-s` 도 센다 — 모호한 앞머리(`kill-s`)는 tmux 가 어차피 거절하니 같이 막아도 잃는 것이 없다.
+fn cmux_touching(w: &str) -> bool {
+    matches!(w, "new" | "killw" | "killp")
+        || (w.len() >= "kill-s".len()
+            && ["kill-server", "kill-session", "kill-window", "kill-pane"].iter().any(|k| k.starts_with(w)))
+        || (w.len() >= "new-s".len() && "new-session".starts_with(w))
+}
+
+/// 전역 플래그와 값을 건너뛴 첫 낱말의 자리 — tmux 의 하위 명령.
+///
+/// **getopt 처럼 읽는다**(리뷰 moai-e7vm.rl8). 값을 받는 글자(`c`·`f`·`L`·`S`·`T`)가 묶음의 끝에 서면 다음
+/// 낱말이 그 값이다 — `-uL x` 의 `x` 를 하위 명령으로 읽던 판은 `tmux -uL x kill-window` 를 지나보냈다.
+/// `--` 는 플래그의 끝이다.
+fn tmux_sub(rest: &[String]) -> Option<usize> {
+    let mut n = 0;
+    while n < rest.len() {
+        let w = rest[n].as_str();
+        if w == "--" {
+            return (n + 1 < rest.len()).then_some(n + 1);
+        }
+        let Some(flags) = w.strip_prefix('-').filter(|f| !f.is_empty()) else { return Some(n) };
+        n += match flags.find(['c', 'f', 'L', 'S', 'T']) {
+            Some(at) if at + 1 == flags.len() => 2,
+            _ => 1,
+        };
+    }
+    None
+}
+
+/// 가짜 `$TMUX` 아래에서 shim 이 사람의 cmux 를 건드리게 할 명령의 자리 — `(첫 하위 명령, 건드리는 하위 명령)`.
+///
+/// **명령 묶음의 뒤 명령도 본다**(리뷰 moai-e7vm.rl8). tmux 는 `;` 로 끝나는 낱말(`\;`·`';'`)에서 다음 명령을
+/// 받으니 그 뒤의 첫 낱말도 하위 명령이다 — 첫 명령만 보던 판은 `tmux -L x ls \; kill-session` 을 지나보냈다.
+/// 인자 자리의 낱말(`tmux display new`)은 하위 명령이 아니다.
+fn cmux_hit(rest: &[String]) -> Option<(usize, usize)> {
+    let first = tmux_sub(rest)?;
+    let mut head = true;
+    for (n, w) in rest.iter().enumerate().skip(first) {
+        if head && cmux_touching(w.strip_suffix(';').unwrap_or(w)) {
+            return Some((first, n));
+        }
+        head = w.ends_with(';');
+    }
+    None
+}
+
+/// 거절문이 내미는 시험용 tmux 줄(moai-e7vm.83t) — 가짜 `$TMUX` 아래에서는 진짜 tmux 의 절대 경로로 짠 줄이고
+/// (없으면 없다고 말한다), 밖에서는 `tmux` 그대로다. `tail` 은 `…` 자리에 들어간다.
+fn own_line(env: &TmuxEnv, tail: &str) -> String {
+    if !env.stand_in {
+        return crate::guide::TMUX_OWN.replace('…', tail);
+    }
+    match &env.real {
+        Some(real) => crate::guide::TMUX_OWN_REAL.replace("<real tmux>", &crate::text::quoted(real)).replace('…', tail),
+        None => "There is no real tmux on this PATH — run the test outside the claude-teams shell.".into(),
+    }
+}
+
+/// [`guard_tmux`] 의 순수한 몸 — 환경은 인자로 받는다. 받는 것은 [`TmuxEnv`] 로 풀리는 무엇이든이라
+/// `guard_tmux` 는 게으른 칸을, 시험은 손으로 세운 값을 건넨다.
+pub fn guard_tmux_in(line: &Line<'_>, env: &impl std::ops::Deref<Target = TmuxEnv>) -> Decision {
     // tmux 는 모호하지 않은 앞머리도 그 명령으로 받는다 — `kill-ser` 가 `kill-server` 다.
     let kills = |w: &str| w.len() > "kill-s".len() && ["kill-server", "kill-session"].iter().any(|k| k.starts_with(w));
     for seg in line.words() {
@@ -6452,6 +6693,25 @@ pub fn guard_tmux(line: &Line<'_>) -> Decision {
             let rest = &seg[i + 1..];
             match basename(word) {
                 "tmux" => {
+                    // 순수한 낱말 물음이 먼저다 — 환경(`PATH` 훑기)은 그것이 걸린 줄에서만 읽는다.
+                    if let Some((first, at)) = cmux_hit(rest)
+                        && env.stand_in
+                        && env.is_shim(word)
+                    {
+                        // 낱말마다 감싼다 — 껍데기가 벗긴 따옴표를 되살려야 `'sleep 60'`·`';'` 가 그 낱말 하나로 돌아간다.
+                        let tail = rest[first..].iter().map(|w| crate::text::quoted(w)).collect::<Vec<_>>().join(" ");
+                        let handed = own_line(env, &tail);
+                        return refuse(
+                            4,
+                            format!(
+                                "`tmux {}` would reach the person's cmux, not a tmux server.\n\
+                             Under cmux claude-teams the tmux on PATH is cmux's shim: it drops -L, -S and -f, so this line\n\
+                             closes or opens a workspace or tab in the person's cmux whatever socket it names.\n\
+                             \x20 {handed}",
+                                rest[at].trim_end_matches(';')
+                            ),
+                        );
+                    }
                     let Some(at) = rest.iter().position(|w| kills(w)) else { continue };
                     // `-L default` 는 이름을 댔어도 사람의 기본 서버다 — 맨 tmux 가 붙는 바로 그 소켓이다.
                     let own = rest[..at].iter().enumerate().any(|(n, f)| match f.as_str() {
@@ -6470,7 +6730,7 @@ pub fn guard_tmux(line: &Line<'_>) -> Decision {
                          and run it there.\n\
                          \x20 {}",
                             rest[at],
-                            crate::guide::TMUX_OWN.replace('…', &rest[at..].join(" "))
+                            own_line(env, &rest[at..].join(" "))
                         ),
                     );
                 }
@@ -6484,7 +6744,7 @@ pub fn guard_tmux(line: &Line<'_>) -> Decision {
                          If you raised a separate server for testing, run kill-server against that server.\n\
                          \x20 {}",
                             basename(word),
-                            crate::guide::TMUX_OWN.replace('…', "kill-server")
+                            own_line(env, "kill-server")
                         ),
                     );
                 }
@@ -8153,6 +8413,72 @@ fn refuse(rule: usize, why: String) -> Decision {
     Decision::Deny(format!("{}\n{why}", crate::guide::rule_head(rule)))
 }
 
+/// 막는 답에 **왜 그 줄이 이 세션의 것인가**를 한 줄씩 붙인다(moai-pyi4.w47, 2026-10-14 사용자 결정).
+///
+/// 같은 사람의 세션 여럿이 한 트래커를 쓰면, 거절문이 대는 줄이 왜 제 초점인지 아무도 몰랐다 — 감독과 일꾼이
+/// 저마다 남의 줄로 막히고도 어느 세션·어느 기록 때문인지 못 찾아 손으로 돌았다. 진단 명령을 따로 두지 않은 것은
+/// 에이전트가 제 세션 id 를 몰라 그 명령을 못 부르기 때문이다 — 근거는 막힌 그 자리에서 읽힌다.
+///
+/// **초점을 대는 답만 본다** — 규칙 1·3 의 거절과 `Stop` 의 붙듦이다. **그 답을 낸 판정의 초점**([`held`] — 그
+/// 판정이 읽은 줄과 `away`) 가운데 글에 id 가 통째로 선 줄([`crate::git::words`])마다 근거를 단다. 글에 id 가 선 집힌
+/// 줄을 다 대던 판은 초점 밖의 줄 — 집은 줄의 제목에 선 id, 규칙 3 이 대는 이어지지 않은 리뷰, `Stop` 이 닫으라는
+/// 남의 담당 리뷰 — 에도 "이 세션이 쥔 까닭" 을 달아, 그 머리 밑에 "다른 세션이 마지막으로 집었다" 가 섰다(리뷰
+/// moai-pyi4.7g5).
+///
+/// **근거는 셋뿐이다** — 이 세션이 집었다 / 제 워크트리 이름이 가리킨다 / 아무 세션도 안 적었다. 남이 마지막으로 집은
+/// 줄과, 다른 세션이 도는 판의 기록 없는 줄은 제 이름이 안 가리키면 모르는 줄([`unsure`])로 초점에서 이미 빠졌다 —
+/// 그래서 `picks` 는 **그 판정이 모름을 잰 그 기록**이어야 하고, 기록 없는 줄의 근거는 "다른 세션의 기록도 없다" 다.
+/// 집은 기록을 이름보다 먼저 본다 — 옆 이름이 더 가까이 가리켜도 확실히 집은 줄은 제 것인데([`Away::sure`]), 그 줄을
+/// 제 이름으로 대면 겨루다 진 이름을 근거로 댄다.
+///
+/// 글은 `lang` 으로 낸다 — `Stop` 의 붙듦은 말묶음에서 오고, 규칙의 거절문은 아직 영어 하나다(`i18n/README.md` 의
+/// "훅은 반만 옮겼다"). 붙이면 `room` 을 넘는 글이면 붙이지 않는다 — 근거는 덤이고, 붙듦 글을 자르면 안 된다.
+/// 무엇을 막는지는 안 바꾼다.
+pub fn vouch(
+    decision: Decision,
+    issues: &[Issue],
+    cfg: &Config,
+    away: &Away,
+    picks: &Picks,
+    room: Option<Room>,
+    lang: Lang,
+) -> Decision {
+    let focus_rule = |text: &str| [1, 3].iter().any(|&n| text.starts_with(&crate::guide::rule_head(n)));
+    let text = match &decision {
+        Decision::Deny(text) if focus_rule(text) => text,
+        Decision::Block(text) => text,
+        _ => return decision,
+    };
+    let named: BTreeSet<&str> = crate::git::words(text).collect();
+    let shown: Vec<&Issue> = held(issues, cfg, away).into_iter().filter(|i| named.contains(i.id.as_str())).collect();
+    if shown.is_empty() {
+        return decision;
+    }
+    let named_mine = report::claimed(issues, &away.own);
+    let hours = (Picks::LIVE_NANOS / 3_600_000_000_000).to_string();
+    let lines: Vec<String> = shown
+        .into_iter()
+        .map(|i| {
+            let why = if picks.mine.contains(&i.id) {
+                say(lang, "hook.vouch_picked").to_string()
+            } else if named_mine(i) {
+                say(lang, "hook.vouch_named").to_string()
+            } else {
+                fill(say(lang, "hook.vouch_unrecorded"), &[("hours", &hours)])
+            };
+            format!("  {}  {why}", i.id)
+        })
+        .collect();
+    let told = format!("{text}\n\n{}\n{}", say(lang, "hook.vouch_head"), lines.join("\n"));
+    if room.is_some_and(|r| r.unit.of(&told) > r.size) {
+        return decision;
+    }
+    match decision {
+        Decision::Deny(_) => Decision::Deny(told),
+        _ => Decision::Block(told),
+    }
+}
+
 /// 이 자리에서 **아직** 집고 있는 것 — [`held`] 에서 겹친 줄(`latest`)로는 더는 안 집힌 줄을 뺀 것.
 /// [`closing`] 과 접힌 뒤 싣는 것([`carried`])이 같은 자로 잰다.
 ///
@@ -8936,7 +9262,7 @@ mod tests {
     fn a_pick_that_might_not_have_run_never_takes_a_row_from_another_session() {
         let never = |_: &str| None;
         let read = |files: &[(&str, String)]| {
-            Picks::fold("me", files.iter().map(|(s, t)| (*s, t.as_str())).collect::<Vec<_>>(), &never)
+            Picks::fold("me", files.iter().map(|(s, t)| (*s, t.as_str())).collect::<Vec<_>>(), &never, 0)
         };
         let theirs = ("you", Picks::line(1, None, "t-1", true));
         let sure = ("me", Picks::line(2, None, "t-1", true));
@@ -9058,6 +9384,169 @@ mod tests {
         assert_eq!(picked_ids(cmd, &cfg(), &|_| true, &stands), ["t-1", "t-3"]);
         assert_eq!(picked_ids(cmd, &cfg(), &|k| k == 0, &stands), ["t-1"]);
         assert!(picked_ids("moai mv t-1 in_progress --help", &cfg(), &|_| true, &stands).is_empty());
+    }
+
+    /// **여러 세션이 도는 판에서는 아무도 적지 않은 집힌 줄도 모른다**(moai-pyi4, 사용자 결정 2026-10-14). 워크트리
+    /// 안에서 띄워 훅이 안 돈 세션의 집기와 id 를 못 읽은 옮김은 기록이 없다 — 그 줄을 모든 세션의 것으로 세던 판은
+    /// 감독과 일꾼 모두의 초점에 세웠다. 혼자 쓰는 판(다른 세션의 최근 기록이 없다)은 전과 같다.
+    #[test]
+    fn an_unrecorded_pick_is_unsure_only_while_other_sessions_run() {
+        const HOUR: u128 = 60 * 60 * 1_000_000_000;
+        let now = 100 * HOUR;
+        let never = |_: &str| None;
+        let fold = |files: &[(&str, String)], now: u128| {
+            Picks::fold("me", files.iter().map(|(s, t)| (*s, t.as_str())).collect::<Vec<_>>(), &never, now)
+        };
+        // 다른 세션이 한나절 안에 적었으면 붐빈다 — 제 기록은 안 센다, 시계를 못 읽었으면(0) 아무것도 안 센다.
+        assert!(fold(&[("you", Picks::line(now - HOUR, None, "t-9", true))], now).crowded);
+        assert!(!fold(&[("you", Picks::line(now - 13 * HOUR, None, "t-9", true))], now).crowded, "어제 세션을 셌다");
+        assert!(!fold(&[("me", Picks::line(now, None, "t-9", true))], now).crowded, "제 기록을 남의 것으로 셌다");
+        assert!(!fold(&[("you", Picks::line(now, None, "t-9", true))], 0).crowded, "시계 없이 붐빈다고 했다");
+        // 버린 기록(그 뒤 칸이 옮겨진 줄)도 세션이 돌았다는 표다.
+        let moved = |_: &str| Some(10_000);
+        let gone = Picks::fold("me", [("you", Picks::line(now - HOUR, Some(1), "t-9", true))], &moved, now);
+        assert!(gone.theirs.is_empty() && gone.crowded, "{gone:?}");
+        // 이름을 못 읽은 집기도 돈다는 표다 — 누구의 집기로도 안 센다(리뷰 moai-pyi4.7g5).
+        let unnamed = fold(&[("you", Picks::line(now - HOUR, None, Picks::UNNAMED, true))], now);
+        assert!(unnamed.crowded && unnamed.theirs.is_empty() && unnamed.mine.is_empty(), "{unnamed:?}");
+        // 읽는 사이에 덧붙은 줄(조금 앞선 때)은 세고, 시계가 뒤로 돈 줄의 먼 앞날은 안 센다.
+        assert!(fold(&[("you", Picks::line(now + 1, None, "t-9", true))], now).crowded, "읽는 사이의 줄을 안 셌다");
+        assert!(
+            !fold(&[("you", Picks::line(now + 13 * HOUR, None, "t-9", true))], now).crowded,
+            "먼 앞날의 줄로 붐빈다고 했다"
+        );
+
+        // 묶음은 안 센다 — [`report::wip`] 가 일 줄만 낸다.
+        let mut group = epic("t-e");
+        group.status = Status::new("in_progress");
+        let all = vec![
+            issue("t-1", "in_progress"),        // 아무도 안 적었다
+            issue("t-2", "in_progress"),        // 이 세션이 적었다
+            under("t-3", "in_progress", "t-e"), // 아무도 안 적었지만 제 이름(`t-e`)이 가리킨다
+            group,
+            issue("t-1.r", "in_progress"), // 기록 없는 줄 밑에서 이 세션이 집었다
+        ];
+        let crowded = Picks { mine: set(&["t-2", "t-1.r"]), crowded: true, ..Picks::default() };
+        let got: Vec<String> = unsure(&all, &cfg(), &set(&[]), &set(&["t-e"]), &crowded).into_iter().collect();
+        assert_eq!(got, ["t-1"], "기록 없는 줄을 모른다고 안 했거나, 제 기록·제 이름·묶음을 모른다고 했다");
+        let alone = Picks { mine: set(&["t-2", "t-1.r"]), ..Picks::default() };
+        assert!(
+            unsure(&all, &cfg(), &set(&[]), &set(&["t-e"]), &alone).is_empty(),
+            "혼자 쓰는 판의 터미널 집기를 뺐다"
+        );
+
+        // 모르는 줄은 좁힌 초점에서만 빠진다 — 그 밑이라도 이 세션이 집은 줄은 남는다.
+        let narrowed = Away {
+            unsure: set(&got.iter().map(String::as_str).collect::<Vec<_>>()),
+            picked: set(&["t-2", "t-1.r"]),
+            ..here()
+        };
+        let held: Vec<&str> = held(&all, &cfg(), &narrowed).iter().map(|i| i.id.as_str()).collect();
+        assert!(!held.contains(&"t-1") && held.contains(&"t-2") && held.contains(&"t-1.r"), "{held:?}");
+    }
+
+    /// **아무도 안 적은 줄이 이 세션의 집기 밑에 서면 제 것이다**(리뷰 moai-pyi4.7g5 의 1번, 사용자 결정 2026-10-14) —
+    /// `moai mv "$R" in_progress` 로 집은 리뷰는 이름이 안 적힌다. 그 줄을 모른다고 빼던 판은 규칙 3 이 제 리뷰를
+    /// `-m` 없이 닫게 두었다. 집은 줄의 에픽 밑도 든다. 에픽 밖에 홀로 선 줄과 남이 적은 줄은 그대로다.
+    #[test]
+    fn an_unrecorded_row_under_this_session_s_pick_stays_its_own() {
+        let mut group = epic("t-e");
+        group.status = Status::new("in_progress");
+        let all = vec![
+            group,
+            under("t-1", "review", "t-e"),      // 이 세션이 적었다
+            under("t-2", "in_progress", "t-e"), // 아무도 안 적었다 — 같은 에픽의 리뷰
+            issue("t-1.r", "in_progress"),      // 아무도 안 적었다 — 집은 줄의 자식
+            issue("t-3", "in_progress"),        // 아무도 안 적었다 — 에픽 밖
+            under("t-4", "in_progress", "t-e"), // 남이 적었다
+        ];
+        let crowded = Picks { mine: set(&["t-1"]), theirs: set(&["t-4"]), crowded: true, ..Picks::default() };
+        let got: Vec<String> = unsure(&all, &cfg(), &set(&[]), &set(&[]), &crowded).into_iter().collect();
+        assert_eq!(
+            got,
+            ["t-3", "t-4"],
+            "제 집기 밑의 기록 없는 줄을 모른다고 했거나, 에픽 밖·남의 줄을 제 것으로 셌다"
+        );
+        // 이 세션이 아무것도 안 적었으면 전과 같다.
+        let none = Picks { crowded: true, ..Picks::default() };
+        let got: Vec<String> = unsure(&all, &cfg(), &set(&[]), &set(&[]), &none).into_iter().collect();
+        assert_eq!(got, ["t-1", "t-1.r", "t-2", "t-3", "t-4"]);
+    }
+
+    /// **막는 답에 근거를 붙인다 — 초점을 대는 답에만, 그 답의 초점에 들고 글에 통째로 선 줄에만, 자리 안에서만**
+    /// (moai-pyi4.w47·리뷰 moai-pyi4.7g5).
+    #[test]
+    fn a_held_row_says_why_it_is_this_session_s() {
+        let all = vec![issue("t-1", "in_progress"), issue("t-12", "in_progress"), issue("t-1.x0a", "in_progress")];
+        let picks = Picks { mine: set(&["t-12"]), ..Picks::default() };
+        let vouched = |d: Decision, away: &Away, room| vouch(d, &all, &cfg(), away, &picks, room, Lang::En);
+        let rule1 = format!("{}\nYou are already holding something — t-12 제목, t-1.", crate::guide::rule_head(1));
+        let Decision::Deny(told) = vouched(Decision::Deny(rule1.clone()), &here(), None) else {
+            panic!("막는 답이 바뀌었다")
+        };
+        assert!(told.starts_with(&rule1), "{told}");
+        assert!(told.contains("Why this session holds them:\n"), "{told}");
+        assert!(told.contains("  t-12  this session picked it up"), "{told}");
+        assert!(told.contains("  t-1  no session recorded"), "문장 끝 마침표 앞의 id 를 못 읽었다 — {told}");
+        assert!(told.contains("in the last 12 hours"), "기록 없는 줄의 근거가 창을 안 댄다 — {told}");
+        assert!(!told.contains("t-1.x0a  "), "글에 없는 자식을 댔다 — {told}");
+        // id 는 통째로만 읽는다 — 자식 `t-1.x0a` 만 선 글에 부모 `t-1` 은 안 선다.
+        let child = vouched(Decision::Block("hold t-1.x0a and t-12".into()), &here(), None);
+        assert!(
+            matches!(&child, Decision::Block(t) if t.contains("  t-1.x0a  ") && t.contains("  t-12  ")
+                && !t.contains("  t-1  ")),
+            "자식의 id 로 부모를 댔다 — {child:?}"
+        );
+        // 제 워크트리 이름이 가리키면 그것이 근거다 — 다만 이 세션이 집었으면 그 기록이 먼저다.
+        let named = vouched(Decision::Deny(rule1.clone()), &Away { own: set(&["t-1"]), ..here() }, None);
+        assert!(
+            matches!(&named, Decision::Deny(t) if t.contains("  t-1  this worktree's name points at it")
+                && t.contains("  t-12  this session picked it up")),
+            "{named:?}"
+        );
+        // **초점 밖의 줄은 글에 서도 안 댄다** — 모르는 줄로 빠진 t-1 은 이 세션이 쥔 줄이 아니다.
+        let narrowed = vouched(Decision::Deny(rule1.clone()), &Away { unsure: set(&["t-1"]), ..here() }, None);
+        assert!(
+            matches!(&narrowed, Decision::Deny(t) if t.contains("  t-12  ") && !t.contains("  t-1  ")),
+            "초점 밖의 줄에 이 세션이 쥔 까닭을 달았다 — {narrowed:?}"
+        );
+        // 규칙 2 의 거절과 비추는 줄은 그대로다.
+        let rule2 = Decision::Deny(format!("{}\nt-12", crate::guide::rule_head(2)));
+        assert_eq!(vouched(rule2.clone(), &here(), None), rule2);
+        // 자리를 넘기면 안 붙인다 — 붙듦 글을 자르면 안 된다.
+        let hold = Decision::Block("hold t-12".into());
+        let tight = Room { size: 20, unit: Unit::Utf8 };
+        assert_eq!(vouched(hold.clone(), &here(), Some(tight)), hold);
+        assert!(matches!(vouched(hold.clone(), &here(), None), Decision::Block(t) if t.contains("t-12  this session")));
+        // 붙드는 글은 말묶음에서 온다 — 근거도 그 말로 낸다.
+        let ko = vouch(hold, &all, &cfg(), &here(), &picks, None, Lang::Ko);
+        let picked = format!("  t-12  {}", say(Lang::Ko, "hook.vouch_picked"));
+        assert!(
+            matches!(&ko, Decision::Block(t) if t.contains(&picked) && t.contains(say(Lang::Ko, "hook.vouch_head"))),
+            "{ko:?}"
+        );
+    }
+
+    /// **껍데기가 풀 낱말은 id 로 안 적는다**(moai-pyi4) — `moai mv $R review` 의 `$R` 를 id 로 적던 판은 아무 줄도 안
+    /// 가리키는 기록을 남겼다. 그 자리에는 이 세션이 돈다는 표만 적는다([`Picks::UNNAMED`], 리뷰 moai-pyi4.7g5).
+    #[test]
+    fn an_unexpanded_word_is_not_recorded_as_a_pick() {
+        let stands = |_: usize, _: &str| None;
+        let unnamed = [Picks::UNNAMED];
+        assert_eq!(picked_ids("moai mv $R review", &cfg(), &|_| true, &stands), unnamed);
+        assert_eq!(picked_ids("moai mv \"${ids[0]}\" in_progress", &cfg(), &|_| true, &stands), unnamed);
+        assert_eq!(picked_ids("moai mv t-1 $X in_progress", &cfg(), &|_| true, &stands), ["t-1", Picks::UNNAMED]);
+        // 빈 낱말과 ASCII 밖의 글자는 id 가 아니다 — id 는 ASCII 다.
+        assert_eq!(picked_ids("moai mv '' in_progress", &cfg(), &|_| true, &stands), unnamed);
+        assert_eq!(picked_ids("moai mv 이슈 in_progress", &cfg(), &|_| true, &stands), unnamed);
+        // 본 칸이 껍데기가 풀 글자면 겨룬 답을 모른다 — 진 집기로 버리지 않고 돌았는지 모르는 집기로 적는다.
+        let todo = |_: usize, _: &str| Some("todo".to_string());
+        let open = picked_in("moai mv t-1 in_progress --from \"$col\"", &cfg(), &|_| true, &todo);
+        assert_eq!(open, [("t-1".to_string(), false)], "겨룬 답을 모르는 집기를 버렸거나 확실하다고 적었다");
+        // 글자로 본 칸이 지금 칸과 다르면 진 집기라 전처럼 안 적는다.
+        assert!(picked_ids("moai mv t-1 in_progress --from review", &cfg(), &|_| true, &todo).is_empty());
+        // 옛 꼴의 id 와 손으로 지은 id 는 그대로 집힌다 — `id::is_valid` 의 네 글자 자로 재지 않는다.
+        assert_eq!(picked_ids("moai mv t-1.x_y in_progress", &cfg(), &|_| true, &stands), ["t-1.x_y"]);
     }
 
     /// **온통 치환인 글은 셸에 넘긴 글이 아니다**(moai-6qkc) — `eval "$( … )"` 가 돌리는 것은 그
@@ -11449,6 +11938,10 @@ mod tests {
                 assert!(why.starts_with(&crate::guide::rule_head(4)), "규칙 4 가 안 섰다 — {cmd}\n{why}");
             }
         }
+        // 통과 쪽은 시험 프로세스의 `$TMUX` 를 안 읽는다 — 가짜 밖의 환경을 손으로 세워 순수한 몸에 건넨다.
+        // (가짜 아래는 아래 시험이 환경을 갈아 끼워 잰다.)
+        let outside = TmuxEnv { stand_in: false, shim: None, real: None, canon: |_| None };
+        let pass = |cmd: &str| guard_tmux_in(&Line::new(cmd), &&outside);
         for cmd in [
             "tmux -L moai-ju21 kill-server",
             "env -u TMUX tmux -L t kill-session -t x",
@@ -11456,17 +11949,162 @@ mod tests {
             "tmux -Lfoo kill-server",
             "tmux kill-pane -t 1",
             "tmux ls",
-            "moai note t-1 \"tmux kill-server 를 막는다\"",
-            "echo 'tmux kill-server'",
-            "pkill cargo",
         ] {
+            assert_eq!(pass(cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
+        // 따옴표 안의 글과 `pkill cargo` 는 어느 환경에서도 지난다.
+        for cmd in ["moai note t-1 \"tmux kill-server 를 막는다\"", "echo 'tmux kill-server'", "pkill cargo", "tmux ls"]
+        {
             assert_eq!(guard_shell(&held, &cfg(), &here(), root, root, cmd), Decision::Pass, "막혔다 — {cmd}");
         }
+        // 거절문이 댄 줄은 자리표시자만 채우면 지나간다. **가짜 밖의 줄은 글자째 못박는다**(moai-e7vm) — 가짜 아래의
+        // 갈래가 거절문을 [`own_line`] 으로 옮기면서 밖의 줄은 이전 그대로여야 했는데, 끝말만 보던 판은 그 줄이 바뀌어도
+        // 푸르게 섰다.
+        for cmd in ["tmux kill-server", "pkill tmux"] {
+            let why = denied(&pass(cmd)).to_string();
+            let line = why.lines().last().unwrap().trim().replace("<unique name>", "moai-t");
+            assert_eq!(line, "env -u TMUX tmux -L moai-t kill-server", "{cmd}\n{why}");
+            assert_eq!(pass(&line), Decision::Pass, "{line}");
+        }
+    }
+
+    /// **규칙 4 는 판정이 환경에 달린 줄에서만 그것을 읽는다**(moai-e7vm) — 가짜 `$TMUX` 아래에서 환경을 읽는 것은
+    /// `PATH` 의 자리마다 `access`·`canonicalize` 를 치르는 일이고, 훅은 한 부름에 규칙 4 를 여러 번 부른다. 세는
+    /// 자리로 환경을 건네 몇 번 풀었는지 본다 — `tmux` 낱말마다 환경을 먼저 묻던 판은 `tmux ls`·`type -a tmux` 에서도
+    /// 읽어 여기서 붉어진다.
+    #[test]
+    fn rule_four_reads_the_environment_only_where_it_decides_on_it() {
+        struct Counted(std::cell::Cell<usize>, TmuxEnv);
+        impl std::ops::Deref for Counted {
+            type Target = TmuxEnv;
+            fn deref(&self) -> &TmuxEnv {
+                self.0.set(self.0.get() + 1);
+                &self.1
+            }
+        }
+        let reads = |cmd: &str| {
+            let env = Counted(Default::default(), TmuxEnv { stand_in: true, shim: None, real: None, canon: |_| None });
+            let _ = guard_tmux_in(&Line::new(cmd), &env);
+            env.0.get()
+        };
+        for cmd in [
+            "cargo test",
+            "echo x > f",
+            "pkill cargo",
+            "tmux ls",
+            "type -a tmux",
+            "grep -rn tmux src",
+            "tmux display -p x",
+        ] {
+            assert_eq!(reads(cmd), 0, "환경을 읽었다 — {cmd}");
+        }
+        for cmd in ["tmux -L x kill-session", "tmux kill-server", "pkill tmux"] {
+            assert!(reads(cmd) > 0, "환경을 안 읽고 판정했다 — {cmd}");
+        }
+    }
+
+    /// **cmux 의 가짜 `$TMUX` 아래에서는 `-L`·`-S` 도 사람의 cmux 를 못 지킨다**(moai-e7vm, 리뷰 moai-xpa8.yv6) —
+    /// shim 은 그 플래그를 버린다. 환경을 갈아 끼워 순수한 몸을 잰다. 가짜 아래 갈래를 걷으면 첫 묶음이 붉어진다.
+    #[test]
+    fn under_the_cmux_stand_in_the_shim_is_refused_whatever_the_socket() {
+        fn canon(w: &str) -> Option<std::path::PathBuf> {
+            match w {
+                "/opt/cmux/bin/tmux" | "/usr/local/bin/tmux" => Some("/opt/cmux/bin/tmux".into()),
+                "/usr/bin/tmux" => Some("/usr/bin/tmux".into()),
+                "/Applications/cmux.app/Contents/Resources/bin/tmux" => Some(w.into()),
+                _ => None,
+            }
+        }
+        let env = |stand_in, real: Option<&str>| TmuxEnv {
+            stand_in,
+            shim: Some("/opt/cmux/bin/tmux".into()),
+            real: real.map(String::from),
+            canon,
+        };
+        let inside = env(true, Some("/usr/bin/tmux"));
+        let run = |e: &TmuxEnv, cmd: &str| guard_tmux_in(&Line::new(cmd), &e);
+        for cmd in [
+            "env -u TMUX tmux -L t kill-session",
+            "tmux -S /tmp/s kill-server",
+            "tmux -L x kill-window",
+            "tmux -L x kill-window -t 1",
+            "tmux killw",
+            "tmux killp",
+            "tmux kill-p",
+            "tmux kill-pane -t 1",
+            "tmux -L x new -d",
+            "tmux new-session -d -s x",
+            "tmux -L x new-s -d",
+            "./tmux -L x new-session",
+            "/opt/cmux/bin/tmux -L x kill-session",
+            "/usr/local/bin/tmux -L x kill-session",
+            "/usr/local/bin/tmux -L x new-session",
+            // 정규 경로에 cmux 가 든 것은 `PATH` 의 첫 tmux 가 아니어도 shim 이다(리뷰 moai-e7vm.rl8).
+            "/Applications/cmux.app/Contents/Resources/bin/tmux -L x kill-session",
+            // getopt 의 묶음 — 값을 받는 글자가 끝에 서면 다음 낱말이 그 값이다(리뷰 moai-e7vm.rl8).
+            "tmux -uL x kill-window",
+            "tmux -2S /tmp/s kill-pane",
+            "tmux -- new-session -d",
+            // 명령 묶음의 뒤 명령 — `\;`·`';'`·`;` 로 끝나는 낱말 뒤도 하위 명령이다(리뷰 moai-e7vm.rl8).
+            "tmux -L x ls \\; kill-session -t foo",
+            "tmux -L x ls ';' new-session -d",
+            "tmux -L x display -p x\\; killp",
+        ] {
+            let why = denied(&run(&inside, cmd)).to_string();
+            assert!(why.starts_with(&crate::guide::rule_head(4)), "규칙 4 가 안 섰다 — {cmd}\n{why}");
+        }
+        for cmd in [
+            "tmux ls",
+            "tmux display -p x",
+            "tmux -L x list-sessions",
+            "tmux display new",
+            "/usr/bin/tmux -L x kill-server",
+            "/usr/bin/tmux -S /tmp/s new-session -d",
+            "echo 'tmux -L x kill-session'",
+            "tmux -L x ls \\; display -p new",
+            "tmux -Lx list-sessions",
+        ] {
+            assert_eq!(run(&inside, cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
         // 거절문이 댄 줄은 자리표시자만 채우면 지나간다.
-        let why = denied(&guard_shell(&idle, &cfg(), &here(), root, root, "tmux kill-server")).to_string();
-        let line = why.lines().last().unwrap().trim().replace("<unique name>", "moai-t");
-        assert!(line.ends_with("kill-server"), "{why}");
-        assert_eq!(guard_shell(&idle, &cfg(), &here(), root, root, &line), Decision::Pass, "{line}");
+        for (cmd, tail) in [
+            ("env -u TMUX tmux -L t kill-session -t x", "kill-session -t x"),
+            ("tmux new -d", "new -d"),
+            // 따옴표와 묶음의 `;` 는 되살아난다 — 벗긴 채 내면 `;` 가 껍데기의 토막 가르개가 된다.
+            ("tmux -L x new-session -d 'sleep 60' \\; kill-pane", "new-session -d 'sleep 60' ';' kill-pane"),
+        ] {
+            let why = denied(&run(&inside, cmd)).to_string();
+            assert!(why.contains("cmux's shim"), "{why}");
+            let line = why.lines().last().unwrap().trim().replace("<unique name>", "moai-t");
+            assert_eq!(line, format!("env -u TMUX /usr/bin/tmux -L moai-t {tail}"), "{why}");
+            assert_eq!(run(&inside, &line), Decision::Pass, "{line}");
+        }
+        // 절대 경로의 맨 kill-server 와 pkill 은 옛 갈래로 떨어진다 — 그 거절문도 shim 이 안 막는 줄을 낸다
+        // (리뷰 moai-e7vm.rl8 10번).
+        for cmd in ["/usr/bin/tmux kill-server", "pkill tmux", "killall tmux"] {
+            let why = denied(&run(&inside, cmd)).to_string();
+            let line = why.lines().last().unwrap().trim().replace("<unique name>", "moai-t");
+            assert_eq!(line, "env -u TMUX /usr/bin/tmux -L moai-t kill-server", "{cmd}\n{why}");
+            assert_eq!(run(&inside, &line), Decision::Pass, "{line}");
+            let why = denied(&run(&env(true, None), cmd)).to_string();
+            assert!(why.contains("no real tmux"), "{cmd}\n{why}");
+        }
+        // 진짜 tmux 가 없으면 줄 대신 그렇다고 말한다.
+        let why = denied(&run(&env(true, None), "tmux kill-session")).to_string();
+        assert!(why.contains("no real tmux"), "{why}");
+        // shim 을 못 풀었으면 절대 경로도 shim 으로 읽는다.
+        let blind = TmuxEnv { shim: None, ..env(true, None) };
+        assert!(matches!(run(&blind, "/usr/bin/tmux -L x kill-server"), Decision::Deny(_)));
+        // `PATH` 의 첫 tmux 가 진짜여도 cmux 의 것은 shim 이다.
+        let inverted = TmuxEnv { shim: Some("/usr/bin/tmux".into()), ..env(true, None) };
+        let cmux = "/Applications/cmux.app/Contents/Resources/bin/tmux -L x kill-session";
+        assert!(matches!(run(&inverted, cmux), Decision::Deny(_)), "{cmux}");
+        // 가짜 밖에서는 이전 그대로다.
+        let outside = env(false, None);
+        for cmd in ["tmux -L x new-session", "tmux kill-pane", "tmux killw", "tmux -L x kill-session", "tmux ls"] {
+            assert_eq!(run(&outside, cmd), Decision::Pass, "막혔다 — {cmd}");
+        }
+        assert!(matches!(run(&outside, "tmux kill-server"), Decision::Deny(_)));
     }
 
     /// **`hook --help` 의 이벤트 목록은 `Event` 의 글과 같다**(moai-h0r2) — clap 의 값 목록을 숨기고

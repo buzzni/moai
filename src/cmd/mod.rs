@@ -6,7 +6,9 @@
 pub mod add;
 pub mod archive;
 pub mod backlog;
+pub mod config;
 pub mod defer;
+pub mod due;
 pub mod edit;
 pub mod hook;
 pub mod init;
@@ -160,6 +162,18 @@ static AFTER: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 /// [`AFTER`] 에 한 줄 — 명령이 `Ok` 로 끝나면 [`run`] 이 [`tell`] 로 낸다.
 pub(crate) fn tell_after(line: String) {
     AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line);
+}
+
+/// `--due` 에 친 값 — `+N` 이면 **오늘에서 N 일 뒤**의 날짜로 바꾼다(moai-ghkp.kz7, [`crate::model::relative_due`]).
+/// 오늘은 읽는 사람의 달이다 — 보드가 남은 날수를 재는 그 달이라야 `+1` 이 "내일" 로 선다.
+///
+/// **락 밖에서 부른다** — 시간대를 풀면 tzdb 를 연다([`Ctx::zone`]). `+` 로 시작하지 않으면 안 연다:
+/// 날짜·`none` 은 그대로 돌아가고 꼴은 쓰기가 잰다.
+pub fn due_arg(ctx: &Ctx, v: &str, now: &str) -> String {
+    match v.trim().starts_with('+') {
+        true => crate::model::relative_due(v.trim(), &ctx.zone().shift(now)).unwrap_or_else(|| v.to_string()),
+        false => v.to_string(),
+    }
 }
 
 /// `none` 은 "비운다" 는 뜻이다. 제목이 `none` 인 이슈를 만들 일은 없다.
@@ -625,6 +639,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
         Cmd::Models => models::run(ctx),
+        Cmd::Config => config::run(ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
         // 트래커를 안 찾는다 — 올리는 것은 이 바이너리다(moai-zsfr.2p9).
@@ -639,6 +654,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Note(a) => note::run(ctx, a),
         Cmd::Link(a) => link::run(ctx, a),
         Cmd::Defer(a) => defer::run(ctx, a),
+        Cmd::Due(c) => due::run(ctx, c),
         Cmd::Read(a) => read::run(ctx, a),
         Cmd::Ready(a) => ready::run(ctx, a.worktree.worktree, a.limit),
         Cmd::Prime(w) => prime::run(ctx, w.worktree),
@@ -954,6 +970,11 @@ pub const OURS: &[&str] = &[
     "journal_error",
     "work",
     "spent",
+    // `show --json`(목록도 하나도)이 안 읽은 줄에 다는 것(moai-cqwy).
+    "unread",
+    // `show --json`(목록도 하나도)이 곁들이는 선 마일스톤과 아카이브(moai-wk7i.rmc).
+    "derived_milestone",
+    "archived",
     // `edit --json` 이 곁들이는 남은 소속.
     "inherited_epic",
     "inherited_milestone",

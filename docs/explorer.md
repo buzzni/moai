@@ -18,7 +18,8 @@ reach for, and [the glossary](glossary.md) says what the words mean.
   the epic or milestone they name is not there (or their parent's id stands twice)
 
 It needs a terminal. A script that wants the same rows calls `moai tui --json`,
-which prints the listing and opens no screen.
+which prints the listing and opens no screen — with counts, filters and order as
+[Draw the tracker from another program](json.md#walk-the-explorers-directories) says.
 
 ## Find your way around
 
@@ -55,8 +56,8 @@ the first ties, and each field has its own direction.
 
 | Keys | What it does |
 |---|---|
-| `SPC s p` `c` `u` `s` `a` `t` | sort by that one field (priority, created, updated, status, assignee, title); the same key again turns it around |
-| `SPC s P` `C` `U` `S` `A` `T` | add that field at the end of the order; if it is already there, turn it around |
+| `SPC s p` `c` `u` `s` `a` `t` `w` | sort by that one field (priority, created, updated, status, assignee, title, due — `w` for when); the same key again turns it around |
+| `SPC s P` `C` `U` `S` `A` `T` `W` | add that field at the end of the order; if it is already there, turn it around |
 | `SPC s e` | open the sort window |
 
 In the sort window the fields in the order come first, numbered and marked
@@ -243,7 +244,10 @@ something that is — and changed
 since you last looked carry a `[NEW]` mark. `r` marks the row under the cursor
 read, `SPC m g` every member of the group it is in, and `SPC m a` everything.
 Read marks live in your own config, not in the tracker, so marking changes
-nothing anyone else sees; the CLI side is `moai read`.
+nothing anyone else sees; the CLI side is `moai read`. Outside the explorer,
+`moai show --json` (and `moai show <id> --json`) puts `"unread": true` on the same
+rows the explorer marks `[NEW]`; a row that is not unread has no key at all, and
+when moai cannot tell who you are or cannot read your read marks, no row carries it.
 
 ## Park a thought
 
@@ -253,6 +257,9 @@ as a [backlog item](glossary.md#backlog) with no epic — off the board and out 
 unfolds it. With an editor on hand (`$VISUAL`, `$EDITOR`, `vi` or `nano`) it opens
 like a git commit message: the first line is the title. Without one, a built-in
 form opens and `Ctrl-S` keeps it. Leave the title empty and nothing is kept.
+The editor has to save UTF-8. If it saves in another encoding, moai cannot read
+the file, so it keeps it where it is, names its path, and says that path again on
+the shell when you quit — open it, save it as UTF-8, and park it again.
 
 ## Several projects
 
@@ -297,4 +304,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i

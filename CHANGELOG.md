@@ -61,6 +61,163 @@ does not tag — see `CONTRIBUTING.md`.
   - CI builds and lints the Windows target on every pull request that touches
     code. The tests are built there, not yet run.
 
+## [0.18.1] - 2026-10-16
+
+### Fixed
+
+- **An editor that saves in a non-UTF-8 encoding no longer loses what you wrote.**
+  When the editor opened by `SPC n` saved the thought as, say, Notepad ANSI or vim
+  `fenc=latin1`, moai could not read the file and then deleted it — the only copy.
+  It now keeps that file (readable by you alone), names its path at the front of
+  the message, and prints the path once more on the shell when the explorer quits.
+- **Hook rule 4 no longer lets `tmux -L …` through inside `cmux claude-teams`.**
+  There `$TMUX` is cmux's stand-in (`/tmp/cmux-…`) and the `tmux` on `PATH` is
+  cmux's shim, which drops `-L`, `-S` and `-f`: `env -u TMUX tmux -L x
+  kill-session` closed a workspace in the person's cmux. Under the stand-in,
+  rule 4 now refuses the shim's `kill-server`, `kill-session`, `kill-window`,
+  `kill-pane` and `new-session` (aliases, prefixes, flag clusters and `\;`
+  sequences included) whatever socket the line names, and the refusal hands the
+  same line on the real tmux's absolute path. Its other refusals (a bare
+  `kill-server` on an absolute path, `pkill`/`killall tmux`) hand that line
+  too, and rule 4 in the `AGENTS.md` block and the worker steps teach it, where
+  they taught `env -u TMUX tmux -L …`, which runs the shim. Outside cmux
+  nothing changes. (moai-e7vm)
+
+## [0.18.0] - 2026-10-16
+
+### Added
+
+- **Any row can carry a deadline, not only a milestone.** `--due` works on
+  `add`, `edit`, `epic add` and `backlog add`, and `+N` means N days from today
+  in your time zone (stored as the date). A deadline cannot be later than the
+  milestone, epic or parent the row is drawn under — the write is refused and
+  the message names that ancestor, its deadline and the `--due` to give. Only
+  the row being written is checked: pulling an ancestor's deadline in never
+  blocks, it prints one line naming the rows it pushed past, and `moai status`
+  warns `due_beyond_parent` without changing the exit code. `--start` stays on
+  milestone rows. (moai-ghkp)
+- **Deadlines order and filter the list.** `--sort due` (and `SPC s w` in the
+  explorer) puts the earliest first and rows without one last;
+  `--filter due_on=2026-10-01~2026-10-05` keeps rows whose own deadline falls
+  on those calendar days, both ends in. Within one priority `moai ready` puts
+  the running milestone's work first and then the nearer deadline.
+  (moai-ghkp.7uy)
+- **A plan line can end in `@YYYY-MM-DD`.** `add --from --due` puts the
+  deadline on each epic the plan creates that has none of its own, and
+  `backlog promote` carries the backlog item's deadline onto the epic.
+  `--dry-run` checks them the way the real write does, and `show --as-plan`
+  writes them back. (moai-ghkp.u1w)
+- **The AGENTS block asks when work is due.** Showing a plan, an agent now asks
+  for a deadline in the same breath as the milestone, writes the answer as
+  `@YYYY-MM-DD` or `--due`, and leaves it empty when there is none — never made
+  up. The supervisor's message carries a `Due:` line that the worker hangs on
+  the epic it unfolds, and each supervisor round starts with `moai due apply`.
+  Run `moai init` to bring a repository's block in line. (moai-7bqy)
+- **`moai due apply` raises priority as a deadline nears.** An open, not
+  deferred issue or backlog item follows the earliest of its own deadline and
+  those of the milestone, epic and open parent it stands under (a parent
+  already closed lends none); one day left or less (today and past included)
+  makes it `p0`, two or less `p1`, seven or less `p2`. It only raises, never
+  lowers, and leaves a
+  `Due-priority: p2 → p0 (1 days left, due 2026-10-17 from <epic>)` note in
+  the same write. A row the write would refuse (a hand-edited date) is left
+  for `moai edit` instead of stopping the rest. With nothing to raise it
+  writes nothing; `--dry-run` shows what it would do. `due_priority = "off"`
+  and `due_p0_days`, `due_p1_days`, `due_p2_days` in `.moai/config.toml` set
+  it (`auto`, 1, 2, 7 by default), and `moai config` shows them. Reading never
+  writes, so nothing raises by itself. (moai-dr8a)
+- **`moai status` says when a priority lags its deadline**, as a notice that
+  names `moai due apply`, and warns `overdue` about an open issue or
+  epic whose own deadline has passed. Neither changes the exit code.
+  (moai-dr8a.rl4)
+
+### Changed
+
+- **`due_on` is no longer refused on rows that are not milestones.** A binary
+  from before this release still refuses it: it cannot edit an issue, epic or
+  backlog item that carries a deadline — not even its title — and says to clear
+  it with `moai edit <id> --due none`. Upgrade every binary that writes the
+  tracker before giving such a row a deadline. (moai-ghkp.kz7)
+- **A plan line that ends in `@` and a digit is read as a deadline.** A title
+  such as `retina icons @2x` now stops the plan with its line number; write
+  `\@2x` to keep it as text. Saved plan templates with such titles need the
+  backslash. (moai-ghkp.u1w)
+
+## [0.17.0] - 2026-10-14
+
+### Added
+
+- **`moai show --json` puts `"unread": true` on the rows the explorer marks [NEW].**
+  It holds for the list and for `show <id>`: a row near you — yours, their
+  children, and the members of your epics (milestones are not counted) — that
+  changed since you last read it. The key is absent otherwise. When moai cannot
+  tell who you are, or cannot read your read marks, no row carries the key and
+  the exit code stays 0. The explorer and the CLI share one helper, so the two
+  never disagree. (moai-cqwy)
+- **`moai config` prints this repository's settings with the defaults filled in.**
+  prefix, statuses in board order, naming, archive_days, wiki_dir and the
+  `status_*` thresholds, under the names `.moai/config.toml` uses; `--json`
+  gives one object with `path` added. A surface drawing the board reads the
+  values this binary acts on instead of parsing the file again. It only reads.
+  (moai-wk7i.qtq)
+- **`moai status --json` carries `statuses`, the columns in the order the config
+  lists them.** `counts` is a map in name order, so the board's order was lost
+  there. (moai-wk7i.7yy)
+- **`moai show --json` names where a row stands without it being written on the
+  row** — `derived_milestone` (the milestone `--milestone` stands it under,
+  inherited from its epic included), `shelved_by` on the list as well as on
+  `show <id>` (the nearest row that took it out of the plan, its own id when it
+  was deferred itself — a closed row is in no plan, so `--deferred` picks it by
+  `deferred_at` alone) and `archived: true` on a row `--all` hides as the
+  archive. Each stands only when it holds. (moai-wk7i.rmc)
+- **`moai show --fields id,title,… --json` keeps only those keys of each row**, in
+  that order and each once; a key a row does not carry stays out. The costly
+  keys it leaves out are not worked out — without `work` a list skips the
+  journals, and `show <id>` asks git only for `commits` — so
+  `moai show -g <word> --all --fields id --json` is a small list of the ids a
+  search found, notes included. It refuses to run without `--json`.
+  (moai-wk7i.vsk, moai-wk7i.3it)
+- **`moai tui --json` puts `progress` (`done`, `total`) on every folder row — a
+  milestone, an epic, an issue with children — and takes the filters and
+  `--sort` of `moai show`.** Given filters, a row
+  stands when `moai show` would list it and a folder stands when something
+  under it does; without them the listing is every row, as before. The flags
+  are refused on the screen and outside a `.moai`. (moai-wk7i.5wx)
+- **`moai show --help` says `--archived` pages like any list**: archived and live
+  rows share one order, so `--sort id -n <count> --after <last id>` reads a long
+  list whole. A test now holds that. (moai-wk7i.gkd)
+
+### Changed
+
+- **A rule 1 or rule 3 refusal and the turn-end hold say why each held row is this
+  session's.** One line per row — this session picked it up, this worktree's name
+  points at it, or no session recorded the pick — so a session that is blocked can
+  tell which row did it without a separate command. The lines are dropped when they
+  would not fit the hold. (moai-pyi4.w47)
+- **`moai-supervise` and the worker steps cover five places a round had to patch by
+  hand.** In a repository whose `.moai` is kept out of git, the supervisor and the
+  worker ask `git ls-files` once and skip the tracker commits. A member the hook
+  refuses to create (rule 1) is parked as a backlog item under the epic and reported
+  as `member refused:`, so the supervisor unfolds it. An epic-end review rule 3 keeps
+  refusing is run by hand and says so on its first line (`Manual review:`). A session
+  worker writes the review issue's `model:` line too, and the worker and the
+  supervisor look for members closed without one. The message gains a `Subagents:`
+  line naming the model and effort per role a worker may hand pieces of its work to.
+  (moai-nzmp)
+
+### Fixed
+
+- **Several sessions of one person no longer block each other over rows nobody
+  recorded.** Once another session has recorded a pick in the same tracker within
+  the last 12 hours, a started row no session's hook recorded picking up — moved in
+  a terminal, by a session running without the moai hook, or through a shell
+  variable such as `moai mv "$R" review` — is no longer every session's focus, so
+  it stops refusing rule 1 and rule 3 and stops holding the turn end. It stays
+  yours when this worktree's name points at it, or when it sits under a row this
+  session picked up or in that row's epic. Working alone is unchanged. A word the
+  shell would expand is no longer recorded as an issue id. (moai-pyi4.cu3,
+  moai-pyi4.ewi, moai-pyi4.hkn, moai-pyi4.m8o)
+
 ## [0.16.0] - 2026-10-11
 
 ### Added
