@@ -6957,3 +6957,15 @@
 {"ts":"2026-10-16T15:05:46Z","id":"moai-c6wz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Zone::system 의 cfg!(test) 갈래를 시간대 출처 주입으로 바꾼다"}
 {"ts":"2026-10-16T15:05:57Z","id":"moai-lag7.482","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 에픽 끝 리뷰, 사람이 max 대신 xhigh 로 정함)"}
 {"ts":"2026-10-16T15:05:57Z","id":"moai-lag7.482","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"받은 것: 1~13 을 리뷰어가 fix 커밋 일곱(c641ed99..2a2d9b76)으로 고쳤고 cargo test 유닛 1918/0·cli 673/0 으로 확인했다. 넘긴 것: 14(canonical 이 다른 파일이 되는 철자에서도 걷음) → backlog moai-ons4, 15(Zone::system 의 cfg!(test) 갈래) → backlog moai-c6wz. 안 한 것: hook 거절문 C:/… 와 init·status 안내 C:\\… 의 철자 차이 — 둘 다 Git Bash 에서 돌고 / 꼴은 913369c5 의 결정이라 둔다."}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.9fm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — .gitattributes eol=lf)"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.rrm","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — cli 시험 도우미, 서브에이전트와 감독)"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.vva","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 훅·user_config 표본, 서브에이전트)"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.sk7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 시간대·exe 이름·외부 도구 가정, 서브에이전트)"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.951","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 쓰기 경로: path::canonical, 훅 규칙 2 의 Windows 경로 판정)"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.eup","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 재측정)"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.9fm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.rrm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.vva","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.sk7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.951","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-16T15:06:07Z","id":"moai-lag7.eup","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
