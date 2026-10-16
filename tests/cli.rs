@@ -1192,7 +1192,10 @@ fn init_plants_the_merge_driver_too() {
     #[cfg(unix)]
     {
         let gone = root.join("없는/자리/moai");
-        git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
+        git(
+            root,
+            &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())],
+        );
         assert!(ok(root, &["status"]).contains("안 돈다"), "썩은 줄을 안 댔다");
         let said = ok(root, &["init"]);
         assert!(said.contains("머지 드라이버를 심었다"), "죽은 경로를 안 고쳤다\n{said}");
@@ -16764,7 +16767,10 @@ fn a_row_picked_in_the_root_stands_in_a_nameless_worktree_only_once_picked_there
     // 그 워크트리 안에서 집으면(다음 칸으로 옮겨도 된다) 표식에 적혀 자리로 선다.
     ok_at(&side, &later, &["mv", &id, "review"]);
     let shown = ok_at(&main, &later, &["show", &id, "--json"]);
-    assert!(shown.contains(r#""place":"at""#) && shown.contains(&js(native(dir))), "표식에 적힌 자리를 못 봤다\n{shown}");
+    assert!(
+        shown.contains(r#""place":"at""#) && shown.contains(&js(native(dir))),
+        "표식에 적힌 자리를 못 봤다\n{shown}"
+    );
     assert!(!ok_at(&main, &later, &["status", "--json"]).contains("\"stranded\""), "산 일을 자리 없다고 했다");
 }
 
@@ -16826,7 +16832,10 @@ fn a_worktree_outside_main_is_named_relative_to_main() {
     let root = s.path().to_str().unwrap();
     assert!(!json.contains(root), "기계의 절대 경로가 --json 으로 나갔다\n{json}");
     let line = ok(&main, &["show", &id]);
-    assert!(line.contains(&native(&format!("../{id}"))) && !line.contains(root), "사람 화면의 자리가 다른 자로 쟀다\n{line}");
+    assert!(
+        line.contains(&native(&format!("../{id}"))) && !line.contains(root),
+        "사람 화면의 자리가 다른 자로 쟀다\n{line}"
+    );
 
     // 맨몸 저장소 — main 이 없다. 딸린 워크트리 둘 가운데 어디서 불러도 같은 글자다.
     let bare = s.path().join("repo.git");
@@ -16835,7 +16844,10 @@ fn a_worktree_outside_main_is_named_relative_to_main() {
     git(&bare, &["worktree", "add", "-q", &format!("../b-{id}"), &format!("worktree-{id}")]);
     for at in ["w1".to_string(), format!("b-{id}")] {
         let json = ok(&s.path().join(&at), &["show", &id, "--json", "--worktree"]);
-        assert!(json.contains(&format!(r#""path":"{}""#, js(native(&format!("../b-{id}"))))), "{at} 에서 부르니 다른 자로 쟀다\n{json}");
+        assert!(
+            json.contains(&format!(r#""path":"{}""#, js(native(&format!("../b-{id}"))))),
+            "{at} 에서 부르니 다른 자로 쟀다\n{json}"
+        );
     }
 }
 
@@ -16975,9 +16987,9 @@ fn a_broken_side_snapshot_is_told_of_but_never_hides_a_lost_row() {
     // 가지와 **경로를 함께** 낸다 — 떼어 낸 HEAD 는 이름이 커밋 앞 일곱 자라 가지만으로는 두
     // 워크트리가 글자까지 같아진다. 경로는 `show` 와 같이 꼭대기에서 줄여 절대 경로를 안 낸다.
     assert!(json.contains(&format!(
-            r#""broken_worktrees":[{{"path":"{}","branch":"worktree-agent-x"}}]"#,
-            js(native(".claude/worktrees/agent-x"))
-        )));
+        r#""broken_worktrees":[{{"path":"{}","branch":"worktree-agent-x"}}]"#,
+        js(native(".claude/worktrees/agent-x"))
+    )));
     assert!(!json.contains(&main.display().to_string()), "기계의 절대 경로가 그대로 나갔다\n{json}");
 
     // **겹쳐 볼 때는 같은 워크트리를 두 번 말하지 않는다** — `--worktree` 면 `gather` 가 옆 스냅샷을
@@ -17215,7 +17227,10 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     };
     let out = ok(&main, &["show", &id]);
     let line = place(&out);
-    assert!(line.contains(&native(&format!(".claude/worktrees/{id}"))) && line.contains(&format!("worktree-{id}")), "{line}");
+    assert!(
+        line.contains(&native(&format!(".claude/worktrees/{id}"))) && line.contains(&format!("worktree-{id}")),
+        "{line}"
+    );
     // **경로는 뿌리에서 잰 것이다** — 절대 경로가 그대로 나가면 위의 `contains` 도 지나가므로 여기서 못박는다.
     assert!(!line.contains(&main.display().to_string()), "뿌리에서 안 잘랐다\n{line}");
     let json = ok(&main, &["show", &id, "--json"]);
@@ -18249,8 +18264,7 @@ fn skill_status_notices_a_vanished_hook_binary() {
     {
         let noexec = c.home.path().join("noexec-moai");
         std::fs::write(&noexec, "#!/bin/sh\n").unwrap();
-        let body =
-            std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());
+        let body = std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());
         std::fs::write(&manifest, body).unwrap();
         let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
         assert!(json.contains("\"hook_exe_found\":false"), "실행할 수 없는 훅을 있다고 한다\n{json}");
@@ -21096,7 +21110,8 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
     assert!(added.contains("등록함") && added.contains("init 전"), "{added}");
     let written = std::fs::read_to_string(&config).unwrap();
     // TOML 은 `\` 를 품은 글을 따옴표 하나로 적기도 한다 — Windows 의 자리가 늘 그 꼴이다(moai-lag7.rrm).
-    let (basic, literal) = (format!("path = {:?}", bare_real.display().to_string()), format!("path = '{}'", bare_real.display()));
+    let (basic, literal) =
+        (format!("path = {:?}", bare_real.display().to_string()), format!("path = '{}'", bare_real.display()));
     assert!(written.contains(&basic) || written.contains(&literal), "절대경로로 적지 않았다\n{written}");
 
     let ls = project_ok(home.path(), &config, &["project", "ls"]);
@@ -22683,10 +22698,7 @@ fn status_tells_an_old_planted_line_to_be_replanted() {
     git(root, &["config", "--local", "merge.moai.driver", &old]);
     let said = ok(root, &["status"]);
     assert!(said.contains("옛 판이다"), "옛 줄을 안 댔다\n{said}");
-    assert!(
-        shell_spelt(&said, "merge-driver --install --as ", BIN, ""),
-        "같은 명령으로 다시 심으라고 안 한다\n{said}"
-    );
+    assert!(shell_spelt(&said, "merge-driver --install --as ", BIN, ""), "같은 명령으로 다시 심으라고 안 한다\n{said}");
     assert!(!said.contains("안 돈다"), "도는 명령을 못 돈다고 했다\n{said}");
 
     // 고칠 명령을 그대로 친다 — 알림이 걷힌다.
@@ -22698,7 +22710,10 @@ fn status_tells_an_old_planted_line_to_be_replanted() {
     #[cfg(unix)]
     {
         let gone = root.join("없는/자리/moai");
-        git(root, &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())]);
+        git(
+            root,
+            &["config", "--local", "merge.moai.driver", &format!("{} merge-driver %O %A %B %L %P", gone.display())],
+        );
         let said = ok(root, &["status"]);
         assert!(said.contains("안 돈다") && !said.contains("옛 판이다"), "{said}");
     }
