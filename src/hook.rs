@@ -6357,7 +6357,7 @@ fn guard_writes_in(
     // 지은 절대 경로가 되고, 푸는 일도 한 벌 더 돈다.
     let inside: Vec<(PathBuf, &String)> = writes
         .iter()
-        .map(|path| (resolve_path(&cwd.join(path), root), path))
+        .map(|path| (resolve_path(&cwd.join(&*native(path, cfg!(windows))), root), path))
         .filter(|(at, _)| counted(at, root))
         .collect();
     if inside.is_empty() || !held(issues, scan.cfg(), away).is_empty() {
@@ -7303,7 +7303,9 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
         let moved_here = moved.is_some();
         for (path, elsewhere) in found {
             let nowhere_known = moved_here || elsewhere;
-            let relative = !Path::new(&path).is_absolute();
+            // **뿌리부터 친 경로는 자리를 안 탄다**(moai-lag7.951) — Windows 의 `is_absolute` 는 드라이브가 없는
+            // `/repo/x` 를 상대로 읽지만, 껍데기(Git Bash)에서 그것은 어디서 쳐도 같은 자리다.
+            let relative = !Path::new(&*native(&path, cfg!(windows))).has_root();
             if gate.is_some() || unknowable(&path) || (nowhere_known && relative) {
                 continue;
             }
@@ -8122,7 +8124,9 @@ fn echo_moai(dir: Option<&Path>, seg: &[String]) -> String {
 /// 않은 자리를 겨눈다. 빈 글을 내면 받는 쪽의 맨 `moai` 가 적어도 이 자리에서 돈다.
 fn aim_flag(dir: Option<&Path>, seg: &[String]) -> String {
     if let Some(d) = dir.and_then(Path::to_str) {
-        return format!(" -C {}", crate::text::shell_word(d));
+        // **Windows 에서는 `/` 철자로 댄다**(moai-lag7.951) — 뿌리는 `canonicalize` 를 지나 `\\?\C:\…` 로 오는데,
+        // 그대로 내밀면 Git Bash 에 옮겨 칠 줄이 그 접두어를 달고 선다. 훅 줄의 철자와 같은 자다([`crate::path::slashed`]).
+        return format!(" -C {}", crate::text::shell_word(&crate::path::slashed(d, cfg!(windows))));
     }
     moai_flagged(seg)
         .and_then(|args| flag_values(args, &["-C", "--dir"]).pop())
@@ -8435,7 +8439,30 @@ fn counted(at: &Path, root: &Path) -> bool {
 /// **상대 경로는 저장소의 자리로 푼다.** 훅 프로세스가 어디서 도는지는 아무도
 /// 약속하지 않았다 — `src/main.rs` 가 저장소 밖으로 보여 규칙이 통째로 샜다.
 fn resolve(path: &str, root: &Path) -> PathBuf {
-    resolve_path(Path::new(path), root)
+    resolve_path(Path::new(&*native(path, cfg!(windows))), root)
+}
+
+/// 껍데기가 친 경로를 이 기계의 철자로 — **Windows 에서 Git Bash 의 드라이브 철자 `/c/…` 를 `C:/…` 로 읽는다**
+/// (moai-lag7.951).
+///
+/// Windows 의 Claude Code 는 Git Bash 로 명령을 돌리고, 거기서 에이전트는 `cd /c/Users/…/repo`·`moai -C /c/…`·
+/// `sed -i … /c/…/src/x.rs` 처럼 친다. 그대로 `Path` 로 받으면 드라이브 없는 뿌리 경로라 지금 자리의 드라이브에
+/// 붙어 `C:\c\Users\…` 가 되고, 저장소 안의 쓰기가 밖으로 보여 규칙 2 가 샜고 `-C` 가 없는 트래커를 겨눴다.
+/// Git Bash 는 네이티브 프로그램에 넘기는 인자도 같은 규칙으로 바꾼다(`/c` 는 `C:/`).
+///
+/// **한 글자짜리 맨 앞 조각만 바꾼다** — `/repo`·`/tmp` 처럼 Git 의 설치 자리로 풀리는 나머지는 어디인지 글자로
+/// 모르니 안 지어낸다. 유닉스에서는 한 글자도 안 바꾼다 — 거기서 `/c` 는 그냥 `/c` 다. `windows` 를 받는 까닭은
+/// [`crate::path::slashed`] 와 같다: 리눅스에서도 그 갈래를 잰다.
+fn native(path: &str, windows: bool) -> std::borrow::Cow<'_, str> {
+    let b = path.as_bytes();
+    let drive = windows
+        && b.first() == Some(&b'/')
+        && b.get(1).is_some_and(u8::is_ascii_alphabetic)
+        && matches!(b.get(2), None | Some(b'/' | b'\\'));
+    if !drive {
+        return std::borrow::Cow::Borrowed(path);
+    }
+    std::borrow::Cow::Owned(format!("{}:/{}", char::from(b[1].to_ascii_uppercase()), path.get(3..).unwrap_or("")))
 }
 
 /// [`resolve`] 를 `Path` 로 — 껍데기에서 캔 쓰기([`guard_writes_in`])는 그 낱말을 이미 `Path` 로
@@ -8493,7 +8520,11 @@ fn real_path(at: &Path) -> PathBuf {
 /// U+FFFD 로 바꿔, 내민 줄이 있지도 않은 자리를 겨눈다. 못 찍는 이름은 뿌리를 떼는 대신 `typed`
 /// 를 그대로 낸다: 그것은 `&str` 로 들어온 값이라 언제나 옮겨 칠 수 있다.
 fn shown(at: &Path, root: &Path, typed: &str) -> String {
-    at.strip_prefix(root).ok().and_then(|r| r.to_str()).map_or_else(|| typed.to_string(), str::to_owned)
+    // 뗀 조각은 이 기계의 가름선으로 이어 붙은 것이라, Windows 에서는 사람이 Git Bash 에 친 `/` 철자로 되돌린다.
+    at.strip_prefix(root)
+        .ok()
+        .and_then(|r| r.to_str())
+        .map_or_else(|| typed.to_string(), |r| crate::path::slashed(r, cfg!(windows)))
 }
 
 /// 명령줄에서 이 플래그들에 딸린 값을 모은다. `-e x`·`-e=x`, 그리고 짧은
