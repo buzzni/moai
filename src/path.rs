@@ -51,7 +51,20 @@ use std::path::{Path, PathBuf};
 /// [모듈 머리글](self) 에 한 번 적혀 있다. 여기 다시 적었더니 두 벌이 서로 다른 수를 대기
 /// 시작했다(리뷰) — 그래서 여기에는 수를 안 적는다. 푸는 자가 늘던 날(moai-4oab) 머리글만 고치면 된다.
 pub(crate) fn real(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    canonical(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// `std::fs::canonicalize` 에서 Windows 의 `\\?\` 접두어를 걷은 것 — **moai 가 링크를 푸는 길은 이것 하나다**(moai-lag7.951).
+///
+/// 접두어가 남으면 이 값은 사람이 준 철자(`C:\…`)와 어디서도 안 맞는다. 실기 Windows 에서 훅이 Claude Code 가 준 `cwd`
+/// (`C:\…`)를 뿌리로 쥐고 고칠 파일은 `\\?\C:\…` 로 풀어, `strip_prefix` 가 늘 실패해 저장소 파일을 다 "밖" 으로 셌다 —
+/// 규칙 2 가 한 번도 안 섰다. 읽음 표시·프로젝트 등록·`init` 안내도 그 철자를 설정 파일과 화면에 적었다. 한 갈래만 걷으면
+/// 남은 갈래와 견주기가 갈라지니, 부르는 자리 모두가 이것을 탄다.
+///
+/// 걷어도 긴 경로는 안 잃는다 — std 가 Windows 의 파일 API 를 부를 때 260자를 넘는 경로에 접두어를 스스로 붙인다.
+/// 유닉스에서는 [`unverbatim`] 이 글자 하나 안 바꾼다.
+pub(crate) fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(p).map(|real| PathBuf::from(unverbatim(real.as_os_str())))
 }
 
 /// `.` 을 버리고 `..` 은 앞 조각을 뗀다. **파일 시스템을 안 본다** — 아직 없는 자리도 접어야 하고
@@ -110,7 +123,7 @@ pub(crate) fn real_prefix(p: &Path) -> PathBuf {
         p.display()
     );
     for head in p.ancestors() {
-        if let Ok(real) = std::fs::canonicalize(head) {
+        if let Ok(real) = crate::path::canonical(head) {
             // **떼어 내기는 실패하지 않는다** — `head` 는 `p` 의 조상이다. 이것을 `if let` 으로 받아
             // 넘기면 못 뗀 자리에서 한 칸 더 짧은 조상으로 내려가, 엉뚱한 윗자리로 푼 경로를 아무 말
             // 없이 답으로 낸다.
@@ -307,7 +320,7 @@ mod tests {
         let real = s.join("real");
         std::fs::create_dir_all(real.join("src")).unwrap();
         std::os::unix::fs::symlink(&real, s.join("link")).unwrap();
-        let here = std::fs::canonicalize(&real).unwrap();
+        let here = crate::path::canonical(&real).unwrap();
 
         assert_eq!(real_prefix(&s.join("link/src")), here.join("src"));
         // 아직 없는 파일도 같은 자리다.

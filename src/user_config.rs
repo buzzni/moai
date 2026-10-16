@@ -612,7 +612,7 @@ pub fn update<T>(path: &Path, lang: crate::i18n::Lang, f: impl FnOnce(&mut Doc) 
     // 견준다. 파일이 아직 없으면(`resolved` 가 없다) 곁의 락이 곧 그 자리의 락이다.
     let held = |r: &Path| {
         lock.holds(&lock_beside(r)).unwrap_or_else(|| {
-            std::fs::canonicalize(dir).ok().zip(path.file_name()).is_some_and(|(d, name)| d.join(name) == r)
+            crate::path::canonical(dir).ok().zip(path.file_name()).is_some_and(|(d, name)| d.join(name) == r)
         })
     };
     let _real_lock = match resolved.as_deref() {
@@ -669,7 +669,7 @@ pub(crate) fn fail(lang: crate::i18n::Lang, at: Option<&Path>, why: &WriteTroubl
 /// 링크가 가리키는 자리의 디렉터리가 없으면 **쓰지 않는다**(`broken`). 아직 안 받은 dotfiles 저장소 자리에 디렉터리를
 /// 지으면 뒤의 `git clone` 이 거기서 멈춘다 — 사람이 그 자리를 세울 때까지 멈춘다.
 fn resolve_config(path: &Path) -> Result<Option<PathBuf>, WriteTrouble> {
-    match std::fs::canonicalize(path) {
+    match crate::path::canonical(path) {
         Ok(real) => return Ok(Some(real)),
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => {}
@@ -682,7 +682,7 @@ fn resolve_config(path: &Path) -> Result<Option<PathBuf>, WriteTrouble> {
     if at == path {
         return Ok(None);
     }
-    match (std::fs::canonicalize(dir_of(&at)), at.file_name()) {
+    match (crate::path::canonical(dir_of(&at)), at.file_name()) {
         (Ok(dir), Some(name)) => Ok(Some(dir.join(name))),
         _ => Err(WriteTrouble::LinkDangling { from: path.to_path_buf(), to: at }),
     }
@@ -2303,7 +2303,7 @@ fn writable(dir: &Path) -> Result<&str, WriteTrouble> {
 pub fn resolve_dir(input: &Path, cwd: &Path, lang: crate::i18n::Lang) -> R<PathBuf> {
     let joined = cwd.join(input);
     // **OS 가 낸 글은 그대로 나른다** — 우리가 지은 글이 아니라 말묶음에 키를 둘 자리가 없다.
-    let real = std::fs::canonicalize(&joined).map_err(|e| {
+    let real = crate::path::canonical(&joined).map_err(|e| {
         let code = if e.kind() == std::io::ErrorKind::NotFound { code::NOT_FOUND } else { code::ERROR };
         Fail::coded(format!("{}: {e}", joined.display()), code)
     })?;
@@ -2339,7 +2339,7 @@ pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
     let mut out = vec![lexical.clone()];
     // **없을 수 있는 것은 통째 풀기 하나다.** 셋 다 `Option` 이던 판의 모양을 그대로 두면 `Some(` 이
     // 둘 붙어, 다음에 철자를 더하는 이가 그것을 흉내 낸다.
-    let more = std::fs::canonicalize(&joined).ok().into_iter().chain([crate::path::real_prefix(&lexical), joined]);
+    let more = crate::path::canonical(&joined).ok().into_iter().chain([crate::path::real_prefix(&lexical), joined]);
     for one in more {
         if !out.contains(&one) {
             out.push(one);
@@ -2355,7 +2355,7 @@ pub fn spellings(input: &Path, cwd: &Path) -> Vec<PathBuf> {
 /// 글자로만 견주면 `/w/link` 가 적힌 목록에 `/w/real` 이 또 실려 같은 저장소가 두 줄로
 /// 선다(TUI 의 고르기 창은 이미 링크를 풀어 `✓ 등록됨` 을 달아 놓고 있다).
 pub fn same_dir(a: &Path, b: &Path) -> bool {
-    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+    a == b || matches!((crate::path::canonical(a), crate::path::canonical(b)), (Ok(x), Ok(y)) if x == y)
 }
 
 /// 목록에 보일 이름 — 디렉터리 이름이고, **겹치는 것끼리만** 위 조각을 하나씩
@@ -2591,7 +2591,7 @@ mod tests {
             assert_eq!(reg.problems.len(), 1, "{src:?} → {reg:?}");
             assert!(!said_all(&reg.problems, reg.path.as_deref())[0].contains('\n'), "한 줄이 아니다 — {reg:?}");
 
-            let file = std::fs::canonicalize(&path).unwrap().display().to_string();
+            let file = crate::path::canonical(&path).unwrap().display().to_string();
             for e in [
                 upd(&path, |doc| doc.add(Path::new(p("/b")))).unwrap_err(),
                 upd(&path, |doc| doc.remove(&[p("/a").into()])).unwrap_err(),
@@ -4081,7 +4081,7 @@ mod tests {
     #[test]
     fn resolve_dir_makes_absolute_and_follows_symlinks() {
         let s = scratch("resolve");
-        let d = s.canonicalize().unwrap();
+        let d = crate::path::canonical(&*s).unwrap();
         std::fs::create_dir_all(d.join("real/apps/a")).unwrap();
         assert_eq!(resolve_dir(Path::new("real/apps/./a"), &d, crate::i18n::Lang::Ko).unwrap(), d.join("real/apps/a"));
         assert_eq!(
@@ -4137,7 +4137,7 @@ mod tests {
     #[test]
     fn a_symlinked_config_stays_a_symlink() {
         let s = scratch("symlink");
-        let d = s.canonicalize().unwrap();
+        let d = crate::path::canonical(&*s).unwrap();
         std::fs::create_dir_all(d.join("dots")).unwrap();
         std::fs::write(d.join("dots/config.toml"), "# dotfiles\n").unwrap();
         let link = d.join("config.toml");
@@ -4161,7 +4161,7 @@ mod tests {
     #[test]
     fn a_config_under_a_linked_directory_locks_once() {
         let s = scratch("linked-dir");
-        let d = s.canonicalize().unwrap();
+        let d = crate::path::canonical(&*s).unwrap();
         std::fs::create_dir_all(d.join("dots")).unwrap();
         std::os::unix::fs::symlink(d.join("dots"), d.join("cfg")).unwrap();
         let path = d.join("cfg/config.toml");
@@ -4177,7 +4177,7 @@ mod tests {
     #[test]
     fn a_linked_lock_file_is_locked_once() {
         let s = scratch("linked-lock");
-        let d = s.canonicalize().unwrap();
+        let d = crate::path::canonical(&*s).unwrap();
         std::fs::create_dir_all(d.join("dots")).unwrap();
         std::fs::create_dir_all(d.join("cfg")).unwrap();
         std::fs::write(d.join("dots/config.toml"), "").unwrap();
@@ -4201,7 +4201,7 @@ mod tests {
     #[test]
     fn a_link_to_a_missing_config_stays_a_link() {
         let s = scratch("dangling");
-        let d = s.canonicalize().unwrap();
+        let d = crate::path::canonical(&*s).unwrap();
         std::fs::create_dir_all(d.join("dots")).unwrap();
         std::fs::create_dir_all(d.join("cfg")).unwrap();
         let link = d.join("cfg/config.toml");
@@ -4227,7 +4227,7 @@ mod tests {
     #[test]
     fn two_spellings_of_one_config_still_lock_each_other() {
         let s = scratch("two-spellings");
-        let d = s.canonicalize().unwrap();
+        let d = crate::path::canonical(&*s).unwrap();
         std::fs::create_dir_all(d.join("dots")).unwrap();
         let real = d.join("dots/config.toml");
         std::fs::write(&real, "").unwrap();

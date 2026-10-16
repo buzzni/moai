@@ -2459,7 +2459,7 @@ fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>
 /// 자다. 없는 자리는 아니다 — 거기서는 어차피 못 짓는다.
 fn stage_inside(dir: &Path, root: &Path) -> bool {
     let root = crate::path::real(root);
-    std::fs::canonicalize(dir).is_ok_and(|dir| dir.strip_prefix(&root).is_ok_and(|rest| !crate::held::into_git(rest)))
+    crate::path::canonical(dir).is_ok_and(|dir| dir.strip_prefix(&root).is_ok_and(|rest| !crate::held::into_git(rest)))
 }
 
 /// 파일이 든 디렉터리 — 없으면(뿌리 `/` 나 빈 경로) `named` 를 대는 거절이다(moai-iq7j).
@@ -2505,7 +2505,7 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
 /// 링크를 끝까지 푼 끝([`crate::path::follow_links`])이 앉은 자리 — **끝 파일은 없어도 된다**. 디렉터리는 풀고 끝
 /// 이름은 그대로 붙인다. 디렉터리를 못 풀면 있는 조상까지 푼 철자다([`crate::path::real_prefix`]).
 pub(crate) fn landed(end: &Path) -> PathBuf {
-    match (std::fs::canonicalize(crate::path::dir_of(end)), end.file_name()) {
+    match (crate::path::canonical(crate::path::dir_of(end)), end.file_name()) {
         (Ok(dir), Some(name)) => dir.join(name),
         _ => crate::path::real_prefix(&crate::path::lexical(end)),
     }
@@ -2551,7 +2551,7 @@ fn into_tracker(path: &Path, real: &Path, root: &Path) -> Option<(PathBuf, &'sta
     let dot = root.join(".moai");
     let beyond = [dot.join("journal"), crate::archive::dir(root), dot];
     if landed.strip_prefix(&base).is_ok_and(tracker)
-        || beyond.iter().any(|d| std::fs::canonicalize(d).is_ok_and(|d| landed.starts_with(&d)))
+        || beyond.iter().any(|d| crate::path::canonical(d).is_ok_and(|d| landed.starts_with(&d)))
     {
         return Some((landed, "inside the tracker (.moai)"));
     }
@@ -2598,7 +2598,7 @@ fn resolve(path: &Path, within: Option<&Path>) -> R<PathBuf> {
     let end = || crate::text::one_line(&real.display().to_string());
     if let Some(root) = within {
         let root = crate::path::real(root);
-        if let Ok(dir) = std::fs::canonicalize(crate::path::dir_of(&real)) {
+        if let Ok(dir) = crate::path::canonical(crate::path::dir_of(&real)) {
             if !dir.starts_with(&root) {
                 // 끝 조각이 링크가 아니면 가운데 디렉터리가 링크다 — 그때 댈 것은 푼 디렉터리다.
                 let landed = real.file_name().map_or_else(|| dir.clone(), |name| dir.join(name));
@@ -2692,7 +2692,7 @@ fn on_lock(real: &Path, root: &Path) -> bool {
     if let Some(at) = id(std::fs::metadata(real)) {
         return locks.any(|lock| id(std::fs::symlink_metadata(&lock)) == Some(at));
     }
-    let spelled = |p: &Path| Some(std::fs::canonicalize(crate::path::dir_of(p)).ok()?.join(p.file_name()?));
+    let spelled = |p: &Path| Some(crate::path::canonical(crate::path::dir_of(p)).ok()?.join(p.file_name()?));
     let Some(landed) = spelled(real) else { return false };
     locks.filter_map(|lock| spelled(&lock)).any(|lock| lock == landed)
 }

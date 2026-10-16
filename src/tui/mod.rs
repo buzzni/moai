@@ -3366,10 +3366,10 @@ impl App {
             return Some(k.clone());
         }
         // 지금 자리는 한 번만 푼다 — `same_dir` 은 두 쪽을 다 풀어, 열쇠마다 부르면 같은 자리를 열쇠 수만큼 다시 판다.
-        let real = std::fs::canonicalize(&here).unwrap_or(here);
+        let real = crate::path::canonical(&here).unwrap_or(here);
         if let Some(k) = self.order_projects.keys().find(|k| {
             let k = std::path::Path::new(k.as_str());
-            k == real || std::fs::canonicalize(k).is_ok_and(|k| k == real)
+            k == real || crate::path::canonical(k).is_ok_and(|k| k == real)
         }) {
             return Some(k.clone());
         }
@@ -12001,8 +12001,8 @@ mod tests {
         let user = s.join("user.toml");
         let (root, worktree) = (s.join("proj"), s.join("proj/.worktrees/moai-x"));
         std::fs::create_dir_all(&worktree).unwrap();
-        let root = std::fs::canonicalize(&root).unwrap();
-        let worktree = std::fs::canonicalize(&worktree).unwrap();
+        let root = crate::path::canonical(&root).unwrap();
+        let worktree = crate::path::canonical(&worktree).unwrap();
         // 열쇠는 도구가 짓는 꼴로 — Windows 의 `\\?\C:\…` 를 `"…"` 에 날로 넣으면 TOML 이 깨진다(moai-lag7.951).
         let key = crate::user_config::project_key(&root.display().to_string());
         std::fs::write(&user, format!("[tui.{key}]\norder = [\"title\"]\n")).unwrap();

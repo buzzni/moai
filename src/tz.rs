@@ -261,8 +261,8 @@ fn system_name() -> Option<String> {
         // (macOS 의 `/usr/share/zoneinfo` → `/var/db/timezone/zoneinfo`). 거기서 포기하면 화면이
         // UTC 로 서면서 **매 명령**에 "시스템이 제 시간대를 안 댄다" 가 붙는다.
         .or_else(|| {
-            let real = std::fs::canonicalize("/etc/localtime").ok()?;
-            [std::fs::canonicalize(&dir).ok(), std::fs::canonicalize("/usr/share/zoneinfo").ok()]
+            let real = crate::path::canonical("/etc/localtime").ok()?;
+            [crate::path::canonical(&dir).ok(), crate::path::canonical("/usr/share/zoneinfo").ok()]
                 .into_iter()
                 .flatten()
                 .find_map(|root| name_under(&real, &root))

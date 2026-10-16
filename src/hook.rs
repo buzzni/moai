@@ -8681,8 +8681,8 @@ mod tests {
 
     /// 유닉스 꼴로 적은 표본 경로를 **이 기계의 절대 경로로** 세운다(moai-lag7.vva). 유닉스에서는 그대로다.
     ///
-    /// Windows 에서 `/repo` 는 드라이브가 없어 절대 경로가 아니고, 훅의 뿌리는 `canonicalize` 를 지난
-    /// `\\?\C:\…` 철자다(`Repo::here`) — 셈하는 자([`counted`])가 견주는 쪽도 그 철자라, 표본 뿌리도 그
+    /// Windows 에서 `/repo` 는 드라이브가 없어 절대 경로가 아니고, 훅의 뿌리는 `path::canonical` 을 지난
+    /// `C:\…` 철자다(`Repo::here`, moai-lag7.951) — 셈하는 자([`counted`])가 견주는 쪽도 그 철자라, 표본 뿌리도 그
     /// 꼴이어야 실제 훅이 선 자리를 잰다. Git Bash 의 드라이브 철자(`/a/b`)는 제품이 읽는 대로([`native`])
     /// 그 드라이브다.
     fn abs(p: &str) -> PathBuf {
@@ -8691,7 +8691,7 @@ mod tests {
         }
         match native(p, true) {
             std::borrow::Cow::Owned(drive) => PathBuf::from(drive),
-            std::borrow::Cow::Borrowed(_) => PathBuf::from(format!(r"\\?\C:{}", p.replace('/', r"\"))),
+            std::borrow::Cow::Borrowed(_) => PathBuf::from(format!(r"C:{}", p.replace('/', r"\"))),
         }
     }
 

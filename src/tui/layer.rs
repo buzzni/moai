@@ -2028,7 +2028,7 @@ mod tests {
         a.hit("SPC s c Esc");
         let text = std::fs::read_to_string(&cfg).unwrap();
         // 열쇠의 따옴표는 도구가 고른다 — `\` 가 든 Windows 경로는 `'…'` 로 선다(moai-lag7.951).
-        let home = crate::user_config::project_key(&std::fs::canonicalize(&one).unwrap().display().to_string());
+        let home = crate::user_config::project_key(&crate::path::canonical(&one).unwrap().display().to_string());
         assert!(
             text.starts_with(&before) && text.contains(&format!("[tui.{home}]\norder = [\"created\"]\n")),
             "프로젝트 안의 고르기가 그 프로젝트의 표에만 적히지 않았다\n{text}"

@@ -70,7 +70,7 @@ impl Scratch {
         let mut s = Scratch::new(name);
         // **여기만 터진다** — 방금 지은 디렉터리라 못 푸는 것은 시험 자리가 성치 않다는 뜻이고,
         // 받은 철자로 떨어지면([`crate::path::real`]) 견주는 시험이 까닭 없이 붉어진다.
-        s.0 = std::fs::canonicalize(&s.0).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
+        s.0 = canonical(&s.0).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
         s
     }
 
@@ -110,7 +110,7 @@ impl Scratch {
     /// Windows 에서 `\\?\C:\…` 로 서는데, 그 꼴에 `join` 하면 Rust 가 `/` 를 `\` 로 바꾸고 `..` 까지
     /// 접어 "같은 자리의 다른 철자" 를 재는 시험의 전제가 무너진다(moai-lag7.951). 유닉스에서는 `join` 그대로다.
     pub fn spelt(&self, tail: &str) -> PathBuf {
-        PathBuf::from(crate::path::unverbatim(self.0.as_os_str())).join(tail)
+        plain(self.0.clone()).join(tail)
     }
 }
 
@@ -235,7 +235,7 @@ pub fn names(d: &Path) -> Vec<String> {
 /// 그쪽에서는 `crate` 가 시험 크레이트라 `crate::path` 가 없다. 한 자로 모으는 결정(moai-8csx)이
 /// 닿지 못하는 한 자리고, 갈리면 시험 자리가 링크를 달리 푼다 — 그래서 글로 맨다.
 fn real(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    canonical(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// `dir` 에 아무것도 없는 저장소를 세운다([`Scratch::fenced`] 가 왜 세 개인지 적는다).
@@ -368,7 +368,7 @@ mod tests {
         std::os::unix::fs::symlink(away.path(), &link).unwrap();
         #[cfg(not(unix))]
         let link = away.path().to_path_buf();
-        let resolved = std::fs::canonicalize(&link).unwrap();
+        let resolved = canonical(&link).unwrap();
         #[cfg(unix)]
         assert_ne!(link, resolved, "링크가 안 섰다 — 아래 단언이 아무것도 못 잰다");
 
@@ -383,5 +383,23 @@ mod tests {
         // 갈 곳이 다 체크아웃 안이면 크게 실패한다 — 조용히 눌러앉지 않는다.
         let why = pick(inside.clone(), &[inside.as_path()]).unwrap_err();
         assert!(why.contains("TMPDIR"), "고칠 길을 안 댄다 — {why}");
+    }
+}
+
+/// [`crate::path::canonical`] 과 같은 자 — 링크를 풀고 Windows 의 `\\?\` 접두어를 걷는다(moai-lag7.951). [`real`] 과
+/// 같은 까닭으로 여기만 제 몸으로 든다. 도구가 내는 철자가 접두어 없는 꼴이니 시험 자리도 그 꼴로 서야 견주기가 맞는다.
+fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(p).map(plain)
+}
+
+/// [`crate::path::unverbatim`] 과 같은 규칙 — 유닉스에서는 글자 하나 안 바꾼다. 시험 자리는 늘 UTF-8 이라 글로 걷는다.
+fn plain(p: PathBuf) -> PathBuf {
+    let Some(s) = p.to_str() else { return p };
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p,
     }
 }

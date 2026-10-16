@@ -139,14 +139,14 @@ pub(crate) fn into_git(rest: &Path) -> bool {
 /// **`..` 이 남은 끝은 조상으로 안 푼다** — 아직 없는 디렉터리 너머의 `..` 은 링크를 푼 뒤의 뜻이 달라
 /// 진다([`crate::path::real_prefix`] 의 전제). 그런 끝은 재지 않고 넘긴다.
 fn landing(p: &Path) -> Option<PathBuf> {
-    if let Ok(real) = std::fs::canonicalize(p) {
+    if let Ok(real) = crate::path::canonical(p) {
         return Some(real);
     }
     if !std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink()) {
         return None;
     }
     let end = crate::path::follow_links(p).ok()?;
-    match std::fs::canonicalize(crate::path::dir_of(&end)) {
+    match crate::path::canonical(crate::path::dir_of(&end)) {
         Ok(dir) => Some(end.file_name().map_or_else(|| dir.clone(), |name| dir.join(name))),
         Err(_) if end.is_absolute() && !end.components().any(|c| c == std::path::Component::ParentDir) => {
             Some(crate::path::real_prefix(&end))

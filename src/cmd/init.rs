@@ -673,7 +673,7 @@ fn mirrored(block: &str, under: &str, dir: &str, name: Option<&str>) -> String {
 /// 못 거는 자리면 `None` 이다. 락과 임시 파일과 저널이 받은 철자(`.moai/…`)로 가는 곳이 여기다 —
 /// [`gitignore_for`] 와 [`attributes_for`] 가 이 하나로 잰다.
 fn moai_moved(root: &Path) -> Option<String> {
-    inside(root, &std::fs::canonicalize(root.join(".moai")).ok()?).filter(|dir| dir != ".moai")
+    inside(root, &crate::path::canonical(root.join(".moai")).ok()?).filter(|dir| dir != ".moai")
 }
 
 /// `.gitattributes` 에 심을 블록 — **트래커가 체크아웃 안의 파일을 가리키는 링크면 그 파일에도
@@ -741,7 +741,7 @@ const LINKED_JOURNAL_COMMENT: &str = "\
 /// 풀던 판은 링크를 알아보는 길부터 갈렸다(리뷰).
 pub(crate) fn tracker_file(root: &Path) -> Option<std::path::PathBuf> {
     let end = crate::path::follow_links(&root.join(crate::cmd::merge_driver::SNAPSHOT)).ok()?;
-    Some(std::fs::canonicalize(crate::path::dir_of(&end)).ok()?.join(end.file_name()?))
+    Some(crate::path::canonical(crate::path::dir_of(&end)).ok()?.join(end.file_name()?))
 }
 
 /// 트래커가 링크면 **이 뿌리 안에서** 그것이 가리키는 파일의 경로(`shared/issues.jsonl`). 링크가 아니거나
@@ -1440,7 +1440,7 @@ fn ensure_lines(path: &Path, block: &str, lang: impl FnOnce() -> crate::i18n::La
         let checkout = crate::path::real(crate::path::dir_of(path));
         let outside = !crate::path::follow_links(path)
             .ok()
-            .and_then(|end| std::fs::canonicalize(crate::path::dir_of(&end)).ok())
+            .and_then(|end| crate::path::canonical(crate::path::dir_of(&end)).ok())
             .is_some_and(|dir| dir.starts_with(&checkout));
         return Added::Linked { to, outside };
     }
