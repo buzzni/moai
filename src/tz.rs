@@ -223,6 +223,11 @@ fn safe_join(dir: &Path, name: &str) -> Option<PathBuf> {
         if part.is_empty() || part == "." || part == ".." {
             return None;
         }
+        // Windows 는 `\` 와 `C:` 도 경로로 읽는다 — 한 마디가 이름 하나가 아니면 tzdb 밖으로 나간다.
+        let mut one = Path::new(part).components();
+        if !matches!((one.next(), one.next()), (Some(std::path::Component::Normal(_)), None)) {
+            return None;
+        }
         at.push(part);
     }
     Some(at)
@@ -301,8 +306,21 @@ fn name_under(at: &Path, dir: &Path) -> Option<String> {
         // `/etc/localtime` 의 링크라 기준은 `/etc` 다.
         false => crate::path::lexical(&Path::new("/etc").join(at)),
     };
-    let name = full.strip_prefix(dir).ok()?.to_str()?;
-    (!name.is_empty()).then(|| name.to_string())
+    let name = slashed(full.strip_prefix(dir).ok()?)?;
+    (!name.is_empty()).then_some(name)
+}
+
+/// tzdb 밑의 상대 경로를 이름으로 — **마디는 늘 `/` 로 잇는다**(moai-lag7.951). Windows 의 `Path` 는
+/// `\` 로 이어 `Asia\Seoul` 을 냈고, 그 이름은 고르는 창에서 설정에 적히면 다른 기계에서 못 읽는 글이 된다.
+fn slashed(rel: &Path) -> Option<String> {
+    let parts = rel
+        .components()
+        .map(|c| match c {
+            std::path::Component::Normal(s) => s.to_str(),
+            _ => None,
+        })
+        .collect::<Option<Vec<&str>>>()?;
+    Some(parts.join("/"))
 }
 
 /// 화면이 설 시간대와, **그때 할 말 하나**. 고른 이름이 있으면 그것이 답이고, 없으면 시스템이다
@@ -359,7 +377,7 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>, left: usize) {
     for e in entries.flatten() {
         let at = e.path();
         let Ok(rel) = at.strip_prefix(root) else { continue };
-        let Some(name) = rel.to_str() else { continue };
+        let Some(name) = slashed(rel) else { continue };
         if name == "posix" || name == "right" {
             continue;
         }
@@ -367,7 +385,7 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>, left: usize) {
         match at.is_dir() {
             true if left > 0 => walk(&at, root, out, left - 1),
             true => {}
-            false if is_tzif(&at) => out.push(name.to_string()),
+            false if is_tzif(&at) => out.push(name),
             false => {}
         }
     }
@@ -762,6 +780,11 @@ mod tests {
     fn a_name_cannot_climb_out_of_the_tzdb() {
         let dir = Path::new("/usr/share/zoneinfo");
         for bad in ["", "/etc/passwd", "../../etc/passwd", "Asia/../../etc/passwd", "./x", "Asia//Seoul"] {
+            assert_eq!(safe_join(dir, bad), None, "{bad:?} 가 이름으로 섰다");
+        }
+        // Windows 에서만 `\` 와 드라이브가 경로다 — Unix 에서는 파일 이름의 한 글자라 밖으로 못 나간다.
+        #[cfg(windows)]
+        for bad in ["Asia\\..\\..\\x", "..\\x", "C:x", "Asia/C:\\x"] {
             assert_eq!(safe_join(dir, bad), None, "{bad:?} 가 이름으로 섰다");
         }
         assert_eq!(safe_join(dir, "Asia/Seoul"), Some(dir.join("Asia/Seoul")));
