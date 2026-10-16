@@ -6949,3 +6949,4 @@
 {"ts":"2026-10-16T10:29:07Z","id":"moai-lag7.eup","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"재측정(2026-10-16, Windows 11 실기): cargo test 유닛 1918/0 실패, cli 672/0 실패. 남은 실패 없음 — 고칠 버그와 막을 시험으로 가를 것이 더 없다. 첫 측정은 유닛 122/1919·cli 139/675 실패였다."}
 {"ts":"2026-10-16T10:29:07Z","id":"moai-lag7.482","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — Windows 시험 스위트 에픽 끝"}
 {"ts":"2026-10-16T10:29:22Z","id":"moai-lag7.482","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-16T10:49:26Z","id":"moai-lag7.482","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 2026-10-16 사람의 지시로 리뷰를 중간에 멈췄다. 고친 것 없음(워크트리 깨끗, 4fa0cf63). 멈추기 전 리뷰어가 \"확인한 high 후보 하나\" 를 말했으나 내용은 못 받았다 — 다시 돌릴 때 max 로 milestone/moai-c12a...worktree-moai-lag7 을 본다."}
