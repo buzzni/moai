@@ -2431,11 +2431,23 @@ mod tests {
         move |k| m.get(k).cloned()
     }
 
+    /// 유닉스 꼴로 적은 표본 경로를 **이 기계의 절대 경로로**(moai-lag7.vva) — Windows 에서는 `C:` 를 붙인다.
+    /// 드라이브 없는 `/a` 는 Windows 에서 부른 드라이브마다 다른 자리라 등록이 거절한다([`entry_path`]) — 그
+    /// 거절은 옳고, 표본이 그 기계의 절대 경로가 아니었다. 시험이 끝나면 버리는 값이라 새어도 된다.
+    fn p(s: &'static str) -> &'static str {
+        if cfg!(windows) { Box::leak(format!("C:{s}").into_boxed_str()) } else { s }
+    }
+
+    /// [`p`] 를 설정 글에 — 글 안의 `"/…"` 경로를 그 기계의 절대 경로로 바꾼다. 유닉스에서는 받은 그대로다.
+    fn t(s: &'static str) -> &'static str {
+        if cfg!(windows) { Box::leak(s.replace("\"/", "\"C:/").into_boxed_str()) } else { s }
+    }
+
     #[test]
     fn the_path_prefers_moai_config_then_xdg_then_home() {
-        let all = [("MOAI_CONFIG", "/t/c.toml"), ("XDG_CONFIG_HOME", "/x"), ("HOME", "/h")];
+        let all = [("MOAI_CONFIG", "/t/c.toml"), ("XDG_CONFIG_HOME", p("/x")), ("HOME", "/h")];
         assert_eq!(path_from(env(&all)), Some("/t/c.toml".into()));
-        assert_eq!(path_from(env(&all[1..])), Some("/x/moai/config.toml".into()));
+        assert_eq!(path_from(env(&all[1..])), Some(Path::new(p("/x/moai/config.toml")).into()));
         assert_eq!(path_from(env(&all[2..])), Some("/h/.config/moai/config.toml".into()));
         assert_eq!(path_from(env(&[])), None);
     }
@@ -2572,7 +2584,7 @@ mod tests {
     fn a_broken_file_is_reported_on_read_and_refused_on_write() {
         let d = scratch("broken");
         let path = d.join("config.toml");
-        for src in ["[[project]\npath = \"/a\"\n", "project = \"/a\"\n", "project = [{ path = \"/a\" }]\n"] {
+        for src in [t("[[project]\npath = \"/a\"\n"), t("project = \"/a\"\n"), t("project = [{ path = \"/a\" }]\n")] {
             std::fs::write(&path, src).unwrap();
             let reg = read(Some(&path));
             assert!(reg.projects.is_empty(), "{src:?} → {reg:?}");
@@ -2581,9 +2593,9 @@ mod tests {
 
             let file = std::fs::canonicalize(&path).unwrap().display().to_string();
             for e in [
-                upd(&path, |doc| doc.add(Path::new("/b"))).unwrap_err(),
-                upd(&path, |doc| doc.remove(&["/a".into()])).unwrap_err(),
-                upd(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap_err(),
+                upd(&path, |doc| doc.add(Path::new(p("/b")))).unwrap_err(),
+                upd(&path, |doc| doc.remove(&[p("/a").into()])).unwrap_err(),
+                upd(&path, |doc| doc.set_hue(&[p("/a").into()], Hue::named("green"))).unwrap_err(),
             ] {
                 assert_eq!(e.code, code::BROKEN, "{src:?} → {e}");
                 // 손으로 고치라는 거절은 **어느 파일인지** 댄다(moai-gmdu 에픽 리뷰) — 설정의 자리는 환경이 골라
@@ -2625,10 +2637,12 @@ mod tests {
     fn a_bad_entry_is_reported_carried_and_does_not_block() {
         let d = scratch("bad-entry");
         let path = d.join("config.toml");
-        let src = "[[project]]\npath = \"상대/경로\"\n\n[[project]]\npath = \"/good\"\n\n[[project]]\nname = \"경로 없음\"\n\n[[project]]\npath = 3\n";
+        let src = t(
+            "[[project]]\npath = \"상대/경로\"\n\n[[project]]\npath = \"/good\"\n\n[[project]]\nname = \"경로 없음\"\n\n[[project]]\npath = 3\n",
+        );
         std::fs::write(&path, src).unwrap();
         let reg = read(Some(&path));
-        assert_eq!(reg.projects, [Project { path: "/good".into(), hue: None }]);
+        assert_eq!(reg.projects, [Project { path: p("/good").into(), hue: None }]);
         assert_eq!(reg.problems.len(), 3, "{reg:?}");
         assert_eq!(
             reg.problems[0],
@@ -2638,7 +2652,7 @@ mod tests {
         let first = &said_all(&reg.problems, reg.path.as_deref())[0];
         assert!(first.contains("1번째") && first.contains("절대경로"), "{first}");
 
-        upd(&path, |doc| doc.add(Path::new("/new"))).expect("못 읽는 항목이 쓰기를 막았다");
+        upd(&path, |doc| doc.add(Path::new(p("/new")))).expect("못 읽는 항목이 쓰기를 막았다");
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(after.starts_with(src), "못 읽는 항목을 잃거나 옮겼다\n{after}");
         assert_eq!(read(Some(&path)).projects.len(), 2);
@@ -2650,13 +2664,15 @@ mod tests {
     fn unknown_keys_tables_and_comments_survive_a_rewrite() {
         let d = scratch("unknown");
         let path = d.join("config.toml");
-        let src = "\u{feff}# 내 설정\ntheme = \"dark\"  # 뒤 주석\n\n[[project]]\npath = \"/a\"\ncolor = \"cyan\"\n\n[ui]\nlayers = [\n  \"[[project]]\",\n]\n";
+        let src = t(
+            "\u{feff}# 내 설정\ntheme = \"dark\"  # 뒤 주석\n\n[[project]]\npath = \"/a\"\ncolor = \"cyan\"\n\n[ui]\nlayers = [\n  \"[[project]]\",\n]\n",
+        );
         std::fs::write(&path, src).unwrap();
 
         // 고치지 않고 파싱→렌더는 바이트 그대로다.
         assert_eq!(Doc::parse(src).unwrap().render(), src);
 
-        upd(&path, |doc| doc.add(Path::new("/b"))).unwrap();
+        upd(&path, |doc| doc.add(Path::new(p("/b")))).unwrap();
         let after = std::fs::read_to_string(&path).unwrap();
         for kept in
             ["\u{feff}# 내 설정\n", "theme = \"dark\"  # 뒤 주석", "color = \"cyan\"", "\"[[project]]\",", "[ui]"]
@@ -2664,11 +2680,11 @@ mod tests {
             assert!(after.contains(kept), "{kept:?} 를 잃었다\n{after}");
         }
         let reg = read(Some(&path));
-        assert_eq!(reg.projects.iter().map(|p| p.path.to_str().unwrap()).collect::<Vec<_>>(), ["/a", "/b"]);
+        assert_eq!(reg.projects.iter().map(|p| p.path.to_str().unwrap()).collect::<Vec<_>>(), [p("/a"), p("/b")]);
         assert!(reg.problems.is_empty(), "{reg:?}");
 
         // 더했다 빼면 처음 바이트로 돌아온다.
-        upd(&path, |doc| doc.remove(&["/b".into()])).unwrap();
+        upd(&path, |doc| doc.remove(&[p("/b").into()])).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
     }
 
@@ -2676,18 +2692,25 @@ mod tests {
     /// 알린다. `auto` 는 정하지 않은 것이라 알릴 것이 없다.
     #[test]
     fn a_bad_colour_is_reported_and_the_project_still_stands() {
-        let src = "[[project]]\npath = \"/ok\"\ncolor = \"green\"\n\n\
+        let src = t("[[project]]\npath = \"/ok\"\ncolor = \"green\"\n\n\
                    [[project]]\npath = \"/red\"\ncolor = \"red\"\n\n\
                    [[project]]\npath = \"/num\"\ncolor = 3\n\n\
                    [[project]]\npath = \"/typo\"\ncolour = \"blue\"\n\n\
                    [[project]]\npath = \"/auto\"\ncolor = \"auto\"\n\n\
-                   [[project]]\npath = \"/case\"\ncolor = \"Green\"\n";
+                   [[project]]\npath = \"/case\"\ncolor = \"Green\"\n");
         let (projects, problems) = Doc::parse(src).unwrap().projects();
         let got: Vec<(&str, Option<&str>)> =
             projects.iter().map(|p| (p.path.to_str().unwrap(), p.hue.map(Hue::name))).collect();
         assert_eq!(
             got,
-            [("/ok", Some("green")), ("/red", None), ("/num", None), ("/typo", None), ("/auto", None), ("/case", None)]
+            [
+                (p("/ok"), Some("green")),
+                (p("/red"), None),
+                (p("/num"), None),
+                (p("/typo"), None),
+                (p("/auto"), None),
+                (p("/case"), None)
+            ]
         );
         assert_eq!(problems.len(), 4, "{problems:#?}");
         // **자료로 잰다** — 어느 항목의 무슨 탈인지가 값이고, 글은 그 아래에서 한 번 본다.
@@ -2709,7 +2732,7 @@ mod tests {
         assert!(said.iter().all(|p| p.contains("지금은 경로로 고른 색을 쓴다") && !p.contains('\n')), "{said:#?}");
 
         // `color` 와 `colour` 가 함께 있으면 `color` 가 서고, `colour` 는 조용히 버리지 않고 알린다.
-        let both = "[[project]]\npath = \"/both\"\ncolor = \"green\"\ncolour = \"blue\"\n";
+        let both = t("[[project]]\npath = \"/both\"\ncolor = \"green\"\ncolour = \"blue\"\n");
         let (projects, problems) = Doc::parse(both).unwrap().projects();
         assert_eq!(projects[0].hue, Hue::named("green"));
         assert_eq!(problems, [ConfigTrouble::Entry { nth: 1, why: EntryTrouble::ColourIgnored }], "{problems:#?}");
@@ -2730,11 +2753,13 @@ mod tests {
     fn setting_a_colour_and_back_to_auto_restores_the_bytes() {
         let d = scratch("hue");
         let path = d.join("config.toml");
-        let src = "# 내 설정\n[[project]]\npath = \"/a\"   # 일\nalias = \"일\"\n\n[[project]]\npath = \"/b\"\n\n[ui]\nx = 1\n";
+        let src = t(
+            "# 내 설정\n[[project]]\npath = \"/a\"   # 일\nalias = \"일\"\n\n[[project]]\npath = \"/b\"\n\n[ui]\nx = 1\n",
+        );
         std::fs::write(&path, src).unwrap();
         let green = Hue::named("green");
 
-        assert_eq!(upd(&path, |doc| doc.set_hue(&["/a".into()], green)).unwrap(), 1);
+        assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/a").into()], green)).unwrap(), 1);
         let after = std::fs::read_to_string(&path).unwrap();
         assert!(
             after.contains("color = \"green\"") && after.contains("alias = \"일\"") && after.contains("[ui]"),
@@ -2745,20 +2770,20 @@ mod tests {
 
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
-        assert_eq!(upd(&path, |doc| doc.set_hue(&["/a".into()], green)).unwrap(), 1);
+        assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/a").into()], green)).unwrap(), 1);
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before, "같은 색인데 다시 썼다");
 
-        assert_eq!(upd(&path, |doc| doc.set_hue(&["/a".into()], None)).unwrap(), 1);
+        assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/a").into()], None)).unwrap(), 1);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "auto 로 되돌렸는데 바이트가 다르다");
-        assert_eq!(upd(&path, |doc| doc.set_hue(&["/없음".into()], green)).unwrap(), 0);
+        assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/없음").into()], green)).unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
 
         // 값을 바꿀 때 그 값 뒤의 주석도, 키 위의 주석과 키 모양도 들고 간다 — 값만 바꾼 것이다.
-        std::fs::write(&path, "[[project]]\npath = \"/a\"\n# 회사 색\ncolor   = \"blue\"  # 회사 것\n").unwrap();
-        upd(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("cyan"))).unwrap();
+        std::fs::write(&path, t("[[project]]\npath = \"/a\"\n# 회사 색\ncolor   = \"blue\"  # 회사 것\n")).unwrap();
+        upd(&path, |doc| doc.set_hue(&[p("/a").into()], Hue::named("cyan"))).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "[[project]]\npath = \"/a\"\n# 회사 색\ncolor   = \"cyan\"  # 회사 것\n"
+            t("[[project]]\npath = \"/a\"\n# 회사 색\ncolor   = \"cyan\"  # 회사 것\n")
         );
     }
 
@@ -2770,29 +2795,29 @@ mod tests {
         let d = scratch("hue-table");
         let path = d.join("config.toml");
         for src in [
-            "[[project]]\npath = \"/a\"\ncolor.x = 1  # 내 것\n",
-            "[[project]]\npath = \"/a\"\n\n[project.color]\nx = 1\n",
-            "[[project]]\npath = \"/a\"\ncolor = { x = 1 }\n",
-            "[[project]]\npath = \"/a\"\ncolor = [\"green\"]\n",
-            "[[project]]\npath = \"/a\"\n\n[[project.color]]\nx = 1\n",
-            "[[project]]\npath = \"/a\"\ncolor = \"red\"\n\n[[project]]\npath = \"/a\"\ncolor.x = 1\n",
+            t("[[project]]\npath = \"/a\"\ncolor.x = 1  # 내 것\n"),
+            t("[[project]]\npath = \"/a\"\n\n[project.color]\nx = 1\n"),
+            t("[[project]]\npath = \"/a\"\ncolor = { x = 1 }\n"),
+            t("[[project]]\npath = \"/a\"\ncolor = [\"green\"]\n"),
+            t("[[project]]\npath = \"/a\"\n\n[[project.color]]\nx = 1\n"),
+            t("[[project]]\npath = \"/a\"\ncolor = \"red\"\n\n[[project]]\npath = \"/a\"\ncolor.x = 1\n"),
         ] {
             std::fs::write(&path, src).unwrap();
             for hue in [Hue::named("green"), None] {
-                let e = upd(&path, |doc| doc.set_hue(&["/a".into()], hue)).unwrap_err();
+                let e = upd(&path, |doc| doc.set_hue(&[p("/a").into()], hue)).unwrap_err();
                 // 어느 줄인지 경로로 댄다 — 사람이 그 줄을 찾아 고친다.
-                assert!(e.message.contains("/a 의 `color`") && e.message.contains("손으로"), "{}", e.message);
+                assert!(e.message.contains(p("/a 의 `color`")) && e.message.contains("손으로"), "{}", e.message);
                 // 손으로 고칠 거절은 깨진 설정과 같은 코드다(moai-3owm) — I/O 실패(`error`)와 갈린다.
                 assert_eq!(e.code, code::BROKEN);
                 assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "표 모양 color 를 덮었다");
             }
             // 남의 줄 것은 막지 않는다 — 엄함은 지금 쓰는 줄에 대한 것이다.
-            assert_eq!(upd(&path, |doc| doc.set_hue(&["/b".into()], Hue::named("green"))).unwrap(), 0);
+            assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/b").into()], Hue::named("green"))).unwrap(), 0);
         }
 
-        std::fs::write(&path, "[[project]]\npath = \"/a\"\ncolor = 3\n").unwrap();
-        assert_eq!(upd(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap(), 1);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[[project]]\npath = \"/a\"\ncolor = \"green\"\n");
+        std::fs::write(&path, t("[[project]]\npath = \"/a\"\ncolor = 3\n")).unwrap();
+        assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/a").into()], Hue::named("green"))).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), t("[[project]]\npath = \"/a\"\ncolor = \"green\"\n"));
     }
 
     /// 끝 줄바꿈 없이 손으로 적은 파일도 더했다 빼거나 색을 정했다 되돌리면 처음 바이트다 —
@@ -2803,23 +2828,23 @@ mod tests {
         let path = d.join("config.toml");
         for src in [
             "theme = \"dark\"",
-            "[[project]]\npath = \"/a\"",
-            "[[project]]\npath = \"/a\"\n",
-            "[[project]]\npath = \"/a\"   # 끝 주석",
-            "[[project]]\npath = \"/a\"\n\n[ui]\nx = 1",
+            t("[[project]]\npath = \"/a\""),
+            t("[[project]]\npath = \"/a\"\n"),
+            t("[[project]]\npath = \"/a\"   # 끝 주석"),
+            t("[[project]]\npath = \"/a\"\n\n[ui]\nx = 1"),
             "\u{feff}theme = \"dark\"",
         ] {
             std::fs::write(&path, src).unwrap();
-            assert!(upd(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            assert!(upd(&path, |doc| doc.add(Path::new(p("/z")))).unwrap());
             let added = std::fs::read_to_string(&path).unwrap();
-            assert_eq!(read(Some(&path)).projects.last().map(|p| p.path.clone()), Some("/z".into()), "{added}");
+            assert_eq!(read(Some(&path)).projects.last().map(|p| p.path.clone()), Some(p("/z").into()), "{added}");
             assert_eq!(added.ends_with('\n'), src.ends_with('\n'), "끝 줄바꿈 모양이 바뀌었다\n{added:?}");
-            assert_eq!(upd(&path, |doc| doc.remove(&["/z".into()])).unwrap(), 1);
+            assert_eq!(upd(&path, |doc| doc.remove(&[p("/z").into()])).unwrap(), 1);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
 
-            if src.contains("/a") {
-                assert_eq!(upd(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap(), 1);
-                assert_eq!(upd(&path, |doc| doc.set_hue(&["/a".into()], None)).unwrap(), 1);
+            if src.contains(p("/a")) {
+                assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/a").into()], Hue::named("green"))).unwrap(), 1);
+                assert_eq!(upd(&path, |doc| doc.set_hue(&[p("/a").into()], None)).unwrap(), 1);
                 assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "color 왕복");
             }
         }
@@ -2831,19 +2856,19 @@ mod tests {
     fn line_endings_follow_the_most_lines() {
         let d = scratch("crlf");
         let path = d.join("config.toml");
-        let all = "# 머리\r\n[tui]\r\nsort = \"title\"\r\n\r\n[[project]]\r\npath = \"/a\"\r\n";
+        let all = t("# 머리\r\n[tui]\r\nsort = \"title\"\r\n\r\n[[project]]\r\npath = \"/a\"\r\n");
         for src in [all, all.trim_end(), "\u{feff}# 머리\r\n\r\n"] {
             std::fs::write(&path, src).unwrap();
-            assert!(upd(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            assert!(upd(&path, |doc| doc.add(Path::new(p("/z")))).unwrap());
             let added = std::fs::read_to_string(&path).unwrap();
             assert!(!added.replace("\r\n", "").contains('\n'), "LF 로 접힌 줄이 있다\n{added:?}");
-            assert_eq!(upd(&path, |doc| doc.remove(&["/z".into()])).unwrap(), 1);
+            assert_eq!(upd(&path, |doc| doc.remove(&[p("/z").into()])).unwrap(), 1);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
         }
         // 보기·색도 같은 렌더를 지난다.
         std::fs::write(&path, all).unwrap();
         upd(&path, |doc| doc.merge_look(&Look::default(), &Look { detail: Some(true), ..Look::default() })).unwrap();
-        upd(&path, |doc| doc.set_hue(&["/a".into()], Hue::named("green"))).unwrap();
+        upd(&path, |doc| doc.set_hue(&[p("/a").into()], Hue::named("green"))).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.replace("\r\n", "").contains('\n'), "{text:?}");
 
@@ -2852,7 +2877,7 @@ mod tests {
             [("a = 1\r\nb = 2\r\nc = 3\n", true), ("a = 1\r\nb = 2\nc = 3\n", false), ("a = 1\r\nb = 2\n", false)]
         {
             std::fs::write(&path, src).unwrap();
-            assert!(upd(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            assert!(upd(&path, |doc| doc.add(Path::new(p("/z")))).unwrap());
             let text = std::fs::read_to_string(&path).unwrap();
             let lf = text.matches('\n').count() - text.matches("\r\n").count();
             assert!(if crlf { lf == 0 } else { !text.contains('\r') }, "{src:?} → {text:?}");
@@ -2867,7 +2892,7 @@ mod tests {
         // CRLF 파일의 LF 문자열 — 줄은 CRLF 로 서고 값은 그대로다.
         let src = "a = 1\r\nb = 2\r\nmemo = \"\"\"\nx\ny\"\"\"\r\nc = '''\nz'''\r\n";
         let mut doc = Doc::parse(src).unwrap();
-        doc.add(Path::new("/z")).unwrap();
+        doc.add(Path::new(p("/z"))).unwrap();
         let out = doc.render();
         let again = Doc::parse(&out).unwrap();
         assert_eq!(memo(&again).as_deref(), Some("x\ny"), "{out:?}");
@@ -2881,17 +2906,17 @@ mod tests {
         let src = "a = 1\nmemo = \"\"\"\r\n1\r\n2\r\n3\r\n4\r\n\"\"\"\n";
         let mut doc = Doc::parse(src).unwrap();
         assert!(!doc.crlf, "문자열 안의 CRLF 를 줄 끝으로 셌다");
-        doc.add(Path::new("/z")).unwrap();
+        doc.add(Path::new(p("/z"))).unwrap();
         let mut doc = Doc::parse(&doc.render()).unwrap();
-        doc.remove(&["/z".into()]).unwrap();
+        doc.remove(&[p("/z").into()]).unwrap();
         assert_eq!(doc.render(), src);
 
         // 이 도구가 적은 경로도 — 줄바꿈이 든 디렉터리 이름은 CRLF 파일에서도 그 이름으로 남아 도로 뺄 수 있다.
         let mut doc = Doc::parse("a = 1\r\nb = 2\r\n").unwrap();
-        doc.add(Path::new("/tmp/a\nb")).unwrap();
+        doc.add(Path::new(p("/tmp/a\nb"))).unwrap();
         let mut doc = Doc::parse(&doc.render()).unwrap();
-        assert_eq!(doc.projects().0, [Project { path: "/tmp/a\nb".into(), hue: None }]);
-        assert_eq!(doc.remove(&["/tmp/a\nb".into()]).unwrap(), 1);
+        assert_eq!(doc.projects().0, [Project { path: p("/tmp/a\nb").into(), hue: None }]);
+        assert_eq!(doc.remove(&[p("/tmp/a\nb").into()]).unwrap(), 1);
         assert_eq!(doc.render(), "a = 1\r\nb = 2\r\n");
     }
 
@@ -2902,55 +2927,55 @@ mod tests {
         let d = scratch("head-comment");
         let path = d.join("config.toml");
         for (src, want) in [
-            ("# 내 설정\n", "# 내 설정\n\n[[project]]\npath = \"/z\"\n"),
-            ("# 내 설정\n\n", "# 내 설정\n\n\n[[project]]\npath = \"/z\"\n"),
-            ("# 내 설정", "# 내 설정\n\n[[project]]\npath = \"/z\""),
-            ("# a\n\n# b\n", "# a\n\n# b\n\n[[project]]\npath = \"/z\"\n"),
-            ("\u{feff}# 내 설정\n", "\u{feff}# 내 설정\n\n[[project]]\npath = \"/z\"\n"),
+            ("# 내 설정\n", t("# 내 설정\n\n[[project]]\npath = \"/z\"\n")),
+            ("# 내 설정\n\n", t("# 내 설정\n\n\n[[project]]\npath = \"/z\"\n")),
+            ("# 내 설정", t("# 내 설정\n\n[[project]]\npath = \"/z\"")),
+            ("# a\n\n# b\n", t("# a\n\n# b\n\n[[project]]\npath = \"/z\"\n")),
+            ("\u{feff}# 내 설정\n", t("\u{feff}# 내 설정\n\n[[project]]\npath = \"/z\"\n")),
         ] {
             std::fs::write(&path, src).unwrap();
-            assert!(upd(&path, |doc| doc.add(Path::new("/z"))).unwrap());
+            assert!(upd(&path, |doc| doc.add(Path::new(p("/z")))).unwrap());
             assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "{src:?}");
-            assert!(upd(&path, |doc| doc.add(Path::new("/y"))).unwrap());
+            assert!(upd(&path, |doc| doc.add(Path::new(p("/y")))).unwrap());
             assert_eq!(read(Some(&path)).projects.len(), 2);
-            assert_eq!(upd(&path, |doc| doc.remove(&["/y".into(), "/z".into()])).unwrap(), 2);
+            assert_eq!(upd(&path, |doc| doc.remove(&[p("/y").into(), p("/z").into()])).unwrap(), 2);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src, "add/rm 왕복");
         }
 
         // 손으로 적은 파일도 같다 — 빈 줄로 떨어진 주석은 남고 바로 위에 붙은 주석은 표와 함께 빠진다.
         // 남은 글은 뺀 표 뒤에 그려지던 것 앞에 선다.
         for (src, gone, want) in [
-            ("# 목록\n\n# a 는 일\n[[project]]\npath = \"/a\"\n", "/a", "# 목록\n"),
+            (t("# 목록\n\n# a 는 일\n[[project]]\npath = \"/a\"\n"), p("/a"), "# 목록\n"),
             (
-                "# 목록\n\n[[project]]\npath = \"/a\"\n\n[[project]]\npath = \"/b\"\n",
-                "/a",
-                "# 목록\n\n[[project]]\npath = \"/b\"\n",
+                t("# 목록\n\n[[project]]\npath = \"/a\"\n\n[[project]]\npath = \"/b\"\n"),
+                p("/a"),
+                t("# 목록\n\n[[project]]\npath = \"/b\"\n"),
             ),
             (
-                "# 목록\n\n[[project]]\npath = \"/a\"\n\n[tui]\nsort = \"title\"\n# 꼬리\n",
-                "/a",
+                t("# 목록\n\n[[project]]\npath = \"/a\"\n\n[tui]\nsort = \"title\"\n# 꼬리\n"),
+                p("/a"),
                 "# 목록\n\n[tui]\nsort = \"title\"\n# 꼬리\n",
             ),
             (
-                "[tui]\nsort = \"title\"\n\n# 여기부터 목록\n\n[[project]]\npath = \"/a\"\n",
-                "/a",
+                t("[tui]\nsort = \"title\"\n\n# 여기부터 목록\n\n[[project]]\npath = \"/a\"\n"),
+                p("/a"),
                 "[tui]\nsort = \"title\"\n\n# 여기부터 목록\n",
             ),
-            ("# 붙은 주석\n[[project]]\npath = \"/a\"\n", "/a", ""),
+            (t("# 붙은 주석\n[[project]]\npath = \"/a\"\n"), p("/a"), ""),
             // 빈칸·탭뿐인 줄도 빈 줄이다(moai-gmdu 에픽 리뷰) — 눈에는 같은 빈 줄이다.
-            ("# 목록\n  \n[[project]]\npath = \"/a\"\n", "/a", "# 목록\n"),
-            ("# 목록\n\t\r\n# a 는 일\n[[project]]\npath = \"/a\"\n", "/a", "# 목록\n"),
+            (t("# 목록\n  \n[[project]]\npath = \"/a\"\n"), p("/a"), "# 목록\n"),
+            (t("# 목록\n\t\r\n# a 는 일\n[[project]]\npath = \"/a\"\n"), p("/a"), "# 목록\n"),
             // 뒤의 표가 뺀 표에 빈 줄 없이 붙어 있었으면 남긴 글과 그 표 사이에 빈 줄을 둔다(moai-gmdu 에픽
             // 리뷰) — 안 두면 남긴 글이 그 표의 머리에 붙어, 그 표를 뺄 때 함께 지워진다.
             (
-                "# 목록\n\n[[project]]\npath = \"/a\"\n# b 는 일\n[[project]]\npath = \"/b\"\n",
-                "/a",
-                "# 목록\n\n# b 는 일\n[[project]]\npath = \"/b\"\n",
+                t("# 목록\n\n[[project]]\npath = \"/a\"\n# b 는 일\n[[project]]\npath = \"/b\"\n"),
+                p("/a"),
+                t("# 목록\n\n# b 는 일\n[[project]]\npath = \"/b\"\n"),
             ),
             (
-                "# 목록\n\n[[project]]\npath = \"/a\"\n[[project]]\npath = \"/b\"\n",
-                "/a",
-                "# 목록\n\n[[project]]\npath = \"/b\"\n",
+                t("# 목록\n\n[[project]]\npath = \"/a\"\n[[project]]\npath = \"/b\"\n"),
+                p("/a"),
+                t("# 목록\n\n[[project]]\npath = \"/b\"\n"),
             ),
         ] {
             std::fs::write(&path, src).unwrap();
@@ -2958,8 +2983,8 @@ mod tests {
             let left = std::fs::read_to_string(&path).unwrap();
             assert_eq!(left, want, "{src:?}");
             // 남긴 주석은 남은 표를 마저 빼도 남는다 — 한 번 남긴 것이 다음 `remove` 에 지워지면 남긴 뜻이 없다.
-            if left.contains("/b") {
-                assert_eq!(upd(&path, |doc| doc.remove(&["/b".into()])).unwrap(), 1, "{src:?}");
+            if left.contains(p("/b")) {
+                assert_eq!(upd(&path, |doc| doc.remove(&[p("/b").into()])).unwrap(), 1, "{src:?}");
                 assert!(
                     std::fs::read_to_string(&path).unwrap().starts_with("# 목록\n"),
                     "{src:?} → 둘째 rm 이 남긴 주석을 지웠다"
@@ -2978,9 +3003,9 @@ mod tests {
         assert_eq!(doc.render(), "# 내 설정\n\n[tui]\ndetail = true\n");
         // 보기를 먼저 적고 등록했다 빼도 머리 주석은 머리에 있다.
         let mut doc = Doc::parse(&doc.render()).unwrap();
-        doc.add(Path::new("/z")).unwrap();
+        doc.add(Path::new(p("/z"))).unwrap();
         let mut doc = Doc::parse(&doc.render()).unwrap();
-        doc.remove(&["/z".into()]).unwrap();
+        doc.remove(&[p("/z").into()]).unwrap();
         assert_eq!(doc.render(), "# 내 설정\n\n[tui]\ndetail = true\n");
     }
 
@@ -2989,15 +3014,15 @@ mod tests {
     /// 두 조건을 지키는 시험이 없었다).
     #[test]
     fn only_a_comment_only_config_lifts_its_comment() {
-        let mut doc = Doc::parse("[[project]]\npath = \"/a\"\n# 꼬리\n").unwrap();
-        doc.add(Path::new("/z")).unwrap();
+        let mut doc = Doc::parse(t("[[project]]\npath = \"/a\"\n# 꼬리\n")).unwrap();
+        doc.add(Path::new(p("/z"))).unwrap();
         let added = doc.render();
-        assert!(added.starts_with("[[project]]\npath = \"/a\"\n") && added.ends_with("# 꼬리\n"), "{added:?}");
+        assert!(added.starts_with(t("[[project]]\npath = \"/a\"\n")) && added.ends_with("# 꼬리\n"), "{added:?}");
         for src in ["\n\n", "  \n"] {
             let mut doc = Doc::parse(src).unwrap();
-            doc.add(Path::new("/z")).unwrap();
+            doc.add(Path::new(p("/z"))).unwrap();
             let mut doc = Doc::parse(&doc.render()).unwrap();
-            doc.remove(&["/z".into()]).unwrap();
+            doc.remove(&[p("/z").into()]).unwrap();
             assert_eq!(doc.render(), src, "{src:?}");
         }
     }
@@ -3007,19 +3032,19 @@ mod tests {
     #[test]
     fn kept_heads_keep_the_order_of_the_text() {
         let src =
-            "# 일\n\n[[project]]\npath = \"/w\"\n\n# 집\n\n[[project]]\npath = \"/h\"\n\n[tui]\nsort = \"title\"\n";
+            t("# 일\n\n[[project]]\npath = \"/w\"\n\n# 집\n\n[[project]]\npath = \"/h\"\n\n[tui]\nsort = \"title\"\n");
         let mut doc = Doc::parse(src).unwrap();
-        assert_eq!(doc.remove(&["/w".into()]).unwrap(), 1);
-        assert_eq!(doc.render(), "# 일\n\n# 집\n\n[[project]]\npath = \"/h\"\n\n[tui]\nsort = \"title\"\n");
+        assert_eq!(doc.remove(&[p("/w").into()]).unwrap(), 1);
+        assert_eq!(doc.render(), t("# 일\n\n# 집\n\n[[project]]\npath = \"/h\"\n\n[tui]\nsort = \"title\"\n"));
 
         // 한 번에 둘을 빼면(링크 철자와 푼 철자) 남긴 글은 파일에 있던 차례대로 선다.
         let mut doc = Doc::parse(src).unwrap();
-        assert_eq!(doc.remove(&["/w".into(), "/h".into()]).unwrap(), 2);
+        assert_eq!(doc.remove(&[p("/w").into(), p("/h").into()]).unwrap(), 2);
         assert_eq!(doc.render(), "# 일\n\n# 집\n\n[tui]\nsort = \"title\"\n");
 
         let mut doc =
-            Doc::parse("[tui]\nsort = \"title\"\n\n# 목록\n\n[[project]]\npath = \"/a\"\n# 파일 끝\n").unwrap();
-        assert_eq!(doc.remove(&["/a".into()]).unwrap(), 1);
+            Doc::parse(t("[tui]\nsort = \"title\"\n\n# 목록\n\n[[project]]\npath = \"/a\"\n# 파일 끝\n")).unwrap();
+        assert_eq!(doc.remove(&[p("/a").into()]).unwrap(), 1);
         assert_eq!(doc.render(), "[tui]\nsort = \"title\"\n\n# 목록\n# 파일 끝\n");
     }
 
@@ -3029,25 +3054,25 @@ mod tests {
     fn dropping_a_key_keeps_the_comment_a_blank_line_away() {
         let hue = |src: &str| {
             let mut doc = Doc::parse(src).unwrap();
-            assert_eq!(doc.set_hue(&["/a".into()], None).unwrap(), 1);
+            assert_eq!(doc.set_hue(&[p("/a").into()], None).unwrap(), 1);
             doc.render()
         };
         // gmdu 에픽 리뷰가 본 자리 — 그 주석은 밑의 `name` 의 머리이기도 했다.
         assert_eq!(
-            hue("[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\ncolor = \"cyan\"\nname = \"일\"\n"),
-            "[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\nname = \"일\"\n"
+            hue(t("[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\ncolor = \"cyan\"\nname = \"일\"\n")),
+            t("[[project]]\npath = \"/a\"\n\n# --- hand tweaks below ---\n\nname = \"일\"\n")
         );
         // 끝 키면 표 다음 것 앞에, 파일 끝이면 끝 글 앞에 선다.
         assert_eq!(
-            hue("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n\n[tui]\nsort = \"title\"\n"),
-            "[[project]]\npath = \"/a\"\n# 색\n\n[tui]\nsort = \"title\"\n"
+            hue(t("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n\n[tui]\nsort = \"title\"\n")),
+            t("[[project]]\npath = \"/a\"\n# 색\n\n[tui]\nsort = \"title\"\n")
         );
         assert_eq!(
-            hue("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n# 끝\n"),
-            "[[project]]\npath = \"/a\"\n# 색\n# 끝\n"
+            hue(t("[[project]]\npath = \"/a\"\n# 색\n\ncolor = \"cyan\"\n# 끝\n")),
+            t("[[project]]\npath = \"/a\"\n# 색\n# 끝\n")
         );
         // 바로 위에 붙은 주석은 그 키의 것이다.
-        assert_eq!(hue("[[project]]\npath = \"/a\"\n\n# 색\ncolor = \"cyan\"\n"), "[[project]]\npath = \"/a\"\n");
+        assert_eq!(hue(t("[[project]]\npath = \"/a\"\n\n# 색\ncolor = \"cyan\"\n")), t("[[project]]\npath = \"/a\"\n"));
 
         // 보기 키도 같다. 끝 키 둘을 한 번에 지우면 남은 글은 파일에 있던 차례로 선다.
         let src = "[tui]\n# 위\n\nsort = \"title\"\n# 차례\n\nsort_reversed = true\n# 방향\n\ndetail = false\n\n[x]\n";
@@ -3258,9 +3283,9 @@ mod tests {
         assert_eq!(look("[tui]\nx = 1\n", sort("title")), "[tui]\nx = 1\nsort = \"title\"\n");
 
         // 색(`set_hue`)도 같은 길이다.
-        let mut doc = Doc::parse("[[project]]\npath = \"/a\"\ncolor = 'red'  # 눈에 띄게\n").unwrap();
-        doc.set_hue(&["/a".into()], Hue::named("green")).unwrap();
-        assert_eq!(doc.render(), "[[project]]\npath = \"/a\"\ncolor = 'green'  # 눈에 띄게\n");
+        let mut doc = Doc::parse(t("[[project]]\npath = \"/a\"\ncolor = 'red'  # 눈에 띄게\n")).unwrap();
+        doc.set_hue(&[p("/a").into()], Hue::named("green")).unwrap();
+        assert_eq!(doc.render(), t("[[project]]\npath = \"/a\"\ncolor = 'green'  # 눈에 띄게\n"));
     }
 
     /// **안 보이는 글자가 든 낱말은 작은따옴표로 안 적는다**(moai-5thc, 리뷰 moai-333l.wj6 의 15번, [`quoted`]).
@@ -3427,12 +3452,12 @@ mod tests {
     /// `tui.x` 는 위치가 없어 남긴 글이 버려졌다 — 설정 머리 주석이 그 첫 줄의 머리다.
     #[test]
     fn a_kept_comment_stays_above_a_dotted_key() {
-        let mut doc = Doc::parse(
+        let mut doc = Doc::parse(t(
             "[[project]]\npath = \"/a\"\n# --- 손본 것 ---\n\ncolor = \"cyan\"\nmeta.x = 1\nname = \"일\"\n",
-        )
+        ))
         .unwrap();
-        assert_eq!(doc.set_hue(&["/a".into()], None).unwrap(), 1);
-        assert_eq!(doc.render(), "[[project]]\npath = \"/a\"\n# --- 손본 것 ---\n\nmeta.x = 1\nname = \"일\"\n");
+        assert_eq!(doc.set_hue(&[p("/a").into()], None).unwrap(), 1);
+        assert_eq!(doc.render(), t("[[project]]\npath = \"/a\"\n# --- 손본 것 ---\n\nmeta.x = 1\nname = \"일\"\n"));
 
         let hidden = Look { hidden: Some(vec!["done".into()]), ..Look::default() };
         let mut doc = Doc::parse("[tui]\n# 보기\n\nhidden = [\"done\"]\nsort.by = \"title\"\n").unwrap();
@@ -3442,8 +3467,8 @@ mod tests {
         let sort = Look { sort: Some("title".into()), ..Look::default() };
         for (src, want) in [
             (
-                "# 내 설정\n\ntui.sort = \"title\"\n\n[[project]]\npath = \"/a\"\n",
-                "# 내 설정\n\n[[project]]\npath = \"/a\"\n",
+                t("# 내 설정\n\ntui.sort = \"title\"\n\n[[project]]\npath = \"/a\"\n"),
+                t("# 내 설정\n\n[[project]]\npath = \"/a\"\n"),
             ),
             ("# 내 설정\n\ntui.sort = \"title\"\n", "# 내 설정\n"),
             ("# 내 설정\n\ntui.sort = \"title\"\ni18n.lang = \"ko\"\n", "# 내 설정\n\ni18n.lang = \"ko\"\n"),
@@ -3597,7 +3622,7 @@ mod tests {
     fn one_read_gives_the_projects_and_the_look() {
         let d = scratch("one-read");
         let path = d.join("config.toml");
-        std::fs::write(&path, "[[project]]\npath = \"/a\"\n\n[tui]\nsort = \"title\"\nhide_deferred = 3\n").unwrap();
+        std::fs::write(&path, t("[[project]]\npath = \"/a\"\n\n[tui]\nsort = \"title\"\nhide_deferred = 3\n")).unwrap();
         let reg = read(Some(&path));
         assert_eq!(reg.projects.len(), 1);
         assert_eq!(reg.look.sort.as_deref(), Some("title"));
@@ -4012,13 +4037,13 @@ mod tests {
     fn a_no_op_update_leaves_the_file_alone() {
         let d = scratch("noop");
         let path = d.join("config.toml");
-        let src = "[[project]]\npath   =   \"/a\"   # 손으로 띄운 칸\n";
+        let src = t("[[project]]\npath   =   \"/a\"   # 손으로 띄운 칸\n");
         std::fs::write(&path, src).unwrap();
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
 
-        assert!(!upd(&path, |doc| doc.add(Path::new("/a"))).unwrap());
-        assert_eq!(upd(&path, |doc| doc.remove(&["/없음".into()])).unwrap(), 0);
+        assert!(!upd(&path, |doc| doc.add(Path::new(p("/a")))).unwrap());
+        assert_eq!(upd(&path, |doc| doc.remove(&[p("/없음").into()])).unwrap(), 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
         assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
 
@@ -4032,17 +4057,17 @@ mod tests {
     fn add_is_idempotent_and_remove_takes_every_spelling() {
         let d = scratch("add-rm");
         let path = d.join("nested/moai/config.toml");
-        assert!(upd(&path, |doc| doc.add(Path::new("/a"))).unwrap(), "디렉터리를 만들고 써야 한다");
-        assert!(!upd(&path, |doc| doc.add(Path::new("/a/"))).unwrap(), "같은 경로를 두 번 넣었다");
-        assert!(upd(&path, |doc| doc.add(Path::new("/b"))).unwrap());
+        assert!(upd(&path, |doc| doc.add(Path::new(p("/a")))).unwrap(), "디렉터리를 만들고 써야 한다");
+        assert!(!upd(&path, |doc| doc.add(Path::new(p("/a/")))).unwrap(), "같은 경로를 두 번 넣었다");
+        assert!(upd(&path, |doc| doc.add(Path::new(p("/b")))).unwrap());
         assert_eq!(read(Some(&path)).projects.len(), 2);
 
         // 손으로 겹쳐 적은 줄도 하나로 보이고, 뺄 때는 전부 빠진다.
         let src = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, format!("{src}\n[[project]]\npath = \"/a\"\n")).unwrap();
+        std::fs::write(&path, format!("{src}{}", t("\n[[project]]\npath = \"/a\"\n"))).unwrap();
         assert_eq!(read(Some(&path)).projects.len(), 2);
-        assert_eq!(upd(&path, |doc| doc.remove(&["/x".into(), "/a".into()])).unwrap(), 2);
-        assert_eq!(read(Some(&path)).projects, [Project { path: "/b".into(), hue: None }]);
+        assert_eq!(upd(&path, |doc| doc.remove(&[p("/x").into(), p("/a").into()])).unwrap(), 2);
+        assert_eq!(read(Some(&path)).projects, [Project { path: p("/b").into(), hue: None }]);
     }
 
     /// 적는 줄은 엄하다 — 상대경로는 부른 자리마다 다른 곳을 가리킨다.
@@ -4085,7 +4110,12 @@ mod tests {
         }
         // 사라진 디렉터리도 글자로는 찾는다. 준 철자 그대로도 뒤에 선다 — 손으로
         // `/w/a/../b` 라 적힌 줄은 그 철자로만 찾을 수 있다(`rm`·`color` 가 함께 쓴다).
-        assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2"), d.join("gone/../gone2")]);
+        //
+        // Windows 의 `d` 는 `canonicalize` 가 낸 `\\?\` 철자라, 거기에 이으면 `PathBuf::push` 가 `..` 를 이미
+        // 접는다 — 준 철자가 글자 철자와 같아 한 번만 선다(moai-lag7.vva).
+        let typed = d.join("gone/../gone2");
+        let want: Vec<PathBuf> = if typed == d.join("gone2") { vec![typed] } else { vec![d.join("gone2"), typed] };
+        assert_eq!(spellings(Path::new("gone/../gone2"), &d), want);
         assert_eq!(spellings(Path::new("gone/../gone2"), &d)[0], d.join("gone2"), "대표 철자가 밀렸다");
     }
 
@@ -4233,7 +4263,7 @@ mod tests {
                 let path = path.clone();
                 std::thread::spawn(move || {
                     for i in 0..each {
-                        let dir = PathBuf::from(format!("/p/{t}/{i}"));
+                        let dir = PathBuf::from(format!("{}/p/{t}/{i}", p("")));
                         upd(&path, |doc| doc.add(&dir)).unwrap();
                     }
                 })
