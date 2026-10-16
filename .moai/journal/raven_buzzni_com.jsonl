@@ -6950,3 +6950,4 @@
 {"ts":"2026-10-16T10:29:07Z","id":"moai-lag7.482","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — Windows 시험 스위트 에픽 끝"}
 {"ts":"2026-10-16T10:29:22Z","id":"moai-lag7.482","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-16T10:49:26Z","id":"moai-lag7.482","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 2026-10-16 사람의 지시로 리뷰를 중간에 멈췄다. 고친 것 없음(워크트리 깨끗, 4fa0cf63). 멈추기 전 리뷰어가 \"확인한 high 후보 하나\" 를 말했으나 내용은 못 받았다 — 다시 돌릴 때 max 로 milestone/moai-c12a...worktree-moai-lag7 을 본다."}
+{"ts":"2026-10-16T10:50:05Z","id":"moai-lag7.482","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"등급 변경: 사람이 남은 리뷰를 xhigh 로 하라고 했다(2026-10-16) — 규약상 max 자리지만 사람의 결정을 따른다. 멈춘 max 리뷰의 관례 각도 리뷰어 하나가 늦게 낸 지적 둘(86cb501f 주석의 id 가 9fm, 60f1bdee 에 951 몫이 섞임)과 낡은 주석 목록(path.rs:36-39 의 real() 글, hook.rs:8128 등 \\?\\ 를 말하는 글)은 xhigh 리뷰에 함께 넘긴다."}
