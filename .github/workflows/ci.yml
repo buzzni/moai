@@ -6,8 +6,10 @@
 #
 # 잡은 다섯이다 — `ci-gate`(fmt·clippy·시험), `changes`(바이너리에 닿는 것이 바뀌었나),
 # `msrv`(`Cargo.toml` 이 적은 판으로 서는가), `windows`(Windows 에서 clippy·시험 컴파일이 서는가),
-# `size-budget`(15MB 예산). required check 는 `ci-gate` 와 `size-budget` 둘이고, 나머지
-# 셋(`changes`·`msrv`·`windows`)이 required 가 아닌 까닭은 제 머리글에 적는다.
+# `size-budget`(15MB 예산). required check 는 `main` 의 보호 규칙이 요구하는 `ci-gate` 와
+# `size-budget` 둘이고, 나머지 셋(`changes`·`msrv`·`windows`)이 required 가 아닌 까닭은 제
+# 머리글에 적는다. 밑의 잡 주석이 "required" 라 하면 이 둘이다 — 보호 규칙이 바뀌면 이 줄과
+# 둘을 이름으로 대는 `ci-gate`·`changes`·`size-budget` 의 머리글을 고친다.
 name: CI
 
 on:
@@ -34,9 +36,11 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
-  # 이것이 required check 둘 중 하나다(다른 하나는 `size-budget`). 저장소 보호 규칙은
-  # 이 `name:` 글자로 맞추니 이름을 바꾸면 보호가 깨진다. 갈래를 늘리면 보호 규칙도 같이
-  # 는다 — 검사를 더할 자리는 새 잡이 아니라 이 잡의 스텝이다.
+  # 이것이 required check 둘 중 하나다(다른 하나는 `size-budget`). `main` 의 보호 규칙은 이
+  # `name:` 글자로 맞추니, 이름만 바꾸면 보호 규칙이 옛 이름의 보고를 영영 기다려 `main` 으로
+  # 가는 PR 이 안 머지된다 — 바꿀 때는 보호 규칙의 이름도 함께 고친다. 갈래를 늘리면 보호
+  # 규칙도 같이 는다 — 검사를 더할 자리는 새 잡이 아니라 이 잡의 스텝이다. `size-budget` 이
+  # 딴 잡으로 선 까닭은 맨 위 머리글의 시간이다(LTO 링크를 시험 뒤에서 기다리지 않는다).
   ci-gate:
     name: fmt · clippy · test
     runs-on: ubuntu-latest
@@ -194,7 +198,8 @@ jobs:
   # **이 잡을 required check 로 삼지 않는다.** required 는 `ci-gate` 와 `size-budget`
   # 둘이다. `ci-gate` 는 무엇이 바뀌었든 언제나 돌고, `size-budget` 은 이 답에 걸려
   # 건너뛰어도 보고한다 — 잡 수준 `if:` 로 건너뛴 잡은 결론 `skipped` 인 check run 을
-  # 남기고 보호 규칙은 그것을 통과로 셈한다. 문서 PR 이 보고를 못 받아 영영 안 머지되는
+  # 남기고(09731b77 에서 봤다) 보호 규칙은 그것을 통과로 셈한다(GitHub 문서의 "Handling
+  # skipped but required checks"). 문서 PR 이 보고를 못 받아 영영 안 머지되는
   # 일이 없는 까닭이다. 워크플로에 `paths-ignore` 를 거는 길이 한 줄로 짧지만, 그쪽은
   # required check 까지 같이 세워 pending 으로 영영 두는 덫을 놓는다.
   #
@@ -255,7 +260,7 @@ jobs:
   # "1.88 이상이 필요하다" 가 아니라 컴파일 오류다 — `rust-version` 의 머리글이 그
   # 자리를 적어 두었다.
   #
-  # **required check 로 삼지 않는다.** required 는 `ci-gate`·`size-budget` 둘이라는 위의 약속을
+  # **required check 로 삼지 않는다.** required 는 맨 위 머리글이 적은 둘뿐이라는 약속을
   # 지킨다. 여기가 붉어질 때 고칠 것이 코드인지 `rust-version` 한 줄인지는 사람이
   # 가른다 — 자동으로 막을 일이 아니다.
   #
@@ -331,7 +336,7 @@ jobs:
   # 내는데 그 타깃을 밟는 잡이 없으면, 유닉스 전용 API 하나가 든 PR 이 초록으로 들어가 릴리스
   # 태그에서 처음 붉어진다. 리눅스에서는 msvc 를 못 잰다 — `ring` 의 build.rs 가 `cl.exe` 를 찾는다.
   #
-  # **required check 로 삼지 않는다.** required 는 `ci-gate`·`size-budget` 둘이라는 위의 약속을 지킨다.
+  # **required check 로 삼지 않는다.** required 는 맨 위 머리글이 적은 둘뿐이라는 약속을 지킨다.
   # `msrv`·`size-budget` 과 같은 `if:` 를 쓴다 — 글만 바뀐 판은 잴 것이 없고, 못 잰 판은
   # 도는 쪽으로 선다.
   #
@@ -409,15 +414,16 @@ jobs:
   # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
   # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
   #
-  # 이것이 required check 둘 중 나머지 하나다. 보호 규칙이 이 `name:` 글자로 맞추니
-  # 이름을 바꾸면 보호가 깨진다. `if:` 로 건너뛰면 `skipped` 로 보고하고 보호 규칙은 그것을
-  # 통과로 셈한다 — 문서 PR 이 기다리지 않는 까닭은 `changes` 의 머리글에 있다.
+  # 이것이 required check 둘 중 나머지 하나다. `name:` 을 바꿀 때 `main` 의 보호 규칙도 함께
+  # 고치는 까닭은 `ci-gate` 의 머리글에 있다. `if:` 로 건너뛰면 `skipped` 로 보고하고 보호
+  # 규칙은 그것을 통과로 셈한다 — 문서 PR 이 기다리지 않는 까닭은 `changes` 의 머리글에 있다.
   size-budget:
     name: release 바이너리 15MB 예산
     needs: changes
     # **`false` 일 때만 건너뛴다** (리뷰 moai-6mk3.lgj). `== 'true'` 로 적으면 `changes` 가
     # 지거나 제한 시간을 넘긴 판에서도 이 잡이 건너뛰어진다 — `if:` 에 상태 함수가 없으면
-    # GitHub 이 `success()` 를 덧붙이기 때문이고, 건너뛴 잡은 붉지도 않아 아무도 못 본다.
+    # GitHub 이 `success()` 를 덧붙이기 때문이고, 건너뛴 잡은 붉지도 않아 아무도 못 본다 —
+    # 이 잡은 required 라, 잘못 건너뛴 판도 보호 규칙은 15MB 를 잰 것으로 세어 통과시킨다.
     # 못 잰 판은 도는 쪽으로 세운다는 위의 약속을 잡 경계에서도 지킨다.
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest

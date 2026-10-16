@@ -48,11 +48,11 @@ minutes. CI has five jobs: one runs clippy and the tests on the dev profile,
 one works out whether anything outside the docs changed, one builds the crate
 with the `rust-version` written in `Cargo.toml`, one runs clippy and builds the
 tests on Windows without running them, and the last builds the release binary
-and checks it against the 15 MB budget. The dev-profile job and the
-release-budget job are the required checks; the others are not. The jobs that
-skip on a pull request that touched documentation alone show as skipped - not
-failed - and a skipped required check still counts as passing, so a docs-only
-pull request is not held up.
+and checks it against the 15 MB budget. The first and the last are the checks
+that branch protection on `main` requires; the other three are not. The last
+three skip on a pull request that touched documentation alone and show as
+skipped - not failed - and a skipped required check still counts as passing,
+so a docs-only pull request is not held up.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
@@ -187,7 +187,7 @@ commit, and a review point you decided not to act on gets a sentence saying why.
 - New commands are caught by the tests that sweep every command for `--json`
   support, so add the command and let the test tell you what it wants.
 - **Open it against `develop`.** `main` takes no direct push and no pull request
-  from anywhere but `develop` — a ruleset holds the first, and a step in
+  from anywhere but `develop` — branch protection holds the first, and a step in
   `ci-gate` holds the second, because GitHub has no rule that pins the source
   branch of a pull request. `main` carries one commit per release that way, and
   its history reads as the distance between two releases.
