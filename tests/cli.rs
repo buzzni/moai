@@ -15648,6 +15648,33 @@ fn an_edit_under_the_shared_worktree_dir_is_not_the_roots_work() {
     }
 }
 
+/// **Windows 의 `cwd` 는 사람이 친 대소문자 그대로 온다**(moai-lag7.482) — PowerShell 의 `cd c:\work\repo` 가 그 철자를
+/// 세션에 넘긴다. 훅이 그 철자를 뿌리로 쥐던 판은 링크를 푼(디스크의 대소문자) 파일 자리와 `strip_prefix` 가 어긋나
+/// 저장소 파일을 다 "밖" 으로 셌고, 집은 것 없는 고침을 규칙 2 가 말없이 넘겼다. 유닉스의 `getcwd` 는 이미 푼 자리를
+/// 내고 대소문자가 다르면 딴 디렉터리라 이 갈래가 없다.
+#[cfg(windows)]
+#[test]
+fn a_cwd_spelt_in_another_case_still_meets_rule_two() {
+    let s = init("HookCase");
+    ok(s.path(), &["add", "무엇"]);
+    let spelt = s.path().display().to_string();
+    let lower = spelt.to_lowercase();
+    assert_ne!(lower, spelt, "시험의 전제 — 대소문자가 다른 철자여야 한다");
+    let edit = |cwd: &str| {
+        hook_out(
+            &s,
+            "pre-tool-use",
+            &format!(
+                "{{\"session_id\":\"s1\",\"cwd\":{},\"tool_name\":\"Edit\",\"tool_input\":{{\"file_path\":\"src/store.rs\"}}}}",
+                json_str(cwd)
+            ),
+        )
+    };
+    assert!(refusal(&edit(&spelt)).contains("Rule 2"), "시험의 바닥 — 디스크의 철자로도 안 막는다");
+    let out = edit(&lower);
+    assert!(refusal(&out).contains("Rule 2"), "대소문자만 다른 cwd 에서 규칙 2 가 샜다 — {out}");
+}
+
 /// 규칙이 실제로 계약 JSON 으로 나온다. **막힌 쪽이 읽고 그대로 고칠 수 있는
 /// 글이어야 한다** — 고칠 명령 없는 거절은 사람을 부르는 게이트다.
 #[test]
