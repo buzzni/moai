@@ -32,7 +32,7 @@ fn recorded_bin() -> &'static str {
         } else if cfg!(windows) {
             // Windows 의 moai 는 제 자리를 `/` 로 이어 적는다(`path::slashed` — git 의 `sh -c` 가 `\` 를 먹는다). cargo 가
             // 이어 지은 `BIN` 은 `C:/…\debug\moai.exe` 처럼 섞여 있어(moai-lag7.rrm) 같은 꼴로 바꿔 견준다.
-            canon(BIN).unwrap_or_else(|e| panic!("{BIN}: {e}")).display().to_string().replace('\\', "/")
+            aimed(&canon(BIN).unwrap_or_else(|e| panic!("{BIN}: {e}")))
         } else {
             BIN.to_string()
         }
@@ -47,7 +47,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Scratch {
-        let dir = plain(scratch::base()).join(format!(
+        let dir = scratch::base().join(format!(
             "moai-cli-{}-{}-{name}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -70,64 +70,36 @@ impl Drop for Scratch {
     }
 }
 
-/// `canonicalize` 가 Windows 에서 붙이는 `\\?\` 를 걷는다(moai-lag7.rrm). 제품의 `path::unverbatim` 과 같은 규칙이다 —
-/// 시험 크레이트라 그것을 못 들여 글로 맨다.
-/// - 그 꼴은 `sh` 가 `\` 를 먹어 `cp '\?C:Users…'` 가 되고, git 은 `worktree add` 에서 받지 못하며, 손으로 짓는 JSON 은
-///   그 자리에서 깨진다. 사람이 손에 드는 철자는 `C:\…` 다
-/// - 유닉스에서는 그런 철자가 없어 받은 그대로다 — 리눅스의 판은 한 글자도 안 바뀐다
-fn plain(p: PathBuf) -> PathBuf {
-    let Some(s) = p.to_str() else { return p };
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        PathBuf::from(format!(r"\\{rest}"))
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        PathBuf::from(rest)
-    } else {
-        p
-    }
-}
-
-/// 링크를 푼 자리 — `std::fs::canonicalize` 에 [`plain`] 을 씌운 것. 시험이 도구의 철자와 견줄 때 쓴다.
-fn canon(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-    std::fs::canonicalize(p).map(plain)
-}
+// 링크를 푼 자리 — Windows 의 `\\?\` 까지 걷은, 도구가 내는 철자다(moai-lag7.rrm). 시험이 도구의 철자와 견줄 때 쓴다.
+// 시험 크레이트라 `path::canonical` 을 못 들여, `#[path]` 로 함께 든 `scratch` 의 같은 자를 쓴다 — 여기 베껴 두던
+// 두 벌째를 걷었다(moai-lag7.482). 유닉스에서는 `std::fs::canonicalize` 그대로다.
+use scratch::canonical as canon;
 
 /// JSON 문자열 안에 넣을 글 — 따옴표 없이 푼 몸만 낸다(moai-lag7.rrm). 손으로 짓는 JSON 과 도구가 낸 JSON 에서
-/// 찾을 조각이 이것을 거친다.
+/// 찾을 조각이 이것을 거친다. 몸은 [`json_str`] 하나다 — 이스케이프하는 자가 둘이면 한쪽만 고쳐져 손으로 지은
+/// 입력과 도구의 출력을 서로 다른 자로 잰다.
 /// - Windows 의 자리는 늘 `\` 를 품어, 날것으로 넣으면 깨진 JSON 이 되고 도구가 낸 `\\` 와도 안 맞는다
 /// - 유닉스의 시험 자리에는 풀 글자가 없어 받은 그대로다
 fn js(text: impl std::fmt::Display) -> String {
-    let quoted = serde_json::to_string(&text.to_string()).unwrap();
+    let quoted = json_str(&text.to_string());
     quoted[1..quoted.len() - 1].to_string()
 }
 
-/// [`js`] 를 되돌린다 — [`field`] 가 JSON 에서 떼어 온 몸을 글로 푼다. 자리로 쓸 값이 지나간다: Windows 의 `\\` 를
-/// 안 풀면 그 자리가 `C:\\Users\\…` 로 서서 도구의 철자와 안 맞는다. 유닉스의 자리에는 풀 글자가 없어 그대로다.
-fn unjs(body: &str) -> String {
-    serde_json::from_str(&format!("\"{body}\"")).unwrap_or_else(|e| panic!("JSON 글이 아니다 — {body}: {e}"))
-}
-
-/// 도구가 셸에 붙여 넣을 줄로 낸 자리 — 셸이 달리 읽을 글자가 있으면 `'…'` 로 싼다(Windows 의 `\` 가 늘 그렇다).
-/// 그 글자가 없는 유닉스의 시험 자리는 날것 그대로다. 두 꼴을 다 찾는다.
 /// 도구가 화면·JSON 에 내는 상대 자리 — 도구는 그것을 OS 의 가름 글자로 잇는다(moai-lag7.rrm). 유닉스에서는 받은 그대로다.
 fn native(rel: &str) -> String {
     rel.replace('/', std::path::MAIN_SEPARATOR_STR)
 }
 
-/// 시험이 짓는 셸 줄에 넣을 자리(moai-lag7.rrm) — `\` 가 들면 `'…'` 로 싼다. Claude Code 의 Bash 는 Windows 에서도
-/// POSIX 껍데기라 날것의 `C:\Users` 는 `C:Users` 로 읽히고, 훅도 그 껍데기의 규칙으로 낱말을 가른다. 유닉스의 시험
-/// 자리에는 `\` 가 없어 받은 그대로다.
-fn sh_path(p: &Path) -> String {
-    let s = p.display().to_string();
-    if s.contains('\\') { format!("'{s}'") } else { s }
-}
-
 /// 도구가 `-C` 에 대는 꼴의 자리(moai-lag7.951) — Windows 에서는 `\` 를 `/` 로 바꾼 `C:/…` 다(`path::slashed`). 그 꼴은 셸이
-/// 그대로 읽으니 시험이 쳐 넣는 줄에도 쓴다. 유닉스에서는 받은 그대로다.
+/// 그대로 읽으니 시험이 쳐 넣는 줄에도 쓴다 — Claude Code 의 Bash 는 Windows 에서도 POSIX 껍데기라 날것의 `C:\Users` 는
+/// `C:Users` 로 읽히고, 훅도 그 껍데기의 규칙으로 낱말을 가른다. 유닉스에서는 받은 그대로다.
 fn aimed(p: &Path) -> String {
     let s = p.display().to_string();
     if cfg!(windows) { s.replace('\\', "/") } else { s }
 }
 
+/// 도구가 셸에 붙여 넣을 줄로 낸 자리 — 셸이 달리 읽을 글자가 있으면 `'…'` 로 싼다(Windows 의 `\` 가 늘 그렇다).
+/// 그 글자가 없는 유닉스의 시험 자리는 날것 그대로다. 두 꼴을 다 찾는다.
 fn shell_spelt(said: &str, before: &str, path: impl std::fmt::Display, after: &str) -> bool {
     said.contains(&format!("{before}{path}{after}")) || said.contains(&format!("{before}'{path}'{after}"))
 }
@@ -1009,7 +981,7 @@ fn the_skill_screens_stand_in_one_language() {
         };
         if seeded {
             let plan = run(&["skill", "install", "--dry-run", "--json"]);
-            let dir = PathBuf::from(unjs(&field(&plan, "dir")));
+            let dir = PathBuf::from(json_text(&plan, "dir"));
             let here = json_str(&dir.parent().unwrap().parent().unwrap().display().to_string());
             let at = |scope: &str, path: &str| {
                 let place = if scope == "local" { format!("\"projectPath\":{here},") } else { String::new() };
@@ -15749,21 +15721,13 @@ fn every_refusal_is_undone_by_its_own_advice() {
 // 자리, 계약 JSON 을 쓰는 자리는 단위 시험이 못 밟는다. 시험판에서 잡힌
 // 버그 셋 중 둘이 바로 그 자리에 있었다.
 
-/// JSON 문자열 하나. **제어문자는 전부 이스케이프한다** — 하나라도 날것으로 들어가면
-/// 훅이 stdin 을 못 풀어 조용히 지나가고, "막지 않는다" 는 시험이 헛으로 초록이 된다.
+/// JSON 문자열 하나. **JSON 이 날것으로 못 받는 제어문자(U+0000~U+001F)는 전부 이스케이프한다** — 하나라도
+/// 날것으로 들어가면 훅이 stdin 을 못 풀어 조용히 지나가고, "막지 않는다" 는 시험이 헛으로 초록이 된다.
+///
+/// **도구와 같은 자(`serde_json`)로 짓는다**(moai-lag7.482) — 손으로 적은 이스케이프가 따로 있던 판은 도구가 낸
+/// JSON 에서 찾을 조각([`js`])을 짓는 자와 두 벌이 되어, 탭 하나에도 `\t` 와 `\u0009` 로 갈렸다.
 fn json_str(s: &str) -> String {
-    let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+    serde_json::to_string(s).unwrap()
 }
 
 /// **한국어 글을 넣어도 훅은 아무 말도 안 붙인다**(사용자 결정 moai-vtfu, 2026-10-03). 한때 한글이 든 쓰기마다
@@ -16224,7 +16188,7 @@ fn a_pick_aimed_at_another_tracker_reads_its_from_race_there() {
             format!("{{\"session_id\":\"{session}\",\"cwd\":{}{body}}}", json_str(&where_.display().to_string()));
         String::from_utf8(hook_in(&s, run_in, event, &input).stdout).unwrap()
     };
-    let pick = format!("moai -C {} mv {id} in_progress --from todo", sh_path(&other));
+    let pick = format!("moai -C {} mv {id} in_progress --from todo", aimed(&other));
     // 이긴 쪽 — 옆 트래커에서 아직 `todo` 라 정말 옮긴다. 그 집기는 이 세션의 것으로 적힌다.
     assert!(at("winner", "pre-tool-use", Some(&pick), &main).trim().is_empty());
     ok(&other, &["mv", &id, "in_progress", "--from", "todo"]);
@@ -17472,7 +17436,7 @@ fn a_moai_call_is_judged_by_the_tracker_it_points_at() {
     let held = field(&ok(a.path(), &["add", "여기서 할 일", "--json"]), "id");
     ok(a.path(), &["mv", &held, "in_progress"]);
     let bash = |s: &Scratch, cmd: &str| tool_at(s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
-    let bp = sh_path(b.path());
+    let bp = aimed(b.path());
 
     // A 가 쥔 것으로 B 에 세우는 줄을 막지 않는다.
     for cmd in [
@@ -18196,7 +18160,7 @@ fn installed_as(s: &Scratch, c: &Claude, bin: &Path, version: &str) -> (String, 
     let run = |args: &[&str]| c.command(bin, s.path(), args, true).output().unwrap();
     let plan = String::from_utf8(run(&["skill", "install", "--dry-run", "--json"]).stdout).unwrap();
     let market = field(&plan, "market");
-    let dir = PathBuf::from(unjs(&field(&plan, "dir")));
+    let dir = PathBuf::from(json_text(&plan, "dir"));
     let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
     assert!(run(&["skill", "install"]).status.success());
 
@@ -18588,10 +18552,10 @@ fn skill_uninstall_leaves_another_repos_registration_alone() {
 fn skill_install_without_registration_is_not_a_success() {
     let s = init("skillinstallpartial");
     let c = Claude::new("skillinstallpartial-home");
-    let dir = unjs(&field(
+    let dir = json_text(
         &String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], false).stdout).unwrap(),
         "dir",
-    ));
+    );
     // **하위 디렉터리에서 불러도 옳은 자리를 댄다.** 뿌리 기준의 상대 경로를 내면
     // 그 자리에서 친 줄이 없는 디렉터리를 가리킨다.
     let sub = s.path().join("src");
@@ -18600,8 +18564,7 @@ fn skill_install_without_registration_is_not_a_success() {
     assert!(!out.status.success(), "등록을 못 했는데 성공으로 끝났다\n{}", text(&out));
     assert!(text(&out).contains("손으로 마친다"), "마칠 길을 안 낸다\n{}", text(&out));
     assert!(
-        text(&out).contains(&format!("claude plugin marketplace add {dir} --scope local"))
-            || text(&out).contains(&format!("claude plugin marketplace add '{dir}' --scope local")),
+        shell_spelt(&text(&out), "claude plugin marketplace add ", &dir, " --scope local"),
         "마칠 길이 부른 자리에 따라 틀린다\n{}",
         text(&out)
     );

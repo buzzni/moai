@@ -105,13 +105,6 @@ impl Scratch {
     pub fn path(&self) -> &Path {
         &self.0
     }
-
-    /// 이 자리 밑의 **사람이 치는 철자** — 끝 `/` 나 `..` 이 든 꼴을 그대로 지킨다. 자리는 푼 철자라
-    /// Windows 에서 `\\?\C:\…` 로 서는데, 그 꼴에 `join` 하면 Rust 가 `/` 를 `\` 로 바꾸고 `..` 까지
-    /// 접어 "같은 자리의 다른 철자" 를 재는 시험의 전제가 무너진다(moai-lag7.951). 유닉스에서는 `join` 그대로다.
-    pub fn spelt(&self, tail: &str) -> PathBuf {
-        plain(self.0.clone()).join(tail)
-    }
 }
 
 impl std::ops::Deref for Scratch {
@@ -265,7 +258,11 @@ pub fn fence(dir: &Path) {
 
 /// [`crate::path::canonical`] 과 같은 자 — 링크를 풀고 Windows 의 `\\?\` 접두어를 걷는다(moai-lag7.951). [`real`] 과
 /// 같은 까닭으로 여기만 제 몸으로 든다. 도구가 내는 철자가 접두어 없는 꼴이니 시험 자리도 그 꼴로 서야 견주기가 맞는다.
-fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+///
+/// **자리는 늘 이것을 지나 선다** — [`base`] 와 [`Scratch::real`] 이 이것으로 푸니, 그 밑에 `join` 한 철자는
+/// Windows 에서도 끝 `/`·`..` 를 친 그대로 지킨다. 통합 시험(`tests/cli.rs`)도 도구의 철자와 견줄 때 이것을 쓴다 —
+/// 거기 베껴 두던 같은 글을 걷었다(moai-lag7.482).
+pub fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
     std::fs::canonicalize(p).map(plain)
 }
 
