@@ -233,12 +233,18 @@ pub fn skills() -> Vec<Skill> {
 }
 
 /// 스킬마다의 글을 `<이름>/<상대 경로>` 로 편다 — 두 트리가 이 차례 그대로 받는다.
+///
+/// **가르는 금은 어느 플랫폼에서나 `/` 다**(moai-lag7.9fm). `Path::join` 은 Windows 에서 `\` 를 끼워,
+/// [`version_of`] 가 셈하는 경로 글이 플랫폼마다 달라진다 — 같은 트리를 Linux 와 Windows 가 번갈아 심으면
+/// 커밋된 `plugin.json` 의 판이 매번 뒤집힌다. Windows 의 파일 API 는 `/` 를 그대로 받는다.
 fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (PathBuf, String)> + 'a
 where
     I: IntoIterator<Item = &'a Skill>,
     I::IntoIter: 'a,
 {
-    skills.into_iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+    skills
+        .into_iter()
+        .flat_map(|s| s.files.iter().map(move |(rel, body)| (PathBuf::from(format!("{}/{rel}", s.name)), body.clone())))
 }
 
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
@@ -898,7 +904,7 @@ pub fn tree(prefix: &str, root: &Path, exe: &str, skills: &[Skill]) -> Vec<(Path
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
 fn tree_named(market: &str, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
     let mut files: Vec<(PathBuf, String)> =
-        skill_files(skills).map(|(p, b)| (Path::new("skills").join(p), b)).collect();
+        skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{}", p.display())), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
