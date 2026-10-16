@@ -299,31 +299,33 @@ mod tests {
     #[test]
     fn it_refuses_where_install_sh_cannot_upgrade() {
         let s = crate::scratch::Scratch::new("update-refusal");
+        // 이 기계의 설치 스크립트가 까는 이름이다 — Windows 는 `moai.exe`(moai-lag7.sk7).
+        let moai = Runner::native(Path::new("")).binary();
         let plain = s.path().join("bin");
         std::fs::create_dir_all(&plain).unwrap();
-        assert_eq!(refusal(&plain.join("moai"), true, yes), None, "쓸 수 있는 자리");
-        assert_eq!(refusal(Path::new("/opt/tools/moai"), true, yes), None, "집 밖이어도 쓸 수 있으면 올린다");
-        assert_eq!(refusal(&plain.join("moai"), false, yes), Some(Refusal::NotServed));
+        assert_eq!(refusal(&plain.join(moai), true, yes), None, "쓸 수 있는 자리");
+        assert_eq!(refusal(&Path::new("/opt/tools").join(moai), true, yes), None, "집 밖이어도 쓸 수 있으면 올린다");
+        assert_eq!(refusal(&plain.join(moai), false, yes), Some(Refusal::NotServed));
         assert_eq!(
             refusal(&plain.join("moai-dev"), true, yes),
             Some(Refusal::NotNamedMoai { name: "moai-dev".into() })
         );
-        assert_eq!(refusal(&plain.join("moai"), true, |_| false), Some(Refusal::NotWritable { dir: plain.clone() }));
+        assert_eq!(refusal(&plain.join(moai), true, |_| false), Some(Refusal::NotWritable { dir: plain.clone() }));
 
         let profile = s.path().join("target").join("release");
         std::fs::create_dir_all(profile.join(".fingerprint")).unwrap();
         assert_eq!(
-            refusal(&profile.join("moai"), true, yes),
+            refusal(&profile.join(moai), true, yes),
             Some(Refusal::BuiltByCargo { dir: profile.clone() }),
             "소스에서 지은 판"
         );
-        assert_eq!(refusal(&profile.join("moai"), false, yes), Some(Refusal::NotServed), "판을 안 내는 기계가 먼저다");
+        assert_eq!(refusal(&profile.join(moai), false, yes), Some(Refusal::NotServed), "판을 안 내는 기계가 먼저다");
         let cargo = s.path().join(".cargo");
         std::fs::create_dir_all(cargo.join("bin")).unwrap();
         std::fs::write(cargo.join(".crates.toml"), "[v1]\n\"moai 0.1.3 (path+file:///src/moai)\" = [\"moai\"]\n")
             .unwrap();
         assert_eq!(
-            refusal(&cargo.join("bin").join("moai"), true, |_| false),
+            refusal(&cargo.join("bin").join(moai), true, |_| false),
             Some(Refusal::BuiltByCargo { dir: cargo.join("bin") }),
             "cargo install — 쓰기보다 먼저 막는다"
         );
