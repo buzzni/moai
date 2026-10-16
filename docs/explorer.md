@@ -257,6 +257,9 @@ as a [backlog item](glossary.md#backlog) with no epic — off the board and out 
 unfolds it. With an editor on hand (`$VISUAL`, `$EDITOR`, `vi` or `nano`) it opens
 like a git commit message: the first line is the title. Without one, a built-in
 form opens and `Ctrl-S` keeps it. Leave the title empty and nothing is kept.
+The editor has to save UTF-8. If it saves in another encoding, moai cannot read
+the file, so it keeps it where it is, names its path, and says that path again on
+the shell when you quit — open it, save it as UTF-8, and park it again.
 
 ## Several projects
 

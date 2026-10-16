@@ -978,6 +978,7 @@
   "tui.editor_no_write": "임시 파일에 못 적었다 — {why}",
   "tui.editor_not_started": "편집기를 못 띄웠다({editor}) — {why}",
   "tui.editor_no_read": "편집기가 남긴 파일을 못 읽었다 — {why}",
+  "tui.editor_no_read_kept": "편집기가 남긴 파일은 {path} 에 그대로 두었다 — 못 읽었다: {why}",
   "tui.editor_exit": "편집기가 {code} 로 끝났다({editor})",
   "tui.editor_signal": "편집기가 신호로 끝났다({editor})",
   "tui.unsaved_kept": "담지 못한 생각을 파일로 남겼다 — {at}",

@@ -383,11 +383,19 @@ fn screen(mut app: App) -> R<Vec<String>> {
     // 로 되던지는데 그것은 훅을 안 지난다 — 훅이 이미 걷은 터미널을 편집기에서 돌아오며 다시
     // 올렸다면 raw·대체 화면인 채로 셸에 남는다. 걷은 뒤 패닉 글을 **한 번 더** 낸다: 훅이 낸
     // 글은 그 뒤에도 루프가 그린 한 프레임에 덮였을 수 있다.
-    let out = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app)));
+    let mut left = Vec::new();
+    let out =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| loop_until_quit(&mut term, &mut app, &mut left)));
     // 루프는 사건마다 터미널의 잡기를 `wants_mouse` 에 맞춰 두므로, 제대로 끝난 자리의 값이 곧 터미널의 것이다.
     // 오류·패닉으로 끝난 길에서는 어긋날 수 있는데, 그때 드는 것은 헛 왕복 한 번이지 새는 글이 아니다.
     modes_off_draining(app.wants_mouse(), app.rolled_at);
     ratatui::restore();
+    // 편집기가 남겼는데 못 읽어 **지우지 않은 파일은 나갈 때 셸에 한 번 더 댄다**(moai-f6ao) — 어느 길로
+    // 끝났든. 배너의 알림은 80칸에서 잘리고 다음 키에 걷힌다 — 새 판 줄을 나갈 때 내는 것과 같은 까닭이다
+    // (moai-8rmw.665). 거기 든 것이 적은 글의 유일한 사본이다.
+    for said in &left {
+        eprintln!("moai: {said}");
+    }
     // 오류·패닉으로 끝났으면 폼에 남은 글부터 건진다 — 터미널을 걷은 **뒤라** 그 말이 셸에 보이고,
     // 패닉을 되던지기 **전이라** 남길 기회가 있다(moai-y3r7).
     if !matches!(out, Ok(Ok(()))) {
@@ -1133,11 +1141,25 @@ fn resume(term: &mut DefaultTerminal, mouse: bool) -> std::io::Result<()> {
 /// `text` 를 임시 파일에 적고 `editor` 로 연 뒤 **고친 글**을 돌려준다. `Err` 는 담지 않을
 /// 까닭이다 — 편집기가 0 이 아닌 코드로 끝났다(vim 의 `:cq`), 못 띄웠다, 못 읽었다.
 ///
-/// 파일은 **어느 길로든 지운다.** 받은 글은 이미 돌려주었고, 담기가 실패해도 그 글은 폼에
-/// 열린 채 남는다([`App::edited`]) — 파일에 둘 까닭이 없다. 편집기는 이 프로세스의 stdin·
-/// stdout 을 그대로 받는다. 기다리는 동안 Ctrl-C 가 신호로 오면(raw 로 돌지 않는 편집기)
-/// moai 도 같이 끝난다 — 터미널은 이미 내려 둔 채라 셸은 멀쩡하고, 파일 하나가 남는다.
-fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate::i18n::Lang) -> Result<String, String> {
+/// 파일은 **한 길만 빼고 지운다 — 편집기가 0 으로 끝났는데 못 읽은 때다**(moai-wk3r). 비 UTF-8
+/// 로 저장한 편집기(메모장 ANSI, vim `fenc=latin1`)에서는 그 파일이 적은 글의 **유일한 사본**이라,
+/// 남겨 두고 오류에 경로를 댄다. 경로는 **글의 앞에 선다** — 배너는 한 줄이라 80칸에서 꼬리가
+/// 잘린다. 같은 말을 `left` 에도 담아 루프가 끝난 뒤 셸에 한 번 더 낸다([`screen`]) — 배너의 알림은
+/// 다음 키에 걷히고, 긴 임시 경로(macOS 의 `$TMPDIR`)는 앞에 서도 잘린다. 남기는 파일은 다시
+/// 0600 으로 둔다 — 편집기가 새로 지어 바꿔 넣었으면 권한이 그쪽 umask 를 따르는데, 공유 임시
+/// 디렉터리에 오래 남는다. 파일이 없어졌으면(편집기가 지웠다) 댈 경로가 없다.
+///
+/// 그 밖의 길에서는 받은 글은 이미 돌려주었고, 담기가 실패해도 그 글은 폼에 열린 채
+/// 남는다([`App::edited`]) — 파일에 둘 까닭이 없다. 편집기는 이 프로세스의 stdin·stdout 을
+/// 그대로 받는다. 기다리는 동안 Ctrl-C 가 신호로 오면(raw 로 돌지 않는 편집기) moai 도 같이
+/// 끝난다 — 터미널은 이미 내려 둔 채라 셸은 멀쩡하고, 파일 하나가 남는다.
+fn write_in_editor(
+    editor: &str,
+    text: &str,
+    dir: &std::path::Path,
+    lang: crate::i18n::Lang,
+    left: &mut Vec<String>,
+) -> Result<String, String> {
     use crate::i18n::{fill, say};
     use std::io::Write;
     // **키는 낱말째 적는다** — 소스를 훑는 시험(`i18n::tests`)이 `say(…, "키")` 모양만 읽어,
@@ -1146,6 +1168,7 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
         scratch_file(dir).map_err(|e| fill(say(lang, "tui.editor_no_temp_file"), &[("why", &e.to_string())]))?;
     let written = file.write_all(text.as_bytes()).and_then(|()| file.sync_all());
     drop(file);
+    let mut keep = false;
     let got = written
         .map_err(|e| fill(say(lang, "tui.editor_no_write"), &[("why", &e.to_string())]))
         .and_then(|()| {
@@ -1155,12 +1178,31 @@ fn write_in_editor(editor: &str, text: &str, dir: &std::path::Path, lang: crate:
                 .map_err(|e| fill(say(lang, "tui.editor_not_started"), &[("editor", editor), ("why", &e.to_string())]))
         })
         .and_then(|status| match status.code() {
-            Some(0) => std::fs::read_to_string(&path)
-                .map_err(|e| fill(say(lang, "tui.editor_no_read"), &[("why", &e.to_string())])),
+            Some(0) => std::fs::read_to_string(&path).map_err(|e| {
+                keep = path.exists();
+                let why = e.to_string();
+                if keep {
+                    fill(say(lang, "tui.editor_no_read_kept"), &[("why", &why), ("path", &path.display().to_string())])
+                } else {
+                    fill(say(lang, "tui.editor_no_read"), &[("why", &why)])
+                }
+            }),
             Some(code) => Err(fill(say(lang, "tui.editor_exit"), &[("editor", editor), ("code", &code.to_string())])),
             None => Err(fill(say(lang, "tui.editor_signal"), &[("editor", editor)])),
         });
-    let _ = std::fs::remove_file(&path);
+    if !keep {
+        let _ = std::fs::remove_file(&path);
+        return got;
+    }
+    // 고리를 따라가지 않는다 — 편집기가 그 자리에 둔 것이 보통 파일일 때만 권한을 고친다.
+    #[cfg(unix)]
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_file()) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    if let Err(said) = &got {
+        left.push(said.clone());
+    }
     got
 }
 
@@ -1305,7 +1347,9 @@ fn spin_step(drew: std::time::Duration) -> std::time::Duration {
     (drew * SPIN_BUDGET).clamp(SPIN_TICK, SPIN_SLOWEST)
 }
 
-fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result<()> {
+/// `q` 가 올 때까지 그리고 받는다. `left` 에는 편집기가 남겼는데 못 읽어 지우지 않은 파일의 말이
+/// 쌓인다 — [`screen`] 이 터미널을 걷은 뒤 셸에 낸다([`write_in_editor`]).
+fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App, left: &mut Vec<String>) -> std::io::Result<()> {
     // 층에서 시작하면 읽기가 이미 돌 수 있다 — 첫 걸음부터 빠르게 받는다.
     let mut stale_due = std::time::Instant::now() + if app.loading() { LOAD_POLL } else { TICK };
     let mut spin_due = std::time::Instant::now() + SPIN_TICK;
@@ -1350,7 +1394,7 @@ fn loop_until_quit(term: &mut DefaultTerminal, app: &mut App) -> std::io::Result
         // 순간 박힌 그대로 요청에 실려 왔다.
         if let Some(edit) = app.edit.take() {
             suspend(caught, app.rolled_at);
-            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang);
+            let got = write_in_editor(&edit.editor, &edit.text, &std::env::temp_dir(), app.site.lang, left);
             // **받은 글을 올리기보다 먼저 담는다.** 올리기가 실패하면 루프가 끝나는데, 먼저 담아
             // 두면 적은 것은 파일에 있다 — 거꾸로 하면 편집기에서 적은 글이 임시 파일과 함께 사라진다.
             app.edited(edit.into, got);
@@ -1763,8 +1807,11 @@ mod tests {
     fn the_editor_gets_the_template_and_its_edit_comes_back() {
         let d = Dir::new("ok");
         let editor = d.editor("f=\"$2\"; printf '제목\\n\\n본문\\n' >> \"$f\"");
-        let got = write_in_editor(&editor, "# 안내\n", &d.0, crate::i18n::Lang::Ko).expect("편집기가 돌려주지 않았다");
+        let mut said = Vec::new();
+        let got = write_in_editor(&editor, "# 안내\n", &d.0, crate::i18n::Lang::Ko, &mut said)
+            .expect("편집기가 돌려주지 않았다");
         assert_eq!(got, "# 안내\n제목\n\n본문\n");
+        assert_eq!(said, Vec::<String>::new(), "읽은 글인데 나갈 때 댈 말을 남겼다");
         assert_eq!(d.seen("text"), "# 안내\n", "편집기가 안내 글을 못 봤다");
         assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
         let args: Vec<String> = d.seen("args").lines().map(str::to_string).collect();
@@ -1780,15 +1827,59 @@ mod tests {
     fn a_failing_editor_gives_a_reason_and_leaves_nothing() {
         let d = Dir::new("fail");
         let editor = d.editor("printf '담길 뻔한 것\\n' > \"$2\"; exit 3");
-        let why =
-            write_in_editor(&editor, "", &d.0, crate::i18n::Lang::Ko).expect_err("비영으로 끝났는데 글을 돌려줬다");
+        let mut said = Vec::new();
+        let why = write_in_editor(&editor, "", &d.0, crate::i18n::Lang::Ko, &mut said)
+            .expect_err("비영으로 끝났는데 글을 돌려줬다");
         assert!(why.contains('3'), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
 
-        let why = write_in_editor("moai-없는-편집기-08af", "", &d.0, crate::i18n::Lang::Ko)
+        let why = write_in_editor("moai-없는-편집기-08af", "", &d.0, crate::i18n::Lang::Ko, &mut said)
             .expect_err("없는 편집기인데 글을 돌려줬다");
         assert!(why.contains("127"), "{why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
+        assert_eq!(said, Vec::<String>::new(), "지운 파일을 나갈 때 댄다");
+    }
+
+    /// **편집기가 0 으로 끝났는데 파일을 못 읽으면(비 UTF-8) 파일을 지우지 않고 오류에 경로를 댄다.**
+    /// 그 파일이 적은 글의 유일한 사본이다. 경로는 **글의 앞에** 선다 — 배너는 한 줄이라 꼬리가 80칸에서
+    /// 잘린다. 같은 말이 나갈 때 셸에 낼 몫(`left`)에도 든다. 편집기가 파일을 바꿔 넣으며 남도 읽게
+    /// 두었어도 남기는 파일은 다시 0600 이다.
+    #[test]
+    fn an_unreadable_edit_keeps_the_file_and_names_it() {
+        let d = Dir::new("latin1");
+        let editor = d.editor("printf '\\377\\376x' > \"$2.new\"; chmod 644 \"$2.new\"; mv \"$2.new\" \"$2\"");
+        let mut said = Vec::new();
+        let why = write_in_editor(&editor, "", &d.0, crate::i18n::Lang::Ko, &mut said)
+            .expect_err("못 읽었는데 글을 돌려줬다");
+        let left = d.leftovers();
+        assert_eq!(left.len(), 1, "파일이 안 남았다 — {left:?}");
+        let kept = d.0.join(&left[0]).display().to_string();
+        assert!(why.contains(&kept), "경로를 안 댔다 — {why}");
+        assert!(why.find(&kept) < why.find("UTF-8"), "경로가 io 의 까닭 뒤에 서서 배너에서 잘린다 — {why}");
+        assert_eq!(said, vec![why.clone()], "나갈 때 댈 말을 안 남겼다");
+        assert_eq!(std::fs::read(&kept).unwrap(), b"\xff\xfex", "남은 파일의 바이트가 다르다");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&kept).unwrap().permissions().mode() & 0o777,
+                0o600,
+                "남긴 파일을 남도 읽는다"
+            );
+        }
+    }
+
+    /// **편집기가 파일을 지웠으면 댈 경로가 없다** — 옛 말 그대로 못 읽었다고만 하고, 나갈 때 댈 것도 없다.
+    #[test]
+    fn an_edit_the_editor_removed_names_no_path() {
+        let d = Dir::new("gone");
+        let editor = d.editor("rm -f \"$2\"");
+        let mut said = Vec::new();
+        let why = write_in_editor(&editor, "", &d.0, crate::i18n::Lang::Ko, &mut said)
+            .expect_err("없는 파일인데 글을 돌려줬다");
+        assert!(!why.contains("moai-backlog-"), "없는 파일의 경로를 댔다 — {why}");
+        assert_eq!(d.leftovers(), Vec::<String>::new());
+        assert_eq!(said, Vec::<String>::new(), "없는 파일을 나갈 때 댄다");
     }
 
     /// **루프가 오류로 끝나며 버릴 뻔한 글은 파일로 남는다**(moai-y3r7). 편집기 글과 같은 모양이라
