@@ -1792,11 +1792,20 @@ mod tests {
         let got = write_in_editor(&editor, "# 안내\n", &d.0, crate::i18n::Lang::Ko).expect("편집기가 돌려주지 않았다");
         assert_eq!(got, "# 안내\n제목\n\n본문\n");
         assert_eq!(d.seen("text"), "# 안내\n", "편집기가 안내 글을 못 봤다");
-        assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
+        // 권한 비트는 유닉스의 것이다 — Windows 는 ACL 로 막고, Git Bash 의 `stat` 은 NTFS 를 늘 644 로 꾸며 댄다.
+        if cfg!(unix) {
+            assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
+        }
         let args: Vec<String> = d.seen("args").lines().map(str::to_string).collect();
         assert_eq!(args.len(), 2, "인자가 쪼개졌다 — {args:?}");
         assert_eq!(args[0], "--wait");
-        assert!(args[1].starts_with(&d.0.display().to_string()) && args[1].ends_with(".md"), "{args:?}");
+        // 그 디렉터리의 파일이다 — Windows 는 MSYS2 를 지나는 철자(`C:/…`)를 넘기거나, 못 고르면 이름만 넘기고 그
+        // 디렉터리에서 띄운다(`editor_target`). 이름뿐이면 `join` 이 거기 붙이고, 절대 경로면 그대로다.
+        let at = d.0.join(&args[1]);
+        assert!(
+            at.parent().map(crate::path::real) == Some(crate::path::real(&d.0)) && args[1].ends_with(".md"),
+            "{args:?}"
+        );
         assert_eq!(d.leftovers(), Vec::<String>::new(), "임시 파일이 남았다");
     }
 
