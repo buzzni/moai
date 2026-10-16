@@ -2371,13 +2371,16 @@ mod tests {
         let home = s.path().join("home");
         let local = home.join(".local").join("bin");
         std::fs::create_dir_all(&local).unwrap();
-        let exe = local.join("moai");
+        // 이 기계의 설치 스크립트가 까는 이름이다 — Windows 는 `moai.exe`(moai-lag7.sk7).
+        let moai = crate::update::Runner::native(Path::new("")).binary();
+        let exe = local.join(moai);
         let yes = |_: &Path| true;
         let no = |_: &Path| false;
-        let up = upgrade_of(DEFAULT_REPO);
+        // 긴 줄은 `install.sh` 의 것이라 `moai` 라는 이름에만 선다 — Windows 의 `moai.exe` 에는 권할 줄이 없다.
+        let up = (!cfg!(windows)).then(|| upgrade_of(DEFAULT_REPO));
         assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, yes).as_deref(), Some(SELF_UPDATE));
         assert_eq!(
-            upgrade_for(Path::new("/opt/tools/moai"), Some(&home), true, DEFAULT_REPO, true, yes).as_deref(),
+            upgrade_for(&Path::new("/opt/tools").join(moai), Some(&home), true, DEFAULT_REPO, true, yes).as_deref(),
             Some(SELF_UPDATE),
             "집 밖이어도 쓸 수 있으면 moai update 가 선다"
         );
@@ -2393,7 +2396,7 @@ mod tests {
         );
         assert_eq!(
             upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, yes),
-            Some(up),
+            up,
             "moai update 가 거절할 저장소 값"
         );
         assert_eq!(upgrade_for(&exe, Some(&home), false, DEFAULT_REPO, true, yes), None, "판을 안 내는 기계");
