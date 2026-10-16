@@ -12,6 +12,28 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-16
+
+### Fixed
+
+- **An editor that saves in a non-UTF-8 encoding no longer loses what you wrote.**
+  When the editor opened by `SPC n` saved the thought as, say, Notepad ANSI or vim
+  `fenc=latin1`, moai could not read the file and then deleted it — the only copy.
+  It now keeps that file (readable by you alone), names its path at the front of
+  the message, and prints the path once more on the shell when the explorer quits.
+- **Hook rule 4 no longer lets `tmux -L …` through inside `cmux claude-teams`.**
+  There `$TMUX` is cmux's stand-in (`/tmp/cmux-…`) and the `tmux` on `PATH` is
+  cmux's shim, which drops `-L`, `-S` and `-f`: `env -u TMUX tmux -L x
+  kill-session` closed a workspace in the person's cmux. Under the stand-in,
+  rule 4 now refuses the shim's `kill-server`, `kill-session`, `kill-window`,
+  `kill-pane` and `new-session` (aliases, prefixes, flag clusters and `\;`
+  sequences included) whatever socket the line names, and the refusal hands the
+  same line on the real tmux's absolute path. Its other refusals (a bare
+  `kill-server` on an absolute path, `pkill`/`killall tmux`) hand that line
+  too, and rule 4 in the `AGENTS.md` block and the worker steps teach it, where
+  they taught `env -u TMUX tmux -L …`, which runs the shim. Outside cmux
+  nothing changes. (moai-e7vm)
+
 ## [0.18.0] - 2026-10-16
 
 ### Added

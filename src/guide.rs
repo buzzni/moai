@@ -1160,6 +1160,7 @@ fn rules() -> String {
     // Antigravity 의 칸은 한 글이라([`REVIEW_IN_SESSION`]) 한 번 싣는다 — 둘이 갈리면
     // `the_skills_carry_the_words_table_and_rule_three_points_at_it` 가 빠진 칸을 댄다.
     let [claude, elsewhere, _] = REVIEW_VERB.words;
+    let stand_in = crate::skill::CMUX_STAND_IN;
     format!(
         r#"**1. {one}.** The issue in focus is the one you picked up — it has left the
 first column and is not closed yet (`in_progress`·`review`).
@@ -1202,6 +1203,14 @@ own server.
 
     {TMUX_OWN}
 
+Under cmux claude-teams (`$TMUX` starts with `{stand_in}`) the `tmux` on `PATH` is cmux's shim: it
+drops `-L`, `-S` and `-f`, so `new-session` and the `kill-*` commands open and close workspaces and
+tabs in the person's cmux, and `env -u TMUX` takes away only the fake `$TMUX`. The hook refuses
+those through the shim. Call a real tmux by its absolute path instead — `type -a tmux` lists the
+candidates; take one whose `readlink -f` has no `cmux` in it:
+
+    {TMUX_OWN_REAL}
+
 **5. {five}.** A `moai mv` into a started column on a row whose assignee is
 someone else — or nobody — is refused unless it carries `--take`. Ask the person
 watching first. On a yes, take it over and say who said yes:
@@ -1234,6 +1243,11 @@ pub const TAKE_YES: &str = "--take -m '<who said yes>'";
 
 /// 시험용 tmux 를 띄우는 줄 — 규칙 4 의 글과 거절문이 함께 쓴다.
 pub const TMUX_OWN: &str = "env -u TMUX tmux -L <unique name> …";
+
+/// cmux 의 가짜 `$TMUX` 아래(`cmux claude-teams`)에서 시험용 tmux 를 띄우는 줄(moai-e7vm.83t) — 그 아래의 `tmux` 는
+/// `-L`·`-S` 를 버리는 shim 이라 [`TMUX_OWN`] 이 그대로는 사람의 cmux 에 닿는다. `<real tmux>` 는 shim 이 아닌
+/// tmux 의 절대 경로다. 규칙 4 의 글·일꾼 걸음과, 가짜 아래의 모든 규칙 4 거절문(`hook::own_line`)이 함께 쓴다.
+pub const TMUX_OWN_REAL: &str = "env -u TMUX <real tmux> -L <unique name> …";
 
 /// 안내 전문이 사는 파일(moai-cbfz) — `init --guide file` 이 쓴다. 트래커 디렉터리 안이라 뿌리를 안 어지르고,
 /// 추적 여부를 `.moai` 와 함께 따른다.
@@ -4432,6 +4446,7 @@ pub fn worker() -> String {
     let wiki_commit = indent(WIKI_COMMIT, "    ");
     let brief = indent(&review_brief(), "    ");
     let untracked = tracker_out_of_git();
+    let stand_in = crate::skill::CMUX_STAND_IN;
     format!(
         r#"# Worker steps
 
@@ -4695,6 +4710,11 @@ never in the root
    and inserts `-L`. Do not send keys into a pane someone else raised. If you raise a test
    agent on that server, keep its cwd outside the root (the scratchpad) — raised in the root,
    it stands in `ListAgents` as a session of this repository and a supervisor takes it for a worker.
+   **Under cmux claude-teams** (`$TMUX` starts with `{stand_in}`) the `tmux` on `PATH` is cmux's shim,
+   which drops `-L`, `-S` and `-f` and so reaches the person's cmux whatever socket you name — call a
+   real tmux by absolute path instead (`{TMUX_OWN_REAL}`; `type -a tmux` lists the candidates, take one whose
+   `readlink -f` has no `cmux` in it), and point a wrapper script at that same path. With no real tmux there,
+   do not test tmux in that shell.
    **Give a review subagent these words too**
 
 4-3. **If you would have to touch a file that work running alongside holds, do not fix it** —
@@ -6504,6 +6524,13 @@ stop sending outside work while a release runs",
         // 감독 글은 tmux 명령을 안 든다 — 칸을 만지는 걸음은 `moai-tmux` 에 있다(moai-u99i). 시험하는 것은 일꾼이라 규칙은 일꾼 글에 선다.
         assert!(brief.contains("env -u TMUX tmux -L"), "일꾼 걸음: 떼어 낸 서버로 시험하라는 말이 없다");
         assert!(brief.contains("without `-L`/`-S`"), "일꾼 걸음: 맨 kill-server 를 막는 말이 없다");
+        // cmux 의 shim 아래에서는 `-L` 이 버려진다 — 진짜 tmux 의 절대 경로로 부르라는 줄이 선다(moai-e7vm.83t).
+        assert!(brief.contains(TMUX_OWN_REAL) && brief.contains("shim"), "일꾼 걸음: cmux shim 아래의 길이 없다");
+        let rules = rules();
+        assert!(
+            rules.contains(TMUX_OWN_REAL) && rules.contains(crate::skill::CMUX_STAND_IN),
+            "규칙 4 의 글: cmux shim 아래의 길이 없다"
+        );
         assert!(brief.contains("TMUX_TMPDIR"), "일꾼 걸음: TMUX_TMPDIR 로 안 갇힌다는 말이 없다");
         // 속에서 `tmux` 를 부르는 스크립트에는 손으로 `-L` 을 못 준다 — 그것을 시험하는
         // 일꾼에게도 가둘 길이 있어야 하고, 그 감싸개가 PATH 로 제 자신을 부르면 끝나지 않는다.
@@ -7296,8 +7323,12 @@ stop sending outside work while a release runs",
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
         let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+        // 자식 bash 가 시작 파일을 읽으면 PATH 의 앞이 바뀌어 가짜 `moai` 가 지고 진짜가 돈다. 길은 둘이다 — 세션의
+        // `BASH_ENV`, 그리고 `SSH_CLIENT` 가 서고 `SHLVL` 이 0 인 자리(`ssh host 'cd … && cargo test'`)에서 Debian 의
+        // bash 가 `-c` 에도 읽는 `~/.bashrc`. 앞은 걷고, 뒤는 `--norc` 가 막는다(재 봤다).
         let out = std::process::Command::new("bash")
-            .args(["-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
+            .args(["--norc", "-c", script, "watch", "/root", "e", "2026-10-12T00:00:00Z"])
+            .env_remove("BASH_ENV")
             .env("PATH", path)
             .output()
             .unwrap();

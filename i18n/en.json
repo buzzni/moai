@@ -978,6 +978,7 @@
   "tui.editor_no_write": "could not write to the temporary file — {why}",
   "tui.editor_not_started": "could not start the editor ({editor}) — {why}",
   "tui.editor_no_read": "could not read the file the editor left — {why}",
+  "tui.editor_no_read_kept": "the file the editor left stays at {path} — could not read it: {why}",
   "tui.editor_exit": "the editor ended with {code} ({editor})",
   "tui.editor_signal": "the editor ended on a signal ({editor})",
   "tui.unsaved_kept": "the thought that was not stored was kept in a file — {at}",

@@ -344,7 +344,13 @@ gets through — run it as given. None of them waits on a person except rule 5.
 4. **Never kill the person's tmux server.** `tmux kill-server` or `kill-session`
    without `-L`/`-S`, and `pkill`/`killall` aimed at tmux, are refused even
    outside a tracker. A tmux under test gets its own server:
-   `env -u TMUX tmux -L <unique name> …`
+   `env -u TMUX tmux -L <unique name> …`. Inside `cmux claude-teams` (`$TMUX`
+   starts with `/tmp/cmux-`) the `tmux` on `PATH` is cmux's shim and drops
+   `-L`/`-S`, so there its `kill-*` and `new-session` are refused whatever socket
+   the line names. Every rule-4 refusal there hands
+   `env -u TMUX <real tmux> -L <unique name> …` on the real tmux's absolute
+   path — `type -a tmux` lists the candidates; take one whose `readlink -f` has
+   no `cmux` in it (moai-e7vm)
 5. **Ask before you pick up someone else's work.** Moving a row assigned to
    someone else, or to nobody, into a started column is refused without `--take`.
    The agent asks the person watching, and on a yes runs
