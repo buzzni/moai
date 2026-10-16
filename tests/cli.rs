@@ -96,6 +96,18 @@ fn js(text: impl std::fmt::Display) -> String {
     quoted[1..quoted.len() - 1].to_string()
 }
 
+/// [`js`] 를 되돌린다 — [`field`] 가 JSON 에서 떼어 온 몸을 글로 푼다. 자리로 쓸 값이 지나간다: Windows 의 `\\` 를
+/// 안 풀면 그 자리가 `C:\\Users\\…` 로 서서 도구의 철자와 안 맞는다. 유닉스의 자리에는 풀 글자가 없어 그대로다.
+fn unjs(body: &str) -> String {
+    serde_json::from_str(&format!("\"{body}\"")).unwrap_or_else(|e| panic!("JSON 글이 아니다 — {body}: {e}"))
+}
+
+/// 도구가 셸에 붙여 넣을 줄로 낸 자리 — 셸이 달리 읽을 글자가 있으면 `'…'` 로 싼다(Windows 의 `\` 가 늘 그렇다).
+/// 그 글자가 없는 유닉스의 시험 자리는 날것 그대로다. 두 꼴을 다 찾는다.
+fn shell_spelt(said: &str, before: &str, path: impl std::fmt::Display) -> bool {
+    said.contains(&format!("{before}{path}")) || said.contains(&format!("{before}'{path}'"))
+}
+
 /// 띄울 moai 의 임시 자리를 `dir` 로 둔다. **Windows 는 `TMPDIR` 을 안 읽는다**(moai-lag7.rrm) — `std::env::temp_dir`
 /// 은 거기서 `TMP`·`TEMP` 를 읽으므로, 훅이 쪽지·기준선을 적는 자리를 시험이 고르려면 그 둘도 준다. 유닉스는 `TMPDIR`
 /// 하나뿐이라 그대로다.
@@ -973,7 +985,7 @@ fn the_skill_screens_stand_in_one_language() {
         };
         if seeded {
             let plan = run(&["skill", "install", "--dry-run", "--json"]);
-            let dir = PathBuf::from(field(&plan, "dir"));
+            let dir = PathBuf::from(unjs(&field(&plan, "dir")));
             let here = json_str(&dir.parent().unwrap().parent().unwrap().display().to_string());
             let at = |scope: &str, path: &str| {
                 let place = if scope == "local" { format!("\"projectPath\":{here},") } else { String::new() };
@@ -15371,7 +15383,8 @@ fn skill_status_names_a_retired_skill_left_in_claudes_tree() {
     let left = v["leftovers"].as_array().unwrap();
     assert_eq!(left.len(), 1, "{left:?}");
     assert_eq!(left[0]["state"], "planned");
-    assert!(left[0]["path"].as_str().unwrap().ends_with("moai-plugin/skills/moai-work"), "{left:?}");
+    // 조각으로 견준다(moai-lag7.rrm) — Windows 의 도구는 트리 밑을 `\` 로 잇는다.
+    assert!(Path::new(left[0]["path"].as_str().unwrap()).ends_with("moai-plugin/skills/moai-work"), "{left:?}");
     assert_eq!(v["agents"]["leftovers"], serde_json::json!([]), "Claude 의 트리를 `.agents` 로 셌다");
     let english = || staged(&["skill", "status"]).current_dir(root).env("MOAI_LANG", "en").output().unwrap();
     let out = english();
@@ -18089,7 +18102,7 @@ fn installed_as(s: &Scratch, c: &Claude, bin: &Path, version: &str) -> (String, 
     let run = |args: &[&str]| c.command(bin, s.path(), args, true).output().unwrap();
     let plan = String::from_utf8(run(&["skill", "install", "--dry-run", "--json"]).stdout).unwrap();
     let market = field(&plan, "market");
-    let dir = PathBuf::from(field(&plan, "dir"));
+    let dir = PathBuf::from(unjs(&field(&plan, "dir")));
     let root = dir.parent().unwrap().parent().unwrap().to_path_buf();
     assert!(run(&["skill", "install"]).status.success());
 
@@ -18186,12 +18199,17 @@ fn skill_status_notices_a_vanished_hook_binary() {
     // **파일은 있어도 실행할 수 없으면** 훅은 126 을 받아 알림 한 줄을 낸다(moai-j4ie). 그 줄도
     // 이제 경로를 대지만(moai-wza7), 세션·이벤트마다 한 번뿐이고(moai-f7up) 그 말을 읽는 사람이
     // 없을 때도 있다 — 같은 자리를 언제든 다시 대는 것이 이 줄이다.
-    let noexec = c.home.path().join("noexec-moai");
-    std::fs::write(&noexec, "#!/bin/sh\n").unwrap();
-    let body = std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());
-    std::fs::write(&manifest, body).unwrap();
-    let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
-    assert!(json.contains("\"hook_exe_found\":false"), "실행할 수 없는 훅을 있다고 한다\n{json}");
+    // 실행 비트가 없는 파일은 유닉스에만 있다 — Windows 에는 그 비트가 없다.
+    #[cfg(unix)]
+    {
+        let noexec = c.home.path().join("noexec-moai");
+        std::fs::write(&noexec, "#!/bin/sh\n").unwrap();
+        let body =
+            std::fs::read_to_string(&manifest).unwrap().replace("/nowhere/moai", &noexec.display().to_string());
+        std::fs::write(&manifest, body).unwrap();
+        let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
+        assert!(json.contains("\"hook_exe_found\":false"), "실행할 수 없는 훅을 있다고 한다\n{json}");
+    }
 }
 
 /// **판은 그 설치의 훅이 부르는 것으로 견준다.** 같은 moai 를 다른 자리에서 부른
@@ -18477,10 +18495,10 @@ fn skill_uninstall_leaves_another_repos_registration_alone() {
 fn skill_install_without_registration_is_not_a_success() {
     let s = init("skillinstallpartial");
     let c = Claude::new("skillinstallpartial-home");
-    let dir = field(
+    let dir = unjs(&field(
         &String::from_utf8(c.run(s.path(), &["skill", "install", "--dry-run", "--json"], false).stdout).unwrap(),
         "dir",
-    );
+    ));
     // **하위 디렉터리에서 불러도 옳은 자리를 댄다.** 뿌리 기준의 상대 경로를 내면
     // 그 자리에서 친 줄이 없는 디렉터리를 가리킨다.
     let sub = s.path().join("src");
@@ -18489,7 +18507,8 @@ fn skill_install_without_registration_is_not_a_success() {
     assert!(!out.status.success(), "등록을 못 했는데 성공으로 끝났다\n{}", text(&out));
     assert!(text(&out).contains("손으로 마친다"), "마칠 길을 안 낸다\n{}", text(&out));
     assert!(
-        text(&out).contains(&format!("claude plugin marketplace add {dir} --scope local")),
+        text(&out).contains(&format!("claude plugin marketplace add {dir} --scope local"))
+            || text(&out).contains(&format!("claude plugin marketplace add '{dir}' --scope local")),
         "마칠 길이 부른 자리에 따라 틀린다\n{}",
         text(&out)
     );
@@ -19588,7 +19607,7 @@ fn skill_install_for_codex_plants_the_shared_skills_and_calls_no_claude() {
         String::from_utf8(c.run(s.path(), &["skill", "install", "--agent", "codex", "--json"], true).stdout).unwrap();
     one_json_value(&json);
     assert_eq!(list_in(&json, "agents"), Some(vec!["codex".to_string()]), "{json}");
-    assert_eq!(field(&json, "agents_dir"), shared.display().to_string());
+    assert_eq!(field(&json, "agents_dir"), js(shared.display()));
     assert!(!json.contains("\"market\""), "고르지 않은 Claude 의 값을 낸다\n{json}");
 
     // `--scope` 는 Claude 의 등록 범위다 — 안 고른 채로 주면 아무것도 안 바뀐다고 한 줄로 말한다. 막지는 않는다.
@@ -19799,7 +19818,7 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
     for name in ["moai", "moai-wiki"] {
-        assert!(said.contains(&format!("rm -r {}", shared.join(name).display())), "{name} 을 안 댄다\n{said}");
+        assert!(shell_spelt(&said, "rm -r ", shared.join(name).display()), "{name} 을 안 댄다\n{said}");
         assert!(shared.join(name).join("SKILL.md").is_file(), "{name} 을 지웠다");
     }
     // 심지 않은 감독 스킬은 대지 않는다 — 없는 자리를 `rm -r` 로 대면 사람이 무엇이 있는지 헛갈린다.
@@ -19981,8 +20000,8 @@ fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
 
     let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--agent", "antigravity"], true);
     let said = text(&out);
-    assert!(said.contains(&format!("rm {}", codex.display())), "moai 의 훅을 안 댄다\n{said}");
-    assert!(!said.contains(&format!("rm {}", agy.display())), "남의 훅을 지우라고 한다\n{said}");
+    assert!(shell_spelt(&said, "rm ", codex.display()), "moai 의 훅을 안 댄다\n{said}");
+    assert!(!shell_spelt(&said, "rm ", agy.display()), "남의 훅을 지우라고 한다\n{said}");
     assert!(codex.is_file() && agy.is_file(), "파일을 지웠다");
 }
 
@@ -20019,7 +20038,15 @@ fn skill_install_leaves_nothing_an_older_moai_planted() {
                 let path = entry.unwrap().path();
                 match path.is_dir() {
                     true => todo.push(path),
-                    false => out.push(path.strip_prefix(dir).unwrap().display().to_string()),
+                    // 조각을 `/` 로 잇는다(moai-lag7.rrm) — 도구는 트리 안의 자리를 어느 OS 에서나 `/` 로 댄다.
+                    false => out.push(
+                        path.strip_prefix(dir)
+                            .unwrap()
+                            .components()
+                            .map(|c| c.as_os_str().to_string_lossy())
+                            .collect::<Vec<_>>()
+                            .join("/"),
+                    ),
                 }
             }
         }
@@ -20098,7 +20125,8 @@ fn skill_install_refreshes_an_optional_skill_only_where_it_stands() {
 fn skill_install_with_plants_and_without_removes_an_optional_skill() {
     let s = init("skillwith");
     let c = Claude::new("skillwith-home");
-    let tmux = s.path().join(".claude/moai-plugin/skills/moai-tmux");
+    // 도구가 잇는 대로 조각을 잇는다(moai-lag7.rrm) — Windows 에서는 트리 뿌리 밑을 `\` 로 잇는다.
+    let tmux = s.path().join(".claude/moai-plugin").join("skills").join("moai-tmux");
     let run = |args: &[&str]| -> String {
         let out = c.run(s.path(), args, true);
         assert!(out.status.success(), "{args:?}\n{}", text(&out));
