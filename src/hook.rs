@@ -6100,7 +6100,8 @@ fn create_in<'a>(
     // 대던 판은 안 도는 줄을 안 도는 줄로 바꿨을 뿐이다 — 이 이슈(moai-bt1f)가 고치려던 그 모양이다.
     let fresh: String = aim(at)
         .filter(|a| !a.tracker)
-        .and_then(|a| a.at.to_str().map(crate::text::shell_word))
+        // 철자는 [`aim_flag`] 와 같은 자다 — Windows 에서 `C:/…`(moai-lag7.951). 한 거절문 안에서 같은 뜻의 `-C` 가 두 꼴로 서지 않는다.
+        .and_then(|a| a.at.to_str().map(|d| crate::text::shell_word(&crate::path::slashed(d, cfg!(windows)))))
         .map_or_else(String::new, |d| {
             format!(
                 "\x20 mkdir -p {d} && moai -C {d} init\n\
