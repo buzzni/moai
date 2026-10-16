@@ -1056,7 +1056,8 @@ pub struct Surfaced {
     /// [`warnings_in`] 의 `warnings`)에, 그 셈이 못 내는 몫(자리 없는 집은 줄)까지 더한 값이다. 그 몫을 얹는 자는 [`Surfaced::add`] 하나고
     /// (`prepare`·`App::overlaid` 가 부른다), 디스크를 읽어야 아는 값이라 `report` 가 못 낸다.
     free: usize,
-    /// 아직 판정 안 한 기한. 마일스톤만 드는 값이라 줄이 몇 개다([`crate::report::Dues`]).
+    /// 아직 판정 안 한 기한([`crate::report::Dues`]) — 마일스톤의 기한, 줄의 제 기한, 뒤처질 수 있는 우선순위. 셋째는
+    /// 물려받은 기한을 따르는 멤버까지 들어 열린 줄 대부분일 수 있다 — 프레임마다 세는 자리는 첫 답에서 멈춘다.
     dues: crate::report::Dues,
 }
 
@@ -1076,6 +1077,14 @@ impl Surfaced {
     /// 그만큼은 그대로고, 이 자리를 `crate::model::now()` 로 바꾸면 그 틈까지 사라진다.
     pub fn count(&self, now: &str, zone: &crate::tz::Zone) -> usize {
         self.free + self.dues.count(now, zone)
+    }
+
+    /// 든 알림 수(`free`)에 **읽는 사람의 달로 잰** 기한 알림을 더한다(moai-dr8a.rl4) — 기한에 뒤처진 우선순위는
+    /// 날 판정에 닿으므로 셈이 접지 않고 [`crate::report::Dues`] 에 들었다. 알림 수는 `usize` 로 따로 드니, 그것을
+    /// 대는 자리는 모두 이것으로 더한다 — 그리는 쪽은 `draw::noticed`, 기계에게 내는 `moai tui --json` 은 그 자리에서.
+    /// 안 더한 표면은 `moai status` 보다 하나 적게 센다(리뷰가 `tui --json` 에서 찾았다).
+    pub fn notices(&self, free: usize, now: &str, zone: &crate::tz::Zone) -> usize {
+        free + self.dues.notice_count(now, zone)
     }
 
     /// 순수한 셈이 못 내는 몫을 더한다 — 자리 없는 집은 줄이 그것이다(디스크를 읽어야 안다).
@@ -3307,6 +3316,7 @@ impl App {
             keys::Order::Column => SortKey::Status,
             keys::Order::Assignee => SortKey::Assignee,
             keys::Order::Title => SortKey::Title,
+            keys::Order::Due => SortKey::Due,
         }
     }
 
@@ -12871,7 +12881,11 @@ mod tests {
             assert!(!warnings.contains(&kind), "{kind}: {warnings:?}");
         }
         assert_eq!(f.warnings.count(&f.now, zone), st.warnings.len(), "배너와 보드가 경고를 달리 센다 {warnings:?}");
-        assert_eq!(f.notices, st.notices.len(), "배너와 보드가 알림을 달리 센다 {notices:?}");
+        assert_eq!(
+            f.warnings.notices(f.notices, &f.now, zone),
+            st.notices.len(),
+            "배너와 보드가 알림을 달리 센다 {notices:?}"
+        );
         assert!(f.issues.iter().any(|i| i.id == "argos-a002"), "화면이 아카이브의 줄을 잃었다");
     }
 

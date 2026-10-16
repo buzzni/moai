@@ -554,6 +554,17 @@ members inherit it; without it the whole plan stands outside the release, and of
 `moai ready` then hands out only what is `p0`. Do not hang a running release on a plan
 because the plan looks urgent: that is the release changing size while it runs.
 
+**Ask when it is due, in that same breath.** A deadline is never required, but it is
+always asked about — for a plan, an epic, an issue or a backlog item that comes out of
+the person's own request. Write the answer as `@YYYY-MM-DD` at the end of the plan line
+it belongs to (`# Epic title @2026-10-31`, `- [p1] first issue @2026-10-20`), or give
+`--due <day>` to put it on every epic the plan creates that carries no `@` of its own.
+A row made alone takes the same `--due` on `moai add` or `moai backlog add` — an `@` in
+a single title stays text. `--due +3` is three days from today.
+**No answer, no deadline** — leave it empty, never make one up. A review issue and a
+backlog item you park mid-work are not asked about.
+Nothing checks this: it is a question for you to ask, not a gate.
+
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
 plan creates, which is where `moai show <epic>` reads it from. `--body <text>` takes
 the text itself (a file path there becomes the body as written), `--body -` reads
@@ -638,7 +649,9 @@ it to every member, the ones added later included, and the body is what lets
 `moai show <epic>` say why these issues are one bundle. Not onto every issue: the
 original stays on the closed backlog and the history leads back to it, and the one
 place worth filling is the epic, so the window that picks a member up does not
-have to press every member to find out what this is.
+have to press every member to find out what this is. The backlog item's own deadline
+comes over onto the epic too, unless the plan's `#` line carries an `@` of its own — onto
+the epic only, since a deadline bounds the members without being inherited.
 
 **The milestone that comes over is the one `moai show --milestone` stands the backlog
 under**, not whatever its own field says — a backlog item parked inside an epic comes over
@@ -646,9 +659,9 @@ in that epic's release even with an empty field of its own, and a field of its o
 that loses to the epic it sits in never reaches the new epic. One reader answers
 where a row belongs, on every surface.
 
-**Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
-already the owner — its members inherit its milestone, and writing the backlog's over
-theirs would stand one bundle in two places.
+**Unfolding into a standing epic (`-e <epic>`) carries neither**, and no deadline either.
+That epic is already the owner — its members inherit its milestone, and writing the backlog's
+over theirs would stand one bundle in two places.
 
 **If what came over is not the release that is running, leave it where it stands.**
 Work is never pulled into a running release, so the epic stays outside it and what
@@ -747,12 +760,36 @@ const GROUPS: &str = r#"    moai epic add '<storage layer>'                an ep
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
-**A milestone is the one row that carries dates.** `--start` and `--due` take a
-calendar day, `YYYY-MM-DD`, and `moai edit <milestone> --due none` clears one.
-They stand on a milestone row only — on anything else the write is refused. A
-deadline that has passed, and one falling due within `status_due_days` (3 unless
-your config says otherwise), is one warning line on the board; **nothing is
-blocked and the exit code never changes.**
+**Any row can carry a deadline; only a milestone carries a start.** `--due` takes a
+calendar day, `YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on),
+and `moai edit <id> --due none` clears one. `--start` stands on a milestone row only.
+A milestone's deadline that has passed, and one falling due within `status_due_days`
+(3 unless your config says otherwise), is one warning line on the board, and so is
+an open issue or epic whose own deadline has passed (`overdue`); **nothing is blocked and
+the exit code never changes.**
+
+**A deadline cannot pass the one above it** — milestone, then epic, then parent. A
+write that gives a row a later day than the earliest of those, or moves a row that
+carries a deadline under one due earlier, is refused, and the refusal names the day to
+give instead. Pulling the one above in is never refused: the rows it overtakes are
+named in one line on stderr and stand as `due_beyond_parent` on the board until their
+own deadlines come in. `moai show --sort due` puts the nearest first, and
+`--filter due_on=<from>~<to>` picks rows by their own deadline.
+
+**A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
+first) raises an open, not deferred issue or backlog item by the deadline it follows —
+the earliest of its own and those of the milestone, epic and open parent it stands under. One
+day left or less (today and past included) is `p0`, two or less `p1`, seven or less `p2`,
+and it leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
+write, ending in `from <id>` when the deadline was that row's. It only raises, never
+lowers, so the value a person set is never fought over and the old one stays in that
+note. A group row is never raised itself — its members are: the deadline a plan's
+`--due` puts on an epic raises its members as it nears. Reading never writes, so nothing
+raises by itself — when `moai status` says rows lag their deadline, run
+`moai due apply`. The thresholds are `due_p0_days`,
+`due_p1_days` and `due_p2_days` in `.moai/config.toml` (1, 2 and 7), and
+`due_priority = "off"` stops future raises. A row raised to `p0` outside a running
+milestone takes the hotfix slot in `moai ready` — that is the point of raising it.
 
 **`moai show <milestone>` also says how long it took.** That is read from the
 closed members' start and finish right then — no field holds it. It comes with
@@ -804,6 +841,9 @@ column, it is running. There is no command that opens it and no new field.
   through, and so does a `--milestone` that carries a row in — the rule above is a rule
   for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
+- **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
+  row with none comes last. It is the row's own deadline — an epic's or a milestone's moves
+  none of its members. Where a milestone runs, its work still comes before outside work of the same `p`
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
   setup `ready` and the board are as they were"#;
@@ -1282,7 +1322,8 @@ Start a session by running `moai status`. The board and the warnings come up on 
 ### When a feature request comes in
 
 1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`.
-2. Show a plan split the way fork 3 says, once, and on a "yes" create it in one go.
+2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
+   and on a "yes" create it in one go. No answer leaves the deadline empty.
 3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
 4. Park what you find along the way that is out of scope with `moai backlog add` — if the
    epic promised it, it is not a backlog item even when you cannot do it now (fork 1).
@@ -2164,8 +2205,17 @@ refusal — to the new name (2).
   work to put down (`moai mv <id> todo`, `moai defer <id> -m '<why>'`), ask the person
 - Work handed on to be carried is, like a backlog item, not sent again until its report is checked
 
-**1. Pick.** Out of the backlog that have piled up, keep only the ones that do not collide
-with what is open right now.
+**1. Pick.** First raise what a near deadline calls for, once a round, and when it raised
+anything take it into the root with a commit with a path — reading never writes, so a
+deadline raises nothing until someone runs the verb, and the order `moai ready` gives is
+only as fresh as that run. A member follows the earliest deadline above it as well as its
+own, so the one an epic carries raises its members
+
+    moai due apply                        raises priority by the deadline each row follows, never lowers
+
+A row it raises to `p0` takes the hotfix slot even outside a running milestone — that is
+what the person asked a deadline to do. Then, out of the backlog that have piled up, keep
+only the ones that do not collide with what is open right now.
 
     moai backlog ls                           what has piled up
     moai show -s in_progress,review        what is picked up
@@ -2363,7 +2413,7 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -2378,6 +2428,15 @@ refuse** — the check is the shape, not whether that milestone stands, so a sta
 in with exit 0: one line on stderr says there is no such milestone, and `moai status`
 counts the epic as `dangling_milestone`. Copy it off
 {MILESTONE_FROM}; do not write it from memory.
+`<due>` is when the person wants this work done, as `YYYY-MM-DD` — the backlog's own
+`due_on` when it carries one (`promote` carries that onto the epic anyway), else the day
+the person gave when you asked. **Ask when it is due as you pick work whose backlog
+carries none** — never required, always asked; the backlog's own is an answer the person
+already gave. A day given as "in three days" you write as the day it lands on.
+It is `none` when neither stands — with `Person: away` there is nobody to ask, so it is
+the backlog's own `due_on` or `none`: a deadline is the person's, and you never make one
+up. The worker hangs it on the epic it unfolds; the epic's deadline then bounds every
+member's, and `moai due apply` raises the members' priority as it nears.
 `<model>`, `<difficulty>` and `<why>` are the role's model you read in 2-1, the difficulty
 you measured and your reason; `<effort>` is that role's effort (2-1), the same value you pass
 to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
@@ -4272,6 +4331,7 @@ fn message() -> String {
     Root branch: <root branch>
     Base branch: <base branch>
     Milestone: <milestone>
+    Due: <due>
     Root: <root>
     Subdir: <subdir>
     Person: <person>"#
@@ -4416,6 +4476,8 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   Outside every milestone it is `<root branch>`; inside a milestone it is that milestone's own
   branch, `milestone/<milestone id>` ("The milestone branch")
 - `Milestone:` — `<milestone>`, the release the epic hangs (1)
+- `Due:` — `<due>`, the deadline the person gave for this work, `YYYY-MM-DD`, or `none`.
+  The epic hangs it (1); `none` hangs nothing and never stands for a day you make up
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
@@ -4560,6 +4622,12 @@ never in the root
    not in `ready`, not in `held`, no warning
 
        {MILESTONE_ATTACH}
+   Then hang `<due>` on the epic the same way, unless it is `none` — `none` hangs nothing
+   and does not clear a deadline `promote` carried over from the backlog. The members are
+   bounded by it without carrying it. If the write is refused because the day is later than
+   the milestone's deadline, leave the epic's deadline as it stands and name it in the report
+
+       moai edit <epic> --due <due>
 2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
    **Pass the column you saw** — this is a place where several sessions share one `.moai`,
    and overwriting a row picked up beside you means two of you do the same work. A non-zero
@@ -7336,6 +7404,61 @@ stop sending outside work while a release runs",
             assert!(supervise.contains(start), "감독이 `{start}` 메시지를 안 보낸다");
             assert!(section.contains(start), "일꾼 글이 `{start}` 를 어떻게 읽는지 안 댄다");
         }
+    }
+
+    /// **기한은 사람의 것이라 감독이 실어 보내고 일꾼이 에픽에 단다**(moai-7bqy.fvo). 감독은 회차마다 우선순위를
+    /// 기한에 맞추고(읽기는 쓰지 않으니 그 동사를 누군가 쳐야 한다), `Person: away` 면 지어내지 않는다. 일꾼의 `none`
+    /// 은 `promote` 가 데려온 기한을 지우지 않는다 — 지우면 backlog 에 적어 둔 사람의 답이 펼치는 순간 사라진다.
+    #[test]
+    fn the_due_travels_from_the_person_to_the_epic() {
+        let (supervise, work) = (supervise(), worker());
+        let one = &supervise[supervise.find("**1. Pick.**").expect("감독 1 이 없다")..];
+        let one = &one[..one.find("**2. ").expect("감독 2 가 없다")];
+        assert!(one.contains("moai due apply"), "감독이 회차마다 기한으로 우선순위를 안 올린다");
+        let due = &supervise[supervise.find("`<due>` is when").expect("감독이 `<due>` 를 풀지 않는다")..];
+        let due = &due[..due.find("\n`<model>`").expect("`<due>` 풀이 뒤의 `<model>` 이 없다")];
+        // 앞머리만 매면 뒤 절("지어내지 않는다")을 걷어도 초록이다 — 비운 사람의 길과 그 금지를 같이 맨다(리뷰).
+        assert!(
+            due.contains("with `Person: away` there is nobody to ask") && due.contains("you never make one\nup"),
+            "감독이 비운 사람의 기한을 지어낼 수 있다 — {due}"
+        );
+        // backlog 가 기한을 들었으면 그것이 이기므로, 묻고서 버리지 않는다(리뷰).
+        assert!(due.contains("whose backlog\ncarries none"), "backlog 의 기한이 있어도 묻고 그 답을 버린다 — {due}");
+        let step1 = &work[step_at(&work, "1")..step_at(&work, "2")];
+        assert!(step1.contains("moai edit <epic> --due <due>"), "일꾼이 기한을 에픽에 안 단다");
+        assert!(step1.contains("does not clear a deadline `promote` carried"), "`none` 이 데려온 기한을 지운다");
+    }
+
+    /// **기한은 계획과 같은 숨에 묻고, 답이 없으면 비운다**(moai-7bqy.a84). 글이지 게이트가 아니라 이 글이 빠지면
+    /// 아무것도 묻지 않는다 — 걷어도 초록이던 자리를 맨다. 혼자 만드는 줄의 `--due` 와, 에픽의 기한이 멤버를
+    /// 올린다는 말도 맨다: `--due` 는 계획이 짓는 에픽에만 서고 `moai due apply` 는 멤버가 조상의 기한도 따르게 읽어
+    /// (moai-dr8a.7rs), 그 말이 없으면 에픽의 기한이 멤버를 올리는지를 글에서 못 읽는다(리뷰). 감독의 `<due>` 글도 같은
+    /// 말을 해야 한다 — 한때 "에픽의 기한은 멤버를 안 올린다" 가 거기 남아 같은 스킬의 1 단계와 엇갈렸다.
+    #[test]
+    fn the_agents_block_asks_when_it_is_due() {
+        let agents = agents();
+        assert!(FORKS.contains("**Ask when it is due, in that same breath.**"), "갈림길 3 이 기한을 안 묻는다");
+        assert!(FORKS.contains("**No answer, no deadline**"), "답이 없을 때 지어내지 말라는 말이 없다");
+        assert!(
+            FORKS.contains("`--due` on `moai add` or `moai backlog add`"),
+            "혼자 만드는 줄에 기한을 다는 길이 없다"
+        );
+        assert!(agents.contains("ask when it is due in the same breath"), "기능 요청 2 단계가 기한을 안 묻는다");
+        assert!(
+            GROUPS.contains("`moai due apply`") && GROUPS.contains("puts on an epic raises its members as it nears"),
+            "그룹 글이 에픽의 기한이 멤버를 올린다고 안 댄다"
+        );
+        assert!(
+            GROUPS.contains("**Within one `p` the nearer deadline comes first**, whether"),
+            "ready 의 기한 차례가 두 마일스톤 줄에 묶였다"
+        );
+        assert!(backlog().contains("own deadline\ncomes over onto the epic"), "promote 가 기한을 데려간다는 말이 없다");
+        // 감독의 `<due>` 글도 같은 말을 한다(리뷰) — 옛 "안 올린다" 가 남으면 같은 스킬의 1 단계와 엇갈린다.
+        let supervise = supervise();
+        assert!(supervise.contains("raises the members' priority as it nears"), "감독의 <due> 글이 올린다고 안 댄다");
+        assert!(!supervise.contains("without raising"), "감독의 <due> 글에 옛 '안 올린다' 가 남았다");
+        // 지난 제 기한은 경고다(`overdue`) — Stop 이 그 수를 센다. 그룹 글이 마일스톤의 것만 댔다(리뷰).
+        assert!(GROUPS.contains("own deadline has passed (`overdue`)"), "그룹 글이 overdue 경고를 안 댄다");
     }
 
     /// **감독과 일꾼은 Claude Code 의 제 수단으로 말한다**(2026-10-06 사용자 결정, moai-obxm). moai 는 통신을 안 든다 —

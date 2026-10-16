@@ -52,6 +52,8 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
   Outside every milestone it is `<root branch>`; inside a milestone it is that milestone's own
   branch, `milestone/<milestone id>` ("The milestone branch")
 - `Milestone:` — `<milestone>`, the release the epic hangs (1)
+- `Due:` — `<due>`, the deadline the person gave for this work, `YYYY-MM-DD`, or `none`.
+  The epic hangs it (1); `none` hangs nothing and never stands for a day you make up
 - `Root:` — `<root>`, the root checkout's place (4-1)
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
@@ -231,6 +233,12 @@ never in the root
    not in `ready`, not in `held`, no warning
 
        moai edit <epic> --milestone <milestone>
+   Then hang `<due>` on the epic the same way, unless it is `none` — `none` hangs nothing
+   and does not clear a deadline `promote` carried over from the backlog. The members are
+   bounded by it without carrying it. If the write is refused because the day is later than
+   the milestone's deadline, leave the epic's deadline as it stands and name it in the report
+
+       moai edit <epic> --due <due>
 2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
    **Pass the column you saw** — this is a place where several sessions share one `.moai`,
    and overwriting a row picked up beside you means two of you do the same work. A non-zero

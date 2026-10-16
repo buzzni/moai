@@ -228,8 +228,17 @@ refusal — to the new name (2).
   work to put down (`moai mv <id> todo`, `moai defer <id> -m '<why>'`), ask the person
 - Work handed on to be carried is, like a backlog item, not sent again until its report is checked
 
-**1. Pick.** Out of the backlog that have piled up, keep only the ones that do not collide
-with what is open right now.
+**1. Pick.** First raise what a near deadline calls for, once a round, and when it raised
+anything take it into the root with a commit with a path — reading never writes, so a
+deadline raises nothing until someone runs the verb, and the order `moai ready` gives is
+only as fresh as that run. A member follows the earliest deadline above it as well as its
+own, so the one an epic carries raises its members
+
+    moai due apply                        raises priority by the deadline each row follows, never lowers
+
+A row it raises to `p0` takes the hotfix slot even outside a running milestone — that is
+what the person asked a deadline to do. Then, out of the backlog that have piled up, keep
+only the ones that do not collide with what is open right now.
 
     moai backlog ls                           what has piled up
     moai show -s in_progress,review        what is picked up
@@ -443,7 +452,7 @@ and if the message does not arrive, deliver it into the tab —
 `moai-cmux`, "Label the tab" and "When a message does not arrive".
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
-Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
+Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
 `<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
 reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
@@ -458,6 +467,15 @@ refuse** — the check is the shape, not whether that milestone stands, so a sta
 in with exit 0: one line on stderr says there is no such milestone, and `moai status`
 counts the epic as `dangling_milestone`. Copy it off
 the release `moai show --milestone` stands that backlog under; do not write it from memory.
+`<due>` is when the person wants this work done, as `YYYY-MM-DD` — the backlog's own
+`due_on` when it carries one (`promote` carries that onto the epic anyway), else the day
+the person gave when you asked. **Ask when it is due as you pick work whose backlog
+carries none** — never required, always asked; the backlog's own is an answer the person
+already gave. A day given as "in three days" you write as the day it lands on.
+It is `none` when neither stands — with `Person: away` there is nobody to ask, so it is
+the backlog's own `due_on` or `none`: a deadline is the person's, and you never make one
+up. The worker hangs it on the epic it unfolds; the epic's deadline then bounds every
+member's, and `moai due apply` raises the members' priority as it nears.
 `<model>`, `<difficulty>` and `<why>` are the role's model you read in 2-1, the difficulty
 you measured and your reason; `<effort>` is that role's effort (2-1), the same value you pass
 to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
@@ -494,6 +512,7 @@ a session worker's 9-1).
     Root branch: <root branch>
     Base branch: <base branch>
     Milestone: <milestone>
+    Due: <due>
     Root: <root>
     Subdir: <subdir>
     Person: <person>

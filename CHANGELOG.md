@@ -12,6 +12,66 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-16
+
+### Added
+
+- **Any row can carry a deadline, not only a milestone.** `--due` works on
+  `add`, `edit`, `epic add` and `backlog add`, and `+N` means N days from today
+  in your time zone (stored as the date). A deadline cannot be later than the
+  milestone, epic or parent the row is drawn under — the write is refused and
+  the message names that ancestor, its deadline and the `--due` to give. Only
+  the row being written is checked: pulling an ancestor's deadline in never
+  blocks, it prints one line naming the rows it pushed past, and `moai status`
+  warns `due_beyond_parent` without changing the exit code. `--start` stays on
+  milestone rows. (moai-ghkp)
+- **Deadlines order and filter the list.** `--sort due` (and `SPC s w` in the
+  explorer) puts the earliest first and rows without one last;
+  `--filter due_on=2026-10-01~2026-10-05` keeps rows whose own deadline falls
+  on those calendar days, both ends in. Within one priority `moai ready` puts
+  the running milestone's work first and then the nearer deadline.
+  (moai-ghkp.7uy)
+- **A plan line can end in `@YYYY-MM-DD`.** `add --from --due` puts the
+  deadline on each epic the plan creates that has none of its own, and
+  `backlog promote` carries the backlog item's deadline onto the epic.
+  `--dry-run` checks them the way the real write does, and `show --as-plan`
+  writes them back. (moai-ghkp.u1w)
+- **The AGENTS block asks when work is due.** Showing a plan, an agent now asks
+  for a deadline in the same breath as the milestone, writes the answer as
+  `@YYYY-MM-DD` or `--due`, and leaves it empty when there is none — never made
+  up. The supervisor's message carries a `Due:` line that the worker hangs on
+  the epic it unfolds, and each supervisor round starts with `moai due apply`.
+  Run `moai init` to bring a repository's block in line. (moai-7bqy)
+- **`moai due apply` raises priority as a deadline nears.** An open, not
+  deferred issue or backlog item follows the earliest of its own deadline and
+  those of the milestone, epic and open parent it stands under (a parent
+  already closed lends none); one day left or less (today and past included)
+  makes it `p0`, two or less `p1`, seven or less `p2`. It only raises, never
+  lowers, and leaves a
+  `Due-priority: p2 → p0 (1 days left, due 2026-10-17 from <epic>)` note in
+  the same write. A row the write would refuse (a hand-edited date) is left
+  for `moai edit` instead of stopping the rest. With nothing to raise it
+  writes nothing; `--dry-run` shows what it would do. `due_priority = "off"`
+  and `due_p0_days`, `due_p1_days`, `due_p2_days` in `.moai/config.toml` set
+  it (`auto`, 1, 2, 7 by default), and `moai config` shows them. Reading never
+  writes, so nothing raises by itself. (moai-dr8a)
+- **`moai status` says when a priority lags its deadline**, as a notice that
+  names `moai due apply`, and warns `overdue` about an open issue or
+  epic whose own deadline has passed. Neither changes the exit code.
+  (moai-dr8a.rl4)
+
+### Changed
+
+- **`due_on` is no longer refused on rows that are not milestones.** A binary
+  from before this release still refuses it: it cannot edit an issue, epic or
+  backlog item that carries a deadline — not even its title — and says to clear
+  it with `moai edit <id> --due none`. Upgrade every binary that writes the
+  tracker before giving such a row a deadline. (moai-ghkp.kz7)
+- **A plan line that ends in `@` and a digit is read as a deadline.** A title
+  such as `retina icons @2x` now stops the plan with its line number; write
+  `\@2x` to keep it as text. Saved plan templates with such titles need the
+  backslash. (moai-ghkp.u1w)
+
 ## [0.17.0] - 2026-10-14
 
 ### Added

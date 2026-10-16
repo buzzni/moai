@@ -419,6 +419,51 @@ pub struct Filter {
     /// 숨는 것을 도로 켜는 스위치가 둘이 되면, 켜는 쪽이 어느 것을 켰는지
     /// 매번 되짚어야 한다.
     pub backlog: bool,
+    /// 줄 자신의 `due_on` 이 든 날의 폭(`due_on=`, moai-ghkp.7uy). **AND of OR** — `tags` 와 같은 꼴이다.
+    /// **달력의 날로 견준다** — 기한은 시각이 아니라 날이라(`Issue::due_on`) 시간대로 안 옮긴다. 기한 없는
+    /// 줄은 어느 폭에도 안 든다. 때로 묻는 폭([`Filter::times`])이 아니다: 그사이 바뀐 것을 묻는 말이 아니라
+    /// 숨김을 안 연다.
+    pub due: Vec<Vec<DaySpan>>,
+}
+
+/// 달력 날의 폭 — 양 끝을 든다(`2026-10-01~2026-10-05` 는 닷새). 한쪽이 없으면 그쪽으로 열렸다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaySpan {
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+impl DaySpan {
+    /// `YYYY-MM-DD`·`a~b`·`a~`·`~b` — `..` 도 `~` 와 같다(때의 폭 [`Span`] 과 같은 꼴). 날은
+    /// [`crate::model::parse_date`] 가 잰다 — 쓰기가 받는 꼴과 같아야 받은 값을 거를 수 있다.
+    pub fn parse(raw: &str) -> Result<DaySpan, BadFilter> {
+        let raw = raw.trim();
+        let day = |s: &str| -> Result<Option<String>, BadFilter> {
+            let s = s.trim();
+            match s.is_empty() {
+                true => Ok(None),
+                false => crate::model::parse_date(s)
+                    .map(|_| Some(s.to_string()))
+                    .ok_or_else(|| BadFilter::NotADay(raw.to_string())),
+            }
+        };
+        let (from, to) = match raw.split_once('~').or_else(|| raw.split_once("..")) {
+            None => {
+                let d = day(raw)?.ok_or_else(|| BadFilter::NotADay(raw.to_string()))?;
+                (Some(d.clone()), Some(d))
+            }
+            Some((a, b)) => (day(a)?, day(b)?),
+        };
+        match (&from, &to) {
+            (None, None) => Err(BadFilter::Endless(raw.to_string())),
+            (Some(a), Some(b)) if a > b => Err(BadFilter::Backwards(raw.to_string())),
+            _ => Ok(DaySpan { from, to }),
+        }
+    }
+
+    fn holds(&self, day: &str) -> bool {
+        self.from.as_deref().is_none_or(|f| f <= day) && self.to.as_deref().is_none_or(|t| day <= t)
+    }
 }
 
 /// 거르개가 값을 거절한 까닭. **자료만 든다**(moai-2htt) — 말은 [`crate::view::bad_filter`] 가 고른 말로
@@ -439,6 +484,8 @@ pub enum BadFilter {
     Backwards(String),
     /// 때로 못 읽는 값.
     NotATime(String),
+    /// 달력의 날로 못 읽는 값(`due_on=`).
+    NotADay(String),
     /// 때가 하나도 없는 값(`--since ''`·`--created ,`).
     NoTime,
     /// `--filter` 의 항목이 `항목=값` 꼴이 아니다.
@@ -561,6 +608,7 @@ pub const KEYS: &[&str] = &[
     "updated_at",
     "started_at",
     "done_at",
+    "due_on",
 ];
 
 /// 플래그에서 온 날것. `cmd` 가 argv 를 그대로 옮겨 담아 넘긴다.
@@ -591,6 +639,8 @@ pub struct Raw {
     pub updated_at: Vec<String>,
     pub started_at: Vec<String>,
     pub done_at: Vec<String>,
+    /// `--filter due_on=` 의 날것(moai-ghkp.7uy).
+    pub due_on: Vec<String>,
     pub all: bool,
     /// `--archived` — 아카이브까지 연다. done 도 연다(`all` 을 품는다).
     pub archived: bool,
@@ -681,6 +731,16 @@ impl Filter {
             archived,
             backlog,
             deferred,
+            // **빈 값은 거절한다**(리뷰) — [`spans`] 와 같은 까닭이다. 빈 `또는` 묶음은 어느 줄에도 안 맞아,
+            // `--filter "due_on=$DUE"` 의 빈 변수가 말없이 0건이 되고 받는 쪽은 "기한 든 일이 없다" 로 읽는다.
+            due: raw
+                .due_on
+                .iter()
+                .map(|v| match csv(v).as_slice() {
+                    [] => Err(BadFilter::NotADay(v.clone())),
+                    days => days.iter().map(|d| DaySpan::parse(d)).collect::<Result<Vec<_>, _>>(),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         };
         // **시간으로 물으면 숨김을 다 연다**(moai-efoc.ip5, 2026-09-30 사용자 결정) — done·미룸·생각·아카이브까지.
         // 그 물음은 "그사이 무엇이 바뀌었나" 이고 그사이 닫힌 줄도 바뀐 줄이다. 기본 숨김을 그대로 두면
@@ -726,6 +786,7 @@ impl Filter {
             archived: _,
             deferred: _,
             backlog: _,
+            due: _,
         } = self;
         [updated, created, done, started, done_at]
     }
@@ -879,6 +940,13 @@ impl Filter {
         // 셈해지고(위의 `--milestone` 과 같은 까닭), 탐색기의 거름망은 키 하나에 줄마다 여기를 지난다.
         // 날로 친 끝은 읽는 사람의 벽시계로 견준다([`End::Wall`]) — 시간대가 안 실렸으면(`None`) 도장 그대로다.
         let within = |spans: &[Vec<Span>], at: Option<i64>| spans_hold(spans, at, wh.zone);
+        // 기한은 **줄 자신의 그 필드**를 날로 견준다(moai-ghkp.7uy) — 없으면 어느 폭에도 안 든다. 꼴이 틀린 값도
+        // 없는 것이다([`Issue::deadline`]) — `*_at=` 이 못 읽는 시각을 어느 폭에도 안 넣는 것과 같은 결이다.
+        if !self.due.is_empty()
+            && !i.deadline().is_some_and(|d| self.due.iter().all(|any| any.iter().any(|s| s.holds(d))))
+        {
+            return false;
+        }
         if !self.updated.is_empty() && !within(&self.updated, parse_rfc3339(&i.updated_at)) {
             return false;
         }
@@ -1136,6 +1204,7 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
             "updated_at" => raw.updated_at.push(v),
             "started_at" => raw.started_at.push(v),
             "done_at" => raw.done_at.push(v),
+            "due_on" => raw.due_on.push(v),
             _ => return Err(BadFilter::NoSuchKey(k.to_string())),
         }
     }
@@ -1328,6 +1397,19 @@ pub fn display_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
     a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id))
 }
 
+/// 기한의 차례 — **이른 기한이 먼저고 기한 없는 줄이 뒤다**(moai-ghkp.7uy). 꼴이 틀린 값은 없는 것이다
+/// ([`Issue::deadline`]). `--sort due`·탐색기의 `SPC s w`·`ready` 가 이 하나로 잰다(리뷰) — 저마다 적던 때는
+/// 셋이 같은 줄을 다른 차례로 세울 길이 열려 있었다. 날짜는 고정폭이라 글로 견준다.
+pub fn due_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.deadline(), b.deadline()) {
+        (Some(x), Some(y)) => x.cmp(y),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 /// 사람이 고르는 차례의 한 필드(moai-55cp). 기본은 [`display_order`] 다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortKey {
@@ -1338,6 +1420,8 @@ pub enum SortKey {
     Status,
     Assignee,
     Title,
+    /// 기한(`due_on`, moai-ghkp.7uy) — 이른 것이 먼저고 기한 없는 줄은 뒤다(내림이면 앞, 담당과 같은 결).
+    Due,
     /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
     /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
     /// 차례 표(`tui::keys::Order`)에는 없다 — id 는 씨앗 해시(`id::mint`)라 만든 차례도 아니고
@@ -1347,13 +1431,14 @@ pub enum SortKey {
 }
 
 impl SortKey {
-    pub const ALL: [SortKey; 7] = [
+    pub const ALL: [SortKey; 8] = [
         SortKey::Priority,
         SortKey::Created,
         SortKey::Updated,
         SortKey::Status,
         SortKey::Assignee,
         SortKey::Title,
+        SortKey::Due,
         SortKey::Id,
     ];
 
@@ -1367,6 +1452,7 @@ impl SortKey {
             SortKey::Status => "status",
             SortKey::Assignee => "assignee",
             SortKey::Title => "title",
+            SortKey::Due => "due",
             SortKey::Id => "id",
         }
     }
@@ -1545,6 +1631,7 @@ pub fn order_by(
             (None, None) => Ordering::Equal,
         },
         SortKey::Title => caseless(&a.0.title, &b.0.title),
+        SortKey::Due => due_order(a.0, b.0),
         SortKey::Id => a.0.id.cmp(&b.0.id),
     };
     let order = fields

@@ -25,6 +25,11 @@ struct Out<'a> {
     status_flow_days: i64,
     status_backlog_pile: usize,
     status_due_days: i64,
+    /// `auto` 또는 `off`(moai-dr8a.cf1).
+    due_priority: &'static str,
+    due_p0_days: i64,
+    due_p1_days: i64,
+    due_p2_days: i64,
     /// 읽은 파일의 자리.
     path: &'a std::path::Path,
 }
@@ -57,6 +62,10 @@ impl<'a> Out<'a> {
             status_flow_days: flow_days,
             status_backlog_pile: backlog_pile,
             status_due_days: due_days,
+            due_priority: cfg.due.mode(),
+            due_p0_days: cfg.due.p0_days,
+            due_p1_days: cfg.due.p1_days,
+            due_p2_days: cfg.due.p2_days,
             path,
         }
     }
@@ -81,7 +90,7 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
     // 사람의 화면은 파일의 꼴 그대로다 — 그대로 옮겨 적으면 같은 설정이 된다. 차례도 위 `Out` 의 것이다.
     let t = |v: &dyn std::fmt::Display| v.to_string();
     let q = |v: &str| format!("{v:?}");
-    let pairs: [(&str, String); 14] = [
+    let pairs: [(&str, String); 18] = [
         ("prefix", q(out.prefix)),
         ("statuses", q(&out.statuses.join(","))),
         ("naming", q(out.naming)),
@@ -96,6 +105,10 @@ pub fn run(ctx: &Ctx) -> R<Vec<String>> {
         ("status_flow_days", t(&out.status_flow_days)),
         ("status_backlog_pile", t(&out.status_backlog_pile)),
         ("status_due_days", t(&out.status_due_days)),
+        ("due_priority", q(out.due_priority)),
+        ("due_p0_days", t(&out.due_p0_days)),
+        ("due_p1_days", t(&out.due_p1_days)),
+        ("due_p2_days", t(&out.due_p2_days)),
     ];
     let mut lines: Vec<String> = pairs.iter().map(|(k, v)| crate::text::one_line(&format!("{k:20} = {v}"))).collect();
     lines.push(crate::i18n::fill(

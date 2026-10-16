@@ -11,12 +11,36 @@ them, so where they differ the help wins.
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
-**A milestone is the one row that carries dates.** `--start` and `--due` take a
-calendar day, `YYYY-MM-DD`, and `moai edit <milestone> --due none` clears one.
-They stand on a milestone row only — on anything else the write is refused. A
-deadline that has passed, and one falling due within `status_due_days` (3 unless
-your config says otherwise), is one warning line on the board; **nothing is
-blocked and the exit code never changes.**
+**Any row can carry a deadline; only a milestone carries a start.** `--due` takes a
+calendar day, `YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on),
+and `moai edit <id> --due none` clears one. `--start` stands on a milestone row only.
+A milestone's deadline that has passed, and one falling due within `status_due_days`
+(3 unless your config says otherwise), is one warning line on the board, and so is
+an open issue or epic whose own deadline has passed (`overdue`); **nothing is blocked and
+the exit code never changes.**
+
+**A deadline cannot pass the one above it** — milestone, then epic, then parent. A
+write that gives a row a later day than the earliest of those, or moves a row that
+carries a deadline under one due earlier, is refused, and the refusal names the day to
+give instead. Pulling the one above in is never refused: the rows it overtakes are
+named in one line on stderr and stand as `due_beyond_parent` on the board until their
+own deadlines come in. `moai show --sort due` puts the nearest first, and
+`--filter due_on=<from>~<to>` picks rows by their own deadline.
+
+**A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
+first) raises an open, not deferred issue or backlog item by the deadline it follows —
+the earliest of its own and those of the milestone, epic and open parent it stands under. One
+day left or less (today and past included) is `p0`, two or less `p1`, seven or less `p2`,
+and it leaves on the row a note `Due-priority: pX → pY (N days left, due D)` in the same
+write, ending in `from <id>` when the deadline was that row's. It only raises, never
+lowers, so the value a person set is never fought over and the old one stays in that
+note. A group row is never raised itself — its members are: the deadline a plan's
+`--due` puts on an epic raises its members as it nears. Reading never writes, so nothing
+raises by itself — when `moai status` says rows lag their deadline, run
+`moai due apply`. The thresholds are `due_p0_days`,
+`due_p1_days` and `due_p2_days` in `.moai/config.toml` (1, 2 and 7), and
+`due_priority = "off"` stops future raises. A row raised to `p0` outside a running
+milestone takes the hotfix slot in `moai ready` — that is the point of raising it.
 
 **`moai show <milestone>` also says how long it took.** That is read from the
 closed members' start and finish right then — no field holds it. It comes with
@@ -68,6 +92,9 @@ column, it is running. There is no command that opens it and no new field.
   through, and so does a `--milestone` that carries a row in — the rule above is a rule
   for you, not a refusal. What is already picked up is simply finished — the same ground as never taking work back late
 - If two milestones are running, both are inside, and the ordering within them is as it always was (`p` · age)
+- **Within one `p` the nearer deadline comes first**, whether a milestone runs or not, and a
+  row with none comes last. It is the row's own deadline — an epic's or a milestone's moves
+  none of its members. Where a milestone runs, its work still comes before outside work of the same `p`
 - **A setup with only two columns has no running milestone** — there is no column
   that says "started but not finished", so the rule itself does not stand. In that
   setup `ready` and the board are as they were
@@ -286,7 +313,9 @@ it to every member, the ones added later included, and the body is what lets
 `moai show <epic>` say why these issues are one bundle. Not onto every issue: the
 original stays on the closed backlog and the history leads back to it, and the one
 place worth filling is the epic, so the window that picks a member up does not
-have to press every member to find out what this is.
+have to press every member to find out what this is. The backlog item's own deadline
+comes over onto the epic too, unless the plan's `#` line carries an `@` of its own — onto
+the epic only, since a deadline bounds the members without being inherited.
 
 **The milestone that comes over is the one `moai show --milestone` stands the backlog
 under**, not whatever its own field says — a backlog item parked inside an epic comes over
@@ -294,9 +323,9 @@ in that epic's release even with an empty field of its own, and a field of its o
 that loses to the epic it sits in never reaches the new epic. One reader answers
 where a row belongs, on every surface.
 
-**Unfolding into a standing epic (`-e <epic>`) carries neither.** That epic is
-already the owner — its members inherit its milestone, and writing the backlog's over
-theirs would stand one bundle in two places.
+**Unfolding into a standing epic (`-e <epic>`) carries neither**, and no deadline either.
+That epic is already the owner — its members inherit its milestone, and writing the backlog's
+over theirs would stand one bundle in two places.
 
 **If what came over is not the release that is running, leave it where it stands.**
 Work is never pulled into a running release, so the epic stays outside it and what

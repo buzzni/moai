@@ -400,8 +400,11 @@ one costs is yours.
 1. **Make the supervisor — one per repository.** In one Claude Code session in
    the repository's root, call `/moai-supervise`; it asks you first whether
    another window already runs it, and a supervisor that is sent work refuses
-   it. It reads `moai models --json` and picks backlog items that do not collide
-   with the work open
+   it. It reads `moai models --json`, runs `moai due apply` so a near
+   [deadline](glossary.md#deadline) has raised what it calls for, and picks
+   backlog items that do not collide with the work open. For each one that
+   carries no deadline it asks you when it is due — never required, and with no
+   answer it sends none
 2. **It picks a role and raises a worker.** Each backlog item goes to one role —
    `develop` or `complex` by one word of difficulty, `docs` for the wiki and the
    CHANGELOG, `bulk` for mechanical work — and the supervisor raises a subagent
@@ -416,10 +419,10 @@ one costs is yours.
    backlog, the model, the effort and the difficulty, whether the worker is a
    subagent or a session, the models and efforts per role it may hand pieces of
    its work to (`Subagents:` — `none` for a Codex worker), the work running alongside, the root branch and the
-   base branch, the milestone, the root and whether the person is away
-4. **The worker does the work in a worktree** — unfolds the backlog into an epic,
-   picks the members up, works in `<root>/.worktrees/<epic>`, has the epic
-   reviewed, merges, closes, leaves a `Next:` note and, last of all, reports. A
+   base branch, the milestone, the deadline (`Due:`), the root and whether the person is away
+4. **The worker does the work in a worktree** — unfolds the backlog into an epic
+   and hangs the milestone and the deadline on it, picks the members up, works in
+   `<root>/.worktrees/<epic>`, has the epic reviewed, merges, closes, leaves a `Next:` note and, last of all, reports. A
    subagent leaves the report on the epic as a `report:` note first and then
    hands it back — the notice that it ended is the report, and the note is what
    a supervisor that restarted reads. A design question the notes do not settle
@@ -501,7 +504,8 @@ with `git merge --no-ff` as they stand, never rebased or squashed.
 **When the person steps away**, they tell the supervisor, and its messages say
 `Person: away`. The worker then settles a design question by its own
 recommendation and leaves `Decided alone: …` on the issue instead of waiting,
-and stops at anything that cannot be undone.
+and stops at anything that cannot be undone. Nobody makes a deadline up for you:
+the message's `Due:` is then the one the backlog item already carries, or `none`.
 
 ### In a session
 

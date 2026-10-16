@@ -56,8 +56,8 @@ the first ties, and each field has its own direction.
 
 | Keys | What it does |
 |---|---|
-| `SPC s p` `c` `u` `s` `a` `t` | sort by that one field (priority, created, updated, status, assignee, title); the same key again turns it around |
-| `SPC s P` `C` `U` `S` `A` `T` | add that field at the end of the order; if it is already there, turn it around |
+| `SPC s p` `c` `u` `s` `a` `t` `w` | sort by that one field (priority, created, updated, status, assignee, title, due — `w` for when); the same key again turns it around |
+| `SPC s P` `C` `U` `S` `A` `T` `W` | add that field at the end of the order; if it is already there, turn it around |
 | `SPC s e` | open the sort window |
 
 In the sort window the fields in the order come first, numbered and marked

@@ -1508,6 +1508,8 @@ mod tests {
                     .replace("<that file>", "/tmp/review.txt")
                     .replace("<keyword>", "parser")
                     .replace("<milestone>", "t-m")
+                    // 감독이 싣는 기한(`Due:`, moai-7bqy.fvo) — 일꾼 1 이 에픽에 단다.
+                    .replace("<due>", "2026-12-31")
                     // 치트시트·예시의 제목 자리. 남으면 `<`·`>` 가 리다이렉션으로 읽힌다.
                     .replace("<title>", "title")
                     .replace("<what you found>", "what I found")

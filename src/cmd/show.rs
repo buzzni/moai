@@ -139,6 +139,7 @@ pub(crate) fn filter_of(
         updated_at: Vec::new(),
         started_at: Vec::new(),
         done_at: Vec::new(),
+        due_on: Vec::new(),
         all: a.all,
         archived: a.archived,
         backlog: false,

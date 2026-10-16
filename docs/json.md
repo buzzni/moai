@@ -11,7 +11,8 @@ the binary the day a rule changes.
 
 `moai config --json` gives the repository's settings with the defaults filled
 in, under the names `.moai/config.toml` uses: `statuses` in board order,
-`archive_days`, `naming`, `wiki_dir`, `prefix` and the `status_*` thresholds.
+`archive_days`, `naming`, `wiki_dir`, `prefix`, the `status_*` thresholds and the
+`due_*` rule (`due_priority`, `due_p0_days`, `due_p1_days`, `due_p2_days`).
 These are the values the binary acts on, so a board drawn from them lines its
 columns up with the explorer's.
 
@@ -51,6 +52,14 @@ The last three stand only when they hold. `epic` and `milestone` are what the
 file says, so read membership from the `derived_` keys. A closed row is in no
 plan, so it carries no `shelved_by` even when it was deferred — `--deferred`
 picks it by its own `deferred_at`. A row is deferred when it carries either.
+
+`due_on` is the row's own deadline and nothing else — no key carries the deadline
+inherited from its epic or milestone, because a deadline is not stored on the rows
+below: the one above bounds them, and `moai due apply` raises them by the earliest that
+applies. Read the ancestors' `due_on` to find it. `moai due apply --json` names it in
+each raised row's `due_on`, with `due_from` naming the ancestor when it is not the row's
+own; on `moai status --json` the `due_priority_behind` notice carries it per id in
+`deadlines`, beside the days left in `ages`.
 
 ## Keep the payload small
 

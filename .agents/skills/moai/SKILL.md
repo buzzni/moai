@@ -108,6 +108,17 @@ members inherit it; without it the whole plan stands outside the release, and of
 `moai ready` then hands out only what is `p0`. Do not hang a running release on a plan
 because the plan looks urgent: that is the release changing size while it runs.
 
+**Ask when it is due, in that same breath.** A deadline is never required, but it is
+always asked about — for a plan, an epic, an issue or a backlog item that comes out of
+the person's own request. Write the answer as `@YYYY-MM-DD` at the end of the plan line
+it belongs to (`# Epic title @2026-10-31`, `- [p1] first issue @2026-10-20`), or give
+`--due <day>` to put it on every epic the plan creates that carries no `@` of its own.
+A row made alone takes the same `--due` on `moai add` or `moai backlog add` — an `@` in
+a single title stays text. `--due +3` is three days from today.
+**No answer, no deadline** — leave it empty, never make one up. A review issue and a
+backlog item you park mid-work are not asked about.
+Nothing checks this: it is a question for you to ask, not a gate.
+
 **`--body` says why these issues are one bundle.** It goes onto the first epic the
 plan creates, which is where `moai show <epic>` reads it from. `--body <text>` takes
 the text itself (a file path there becomes the body as written), `--body -` reads

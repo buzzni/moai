@@ -232,7 +232,9 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
                         // 것을 그 자리에서 다 내는 표면이다. 어느 시계로 셀지는 그대로 `Ctx::zone`
                         // 이다(탐색기의 `[tui] timezone` 과 갈리는 것은 backlog moai-dux7 이 든 자리다).
                         warnings: sum.warnings.count(&now, ctx.zone()),
-                        notices: sum.notices,
+                        // 알림도 같은 자리에서 달을 입힌다(리뷰) — 기한에 뒤처진 우선순위는 셈에 안 접혀 `dues` 에 든다.
+                        // 안 더하면 층이 그리는 `+N` 과 `moai status` 보다 하나 적다.
+                        notices: sum.warnings.notices(sum.notices, &now, ctx.zone()),
                         stranded: sum.stranded,
                         broken_worktrees: sum.unread,
                         unreadable: sum.unreadable,
