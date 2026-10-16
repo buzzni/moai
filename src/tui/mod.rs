@@ -12003,7 +12003,7 @@ mod tests {
         std::fs::create_dir_all(&worktree).unwrap();
         let root = crate::path::canonical(&root).unwrap();
         let worktree = crate::path::canonical(&worktree).unwrap();
-        // 열쇠는 도구가 짓는 꼴로 — Windows 의 `\\?\C:\…` 를 `"…"` 에 날로 넣으면 TOML 이 깨진다(moai-lag7.951).
+        // 열쇠는 도구가 짓는 꼴로 — Windows 의 `C:\…` 를 `"…"` 에 날로 넣으면 `\` 가 풀이 글자라 TOML 이 깨진다(moai-lag7.951).
         let key = crate::user_config::project_key(&root.display().to_string());
         std::fs::write(&user, format!("[tui.{key}]\norder = [\"title\"]\n")).unwrap();
         let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());

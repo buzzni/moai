@@ -4111,11 +4111,9 @@ mod tests {
         // 사라진 디렉터리도 글자로는 찾는다. 준 철자 그대로도 뒤에 선다 — 손으로
         // `/w/a/../b` 라 적힌 줄은 그 철자로만 찾을 수 있다(`rm`·`color` 가 함께 쓴다).
         //
-        // Windows 의 `d` 는 `canonicalize` 가 낸 `\\?\` 철자라, 거기에 이으면 `PathBuf::push` 가 `..` 를 이미
-        // 접는다 — 준 철자가 글자 철자와 같아 한 번만 선다(moai-lag7.vva).
-        let typed = d.join("gone/../gone2");
-        let want: Vec<PathBuf> = if typed == d.join("gone2") { vec![typed] } else { vec![d.join("gone2"), typed] };
-        assert_eq!(spellings(Path::new("gone/../gone2"), &d), want);
+        // `d` 는 [`crate::path::canonical`] 이 `\\?\` 를 걷은 철자라 Windows 에서도 `join` 이 `..` 를 안 접는다 — 접두어가
+        // 남은 철자에 이으면 `PathBuf::push` 가 접어 준 철자가 글자 철자와 같아졌다(moai-lag7.951).
+        assert_eq!(spellings(Path::new("gone/../gone2"), &d), [d.join("gone2"), d.join("gone/../gone2")]);
         assert_eq!(spellings(Path::new("gone/../gone2"), &d)[0], d.join("gone2"), "대표 철자가 밀렸다");
     }
 

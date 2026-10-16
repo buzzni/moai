@@ -121,9 +121,10 @@ impl Hue {
         // 두 자리에 서고, 한쪽만 고치는 날 모든 프로젝트의 색이 바뀐다.
         let mut h = crate::text::FNV64_OFFSET;
         for part in path.components() {
-            // **뿌리와 드라이브는 철자를 하나로 센다**(moai-lag7.951) — Windows 의 `RootDir` 조각은 `\` 고, `canonicalize`
-            // 를 지난 등록(`\\?\C:`)과 손으로 적은 줄(`C:`)은 `Prefix` 조각의 글자가 갈려, 같은 프로젝트가 철자마다
-            // 다른 색을 냈다. 뿌리는 늘 `/` 로, 접두어는 `\\?\` 를 걷고 센다. 유닉스의 뿌리는 원래 `/` 고 접두어가
+            // **뿌리와 드라이브는 철자를 하나로 센다**(moai-lag7.951) — Windows 의 `RootDir` 조각은 `\` 고, 접두어를
+            // 안 걷던 판이 적은 등록(`\\?\C:`)과 손으로 적은 줄(`C:`)은 `Prefix` 조각의 글자가 갈려, 같은 프로젝트가
+            // 철자마다 다른 색을 냈다. 지금 등록은 [`crate::path::canonical`] 이 걷은 철자로 적히지만, 이미 적힌 줄은
+            // 그대로 남는다. 뿌리는 늘 `/` 로, 접두어는 `\\?\` 를 걷고 센다. 유닉스의 뿌리는 원래 `/` 고 접두어가
             // 없어 바이트 하나 안 바뀐다 — 사용자의 색이 그대로다.
             let spelt: std::borrow::Cow<'_, std::ffi::OsStr> = match part {
                 std::path::Component::RootDir => std::ffi::OsStr::new("/").into(),

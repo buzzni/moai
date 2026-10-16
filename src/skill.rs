@@ -234,7 +234,7 @@ pub fn skills() -> Vec<Skill> {
 
 /// 스킬마다의 글을 `<이름>/<상대 경로>` 로 편다 — 두 트리가 이 차례 그대로 받는다.
 ///
-/// **가르는 금은 어느 플랫폼에서나 `/` 다**(moai-lag7.9fm). `Path::join` 은 Windows 에서 `\` 를 끼워,
+/// **가르는 금은 어느 플랫폼에서나 `/` 다**(moai-lag7.951). `Path::join` 은 Windows 에서 `\` 를 끼워,
 /// [`version_of`] 가 셈하는 경로 글이 플랫폼마다 달라진다 — 같은 트리를 Linux 와 Windows 가 번갈아 심으면
 /// 커밋된 `plugin.json` 의 판이 매번 뒤집힌다. Windows 의 파일 API 는 `/` 를 그대로 받는다.
 fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (PathBuf, String)> + 'a
