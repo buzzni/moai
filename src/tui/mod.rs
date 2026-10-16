@@ -3366,10 +3366,10 @@ impl App {
             return Some(k.clone());
         }
         // 지금 자리는 한 번만 푼다 — `same_dir` 은 두 쪽을 다 풀어, 열쇠마다 부르면 같은 자리를 열쇠 수만큼 다시 판다.
-        let real = std::fs::canonicalize(&here).unwrap_or(here);
+        let real = crate::path::real(&here);
         if let Some(k) = self.order_projects.keys().find(|k| {
             let k = std::path::Path::new(k.as_str());
-            k == real || std::fs::canonicalize(k).is_ok_and(|k| k == real)
+            k == real || crate::path::canonical(k).is_ok_and(|k| k == real)
         }) {
             return Some(k.clone());
         }
@@ -11635,7 +11635,7 @@ mod tests {
         a.mode = Mode::Browse;
         a.set_zone("Mars/Olympus");
         assert!(a.zone.is_utc(), "못 푼 이름으로 화면이 섰다");
-        assert!(a.notice.as_deref().is_some_and(|n| n.contains("Mars/Olympus")), "{:?}", a.notice);
+        assert_eq!(a.notice, Some(mars_trouble(a.site.lang)));
         let text = std::fs::read_to_string(&user).expect("시간대가 설정에 안 적혔다");
         assert!(text.contains("timezone = \"Mars/Olympus\""), "떨어진 UTC 를 적었다 — {text}");
 
@@ -11695,9 +11695,17 @@ mod tests {
         assert!(b.zone.is_utc(), "못 푼 이름으로 화면이 섰다");
         assert_eq!(b.saved_zone.as_deref(), Some("Mars/Olympus"), "설정의 줄을 잃었다");
         // 알림은 한 줄이고 그 이름을 댄다 — `adopt_look` 이 설정 탈들과 나란히 싣는다.
-        assert!(said.iter().any(|n| n.contains("Mars/Olympus")), "까닭을 아무 데도 안 댔다 — {said:?}");
+        let why = mars_trouble(b.site.lang);
+        assert!(said.iter().any(|n| n.contains(&why)), "까닭을 아무 데도 안 댔다 — {said:?}");
         // **막지 않는다** — 그려지는 것은 그대로다.
         assert!(!render_smoke(&mut b).is_empty());
+    }
+
+    /// 없는 이름 `Mars/Olympus` 를 이 기계가 못 푸는 까닭 한 줄. tzdb 가 있으면 그 이름을 대고(`Unknown`), 없으면
+    /// 자료가 없다고 댄다(`NoTzdb`) — Windows·zoneinfo 없는 컨테이너가 뒤쪽이다(moai-lag7.sk7, `tz` 시험과 같은 갈래).
+    fn mars_trouble(lang: crate::i18n::Lang) -> String {
+        let why = crate::tz::Zone::load("Mars/Olympus").expect_err("없는 이름이 풀렸다");
+        crate::view::zone_trouble(lang, &why)
     }
 
     /// **마우스는 잡은 채로 뜨고, `SPC o m` 이 놓으며 그 값이 다음 실행으로 이어진다**(moai-irrj.9xq, 사용자 결정
@@ -11993,9 +12001,11 @@ mod tests {
         let user = s.join("user.toml");
         let (root, worktree) = (s.join("proj"), s.join("proj/.worktrees/moai-x"));
         std::fs::create_dir_all(&worktree).unwrap();
-        let root = std::fs::canonicalize(&root).unwrap();
-        let worktree = std::fs::canonicalize(&worktree).unwrap();
-        std::fs::write(&user, format!("[tui.project.\"{}\"]\norder = [\"title\"]\n", root.display())).unwrap();
+        let root = crate::path::canonical(&root).unwrap();
+        let worktree = crate::path::canonical(&worktree).unwrap();
+        // 열쇠는 도구가 짓는 꼴로 — Windows 의 `C:\…` 를 `"…"` 에 날로 넣으면 `\` 가 풀이 글자라 TOML 이 깨진다(moai-lag7.951).
+        let key = crate::user_config::project_key(&root.display().to_string());
+        std::fs::write(&user, format!("[tui.{key}]\norder = [\"title\"]\n")).unwrap();
         let mut a = App::new(vec![make("argos-0001", Kind::Issue)], cfg(), Path::new());
         a.site.repo = Some(crate::store::Repo::moved(root.clone(), cfg(), worktree.clone()));
         assert_eq!(a.here().as_deref(), Some(worktree.as_path()), "시험의 전제 — 선 자리와 뿌리가 갈렸다");
@@ -12005,8 +12015,7 @@ mod tests {
         a.hit("SPC s c Esc");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(
-            text.contains(&format!("[tui.project.\"{}\"]\norder = [\"created\"]", root.display()))
-                && !text.contains(".worktrees"),
+            text.contains(&format!("[tui.{key}]\norder = [\"created\"]")) && !text.contains(".worktrees"),
             "뿌리가 아닌 자리에 적었다\n{text}"
         );
     }

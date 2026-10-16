@@ -5,21 +5,22 @@
 //! `store`(스냅샷을 읽고 쓴다)·`hook`(툴 부름을 판정한다)·`user_config`·`tz` 가 다 같이
 //! 부를 수 있고, 어느 쪽에 얹어도 나머지가 그 모듈에 딸리게 되는 자리였다(moai-xvyz).
 //!
-//! **자리를 푸는 자는 넷이다**(moai-i7b6, moai-4oab) — 통째로 푸는 [`real`], 글자로만 접는
-//! [`lexical`], 아직 있는 윗자리까지만 푸는 [`real_prefix`], 그리고 **끝 조각의 링크 사슬만**
-//! 따라가는 [`follow_links`]. 앞의 셋은 못 풀면 받은 철자로 떨어진다. 넷째는 쓰는 쪽의 자라 고리를
-//! `Err` 로 낸다 — 못 푼 링크를 받은 철자로 돌려주면 부르는 쪽이 그 자리에 `rename` 해 링크를 보통
-//! 파일로 갈아끼운다([`crate::store::write_atomic`]). 다섯째로 보이지만 아닌 것이 둘 있고, 둘 다
-//! **일부러 제 몸으로 든다.**
+//! **자리를 푸는 자는 다섯이다**(moai-i7b6, moai-4oab, moai-lag7.951) — 통째로 풀고 못 풀면 `Err` 를 내는
+//! [`canonical`], 그것을 받은 철자로 떨어뜨리는 [`real`], 글자로만 접는 [`lexical`], 아직 있는 윗자리까지만 푸는
+//! [`real_prefix`], 그리고 **끝 조각의 링크 사슬만** 따라가는 [`follow_links`]. [`canonical`] 은 못 푼 까닭을
+//! 부르는 쪽이 갈라야 하는 자리의 자고, 통째로 푸는 길이 그것 하나라 Windows 의 `\\?\` 도 거기서 걷힌다. 가운데
+//! 셋은 못 풀면 받은 철자로 떨어진다. 끝의 것은 쓰는 쪽의 자라 고리를 `Err` 로 낸다 — 못 푼 링크를 받은 철자로
+//! 돌려주면 부르는 쪽이 그 자리에 `rename` 해 링크를 보통 파일로 갈아끼운다([`crate::store::write_atomic`]).
+//! 여섯째로 보이지만 아닌 것이 둘 있고, 둘 다 **일부러 제 몸으로 든다.**
 //!
-//! - `crate::scratch`(시험에만 선다) 의 `real` 은 [`real`] 과 같은 글인데, 그 파일을 `tests/cli.rs` 가
-//!   `#[path]` 로 함께 들어 그쪽에서는 `crate` 가 시험 크레이트라 이 모듈이 없다
+//! - `crate::scratch`(시험에만 선다) 의 `real`·`canonical` 은 [`real`]·[`canonical`] 과 같은 글인데, 그 파일을
+//!   `tests/cli.rs` 가 `#[path]` 로 함께 들어 그쪽에서는 `crate` 가 시험 크레이트라 이 모듈이 없다
 //! - [`crate::user_config`] 의 `resolve_config` 는 사슬을 [`follow_links`] 로 따라간 뒤, 가리키는
 //!   자리의 **부모가 없으면 일부러 탈로 낸다** — 여기 넷은 그것을 묻지 않는다. 묻는 것이 "이 자리가
 //!   어디인가" 가 아니라 "여기에 써도 되는가" 라 답이 갈리는 자리다. 따라가는 것만 이리로 모았다 —
 //!   거절까지 모으려 들면 그 거절이 사라진다
 //!
-//! [`dir_of`] 는 다섯째 푸는 자가 아니다 — 아무것도 안 풀고 철자를 한 조각 뗄 뿐이다. 여기 사는
+//! [`dir_of`] 는 여섯째 푸는 자가 아니다 — 아무것도 안 풀고 철자를 한 조각 뗄 뿐이다. 여기 사는
 //! 것은 그 물음도 "경로 하나를 받아 경로 하나를 낸다" 라서고, 세는 자리에는 안 든다(리뷰).
 
 use std::path::{Path, PathBuf};
@@ -33,10 +34,10 @@ use std::path::{Path, PathBuf};
 /// (목록에서 빠져 있던 여섯째다, 리뷰). 나중에 정할 것(못 푼 자리를 어떻게 셀 것인가)이 여섯 중
 /// 하나에만 닿으면 나머지 다섯은 옛 답을 낸다.
 ///
-/// **윈도의 `\\?\` 접두어는 여기서 안 걷는다**(moai-vaj4, 리뷰 moai-j9gv.8gr). `store::resolve`·`held`·
-/// `cmd::init` 이 `canonicalize` 를 바로 부른 철자를 이것과 `starts_with`·`strip_prefix` 로 견주어, 여기서만 걷으면
-/// Windows 에서 스냅샷이 저장소 "밖" 으로 읽혀 모든 쓰기가 선다. 걷는 것은 밖으로 내보내는 자리의 [`unverbatim`]
-/// 하나다.
+/// **윈도의 `\\?\` 접두어는 [`canonical`] 이 걷는다**(moai-lag7.951) — 이것은 그 위에 선 떨어지는 자라 걷은 철자를
+/// 낸다. 한때는 여기서 안 걷었다(moai-vaj4, 리뷰 moai-j9gv.8gr): `store::resolve`·`held`·`cmd::init` 이 `canonicalize`
+/// 를 바로 불러, 여기서만 걷으면 견주는 두 쪽이 갈려 스냅샷이 저장소 "밖" 으로 읽혔다. 지금은 그 자리들이 다
+/// [`canonical`] 을 타서 두 쪽이 한 철자다 — 한 갈래만 되돌리면 그 갈림이 돌아온다.
 ///
 /// **까닭을 대야 하는 자리는 따로 선다**([`crate::read_marks::settle`]). 거기는 못 푼 까닭이
 /// 사람에게 가는 값이라 [`Settled`](crate::read_marks::Settled) 로 갈라 내고, 여기는 **자리를 못
@@ -51,7 +52,20 @@ use std::path::{Path, PathBuf};
 /// [모듈 머리글](self) 에 한 번 적혀 있다. 여기 다시 적었더니 두 벌이 서로 다른 수를 대기
 /// 시작했다(리뷰) — 그래서 여기에는 수를 안 적는다. 푸는 자가 늘던 날(moai-4oab) 머리글만 고치면 된다.
 pub(crate) fn real(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    canonical(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// `std::fs::canonicalize` 에서 Windows 의 `\\?\` 접두어를 걷은 것 — **moai 가 링크를 푸는 길은 이것 하나다**(moai-lag7.951).
+///
+/// 접두어가 남으면 이 값은 사람이 준 철자(`C:\…`)와 어디서도 안 맞는다. 실기 Windows 에서 훅이 Claude Code 가 준 `cwd`
+/// (`C:\…`)를 뿌리로 쥐고 고칠 파일은 `\\?\C:\…` 로 풀어, `strip_prefix` 가 늘 실패해 저장소 파일을 다 "밖" 으로 셌다 —
+/// 규칙 2 가 한 번도 안 섰다. 읽음 표시·프로젝트 등록·`init` 안내도 그 철자를 설정 파일과 화면에 적었다. 한 갈래만 걷으면
+/// 남은 갈래와 견주기가 갈라지니, 부르는 자리 모두가 이것을 탄다.
+///
+/// 걷어도 긴 경로는 안 잃는다 — std 가 Windows 의 파일 API 를 부를 때 260자를 넘는 경로에 접두어를 스스로 붙인다.
+/// 유닉스에서는 [`unverbatim`] 이 글자 하나 안 바꾼다.
+pub(crate) fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(p).map(|real| PathBuf::from(unverbatim(real.as_os_str())))
 }
 
 /// `.` 을 버리고 `..` 은 앞 조각을 뗀다. **파일 시스템을 안 본다** — 아직 없는 자리도 접어야 하고
@@ -110,7 +124,7 @@ pub(crate) fn real_prefix(p: &Path) -> PathBuf {
         p.display()
     );
     for head in p.ancestors() {
-        if let Ok(real) = std::fs::canonicalize(head) {
+        if let Ok(real) = crate::path::canonical(head) {
             // **떼어 내기는 실패하지 않는다** — `head` 는 `p` 의 조상이다. 이것을 `if let` 으로 받아
             // 넘기면 못 뗀 자리에서 한 칸 더 짧은 조상으로 내려가, 엉뚱한 윗자리로 푼 경로를 아무 말
             // 없이 답으로 낸다.
@@ -185,8 +199,8 @@ pub(crate) fn slashed_os(p: &std::ffi::OsStr) -> std::ffi::OsString {
 
 /// `canonicalize` 가 Windows 에서 붙이는 `\\?\` 접두어를 걷는다 — `\\?\UNC\서버\…` 는 `\\서버\…` 로 되돌리고, 그
 /// 밖의 철자는 그대로다. 구분자는 안 바꾼다(그것은 [`slashed_os`] 의 몫이다). **걷는 자는 여기 하나다**(moai-vaj4) —
-/// 훅 줄의 철자, 편집기에 넘기는 임시 경로, `moai update` 가 PowerShell 에 넘기는 자리(`update::plain`)가 같은 규칙으로
-/// 걷는다. 글자만 보는 것이라 리눅스에서도 잰다.
+/// 링크를 푼 철자([`canonical`]), 훅 줄의 철자, 편집기에 넘기는 임시 경로, `moai update` 가 PowerShell 에 넘기는
+/// 자리(`update::plain`)가 같은 규칙으로 걷는다. 글자만 보는 것이라 리눅스에서도 잰다.
 ///
 /// **바이트로 걷는다**(리뷰 moai-j9gv.8gr) — UTF-8 이 아닌 철자(Windows 의 짝 없는 서로게이트)도 접두어만 떼고 나머지는
 /// 받은 그대로다. `&str` 로 받던 판은 그런 자리를 `update::plain` 이 걷지 못해 PowerShell 5.1 이 못 읽는 `\\?\` 꼴이
@@ -307,7 +321,7 @@ mod tests {
         let real = s.join("real");
         std::fs::create_dir_all(real.join("src")).unwrap();
         std::os::unix::fs::symlink(&real, s.join("link")).unwrap();
-        let here = std::fs::canonicalize(&real).unwrap();
+        let here = crate::path::canonical(&real).unwrap();
 
         assert_eq!(real_prefix(&s.join("link/src")), here.join("src"));
         // 아직 없는 파일도 같은 자리다.

@@ -1,3 +1,10 @@
+# Every text file is LF in the index and on every checkout (moai-lag7.9fm).
+# Windows clones default to core.autocrlf=true, which checks out CRLF; then the
+# tests that compare checked-in trees (the plugin, docs/cli.md, the source
+# scans) against what the binary writes see every line differ. The lines
+# below only add merge drivers and labels on top of this.
+* text=auto eol=lf
+
 # moai — issue tracker
 # The snapshot does not use merge=union. When two branches change the same
 # issue, union quietly leaves two lines carrying one id, and that is data loss.

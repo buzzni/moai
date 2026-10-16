@@ -233,8 +233,9 @@ pub fn plan(repo: &str, script: String, dir: &Path, version: Option<&str>, runne
 /// 판은 그런 자리를 접두어째 넘겨, 그 앞의 `to_string_lossy` 판이 없는 자리로 거절하던 것을 거절 문을 지나 PowerShell
 /// 까지 보냈다.
 ///
-/// **푼 자리를 받는 곳에서 한 번 걷는다**(`cmd::update`, 리뷰) — 인자 하나에서만 걷던 판은 `--json` 의
-/// `dir` 과 거절문이 `\\?\C:\…` 를, 인자는 `C:\…` 를 대 한 자리를 두 철자로 말했다.
+/// **푼 자리는 푸는 자가 이미 걷어 온다**([`crate::path::canonical`], moai-lag7.951) — `cmd::update` 가 넘기는
+/// 자리에는 걷을 것이 없고, 이것은 [`plan`] 이 받은 자리를 제 손으로 한 번 더 지키는 자다. 인자 하나에서만 걷던
+/// 판은 `--json` 의 `dir` 과 거절문이 `\\?\C:\…` 를, 인자는 `C:\…` 를 대 한 자리를 두 철자로 말했다(리뷰).
 pub fn plain(dir: &Path) -> PathBuf {
     PathBuf::from(crate::path::unverbatim(dir.as_os_str()))
 }
@@ -299,31 +300,33 @@ mod tests {
     #[test]
     fn it_refuses_where_install_sh_cannot_upgrade() {
         let s = crate::scratch::Scratch::new("update-refusal");
+        // 이 기계의 설치 스크립트가 까는 이름이다 — Windows 는 `moai.exe`(moai-lag7.sk7).
+        let moai = Runner::native(Path::new("")).binary();
         let plain = s.path().join("bin");
         std::fs::create_dir_all(&plain).unwrap();
-        assert_eq!(refusal(&plain.join("moai"), true, yes), None, "쓸 수 있는 자리");
-        assert_eq!(refusal(Path::new("/opt/tools/moai"), true, yes), None, "집 밖이어도 쓸 수 있으면 올린다");
-        assert_eq!(refusal(&plain.join("moai"), false, yes), Some(Refusal::NotServed));
+        assert_eq!(refusal(&plain.join(moai), true, yes), None, "쓸 수 있는 자리");
+        assert_eq!(refusal(&Path::new("/opt/tools").join(moai), true, yes), None, "집 밖이어도 쓸 수 있으면 올린다");
+        assert_eq!(refusal(&plain.join(moai), false, yes), Some(Refusal::NotServed));
         assert_eq!(
             refusal(&plain.join("moai-dev"), true, yes),
             Some(Refusal::NotNamedMoai { name: "moai-dev".into() })
         );
-        assert_eq!(refusal(&plain.join("moai"), true, |_| false), Some(Refusal::NotWritable { dir: plain.clone() }));
+        assert_eq!(refusal(&plain.join(moai), true, |_| false), Some(Refusal::NotWritable { dir: plain.clone() }));
 
         let profile = s.path().join("target").join("release");
         std::fs::create_dir_all(profile.join(".fingerprint")).unwrap();
         assert_eq!(
-            refusal(&profile.join("moai"), true, yes),
+            refusal(&profile.join(moai), true, yes),
             Some(Refusal::BuiltByCargo { dir: profile.clone() }),
             "소스에서 지은 판"
         );
-        assert_eq!(refusal(&profile.join("moai"), false, yes), Some(Refusal::NotServed), "판을 안 내는 기계가 먼저다");
+        assert_eq!(refusal(&profile.join(moai), false, yes), Some(Refusal::NotServed), "판을 안 내는 기계가 먼저다");
         let cargo = s.path().join(".cargo");
         std::fs::create_dir_all(cargo.join("bin")).unwrap();
         std::fs::write(cargo.join(".crates.toml"), "[v1]\n\"moai 0.1.3 (path+file:///src/moai)\" = [\"moai\"]\n")
             .unwrap();
         assert_eq!(
-            refusal(&cargo.join("bin").join("moai"), true, |_| false),
+            refusal(&cargo.join("bin").join(moai), true, |_| false),
             Some(Refusal::BuiltByCargo { dir: cargo.join("bin") }),
             "cargo install — 쓰기보다 먼저 막는다"
         );

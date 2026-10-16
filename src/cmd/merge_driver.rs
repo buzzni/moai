@@ -1598,8 +1598,8 @@ fn chosen_command(here: &Path) -> Result<String, String> {
     // 읽었다. 못 풀면 적힌 철자 그대로 견준다: 여기서 틀리는 값은 **덜 이르는 쪽**이다.
     // 푸는 자는 [`crate::path::real`] 하나다(moai-8csx) — 이 줄도 그 다섯과 같은 꼴이었는데
     // 목록에서 빠져, 나중에 정할 것(윈도의 `\\?\` 접두어)이 여기만 옛 답으로 남았다(리뷰). 그 접두어는 이제
-    // 정했다 — 견주는 이 자리에서는 그대로 두고, 적을 철자(`spelt`)에서만 걷는다([`crate::path::unverbatim`],
-    // moai-vaj4).
+    // 푸는 자가 걷는다([`crate::path::canonical`], moai-lag7.951) — 견주는 두 쪽이 한 철자로 서고, 적을 철자
+    // (`spelt`)도 같은 규칙으로 걷는다([`crate::path::unverbatim`], moai-vaj4).
     if crate::path::real(&found) == crate::path::real(&mine) {
         return Ok(spelt(&mine));
     }

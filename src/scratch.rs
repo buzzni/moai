@@ -70,7 +70,7 @@ impl Scratch {
         let mut s = Scratch::new(name);
         // **여기만 터진다** — 방금 지은 디렉터리라 못 푸는 것은 시험 자리가 성치 않다는 뜻이고,
         // 받은 철자로 떨어지면([`crate::path::real`]) 견주는 시험이 까닭 없이 붉어진다.
-        s.0 = std::fs::canonicalize(&s.0).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
+        s.0 = canonical(&s.0).unwrap_or_else(|e| panic!("{}: {e}", s.0.display()));
         s
     }
 
@@ -228,7 +228,7 @@ pub fn names(d: &Path) -> Vec<String> {
 /// 그쪽에서는 `crate` 가 시험 크레이트라 `crate::path` 가 없다. 한 자로 모으는 결정(moai-8csx)이
 /// 닿지 못하는 한 자리고, 갈리면 시험 자리가 링크를 달리 푼다 — 그래서 글로 맨다.
 fn real(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    canonical(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
 /// `dir` 에 아무것도 없는 저장소를 세운다([`Scratch::fenced`] 가 왜 세 개인지 적는다).
@@ -254,6 +254,28 @@ pub fn fence(dir: &Path) {
         std::fs::create_dir_all(git.join(sub)).unwrap_or_else(fail);
     }
     std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap_or_else(fail);
+}
+
+/// [`crate::path::canonical`] 과 같은 자 — 링크를 풀고 Windows 의 `\\?\` 접두어를 걷는다(moai-lag7.951). [`real`] 과
+/// 같은 까닭으로 여기만 제 몸으로 든다. 도구가 내는 철자가 접두어 없는 꼴이니 시험 자리도 그 꼴로 서야 견주기가 맞는다.
+///
+/// **자리는 늘 이것을 지나 선다** — [`base`] 와 [`Scratch::real`] 이 이것으로 푸니, 그 밑에 `join` 한 철자는
+/// Windows 에서도 끝 `/`·`..` 를 친 그대로 지킨다. 통합 시험(`tests/cli.rs`)도 도구의 철자와 견줄 때 이것을 쓴다 —
+/// 거기 베껴 두던 같은 글을 걷었다(moai-lag7.482).
+pub fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(p).map(plain)
+}
+
+/// [`crate::path::unverbatim`] 과 같은 규칙 — 유닉스에서는 글자 하나 안 바꾼다. 시험 자리는 늘 UTF-8 이라 글로 걷는다.
+fn plain(p: PathBuf) -> PathBuf {
+    let Some(s) = p.to_str() else { return p };
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p,
+    }
 }
 
 #[cfg(test)]
@@ -361,7 +383,7 @@ mod tests {
         std::os::unix::fs::symlink(away.path(), &link).unwrap();
         #[cfg(not(unix))]
         let link = away.path().to_path_buf();
-        let resolved = std::fs::canonicalize(&link).unwrap();
+        let resolved = canonical(&link).unwrap();
         #[cfg(unix)]
         assert_ne!(link, resolved, "링크가 안 섰다 — 아래 단언이 아무것도 못 잰다");
 

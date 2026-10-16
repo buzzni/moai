@@ -462,8 +462,14 @@ fn ignored_by(said: &str) -> Tracking {
     if pattern.starts_with('!') {
         return Tracking::Commit;
     }
-    let source = Path::new(source.trim_matches('"'));
-    match source.is_relative() && source.file_name().is_some_and(|n| n == ".gitignore") {
+    let source = source.trim_matches('"');
+    // **`/` 로 선 자리는 작업 트리 밖이다**(moai-lag7.951) — git 은 작업 트리 안을 늘 상대 경로로 대고, `/` 로 선
+    // 자리는 Windows 에서도 MSYS·Cygwin 의 git 이 댄 전역 무시 파일(`/home/u/.gitignore`)이다. Windows 의
+    // `is_relative` 는 드라이브 없는 그 철자를 상대로 읽어, 사람의 전역 파일을 이 저장소의 `.gitignore` 로 셌다.
+    // `has_root` 로 묻지 않는다 — git 이 따옴표로 싼 `\355\225\234/.gitignore` 가 Windows 에서는 `\` 로 선 뿌리다.
+    // 유닉스에서는 `/` 로 서는 것이 곧 절대 경로라 같은 물음이다.
+    let outside = source.starts_with('/') || Path::new(source).is_absolute();
+    match !outside && Path::new(source).file_name().is_some_and(|n| n == ".gitignore") {
         true => Tracking::Gitignore,
         false => Tracking::Exclude,
     }
@@ -667,7 +673,7 @@ fn mirrored(block: &str, under: &str, dir: &str, name: Option<&str>) -> String {
 /// 못 거는 자리면 `None` 이다. 락과 임시 파일과 저널이 받은 철자(`.moai/…`)로 가는 곳이 여기다 —
 /// [`gitignore_for`] 와 [`attributes_for`] 가 이 하나로 잰다.
 fn moai_moved(root: &Path) -> Option<String> {
-    inside(root, &std::fs::canonicalize(root.join(".moai")).ok()?).filter(|dir| dir != ".moai")
+    inside(root, &crate::path::canonical(root.join(".moai")).ok()?).filter(|dir| dir != ".moai")
 }
 
 /// `.gitattributes` 에 심을 블록 — **트래커가 체크아웃 안의 파일을 가리키는 링크면 그 파일에도
@@ -735,7 +741,7 @@ const LINKED_JOURNAL_COMMENT: &str = "\
 /// 풀던 판은 링크를 알아보는 길부터 갈렸다(리뷰).
 pub(crate) fn tracker_file(root: &Path) -> Option<std::path::PathBuf> {
     let end = crate::path::follow_links(&root.join(crate::cmd::merge_driver::SNAPSHOT)).ok()?;
-    Some(std::fs::canonicalize(crate::path::dir_of(&end)).ok()?.join(end.file_name()?))
+    Some(crate::path::canonical(crate::path::dir_of(&end)).ok()?.join(end.file_name()?))
 }
 
 /// 트래커가 링크면 **이 뿌리 안에서** 그것이 가리키는 파일의 경로(`shared/issues.jsonl`). 링크가 아니거나
@@ -1434,7 +1440,7 @@ fn ensure_lines(path: &Path, block: &str, lang: impl FnOnce() -> crate::i18n::La
         let checkout = crate::path::real(crate::path::dir_of(path));
         let outside = !crate::path::follow_links(path)
             .ok()
-            .and_then(|end| std::fs::canonicalize(crate::path::dir_of(&end)).ok())
+            .and_then(|end| crate::path::canonical(crate::path::dir_of(&end)).ok())
             .is_some_and(|dir| dir.starts_with(&checkout));
         return Added::Linked { to, outside };
     }
@@ -2804,7 +2810,9 @@ mod tests {
         let main = Path::new("/main");
         let said = check_worktree(crate::i18n::Lang::En, main, None, true, Some(Path::new("/main/wt")));
         assert_eq!(said.len(), 2, "밑자리에서 둘째 줄이 없다 — {said:?}");
-        assert!(said[1].contains("/main/wt/.moai"), "읽고 있는 트래커를 안 댔다 — {}", said[1]);
+        // 잇는 가름선은 이 기계의 것이다 — 표본의 `/` 와 섞여도 사람이 읽는 철자는 그 기계의 것이다(moai-lag7.vva).
+        let reading = Path::new("/main/wt").join(".moai").display().to_string();
+        assert!(said[1].contains(&reading), "읽고 있는 트래커를 안 댔다 — {}", said[1]);
         assert!(!said[1].contains("MOAI_HERE=1 moai init"), "가릴 명령을 그대로 댔다 — {}", said[1]);
     }
 

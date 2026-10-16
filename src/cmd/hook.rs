@@ -143,8 +143,14 @@ fn judge(ctx: &Ctx, event: Event, dialect: Dialect, input: &Input) -> Decision {
     // 약속하지 않았다 — 시험판이 제 cwd 로 상대 경로를 풀다가 저장소 안의
     // 파일을 저장소 밖으로 보아 규칙이 통째로 샜다. Antigravity 는 훅을 hooks.json 이 놓인 디렉터리에서
     // 띄운다(2026-10-04 실측) — 작업 자리가 아니다.
+    //
+    // **푼 자리에 선다**(moai-lag7.482). 뿌리는 이 자리에서 위로 찾아 잡히고, 규칙 2 는 고칠 파일을 링크까지 푼
+    // 철자([`crate::path::real_prefix`])로 그 뿌리와 견준다. 유닉스의 `getcwd` 는 이미 푼 자리를 내 답이 같지만,
+    // Windows 의 `GetCurrentDirectory` 는 받은 철자를 그대로 돌려준다 — PowerShell 에서 `cd c:\work\repo` 로 띄운
+    // 세션의 `cwd` 는 디스크의 대소문자와 달라 `strip_prefix` 가 늘 빗나갔고, 저장소 파일이 다 "밖" 으로 보여
+    // 규칙 2 가 말없이 지나갔다.
     if let Some(cwd) = input.cwd.as_deref()
-        && std::env::set_current_dir(cwd).is_err()
+        && std::env::set_current_dir(crate::path::real(Path::new(cwd))).is_err()
     {
         return Decision::Pass;
     }

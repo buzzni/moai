@@ -233,19 +233,26 @@ pub fn skills() -> Vec<Skill> {
 }
 
 /// 스킬마다의 글을 `<이름>/<상대 경로>` 로 편다 — 두 트리가 이 차례 그대로 받는다.
-fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (PathBuf, String)> + 'a
+///
+/// **가르는 금은 어느 플랫폼에서나 `/` 다**(moai-lag7.951). `Path::join` 은 Windows 에서 `\` 를 끼워,
+/// [`version_of`] 가 셈하는 경로 글이 플랫폼마다 달라진다 — 같은 트리를 Linux 와 Windows 가 번갈아 심으면
+/// 커밋된 `plugin.json` 의 판이 매번 뒤집힌다. Windows 의 파일 API 는 `/` 를 그대로 받는다.
+///
+/// 경로를 글로 낸다 — 받는 쪽이 앞에 `skills/` 를 더 붙이므로(`tree_named`), `PathBuf` 로 냈다가 `display()` 로 도로
+/// 펴는 한 겹이 없다.
+fn skill_files<'a, I>(skills: I) -> impl Iterator<Item = (String, String)> + 'a
 where
     I: IntoIterator<Item = &'a Skill>,
     I::IntoIter: 'a,
 {
-    skills.into_iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (Path::new(s.name).join(rel), body.clone())))
+    skills.into_iter().flat_map(|s| s.files.iter().map(move |(rel, body)| (format!("{}/{rel}", s.name), body.clone())))
 }
 
 /// [`AGENTS_DIR`] 에 심을 파일들. 경로는 그 자리부터의 상대다. **Claude 의 트리와 글이 같다** — 다른 것은 매니페스트가
 /// 없다는 것과 Claude 에만 서는 스킬([`Skill::claude_only`], 감독)이 빠진다는 것뿐이고, 에이전트마다 다른 걸음은 글
 /// 안의 낱말표(`guide::VERBS`)가 열로 가른다(사용자 결정 2026-10-04).
 pub fn agents_tree(skills: &[Skill]) -> Vec<(PathBuf, String)> {
-    skill_files(skills.iter().filter(|s| !s.claude_only)).collect()
+    skill_files(skills.iter().filter(|s| !s.claude_only)).map(|(p, b)| (PathBuf::from(p), b)).collect()
 }
 
 /// 마켓플레이스 이름. `claude plugin install moai@<이것>` 의 뒷부분이다.
@@ -898,7 +905,7 @@ pub fn tree(prefix: &str, root: &Path, exe: &str, skills: &[Skill]) -> Vec<(Path
 /// 다른 체크아웃(워크트리)에서 부른 시험이 남의 자리를 안 섞는다.
 fn tree_named(market: &str, exe: &str, skills: &[Skill]) -> Vec<(PathBuf, String)> {
     let mut files: Vec<(PathBuf, String)> =
-        skill_files(skills).map(|(p, b)| (Path::new("skills").join(p), b)).collect();
+        skill_files(skills).map(|(p, b)| (PathBuf::from(format!("skills/{p}")), b)).collect();
     let market = (PathBuf::from(".claude-plugin/marketplace.json"), marketplace_json(market));
     // 판은 **매니페스트를 뺀 트리 전부와 판 자리를 비운 매니페스트**에서 나온다.
     // 매니페스트 자신은 그 판을 담고 있으므로 그대로는 셈에 넣을 수 없다 —
@@ -2234,17 +2241,22 @@ mod tests {
     /// 안 접은 철자도 같다고 한다(`crate::path` 의 시험이 적어 둔 덫이다).
     #[test]
     fn the_spelling_is_argv0_folded_against_cwd() {
-        let cwd = Path::new("/repo/.claude/worktrees/w");
+        // 유닉스 꼴로 적은 표본을 이 기계의 절대 철자로(moai-lag7.vva) — Windows 에서 `/repo` 는 드라이브가 없어 절대
+        // 경로가 아니고, 접은 철자는 그 기계의 가름선으로 선다. 유닉스에서는 받은 그대로다.
+        let abs = |s: &str| if cfg!(windows) { format!("C:{}", s.replace('/', r"\")) } else { s.to_string() };
+        let cwd = PathBuf::from(abs("/repo/.claude/worktrees/w"));
+        let cwd = cwd.as_path();
         let at = |argv0: &str| spelled(Some(Path::new(argv0)), Some(cwd)).map(|p| p.display().to_string());
-        assert_eq!(at("../../../target/release/moai").as_deref(), Some("/repo/target/release/moai"));
-        assert_eq!(at("./target/release/moai").as_deref(), Some("/repo/.claude/worktrees/w/target/release/moai"));
-        assert_eq!(at("/repo/./target/release/moai").as_deref(), Some("/repo/target/release/moai"));
-        assert_eq!(at("/repo/scripts/../target/release/moai").as_deref(), Some("/repo/target/release/moai"));
+        let want = |s: &str| Some(abs(s));
+        assert_eq!(at("../../../target/release/moai"), want("/repo/target/release/moai"));
+        assert_eq!(at("./target/release/moai"), want("/repo/.claude/worktrees/w/target/release/moai"));
+        assert_eq!(at(&abs("/repo/./target/release/moai")), want("/repo/target/release/moai"));
+        assert_eq!(at(&abs("/repo/scripts/../target/release/moai")), want("/repo/target/release/moai"));
         assert_eq!(at("moai"), None);
         assert_eq!(spelled(None, Some(cwd)), None);
         // `cwd` 를 못 읽으면 상대 철자는 붙일 데가 없다. 절대 철자는 그대로 선다.
         assert_eq!(spelled(Some(Path::new("target/release/moai")), None), None);
-        assert_eq!(spelled(Some(Path::new("/x/moai")), None), Some(PathBuf::from("/x/moai")));
+        assert_eq!(spelled(Some(Path::new(&abs("/x/moai"))), None), Some(PathBuf::from(abs("/x/moai"))));
     }
 
     /// **훅 한 줄에 못 적는 철자는 안 낸다**(리뷰 moai-gu5m.ke0) — 그러면 부르는 쪽이 푼 자리로
@@ -2253,7 +2265,9 @@ mod tests {
     /// 가리키는 자리(`/proc`·`/dev`)는 훅의 셸에서 이 파일이 아니다.
     #[test]
     fn a_spelling_the_hook_cannot_carry_is_not_offered() {
-        let cwd = Path::new("/repo");
+        // 부른 자리는 이 기계의 절대 경로다(moai-lag7.vva) — Windows 에서 `/repo` 는 절대 경로가 아니라, 상대 철자를
+        // 붙일 데가 없어 모든 표본이 `None` 으로 떨어져 무엇도 못 잰다.
+        let cwd = if cfg!(windows) { Path::new(r"C:\repo") } else { Path::new("/repo") };
         let at = |argv0: &Path| spelled(Some(argv0), Some(cwd));
         for unwritable in ["/home/we$ird/moai", "../we\"ird/moai", "/home/tick`/moai"] {
             assert_eq!(at(Path::new(unwritable)), None, "{unwritable}: 못 적는 철자를 냈다");
@@ -2268,6 +2282,8 @@ mod tests {
             assert_eq!(spelled_for(Some(back), Some(cwd), false), None, "유닉스에서 `\\` 가 든 철자를 냈다");
             assert!(spelled_for(Some(back), Some(cwd), true).is_some(), "Windows 에서 `/` 로 적을 철자를 버렸다");
         }
+        // `/proc`·`/dev` 는 유닉스의 자리다 — Windows 에는 그런 자리가 없다(moai-lag7.vva).
+        #[cfg(unix)]
         for per_process in ["/proc/self/exe", "/proc/4242/exe", "/dev/fd/9", "/proc/self/cwd/target/release/moai"] {
             assert_eq!(at(Path::new(per_process)), None, "{per_process}: 프로세스마다 다른 자리를 냈다");
         }
