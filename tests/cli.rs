@@ -104,8 +104,13 @@ fn unjs(body: &str) -> String {
 
 /// 도구가 셸에 붙여 넣을 줄로 낸 자리 — 셸이 달리 읽을 글자가 있으면 `'…'` 로 싼다(Windows 의 `\` 가 늘 그렇다).
 /// 그 글자가 없는 유닉스의 시험 자리는 날것 그대로다. 두 꼴을 다 찾는다.
-fn shell_spelt(said: &str, before: &str, path: impl std::fmt::Display) -> bool {
-    said.contains(&format!("{before}{path}")) || said.contains(&format!("{before}'{path}'"))
+/// 사람에게 보이는 상대 자리 — 도구는 그것을 OS 의 가름 글자로 잇는다(moai-lag7.rrm). 유닉스에서는 받은 그대로다.
+fn native(rel: &str) -> String {
+    rel.replace('/', std::path::MAIN_SEPARATOR_STR)
+}
+
+fn shell_spelt(said: &str, before: &str, path: impl std::fmt::Display, after: &str) -> bool {
+    said.contains(&format!("{before}{path}{after}")) || said.contains(&format!("{before}'{path}'{after}"))
 }
 
 /// 띄울 moai 의 임시 자리를 `dir` 로 둔다. **Windows 는 `TMPDIR` 을 안 읽는다**(moai-lag7.rrm) — `std::env::temp_dir`
@@ -1863,8 +1868,8 @@ fn init_in_a_worktree_points_at_the_main_checkout() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "아무도 안 읽을 자리에 세웠다 — {err}");
     assert!(err.contains("딸린 워크트리"), "워크트리를 그냥 '위의 트래커' 로 댔다 — {err}");
-    assert!(err.contains("/main/.moai"), "주 체크아웃의 트래커를 안 댔다 — {err}");
-    assert!(!err.contains("argos-wt/.moai"), "아무도 안 읽는 트래커를 고치라고 했다 — {err}");
+    assert!(err.contains(&native("/main/.moai")), "주 체크아웃의 트래커를 안 댔다 — {err}");
+    assert!(!err.contains(&native("argos-wt/.moai")), "아무도 안 읽는 트래커를 고치라고 했다 — {err}");
     assert!(err.contains("MOAI_HERE=1 moai init argos"), "친 접두어를 빠뜨린 줄을 댔다 — {err}");
     assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
 
@@ -1926,7 +1931,7 @@ fn a_worktree_split_before_moai_still_refuses_to_plant_a_tracker() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "아무도 안 읽을 자리에 세웠다 — {err}");
     assert!(err.contains("딸린 워크트리"), "워크트리를 그냥 '위의 트래커' 로 댔다 — {err}");
-    assert!(err.contains("/main/.moai"), "주 체크아웃의 트래커를 안 댔다 — {err}");
+    assert!(err.contains(&native("/main/.moai")), "주 체크아웃의 트래커를 안 댔다 — {err}");
     assert!(!deep.join(".moai").exists(), "거절하고도 .moai 를 만들었다");
 
     // 꼭대기도 같다 — 거기 `.moai` 가 없는 것은 이 워크트리가 처음이다.
@@ -2033,7 +2038,7 @@ fn saying_where_init_goes_does_not_inherit_moai_here() {
     let here = |args: &[&str]| ok_env(&deep, NOW, &[("MOAI_HERE", "1")], args);
     let json = here(&["init", "--check", "--json"]);
     assert!(json.contains("tracker_at"), "손잡이를 켰다고 댈 자리를 통째로 뺐다\n{json}");
-    let real = canon(&main).unwrap().display().to_string();
+    let real = js(canon(&main).unwrap().display());
     assert!(json.contains(&real), "주 체크아웃이 아닌 자리를 댔다\n{json}");
 
     // 거절은 그대로 꺼진다 — 켠 사람의 `init` 은 여기 심는다([`ok_env`] 가 0 을 잰다).
@@ -2085,26 +2090,26 @@ fn every_surface_that_says_init_points_at_the_main_checkout() {
     // `worktree::main_root`), 스크래치 철자로 재면 기계마다 갈린다.
     let real = |p: &Path| canon(p).unwrap().display().to_string();
     let (there, here) = (real(&main), real(&deep));
-    let go = |at: &str| format!("moai -C {at} init");
+    let go = |t: &str, at: &str| shell_spelt(t, "moai -C ", at, " init");
     // 등록 쪽이 대야 할 것은 `init` 이 아니라 등록이다 — 위의 다섯째 문단이 그 까닭이다.
-    let reg = |at: &str| format!("moai project add {at}");
+    let reg = |t: &str, at: &str| shell_spelt(t, "moai project add ", at, "");
 
     let added = run(&out, &["project", "add", &deep.display().to_string()]);
     assert!(added.contains("딸린 워크트리"), "등록 줄이 그 갈래를 모른다\n{added}");
-    assert!(added.contains(&reg(&there)), "등록 줄이 주 체크아웃을 안 댔다\n{added}");
-    assert!(!added.contains(&go(&here)), "등록 줄이 1 로 끝나는 명령을 댔다\n{added}");
-    assert!(!added.contains(&go(&there)), "등록 줄이 아무것도 안 바꾸는 명령을 댔다\n{added}");
+    assert!(reg(&added, &there), "등록 줄이 주 체크아웃을 안 댔다\n{added}");
+    assert!(!go(&added, &here), "등록 줄이 1 로 끝나는 명령을 댔다\n{added}");
+    assert!(!go(&added, &there), "등록 줄이 아무것도 안 바꾸는 명령을 댔다\n{added}");
 
     let listed = run(&out, &["project", "ls"]);
     assert!(listed.contains("주 체크아웃에 있다"), "목록 칸이 그 갈래를 모른다\n{listed}");
 
     let over = run(&out, &["status"]);
-    assert!(over.contains(&reg(&there)), "한눈 보기가 주 체크아웃을 안 댔다\n{over}");
-    assert!(!over.contains(&go(&here)), "한눈 보기가 1 로 끝나는 명령을 댔다\n{over}");
-    assert!(!over.contains(&go(&there)), "한눈 보기가 아무것도 안 바꾸는 명령을 댔다\n{over}");
+    assert!(reg(&over, &there), "한눈 보기가 주 체크아웃을 안 댔다\n{over}");
+    assert!(!go(&over, &here), "한눈 보기가 1 로 끝나는 명령을 댔다\n{over}");
+    assert!(!go(&over, &there), "한눈 보기가 아무것도 안 바꾸는 명령을 댔다\n{over}");
 
     let checked = run(&deep, &["init", "--check"]);
-    assert!(checked.contains(&go(&there)), "--check 가 주 체크아웃을 안 댔다\n{checked}");
+    assert!(go(&checked, &there), "--check 가 주 체크아웃을 안 댔다\n{checked}");
 
     // **트래커를 들고 온 꼭대기에서는 입을 다문다** — 거기서 `moai init` 은 0 으로 끝난다. 이 줄이
     // 서면 `--check` 가 제가 잰 파일과 **다른 체크아웃**을 고치라고 시킨다.
@@ -2112,7 +2117,7 @@ fn every_surface_that_says_init_points_at_the_main_checkout() {
     assert!(top.join(".moai").is_dir(), "워크트리가 트래커를 안 들고 왔다");
     let atop = run(&top, &["init", "--check"]);
     assert!(!atop.contains("딸린 워크트리"), "심겨 있는 워크트리를 딴 데로 보냈다\n{atop}");
-    assert!(!atop.contains(&go(&there)), "심겨 있는 워크트리에 남의 자리를 댔다\n{atop}");
+    assert!(!go(&atop, &there), "심겨 있는 워크트리에 남의 자리를 댔다\n{atop}");
     let atop = run(&top, &["init", "--check", "--json"]);
     assert!(!atop.contains("tracker_at"), "기계 쪽도 심겨 있는 워크트리를 딴 데로 보냈다\n{atop}");
     // 그리고 실제로 여기서 선다 — 대는 말과 도는 명령이 갈리면 안 된다.
@@ -2677,7 +2682,12 @@ fn the_overview_body_speaks_the_picked_language() {
     // 그러면 이 판은 그 자리에 박힌 한국어를 못 본다 — 실제로 그랬다. 경로는 ASCII 로 둔다:
     // 적힌 값은 그대로 되울리므로 한글 경로를 두면 이 자가 제 글과 남의 자료를 못 가른다.
     let mut src = std::fs::read_to_string(&cfg).unwrap();
-    src.push_str("\n[[project]]\npath = \"not/absolute\"\n\n[[project]]\npath = \"/nowhere\"\ncolor = \"red\"\n");
+    // 없는 절대 자리는 시험 자리 밑에 짓는다(moai-lag7.rrm) — `/nowhere` 는 Windows 에서 절대 자리가 아니라, 색의 탈
+    // 대신 "절대 자리가 아니다" 가 선다. 유닉스에서도 절대 자리이고 없다.
+    src.push_str(&format!(
+        "\n[[project]]\npath = \"not/absolute\"\n\n[[project]]\npath = \"{}\"\ncolor = \"red\"\n",
+        js(s.path().join("nowhere").display())
+    ));
     std::fs::write(&cfg, src).unwrap();
     let screen = |args: &[&str], lang: &str| {
         let got = isolated(BIN)
@@ -2808,7 +2818,7 @@ fn the_overview_counts_work_with_no_live_worktree() {
     assert!(mine.contains("옆 워크트리 문제 1건"), "못 읽은 워크트리를 안 셌다\n{blind}");
     // **센 것은 줄로도 댄다** — 수만 서면 `— 위 줄` 이 없는 줄을 가리키고 어느 워크트리인지 모른다.
     assert!(
-        mine.contains("스냅샷을 못 읽었다 — ⎇ worktree-agent-x: .claude/worktrees/agent-x"),
+        mine.contains(&format!("스냅샷을 못 읽었다 — ⎇ worktree-agent-x: {}", native(".claude/worktrees/agent-x"))),
         "못 읽은 워크트리를 세기만 하고 대지 않았다\n{blind}"
     );
     // 못 읽은 워크트리 하나에 그 문장도 하나다.
@@ -3241,7 +3251,7 @@ fn outside_a_repo_a_path_cannot_repaint_the_screen() {
     let out = dir_in(&s, "out");
     let cfg = s.path().join("user/config.toml");
     std::fs::create_dir_all(cfg.parent().unwrap()).unwrap();
-    std::fs::write(&cfg, format!("[[project]]\npath = \"{}/gone\\u001b[2Jx\"\n", s.path().display())).unwrap();
+    std::fs::write(&cfg, format!("[[project]]\npath = \"{}/gone\\u001b[2Jx\"\n", js(s.path().display()))).unwrap();
     for verb in ["status", "ready"] {
         let shown = ok_with(&out, &cfg, &[verb]);
         assert!(!shown.contains('\u{1b}'), "{verb}: {shown:?}");
@@ -7949,12 +7959,12 @@ fn status_notices_a_stale_agents_block_but_not_a_missing_one() {
     std::fs::create_dir_all(&sub).unwrap();
     let root = canon(s.path()).unwrap();
     let below = ok(&sub, &["status"]);
-    assert!(below.contains(&format!("`moai -C {} init`", root.display())), "하위에서 뿌리를 안 댄다 — {below}");
+    assert!(shell_spelt(&below, "`moai -C ", root.display(), " init`"), "하위에서 뿌리를 안 댄다 — {below}");
     assert!(!sub.join(".moai").exists());
     // `-C` 로 본 셸도 뿌리에 있지 않다 — 등록한 프로젝트를 한눈에 보다 `moai -C <프로젝트> status` 로 들어온 자리.
     let outside = Scratch::new("agentsnotice-outside");
     let there = ok(outside.path(), &["-C", &s.path().display().to_string(), "status"]);
-    assert!(there.contains(&format!("`moai -C {} init`", root.display())), "-C 로 본 셸에 뿌리를 안 댄다 — {there}");
+    assert!(shell_spelt(&there, "`moai -C ", root.display(), " init`"), "-C 로 본 셸에 뿌리를 안 댄다 — {there}");
     assert!(st.contains("드러난 문제 없다"), "알림이 문제로 섰다 — {st}");
     let js = ok(s.path(), &["status", "--json"]);
     let notices = &js[js.find("\"notices\"").expect("notices 가 없다")..];
@@ -13050,11 +13060,11 @@ fn rm_line_preview_command_keeps_the_dir_it_was_given() {
 
     let hash = field(&ok(away.path(), &["-C", &dir, "rm", "--line", "2", "--json"]), "match");
     let shown = ok(away.path(), &["-C", &dir, "rm", "--line", "2"]);
-    let go = format!("moai -C {} rm --line 2 --yes --match {hash}", root.display());
-    assert!(shown.contains(&go), "-C 로 본 줄을 지우는 명령에 -C 가 없다\n{shown}");
+    let go = format!(" rm --line 2 --yes --match {hash}");
+    assert!(shell_spelt(&shown, "moai -C ", root.display(), &go), "-C 로 본 줄을 지우는 명령에 -C 가 없다\n{shown}");
     let out = moai(away.path(), &["-C", &dir, "rm", "--line", "2", "--yes"]);
     let said = text(&out);
-    assert!(said.contains(&format!("moai -C {} rm --line 2", root.display())), "{said}");
+    assert!(shell_spelt(&said, "moai -C ", root.display(), " rm --line 2"), "{said}");
 }
 
 /// **지운 줄의 원문은 사람 화면에도 선다**(리뷰 moai-mo9v.1ln). 번호가 다른 못 읽는 줄에 떨어져도
@@ -15257,12 +15267,16 @@ fn a_stale_planted_tree_names_the_install_line() {
     assert_eq!(json["skills_stale"], "moai skill install --agent codex");
 
     // **못 읽는 자리는 세지 않고, 멈추지도 않는다** — 심긴 파일 하나를 FIFO 로 바꿔도 보드는 끝난다.
-    let skill = root.join(".agents/skills/moai/SKILL.md");
-    std::fs::remove_file(&skill).unwrap();
-    let made = Command::new("mkfifo").arg(&skill).status().unwrap();
-    assert!(made.success());
-    assert!(stale(root).is_some());
-    std::fs::remove_file(&skill).unwrap();
+    // FIFO 는 유닉스에만 있다 — Windows 에는 `mkfifo` 도 그런 파일도 없다.
+    #[cfg(unix)]
+    {
+        let skill = root.join(".agents/skills/moai/SKILL.md");
+        std::fs::remove_file(&skill).unwrap();
+        let made = Command::new("mkfifo").arg(&skill).status().unwrap();
+        assert!(made.success());
+        assert!(stale(root).is_some());
+        std::fs::remove_file(&skill).unwrap();
+    }
 
     // 시킨 대로 다시 심으면 걷힌다.
     ok(root, &["skill", "install", "--agent", "codex"]);
@@ -17147,7 +17161,7 @@ fn show_rolls_a_groups_place_up_from_its_members() {
     let out = ok_at(&main, LATER, &["show", &epic]);
     let line =
         out.lines().find(|l| l.trim_start().starts_with("자리")).unwrap_or_else(|| panic!("에픽에 자리가 없다\n{out}"));
-    assert!(line.contains(&format!(".claude/worktrees/{epic}")), "{line}");
+    assert!(line.contains(&native(&format!(".claude/worktrees/{epic}"))), "{line}");
     assert!(ok_at(&main, LATER, &["show", &epic, "--json"]).contains(&format!("\"branch\":\"worktree-{epic}\"")));
 }
 
@@ -17170,7 +17184,7 @@ fn show_names_the_worktree_a_picked_row_lives_in() {
     };
     let out = ok(&main, &["show", &id]);
     let line = place(&out);
-    assert!(line.contains(&format!(".claude/worktrees/{id}")) && line.contains(&format!("worktree-{id}")), "{line}");
+    assert!(line.contains(&native(&format!(".claude/worktrees/{id}"))) && line.contains(&format!("worktree-{id}")), "{line}");
     // **경로는 뿌리에서 잰 것이다** — 절대 경로가 그대로 나가면 위의 `contains` 도 지나가므로 여기서 못박는다.
     assert!(!line.contains(&main.display().to_string()), "뿌리에서 안 잘랐다\n{line}");
     let json = ok(&main, &["show", &id, "--json"]);
@@ -19818,7 +19832,7 @@ fn skill_uninstall_names_the_shared_skills_and_deletes_nothing() {
     assert!(out.status.success(), "{}", text(&out));
     let said = text(&out);
     for name in ["moai", "moai-wiki"] {
-        assert!(shell_spelt(&said, "rm -r ", shared.join(name).display()), "{name} 을 안 댄다\n{said}");
+        assert!(shell_spelt(&said, "rm -r ", shared.join(name).display(), ""), "{name} 을 안 댄다\n{said}");
         assert!(shared.join(name).join("SKILL.md").is_file(), "{name} 을 지웠다");
     }
     // 심지 않은 감독 스킬은 대지 않는다 — 없는 자리를 `rm -r` 로 대면 사람이 무엇이 있는지 헛갈린다.
@@ -20000,8 +20014,8 @@ fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
 
     let out = c.run(s.path(), &["skill", "uninstall", "--agent", "codex", "--agent", "antigravity"], true);
     let said = text(&out);
-    assert!(shell_spelt(&said, "rm ", codex.display()), "moai 의 훅을 안 댄다\n{said}");
-    assert!(!shell_spelt(&said, "rm ", agy.display()), "남의 훅을 지우라고 한다\n{said}");
+    assert!(shell_spelt(&said, "rm ", codex.display(), ""), "moai 의 훅을 안 댄다\n{said}");
+    assert!(!shell_spelt(&said, "rm ", agy.display(), ""), "남의 훅을 지우라고 한다\n{said}");
     assert!(codex.is_file() && agy.is_file(), "파일을 지웠다");
 }
 
@@ -22637,7 +22651,7 @@ fn status_tells_an_old_planted_line_to_be_replanted() {
     let said = ok(root, &["status"]);
     assert!(said.contains("옛 판이다"), "옛 줄을 안 댔다\n{said}");
     assert!(
-        said.contains(&format!("merge-driver --install --as {BIN}")),
+        shell_spelt(&said, "merge-driver --install --as ", BIN, ""),
         "같은 명령으로 다시 심으라고 안 한다\n{said}"
     );
     assert!(!said.contains("안 돈다"), "도는 명령을 못 돈다고 했다\n{said}");
