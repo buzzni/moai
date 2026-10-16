@@ -48,9 +48,11 @@ minutes. CI has five jobs: one runs clippy and the tests on the dev profile,
 one works out whether anything outside the docs changed, one builds the crate
 with the `rust-version` written in `Cargo.toml`, one runs clippy and builds the
 tests on Windows without running them, and the last builds the release binary
-and checks it against the 15 MB budget. Only the first is a required check, and
-the last three show as skipped - not failed - on a pull request that touched
-documentation alone.
+and checks it against the 15 MB budget. The dev-profile job and the
+release-budget job are the required checks; the others are not. The jobs that
+skip on a pull request that touched documentation alone show as skipped - not
+failed - and a skipped required check still counts as passing, so a docs-only
+pull request is not held up.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
