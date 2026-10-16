@@ -2240,17 +2240,22 @@ mod tests {
     /// 안 접은 철자도 같다고 한다(`crate::path` 의 시험이 적어 둔 덫이다).
     #[test]
     fn the_spelling_is_argv0_folded_against_cwd() {
-        let cwd = Path::new("/repo/.claude/worktrees/w");
+        // 유닉스 꼴로 적은 표본을 이 기계의 절대 철자로(moai-lag7.vva) — Windows 에서 `/repo` 는 드라이브가 없어 절대
+        // 경로가 아니고, 접은 철자는 그 기계의 가름선으로 선다. 유닉스에서는 받은 그대로다.
+        let abs = |s: &str| if cfg!(windows) { format!("C:{}", s.replace('/', r"\")) } else { s.to_string() };
+        let cwd = PathBuf::from(abs("/repo/.claude/worktrees/w"));
+        let cwd = cwd.as_path();
         let at = |argv0: &str| spelled(Some(Path::new(argv0)), Some(cwd)).map(|p| p.display().to_string());
-        assert_eq!(at("../../../target/release/moai").as_deref(), Some("/repo/target/release/moai"));
-        assert_eq!(at("./target/release/moai").as_deref(), Some("/repo/.claude/worktrees/w/target/release/moai"));
-        assert_eq!(at("/repo/./target/release/moai").as_deref(), Some("/repo/target/release/moai"));
-        assert_eq!(at("/repo/scripts/../target/release/moai").as_deref(), Some("/repo/target/release/moai"));
+        let want = |s: &str| Some(abs(s));
+        assert_eq!(at("../../../target/release/moai"), want("/repo/target/release/moai"));
+        assert_eq!(at("./target/release/moai"), want("/repo/.claude/worktrees/w/target/release/moai"));
+        assert_eq!(at(&abs("/repo/./target/release/moai")), want("/repo/target/release/moai"));
+        assert_eq!(at(&abs("/repo/scripts/../target/release/moai")), want("/repo/target/release/moai"));
         assert_eq!(at("moai"), None);
         assert_eq!(spelled(None, Some(cwd)), None);
         // `cwd` 를 못 읽으면 상대 철자는 붙일 데가 없다. 절대 철자는 그대로 선다.
         assert_eq!(spelled(Some(Path::new("target/release/moai")), None), None);
-        assert_eq!(spelled(Some(Path::new("/x/moai")), None), Some(PathBuf::from("/x/moai")));
+        assert_eq!(spelled(Some(Path::new(&abs("/x/moai"))), None), Some(PathBuf::from(abs("/x/moai"))));
     }
 
     /// **훅 한 줄에 못 적는 철자는 안 낸다**(리뷰 moai-gu5m.ke0) — 그러면 부르는 쪽이 푼 자리로
@@ -2259,7 +2264,9 @@ mod tests {
     /// 가리키는 자리(`/proc`·`/dev`)는 훅의 셸에서 이 파일이 아니다.
     #[test]
     fn a_spelling_the_hook_cannot_carry_is_not_offered() {
-        let cwd = Path::new("/repo");
+        // 부른 자리는 이 기계의 절대 경로다(moai-lag7.vva) — Windows 에서 `/repo` 는 절대 경로가 아니라, 상대 철자를
+        // 붙일 데가 없어 모든 표본이 `None` 으로 떨어져 무엇도 못 잰다.
+        let cwd = if cfg!(windows) { Path::new(r"C:\repo") } else { Path::new("/repo") };
         let at = |argv0: &Path| spelled(Some(argv0), Some(cwd));
         for unwritable in ["/home/we$ird/moai", "../we\"ird/moai", "/home/tick`/moai"] {
             assert_eq!(at(Path::new(unwritable)), None, "{unwritable}: 못 적는 철자를 냈다");
@@ -2274,6 +2281,8 @@ mod tests {
             assert_eq!(spelled_for(Some(back), Some(cwd), false), None, "유닉스에서 `\\` 가 든 철자를 냈다");
             assert!(spelled_for(Some(back), Some(cwd), true).is_some(), "Windows 에서 `/` 로 적을 철자를 버렸다");
         }
+        // `/proc`·`/dev` 는 유닉스의 자리다 — Windows 에는 그런 자리가 없다(moai-lag7.vva).
+        #[cfg(unix)]
         for per_process in ["/proc/self/exe", "/proc/4242/exe", "/dev/fd/9", "/proc/self/cwd/target/release/moai"] {
             assert_eq!(at(Path::new(per_process)), None, "{per_process}: 프로세스마다 다른 자리를 냈다");
         }

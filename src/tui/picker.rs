@@ -364,7 +364,9 @@ mod tests {
     fn g_p_opens_a_path_field_whose_keys_are_letters() {
         let mut p = Picker::new(listing("/w", &["apps"]));
         path(&mut p);
-        assert_eq!(p.typing.as_ref().map(Input::text), Some("/w/"));
+        // 끝의 가름선은 이 기계의 것이다 — Windows 에서는 `\` 다(moai-lag7.vva).
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(p.typing.as_ref().map(Input::text), Some(format!("/w{sep}").as_str()));
         for c in "qajkgghlGp".chars() {
             assert_eq!(press(&mut p, KeyCode::Char(c)), Act::Stay);
         }
@@ -425,7 +427,7 @@ mod tests {
 
         let mut p = Picker::new(listing("/home/coder/work", &[]));
         path(&mut p);
-        assert_eq!(text(&p).as_deref(), Some("/home/coder/work/"));
+        assert_eq!(text(&p), Some(format!("/home/coder/work{}", std::path::MAIN_SEPARATOR)));
         assert_eq!(p.key(alt_bksp, KO), Act::Stay);
         assert_eq!(text(&p).as_deref(), Some("/home/coder/"), "Alt-Backspace 가 한 층보다 많이 지웠다");
         p.key(ctrl_w, KO);
