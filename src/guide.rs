@@ -4913,11 +4913,12 @@ mod tests {
     fn tool(name: &str) -> Option<std::path::PathBuf> {
         use std::process::Command;
         let mut seen = Vec::new();
-        if cfg!(windows) && name == "bash" {
-            if let Ok(out) = crate::git::command().arg("--exec-path").output() {
-                let exec = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
-                seen.extend(exec.ancestors().nth(3).map(|git| git.join("bin").join("bash.exe")));
-            }
+        if cfg!(windows)
+            && name == "bash"
+            && let Ok(out) = crate::git::command().arg("--exec-path").output()
+        {
+            let exec = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+            seen.extend(exec.ancestors().nth(3).map(|git| git.join("bin").join("bash.exe")));
         }
         seen.push(std::path::PathBuf::from(name));
         let probe = if name.starts_with("python") { "pass" } else { "exit 0" };

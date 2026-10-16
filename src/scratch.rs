@@ -263,6 +263,24 @@ pub fn fence(dir: &Path) {
     std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap_or_else(fail);
 }
 
+/// [`crate::path::canonical`] 과 같은 자 — 링크를 풀고 Windows 의 `\\?\` 접두어를 걷는다(moai-lag7.951). [`real`] 과
+/// 같은 까닭으로 여기만 제 몸으로 든다. 도구가 내는 철자가 접두어 없는 꼴이니 시험 자리도 그 꼴로 서야 견주기가 맞는다.
+fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(p).map(plain)
+}
+
+/// [`crate::path::unverbatim`] 과 같은 규칙 — 유닉스에서는 글자 하나 안 바꾼다. 시험 자리는 늘 UTF-8 이라 글로 걷는다.
+fn plain(p: PathBuf) -> PathBuf {
+    let Some(s) = p.to_str() else { return p };
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,23 +401,5 @@ mod tests {
         // 갈 곳이 다 체크아웃 안이면 크게 실패한다 — 조용히 눌러앉지 않는다.
         let why = pick(inside.clone(), &[inside.as_path()]).unwrap_err();
         assert!(why.contains("TMPDIR"), "고칠 길을 안 댄다 — {why}");
-    }
-}
-
-/// [`crate::path::canonical`] 과 같은 자 — 링크를 풀고 Windows 의 `\\?\` 접두어를 걷는다(moai-lag7.951). [`real`] 과
-/// 같은 까닭으로 여기만 제 몸으로 든다. 도구가 내는 철자가 접두어 없는 꼴이니 시험 자리도 그 꼴로 서야 견주기가 맞는다.
-fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-    std::fs::canonicalize(p).map(plain)
-}
-
-/// [`crate::path::unverbatim`] 과 같은 규칙 — 유닉스에서는 글자 하나 안 바꾼다. 시험 자리는 늘 UTF-8 이라 글로 걷는다.
-fn plain(p: PathBuf) -> PathBuf {
-    let Some(s) = p.to_str() else { return p };
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{rest}"));
-    }
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) => PathBuf::from(rest),
-        None => p,
     }
 }

@@ -12015,8 +12015,7 @@ mod tests {
         a.hit("SPC s c Esc");
         let text = std::fs::read_to_string(&user).unwrap();
         assert!(
-            text.contains(&format!("[tui.{key}]\norder = [\"created\"]"))
-                && !text.contains(".worktrees"),
+            text.contains(&format!("[tui.{key}]\norder = [\"created\"]")) && !text.contains(".worktrees"),
             "뿌리가 아닌 자리에 적었다\n{text}"
         );
     }
