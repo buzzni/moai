@@ -96,6 +96,17 @@ fn js(text: impl std::fmt::Display) -> String {
     quoted[1..quoted.len() - 1].to_string()
 }
 
+/// 띄울 moai 의 임시 자리를 `dir` 로 둔다. **Windows 는 `TMPDIR` 을 안 읽는다**(moai-lag7.rrm) — `std::env::temp_dir`
+/// 은 거기서 `TMP`·`TEMP` 를 읽으므로, 훅이 쪽지·기준선을 적는 자리를 시험이 고르려면 그 둘도 준다. 유닉스는 `TMPDIR`
+/// 하나뿐이라 그대로다.
+fn temp_at(cmd: &mut Command, dir: impl AsRef<std::ffi::OsStr>) -> &mut Command {
+    let dir = dir.as_ref();
+    cmd.env("TMPDIR", dir);
+    #[cfg(windows)]
+    cmd.env("TMP", dir).env("TEMP", dir);
+    cmd
+}
+
 /// **시험이 띄우는 프로세스는 시험을 돌리는 사람의 기계를 읽지 않는다.** 모든
 /// 실행이 여기서 시작한다 — 따로 막기로 한 시험만 막혀 있으면 새 시험이 그것을
 /// 잊는 날 결과가 기계를 따라 달라진다. json 훑기의 `skill status` 가 진짜
@@ -4905,8 +4916,15 @@ fn a_text_over_the_limit_is_refused_whole_and_says_what_to_write_instead() {
     }
     ok(s.path(), &["rm", &thought]);
 
-    // 딱 상한은 받는다.
+    // 딱 상한은 받는다. Windows 의 명령줄은 32767 글자가 끝이라(`CreateProcessW`) 64KB 를 argv 에 못 싣는다 —
+    // 그쪽은 같은 상한을 지나는 stdin 으로 준다.
+    #[cfg(unix)]
     ok(s.path(), &["note", &id, &"a".repeat(limit)]);
+    #[cfg(not(unix))]
+    {
+        let out = from_stdin(s.path(), &["note", &id, "-b", "-"], &"a".repeat(limit));
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
 
     // 손으로 넣은 큰 본문은 막지 않는다 — 그 줄을 옮기고 제목을 고칠 수 있어야 한다.
     let path = s.path().join(".moai/issues.jsonl");
@@ -8233,11 +8251,18 @@ fn read_sheets(cfg: &std::path::Path, root: &std::path::Path) -> Vec<(PathBuf, S
     // 다섯 단언이 제품이 아니라 임시 자리의 철자 때문에 붉다. 어느 뿌리의 것인지를 보는 힘은 그대로다.
     let real = canon(root).unwrap_or_else(|e| panic!("{}: {e}", root.display()));
     let mine = format!("path = {:?}", real.display().to_string());
+    // TOML 은 `\` 를 품은 글을 따옴표 하나(`'…'`)로 적기도 한다 — Windows 의 자리가 늘 그 꼴이다(moai-lag7.rrm).
+    // 유닉스의 시험 자리에는 `\` 가 없어 앞의 꼴만 선다.
+    let literal = format!("path = '{}'", real.display());
     files
         .into_iter()
         .map(|p| {
             let text = std::fs::read_to_string(&p).expect("방금 본 파일이다");
-            assert!(text.contains(&mine), "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}", root.display());
+            assert!(
+                text.contains(&mine) || text.contains(&literal),
+                "{} 의 읽음이 아닌 파일이 곁에 섰다 — {text}",
+                root.display()
+            );
             (p, text)
         })
         .collect()
@@ -8731,7 +8756,7 @@ fn tests_do_not_read_the_runners_home() {
             plugins.join("installed_plugins.json"),
             format!(
                 "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"/없는/자리\",\"version\":\"0.0.1\"}}]}}}}",
-                root.display()
+                js(root.display())
             ),
         )
         .unwrap();
@@ -9125,8 +9150,12 @@ fn a_body_that_is_not_a_lone_file_name_stays_quiet() {
     // 여러 줄 — 첫 줄이 파일 이름이어도 본문이다. 줄바꿈이 든 이름의 파일이 **실제로 있어도** 한 줄이
     // 아니라서 안 센다(없는 경로는 줄바꿈 규칙이 없어도 안 걸리므로, 그 규칙은 이 파일이 지킨다).
     quiet(&["add", "여러 줄", "--body", "plan.md\n더 있다", "-q"], None);
-    std::fs::write(s.path().join("two\nlines.md"), "x").unwrap();
-    quiet(&["add", "줄바꿈 이름", "--body", "two\nlines.md", "-q"], None);
+    // 줄바꿈이 든 파일 이름은 NTFS 가 안 받는다 — 그 이름을 실제로 세우는 반쪽은 유닉스에서만 선다.
+    #[cfg(unix)]
+    {
+        std::fs::write(s.path().join("two\nlines.md"), "x").unwrap();
+        quiet(&["add", "줄바꿈 이름", "--body", "two\nlines.md", "-q"], None);
+    }
     // 없는 경로.
     quiet(&["add", "없는 파일", "--body", "nope.md", "-q"], None);
     // 디렉터리는 `--from` 이 읽지도 못하는 자리다 — 일반 파일만 센다.
@@ -14753,9 +14782,7 @@ fn hook_argv(
     for (k, v) in env {
         cmd.env(k, v);
     }
-    let mut child = cmd
-        .current_dir(run_in)
-        .env("TMPDIR", &tmp)
+    let mut child = temp_at(cmd.current_dir(run_in), &tmp)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -14896,9 +14923,8 @@ fn a_relative_slip_or_mark_takes_the_old_path() {
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
     let prompt = |session: &str, tmpdir: &Path, slip: &Path| {
-        let mut child = staged(&["hook", "user-prompt-submit"])
-            .current_dir(&shell_at)
-            .env("TMPDIR", tmpdir)
+        let mut cmd = staged(&["hook", "user-prompt-submit"]);
+        let mut child = temp_at(cmd.current_dir(&shell_at), tmpdir)
             .env("MOAI_HOOK_HANDOFF", slip)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -15375,11 +15401,9 @@ fn the_hook_works_where_stdin_says() {
     use std::io::Write as _;
     let tmp = s.path().join("hooktmp");
     std::fs::create_dir_all(&tmp).unwrap();
-    let mut child = isolated(BIN)
-        .args(["hook", "user-prompt-submit"])
-        .current_dir(elsewhere.path())
+    let mut cmd = isolated(BIN);
+    let mut child = temp_at(cmd.args(["hook", "user-prompt-submit"]).current_dir(elsewhere.path()), &tmp)
         .env("MOAI_NOW", NOW)
-        .env("TMPDIR", &tmp)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -18075,13 +18099,13 @@ fn installed_as(s: &Scratch, c: &Claude, bin: &Path, version: &str) -> (String, 
     // 옛 판 하나가 캐시에 남아 있다.
     std::fs::create_dir_all(copy.parent().unwrap().join("0.0.0")).unwrap();
 
-    c.ledger("known_marketplaces.json", &format!("{{\"{market}\":{{\"installLocation\":\"{}\"}}}}", dir.display()));
+    c.ledger("known_marketplaces.json", &format!("{{\"{market}\":{{\"installLocation\":\"{}\"}}}}", js(dir.display())));
     c.ledger(
         "installed_plugins.json",
         &format!(
             "{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"{}\",\"version\":\"{version}\"}}]}}}}",
-            root.display(),
-            copy.display()
+            js(root.display()),
+            js(copy.display())
         ),
     );
     (market, dir)
@@ -18416,8 +18440,8 @@ fn skill_uninstall_calls_each_scope_once() {
     let copy = c.home.path().join(format!(".claude/plugins/cache/{market}/moai/0.0.1"));
     let row = format!(
         "{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"{}\",\"version\":\"0.0.1\"}}",
-        root.display(),
-        copy.display()
+        js(root.display()),
+        js(copy.display())
     );
     c.ledger("installed_plugins.json", &format!("{{\"version\":2,\"plugins\":{{\"moai@{market}\":[{row},{row}]}}}}"));
     let before = c.calls().len();
@@ -18906,12 +18930,12 @@ fn skill_uninstall_takes_the_korean_plugins_along() {
     c.ledger("known_marketplaces.json", &known_with_retired(&market, &dir));
     let moai = format!(
         "{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":{},\"version\":\"0.0.1\"}}",
-        root.display(),
+        js(root.display()),
         json_str(&old_moai(c.home.path()))
     );
     let here = format!(
         "{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":\"/y\",\"version\":\"1\"}}",
-        root.display()
+        js(root.display())
     );
     let there = r#"{"scope":"local","projectPath":"/elsewhere","installPath":"/z","version":"1"}"#;
     c.ledger(
@@ -18942,7 +18966,7 @@ fn skill_uninstall_counts_the_korean_plugins_apart() {
     let row = |path: &str| {
         format!(
             "{{\"scope\":\"local\",\"projectPath\":\"{}\",\"installPath\":{},\"version\":\"1\"}}",
-            root.display(),
+            js(root.display()),
             json_str(path)
         )
     };
@@ -19948,7 +19972,7 @@ fn skill_install_plants_each_agents_hooks_and_leaves_foreign_ones() {
     let json = String::from_utf8(c.run(s.path(), &["skill", "status", "--json"], true).stdout).unwrap();
     one_json_value(&json);
     let state = |path: &Path, agent: &str, state: &str| {
-        format!("{{\"agent\":\"{agent}\",\"path\":\"{}\",\"state\":\"{state}\"}}", path.display())
+        format!("{{\"agent\":\"{agent}\",\"path\":\"{}\",\"state\":\"{state}\"}}", js(path.display()))
     };
     assert!(json.contains(&state(&codex, "codex", "current")), "{json}");
     assert!(json.contains(&state(&agy, "antigravity", "foreign")), "{json}");
@@ -20018,7 +20042,7 @@ fn skill_install_leaves_nothing_an_older_moai_planted() {
     assert!(!plugin.join("skills/moai-work").exists() && !shared.join("moai-supervise").exists(), "{json}");
     assert!(plugin.join("skills/moai-supervise/SKILL.md").is_file(), "Claude 의 감독을 걷었다");
     assert!(
-        json.contains(&format!("\"path\":\"{}\",\"state\":\"foreign\"", shared.join("moai-work").display())),
+        json.contains(&format!("\"path\":\"{}\",\"state\":\"foreign\"", js(shared.join("moai-work").display()))),
         "{json}"
     );
 
@@ -20255,7 +20279,7 @@ fn skill_hooks_are_judged_by_the_moai_they_call_and_by_what_is_inside() {
         text(&c.command(Path::new(recorded_bin()), s.path(), args, true).output().unwrap())
     };
     let row = |path: &Path, agent: &str, state: &str| {
-        format!("{{\"agent\":\"{agent}\",\"path\":\"{}\",\"state\":\"{state}\"}}", path.display())
+        format!("{{\"agent\":\"{agent}\",\"path\":\"{}\",\"state\":\"{state}\"}}", js(path.display()))
     };
     let json = status(true);
     for (path, agent) in [(&codex, "codex"), (&agy, "antigravity")] {
@@ -20998,7 +21022,9 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
     let added = project_ok(home.path(), &config, &["project", "add", "bare"]);
     assert!(added.contains("등록함") && added.contains("init 전"), "{added}");
     let written = std::fs::read_to_string(&config).unwrap();
-    assert!(written.contains(&format!("path = \"{}\"", bare_real.display())), "절대경로로 적지 않았다\n{written}");
+    // TOML 은 `\` 를 품은 글을 따옴표 하나로 적기도 한다 — Windows 의 자리가 늘 그 꼴이다(moai-lag7.rrm).
+    let (basic, literal) = (format!("path = {:?}", bare_real.display().to_string()), format!("path = '{}'", bare_real.display()));
+    assert!(written.contains(&basic) || written.contains(&literal), "절대경로로 적지 않았다\n{written}");
 
     let ls = project_ok(home.path(), &config, &["project", "ls"]);
     let lines: Vec<&str> = ls.lines().collect();
@@ -21007,12 +21033,12 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
 
     let json = project_ok(home.path(), &config, &["project", "ls", "--json"]);
     one_json_value(&json);
-    assert!(json.contains(&format!("\"config\":\"{}\"", config.display())), "{json}");
+    assert!(json.contains(&format!("\"config\":\"{}\"", js(config.display()))), "{json}");
     assert!(json.contains("\"state\":\"initialized\",\"counts\":{"), "{json}");
     assert!(
         json.contains(&format!(
             "{{\"name\":\"bare\",\"path\":\"{}\",\"state\":\"uninitialized\"}}",
-            bare_real.display()
+            js(bare_real.display())
         )),
         "{json}"
     );
@@ -21224,6 +21250,8 @@ fn project_color_finds_every_spelling_that_rm_can_remove() {
 /// **안내가 대는 명령은 붙여 넣으면 그 디렉터리로 풀린다.** 경로를 화면용 `one_line` 에
 /// 지나게 한 뒤 감쌌을 때는 이름 속 탭이 빈칸이 된 채 인용돼, 시키는 대로 치면 없는
 /// 디렉터리를 가리켰다(moai-0cl3). 제어문자는 `$'…'` 로 한 줄에 원문 그대로 선다.
+// 탭이 든 디렉터리 이름은 NTFS 가 안 받는다 — 그 이름을 실제로 세워야 재는 시험이다.
+#[cfg(unix)]
 #[test]
 fn a_hint_spells_a_path_with_a_tab_so_the_shell_gets_that_directory() {
     let home = Scratch::new("project-tab");
@@ -21284,11 +21312,17 @@ fn project_registers_monorepo_subdirs_separately() {
 
     let json = project_ok(repo.path(), &config, &["project", "ls", "--json"]);
     let root = canon(repo.path()).unwrap();
-    for (name, path) in [("apps/a", root.join("apps/a")), ("b", root.join("apps/b")), ("libs/a", root.join("libs/a"))] {
-        let row = format!("{{\"name\":\"{name}\",\"path\":\"{}\",\"state\":\"uninitialized\"", path.display());
+    // 자리는 조각으로 잇고 JSON 글로 푼다(moai-lag7.rrm) — `join("apps/a")` 는 Windows 에서 `\apps/a` 로 갈라 서고,
+    // 날것의 `\` 는 도구가 낸 `\\` 와 안 맞는다. 유닉스에서는 글자가 그대로다.
+    for (name, path) in [
+        ("apps/a", root.join("apps").join("a")),
+        ("b", root.join("apps").join("b")),
+        ("libs/a", root.join("libs").join("a")),
+    ] {
+        let row = format!("{{\"name\":\"{name}\",\"path\":\"{}\",\"state\":\"uninitialized\"", js(path.display()));
         assert!(json.contains(&row), "{row} 가 없다 — 루트의 .moai 를 제 것으로 읽었거나 이름을 못 갈랐다\n{json}");
     }
-    assert!(json.contains(&format!("\"path\":\"{}\",\"state\":\"initialized\"", root.display())), "{json}");
+    assert!(json.contains(&format!("\"path\":\"{}\",\"state\":\"initialized\"", js(root.display()))), "{json}");
 }
 
 /// 사라진 디렉터리는 `ls` 가 그 줄만 말하고 0 으로 끝나며, 적힌 경로로 뺄 수 있다.
@@ -27693,6 +27727,8 @@ fn archive_regressions_the_explorer_opens_beside_a_broken_archive_directory() {
 
 /// **What is said about an archive file is the file's own words, cleaned**(review of moai-bth3) — a committed file name
 /// carries no terminal control sequence to stderr, and an unreadable archive row names its id like an active one.
+// 제어문자가 든 파일 이름은 NTFS 가 안 받는다 — 그 이름을 실제로 세워야 재는 시험이다.
+#[cfg(unix)]
 #[test]
 fn archive_regressions_archive_diagnostics_strip_control_characters_and_name_ids() {
     let s = init("archive-diagnostic-text");
