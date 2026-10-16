@@ -121,6 +121,13 @@ fn sh_path(p: &Path) -> String {
     if s.contains('\\') { format!("'{s}'") } else { s }
 }
 
+/// 도구가 `-C` 에 대는 꼴의 자리(moai-lag7.951) — Windows 에서는 `\` 를 `/` 로 바꾼 `C:/…` 다(`path::slashed`). 그 꼴은 셸이
+/// 그대로 읽으니 시험이 쳐 넣는 줄에도 쓴다. 유닉스에서는 받은 그대로다.
+fn aimed(p: &Path) -> String {
+    let s = p.display().to_string();
+    if cfg!(windows) { s.replace('\\', "/") } else { s }
+}
+
 fn shell_spelt(said: &str, before: &str, path: impl std::fmt::Display, after: &str) -> bool {
     said.contains(&format!("{before}{path}{after}")) || said.contains(&format!("{before}'{path}'{after}"))
 }
@@ -17355,7 +17362,7 @@ fn a_review_picked_in_main_opens_the_review_inside_the_worktree() {
 fn a_dash_c_at_the_root_is_judged_by_the_roots_snapshot_when_the_trackers_really_split() {
     let s = Scratch::new("hookaimsplit");
     let (main, inside, id) = picked_in_a_worktree(&s);
-    let mp = main.display().to_string();
+    let mp = aimed(&main);
     let here = |cmd: &str| tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
 
     // 규약대로 루트에 리뷰를 세우고 집는다 — 워크트리의 스냅샷(HEAD)에는 그 줄이 없다.
@@ -17407,7 +17414,7 @@ fn a_pick_spelled_with_dash_c_at_the_root_still_counts_for_rule_two() {
     git(&main, &["commit", "-q", "-m", "세운다"]);
     git(&main, &["worktree", "add", "-q", ".claude/worktrees/w", "-b", "worktree-w"]);
     let inside = main.join(".claude/worktrees/w");
-    let mp = main.display().to_string();
+    let mp = aimed(&main);
     let here = |cmd: &str| tool_here(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
     assert!(!issues(&inside).contains("in_progress"), "양쪽 다 빈손이어야 규칙 2 를 잰다");
 
@@ -17423,7 +17430,7 @@ fn a_pick_spelled_with_dash_c_at_the_root_still_counts_for_rule_two() {
     let far = field(&ok(&other, &["add", "남의 일", "--json"]), "id");
     let why = refusal(&here(&format!(
         "moai -C {} mv {far} in_progress --from todo && sed -i s/a/b/ src/x.rs",
-        other.display()
+        aimed(&other)
     )));
     assert!(why.contains("Rule 2"), "남의 트래커의 집기가 여기 규칙 2 를 채웠다\n{why}");
 }
@@ -17580,7 +17587,7 @@ fn a_note_does_not_bring_back_a_deny_the_fresh_view_lifted() {
 fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     let s = Scratch::new("hookaimroot");
     let (main, inside, _, id) = epic_member_in_a_worktree(&s);
-    let wt = inside.display().to_string();
+    let wt = aimed(&inside);
     for typed in ["moai -C . add '딴 일'", &format!("moai -C {wt} add '딴 일'"), "cd src && moai -C .. add '딴 일'"]
     {
         std::fs::create_dir_all(inside.join("src")).unwrap();
@@ -17598,7 +17605,7 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     ok(&other, &["init", "argos"]);
     let theirs = field(&ok(&other, &["add", "남의 일", "--json"]), "id");
     ok(&other, &["mv", &theirs, "in_progress"]);
-    let op = other.display().to_string();
+    let op = aimed(&other);
     let why = refusal(&tool_at(
         &s,
         &main,
@@ -17627,7 +17634,7 @@ fn a_refusal_in_a_worktree_aims_at_the_root_tracker() {
     // **아직 없는 자리를 가리킨 줄은 그 자리를 그대로 댄다**(리뷰 moai-51h9.n0z 13번) — 판정은 이
     // 트래커가 맡되, 옮겨 친 줄이 이 트래커에 서면 안 된다.
     let fresh = s.path().join("newproj");
-    let np = fresh.display().to_string();
+    let np = aimed(&fresh);
     let make = format!("mkdir -p {np} && moai -C {np} add '딴 일'");
     let why = refusal(&tool_at(&s, &inside, "Bash", &format!("{{\"command\":{}}}", json_str(&make))));
     assert!(why.contains(&format!("moai -C {np} add '<title>'")), "없는 자리의 -C 를 버렸다\n{why}");
@@ -17898,7 +17905,7 @@ fn notes_and_refusals_from_two_trackers_are_joined_in_one_order() {
     let wb = field(&ok(b.path(), &["add", "B 의 일", "-e", &eb, "--json"]), "id");
     ok(b.path(), &["mv", &wb, "in_progress"]);
     let bash = |cmd: &str| tool_at(&a, a.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
-    let bp = sh_path(b.path());
+    let bp = aimed(b.path());
 
     // 제 자리의 물음이 남의 트래커의 규칙 1 을 가리지 않는다.
     let why = refusal(&bash(&format!("moai backlog add \"a\"; moai -C {bp} add \"딴 일\"")));
@@ -21136,7 +21143,7 @@ fn project_add_ls_rm_round_trip_outside_any_moai() {
     assert!(gone.contains("뺌") && gone.contains(&bare_real.display().to_string()), "{gone}");
     let rm_json = project_ok(home.path(), &config, &["project", "rm", argos.path().to_str().unwrap(), "--json"]);
     one_json_value(&rm_json);
-    assert!(rm_json.contains(&format!("\"removed\":[\"{}\"]", argos_real.display())), "{rm_json}");
+    assert!(rm_json.contains(&format!("\"removed\":[\"{}\"]", js(argos_real.display()))), "{rm_json}");
     assert!(bare.is_dir() && argos.path().join(".moai/issues.jsonl").is_file(), "목록 밖의 것을 건드렸다");
 
     let empty = project_ok(home.path(), &config, &["project", "ls", "--json"]);
@@ -26151,7 +26158,9 @@ fn init_reads_a_linked_worktrees_guide_from_the_main_tracker() {
     std::fs::write(main.join(".moai/guide.md"), b"bad\xff\n").unwrap();
     let out = moai(&side, &["init", "--check"]);
     assert!(!out.status.success());
-    let err = String::from_utf8_lossy(&out.stderr);
+    // Windows 에서 도구는 뿌리(`C:\…`)에 `.moai/guide.md` 를 그대로 이어 `\` 와 `/` 가 섞여 선다 — 두 가름 글자를 하나로
+    // 모아 견준다(moai-lag7.951). 유닉스에는 바꿀 글자가 없다.
+    let err = String::from_utf8_lossy(&out.stderr).replace('/', std::path::MAIN_SEPARATOR_STR);
     assert!(err.contains(&main.join(native(".moai/guide.md")).display().to_string()), "{err}");
 }
 
@@ -26340,7 +26349,7 @@ fn a_codex_patch_is_judged_file_by_file() {
     // **상대 경로는 세션의 자리(`cwd`)에 붙는다** — 저장소 뿌리가 아니다(리뷰 moai-u5wr.e74). 기록은 그 둘이 같아 뿌리에
     // 붙여도 위의 줄들은 푸르다.
     std::fs::create_dir_all(s.path().join("src")).unwrap();
-    let here = s.path().display().to_string();
+    let here = js(s.path().display());
     let nested = second
         .replace(&format!("\"cwd\": \"{here}\""), &format!("\"cwd\": \"{here}/src\""))
         .replace("*** Update File: src/store.rs", "*** Update File: store.rs");
@@ -26397,7 +26406,7 @@ fn antigravity_calls_are_answered_in_its_shape() {
         assert!(!out.contains("allow") && !out.contains("hookSpecificOutput"), "{out}");
     };
     refused(&run.replace("echo moai-hook-probe", "sed -i s/a/b/ src/store.rs"));
-    let inside = format!("{}/src/store.rs", s.path().display());
+    let inside = js(format!("{}/src/store.rs", s.path().display()));
     for rel in ["antigravity/pre-tool-use-write-to-file.json", "antigravity/pre-tool-use-replace-file-content.json"] {
         let tool = recorded(&s, rel);
         assert!(
@@ -26411,7 +26420,7 @@ fn antigravity_calls_are_answered_in_its_shape() {
     // **명령이 도는 자리(`Cwd`)가 작업 자리보다 먼저다**(리뷰 moai-u5wr.e74) — 상대 경로는 거기서 푼다. 기록은 두 자리가
     // 같아, 차례를 뒤집어도 위의 줄들은 푸르다.
     std::fs::create_dir_all(s.path().join("src")).unwrap();
-    let here = s.path().display().to_string();
+    let here = js(s.path().display());
     let nested = run
         .replace(&format!("\"Cwd\": \"{here}\""), &format!("\"Cwd\": \"{here}/src\""))
         .replace("echo moai-hook-probe", "sed -i s/a/b/ store.rs");
