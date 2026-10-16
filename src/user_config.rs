@@ -99,15 +99,17 @@ pub enum ModelsTrouble {
 /// - `XDG_CONFIG_HOME` 이 상대경로면 무시한다 — XDG 명세가 그렇게 정했고,
 ///   따르지 않으면 부른 자리마다 다른 파일을 읽는다
 /// - `MOAI_CONFIG` 는 준 그대로다. 시험·격리가 가리키는 파일이라 고르는 쪽의 몫이다
+/// - 붙이는 조각은 하나씩 잇는다(moai-lag7.951) — `"moai/config.toml"` 을 통째로 이으면 Windows 에서
+///   `C:\Users\x\.config/moai/config.toml` 처럼 가름선이 섞인 철자가 깨진 설정을 대는 말에 그대로 선다
 pub fn path_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     let set = |k: &str| env(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     if let Some(p) = set("MOAI_CONFIG") {
         return Some(p);
     }
     if let Some(x) = set("XDG_CONFIG_HOME").filter(|p| p.is_absolute()) {
-        return Some(x.join("moai/config.toml"));
+        return Some(x.join("moai").join("config.toml"));
     }
-    home_here(&env).map(|h| h.join(".config/moai/config.toml"))
+    home_here(&env).map(|h| h.join(".config").join("moai").join("config.toml"))
 }
 
 /// 이 프로세스의 환경으로 [`path_from`].
@@ -2464,6 +2466,16 @@ mod tests {
         assert_eq!(path_from(e), Some("/h/.config/moai/config.toml".into()));
         let e = env(&[("XDG_CONFIG_HOME", ""), ("HOME", "/h")]);
         assert_eq!(path_from(e), Some("/h/.config/moai/config.toml".into()));
+    }
+
+    /// **붙이는 조각은 이 기계의 가름선을 탄다**(moai-lag7.951) — `Path` 의 견주기는 가름선을 안 보니 위 시험은
+    /// 섞인 철자를 못 잡는다. 사람에게 대는 글자로 잰다.
+    #[test]
+    fn the_config_path_is_spelt_with_one_separator() {
+        let sep = std::path::MAIN_SEPARATOR;
+        let home = format!("{sep}h");
+        let got = path_from(env(&[("HOME", home.as_str())])).unwrap();
+        assert_eq!(got.to_str().unwrap(), format!("{sep}h{sep}.config{sep}moai{sep}config.toml"));
     }
 
     #[test]
