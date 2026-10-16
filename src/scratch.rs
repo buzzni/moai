@@ -105,6 +105,13 @@ impl Scratch {
     pub fn path(&self) -> &Path {
         &self.0
     }
+
+    /// 이 자리 밑의 **사람이 치는 철자** — 끝 `/` 나 `..` 이 든 꼴을 그대로 지킨다. 자리는 푼 철자라
+    /// Windows 에서 `\\?\C:\…` 로 서는데, 그 꼴에 `join` 하면 Rust 가 `/` 를 `\` 로 바꾸고 `..` 까지
+    /// 접어 "같은 자리의 다른 철자" 를 재는 시험의 전제가 무너진다(moai-lag7.951). 유닉스에서는 `join` 그대로다.
+    pub fn spelt(&self, tail: &str) -> PathBuf {
+        PathBuf::from(crate::path::unverbatim(self.0.as_os_str())).join(tail)
+    }
 }
 
 impl std::ops::Deref for Scratch {

@@ -9163,7 +9163,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         // 옛 바이너리가 안 푼 철자로 적어 둔 파일 — 끝 `/` 하나가 딴 이름을 냈다.
-        let slashed = s.path().join("proj/");
+        let slashed = s.spelt("proj/");
         let old = crate::path::dir_of(&config)
             .join("read")
             .join(format!("{:016x}.toml", crate::text::fnv1a64(slashed.as_os_str().as_encoded_bytes())));
@@ -9662,7 +9662,7 @@ mod tests {
         let root = s.path().join("proj");
         std::fs::create_dir_all(&root).unwrap();
         // 등록 줄이 든 철자 — 끝 `/` 하나가 딴 이름을 낸다.
-        let slashed = s.path().join("proj/");
+        let slashed = s.spelt("proj/");
         let mut a = app();
         for i in &mut a.site.issues {
             i.assignee = Some("레이븐".into());

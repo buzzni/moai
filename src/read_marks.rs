@@ -1356,7 +1356,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let real = std::fs::canonicalize(&root).unwrap();
 
-        let spellings = [root.clone(), s.join("proj/"), s.join("proj/../proj"), real.clone()];
+        let spellings = [root.clone(), s.spelt("proj/"), s.spelt("proj/../proj"), real.clone()];
         for (n, spelling) in spellings.iter().enumerate() {
             let id = format!("argos-{n:04}");
             upd(&cfg, spelling, |sh| sh.mark(&marks(&[(&id, "A")]))).unwrap();
@@ -1392,7 +1392,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         // 옛 바이너리가 안 푼 철자로 적어 둔 파일 — 끝 `/` 하나가 딴 이름을 냈다.
-        let slashed = s.join("proj/");
+        let slashed = s.spelt("proj/");
         let old = sheet_at(dir_of(&cfg), &slashed);
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         let before = format!("path = {:?}\n\n[read]\n\"argos-0001\" = \"옛것\"\n", slashed.display().to_string());
@@ -1438,7 +1438,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         let (past, here, latest) = ("2026-09-20T00:00:00Z", "2026-09-21T00:00:00Z", "2026-09-25T00:00:00Z");
-        let slashed = s.join("proj/");
+        let slashed = s.spelt("proj/");
         let old = sheet_at(dir_of(&cfg), &slashed);
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::write(
@@ -1470,7 +1470,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         let (early, mid, late) = ("2026-09-19T00:00:00Z", "2026-09-21T00:00:00Z", "2026-09-23T00:00:00Z");
-        let slashed = s.join("proj/");
+        let slashed = s.spelt("proj/");
         let dir = dir_of(&cfg);
         let spool = spool_at(dir, &slashed);
         std::fs::create_dir_all(spool.parent().unwrap()).unwrap();
@@ -1545,7 +1545,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
 
         let (here, word) = ("2026-09-21T00:00:00Z", "어제 읽음");
-        let slashed = s.join("proj/");
+        let slashed = s.spelt("proj/");
         let dir = dir_of(&cfg);
         let spool = spool_at(dir, &slashed);
         std::fs::create_dir_all(spool.parent().unwrap()).unwrap();
@@ -1742,7 +1742,7 @@ mod tests {
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
         // **받은 철자가 푼 경로와 다르다** — 그래야 떨어진 자리가 다음 판에 옛 자리로 선다.
-        let spelling = s.join("문/proj/../proj");
+        let spelling = s.spelt("문/proj/../proj");
         let at = place_of(&cfg, &spelling).at;
         let fell = spool_at(dir_of(&cfg), &spelling);
         assert_ne!(at, fell, "시험의 전제 — 푼 자리와 대기 자리가 딴 파일이다");
@@ -1811,7 +1811,7 @@ mod tests {
         std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
-        let spelling = s.join("문/proj/../proj");
+        let spelling = s.spelt("문/proj/../proj");
         let (at, fell) = (place_of(&cfg, &spelling).at, spool_at(dir_of(&cfg), &spelling));
         let block = || {
             std::fs::remove_file(&gate).unwrap();
@@ -1910,7 +1910,7 @@ mod tests {
         std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
         let gate = s.join("문");
         std::os::unix::fs::symlink("real", &gate).unwrap();
-        let spelling = s.join("문/proj/../proj");
+        let spelling = s.spelt("문/proj/../proj");
         upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("z", "내 것")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
@@ -2170,7 +2170,7 @@ mod tests {
         std::os::unix::fs::symlink("막힌 것", s.join("막힌 것")).unwrap();
         let gate = s.join("문");
         std::os::unix::fs::symlink("막힌 것", &gate).unwrap();
-        let spelling = s.join("문/proj/../proj");
+        let spelling = s.spelt("문/proj/../proj");
         upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("b", "떨어진 판")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("real", &gate).unwrap();
@@ -2204,7 +2204,7 @@ mod tests {
         let at = place_of(&cfg, &root).at;
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
         // 같은 자리를 딴 철자로 적어 둔 파일.
-        let spelled = s.join("proj/../proj");
+        let spelled = s.spelt("proj/../proj");
         std::fs::write(&at, format!("path = {:?}\n\n[read]\n\"a\" = \"A\"\n", spelled.display().to_string())).unwrap();
 
         let got = read(&cfg, &root, &BTreeMap::new());
@@ -2717,7 +2717,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
-        let slashed = s.join("proj/");
+        let slashed = s.spelt("proj/");
         let old = sheet_at(dir_of(&cfg), &slashed);
         std::fs::create_dir_all(dir_of(&old)).unwrap();
         std::fs::write(&old, format!("path = {:?}\n\n[read]\n\"a\" = \"옛 철자\"\n", slashed.display().to_string()))
