@@ -500,7 +500,7 @@ const LOST: &str = "lost";
 use crate::tui::App;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, Event, KeyEventKind, MouseEventKind,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind, MouseEventKind,
 };
 
 /// bracketed paste 를 켜거나 끈다 — xterm 의 2004 번. 쓰는 곳을 받는 것은 시험이 그 글을
@@ -522,15 +522,20 @@ fn bracketed_paste(out: &mut impl std::io::Write, on: bool) -> std::io::Result<(
 /// 어느 꼴로 올지가 터미널마다 갈린다. **켜기 전에 둘을 끈다**(리뷰) — 편집기 같은 남이 켜 둔 채 끝났으면 그대로
 /// 남아 움직임마다 사건이 온다.
 ///
-/// **끌 때는 `DisableMouseCapture` 를 쓴다**(리뷰) — 켠 차례의 거꾸로이고 1003·1015 번까지 끈다. 안 켠 것을 끄는
-/// 것은 터미널에 아무 일도 아니다.
+/// **끌 때는 `DisableMouseCapture` 의 글을 쓴다**(리뷰) — 켠 차례의 거꾸로이고 1003·1015 번까지 끈다. 안 켠 것을
+/// 끄는 것은 터미널에 아무 일도 아니다.
+///
+/// **그 글도 여기서 바로 쓴다**(moai-lag7.sk7). crossterm 의 `execute!(DisableMouseCapture)` 는 Windows 에서 글을 안
+/// 쓰고 콘솔 입력 모드를 `EnableMouseCapture` 가 적어 둔 값으로 되돌리려 드는데, 켤 때 그것을 안 거쳤으니 "Initial
+/// console modes not set" 으로 아무것도 안 했다 — 켤 때 쓴 1000·1002·1006 번이 꺼지지 않아, 탐색기를 닫은 셸에
+/// 마우스 보고가 날 글로 찍혔다. 유닉스에서는 `execute!` 가 쓰던 바이트 그대로다.
 ///
 /// 쓰는 곳을 받는 것은 [`bracketed_paste`] 와 같은 까닭이다 — 시험이 그 글을 본다.
 fn mouse_capture(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()> {
-    if !on {
-        return ratatui::crossterm::execute!(out, DisableMouseCapture);
-    }
-    out.write_all(b"\x1b[?1003l\x1b[?1015l\x1b[?1000h\x1b[?1002h\x1b[?1006h")?;
+    out.write_all(match on {
+        true => b"\x1b[?1003l\x1b[?1015l\x1b[?1000h\x1b[?1002h\x1b[?1006h",
+        false => b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l",
+    })?;
     out.flush()
 }
 
