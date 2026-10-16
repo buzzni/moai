@@ -323,6 +323,98 @@ impl Thresholds {
     }
 }
 
+/// 남은 날수로 우선순위를 올리는 규칙(moai-dr8a.cf1, 2026-10-16 사용자 결정).
+///
+/// **올리는 자는 `moai due apply` 하나다** — 이 값은 그 동사와 `moai status` 의 알림이 읽을 뿐, 읽는 길이 줄을
+/// 고치지 않는다. 문턱은 "남은 날이 이 날수 **이하**" 다: 오늘·지난 기한은 남은 날이 0 이하라 언제나 `p0` 칸에 든다.
+///
+/// **평평한 키로 둔다** — [`Thresholds`] 와 같은 까닭이다. 그리고 **`status_` 접두어를 안 쓴다**: 옛 바이너리는
+/// 모르는 `status_*` 키에서 설정 전체를 거절하므로, 그 이름을 쓰면 새 키를 적은 저장소에서 옛 바이너리가 통째로
+/// 선다. `due_*` 는 옛 바이너리가 모르는 키로 조용히 넘긴다.
+///
+/// ```toml
+/// due_priority = "auto"   # 또는 "off" — 앞으로의 변경만 멈춘다
+/// due_p0_days  = 1
+/// due_p1_days  = 2
+/// due_p2_days  = 7
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DueRule {
+    /// `due_priority = "auto"` 인가. `off` 면 `moai due apply` 는 아무것도 안 바꾸고 `status` 도 알리지 않는다.
+    pub auto: bool,
+    /// 남은 날이 이 날수 이하면 `p0` 이다.
+    pub p0_days: i64,
+    /// 남은 날이 이 날수 이하면 `p1` 이다.
+    pub p1_days: i64,
+    /// 남은 날이 이 날수 이하면 `p2` 다. 그보다 많이 남은 줄은 손대지 않는다.
+    pub p2_days: i64,
+}
+
+impl Default for DueRule {
+    fn default() -> DueRule {
+        DueRule::DEFAULT
+    }
+}
+
+impl DueRule {
+    /// 한 줄도 안 적은 저장소가 받는 값 — 켜져 있고 문턱은 1·2·7 이다(2026-10-16 사용자 결정).
+    pub const DEFAULT: DueRule = DueRule { auto: true, p0_days: 1, p1_days: 2, p2_days: 7 };
+
+    /// `due_priority` 가 받는 낱말, 파일에 적는 그대로다. 첫 것이 켠 것이다.
+    pub const MODES: [&'static str; 2] = ["auto", "off"];
+
+    /// 아는 키 — 테이블 안에 적은 줄을 잡는 데 쓴다([`DueRule::parse`]).
+    pub const KEYS: [&'static str; 4] = ["due_priority", "due_p0_days", "due_p1_days", "due_p2_days"];
+
+    /// 파일에 적는 낱말 — [`DueRule::MODES`] 의 하나.
+    pub fn mode(&self) -> &'static str {
+        DueRule::MODES[usize::from(!self.auto)]
+    }
+
+    fn parse(es: &[Entry<'_>]) -> Result<DueRule, Trouble> {
+        // **테이블 안에 적은 줄은 소리낸다** — [`Thresholds::check_keys`] 와 같은 까닭이다. 이 파서는 테이블을 안
+        // 읽으므로 `[due]` 밑의 `priority = "off"` 는 조용히 안 먹고, 끄려던 사람은 왜 안 꺼지는지 모른다.
+        //
+        // **소리내는 것은 아는 키뿐이다**(리뷰) — `check_keys` 가 `[status]` 밑의 모르는 키를 넘기는 것과 같은 자다.
+        // `[due]` 밑의 키를 다 막던 판은 모르는 키 하나(`calendar = "kr"`)로 모든 명령을 세우고, 아무도 안 읽는
+        // `due_calendar` 를 맨 위에 적으라고 했다 — 옛 바이너리는 그 파일을 그대로 읽는다.
+        for e in es {
+            let Some(table) = e.table else { continue };
+            let flat = format!("due_{}", e.key);
+            let named = if DueRule::KEYS.contains(&e.key) {
+                e.key.to_string()
+            } else if table == "due" && DueRule::KEYS.contains(&flat.as_str()) {
+                flat
+            } else {
+                continue;
+            };
+            return Err(Trouble::ThresholdInTable { line: e.line, named });
+        }
+        let d = DueRule::DEFAULT;
+        let auto = match text(es, "due_priority")? {
+            None => d.auto,
+            Some(raw) => match DueRule::MODES.iter().position(|m| *m == raw) {
+                Some(at) => at == 0,
+                None => return Err(Trouble::DueModeUnknown { raw }),
+            },
+        };
+        let written = |key| Ok::<_, Trouble>(number::<u32>(es, key, Want::Whole)?.map(i64::from));
+        let (w0, w1, w2) = (written("due_p0_days")?, written("due_p1_days")?, written("due_p2_days")?);
+        // **안 적은 문턱은 적은 문턱을 따라 비킨다**(리뷰) — `due_p0_days = 3` 하나만 적은 사람은 기본 `p1` 2 와
+        // 어긋나려던 것이 아니다. 비키지 않으면 그 한 줄이 훅까지 모든 명령을 세운다.
+        let p0_days = w0.unwrap_or_else(|| d.p0_days.min(w1.or(w2).unwrap_or(i64::MAX)));
+        let p1_days = w1.unwrap_or_else(|| d.p1_days.max(p0_days).min(w2.unwrap_or(i64::MAX)));
+        let p2_days = w2.unwrap_or_else(|| d.p2_days.max(p1_days));
+        let r = DueRule { auto, p0_days, p1_days, p2_days };
+        // **적은 문턱끼리 차례가 어긋나면 거절한다** — `p1` 이 `p0` 보다 좁으면 그 칸은 영영 안 서고, 고친 사람은 왜
+        // `p1` 으로 안 오르는지 화면에서 못 읽는다. 같은 값은 받는다: 그 칸을 접는 뜻이다.
+        if !(r.p0_days <= r.p1_days && r.p1_days <= r.p2_days) {
+            return Err(Trouble::DueDaysOrder { p0: r.p0_days, p1: r.p1_days, p2: r.p2_days });
+        }
+        Ok(r)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     /// id 접두어. 그 저장소의 프로젝트명이다.
@@ -346,6 +438,8 @@ pub struct Config {
     /// ([`crate::wiki::dir_of`])가 잰다 — `Config::parse` 가 거절하면 경로 오타 하나가 위키와 아무 상관 없는
     /// `moai status` 까지 세운다. 따옴표와 자리(테이블 밖)는 이 파일의 다른 글 키와 같은 자로 잰다.
     pub wiki_dir: String,
+    /// 기한이 우선순위를 올리는 규칙(moai-dr8a) — 평평한 키 `due_priority`·`due_p0_days`·`due_p1_days`·`due_p2_days`.
+    pub due: DueRule,
 }
 
 /// [`Config::archive_days`] 를 안 적은 저장소가 받는 날수 — 두 주(2026-10-03 사용자 결정).
@@ -415,8 +509,9 @@ impl Config {
         }
         let archive_days = days(es, ARCHIVE_KEY, ARCHIVE_DAYS)?;
         let wiki_dir = text(es, WIKI_KEY)?.unwrap_or_else(|| WIKI_DIR.into());
+        let due = DueRule::parse(es)?;
 
-        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir })
+        Ok(Config { prefix, statuses, naming, status, archive_days, wiki_dir, due })
     }
 
     /// 새 이슈가 놓이는 칸. 목록의 첫 칸이다.
@@ -497,7 +592,7 @@ pub enum Trouble {
     FlowDaysZero,
     /// `status_` 로 시작하는데 없는 설정이다 — 그 줄·키. **아는 키는 [`Thresholds::KEYS`] 가 댄다.**
     NoSuchThreshold { line: usize, key: String },
-    /// 평평한 키(문턱·`archive_days`·`wiki_dir`)를 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
+    /// 평평한 키(문턱·`archive_days`·`wiki_dir`·`due_*`)를 테이블 안에 적었다 — 그 줄과, 맨 위에 적을 평평한 이름.
     ThresholdInTable { line: usize, named: String },
     /// `prefix` 가 없다.
     NoPrefix,
@@ -509,6 +604,10 @@ pub enum Trouble {
     StatusTwice { status: String },
     /// `naming` 이 모르는 값이다 — 쓰인 그대로.
     NamingUnknown { raw: String },
+    /// `due_priority` 가 모르는 값이다 — 쓰인 그대로. 아는 낱말은 [`DueRule::MODES`] 가 댄다.
+    DueModeUnknown { raw: String },
+    /// 기한 문턱이 `due_p0_days <= due_p1_days <= due_p2_days` 가 아니다 — 읽힌 세 값.
+    DueDaysOrder { p0: i64, p1: i64, p2: i64 },
 }
 
 impl Trouble {
@@ -536,7 +635,9 @@ impl Trouble {
             | Trouble::NoStatuses
             | Trouble::NoDone { .. }
             | Trouble::StatusTwice { .. }
-            | Trouble::NamingUnknown { .. } => crate::fail::code::ERROR,
+            | Trouble::NamingUnknown { .. }
+            | Trouble::DueModeUnknown { .. }
+            | Trouble::DueDaysOrder { .. } => crate::fail::code::ERROR,
         }
     }
 }
@@ -716,6 +817,53 @@ status_due_days      = 17
         assert_eq!((t.wip_limit, t.no_epic_min, t.backlog_pile), (13, 14, 16));
         assert_eq!(t.no_epic_ratio, 0.5);
         assert_eq!(t.due_days, 17, "status_due_days 가 안 먹는다");
+    }
+
+    /// 기한 규칙(moai-dr8a.cf1) — 안 적으면 켜져 있고 1·2·7 이다. 적은 값이 그대로 서고, 끄는 낱말은 `off` 다.
+    #[test]
+    fn the_due_rule_defaults_to_auto_and_reads_what_is_written() {
+        let parse = |s: &str| Config::parse(&format!("prefix = \"a\"\n{s}"));
+        assert_eq!(parse("").unwrap().due, DueRule::DEFAULT);
+        assert_eq!(DueRule::DEFAULT, DueRule { auto: true, p0_days: 1, p1_days: 2, p2_days: 7 });
+        let c = parse("due_priority = \"off\"\ndue_p0_days = 0\ndue_p1_days = 3\ndue_p2_days = 10\n").unwrap();
+        assert_eq!(c.due, DueRule { auto: false, p0_days: 0, p1_days: 3, p2_days: 10 });
+        assert_eq!((c.due.mode(), DueRule::DEFAULT.mode()), ("off", "auto"));
+        // 같은 값은 받는다 — 그 칸을 접는 뜻이다.
+        assert_eq!(parse("due_p1_days = 1\n").unwrap().due.p1_days, 1);
+        // 안 적은 문턱은 적은 것을 따라 비킨다 — 한 줄만 적은 설정이 모든 명령을 세우지 않는다(리뷰).
+        let due = |s: &str| {
+            let r = parse(s).unwrap().due;
+            (r.p0_days, r.p1_days, r.p2_days)
+        };
+        assert_eq!(due("due_p0_days = 3\n"), (3, 3, 7));
+        assert_eq!(due("due_p0_days = 9\n"), (9, 9, 9));
+        assert_eq!(due("due_p2_days = 1\n"), (1, 1, 1));
+        assert_eq!(due("due_p2_days = 0\n"), (0, 0, 0));
+        assert_eq!(due("due_p1_days = 5\n"), (1, 5, 7));
+    }
+
+    /// 모르는 낱말·어긋난 차례·테이블 안에 적은 키는 **조용히 넘기지 않는다** — 넘기면 끄려던 사람이 왜 안 꺼지는지 모른다.
+    #[test]
+    fn the_due_rule_refuses_what_would_not_take() {
+        let parse = |s: &str| Config::parse(&format!("prefix = \"a\"\n{s}")).unwrap_err();
+        assert_eq!(parse("due_priority = \"Off\"\n"), Trouble::DueModeUnknown { raw: "Off".into() });
+        assert_eq!(parse("due_p0_days = 3\ndue_p1_days = 2\n"), Trouble::DueDaysOrder { p0: 3, p1: 2, p2: 7 });
+        assert_eq!(parse("due_p1_days = 3\ndue_p2_days = 1\n"), Trouble::DueDaysOrder { p0: 1, p1: 3, p2: 1 });
+        assert!(matches!(parse("due_p1_days = -1\n"), Trouble::NotANumber { .. }));
+        assert!(matches!(parse("due_priority = off\n"), Trouble::NotQuoted { .. }));
+        for (src, named) in [
+            ("[due]\npriority = \"off\"\n", "due_priority"),
+            ("[due]\np0_days = 0\n", "due_p0_days"),
+            ("[x]\ndue_p2_days = 9\n", "due_p2_days"),
+        ] {
+            assert_eq!(parse(src), Trouble::ThresholdInTable { line: 3, named: named.into() }, "{src:?}");
+        }
+        // 다른 테이블의 같은 낱말은 남의 것이다.
+        assert!(Config::parse("prefix = \"a\"\n[models]\npriority = \"x\"\n").is_ok());
+        // `[due]` 밑의 **모르는 키**도 남의 것이다 — 아는 이름(`due_<키>`)이 아니면 소리낼 까닭이 없고, 막으면 옛
+        // 바이너리가 읽는 파일 하나로 모든 명령이 선다(리뷰).
+        let kept = Config::parse("prefix = \"a\"\n[due]\ncalendar = \"kr\"\n").expect("[due] 의 모르는 키에 섰다");
+        assert_eq!(kept.due, DueRule::DEFAULT);
     }
 
     /// **아카이브 날수는 안 적으면 두 주, `0` 이면 끈다**(moai-47mz). 테이블 안에 적으면 문턱처럼 소리낸다 —

@@ -46,6 +46,24 @@ every column between them is a started one. A [group](#group) has no column of
 its own: it is read from its members. More in
 [the workflow](workflow.md#pick-up-work).
 
+## Deadline
+
+The day a row is due — its own `due_on` field, set with `--due YYYY-MM-DD`, `--due +N`
+(N days from today) or `@YYYY-MM-DD` at the end of a [plan](#plan) line. Any row can
+carry one, and it is asked about but never required. It cannot pass the deadline of
+the [milestone](#milestone), [epic](#epic) or parent above it: such a write is refused,
+and a row the one above overtook by being pulled in is a [warning](#warning),
+`due_beyond_parent`. It is not inherited — a member is bounded by its epic's deadline
+without carrying it. `moai due apply` raises an open, not deferred issue's or backlog
+item's priority as the deadline it follows nears — the earliest of its own and those of
+the rows above it, a parent already closed lending none (one day left or less, today and
+past included, `p0`; two or less `p1`; seven or less `p2`), never lowers it, and leaves a
+`Due-priority:` note. A group row is never raised itself; its members are. An open
+issue or epic whose own deadline has passed is a [warning](#warning), `overdue`, and a priority
+behind its deadline is a [notice](#notice) that names `moai due apply`.
+More in
+[the workflow](workflow.md#plan-something-bigger).
+
 ## Deferred
 
 Work taken out of the plan for now, without changing its [column](#column) or
@@ -66,6 +84,22 @@ stands `done` — never `moai mv` the epic itself. An epic usually comes from a
 The work a session holds: rows assigned to you that have left the first
 [column](#column) and are not closed yet. While you hold something, new issues
 go inside it — rule 1 of the [hook rules](#hook-rules).
+
+It is counted per session, not per person. A row a sibling worktree's name points
+at is that worktree's, unless this worktree's name points at it as closely or this
+session picked it up for certain. A row another session picked up last is not
+counted, and nor — once another session has recorded a pick in the same tracker
+within the last 12 hours — is a started row no session's hook recorded picking up:
+moved in a terminal, by a session that runs without the moai hook, or through a
+shell variable such as `moai mv "$id" …`. Such an unrecorded row still counts when
+this worktree's name points at it, or when it sits under a row this session
+picked up or in that row's epic. Leaving rows out only ever lets a call through
+or holds the turn end less — it never adds a refusal. The session before a
+`/clear` counts as another session; with no other session's pick recorded in that
+window, an unrecorded row is still yours. A rule 1 or rule 3 refusal and the
+turn-end question end with one line per held row on why this session holds it —
+it picked the row up, this worktree's name points at it, or nobody recorded the
+pick — when the lines fit.
 
 ## Group
 
@@ -119,9 +153,9 @@ closing by itself.
 
 ## Milestone
 
-A [group](#group) that carries dates — `--start` and `--due` — and is usually a
-release. A deadline that has passed or falls due soon is one [warning](#warning)
-line, nothing more. See [running milestone](#running-milestone).
+A [group](#group) that is usually a release, and the one row that carries a start
+date (`--start`) as well as a [deadline](#deadline). A milestone's deadline that has
+passed or falls due soon is one [warning](#warning) line, nothing more. See [running milestone](#running-milestone).
 
 ## Milestone branch
 
@@ -155,7 +189,8 @@ from `moai show <id>`. The hook holds the end of a turn once to ask for it.
 ## Notice
 
 A board line that informs without judging: backlog items piling up, work deferred, a
-milestone running, a merge driver not installed. It stands apart from the
+milestone running, a merge driver not installed, a priority behind its deadline. It
+stands apart from the
 [warnings](#warning) under `notices`. `moai wiki ls` uses the same word for a
 page with conflict markers, a link that leads to no page, a link to a heading the
 page does not have and an id the tracker does not hold.
@@ -171,7 +206,8 @@ The first pick-up stamps `started_at`. More in
 ## Plan
 
 Markdown that creates an epic and its issues in one go — `# Epic title`, then
-one `- [p1] issue title #tag` line per issue — fed to `moai add --from -`
+one `- [p1] issue title #tag` line per issue, any line ending in an optional
+`@YYYY-MM-DD` [deadline](#deadline) — fed to `moai add --from -`
 (`--dry-run` shows it first) or to `moai backlog promote`. Show it to the person
 once, before writing code. More in
 [the workflow](workflow.md#plan-something-bigger).
@@ -248,7 +284,9 @@ writes the main checkout's tracker.
 
 A board line on `moai status` about how the plan stands — such as issues with no
 epic, a review stalled, too much started at once (the members of one epic count as
-one), work picked up and forgotten, or a milestone falling due. Warnings block nothing and never change the exit code;
+one), work picked up and forgotten, a milestone falling due, a row past its own
+[deadline](#deadline) (`overdue`), or a row whose deadline passes the one above it. Warnings
+block nothing and never change the exit code;
 only broken data does that. Compare [notice](#notice).
 
 ## Worker
@@ -271,4 +309,4 @@ not pile commits onto one branch. The tracker stays in the main checkout; the
 wiki pages ride the branch. More in
 [the workflow](workflow.md#work-in-a-worktree).
 
-Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx
+Decided in: moai-tllo moai-snyk moai-u5wr moai-dhxm moai-kxkw moai-jtvp moai-bth3 moai-obxm moai-9tqo moai-uzhx moai-pyi4

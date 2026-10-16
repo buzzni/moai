@@ -1870,8 +1870,9 @@ fn banner_parts(app: &App) -> Option<(String, bool, Option<std::ops::Range<usize
     // 낱말로 부르면 오가는 사람이 둘을 다 배워야 한다. `+` 가 글에 들어 경고의 `!` 와 갈린다.
     // **급한 것이 아니라** `urgent` 를 안 세운다 — 담아 둔 것과 설치가 어긋난 것이지 고칠 계획이
     // 아니다(`view::status` 의 "알림만 있는 것은 문제 없다" 와 같은 자).
-    if app.site.notices > 0 {
-        parts.push(fill(say(lang, "tui.place.notices"), &[("n", &app.site.notices.to_string())]));
+    let notices = noticed(app, &app.site.warnings, app.site.notices);
+    if notices > 0 {
+        parts.push(fill(say(lang, "tui.place.notices"), &[("n", &notices.to_string())]));
         // **급한 줄로 안 센다**(리뷰) — 이 줄만 선 배너에 아래의 `!` 가 붙던 때는 `! + 알림 3건`
         // 이 되어, 한 줄이 경고의 `!` 와 알림의 `+` 를 같이 이고 섰다. 같은 수를 `view::status` 는
         // `✓ 드러난 문제 없다` 와 흐린 `+` 로 내고, 프로젝트 층의 상세도 `!` 없이 낸다 — 설치를
@@ -4570,8 +4571,9 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
             // (`view::status`). `!` 를 달면 설치가 어긋난 것이 고칠 계획으로 읽히고, 글자 없이
             // `+` 만 달면 하나인지 셋인지를 들어가 봐야 안다. 낱말은 안 붙인다 — 이 줄은 80칸에서
             // 이미 이름·칸·경로로 차 있다.
-            if sum.notices > 0 {
-                spans.push(Span::styled(format!(" +{}", sum.notices), dim()));
+            let notices = noticed(app, &sum.warnings, sum.notices);
+            if notices > 0 {
+                spans.push(Span::styled(format!(" +{notices}"), dim()));
             }
         }
         Look::Shut { state, said } => spans.push(Span::styled(said.clone(), shut_style(*state))),
@@ -4616,6 +4618,13 @@ fn place_line<'a>(app: &App, at: usize, budget: usize) -> Line<'a> {
 /// 서명이 `&Summary` 였던 까닭은 시험 전용 import 하나였다 — 그 `#[cfg(test)]` 를 걷었다.
 fn surfaced(app: &App, counted: &Surfaced) -> usize {
     counted.count(&app.site.now, &app.zone)
+}
+
+/// **알림의 수** — [`surfaced`] 의 짝이다(moai-dr8a.rl4). 든 알림 수(`free`)에 이 프레임의 달로 잰 기한 알림을 더한다.
+/// 시계를 고르는 자리를 [`surfaced`] 곁에 둔다(리뷰) — 그리는 쪽마다 `(site.now, zone)` 짝을 고르면, 그 시계를 바꾸는
+/// 날 자정을 넘긴 화면에서 `!N` 과 `+N` 이 다른 날로 잰다(moai-ynd6 가 경고 쪽에서 걷어 낸 그 증상이다).
+fn noticed(app: &App, counted: &Surfaced, free: usize) -> usize {
+    counted.notices(free, &app.site.now, &app.zone)
 }
 
 /// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
@@ -4722,8 +4731,9 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
             //
             // **감아 낸다**(위의 `stranded` 와 같은 자) — 80칸 창의 상세는 안쪽 폭이 30 뿐이라,
             // 자르면 정작 몇 건인지가 잘려 나간다.
-            if sum.notices > 0 {
-                let said = fill(say(lang, "tui.place.notices"), &[("n", &sum.notices.to_string())]);
+            let notices = noticed(app, &sum.warnings, sum.notices);
+            if notices > 0 {
+                let said = fill(say(lang, "tui.place.notices"), &[("n", &notices.to_string())]);
                 out.extend(wrapped(&said, w, dim()));
             }
             out.push(Line::from(""));
@@ -7410,19 +7420,20 @@ pub(super) mod tests {
         let narrow = about_text(&render(&mut a, 80, 24));
         assert!(narrow.contains("(9일 남음)"), "좁은 창이 남은 날수를 잘라 냈다\n{narrow}");
 
-        // **에픽에는 든 시간도 기한도 안 낸다**(moai-x04r.fn4). 쓰기는 마일스톤 아닌 줄에
-        // `due_on` 을 거절하므로(`Issue::check`) 여기 서는 값은 손으로 푼 충돌이나 머지가
-        // 안 건드리고 넘긴 낡은 줄뿐인데, 그리면 보드와 이 패널이 한 줄을 다르게 읽는다.
+        // **에픽에는 든 시간을 안 내고, 기한은 낸다**(moai-ghkp.kz7) — 종료 기한은 모든 줄에 선다.
+        // 시작 기한은 마일스톤 줄의 것이라(moai-x04r.fn4) 손으로 남은 값이어도 안 그린다.
         let mut epic = issues();
         epic[0].due_on = Some("2026-09-20".into());
+        epic[0].starts_on = Some("2026-09-05".into());
         let mut a = every(epic);
         a.site.now = "2026-09-11T00:00:00Z".into();
         a.see();
         let pane = about_text(&render(&mut a, 160, 24));
-        // **없다는 것만 재지 않는다**(리뷰) — 밑의 둘은 아니라는 말뿐이라, 이 패널이 아예 안
-        // 그려졌거나 커서가 딴 줄에 섰어도 둘 다 지난다. 그 에픽을 그렸다는 것부터 박는다.
+        // **없다는 것만 재지 않는다**(리뷰) — 이 패널이 아예 안 그려졌거나 커서가 딴 줄에 섰어도
+        // 없다는 말은 지난다. 그 에픽을 그렸다는 것부터 박는다.
         assert!(pane.contains("argos-0001"), "에픽의 상세가 안 그려졌다\n{pane}");
-        assert!(!pane.contains("2026-09-20"), "마일스톤 아닌 줄에 기한이 섰다\n{pane}");
+        assert!(pane.contains("2026-09-20") && pane.contains("(9일 남음)"), "에픽의 기한이 안 섰다\n{pane}");
+        assert!(!pane.contains("2026-09-05"), "마일스톤 아닌 줄에 시작 기한이 섰다\n{pane}");
         assert!(!pane.contains("중앙값"), "에픽에 든 시간이 섰다\n{pane}");
     }
 

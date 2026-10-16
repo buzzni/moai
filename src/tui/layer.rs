@@ -4666,7 +4666,40 @@ mod tests {
         let kinds: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(!kinds.contains(&"milestone_overdue") && !kinds.contains(&"dangling_blocked_by"), "{kinds:?}");
         assert_eq!(sum.warnings.count(now, zone), st.warnings.len(), "층과 보드가 경고를 달리 센다 {kinds:?}");
-        assert_eq!(sum.notices, st.notices.len(), "층과 보드가 알림을 달리 센다");
+        // 그리는 수로 견준다 — 날 판정에 닿는 알림(뒤처진 우선순위)은 `notices` 에 안 접혀 있다(moai-dr8a.rl4).
+        assert_eq!(sum.warnings.notices(sum.notices, now, zone), st.notices.len(), "층과 보드가 알림을 달리 센다");
+    }
+
+    /// **층은 날 판정에 닿는 알림도 보드와 같이 센다**(moai-dr8a.rl4, 리뷰) — 기한에 뒤처진 우선순위는 셈에 안 접혀
+    /// `Surfaced` 의 `dues` 에 들므로, 든 수(`sum.notices`)만 대는 표면은 보드보다 하나 적다. 다른 시험의
+    /// 판에는 뒤처진 줄이 없어, 그 셈을 빼도 다 초록이었다.
+    #[test]
+    fn the_layer_counts_a_priority_behind_its_deadline_as_the_board_does() {
+        let s = Scratch::fenced("layer-due-behind");
+        let dir = s.project("p", &[]);
+        let mut soon = Issue::new(
+            "argos-0001".into(),
+            "내일까지".into(),
+            Kind::Issue,
+            Status::new("todo"),
+            "2026-09-01T00:00:00Z",
+        );
+        soon.due_on = Some("2026-09-02".into());
+        std::fs::write(dir.join(".moai/issues.jsonl"), format!("{}\n", serde_json::to_string(&soon).unwrap())).unwrap();
+        let now = "2026-09-01T00:00:00Z";
+        let Look::Open { sum } = look_one(&dir, Some(0), now, crate::i18n::Lang::Ko).look else {
+            panic!("못 열었다")
+        };
+        let repo = Repo::at(dir.clone(), crate::config::Config::parse("prefix = \"argos\"\n").unwrap());
+        let live = repo.read().unwrap();
+        let unreadable = live.unreadable();
+        let zone = crate::tz::Zone::stored();
+        let (st, _) =
+            crate::cmd::status::archive_board(&repo, &live.issues, &unreadable, (&live.issues, &unreadable), now, zone);
+        assert!(st.notices.iter().any(|w| w.kind == "due_priority_behind"), "전제: 보드가 뒤처진 우선순위를 안 댔다");
+        let drawn = sum.warnings.notices(sum.notices, now, zone);
+        assert_eq!(drawn, st.notices.len(), "층과 보드가 알림을 달리 센다");
+        assert_eq!(drawn, sum.notices + 1, "날 판정에 닿는 알림을 안 더했다");
     }
 
     /// **못 읽는 아카이브가 층을 멈추지도 실패시키지도 않는다**(moai-nkwg) — 해마다 파일 자리의 FIFO 는 열지 않고
@@ -4695,7 +4728,7 @@ mod tests {
         let warnings: Vec<&str> = st.warnings.iter().map(|w| w.kind).collect();
         assert!(warnings.contains(&"archive_unreadable"), "전제: 보드가 FIFO 를 경고로 안 셌다 {warnings:?}");
         assert!(!warnings.contains(&"unreadable_line"), "FIFO 가 산 줄의 못 읽는 줄로 섰다 {warnings:?}");
-        let counted = (sum.warnings.count(now, zone), sum.notices);
+        let counted = (sum.warnings.count(now, zone), sum.warnings.notices(sum.notices, now, zone));
         assert_eq!(counted, (st.warnings.len(), st.notices.len()), "층과 보드가 달리 센다");
     }
 
@@ -4740,7 +4773,11 @@ mod tests {
         let st = board((&root.issues, &root.unreadable()));
         assert!(!kinds(&st).contains(&"archive_duplicate_id"), "{:?}", kinds(&st));
         assert_eq!(f.warnings.count(&f.now, zone), st.warnings.len(), "겹친 배너가 보드와 달리 센다 {:?}", kinds(&st));
-        assert_eq!(f.notices, st.notices.len(), "겹친 배너가 보드와 알림을 달리 센다");
+        assert_eq!(
+            f.warnings.notices(f.notices, &f.now, zone),
+            st.notices.len(),
+            "겹친 배너가 보드와 알림을 달리 센다"
+        );
     }
 
     /// **띄울 때와 다시 읽을 때 지켜보는 목록이 같다**(리뷰 moai-3lul.kt0 다시 본 판). 다르면 조용한

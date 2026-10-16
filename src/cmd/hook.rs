@@ -212,7 +212,7 @@ fn decide(
             }
             // 누구의 것인지 모르는 줄은 싣지 않는다 — 남의 일을 "압축 전부터 집고 있다" 로 떠안긴다(moai-4jsy).
             // `Stop` 이 붙드는 것과 같은 자로 잰다([`releasing`]).
-            let (away, latest) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
+            let (away, latest, _) = releasing(input, &repo, &load.issues, &person_at(&repo, ctx));
             crate::hook::carried(
                 &load.issues,
                 latest.as_deref().unwrap_or(&load.issues),
@@ -305,7 +305,7 @@ fn decide(
             // **사람은 묻는 자리에서 푼다**(moai-0zjo 리뷰, [`crate::hook::Person`]) — 여기서는 푸는 길만 건넨다.
             let me = person_at(&repo, ctx);
             let base = away_of(input, &repo, &load.issues, &me);
-            let decision = settle(input, &repo, &load.issues, base, &|issues, away| {
+            let settled = settle(input, &repo, &load.issues, base, &|issues, away| {
                 match call {
                     // 규칙의 차례는 `guard_shell_in` 이 정한다. 여기는 껍데기의 자리와 제 토막만 준다.
                     // **세는 자리는 세션이 선 체크아웃이다**(moai-y7go) — 트래커는 루트로 옮겨 가지만
@@ -319,9 +319,13 @@ fn decide(
                     Call::Other => Decision::Pass,
                 }
             });
+            // **막으면 그 줄이 왜 이 세션의 것인지 붙인다**(moai-pyi4.w47) — 그 답을 낸 판정의 줄·초점·기록으로 잰다
+            // ([`Settled`]). 기록은 막을 때만 읽혔다 — 막는 답은 늘 모름을 잰 뒤에 나온다.
+            let mut decision = settled.vouched(&repo);
             // 다른 트래커를 가리키는 토막은 **그 트래커가 본다**(moai-23ky). 판정을 잇는 차례는
             // `Decision::then` 이 정한다 — 막으면 남의 트래커는 묻지 않고, 남이 막으면 제 비춤을 버린다.
-            let mut decision = decision;
+            // 그 트래커의 거절에도 근거를 그 트래커의 줄·기록으로 붙인다 — 같은 규칙의 거절이 트래커에 따라 근거를
+            // 달고 안 달면 안 된다.
             if let Call::Shell(_) = call {
                 for (n, other) in there.iter().enumerate() {
                     decision = decision.then(|| {
@@ -334,6 +338,7 @@ fn decide(
                                 Some(crate::hook::Aimed::stands(other.root.as_path()))
                             })
                         })
+                        .vouched(other)
                     });
                 }
             }
@@ -451,8 +456,8 @@ fn closing_hold(
         let warnings = warned(repo, issues, unreadable, ctx.zone());
         // **누구의 것인지 모르는 줄로는 붙들지 않는다**(moai-ntl6). 에픽이 닫히는지와 집은 줄이 아직
         // 집혀 있는지는 옆까지 겹친 줄로 잰다(moai-8ema). 둘 다 [`releasing`] 이 잰다.
-        let (away, latest) = releasing(input, repo, issues, &person_at(repo, ctx));
-        crate::hook::closing(
+        let (away, latest, picks) = releasing(input, repo, issues, &person_at(repo, ctx));
+        let hold = crate::hook::closing(
             issues,
             latest.as_deref().unwrap_or(issues),
             &repo.config,
@@ -461,7 +466,10 @@ fn closing_hold(
             baseline(input, repo),
             ctx.lang(),
             room,
-        )
+        );
+        // **붙들면 그 줄이 왜 이 세션의 것인지 붙인다**(moai-pyi4.w47) — 붙든 초점을 모름을 잰 그 기록으로 잰다(기록을
+        // 다시 읽지 않는다). 붙드는 글은 말묶음에서 오니 근거도 그 말로 내고, 자리를 넘기면 안 붙인다.
+        crate::hook::vouch(hold, issues, &repo.config, &away, &picks, Some(room), ctx.lang())
     })
 }
 
@@ -688,16 +696,18 @@ fn from_antigravity(event: Event, raw: &str) -> Option<Input> {
 /// **겹친 판의 이름도 사람을 싣는다**(moai-0zjo) — `worktree::fresh` 가 짓는 이름에는 사람이 없어,
 /// 안 실으면 겹쳐 본 판정에서만 남의 줄이 도로 제 초점이 된다. `base` 의 사람을 그대로 옮긴다 — 한
 /// 칸을 나눠 쓰니([`crate::hook::Person`]) 다시 안 푼다.
-fn settle(
+///
+/// **답은 그것을 낸 판정과 함께 돌려준다**([`Settled`]) — 막는 답에 근거를 붙이는 쪽이 같은 초점을 읽는다.
+fn settle<'a>(
     input: &Input,
     repo: &Repo,
-    issues: &[model::Issue],
+    issues: &'a [model::Issue],
     base: crate::hook::Away,
     judge: &dyn Fn(&[model::Issue], &crate::hook::Away) -> Decision,
-) -> Decision {
+) -> Settled<'a> {
     let first = judge(issues, &base);
     if first == Decision::Pass {
-        return first;
+        return Settled::passed(first, std::borrow::Cow::Borrowed(issues), base);
     }
     // **겹침과 모름을 한 판에 얹어 한 번 다시 본다**(moai-15c2, 사용자 결정). 따로 보던 판은 둘이
     // 함께일 때 풀릴 것을 못 풀었다 — 겹친 줄의 판정은 모름을 안 뺐고, 모름을 뺀 판정은 낡은 제
@@ -714,7 +724,7 @@ fn settle(
     // **겹친 판도 이 세션의 집기를 싣는다**(moai-pxui) — 옆 이름을 다시 읽으니 집기도 그 줄로 다시 잰다.
     // `base` 의 것을 옮기지 않는 까닭: `base` 는 제 스냅샷에 집은 줄이 없으면 이름을 안 읽어 집기도 비고,
     // 기록이 끝났는지는 겹친 줄의 칸 시각으로 재야 맞다.
-    let (rows, mut narrow): (std::borrow::Cow<'_, [model::Issue]>, _) = match overlaid {
+    let (rows, mut narrow): (std::borrow::Cow<'a, [model::Issue]>, _) = match overlaid {
         Some((fresh, beside)) => {
             let mut away = crate::hook::Away { me: base.me.clone(), archive: base.archive.clone(), ..beside };
             add_picked(input, repo, &fresh, &mut away);
@@ -726,14 +736,15 @@ fn settle(
     // 훑는 일)을 안 치른다. 겹치지 않은 판은 `first` 가 곧 이 답이라 다시 재지 않는다.
     let wide = if seen { judge(&rows, &narrow) } else { first };
     if wide == Decision::Pass {
-        return wide;
+        return Settled::passed(wide, rows, narrow);
     }
     // **모르는 줄도 같은 판에서 뺀다**(moai-ntl6, 사용자 결정 B) — 옆 워크트리가 쥐었을 일을 초점으로
     // 대지 않는다. **비추는 줄도 같은 자로 좁힌다** — 막지도 붙들지도 않기로 한 줄의 에픽을 제 물음으로
     // 비추면, 그 세션을 남의 에픽에 세우는 길로 보낸다(`backlog promote -e <남의 에픽>`).
-    let added = add_unsure(input, repo, &rows, &mut narrow);
+    let picks = read_picks(input, repo, &rows);
+    let added = add_unsure(repo, &rows, &mut narrow, &picks);
     if !added {
-        return wide;
+        return Settled { decision: wide, rows, away: narrow, picks };
     }
     // 막히면 **그 판정의 까닭**을 낸다 — 겹친 줄과 모름을 함께 본 판이 지금 가장 참에 가깝다.
     let again = judge(&rows, &narrow);
@@ -743,7 +754,42 @@ fn settle(
     //
     // **`first` 를 따로 다시 대지 않는다** — `first` 가 안 막으면 겹쳐 보지도 않아(`first.blocks()`)
     // `wide` 가 곧 `first` 다. 두 자로 적던 판은 같은 것을 두 번 물었다.
-    if again.blocks() && !wide.blocks() { wide } else { again }
+    let decision = if again.blocks() && !wide.blocks() { wide } else { again };
+    Settled { decision, rows, away: narrow, picks }
+}
+
+/// [`settle`] 의 답 — 판정과 **그 판정을 낸 줄·`Away`·집기 기록**이다(리뷰 moai-pyi4.7g5).
+///
+/// 막는 답에 근거를 붙이는 쪽([`crate::hook::vouch`])이 판정이 실제로 센 초점을 읽는다. 제 스냅샷과 덜 좁힌 이름,
+/// 따로 다시 읽은 기록으로 재던 판은 그 답이 겹친 줄·좁힌 초점으로 막았을 때 초점 밖의 줄에 "이 세션이 쥔 까닭" 을
+/// 달고, 기록을 판정마다 한 번 더 읽었다. 셋은 **답이 막을 때만** 그 답의 것이다 — 막는 답은 늘 모름을 잰 뒤에
+/// 나오고, 막지 않는 답에는 아무도 근거를 안 단다.
+struct Settled<'a> {
+    decision: Decision,
+    rows: std::borrow::Cow<'a, [model::Issue]>,
+    away: crate::hook::Away,
+    picks: crate::hook::Picks,
+}
+
+impl<'a> Settled<'a> {
+    /// 모름을 재기 전에 풀린 답 — 기록을 안 읽었다.
+    fn passed(decision: Decision, rows: std::borrow::Cow<'a, [model::Issue]>, away: crate::hook::Away) -> Self {
+        Settled { decision, rows, away, picks: Default::default() }
+    }
+
+    /// 답에 근거를 붙여 낸다 — 막지 않는 답은 그대로다([`crate::hook::vouch`]). 규칙의 거절문은 아직 말묶음 밖이라
+    /// (`i18n/README.md` 의 "훅은 반만 옮겼다") 근거도 그 글의 말인 영어로 낸다.
+    fn vouched(self, repo: &Repo) -> Decision {
+        crate::hook::vouch(
+            self.decision,
+            &self.rows,
+            &repo.config,
+            &self.away,
+            &self.picks,
+            None,
+            crate::i18n::Lang::En,
+        )
+    }
 }
 
 /// **이 세션의 사람을 푸는 길** — 그 트래커의 뿌리에서 푼다(`cmd::me_of`, `ready`·`prime` 과 한 자). 푸는 것은
@@ -796,15 +842,18 @@ fn add_picked(input: &Input, repo: &Repo, issues: &[model::Issue], away: &mut cr
 /// `away` 에 **누구의 것인지 모르는** 집은 줄(`hook::unsure`)을 더한다 — 옆 딸린 워크트리가 쥐었을 수
 /// 있거나 다른 세션이 마지막으로 집은 줄이다. 이 세션이 마지막으로 집은 줄도 함께 싣는다(`Away::picked`) —
 /// 모르는 줄 밑에 있어도 제 것이다. 제 이름은 `away` 의 것을 쓴다. 더한 것이 없으면 거짓이다.
-fn add_unsure(input: &Input, repo: &Repo, issues: &[model::Issue], away: &mut crate::hook::Away) -> bool {
+///
+/// **기록(`picks`)은 부르는 쪽이 읽어 건넨다** — 막는 답에 근거를 붙이는 쪽이 모름을 잰 그 기록을 그대로 쓴다
+/// ([`Settled`]·[`releasing`]). 따로 다시 읽던 판은 같은 디렉터리를 한 판에 한 번 더 훑었고, 그 사이에 옆이
+/// 덧붙이면 근거가 판정과 다른 기록을 읽었다.
+fn add_unsure(repo: &Repo, issues: &[model::Issue], away: &mut crate::hook::Away, picks: &crate::hook::Picks) -> bool {
     let elsewhere = crate::worktree::held_elsewhere(repo.here());
-    let picks = read_picks(input, repo, issues);
-    let unsure = crate::hook::unsure(issues, &repo.config, &elsewhere, &away.own, &picks);
+    let unsure = crate::hook::unsure(issues, &repo.config, &elsewhere, &away.own, picks);
     if unsure.is_empty() {
         return false;
     }
     away.unsure.extend(unsure);
-    away.picked.extend(picks.mine);
+    away.picked.extend(picks.mine.iter().cloned());
     true
 }
 
@@ -814,20 +863,24 @@ fn add_unsure(input: &Input, repo: &Repo, issues: &[model::Issue], away: &mut cr
 ///
 /// **두 자리가 한 자를 쓴다**(리뷰 moai-3k2d.1df) — 따로 적던 판은 접힌 뒤 싣는 쪽이 되짚기를 빠뜨려,
 /// main 이 이미 닫은 줄을 "압축 전부터 집고 있다" 로 실었다.
+///
+/// 셋째는 모름을 잰 집기 기록이다 — `Stop` 이 붙들 때 그 기록으로 근거를 단다([`crate::hook::vouch`]). 집은 것이
+/// 없어 모름을 안 쟀으면 비어 있다.
 fn releasing(
     input: &Input,
     repo: &Repo,
     issues: &[model::Issue],
     me: &crate::hook::Person,
-) -> (crate::hook::Away, Option<Vec<model::Issue>>) {
+) -> (crate::hook::Away, Option<Vec<model::Issue>>, crate::hook::Picks) {
     let mut away = away_of(input, repo, issues, me);
     if crate::hook::held(issues, &repo.config, &away).is_empty() {
-        return (away, None);
+        return (away, None, Default::default());
     }
+    let picks = read_picks(input, repo, issues);
     let still =
-        !add_unsure(input, repo, issues, &mut away) || !crate::hook::held(issues, &repo.config, &away).is_empty();
+        !add_unsure(repo, issues, &mut away, &picks) || !crate::hook::held(issues, &repo.config, &away).is_empty();
     let latest = still.then(|| crate::worktree::fresh(repo, issues.to_vec())).flatten().map(|(fresh, _)| fresh);
-    (away, latest)
+    (away, latest, picks)
 }
 
 /// 세션의 집기를 적는 자리(moai-4jsy) — **같은 저장소의 같은 트래커면 어느 워크트리에서 재도 같은
@@ -871,7 +924,8 @@ fn picks_key(root: &Path) -> u64 {
     }
 }
 
-/// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 전과 같은 판정이다.
+/// 이 세션이 `ids` 를 지금 집었다고 적는다. 못 적으면 조용히 넘어간다 — 빠진 기록은 기록 없는 줄의 판정이다: 다른
+/// 세션의 기록이 없는 판에서는 전과 같고, 있는 판에서는 그 줄이 누구의 것인지 모른다(`hook::Picks::crowded`).
 fn record_picks(input: &Input, repo: &Repo, ids: &[(String, bool)]) {
     use std::io::Write;
     if ids.is_empty() {
@@ -965,7 +1019,9 @@ fn read_picks(input: &Input, repo: &Repo, issues: &[model::Issue]) -> crate::hoo
         });
     let since: std::collections::BTreeMap<&str, i64> =
         issues.iter().filter_map(|i| Some((i.id.as_str(), crate::model::parse_rfc3339(&i.status_since)?))).collect();
-    crate::hook::Picks::fold(&me, files, &|id| since.get(id).copied())
+    // 기록과 같은 벽시계다([`record_picks`]) — 못 읽으면 0 이라 아무 기록도 최근이 아니다.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    crate::hook::Picks::fold(&me, files, &|id| since.get(id).copied(), now)
 }
 
 /// 세션 id 를 경로 조각으로 — 사람이 준 글자를 그대로 쓰지 않는다.

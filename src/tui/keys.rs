@@ -428,6 +428,8 @@ pub enum Order {
     Column,
     Assignee,
     Title,
+    /// 기한(moai-ghkp.7uy) — `query::SortKey::Due` 와 같은 낱말 `due` 다.
+    Due,
 }
 
 impl Order {
@@ -439,11 +441,12 @@ impl Order {
             Order::Column => say(lang, "tui.order.column"),
             Order::Assignee => say(lang, "tui.order.assignee"),
             Order::Title => say(lang, "tui.order.title"),
+            Order::Due => say(lang, "tui.order.due"),
         }
     }
 
-    pub const ALL: [Order; 6] =
-        [Order::Priority, Order::Created, Order::Updated, Order::Column, Order::Assignee, Order::Title];
+    pub const ALL: [Order; 7] =
+        [Order::Priority, Order::Created, Order::Updated, Order::Column, Order::Assignee, Order::Title, Order::Due];
 
     /// 설정 파일에 적는 이름(moai-2bzp) — 화면 낱말과 따로다(`view::Field::name` 과 같은 까닭).
     pub fn name(self) -> &'static str {
@@ -454,6 +457,7 @@ impl Order {
             Order::Column => "status",
             Order::Assignee => "assignee",
             Order::Title => "title",
+            Order::Due => "due",
         }
     }
 
@@ -479,6 +483,7 @@ impl Order {
             Order::Column => say(lang, "tui.order_then.column"),
             Order::Assignee => say(lang, "tui.order_then.assignee"),
             Order::Title => say(lang, "tui.order_then.title"),
+            Order::Due => say(lang, "tui.order_then.due"),
         }
     }
 }
@@ -787,6 +792,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Sort(Order::Column), Some("SPC s s"), LEADER, Key::plain('s'), Key::plain('s')),
         row!(Sort(Order::Assignee), Some("SPC s a"), LEADER, Key::plain('s'), Key::plain('a')),
         row!(Sort(Order::Title), Some("SPC s t"), LEADER, Key::plain('s'), Key::plain('t')),
+        // 기한은 `w`(when, moai-ghkp.7uy). `d` 가 아닌 까닭: `SPC s d` 는 걷어 낸 옛 키라 죽은 채로 둔다
+        // (`the_old_menu_keys_are_gone`) — 옛 손버릇이 말없이 차례를 바꾸면 안 된다.
+        row!(Sort(Order::Due), Some("SPC s w"), LEADER, Key::plain('s'), Key::plain('w')),
         // **대문자는 끝에 더한다**(moai-r170.x22, 2026-10-09 사용자 결정) — 소문자가 차례를 그 하나로 갈아 끼우는 것과
         // 한 글자로 짝을 짓는다. 터미널은 대문자를 SHIFT 와 함께 보내지만 글자 키는 SHIFT 를 떼고 견준다([`Key`]).
         row!(SortAdd(Order::Priority), Some("SPC s P"), LEADER, Key::plain('s'), Key::plain('P')),
@@ -795,7 +803,8 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(SortAdd(Order::Column), Some("SPC s S"), LEADER, Key::plain('s'), Key::plain('S')),
         row!(SortAdd(Order::Assignee), Some("SPC s A"), LEADER, Key::plain('s'), Key::plain('A')),
         row!(SortAdd(Order::Title), Some("SPC s T"), LEADER, Key::plain('s'), Key::plain('T')),
-        // 편집 창은 `e`(edit) — 차례 필드의 글자(p·c·u·s·a·t)와 안 겹친다.
+        row!(SortAdd(Order::Due), Some("SPC s W"), LEADER, Key::plain('s'), Key::plain('W')),
+        // 편집 창은 `e`(edit) — 차례 필드의 글자(p·c·u·s·a·t·w)와 안 겹친다.
         row!(SortEdit, Some("SPC s e"), LEADER, Key::plain('s'), Key::plain('e')),
         row!(Cell(super::view::Field::Id), Some("SPC c i"), LEADER, Key::plain('c'), Key::plain('i')),
         row!(Cell(super::view::Field::Priority), Some("SPC c p"), LEADER, Key::plain('c'), Key::plain('p')),

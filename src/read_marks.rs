@@ -386,6 +386,17 @@ pub struct Marks {
     pub pending: Option<crate::user_config::Trouble>,
 }
 
+impl Marks {
+    /// **앞서 든 표가 없는 쪽이 들 표**(moai-cqwy) — 못 들었으면(`trouble`) 빈 표다. 탐색기가 처음
+    /// 든 걸음(`App::take_read`: 탈이 있으면 `seen` 을 안 들인다)과 같은 자다. 이때 `seen` 에 남은 옛
+    /// `[read]`·대기 자리의 반쪽 표를 들이면 지금 자리의 도장이 빠져 내 줄이 [NEW] 로 선다.
+    /// 세는 쪽은 이 값을 `trouble` 과 함께 [`crate::query::unread_held`] 에 넘긴다.
+    pub fn held(&self) -> &BTreeMap<String, String> {
+        static EMPTY: BTreeMap<String, String> = BTreeMap::new();
+        if self.trouble.is_none() { &self.seen } else { &EMPTY }
+    }
+}
+
 /// 그 프로젝트의 읽음. **실패하지 않는다** — 못 읽거나 깨졌으면 [`Marks::trouble`] 과 까닭 한 줄이다.
 /// 읽음 하나 때문에 제 저장소를 보던 명령이 넘어지면 도구가 고장 난 것으로 보인다
 /// ([`crate::user_config::read`] 와 같은 자다).
@@ -1309,6 +1320,21 @@ mod tests {
 
     fn marks(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs.iter().map(|(a, b)| ((*a).to_string(), (*b).to_string())).collect()
+    }
+
+    /// **앞서 든 표가 없는 쪽은 못 든 판의 반쪽 표를 안 든다**(moai-cqwy) — 탐색기의 `take_read` 와 같은 자.
+    /// 탈이 있는 판의 `seen` 은 옛 `[read]` 뿐일 수 있어, 들이면 지금 자리의 도장이 빠진 채 센다.
+    #[test]
+    fn held_is_empty_when_the_sheet_could_not_be_read() {
+        let of = |trouble| Marks {
+            seen: marks(&[("a-1", "2026-09-01T00:00:00Z")]),
+            problems: Vec::new(),
+            trouble,
+            pending: None,
+        };
+        assert_eq!(of(None).held().len(), 1);
+        assert!(of(Some(crate::user_config::Trouble::Unreadable)).held().is_empty());
+        assert!(of(Some(crate::user_config::Trouble::Gone)).held().is_empty());
     }
 
     /// [`update`] 를 한국어로 부른다 — **여기 시험은 멈춘 글을 안 견준다**(코드와 갈래만 본다). 말을 받는

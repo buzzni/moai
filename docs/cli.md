@@ -46,6 +46,8 @@ Commands:
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
   project       Register a directory to watch several projects from one moai
+  due           Raise priorities a deadline has caught up with
+  config        Read this repository's settings, defaults filled in
   models        Read the model per role from your user config
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
@@ -155,6 +157,10 @@ Options:
     status_flow_days     = 7      the window the flow is measured over
     status_backlog_pile  = 5      when this many thoughts have piled up
     status_due_days      = 3      days before a milestone deadline to say so
+
+  A row whose own deadline has passed is a warning too (overdue). A priority
+  behind the deadline its row follows is a notice naming `moai due apply`;
+  due_priority = "off" silences it, and `moai due --help` has its thresholds.
 ```
 
 ## `moai ready`
@@ -176,7 +182,8 @@ Options:
 
   Epics themselves, deferred rows and what is under them, and parents with
   unfinished children are left out.
-  Urgent first, then epics near the end, then the oldest.
+  Urgent first, then what is inside a running milestone, then the earliest
+  deadline (none last), then epics near the end, then the oldest.
 
   Only your own rows are offered. A row that is someone else's or nobody's
   stands apart below - ask before you pick it up (`moai mv <id> <column>
@@ -279,7 +286,7 @@ Options:
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --due <date>
-          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
 
       --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
@@ -350,15 +357,16 @@ BODY
 Several at once (`--from`):
 
 moai add --from - <<'PLAN'
-# Storage layer
-- [p1] write atomically #bug
+# Storage layer @2026-10-31
+- [p1] write atomically #bug @2026-10-20
 - recover a truncated line
 - \[WIP] issue \#12
 PLAN
 
   A `#` line is an epic, a `-` line is an issue of the epic above it.
-  [pN] and #tag are optional.
-  Put \ in front of a leading [ or a trailing #word in a title.
+  [pN], #tag and @YYYY-MM-DD (the deadline) are optional. --due goes on
+  each epic the plan creates that carries no @date of its own.
+  Put \ in front of a leading [, a trailing #word or @digit in a title.
   --dry-run keeps a heredoc typo from creating six wrong issues.
 
 Plan templates (`{{name}}` filled by --var, every variable required):
@@ -383,6 +391,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -421,13 +430,13 @@ Order and paging:
   field decides only where the ones before it tie. The fields: priority
   (the default: urgent first), created and updated (newest first), status
   (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), id. A field without a
-  direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger - unowned
-  rows go first under assignee:desc. A field is given once. When every
-  field ties, a last field of created or updated falls to id alone, and
-  any other to priority, then id. --reverse turns the whole order around,
-  ties included.
+  shows, unowned last), title (ignoring case), due (the earliest deadline
+  first, none last), id. A field without a direction keeps the one named
+  here; :asc puts the smaller value first (p0, the oldest, the first
+  column, A) and :desc the larger - unowned or undated rows go first under
+  assignee:desc or due:desc. A field is given once. When every field ties,
+  a last field of created or updated falls to id alone, and any other to
+  priority, then id. --reverse turns the whole order around, ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -438,6 +447,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -485,6 +497,9 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
+  due_on= is the row's own deadline, read as calendar days with both ends
+  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
+  falls in none. It is not a time item and opens nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -519,9 +534,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -756,7 +791,7 @@ Options:
   -p, --priority <0-3>       
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
       --start <date|none>    Start of a milestone. `none` clears it
-      --due <date|none>      Deadline of a milestone. `none` clears it
+      --due <date|none>      Deadline, a day or `+N` days. `none` clears it
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -1080,7 +1115,7 @@ Options:
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --due <date>
-          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
 
       --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
@@ -1150,6 +1185,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1188,13 +1224,13 @@ Order and paging:
   field decides only where the ones before it tie. The fields: priority
   (the default: urgent first), created and updated (newest first), status
   (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), id. A field without a
-  direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger - unowned
-  rows go first under assignee:desc. A field is given once. When every
-  field ties, a last field of created or updated falls to id alone, and
-  any other to priority, then id. --reverse turns the whole order around,
-  ties included.
+  shows, unowned last), title (ignoring case), due (the earliest deadline
+  first, none last), id. A field without a direction keeps the one named
+  here; :asc puts the smaller value first (p0, the oldest, the first
+  column, A) and :desc the larger - unowned or undated rows go first under
+  assignee:desc or due:desc. A field is given once. When every field ties,
+  a last field of created or updated falls to id alone, and any other to
+  priority, then id. --reverse turns the whole order around, ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -1205,6 +1241,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -1252,6 +1291,9 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
+  due_on= is the row's own deadline, read as calendar days with both ends
+  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
+  falls in none. It is not a time item and opens nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1286,9 +1328,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -1357,7 +1419,7 @@ Options:
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --due <date>
-          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
 
       --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
@@ -1427,6 +1489,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1465,13 +1528,13 @@ Order and paging:
   field decides only where the ones before it tie. The fields: priority
   (the default: urgent first), created and updated (newest first), status
   (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), id. A field without a
-  direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger - unowned
-  rows go first under assignee:desc. A field is given once. When every
-  field ties, a last field of created or updated falls to id alone, and
-  any other to priority, then id. --reverse turns the whole order around,
-  ties included.
+  shows, unowned last), title (ignoring case), due (the earliest deadline
+  first, none last), id. A field without a direction keeps the one named
+  here; :asc puts the smaller value first (p0, the oldest, the first
+  column, A) and :desc the larger - unowned or undated rows go first under
+  assignee:desc or due:desc. A field is given once. When every field ties,
+  a last field of created or updated falls to id alone, and any other to
+  priority, then id. --reverse turns the whole order around, ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -1482,6 +1545,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -1529,6 +1595,9 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
+  due_on= is the row's own deadline, read as calendar days with both ends
+  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
+  falls in none. It is not a time item and opens nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1563,9 +1632,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -1634,7 +1723,7 @@ Options:
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --due <date>
-          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
 
       --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
@@ -1704,6 +1793,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1742,13 +1832,13 @@ Order and paging:
   field decides only where the ones before it tie. The fields: priority
   (the default: urgent first), created and updated (newest first), status
   (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), id. A field without a
-  direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger - unowned
-  rows go first under assignee:desc. A field is given once. When every
-  field ties, a last field of created or updated falls to id alone, and
-  any other to priority, then id. --reverse turns the whole order around,
-  ties included.
+  shows, unowned last), title (ignoring case), due (the earliest deadline
+  first, none last), id. A field without a direction keeps the one named
+  here; :asc puts the smaller value first (p0, the oldest, the first
+  column, A) and :desc the larger - unowned or undated rows go first under
+  assignee:desc or due:desc. A field is given once. When every field ties,
+  a last field of created or updated falls to id alone, and any other to
+  priority, then id. --reverse turns the whole order around, ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -1759,6 +1849,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -1806,6 +1899,9 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
+  due_on= is the row's own deadline, read as calendar days with both ends
+  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
+  falls in none. It is not a time item and opens nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1840,9 +1936,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -1932,7 +2048,7 @@ Options:
           Start of a milestone, `YYYY-MM-DD` (milestone rows only)
 
       --due <date>
-          Deadline of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
 
       --type <issue|epic|milestone|backlog>
           What kind to create (issue when absent, epic under `epic add`)
@@ -2002,6 +2118,7 @@ Options:
       --tree                 Fold it as epic, issue, child
       --as-plan              Print an epic back as `add --from` markdown
       --removed              Removed issues, from the journal (see below)
+      --fields <keys>        Keep only these keys of each --json row
       --worktree             Also overlay other worktrees (no file changes)
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -2040,13 +2157,13 @@ Order and paging:
   field decides only where the ones before it tie. The fields: priority
   (the default: urgent first), created and updated (newest first), status
   (the column order of .moai/config.toml), assignee (the name the screen
-  shows, unowned last), title (ignoring case), id. A field without a
-  direction keeps the one named here; :asc puts the smaller value first
-  (p0, the oldest, the first column, A) and :desc the larger - unowned
-  rows go first under assignee:desc. A field is given once. When every
-  field ties, a last field of created or updated falls to id alone, and
-  any other to priority, then id. --reverse turns the whole order around,
-  ties included.
+  shows, unowned last), title (ignoring case), due (the earliest deadline
+  first, none last), id. A field without a direction keeps the one named
+  here; :asc puts the smaller value first (p0, the oldest, the first
+  column, A) and :desc the larger - unowned or undated rows go first under
+  assignee:desc or due:desc. A field is given once. When every field ties,
+  a last field of created or updated falls to id alone, and any other to
+  priority, then id. --reverse turns the whole order around, ties included.
 
     moai show --sort priority,updated:desc
     moai show --sort status:asc,title
@@ -2057,6 +2174,9 @@ Order and paging:
   A row whose place in the order changes between pages - the cursor row or
   any other, a priority edit included - can repeat or be skipped; id,
   created and lists of those two alone are the orders no edit moves.
+  --archived pages the same way: rows moved into .moai/archive and live
+  rows stand in one order, so a long list is read whole in id order with
+  --sort id -n <count> --after <last id>.
   Lines sharing one id
   (twins a merge left behind) stand together and a page never splits them,
   so such a page can run past -n. --json stays an array - fewer rows than
@@ -2104,6 +2224,9 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
+  due_on= is the row's own deadline, read as calendar days with both ends
+  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
+  falls in none. It is not a time item and opens nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2138,9 +2261,29 @@ Order and paging:
 
     moai show --removed --since 2026-09-29T00:00:00Z --json
 
+  Unread: --json, a list or one row, adds unread:true to a row the
+  explorer marks [NEW] - yours, your rows' children and your epics'
+  members (not a milestone's), changed since you last read it. The key is
+  there only then. Opening a row does not read it; `moai read` does. When
+  moai cannot tell who you are, or cannot read your read marks, no row
+  carries it.
+
+  Fields: --fields id,title,status keeps only those keys of each --json
+  row, in that order, each once - a key the row does not carry stays out.
+  It picks keys, not rows: the filters pick the rows. The costly keys it
+  leaves out are not worked out - without work a list skips the journals,
+  and show <id> asks git only for commits. It stands only with --json.
+
+    moai show -g parser --all --fields id --json
+
   There is no query language. The filters read derived values the file does
   not hold - a group's column, an inherited epic - so run SQL on the --json
-  output, where derived_status and derived_epic are worked out already:
+  output, where they are worked out already: derived_status, derived_epic,
+  derived_milestone (the milestone --milestone stands the row under),
+  shelved_by (the nearest row that took it out of the plan - its own id when
+  it was deferred itself; a closed row is in no plan, so --deferred picks
+  it by deferred_at alone) and archived (true on a row --all hides as the
+  archive). The last three stand only when they hold:
 
     moai show --type issue --json |
       jq -r '.[] | .derived_epic // "none"' | sort | uniq -c
@@ -2338,6 +2481,30 @@ Options:
       --user <name (email)>  Who is doing this (from `git config` when absent)
   -h, --help                 Print help
 
+Filters  (comma = or,  repeated = and):
+  -s, --status <status>                      In that column
+  -t, --tag <tag>                            Carrying that tag
+      --no-tag <tag>                         Not carrying that tag
+  -e, --epic <id|none>                       In that epic (`none` = no epic)
+      --milestone <id|none>                  In that milestone (`none` = none)
+      --parent <id|none>                     Child of this issue (`none` = top)
+  -p, --priority <0-3>                       
+  -a, --assignee <who|none|me>               That assignee (repeated = or)
+      --type <issue|epic|milestone|backlog>  
+  -g, --grep <text>                          In id, title, tag, body or notes
+      --stale <days>                         Sitting in its column that long
+      --since <when>                         Changed since that time (see below)
+      --created <from..to>                   Created in that range (see below)
+      --done <from..to>                      Closed in that range (see below)
+      --deferred                             Only what is deferred
+      --all                                  Include done/deferred, no archive
+      --archived                             Include the archive too (old done)
+      --filter <item=value>                  One filter string (`status=todo`)
+
+Order:
+      --sort <fields>  Order the listing by these fields (as `show --sort`)
+      --reverse        Turn the order around, ties included
+
   Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
 
@@ -2406,8 +2573,9 @@ Options:
   letter — only title (SPC s t) and tag (SPC c t) split one letter:
     SPC s p  priority            SPC s c  created            SPC s u  updated
     SPC s s  column              SPC s a  assignee           SPC s t  title
-    SPC s P, SPC s C, SPC s U, SPC s S, SPC s A, SPC s T  the same field
-             added at the end of the order [↑ asc/↓ desc]
+    SPC s w  due (when) — earliest first, no deadline last
+    SPC s P, SPC s C, SPC s U, SPC s S, SPC s A, SPC s T, SPC s W  the same
+             field added at the end of the order [↑ asc/↓ desc]
     SPC s e  edit the order in a window — described below
     SPC c i  id                  SPC c p  priority           SPC c a  assignee
     SPC c c  created             SPC c u  updated            SPC c n  counts
@@ -2623,7 +2791,21 @@ Options:
   keeps it. Esc closes it, asking once if you had typed something (y throws
   it away). This is the one write to an issue — editing is done on the CLI.
   `--json` prints only that directory's listing, with no screen (outside a
-  `.moai`, the rows of the layer).
+  `.moai`, the rows of the layer). Each folder row (a milestone, an epic,
+  an issue with children) carries progress, {"done": 3, "total": 5} —
+  what the counts column shows as 3/5, read from every row under it whatever
+  the filters keep. The filters of `moai show` (-s, -t, -e, -g, --filter,
+  --all, --archived, --deferred and the rest; the time filters read as in
+  `moai show --help`) shape that listing: given any, a row stands when
+  `moai show` with the same filters would list it, and a folder stands too
+  when something under it does — so done is hidden unless asked for, as in
+  `moai show`. Without them the listing is every row, as before. --sort and
+  --reverse order it in the words of `moai show --sort`, and folders still come
+  first and the baskets last. These shape --json only, and only inside a
+  `.moai`.
+
+    moai tui --path <milestone> -g parser --all --json
+    moai tui --sort updated --json
 
   `--path` takes an issue id, or one of the two baskets by the word this
   tool uses for them: none (no milestone) and lost.
@@ -3106,6 +3288,98 @@ Examples:
   It is written as `color = "green"` under `[[project]]` in the user config.
   Writing it by hand is fine - a wrong value is shown in one line by
   `moai project ls`, which then uses the colour picked by path.
+```
+
+## `moai due`
+
+```
+Raise priorities a deadline has caught up with
+
+Usage: moai due [OPTIONS] <COMMAND>
+
+Commands:
+  apply  Raise priorities their deadline calls for, with a note on each
+  help   Print this message or the help of the given subcommand(s)
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai due apply             raise what its deadline calls for, note each one
+  moai due apply --dry-run   show what it would raise, write nothing
+
+  A row follows the earliest deadline among its own and those of the rows it
+  is drawn under - its milestone, its epic, its parent (a parent already
+  closed lends none). By days left (today and a past deadline count as 0 or
+  less):
+    due_p0_days  = 1      at most this many days left - p0
+    due_p1_days  = 2      at most this many - p1
+    due_p2_days  = 7      at most this many - p2; more days left, untouched
+  Only issues and backlog items that are open and in the plan are raised -
+  never a group row, never a deferred one, never a row the write would refuse
+  (a hand-edited date: fix it with `moai edit <id> --due`). It only raises: a
+  priority that is already that urgent stays, and nothing is ever lowered back.
+
+  Each raise leaves a note in the same write, which keeps the old value:
+    Due-priority: p2 → p0 (1 days left, due 2026-10-17 from <epic>)
+  With nothing to raise it writes nothing and asks nobody who you are.
+  `due_priority = "off"` in .moai/config.toml stops it from changing
+  anything from then on; what it raised before stays. `moai status` says
+  when rows have fallen behind their deadline.
+
+  The day is the reader's day - the timezone the board uses. --json gives
+  {"due_priority","dry_run","raised":[{"id","title","was","to",
+  "days_left","due_on","due_from"}]} - due_from only when the deadline is
+  an ancestor's.
+```
+
+## `moai due apply`
+
+```
+Raise priorities their deadline calls for, with a note on each
+
+Usage: moai due apply [OPTIONS]
+
+Options:
+      --dry-run              Show what would be raised; write nothing
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+```
+
+## `moai config`
+
+```
+Read this repository's settings, defaults filled in
+
+Usage: moai config [OPTIONS]
+
+Options:
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai config           every setting, as you would write it in the file
+  moai config --json    one object - the keys of .moai/config.toml
+
+  Reads .moai/config.toml and fills in what it leaves out with the values moai
+  uses: prefix, statuses (in board order), naming, archive_days, wiki_dir, the
+  status_* thresholds and the due_* rule that `moai due apply` reads. These
+  are the values this binary acts on, so a surface drawing the board reads
+  them here instead of parsing the file again. --json adds path, the file it
+  read.
+
+  It only reads; edit the file by hand to change a setting.
 ```
 
 ## `moai models`

@@ -6769,6 +6769,404 @@ fn status_json_is_machine_shaped() {
     assert!(out.contains(&epic), "{out}");
 }
 
+/// `counts` 는 이름순 맵이라 칸 차례를 잃는다 — `statuses` 가 설정에 적힌 차례 그대로 낸다(moai-wk7i.7yy).
+/// 이름순과 갈리는 차례를 골라야 되돌리면 붉어진다.
+#[test]
+fn status_json_keeps_the_column_order_of_the_config() {
+    let s = init("statusorder");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\nstatuses = \"todo,wip,blocked,done\"\n")
+        .unwrap();
+    add(s.path(), &["하나"]);
+    let v: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
+    assert_eq!(v["statuses"], serde_json::json!(["todo", "wip", "blocked", "done"]), "{v}");
+    assert_eq!(v["counts"]["todo"], 1, "{v}");
+}
+
+/// `moai config --json` 은 이 바이너리가 실제로 쓰는 값이다(moai-wk7i.qtq) — 적은 키는 적은 대로, 안 적은 키는
+/// 기본값으로. 키는 파일의 이름 그대로다.
+#[test]
+fn config_json_fills_defaults_and_keeps_written_values() {
+    let s = init("configjson");
+    std::fs::write(
+        s.path().join(".moai/config.toml"),
+        "prefix = \"argos\"\nstatuses = \"todo,wip,done\"\narchive_days = 5\nstatus_wip_limit = 7\n",
+    )
+    .unwrap();
+    let v: serde_json::Value = serde_json::from_str(&ok(s.path(), &["config", "--json"])).unwrap();
+    assert_eq!(v["prefix"], "argos", "{v}");
+    assert_eq!(v["statuses"], serde_json::json!(["todo", "wip", "done"]), "{v}");
+    assert_eq!(v["archive_days"], 5, "{v}");
+    assert_eq!(v["status_wip_limit"], 7, "{v}");
+    // 안 적은 키는 바이너리의 기본값이다.
+    assert_eq!(v["naming"], "full", "{v}");
+    assert_eq!(v["wiki_dir"], "docs", "{v}");
+    assert_eq!(v["status_review_days"], 3, "{v}");
+    assert!(v["path"].as_str().is_some_and(|p| p.ends_with("config.toml")), "{v}");
+    // 사람 화면은 파일에 옮겨 적을 수 있는 꼴이다.
+    let human = ok(s.path(), &["config"]);
+    assert!(human.contains("statuses             = \"todo,wip,done\""), "{human}");
+    assert!(human.contains("archive_days         = 5"), "{human}");
+    // 기한 규칙(moai-dr8a.cf1) — 안 적으면 켜져 있고 1·2·7 이다.
+    assert_eq!(
+        (&v["due_priority"], &v["due_p0_days"], &v["due_p1_days"], &v["due_p2_days"]),
+        (&serde_json::json!("auto"), &serde_json::json!(1), &serde_json::json!(2), &serde_json::json!(7)),
+        "{v}"
+    );
+    assert!(human.contains("due_priority         = \"auto\""), "{human}");
+}
+
+/// `moai due apply` 는 기한이 부르는 만큼 **올리기만** 하고, 같은 쓰기에서 노트를 단다(moai-dr8a.1q4). 미리 보기는 아무것도
+/// 안 쓰고, 두 번 부르면 둘째는 아무것도 안 건드린다 — 감독이 회차마다 치는 동사라 헛 diff 를 내면 안 된다.
+#[test]
+fn due_apply_raises_by_deadline_notes_it_and_writes_nothing_twice() {
+    let s = init("dueapply");
+    let p = s.path();
+    // NOW 는 2026-09-11 이다.
+    let epic = field(&ok(p, &["epic", "add", "기한 든 에픽", "--due", "2026-09-12", "--json"]), "id");
+    let inherits = add(p, &["에픽의 기한을 따른다", "-e", &epic]);
+    let own = add(p, &["사흘 남았다", "--due", "2026-09-14", "-p", "3"]);
+    let far = add(p, &["멀다", "--due", "2026-12-01"]);
+    let urgent = add(p, &["이미 급하다", "--due", "2026-09-11", "-p", "0"]);
+    let shelved = add(p, &["미뤘다", "--due", "2026-09-11"]);
+    ok(p, &["defer", &shelved]);
+    let before = issues(p);
+
+    let dry: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(issues(p), before, "미리 보기가 썼다");
+    let row = |v: &serde_json::Value, i: usize| {
+        let r = &v["raised"][i];
+        (
+            r["id"].as_str().unwrap().to_string(),
+            r["was"].as_u64().unwrap(),
+            r["to"].as_u64().unwrap(),
+            r["days_left"].as_i64().unwrap(),
+        )
+    };
+    assert_eq!((dry["due_priority"].as_str(), dry["dry_run"].as_bool()), (Some("auto"), Some(true)), "{dry}");
+    assert_eq!(dry["raised"].as_array().unwrap().len(), 2, "{dry}");
+    assert_eq!(row(&dry, 0), (inherits.clone(), 2, 0, 1), "급한 것이 앞이고 에픽의 기한을 따른다 — {dry}");
+    assert_eq!(dry["raised"][0]["due_from"], serde_json::json!(epic), "{dry}");
+    assert_eq!(row(&dry, 1), (own.clone(), 3, 2, 3), "{dry}");
+    assert!(dry["raised"][1].get("due_from").is_none(), "제 기한에 조상을 댔다 — {dry}");
+
+    let done: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    assert_eq!(done["raised"], dry["raised"], "미리 보기와 쓰기가 갈렸다");
+    let prio = |id: &str| -> u64 {
+        let v: serde_json::Value = serde_json::from_str(&ok(p, &["show", id, "--json"])).unwrap();
+        v["priority"].as_u64().unwrap()
+    };
+    assert_eq!((prio(&inherits), prio(&own), prio(&far), prio(&urgent), prio(&shelved)), (0, 2, 2, 0, 2));
+    assert!(ok(p, &["show", &epic, "--json"]).contains(r#""priority":2"#), "에픽 줄 자신을 올렸다");
+    let said = ok(p, &["show", &inherits]);
+    assert!(said.contains(&format!("Due-priority: p2 → p0 (1 days left, due 2026-09-12 from {epic})")), "{said}");
+    assert!(ok(p, &["show", &own]).contains("Due-priority: p3 → p2 (3 days left, due 2026-09-14)"));
+    assert!(!ok(p, &["show", &far]).contains("Due-priority"), "안 올린 줄에 노트를 달았다");
+
+    // 둘째는 아무것도 안 바꾼다 — 스냅샷도 저널도.
+    let (snap, history) = (issues(p), ok(p, &["show", &inherits]));
+    let again: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    assert_eq!(again["raised"], serde_json::json!([]), "{again}");
+    assert_eq!((issues(p), ok(p, &["show", &inherits])), (snap, history), "올릴 것이 없는데 썼다");
+    assert!(ok(p, &["due", "apply"]).contains("올릴 것이 없다"));
+}
+
+/// 누군지 모르면 **쓸 것이 있을 때만** 멈춘다. 꺼진 규칙은 아무것도 안 바꾸고, 이미 올린 값을 되돌리지도 않는다.
+#[test]
+fn due_apply_stops_without_a_person_only_when_it_would_write_and_off_changes_nothing() {
+    let s = init("dueoff");
+    let p = s.path();
+    let nothing = without_user(p, &["due", "apply", "--json"]);
+    assert!(nothing.status.success(), "쓸 것이 없는데 사람을 물었다 — {}", String::from_utf8_lossy(&nothing.stderr));
+    let id = add(p, &["오늘까지", "--due", "2026-09-11"]);
+    let before = issues(p);
+    let stopped = without_user(p, &["due", "apply"]);
+    assert!(!stopped.status.success(), "누군지 모르는데 썼다");
+    assert_eq!(issues(p), before);
+    let dry = without_user(p, &["due", "apply", "--dry-run"]);
+    assert!(dry.status.success(), "미리 보기가 사람을 물었다");
+
+    ok(p, &["due", "apply"]);
+    std::fs::write(p.join(".moai/config.toml"), "prefix = \"argos\"\ndue_priority = \"off\"\n").unwrap();
+    let late = add(p, &["꺼진 뒤에 든 줄", "--due", "2026-09-11"]);
+    let before = issues(p);
+    let off: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    assert_eq!((off["due_priority"].as_str(), &off["raised"]), (Some("off"), &serde_json::json!([])), "{off}");
+    assert_eq!(issues(p), before, "꺼진 규칙이 썼다");
+    assert!(ok(p, &["show", &id, "--json"]).contains(r#""priority":0"#), "꺼질 때 올린 값을 되돌렸다");
+    assert!(ok(p, &["show", &late, "--json"]).contains(r#""priority":2"#));
+    assert!(ok(p, &["due", "apply"]).contains("꺼져 있다"));
+}
+
+/// **올릴 것이 없으면 정말 아무것도 안 쓴다**(리뷰) — 쓰기 길에 들던 판은 손으로 푼 스냅샷(적힌 기본 우선순위, 차례가
+/// 틀린 태그)을 정규화해 다시 쓰며 "올릴 것이 없다" 고 말했다. 감독이 회차마다 치는 동사라, 아무도 모를 diff 가 루트에
+/// 남는다. 누군지 모르는 기계에서도 같다.
+#[test]
+fn due_apply_with_nothing_to_raise_leaves_a_hand_merged_snapshot_alone() {
+    let s = init("duenoop");
+    let p = s.path();
+    let id = add(p, &["멀다", "--due", "2026-12-01"]);
+    let hand = issues(p)
+        .replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"tags":["zeta","alpha"],"#));
+    assert_ne!(hand, issues(p), "전제: 손으로 푼 줄을 못 지었다");
+    std::fs::write(p.join(".moai/issues.jsonl"), &hand).unwrap();
+    for args in [&["due", "apply"][..], &["due", "apply", "--json"]] {
+        let out = without_user(p, args);
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(issues(p), hand, "{args:?}: 올릴 것이 없는데 스냅샷을 다시 썼다");
+    }
+}
+
+/// **쓰기가 거절할 줄은 안 올리고, 다른 줄은 그대로 올린다**(리뷰) — 손으로 푼 틀린 제 기한을 든 멤버는 기한 없는 줄로
+/// 읽혀 에픽의 기한을 따라 올릴 줄에 들었고, 쓰기의 검사가 그 줄에서 쓰기를 통째로 물려 같은 에픽의 멤버를 회차마다
+/// 하나도 못 올렸다. 보드도 그 줄로 `moai due apply` 를 시키지 않는다 — 시켜도 늘 거기서 멈춘다.
+#[test]
+fn due_apply_skips_a_row_the_write_would_refuse() {
+    let s = init("duebroken");
+    let p = s.path();
+    // NOW 는 2026-09-11 이다 — 에픽의 기한까지 하루.
+    let epic = field(&ok(p, &["epic", "add", "기한 든 에픽", "--due", "2026-09-12", "--json"]), "id");
+    let clean = add(p, &["멀쩡한 멤버", "-e", &epic]);
+    let broken = add(p, &["손으로 푼 멤버", "-e", &epic]);
+    let hand = issues(p)
+        .replace(&format!(r#""id":"{broken}","#), &format!(r#""id":"{broken}","due_on":"2026-10-05T00:00:00Z","#));
+    assert_ne!(hand, issues(p), "전제: 손으로 푼 줄을 못 지었다");
+    std::fs::write(p.join(".moai/issues.jsonl"), &hand).unwrap();
+    let done: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--json"])).unwrap();
+    let raised: Vec<&str> = done["raised"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(raised, [clean.as_str()], "{done}");
+    let prio = |id: &str| -> u64 {
+        let v: serde_json::Value = serde_json::from_str(&ok(p, &["show", id, "--json"])).unwrap();
+        v["priority"].as_u64().unwrap()
+    };
+    assert_eq!((prio(&clean), prio(&broken)), (0, 2), "멀쩡한 멤버가 안 올랐거나 손으로 푼 줄을 고쳤다");
+    let board = ok(p, &["status", "--json"]);
+    assert!(!board.contains("due_priority_behind"), "보드가 늘 멈출 동사를 시킨다 — {board}");
+}
+
+/// **닫힌 부모의 지난 기한은 안 따른다**(리뷰) — 끝난 일 밑에 뒤늦게 세운 후속 일이 그 기한으로 `p0` 에 서고(`ready` 의
+/// 급한 자리를 차지한다), 손으로 내려도 다음 회차가 도로 올렸다. 그 줄은 더 늦은 제 기한도 못 받아(부모를 넘는다)
+/// 빠져나갈 길이 부모의 기한을 지우는 것뿐이었다.
+#[test]
+fn due_apply_does_not_follow_a_closed_parent() {
+    let s = init("dueclosed");
+    let p = s.path();
+    let parent = add(p, &["제때 끝낸 일", "--due", "2026-09-05"]);
+    ok(p, &["mv", &parent, "done"]);
+    let child = add(p, &["뒤늦게 찾은 후속", "--parent", &parent, "-p", "3"]);
+    let dry: serde_json::Value = serde_json::from_str(&ok(p, &["due", "apply", "--dry-run", "--json"])).unwrap();
+    assert_eq!(dry["raised"], serde_json::json!([]), "{dry}");
+    let board = ok(p, &["status", "--json"]);
+    assert!(!board.contains("due_priority_behind"), "닫힌 부모의 기한으로 알렸다 — {board}");
+    let v: serde_json::Value = serde_json::from_str(&ok(p, &["show", &child, "--json"])).unwrap();
+    assert_eq!(v["priority"], 3);
+}
+
+/// **`moai tui --json` 의 알림 수도 `moai status` 와 같다**(moai-dr8a.rl4, 리뷰) — 기한에 뒤처진 우선순위는 날 판정에
+/// 닿아 셈에 안 접히므로, 든 수만 내던 판은 그 알림을 빼고 층의 `+N`·보드보다 하나 적게 댔다.
+#[test]
+fn the_project_layer_json_counts_a_priority_behind_its_deadline() {
+    let s = init("layer-due-behind");
+    add(s.path(), &["내일까지", "--due", "2026-09-12"]);
+    let board: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
+    let notices = board["notices"].as_array().unwrap();
+    assert!(notices.iter().any(|w| w["kind"] == "due_priority_behind"), "전제: 보드가 안 알렸다 — {board}");
+    let out = Scratch::new("layer-due-behind-outside");
+    let cfg = registry(&out, &[s.path()]);
+    let seen = staged(&["tui", "--json"]).current_dir(out.path()).env("MOAI_CONFIG", &cfg).output().unwrap();
+    let layer: serde_json::Value = serde_json::from_slice(&seen.stdout).expect("tui --json");
+    assert_eq!(layer["projects"][0]["notices"], notices.len(), "{layer}\n{board}");
+}
+
+/// `show --json` 은 파일에 안 적힌 자리 셋을 낸다(moai-wk7i.rmc) — 물려받은 마일스톤, 계획에서 뺀 줄,
+/// 아카이브. 목록과 하나를 펼칠 때가 같은 답이어야 한다.
+#[test]
+fn show_json_names_the_inherited_milestone_the_shelf_and_the_archive() {
+    let s = init("derivedjson");
+    std::fs::write(s.path().join(".moai/config.toml"), "prefix = \"argos\"\narchive_days = 1\n").unwrap();
+    let stone = field(&ok(s.path(), &["milestone", "add", "v0.1", "--json"]), "id");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &stone, "--json"]), "id");
+    let member = field(&ok(s.path(), &["add", "안의 일", "-e", &epic, "--json"]), "id");
+    let shelf = field(&ok(s.path(), &["epic", "add", "미룬 에픽", "--json"]), "id");
+    let parked = field(&ok(s.path(), &["add", "미룬 것 밑", "-e", &shelf, "--json"]), "id");
+    ok(s.path(), &["defer", &shelf, "-m", "다음 판"]);
+    let old = add(s.path(), &["오래 닫힌 것"]);
+    assert!(at(s.path(), "2026-01-01T00:00:00Z", &["mv", &old, "done"]).status.success());
+
+    let one = |id: &str| -> serde_json::Value { serde_json::from_str(&ok(s.path(), &["show", id, "--json"])).unwrap() };
+    let list: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &["show", "--archived", "--json"])).unwrap();
+    let row = |id: &str| list.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 목록에 없다")).clone();
+
+    // 마일스톤은 에픽에서 물려받는다 — 줄의 `milestone` 은 비어 있다.
+    for r in [one(&member), row(&member)] {
+        assert_eq!(r["derived_milestone"], stone.as_str(), "{r}");
+        assert!(r.get("milestone").is_none(), "{r}");
+        assert!(r.get("archived").is_none() && r.get("shelved_by").is_none(), "{r}");
+    }
+    // 미룬 에픽 밑의 줄은 그 에픽이 계획에서 뺐다.
+    for r in [one(&parked), row(&parked)] {
+        assert_eq!(r["shelved_by"], shelf.as_str(), "{r}");
+        assert!(r.get("derived_milestone").is_none(), "{r}");
+    }
+    // done 에 archive_days 넘게 선 줄은 아카이브다.
+    assert_eq!(one(&old)["archived"], true);
+    assert_eq!(row(&old)["archived"], true);
+}
+
+/// **아카이브 파일로 옮긴 줄은 시계와 상관없이 `archived` 다**(리뷰) — `--all` 이 그 줄을 안 내는 자
+/// (`Where::stored`)와 같은 답이어야 한다. 하나를 펼치는 길은 그 집합을 따로 싣는데, 시계로 아카이브인 줄만 재던
+/// 시험은 그 한 줄을 빼도 푸르렀다. `archive_days = 0` 으로 시계를 꺼서 옮긴 것만으로 서게 한다.
+#[test]
+fn show_json_marks_a_moved_row_archived_with_the_clock_off() {
+    let s = init("storedjson");
+    let old = add(s.path(), &["옮길 것"]);
+    let kept = add(s.path(), &["남길 것"]);
+    assert!(at(s.path(), "2026-01-01T00:00:00Z", &["mv", &old, "done"]).status.success());
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    let config = s.path().join(".moai/config.toml");
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str("archive_days = 0\n");
+    std::fs::write(&config, text).unwrap();
+
+    let one: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", &old, "--json"])).unwrap();
+    assert_eq!(one["archived"], true, "{one}");
+    let list: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &["show", "--archived", "--json"])).unwrap();
+    let row = list.iter().find(|r| r["id"] == old.as_str()).unwrap_or_else(|| panic!("{old} 가 목록에 없다"));
+    assert_eq!(row["archived"], true, "{row}");
+    // 산 줄에는 안 선다 — 그리고 `--all` 은 옮긴 줄을 안 낸다.
+    let live: serde_json::Value = serde_json::from_str(&ok(s.path(), &["show", &kept, "--json"])).unwrap();
+    assert!(live.get("archived").is_none(), "{live}");
+    let all = ok(s.path(), &["show", "--all", "--fields", "id", "--json"]);
+    assert!(!all.contains(&old), "{all}");
+}
+
+/// `--fields` 는 줄마다 고른 키만 고른 차례로 낸다(moai-wk7i.vsk) — 없는 키는 안 세운다. 노트로 찾은 줄의
+/// id 목록이 그 한 꼴로 나온다(moai-wk7i.3it).
+#[test]
+fn show_fields_keeps_only_the_keys_asked_for() {
+    let s = init("fieldsjson");
+    let a = add(s.path(), &["첫째"]);
+    let b = add(s.path(), &["둘째"]);
+    ok(s.path(), &["note", &b, "노트에만 적힌 낱말 qzxv"]);
+
+    // 차례는 고른 차례다 — 파일의 차례(id 먼저)와 갈리게 골라야 되돌리면 붉어진다.
+    let out = ok(s.path(), &["show", "--fields", "title,id,nope", "--json"]);
+    one_json_value(&out);
+    assert!(out.contains(&format!("{{\"title\":\"첫째\",\"id\":\"{a}\"}}")), "{out}");
+    assert!(!out.contains("nope") && !out.contains("status"), "{out}");
+    // 키는 한 번씩만, 앞뒤 빈칸은 벗긴다 — 한 객체에 같은 키가 둘 서지 않는다(리뷰).
+    let twice = ok(s.path(), &["show", "--fields", "id, title,id", "--json"]);
+    assert!(twice.contains(&format!("{{\"id\":\"{a}\",\"title\":\"첫째\"}}")), "{twice}");
+
+    // 노트로 찾은 줄의 id 목록.
+    let found = ok(s.path(), &["show", "-g", "qzxv", "--all", "--fields", "id", "--json"]);
+    assert_eq!(found.trim(), format!("[{{\"id\":\"{b}\"}}]"), "{found}");
+
+    // 하나를 펼칠 때도 같다.
+    let one = ok(s.path(), &["show", &a, "--fields", "id,derived_status,priority", "--json"]);
+    assert_eq!(one.trim(), format!("{{\"id\":\"{a}\",\"priority\":2}}"), "{one}");
+
+    // 키는 --json 에만 있다 — 말없이 먹지 않는다.
+    let refused = moai(s.path(), &["show", "--fields", "id"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("--fields"), "{refused:?}");
+}
+
+/// `--archived` 를 쪽으로 넘겨 받은 것이 한 번에 받은 것과 같다(moai-wk7i.gkd) — 아카이브 파일의 줄과 산 줄이
+/// 한 차례에 섞이고, 쪽 사이에 산 줄 하나를 고쳐도 `--sort id` 의 쪽은 밀리지 않는다. 웹 패널이 2 MB 넘는
+/// 목록을 나눠 받는 길이다.
+#[test]
+fn archived_pages_in_id_order_join_into_the_whole_list() {
+    let s = init("archivedpages");
+    let ids: Vec<String> = (0..6).map(|n| add(s.path(), &[&format!("줄 {n}")])).collect();
+    for id in &ids[..3] {
+        assert!(at(s.path(), "2026-01-01T00:00:00Z", &["mv", id, "done"]).status.success());
+    }
+    // 셋은 아카이브 파일로 옮기고 셋은 산 줄로 둔다.
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    assert!(s.path().join(".moai/archive/2026.jsonl").is_file(), "아카이브 파일이 안 섰다");
+
+    let page = |extra: &[&str]| {
+        let mut args = vec!["show", "--archived", "--sort", "id", "--fields", "id", "--json"];
+        args.extend(extra);
+        ids_in(&ok(s.path(), &args))
+    };
+    let whole = page(&[]);
+    let mut sorted = ids.clone();
+    sorted.sort();
+    assert_eq!(whole, sorted, "아카이브 파일의 줄과 산 줄이 한 차례에 안 섰다");
+
+    let mut got: Vec<String> = Vec::new();
+    loop {
+        let mut extra = vec!["-n", "2"];
+        let last = got.last().cloned();
+        if let Some(last) = &last {
+            extra.extend(["--after", last.as_str()]);
+        }
+        let next = page(&extra);
+        // 쪽 사이에 산 줄 하나를 고친다 — id 차례는 고침에 안 움직인다.
+        ok(s.path(), &["edit", &ids[5], "-p", "0"]);
+        let done = next.len() < 2;
+        got.extend(next);
+        if done {
+            break;
+        }
+    }
+    assert_eq!(got, whole, "쪽으로 받은 것이 한 번에 받은 것과 다르다");
+}
+
+/// `tui --json` 의 목록은 묶음 줄에 `n/n` 셈을 늘 달고, `show` 의 거르개와 차례를 받는다(moai-wk7i.5wx).
+/// 거르개를 주면 `show` 가 고를 줄이 서고 그 밑에 걸린 것이 있는 폴더가 선다 — 셈은 거르개와 상관없이 다 센다.
+#[test]
+fn tui_json_counts_groups_and_takes_the_show_filters() {
+    let s = init("tuishape");
+    let epic = field(&ok(s.path(), &["epic", "add", "저장 계층", "--json"]), "id");
+    let done = field(&ok(s.path(), &["add", "끝난 일", "-e", &epic, "--json"]), "id");
+    let open = field(&ok(s.path(), &["add", "남은 일 zqx", "-e", &epic, "-p", "0", "--json"]), "id");
+    let other = field(&ok(s.path(), &["add", "에픽 밖", "-p", "3", "--json"]), "id");
+    ok(s.path(), &["mv", &done, "done"]);
+    let rows = |args: &[&str]| -> Vec<serde_json::Value> {
+        let mut all = vec!["tui", "--json"];
+        all.extend(args);
+        serde_json::from_str(&ok(s.path(), &all)).unwrap()
+    };
+    let ids = |rows: &[serde_json::Value]| -> Vec<String> {
+        rows.iter().filter_map(|r| r["id"].as_str().map(str::to_string)).collect()
+    };
+
+    // 거르개 없이는 전처럼 다 — 묶음 줄에는 셈이 선다.
+    let top = rows(&[]);
+    let e = top.iter().find(|r| r["id"] == epic.as_str()).unwrap();
+    assert_eq!(e["progress"], serde_json::json!({"done": 1, "total": 2}), "{e}");
+    assert!(top.iter().find(|r| r["id"] == other.as_str()).unwrap().get("progress").is_none());
+    assert_eq!(ids(&rows(&["--path", &epic])), vec![open.clone(), done.clone()]);
+
+    // `show` 의 말 — 기본으로 done 을 숨기고, `-g` 에 걸린 줄의 폴더가 선다. 셈은 그대로다.
+    assert_eq!(ids(&rows(&["--path", &epic, "-s", "todo"])), vec![open.clone()]);
+    assert_eq!(ids(&rows(&["--path", &epic, "--all", "-s", "done"])), vec![done.clone()]);
+    let found = rows(&["-g", "zqx"]);
+    assert_eq!(ids(&found), vec![epic.clone()], "걸린 줄의 폴더만 서야 한다");
+    assert_eq!(found[0]["progress"], serde_json::json!({"done": 1, "total": 2}));
+
+    // 차례는 `show --sort` 의 말이다. `--reverse` 만 주면 기본 차례(우선순위)를 뒤집는다.
+    assert_eq!(ids(&rows(&["--path", &epic, "--sort", "priority:desc"])), vec![done.clone(), open.clone()]);
+    assert_eq!(ids(&rows(&["--path", &epic, "--reverse"])), vec![done.clone(), open.clone()]);
+
+    // 화면에서는 말없이 먹지 않는다.
+    let refused = moai(s.path(), &["tui", "-s", "todo"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("-s"), "{refused:?}");
+
+    // `.moai` 밖에서는 화면이든 `--json` 이든 **같은 말로** 거절한다(리뷰) — 화면의 거절이 "--json 을 더하라" 를
+    // 대면, 그대로 친 판이 다시 거절된다.
+    let outside = Scratch::new("tuishape-outside");
+    for args in [&["tui", "-s", "todo"][..], &["tui", "-s", "todo", "--json"][..]] {
+        let out = moai(outside.path(), args);
+        assert!(!out.status.success(), "{args:?}");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        assert!(said.contains("moai -C <dir> tui"), "{args:?}: {said}");
+    }
+}
+
 /// 시계가 가는 것만으로 드러나는 것들 — 고정 시계 없이는 시험할 수 없다.
 #[test]
 fn time_alone_surfaces_rot() {
@@ -6921,8 +7319,8 @@ fn a_plan_hangs_its_epics_on_the_milestone() {
 
 /// **`--from` 과 뜻이 안 통하는 깃발은 거절한다**(moai-fppn). `--body -` 는 계획과 stdin 을
 /// 다투고, `--status` 는 계획이 늘 첫 칸에 세우므로 갈 곳이 없다 — 받고 버리면 0 으로 끝난
-/// 부름이 사람이 준 글과 칸을 말없이 삼킨다. `--epic`·`--tag`·`--start`·`--due` 가 이미 선
-/// 자리와 한 줄이다.
+/// 부름이 사람이 준 글과 칸을 말없이 삼킨다. `--epic`·`--tag`·`--start` 가 이미 선 자리와 한 줄이다
+/// (`--due` 는 계획이 짓는 에픽에 서서 빠졌다, moai-ghkp.u1w).
 #[test]
 fn a_plan_refuses_the_flags_it_cannot_use() {
     let s = init("planflags");
@@ -6932,7 +7330,7 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
     // **`--body` 는 여기서 빠졌다**(moai-kqid) — 계획은 본문을 받아 첫 뿌리에 단다. 못 서는
     // 판은 stdin 을 정말 다투는 판뿐이고, 그것은 아래 [`a_plan_takes_a_body_unless_stdin_is_contested`] 가 잰다.
     //
-    // **열 가지를 남김없이 돈다**(리뷰). clap 의 `conflicts_with_all` 이 거저 지키던 목록을
+    // **아홉 가지를 남김없이 돈다**(리뷰 — `--due` 는 계획이 짓는 에픽에 서서 빠졌다, moai-ghkp.u1w). clap 의 `conflicts_with_all` 이 거저 지키던 목록을
     // 손으로 옮겨 적었는데 시험은 셋만 돌아, 그 목록에서 한 줄이 빠지는 날 아무것도 안 붉어졌다 —
     // 빠진 깃발은 받아서 버려지고 그 부름이 0 으로 끝난다(`--type` 이 실제로 그랬다, moai-g9a8).
     for extra in [
@@ -6942,7 +7340,6 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
         ["--priority", "1"].as_slice(),
         ["--parent", "moai-aaaa"].as_slice(),
         ["--start", "2026-09-01"].as_slice(),
-        ["--due", "2026-09-30"].as_slice(),
         ["--status", "in_progress"].as_slice(),
         ["--quiet"].as_slice(),
         ["--type", "issue"].as_slice(),
@@ -7364,9 +7761,9 @@ fn a_single_add_says_an_epic_that_is_not_there() {
     let row = String::from_utf8(out.stdout).unwrap();
     assert!(row.trim_start().starts_with('{') && row.contains(r#""epic":"argos-zzzz""#), "{row}");
 
-    // 거절된 쓰기는 알리지 않는다 — 기한은 마일스톤 줄에만 서므로 이 쓰기는 락 안에서 물린다.
-    let out = moai(s.path(), &["add", "거절될 줄", "-e", "argos-zzzz", "--due", "2026-10-10"]);
-    assert!(!out.status.success(), "기한을 든 이슈가 받아들여졌다\n{}", text(&out));
+    // 거절된 쓰기는 알리지 않는다 — 시작 기한은 마일스톤 줄에만 서므로 이 쓰기는 락 안에서 물린다.
+    let out = moai(s.path(), &["add", "거절될 줄", "-e", "argos-zzzz", "--start", "2026-10-10"]);
+    assert!(!out.status.success(), "시작 기한을 든 이슈가 받아들여졌다\n{}", text(&out));
     assert!(!said(&out, "argos-zzzz"), "거절된 쓰기가 알림을 먼저 냈다\n{}", text(&out));
 
     // 에픽이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_epic` 과 같다.
@@ -8185,6 +8582,8 @@ fn idea_and_issue_share_one_list_of_verbs() {
 /// 목록을 여기 한 자리에 두어야 그 견줌이 뜻을 갖는다.
 const JSON_SWEEP: &[&str] = &[
     "init",
+    // 저장소의 설정을 기본값을 채워 읽는다(moai-wk7i.qtq).
+    "config",
     "add",
     "status",
     "ready",
@@ -8221,6 +8620,8 @@ const JSON_SWEEP: &[&str] = &[
     // 자리(`target/`)에 서서 거절되므로, 그 밖에 걸어 둔 한 벌([`hoisted`])로 부른다.
     "update",
     "models",
+    // 기한이 우선순위를 올린다(moai-dr8a.1q4). 훑는 판에는 기한 든 줄이 없어 아무것도 안 쓴다.
+    "due",
 ];
 
 /// `install.sh` 가 판을 내는 기계인가 — `latest::SERVED` 와 같은 자다. 다른 기계에서 `moai update` 는 무엇보다
@@ -8386,6 +8787,98 @@ fn read_names_the_ids_a_hand_written_value_held_back() {
     assert!(said.contains(&format!(r#""held":["{b}"]"#)), "막힌 id 를 이름으로 안 냈다 — {said}");
     assert!(said.contains(r#""read":[]"#) && said.contains(r#""missing":[]"#), "{said}");
     assert!(std::fs::read_to_string(&sheet).unwrap().contains(&format!("\"{b}\" = 3")), "사람이 적은 값을 덮었다");
+}
+
+/// **`show --json` 은 탐색기의 [NEW] 를 `unread: true` 로 싣는다**(moai-cqwy) — 같은 자(`query::unread_held`)다.
+/// 내게 온 줄(담당·자식·내 에픽의 멤버)만 서고 마일스톤의 멤버와 남의 줄은 안 선다. `moai read` 가 내리고,
+/// 목록과 하나를 펼친 것이 같은 답을 낸다. 키는 설 때만 단다 — 없는 것이 곧 읽은 것이다.
+/// **누군지 모르면 키가 하나도 없고 명령은 0 으로 끝난다** — 읽기는 사람을 묻지 않는다.
+#[test]
+fn show_json_marks_the_rows_unread_for_me() {
+    let s = init("showunread");
+    let cfg = s.path().join("user.toml");
+    let mine = |args: &[&str]| ok_with(s.path(), &cfg, args);
+    let own = field(&mine(&["add", "내 일", "--json"]), "id");
+    let other = field(&mine(&["add", "남의 일", "-a", "Kim (kim@example.com)", "--json"]), "id");
+    let stone = field(&mine(&["milestone", "add", "v1", "--json"]), "id");
+    let in_stone =
+        field(&mine(&["add", "마일 멤버", "--milestone", &stone, "-a", "Kim (kim@example.com)", "--json"]), "id");
+    let epic = field(&mine(&["add", "내 에픽", "--type", "epic", "--json"]), "id");
+    let in_epic = field(&mine(&["add", "에픽 멤버", "-e", &epic, "-a", "Kim (kim@example.com)", "--json"]), "id");
+    let unread_in = |json: &str| -> Vec<String> {
+        let rows: Vec<serde_json::Value> = serde_json::from_str(json.trim()).unwrap();
+        let mut ids: Vec<String> = rows
+            .iter()
+            .filter(|r| {
+                // 키는 설 때만 — `false` 로 서면 안 된다.
+                assert_ne!(r.get("unread"), Some(&serde_json::Value::Bool(false)), "{r}");
+                r.get("unread") == Some(&serde_json::Value::Bool(true))
+            })
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    };
+    let one_unread = |id: &str| -> Option<serde_json::Value> {
+        let v: serde_json::Value = serde_json::from_str(mine(&["show", id, "--json"]).trim()).unwrap();
+        v.get("unread").cloned()
+    };
+
+    // 아직 아무것도 안 읽었다 — 읽음 파일이 없는 것은 정상이고 내게 온 것이 모두 선다.
+    let mut want = vec![own.clone(), stone.clone(), epic.clone(), in_epic.clone()];
+    want.sort();
+    assert_eq!(unread_in(&mine(&["show", "--all", "--json"])), want, "마일스톤 멤버·남의 줄이 섰거나 내 것이 빠졌다");
+    assert_eq!(one_unread(&own), Some(serde_json::Value::Bool(true)));
+    assert_eq!(one_unread(&other), None, "남의 줄에 섰다");
+    assert_eq!(one_unread(&in_stone), None, "마일스톤의 멤버를 셌다");
+    // 목록과 하나를 펼친 것이 **줄마다** 같은 답이다.
+    let listed: Vec<serde_json::Value> = serde_json::from_str(mine(&["show", "--all", "--json"]).trim()).unwrap();
+    for r in &listed {
+        let id = r["id"].as_str().unwrap();
+        assert_eq!(one_unread(id), r.get("unread").cloned(), "{id} 에서 목록과 하나가 갈렸다");
+    }
+    // 걸러 낸 목록도 같은 자다 — **소속은 걸러지기 전의 줄로 잰다**. 남의 멤버는 내 에픽에 들어 서는데,
+    // 그 에픽 줄은 `-e` 의 목록에 없다 — 보이는 줄만으로 재면 이 줄이 빠진다.
+    assert_eq!(unread_in(&mine(&["show", "-e", &epic, "--json"])), vec![in_epic.clone()], "보이는 줄로만 쟀다");
+
+    // 읽으면 내린다 — 목록에서도, 하나를 펼쳐도.
+    mine(&["read", &own, &in_epic]);
+    let mut want = vec![stone.clone(), epic.clone()];
+    want.sort();
+    assert_eq!(unread_in(&mine(&["show", "--all", "--json"])), want, "읽은 줄이 그대로 섰다");
+    assert_eq!(one_unread(&own), None, "읽은 줄을 펼쳤는데 섰다");
+    assert_eq!(unread_in(&mine(&["show", "-e", &epic, "--json"])), Vec::<String>::new(), "읽은 멤버가 그대로 섰다");
+
+    // 누군지 모른다 — 키가 하나도 없고 명령은 넘어지지 않는다.
+    let bare = |args: &[&str]| {
+        let out = isolated(BIN)
+            .args(args)
+            .current_dir(s.path())
+            .env("MOAI_CONFIG", &cfg)
+            .env("MOAI_NOW", NOW)
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("moai 를 실행하지 못했다");
+        assert!(out.status.success(), "누군지 몰라 show 가 넘어졌다 — {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let list = bare(&["show", "--all", "--json"]);
+    assert!(!list.contains("\"unread\""), "누군지 모르는데 안 읽음을 셌다 — {list}");
+    let one = bare(&["show", &stone, "--json"]);
+    assert!(!one.contains("\"unread\""), "누군지 모르는데 안 읽음을 셌다 — {one}");
+
+    // 읽음을 못 든다 — "모른다" 라 키가 하나도 없고(빈 표로 세면 내 줄이 모두 선다) 명령은 0 으로 끝난다.
+    let sheets: Vec<std::path::PathBuf> = std::fs::read_dir(s.path().join("read"))
+        .expect("`moai read` 가 읽음 파일을 설정 곁에 안 지었다")
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    assert_eq!(sheets.len(), 1, "읽음 파일을 못 골랐다 — {sheets:?}");
+    std::fs::write(&sheets[0], "garbage [[[\n").unwrap();
+    let list = mine(&["show", "--all", "--json"]);
+    assert!(!list.contains("\"unread\""), "못 든 읽음을 빈 표로 셌다 — {list}");
+    let one = mine(&["show", &stone, "--json"]);
+    assert!(!one.contains("\"unread\""), "못 든 읽음을 빈 표로 셌다 — {one}");
 }
 
 /// **읽음은 본 때가 아니라 본 줄의 `updated_at` 을 적는다**(moai-lyc1, 사용자 결정 2026-09-19). 본 때를
@@ -8691,6 +9184,9 @@ fn every_command_still_speaks_json() {
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
         vec!["models", "--json"],
+        vec!["config", "--json"],
+        vec!["due", "apply", "--dry-run", "--json"],
+        vec!["due", "apply", "--json"],
     ];
     // **적어 둔 목록과 실제로 부르는 목록을 여기서 잇는다.** 잇지 않으면
     // `JSON_SWEEP` 에 이름만 적고 한 번도 안 부르는 명령이 생기고, 그러면
@@ -9754,15 +10250,16 @@ fn a_milestone_carries_a_start_and_a_deadline() {
     assert!(!ok(s.path(), &["show", &m]).contains("기한"), "빈 기한이 줄을 세웠다");
 }
 
-/// **기한은 마일스톤 줄에만 선다.** 다른 종류에 적힌 값은 어느 화면도 안 읽으므로, 조용히
-/// 받으면 적은 사람은 걸린 줄 안다 — 거절문이 비우는 명령을 그대로 낸다.
+/// **시작 기한은 마일스톤 줄에만 선다.** 다른 종류에 적힌 값은 어느 화면도 안 읽으므로, 조용히
+/// 받으면 적은 사람은 걸린 줄 안다 — 거절문이 비우는 명령을 그대로 낸다. **종료 기한은 모든 줄에
+/// 선다**(moai-ghkp.kz7) — 그쪽은 `a_deadline_stands_on_every_kind_of_row` 가 잰다.
 #[test]
-fn a_deadline_stands_on_a_milestone_row_only() {
+fn a_start_date_stands_on_a_milestone_row_only() {
     let s = init("duekind");
-    let made = moai(s.path(), &["add", "그냥 이슈", "--due", "2026-09-20"]);
-    assert!(!made.status.success(), "이슈에 기한을 받았다");
+    let made = moai(s.path(), &["add", "그냥 이슈", "--start", "2026-09-20"]);
+    assert!(!made.status.success(), "이슈에 시작 기한을 받았다");
     let said = String::from_utf8_lossy(&made.stderr).to_string();
-    assert!(said.contains("--due"), "어느 옵션이 틀렸는지를 안 댄다 — {said}");
+    assert!(said.contains("--start"), "어느 옵션이 틀렸는지를 안 댄다 — {said}");
     // **만들다 걸린 줄에는 고칠 id 가 없다**(moai-1rkl, 리뷰) — 거절이 쓰기를 통째로 물리므로
     // 방금 뽑은 id 는 어디에도 안 남는다. 그 id 를 그대로 내밀면 따라 친 쪽이 "없는 이슈" 를 본다.
     assert!(said.contains("빼고"), "만들 때 무엇을 해야 하는지를 안 댄다 — {said}");
@@ -9793,31 +10290,493 @@ fn a_row_that_picked_up_a_broken_deadline_is_told_how_to_clear_it() {
     ok(s.path(), &["edit", &m, "--title", "v0.1.1"]);
 }
 
-/// **기한은 마일스톤 줄의 것이다**(moai-x04r.fn4). 쓰기가 다른 종류의 줄에 `due_on` 을
-/// 거절하므로 그 값이 서는 길은 손으로 푼 충돌과 머지 드라이버가 안 건드리고 넘긴 낡은 줄
-/// (`a_row_neither_side_touched_does_not_block_the_merge`)뿐인데, 상세는 종류를 안 보고 그려
-/// `3일 지남` 이라 말하고 보드는 마일스톤만 세어 아무 말도 안 했다 — 한 줄이 두 표면에서
-/// 다르게 읽혔다. 따르는 것은 쓰기의 규칙(`Issue::check`)이다: 그리는 쪽을 따르면 이슈에
-/// 적힌 날이 기한 경고로 서서 없는 마일스톤이 보드를 채운다.
+/// **종료 기한은 모든 줄에 선다**(moai-ghkp.kz7, 2026-10-16 사용자 결정) — 이슈·에픽·backlog 가
+/// `--due` 를 받고, 상세가 그 날을 그린다. **시작 기한은 마일스톤 줄의 것이다**(moai-x04r.fn4) —
+/// 쓰기가 거절하는 값이라 손으로 푼 충돌이 남겨도 상세는 그리지 않는다. 적힌 값은 지우지 않는다.
 #[test]
-fn a_deadline_on_a_row_that_is_not_a_milestone_is_drawn_nowhere() {
-    let s = init("duekind");
-    let i = add(s.path(), &["손으로 푼 충돌이 남긴 줄"]);
-    let line =
-        line_of(s.path(), &i).replace(r#""status":"#, r#""due_on":"2026-09-20","starts_on":"2026-09-05","status":"#);
-    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{line}\n")).unwrap();
+fn a_deadline_stands_on_every_kind_of_row() {
+    let s = init("duekinds");
+    let i = add(s.path(), &["그냥 이슈", "--due", "2026-09-20"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--due", "2026-09-25"]);
+    let b = ok(s.path(), &["backlog", "add", "생각", "--due", "2026-09-22", "-q"]).trim().to_string();
+    for (id, day) in [(&i, "2026-09-20"), (&e, "2026-09-25"), (&b, "2026-09-22")] {
+        assert!(line_of(s.path(), id).contains(&format!(r#""due_on":"{day}""#)), "{id}: 기한이 안 적혔다");
+        let shown = ok(s.path(), &["show", id]);
+        assert!(shown.contains(day), "{id}: 상세에 기한이 안 섰다\n{shown}");
+        assert!(!shown.contains("—"), "{id}: 시작 기한 자리를 그렸다\n{shown}");
+    }
+    // 고치기도, 비우기도 된다.
+    ok(s.path(), &["edit", &i, "--due", "2026-09-19"]);
+    assert!(line_of(s.path(), &i).contains(r#""due_on":"2026-09-19""#));
+    ok(s.path(), &["edit", &i, "--due", "none"]);
+    assert!(!line_of(s.path(), &i).contains("due_on"), "비운 기한이 남았다");
 
-    let shown = ok(s.path(), &["show", &i]);
-    assert!(!shown.contains("2026-09-20"), "마일스톤 아닌 줄의 상세에 기한이 섰다\n{shown}");
+    // 손으로 끼운 시작 기한은 상세가 그리지 않는다. 적힌 값은 `--json` 에 그대로 선다.
+    let line = line_of(s.path(), &e).replace(r#""status":"#, r#""starts_on":"2026-09-05","status":"#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&line_of(s.path(), &e), &line))
+        .unwrap();
+    let shown = ok(s.path(), &["show", &e]);
     assert!(!shown.contains("2026-09-05"), "마일스톤 아닌 줄의 상세에 시작 기한이 섰다\n{shown}");
+    let json = ok(s.path(), &["show", &e, "--json"]);
+    assert!(json.contains(r#""starts_on":"2026-09-05""#), "적힌 값이 기계 표면에서 사라졌다\n{json}");
+}
 
-    // **적힌 값은 지우지 않는다** — 읽기는 관대하고, `--json` 은 파일에 있는 그대로 낸다.
-    let json = ok(s.path(), &["show", &i, "--json"]);
-    assert!(json.contains(r#""due_on":"2026-09-20""#), "적힌 값이 기계 표면에서 사라졌다\n{json}");
+/// **자식의 기한은 조상보다 늦을 수 없다**(moai-ghkp.33i, 2026-10-16 사용자 결정) — 마일스톤 > 에픽 >
+/// 이슈 > backlog. 조상은 선 마일스톤(물려받은 것 포함)·든 에픽·점 id 의 부모다. 막는 것은 **지금 쓰는
+/// 줄**뿐이고, 거절문은 당길 날짜와 먼저 고칠 조상을 함께 댄다.
+#[test]
+fn a_deadline_cannot_pass_its_ancestors() {
+    let s = init("dueladder");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-30"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m, "--due", "2026-09-25"]);
 
-    // 보드는 처음부터 조용했다. 이제 상세도 같은 말을 한다.
-    let board = ok(s.path(), &["status"]);
-    assert!(!board.contains("2026-09-20"), "보드가 기한 경고를 세웠다\n{board}");
+    // 에픽이 마일스톤을 넘는다.
+    let out = moai(s.path(), &["edit", &e, "--due", "2026-10-01"]);
+    assert!(!out.status.success(), "마일스톤보다 늦은 에픽 기한을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&m) && said.contains("--due 2026-09-30"), "고칠 길을 안 댄다 — {said}");
+
+    // 멤버는 에픽에도, 에픽이 선 마일스톤에도 걸린다 — 가장 이른 것이 이긴다.
+    let out = moai(s.path(), &["add", "멤버", "-e", &e, "--due", "2026-09-26"]);
+    assert!(!out.status.success(), "에픽보다 늦은 멤버 기한을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&e) && said.contains("2026-09-25"), "{said}");
+    let before = issues(s.path());
+    assert!(!before.contains("멤버"), "거절한 줄이 남았다");
+    let i = add(s.path(), &["멤버", "-e", &e, "--due", "2026-09-25"]);
+
+    // 점 id 의 자식은 부모 이슈에도 걸린다.
+    let out = moai(s.path(), &["add", "자식", "--parent", &i, "--due", "2026-09-26"]);
+    assert!(!out.status.success(), "부모보다 늦은 자식 기한을 받았다");
+    add(s.path(), &["자식", "--parent", &i, "--due", "2026-09-24"]);
+
+    // **기한 든 줄을 더 이른 에픽으로 옮기는 것도 이 줄의 쓰기다.**
+    let late = add(s.path(), &["늦은 에픽", "--type", "epic", "--due", "2026-10-10"]);
+    let loose = add(s.path(), &["떠도는 일", "-e", &late, "--due", "2026-10-05"]);
+    let out = moai(s.path(), &["edit", &loose, "-e", &e]);
+    assert!(!out.status.success(), "기한이 넘는 에픽으로 옮겼다");
+    assert!(line_of(s.path(), &loose).contains(&late), "거절한 옮김이 남았다");
+
+    // **기한을 안 건드린 쓰기는 안 막는다** — 손으로 넘긴 줄도 제목은 고친다.
+    let line = line_of(s.path(), &loose);
+    let over = line.replace(r#""due_on":"2026-10-05""#, r#""due_on":"2026-10-20""#);
+    assert_ne!(line, over);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&line, &over)).unwrap();
+    ok(s.path(), &["edit", &loose, "--title", "제목만 고친다"]);
+
+    // 기한 없는 줄은 조상 기한이 있어도 그대로 선다 — 기한은 필수가 아니다.
+    add(s.path(), &["기한 없음", "-e", &e]);
+}
+
+/// **조상을 당긴 쓰기는 자식을 안 막는다**(moai-ghkp.cb3) — 자식은 남의 줄이다. 쓰기 뒤에 stderr 한
+/// 줄로 넘친 줄을 대고, `status` 가 `due_beyond_parent` 로 비춘다. 경고는 종료 코드를 안 바꾼다.
+#[test]
+fn pulling_a_parent_deadline_in_warns_about_the_children() {
+    let s = init("duepull");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-30"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m]);
+    let i = add(s.path(), &["멤버", "-e", &e, "--due", "2026-09-28"]);
+    let quiet = add(s.path(), &["기한 없는 멤버", "-e", &e]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "넘친 줄이 없는데 경고가 섰다");
+
+    let out = moai(s.path(), &["edit", &m, "--due", "2026-09-20"]);
+    assert!(out.status.success(), "조상을 당기는 쓰기가 막혔다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&i) && said.contains("due_beyond_parent"), "넘친 줄을 안 댄다 — {said}");
+    assert!(!said.contains(&quiet), "기한 없는 줄을 댔다 — {said}");
+
+    let out = moai(s.path(), &["status", "--json"]);
+    assert!(out.status.success(), "경고가 종료 코드를 바꿨다");
+    let board = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(board.contains("due_beyond_parent") && board.contains(&i), "{board}");
+    assert!(ok(s.path(), &["status"]).contains(&i), "보드가 넘친 줄을 안 댄다");
+
+    // **에픽을 더 이른 마일스톤으로 옮겨도** 멤버가 넘치면 그 쓰기가 댄다 — 천장은 에픽이 아니라 마일스톤이다.
+    ok(s.path(), &["edit", &i, "--due", "2026-09-20"]);
+    let early = add(s.path(), &["v0.0", "--type", "milestone", "--due", "2026-09-15"]);
+    let out = moai(s.path(), &["edit", &e, "--milestone", &early]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&i), "옮긴 에픽 밑에서 넘친 멤버를 안 댄다\n{}", text(&out));
+
+    // 닫으면 안 센다.
+    ok(s.path(), &["mv", &i, "done"]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "닫은 줄을 셌다");
+}
+
+/// **기한으로 줄 세우고 거른다**(moai-ghkp.7uy) — `--sort due` 는 이른 것이 먼저고 기한 없는 줄이 뒤다.
+/// `due_on=` 은 달력의 날로 양 끝을 든다. `ready` 는 같은 `p` 안에서 기한이 이른 것을 먼저 낸다 — 읽을
+/// 때만 재고 저장하지 않는다.
+#[test]
+fn deadlines_order_and_filter_the_list() {
+    let s = init("duesort");
+    let late = add(s.path(), &["늦은 것", "--due", "2026-10-20"]);
+    let none = add(s.path(), &["기한 없음"]);
+    let soon = add(s.path(), &["이른 것", "--due", "2026-10-02"]);
+    let mid = add(s.path(), &["가운데", "--due", "2026-10-05"]);
+    let urgent = add(s.path(), &["급한 것", "-p", "0"]);
+
+    let ids = |out: &str| ids_in(out);
+    let sorted = ids(&ok(s.path(), &["show", "--sort", "due", "--json"]));
+    let pos = |id: &str| sorted.iter().position(|x| x == id).unwrap();
+    assert!(pos(&soon) < pos(&mid) && pos(&mid) < pos(&late) && pos(&late) < pos(&none), "{sorted:?}");
+
+    let picked = ids(&ok(s.path(), &["show", "--filter", "due_on=2026-10-01~2026-10-05", "--json"]));
+    assert_eq!(picked.len(), 2, "{picked:?}");
+    assert!(picked.contains(&soon) && picked.contains(&mid));
+    let one = ids(&ok(s.path(), &["show", "--filter", "due_on=2026-10-20", "--json"]));
+    assert_eq!(one, vec![late.clone()]);
+    let open = ids(&ok(s.path(), &["show", "--filter", "due_on=2026-10-03~", "--json"]));
+    assert!(open.contains(&mid) && open.contains(&late) && !open.contains(&soon) && !open.contains(&none));
+    for bad in ["due_on=어제", "due_on=2026-10-05~2026-10-01", "due_on=~"] {
+        assert!(!moai(s.path(), &["show", "--filter", bad]).status.success(), "{bad} 를 받았다");
+    }
+
+    // ready — 급한 것이 먼저고, 같은 p2 안에서는 기한이 이른 것이 먼저다.
+    let ready = ids(&ok(s.path(), &["ready", "--json"]));
+    let at = |id: &str| ready.iter().position(|x| x == id).unwrap_or_else(|| panic!("{id} 가 ready 에 없다 {ready:?}"));
+    assert!(at(&urgent) < at(&soon), "{ready:?}");
+    assert!(at(&soon) < at(&mid) && at(&mid) < at(&late) && at(&late) < at(&none), "{ready:?}");
+}
+
+/// **계획이 기한을 든다**(moai-ghkp.u1w) — 줄 끝의 `@날짜` 가 그 줄의 기한이고, `add --from --due` 는
+/// 계획이 짓는 에픽에 선다(`--milestone` 과 같은 길). 줄이 제 `@날짜` 를 들었으면 그것이 이긴다. 멤버에는
+/// 안 내린다. `backlog promote` 는 backlog 의 기한을 에픽으로 데려간다. 위계는 같은 쓰기 안에서도 선다.
+#[test]
+fn a_plan_carries_deadlines() {
+    let s = init("dueplan");
+    let plan = "# 첫 에픽\n- 멤버 @2026-10-20\n- 기한 없는 멤버\n# 둘째 에픽 @2026-10-25\n- 다른 멤버\n";
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--due", "2026-10-30", "--json"], plan);
+    assert!(out.status.success(), "{}", text(&out));
+    let rows = issues(s.path());
+    let line = |title: &str| rows.lines().find(|l| l.contains(&format!(r#""title":"{title}""#))).unwrap().to_string();
+    assert!(line("첫 에픽").contains(r#""due_on":"2026-10-30""#), "{}", line("첫 에픽"));
+    assert!(line("둘째 에픽").contains(r#""due_on":"2026-10-25""#), "줄의 @날짜가 --due 에 졌다");
+    assert!(line("멤버").contains(r#""due_on":"2026-10-20""#));
+    assert!(!line("기한 없는 멤버").contains("due_on"), "멤버에 기한을 내렸다");
+
+    // 연습도 같은 날을 댄다.
+    let dry = from_stdin(s.path(), &["add", "--from", "-", "--due", "2026-10-30", "--dry-run", "--json"], plan);
+    let said = String::from_utf8_lossy(&dry.stdout).to_string();
+    assert!(said.contains(r#""due_on":"2026-10-30""#) && said.contains(r#""due_on":"2026-10-25""#), "{said}");
+
+    // 같은 쓰기 안의 위계 — 멤버가 제 에픽보다 늦으면 계획째 물린다.
+    let before = issues(s.path());
+    let out = from_stdin(s.path(), &["add", "--from", "-"], "# 에픽 @2026-10-10\n- 늦은 멤버 @2026-10-11\n");
+    assert!(!out.status.success(), "에픽보다 늦은 멤버를 받았다");
+    assert_eq!(issues(s.path()), before, "물린 계획이 남았다");
+    // 꼴이 틀린 @날짜는 줄 번호와 거절한다.
+    let out = from_stdin(s.path(), &["add", "--from", "-"], "# 에픽\n- 멤버 @2026-13-01\n");
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("2"), "{}", text(&out));
+
+    // promote 는 backlog 의 기한을 에픽으로 데려간다.
+    let b = ok(s.path(), &["backlog", "add", "나중", "--due", "2026-11-01", "-q"]).trim().to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &b, "--from", "-"], "# 펼친 에픽\n- 펼친 멤버\n");
+    assert!(out.status.success(), "{}", text(&out));
+    let rows = issues(s.path());
+    let line = |title: &str| rows.lines().find(|l| l.contains(&format!(r#""title":"{title}""#))).unwrap().to_string();
+    assert!(line("펼친 에픽").contains(r#""due_on":"2026-11-01""#), "{}", line("펼친 에픽"));
+    assert!(!line("펼친 멤버").contains("due_on"));
+}
+
+/// **`--due +N` 은 오늘에서 N 일 뒤다**(moai-ghkp.kz7) — 저장하는 것은 날짜다. `+3` 을 그대로 두면
+/// 읽을 때마다 다른 날을 가리킨다. 오늘은 읽는 사람의 달이다: 서울의 아침은 UTC 로 아직 어제다.
+#[test]
+fn a_relative_deadline_is_stored_as_a_day() {
+    let s = init("duerel");
+    let now = "2026-09-11T20:00:00Z"; // 서울로는 09-12 05:00
+    let run = |tz: &str, args: &[&str]| {
+        let out = staged(args).current_dir(s.path()).env("MOAI_NOW", now).env("TZ", tz).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let id = run("UTC", &["add", "사흘 뒤", "--due", "+3", "-q"]);
+    assert!(line_of(s.path(), &id).contains(r#""due_on":"2026-09-14""#), "{}", line_of(s.path(), &id));
+    run("UTC", &["edit", &id, "--due", "+0"]);
+    assert!(line_of(s.path(), &id).contains(r#""due_on":"2026-09-11""#), "{}", line_of(s.path(), &id));
+    // **자료가 있는 기계에서만 잰다** — `a_bare_day_is_the_readers_day` 와 같은 까닭이다.
+    let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+    if tzdb.join("Asia/Seoul").exists() {
+        run("Asia/Seoul", &["edit", &id, "--due", "+0"]);
+        assert!(line_of(s.path(), &id).contains(r#""due_on":"2026-09-12""#), "{}", line_of(s.path(), &id));
+    }
+
+    for bad in ["+", "+x", "++3", "+-1"] {
+        let out = moai(s.path(), &["edit", &id, "--due", bad]);
+        assert!(!out.status.success(), "{bad} 를 날짜로 받았다");
+    }
+    // **네 자리 해를 넘는 날은 친 글 그대로 거절한다**(리뷰) — 날수로 상한을 박던 판은 다섯 자리 해를 지어, 거절문이
+    // 사람이 안 친 날을 댔다.
+    let out = moai(s.path(), &["edit", &id, "--due", "+3000000"]);
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(!out.status.success() && said.contains("+3000000"), "친 글을 안 댄다 — {said}");
+}
+
+/// **아카이브에서 되살리는 쓰기는 기한을 다시 안 잰다**(리뷰) — 되살리기는 기한도 자리도 안 바꾼다. 재면 아카이브에
+/// 있는 동안 당겨진 조상 때문에 다시 여는 길이 막히는데, 아카이브의 줄은 `edit` 으로 못 고친다. 넘친 것은 `status` 가
+/// 비추고, 되살린 뒤 그 줄의 기한을 쓰는 쓰기는 그대로 잰다.
+#[test]
+fn reopening_an_archived_row_is_not_a_deadline_write() {
+    let s = init("duerestore");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-12-30"]);
+    let i = add(s.path(), &["되살릴 줄", "--milestone", &m, "--due", "2026-12-20"]);
+    ok(s.path(), &["mv", &i, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    assert!(!issues(s.path()).contains(&i), "아카이브로 안 옮겨졌다");
+    ok_at(s.path(), later, &["edit", &m, "--due", "2026-11-30"]);
+    ok_at(s.path(), later, &["mv", &i, "todo", "--from", "done"]);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(board.contains("due_beyond_parent") && board.contains(&i), "되살린 줄의 넘침을 안 비춘다\n{board}");
+    // 되살린 뒤 그 줄의 기한을 쓰는 쓰기는 이 줄의 쓰기다 — 그대로 잰다.
+    assert!(!at(s.path(), later, &["edit", &i, "--due", "2026-12-21"]).status.success(), "늦은 기한을 받았다");
+    ok_at(s.path(), later, &["edit", &i, "--due", "2026-11-30"]);
+}
+
+/// **위계는 산 줄로 잰다**(리뷰) — 쓰기는 아카이브를 안 펴므로, 아카이브에 든 에픽을 조상으로 세는 보드는 쓰기가 받은
+/// 줄을 바로 꾸짖는다. 둘이 같은 자로 잰다.
+#[test]
+fn an_archived_ancestor_does_not_bound_a_live_row() {
+    let s = init("duearchived");
+    let e = add(s.path(), &["에픽", "--type", "epic", "--due", "2026-09-20"]);
+    let i = add(s.path(), &["멤버", "-e", &e, "--due", "2026-09-19"]);
+    ok(s.path(), &["mv", &i, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    ok_at(s.path(), later, &["mv", &i, "todo", "--from", "done"]);
+    ok_at(s.path(), later, &["edit", &i, "--due", "2026-09-28"]);
+    let board = ok_at(s.path(), later, &["status", "--json"]);
+    assert!(!board.contains("due_beyond_parent"), "쓰기가 받은 줄을 꾸짖었다\n{board}");
+}
+
+/// **연습은 진짜가 물릴 기한을 먼저 물린다**(리뷰) — 기한의 꼴과 위계는 쓰기에서 재므로, 연습(`--dry-run`)이 그것을
+/// 모르면 사람이 "좋다" 한 계획을 진짜가 물린다. **이 쓰기가 짓는 조상은 제목으로 댄다**(moai-1rkl) — 거절은 쓰기를
+/// 통째로 물리므로 방금 뽑은 그 id 는 어디에도 안 남는다.
+#[test]
+fn a_rehearsal_refuses_the_deadlines_the_write_refuses() {
+    let s = init("duerehearse");
+    let late = "# 늦은 에픽 @2026-10-10\n- 늦은 멤버 @2026-10-11\n";
+    let dry = from_stdin(s.path(), &["add", "--from", "-", "--dry-run"], late);
+    let real = from_stdin(s.path(), &["add", "--from", "-"], late);
+    assert!(!dry.status.success() && !real.status.success(), "{}\n{}", text(&dry), text(&real));
+    let said = String::from_utf8_lossy(&real.stderr).to_string();
+    assert!(said.contains("새 줄 '늦은 에픽'") && !said.contains("argos-"), "안 남을 조상의 id 를 댔다 — {said}");
+    assert_eq!(String::from_utf8_lossy(&dry.stderr), said, "연습과 진짜가 다른 말을 한다");
+    assert_eq!(issues(s.path()).trim(), "", "물린 계획이 남았다");
+
+    // 꼴이 틀린 `--due`, 마일스톤의 기한을 넘는 뿌리 — 연습도 물린다.
+    let plan = "# 에픽\n- 멤버\n";
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--due", "2026-02-30", "--dry-run"], plan);
+    assert!(!out.status.success(), "꼴이 틀린 --due 를 연습이 받았다");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-10-30"]);
+    for dry in [true, false] {
+        let mut args = vec!["add", "--from", "-", "--milestone", m.as_str(), "--due", "2026-11-01"];
+        if dry {
+            args.push("--dry-run");
+        }
+        assert!(!from_stdin(s.path(), &args, plan).status.success(), "{args:?}");
+    }
+    // promote 가 데려가는 기한이 데려가는 마일스톤보다 늦으면 연습도 물린다.
+    let b =
+        ok(s.path(), &["backlog", "add", "생각", "--milestone", &m, "--due", "2026-10-25", "-q"]).trim().to_string();
+    ok(s.path(), &["edit", &m, "--due", "2026-10-20"]);
+    for dry in [true, false] {
+        let mut args = vec!["backlog", "promote", b.as_str(), "--from", "-"];
+        if dry {
+            args.push("--dry-run");
+        }
+        assert!(!from_stdin(s.path(), &args, plan).status.success(), "{args:?}");
+    }
+    // `#` 줄이 제 `@날짜` 로 이기면 받는다.
+    let fine = "# 에픽 @2026-10-19\n- 멤버\n";
+    assert!(from_stdin(s.path(), &["backlog", "promote", &b, "--from", "-", "--dry-run"], fine).status.success());
+}
+
+/// **위계의 조상은 그 줄이 서는 자리다**(리뷰) — 셈과 트리가 짚는 자리와 같다. 점 id 의 부모를 다 세던 판은 `-e` 로
+/// 옮긴 멤버를 떠난 에픽으로, 생각 밑의 이슈를 그 생각으로, 이슈 밑에 id 로 선 에픽·마일스톤을 그 이슈로, 에픽 아닌
+/// 줄을 가리킨 `-e` 를 그 줄로 막았다.
+#[test]
+fn a_deadline_answers_to_where_the_row_stands() {
+    let s = init("dueplace");
+    let id_of = |title: &str| {
+        let rows = issues(s.path());
+        field(rows.lines().find(|l| l.contains(&format!(r#""title":"{title}""#))).expect(title), "id")
+    };
+    // 옮긴 멤버는 새 에픽의 기한을 받는다 — id 가 가리키는 옛 에픽이 아니다.
+    let out = from_stdin(s.path(), &["add", "--from", "-"], "# 첫 에픽 @2026-10-10\n- 옮길 멤버\n");
+    assert!(out.status.success(), "{}", text(&out));
+    let (first, member) = (id_of("첫 에픽"), id_of("옮길 멤버"));
+    let other = add(s.path(), &["다른 에픽", "--type", "epic", "--due", "2026-10-30"]);
+    ok(s.path(), &["edit", &member, "-e", &other]);
+    ok(s.path(), &["edit", &member, "--due", "2026-10-25"]);
+    assert!(!moai(s.path(), &["edit", &member, "--due", "2026-10-31"]).status.success(), "새 에픽의 기한을 넘었다");
+    // 옛 에픽을 당겨도 옮긴 멤버는 그 밑이 아니다.
+    let out = moai(s.path(), &["edit", &first, "--due", "2026-10-01"]);
+    assert!(out.status.success() && !String::from_utf8_lossy(&out.stderr).contains(&member), "{}", text(&out));
+
+    // 생각은 이슈를 안 막는다 — 위계는 마일스톤 > 에픽 > 이슈 > backlog 다.
+    let b = ok(s.path(), &["backlog", "add", "생각", "--due", "2026-10-12", "-q"]).trim().to_string();
+    add(s.path(), &["생각 밑의 일", "--parent", &b, "--due", "2026-10-20"]);
+    // 생각 밑에 접힌 생각은 막는다 — 제 에픽을 든 생각이어도, 그 밑의 생각은 그 생각 밑에 그려진다(트리가 접는 자).
+    let thought = |args: &[&str]| {
+        let mut v = vec!["backlog", "add"];
+        v.extend_from_slice(args);
+        v.push("-q");
+        moai(s.path(), &v)
+    };
+    let held = thought(&["에픽 든 생각", "-e", &other, "--due", "2026-10-20"]);
+    let held = String::from_utf8_lossy(&held.stdout).trim().to_string();
+    assert!(
+        !thought(&["그 밑의 생각", "--parent", &held, "--due", "2026-10-25"]).status.success(),
+        "접힌 생각을 안 막았다"
+    );
+    // 제 에픽을 적어 이슈 곁에 선 생각은 아무것도 안 넘긴다 — 같은 에픽을 적은 그 밑의 줄은 그 곁에 선다.
+    let i1 = add(s.path(), &["첫 에픽의 이슈", "-e", &first]);
+    let r2 = thought(&["곁에 선 생각", "--parent", &i1, "-e", &other, "--due", "2026-10-20"]);
+    let r2 = String::from_utf8_lossy(&r2.stdout).trim().to_string();
+    assert!(thought(&["그 곁의 생각", "--parent", &r2, "-e", &other, "--due", "2026-10-25"]).status.success());
+    // 이슈 밑에 id 로 선 에픽·마일스톤은 그 이슈 밑에 안 그려진다.
+    let i = add(s.path(), &["이슈", "--due", "2026-10-20"]);
+    add(s.path(), &["이슈 밑의 에픽", "--type", "epic", "--parent", &i, "--due", "2026-10-25"]);
+    add(s.path(), &["이슈 밑의 마일스톤", "--type", "milestone", "--parent", &i, "--due", "2026-10-25"]);
+    // 에픽·마일스톤 아닌 줄을 가리킨 `-e`·`--milestone` 은 못 쓸 참조다 — 조상이 아니다.
+    add(s.path(), &["엉뚱한 에픽", "-e", &i, "--due", "2026-10-25"]);
+    add(s.path(), &["엉뚱한 마일스톤", "--milestone", &i, "--due", "2026-10-25"]);
+    // 이슈 밑의 이슈는 그대로 막는다.
+    assert!(!moai(s.path(), &["add", "자식", "--parent", &i, "--due", "2026-10-21"]).status.success());
+    // 기한 든 에픽을 더 이른 마일스톤으로 옮기는 것도 이 줄의 쓰기다.
+    let early = add(s.path(), &["v0.0", "--type", "milestone", "--due", "2026-10-28"]);
+    assert!(!moai(s.path(), &["edit", &other, "--milestone", &early]).status.success(), "늦은 에픽을 옮겼다");
+}
+
+/// **넘쳤다는 알림은 이 쓰기가 넘치게 한 줄만 댄다**(리뷰) — 쓰기 앞에도 넘쳤던 줄, 계획 밖의 줄은 빼고 댄다. 조상을
+/// 늦추는 쓰기가 남은 넘침을 제 탓으로 대면 받는 쪽은 그때마다 남의 기한을 고치러 가고, `status` 가 안 세는 미룬 줄을
+/// "센다" 고 하면 거짓말이다.
+#[test]
+fn the_overflow_notice_names_what_this_write_pushed_over() {
+    let s = init("dueoverflow");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-30"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m]);
+    let i = add(s.path(), &["멤버", "-e", &e, "--due", "2026-09-28"]);
+    let put = add(s.path(), &["미룬 멤버", "-e", &e, "--due", "2026-09-27"]);
+    ok(s.path(), &["defer", &put, "-m", "나중에"]);
+    let shut = add(s.path(), &["닫은 멤버", "-e", &e, "--due", "2026-09-29"]);
+    ok(s.path(), &["mv", &shut, "done"]);
+    // 멤버가 다 닫힌 묶음도 안 댄다 — 묶음의 칸은 멤버에서 읽는다.
+    let closed = add(s.path(), &["닫힌 에픽", "--type", "epic", "--milestone", &m, "--due", "2026-09-29"]);
+    let last = add(s.path(), &["닫힌 에픽의 멤버", "-e", &closed]);
+    ok(s.path(), &["mv", &last, "done"]);
+    let out = moai(s.path(), &["edit", &m, "--due", "2026-09-20"]);
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&i) && !said.contains(&put) && !said.contains(&shut) && !said.contains(&closed), "{said}");
+    // 보드도 같은 줄을 센다 — 미룬 줄과 닫은 줄은 안 센다.
+    let board: serde_json::Value = serde_json::from_str(&ok(s.path(), &["status", "--json"])).unwrap();
+    let beyond = board["warnings"].as_array().unwrap().iter().find(|w| w["kind"] == "due_beyond_parent").cloned();
+    assert_eq!(beyond.map(|w| w["ids"].clone()), Some(serde_json::json!([i])), "{board}");
+    // 늦추는 쓰기는 남은 넘침을 제 탓으로 안 댄다.
+    let out = moai(s.path(), &["edit", &m, "--due", "2026-09-25"]);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("due_beyond_parent"), "{}", text(&out));
+    assert!(ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "남은 넘침을 보드가 안 비춘다");
+}
+
+/// **도는 마일스톤 안이 기한보다 먼저다**(리뷰) — AGENTS 블록의 약속("`p0` 이 먼저고 마일스톤이 둘째다")이
+/// `ready` 의 차례에도 선다. 같은 자리 안에서는 이른 기한이 먼저다.
+#[test]
+fn ready_puts_the_running_milestone_before_a_deadline() {
+    let s = init("dueready");
+    let m = add(s.path(), &["v0.1", "--type", "milestone"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m]);
+    let going = add(s.path(), &["도는 일", "-e", &e]);
+    ok(s.path(), &["mv", &going, "in_progress"]);
+    let inside = add(s.path(), &["안의 급한 일", "-e", &e, "-p", "0"]);
+    let outside = add(s.path(), &["밖의 급한 일", "-p", "0", "--due", "2027-06-01"]);
+    let ready = ids_in(&ok(s.path(), &["ready", "--json"]));
+    let at = |id: &str| ready.iter().position(|x| x == id).unwrap_or_else(|| panic!("{id} 가 없다 {ready:?}"));
+    assert!(at(&inside) < at(&outside), "{ready:?}");
+}
+
+/// **꼴이 틀린 기한은 기한이 아니다**(리뷰) — 손으로 푼 줄의 값은 상세에 적힌 그대로 서지만, 거르개·차례는 기한
+/// 없는 줄로 읽는다. `*_at=` 이 못 읽는 시각을 어느 폭에도 안 넣는 것과 같은 결이다. 빈 `due_on=` 은 거절한다.
+#[test]
+fn a_malformed_deadline_is_no_deadline() {
+    let s = init("duemalformed");
+    let bad = add(s.path(), &["꼴이 틀린 줄", "--due", "2026-10-05"]);
+    let good = add(s.path(), &["바른 줄", "--due", "2026-10-07"]);
+    let line = line_of(s.path(), &bad);
+    std::fs::write(
+        s.path().join(".moai/issues.jsonl"),
+        issues(s.path())
+            .replace(&line, &line.replace(r#""due_on":"2026-10-05""#, r#""due_on":"2026-10-05T00:00:00Z""#)),
+    )
+    .unwrap();
+    let picked = ids_in(&ok(s.path(), &["show", "--filter", "due_on=2026-10-01~2026-10-31", "--json"]));
+    assert_eq!(picked, vec![good.clone()], "꼴이 틀린 기한이 폭에 들었다");
+    let sorted = ids_in(&ok(s.path(), &["show", "--sort", "due", "--json"]));
+    assert_eq!(sorted.first(), Some(&good), "꼴이 틀린 기한이 날짜로 섰다 {sorted:?}");
+    for empty in ["due_on=", "due_on=,"] {
+        assert!(!moai(s.path(), &["show", "--filter", empty]).status.success(), "빈 {empty} 를 받았다");
+    }
+    // 하루는 그 하루다 — 뒤로 열린 폭이 아니다. 기한으로 물어도 숨긴 줄(done)은 안 연다.
+    let later = add(s.path(), &["뒤의 줄", "--due", "2026-10-09"]);
+    assert_eq!(ids_in(&ok(s.path(), &["show", "--filter", "due_on=2026-10-07", "--json"])), vec![good.clone()]);
+    ok(s.path(), &["mv", &later, "done"]);
+    assert!(ids_in(&ok(s.path(), &["show", "--filter", "due_on=2026-10-09", "--json"])).is_empty(), "닫힌 줄을 열었다");
+    assert_eq!(ids_in(&ok(s.path(), &["show", "--all", "--filter", "due_on=2026-10-09", "--json"])), vec![later]);
+
+    // 같은 id 의 줄이 둘이면(머지를 잘못 푼 흉터) 줄마다 잰다 — 뒷줄 하나로 재면 파일 차례가 경고를 켰다 껐다 한다.
+    let e = add(s.path(), &["에픽", "--type", "epic", "--due", "2026-10-20"]);
+    let twin = add(s.path(), &["쌍둥이", "-e", &e, "--due", "2026-10-15"]);
+    let line = line_of(s.path(), &twin);
+    let late = line.replace(r#""due_on":"2026-10-15""#, r#""due_on":"2026-10-25""#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&line, &format!("{late}\n{line}")))
+        .unwrap();
+    let board: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&moai(s.path(), &["status", "--json"]).stdout)).unwrap();
+    let kinds: Vec<&str> = board["warnings"].as_array().unwrap().iter().filter_map(|w| w["kind"].as_str()).collect();
+    assert!(kinds.contains(&"due_beyond_parent"), "앞줄의 넘침을 뒷줄이 가렸다 {kinds:?}");
+}
+
+/// **연습과 되뽑기는 기한도 보인다**(리뷰) — `@날짜` 는 제목에서 떼어지므로 연습 화면이 안 그리면 사람은 날짜 오타를
+/// 못 본다. `--due` 가 어느 에픽에도 안 서면 말한다. 되뽑은 틀이 도로 안 들어가는 줄(에픽보다 늦은 멤버)은 댄다.
+#[test]
+fn a_plan_shows_its_deadlines() {
+    let s = init("dueshow");
+    let shown = String::from_utf8_lossy(
+        &from_stdin(
+            s.path(),
+            &["add", "--from", "-", "--due", "2026-10-30", "--dry-run"],
+            "# 에픽\n- 멤버 @2026-10-20\n",
+        )
+        .stdout,
+    )
+    .to_string();
+    assert!(shown.contains("@2026-10-30") && shown.contains("@2026-10-20"), "{shown}");
+    let out = from_stdin(
+        s.path(),
+        &["add", "--from", "-", "--due", "2026-10-30", "--dry-run"],
+        "# 에픽 @2026-10-25\n- 멤버\n",
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("--due 2026-10-30"), "{}", text(&out));
+    // 기계가 받는 길에서도 말한다 — stderr 로.
+    let out = from_stdin(
+        s.path(),
+        &["add", "--from", "-", "--due", "2026-10-30", "--dry-run", "--json"],
+        "# 에픽 @2026-10-25\n- 멤버\n",
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--due 2026-10-30"), "{}", text(&out));
+    // 빈 `--due` 는 없는 것이다 — 쓰기가 지우는 값을 연습만 그리면 안 된다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--due", " ", "--dry-run", "--json"], "# 에픽\n- 멤버\n");
+    assert!(out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("due_on"), "{}", text(&out));
+    // 펼치기의 연습도 데려갈 기한을 댄다.
+    let b = ok(s.path(), &["backlog", "add", "생각", "--due", "2026-11-01", "-q"]).trim().to_string();
+    let json =
+        from_stdin(s.path(), &["backlog", "promote", &b, "--from", "-", "--dry-run", "--json"], "# 펼침\n- 멤버\n");
+    assert!(String::from_utf8_lossy(&json.stdout).contains(r#""due_on":"2026-11-01""#), "{}", text(&json));
+
+    let e = add(s.path(), &["에픽", "--type", "epic", "--due", "2026-10-31"]);
+    let member = add(s.path(), &["멤버", "-e", &e, "--due", "2026-10-28"]);
+    ok(s.path(), &["edit", &e, "--due", "2026-10-20"]);
+    let json = ok(s.path(), &["show", &e, "--as-plan", "--json"]);
+    assert!(json.contains(&format!(r#""lossy":["{member}"]"#)), "{json}");
 }
 
 /// **쓰기는 엄하다.** `--due 2026-02-30` 은 오타지 옛 줄이 아니다 — 받으면 그 마일스톤은
@@ -15881,6 +16840,73 @@ fn the_hook_leaves_what_a_named_worktree_holds_to_that_worktree() {
     assert!(!own.contains("-C "), "이제 겨눌 것이 없는데 -C 를 붙인다\n{own}");
 }
 
+/// **여러 세션이 도는 판에서는 아무도 적지 않은 집힌 줄이 누구의 것인지 모른다**(moai-pyi4, 2026-10-14 사용자 결정).
+/// 같은 사람의 감독과 일꾼 세션이 한 트래커를 쓸 때, 훅이 안 돈 자리(워크트리 안에서 띄운 세션)에서 집은 줄이 감독의
+/// 초점에 서서 감독의 `add -e`·`backlog promote -e` 를 막고 `Stop` 이 그것을 닫으라고 붙들었다. 다른 세션이 최근에
+/// 집기를 적었으면 그 줄은 풀기만 하는 판정에서 빠진다. 혼자 쓰는 판은 전과 같다 — 터미널 집기는 이 세션의 일이다.
+#[test]
+fn another_running_session_frees_rows_nobody_recorded() {
+    let s = init("hookcrowd");
+    let loose = add(s.path(), &["훅 없이 집은 줄"]);
+    ok(s.path(), &["mv", &loose, "in_progress"]);
+    let mine = field(&ok(s.path(), &["epic", "add", "감독이 펼칠 에픽", "--json"]), "id");
+    let made = |session: &str| call(&s, "Bash", &format!("{{\"command\":\"moai add 'x' -e {mine}\"}}"), session);
+    let stop = |session: &str| hook_out(&s, "stop", &event(&s, session));
+
+    // 혼자 쓰는 판 — 기록 없는 집힌 줄은 이 세션의 일이다.
+    assert!(refusal(&made("sup")).contains(&loose), "혼자 쓰는 판의 터미널 집기를 놓았다");
+    let alone = stop("sup");
+    assert!(alone.contains(&format!("moai mv {loose}")), "혼자 쓰는 판에서 안 붙든다");
+    // 붙든 줄마다 왜 이 세션의 것인지 댄다(moai-pyi4.w47) — 막힌 자리에서 근거가 읽혀야 한다. 붙드는 글은 말묶음에서
+    // 오니(이 시험은 한국어 화면이다) 근거도 그 말이다 — 한국어 붙듦에 영어 꼬리를 달던 판이 있었다(리뷰 moai-pyi4.7g5).
+    assert!(
+        alone.contains("이 세션이 쥔 까닭:")
+            && alone.contains(&format!("{loose}  집었다고 적은 세션이 없다"))
+            && alone.contains("지난 12시간 동안 다른 세션이 여기 적은 집기도 없다"),
+        "붙든 근거를 안 댄다\n{alone}"
+    );
+    assert!(!alone.contains("Why this session holds them"), "한국어 붙듦에 영어 근거를 달았다\n{alone}");
+    // 규칙의 거절문은 아직 영어 하나라 근거도 영어다.
+    assert!(refusal(&made("sup2-early")).contains("Why this session holds them"), "거절문이 근거를 안 댄다");
+
+    // 다른 세션이 제 줄을 훅으로 집는다 — 이제 여러 세션이 도는 판이다.
+    let theirs = add(s.path(), &["일꾼의 줄"]);
+    let picked = call(&s, "Bash", &format!("{{\"command\":\"moai mv {theirs} in_progress --from todo\"}}"), "worker");
+    assert!(picked.trim().is_empty(), "일꾼의 집기를 막았다\n{picked}");
+    ok(s.path(), &["mv", &theirs, "in_progress", "--from", "todo"]);
+
+    let free = made("sup2");
+    assert!(free.trim().is_empty(), "아무도 안 적은 줄과 일꾼의 줄로 감독의 생성을 막았다\n{free}");
+    let held = stop("sup2");
+    assert!(held.trim().is_empty(), "감독에게 남의 줄을 닫으라고 붙든다\n{held}");
+    // 일꾼은 제가 적은 줄을 그대로 쥔다.
+    let own = stop("worker");
+    assert!(own.contains(&format!("moai mv {theirs}")), "일꾼이 제 줄을 놓았다");
+    assert!(own.contains(&format!("{theirs}  이 세션이 집었다")), "제 기록을 근거로 안 댄다\n{own}");
+
+    // 규칙 3 — 감독의 리뷰는 남의 줄 밑에 리뷰 이슈를 세우라고 안 한다. 일꾼에게는 제 줄만 댄다(일꾼에게 그 판은
+    // 붐비지 않는다 — 다른 세션이 기록을 안 적었으니, 아래 둘째 일꾼이 붐비게 한다).
+    let review = |session: &str| call(&s, "Skill", "{\"skill\":\"code-review\",\"args\":\"high\"}", session);
+    // 빈손의 감독은 "무엇을 보는지부터 정하라" 를 듣는다 — 남의 줄을 대지 않는다.
+    let sup = refusal(&review("sup2"));
+    assert!(!sup.contains(&loose) && !sup.contains(&theirs), "빈손의 감독에게 남의 줄 밑 리뷰를 시킨다 — {sup}");
+    let other = add(s.path(), &["둘째 일꾼의 줄"]);
+    // 둘째 일꾼의 집기가 적혀야 일꾼에게 그 판이 붐빈다 — 안 적히면 아래 거절은 초점의 첫 줄을 대고, 그 첫 줄은 무른
+    // id 의 차례라 셋에 하나꼴로 우연히 맞는다(리뷰 moai-pyi4.7g5).
+    let second = call(&s, "Bash", &format!("{{\"command\":\"moai mv {other} in_progress --from todo\"}}"), "worker2");
+    assert!(second.trim().is_empty(), "둘째 일꾼의 집기를 막았다\n{second}");
+    ok(s.path(), &["mv", &other, "in_progress", "--from", "todo"]);
+    // 붐비는 판에서 일꾼의 거절은 제 줄만 대고, 아무도 안 적은 줄과 둘째 일꾼의 줄은 모르는 줄로 뺀다.
+    let freed = refusal(&made("worker"));
+    assert!(
+        freed.contains(&theirs) && !freed.contains(&loose) && !freed.contains(&other),
+        "붐비는 판에서 일꾼이 남의 줄로 막혔다 — {freed}"
+    );
+    let why = refusal(&review("worker"));
+    assert!(why.contains(&theirs), "일꾼의 리뷰 거절이 제 줄을 안 댄다 — {why}");
+    assert!(!why.contains(&loose) && !why.contains(&other), "일꾼에게 남의 줄 밑 리뷰를 시킨다 — {why}");
+}
+
 /// **제 이름 워크트리가 옆 에픽 워크트리를 이긴다**(moai-m62u·moai-cle9, 사용자 결정). 에픽
 /// 워크트리가 살아 있거나 머지하고 안 치운 채 그 에픽에 새 멤버를 집으면, 그 멤버를 제 이름
 /// 워크트리에서 하는 세션이 에픽 이름에 초점을 뺏겨 규칙 2 에 막혔다. 워크트리 목록을 읽는 배선
@@ -17879,8 +18905,77 @@ fn the_tmux_rule_stands_outside_a_tracker() {
     let s = Scratch::new("hooktmuxbare");
     let bash = |cmd: &str| tool_at(&s, s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
     assert!(refusal(&bash("tmux kill-server")).starts_with("Rule 4"), "트래커 밖에서 사람의 서버를 겨눈 줄이 지나간다");
+    // 돌리는 사람의 `$TMUX` 가 cmux 의 가짜여도 이 줄은 지난다 — `isolated` 가 훅 프로세스에서 `TMUX` 를 걷는다.
+    // 가짜 아래의 판정은 아래 `under_the_cmux_stand_in_the_hook_reads_the_shim_off_its_path` 가 그 값을 손으로 세워 잰다.
     assert_eq!(bash("env -u TMUX tmux -L t kill-server"), "", "제 서버를 가리킨 줄을 막는다");
     assert_eq!(bash("echo x > f"), "", "트래커 밖에서 트래커의 규칙을 세운다");
+}
+
+/// **가짜 `$TMUX` 아래의 규칙 4 는 훅이 제 `PATH` 에서 shim 과 진짜 tmux 를 가려 읽는다**(moai-e7vm, 리뷰
+/// moai-e7vm.rl8). `TmuxEnv::read` 를 지나는 하나뿐인 시험이다 — 단위 시험은 환경을 손으로 세워 그 읽기를 안
+/// 지나고, 나머지 시험은 훅 프로세스에서 `TMUX` 를 걷는다. 읽기가 shim 과 진짜를 뒤바꾸면 거절문이 shim 을
+/// "진짜" 로 건네 그 줄이 사람의 cmux 를 닫으니, 그 줄을 다시 훅에 넣어 지나는지까지 본다.
+///
+/// `PATH` 셋으로 읽기의 가름마다 하나씩 잰다 — 걷으면 그 판이 붉어진다.
+///
+/// - 실행 비트 없는 `tmux` 가 맨 앞이다 — 껍데기가 안 고르니 shim 으로 세지 않는다(`cmd::runnable`)
+/// - 진짜가 cmux 의 것보다 앞이고 상대 자리가 그 앞이다 — shim 은 차례가 아니라 정규 경로의 `cmux` 로 가리고, 상대
+///   자리의 `tmux` 는 `real` 로 안 낸다
+/// - cmux 의 것 둘이 진짜보다 앞이다 — shim 이 아닌 cmux 의 것도 `real` 로 안 낸다
+#[cfg(unix)]
+#[test]
+fn under_the_cmux_stand_in_the_hook_reads_the_shim_off_its_path() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let s = Scratch::new("hooktmuxshim");
+    let plant = |dir: &Path, mode: u32| {
+        std::fs::create_dir_all(dir).unwrap();
+        let tmux = dir.join("tmux");
+        std::fs::write(&tmux, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    let (dud, shim, real) = (s.path().join("dud"), s.path().join("shim"), s.path().join("real"));
+    let (cmux_a, cmux_b, rel) = (s.path().join("cmux.app/bin"), s.path().join("cmux-b"), s.path().join("rel"));
+    plant(&dud, 0o644);
+    for dir in [&shim, &real, &cmux_a, &cmux_b, &rel] {
+        plant(dir, 0o755);
+    }
+    // **돌리는 사람의 `PATH` 에서 `tmux` 가 든 자리는 뺀다**(git 이 함께 든 자리는 남긴다 — moai 가 부른다). cmux
+    // claude-teams 안에서 돌리면 그 `PATH` 의 shim(정규 경로에 `cmux` 가 든다)이 아래의 가짜 shim 을 제치고 shim 으로
+    // 읽혀, 이 시험이 바로 그 셸에서만 붉어졌다.
+    let tail: Vec<_> = std::env::split_paths(&path_without_moai())
+        .filter(|d| !d.join("tmux").exists() || d.join("git").is_file())
+        .collect();
+    let bash = |front: &[&Path], cmd: &str| {
+        let path = std::env::join_paths(front.iter().map(|d| d.to_path_buf()).chain(tail.iter().cloned())).unwrap();
+        let path = path.to_str().expect("PATH 가 UTF-8 이 아니다").to_string();
+        let env = [("TMUX", "/tmp/cmux-claude-teams/WS,WIN,1"), ("PATH", path.as_str())];
+        let input = tool_input(s.path(), "Bash", &format!("{{\"command\":{}}}", json_str(cmd)));
+        String::from_utf8(hook_at_home(&s, s.path(), None, &env, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let real_tmux = real.join("tmux").display().to_string();
+    // 상대 자리는 훅 프로세스의 자리(`s.path()`)에서 `rel/tmux` 로 풀린다.
+    let relative = Path::new("rel");
+    for (front, shims) in [
+        (vec![dud.as_path(), shim.as_path(), real.as_path()], vec![&shim]),
+        (vec![relative, real.as_path(), cmux_a.as_path()], vec![&cmux_a]),
+        (vec![cmux_a.as_path(), cmux_b.as_path(), real.as_path()], vec![&cmux_a, &cmux_b]),
+    ] {
+        let mut refused = vec!["env -u TMUX tmux -L t kill-session".to_string()];
+        refused.extend(shims.iter().map(|d| format!("{}/tmux -L t kill-window", d.display())));
+        for cmd in refused {
+            let why = refusal(&bash(&front, &cmd));
+            assert!(why.starts_with("Rule 4") && why.contains("cmux's shim"), "{front:?}\n{cmd}\n{why}");
+        }
+        let why = refusal(&bash(&front, "env -u TMUX tmux -L t kill-session"));
+        let handed = why.rsplit("\\n").next().unwrap().trim().replace("<unique name>", "moai-t");
+        assert_eq!(handed, format!("env -u TMUX {real_tmux} -L moai-t kill-session"), "{front:?}\n{why}");
+        assert_eq!(bash(&front, &handed), "", "거절문이 댄 줄이 막혔다 — {front:?}\n{handed}");
+        assert_eq!(
+            bash(&front, &format!("{real_tmux} -L t new-session -d")),
+            "",
+            "진짜 tmux 를 shim 으로 읽었다 — {front:?}"
+        );
+    }
 }
 
 /// 다른 트래커를 가리키는 토막의 판정도 **같은 차례로 잇는다**(`Decision::then`, moai-dw63.e31) —
@@ -22017,14 +23112,14 @@ fn a_row_neither_side_touched_does_not_block_the_merge() {
     let old = add(root, &["손으로 푼 충돌이 남긴 줄"]);
     let one = add(root, &["이쪽이 고칠 줄"]);
     let two = add(root, &["저쪽이 고칠 줄"]);
-    // **도구로는 못 적는 값이다** — `--due` 는 마일스톤 줄에만 선다. 손으로 끼운다.
+    // **도구로는 못 적는 값이다** — `--start` 는 마일스톤 줄에만 선다. 손으로 끼운다.
     //
     // 닫는 괄호가 아니라 id 뒤에 끼운다. 끝에 붙이면 그 자리가 곧 `Issue` 의 표준 차례라
     // 심은 줄이 표준형이 되고, [`line_of`] 는 `{"id":…` 로 찾으므로 머리는 그대로 둔다.
     //
     // **가지마다 되심는다.** `moai` 쓰기는 파일 전체를 표준형으로 되쓰므로, 한 번만 심으면
     // 그 다음 `edit` 한 줄에 차례가 사라져 셋 다 표준형인 채로 머지에 들어간다.
-    let due = "\"due_on\":\"2026-09-20\"";
+    let due = "\"starts_on\":\"2026-09-05\"";
     let plant = || {
         let was = line_of(root, &old);
         let head = format!("\"id\":\"{old}\",");

@@ -19,6 +19,8 @@ The supervisor skill remains Claude Code only; reading this file does not instal
 as the suggestion, and record the model that actually ran. Do not change it yourself.
 `Model:` names the Codex model (`[models] codex`); worker.md's Claude models and their ladder
 do not apply here — when the work reads harder than its difficulty, say so in 9-1's reason.
+`Subagents:` names Claude models raised with Claude Code's `Agent`; it does not apply here —
+do the work yourself.
 A question tool can depend on the mode: use `request_user_input_async` when available,
 or `request_user_input` in Plan mode; without either, ask in conversation and wait.
 One call's `cd` may not persist into the next: always supply the absolute command directory.

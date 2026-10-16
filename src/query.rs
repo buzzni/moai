@@ -419,6 +419,51 @@ pub struct Filter {
     /// 숨는 것을 도로 켜는 스위치가 둘이 되면, 켜는 쪽이 어느 것을 켰는지
     /// 매번 되짚어야 한다.
     pub backlog: bool,
+    /// 줄 자신의 `due_on` 이 든 날의 폭(`due_on=`, moai-ghkp.7uy). **AND of OR** — `tags` 와 같은 꼴이다.
+    /// **달력의 날로 견준다** — 기한은 시각이 아니라 날이라(`Issue::due_on`) 시간대로 안 옮긴다. 기한 없는
+    /// 줄은 어느 폭에도 안 든다. 때로 묻는 폭([`Filter::times`])이 아니다: 그사이 바뀐 것을 묻는 말이 아니라
+    /// 숨김을 안 연다.
+    pub due: Vec<Vec<DaySpan>>,
+}
+
+/// 달력 날의 폭 — 양 끝을 든다(`2026-10-01~2026-10-05` 는 닷새). 한쪽이 없으면 그쪽으로 열렸다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DaySpan {
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+impl DaySpan {
+    /// `YYYY-MM-DD`·`a~b`·`a~`·`~b` — `..` 도 `~` 와 같다(때의 폭 [`Span`] 과 같은 꼴). 날은
+    /// [`crate::model::parse_date`] 가 잰다 — 쓰기가 받는 꼴과 같아야 받은 값을 거를 수 있다.
+    pub fn parse(raw: &str) -> Result<DaySpan, BadFilter> {
+        let raw = raw.trim();
+        let day = |s: &str| -> Result<Option<String>, BadFilter> {
+            let s = s.trim();
+            match s.is_empty() {
+                true => Ok(None),
+                false => crate::model::parse_date(s)
+                    .map(|_| Some(s.to_string()))
+                    .ok_or_else(|| BadFilter::NotADay(raw.to_string())),
+            }
+        };
+        let (from, to) = match raw.split_once('~').or_else(|| raw.split_once("..")) {
+            None => {
+                let d = day(raw)?.ok_or_else(|| BadFilter::NotADay(raw.to_string()))?;
+                (Some(d.clone()), Some(d))
+            }
+            Some((a, b)) => (day(a)?, day(b)?),
+        };
+        match (&from, &to) {
+            (None, None) => Err(BadFilter::Endless(raw.to_string())),
+            (Some(a), Some(b)) if a > b => Err(BadFilter::Backwards(raw.to_string())),
+            _ => Ok(DaySpan { from, to }),
+        }
+    }
+
+    fn holds(&self, day: &str) -> bool {
+        self.from.as_deref().is_none_or(|f| f <= day) && self.to.as_deref().is_none_or(|t| day <= t)
+    }
 }
 
 /// 거르개가 값을 거절한 까닭. **자료만 든다**(moai-2htt) — 말은 [`crate::view::bad_filter`] 가 고른 말로
@@ -439,6 +484,8 @@ pub enum BadFilter {
     Backwards(String),
     /// 때로 못 읽는 값.
     NotATime(String),
+    /// 달력의 날로 못 읽는 값(`due_on=`).
+    NotADay(String),
     /// 때가 하나도 없는 값(`--since ''`·`--created ,`).
     NoTime,
     /// `--filter` 의 항목이 `항목=값` 꼴이 아니다.
@@ -561,6 +608,7 @@ pub const KEYS: &[&str] = &[
     "updated_at",
     "started_at",
     "done_at",
+    "due_on",
 ];
 
 /// 플래그에서 온 날것. `cmd` 가 argv 를 그대로 옮겨 담아 넘긴다.
@@ -591,6 +639,8 @@ pub struct Raw {
     pub updated_at: Vec<String>,
     pub started_at: Vec<String>,
     pub done_at: Vec<String>,
+    /// `--filter due_on=` 의 날것(moai-ghkp.7uy).
+    pub due_on: Vec<String>,
     pub all: bool,
     /// `--archived` — 아카이브까지 연다. done 도 연다(`all` 을 품는다).
     pub archived: bool,
@@ -681,6 +731,16 @@ impl Filter {
             archived,
             backlog,
             deferred,
+            // **빈 값은 거절한다**(리뷰) — [`spans`] 와 같은 까닭이다. 빈 `또는` 묶음은 어느 줄에도 안 맞아,
+            // `--filter "due_on=$DUE"` 의 빈 변수가 말없이 0건이 되고 받는 쪽은 "기한 든 일이 없다" 로 읽는다.
+            due: raw
+                .due_on
+                .iter()
+                .map(|v| match csv(v).as_slice() {
+                    [] => Err(BadFilter::NotADay(v.clone())),
+                    days => days.iter().map(|d| DaySpan::parse(d)).collect::<Result<Vec<_>, _>>(),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
         };
         // **시간으로 물으면 숨김을 다 연다**(moai-efoc.ip5, 2026-09-30 사용자 결정) — done·미룸·생각·아카이브까지.
         // 그 물음은 "그사이 무엇이 바뀌었나" 이고 그사이 닫힌 줄도 바뀐 줄이다. 기본 숨김을 그대로 두면
@@ -726,6 +786,7 @@ impl Filter {
             archived: _,
             deferred: _,
             backlog: _,
+            due: _,
         } = self;
         [updated, created, done, started, done_at]
     }
@@ -879,6 +940,13 @@ impl Filter {
         // 셈해지고(위의 `--milestone` 과 같은 까닭), 탐색기의 거름망은 키 하나에 줄마다 여기를 지난다.
         // 날로 친 끝은 읽는 사람의 벽시계로 견준다([`End::Wall`]) — 시간대가 안 실렸으면(`None`) 도장 그대로다.
         let within = |spans: &[Vec<Span>], at: Option<i64>| spans_hold(spans, at, wh.zone);
+        // 기한은 **줄 자신의 그 필드**를 날로 견준다(moai-ghkp.7uy) — 없으면 어느 폭에도 안 든다. 꼴이 틀린 값도
+        // 없는 것이다([`Issue::deadline`]) — `*_at=` 이 못 읽는 시각을 어느 폭에도 안 넣는 것과 같은 결이다.
+        if !self.due.is_empty()
+            && !i.deadline().is_some_and(|d| self.due.iter().all(|any| any.iter().any(|s| s.holds(d))))
+        {
+            return false;
+        }
         if !self.updated.is_empty() && !within(&self.updated, parse_rfc3339(&i.updated_at)) {
             return false;
         }
@@ -1136,6 +1204,7 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
             "updated_at" => raw.updated_at.push(v),
             "started_at" => raw.started_at.push(v),
             "done_at" => raw.done_at.push(v),
+            "due_on" => raw.due_on.push(v),
             _ => return Err(BadFilter::NoSuchKey(k.to_string())),
         }
     }
@@ -1328,6 +1397,19 @@ pub fn display_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
     a.priority().cmp(&b.priority()).then_with(|| a.id.cmp(&b.id))
 }
 
+/// 기한의 차례 — **이른 기한이 먼저고 기한 없는 줄이 뒤다**(moai-ghkp.7uy). 꼴이 틀린 값은 없는 것이다
+/// ([`Issue::deadline`]). `--sort due`·탐색기의 `SPC s w`·`ready` 가 이 하나로 잰다(리뷰) — 저마다 적던 때는
+/// 셋이 같은 줄을 다른 차례로 세울 길이 열려 있었다. 날짜는 고정폭이라 글로 견준다.
+pub fn due_order(a: &Issue, b: &Issue) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.deadline(), b.deadline()) {
+        (Some(x), Some(y)) => x.cmp(y),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
 /// 사람이 고르는 차례의 한 필드(moai-55cp). 기본은 [`display_order`] 다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortKey {
@@ -1338,6 +1420,8 @@ pub enum SortKey {
     Status,
     Assignee,
     Title,
+    /// 기한(`due_on`, moai-ghkp.7uy) — 이른 것이 먼저고 기한 없는 줄은 뒤다(내림이면 앞, 담당과 같은 결).
+    Due,
     /// **안 움직이는 차례**(moai-efoc) — id 는 한 번 서면 안 바뀐다. `--after` 로 넘길 때
     /// 앞 쪽을 받는 사이 다른 줄의 우선순위나 칸이 바뀌어도 이 차례는 안 밀린다. 탐색기의
     /// 차례 표(`tui::keys::Order`)에는 없다 — id 는 씨앗 해시(`id::mint`)라 만든 차례도 아니고
@@ -1347,13 +1431,14 @@ pub enum SortKey {
 }
 
 impl SortKey {
-    pub const ALL: [SortKey; 7] = [
+    pub const ALL: [SortKey; 8] = [
         SortKey::Priority,
         SortKey::Created,
         SortKey::Updated,
         SortKey::Status,
         SortKey::Assignee,
         SortKey::Title,
+        SortKey::Due,
         SortKey::Id,
     ];
 
@@ -1367,6 +1452,7 @@ impl SortKey {
             SortKey::Status => "status",
             SortKey::Assignee => "assignee",
             SortKey::Title => "title",
+            SortKey::Due => "due",
             SortKey::Id => "id",
         }
     }
@@ -1545,6 +1631,7 @@ pub fn order_by(
             (None, None) => Ordering::Equal,
         },
         SortKey::Title => caseless(&a.0.title, &b.0.title),
+        SortKey::Due => due_order(a.0, b.0),
         SortKey::Id => a.0.id.cmp(&b.0.id),
     };
     let order = fields
@@ -1677,6 +1764,37 @@ pub fn unread<'a>(issues: &'a [Issue], me: &str, seen: &BTreeMap<String, String>
         .collect()
 }
 
+/// **[NEW] 가 서는 줄** — 누구인지와 읽음의 형편까지 받아 [`unread`] 를 부른다(moai-cqwy). 탐색기의
+/// [NEW](`App::recount_unread_in`)와 `moai show --json` 의 `unread` 키가 **이 하나로** 가른다 — 둘이
+/// 저마다 가르면 같은 줄이 화면에는 [NEW] 로 서고 기계에는 읽은 것으로 나간다.
+///
+/// - **누군지 모르면(`me` 가 `None`) 아무것도 안 센다** — 읽기는 사람을 묻지 않는다(CLAUDE.md).
+///   그러면 한 줄도 안 서고, 그것이 설정 없는 기계의 옳은 답이다.
+/// - **읽음을 못 들었고 들고 있는 표가 비었으면 아무것도 안 센다**(moai-2gep). 빈 표로 세면 내게 온
+///   줄이 모두 서는데, 그것은 "다 안 읽었다" 가 아니라 "모른다" 다 — 탐색기의 `SPC m a` 한 번이
+///   모르는 것을 다 읽음으로 찍는다. 들고 있는 표가 있으면 그것으로 센다.
+/// - 읽음 파일이 **없는** 것은 탈이 아니다 — 아직 아무것도 안 읽은 프로젝트의 정상이라 내게 온 줄이
+///   모두 선다. **[`crate::user_config::Trouble::Gone`] 도 그 자리에 든다**(리뷰) — 읽기는 그 갈래를 혼자
+///   안 세운다([`crate::read_marks::Marks::trouble`]). 세우는 것은 탐색기(`App::read_marks_of`)고 뜻은
+///   "**곁의 설정이** 사라졌다" 인데, 설정을 아직 안 만든 기계가 그대로 그 갈래로 온다 — 막으면 처음
+///   띄운 사람에게 [NEW] 가 한 줄도 안 서고 까닭도 없다. 홈이 끊긴 쪽은 들고 있던 표가 지킨다.
+///
+/// `held` 는 **부르는 쪽이 들고 있는 표**다. 탐색기는 제 `Site::seen` 이다 — 못 읽은 걸음에는 앞서 든
+/// 것을 그대로 둔다(`App::take_read`). 앞서 든 것이 없는 CLI 는 그 자로 처음 든 표를 넘긴다
+/// ([`crate::read_marks::Marks::held`]).
+pub fn unread_held<'a>(
+    issues: &'a [Issue],
+    me: Option<&str>,
+    trouble: Option<crate::user_config::Trouble>,
+    held: &BTreeMap<String, String>,
+) -> BTreeSet<&'a str> {
+    let Some(me) = me else { return BTreeSet::new() };
+    if trouble.is_some_and(|t| t != crate::user_config::Trouble::Gone) && held.is_empty() {
+        return BTreeSet::new();
+    }
+    unread(issues, me, held)
+}
+
 /// 그 줄이 **내가 마지막으로 본 뒤에 바뀌었나** — 한 번도 안 봤거나(`seen` 에 없다) 적힌 값보다 늦게
 /// 고쳐졌다. 때는 스냅샷의 `updated_at` 이다(사용자 결정 2026-09-15). 안 읽음([`unread`])도, 읽음을 적을
 /// 때 이미 읽은 줄을 거르는 것(`moai read`·탐색기의 `r`)도 이 하나로 잰다(moai-j038.vna).
@@ -1795,6 +1913,44 @@ mod tests {
         assert_eq!(ids("raven@buzzni.com", &none).len(), 4);
         // 담당이 나인 줄이 하나도 없으면 아무것도 안 센다.
         assert!(ids("아무개", &none).is_empty());
+    }
+
+    /// **[NEW] 의 가장자리는 한 자리에 있다**(moai-cqwy) — 탐색기와 `show --json` 이 함께 부르는
+    /// [`unread_held`]. 누군지 모르면 안 세고, 읽음을 못 들었는데 들고 있는 표가 비면 안 세며("모른다"
+    /// 이지 "다 안 읽었다" 가 아니다), 들고 있는 표가 있으면 탈이 있어도 그것으로 센다. 없는 읽음 파일과
+    /// `Gone` 은 탈이 아니라 내게 온 것이 모두 선다. 마일스톤의 멤버는 안 센다.
+    #[test]
+    fn unread_held_keeps_the_explorers_edges() {
+        use crate::user_config::Trouble;
+        let at = |id: &str, who: Option<&str>| {
+            let mut i =
+                Issue::new(id.into(), format!("{id} 제목"), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+            i.assignee = who.map(String::from);
+            i.updated_at = "2026-09-14T00:00:00Z".into();
+            i
+        };
+        let mut stone = at("a-0001", Some("레이븐"));
+        stone.kind = Kind::Milestone;
+        let mut in_stone = at("a-0002", None);
+        in_stone.milestone = Some("a-0001".into());
+        let issues = vec![stone, in_stone, at("a-0003", Some("레이븐")), at("a-0004", Some("나래"))];
+        let none = BTreeMap::new();
+        let held: BTreeMap<String, String> = [("a-0003".to_string(), "2026-09-14T00:00:00Z".to_string())].into();
+        let ids = |me: Option<&str>, t: Option<Trouble>, seen: &BTreeMap<String, String>| {
+            unread_held(&issues, me, t, seen).into_iter().collect::<Vec<_>>()
+        };
+
+        // 읽음 파일이 없다 — 내게 온 것이 모두 선다. 마일스톤의 멤버와 남의 줄은 빠진다.
+        assert_eq!(ids(Some("레이븐"), None, &none), ["a-0001", "a-0003"]);
+        assert_eq!(ids(Some("레이븐"), Some(Trouble::Gone), &none), ["a-0001", "a-0003"], "`Gone` 을 탈로 셌다");
+        // 누군지 모른다 — 아무것도 안 선다.
+        assert!(ids(None, None, &none).is_empty());
+        // 못 들었고 들고 있는 것도 없다 — "모른다" 라 안 선다.
+        assert!(ids(Some("레이븐"), Some(Trouble::Unreadable), &none).is_empty());
+        assert!(ids(Some("레이븐"), Some(Trouble::Reading), &none).is_empty());
+        // 들고 있는 표가 있으면 탈이 있어도 그것으로 센다.
+        assert_eq!(ids(Some("레이븐"), Some(Trouble::Broken), &held), ["a-0001"]);
+        assert_eq!(ids(Some("레이븐"), None, &held), ["a-0001"]);
     }
 
     /// **고른 차례는 제 방향이 있고, 같으면 기본 차례로 가르며, 뒤집으면 통째로 뒤집는다**(moai-55cp).

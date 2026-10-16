@@ -112,6 +112,17 @@ fn carried_body<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
     }
 }
 
+/// 펼치기가 에픽에 데려갈 기한(moai-ghkp.u1w) — 본문과 같은 자리, 같은 규칙이다. **`-e <에픽>` 이면
+/// 없다** — 그 에픽이 이미 임자고 기한은 멤버에게 안 내린다(`add::Rooted::due`). 꼴이 틀린 값은 안
+/// 데려간다: 데려가면 이 생각과 무관한 계획이 그 값 때문에 거절된다. 무엇이 기한인지는 이 자리가 안 가른다
+/// ([`Issue::deadline`], CLAUDE.md — `cmd` 에 이슈의 뜻을 판단하는 `if` 를 두지 않는다).
+fn carried_due<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
+    match into {
+        Some(_) => None,
+        None => thought.deadline(),
+    }
+}
+
 /// 데려갈 본문이 한 쓰기의 상한 안인가 — **넘으면 그 생각을 가리키며 거절한다**(moai-oejf).
 ///
 /// `promote` 가 데려가는 본문은 `store` 의 쓰기 검사를 다시 지난다. 손으로 푼 머지가 남길 수
@@ -210,8 +221,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
         // 데려가는 본문은 여기 안 준다 — 그것은 이 생각이 이미 든 글이라 가리킬 줄이 계획의
         // 것이 아니라 그 생각이다(moai-oejf). 바로 위가 제 자로 잰다.
-        let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: None };
+        let rooted =
+            crate::cmd::add::Rooted { milestone: stone.as_deref(), body: None, due: carried_due(thought, into) };
         crate::cmd::add::check_plan(&drafts, rooted, ctx.lang())?;
+        // **기한의 꼴과 위계도 진짜의 자로 잰다**(리뷰) — 데려간 기한이 데려간 마일스톤보다 늦거나, 계획의 `@날짜` 가
+        // 펼칠 에픽(`-e`)이나 그 마일스톤을 넘으면 진짜가 물린다.
+        crate::cmd::add::check_plan_rows(&load.issues, &repo.config, &drafts, into, rooted, ctx.lang())?;
         // **거절은 `--json` 보다 먼저다.** 못 할 일을 하겠다고 말하면 모양이
         // 무엇이든 거절이고, 뒤에 두면 연습이 조용히 "된다" 고 낸다.
         let known = crate::cmd::add::is_milestone(&load.issues, stone.as_deref());
@@ -219,10 +234,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             crate::cmd::add::say_no_such_milestone(stone.as_deref(), known, ctx.lang());
             // 본문이 설 자리는 안 낸다 — 펼치기가 데려가는 글은 그 생각이 이미 들고 있어
             // `moai show <backlog>` 가 낸다(moai-07v1). `add --from --body` 만 새 글이라 그쪽이 댄다.
-            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, stone.as_deref(), None);
+            return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, rooted);
         }
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.will_unfold"))];
-        out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None)));
+        out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None, rooted.due_for(d, into))));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
         out.extend(crate::cmd::add::milestone_line(
@@ -303,7 +318,9 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             let stone = stone_of(issues, &args.id, into);
             say_if_inherited(issues, thought, stone.as_deref(), lang);
             say_if_dead(issues, cfg, stone.as_deref(), lang);
-            let rooted = crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref() };
+            let due = carried_due(thought, into).map(str::to_string);
+            let rooted =
+                crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref(), due: due.as_deref() };
 
             let (mut entries, made) =
                 crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, rooted, &heir, &by, &at)?;
@@ -391,7 +408,7 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         });
     }
     let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.unfolded"))];
-    out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id))));
+    out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id), i.due_on.as_deref())));
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
     // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)
