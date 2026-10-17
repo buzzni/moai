@@ -7076,3 +7076,11 @@
 {"ts":"2026-10-16T20:23:34Z","id":"moai-4ysn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 737efebe in milestone/moai-c12a (the person chose c12a in the worker window), origin/worktree-moai-4ysn pushed, members closed"}
 {"ts":"2026-10-16T20:36:37Z","id":"moai-c12a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-6d (take develop in after v0.18.1, fix, test, push; supervisor releases)"}
 {"ts":"2026-10-16T20:48:43Z","id":"moai-c12a","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: develop taken in at 8b0ab75d (origin), CI run 38964383409 success incl. the windows-latest clippy/test build. Release waits for the person: real-machine checks still open."}
+{"ts":"2026-10-17T02:41:51Z","id":"moai-n7ca","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Also found by epic-end review moai-f6ao.ir2 finding 3 (moai-4i1i, removed as a duplicate of this one)"}
+{"ts":"2026-10-17T02:41:51Z","id":"moai-w9ha","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Fixed by moai-lag7.951 (1b0ffea9): resolve_dir now goes through path::canonical, which strips \\\\?\\. The case where stripping opens another file is moai-ons4."}
+{"ts":"2026-10-17T02:41:51Z","id":"moai-w9ha","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"fixed by moai-lag7.951"}
+{"ts":"2026-10-17T02:41:53Z","id":"moai-ngiv","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"backlog triage 2026-10-17: no decision yet, out of the plan for now"}
+{"ts":"2026-10-17T02:41:53Z","id":"moai-rlja","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"backlog triage 2026-10-17: no decision yet, out of the plan for now"}
+{"ts":"2026-10-17T02:41:53Z","id":"moai-zeta","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"backlog triage 2026-10-17: no decision yet, out of the plan for now"}
+{"ts":"2026-10-17T02:42:00Z","id":"moai-4i1i","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"편집기 글의 UTF-8 BOM 이 제목에 보이지 않게 남는다"}
+{"ts":"2026-10-17T02:42:00Z","id":"moai-0em3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.20.0"}
