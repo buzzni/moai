@@ -5152,6 +5152,42 @@ fn indent(text: &str, by: &str) -> String {
 mod tests {
     use super::*;
 
+    /// 셸 글을 재는 도구(`bash`·`python3`)의 자리 — 돌려 봐서 서는 것만 낸다. 없으면 한 줄 말하고 `None` 이다
+    /// (moai-lag7.sk7).
+    ///
+    /// 이 글들은 에이전트가 bash 에서 칠 것이라 문법은 어느 기계의 bash·python3 로 재도 같다 — 그래서 막지 않고
+    /// 찾는다. 다만 **있다는 것만으로는 못 믿는다**: Windows 의 `Command::new("bash")` 는 PATH 보다 System32 를
+    /// 먼저 찾아 WSL 껍데기를 잡고(WSL 이 없으면 `execvpe(/bin/bash) failed`), `python3` 는 스토어 별칭이 받아
+    /// "Python was not found" 로 끝난다. bash 는 git 이 선 자리(`git --exec-path` 의 세 층 위 `bin/bash.exe`,
+    /// Git for Windows)를 먼저 본다.
+    fn tool(name: &str) -> Option<std::path::PathBuf> {
+        use std::process::Command;
+        let mut seen = Vec::new();
+        if cfg!(windows)
+            && name == "bash"
+            && let Ok(out) = crate::git::command().arg("--exec-path").output()
+        {
+            let exec = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+            seen.extend(exec.ancestors().nth(3).map(|git| git.join("bin").join("bash.exe")));
+        }
+        seen.push(std::path::PathBuf::from(name));
+        let probe = if name.starts_with("python") { "pass" } else { "exit 0" };
+        let found =
+            seen.into_iter().find(|at| Command::new(at).args(["-c", probe]).output().is_ok_and(|o| o.status.success()));
+        if found.is_none() {
+            eprintln!("{name} 가 이 기계에서 안 돈다 — 셸 글의 문법은 못 재고 글만 잰다");
+        }
+        found
+    }
+
+    /// [`tool`] 이되 **유닉스에서는 없으면 붉다** — 거기서는 늘 있던 도구라 빠지면 시험이 아무것도 안 재며 푸르게 선다.
+    /// Windows 만 건너뛴다: python3 가 안 깔린(스토어 별칭만 선) 기계가 흔하고, Git Bash 없이 cargo 만 든 기계도 있다.
+    fn needed(name: &str) -> Option<std::path::PathBuf> {
+        let found = tool(name);
+        assert!(found.is_some() || cfg!(windows), "{name} 를 실행하지 못했다 — 이 시험에는 {name} 가 있어야 한다");
+        found
+    }
+
     /// 일꾼 글의 번호 걸음 — "The steps" 절 하나. 그 앞(맡은 일·사람이 비울 때·걸음 앞)과 뒤(이어받기)는 번호가
     /// 없는 절이라, 번호 목록의 규칙을 잴 때는 이 토막만 본다.
     fn numbered_steps(worker: &str) -> &str {
@@ -5501,13 +5537,14 @@ mod tests {
         let script = &reference[open..];
         // 파이썬 안에는 큰따옴표가 없다 — 셸이 `-c "…"` 로 싸는 글이라 그것이 곧 닫는 자다.
         let script = &script[..script.find('"').expect("파이썬이 안 닫힌다")];
+        let Some(python3) = needed("python3") else { return };
         let s = crate::scratch::Scratch::new("handback");
         let line = |v: serde_json::Value| format!("{}\n", serde_json::json!({"message": {"content": v}}));
         let text = |t: &str| serde_json::json!([{"type": "text", "text": t}]);
         let run = |name: &str, body: &str| -> String {
             let path = s.path().join(name);
             std::fs::write(&path, body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-            let mut child = Command::new("python3")
+            let mut child = Command::new(&python3)
                 .arg("-")
                 .arg(&path)
                 .stdin(Stdio::piped())
@@ -6231,6 +6268,7 @@ stop sending outside work while a release runs",
     /// 말이라 가르면 안 되며("Branch on `kind`, not on the words beside it"), `body` 는 원문이라 페이지 파일을 읽는
     /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
     /// 여기 둘지를 그때 정한다.
+    #[cfg(unix)]
     const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
 
     /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
@@ -7290,7 +7328,8 @@ stop sending outside work while a release runs",
         }
         assert!(!REPORT_WATCH.contains("ListAgents"), "보고를 세션 훑기로 기다린다");
         let script = REPORT_WATCH.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
-        let out = std::process::Command::new("bash").args(["-n", "-c", script]).output().unwrap();
+        let Some(bash) = needed("bash") else { return };
+        let out = std::process::Command::new(bash).args(["-n", "-c", script]).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     }
 
@@ -7648,6 +7687,7 @@ stop sending outside work while a release runs",
     /// 낸다(리뷰 moai-p5sz.tkn). 일곱째 칸 `saycode` 는 기록의 `entrypoint` 가 `remote_mobile` 인 세션의 표고, 그 세션은 칸이
     /// 늘 `-` 다 — 짝은 남의 프로세스 환경을 안 읽는다(moai-l244, develop 머지).
     #[test]
+    #[cfg(unix)]
     fn the_session_map_reads_the_records() {
         assert!(tmux().contains(SESSIONS), "tmux 스킬이 짝을 그대로 안 싣는다");
         assert!(cmux().contains(SESSIONS), "cmux 스킬이 짝을 그대로 안 싣는다");
@@ -7894,6 +7934,7 @@ stop sending outside work while a release runs",
 
     /// 프로세스 `pid` 의 시작 시각을 Claude Code 가 기록의 `procStart` 에 적는 꼴로 — 리눅스는 `/proc/<pid>/stat` 의
     /// 22번째 칸, `/proc` 가 없는 macOS 는 `LC_ALL=C TZ=UTC ps -o lstart=` 의 글(2026-10-11 실제 기록과 견줘 잼).
+    #[cfg(unix)]
     fn proc_start(pid: u32) -> String {
         match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
             Ok(stat) => stat[stat.rfind(')').unwrap() + 2..].split_whitespace().nth(19).unwrap().to_string(),
@@ -8159,16 +8200,19 @@ stop sending outside work while a release runs",
         assert!(!codex.contains(SESSIONS), "Codex 를 Claude 세션 짝에 넣었다");
         assert!(cmux_calls(codex) >= 8, "Codex 절의 cmux 명령을 못 셌다");
         let script = codex.split("```sh\n").nth(1).unwrap().split("```").next().unwrap();
-        let out = std::process::Command::new("bash").args(["-n", "-c", script]).output().unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        if let Some(bash) = needed("bash") {
+            let out = std::process::Command::new(bash).args(["-n", "-c", script]).output().unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        }
         // `bash -n` 은 heredoc 안을 안 읽는다 — `format!` 의 `{{`·`}}` 하나가 어긋나면 파이썬만 깨진다.
         let python =
             script.split_once("<<'MOAI_CODEX_SURFACES'\n").unwrap().1.split("MOAI_CODEX_SURFACES").next().unwrap();
         assert!(python.contains("\"git\", \"-C\", root"), "워크트리 목록을 부른 자리에서 읽는다");
-        let parse = std::process::Command::new("python3")
-            .args(["-c", "import ast, sys; ast.parse(sys.argv[1])", python])
-            .output();
-        if let Ok(out) = parse {
+        if let Some(python3) = tool("python3") {
+            let out = std::process::Command::new(python3)
+                .args(["-c", "import ast, sys; ast.parse(sys.argv[1])", python])
+                .output()
+                .unwrap();
             assert!(
                 out.status.success(),
                 "Codex 탭 찾기의 파이썬이 안 읽힌다: {}",

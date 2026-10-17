@@ -39,7 +39,7 @@ pub struct Unregister {
 ///
 /// `registered` 는 등록한 경로와 그 푼 철자들이다([`registered_paths`]).
 pub fn list_dir(dir: &Path, registered: &[PathBuf], show_hidden: bool, lang: Lang) -> Result<Listing, String> {
-    let dir = std::fs::canonicalize(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let dir = crate::path::canonical(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     if !dir.is_dir() {
         return Err(fill(say(lang, "tui.pick.not_a_dir"), &[("path", &dir.display().to_string())]));
     }
@@ -72,7 +72,7 @@ pub fn list_dir(dir: &Path, registered: &[PathBuf], show_hidden: bool, lang: Lan
         .map(|(name, link)| {
             let path = dir.join(&name);
             // 링크면 등록은 푼 경로로 적혔다. 링크가 아니면 `dir` 이 이미 풀렸으니 그대로다.
-            let real = if link { std::fs::canonicalize(&path).ok() } else { None };
+            let real = if link { crate::path::canonical(&path).ok() } else { None };
             Dent {
                 moai: path.join(".moai").is_dir(),
                 registered: marked(&path) || real.as_deref().is_some_and(marked),
@@ -88,7 +88,7 @@ pub fn registered_paths(config: &Path) -> Vec<PathBuf> {
     let reg = crate::user_config::read(Some(config));
     let mut out = Vec::new();
     for p in reg.projects {
-        if let Ok(real) = std::fs::canonicalize(&p.path)
+        if let Ok(real) = crate::path::canonical(&p.path)
             && real != p.path
         {
             out.push(real);
@@ -107,8 +107,8 @@ fn shown(path: &Path) -> String {
 /// 홈을 모르면 준 철자 그대로 두고, 없는 디렉터리라는 말이 그대로 선다.
 fn expand_home(p: &Path) -> PathBuf {
     let Ok(rest) = p.strip_prefix("~") else { return p.to_path_buf() };
-    match std::env::var_os("HOME").filter(|h| !h.is_empty()) {
-        Some(home) => PathBuf::from(home).join(rest),
+    match crate::user_config::home() {
+        Some(home) => home.join(rest),
         None => p.to_path_buf(),
     }
 }

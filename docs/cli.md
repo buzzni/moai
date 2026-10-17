@@ -3441,6 +3441,16 @@ Options:
   is fetched by moai itself, not by curl; install.sh then downloads the
   release with curl or wget and checks it against the release checksums.
 
+  On Windows it fetches install.ps1 instead, writes it to a temporary file and
+  runs it with Windows PowerShell, removing the file afterwards:
+
+    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass
+      -File <that file> -Dir <that directory> -Force
+
+  The running moai.exe cannot be overwritten, so install.ps1 renames it to
+  moai.exe.old and puts the new one in its place; the next install removes
+  that .old.
+
   The repository is `buzzni/moai` unless your user config says otherwise -
   `repo = "owner/name"` under [update] - and MOAI_REPO wins over both. The
   repository's own .moai/config.toml is never read for it: what it names is
@@ -3452,10 +3462,11 @@ Options:
   instead), a binary not named moai, a directory you cannot write (run it as a
   user who can, or reinstall with install.sh --dir), and a machine the releases
   do not cover. A directory outside your home is fine when you can write it.
+  On Windows the binary has to be named moai.exe.
 
   --dry-run fetches nothing and runs nothing. --json prints {repo, script,
-  dir, command, dry_run} and, after a run, `code` - sh's exit code; install.sh's
-  own output then goes to stderr so stdout stays one JSON value.
+  dir, command, dry_run} and, after a run, `code` - the shell's exit code; the
+  script's own output then goes to stderr so stdout stays one JSON value.
 ```
 
 ## `moai init`

@@ -1324,6 +1324,9 @@ fn planted_word(planted: &str) -> Option<String> {
 ///
 /// **셋을 가른다.** 고칠 명령이 비슷해도 무엇이 어긋났는지가 다르고, 뭉치면 그 중 하나는 반드시
 /// 거짓말이 된다(`agents_stale` 을 둘로 가른 것과 같은 까닭).
+///
+/// 유닉스가 아니면 [`probe`] 가 `Runs` 하나만 내니 나머지 셋은 그 판에서 안 선다.
+#[cfg_attr(not(unix), allow(dead_code))]
 enum Probe {
     /// 이 명령을 알고 0 으로 끝났다 — 도움말이 제 이름을 댄다([`Said`]).
     Runs,
@@ -1442,56 +1445,55 @@ pub(crate) const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_s
 /// 멀쩡한 `--as bin/moai` 를 "썩었다" 고 불렀다. 절대 경로면 `join` 이 그대로 낸다. 자리에
 /// 구분자가 없으면 이름이므로 `PATH` 에 맡긴다 — 그 `PATH` 는 이 프로세스의 것이고 git 이 병합에서
 /// 쓸 것과 꼭 같지는 않지만, 이름으로 심은 것은 그만큼만 믿는 것이 맞다.
+#[cfg(unix)]
 fn probe(root: &Path, cmd: &str) -> Probe {
-    // **유닉스가 아니면 재지 않는다**(리뷰 moai-vbmn.spv 가 짚은, 조용히 사라진 결정). 앞 판은
-    // `\` 와 `PATHEXT` 규칙을 여기 다시 적지 않으려고 입을 다물었고, 부르는 쪽으로 옮겨도 그
-    // 까닭은 그대로다 — 러스트의 `Command` 는 이름에 `.exe` 만 붙이는데 git 은 심은 줄을
-    // `sh -c` 로 돌려 `moai.cmd` 도 찾아낸다. 그 판을 `Dead` 로 읽으면 git 이 잘 부르는 드라이버에
-    // 걷을 길 없는 알림이 선다. **줄의 모양은 그대로 본다** — 여기서 지나가는 것은 "돌 수
-    // 있는가" 하나뿐이고, 그것이 이 에픽 전에 `runnable` 이 하던 일이다.
-    #[cfg(not(unix))]
-    {
-        let _ = (root, cmd);
-        return Probe::Runs;
+    use std::io::ErrorKind;
+    use std::process::{Command, Stdio};
+    let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
+    let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
+    // **못 열면 안 잰다** — 도움말을 못 받아 놓고 "제 이름을 안 댔다" 로 읽으면 멀쩡한
+    // 드라이버가 `Alien` 이 된다. 못 잰 것은 말하지 않는 자리다.
+    let Some((said, sink)) = Said::new() else { return Probe::Unknown };
+    let spawned = Command::new(program)
+        .args([SUB, "--help"])
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(sink))
+        .stderr(Stdio::null())
+        .spawn();
+    let mut child = match spawned {
+        Ok(c) => c,
+        // 이 둘만 그 **자리**에 대한 말이다.
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Probe::Dead,
+        // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
+        Err(_) => return Probe::Unknown,
+    };
+    let Some(st) = reaped(&mut child) else { return Probe::Unknown };
+    match st.code() {
+        // **0 으로 끝난 것만으로는 모자라다**(moai-wwbi, 2026-09-21 사용자 결정). 모르는 인자를
+        // 흘려 듣고 0 을 내는 래퍼(`#!/bin/sh` 두 줄짜리)는 `merge-driver` 를 모른 채 그대로
+        // 지나갔고, 그 저장소의 매 병합이 말없이 내려앉는다. 도움말에 제 이름이 서는지까지 본다.
+        Some(0) if said.read().contains(SUB) => Probe::Runs,
+        Some(0) => Probe::Alien,
+        // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
+        // 딴 도구가 아니라 그 자리가 못 도는 것이다.
+        Some(126 | 127) => Probe::Dead,
+        Some(_) => Probe::Alien,
+        // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
+        None => Probe::Unknown,
     }
-    #[cfg(unix)]
-    {
-        use std::io::ErrorKind;
-        use std::process::{Command, Stdio};
-        let has_dir = cmd.contains('/') || cmd.contains(std::path::MAIN_SEPARATOR);
-        let program = if has_dir { root.join(cmd) } else { std::path::PathBuf::from(cmd) };
-        // **못 열면 안 잰다** — 도움말을 못 받아 놓고 "제 이름을 안 댔다" 로 읽으면 멀쩡한
-        // 드라이버가 `Alien` 이 된다. 못 잰 것은 말하지 않는 자리다.
-        let Some((said, sink)) = Said::new() else { return Probe::Unknown };
-        let spawned = Command::new(program)
-            .args([SUB, "--help"])
-            .current_dir(root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::from(sink))
-            .stderr(Stdio::null())
-            .spawn();
-        let mut child = match spawned {
-            Ok(c) => c,
-            // 이 둘만 그 **자리**에 대한 말이다.
-            Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::PermissionDenied) => return Probe::Dead,
-            // 나머지는 기계가 막은 것이다 — 멀쩡한 자리를 "썩었다" 고 부르지 않는다.
-            Err(_) => return Probe::Unknown,
-        };
-        let Some(st) = reaped(&mut child) else { return Probe::Unknown };
-        match st.code() {
-            // **0 으로 끝난 것만으로는 모자라다**(moai-wwbi, 2026-09-21 사용자 결정). 모르는 인자를
-            // 흘려 듣고 0 을 내는 래퍼(`#!/bin/sh` 두 줄짜리)는 `merge-driver` 를 모른 채 그대로
-            // 지나갔고, 그 저장소의 매 병합이 말없이 내려앉는다. 도움말에 제 이름이 서는지까지 본다.
-            Some(0) if said.read().contains(SUB) => Probe::Runs,
-            Some(0) => Probe::Alien,
-            // 껍데기와 로더의 낱말이다 — 공유 라이브러리를 못 찾은 판, exec 에 막힌 래퍼. 그 이름의
-            // 딴 도구가 아니라 그 자리가 못 도는 것이다.
-            Some(126 | 127) => Probe::Dead,
-            Some(_) => Probe::Alien,
-            // 신호에 맞아 죽었다(유닉스에서만 선다) — OOM 킬러가 가장 흔하다.
-            None => Probe::Unknown,
-        }
-    }
+}
+
+/// 유닉스가 아닌 판의 [`probe`].
+#[cfg(not(unix))]
+fn probe(_root: &Path, _cmd: &str) -> Probe {
+    // **유닉스가 아니면 재지 않는다**(리뷰 moai-vbmn.spv 가 짚은, 조용히 사라진 결정). `\`·`PATHEXT` 를
+    // 푸는 자(`crate::path::slashed`·`super::find_on_path`)가 이제 있어도 그것으로는 못 잰다(리뷰
+    // moai-j9gv.4s3) — git 은 심은 줄을 제 `sh -c` 로 돌리고, 그 껍데기는 러스트의 `Command`(이름에 `.exe`
+    // 만 붙인다)와도 `find_on_path`(확장자 없는 이름은 안 고른다)와도 딴 규칙으로 찾는다. 이쪽 규칙으로 잰
+    // 판을 `Dead` 로 읽으면 git 이 잘 부르는 드라이버에 걷을 길 없는 알림이 선다. **줄의 모양은 그대로
+    // 본다** — 여기서 지나가는 것은 "돌 수 있는가" 하나뿐이고, 그것이 moai-vbmn 전에 `runnable` 이 하던 일이다.
+    Probe::Runs
 }
 
 /// 재는 동안 아이가 쓴 stdout 을 받아 둘 자리 — **파이프가 아니라 파일이다**(리뷰).
@@ -1508,8 +1510,10 @@ fn probe(root: &Path, cmd: &str) -> Probe {
 ///
 /// 파일로 받으면 쓰는 쪽이 안 막히고, 읽는 쪽은 손자를 안 기다린다. 한도는 다시 [`reaped`]
 /// 하나가 쥔다. **값은 자리 하나 열고 지우는 것**이라 프로세스 하나 띄우는 값에 묻힌다.
+#[cfg(unix)]
 struct Said(std::path::PathBuf);
 
+#[cfg(unix)]
 impl Said {
     /// 자리를 하나 열어 **읽을 쪽과 아이에게 물려줄 쪽**을 함께 낸다. 못 열면 `None`.
     fn new() -> Option<(Said, std::fs::File)> {
@@ -1533,6 +1537,7 @@ impl Said {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Said {
     /// **재고 나면 치운다.** 손자가 아직 그 fd 를 쥐고 있어도 유닉스에서는 지워진다.
     fn drop(&mut self) {
@@ -1544,6 +1549,7 @@ impl Drop for Said {
 ///
 /// **거두고 간다.** 죽이기만 하고 두면 `moai status` 가 좀비를 남긴 채 끝난다. 기다리는 자는
 /// [`crate::git::waited`] 와 한 벌이다 — 기다리는 간격을 늘려 가는 까닭도 거기 적혀 있다.
+#[cfg(unix)]
 fn reaped(child: &mut std::process::Child) -> Option<std::process::ExitStatus> {
     crate::git::waited(child, PROBE_BUDGET).or_else(|| {
         let _ = child.kill();
@@ -1579,7 +1585,10 @@ fn chosen_command(here: &Path) -> Result<String, String> {
     // **까닭은 자료로 낸다** — 부르는 두 자리(`install` 과 `plant_for_init`)가 저마다 제 말로
     // 편다(moai-uzgp). 여기서 글을 지으면 이 함수가 화면 말을 알아야 한다.
     let mine = std::env::current_exe().map_err(|e| e.to_string())?;
-    let Some(found) = on_path(DRIVER) else { return Ok(mine.display().to_string()) };
+    // 심는 줄은 git 이 제 `sh -c` 로 돌린다 — Windows 의 `\` 는 `/` 로 적는다([`crate::path::slashed`],
+    // moai-j9gv.4c1). 사람이 `--as` 로 준 것은 손대지 않는다: 준 것이 이긴다.
+    let spelt = |p: &Path| crate::path::slashed(&p.display().to_string(), cfg!(windows));
+    let Some(found) = on_path(DRIVER) else { return Ok(spelt(&mine)) };
     // 같은 파일이면 고를 것이 없다 — 이름으로 적으면 git 이 병합에서 쓸 `PATH` 에 기대는 것이
     // 하나 늘 뿐이다.
     //
@@ -1588,16 +1597,14 @@ fn chosen_command(here: &Path) -> Result<String, String> {
     // 파일을 가리키는 심볼릭 링크면 둘이 갈려, 같은 바이너리를 두 번 띄워 재고도 "딴것" 으로
     // 읽었다. 못 풀면 적힌 철자 그대로 견준다: 여기서 틀리는 값은 **덜 이르는 쪽**이다.
     // 푸는 자는 [`crate::path::real`] 하나다(moai-8csx) — 이 줄도 그 다섯과 같은 꼴이었는데
-    // 목록에서 빠져, 나중에 정할 것(윈도의 `\\?\` 접두어)이 여기만 옛 답으로 남았다(리뷰).
+    // 목록에서 빠져, 나중에 정할 것(윈도의 `\\?\` 접두어)이 여기만 옛 답으로 남았다(리뷰). 그 접두어는 이제
+    // 푸는 자가 걷는다([`crate::path::canonical`], moai-lag7.951) — 견주는 두 쪽이 한 철자로 서고, 적을 철자
+    // (`spelt`)도 같은 규칙으로 걷는다([`crate::path::unverbatim`], moai-vaj4).
     if crate::path::real(&found) == crate::path::real(&mine) {
-        return Ok(mine.display().to_string());
+        return Ok(spelt(&mine));
     }
-    let word = found.display().to_string();
-    if same_bytes(&found, &mine) && matches!(probe(here, &word), Probe::Runs) {
-        Ok(word)
-    } else {
-        Ok(mine.display().to_string())
-    }
+    let word = spelt(&found);
+    if same_bytes(&found, &mine) && matches!(probe(here, &word), Probe::Runs) { Ok(word) } else { Ok(spelt(&mine)) }
 }
 
 /// 두 파일이 **바이트째 같은가** — 못 읽으면 거짓이다(모르면 덜 이르는 쪽).
@@ -1630,9 +1637,19 @@ fn same_bytes(a: &Path, b: &Path) -> bool {
 /// **돌릴 수 있는가는 [`super::runnable`] 하나가 답한다**(moai-p3kb, 리뷰). 여기 있던 셋째 벌은
 /// `skill`·`tui` 의 것과 글자째 같았는데 모으는 판에서 빠져, 이식성 고침 하나가 저 둘에만 들 뻔했다.
 /// 빈 자리를 거르는 **위의 한 줄이 이 자리만의 것**이고, 그것은 재는 자가 아니라 고르는 자에 붙는다.
+///
+/// **훑는 몸통도 하나다 — [`super::found_in`]**(리뷰 moai-j9gv.4s3). `PATHEXT` 고침(moai-j9gv.cl6)이 `skill`·`tui`
+/// 에만 들어 위 문단의 일이 한 번 더 났다 — 이 자리만 이름 그대로 이어 Windows 에서 `moai.exe` 를 영영 못 찾았고,
+/// [`chosen_command`] 의 PATH 갈래가 그 판에서 죽어 같은 기계의 `skill install` 과 답이 갈렸다. 유닉스에서는 확장자
+/// 목록이 비어 이름 그대로 잇는다 — 이 문 앞과 바이트째 같은 훑기다. 찾은 것이 `.cmd` 여도 심기지는 않는다:
+/// [`chosen_command`] 는 바이트가 같은 파일만 고른다.
 fn on_path(name: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).filter(|d| d.is_absolute()).map(|d| d.join(name)).find(|p| super::runnable(p))
+    #[cfg(unix)]
+    let exts: Vec<String> = Vec::new();
+    #[cfg(not(unix))]
+    let exts = super::path_exts(std::env::var_os("PATHEXT").as_deref());
+    super::found_in(std::env::split_paths(&path).filter(|d| d.is_absolute()), name, &exts, super::runnable)
 }
 
 /// 설정의 세 줄을 적는다 — 심은 드라이버 줄을 낸다.
