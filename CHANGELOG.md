@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-17
+
 ### Added
 
 - **Windows releases.** A tag now also builds `x86_64-pc-windows-msvc` on a
