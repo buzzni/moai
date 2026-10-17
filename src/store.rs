@@ -2498,7 +2498,7 @@ fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>
 /// 자다. 없는 자리는 아니다 — 거기서는 어차피 못 짓는다.
 fn stage_inside(dir: &Path, root: &Path) -> bool {
     let root = crate::path::real(root);
-    std::fs::canonicalize(dir).is_ok_and(|dir| dir.strip_prefix(&root).is_ok_and(|rest| !crate::held::into_git(rest)))
+    crate::path::canonical(dir).is_ok_and(|dir| dir.strip_prefix(&root).is_ok_and(|rest| !crate::held::into_git(rest)))
 }
 
 /// 파일이 든 디렉터리 — 없으면(뿌리 `/` 나 빈 경로) `named` 를 대는 거절이다(moai-iq7j).
@@ -2544,7 +2544,7 @@ fn target_of(path: &Path, within: Option<&Path>) -> R<PathBuf> {
 /// 링크를 끝까지 푼 끝([`crate::path::follow_links`])이 앉은 자리 — **끝 파일은 없어도 된다**. 디렉터리는 풀고 끝
 /// 이름은 그대로 붙인다. 디렉터리를 못 풀면 있는 조상까지 푼 철자다([`crate::path::real_prefix`]).
 pub(crate) fn landed(end: &Path) -> PathBuf {
-    match (std::fs::canonicalize(crate::path::dir_of(end)), end.file_name()) {
+    match (crate::path::canonical(crate::path::dir_of(end)), end.file_name()) {
         (Ok(dir), Some(name)) => dir.join(name),
         _ => crate::path::real_prefix(&crate::path::lexical(end)),
     }
@@ -2590,7 +2590,7 @@ fn into_tracker(path: &Path, real: &Path, root: &Path) -> Option<(PathBuf, &'sta
     let dot = root.join(".moai");
     let beyond = [dot.join("journal"), crate::archive::dir(root), dot];
     if landed.strip_prefix(&base).is_ok_and(tracker)
-        || beyond.iter().any(|d| std::fs::canonicalize(d).is_ok_and(|d| landed.starts_with(&d)))
+        || beyond.iter().any(|d| crate::path::canonical(d).is_ok_and(|d| landed.starts_with(&d)))
     {
         return Some((landed, "inside the tracker (.moai)"));
     }
@@ -2637,7 +2637,7 @@ fn resolve(path: &Path, within: Option<&Path>) -> R<PathBuf> {
     let end = || crate::text::one_line(&real.display().to_string());
     if let Some(root) = within {
         let root = crate::path::real(root);
-        if let Ok(dir) = std::fs::canonicalize(crate::path::dir_of(&real)) {
+        if let Ok(dir) = crate::path::canonical(crate::path::dir_of(&real)) {
             if !dir.starts_with(&root) {
                 // 끝 조각이 링크가 아니면 가운데 디렉터리가 링크다 — 그때 댈 것은 푼 디렉터리다.
                 let landed = real.file_name().map_or_else(|| dir.clone(), |name| dir.join(name));
@@ -2731,7 +2731,7 @@ fn on_lock(real: &Path, root: &Path) -> bool {
     if let Some(at) = id(std::fs::metadata(real)) {
         return locks.any(|lock| id(std::fs::symlink_metadata(&lock)) == Some(at));
     }
-    let spelled = |p: &Path| Some(std::fs::canonicalize(crate::path::dir_of(p)).ok()?.join(p.file_name()?));
+    let spelled = |p: &Path| Some(crate::path::canonical(crate::path::dir_of(p)).ok()?.join(p.file_name()?));
     let Some(landed) = spelled(real) else { return false };
     locks.filter_map(|lock| spelled(&lock)).any(|lock| lock == landed)
 }
@@ -2830,6 +2830,8 @@ fn torn_tail(f: &mut std::fs::File) -> std::io::Result<bool> {
 /// 링크가 바뀐 경우에 임시 자리와 갈아끼울 자리가 서로 다른 풀이에서 온다.
 fn replace(path: &Path, bytes: &[u8], tmp_dir: &Path) -> R<()> {
     let perms = std::fs::metadata(path).ok().map(|m| m.permissions());
+    // 부모를 묻는 것은 어디서나 한다(없으면 실패) — 그 값을 쓰는 것은 아래 유닉스 fsync 뿐이다.
+    #[cfg_attr(not(unix), allow(unused_variables))]
     let dir = parent_of(path, path)?;
     let (tmp, mut f) = open_tmp(path, tmp_dir)?;
     // **어디서 실패하든 임시 파일을 치운다.** `rename` 에서만 치우던 때는 디스크가 찬(ENOSPC)
@@ -3738,11 +3740,13 @@ mod tests {
 
     /// 이 저장소의 자리만 골라 센 것 — [`UNREAD`] 는 프로세스 하나의 것이라 병렬 시험끼리
     /// 섞인다. 수를 세지 말고 제 뿌리 밑의 짝만 본다.
+    #[cfg(unix)]
     fn unread_under(root: &Path) -> Vec<Unread> {
         journal_unread().into_iter().filter(|u| u.at.starts_with(root)).collect()
     }
 
     /// [`unread_under`] 와 같되 탐색기 머리의 줄이 읽는 [`UNREAD_NOW`] 에서 고른다 — 다시 재는 걸음이 걷는 쪽이다.
+    #[cfg(unix)]
     fn unread_now_under(root: &Path) -> Vec<Unread> {
         journal_unread_now().into_iter().filter(|u| u.at.starts_with(root)).collect()
     }
@@ -3752,6 +3756,7 @@ mod tests {
     /// 읽던 것을 내고, 못 연 자리를 [`journal_unread`] 에 세운다 — 그것을 대는 자가 `cmd::run`
     /// 이고, 거기서 종료 코드도 0 이 아니게 된다.
     #[test]
+    #[cfg(unix)]
     fn an_unreadable_journal_dir_is_carried_and_told() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("nojournaldir");
@@ -3795,6 +3800,7 @@ mod tests {
     /// 접어 **모든** 저널 파일이 말없이 빠졌다 — 이력 없는 화면이 stderr 한 줄 없이 0 으로
     /// 끝났다. 조용한 손실이 이 도구가 못 견디는 하나다.
     #[test]
+    #[cfg(unix)]
     fn a_journal_dir_that_cannot_be_stat_ed_is_told_not_swallowed() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("nostatjournal");
@@ -3833,6 +3839,7 @@ mod tests {
     /// 관대해진 읽기가 조용해지지 않는 것까지 한 자리에서 잰다: 읽은 것은 나오고, 못 읽은
     /// 파일은 [`journal_unread`] 에 선다.
     #[test]
+    #[cfg(unix)]
     fn an_unreadable_journal_file_is_skipped_and_told() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("nojournalfile");
@@ -3882,6 +3889,7 @@ mod tests {
     /// [`UNREAD`] 는 고쳐도 그대로다. **목록에 없던 파일은 안 연다** — 내 파일은 읽혔던 자리라, 그 뒤에 못 읽게 되어도
     /// 다시 재는 걸음은 그것을 안 열어 새로 세지 않는다.
     #[test]
+    #[cfg(unix)]
     fn a_fixed_journal_place_is_dropped_on_reopen_and_a_broken_one_stays() {
         use std::os::unix::fs::PermissionsExt;
         let (r, d) = repo("reopenjournal");

@@ -110,7 +110,12 @@ pub fn api_of(repo: &str) -> String {
 /// `repo` 의 `install.sh` — **늘 `main` 의 것이다**(2026-10-08 사용자 결정). 받는 사람이 밟는 가지가
 /// `main` 이고(moai-vqmx), 판을 고르는 것은 스크립트가 아니라 그 스크립트에 넘기는 `--version` 이다.
 pub fn script_of(repo: &str) -> String {
-    format!("https://raw.githubusercontent.com/{repo}/main/install.sh")
+    script_named(repo, "install.sh")
+}
+
+/// `repo` 의 `main` 에 선 설치 스크립트 `name` — `install.sh` 나 `install.ps1`([`crate::update::Runner::script`]).
+pub fn script_named(repo: &str, name: &str) -> String {
+    format!("https://raw.githubusercontent.com/{repo}/main/{name}")
 }
 
 /// 판을 올리는 한 줄 — 처음 까는 줄과 같다(moai-8rmw). `install.sh` 는 깔 자리에 선 것이
@@ -180,13 +185,17 @@ pub fn repo_lenient(env: impl Fn(&str) -> Option<OsString>, config: Option<&str>
     repo_from(env, config).unwrap_or_else(|_| config.unwrap_or(DEFAULT_REPO).to_string())
 }
 
-/// `install.sh` 가 판을 내는 기계인가 — 그 스크립트의 플랫폼 표, `release.yml` 의 빌드 행렬과
-/// 같은 둘이다. 다른 기계에서 [`upgrade_of`] 의 줄은 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
+/// 설치 스크립트가 판을 내는 기계인가 — `install.sh`·`install.ps1` 의 플랫폼 표, `release.yml` 의
+/// 빌드 행렬과 같은 셋이다. 다른 기계에서 [`upgrade_of`] 의 줄은 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
 ///
 /// **행렬에 칸이 늘면 여기도 는다.** 안 늘리면 그 기계의 탐색기가 올리는 줄을 안 댈 뿐이다 —
-/// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다.
-pub const SERVED: bool =
-    cfg!(any(all(target_os = "linux", target_arch = "x86_64"), all(target_os = "macos", target_arch = "aarch64")));
+/// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다. Windows 칸이 는 날(moai-j9gv.3fl) 함께 늘었다 —
+/// 그 기계의 탐색기는 [`upgrade_for`] 로 `moai update` 를 댄다.
+pub const SERVED: bool = cfg!(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "windows", target_arch = "x86_64")
+));
 
 /// **도는 이 바이너리를 올리는 한 줄**(리뷰). 못 올리는 줄은 안 낸다 — 그때는 `None` 이다.
 ///
@@ -245,16 +254,33 @@ pub fn built_by_cargo(dir: &Path) -> bool {
 }
 
 /// 도는 이 바이너리를 올리는 한 줄 — `moai update` 가 설 자리면 [`SELF_UPDATE`], 아니면
-/// [`upgrade_line`](moai-zsfr.o3s). 도는 바이너리의 푼 자리와 `HOME` 을 넣는다. 파일 시스템을
+/// [`upgrade_line`](moai-zsfr.o3s). 도는 바이너리의 푼 자리와 사람의 집을 넣는다. 파일 시스템을
 /// 보므로 **여는 걸음에 한 번만 부른다**(`tui::App::ask_latest`). 그리는 걸음에서 부르면
 /// 프레임마다 디스크를 두드린다.
+///
+/// **집은 `install.sh` 의 집이다 — `HOME` 만 보고, 없으면 줄을 안 댄다**(moai-vaj4). 유닉스의 사용자 설정이 집을
+/// 고르는 자([`crate::user_config::home_here`])가 꼭 그것이라 그 자로 고른다 — 따로 두었던 옛 자는 리눅스에서도
+/// `USERPROFILE` 로 물러서, `install.sh` 가 "`HOME` 이 없다" 로 멈출 자리에 줄을 댔다. Windows 에서는 이 값이 답을
+/// 안 바꾼다: `moai.exe` 는 [`upgrade_line`] 의 이름에서 걸러져 그 기계의 줄은 [`SELF_UPDATE`] 뿐이다.
 ///
 /// **`moai update` 가 서는지는 그 명령이 거절하는 자로 잰다** — 자리는 [`crate::update::refusal`] 로,
 /// 받을 저장소는 부르는 쪽이 `cmd::update::chosen_repo` 로 재어 `repo_ok` 에 싣는다. 안내가 `moai update` 를
 /// 대고 그 명령은 거절하는 판을 안 만든다. 저장소 값 때문에만 못 서면 긴 줄을 댄다 — 자리를 못 쓰면 그 줄도 못 서니 `None` 이다.
+/// 바이너리의 자리도 그 명령과 **같은 철자로** 잰다(접두어를 걷은 [`crate::path::real`], 리뷰 moai-j9gv.8gr) — 푼
+/// 철자를 `\\?\` 째 재던 판은
+/// 이름 끝이 빈칸이거나 장치 이름(`aux`)인 Windows 디렉터리에서 안내는 `moai update` 를 대고 명령은 거절했다.
 pub fn upgrade_here(repo: &str, repo_ok: bool) -> Option<String> {
-    let exe = crate::path::real(&std::env::current_exe().ok()?);
-    let home = std::env::var_os("HOME").filter(|h| !h.is_empty()).map(|h| crate::path::real(Path::new(&h)));
+    upgrade_in(|k| std::env::var_os(k), &std::env::current_exe().ok()?, repo, repo_ok)
+}
+
+/// [`upgrade_here`] 의 몸통 — 환경과 도는 바이너리를 받아, 집을 고르는 자를 시험이 프로세스 환경 없이 잰다(리뷰
+/// moai-j9gv.8gr). 그 자를 재던 시험은 옛 자와 함께 걷혀, 리눅스에서 `USERPROFILE` 로 물러서는 자가 돌아와도 아무것도
+/// 안 붉어졌다.
+fn upgrade_in(env: impl Fn(&str) -> Option<OsString>, exe: &Path, repo: &str, repo_ok: bool) -> Option<String> {
+    // 둘을 같은 철자로 푼다 — [`upgrade_line`] 이 `starts_with` 로 견주는데, Windows 에서 `C:\…` 와 `\\?\C:\…` 는
+    // 같은 자리여도 안 맞는다. 푸는 자가 접두어까지 걷는다([`crate::path::canonical`]).
+    let exe = crate::path::real(exe);
+    let home = crate::user_config::home_here(env).map(|h| crate::path::real(&h));
     upgrade_for(&exe, home.as_deref(), SERVED, repo, repo_ok, crate::update::writable)
 }
 
@@ -2345,13 +2371,16 @@ mod tests {
         let home = s.path().join("home");
         let local = home.join(".local").join("bin");
         std::fs::create_dir_all(&local).unwrap();
-        let exe = local.join("moai");
+        // 이 기계의 설치 스크립트가 까는 이름이다 — Windows 는 `moai.exe`(moai-lag7.sk7).
+        let moai = crate::update::Runner::native(Path::new("")).binary();
+        let exe = local.join(moai);
         let yes = |_: &Path| true;
         let no = |_: &Path| false;
-        let up = upgrade_of(DEFAULT_REPO);
+        // 긴 줄은 `install.sh` 의 것이라 `moai` 라는 이름에만 선다 — Windows 의 `moai.exe` 에는 권할 줄이 없다.
+        let up = (!cfg!(windows)).then(|| upgrade_of(DEFAULT_REPO));
         assert_eq!(upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, true, yes).as_deref(), Some(SELF_UPDATE));
         assert_eq!(
-            upgrade_for(Path::new("/opt/tools/moai"), Some(&home), true, DEFAULT_REPO, true, yes).as_deref(),
+            upgrade_for(&Path::new("/opt/tools").join(moai), Some(&home), true, DEFAULT_REPO, true, yes).as_deref(),
             Some(SELF_UPDATE),
             "집 밖이어도 쓸 수 있으면 moai update 가 선다"
         );
@@ -2367,10 +2396,30 @@ mod tests {
         );
         assert_eq!(
             upgrade_for(&exe, Some(&home), true, DEFAULT_REPO, false, yes),
-            Some(up),
+            up,
             "moai update 가 거절할 저장소 값"
         );
         assert_eq!(upgrade_for(&exe, Some(&home), false, DEFAULT_REPO, true, yes), None, "판을 안 내는 기계");
+    }
+
+    /// **안내 줄의 집은 사용자 설정의 집과 한 자다**(moai-vaj4, 리뷰 moai-j9gv.8gr) — `USERPROFILE` 만 선 환경에서
+    /// 줄이 서는지와 설정의 자리가 서는지가 같다. 리눅스에서 `USERPROFILE` 로 물러서던 옛 자가 돌아오면 여기가
+    /// 붉어진다 — 그 줄이 대는 `install.sh` 는 `HOME` 이 없으면 멈춘다. 저장소 값이 틀린 판(`repo_ok` 거짓)으로 불러
+    /// 집을 읽는 긴 줄의 갈래를 탄다.
+    #[test]
+    fn the_upgrade_line_reads_the_home_the_config_reads() {
+        let s = Scratch::new("upgrade-home");
+        let bin = s.path().join(".local").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join("moai");
+        std::fs::write(&exe, "").unwrap();
+        let profile = s.path().as_os_str().to_owned();
+        let env = |k: &str| (k == "USERPROFILE").then(|| profile.clone());
+        assert_eq!(
+            upgrade_in(env, &exe, DEFAULT_REPO, false).is_some(),
+            SERVED && crate::user_config::path_from(env).is_some(),
+            "안내 줄과 설정이 다른 집을 읽는다"
+        );
     }
 
     #[test]

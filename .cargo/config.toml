@@ -1,0 +1,11 @@
+# Windows 판은 C 런타임을 바이너리에 묶는다(2026-10-12 사용자 결정, moai-j9gv.ukd).
+#
+# msvc 타깃은 기본으로 vcruntime140.dll 을 동적으로 부른다. 깨끗한 Windows 에는 그 DLL 이 없어,
+# 받은 moai.exe 가 "VCRUNTIME140.dll 이 없다" 로 뜨지도 않는다 — 받는 사람에게 재배포 패키지를
+# 먼저 깔라고 할 수는 없다. 리눅스 판이 musl 정적인 것과 같은 까닭이다.
+#
+# 이 파일이 저장소 뿌리에 서는 까닭은 `cargo build --target x86_64-pc-windows-msvc` 를 누가 어디서
+# 치든 같은 바이너리가 나오게 하려는 것이다 — 릴리스 칸과 CI 의 Windows 잡이 같은 것을 짓는다.
+# 다른 타깃에는 아무 일도 안 한다.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

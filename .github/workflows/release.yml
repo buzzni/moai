@@ -55,6 +55,12 @@ jobs:
     needs: guard
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
+    # **모든 칸이 bash 로 돈다**(moai-j9gv.ukd). Windows 러너의 기본 셸은 pwsh 라, 셸 스크립트를
+    # 부르는 스텝(`check-size.sh`)과 `set -euo pipefail` 로 쓴 꾸리기가 그 칸에서만 다른 말로
+    # 읽힌다. 러너에는 Git Bash 가 서 있다.
+    defaults:
+      run:
+        shell: bash
     strategy:
       # 한 칸이 죽어도 남은 칸은 끝까지 간다 — 무엇이 되고 무엇이 안 되는지를
       # 한 판에서 본다.
@@ -66,6 +72,10 @@ jobs:
             os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
+          # 네이티브 msvc 판이다(2026-10-12 사용자 결정, moai-j9gv). CRT 를 정적으로 묶는 것은
+          # `.cargo/config.toml` 이 맡는다 — 깨끗한 Windows 에 vcruntime140.dll 이 없어도 뜬다.
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -114,30 +124,56 @@ jobs:
       - name: build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      # Windows 칸의 바이너리만 이름에 `.exe` 가 붙는다. 이름을 고르는 자리를 둘로 두지 않으려고
+      # 여기서 한 번 고르고 뒤의 스텝이 받아 쓴다.
+      - name: 바이너리 이름을 고른다
+        id: exe
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          case $TARGET in
+          *-windows-*) printf 'name=moai.exe\n' >>"$GITHUB_OUTPUT" ;;
+          *) printf 'name=moai\n' >>"$GITHUB_OUTPUT" ;;
+          esac
+
       # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 채로 올리면
       # 받는 사람 쪽에서야 드러난다. 자는 ci.yml 과 나눠 쓰는 것 하나다.
       - name: 15MB 예산을 잰다
-        run: scripts/check-size.sh "target/${{ matrix.target }}/release/moai"
+        run: scripts/check-size.sh "target/${{ matrix.target }}/release/${{ steps.exe.outputs.name }}"
 
       - name: 꾸린다
         id: pack
         env:
           TARGET: ${{ matrix.target }}
+          EXE: ${{ steps.exe.outputs.name }}
         run: |
           set -euo pipefail
           version=$(scripts/check-version.sh --print)
           name="moai-v$version-$TARGET"
           mkdir "$name"
-          cp "target/$TARGET/release/moai" "$name/"
+          cp "target/$TARGET/release/$EXE" "$name/"
           cp README.md CHANGELOG.md LICENSE "$name/"
-          # macOS 의 tar 는 bsdtar 다. `--` 를 안 쓰는 꼴로 맞춘다.
-          tar czf "$name.tar.gz" "$name"
+          # **Windows 칸은 zip 이다**(2026-10-12 사용자 결정). install.ps1 이 `Expand-Archive` 로
+          # 푸는데, 그것은 Windows PowerShell 5.1 에도 서고 tar.gz 는 못 읽는다. `7z` 는 러너에 있다.
+          # 안의 꼴(`<이름>/moai.exe`)은 tar.gz 와 같다 — 두 설치 스크립트가 같은 자리를 찾는다.
+          case $TARGET in
+          *-windows-*)
+            7z a -tzip "$name.zip" "$name" >/dev/null
+            printf 'file=%s.zip\n' "$name" >>"$GITHUB_OUTPUT"
+            ;;
+          *)
+            # macOS 의 tar 는 bsdtar 다. `--` 를 안 쓰는 꼴로 맞춘다.
+            tar czf "$name.tar.gz" "$name"
+            printf 'file=%s.tar.gz\n' "$name" >>"$GITHUB_OUTPUT"
+            ;;
+          esac
           printf 'name=%s\n' "$name" >>"$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.pack.outputs.name }}
-          path: ${{ steps.pack.outputs.name }}.tar.gz
+          path: ${{ steps.pack.outputs.file }}
           if-no-files-found: error
 
   release:
@@ -157,20 +193,21 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # checksums 는 산출물 곁에 한 파일로 둔다. install.sh 가 이것 없이는 설치를
-      # 거부한다 (moai-j54h) — 이 스텝이 빠지면 그쪽이 조용히 못 깔리는 것이
-      # 아니라 **소리 내어** 거부한다.
+      # checksums 는 산출물 곁에 한 파일로 둔다. install.sh 와 install.ps1 이 이것 없이는
+      # 설치를 거부한다 (moai-j54h) — 이 스텝이 빠지면 그쪽이 조용히 못 깔리는 것이
+      # 아니라 **소리 내어** 거부한다. zip 도 같은 파일에 선다 — 두 스크립트가 제 산출물의
+      # 이름을 낱말째 찾는다.
       - name: SHA256SUMS
         working-directory: dist
         run: |
           set -euo pipefail
-          sha256sum -- *.tar.gz >SHA256SUMS
+          sha256sum -- *.tar.gz *.zip >SHA256SUMS
           cat SHA256SUMS
 
       # 설치 스크립트도 릴리스에 함께 둔다 — 받는 사람이 판마다 그때의 스크립트를
       # 쓸 수 있다. 합계를 낸 뒤에 넣어, SHA256SUMS 는 산출물만 담는다.
-      - name: install.sh 를 함께 올린다
-        run: cp install.sh dist/
+      - name: 설치 스크립트를 함께 올린다
+        run: cp install.sh install.ps1 dist/
 
       # 릴리스 노트는 CHANGELOG 의 이번 판 절을 그대로 쓴다. 그 절이 없으면 커밋
       # 목록으로 대신한다 — 노트가 없다고 릴리스를 멈추지는 않는다.

@@ -617,7 +617,7 @@ const LOST: &str = "lost";
 use crate::tui::App;
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, Event, KeyEventKind, MouseEventKind,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind, MouseEventKind,
 };
 
 /// bracketed paste 를 켜거나 끈다 — xterm 의 2004 번. 쓰는 곳을 받는 것은 시험이 그 글을
@@ -639,15 +639,20 @@ fn bracketed_paste(out: &mut impl std::io::Write, on: bool) -> std::io::Result<(
 /// 어느 꼴로 올지가 터미널마다 갈린다. **켜기 전에 둘을 끈다**(리뷰) — 편집기 같은 남이 켜 둔 채 끝났으면 그대로
 /// 남아 움직임마다 사건이 온다.
 ///
-/// **끌 때는 `DisableMouseCapture` 를 쓴다**(리뷰) — 켠 차례의 거꾸로이고 1003·1015 번까지 끈다. 안 켠 것을 끄는
-/// 것은 터미널에 아무 일도 아니다.
+/// **끌 때는 `DisableMouseCapture` 의 글을 쓴다**(리뷰) — 켠 차례의 거꾸로이고 1003·1015 번까지 끈다. 안 켠 것을
+/// 끄는 것은 터미널에 아무 일도 아니다.
+///
+/// **그 글도 여기서 바로 쓴다**(moai-lag7.sk7). crossterm 의 `execute!(DisableMouseCapture)` 는 Windows 에서 글을 안
+/// 쓰고 콘솔 입력 모드를 `EnableMouseCapture` 가 적어 둔 값으로 되돌리려 드는데, 켤 때 그것을 안 거쳤으니 "Initial
+/// console modes not set" 으로 아무것도 안 했다 — 켤 때 쓴 1000·1002·1006 번이 꺼지지 않아, 탐색기를 닫은 셸에
+/// 마우스 보고가 날 글로 찍혔다. 유닉스에서는 `execute!` 가 쓰던 바이트 그대로다.
 ///
 /// 쓰는 곳을 받는 것은 [`bracketed_paste`] 와 같은 까닭이다 — 시험이 그 글을 본다.
 fn mouse_capture(out: &mut impl std::io::Write, on: bool) -> std::io::Result<()> {
-    if !on {
-        return ratatui::crossterm::execute!(out, DisableMouseCapture);
-    }
-    out.write_all(b"\x1b[?1003l\x1b[?1015l\x1b[?1000h\x1b[?1002h\x1b[?1006h")?;
+    out.write_all(match on {
+        true => b"\x1b[?1003l\x1b[?1015l\x1b[?1000h\x1b[?1002h\x1b[?1006h",
+        false => b"\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l",
+    })?;
     out.flush()
 }
 
@@ -1087,7 +1092,8 @@ impl Gate {
 
 /// 생각 담기를 적을 편집기(moai-08af). **환경과 PATH 를 읽는 것은 여기다** — 고르는 차례는
 /// 조각([`crate::tui::jotfile::pick`])이 정한다. 띄울 때 한 번 고른다: 도는 중에 `$EDITOR` 가
-/// 바뀔 길은 없고, 키마다 PATH 를 훑을 까닭도 없다.
+/// 바뀔 길은 없고, 키마다 PATH 를 훑을 까닭도 없다. 다만 유닉스가 아닌 판은 편집기를 띄울 때마다 `sh`·첫 낱말을
+/// `PATH`·`PATHEXT` 에서 한 번 더 찾는다([`editor_command`]).
 fn editor() -> Option<String> {
     let var = |k: &str| std::env::var(k).ok();
     crate::tui::jotfile::pick(var("VISUAL").as_deref(), var("EDITOR").as_deref(), on_path)
@@ -1098,9 +1104,37 @@ fn editor() -> Option<String> {
 ///
 /// 여기서 `PATH` 를 제 손으로 훑는 것은 껍데기를 띄우지 않으려는 것이다. 편집기 후보가 여럿이고
 /// 띄울 때 한 번 고르는 자리라, 이름마다 `sh -c 'command -v'` 를 띄우면 그 값이 얻는 값보다 크다.
+#[cfg(unix)]
 fn on_path(name: &str) -> bool {
     let Some(dirs) = std::env::var_os("PATH") else { return false };
     std::env::split_paths(&dirs).any(|d| super::runnable(&d.join(name)))
+}
+
+/// 유닉스가 아닌 판의 [`on_path`] — **편집기를 띄울 길([`editor_command`])의 찾기를 그대로 탄다**(리뷰
+/// moai-j9gv.4s3). Git Bash 안이면 그 `sh` 가 띄우니 그 껍데기처럼 이름 그대로와 `.exe` 를 본다 — Git for Windows 의
+/// `vi` 는 확장자 없는 스크립트(`exec vim "$@"`)라 `PATHEXT` 로는 영영 안 잡혀, 이 에픽 전에 고르던 `vi` 를 놓친다.
+/// 그 밖에서는 `PATHEXT` 를 붙여 찾는다([`super::find_on_path`]).
+#[cfg(not(unix))]
+fn on_path(name: &str) -> bool {
+    if msys_sh().is_none() {
+        return super::find_on_path(name).is_some();
+    }
+    let Some(dirs) = std::env::var_os("PATH") else { return false };
+    std::env::split_paths(&dirs)
+        .any(|d| super::runnable(&d.join(name)) || super::runnable(&d.join(format!("{name}.exe"))))
+}
+
+/// Git Bash(`MSYSTEM` 이 선다) 안에서 `PATH` 에 선 `sh.exe` — 편집기를 그 껍데기로 띄울지와 기본 편집기를 어떻게 찾을지를
+/// 이것 하나가 가른다([`editor_command`]·[`on_path`]). 둘이 따로 물으면 찾은 것과 띄우는 길이 갈린다.
+///
+/// **`PATH` 의 자리마다 `sh.exe` 만 찾는다**(리뷰 moai-j9gv.g3t) — git 도 그렇게 찾는다. `PATHEXT` 로 찾으면 앞 자리의
+/// `sh.cmd`·`sh.bat` 가 잡히는데, 러스트는 그것을 `cmd.exe` 로 넘기고 [`msys_command`] 가 MSYS2 의 규칙으로 싼 날것을
+/// `cmd.exe` 가 다시 읽어 따옴표가 어긋난다(러스트가 보통 낱말에 하는 `cmd.exe` 용 막음도 날것에는 안 한다).
+#[cfg(not(unix))]
+fn msys_sh() -> Option<std::path::PathBuf> {
+    std::env::var_os("MSYSTEM").filter(|v| !v.is_empty())?;
+    let dirs = std::env::var_os("PATH")?;
+    super::found_in(std::env::split_paths(&dirs), "sh.exe", &[], super::runnable)
 }
 
 /// 터미널을 **내린다** — 편집기에 터미널을 넘기는 자리(moai-08af).
@@ -1172,8 +1206,7 @@ fn write_in_editor(
     let got = written
         .map_err(|e| fill(say(lang, "tui.editor_no_write"), &[("why", &e.to_string())]))
         .and_then(|()| {
-            std::process::Command::new("sh")
-                .args(crate::tui::jotfile::argv(editor, &path))
+            editor_command(editor, &path)
                 .status()
                 .map_err(|e| fill(say(lang, "tui.editor_not_started"), &[("editor", editor), ("why", &e.to_string())]))
         })
@@ -1204,6 +1237,108 @@ fn write_in_editor(
         left.push(said.clone());
     }
     got
+}
+
+/// 편집기를 띄우는 명령 — 유닉스에서는 `sh` 가 편집기 글을 껍데기 규칙으로 쪼갠다([`crate::tui::jotfile::argv`]).
+#[cfg(unix)]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new("sh");
+    cmd.args(crate::tui::jotfile::argv(editor, path));
+    cmd
+}
+
+/// 유닉스가 아닌 판의 [`editor_command`](moai-j9gv.cl6) — **Git Bash 안이면 유닉스와 같은 길이다**(리뷰
+/// moai-j9gv.4s3). 그 껍데기(`MSYSTEM` 이 선다)의 사람은 편집기 글을 `sh` 의 말로 적고(`'C:/Program Files/…/code'
+/// --wait`), git 도 거기서 편집기를 `sh -c` 로 띄운다. 이 에픽 전에는 어디서나 `sh` 로 띄워 그 글이 섰으니, 빈칸으로만
+/// 쪼개면 거기서 되던 것이 안 된다. 그 `sh` 는 [`msys_sh`] 가 `PATH` 에서 찾고, 못 찾으면 아래 길로 간다. 인자의
+/// 모양은 유닉스와 같고, 명령 줄에 싸는 규칙만 MSYS2 의 것이다(moai-6kbo) — 편집기 글에서 온 낱말은 git 이 그 `sh` 를
+/// 띄우는 꼴과 같고, 임시 경로만 싸지 않고 넘긴다([`msys_command`]).
+///
+/// 그 밖(cmd·PowerShell)에는 물을 `sh` 가 없거나, 있어도 그 사람의 글(`C:\tools\nvim.exe`)의 `\` 를 `sh` 가 먹는다.
+/// 거기서는 편집기 글을 쪼개([`crate::tui::jotfile::words`]) 첫 낱말을 프로그램으로 띄우고, 그 낱말은
+/// [`super::program`] 이 고른 자리로 바꾼다 — 러스트의 `Command` 는 이름에 `.exe` 만 붙여 `code.cmd` 같은 편집기를 못
+/// 찾는다.
+///
+/// 두 길 모두 임시 파일은 [`editor_target`] 이 고른 철자로 넘기고, 그것이 이름뿐이면 편집기의 지금 자리를 그 디렉터리로
+/// 둔다(moai-l3pp). **둘을 함께 싣는 것은 여기 하나다**(리뷰 moai-j9gv.8oh) — 이름만 넘기고 자리를 안 옮기면 편집기가
+/// moai 의 지금 자리에 같은 이름의 새 파일을 열고, 적은 생각은 거기 남는다.
+#[cfg(not(unix))]
+fn editor_command(editor: &str, path: &std::path::Path) -> std::process::Command {
+    let (spelt, cwd) = editor_target(path);
+    let mut cmd = match msys_sh() {
+        Some(sh) => msys_command(&sh, editor, &spelt),
+        None => {
+            let (program, rest) = crate::tui::jotfile::words(editor);
+            let mut cmd = std::process::Command::new(super::program(program));
+            cmd.args(rest).arg(&spelt);
+            cmd
+        }
+    };
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
+    cmd
+}
+
+/// Git Bash 의 `sh` 로 편집기를 띄우는 명령 — **낱말은 MSYS2 의 규칙으로 싸 그대로 넘긴다**(moai-6kbo). `args` 가 싸는
+/// MSVC 의 꼴을 그 `sh` 가 다시 쪼개 `'` 든 임시 경로를 잃었다([`crate::tui::jotfile::msys_quoted`]). `sh` 를 받는 것은
+/// 시험이 환경 없이 부르게 하려는 것이다(리뷰 moai-j9gv.g3t).
+///
+/// **끝 낱말(임시 경로)만은 싸지 않아도 지나면 그대로 넘긴다**(moai-l3pp) — [`editor_target`] 이 그런 철자를 골랐고, 싼
+/// 낱말은 옛 `LANG` 문자셋에 없는 글자가 들면 따옴표째 넘어간다(리뷰 moai-j9gv.g3t). 앞의 셋(`-c`·껍데기 글·편집기 글)은
+/// git 의 목록대로 싼다 — 편집기 글은 사람이 적어 맨 앞에 `~` 가 설 수 있고, 거기 [`crate::tui::jotfile::msys_word`] 를
+/// 대면 git 과 답이 갈린다(리뷰 moai-j9gv.8oh).
+#[cfg(not(unix))]
+fn msys_command(sh: &std::path::Path, editor: &str, path: &std::path::Path) -> std::process::Command {
+    use crate::tui::jotfile::{msys_quoted, msys_word};
+    use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+    use std::os::windows::process::CommandExt as _;
+    let quoted = |word: &std::ffi::OsStr| std::ffi::OsString::from_wide(&msys_quoted(word.encode_wide()));
+    let mut cmd = std::process::Command::new(sh);
+    let words = crate::tui::jotfile::argv(editor, path);
+    if let Some((file, head)) = words.split_last() {
+        for word in head {
+            cmd.raw_arg(quoted(word));
+        }
+        cmd.raw_arg(if msys_word(file.encode_wide()) { file.clone() } else { quoted(file) });
+    }
+    cmd
+}
+
+/// 편집기가 받을 임시 파일의 철자와, 바꿀 지금 자리 — **편집기는 싸지 않아도 MSYS2 를 지나는 철자를 받는다**(moai-l3pp,
+/// 2026-10-12 사람 결정). Git 의 `nano.exe` 처럼 MSYS2 의 런타임으로 지은 편집기는 명령 줄을 다시 쪼개, 프로필 이름에
+/// `'` 가 든 임시 경로(`C:\Users\o'brien\…`)를 없는 자리로 읽고 적은 생각이 사라졌다. 어느 편집기인지 가리지 않고
+/// 철자로 푼다. 유닉스에는 이것이 없다 — 거기서는 경로를 그대로 넘기고 자리를 안 옮긴다.
+///
+/// - 먼저 `\` 를 `/` 로 쓴 `C:/…` 다([`editor_spelling`]). 그 철자가 MSYS2 를 그대로 지나면 그것을 넘기고 자리는 안
+///   바꾼다
+/// - 아니면 **파일 이름만** 넘기고 편집기의 지금 자리를 그 디렉터리로 둔다. 이름(`moai-backlog-<pid>-<n>.md`)은 moai 가
+///   지어 걸릴 글자가 없고, 지금 자리는 명령 줄이 아니라 쪼개지지 않는다
+///
+/// 8.3 짧은 이름은 안 쓴다 — `'`·`{`·`}` 는 짧은 이름에도 그대로 남는다(`O'BRIE~1`, wine 에서 `O'BR~DML` 로 쟀다).
+///
+/// **둘째 갈래가 못 닿는 자리가 하나 있다**(리뷰 moai-j9gv.8oh) — 임시 디렉터리가 UNC(`\\server\share\…`)면 `.cmd`·`.bat`
+/// 편집기(`code.cmd`)를 띄우는 `cmd.exe` 가 그 자리를 지금 자리로 못 세워 `%SystemRoot%` 로 옮겨 가([`super::program`]
+/// 의 글), 이름만 받은 편집기가 다른 파일을 연다. 그런 자리에 UNC 를 거는 판이 드물어 사람이 정할 일로 남겼다.
+#[cfg(not(unix))]
+fn editor_target(path: &std::path::Path) -> (std::path::PathBuf, Option<std::path::PathBuf>) {
+    if let Some(spelt) = editor_spelling(path.as_os_str()) {
+        return (spelt.into(), None);
+    }
+    let (Some(name), Some(dir)) = (path.file_name(), path.parent()) else {
+        unreachable!("편집기에 넘길 임시 파일은 디렉터리에 이름을 붙인 자리다(private_file)")
+    };
+    (name.into(), Some(dir.to_path_buf()))
+}
+
+/// [`editor_target`] 의 첫 갈래 — `\\?\` 를 걷고 `\` 를 `/` 로 쓴 철자([`crate::path::slashed_os`])가 싸지 않아도 MSYS2 를
+/// 그대로 지나면([`crate::tui::jotfile::msys_word`]) 그것이고, 아니면 없다. **환경도 파일도 안 봐 리눅스에서도 잰다**(리뷰
+/// moai-j9gv.8oh) — CI 는 Windows 의 시험을 짓기만 한다. 고르는 글자가 모두 ASCII 라 손실 있는 글로 봐도 UTF-16 단위로 본
+/// 답과 같다.
+#[cfg(any(not(unix), test))]
+fn editor_spelling(path: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
+    let spelt = crate::path::slashed_os(path);
+    crate::tui::jotfile::msys_word(spelt.to_string_lossy().encode_utf16()).then_some(spelt)
 }
 
 /// 편집기에 넘길 새 파일. **남이 못 읽게(0600) 새로 만든다** — 공유 임시 디렉터리라 이름을
@@ -1813,11 +1948,20 @@ mod tests {
         assert_eq!(got, "# 안내\n제목\n\n본문\n");
         assert_eq!(said, Vec::<String>::new(), "읽은 글인데 나갈 때 댈 말을 남겼다");
         assert_eq!(d.seen("text"), "# 안내\n", "편집기가 안내 글을 못 봤다");
-        assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
+        // 권한 비트는 유닉스의 것이다 — Windows 는 ACL 로 막고, Git Bash 의 `stat` 은 NTFS 를 늘 644 로 꾸며 댄다.
+        if cfg!(unix) {
+            assert_eq!(d.seen("mode").trim(), "600", "임시 파일을 남도 읽게 만들었다");
+        }
         let args: Vec<String> = d.seen("args").lines().map(str::to_string).collect();
         assert_eq!(args.len(), 2, "인자가 쪼개졌다 — {args:?}");
         assert_eq!(args[0], "--wait");
-        assert!(args[1].starts_with(&d.0.display().to_string()) && args[1].ends_with(".md"), "{args:?}");
+        // 그 디렉터리의 파일이다 — Windows 는 MSYS2 를 지나는 철자(`C:/…`)를 넘기거나, 못 고르면 이름만 넘기고 그
+        // 디렉터리에서 띄운다(`editor_target`). 이름뿐이면 `join` 이 거기 붙이고, 절대 경로면 그대로다.
+        let at = d.0.join(&args[1]);
+        assert!(
+            at.parent().map(crate::path::real) == Some(crate::path::real(&d.0)) && args[1].ends_with(".md"),
+            "{args:?}"
+        );
         assert_eq!(d.leftovers(), Vec::<String>::new(), "임시 파일이 남았다");
     }
 
@@ -1880,6 +2024,113 @@ mod tests {
         assert!(!why.contains("moai-backlog-"), "없는 파일의 경로를 댔다 — {why}");
         assert_eq!(d.leftovers(), Vec::<String>::new());
         assert_eq!(said, Vec::<String>::new(), "없는 파일을 나갈 때 댄다");
+    }
+
+    /// **편집기가 받을 철자는 리눅스에서도 잰다**(moai-l3pp, 리뷰 moai-j9gv.8oh) — `\\?\` 를 걷고 `/` 로 쓴 `C:/…` 가 MSYS2 를
+    /// 그대로 지나면 그것이고, 아니면 없다(이름만 넘기고 자리를 옮긴다). Windows 의 갈래는 CI 가 짓기만 하므로 그 몸통을
+    /// 여기서 잰다 — 접두어를 안 걷거나, `\` 철자로 재거나, 갈래를 뒤집으면 붉어진다.
+    #[test]
+    fn the_editor_spelling_is_slashed_unless_msys2_would_change_it() {
+        let s = |p: &str| editor_spelling(std::ffi::OsStr::new(p));
+        let whole = |p: &'static str| Some(std::ffi::OsStr::new(p));
+        assert_eq!(
+            s(r"\\?\C:\Users\me\AppData\Local\Temp\moai-backlog-1-0.md").as_deref(),
+            whole("C:/Users/me/AppData/Local/Temp/moai-backlog-1-0.md"),
+            "접두어나 `\\` 가 남았다"
+        );
+        assert_eq!(
+            s(r"C:\Users\JOHNSM~1\AppData\Local\Temp\moai-backlog-1-0.md").as_deref(),
+            whole("C:/Users/JOHNSM~1/AppData/Local/Temp/moai-backlog-1-0.md"),
+            "8.3 짧은 이름의 `~` 를 막았다"
+        );
+        assert_eq!(
+            s(r"\\?\UNC\srv\share\T\moai-backlog-1-0.md").as_deref(),
+            whole("//srv/share/T/moai-backlog-1-0.md")
+        );
+        for split in [
+            r"C:\Users\o'brien\AppData\Local\Temp\moai-backlog-1-0.md",
+            r"C:\Users\John Smith\AppData\Local\Temp\moai-backlog-1-0.md",
+            r"C:\Temp\{x}\moai-backlog-1-0.md",
+            r"C:\Temp\[x]\moai-backlog-1-0.md",
+        ] {
+            assert_eq!(s(split), None, "{split}: MSYS2 가 바꾸는 철자를 넘긴다");
+        }
+    }
+
+    /// **Git Bash 의 `sh` 는 네 낱말을 MSYS2 의 규칙으로 싼 날것으로 받는다**(moai-6kbo, 리뷰 moai-j9gv.g3t). `args` 로
+    /// 되돌리면 낱말이 안 싸이고, `arg` 로 바꾸면 싼 글을 러스트가 MSVC 의 규칙으로 한 번 더 싸 — 어느 쪽이든 그 `sh` 가
+    /// `'`·`\` 든 낱말을 잃는다. 둘째는 낱말이 같아 `get_args` 로는 안 갈리고, 러스트의 `Debug` 가 날것은 그대로,
+    /// 보통 낱말은 `{:?}` 로 찍어 가른다. 리눅스는 이 갈래를 짓지 않아 Windows 에서만 돈다.
+    #[cfg(not(unix))]
+    #[test]
+    fn the_git_bash_sh_gets_raw_msys2_words() {
+        let path = std::path::Path::new(r"C:\Users\o'brien\AppData\Local\Temp\moai-backlog-1-0.md");
+        let cmd = msys_command(std::path::Path::new("sh.exe"), r"C:\\tools\\ed.exe --wait", path);
+        let want = [
+            "-c",
+            r#""C:\\\\tools\\\\ed.exe --wait \"$@\"""#,
+            r#""C:\\\\tools\\\\ed.exe --wait""#,
+            r#""C:\\Users\\o'brien\\AppData\\Local\\Temp\\moai-backlog-1-0.md""#,
+        ];
+        let got: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(got, want, "낱말을 MSYS2 의 규칙으로 안 쌌다");
+        let shown = format!("{cmd:?}");
+        assert!(shown.ends_with(&format!(" {}", want.join(" "))), "날것으로 안 넘겼다 — {shown}");
+    }
+
+    /// **편집기는 싸지 않아도 지나는 철자를 받는다**(moai-l3pp, 2026-10-12 사람 결정) — 보통 자리는 `C:/…` 로, `'`·빈칸이
+    /// 든 자리는 파일 이름만 받고 지금 자리를 그 디렉터리로 둔다. 어느 쪽이든 같은 파일을 연다. 철자는 글자로 견준다 —
+    /// Windows 의 `Path` 는 `/` 와 `\` 를 같은 구분자로 쳐 `C:\…` 도 같다고 한다(리뷰 moai-j9gv.8oh).
+    #[cfg(not(unix))]
+    #[test]
+    fn the_editor_gets_a_spelling_msys2_does_not_split() {
+        use std::os::windows::ffi::OsStrExt as _;
+        let word = |p: &std::path::Path| crate::tui::jotfile::msys_word(p.as_os_str().encode_wide());
+        let (spelt, cwd) =
+            editor_target(std::path::Path::new(r"\\?\C:\Users\me\AppData\Local\Temp\moai-backlog-1-0.md"));
+        assert_eq!(spelt.as_os_str(), "C:/Users/me/AppData/Local/Temp/moai-backlog-1-0.md", "접두어나 `\\` 가 남았다");
+        assert_eq!(cwd, None, "보통 자리에서 지금 자리를 바꿨다");
+        // `sh` 에도 그 철자는 싸지 않고 넘긴다 — git 의 목록이 싸는 `~` 가 들어도 그대로다. 편집기 글은 git 처럼 싼다(리뷰
+        // moai-j9gv.8oh) — 8.3 짧은 이름의 `~` 가 든 편집기 글도 싼다.
+        let (spelt, _) =
+            editor_target(std::path::Path::new(r"C:\Users\JOHNSM~1\AppData\Local\Temp\moai-backlog-1-0.md"));
+        let cmd = msys_command(std::path::Path::new("sh.exe"), "C:/PROGRA~1/Vim/vim.exe", &spelt);
+        let got: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let want = [
+            "-c",
+            r#""C:/PROGRA~1/Vim/vim.exe \"$@\"""#,
+            r#""C:/PROGRA~1/Vim/vim.exe""#,
+            "C:/Users/JOHNSM~1/AppData/Local/Temp/moai-backlog-1-0.md",
+        ];
+        assert_eq!(got, want);
+        let d = Dir::new("quoted");
+        let dir = d.0.join("o'brien {x}");
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join("moai-backlog-1-0.md");
+        std::fs::write(&file, "x").unwrap();
+        let (spelt, cwd) = editor_target(&file);
+        assert!(word(&spelt), "MSYS2 가 쪼개는 철자를 넘긴다 — {spelt:?}");
+        let cwd = cwd.expect("파일 이름만 넘기면서 지금 자리를 안 줬다");
+        assert_eq!(std::fs::read_to_string(cwd.join(&spelt)).unwrap(), "x", "다른 파일을 댔다");
+    }
+
+    /// **편집기 명령은 이름만 넘길 때 지금 자리를 함께 싣는다**(moai-l3pp, 리뷰 moai-j9gv.8oh) — [`editor_target`] 의 두 답을
+    /// 함께 싣는 것은 [`editor_command`] 하나다. 자리를 빼면 편집기가 moai 의 자리에서 같은 이름의 새 파일을 열고, 적은
+    /// 생각은 거기 남는다. `sh` 로 띄우든(Git Bash) 아니든 끝 낱말이 그 철자다.
+    #[cfg(not(unix))]
+    #[test]
+    fn the_editor_command_starts_where_the_bare_name_is() {
+        let d = Dir::new("cwd");
+        let dir = d.0.join("o'brien");
+        std::fs::create_dir(&dir).unwrap();
+        let cmd = editor_command("vim", &dir.join("moai-backlog-1-0.md"));
+        assert_eq!(cmd.get_args().last(), Some(std::ffi::OsStr::new("moai-backlog-1-0.md")), "{cmd:?}");
+        assert_eq!(cmd.get_current_dir(), Some(dir.as_path()), "이름만 넘기면서 지금 자리를 안 옮겼다");
+        let plain = std::path::Path::new(r"C:\Users\me\AppData\Local\Temp\moai-backlog-1-0.md");
+        let cmd = editor_command("vim", plain);
+        let whole = std::ffi::OsStr::new("C:/Users/me/AppData/Local/Temp/moai-backlog-1-0.md");
+        assert_eq!(cmd.get_args().last(), Some(whole), "{cmd:?}");
+        assert_eq!(cmd.get_current_dir(), None, "보통 자리에서 지금 자리를 옮겼다");
     }
 
     /// **루프가 오류로 끝나며 버릴 뻔한 글은 파일로 남는다**(moai-y3r7). 편집기 글과 같은 모양이라

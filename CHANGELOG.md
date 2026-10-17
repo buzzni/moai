@@ -12,6 +12,57 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-17
+
+### Added
+
+- **Windows releases.** A tag now also builds `x86_64-pc-windows-msvc` on a
+  Windows runner, with the C runtime linked in (`.cargo/config.toml`) so
+  `moai.exe` starts on a clean machine without the Visual C++ redistributable.
+  It ships as `moai-v<version>-x86_64-pc-windows-msvc.zip`, listed in the same
+  `SHA256SUMS` as the two `.tar.gz` archives. (moai-l3mn, moai-j9gv.ukd)
+
+- **`install.ps1`, the Windows installer.** Download it and run it with
+  `powershell -File install.ps1`; it keeps `install.sh`'s rules — nothing is
+  installed that `SHA256SUMS` does not vouch for, this moai is upgraded without
+  `-Force`, the same version is not fetched again, and someone else's
+  `moai.exe` is left alone without `-Force`. It installs to
+  `%LOCALAPPDATA%\Programs\moai` unless `-Dir` says otherwise, takes `-Version`
+  and the same `MOAI_*` variables, and says in one line when that directory is
+  not on `PATH` without editing it. A running `moai.exe` is renamed to
+  `moai.exe.old` rather than overwritten. The release carries it next to
+  `install.sh`. (moai-l3mn, moai-j9gv.ukd)
+
+- **`moai update` upgrades on Windows.** It fetches `install.ps1` from the
+  repository's `main` branch, writes it to a temporary file and runs it with
+  Windows PowerShell over the directory of the running `moai.exe`;
+  `--dry-run` prints that command and `--json` names `powershell` as the
+  program. The explorer's new-release banner names `moai update` there too.
+  (moai-l3mn, moai-j9gv.3fl)
+
+- **moai runs on Windows without `sh` or `HOME`.** (moai-j9gv)
+  - Unless `MOAI_CONFIG` or an absolute `XDG_CONFIG_HOME` says otherwise (as
+    on Unix), the user config is `.config\moai\config.toml` under `HOME`, or
+    under `%USERPROFILE%` when `HOME` is not set. A shell that sets its own
+    `HOME` (MSYS2, Cygwin, Git Bash on a domain account) reads a different
+    file than PowerShell; set `MOAI_CONFIG` to pin one.
+  - The explorer's editor (`SPC n`) starts through `sh -c` inside Git Bash.
+    Elsewhere the value is split on blanks, a double-quoted first word
+    is the program (`"C:\Program Files\…\notepad++.exe" -multiInst`), and
+    editors installed as `.cmd` are found through `PATHEXT`. The editor gets
+    the temporary file as `C:/…`; when that path holds a space, `'`, `{` or
+    `[`, it gets only the file name and starts in the temporary directory.
+  - The hooks and the merge driver write the binary's path as `C:/…/moai.exe`,
+    with `/`, so Git's `sh` and Claude Code's Git Bash can run it; the hooks
+    write just `moai` when the `moai` on `PATH` is the same file. The hooks
+    need Git for Windows — without Git Bash, Claude Code runs them in
+    PowerShell, which cannot.
+  - Claude Code's plugin records are read from `%USERPROFILE%\.claude`, where
+    `claude` itself keeps them, even when `HOME` points elsewhere (unless
+    `CLAUDE_CODE_PLUGIN_CACHE_DIR` or `CLAUDE_CONFIG_DIR` names another place).
+  - CI builds and lints the Windows target on every pull request that touches
+    code. The tests are built there, not yet run.
+
 ## [0.18.1] - 2026-10-16
 
 ### Fixed

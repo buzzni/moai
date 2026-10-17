@@ -146,7 +146,7 @@ pub enum SheetRefusal {
 /// 없다`) 여기서 한 번 더 댈 것이 없다 — 떨어지는 것과 까닭을 대는 것은 **다른 물음**이라 [`Settled`]
 /// 가 둘을 가른다.
 fn settle(path: &Path) -> Settled {
-    match std::fs::canonicalize(path) {
+    match crate::path::canonical(path) {
         Ok(real) => Settled::Here(real),
         Err(e) if crate::store::gone(&e) => Settled::Fallen(None),
         Err(e) => Settled::Fallen(Some(SheetTrouble::Unsettled { at: path.to_path_buf(), said: e.to_string() })),
@@ -1380,7 +1380,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
-        let real = std::fs::canonicalize(&root).unwrap();
+        let real = crate::path::canonical(&root).unwrap();
 
         let spellings = [root.clone(), s.join("proj/"), s.join("proj/../proj"), real.clone()];
         for (n, spelling) in spellings.iter().enumerate() {
@@ -1809,7 +1809,7 @@ mod tests {
         upd(&cfg, &spelling, |sh| sh.mark(&marks(&[("d", "또 떨어진 판")]))).unwrap();
         std::fs::remove_file(&gate).unwrap();
         std::os::unix::fs::symlink("real", &gate).unwrap();
-        let real = std::fs::canonicalize(&spelling).unwrap();
+        let real = crate::path::canonical(&spelling).unwrap();
         assert_ne!(real.as_os_str(), spelling.as_os_str(), "시험의 전제 — 푼 철자가 받은 철자와 다르다");
         upd(&cfg, &real, |sh| sh.mark(&marks(&[("e", "푼 철자로")]))).unwrap();
         assert!(fell.exists(), "푼 철자로 부른 쓰기가 대기 자리를 닫았다");
@@ -2257,7 +2257,7 @@ mod tests {
         std::fs::create_dir_all(&real).unwrap();
         let link = s.join("바로 가기");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        let settled = std::fs::canonicalize(&link).unwrap();
+        let settled = crate::path::canonical(&link).unwrap();
 
         // 링크 철자로 적어도 파일은 푼 자리의 것 하나다.
         upd(&cfg, &link, |sh| sh.mark(&marks(&[("argos-0001", "A")]))).unwrap();
@@ -2823,7 +2823,7 @@ mod tests {
         let cfg = s.join("config.toml");
         let root = s.join("proj");
         std::fs::create_dir_all(&root).unwrap();
-        let real = std::fs::canonicalize(&root).unwrap();
+        let real = crate::path::canonical(&root).unwrap();
         let place = place_of(&cfg, &root);
         assert!(!place.fallen, "서 있는 뿌리가 떨어졌다");
         assert_eq!(place.at, sheet_at(dir_of(&cfg), &real), "성한 판이 읽음 파일의 이름을 안 골랐다");

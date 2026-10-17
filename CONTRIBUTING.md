@@ -44,12 +44,15 @@ cargo fmt --all --check    # or `cargo fmt --all` to fix
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
-minutes. CI has four jobs: one runs clippy and the tests on the dev profile,
+minutes. CI has five jobs: one runs clippy and the tests on the dev profile,
 one works out whether anything outside the docs changed, one builds the crate
-with the `rust-version` written in `Cargo.toml`, and the last builds the release
-binary and checks it against the 15 MB budget. Only the first is a required
-check, and the last two show as skipped - not failed - on a pull request that
-touched documentation alone.
+with the `rust-version` written in `Cargo.toml`, one runs clippy and builds the
+tests on Windows without running them, and the last builds the release binary
+and checks it against the 15 MB budget. The first and the last are the checks
+that branch protection on `main` requires; the other three are not. The last
+three skip on a pull request that touched documentation alone and show as
+skipped - not failed - and a skipped required check still counts as passing,
+so a docs-only pull request is not held up.
 
 There are no dev-dependencies, and that is deliberate: `tests/cli.rs` runs the
 real binary through `CARGO_BIN_EXE_moai`. A test harness that drags in
@@ -85,6 +88,58 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 A clone that skips this is no worse off than before; `blame` just stops at the
 formatting commit.
+
+## Developing on Windows
+
+Windows is a release target (`x86_64-pc-windows-msvc`), and you can build, test
+and keep developing on it.
+
+`scripts/windows-dev.ps1` gets a clean machine ready and is safe to run again:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows-dev.ps1
+```
+
+- It looks for Git for Windows, the Visual Studio C++ build tools (the `ring`
+  crate builds C with `cl.exe`) and rustup. **It installs nothing**: what is
+  missing is printed as a `winget` command for you to run, and it stops there
+- rustup reads `rust-toolchain.toml` and fetches the pinned toolchain for the
+  host target by itself; the script only checks `cargo --version`
+- It runs `cargo build --release`, `cargo clippy --all-targets -- -D warnings`
+  and `cargo test --no-fail-fast`, prints one line each (plus the
+  `test result: FAILED` line of every test binary that failed), and keeps the
+  full output in `target\windows-dev\*.log`. `-SkipTest` stops after clippy, `-SkipBuild`
+  only checks the tools
+- It installs the merge driver with the `moai.exe` it just built
+  (`merge-driver --install --as <that path>`), so keep that build where it is or
+  install again with a path that stays. `-SkipDriver` leaves it out
+- It never edits `PATH`, the registry or anyone's config
+
+`.ps1` files in this repository are ASCII only — Windows PowerShell 5.1 reads a
+script without a BOM in the system code page, and `install_ps1_is_ascii` holds
+the line.
+
+### What to check on a real machine
+
+The container that builds this repository cannot run these. Check them on
+Windows and leave what you saw on the issue with `moai note <id> '…'` — the
+command, what it printed, and the Windows and PowerShell versions
+(`$PSVersionTable.PSVersion`):
+
+- `moai-j9gv.4c1` — which shell Claude Code starts hooks with; whether Git's
+  `sh` can exec `'C:/…/moai.exe'` as the merge driver records it; whether the
+  hooks' `${TMPDIR:-/tmp}` is writable
+- `moai-j9gv.3fl` — `moai update --dry-run`, one real upgrade, and that
+  `moai.exe.old` is gone after the next install
+- `moai-j9gv.ukd` — installing with `install.ps1`, and that a tampered zip or a
+  missing `SHA256SUMS` is refused
+- `moai-j9gv.ae7` — the test failures counted under wine (about 150); count them
+  again with `cargo test --no-fail-fast` (the script runs that) and note the
+  summary lines
+- `moai-l3pp` — `SPC n` with `code --wait`, and with Git's `nano.exe` from
+  PowerShell and from Git Bash, on a profile whose temporary directory holds a
+  space or `'`: the jot comes back. A temporary directory on a share
+  (`\\server\…`) with `code --wait` is a known gap (review `moai-j9gv.8oh`)
 
 ## If you change a command's help
 
@@ -132,7 +187,7 @@ commit, and a review point you decided not to act on gets a sentence saying why.
 - New commands are caught by the tests that sweep every command for `--json`
   support, so add the command and let the test tell you what it wants.
 - **Open it against `develop`.** `main` takes no direct push and no pull request
-  from anywhere but `develop` — a ruleset holds the first, and a step in
+  from anywhere but `develop` — branch protection holds the first, and a step in
   `ci-gate` holds the second, because GitHub has no rule that pins the source
   branch of a pull request. `main` carries one commit per release that way, and
   its history reads as the distance between two releases.
@@ -227,9 +282,15 @@ For the very first release the bump script has nothing to move — `Cargo.toml` 
 already at `0.1.0` — so rename the `[Unreleased]` heading in `CHANGELOG.md` to
 `## [0.1.0] - <date>` by hand, add a fresh empty `[Unreleased]` above it, and tag.
 
-A `v*` tag builds `x86_64-unknown-linux-musl` and `aarch64-apple-darwin`,
-publishes both archives with `SHA256SUMS` and `install.sh`, and takes the release
-notes from that version's section of `CHANGELOG.md`.
+A `v*` tag builds `x86_64-unknown-linux-musl`, `aarch64-apple-darwin` and
+`x86_64-pc-windows-msvc`, publishes the two `.tar.gz` archives and the Windows
+`.zip` with `SHA256SUMS`, `install.sh` and `install.ps1`, and takes the release
+notes from that version's section of `CHANGELOG.md`. The Windows build links the
+C runtime statically (`.cargo/config.toml`). A new target is a row in the
+release matrix plus a line in one installer's platform table —
+`the_install_table_and_the_release_matrix_name_the_same_targets` fails until
+both agree. `install.ps1` stays ASCII-only, because Windows PowerShell 5.1 reads
+a script without a BOM in the system code page.
 
 ## When something breaks
 

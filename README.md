@@ -60,6 +60,30 @@ curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
   | sh -s -- --dir ~/bin --version v0.1.0
 ```
 
+### Windows
+
+On Windows, `install.ps1` does the same job in PowerShell. Download it, then run
+it as a file:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -OutFile install.ps1 https://raw.githubusercontent.com/buzzni/moai/main/install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1
+```
+
+Piping it into `iex` (`irm … | iex`) is not supported: the script's own `exit`
+would close your PowerShell window, and its refusals hand back a command that
+runs it as a file.
+
+It follows the same rules as `install.sh` — it checks the zip against
+`SHA256SUMS`, upgrades this moai without `-Force`, and leaves a `moai.exe` it
+does not recognise alone unless you pass `-Force`. It installs to
+`%LOCALAPPDATA%\Programs\moai`; pick another directory with `-Dir`, or a
+specific release with `-Version v0.17.0`. It does not edit your `PATH`: when that
+directory is not on it, it says so in one line.
+
+The Windows build is `x86_64-pc-windows-msvc` with the C runtime linked in, so
+it runs on a clean machine without the Visual C++ redistributable.
+
 ### Upgrade
 
 ```sh
@@ -74,6 +98,12 @@ binary you are running wherever you put it. It stops before fetching anything,
 with one line saying what to do instead, for a build from source (cargo built it
 — rebuild), for a binary not named `moai`, for a directory you cannot write, and
 on a machine the releases do not cover.
+
+On Windows it fetches `install.ps1` instead and runs it with Windows PowerShell
+(`-Dir <that directory> -Force`), and the binary has to be named `moai.exe`.
+Windows will not overwrite a running program, so the installer renames the
+running `moai.exe` to `moai.exe.old` and puts the new one in its place; the next
+install removes that `.old`.
 
 Releases come from `buzzni/moai`. A fork, or the project after a move, is picked
 in your user config, and `MOAI_REPO` wins over it for one run:
@@ -114,8 +144,9 @@ read), quitting prints the install line instead, with `--dir` when it is not
 `~/.local/bin`. A build from source, a directory you cannot write and a machine
 the releases do not cover get no line.
 
-Prebuilt binaries are published for `x86_64-unknown-linux-musl` and
-`aarch64-apple-darwin`. On anything else, build from source:
+Prebuilt binaries are published for `x86_64-unknown-linux-musl`,
+`aarch64-apple-darwin` and `x86_64-pc-windows-msvc`. On anything else, build
+from source:
 
 ```sh
 cargo build --release      # target/release/moai
