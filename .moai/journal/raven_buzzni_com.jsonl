@@ -7084,3 +7084,38 @@
 {"ts":"2026-10-17T02:41:53Z","id":"moai-zeta","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"backlog triage 2026-10-17: no decision yet, out of the plan for now"}
 {"ts":"2026-10-17T02:42:00Z","id":"moai-4i1i","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"편집기 글의 UTF-8 BOM 이 제목에 보이지 않게 남는다"}
 {"ts":"2026-10-17T02:42:00Z","id":"moai-0em3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.20.0"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-vjdq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Windows 잔손질 — 실기 뒤 남은 경로·시간대·BOM·update"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-vjdq.wms","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"편집기 글 첫머리의 BOM 을 걷는다"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-vjdq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-n7ca 에서 펼쳤다 — 편집기가 BOM 을 붙여 저장하면 제목에 U+FEFF 가 든다"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-n7ca","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-uwzg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CI — 캐시 예산·코드 서명·aarch64 Windows"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-uwzg.7ow","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Actions 캐시에 담는 것을 다시 고른다"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-uwzg","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-41dc 에서 펼쳤다 — Actions 캐시가 10GiB 의 98% — 담는 것을 다시 고른다"}
+{"ts":"2026-10-18T16:23:51Z","id":"moai-41dc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-uwzg 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.ad1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"update --dry-run 의 PowerShell 줄이 활자 따옴표 경로에서 깨진다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.ad1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-k3ye 에서 펼쳤다 — update --dry-run 의 PowerShell 줄이 활자 따옴표 든 경로에서 깨진다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-k3ye","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 의 멤버 moai-vjdq.ad1 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.chk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"update 를 Ctrl-C 로 끊으면 임시 install.ps1 이 남는다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.chk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-lo8w 에서 펼쳤다 — moai update 를 Ctrl-C 로 끊으면 Windows 임시 install.ps1 이 남는다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-lo8w","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 의 멤버 moai-vjdq.chk 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.ch3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"MSYS2 빌드가 -C 뿌리를 MSVC 꼴로 싸 넘겨 따옴표 뿌리에서 진다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.ch3","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-yekm 에서 펼쳤다 — MSYS2 빌드의 저장소 도구에 -C 뿌리를 MSVC 꼴로 싸 넘겨 따옴표 든 뿌리에서 진다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-yekm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 의 멤버 moai-vjdq.ch3 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.lk8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"canonical 이 \\\\?\\\\ 를 걷어 다른 파일이 되는 경로"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.lk8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-ons4 에서 펼쳤다 — canonical 이 \\?\\ 를 걷으면 다른 파일이 되는 Windows 경로"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-ons4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 의 멤버 moai-vjdq.lk8 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.3ls","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Windows 시간대 오프셋을 읽는다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-vjdq.3ls","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-gl9k 에서 펼쳤다 — Windows 시간대 오프셋 — 지금은 UTC 와 한 줄로 내려앉는다"}
+{"ts":"2026-10-18T16:24:02Z","id":"moai-gl9k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 의 멤버 moai-vjdq.3ls 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-vjdq.to6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Zone::system 의 cfg!(test) 갈래를 시간대 출처 주입으로"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-vjdq.to6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-c6wz 에서 펼쳤다 — Zone::system 의 cfg!(test) 갈래를 시간대 출처 주입으로 바꾼다"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-c6wz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 의 멤버 moai-vjdq.to6 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-vjdq.4sl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"탐색기와 due apply 가 같은 시간대로 날을 잰다"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-vjdq.4sl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-pzzl 에서 펼쳤다 — 탐색기와 due apply 가 다른 시간대로 날을 잰다"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-pzzl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-vjdq 의 멤버 moai-vjdq.4sl 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-uwzg.kpx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Windows 코드 서명과 PE 메타데이터"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-uwzg.kpx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-5ino 에서 펼쳤다 — Windows 코드 서명과 PE 메타데이터"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-5ino","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-uwzg 의 멤버 moai-uwzg.kpx 로 펼쳤다"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-uwzg.q1j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"aarch64 Windows 릴리스 칸"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-uwzg.q1j","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-hg88 에서 펼쳤다 — aarch64 Windows 릴리스 칸"}
+{"ts":"2026-10-18T16:24:03Z","id":"moai-hg88","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-uwzg 의 멤버 moai-uwzg.q1j 로 펼쳤다"}
