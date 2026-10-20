@@ -12,6 +12,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **An ARM64 Windows build, `aarch64-pc-windows-msvc`**, with the C runtime
+  linked in like the x64 one. `install.ps1` picks it on ARM64 Windows when run
+  from a native ARM64 PowerShell; an x64 PowerShell running emulated still gets
+  the x64 build. (moai-uwzg.q1j)
+- **`moai.exe` carries version information** — product name, version,
+  description and license show in Explorer's Details tab and in
+  `(Get-Item moai.exe).VersionInfo`. The binary is not code-signed yet.
+  (moai-uwzg.kpx)
+
 ### Fixed
 
 - **Windows reads its own time zone.** Times were always drawn in UTC with a
