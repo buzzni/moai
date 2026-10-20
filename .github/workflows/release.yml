@@ -143,6 +143,24 @@ jobs:
           *) printf 'name=moai\n' >>"$GITHUB_OUTPUT" ;;
           esac
 
+      # **PE 버전 정보가 실제로 들었는가**(moai-uwzg.kpx). `build.rs` 가 손으로 쓴 `.res` 를 링커에
+      # 넘기는데, 리눅스의 시험은 바이트 배치까지만 잰다 — 링커가 받았는지, Windows 가 그것을 읽는지는
+      # 여기서만 보인다. 엇지은 aarch64 판도 리소스는 읽힌다(실행하지 않는다).
+      - name: PE 버전 정보를 읽는다
+        if: contains(matrix.target, '-windows-')
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          # pwsh 안의 `bash` 는 WSL 의 것을 집을 수 있어 `check-version.sh` 를 안 부른다 — 첫 `version =` 줄이 판이다.
+          $want = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $info = (Get-Item "target/$env:TARGET/release/moai.exe").VersionInfo
+          $info | Format-List ProductName, ProductVersion, FileVersion, FileDescription, LegalCopyright
+          if ($info.ProductVersion -ne $want -or $info.ProductName -ne 'moai') {
+            Write-Output "::error::moai.exe 의 버전 정보가 '$($info.ProductName) $($info.ProductVersion)' 다 — 'moai $want' 여야 한다"
+            exit 1
+          }
+
       # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 채로 올리면
       # 받는 사람 쪽에서야 드러난다. 자는 ci.yml 과 나눠 쓰는 것 하나다.
       - name: 15MB 예산을 잰다
