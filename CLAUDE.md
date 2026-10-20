@@ -179,8 +179,7 @@
 **moai 에서 집은 일은 모두 워크트리에서 한다.** 본 가지(`develop`)에서 직접
 하면 여러 세션이 같은 가지에 쌓아, 병합할 때 서로 끝나기를 기다려야 한다.
 
-    moai mv <id> in_progress --from todo          develop 에서 집는다
-    git commit -m "chore(tracker): <id> 를 워크트리에서 집는다"
+    moai mv <id> in_progress --from todo          develop 에서 집는다. 커밋하지 않는다(아래)
     git worktree add -b worktree-moai-<id> .worktrees/moai-<id> develop
     mkdir -p /tmp/cargo-target/moai-<id>          빌드 출력은 로컬 디스크로(아래)
     ln -s /tmp/cargo-target/moai-<id> .worktrees/moai-<id>/target
@@ -190,8 +189,11 @@
     rm -rf /tmp/cargo-target/moai-<id>            링크만 지워지고 출력은 남으므로 따로 지운다
     moai mv <id> done                             "chore(tracker): <id> 를 develop 머지와 함께 닫는다"
 
-- **집기는 develop 에서 커밋한다.** 옆 세션의 `moai ready --worktree` 와 보드가
-  누가 무엇을 쥐었는지 보려면 그 줄이 develop 에 있어야 한다
+- **트래커 커밋은 에픽마다 닫을 때 한 번이다**(2026-10-20 사용자 결정, `moai-p8e9`). 집기·보내기·
+  보고 확인·`Next:` 노트는 따로 커밋하지 않는다. 옆 세션은 git 이 아니라 루트의 파일을 읽으니 쓰는 순간
+  보이고, 커밋은 이력에 남기는 일이지 알리는 일이 아니다. 그 전에는 에픽 하나에 트래커 커밋이 셋~넷
+  붙어, 2026-10-13~20 의 250커밋 중 83개가 트래커였다. 닫는 커밋은 그동안 쓰인 남의 줄까지 싣는다 —
+  이미 나눈 것이라 괜찮다. 감독은 라운드를 멈출 때 한 번 커밋한다
 - **집을 때 본 칸을 함께 준다** (`--from todo`). 여기는 세션 예닐곱이 같은
   `.moai` 를 쓰는 저장소라 `ready` 와 `mv` 사이가 실제로 경합한다 — 본 칸이
   달라졌으면 옮기지 않고 0 아닌 코드로 말하니, 남이 집은 일을 뒤늦게 덮지

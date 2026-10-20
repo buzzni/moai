@@ -226,7 +226,9 @@ line — and look at where it stood:
 - **Work.** The issue or epic id it held, and what it was doing or waiting for — a report,
   a review, a person's decision, a build
 - **Died at** — the `timestamp` of its last line
-- `git -C <cwd> status --short` — what it left uncommitted
+- `git -C <cwd> status --short` — what it left uncommitted. In the root, leave `.moai/` out:
+  the supervisor's steps commit the tracker once an epic closes or a round stops, so rows wait
+  there by design, and they are every session's, not this one's
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
