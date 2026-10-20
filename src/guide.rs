@@ -358,8 +358,9 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
 gets the same check before the merge ("The milestone branch").
 
-**Ask it where you already are.** Before the first tracker commit you are still in the root, so
-it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+**Ask it where you already are.** The merge and the tracker commits (8, 11) come after
+`ExitWorktree(keep)`, so you are back in the root and it is one command. From inside the
+worktree, do not ask with `git -C <root> …` — that shape is
 refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
 worktree go back in with `EnterWorktree(path)`"#;
 
@@ -375,9 +376,9 @@ worktree go back in with `EnterWorktree(path)`"#;
 /// 커밋이나 일꾼의 닫기 커밋 하나가 진다.
 const TRACKER_IN_GIT: &str = "git -C <root> ls-files --error-unmatch -- .moai/issues.jsonl";
 
-/// 그 답을 일꾼이 어떻게 읽는가 — "Before the steps" 에 한 번 선다. **2 의 커밋에 매지 않는다**(리뷰 moai-nzmp.nfj) —
-/// `from "Carrying on stalled work"` 로 든 일꾼은 2 를 안 지나, "2 의 첫 트래커 커밋 앞" 이면 묻지 않은 채 8·10 의 커밋에서
-/// "pathspec did not match" 로 진다.
+/// 그 답을 일꾼이 어떻게 읽는가 — "Before the steps" 에 한 번 선다. **한 걸음의 커밋에 매지 않는다**(리뷰 moai-nzmp.nfj) —
+/// 그때는 2 가 집기를 커밋해 `from "Carrying on stalled work"` 로 든 일꾼은 2 를 안 지나 묻지 않은 채 8·10 의 커밋에서
+/// "pathspec did not match" 로 졌다. 집기 커밋을 걷은 뒤(moai-p8e9) 트래커 커밋은 11 의 하나와 8 이 부를 수 있는 하나다.
 fn tracker_out_of_git() -> String {
     format!(
         r#"**Some repositories keep the tracker out of git** — `.moai` in `.gitignore` or
@@ -385,7 +386,7 @@ fn tracker_out_of_git() -> String {
 or one an earlier step makes (8 can call for it)
 
     {TRACKER_IN_GIT}      a non-zero code: the tracker is not in git
-On a non-zero code every tracker commit in these steps — each "commit with a path, as in 2" —
+On a non-zero code every tracker commit in these steps — each "commit with a path, as in 11" —
 does not exist: the `moai` writes still land in the root's file, and there is nothing to commit.
 Skip them and nothing else; the merge and the branches still go through git. A zero code is the
 usual case, and every step stands as written"#
@@ -419,8 +420,9 @@ intent.
   `symbolic-ref` are refused even as single plain commands. Root work happens after
   ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
 - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
-  commit from sealing someone's open merge, but it cannot keep it from carrying rows another
-  session has not committed yet"#;
+  commit from sealing someone's open merge; the rows other sessions have not committed yet ride
+  along, and that is expected — they stand in the shared file already, and the next tracker
+  commit is where they go into history"#;
 
 /// 밖의 backlog 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
 /// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
@@ -2556,7 +2558,8 @@ open, so the epic is not done either.
 
 **A `member refused:` line** is a member the hook kept the worker from creating (the worker's
 4-3): it stands as a backlog item under the epic. Unfold it into that epic before you send the
-next — write only `- issue` lines in the plan; it then stands in the first column like a member from 4-3 and keeps the epic open.
+next — write only `- issue` lines in the plan; it then stands in the first column like a
+member from 4-3 and keeps the epic open.
 **If the line says the worker reclaimed it itself, or that backlog is already done, do not
 unfold it** — promote unfolds a closed backlog too, and the same member stands twice. If the
 hook refuses you as well, pass the line and the refusal to the person; do not create it under
@@ -2650,8 +2653,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ## When to stop
 
 - Before you stop, take what you wrote into the root with **one** tracker commit, as "The
-  shared root" says — `git status -- .moai/` first, and nothing to commit is fine
-
+  shared root" says — `git status -- .moai/` first, and nothing to commit is fine. A round that
+  never reached this line (its window died or was cleared) left its notes out of git, so when
+  you start or resume (4), make the same one commit if `git status -- .moai/` is not clean
 - If there is no backlog that does not collide, or no idle worker, say so to the person and
   stop — do not force a colliding backlog out
 - If a worker is waiting on a person's decision, the supervisor does not answer in their
@@ -4144,7 +4148,9 @@ line — and look at where it stood:
 - **Work.** The issue or epic id it held, and what it was doing or waiting for — a report,
   a review, a person's decision, a build
 - **Died at** — the `timestamp` of its last line
-- `git -C <cwd> status --short` — what it left uncommitted
+- `git -C <cwd> status --short` — what it left uncommitted. In the root, leave `.moai/` out:
+  the supervisor's steps commit the tracker once an epic closes or a round stops, so rows wait
+  there by design, and they are every session's, not this one's
 - `moai show <id>` — a `Next:` note on that id says where the session meant to go on
 
 Show the person **one table**, a row per session: role, name, `cwd`, work id, what it was
@@ -4656,13 +4662,7 @@ never in the root
    and overwriting a row picked up beside you means two of you do the same work. A non-zero
    code means it is taken, so leave that member and tell the supervisor.
    **Do not commit the pick-up.** Every session reads the root's file, not git, so the row
-   shows beside you the moment it is written; the one tracker commit in 11 carries it. When a
-   step below says "a commit with a path, as in 2", this is its shape. The root is shared
-   by every session — a commit made while someone has a merge open (MERGE_HEAD) seals that
-   merge with its own subject. So give the tracker commit a path. With a merge open git
-   refuses it, so wait for that merge to finish and run it again
-
-       git commit -m "chore(tracker): close <epic> with its merge" -- .moai/
+   shows beside you the moment it is written; the one tracker commit in 11 carries it.
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
    pick-up (rule 5). Ask the person watching this window — a yes the message already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
@@ -4916,9 +4916,10 @@ never in the root
 
        git merge --no-ff worktree-<epic> -m "merge: …"
        git -C .worktrees/milestone-<milestone id> merge --no-ff worktree-<epic> -m "merge: …"     inside a milestone
-   If the root's `.moai` holds uncommitted rows from another session the merge is refused —
-   take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
-   resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
+   If the merge is refused over the root's uncommitted `.moai` — yours since 2 or another
+   session's — take them in first with a commit with a path, as in 11, its subject
+   `chore(tracker): take the root's rows in before <epic> merges`. If it stops on a conflict,
+   do not resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
    `EnterWorktree(path)` and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
@@ -4981,12 +4982,19 @@ never in the root
 
         {UNWRITTEN}
     Leave the tests passing in the root
-11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and then take the
-    tracker into the root with a commit with a path, as in 2 — **one** for the epic. It carries
-    the pick-up of 2, the lines of 9-1, the closes of 10 and this note together, not one commit
-    per step. If anything is left (a background review, say), finish it
-    before the note — the supervisor reads the note as this work being over; what you cannot
-    finish, name in the report (12)
+11. Leave the line to take over from — `moai note <epic> 'Next: …'`. If anything is left (a
+    background review, say), finish it before the note — the supervisor reads the note as this
+    work being over; what you cannot finish, name in the report (12).
+    Then take the tracker into the root with a commit with a path — **one** for the epic. It
+    carries the pick-up of 2, the lines of 9-1, the closes of 10 and this note together, not one
+    commit per step. A report left as a note in 12 — and, in a subagent, the `model:` lines the
+    supervisor writes from it — come after it; the supervisor's own tracker commit carries those.
+    When a step says "a commit with a path, as in 11", this is its shape. The root is shared by
+    every session — a commit made while someone has a merge open (MERGE_HEAD) seals that merge
+    with its own subject. So give the tracker commit a path. With a merge open git refuses it,
+    so wait for that merge to finish and run it again
+
+        git commit -m "chore(tracker): close <epic> with its merge" -- .moai/
 12. Report to the supervisor, **last of all**, with `SendMessage(to: <supervisor>, message: …)`
     — `report: <epic>` at its head. It carries the merge hash,
     the unfolded epic's id, a line or two of summary, what you handed on and any new backlog,
@@ -5102,7 +5110,7 @@ Until it is written, a note the steps below put on the epic goes on that backlog
 Keep worker.md's pick-up, worktree, design questions, root tracker, test server and file
 ownership rules (2, 3, 4, 4-1, 4-2, 4-3, 5, 6). Never set `MOAI_HERE`.
 The root branch check and path-only tracker commits apply here too. Return to `Root:`
-before `git symbolic-ref -q HEAD`, `git status -- .moai/` and the root tracker commit of 11.
+before `git symbolic-ref -q HEAD`, `git status -- .moai/` and each root tracker commit (8, 11).
 The assignment's base branch is where the worktree splits and eventually merges.
 Hooks may be words only here: keep the five yourself. The person trusts moai in `/hooks`;
 check that screen rather than assuming a wrapper or another installation enabled them.
@@ -8645,11 +8653,21 @@ stop sending outside work while a release runs",
         let work = worker();
         let before = &work[work.find("## Before the steps").unwrap()..work.find("## The steps").unwrap()];
         assert!(before.contains(TRACKER_IN_GIT), "일꾼 글이 트래커가 git 밖인지 안 묻는다");
-        assert!(before.contains("\"commit with a path, as in 2\""), "건너뛸 걸음을 일꾼 글의 말로 안 댄다");
+        assert!(before.contains("\"commit with a path, as in 11\""), "건너뛸 걸음을 일꾼 글의 말로 안 댄다");
+        // 그 말이 가리키는 걸음에 커밋의 꼴이 선다 — 집기 커밋을 걷은 뒤(moai-p8e9) 꼴이 "커밋하지 말라" 는 2 에 남아,
+        // 2 를 읽는 일꾼 앞에 칠 커밋 한 줄이 섰다(리뷰 moai-p8e9.dnl).
+        let eleven = &work[step_at(&work, "11")..step_at(&work, "12")];
+        assert!(
+            eleven.contains("\"a commit with a path, as in 11\", this is its shape"),
+            "11 이 트래커 커밋의 꼴을 안 댄다"
+        );
+        let two = &work[step_at(&work, "2")..step_at(&work, "3")];
+        assert!(!two.contains("git commit"), "커밋하지 않는 집기 걸음에 칠 커밋이 섰다");
         let shared = supervise();
         let shared = &shared[shared.find("## The shared root").unwrap()..];
         assert!(shared.contains(TRACKER_IN_GIT), "감독이 같은 줄로 안 묻는다 — 감독의 트래커 커밋 하나가 진다");
-        // 2 를 안 지나는 이어받기 일꾼도 묻는다 — "2 의 첫 커밋 앞" 에 매면 그 일꾼은 8·10 의 커밋에서 진다.
+        // 한 걸음의 커밋에 매지 않는다 — 집기를 커밋하던 판에 "2 의 첫 커밋 앞" 에 매면 2 를 안 지나는 이어받기
+        // 일꾼이 8·10 의 커밋에서 졌다. 지금 트래커 커밋은 8 과 11 이다.
         assert!(before.contains("before your first tracker commit"), "묻는 때를 2 의 커밋에 맸다");
 
         let s = crate::scratch::Scratch::new("tracker-in-git");

@@ -39,7 +39,7 @@ Until it is written, a note the steps below put on the epic goes on that backlog
 Keep worker.md's pick-up, worktree, design questions, root tracker, test server and file
 ownership rules (2, 3, 4, 4-1, 4-2, 4-3, 5, 6). Never set `MOAI_HERE`.
 The root branch check and path-only tracker commits apply here too. Return to `Root:`
-before `git symbolic-ref -q HEAD`, `git status -- .moai/` and the root tracker commit of 11.
+before `git symbolic-ref -q HEAD`, `git status -- .moai/` and each root tracker commit (8, 11).
 The assignment's base branch is where the worktree splits and eventually merges.
 Hooks may be words only here: keep the five yourself. The person trusts moai in `/hooks`;
 check that screen rather than assuming a wrapper or another installation enabled them.

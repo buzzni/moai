@@ -594,7 +594,8 @@ open, so the epic is not done either.
 
 **A `member refused:` line** is a member the hook kept the worker from creating (the worker's
 4-3): it stands as a backlog item under the epic. Unfold it into that epic before you send the
-next — write only `- issue` lines in the plan; it then stands in the first column like a member from 4-3 and keeps the epic open.
+next — write only `- issue` lines in the plan; it then stands in the first column like a
+member from 4-3 and keeps the epic open.
 **If the line says the worker reclaimed it itself, or that backlog is already done, do not
 unfold it** — promote unfolds a closed backlog too, and the same member stands twice. If the
 hook refuses you as well, pass the line and the refusal to the person; do not create it under
@@ -688,8 +689,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
 ## When to stop
 
 - Before you stop, take what you wrote into the root with **one** tracker commit, as "The
-  shared root" says — `git status -- .moai/` first, and nothing to commit is fine
-
+  shared root" says — `git status -- .moai/` first, and nothing to commit is fine. A round that
+  never reached this line (its window died or was cleared) left its notes out of git, so when
+  you start or resume (4), make the same one commit if `git status -- .moai/` is not clean
 - If there is no backlog that does not collide, or no idle worker, say so to the person and
   stop — do not force a colliding backlog out
 - If a worker is waiting on a person's decision, the supervisor does not answer in their

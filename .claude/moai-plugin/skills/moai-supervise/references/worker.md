@@ -121,8 +121,9 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
 gets the same check before the merge ("The milestone branch").
 
-**Ask it where you already are.** Before the first tracker commit you are still in the root, so
-it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+**Ask it where you already are.** The merge and the tracker commits (8, 11) come after
+`ExitWorktree(keep)`, so you are back in the root and it is one command. From inside the
+worktree, do not ask with `git -C <root> …` — that shape is
 refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
 worktree go back in with `EnterWorktree(path)`
 
@@ -131,7 +132,7 @@ worktree go back in with `EnterWorktree(path)`
 or one an earlier step makes (8 can call for it)
 
     git -C <root> ls-files --error-unmatch -- .moai/issues.jsonl      a non-zero code: the tracker is not in git
-On a non-zero code every tracker commit in these steps — each "commit with a path, as in 2" —
+On a non-zero code every tracker commit in these steps — each "commit with a path, as in 11" —
 does not exist: the `moai` writes still land in the root's file, and there is nothing to commit.
 Skip them and nothing else; the merge and the branches still go through git. A zero code is the
 usual case, and every step stands as written
@@ -152,8 +153,9 @@ intent.
   `symbolic-ref` are refused even as single plain commands. Root work happens after
   ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
 - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
-  commit from sealing someone's open merge, but it cannot keep it from carrying rows another
-  session has not committed yet
+  commit from sealing someone's open merge; the rows other sessions have not committed yet ride
+  along, and that is expected — they stand in the shared file already, and the next tracker
+  commit is where they go into history
 
 ## The milestone branch
 
@@ -244,13 +246,7 @@ never in the root
    and overwriting a row picked up beside you means two of you do the same work. A non-zero
    code means it is taken, so leave that member and tell the supervisor.
    **Do not commit the pick-up.** Every session reads the root's file, not git, so the row
-   shows beside you the moment it is written; the one tracker commit in 11 carries it. When a
-   step below says "a commit with a path, as in 2", this is its shape. The root is shared
-   by every session — a commit made while someone has a merge open (MERGE_HEAD) seals that
-   merge with its own subject. So give the tracker commit a path. With a merge open git
-   refuses it, so wait for that merge to finish and run it again
-
-       git commit -m "chore(tracker): close <epic> with its merge" -- .moai/
+   shows beside you the moment it is written; the one tracker commit in 11 carries it.
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
    pick-up (rule 5). Ask the person watching this window — a yes the message already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
@@ -527,9 +523,10 @@ never in the root
 
        git merge --no-ff worktree-<epic> -m "merge: …"
        git -C .worktrees/milestone-<milestone id> merge --no-ff worktree-<epic> -m "merge: …"     inside a milestone
-   If the root's `.moai` holds uncommitted rows from another session the merge is refused —
-   take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
-   resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
+   If the merge is refused over the root's uncommitted `.moai` — yours since 2 or another
+   session's — take them in first with a commit with a path, as in 11, its subject
+   `chore(tracker): take the root's rows in before <epic> merges`. If it stops on a conflict,
+   do not resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
    `EnterWorktree(path)` and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
@@ -594,12 +591,19 @@ never in the root
 
         moai -C <root> show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'
     Leave the tests passing in the root
-11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and then take the
-    tracker into the root with a commit with a path, as in 2 — **one** for the epic. It carries
-    the pick-up of 2, the lines of 9-1, the closes of 10 and this note together, not one commit
-    per step. If anything is left (a background review, say), finish it
-    before the note — the supervisor reads the note as this work being over; what you cannot
-    finish, name in the report (12)
+11. Leave the line to take over from — `moai note <epic> 'Next: …'`. If anything is left (a
+    background review, say), finish it before the note — the supervisor reads the note as this
+    work being over; what you cannot finish, name in the report (12).
+    Then take the tracker into the root with a commit with a path — **one** for the epic. It
+    carries the pick-up of 2, the lines of 9-1, the closes of 10 and this note together, not one
+    commit per step. A report left as a note in 12 — and, in a subagent, the `model:` lines the
+    supervisor writes from it — come after it; the supervisor's own tracker commit carries those.
+    When a step says "a commit with a path, as in 11", this is its shape. The root is shared by
+    every session — a commit made while someone has a merge open (MERGE_HEAD) seals that merge
+    with its own subject. So give the tracker commit a path. With a merge open git refuses it,
+    so wait for that merge to finish and run it again
+
+        git commit -m "chore(tracker): close <epic> with its merge" -- .moai/
 12. Report to the supervisor, **last of all**, with `SendMessage(to: <supervisor>, message: …)`
     — `report: <epic>` at its head. It carries the merge hash,
     the unfolded epic's id, a line or two of summary, what you handed on and any new backlog,
