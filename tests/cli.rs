@@ -24632,7 +24632,7 @@ fn what_the_receiver_curls_is_main() {
 ///
 /// **설치 스크립트가 둘이다**(moai-j9gv.ukd). Windows 칸은 `install.ps1` 이 깔고, 두 표는
 /// 겹치지 않고 합쳐서 행렬이 된다 — 한 칸을 두 스크립트가 다 대면 어느 쪽이 그 판을 까는지
-/// 받는 사람이 모른다. 못 내는 기계에 대는 말은 두 스크립트 다 **세 이름 전부**를 댄다 —
+/// 받는 사람이 모른다. 못 내는 기계에 대는 말은 두 스크립트 다 **행렬의 이름 전부**를 댄다 —
 /// 리눅스에서 받은 사람이 Windows 판이 있다는 것을, 그 반대도 알아야 한다.
 #[cfg(unix)]
 #[test]
@@ -24682,6 +24682,46 @@ fn the_install_table_and_the_release_matrix_name_the_same_targets() {
     };
     assert_eq!(named(said), matrix, "못 내는 기계에 대는 말이 행렬과 갈라졌다\n{said}");
     assert_eq!(named(ps1_said), matrix, "install.ps1 이 못 내는 기계에 대는 말이 행렬과 갈라졌다\n{ps1_said}");
+}
+
+/// **`latest::SERVED` 와 [`served`] 도 행렬을 한 번 더 적은 자리다**(moai-uwzg 리뷰). ARM64 Windows 칸이 는
+/// 날 위의 시험은 설치 스크립트만 보아 둘 다 안 늘어도 초록이었고, 그 기계의 `moai update` 는 "맞는 판이
+/// 없다" 로 거절될 판이었다. 칸마다 `target_os`·`target_arch` 쌍으로 옮겨 견준다.
+#[cfg(unix)]
+#[test]
+fn served_names_the_targets_the_release_matrix_builds() {
+    use std::collections::BTreeSet;
+    let matrix: BTreeSet<(String, String)> = release_matrix()
+        .iter()
+        .map(|t| {
+            let os = if t.contains("-linux-") {
+                "linux"
+            } else if t.ends_with("-apple-darwin") {
+                "macos"
+            } else if t.contains("-windows-") {
+                "windows"
+            } else {
+                panic!("행렬의 {t} 를 target_os 로 옮길 줄 모른다 — 이 시험의 갈래를 늘린다")
+            };
+            (os.to_owned(), t.split('-').next().unwrap().to_owned())
+        })
+        .collect();
+    let quoted = |line: &str, key: &str| -> Option<String> {
+        let rest = line.split_once(&format!("{key} = \""))?.1;
+        Some(rest.split_once('"')?.0.to_owned())
+    };
+    for (file, head) in
+        [("src/latest.rs", "pub const SERVED: bool = cfg!(any("), ("tests/cli.rs", "fn served() -> bool {")]
+    {
+        let text = std::fs::read_to_string(at_root(file)).unwrap();
+        let body = text.split_once(head).unwrap_or_else(|| panic!("{file} 에서 `{head}` 를 못 찾았다")).1;
+        let pairs: BTreeSet<(String, String)> = body
+            .lines()
+            .take_while(|l| !l.trim_start().starts_with("))"))
+            .filter_map(|l| Some((quoted(l, "target_os")?, quoted(l, "target_arch")?)))
+            .collect();
+        assert_eq!(pairs, matrix, "{file} 의 판을 내는 기계가 release.yml 의 빌드 행렬과 갈라졌다");
+    }
 }
 
 /// **`install.ps1` 은 ASCII 로만 쓴다**(moai-j9gv.ukd). Windows PowerShell 5.1 은 BOM 없는

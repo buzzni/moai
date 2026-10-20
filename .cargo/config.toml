@@ -4,12 +4,12 @@
 # 받은 moai.exe 가 "VCRUNTIME140.dll 이 없다" 로 뜨지도 않는다 — 받는 사람에게 재배포 패키지를
 # 먼저 깔라고 할 수는 없다. 리눅스 판이 musl 정적인 것과 같은 까닭이다.
 #
-# 이 파일이 저장소 뿌리에 서는 까닭은 `cargo build --target x86_64-pc-windows-msvc` 를 누가 어디서
+# 이 파일이 저장소 뿌리에 서는 까닭은 `cargo build --target <msvc 타깃>` 을 누가 어디서
 # 치든 같은 바이너리가 나오게 하려는 것이다 — 릴리스 칸과 CI 의 Windows 잡이 같은 것을 짓는다.
-# 다른 타깃에는 아무 일도 안 한다.
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
-
-# ARM64 Windows 판(moai-uwzg.q1j)도 같은 까닭으로 묶는다 — 깨끗한 ARM64 기계에도 재배포 패키지가 없다.
-[target.aarch64-pc-windows-msvc]
+# msvc 타깃 밖에는 아무 일도 안 한다.
+#
+# **타깃 이름이 아니라 cfg 로 건다**(moai-uwzg 리뷰). 이름마다 표를 두면 행렬에 Windows 칸이 늘 때마다
+# 여기도 한 줄 늘어야 하는데, 빠뜨려도 아무것도 안 붉어진다 — 엇지은 ARM64 판(moai-uwzg.q1j)은 릴리스
+# 잡에서 돌려 보지도 않아, 받는 사람의 깨끗한 기계에서야 DLL 이 없다고 드러난다.
+[target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]

@@ -141,6 +141,10 @@ command, what it printed, and the Windows and PowerShell versions
   PowerShell and from Git Bash, on a profile whose temporary directory holds a
   space or `'`: the jot comes back. A temporary directory on a share
   (`\\server\…`) with `code --wait` is a known gap (review `moai-j9gv.8oh`)
+- `moai-uwzg.q1j` — the ARM64 build is cross-built on the x64 runner and never
+  run there: on ARM64 Windows, `install.ps1` from the native PowerShell installs
+  `aarch64-pc-windows-msvc`, and that `moai.exe --version` starts on a machine
+  without the Visual C++ redistributable
 
 ## If you change a command's help
 
@@ -288,10 +292,12 @@ A `v*` tag builds `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
 `.tar.gz` archives and the two Windows `.zip` archives with `SHA256SUMS`, `install.sh` and `install.ps1`, and takes the release
 notes from that version's section of `CHANGELOG.md`. The Windows builds link the
 C runtime statically (`.cargo/config.toml`). A new target is a row in the
-release matrix plus a line in one installer's platform table —
-`the_install_table_and_the_release_matrix_name_the_same_targets` fails until
-both agree. `install.ps1` stays ASCII-only, because Windows PowerShell 5.1 reads
-a script without a BOM in the system code page.
+release matrix, a line in one installer's platform table, and a
+`target_os`/`target_arch` pair in `latest::SERVED` and the tests' `served()` —
+`the_install_table_and_the_release_matrix_name_the_same_targets` and
+`served_names_the_targets_the_release_matrix_builds` fail until they all agree.
+`install.ps1` stays ASCII-only, because Windows PowerShell 5.1 reads a script
+without a BOM in the system code page.
 
 ## When something breaks
 

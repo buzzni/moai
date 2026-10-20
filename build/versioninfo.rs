@@ -14,9 +14,8 @@ fn utf16z(s: &str) -> Vec<u8> {
     s.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect()
 }
 
-// `is_multiple_of` 는 1.90 부터라 rust-version(1.88)에서는 비트로 쓴다.
 fn pad4(v: &mut Vec<u8>) {
-    while v.len() & 3 != 0 {
+    while !v.len().is_multiple_of(4) {
         v.push(0);
     }
 }

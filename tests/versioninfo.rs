@@ -1,7 +1,6 @@
 // build.rs 가 윈도 바이너리에 넣는 `.res`(moai-uwzg.kpx)의 바이트 배치를 리눅스에서 시험한다.
 // 윈도 링커는 여기 없으니, 아래 숫자는 VS_VERSIONINFO 규칙으로 손으로 센 값이다.
 #[path = "../build/versioninfo.rs"]
-#[allow(dead_code)]
 mod versioninfo;
 
 use versioninfo::{Info, res_file, version_info};

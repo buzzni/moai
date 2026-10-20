@@ -34,6 +34,15 @@ env:
   # 컴파일 세션에 매인 상태라, 매번 새로 뜨는 러너에서는 쓸 데가 없다 — 그런데 덩치가
   # `target/` 의 삼분의 이다. 담고 풀기만 하고 아무도 안 쓰는 1GB 를 걷는다.
   CARGO_INCREMENTAL: 0
+  # **cargo 캐시가 담고 푸는 자리는 여기 한 곳에 적는다**(moai-uwzg 리뷰). 잡마다 `cache/restore` 와
+  # `cache/save` 가 갈라 서는데, `actions/cache` 는 이 목록을 캐시의 판(version)에 섞는다 — 한쪽만 고치면
+  # 푸는 쪽이 담은 것을 영영 못 맞히고, 붉어지는 것은 없다. 이름이 `CARGO_` 로 시작하지 않는 까닭은 cargo 가
+  # 그 머리의 환경 변수를 설정 값으로 읽기 때문이다(`CARGO_CACHE_*` 는 `[cache]` 표다).
+  CACHED_PATHS: |
+    ~/.cargo/registry/index
+    ~/.cargo/registry/cache
+    ~/.cargo/git/db
+    target
 
 jobs:
   # 이것이 required check 둘 중 하나다(다른 하나는 `size-budget`). `main` 의 보호 규칙은 이
@@ -160,11 +169,7 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
 
@@ -205,11 +210,7 @@ jobs:
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # 바이너리에 닿는 것이 하나라도 바뀌었나 — 밑의 `msrv`·`windows`·`size-budget` 이 이 답을 쓴다
@@ -342,11 +343,7 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: cargo-msrv-${{ runner.os }}-${{ steps.msrv.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-msrv-${{ runner.os }}-${{ steps.msrv.outputs.version }}-
 
@@ -374,11 +371,7 @@ jobs:
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # **Windows 에서 clippy 와 시험 컴파일이 서는가**(moai-j9gv.ae7). 릴리스가 `x86_64-pc-windows-msvc` 를
@@ -448,11 +441,7 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
           restore-keys: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
 
@@ -470,11 +459,7 @@ jobs:
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
@@ -524,11 +509,7 @@ jobs:
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: cargo-release-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-release-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
 
@@ -548,9 +529,5 @@ jobs:
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
