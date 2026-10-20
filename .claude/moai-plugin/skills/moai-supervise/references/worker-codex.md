@@ -12,7 +12,7 @@ The supervisor skill remains Claude Code only; reading this file does not instal
 | `AskUserQuestion` | Ask this window's person with the available question tool; otherwise ask in conversation and wait. |
 | `/code-review` (7) | Send the review readiness note below and wait for the supervisor's review. |
 | `TaskStop` | No equivalent step here; the supervisor manages its review subagent. |
-| `SendMessage(to: <supervisor>, …)` | Write an epic note and commit the tracker in the root, as below. |
+| `SendMessage(to: <supervisor>, …)` | Write an epic note in the root's tracker, as below. |
 | `/clear` | The person or supervisor sends `/new`, then handles the work directory menu. |
 
 `/model` exists in Codex too. The person changes the model; use the assignment's `Model:`
@@ -28,7 +28,7 @@ One call's `cd` may not persist into the next: always supply the absolute comman
 ## Step 1: name the epic you unfolded
 
 A backlog has no epic for the supervisor to watch until you unfold it. Right after the
-promote in 1, before 2's commit, name the epic on the backlog `<id>` you were handed:
+promote in 1, before 2, name the epic on the backlog `<id>` you were handed:
 
     moai -C <root> note <id> 'Unfolded: <epic>'
 
@@ -39,7 +39,7 @@ Until it is written, a note the steps below put on the epic goes on that backlog
 Keep worker.md's pick-up, worktree, design questions, root tracker, test server and file
 ownership rules (2, 3, 4, 4-1, 4-2, 4-3, 5, 6). Never set `MOAI_HERE`.
 The root branch check and path-only tracker commits apply here too. Return to `Root:`
-before `git symbolic-ref -q HEAD`, `git status -- .moai/` and each root tracker commit.
+before `git symbolic-ref -q HEAD`, `git status -- .moai/` and the root tracker commit of 11.
 The assignment's base branch is where the worktree splits and eventually merges.
 Hooks may be words only here: keep the five yourself. The person trusts moai in `/hooks`;
 check that screen rather than assuming a wrapper or another installation enabled them.
@@ -68,7 +68,7 @@ Review-ready: <epic>
 CODEX_REVIEW
 ```
 
-Return to the root, check its branch and tracker diff, then commit only `.moai/`.
+The note stands in the root's file, where the supervisor reads it — it needs no commit.
 Stop until the supervisor pastes "merge and close — review <id> done"; its reviewer used
 "The review brief" in `references/worker.md` and its review model in this worktree. Then finish 7 as worker.md says — the
 review's fixes stand uncommitted in the worktree: take them in as a separate `fix:` commit
@@ -87,8 +87,8 @@ Do not write the review issue's model line: the supervisor's reviewer writes its
 
 Put worker.md's final report details in `moai note <epic> -b -`, called with
 `moai -C <root>` from the worktree. Its first line is `report: <epic>`.
-Return to the root, check its branch and tracker diff, and commit only `.moai/`.
-For a decision needed during work, use the same note-and-commit path, starting with
+It stands in the root's file, where the supervisor reads it — it needs no commit.
+For a decision needed during work, use the same note, starting with
 `Decision needed:` or `진행 중 결정이 필요합니다`, and ask this window's person too.
 The supervisor watches these notes; a note does not grant permission for a decision.
 When the report is complete, tell the person here they may clear this window with `/new`.

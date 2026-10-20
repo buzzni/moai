@@ -137,7 +137,7 @@ inside a worktree included. If nothing comes out, report the error git gave and 
 if w=$(git worktree list --porcelain); then b=$(printf '%s\n' "$w" | sed -n '1,/^$/s|^branch refs/heads/||p'); if [ -n "$b" ]; then echo "$b"; else echo "the root is detached" >&2; fi; fi
 ```
 
-**If the root is detached, do not send.** The worker's pick-up commit and its merge
+**If the root is detached, do not send.** The worker's tracker commit and its merge
 land on a HEAD with no branch, the check (`merge-base`) and `worktree add`
 fail, and `branch -d` deletes that work's only reference. Do not read the remote's
 default branch instead — the root does not stand on that branch, so it is the same
@@ -228,8 +228,7 @@ refusal — to the new name (2).
   work to put down (`moai mv <id> todo`, `moai defer <id> -m '<why>'`), ask the person
 - Work handed on to be carried is, like a backlog item, not sent again until its report is checked
 
-**1. Pick.** First raise what a near deadline calls for, once a round, and when it raised
-anything take it into the root with a commit with a path — reading never writes, so a
+**1. Pick.** First raise what a near deadline calls for, once a round — reading never writes, so a
 deadline raises nothing until someone runs the verb, and the order `moai ready` gives is
 only as fresh as that run. A member follows the earliest deadline above it as well as its
 own, so the one an epic carries raises its members
@@ -280,8 +279,9 @@ on would make the release grow after it started, and that is the person's call a
 **A backlog item you sent comes out of the candidates until its report is checked.** Until the
 worker unfolds it, it stays in `moai backlog ls`, and the same backlog goes to a second worker.
 So the moment you send it, mark the row you sent — the backlog item, or the epic when the work
-is already unfolded — and take the note into the root with a commit with a path. Without it
-the send lives only in this conversation, and a supervisor that starts again (4) cannot see it.
+is already unfolded. Without it the send lives only in this conversation, and a supervisor
+that starts again (4) cannot see it. The note needs no commit of its own — it stands in the
+root's file the moment it is written, and the next tracker commit carries it ("The shared root").
 
     moai note <id> 'Sent: <worker>'
 
@@ -594,8 +594,7 @@ open, so the epic is not done either.
 
 **A `member refused:` line** is a member the hook kept the worker from creating (the worker's
 4-3): it stands as a backlog item under the epic. Unfold it into that epic before you send the
-next — write only `- issue` lines in the plan — and take it into the root with a commit with a
-path; it then stands in the first column like a member from 4-3 and keeps the epic open.
+next — write only `- issue` lines in the plan; it then stands in the first column like a member from 4-3 and keeps the epic open.
 **If the line says the worker reclaimed it itself, or that backlog is already done, do not
 unfold it** — promote unfolds a closed backlog too, and the same member stands twice. If the
 hook refuses you as well, pass the line and the refusal to the person; do not create it under
@@ -613,13 +612,13 @@ unfolded and it does not show its members, so `moai show <id>` cannot tell you w
 the work finished — when the report does not carry it, read it from that backlog's history
 line about being unfolded.
 
-If the three hold, mark the report checked on the epic and take it into the root with a
-commit with a path — a supervisor that starts again reads that line, not this conversation (4).
+If the three hold, mark the report checked on the epic — a supervisor that starts again reads
+that line, not this conversation (4). It needs no commit of its own ("The shared root").
 
     moai note <epic> 'Report-checked: <merge hash>'
 
 **For a subagent worker, write the `model:` line yourself**, one per member it did — not the
-members it left in the first column — and take them into the root the same way. `<model ran>` is
+members it left in the first column — the same way, with no commit of their own. `<model ran>` is
 the name after `anthropic/` on the report's `Model ran:` line — the real name the worker read in
 its own system prompt, not the alias you passed. Copy the vendor once: `anthropic/anthropic/…`
 is a line `work` never reads. Each `Subagent ran: anthropic/<model> on <member>` line below it
@@ -666,6 +665,12 @@ The root checkout is **shared by every session.** While one session has a merge 
 (`MERGE_HEAD`), another session committing a tracker note seals that merge with its own
 subject — that has actually happened. So in the root, supervisor and worker alike:
 
+- **Commit the tracker rarely.** Every session reads the root's file, not git, so a move or a
+  note shows beside you the moment it is written; a tracker commit keeps the file in history,
+  it tells nobody anything. The worker commits once, at the close (its 11), and you commit
+  once before you stop ("When to stop") — not after each send, check or note. That one commit
+  carries every row written since, someone else's included, and that is fine: what it carries
+  is already shared
 - Give the tracker commit a path — `git commit -m "…" -- .moai/`. With a merge open git
   refuses a commit with a path, so wait until the session that opened it finishes and run it
   again. A `git commit` without a path seals that merge even when you ran `git status` first
@@ -681,6 +686,9 @@ subject — that has actually happened. So in the root, supervisor and worker al
   message needs no word about it
 
 ## When to stop
+
+- Before you stop, take what you wrote into the root with **one** tracker commit, as "The
+  shared root" says — `git status -- .moai/` first, and nothing to commit is fine
 
 - If there is no backlog that does not collide, or no idle worker, say so to the person and
   stop — do not force a colliding backlog out
