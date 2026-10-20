@@ -7174,3 +7174,8 @@
 {"ts":"2026-10-20T03:52:47Z","id":"moai-vjdq.3ls","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — worker window; took in review finding 2, unopened TZ falls to the kernel)"}
 {"ts":"2026-10-20T03:52:47Z","id":"moai-vjdq.chk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — worker window; took in review finding 9, Ctrl-Break passes)"}
 {"ts":"2026-10-20T03:52:48Z","id":"moai-vjdq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: nothing left in this epic. Merged into milestone/moai-0em3 at 9e09fb9b and pushed; Windows-only paths (tz kernel lookup, MSYS2 quoting, Ctrl-C handler) are compile-checked only — a real Windows run before the v0.20.0 release is worth it. Handed on: moai-5kte, moai-3bx3, moai-htft (backlog, outside the release)."}
+{"ts":"2026-10-20T03:53:05Z","id":"moai-uwzg.7ow","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-20T03:53:05Z","id":"moai-uwzg.kpx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-20T03:53:05Z","id":"moai-uwzg.q1j","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-20T03:53:15Z","id":"moai-uwzg.kpx","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided by the person (2026-10-20): PE metadata only, no certificate or secret now. Signing is split off as its own member and stays in the first column."}
+{"ts":"2026-10-20T03:53:15Z","id":"moai-f24n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Windows 릴리스 바이너리에 코드 서명을 건다"}
