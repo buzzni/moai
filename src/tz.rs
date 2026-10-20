@@ -159,7 +159,28 @@ impl Zone {
     /// 든다** — [`System`] 과 `App` 이 [`Source`] 를 들고(처음값은 [`SOURCE`]), `chosen` 은 그것으로 푼 값을 받는다.
     /// 시험의 처음값은 [`quiet`] 이고, 기계를 재는 시험은 제 가짜를 건다.
     pub fn system() -> (Zone, Option<Trouble>) {
-        Zone::named(system_name())
+        Zone::resolved(env_name(), machine_name, cfg!(windows))
+    }
+
+    /// `TZ` 가 먼저고, 없으면 기계가 댄다. **Windows 에서는 못 연 `TZ` 가 기계로 내려간다**(리뷰 moai-vjdq.tg6 2번,
+    /// 2026-10-20 사용자 결정) — MSYS2 의 profile 이 흔히 `TZ=Asia/Seoul` 을 내보내는데 `moai.exe` 곁에는 tzdb 가 없어,
+    /// `TZ` 가 이기는 자로는 커널이 아는 답을 두고 늘 UTC 와 `NoTzdb` 로 섰다. 열리는 `TZ`(`JST-9` 같은 규칙 글)는
+    /// 그대로 이긴다. 기계도 못 대면 `TZ` 의 까닭을 그대로 낸다 — 사람이 적은 이름이 무엇이 틀렸는지가 더 쓸모 있다.
+    /// 유닉스는 내려가지 않는다: 거기서 못 연 `TZ` 는 오타고, 조용히 `/etc/localtime` 으로 서면 그 오타가 안 보인다.
+    fn resolved(
+        env: Option<String>,
+        machine: impl FnOnce() -> Option<String>,
+        fall_back: bool,
+    ) -> (Zone, Option<Trouble>) {
+        let Some(name) = env else { return Zone::named(machine()) };
+        let (zone, why) = Zone::named(Some(name));
+        if why.is_some()
+            && fall_back
+            && let (z, None) = Zone::named(machine())
+        {
+            return (z, None);
+        }
+        (zone, why)
     }
 
     /// [`Zone::system`] 의 몸통 — 시스템이 댄 이름(없을 수 있다)을 시간대로 연다. 이름을 어디서 얻는가와 떼어 두어
@@ -246,11 +267,6 @@ fn safe_join(dir: &Path, name: &str) -> Option<PathBuf> {
         at.push(part);
     }
     Some(at)
-}
-
-/// 시스템이 대는 이름. `TZ` 가 먼저고, 그다음이 `/etc/localtime` 이 가리키는 자리다(Windows 는 [`windows_name`]).
-fn system_name() -> Option<String> {
-    env_name().or_else(machine_name)
 }
 
 /// Windows 는 `/etc/localtime` 이 없다 — 커널에 묻는다(moai-vjdq.3ls). 이름은 IANA 가 아니라 규칙 글이다.
@@ -1476,6 +1492,25 @@ mod tests {
     }
 
     /// 시스템이 이름을 대는 세 길 — 안 댄다·못 푼다·푼다. 이름만 건네 기계와 떼어 잰다(moai-vjdq.to6).
+    #[test]
+    fn an_unopened_tz_falls_to_the_machine_only_where_asked() {
+        let seoul = || Some("<+09>-9".to_string());
+        // Windows: tzdb 없는 `TZ=Asia/Seoul` 은 커널이 대는 규칙으로 선다.
+        let (z, why) = Zone::resolved(Some("Mars/Olympus".into()), seoul, true);
+        assert_eq!((z.name(), why), ("<+09>-9", None));
+        // 유닉스: 못 연 `TZ` 는 그대로 UTC 와 까닭이다 — 오타를 가리지 않는다.
+        let (z, why) = Zone::resolved(Some("Mars/Olympus".into()), seoul, false);
+        assert!(z.is_utc() && why.is_some());
+        // 열리는 `TZ` 는 기계를 안 본다.
+        let (z, _) = Zone::resolved(Some("JST-9".into()), || panic!("열린 TZ 가 기계에 물었다"), true);
+        assert_eq!(z.name(), "JST-9");
+        // 기계도 못 대면 `TZ` 의 까닭이 선다.
+        let (_, why) = Zone::resolved(Some("Mars/Olympus".into()), || None, true);
+        assert!(matches!(why, Some(Trouble::Unknown { .. } | Trouble::NoTzdb { .. })), "{why:?}");
+        // `TZ` 가 없으면 기계가 답한다.
+        assert_eq!(Zone::resolved(None, seoul, false).0.name(), "<+09>-9");
+    }
+
     #[test]
     fn the_system_name_has_three_ways_to_answer() {
         assert_eq!(Zone::named(None), (Zone::utc(), Some(Trouble::NoSystemZone)));
