@@ -268,9 +268,10 @@ there. Only the sandbox goes: the approval setting is left at Codex's default.
 A Codex session can also be a supervisor's worker in a [tmux pane](#in-tmux)
 or [cmux tab](#in-cmux), with `Worker: codex` in its assignment. The assignment
 names `references/worker-codex.md` by its absolute path; Codex reads `worker.md`
-beside it, then those differences. Reports are epic notes, committed from the
-root — after unfolding a backlog, Codex first names the new epic on that backlog
-with an `Unfolded:` note. After tests and commits, Codex writes `Review-ready:`
+beside it, then those differences. Reports are epic notes in the root's tracker
+— after unfolding a backlog, Codex first names the new epic on that backlog
+with an `Unfolded:` note. The supervisor reads them from the file, so a note
+needs no commit of its own; the epic's one tracker commit comes at its close. After tests and commits, Codex writes `Review-ready:`
 and stops; the supervisor's review subagent reviews the work before a second
 "merge and close" assignment, and Codex then takes the review's fixes in itself.
 Record the model that actually ran in the issue's `model:` note, without a token
