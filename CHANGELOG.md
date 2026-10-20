@@ -17,8 +17,9 @@ does not tag — see `CONTRIBUTING.md`.
 - **Windows reads its own time zone.** Times were always drawn in UTC with a
   "the system names no time zone" notice; moai now asks Windows for the
   current zone and its daylight-saving rules and opens them as a POSIX rule
-  (`<+09>-9`, `<-05>5<-04>,M3.2.0/2,M11.1.0/2`). `TZ` still comes first.
-  (moai-vjdq.3ls)
+  (`<+09>-9`, `<-05>5<-04>,M3.2.0/2,M11.1.0/2`). `TZ` still comes first,
+  but a `TZ` moai cannot open — an IANA name with no tzdb beside `moai.exe`,
+  as MSYS2 shells often set — falls back to Windows' zone. (moai-vjdq.3ls)
 - **The explorer's "run `moai due apply`" notice counts in the zone `due apply`
   uses** — the system zone — so the number it shows is the number of rows
   `due apply` would raise, even when `[tui] timezone` names another zone.
