@@ -91,7 +91,8 @@ formatting commit.
 
 ## Developing on Windows
 
-Windows is a release target (`x86_64-pc-windows-msvc`), and you can build, test
+Windows is a release target (`x86_64-pc-windows-msvc`, and
+`aarch64-pc-windows-msvc` cross-built on the x64 runner), and you can build, test
 and keep developing on it.
 
 `scripts/windows-dev.ps1` gets a clean machine ready and is safe to run again:
@@ -282,10 +283,10 @@ For the very first release the bump script has nothing to move — `Cargo.toml` 
 already at `0.1.0` — so rename the `[Unreleased]` heading in `CHANGELOG.md` to
 `## [0.1.0] - <date>` by hand, add a fresh empty `[Unreleased]` above it, and tag.
 
-A `v*` tag builds `x86_64-unknown-linux-musl`, `aarch64-apple-darwin` and
-`x86_64-pc-windows-msvc`, publishes the two `.tar.gz` archives and the Windows
-`.zip` with `SHA256SUMS`, `install.sh` and `install.ps1`, and takes the release
-notes from that version's section of `CHANGELOG.md`. The Windows build links the
+A `v*` tag builds `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
+`x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`, publishes the two
+`.tar.gz` archives and the two Windows `.zip` archives with `SHA256SUMS`, `install.sh` and `install.ps1`, and takes the release
+notes from that version's section of `CHANGELOG.md`. The Windows builds link the
 C runtime statically (`.cargo/config.toml`). A new target is a row in the
 release matrix plus a line in one installer's platform table —
 `the_install_table_and_the_release_matrix_name_the_same_targets` fails until

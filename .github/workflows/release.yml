@@ -76,6 +76,12 @@ jobs:
           # `.cargo/config.toml` 이 맡는다 — 깨끗한 Windows 에 vcruntime140.dll 이 없어도 뜬다.
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+          # ARM64 Windows 판이다(moai-uwzg.q1j). **x64 러너에서 엇짓는다** — `windows-latest` 에는 rustup 과
+          # VS 의 ARM64 MSVC 도구, `ring` 이 이 타깃에서 찾는 clang(LLVM)이 다 서 있다. `windows-11-arm`
+          # 러너로 제 기계에서 짓는 길은 그 이미지에 rustup 이 서는지 이 저장소가 재 보지 않았다.
+          # 엇지은 판은 이 잡에서 못 돌려 보니, 재는 것은 크기 예산과 링크가 섰다는 것까지다.
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

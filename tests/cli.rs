@@ -25115,7 +25115,14 @@ fn install_ps1_prints_the_target_from_its_table() {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "x86_64-pc-windows-msvc");
     assert!(release_matrix().contains("x86_64-pc-windows-msvc"), "표가 행렬에 없는 이름을 찍었다");
 
+    // ARM64 칸(moai-uwzg.q1j)도 같은 길로 돈다.
     let out = run(&[], Some("ARM64"));
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "aarch64-pc-windows-msvc");
+    assert!(release_matrix().contains("aarch64-pc-windows-msvc"), "표가 행렬에 없는 이름을 찍었다");
+
+    // 32비트 Windows 는 판이 없다 — 64비트 위의 32비트 PowerShell 은 W6432 가 AMD64 로 바로잡는다.
+    let out = run(&[], Some("x86"));
     assert_eq!(out.status.code(), Some(1), "판이 없는 기계에서 엉뚱한 코드로 끝났다\n{}", text(&out));
     assert!(String::from_utf8_lossy(&out.stderr).contains("no build for this machine"), "{}", text(&out));
 

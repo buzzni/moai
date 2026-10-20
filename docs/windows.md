@@ -1,7 +1,7 @@
 # Windows
 
-moai ships a Windows build, `x86_64-pc-windows-msvc`, with the C runtime linked
-in — `moai.exe` starts on a clean machine without the Visual C++
+moai ships two Windows builds, `x86_64-pc-windows-msvc` and
+`aarch64-pc-windows-msvc`, with the C runtime linked in — `moai.exe` starts on a clean machine without the Visual C++
 redistributable. This page covers installing it, upgrading it, its config,
 editor and hooks, and building it yourself.
 
@@ -37,8 +37,11 @@ The environment variables `install.sh` reads work here too: `MOAI_REPO`,
   `-Force`
 - **It does not edit `PATH`.** When the install directory is not on it, it says
   so in one line — add it yourself in System Properties → Environment Variables
-- Only x64 Windows (`AMD64`) has a build. Anywhere else the installer stops and
-  names the builds there are
+- x64 (`AMD64`) and ARM64 Windows each have a build; 32-bit Windows does not,
+  and there the installer stops and names the builds there are. An x64
+  PowerShell running emulated on ARM64 Windows reads `AMD64` and installs the
+  x64 build, which runs under emulation — run the installer from the native
+  ARM64 PowerShell to get the ARM64 build
 
 ## Upgrade
 

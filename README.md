@@ -81,8 +81,8 @@ does not recognise alone unless you pass `-Force`. It installs to
 specific release with `-Version v0.17.0`. It does not edit your `PATH`: when that
 directory is not on it, it says so in one line.
 
-The Windows build is `x86_64-pc-windows-msvc` with the C runtime linked in, so
-it runs on a clean machine without the Visual C++ redistributable.
+The Windows builds are `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`,
+with the C runtime linked in, so they run on a clean machine without the Visual C++ redistributable.
 
 ### Upgrade
 
@@ -145,7 +145,8 @@ read), quitting prints the install line instead, with `--dir` when it is not
 the releases do not cover get no line.
 
 Prebuilt binaries are published for `x86_64-unknown-linux-musl`,
-`aarch64-apple-darwin` and `x86_64-pc-windows-msvc`. On anything else, build
+`aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`.
+On anything else, build
 from source:
 
 ```sh
