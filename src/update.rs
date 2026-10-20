@@ -251,9 +251,18 @@ fn ps_quoted(s: &str) -> String {
     ps_literal(s)
 }
 
-/// 늘 작은따옴표로 싼다 — 그 안에서는 `''` 만 가른다.
+/// 늘 작은따옴표로 싼다 — 그 안에서는 따옴표를 겹쳐 쓴다. **PowerShell 은 활자 따옴표 U+2018~U+201B 도
+/// 작은따옴표로 읽는다**(moai-vjdq.ad1) — `O’Brien` 이 든 자리가 싼 글을 일찍 닫는다. 같은 글자를 겹친다.
 fn ps_literal(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "''"))
+    let mut out = String::from("'");
+    for c in s.chars() {
+        out.push(c);
+        if matches!(c, '\'' | '\u{2018}'..='\u{201B}') {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
 }
 
 impl Plan {
@@ -285,6 +294,14 @@ impl Plan {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ps_literal_doubles_typographic_quotes() {
+        assert_eq!(
+            super::ps_literal("O\u{2019}B'x\u{2018}\u{201A}\u{201B}"),
+            "'O\u{2019}\u{2019}B''x\u{2018}\u{2018}\u{201A}\u{201A}\u{201B}\u{201B}'"
+        );
+    }
+
     use super::*;
 
     fn yes(_: &Path) -> bool {
