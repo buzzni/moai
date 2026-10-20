@@ -1184,12 +1184,12 @@ pub fn actor(flag: Option<&str>, root: &Path) -> Result<Actor, NoActor> {
 ///
 /// 뿌리가 git 저장소가 아니어도 된다 — git 은 거기서 위로 찾고, 끝내 못 찾으면
 /// 전역 설정을 낸다. moai 는 `.moai/` 만 찾지 git 을 요구하지 않는다.
+///
+/// **`-C <뿌리>` 를 짓는 것은 [`crate::git::run`] 이다**(리뷰 moai-vjdq.ch3) — 제 손으로 `.arg(root)` 를 붙이던
+/// 판은 MSYS2 의 git 에 러스트의 MSVC 꼴로 싼 뿌리를 넘겨, 뿌리에 `'` 가 든 기계에서 이름을 못 읽고 모든 쓰기가
+/// "누군지 모른다" 로 멈췄다. 그 꼴을 가르는 자리가 `git::invocation` 하나다.
 fn git_config(root: &Path, key: &str) -> Option<String> {
-    let out = crate::git::command().arg("-C").arg(root).args(["config", key]).output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let v = String::from_utf8(out.stdout).ok()?.trim().to_string();
+    let v = crate::git::run(root, &["config", key]).ok()?.trim().to_string();
     (!v.is_empty()).then_some(v)
 }
 

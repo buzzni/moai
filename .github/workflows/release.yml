@@ -76,6 +76,12 @@ jobs:
           # `.cargo/config.toml` 이 맡는다 — 깨끗한 Windows 에 vcruntime140.dll 이 없어도 뜬다.
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+          # ARM64 Windows 판이다(moai-uwzg.q1j). **x64 러너에서 엇짓는다** — `windows-latest` 에는 rustup 과
+          # VS 의 ARM64 MSVC 도구, `ring` 이 이 타깃에서 찾는 clang(LLVM)이 다 서 있다. `windows-11-arm`
+          # 러너로 제 기계에서 짓는 길은 그 이미지에 rustup 이 서는지 이 저장소가 재 보지 않았다.
+          # 엇지은 판은 이 잡에서 못 돌려 보니, 재는 것은 링크가 섰다는 것과 크기 예산, PE 버전 정보까지다.
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -136,6 +142,38 @@ jobs:
           *-windows-*) printf 'name=moai.exe\n' >>"$GITHUB_OUTPUT" ;;
           *) printf 'name=moai\n' >>"$GITHUB_OUTPUT" ;;
           esac
+
+      # **PE 버전 정보가 실제로 들었는가**(moai-uwzg.kpx). `build.rs` 가 손으로 쓴 `.res` 를 링커에
+      # 넘기는데, 리눅스의 시험은 바이트 배치까지만 잰다 — 링커가 받았는지, Windows 가 그것을 읽는지는 Windows
+      # 러너에서만 보인다. PR 의 `windows` 잡이 디버그 판으로 먼저 보고, 여기서는 내보낼 판 둘을 본다.
+      # 엇지은 aarch64 판도 리소스는 읽힌다(실행하지 않는다).
+      #
+      # **판은 `check-version.sh` 가 읽어 넘긴다.** `Cargo.toml` 을 pwsh 로 또 읽으면 `[package]` 표를 가리는
+      # 자가 둘이 된다(그 스크립트의 머리글). pwsh 안의 `bash` 는 WSL 의 것을 집을 수 있어 거기서 못 부르니,
+      # 이 칸의 bash 스텝이 읽고 pwsh 스텝은 받아 쓴다.
+      - name: 판을 읽는다
+        id: version
+        if: contains(matrix.target, '-windows-')
+        run: |
+          set -euo pipefail
+          version=$(scripts/check-version.sh --print)
+          printf 'value=%s\n' "$version" >>"$GITHUB_OUTPUT"
+
+      - name: PE 버전 정보를 읽는다
+        if: contains(matrix.target, '-windows-')
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          WANT: ${{ steps.version.outputs.value }}
+        run: |
+          $want = $env:WANT
+          if (-not $want) { Write-Output '::error::Cargo.toml 의 판을 못 받았다'; exit 1 }
+          $info = (Get-Item "target/$env:TARGET/release/moai.exe").VersionInfo
+          $info | Format-List ProductName, ProductVersion, FileVersion, FileDescription, LegalCopyright
+          if ($info.ProductVersion -ne $want -or $info.ProductName -ne 'moai') {
+            Write-Output "::error::moai.exe 의 버전 정보가 '$($info.ProductName) $($info.ProductVersion)' 다 — 'moai $want' 여야 한다"
+            exit 1
+          }
 
       # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 채로 올리면
       # 받는 사람 쪽에서야 드러난다. 자는 ci.yml 과 나눠 쓰는 것 하나다.

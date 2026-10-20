@@ -115,7 +115,7 @@ else
   case "$(uname -s)-$(uname -m)" in
   Linux-x86_64 | Linux-amd64) target=x86_64-unknown-linux-musl ;;
   Darwin-arm64 | Darwin-aarch64) target=aarch64-apple-darwin ;;
-  *) die "이 기계에 맞는 판이 없다 — $(uname -s) $(uname -m). 이 스크립트가 까는 것은 x86_64-unknown-linux-musl 과 aarch64-apple-darwin 이고, x86_64-pc-windows-msvc 는 install.ps1 이 깐다. 소스에서 짓는 길은 README 에 있다" ;;
+  *) die "이 기계에 맞는 판이 없다 — $(uname -s) $(uname -m). 이 스크립트가 까는 것은 x86_64-unknown-linux-musl 과 aarch64-apple-darwin 이고, x86_64-pc-windows-msvc 와 aarch64-pc-windows-msvc 는 install.ps1 이 깐다. 소스에서 짓는 길은 README 에 있다" ;;
   esac
 fi
 

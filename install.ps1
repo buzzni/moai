@@ -89,10 +89,13 @@ if ($env:MOAI_TARGET -and $env:MOAI_BASE_URL) {
   $target = $env:MOAI_TARGET
 } else {
   # A 32-bit PowerShell on 64-bit Windows reads x86 here and AMD64 in the W6432 one.
+  # An x64 PowerShell emulated on ARM64 Windows reads AMD64 and gets the x64 build, which runs
+  # there under emulation too -- a native ARM64 PowerShell reads ARM64.
   $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
   switch ($arch) {
     'AMD64' { $target = 'x86_64-pc-windows-msvc' }
-    default { Die "no build for this machine ('$arch'). Released are x86_64-pc-windows-msvc here and x86_64-unknown-linux-musl, aarch64-apple-darwin through install.sh. Building from source is in the README" }
+    'ARM64' { $target = 'aarch64-pc-windows-msvc' }
+    default { Die "no build for this machine ('$arch'). Released are x86_64-pc-windows-msvc, aarch64-pc-windows-msvc here and x86_64-unknown-linux-musl, aarch64-apple-darwin through install.sh. Building from source is in the README" }
   }
 }
 

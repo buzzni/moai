@@ -4620,11 +4620,17 @@ fn surfaced(app: &App, counted: &Surfaced) -> usize {
     counted.count(&app.site.now, &app.zone)
 }
 
-/// **알림의 수** — [`surfaced`] 의 짝이다(moai-dr8a.rl4). 든 알림 수(`free`)에 이 프레임의 달로 잰 기한 알림을 더한다.
+/// **알림의 수** — [`surfaced`] 의 짝이다(moai-dr8a.rl4). 든 알림 수(`free`)에 `site.now` 의 날로 잰 기한 알림을 더한다.
 /// 시계를 고르는 자리를 [`surfaced`] 곁에 둔다(리뷰) — 그리는 쪽마다 `(site.now, zone)` 짝을 고르면, 그 시계를 바꾸는
-/// 날 자정을 넘긴 화면에서 `!N` 과 `+N` 이 다른 날로 잰다(moai-ynd6 가 경고 쪽에서 걷어 낸 그 증상이다).
+/// 날 자정을 넘긴 화면에서 그리는 자리마다 `+N` 이 다른 날로 잰다(moai-ynd6 가 경고 쪽에서 걷어 낸 그 증상이다).
+///
+/// **기한 알림의 수는 시스템의 시간대로 잰다**(moai-vjdq.4sl, 2026-10-20 사용자 결정) — 그 알림이 시키는 `moai due apply` 가
+/// `[tui] timezone` 을 안 읽고 이 기계의 시간대로 날을 재서다. 고른 시간대로 세면 시스템이 UTC 이고 Seoul 을 골랐을 때 하루 아홉
+/// 시간 동안 탐색기는 `+1` 을 보이는데 `due apply` 는 아무것도 안 올린다. 그린 기한의 날과 날 거르개는 `app.zone` 을 그대로 쓴다.
+/// **그래서 `!N`([`surfaced`], 고른 시간대)과 `+N` 은 시간대가 갈리면 다른 날로 잰다** — 일부러다. 같은 `site.now` 를 쓰는
+/// 것은 그대로라, 갈리는 것은 시간대 하나다.
 fn noticed(app: &App, counted: &Surfaced, free: usize) -> usize {
-    counted.notices(free, &app.site.now, &app.zone)
+    counted.notices(free, &app.site.now, &app.system_zone)
 }
 
 /// 못 여는 프로젝트의 색 — CLI 한눈 보기(`view::unopened`)와 같은 무게다. init 전은
@@ -5405,6 +5411,42 @@ pub(super) mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    /// **기한 알림의 수는 `moai due apply` 와 같은 시간대(시스템)로 잰다**(moai-vjdq.4sl). 시스템이 UTC 이고 `[tui] timezone`
+    /// 이 +9 일 때 하루 아홉 시간은 두 쪽의 날이 다르다 — 고른 시간대로 세던 판은 탐색기가 `+1` 을 보이는데 `due apply` 는
+    /// 아무것도 안 올렸다. 그린 날(`app.zone`)은 그대로 고른 시간대다.
+    #[test]
+    fn the_due_notice_is_counted_in_the_zone_due_apply_uses() {
+        use crate::tz::Zone;
+        let cfg = Config::parse("prefix = \"argos\"\n").unwrap();
+        let mut late =
+            Issue::new("argos-0001".into(), "일".into(), Kind::Issue, Status::new("todo"), "2026-09-01T00:00:00Z");
+        late.due_on = Some("2026-10-19".into()); // p2 가 p1 로 오르는 문턱(2일) — UTC 10-16 은 3일, +9 의 10-17 은 2일.
+        let issues = vec![late];
+        let now = "2026-10-16T20:00:00Z";
+        let seoul = crate::user_config::Look { timezone: Some("<+09>-9".into()), ..Default::default() };
+        let utc = crate::user_config::Look { timezone: Some("UTC".into()), ..Default::default() };
+
+        // 시스템 UTC · 고른 +9: `due apply` 는 아무것도 안 올린다 — 알림도 0 이다. 고른 시간대로 세면 1 이었다.
+        let mut a = App::new(issues.clone(), cfg.clone(), Path::new());
+        a.system = || (Zone::utc(), None);
+        a.site.now = now.into();
+        a.adopt_look(&seoul, Vec::new());
+        assert_eq!(a.zone.name(), "<+09>-9", "전제: 화면은 고른 시간대다");
+        let apply = crate::report::due_raises(&issues, &[], now, &Zone::utc(), &cfg.due).len();
+        assert_eq!(apply, 0, "전제: 시스템 UTC 의 due apply 는 안 올린다");
+        assert_eq!(a.site.warnings.notices(0, now, &a.zone), 1, "전제: 고른 시간대의 날로는 뒤처졌다");
+        assert_eq!(noticed(&a, &a.site.warnings, 0), usize::from(apply > 0), "알림이 due apply 와 다른 날로 셌다");
+
+        // 반대로 시스템 +9 · 고른 UTC: `due apply` 가 올리는 줄을 알림이 놓치면 안 된다.
+        let mut b = App::new(issues.clone(), cfg.clone(), Path::new());
+        b.system = || (Zone::load("<+09>-9").unwrap(), None);
+        b.site.now = now.into();
+        b.adopt_look(&utc, Vec::new());
+        let apply = crate::report::due_raises(&issues, &[], now, &b.system_zone, &cfg.due).len();
+        assert_eq!(apply, 1, "전제: 시스템 +9 의 due apply 는 올린다");
+        assert_eq!(noticed(&b, &b.site.warnings, 0), 1);
+    }
 
     /// **골라진 링크의 칠은 링크 칸과 같은 자로 잰다**(moai-p61w 리뷰) — 칸은 조각의 폭으로 섰다
     /// ([`crate::markdown::link_cells`]). 그림 글자 고르개가 든 링크(`❤️`)를 글자마다 더해 재면 조각째 잰 폭보다 한 칸
