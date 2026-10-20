@@ -186,15 +186,17 @@ pub fn repo_lenient(env: impl Fn(&str) -> Option<OsString>, config: Option<&str>
 }
 
 /// 설치 스크립트가 판을 내는 기계인가 — `install.sh`·`install.ps1` 의 플랫폼 표, `release.yml` 의
-/// 빌드 행렬과 같은 셋이다. 다른 기계에서 [`upgrade_of`] 의 줄은 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
+/// 빌드 행렬과 같은 칸들이다. 다른 기계에서 [`upgrade_of`] 의 줄은 늘 "이 기계에 맞는 판이 없다" 로 끝난다.
 ///
 /// **행렬에 칸이 늘면 여기도 는다.** 안 늘리면 그 기계의 탐색기가 올리는 줄을 안 댈 뿐이다 —
-/// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다. Windows 칸이 는 날(moai-j9gv.3fl) 함께 늘었다 —
+/// 틀린 줄을 대는 쪽이 아니라 덜 이르는 쪽으로 낡는다. Windows 칸이 는 날(moai-j9gv.3fl)과 ARM64 Windows 칸이
+/// 는 날(moai-uwzg.q1j) 함께 늘었다 —
 /// 그 기계의 탐색기는 [`upgrade_for`] 로 `moai update` 를 댄다.
 pub const SERVED: bool = cfg!(any(
     all(target_os = "linux", target_arch = "x86_64"),
     all(target_os = "macos", target_arch = "aarch64"),
-    all(target_os = "windows", target_arch = "x86_64")
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "windows", target_arch = "aarch64")
 ));
 
 /// **도는 이 바이너리를 올리는 한 줄**(리뷰). 못 올리는 줄은 안 낸다 — 그때는 `None` 이다.
