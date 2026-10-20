@@ -1557,6 +1557,12 @@ pub struct App {
     /// 저장과 `--json` 은 UTC 그대로다. 못 푼 이름은 UTC 로 떨어지고 그 까닭이 배너에 한 줄로
     /// 선다(moai-77ap) — 막지 않는다.
     pub zone: crate::tz::Zone,
+    /// 이 기계의 시간대가 어디서 오는가(moai-vjdq.to6) — 운영은 `Zone::system`, 시험은 가짜를 건다.
+    system: crate::tz::Source,
+    /// 이 기계의 시간대 — `moai due apply` 가 날을 재는 자와 같다(moai-vjdq.4sl). **알림 수 하나만** 이것으로 센다
+    /// (`draw::noticed`): 고른 시간대(`zone`)와 다르면 같은 줄을 탐색기는 "뒤처졌다" 하고 `due apply` 는 아무것도 안 올린다.
+    /// `adopt_look` 이 `system` 으로 푼다 — 그 전에는 UTC 다.
+    system_zone: crate::tz::Zone,
     /// 설정에 적을 시간대 이름 — **고른 이름이지 떨어진 UTC 가 아니다**(moai-77ap). 지금 기계에
     /// 그 자료가 없다고 사람이 고른 것을 지우면, zoneinfo 가 있는 기계로 옮겼을 때 그 설정이
     /// 사라져 있다. 고른 적 없으면 `None` 이고 그러면 이 키를 안 적는다 — 시스템을 따르는 것이
@@ -2136,6 +2142,13 @@ impl App {
             completion: None,
             hint_room: None,
             zone: crate::tz::Zone::utc(),
+            // 시험은 기계의 시계를 안 탄다 — 시간대 없는 기계에서 알림 시험이 붉어지던 것(moai-lag7.sk7)을 여기서 막는다.
+            // 기계 길을 재는 시험은 이 칸을 갈아 끼운다(moai-vjdq.to6).
+            #[cfg(test)]
+            system: crate::tz::quiet,
+            #[cfg(not(test))]
+            system: crate::tz::Zone::system,
+            system_zone: crate::tz::Zone::utc(),
             saved_zone: None,
             saved: Default::default(),
             list: Scroll::default(),
@@ -3535,7 +3548,13 @@ impl App {
         //
         // **고르는 것도 할 말을 고르는 것도 `tz` 한 자다**(`tz::chosen`, 리뷰) — 까닭은 화면이
         // 실제로 선 시계의 것 하나여야 한다.
-        let (zone, why) = crate::tz::chosen(look.timezone.as_deref());
+        //
+        // **시스템의 시간대는 따로 든다**(moai-vjdq.4sl) — `moai due apply` 는 `[tui] timezone` 을 안 읽고 이 기계의
+        // 시간대로 날을 재므로, "`due apply` 가 올릴 줄이 있다" 는 알림 수만은 그 자로 센다(`draw::noticed`). 그린
+        // 기한의 날과 날로 거르는 거르개는 고른 시간대(`zone`)를 그대로 따른다. 출처는 `system` 이라 시험이 건다(moai-vjdq.to6).
+        let system = (self.system)();
+        self.system_zone = system.0.clone();
+        let (zone, why) = crate::tz::chosen(look.timezone.as_deref(), system);
         self.zone = zone;
         self.saved_zone = look.timezone.clone();
         // **경고를 다시 세지 않는다**(moai-fgjj, 2026-09-23 사용자 결정) — 든 셈에 기한 판정이 안
