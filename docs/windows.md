@@ -126,4 +126,4 @@ It installs nothing on its own and never edits `PATH`. What it does step by step
 and what to check on a real machine, is in `CONTRIBUTING.md` under "Developing on
 Windows".
 
-Decided in: moai-l3mn moai-j9gv
+Decided in: moai-l3mn moai-j9gv moai-uwzg
