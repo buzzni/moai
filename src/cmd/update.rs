@@ -142,6 +142,12 @@ fn sh(plan: &crate::update::Plan, script: Vec<u8>, json: bool) -> std::io::Resul
         // 먼저 선 파일이나 링크를 따라가 덮는다. 앞 판이 남긴 같은 이름은 걷고, 그래도 서 있으면 멈춘다. 못 적은
         // 것은 자리를 대어 "띄우지 못했다" 와 가른다.
         let at = |e: std::io::Error| std::io::Error::new(e.kind(), format!("{}: {e}", file.display()));
+        // **지우는 일은 Drop 이 맡고, Ctrl-C 는 moai 가 살아남아 받는다**(moai-vjdq.chk). 콘솔의 Ctrl-C 는 moai 와
+        // 자식 powershell 둘 다에 간다 — Drop 은 프로세스가 죽으면 안 돈다. 그래서 자식이 끝날 때까지 moai 쪽만
+        // 처리기로 삼켜 파일을 걷고 나서 나간다. `SetConsoleCtrlHandler(NULL, TRUE)` 로 무시하지 않는 까닭은 그
+        // 플래그가 자식에게 상속돼 powershell 까지 Ctrl-C 를 못 받기 때문이다 — 처리기 함수는 상속되지 않는다.
+        // 파일을 만들기 전에 서고, 일찍 실패하는 길(`?`)도 같은 Drop 이 지나간다.
+        let _guard = TempScript::new(file);
         let _ = std::fs::remove_file(file);
         std::fs::OpenOptions::new()
             .write(true)
@@ -151,8 +157,6 @@ fn sh(plan: &crate::update::Plan, script: Vec<u8>, json: bool) -> std::io::Resul
             .map_err(at)?;
         // `install.ps1` 은 표준 입력을 안 읽는다 — 이 프로세스의 것을 물려주면 묻는 것이 없어도 쥔다.
         let status = cmd.stdin(Stdio::null()).status();
-        // 받은 스크립트는 이번 한 번의 것이다. 못 지워도 임시 자리라 막지 않는다.
-        let _ = std::fs::remove_file(file);
         return status;
     }
     cmd.stdin(Stdio::piped());
@@ -174,6 +178,45 @@ fn sh(plan: &crate::update::Plan, script: Vec<u8>, json: bool) -> std::io::Resul
     let status = child.wait();
     let _ = writer.join();
     status
+}
+
+/// 임시 스크립트 한 장의 임자 — 떨어지면 파일을 걷는다(못 지워도 임시 자리라 막지 않는다). Windows 에서는
+/// 살아 있는 동안 Ctrl-C 를 삼켜 Drop 이 돌 수 있게 한다.
+struct TempScript<'a>(&'a std::path::Path);
+
+impl<'a> TempScript<'a> {
+    fn new(file: &'a std::path::Path) -> Self {
+        #[cfg(windows)]
+        ctrl::swallow(true);
+        TempScript(file)
+    }
+}
+
+impl Drop for TempScript<'_> {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.0);
+        #[cfg(windows)]
+        ctrl::swallow(false);
+    }
+}
+
+#[cfg(windows)]
+mod ctrl {
+    type Handler = unsafe extern "system" fn(u32) -> i32;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetConsoleCtrlHandler(handler: Option<Handler>, add: i32) -> i32;
+    }
+    /// CTRL_C_EVENT(0)·CTRL_BREAK_EVENT(1) 은 처리한 것으로 돌려 기본 동작(종료)을 막는다.
+    unsafe extern "system" fn on_ctrl(kind: u32) -> i32 {
+        (kind <= 1) as i32
+    }
+    pub fn swallow(on: bool) {
+        // SAFETY: 서명이 kernel32 의 것과 같고, 처리기는 인자만 읽는다.
+        unsafe {
+            SetConsoleCtrlHandler(Some(on_ctrl), on as i32);
+        }
+    }
 }
 
 /// `--json` 의 값 하나 — 돌릴 것과, 돌렸으면 그 셸의 종료 코드.
