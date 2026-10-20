@@ -12,6 +12,43 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **An ARM64 Windows build, `aarch64-pc-windows-msvc`**, with the C runtime
+  linked in like the x64 one. `install.ps1` picks it on ARM64 Windows when run
+  from a native ARM64 PowerShell; an x64 PowerShell running emulated still gets
+  the x64 build. (moai-uwzg.q1j)
+- **`moai.exe` carries version information** — product name, version,
+  description and license show in Explorer's Details tab and in
+  `(Get-Item moai.exe).VersionInfo`. The binary is not code-signed yet.
+  (moai-uwzg.kpx)
+
+### Fixed
+
+- **Windows reads its own time zone.** Times were always drawn in UTC with a
+  "the system names no time zone" notice; moai now asks Windows for the
+  current zone and its daylight-saving rules and opens them as a POSIX rule
+  (`<+09>-9`, `<-05>5<-04>,M3.2.0/2,M11.1.0/2`). `TZ` still comes first,
+  but a `TZ` moai cannot open — an IANA name with no tzdb beside `moai.exe`,
+  as MSYS2 shells often set — falls back to Windows' zone. (moai-vjdq.3ls)
+- **The explorer's "run `moai due apply`" notice counts in the zone `due apply`
+  uses** — the system zone — so the number it shows is the number of rows
+  `due apply` would raise, even when `[tui] timezone` names another zone.
+  Drawn deadline days and day filters keep the chosen zone. (moai-vjdq.4sl)
+- **Paths whose plain spelling opens another file keep their `\\?\` form on
+  Windows** — names ending in a dot or a space, and device names like `aux`.
+  (moai-vjdq.lk8)
+- **MSYS2's own git works in a repository whose path holds a `'`.** Its
+  arguments are now quoted the MSYS2 way; before, `git config` looked in the
+  wrong place and every write stopped asking who you are. (moai-vjdq.ch3)
+- **`moai update --dry-run`'s PowerShell line survives typographic quotes** in
+  the install path (`C:\Users\O’Brien\…`). (moai-vjdq.ad1)
+- **Ctrl-C during `moai update` on Windows no longer leaves the temporary
+  `install.ps1` behind**; Ctrl-Break still stops moai at once. (moai-vjdq.chk)
+- **A byte-order mark an editor puts at the start of a parked thought is
+  dropped**, so an untouched template says the title is empty instead of
+  storing a title of U+FEFF. (moai-vjdq.wms)
+
 ## [0.19.0] - 2026-10-17
 
 ### Added

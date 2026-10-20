@@ -34,6 +34,15 @@ env:
   # 컴파일 세션에 매인 상태라, 매번 새로 뜨는 러너에서는 쓸 데가 없다 — 그런데 덩치가
   # `target/` 의 삼분의 이다. 담고 풀기만 하고 아무도 안 쓰는 1GB 를 걷는다.
   CARGO_INCREMENTAL: 0
+  # **cargo 캐시가 담고 푸는 자리는 여기 한 곳에 적는다**(moai-uwzg 리뷰). 잡마다 `cache/restore` 와
+  # `cache/save` 가 갈라 서는데, `actions/cache` 는 이 목록을 캐시의 판(version)에 섞는다 — 한쪽만 고치면
+  # 푸는 쪽이 담은 것을 영영 못 맞히고, 붉어지는 것은 없다. 이름이 `CARGO_` 로 시작하지 않는 까닭은 cargo 가
+  # 그 머리의 환경 변수를 설정 값으로 읽기 때문이다(`CARGO_CACHE_*` 는 `[cache]` 표다).
+  CACHED_PATHS: |
+    ~/.cargo/registry/index
+    ~/.cargo/registry/cache
+    ~/.cargo/git/db
+    target
 
 jobs:
   # 이것이 required check 둘 중 하나다(다른 하나는 `size-budget`). `main` 의 보호 규칙은 이
@@ -144,15 +153,25 @@ jobs:
           cargo --version
           cargo clippy --version
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # **cargo 캐시는 develop 만 담고 PR 은 풀기만 한다**(moai-uwzg.7ow). 2026-10-20 에 저장소 캐시가
+      # 20개 12.8GB 로 10GiB 상한을 넘겨 있었고, 그 가운데 7.3GB 가 PR ref 셋(`refs/pull/<n>/merge`)에
+      # 하나씩 담긴 이 잡의 `cargo-dev-Linux`(2.4GB 남짓)였다. PR ref 에 담긴 것은 그 PR 만 읽는데, PR 은
+      # 기본 가지가 담은 것을 읽을 수 있다 — PR 마다 담을 까닭이 없다. 대가는 PR 에서 의존성을 바꾼 판이
+      # 그 PR 의 다음 푸시에서도 바뀐 의존성을 다시 짓는 것이다.
+      #
+      # **담기 전에 `cargo clean -p moai` 로 이 크레이트의 산출물을 걷는다.** 시험 바이너리·clippy 산출물은
+      # 커밋마다 바뀌어 다음 판이 어차피 다시 짓는데, 덩치는 `target/debug` 의 절반을 넘는다(로컬에서
+      # clippy·`test --no-run` 뒤 1.5GB 가 517MB 가 됐다). 남는 것은 의존성 산출물이다.
+      #
+      # **열쇠의 머리에 툴체인 판을 넣는다.** `restore-keys` 가 판을 몰라, 판을 올린 날 못 쓰는 옛 판의
+      # `target` 을 통째로 풀고 새 판의 것을 그 위에 더해 담았다. 같은 판 안에서 `Cargo.lock` 이 바뀔 때마다
+      # 옛 의존성이 남아 커지는 것(한 번에 86MiB 남짓)은 그대로고, 판을 올리는 날 비워진다.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-dev-${{ runner.os }}-
+          path: ${{ env.CACHED_PATHS }}
+          key: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
 
       # 폭은 `rustfmt.toml` 이 정하고 그 값을 고른 까닭도 거기 적혀 있다. 맞추는
       # 한 판은 c005039 이고, `.git-blame-ignore-revs` 가 `blame` 에서 그것을
@@ -182,6 +201,17 @@ jobs:
       # LTO 한 판(65~84초, 그 잡의 머리글에 잰 값이 있다)이다.
       - name: test
         run: cargo test --locked
+
+      # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 이 잡의 cargo 캐시 자리에 있다.
+      - name: 이 크레이트의 산출물을 걷는다
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        run: cargo clean -p moai
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.CACHED_PATHS }}
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # 바이너리에 닿는 것이 하나라도 바뀌었나 — 밑의 `msrv`·`windows`·`size-budget` 이 이 답을 쓴다
   # (moai-bn0y 는 `size-budget` 때문에 세웠다). 문서 한 줄만 바뀐 판도 LTO 빌드를 통째로 돌았다.
@@ -309,13 +339,11 @@ jobs:
           MSRV: ${{ steps.msrv.outputs.version }}
         run: rustup toolchain install "$MSRV" --profile minimal --no-self-update
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # 담는 것은 develop 푸시뿐이다 — 까닭은 `ci-gate` 의 cargo 캐시 자리에 있다. 열쇠에는 이미 판이 든다.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
+          path: ${{ env.CACHED_PATHS }}
           key: cargo-msrv-${{ runner.os }}-${{ steps.msrv.outputs.version }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-msrv-${{ runner.os }}-${{ steps.msrv.outputs.version }}-
 
@@ -331,6 +359,20 @@ jobs:
         env:
           MSRV: ${{ steps.msrv.outputs.version }}
         run: cargo "+$MSRV" check --locked --all-targets
+
+      # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 `ci-gate` 의 같은 자리에 있다.
+      # 판을 대고 부르는 까닭은 위 "그 판을 받는다" 의 rustup 프록시 이야기와 같다.
+      - name: 이 크레이트의 산출물을 걷는다
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        env:
+          MSRV: ${{ steps.msrv.outputs.version }}
+        run: cargo "+$MSRV" clean -p moai
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.CACHED_PATHS }}
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # **Windows 에서 clippy 와 시험 컴파일이 서는가**(moai-j9gv.ae7). 릴리스가 `x86_64-pc-windows-msvc` 를
   # 내는데 그 타깃을 밟는 잡이 없으면, 유닉스 전용 API 하나가 든 PR 이 초록으로 들어가 릴리스
@@ -395,21 +437,44 @@ jobs:
           cargo --version
           cargo clippy --version
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # 담는 것은 develop 푸시뿐이고 열쇠의 머리에 툴체인 판이 든다 — 까닭은 `ci-gate` 의 cargo 캐시 자리에 있다.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-dev-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
-          restore-keys: cargo-dev-${{ runner.os }}-
+          path: ${{ env.CACHED_PATHS }}
+          key: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
+          restore-keys: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
 
       - name: clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: test 를 짓는다
         run: cargo test --locked --no-run
+
+      # **PE 버전 정보가 들었는가**(moai-uwzg.kpx, 리뷰 moai-uwzg.i4r 6번). 위 스텝이 통합 시험을 위해
+      # `target/debug/moai.exe` 를 이미 지었다 — `build.rs` 가 리소스를 안 넣게 된 PR 을 태그까지 끌고 가지
+      # 않는다. 릴리스 잡도 같은 것을 제 바이너리로 다시 본다.
+      - name: PE 버전 정보를 읽는다
+        run: |
+          set -euo pipefail
+          want=$(scripts/check-version.sh --print)
+          got=$(powershell -NoProfile -Command '$i = (Get-Item target/debug/moai.exe).VersionInfo; "$($i.ProductName) $($i.ProductVersion)"' | tr -d '\r')
+          printf '버전 정보: %s\n' "$got"
+          if [ "$got" != "moai $want" ]; then
+            echo "::error::moai.exe 의 버전 정보가 '$got' 다 — 'moai $want' 여야 한다"
+            exit 1
+          fi
+
+      # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 `ci-gate` 의 같은 자리에 있다.
+      - name: 이 크레이트의 산출물을 걷는다
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        run: cargo clean -p moai
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.CACHED_PATHS }}
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # 15MB 는 이 도구가 지고 가는 예산이다 (CLAUDE.md 의 표). 넘긴 것을 릴리스
   # 태그에서 처음 알면 그때는 되돌릴 자리가 없으니 PR 에서 잰다.
@@ -454,15 +519,13 @@ jobs:
           path: ~/.rustup/toolchains/${{ steps.toolchain.outputs.channel }}-*
           key: rustup-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
 
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # 담는 것은 develop 푸시뿐이고 열쇠의 머리에 툴체인 판이 든다 — 까닭은 `ci-gate` 의 cargo 캐시 자리에 있다.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-cache
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
-          restore-keys: cargo-release-${{ runner.os }}-
+          path: ${{ env.CACHED_PATHS }}
+          key: cargo-release-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-${{ hashFiles('**/Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-release-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
 
       - name: build --release
         run: cargo build --release --locked
@@ -471,3 +534,14 @@ jobs:
       # 적어 두면 갈라진다.
       - name: 예산을 잰다
         run: scripts/check-size.sh target/release/moai
+
+      # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 `ci-gate` 의 같은 자리에 있다.
+      - name: 이 크레이트의 산출물을 걷는다
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        run: cargo clean -p moai --release
+
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.CACHED_PATHS }}
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}

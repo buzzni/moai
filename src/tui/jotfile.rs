@@ -45,6 +45,9 @@ fn is_comment(line: &str) -> bool {
 /// - 그 뒤 **앞 빈 줄을 떼고 끝 빈칸을 뗀** 것이 본문이다. 사이의 빈 줄은 그대로다.
 ///   다 떼고 빈 글이면 본문이 없다
 pub fn parse(text: &str) -> Option<(String, Option<String>)> {
+    // 첫머리의 BOM 하나를 뗀다 — BOM 으로 저장하는 편집기(옛 메모장·VS Code `utf8bom`)에서
+    // 안 고친 틀이 "\u{FEFF}" 제목으로 담기고 친 제목에 U+FEFF 가 붙었다(moai-vjdq.wms).
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let mut lines = text.split('\n').filter(|l| !is_comment(l)).skip_while(|l| l.trim().is_empty());
     let title = lines.next()?.trim().to_string();
@@ -198,6 +201,17 @@ mod tests {
         let t =
             template(Some(&Target { path: "/a\nb".into(), name: "이름\n제목이 될 줄".into() }), crate::i18n::Lang::Ko);
         assert_eq!(parsed(&t), None, "{t}");
+    }
+
+    /// BOM 으로 저장한 편집기: 안 고친 틀은 빈 제목이고, 친 제목에는 U+FEFF 가 안 붙는다.
+    /// 첫머리 하나만 뗀다 — 다른 자리의 U+FEFF 는 글이다. (moai-vjdq.wms)
+    #[test]
+    fn a_leading_bom_is_stripped() {
+        let t = template(Some(&target()), crate::i18n::Lang::Ko);
+        assert_eq!(parsed(&format!("\u{FEFF}{t}")), None);
+        assert_eq!(parsed(&format!("\u{FEFF}제목{t}")), some("제목", None));
+        assert_eq!(parsed("\u{FEFF}\u{FEFF}제목"), some("\u{FEFF}제목", None));
+        assert_eq!(parsed("제목\n\u{FEFF}본문"), some("제목", Some("\u{FEFF}본문")));
     }
 
     #[test]

@@ -181,8 +181,47 @@ fn finished(mut cmd: std::process::Command) -> Result<Vec<u8>, Error> {
 /// 끊기면 흘려 읽는 길에서만 git 이 이쪽의 입력을 물려받는다.
 fn invocation(root: &Path, args: &[&str]) -> std::process::Command {
     let mut cmd = command();
-    cmd.arg("-C").arg(root).args(["-c", "i18n.logOutputEncoding=UTF-8"]).args(args).stdin(std::process::Stdio::null());
+    cmd.stdin(std::process::Stdio::null());
+    #[cfg(not(unix))]
+    if msys_git() {
+        // MSYS2 빌드는 명령 줄을 제 규칙으로 다시 쪼갠다 — 러스트의 MSVC 꼴로 싼 `-C <뿌리>` 의 `'` 가 먹혀 git 이 엉뚱한
+        // 자리를 본다(moai-vjdq.ch3). 낱말마다 MSYS2 의 꼴로 싸 `raw_arg` 로 넘긴다([`crate::tui::jotfile::msys_quoted`]).
+        use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+        use std::os::windows::process::CommandExt as _;
+        for w in argv(root, args) {
+            cmd.raw_arg(std::ffi::OsString::from_wide(&crate::tui::jotfile::msys_quoted(w.encode_wide())));
+        }
+        return cmd;
+    }
+    cmd.args(argv(root, args));
     cmd
+}
+
+/// [`invocation`] 이 넘길 낱말 — `-C <뿌리> -c i18n.logOutputEncoding=UTF-8 <args…>`. **싸는 꼴만 갈리고 낱말은 여기
+/// 하나에서 짓는다**(리뷰) — MSYS2 갈래가 제 손으로 다시 적던 판은, 한쪽에만 `-c` 를 더하는 날 두 git 이 다른 물음을 받았다.
+fn argv<'a>(root: &'a Path, args: &'a [&str]) -> impl Iterator<Item = &'a std::ffi::OsStr> {
+    use std::ffi::OsStr;
+    [OsStr::new("-C"), root.as_os_str(), OsStr::new("-c"), OsStr::new("i18n.logOutputEncoding=UTF-8")]
+        .into_iter()
+        .chain(args.iter().map(OsStr::new))
+}
+
+/// `PATH` 에서 처음 닿는 `git.exe` 가 **MSYS2 의 런타임으로 지은 것인가** — 그 옆에 `msys-2.0.dll` 이 있으면 그렇다
+/// (`pacman -S git`). Git for Windows 의 `git.exe` 는 네이티브라 옆에 그 DLL 이 없다(moai-vjdq.ch3).
+///
+/// 디렉터리 목록과 파일 있음은 부르는 쪽이 건넨다 — 리눅스에서 시험하려는 것이다. 못 찾으면 `false`(MSVC 꼴 그대로).
+#[cfg(any(not(unix), test))]
+fn msys_runtime(path: &std::ffi::OsStr, exists: impl Fn(&Path) -> bool) -> bool {
+    std::env::split_paths(path)
+        .find(|dir| exists(&dir.join("git.exe")))
+        .is_some_and(|dir| exists(&dir.join("msys-2.0.dll")))
+}
+
+/// [`msys_runtime`] 을 프로세스에 한 번만 묻는다 — 부를 때마다 `PATH` 를 훑지 않는다.
+#[cfg(not(unix))]
+fn msys_git() -> bool {
+    static MSYS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MSYS.get_or_init(|| std::env::var_os("PATH").is_some_and(|p| msys_runtime(&p, |f| f.is_file())))
 }
 
 /// `root` 에서 git 을 한 번 부르고 표준 출력을 받는다. 글자가 깨졌으면 실패다 —
@@ -659,6 +698,32 @@ fn records_of(record: &str) -> Option<(&str, &str, &str)> {
 pub(crate) mod tests {
     use super::*;
     use crate::git_leaks::{REPO, TEST};
+
+    /// MSYS2 의 git 은 `git.exe` 옆에 `msys-2.0.dll` 이 있고, 처음 닿는 `git.exe` 만 본다(moai-vjdq.ch3).
+    #[test]
+    fn msys_is_told_by_the_dll_beside_the_first_git() {
+        let files = |set: &'static [&'static str]| move |p: &Path| set.contains(&p.to_str().unwrap());
+        // 가르는 글자는 기계마다 다르다(`:`·`;`) — 시험이 Windows 에서도 서게 `join_paths` 로 잇는다.
+        let path = std::env::join_paths(["/a", "/b", "/c"]).unwrap();
+        assert!(msys_runtime(&path, files(&["/b/git.exe", "/b/msys-2.0.dll"])));
+        assert!(!msys_runtime(&path, files(&["/b/git.exe"])));
+        // 앞선 네이티브 git 이 이긴다 — 뒤 디렉터리의 DLL 은 상관없다.
+        assert!(!msys_runtime(&path, files(&["/a/git.exe", "/c/git.exe", "/c/msys-2.0.dll"])));
+        assert!(!msys_runtime(&path, files(&[])));
+    }
+
+    /// 따옴표 든 뿌리는 MSYS2 꼴로 싸야 `'` 가 안 먹힌다 — 싸는 자는 jotfile 의 것을 그대로 쓰고, 낱말은 두 갈래가 함께
+    /// 쓰는 [`argv`] 에서 온다. 그 차례나 낱말이 바뀌면 여기가 붉어진다.
+    #[test]
+    fn a_root_with_a_quote_is_wrapped_the_msys_way() {
+        let q = |w: &std::ffi::OsStr| {
+            String::from_utf16(&crate::tui::jotfile::msys_quoted(w.to_str().unwrap().encode_utf16())).unwrap()
+        };
+        let root = Path::new(r"C:\msys64\home\o'brien\proj");
+        let got: Vec<String> = argv(root, &["log", "--"]).map(q).collect();
+        let want = ["-C", r#""C:\\msys64\\home\\o'brien\\proj""#, "-c", "i18n.logOutputEncoding=UTF-8", "log", "--"];
+        assert_eq!(got, want);
+    }
 
     /// **마감 안에 끝난 부름은 그대로 답하고, 넘긴 부름은 기다리지 않는다**(moai-59k3.u09). 멈춘
     /// git 을 `sleep` 이 대신한다 — 그 자리에서 멈춘 git 과 이쪽에서 보이는 것이 같다. 손자가 파이프를

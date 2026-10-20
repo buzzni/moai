@@ -40,7 +40,8 @@ pub enum Trouble {
     /// **까닭을 글로 싣지 않는다**(리뷰 moai-efoc.3e1) — `Unreadable` 의 `said` 에 한국어 글을 싣던 판은 영어 화면에도
     /// 그 글을 냈다. 말은 [`crate::view::zone_trouble`] 이 짓는다.
     NotTzif { name: String },
-    /// 시스템이 어느 시간대인지를 말해 주지 않는다 — `/etc/localtime` 이 이름을 안 댄다.
+    /// 시스템이 어느 시간대인지를 말해 주지 않는다 — 유닉스는 `/etc/localtime` 이 이름을 안 대고, Windows 는
+    /// `GetTimeZoneInformation` 이 실패했다.
     NoSystemZone,
 }
 
@@ -146,23 +147,46 @@ impl Zone {
     }
 
     /// 이 기계가 선 시간대. **`TZ` 가 먼저다** — 그것으로 한 번만 다르게 보는 길이 사람에게
-    /// 이미 익은 자다. 다음이 `/etc/localtime` 의 심볼릭 링크가 대는 이름이다.
+    /// 이미 익은 자다. 다음은 유닉스에서 `/etc/localtime` 의 심볼릭 링크가 대는 이름이고, Windows 에서는
+    /// 커널이 대는 오프셋과 서머타임 규칙을 POSIX 규칙 글로 옮긴 것이다([`windows_name`], moai-vjdq.3ls).
     ///
     /// 이름을 못 얻으면 UTC 와 까닭을 함께 낸다 — **막지 않는다**.
     ///
-    /// **단위 시험에서는 늘 UTC 이고 할 말이 없다**(moai-lag7.sk7). 시험이 돌리는 기계의 시계를 타면 시간대가 없는
-    /// 기계(Windows·zoneinfo 없는 컨테이너)에서 "시스템이 제 시간대를 안 댄다" 가 보기 설정 알림에 섞여, 그 알림이
-    /// 비었는지를 재는 시험 열 개가 까닭 없이 붉었다. 기계를 읽는 셈은 [`Zone::machine`] 이 따로 잰다.
+    /// **여기에 `cfg!(test)` 갈래가 없다**(moai-vjdq.to6). 한때 단위 시험에서는 늘 UTC 를 냈다 — 시험이 돌리는
+    /// 기계의 시계를 타면 시간대가 없는 기계(Windows·zoneinfo 없는 컨테이너)에서 "시스템이 제 시간대를 안 댄다" 가
+    /// 보기 설정 알림에 섞여 그 알림이 비었는지를 재는 시험 열 개가 까닭 없이 붉었기 때문이다(moai-lag7.sk7).
+    /// 그러나 그 갈래는 기계 시간대의 알림 길을 단위 시험이 아예 못 재게 했다. 그래서 출처를 **부르는 쪽이
+    /// 든다** — [`System`] 과 `App` 이 [`Source`] 를 들고(처음값은 [`SOURCE`]), `chosen` 은 그것으로 푼 값을 받는다.
+    /// 시험의 처음값은 [`quiet`] 이고, 기계를 재는 시험은 제 가짜를 건다.
     pub fn system() -> (Zone, Option<Trouble>) {
-        if cfg!(test) {
-            return (Zone::utc(), None);
-        }
-        Zone::machine()
+        Zone::resolved(env_name(), machine_name, cfg!(windows))
     }
 
-    /// [`Zone::system`] 의 몸통 — 이 기계에 묻는다.
-    fn machine() -> (Zone, Option<Trouble>) {
-        match system_name() {
+    /// `TZ` 가 먼저고, 없으면 기계가 댄다. **Windows 에서는 못 연 `TZ` 가 기계로 내려간다**(리뷰 moai-vjdq.tg6 2번,
+    /// 2026-10-20 사용자 결정) — MSYS2 의 profile 이 흔히 `TZ=Asia/Seoul` 을 내보내는데 `moai.exe` 곁에는 tzdb 가 없어,
+    /// `TZ` 가 이기는 자로는 커널이 아는 답을 두고 늘 UTC 와 `NoTzdb` 로 섰다. 열리는 `TZ`(`JST-9` 같은 규칙 글)는
+    /// 그대로 이긴다. 기계도 못 대면 `TZ` 의 까닭을 그대로 낸다 — 사람이 적은 이름이 무엇이 틀렸는지가 더 쓸모 있다.
+    /// 유닉스는 내려가지 않는다: 거기서 못 연 `TZ` 는 오타고, 조용히 `/etc/localtime` 으로 서면 그 오타가 안 보인다.
+    fn resolved(
+        env: Option<String>,
+        machine: impl FnOnce() -> Option<String>,
+        fall_back: bool,
+    ) -> (Zone, Option<Trouble>) {
+        let Some(name) = env else { return Zone::named(machine()) };
+        let (zone, why) = Zone::named(Some(name));
+        if why.is_some()
+            && fall_back
+            && let (z, None) = Zone::named(machine())
+        {
+            return (z, None);
+        }
+        (zone, why)
+    }
+
+    /// [`Zone::system`] 의 몸통 — 시스템이 댄 이름(없을 수 있다)을 시간대로 연다. 이름을 어디서 얻는가와 떼어 두어
+    /// 시험이 이름만 건네 "안 댄다"·"못 푼다"·"푼다" 세 길을 다 잰다.
+    fn named(name: Option<String>) -> (Zone, Option<Trouble>) {
+        match name {
             None => (Zone::utc(), Some(Trouble::NoSystemZone)),
             Some(name) => match Zone::load(&name) {
                 Ok(z) => (z, None),
@@ -245,11 +269,19 @@ fn safe_join(dir: &Path, name: &str) -> Option<PathBuf> {
     Some(at)
 }
 
-/// 시스템이 대는 이름. `TZ` 가 먼저고, 그다음이 `/etc/localtime` 이 가리키는 자리다.
-fn system_name() -> Option<String> {
-    if let Some(name) = env_name() {
-        return Some(name);
-    }
+/// Windows 는 `/etc/localtime` 이 없다 — 커널에 묻는다(moai-vjdq.3ls). 이름은 IANA 가 아니라 규칙 글이다.
+#[cfg(windows)]
+fn machine_name() -> Option<String> {
+    windows_name()
+}
+
+#[cfg(not(windows))]
+fn machine_name() -> Option<String> {
+    localtime_name()
+}
+
+#[cfg(not(windows))]
+fn localtime_name() -> Option<String> {
     let link = std::fs::read_link("/etc/localtime").ok()?;
     let dir = zoneinfo();
     // 링크가 tzdb 안을 가리키면 그 아래 경로가 곧 이름이다. 밖을 가리키면 이름을 모른다 —
@@ -269,7 +301,151 @@ fn system_name() -> Option<String> {
         })
 }
 
-/// `TZ` 가 대는 이름. 없거나 tzdb 밖을 가리키는 경로면 `None` 이고, 그때는 `/etc/localtime` 이 답한다.
+/// `SYSTEMTIME` 에서 규칙에 쓰는 칸만.
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WinDate {
+    year: u16,
+    month: u16,
+    day_of_week: u16,
+    day: u16,
+    hour: u16,
+    minute: u16,
+    second: u16,
+}
+
+/// Windows 의 `TIME_ZONE_INFORMATION` 을 POSIX TZ 규칙 글로 옮긴다(moai-vjdq.3ls) — **수만 받는 순수 함수**라
+/// Linux 에서 잰다. `bias` 들은 분이고 `UTC = 벽시계 + bias` 라 POSIX 의 서쪽이 양수인 부호와 같다.
+///
+/// - 표준시 = `bias + std_bias`, 서머타임 = `bias + dst_bias`. 이름은 Windows 의 것이 POSIX 약어가 아니라 쓰지 않고
+///   `<±hh[mm]>` 꼴로 짓는다(`<+09>-9`, `<-05>5<-04>,M3.2.0/2,M11.1.0/2`).
+/// - **`std_bias` 는 `StandardDate` 를 댄 때만 든다**(리뷰) — Win32 문서가 "StandardDate 가 없으면 이 칸은 안 본다" 고
+///   못박고, MSVC CRT 의 `_tzset` 과 Go 의 `time` 도 그 달이 0 이면 `Bias` 하나로 잰다.
+/// - 서머타임은 `DaylightDate` 에서 들어가고 `StandardDate` 에서 나온다. 둘 다 *바뀌기 직전의 벽시계*라 POSIX 의
+///   `M월.주.요일/시각` 과 같은 자다. `day` 는 1~5 주고 5 가 마지막 주다(POSIX 의 `M` 규칙과 같은 뜻).
+/// - `month == 0` 이면 서머타임이 없다. 시각 칸이 `SYSTEMTIME` 의 폭 밖이어도 그렇다 — 그 글은 규칙으로 안 읽혀,
+///   그대로 내면 표준시까지 잃고 UTC 로 떨어진다.
+/// - **`year != 0` 이면 그 해 하나의 절대 날짜다.** POSIX 의 `M` 규칙은 해마다 되풀이하는 꼴이라 못 옮긴다 —
+///   그때는 표준시 하나로 떨어진다(지어낸 되풀이 규칙이 틀린 날에 시각을 옮기는 것보다 낫다). Windows 는 되풀이 규칙을
+///   늘 `year = 0` 으로 준다.
+/// - 자정 직전(`23:59:59`)은 Windows 가 "다음 자정" 을 이렇게 적는 꼴이라 `24:00` 으로 읽는다.
+#[cfg(any(windows, test))]
+fn posix_rule(bias: i32, std_bias: i32, dst_bias: i32, std_date: WinDate, dst_date: WinDate) -> String {
+    let std = bias + if std_date.month == 0 { 0 } else { std_bias };
+    let head = format!("{}{}", abbr(-std), west(std));
+    let valid = |d: &WinDate| {
+        d.year == 0
+            && (1..=12).contains(&d.month)
+            && d.day_of_week <= 6
+            && (1..=5).contains(&d.day)
+            && d.hour <= 23
+            && d.minute <= 59
+            && d.second <= 59
+    };
+    let dst = bias + dst_bias;
+    if !valid(&std_date) || !valid(&dst_date) || dst == std {
+        return head;
+    }
+    // 서머타임 오프셋을 빼면 표준시보다 한 시간 앞이다(POSIX) — 그 밖(Lord Howe 의 30분)만 적는다.
+    let dst_off = if dst == std - 60 { String::new() } else { west(dst) };
+    format!("{head}{}{dst_off},{},{}", abbr(-dst), when(&dst_date), when(&std_date))
+}
+
+/// `<+0530>` — 동쪽이 양수인 분으로. 분이 0 이면 시만.
+#[cfg(any(windows, test))]
+fn abbr(east: i32) -> String {
+    let (sign, m) = (if east < 0 { '-' } else { '+' }, east.unsigned_abs());
+    match m % 60 {
+        0 => format!("<{sign}{:02}>", m / 60),
+        mm => format!("<{sign}{:02}{mm:02}>", m / 60),
+    }
+}
+
+/// POSIX 오프셋 — 서쪽이 양수인 분으로. `5`·`-9`·`-5:30`.
+#[cfg(any(windows, test))]
+fn west(min: i32) -> String {
+    let (sign, m) = (if min < 0 { "-" } else { "" }, min.unsigned_abs());
+    match m % 60 {
+        0 => format!("{sign}{}", m / 60),
+        mm => format!("{sign}{}:{mm:02}", m / 60),
+    }
+}
+
+/// `M3.2.0/2` — 달·주·요일과 그날의 벽시계.
+#[cfg(any(windows, test))]
+fn when(d: &WinDate) -> String {
+    let (h, m, s) = match (d.hour, d.minute, d.second) {
+        (23, 59, 59) => (24, 0, 0),
+        (h, m, s) => (h, m, s),
+    };
+    let time = match (m, s) {
+        (0, 0) => format!("{h}"),
+        (m, 0) => format!("{h}:{m:02}"),
+        (m, s) => format!("{h}:{m:02}:{s:02}"),
+    };
+    format!("M{}.{}.{}/{time}", d.month, d.day, d.day_of_week)
+}
+
+/// 커널에 묻는다 — `GetTimeZoneInformation`. 크레이트 없이 선언만 한다(2026-10-20 사용자 결정).
+#[cfg(windows)]
+fn windows_name() -> Option<String> {
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct SystemTime {
+        year: u16,
+        month: u16,
+        day_of_week: u16,
+        day: u16,
+        hour: u16,
+        minute: u16,
+        second: u16,
+        millis: u16,
+    }
+    #[repr(C)]
+    struct TimeZoneInformation {
+        bias: i32,
+        standard_name: [u16; 32],
+        standard_date: SystemTime,
+        standard_bias: i32,
+        daylight_name: [u16; 32],
+        daylight_date: SystemTime,
+        daylight_bias: i32,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetTimeZoneInformation(info: *mut TimeZoneInformation) -> u32;
+    }
+    // Win32 의 TIME_ZONE_INFORMATION 은 172바이트다 — 배치가 어긋나면 여기서 컴파일이 멈춘다.
+    const _: () = assert!(std::mem::size_of::<TimeZoneInformation>() == 172);
+    const TIME_ZONE_ID_INVALID: u32 = 0xFFFF_FFFF;
+    const TIME_ZONE_ID_UNKNOWN: u32 = 0;
+    let mut info = std::mem::MaybeUninit::<TimeZoneInformation>::zeroed();
+    // SAFETY: 크기와 배치가 Win32 의 TIME_ZONE_INFORMATION 과 같은 `repr(C)` 이고, 함수는 그 구조체 하나만 쓴다.
+    let id = unsafe { GetTimeZoneInformation(info.as_mut_ptr()) };
+    if id == TIME_ZONE_ID_INVALID {
+        return None;
+    }
+    // SAFETY: 위에서 0 으로 채웠고 성공한 호출이 채웠다 — 모든 칸이 정수라 어느 비트열도 값이다.
+    let info = unsafe { info.assume_init() };
+    let date = |d: SystemTime| WinDate {
+        year: d.year,
+        month: d.month,
+        day_of_week: d.day_of_week,
+        day: d.day,
+        hour: d.hour,
+        minute: d.minute,
+        second: d.second,
+    };
+    // **`TIME_ZONE_ID_UNKNOWN` 은 "서머타임을 안 쓴다" 는 답이다**(리뷰) — Win32 문서가 전환 날짜가 없거나 사람이
+    // "서머타임 자동 조정" 을 끈 때라고 댄다. 그때 날짜 칸이 남아 있어도 규칙에 싣지 않는다 — 실으면 끈 서머타임을 탄다.
+    let daylight = match id {
+        TIME_ZONE_ID_UNKNOWN => WinDate { month: 0, ..date(info.daylight_date) },
+        _ => date(info.daylight_date),
+    };
+    Some(posix_rule(info.bias, info.standard_bias, info.daylight_bias, date(info.standard_date), daylight))
+}
+
+/// `TZ` 가 대는 이름. 없거나 tzdb 밖을 가리키는 경로면 `None` 이고, 그때는 `/etc/localtime`(Windows 는 커널)이 답한다.
 fn env_name() -> Option<String> {
     tz_name(&std::env::var_os("TZ")?)
 }
@@ -329,6 +505,25 @@ fn slashed(rel: &Path) -> Option<String> {
     Some(crate::path::slashed(rel.to_str()?, cfg!(windows)))
 }
 
+/// 이 기계의 시간대가 어디서 오는가 — 부르는 쪽이 들고 다닌다(moai-vjdq.to6). 운영은 [`Zone::system`], 시험은
+/// [`quiet`] 이나 제 가짜다. 함수 포인터라 `App`·[`System`] 에 그냥 담긴다(`App::journals` 와 같은 꼴).
+pub type Source = fn() -> (Zone, Option<Trouble>);
+
+/// 시험의 기본 출처 — 늘 UTC 이고 할 말이 없다. 시험이 돌리는 기계에 시간대가 있든 없든 같은 답이어야 한다.
+#[cfg(test)]
+pub fn quiet() -> (Zone, Option<Trouble>) {
+    (Zone::utc(), None)
+}
+
+/// 출처의 처음값 — **고르는 자리는 여기 하나다**(리뷰). 운영은 [`Zone::system`], 단위 시험은 [`quiet`] 이고,
+/// [`System::default`] 와 `tui::App` 이 이것을 든다. 둘이 따로 고르던 판은 시험에서 `App` 만 `quiet` 을 들고
+/// `System::default()` 는 돌리는 기계의 시계를 탔다 — 기계를 재려는 시험은 [`System::from`] 이나 `App` 의 칸에 제
+/// 출처를 건다.
+#[cfg(not(test))]
+pub const SOURCE: Source = Zone::system;
+#[cfg(test)]
+pub const SOURCE: Source = quiet;
+
 /// 화면이 설 시간대와, **그때 할 말 하나**. 고른 이름이 있으면 그것이 답이고, 없으면 시스템이다
 /// ([`Zone::system`]).
 ///
@@ -338,9 +533,9 @@ fn slashed(rel: &Path) -> Option<String> {
 /// (systemd 의 `timedatectl`)가 흔해서 실제로 겹치는 자리다.
 ///
 /// 못 푼 이름은 UTC 로 떨어지고 **그 이름의** 까닭을 댄다 — 막지 않는다(moai-77ap).
-pub fn chosen(picked: Option<&str>) -> (Zone, Option<Trouble>) {
+pub fn chosen(picked: Option<&str>, system: (Zone, Option<Trouble>)) -> (Zone, Option<Trouble>) {
     match picked {
-        None => Zone::system(),
+        None => system,
         Some(name) => match Zone::load(name) {
             Ok(z) => (z, None),
             Err(why) => (Zone::utc(), Some(why)),
@@ -727,13 +922,23 @@ impl Posix<'_> {
 /// `backlog ls` 처럼 시각을 한 줄도 안 그리는 명령도 zoneinfo 없는 기계(정적 musl 판, moai-77ap)
 /// 에서 [`System::trouble`] 한 줄을 stderr 에 냈다. 알림은 **드는 자리가 아니라 그리는 자리**
 /// 에서 선다 — 푼 적 없는 판은 할 말이 없다.
-#[derive(Default)]
-pub struct System(std::sync::OnceLock<(Zone, Option<Trouble>)>);
+pub struct System(std::sync::OnceLock<(Zone, Option<Trouble>)>, Source);
+
+impl Default for System {
+    fn default() -> Self {
+        System::from(SOURCE)
+    }
+}
 
 impl System {
-    /// 이 기계의 시간대. 처음 부를 때 [`Zone::system`] 으로 한 번 푼다.
+    /// 출처를 건넨다 — 처음값은 [`SOURCE`] 고(`Default`), 시험은 가짜를 건다(moai-vjdq.to6).
+    pub fn from(source: Source) -> System {
+        System(std::sync::OnceLock::new(), source)
+    }
+
+    /// 이 기계의 시간대. 처음 부를 때 출처로 한 번 푼다.
     pub fn zone(&self) -> &Zone {
-        &self.0.get_or_init(Zone::system).0
+        &self.0.get_or_init(self.1).0
     }
 
     /// 풀다 만난 것. **[`System::zone`] 을 부른 판에서만 선다** — 안 읽은 판은 `None` 이다.
@@ -1167,9 +1372,9 @@ mod tests {
     #[test]
     fn the_chosen_zone_answers_for_itself() {
         // `UTC` 는 자료를 안 보므로 tzdb 없는 기계에서도 선다 — 그때도 할 말은 없다.
-        assert_eq!(chosen(Some("UTC")), (Zone::utc(), None));
+        assert_eq!(chosen(Some("UTC"), quiet()), (Zone::utc(), None));
         // 못 푼 이름은 UTC 로 떨어지고 **그 이름의** 까닭을 댄다(자료가 아예 없으면 그 까닭이다).
-        let (z, why) = chosen(Some("Mars/Olympus"));
+        let (z, why) = chosen(Some("Mars/Olympus"), quiet());
         assert!(z.is_utc(), "못 푼 이름으로 시계가 섰다");
         match why {
             Some(Trouble::Unknown { name }) => assert_eq!(name, "Mars/Olympus"),
@@ -1177,14 +1382,166 @@ mod tests {
             other => panic!("못 푼 이름의 까닭이 아니다 — {other:?}"),
         }
         // 고른 적이 없으면 시스템이 답한다 — 까닭도 시스템의 것이다.
-        assert_eq!(chosen(None), Zone::system());
+        let sys = (Zone::fixed("T", 9 * 3600), Some(Trouble::NoSystemZone));
+        assert_eq!(chosen(None, sys.clone()), sys);
+        // 고른 이름이 서면 시스템 쪽 까닭은 할 말이 아니다.
+        assert_eq!(chosen(Some("UTC"), sys), (Zone::utc(), None));
+    }
+
+    fn wd(month: u16, day_of_week: u16, day: u16, hour: u16) -> WinDate {
+        WinDate { year: 0, month, day_of_week, day, hour, minute: 0, second: 0 }
+    }
+    const NONE: WinDate = WinDate { year: 0, month: 0, day_of_week: 0, day: 0, hour: 0, minute: 0, second: 0 };
+
+    fn at(z: &Zone, stamp: &str) -> i32 {
+        z.offset_at(crate::model::parse_rfc3339(stamp).expect(stamp))
+    }
+
+    /// 서머타임 없는 Windows 시간대(서울 `Bias = -540`) — 표준시 하나로 서고, 열어 보면 +9h 다(moai-vjdq.3ls).
+    #[test]
+    fn a_windows_zone_without_dst_becomes_one_standard_rule() {
+        assert_eq!(posix_rule(-540, 0, -60, NONE, NONE), "<+09>-9");
+        let z = Zone::load("<+09>-9").unwrap();
+        assert_eq!(z.name(), "<+09>-9", "이름은 규칙 글 그대로다");
+        assert_eq!(at(&z, "2026-01-01T00:00:00Z"), 9 * 3600);
+        assert_eq!(z.shift("2026-09-21T08:24:58Z"), "2026-09-21T17:24:58Z");
+        // 서머타임 날짜가 달 0 이면(Windows 가 "없다" 를 이렇게 적는다) 날은 안 본다.
+        assert_eq!(posix_rule(-540, 0, -60, wd(0, 0, 2, 2), wd(0, 0, 1, 2)), "<+09>-9");
+    }
+
+    /// 미 동부: 둘째 일요일 3월 2시에 들어가 첫째 일요일 11월 2시에 나온다.
+    #[test]
+    fn us_eastern_gets_the_m_rules() {
+        let rule = posix_rule(300, 0, -60, wd(11, 0, 1, 2), wd(3, 0, 2, 2));
+        assert_eq!(rule, "<-05>5<-04>,M3.2.0/2,M11.1.0/2");
+        let z = Zone::load(&rule).unwrap();
+        assert_eq!(at(&z, "2026-01-15T12:00:00Z"), -5 * 3600);
+        assert_eq!(at(&z, "2026-07-15T12:00:00Z"), -4 * 3600);
+        // 2026-03-08 07:00Z 가 전환(02:00 EST) — 바로 앞과 바로 뒤.
+        assert_eq!(at(&z, "2026-03-08T06:59:59Z"), -5 * 3600);
+        assert_eq!(at(&z, "2026-03-08T07:00:00Z"), -4 * 3600);
+        // 2026-11-01 06:00Z 가 나옴(02:00 EDT).
+        assert_eq!(at(&z, "2026-11-01T05:59:59Z"), -4 * 3600);
+        assert_eq!(at(&z, "2026-11-01T06:00:00Z"), -5 * 3600);
+    }
+
+    /// 남반구는 서머타임이 해를 넘겨 걸친다(시드니: 10월 첫 일요일 2시 ~ 4월 첫 일요일 3시).
+    #[test]
+    fn a_southern_zone_crosses_the_new_year() {
+        let rule = posix_rule(-600, 0, -60, wd(4, 0, 1, 3), wd(10, 0, 1, 2));
+        assert_eq!(rule, "<+10>-10<+11>,M10.1.0/2,M4.1.0/3");
+        let z = Zone::load(&rule).unwrap();
+        assert_eq!(at(&z, "2026-01-10T00:00:00Z"), 11 * 3600, "1월은 서머타임이다");
+        assert_eq!(at(&z, "2026-07-10T00:00:00Z"), 10 * 3600);
+        assert_eq!(at(&z, "2026-12-25T00:00:00Z"), 11 * 3600, "해 끝도 서머타임이다");
+    }
+
+    /// 인도(+05:30)는 분이 든 오프셋을 `-5:30` 과 `<+0530>` 으로 적는다.
+    #[test]
+    fn a_half_hour_offset_keeps_its_minutes() {
+        let rule = posix_rule(-330, 0, -60, NONE, NONE);
+        assert_eq!(rule, "<+0530>-5:30");
+        let z = Zone::load(&rule).unwrap();
+        assert_eq!(at(&z, "2026-05-01T00:00:00Z"), 5 * 3600 + 1800);
+        assert_eq!(z.shift("2026-05-01T00:00:00Z"), "2026-05-01T05:30:00Z");
+        // 서쪽의 분 오프셋(뉴펀들랜드 -03:30)은 부호가 반대다.
+        assert_eq!(posix_rule(210, 0, -60, NONE, NONE), "<-0330>3:30");
+    }
+
+    /// `day == 5` 는 그 달의 마지막 주다 — 유럽 중부: 3월 마지막 일요일 2시 ~ 10월 마지막 일요일 3시.
+    #[test]
+    fn day_five_is_the_last_week() {
+        let rule = posix_rule(-60, 0, -60, wd(10, 0, 5, 3), wd(3, 0, 5, 2));
+        assert_eq!(rule, "<+01>-1<+02>,M3.5.0/2,M10.5.0/3");
+        let z = Zone::load(&rule).unwrap();
+        // 2026-03-29 01:00Z 에 들어가고 2026-10-25 01:00Z 에 나온다.
+        assert_eq!(at(&z, "2026-03-29T00:59:59Z"), 3600);
+        assert_eq!(at(&z, "2026-03-29T01:00:00Z"), 7200);
+        assert_eq!(at(&z, "2026-10-25T00:59:59Z"), 7200);
+        assert_eq!(at(&z, "2026-10-25T01:00:00Z"), 3600);
+    }
+
+    /// 분·초가 든 전환 시각, 서머타임이 30분인 자리, 자정 직전 꼴, 되풀이가 아닌 날짜.
+    #[test]
+    fn odd_windows_shapes_stay_readable() {
+        // Lord Howe: 표준 +10:30, 서머타임 +11 (30분) — 한 시간 앞이 아니라 오프셋을 적는다.
+        let rule = posix_rule(-630, 0, -30, wd(4, 0, 1, 2), wd(10, 0, 1, 2));
+        assert_eq!(rule, "<+1030>-10:30<+11>-11,M10.1.0/2,M4.1.0/2");
+        assert!(Zone::load(&rule).is_ok());
+        // 23:59:59 는 다음 자정으로 읽는다.
+        let end = WinDate { hour: 23, minute: 59, second: 59, ..wd(10, 6, 5, 0) };
+        assert_eq!(when(&end), "M10.5.6/24");
+        assert_eq!(when(&WinDate { minute: 30, ..wd(3, 0, 2, 2) }), "M3.2.0/2:30");
+        // 해 하나를 못박은 날짜는 M 규칙으로 못 옮긴다 — 표준시 하나로 떨어진다.
+        let dated = WinDate { year: 2026, ..wd(3, 0, 2, 2) };
+        assert_eq!(posix_rule(300, 0, -60, wd(11, 0, 1, 2), dated), "<-05>5");
+        // 서머타임이 표준과 같은 오프셋이면 규칙이 아니다.
+        assert_eq!(posix_rule(300, 0, 0, wd(11, 0, 1, 2), wd(3, 0, 2, 2)), "<-05>5");
+        // `Bias` 에 `StandardBias` 가 얹힌다 — 다만 `StandardDate` 를 댄 때만이다(Win32 문서, MSVC CRT 와 Go 의 자).
+        let rule = posix_rule(0, -60, -120, wd(10, 0, 5, 3), wd(3, 0, 5, 2));
+        assert_eq!(rule, "<+01>-1<+02>,M3.5.0/2,M10.5.0/3");
+        assert_eq!(posix_rule(0, -60, 0, NONE, NONE), "<+00>0", "날짜 없는 StandardBias 를 얹었다");
+        // 해를 못박은 날짜라도 `StandardDate` 는 댄 것이다 — 표준시에 `StandardBias` 가 든다.
+        assert_eq!(posix_rule(0, -60, -120, WinDate { year: 2026, ..wd(10, 0, 5, 3) }, wd(3, 0, 5, 2)), "<+01>-1");
+        assert_eq!(posix_rule(0, 0, 0, NONE, NONE), "<+00>0");
+        // `SYSTEMTIME` 의 폭 밖 시각은 규칙으로 못 읽혀 UTC 로 떨어진다 — 표준시 하나로 남긴다.
+        let bad = WinDate { minute: 60, ..wd(3, 0, 2, 2) };
+        assert_eq!(posix_rule(300, 0, -60, wd(11, 0, 1, 2), bad), "<-05>5");
+        assert_eq!(posix_rule(300, 0, -60, WinDate { hour: 24, ..wd(11, 0, 1, 2) }, wd(3, 0, 2, 2)), "<-05>5");
+        assert!(Zone::load("<+00>0").unwrap().is_utc());
+    }
+
+    /// 시스템이 이름을 대는 세 길 — 안 댄다·못 푼다·푼다. 이름만 건네 기계와 떼어 잰다(moai-vjdq.to6).
+    #[test]
+    fn an_unopened_tz_falls_to_the_machine_only_where_asked() {
+        let seoul = || Some("<+09>-9".to_string());
+        // Windows: tzdb 없는 `TZ=Asia/Seoul` 은 커널이 대는 규칙으로 선다.
+        let (z, why) = Zone::resolved(Some("Mars/Olympus".into()), seoul, true);
+        assert_eq!((z.name(), why), ("<+09>-9", None));
+        // 유닉스: 못 연 `TZ` 는 그대로 UTC 와 까닭이다 — 오타를 가리지 않는다.
+        let (z, why) = Zone::resolved(Some("Mars/Olympus".into()), seoul, false);
+        assert!(z.is_utc() && why.is_some());
+        // 열리는 `TZ` 는 기계를 안 본다.
+        let (z, _) = Zone::resolved(Some("JST-9".into()), || panic!("열린 TZ 가 기계에 물었다"), true);
+        assert_eq!(z.name(), "JST-9");
+        // 기계도 못 대면 `TZ` 의 까닭이 선다.
+        let (_, why) = Zone::resolved(Some("Mars/Olympus".into()), || None, true);
+        assert!(matches!(why, Some(Trouble::Unknown { .. } | Trouble::NoTzdb { .. })), "{why:?}");
+        // `TZ` 가 없으면 기계가 답한다.
+        assert_eq!(Zone::resolved(None, seoul, false).0.name(), "<+09>-9");
+    }
+
+    #[test]
+    fn the_system_name_has_three_ways_to_answer() {
+        assert_eq!(Zone::named(None), (Zone::utc(), Some(Trouble::NoSystemZone)));
+        let (z, why) = Zone::named(Some("Mars/Olympus".into()));
+        assert!(z.is_utc());
+        assert!(matches!(why, Some(Trouble::Unknown { .. } | Trouble::NoTzdb { .. })), "{why:?}");
+        assert_eq!(Zone::named(Some("<+09>-9".into())).1, None);
+        assert_eq!(Zone::named(Some("<+09>-9".into())).0.name(), "<+09>-9");
+    }
+
+    /// **출처를 건네면 그것이 답한다** — `System` 이 기계 대신 가짜를 푼다. 예전에는 `cfg!(test)` 가 늘 UTC 를 내서 이
+    /// 길(기계가 시간대를 안 댄다는 알림)을 단위 시험이 못 쟀다.
+    #[test]
+    fn an_injected_source_answers_instead_of_the_machine() {
+        fn silent() -> (Zone, Option<Trouble>) {
+            (Zone::utc(), Some(Trouble::NoSystemZone))
+        }
+        let sys = System::from(silent);
+        assert!(sys.trouble().is_none(), "풀기 전에는 할 말이 없다");
+        assert!(sys.zone().is_utc());
+        assert_eq!(sys.trouble(), Some(&Trouble::NoSystemZone));
+        let seoul = System::from(|| (Zone::fixed("T", 9 * 3600), None));
+        assert_eq!(seoul.zone().name(), "T");
+        assert_eq!(seoul.trouble(), None);
     }
 
     /// **이 기계가 무엇을 쓰든 답이 있다.** 시스템이 이름을 안 대면 UTC 와 까닭을 함께 낸다 —
     /// 막지 않는다.
     #[test]
     fn the_system_zone_always_answers() {
-        let (z, why) = Zone::machine();
+        let (z, why) = Zone::system();
         // 못 풀었으면 UTC 고, 풀었으면 그 이름이 선다. 둘 다 아닌 답은 없다.
         assert!(why.is_none() || z == Zone::utc(), "못 풀었는데 UTC 가 아니다 — {z:?} {why:?}");
         assert!(!z.name().is_empty());
