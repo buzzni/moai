@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-20
+
 ### Added
 
 - **An ARM64 Windows build, `aarch64-pc-windows-msvc`**, with the C runtime
