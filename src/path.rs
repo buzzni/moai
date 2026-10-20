@@ -64,8 +64,31 @@ pub(crate) fn real(p: &Path) -> PathBuf {
 ///
 /// 걷어도 긴 경로는 안 잃는다 — std 가 Windows 의 파일 API 를 부를 때 260자를 넘는 경로에 접두어를 스스로 붙인다.
 /// 유닉스에서는 [`unverbatim`] 이 글자 하나 안 바꾼다.
+///
+/// **걷은 철자가 같은 파일을 열 때만 걷는다**(moai-vjdq.lk8, 리뷰 moai-lag7.482 14번). `\\?\` 는 Windows 가 이름을
+/// 손대지 않고 여는 꼴이라, 끝이 점이나 빈칸인 이름(`x.`)과 장치 이름(`aux`)은 접두어를 떼면 API 가 `x`·장치로 읽어 다른
+/// 것을 연다. 그래서 걷은 철자를 한 번 더 풀어([`settle_verbatim`]) 처음 값과 같을 때만 쓴다. 유닉스에서는 걷을 것이
+/// 없어 다시 푸는 일도 없다.
 pub(crate) fn canonical(p: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-    std::fs::canonicalize(p).map(|real| PathBuf::from(unverbatim(real.as_os_str())))
+    let real = std::fs::canonicalize(p)?;
+    Ok(PathBuf::from(settle_verbatim(real.as_os_str(), |plain| std::fs::canonicalize(plain))))
+}
+
+/// [`canonical`] 의 판정 — `verbatim` 을 걷은 철자를 `recanon` 으로 다시 풀어 `verbatim` 과 같은 자리를 가리킬 때만 걷은
+/// 철자를 내고, 아니면(풀지 못했거나 다른 자리) `verbatim` 그대로 낸다. 걷을 접두어가 없으면 `recanon` 을 부르지 않는다.
+/// 닫는 함수를 받아 파일 시스템 없이 리눅스에서도 잰다.
+pub(crate) fn settle_verbatim(
+    verbatim: &std::ffi::OsStr,
+    recanon: impl FnOnce(&std::ffi::OsStr) -> std::io::Result<PathBuf>,
+) -> std::ffi::OsString {
+    let plain = unverbatim(verbatim);
+    if plain == verbatim {
+        return plain;
+    }
+    match recanon(&plain) {
+        Ok(back) if back.as_os_str() == verbatim => plain,
+        _ => verbatim.to_owned(),
+    }
 }
 
 /// `.` 을 버리고 `..` 은 앞 조각을 뗀다. **파일 시스템을 안 본다** — 아직 없는 자리도 접어야 하고
@@ -254,6 +277,27 @@ mod tests {
         // **절대 경로를 받는다.** 상대 철자에서 위로 넘치는 `..` 은 남지 않고 사라지므로
         // (`a/../../b` 는 `../b` 가 아니라 `b`), 부르는 쪽이 먼저 뿌리나 `cwd` 를 붙인다.
         assert_eq!(lexical(Path::new("a/../../b")), PathBuf::from("b"));
+    }
+
+    /// **걷은 철자가 다른 파일을 열면 안 걷는다**(moai-vjdq.lk8) — 되돌리면(늘 걷으면) 앞의 두 단언이 붉어진다.
+    #[test]
+    fn the_verbatim_prefix_comes_off_only_when_the_plain_spelling_is_the_same_file() {
+        use std::ffi::OsStr;
+        let v = OsStr::new(r"\\?\C:\d\x.");
+        // 걷은 철자가 `x` 로 풀린다 — 다른 파일이다.
+        let other = |_: &OsStr| Ok(PathBuf::from(r"\\?\C:\d\x"));
+        assert_eq!(settle_verbatim(v, other), v);
+        // 못 풀어도 접두어를 남긴다.
+        let fail = |_: &OsStr| Err(std::io::Error::other("x"));
+        assert_eq!(settle_verbatim(v, fail), v);
+        // 같은 자리로 돌아오면 걷는다.
+        let w = OsStr::new(r"\\?\C:\d\x");
+        assert_eq!(settle_verbatim(w, |_| Ok(PathBuf::from(w))), OsStr::new(r"C:\d\x"));
+        let unc = OsStr::new(r"\\?\UNC\srv\s\f");
+        assert_eq!(settle_verbatim(unc, |_| Ok(PathBuf::from(unc))), OsStr::new(r"\\srv\s\f"));
+        // 걸 것이 없으면 다시 풀지 않는다.
+        let never = |_: &OsStr| -> std::io::Result<PathBuf> { panic!("recanon") };
+        assert_eq!(settle_verbatim(OsStr::new("/a/b"), never), OsStr::new("/a/b"));
     }
 
     /// **Windows 의 철자는 `/` 로, 유닉스의 것은 그대로**(moai-j9gv.4c1).
