@@ -222,8 +222,9 @@ pub(crate) fn slashed_os(p: &std::ffi::OsStr) -> std::ffi::OsString {
 
 /// `canonicalize` 가 Windows 에서 붙이는 `\\?\` 접두어를 걷는다 — `\\?\UNC\서버\…` 는 `\\서버\…` 로 되돌리고, 그
 /// 밖의 철자는 그대로다. 구분자는 안 바꾼다(그것은 [`slashed_os`] 의 몫이다). **걷는 자는 여기 하나다**(moai-vaj4) —
-/// 링크를 푼 철자([`canonical`]), 훅 줄의 철자, 편집기에 넘기는 임시 경로, `moai update` 가 PowerShell 에 넘기는
-/// 자리(`update::plain`)가 같은 규칙으로 걷는다. 글자만 보는 것이라 리눅스에서도 잰다.
+/// 훅 줄의 철자, 편집기에 넘기는 임시 경로, `moai update` 가 PowerShell 에 넘기는 자리(`update::plain`)가 같은 규칙으로
+/// 늘 걷는다. 링크를 푼 철자([`canonical`])만은 이것으로 걷은 철자가 **같은 파일일 때만** 쓴다([`settle_verbatim`],
+/// moai-vjdq.lk8) — 그 판정은 파일 시스템에 묻는 것이라 글자만 보는 여기에 안 든다. 글자만 보는 것이라 리눅스에서도 잰다.
 ///
 /// **바이트로 걷는다**(리뷰 moai-j9gv.8gr) — UTF-8 이 아닌 철자(Windows 의 짝 없는 서로게이트)도 접두어만 떼고 나머지는
 /// 받은 그대로다. `&str` 로 받던 판은 그런 자리를 `update::plain` 이 걷지 못해 PowerShell 5.1 이 못 읽는 `\\?\` 꼴이

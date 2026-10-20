@@ -40,7 +40,8 @@ pub enum Trouble {
     /// **까닭을 글로 싣지 않는다**(리뷰 moai-efoc.3e1) — `Unreadable` 의 `said` 에 한국어 글을 싣던 판은 영어 화면에도
     /// 그 글을 냈다. 말은 [`crate::view::zone_trouble`] 이 짓는다.
     NotTzif { name: String },
-    /// 시스템이 어느 시간대인지를 말해 주지 않는다 — `/etc/localtime` 이 이름을 안 댄다.
+    /// 시스템이 어느 시간대인지를 말해 주지 않는다 — 유닉스는 `/etc/localtime` 이 이름을 안 대고, Windows 는
+    /// `GetTimeZoneInformation` 이 실패했다.
     NoSystemZone,
 }
 
@@ -155,7 +156,8 @@ impl Zone {
     /// 기계의 시계를 타면 시간대가 없는 기계(Windows·zoneinfo 없는 컨테이너)에서 "시스템이 제 시간대를 안 댄다" 가
     /// 보기 설정 알림에 섞여 그 알림이 비었는지를 재는 시험 열 개가 까닭 없이 붉었기 때문이다(moai-lag7.sk7).
     /// 그러나 그 갈래는 기계 시간대의 알림 길을 단위 시험이 아예 못 재게 했다. 그래서 출처를 **부르는 쪽이
-    /// 든다** — [`Source`] 를 `chosen`·[`System`]·`App` 이 넘겨받고, 시험은 [`quiet`] 이나 제 가짜를 건다.
+    /// 든다** — [`System`] 과 `App` 이 [`Source`] 를 들고(처음값은 [`SOURCE`]), `chosen` 은 그것으로 푼 값을 받는다.
+    /// 시험의 처음값은 [`quiet`] 이고, 기계를 재는 시험은 제 가짜를 건다.
     pub fn system() -> (Zone, Option<Trouble>) {
         Zone::named(system_name())
     }
@@ -301,19 +303,29 @@ struct WinDate {
 ///
 /// - 표준시 = `bias + std_bias`, 서머타임 = `bias + dst_bias`. 이름은 Windows 의 것이 POSIX 약어가 아니라 쓰지 않고
 ///   `<±hh[mm]>` 꼴로 짓는다(`<+09>-9`, `<-05>5<-04>,M3.2.0/2,M11.1.0/2`).
+/// - **`std_bias` 는 `StandardDate` 를 댄 때만 든다**(리뷰) — Win32 문서가 "StandardDate 가 없으면 이 칸은 안 본다" 고
+///   못박고, MSVC CRT 의 `_tzset` 과 Go 의 `time` 도 그 달이 0 이면 `Bias` 하나로 잰다.
 /// - 서머타임은 `DaylightDate` 에서 들어가고 `StandardDate` 에서 나온다. 둘 다 *바뀌기 직전의 벽시계*라 POSIX 의
 ///   `M월.주.요일/시각` 과 같은 자다. `day` 는 1~5 주고 5 가 마지막 주다(POSIX 의 `M` 규칙과 같은 뜻).
-/// - `month == 0` 이면 서머타임이 없다.
+/// - `month == 0` 이면 서머타임이 없다. 시각 칸이 `SYSTEMTIME` 의 폭 밖이어도 그렇다 — 그 글은 규칙으로 안 읽혀,
+///   그대로 내면 표준시까지 잃고 UTC 로 떨어진다.
 /// - **`year != 0` 이면 그 해 하나의 절대 날짜다.** POSIX 의 `M` 규칙은 해마다 되풀이하는 꼴이라 못 옮긴다 —
 ///   그때는 표준시 하나로 떨어진다(지어낸 되풀이 규칙이 틀린 날에 시각을 옮기는 것보다 낫다). Windows 는 되풀이 규칙을
 ///   늘 `year = 0` 으로 준다.
 /// - 자정 직전(`23:59:59`)은 Windows 가 "다음 자정" 을 이렇게 적는 꼴이라 `24:00` 으로 읽는다.
 #[cfg(any(windows, test))]
 fn posix_rule(bias: i32, std_bias: i32, dst_bias: i32, std_date: WinDate, dst_date: WinDate) -> String {
-    let std = bias + std_bias;
+    let std = bias + if std_date.month == 0 { 0 } else { std_bias };
     let head = format!("{}{}", abbr(-std), west(std));
-    let valid =
-        |d: &WinDate| d.year == 0 && (1..=12).contains(&d.month) && d.day_of_week <= 6 && (1..=5).contains(&d.day);
+    let valid = |d: &WinDate| {
+        d.year == 0
+            && (1..=12).contains(&d.month)
+            && d.day_of_week <= 6
+            && (1..=5).contains(&d.day)
+            && d.hour <= 23
+            && d.minute <= 59
+            && d.second <= 59
+    };
     let dst = bias + dst_bias;
     if !valid(&std_date) || !valid(&dst_date) || dst == std {
         return head;
@@ -390,6 +402,7 @@ fn windows_name() -> Option<String> {
     // Win32 의 TIME_ZONE_INFORMATION 은 172바이트다 — 배치가 어긋나면 여기서 컴파일이 멈춘다.
     const _: () = assert!(std::mem::size_of::<TimeZoneInformation>() == 172);
     const TIME_ZONE_ID_INVALID: u32 = 0xFFFF_FFFF;
+    const TIME_ZONE_ID_UNKNOWN: u32 = 0;
     let mut info = std::mem::MaybeUninit::<TimeZoneInformation>::zeroed();
     // SAFETY: 크기와 배치가 Win32 의 TIME_ZONE_INFORMATION 과 같은 `repr(C)` 이고, 함수는 그 구조체 하나만 쓴다.
     let id = unsafe { GetTimeZoneInformation(info.as_mut_ptr()) };
@@ -407,16 +420,16 @@ fn windows_name() -> Option<String> {
         minute: d.minute,
         second: d.second,
     };
-    Some(posix_rule(
-        info.bias,
-        info.standard_bias,
-        info.daylight_bias,
-        date(info.standard_date),
-        date(info.daylight_date),
-    ))
+    // **`TIME_ZONE_ID_UNKNOWN` 은 "서머타임을 안 쓴다" 는 답이다**(리뷰) — Win32 문서가 전환 날짜가 없거나 사람이
+    // "서머타임 자동 조정" 을 끈 때라고 댄다. 그때 날짜 칸이 남아 있어도 규칙에 싣지 않는다 — 실으면 끈 서머타임을 탄다.
+    let daylight = match id {
+        TIME_ZONE_ID_UNKNOWN => WinDate { month: 0, ..date(info.daylight_date) },
+        _ => date(info.daylight_date),
+    };
+    Some(posix_rule(info.bias, info.standard_bias, info.daylight_bias, date(info.standard_date), daylight))
 }
 
-/// `TZ` 가 대는 이름. 없거나 tzdb 밖을 가리키는 경로면 `None` 이고, 그때는 `/etc/localtime` 이 답한다.
+/// `TZ` 가 대는 이름. 없거나 tzdb 밖을 가리키는 경로면 `None` 이고, 그때는 `/etc/localtime`(Windows 는 커널)이 답한다.
 fn env_name() -> Option<String> {
     tz_name(&std::env::var_os("TZ")?)
 }
@@ -485,6 +498,15 @@ pub type Source = fn() -> (Zone, Option<Trouble>);
 pub fn quiet() -> (Zone, Option<Trouble>) {
     (Zone::utc(), None)
 }
+
+/// 출처의 처음값 — **고르는 자리는 여기 하나다**(리뷰). 운영은 [`Zone::system`], 단위 시험은 [`quiet`] 이고,
+/// [`System::default`] 와 `tui::App` 이 이것을 든다. 둘이 따로 고르던 판은 시험에서 `App` 만 `quiet` 을 들고
+/// `System::default()` 는 돌리는 기계의 시계를 탔다 — 기계를 재려는 시험은 [`System::from`] 이나 `App` 의 칸에 제
+/// 출처를 건다.
+#[cfg(not(test))]
+pub const SOURCE: Source = Zone::system;
+#[cfg(test)]
+pub const SOURCE: Source = quiet;
 
 /// 화면이 설 시간대와, **그때 할 말 하나**. 고른 이름이 있으면 그것이 답이고, 없으면 시스템이다
 /// ([`Zone::system`]).
@@ -888,12 +910,12 @@ pub struct System(std::sync::OnceLock<(Zone, Option<Trouble>)>, Source);
 
 impl Default for System {
     fn default() -> Self {
-        System::from(Zone::system)
+        System::from(SOURCE)
     }
 }
 
 impl System {
-    /// 출처를 건넨다 — 운영은 [`Zone::system`] 이고(`Default`), 시험은 가짜를 건다(moai-vjdq.to6).
+    /// 출처를 건넨다 — 처음값은 [`SOURCE`] 고(`Default`), 시험은 가짜를 건다(moai-vjdq.to6).
     pub fn from(source: Source) -> System {
         System(std::sync::OnceLock::new(), source)
     }
@@ -1439,9 +1461,17 @@ mod tests {
         assert_eq!(posix_rule(300, 0, -60, wd(11, 0, 1, 2), dated), "<-05>5");
         // 서머타임이 표준과 같은 오프셋이면 규칙이 아니다.
         assert_eq!(posix_rule(300, 0, 0, wd(11, 0, 1, 2), wd(3, 0, 2, 2)), "<-05>5");
-        // `Bias` 에 `StandardBias` 가 얹힌다.
-        assert_eq!(posix_rule(0, -60, 0, NONE, NONE), "<+01>-1");
+        // `Bias` 에 `StandardBias` 가 얹힌다 — 다만 `StandardDate` 를 댄 때만이다(Win32 문서, MSVC CRT 와 Go 의 자).
+        let rule = posix_rule(0, -60, -120, wd(10, 0, 5, 3), wd(3, 0, 5, 2));
+        assert_eq!(rule, "<+01>-1<+02>,M3.5.0/2,M10.5.0/3");
+        assert_eq!(posix_rule(0, -60, 0, NONE, NONE), "<+00>0", "날짜 없는 StandardBias 를 얹었다");
+        // 해를 못박은 날짜라도 `StandardDate` 는 댄 것이다 — 표준시에 `StandardBias` 가 든다.
+        assert_eq!(posix_rule(0, -60, -120, WinDate { year: 2026, ..wd(10, 0, 5, 3) }, wd(3, 0, 5, 2)), "<+01>-1");
         assert_eq!(posix_rule(0, 0, 0, NONE, NONE), "<+00>0");
+        // `SYSTEMTIME` 의 폭 밖 시각은 규칙으로 못 읽혀 UTC 로 떨어진다 — 표준시 하나로 남긴다.
+        let bad = WinDate { minute: 60, ..wd(3, 0, 2, 2) };
+        assert_eq!(posix_rule(300, 0, -60, wd(11, 0, 1, 2), bad), "<-05>5");
+        assert_eq!(posix_rule(300, 0, -60, WinDate { hour: 24, ..wd(11, 0, 1, 2) }, wd(3, 0, 2, 2)), "<-05>5");
         assert!(Zone::load("<+00>0").unwrap().is_utc());
     }
 

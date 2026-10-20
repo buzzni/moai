@@ -4620,13 +4620,15 @@ fn surfaced(app: &App, counted: &Surfaced) -> usize {
     counted.count(&app.site.now, &app.zone)
 }
 
-/// **알림의 수** — [`surfaced`] 의 짝이다(moai-dr8a.rl4). 든 알림 수(`free`)에 이 프레임의 달로 잰 기한 알림을 더한다.
+/// **알림의 수** — [`surfaced`] 의 짝이다(moai-dr8a.rl4). 든 알림 수(`free`)에 `site.now` 의 날로 잰 기한 알림을 더한다.
 /// 시계를 고르는 자리를 [`surfaced`] 곁에 둔다(리뷰) — 그리는 쪽마다 `(site.now, zone)` 짝을 고르면, 그 시계를 바꾸는
-/// 날 자정을 넘긴 화면에서 `!N` 과 `+N` 이 다른 날로 잰다(moai-ynd6 가 경고 쪽에서 걷어 낸 그 증상이다).
+/// 날 자정을 넘긴 화면에서 그리는 자리마다 `+N` 이 다른 날로 잰다(moai-ynd6 가 경고 쪽에서 걷어 낸 그 증상이다).
 ///
 /// **기한 알림의 수는 시스템의 시간대로 잰다**(moai-vjdq.4sl, 2026-10-20 사용자 결정) — 그 알림이 시키는 `moai due apply` 가
 /// `[tui] timezone` 을 안 읽고 이 기계의 시간대로 날을 재서다. 고른 시간대로 세면 시스템이 UTC 이고 Seoul 을 골랐을 때 하루 아홉
 /// 시간 동안 탐색기는 `+1` 을 보이는데 `due apply` 는 아무것도 안 올린다. 그린 기한의 날과 날 거르개는 `app.zone` 을 그대로 쓴다.
+/// **그래서 `!N`([`surfaced`], 고른 시간대)과 `+N` 은 시간대가 갈리면 다른 날로 잰다** — 일부러다. 같은 `site.now` 를 쓰는
+/// 것은 그대로라, 갈리는 것은 시간대 하나다.
 fn noticed(app: &App, counted: &Surfaced, free: usize) -> usize {
     counted.notices(free, &app.site.now, &app.system_zone)
 }

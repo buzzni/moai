@@ -181,23 +181,29 @@ fn finished(mut cmd: std::process::Command) -> Result<Vec<u8>, Error> {
 /// 끊기면 흘려 읽는 길에서만 git 이 이쪽의 입력을 물려받는다.
 fn invocation(root: &Path, args: &[&str]) -> std::process::Command {
     let mut cmd = command();
+    cmd.stdin(std::process::Stdio::null());
     #[cfg(not(unix))]
     if msys_git() {
         // MSYS2 빌드는 명령 줄을 제 규칙으로 다시 쪼갠다 — 러스트의 MSVC 꼴로 싼 `-C <뿌리>` 의 `'` 가 먹혀 git 이 엉뚱한
         // 자리를 본다(moai-vjdq.ch3). 낱말마다 MSYS2 의 꼴로 싸 `raw_arg` 로 넘긴다([`crate::tui::jotfile::msys_quoted`]).
         use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
         use std::os::windows::process::CommandExt as _;
-        let quoted =
-            |w: &std::ffi::OsStr| std::ffi::OsString::from_wide(&crate::tui::jotfile::msys_quoted(w.encode_wide()));
-        cmd.raw_arg(quoted("-C".as_ref())).raw_arg(quoted(root.as_os_str()));
-        for w in ["-c", "i18n.logOutputEncoding=UTF-8"].iter().chain(args) {
-            cmd.raw_arg(quoted(w.as_ref()));
+        for w in argv(root, args) {
+            cmd.raw_arg(std::ffi::OsString::from_wide(&crate::tui::jotfile::msys_quoted(w.encode_wide())));
         }
-        cmd.stdin(std::process::Stdio::null());
         return cmd;
     }
-    cmd.arg("-C").arg(root).args(["-c", "i18n.logOutputEncoding=UTF-8"]).args(args).stdin(std::process::Stdio::null());
+    cmd.args(argv(root, args));
     cmd
+}
+
+/// [`invocation`] 이 넘길 낱말 — `-C <뿌리> -c i18n.logOutputEncoding=UTF-8 <args…>`. **싸는 꼴만 갈리고 낱말은 여기
+/// 하나에서 짓는다**(리뷰) — MSYS2 갈래가 제 손으로 다시 적던 판은, 한쪽에만 `-c` 를 더하는 날 두 git 이 다른 물음을 받았다.
+fn argv<'a>(root: &'a Path, args: &'a [&str]) -> impl Iterator<Item = &'a std::ffi::OsStr> {
+    use std::ffi::OsStr;
+    [OsStr::new("-C"), root.as_os_str(), OsStr::new("-c"), OsStr::new("i18n.logOutputEncoding=UTF-8")]
+        .into_iter()
+        .chain(args.iter().map(OsStr::new))
 }
 
 /// `PATH` 에서 처음 닿는 `git.exe` 가 **MSYS2 의 런타임으로 지은 것인가** — 그 옆에 `msys-2.0.dll` 이 있으면 그렇다
@@ -706,12 +712,17 @@ pub(crate) mod tests {
         assert!(!msys_runtime(&path, files(&[])));
     }
 
-    /// 따옴표 든 뿌리는 MSYS2 꼴로 싸야 `'` 가 안 먹힌다 — 싸는 자는 jotfile 의 것을 그대로 쓴다.
+    /// 따옴표 든 뿌리는 MSYS2 꼴로 싸야 `'` 가 안 먹힌다 — 싸는 자는 jotfile 의 것을 그대로 쓰고, 낱말은 두 갈래가 함께
+    /// 쓰는 [`argv`] 에서 온다. 그 차례나 낱말이 바뀌면 여기가 붉어진다.
     #[test]
     fn a_root_with_a_quote_is_wrapped_the_msys_way() {
-        let q = |s: &str| String::from_utf16(&crate::tui::jotfile::msys_quoted(s.encode_utf16())).unwrap();
-        assert_eq!(q(r"C:\msys64\home\o'brien\proj"), r#""C:\\msys64\\home\\o'brien\\proj""#);
-        assert_eq!(q("-C"), "-C");
+        let q = |w: &std::ffi::OsStr| {
+            String::from_utf16(&crate::tui::jotfile::msys_quoted(w.to_str().unwrap().encode_utf16())).unwrap()
+        };
+        let root = Path::new(r"C:\msys64\home\o'brien\proj");
+        let got: Vec<String> = argv(root, &["log", "--"]).map(q).collect();
+        let want = ["-C", r#""C:\\msys64\\home\\o'brien\\proj""#, "-c", "i18n.logOutputEncoding=UTF-8", "log", "--"];
+        assert_eq!(got, want);
     }
 
     /// **마감 안에 끝난 부름은 그대로 답하고, 넘긴 부름은 기다리지 않는다**(moai-59k3.u09). 멈춘

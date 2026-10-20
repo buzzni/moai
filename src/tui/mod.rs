@@ -1557,7 +1557,7 @@ pub struct App {
     /// 저장과 `--json` 은 UTC 그대로다. 못 푼 이름은 UTC 로 떨어지고 그 까닭이 배너에 한 줄로
     /// 선다(moai-77ap) — 막지 않는다.
     pub zone: crate::tz::Zone,
-    /// 이 기계의 시간대가 어디서 오는가(moai-vjdq.to6) — 운영은 `Zone::system`, 시험은 가짜를 건다.
+    /// 이 기계의 시간대가 어디서 오는가(moai-vjdq.to6) — 처음값은 `tz::SOURCE`(운영은 `Zone::system`), 시험은 가짜를 건다.
     system: crate::tz::Source,
     /// 이 기계의 시간대 — `moai due apply` 가 날을 재는 자와 같다(moai-vjdq.4sl). **알림 수 하나만** 이것으로 센다
     /// (`draw::noticed`): 고른 시간대(`zone`)와 다르면 같은 줄을 탐색기는 "뒤처졌다" 하고 `due apply` 는 아무것도 안 올린다.
@@ -2143,11 +2143,8 @@ impl App {
             hint_room: None,
             zone: crate::tz::Zone::utc(),
             // 시험은 기계의 시계를 안 탄다 — 시간대 없는 기계에서 알림 시험이 붉어지던 것(moai-lag7.sk7)을 여기서 막는다.
-            // 기계 길을 재는 시험은 이 칸을 갈아 끼운다(moai-vjdq.to6).
-            #[cfg(test)]
-            system: crate::tz::quiet,
-            #[cfg(not(test))]
-            system: crate::tz::Zone::system,
+            // 처음값은 `tz::System::default` 와 한 자(`tz::SOURCE`)고, 기계 길을 재는 시험은 이 칸을 갈아 끼운다(moai-vjdq.to6).
+            system: crate::tz::SOURCE,
             system_zone: crate::tz::Zone::utc(),
             saved_zone: None,
             saved: Default::default(),
