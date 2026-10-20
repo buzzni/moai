@@ -207,9 +207,11 @@ mod ctrl {
     unsafe extern "system" {
         fn SetConsoleCtrlHandler(handler: Option<Handler>, add: i32) -> i32;
     }
-    /// CTRL_C_EVENT(0)·CTRL_BREAK_EVENT(1) 은 처리한 것으로 돌려 기본 동작(종료)을 막는다.
+    /// CTRL_C_EVENT(0) 만 처리한 것으로 돌려 기본 동작(종료)을 막는다. **Ctrl-Break 는 지나보낸다**(리뷰
+    /// moai-vjdq.tg6 9번) — `install.ps1` 이 멈춰 Ctrl-C 를 안 받으면 창을 닫는 것 말고 나갈 길이 그것뿐이다.
+    /// 그 길로 나가면 임시 파일이 남지만, 갇히는 것보다 싸다.
     unsafe extern "system" fn on_ctrl(kind: u32) -> i32 {
-        (kind <= 1) as i32
+        (kind == 0) as i32
     }
     pub fn swallow(on: bool) {
         // SAFETY: 서명이 kernel32 의 것과 같고, 처리기는 인자만 읽는다.
