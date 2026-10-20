@@ -17,6 +17,7 @@ use std::{env, fs, path::PathBuf};
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build/versioninfo.rs");
+    println!("cargo:rerun-if-changed=LICENSE");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")
         || env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc")
     {
@@ -25,9 +26,12 @@ fn main() {
     let get = |k: &str| env::var(k).unwrap_or_default();
     let num = |k: &str| get(k).parse::<u16>().unwrap_or(0);
     let version = get("CARGO_PKG_VERSION");
-    let copyright = format!("{} License - {}", get("CARGO_PKG_LICENSE"), get("CARGO_PKG_REPOSITORY"));
+    // 저작권 줄은 `LICENSE` 의 것을 그대로 옮긴다(리뷰 moai-uwzg.i4r 15번) — 탐색기의 "저작권" 칸에
+    // 라이선스 이름이 아니라 저작권 고지가 서고, 해가 바뀌어 `LICENSE` 를 고치면 따라온다.
+    let license = fs::read_to_string("LICENSE").unwrap_or_default();
+    let copyright = license.lines().find(|l| l.starts_with("Copyright")).unwrap_or("").trim().to_owned();
     let strings = [
-        ("CompanyName", "buzzni"),
+        ("CompanyName", "Buzzni Inc."),
         ("FileDescription", "moai issue tracker"),
         ("FileVersion", version.as_str()),
         ("InternalName", "moai"),

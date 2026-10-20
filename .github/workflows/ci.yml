@@ -451,6 +451,20 @@ jobs:
       - name: test 를 짓는다
         run: cargo test --locked --no-run
 
+      # **PE 버전 정보가 들었는가**(moai-uwzg.kpx, 리뷰 moai-uwzg.i4r 6번). 위 스텝이 통합 시험을 위해
+      # `target/debug/moai.exe` 를 이미 지었다 — `build.rs` 가 리소스를 안 넣게 된 PR 을 태그까지 끌고 가지
+      # 않는다. 릴리스 잡도 같은 것을 제 바이너리로 다시 본다.
+      - name: PE 버전 정보를 읽는다
+        run: |
+          set -euo pipefail
+          want=$(scripts/check-version.sh --print)
+          got=$(powershell -NoProfile -Command '$i = (Get-Item target/debug/moai.exe).VersionInfo; "$($i.ProductName) $($i.ProductVersion)"' | tr -d '\r')
+          printf '버전 정보: %s\n' "$got"
+          if [ "$got" != "moai $want" ]; then
+            echo "::error::moai.exe 의 버전 정보가 '$got' 다 — 'moai $want' 여야 한다"
+            exit 1
+          fi
+
       # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 `ci-gate` 의 같은 자리에 있다.
       - name: 이 크레이트의 산출물을 걷는다
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
