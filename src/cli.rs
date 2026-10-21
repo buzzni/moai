@@ -760,7 +760,7 @@ BACKLOG
   place at once, in the order of the explorer's unfolded tree: a folder row,
   then what is in it, with the same filters and order as the one-level
   listing. Each row carries home, the --path handles from the root down to the
-  directory it stands in ([] at the root; none and lost for the baskets).
+  directory it stands in ([] at the root, [none] or [lost] inside a basket).
 
     moai tui --path <milestone> -g parser --all --json
     moai tui --sort updated --json
@@ -781,9 +781,10 @@ BACKLOG
   The first line names the address and the tracker. Ctrl-C stops it; there
   is nothing to clean up. It never opens a browser.
 
-  It only reads. Every request runs `moai --json <command>` in a child
-  process and passes its answer on, so the page sees exactly what the CLI
-  says. Writing stays with the CLI and the explorer.
+  It only reads. Each list, issue and wiki page it serves is the answer of
+  `moai --json <command>`, run in a child process for that request, so the
+  page sees exactly what the CLI says. Writing stays with the CLI and the
+  explorer.
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who
@@ -2108,16 +2109,18 @@ pub struct TuiArgs {
     #[arg(long, value_name = "id|basket")]
     pub path: Option<String>,
 
+    // **펼친 차례가 아니라 목록의 모양이다**(moai-0aa7.joy) — 거르개·차례 묶음보다 **앞에** 둔다. 뒤에 두면
+    // `OrderArgs` 의 `next_help_heading` 을 물려받아 도움말이 이것을 `Order:` 밑에 세운다.
+    /// With --json, list every row below, with its home
+    #[arg(long)]
+    pub deep: bool,
+
     // **`--json` 의 목록만 거르고 늘어놓는다**(moai-wk7i.5wx) — 화면은 `SPC f`·`SPC s` 가 한다. 말은 `show` 의 것이다.
     #[command(flatten)]
     pub filter: FilterArgs,
 
     #[command(flatten)]
     pub order: OrderArgs,
-
-    /// With --json, list every row below, with its home
-    #[arg(long)]
-    pub deep: bool,
 }
 
 /// 차례만 — 쪽(`-n`·`--after`)은 없다. 디렉터리 목록은 한 자리를 통째로 낸다(moai-wk7i.5wx).

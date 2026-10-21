@@ -29527,8 +29527,16 @@ impl Drop for Served {
 
 /// `moai web --port 0 --json` 을 `dir` 에서 띄우고 첫 줄(10초 시한)에서 묶은 포트를 읽는다.
 fn serve(dir: &Path) -> Served {
+    serve_with(dir, |_| {})
+}
+
+/// [`serve`] 를 띄우기 전에 `tweak` 으로 손본다 — 사용자 설정(`MOAI_CONFIG`, 읽음 파일은 그 곁에 선다)이나 말을
+/// 시험마다 제 것으로 준다.
+fn serve_with(dir: &Path, tweak: impl FnOnce(&mut Command)) -> Served {
     use std::io::BufRead as _;
-    let mut child = staged(&["web", "--port", "0", "--json"])
+    let mut cmd = staged(&["web", "--port", "0", "--json"]);
+    tweak(&mut cmd);
+    let mut child = cmd
         .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -29546,6 +29554,7 @@ fn serve(dir: &Path) -> Served {
         Ok(line) => line,
         Err(_) => {
             let _ = child.kill();
+            let _ = child.wait();
             panic!("moai web 의 첫 줄이 10초 안에 안 왔다");
         }
     };
@@ -29683,7 +29692,11 @@ fn web_answers_only_gets() {
         let (status, head, body) = http(web.port, method, "/api/status", Some(&host));
         assert_eq!(status, 405, "{method}\n{head}");
         assert!(head.contains("Allow: GET"), "{head}");
-        assert_eq!(json_of(&body)["code"], "method_not_allowed", "{body}");
+        match method {
+            // HEAD 의 답은 본문을 안 싣는다(RFC 9110 §9.3.2) — 머리만 선다.
+            "HEAD" => assert!(body.is_empty(), "HEAD 에 본문을 실었다\n{body}"),
+            _ => assert_eq!(json_of(&body)["code"], "method_not_allowed", "{body}"),
+        }
     }
     let (status, _, body) = get(web.port, "/api/nope");
     assert_eq!(status, 404, "{body}");
@@ -29703,6 +29716,14 @@ fn web_says_a_port_in_use() {
     assert_eq!(field(&err, "code"), "port_in_use", "{err}");
     assert!(err.contains("--port 0"), "{err}");
     assert!(out.stdout.is_empty(), "묶지 못했는데 첫 줄을 냈다\n{}", text(&out));
+
+    // **묶지 못한 `--json` 판의 stderr 는 오류 객체 하나다** — 루프백 밖이라는 경고는 묶은 뒤에야 선다. 앞에 서던
+    // 판은 `code` 로 가르던 쪽이 파싱 실패를 만났다. 이 기계의 것이 아닌 주소(TEST-NET-1)라 묶기가 진다.
+    let out = moai(s.path(), &["web", "--host", "192.0.2.1", "--port", "0", "--json"]);
+    assert!(!out.status.success(), "{}", text(&out));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    one_json_value(&err);
+    assert_eq!(field(&err, "code"), "error", "{err}");
 }
 
 /// **`.moai` 밖에서는 아무것도 안 묶는다**(moai-0aa7.726) — 다른 명령과 같은 거절이다.
@@ -29747,6 +29768,12 @@ fn web_from_a_linked_worktree_reads_the_root_tracker() {
         rows.contains(&id) && rows.contains(&later),
         "시험의 전제 — 워크트리의 show 가 주 체크아웃을 읽는다\n{rows}"
     );
+    // **서버의 자식도 루트를 읽는다** — 갈라진 뒤 주 체크아웃에 든 줄이 봉투에 선다. 이 단언 없이는 자식이 워크트리의
+    // 낡은 스냅샷을 읽어도 위의 `exit` 0 만 보고 푸르렀다.
+    let env = json_of(&get(web.port, "/api/rows?fields=id").2);
+    let served: Vec<&str> =
+        env["out"].as_array().unwrap_or_else(|| panic!("{env}")).iter().filter_map(|r| r["id"].as_str()).collect();
+    assert!(served.contains(&id.as_str()) && served.contains(&later.as_str()), "{env}");
     assert!(!side.join(".moai/issues.jsonl").exists() || !issues(&side).contains(&later), "워크트리에 썼다");
 }
 
@@ -29798,7 +29825,8 @@ fn web_rows_are_moais_show() {
     let (status, _, body) = get(web.port, "/api/rows?q=--json");
     assert_eq!(status, 200, "{body}");
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
-    // 모양이 틀린 값은 자식을 띄우기 전에 400 이다.
+    // 모양이 틀린 값은 자식을 띄우기 전에 400 이다. 받는 이름이 없는 끝점에 붙인 쿼리도 — 말없이 버리면 부른 쪽은
+    // 걸러진 답이라 믿는다. `show` 가 종류 낱말로 읽는 것(`issue`·`epic`…)은 id 가 아니다 — 목록이 돌아왔다.
     for path in [
         "/api/rows?archived=true",
         "/api/rows?q=a&q=b",
@@ -29806,7 +29834,11 @@ fn web_rows_are_moais_show() {
         "/api/rows?q=",
         "/api/rows?sort=title",
         "/api/issue/--all",
-        "/api/wiki/a%2Fb",
+        "/api/issue/issue",
+        "/api/issue/epic",
+        "/api/status?worktree=1",
+        "/api/boot?x=1",
+        "/api/stamp?x=1",
     ] {
         let (status, _, body) = get(web.port, path);
         assert_eq!(status, 400, "{path}\n{body}");
@@ -29893,4 +29925,108 @@ fn web_stamp_moves_when_the_tracker_is_written() {
     ok(s.path(), &["note", &id, "메모"]);
     let third = stamp(&web);
     assert_ne!(second, third, "note 뒤에 안 움직였다");
+}
+
+/// **표식은 읽음이 바뀌어도 움직인다** — `/api/rows` 의 `unread` 는 사용자 설정 곁의 읽음 파일에서 온다. 트래커만
+/// 접던 판은 다른 창에서 `moai read` 를 친 뒤에도 표식이 그대로라, 표식이 움직일 때만 다시 읽는 페이지가 [NEW] 를
+/// 내내 세웠다.
+#[test]
+fn web_stamp_moves_when_a_row_is_read() {
+    let s = init("web-stamp-read");
+    let cfg = s.path().join("user.toml");
+    let id = field(&ok_with(s.path(), &cfg, &["add", "내 일", "--json"]), "id");
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let stamp = |web: &Served| json_of(&get(web.port, "/api/stamp").2)["stamp"].as_str().unwrap().to_string();
+    let unread = |web: &Served| json_of(&get(web.port, "/api/rows").2)["out"][0]["unread"] == true;
+    let before = stamp(&web);
+    assert!(unread(&web), "시험의 전제 — 내게 온 새 줄은 안 읽은 줄이다");
+    ok_with(s.path(), &cfg, &["read", &id]);
+    assert!(!unread(&web), "시험의 전제 — 읽은 줄이 그대로 안 읽은 줄이다");
+    assert_ne!(stamp(&web), before, "읽은 뒤에 표식이 안 움직였다");
+}
+
+/// **서버의 말은 사용자 설정을 따라 바뀐다** — 띄울 때 고른 말을 들던 판은 설정의 `lang` 을 고친 뒤 `/api/boot` 와
+/// 서버의 거절은 옛 말, 자식의 답은 새 말이었다. 표식도 함께 움직여 페이지가 다시 읽는다.
+#[test]
+fn web_speaks_the_language_the_user_config_says_now() {
+    let s = init("web-lang");
+    let cfg = s.path().join("user.toml");
+    std::fs::write(&cfg, "[i18n]\nlang = \"en\"\n").unwrap();
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg).env_remove("MOAI_LANG");
+    });
+    let boot = |web: &Served| json_of(&get(web.port, "/api/boot").2)["lang"].as_str().unwrap().to_string();
+    let stamp = |web: &Served| json_of(&get(web.port, "/api/stamp").2)["stamp"].as_str().unwrap().to_string();
+    assert_eq!(boot(&web), "en");
+    let before = stamp(&web);
+    std::fs::write(&cfg, "[i18n]\nlang = \"ko\"\n").unwrap();
+    assert_eq!(boot(&web), "ko", "설정을 고쳤는데 옛 말이다");
+    assert_ne!(stamp(&web), before, "설정을 고쳤는데 표식이 그대로다");
+}
+
+/// **넘치면 읽을 수 있는 503 `busy` 로 답하고, 자리가 비면 다시 받는다**(moai-0aa7.726) — 32 자리를 머리를 안
+/// 보내는 연결로 채운다. 안 읽은 요청을 둔 채 닫던 판은 그 503 을 RST 로 덮어, 부른 쪽은 `busy` 대신 "연결이
+/// 끊겼다" 를 받았다(`http` 의 `read_to_end` 가 그것을 넘어뜨린다).
+#[test]
+fn web_answers_busy_past_the_cap_and_frees_the_slots() {
+    let s = init("web-busy");
+    let web = serve(s.path());
+    let idle: Vec<std::net::TcpStream> =
+        (0..32).map(|_| std::net::TcpStream::connect(("127.0.0.1", web.port)).unwrap()).collect();
+    let (status, _, body) = get(web.port, "/api/stamp");
+    assert_eq!(status, 503, "{body}");
+    assert_eq!(json_of(&body)["code"], "busy", "{body}");
+    drop(idle);
+    // 닫힌 연결의 실이 끝나며 자리를 돌려놓는다 — 그 사이의 부름은 아직 503 일 수 있다.
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let (status, _, body) = get(web.port, "/api/stamp");
+        if status == 200 {
+            break;
+        }
+        assert!(std::time::Instant::now() < until, "자리가 안 돌아왔다 — {status} {body}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// **위키의 낱말은 `wiki ls` 가 낸 그대로 연다** — 디렉터리 밑의 쪽(`guide/start`)과 한글 이름을 id 의 모양으로
+/// 재어 400 으로 막던 판은 위키 쪽이 그 쪽을 하나도 못 열었다. 없는 낱말은 moai 가 `not_found` 로 답한다.
+#[test]
+fn web_wiki_opens_nested_and_unicode_slugs() {
+    let s = init("web-wiki-slug");
+    std::fs::create_dir_all(s.path().join("docs/guide")).unwrap();
+    std::fs::write(s.path().join("docs/guide/start.md"), "# Start\n").unwrap();
+    std::fs::write(s.path().join("docs/안내.md"), "# 안내\n").unwrap();
+    let web = serve(s.path());
+    for (path, slug) in [
+        ("/api/wiki/guide/start", "guide/start"),
+        ("/api/wiki/guide%2Fstart", "guide/start"),
+        ("/api/wiki/%EC%95%88%EB%82%B4", "안내"),
+    ] {
+        let (status, _, body) = get(web.port, path);
+        assert_eq!(status, 200, "{path}\n{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{path}\n{env}");
+        assert_eq!(env["out"]["slug"], slug, "{path}\n{env}");
+    }
+    let env = json_of(&get(web.port, "/api/wiki/a%2Fb").2);
+    assert_eq!(env["err"]["code"], "not_found", "{env}");
+}
+
+/// **자식은 올라가 잡은 줄을 되풀이하지 않는다** — 서버가 첫 줄 곁에 한 번 댄 것을, 서버가 선 자리에서 다시 찾던
+/// 자식이 봉투마다 `said` 로 또 실었다. 자식은 서버가 잡은 트래커의 자리에서 돈다.
+#[test]
+fn web_children_do_not_repeat_the_climb_notice() {
+    let s = init("web-climb");
+    let inner = s.path().join("inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    git(&inner, &["init", "-q"]);
+    let direct = moai(&inner, &["status", "--json"]);
+    assert!(!direct.stderr.is_empty(), "시험의 전제 — 안쪽 체크아웃에서는 올라가 잡았다고 댄다\n{}", text(&direct));
+    let web = serve(&inner);
+    let env = json_of(&get(web.port, "/api/status").2);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert!(env.get("said").is_none(), "{env}");
 }

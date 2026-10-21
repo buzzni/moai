@@ -14,20 +14,60 @@ pub mod run;
 use crate::fail::code;
 use crate::i18n::{Lang, fill, say};
 use http::{Bad, Request, Response};
+use std::io::Read as _;
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// 동시에 도는 연결의 상한 — 넘치면 503 을 쓰고 닫는다. 페이지 하나가 한 번에 여는 부름은 몇 개다.
 pub const BUSY_MAX: usize = 32;
+/// 요청 머리 **전체**를 읽는 시한 — `read` 한 번의 시한이 아니다([`read_head`]).
 const READ_LIMIT: Duration = Duration::from_secs(5);
+/// 쓰기 한 번이 나아가지 못하고 기다리는 시한.
 const WRITE_LIMIT: Duration = Duration::from_secs(10);
+/// 답 **전체**를 쓰는 시한 — 쓰기마다 조금씩 나아가는 느린 상대가 큰 답 하나로 한 자리를 몇 시간 쥐지 않게
+/// ([`Within`]). 루프백과 SSH 터널로 보는 페이지에는 넉넉하다.
+const ANSWER_LIMIT: Duration = Duration::from_secs(60);
 
 /// 서버를 띄울 때 한 번 정하고 모든 연결이 나눠 읽는 것.
 pub struct Site {
     pub spawner: run::Spawner,
-    pub lang: Lang,
+    /// 띄울 때 고른 말 — **받는 고리만 쓴다**(503 `busy`·받기 오류). 고리는 파일을 안 연다: 사용자 설정 자리에 무엇이
+    /// 서 있든(FIFO 하나면 열기가 끝없이 선다) 다른 연결을 받는 일이 거기 걸리면 안 된다.
+    pub started_in: Lang,
+    /// 사용자 설정의 표식과 그때 고른 말([`Site::lang`]).
+    picked: Mutex<(Option<crate::store::Stamp>, Lang)>,
+}
+
+impl Site {
+    pub fn new(spawner: run::Spawner, started_in: Lang) -> Site {
+        let path = crate::user_config::path();
+        let stamp = path.as_deref().map(crate::store::stamp);
+        Site { spawner, started_in, picked: Mutex::new((stamp, started_in)) }
+    }
+
+    /// 이 요청의 말 — **설정이 바뀌면 다시 고른다**([`crate::cmd::lang_of`] 의 자, `MOAI_LANG` 이 이긴다). 자식은
+    /// 띄울 때마다 사용자 설정을 다시 읽어 말을 고르는데, 서버만 띄울 때 고른 말을 들던 판은 설정의 `lang` 을 고친
+    /// 뒤 `/api/boot`·서버의 거절은 옛 말, 자식의 답은 새 말로 갈렸다 — [`boot`] 가 적어 둔 대로 다시 띄워야 서는
+    /// 값은 캐시다.
+    ///
+    /// **묻는 것은 표식(`stat`)이다** — 요청마다 설정을 통째로 풀던 판은 옛 `[read]` 가 큰 설정에서 정적 파일 하나에
+    /// 수백 ms 를 들였다. 표식이 바뀐 때만 다시 읽고, **보통 파일만 연다** — FIFO·장치는 열기가 설 수 있다.
+    pub fn lang(&self) -> Lang {
+        let path = crate::user_config::path();
+        let stamp = path.as_deref().map(crate::store::stamp);
+        let mut picked = self.picked.lock().unwrap_or_else(|e| e.into_inner());
+        if picked.0 != stamp {
+            let regular = path.as_deref().is_none_or(|p| std::fs::metadata(p).map_or(true, |m| m.is_file()));
+            let read = match regular {
+                true => crate::user_config::read(path.as_deref()),
+                false => crate::user_config::read(None),
+            };
+            *picked = (stamp, crate::cmd::lang_of(&read));
+        }
+        picked.1
+    }
 }
 
 /// 받기 고리 — **안 돌아온다.** Ctrl-C 가 끝이고, 치울 것이 없다(쓴 파일도 쥔 락도 없다).
@@ -39,7 +79,7 @@ pub fn serve(listener: TcpListener, site: Site) -> ! {
             Ok((stream, _)) => stream,
             // 받기 오류(손이 모자란 판의 EMFILE 따위)는 그 연결 하나의 것이다 — 서버를 안 내린다.
             Err(e) => {
-                crate::cmd::tell(&fill(say(site.lang, "web.accept_failed"), &[("said", &e.to_string())]));
+                crate::cmd::tell(&fill(say(site.started_in, "web.accept_failed"), &[("said", &e.to_string())]));
                 // 같은 오류가 곧바로 다시 나면 고리가 CPU 를 다 먹는다.
                 std::thread::sleep(Duration::from_millis(50));
                 continue;
@@ -47,76 +87,169 @@ pub fn serve(listener: TcpListener, site: Site) -> ! {
         };
         if busy.fetch_add(1, Ordering::SeqCst) >= BUSY_MAX {
             busy.fetch_sub(1, Ordering::SeqCst);
-            // 받는 고리에서 쓰므로 짧게 기다린다 — 안 읽는 상대 하나가 받기를 세우면 안 된다.
-            let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
-            let _ = http::write(&mut &stream, &refuse(503, say(site.lang, "web.busy"), code::BUSY));
+            turn_away(&stream, site.started_in);
             continue;
         }
-        let (site, busy) = (site.clone(), busy.clone());
-        std::thread::spawn(move || {
-            // 스레드가 어떻게 끝나든(패닉도) 센 것을 돌려놓는다.
-            struct Leave(Arc<AtomicUsize>);
-            impl Drop for Leave {
-                fn drop(&mut self) {
-                    self.0.fetch_sub(1, Ordering::SeqCst);
-                }
-            }
-            let _leave = Leave(busy);
-            handle(stream, &site);
+        // **센 것은 실을 띄우기 전에 쥔다** — `std::thread::spawn` 은 OS 가 실을 못 내면 이 고리에서 패닉해 서버가
+        // 통째로 내려갔다(`git::finish_within` 이 `Builder` 로 띄우는 것과 같은 까닭). 못 띄우면 닫힘째 버려지며
+        // 자리를 돌려놓고, 그 연결에는 남겨 둔 손잡이로 503 을 쓴다.
+        let spare = stream.try_clone().ok();
+        let leave = Leave(busy.clone());
+        let site_of = site.clone();
+        let spawned = std::thread::Builder::new().spawn(move || {
+            let _leave = leave;
+            handle(stream, &site_of);
         });
+        if spawned.is_err()
+            && let Some(spare) = spare
+        {
+            turn_away(&spare, site.started_in);
+        }
     }
 }
 
-fn handle(stream: TcpStream, site: &Site) {
-    let _ = stream.set_read_timeout(Some(READ_LIMIT));
-    let _ = stream.set_write_timeout(Some(WRITE_LIMIT));
-    let answer = match http::read(&mut &stream) {
-        // 시한·끊김은 답할 상대가 없다.
-        Err(Bad::Io) => return,
-        Err(bad) => refuse(400, bad_said(&bad, site.lang), code::BAD_INPUT),
-        Ok(req) => answer(&req, site),
-    };
-    let _ = http::write(&mut &stream, &answer);
+/// 연결 하나가 쥔 자리 — 스레드가 어떻게 끝나든(패닉도, 못 띄운 판도) 센 것을 돌려놓는다.
+struct Leave(Arc<AtomicUsize>);
+
+impl Drop for Leave {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
-fn bad_said(bad: &Bad, lang: Lang) -> &'static str {
+/// 받을 자리가 없는 연결에 503 `busy` 를 쓰고 닫는다. 받는 고리에서 쓰므로 짧게 기다린다 — 안 읽는 상대 하나가
+/// 받기를 세우면 안 된다.
+fn turn_away(stream: &TcpStream, lang: Lang) {
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    let _ = http::write(&mut &*stream, &refuse(503, say(lang, "web.busy"), code::BUSY), true);
+    close(stream);
+}
+
+fn handle(stream: TcpStream, site: &Site) {
+    let (answer, body) = match read_head(&stream, READ_LIMIT) {
+        // 시한·끊김은 답할 상대가 없다.
+        Err(Bad::Io) => return,
+        Err(bad) => (refuse(400, &bad_said(&bad, site.lang()), code::BAD_INPUT), true),
+        // HEAD 의 답은 머리만 쓴다([`http::write`]).
+        Ok(req) => (answer(&req, site), req.method != "HEAD"),
+    };
+    let _ = http::write(&mut Within::of(&stream, ANSWER_LIMIT), &answer, body);
+    close(&stream);
+}
+
+/// 요청 머리를 `limit` 안에 **다** 읽는다([`Within`]).
+fn read_head(stream: &TcpStream, limit: Duration) -> Result<Request, Bad> {
+    http::read(&mut Within::of(stream, limit))
+}
+
+/// 연결 하나를 **한 시한 안에서** 읽고 쓰는 손잡이. `set_read_timeout`·`set_write_timeout` 은 부름 한 번의 시한이라,
+/// 몇 초마다 한 바이트씩 흘리는 상대가 머리를 끝없이 늘이고(서른둘이면 모든 부름이 503 이다), 조금씩 읽는 상대가
+/// 큰 답 하나로 한 자리를 몇 시간 쥐었다 — 9.5 MB 의 목록을 4 KB 씩 5 초마다 읽는 상대가 50 초 뒤에도 받고 있었다.
+/// 그래서 부를 때마다 남은 만큼만 기다린다(쓰기는 그래도 [`WRITE_LIMIT`] 넘게는 안).
+struct Within<'a> {
+    stream: &'a TcpStream,
+    until: Instant,
+}
+
+impl<'a> Within<'a> {
+    fn of(stream: &'a TcpStream, limit: Duration) -> Within<'a> {
+        Within { stream, until: Instant::now() + limit }
+    }
+
+    /// 남은 시한 — 다 썼으면 `TimedOut` 이다(`set_*_timeout(Some(0))` 은 거절된다).
+    fn left(&self) -> std::io::Result<Duration> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        match left.is_zero() {
+            true => Err(std::io::ErrorKind::TimedOut.into()),
+            false => Ok(left),
+        }
+    }
+}
+
+impl std::io::Read for Within<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.left()?))?;
+        let mut s = self.stream;
+        s.read(buf)
+    }
+}
+
+impl std::io::Write for Within<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.stream.set_write_timeout(Some(self.left()?.min(WRITE_LIMIT)))?;
+        let mut s = self.stream;
+        s.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut s = self.stream;
+        s.flush()
+    }
+}
+
+/// 답을 쓴 뒤 닫는다. **안 읽은 바이트를 둔 채 닫으면 커널이 FIN 대신 RST 를 보낸다** — 머리를 안 읽은 503 과
+/// 머리를 다 안 읽은 400 이 그 꼴이라, 상대는 방금 쓴 답 대신 "연결이 끊겼다" 를 받았다(503 을 스무 번 불러 열여덟
+/// 번이 `ECONNRESET` 이었다). 쓰기를 먼저 닫아 FIN 을 답 바로 뒤에 붙이고, 이미 와 있는 것만 기다리지 않고 비운다.
+fn close(stream: &TcpStream) {
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    if stream.set_nonblocking(true).is_err() {
+        return;
+    }
+    let mut sink = [0u8; 4096];
+    let mut left = http::HEAD_MAX * 4;
+    let mut s = stream;
+    while left > 0 {
+        match s.read(&mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => left = left.saturating_sub(n),
+        }
+    }
+}
+
+fn bad_said(bad: &Bad, lang: Lang) -> String {
     match bad {
-        Bad::TooBig => say(lang, "web.head_too_big"),
-        Bad::Body => say(lang, "web.body"),
-        Bad::Encoding => say(lang, "web.encoding"),
-        Bad::Malformed | Bad::Io => say(lang, "web.malformed"),
+        Bad::TooBig => fill(say(lang, "web.head_too_big"), &[("max", &(http::HEAD_MAX / 1024).to_string())]),
+        Bad::Body => say(lang, "web.body").to_string(),
+        Bad::Encoding => say(lang, "web.encoding").to_string(),
+        Bad::Malformed | Bad::Io => say(lang, "web.malformed").to_string(),
     }
 }
 
 /// 요청 하나의 답. **Host 가 먼저다** — 남의 이름으로 온 부름에는 어떤 길이 있는지도 안 알려 준다.
 pub fn answer(req: &Request, site: &Site) -> Response {
+    let lang = site.lang();
     if !http::host_ok(req.host.as_deref()) {
-        return refuse(403, say(site.lang, "web.foreign_host"), code::FORBIDDEN_HOST);
+        return refuse(403, say(lang, "web.foreign_host"), code::FORBIDDEN_HOST);
     }
     if req.method != "GET" {
-        let said = fill(say(site.lang, "web.only_get"), &[("method", &req.method)]);
+        let said = fill(say(lang, "web.only_get"), &[("method", &req.method)]);
         return refuse(405, &said, code::METHOD_NOT_ALLOWED);
     }
+    // 자식 없이 답하는 끝점도 쿼리는 안 받는다 — 말없이 버리면 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
+    let bare = || api::none_of(&req.query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
         "/" | "/index.html" => page(http::HTML, include_str!("dist/index.html")),
         "/app.js" => page(http::JS, include_str!("dist/app.js")),
         "/app.css" => page(http::CSS, include_str!("dist/app.css")),
-        "/api/boot" => match boot::boot(&site.spawner.cwd, site.lang) {
+        "/api/boot" => match bare()
+            .and_then(|()| boot::boot(&site.spawner.cwd, lang).map_err(|e| refuse(500, &e.message, e.code)))
+        {
             Ok(body) => Response { status: 200, kind: http::JSON, body: body.into_bytes() },
-            Err(e) => refuse(500, &e.message, e.code),
+            Err(refused) => refused,
         },
-        "/api/status" => child(site, &["status".to_string()]),
-        "/api/stamp" => match api::stamp(&site.spawner.cwd, site.lang) {
+        "/api/stamp" => match bare()
+            .and_then(|()| api::stamp(&site.spawner.cwd, lang).map_err(|e| refuse(500, &e.message, e.code)))
+        {
             Ok(stamp) => {
                 Response { status: 200, kind: http::JSON, body: format!("{{\"stamp\":\"{stamp}\"}}").into_bytes() }
             }
-            Err(e) => refuse(500, &e.message, e.code),
+            Err(refused) => refused,
         },
         path => match api::argv_of(path, &req.query) {
-            Some(Ok(args)) => child(site, &args),
-            Some(Err(bad)) => refuse(400, &bad.said(site.lang), code::BAD_INPUT),
+            Some(Ok(args)) => child(site, &args, lang),
+            Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => {
-                let said = fill(say(site.lang, "web.no_path"), &[("path", &req.path)]);
+                let said = fill(say(lang, "web.no_path"), &[("path", &req.path)]);
                 refuse(404, &said, code::NOT_FOUND)
             }
         },
@@ -129,23 +262,90 @@ fn page(kind: &'static str, body: &'static str) -> Response {
 
 /// 자식을 돌려 봉투로 낸다. **자식이 돌았으면 200 이다** — 자식의 실패는 봉투의 `exit`·`err` 가 말한다.
 /// 4xx·5xx 는 서버가 답을 못 낸 판이다.
-pub fn child(site: &Site, args: &[String]) -> Response {
+pub fn child(site: &Site, args: &[String], lang: Lang) -> Response {
     match site.spawner.run(args) {
         Ok(done) => Response { status: 200, kind: http::JSON, body: run::envelope(&done).into_bytes() },
         Err(run::Fault::Timeout) => {
             let secs = run::TIME_LIMIT.as_secs().to_string();
-            refuse(504, &fill(say(site.lang, "web.child_timeout"), &[("secs", &secs)]), code::TIMEOUT)
+            refuse(504, &fill(say(lang, "web.child_timeout"), &[("secs", &secs)]), code::TIMEOUT)
         }
-        Err(run::Fault::TooBig) => refuse(502, say(site.lang, "web.child_too_big"), code::TOO_LARGE),
-        Err(run::Fault::Killed) => refuse(502, say(site.lang, "web.child_killed"), code::ERROR),
+        Err(run::Fault::TooBig) => {
+            let max = (run::OUT_MAX / (1024 * 1024)).to_string();
+            refuse(502, &fill(say(lang, "web.child_too_big"), &[("max", &max)]), code::TOO_LARGE)
+        }
+        Err(run::Fault::Killed) => refuse(502, say(lang, "web.child_killed"), code::ERROR),
         Err(run::Fault::Spawn(e)) => {
-            refuse(500, &fill(say(site.lang, "web.child_spawn"), &[("said", &e.to_string())]), code::ERROR)
+            refuse(500, &fill(say(lang, "web.child_spawn"), &[("said", &e.to_string())]), code::ERROR)
         }
     }
 }
 
-/// 서버의 거절 — `{"error":"…","code":"…"}`, `moai --json` 이 넘어질 때와 같은 꼴이다.
+/// 서버의 거절 — `{"code":"…","error":"…"}`. `moai --json` 이 넘어질 때(`main::fail`)와 같은 꼴, 같은 차례다.
 pub fn refuse(status: u16, said: &str, code: &str) -> Response {
     let body = serde_json::json!({ "error": said, "code": code }).to_string();
     Response { status, kind: http::JSON, body: body.into_bytes() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// 루프백에 짝 하나 — (부르는 쪽, 받은 쪽).
+    fn pair() -> (TcpStream, TcpStream) {
+        let l = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (server, _) = l.accept().unwrap();
+        (client, server)
+    }
+
+    /// **한 바이트씩 흘려도 머리 전체의 시한에서 끊는다** — `read` 한 번의 시한이던 판은 흘리는 동안 끝없이 쥐었다.
+    #[test]
+    fn a_trickled_head_is_cut_at_the_whole_limit() {
+        let (mut client, server) = pair();
+        let feeder = std::thread::spawn(move || {
+            for b in b"GET / HTTP/1.1\r\nX-Pad: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+                if client.write_all(&[*b]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        let started = Instant::now();
+        let got = read_head(&server, Duration::from_millis(300));
+        assert!(matches!(got, Err(Bad::Io)), "{got:?}");
+        assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+        drop(server);
+        let _ = feeder.join();
+    }
+
+    /// **안 읽는 상대에게 큰 답을 써도 답 전체의 시한에서 끊는다** — 쓰기 한 번의 시한이던 판은 조금씩이라도
+    /// 나아가는 동안 끝없이 썼다.
+    #[test]
+    fn a_reader_that_does_not_keep_up_is_cut_at_the_whole_limit() {
+        let (client, server) = pair();
+        let big = Response { status: 200, kind: http::JSON, body: vec![b' '; 32 * 1024 * 1024] };
+        let started = Instant::now();
+        let got = http::write(&mut Within::of(&server, Duration::from_millis(300)), &big, true);
+        assert!(got.is_err(), "안 읽는 상대에게 32 MiB 를 다 썼다");
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+        drop(client);
+    }
+
+    /// **안 읽은 요청을 둔 채 답하고 닫아도 상대는 답을 끝까지 받는다** — RST 가 아니라 FIN 이다.
+    #[test]
+    fn closing_after_an_unread_request_is_not_a_reset() {
+        for _ in 0..20 {
+            let (mut client, server) = pair();
+            client.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").unwrap();
+            // 요청이 받은 쪽에 닿을 틈 — 닿기 전에 닫으면 RST 를 부르는 안 읽은 바이트가 없다.
+            std::thread::sleep(Duration::from_millis(5));
+            turn_away(&server, Lang::En);
+            drop(server);
+            let mut got = Vec::new();
+            client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            client.read_to_end(&mut got).expect("답 대신 RST 를 받았다");
+            assert!(got.starts_with(b"HTTP/1.1 503 "), "{}", String::from_utf8_lossy(&got));
+        }
+    }
 }

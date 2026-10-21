@@ -2476,6 +2476,7 @@ Usage: moai tui [OPTIONS]
 
 Options:
       --path <id|basket>     Open here - a directory opens inside it
+      --deep                 With --json, list every row below, with its home
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2506,7 +2507,6 @@ Filters  (comma = or,  repeated = and):
 Order:
       --sort <fields>  Order the listing by these fields (as `show --sort`)
       --reverse        Turn the order around, ties included
-      --deep           With --json, list every row below, with its home
 
   Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
@@ -2809,7 +2809,7 @@ Order:
   place at once, in the order of the explorer's unfolded tree: a folder row,
   then what is in it, with the same filters and order as the one-level
   listing. Each row carries home, the --path handles from the root down to the
-  directory it stands in ([] at the root; none and lost for the baskets).
+  directory it stands in ([] at the root, [none] or [lost] inside a basket).
 
     moai tui --path <milestone> -g parser --all --json
     moai tui --sort updated --json
@@ -2845,9 +2845,10 @@ Options:
   The first line names the address and the tracker. Ctrl-C stops it; there
   is nothing to clean up. It never opens a browser.
 
-  It only reads. Every request runs `moai --json <command>` in a child
-  process and passes its answer on, so the page sees exactly what the CLI
-  says. Writing stays with the CLI and the explorer.
+  It only reads. Each list, issue and wiki page it serves is the answer of
+  `moai --json <command>`, run in a child process for that request, so the
+  page sees exactly what the CLI says. Writing stays with the CLI and the
+  explorer.
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who

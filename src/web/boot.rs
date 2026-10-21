@@ -49,7 +49,8 @@ struct Boot<'a> {
     sort_fields: Vec<Sort>,
 }
 
-/// 친 자리(`cwd`)에서 트래커를 찾아 바탕을 짓는다. 못 찾으면 CLI 가 내는 그 거절이다.
+/// `cwd`(자식이 도는 그 자리, [`super::run::Spawner::cwd`])에서 트래커를 찾아 바탕을 짓는다. 못 찾으면 CLI 가 내는
+/// 그 거절이다.
 pub fn boot(cwd: &Path, lang: Lang) -> crate::fail::R<String> {
     let repo = crate::store::Repo::find_from(cwd, || lang)?
         .ok_or_else(|| crate::fail::Fail::new(say(lang, "refuse.not_a_repo")))?;

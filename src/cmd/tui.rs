@@ -45,8 +45,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
     let crate::worktree::Gathered { load: active_load, root, origin, trouble, mut watched, swept, .. } =
         crate::worktree::gather(&repo, !ctx.json)?;
-    // 산 줄의 id — 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`). 거르개를 받은 `--json` 만 쓴다.
-    let live: std::collections::BTreeSet<String> = match ctx.json && shaped(&args).is_some() {
+    // 산 줄의 id — 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`). 거르개를 받은 `--json` 만 쓴다 —
+    // 그것을 읽는 자는 거름망(`Filter::matches`)뿐이라, 차례나 `--deep` 만 받은 판에는 짓지 않는다.
+    let live: std::collections::BTreeSet<String> = match ctx.json && super::show::first_given(&args.filter).is_some() {
         true => active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect(),
         false => Default::default(),
     };
@@ -76,10 +77,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
-        let rows: Vec<Row> = entries
-            .iter()
-            .map(|(e, home)| Row::of(&index, &load.issues, &states, e, home.clone(), ctx.lang()))
-            .collect();
+        let rows: Vec<Row> =
+            entries.into_iter().map(|(e, home)| Row::of(&index, &load.issues, &states, &e, home, ctx.lang())).collect();
         return super::json_line(&rows);
     }
 
@@ -456,7 +455,10 @@ fn resolve(index: &Index, issues: &[Issue], want: Option<&str>, lang: crate::i18
     Ok(path)
 }
 
-/// 거르개나 차례를 받았으면 그 첫 플래그(moai-wk7i.5wx). 거르개 이름은 `show` 가 대는 그 자다.
+/// 거르개나 차례를 받았으면 그 첫 플래그(moai-wk7i.5wx). 거르개 이름은 `show` 가 대는 그 자다. `--deep` 도 여기
+/// 선다(moai-0aa7.joy) — 같은 `--json` 목록의 모양이라 화면과 `.moai` 밖에서 같은 말로 거절한다.
+///
+/// **거절하는 자리만 이것을 묻는다** — 무엇을 미리 지을지(산 줄의 id)는 그것을 읽는 거름망이 섰는가로 가른다.
 fn shaped(args: &TuiArgs) -> Option<&'static str> {
     super::show::first_given(&args.filter)
         .or_else(|| args.order.sort.is_some().then_some("--sort"))
@@ -487,7 +489,9 @@ fn listing(
     let TuiArgs { path: _, filter, order, deep } = args;
     let given = super::show::first_given(&filter).is_some();
     if !given && order.sort.is_none() && !order.reverse {
-        return Ok(spread(path, deep, &|at| index.entries(issues, at)));
+        // 거르개도 차례도 없으면 `Index::entries` 의 그 자다 — 다 남기고 목록의 차례로.
+        let by = |a: usize, b: usize| crate::query::display_order(&issues[a], &issues[b]);
+        return Ok(spread(index, issues, path, deep, &|_| true, &by));
     }
     let kind = filter.kind;
     let filter = super::show::filter_of(ctx, repo, issues, filter, kind)?;
@@ -520,37 +524,42 @@ fn listing(
             if order.reverse { o.reverse() } else { o }
         }
     };
-    Ok(spread(path, deep, &|at| index.entries_sorted(issues, at, &keep, &by)))
+    Ok(spread(index, issues, path, deep, &keep, &by))
 }
 
-/// 한 자리의 목록 `list` 를 그대로 내거나(`--deep` 아님), 폴더 줄(바구니 포함) 바로 뒤에 그 안을 같은 목록으로
-/// 펼친다(앞 순회, moai-0aa7.joy). **차례와 거르개는 한 자리 목록의 것을 그대로 쓴다** — 여기서 다시 정하면
-/// `--path` 로 자리마다 부른 것과 갈린다. 줄마다의 `home` 은 뿌리에서 그 줄이 선 디렉터리까지의 `--path` 손잡이다.
-fn spread(path: &Path, deep: bool, list: &dyn Fn(&Path) -> Vec<Entry>) -> Vec<(Entry, Option<Vec<String>>)> {
+/// 한 자리의 목록을 그대로 내거나(`--deep` 아님), 탐색기가 **다 펼친 나무** 그대로 낸다(moai-0aa7.joy) — 폴더
+/// 줄(바구니 포함) 바로 뒤에 그 안이 같은 거르개·같은 차례로 선다(앞 순회).
+///
+/// **나무를 걷는 자는 [`Index::entries_tree`] 하나다** — 탐색기의 목록과 보드가 펼친 나무를 짓는 그 걸음이다
+/// (`open` 이 늘 참이면 다 펼친 것이다). 여기서 따로 걸으면 그 걸음을 고치는 날 탐색기만 바뀌고 `--deep` 과
+/// `/api/tree` 는 옛 차례로 남는다. 줄마다의 `home` 은 뿌리에서 그 줄이 선 디렉터리까지의 `--path` 손잡이다 —
+/// 앞 순회라 한 줄의 집은 시작 자리에 그 깊이까지 펼친 폴더의 마디를 이은 것이다.
+fn spread(
+    index: &Index,
+    issues: &[Issue],
+    path: &Path,
+    deep: bool,
+    keep: &dyn Fn(usize) -> bool,
+    order: &dyn Fn(usize, usize) -> std::cmp::Ordering,
+) -> Vec<(Entry, Option<Vec<String>>)> {
     if !deep {
-        return list(path).into_iter().map(|e| (e, None)).collect();
+        return index.entries_sorted(issues, path, keep, order).into_iter().map(|e| (e, None)).collect();
     }
-    fn walk(path: &Path, list: &dyn Fn(&Path) -> Vec<Entry>, out: &mut Vec<(Entry, Option<Vec<String>>)>) {
-        let home: Vec<String> = path.iter().map(handle).collect();
-        for e in list(path) {
-            let inside = match &e {
-                Entry::Dir { seg, .. } => Some(seg.clone()),
-                Entry::Leaf { .. } => None,
-            };
-            out.push((e, Some(home.clone())));
-            if let Some(seg) = inside {
-                let mut next = path.clone();
-                next.push(seg);
-                walk(&next, list, out);
-            }
-        }
-    }
+    let mut trail: Vec<String> = path.iter().map(handle).collect();
+    let base = trail.len();
     let mut out = Vec::new();
-    walk(path, list, &mut out);
+    for (e, twig) in index.entries_tree(issues, path, keep, order, &|_| true) {
+        trail.truncate(base + twig.depth());
+        let home = trail.clone();
+        if let Entry::Dir { seg, .. } = &e {
+            trail.push(handle(seg));
+        }
+        out.push((e, Some(home)));
+    }
     out
 }
 
-/// 경로 마디의 `--path` 손잡이 — `Row::path` 가 내는 말과 같다.
+/// 경로 마디의 `--path` 손잡이 — `Row::path`(바구니 줄)도 이것으로 낸다. 내는 말과 받는 말(`resolve`)이 한 낱말이다.
 fn handle(seg: &Seg) -> String {
     match seg {
         Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id.clone(),
@@ -633,9 +642,11 @@ impl Row {
                 title,
                 kind: "bucket",
                 dir,
+                // 손잡이는 [`handle`] 하나로 낸다 — 바구니가 하나 더 서는 날 이 줄의 `path` 와 그 밑 줄들의 `home`
+                // 끝 낱말이 갈리지 않게.
                 path: match e {
-                    Entry::Dir { seg: Seg::Lost, .. } => LOST.into(),
-                    _ => NO_MILESTONE.into(),
+                    Entry::Dir { seg, .. } => handle(seg),
+                    Entry::Leaf { .. } => NO_MILESTONE.into(),
                 },
                 status: None,
                 derived_status: None,

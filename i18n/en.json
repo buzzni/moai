@@ -1221,7 +1221,7 @@
   "web.no_exe": "could not find the running moai to call for each request: {said}",
   "web.accept_failed": "a connection could not be accepted: {said}",
   "web.busy": "too many requests at once — try again",
-  "web.head_too_big": "the request head is larger than 16 KiB",
+  "web.head_too_big": "the request head is larger than {max} KiB",
   "web.body": "this server only reads — a request carrying a body is refused",
   "web.encoding": "the path or query does not decode to UTF-8",
   "web.malformed": "the request could not be read as HTTP/1.1",
@@ -1229,7 +1229,7 @@
   "web.only_get": "{method} is not served — this server only answers GET",
   "web.no_path": "no such path: {path}",
   "web.child_timeout": "moai did not answer within {secs} seconds and was stopped",
-  "web.child_too_big": "moai's answer is larger than 64 MiB",
+  "web.child_too_big": "moai's answer is larger than {max} MiB",
   "web.child_killed": "moai was killed before it answered",
   "web.child_spawn": "could not run moai: {said}",
   "web.bad_unknown": "this path does not take a query named {name}",
@@ -1237,5 +1237,5 @@
   "web.bad_empty": "{name} is empty",
   "web.bad_long": "{name} is longer than {max} bytes",
   "web.bad_control": "{name} holds a control character",
-  "web.bad_shape": "{name} is not in the shape this path takes (1 for a flag, id for fields, letters digits . _ - for an id or slug)"
+  "web.bad_shape": "{name} is not in the shape this path takes (1 for a flag, id for fields, an issue id such as moai-1abc for id)"
 }

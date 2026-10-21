@@ -41,8 +41,9 @@ one directory: the rows in the order of the explorer's fully unfolded tree, a
 folder row followed by what is inside it, with the filters and `--sort` of the
 one-level listing applied at every place. Each row also carries `home`, the
 `--path` handles from the root down to the directory it stands in (`[]` for a
-row at the root, `none` and `lost` for the baskets), always counted from the
-root even when `--path` starts the walk lower. `--deep` needs `--json` and a
+row at the root, the basket rows included; `["none"]` or `["lost"]` for a row
+inside a basket), always counted from the root even when `--path` starts the
+walk lower. `--deep` needs `--json` and a
 `.moai`, and one-level listings carry no `home`.
 
 ## Read rows and what they inherit

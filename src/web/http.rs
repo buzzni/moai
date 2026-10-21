@@ -40,7 +40,14 @@ pub fn read(r: &mut impl Read) -> Result<Request, Bad> {
     let end = loop {
         // 앞에서 본 자리는 다시 안 훑는다 — 끝 표식이 조각 경계에 걸쳐도 잡히게 세 바이트 물린다.
         let from = buf.len().saturating_sub(3);
-        let n = r.read(&mut chunk).map_err(|_| Bad::Io)?;
+        let n = match r.read(&mut chunk) {
+            Ok(n) => n,
+            // **신호 하나에 요청을 버리지 않는다** — 읽기 시한을 건 소켓은 서버가 멈췄다 이어 돌면(`Ctrl-Z`·`fg`)
+            // 처리기가 없어도 `EINTR` 을 낸다. 끊긴 상대로 읽으면 반쯤 온 머리가 답 없이 닫혔다(`git::stream_log`
+            // 이 같은 덫을 적어 두었다).
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err(Bad::Io),
+        };
         if n == 0 {
             return Err(Bad::Malformed);
         }
@@ -112,6 +119,11 @@ fn unescape(s: &str, plus: bool) -> Result<String, Bad> {
         match b[i] {
             b'%' => {
                 let hex = b.get(i + 1..i + 3).ok_or(Bad::Malformed)?;
+                // **두 자가 다 16진 숫자여야 한다** — `u8::from_str_radix` 는 앞의 `+` 를 부호로 받아 `%+A` 를 줄바꿈으로
+                // 풀었다.
+                if !hex.iter().all(u8::is_ascii_hexdigit) {
+                    return Err(Bad::Malformed);
+                }
                 let hex = std::str::from_utf8(hex).map_err(|_| Bad::Malformed)?;
                 out.push(u8::from_str_radix(hex, 16).map_err(|_| Bad::Malformed)?);
                 i += 3;
@@ -196,7 +208,10 @@ fn reason(status: u16) -> &'static str {
     }
 }
 
-pub fn write(w: &mut impl Write, r: &Response) -> std::io::Result<()> {
+/// 답 하나를 쓴다. `body` 가 거짓이면 머리만 쓴다 — **HEAD 의 답은 본문을 안 싣는다**(RFC 9110 §9.3.2). 실으면
+/// HTTP 를 지키는 쪽은 머리 뒤의 바이트를 넘친 것으로 본다(curl 의 `Excess found`). 길이(`Content-Length`)는 본문이
+/// 섰을 때의 것 그대로다.
+pub fn write(w: &mut impl Write, r: &Response, body: bool) -> std::io::Result<()> {
     let mut head = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\
          X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: {CSP}\r\n",
@@ -210,7 +225,9 @@ pub fn write(w: &mut impl Write, r: &Response) -> std::io::Result<()> {
     }
     head.push_str("\r\n");
     w.write_all(head.as_bytes())?;
-    w.write_all(&r.body)?;
+    if body {
+        w.write_all(&r.body)?;
+    }
     w.flush()
 }
 
@@ -248,8 +265,31 @@ mod tests {
         assert!(matches!(req("GET /%FF HTTP/1.1\r\n\r\n"), Err(Bad::Encoding)));
         assert!(matches!(req("GET /%Z1 HTTP/1.1\r\n\r\n"), Err(Bad::Malformed)));
         assert!(matches!(req("GET /% HTTP/1.1\r\n\r\n"), Err(Bad::Malformed)));
+        // 부호는 16진 숫자가 아니다 — `from_str_radix` 는 `+A` 를 10 으로 읽는다.
+        assert!(matches!(req("GET /a%+Ab HTTP/1.1\r\n\r\n"), Err(Bad::Malformed)));
+        assert!(matches!(req("GET /?q=%+0 HTTP/1.1\r\n\r\n"), Err(Bad::Malformed)));
         // 경로의 `+` 는 글자다.
         assert_eq!(req("GET /a+b HTTP/1.1\r\n\r\n").unwrap().path, "/a+b");
+    }
+
+    /// **`EINTR` 은 끊김이 아니다** — 한 번 물러나도 이어 읽어 머리를 다 받는다.
+    #[test]
+    fn an_interrupted_read_is_read_again() {
+        struct Flaky<'a> {
+            rest: &'a [u8],
+            tripped: bool,
+        }
+        impl Read for Flaky<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if !self.tripped {
+                    self.tripped = true;
+                    return Err(std::io::ErrorKind::Interrupted.into());
+                }
+                self.rest.read(buf)
+            }
+        }
+        let mut r = Flaky { rest: b"GET /x HTTP/1.1\r\nHost: localhost\r\n\r\n", tripped: false };
+        assert_eq!(read(&mut r).unwrap().path, "/x");
     }
 
     #[test]
@@ -301,7 +341,7 @@ mod tests {
     #[test]
     fn a_response_carries_the_fixed_headers() {
         let mut out = Vec::new();
-        write(&mut out, &Response { status: 405, kind: JSON, body: b"{}".to_vec() }).unwrap();
+        write(&mut out, &Response { status: 405, kind: JSON, body: b"{}".to_vec() }, true).unwrap();
         let out = String::from_utf8(out).unwrap();
         assert!(out.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"), "{out}");
         for h in [
@@ -316,5 +356,10 @@ mod tests {
             assert!(out.contains(h), "{h}\n{out}");
         }
         assert!(out.ends_with("\r\n\r\n{}"), "{out}");
+        // HEAD 의 답 — 같은 머리(길이까지)에 본문만 없다.
+        let mut head = Vec::new();
+        write(&mut head, &Response { status: 405, kind: JSON, body: b"{}".to_vec() }, false).unwrap();
+        let head = String::from_utf8(head).unwrap();
+        assert!(head.contains("Content-Length: 2\r\n") && head.ends_with("\r\n\r\n"), "{head}");
     }
 }

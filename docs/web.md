@@ -9,22 +9,19 @@ work stands.
 
 ## Start it
 
-    moai web                  http://127.0.0.1:6624/ - open it in a browser
-    moai web --port 0         let the system pick a free port
-    moai web --dry-run        say where it would serve; bind nothing
+Run `moai web` inside a tracker. Its first line names the address and the
+tracker it serves; open that address yourself — moai never launches a browser.
+`Ctrl-C` stops it; there is nothing to clean up. `moai web --help` lists the
+flags.
 
-The first line names the address and the tracker it serves. Open that address
-yourself — moai never launches a browser. `Ctrl-C` stops it; there is nothing to
-clean up.
-
-- **`--port <n>`** is 6624 unless given. `--port 0` asks the system for a free
-  port and prints the one it got. A port that is taken stops it with the code
-  `port_in_use`
-- **`--host <addr>`** is `127.0.0.1` unless given. Any address that is not a
-  loopback one is served with a warning, because anyone who can reach that port
-  can read the whole tracker
-- **`--json`** prints the first line as one value, `{url, host, port, root,
-  here}`, and then serves. A script that starts the page reads its address there
+- **When the port is taken**, it stops with the code `port_in_use`. Give it
+  another one with `--port`, or `--port 0` to let the system pick a free port —
+  the first line says which it got
+- **To serve an address other than the loopback one**, give `--host`. It warns
+  that the address is not a loopback one, because anyone who can reach that port
+  can read the whole tracker — read "See it from another machine" below first
+- **A script that starts the page** passes `--json` and reads the address from
+  the first line, which is then one JSON value
 - **Inside a linked git worktree**, it serves the main checkout's tracker, the
   same one every other command reads
 
@@ -49,9 +46,9 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
 
 ## Search, filter, sort, view, column
 
-- **Search** (`/`) searches as you type, in the scope the select beside it shows:
-  all, id, title, tag or body. `Tab` cycles the scope. Notes are not searched.
-  `Enter` keeps the search and returns to the list; `Esc` closes it
+- **Search** (`/`) searches as you type, with the words of `moai show -g`: the
+  id, title, tags, body and notes of every row. `Enter` keeps the search and
+  returns to the list; `Esc` closes it
 - **Filter** (`SPC f`) takes the same `key=value` words as `--filter`. `Tab`
   completes, `Up`/`Down` pick a value and `Enter` applies. `Esc` in the list
   clears an applied search or filter
@@ -71,22 +68,28 @@ storage. Search, filter, sort, view and column last until you close the tab.
 
 ## It only reads
 
-Nothing on the page changes the tracker. Every request the page makes is answered
-by running `moai --json <command>` in a child process and passing its answer on,
-so what you see is exactly what the CLI says. Writing stays where it was: the CLI
-for moving, editing and noting, and the explorer's `SPC n` for a thought you want
-to park.
+Nothing on the page changes the tracker. Each list, issue and wiki page it shows
+is the answer of `moai --json <command>`, run in a child process for that request
+and passed on as it is, so what you see is exactly what the CLI says. Writing
+stays where it was: the CLI for moving, editing and noting, and the explorer's
+`SPC n` for a thought you want to park.
 
-Nothing is stored for the page either. The list is read again when you ask, and
-the page filters, sorts and groups it itself, so keys answer at once.
+Nothing is stored for the page either: each list is read again when you ask.
+Search, filters and sort are moai's own — the server hands them to `moai show`
+and `moai tui --deep` as `--grep`, `--filter` and `--sort` — so a filter means
+on the page what it means on the command line, and one moai does not know is
+refused in the same words.
 
 ## It follows the tracker
 
 When someone writes the tracker — you in another terminal, a worker in another
 window — the page notices and reads again. It asks the server for a short
-stamp, folded from the files the explorer watches (the snapshot, the journal, the
-archive and the config), and reloads the list only when the stamp has changed. A
-tracker nobody touches costs one tiny question and no reread.
+stamp, folded from the files its answers come from (the tracker's snapshot,
+journal, archive and config, plus your own user config and the read marks kept
+beside it, which say what is new to you), and reloads the list only when the
+stamp has changed. A tracker nobody touches costs one tiny question and no reread. What
+changes with the clock alone — a deadline passing, done work ageing into the
+archive — shows on the next reload.
 
 ## See it from another machine
 
@@ -112,9 +115,16 @@ comes from the start. The rest come from the server while it runs:
 |---|---|
 | `forbidden_host` | The `Host` header was not `localhost` or an IP address |
 | `method_not_allowed` | Anything but `GET`; the page never writes |
+| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take |
+| `not_found` | No such path |
 | `busy` | Too many requests at once; try again |
 | `timeout` | The child `moai` did not answer in time |
 | `too_large` | The child's answer was larger than the server will pass on |
+| `error` | The child `moai` could not be run, or died before it answered |
+
+When the child `moai` itself refuses — an issue that is not there, a filter it
+does not know — that is still an answer: it comes back as moai's own JSON
+failure, with moai's own `code`, the same as on the command line.
 
 ## Keys
 
@@ -167,7 +177,7 @@ pressing its key. `?` shows the overlay of every key.
 | Key | Does |
 |---|---|
 | `Enter` / `Esc` | Apply / cancel and return to the previous cursor |
-| `Tab` / `Shift-Tab` | Cycle search scope, complete a filter |
+| `Tab` / `Shift-Tab` | Complete a filter |
 | `Up` / `Down` | Pick a filter value |
 | `Ctrl-u` | Clear the input |
 

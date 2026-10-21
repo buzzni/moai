@@ -1,9 +1,9 @@
 //! 읽기 끝점 — 경로마다 자식 `moai --json …` 의 argv 틀 하나([`Profile`])와, 요청에서 받는 값의 이름들.
 //!
-//! **요청에서 온 값은 틀의 자리에만 든다.** 값은 늘 `--긴이름=값` 한 토막이라 `-` 로 시작해도 플래그로 안 읽히고,
-//! 셸을 안 지난다(자식은 `Command::args` 로 뜬다). 거르개·찾기·정렬의 **뜻**과 거절(`bad_filter` 와 그 말)은
-//! moai 가 낸다 — 서버는 모양(비지 않음·길이·제어 문자·이름)만 보고 옮긴다. 모양이 틀리면 자식을 띄우기 전에
-//! 400 `bad_input` 이다.
+//! **요청에서 온 값은 틀의 자리에만 든다.** 쿼리의 값은 늘 `--긴이름=값` 한 토막이고 경로의 값(id·위키 쪽)은 `--`
+//! 뒤의 한 토막이라, `-` 로 시작해도 플래그로 안 읽히고 셸을 안 지난다(자식은 `Command::args` 로 뜬다).
+//! 거르개·찾기·정렬의 **뜻**과 거절(`bad_filter` 와 그 말)은 moai 가 낸다 — 서버는 모양(비지 않음·길이·제어 문자·
+//! 이름)만 보고 옮긴다. 모양이 틀리면 자식을 띄우기 전에 400 `bad_input` 이다.
 //!
 //! **`show --archived` 는 산 줄과 아카이브를 함께 낸다**(손으로 쟀다 — 아카이브로 옮긴 줄 하나와 산 줄 하나가
 //! 있는 저장소에서 `--archived` 는 둘 다, `--all` 은 산 줄만 냈다. `backlog show` 도 같다). 그래서 페이지는 한 번
@@ -47,12 +47,21 @@ pub struct Profile {
 
 const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields];
 
-/// 목록 끝점들. `/api/issue/<id>`·`/api/wiki[/<slug>]` 는 [`argv_of`] 가 따로 짓는다.
+/// 자식을 띄우는 끝점들 — **쿼리를 재는 자가 하나다**([`argv`]). 받는 이름이 없는 끝점도 여기 서야 거기 붙인
+/// 쿼리가 거절된다(`/api/status?worktree=1` 을 말없이 맨 보드로 답하던 판이 있었다). 경로에 값이 드는
+/// `/api/issue/<id>`·`/api/wiki/<slug>` 만 [`argv_of`] 가 따로 짓는다.
 pub const PROFILES: &[Profile] = &[
+    Profile { route: "/api/status", head: &["status"], params: &[] },
     Profile { route: "/api/rows", head: &["show", "--all"], params: LIST },
     Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST },
     Profile { route: "/api/tree", head: &["tui", "--deep"], params: &[Param::Sort, Param::Reverse] },
+    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[] },
 ];
+
+/// 거르개 줄 하나의 상한(바이트) — 줄을 나눠 여러 `--filter` 가 된다.
+const FILTER_MAX: usize = 2048;
+/// 그 밖의 값 하나의 상한(바이트).
+const VALUE_MAX: usize = 512;
 
 /// 서버가 자식을 띄우기 전에 거절하는 모양 — 말은 [`Bad::said`] 가 고른다.
 #[derive(Debug, PartialEq, Eq)]
@@ -67,7 +76,7 @@ pub enum Bad {
     Long(String, usize),
     /// 값에 제어 문자가 있다.
     Control(String),
-    /// 값이 그 이름이 받는 모양이 아니다 — 불린은 `1`, `fields` 는 `id`, id·slug 는 글자 몇 개.
+    /// 값이 그 이름이 받는 모양이 아니다 — 불린은 `1`, `fields` 는 `id`, id 는 이슈 id 의 꼴.
     Shape(String),
 }
 
@@ -89,40 +98,38 @@ pub fn argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<Stri
     if let Some(p) = PROFILES.iter().find(|p| p.route == path) {
         return Some(argv(p, query));
     }
-    if path == "/api/wiki" {
-        return Some(none_of(query).map(|()| vec!["wiki".into(), "ls".into()]));
-    }
-    let (head, name, rest): (&[&str], &str, &str) =
+    // 경로의 값은 `--` 뒤에 선다 — `-` 로 시작해도 플래그로 안 읽힌다. **위키의 쪽 이름은 모양만 잰다** — `wiki ls`
+    // 가 내는 낱말은 파일 자리라 `/`(디렉터리 밑의 쪽)·한글·빈칸이 들고, `wiki show` 는 그것을 걸어 둔 쪽들에서 찾을
+    // 뿐이라 자리를 벗어날 길이 없다. id 의 모양으로 재던 판은 그 쪽들을 400 으로 막았다.
+    type Check = fn(&str) -> Result<(), Bad>;
+    let (head, rest, check): (&[&str], &str, Check) =
         match (path.strip_prefix("/api/issue/"), path.strip_prefix("/api/wiki/")) {
-            (Some(id), _) => (&["show"], "id", id),
-            (_, Some(slug)) => (&["wiki", "show"], "slug", slug),
+            (Some(id), _) => (&["show", "--"], id, issue_id),
+            (_, Some(slug)) => (&["wiki", "show", "--"], slug, |slug| shape("slug", slug, VALUE_MAX)),
             _ => return None,
         };
     Some(none_of(query).and_then(|()| {
-        word(name, rest)?;
+        check(rest)?;
         let mut out: Vec<String> = head.iter().map(|s| s.to_string()).collect();
         out.push(rest.to_string());
         Ok(out)
     }))
 }
 
-/// 이 끝점은 쿼리를 안 받는다.
-fn none_of(query: &[(String, String)]) -> Result<(), Bad> {
+/// 이 끝점은 쿼리를 안 받는다 — 자식 없이 답하는 `/api/boot`·`/api/stamp` 도 이것으로 잰다.
+pub fn none_of(query: &[(String, String)]) -> Result<(), Bad> {
     match query.first() {
         Some((n, _)) => Err(Bad::Unknown(n.clone())),
         None => Ok(()),
     }
 }
 
-/// id·slug — `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. 첫 글자가 영숫자라 `-` 로 시작하는 플래그꼴이 못 든다.
-fn word(name: &str, text: &str) -> Result<(), Bad> {
-    let mut chars = text.chars();
-    let first = chars.next().is_some_and(|c| c.is_ascii_alphanumeric());
-    let rest = chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    match first && rest && text.len() <= 128 {
-        true => Ok(()),
-        false => Err(Bad::Shape(name.to_string())),
-    }
+/// `/api/issue/<id>` 의 id — **이슈 id 의 꼴이어야 한다**([`crate::id::is_valid`]). `show` 의 자리는 종류 낱말
+/// (`issue`·`epic`…)도 받아 그 종류의 목록을 내므로, 글자만 재던 판은 `/api/issue/issue` 에 줄 하나 대신 목록을
+/// 돌려주었다. 글자는 id 의 자([`crate::git::id_char`])로 재고, 길이는 [`VALUE_MAX`] 안이다.
+fn issue_id(text: &str) -> Result<(), Bad> {
+    let ok = text.len() <= VALUE_MAX && text.chars().all(crate::git::id_char) && crate::id::is_valid(text);
+    ok.then_some(()).ok_or_else(|| Bad::Shape("id".to_string()))
 }
 
 /// 값의 모양 — 비지 않음, 상한, 제어 문자 없음.
@@ -141,6 +148,9 @@ fn shape(name: &str, value: &str, max: usize) -> Result<(), Bad> {
 
 /// 틀에 쿼리를 채운다. **틀이 안 받는 이름과 두 번 준 이름은 거절**이다 — 하나를 조용히 버리면 페이지가 낸
 /// 거르개가 안 먹은 채 전체 목록이 돌아온다.
+///
+/// **값은 이름을 푼 [`Param`] 으로 가른다** — 글자로 다시 가르던 판은 `Param` 을 하나 더하면 그 이름이 첫 걸음은
+/// 지나고 둘째 걸음의 나머지 갈래로 떨어져, 컴파일러가 아무 말 없이 엉뚱한 플래그를 지었다.
 pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
     let mut seen: Vec<Param> = Vec::new();
     for (name, _) in query {
@@ -155,34 +165,32 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
     }
     let mut out: Vec<String> = profile.head.iter().map(|s| s.to_string()).collect();
     let mut fields = None;
-    for (name, value) in query {
-        match name.as_str() {
-            "archived" | "reverse" => {
+    for (p, (name, value)) in seen.into_iter().zip(query) {
+        match p {
+            Param::Archived | Param::Reverse => {
                 if value != "1" {
                     return Err(Bad::Shape(name.clone()));
                 }
-                out.push(format!("--{name}"));
+                out.push(format!("--{}", p.name()));
             }
-            "filter" => {
-                shape(name, value, 2048)?;
-                for item in crate::query::split_items(value) {
-                    out.push(format!("--filter={item}"));
-                }
+            Param::Filter => {
+                shape(name, value, FILTER_MAX)?;
+                out.extend(crate::query::split_items(value).into_iter().map(|item| format!("--filter={item}")));
             }
-            "q" => {
-                shape(name, value, 512)?;
+            Param::Q => {
+                shape(name, value, VALUE_MAX)?;
                 out.push(format!("--grep={value}"));
             }
-            "fields" => {
-                shape(name, value, 512)?;
+            Param::Fields => {
+                shape(name, value, VALUE_MAX)?;
                 if value != "id" {
                     return Err(Bad::Shape(name.clone()));
                 }
                 fields = Some("id");
             }
-            _ => {
-                shape(name, value, 512)?;
-                out.push(format!("--{name}={value}"));
+            Param::Sort => {
+                shape(name, value, VALUE_MAX)?;
+                out.push(format!("--sort={value}"));
             }
         }
     }
@@ -192,17 +200,14 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
     Ok(out)
 }
 
-/// FNV-1a 64 — `DefaultHasher` 는 판마다 바뀔 수 있어, 같은 파일이 판을 넘어 같은 표식이어야 하는 자리에 못 쓴다.
-fn fnv(bytes: &[u8], mut h: u64) -> u64 {
-    for b in bytes {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h
-}
-
-/// `/api/stamp` 의 표식 — 탐색기가 다시 읽기를 가를 때 보는 파일들(스냅샷·저널·아카이브·설정)의
-/// (경로·수정 시각·크기)를 접은 16진 글. 안 바뀌면 같고, 쓰면 달라진다. **읽기만 하고 자식이 없다.**
+/// `/api/stamp` 의 표식 — 끝점의 답을 바꾸는 파일들의 (경로·수정 시각·크기)를 접은 16진 글. 안 바뀌면 같고,
+/// 쓰면 달라진다. **읽기만 하고 자식이 없다.**
+///
+/// 접는 것은 트래커(스냅샷·저널·아카이브·`.moai/config.toml`)와 **부르는 사람 쪽 둘** — 사용자 설정(화면 말,
+/// 옛 `[read]`)과 그 트래커의 읽음 파일(`/api/rows` 의 `unread`)이다. 트래커만 접던 판은 다른 창에서 `moai read`
+/// 를 친 뒤에도 표식이 그대로라, 표식이 움직일 때만 다시 읽는 페이지가 [NEW] 를 내내 세웠다.
+///
+/// 셈은 [`crate::text::fnv1a64_from`] 이다 — 상수와 그 까닭(`DefaultHasher` 를 안 쓴다)은 거기 한 벌이다.
 pub fn stamp(cwd: &std::path::Path, lang: Lang) -> crate::fail::R<String> {
     let repo = crate::store::Repo::find_from(cwd, || lang)?
         .ok_or_else(|| crate::fail::Fail::new(say(lang, "refuse.not_a_repo")))?;
@@ -211,19 +216,28 @@ pub fn stamp(cwd: &std::path::Path, lang: Lang) -> crate::fail::R<String> {
     marks.extend(crate::archive::marks(&repo.root)?);
     let config = repo.dir().join("config.toml");
     marks.push((config.clone(), crate::store::stamp(&config)));
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    if let Some(user) = crate::user_config::path() {
+        let read = crate::read_marks::place_of(&user, &repo.root);
+        let sheets = std::iter::once(read.at).chain(read.pending).chain(read.past);
+        marks.extend(std::iter::once(user).chain(sheets).map(|p| {
+            let s = crate::store::stamp(&p);
+            (p, s)
+        }));
+    }
+    let fold = crate::text::fnv1a64_from;
+    let mut h = crate::text::FNV64_OFFSET;
     for (path, mark) in marks {
-        h = fnv(path.to_string_lossy().as_bytes(), h);
+        h = fold(h, path.as_os_str().as_encoded_bytes());
         // 파일이 없는 것과 비어 있는 것은 다르다 — 없으면 0xff 한 바이트로 가른다.
         match mark.and_then(|(t, len)| Some((t.duration_since(std::time::UNIX_EPOCH).ok()?, len))) {
             Some((t, len)) => {
-                h = fnv(&t.as_nanos().to_le_bytes(), h);
-                h = fnv(&len.to_le_bytes(), h);
+                h = fold(h, &t.as_nanos().to_le_bytes());
+                h = fold(h, &len.to_le_bytes());
             }
-            None => h = fnv(&[0xff], h),
+            None => h = fold(h, &[0xff]),
         }
         // 이웃한 경로 둘이 글자째 이어 붙어 같은 바이트열이 되지 않게 끊는다.
-        h = fnv(&[0x00], h);
+        h = fold(h, &[0x00]);
     }
     Ok(format!("{h:016x}"))
 }
@@ -255,6 +269,8 @@ mod tests {
         assert_eq!(rows(&[]).unwrap(), with_fields(vec!["show", "--all"]));
         assert_eq!(argv_of("/api/backlog", &[]).unwrap().unwrap(), with_fields(vec!["backlog", "show", "--all"]));
         assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep"]));
+        assert_eq!(argv_of("/api/status", &[]).unwrap().unwrap(), strs(&["status"]));
+        assert_eq!(argv_of("/api/wiki", &[]).unwrap().unwrap(), strs(&["wiki", "ls"]));
     }
 
     #[test]
@@ -287,19 +303,35 @@ mod tests {
         assert!(v.contains(&"--grep=파서".to_string()), "{v:?}");
     }
 
+    /// **id 는 이슈 id 의 꼴이다** — `show` 가 종류 낱말로 읽는 `issue`·`epic`… 은 목록을 내므로 막는다.
     #[test]
-    fn ids_and_slugs_are_words() {
-        assert_eq!(argv_of("/api/issue/moai-1abc.x", &[]).unwrap().unwrap(), strs(&["show", "moai-1abc.x"]));
-        assert_eq!(argv_of("/api/wiki/guide", &[]).unwrap().unwrap(), strs(&["wiki", "show", "guide"]));
-        assert_eq!(argv_of("/api/wiki", &[]).unwrap().unwrap(), strs(&["wiki", "ls"]));
-        for bad in ["--all", "-x", ".hidden", "a b", "a/b", "", "한글"] {
+    fn an_issue_path_takes_an_issue_id_after_a_double_dash() {
+        assert_eq!(argv_of("/api/issue/moai-1abc", &[]).unwrap().unwrap(), strs(&["show", "--", "moai-1abc"]));
+        assert_eq!(
+            argv_of("/api/issue/ai-argos-1abc.x1y", &[]).unwrap().unwrap(),
+            strs(&["show", "--", "ai-argos-1abc.x1y"])
+        );
+        for bad in ["issue", "epic", "milestone", "backlog", "idea", "--all", "-x", "a b", "a/b", "", "한글-1abc"] {
             let r = argv_of(&format!("/api/issue/{bad}"), &[]).unwrap();
             assert!(matches!(r, Err(Bad::Shape(_))), "{bad:?}: {r:?}");
         }
-        let long = "a".repeat(129);
-        assert!(matches!(argv_of(&format!("/api/wiki/{long}"), &[]).unwrap(), Err(Bad::Shape(_))));
-        assert!(argv_of(&format!("/api/wiki/{}", "a".repeat(128)), &[]).unwrap().is_ok());
+        assert!(matches!(argv_of("/api/issue/moai-1abc", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
         assert!(argv_of("/api/nope", &[]).is_none());
+    }
+
+    /// **위키의 쪽은 `wiki ls` 가 낸 낱말 그대로다** — 디렉터리 밑(`guide/start`), 한글, `_` 로 시작하는 것, 빈칸이
+    /// 든 것, `-` 로 시작하는 것까지. 막는 것은 빈 것·제어 문자·상한뿐이다.
+    #[test]
+    fn a_wiki_path_takes_the_slug_as_it_is_listed() {
+        for slug in ["guide", "guide/start", "안내", "_Sidebar", "my notes", "-dash"] {
+            let v = argv_of(&format!("/api/wiki/{slug}"), &[]).unwrap().unwrap();
+            assert_eq!(v, strs(&["wiki", "show", "--", slug]), "{slug:?}");
+        }
+        assert!(matches!(argv_of("/api/wiki/", &[]).unwrap(), Err(Bad::Empty(_))));
+        assert!(matches!(argv_of("/api/wiki/a\nb", &[]).unwrap(), Err(Bad::Control(_))));
+        let long = "a".repeat(VALUE_MAX + 1);
+        assert!(matches!(argv_of(&format!("/api/wiki/{long}"), &[]).unwrap(), Err(Bad::Long(_, VALUE_MAX))));
+        assert!(argv_of(&format!("/api/wiki/{}", "a".repeat(VALUE_MAX)), &[]).unwrap().is_ok());
     }
 
     #[test]
@@ -311,6 +343,8 @@ mod tests {
         assert!(matches!(rows(&[("sort", "title")]), Err(Bad::Unknown(_))));
         assert!(matches!(argv_of("/api/tree", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
         assert!(matches!(argv_of("/api/wiki", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
+        // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?worktree=1` 이 맨 보드로 답했다.
+        assert!(matches!(argv_of("/api/status", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
         for v in ["true", "0", "", "2", "yes"] {
             assert!(matches!(rows(&[("archived", v)]), Err(Bad::Shape(_))), "{v:?}");
         }
@@ -322,11 +356,5 @@ mod tests {
         assert!(rows(&[("q", &"a".repeat(512))]).is_ok());
         assert!(matches!(rows(&[("filter", &"a".repeat(2049))]), Err(Bad::Long(_, 2048))));
         assert!(rows(&[("filter", &"a".repeat(2048))]).is_ok());
-    }
-
-    #[test]
-    fn the_fnv_is_the_published_one() {
-        // 알려진 값: FNV-1a 64 의 "a" → af63dc4c8601ec8c.
-        assert_eq!(fnv(b"a", 0xcbf2_9ce4_8422_2325), 0xaf63_dc4c_8601_ec8c);
     }
 }

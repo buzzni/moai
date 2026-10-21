@@ -205,14 +205,15 @@ backlog, deferred and your columns side by side, one lane per milestone, and in 
 overview one header per project — `SPC g l` brings the list back, and the choice
 is kept for the next run. `SPC v b` hides the backlog items, and a card that is not
 yours says whose it is.
-`moai web` serves the same tracker as a page in a browser tab, read-only, on
-`127.0.0.1:6624` (`--port`, `--port 0` for a free one, `--host`): a board, a list
-and the wiki, with the keys of the explorer. It never opens a browser and never
-writes; see [the manual page](docs/web.md).
 `SPC f` filters with the same `key=value` words as `--filter`. While you type,
 the keys it takes and a few examples stand above the field, and in the value of
 `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
 do — typing narrows them, Up and Down pick one and Enter puts it in.
+
+`moai web` serves the same tracker as a page in a browser tab, read-only, on
+`127.0.0.1:6624` (`--port`, `--port 0` for a free one, `--host`): a board, a list
+and the wiki, with the keys of the explorer. It never opens a browser and never
+writes; see [the manual page](docs/web.md).
 
 Done work that has sat in done for two weeks is the archive. It is not removed
 and nothing is stored for it — moai reads it off the column and the clock each
