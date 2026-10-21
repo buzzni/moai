@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 
-const panel = new URL('../packages/moai/panel/', import.meta.url)
+const panel = new URL('../panel/', import.meta.url)
 const table = await import(new URL('keys/table.ts', panel))
 const routerModule = await import(new URL('keys/router.ts', panel))
 const { KEY_TABLE, MENU_CONTROLS, LAYERS, menuLayer, helpSections, keyLabel, bindingKeys, tokens, say } = table

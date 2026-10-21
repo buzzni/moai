@@ -3,7 +3,7 @@
 import { build } from 'esbuild'
 import { fileURLToPath } from 'node:url'
 
-const panel = fileURLToPath(new URL('../packages/moai/panel/', import.meta.url))
+const panel = fileURLToPath(new URL('../panel/', import.meta.url))
 
 export async function panelModule(relative) {
   const result = await build({

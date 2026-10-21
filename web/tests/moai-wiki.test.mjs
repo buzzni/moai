@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 
-const panel = new URL('../packages/moai/panel/', import.meta.url)
+const panel = new URL('../panel/', import.meta.url)
 const fixtures = new URL('./fixtures/moai-wiki/', import.meta.url)
 const wiki = await import(new URL('view/wiki.ts', panel))
 const wikiSource = await readFile(new URL('view/wiki.ts', panel), 'utf8')

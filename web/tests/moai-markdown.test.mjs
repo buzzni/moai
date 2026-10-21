@@ -4,7 +4,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 
-const panel = new URL('../packages/moai/panel/', import.meta.url)
+const panel = new URL('../panel/', import.meta.url)
 const { renderMarkdown, githubAnchor } = await import(new URL('view/markdown.ts', panel))
 const sourceText = await readFile(new URL('view/markdown.ts', panel), 'utf8')
 const css = await readFile(new URL('style/markdown.css', panel), 'utf8')
@@ -350,7 +350,7 @@ test('XSS: attribute and tag injection through headings, link text, issue ids an
 })
 
 test('smoke: real wiki pages render with tables and links, safely', async () => {
-  const dir = new URL('../tests/fixtures/moai-wiki/', import.meta.url)
+  const dir = new URL('./fixtures/moai-wiki/', import.meta.url)
   const files = (await readdir(dir)).filter((f) => f.startsWith('wiki-show-'))
   assert.ok(files.length >= 3)
   let tables = 0

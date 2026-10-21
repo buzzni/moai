@@ -4,10 +4,10 @@
 # 링크를 분 단위로 만들어, 시험과 한 잡에 두면 clippy 가 30초에 낼 답을 릴리스 링크
 # 뒤에서 기다린다. 둘이 나란히 돌면 벽시계는 느린 쪽 하나다.
 #
-# 잡은 다섯이다 — `ci-gate`(fmt·clippy·시험), `changes`(바이너리에 닿는 것이 바뀌었나),
+# 잡은 여섯이다 — `ci-gate`(fmt·clippy·시험), `changes`(바이너리에 닿는 것이 바뀌었나),
 # `msrv`(`Cargo.toml` 이 적은 판으로 서는가), `windows`(Windows 에서 clippy·시험 컴파일이 서는가),
-# `size-budget`(15MB 예산). required check 는 `main` 의 보호 규칙이 요구하는 `ci-gate` 와
-# `size-budget` 둘이고, 나머지 셋(`changes`·`msrv`·`windows`)이 required 가 아닌 까닭은 제
+# `size-budget`(15MB 예산), `web`(페이지의 시험과 번들). required check 는 `main` 의 보호 규칙이
+# 요구하는 `ci-gate` 와 `size-budget` 둘이고, 나머지 넷(`changes`·`msrv`·`windows`·`web`)이 required 가 아닌 까닭은 제
 # 머리글에 적는다. 밑의 잡 주석이 "required" 라 하면 이 둘이다 — 보호 규칙이 바뀌면 이 줄과
 # 둘을 이름으로 대는 `ci-gate`·`changes`·`size-budget` 의 머리글을 고친다.
 name: CI
@@ -545,3 +545,36 @@ jobs:
         with:
           path: ${{ env.CACHED_PATHS }}
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  # **`moai web` 의 페이지(`web/`)를 node 로 재고 다시 지어, 커밋된 번들과 견준다.** 번들
+  # (`src/web/dist/`)은 커밋해서 `cargo build` 가 node 없이 돈다 — 그래서 소스와 번들이 갈라질 수
+  # 있고, `tests/web_bundle.rs` 가 node 없이 입력의 해시로 잡는 것을 여기서는 바이트로 잡는다.
+  #
+  # **required check 로 삼지 않는다**(아직). 보호 규칙에 더하는 것은 사람의 일이다(moai-jshy) — 더하면
+  # 맨 위 머리글의 "둘" 을 함께 고친다. `if:` 는 `msrv` 와 같다 — 못 잰 판은 도는 쪽으로 선다.
+  web:
+    name: web 페이지 — 형 검사 · 시험 · 번들
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: 커밋된 번들이 지금 지은 것과 같다
+        run: |
+          if ! git diff --exit-code -- ../src/web/dist; then
+            echo '::error::src/web/dist/ 가 web/ 와 갈라졌다 — scripts/gen-web.sh 를 돌려 담는다'
+            exit 1
+          fi

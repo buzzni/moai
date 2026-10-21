@@ -1,136 +1,18 @@
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { pathToFileURL } from 'node:url'
-import { promisify } from 'node:util'
-import JSZip from 'jszip'
 
-import { createTestHost } from '../packages/test-host/dist/index.js'
 import { panelModule } from './moai-panel-modules.mjs'
 
-const exec = promisify(execFile)
 const root = new URL('..', import.meta.url).pathname
-const cli = join(root, 'packages/sdk/dist/cli.js')
-
-const manifest = JSON.parse(await readFile(new URL('../packages/moai/extension.json', import.meta.url)))
 const fixture = async (name) => JSON.parse(await readFile(new URL(`./fixtures/moai/${name}`, import.meta.url), 'utf8'))
 
 const { PROFILE, ARCHIVE_PAGE, loadAllRows, loadArchived, loadRows, loadStatuses, loadTallies, markArchived, activeIds, withArchive, talliesFrom, loadWikiListing, loadWikiPage, rowsFromLists, statusesFrom } =
   await panelModule('data/source.ts')
 const { IssueIndex, LOST } = await panelModule('data/index.ts')
 const { CompatProbe } = await panelModule('data/compat.ts')
-
-/** The extension as shipped: packed by the CLI and read back out of the archive (as tests/moai.test.mjs does). */
-async function packMoai() {
-  const temporary = await mkdtemp(join(tmpdir(), 'saycode-moai-source-'))
-  try {
-    const archivePath = join(temporary, 'moai.saycode-extension')
-    await exec('node', [join(root, 'packages/moai/build.mjs')])
-    await exec('node', [cli, 'pack', join(root, 'packages/moai'), '--output', archivePath])
-    const zip = await JSZip.loadAsync(await readFile(archivePath))
-    const modulePath = join(temporary, 'index.mjs')
-    await writeFile(modulePath, await zip.file('index.js').async('nodebuffer'))
-    return (await import(`${pathToFileURL(modulePath).href}?test=${Date.now()}`)).default
-  } finally {
-    await rm(temporary, { recursive: true, force: true })
-  }
-}
-
-const extension = await packMoai()
-
-async function host() {
-  const starts = []
-  const testHost = createTestHost('buzzni.moai', {
-    async invokeCapability(permission, action, args) {
-      starts.push(args)
-      return { action, operationId: 'op', state: 'accepted' }
-    },
-  })
-  await testHost.activate(extension)
-  return { run: (...args) => testHost.invokeCommand('buzzni.moai.run', args), starts }
-}
-
-const NO_VALUE = ['status', 'prime', 'show-all', 'backlog-all', 'show-archived', 'wiki-ls', 'read-all']
-const ONE_VALUE = { show: 'id', 'wiki-show': 'slug', read: 'id', 'read-group': 'group', 'show-archived-after': 'after' }
-
-test('every declared profile is runnable through the whitelist, and nothing else is', () => {
-  const declared = manifest.machineCommands.profiles.map((profile) => profile.id).sort()
-  const whitelisted = [...NO_VALUE, ...Object.keys(ONE_VALUE)].map((name) => `buzzni.moai.${name}`).sort()
-  assert.deepEqual(declared, whitelisted)
-  // The parameter each takes is the one its argv uses.
-  for (const [name, parameter] of Object.entries(ONE_VALUE)) {
-    const profile = manifest.machineCommands.profiles.find((candidate) => candidate.id === `buzzni.moai.${name}`)
-    assert.deepEqual(Object.keys(profile.parameters), [parameter])
-    assert.ok(profile.argv.includes(`{{${parameter}}}`))
-  }
-  for (const profile of manifest.machineCommands.profiles) {
-    assert.deepEqual(profile.argv.slice(0, 3), ['--json', '-C', '{{workspaceRoot}}'])
-    assert.doesNotMatch(profile.argv.join(' '), /init|tui|wake|hooks|editor|shell/i)
-    // Nothing writes the tracker (no `add`, se-24ey.oxd); `read*` write the user's own ~/.config/moai/read.
-    assert.equal(profile.writeScope, undefined, profile.id)
-  }
-})
-
-const declaredProfile = (name) => manifest.machineCommands.profiles.find((profile) => profile.id === `buzzni.moai.${name}`)
-
-test('the archive pages are the size loadArchived counts on, and the shipped catalog entries are matched', () => {
-  // A page shorter than ARCHIVE_PAGE ends the paging, so `-n` and the constant must agree.
-  for (const name of ['show-archived', 'show-archived-after']) {
-    const argv = declaredProfile(name).argv
-    assert.equal(argv[argv.indexOf('-n') + 1], String(ARCHIVE_PAGE), name)
-  }
-  // The daemon (happy-cli 1.1.10-aplus.320) already ships these two; a digest that differs is refused.
-  assert.deepEqual(declaredProfile('wiki-ls').argv.slice(3), ['wiki', 'ls'])
-  assert.deepEqual(declaredProfile('wiki-show').argv.slice(3), ['wiki', 'show', '{{slug}}'])
-  assert.deepEqual(declaredProfile('wiki-show').parameters, { slug: { type: 'string', maxLength: 128 } })
-  // Its `buzzni.moai.backlog` is `backlog add <title>`, a write: the backlog read must not take that id.
-  assert.equal(declaredProfile('backlog'), undefined)
-  assert.deepEqual(declaredProfile('backlog-all').argv.slice(3), ['backlog', 'show', '--all'])
-})
-
-test('profiles that take no value start with no parameters and refuse a value', async () => {
-  const { run, starts } = await host()
-  for (const name of NO_VALUE) {
-    const profileId = `buzzni.moai.${name}`
-    assert.deepEqual(await run(profileId), { action: 'start', operationId: 'op', state: 'accepted' })
-    await assert.rejects(run(profileId, 'x'), /takes no value/)
-    await assert.rejects(run(profileId, ''), /takes no value/)
-  }
-  assert.deepEqual(starts, NO_VALUE.map((name) => ({ profileId: `buzzni.moai.${name}`, parameters: {} })))
-})
-
-test('profiles that take one value map it to their parameter and refuse an empty, missing or flag-like one', async () => {
-  const { run, starts } = await host()
-  for (const [name, parameter] of Object.entries(ONE_VALUE)) {
-    const profileId = `buzzni.moai.${name}`
-    await run(profileId, 'se-1.a')
-    assert.deepEqual(starts.at(-1), { profileId, parameters: { [parameter]: 'se-1.a' } })
-    await assert.rejects(run(profileId), new RegExp(`${parameter} is required`))
-    await assert.rejects(run(profileId, ''), new RegExp(`${parameter} is required`))
-    await assert.rejects(run(profileId, 42), new RegExp(`${parameter} is required`))
-    // `read --all` must not come out of a `read <id>` call.
-    await assert.rejects(run(profileId, '--all'), /cannot start with "-"/)
-  }
-  assert.equal(starts.length, Object.keys(ONE_VALUE).length)
-})
-
-test('add, unknown and dangerous profiles are refused', async () => {
-  const { run, starts } = await host()
-  for (const profileId of ['buzzni.moai.add', 'buzzni.moai.init', 'buzzni.moai.tui', 'buzzni.moai.wake', 'buzzni.moai.hooks', 'buzzni.moai.editor', 'buzzni.moai.shell', 'buzzni.moai.mv', 'other.status', 42]) {
-    await assert.rejects(run(profileId), /unsupported Moai profile/)
-  }
-  assert.equal(starts.length, 0)
-})
-
-test('the source names every declared profile', () => {
-  assert.deepEqual(Object.values(PROFILE).sort(), manifest.machineCommands.profiles.map((profile) => profile.id).sort())
-  assert.equal(PROFILE.read, 'buzzni.moai.read')
-  assert.equal(PROFILE.readAll, 'buzzni.moai.read-all')
-  assert.equal(PROFILE.readGroup, 'buzzni.moai.read-group')
-})
 
 /** A client that answers each request from `answers[profileId]` (an outcome, or a function of the value). */
 function fakeClient(answers) {

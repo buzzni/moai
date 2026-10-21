@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import { JSDOM } from 'jsdom'
 
-const panel = new URL('../packages/moai/panel/', import.meta.url)
+const panel = new URL('../panel/', import.meta.url)
 const { ICONS, iconSvg } = await import(new URL('view/icons.ts', panel))
 const components = await import(new URL('view/components.ts', panel))
 const tabsModule = await import(new URL('view/tabs.ts', panel))
