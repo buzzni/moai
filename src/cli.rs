@@ -755,10 +755,15 @@ BACKLOG
   `moai show`. Without them the listing is every row, as before. --sort and
   --reverse order it in the words of `moai show --sort`, and folders still come
   first and the baskets last. These shape --json only, and only inside a
-  `.moai`.
+  `.moai`. --deep (with --json, inside a `.moai`) lists every row under the
+  place at once, in the order of the explorer's unfolded tree: a folder row,
+  then what is in it, with the same filters and order as the one-level
+  listing. Each row carries home, the --path handles from the root down to the
+  directory it stands in ([] at the root; none and lost for the baskets).
 
     moai tui --path <milestone> -g parser --all --json
     moai tui --sort updated --json
+    moai tui --deep --json
 
   `--path` takes an issue id, or one of the two baskets by the word this
   tool uses for them: none (no milestone) and lost.")]
@@ -2069,6 +2074,10 @@ pub struct TuiArgs {
 
     #[command(flatten)]
     pub order: OrderArgs,
+
+    /// With --json, list every row below, with its home
+    #[arg(long)]
+    pub deep: bool,
 }
 
 /// 차례만 — 쪽(`-n`·`--after`)은 없다. 디렉터리 목록은 한 자리를 통째로 낸다(moai-wk7i.5wx).

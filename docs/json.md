@@ -36,6 +36,15 @@ list it, and a folder stands when something under it does. Filters bring
 `moai show`'s defaults with them, so done rows are hidden until `--all` or
 `-s done` asks for them; without filters the listing is every row.
 
+`moai tui --deep --json` prints everything under the place at once instead of
+one directory: the rows in the order of the explorer's fully unfolded tree, a
+folder row followed by what is inside it, with the filters and `--sort` of the
+one-level listing applied at every place. Each row also carries `home`, the
+`--path` handles from the root down to the directory it stands in (`[]` for a
+row at the root, `none` and `lost` for the baskets), always counted from the
+root even when `--path` starts the walk lower. `--deep` needs `--json` and a
+`.moai`, and one-level listings carry no `home`.
+
 ## Read rows and what they inherit
 
 `moai show --json` gives the rows themselves. Beside the fields written on a

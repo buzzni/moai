@@ -7167,6 +7167,131 @@ fn tui_json_counts_groups_and_takes_the_show_filters() {
     }
 }
 
+/// `tui --json --deep` 는 그 자리 밑 모든 줄을 앞 순회로 한 번에 내고, 줄마다 뿌리에서 선 디렉터리까지의
+/// 손잡이(`home`)를 단다(moai-0aa7.joy). 마일스톤·에픽·이슈·자식·`none`·`lost`·backlog 가 한 번씩 선다.
+#[test]
+fn tui_deep_lists_every_row_once_with_its_home() {
+    let s = init("tuideep");
+    let ms = field(&ok(s.path(), &["milestone", "add", "v1", "--json"]), "id");
+    let ep = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &ms, "--json"]), "id");
+    let is = field(&ok(s.path(), &["add", "안의 일", "-e", &ep, "--json"]), "id");
+    let kid = field(&ok(s.path(), &["add", "자식", "--parent", &is, "--json"]), "id");
+    let bare = field(&ok(s.path(), &["epic", "add", "마일스톤 없는 에픽", "--json"]), "id");
+    let lost = add(s.path(), &["길 잃은 것"]);
+    let bl = field(&ok(s.path(), &["backlog", "add", "나중에", "--json"]), "id");
+    let broken = line_of(s.path(), &lost).replace(r#""status""#, r#""epic":"argos-zzzz","status""#);
+    let text: String = issues(s.path())
+        .lines()
+        .map(|l| if l.contains(&format!(r#""id":"{lost}""#)) { broken.clone() } else { l.to_string() })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{text}\n")).unwrap();
+
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &["tui", "--json", "--deep"])).unwrap();
+    let at = |id: &str| rows.iter().position(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"));
+    let home = |id: &str| -> Vec<String> {
+        rows[at(id)]["home"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect()
+    };
+    for id in [&ms, &ep, &is, &kid, &bare, &lost, &bl] {
+        assert_eq!(rows.iter().filter(|r| r["id"] == id.as_str()).count(), 1, "{id} 가 한 번이 아니다");
+    }
+    assert_eq!(home(&ms), Vec::<String>::new());
+    assert_eq!(home(&ep), vec![ms.clone()]);
+    assert_eq!(home(&is), vec![ms.clone(), ep.clone()]);
+    assert_eq!(home(&kid), vec![ms.clone(), ep.clone(), is.clone()]);
+    assert_eq!(home(&bare), vec!["none".to_string()]);
+    assert_eq!(home(&lost), vec!["lost".to_string()]);
+    // backlog 는 일과 같은 자리의 잎이다 — 뿌리에 없으면 바구니 밑에 선다.
+    assert!(home(&bl).len() <= 1, "{:?}", home(&bl));
+    // 바구니 줄은 id 가 없지만 제 손잡이를 home 으로 가진 줄들 앞에 선다.
+    let basket = rows.iter().position(|r| r["path"] == "none" && r["kind"] == "bucket").unwrap();
+    assert_eq!(rows[basket]["home"], serde_json::json!([]));
+    assert!(basket < at(&bare), "부모가 자식보다 앞이어야 한다");
+    assert!(at(&ms) < at(&ep) && at(&ep) < at(&is) && at(&is) < at(&kid), "부모가 자식보다 앞이어야 한다");
+    let lost_basket = rows.iter().position(|r| r["path"] == "lost").unwrap();
+    assert!(lost_basket < at(&lost));
+
+    // `--path` 를 줘도 home 은 뿌리에서부터다.
+    let inner: Vec<serde_json::Value> =
+        serde_json::from_str(&ok(s.path(), &["tui", "--json", "--deep", "--path", &ep])).unwrap();
+    let first = &inner[0];
+    assert_eq!(first["id"], is.as_str());
+    assert_eq!(first["home"], serde_json::json!([ms, ep]));
+}
+
+/// 한 자리 목록을 `--path` 로 자리마다 불러 앞 순회로 이으면 `--deep` 이다(`home` 만 빼고).
+#[test]
+fn tui_deep_is_the_one_level_listings_walked() {
+    let s = init("tuideepwalk");
+    let ms = field(&ok(s.path(), &["milestone", "add", "v1", "--json"]), "id");
+    let ep = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &ms, "--json"]), "id");
+    let a = field(&ok(s.path(), &["add", "b 일", "-e", &ep, "-p", "0", "--json"]), "id");
+    let b = field(&ok(s.path(), &["add", "a 일", "-e", &ep, "--json"]), "id");
+    field(&ok(s.path(), &["add", "자식", "--parent", &a, "--json"]), "id");
+    let done = field(&ok(s.path(), &["add", "끝난 일", "-e", &ep, "--json"]), "id");
+    ok(s.path(), &["mv", &done, "done"]);
+    ok(s.path(), &["epic", "add", "빈 에픽", "--json"]);
+    ok(s.path(), &["add", "에픽 밖", "--json"]);
+    ok(s.path(), &["backlog", "add", "나중에"]);
+    let _ = b;
+
+    fn walk(dir: &Path, at: Option<&str>, args: &[&str], out: &mut Vec<serde_json::Value>) {
+        let mut all = vec!["tui", "--json"];
+        if let Some(h) = at {
+            all.extend(["--path", h]);
+        }
+        all.extend(args);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&ok(dir, &all)).unwrap();
+        for r in rows {
+            let (is_dir, handle) = (r["dir"] == true, r["path"].as_str().unwrap().to_string());
+            out.push(r);
+            if is_dir {
+                walk(dir, Some(&handle), args, out);
+            }
+        }
+    }
+    for args in [&[][..], &["-s", "todo", "--all"][..], &["--sort", "title"][..]] {
+        let mut stepped = Vec::new();
+        walk(s.path(), None, args, &mut stepped);
+        let mut all = vec!["tui", "--json", "--deep"];
+        all.extend(args);
+        let mut deep: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &all)).unwrap();
+        assert!(!deep.is_empty());
+        for r in &mut deep {
+            assert!(r.as_object_mut().unwrap().remove("home").is_some(), "{r}");
+        }
+        assert_eq!(deep, stepped, "{args:?}");
+    }
+}
+
+/// `--deep` 는 `--json` 의 목록 모양이다 — 화면에서도 `.moai` 밖에서도 말없이 먹지 않는다.
+#[test]
+fn tui_deep_needs_json() {
+    let s = init("tuideepneed");
+    let out = moai(s.path(), &["tui", "--deep"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--deep"), "{out:?}");
+    let outside = Scratch::new("tuideep-outside");
+    for args in [&["tui", "--deep"][..], &["tui", "--deep", "--json"][..]] {
+        let out = moai(outside.path(), args);
+        assert!(!out.status.success(), "{args:?}");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        assert!(said.contains("--deep"), "{args:?}: {said}");
+    }
+}
+
+/// `--deep` 없는 `tui --json` 에는 `home` 이 없다 — 한 자리 목록의 출력은 그대로다.
+#[test]
+fn tui_one_level_listing_is_unchanged() {
+    let s = init("tuideepplain");
+    let ep = field(&ok(s.path(), &["epic", "add", "에픽", "--json"]), "id");
+    ok(s.path(), &["add", "일", "-e", &ep]);
+    for args in [&["tui", "--json"][..], &["tui", "--json", "--path", &ep][..], &["tui", "--json", "-s", "todo"][..]] {
+        let out = ok(s.path(), args);
+        assert!(!out.contains("home"), "{args:?}: {out}");
+    }
+}
+
 /// 시계가 가는 것만으로 드러나는 것들 — 고정 시계 없이는 시험할 수 없다.
 #[test]
 fn time_alone_surfaces_rot() {
@@ -9168,6 +9293,7 @@ fn every_command_still_speaks_json() {
         vec!["defer", &id, "--json"],
         // tui 는 화면을 켜지 않고 목록만 낸다.
         vec!["tui", "--json"],
+        vec!["tui", "--deep", "--json"],
         // 종류 네임스페이스도 같은 길을 지난다.
         vec!["issue", "show", "--json"],
         vec!["epic", "show", "--json"],

@@ -76,7 +76,8 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
-        let rows: Vec<Row> = entries.iter().map(|e| Row::of(&index, &load.issues, &states, e, ctx.lang())).collect();
+        let rows: Vec<Row> =
+            entries.iter().map(|(e, home)| Row::of(&index, &load.issues, &states, e, home.clone(), ctx.lang())).collect();
         return super::json_line(&rows);
     }
 
@@ -458,6 +459,7 @@ fn shaped(args: &TuiArgs) -> Option<&'static str> {
     super::show::first_given(&args.filter)
         .or_else(|| args.order.sort.is_some().then_some("--sort"))
         .or_else(|| args.order.reverse.then_some("--reverse"))
+        .or_else(|| args.deep.then_some("--deep"))
 }
 
 /// `--json` 이 낼 그 자리의 목록(moai-wk7i.5wx).
@@ -479,11 +481,11 @@ fn listing(
     (index, ground): (&Index, &crate::tui::Ground),
     path: &Path,
     args: TuiArgs,
-) -> R<Vec<Entry>> {
-    let TuiArgs { path: _, filter, order } = args;
+) -> R<Vec<(Entry, Option<Vec<String>>)>> {
+    let TuiArgs { path: _, filter, order, deep } = args;
     let given = super::show::first_given(&filter).is_some();
     if !given && order.sort.is_none() && !order.reverse {
-        return Ok(index.entries(issues, path));
+        return Ok(spread(issues, path, deep, &|at| index.entries(issues, at)));
     }
     let kind = filter.kind;
     let filter = super::show::filter_of(ctx, repo, issues, filter, kind)?;
@@ -516,7 +518,53 @@ fn listing(
             if order.reverse { o.reverse() } else { o }
         }
     };
-    Ok(index.entries_sorted(issues, path, &keep, &by))
+    Ok(spread(issues, path, deep, &|at| index.entries_sorted(issues, at, &keep, &by)))
+}
+
+/// 한 자리의 목록 `list` 를 그대로 내거나(`--deep` 아님), 폴더 줄(바구니 포함) 바로 뒤에 그 안을 같은 목록으로
+/// 펼친다(앞 순회, moai-0aa7.joy). **차례와 거르개는 한 자리 목록의 것을 그대로 쓴다** — 여기서 다시 정하면
+/// `--path` 로 자리마다 부른 것과 갈린다. 줄마다의 `home` 은 뿌리에서 그 줄이 선 디렉터리까지의 `--path` 손잡이다.
+fn spread(
+    issues: &[Issue],
+    path: &Path,
+    deep: bool,
+    list: &dyn Fn(&Path) -> Vec<Entry>,
+) -> Vec<(Entry, Option<Vec<String>>)> {
+    if !deep {
+        return list(path).into_iter().map(|e| (e, None)).collect();
+    }
+    fn walk(
+        issues: &[Issue],
+        path: &Path,
+        list: &dyn Fn(&Path) -> Vec<Entry>,
+        out: &mut Vec<(Entry, Option<Vec<String>>)>,
+    ) {
+        let home: Vec<String> = path.iter().map(handle).collect();
+        for e in list(path) {
+            let inside = match &e {
+                Entry::Dir { seg, .. } => Some(seg.clone()),
+                Entry::Leaf { .. } => None,
+            };
+            out.push((e, Some(home.clone())));
+            if let Some(seg) = inside {
+                let mut next = path.clone();
+                next.push(seg);
+                walk(issues, &next, list, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(issues, path, list, &mut out);
+    out
+}
+
+/// 경로 마디의 `--path` 손잡이 — `Row::path` 가 내는 말과 같다.
+fn handle(seg: &Seg) -> String {
+    match seg {
+        Seg::Milestone(Some(id)) | Seg::Epic(id) | Seg::Issue(id) => id.clone(),
+        Seg::Milestone(None) => NO_MILESTONE.into(),
+        Seg::Lost => LOST.into(),
+    }
 }
 
 /// `--json` 한 줄의 원소. 파일의 키 순서와 같은 뜻으로 앞에서부터 읽힌다.
@@ -546,6 +594,10 @@ struct Row {
     /// 그 밑의 줄 전부로 센다 — 화면의 셈이 그렇다.
     #[serde(skip_serializing_if = "Option::is_none")]
     progress: Option<Tally>,
+    /// `--deep` 일 때만 서는, 뿌리에서 이 줄이 선 디렉터리까지의 `--path` 손잡이 목록(moai-0aa7.joy). 뿌리의 줄은 `[]`.
+    /// 절대 자리라 `--path` 를 줘도 뿌리에서부터다 — 보는 쪽이 자리 규칙을 다시 짓지 않게 하는 값이다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    home: Option<Vec<String>>,
 }
 
 #[derive(serde::Serialize)]
@@ -560,6 +612,7 @@ impl Row {
         issues: &[Issue],
         states: &std::collections::BTreeMap<crate::report::GroupKey<'_>, &str>,
         e: &Entry,
+        home: Option<Vec<String>>,
         lang: crate::i18n::Lang,
     ) -> Row {
         let dir = matches!(e, Entry::Dir { .. });
@@ -581,6 +634,7 @@ impl Row {
                     let (done, total) = index.tally(&index.dir_path(issues, at));
                     Tally { done, total }
                 }),
+                home,
             },
             None => Row {
                 id: None,
@@ -595,6 +649,7 @@ impl Row {
                 derived_status: None,
                 priority: None,
                 progress: None,
+                home,
             },
         }
     }
