@@ -4,15 +4,13 @@
 // view/panes.ts through the contract in view/types.ts; the shell renders the panes that show on every store
 // change, and moves the split to the panel's width as it changes.
 //
-// The shell reads and dispatches to the store; it does no I/O. Reads, read marks and cancels are the caller's
+// The shell reads and dispatches to the store; it does no I/O. Reads and cancels are the caller's
 // (main.ts) and arrive as ShellIntents.
 
 import { isInformation, type Outcome } from "../data/client.ts"
-import { compatTells, type CompatReport, type Feature } from "../data/compat.ts"
 import type { IssueIndex } from "../data/index.ts"
 import { refreshTime } from "../data/refresh.ts"
-import { PROFILE } from "../data/source.ts"
-import { notStartedText, type Copy } from "../i18n/index.ts"
+import type { Copy } from "../i18n/index.ts"
 import { toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
 import { button, el, emptyState, iconButton } from "./components.ts"
 import { mountCrumbs } from "./crumbs.ts"
@@ -25,13 +23,8 @@ import { createToolbar, type LiveToolbar } from "./toolbar.ts"
 import type { PaneLayout, PaneView, Panes, ViewContext, ViewIntents, WikiSource } from "./types.ts"
 
 export interface Activity {
-  /** 'starting' while Desktop may show its confirmation, 'running' once the machine runs it. */
-  phase: "idle" | "starting" | "running"
-  /**
-   * A request still waits on its confirmation. Up to three run at once, so one may wait while another already
-   * runs (phase 'running'): the line still asks the person to approve it.
-   */
-  waiting: boolean
+  /** 'running' while a read is out to `moai web`. */
+  phase: "idle" | "running"
   cancellable: boolean
 }
 
@@ -63,12 +56,8 @@ export interface Shell {
   render(): void
   /** The activity line and Cancel alone: they are all that follows the request queue, so nothing else redraws for it. */
   activity(current: Activity): void
-  /** One line under the banners: what a read mark did, or why it did nothing. */
+  /** One line under the banners: what a key did (`D` saved the order), or why it did nothing. */
   say(text: string, problem?: boolean): void
-  /** Why a read mark did nothing, on that same line. The banners belong to the reads and redraw with them. */
-  refuse(outcome: Outcome): void
-  /** Automatic refresh held after a declined read (main.ts holdClock), on a line of its own until it starts again. */
-  held(on: boolean): void
   /**
    * Places other parts mount into: `toolbar` under the tab bar (holds the search / filter / sort toolbar, which
    * the shell mounts; hidden on the wiki tab), `actions` at the end of the tab bar (the help button, empty and
@@ -92,45 +81,19 @@ export interface Shell {
 /** What an outcome tells the user, and whether it is information (a choice, a retry) rather than an error. */
 export function describe(outcome: Outcome, copy: Copy, doc: Document): { parts: (string | Node)[]; info: boolean } | null {
   switch (outcome.kind) {
-    case "refused":
-      return { parts: [copy.refused[outcome.code]], info: isInformation(outcome) }
-    case "not-initialized":
-      return { parts: [copy.notInitialized[0], el(doc, "code", {}, "moai init"), copy.notInitialized[1]], info: true }
     case "moai-error":
       return { parts: [copy.moaiError(outcome.message)], info: false }
     case "cancelled":
-      return { parts: [outcome.mayContinue ? `${copy.cancelled} ${copy.mayContinue}` : copy.cancelled], info: true }
+      return { parts: [copy.cancelled], info: isInformation(outcome) }
     case "unreadable":
       return { parts: [copy.unreadable], info: false }
     case "not-started":
-      return { parts: [notStartedText(copy, outcome.code)], info: false }
+      return { parts: [copy.unreachable], info: false }
     case "failed":
-      return { parts: [copy.failed], info: false }
+      return { parts: [outcome.message ? copy.moaiError(outcome.message) : copy.failed], info: false }
     case "passed":
       return null
   }
-}
-
-// Which features follow from which fix: the profiles the catalog lacks, and what an older moai prints. `degraded`
-// holds only the features the panel uses (data/compat.ts ORDER), so `status-order` stands here unused.
-const CATALOG_FEATURES: readonly Feature[] = ["all-rows", "backlog", "archive", "wiki", "read-marks"]
-const MOAI_FEATURES: readonly Feature[] = ["status-order", "tallies"]
-
-/**
- * The compatibility banner's sentences, one per thing to fix on that machine: install moai, upgrade it, update the
- * daemon catalog. What cannot be told (`unknown`) says nothing; the features that work are not named, and an old moai
- * none of whose fallbacks the panel uses (a 0.16 lacks only `statuses[]`, which nothing draws yet) is not asked to
- * upgrade.
- */
-export function compatLines(report: CompatReport | null, copy: Copy["shell"]["compat"]): string[] {
-  if (!report) return []
-  const named = (among: readonly Feature[]) => report.degraded.filter((feature) => among.includes(feature)).map((feature) => copy.features[feature])
-  const lines: string[] = []
-  if (report.toolMissing) lines.push(copy.toolMissing)
-  const older = report.moai === "old" ? named(MOAI_FEATURES) : []
-  if (older.length > 0) lines.push(copy.oldMoai(older))
-  if (report.catalog.state === "missing") lines.push(copy.catalog(report.catalog.missing.length, named(CATALOG_FEATURES)))
-  return lines
 }
 
 /** The main pane's width: all of it, less the detail's share when the detail stands on the left. */
@@ -206,24 +169,15 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const hint = el(doc, "p", { class: "moai-hint" }, copy.hint)
   const notice = el(doc, "div", { class: "m-banner moai-notice", role: "status" })
   const error = el(doc, "div", { class: "m-banner m-banner-danger moai-error", role: "alert" })
-  const more = el(doc, "p", { class: "moai-more" })
-  // The list stands on prime's rows: `show --all` was cut at the output limit (BoardData.truncated), or it cannot be
-  // read there (primeOnly), which says what the board then leaves out.
-  const truncated = el(doc, "div", { class: "m-banner m-banner-warn moai-truncated", role: "status" })
-  // What to upgrade, update or install on that machine (data/compat.ts): the reads that work keep showing.
-  const compat = el(doc, "div", { class: "m-banner m-banner-warn moai-compat", role: "status" })
+  // What moai said on stderr beside the lists (BoardData.notes): a line it could not read is told, not swallowed.
+  const said = el(doc, "div", { class: "m-banner m-banner-warn moai-said", role: "status" })
   // Why the archive could not be read (`SPC v o`): its own line, as the board's rows and their banners stand. As for the
   // board's, an error is an alert and information is polite status text (components.ts banner).
   const archiveNotice = el(doc, "div", { class: "m-banner moai-archive-problem", role: "status" })
   const archiveError = el(doc, "div", { class: "m-banner m-banner-danger moai-archive-problem", role: "alert" })
-  // Why the backlog is missing beside prime's rows (BoardData.backlogProblem): the same pair as the archive's.
-  const backlogNotice = el(doc, "div", { class: "m-banner moai-backlog-problem", role: "status" })
-  const backlogError = el(doc, "div", { class: "m-banner m-banner-danger moai-backlog-problem", role: "alert" })
-  // A live region from the start: what a read mark did (or why it did nothing) is read out when it is written.
+  // A live region from the start: what a key did (or why it did nothing) is read out when it is written.
   const result = el(doc, "p", { class: "moai-result", role: "status" })
-  // Its own line, so neither a read mark's words nor clearing them takes the "refresh is held" notice with them.
-  const heldNote = el(doc, "div", { class: "m-banner moai-held", role: "status" })
-  const notes = el(doc, "div", { class: "m-shell-notes" }, hint, notice, error, compat, truncated, backlogNotice, backlogError, archiveNotice, archiveError, heldNote, more, result)
+  const notes = el(doc, "div", { class: "m-shell-notes" }, hint, notice, error, said, archiveNotice, archiveError, result)
   // The path and banners belong to the list and board; the wiki tab brings its own head. A panel
   // that opens on the wiki tab (the remembered one) starts without it: showTab() only runs on a change of tab.
   const head = el(doc, "div", { class: "m-shell-head", hidden: state.tab === "wiki" }, crumbs.el, notes)
@@ -254,8 +208,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const wiki = el(doc, "div", { class: "m-tabpanel m-pane-wiki", role: "tabpanel", id: panelDomId("wiki"), "aria-labelledby": tabDomId("wiki"), tabindex: -1, hidden: state.tab !== "wiki" })
   const body = el(doc, "div", { class: "m-body" }, work, wiki)
 
-  // The activity stays on every tab (the wiki's reads wait for the confirmation too), floating over the foot of the
-  // panes so a run never pushes them (shell.css, se-24ey.14i).
+  // The activity stays on every tab (the wiki reads too), floating over the foot of the panes so a read never pushes
+  // them (shell.css, se-24ey.14i).
   const shell = el(doc, "div", { class: "m-shell" }, tabbar, toolbar, head, body, status)
   root.replaceChildren(shell)
 
@@ -326,9 +280,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
 
   // ── drawing ──
   function showActivity(current: Activity) {
-    const line = current.phase === "starting" ? copy.starting
-      : current.phase === "running" ? (current.waiting ? `${copy.running} ${copy.starting}` : copy.running)
-      : ""
+    const line = current.phase === "running" ? copy.running : ""
     // A live region is read again when it is written, so an unchanged line is left alone.
     if (activityText.textContent !== line) activityText.textContent = line
     cancel.hidden = !current.cancellable
@@ -351,20 +303,14 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   }
   const explain = teller(notice, error)
   const explainArchive = teller(archiveNotice, archiveError, copy.shell.archiveFailed)
-  const explainBacklog = teller(backlogNotice, backlogError, copy.shell.backlogFailed)
 
-  let compatSeen: CompatReport | null = null
-  let compatTold = ""
-  function explainCompat(report: CompatReport | null) {
-    // A live region: written only when its sentences change. A new report can leave them as they were (moai found
-    // up to date beside a catalog line, a fallback the sentences do not name), and writing them again reads them again.
-    if (report === compatSeen) return
-    compatSeen = report
-    const lines = compatLines(report, copy.shell.compat)
+  let saidTold = ""
+  function explainSaid(lines: readonly string[]) {
+    // A live region: written only when its lines change, or every refresh would read them out again.
     const told = lines.join("\n")
-    if (told === compatTold) return
-    compatTold = told
-    compat.replaceChildren(...lines.map((line) => el(doc, "p", {}, line)))
+    if (told === saidTold) return
+    saidTold = told
+    said.replaceChildren(...(lines.length ? [el(doc, "p", {}, copy.said), ...lines.map((line) => el(doc, "p", {}, line))] : []))
   }
 
   function paintLayout(current: State) {
@@ -404,26 +350,10 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
 
     showActivity(options.activity())
     hint.hidden = state.board.value !== null
-    // A refusal the compatibility banner tells (moai missing, a profile the catalog lacks) is told there alone, and the
-    // hidden detail's own problem takes the line it leaves. The detail's read is not one the probe hears (heard: false).
-    const untold = (outcome: Outcome | null, heard?: boolean) => (compatTells(state.compat, outcome, heard) ? null : outcome)
-    explain(untold(state.board.problem) ?? (state.detail.visible ? null : untold(state.shown.problem, false)))
-    const hiddenRows = state.board.value?.more ?? 0
-    more.textContent = hiddenRows > 0 ? copy.more(hiddenRows) : ""
-    // Written only when it changes: it is a live region. A cut list says so here, and so does one left to prime's rows
-    // (BoardData.partial without `truncated`), beside the compat banner that names the whole list: that one says what
-    // to fix, this one what the board leaves out (done, deferred and the other to-do rows; se-24ey.s6v), or the empty
-    // Done column reads as nothing done. A catalog `ok`, or `missing` without the whole list, says a read since found
-    // `show --all` (a refresh still waiting on its backlog read, or one that failed on it): the rows on screen are older
-    // than that, and "cannot be read on this machine" is no longer so.
-    const board = state.board.value
-    const catalog = state.compat?.catalog
-    const listFound = catalog?.state === "ok" || (catalog?.state === "missing" && !catalog.missing.includes(PROFILE.showAll))
-    const cut = board?.truncated === true ? copy.shell.truncated : board?.partial === true && !listFound ? copy.shell.primeOnly : ""
-    if (truncated.textContent !== cut) truncated.textContent = cut
-    explainBacklog(untold(board?.backlogProblem ?? null))
-    explainArchive(untold(state.archiveProblem))
-    explainCompat(state.compat)
+    // The hidden detail's own problem takes the line the board's leaves.
+    explain(state.board.problem ?? (state.detail.visible ? null : state.shown.problem))
+    explainSaid(state.board.value?.notes ?? [])
+    explainArchive(state.archiveProblem)
 
     if (state.tab === "wiki") {
       wikiView?.render(state, index)
@@ -470,15 +400,6 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     say(text, problem = false) {
       result.textContent = text
       result.className = problem ? "moai-result m-banner m-banner-danger" : "moai-result"
-    },
-    refuse(outcome) {
-      const said = describe(outcome, copy, doc)
-      result.replaceChildren(...(said ? [el(doc, "span", {}, ...said.parts)] : []))
-      result.className = said && !said.info ? "moai-result m-banner m-banner-danger" : "moai-result m-banner"
-    },
-    held(on) {
-      const text = on ? copy.autoHeld : ""
-      if (heldNote.textContent !== text) heldNote.textContent = text
     },
     slots: { toolbar, actions },
     setWidth,

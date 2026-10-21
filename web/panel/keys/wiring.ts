@@ -8,12 +8,8 @@
 // leaves it (attachKeyRouter). The mode comes from the store and the focus: `sorter` while the sort editor is
 // open, `prompt` while a search or filter input has the caret, `wiki` on the wiki tab, `browse` otherwise.
 
-import type { Outcome } from "../data/client.ts"
-import { compatTells } from "../data/compat.ts"
-import { NO_MILESTONE, type Row } from "../data/index.ts"
 import { sortDefault, type SortDefault } from "../data/memory.ts"
 import { SORT_KEYS, sortEdit, type Sort, type SortKey } from "../data/query.ts"
-import { withArchive } from "../data/source.ts"
 import type { Copy } from "../i18n/index.ts"
 import type { ColumnName, State, Store } from "../store.ts"
 import { statusKeys } from "../view/board-groups.ts"
@@ -38,8 +34,6 @@ export interface ContextEnv {
   raw?: boolean
   /** Status column names as the menu labels them (SPC v 1~9); the status itself when left out. */
   statusName?: (status: string) => string
-  /** The read marks can be written: the panel was given {@link ReadMarks}. */
-  readable?: boolean
 }
 
 /** The key table's view of the panel (keys/table.ts KeyContext), read from the store. Pure. */
@@ -61,7 +55,6 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
     // is this field alone, pressing flips it", which a dropped field would make untrue.
     sort: state.sort.fields.map((f) => ({ field: f.key, desc: f.dir === "desc" })),
     cells: { ...state.columns },
-    readable: env.readable ?? false,
   }
 }
 
@@ -71,19 +64,6 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
  */
 export const NOT_WIRED: Readonly<Record<string, string>> = {}
 
-/**
- * The read-mark writes (data/read.ts markRead, markAllRead, markGroupRead), each answering null when it went
- * through or the {@link Outcome} that stopped it. main.ts reads the list again after one that went through.
- */
-export interface ReadMarks {
-  /** `r`: the row under the cursor. */
-  one(id: string): Promise<Outcome | null>
-  /** `SPC m a`: everything unread. */
-  all(): Promise<Outcome | null>
-  /** `SPC m g`: a milestone's or epic's members. */
-  group(id: string): Promise<Outcome | null>
-}
-
 export interface KeyWiringOptions {
   document: Document
   store: Store
@@ -91,8 +71,6 @@ export interface KeyWiringOptions {
   copy: Copy
   /** Defaults to the navigator's (detectPlatform). */
   platform?: Platform
-  /** The read-mark writes; without them `r` and `SPC m` are not offered (KeyContext.readable). */
-  read?: ReadMarks
   /**
    * Where `D` saves the default sort; defaults to the panel's shared one. An emptied order returns to the store's
    * `defaultSort`, which `D` sets and data/memory.ts remember() reads from the same storage at boot: pass both the same one.
@@ -150,7 +128,6 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       wikiPane: wikiPaneEl()?.dataset.pane === "body" ? "body" : "list",
       raw: (onWiki ? panes().wiki?.raw?.() : panes().detail.raw?.()) ?? false,
       statusName: (status) => (copy.stats as Record<string, string>)[status] ?? status,
-      readable: options.read !== undefined,
     })
   }
 
@@ -286,70 +263,6 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     const field = String(a.args?.field) as SortKey
     setSort(sortEdit(store.getState().sort, field, how))
   }
-  // ── read marks ──
-  /**
-   * The row under the cursor, among the rows the list draws: with archived rows shown, the archive's answer too,
-   * tagged as main.ts indexOf draws it (source.ts withArchive). An archive-only row is active only beside a list of
-   * prime's rows (`partial`, or `truncated`: a cut one), and only when it does not stand done (source.ts activeIds);
-   * any other is tagged `archived: true`.
-   */
-  function rowAt(): Row | undefined {
-    const state = store.getState()
-    const board = state.board.value
-    if (state.cursor === null || !board) return undefined
-    return withArchive(board, state.view.showArchived ? state.archive : null).find((r) => r.id === state.cursor)
-  }
-  /**
-   * The row under the cursor that takes a read mark: an archived one takes none, as it draws no NEW (`moai read`
-   * resolves active rows only, read.ts isUnread).
-   */
-  function rowHere(): Row | undefined {
-    const row = rowAt()
-    return row?.archived === true ? undefined : row
-  }
-  /**
-   * The group `SPC m g` marks: the milestone or epic under the cursor, else the innermost one the list stands in.
-   * Undefined when the group under the cursor is archived: it takes no mark, and the place around it is not marked
-   * in its stead (the cursor named the group, not the place).
-   */
-  function groupHere(): string | null | undefined {
-    const state = store.getState()
-    const row = rowAt()
-    if (row && (row.kind === "milestone" || row.kind === "epic")) return row.archived === true ? undefined : row.id
-    // The "(no milestone)" bucket (`m:`, NO_MILESTONE) is a place, not a group: it has no id to mark.
-    const place = [...state.path].reverse().find((segment) => (segment.startsWith("m:") && segment !== NO_MILESTONE) || segment.startsWith("e:"))
-    return place ? place.slice(2) : null
-  }
-  function marking(write: (marks: ReadMarks) => Promise<Outcome | null> | null): Handler {
-    return () => {
-      const marks = options.read
-      if (!marks) return say(copy.keys.readUnavailable)
-      const writing = write(marks)
-      if (!writing) return
-      void writing.then((outcome) => {
-        if (!outcome) return
-        // A refusal the compatibility banner tells (moai missing, read marks the catalog lacks) is told there alone:
-        // its own words ("the runtime is too old") would contradict the banner's.
-        if (compatTells(store.getState().compat, outcome)) say("")
-        else shell.refuse(outcome)
-      })
-    }
-  }
-  const readOne = marking((marks) => {
-    const row = rowHere()
-    return row ? marks.one(row.id) : null
-  })
-  const readAll = marking((marks) => marks.all())
-  const readGroup = marking((marks) => {
-    const id = groupHere()
-    // An archived group under the cursor: nothing to mark, as `r` on an archived row.
-    if (id === undefined) return null
-    if (id === null) {
-      say(copy.keys.readNoGroup)
-      return null
-    }
-    return marks.group(id)
-  })
 
   const handlers: Record<string, Handler> = {
     "move.down": move,
@@ -378,9 +291,6 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       if (state.search.open || state.search.text) toolbar({ type: "search-close" })
       if (state.filter.text || state.filter.applied) store.dispatch({ type: "filter", text: "" })
     },
-    read: readOne,
-    "read.all": readAll,
-    "read.group": readGroup,
     help: (a) => help.open(a.mode, context()),
     "tab.list": tab("list"),
     "tab.board": tab("board"),

@@ -38,5 +38,10 @@ and carry it across by hand, then move the commit above.
   Desktop's and is gone; `tests/web_bundle.rs` holds the bundle to 1 MiB.
 - **Tests.** `moai.test.mjs` (packing the extension) and `moai-panel-size.test.mjs` (512 KiB) did not come
   over. The parts of `moai-source.test.mjs` that packed the extension and read its manifest are gone.
+- **The bridge (moai-jshy.jih).** `window.saycodePanel` and its machine runs are gone; `data/client.ts` fetches
+  `moai web`'s endpoints and reads the envelope (`{exit, out, err, said}`). Desktop's refusal codes, confirmation,
+  busy retries, compatibility probe (`data/compat.ts`), `prime` fallback, archive paging and the clock hold are gone
+  with it. Read marks (`r`, `SPC m a`, `SPC m g`) are gone — the page only reads; NEW still shows. The words come
+  from `/api/boot`'s `lang`.
 - **jsdom is pinned to 30.1.1.** Upstream's lock had 30.1.1; on 30.1.3 three focus tests in
   `moai-keys-wiring.test.mjs` fail (184, 187, 193 on 2026-10-21). Raise it on purpose, with those tests read.

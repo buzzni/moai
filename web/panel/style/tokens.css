@@ -1,10 +1,10 @@
 /*
  * Moai panel design tokens. Plain CSS so the bundler can inline it as it stands.
  *
- * The host (panel theme contract v1) injects <html data-theme="light|dark"> and ten --saycode-* custom
- * properties. Everything below is built on those: first the host values (with the --fb-* fallbacks an
- * older Desktop needs, because it injects nothing), then names the panel uses, then values the host does
- * not give and the panel derives. Values follow the Saycode app (docs/moai-panel/look-and-feel.md).
+ * Saycode's panel host (theme contract v1) injected <html data-theme="light|dark"> and ten --saycode-*
+ * custom properties; a browser injects nothing, so in `moai web` the --fb-* fallbacks stand and the OS scheme
+ * picks light or dark. The layering is kept as upstream wrote it (web/UPSTREAM.md): first the host values with
+ * their fallbacks, then names the panel uses, then values the host does not give and the panel derives. Values follow the Saycode app (docs/moai-panel/look-and-feel.md).
  */
 
 /* Fallbacks: the app's own values, light first. Dark applies for data-theme="dark", or for an OS dark

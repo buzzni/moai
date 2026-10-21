@@ -122,11 +122,11 @@ test('table: 대체 — Ctrl-w forms only on macOS, SPC w and Alt-Backspace ever
   assert.equal(KEY_TABLE.menu.find((b) => b.keys.includes('SPC o d')).action, 'option.detailAt')
 })
 
-test('table: 051 bindings — motion, enter/leave, tabs, search, read, help, prompt, sorter, wiki', () => {
+test('table: 051 bindings — motion, enter/leave, tabs, search, help, prompt, sorter, wiki', () => {
   const find = (mode, key) => KEY_TABLE[mode].find((b) => bindingKeys(b, 'mac').includes(key))?.action
   const expect = {
-    browse: { j: 'move.down', Down: 'move.down', k: 'move.up', Up: 'move.up', 'g g': 'move.top', Home: 'move.top', G: 'move.bottom', End: 'move.bottom', 'C-d': 'move.halfDown', 'C-u': 'move.halfUp', 'C-f': 'move.pageDown', PageDown: 'move.pageDown', 'C-b': 'move.pageUp', PageUp: 'move.pageUp', Enter: 'enter', Backspace: 'leave', l: 'expand', Right: 'expand', h: 'collapse', Left: 'collapse', Tab: 'expandAll', '/': 'search.open', Esc: 'clear', r: 'read', '?': 'help', 'C-w W': 'focus.prev' },
-    menu: { 'SPC /': 'search.open', 'SPC f': 'filter.open', 'SPC g l': 'tab.list', 'SPC g b': 'tab.board', 'SPC g w': 'tab.wiki', 'SPC m a': 'read.all', 'SPC m g': 'read.group', 'SPC ?': 'help', 'SPC v r': 'view.raw', 'SPC s e': 'sort.edit' },
+    browse: { j: 'move.down', Down: 'move.down', k: 'move.up', Up: 'move.up', 'g g': 'move.top', Home: 'move.top', G: 'move.bottom', End: 'move.bottom', 'C-d': 'move.halfDown', 'C-u': 'move.halfUp', 'C-f': 'move.pageDown', PageDown: 'move.pageDown', 'C-b': 'move.pageUp', PageUp: 'move.pageUp', Enter: 'enter', Backspace: 'leave', l: 'expand', Right: 'expand', h: 'collapse', Left: 'collapse', Tab: 'expandAll', '/': 'search.open', Esc: 'clear', '?': 'help', 'C-w W': 'focus.prev' },
+    menu: { 'SPC /': 'search.open', 'SPC f': 'filter.open', 'SPC g l': 'tab.list', 'SPC g b': 'tab.board', 'SPC g w': 'tab.wiki', 'SPC ?': 'help', 'SPC v r': 'view.raw', 'SPC s e': 'sort.edit' },
     prompt: { Enter: 'prompt.apply', Esc: 'prompt.cancel', Tab: 'prompt.next', 'S-Tab': 'prompt.prev', Up: 'prompt.up', Down: 'prompt.down', 'C-u': 'prompt.clear' },
     sorter: { j: 'sorter.down', k: 'sorter.up', J: 'sorter.lower', K: 'sorter.raise', SPC: 'sorter.toggle', d: 'sorter.flip', Enter: 'sorter.apply', D: 'sorter.default', Esc: 'sorter.cancel' },
     wiki: { j: 'move.down', 'g g': 'move.top', Enter: 'wiki.enter', Backspace: 'wiki.back', h: 'wiki.back', Left: 'wiki.back', Tab: 'wiki.nextLink', 'S-Tab': 'wiki.prevLink', '/': 'wiki.search', Esc: 'wiki.clear', 'C-w l': 'focus.right' }
@@ -176,7 +176,7 @@ test('router: a click on an item of a menu that a change of mode dropped runs no
   mode = 'browse' // a click on the List tab, with the overlay still up
   assert.deepEqual(router.press('r'), { handled: false, preventDefault: false })
   assert.equal(router.state().menu, null)
-  assert.deepEqual(sent, [], '`r` is not run as the read key of the new mode')
+  assert.deepEqual(sent, [], '`r` is not run as a key of the new mode')
 })
 
 test('router: an editable target turns browse keys off; prompt mode keys still apply', () => {
@@ -255,8 +255,8 @@ test('router: settle() drops a menu or sequence held in a mode the panel has lef
 test('router: motion and the other direct keys dispatch their action ids', () => {
   const { key, sent } = setup()
   key('j'); key('ArrowUp'); key('G', { shiftKey: true }); key('End'); key('d', { ctrlKey: true }); key('PageUp')
-  key('Enter'); key('Backspace'); key('l'); key('ArrowLeft'); key('Tab'); key('/'); key('Escape'); key('r'); key('?')
-  assert.deepEqual(sent.map((a) => a.id), ['move.down', 'move.up', 'move.bottom', 'move.bottom', 'move.halfDown', 'move.pageUp', 'enter', 'leave', 'expand', 'collapse', 'expandAll', 'search.open', 'clear', 'read', 'help'])
+  key('Enter'); key('Backspace'); key('l'); key('ArrowLeft'); key('Tab'); key('/'); key('Escape'); key('?')
+  assert.deepEqual(sent.map((a) => a.id), ['move.down', 'move.up', 'move.bottom', 'move.bottom', 'move.halfDown', 'move.pageUp', 'enter', 'leave', 'expand', 'collapse', 'expandAll', 'search.open', 'clear', 'help'])
   assert.deepEqual(sent[0], { id: 'move.down', keys: ['j'], mode: 'browse', fromMenu: false })
 })
 
@@ -317,7 +317,7 @@ test('menu: SPC opens, layers go down, Backspace goes up, Esc and SPC close', ()
   key(' '); key('s')
   key('Escape')
   assert.equal(router.state().menu, null, 'Esc closes')
-  key(' '); key('m')
+  key(' '); key('o')
   key(' ')
   assert.equal(router.state().menu, null, 'SPC closes')
   assert.deepEqual(ids(), [], 'closing keys run nothing (Esc does not clear the search)')
@@ -458,7 +458,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   })
   const root = menuLayer(['SPC'], ctx)
   assert.equal(root.title, '메뉴')
-  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'm', 'o', 'w', '?'])
+  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'o', 'w', '?'])
   const g = root.items.find((i) => i.key === 'g')
   assert.equal(g.kind, 'layer')
   assert.equal(g.label, '+이동')
@@ -889,14 +889,13 @@ test('menu: no label in any layer outgrows its cell in any language, and the hel
   const width = (text) => [...text].reduce((sum, ch) => sum + (/[\u1100-\uffff]/.test(ch) ? 13 : 7), 0)
   const ctx = browse()
   for (const [lang, words] of Object.entries(TABLE)) {
-    for (const path of [['SPC'], ['SPC', 'v'], ['SPC', 's'], ['SPC', 'c'], ['SPC', 'm'], ['SPC', 'o'], ['SPC', 'g'], ['SPC', 'w']]) {
+    for (const path of [['SPC'], ['SPC', 'v'], ['SPC', 's'], ['SPC', 'c'], ['SPC', 'o'], ['SPC', 'g'], ['SPC', 'w']]) {
       for (const item of menuLayer(path, ctx, words).items) assert.ok(width(item.label) <= 126, `${lang} ${path.join(' ')} ${item.key}: ${item.label}`)
     }
   }
   const rows = helpSections('browse', ctx, 'other', TABLE.en).flatMap((s) => s.rows)
   const longer = (action) => rows.find((r) => r.action === action).label
   assert.equal(longer('option.detailAt'), 'Details position (left ↔ bottom)')
-  assert.equal(longer('read.group'), 'Mark the group read')
   assert.equal(longer('view.raw'), 'Raw or rendered')
   assert.equal(rows.find((r) => r.action === 'sort.add' && r.args?.field === 'priority').label, 'Priority (add at the end)')
 })

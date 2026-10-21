@@ -1,68 +1,15 @@
 /**
- * The panel's words in English, Korean, Japanese and Chinese. The top level is carried over from the 1.x
+ * The page's words in English, Korean, Japanese and Chinese. The top level is carried over from the 1.x
  * panel; newer words live in one group per area (`shell`, `list`, `board`, `detail`, `toolbar`, `keys`, `table`,
  * `wiki`), each with its own interface and its four languages side by side below, so the stages that build those
  * areas add their words inside their own group without touching another's lines.
  */
-import type { RefusalCode } from '../data/client.js'
-import type { Feature } from '../data/compat.js'
 import type { GrepScope, SortKey } from '../data/query.js'
 import type { CellField, HelpGroupId, KeyLabel, LayerId, SortField, StateId } from '../keys/table.js'
 
 export type Language = 'en' | 'ko' | 'ja' | 'zh'
 
 // ── shell: tab bar, toggles, path line, banners (E2 se-qwkz.2v9) ────────────────────────────────────
-
-/** The compatibility banner (data/compat.ts report): one sentence per thing to fix on that machine (se-93p3). */
-export interface CompatCopy {
-  /** `moai` is not installed where the daemon runs. */
-  toolMissing: string
-  /** An older moai: the features the panel uses that are on a fallback follow (one at least). */
-  oldMoai: (features: string[]) => string
-  /** The daemon's catalog lacks `missing` of the panel's profiles; the features they serve follow. */
-  catalog: (missing: number, features: string[]) => string
-  features: Record<Feature, string>
-}
-
-const COMPAT_EN: CompatCopy = {
-  toolMissing: 'Moai is not installed on that machine. Install moai under Machine tools in Settings → Extensions.',
-  oldMoai: (features) => `That machine's moai is older than this panel expects${features.length ? ` (on a fallback: ${features.join(', ')})` : ''}. Upgrade moai.`,
-  catalog: (missing, features) => `That machine's Happy daemon catalog lacks ${missing === 1 ? '1 Moai profile' : `${missing} Moai profiles`} this panel uses${features.length ? ` (${features.join(', ')})` : ''}. Update the daemon catalog.`,
-  features: {
-    'all-rows': 'the whole list', backlog: 'the backlog', archive: 'archived rows', wiki: 'the wiki', 'read-marks': 'read marks',
-    'status-order': 'the column order', tallies: 'milestone and epic counts',
-  },
-}
-
-const COMPAT_KO: CompatCopy = {
-  toolMissing: '그 머신에 Moai가 설치되어 있지 않습니다. 설정 → 확장의 머신 도구에서 moai를 설치하세요.',
-  oldMoai: (features) => `그 머신의 moai가 이 패널이 기대하는 버전보다 오래되었습니다${features.length ? `(대체 방식으로 동작: ${features.join(', ')})` : ''}. moai를 업그레이드하세요.`,
-  catalog: (missing, features) => `그 머신의 Happy 데몬 카탈로그에 이 패널이 쓰는 Moai 프로필 ${missing}개가 없습니다${features.length ? `(${features.join(', ')})` : ''}. 데몬 카탈로그를 업데이트하세요.`,
-  features: {
-    'all-rows': '전체 목록', backlog: '백로그', archive: '아카이브된 항목', wiki: '위키', 'read-marks': '읽음 표시',
-    'status-order': '칸 순서', tallies: '마일스톤·에픽 개수',
-  },
-}
-
-const COMPAT_JA: CompatCopy = {
-  toolMissing: 'そのマシンに Moai がインストールされていません。設定 → 拡張機能のマシンツールから moai をインストールしてください。',
-  oldMoai: (features) => `そのマシンの moai は、このパネルが想定するバージョンより古いです${features.length ? `（代わりの方法で動作中: ${features.join('、')}）` : ''}。moai をアップグレードしてください。`,
-  catalog: (missing, features) => `そのマシンの Happy デーモンのカタログに、このパネルが使う Moai プロファイルが ${missing} 個ありません${features.length ? `（${features.join('、')}）` : ''}。デーモンのカタログを更新してください。`,
-  features: {
-    'all-rows': '一覧全体', backlog: 'バックログ', archive: 'アーカイブ済みの項目', wiki: 'Wiki', 'read-marks': '既読マーク',
-    'status-order': '列の順序', tallies: 'マイルストーンとエピックの件数',
-  },
-}
-
-const COMPAT_ZH: CompatCopy = {
-  toolMissing: '该机器上未安装 Moai。请在「设置 → 扩展」的机器工具中安装 moai。',
-  oldMoai: (features) => `该机器上的 moai 比此面板预期的版本旧${features.length ? `（正以替代方式运行：${features.join('、')}）` : ''}。请升级 moai。`,
-  catalog: (missing, features) => `该机器的 Happy 守护进程目录缺少此面板使用的 ${missing} 个 Moai 配置${features.length ? `（${features.join('、')}）` : ''}。请更新守护进程目录。`,
-  features: {
-    'all-rows': '完整列表', backlog: '待办池', archive: '已归档的条目', wiki: 'Wiki', 'read-marks': '已读标记',
-    'status-order': '列的顺序', tallies: '里程碑和史诗的计数',
-  },
-}
 
 export interface ShellCopy {
   /** Accessible name of the tab strip. */
@@ -97,15 +44,8 @@ export interface ShellCopy {
   wikiUnavailable: string
   /** `wiki ls` failed; the reason follows. */
   wikiListFailed: (reason: string) => string
-  /** `show --all` was cut at the output limit: the list stands on prime's rows and the backlog (source.ts loadAllRows). */
-  truncated: string
   /** The archive read failed (`SPC v o`); why follows. The board's rows stand. */
   archiveFailed: string
-  /** The list stands on prime's rows because `show --all` cannot be read there; says what that leaves out (se-24ey.s6v). */
-  primeOnly: string
-  /** The backlog read beside prime's rows was declined or failed; why follows. The rows stand without the backlog. */
-  backlogFailed: string
-  compat: CompatCopy
 }
 
 const SHELL: Record<Language, ShellCopy> = {
@@ -131,11 +71,7 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiPlaceholder: 'The wiki is not here yet.',
     wikiUnavailable: 'The wiki cannot be read here yet.',
     wikiListFailed: (reason) => `The wiki pages could not be read: ${reason}`,
-    truncated: 'The whole list was too large to read, so only the tasks held and ready to pick up are shown, with the backlog when it could be read.',
     archiveFailed: 'Archived rows could not be read:',
-    primeOnly: 'The whole list cannot be read on this machine, so only the tasks held and ready to pick up are shown. Done, deferred and the other to-do tasks are left out, and the backlog shows only when it could be read.',
-    backlogFailed: 'The backlog could not be read:',
-    compat: COMPAT_EN,
   },
   ko: {
     tabsLabel: 'Moai 보기',
@@ -159,11 +95,7 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiPlaceholder: '위키는 아직 준비 중입니다.',
     wikiUnavailable: '아직 여기서는 위키를 읽을 수 없습니다.',
     wikiListFailed: (reason) => `위키 페이지 목록을 읽지 못했습니다: ${reason}`,
-    truncated: '전체 목록이 너무 커서 다 읽지 못했습니다. 잡고 있는 일과 바로 잡을 수 있는 일만 보입니다. 백로그는 읽은 경우에만 함께 보입니다.',
     archiveFailed: '아카이브된 항목을 읽지 못했습니다:',
-    primeOnly: '이 환경에서는 전체 목록을 읽을 수 없어 잡고 있는 일과 바로 잡을 수 있는 일만 보입니다. 완료·미룬 일과 나머지 할 일은 보이지 않고, 백로그는 읽은 경우에만 보입니다.',
-    backlogFailed: '백로그를 읽지 못했습니다:',
-    compat: COMPAT_KO,
   },
   ja: {
     tabsLabel: 'Moai ビュー',
@@ -187,11 +119,7 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiPlaceholder: 'Wiki はまだ準備中です。',
     wikiUnavailable: 'ここではまだ Wiki を読めません。',
     wikiListFailed: (reason) => `Wiki のページ一覧を読めませんでした: ${reason}`,
-    truncated: '一覧全体が大きすぎて読み切れませんでした。手元のタスクとすぐ着手できるタスクだけを表示しています。バックログは読めた場合にだけ表示します。',
     archiveFailed: 'アーカイブ済みの項目を読めませんでした:',
-    primeOnly: 'この環境では一覧全体を読めないため、手元のタスクとすぐ着手できるタスクだけを表示しています。完了・保留のタスクとその他の未着手タスクは表示されず、バックログは読めた場合にだけ表示します。',
-    backlogFailed: 'バックログを読めませんでした:',
-    compat: COMPAT_JA,
   },
   zh: {
     tabsLabel: 'Moai 视图',
@@ -215,11 +143,7 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiPlaceholder: 'Wiki 尚未就绪。',
     wikiUnavailable: '这里暂时无法读取 Wiki。',
     wikiListFailed: (reason) => `无法读取 Wiki 页面列表: ${reason}`,
-    truncated: '完整列表太大，未能全部读取，因此只显示已领取和可以开始的任务；待办池仅在读取成功时一并显示。',
     archiveFailed: '无法读取已归档的条目:',
-    primeOnly: '此环境无法读取完整列表，因此只显示已领取和可以开始的任务。已完成、已推迟的任务和其他待办任务不显示，待办池仅在读取成功时显示。',
-    backlogFailed: '无法读取待办池:',
-    compat: COMPAT_ZH,
   },
 }
 
@@ -506,10 +430,6 @@ const TOOLBAR: Record<Language, ToolbarCopy> = {
 export interface KeysCopy {
   /** Shown while the panel's frame has no keyboard focus (the host does not give it one). */
   focusHint: string
-  /** `r`, `SPC m a`, `SPC m g` in a panel given no read-mark writes (keys/wiring.ts `read`). */
-  readUnavailable: string
-  /** `SPC m g` with neither a group under the cursor nor a group to stand in. */
-  readNoGroup: string
   /** `D` in the sort editor: the default order is saved where it outlives the panel. */
   sortDefaultSaved: string
   /** `D` in the sort editor while no settings storage keeps it: saved for this session only. */
@@ -519,29 +439,21 @@ export interface KeysCopy {
 const KEYS: Record<Language, KeysCopy> = {
   en: {
     focusHint: 'Click to use the keyboard',
-    readUnavailable: 'Marking items read is not available in the panel yet.',
-    readNoGroup: 'Move to a milestone or epic to mark its items read.',
     sortDefaultSaved: 'Saved as the default order.',
     sortDefaultSavedSession: 'Saved as the default order. Until a settings storage is available it is kept for this session only.',
   },
   ko: {
     focusHint: '클릭하면 키보드를 쓸 수 있습니다',
-    readUnavailable: '읽음 표시는 아직 패널에서 쓸 수 없습니다.',
-    readNoGroup: '읽음으로 표시할 마일스톤이나 에픽으로 옮겨 가세요.',
     sortDefaultSaved: '기본 정렬로 저장했습니다.',
     sortDefaultSavedSession: '기본 정렬로 저장했습니다. 설정 저장소가 생기기 전까지는 이 세션에서만 유지됩니다.',
   },
   ja: {
     focusHint: 'クリックするとキーボードを使えます',
-    readUnavailable: '既読の記録はまだパネルでは使えません。',
-    readNoGroup: '既読にするマイルストーンかエピックに移動してください。',
     sortDefaultSaved: '既定の並べ替えとして保存しました。',
     sortDefaultSavedSession: '既定の並べ替えとして保存しました。設定の保存先ができるまでは、このセッションの間だけ保持されます。',
   },
   zh: {
     focusHint: '点击后即可使用键盘',
-    readUnavailable: '面板中暂时还不能标记为已读。',
-    readNoGroup: '请移到要标记为已读的里程碑或史诗。',
     sortDefaultSaved: '已保存为默认排序。',
     sortDefaultSavedSession: '已保存为默认排序。在有设置存储之前，仅在本次会话中保留。',
   },
@@ -587,12 +499,12 @@ const TABLE_EN: KeyTableCopy = {
     'focus.next': 'Next pane', 'focus.prev': 'Previous pane', 'focus.left': 'Left pane', 'focus.right': 'Right pane', 'focus.up': 'Pane above', 'focus.down': 'Pane below',
     enter: 'Go in (a leaf row opens its details)', leave: 'Up one level',
     expand: 'Expand (board: column to the right)', collapse: 'Collapse (board: column to the left)', expandAll: 'Expand or collapse all under a group',
-    search: 'Search', clear: 'Clear the search and filter', read: 'Mark the cursor row read', help: 'Keyboard shortcuts',
+    search: 'Search', clear: 'Clear the search and filter', help: 'Keyboard shortcuts',
     filter: 'Filter', 'tab.list': 'List', 'tab.board': 'Board', 'tab.wiki': 'Wiki',
     'view.deferred': 'Deferred', 'view.backlog': 'Backlog', 'view.archived': 'Archive',
     'view.all': 'All but archived', 'view.allHelp': 'Show all (archive stays hidden)',
     'view.detail': 'Details', 'view.raw': 'Raw', 'view.rawHelp': 'Raw or rendered', 'sort.edit': 'Edit the order…',
-    'read.all': 'Mark all read', 'read.group': 'Group read', 'read.groupHelp': 'Mark the group read', 'option.detailAt': 'Details at', 'option.detailAtHelp': 'Details position (left ↔ bottom)',
+    'option.detailAt': 'Details at', 'option.detailAtHelp': 'Details position (left ↔ bottom)',
     'menu.close': 'Close', 'menu.up': 'Up one level',
     'prompt.apply': 'Apply (with filter values listed, insert one)', 'prompt.cancel': 'Cancel, back to the cursor before',
     'prompt.next': 'Cycle the search scope / complete the filter', 'prompt.prev': 'Cycle the scope back / complete back',
@@ -603,10 +515,10 @@ const TABLE_EN: KeyTableCopy = {
     'wiki.nextLink': 'Next link', 'wiki.prevLink': 'Previous link', 'wiki.search': 'Search titles and text', 'wiki.clear': 'Drop the link, then the search',
   },
   root: 'Menu',
-  layers: { g: 'Go', v: 'View', s: 'Sort', c: 'Columns', m: 'Read', o: 'Options', w: 'Window' },
+  layers: { g: 'Go', v: 'View', s: 'Sort', c: 'Columns', o: 'Options', w: 'Window' },
   groups: {
     move: 'Move', enter: 'In, out and expand', wiki: 'Wiki', focus: 'Pane focus', tab: 'Switch views', search: 'Search and filter',
-    read: 'Read', view: 'View (SPC v)', sort: 'Sort (SPC s)', cell: 'Columns (SPC c)', option: 'Options (SPC o)', other: 'Other',
+    view: 'View (SPC v)', sort: 'Sort (SPC s)', cell: 'Columns (SPC c)', option: 'Options (SPC o)', other: 'Other',
     menu: 'Inside the SPC menu', prompt: 'Search and filter input', sorter: 'Sort editor',
   },
   states: {
@@ -632,12 +544,12 @@ const TABLE_KO: KeyTableCopy = {
     'focus.next': '다음 패널', 'focus.prev': '이전 패널', 'focus.left': '왼쪽 패널', 'focus.right': '오른쪽 패널', 'focus.up': '위 패널', 'focus.down': '아래 패널',
     enter: '들어가기 (잎 행이면 상세로)', leave: '한 층 나가기',
     expand: '펼침 (칸반: 오른쪽 칸)', collapse: '접음 (칸반: 왼쪽 칸)', expandAll: '그룹 밑을 모두 펼침·접음',
-    search: '검색', clear: '걸린 검색·필터 해제', read: '커서 행 읽음', help: '단축키 도움말',
+    search: '검색', clear: '걸린 검색·필터 해제', help: '단축키 도움말',
     filter: '필터', 'tab.list': '목록', 'tab.board': '칸반', 'tab.wiki': '위키',
     'view.deferred': '미룸', 'view.backlog': '백로그', 'view.archived': '아카이브',
     'view.all': '아카이브 빼고 모두', 'view.allHelp': '모두 보이기 (아카이브 제외)',
     'view.detail': '상세', 'view.raw': '원문', 'view.rawHelp': '원문 또는 렌더링', 'sort.edit': '정렬 편집…',
-    'read.all': '모두 읽음', 'read.group': '그룹 읽음', 'read.groupHelp': '그룹을 읽음으로', 'option.detailAt': '상세 위치', 'option.detailAtHelp': '상세 위치 (왼쪽 ↔ 아래)',
+    'option.detailAt': '상세 위치', 'option.detailAtHelp': '상세 위치 (왼쪽 ↔ 아래)',
     'menu.close': '닫기', 'menu.up': '한 층 위로',
     'prompt.apply': '적용 (필터 값 목록이 있으면 값 넣기)', 'prompt.cancel': '취소하고 열기 전 커서로',
     'prompt.next': '검색 범위 순환 / 필터 자동완성', 'prompt.prev': '검색 범위 거꾸로 / 필터 자동완성 거꾸로',
@@ -648,10 +560,10 @@ const TABLE_KO: KeyTableCopy = {
     'wiki.nextLink': '다음 링크', 'wiki.prevLink': '이전 링크', 'wiki.search': '제목·본문 검색', 'wiki.clear': '링크 선택 해제 → 검색 해제',
   },
   root: '메뉴',
-  layers: { g: '이동', v: '보기', s: '정렬', c: '열', m: '읽음', o: '옵션', w: '창' },
+  layers: { g: '이동', v: '보기', s: '정렬', c: '열', o: '옵션', w: '창' },
   groups: {
     move: '이동', enter: '드나들기·펼침', wiki: '위키', focus: '패널 포커스', tab: '화면 전환', search: '검색·필터',
-    read: '읽음', view: '보기 (SPC v)', sort: '정렬 (SPC s)', cell: '열 (SPC c)', option: '옵션 (SPC o)', other: '기타',
+    view: '보기 (SPC v)', sort: '정렬 (SPC s)', cell: '열 (SPC c)', option: '옵션 (SPC o)', other: '기타',
     menu: 'SPC 메뉴 안에서', prompt: '검색·필터 입력', sorter: '정렬 편집',
   },
   states: {
@@ -677,12 +589,12 @@ const TABLE_JA: KeyTableCopy = {
     'focus.next': '次のペイン', 'focus.prev': '前のペイン', 'focus.left': '左のペイン', 'focus.right': '右のペイン', 'focus.up': '上のペイン', 'focus.down': '下のペイン',
     enter: '入る (末端の行なら詳細へ)', leave: '一つ上の階層へ',
     expand: '展開 (カンバン: 右の列)', collapse: '折りたたむ (カンバン: 左の列)', expandAll: 'グループの下をすべて展開・折りたたみ',
-    search: '検索', clear: '検索・フィルターを解除', read: 'カーソル行を既読に', help: 'ショートカット',
+    search: '検索', clear: '検索・フィルターを解除', help: 'ショートカット',
     filter: 'フィルター', 'tab.list': '一覧', 'tab.board': 'カンバン', 'tab.wiki': 'Wiki',
     'view.deferred': '保留', 'view.backlog': 'バックログ', 'view.archived': 'アーカイブ',
     'view.all': 'アーカイブ以外', 'view.allHelp': 'すべて表示 (アーカイブは除く)',
     'view.detail': '詳細', 'view.raw': '原文', 'view.rawHelp': '原文またはレンダリング', 'sort.edit': '並べ替えを編集…',
-    'read.all': 'すべて既読', 'read.group': 'グループ既読', 'read.groupHelp': 'グループを既読に', 'option.detailAt': '詳細の位置', 'option.detailAtHelp': '詳細の位置 (左 ↔ 下)',
+    'option.detailAt': '詳細の位置', 'option.detailAtHelp': '詳細の位置 (左 ↔ 下)',
     'menu.close': '閉じる', 'menu.up': '一つ上の階層へ',
     'prompt.apply': '適用 (フィルター値の候補があれば挿入)', 'prompt.cancel': 'キャンセルして開く前のカーソルへ',
     'prompt.next': '検索範囲を切り替え / フィルターを補完', 'prompt.prev': '検索範囲を逆に切り替え / 逆に補完',
@@ -693,10 +605,10 @@ const TABLE_JA: KeyTableCopy = {
     'wiki.nextLink': '次のリンク', 'wiki.prevLink': '前のリンク', 'wiki.search': 'タイトル・本文を検索', 'wiki.clear': 'リンクの選択を解除 → 検索を解除',
   },
   root: 'メニュー',
-  layers: { g: '移動', v: '表示', s: '並べ替え', c: '列', m: '既読', o: 'オプション', w: 'ウィンドウ' },
+  layers: { g: '移動', v: '表示', s: '並べ替え', c: '列', o: 'オプション', w: 'ウィンドウ' },
   groups: {
     move: '移動', enter: '出入り・展開', wiki: 'Wiki', focus: 'ペインのフォーカス', tab: '画面の切り替え', search: '検索・フィルター',
-    read: '既読', view: '表示 (SPC v)', sort: '並べ替え (SPC s)', cell: '列 (SPC c)', option: 'オプション (SPC o)', other: 'その他',
+    view: '表示 (SPC v)', sort: '並べ替え (SPC s)', cell: '列 (SPC c)', option: 'オプション (SPC o)', other: 'その他',
     menu: 'SPC メニューの中', prompt: '検索・フィルターの入力', sorter: '並べ替えの編集',
   },
   states: {
@@ -722,12 +634,12 @@ const TABLE_ZH: KeyTableCopy = {
     'focus.next': '下一个窗格', 'focus.prev': '上一个窗格', 'focus.left': '左侧窗格', 'focus.right': '右侧窗格', 'focus.up': '上方窗格', 'focus.down': '下方窗格',
     enter: '进入 (叶子行则打开详情)', leave: '返回上一层',
     expand: '展开 (看板: 右侧列)', collapse: '折叠 (看板: 左侧列)', expandAll: '展开或折叠分组下的全部',
-    search: '搜索', clear: '清除搜索和筛选', read: '将光标所在行标为已读', help: '键盘快捷键',
+    search: '搜索', clear: '清除搜索和筛选', help: '键盘快捷键',
     filter: '筛选', 'tab.list': '列表', 'tab.board': '看板', 'tab.wiki': 'Wiki',
     'view.deferred': '推迟', 'view.backlog': '待办池', 'view.archived': '归档',
     'view.all': '除归档外全部', 'view.allHelp': '全部显示 (归档除外)',
     'view.detail': '详情', 'view.raw': '原文', 'view.rawHelp': '原文或渲染', 'sort.edit': '编辑排序…',
-    'read.all': '全部标为已读', 'read.group': '分组已读', 'read.groupHelp': '分组标为已读', 'option.detailAt': '详情位置', 'option.detailAtHelp': '详情位置 (左 ↔ 下)',
+    'option.detailAt': '详情位置', 'option.detailAtHelp': '详情位置 (左 ↔ 下)',
     'menu.close': '关闭', 'menu.up': '返回上一层',
     'prompt.apply': '应用 (有筛选值候选时插入)', 'prompt.cancel': '取消并回到打开前的光标',
     'prompt.next': '切换搜索范围 / 补全筛选', 'prompt.prev': '反向切换搜索范围 / 反向补全',
@@ -738,10 +650,10 @@ const TABLE_ZH: KeyTableCopy = {
     'wiki.nextLink': '下一个链接', 'wiki.prevLink': '上一个链接', 'wiki.search': '搜索标题和正文', 'wiki.clear': '取消链接选择 → 清除搜索',
   },
   root: '菜单',
-  layers: { g: '跳转', v: '视图', s: '排序', c: '列', m: '已读', o: '选项', w: '窗口' },
+  layers: { g: '跳转', v: '视图', s: '排序', c: '列', o: '选项', w: '窗口' },
   groups: {
     move: '移动', enter: '进出·展开', wiki: 'Wiki', focus: '窗格焦点', tab: '切换视图', search: '搜索·筛选',
-    read: '已读', view: '视图 (SPC v)', sort: '排序 (SPC s)', cell: '列 (SPC c)', option: '选项 (SPC o)', other: '其他',
+    view: '视图 (SPC v)', sort: '排序 (SPC s)', cell: '列 (SPC c)', option: '选项 (SPC o)', other: '其他',
     menu: 'SPC 菜单内', prompt: '搜索·筛选输入', sorter: '编辑排序',
   },
   states: {
@@ -917,34 +829,29 @@ const WIKI: Record<Language, WikiCopy> = {
   },
 }
 
-// ── the 1.x words, and the groups put together ───────────────────────────────────────────────────────
+// ── the top-level words, and the groups put together ─────────────────────────────────────────────────
 
 export interface Copy {
   hint: string
   refreshedAt: (time: string) => string
   empty: string
-  more: (n: number) => string
   up: string
   root: string
   noMilestone: string
   lost: string
   loading: string
-  starting: string
+  /** A read is out to `moai web` (the activity line). */
   running: string
   cancel: string
   cancelled: string
-  mayContinue: string
   stats: Record<string, string>
-  notStarted: string
-  /** A start that failed naming a code the panel lists no refusal for (client.ts REFUSAL_CODES): what it means (se-24ey.dcj). */
-  notStartedFor: Record<'binding-mismatch' | 'invalid-request', string>
-  /** Automatic refresh held after a list read was declined or left unanswered (main.ts holdIfAsked). */
-  autoHeld: string
+  /** `moai web` could not be reached (client.ts `not-started`). */
+  unreachable: string
   moaiError: (message: string) => string
   failed: string
   unreadable: string
-  refused: Record<RefusalCode, string>
-  notInitialized: [string, string]
+  /** Before the lines moai said on stderr beside an answer (client.ts Outcome `notes`). */
+  said: string
   shell: ShellCopy
   list: ListCopy
   board: BoardCopy
@@ -956,121 +863,60 @@ export interface Copy {
 }
 
 const en: Copy = {
-  hint: "Runs in this project's folder, reading only. Each kind of read asks once per session in a confirmation that shows the machine and folder.",
-  refreshedAt: (time) => `Updated ${time}`, empty: 'Nothing here.', more: (n) => `${n} more not shown`,
+  hint: 'Reading this project through moai web.',
+  refreshedAt: (time) => `Updated ${time}`, empty: 'Nothing here.',
   up: '..', root: 'All', noMilestone: '(no milestone)', lost: '(lost)', loading: 'Loading…',
-  starting: 'Starting… approve the confirmation if it is showing.', running: 'Running on the machine…',
-  cancel: 'Cancel', cancelled: 'The run was cancelled.', mayContinue: 'Processes on the machine may not have finished yet.',
+  running: 'Reading…', cancel: 'Cancel', cancelled: 'The read was cancelled.',
   stats: { todo: 'To do', in_progress: 'In progress', review: 'Review', done: 'Done' },
-  notStarted: 'The run did not start, and Desktop gave no reason. Click the refresh time to try again; if it keeps happening, restart Desktop.',
-  notStartedFor: {
-    'binding-mismatch': 'The run did not start: Desktop could not match this panel to its machine and project folder (the selection changed, or the machine reconnected). Open the project conversation again, or restart Desktop, then try again.',
-    'invalid-request': 'The run did not start: Desktop did not accept the request. Update the Moai extension.',
-  },
-  autoHeld: 'Automatic refresh is paused so the confirmation does not come back by itself. Click the refresh time to read again.',
-  moaiError: (message) => `Moai reported an error: ${message}`, failed: 'The run failed.', unreadable: 'The run finished, but its result could not be read.',
-  refused: {
-    declined: 'The run did not start: the confirmation was declined.',
-    'approval-timeout': 'The confirmation was not answered in time, so nothing ran. Try again.',
-    'workspace-busy': 'Another change is still running in this folder on that machine. Try again when it finishes.',
-    'tool-missing': 'Moai is not installed on that machine. Install it for that machine under Machine tools in Settings → Extensions.',
-    'unsupported-platform': "Moai cannot run on that machine's operating system.",
-    'unsupported-daemon': "That machine's Saycode runtime is too old to run Moai. Update the runtime, then try again.",
-  },
-  notInitialized: ['This project has no Moai board yet. On that machine, run ', ' once in the project folder, then try again. If moai is not found, run it from the Moai path shown under Machine tools in Settings → Extensions.'],
+  unreachable: 'moai web cannot be reached — check that it is still running, then click the refresh time.',
+  moaiError: (message) => `Moai reported an error: ${message}`, failed: 'The read failed.', unreadable: 'The answer could not be read.',
+  said: 'moai said:',
   shell: SHELL.en, list: LIST.en, board: BOARD.en, detail: DETAIL.en, toolbar: TOOLBAR.en, keys: KEYS.en,
   table: TABLE.en, wiki: WIKI.en,
 }
 
 const ko: Copy = {
-  hint: '이 프로젝트 폴더에서 읽기만 합니다. 읽는 명령마다 앱을 켜 둔 동안 처음 한 번, 머신과 폴더를 보여주는 확인 창이 뜹니다.',
-  refreshedAt: (time) => `${time} 갱신`, empty: '항목이 없습니다.', more: (n) => `그 밖에 ${n}개는 표시하지 않았습니다`,
+  hint: 'moai web 으로 이 프로젝트를 읽는 중입니다.',
+  refreshedAt: (time) => `${time} 갱신`, empty: '항목이 없습니다.',
   up: '..', root: '전체', noMilestone: '(마일스톤 없음)', lost: '(길 잃음)', loading: '불러오는 중…',
-  starting: '시작하는 중… 확인 창이 떠 있으면 승인하세요.', running: '머신에서 실행하는 중…',
-  cancel: '취소', cancelled: '실행을 취소했습니다.', mayContinue: '머신에서 프로세스가 아직 끝나지 않았을 수 있습니다.',
+  running: '읽는 중…', cancel: '취소', cancelled: '읽기를 취소했습니다.',
   stats: { todo: '할 일', in_progress: '진행 중', review: '검토', done: '완료' },
-  notStarted: '실행이 시작되지 않았고 Desktop이 이유를 알려 주지 않았습니다. 갱신 시각을 눌러 다시 시도하고, 계속되면 Desktop을 다시 시작하세요.',
-  notStartedFor: {
-    'binding-mismatch': '실행이 시작되지 않았습니다. Desktop이 이 패널의 머신과 프로젝트 폴더를 확인하지 못했습니다(선택이 바뀌었거나 머신이 다시 연결됨). 프로젝트 대화를 다시 열거나 Desktop을 다시 시작한 뒤 다시 시도하세요.',
-    'invalid-request': '실행이 시작되지 않았습니다. Desktop이 요청을 받아들이지 않았습니다. Moai 확장을 업데이트하세요.',
-  },
-  autoHeld: '확인 창이 저절로 다시 뜨지 않도록 자동 갱신을 멈췄습니다. 갱신 시각을 누르면 다시 읽습니다.',
-  moaiError: (message) => `Moai 오류: ${message}`, failed: '실행에 실패했습니다.', unreadable: '실행은 끝났지만 결과를 읽지 못했습니다.',
-  refused: {
-    declined: '확인 창에서 거부해 실행하지 않았습니다.',
-    'approval-timeout': '확인 창에 시간 안에 응답하지 않아 실행하지 않았습니다. 다시 시도하세요.',
-    'workspace-busy': '그 머신의 이 폴더에서 다른 변경이 아직 실행 중입니다. 끝난 뒤 다시 시도하세요.',
-    'tool-missing': '그 머신에 Moai가 설치되어 있지 않습니다. 설정 → 확장의 머신 도구에서 그 머신에 Moai를 설치하세요.',
-    'unsupported-platform': '그 머신의 운영체제에서는 Moai를 실행할 수 없습니다.',
-    'unsupported-daemon': '그 머신의 Saycode 런타임이 오래되어 Moai를 실행할 수 없습니다. 런타임을 업데이트한 뒤 다시 시도하세요.',
-  },
-  notInitialized: ['이 프로젝트에는 아직 Moai 보드가 없습니다. 그 머신의 프로젝트 폴더에서 ', '을 한 번 실행한 뒤 다시 시도하세요. moai를 찾을 수 없으면 설정 → 확장의 머신 도구에 표시된 Moai 경로로 실행하세요.'],
+  unreachable: 'moai web 에 닿지 않습니다 — 아직 도는지 본 뒤 갱신 시각을 누르세요.',
+  moaiError: (message) => `Moai 오류: ${message}`, failed: '읽지 못했습니다.', unreadable: '답을 읽지 못했습니다.',
+  said: 'moai 가 한 말:',
   shell: SHELL.ko, list: LIST.ko, board: BOARD.ko, detail: DETAIL.ko, toolbar: TOOLBAR.ko, keys: KEYS.ko,
   table: TABLE.ko, wiki: WIKI.ko,
 }
 
 const ja: Copy = {
-  hint: 'このプロジェクトのフォルダで読み取りだけを行います。読み取りの種類ごとに、アプリの起動中に最初の一回、マシンとフォルダを示す確認画面が表示されます。',
-  refreshedAt: (time) => `${time} 更新`, empty: '項目はありません。', more: (n) => `ほかに ${n} 件は表示していません`,
+  hint: 'moai web でこのプロジェクトを読み込んでいます。',
+  refreshedAt: (time) => `${time} 更新`, empty: '項目はありません。',
   up: '..', root: 'すべて', noMilestone: '(マイルストーンなし)', lost: '(迷子)', loading: '読み込み中…',
-  starting: '開始しています… 確認画面が表示されていれば承認してください。', running: 'マシンで実行中…',
-  cancel: 'キャンセル', cancelled: '実行をキャンセルしました。', mayContinue: 'マシン上のプロセスはまだ終了していない可能性があります。',
+  running: '読み込み中…', cancel: 'キャンセル', cancelled: '読み込みをキャンセルしました。',
   stats: { todo: '未着手', in_progress: '進行中', review: 'レビュー', done: '完了' },
-  notStarted: '実行が開始されず、Desktop から理由が返りませんでした。更新時刻をクリックしてもう一度お試しください。繰り返す場合は Desktop を再起動してください。',
-  notStartedFor: {
-    'binding-mismatch': '実行が開始されませんでした。Desktop がこのパネルのマシンとプロジェクトフォルダを確認できませんでした（選択が変わったか、マシンが再接続されました）。プロジェクトの会話を開き直すか Desktop を再起動してから、もう一度お試しください。',
-    'invalid-request': '実行が開始されませんでした。Desktop が要求を受け付けませんでした。Moai 拡張機能を更新してください。',
-  },
-  autoHeld: '確認画面が自動で再表示されないよう、自動更新を止めました。更新時刻をクリックすると再読み込みします。',
-  moaiError: (message) => `Moai のエラー: ${message}`, failed: '実行に失敗しました。', unreadable: '実行は完了しましたが、結果を読み取れませんでした。',
-  refused: {
-    declined: '確認画面で拒否されたため、実行しませんでした。',
-    'approval-timeout': '確認画面に時間内に応答がなかったため、実行しませんでした。もう一度お試しください。',
-    'workspace-busy': 'そのマシンのこのフォルダでは、別の変更がまだ実行中です。終了してからもう一度お試しください。',
-    'tool-missing': 'そのマシンに Moai がインストールされていません。設定 → 拡張機能のマシンツールから、そのマシンに Moai をインストールしてください。',
-    'unsupported-platform': 'そのマシンの OS では Moai を実行できません。',
-    'unsupported-daemon': 'そのマシンの Saycode ランタイムが古いため、Moai を実行できません。ランタイムを更新してから、もう一度お試しください。',
-  },
-  notInitialized: ['このプロジェクトにはまだ Moai ボードがありません。そのマシンのプロジェクトフォルダで ', ' を一度実行してから、もう一度お試しください。moai が見つからない場合は、設定 → 拡張機能のマシンツールに表示される Moai のパスから実行してください。'],
+  unreachable: 'moai web に接続できません — まだ動いているか確認してから、更新時刻をクリックしてください。',
+  moaiError: (message) => `Moai のエラー: ${message}`, failed: '読み込みに失敗しました。', unreadable: '応答を読み取れませんでした。',
+  said: 'moai のメッセージ:',
   shell: SHELL.ja, list: LIST.ja, board: BOARD.ja, detail: DETAIL.ja, toolbar: TOOLBAR.ja, keys: KEYS.ja,
   table: TABLE.ja, wiki: WIKI.ja,
 }
 
 const zh: Copy = {
-  hint: '在此项目的文件夹中只做读取。每种读取在应用运行期间首次进行时确认一次，确认窗口会显示机器和文件夹。',
-  refreshedAt: (time) => `${time} 更新`, empty: '没有项目。', more: (n) => `另有 ${n} 项未显示`,
+  hint: '正在通过 moai web 读取此项目。',
+  refreshedAt: (time) => `${time} 更新`, empty: '没有项目。',
   up: '..', root: '全部', noMilestone: '(无里程碑)', lost: '(无归属)', loading: '加载中…',
-  starting: '正在启动… 如果显示了确认窗口，请批准。', running: '正在机器上运行…',
-  cancel: '取消', cancelled: '已取消运行。', mayContinue: '机器上的进程可能尚未结束。',
+  running: '正在读取…', cancel: '取消', cancelled: '已取消读取。',
   stats: { todo: '待办', in_progress: '进行中', review: '审核', done: '完成' },
-  notStarted: '运行未开始，Desktop 也未说明原因。请点击刷新时间重试；如果反复出现，请重启 Desktop。',
-  notStartedFor: {
-    'binding-mismatch': '运行未开始：Desktop 无法确认此面板所属的机器和项目文件夹（选择已更改，或机器已重新连接）。请重新打开项目对话或重启 Desktop 后重试。',
-    'invalid-request': '运行未开始：Desktop 不接受此请求。请更新 Moai 扩展。',
-  },
-  autoHeld: '为避免确认窗口自动再次出现，已暂停自动刷新。点击刷新时间可重新读取。',
-  moaiError: (message) => `Moai 错误: ${message}`, failed: '运行失败。', unreadable: '运行已结束，但无法读取结果。',
-  refused: {
-    declined: '已在确认窗口中拒绝，因此未运行。',
-    'approval-timeout': '未在规定时间内回应确认窗口，因此未运行。请重试。',
-    'workspace-busy': '该机器的此文件夹中仍有其他更改正在运行。请在其结束后重试。',
-    'tool-missing': '该机器上未安装 Moai。请在「设置 → 扩展」的机器工具中为该机器安装 Moai。',
-    'unsupported-platform': '该机器的操作系统无法运行 Moai。',
-    'unsupported-daemon': '该机器的 Saycode 运行时版本过旧，无法运行 Moai。请更新运行时后重试。',
-  },
-  notInitialized: ['此项目还没有 Moai 看板。请在该机器的项目文件夹中运行一次 ', '，然后重试。如果找不到 moai，请使用「设置 → 扩展」的机器工具中显示的 Moai 路径运行。'],
+  unreachable: '无法连接 moai web — 请确认它仍在运行，然后点击刷新时间。',
+  moaiError: (message) => `Moai 错误: ${message}`, failed: '读取失败。', unreadable: '无法读取应答。',
+  said: 'moai 提示:',
   shell: SHELL.zh, list: LIST.zh, board: BOARD.zh, detail: DETAIL.zh, toolbar: TOOLBAR.zh, keys: KEYS.zh,
   table: TABLE.zh, wiki: WIKI.zh,
 }
 
 export const COPY: Record<Language, Copy> = { en, ko, ja, zh }
 
-/** What a start that failed says: the words for the code it named when the panel has them, else the general ones. */
-export function notStartedText(copy: Copy, code?: string): string {
-  return code !== undefined && Object.hasOwn(copy.notStartedFor, code) ? copy.notStartedFor[code as keyof Copy['notStartedFor']] : copy.notStarted
-}
-
-/** The host document's language, else the browser's, else English. */
+/** The words for a language tag (`/api/boot`'s `lang`); a language the page does not carry is English. */
 export function copyFor(language: string | undefined): Copy {
   const base = (language || 'en').split('-')[0]!.toLowerCase()
   return COPY[base as Language] ?? en

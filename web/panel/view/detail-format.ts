@@ -5,7 +5,7 @@
  */
 import { isDone, isGroup, type IssueIndex, type Progress, type Row } from '../data/index.ts'
 import type { Outcome } from '../data/client.ts'
-import { notStartedText, type Copy } from '../i18n/index.ts'
+import type { Copy } from '../i18n/index.ts'
 
 /** The columns in moai's default order; a column the config adds stands after them. */
 const STATUS_ORDER = ['todo', 'in_progress', 'review', 'done']
@@ -264,13 +264,11 @@ export function childrenOf(row: Row, index: IssueIndex | null = null): { id: str
 /** Why a read failed, in the words the shell uses for the same outcome; null for one that passed. */
 export function problemText(outcome: Outcome, copy: Copy): string | null {
   switch (outcome.kind) {
-    case 'refused': return copy.refused[outcome.code]
-    case 'not-initialized': return `${copy.notInitialized[0]}moai init${copy.notInitialized[1]}`
     case 'moai-error': return copy.moaiError(outcome.message)
-    case 'cancelled': return outcome.mayContinue ? `${copy.cancelled} ${copy.mayContinue}` : copy.cancelled
+    case 'cancelled': return copy.cancelled
     case 'unreadable': return copy.unreadable
-    case 'not-started': return notStartedText(copy, outcome.code)
-    case 'failed': return copy.failed
+    case 'not-started': return copy.unreachable
+    case 'failed': return outcome.message ? copy.moaiError(outcome.message) : copy.failed
     case 'passed': return null
   }
 }

@@ -10,7 +10,6 @@
  * column is `status`), and the list cells are the key table's `CellField` names (the name line is `names`).
  */
 import type { Outcome } from './data/client.js'
-import { compatFixed, sameReport, type CompatReport } from './data/compat.js'
 import { pathKey, type Path, type Row } from './data/index.js'
 import { DEFAULT_SORT, type GrepScope, type Sort } from './data/query.js'
 import { toolbarReduce, type ToolbarAction, type ToolbarState } from './view/toolbar.js'
@@ -50,13 +49,8 @@ export interface Loadable<T> {
 
 export interface BoardData {
   rows: Row[]
-  more: number
-  /** `show --all` was cut at the output limit, so these are prime's rows and the backlog (source.ts loadAllRows). */
-  truncated?: boolean
-  /** prime's rows and the backlog, not every active row: `show --all` was cut, or the catalog lacks it (source.ts activeIds). */
-  partial?: boolean
-  /** Why the backlog is missing from prime's rows: its read beside them was declined or failed (source.ts Rows). */
-  backlogProblem?: Outcome
+  /** What moai said on stderr beside the lists (source.ts Rows): a line it could not read, a notice. */
+  notes?: string[]
   /**
    * Milestone and epic `[done, total]` from `moai status` (source.ts loadTallies). Absent when that read failed, or on
    * the first read until it answers; a later read keeps the counts of the board before it until its own come.
@@ -121,8 +115,6 @@ export interface State {
   archive: Row[] | null
   /** Why the last archive read failed; the board's rows and its own problem stay as they are. */
   archiveProblem: Outcome | null
-  /** What the answers so far tell of the moai CLI and the daemon's catalog (data/compat.ts); null before any. */
-  compat: CompatReport | null
   /**
    * The wiki view's own state (view/wiki.ts state()), saved when the wiki tab is left; a wiki pane mounted on this
    * store starts from it (the mounted pane keeps its own state across tab switches).
@@ -200,7 +192,6 @@ export function initialState(): State {
     shown: idle(),
     archive: null,
     archiveProblem: null,
-    compat: null,
     wiki: initialWiki(),
   }
 }
@@ -244,11 +235,6 @@ export type Action =
   /** The archive's rows as read (null forgets them); either way an archive problem told before goes. */
   | { type: 'archive'; rows: Row[] | null }
   | { type: 'archive-failed'; problem: Outcome }
-  /**
-   * The compatibility probe's report after a read; one that says what the last one said changes nothing. A problem
-   * the last report told that this one says was fixed goes with it (data/compat.ts compatFixed).
-   */
-  | { type: 'compat'; report: CompatReport }
   | { type: 'detail-loading'; id: string }
   | { type: 'detail-loaded'; data: DetailData }
   | { type: 'detail-failed'; id: string; problem: Outcome }
@@ -353,19 +339,6 @@ export function reduce(state: State, action: Action): State {
       return state.archive === action.rows && state.archiveProblem === null ? state : { ...state, archive: action.rows, archiveProblem: null }
     case 'archive-failed':
       return { ...state, archiveProblem: action.problem }
-    case 'compat': {
-      if (state.compat && sameReport(state.compat, action.report)) return state
-      // The report moves in the middle of a load (main.ts hands it over after each answer). A refusal the banner told,
-      // still held from the read before, would otherwise come back on its own banner the moment moai is found or the
-      // catalog is complete, telling what is no longer so until the new read ends. The detail's read is not one the
-      // probe hears (heard: false).
-      const fixed = (outcome: Outcome | null, heard?: boolean) => compatFixed(state.compat, action.report, outcome, heard)
-      const next: State = { ...state, compat: action.report }
-      if (fixed(state.board.problem)) next.board = { ...state.board, problem: null }
-      if (fixed(state.archiveProblem)) next.archiveProblem = null
-      if (fixed(state.shown.problem, false)) next.shown = { ...state.shown, problem: null }
-      return next
-    }
     case 'detail-loading':
       return { ...state, shown: { value: state.shown.value?.id === action.id ? state.shown.value : null, loading: true, problem: null } }
     case 'detail-loaded':

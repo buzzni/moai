@@ -59,11 +59,6 @@ export interface KeyContext {
   sort?: ReadonlyArray<{ field: SortField | "id"; desc: boolean }>
   /** List columns shown (SPC c). A missing field reads as shown. */
   cells?: Partial<Record<CellField, boolean>>
-  /**
-   * The read marks can be written (`r`, `SPC m a`, `SPC m g`). Missing reads as true; keys/wiring.ts passes false
-   * when it is given no read-mark writes, so the menu leaves the items out and the help dims them.
-   */
-  readable?: boolean
 }
 
 export type StateId =
@@ -73,12 +68,12 @@ export type StateId =
 const DEFAULT_WORDS: KeyTableCopy = TABLE.ko
 
 export type HelpGroupId =
-  | "move" | "enter" | "focus" | "tab" | "search" | "read" | "other"
+  | "move" | "enter" | "focus" | "tab" | "search" | "other"
   | "view" | "sort" | "cell" | "option" | "menu" | "prompt" | "sorter" | "wiki"
 
 /** The help overlay's group order; the titles are the words' `groups`. */
 export const HELP_GROUPS: ReadonlyArray<HelpGroupId> = [
-  "move", "enter", "wiki", "focus", "tab", "search", "read", "view", "sort", "cell", "option", "other", "menu", "prompt", "sorter",
+  "move", "enter", "wiki", "focus", "tab", "search", "view", "sort", "cell", "option", "other", "menu", "prompt", "sorter",
 ]
 
 /** A binding's words, by id in the catalogue's `labels`. */
@@ -86,10 +81,10 @@ export type KeyLabel =
   | "move.down" | "move.up" | "move.top" | "move.bottom" | "move.halfDown" | "move.halfUp" | "move.pageDown" | "move.pageUp"
   | "wiki.halfDown" | "wiki.halfUp"
   | "focus.next" | "focus.prev" | "focus.left" | "focus.right" | "focus.up" | "focus.down"
-  | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "read" | "help"
+  | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "help"
   | "filter" | "tab.list" | "tab.board" | "tab.wiki"
   | "view.deferred" | "view.backlog" | "view.archived" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
-  | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "option.detailAt" | "option.detailAtHelp" | "menu.close" | "menu.up"
+  | "sort.edit" | "option.detailAt" | "option.detailAtHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
   | "sorter.down" | "sorter.up" | "sorter.lower" | "sorter.raise" | "sorter.toggle" | "sorter.flip" | "sorter.apply" | "sorter.default" | "sorter.cancel"
   | "wiki.enter" | "wiki.back" | "wiki.page" | "wiki.nextLink" | "wiki.prevLink" | "wiki.search" | "wiki.clear"
@@ -98,7 +93,7 @@ export type KeyLabel =
 export type Label = KeyLabel | ((words: KeyTableCopy, ctx: KeyContext) => string)
 
 /** The SPC layers by their key after SPC. */
-export type LayerId = "g" | "v" | "s" | "c" | "m" | "o" | "w"
+export type LayerId = "g" | "v" | "s" | "c" | "o" | "w"
 
 export interface Binding {
   /** Action id the router dispatches (with `args`). The store performs it. */
@@ -193,7 +188,6 @@ const BROWSE: ReadonlyArray<Binding> = [
   ...CTRL_W,
   { action: "search.open", keys: ["/"], label: "search", group: "search" },
   { action: "clear", keys: ["Esc"], label: "clear", group: "search" },
-  { action: "read", keys: ["r"], label: "read", group: "read", when: (c) => c.readable !== false },
   { action: "help", keys: ["?"], label: "help", group: "other", verdict: "추가" },
 ]
 
@@ -320,8 +314,6 @@ const MENU: ReadonlyArray<Binding> = [
   ...sortBindings,
   { action: "sort.edit", keys: ["SPC s e"], label: "sort.edit", group: "sort", modes: BROWSE_ONLY },
   ...cellBindings,
-  { action: "read.all", keys: ["SPC m a"], label: "read.all", group: "read", modes: BROWSE_ONLY, when: (c) => c.readable !== false },
-  { action: "read.group", keys: ["SPC m g"], label: "read.group", helpLabel: "read.groupHelp", group: "read", modes: BROWSE_ONLY, when: (c) => c.readable !== false },
   {
     action: "option.detailAt",
     keys: ["SPC o d"],
@@ -348,7 +340,6 @@ export const LAYERS: ReadonlyArray<Layer> = [
   { prefix: "SPC v", id: "v" },
   { prefix: "SPC s", id: "s" },
   { prefix: "SPC c", id: "c" },
-  { prefix: "SPC m", id: "m" },
   { prefix: "SPC o", id: "o" },
   { prefix: "SPC w", id: "w" },
 ]

@@ -362,14 +362,13 @@ test('keys: the board — j/k inside a column, l to the next column with cards, 
   assert.deepEqual(panel.chosen, ['e1.b'])
 })
 
-test('keys: every action of the key table has a dispatch target; without read writes the read marks are not offered', () => {
+test('keys: every action of the key table has a dispatch target; the page marks nothing read', () => {
   const panel = inEpic()
   const ids = new Set(Object.values(KEY_TABLE).flat().map((binding) => binding.action))
   const missing = [...ids].filter((id) => !panel.keys.actions.includes(id))
   assert.deepEqual(missing, [])
   for (const id of Object.keys(NOT_WIRED)) assert.ok(ids.has(id), `${id} is a table action`)
-  // Not given the read writes, `r` and SPC m are unavailable: the menu has no SPC m layer and `r` runs nothing.
-  assert.equal(panel.keys.context().readable, false)
+  // The page only reads: there is no SPC m layer, and `r` runs nothing.
   panel.press(' ')
   assert.equal(panel.keys.menu.el.querySelector('[data-key="m"]'), null)
   panel.press('Escape')
@@ -388,45 +387,6 @@ test('keys: every action of the key table has a dispatch target; without read wr
   // The focus hint is in the page, in the panel's language.
   assert.equal(panel.keys.hint.textContent, en.keys.focusHint)
   assert.ok(panel.keys.hint.isConnected)
-})
-
-test('keys: r marks the cursor row read, SPC m a everything, SPC m g the group the list stands in; a refusal is told', async () => {
-  const calls = []
-  let refuse = null
-  const read = {
-    one: async (id) => (calls.push(['one', id]), refuse),
-    all: async () => (calls.push(['all']), refuse),
-    group: async (id) => (calls.push(['group', id]), refuse),
-  }
-  const panel = inEpic({ read })
-  assert.equal(panel.keys.context().readable, true)
-  assert.ok(!('read' in NOT_WIRED) && !('read.all' in NOT_WIRED) && !('read.group' in NOT_WIRED))
-  panel.press(' ')
-  assert.ok(panel.keys.menu.el.querySelector('[data-key="m"]'), 'the SPC m layer is offered')
-  panel.press('Escape')
-  assert.equal(panel.press('r').defaultPrevented, true)
-  panel.seq(' ', 'm', 'a')
-  // Inside the epic with a task under the cursor: the group is the epic.
-  panel.seq(' ', 'm', 'g')
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(calls, [['one', 'e1.a'], ['all'], ['group', 'e1']])
-  // A group under the cursor is the one marked.
-  panel.store.dispatch({ type: 'enter', path: ['m:m1'], cursor: 'e1' })
-  panel.shell.focusPane('list')
-  panel.seq(' ', 'm', 'g')
-  // At the root, on the milestone row.
-  panel.store.dispatch({ type: 'enter', path: [], cursor: 'm1' })
-  panel.seq(' ', 'm', 'g')
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(calls.slice(3), [['group', 'e1'], ['group', 'm1']])
-  // A write that did not go through says why on the result line.
-  refuse = { kind: 'refused', code: 'declined' }
-  panel.store.dispatch({ type: 'enter', path: ['m:m1', 'e:e1'], cursor: 'e1.b' })
-  panel.shell.focusPane('list')
-  panel.press('r')
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(calls.at(-1), ['one', 'e1.b'])
-  assert.equal(panel.$('.moai-result').textContent, en.refused.declined)
 })
 
 test('keys: a focus move into the detail lands on the pane, not on Close, so SPC still opens the menu', () => {
@@ -520,17 +480,6 @@ test('keys: outside the wiki ↑/↓ in the search are the input\'s, and ↓ in 
   const at = panel.state().toolbar.hintIndex
   assert.equal(panel.press('ArrowDown').defaultPrevented, true, 'the filter takes ↓ itself')
   assert.equal(panel.state().toolbar.hintIndex, at + 1)
-})
-
-test('keys: SPC m g in the "(no milestone)" bucket says where to go and writes nothing', () => {
-  const calls = []
-  const read = { one: async () => null, all: async () => null, group: async (id) => (calls.push(id), null) }
-  const panel = boot({ read, rows: [...ROWS, { id: 'x1', kind: 'issue', title: 'Loose', status: 'todo' }] })
-  panel.store.dispatch({ type: 'enter', path: ['m:'], cursor: 'x1' })
-  panel.shell.focusPane('list')
-  panel.seq(' ', 'm', 'g')
-  assert.deepEqual(calls, [])
-  assert.equal(panel.$('.moai-result').textContent, en.keys.readNoGroup)
 })
 
 test('keys: Esc in a search opened after an applied one keeps the cursor where it is', () => {
@@ -659,51 +608,6 @@ test('keys: the help open on macOS — Ctrl edits text there (Ctrl+K) and is sto
   assert.equal(panel.keys.help.isOpen(), true)
 })
 
-test('keys: r and SPC m g see an active row only the archive answer holds in a cut list; an archived row takes no mark (se-4f4s)', async () => {
-  const calls = []
-  const read = {
-    one: async (id) => (calls.push(['one', id]), null),
-    all: async () => null,
-    group: async (id) => (calls.push(['group', id]), null),
-  }
-  const panel = inEpic({ read })
-  // A cut list (prime's rows): the archive answers rows it does not hold, and those that do not stand done are
-  // active (source.ts activeIds). A done one is archived, as is every archive-only row beside a whole list.
-  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, more: 0, truncated: true, loadedAt: Date.now() } })
-  const extra = [
-    { id: 'e2', kind: 'epic', title: 'Other epic', status: 'todo' },
-    { id: 'e1.y', kind: 'issue', title: 'Ypsilon', epic: 'e1', status: 'todo' },
-    { id: 'e1.z', kind: 'issue', title: 'Zeta', epic: 'e1', status: 'done' },
-  ]
-  panel.store.dispatch({ type: 'view', view: { showArchived: true } })
-  panel.store.dispatch({ type: 'archive', rows: [...ROWS, ...extra] })
-  panel.store.dispatch({ type: 'cursor', id: 'e1.y' })
-  panel.shell.focusPane('list')
-  panel.press('r')
-  panel.store.dispatch({ type: 'cursor', id: 'e2' })
-  panel.seq(' ', 'm', 'g')
-  await ticks()
-  assert.deepEqual(calls, [['one', 'e1.y'], ['group', 'e2']])
-  // An archived row: `moai read` resolves active rows only, so nothing is asked of it.
-  panel.store.dispatch({ type: 'cursor', id: 'e1.z' })
-  panel.press('r')
-  await ticks()
-  assert.equal(calls.length, 2, 'a done archive-only row is archived')
-  // Beside a whole list every archive-only row is archived.
-  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, more: 0, loadedAt: Date.now() } })
-  panel.store.dispatch({ type: 'cursor', id: 'e1.y' })
-  panel.press('r')
-  await ticks()
-  assert.equal(calls.length, 2, 'whole list')
-  // Archived rows hidden again: the archive answer is not the list's.
-  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, more: 0, truncated: true, loadedAt: Date.now() } })
-  panel.store.dispatch({ type: 'view', view: { showArchived: false } })
-  panel.store.dispatch({ type: 'cursor', id: 'e1.y' })
-  panel.press('r')
-  await ticks()
-  assert.equal(calls.length, 2, 'archived rows hidden')
-})
-
 test('keys: Tab in browse moves the focus unless it runs expandAll on the list (se-h5c7)', () => {
   const panel = inEpic()
   assert.equal(panel.press('Tab').defaultPrevented, true, 'on the list Tab is expandAll')
@@ -813,29 +717,6 @@ test('keys: the filter suggestions close when the filter loses the focus (se-h5c
   assert.equal(panel.state().toolbar.hintsOpen, false)
   assert.equal(panel.$('.m-hints .m-menu-item'), null, 'the list is no longer drawn')
   assert.equal(panel.state().filter.text, 'sta', 'the text stays')
-})
-
-test('keys: SPC m g on an archived group marks nothing — not the milestone around it either', async () => {
-  const calls = []
-  const read = { one: async (id) => (calls.push(['one', id]), null), all: async () => null, group: async (id) => (calls.push(['group', id]), null) }
-  const panel = boot({ read })
-  panel.store.dispatch({ type: 'enter', path: ['m:m1'], cursor: 'e1' })
-  panel.shell.focusPane('list')
-  // Beside a whole list an archive-only row is archived (source.ts withArchive tags it).
-  panel.store.dispatch({ type: 'view', view: { showArchived: true } })
-  panel.store.dispatch({ type: 'archive', rows: [...ROWS, { id: 'e9', kind: 'epic', title: 'Old epic', milestone: 'm1', status: 'done' }] })
-  panel.store.dispatch({ type: 'cursor', id: 'e9' })
-  panel.seq(' ', 'm', 'g')
-  await ticks()
-  assert.deepEqual(calls, [], 'the archived epic takes no mark, and m1 is not marked in its stead')
-  // An active group under the cursor is still the one marked, and a row that is no group marks the place.
-  panel.store.dispatch({ type: 'cursor', id: 'e1' })
-  panel.seq(' ', 'm', 'g')
-  panel.store.dispatch({ type: 'enter', path: ['m:m1', 'e:e1'], cursor: 'e1.a' })
-  panel.shell.focusPane('list')
-  panel.seq(' ', 'm', 'g')
-  await ticks()
-  assert.deepEqual(calls, [['group', 'e1'], ['group', 'e1']])
 })
 
 test('keys: Esc in a search opened with / still puts the cursor back after the window lost the focus and came back', () => {

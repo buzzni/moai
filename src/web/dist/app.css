@@ -1,10 +1,10 @@
 /*
  * Moai panel design tokens. Plain CSS so the bundler can inline it as it stands.
  *
- * The host (panel theme contract v1) injects <html data-theme="light|dark"> and ten --saycode-* custom
- * properties. Everything below is built on those: first the host values (with the --fb-* fallbacks an
- * older Desktop needs, because it injects nothing), then names the panel uses, then values the host does
- * not give and the panel derives. Values follow the Saycode app (docs/moai-panel/look-and-feel.md).
+ * Saycode's panel host (theme contract v1) injected <html data-theme="light|dark"> and ten --saycode-*
+ * custom properties; a browser injects nothing, so in `moai web` the --fb-* fallbacks stand and the OS scheme
+ * picks light or dark. The layering is kept as upstream wrote it (web/UPSTREAM.md): first the host values with
+ * their fallbacks, then names the panel uses, then values the host does not give and the panel derives. Values follow the Saycode app (docs/moai-panel/look-and-feel.md).
  */
 
 /* Fallbacks: the app's own values, light first. Dark applies for data-theme="dark", or for an OS dark
@@ -481,11 +481,11 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-shell-notes { display: flex; flex-direction: column; }
 .m-shell-notes > * { margin: 8px 8px 0; }
 .m-shell-notes > :last-child { margin-bottom: 8px; }
-.moai-hint, .moai-more { color: var(--muted); font-size: 12px; }
-.moai-notice:empty, .moai-error:empty, .moai-truncated:empty, .moai-archive-problem:empty, .moai-backlog-problem:empty, .moai-compat:empty, .moai-held:empty, .moai-more:empty, .moai-result:empty { display: none; }
-/* The compatibility banner: one sentence per line, one per thing to fix on that machine. */
-.moai-compat { flex-direction: column; gap: 2px; }
-.moai-compat > p { margin: 0; }
+.moai-hint { color: var(--muted); font-size: 12px; }
+.moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
+/* What moai said beside the lists: one line per line it said. */
+.moai-said { flex-direction: column; gap: 2px; }
+.moai-said > p { margin: 0; }
 .moai-result { font-size: 12px; }
 
 /* ---- The run's activity (se-24ey.14i): a toast over the foot of the panes, so a run never pushes the layout.

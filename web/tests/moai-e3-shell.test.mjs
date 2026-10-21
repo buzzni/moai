@@ -298,8 +298,6 @@ test('shell: choosing a row reads its detail through the shell intents; the add 
   panel.shell.say('The run failed.', true)
   assert.equal(panel.$('.moai-result').className, 'moai-result m-banner m-banner-danger')
   assert.equal(panel.$('.moai-result').getAttribute('role'), 'status', 'the result line is a live region')
-  panel.shell.refuse({ kind: 'refused', code: 'declined' })
-  assert.equal(panel.$('.moai-result').className, 'moai-result m-banner')
 })
 
 test('shell: a panel that opens on the wiki tab starts without the path line and the add field', () => {
@@ -361,8 +359,8 @@ test('shell: a tab comes back with its own scroll, and what the pane decided whi
 
 test('shell: a failed detail read is told once, in the pane, and does not hide the list problem', () => {
   const panel = boot(fakeStorage())
-  const declined = { kind: 'refused', code: 'declined' }
-  panel.store.dispatch({ type: 'detail-failed', id: 'se-e1.a', problem: declined })
+  const cancelled = { kind: 'cancelled' }
+  panel.store.dispatch({ type: 'detail-failed', id: 'se-e1.a', problem: cancelled })
   // As information, in the pane that asked; the shell's banners stay for the list.
   const pane = panel.$('.m-split-detail')
   assert.equal(pane.querySelectorAll('.m-banner').length, 1)
@@ -372,74 +370,20 @@ test('shell: a failed detail read is told once, in the pane, and does not hide t
   // A list problem keeps its place while the detail's stands.
   panel.store.dispatch({ type: 'board-failed', problem: { kind: 'moai-error', message: 'broken' } })
   assert.match(panel.$('.moai-error').textContent, /broken/)
-  assert.match(pane.textContent, /confirmation was declined/)
+  assert.match(pane.textContent, /read was cancelled/)
   // With the pane hidden the shell says it, so a read the user asked for is never silent.
-  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, more: 0, loadedAt: Date.now() } })
+  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, loadedAt: Date.now() } })
   panel.store.dispatch({ type: 'detail-visible', visible: false })
-  assert.match(panel.$('.moai-notice').textContent, /confirmation was declined/)
+  assert.match(panel.$('.moai-notice').textContent, /read was cancelled/)
 })
 
-test('shell: a list left to prime\'s rows says what it leaves out, beside the catalog line too, and a backlog that could not be read says why', () => {
+test('shell: moai web out of reach is one sentence in its banner, and a banner is written only when it says something new', () => {
   const panel = boot(fakeStorage())
-  const load = (extra) => panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, more: 0, loadedAt: Date.now(), partial: true, ...extra } })
-  // The catalog undecided (`unknown`, here no report yet): nothing else tells why the list is held and ready rows only.
-  load({})
-  assert.equal(panel.$('.moai-truncated').textContent, en.shell.primeOnly)
-  // Once the catalog line names the whole list it says what to fix; this one still says what the board leaves out
-  // (an empty Done column is not "nothing done", se-24ey.s6v).
-  panel.store.dispatch({ type: 'compat', report: { moai: 'ok', toolMissing: false, catalog: { state: 'missing', missing: ['buzzni.moai.show-all'] }, degraded: ['all-rows'] } })
-  assert.equal(panel.$('.moai-truncated').textContent, en.shell.primeOnly)
-  // A read since found show --all (the catalog lacks only the backlog now, or nothing): the rows on screen are older,
-  // and the whole list is no longer out of reach there.
-  panel.store.dispatch({ type: 'compat', report: { moai: 'ok', toolMissing: false, catalog: { state: 'missing', missing: ['buzzni.moai.backlog-all'] }, degraded: ['backlog'] } })
-  assert.equal(panel.$('.moai-truncated').textContent, '')
-  panel.store.dispatch({ type: 'compat', report: { moai: 'ok', toolMissing: false, catalog: { state: 'ok', missing: [] }, degraded: [] } })
-  assert.equal(panel.$('.moai-truncated').textContent, '')
-  // The catalog undecided again (a shipped profile refused as unsupported): this banner tells it once more.
-  panel.store.dispatch({ type: 'compat', report: { moai: 'ok', toolMissing: false, catalog: { state: 'unknown', missing: [] }, degraded: [] } })
-  assert.equal(panel.$('.moai-truncated').textContent, en.shell.primeOnly)
-  // A cut list says it was too large, whatever the catalog says.
-  load({ truncated: true })
-  assert.equal(panel.$('.moai-truncated').textContent, en.shell.truncated)
-  // The backlog read beside prime: an error is an alert, information polite status text, and a whole read clears it.
-  load({ backlogProblem: { kind: 'failed' } })
-  assert.match(panel.$('.moai-backlog-problem[role="alert"]').textContent, /^The backlog could not be read: /)
-  load({ backlogProblem: { kind: 'refused', code: 'declined' } })
-  assert.equal(panel.$('.moai-backlog-problem[role="alert"]').textContent, '')
-  assert.match(panel.$('.moai-backlog-problem[role="status"]').textContent, /^The backlog could not be read: .*declined/)
-  load({})
-  assert.equal([...panel.doc.querySelectorAll('.moai-backlog-problem')].map((node) => node.textContent).join(''), '')
-  // The catalog lacks the backlog read: said here while the catalog is undecided, left to the catalog line once it names it.
-  const backlogText = () => [...panel.doc.querySelectorAll('.moai-backlog-problem')].map((node) => node.textContent).join('')
-  load({ backlogProblem: { kind: 'refused', code: 'unsupported-daemon' } })
-  assert.match(backlogText(), /^The backlog could not be read: /)
-  panel.store.dispatch({ type: 'compat', report: { moai: 'ok', toolMissing: false, catalog: { state: 'missing', missing: ['buzzni.moai.backlog-all'] }, degraded: ['backlog'] } })
-  assert.equal(backlogText(), '')
-})
-
-test('shell: a list refusal the compatibility banner tells leaves the error line to the hidden detail\'s own problem', () => {
-  const panel = boot(fakeStorage())
-  panel.store.dispatch({ type: 'compat', report: { moai: 'ok', toolMissing: false, catalog: { state: 'missing', missing: ['buzzni.moai.show-all'] }, degraded: ['all-rows'] } })
-  panel.store.dispatch({ type: 'board-failed', problem: { kind: 'refused', code: 'unsupported-daemon' } })
-  assert.equal(panel.$('.moai-error').textContent, '', 'the catalog line tells it')
-  panel.store.dispatch({ type: 'detail-visible', visible: false })
-  panel.store.dispatch({ type: 'detail-failed', id: 'se-e1.a', problem: { kind: 'moai-error', message: 'issue se-e1.a not found' } })
-  assert.match(panel.$('.moai-error').textContent, /not found/, 'a read the user asked for is never silent')
-  // The detail's `show` is not a read the probe hears: a catalog line about other profiles does not stand for it.
-  panel.store.dispatch({ type: 'detail-failed', id: 'se-e1.a', problem: { kind: 'refused', code: 'unsupported-daemon' } })
-  assert.equal(panel.$('.moai-error').textContent, en.refused['unsupported-daemon'])
-})
-
-test('shell: the missing-board guidance is one sentence in its banner, and a banner is written only when it says something new', () => {
-  const panel = boot(fakeStorage())
-  panel.store.dispatch({ type: 'board-failed', problem: { kind: 'not-initialized' } })
-  const notice = panel.$('.moai-notice')
-  // One child, so the flex banner lays the sentence out as text with the command inside it.
-  assert.equal(notice.children.length, 1)
-  assert.equal(notice.firstElementChild.tagName, 'SPAN')
-  assert.equal(notice.querySelector('code').textContent, 'moai init')
-  panel.shell.refuse({ kind: 'not-initialized' })
-  assert.equal(panel.$('.moai-result').children.length, 1)
+  panel.store.dispatch({ type: 'board-failed', problem: { kind: 'not-started' } })
+  const error = panel.$('.moai-error')
+  // One child, so the flex banner lays the sentence out as text.
+  assert.equal(error.children.length, 1)
+  assert.equal(error.textContent, en.unreachable)
 
   // A live region is read again when it is written: an unchanged problem is left alone.
   panel.store.dispatch({ type: 'board-failed', problem: { kind: 'moai-error', message: 'broken' } })
@@ -470,27 +414,6 @@ test('shell: the store\'s focus follows the DOM focus into a pane, not only focu
   // Back into the list by a click or Tab.
   panel.$('.moai-list').focus()
   assert.equal(panel.store.getState().focus, 'list')
-})
-
-test('shell: every refusal has its words in every language; a cancel that was reaped does not say the run may go on', () => {
-  const doc = new JSDOM('').window.document
-  const codes = ['declined', 'approval-timeout', 'workspace-busy', 'tool-missing', 'unsupported-platform', 'unsupported-daemon']
-  const seen = new Set()
-  for (const lang of ['en', 'ko', 'ja', 'zh']) {
-    const copy = copyFor(lang)
-    for (const code of codes) {
-      const said = describe({ kind: 'refused', code }, copy, doc)
-      assert.equal(typeof said.parts[0], 'string', `${lang} ${code}`)
-      assert.ok(said.parts[0].length > 10, `${lang} ${code} has words`)
-      seen.add(`${lang}|${said.parts[0]}`)
-    }
-  }
-  assert.equal(seen.size, 24, 'no two refusals share a text within a language')
-  assert.equal(describe({ kind: 'refused', code: 'approval-timeout' }, en, doc).info, true)
-  assert.equal(describe({ kind: 'refused', code: 'unsupported-platform' }, en, doc).info, false)
-  const reaped = describe({ kind: 'cancelled', mayContinue: false }, en, doc)
-  assert.deepEqual(reaped.parts, [en.cancelled])
-  assert.deepEqual(describe({ kind: 'cancelled', mayContinue: true }, en, doc).parts, [`${en.cancelled} ${en.mayContinue}`])
 })
 
 test('unread: unreadBadges counts the rows the CLI marked unread, archive rows never; null when none (se-ehdi.zcx)', async () => {
@@ -550,25 +473,36 @@ test('unread: the shell puts the unread count on the board and list tabs, and ta
   assert.equal(panel.tab('list').getAttribute('aria-label'), null)
 })
 
-test('shell: the activity line asks to approve a waiting run beside one that runs, and an unchanged line is not rewritten', async () => {
+test('shell: the activity line says a read is out, and an unchanged line is not rewritten', async () => {
   const panel = boot(fakeStorage())
   const line = panel.$('.moai-activity')
   const writes = []
   new panel.dom.window.MutationObserver((records) => writes.push(...records)).observe(line, { childList: true, characterData: true, subtree: true })
-  panel.shell.activity({ phase: 'running', waiting: true, cancellable: true })
-  assert.equal(line.textContent, `${en.running} ${en.starting}`)
+  panel.shell.activity({ phase: 'running', cancellable: true })
+  assert.equal(line.textContent, en.running)
   assert.equal(panel.$('.moai-cancel').hidden, false)
   await Promise.resolve()
   const after = writes.length
-  panel.shell.activity({ phase: 'running', waiting: true, cancellable: true })
+  panel.shell.activity({ phase: 'running', cancellable: true })
   await Promise.resolve()
   assert.equal(writes.length, after, 'the live region is left alone')
-  panel.shell.activity({ phase: 'running', waiting: false, cancellable: true })
-  assert.equal(line.textContent, en.running)
-  // Waiting alone: nothing to cancel yet.
-  panel.shell.activity({ phase: 'starting', waiting: true, cancellable: false })
-  assert.equal(line.textContent, en.starting)
+  panel.shell.activity({ phase: 'idle', cancellable: false })
+  assert.equal(line.textContent, '')
   assert.equal(panel.$('.moai-cancel').hidden, true)
+})
+
+test('shell: what moai said beside the lists is told once, under its lead, and goes with the next clean read', async () => {
+  const panel = boot(fakeStorage())
+  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, loadedAt: 1, notes: ['line 7 could not be read'] } })
+  const said = panel.$('.moai-said')
+  assert.deepEqual([...said.querySelectorAll('p')].map((p) => p.textContent), [en.said, 'line 7 could not be read'])
+  const writes = []
+  new panel.dom.window.MutationObserver((records) => writes.push(...records)).observe(said, { childList: true, subtree: true })
+  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, loadedAt: 2, notes: ['line 7 could not be read'] } })
+  await Promise.resolve()
+  assert.equal(writes.length, 0, 'the same lines are not read out again')
+  panel.store.dispatch({ type: 'board-loaded', data: { rows: ROWS, loadedAt: 3 } })
+  assert.equal(said.textContent, '')
 })
 
 test('memory: the default sort lasts for the session, lives under one key, and is applied at boot', () => {

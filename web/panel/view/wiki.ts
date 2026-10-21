@@ -1124,8 +1124,8 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
 
 /**
  * The wiki view in the shell's wiki panel (contract: view/types.ts). Pages come from `ctx.wiki` — read the first
- * time the tab shows, and again the next time it shows after a listing that failed (a declined confirmation, a
- * cancelled or busy run) — and the view's state is saved into the store (`wiki`) as the tab is left and given back
+ * time the tab shows, and again the next time it shows after a listing that failed (a cancelled read, `moai web`
+ * out of reach) — and the view's state is saved into the store (`wiki`) as the tab is left and given back
  * from it when the pane is mounted again. Without a source the tab says the wiki cannot be read.
  * Its keys come from the key router (keys/wiring.ts), which calls handleKey and command: the view listens for
  * none itself (standaloneKeys: false), so no key runs twice.

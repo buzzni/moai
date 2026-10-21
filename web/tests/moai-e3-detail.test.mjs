@@ -156,7 +156,9 @@ test('journal, commits and work lines', () => {
 })
 
 test('problem text uses the shell words', () => {
-  assert.equal(F.problemText({ kind: 'refused', code: 'declined' }, en), en.refused.declined)
+  assert.equal(F.problemText({ kind: 'not-started' }, en), en.unreachable)
+  assert.equal(F.problemText({ kind: 'failed', message: 'page b skipped' }, en), en.moaiError('page b skipped'))
+  assert.equal(F.problemText({ kind: 'failed' }, en), en.failed)
   assert.equal(F.problemText({ kind: 'moai-error', message: 'boom' }, en), en.moaiError('boom'))
   assert.equal(F.problemText({ kind: 'passed', output: 1 }, en), null)
 })
@@ -186,53 +188,14 @@ test('pane: nothing chosen, loading and a problem', () => {
   assert.match(root.textContent, /Choose a task/)
   view.render(stateWith({ loading: true }), index)
   assert.match(root.textContent, /Loading/)
-  // What the user chose is information, as in the shell's banners; a machine problem is an error.
-  view.render(stateWith({ problem: { kind: 'refused', code: 'declined' } }), index)
+  // What the person chose is information, as in the shell's banners; a machine problem is an error.
+  view.render(stateWith({ problem: { kind: 'cancelled' } }), index)
   assert.equal(root.querySelector('.m-banner-danger'), null)
   assert.equal(root.querySelector('.m-banner').getAttribute('role'), 'status')
-  assert.match(root.textContent, /confirmation was declined/)
+  assert.match(root.textContent, /read was cancelled/)
   view.render(stateWith({ problem: { kind: 'moai-error', message: 'boom' } }), index)
   assert.equal(root.querySelector('.m-banner-danger').getAttribute('role'), 'alert')
   assert.match(root.textContent, /boom/)
-})
-
-test('pane: a tool-missing refusal the compat banner tells is not said again; unsupported-daemon still is (se-p314)', () => {
-  const { root, view } = mount()
-  const missing = { kind: 'refused', code: 'tool-missing' }
-  const told = { toolMissing: true, catalog: { state: 'ok' } }
-  const base = stateWith({ problem: missing })
-  view.render({ ...base, compat: null }, index)
-  assert.match(root.textContent, /\S/)
-  assert.ok(root.querySelector('.m-banner'), 'nobody told it: the detail says it')
-  view.render({ ...base, compat: told }, index)
-  assert.equal(root.querySelector('.m-banner'), null, 'the banner told it: the detail keeps quiet')
-  // A task was chosen and its read refused: the pane does not ask to choose one, it says it has no details.
-  assert.equal(root.querySelector('.m-empty-title').textContent, en.detail.problem)
-  // Announced as the danger banner it stands for would have been: a status region inserted with its text is not.
-  assert.equal(root.querySelector('.m-empty').getAttribute('role'), 'alert')
-  const daemon = stateWith({ problem: { kind: 'refused', code: 'unsupported-daemon' } })
-  view.render({ ...daemon, compat: { toolMissing: false, catalog: { state: 'missing' } } }, index)
-  assert.ok(root.querySelector('.m-banner'), 'the detail read is not heard by the probe: unsupported-daemon is its own')
-})
-
-test('pane: a compat report that tells the pane nothing new does not draw it again (selection and focus stay)', () => {
-  const { root, view } = mount()
-  const row = { ...ROWS[3], body: 'some **body**' }
-  const state = stateWith({ value: { id: row.id, row } })
-  const report = (over = {}) => ({ moai: 'ok', toolMissing: false, catalog: { state: 'ok', missing: [] }, degraded: [], ...over })
-  view.render({ ...state, compat: null }, index)
-  const body = root.querySelector('.moai-detail-body')
-  assert.ok(body)
-  view.render({ ...state, compat: report() }, index)
-  view.render({ ...state, compat: report({ moai: 'old', degraded: ['tallies'] }) }, index)
-  assert.equal(root.querySelector('.moai-detail-body'), body, 'no problem on screen: no report changes what the pane draws')
-  // With a refusal on screen the report decides whether the banner draws it: that is a change of the pane.
-  const failed = stateWith({ problem: { kind: 'refused', code: 'tool-missing' } })
-  view.render({ ...failed, compat: report() }, index)
-  assert.ok(root.querySelector('.m-banner'))
-  const banner = root.querySelector('.m-banner')
-  view.render({ ...failed, compat: report({ moai: 'old' }) }, index)
-  assert.equal(root.querySelector('.m-banner'), banner, 'a report that tells the refusal no more than before leaves it be')
 })
 
 test('pane: the focus goes to the pane itself while it has no control, and the scroll is the split container\'s', () => {
