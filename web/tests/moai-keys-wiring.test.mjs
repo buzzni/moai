@@ -755,7 +755,7 @@ test('keys: D in the sort editor saves the order as the default; emptying the or
   panel.press('P')
   panel.press('Escape')
   panel.seq(' ', 's', 'e')
-  assert.match(panel.$('.m-sort-pop [data-sort-note]').textContent, /this session only/, 'the editor says the default lasts for the session')
+  assert.match(panel.$('.m-sort-pop [data-sort-note]').textContent, /until the tab is closed/, 'the editor says the default lasts until the tab closes')
   panel.press('D')
   assert.deepEqual(sortDefault.get(), { fields: [{ key: 'title', dir: 'asc' }, { key: 'priority', dir: 'asc' }], reversed: false })
   assert.equal(panel.$('.moai-result')?.textContent ?? '', en.keys.sortDefaultSavedSession)

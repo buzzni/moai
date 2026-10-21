@@ -168,16 +168,6 @@ const MOTION: ReadonlyArray<Binding> = [
   { action: "move.pageUp", keys: ["C-b", "PageUp"], label: "move.pageUp", group: "move", motion: true, verdict: "확인" },
 ]
 
-/** Ctrl-w window moves (vim). macOS only — keybindings.md §3.3 대체; SPC w is the key everywhere. */
-const CTRL_W: ReadonlyArray<Binding> = [
-  { action: "focus.next", keys: [], macKeys: ["C-w w", "C-w C-w"], label: "focus.next", group: "focus", when: focusWhen("next"), verdict: "대체" },
-  { action: "focus.prev", keys: [], macKeys: ["C-w W"], label: "focus.prev", group: "focus", when: focusWhen("prev"), verdict: "대체" },
-  { action: "focus.left", keys: [], macKeys: ["C-w h", "C-w C-h"], label: "focus.left", group: "focus", when: focusWhen("left"), verdict: "대체" },
-  { action: "focus.right", keys: [], macKeys: ["C-w l", "C-w C-l"], label: "focus.right", group: "focus", when: focusWhen("right"), verdict: "대체" },
-  { action: "focus.up", keys: [], macKeys: ["C-w k", "C-w C-k"], label: "focus.up", group: "focus", when: focusWhen("up"), verdict: "대체" },
-  { action: "focus.down", keys: [], macKeys: ["C-w j", "C-w C-j"], label: "focus.down", group: "focus", when: focusWhen("down"), verdict: "대체" },
-]
-
 const BROWSE: ReadonlyArray<Binding> = [
   ...MOTION,
   { action: "enter", keys: ["Enter"], label: "enter", group: "enter", when: listFocus },
@@ -185,7 +175,6 @@ const BROWSE: ReadonlyArray<Binding> = [
   { action: "expand", keys: ["l", "Right"], label: "expand", group: "enter", motion: true, when: listFocus },
   { action: "collapse", keys: ["h", "Left"], label: "collapse", group: "enter", motion: true, when: listFocus },
   { action: "expandAll", keys: ["Tab"], label: "expandAll", group: "enter", when: (c) => listFocus(c) && c.tab !== "board" },
-  ...CTRL_W,
   { action: "search.open", keys: ["/"], label: "search", group: "search" },
   { action: "clear", keys: ["Esc"], label: "clear", group: "search" },
   { action: "help", keys: ["?"], label: "help", group: "other", verdict: "추가" },
@@ -362,7 +351,8 @@ const PROMPT: ReadonlyArray<Binding> = [
   { action: "prompt.up", keys: ["Up"], label: "prompt.up", group: "prompt" },
   { action: "prompt.down", keys: ["Down"], label: "prompt.down", group: "prompt" },
   { action: "prompt.clear", keys: ["C-u"], label: "prompt.clear", group: "prompt", verdict: "확인" },
-  { action: "prompt.deleteWord", keys: ["A-Backspace"], macKeys: ["C-w"], label: "prompt.deleteWord", group: "prompt", verdict: "대체" },
+  // Ctrl-w closes the browser tab, so neither the window moves nor the word delete take it: SPC w moves the focus.
+  { action: "prompt.deleteWord", keys: ["A-Backspace"], label: "prompt.deleteWord", group: "prompt", verdict: "대체" },
 ]
 
 const SORTER: ReadonlyArray<Binding> = [
@@ -390,7 +380,6 @@ const WIKI: ReadonlyArray<Binding> = [
   { action: "wiki.prevLink", keys: ["S-Tab"], label: "wiki.prevLink", group: "wiki" },
   { action: "wiki.search", keys: ["/"], label: "wiki.search", group: "search" },
   { action: "wiki.clear", keys: ["Esc"], label: "wiki.clear", group: "wiki", verdict: "변경" },
-  ...CTRL_W.filter((b) => b.action !== "focus.up" && b.action !== "focus.down"),
   { action: "help", keys: ["?"], label: "help", group: "other", verdict: "추가" },
 ]
 

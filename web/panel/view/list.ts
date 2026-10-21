@@ -11,6 +11,7 @@
 
 import { pathKey, priorityOf, type IssueIndex, type Keep, type Path } from "../data/index.ts"
 import { sortEdit, type SortKey } from "../data/query.ts"
+import { assigneeOf } from "../data/people.ts"
 import { isUnread } from "../data/read.ts"
 import type { State } from "../store.ts"
 import { button, el, emptyState, icon } from "./components.ts"
@@ -139,7 +140,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
         return node
       }
       case "assignee":
-        return cell(className, typeof row.assignee === "string" ? row.assignee : "")
+        return cell(className, assigneeOf(row))
       case "created":
         return cell(className, shortDate(row.created_at))
       case "updated":

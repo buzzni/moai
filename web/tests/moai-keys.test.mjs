@@ -108,15 +108,14 @@ test('table: 제외 keys are absent (0-9, SPC q, SPC g s, SPC v w, SPC c w, SPC 
   }
 })
 
-test('table: 대체 — Ctrl-w forms only on macOS, SPC w and Alt-Backspace everywhere', () => {
-  const focusNext = KEY_TABLE.browse.find((b) => b.action === 'focus.next')
-  assert.deepEqual(bindingKeys(focusNext, 'other'), [])
-  assert.ok(bindingKeys(focusNext, 'mac').includes('C-w w'))
+test('table: no Ctrl-w anywhere (it closes the browser tab); SPC w and Alt-Backspace everywhere', () => {
+  const everything = Object.values(KEY_TABLE).flat().flatMap((b) => [...bindingKeys(b, 'mac'), ...bindingKeys(b, 'other')])
+  assert.equal(everything.filter((key) => key.startsWith('C-w')).length, 0)
   assert.ok(KEY_TABLE.menu.some((b) => b.action === 'focus.next' && b.keys.includes('SPC w w')))
   for (const side of ['W', 'h', 'j', 'k', 'l']) assert.ok(KEY_TABLE.menu.some((b) => b.keys.includes(`SPC w ${side}`)), `SPC w ${side}`)
   const word = KEY_TABLE.prompt.find((b) => b.action === 'prompt.deleteWord')
   assert.deepEqual(bindingKeys(word, 'other'), ['A-Backspace'])
-  assert.deepEqual(bindingKeys(word, 'mac'), ['A-Backspace', 'C-w'])
+  assert.deepEqual(bindingKeys(word, 'mac'), ['A-Backspace'])
   // 변경: SPC o d toggles left/bottom. SPC n (add) is gone: the panel reads only (se-24ey.oxd).
   assert.equal(KEY_TABLE.menu.find((b) => b.keys.includes('SPC n')), undefined)
   assert.equal(KEY_TABLE.menu.find((b) => b.keys.includes('SPC o d')).action, 'option.detailAt')
@@ -125,11 +124,11 @@ test('table: 대체 — Ctrl-w forms only on macOS, SPC w and Alt-Backspace ever
 test('table: 051 bindings — motion, enter/leave, tabs, search, help, prompt, sorter, wiki', () => {
   const find = (mode, key) => KEY_TABLE[mode].find((b) => bindingKeys(b, 'mac').includes(key))?.action
   const expect = {
-    browse: { j: 'move.down', Down: 'move.down', k: 'move.up', Up: 'move.up', 'g g': 'move.top', Home: 'move.top', G: 'move.bottom', End: 'move.bottom', 'C-d': 'move.halfDown', 'C-u': 'move.halfUp', 'C-f': 'move.pageDown', PageDown: 'move.pageDown', 'C-b': 'move.pageUp', PageUp: 'move.pageUp', Enter: 'enter', Backspace: 'leave', l: 'expand', Right: 'expand', h: 'collapse', Left: 'collapse', Tab: 'expandAll', '/': 'search.open', Esc: 'clear', '?': 'help', 'C-w W': 'focus.prev' },
+    browse: { j: 'move.down', Down: 'move.down', k: 'move.up', Up: 'move.up', 'g g': 'move.top', Home: 'move.top', G: 'move.bottom', End: 'move.bottom', 'C-d': 'move.halfDown', 'C-u': 'move.halfUp', 'C-f': 'move.pageDown', PageDown: 'move.pageDown', 'C-b': 'move.pageUp', PageUp: 'move.pageUp', Enter: 'enter', Backspace: 'leave', l: 'expand', Right: 'expand', h: 'collapse', Left: 'collapse', Tab: 'expandAll', '/': 'search.open', Esc: 'clear', '?': 'help' },
     menu: { 'SPC /': 'search.open', 'SPC f': 'filter.open', 'SPC g l': 'tab.list', 'SPC g b': 'tab.board', 'SPC g w': 'tab.wiki', 'SPC ?': 'help', 'SPC v r': 'view.raw', 'SPC s e': 'sort.edit' },
     prompt: { Enter: 'prompt.apply', Esc: 'prompt.cancel', Tab: 'prompt.next', 'S-Tab': 'prompt.prev', Up: 'prompt.up', Down: 'prompt.down', 'C-u': 'prompt.clear' },
     sorter: { j: 'sorter.down', k: 'sorter.up', J: 'sorter.lower', K: 'sorter.raise', SPC: 'sorter.toggle', d: 'sorter.flip', Enter: 'sorter.apply', D: 'sorter.default', Esc: 'sorter.cancel' },
-    wiki: { j: 'move.down', 'g g': 'move.top', Enter: 'wiki.enter', Backspace: 'wiki.back', h: 'wiki.back', Left: 'wiki.back', Tab: 'wiki.nextLink', 'S-Tab': 'wiki.prevLink', '/': 'wiki.search', Esc: 'wiki.clear', 'C-w l': 'focus.right' }
+    wiki: { j: 'move.down', 'g g': 'move.top', Enter: 'wiki.enter', Backspace: 'wiki.back', h: 'wiki.back', Left: 'wiki.back', Tab: 'wiki.nextLink', 'S-Tab': 'wiki.prevLink', '/': 'wiki.search', Esc: 'wiki.clear' }
   }
   for (const [mode, keys] of Object.entries(expect)) {
     for (const [key, action] of Object.entries(keys)) assert.equal(find(mode, key), action, `${mode} ${key}`)
@@ -279,22 +278,14 @@ test('router: gg goes to the top; g then another key drops both (keys.rs Chord::
   assert.deepEqual(changes.at(-1), { pending: [], menu: null })
 })
 
-test('router: Ctrl-w only on macOS, SPC w everywhere', () => {
-  const mac = setup({ platform: 'mac' })
-  assert.equal(mac.key('w', { ctrlKey: true }).handled, true)
-  assert.equal(mac.key('w').action.id, 'focus.next')
-  mac.key('w', { ctrlKey: true })
-  assert.equal(mac.key('w', { ctrlKey: true }).action.id, 'focus.next', 'Ctrl held through the second key')
-  mac.key('w', { ctrlKey: true })
-  assert.equal(mac.key('k').action.id, 'focus.up')
-  mac.key('w', { ctrlKey: true })
-  assert.equal(mac.key('h').action, undefined, 'Ctrl-w h with the detail below does nothing')
-
-  const linux = setup({ platform: 'other' })
-  assert.deepEqual(linux.key('w', { ctrlKey: true }), { handled: false, preventDefault: false })
-  assert.equal(linux.key('w').handled, false)
-  assert.deepEqual(linux.ids(), [])
-  for (const r of [linux, setup({ platform: 'mac' })]) {
+test('router: Ctrl-w is the browser\'s on every platform, SPC w moves the focus', () => {
+  for (const platform of ['mac', 'other']) {
+    const r = setup({ platform })
+    assert.deepEqual(r.key('w', { ctrlKey: true }), { handled: false, preventDefault: false }, platform)
+    assert.equal(r.key('w').handled, false)
+    assert.deepEqual(r.ids(), [])
+  }
+  for (const r of [setup({ platform: 'other' }), setup({ platform: 'mac' })]) {
     r.key(' '); r.key('w')
     assert.equal(r.key('w').action.id, 'focus.next')
     r.key(' '); r.key('w')
@@ -505,7 +496,7 @@ test('helpSections: grouped rows, platform keys, availability', () => {
   const row = (sections, action) => sections.flatMap((s) => s.rows).find((r) => r.action === action)
   assert.deepEqual(row(other, 'move.top').keys, ['g g', 'Home'])
   assert.deepEqual(row(other, 'focus.next').keys, ['SPC w w'])
-  assert.deepEqual(row(helpSections('browse', browse(), 'mac'), 'focus.next').keys, ['C-w w', 'C-w C-w', 'SPC w w'])
+  assert.deepEqual(row(helpSections('browse', browse(), 'mac'), 'focus.next').keys, ['SPC w w'])
   assert.equal(row(other, 'focus.left').available, false, 'detail below: h/l do nothing')
   assert.equal(row(other, 'focus.down').available, true)
   assert.deepEqual(row(other, 'view.column').keys, ['SPC v 1~9'])
@@ -795,7 +786,7 @@ test('kbdHint: kbd chips with key labels; focus hint text', () => {
   const { document } = new JSDOM('<!doctype html><body></body>').window
   assert.equal(kbdHint(document, '/').querySelector('kbd').textContent, '/')
   assert.deepEqual([...kbdHint(document, ['C-d', 'g g']).querySelectorAll('kbd')].map((k) => k.textContent), ['Ctrl-d', 'gg'])
-  assert.equal(focusHint(document).textContent, '클릭하면 키보드를 쓸 수 있습니다')
+  assert.equal(focusHint(document).textContent, '페이지를 한 번 누르면 키가 듣습니다')
 })
 
 test('focus hint: anchored to the bottom so it never covers the tab bar at the top', async () => {

@@ -73,6 +73,12 @@ export interface RequestOptions {
 
 export interface ClientOptions {
   concurrency?: number
+  /**
+   * How long one read may go unanswered before it counts as the server out of reach (`not-started`). The server
+   * cuts its own answers at a minute; past that a read waited on would hold its slot, and the refresh behind it,
+   * for good. Default 90 s.
+   */
+  timeoutMs?: number
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
@@ -154,6 +160,7 @@ export interface Client {
 
 export function createClient(fetcher: Fetch, options: ClientOptions = {}): Client {
   const concurrency = Math.max(1, options.concurrency ?? 1)
+  const timeoutMs = options.timeoutMs ?? 90_000
   const pending: Pending[] = []
   const listeners = new Set<() => void>()
   let seq = 0
@@ -181,16 +188,20 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
   }
 
   async function execute(entry: Pending): Promise<Outcome> {
-    let answer: { status: number; text(): Promise<string> }
+    let late = false
+    const limit = setTimeout(() => {
+      late = true
+      entry.abort.abort()
+    }, timeoutMs)
+    // Aborted by the time limit is out of reach; aborted by a person is a cancel.
+    const failed = (): Outcome => (entry.abort.signal.aborted && !late ? { kind: 'cancelled' } : { kind: 'not-started' })
     try {
-      answer = await fetcher(entry.url, { signal: entry.abort.signal, headers: { Accept: 'application/json' } })
-    } catch {
-      return entry.abort.signal.aborted ? { kind: 'cancelled' } : { kind: 'not-started' }
-    }
-    try {
+      const answer = await fetcher(entry.url, { signal: entry.abort.signal, headers: { Accept: 'application/json' } })
       return outcomeOf(answer.status, await answer.text())
     } catch {
-      return entry.abort.signal.aborted ? { kind: 'cancelled' } : { kind: 'not-started' }
+      return failed()
+    } finally {
+      clearTimeout(limit)
     }
   }
 

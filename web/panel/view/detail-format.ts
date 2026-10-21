@@ -5,6 +5,7 @@
  */
 import { isDone, isGroup, isWork, type IssueIndex, type Row } from '../data/index.ts'
 import type { Outcome } from '../data/client.ts'
+import { assigneeOf, label } from '../data/people.ts'
 import type { Copy } from '../i18n/index.ts'
 
 /** The columns in moai's default order; a column the config adds stands after them. */
@@ -167,10 +168,8 @@ export function fieldsOf(row: Row, index: IssueIndex | null, copy: Copy): Field[
     const title = at === undefined ? '' : text(index!.rows[at]!.title)
     return title ? `${title} (${id})` : id
   }
-  const assignee = text(row.assignee)
-  const email = text(row.assignee_email)
   const all: [string, string, string][] = [
-    ['assignee', d.assignee, assignee && email && email !== assignee ? `${assignee} <${email}>` : assignee || email],
+    ['assignee', d.assignee, assigneeOf(row)],
     ['epic', d.epic, epic ? titled(epic) : ''],
     ['milestone', d.milestone, milestone ? titled(milestone) : ''],
     // The CLI's key is `due_on` (and `starts_on`); `due` is what an older row may carry.
@@ -214,7 +213,7 @@ export function journalLine(entry: unknown, copy: Copy): JournalLine | null {
     const note = text(entry.note)
     said = `${copy.stats[from] ?? from} → ${copy.stats[to] ?? to}${note ? ` — ${note}` : ''}`
   } else said = text(entry.text) || kind
-  return { kind, text: said, meta: [text(entry.by), formatDate(entry.ts)].filter(Boolean).join(' · ') }
+  return { kind, text: said, meta: [label(text(entry.by), text(entry.by_email) || undefined), formatDate(entry.ts)].filter(Boolean).join(' · ') }
 }
 
 /** The journal as the file keeps it: oldest first, so it reads top to bottom. */

@@ -203,3 +203,14 @@ test('only a cancel is information; everything a machine got wrong is an error',
     assert.equal(isInformation(outcome), false, outcome.kind)
   }
 })
+
+test('a read left unanswered past the time limit is the server out of reach, not a cancel, and frees its slot', async () => {
+  const net = fakeFetch()
+  const client = createClient(net.fetcher, { concurrency: 1, timeoutMs: 20 })
+  const hung = client.request({ path: '/api/rows' })
+  const next = client.request({ path: '/api/status' })
+  assert.deepEqual(await hung, { kind: 'not-started' })
+  await flush()
+  net.answer(2, 200, envelope({}))
+  assert.equal((await next).kind, 'passed')
+})

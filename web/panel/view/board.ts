@@ -6,6 +6,7 @@
  * within a column, h/l to the next column, Enter to show the card — and the cards listen for none.
  */
 import { isDone, type IssueIndex, type Row } from '../data/index.js'
+import { assigneeOf } from '../data/people.js'
 import { isUnread } from '../data/read.js'
 import type { Boot } from '../data/source.js'
 import type { State } from '../store.js'
@@ -63,7 +64,8 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     title.append(row.title ?? row.id)
     const lines: Node[] = [first, title]
     const extras: Node[] = []
-    if (state.columns.assignee && row.assignee) extras.push(chip(doc, { label: String(row.assignee) }))
+    const who = assigneeOf(row)
+    if (state.columns.assignee && who) extras.push(chip(doc, { label: who }))
     if (state.columns.epic) {
       const epic = index.epicOf(at)
       if (epic !== undefined) extras.push(chip(doc, { label: index.rows[index.find(epic) ?? -1]?.title ?? epic, tone: 'accent' }))

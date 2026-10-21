@@ -2,13 +2,9 @@
  * What the panel remembers between openings (design §5): the last tab, whether the detail shows, where it
  * stands and its share of the split for each position (`ratio.left`, `ratio.bottom`).
  *
- * Where it is kept: the panel bridge offers commands only (`invokeCommand`), no settings API, and the SDK's
- * `storage.read`/`storage.write` permissions are names without actions yet (docs/moai-panel/current-state.md).
- * So the settings go to the frame's localStorage when it can be used — a frame sandboxed without
- * `allow-same-origin` has an opaque origin, where touching localStorage throws SecurityError — and otherwise
- * stay in memory for the session. That is the order design §5 sets (localStorage → `storage.*` → session);
- * spike se-0g4a.y91 settles which one Desktop gives. Every access is guarded: a failing store never stops the
- * panel, it only forgets.
+ * Where it is kept: the browser's localStorage for the page's origin (`moai web`'s host and port). When it cannot
+ * be used — a private window, site data blocked, where touching it throws — the settings stay in memory until the
+ * tab is closed. Every access is guarded: a failing store never stops the page, it only forgets.
  *
  * {@link normalizeMemory} is pure and cleans whatever comes back, so a value from an older or newer panel,
  * or one edited by hand, still boots with usable settings.
@@ -18,7 +14,8 @@ import { COLUMN_DEFAULTS, type ColumnName, type DetailPosition, type Remembered,
 import { DEFAULT_RATIO, normalizeRatio } from '../view/split.js'
 import { DEFAULT_TAB, normalizeTab } from '../view/tabs.js'
 
-export const MEMORY_KEY = 'buzzni.moai.panel'
+/** The page's key in localStorage. The origin is `moai web`'s host:port, so each project's page keeps its own. */
+export const MEMORY_KEY = 'moai.web'
 /** Written with the settings; a later panel that changes their shape reads this to migrate. */
 export const MEMORY_VERSION = 1
 
@@ -128,10 +125,9 @@ export function createMemory(backend: () => Backend | null | undefined, key: str
 //
 // The sort editor's `D` keeps the order on screen as the one `reset sort` and a fresh opening return to (a
 // workspace that kept an order of its own opens on that one, as moai tui's project order beats its default).
-// Nothing persists settings yet (the SDK is being asked for a settings-storage API), so it is kept through a
-// {@link SettingsStorage} whose only implementation today is the session's own memory ({@link settingsStorage}). A backend
-// that persists plugs in under the same {@link SORT_DEFAULT_KEY}. Every access is guarded, as {@link createMemory}'s:
-// a failing store only forgets.
+// It is kept through a {@link SettingsStorage}: the browser's localStorage when the page may use it
+// ({@link createBrowserStorage}), else the tab's own memory. Every access is guarded, as {@link createMemory}'s: a
+// failing store only forgets.
 
 /** Where the default sort is kept; a persisting backend is stored under this same key. */
 export const SORT_DEFAULT_KEY = `${MEMORY_KEY}.sort`
@@ -144,7 +140,7 @@ export interface SettingsStorage {
   readonly persistent: boolean
 }
 
-/** The session-only storage: a copy in memory, gone when the panel closes. */
+/** The session-only storage: a copy in memory, gone when the tab closes. */
 export function createSessionStorage(): SettingsStorage {
   const kept = new Map<string, string>()
   return {
@@ -154,6 +150,35 @@ export function createSessionStorage(): SettingsStorage {
       else kept.set(key, value)
     },
     persistent: false,
+  }
+}
+
+/**
+ * localStorage when it can be used — reading `window.localStorage` itself can throw (site data blocked), and a
+ * private window may refuse a write — else {@link createSessionStorage}. It is tried once, when made.
+ */
+export function createBrowserStorage(backend: () => (Backend & { removeItem(key: string): void }) | null | undefined): SettingsStorage {
+  let store: (Backend & { removeItem(key: string): void }) | null = null
+  try {
+    const found = backend()
+    if (found) {
+      const probe = `${MEMORY_KEY}.probe`
+      found.setItem(probe, '1')
+      found.removeItem(probe)
+      store = found
+    }
+  } catch {
+    store = null
+  }
+  if (!store) return createSessionStorage()
+  const kept = store
+  return {
+    read: (key) => kept.getItem(key),
+    write(key, value) {
+      if (value === null) kept.removeItem(key)
+      else kept.setItem(key, value)
+    },
+    persistent: true,
   }
 }
 
@@ -211,12 +236,12 @@ export function createSortDefault(storage: SettingsStorage = createSessionStorag
 }
 
 /**
- * The panel's one settings storage and one default sort, which {@link remember} (at boot, into the store's
- * `defaultSort`) and the key wiring (`D`) fall back to so they meet the same default. Session-only today; a persisting
- * backend replaces them here. Callers other than the panel itself (tests) pass their own, so nothing they write
- * reaches the next boot.
+ * The page's one settings storage and one default sort, which {@link remember} (at boot, into the store's
+ * `defaultSort`) and the key wiring (`D`) fall back to so they meet the same default: the browser's localStorage,
+ * else the tab's memory. Callers other than the page itself (tests) pass their own, so nothing they write reaches the
+ * next boot.
  */
-export const settingsStorage: SettingsStorage = createSessionStorage()
+export const settingsStorage: SettingsStorage = createBrowserStorage(() => (typeof window === 'undefined' ? null : window.localStorage))
 export const sortDefault: SortDefault = createSortDefault(settingsStorage)
 
 // ── the query settings (E4 se-cv7w.lca) ────────────────────────────────────────────────────────────────

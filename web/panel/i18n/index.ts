@@ -381,7 +381,7 @@ const TOOLBAR: Record<Language, ToolbarCopy> = {
     sortKeys: { priority: 'Priority', created: 'Created', updated: 'Updated', status: 'Status', assignee: 'Assignee', title: 'Title', due: 'Due', id: 'ID' },
     hidden: (n) => `${n} hidden`,
     hiddenReasons: { column: 'hidden column', deferred: 'deferred', backlog: 'backlog', archived: 'archived' },
-    sortDefaultSessionNote: 'D: save as the default order — kept for this session only.',
+    sortDefaultSessionNote: 'D: save as the default order — this browser keeps no site data, so it lasts until the tab is closed.',
   },
   ko: {
     search: '검색', searchPlaceholder: '검색 (/)',
@@ -390,7 +390,7 @@ const TOOLBAR: Record<Language, ToolbarCopy> = {
     sortKeys: { priority: '우선순위', created: '만든 때', updated: '고친 때', status: '상태', assignee: '담당', title: '제목', due: '기한', id: 'ID' },
     hidden: (n) => `${n}건 숨김`,
     hiddenReasons: { column: '숨긴 칸', deferred: '미룸', backlog: '백로그', archived: '보관' },
-    sortDefaultSessionNote: 'D: 기본 정렬로 저장 — 이 세션에서만 유지됩니다.',
+    sortDefaultSessionNote: 'D: 기본 정렬로 저장 — 이 브라우저가 사이트 데이터를 안 남겨 탭을 닫을 때까지만 유지됩니다.',
   },
   ja: {
     search: '検索', searchPlaceholder: '検索 (/)',
@@ -399,7 +399,7 @@ const TOOLBAR: Record<Language, ToolbarCopy> = {
     sortKeys: { priority: '優先度', created: '作成', updated: '更新', status: '状態', assignee: '担当', title: 'タイトル', due: '期限', id: 'ID' },
     hidden: (n) => `${n} 件を非表示`,
     hiddenReasons: { column: '非表示の列', deferred: '保留', backlog: 'バックログ', archived: 'アーカイブ' },
-    sortDefaultSessionNote: 'D: 既定の並べ替えとして保存 — このセッションの間だけ保持されます。',
+    sortDefaultSessionNote: 'D: 既定の並べ替えとして保存 — このブラウザはサイトのデータを残さないため、タブを閉じるまで保持されます。',
   },
   zh: {
     search: '搜索', searchPlaceholder: '搜索 (/)',
@@ -408,7 +408,7 @@ const TOOLBAR: Record<Language, ToolbarCopy> = {
     sortKeys: { priority: '优先级', created: '创建', updated: '更新', status: '状态', assignee: '负责人', title: '标题', due: '期限', id: 'ID' },
     hidden: (n) => `已隐藏 ${n} 项`,
     hiddenReasons: { column: '隐藏的列', deferred: '推迟', backlog: '待办池', archived: '已归档' },
-    sortDefaultSessionNote: 'D: 保存为默认排序 — 仅在本次会话中保留。',
+    sortDefaultSessionNote: 'D: 保存为默认排序 — 此浏览器不保留网站数据，关闭标签页前有效。',
   },
 }
 
@@ -425,24 +425,24 @@ export interface KeysCopy {
 
 const KEYS: Record<Language, KeysCopy> = {
   en: {
-    focusHint: 'Click to use the keyboard',
+    focusHint: 'Click the page once and the keys work',
     sortDefaultSaved: 'Saved as the default order.',
-    sortDefaultSavedSession: 'Saved as the default order. Until a settings storage is available it is kept for this session only.',
+    sortDefaultSavedSession: 'Saved as the default order. This browser keeps no site data, so it lasts until the tab is closed.',
   },
   ko: {
-    focusHint: '클릭하면 키보드를 쓸 수 있습니다',
+    focusHint: '페이지를 한 번 누르면 키가 듣습니다',
     sortDefaultSaved: '기본 정렬로 저장했습니다.',
-    sortDefaultSavedSession: '기본 정렬로 저장했습니다. 설정 저장소가 생기기 전까지는 이 세션에서만 유지됩니다.',
+    sortDefaultSavedSession: '기본 정렬로 저장했습니다. 이 브라우저가 사이트 데이터를 안 남겨 탭을 닫을 때까지만 유지됩니다.',
   },
   ja: {
-    focusHint: 'クリックするとキーボードを使えます',
+    focusHint: 'ページを一度クリックするとキーが効きます',
     sortDefaultSaved: '既定の並べ替えとして保存しました。',
-    sortDefaultSavedSession: '既定の並べ替えとして保存しました。設定の保存先ができるまでは、このセッションの間だけ保持されます。',
+    sortDefaultSavedSession: '既定の並べ替えとして保存しました。このブラウザはサイトのデータを残さないため、タブを閉じるまで保持されます。',
   },
   zh: {
-    focusHint: '点击后即可使用键盘',
+    focusHint: '点击页面一次即可使用按键',
     sortDefaultSaved: '已保存为默认排序。',
-    sortDefaultSavedSession: '已保存为默认排序。在有设置存储之前，仅在本次会话中保留。',
+    sortDefaultSavedSession: '已保存为默认排序。此浏览器不保留网站数据，关闭标签页前有效。',
   },
 }
 

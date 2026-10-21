@@ -482,7 +482,7 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-shell-notes > * { margin: 8px 8px 0; }
 .m-shell-notes > :last-child { margin-bottom: 8px; }
 .moai-hint { color: var(--muted); font-size: 12px; }
-.moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
+.moai-offline:empty, .moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
 /* What moai said beside the lists: one line per line it said. */
 .moai-said { flex-direction: column; gap: 2px; }
 .moai-said > p { margin: 0; }

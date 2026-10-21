@@ -40,7 +40,7 @@ test('fields: only those with a value, epic and milestone with their titles', ()
   const row = { id: 'se-e1.b', assignee: 'dev', assignee_email: 'dev@example.com', epic: 'se-e1', derived_epic: 'se-e1', milestone: 'se-m1', created_at: 'not a date' }
   const fields = F.fieldsOf(row, index, en)
   assert.deepEqual(fields.map((f) => f.key), ['assignee', 'epic', 'milestone'])
-  assert.equal(fields[0].value, 'dev <dev@example.com>')
+  assert.equal(fields[0].value, 'dev (dev@example.com)')
   assert.equal(fields[1].value, 'E3 views (se-e1)')
   assert.equal(F.formatDate('2026-10-12'), '2026-10-12')
   assert.match(F.formatDate('2026-10-12T13:17:11Z'), /^2026-10-1[23] \d\d:\d\d$/)

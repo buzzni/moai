@@ -58,6 +58,8 @@ export interface Shell {
   activity(current: Activity): void
   /** One line under the banners: what a key did (`D` saved the order), or why it did nothing. */
   say(text: string, problem?: boolean): void
+  /** `moai web` could not be reached (data/refresh.ts onReach): one line until it answers again. */
+  offline(on: boolean): void
   /**
    * Places other parts mount into: `toolbar` under the tab bar (holds the search / filter / sort toolbar, which
    * the shell mounts; hidden on the wiki tab), `actions` at the end of the tab bar (the help button, empty and
@@ -177,7 +179,9 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const archiveError = el(doc, "div", { class: "m-banner m-banner-danger moai-archive-problem", role: "alert" })
   // A live region from the start: what a key did (or why it did nothing) is read out when it is written.
   const result = el(doc, "p", { class: "moai-result", role: "status" })
-  const notes = el(doc, "div", { class: "m-shell-notes" }, hint, notice, error, said, archiveNotice, archiveError, result)
+  // Its own line: the server out of reach is not a read's problem, and no read's answer takes it away.
+  const away = el(doc, "div", { class: "m-banner m-banner-danger moai-offline", role: "alert" })
+  const notes = el(doc, "div", { class: "m-shell-notes" }, hint, away, notice, error, said, archiveNotice, archiveError, result)
   // The path and banners belong to the list and board; the wiki tab brings its own head. A panel
   // that opens on the wiki tab (the remembered one) starts without it: showTab() only runs on a change of tab.
   const head = el(doc, "div", { class: "m-shell-head", hidden: state.tab === "wiki" }, crumbs.el, notes)
@@ -413,6 +417,10 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     say(text, problem = false) {
       result.textContent = text
       result.className = problem ? "moai-result m-banner m-banner-danger" : "moai-result"
+    },
+    offline(on) {
+      const text = on ? copy.unreachable : ""
+      if (away.textContent !== text) away.textContent = text
     },
     slots: { toolbar, actions },
     setWidth,

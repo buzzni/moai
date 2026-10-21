@@ -6,10 +6,11 @@
 import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, type Fetch } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, remember } from './data/memory.js'
+import { useNaming } from './data/people.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import { loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, sameGroups, withArchive, type Loaded } from './data/source.js'
-import { copyFor } from './i18n/index.js'
+import { COPY, copyFor } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
 import { listLines, narrow } from './view/list-model.js'
@@ -19,12 +20,16 @@ import type { WikiSource } from './view/types.js'
 
 const fetcher: Fetch = (url, init) => window.fetch(url, init)
 
+/** How long `/api/stamp` may take before the server counts as out of reach. */
+const STAMP_LIMIT_MS = 5_000
+
 async function start(): Promise<void> {
   // Nothing is drawn before the language is known. A boot that fails still mounts the page, in the browser's
   // language, and says why where the rows would stand.
   const booted = await loadBoot(fetcher)
   const language = booted.ok ? booted.value.lang : navigator.language || 'en'
-  document.documentElement.lang = language
+  // The page says the language it is drawn in: one it does not carry (es) is drawn, and named, in English.
+  document.documentElement.lang = Object.hasOwn(COPY, language.split('-')[0]!.toLowerCase()) ? language : 'en'
   const copy = copyFor(language)
   const store = createStore()
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the
@@ -32,6 +37,8 @@ async function start(): Promise<void> {
   remember(store, createMemory(() => window.localStorage))
   if (booted.ok) {
     useVocabulary(booted.value)
+    useNaming(booted.value.naming)
+    document.title = `moai — ${booted.value.project}`
     store.dispatch({ type: 'boot', boot: booted.value })
   }
   // Up to 3 reads at once (data/client.ts PANEL_CLIENT_OPTIONS).
@@ -74,9 +81,10 @@ async function start(): Promise<void> {
     // The rows, where they stand (`/api/tree`, in the order on screen) and the milestone and epic counts `moai
     // status` prints, side by side. The load does not wait for the counts: rows are drawn at once, and the counts
     // are put on them when they come.
-    const listing = loadAllRows(client, PRIORITY.list)
-    const placing = loadTree(client, sortQuery(store.getState().sort), PRIORITY.list)
-    const counting = loadGroups(client, PRIORITY.list)
+    // Each load is a change seen through: a read of it is never handed a run another load started before it.
+    const listing = loadAllRows(client, PRIORITY.list, load)
+    const placing = loadTree(client, sortQuery(store.getState().sort), PRIORITY.list, load)
+    const counting = loadGroups(client, PRIORITY.list, load)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
     const [loaded, placed] = await Promise.all([listing, placing])
@@ -101,6 +109,8 @@ async function start(): Promise<void> {
     const state = store.getState()
     const shown = state.shown.value
     if (shown && wasListed && indexOf(state)?.find(shown.id) === undefined) store.dispatch({ type: 'detail-closed' })
+    // The tracker changed: the detail on screen is read again too, in place (its pane, scroll and folds stay).
+    else if (shown && automatic) void rereadDetail(shown.id, load)
     // Archived rows shown but not read yet: turned on before the rows were there, or the last read failed.
     if (state.view.showArchived && archiveRunning === null && state.archive === null) void loadArchive()
     // What the filter and the search find moves with the rows: asked again for the rows just read.
@@ -169,7 +179,25 @@ async function start(): Promise<void> {
   })
 
   // Paused while the page is out of sight (data/refresh.ts).
-  const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic) })
+  // `/api/stamp` moves when the tracker's files do: the rows are read only then (data/refresh.ts). A server that
+  // answers with a refusal still answers, so its stamp is a word that never repeats and the read says why.
+  let refused = 0
+  const stamp = async (): Promise<string | null> => {
+    // An answer that never comes is the server out of reach too: a stamp waited on for ever would stop the asking
+    // for good, and a stopped process can leave its port taking connections that nobody answers.
+    const abort = new AbortController()
+    const limit = setTimeout(() => abort.abort(), STAMP_LIMIT_MS)
+    try {
+      const answer = await fetcher('/api/stamp', { signal: abort.signal, headers: { Accept: 'application/json' } })
+      const body = JSON.parse(await answer.text()) as { stamp?: unknown }
+      return answer.status === 200 && typeof body.stamp === 'string' ? body.stamp : `refused-${++refused}`
+    } catch (error) {
+      return error instanceof SyntaxError ? `unreadable-${++refused}` : null
+    } finally {
+      clearTimeout(limit)
+    }
+  }
+  const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached) })
 
   let choice = 0
   async function choose(id: string) {
@@ -191,6 +219,14 @@ async function start(): Promise<void> {
     if (held && listed && listed.find(id) === undefined) return store.dispatch({ type: 'detail-closed' })
     if (loaded.ok) store.dispatch({ type: 'detail-loaded', data: { id, row: loaded.value } })
     else store.dispatch({ type: 'detail-failed', id, problem: loaded.outcome })
+  }
+
+  /** The detail on screen, read again after a change; a choice made meanwhile, or the pane closed, wins. */
+  async function rereadDetail(id: string, epoch: number): Promise<void> {
+    const mine = choice
+    const loaded = await loadDetail(client, id, { epoch })
+    if (!loaded.ok || mine !== choice || store.getState().shown.value?.id !== id) return
+    store.dispatch({ type: 'detail-loaded', data: { id, row: loaded.value } })
   }
 
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
