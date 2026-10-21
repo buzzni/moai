@@ -76,8 +76,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
-        let rows: Vec<Row> =
-            entries.iter().map(|(e, home)| Row::of(&index, &load.issues, &states, e, home.clone(), ctx.lang())).collect();
+        let rows: Vec<Row> = entries
+            .iter()
+            .map(|(e, home)| Row::of(&index, &load.issues, &states, e, home.clone(), ctx.lang()))
+            .collect();
         return super::json_line(&rows);
     }
 
@@ -485,7 +487,7 @@ fn listing(
     let TuiArgs { path: _, filter, order, deep } = args;
     let given = super::show::first_given(&filter).is_some();
     if !given && order.sort.is_none() && !order.reverse {
-        return Ok(spread(issues, path, deep, &|at| index.entries(issues, at)));
+        return Ok(spread(path, deep, &|at| index.entries(issues, at)));
     }
     let kind = filter.kind;
     let filter = super::show::filter_of(ctx, repo, issues, filter, kind)?;
@@ -518,27 +520,17 @@ fn listing(
             if order.reverse { o.reverse() } else { o }
         }
     };
-    Ok(spread(issues, path, deep, &|at| index.entries_sorted(issues, at, &keep, &by)))
+    Ok(spread(path, deep, &|at| index.entries_sorted(issues, at, &keep, &by)))
 }
 
 /// 한 자리의 목록 `list` 를 그대로 내거나(`--deep` 아님), 폴더 줄(바구니 포함) 바로 뒤에 그 안을 같은 목록으로
 /// 펼친다(앞 순회, moai-0aa7.joy). **차례와 거르개는 한 자리 목록의 것을 그대로 쓴다** — 여기서 다시 정하면
 /// `--path` 로 자리마다 부른 것과 갈린다. 줄마다의 `home` 은 뿌리에서 그 줄이 선 디렉터리까지의 `--path` 손잡이다.
-fn spread(
-    issues: &[Issue],
-    path: &Path,
-    deep: bool,
-    list: &dyn Fn(&Path) -> Vec<Entry>,
-) -> Vec<(Entry, Option<Vec<String>>)> {
+fn spread(path: &Path, deep: bool, list: &dyn Fn(&Path) -> Vec<Entry>) -> Vec<(Entry, Option<Vec<String>>)> {
     if !deep {
         return list(path).into_iter().map(|e| (e, None)).collect();
     }
-    fn walk(
-        issues: &[Issue],
-        path: &Path,
-        list: &dyn Fn(&Path) -> Vec<Entry>,
-        out: &mut Vec<(Entry, Option<Vec<String>>)>,
-    ) {
+    fn walk(path: &Path, list: &dyn Fn(&Path) -> Vec<Entry>, out: &mut Vec<(Entry, Option<Vec<String>>)>) {
         let home: Vec<String> = path.iter().map(handle).collect();
         for e in list(path) {
             let inside = match &e {
@@ -549,12 +541,12 @@ fn spread(
             if let Some(seg) = inside {
                 let mut next = path.clone();
                 next.push(seg);
-                walk(issues, &next, list, out);
+                walk(&next, list, out);
             }
         }
     }
     let mut out = Vec::new();
-    walk(issues, path, list, &mut out);
+    walk(path, list, &mut out);
     out
 }
 
