@@ -1,23 +1,17 @@
 // Search / filter / sort toolbar of the list and board. State and reducer are pure (testable without the
 // store, which keeps the state: store.ts toolbarOf); createToolbar() builds the DOM once through the shared
 // components and update() brings it to a state, so the inputs are never rebuilt under the caret or an IME
-// composition. Every user act is reported as an action. What is searched (rows, context) comes in with update.
+// composition. Every user act is reported as an action. What moai found and why it refused a filter come in with
+// update: the toolbar judges nothing (data/query.ts).
 
 import {
-  GREP_SCOPES,
   SORT_KEYS,
-  badFilterMessage,
   hintsAt,
   items,
-  nextScope,
-  parseFilter,
-  prevScope,
-  search,
   sortBadge,
   sortEdit,
-  type Context,
-  type GrepScope,
   type Hint,
+  type HintContext,
   type Slot,
   type Sort,
   type SortEdit,
@@ -37,10 +31,9 @@ export type { HiddenReason, ToolbarCopy }
 export interface ToolbarState {
   searchOpen: boolean
   searchText: string
-  scope: GrepScope
   /** The filter as typed. */
   filterText: string
-  /** The filter that narrows the rows: Enter applies the typed text (when it parses), a chip removal at once (design §4.5). */
+  /** The filter moai is asked: Enter applies the typed text, a chip removal at once (design §4.5). moai judges it. */
   filterApplied: string
   /** Caret of the filter input (UTF-16 index); the hints follow it. */
   cursor: number
@@ -55,7 +48,6 @@ export interface ToolbarState {
 export const initialToolbar = (): ToolbarState => ({
   searchOpen: false,
   searchText: "",
-  scope: "all",
   filterText: "",
   filterApplied: "",
   cursor: 0,
@@ -69,9 +61,6 @@ export type ToolbarAction =
   | { type: "search-open" }
   | { type: "search-close" }
   | { type: "search-text"; text: string }
-  | { type: "scope-next" }
-  | { type: "scope-prev" }
-  | { type: "scope-set"; scope: GrepScope }
   | { type: "filter-text"; text: string; cursor: number }
   | { type: "filter-cursor"; cursor: number }
   | { type: "filter-apply" }
@@ -141,25 +130,18 @@ export function toolbarReduce(state: ToolbarState, action: ToolbarAction): Toolb
       return { ...state, searchOpen: false, searchText: "" }
     case "search-text":
       return { ...state, searchOpen: true, searchText: action.text }
-    case "scope-next":
-      return { ...state, scope: nextScope(state.scope) }
-    case "scope-prev":
-      return { ...state, scope: prevScope(state.scope) }
-    case "scope-set":
-      return GREP_SCOPES.includes(action.scope) ? { ...state, scope: action.scope } : state
     case "filter-text":
       return { ...state, filterText: action.text, cursor: clamp(action.cursor, action.text.length), hintsOpen: true, hintIndex: -1 }
     case "filter-cursor":
       return { ...state, cursor: clamp(action.cursor, state.filterText.length), hintIndex: -1 }
     case "filter-apply":
-      // A text that does not parse is not applied: the rows stay as the last good filter left them, and the
-      // error stands under the input.
-      return parseFilter(state.filterText).ok ? { ...state, filterApplied: state.filterText, hintsOpen: false, hintIndex: -1 } : state
+      // moai judges the text: one it refuses keeps the rows the last answer left, and its words stand under the input.
+      return { ...state, filterApplied: state.filterText, hintsOpen: false, hintIndex: -1 }
     case "chip-remove": {
       const text = removeItem(state.filterText, action.index)
       if (text === state.filterText) return state
-      // A chip applies at once (design §4.5), unless the rest does not parse.
-      return { ...state, filterText: text, filterApplied: parseFilter(text).ok ? text : state.filterApplied, cursor: text.length, hintIndex: -1 }
+      // A chip applies at once (design §4.5).
+      return { ...state, filterText: text, filterApplied: text, cursor: text.length, hintIndex: -1 }
     }
     case "hints-open":
       return { ...state, hintsOpen: true }
@@ -211,36 +193,36 @@ export function highlight(doc: Document, text: string, q: string): Array<Node | 
 }
 
 /**
- * The search result, and how many of the found rows only the search shows, by the reason the list would hide
- * them. `hiddenBy` is the caller's: the panel's own view toggles (and its filter) decide what the list hides,
- * not what the moai CLI hides by default (view/list-model.ts narrow). Without it nothing is counted.
+ * How many of the rows the search found only the search shows, by the reason the list would hide them. `found` is
+ * what moai found (store.ts Matched); `hiddenBy` is the page's own view toggles (view/list-model.ts narrow). Without
+ * a search, or without `hiddenBy`, nothing is counted.
  */
 export function searchView<T extends Row>(
-  rows: readonly T[],
-  state: Pick<ToolbarState, "searchText" | "scope">,
+  found: readonly T[],
+  state: Pick<ToolbarState, "searchText">,
   hiddenBy?: (row: T) => HiddenReason | undefined,
-  ctx: Context = {},
 ): { found: T[]; hidden: Partial<Record<HiddenReason, number>> } {
-  // Trimmed, as the list reads it (list-model.ts narrow): "login " finds what the list draws for "login".
-  const q = state.searchText.trim()
-  const found = search(rows, q, state.scope, ctx)
   const hidden: Partial<Record<HiddenReason, number>> = {}
-  if (q === "" || !hiddenBy) return { found, hidden }
+  if (state.searchText.trim() === "" || !hiddenBy) return { found: [...found], hidden }
   for (const row of found) {
     const why = hiddenBy(row)
     if (why) hidden[why] = (hidden[why] ?? 0) + 1
   }
-  return { found, hidden }
+  return { found: [...found], hidden }
 }
 
 // ---- render ---------------------------------------------------------------------------------------------
 
-/** What the toolbar reads besides its state: the rows it hints from and searches, and why the list hides one. */
+/** What the toolbar reads besides its state: the rows it hints from, what moai found, and why it refused a filter. */
 export interface ToolbarData {
   rows: readonly Row[]
-  ctx?: Context
+  ctx?: HintContext
+  /** The rows moai found for the filter and the search on screen (empty while nothing is asked). */
+  found?: readonly Row[]
   /** Why the list would hide a row the search shows ({@link searchView}); the hidden note counts these. */
   hiddenBy?: (row: Row) => HiddenReason | undefined
+  /** moai's words for a filter it refused (`bad_filter`); the input is marked invalid while it stands. */
+  problem?: string
 }
 
 export interface ToolbarDeps extends ToolbarData {
@@ -259,7 +241,7 @@ export interface Toolbar {
   el: HTMLDivElement
   searchInput: HTMLInputElement
   filterInput: HTMLInputElement
-  /** Rows the search finds (not yet cut by the filter) and the hidden-row counts behind the note. */
+  /** Rows moai found and the hidden-row counts behind the note. */
   found: Row[]
   hidden: Partial<Record<HiddenReason, number>>
 }
@@ -305,30 +287,16 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
     if (caret !== undefined && doc.activeElement === input) input.setSelectionRange(caret, caret)
   }
 
-  // Search: opened by `/` (bound by the caller) or the search button, applies as you type. Alt+ArrowDown /
-  // Alt+ArrowUp in the input cycle the scope (the explorer's Tab / Shift-Tab order); the select sets it directly.
+  // Search: opened by `/` (bound by the caller) or the search button, applies as you type. moai looks in titles,
+  // bodies and notes (`show --grep`); it has no scope to pick.
   const searchRow = el(doc, "div", { class: "m-toolbar", role: "search" })
-  const box = searchBox(doc, {
-    placeholder: t.searchPlaceholder,
-    label: t.search,
-    scopes: GREP_SCOPES.map((value) => ({ value, label: t.scopes[value] })),
-    scopeLabel: t.scope,
-    hint: "/",
-  })
-  // No scope searches notes (rows carry none, se-thyl): the select says so in a line of its own that cannot be chosen.
-  if (box.select) {
-    box.select.append(el(doc, "option", { value: "", disabled: true, "data-scope-note": "notes" }, t.notesUnsearched))
-    box.select.title = t.notesUnsearched
-  }
-  box.select?.addEventListener("change", () => dispatch({ type: "scope-set", scope: box.select!.value as GrepScope }))
+  const box = searchBox(doc, { placeholder: t.searchPlaceholder, label: t.search, hint: "/" })
   const reportSearch = () => dispatch({ type: "search-text", text: box.input.value })
   box.input.addEventListener("input", reportSearch)
   trackComposition(box.input, reportSearch)
   box.input.addEventListener("keydown", (event) => {
     if (event.isComposing) return
     if (event.key === "Escape") dispatch({ type: "search-close" })
-    else if (event.key === "ArrowDown" && event.altKey) dispatch({ type: "scope-next" })
-    else if (event.key === "ArrowUp" && event.altKey) dispatch({ type: "scope-prev" })
   })
   searchRow.append(box.el)
 
@@ -412,17 +380,16 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
   function update(next: ToolbarState, nextData: ToolbarData) {
     state = next
     data = nextData
-    const parsed = parseFilter(state.filterText)
+    const problem = data.problem ?? ""
 
     searchRow.dataset.open = String(state.searchOpen)
     searchRow.hidden = !state.searchOpen
     openSearch.hidden = state.searchOpen
     searchShortcut.hidden = state.searchOpen
     write(box.input, state.searchText)
-    if (box.select && box.select.value !== state.scope) box.select.value = state.scope
 
     write(filterInput, state.filterText, state.cursor)
-    if (parsed.ok) filterInput.removeAttribute("aria-invalid")
+    if (problem === "") filterInput.removeAttribute("aria-invalid")
     else filterInput.setAttribute("aria-invalid", "true")
     const hintKey = [data.rows, state.filterText, state.cursor, data.ctx]
     if (!same(hintKey, hintsFor)) {
@@ -492,27 +459,26 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
       }
     }
 
-    const chipKey = JSON.stringify([state.filterText, parsed.ok])
+    const chipKey = JSON.stringify([state.filterText, problem === ""])
     if (chipKey !== chipsDrawn) {
       chipsDrawn = chipKey
       const made: Node[] = []
       items(state.filterText).forEach((item, index) => {
         if (item.text.trim() === "") return
-        made.push(chip(doc, { label: item.text, tone: parsed.ok ? "accent" : "neutral", removeLabel: t.removeChip, onRemove: () => dispatch({ type: "chip-remove", index }) }))
+        made.push(chip(doc, { label: item.text, tone: problem === "" ? "accent" : "neutral", removeLabel: t.removeChip, onRemove: () => dispatch({ type: "chip-remove", index }) }))
       })
       chips.replaceChildren(...made)
       chips.hidden = made.length === 0
     }
 
-    const problem = parsed.ok ? "" : badFilterMessage(parsed.error)
     if (error.textContent !== problem) error.textContent = problem
-    error.hidden = parsed.ok
+    error.hidden = problem === ""
 
     // Search result and the note on rows only the search shows.
-    const searchKey = [data.rows, state.searchText, state.scope, data.hiddenBy, data.ctx]
+    const searchKey = [data.found, state.searchText, data.hiddenBy]
     if (!same(searchKey, searchFor)) {
       searchFor = searchKey
-      Object.assign(view, searchView(data.rows, state, data.hiddenBy, data.ctx))
+      Object.assign(view, searchView(data.found ?? [], state, data.hiddenBy))
     }
     const reasons = (Object.keys(view.hidden) as HiddenReason[]).map((reason) => `${t.hiddenReasons[reason]} ${view.hidden[reason]}`)
     const total = Object.values(view.hidden).reduce((sum, n) => sum + (n ?? 0), 0)

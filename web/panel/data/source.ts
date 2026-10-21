@@ -7,7 +7,10 @@
  *   A failure of either is the load's.
  * - A partial answer (Moai's non-zero exit with its whole JSON still printed; see client.ts) is read like a
  *   whole one: the rows it could read, the wiki pages it did not skip. What moai said beside it rides as `notes`.
- * - The milestone and epic counts come from `/api/status` ({@link loadTallies}).
+ * - Where each row stands, whether it opens, its `n/n` and the order are `/api/tree` (`tui --json --deep`,
+ *   {@link loadTree}); the order the page asks for goes with it.
+ * - What a filter or a search finds is moai's answer too: both lists again, with `fields=id` ({@link loadMatches}).
+ * - The milestone and epic counts per column come from `/api/status` ({@link loadGroups}).
  * - The archive is read when asked for, once each list with `archived=1` ({@link loadArchived}): `show --archived`
  *   prints the active rows and the archive together, and marks the archive's own `archived: true`.
  * - The wiki listing and pages are handed out as Moai printed them ({@link loadWikiListing},
@@ -16,7 +19,7 @@
  *   the server answers itself, without the envelope.
  */
 import { PRIORITY, answerOf, outcomeOf, type Client, type Endpoint, type Fetch, type Outcome, type RequestOptions } from './client.js'
-import type { Row } from './index.js'
+import type { Row, TreeRow } from './index.js'
 
 export const ENDPOINT = {
   boot: '/api/boot',
@@ -25,6 +28,7 @@ export const ENDPOINT = {
   rows: '/api/rows',
   backlog: '/api/backlog',
   issue: (id: string): Endpoint => ({ path: `/api/issue/${encodeURIComponent(id)}` }),
+  tree: '/api/tree',
   wiki: '/api/wiki',
   wikiPage: (slug: string): Endpoint => ({ path: `/api/wiki/${slug.split('/').map(encodeURIComponent).join('/')}` }),
 } as const
@@ -81,39 +85,67 @@ export function loadAllRows(client: Client, priority: number = PRIORITY.list, ep
 }
 
 /**
- * `[done, total]` per milestone and epic id from `status --json` (`milestones[]` and `epics[]`). These count the
- * rows the clock has archived too, which `show --all` omits; hand the map to `new IssueIndex(rows, tallies)` so
- * the board's n/n equals `moai status`. Entries without a string id and numeric `done` and `total` are skipped.
+ * The counts per column of each milestone and epic `status --json` prints (`milestones[]` and `epics[]` `counts`).
+ * These count the archive too, which `show --all` leaves out. Entries without a string id and a counts object are skipped.
  */
-export function talliesFrom(output: unknown): Map<string, [number, number]> {
-  const tallies = new Map<string, [number, number]>()
-  if (!isRecord(output)) return tallies
+export function groupsFrom(output: unknown): Map<string, Record<string, number>> {
+  const groups = new Map<string, Record<string, number>>()
+  if (!isRecord(output)) return groups
   for (const list of [output.milestones, output.epics]) {
     if (!Array.isArray(list)) continue
     for (const entry of list) {
-      if (!isRecord(entry) || typeof entry.id !== 'string' || entry.id === '') continue
-      const { done, total } = entry
-      if (typeof done !== 'number' || typeof total !== 'number' || !Number.isFinite(done) || !Number.isFinite(total)) continue
-      tallies.set(entry.id, [done, total])
+      if (!isRecord(entry) || typeof entry.id !== 'string' || entry.id === '' || !isRecord(entry.counts)) continue
+      const counts: Record<string, number> = {}
+      for (const [status, count] of Object.entries(entry.counts)) if (typeof count === 'number' && Number.isFinite(count)) counts[status] = count
+      groups.set(entry.id, counts)
     }
   }
-  return tallies
+  return groups
 }
 
-/** Two {@link talliesFrom} maps that give every milestone and epic the same `[done, total]`. */
-export function sameTallies(a: ReadonlyMap<string, readonly [number, number]>, b: ReadonlyMap<string, readonly [number, number]> | undefined): boolean {
+/** Two {@link groupsFrom} maps that give every milestone and epic the same counts. */
+export function sameGroups(a: ReadonlyMap<string, Readonly<Record<string, number>>>, b: ReadonlyMap<string, Readonly<Record<string, number>>> | undefined): boolean {
   if (!b || a.size !== b.size) return false
-  for (const [id, [done, total]] of a) {
+  for (const [id, counts] of a) {
     const other = b.get(id)
-    if (!other || other[0] !== done || other[1] !== total) return false
+    if (!other || JSON.stringify(Object.entries(other)) !== JSON.stringify(Object.entries(counts))) return false
   }
   return true
 }
 
-export async function loadTallies(client: Client, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<Map<string, [number, number]>>> {
+export async function loadGroups(client: Client, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<Map<string, Record<string, number>>>> {
   const outcome = await client.request({ path: ENDPOINT.status }, { priority, epoch })
   const output = answerOf(outcome)
-  return output === undefined ? { ok: false, outcome } : { ok: true, value: talliesFrom(output) }
+  return output === undefined ? { ok: false, outcome } : { ok: true, value: groupsFrom(output) }
+}
+
+/** `/api/tree` with the order the page asks for (query.ts sortQuery): every row, where it stands, in moai's order. */
+export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<TreeRow[]>> {
+  const outcome = await client.request({ path: ENDPOINT.tree, query }, { priority, epoch })
+  const output = answerOf(outcome)
+  if (output === undefined) return { ok: false, outcome }
+  if (!Array.isArray(output)) return { ok: false, outcome: { kind: 'unreadable' } }
+  return { ok: true, value: output.filter((line): line is TreeRow => isRecord(line)) }
+}
+
+/** What the page asks moai to find: the filter line as typed, the search, and whether the archive may answer. */
+export interface Question {
+  filter: string
+  q: string
+  archived: boolean
+}
+
+/**
+ * The ids moai finds for a filter and a search: both lists with `fields=id`. A refusal (a filter moai cannot read)
+ * is the outcome, in moai's own words.
+ */
+export async function loadMatches(client: Client, question: Question, epoch?: number): Promise<Loaded<Set<string>>> {
+  const query: Record<string, string> = { fields: 'id' }
+  if (question.filter.trim() !== '') query.filter = question.filter
+  if (question.q.trim() !== '') query.q = question.q.trim()
+  if (question.archived) query.archived = '1'
+  const loaded = await bothLists(client, query, { priority: PRIORITY.list, epoch })
+  return loaded.ok ? { ok: true, value: new Set(loaded.value.rows.map((row) => row.id)) } : loaded
 }
 
 /**

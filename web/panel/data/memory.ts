@@ -13,7 +13,7 @@
  * {@link normalizeMemory} is pure and cleans whatever comes back, so a value from an older or newer panel,
  * or one edited by hand, still boots with usable settings.
  */
-import { GREP_SCOPES, SORT_KEYS, sameSort, type Dir, type GrepScope, type Sort, type SortField } from './query.js'
+import { SORT_KEYS, sameSort, type Dir, type Sort, type SortField } from './query.js'
 import { COLUMN_DEFAULTS, type ColumnName, type DetailPosition, type Remembered, type State, type Store, type ViewSettings } from '../store.js'
 import { DEFAULT_RATIO, normalizeRatio } from '../view/split.js'
 import { DEFAULT_TAB, normalizeTab } from '../view/tabs.js'
@@ -221,7 +221,7 @@ export const sortDefault: SortDefault = createSortDefault(settingsStorage)
 
 // ── the query settings (E4 se-cv7w.lca) ────────────────────────────────────────────────────────────────
 //
-// What the toolbar and the view menu set — search scope, filter, sort, list cells, hidden statuses — is the
+// What the toolbar and the view menu set — filter, sort, list cells, hidden statuses — is the
 // workspace's: it goes under {@link QUERY_KEY} in the same settings storage (design §5, scope "workspace"),
 // while tab and layout (`MEMORY_KEY`) are global. The search text is not kept: a reopened panel does not
 // start inside yesterday's search.
@@ -229,7 +229,6 @@ export const sortDefault: SortDefault = createSortDefault(settingsStorage)
 export const QUERY_KEY = `${MEMORY_KEY}.query`
 
 export interface QuerySettings {
-  scope: GrepScope
   /** The applied filter text. */
   filter: string
   /** The workspace's own order; null while it is the default one, which the workspace then follows. */
@@ -247,7 +246,6 @@ const COLUMN_NAMES = Object.keys(COLUMN_DEFAULTS) as ColumnName[]
  */
 export function queryOf(state: State): QuerySettings {
   return {
-    scope: state.search.scope,
     filter: state.filter.applied,
     sort: sameSort(state.sort, state.defaultSort) ? null : state.sort,
     columns: state.columns,
@@ -257,14 +255,12 @@ export function queryOf(state: State): QuerySettings {
 
 /** The slices {@link queryOf} reads are the ones `previous` had: the reducer keeps an unchanged slice's object. */
 const sameQuerySlices = (a: State, b: State): boolean =>
-  a.search.scope === b.search.scope && a.filter.applied === b.filter.applied && a.sort === b.sort && a.defaultSort === b.defaultSort && a.columns === b.columns && a.view === b.view
+  a.filter.applied === b.filter.applied && a.sort === b.sort && a.defaultSort === b.defaultSort && a.columns === b.columns && a.view === b.view
 
 /** Stored query settings (parsed JSON, or anything else) to what can be applied; what is wrong is left out. */
 export function normalizeQuery(value: unknown): Partial<QuerySettings> {
   if (!isRecord(value)) return {}
   const out: Partial<QuerySettings> = {}
-  const scope = GREP_SCOPES.find((one) => one === value.scope)
-  if (scope) out.scope = scope
   if (typeof value.filter === 'string') out.filter = value.filter
   const sort = normalizeSort(value.sort)
   if (sort) out.sort = sort
@@ -287,7 +283,6 @@ export function normalizeQuery(value: unknown): Partial<QuerySettings> {
 
 /** Puts stored query settings into the store through the actions the toolbar and the view menu use. */
 function applyQuery(store: Store, query: Partial<QuerySettings>): void {
-  if (query.scope) store.dispatch({ type: 'search', text: store.getState().search.text, scope: query.scope })
   if (query.filter !== undefined) store.dispatch({ type: 'filter', text: query.filter })
   if (query.sort) store.dispatch({ type: 'sort', sort: query.sort })
   for (const name of COLUMN_NAMES) {

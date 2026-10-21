@@ -6,7 +6,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 
 const fixture = async (name) => JSON.parse(await readFile(new URL(`./fixtures/moai/${name}`, import.meta.url), 'utf8'))
 
-const { ENDPOINT, bootFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadTallies, loadWikiListing, loadWikiPage, markArchived, rowsFromLists, talliesFrom, withArchive } =
+const { ENDPOINT, bootFrom, groupsFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, markArchived, rowsFromLists, sameGroups, withArchive } =
   await panelModule('data/source.ts')
 const { urlOf } = await panelModule('data/client.ts')
 
@@ -27,20 +27,21 @@ function fakeClient(answers) {
 }
 const passed = (output, notes) => (notes ? { kind: 'passed', output, notes } : { kind: 'passed', output })
 
-const SHOW_ALL = await fixture('show-all-v016.json')
-const BACKLOG = await fixture('backlog-v016.json')
-const ARCHIVED = await fixture('show-archived-v016.json')
-const WIKI_LS = await fixture('wiki-ls-v016.json')
-const WIKI_SHOW = await fixture('wiki-show-v016.json')
+// Real answers of this binary on the fixture tracker (scripts/gen-web-fixtures.sh).
+const SHOW_ALL = await fixture('rows.json')
+const BACKLOG = await fixture('backlog.json')
+const ARCHIVED = await fixture('rows-archived.json')
+const TREE = await fixture('tree.json')
+const STATUS = await fixture('status.json')
+const WIKI_LS = await fixture('wiki-ls.json')
+const WIKI_SHOW = await fixture('wiki-show.json')
 
 test('all rows are /api/rows and /api/backlog, read at once, backlog rows marked so', async () => {
   const client = fakeClient({ '/api/rows': passed(SHOW_ALL), '/api/backlog': passed(BACKLOG) })
   const loaded = await loadAllRows(client, 2, 4)
   assert.equal(loaded.ok, true)
-  assert.deepEqual(loaded.value.rows.map((row) => [row.id, row.kind]), [
-    ['tracker-0i7e', 'issue'], ['tracker-38yh', 'issue'], ['tracker-4j44', 'issue'], ['tracker-e0ue', 'milestone'], ['tracker-tdv4', 'epic'],
-    ['tracker-m21g', 'backlog'], ['tracker-zwyp', 'backlog'],
-  ])
+  assert.deepEqual(loaded.value.rows.map((row) => row.id), [...SHOW_ALL.map((row) => row.id), 'fx-th01'])
+  assert.equal(loaded.value.rows.at(-1).kind, 'backlog')
   assert.equal(loaded.value.notes, undefined)
   assert.deepEqual(client.calls, [{ url: '/api/rows', priority: 2, epoch: 4 }, { url: '/api/backlog', priority: 2, epoch: 4 }])
 })
@@ -71,6 +72,7 @@ test('the archive is both lists once with archived=1, at background priority', a
   const client = fakeClient({ '/api/rows?archived=1': passed(ARCHIVED), '/api/backlog?archived=1': passed([{ id: 'th-1' }]) })
   const loaded = await loadArchived(client)
   assert.deepEqual(loaded.value.map((row) => row.id), [...ARCHIVED.map((row) => row.id), 'th-1'])
+  assert.equal(loaded.value.find((row) => row.id === 'fx-is02').archived, true, 'moai marks its archive rows itself')
   assert.ok(client.calls.every((call) => call.priority === 3))
   const failing = fakeClient({ '/api/rows?archived=1': { kind: 'moai-error', message: 'x' }, '/api/backlog?archived=1': passed([]) })
   assert.deepEqual(await loadArchived(failing), { ok: false, outcome: { kind: 'moai-error', message: 'x' } })
@@ -106,13 +108,39 @@ test('the detail is /api/issue/<id> at detail priority; an answer without an id 
   assert.equal(urlOf(ENDPOINT.issue('a/b')), '/api/issue/a%2Fb')
 })
 
-test('status epics[] and milestones[] become [done, total] per id; malformed entries are skipped (se-tcd4)', async () => {
-  const status = { counts: { done: 2 }, milestones: [{ id: 'm1', done: 4, total: 7 }, { id: 5, done: 1, total: 1 }], epics: [{ id: 'e1', done: 2, total: 3 }, { id: 'e2', done: '2', total: 3 }, null, { id: 'e3', total: 3 }] }
-  assert.deepEqual([...talliesFrom(status)], [['m1', [4, 7]], ['e1', [2, 3]]])
-  assert.equal(talliesFrom('x').size, 0)
-  const loaded = await loadTallies(fakeClient({ '/api/status': passed(status) }))
-  assert.deepEqual([...loaded.value], [['m1', [4, 7]], ['e1', [2, 3]]])
-  assert.deepEqual(await loadTallies(fakeClient({ '/api/status': { kind: 'not-started' } })), { ok: false, outcome: { kind: 'not-started' } })
+test('status epics[] and milestones[] give their counts per column; malformed entries are skipped', async () => {
+  const groups = groupsFrom(STATUS)
+  assert.deepEqual(groups.get('fx-ep01'), { done: 0, in_progress: 1, review: 1, todo: 1 })
+  assert.deepEqual(groups.get('fx-ms01'), { done: 0, in_progress: 1, review: 1, todo: 1 })
+  assert.equal(groupsFrom({ epics: [{ id: 'e', counts: 'x' }, { id: 5, counts: {} }, null] }).size, 0)
+  assert.equal(groupsFrom('x').size, 0)
+  assert.equal(sameGroups(groups, groupsFrom(STATUS)), true)
+  assert.equal(sameGroups(groups, new Map()), false)
+  const loaded = await loadGroups(fakeClient({ '/api/status': passed(STATUS) }))
+  assert.deepEqual(loaded.value.get('fx-ep02'), { done: 0, in_progress: 0, review: 0, todo: 1 })
+  assert.deepEqual(await loadGroups(fakeClient({ '/api/status': { kind: 'not-started' } })), { ok: false, outcome: { kind: 'not-started' } })
+})
+
+test('the tree is /api/tree with the order asked for; an answer that is not a list is unreadable', async () => {
+  const client = fakeClient({ '/api/tree?reverse=1&sort=updated%3Adesc': passed(TREE), '/api/tree': passed({}) })
+  assert.deepEqual((await loadTree(client, { sort: 'updated:desc', reverse: '1' })).value, TREE)
+  assert.deepEqual(await loadTree(client), { ok: false, outcome: { kind: 'unreadable' } })
+})
+
+test('what a filter and a search find is both lists with fields=id; moai\'s refusal is the outcome', async () => {
+  const todo = await fixture('match-todo.json')
+  const client = fakeClient({
+    '/api/rows?fields=id&filter=status%3Dtodo': passed(todo),
+    '/api/backlog?fields=id&filter=status%3Dtodo': passed(await fixture('match-todo-backlog.json')),
+    '/api/rows?archived=1&fields=id&q=parser': passed(await fixture('match-grep.json')),
+    '/api/backlog?archived=1&fields=id&q=parser': passed([]),
+    '/api/rows?fields=id&filter=nope%3D1': { kind: 'moai-error', message: 'unknown filter key nope', code: 'bad_filter' },
+    '/api/backlog?fields=id&filter=nope%3D1': { kind: 'moai-error', message: 'unknown filter key nope', code: 'bad_filter' },
+  })
+  const found = await loadMatches(client, { filter: 'status=todo', q: '', archived: false })
+  assert.deepEqual([...found.value].sort(), [...todo.map((row) => row.id), 'fx-th01'].sort())
+  assert.deepEqual([...(await loadMatches(client, { filter: '', q: ' parser ', archived: true })).value], ['fx-is01'], 'a word only a note holds')
+  assert.deepEqual(await loadMatches(client, { filter: 'nope=1', q: '', archived: false }), { ok: false, outcome: { kind: 'moai-error', message: 'unknown filter key nope', code: 'bad_filter' } })
 })
 
 const BOOT = {

@@ -11,7 +11,7 @@ import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
 import { refreshTime } from "../data/refresh.ts"
 import type { Copy } from "../i18n/index.ts"
-import { toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
+import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
 import { button, el, emptyState, iconButton } from "./components.ts"
 import { mountCrumbs } from "./crumbs.ts"
 import { COLUMN_DROPS, effectivePosition } from "./responsive.ts"
@@ -358,7 +358,20 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     if (state.tab === "wiki") {
       wikiView?.render(state, index)
     } else {
-      bar.update(toolbarOf(state), { rows: index?.rows ?? [], hiddenBy: index ? narrow(state, index).hiddenBy : undefined })
+      // What moai found and why it refused a filter are the toolbar's to show; it judges neither.
+      const found = index && state.search.text.trim() !== "" ? narrow(state, index) : null
+      // A refusal answers the question on screen only: an emptied filter asks nothing, and its old refusal goes.
+      const refused = matchKey(state) === "" ? null : state.matched.problem
+      bar.update(toolbarOf(state), {
+        rows: index?.rows ?? [],
+        ctx: { statuses: state.boot?.statuses },
+        found: found && index ? index.rows.filter((_, at) => found.match(at)) : [],
+        hiddenBy: index ? narrow(state, index).hiddenBy : undefined,
+        // moai's own words for a filter it cannot read (`bad_filter`), as they are; anything else as the banners say it.
+        problem: !refused ? undefined
+          : refused.kind === "moai-error" ? refused.message
+          : describe(refused, copy, doc)?.parts.map((part) => (typeof part === "string" ? part : part.textContent ?? "")).join(""),
+      })
       crumbs.render(state, index)
       mainViews[state.tab].render(state, index)
       if (state.detail.visible) detailView.render(state, index)

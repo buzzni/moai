@@ -10,6 +10,8 @@ const { crumbSegments, crumbLine, hungBadge, lookBadge, segLabel, sortWords } = 
 const { MEMORY_KEY, SORT_DEFAULT_KEY, createMemory, createSortDefault, createSessionStorage, normalizeSort, QUERY_KEY, normalizeQuery, normalizeMemory, remember } = await panelModule('data/memory.ts')
 const { createStore, initialState, reduce } = await panelModule('store.ts')
 const { IssueIndex, LOST, NO_MILESTONE } = await panelModule('data/index.ts')
+const { treeOf } = await import('./moai-tree-helper.mjs')
+const build = (rows, tree = treeOf(rows)) => new IssueIndex(rows, tree)
 const { copyFor } = await panelModule('i18n/index.ts')
 const { describe, mountShell, mainWidth } = await panelModule('view/shell.ts')
 const { PANES } = await panelModule('view/panes.ts')
@@ -23,7 +25,7 @@ const ROWS = [
   { id: 'se-e1.a', kind: 'issue', title: 'List', epic: 'se-e1', derived_epic: 'se-e1', status: 'todo', priority: 1 },
   { id: 'se-e1.b', kind: 'issue', title: 'Board', epic: 'se-e1', derived_epic: 'se-e1', status: 'in_progress', priority: 2 },
 ]
-const index = new IssueIndex(ROWS)
+const index = build(ROWS)
 
 test('crumbs: the path reads as titles from the root, each segment going to its level', () => {
   const path = index.pathOf('se-e1')
@@ -68,7 +70,7 @@ test('crumbs: a search or filter that is on is a badge of its own; the filter wi
   assert.equal(hungBadge({ search: 'grid' }), '/grid')
   assert.equal(hungBadge({ search: 'grid', filter: 'status=todo' }), 'status=todo')
   assert.equal(hungBadge({ search: '', filter: '   ' }), null)
-  const line = crumbLine({ ...initialState(), path: ['m:se-m1'], search: { text: 'x', scope: 'all', open: true } }, index, en)
+  const line = crumbLine({ ...initialState(), path: ['m:se-m1'], search: { text: 'x', open: true } }, index, en)
   assert.deepEqual(line.segments.map((segment) => segment.label), ['/', 'v2.0'])
   assert.equal(line.hung, '/x')
 })
@@ -161,7 +163,7 @@ function boot(storage, { rows = ROWS, indexOf = null } = {}) {
   const store = createStore()
   remember(store, createMemory(() => storage), createSortDefault(), createSessionStorage())
   const calls = []
-  const rowIndex = new IssueIndex(rows)
+  const rowIndex = build(rows)
   const shell = mountShell(doc.getElementById('moai-app'), {
     document: doc,
     store,
@@ -443,7 +445,7 @@ test('unread: the shell puts the unread count on the board and list tabs, and ta
   const indexOf = (state) => {
     const held = state.board.value?.rows
     if (!held) return null
-    if (!indexes.has(held)) indexes.set(held, new IssueIndex(held))
+    if (!indexes.has(held)) indexes.set(held, build(held))
     return indexes.get(held)
   }
   const panel = boot(fakeStorage(), { rows: unreadAmong('se-e1.a', 'se-e1.b'), indexOf })
@@ -549,12 +551,12 @@ test('memory: a stored sort that is not usable is no default', () => {
   assert.equal(createSortDefault(storage).get(), null)
 })
 
-test('memory: search scope, filter, sort, cells and view are kept under one key and restored at boot', () => {
+test('memory: filter, sort, cells and view are kept under one key and restored at boot', () => {
   const storage = createSessionStorage()
   const none = createSortDefault(storage)
   const first = createStore()
   remember(first, createMemory(() => null), none, storage)
-  first.dispatch({ type: 'search', text: 'abc', scope: 'title' })
+  first.dispatch({ type: 'search', text: 'abc' })
   first.dispatch({ type: 'filter', text: 'status=todo' })
   first.dispatch({ type: 'sort', sort: { fields: [{ key: 'title', dir: 'desc' }], reversed: false } })
   first.dispatch({ type: 'column', column: 'tags', on: true })
@@ -563,7 +565,6 @@ test('memory: search scope, filter, sort, cells and view are kept under one key 
   const second = createStore()
   remember(second, createMemory(() => null), none, storage)
   const state = second.getState()
-  assert.equal(state.search.scope, 'title')
   assert.equal(state.search.text, '', 'the search text is not kept')
   assert.equal(state.filter.applied, 'status=todo')
   assert.deepEqual(state.sort.fields, [{ key: 'title', dir: 'desc' }])
@@ -617,5 +618,5 @@ test('memory: a settings storage that throws only forgets; the store and its oth
 
 test('memory: query settings that are not usable are left out', () => {
   assert.deepEqual(normalizeQuery(null), {})
-  assert.deepEqual(normalizeQuery({ scope: 'nope', filter: 3, sort: { fields: [] }, columns: { tags: 'x', id: false }, view: { hideDeferred: 1 } }), { columns: { id: false }, view: {} })
+  assert.deepEqual(normalizeQuery({ filter: 3, sort: { fields: [] }, columns: { tags: 'x', id: false }, view: { hideDeferred: 1 } }), { columns: { id: false }, view: {} })
 })

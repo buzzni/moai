@@ -16,18 +16,11 @@ const rows = [
 ]
 const reduce = (state, ...actions) => actions.reduce((s, a) => tb.toolbarReduce(s, a), state)
 
-test('search: open, type, cycle scope both ways, close clears', () => {
+test('search: open, type, close clears; there is no scope to cycle', () => {
   let s = reduce(tb.initialToolbar(), { type: 'search-open' }, { type: 'search-text', text: 'log' })
   assert.equal(s.searchOpen, true)
   assert.equal(s.searchText, 'log')
-  s = reduce(s, { type: 'scope-next' })
-  assert.equal(s.scope, 'id')
-  s = reduce(s, { type: 'scope-prev' }, { type: 'scope-prev' })
-  assert.equal(s.scope, 'body', 'the cycle skips the note scope: nothing loads notes, it would find nothing')
-  s = reduce(s, { type: 'scope-set', scope: 'tag' })
-  assert.equal(s.scope, 'tag')
-  s = reduce(s, { type: 'scope-set', scope: 'note' })
-  assert.equal(s.scope, 'tag', 'the note scope is not offered, so it cannot be set')
+  assert.equal('scope' in s, false, 'moai looks in every field: the toolbar has no scope')
   s = reduce(s, { type: 'search-close' })
   assert.deepEqual([s.searchOpen, s.searchText], [false, ''])
 })
@@ -103,25 +96,22 @@ test('sort edit through the reducer: replace, append, flip, replace twice flips'
   assert.equal(s.sortOpen, true)
 })
 
-test('render: chips, error, scope, hidden note, hints, sort popover', () => {
+test('render: chips, moai\'s refusal, hidden note, hints, sort popover', () => {
   const seen = []
   const handlers = { dispatch: (a) => seen.push(a) }
   const base = { ...tb.initialToolbar(), searchOpen: true, searchText: 'login', filterText: 'tag=bug,ui priority=1', cursor: 21 }
   // The list hides what its view toggles say (list-model.ts narrow), not what the CLI hides by default: a done
   // row the view shows is not "hidden", a row in a column the user hid is.
   const hiddenBy = (row) => (row.status === 'in_progress' ? 'column' : undefined)
-  const plain = tb.renderToolbar(base, { doc, rows, lang: 'en' }, handlers)
+  // The rows the search found are moai's (`found`); the toolbar only counts and shows them.
+  const plain = tb.renderToolbar(base, { doc, rows, found: [rows[0], rows[2]], lang: 'en' }, handlers)
   assert.equal(plain.found.length, 2)
   assert.deepEqual(plain.hidden, {}, 'without the view nothing counts as hidden: a done row is not hidden by itself')
   assert.equal(plain.el.querySelector('.m-hidden-note').hidden, true)
-  // The scope select offers no note scope: the rows carry no notes, so it would find nothing and say nothing.
-  assert.deepEqual([...plain.el.querySelectorAll('select option:not([disabled])')].map((o) => o.value), ['all', 'id', 'title', 'tag', 'body'])
-  // It says so where the scope is chosen: a line in the select that cannot be chosen, and the select's title (se-thyl).
-  const note = plain.el.querySelector('select option[data-scope-note]')
-  assert.equal(note.disabled, true)
-  assert.equal(note.textContent, 'Notes are not searched')
-  assert.equal(plain.el.querySelector('select').title, 'Notes are not searched')
-  const view = tb.renderToolbar({ ...base, searchText: 'o' }, { doc, rows, lang: 'en', hiddenBy }, handlers)
+  assert.equal(plain.el.querySelector('select'), null, 'no scope select: moai searches every field')
+  const noFound = tb.renderToolbar(base, { doc, rows, lang: 'en' }, handlers)
+  assert.equal(noFound.found.length, 0, 'nothing found until moai answers')
+  const view = tb.renderToolbar({ ...base, searchText: 'o' }, { doc, rows, found: rows, lang: 'en', hiddenBy }, handlers)
   assert.equal(view.el.querySelectorAll('.m-chip').length, 2)
   assert.equal(view.searchInput.value, 'o')
   assert.equal(view.found.length, 3)
@@ -131,9 +121,14 @@ test('render: chips, error, scope, hidden note, hints, sort popover', () => {
   assert.deepEqual(seen.pop(), { type: 'chip-remove', index: 0 })
   assert.equal(view.el.querySelector('.m-sort-pop'), null)
 
-  const bad = tb.renderToolbar({ ...base, filterText: 'nope=1' }, { doc, rows }, handlers)
-  assert.ok(bad.el.querySelector('[role=alert]').textContent.length > 0)
+  // A filter moai refused: its words under the box, the input invalid, the chips neutral. The toolbar judges nothing.
+  const bad = tb.renderToolbar({ ...base, filterText: 'nope=1' }, { doc, rows, problem: 'unknown filter key: nope' }, handlers)
+  assert.equal(bad.el.querySelector('[role=alert]').textContent, 'unknown filter key: nope')
+  assert.equal(bad.el.querySelector('[role=alert]').hidden, false)
   assert.equal(bad.filterInput.getAttribute('aria-invalid'), 'true')
+  const fine = tb.renderToolbar({ ...base, filterText: 'nope=1' }, { doc, rows }, handlers)
+  assert.equal(fine.el.querySelector('[role=alert]').hidden, true, 'with no refusal the page does not complain about a key it does not know')
+  assert.equal(fine.filterInput.hasAttribute('aria-invalid'), false)
 
   const hinting = tb.renderToolbar({ ...base, filterText: 'status=', cursor: 7, hintsOpen: true }, { doc, rows, lang: 'en' }, handlers)
   const items = hinting.el.querySelectorAll('.m-hints .m-menu-item')
@@ -148,7 +143,8 @@ test('render: chips, error, scope, hidden note, hints, sort popover', () => {
   assert.deepEqual(seen.pop(), { type: 'filter-cursor', cursor: 3 })
 
   const sorting = tb.renderToolbar({ ...base, sortOpen: true }, { doc, rows, lang: 'en' }, handlers)
-  assert.equal(sorting.el.querySelectorAll('.m-sort-pop [data-key]').length, 7)
+  assert.equal(sorting.el.querySelectorAll('.m-sort-pop [data-key]').length, 8, 'the deadline is a sort key too')
+  assert.ok(sorting.el.querySelector('.m-sort-pop [data-key=due]'))
   sorting.el.querySelector('[data-key=title] [data-how=append]').click()
   assert.deepEqual(seen.pop(), { type: 'sort-edit', key: 'title', how: 'append' })
 })
@@ -189,20 +185,22 @@ test('the toolbar is built once: an update writes an input only when its text di
   live.destroy()
 })
 
-test('filter-apply applies only a text that parses; a chip removal applies at once', () => {
+test('filter-apply applies whatever was typed (moai judges it); a chip removal applies at once', () => {
   let s = reduce(tb.initialToolbar(), { type: 'filter-text', text: 'status=todo', cursor: 11 }, { type: 'filter-apply' })
   assert.equal(s.filterApplied, 'status=todo')
   s = reduce(s, { type: 'filter-text', text: 'status=todo bogus=1', cursor: 19 }, { type: 'filter-apply' })
-  assert.equal(s.filterApplied, 'status=todo')
+  assert.equal(s.filterApplied, 'status=todo bogus=1', 'a key the page does not know is applied: the question goes to moai')
   s = reduce(s, { type: 'chip-remove', index: 1 })
   assert.deepEqual([s.filterText, s.filterApplied], ['status=todo', 'status=todo'])
+  s = reduce(s, { type: 'chip-remove', index: 0 })
+  assert.deepEqual([s.filterText, s.filterApplied], ['', ''])
 })
 
 test('the hidden note reads the search as the list does: spaces around it change nothing', () => {
   const hiddenBy = (row) => (row.status === 'in_progress' ? 'column' : undefined)
-  const plain = tb.searchView(rows, { searchText: 'o', scope: 'all' }, hiddenBy)
+  const plain = tb.searchView(rows, { searchText: 'o' }, hiddenBy)
   for (const text of [' o', 'o ', '  o  ']) {
-    const spaced = tb.searchView(rows, { searchText: text, scope: 'all' }, hiddenBy)
+    const spaced = tb.searchView(rows, { searchText: text }, hiddenBy)
     assert.deepEqual(spaced.hidden, plain.hidden, JSON.stringify(text))
     assert.deepEqual(spaced.found.map((row) => row.id), plain.found.map((row) => row.id))
   }

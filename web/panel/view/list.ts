@@ -1,6 +1,6 @@
 // The list tab (design §4.1, §4.7, §4.8; E3 se-c10x): the tree list in the main pane. Folders are entered
 // (Enter, double click) and left (Backspace, `..`), unfolded in place (→/←, the ▸ button), rows carry the
-// columns the user turned on that still fit, the order follows the sort keys, and the view toggles hide rows
+// columns the user turned on that still fit, the order is moai's (the sort keys ask for it), and the view toggles hide rows
 // with a note saying how many. The pure half lives in view/list-model.ts.
 //
 // Thousands of rows stay fast: every line has the same height, so only the lines in and near the viewport
@@ -9,15 +9,15 @@
 // redrawing the window never drops it. The key router (panel/keys/) owns every key; it calls command() with
 // the action a key stands for (moves in drawn order, going in and out, unfolding), so no key runs twice.
 
-import { pathKey, priorityOf, type IssueIndex, type Keep, type Order, type Path } from "../data/index.ts"
-import { sortEdit, sees, type SortKey } from "../data/query.ts"
+import { pathKey, priorityOf, type IssueIndex, type Keep, type Path } from "../data/index.ts"
+import { sortEdit, type SortKey } from "../data/query.ts"
 import { isUnread } from "../data/read.ts"
 import type { State } from "../store.ts"
 import { button, el, emptyState, icon } from "./components.ts"
 import { segLabel } from "./crumbs.ts"
 import {
   columnSet, firstKey, folderOf, HEAD_SORT, hiddenUnder, hidesAnything, listLines, moveKey, narrow, parentLine, segKey, shortDate, SHOW_ALL,
-  sortOrder, statusGlyph, statusOf, twigText, windowRange, revealOffset, type ColumnSet, type ListLine, type RightColumn,
+  statusGlyph, statusOf, twigText, windowRange, revealOffset, type ColumnSet, type ListLine, type RightColumn,
 } from "./list-model.ts"
 import { newChip } from "./unread.ts"
 import { highlight } from "./toolbar.ts"
@@ -37,7 +37,8 @@ interface Model {
   keep: Keep
   /** Rows only the search shows (the view hides them): drawn dim and marked hidden. */
   revealed: Keep
-  order: Order
+  /** What moai found, as the lines were drawn from it. */
+  matched: State["matched"]
   lines: ListLine[]
   at: Map<string, number>
   hidden: number
@@ -81,27 +82,26 @@ export const mountList: MountPane = (root, ctx): PaneView => {
   // ── model ──
 
   function compute(current: State, index: IssueIndex): Model {
-    const key = JSON.stringify([current.path, current.expanded, current.view, current.sort, current.search.text, current.search.scope, current.filter.applied])
-    if (model && model.index === index && model.key === key) return model
-    // The view toggles, the applied filter and the search, through data/query.ts (list-model.ts narrow).
+    const key = JSON.stringify([current.path, current.expanded, current.view, current.search.text, current.filter.applied])
+    if (model && model.index === index && model.key === key && model.matched === current.matched) return model
+    // The view toggles, and what moai found for the filter and the search (list-model.ts narrow).
     const narrowed = narrow(current, index)
     const keep = narrowed.keep
-    const order = sortOrder(current.sort, index)
-    const lines = listLines(current, index, keep, order)
+    const lines = listLines(current, index, keep)
     const at = new Map<string, number>()
     let idWidth = 4
     lines.forEach((line, n) => {
       if (!at.has(line.key)) at.set(line.key, n)
       if (line.kind === "row") idWidth = Math.max(idWidth, line.key.length)
     })
-    return { index, key, keep, revealed: narrowed.revealed, order, lines, at, hidden: hiddenUnder(index, current.path, narrowed.hidden), idWidth: Math.min(idWidth, 18) }
+    return { index, key, keep, revealed: narrowed.revealed, matched: current.matched, lines, at, hidden: hiddenUnder(index, current.path, narrowed.hidden), idWidth: Math.min(idWidth, 18) }
   }
 
   // ── places ──
 
   function enterPlace(path: Path) {
     if (!model || !state) return
-    intents.enter(path, firstKey(listLines({ path, expanded: state.expanded }, model.index, model.keep, model.order)))
+    intents.enter(path, firstKey(listLines({ path, expanded: state.expanded }, model.index, model.keep)))
   }
 
   function leave() {
@@ -179,13 +179,12 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       node.append(el(doc, "span", { class: "moai-c-toggle", role: "gridcell" }, toggle))
     } else node.append(cell("moai-c-toggle"))
 
-    // A search paints its hits in the id and title it looks in (design §4.4).
+    // A search paints its hits where they show in the id and the title (design §4.4); moai also finds a body or a note.
     const q = state?.search.text.trim() ?? ""
-    const scope = state?.search.scope ?? "all"
-    const painted = (text: string, part: "id" | "title"): Array<Node | string> => (q && sees(scope, part) ? highlight(doc, text, q) : [text])
+    const painted = (text: string): Array<Node | string> => (q ? highlight(doc, text, q) : [text])
     if (cols.id) {
       const id = cell("m-row-meta moai-c-id")
-      id.append(...painted(row?.id ?? "", "id"))
+      id.append(...painted(row?.id ?? ""))
       node.append(id)
     }
     if (cols.priority) {
@@ -193,7 +192,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       node.append(cell(`moai-c-p${p === undefined ? "" : ` m-p${Math.max(0, Math.min(3, p))}`}`, p === undefined ? "" : `p${p}`))
     }
     if (row) {
-      const { glyph, tone } = statusGlyph(statusOf(row))
+      const { glyph, tone } = statusGlyph(statusOf(row), state?.boot)
       const status = cell(`moai-c-st m-st-${tone}${tone === "in_progress" ? " m-pulse" : ""}`, glyph)
       status.title = copy.stats[statusOf(row)] ?? statusOf(row)
       node.append(status)
@@ -205,7 +204,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
     // NEW stands after the twig and before the name (design §4.1); the title cell stays one line, so the row keeps its height.
     if (row && isUnread(row)) title.append(newChip(doc), " ")
     const name = line.kind === "up" ? copy.up : line.kind === "bucket" ? segLabel(line.seg, index, copy) : String(row!.title ?? row!.id)
-    title.append(...(line.kind === "row" ? painted(name, "title") : [name]), folder ? "/" : "")
+    title.append(...(line.kind === "row" ? painted(name) : [name]), folder ? "/" : "")
     if (revealed) title.append(" ", el(doc, "span", { class: "m-chip moai-hidden-mark" }, words.hiddenMark))
     if (line.kind === "up") title.setAttribute("aria-label", words.upLabel)
     else title.title = name

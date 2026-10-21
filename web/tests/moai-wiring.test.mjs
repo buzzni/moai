@@ -7,7 +7,7 @@ import { JSDOM } from 'jsdom'
 
 import { panelModule } from './moai-panel-modules.mjs'
 
-const { createStore } = await panelModule('store.ts')
+const { createStore, matchKey } = await panelModule('store.ts')
 const { IssueIndex } = await panelModule('data/index.ts')
 const { copyFor } = await panelModule('i18n/index.ts')
 const { mountShell } = await panelModule('view/shell.ts')
@@ -15,23 +15,23 @@ const { PANES } = await panelModule('view/panes.ts')
 const { mountWiki } = await panelModule('view/wiki.ts')
 const { wireKeys } = await panelModule('keys/wiring.ts')
 const { createSortDefault } = await panelModule('data/memory.ts')
+const { treeOf } = await import('./moai-tree-helper.mjs')
 
 const en = copyFor('en')
-const old = new Date(Date.now() - 40 * 86_400_000).toISOString()
 const recent = new Date(Date.now() - 86_400_000).toISOString()
 
 // No milestones: the root lists the work itself. r3 is archived and r4 deferred, so the view hides both.
 const ROWS = [
   { id: 'r1', kind: 'issue', title: 'Fix login', status: 'todo', priority: 1, tags: ['ui'] },
   { id: 'r2', kind: 'issue', title: 'Write docs', status: 'todo', priority: 2 },
-  { id: 'r3', kind: 'issue', title: 'Old login page', status: 'done', priority: 2, status_since: old },
-  { id: 'r4', kind: 'issue', title: 'Later', status: 'todo', priority: 1, deferred_at: recent },
+  { id: 'r3', kind: 'issue', title: 'Old login page', status: 'done', priority: 2, archived: true },
+  { id: 'r4', kind: 'issue', title: 'Later', status: 'todo', priority: 1, deferred_at: recent, shelved_by: 'r4' },
 ]
 
 function boot({ rows = ROWS, wiki, store = createStore() } = {}) {
   const dom = new JSDOM('<!doctype html><html lang="en"><head></head><body><div id="moai-app"></div></body></html>', { pretendToBeVisual: true })
   const doc = dom.window.document
-  const index = new IssueIndex(rows)
+  const index = new IssueIndex(rows, treeOf(rows))
   const shell = mountShell(doc.getElementById('moai-app'), {
     document: doc,
     store,
@@ -44,6 +44,21 @@ function boot({ rows = ROWS, wiki, store = createStore() } = {}) {
     wiki,
   })
   store.dispatch({ type: 'board-loaded', data: { rows, more: 0, loadedAt: Date.now() } })
+  // moai's side of the question (main.ts `ask`): the filter and the search go to the binary, which answers with ids.
+  // This stands in for it over the same rows: a title or tag holding the search, `priority=N`, or a refusal.
+  store.subscribe((state) => {
+    const key = matchKey(state)
+    if (key === '' || key === state.matched.key) return
+    store.dispatch({ type: 'match-loading', key })
+    const filter = state.filter.applied.trim()
+    const q = state.search.text.trim().toLowerCase()
+    if (filter.includes('bogus')) return store.dispatch({ type: 'match-failed', key, problem: { kind: 'moai-error', message: 'unknown filter key: bogus' } })
+    const priority = /^priority=(\d)$/.exec(filter)?.[1]
+    const ids = rows
+      .filter((row) => (priority === undefined || row.priority === Number(priority)) && (q === '' || row.title.toLowerCase().includes(q) || (row.tags ?? []).includes(q)))
+      .map((row) => row.id)
+    store.dispatch({ type: 'matched', key, ids: new Set(ids) })
+  })
   // The one keydown listener, as main.ts wires it.
   const keys = wireKeys({ document: doc, store, shell, copy: en, platform: 'other', sortDefault: createSortDefault() })
   const $ = (selector) => doc.querySelector(selector)
@@ -60,7 +75,7 @@ const ticks = async (n = 5) => {
   for (let i = 0; i < n; i++) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-test('toolbar: typing a search narrows the list, shows hidden finds dim, and the note counts only what the view hides', () => {
+test('toolbar: typing a search narrows the list to what moai found, shows hidden finds dim, and the note counts only what the view hides', () => {
   const panel = boot()
   assert.ok(panel.$('.m-toolbar-slot [data-toolbar]'), 'the toolbar is mounted above the panes')
   assert.deepEqual(panel.listed(), ['r1', 'r2'])
@@ -68,8 +83,10 @@ test('toolbar: typing a search narrows the list, shows hidden finds dim, and the
   panel.$('.m-toolbar-slot button[aria-label="Search"]').click()
   const search = panel.$('.m-toolbar-slot [role="search"] input')
   assert.equal(panel.doc.activeElement, search)
+  assert.equal(panel.$('.m-toolbar-slot select'), null, 'there is no scope to choose: moai looks in every field')
   panel.type(search, 'login')
-  assert.deepEqual(panel.store.getState().search, { text: 'login', scope: 'all', open: true })
+  assert.deepEqual(panel.store.getState().search, { text: 'login', open: true })
+  assert.deepEqual([...panel.store.getState().matched.ids].sort(), ['r1', 'r3'], 'the ids are moai\'s answer')
   // The search lifts the view's hiding: the archived r3 is found, drawn dim and marked.
   assert.deepEqual(panel.listed(), ['r1', 'r3'])
   const r3 = panel.$('.moai-line[data-key="r3"]')
@@ -79,12 +96,8 @@ test('toolbar: typing a search narrows the list, shows hidden finds dim, and the
   // Only r3 counts: the view hides it (archived). A done row in a column the view shows would not count.
   assert.equal(panel.$('.m-hidden-note').textContent, '1 hidden: archived 1')
   assert.equal(panel.$('.m-toolbar-slot [role="search"] input'), search, 'the input was not rebuilt')
-  // The scope narrows what is looked in.
-  const scope = panel.$('.m-toolbar-slot select')
-  scope.value = 'tag'
-  scope.dispatchEvent(new panel.dom.window.Event('change', { bubbles: true }))
-  assert.deepEqual(panel.listed(), [])
-  panel.type(search, 'ui')
+  // A search moai finds one row for narrows to that row.
+  panel.type(search, 'fix')
   assert.deepEqual(panel.listed(), ['r1'])
   // The board is a layout of the same list.
   panel.tab('board').click()
@@ -128,18 +141,38 @@ test('toolbar: the filter narrows the rows on Enter, a chip removal at once; the
   assert.deepEqual(panel.listed(), ['r1', 'r2'])
 })
 
-test('toolbar: the sort popover and the name line change one order, query.ts\'s', () => {
+test('toolbar: a filter moai refuses is applied all the same; its words stand under the box and the input is invalid', () => {
+  const panel = boot()
+  const filter = panel.$('.m-toolbar-slot .m-filter input')
+  filter.focus()
+  panel.type(filter, 'bogus=1')
+  assert.equal(filter.hasAttribute('aria-invalid'), false, 'typing asks nothing yet')
+  panel.key(filter, { key: 'Enter' })
+  assert.deepEqual(panel.store.getState().filter, { text: 'bogus=1', applied: 'bogus=1' }, 'the page does not judge the text')
+  assert.equal(panel.store.getState().matched.problem.message, 'unknown filter key: bogus')
+  assert.equal(filter.getAttribute('aria-invalid'), 'true')
+  const error = panel.$('.m-toolbar-slot [role="alert"]')
+  assert.equal(error.hidden, false)
+  assert.equal(error.textContent, 'unknown filter key: bogus', 'moai\'s own words')
+  // The way out: a chip removal applies at once, and an emptied filter asks nothing, so its old refusal goes.
+  panel.$('.m-toolbar-slot .m-chips .m-chip-x').click()
+  assert.deepEqual(panel.store.getState().filter, { text: '', applied: '' })
+  assert.equal(filter.hasAttribute('aria-invalid'), false, 'no refusal stands under an empty box')
+  assert.equal(panel.$('.m-toolbar-slot [role="alert"]').hidden, true)
+})
+
+test('toolbar: the sort popover and the name line change one order, the store\'s `sort` (moai orders the rows)', () => {
   const panel = boot()
   panel.$('.m-toolbar-slot .m-sort button').click()
   panel.$('.m-sort-pop [data-key="priority"] [data-how="flip"]').click()
   assert.deepEqual(panel.store.getState().sort, { fields: [{ key: 'priority', dir: 'desc' }], reversed: false })
-  assert.deepEqual(panel.listed(), ['r2', 'r1'])
   assert.match(panel.$('.m-toolbar-slot .m-sort button').textContent, /Priority↓/)
   assert.match(panel.$('.m-crumbs-badges').textContent, /sort priority↓/)
+  // The page does not sort the rows itself: they stand in the order the tree gave them until moai is asked again.
+  assert.deepEqual(panel.listed(), ['r1', 'r2'])
   // A name-line click is the same state: title alone, and the toolbar's badge follows.
   panel.$('.moai-head-sort[data-sort="title"]').click()
   assert.deepEqual(panel.store.getState().sort, { fields: [{ key: 'title', dir: 'asc' }], reversed: false })
-  assert.deepEqual(panel.listed(), ['r1', 'r2'])
   assert.match(panel.$('.m-toolbar-slot .m-sort button').textContent, /Title↑/)
 })
 
@@ -165,8 +198,8 @@ test('detail: a search paints its hits in the id and title', () => {
   assert.equal(panel.$('.moai-detail-title mark'), null)
   panel.store.dispatch({ type: 'search', text: 'login' })
   assert.equal(panel.$('.moai-detail-title mark').textContent, 'login')
-  panel.store.dispatch({ type: 'search', text: 'r1', scope: 'title' })
-  assert.equal(panel.$('.moai-detail-id mark'), null, 'the title scope does not look in the id')
+  panel.store.dispatch({ type: 'search', text: 'r1' })
+  assert.equal(panel.$('.moai-detail-id mark').textContent, 'r1', 'the id is looked in as well')
 })
 
 const PAGES = [

@@ -29,6 +29,9 @@ export interface Rendered {
  * '-', '_' and spaces; each space -> '-'; drop the rest (punctuation, symbols, emoji, '²', '①'). With `seen`, a
  * repeat gets '-1', '-2', ... and a numbered slug that is already taken is counted again, so `Foo`, `Foo-1`,
  * `Foo` give `foo`, `foo-1`, `foo-2` (moai `wiki::Anchors`).
+ *
+ * A rule kept on this side: moai's own is src/wiki.rs `Anchors`, and its JSON carries no anchors to read — the page
+ * needs them to draw and to jump. Change one, change both.
  */
 export function githubAnchor(text: string, seen?: Map<string, number>): string {
   const base = text

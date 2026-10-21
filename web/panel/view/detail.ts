@@ -6,7 +6,6 @@
  */
 import { isInformation } from '../data/client.js'
 import type { IssueIndex, Row } from '../data/index.js'
-import { sees } from '../data/query.js'
 import { isUnread } from '../data/read.js'
 import type { State } from '../store.js'
 import { banner, button, chip, el, emptyState } from './components.ts'
@@ -141,8 +140,8 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     if (head.deferred) chips.append(chip(doc, { label: `${d.deferred}: ${head.deferred}`, tone: 'warn' }))
     else if (head.shelvedBy) chips.append(chip(doc, { label: d.deferredUnder(head.shelvedBy), tone: 'warn' }))
     for (const tag of tagsOf(row)) chips.append(chip(doc, { label: tag }))
-    const idLine = el(doc, 'div', { class: 'moai-detail-id' }, ...painted(head.id, 'id', search))
-    const titleLine = el(doc, 'h2', { class: 'moai-detail-title' }, ...painted(head.title, 'title', search))
+    const idLine = el(doc, 'div', { class: 'moai-detail-id' }, ...painted(head.id, search))
+    const titleLine = el(doc, 'h2', { class: 'moai-detail-title' }, ...painted(head.title, search))
     heads = { id: idLine, title: titleLine, idText: head.id, titleText: head.title }
     const out: Node[] = [
       el(doc, 'div', { class: 'moai-detail-head' },
@@ -159,7 +158,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     if (blockedBy.length) out.push(section(doc, d.blockedBy, idList(doc, blockedBy, index, copy, true, row)))
     const blocks = blocksOf(row, index)
     if (blocks.length) out.push(section(doc, d.blocks, idList(doc, blocks, index, copy, false)))
-    const rollup = rollupOf(row, index)
+    const rollup = rollupOf(row, index, last?.state.board.value?.groups, last?.state.boot?.statuses)
     if (rollup) {
       const bar = el(doc, 'div', { class: 'moai-detail-bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': rollup.percent ?? 0, 'aria-label': d.rollup })
       bar.append(el(doc, 'span', { style: `width: ${rollup.percent ?? 0}%` }))
@@ -196,8 +195,8 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
   }
 
   /** A search paints its hits in the id and title it looks in (design §4.4); the body is drawn as it is. */
-  const painted = (text: string, part: 'id' | 'title', search: State['search']): Array<Node | string> =>
-    search.text.trim() && sees(search.scope, part) ? highlight(doc, text, search.text) : [text]
+  const painted = (text: string, search: State['search']): Array<Node | string> =>
+    search.text.trim() ? highlight(doc, text, search.text) : [text]
 
   function render(state: State, index: IssueIndex | null) {
     last = { state, index }
@@ -206,12 +205,12 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
       if (drawn.search === state.search) return
       // Only the search changed (a keystroke): the hits are painted in the id and title, so repaint those two lines.
       // The body, the sections and the markdown stay the nodes they were (and so does a text selection in them).
-      const same = drawn.search.text === state.search.text && drawn.search.scope === state.search.scope
+      const same = drawn.search.text === state.search.text
       drawn = { shown: state.shown, index, search: state.search }
       if (same) return
       if (heads?.id.isConnected && heads.title.isConnected) {
-        heads.id.replaceChildren(...painted(heads.idText, 'id', state.search))
-        heads.title.replaceChildren(...painted(heads.titleText, 'title', state.search))
+        heads.id.replaceChildren(...painted(heads.idText, state.search))
+        heads.title.replaceChildren(...painted(heads.titleText, state.search))
         return
       }
     }

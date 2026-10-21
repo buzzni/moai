@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { panelModule } from './moai-panel-modules.mjs'
 
-const { COLUMN_DEFAULTS, createStore, detailPosition, initialState, keepCursor, reduce } = await panelModule('store.ts')
+const { COLUMN_DEFAULTS, createStore, detailPosition, initialState, keepCursor, matchKey, reduce } = await panelModule('store.ts')
 const { FORCE_BOTTOM_BELOW } = await panelModule('view/responsive.ts')
 const { MAX_RATIO, MIN_RATIO } = await panelModule('view/split.ts')
 
@@ -17,7 +17,9 @@ test('the panel starts on the list with the TUI defaults', () => {
   assert.deepEqual(state.sort, { fields: [{ key: 'priority', dir: 'asc' }], reversed: false })
   // The cells are named as the key table's CellField: the name line is `names`.
   assert.deepEqual(Object.entries(state.columns).filter(([, on]) => on).map(([name]) => name), ['id', 'priority', 'counts', 'names'])
-  assert.deepEqual([state.search, state.filter], [{ text: '', scope: 'all', open: false }, { text: '', applied: '' }])
+  assert.deepEqual([state.search, state.filter], [{ text: '', open: false }, { text: '', applied: '' }])
+  assert.equal(state.boot, null, 'nothing is known of moai\'s config before /api/boot answers')
+  assert.deepEqual(state.matched, { key: '', ids: null, loading: false, problem: null })
   assert.deepEqual(COLUMN_DEFAULTS.tags, false)
 })
 
@@ -79,30 +81,65 @@ test('an emptied order returns to the saved default on every path: the sort acti
   assert.deepEqual(state.sort, { fields: [{ key: 'priority', dir: 'asc' }], reversed: false })
 })
 
-test('the toolbar keeps its state in the store: search as typed, the filter on Enter, the sort through query.ts', () => {
+test('the toolbar keeps its state in the store: search as typed, the filter on Enter (always), the sort through query.ts', () => {
   const tb = (state, action) => reduce(state, { type: 'toolbar', action })
   let state = tb(initialState(), { type: 'search-text', text: 'grid' })
-  assert.deepEqual(state.search, { text: 'grid', scope: 'all', open: true })
-  state = tb(state, { type: 'scope-next' })
-  assert.equal(state.search.scope, 'id')
-  // Typing changes the text, not the rows; Enter applies a text that parses, and only that.
+  assert.deepEqual(state.search, { text: 'grid', open: true })
+  // Typing changes the text, not the question; Enter applies whatever was typed: judging it is moai's.
   state = tb(state, { type: 'filter-text', text: 'status=todo', cursor: 11 })
   assert.deepEqual(state.filter, { text: 'status=todo', applied: '' })
   assert.equal(state.toolbar.cursor, 11)
   state = tb(state, { type: 'filter-apply' })
   assert.deepEqual(state.filter, { text: 'status=todo', applied: 'status=todo' })
   state = tb(tb(state, { type: 'filter-text', text: 'nope=1', cursor: 6 }), { type: 'filter-apply' })
-  assert.deepEqual(state.filter, { text: 'nope=1', applied: 'status=todo' })
+  assert.deepEqual(state.filter, { text: 'nope=1', applied: 'nope=1' }, 'a text the page cannot read is applied too')
   // A chip removal applies at once; the `filter` action sets and applies (chips, keys).
   state = reduce(state, { type: 'filter', text: 'tag=ui tag=bug' })
   state = tb(state, { type: 'chip-remove', index: 0 })
   assert.deepEqual(state.filter, { text: 'tag=bug', applied: 'tag=bug' })
   state = tb(state, { type: 'sort-edit', key: 'status', how: 'replace' })
   assert.deepEqual(state.sort, { fields: [{ key: 'status', dir: 'asc' }], reversed: false })
-  // A toolbar act that changes nothing keeps the state.
-  assert.equal(tb(state, { type: 'scope-set', scope: 'id' }), state)
+  state = tb(state, { type: 'sort-edit', key: 'due', how: 'replace' })
+  assert.deepEqual(state.sort, { fields: [{ key: 'due', dir: 'asc' }], reversed: false }, 'the deadline is a sort key')
   state = tb(state, { type: 'search-close' })
-  assert.deepEqual(state.search, { text: '', scope: 'id', open: false })
+  assert.deepEqual(state.search, { text: '', open: false })
+})
+
+test('matchKey: nothing to ask while the filter and the search are empty; else one key for filter, search and archive', () => {
+  const state = initialState()
+  assert.equal(matchKey(state), '')
+  assert.equal(matchKey({ ...state, filter: { text: '  ', applied: '   ' } }), '')
+  const asked = matchKey({ ...state, filter: { text: '', applied: 'status=todo' } })
+  assert.notEqual(asked, '')
+  assert.notEqual(matchKey({ ...state, search: { text: 'grid', open: true } }), asked)
+  assert.notEqual(matchKey({ ...state, filter: { text: '', applied: 'status=todo' }, view: { ...state.view, showArchived: true } }), asked, 'the archive is part of the question')
+})
+
+test('moai\'s answers: ids come for the question on screen, an older question\'s answer is dropped, a refusal keeps the ids', () => {
+  let state = reduce(initialState(), { type: 'match-loading', key: 'k1' })
+  assert.deepEqual(state.matched, { key: 'k1', ids: null, loading: true, problem: null })
+  state = reduce(state, { type: 'matched', key: 'k1', ids: new Set(['a']) })
+  assert.deepEqual([...state.matched.ids], ['a'])
+  assert.equal(state.matched.loading, false)
+  // A newer question keeps the older ids on screen until its own come.
+  state = reduce(state, { type: 'match-loading', key: 'k2' })
+  assert.deepEqual([...state.matched.ids], ['a'])
+  assert.equal(state.matched.loading, true)
+  // The answer of the first question arrives late: dropped.
+  assert.equal(reduce(state, { type: 'matched', key: 'k1', ids: new Set(['z']) }), state)
+  assert.equal(reduce(state, { type: 'match-failed', key: 'k1', problem: { kind: 'moai-error', message: 'x' } }), state)
+  const refused = reduce(state, { type: 'match-failed', key: 'k2', problem: { kind: 'moai-error', message: 'unknown filter key' } })
+  assert.equal(refused.matched.problem.message, 'unknown filter key')
+  assert.deepEqual([...refused.matched.ids], ['a'], 'the ids stay beside the refusal')
+  assert.equal(refused.matched.loading, false)
+  // The next answer clears the refusal.
+  const next = reduce(reduce(refused, { type: 'match-loading', key: 'k3' }), { type: 'matched', key: 'k3', ids: new Set() })
+  assert.equal(next.matched.problem, null)
+})
+
+test('/api/boot is kept as it came', () => {
+  const boot = { lang: 'en', version: '1', project: 'p', root: '/r', statuses: ['todo', 'done'], naming: 'name', glyphs: { todo: '·' }, unknown_glyph: '○', columns: { backlog: { name: 'Backlog', glyph: '◇' }, shelved: { name: 'Deferred', glyph: '‖' } }, filter_keys: [], sort_fields: [] }
+  assert.equal(reduce(initialState(), { type: 'boot', boot }).boot, boot)
 })
 
 test('the wiki state is the wiki view\'s own shape, saved by a wiki action', () => {
@@ -182,15 +219,15 @@ test('counts that come after the rows go on the board they belong to, and a late
   const rows = [{ id: 'a' }, { id: 'b' }]
   const first = { rows, more: 0, loadedAt: 1 }
   let state = reduce({ ...initialState(), cursor: 'b' }, { type: 'board-loaded', data: first })
-  const tallies = new Map([['m', [1, 2]]])
-  const counted = reduce(state, { type: 'tallies', data: first, tallies })
-  assert.equal(counted.board.value.tallies, tallies)
+  const groups = new Map([['m', { todo: 1, done: 1 }]])
+  const counted = reduce(state, { type: 'groups', data: first, groups })
+  assert.equal(counted.board.value.groups, groups)
   assert.equal(counted.board.value.rows, rows, 'the rows stay')
   assert.equal(counted.cursor, 'b')
   // A later read's board: the first read's late counts are dropped.
   const second = { rows, more: 0, loadedAt: 2 }
   state = reduce(counted, { type: 'board-loaded', data: second })
-  assert.equal(reduce(state, { type: 'tallies', data: first, tallies: new Map() }), state)
+  assert.equal(reduce(state, { type: 'groups', data: first, groups: new Map() }), state)
 })
 
 test('an archive read that failed is its own problem, gone with the next archive read or when archived rows go', () => {
@@ -205,11 +242,10 @@ test('an archive read that failed is its own problem, gone with the next archive
 })
 
 test('late counts that could not be read take the counts the board carried off it', () => {
-  const carried = new Map([['m', [1, 2]]])
-  const data = { rows: [{ id: 'a' }], more: 0, loadedAt: 1, tallies: carried }
+  const carried = new Map([['m', { todo: 1 }]])
+  const data = { rows: [{ id: 'a' }], more: 0, loadedAt: 1, groups: carried }
   const state = reduce(initialState(), { type: 'board-loaded', data })
-  const dropped = reduce(state, { type: 'tallies', data, tallies: null })
-  assert.equal('tallies' in dropped.board.value, false)
+  const dropped = reduce(state, { type: 'groups', data, groups: null })
+  assert.equal('groups' in dropped.board.value, false)
   assert.equal(dropped.board.value.rows, data.rows)
 })
-

@@ -38,7 +38,7 @@ export interface ContextEnv {
 
 /** The key table's view of the panel (keys/table.ts KeyContext), read from the store. Pure. */
 export function keyContext(state: State, env: ContextEnv): KeyContext {
-  const statuses = statusKeys(state.board.value?.rows ?? [])
+  const statuses = statusKeys(state.board.value?.rows ?? [], state.boot?.statuses)
   const hidden = new Set(state.view.hiddenStatuses)
   return {
     mode: env.mode,
@@ -301,7 +301,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "view.all": () => store.dispatch({ type: "view", view: SHOW_ALL }),
     "view.column": (a) => {
       const state = store.getState()
-      const status = statusKeys(state.board.value?.rows ?? [])[Number(a.args?.index)]
+      const status = statusKeys(state.board.value?.rows ?? [], state.boot?.statuses)[Number(a.args?.index)]
       if (status === undefined) return
       const hidden = state.view.hiddenStatuses
       store.dispatch({ type: "view", view: { hiddenStatuses: hidden.includes(status) ? hidden.filter((s) => s !== status) : [...hidden, status] } })
@@ -353,13 +353,14 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     },
     "prompt.next": () => {
       if (inWiki()) return wikiKey()
-      if (doc.activeElement === bar.filterInput) toolbar({ type: "hint-move", delta: 1, count: hintCount() })
-      else toolbar({ type: "scope-next" })
+      // The search has no scope to cycle (moai's `--grep` has none): Tab there moves the focus as anywhere.
+      if (doc.activeElement !== bar.filterInput) return false
+      toolbar({ type: "hint-move", delta: 1, count: hintCount() })
     },
     "prompt.prev": () => {
       if (inWiki()) return wikiKey()
-      if (doc.activeElement === bar.filterInput) toolbar({ type: "hint-move", delta: -1, count: hintCount() })
-      else toolbar({ type: "scope-prev" })
+      if (doc.activeElement !== bar.filterInput) return false
+      toolbar({ type: "hint-move", delta: -1, count: hintCount() })
     },
     // The filter input moves through its suggestions itself and the search has none: outside the wiki the key is
     // not the router's, so the input (or the browser) keeps it.

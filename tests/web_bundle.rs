@@ -54,6 +54,36 @@ fn the_web_bundle_is_built_from_these_sources() {
     assert_eq!(dist("SOURCES"), sources(), "src/web/dist/ 가 web/ 와 갈라졌다 — scripts/gen-web.sh 를 돌려 담는다");
 }
 
+/// **페이지 시험이 읽는 자료는 이 바이너리의 답이다**(moai-jshy.hfr) — `scripts/gen-web-fixtures.sh` 로 스크래치에 다시
+/// 지어 커밋된 것과 견준다. 손으로 적거나 옛 판이 낸 자료로 초록인 페이지 시험은 moai 가 내는 값을 안 잰다.
+#[cfg(unix)]
+#[test]
+fn the_web_fixtures_match_the_binary() {
+    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web-fixtures");
+    let _ = std::fs::remove_dir_all(&made);
+    let out = std::process::Command::new("bash")
+        .arg(at_root("scripts/gen-web-fixtures.sh"))
+        .arg(&made)
+        .env("MOAI", env!("CARGO_BIN_EXE_moai"))
+        .output()
+        .expect("bash 를 실행하지 못했다 — 이 시험에는 bash 가 있어야 한다");
+    assert!(out.status.success(), "자료를 못 지었다\n{}", String::from_utf8_lossy(&out.stderr));
+    let kept = at_root("web/tests/fixtures/moai");
+    let mut names: Vec<String> =
+        std::fs::read_dir(&made).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+    names.sort();
+    assert!(!names.is_empty(), "생성기가 아무것도 안 썼다");
+    for name in &names {
+        let fresh = std::fs::read_to_string(made.join(name)).unwrap();
+        let old = std::fs::read_to_string(kept.join(name)).unwrap_or_default();
+        assert!(
+            fresh == old,
+            "web/tests/fixtures/moai/{name} 가 바이너리의 답과 갈라졌다 — \
+             `cargo build && MOAI=target/debug/moai scripts/gen-web-fixtures.sh` 를 돌리고 담는다"
+        );
+    }
+}
+
 #[test]
 fn the_web_page_runs_no_inline_script() {
     let html = dist("index.html");

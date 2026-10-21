@@ -32,7 +32,7 @@ export type TableName = Mode | "menu"
 /** Verdicts of keybindings.md §3. 제외 keys are simply absent. */
 export type Verdict = "같음" | "확인" | "대체" | "변경" | "추가"
 
-export type SortField = "priority" | "created" | "updated" | "status" | "assignee" | "title"
+export type SortField = "priority" | "created" | "updated" | "status" | "assignee" | "title" | "due"
 export type CellField = "id" | "priority" | "assignee" | "created" | "updated" | "counts" | "tags" | "epic" | "names"
 
 /**
@@ -203,6 +203,8 @@ const SORTS: ReadonlyArray<[string, SortField]> = [
   ["s", "status"],
   ["a", "assignee"],
   ["t", "title"],
+  // The deadline is `w` (when), as the explorer's: `SPC s d` is a key it took out and leaves dead (tui/keys.rs).
+  ["w", "due"],
 ]
 
 const CELLS: ReadonlyArray<[string, CellField]> = [

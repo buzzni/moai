@@ -4,7 +4,7 @@
  * `wiki`), each with its own interface and its four languages side by side below, so the stages that build those
  * areas add their words inside their own group without touching another's lines.
  */
-import type { GrepScope, SortKey } from '../data/query.js'
+import type { SortKey } from '../data/query.js'
 import type { CellField, HelpGroupId, KeyLabel, LayerId, SortField, StateId } from '../keys/table.js'
 
 export type Language = 'en' | 'ko' | 'ja' | 'zh'
@@ -65,7 +65,7 @@ const SHELL: Record<Language, ShellCopy> = {
     deferred: 'deferred',
     backlog: 'backlog',
     sorted: (by) => `sort ${by}`,
-    sortFields: { priority: 'priority', created: 'created', updated: 'updated', status: 'status', assignee: 'assignee', title: 'title', id: 'id' },
+    sortFields: { priority: 'priority', created: 'created', updated: 'updated', status: 'status', assignee: 'assignee', title: 'title', due: 'due', id: 'id' },
     reversed: '(reversed)',
     clearHint: 'Esc clears it',
     wikiPlaceholder: 'The wiki is not here yet.',
@@ -89,7 +89,7 @@ const SHELL: Record<Language, ShellCopy> = {
     deferred: '미룸',
     backlog: '백로그',
     sorted: (by) => `정렬 ${by}`,
-    sortFields: { priority: '우선순위', created: '만든 날', updated: '고친 날', status: '칸', assignee: '담당', title: '제목', id: 'ID' },
+    sortFields: { priority: '우선순위', created: '만든 날', updated: '고친 날', status: '칸', assignee: '담당', title: '제목', due: '기한', id: 'ID' },
     reversed: '(뒤집음)',
     clearHint: 'Esc로 해제',
     wikiPlaceholder: '위키는 아직 준비 중입니다.',
@@ -113,7 +113,7 @@ const SHELL: Record<Language, ShellCopy> = {
     deferred: '保留',
     backlog: 'バックログ',
     sorted: (by) => `並べ替え ${by}`,
-    sortFields: { priority: '優先度', created: '作成', updated: '更新', status: '列', assignee: '担当', title: 'タイトル', id: 'ID' },
+    sortFields: { priority: '優先度', created: '作成', updated: '更新', status: '列', assignee: '担当', title: 'タイトル', due: '期限', id: 'ID' },
     reversed: '(逆順)',
     clearHint: 'Esc で解除',
     wikiPlaceholder: 'Wiki はまだ準備中です。',
@@ -137,7 +137,7 @@ const SHELL: Record<Language, ShellCopy> = {
     deferred: '推迟',
     backlog: '待办池',
     sorted: (by) => `排序 ${by}`,
-    sortFields: { priority: '优先级', created: '创建', updated: '更新', status: '列', assignee: '负责人', title: '标题', id: 'ID' },
+    sortFields: { priority: '优先级', created: '创建', updated: '更新', status: '列', assignee: '负责人', title: '标题', due: '期限', id: 'ID' },
     reversed: '(反向)',
     clearHint: '按 Esc 清除',
     wikiPlaceholder: 'Wiki 尚未就绪。',
@@ -354,11 +354,6 @@ export type HiddenReason = 'column' | 'deferred' | 'backlog' | 'archived'
 export interface ToolbarCopy {
   search: string
   searchPlaceholder: string
-  /** Accessible name of the search scope select. */
-  scope: string
-  scopes: Record<GrepScope, string>
-  /** In the scope select: rows carry no notes, so no scope searches them (se-thyl). */
-  notesUnsearched: string
   filter: string
   filterPlaceholder: string
   removeChip: string
@@ -380,45 +375,37 @@ export interface ToolbarCopy {
 
 const TOOLBAR: Record<Language, ToolbarCopy> = {
   en: {
-    search: 'Search', searchPlaceholder: 'Search (/)', scope: 'Search in',
-    scopes: { all: 'All', id: 'ID', title: 'Title', tag: 'Tag', body: 'Body', note: 'Note' },
-    notesUnsearched: 'Notes are not searched',
+    search: 'Search', searchPlaceholder: 'Search (/)',
     filter: 'Filter', filterPlaceholder: 'status=todo tag=bug,ui (Enter applies)', removeChip: 'Remove filter item', hints: 'Suggestions',
     sort: 'Sort', sortEdit: 'Edit sort', reversed: 'reversed', replace: 'Only this', append: 'Add', flip: 'Flip direction',
-    sortKeys: { priority: 'Priority', created: 'Created', updated: 'Updated', status: 'Status', assignee: 'Assignee', title: 'Title', id: 'ID' },
+    sortKeys: { priority: 'Priority', created: 'Created', updated: 'Updated', status: 'Status', assignee: 'Assignee', title: 'Title', due: 'Due', id: 'ID' },
     hidden: (n) => `${n} hidden`,
     hiddenReasons: { column: 'hidden column', deferred: 'deferred', backlog: 'backlog', archived: 'archived' },
     sortDefaultSessionNote: 'D: save as the default order — kept for this session only.',
   },
   ko: {
-    search: '검색', searchPlaceholder: '검색 (/)', scope: '검색 범위',
-    scopes: { all: '전체', id: 'ID', title: '제목', tag: '태그', body: '본문', note: '메모' },
-    notesUnsearched: '메모는 검색하지 않습니다',
+    search: '검색', searchPlaceholder: '검색 (/)',
     filter: '필터', filterPlaceholder: 'status=todo tag=bug,ui (Enter로 적용)', removeChip: '필터 항목 지우기', hints: '자동 완성',
     sort: '정렬', sortEdit: '정렬 편집', reversed: '뒤집힘', replace: '이것만', append: '추가', flip: '방향 바꿈',
-    sortKeys: { priority: '우선순위', created: '만든 때', updated: '고친 때', status: '상태', assignee: '담당', title: '제목', id: 'ID' },
+    sortKeys: { priority: '우선순위', created: '만든 때', updated: '고친 때', status: '상태', assignee: '담당', title: '제목', due: '기한', id: 'ID' },
     hidden: (n) => `${n}건 숨김`,
     hiddenReasons: { column: '숨긴 칸', deferred: '미룸', backlog: '백로그', archived: '보관' },
     sortDefaultSessionNote: 'D: 기본 정렬로 저장 — 이 세션에서만 유지됩니다.',
   },
   ja: {
-    search: '検索', searchPlaceholder: '検索 (/)', scope: '検索範囲',
-    scopes: { all: 'すべて', id: 'ID', title: 'タイトル', tag: 'タグ', body: '本文', note: 'メモ' },
-    notesUnsearched: 'メモは検索しません',
+    search: '検索', searchPlaceholder: '検索 (/)',
     filter: 'フィルター', filterPlaceholder: 'status=todo tag=bug,ui (Enter で適用)', removeChip: 'フィルター項目を削除', hints: '候補',
     sort: '並べ替え', sortEdit: '並べ替えを編集', reversed: '逆順', replace: 'これだけ', append: '追加', flip: '向きを反転',
-    sortKeys: { priority: '優先度', created: '作成', updated: '更新', status: '状態', assignee: '担当', title: 'タイトル', id: 'ID' },
+    sortKeys: { priority: '優先度', created: '作成', updated: '更新', status: '状態', assignee: '担当', title: 'タイトル', due: '期限', id: 'ID' },
     hidden: (n) => `${n} 件を非表示`,
     hiddenReasons: { column: '非表示の列', deferred: '保留', backlog: 'バックログ', archived: 'アーカイブ' },
     sortDefaultSessionNote: 'D: 既定の並べ替えとして保存 — このセッションの間だけ保持されます。',
   },
   zh: {
-    search: '搜索', searchPlaceholder: '搜索 (/)', scope: '搜索范围',
-    scopes: { all: '全部', id: 'ID', title: '标题', tag: '标签', body: '正文', note: '备注' },
-    notesUnsearched: '不搜索备注',
+    search: '搜索', searchPlaceholder: '搜索 (/)',
     filter: '筛选', filterPlaceholder: 'status=todo tag=bug,ui (按 Enter 应用)', removeChip: '删除筛选项', hints: '建议',
     sort: '排序', sortEdit: '编辑排序', reversed: '反向', replace: '仅此项', append: '添加', flip: '反转方向',
-    sortKeys: { priority: '优先级', created: '创建', updated: '更新', status: '状态', assignee: '负责人', title: '标题', id: 'ID' },
+    sortKeys: { priority: '优先级', created: '创建', updated: '更新', status: '状态', assignee: '负责人', title: '标题', due: '期限', id: 'ID' },
     hidden: (n) => `已隐藏 ${n} 项`,
     hiddenReasons: { column: '隐藏的列', deferred: '推迟', backlog: '待办池', archived: '已归档' },
     sortDefaultSessionNote: 'D: 保存为默认排序 — 仅在本次会话中保留。',
@@ -507,7 +494,7 @@ const TABLE_EN: KeyTableCopy = {
     'option.detailAt': 'Details at', 'option.detailAtHelp': 'Details position (left ↔ bottom)',
     'menu.close': 'Close', 'menu.up': 'Up one level',
     'prompt.apply': 'Apply (with filter values listed, insert one)', 'prompt.cancel': 'Cancel, back to the cursor before',
-    'prompt.next': 'Cycle the search scope / complete the filter', 'prompt.prev': 'Cycle the scope back / complete back',
+    'prompt.next': 'Complete the filter', 'prompt.prev': 'Complete the filter, back',
     'prompt.up': 'Previous filter value', 'prompt.down': 'Next filter value', 'prompt.clear': 'Clear the whole input', 'prompt.deleteWord': 'Delete a word',
     'sorter.down': 'Down', 'sorter.up': 'Up', 'sorter.lower': 'Move later', 'sorter.raise': 'Move earlier', 'sorter.toggle': 'Use or drop',
     'sorter.flip': 'Flip direction', 'sorter.apply': 'Apply', 'sorter.default': 'Save as default', 'sorter.cancel': 'Cancel',
@@ -525,7 +512,7 @@ const TABLE_EN: KeyTableCopy = {
     shown: '[shown]', hidden: '[hidden]', asc: '[↑ asc]', desc: '[↓ desc]', left: '[left]', bottom: '[bottom]',
     raw: '[raw]', rendered: '[rendered]', list: '[list]', board: '[board]', wiki: '[wiki]',
   },
-  sortFields: { priority: 'Priority', created: 'Created', updated: 'Updated', status: 'Status', assignee: 'Assignee', title: 'Title' },
+  sortFields: { priority: 'Priority', created: 'Created', updated: 'Updated', status: 'Status', assignee: 'Assignee', title: 'Title', due: 'Due' },
   cellFields: { id: 'id', priority: 'Priority', assignee: 'Assignee', created: 'Created', updated: 'Updated', counts: 'Counts (n/n)', tags: 'Tags', epic: 'Epic', names: 'Name line' },
   sortAdd: (field) => `${field} (add)`,
   sortAddHelp: (field) => `${field} (add at the end)`,
@@ -552,7 +539,7 @@ const TABLE_KO: KeyTableCopy = {
     'option.detailAt': '상세 위치', 'option.detailAtHelp': '상세 위치 (왼쪽 ↔ 아래)',
     'menu.close': '닫기', 'menu.up': '한 층 위로',
     'prompt.apply': '적용 (필터 값 목록이 있으면 값 넣기)', 'prompt.cancel': '취소하고 열기 전 커서로',
-    'prompt.next': '검색 범위 순환 / 필터 자동완성', 'prompt.prev': '검색 범위 거꾸로 / 필터 자동완성 거꾸로',
+    'prompt.next': '필터 자동완성', 'prompt.prev': '필터 자동완성 거꾸로',
     'prompt.up': '필터 값 후보 위', 'prompt.down': '필터 값 후보 아래', 'prompt.clear': '입력 전체 지움', 'prompt.deleteWord': '단어 지움',
     'sorter.down': '아래로', 'sorter.up': '위로', 'sorter.lower': '순서 뒤로', 'sorter.raise': '순서 앞으로', 'sorter.toggle': '넣기·빼기',
     'sorter.flip': '방향 반전', 'sorter.apply': '적용', 'sorter.default': '기본값으로 저장', 'sorter.cancel': '취소',
@@ -570,7 +557,7 @@ const TABLE_KO: KeyTableCopy = {
     shown: '[보임]', hidden: '[숨김]', asc: '[↑ 오름]', desc: '[↓ 내림]', left: '[왼쪽]', bottom: '[아래]',
     raw: '[원문]', rendered: '[렌더링]', list: '[목록]', board: '[칸반]', wiki: '[위키]',
   },
-  sortFields: { priority: '우선순위', created: '생성일', updated: '수정일', status: '상태', assignee: '담당자', title: '제목' },
+  sortFields: { priority: '우선순위', created: '생성일', updated: '수정일', status: '상태', assignee: '담당자', title: '제목', due: '기한' },
   cellFields: { id: 'id', priority: '우선순위', assignee: '담당자', created: '생성일', updated: '수정일', counts: '셈 (n/n)', tags: '태그', epic: '에픽', names: '이름줄' },
   sortAdd: (field) => `${field} (추가)`,
   sortAddHelp: (field) => `${field} (끝에 추가)`,
@@ -597,7 +584,7 @@ const TABLE_JA: KeyTableCopy = {
     'option.detailAt': '詳細の位置', 'option.detailAtHelp': '詳細の位置 (左 ↔ 下)',
     'menu.close': '閉じる', 'menu.up': '一つ上の階層へ',
     'prompt.apply': '適用 (フィルター値の候補があれば挿入)', 'prompt.cancel': 'キャンセルして開く前のカーソルへ',
-    'prompt.next': '検索範囲を切り替え / フィルターを補完', 'prompt.prev': '検索範囲を逆に切り替え / 逆に補完',
+    'prompt.next': 'フィルターを補完', 'prompt.prev': 'フィルターを逆に補完',
     'prompt.up': 'フィルター値の前の候補', 'prompt.down': 'フィルター値の次の候補', 'prompt.clear': '入力をすべて消去', 'prompt.deleteWord': '単語を削除',
     'sorter.down': '下へ', 'sorter.up': '上へ', 'sorter.lower': '順序を後ろへ', 'sorter.raise': '順序を前へ', 'sorter.toggle': '入れる・外す',
     'sorter.flip': '向きを反転', 'sorter.apply': '適用', 'sorter.default': '既定として保存', 'sorter.cancel': 'キャンセル',
@@ -615,7 +602,7 @@ const TABLE_JA: KeyTableCopy = {
     shown: '[表示]', hidden: '[非表示]', asc: '[↑ 昇順]', desc: '[↓ 降順]', left: '[左]', bottom: '[下]',
     raw: '[原文]', rendered: '[レンダリング]', list: '[一覧]', board: '[カンバン]', wiki: '[Wiki]',
   },
-  sortFields: { priority: '優先度', created: '作成日', updated: '更新日', status: '状態', assignee: '担当者', title: 'タイトル' },
+  sortFields: { priority: '優先度', created: '作成日', updated: '更新日', status: '状態', assignee: '担当者', title: 'タイトル', due: '期限' },
   cellFields: { id: 'id', priority: '優先度', assignee: '担当者', created: '作成日', updated: '更新日', counts: '件数 (n/n)', tags: 'タグ', epic: 'エピック', names: '名前の行' },
   sortAdd: (field) => `${field} (追加)`,
   sortAddHelp: (field) => `${field} (末尾に追加)`,
@@ -642,7 +629,7 @@ const TABLE_ZH: KeyTableCopy = {
     'option.detailAt': '详情位置', 'option.detailAtHelp': '详情位置 (左 ↔ 下)',
     'menu.close': '关闭', 'menu.up': '返回上一层',
     'prompt.apply': '应用 (有筛选值候选时插入)', 'prompt.cancel': '取消并回到打开前的光标',
-    'prompt.next': '切换搜索范围 / 补全筛选', 'prompt.prev': '反向切换搜索范围 / 反向补全',
+    'prompt.next': '补全筛选', 'prompt.prev': '反向补全筛选',
     'prompt.up': '上一个筛选值候选', 'prompt.down': '下一个筛选值候选', 'prompt.clear': '清空全部输入', 'prompt.deleteWord': '删除一个词',
     'sorter.down': '向下', 'sorter.up': '向上', 'sorter.lower': '顺序后移', 'sorter.raise': '顺序前移', 'sorter.toggle': '加入·移除',
     'sorter.flip': '反转方向', 'sorter.apply': '应用', 'sorter.default': '保存为默认', 'sorter.cancel': '取消',
@@ -660,7 +647,7 @@ const TABLE_ZH: KeyTableCopy = {
     shown: '[显示]', hidden: '[隐藏]', asc: '[↑ 升序]', desc: '[↓ 降序]', left: '[左]', bottom: '[下]',
     raw: '[原文]', rendered: '[渲染]', list: '[列表]', board: '[看板]', wiki: '[Wiki]',
   },
-  sortFields: { priority: '优先级', created: '创建日期', updated: '更新日期', status: '状态', assignee: '负责人', title: '标题' },
+  sortFields: { priority: '优先级', created: '创建日期', updated: '更新日期', status: '状态', assignee: '负责人', title: '标题', due: '期限' },
   cellFields: { id: 'id', priority: '优先级', assignee: '负责人', created: '创建日期', updated: '更新日期', counts: '计数 (n/n)', tags: '标签', epic: '史诗', names: '名称行' },
   sortAdd: (field) => `${field} (追加)`,
   sortAddHelp: (field) => `${field} (追加到末尾)`,

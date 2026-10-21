@@ -10,12 +10,12 @@ import { panelModule } from './moai-panel-modules.mjs'
 const model = await panelModule('view/list-model.ts')
 const { mountList, ROW_HEIGHT } = await panelModule('view/list.ts')
 const { createStore, initialState } = await panelModule('store.ts')
-const { IssueIndex, NO_MILESTONE, pathKey } = await panelModule('data/index.ts')
+const { IssueIndex, NO_MILESTONE, LOST, pathKey } = await panelModule('data/index.ts')
 const { copyFor } = await panelModule('i18n/index.ts')
 
 const en = copyFor('en')
+const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/moai/${name}`, import.meta.url), 'utf8'))
 const recent = new Date(Date.now() - 86_400_000).toISOString()
-const old = new Date(Date.now() - 40 * 86_400_000).toISOString()
 
 const ROWS = [
   { id: 'se-m1', kind: 'milestone', title: 'v2.0', status: 'todo' },
@@ -23,20 +23,21 @@ const ROWS = [
   { id: 'se-e1.a', kind: 'issue', title: 'List', epic: 'se-e1', status: 'todo', priority: 1, created_at: '2026-01-02T00:00:00Z', assignee: 'raven' },
   { id: 'se-e1.a.x', kind: 'issue', title: 'Rows', epic: 'se-e1', status: 'done', priority: 2, status_since: recent },
   { id: 'se-e1.b', kind: 'issue', title: 'Board', epic: 'se-e1', status: 'in_progress', priority: 0, created_at: '2026-03-02T00:00:00Z', tags: ['ui'] },
-  { id: 'se-e1.c', kind: 'issue', title: 'Archived', epic: 'se-e1', status: 'done', priority: 2, status_since: old },
-  { id: 'se-e1.d', kind: 'issue', title: 'Later', epic: 'se-e1', status: 'todo', priority: 1, deferred_at: recent },
+  { id: 'se-e1.c', kind: 'issue', title: 'Archived', epic: 'se-e1', status: 'done', priority: 2, archived: true },
+  { id: 'se-e1.d', kind: 'issue', title: 'Later', epic: 'se-e1', status: 'todo', priority: 1, deferred_at: recent, shelved_by: 'se-e1.d' },
   { id: 'se-k1', kind: 'backlog', title: 'An idea', status: 'todo' },
 ]
-const index = new IssueIndex(ROWS)
+const { treeOf } = await import('./moai-tree-helper.mjs')
+const build = (rows, tree = treeOf(rows)) => new IssueIndex(rows, tree)
+const index = build(ROWS)
 const at = (id) => index.find(id)
 const EPIC = ['m:se-m1', 'e:se-e1']
 const view = (over = {}) => ({ ...initialState().view, ...over })
 const keys = (lines) => lines.map((line) => line.key)
 // An order as data/query.ts writes it (the store keeps that `Sort`).
 const by = (...fields) => ({ fields: fields.map((field) => { const [key, dir] = field.split(':'); return { key, dir: dir ?? (key === 'created' || key === 'updated' ? 'desc' : 'asc') } }), reversed: false })
-const order = model.sortOrder(by('priority'), index)
 
-test('view toggles: deferred hidden by default, done rows past the archive age hidden unless shown', () => {
+test('view toggles: deferred hidden by default, archived rows (moai\'s `archived`) hidden unless shown', () => {
   const keep = model.viewKeep(view(), index)
   assert.equal(keep(at('se-e1.d')), false, 'deferred')
   assert.equal(keep(at('se-e1.c')), false, 'archived')
@@ -57,90 +58,45 @@ test('view toggles: deferred hidden by default, done rows past the archive age h
   assert.equal(model.hidesAnything(view()), true)
 })
 
-test('archive: a row counts from the day it got to done, a group from the work under it, and 0 days is off', () => {
-  const now = new Date('2026-10-14T12:00:00Z')
-  const day = (n) => new Date(now.getTime() - n * 86_400_000).toISOString()
+test('order: the list draws the rows in the order moai\'s tree gave, whatever the rows\' own fields say', () => {
   const rows = [
-    // A finished epic: its own `status` was never moved to done, but its members are, 30 and 20 days ago.
-    { id: 'e-fin', kind: 'epic', title: 'Finished', status: 'todo', derived_status: 'done', status_since: day(60), created_at: day(60) },
-    { id: 'e-fin.a', kind: 'issue', title: 'a', epic: 'e-fin', status: 'done', status_since: day(30) },
-    { id: 'e-fin.b', kind: 'issue', title: 'b', epic: 'e-fin', status: 'done', status_since: day(20) },
-    // An epic somebody set to done by hand while a member is still open: it stands in the column its members give.
-    { id: 'e-hand', kind: 'epic', title: 'By hand', status: 'done', derived_status: 'in_progress', status_since: day(60), created_at: day(60) },
-    { id: 'e-hand.a', kind: 'issue', title: 'a', epic: 'e-hand', status: 'in_progress', status_since: day(1) },
-    // A group whose members finished two days ago is not old whatever its own stamp says.
-    { id: 'e-new', kind: 'epic', title: 'New', status: 'todo', derived_status: 'done', status_since: day(90), created_at: day(90) },
-    { id: 'e-new.a', kind: 'issue', title: 'a', epic: 'e-new', status: 'done', status_since: day(2) },
-    // The boundary: exactly archive_days whole days is archived (the CLI counts days that have come, `>=`).
-    { id: 'w-edge', kind: 'issue', title: 'edge', status: 'done', status_since: day(14) },
-    { id: 'w-fresh', kind: 'issue', title: 'fresh', status: 'done', status_since: day(13) },
+    { id: 'a', kind: 'issue', title: 'alpha', status: 'todo', priority: 3 },
+    { id: 'b', kind: 'issue', title: 'beta', status: 'todo', priority: 0 },
+    { id: 'c', kind: 'issue', title: 'gamma', status: 'todo', priority: 1 },
   ]
-  const idx = new IssueIndex(rows)
-  const hidden = (days) => {
-    const keep = model.viewKeep(view(), idx, now, days)
-    return rows.filter((row) => !keep(idx.find(row.id))).map((row) => row.id)
-  }
-  assert.deepEqual(hidden(14), ['e-fin', 'e-fin.a', 'e-fin.b', 'w-edge'])
-  assert.deepEqual(hidden(0), [], 'archive_days = 0 turns the archive off')
-  assert.deepEqual(hidden(25), ['e-fin.a'], 'a member 30 days old; the group counts from its latest member, 20 days')
+  const lines = (tree) => model.listLines({ path: [], expanded: [] }, build(rows, tree), () => true).map((line) => line.key)
+  const tree = treeOf(rows)
+  assert.deepEqual(lines(tree), ['a', 'b', 'c'])
+  assert.deepEqual(lines([...tree].reverse()), ['c', 'b', 'a'], 'the tree\'s order, not priority')
+  assert.deepEqual(lines([tree[1], tree[2], tree[0]]), ['b', 'c', 'a'])
+  // A row the tree does not hold stands at the root after the ones it does.
+  assert.deepEqual(lines([tree[2]]), ['c', 'a', 'b'])
 })
 
-test('sort: field by field as moai orders, then (priority, id) or the id after a date', () => {
-  const rows = [
-    { id: 'b', priority: 1, created_at: '2026-01-01T00:00:00Z', status: 'done', title: 'beta' },
-    { id: 'a', priority: 1, status: 'todo', title: 'alpha', assignee: 'zed' },
-    { id: 'c', priority: 0, created_at: '2026-02-01T00:00:00Z', status: 'review', title: 'Gamma', assignee: 'amy' },
-    { id: 'd', status: 'weird', title: 'delta' },
-  ]
-  const sorted = (sort) => [...rows].sort(model.sortCompare(sort)).map((row) => row.id)
-  assert.deepEqual(sorted(by('priority')), ['c', 'a', 'b', 'd'])
-  assert.deepEqual(sorted(by('created:desc')), ['c', 'b', 'a', 'd'])
-  // A stamp that is not there compares as the empty string, as in the CLI: first when ascending.
-  assert.deepEqual(sorted(by('created:asc')), ['a', 'd', 'b', 'c'])
-  // The column is `status`, one name with data/query.ts and the key table.
-  assert.deepEqual(sorted(by('status')), ['a', 'c', 'b', 'd'])
-  // An unassigned row goes last when ascending and first when descending (SQL's reversed order).
-  assert.deepEqual(sorted(by('assignee:asc')), ['c', 'a', 'b', 'd'])
-  assert.deepEqual(sorted(by('assignee:desc')), ['b', 'd', 'a', 'c'])
-  // A title compares without regard to case: `Gamma` is not before `alpha`.
-  assert.deepEqual(sorted(by('title')), ['a', 'b', 'd', 'c'])
-  // The whole list turned around, ties included.
-  assert.deepEqual(sorted({ ...by('priority'), reversed: true }), ['d', 'b', 'a', 'c'])
-  // Plain fields (no reverse switch) order the same.
-  assert.deepEqual(sorted(by('title').fields), ['a', 'b', 'd', 'c'])
-})
-
-test('sort: the list orders rows as `moai show --sort` printed them in the CLI fixture', async () => {
-  const query = await panelModule('data/query.ts')
-  const fixture = JSON.parse(readFileSync(new URL('./fixtures/moai/query-v016.json', import.meta.url), 'utf8'))
-  let checked = 0
-  for (const item of fixture.cases) {
-    if (item.sort === undefined) continue
-    const parsed = query.parseSort(item.sort)
-    if (!parsed.ok) continue
-    // The store keeps query.ts's own order: the parsed fields are the list's sort as they are.
-    const sort = { fields: parsed.value, reversed: false }
-    const filter = query.parseFilter(item.filter, item.flags)
-    assert.ok(filter.ok, item.name)
-    const kept = query.applyFilter(fixture.rows, filter.value)
-    const ids = [...kept].sort(model.sortCompare(sort)).map((row) => row.id)
-    if (item.reverse) ids.reverse()
-    assert.deepEqual(ids, item.ids, item.name)
-    checked++
+test('order: a real tree file is drawn as printed, sorted or not (tree.json, tree-updated.json)', () => {
+  const rows = [...fixture('rows.json'), ...fixture('backlog.json').map((row) => ({ ...row, kind: 'backlog' }))]
+  const draw = (name, path = []) => {
+    const idx = new IssueIndex(rows, fixture(name))
+    return model.listLines({ path, expanded: [] }, idx, () => true).map((line) => line.key)
   }
-  assert.ok(checked >= 8, `only ${checked} sorted CLI cases were checked`)
+  const tree = fixture('tree.json')
+  assert.deepEqual(draw('tree.json'), ['fx-ms01', NO_MILESTONE, LOST])
+  const printed = tree.filter((line) => line.home.join('/') === 'none' && line.id).map((line) => line.id)
+  assert.deepEqual(draw('tree.json', [NO_MILESTONE]).filter((key) => key !== '..'), printed)
+  const updated = fixture('tree-updated.json').filter((line) => line.home.join('/') === 'none' && line.id).map((line) => line.id)
+  assert.deepEqual(draw('tree-updated.json', [NO_MILESTONE]).filter((key) => key !== '..'), updated)
 })
 
 test('lines: .. below the root, folders first, open folders unfolded in place with their branches', () => {
   const keep = model.viewKeep(view(), index)
-  const root = model.listLines({ path: [], expanded: [] }, index, keep, order)
+  const root = model.listLines({ path: [], expanded: [] }, index, keep)
   assert.deepEqual(keys(root), ['se-m1', NO_MILESTONE])
   assert.equal(root[1].kind, 'bucket')
-  const inside = model.listLines({ path: EPIC, expanded: [] }, index, keep, order)
+  const inside = model.listLines({ path: EPIC, expanded: [] }, index, keep)
   assert.deepEqual(keys(inside), ['..', 'se-e1.a', 'se-e1.b'])
   assert.equal(inside[1].dir, true)
   assert.deepEqual(inside[0].path, ['m:se-m1'])
-  const open = model.listLines({ path: EPIC, expanded: [pathKey([...EPIC, 'i:se-e1.a'])] }, index, keep, order)
+  const open = model.listLines({ path: EPIC, expanded: [pathKey([...EPIC, 'i:se-e1.a'])] }, index, keep)
   assert.deepEqual(keys(open), ['..', 'se-e1.a', 'se-e1.a.x', 'se-e1.b'])
   assert.equal(open[2].depth, 2)
   assert.equal(model.twigText(open[2].twig), '└─')
@@ -150,9 +106,6 @@ test('lines: .. below the root, folders first, open folders unfolded in place wi
   assert.equal(model.parentLine(open, 3), -1)
   assert.deepEqual(model.folderOf(open[1]), { path: [...EPIC, 'i:se-e1.a'], open: true })
   assert.equal(model.folderOf(open[3]), null)
-  // Sorting by title puts Board before List.
-  const byTitle = model.listLines({ path: EPIC, expanded: [] }, index, keep, model.sortOrder(by('title'), index))
-  assert.deepEqual(keys(byTitle), ['..', 'se-e1.a', 'se-e1.b'], 'folders still lead')
   assert.equal(model.firstKey(inside), 'se-e1.a')
   assert.equal(model.segKey('e:se-e1'), 'se-e1')
   assert.equal(model.segKey(NO_MILESTONE), NO_MILESTONE)
@@ -175,6 +128,11 @@ test('columns: the ones turned on that fit, dropping dates, epic, assignee, tags
   assert.equal(model.shortDate(undefined, now), '')
   assert.deepEqual(model.statusGlyph('review'), { glyph: '?', tone: 'review' })
   assert.deepEqual(model.statusGlyph('blocked'), { glyph: '○', tone: 'other' })
+  // With moai's boot answer the glyph is moai's: configured ones as given, an unnamed column the unknown glyph.
+  const boot = { glyphs: { todo: 'T', blocked: 'B' }, unknown_glyph: 'U' }
+  assert.deepEqual(model.statusGlyph('todo', boot), { glyph: 'T', tone: 'todo' })
+  assert.deepEqual(model.statusGlyph('blocked', boot), { glyph: 'B', tone: 'other' })
+  assert.deepEqual(model.statusGlyph('review', boot), { glyph: 'U', tone: 'review' })
 })
 
 test('windowing: only the rows near the viewport, and the offset that reveals a row', () => {
@@ -198,7 +156,7 @@ function mount(rows, { state: over = {}, width = 800, height = 280, detailVisibl
   const size = { height }
   Object.defineProperty(root, 'clientHeight', { configurable: true, get: () => size.height })
   const store = createStore({ ...initialState(), ...over })
-  const idx = new IssueIndex(rows)
+  const idx = build(rows)
   const calls = []
   const intents = {
     enter: (path, cursor) => store.dispatch(cursor === undefined ? { type: 'enter', path } : { type: 'enter', path, cursor }),
@@ -255,7 +213,7 @@ test('list view: rows, columns, the name line, and going in and out', () => {
   epic.dispatchEvent(new view.dom.window.MouseEvent('dblclick', { bubbles: true }))
   assert.deepEqual(store.getState().path, EPIC)
   assert.equal(store.getState().cursor, 'se-e1.a')
-  // Folders lead whatever the order: se-e1.a (List) has a child, so it stands before Board.
+  // The order is the tree's: se-e1.a (List, with a child) stands before Board whatever the sort editor says.
   assert.deepEqual(lines().map((line) => line.dataset.key), ['..', 'se-e1.a', 'se-e1.b'])
   store.dispatch({ type: 'sort', sort: by('priority:desc') })
   assert.deepEqual(lines().map((line) => line.dataset.key), ['..', 'se-e1.a', 'se-e1.b'])
@@ -456,23 +414,38 @@ test('list view: a pane that only gets taller draws the rows its new height show
   assert.equal(disconnected.length, 1)
 })
 
-test('narrow: a day in the filter is the reader\'s own day, not a UTC one', () => {
-  const zone = process.env.TZ
-  process.env.TZ = 'Asia/Seoul'
-  try {
-    // 07:00 on the 14th in Seoul is the 13th in UTC; 01:00 on the 15th in Seoul is the 14th in UTC.
-    const rows = [
-      { id: 'a1', kind: 'issue', title: 'Morning', status: 'todo', updated_at: '2026-10-13T22:00:00Z' },
-      { id: 'a2', kind: 'issue', title: 'Night', status: 'todo', updated_at: '2026-10-14T16:00:00Z' },
-    ]
-    const idx = new IssueIndex(rows)
-    const state = { ...initialState(), filter: { text: 'updated_at=2026-10-14', applied: 'updated_at=2026-10-14' } }
+test('narrow: a filter or a search takes moai\'s ids; none yet means every row passes; a search reveals what the view hides', () => {
+  const rows = [
+    { id: 'a', kind: 'issue', title: 'Alpha', status: 'todo' },
+    { id: 'b', kind: 'issue', title: 'Beta', status: 'todo', shelved_by: 'b' },
+    { id: 'c', kind: 'issue', title: 'Gamma', status: 'done', archived: true },
+  ]
+  const idx = build(rows)
+  const matched = (ids) => ({ key: 'k', ids: ids === null ? null : new Set(ids), loading: false, problem: null })
+  const base = { ...initialState(), matched: matched(null) }
+  const drawn = (state) => {
     const kept = model.narrow(state, idx)
-    assert.deepEqual(rows.map((row, n) => kept.keep(n) ? row.id : null).filter(Boolean), ['a1'])
-  } finally {
-    if (zone === undefined) delete process.env.TZ
-    else process.env.TZ = zone
+    return rows.filter((row) => kept.keep(idx.find(row.id))).map((row) => row.id)
   }
+  // Nothing asked: the view alone (deferred and archived rows go).
+  assert.deepEqual(drawn(base), ['a'])
+  // A filter on whose answer is {a}: only a. An answer not yet in (null ids): every row passes the question.
+  const filtered = { ...base, filter: { text: 'status=todo', applied: 'status=todo' } }
+  assert.deepEqual(drawn({ ...filtered, matched: matched(['a']) }), ['a'])
+  assert.deepEqual(drawn({ ...filtered, matched: matched(['b']) }), [], 'the view still hides a deferred row a filter found')
+  assert.deepEqual(drawn({ ...filtered, matched: matched(null) }), ['a'], 'null ids: the filter keeps everything the view shows')
+  const kept = model.narrow({ ...filtered, view: { ...filtered.view, hideDeferred: false }, matched: matched(['a', 'b']) }, idx)
+  assert.deepEqual([kept.match(0), kept.match(1), kept.match(2)], [true, true, false])
+  // A search lifts the view's hiding for what moai found, drawn dim as revealed; the hidden note does not count it.
+  const searching = { ...base, search: { text: 'be', open: true }, matched: matched(['b', 'c']) }
+  const found = model.narrow(searching, idx)
+  assert.deepEqual(drawn(searching), ['b', 'c'])
+  assert.deepEqual([found.revealed(1), found.revealed(2), found.revealed(0)], [true, true, false])
+  assert.deepEqual([found.hidden(1), found.hidden(2)], [false, false])
+  assert.deepEqual([found.hiddenBy(idx.rows[1]), found.hiddenBy(idx.rows[2]), found.hiddenBy(idx.rows[0])], ['deferred', 'archived', undefined])
+  // With a filter alone the view's hiding stands, and the hidden rows are what the note counts.
+  const hiddenFilter = model.narrow({ ...filtered, matched: matched(['a', 'b', 'c']) }, idx)
+  assert.deepEqual([hiddenFilter.hidden(1), hiddenFilter.hidden(2), hiddenFilter.hidden(0)], [true, true, false])
 })
 
 test('list view: NEW before the name on unread rows only; archived rows and a source that says nothing show none (se-ehdi.zcx)', () => {

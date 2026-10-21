@@ -9,6 +9,8 @@ import { panelModule } from './moai-panel-modules.mjs'
 const F = await panelModule('view/detail-format.ts')
 const { mountDetail, renderBody } = await panelModule('view/detail.ts')
 const { IssueIndex } = await panelModule('data/index.ts')
+const { treeOf } = await import('./moai-tree-helper.mjs')
+const build = (rows, tree = treeOf(rows)) => new IssueIndex(rows, tree)
 const { initialState, reduce } = await panelModule('store.ts')
 const { copyFor } = await panelModule('i18n/index.ts')
 
@@ -20,9 +22,9 @@ const ROWS = [
   { id: 'se-e1', kind: 'epic', title: 'E3 views', milestone: 'se-m1', status: 'todo' },
   { id: 'se-e1.a', kind: 'issue', title: 'List', epic: 'se-e1', derived_epic: 'se-e1', status: 'done', priority: 1 },
   { id: 'se-e1.b', kind: 'issue', title: 'Board', epic: 'se-e1', derived_epic: 'se-e1', status: 'in_progress', blocked_by: ['se-e1.a', 'se-e1.c', 'se-gone'] },
-  { id: 'se-e1.c', kind: 'issue', title: 'Detail', epic: 'se-e1', derived_epic: 'se-e1', status: 'todo', deferred_at: '2026-10-01T00:00:00Z' },
+  { id: 'se-e1.c', kind: 'issue', title: 'Detail', epic: 'se-e1', derived_epic: 'se-e1', status: 'todo', deferred_at: '2026-10-01T00:00:00Z', shelved_by: 'se-e1.c' },
 ]
-const index = new IssueIndex(ROWS)
+const index = build(ROWS)
 
 test('head: status label and tone, priority, kind and deferral', () => {
   const head = F.headOf({ id: 'x', title: 'T', status: 'in_progress', priority: 1, kind: 'epic' }, ko)
@@ -31,7 +33,7 @@ test('head: status label and tone, priority, kind and deferral', () => {
   assert.equal(F.headOf({ id: 'x' }, en).title, 'x')
   assert.equal(F.headOf({ id: 'x', status: 'todo', deferred_at: '2026-10-01T00:00:00Z', deferred_reason: 'later' }, en).deferred, 'later')
   // A closed row is not deferred whatever it says.
-  assert.equal(F.headOf({ id: 'x', status: 'done', deferred_at: '2026-10-01T00:00:00Z' }, en).deferred, '')
+  assert.equal(F.headOf({ id: 'x', status: 'done', deferred_at: '2026-10-01T00:00:00Z', shelved_by: 'se-e1.c' }, en).deferred, '')
 })
 
 test('fields: only those with a value, epic and milestone with their titles', () => {
@@ -56,7 +58,7 @@ test('blockers: done, open, deferred and unknown; blocks come from the rows that
 })
 
 test('roll-up: n/n of the work under a group, none for work', () => {
-  const rollup = F.rollupOf(ROWS[1], index)
+  const rollup = F.rollupOf(ROWS[1], index, new Map([['se-e1', { todo: 1, in_progress: 1, done: 1 }]]))
   assert.equal(rollup.done, 1)
   assert.equal(rollup.work, 3)
   assert.equal(rollup.percent, 33)
@@ -75,7 +77,7 @@ test('roll-up: an issue with `.child` ids is a folder in the list and has the ro
     { id: 't-1.b', kind: 'issue', title: 'B', status: 'review' },
     { id: 't-2', kind: 'issue', title: 'Plain', status: 'todo' },
   ]
-  const idx = new IssueIndex(rows)
+  const idx = build(rows)
   const rollup = F.rollupOf(rows[0], idx)
   assert.deepEqual([rollup.done, rollup.work, rollup.percent], [1, 2, 50])
   assert.deepEqual(rollup.byStatus, [['review', 1], ['done', 1]])
@@ -84,7 +86,7 @@ test('roll-up: an issue with `.child` ids is a folder in the list and has the ro
 
 test('blockers: `show` says what each blocker is; a finished one is not "not found" because the index holds open work only', () => {
   // The index here holds prime rows (open work): the blocker that finished is not in it.
-  const open = new IssueIndex([{ id: 'p-1', title: 'Open', status: 'todo' }, { id: 'p-2', title: 'Blocked', status: 'todo', blocked_by: ['p-1', 'p-done', 'p-late', 'p-gone'] }])
+  const open = build([{ id: 'p-1', title: 'Open', status: 'todo' }, { id: 'p-2', title: 'Blocked', status: 'todo', blocked_by: ['p-1', 'p-done', 'p-late', 'p-gone'] }])
   const row = {
     id: 'p-2',
     blocked_by: ['p-1', 'p-done', 'p-late', 'p-gone'],
@@ -109,7 +111,7 @@ test('a row put off through its epic carries shelved_by (not deferred_at): the h
   view.render(stateWith({ value: { id: 'x', row: { id: 'x', title: 'Member', status: 'todo', shelved_by: 'trk-ep01' } } }), index)
   assert.ok([...root.querySelectorAll('.moai-detail-chips .m-chip-warn')].some((chip) => chip.textContent === 'Deferred — under trk-ep01'))
   // An epic whose members are all done is `todo` as written and `done` as it stands: the blocker is freed.
-  const idx = new IssueIndex([
+  const idx = build([
     { id: 'e-1', kind: 'epic', title: 'Epic', status: 'todo', derived_status: 'done' },
     { id: 'e-1.a', kind: 'issue', title: 'A', epic: 'e-1', status: 'done' },
   ])
@@ -128,7 +130,7 @@ test('what `show --json` really sends: children are ids, a due date is due_on, a
     ],
     work: [{ provider: 'anthropic', model: 'opus-5', tokens: 12345, grade: 'medium', why: 'wrote the list view', at: '2026-10-14T06:11:19Z', by: 'Tester' }],
   }
-  const idx = new IssueIndex([{ id: 'sw-1', title: 'Parent', status: 'todo' }, { id: 'sw-1.a', title: 'Child of list', status: 'todo' }])
+  const idx = build([{ id: 'sw-1', title: 'Parent', status: 'todo' }, { id: 'sw-1.a', title: 'Child of list', status: 'todo' }])
   assert.deepEqual(F.childrenOf(row, idx), [{ id: 'sw-1.a', title: 'Child of list' }, { id: 'sw-1.b' }, { id: 'sw-1.c', title: 'Given' }])
   assert.equal(F.fieldsOf(row, idx, en).find((f) => f.key === 'due').value, '2026-12-31')
   assert.equal(F.journalOf(row, en)[0].text, 'To do → In progress — picked up: start with the pure model')
@@ -273,13 +275,13 @@ test('pane: a task lists its blockers with marks; a redraw keeps the opened hist
   assert.equal(root.querySelector('details[data-fold=journal]').open, true)
 })
 
-test('roll-up: a milestone or epic counts as the list does, with the `moai status` counts when the index has them', () => {
+test('roll-up: a milestone or epic counts as the list does, n/n from the tree progress, per-status counts from `status --json`', () => {
   // The epic's members the index holds: one done of three. `moai status` counts six, four done (archived done ones).
-  const counted = new IssueIndex(ROWS, new Map([['se-e1', [4, 6]]]))
-  const rollup = F.rollupOf(ROWS[1], counted)
+  const counted = build(ROWS, treeOf(ROWS).map((line) => (line.id === 'se-e1' ? { ...line, progress: { done: 4, total: 6 } } : line)))
+  const rollup = F.rollupOf(ROWS[1], counted, new Map([['se-e1', { todo: 1, in_progress: 1, done: 4 }]]))
   assert.deepEqual([rollup.done, rollup.work, rollup.percent], [4, 6, 66])
   assert.deepEqual([rollup.done, rollup.work], counted.tally(counted.dirPath(counted.find('se-e1'))), 'the n/n the list draws')
-  // The done members the index does not hold count as done: the statuses add up to the total.
+  // A group's per-status counts are the `moai status --json` counts (they include the archive); the n/n is the tree's.
   assert.deepEqual(rollup.byStatus, [['todo', 1], ['in_progress', 1], ['done', 4]])
 })
 
@@ -293,14 +295,14 @@ test('pane: a search keystroke repaints the id and title only; the body and sect
   const title = root.querySelector('.moai-detail-title')
   assert.ok(body && journal)
   assert.equal(title.querySelector('mark'), null)
-  view.render({ ...state, search: { text: 'Boa', scope: 'all', open: true } }, index)
+  view.render({ ...state, search: { text: 'Boa', open: true } }, index)
   assert.ok(title.querySelector('mark'), 'the hit is painted')
   assert.equal(root.querySelector('.moai-detail-body'), body)
   assert.equal(root.querySelector('details[data-fold=journal]'), journal)
   assert.equal(root.querySelector('.moai-detail-title'), title)
-  view.render({ ...state, search: { text: 'Boar', scope: 'all', open: true } }, index)
+  view.render({ ...state, search: { text: 'Boar', open: true } }, index)
   assert.equal(title.querySelector('mark').textContent, 'Boar')
-  view.render({ ...state, search: { text: '', scope: 'all', open: false } }, index)
+  view.render({ ...state, search: { text: '', open: false } }, index)
   assert.equal(title.querySelector('mark'), null)
   assert.equal(root.querySelector('.moai-detail-body'), body)
 })
@@ -314,10 +316,10 @@ test('pane: NEW first among the chips for an unread row; not for a read or archi
   view.render(stateWith({ value: { id: ROWS[3].id, row: ROWS[3] } }), index)
   assert.equal(chips().querySelector('.m-chip-new'), null)
   // The list's own row says it is unread; the archive tag is only there too.
-  const listed = new IssueIndex(ROWS.map((one) => (one.id === 'se-e1.b' ? { ...one, unread: true } : one)))
+  const listed = build(ROWS.map((one) => (one.id === 'se-e1.b' ? { ...one, unread: true } : one)))
   view.render(stateWith({ value: { id: ROWS[3].id, row: ROWS[3] } }), listed)
   assert.equal(chips().firstChild.textContent, 'NEW', 'the row is looked up in the list when show did not carry it')
-  const archived = new IssueIndex(ROWS.map((one) => (one.id === 'se-e1.b' ? { ...one, unread: true, archived: true } : one)))
+  const archived = build(ROWS.map((one) => (one.id === 'se-e1.b' ? { ...one, unread: true, archived: true } : one)))
   view.render(stateWith({ value: { id: row.id, row } }), archived)
   assert.equal(chips().querySelector('.m-chip-new'), null)
 })

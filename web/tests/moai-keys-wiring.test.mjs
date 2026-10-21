@@ -9,6 +9,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 
 const { createStore } = await panelModule('store.ts')
 const { IssueIndex } = await panelModule('data/index.ts')
+const { treeOf } = await import('./moai-tree-helper.mjs')
 const { copyFor } = await panelModule('i18n/index.ts')
 const { mountShell } = await panelModule('view/shell.ts')
 const { PANES } = await panelModule('view/panes.ts')
@@ -44,7 +45,7 @@ function boot({ wiki, read, rows = ROWS, platform = 'other', sortDefault = creat
   const dom = new JSDOM('<!doctype html><html lang="en"><body><div id="moai-app"></div></body></html>', { pretendToBeVisual: true })
   const doc = dom.window.document
   const store = createStore()
-  const index = new IssueIndex(rows)
+  const index = new IssueIndex(rows, treeOf(rows))
   const chosen = []
   const shell = mountShell(doc.getElementById('moai-app'), {
     document: doc,
@@ -233,9 +234,10 @@ test('keys: / opens the search and puts the caret in it; typing there is text, E
   for (const key of ['j', 'k', 'G', ' ', 'q']) assert.equal(panel.press(key).defaultPrevented, false, `${key} types`)
   assert.equal(panel.state().cursor, 'e1.a')
   assert.equal(panel.keys.router.state().menu, null)
-  // Tab cycles the scope (prompt mode), Esc closes the search and puts the focus back on the list.
-  panel.press('Tab')
-  assert.equal(panel.state().search.scope, 'id')
+  // There is no scope to cycle: Tab in the search is not taken (the focus moves as the browser moves it), and
+  // Esc closes the search and puts the focus back on the list.
+  assert.equal(panel.press('Tab').defaultPrevented, false)
+  assert.deepEqual(Object.keys(panel.state().search).sort(), ['open', 'text'])
   panel.press('Escape')
   assert.equal(panel.state().search.open, false)
   assert.equal(panel.doc.activeElement, panel.$('.moai-list'))
@@ -263,7 +265,7 @@ test('keys: SPC s sorts by a field; SPC s e opens the sort editor (sorter mode),
   const cursorRow = () => panel.$('.m-sort-pop [data-cursor]')?.dataset.key
   assert.equal(cursorRow(), 'title', 'the editor opens on the first field')
   panel.press('j')
-  assert.equal(cursorRow(), 'id')
+  assert.equal(cursorRow(), 'due')
   panel.seq('k', 'k', 'k')
   assert.equal(cursorRow(), 'status')
   panel.press(' ')
@@ -283,6 +285,13 @@ test('keys: SPC s sorts by a field; SPC s e opens the sort editor (sorter mode),
   assert.equal(panel.state().toolbar.sortOpen, false)
   assert.notDeepEqual(panel.state().sort, before, 'Enter keeps it')
   assert.equal(panel.keys.context().mode, 'browse')
+})
+
+test('keys: SPC s w sorts by the deadline (moai\'s `due`)', () => {
+  const panel = inEpic()
+  panel.seq(' ', 's', 'w')
+  assert.deepEqual(panel.state().sort.fields, [{ key: 'due', dir: 'asc' }])
+  assert.equal(panel.$('.m-whichkey [data-key="w"] .m-wk-state').textContent, '[↑ asc]')
 })
 
 test('keys: wiki mode — keys reach the wiki pane, SPC v r toggles raw, Tab cycles links and Esc gets out to the tab bar', async () => {

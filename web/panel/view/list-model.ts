@@ -1,16 +1,16 @@
-// The list view's pure half (design §4.1, §4.6–4.8; TUI nav.rs, view.rs, query.rs order): what the view
-// toggles keep, the order rows sort in, the flat lines of the tree with open folders unfolded, the columns
-// that fit, and the windowing math of the virtual scroll. No DOM; view/list.ts draws from these and
-// tests/moai-e3-list.test.mjs checks them.
+// The list view's pure half (design §4.1, §4.6–4.8): what the view toggles keep, the flat lines of the tree with
+// open folders unfolded, the columns that fit, and the windowing math of the virtual scroll. No DOM; view/list.ts
+// draws from these and tests/moai-e3-list.test.mjs checks them.
+//
+// Where a row stands and in which order is moai's (data/index.ts: `tui --json --deep`); what the filter and the
+// search find is moai's too (store.ts Matched). What stays here is drawing: which of those rows the view toggles show.
 
-import { archiveCandidate, isBacklog, isGroup, LOST, NO_MILESTONE, pathKey, type IssueIndex, type Keep, type Order, type Path, type Row, type Seg, type Twig } from "../data/index.ts"
-import { applyFilter, hits, orderBy, parseFilter, type Flags, type Sort, type SortField, type SortKey } from "../data/query.ts"
+import { isBacklog, LOST, NO_MILESTONE, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg, type Twig } from "../data/index.ts"
+import type { Boot } from "../data/source.ts"
+import type { SortKey } from "../data/query.ts"
 import type { HiddenReason } from "../i18n/index.ts"
-import type { ColumnName, State, ViewSettings } from "../store.ts"
+import { matchKey, type ColumnName, type State, type ViewSettings } from "../store.ts"
 import { visibleColumns } from "./responsive.ts"
-
-/** Days a done row stands before it reads as archived (moai's `archive_days` default). */
-export const ARCHIVE_DAYS = 14
 
 /** One line of the list. `key` is what the store's cursor holds for it: a row's id, `..`, or a bucket's seg. */
 export type ListLine =
@@ -20,40 +20,18 @@ export type ListLine =
 
 export const UP_KEY = ".."
 
-/** A row's column: a group's is read from its members. */
+/** A row's column: moai's `derived_status` (a group's is read from its members), else its own. */
 export function statusOf(row: Row): string {
-  const status = isGroup(row) ? row.derived_status ?? row.status : row.status
+  const status = row.derived_status ?? row.status
   return typeof status === "string" ? status : ""
 }
 
 /**
- * What dates a group for the archive (data/index.ts archiveCandidate): the work under it, each by the day it
- * got to its column. A member that is put off is not counted, but a group that reads done by putting its
- * remaining members off counts from the day they were put off (moai's `report::Stand::entered`); the group's
- * own deferral does not take its members out of the count.
+ * Why the view toggles (`SPC v`) hide a row, or undefined when they show it: a hidden status column, a deferral
+ * (moai's `shelved_by`), the backlog, or the archive (a row no list printed, or one `show --archived` marked, unless
+ * archived rows are shown). There is no clock here: what is the archive is moai's `archive_days`.
  */
-function stamps(index: IssueIndex, at: number): Row[] {
-  const group = index.rows[at]!
-  const out: Row[] = []
-  for (const member of index.progress(index.dirPath(at)).work) {
-    const row = index.rows[member]!
-    const shelf = index.shelvedAt(member)
-    if (shelf === undefined || shelf === group.id) {
-      out.push(row)
-      continue
-    }
-    const holder = index.find(shelf)
-    const since = holder === undefined ? undefined : index.rows[holder]!.deferred_at
-    if (typeof since === "string") out.push({ id: row.id, status_since: since })
-  }
-  return out
-}
-
-/**
- * Why the view toggles (`SPC v`) hide a row, or undefined when they show it: a hidden status column, a
- * deferral, the backlog, or the archive (done rows past the archive age, unless archived rows are shown).
- */
-export function viewHides(view: ViewSettings, index: IssueIndex, now: Date = new Date(), archiveDays = ARCHIVE_DAYS): (at: number) => HiddenReason | undefined {
+export function viewHides(view: ViewSettings, index: IssueIndex): (at: number) => HiddenReason | undefined {
   const hidden = new Set(view.hiddenStatuses)
   return (at) => {
     const row = index.rows[at]!
@@ -61,26 +39,17 @@ export function viewHides(view: ViewSettings, index: IssueIndex, now: Date = new
     if (view.hideDeferred && index.shelvedAt(at) !== undefined) return "deferred"
     if (view.hideBacklog && isBacklog(row)) return "backlog"
     if (view.showArchived) return undefined
-    return archiveCandidate(row, now, archiveDays, isGroup(row) ? stamps(index, at) : undefined) ? "archived" : undefined
+    return row.archived === true ? "archived" : undefined
   }
 }
 
 /** What the view toggles keep (`SPC v`): hidden columns, deferred, backlog and archived rows go. */
-export function viewKeep(view: ViewSettings, index: IssueIndex, now: Date = new Date(), archiveDays = ARCHIVE_DAYS): Keep {
-  const hides = viewHides(view, index, now, archiveDays)
+export function viewKeep(view: ViewSettings, index: IssueIndex): Keep {
+  const hides = viewHides(view, index)
   return (at) => hides(at) === undefined
 }
 
-/**
- * The flags the filter text is read with. The panel's view toggles do all the hiding (done by status column,
- * deferred, backlog, the archive — {@link viewHides}), so the filter's own CLI defaults are all opened here and
- * the two never disagree about a row. Polarity: query.ts's flags say "let in" (`archived: true` lets the
- * archive in), as the store's `view.showArchived` does; the store's `hide*` toggles are the other way round, and
- * the filter never reads them.
- */
-export const FILTER_FLAGS: Flags = { all: true, archived: true, backlog: true }
-
-/** The rows the list and board draw, from the view toggles, the applied filter and the search. */
+/** The rows the list and board draw, from the view toggles and what moai found for the filter and the search. */
 export interface Narrow {
   /** Drawn: what the filter passes and, with a search on, what it finds whether the view hides it or not
    *  (design §4.4: a search lifts the view's hiding); with no search, what the view keeps. */
@@ -90,9 +59,8 @@ export interface Narrow {
   /** A drawn row that the view hides and only the search shows: drawn dim, marked hidden. */
   revealed: Keep
   /**
-   * The rows the "N hidden" notes count: the view hides them, and the user's own filter and search would show
-   * them. A row the filter drops is not "hidden", it is filtered; a row the CLI would hide by default but the
-   * view shows (a done row in an unhidden column) is not hidden either.
+   * The rows the "N hidden" notes count: the view hides them, and the person's own filter and search would show
+   * them. A row the filter drops is not "hidden", it is filtered.
    */
   hidden: Keep
   /** Why the view hides a row the search found, by the row itself (the toolbar's note); undefined otherwise. */
@@ -100,30 +68,22 @@ export interface Narrow {
   searching: boolean
 }
 
-type NarrowState = Pick<State, "view"> & { search: Pick<State["search"], "text" | "scope">; filter: Pick<State["filter"], "applied"> }
+type NarrowState = Pick<State, "view" | "matched"> & { search: Pick<State["search"], "text">; filter: Pick<State["filter"], "applied"> }
+
+let narrowed: { index: IssueIndex; key: string; matched: State["matched"]; value: Narrow } | null = null
 
 /**
- * Epoch seconds to the reader's wall clock (query.ts Context.local): a `YYYY-MM-DD` or `YYYY-MM-DD HH:MM` in the
- * filter is the reader's own day, as `moai show --filter` reads it, not a UTC one.
+ * {@link Narrow} for a state; the list, the board, the toolbar and main.ts share one answer per change. While moai
+ * has not answered the question on screen the ids it gave last stand; before any answer every row passes.
  */
-const readerClock = (epoch: number): number => epoch - new Date(epoch * 1000).getTimezoneOffset() * 60
-
-let narrowed: { index: IssueIndex; key: string; value: Narrow } | null = null
-
-/** {@link Narrow} for a state; the list, the board, the toolbar and main.ts share one answer per change. */
-export function narrow(state: NarrowState, index: IssueIndex, now: Date = new Date()): Narrow {
-  const key = JSON.stringify([state.view, state.search.text, state.search.scope, state.filter.applied])
-  if (narrowed && narrowed.index === index && narrowed.key === key) return narrowed.value
-  const hides = viewHides(state.view, index, now)
-  const parsed = parseFilter(state.filter.applied, FILTER_FLAGS)
-  // The store applies only a text that parses; a bad one here (set from outside) narrows nothing.
-  const passed = state.filter.applied.trim() !== "" && parsed.ok ? new Set(applyFilter(index.rows, parsed.value, { now: now.toISOString().replace(/\.\d+Z$/, "Z"), local: readerClock })) : null
-  const q = state.search.text.trim()
-  const searching = q !== ""
-  const wanted = (at: number) => {
-    const row = index.rows[at]!
-    return (passed === null || passed.has(row)) && (!searching || hits(row, q, state.search.scope))
-  }
+export function narrow(state: NarrowState, index: IssueIndex): Narrow {
+  const key = JSON.stringify([state.view, state.search.text, state.filter.applied])
+  if (narrowed && narrowed.index === index && narrowed.key === key && narrowed.matched === state.matched) return narrowed.value
+  const hides = viewHides(state.view, index)
+  const asking = matchKey(state) !== ""
+  const ids = asking ? state.matched.ids : null
+  const searching = state.search.text.trim() !== ""
+  const wanted = (at: number) => ids === null || ids.has(index.rows[at]!.id)
   const value: Narrow = {
     match: wanted,
     keep: (at) => wanted(at) && (searching || hides(at) === undefined),
@@ -139,7 +99,7 @@ export function narrow(state: NarrowState, index: IssueIndex, now: Date = new Da
     })(),
     searching,
   }
-  narrowed = { index, key, value }
+  narrowed = { index, key, matched: state.matched, value }
   return value
 }
 
@@ -156,38 +116,19 @@ export const SHOW_ALL: Partial<ViewSettings> = { hiddenStatuses: [], hideDeferre
 /** True when the toggles that "show all" lifts hide something. */
 export const hidesAnything = (view: ViewSettings): boolean => view.hiddenStatuses.length > 0 || view.hideDeferred || view.hideBacklog
 
-// ── order ──────────────────────────────────────────────────────────────
-
-/**
- * The rows' order for a sort. It is moai's `order_by` as data/query.ts ports it — the one that
- * tests/moai-query.test.mjs holds to the order `moai show --sort` prints: field by field (a title compares
- * without regard to case, an unassigned row goes last when ascending), then `(priority, id)`, or only the id
- * when the last field is a date; `reversed` turns the whole list. The store keeps query.ts's {@link Sort}.
- */
-export function sortCompare(sort: Sort | ReadonlyArray<SortField>): (a: Row, b: Row) => number {
-  const { fields, reversed } = "fields" in sort ? sort : { fields: sort, reversed: false }
-  return (a, b) => orderBy(a, b, fields, reversed)
-}
-
-/** {@link sortCompare} over the index's row positions, as {@link IssueIndex.entries} takes it. */
-export function sortOrder(sort: Sort | ReadonlyArray<SortField>, index: IssueIndex): Order {
-  const compare = sortCompare(sort)
-  return (a, b) => compare(index.rows[a]!, index.rows[b]!)
-}
-
 // ── lines ──────────────────────────────────────────────────────────────
 
 /**
  * The listing at `state.path` with the open folders unfolded in place: `..` first below the root, then each
- * level's folders, rows and buckets in {@link IssueIndex.entries} order.
+ * level's folders, rows and buckets in moai's order ({@link IssueIndex.entries}).
  */
-export function listLines(state: Pick<State, "path" | "expanded">, index: IssueIndex, keep: Keep, order: Order): ListLine[] {
+export function listLines(state: Pick<State, "path" | "expanded">, index: IssueIndex, keep: Keep): ListLine[] {
   const open = new Set(state.expanded)
   const out: ListLine[] = []
   if (state.path.length) out.push({ kind: "up", key: UP_KEY, depth: 0, path: state.path.slice(0, -1) })
   const kin: boolean[] = []
   const walk = (here: Path) => {
-    const entries = index.entries(here, keep, order)
+    const entries = index.entries(here, keep)
     entries.forEach((entry, n) => {
       kin.push(n < entries.length - 1)
       const twig = [...kin]
@@ -296,20 +237,18 @@ export function shortDate(value: unknown, now: Date = new Date()): string {
   return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 }
 
-/** The column glyph (look-and-feel §6): the glyph differs, so colour never carries the status alone. */
-export function statusGlyph(status: string): { glyph: string; tone: string } {
-  switch (status) {
-    case "todo":
-      return { glyph: "·", tone: "todo" }
-    case "in_progress":
-      return { glyph: "▸", tone: "in_progress" }
-    case "review":
-      return { glyph: "?", tone: "review" }
-    case "done":
-      return { glyph: "✓", tone: "done" }
-    default:
-      return { glyph: "○", tone: "other" }
-  }
+/** The four columns moai draws in their own colour; any other is `other`. */
+const TONES = new Set(["todo", "in_progress", "review", "done"])
+/** moai's glyphs (`style::glyph`) before `/api/boot` answers. */
+const GLYPHS: Readonly<Record<string, string>> = { todo: "·", in_progress: "▸", review: "?", done: "✓" }
+
+/**
+ * The column glyph (look-and-feel §6): the glyph differs, so colour never carries the status alone. The glyph is
+ * moai's (`/api/boot` `glyphs`, `unknown_glyph` for a column the config does not name).
+ */
+export function statusGlyph(status: string, boot?: Pick<Boot, "glyphs" | "unknown_glyph"> | null): { glyph: string; tone: string } {
+  const glyph = boot ? (Object.hasOwn(boot.glyphs, status) ? boot.glyphs[status]! : boot.unknown_glyph) : GLYPHS[status] ?? "○"
+  return { glyph, tone: TONES.has(status) ? status : "other" }
 }
 
 // ── windowing ──────────────────────────────────────────────────────────

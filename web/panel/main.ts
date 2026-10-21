@@ -7,11 +7,12 @@ import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, type Fetch } from './data
 import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, remember } from './data/memory.js'
 import { createRefresher } from './data/refresh.js'
-import { loadAllRows, loadArchived, loadBoot, loadDetail, loadTallies, loadWikiListing, loadWikiPage, sameTallies, withArchive, type Loaded } from './data/source.js'
+import { sortQuery, useVocabulary } from './data/query.js'
+import { loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, sameGroups, withArchive, type Loaded } from './data/source.js'
 import { copyFor } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
-import { createStore, type BoardData, type State } from './store.js'
-import { listLines, narrow, sortOrder } from './view/list-model.js'
+import { createStore, matchKey, type BoardData, type State } from './store.js'
+import { listLines, narrow } from './view/list-model.js'
 import { PANES } from './view/panes.js'
 import { describe, mountShell, type Activity } from './view/shell.js'
 import type { WikiSource } from './view/types.js'
@@ -29,17 +30,21 @@ async function start(): Promise<void> {
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the
   // page use it, else this session only (data/memory.ts); reading `window.localStorage` itself can throw, hence the getter.
   remember(store, createMemory(() => window.localStorage))
+  if (booted.ok) {
+    useVocabulary(booted.value)
+    store.dispatch({ type: 'boot', boot: booted.value })
+  }
   // Up to 3 reads at once (data/client.ts PANEL_CLIENT_OPTIONS).
   const client = createClient(fetcher, PANEL_CLIENT_OPTIONS)
 
-  // The index is built once per read, not per render: again when the rows, the status counts or the archive shown change.
-  let indexed: { rows: Row[]; tallies: BoardData['tallies']; archive: Row[] | null; index: IssueIndex } | null = null
+  // The index is built once per read, not per render: again when the rows, the tree or the archive shown change.
+  let indexed: { rows: Row[]; tree: BoardData['tree']; archive: Row[] | null; index: IssueIndex } | null = null
   function indexOf(state: State): IssueIndex | null {
     const board = state.board.value
     if (!board) return null
     const archive = state.view.showArchived ? state.archive : null
-    if (indexed?.rows !== board.rows || indexed.tallies !== board.tallies || indexed.archive !== archive) {
-      indexed = { rows: board.rows, tallies: board.tallies, archive, index: new IssueIndex(withArchive(board, archive), board.tallies) }
+    if (indexed?.rows !== board.rows || indexed.tree !== board.tree || indexed.archive !== archive) {
+      indexed = { rows: board.rows, tree: board.tree, archive, index: new IssueIndex(withArchive(board, archive), board.tree) }
     }
     return indexed.index
   }
@@ -49,7 +54,7 @@ async function start(): Promise<void> {
     const state = store.getState()
     const index = indexOf(state)
     if (!index) return []
-    const lines = listLines(state, index, narrow(state, index).keep, sortOrder(state.sort, index))
+    const lines = listLines(state, index, narrow(state, index).keep)
     return lines.flatMap((line) => (line.kind === 'row' ? [line.key] : []))
   }
 
@@ -66,26 +71,27 @@ async function start(): Promise<void> {
       return
     }
     store.dispatch({ type: 'board-loading' })
-    // The rows and the milestone and epic counts `moai status` prints (they count archived rows too) side by side.
-    // Without the counts the board counts its own rows. The load does not wait for the counts: rows are drawn at
-    // once, and the counts are put on them when they come.
+    // The rows, where they stand (`/api/tree`, in the order on screen) and the milestone and epic counts `moai
+    // status` prints, side by side. The load does not wait for the counts: rows are drawn at once, and the counts
+    // are put on them when they come.
     const listing = loadAllRows(client, PRIORITY.list)
-    const counting = loadTallies(client, PRIORITY.list)
+    const placing = loadTree(client, sortQuery(store.getState().sort), PRIORITY.list)
+    const counting = loadGroups(client, PRIORITY.list)
     let counted: Awaited<typeof counting> | undefined
-    void counting.then((tallies) => (counted = tallies))
-    const loaded = await listing
+    void counting.then((groups) => (counted = groups))
+    const [loaded, placed] = await Promise.all([listing, placing])
     if (load !== loads) return
-    if (!loaded.ok) {
-      store.dispatch({ type: 'board-failed', problem: loaded.outcome })
+    if (!loaded.ok || !placed.ok) {
+      store.dispatch({ type: 'board-failed', problem: loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome })
       return
     }
     const { rows, notes } = loaded.value
     const before = store.getState()
     // Counts that came first go in with the rows, so the board is not drawn twice. Until this read's counts come, a
-    // refresh keeps the counts the board showed: its rows alone undercount (they leave the archived members out).
-    const carried = counted === undefined ? before.board.value?.tallies : undefined
+    // refresh keeps the counts the board showed.
+    const carried = counted === undefined ? before.board.value?.groups : undefined
     const counts = counted?.ok ? counted.value : carried
-    const data: BoardData = { rows, loadedAt: Date.now(), ...(notes ? { notes } : {}), ...(counts ? { tallies: counts } : {}) }
+    const data: BoardData = { rows, tree: placed.value, loadedAt: Date.now(), ...(notes ? { notes } : {}), ...(counts ? { groups: counts } : {}) }
     const shownBefore = before.shown.value
     // The detail on screen was read before this list and stands beside it: when its row has left the list
     // (finished, moved away) the pane goes with it, as choose() does for a read still running. A detail the list
@@ -97,15 +103,41 @@ async function start(): Promise<void> {
     if (shown && wasListed && indexOf(state)?.find(shown.id) === undefined) store.dispatch({ type: 'detail-closed' })
     // Archived rows shown but not read yet: turned on before the rows were there, or the last read failed.
     if (state.view.showArchived && archiveRunning === null && state.archive === null) void loadArchive()
-    // Counts that come later go on this board only: a later load's board has its own (store 'tallies'). Counts that
-    // match the ones carried (most refreshes) change nothing on screen, so the board is not drawn again for them;
-    // counts that could not be read leave the board counting its own rows.
+    // What the filter and the search find moves with the rows: asked again for the rows just read.
+    void ask(true)
+    // Counts that come later go on this board only: a later load's board has its own (store 'groups'). Counts that
+    // match the ones carried (most refreshes) change nothing on screen, so the board is not drawn again for them.
     if (counted === undefined) {
       void counting.then((late) => {
-        if (late.ok ? !sameTallies(late.value, carried) : carried) store.dispatch({ type: 'tallies', data, tallies: late.ok ? late.value : null })
+        if (late.ok ? !sameGroups(late.value, carried) : carried) store.dispatch({ type: 'groups', data, groups: late.ok ? late.value : null })
       })
     }
   }
+
+  /**
+   * Asks moai what the filter and the search on screen find (`loadMatches`), unless that is the question already
+   * answered — `again` asks it anyway, for rows read since. A search typed fast asks once it rests.
+   */
+  let asking: ReturnType<typeof setTimeout> | undefined
+  async function ask(again = false): Promise<void> {
+    const state = store.getState()
+    const key = matchKey(state)
+    if (key === '' || (!again && key === state.matched.key)) return
+    store.dispatch({ type: 'match-loading', key })
+    const loaded = await loadMatches(client, { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived })
+    if (loaded.ok) store.dispatch({ type: 'matched', key, ids: loaded.value })
+    else store.dispatch({ type: 'match-failed', key, problem: loaded.outcome })
+  }
+  store.subscribe((state, previous) => {
+    if (matchKey(state) !== matchKey(previous)) {
+      clearTimeout(asking)
+      // The search applies as it is typed: a pause of 150 ms is one question, not one per key.
+      if (state.search.text !== previous.search.text) asking = setTimeout(() => void ask(), 150)
+      else void ask()
+    }
+    // A new order is moai's to make: the tree is read again in it.
+    if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
+  })
 
   // The archive is read when archived rows are shown (`SPC v o`), each time they are turned on, once the active
   // rows are there: a row they do not hold is archive-only, tagged `archived: true` (never NEW).

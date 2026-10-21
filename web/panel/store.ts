@@ -10,8 +10,9 @@
  * column is `status`), and the list cells are the key table's `CellField` names (the name line is `names`).
  */
 import type { Outcome } from './data/client.js'
-import { pathKey, type Path, type Row } from './data/index.js'
-import { DEFAULT_SORT, type GrepScope, type Sort } from './data/query.js'
+import { pathKey, type Path, type Row, type TreeRow } from './data/index.js'
+import { DEFAULT_SORT, type Sort } from './data/query.js'
+import type { Boot } from './data/source.js'
 import { toolbarReduce, type ToolbarAction, type ToolbarState } from './view/toolbar.js'
 import type { WikiState } from './view/wiki.js'
 // The split owns the layout rules (the 640px rule, the ratio bounds and defaults); the store keeps the choices.
@@ -49,15 +50,37 @@ export interface Loadable<T> {
 
 export interface BoardData {
   rows: Row[]
+  /** `/api/tree` (`tui --json --deep`): where every row stands and in which order (data/index.ts). */
+  tree?: TreeRow[]
   /** What moai said on stderr beside the lists (source.ts Rows): a line it could not read, a notice. */
   notes?: string[]
   /**
-   * Milestone and epic `[done, total]` from `moai status` (source.ts loadTallies). Absent when that read failed, or on
-   * the first read until it answers; a later read keeps the counts of the board before it until its own come.
+   * Milestone and epic counts per column from `moai status` (source.ts loadGroups). Absent when that read failed, or
+   * on the first read until it answers; a later read keeps the counts of the board before it until its own come.
    */
-  tallies?: ReadonlyMap<string, readonly [number, number]>
+  groups?: ReadonlyMap<string, Readonly<Record<string, number>>>
   /** When the rows were read (ms since epoch). */
   loadedAt: number
+}
+
+/**
+ * The ids moai found for the filter and the search on screen (`/api/rows?filter=…&q=…&fields=id` and the backlog's).
+ * `key` names what they answer ({@link matchKey}); a newer question keeps the older ids until its own come, so the
+ * list does not blink to everything between two keystrokes.
+ */
+export interface Matched {
+  key: string
+  ids: ReadonlySet<string> | null
+  loading: boolean
+  /** Why moai refused the question: a filter it cannot read says so in its own words (`bad_filter`). */
+  problem: Outcome | null
+}
+
+/** What the filter and the search ask moai, as one key: nothing to ask when both are empty. */
+export function matchKey(state: { filter: Pick<FilterState, 'applied'>; search: Pick<SearchState, 'text'>; view: Pick<ViewSettings, 'showArchived'> }): string {
+  const filter = state.filter.applied.trim()
+  const q = state.search.text.trim()
+  return filter === '' && q === '' ? '' : JSON.stringify([filter, q, state.view.showArchived])
 }
 
 export interface DetailData {
@@ -68,7 +91,6 @@ export interface DetailData {
 /** The search (`/`): applies as it is typed and lifts the view's hiding (design §4.4). */
 export interface SearchState {
   text: string
-  scope: GrepScope
   /** The search row is shown in the toolbar. */
   open: boolean
 }
@@ -115,6 +137,9 @@ export interface State {
   archive: Row[] | null
   /** Why the last archive read failed; the board's rows and its own problem stay as they are. */
   archiveProblem: Outcome | null
+  /** `/api/boot`: the language, the columns, their glyphs and names, how a person is named; null until it answers. */
+  boot: Boot | null
+  matched: Matched
   /**
    * The wiki view's own state (view/wiki.ts state()), saved when the wiki tab is left; a wiki pane mounted on this
    * store starts from it (the mounted pane keeps its own state across tab switches).
@@ -145,7 +170,6 @@ export function toolbarOf(state: Pick<State, 'search' | 'filter' | 'sort' | 'too
   return {
     searchOpen: state.search.open,
     searchText: state.search.text,
-    scope: state.search.scope,
     filterText: state.filter.text,
     filterApplied: state.filter.applied,
     sort: state.sort,
@@ -155,9 +179,9 @@ export function toolbarOf(state: Pick<State, 'search' | 'filter' | 'sort' | 'too
 
 /** A reduced toolbar state put back into the store's fields; a field that did not change keeps its object. */
 function withToolbar(state: State, next: ToolbarState): State {
-  const search = next.searchText === state.search.text && next.scope === state.search.scope && next.searchOpen === state.search.open
+  const search = next.searchText === state.search.text && next.searchOpen === state.search.open
     ? state.search
-    : { text: next.searchText, scope: next.scope, open: next.searchOpen }
+    : { text: next.searchText, open: next.searchOpen }
   const filter = next.filterText === state.filter.text && next.filterApplied === state.filter.applied
     ? state.filter
     : { text: next.filterText, applied: next.filterApplied }
@@ -185,13 +209,15 @@ export function initialState(): State {
     columnsKnown: Object.keys(COLUMN_DEFAULTS) as ColumnName[],
     sort: copySort(DEFAULT_SORT),
     defaultSort: copySort(DEFAULT_SORT),
-    search: { text: '', scope: 'all', open: false },
+    search: { text: '', open: false },
     filter: { text: '', applied: '' },
     toolbar: { cursor: 0, hintsOpen: false, hintIndex: -1, sortOpen: false },
     board: idle(),
     shown: idle(),
     archive: null,
     archiveProblem: null,
+    boot: null,
+    matched: { key: '', ids: null, loading: false, problem: null },
     wiki: initialWiki(),
   }
 }
@@ -214,8 +240,8 @@ export type Action =
   | { type: 'sort'; sort: Sort }
   /** The saved default order (`D`, or read at start-up); null when none is saved. The order on screen stays. */
   | { type: 'sort-default'; sort: Sort | null }
-  /** Search text (and scope); a text opens the search row. */
-  | { type: 'search'; text: string; scope?: GrepScope }
+  /** Search text; a text opens the search row. */
+  | { type: 'search'; text: string }
   /** Set the filter text and apply it at once (a chip, the key router); typing goes through `toolbar`. */
   | { type: 'filter'; text: string }
   /** Anything the toolbar did (view/toolbar.ts ToolbarAction), reduced by its own reducer over {@link toolbarOf}. */
@@ -228,10 +254,14 @@ export type Action =
   | { type: 'board-failed'; problem: Outcome }
   /**
    * The status counts that came after the rows of `data` (the board-loaded they belong to); null when they could not
-   * be read, so the board counts its own rows. A later read's board has its own counts, so counts for any board but
-   * the one shown are dropped.
+   * be read. A later read's board has its own counts, so counts for any board but the one shown are dropped.
    */
-  | { type: 'tallies'; data: BoardData; tallies: NonNullable<BoardData['tallies']> | null }
+  | { type: 'groups'; data: BoardData; groups: NonNullable<BoardData['groups']> | null }
+  | { type: 'boot'; boot: Boot }
+  /** A question about to go to moai (`key`, {@link matchKey}): the ids on screen stay until its answer. */
+  | { type: 'match-loading'; key: string }
+  | { type: 'matched'; key: string; ids: ReadonlySet<string> }
+  | { type: 'match-failed'; key: string; problem: Outcome }
   /** The archive's rows as read (null forgets them); either way an archive problem told before goes. */
   | { type: 'archive'; rows: Row[] | null }
   | { type: 'archive-failed'; problem: Outcome }
@@ -304,11 +334,9 @@ export function reduce(state: State, action: Action): State {
       return { ...state, sort: action.sort.fields.length ? copySort(action.sort) : copySort(state.defaultSort) }
     case 'sort-default':
       return { ...state, defaultSort: action.sort?.fields.length ? copySort(action.sort) : copySort(DEFAULT_SORT) }
-    case 'search': {
-      const scope = action.scope ?? state.search.scope
-      if (action.text === state.search.text && scope === state.search.scope) return state
-      return { ...state, search: { text: action.text, scope, open: state.search.open || action.text !== '' } }
-    }
+    case 'search':
+      if (action.text === state.search.text) return state
+      return { ...state, search: { text: action.text, open: state.search.open || action.text !== '' } }
     case 'filter':
       return withToolbar(state, toolbarReduce({ ...toolbarOf(state), filterText: action.text, cursor: action.text.length }, { type: 'filter-apply' }))
     case 'toolbar':
@@ -329,12 +357,23 @@ export function reduce(state: State, action: Action): State {
     case 'board-failed':
       // The rows read before stay on screen; the problem is shown beside them.
       return { ...state, board: { ...state.board, loading: false, problem: action.problem } }
-    case 'tallies': {
+    case 'groups': {
       // Only the counts change: the rows, and so the cursor and the drawn order, stay.
       if (state.board.value !== action.data) return state
-      const { tallies: _drawn, ...uncounted } = action.data
-      return { ...state, board: { ...state.board, value: action.tallies ? { ...uncounted, tallies: action.tallies } : uncounted } }
+      const { groups: _drawn, ...uncounted } = action.data
+      return { ...state, board: { ...state.board, value: action.groups ? { ...uncounted, groups: action.groups } : uncounted } }
     }
+    case 'boot':
+      return { ...state, boot: action.boot }
+    case 'match-loading':
+      return { ...state, matched: { ...state.matched, key: action.key, loading: true } }
+    case 'matched':
+      // An answer to a question no longer on screen is dropped: the one asked since answers for itself.
+      if (action.key !== state.matched.key) return state
+      return { ...state, matched: { key: action.key, ids: action.ids, loading: false, problem: null } }
+    case 'match-failed':
+      if (action.key !== state.matched.key) return state
+      return { ...state, matched: { ...state.matched, loading: false, problem: action.problem } }
     case 'archive':
       return state.archive === action.rows && state.archiveProblem === null ? state : { ...state, archive: action.rows, archiveProblem: null }
     case 'archive-failed':

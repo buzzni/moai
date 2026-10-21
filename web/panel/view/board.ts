@@ -1,12 +1,13 @@
 /**
  * The kanban: status columns (with Backlog and deferred in front), milestone lanes at the root, cards of up
- * to three lines. Which card goes where is board-groups.ts (on the IssueIndex's rules); this file draws it
+ * to three lines. Which card goes where is board-groups.ts (on where moai stands each row); this file draws it
  * with the shared components. It reads state and reports a click as `intents.choose`; moving a card
  * between columns is not part of 2.0. Keys are the key router's (panel/keys/): it calls command() — j/k
  * within a column, h/l to the next column, Enter to show the card — and the cards listen for none.
  */
 import { isDone, type IssueIndex, type Row } from '../data/index.js'
 import { isUnread } from '../data/read.js'
+import type { Boot } from '../data/source.js'
 import type { State } from '../store.js'
 import { BACKLOG, DEFERRED, groupBoard, type BoardLane, type BoardModel } from './board-groups.ts'
 import { segLabel } from './crumbs.ts'
@@ -15,9 +16,12 @@ import { chip, el, emptyState } from './components.ts'
 import { newChip } from './unread.ts'
 import type { MountPane, PaneView, ViewContext } from './types.ts'
 
-/** The same letters as the TUI, so a state is never told by colour alone. */
-const GLYPHS: Record<string, string> = { todo: '·', in_progress: '▸', review: '?', done: '✓' }
-export const glyphOf = (key: string): string => (key === BACKLOG ? '◇' : key === DEFERRED ? '⏸' : (GLYPHS[key] ?? '○'))
+/**
+ * A column head's glyph, as moai draws it (`/api/boot`: `columns` for the backlog and deferred columns, `glyphs`
+ * for the statuses), so a column is never told by colour alone. Before the boot answers, the explorer's own.
+ */
+export const glyphOf = (key: string, boot?: Boot | null): string =>
+  key === BACKLOG ? boot?.columns.backlog.glyph ?? '◇' : key === DEFERRED ? boot?.columns.shelved.glyph ?? '‖' : statusGlyph(key, boot).glyph
 
 const priorityClass = (priority: number) => `m-p${Math.min(3, Math.max(0, Math.round(priority)))}`
 
@@ -26,7 +30,9 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
   if (!model.total) return [emptyState(doc, { icon: 'kanban', title: copy.empty })]
 
   const nameOf = (key: string) =>
-    key === BACKLOG ? copy.shell.backlog : key === DEFERRED ? copy.shell.deferred : ((copy.stats as Record<string, string>)[key] ?? key)
+    key === BACKLOG ? state.boot?.columns.backlog.name ?? copy.shell.backlog
+      : key === DEFERRED ? state.boot?.columns.shelved.name ?? copy.shell.deferred
+      : ((copy.stats as Record<string, string>)[key] ?? key)
 
   // One card is the tab stop, where focus() puts the focus: the one with the cursor, else the first. Tab on the board
   // runs nothing (expandAll is the list's), so the key router leaves it to the browser: Tab reaches that one card and
@@ -45,7 +51,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     // The status in the card itself, as the TUI draws it (`id glyph pN n/n`): a card in the Deferred or Backlog
     // column would otherwise not say where it stands. The glyph differs by status, never colour alone.
     const status = statusOf(row)
-    const { glyph, tone } = statusGlyph(status)
+    const { glyph, tone } = statusGlyph(status, state.boot)
     first.append(' ', el(doc, 'span', { class: `m-st-${tone}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph))
     if (typeof row.priority === 'number') first.append(' ', el(doc, 'span', { class: priorityClass(row.priority) }, `p${row.priority}`))
     if (index.isDir(at)) {
@@ -90,7 +96,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
       const label = nameOf(column.key)
       const lanes = el(doc, 'div', { class: 'm-lane', role: 'list', 'data-status': column.key, 'aria-label': copy.board.columnLabel(label, column.cards.length) })
       lanes.append(el(doc, 'div', { class: 'm-lane-head' },
-        el(doc, 'span', { 'aria-hidden': 'true' }, glyphOf(column.key)), el(doc, 'span', {}, label), el(doc, 'span', { class: 'm-count' }, String(column.cards.length))))
+        el(doc, 'span', { 'aria-hidden': 'true' }, glyphOf(column.key, state.boot)), el(doc, 'span', {}, label), el(doc, 'span', { class: 'm-count' }, String(column.cards.length))))
       if (!column.cards.length) lanes.append(el(doc, 'div', { class: 'm-note', style: 'padding: 6px 10px; color: var(--muted);' }, copy.board.noCards))
       for (const at of column.cards) lanes.append(card(at))
       board.append(lanes)
@@ -234,11 +240,11 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
       const key = active && pane.contains(active) ? active.dataset?.focus : undefined
       if (index) {
         // What the cards are drawn from. The cursor is not in it: a cursor move changes two cards' marks, not the board.
-        const drawKey = JSON.stringify([state.path, state.view, state.sort, state.search.text, state.search.scope, state.filter.applied, state.columns])
+        const drawKey = JSON.stringify([state.path, state.view, state.search.text, state.filter.applied, state.columns])
         if (!inPlace(state, index, drawKey)) {
           // The board is a layout of the list: the same filter and search narrow it (list-model.ts narrow).
           const found = narrow(state, index)
-          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, sort: state.sort, match: found.match, reveal: found.searching })
+          const model = groupBoard(index, { path: state.path, view: state.view, cursor: state.cursor, match: found.match, reveal: found.searching }, state.boot?.statuses)
           drawn = { state, index, model, key: drawKey }
           pane.replaceChildren(...draw(ctx, state, index, model))
         }

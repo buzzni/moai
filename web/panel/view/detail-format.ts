@@ -3,7 +3,7 @@
  * roll-up, and one line each for a commit, a journal entry and a work record. No DOM here; view/detail.ts
  * draws it and tests/moai-e3-detail.test.mjs checks it.
  */
-import { isDone, isGroup, type IssueIndex, type Progress, type Row } from '../data/index.ts'
+import { isDone, isGroup, isWork, type IssueIndex, type Row } from '../data/index.ts'
 import type { Outcome } from '../data/client.ts'
 import type { Copy } from '../i18n/index.ts'
 
@@ -119,29 +119,33 @@ export interface Rollup {
 }
 
 /**
- * `n/n` for a group, the count the list draws: `index.tally()`, which for a milestone or epic is the one `moai
- * status` gave (archived done members included). The per-status counts are the rows the index holds, with the done
- * members it does not (the archive's) counted as done. Null for anything that is not a group.
+ * `n/n` for a group, the count the list draws: `index.tally()`, moai's `progress` (archived done members included).
+ * The per-status counts of a milestone or an epic are the ones `moai status` gives (`groups`, archived members
+ * included); an issue with `.child` ids counts the rows the index holds under it. Null for anything that is not a
+ * folder.
  */
-export function rollupOf(row: Row, index: IssueIndex | null): Rollup | null {
+export function rollupOf(row: Row, index: IssueIndex | null, groups?: ReadonlyMap<string, Readonly<Record<string, number>>>, statuses: readonly string[] = STATUS_ORDER): Rollup | null {
   if (!index) return null
   const at = index.find(row.id)
   // A group, or an issue with `.child` ids — whatever the list draws as a folder with an n/n.
   if (at === undefined || !(isGroup(row) || index.isDir(at))) return null
   const path = index.dirPath(at)
-  const progress: Progress = index.progress(path)
   const [done, total] = index.tally(path)
   const counts = new Map<string, number>()
-  for (const work of progress.work) {
-    const status = text(index.rows[work]!.status) || 'todo'
-    counts.set(status, (counts.get(status) ?? 0) + 1)
+  const given = isGroup(row) ? groups?.get(row.id) : undefined
+  if (given) {
+    for (const [status, count] of Object.entries(given)) if (count > 0) counts.set(status, count)
+  } else if (!isGroup(row)) {
+    for (const under of index.descendants(path)) {
+      if (!isWork(index.rows[under]!)) continue
+      const status = text(index.rows[under]!.status) || 'todo'
+      counts.set(status, (counts.get(status) ?? 0) + 1)
+    }
   }
-  const unheld = done - progress.done
-  if (unheld > 0) counts.set('done', (counts.get('done') ?? 0) + unheld)
-  // The columns in their order (todo, in_progress, review, done), then any other in the order met.
+  // The columns in the config's order, then any other in the order met.
   const rank = (status: string) => {
-    const at = STATUS_ORDER.indexOf(status)
-    return at < 0 ? STATUS_ORDER.length : at
+    const at = statuses.indexOf(status)
+    return at < 0 ? statuses.length : at
   }
   const byStatus = [...counts].sort((a, b) => rank(a[0]) - rank(b[0]))
   return { done, work: total, percent: total ? Math.floor((done * 100) / total) : undefined, byStatus }
