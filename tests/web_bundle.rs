@@ -51,11 +51,7 @@ fn sources() -> String {
 
 #[test]
 fn the_web_bundle_is_built_from_these_sources() {
-    assert_eq!(
-        dist("SOURCES"),
-        sources(),
-        "src/web/dist/ 가 web/ 와 갈라졌다 — scripts/gen-web.sh 를 돌려 담는다"
-    );
+    assert_eq!(dist("SOURCES"), sources(), "src/web/dist/ 가 web/ 와 갈라졌다 — scripts/gen-web.sh 를 돌려 담는다");
 }
 
 #[test]
