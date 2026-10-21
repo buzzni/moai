@@ -132,6 +132,9 @@ test('moai\'s answers: ids come for the question on screen, an older question\'s
   assert.equal(refused.matched.problem.message, 'unknown filter key')
   assert.deepEqual([...refused.matched.ids], ['a'], 'the ids stay beside the refusal')
   assert.equal(refused.matched.loading, false)
+  // The same question asked again (rows read since) keeps its refusal while it waits; another question does not wear it.
+  assert.equal(reduce(refused, { type: 'match-loading', key: 'k2' }).matched.problem.message, 'unknown filter key')
+  assert.equal(reduce(refused, { type: 'match-loading', key: 'k3' }).matched.problem, null, 'k2\'s refusal is not k3\'s')
   // The next answer clears the refusal.
   const next = reduce(reduce(refused, { type: 'match-loading', key: 'k3' }), { type: 'matched', key: 'k3', ids: new Set() })
   assert.equal(next.matched.problem, null)

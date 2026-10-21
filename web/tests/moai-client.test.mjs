@@ -156,6 +156,20 @@ test('a queued read is cancelled at once; a running one is aborted and ends canc
   assert.equal((await after).kind, 'passed')
 })
 
+test('cancelAll ends every read at once and starts none of the waiting ones in the freed slots', async () => {
+  const net = fakeFetch()
+  const client = createClient(net.fetcher, { concurrency: 1 })
+  const reads = [client.request({ path: '/api/rows' }), client.request({ path: '/api/backlog' }), client.request({ path: '/api/status' })]
+  await flush()
+  assert.deepEqual(net.urls(), ['/api/rows'])
+  client.cancelAll()
+  for (const read of reads) assert.deepEqual(await read, { kind: 'cancelled' })
+  await flush()
+  assert.deepEqual(net.urls(), ['/api/rows'], 'no queued read reached the server')
+  assert.equal(net.calls[0].init.signal.aborted, true)
+  assert.deepEqual(client.requests(), [])
+})
+
 test('a fetch that fails is not-started (moai web out of reach), and the next read still runs', async () => {
   const net = fakeFetch()
   const client = createClient(net.fetcher)

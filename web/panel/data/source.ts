@@ -9,7 +9,8 @@
  *   whole one: the rows it could read, the wiki pages it did not skip. What moai said beside it rides as `notes`.
  * - Where each row stands, whether it opens, its `n/n` and the order are `/api/tree` (`tui --json --deep`,
  *   {@link loadTree}); the order the page asks for goes with it.
- * - What a filter or a search finds is moai's answer too: both lists again, with `fields=id` ({@link loadMatches}).
+ * - What a filter or a search finds is moai's answer too: both lists again, with `fields=id` — `/api/rows` alone for
+ *   a `type=` filter, which `backlog show` refuses ({@link loadMatches}).
  * - The milestone and epic counts per column come from `/api/status` ({@link loadGroups}).
  * - The archive is read when asked for, once each list with `archived=1` ({@link loadArchived}): `show --archived`
  *   prints the active rows and the archive together, and marks the archive's own `archived: true`.
@@ -20,6 +21,7 @@
  */
 import { PRIORITY, answerOf, outcomeOf, type Client, type Endpoint, type Fetch, type Outcome, type RequestOptions } from './client.js'
 import type { Row, TreeRow } from './index.js'
+import { splitItems } from './query.js'
 
 export const ENDPOINT = {
   boot: '/api/boot',
@@ -58,8 +60,8 @@ function withBacklog(rows: Row[], backlog: unknown): Row[] {
 
 /**
  * `show --all` and `backlog show --all` print a JSON array of rows; backlog rows are kind `backlog` whatever they
- * say. Twins (lines a merge left sharing one id) are not thinned out here: the index lets the later one win, as
- * moai does, and `show` prints them together, in file order when their priority ties.
+ * say. Twins (lines a merge left sharing one id) are not thinned out here: `show` prints each, and the index gives
+ * each tree line its own (data/index.ts), the folder being the line moai opens.
  */
 export function rowsFromLists(all: unknown, backlog: unknown): Loaded<Rows> {
   if (!Array.isArray(all) || !Array.isArray(backlog)) return { ok: false, outcome: { kind: 'unreadable' } }
@@ -136,16 +138,34 @@ export interface Question {
 }
 
 /**
- * The ids moai finds for a filter and a search: both lists with `fields=id`. A refusal (a filter moai cannot read)
- * is the outcome, in moai's own words.
+ * The reads a question takes: both lists with `fields=id` — except when the filter names a `type=`. `backlog show`
+ * already picks the type and refuses another (`show_kind_typed`), while `show` answers a type for every kind, the
+ * backlog's own included (`type=backlog`), so then `/api/rows` alone answers.
  */
-export async function loadMatches(client: Client, question: Question, epoch?: number): Promise<Loaded<Set<string>>> {
+export function matchEndpoints(question: Question): Endpoint[] {
   const query: Record<string, string> = { fields: 'id' }
   if (question.filter.trim() !== '') query.filter = question.filter
   if (question.q.trim() !== '') query.q = question.q.trim()
   if (question.archived) query.archived = '1'
-  const loaded = await bothLists(client, query, { priority: PRIORITY.list, epoch })
-  return loaded.ok ? { ok: true, value: new Set(loaded.value.rows.map((row) => row.id)) } : loaded
+  const typed = splitItems(question.filter).some((item) => item.split('=')[0]!.trim() === 'type')
+  const rows: Endpoint = { path: ENDPOINT.rows, query }
+  return typed ? [rows] : [rows, { path: ENDPOINT.backlog, query }]
+}
+
+/**
+ * The ids moai finds for a filter and a search ({@link matchEndpoints}). A refusal (a filter moai cannot read) is
+ * the outcome, in moai's own words.
+ */
+export async function loadMatches(client: Client, question: Question, epoch?: number): Promise<Loaded<Set<string>>> {
+  const outcomes = await Promise.all(matchEndpoints(question).map((endpoint) => client.request(endpoint, { priority: PRIORITY.list, epoch })))
+  for (const outcome of outcomes) if (answerOf(outcome) === undefined) return { ok: false, outcome }
+  const ids = new Set<string>()
+  for (const outcome of outcomes) {
+    const list = answerOf(outcome)
+    if (!Array.isArray(list)) return { ok: false, outcome: { kind: 'unreadable' } }
+    for (const row of items(list)) ids.add(row.id)
+  }
+  return { ok: true, value: ids }
 }
 
 /**
@@ -193,11 +213,16 @@ export async function loadWikiPage(client: Client, slug: string): Promise<Loaded
   return output === undefined ? { ok: false, outcome } : { ok: true, value: output }
 }
 
-/** One row with its body, children and journal (`moai show <id>`); `epoch` as client.ts RequestOptions says. */
+/**
+ * One row with its body, children and journal (`moai show <id>`); `epoch` as client.ts RequestOptions says. A partial
+ * answer is read like a whole one, as the lists are: one unreadable line anywhere in the tracker ends every command
+ * non-zero with its whole answer still printed, and the detail of every row would otherwise fail beside a full list.
+ */
 export async function loadDetail(client: Client, id: string, options: Pick<RequestOptions, 'epoch'> = {}): Promise<Loaded<Row>> {
   const outcome = await client.request(ENDPOINT.issue(id), { priority: PRIORITY.detail, epoch: options.epoch })
-  if (outcome.kind !== 'passed') return { ok: false, outcome }
-  return isRecord(outcome.output) && typeof outcome.output.id === 'string' ? { ok: true, value: outcome.output as Row } : { ok: false, outcome: { kind: 'unreadable' } }
+  const output = answerOf(outcome)
+  if (output === undefined) return { ok: false, outcome }
+  return isRecord(output) && typeof output.id === 'string' ? { ok: true, value: output as Row } : { ok: false, outcome: { kind: 'unreadable' } }
 }
 
 /** A board column only the board draws — not one of the configured statuses (src/web/boot.rs Column). */
@@ -237,16 +262,23 @@ export function bootFrom(value: unknown): Boot | null {
   return value as unknown as Boot
 }
 
-/** `/api/boot`, fetched outside the queue: nothing else can be read before it. */
-export async function loadBoot(fetcher: Fetch): Promise<Loaded<Boot>> {
+/**
+ * `/api/boot`, fetched outside the queue: nothing else can be read before it. An answer that does not come within
+ * `timeoutMs` is the server out of reach, as a stamp's is (main.ts): nothing is drawn while the boot is waited on.
+ */
+export async function loadBoot(fetcher: Fetch, timeoutMs = 10_000): Promise<Loaded<Boot>> {
   let status: number
   let body: string
+  const abort = new AbortController()
+  const limit = setTimeout(() => abort.abort(), timeoutMs)
   try {
-    const answer = await fetcher(ENDPOINT.boot, { signal: new AbortController().signal, headers: { Accept: 'application/json' } })
+    const answer = await fetcher(ENDPOINT.boot, { signal: abort.signal, headers: { Accept: 'application/json' } })
     status = answer.status
     body = await answer.text()
   } catch {
     return { ok: false, outcome: { kind: 'not-started' } }
+  } finally {
+    clearTimeout(limit)
   }
   if (status !== 200) return { ok: false, outcome: outcomeOf(status, body) }
   let parsed: unknown

@@ -143,6 +143,32 @@ test('what a filter and a search find is both lists with fields=id; moai\'s refu
   assert.deepEqual(await loadMatches(client, { filter: 'nope=1', q: '', archived: false }), { ok: false, outcome: { kind: 'moai-error', message: 'unknown filter key nope', code: 'bad_filter' } })
 })
 
+test('a type= filter asks /api/rows alone: backlog show refuses a second type, and show answers every kind', async () => {
+  // This binary's answers (gen-web-fixtures.sh tracker): `backlog show --filter=type=epic` is refused with
+  // `show_kind_typed`, and `show --all --filter=type=backlog` prints the backlog's own row.
+  const refused = { kind: 'moai-error', message: '`backlog` here already picks the type — `type=epic` cannot pick it again.', code: 'bad_filter' }
+  const client = fakeClient({
+    '/api/rows?fields=id&filter=type%3Depic': passed([{ id: 'fx-ep01' }, { id: 'fx-ep02' }]),
+    '/api/backlog?fields=id&filter=type%3Depic': refused,
+    '/api/rows?fields=id&filter=type%3Dbacklog+status%3Dtodo': passed([{ id: 'fx-th01' }]),
+  })
+  assert.deepEqual([...(await loadMatches(client, { filter: 'type=epic', q: '', archived: false })).value], ['fx-ep01', 'fx-ep02'])
+  assert.deepEqual([...(await loadMatches(client, { filter: 'type=backlog status=todo', q: '', archived: false })).value], ['fx-th01'])
+  assert.deepEqual(client.calls.map((call) => call.url), ['/api/rows?fields=id&filter=type%3Depic', '/api/rows?fields=id&filter=type%3Dbacklog+status%3Dtodo'])
+})
+
+test('a detail moai printed whole before ending non-zero (an unreadable line elsewhere) is read, as the lists are', async () => {
+  const row = { id: 'fx-is01', title: 'Grid layout' }
+  const client = fakeClient({ '/api/issue/fx-is01': { kind: 'failed', output: row, notes: ['unreadable rows 1'] }, '/api/issue/fx-nope': { kind: 'failed' } })
+  assert.deepEqual(await loadDetail(client, 'fx-is01'), { ok: true, value: row })
+  assert.deepEqual(await loadDetail(client, 'fx-nope'), { ok: false, outcome: { kind: 'failed' } })
+})
+
+test('a boot left unanswered past its time limit is the server out of reach', async () => {
+  const hanging = (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))))
+  assert.deepEqual(await loadBoot(hanging, 20), { ok: false, outcome: { kind: 'not-started' } })
+})
+
 const BOOT = {
   lang: 'ko', version: '0.22.0', project: 'p', root: '/r', statuses: ['todo', 'done'], naming: 'full',
   glyphs: { todo: '·', done: '✓' }, unknown_glyph: '○',

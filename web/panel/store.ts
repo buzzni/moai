@@ -258,7 +258,7 @@ export type Action =
    */
   | { type: 'groups'; data: BoardData; groups: NonNullable<BoardData['groups']> | null }
   | { type: 'boot'; boot: Boot }
-  /** A question about to go to moai (`key`, {@link matchKey}): the ids on screen stay until its answer. */
+  /** A question about to go to moai (`key`, {@link matchKey}): the ids on screen stay until its answer; another question's refusal goes. */
   | { type: 'match-loading'; key: string }
   | { type: 'matched'; key: string; ids: ReadonlySet<string> }
   | { type: 'match-failed'; key: string; problem: Outcome }
@@ -366,7 +366,9 @@ export function reduce(state: State, action: Action): State {
     case 'boot':
       return { ...state, boot: action.boot }
     case 'match-loading':
-      return { ...state, matched: { ...state.matched, key: action.key, loading: true } }
+      // The ids stay until the answer; a refusal answers its own question only, so a new question takes it away (the
+      // same one asked again for rows read since keeps it, or it would blink on every reload).
+      return { ...state, matched: { ...state.matched, key: action.key, loading: true, problem: action.key === state.matched.key ? state.matched.problem : null } }
     case 'matched':
       // An answer to a question no longer on screen is dropped: the one asked since answers for itself.
       if (action.key !== state.matched.key) return state

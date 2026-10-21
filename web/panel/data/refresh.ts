@@ -4,7 +4,8 @@
  * one means nothing to read. A hidden tab (`document.visibilityState`) asks nothing; shown again, it asks at once.
  * A manual refresh (the refresh-time button) reads whatever the stamp says. When `moai web` cannot be reached the
  * page says so once (`onReach(false)`) and asks again every `backoffMs` (10 s); the first answer after that takes the
- * line back (`onReach(true)`) and reads. Reads never overlap: a refresh asked for while one runs joins it.
+ * line back (`onReach(true)`) and reads. Reads never overlap: a refresh asked for while one runs joins it. A read
+ * that did not take (`load` gives `false`) leaves its stamp unseen, so the next look reads again.
  *
  * The stamp is read before the rows, so a write landing between the two is seen as a later change, never lost.
  * Timers and visibility are injected so the schedule is tested without a DOM or real time.
@@ -24,8 +25,12 @@ export interface Clock {
 }
 
 export interface RefresherOptions {
-  /** `automatic`: the stamp moved (not a person's click). */
-  load: (how: { automatic: boolean }) => Promise<void>
+  /**
+   * `automatic`: the stamp moved (not a person's click). `false` says the read did not take (a refusal, a cancel, a
+   * child the server cut off): its stamp is not counted as seen, so the next look reads again rather than leaving the
+   * rows of before on screen until someone writes the tracker.
+   */
+  load: (how: { automatic: boolean }) => Promise<void | boolean>
   /** `/api/stamp`'s answer, or null when the server could not be reached. */
   stamp: () => Promise<string | null>
   /** The server could (true) or could not (false) be reached — told only when it changes. */
@@ -93,8 +98,8 @@ export function createRefresher(options: RefresherOptions): Refresher {
     if (inFlight) return inFlight
     inFlight = (async () => {
       try {
-        await options.load({ automatic })
-        if (at !== null) seen = at
+        const took = await options.load({ automatic })
+        if (at !== null && took !== false) seen = at
       } finally {
         lastLoaded = clock.now()
         inFlight = null

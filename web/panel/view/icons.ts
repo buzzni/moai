@@ -31,7 +31,7 @@ export function iconSvg(name: IconName, size = 16): string {
 
 /**
  * The icon as an element. The body is a constant above, never user text. It is parsed as SVG (XML) rather
- * than set as HTML, so the packed panel holds no innerHTML at all — tests/moai.test.mjs checks that.
+ * than set as HTML, so the bundle holds no innerHTML at all — tests/web_bundle.rs checks that.
  */
 export function iconEl(doc: Document, name: IconName, size = 16): SVGSVGElement {
   const Parser = doc.defaultView?.DOMParser ?? DOMParser

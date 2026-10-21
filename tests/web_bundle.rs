@@ -61,10 +61,13 @@ fn the_web_bundle_is_built_from_these_sources() {
 fn the_web_fixtures_match_the_binary() {
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("web-fixtures");
     let _ = std::fs::remove_dir_all(&made);
+    // 스크립트가 제 환경(사람·시계·말·git)을 세운다. `BASH_ENV` 만은 여기서 걷는다 — 비대화형 bash 가 스크립트의 첫 줄보다
+    // 먼저 그 파일을 돌려, 거기서 내보낸 `MOAI` 가 여기서 준 바이너리를 덮는다(tests/cli.rs `isolated` 와 같은 까닭).
     let out = std::process::Command::new("bash")
         .arg(at_root("scripts/gen-web-fixtures.sh"))
         .arg(&made)
         .env("MOAI", env!("CARGO_BIN_EXE_moai"))
+        .env_remove("BASH_ENV")
         .output()
         .expect("bash 를 실행하지 못했다 — 이 시험에는 bash 가 있어야 한다");
     assert!(out.status.success(), "자료를 못 지었다\n{}", String::from_utf8_lossy(&out.stderr));

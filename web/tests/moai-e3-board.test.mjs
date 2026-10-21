@@ -145,6 +145,19 @@ const mount = (state, rows = ROWS) => {
   return { root, view, chosen, dom }
 }
 
+test('board view: moai\'s answer to the filter, coming after the filter, draws the board again', () => {
+  const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
+  const root = dom.window.document.getElementById('r')
+  const view = mountBoard(root, { document: dom.window.document, copy: copyFor('en'), language: 'en', intents: { choose() {}, point() {} }, layout: () => ({}), focusPane() {} })
+  const same = build(ROWS)
+  const asked = { ...initialState(), tab: 'board', filter: { text: 'priority=0', applied: 'priority=0' } }
+  const key = JSON.stringify(['priority=0', '', false])
+  view.render({ ...asked, matched: { key, ids: null, loading: true, problem: null } }, same)
+  assert.ok(root.querySelector('[data-id="e1.a"]'), 'before the answer every card passes')
+  view.render({ ...asked, matched: { key, ids: new Set(['e1.b']), loading: false, problem: null } }, same)
+  assert.deepEqual([...root.querySelectorAll('.m-card')].map((card) => card.dataset.id), ['e1.b'])
+})
+
 test('board view: columns, lanes, cards, cursor highlight and click', () => {
   const state = { ...initialState(), tab: 'board', cursor: 'e1.b' }
   const { root, chosen } = mount(state)

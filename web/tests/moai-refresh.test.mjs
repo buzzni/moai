@@ -158,6 +158,29 @@ test('the stamp is read before the rows, so a write during a read is the next ch
   assert.equal(loads, 2)
 })
 
+test('a read that did not take leaves its stamp unseen: the next look reads again, and once it takes it stops', async () => {
+  const server = fakeServer('a')
+  const clock = fakeClock()
+  const loads = []
+  let take = true
+  const refresher = createRefresher({
+    load: async (how) => { loads.push(how.automatic); return take },
+    stamp: server.stamp,
+    visibility: fakeVisibility(),
+    clock,
+  })
+  await refresher.refresh()
+  take = false
+  server.set('b')
+  await clock.advance(POLL_MS)
+  assert.deepEqual(loads, [false, true], 'the stamp moved: read, and refused (busy, a child cut off, a cancel)')
+  take = true
+  await clock.advance(POLL_MS)
+  assert.deepEqual(loads, [false, true, true], 'the same stamp, read again: the rows on screen are still the ones before it')
+  await clock.advance(POLL_MS)
+  assert.deepEqual(loads, [false, true, true], 'it took: nothing more to read')
+})
+
 test('the document\'s own visibility follows visibilityState', () => {
   const dom = new JSDOM('')
   const doc = dom.window.document

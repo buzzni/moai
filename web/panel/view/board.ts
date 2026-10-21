@@ -140,7 +140,9 @@ export const mountBoard: MountPane = (root, ctx): PaneView => {
    * narrow() memoizes it, until the next read.
    */
   function inPlace(state: State, index: IssueIndex, drawKey: string): boolean {
-    if (!drawn || drawn.index !== index || drawn.key !== drawKey) return false
+    // What moai found is drawn from too: its answer comes after the filter or search that asked it, with the rest of
+    // the key unchanged (the list's model keys on it the same way).
+    if (!drawn || drawn.index !== index || drawn.key !== drawKey || drawn.state.matched !== state.matched) return false
     if (drawn.state.cursor === state.cursor) {
       drawn.state = state
       return true

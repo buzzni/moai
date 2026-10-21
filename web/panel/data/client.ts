@@ -154,6 +154,11 @@ export interface Client {
   request(endpoint: Endpoint, options?: RequestOptions): Promise<Outcome>
   /** Cancels a queued request at once, or aborts a running one. */
   cancel(key: string): void
+  /**
+   * Cancels every request, queued and running, in one step. Cancelling them key by key would free a running one's
+   * slot first, and the queue would start the next waiting read — sent to the server — before its own turn came.
+   */
+  cancelAll(): void
   requests(): RequestState[]
   subscribe(listener: () => void): () => void
 }
@@ -252,6 +257,14 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
         // waiting now.
         settle(entry, { kind: 'cancelled' })
       }
+    },
+    cancelAll() {
+      const all = pending.splice(0)
+      for (const entry of all) {
+        entry.abort.abort()
+        entry.resolve({ kind: 'cancelled' })
+      }
+      if (all.length) notify()
     },
     requests() {
       return pending.map(({ key, path, priority, phase, share }) => ({ key, path, priority, phase, share }))

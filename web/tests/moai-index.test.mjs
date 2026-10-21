@@ -108,6 +108,28 @@ test('a row written between the two reads, that the tree does not hold yet, stan
   assert.ok(late.entries([]).some((entry) => entry.at !== undefined && late.rows[entry.at].id === 'fx-new1'))
 })
 
+test('twins: each line keeps its own row, and the folder is the line moai opens even when it is drawn first', () => {
+  // This binary's answers for a tracker whose two `fx-ep01` epic lines are B (earlier in the file, p3) and A (later,
+  // p0): moai opens A (`find` is the later line in the file), and draws it first by priority.
+  const tree = [
+    { id: 'fx-ep01', title: 'Twin A (later in file, p0)', kind: 'epic', dir: true, path: 'fx-ep01', status: 'todo', derived_status: 'todo', priority: 0, progress: { done: 0, total: 1 }, home: [] },
+    { id: 'fx-ep01.aaa', title: 'Member', kind: 'issue', dir: false, path: 'fx-ep01.aaa', status: 'todo', priority: 2, home: ['fx-ep01'] },
+    { id: 'fx-is01', title: 'Plain', kind: 'issue', dir: false, path: 'fx-is01', status: 'todo', priority: 2, home: [] },
+    { id: 'fx-ep01', title: 'Twin B (earlier in file, p3)', kind: 'epic', dir: false, path: 'fx-ep01', status: 'todo', derived_status: 'todo', priority: 3, home: [] },
+  ]
+  const rows = [
+    { id: 'fx-ep01', title: 'Twin A (later in file, p0)', kind: 'epic', status: 'todo', priority: 0 },
+    { id: 'fx-ep01', title: 'Twin B (earlier in file, p3)', kind: 'epic', status: 'todo', priority: 3 },
+    { id: 'fx-ep01.aaa', title: 'Member', kind: 'issue', status: 'todo', priority: 2 },
+    { id: 'fx-is01', title: 'Plain', kind: 'issue', status: 'todo', priority: 2 },
+  ]
+  const twins = new IssueIndex(rows, tree)
+  const drawn = twins.tree([], () => true).map((line) => `${twins.rows[line.entry.at].title}${line.entry.dir ? '/' : ''}`)
+  assert.deepEqual(drawn, ['Twin A (later in file, p0)/', 'Member', 'Plain', 'Twin B (earlier in file, p3)'])
+  assert.equal(twins.rows[twins.find('fx-ep01')].title, 'Twin A (later in file, p0)', 'the id finds the folder line')
+  assert.deepEqual(twins.tally(['e:fx-ep01']), [0, 1], 'its n/n is the folder line\'s progress')
+})
+
 test('helpers: id parents', () => {
   assert.equal(parentOf('a-1.b2.c3'), 'a-1.b2')
   assert.equal(parentOf('a-1'), undefined)

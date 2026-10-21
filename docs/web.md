@@ -98,7 +98,9 @@ ageing into the archive — shows on the next reload, or when you click the
 refresh time.
 
 When the server stops, one line says it cannot be reached, and the page asks
-again every ten seconds; the line goes once the server answers.
+again every ten seconds; the line goes once the server answers. A read that
+comes back refused or cut short (`busy`, `timeout`, a Cancel) is asked again on
+the next look, so the list never stays on the rows from before a change.
 
 ## See it from another machine
 

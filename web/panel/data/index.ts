@@ -130,6 +130,8 @@ const TREE_KEYS = ['title', 'kind', 'status', 'derived_status', 'priority'] as c
 export class IssueIndex {
   readonly rows: readonly Row[]
   private readonly byId = new Map<string, number>()
+  /** Each line's own segment, from the kind the tree drew it as. */
+  private readonly segs: Seg[] = []
   private readonly homes: Path[] = []
   private readonly dirs: boolean[] = []
   private readonly progressOf: (readonly [number, number] | undefined)[] = []
@@ -142,12 +144,30 @@ export class IssueIndex {
    * all places every row so.
    */
   constructor(rows: readonly Row[], tree: readonly TreeRow[] = []) {
-    // The later row wins an id, as in moai.
-    const printed = new Map<string, Row>()
-    for (const row of rows) printed.set(row.id, row)
+    // Twins (lines a merge left sharing one id) are printed, and drawn, once each: a tree line takes the printed row
+    // of its id that says what the line says (title, kind, column, priority), so each twin keeps its own fields.
+    const printed = new Map<string, Row[]>()
+    for (const row of rows) {
+      const same = printed.get(row.id)
+      if (same) same.push(row)
+      else printed.set(row.id, [row])
+    }
+    const taken = new Set<Row>()
+    const printedFor = (id: string, line: TreeRow): Row | undefined => {
+      const all = printed.get(id)
+      if (!all || all.length === 1) return all?.[0]
+      const free = all.filter((row) => !taken.has(row))
+      const alike = (row: Row) =>
+        row.title === line.title && kindOf(row) === kindOf(line) && row.status === line.status && priorityOf(row) === (line.priority ?? 2)
+      const found = free.find(alike) ?? free[0] ?? all[all.length - 1]!
+      taken.add(found)
+      return found
+    }
     const out: Row[] = []
+    // A handle names the line moai opens as a folder (`nav::Index::is_dir`: one per id, the later line in the file,
+    // which need not be the later one drawn). Among lines that are not folders the first stands until one comes.
     const segs = new Map<string, Seg>()
-    for (const line of tree) if (line.id !== undefined) segs.set(line.id, segFor(line.id, kindOf(line)))
+    for (const line of tree) if (line.id !== undefined && (line.dir === true || !segs.has(line.id))) segs.set(line.id, segFor(line.id, kindOf(line)))
     const segOfHandle = (handle: string): Seg => (handle === 'none' ? NO_MILESTONE : handle === 'lost' ? LOST : segs.get(handle) ?? `i:${handle}`)
     const placed = new Set<string>()
     const place = (key: string): Place => {
@@ -158,10 +178,13 @@ export class IssueIndex {
       }
       return found
     }
-    const stand = (row: Row, home: Path, dir: boolean, progress: TreeRow['progress']) => {
+    const stand = (row: Row, home: Path, dir: boolean, progress: TreeRow['progress'], seg: Seg) => {
       const at = out.length
       out.push(row)
-      this.byId.set(row.id, at)
+      // An id finds the folder line of it when there is one (moai's `find` is the line `is_dir` opens), else the later.
+      const before = this.byId.get(row.id)
+      if (before === undefined || dir || !this.dirs[before]) this.byId.set(row.id, at)
+      this.segs.push(seg)
       this.homes.push(home)
       this.dirs.push(dir)
       this.progressOf.push(progress ? [progress.done, progress.total] : undefined)
@@ -177,14 +200,14 @@ export class IssueIndex {
         place(pathKey([...home, seg]))
         continue
       }
-      const own = printed.get(line.id)
+      const own = printedFor(line.id, line)
       const row: Row = own ? { ...own } : { id: line.id, archived: true }
       // The tree's keys fill what the list did not print (an archived row), never what it did.
       for (const key of TREE_KEYS) if (row[key] === undefined && line[key] !== undefined) (row as Record<string, unknown>)[key] = line[key]
       placed.add(line.id)
-      stand(row, home, line.dir === true, line.progress)
+      stand(row, home, line.dir === true, line.progress, segFor(line.id, kindOf(line)))
     }
-    for (const row of rows) if (!placed.has(row.id) && printed.get(row.id) === row) stand(row, [], isGroup(row), undefined)
+    for (const row of rows) if (!placed.has(row.id) && printed.get(row.id)?.at(-1) === row) stand(row, [], isGroup(row), undefined, segFor(row.id, kindOf(row)))
     this.rows = out
   }
 
@@ -200,11 +223,10 @@ export class IssueIndex {
   }
 
   segOf(at: number): Seg {
-    const row = this.rows[at]!
-    return segFor(row.id, kindOf(row))
+    return this.segs[at]!
   }
 
-  /** Can it be entered? moai's `dir`. */
+  /** Can it be entered? moai's `dir` — on the one line of an id that {@link find} names. */
   isDir(at: number): boolean {
     return this.dirs[at] === true && this.byId.get(this.rows[at]!.id) === at
   }
@@ -259,7 +281,7 @@ export class IssueIndex {
     return typeof given === 'string' && given !== '' ? given : undefined
   }
 
-  /** `shelvedAt` for a place known only by id (a blocker): the later row of that id answers. */
+  /** `shelvedAt` for a place known only by id (a blocker): the row {@link find} names for that id answers. */
   deferredRoot(id: string): string | undefined {
     const at = this.byId.get(id)
     return at === undefined ? undefined : this.shelvedAt(at)

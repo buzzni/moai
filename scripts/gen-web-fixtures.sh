@@ -34,6 +34,14 @@ mkdir -p "$repo/.moai" "$scratch/home"
 export HOME=$scratch/home MOAI_CONFIG=$scratch/home/config.toml MOAI_LANG=en NO_COLOR=1
 export MOAI_NOW=2026-10-20T09:00:00Z MOAI_ACTOR='Fixture (fixture@example.com)'
 unset MOAI_HERE
+# git 은 스크래치 저장소 하나만 본다 — 훅이나 `git rebase -x 'cargo test'` 안에서 돌면 git 이 바깥 저장소를 가리키는
+# 이름(`GIT_DIR`·…)과 환경으로 넣는 설정을 내보내, 밑의 `git config user.name Fixture` 가 바깥 저장소의 설정에 적힌다.
+# 걷는 목록은 src/git_leaks.rs 의 `REPO` 다.
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+  GIT_QUARANTINE_PATH GIT_NAMESPACE GIT_PREFIX GIT_IMPLICIT_WORK_TREE GIT_CONFIG GIT_SHALLOW_FILE GIT_GRAFT_FILE \
+  GIT_REPLACE_REF_BASE GIT_NO_REPLACE_OBJECTS GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM \
+  GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1
 : >"$MOAI_CONFIG"
 
 cat >"$repo/.moai/config.toml" <<'EOF'

@@ -285,6 +285,18 @@ test('roll-up: a milestone or epic counts as the list does, n/n from the tree pr
   assert.deepEqual(rollup.byStatus, [['todo', 1], ['in_progress', 1], ['done', 4]])
 })
 
+test('pane: the per-column counts that come after the rows draw the roll-up again (the index stays the same)', () => {
+  const { root, view } = mount()
+  const state = stateWith({ value: { id: 'se-e1', row: ROWS[1] } })
+  const board = { rows: ROWS, loadedAt: 0 }
+  view.render({ ...state, board: { value: board, loading: false, problem: null } }, index)
+  const before = root.querySelector('.moai-detail-title')
+  const counted = { ...board, groups: new Map([['se-e1', { todo: 1, in_progress: 1, done: 4 }]]) }
+  view.render({ ...state, board: { value: counted, loading: false, problem: null } }, index)
+  assert.notEqual(root.querySelector('.moai-detail-title'), before, 'drawn again for the counts')
+  assert.match(root.textContent, /4/)
+})
+
 test('pane: a search keystroke repaints the id and title only; the body and sections stay (se-mzlx)', () => {
   const { root, view } = mount()
   const row = { ...ROWS[3], body: 'some **body**' }

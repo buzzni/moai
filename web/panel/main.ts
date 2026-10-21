@@ -3,13 +3,16 @@
  * settings, wires the store to the data layer and mounts the shell (view/shell.ts), which renders from the store.
  * Built by build.mjs into src/web/dist/app.js.
  */
-import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, type Fetch } from './data/client.js'
+import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, requestKey, type Fetch } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, remember } from './data/memory.js'
 import { useNaming } from './data/people.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
-import { loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, sameGroups, withArchive, type Loaded } from './data/source.js'
+import {
+  loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
+  type Boot, type Loaded,
+} from './data/source.js'
 import { COPY, copyFor } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
@@ -25,8 +28,8 @@ const STAMP_LIMIT_MS = 5_000
 
 async function start(): Promise<void> {
   // Nothing is drawn before the language is known. A boot that fails still mounts the page, in the browser's
-  // language, and says why where the rows would stand.
-  const booted = await loadBoot(fetcher)
+  // language, and says why where the rows would stand; the next read asks the boot again (loadBoard).
+  let booted = await loadBoot(fetcher)
   const language = booted.ok ? booted.value.lang : navigator.language || 'en'
   // The page says the language it is drawn in: one it does not carry (es) is drawn, and named, in English.
   document.documentElement.lang = Object.hasOwn(COPY, language.split('-')[0]!.toLowerCase()) ? language : 'en'
@@ -35,12 +38,14 @@ async function start(): Promise<void> {
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the
   // page use it, else this session only (data/memory.ts); reading `window.localStorage` itself can throw, hence the getter.
   remember(store, createMemory(() => window.localStorage))
-  if (booted.ok) {
-    useVocabulary(booted.value)
-    useNaming(booted.value.naming)
-    document.title = `moai — ${booted.value.project}`
-    store.dispatch({ type: 'boot', boot: booted.value })
+  /** What the boot gives the page: the words, how a person is named, the columns. The language stays the one drawn. */
+  function useBoot(boot: Boot): void {
+    useVocabulary(boot)
+    useNaming(boot.naming)
+    document.title = `moai — ${boot.project}`
+    store.dispatch({ type: 'boot', boot })
   }
+  if (booted.ok) useBoot(booted.value)
   // Up to 3 reads at once (data/client.ts PANEL_CLIENT_OPTIONS).
   const client = createClient(fetcher, PANEL_CLIENT_OPTIONS)
 
@@ -70,28 +75,41 @@ async function start(): Promise<void> {
   /** The load the clock started on its own, or 0: its reads run without the activity line. */
   let quietLoad = 0
 
-  async function loadBoard(automatic = false): Promise<void> {
+  /**
+   * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
+   * then leaves the stamp unseen and reads again on its next look.
+   */
+  async function loadBoard(automatic = false): Promise<boolean> {
     const load = ++loads
     quietLoad = automatic ? load : 0
     if (!booted.ok) {
-      store.dispatch({ type: 'board-failed', problem: booted.outcome })
-      return
+      // The boot failed when the page opened (the server out of reach, or refusing then): ask it again, or the page
+      // would say so for good while the server answers everything else.
+      const again = await loadBoot(fetcher)
+      if (load !== loads) return true
+      if (!again.ok) {
+        store.dispatch({ type: 'board-failed', problem: again.outcome })
+        return false
+      }
+      booted = again
+      useBoot(again.value)
     }
     store.dispatch({ type: 'board-loading' })
     // The rows, where they stand (`/api/tree`, in the order on screen) and the milestone and epic counts `moai
     // status` prints, side by side. The load does not wait for the counts: rows are drawn at once, and the counts
     // are put on them when they come.
     // Each load is a change seen through: a read of it is never handed a run another load started before it.
+    const sort = store.getState().sort
     const listing = loadAllRows(client, PRIORITY.list, load)
-    const placing = loadTree(client, sortQuery(store.getState().sort), PRIORITY.list, load)
+    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load)
     const counting = loadGroups(client, PRIORITY.list, load)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
     const [loaded, placed] = await Promise.all([listing, placing])
-    if (load !== loads) return
+    if (load !== loads) return true
     if (!loaded.ok || !placed.ok) {
       store.dispatch({ type: 'board-failed', problem: loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome })
-      return
+      return false
     }
     const { rows, notes } = loaded.value
     const before = store.getState()
@@ -122,19 +140,40 @@ async function start(): Promise<void> {
         if (late.ok ? !sameGroups(late.value, carried) : carried) store.dispatch({ type: 'groups', data, groups: late.ok ? late.value : null })
       })
     }
+    // The order changed while this read ran: the refresh it asked for joined this one (data/refresh.ts), which read
+    // the tree in the order before. Read it again in the order on screen.
+    if (store.getState().sort !== sort) setTimeout(() => void refresher.refresh(), 0)
+    return true
   }
 
+  let asking: ReturnType<typeof setTimeout> | undefined
+  /** Questions asked so far: only the latest one's answer counts, even when an older one asked the same. */
+  let asks = 0
+  /** The load the answer on screen was asked after: a question asked again once the rows were read since is asked anew. */
+  let askedAt = -1
+  /** The reads of the question in flight, cancelled when a newer one is asked: its answer would be dropped. */
+  let askingKeys: string[] = []
   /**
    * Asks moai what the filter and the search on screen find (`loadMatches`), unless that is the question already
-   * answered — `again` asks it anyway, for rows read since. A search typed fast asks once it rests.
+   * answered for the rows on screen — `again` asks it anyway, for rows read since. A search typed fast asks once it
+   * rests. A question emptied and put back after a reload is not the one answered before it.
    */
-  let asking: ReturnType<typeof setTimeout> | undefined
   async function ask(again = false): Promise<void> {
     const state = store.getState()
     const key = matchKey(state)
-    if (key === '' || (!again && key === state.matched.key)) return
+    if (key === '' || (!again && key === state.matched.key && askedAt === loads)) return
+    const mine = ++asks
+    askedAt = loads
+    const question = { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived }
+    const next = matchEndpoints(question).map(requestKey)
+    // The older question's reads this one does not share: their answer would be dropped, and they hold the slots.
+    for (const old of askingKeys) if (!next.includes(old)) client.cancel(old)
+    askingKeys = next
     store.dispatch({ type: 'match-loading', key })
-    const loaded = await loadMatches(client, { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived })
+    // Asked for the rows of this load: never handed a run that began before them (data/client.ts epoch).
+    const loaded = await loadMatches(client, question, loads)
+    if (mine !== asks) return
+    askingKeys = []
     if (loaded.ok) store.dispatch({ type: 'matched', key, ids: loaded.value })
     else store.dispatch({ type: 'match-failed', key, problem: loaded.outcome })
   }
@@ -178,9 +217,9 @@ async function start(): Promise<void> {
     }
   })
 
-  // Paused while the page is out of sight (data/refresh.ts).
-  // `/api/stamp` moves when the tracker's files do: the rows are read only then (data/refresh.ts). A server that
-  // answers with a refusal still answers, so its stamp is a word that never repeats and the read says why.
+  // `/api/stamp` moves when the tracker's files do: the rows are read only then, and not at all while the page is out
+  // of sight (data/refresh.ts). A server that answers with a refusal still answers, so its stamp is a word that never
+  // repeats and the read says why.
   let refused = 0
   const stamp = async (): Promise<string | null> => {
     // An answer that never comes is the server out of reach too: a stamp waited on for ever would stop the asking
@@ -221,11 +260,14 @@ async function start(): Promise<void> {
     else store.dispatch({ type: 'detail-failed', id, problem: loaded.outcome })
   }
 
-  /** The detail on screen, read again after a change; a choice made meanwhile, or the pane closed, wins. */
+  /** Rereads so far: an older one answering after a newer one does not cover it. */
+  let rereads = 0
+  /** The detail on screen, read again after a change; a choice made meanwhile, a later reread, or the pane closed, wins. */
   async function rereadDetail(id: string, epoch: number): Promise<void> {
     const mine = choice
+    const turn = ++rereads
     const loaded = await loadDetail(client, id, { epoch })
-    if (!loaded.ok || mine !== choice || store.getState().shown.value?.id !== id) return
+    if (!loaded.ok || mine !== choice || turn !== rereads || store.getState().shown.value?.id !== id) return
     store.dispatch({ type: 'detail-loaded', data: { id, row: loaded.value } })
   }
 
@@ -270,10 +312,8 @@ async function start(): Promise<void> {
       refresh: () => void refresher.refresh(),
       choose: (id) => void choose(id),
       // Up to three reads go at once (the list is three of them): Cancel stops every one, and the reads that wait
-      // behind them, rather than letting the next queued read start in the freed slot.
-      cancel: () => {
-        for (const key of new Set(client.requests().map((request) => request.key))) client.cancel(key)
-      },
+      // behind them, in one step (data/client.ts cancelAll) rather than letting the next queued read start in the freed slot.
+      cancel: () => client.cancelAll(),
     },
   })
   client.subscribe(() => shell.activity(activity()))
