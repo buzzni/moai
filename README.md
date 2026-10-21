@@ -205,6 +205,10 @@ backlog, deferred and your columns side by side, one lane per milestone, and in 
 overview one header per project — `SPC g l` brings the list back, and the choice
 is kept for the next run. `SPC v b` hides the backlog items, and a card that is not
 yours says whose it is.
+`moai web` serves the same tracker as a page in a browser tab, read-only, on
+`127.0.0.1:6624` (`--port`, `--port 0` for a free one, `--host`): a board, a list
+and the wiki, with the keys of the explorer. It never opens a browser and never
+writes; see [the manual page](docs/web.md).
 `SPC f` filters with the same `key=value` words as `--filter`. While you type,
 the keys it takes and a few examples stand above the field, and in the value of
 `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
@@ -349,8 +353,10 @@ no human-shaped output mixed in.
   to stdout. Human output disappears entirely; it is not interleaved.
 - Failures are JSON too, with a stable `code` you can branch on — `not_found`,
   `bad_status`, `bad_filter`, `bad_target`, `bad_input`, `no_actor`,
-  `already_exists`, `locked`, `broken`, `not_updatable`, and `error` as the
-  catch-all. The human sentence beside it is not something to match on.
+  `already_exists`, `locked`, `broken`, `not_updatable`, `port_in_use` (`moai web`
+  found its port taken), and `error` as the catch-all. The server `moai web` runs
+  speaks the same way over HTTP, with `forbidden_host`, `method_not_allowed`,
+  `busy`, `timeout` and `too_large`. The human sentence beside it is not something to match on.
 - Keys that are always present stay present. `moai ready --json` is
   `{"ready":[…],"others":[…],"held":[…]}`, never a bare array — `others` is ready
   work that is someone else's or nobody's (`owner` says which), and `held` is work

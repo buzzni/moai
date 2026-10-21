@@ -89,6 +89,21 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 A clone that skips this is no worse off than before; `blame` just stops at the
 formatting commit.
 
+## The web page
+
+`moai web` serves a page built from `web/`, a TypeScript project (the Saycode
+panel, taken as a base). The built bundle is committed under `src/web/dist/` and
+compiled into the binary, so a plain `cargo build` needs no node.
+
+- Change `web/`, then rebuild the bundle with node 22: `scripts/gen-web.sh`.
+  Commit the source and the bundle in the same commit
+- `cargo test` runs `tests/web_bundle.rs`, which fails when the committed bundle
+  is not what `web/` builds to. CI's web job rebuilds it on a clean machine and
+  catches the same drift, plus a bundle built with another node
+- `web/UPSTREAM.md` says which Saycode panel commit the page came from and what
+  was changed since; read it before pulling a newer panel in
+- The server side is `src/web/`; its error codes live in `src/fail.rs`
+
 ## Developing on Windows
 
 Windows is a release target (`x86_64-pc-windows-msvc`, and
