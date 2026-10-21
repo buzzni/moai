@@ -29646,15 +29646,18 @@ fn web_serves_the_page_and_the_boot() {
     assert!(head.contains("Content-Type: application/json"), "{head}");
     let boot = json_of(&body);
     assert_eq!(boot["statuses"], serde_json::json!(["todo", "in_progress", "review", "done"]), "{boot}");
-    assert_eq!(boot["glyphs"]["backlog"], "◇", "{boot}");
-    assert_eq!(boot["glyphs"]["shelved"], "‖", "{boot}");
+    assert_eq!(boot["columns"]["backlog"]["glyph"], "◇", "{boot}");
+    assert_eq!(boot["columns"]["shelved"]["glyph"], "‖", "{boot}");
     assert_eq!(boot["glyphs"]["done"], "✓", "{boot}");
+    assert!(boot["unknown_glyph"].is_string(), "{boot}");
+    let keys: Vec<&String> = boot["glyphs"].as_object().unwrap().keys().collect();
+    assert_eq!(keys, ["done", "in_progress", "review", "todo"], "glyphs 는 설정의 칸만 싣는다 — {boot}");
     assert_eq!(boot["lang"], "ko", "{boot}");
     assert_eq!(boot["version"], env!("CARGO_PKG_VERSION"), "{boot}");
     assert!(boot["filter_keys"].as_array().unwrap().iter().any(|k| k == "due_on"), "{boot}");
     assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "due" && f["dir"] == "asc"), "{boot}");
     assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "created" && f["dir"] == "desc"));
-    assert!(boot["columns"]["backlog"].is_string(), "{boot}");
+    assert!(boot["columns"]["backlog"]["name"].is_string(), "{boot}");
 
     let (status, _, body) = get(web.port, "/api/status");
     assert_eq!(status, 200, "{body}");
@@ -29945,6 +29948,27 @@ fn web_stamp_moves_when_a_row_is_read() {
     ok_with(s.path(), &cfg, &["read", &id]);
     assert!(!unread(&web), "시험의 전제 — 읽은 줄이 그대로 안 읽은 줄이다");
     assert_ne!(stamp(&web), before, "읽은 뒤에 표식이 안 움직였다");
+}
+
+/// **칸 이름이 `backlog`·`shelved` 여도 바탕의 키가 안 겹친다**(moai-jshy.yxh) — 글리프를 한 맵에 두던 판은
+/// 칸의 것과 보드의 것이 같은 키로 둘 서서, `JSON.parse` 가 뒤의 것(보드의 글리프)을 칸의 것으로 남겼다.
+#[test]
+fn web_boot_keeps_columns_named_like_the_board_apart() {
+    let s = init("web-boot-names");
+    std::fs::write(
+        s.path().join(".moai/config.toml"),
+        "prefix = \"argos\"\nstatuses = \"backlog,todo,shelved,done\"\n",
+    )
+    .unwrap();
+    let web = serve(s.path());
+    let body = get(web.port, "/api/boot").2;
+    let boot = json_of(&body);
+    let glyphs = boot["glyphs"].as_object().unwrap();
+    assert_eq!(glyphs.len(), 4, "{body}");
+    assert_eq!(body.matches("\"backlog\":").count(), 2, "glyphs 의 칸 하나와 columns 의 보드 칸 하나 — {body}");
+    assert_eq!(boot["glyphs"]["backlog"], boot["unknown_glyph"], "설정의 칸 backlog 는 제 글리프다 — {body}");
+    assert_eq!(boot["columns"]["backlog"]["glyph"], "◇", "{body}");
+    assert_eq!(boot["columns"]["shelved"]["glyph"], "‖", "{body}");
 }
 
 /// **서버의 말은 사용자 설정을 따라 바뀐다** — 띄울 때 고른 말을 들던 판은 설정의 `lang` 을 고친 뒤 `/api/boot` 와

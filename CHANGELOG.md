@@ -21,7 +21,8 @@ does not tag — see `CONTRIBUTING.md`.
   a board, a list and the wiki, built on the Saycode panel 2.0. `--port`,
   `--port 0` for a free port and `--host` (with a warning off loopback) say
   where; it answers only requests whose `Host` is `localhost` or an IP address.
-  (moai-0aa7)
+  The page reads again within two seconds of a write, and its filter, search
+  and sort are moai's own. (moai-0aa7, moai-jshy)
 
 ## [0.20.0] - 2026-10-20
 

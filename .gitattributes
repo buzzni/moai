@@ -32,3 +32,7 @@ docs/cli.md          linguist-generated=true
 # `set -euo pipefail\r` -- the release's Windows column calls these scripts.
 *.sh                 text eol=lf
 scripts/git-hooks/*  text eol=lf
+# src/web/dist/ is built from web/ by scripts/gen-web.sh and committed so that
+# `cargo build` never needs node. Marking it generated collapses the bundle diff;
+# read the change under web/ instead.
+src/web/dist/**      linguist-generated=true

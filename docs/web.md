@@ -52,9 +52,9 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
 - **Filter** (`SPC f`) takes the same `key=value` words as `--filter`. `Tab`
   completes, `Up`/`Down` pick a value and `Enter` applies. `Esc` in the list
   clears an applied search or filter
-- **Sort** (`SPC s`) works as in the explorer: `p c u s a t` sorts by priority,
-  created, updated, status, assignee or title, and the same key again turns it
-  around. The capital letter adds the field to the end of the order. `SPC s e`
+- **Sort** (`SPC s`) works as in the explorer: `p c u s a t w` sorts by priority,
+  created, updated, status, assignee, title or deadline, and the same key again
+  turns it around. The capital letter adds the field to the end of the order. `SPC s e`
   opens the sort editor
 - **View** (`SPC v`) shows or hides deferred work (`l`), backlog items (`b`) and
   the archive (`o`); `a` shows everything but the archive, `1`~`9` toggle the nth
@@ -63,8 +63,10 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   `a` assignee, `c` created, `u` updated, `n` counts, `t` tags, `e` epic,
   `h` names
 
-The page remembers its tab and where the detail sits in the browser's own local
-storage. Search, filter, sort, view and column last until you close the tab.
+The page remembers its tab, where the detail sits, the filter, the sort, the view
+and the columns in the browser's own local storage, kept per address — each
+project's page has its own. The search is not kept. A browser that keeps no site
+data (a private window) remembers them until the tab is closed.
 
 ## It only reads
 
@@ -87,9 +89,18 @@ window — the page notices and reads again. It asks the server for a short
 stamp, folded from the files its answers come from (the tracker's snapshot,
 journal, archive and config, plus your own user config and the read marks kept
 beside it, which say what is new to you), and reloads the list only when the
-stamp has changed. A tracker nobody touches costs one tiny question and no reread. What
-changes with the clock alone — a deadline passing, done work ageing into the
-archive — shows on the next reload.
+stamp has changed. It asks every two seconds while the tab is visible, and not at
+all while it is hidden; shown again, it asks at once. The issue open in the
+detail is read again with it, and the cursor, the folded groups and what you are
+typing stay where they were. A tracker nobody touches costs one tiny question and
+no reread. What changes with the clock alone — a deadline passing, done work
+ageing into the archive — shows on the next reload, or when you click the
+refresh time.
+
+When the server stops, one line says it cannot be reached, and the page asks
+again every ten seconds; the line goes once the server answers. A read that
+comes back refused or cut short (`busy`, `timeout`, a Cancel) is asked again on
+the next look, so the list never stays on the rows from before a change.
 
 ## See it from another machine
 
@@ -142,6 +153,11 @@ pressing its key. `?` shows the overlay of every key.
 | `gg` `Home` / `G` `End` | Top / bottom |
 | `Ctrl-d` / `Ctrl-u` | Half page down / up; the cursor stays |
 | `Ctrl-f` `PageDown` / `Ctrl-b` `PageUp` | Page down / up |
+
+A browser keeps some `Ctrl` keys for itself, and `Ctrl-w` closes the tab, so the
+page binds no `Ctrl-w`: `SPC w` moves between panes. Where a browser takes
+`Ctrl-f` or `Ctrl-b` first, `PageDown` and `PageUp` do the same. Click the page
+once and the keys reach it.
 
 **Step in and fold**
 
