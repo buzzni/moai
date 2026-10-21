@@ -7229,3 +7229,20 @@
 {"ts":"2026-10-20T06:38:51Z","id":"moai-p8e9.hyw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 심는 글만, 시험이 글자째 맨다)"}
 {"ts":"2026-10-20T06:38:51Z","id":"moai-p8e9.hyw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-20T06:38:52Z","id":"moai-p8e9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: milestone/moai-75ia 에 머지됨(2ee49cdb). 릴리스 때 develop 에 든다"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-kia8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.22.0"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-0aa7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai web 서버 — 127.0.0.1 에서 트래커를 낸다"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-0aa7.joy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tui --json --deep — 탐색기 자리를 한 번에 낸다"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-0aa7.726","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai web 명령과 HTTP 뼈대"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-0aa7.a0l","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"읽기 끝점 — 패널이 부를 moai JSON 부름을 정해 둔다"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-0aa7.osc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"문서 — 위키 web 쪽·README·CONTRIBUTING·CHANGELOG"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-jshy","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai web 페이지 — Saycode 패널 2.0 을 moai 에 맞춰 들인다"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-jshy.gh0","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"패널 2.0 을 web/ 에 들이고 번들을 바이너리에 싣는 길"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-jshy.jih","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Saycode 다리를 걷고 moai web 끝점에 잇는다"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-jshy.hfr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"패널의 두 번째 규칙을 걷는다 — 자리·거르개·정렬·아카이브는 moai 가"}
+{"ts":"2026-10-21T08:00:11Z","id":"moai-jshy.vve","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"브라우저에 맞춘다 — 갱신·키·이름·색·CSP"}
+{"ts":"2026-10-21T08:04:21Z","id":"moai-5u2p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹에서 쓰기 — 칸 옮기기·노트·생각 적기"}
+{"ts":"2026-10-21T08:04:22Z","id":"moai-vg0h","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 읽음 표시 — r·SPC m g·SPC m a"}
+{"ts":"2026-10-21T08:04:22Z","id":"moai-ngj1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 페이지 말을 i18n/*.json 으로 합치기"}
+{"ts":"2026-10-21T08:04:22Z","id":"moai-oavt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 CSP 의 style-src 조이기"}
+{"ts":"2026-10-21T08:04:22Z","id":"moai-1uls","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 갱신을 표식 물어보기 대신 SSE 로"}
+{"ts":"2026-10-21T08:04:22Z","id":"moai-y8bn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹에서 여러 프로젝트 층과 겹쳐 보기"}
