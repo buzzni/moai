@@ -6,6 +6,7 @@
 //!
 //! **읽기만 한다.** 길은 모두 GET 이고, 쓰는 길은 CLI 와 탐색기다(사람 결정, v1).
 
+pub mod api;
 pub mod boot;
 pub mod http;
 pub mod run;
@@ -105,10 +106,20 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             Err(e) => refuse(500, &e.message, e.code),
         },
         "/api/status" => child(site, &["status".to_string()]),
-        _ => {
-            let said = fill(say(site.lang, "web.no_path"), &[("path", &req.path)]);
-            refuse(404, &said, code::NOT_FOUND)
-        }
+        "/api/stamp" => match api::stamp(&site.spawner.cwd, site.lang) {
+            Ok(stamp) => {
+                Response { status: 200, kind: http::JSON, body: format!("{{\"stamp\":\"{stamp}\"}}").into_bytes() }
+            }
+            Err(e) => refuse(500, &e.message, e.code),
+        },
+        path => match api::argv_of(path, &req.query) {
+            Some(Ok(args)) => child(site, &args),
+            Some(Err(bad)) => refuse(400, &bad.said(site.lang), code::BAD_INPUT),
+            None => {
+                let said = fill(say(site.lang, "web.no_path"), &[("path", &req.path)]);
+                refuse(404, &said, code::NOT_FOUND)
+            }
+        },
     }
 }
 

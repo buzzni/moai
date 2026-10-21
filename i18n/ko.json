@@ -1231,5 +1231,11 @@
   "web.child_timeout": "moai 가 {secs}초 안에 답하지 않아 멈췄다",
   "web.child_too_big": "moai 의 답이 64 MiB 를 넘는다",
   "web.child_killed": "moai 가 답하기 전에 죽었다",
-  "web.child_spawn": "moai 를 띄우지 못했다: {said}"
+  "web.child_spawn": "moai 를 띄우지 못했다: {said}",
+  "web.bad_unknown": "이 경로는 {name} 이라는 쿼리를 받지 않는다",
+  "web.bad_twice": "{name} 을 두 번 줬다",
+  "web.bad_empty": "{name} 이 비었다",
+  "web.bad_long": "{name} 이 {max} 바이트보다 길다",
+  "web.bad_control": "{name} 에 제어 문자가 들었다",
+  "web.bad_shape": "{name} 이 이 경로가 받는 모양이 아니다 (플래그는 1, fields 는 id, id·slug 는 영숫자와 . _ -)"
 }

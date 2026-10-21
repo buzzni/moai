@@ -29749,3 +29749,148 @@ fn web_from_a_linked_worktree_reads_the_root_tracker() {
     );
     assert!(!side.join(".moai/issues.jsonl").exists() || !issues(&side).contains(&later), "워크트리에 썼다");
 }
+
+/// 봉투의 `out` 원문 — `{"exit":N,"out":<원문>…`. `direct` 의 길이만큼 글자째 떼어 낸다.
+fn envelope_out<'a>(body: &'a str, direct: &str) -> &'a str {
+    let start = body.find("\"out\":").unwrap_or_else(|| panic!("out 이 없다\n{body}")) + "\"out\":".len();
+    let n = direct.trim().len();
+    assert!(body.len() >= start + n, "봉투가 짧다\n{body}");
+    &body[start..start + n]
+}
+
+const WEB_ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,tags,assignee,assignee_email,blocked_by,unread,archived";
+
+/// **`/api/rows` 의 `out` 은 같은 플래그의 `moai show … --json` 과 바이트째 같다**(moai-0aa7.a0l) — 서버가
+/// 데이터의 뜻을 안 짓는다는 계약이다.
+#[test]
+fn web_rows_are_moais_show() {
+    let s = init("web-rows");
+    ok(s.path(), &["add", "파서가 죽는다", "-t", "bug"]);
+    let done = field(&ok(s.path(), &["add", "끝난 일", "--json"]), "id");
+    ok(s.path(), &["mv", &done, "done"]);
+    ok(s.path(), &["backlog", "add", "나중 생각"]);
+    let web = serve(s.path());
+    let fields = format!("--fields={WEB_ROW_FIELDS}");
+    let cases: [(&str, Vec<&str>); 4] = [
+        ("/api/rows", vec!["show", "--all", &fields]),
+        ("/api/rows?archived=1", vec!["show", "--all", "--archived", &fields]),
+        ("/api/rows?filter=status%3Ddone", vec!["show", "--all", "--filter=status=done", &fields]),
+        ("/api/rows?q=%ED%8C%8C%EC%84%9C&fields=id", vec!["show", "--all", "--grep=파서", "--fields=id"]),
+    ];
+    for (path, args) in cases {
+        let mut argv = args.clone();
+        argv.push("--json");
+        let direct = ok(s.path(), &argv);
+        let (status, head, body) = get(web.port, path);
+        assert_eq!(status, 200, "{path}\n{head}\n{body}");
+        assert_eq!(json_of(&body)["exit"], 0, "{path}\n{body}");
+        assert_eq!(envelope_out(&body, &direct), direct.trim(), "{path}");
+    }
+    let direct = ok(s.path(), &["backlog", "show", "--all", &fields, "--json"]);
+    let (status, _, body) = get(web.port, "/api/backlog");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+    let direct = ok(s.path(), &["backlog", "show", "--all", "--archived", "--fields=id", "--json"]);
+    let (_, _, body) = get(web.port, "/api/backlog?archived=1&fields=id");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+
+    // 값이 플래그꼴이어도 한 토막이다 — `--json` 이 찾기 글이 될 뿐 출력 꼴을 안 바꾼다.
+    let (status, _, body) = get(web.port, "/api/rows?q=--json");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    // 모양이 틀린 값은 자식을 띄우기 전에 400 이다.
+    for path in [
+        "/api/rows?archived=true",
+        "/api/rows?q=a&q=b",
+        "/api/rows?nope=1",
+        "/api/rows?q=",
+        "/api/rows?sort=title",
+        "/api/issue/--all",
+        "/api/wiki/a%2Fb",
+    ] {
+        let (status, _, body) = get(web.port, path);
+        assert_eq!(status, 400, "{path}\n{body}");
+        assert_eq!(json_of(&body)["code"], "bad_input", "{path}\n{body}");
+    }
+}
+
+/// **`/api/tree` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
+#[test]
+fn web_tree_is_tui_deep() {
+    let s = init("web-tree");
+    ok(s.path(), &["add", "b 일"]);
+    ok(s.path(), &["add", "a 일"]);
+    let web = serve(s.path());
+    let direct = ok(s.path(), &["tui", "--deep", "--json"]);
+    let (status, _, body) = get(web.port, "/api/tree");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+    let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--json"]);
+    let (_, _, body) = get(web.port, "/api/tree?sort=title");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+    let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--reverse", "--json"]);
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+}
+
+/// **거르개의 뜻과 거절은 moai 가 낸다**(moai-0aa7.a0l) — 서버는 봉투에 옮길 뿐이라 상태는 200 이다.
+#[test]
+fn web_bad_filter_says_moais_words() {
+    let s = init("web-badfilter");
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, "/api/rows?filter=nope%3D1");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_ne!(env["exit"], 0, "{env}");
+    assert_eq!(env["err"]["code"], "bad_filter", "{env}");
+}
+
+/// **일 하나와 위키**(moai-0aa7.a0l) — 없는 id 는 `not_found`, `docs/` 가 없는 판에서도 `/api/wiki` 는 객체다.
+#[test]
+fn web_shows_one_issue_and_the_wiki() {
+    let s = init("web-one");
+    let id = field(&ok(s.path(), &["add", "하나", "--json"]), "id");
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, &format!("/api/issue/{id}"));
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert_eq!(env["out"]["id"], id.as_str(), "{env}");
+    let (status, _, body) = get(web.port, "/api/issue/nope-0000");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_ne!(env["exit"], 0, "{env}");
+    assert_eq!(env["err"]["code"], "not_found", "{env}");
+    let (status, _, body) = get(web.port, "/api/wiki");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert!(env["out"].is_object(), "{env}");
+    let (status, _, body) = get(web.port, "/api/wiki/nope");
+    assert_eq!(status, 200, "{body}");
+    assert_ne!(json_of(&body)["exit"], 0, "{body}");
+}
+
+/// **표식은 트래커를 쓰면 움직인다**(moai-0aa7.a0l) — 안 쓰면 같고, `add` 뒤와 `note` 뒤(저널만 바뀐다)에 다르다.
+#[test]
+fn web_stamp_moves_when_the_tracker_is_written() {
+    let s = init("web-stamp");
+    let id = field(&ok(s.path(), &["add", "하나", "--json"]), "id");
+    let web = serve(s.path());
+    let stamp = |web: &Served| {
+        let (status, _, body) = get(web.port, "/api/stamp");
+        assert_eq!(status, 200, "{body}");
+        let v = json_of(&body);
+        let got = v["stamp"].as_str().unwrap_or_else(|| panic!("{body}")).to_string();
+        assert!(got.len() == 16 && got.chars().all(|c| c.is_ascii_hexdigit()), "{got}");
+        got
+    };
+    let first = stamp(&web);
+    assert_eq!(first, stamp(&web), "안 썼는데 움직였다");
+    ok(s.path(), &["add", "둘"]);
+    let second = stamp(&web);
+    assert_ne!(first, second, "add 뒤에 안 움직였다");
+    ok(s.path(), &["note", &id, "메모"]);
+    let third = stamp(&web);
+    assert_ne!(second, third, "note 뒤에 안 움직였다");
+}

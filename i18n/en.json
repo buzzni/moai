@@ -1231,5 +1231,11 @@
   "web.child_timeout": "moai did not answer within {secs} seconds and was stopped",
   "web.child_too_big": "moai's answer is larger than 64 MiB",
   "web.child_killed": "moai was killed before it answered",
-  "web.child_spawn": "could not run moai: {said}"
+  "web.child_spawn": "could not run moai: {said}",
+  "web.bad_unknown": "this path does not take a query named {name}",
+  "web.bad_twice": "{name} was given more than once",
+  "web.bad_empty": "{name} is empty",
+  "web.bad_long": "{name} is longer than {max} bytes",
+  "web.bad_control": "{name} holds a control character",
+  "web.bad_shape": "{name} is not in the shape this path takes (1 for a flag, id for fields, letters digits . _ - for an id or slug)"
 }
