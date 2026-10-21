@@ -71,8 +71,8 @@ impl<'a> Out<'a> {
     }
 }
 
-/// 파일에 적는 낱말 그대로다(`Naming::ALL`).
-fn naming(n: Naming) -> &'static str {
+/// 파일에 적는 낱말 그대로다(`Naming::ALL`). `moai web` 의 `/api/boot` 도 이것을 낸다.
+pub(crate) fn naming(n: Naming) -> &'static str {
     match n {
         Naming::Full => Naming::ALL[0],
         Naming::Name => Naming::ALL[1],

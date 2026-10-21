@@ -7167,6 +7167,131 @@ fn tui_json_counts_groups_and_takes_the_show_filters() {
     }
 }
 
+/// `tui --json --deep` 는 그 자리 밑 모든 줄을 앞 순회로 한 번에 내고, 줄마다 뿌리에서 선 디렉터리까지의
+/// 손잡이(`home`)를 단다(moai-0aa7.joy). 마일스톤·에픽·이슈·자식·`none`·`lost`·backlog 가 한 번씩 선다.
+#[test]
+fn tui_deep_lists_every_row_once_with_its_home() {
+    let s = init("tuideep");
+    let ms = field(&ok(s.path(), &["milestone", "add", "v1", "--json"]), "id");
+    let ep = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &ms, "--json"]), "id");
+    let is = field(&ok(s.path(), &["add", "안의 일", "-e", &ep, "--json"]), "id");
+    let kid = field(&ok(s.path(), &["add", "자식", "--parent", &is, "--json"]), "id");
+    let bare = field(&ok(s.path(), &["epic", "add", "마일스톤 없는 에픽", "--json"]), "id");
+    let lost = add(s.path(), &["길 잃은 것"]);
+    let bl = field(&ok(s.path(), &["backlog", "add", "나중에", "--json"]), "id");
+    let broken = line_of(s.path(), &lost).replace(r#""status""#, r#""epic":"argos-zzzz","status""#);
+    let text: String = issues(s.path())
+        .lines()
+        .map(|l| if l.contains(&format!(r#""id":"{lost}""#)) { broken.clone() } else { l.to_string() })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(s.path().join(".moai/issues.jsonl"), format!("{text}\n")).unwrap();
+
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &["tui", "--json", "--deep"])).unwrap();
+    let at = |id: &str| rows.iter().position(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"));
+    let home = |id: &str| -> Vec<String> {
+        rows[at(id)]["home"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect()
+    };
+    for id in [&ms, &ep, &is, &kid, &bare, &lost, &bl] {
+        assert_eq!(rows.iter().filter(|r| r["id"] == id.as_str()).count(), 1, "{id} 가 한 번이 아니다");
+    }
+    assert_eq!(home(&ms), Vec::<String>::new());
+    assert_eq!(home(&ep), vec![ms.clone()]);
+    assert_eq!(home(&is), vec![ms.clone(), ep.clone()]);
+    assert_eq!(home(&kid), vec![ms.clone(), ep.clone(), is.clone()]);
+    assert_eq!(home(&bare), vec!["none".to_string()]);
+    assert_eq!(home(&lost), vec!["lost".to_string()]);
+    // backlog 는 일과 같은 자리의 잎이다 — 뿌리에 없으면 바구니 밑에 선다.
+    assert!(home(&bl).len() <= 1, "{:?}", home(&bl));
+    // 바구니 줄은 id 가 없지만 제 손잡이를 home 으로 가진 줄들 앞에 선다.
+    let basket = rows.iter().position(|r| r["path"] == "none" && r["kind"] == "bucket").unwrap();
+    assert_eq!(rows[basket]["home"], serde_json::json!([]));
+    assert!(basket < at(&bare), "부모가 자식보다 앞이어야 한다");
+    assert!(at(&ms) < at(&ep) && at(&ep) < at(&is) && at(&is) < at(&kid), "부모가 자식보다 앞이어야 한다");
+    let lost_basket = rows.iter().position(|r| r["path"] == "lost").unwrap();
+    assert!(lost_basket < at(&lost));
+
+    // `--path` 를 줘도 home 은 뿌리에서부터다.
+    let inner: Vec<serde_json::Value> =
+        serde_json::from_str(&ok(s.path(), &["tui", "--json", "--deep", "--path", &ep])).unwrap();
+    let first = &inner[0];
+    assert_eq!(first["id"], is.as_str());
+    assert_eq!(first["home"], serde_json::json!([ms, ep]));
+}
+
+/// 한 자리 목록을 `--path` 로 자리마다 불러 앞 순회로 이으면 `--deep` 이다(`home` 만 빼고).
+#[test]
+fn tui_deep_is_the_one_level_listings_walked() {
+    let s = init("tuideepwalk");
+    let ms = field(&ok(s.path(), &["milestone", "add", "v1", "--json"]), "id");
+    let ep = field(&ok(s.path(), &["epic", "add", "저장 계층", "--milestone", &ms, "--json"]), "id");
+    let a = field(&ok(s.path(), &["add", "b 일", "-e", &ep, "-p", "0", "--json"]), "id");
+    let b = field(&ok(s.path(), &["add", "a 일", "-e", &ep, "--json"]), "id");
+    field(&ok(s.path(), &["add", "자식", "--parent", &a, "--json"]), "id");
+    let done = field(&ok(s.path(), &["add", "끝난 일", "-e", &ep, "--json"]), "id");
+    ok(s.path(), &["mv", &done, "done"]);
+    ok(s.path(), &["epic", "add", "빈 에픽", "--json"]);
+    ok(s.path(), &["add", "에픽 밖", "--json"]);
+    ok(s.path(), &["backlog", "add", "나중에"]);
+    let _ = b;
+
+    fn walk(dir: &Path, at: Option<&str>, args: &[&str], out: &mut Vec<serde_json::Value>) {
+        let mut all = vec!["tui", "--json"];
+        if let Some(h) = at {
+            all.extend(["--path", h]);
+        }
+        all.extend(args);
+        let rows: Vec<serde_json::Value> = serde_json::from_str(&ok(dir, &all)).unwrap();
+        for r in rows {
+            let (is_dir, handle) = (r["dir"] == true, r["path"].as_str().unwrap().to_string());
+            out.push(r);
+            if is_dir {
+                walk(dir, Some(&handle), args, out);
+            }
+        }
+    }
+    for args in [&[][..], &["-s", "todo", "--all"][..], &["--sort", "title"][..]] {
+        let mut stepped = Vec::new();
+        walk(s.path(), None, args, &mut stepped);
+        let mut all = vec!["tui", "--json", "--deep"];
+        all.extend(args);
+        let mut deep: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &all)).unwrap();
+        assert!(!deep.is_empty());
+        for r in &mut deep {
+            assert!(r.as_object_mut().unwrap().remove("home").is_some(), "{r}");
+        }
+        assert_eq!(deep, stepped, "{args:?}");
+    }
+}
+
+/// `--deep` 는 `--json` 의 목록 모양이다 — 화면에서도 `.moai` 밖에서도 말없이 먹지 않는다.
+#[test]
+fn tui_deep_needs_json() {
+    let s = init("tuideepneed");
+    let out = moai(s.path(), &["tui", "--deep"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--deep"), "{out:?}");
+    let outside = Scratch::new("tuideep-outside");
+    for args in [&["tui", "--deep"][..], &["tui", "--deep", "--json"][..]] {
+        let out = moai(outside.path(), args);
+        assert!(!out.status.success(), "{args:?}");
+        let said = format!("{}{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+        assert!(said.contains("--deep"), "{args:?}: {said}");
+    }
+}
+
+/// `--deep` 없는 `tui --json` 에는 `home` 이 없다 — 한 자리 목록의 출력은 그대로다.
+#[test]
+fn tui_one_level_listing_is_unchanged() {
+    let s = init("tuideepplain");
+    let ep = field(&ok(s.path(), &["epic", "add", "에픽", "--json"]), "id");
+    ok(s.path(), &["add", "일", "-e", &ep]);
+    for args in [&["tui", "--json"][..], &["tui", "--json", "--path", &ep][..], &["tui", "--json", "-s", "todo"][..]] {
+        let out = ok(s.path(), args);
+        assert!(!out.contains("home"), "{args:?}: {out}");
+    }
+}
+
 /// 시계가 가는 것만으로 드러나는 것들 — 고정 시계 없이는 시험할 수 없다.
 #[test]
 fn time_alone_surfaces_rot() {
@@ -8596,6 +8721,8 @@ const JSON_SWEEP: &[&str] = &[
     "link",
     "defer",
     "tui",
+    // 섬기는 판은 안 돌아오므로 훑기는 `--dry-run` 으로 부른다(moai-0aa7.726).
+    "web",
     "edit",
     "mv",
     "rm",
@@ -9168,6 +9295,8 @@ fn every_command_still_speaks_json() {
         vec!["defer", &id, "--json"],
         // tui 는 화면을 켜지 않고 목록만 낸다.
         vec!["tui", "--json"],
+        vec!["tui", "--deep", "--json"],
+        vec!["web", "--dry-run", "--json"],
         // 종류 네임스페이스도 같은 길을 지난다.
         vec!["issue", "show", "--json"],
         vec!["epic", "show", "--json"],
@@ -29380,4 +29509,524 @@ fn models_json_has_null_path_when_no_config_place_is_known() {
     assert_eq!(got["path"], serde_json::Value::Null);
     assert_eq!(got["written"], serde_json::json!([]));
     assert_eq!(got["codex"], "gpt-6.1-sol");
+}
+
+/// 띄운 `moai web` 한 판 — 떨어질 때 죽인다. 시험이 넘어져도 서버가 남지 않게.
+struct Served {
+    child: std::process::Child,
+    port: u16,
+    first: serde_json::Value,
+}
+
+impl Drop for Served {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// `moai web --port 0 --json` 을 `dir` 에서 띄우고 첫 줄(10초 시한)에서 묶은 포트를 읽는다.
+fn serve(dir: &Path) -> Served {
+    serve_with(dir, |_| {})
+}
+
+/// [`serve`] 를 띄우기 전에 `tweak` 으로 손본다 — 사용자 설정(`MOAI_CONFIG`, 읽음 파일은 그 곁에 선다)이나 말을
+/// 시험마다 제 것으로 준다.
+fn serve_with(dir: &Path, tweak: impl FnOnce(&mut Command)) -> Served {
+    use std::io::BufRead as _;
+    let mut cmd = staged(&["web", "--port", "0", "--json"]);
+    tweak(&mut cmd);
+    let mut child = cmd
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("moai web 을 띄우지 못했다");
+    let out = child.stdout.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = std::io::BufReader::new(out).read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    let line = match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(line) => line,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("moai web 의 첫 줄이 10초 안에 안 왔다");
+        }
+    };
+    one_json_value(&line);
+    let first: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let port = first["port"].as_u64().expect("첫 줄에 port 가 없다") as u16;
+    Served { child, port, first }
+}
+
+/// 날 요청 하나 — `(상태, 머리, 본문)`. dev-dependency 없이 std `TcpStream` 으로.
+fn http(port: u16, method: &str, path: &str, host: Option<&str>) -> (u16, String, String) {
+    use std::io::{Read as _, Write as _};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
+    let host = host.map(|h| format!("Host: {h}\r\n")).unwrap_or_default();
+    write!(s, "{method} {path} HTTP/1.1\r\n{host}\r\n").unwrap();
+    let mut got = Vec::new();
+    s.read_to_end(&mut got).unwrap();
+    let got = String::from_utf8(got).unwrap();
+    let (head, body) = got.split_once("\r\n\r\n").unwrap_or_else(|| panic!("머리 끝이 없다\n{got}"));
+    let status = head.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or_else(|| panic!("상태 줄\n{head}"));
+    (status, head.to_string(), body.to_string())
+}
+
+fn get(port: u16, path: &str) -> (u16, String, String) {
+    http(port, "GET", path, Some(&format!("127.0.0.1:{port}")))
+}
+
+fn json_of(body: &str) -> serde_json::Value {
+    serde_json::from_str(body).unwrap_or_else(|e| panic!("{e}\n{body}"))
+}
+
+/// **`--dry-run` 은 묶지 않고 어디서 낼지를 댄다**(moai-0aa7.726) — 기본 자리는 `127.0.0.1:6624`, 빈 포트를
+/// 고르게 한 판(`--port 0`)은 아직 포트를 몰라 `url` 이 없다.
+#[test]
+fn web_dry_run_names_where_it_would_serve() {
+    let s = init("web-dry");
+    let out = ok(s.path(), &["web", "--dry-run", "--json"]);
+    one_json_value(&out);
+    let v = json_of(&out);
+    assert_eq!(v["port"], 6624, "{v}");
+    assert_eq!(v["host"], "127.0.0.1", "{v}");
+    assert_eq!(v["url"], "http://127.0.0.1:6624/", "{v}");
+    assert_eq!(v["dry_run"], true, "{v}");
+    let root = canon(s.path()).unwrap().display().to_string();
+    assert_eq!(v["root"], root.as_str(), "{v}");
+    assert_eq!(v["here"], root.as_str(), "{v}");
+
+    let v = json_of(&ok(s.path(), &["web", "--dry-run", "--port", "0", "--json"]));
+    assert!(v.get("url").is_none(), "포트를 모르는데 url 을 댔다 — {v}");
+    assert_eq!(v["port"], 0, "{v}");
+
+    // 아무 데나(0.0.0.0)에 묶는 판의 주소는 루프백으로 댄다 — 그 글자는 붙을 곳이 아니다.
+    let out = moai(s.path(), &["web", "--dry-run", "--host", "0.0.0.0", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(json_of(&String::from_utf8_lossy(&out.stdout))["url"], "http://127.0.0.1:6624/");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("0.0.0.0"), "루프백 밖이라는 경고가 없다\n{}", text(&out));
+
+    let said = ok(s.path(), &["web", "--dry-run"]);
+    assert!(said.contains("http://127.0.0.1:6624/"), "{said}");
+}
+
+/// **페이지와 바탕을 낸다**(moai-0aa7.726) — 정적 파일 셋, `/api/boot`, `/api/status` 의 봉투.
+#[test]
+fn web_serves_the_page_and_the_boot() {
+    let s = init("web-serve");
+    ok(s.path(), &["add", "일 하나"]);
+    let web = serve(s.path());
+    assert!(web.first["url"].as_str().is_some_and(|u| u.ends_with(&format!(":{}/", web.port))), "{}", web.first);
+
+    let (status, head, body) = get(web.port, "/");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/html"), "{head}");
+    assert!(body.contains("app.js"), "{body}");
+    for h in
+        ["Connection: close", "Cache-Control: no-store", "X-Content-Type-Options: nosniff", "Content-Security-Policy: "]
+    {
+        assert!(head.contains(h), "{h}\n{head}");
+    }
+    let (status, head, _) = get(web.port, "/app.js");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/javascript"), "{head}");
+    let (status, head, _) = get(web.port, "/app.css");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/css"), "{head}");
+
+    let (status, head, body) = get(web.port, "/api/boot");
+    assert_eq!(status, 200, "{head}\n{body}");
+    assert!(head.contains("Content-Type: application/json"), "{head}");
+    let boot = json_of(&body);
+    assert_eq!(boot["statuses"], serde_json::json!(["todo", "in_progress", "review", "done"]), "{boot}");
+    assert_eq!(boot["glyphs"]["backlog"], "◇", "{boot}");
+    assert_eq!(boot["glyphs"]["shelved"], "‖", "{boot}");
+    assert_eq!(boot["glyphs"]["done"], "✓", "{boot}");
+    assert_eq!(boot["lang"], "ko", "{boot}");
+    assert_eq!(boot["version"], env!("CARGO_PKG_VERSION"), "{boot}");
+    assert!(boot["filter_keys"].as_array().unwrap().iter().any(|k| k == "due_on"), "{boot}");
+    assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "due" && f["dir"] == "asc"), "{boot}");
+    assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "created" && f["dir"] == "desc"));
+    assert!(boot["columns"]["backlog"].is_string(), "{boot}");
+
+    let (status, _, body) = get(web.port, "/api/status");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert!(env["out"]["counts"].is_object(), "{env}");
+    // 봉투의 `out` 은 `moai status --json` 의 원문 그대로다 — 키 차례까지.
+    let direct = ok(s.path(), &["status", "--json"]);
+    let start = body.find("\"out\":").unwrap() + "\"out\":".len();
+    assert!(body[start..].starts_with(direct.trim()), "원문이 아니다\n{body}\n{direct}");
+}
+
+/// **남의 이름으로 온 부름은 거절한다**(moai-0aa7.726) — DNS 리바인딩. `Host` 가 없어도 같다.
+#[test]
+fn web_refuses_a_foreign_host() {
+    let s = init("web-host");
+    let web = serve(s.path());
+    let foreign = format!("evil.example:{}", web.port);
+    for host in [Some("evil.example"), Some("localhost.evil.example"), Some(foreign.as_str()), None] {
+        let (status, _, body) = http(web.port, "GET", "/api/boot", host);
+        assert_eq!(status, 403, "{host:?}\n{body}");
+        assert_eq!(json_of(&body)["code"], "forbidden_host", "{body}");
+    }
+    let (status, _, _) = http(web.port, "GET", "/api/boot", Some(&format!("localhost:{}", web.port)));
+    assert_eq!(status, 200);
+}
+
+/// **읽기만 한다**(moai-0aa7.726) — GET 이 아니면 405, 없는 길은 404, 본문을 실으면 400.
+#[test]
+fn web_answers_only_gets() {
+    let s = init("web-get");
+    let web = serve(s.path());
+    let host = format!("127.0.0.1:{}", web.port);
+    for method in ["POST", "PUT", "DELETE", "HEAD"] {
+        let (status, head, body) = http(web.port, method, "/api/status", Some(&host));
+        assert_eq!(status, 405, "{method}\n{head}");
+        assert!(head.contains("Allow: GET"), "{head}");
+        match method {
+            // HEAD 의 답은 본문을 안 싣는다(RFC 9110 §9.3.2) — 머리만 선다.
+            "HEAD" => assert!(body.is_empty(), "HEAD 에 본문을 실었다\n{body}"),
+            _ => assert_eq!(json_of(&body)["code"], "method_not_allowed", "{body}"),
+        }
+    }
+    let (status, _, body) = get(web.port, "/api/nope");
+    assert_eq!(status, 404, "{body}");
+    assert_eq!(json_of(&body)["code"], "not_found", "{body}");
+    assert!(json_of(&body)["error"].as_str().unwrap().contains("/api/nope"), "{body}");
+}
+
+/// **쓰인 포트면 멈추고 고칠 길을 댄다**(moai-0aa7.726) — 코드 `port_in_use`, 말에 `--port 0`.
+#[test]
+fn web_says_a_port_in_use() {
+    let s = init("web-port");
+    let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = held.local_addr().unwrap().port().to_string();
+    let out = moai(s.path(), &["web", "--port", &port, "--json"]);
+    assert!(!out.status.success(), "{}", text(&out));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(field(&err, "code"), "port_in_use", "{err}");
+    assert!(err.contains("--port 0"), "{err}");
+    assert!(out.stdout.is_empty(), "묶지 못했는데 첫 줄을 냈다\n{}", text(&out));
+
+    // **묶지 못한 `--json` 판의 stderr 는 오류 객체 하나다** — 루프백 밖이라는 경고는 묶은 뒤에야 선다. 앞에 서던
+    // 판은 `code` 로 가르던 쪽이 파싱 실패를 만났다. 이 기계의 것이 아닌 주소(TEST-NET-1)라 묶기가 진다.
+    let out = moai(s.path(), &["web", "--host", "192.0.2.1", "--port", "0", "--json"]);
+    assert!(!out.status.success(), "{}", text(&out));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    one_json_value(&err);
+    assert_eq!(field(&err, "code"), "error", "{err}");
+}
+
+/// **`.moai` 밖에서는 아무것도 안 묶는다**(moai-0aa7.726) — 다른 명령과 같은 거절이다.
+#[test]
+fn web_outside_a_tracker_refuses() {
+    let s = Scratch::new("web-outside");
+    for args in [&["web", "--dry-run", "--json"][..], &["web", "--port", "0", "--json"]] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?}\n{}", text(&out));
+        assert!(out.stdout.is_empty(), "{args:?}\n{}", text(&out));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("moai init"), "{args:?}\n{}", text(&out));
+    }
+}
+
+/// **딸린 워크트리에서 띄우면 주 체크아웃의 트래커를 낸다**(moai-0aa7.726) — 다른 명령과 같은 자리다. 첫 줄이
+/// 둘을 함께 댄다: `root` 는 트래커가 사는 곳, `here` 는 친 체크아웃.
+#[test]
+fn web_from_a_linked_worktree_reads_the_root_tracker() {
+    let s = Scratch::new("web-wt");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "주 체크아웃의 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "../side", "-b", "side"]);
+    let side = s.path().join("side");
+    // 워크트리의 스냅샷은 갈라진 때의 것이다 — 그 뒤에 주 체크아웃에 든 일은 거기 없다.
+    let later = field(&ok(&main, &["add", "갈라진 뒤의 일", "--json"]), "id");
+
+    let web = serve(&side);
+    assert_eq!(web.first["root"], canon(&main).unwrap().display().to_string().as_str(), "{}", web.first);
+    assert_eq!(web.first["here"], canon(&side).unwrap().display().to_string().as_str(), "{}", web.first);
+    let boot = json_of(&get(web.port, "/api/boot").2);
+    assert_eq!(boot["root"], canon(&main).unwrap().display().to_string().as_str(), "{boot}");
+    assert_eq!(boot["project"], "main", "{boot}");
+    let (_, _, body) = get(web.port, "/api/status");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let rows = ok(&side, &["show", "--json"]);
+    assert!(
+        rows.contains(&id) && rows.contains(&later),
+        "시험의 전제 — 워크트리의 show 가 주 체크아웃을 읽는다\n{rows}"
+    );
+    // **서버의 자식도 루트를 읽는다** — 갈라진 뒤 주 체크아웃에 든 줄이 봉투에 선다. 이 단언 없이는 자식이 워크트리의
+    // 낡은 스냅샷을 읽어도 위의 `exit` 0 만 보고 푸르렀다.
+    let env = json_of(&get(web.port, "/api/rows?fields=id").2);
+    let served: Vec<&str> =
+        env["out"].as_array().unwrap_or_else(|| panic!("{env}")).iter().filter_map(|r| r["id"].as_str()).collect();
+    assert!(served.contains(&id.as_str()) && served.contains(&later.as_str()), "{env}");
+    assert!(!side.join(".moai/issues.jsonl").exists() || !issues(&side).contains(&later), "워크트리에 썼다");
+}
+
+/// 봉투의 `out` 원문 — `{"exit":N,"out":<원문>…`. `direct` 의 길이만큼 글자째 떼어 낸다.
+fn envelope_out<'a>(body: &'a str, direct: &str) -> &'a str {
+    let start = body.find("\"out\":").unwrap_or_else(|| panic!("out 이 없다\n{body}")) + "\"out\":".len();
+    let n = direct.trim().len();
+    assert!(body.len() >= start + n, "봉투가 짧다\n{body}");
+    &body[start..start + n]
+}
+
+const WEB_ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,tags,assignee,assignee_email,blocked_by,unread,archived";
+
+/// **`/api/rows` 의 `out` 은 같은 플래그의 `moai show … --json` 과 바이트째 같다**(moai-0aa7.a0l) — 서버가
+/// 데이터의 뜻을 안 짓는다는 계약이다.
+#[test]
+fn web_rows_are_moais_show() {
+    let s = init("web-rows");
+    ok(s.path(), &["add", "파서가 죽는다", "-t", "bug"]);
+    let done = field(&ok(s.path(), &["add", "끝난 일", "--json"]), "id");
+    ok(s.path(), &["mv", &done, "done"]);
+    ok(s.path(), &["backlog", "add", "나중 생각"]);
+    let web = serve(s.path());
+    let fields = format!("--fields={WEB_ROW_FIELDS}");
+    let cases: [(&str, Vec<&str>); 4] = [
+        ("/api/rows", vec!["show", "--all", &fields]),
+        ("/api/rows?archived=1", vec!["show", "--all", "--archived", &fields]),
+        ("/api/rows?filter=status%3Ddone", vec!["show", "--all", "--filter=status=done", &fields]),
+        ("/api/rows?q=%ED%8C%8C%EC%84%9C&fields=id", vec!["show", "--all", "--grep=파서", "--fields=id"]),
+    ];
+    for (path, args) in cases {
+        let mut argv = args.clone();
+        argv.push("--json");
+        let direct = ok(s.path(), &argv);
+        let (status, head, body) = get(web.port, path);
+        assert_eq!(status, 200, "{path}\n{head}\n{body}");
+        assert_eq!(json_of(&body)["exit"], 0, "{path}\n{body}");
+        assert_eq!(envelope_out(&body, &direct), direct.trim(), "{path}");
+    }
+    let direct = ok(s.path(), &["backlog", "show", "--all", &fields, "--json"]);
+    let (status, _, body) = get(web.port, "/api/backlog");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+    let direct = ok(s.path(), &["backlog", "show", "--all", "--archived", "--fields=id", "--json"]);
+    let (_, _, body) = get(web.port, "/api/backlog?archived=1&fields=id");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+
+    // 값이 플래그꼴이어도 한 토막이다 — `--json` 이 찾기 글이 될 뿐 출력 꼴을 안 바꾼다.
+    let (status, _, body) = get(web.port, "/api/rows?q=--json");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    // 모양이 틀린 값은 자식을 띄우기 전에 400 이다. 받는 이름이 없는 끝점에 붙인 쿼리도 — 말없이 버리면 부른 쪽은
+    // 걸러진 답이라 믿는다. `show` 가 종류 낱말로 읽는 것(`issue`·`epic`…)은 id 가 아니다 — 목록이 돌아왔다.
+    for path in [
+        "/api/rows?archived=true",
+        "/api/rows?q=a&q=b",
+        "/api/rows?nope=1",
+        "/api/rows?q=",
+        "/api/rows?sort=title",
+        "/api/issue/--all",
+        "/api/issue/issue",
+        "/api/issue/epic",
+        "/api/status?worktree=1",
+        "/api/boot?x=1",
+        "/api/stamp?x=1",
+    ] {
+        let (status, _, body) = get(web.port, path);
+        assert_eq!(status, 400, "{path}\n{body}");
+        assert_eq!(json_of(&body)["code"], "bad_input", "{path}\n{body}");
+    }
+}
+
+/// **`/api/tree` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
+#[test]
+fn web_tree_is_tui_deep() {
+    let s = init("web-tree");
+    ok(s.path(), &["add", "b 일"]);
+    ok(s.path(), &["add", "a 일"]);
+    let web = serve(s.path());
+    let direct = ok(s.path(), &["tui", "--deep", "--json"]);
+    let (status, _, body) = get(web.port, "/api/tree");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+    let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--json"]);
+    let (_, _, body) = get(web.port, "/api/tree?sort=title");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+    let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--reverse", "--json"]);
+    let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1");
+    assert_eq!(envelope_out(&body, &direct), direct.trim());
+}
+
+/// **거르개의 뜻과 거절은 moai 가 낸다**(moai-0aa7.a0l) — 서버는 봉투에 옮길 뿐이라 상태는 200 이다.
+#[test]
+fn web_bad_filter_says_moais_words() {
+    let s = init("web-badfilter");
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, "/api/rows?filter=nope%3D1");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_ne!(env["exit"], 0, "{env}");
+    assert_eq!(env["err"]["code"], "bad_filter", "{env}");
+}
+
+/// **일 하나와 위키**(moai-0aa7.a0l) — 없는 id 는 `not_found`, `docs/` 가 없는 판에서도 `/api/wiki` 는 객체다.
+#[test]
+fn web_shows_one_issue_and_the_wiki() {
+    let s = init("web-one");
+    let id = field(&ok(s.path(), &["add", "하나", "--json"]), "id");
+    let web = serve(s.path());
+    let (status, _, body) = get(web.port, &format!("/api/issue/{id}"));
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert_eq!(env["out"]["id"], id.as_str(), "{env}");
+    let (status, _, body) = get(web.port, "/api/issue/nope-0000");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_ne!(env["exit"], 0, "{env}");
+    assert_eq!(env["err"]["code"], "not_found", "{env}");
+    let (status, _, body) = get(web.port, "/api/wiki");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert!(env["out"].is_object(), "{env}");
+    let (status, _, body) = get(web.port, "/api/wiki/nope");
+    assert_eq!(status, 200, "{body}");
+    assert_ne!(json_of(&body)["exit"], 0, "{body}");
+}
+
+/// **표식은 트래커를 쓰면 움직인다**(moai-0aa7.a0l) — 안 쓰면 같고, `add` 뒤와 `note` 뒤(저널만 바뀐다)에 다르다.
+#[test]
+fn web_stamp_moves_when_the_tracker_is_written() {
+    let s = init("web-stamp");
+    let id = field(&ok(s.path(), &["add", "하나", "--json"]), "id");
+    let web = serve(s.path());
+    let stamp = |web: &Served| {
+        let (status, _, body) = get(web.port, "/api/stamp");
+        assert_eq!(status, 200, "{body}");
+        let v = json_of(&body);
+        let got = v["stamp"].as_str().unwrap_or_else(|| panic!("{body}")).to_string();
+        assert!(got.len() == 16 && got.chars().all(|c| c.is_ascii_hexdigit()), "{got}");
+        got
+    };
+    let first = stamp(&web);
+    assert_eq!(first, stamp(&web), "안 썼는데 움직였다");
+    ok(s.path(), &["add", "둘"]);
+    let second = stamp(&web);
+    assert_ne!(first, second, "add 뒤에 안 움직였다");
+    ok(s.path(), &["note", &id, "메모"]);
+    let third = stamp(&web);
+    assert_ne!(second, third, "note 뒤에 안 움직였다");
+}
+
+/// **표식은 읽음이 바뀌어도 움직인다** — `/api/rows` 의 `unread` 는 사용자 설정 곁의 읽음 파일에서 온다. 트래커만
+/// 접던 판은 다른 창에서 `moai read` 를 친 뒤에도 표식이 그대로라, 표식이 움직일 때만 다시 읽는 페이지가 [NEW] 를
+/// 내내 세웠다.
+#[test]
+fn web_stamp_moves_when_a_row_is_read() {
+    let s = init("web-stamp-read");
+    let cfg = s.path().join("user.toml");
+    let id = field(&ok_with(s.path(), &cfg, &["add", "내 일", "--json"]), "id");
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let stamp = |web: &Served| json_of(&get(web.port, "/api/stamp").2)["stamp"].as_str().unwrap().to_string();
+    let unread = |web: &Served| json_of(&get(web.port, "/api/rows").2)["out"][0]["unread"] == true;
+    let before = stamp(&web);
+    assert!(unread(&web), "시험의 전제 — 내게 온 새 줄은 안 읽은 줄이다");
+    ok_with(s.path(), &cfg, &["read", &id]);
+    assert!(!unread(&web), "시험의 전제 — 읽은 줄이 그대로 안 읽은 줄이다");
+    assert_ne!(stamp(&web), before, "읽은 뒤에 표식이 안 움직였다");
+}
+
+/// **서버의 말은 사용자 설정을 따라 바뀐다** — 띄울 때 고른 말을 들던 판은 설정의 `lang` 을 고친 뒤 `/api/boot` 와
+/// 서버의 거절은 옛 말, 자식의 답은 새 말이었다. 표식도 함께 움직여 페이지가 다시 읽는다.
+#[test]
+fn web_speaks_the_language_the_user_config_says_now() {
+    let s = init("web-lang");
+    let cfg = s.path().join("user.toml");
+    std::fs::write(&cfg, "[i18n]\nlang = \"en\"\n").unwrap();
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg).env_remove("MOAI_LANG");
+    });
+    let boot = |web: &Served| json_of(&get(web.port, "/api/boot").2)["lang"].as_str().unwrap().to_string();
+    let stamp = |web: &Served| json_of(&get(web.port, "/api/stamp").2)["stamp"].as_str().unwrap().to_string();
+    assert_eq!(boot(&web), "en");
+    let before = stamp(&web);
+    std::fs::write(&cfg, "[i18n]\nlang = \"ko\"\n").unwrap();
+    assert_eq!(boot(&web), "ko", "설정을 고쳤는데 옛 말이다");
+    assert_ne!(stamp(&web), before, "설정을 고쳤는데 표식이 그대로다");
+}
+
+/// **넘치면 읽을 수 있는 503 `busy` 로 답하고, 자리가 비면 다시 받는다**(moai-0aa7.726) — 32 자리를 머리를 안
+/// 보내는 연결로 채운다. 안 읽은 요청을 둔 채 닫던 판은 그 503 을 RST 로 덮어, 부른 쪽은 `busy` 대신 "연결이
+/// 끊겼다" 를 받았다(`http` 의 `read_to_end` 가 그것을 넘어뜨린다).
+#[test]
+fn web_answers_busy_past_the_cap_and_frees_the_slots() {
+    let s = init("web-busy");
+    let web = serve(s.path());
+    let idle: Vec<std::net::TcpStream> =
+        (0..32).map(|_| std::net::TcpStream::connect(("127.0.0.1", web.port)).unwrap()).collect();
+    let (status, _, body) = get(web.port, "/api/stamp");
+    assert_eq!(status, 503, "{body}");
+    assert_eq!(json_of(&body)["code"], "busy", "{body}");
+    drop(idle);
+    // 닫힌 연결의 실이 끝나며 자리를 돌려놓는다 — 그 사이의 부름은 아직 503 일 수 있다.
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let (status, _, body) = get(web.port, "/api/stamp");
+        if status == 200 {
+            break;
+        }
+        assert!(std::time::Instant::now() < until, "자리가 안 돌아왔다 — {status} {body}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// **위키의 낱말은 `wiki ls` 가 낸 그대로 연다** — 디렉터리 밑의 쪽(`guide/start`)과 한글 이름을 id 의 모양으로
+/// 재어 400 으로 막던 판은 위키 쪽이 그 쪽을 하나도 못 열었다. 없는 낱말은 moai 가 `not_found` 로 답한다.
+#[test]
+fn web_wiki_opens_nested_and_unicode_slugs() {
+    let s = init("web-wiki-slug");
+    std::fs::create_dir_all(s.path().join("docs/guide")).unwrap();
+    std::fs::write(s.path().join("docs/guide/start.md"), "# Start\n").unwrap();
+    std::fs::write(s.path().join("docs/안내.md"), "# 안내\n").unwrap();
+    let web = serve(s.path());
+    for (path, slug) in [
+        ("/api/wiki/guide/start", "guide/start"),
+        ("/api/wiki/guide%2Fstart", "guide/start"),
+        ("/api/wiki/%EC%95%88%EB%82%B4", "안내"),
+    ] {
+        let (status, _, body) = get(web.port, path);
+        assert_eq!(status, 200, "{path}\n{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{path}\n{env}");
+        assert_eq!(env["out"]["slug"], slug, "{path}\n{env}");
+    }
+    let env = json_of(&get(web.port, "/api/wiki/a%2Fb").2);
+    assert_eq!(env["err"]["code"], "not_found", "{env}");
+}
+
+/// **자식은 올라가 잡은 줄을 되풀이하지 않는다** — 서버가 첫 줄 곁에 한 번 댄 것을, 서버가 선 자리에서 다시 찾던
+/// 자식이 봉투마다 `said` 로 또 실었다. 자식은 서버가 잡은 트래커의 자리에서 돈다.
+#[test]
+fn web_children_do_not_repeat_the_climb_notice() {
+    let s = init("web-climb");
+    let inner = s.path().join("inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    git(&inner, &["init", "-q"]);
+    let direct = moai(&inner, &["status", "--json"]);
+    assert!(!direct.stderr.is_empty(), "시험의 전제 — 안쪽 체크아웃에서는 올라가 잡았다고 댄다\n{}", text(&direct));
+    let web = serve(&inner);
+    let env = json_of(&get(web.port, "/api/status").2);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert!(env.get("said").is_none(), "{env}");
 }

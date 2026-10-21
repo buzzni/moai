@@ -21,6 +21,9 @@ It needs a terminal. A script that wants the same rows calls `moai tui --json`,
 which prints the listing and opens no screen — with counts, filters and order as
 [Draw the tracker from another program](json.md#walk-the-explorers-directories) says.
 
+To read the same tracker in a browser tab instead, run `moai web` — see
+[Open the tracker in a browser](web.md).
+
 ## Find your way around
 
 [Milestones](glossary.md#milestone) and [epics](glossary.md#epic) behave like

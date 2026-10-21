@@ -42,6 +42,7 @@ Commands:
   backlog       Jot a passing thought down where you are (`--type backlog`)
   wiki          Read the project wiki - the markdown pages under `docs/`
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
+  web           Serve this tracker as a page on 127.0.0.1, read-only
   hook          Called by an agent's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
@@ -71,6 +72,7 @@ Start a session like this:
   moai note <id> 'what I found' a note for whoever comes next
   moai tui                      explorer - epics open like directories.
                                 SPC n jots a thought down
+  moai web                      the same tracker as a page in a browser
 
 When something not for now comes to mind:
 
@@ -2474,6 +2476,7 @@ Usage: moai tui [OPTIONS]
 
 Options:
       --path <id|basket>     Open here - a directory opens inside it
+      --deep                 With --json, list every row below, with its home
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2802,13 +2805,60 @@ Order:
   `moai show`. Without them the listing is every row, as before. --sort and
   --reverse order it in the words of `moai show --sort`, and folders still come
   first and the baskets last. These shape --json only, and only inside a
-  `.moai`.
+  `.moai`. --deep (with --json, inside a `.moai`) lists every row under the
+  place at once, in the order of the explorer's unfolded tree: a folder row,
+  then what is in it, with the same filters and order as the one-level
+  listing. Each row carries home, the --path handles from the root down to the
+  directory it stands in ([] at the root, [none] or [lost] inside a basket).
 
     moai tui --path <milestone> -g parser --all --json
     moai tui --sort updated --json
+    moai tui --deep --json
 
   `--path` takes an issue id, or one of the two baskets by the word this
   tool uses for them: none (no milestone) and lost.
+```
+
+## `moai web`
+
+```
+Serve this tracker as a page on 127.0.0.1, read-only
+
+Usage: moai web [OPTIONS]
+
+Options:
+      --port <n>             Port - 6624 unless given; 0 picks a free one
+      --host <addr>          Address - 127.0.0.1 unless given
+      --dry-run              Say where it would serve; bind nothing
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai web                  http://127.0.0.1:6624/ - open it in a browser
+  moai web --port 0         let the system pick a free port
+  moai web --dry-run        say where it would serve; bind nothing
+  moai web --port 0 --json  one line {url, host, port, root, here}, then serve
+
+  The first line names the address and the tracker. Ctrl-C stops it; there
+  is nothing to clean up. It never opens a browser.
+
+  It only reads. Each list, issue and wiki page it serves is the answer of
+  `moai --json <command>`, run in a child process for that request, so the
+  page sees exactly what the CLI says. Writing stays with the CLI and the
+  explorer.
+
+  --port is 6624 unless given. --host is 127.0.0.1 unless given; another
+  address than a loopback one is served with a warning, because anyone who
+  reaches that port can read the tracker. Whatever it binds, it answers only
+  requests whose Host is localhost or an IP address.
+
+  A port already in use stops it with the code port_in_use. Run inside a
+  linked worktree, it serves the main checkout's tracker, as other commands
+  read it. --json prints the first line as one JSON value and nothing more
+  on stdout; --dry-run adds dry_run, and with --port 0 there is no url.
 ```
 
 ## `moai hook`

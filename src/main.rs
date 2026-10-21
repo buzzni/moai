@@ -38,6 +38,7 @@ mod tz;
 mod update;
 mod user_config;
 mod view;
+mod web;
 mod wiki;
 mod worktree;
 

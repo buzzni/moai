@@ -12,6 +12,17 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai tui --json --deep`** prints the explorer's whole tree in one call, so
+  a program that draws the tracker no longer walks it directory by directory.
+  (moai-0aa7.joy)
+- **`moai web`** serves the tracker as a read-only page on `127.0.0.1:6624`:
+  a board, a list and the wiki, built on the Saycode panel 2.0. `--port`,
+  `--port 0` for a free port and `--host` (with a warning off loopback) say
+  where; it answers only requests whose `Host` is `localhost` or an IP address.
+  (moai-0aa7)
+
 ## [0.20.0] - 2026-10-20
 
 ### Added
