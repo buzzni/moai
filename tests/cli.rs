@@ -8721,6 +8721,8 @@ const JSON_SWEEP: &[&str] = &[
     "link",
     "defer",
     "tui",
+    // 섬기는 판은 안 돌아오므로 훑기는 `--dry-run` 으로 부른다(moai-0aa7.726).
+    "web",
     "edit",
     "mv",
     "rm",
@@ -9294,6 +9296,7 @@ fn every_command_still_speaks_json() {
         // tui 는 화면을 켜지 않고 목록만 낸다.
         vec!["tui", "--json"],
         vec!["tui", "--deep", "--json"],
+        vec!["web", "--dry-run", "--json"],
         // 종류 네임스페이스도 같은 길을 지난다.
         vec!["issue", "show", "--json"],
         vec!["epic", "show", "--json"],
@@ -29506,4 +29509,243 @@ fn models_json_has_null_path_when_no_config_place_is_known() {
     assert_eq!(got["path"], serde_json::Value::Null);
     assert_eq!(got["written"], serde_json::json!([]));
     assert_eq!(got["codex"], "gpt-6.1-sol");
+}
+
+/// 띄운 `moai web` 한 판 — 떨어질 때 죽인다. 시험이 넘어져도 서버가 남지 않게.
+struct Served {
+    child: std::process::Child,
+    port: u16,
+    first: serde_json::Value,
+}
+
+impl Drop for Served {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// `moai web --port 0 --json` 을 `dir` 에서 띄우고 첫 줄(10초 시한)에서 묶은 포트를 읽는다.
+fn serve(dir: &Path) -> Served {
+    use std::io::BufRead as _;
+    let mut child = staged(&["web", "--port", "0", "--json"])
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("moai web 을 띄우지 못했다");
+    let out = child.stdout.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = std::io::BufReader::new(out).read_line(&mut line);
+        let _ = tx.send(line);
+    });
+    let line = match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(line) => line,
+        Err(_) => {
+            let _ = child.kill();
+            panic!("moai web 의 첫 줄이 10초 안에 안 왔다");
+        }
+    };
+    one_json_value(&line);
+    let first: serde_json::Value = serde_json::from_str(&line).unwrap();
+    let port = first["port"].as_u64().expect("첫 줄에 port 가 없다") as u16;
+    Served { child, port, first }
+}
+
+/// 날 요청 하나 — `(상태, 머리, 본문)`. dev-dependency 없이 std `TcpStream` 으로.
+fn http(port: u16, method: &str, path: &str, host: Option<&str>) -> (u16, String, String) {
+    use std::io::{Read as _, Write as _};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
+    let host = host.map(|h| format!("Host: {h}\r\n")).unwrap_or_default();
+    write!(s, "{method} {path} HTTP/1.1\r\n{host}\r\n").unwrap();
+    let mut got = Vec::new();
+    s.read_to_end(&mut got).unwrap();
+    let got = String::from_utf8(got).unwrap();
+    let (head, body) = got.split_once("\r\n\r\n").unwrap_or_else(|| panic!("머리 끝이 없다\n{got}"));
+    let status = head.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or_else(|| panic!("상태 줄\n{head}"));
+    (status, head.to_string(), body.to_string())
+}
+
+fn get(port: u16, path: &str) -> (u16, String, String) {
+    http(port, "GET", path, Some(&format!("127.0.0.1:{port}")))
+}
+
+fn json_of(body: &str) -> serde_json::Value {
+    serde_json::from_str(body).unwrap_or_else(|e| panic!("{e}\n{body}"))
+}
+
+/// **`--dry-run` 은 묶지 않고 어디서 낼지를 댄다**(moai-0aa7.726) — 기본 자리는 `127.0.0.1:6624`, 빈 포트를
+/// 고르게 한 판(`--port 0`)은 아직 포트를 몰라 `url` 이 없다.
+#[test]
+fn web_dry_run_names_where_it_would_serve() {
+    let s = init("web-dry");
+    let out = ok(s.path(), &["web", "--dry-run", "--json"]);
+    one_json_value(&out);
+    let v = json_of(&out);
+    assert_eq!(v["port"], 6624, "{v}");
+    assert_eq!(v["host"], "127.0.0.1", "{v}");
+    assert_eq!(v["url"], "http://127.0.0.1:6624/", "{v}");
+    assert_eq!(v["dry_run"], true, "{v}");
+    let root = canon(s.path()).unwrap().display().to_string();
+    assert_eq!(v["root"], root.as_str(), "{v}");
+    assert_eq!(v["here"], root.as_str(), "{v}");
+
+    let v = json_of(&ok(s.path(), &["web", "--dry-run", "--port", "0", "--json"]));
+    assert!(v.get("url").is_none(), "포트를 모르는데 url 을 댔다 — {v}");
+    assert_eq!(v["port"], 0, "{v}");
+
+    // 아무 데나(0.0.0.0)에 묶는 판의 주소는 루프백으로 댄다 — 그 글자는 붙을 곳이 아니다.
+    let out = moai(s.path(), &["web", "--dry-run", "--host", "0.0.0.0", "--json"]);
+    assert!(out.status.success(), "{}", text(&out));
+    assert_eq!(json_of(&String::from_utf8_lossy(&out.stdout))["url"], "http://127.0.0.1:6624/");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("0.0.0.0"), "루프백 밖이라는 경고가 없다\n{}", text(&out));
+
+    let said = ok(s.path(), &["web", "--dry-run"]);
+    assert!(said.contains("http://127.0.0.1:6624/"), "{said}");
+}
+
+/// **페이지와 바탕을 낸다**(moai-0aa7.726) — 정적 파일 셋, `/api/boot`, `/api/status` 의 봉투.
+#[test]
+fn web_serves_the_page_and_the_boot() {
+    let s = init("web-serve");
+    ok(s.path(), &["add", "일 하나"]);
+    let web = serve(s.path());
+    assert!(web.first["url"].as_str().is_some_and(|u| u.ends_with(&format!(":{}/", web.port))), "{}", web.first);
+
+    let (status, head, body) = get(web.port, "/");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/html"), "{head}");
+    assert!(body.contains("app.js"), "{body}");
+    for h in
+        ["Connection: close", "Cache-Control: no-store", "X-Content-Type-Options: nosniff", "Content-Security-Policy: "]
+    {
+        assert!(head.contains(h), "{h}\n{head}");
+    }
+    let (status, head, _) = get(web.port, "/app.js");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/javascript"), "{head}");
+    let (status, head, _) = get(web.port, "/app.css");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/css"), "{head}");
+
+    let (status, head, body) = get(web.port, "/api/boot");
+    assert_eq!(status, 200, "{head}\n{body}");
+    assert!(head.contains("Content-Type: application/json"), "{head}");
+    let boot = json_of(&body);
+    assert_eq!(boot["statuses"], serde_json::json!(["todo", "in_progress", "review", "done"]), "{boot}");
+    assert_eq!(boot["glyphs"]["backlog"], "◇", "{boot}");
+    assert_eq!(boot["glyphs"]["shelved"], "‖", "{boot}");
+    assert_eq!(boot["glyphs"]["done"], "✓", "{boot}");
+    assert_eq!(boot["lang"], "ko", "{boot}");
+    assert_eq!(boot["version"], env!("CARGO_PKG_VERSION"), "{boot}");
+    assert!(boot["filter_keys"].as_array().unwrap().iter().any(|k| k == "due_on"), "{boot}");
+    assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "due" && f["dir"] == "asc"), "{boot}");
+    assert!(boot["sort_fields"].as_array().unwrap().iter().any(|f| f["name"] == "created" && f["dir"] == "desc"));
+    assert!(boot["columns"]["backlog"].is_string(), "{boot}");
+
+    let (status, _, body) = get(web.port, "/api/status");
+    assert_eq!(status, 200, "{body}");
+    let env = json_of(&body);
+    assert_eq!(env["exit"], 0, "{env}");
+    assert!(env["out"]["counts"].is_object(), "{env}");
+    // 봉투의 `out` 은 `moai status --json` 의 원문 그대로다 — 키 차례까지.
+    let direct = ok(s.path(), &["status", "--json"]);
+    let start = body.find("\"out\":").unwrap() + "\"out\":".len();
+    assert!(body[start..].starts_with(direct.trim()), "원문이 아니다\n{body}\n{direct}");
+}
+
+/// **남의 이름으로 온 부름은 거절한다**(moai-0aa7.726) — DNS 리바인딩. `Host` 가 없어도 같다.
+#[test]
+fn web_refuses_a_foreign_host() {
+    let s = init("web-host");
+    let web = serve(s.path());
+    let foreign = format!("evil.example:{}", web.port);
+    for host in [Some("evil.example"), Some("localhost.evil.example"), Some(foreign.as_str()), None] {
+        let (status, _, body) = http(web.port, "GET", "/api/boot", host);
+        assert_eq!(status, 403, "{host:?}\n{body}");
+        assert_eq!(json_of(&body)["code"], "forbidden_host", "{body}");
+    }
+    let (status, _, _) = http(web.port, "GET", "/api/boot", Some(&format!("localhost:{}", web.port)));
+    assert_eq!(status, 200);
+}
+
+/// **읽기만 한다**(moai-0aa7.726) — GET 이 아니면 405, 없는 길은 404, 본문을 실으면 400.
+#[test]
+fn web_answers_only_gets() {
+    let s = init("web-get");
+    let web = serve(s.path());
+    let host = format!("127.0.0.1:{}", web.port);
+    for method in ["POST", "PUT", "DELETE", "HEAD"] {
+        let (status, head, body) = http(web.port, method, "/api/status", Some(&host));
+        assert_eq!(status, 405, "{method}\n{head}");
+        assert!(head.contains("Allow: GET"), "{head}");
+        assert_eq!(json_of(&body)["code"], "method_not_allowed", "{body}");
+    }
+    let (status, _, body) = get(web.port, "/api/nope");
+    assert_eq!(status, 404, "{body}");
+    assert_eq!(json_of(&body)["code"], "not_found", "{body}");
+    assert!(json_of(&body)["error"].as_str().unwrap().contains("/api/nope"), "{body}");
+}
+
+/// **쓰인 포트면 멈추고 고칠 길을 댄다**(moai-0aa7.726) — 코드 `port_in_use`, 말에 `--port 0`.
+#[test]
+fn web_says_a_port_in_use() {
+    let s = init("web-port");
+    let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = held.local_addr().unwrap().port().to_string();
+    let out = moai(s.path(), &["web", "--port", &port, "--json"]);
+    assert!(!out.status.success(), "{}", text(&out));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(field(&err, "code"), "port_in_use", "{err}");
+    assert!(err.contains("--port 0"), "{err}");
+    assert!(out.stdout.is_empty(), "묶지 못했는데 첫 줄을 냈다\n{}", text(&out));
+}
+
+/// **`.moai` 밖에서는 아무것도 안 묶는다**(moai-0aa7.726) — 다른 명령과 같은 거절이다.
+#[test]
+fn web_outside_a_tracker_refuses() {
+    let s = Scratch::new("web-outside");
+    for args in [&["web", "--dry-run", "--json"][..], &["web", "--port", "0", "--json"]] {
+        let out = moai(s.path(), args);
+        assert!(!out.status.success(), "{args:?}\n{}", text(&out));
+        assert!(out.stdout.is_empty(), "{args:?}\n{}", text(&out));
+        assert!(String::from_utf8_lossy(&out.stderr).contains("moai init"), "{args:?}\n{}", text(&out));
+    }
+}
+
+/// **딸린 워크트리에서 띄우면 주 체크아웃의 트래커를 낸다**(moai-0aa7.726) — 다른 명령과 같은 자리다. 첫 줄이
+/// 둘을 함께 댄다: `root` 는 트래커가 사는 곳, `here` 는 친 체크아웃.
+#[test]
+fn web_from_a_linked_worktree_reads_the_root_tracker() {
+    let s = Scratch::new("web-wt");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(&main).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let id = field(&ok(&main, &["add", "주 체크아웃의 일", "--json"]), "id");
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", "../side", "-b", "side"]);
+    let side = s.path().join("side");
+    // 워크트리의 스냅샷은 갈라진 때의 것이다 — 그 뒤에 주 체크아웃에 든 일은 거기 없다.
+    let later = field(&ok(&main, &["add", "갈라진 뒤의 일", "--json"]), "id");
+
+    let web = serve(&side);
+    assert_eq!(web.first["root"], canon(&main).unwrap().display().to_string().as_str(), "{}", web.first);
+    assert_eq!(web.first["here"], canon(&side).unwrap().display().to_string().as_str(), "{}", web.first);
+    let boot = json_of(&get(web.port, "/api/boot").2);
+    assert_eq!(boot["root"], canon(&main).unwrap().display().to_string().as_str(), "{boot}");
+    assert_eq!(boot["project"], "main", "{boot}");
+    let (_, _, body) = get(web.port, "/api/status");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let rows = ok(&side, &["show", "--json"]);
+    assert!(
+        rows.contains(&id) && rows.contains(&later),
+        "시험의 전제 — 워크트리의 show 가 주 체크아웃을 읽는다\n{rows}"
+    );
+    assert!(!side.join(".moai/issues.jsonl").exists() || !issues(&side).contains(&later), "워크트리에 썼다");
 }

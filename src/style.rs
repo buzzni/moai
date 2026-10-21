@@ -172,6 +172,12 @@ pub fn glyph(status: &str) -> &'static str {
     }
 }
 
+/// 보드의 backlog 칸 글리프. 탐색기 보드와 `moai web` 의 `/api/boot` 가 함께 쓴다 — 두 표면이 한 칸을 다른
+/// 그림으로 그리면 사람이 둘을 다른 칸으로 읽는다.
+pub const BACKLOG_GLYPH: &str = "◇";
+/// 보드의 미룸 칸 글리프 — [`BACKLOG_GLYPH`] 와 같은 까닭으로 여기 하나다.
+pub const SHELVED_GLYPH: &str = "‖";
+
 // **줄머리에 서던 표식 둘(backlog `◇`·미룸 `‖`)을 걷었다**(moai-nb6w, 사용자 결정 2026-09-21).
 //
 // 축 셋(`kind`·`status`·`deferred_at`)을 글리프로 다 세우려던 것인데, 표식이 하나만 붙어도

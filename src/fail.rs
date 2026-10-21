@@ -29,6 +29,14 @@ pub mod code {
     /// 도는 바이너리를 `moai update` 로 못 올린다(moai-zsfr.2p9) — cargo 가 지은 자리, 쓸 수 없는 자리,
     /// 판을 안 내는 기계. 고칠 곳이 argv 가 아니라 그 바이너리가 선 자리라 `bad_input` 과 가른다.
     pub const NOT_UPDATABLE: &str = "not_updatable";
+    /// `moai web` 이 묶으려는 포트를 남이 쥐었다(moai-0aa7.726). 고칠 곳이 `--port` 라 `error` 와 가른다.
+    pub const PORT_IN_USE: &str = "port_in_use";
+    // 아래는 `moai web` 이 HTTP 로 내는 거절의 `code` 다 — 상태 줄과 함께 나가지만, 받는 쪽이 분기하는 값은 이쪽이다.
+    pub const FORBIDDEN_HOST: &str = "forbidden_host";
+    pub const METHOD_NOT_ALLOWED: &str = "method_not_allowed";
+    pub const BUSY: &str = "busy";
+    pub const TIMEOUT: &str = "timeout";
+    pub const TOO_LARGE: &str = "too_large";
 }
 
 impl Fail {
