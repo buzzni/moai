@@ -1,0 +1,8 @@
+/*
+ * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
+ * of the columns that are on. The lanes, the column heads and the card box are components.css (look-and-feel 5.7).
+ * Needs tokens.css and components.css.
+ */
+.m-card-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
+.m-card-title { margin-top: 2px; overflow-wrap: anywhere; }

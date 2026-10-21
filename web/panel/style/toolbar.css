@@ -1,0 +1,12 @@
+/* The search / filter / sort toolbar above the list and board (view/toolbar.ts), mounted by the shell. */
+/* Its rows and buttons have display rules of their own (flex, inline-flex): `hidden` must still hide them. */
+.m-toolbar-slot[hidden], .m-toolbar-stack [hidden] { display: none !important; }
+.m-toolbar-stack .m-chips { padding: 4px 8px !important; }
+.m-toolbar-stack > .m-banner { margin: 4px 8px; }
+.m-hidden-note { padding: 2px 8px 4px; font-size: 12px; color: var(--muted); }
+/* After the title of a row only the search shows (the view hides it). */
+.moai-hidden-mark { margin-left: 6px; font-size: 11px; line-height: 16px; }
+
+/* The sort editor's row under the key cursor (j/k in sorter mode, keys/wiring.ts). */
+.m-sort-pop .m-menu-item[data-cursor] { background: var(--selected); }
+.m-sort-pop .m-sort-note { padding: 4px 8px; color: var(--muted, inherit); font-size: 11px; }

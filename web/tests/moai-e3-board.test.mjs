@@ -1,0 +1,408 @@
+// Moai panel board (se-c10x.bym): the grouping into lanes and columns, and the kanban in a jsdom document.
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { JSDOM } from 'jsdom'
+
+import { panelModule } from './moai-panel-modules.mjs'
+
+const { groupBoard, columnOf, statusKeys, BACKLOG, DEFERRED } = await panelModule('view/board-groups.ts')
+const { mountBoard, glyphOf } = await panelModule('view/board.ts')
+const { IssueIndex, NO_MILESTONE } = await panelModule('data/index.ts')
+const { initialState } = await panelModule('store.ts')
+const { copyFor } = await panelModule('i18n/index.ts')
+
+const ROWS = [
+  { id: 'm1', kind: 'milestone', title: 'v1', status: 'todo' },
+  { id: 'm2', kind: 'milestone', title: 'v2', status: 'todo' },
+  { id: 'e1', kind: 'epic', title: 'Epic one', milestone: 'm1', status: 'todo' },
+  { id: 'e2', kind: 'epic', title: 'Epic two', milestone: 'm2', status: 'todo' },
+  { id: 'e1.a', kind: 'issue', title: 'A', epic: 'e1', derived_epic: 'e1', status: 'todo', priority: 2 },
+  { id: 'e1.b', kind: 'issue', title: 'B', epic: 'e1', derived_epic: 'e1', status: 'in_progress', priority: 0, assignee: 'kim' },
+  { id: 'e1.c', kind: 'issue', title: 'C', epic: 'e1', derived_epic: 'e1', status: 'done', priority: 1 },
+  { id: 'e2.a', kind: 'issue', title: 'D', epic: 'e2', derived_epic: 'e2', status: 'blocked', priority: 1 },
+  { id: 'e2.b', kind: 'issue', title: 'E', epic: 'e2', derived_epic: 'e2', status: 'todo', deferred_at: '2026-01-01' },
+  { id: 'b1', kind: 'backlog', title: 'Idea', status: 'todo' },
+]
+const index = new IssueIndex(ROWS)
+const look = (over = {}) => ({
+  path: [],
+  view: { hiddenStatuses: [], hideDeferred: false, hideBacklog: false, showArchived: false },
+  cursor: null,
+  ...over,
+})
+const ids = (model, lane, key) => model.lanes[lane].columns.find((c) => c.key === key).cards.map((at) => index.rows[at].id)
+
+test('statusKeys: configured statuses first, unknown ones appended once', () => {
+  assert.deepEqual(statusKeys(ROWS), ['todo', 'in_progress', 'review', 'done', 'blocked'])
+  assert.deepEqual(statusKeys(ROWS, ['done', 'todo']), ['done', 'todo', 'in_progress', 'blocked'])
+})
+
+test('groupBoard: root has a lane per milestone, cards in priority order, groups are not cards', () => {
+  const model = groupBoard(index, look())
+  assert.deepEqual(model.keys, [BACKLOG, DEFERRED, 'todo', 'in_progress', 'review', 'done', 'blocked'])
+  assert.deepEqual(model.lanes.map((lane) => lane.seg), ['m:m1', 'm:m2', NO_MILESTONE])
+  assert.equal(model.lanes[0].at, 0)
+  assert.deepEqual(ids(model, 0, 'todo'), ['e1.a'])
+  assert.deepEqual(ids(model, 0, 'in_progress'), ['e1.b'])
+  assert.deepEqual(ids(model, 1, 'blocked'), ['e2.a'])
+  assert.deepEqual(ids(model, 1, DEFERRED), ['e2.b'])
+  assert.deepEqual(ids(model, 2, BACKLOG), ['b1'])
+  assert.equal(model.total, 6)
+  assert.equal(columnOf(index, index.find('e2.b')), DEFERRED)
+})
+
+test('groupBoard: hidden statuses, deferred and backlog drop their columns; the cursor card keeps its own', () => {
+  const view = { hiddenStatuses: ['done'], hideDeferred: true, hideBacklog: true, showArchived: false }
+  const model = groupBoard(index, look({ view }))
+  assert.ok(!model.keys.includes('done') && !model.keys.includes(DEFERRED) && !model.keys.includes(BACKLOG))
+  assert.deepEqual(model.lanes.map((lane) => lane.seg), ['m:m1', 'm:m2'])
+  assert.equal(model.total, 3)
+  const kept = groupBoard(index, look({ view, cursor: 'e1.c' }))
+  assert.ok(kept.keys.includes('done'))
+  assert.deepEqual(ids(kept, 0, 'done'), ['e1.c'])
+})
+
+test('groupBoard: the board is a layout of the list: done rows past the archive age go unless shown, cards follow the sort', () => {
+  const old = new Date(Date.now() - 40 * 86_400_000).toISOString()
+  const rows = [
+    { id: 't1', kind: 'issue', title: 'banana', status: 'todo', priority: 1 },
+    { id: 't2', kind: 'issue', title: 'Apple', status: 'todo', priority: 2 },
+    { id: 't3', kind: 'issue', title: 'cherry', status: 'todo', priority: 0 },
+    { id: 'd1', kind: 'issue', title: 'Old', status: 'done', priority: 2, status_since: old },
+    { id: 'd2', kind: 'issue', title: 'Fresh', status: 'done', priority: 2, status_since: new Date().toISOString() },
+  ]
+  const idx = new IssueIndex(rows)
+  const cards = (model, key) => model.lanes[0].columns.find((c) => c.key === key)?.cards.map((at) => idx.rows[at].id)
+  const hidden = groupBoard(idx, look())
+  assert.deepEqual(cards(hidden, 'done'), ['d2'], 'an archive candidate is not a card')
+  const shown = groupBoard(idx, look({ view: { ...look().view, showArchived: true } }))
+  assert.deepEqual(cards(shown, 'done'), ['d1', 'd2'])
+  assert.deepEqual(cards(groupBoard(idx, look({ cursor: 'd1' })), 'done'), ['d1', 'd2'], 'the cursor card is kept')
+  // Without sort keys: (priority, id). With the list's: its order, a title without regard to case.
+  assert.deepEqual(cards(hidden, 'todo'), ['t3', 't1', 't2'])
+  assert.deepEqual(cards(groupBoard(idx, look({ sort: { fields: [{ key: 'title', dir: 'asc' }], reversed: false } })), 'todo'), ['t2', 't1', 't3'])
+  // The list's filter and search narrow the cards; a search also lifts the view's hiding (the archive here).
+  const lit = new Set(['t1', 'd1'].map((id) => idx.find(id)))
+  const narrowed = groupBoard(idx, look({ match: (at) => lit.has(at) }))
+  assert.deepEqual([cards(narrowed, 'todo'), cards(narrowed, 'done')], [['t1'], []])
+  const found = groupBoard(idx, look({ match: (at) => lit.has(at), reveal: true }))
+  assert.deepEqual([cards(found, 'todo'), cards(found, 'done')], [['t1'], ['d1']])
+})
+
+test('groupBoard: a thought that is closed is not a card', () => {
+  const rows = [
+    { id: 'i1', kind: 'backlog', title: 'open idea', status: 'todo' },
+    { id: 'i2', kind: 'backlog', title: 'closed idea', status: 'done' },
+    { id: 't1', kind: 'issue', title: 'work', status: 'todo' },
+  ]
+  const idx = new IssueIndex(rows)
+  const model = groupBoard(idx, look())
+  const cards = model.lanes.flatMap((lane) => lane.columns.flatMap((column) => column.cards.map((at) => idx.rows[at].id)))
+  assert.deepEqual(cards.sort(), ['i1', 't1'])
+  assert.equal(model.total, 2)
+})
+
+test('groupBoard: a repository without milestones has one unnamed lane, not a `(no milestone)` bucket', () => {
+  const rows = [
+    { id: 't1', kind: 'issue', title: 'A', status: 'todo', priority: 2 },
+    { id: 't2', kind: 'issue', title: 'B', status: 'in_progress', priority: 1 },
+  ]
+  const plain = groupBoard(new IssueIndex(rows), look())
+  assert.deepEqual(plain.lanes.map((lane) => lane.seg), [null])
+  assert.equal(plain.total, 2)
+  // And the view draws no lane head for it (the board's own columns are the only heads).
+  const view = mount({ ...initialState(), tab: 'board' }, rows)
+  assert.equal(view.root.querySelector('.m-lane-head:not(.m-lane .m-lane-head)'), null)
+  assert.equal(view.root.querySelectorAll('.m-lane-head').length, view.root.querySelectorAll('.m-lane').length, 'only column heads')
+  // With milestones the bucket is a lane of its own, as before.
+  const withMilestone = groupBoard(index, look())
+  assert.ok(withMilestone.lanes.some((lane) => lane.seg === NO_MILESTONE))
+})
+
+test('groupBoard: inside a place there is one lane holding what is under it', () => {
+  const model = groupBoard(index, look({ path: index.pathOf('e1') }))
+  assert.equal(model.lanes.length, 1)
+  assert.equal(model.lanes[0].seg, null)
+  assert.deepEqual(ids(model, 0, 'todo'), ['e1.a'])
+  assert.equal(model.total, 3)
+  assert.deepEqual(groupBoard(new IssueIndex([]), look()).lanes, [])
+})
+
+const mount = (state, rows = ROWS) => {
+  const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
+  const chosen = []
+  const root = dom.window.document.getElementById('r')
+  const ctx = {
+    document: dom.window.document, copy: copyFor('en'), language: 'en',
+    intents: { choose: (id) => chosen.push(id), point: (id) => chosen.push(`point:${id}`) }, layout: () => ({}), focusPane: () => {},
+  }
+  const view = mountBoard(root, ctx)
+  view.render(state, new IssueIndex(rows))
+  return { root, view, chosen, dom }
+}
+
+test('board view: columns, lanes, cards, cursor highlight and click', () => {
+  const state = { ...initialState(), tab: 'board', cursor: 'e1.b' }
+  const { root, chosen } = mount(state)
+  const lanes = [...root.querySelectorAll('[data-lane]')].filter((n) => n.classList.contains('m-board'))
+  assert.equal(lanes.length, 3)
+  const status = root.querySelector('.m-board [data-status="in_progress"]')
+  assert.equal(status.getAttribute('role'), 'list')
+  assert.match(status.getAttribute('aria-label'), /^In progress, 1 card$/)
+  const card = status.querySelector('.m-card')
+  assert.equal(card.dataset.id, 'e1.b')
+  assert.equal(card.getAttribute('aria-selected'), 'true')
+  assert.match(card.textContent, /e1\.b/)
+  assert.match(card.textContent, /p0/)
+  card.click()
+  root.querySelector('[data-id="e1.a"]').click()
+  assert.deepEqual(chosen, ['e1.b', 'e1.a'])
+  // The deferred row is hidden by default (hideDeferred) and the backlog stands in the first column.
+  assert.equal(root.querySelector('[data-id="e2.b"]'), null)
+  assert.ok(root.querySelector('[data-status="backlog"] [data-id="b1"]'))
+  assert.equal(glyphOf('done'), '✓')
+})
+
+test('board view: one card is always the tab stop, Space is left to the key layer, tags that are not a list are not drawn', () => {
+  const tabbable = (root) => [...root.querySelectorAll('.m-card')].filter((card) => card.getAttribute('tabindex') === '0').map((card) => card.dataset.id)
+  // No cursor (or a cursor that is not a card): the first card in the order drawn can be reached by Tab.
+  const none = mount({ ...initialState(), tab: 'board', cursor: null })
+  assert.equal(tabbable(none.root).length, 1)
+  assert.equal(tabbable(none.root)[0], none.root.querySelector('.m-card').dataset.id)
+  assert.deepEqual(tabbable(mount({ ...initialState(), tab: 'board', cursor: 'e1' }).root).length, 1, 'a cursor on a group is not a card')
+  assert.deepEqual(tabbable(mount({ ...initialState(), tab: 'board', cursor: 'e1.b' }).root), ['e1.b'])
+
+  // The cards listen for no keys: Space (the SPC leader) and Enter are the key router's, which hands the board
+  // the action (command) — Enter shows the cursor's card, h/l go to the next column that has cards.
+  const { root, chosen, dom, view } = mount({ ...initialState(), tab: 'board', cursor: 'e1.b' })
+  const card = root.querySelector('[data-id="e1.a"]')
+  for (const key of [' ', 'Enter']) {
+    const event = new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+    card.dispatchEvent(event)
+    assert.equal(event.defaultPrevented, false)
+  }
+  assert.deepEqual(chosen, [])
+  assert.equal(view.command('enter'), true)
+  assert.deepEqual(chosen, ['e1.b'])
+  view.command('collapse')
+  assert.deepEqual(chosen.at(-1), 'point:e1.a', 'h goes to the column on the left, at the same height')
+  assert.equal(view.command('read'), false, 'not a board action')
+
+  // A `tags` that is a string or an object (not what the CLI writes) draws no chips and does not throw.
+  const odd = ROWS.map((row) => (row.id === 'e1.a' ? { ...row, tags: 'bug' } : row.id === 'e1.b' ? { ...row, tags: { a: 1 } } : row))
+  const withTags = mount({ ...initialState(), tab: 'board', columns: { ...initialState().columns, tags: true } }, odd)
+  assert.doesNotMatch(withTags.root.querySelector('[data-id="e1.a"]').textContent, /#/)
+})
+
+test('board view: assignee chip only when the column is on; empty board says so', () => {
+  const base = { ...initialState(), tab: 'board' }
+  assert.doesNotMatch(mount(base).root.querySelector('[data-id="e1.b"]').textContent, /kim/)
+  const on = { ...base, columns: { ...base.columns, assignee: true } }
+  assert.match(mount(on).root.querySelector('[data-id="e1.b"]').textContent, /kim/)
+  const empty = mount(base, [])
+  assert.match(empty.root.textContent, /Nothing here/)
+})
+
+const bare = (intents = { choose() {}, point() {} }) => {
+  const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
+  const root = dom.window.document.getElementById('r')
+  const view = mountBoard(root, { document: dom.window.document, copy: copyFor('en'), language: 'en', intents, layout: () => ({}), focusPane() {} })
+  return { root, view }
+}
+
+test('board view: a cursor move changes two cards in place; the board is not drawn again (se-mzlx)', () => {
+  const { root, view } = bare()
+  const idx = new IssueIndex(ROWS)
+  const state = { ...initialState(), tab: 'board', cursor: 'e1.a' }
+  view.render(state, idx)
+  const cardA = root.querySelector('[data-id="e1.a"]')
+  const cardB = root.querySelector('[data-id="e1.b"]')
+  const wrap = root.querySelector('.m-board-wrap')
+  view.render({ ...state, cursor: 'e1.b' }, idx)
+  assert.equal(root.querySelector('.m-board-wrap'), wrap, 'the board stayed')
+  assert.equal(root.querySelector('[data-id="e1.a"]'), cardA)
+  assert.equal(root.querySelector('[data-id="e1.b"]'), cardB)
+  assert.equal(cardA.getAttribute('aria-selected'), 'false')
+  assert.equal(cardB.getAttribute('aria-selected'), 'true')
+  assert.deepEqual([cardA.getAttribute('tabindex'), cardB.getAttribute('tabindex')], ['-1', '0'])
+  // An unrelated change (the detail loading) keeps the board; another sort or a new index draws it again.
+  view.render({ ...state, cursor: 'e1.b', shown: { value: null, loading: true, problem: null } }, idx)
+  assert.equal(root.querySelector('.m-board-wrap'), wrap)
+  view.render({ ...state, cursor: 'e1.b', sort: { ...state.sort, reversed: !state.sort.reversed } }, idx)
+  assert.notEqual(root.querySelector('.m-board-wrap'), wrap)
+  const wrap2 = root.querySelector('.m-board-wrap')
+  view.render({ ...state, cursor: 'e1.b', sort: { ...state.sort, reversed: !state.sort.reversed } }, new IssueIndex(ROWS))
+  assert.notEqual(root.querySelector('.m-board-wrap'), wrap2)
+})
+
+test('board view: a focused card hands the focus to the card the cursor moved to in place (se-mzlx)', () => {
+  const { root, view } = bare()
+  const idx = new IssueIndex(ROWS)
+  const state = { ...initialState(), tab: 'board', cursor: 'e1.a' }
+  view.render(state, idx)
+  root.querySelector('[data-id="e1.a"]').focus()
+  const wrap = root.querySelector('.m-board-wrap')
+  view.render({ ...state, cursor: 'e1.b' }, idx)
+  assert.equal(root.querySelector('.m-board-wrap'), wrap, 'drawn in place')
+  assert.equal(root.ownerDocument.activeElement, root.querySelector('[data-id="e1.b"]'), 'the focus ring and the selection stay one card')
+})
+
+test('board view: the command acts on the cursor the in-place render recorded', () => {
+  const moved = []
+  const { view } = bare({ choose() {}, point: (id) => moved.push(id) })
+  const idx = new IssueIndex(ROWS)
+  const state = { ...initialState(), tab: 'board', cursor: 'e1.a' }
+  view.render(state, idx)
+  view.render({ ...state, cursor: 'e1.b' }, idx)
+  view.command('collapse')
+  assert.deepEqual(moved, ['e1.a'], 'h goes left of e1.b, not of e1.a')
+})
+
+test('board view: a card drawn only for the cursor goes when the cursor leaves it (pinned: drawn again)', () => {
+  const view = { hiddenStatuses: ['done'], hideDeferred: true, hideBacklog: true, showArchived: false }
+  assert.equal(groupBoard(index, look({ view, cursor: 'e1.c' })).pinned, true)
+  assert.equal(groupBoard(index, look({ view, cursor: 'e1.a' })).pinned, false)
+  assert.equal(groupBoard(index, look({ view, cursor: 'e1' })).pinned, false, 'a group in a shown column pins nothing')
+  const { root, view: pane } = bare()
+  const idx = new IssueIndex(ROWS)
+  const state = { ...initialState(), tab: 'board', view, cursor: 'e1.c' }
+  pane.render(state, idx)
+  assert.ok(root.querySelector('[data-status="done"] [data-id="e1.c"]'))
+  pane.render({ ...state, cursor: 'e1.a' }, idx)
+  assert.equal(root.querySelector('[data-status="done"]'), null, 'the column that only the cursor kept is gone')
+})
+
+test('board view: a cursor on a card not drawn draws again (it may bring a column)', () => {
+  const view = { hiddenStatuses: ['done'], hideDeferred: true, hideBacklog: true, showArchived: false }
+  const { root, view: pane } = bare()
+  const idx = new IssueIndex(ROWS)
+  const state = { ...initialState(), tab: 'board', view, cursor: 'e1.a' }
+  pane.render(state, idx)
+  assert.equal(root.querySelector('[data-id="e1.c"]'), null)
+  pane.render({ ...state, cursor: 'e1.c' }, idx)
+  assert.ok(root.querySelector('[data-status="done"] [data-id="e1.c"]'))
+})
+
+test('board view: a store change that touches nothing the board draws keeps it, the cursor on a group or on a pinned card too (se-mzlx)', () => {
+  const pinned = { hiddenStatuses: ['done'], hideDeferred: true, hideBacklog: true, showArchived: false }
+  const unrelated = (state) => [
+    { ...state, shown: { value: null, loading: true, problem: null } },
+    { ...state, focus: 'detail' },
+    { ...state, filter: { ...state.filter, text: 'sta' } },
+    { ...state, board: { ...state.board, loading: true } },
+    { ...state, toolbar: { ...state.toolbar, hintsOpen: true, hintIndex: 0 } },
+  ]
+  const bases = {
+    'a group': { ...initialState(), tab: 'board', cursor: 'e1' },
+    'a pinned card': { ...initialState(), tab: 'board', view: pinned, cursor: 'e1.c' },
+    'no cursor': { ...initialState(), tab: 'board', cursor: null },
+    'a card': { ...initialState(), tab: 'board', cursor: 'e1.a' },
+  }
+  for (const [name, base] of Object.entries(bases)) {
+    const { root, view } = bare()
+    const idx = new IssueIndex(ROWS)
+    view.render(base, idx)
+    const wrap = root.querySelector('.m-board-wrap')
+    const cards = [...root.querySelectorAll('.m-card')]
+    for (const next of unrelated(base)) {
+      view.render(next, idx)
+      assert.equal(root.querySelector('.m-board-wrap'), wrap, `${name}: the board stayed`)
+    }
+    assert.deepEqual([...root.querySelectorAll('.m-card')], cards, `${name}: the same card nodes`)
+  }
+})
+
+test('board view: what the board is drawn from, or the cursor, still draws it again after an unrelated change', () => {
+  const pinned = { hiddenStatuses: ['done'], hideDeferred: true, hideBacklog: true, showArchived: false }
+  const { root, view } = bare()
+  const idx = new IssueIndex(ROWS)
+  const base = { ...initialState(), tab: 'board', view: pinned, cursor: 'e1.c' }
+  view.render(base, idx)
+  view.render({ ...base, focus: 'detail' }, idx)
+  assert.ok(root.querySelector('[data-status="done"] [data-id="e1.c"]'), 'drawn for the cursor')
+  // The cursor leaves the pinned card: it goes.
+  view.render({ ...base, focus: 'detail', cursor: 'e1.a' }, idx)
+  assert.equal(root.querySelector('[data-status="done"]'), null, 'the column that only the cursor kept is gone')
+  // A group cursor in a hidden column brings the column: a cursor change from a card to a non-card draws again.
+  const wrap = root.querySelector('.m-board-wrap')
+  view.render({ ...base, focus: 'detail', cursor: 'e1' }, idx)
+  assert.notEqual(root.querySelector('.m-board-wrap'), wrap)
+  // The same cursor, another view or index: drawn again.
+  const wrap2 = root.querySelector('.m-board-wrap')
+  view.render({ ...base, focus: 'list', cursor: 'e1', view: { ...pinned, hiddenStatuses: [] } }, idx)
+  assert.notEqual(root.querySelector('.m-board-wrap'), wrap2)
+  assert.ok(root.querySelector('[data-status="done"] [data-id="e1.c"]'), 'the done column is back with the view')
+  const wrap3 = root.querySelector('.m-board-wrap')
+  view.render({ ...base, focus: 'list', cursor: 'e1', view: { ...pinned, hiddenStatuses: [] } }, new IssueIndex(ROWS))
+  assert.notEqual(root.querySelector('.m-board-wrap'), wrap3)
+})
+
+test('board view: the command reads the cursor of the last change that left the board alone', () => {
+  const moved = []
+  const { view } = bare({ choose() {}, point: (id) => moved.push(id) })
+  const idx = new IssueIndex(ROWS)
+  const base = { ...initialState(), tab: 'board', cursor: 'e1' }
+  view.render(base, idx)
+  view.render({ ...base, focus: 'detail' }, idx)
+  view.command('move.down')
+  assert.deepEqual(moved, ['e1.a'], 'the cursor is on no card: the first card')
+})
+
+test('board view: NEW stands before the title of an unread card only (se-ehdi.zcx)', () => {
+  const rows = ROWS.map((row) => (row.id === 'e1.a' ? { ...row, unread: true } : row.id === 'e1.b' ? { ...row, unread: true, archived: true } : row))
+  const { root } = mount({ ...initialState(), tab: 'board' }, rows)
+  const title = (id) => root.querySelector(`[data-id="${id}"] .m-card-title`)
+  assert.equal(title('e1.a').firstChild.textContent, 'NEW')
+  assert.ok(title('e1.a').firstChild.classList.contains('m-chip-new'))
+  assert.match(title('e1.a').textContent, /^NEW A$/)
+  assert.equal(title('e1.b'), null, 'the board does not draw an archive row unless archived rows are shown')
+  assert.equal(title('e1.c').querySelector('.m-chip-new'), null)
+  assert.equal(mount({ ...initialState(), tab: 'board' }).root.querySelector('.m-chip-new'), null)
+  // Archived rows shown: the card is drawn, and an archive row is never NEW (moai read cannot clear it).
+  const shown = mount({ ...initialState(), tab: 'board', view: { ...initialState().view, showArchived: true } }, rows).root
+  assert.ok(shown.querySelector('[data-id="e1.b"] .m-card-title'), 'the archive card is drawn')
+  assert.equal(shown.querySelector('[data-id="e1.b"] .m-chip-new'), null)
+  assert.ok(shown.querySelector('[data-id="e1.a"] .m-chip-new'), 'a live unread card keeps its mark')
+})
+
+test('board view: a render in place is the render a fresh board gives, for every input of the cards', () => {
+  const rows = [
+    ...ROWS,
+    // An epic whose column the view hides, to be kept only for the cursor standing on it.
+    { id: 'e3', kind: 'epic', title: 'Done epic', milestone: 'm1', status: 'done' },
+  ]
+  const idx = new IssueIndex(rows)
+  const html = (state) => {
+    const { root, view } = bare()
+    view.render(state, idx)
+    return root.innerHTML
+  }
+  const base = { ...initialState(), tab: 'board', cursor: 'e1.a' }
+  // A search for `e1` finds the cards by their ids and none by their titles: the scope alone changes what is drawn.
+  const searching = { ...base, search: { text: 'e1', scope: 'all', open: true } }
+  const changes = {
+    path: { from: base, to: { path: ['m:m1'] } },
+    view: { from: base, to: { view: { ...base.view, hiddenStatuses: ['todo'] } } },
+    'search text': { from: base, to: { search: { ...base.search, text: 'B', open: true } } },
+    'search scope': { from: searching, to: { search: { ...searching.search, scope: 'title' } } },
+    filter: { from: base, to: { filter: { text: 'status=in_progress', applied: 'status=in_progress' } } },
+    columns: { from: base, to: { columns: { ...base.columns, epic: true, assignee: true } } },
+    sort: { from: base, to: { sort: { ...base.sort, reversed: true } } },
+  }
+  for (const [name, { from, to }] of Object.entries(changes)) {
+    // Draw the base, then the change with the cursor moved to another card: the shortcut must not keep the old DOM.
+    const { root, view } = bare()
+    view.render({ ...from, cursor: 'e1.a' }, idx)
+    const next = { ...from, ...to, cursor: 'e1.b' }
+    view.render(next, idx)
+    assert.equal(root.innerHTML, html(next), `${name}: the board drawn in place equals the board drawn fresh`)
+  }
+  // A cursor on a group whose column the view hides keeps that column only while it stands there.
+  const hidden = { ...base, view: { ...base.view, hiddenStatuses: ['done'] }, cursor: 'e3' }
+  const { root, view } = bare()
+  view.render(hidden, idx)
+  assert.ok(root.querySelector('[data-status="done"]'), 'the column is kept for the cursor on the epic')
+  view.render({ ...hidden, cursor: 'e1.a' }, idx)
+  assert.equal(root.querySelector('[data-status="done"]'), null, 'the cursor left it: the column goes')
+  assert.equal(root.innerHTML, html({ ...hidden, cursor: 'e1.a' }))
+})
