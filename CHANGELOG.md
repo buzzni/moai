@@ -51,6 +51,11 @@ does not tag — see `CONTRIBUTING.md`.
   and says so on one line. Cancel no longer ends the one-time projects read or
   a read mark in flight, and the header marks the project on screen with a `▸`
   as well as the accent. (moai-m4ez.42r)
+- **`moai web` has a theme button** left of the hide-detail button. It cycles
+  system, light and dark: system follows the browser's colour scheme live, light
+  and dark win over it. The icon's shape (half-filled circle, sun, moon) and the
+  button's name say which, and the choice is kept in the browser, not in your
+  user config. (moai-whvr)
 
 ### Changed
 

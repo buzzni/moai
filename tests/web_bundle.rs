@@ -129,11 +129,26 @@ fn the_web_page_runs_no_inline_script() {
     }
 }
 
+/// **고른 테마는 첫 그림 전에 선다**(moai-whvr). app.js 는 `defer` 라 브라우저가 그 전에 몸을 시스템 색으로 한 번
+/// 그린다 — 저장한 테마를 거는 `theme.js` 는 `<head>` 에서 `defer`·`async` 없이, 시트와 app.js 보다 먼저 불려야 한다.
+#[test]
+fn the_web_page_puts_the_theme_on_before_the_first_paint() {
+    let html = dist("index.html").to_ascii_lowercase();
+    let first = html.find("<script src=\"/theme.js\"></script>");
+    let theme = first.expect("index.html 이 theme.js 를 defer 없이 안 부른다");
+    for later in ["<link rel=\"stylesheet\"", "src=\"/app.js\"", "<body"] {
+        assert!(html.find(later).is_some_and(|at| theme < at), "theme.js 가 {later} 보다 먼저 서야 한다");
+    }
+    assert!(dist("theme.js").contains("moai.web"), "theme.js 가 페이지의 키를 안 읽는다");
+}
+
 #[test]
 fn the_web_bundle_writes_text_not_markup() {
-    let js = dist("app.js");
-    for word in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"] {
-        assert!(!js.contains(word), "app.js 에 {word} 가 있다 — 글은 textContent 로만 넣는다");
+    for name in ["app.js", "theme.js"] {
+        let js = dist(name);
+        for word in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"] {
+            assert!(!js.contains(word), "{name} 에 {word} 가 있다 — 글은 textContent 로만 넣는다");
+        }
     }
 }
 
@@ -163,6 +178,9 @@ fn the_web_bundle_sets_no_inline_style_attribute() {
 
 #[test]
 fn the_web_bundle_fits_its_budget() {
-    let bytes = dist("app.js").len() + dist("app.css").len();
-    assert!(bytes <= 1024 * 1024, "app.js+app.css 가 {bytes} 바이트 — 상한 1MiB");
+    let bytes = dist("app.js").len() + dist("app.css").len() + dist("theme.js").len();
+    assert!(bytes <= 1024 * 1024, "app.js+app.css+theme.js 가 {bytes} 바이트 — 상한 1MiB");
+    // theme.js 는 첫 그림을 쥐고 선다 — 테마와 키만 들고, 저장소·스토어가 끌려 들어오면 여기서 붉어진다.
+    let early = dist("theme.js").len();
+    assert!(early <= 2048, "theme.js 가 {early} 바이트 — 첫 그림을 쥐는 스크립트라 상한 2KiB");
 }

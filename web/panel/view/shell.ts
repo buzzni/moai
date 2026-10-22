@@ -1,4 +1,4 @@
-// The panel's frame (design §1): the tab bar (board, list, wiki; the refresh time, the detail toggles), the
+// The panel's frame (design §1): the tab bar (board, list, wiki; the refresh time, the theme button, the detail toggles), the
 // search / filter / sort toolbar (view/toolbar.ts, its state in the store), the path line, the banners, the result line, the run's activity, and under them the
 // split holding the list or board beside the detail. The panes are filled by the views named in
 // view/panes.ts through the contract in view/types.ts; the shell renders the panes that show on every store
@@ -12,10 +12,12 @@ import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
 import type { ProjectEntry } from "../data/projects.ts"
 import { refreshTime } from "../data/refresh.ts"
+import { applyTheme, nextTheme, type Theme } from "../data/theme.ts"
 import { fill, type Copy } from "../i18n/index.ts"
 import { detectPlatform } from "../keys/router.ts"
 import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
-import { button, el, emptyState, iconButton } from "./components.ts"
+import { button, el, emptyState, icon, iconButton } from "./components.ts"
+import type { IconName } from "./icons.ts"
 import { mountBrand } from "./brand.ts"
 import { allTips, createTips } from "./tips.ts"
 import { mountCrumbs } from "./crumbs.ts"
@@ -114,8 +116,11 @@ export function mainWidth(width: number, position: PaneLayout["position"], detai
   return position === "left" && detailVisible ? width * (1 - leftRatio) : width
 }
 
+/** The theme button's icon: the state it is in, by shape (data/theme.ts). */
+const THEME_ICONS: Record<Theme, IconName> = { system: "contrast", light: "sun", dark: "moon" }
+
 /** How many right-hand columns a list this wide drops; a pane re-renders when this changes. */
-const columnBand = (width: number): number => COLUMN_DROPS.filter((entry) => width < entry.below).length
+const columnBand =(width: number): number => COLUMN_DROPS.filter((entry) => width < entry.below).length
 
 type Saved = Array<[HTMLElement, number, number]>
 const scrollers = (root: HTMLElement): HTMLElement[] => [root, ...root.querySelectorAll<HTMLElement>("[data-keep-scroll]")]
@@ -149,6 +154,23 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const visibility = iconButton(doc, { icon: "eye", label: copy.shell.hideDetail, pressed: state.detail.visible })
   visibility.classList.add("moai-detail-toggle")
   visibility.addEventListener("click", () => store.dispatch({ type: "detail-visible", visible: !store.getState().detail.visible }))
+  // Theme button (data/theme.ts): its icon is the state it is in, by shape; the name says the state and what pressing does.
+  const themeButton = el(doc, "button", { type: "button", class: "m-iconbtn moai-theme-toggle" })
+  themeButton.addEventListener("click", () => store.dispatch({ type: "theme", theme: nextTheme(store.getState().theme) }))
+  let themeShown: Theme | null = null
+  function paintTheme(theme: Theme) {
+    if (theme === themeShown) return
+    themeShown = theme
+    applyTheme(doc, theme)
+    const t = copy.shell.theme
+    const toNext = { system: t.toSystem, light: t.toLight, dark: t.toDark }[nextTheme(theme)]
+    const label = `${t[theme]} — ${toNext}`
+    themeButton.setAttribute("aria-label", label)
+    themeButton.title = label
+    themeButton.dataset.state = theme
+    themeButton.replaceChildren(icon(doc, THEME_ICONS[theme]))
+  }
+  paintTheme(state.theme)
   const position = createPositionToggle(doc, {
     position: effectivePosition(width, state.detail.position),
     width,
@@ -159,7 +181,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const actions = el(doc, "div", { class: "m-tabbar-slot" })
   const tabbar = el(doc, "div", { class: "m-tabbar" },
     tabs.el, el(doc, "div", { class: "m-tabbar-spacer" }),
-    el(doc, "div", { class: "m-tabbar-actions" }, refresh, visibility, position.el, actions))
+    el(doc, "div", { class: "m-tabbar-actions" }, refresh, themeButton, visibility, position.el, actions))
 
   // ── under the tab bar: toolbar slot, path line, banners, result line ──
   const toolbar = el(doc, "div", { class: "m-toolbar-slot", hidden: state.tab === "wiki" })
@@ -352,6 +374,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   let band = columnBand(layout().mainWidth)
   function render() {
     state = store.getState()
+    paintTheme(state.theme)
     const index = options.index(state)
     if (tabs.selected() !== state.tab) tabs.setSelected(state.tab)
     // The unread count rides the board and list tabs; with no index there is nothing to count (se-ehdi.zcx).

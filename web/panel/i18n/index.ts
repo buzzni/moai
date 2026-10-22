@@ -47,6 +47,8 @@ export interface ShellCopy {
   detailForcedBottom: string
   showDetail: string
   hideDetail: string
+  /** The theme button: the state it is in, then what pressing it does (the accessible name says both). */
+  theme: { system: string; light: string; dark: string; toSystem: string; toLight: string; toDark: string }
   resizer: string
   /** The refresh-time button before the first read finished. */
   refreshNow: string

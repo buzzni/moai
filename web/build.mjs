@@ -1,6 +1,7 @@
-// Builds the page `moai web` serves into ../src/web/dist/: app.js (the modules under panel/, bundled), app.css
-// (the sheets under panel/style/, joined) and index.html (copied). The server sends a CSP that allows scripts from
-// its own origin only, so nothing is inlined — the page loads both files by path.
+// Builds the page `moai web` serves into ../src/web/dist/: app.js (the modules under panel/, bundled), theme.js (the
+// page's first script, panel/early.ts: it puts the stored theme on before the first paint), app.css (the sheets under
+// panel/style/, joined) and index.html (copied). The server sends a CSP that allows scripts from its own origin only,
+// so nothing is inlined — the page loads every file by path.
 //
 // The page's words are moai's own i18n/*.json, the `page.` keys of them (i18n-bundles.mjs).
 //
@@ -75,9 +76,7 @@ async function sources() {
   return `fnv1a64 ${hash.toString(16).padStart(16, '0')}\n`
 }
 
-const result = await build({
-  // A file path, not URL.pathname: that stays percent-encoded, so a checkout under a path with a space or Hangul fails.
-  entryPoints: [fileURLToPath(new URL('panel/main.ts', root))],
+const options = {
   bundle: true,
   format: 'iife',
   platform: 'browser',
@@ -88,12 +87,20 @@ const result = await build({
   minifySyntax: true,
   minifyIdentifiers: false,
   legalComments: 'none',
+}
+const result = await build({
+  ...options,
+  // A file path, not URL.pathname: that stays percent-encoded, so a checkout under a path with a space or Hangul fails.
+  entryPoints: [fileURLToPath(new URL('panel/main.ts', root))],
   banner: { js: BANNER },
   plugins: [i18nBundles],
 })
+// index.html loads it in <head> without `defer`, so it holds the first paint: it imports the theme and the key alone.
+const early = await build({ ...options, entryPoints: [fileURLToPath(new URL('panel/early.ts', root))] })
 const css = `${await styles()}\n[hidden]{display:none!important}\n`
 await mkdir(dist, { recursive: true })
 await writeFile(new URL('app.js', dist), result.outputFiles[0].text)
+await writeFile(new URL('theme.js', dist), early.outputFiles[0].text)
 await writeFile(new URL('app.css', dist), css)
 await writeFile(new URL('index.html', dist), await readFile(new URL('panel/index.html', root)))
 await writeFile(new URL('SOURCES', dist), await sources())

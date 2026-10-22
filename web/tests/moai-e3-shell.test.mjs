@@ -2,6 +2,7 @@
 // tabs, the detail toggles and the split wired to the store — in a jsdom document.
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 
 import { panelModule } from './moai-panel-modules.mjs'
@@ -247,6 +248,66 @@ test('shell: the position and visibility toggles are remembered and come back on
   assert.equal(again.$('.m-split').dataset.position, 'left')
   assert.equal(again.$('.m-split').dataset.detail, 'hidden')
   assert.equal(again.$('.m-split').style.getPropertyValue('--m-detail-size'), '47.00%')
+})
+
+test('shell: the theme button cycles system, light, dark and the choice (not system) is kept in the browser', async () => {
+  const { nextTheme, storedTheme } = await panelModule('data/theme.ts')
+  assert.deepEqual(['system', 'light', 'dark'].map(nextTheme), ['light', 'dark', 'system'])
+  // `restore` takes a part of the settings: one that names no theme keeps it, as it keeps the tab and the zone.
+  assert.equal(reduce({ ...initialState(), theme: 'dark' }, { type: 'restore', settings: { tab: 'board' } }).theme, 'dark')
+  const storage = fakeStorage()
+  const panel = boot(storage)
+  const html = panel.dom.window.document.documentElement
+  const button = panel.$('.moai-theme-toggle')
+  // It stands left of the hide-detail button.
+  assert.equal(button.nextElementSibling, panel.$('.moai-detail-toggle'))
+  const shape = () => button.querySelector('svg').innerHTML
+  const shapes = new Set([shape()])
+  assert.equal(html.dataset.theme, undefined, 'system sets nothing: the media query decides')
+  assert.equal(button.getAttribute('aria-label'), 'Theme: system (follows the browser) — switch to light')
+  assert.equal(storage.items.has(MEMORY_KEY), false, 'nothing stored before a choice')
+
+  button.click()
+  assert.equal(html.dataset.theme, 'light')
+  assert.equal(button.getAttribute('aria-label'), 'Theme: light — switch to dark')
+  assert.equal(JSON.parse(storage.items.get(MEMORY_KEY)).theme, 'light')
+  shapes.add(shape())
+  assert.equal(storedTheme(MEMORY_KEY, () => storage), 'light')
+
+  button.click()
+  assert.equal(html.dataset.theme, 'dark')
+  assert.equal(button.getAttribute('aria-label'), 'Theme: dark — switch to system')
+  assert.equal(JSON.parse(storage.items.get(MEMORY_KEY)).theme, 'dark')
+  shapes.add(shape())
+  assert.equal(shapes.size, 3, 'each state has a shape of its own')
+
+  // The next boot opens the same way.
+  assert.equal(boot(storage).dom.window.document.documentElement.dataset.theme, 'dark')
+
+  button.click()
+  assert.equal(html.dataset.theme, undefined)
+  assert.equal('theme' in JSON.parse(storage.items.get(MEMORY_KEY)), false, 'system stores no key')
+  assert.equal(storedTheme(MEMORY_KEY, () => storage), 'system')
+  assert.equal(storedTheme(MEMORY_KEY, () => { throw new Error('SecurityError') }), 'system')
+  storage.items.set(MEMORY_KEY, JSON.stringify({ theme: 'purple' }))
+  assert.equal(storedTheme(MEMORY_KEY, () => storage), 'system')
+})
+
+test('shell: the page\'s first script (early.ts, theme.js) puts the stored theme on before the page is drawn', async () => {
+  const { build } = await import('esbuild')
+  const entry = fileURLToPath(new URL('../panel/early.ts', import.meta.url))
+  const { outputFiles } = await build({ entryPoints: [entry], bundle: true, format: 'iife', platform: 'browser', target: 'es2022', write: false, logLevel: 'silent' })
+  const run = (stored) => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'http://127.0.0.1:6624/', runScripts: 'outside-only' })
+    if (stored !== undefined) dom.window.localStorage.setItem(MEMORY_KEY, stored)
+    dom.window.eval(outputFiles[0].text)
+    return dom.window.document.documentElement.dataset.theme
+  }
+  assert.equal(run(JSON.stringify({ version: 1, tab: 'list', theme: 'dark' })), 'dark')
+  assert.equal(run(JSON.stringify({ version: 1, theme: 'light' })), 'light')
+  assert.equal(run(undefined), undefined, 'nothing stored: the system decides')
+  assert.equal(run('{not json'), undefined)
+  assert.equal(run(JSON.stringify({ theme: 'purple' })), undefined)
 })
 
 test('shell: a narrow panel forces the detail to the bottom without forgetting the choice', () => {

@@ -13,6 +13,7 @@ import type { Outcome } from './data/client.js'
 import { pathKey, type Path, type Row, type TreeRow } from './data/index.js'
 import { DEFAULT_SORT, type Sort } from './data/query.js'
 import type { ProjectEntry } from './data/projects.js'
+import type { Theme } from './data/theme.js'
 import type { Boot } from './data/source.js'
 import { toolbarReduce, type ToolbarAction, type ToolbarState } from './view/toolbar.js'
 import type { WikiState } from './view/wiki.js'
@@ -160,6 +161,8 @@ export interface State {
    * else the browser's. Remembered in the browser (data/memory.ts); never written to the server.
    */
   zone: string | null
+  /** The colour theme picked on this page (data/theme.ts); `system` follows the browser. Remembered in the browser only. */
+  theme: Theme
 }
 
 /**
@@ -171,6 +174,8 @@ export interface Remembered {
   detail: DetailSettings
   /** The zone picked on this page (`SPC o t`); null when none is. Left out by an older page's settings. */
   zone?: string | null
+  /** Light or dark, when one was picked; left out for `system`. */
+  theme?: Theme
 }
 
 export const COLUMN_DEFAULTS: Record<ColumnName, boolean> = {
@@ -238,6 +243,7 @@ export function initialState(): State {
     wiki: initialWiki(),
     projects: [],
     zone: null,
+    theme: 'system',
   }
 }
 
@@ -294,6 +300,8 @@ export type Action =
   | { type: 'projects'; projects: ProjectEntry[] }
   /** The zone picked (`SPC o t`); null goes back to the TUI's, else the browser's. */
   | { type: 'zone'; zone: string | null }
+  /** The theme button (data/theme.ts). */
+  | { type: 'theme'; theme: Theme }
 
 /** Where the detail actually stands at this panel width: a narrow panel forces the bottom. */
 export const detailPosition = (detail: DetailSettings, width: number): DetailPosition => effectivePosition(width, detail.position)
@@ -415,9 +423,11 @@ export function reduce(state: State, action: Action): State {
       return { ...state, projects: action.projects }
     case 'zone':
       return state.zone === action.zone ? state : { ...state, zone: action.zone }
+    case 'theme':
+      return state.theme === action.theme ? state : { ...state, theme: action.theme }
     case 'restore': {
-      const { tab, detail, zone } = action.settings
-      if (tab === undefined && detail === undefined && zone === undefined) return state
+      const { tab, detail, zone, theme } = action.settings
+      if (tab === undefined && detail === undefined && zone === undefined && theme === undefined) return state
       const ratio = detail ? { left: normalizeRatio(detail.ratio.left, 'left'), bottom: normalizeRatio(detail.ratio.bottom, 'bottom') } : state.detail.ratio
       return {
         ...state,
@@ -425,6 +435,7 @@ export function reduce(state: State, action: Action): State {
         detail: detail ? { visible: detail.visible, position: detail.position, ratio } : state.detail,
         focus: detail && !detail.visible ? 'list' : state.focus,
         zone: zone === undefined ? state.zone : zone,
+        theme: theme ?? state.theme,
       }
     }
   }
