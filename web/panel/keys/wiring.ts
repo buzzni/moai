@@ -9,7 +9,7 @@
 // open, `prompt` while a search or filter input has the caret, `wiki` on the wiki tab, `browse` otherwise.
 
 import type { Outcome } from "../data/client.ts"
-import { NO_MILESTONE, type Row } from "../data/index.ts"
+import { NO_MILESTONE, type IssueIndex, type Path, type Row } from "../data/index.ts"
 import type { ReadMarks } from "../data/read.ts"
 import { sortDefault, type SortDefault } from "../data/memory.ts"
 import { entryOf, numberedNames, type ProjectEntry } from "../data/projects.ts"
@@ -20,7 +20,7 @@ import type { Copy } from "../i18n/index.ts"
 import type { ColumnName, State, Store } from "../store.ts"
 import { statusKeys } from "../view/board-groups.ts"
 import { createHelp, focusHint, type HelpView } from "../view/help.ts"
-import { SHOW_ALL } from "../view/list-model.ts"
+import { SHOW_ALL, UP_KEY } from "../view/list-model.ts"
 import { createMenu, type MenuView } from "../view/menu.ts"
 import { effectivePosition } from "../view/responsive.ts"
 import type { Shell } from "../view/shell.ts"
@@ -94,6 +94,12 @@ export interface KeyWiringOptions {
   openProject?: (entry: ProjectEntry) => void
   /** The names the zone picker lists after its first line; defaults to the browser's (data/zone.ts zoneNames). */
   zoneNames?: () => string[]
+  /**
+   * The index the views draw from (main.ts indexOf): where the row under the cursor lives, and the tree lines no list
+   * printed (an archived group still holding a live member). Without it the read marks look the row up among the
+   * printed rows and read the group from the folder the list is in.
+   */
+  index?: (state: State) => IssueIndex | null
   /**
    * Where `D` saves the default sort; defaults to the panel's shared one. An emptied order returns to the store's
    * `defaultSort`, which `D` sets and data/memory.ts remember() reads from the same storage at boot: pass both the same one.
@@ -292,34 +298,48 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
 
   // ── read marks ──
   /**
-   * The row under the cursor, among the rows the list draws: with archived rows shown, the archive's answer too,
-   * tagged as main.ts indexOf draws it (source.ts withArchive): an archive-only row is `archived: true`.
+   * The row under the cursor and, when the index draws it, where it lives. The index's row is the one the list draws:
+   * the archive's answer too while archived rows are shown, and a tree line no list printed (an archived group still
+   * holding a live member, or every archived group while the archive is still being read) as `archived: true`
+   * (data/index.ts). Without an index, or for a row it does not hold, the rows as the lists and the archive printed
+   * them, tagged as main.ts indexOf tags them (source.ts withArchive).
    */
-  function rowAt(): Row | undefined {
+  function cursorRow(): { row: Row; home?: Path } | undefined {
     const state = store.getState()
     const board = state.board.value
     if (state.cursor === null || !board) return undefined
-    return withArchive(board, state.view.showArchived ? state.archive : null).find((r) => r.id === state.cursor)
+    const index = options.index?.(state)
+    const at = index?.find(state.cursor)
+    if (index && at !== undefined) return { row: index.rows[at]!, home: index.homeOf(at) }
+    const row = withArchive(board, state.view.showArchived ? state.archive : null).find((r) => r.id === state.cursor)
+    return row ? { row } : undefined
   }
   /**
    * The row under the cursor that takes a read mark: an archived one takes none, as it draws no NEW (`moai read`
    * resolves active rows only, read.ts isUnread).
    */
   function rowHere(): Row | undefined {
-    const row = rowAt()
+    const row = cursorRow()?.row
     return row?.archived === true ? undefined : row
   }
   /**
-   * The group `SPC m g` marks: the milestone or epic under the cursor, else the innermost one the list stands in.
+   * The group `SPC m g` marks: the milestone or epic under the cursor, else the innermost one the cursor row lives in.
    * Undefined when the group under the cursor is archived: it takes no mark, and the place around it is not marked
    * in its stead (the cursor named the group, not the place).
    */
   function groupHere(): string | null | undefined {
     const state = store.getState()
-    const row = rowAt()
+    const here = cursorRow()
+    const row = here?.row
     if (row && (row.kind === "milestone" || row.kind === "epic")) return row.archived === true ? undefined : row.id
+    // No row under the cursor — `..`, or a folder left empty: the TUI asks for a row inside a group
+    // (`tui.read.pick_in_group`). Reading the folder here marked the whole group around it read.
+    if (state.cursor === null || state.cursor === UP_KEY) return null
+    // Where the row lives, not the folder the list is in (the TUI's `group_of`): a member of an epic unfolded in place
+    // inside a milestone stands in that milestone's folder, and reading the folder marked the whole milestone read —
+    // a write nothing takes back. A bucket line, which the index places nowhere, reads the folder, as there.
     // The "(no milestone)" bucket (`m:`, NO_MILESTONE) is a place, not a group: it has no id to mark.
-    const place = [...state.path].reverse().find((segment) => (segment.startsWith("m:") && segment !== NO_MILESTONE) || segment.startsWith("e:"))
+    const place = [...(here?.home ?? state.path)].reverse().find((segment) => (segment.startsWith("m:") && segment !== NO_MILESTONE) || segment.startsWith("e:"))
     return place ? place.slice(2) : null
   }
   function marking(write: (marks: ReadMarks) => Promise<Outcome | null> | null): Handler {
@@ -330,7 +350,9 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       if (!writing) return
       void writing.then((outcome) => {
         // A mark that went through says nothing: its NEW goes with the rows read again after it (main.ts marked()).
+        // It does clear the line a mark that failed before left there — nothing else writes that line.
         if (outcome) shell.refuse(outcome)
+        else shell.say("")
       })
     }
   }
@@ -363,8 +385,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     words: copy.keys.zone,
     names: options.zoneNames ?? zoneNames,
     pick: (zone) => store.dispatch({ type: "zone", zone }),
-    closed: () => {
-      // Back to the pane the keys were in; a click outside that moved the focus elsewhere keeps it there.
+    closed: (away) => {
+      // Back to the pane the keys were in; a click outside that moved the focus elsewhere keeps it there. `away` is that
+      // click (or a Tab) seen from inside the focusout, where the focus has left the picker and not yet arrived.
+      if (away) return
       const at = doc.activeElement
       if (!at || at === doc.body || zones.el.contains(at)) backToPane()
     },

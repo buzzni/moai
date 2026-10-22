@@ -5,7 +5,9 @@
  * its own controls; Esc and Close shut it and give the focus back.
  */
 import type { TipsCopy } from '../i18n/index.ts'
+import { isEditableTarget } from '../keys/router.ts'
 import { button, el, iconButton } from './components.ts'
+import { ACTS_BEHIND, EDITS_INPUT } from './help.ts'
 
 export interface TipsView {
   el: HTMLElement
@@ -53,11 +55,19 @@ export function createTips(doc: Document, words: TipsCopy, platform: 'mac' | 'ot
   /**
    * While it is open nothing behind it takes a key (help.ts's guard, in the capture phase on the document): a key with
    * the focus outside brings the focus back, Esc closes, Tab goes round the page's own controls. The host's
-   * combinations (copy, find; Cmd, and Ctrl off macOS) go on.
+   * combinations (copy, find, a tab switch; Cmd, and Ctrl off macOS) go on — but not to the key router behind, which
+   * would run the panel's own on them (`C-d`, `C-f` move the list under the page; help.ts keeps them out through the
+   * router's intercept). Stopped all the same, as help.ts stops them: a key a control behind acts on whatever the
+   * modifier (ACTS_BEHIND) and a paste, cut, undo or redo into an input behind (EDITS_INPUT).
    */
   function guard(event: KeyboardEvent): void {
+    if (root.hidden) return
     const host = event.metaKey || (event.ctrlKey && !event.altKey && platform !== 'mac')
-    if (root.hidden || (host && event.key !== 'Escape')) return
+    const edits = EDITS_INPUT.has(event.key.toLowerCase()) && isEditableTarget(event.target)
+    if (host && !ACTS_BEHIND.has(event.key) && !edits) {
+      event.stopPropagation()
+      return
+    }
     const target = event.target as Node | null
     const inside = target !== null && root.contains(target)
     if (event.key === 'Escape' || event.key === 'Esc') {

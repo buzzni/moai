@@ -7,7 +7,7 @@ import { JSDOM } from 'jsdom'
 import { panelModule } from './moai-panel-modules.mjs'
 
 const { crumbSegments, crumbLine, hungBadge, lookBadge, segLabel, sortWords } = await panelModule('view/crumbs.ts')
-const { MEMORY_KEY, SORT_DEFAULT_KEY, createMemory, createSortDefault, createSessionStorage, normalizeSort, QUERY_KEY, normalizeQuery, normalizeMemory, remember } = await panelModule('data/memory.ts')
+const { MEMORY_KEY, SORT_DEFAULT_KEY, createMemory, createSortDefault, createSessionStorage, normalizeSort, QUERY_KEY, queryKeyOf, normalizeQuery, normalizeMemory, remember } = await panelModule('data/memory.ts')
 const { createStore, initialState, reduce } = await panelModule('store.ts')
 const { IssueIndex, LOST, NO_MILESTONE } = await panelModule('data/index.ts')
 const { treeOf } = await import('./moai-tree-helper.mjs')
@@ -571,6 +571,29 @@ test('memory: filter, sort, cells and view are kept under one key and restored a
   assert.equal(state.columns.tags, true)
   assert.equal(state.view.hideBacklog, true)
   assert.deepEqual(state.view.hiddenStatuses, ['done'])
+})
+
+test('memory: each project the page reads keeps its own filter, order, cells and view; the home keeps the old key', () => {
+  assert.equal(queryKeyOf(null), QUERY_KEY)
+  assert.equal(queryKeyOf('/w/argos'), `${QUERY_KEY}:/w/argos`)
+  const storage = createSessionStorage()
+  const none = createSortDefault(storage)
+  // Project A filters on one of its epics and hides one of its columns.
+  const a = createStore()
+  remember(a, createMemory(() => null), none, storage, queryKeyOf('/w/a'))
+  a.dispatch({ type: 'filter', text: 'epic=a-1abc' })
+  a.dispatch({ type: 'view', view: { hiddenStatuses: ['shipping'] } })
+  // Project B, on the same origin, opens on its own settings, not A's.
+  const b = createStore()
+  remember(b, createMemory(() => null), none, storage, queryKeyOf('/w/b'))
+  assert.equal(b.getState().filter.applied, '')
+  assert.deepEqual(b.getState().view.hiddenStatuses, [])
+  b.dispatch({ type: 'filter', text: 'status=todo' })
+  // A's come back on A's next opening, untouched by B.
+  const again = createStore()
+  remember(again, createMemory(() => null), none, storage, queryKeyOf('/w/a'))
+  assert.equal(again.getState().filter.applied, 'epic=a-1abc')
+  assert.equal(storage.read(QUERY_KEY), null, 'the home\'s key was not written')
 })
 
 test('memory: an order that is the default is not kept, so a later default decides the next opening', () => {

@@ -103,3 +103,17 @@ test('readMarks reads again after a write that went through, with the ids it wro
   assert.equal(outcome.kind, 'moai-error')
   assert.deepEqual(failed, [])
 })
+
+test('readMarks says why a write marked nothing: an id moai does not hold (a sibling worktree\'s row) or one held back', async () => {
+  const answering = (exit, out, said) => async () => ({ status: 200, text: async () => JSON.stringify({ exit, out, said }) })
+  const after = []
+  const gone = { read: [], missing: ['gone'], held: [], problems: [], at: '' }
+  const marks = readMarks(createClient(answering(1, gone, ['moai: gone not found'])), async (written) => after.push([...written]))
+  assert.deepEqual(await marks.one('gone'), { kind: 'moai-error', message: 'moai: gone not found' })
+  assert.deepEqual(after, [[]], 'the rows are read again all the same')
+  const held = { read: [], missing: [], held: ['x'], problems: ['x is held by a value written by hand'], at: '' }
+  assert.deepEqual(await readMarks(createClient(answering(0, held, [])), async () => {}).one('x'), { kind: 'moai-error', message: 'x is held by a value written by hand' })
+  // Something written, or nothing to write: nothing to say.
+  assert.equal(await readMarks(createClient(answering(0, { ...gone, missing: [], read: [] }, [])), async () => {}).all(), null)
+  assert.equal(await readMarks(createClient(answering(1, { ...gone, read: ['a'] }, ['moai: gone not found'])), async () => {}).group('e1'), null)
+})

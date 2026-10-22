@@ -196,7 +196,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       node.append(cell(`moai-c-p${p === undefined ? "" : ` m-p${Math.max(0, Math.min(3, p))}`}`, p === undefined ? "" : `p${p}`))
     }
     // What someone holds moves as in the TUI (view/spin.ts): the glyph turns and a band runs over the name.
-    const moving = line.kind === "row" && spins(index, line.at, firstStatus(state?.boot))
+    const moving = line.kind === "row" && spins(index, line.at, firstStatus(state?.boot), state?.boot?.statuses)
     if (row) {
       const { glyph, tone } = statusGlyph(statusOf(row), state?.boot)
       const status = cell(`moai-c-st m-st-${tone}${moving ? " m-spin" : ""}`, glyph)

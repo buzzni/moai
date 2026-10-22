@@ -47,7 +47,8 @@ export interface ReadResult {
   at: string
 }
 
-export type Marked = { ok: true; result: ReadResult } | { ok: false; outcome: Outcome }
+/** `said`: the lines moai wrote on stderr beside the answer (`moai: <id> not found`), when it wrote any. */
+export type Marked = { ok: true; result: ReadResult; said?: string[] } | { ok: false; outcome: Outcome }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [])
@@ -69,7 +70,7 @@ async function write(client: Client, endpoint: Endpoint): Promise<Marked> {
   const outcome = await client.request(endpoint, { priority: PRIORITY.detail, share: false })
   // A missing id ends the run non-zero with the whole answer still printed (see the header).
   const result = parseRead(answerOf(outcome))
-  if (result) return { ok: true, result }
+  if (result) return { ok: true, result, ...('notes' in outcome && outcome.notes ? { said: outcome.notes } : {}) }
   return { ok: false, outcome: outcome.kind === 'passed' ? { kind: 'unreadable' } : outcome }
 }
 
@@ -101,6 +102,14 @@ export function readMarks(client: Client, after: (written: ReadonlySet<string>) 
     const done = await writing
     if (!done.ok) return done.outcome
     await after(new Set(done.result.read))
+    // Nothing written, and the answer says why: an id moai's tracker does not hold — a row only another worktree's
+    // has, drawn under `SPC v w` — or one a value written by hand holds back. Told in moai's own words (the TUI tells
+    // it too) rather than left to a NEW that stays on screen in silence.
+    const { read, missing, held, problems } = done.result
+    if (read.length === 0 && missing.length + held.length > 0) {
+      const said = [...problems, ...(done.said ?? [])]
+      return { kind: 'moai-error', message: said.length ? said.join(' ') : [...missing, ...held].join(', ') }
+    }
     return null
   }
   return {

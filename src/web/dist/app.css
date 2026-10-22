@@ -311,7 +311,9 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
     animation: m-glint var(--glint-time, 3s) linear infinite;
   }
   /* A search hit keeps its mark and its words readable; the band skips it. */
-  .m-glint mark { color: var(--text); }
+  /* `.m-mark` too: `mark.m-mark` below weighs as much and comes later, and its `color: inherit` took the band's
+     transparent ink — the hit's letters vanished under its opaque background. */
+  .m-glint mark, .m-glint mark.m-mark { color: var(--text); }
 }
 @keyframes m-spin {
   0% { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; } 40% { content: "\283C"; }

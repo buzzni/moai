@@ -178,6 +178,19 @@ test('picker: a zone in use the list lacks aims at nothing, says so, and Enter a
   assert.deepEqual(p.picked, [])
 })
 
+test('picker: a step with nothing matching never takes the cursor above the top, so the next match is aimed', () => {
+  const p = picker()
+  p.zones.open({ chosen: null, tui: null })
+  p.type('zzz')
+  p.key('ArrowDown')
+  p.key('PageDown')
+  p.type('seoul')
+  assert.equal(p.zones.aimed(), 'Asia/Seoul')
+  assert.ok(p.zones.el.querySelector('[data-zone="Asia/Seoul"][data-cursor]'))
+  p.key('Enter')
+  assert.deepEqual(p.picked, ['Asia/Seoul'])
+})
+
 // ── wired: SPC o t ──
 
 test('SPC o t opens the picker over the page; what it picks goes to the store, never the server', () => {
@@ -217,4 +230,13 @@ test('SPC o t opens the picker over the page; what it picks goes to the store, n
   press('Escape', keys.zones.input)
   assert.equal(store.getState().zone, 'Europe/Paris')
   assert.equal(keys.zones.isOpen(), false)
+  // A click on its own title keeps the caret in the filter box (and the picker open).
+  press(' '); press('o'); press('t')
+  const down = new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true })
+  keys.zones.el.querySelector('.m-wk-title').dispatchEvent(down)
+  assert.equal(down.defaultPrevented, true)
+  // The focus moving to another control closes it and stays there: the pane does not take it back.
+  shell.toolbar.searchInput.focus()
+  assert.equal(keys.zones.isOpen(), false)
+  assert.equal(doc.activeElement, shell.toolbar.searchInput)
 })

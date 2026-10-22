@@ -146,6 +146,11 @@ export interface Question {
   filter: string
   q: string
   archived: boolean
+  /**
+   * The worktree overlay is on (`SPC v w`): the rows are asked over it, as the list reads them (loadAllRows), so a row
+   * only another worktree holds can match and an overlaid row is judged by the fields it is drawn with.
+   */
+  worktree?: boolean
 }
 
 /**
@@ -159,7 +164,8 @@ export function matchEndpoints(question: Question): Endpoint[] {
   if (question.q.trim() !== '') query.q = question.q.trim()
   if (question.archived) query.archived = '1'
   const typed = splitItems(question.filter).some((item) => item.split('=')[0]!.trim() === 'type')
-  const rows: Endpoint = { path: ENDPOINT.rows, query }
+  // The overlay is `/api/rows`' alone, as on the list's own read: the backlog has none.
+  const rows: Endpoint = { path: ENDPOINT.rows, query: question.worktree ? { ...query, worktree: '1' } : query }
   return typed ? [rows] : [rows, { path: ENDPOINT.backlog, query }]
 }
 

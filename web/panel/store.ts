@@ -81,10 +81,11 @@ export interface Matched {
 }
 
 /** What the filter and the search ask moai, as one key: nothing to ask when both are empty. */
-export function matchKey(state: { filter: Pick<FilterState, 'applied'>; search: Pick<SearchState, 'text'>; view: Pick<ViewSettings, 'showArchived'> }): string {
+export function matchKey(state: { filter: Pick<FilterState, 'applied'>; search: Pick<SearchState, 'text'>; view: Pick<ViewSettings, 'showArchived'> & Partial<Pick<ViewSettings, 'worktree'>> }): string {
   const filter = state.filter.applied.trim()
   const q = state.search.text.trim()
-  return filter === '' && q === '' ? '' : JSON.stringify([filter, q, state.view.showArchived])
+  // The worktree overlay is part of the question (data/source.ts matchEndpoints): turning it asks again.
+  return filter === '' && q === '' ? '' : JSON.stringify([filter, q, state.view.showArchived, state.view.worktree === true])
 }
 
 export interface DetailData {

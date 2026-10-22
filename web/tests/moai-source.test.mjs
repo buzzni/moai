@@ -6,7 +6,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 
 const fixture = async (name) => JSON.parse(await readFile(new URL(`./fixtures/moai/${name}`, import.meta.url), 'utf8'))
 
-const { ENDPOINT, bootFrom, groupsFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, markArchived, rowsFromLists, sameGroups, withArchive } =
+const { ENDPOINT, bootFrom, groupsFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, markArchived, matchEndpoints, rowsFromLists, sameGroups, withArchive } =
   await panelModule('data/source.ts')
 const { urlOf } = await panelModule('data/client.ts')
 
@@ -203,6 +203,15 @@ test('loadBoot fetches /api/boot outside the queue; a refusal, a lost server and
   assert.deepEqual(await loadBoot(answering(500, JSON.stringify({ error: 'not a moai repository', code: 'not_a_repo' }))), { ok: false, outcome: { kind: 'moai-error', message: 'not a moai repository', code: 'not_a_repo' } })
   assert.deepEqual(await loadBoot(answering(200, '{')), { ok: false, outcome: { kind: 'unreadable' } })
   assert.deepEqual(await loadBoot(async () => { throw new TypeError('Failed to fetch') }), { ok: false, outcome: { kind: 'not-started' } })
+})
+
+test('a filter or a search is asked over the worktree overlay while it is on — /api/rows only, as the list is read', () => {
+  const over = matchEndpoints({ filter: 'status=todo', q: '', archived: false, worktree: true })
+  assert.deepEqual(over.map((e) => [e.path, e.query]), [
+    ['/api/rows', { fields: 'id', filter: 'status=todo', worktree: '1' }],
+    ['/api/backlog', { fields: 'id', filter: 'status=todo' }],
+  ])
+  assert.deepEqual(matchEndpoints({ filter: 'status=todo', q: '', archived: false }).map((e) => e.query), [{ fields: 'id', filter: 'status=todo' }, { fields: 'id', filter: 'status=todo' }])
 })
 
 test('loadAllRows asks /api/rows for the worktree overlay while it is on, and the backlog never', async () => {

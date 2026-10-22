@@ -62,7 +62,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     const status = statusOf(row)
     const { glyph, tone } = statusGlyph(status, state.boot)
     // What someone holds moves as in the TUI (view/spin.ts): the glyph turns and a band runs over the title.
-    const moving = spins(index, at, firstColumn)
+    const moving = spins(index, at, firstColumn, state.boot?.statuses)
     first.append(' ', el(doc, 'span', { class: `m-st-${tone}${moving ? ' m-spin' : ''}`, title: (copy.stats as Record<string, string>)[status] ?? status }, glyph))
     if (typeof row.priority === 'number') first.append(' ', el(doc, 'span', { class: priorityClass(row.priority) }, `p${row.priority}`))
     if (index.isDir(at)) {
@@ -115,7 +115,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
       const label = nameOf(column.key)
       const lanes = el(doc, 'div', { class: 'm-lane', role: 'list', 'data-status': column.key, 'aria-label': copy.board.columnLabel(label, column.cards.length) })
       // The column's glyph turns while a card in it does, as the TUI's column head does.
-      const turning = column.cards.some((at) => spins(index, at, firstColumn))
+      const turning = column.cards.some((at) => spins(index, at, firstColumn, state.boot?.statuses))
       lanes.append(el(doc, 'div', { class: 'm-lane-head' },
         el(doc, 'span', { 'aria-hidden': 'true', class: turning ? `m-spin m-st-${column.key}` : null }, glyphOf(column.key, state.boot)), el(doc, 'span', {}, label), el(doc, 'span', { class: 'm-count' }, String(column.cards.length))))
       if (!column.cards.length) lanes.append(el(doc, 'div', { class: 'm-lane-empty' }, copy.board.noCards))

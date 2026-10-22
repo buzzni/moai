@@ -820,6 +820,12 @@ test('keyToken: a Korean input source falls back to event.code (jamo, Process), 
   assert.equal(keyToken({ key: 'ㅓ', code: 'KeyJ', ctrlKey: true }), 'C-j')
   // AZERTY: 'a' typed on the physical KeyQ is still 'a'.
   assert.equal(keyToken({ key: 'a', code: 'KeyQ' }), 'a')
+  // A Latin letter on a digit key is the layout's own (é on AZERTY's 2, ě on the Czech 2), never the digit: bare digits
+  // leave the page for another project. A non-Latin one (a full-width digit) and an IME at work still read the digit.
+  assert.equal(keyToken({ key: 'é', code: 'Digit2' }), 'é')
+  assert.equal(keyToken({ key: 'ě', code: 'Digit2' }), 'ě')
+  assert.equal(keyToken({ key: '２', code: 'Digit2' }), '2')
+  assert.equal(keyToken({ key: 'Process', code: 'Digit2', keyCode: 229 }), '2')
   // No Key*/Digit* code: what it was before.
   assert.equal(keyToken({ key: 'ㅓ' }), 'ㅓ')
   assert.equal(keyToken({ key: 'ㅓ', code: 'Space' }), 'ㅓ')

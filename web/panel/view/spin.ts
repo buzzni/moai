@@ -4,7 +4,7 @@
  * column (in progress, review), and a group whose work is, unless deferral took it out of the plan. The motion itself
  * is components.css; this file marks what moves and times the band.
  */
-import type { IssueIndex } from '../data/index.js'
+import { isGroup, isWork, NO_MILESTONE, type IssueIndex } from '../data/index.js'
 import { el } from './components.ts'
 import { statusOf } from './list-model.ts'
 
@@ -15,14 +15,43 @@ const BAND = 3
 const REST = 8
 
 /**
- * Does the row at `at` move? The TUI's rule (`Config::is_started`): a column that is neither the first nor done is a
- * started one — in progress, review, and a column of the project's own between them — so review moves too. A group's
- * status is the one derived from its members (statusOf). Deferred work stands still. `first` is the project's first
- * configured column (`/api/boot`'s `statuses[0]`); until boot answers, moai's default.
+ * Does the row at `at` move? The TUI's rule (`tui::App::spins`). Work moves in a started column (`Config::is_started`):
+ * one that is neither the first nor done — in progress, review, and a column of the project's own between them — and
+ * one the config knows (`cfg.knows`: a column left over from an older config, or written by hand, stands still). A
+ * group moves only while it is busy (`report::Stand::busy`): some work under it moves. Its own column says less — a
+ * group stands in a started column as soon as one member is done and the rest wait (`column_of`), which is half done,
+ * not being done. Deferred work stands still, and so does work a deferred group took out of the plan. `first` is the
+ * project's first configured column and `known` its columns (`/api/boot`'s `statuses`); until the boot answers, moai's
+ * default first column and no check of the rest.
  */
-export function spins(index: IssueIndex, at: number, first: string = FIRST): boolean {
-  const status = statusOf(index.rows[at]!)
-  return status !== '' && status !== first && status !== 'done' && index.shelvedAt(at) === undefined
+export function spins(index: IssueIndex, at: number, first: string = FIRST, known?: readonly string[]): boolean {
+  if (index.shelvedAt(at) !== undefined) return false
+  const row = index.rows[at]!
+  return isGroup(row) ? busyGroups(index, first, known).has(at) : started(statusOf(row), first, known)
+}
+
+const started = (status: string, first: string, known: readonly string[] | undefined): boolean =>
+  status !== '' && status !== first && status !== 'done' && (known === undefined || known.includes(status))
+
+/** The groups some moving work stands under, worked out once per index and rule: work that moves moves every group above it. */
+const busyMemo = new WeakMap<IssueIndex, { rule: string; groups: ReadonlySet<number> }>()
+
+function busyGroups(index: IssueIndex, first: string, known: readonly string[] | undefined): ReadonlySet<number> {
+  const rule = JSON.stringify([first, known ?? null])
+  const kept = busyMemo.get(index)
+  if (kept?.rule === rule) return kept.groups
+  const groups = new Set<number>()
+  index.rows.forEach((row, at) => {
+    if (!isWork(row) || index.shelvedAt(at) !== undefined || !started(statusOf(row), first, known)) return
+    for (const seg of index.homeOf(at)) {
+      // `m:<id>` and `e:<id>` name the groups it stands in; the `(no milestone)` bucket and an issue's own folder do not.
+      if (!((seg.startsWith('m:') && seg !== NO_MILESTONE) || seg.startsWith('e:'))) continue
+      const group = index.find(seg.slice(2))
+      if (group !== undefined) groups.add(group)
+    }
+  })
+  busyMemo.set(index, { rule, groups })
+  return groups
 }
 
 /** The first column, where nothing has started (`Config::first_status`), when the configured ones are not known yet. */

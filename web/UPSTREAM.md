@@ -88,7 +88,18 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
   says `—`), not from `status --json`, which in moai carries neither. Left out: `data/skills.ts` and the skills
   banner, the init banner (both write, and both are Desktop's), the `about` read from `status` and its store entry,
   and reading the detail with `--worktree` (`/api/issue` has no overlay). The `⎇` marks and the path line's worktree
-  chip read `working`/`branch` on a row; this moai's `show --all --worktree --json` emits neither yet, so they stay
-  blank until it does.
+  chip read `working`/`branch` on a row: `show --all --worktree --json` puts `branch` on a row a sibling worktree gave,
+  and `/api/rows` asks for it (`ROW_FIELDS`); `working` it does not emit yet, so the mark names where a row came from,
+  not who holds it. The filter and search ids are asked over the overlay too (`matchEndpoints`); the tree (`tui --deep`)
+  and `moai read` still see the main checkout's rows alone, so a row only a sibling holds stands at the list's root and
+  takes no read mark (the page says why).
+- **Fixed here, not upstream (moai-jshy review).** `SPC m g` reads the group from the cursor row's place in the index
+  (`homeOf`), not the list's folder; an archived group the tree alone draws takes no mark, and `..` marks nothing
+  (`keys/wiring.ts`, the TUI's `group_of` and `pick_in_group`). A group spins only while work under it moves, and a
+  column the config does not know never does (`view/spin.ts`, the TUI's `spins`); a search hit inside the band keeps
+  its ink (`components.css`). The tips page stops what help.ts stops, and its tip keeps the focus off itself
+  (`view/tips.ts`, `view/brand.ts`). The roll-up bar falls back to the share done without `moai status` counts
+  (`view/detail.ts`). A Latin letter on a digit key (é, ě) is itself, not the digit (`keys/router.ts` codeKey) — bare
+  digits now open another project.
 - **jsdom is pinned to 30.1.1.** Upstream's lock had 30.1.1; on 30.1.3 three focus tests in
   `moai-keys-wiring.test.mjs` fail (184, 187, 193 on 2026-10-21). Raise it on purpose, with those tests read.

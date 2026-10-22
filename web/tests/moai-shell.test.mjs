@@ -42,6 +42,9 @@ test('components css: no blur or glow; a gradient only in the band over a held t
   assert.deepEqual(rules.filter(([, , body]) => /gradient/.test(body)).map(([, selector]) => selectorOf(selector)), ['.m-glint'])
   const shadowed = rules.filter(([, , body]) => /box-shadow:\s*(?!none\b)[^;\s]/.test(body)).map(([, selector]) => selectorOf(selector))
   assert.deepEqual(shadowed, ['.m-menu', '.m-card', '.m-card[aria-selected="true"]', '.m-tooltip'])
+  // A search hit inside the band keeps its ink: `mark.m-mark` weighs as much as `.m-glint mark` and comes later, so the
+  // band's rule names the class too, or the hit's letters take the band's transparent colour.
+  assert.match(componentsCss, /\.m-glint mark\.m-mark\s*\{\s*color:\s*var\(--text\)/)
   assert.doesNotMatch(componentsCss + tokensCss, /@import|url\(/, 'CSP: nothing external')
 })
 

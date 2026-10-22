@@ -140,7 +140,8 @@ const DIGIT_SHIFT = ")!@#$%^&*("
 /**
  * The key a keydown stands for. With a Korean (or any non-Latin) input source event.key is a jamo ('ㅓ' for J) or
  * 'Process'; then the US-layout character of event.code (KeyA..KeyZ, Digit0..Digit9) is used, with Shift honoured.
- * An ASCII event.key is left alone (AZERTY, Dvorak). Anything else without such a code is returned as it was.
+ * An ASCII event.key is left alone (AZERTY, Dvorak), and so is a Latin letter on a digit key. Anything else without
+ * such a code is returned as it was.
  */
 function codeKey(event: KeyEventLike): string {
   const key = event.key
@@ -149,6 +150,9 @@ function codeKey(event: KeyEventLike): string {
   const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code ?? "")
   if (!m) return key
   if (m[1]) return event.shiftKey ? m[1] : m[1].toLowerCase()
+  // A Latin letter on a digit key is the layout's own (é on AZERTY's 2, ě on the Czech 2): it stands for itself, as it
+  // does in the TUI. Read as the digit, it ran `1`–`9`, which leave the page for another project.
+  if ([...key].length === 1 && /\p{Script=Latin}/u.test(key)) return key
   return event.shiftKey ? DIGIT_SHIFT[Number(m[2])]! : m[2]!
 }
 

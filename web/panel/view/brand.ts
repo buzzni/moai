@@ -185,6 +185,9 @@ function tipLine(doc: Document, tips: BrandTips): HTMLElement {
   })
   const text = el(doc, 'button', { type: 'button', class: 'm-brand-tip-text', title: tips.label, 'aria-label': tips.label }, ...items)
   text.addEventListener('click', () => tips.open())
+  // The keys stay where they were, as on a project (projectEl): the tips page hands the focus back to what held it, and
+  // on this button SPC — the leader — would click it again and reopen the page instead of the menu.
+  text.addEventListener('mousedown', (event) => event.preventDefault())
   // At the foot of the info column, so its last line stands on the tagline's row (shell.css).
   return el(doc, 'div', { class: 'm-brand-tip' }, text)
 }

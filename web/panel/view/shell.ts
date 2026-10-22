@@ -13,6 +13,7 @@ import type { IssueIndex } from "../data/index.ts"
 import type { ProjectEntry } from "../data/projects.ts"
 import { refreshTime } from "../data/refresh.ts"
 import type { Copy } from "../i18n/index.ts"
+import { detectPlatform } from "../keys/router.ts"
 import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
 import { button, el, emptyState, iconButton } from "./components.ts"
 import { mountBrand } from "./brand.ts"
@@ -224,7 +225,8 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   // them (shell.css, se-24ey.14i).
   // The TUI's header (view/brand.ts): the logo, then who and which moai (from `/api/boot`, data/about.ts), and a tip
   // that opens the tips page (view/tips.ts).
-  const platform = /Mac|iPhone|iPad/.test(win?.navigator.platform ?? "") ? "mac" : "other"
+  // The key router's own reading of the platform, so the page and the keys agree on which Ctrl is the host's.
+  const platform = detectPlatform(win?.navigator)
   const tipsPage = createTips(doc, copy.shell.tips, platform)
   const brand = mountBrand(doc, copy.shell.version, { tips: allTips(copy.shell.tips), label: copy.shell.tips.openAll, open: () => tipsPage.open() }, (entry) => intents.openProject?.(entry))
   const shell = el(doc, "div", { class: "m-shell" }, brand.el, tabbar, toolbar, head, body, status, tipsPage.el)

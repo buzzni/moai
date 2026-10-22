@@ -190,7 +190,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     // The status glyph before the id, as the list and the board draw it, and turning while the work is held.
     const boot = last?.state.boot
     const { glyph, tone } = statusGlyph(head.status, boot)
-    const moving = listed !== undefined && spins(index!, listed, firstStatus(boot))
+    const moving = listed !== undefined && spins(index!, listed, firstStatus(boot), boot?.statuses)
     const glyphNode = el(doc, 'span', { class: `moai-detail-glyph m-st-${tone}${moving ? ' m-spin' : ''}`, 'aria-hidden': 'true' }, glyph)
     // The worktree the row came from, after the id, as the TUI's detail (`Origin::branch`, se-etwu): `show --worktree`
     // carries it, and so does the list's row when the detail was read plain.
@@ -223,6 +223,9 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
         const n = rollup.byStatus.find(([one]) => one === status)?.[1] ?? 0
         if (n && counted) bar.append(el(doc, 'span', { 'data-status': status, style: `width: ${(n * 100) / counted}%` }))
       }
+      // A group `moai status` gave no counts for — not answered yet, failed, or left out as one closed past
+      // archive_days (`SPC v o`) — still has its share done: drawn as the bar always drew it, beside the same text.
+      if (!counted && rollup.percent) bar.append(el(doc, 'span', { 'data-status': 'done', style: `width: ${rollup.percent}%` }))
       const legend = el(doc, 'div', { class: 'moai-detail-legend' })
       for (const [status, n] of rollup.byStatus) legend.append(el(doc, 'span', { 'data-status': status }, `${copy.stats[status] ?? status} ${n}`))
       out.push(section(doc, d.rollup, el(doc, 'div', { class: 'moai-detail-rollup' }, d.rollupText(rollup.done, rollup.work, rollup.percent)), bar, rollup.byStatus.length ? legend : null))

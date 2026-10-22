@@ -28,8 +28,11 @@ export interface ZonePickerProps {
   names: () => string[]
   /** A line was picked: a name, or null for the first line (the TUI's zone, else the browser's). */
   pick: (zone: string | null) => void
-  /** The picker closed, picked or not: the keys go back to the pane. */
-  closed: () => void
+  /**
+   * The picker closed, picked or not: the keys go back to the pane — unless the focus left it for something the person
+   * chose (`away`: a click on the search box, a Tab), where it stays.
+   */
+  closed: (away: boolean) => void
 }
 
 export interface ZoneOpen {
@@ -84,7 +87,8 @@ export function createZonePicker(doc: Document, props: ZonePickerProps): ZonePic
   function settle() {
     const typed = input.value
     hits = typed.trim() === "" ? [DEFAULT, ...all] : filterZones(all, typed)
-    cursor = Math.min(cursor, Math.max(0, hits.length - 1))
+    // Never above the list's top (zones.rs saturates): a cursor of -1 would aim at no line while it says it aims.
+    cursor = Math.max(0, Math.min(cursor, hits.length - 1))
   }
 
   const selected = (): number | null => (aimed && hits.length ? Math.min(cursor, hits.length - 1) : null)
@@ -112,7 +116,7 @@ export function createZonePicker(doc: Document, props: ZonePickerProps): ZonePic
   function step(by: number, page = false) {
     if (!aimed) {
       // A cursor that aimed at nothing lands on the first line, as from the empty place above the list (zones.rs step).
-      cursor = page && by > 0 ? Math.min(hits.length - 1, PAGE) : 0
+      cursor = page && by > 0 ? Math.max(0, Math.min(hits.length - 1, PAGE)) : 0
     } else {
       cursor = Math.max(0, Math.min(hits.length - 1, cursor + by))
     }
@@ -120,12 +124,12 @@ export function createZonePicker(doc: Document, props: ZonePickerProps): ZonePic
     draw()
   }
 
-  function finish(zone: string | null | undefined) {
+  function finish(zone: string | null | undefined, away = false) {
     if (root.hidden) return
     root.hidden = true
     list.replaceChildren()
     if (zone !== undefined) props.pick(zone)
-    props.closed()
+    props.closed(away)
   }
 
   input.addEventListener("input", () => {
@@ -153,18 +157,23 @@ export function createZonePicker(doc: Document, props: ZonePickerProps): ZonePic
       event.stopPropagation()
     }
   })
-  list.addEventListener("mousedown", (event) => event.preventDefault())
+  // A click anywhere in the picker but the filter box (a line, the title, the note, the padding) leaves the caret in the
+  // box: none of them takes the focus, and the box losing it would close the picker and drop what was typed.
+  root.addEventListener("mousedown", (event) => {
+    if (event.target !== input) event.preventDefault()
+  })
   list.addEventListener("click", (event) => {
     const line = (event.target as Element | null)?.closest?.<HTMLElement>(".m-zone-item")
     if (!line) return
     const name = line.dataset.zone ?? DEFAULT
     finish(name === DEFAULT ? null : name)
   })
-  // A click or a Tab out of the picker closes it without a change.
+  // A click or a Tab out of the picker closes it without a change. The focus is on its way to `to`, the person's
+  // choice: `away` keeps the pane from taking it back from inside this focusout (focusing there cancels the move).
   root.addEventListener("focusout", (event) => {
     const to = (event as FocusEvent).relatedTarget as Node | null
     if (to && root.contains(to)) return
-    finish(undefined)
+    finish(undefined, to !== null)
   })
 
   return {

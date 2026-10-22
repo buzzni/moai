@@ -16,7 +16,10 @@ import { DEFAULT_RATIO, normalizeRatio } from '../view/split.js'
 import { DEFAULT_TAB, normalizeTab } from '../view/tabs.js'
 import { validZone } from './zone.js'
 
-/** The page's key in localStorage. The origin is `moai web`'s host:port, so each project's page keeps its own. */
+/**
+ * The page's key in localStorage. The origin is `moai web`'s host:port, which every project the page reads shares
+ * (`?project=`): what is kept here is the person's, and what is a project's own goes under {@link queryKeyOf}.
+ */
 export const MEMORY_KEY = 'moai.web'
 /** Written with the settings; a later panel that changes their shape reads this to migrate. */
 export const MEMORY_VERSION = 1
@@ -259,6 +262,14 @@ export const sortDefault: SortDefault = createSortDefault(settingsStorage)
 
 export const QUERY_KEY = `${MEMORY_KEY}.query`
 
+/**
+ * The query settings' key for the project the page reads (`?project=`, data/client.ts projectOf). One server reads
+ * every registered project from the same origin, so a key of its own keeps one project's filter, order, cells and
+ * hidden columns off the next one's page: a filter on an epic B does not have, or a column B's config lacks, emptied
+ * B's list or had it refused. The home keeps the key it always had.
+ */
+export const queryKeyOf = (project: string | null): string => (project ? `${QUERY_KEY}:${project}` : QUERY_KEY)
+
 export interface QuerySettings {
   /** The applied filter text. */
   filter: string
@@ -327,20 +338,22 @@ function applyQuery(store: Store, query: Partial<QuerySettings>): void {
  * Restores the remembered settings into the store, then saves them whenever they change. Returns the
  * unsubscribe. Call it before the views mount, so they first draw the restored tab and layout. The default
  * sort is applied first, so the workspace's own order in the query settings wins over it. Left out, `defaults` and
- * `storage` are the panel's shared {@link sortDefault} and {@link settingsStorage}, the ones the key wiring falls back to.
+ * `storage` are the panel's shared {@link sortDefault} and {@link settingsStorage}, the ones the key wiring falls back to,
+ * and `queryKey` the home's ({@link queryKeyOf}).
  */
 export function remember(
   store: Store,
   memory: Memory,
   defaults: SortDefault = sortDefault,
   storage: SettingsStorage = settingsStorage,
+  queryKey: string = QUERY_KEY,
 ): () => void {
   store.dispatch({ type: 'restore', settings: memory.load() })
   const saved = defaults.get()
   store.dispatch({ type: 'sort-default', sort: saved })
   if (saved) store.dispatch({ type: 'sort', sort: saved })
   try {
-    const text = storage.read(QUERY_KEY)
+    const text = storage.read(queryKey)
     if (text !== null) applyQuery(store, normalizeQuery(JSON.parse(text)))
   } catch {
     // Unreadable: the panel starts from its defaults.
@@ -356,7 +369,7 @@ export function remember(
     if (text === last) return
     last = text
     try {
-      storage.write(QUERY_KEY, text)
+      storage.write(queryKey, text)
     } catch {
       // Full, or refused: forgotten. A throw here would stop the listeners after this one (the views) drawing.
     }

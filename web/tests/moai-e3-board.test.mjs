@@ -495,6 +495,29 @@ test('spin: the first column is the configured one once the boot says it, else t
   assert.equal(SPIN.spins(index, 1, 'backlog'), false)
 })
 
+test('spin: a group moves only while work under it moves, and a column the config does not know never moves (tui::App::spins)', () => {
+  const rows = [
+    { id: 'm1', kind: 'milestone', title: 'v1', status: 'todo', derived_status: 'in_progress' },
+    { id: 'e1', kind: 'epic', title: 'Half done', milestone: 'm1', status: 'todo', derived_status: 'in_progress' },
+    { id: 'e1.a', kind: 'issue', title: 'A', epic: 'e1', derived_epic: 'e1', milestone: 'm1', status: 'done' },
+    { id: 'e1.b', kind: 'issue', title: 'B', epic: 'e1', derived_epic: 'e1', milestone: 'm1', status: 'todo' },
+    { id: 'x', kind: 'issue', title: 'Old column', status: 'blocked' },
+  ]
+  const with_ = (change) => build(rows.map((row) => (row.id === 'e1.b' ? { ...row, ...change } : row)))
+  // One member done and the rest waiting stands the group in a started column (`column_of`): half done, not being done.
+  const half = build(rows)
+  assert.equal(SPIN.spins(half, half.find('e1')), false)
+  assert.equal(SPIN.spins(half, half.find('m1')), false)
+  const held = with_({ status: 'in_progress' })
+  assert.equal(SPIN.spins(held, held.find('e1')), true, 'work under it moves')
+  assert.equal(SPIN.spins(held, held.find('m1')), true, 'and so does every group above it')
+  const shelved = with_({ status: 'in_progress', deferred_at: '2026-01-01', shelved_by: 'e1.b' })
+  assert.equal(SPIN.spins(shelved, shelved.find('e1')), false, 'deferred work does not make it busy')
+  // A column left from an older config stands still once the boot names the columns.
+  assert.equal(SPIN.spins(half, half.find('x'), 'todo', ['todo', 'in_progress', 'review', 'done']), false)
+  assert.equal(SPIN.spins(half, half.find('x')), true, 'before the boot answers, the columns are not known')
+})
+
 test('branch mark: the holder, else where the row came from; the name kept by its tail; none on a done row', () => {
   assert.equal(BR.clipFront('wt-se-43oh'), 'wt-se-43oh')
   assert.equal(BR.clipFront('worktree-moai-3fnf-long'), '…-moai-3fnf-long')

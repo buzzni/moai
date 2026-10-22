@@ -8,7 +8,7 @@
  */
 import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
-import { createMemory, remember } from './data/memory.js'
+import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { isUnread, readMarks } from './data/read.js'
@@ -48,7 +48,8 @@ async function start(): Promise<void> {
   const store = createStore()
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the
   // page use it, else this session only (data/memory.ts); reading `window.localStorage` itself can throw, hence the getter.
-  remember(store, createMemory(() => window.localStorage))
+  // The filter, the order, the cells and the hidden columns are this project's own (data/memory.ts queryKeyOf).
+  remember(store, createMemory(() => window.localStorage), sortDefault, settingsStorage, queryKeyOf(project))
   // Every date is drawn in the zone picked here (`SPC o t`), else the TUI's, else the browser's (data/zone.ts). Set
   // before any view draws, and before the shell (subscribed after this) draws again on a change.
   let zoneDrawn = ''
@@ -215,7 +216,7 @@ async function start(): Promise<void> {
     if (key === '' || (!again && key === state.matched.key && askedAt === loads)) return
     const mine = ++asks
     askedAt = loads
-    const question = { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived }
+    const question = { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived, worktree: state.view.worktree }
     const next = matchEndpoints(question).map(requestKey)
     // The older question's reads this one does not share: their answer would be dropped, and they hold the slots.
     for (const old of askingKeys) if (!next.includes(old)) client.cancel(old)
@@ -388,7 +389,7 @@ async function start(): Promise<void> {
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  wireKeys({ document, store, shell, copy, read, openProject })
+  wireKeys({ document, store, shell, copy, read, openProject, index: indexOf })
 
   document.body.tabIndex = -1
   document.body.focus({ preventScroll: true })

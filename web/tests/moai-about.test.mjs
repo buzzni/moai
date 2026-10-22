@@ -129,6 +129,10 @@ test('tips: the header turns through them every 8 s by CSS, from a random place,
   assert.equal(doc.querySelectorAll('style#m-tip-4').length, 1)
   // Screen readers hear what the button does, not the stack.
   assert.equal(brand.el.querySelector('.m-brand-tip-text').getAttribute('aria-label'), 'All tips')
+  // A click leaves the focus where it was, as on a project: on the button, SPC would click it again.
+  const press = new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true })
+  brand.el.querySelector('.m-brand-tip-text').dispatchEvent(press)
+  assert.equal(press.defaultPrevented, true)
   brand.el.querySelector('.m-brand-tip-text').click()
   assert.equal(opened, 1)
   // No timer at all: a shown document keeps none alive.
@@ -158,4 +162,26 @@ test('tips page: every tip with its Copy button; keys stay in it; Esc closes and
   key(page.el, 'Escape')
   assert.equal(page.isOpen(), false)
   assert.equal(doc.activeElement, doc.getElementById('before'))
+})
+
+test('tips page: off macOS, a Ctrl key with the focus behind reaches neither the panel\'s keys nor a control behind', () => {
+  const dom = new JSDOM('<!doctype html><body><input id="behind"><button id="press">x</button></body>')
+  const doc = dom.window.document
+  const page = T.createTips(doc, copyFor('en').shell.tips, 'other')
+  doc.body.append(page.el)
+  const router = []
+  doc.addEventListener('keydown', (event) => router.push(event.key))
+  page.open()
+  const key = (target, k) => {
+    const event = new dom.window.KeyboardEvent('keydown', { key: k, ctrlKey: true, bubbles: true, cancelable: true })
+    target.dispatchEvent(event)
+    return event
+  }
+  // `C-d` is the host's own (a bookmark) and goes on, but the key router behind never hears it.
+  assert.equal(key(doc.getElementById('behind'), 'd').defaultPrevented, false)
+  assert.deepEqual(router, [], 'the panel ran C-d under the open page')
+  // A paste into an input behind and Ctrl+Enter on a button behind are stopped, and the focus comes back.
+  assert.equal(key(doc.getElementById('behind'), 'v').defaultPrevented, true)
+  assert.equal(key(doc.getElementById('press'), 'Enter').defaultPrevented, true)
+  assert.equal(doc.activeElement, page.el)
 })
