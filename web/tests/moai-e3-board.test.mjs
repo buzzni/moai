@@ -220,6 +220,14 @@ test('board view: assignee chip only when the column is on; empty board says so'
   assert.match(empty.root.textContent, /Nothing here/)
 })
 
+test('board view: a card chip carries its whole words in its title, so the stylesheet may cut it at the card edge (moai-rqec)', () => {
+  const base = { ...initialState(), tab: 'board' }
+  const on = { ...base, columns: { ...base.columns, assignee: true, epic: true } }
+  const chips = [...mount(on).root.querySelectorAll('[data-id="e1.b"] .m-card-line > .m-chip')]
+  assert.ok(chips.length >= 2, 'the epic and assignee chips stand')
+  for (const chip of chips) assert.equal(chip.title, chip.textContent)
+})
+
 const bare = (intents = { choose() {}, point() {} }) => {
   const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
   const root = dom.window.document.getElementById('r')

@@ -77,7 +77,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     const name = row.title ?? row.id
     title.append(moving ? glint(doc, name) : name)
     const lines: Node[] = [first, title]
-    const extras: Node[] = []
+    const extras: HTMLElement[] = []
     const who = assigneeOf(row)
     if (state.columns.assignee && who) extras.push(chip(doc, { label: who }))
     if (state.columns.epic) {
@@ -85,6 +85,8 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
       if (epic !== undefined) extras.push(chip(doc, { label: index.rows[index.find(epic) ?? -1]?.title ?? epic, tone: 'accent' }))
     }
     if (state.columns.tags && Array.isArray(row.tags)) for (const tag of row.tags) extras.push(chip(doc, { label: `#${tag}` }))
+    // A chip is cut at the card's edge (board.css, moai-rqec); its whole words stay in its title.
+    for (const extra of extras) extra.title = extra.textContent ?? ''
     if (extras.length) lines.push(el(doc, 'div', { class: 'm-card-line' }, ...extras))
     const node = el(doc, 'div', {
       class: 'm-card', role: 'listitem', tabindex: at === tabStop ? 0 : -1, 'aria-selected': String(selected),
