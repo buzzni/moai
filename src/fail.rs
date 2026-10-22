@@ -33,6 +33,10 @@ pub mod code {
     pub const PORT_IN_USE: &str = "port_in_use";
     // 아래는 `moai web` 이 HTTP 로 내는 거절의 `code` 다 — 상태 줄과 함께 나가지만, 받는 쪽이 분기하는 값은 이쪽이다.
     pub const FORBIDDEN_HOST: &str = "forbidden_host";
+    /// 쓰는 요청(읽음 표시)의 `Origin` 이 이 서버가 아니다 — 남의 사이트가 보낸 POST 다.
+    pub const FORBIDDEN_ORIGIN: &str = "forbidden_origin";
+    /// `project=` 가 걸어 둔 프로젝트가 아니다 — 페이지는 걸어 둔 것만 읽는다.
+    pub const NOT_REGISTERED: &str = "not_registered";
     pub const METHOD_NOT_ALLOWED: &str = "method_not_allowed";
     pub const BUSY: &str = "busy";
     pub const TIMEOUT: &str = "timeout";

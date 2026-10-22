@@ -29583,6 +29583,21 @@ fn get(port: u16, path: &str) -> (u16, String, String) {
     http(port, "GET", path, Some(&format!("127.0.0.1:{port}")))
 }
 
+/// 본문 없는 POST 하나 — `Origin` 을 줄 때만 싣는다. 브라우저가 보내는 꼴이다(읽음 표시, moai-ly88).
+fn post(port: u16, path: &str, origin: Option<&str>) -> (u16, String, String) {
+    use std::io::{Read as _, Write as _};
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
+    let origin = origin.map(|o| format!("Origin: {o}\r\n")).unwrap_or_default();
+    write!(s, "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{origin}Content-Length: 0\r\n\r\n").unwrap();
+    let mut got = Vec::new();
+    s.read_to_end(&mut got).unwrap();
+    let got = String::from_utf8(got).unwrap();
+    let (head, body) = got.split_once("\r\n\r\n").unwrap_or_else(|| panic!("머리 끝이 없다\n{got}"));
+    let status = head.split(' ').nth(1).and_then(|c| c.parse().ok()).unwrap_or_else(|| panic!("상태 줄\n{head}"));
+    (status, head.to_string(), body.to_string())
+}
+
 fn json_of(body: &str) -> serde_json::Value {
     serde_json::from_str(body).unwrap_or_else(|e| panic!("{e}\n{body}"))
 }
@@ -29801,8 +29816,9 @@ fn web_rows_are_moais_show() {
     ok(s.path(), &["backlog", "add", "나중 생각"]);
     let web = serve(s.path());
     let fields = format!("--fields={WEB_ROW_FIELDS}");
-    let cases: [(&str, Vec<&str>); 4] = [
+    let cases: [(&str, Vec<&str>); 5] = [
         ("/api/rows", vec!["show", "--all", &fields]),
+        ("/api/rows?worktree=1", vec!["show", "--all", "--worktree", &fields]),
         ("/api/rows?archived=1", vec!["show", "--all", "--archived", &fields]),
         ("/api/rows?filter=status%3Ddone", vec!["show", "--all", "--filter=status=done", &fields]),
         ("/api/rows?q=%ED%8C%8C%EC%84%9C&fields=id", vec!["show", "--all", "--grep=파서", "--fields=id"]),
@@ -29948,6 +29964,116 @@ fn web_stamp_moves_when_a_row_is_read() {
     ok_with(s.path(), &cfg, &["read", &id]);
     assert!(!unread(&web), "시험의 전제 — 읽은 줄이 그대로 안 읽은 줄이다");
     assert_ne!(stamp(&web), before, "읽은 뒤에 표식이 안 움직였다");
+}
+
+/// **읽음 표시는 이 페이지가 보낸 POST 만 받는다**(moai-ly88, 2026-10-22 사람 결정) — `Origin` 이 이 서버면 `moai read`
+/// 를 돌려 봉투로 답하고, 없거나 남의 것이면 무엇을 쓰는지 재기 전에 403 이다. 트래커는 안 바뀐다.
+#[test]
+fn web_marks_read_only_from_its_own_page() {
+    let s = init("web-read");
+    let cfg = s.path().join("user.toml");
+    let id = field(&ok_with(s.path(), &cfg, &["add", "내 일", "--json"]), "id");
+    let epic = field(&ok_with(s.path(), &cfg, &["epic", "add", "묶음", "--json"]), "id");
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let mine = format!("http://127.0.0.1:{}", web.port);
+    let unread = |web: &Served| {
+        json_of(&get(web.port, "/api/rows").2)["out"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == id.as_str() && r["unread"] == true)
+    };
+    let snapshot = std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap();
+    assert!(unread(&web), "시험의 전제 — 내게 온 새 줄은 안 읽은 줄이다");
+
+    for origin in [None, Some("http://evil.example"), Some("https://127.0.0.1"), Some("null")] {
+        let (status, _, body) = post(web.port, &format!("/api/read/{id}"), origin);
+        assert_eq!(status, 403, "{origin:?}\n{body}");
+        assert_eq!(json_of(&body)["code"], "forbidden_origin", "{body}");
+    }
+    assert!(unread(&web), "거절한 POST 가 읽음을 적었다");
+
+    let (status, _, body) = post(web.port, &format!("/api/read/{id}"), Some(&mine));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert!(!unread(&web), "읽음이 안 적혔다");
+    for path in ["/api/read-all".to_string(), format!("/api/read-group/{epic}")] {
+        let (status, _, body) = post(web.port, &path, Some(&mine));
+        assert_eq!(status, 200, "{path}\n{body}");
+        assert_eq!(json_of(&body)["exit"], 0, "{path}\n{body}");
+    }
+    assert_eq!(std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap(), snapshot, "읽음 표시가 트래커를 고쳤다");
+
+    // 모양이 틀리면 자식을 안 띄운다. 쓰는 길이 아닌 곳의 POST 는 전처럼 405 다.
+    let (status, _, body) = post(web.port, "/api/read/issue", Some(&mine));
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    let (status, _, body) = post(web.port, "/api/read-all?all=1", Some(&mine));
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    let (status, _, body) = post(web.port, "/api/rows", Some(&mine));
+    assert_eq!((status, json_of(&body)["code"].as_str()), (405, Some("method_not_allowed")), "{body}");
+    let (status, _, _) = get(web.port, &format!("/api/read/{id}"));
+    assert_eq!(status, 404, "GET 으로 읽음을 적는 길이 섰다");
+}
+
+/// **`project=` 는 걸어 둔 프로젝트만 읽는다**(moai-o14f) — 그 자리의 트래커로 답하고, 걸지 않은 자리·상대 경로는
+/// 자식을 띄우기 전에 403 `not_registered`, 두 번 주면 400 이다. `/api/projects` 는 `project ls` 의 원문이다.
+#[test]
+fn web_reads_a_registered_project_only() {
+    let home = init("web-proj-home");
+    let other = init("web-proj-other");
+    let stranger = init("web-proj-stranger");
+    let cfg = home.path().join("user.toml");
+    ok(other.path(), &["add", "저쪽 일"]);
+    ok(other.path(), &["add", "저쪽 일 둘"]);
+    ok_with(home.path(), &cfg, &["project", "add", other.path().to_str().unwrap()]);
+    let web = serve_with(home.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+
+    let (status, _, body) = get(web.port, "/api/projects");
+    assert_eq!(status, 200, "{body}");
+    let listed = json_of(&body)["out"]["projects"][0]["path"].as_str().unwrap().to_string();
+    let enc = |p: &str| p.replace('%', "%25").replace(' ', "%20").replace('&', "%26");
+
+    let (status, _, body) = get(web.port, &format!("/api/status?project={}", enc(&listed)));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["out"]["total"], 2, "걸어 둔 저쪽의 트래커를 안 읽었다 — {body}");
+    let (status, _, body) = get(web.port, &format!("/api/boot?project={}", enc(&listed)));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["root"], listed.as_str(), "{body}");
+    let (_, _, body) = get(web.port, "/api/status");
+    assert_eq!(json_of(&body)["out"]["total"], 0, "project 없이는 띄운 자리다 — {body}");
+
+    for asked in [stranger.path().to_str().unwrap().to_string(), "web-proj-other".to_string(), "/".to_string()] {
+        let (status, _, body) = get(web.port, &format!("/api/status?project={}", enc(&asked)));
+        assert_eq!(status, 403, "{asked}\n{body}");
+        assert_eq!(json_of(&body)["code"], "not_registered", "{body}");
+    }
+    let (status, _, body) = get(web.port, &format!("/api/status?project={0}&project={0}", enc(&listed)));
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+}
+
+/// **바탕이 탐색기 머리의 `User` 와 판 소식을 싣는다**(moai-ir9k) — 사람은 `naming` 을 입힌 한 줄, 판 소식은 적어 둔
+/// 답을 읽을 뿐 바깥에 안 묻는다. 묻기를 끈 기계(`MOAI_NO_UPDATE_CHECK`)는 `null` 이다.
+#[test]
+fn web_boot_names_the_user_and_the_latest() {
+    let s = init("web-boot-user");
+    let cfg = s.path().join("user.toml");
+    std::fs::write(s.path().join("latest.toml"), "asked_at = \"2026-09-01T00:00:00Z\"\ntag = \"v0.0.1\"\n").unwrap();
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg).env_remove("MOAI_NO_UPDATE_CHECK");
+    });
+    let boot = json_of(&get(web.port, "/api/boot").2);
+    assert!(boot["user"].as_str().is_some_and(|u| !u.is_empty() && u != "—"), "{boot}");
+    assert!(boot["latest"]["state"].is_string(), "적어 둔 답을 안 읽었다 — {boot}");
+    drop(web);
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg).env("MOAI_NO_UPDATE_CHECK", "1");
+    });
+    let boot = json_of(&get(web.port, "/api/boot").2);
+    assert!(boot["latest"].is_null(), "묻기를 끈 기계에 판 소식을 댔다 — {boot}");
 }
 
 /// **칸 이름이 `backlog`·`shelved` 여도 바탕의 키가 안 겹친다**(moai-jshy.yxh) — 글리프를 한 맵에 두던 판은

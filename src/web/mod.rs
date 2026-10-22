@@ -4,7 +4,9 @@
 //! ([`run`]) 스레드끼리 함께 쥐는 것은 띄우는 법([`Site`])과 도는 연결의 수뿐이다. 비동기 런타임을 안 쓰는
 //! 까닭이 이것이다 — 동시에 도는 것이 많아야 [`BUSY_MAX`] 이고, 한 판의 값은 자식 프로세스가 치른다.
 //!
-//! **읽기만 한다.** 길은 모두 GET 이고, 쓰는 길은 CLI 와 탐색기다(사람 결정, v1).
+//! **트래커는 읽기만 한다.** 길은 GET 이고, 트래커를 바꾸는 길은 CLI 와 탐색기다(사람 결정, v1). 하나뿐인 POST 는
+//! 읽음 표시다([`api::write_argv_of`], 2026-10-22 사람 결정, moai-ly88) — 읽음은 사용자 설정 곁의 제 파일에만
+//! 적히고, 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]).
 
 pub mod api;
 pub mod boot;
@@ -221,32 +223,59 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     if !http::host_ok(req.host.as_deref()) {
         return refuse(403, say(lang, "web.foreign_host"), code::FORBIDDEN_HOST);
     }
-    if req.method != "GET" {
-        let said = fill(say(lang, "web.only_get"), &[("method", &req.method)]);
-        return refuse(405, &said, code::METHOD_NOT_ALLOWED);
+    let not_allowed = || {
+        let said = fill(say(lang, "web.only_get"), &[("method", &req.method), ("path", &req.path)]);
+        refuse(405, &said, code::METHOD_NOT_ALLOWED)
+    };
+    // **쓰는 길은 이 페이지가 보낸 것만 받는다**([`http::origin_ok`]) — 무엇을 쓰는지 재기 전에, 프로젝트를 찾으러
+    // 사용자 설정을 열기 전에 거른다.
+    let write = match req.method.as_str() {
+        "GET" => false,
+        "POST" if api::write_argv_of(&req.path, &[]).is_some() => {
+            if !http::origin_ok(req.origin.as_deref(), req.host.as_deref()) {
+                return refuse(403, say(lang, "web.foreign_origin"), code::FORBIDDEN_ORIGIN);
+            }
+            true
+        }
+        _ => return not_allowed(),
+    };
+    let (project, query) = match api::split_project(&req.query) {
+        Ok(split) => split,
+        Err(bad) => return refuse(400, &bad.said(lang), code::BAD_INPUT),
+    };
+    let cwd = match project.as_deref().map(|p| project_of(p, lang)) {
+        None => site.spawner.cwd.clone(),
+        Some(Ok(dir)) => dir,
+        Some(Err(refused)) => return refused,
+    };
+    if write {
+        return match api::write_argv_of(&req.path, &query) {
+            Some(Ok(args)) => child(site, &args, &cwd, lang),
+            Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
+            None => not_allowed(),
+        };
     }
     // 자식 없이 답하는 끝점도 쿼리는 안 받는다 — 말없이 버리면 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
-    let bare = || api::none_of(&req.query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
+    let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
         "/" | "/index.html" => page(http::HTML, include_str!("dist/index.html")),
         "/app.js" => page(http::JS, include_str!("dist/app.js")),
         "/app.css" => page(http::CSS, include_str!("dist/app.css")),
-        "/api/boot" => match bare()
-            .and_then(|()| boot::boot(&site.spawner.cwd, lang).map_err(|e| refuse(500, &e.message, e.code)))
-        {
+        "/api/boot" => match bare().and_then(|()| {
+            boot::boot(&cwd, site.spawner.user.as_deref(), lang).map_err(|e| refuse(500, &e.message, e.code))
+        }) {
             Ok(body) => Response { status: 200, kind: http::JSON, body: body.into_bytes() },
             Err(refused) => refused,
         },
-        "/api/stamp" => match bare()
-            .and_then(|()| api::stamp(&site.spawner.cwd, lang).map_err(|e| refuse(500, &e.message, e.code)))
+        "/api/stamp" => match bare().and_then(|()| api::stamp(&cwd, lang).map_err(|e| refuse(500, &e.message, e.code)))
         {
             Ok(stamp) => {
                 Response { status: 200, kind: http::JSON, body: format!("{{\"stamp\":\"{stamp}\"}}").into_bytes() }
             }
             Err(refused) => refused,
         },
-        path => match api::argv_of(path, &req.query) {
-            Some(Ok(args)) => child(site, &args, lang),
+        path => match api::argv_of(path, &query) {
+            Some(Ok(args)) => child(site, &args, &cwd, lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => {
                 let said = fill(say(lang, "web.no_path"), &[("path", &req.path)]);
@@ -256,14 +285,34 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     }
 }
 
+/// `project=` 의 자리 — **걸어 둔 프로젝트만 읽는다**(moai-o14f). 페이지는 `/api/projects` 가 낸 `path` 를 그대로
+/// 되돌려 보내니, 걸어 둔 목록에 없는 자리는 남이 지어 보낸 것이다: 이 서버가 그 디렉터리의 트래커를 읽어 줄 까닭이
+/// 없다. 견주기는 `project ls` 와 같은 자([`crate::user_config::same_dir`])다.
+///
+/// **사용자 설정은 보통 파일일 때만 연다**([`Site::lang`] 과 같은 자) — 아니면 걸어 둔 것이 없는 것으로 읽는다.
+pub fn project_of(value: &str, lang: Lang) -> Result<std::path::PathBuf, Response> {
+    let path = crate::user_config::path();
+    let regular = path.as_deref().is_none_or(|p| std::fs::metadata(p).map_or(true, |m| m.is_file()));
+    let reg = crate::user_config::read(if regular { path.as_deref() } else { None });
+    let asked = std::path::Path::new(value);
+    let found = match asked.is_absolute() {
+        true => reg.projects.iter().find(|p| crate::user_config::same_dir(&p.path, asked)),
+        false => None,
+    };
+    found.map(|p| p.path.clone()).ok_or_else(|| {
+        let said = fill(say(lang, "web.not_registered"), &[("path", value)]);
+        refuse(403, &said, code::NOT_REGISTERED)
+    })
+}
+
 fn page(kind: &'static str, body: &'static str) -> Response {
     Response { status: 200, kind, body: body.as_bytes().to_vec() }
 }
 
 /// 자식을 돌려 봉투로 낸다. **자식이 돌았으면 200 이다** — 자식의 실패는 봉투의 `exit`·`err` 가 말한다.
 /// 4xx·5xx 는 서버가 답을 못 낸 판이다.
-pub fn child(site: &Site, args: &[String], lang: Lang) -> Response {
-    match site.spawner.run(args) {
+pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, lang: Lang) -> Response {
+    match site.spawner.run_in(args, cwd) {
         Ok(done) => Response { status: 200, kind: http::JSON, body: run::envelope(&done).into_bytes() },
         Err(run::Fault::Timeout) => {
             let secs = run::TIME_LIMIT.as_secs().to_string();

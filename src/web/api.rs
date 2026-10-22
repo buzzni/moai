@@ -23,6 +23,7 @@ pub enum Param {
     Fields,
     Sort,
     Reverse,
+    Worktree,
 }
 
 impl Param {
@@ -34,6 +35,7 @@ impl Param {
             Param::Fields => "fields",
             Param::Sort => "sort",
             Param::Reverse => "reverse",
+            Param::Worktree => "worktree",
         }
     }
 }
@@ -46,16 +48,21 @@ pub struct Profile {
 }
 
 const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields];
+/// 산 줄의 목록만 옆 워크트리를 겹친다(`--worktree`, 탐색기의 `SPC v w`) — backlog 는 겹칠 줄이 없다.
+const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Worktree];
 
 /// 자식을 띄우는 끝점들 — **쿼리를 재는 자가 하나다**([`argv`]). 받는 이름이 없는 끝점도 여기 서야 거기 붙인
 /// 쿼리가 거절된다(`/api/status?worktree=1` 을 말없이 맨 보드로 답하던 판이 있었다). 경로에 값이 드는
 /// `/api/issue/<id>`·`/api/wiki/<slug>` 만 [`argv_of`] 가 따로 짓는다.
 pub const PROFILES: &[Profile] = &[
     Profile { route: "/api/status", head: &["status"], params: &[] },
-    Profile { route: "/api/rows", head: &["show", "--all"], params: LIST },
+    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS },
     Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST },
     Profile { route: "/api/tree", head: &["tui", "--deep"], params: &[Param::Sort, Param::Reverse] },
     Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[] },
+    // 걸어 둔 프로젝트들 — 사용자 설정을 읽으니 어느 자리에서 돌아도 같은 답이다. 페이지는 그 `path` 를
+    // `project=` 로 되돌려 보내 그 프로젝트를 읽는다([`super::project_of`]).
+    Profile { route: "/api/projects", head: &["project", "ls"], params: &[] },
 ];
 
 /// 거르개 줄 하나의 상한(바이트) — 줄을 나눠 여러 `--filter` 가 된다.
@@ -116,6 +123,38 @@ pub fn argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<Stri
     }))
 }
 
+/// 걸어 둔 프로젝트의 자리 하나의 상한(바이트) — 경로라 다른 값보다 넉넉하다.
+const PROJECT_MAX: usize = 4096;
+
+/// 쿼리에서 `project=` 를 떼어 낸다 — **모든 길이 받는 이름이다**(moai-o14f). 페이지가 고른 걸어 둔 프로젝트를 읽는
+/// 자리라 끝점마다 틀에 적지 않고 여기서 한 번 뗀 뒤, 나머지를 끝점이 잰다. 두 번 주면 어느 쪽을 읽을지 모른다.
+pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<(String, String)>), Bad> {
+    let (mut project, mut rest) = (None, Vec::new());
+    for (name, value) in query {
+        if name != "project" {
+            rest.push((name.clone(), value.clone()));
+        } else if project.replace(value.clone()).is_some() {
+            return Err(Bad::Twice(name.clone()));
+        } else {
+            shape(name, value, PROJECT_MAX)?;
+        }
+    }
+    Ok((project, rest))
+}
+
+/// 쓰는 길 — **읽음 표시 셋뿐이다**(2026-10-22 사람 결정, moai-ly88). 읽음은 사용자 설정 곁의 제 파일에만 적히고
+/// 트래커에는 안 적힌다(`moai read --help`) — 트래커를 바꾸는 길은 여전히 CLI 와 탐색기다. 끝점이 아니면 `None`.
+pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
+    let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let built = match (path, path.strip_prefix("/api/read/"), path.strip_prefix("/api/read-group/")) {
+        ("/api/read-all", _, _) => Ok(strs(&["read", "--all"])),
+        (_, Some(id), _) => issue_id(id).map(|()| strs(&["read", "--", id])),
+        (_, _, Some(id)) => issue_id(id).map(|()| vec!["read".to_string(), format!("--epic={id}")]),
+        _ => return None,
+    };
+    Some(none_of(query).and(built))
+}
+
 /// 이 끝점은 쿼리를 안 받는다 — 자식 없이 답하는 `/api/boot`·`/api/stamp` 도 이것으로 잰다.
 pub fn none_of(query: &[(String, String)]) -> Result<(), Bad> {
     match query.first() {
@@ -167,7 +206,7 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
     let mut fields = None;
     for (p, (name, value)) in seen.into_iter().zip(query) {
         match p {
-            Param::Archived | Param::Reverse => {
+            Param::Archived | Param::Reverse | Param::Worktree => {
                 if value != "1" {
                     return Err(Bad::Shape(name.clone()));
                 }
@@ -356,5 +395,33 @@ mod tests {
         assert!(rows(&[("q", &"a".repeat(512))]).is_ok());
         assert!(matches!(rows(&[("filter", &"a".repeat(2049))]), Err(Bad::Long(_, 2048))));
         assert!(rows(&[("filter", &"a".repeat(2048))]).is_ok());
+    }
+
+    /// **쓰는 길은 읽음 셋뿐이고, 값은 `--` 뒤나 `--epic=` 한 토막에 든다**(moai-ly88).
+    #[test]
+    fn writes_are_the_three_read_marks() {
+        let w = |path: &str| write_argv_of(path, &[]).map(|r| r.unwrap());
+        assert_eq!(w("/api/read/moai-1abc"), Some(strs(&["read", "--", "moai-1abc"])));
+        assert_eq!(w("/api/read-all"), Some(strs(&["read", "--all"])));
+        assert_eq!(w("/api/read-group/moai-1abc"), Some(strs(&["read", "--epic=moai-1abc"])));
+        for bad in ["/api/read/issue", "/api/read/-e", "/api/read-group/--all", "/api/read/"] {
+            assert!(matches!(write_argv_of(bad, &[]), Some(Err(Bad::Shape(_)))), "{bad}");
+        }
+        assert!(matches!(write_argv_of("/api/read-all", &q(&[("x", "1")])), Some(Err(Bad::Unknown(_)))));
+        for none in ["/api/rows", "/api/status", "/api/readall", "/api/read"] {
+            assert!(write_argv_of(none, &[]).is_none(), "{none}");
+        }
+    }
+
+    /// **`project=` 는 어느 길에서나 떼어 내고, 두 번이면 거절한다**(moai-o14f).
+    #[test]
+    fn the_project_is_split_off_every_query() {
+        let (p, rest) = split_project(&q(&[("filter", "a"), ("project", "/x y"), ("q", "b")])).unwrap();
+        assert_eq!(p.as_deref(), Some("/x y"));
+        assert_eq!(rest, q(&[("filter", "a"), ("q", "b")]));
+        assert_eq!(split_project(&q(&[("q", "b")])).unwrap(), (None, q(&[("q", "b")])));
+        assert!(matches!(split_project(&q(&[("project", "/a"), ("project", "/a")])), Err(Bad::Twice(_))));
+        assert!(matches!(split_project(&q(&[("project", "")])), Err(Bad::Empty(_))));
+        assert!(matches!(split_project(&q(&[("project", "/a\nb")])), Err(Bad::Control(_))));
     }
 }
