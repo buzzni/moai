@@ -258,6 +258,7 @@ once and the keys reach it.
 | `J` `K` | Move the field later / earlier in the order |
 | `SPC` | Add / remove the field |
 | `d` | Flip direction |
+| `D` | Save the order as the default: what an emptied order returns to, kept in this browser |
 | `Enter` / `Esc` | Apply / cancel |
 
 **Wiki tab**

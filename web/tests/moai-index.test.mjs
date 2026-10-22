@@ -31,7 +31,8 @@ test('a row stands where moai\'s home says, its handles read as the kind of the 
   // The inverse holds for every line: each home is exactly where moai put it.
   for (const line of TREE.filter((one) => one.id)) {
     const at = index.find(line.id)
-    assert.equal(index.homeOf(at).length, line.home.length, line.id)
+    // The pieces, not only how many: each segment without its `m:`/`e:`/`i:` mark is the name moai gave (`m:` alone is its `none`).
+    assert.deepEqual(index.homeOf(at).map((seg) => (seg === NO_MILESTONE ? 'none' : seg.replace(/^[mei]:/, ''))), line.home, line.id)
   }
 })
 
