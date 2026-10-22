@@ -7379,3 +7379,21 @@
 {"ts":"2026-10-22T06:08:10Z","id":"moai-jshy.o2a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"Took in all 15 fixes: 973a8b24 (server: bookmark/projects before project=, --worktree only inside git, branch in ROW_FIELDS), aac8b6bf (page: twelve fixes), 9373d46d (web.md). Plus the FIFO guard on latest.toml that the review handed on. Handed on: 6 and 7 (the overlay into tree, stamp and read needs CLI work) to backlog moai-77b1; the small verified items (config re-parse per poll, Cancel scope, 60s future slack, Allow header, parent tracker for a dir without .moai, symlinked home, perf, colour-only current project, dead code) to backlog moai-yoo2. Commit-subject findings (7fa17907 lacks moai-ir9k, 2630c6b4 bundles three issues) not fixed: the branch is not rewritten."}
 {"ts":"2026-10-22T06:08:20Z","id":"moai-jshy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 둘째 바퀴는 milestone/moai-kia8 에 ff106ef1 로 들었다(멤버 여섯·리뷰 o2a 닫힘). 남은 것은 backlog 셋 — moai-f35a(실패 반복 시 물러나기), moai-77b1(겹치기를 트리·표식·읽음까지, CLI 일), moai-yoo2(리뷰가 넘긴 작은 것들). 에픽 멤버로 남긴 것은 없다."}
 {"ts":"2026-10-22T06:09:26Z","id":"moai-jshy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: ff106ef1"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-m4ez","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai web 다듬기 — 리뷰가 넘긴 것·겹치기·CSP·말묶음"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-m4ez.gcp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tree·stamp·read 가 --worktree 를 알고 웹이 넘긴다"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-m4ez.4zq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"끝점 비용과 거절을 다듬는다 — git log·봉투·아카이브·sort·설정 다시 읽기"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-m4ez.42r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"페이지 잔손질 — 실패 물러나기·취소 범위·현재 프로젝트 글리프·죽은 코드"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-m4ez.h2o","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CSP 의 style-src 에서 unsafe-inline 을 걷는다"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-m4ez.n42","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 페이지 말을 i18n/*.json 으로 합친다"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-m4ez","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-77b1 에서 펼쳤다 — web: 겹치기(SPC v w)를 트리·표식·읽음까지 옆 워크트리로 잇는다"}
+{"ts":"2026-10-22T06:23:38Z","id":"moai-77b1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez 로 펼쳤다 (이슈 5건)"}
+{"ts":"2026-10-22T06:24:29Z","id":"moai-6e9b","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez.4zq 로 합쳤다 (2026-10-22 사람 결정)"}
+{"ts":"2026-10-22T06:24:29Z","id":"moai-z7z1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez.4zq 로 합쳤다 (2026-10-22 사람 결정)"}
+{"ts":"2026-10-22T06:24:30Z","id":"moai-yoo2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez.4zq 로 합쳤다 (2026-10-22 사람 결정)"}
+{"ts":"2026-10-22T06:24:30Z","id":"moai-f35a","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez.42r 로 합쳤다"}
+{"ts":"2026-10-22T06:24:30Z","id":"moai-eatm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez.42r 로 합쳤다"}
+{"ts":"2026-10-22T06:24:30Z","id":"moai-oavt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez.h2o 로 펼쳤다"}
+{"ts":"2026-10-22T06:24:31Z","id":"moai-ngj1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez.n42 로 펼쳤다"}
+{"ts":"2026-10-22T06:24:31Z","id":"moai-vg0h","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"필요 없다 — moai-ly88 이 읽음 표시 POST 를 들였다"}
+{"ts":"2026-10-22T06:24:31Z","id":"moai-y8bn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"필요 없다 — moai-o14f 가 프로젝트 오가기를, 겹치기 나머지는 moai-m4ez.gcp 가 한다"}
+{"ts":"2026-10-22T06:25:03Z","id":"moai-m4ez","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-37 (develop sonnet-5.5 medium, review opus-5.5 xhigh — 사람 결정 2026-10-22)"}
