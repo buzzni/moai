@@ -295,7 +295,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
         "/api/boot" => match bare().and_then(|()| {
-            boot::boot(&cwd, site.spawner.user.as_deref(), lang).map_err(|e| refuse(500, &e.message, e.code))
+            boot::boot(&cwd, site.spawner.user.as_deref(), lang, &site.registered()).map_err(|e| refuse(500, &e.message, e.code))
         }) {
             Ok(body) => Response::new(200, http::JSON, body.into_bytes()),
             Err(refused) => refused,
@@ -342,12 +342,15 @@ fn project_of(site: &Site, value: &str, lang: Lang) -> Result<std::path::PathBuf
         let said = fill(say(lang, "web.not_registered"), &[("path", value)]);
         return Err(refuse(403, &said, code::NOT_REGISTERED));
     };
-    match crate::store::Repo::open(&dir, || lang) {
-        Ok(crate::store::Opened::Uninit | crate::store::Opened::Missing) => {
+    // **`.moai` 가 섰는지는 `stat` 하나로 가른다**(moai-m4ez.u6a) — `Repo::open` 은 설정을 파싱하고 `held::check` 를 돌려, 2초마다
+    // 도는 `/api/stamp` 도 요청마다 그것을 치렀다. 열기와 같은 자리(`opened_root`: 딸린 워크트리는 트래커가 선 주 체크아웃)에서
+    // 같은 자(`spot`)로 잰다 — 디렉터리가 아닌 `.moai` 나 못 들여다본 자리는 자식이 제 말로 대니 안 막는다.
+    match crate::store::spot(&crate::store::Repo::opened_root(&dir)) {
+        crate::store::Spot::Absent => {
             let said = fill(say(lang, "web.not_a_project"), &[("path", value)]);
             Err(refuse(404, &said, code::NOT_A_PROJECT))
         }
-        Ok(crate::store::Opened::Repo(_)) | Err(_) => Ok(dir),
+        _ => Ok(dir),
     }
 }
 

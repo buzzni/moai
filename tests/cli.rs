@@ -30028,7 +30028,7 @@ fn web_rows_are_moais_show() {
         "/api/issue/--all",
         "/api/issue/issue",
         "/api/issue/epic",
-        "/api/status?worktree=1",
+        "/api/status?archived=1",
         "/api/boot?x=1",
         "/api/stamp?x=1",
     ] {
@@ -30036,6 +30036,10 @@ fn web_rows_are_moais_show() {
         assert_eq!(status, 400, "{path}\n{body}");
         assert_eq!(json_of(&body)["code"], "bad_input", "{path}\n{body}");
     }
+    // 겹쳐 보기를 켠 페이지는 보드의 셈도 그 판으로 묻는다(`status --worktree`, moai-m4ez.u6a) — 트리와 같은 줄을 센다.
+    let (status, _, body) = get(web.port, "/api/status?worktree=1");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
 }
 
 /// **`/api/tree` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
@@ -30138,35 +30142,54 @@ fn web_refuses_a_registered_directory_without_its_own_tracker() {
 
 /// **머리글이 글자로 견주는 자리는 한 철자다**(moai-m4ez.4zq) — 링크로 띄운 서버의 `root` 가 걸어 둔 철자와 같은 디렉터리면
 /// 걸어 둔 철자로 선다. 아니면 홈이 같은 프로젝트를 한 번 더 늘어놓았다.
+/// 링크를 임시 부모에 남기지 않는다 — 단언이 넘어져도 `Drop` 이 치운다(moai-m4ez.u6a).
+#[cfg(unix)]
+struct Linked(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Linked {
+    fn to(target: &std::path::Path) -> Linked {
+        let name = format!("{}-link", target.file_name().unwrap().to_string_lossy());
+        let link = target.join("..").join(name);
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        Linked(link)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Linked {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn web_boot_root_is_spelled_as_the_registered_project() {
     let home = init("web-spell");
-    let link = home.path().join("..").join(format!("{}-link", home.path().file_name().unwrap().to_string_lossy()));
-    let _ = std::fs::remove_file(&link);
-    std::os::unix::fs::symlink(home.path(), &link).unwrap();
+    let link = Linked::to(home.path());
     let cfg = home.path().join("user.toml");
     let real = canon(home.path()).unwrap();
     ok_with(home.path(), &cfg, &["project", "add", real.to_str().unwrap()]);
-    let web = serve_with(&link, |cmd| {
+    let web = serve_with(&link.0, |cmd| {
         cmd.env("MOAI_CONFIG", &cfg);
     });
     let boot = json_of(&get(web.port, "/api/boot").2);
     assert_eq!(boot["root"], real.display().to_string().as_str(), "링크 철자가 남았다\n{boot}");
+    assert_eq!(boot["project"], real.file_name().unwrap().to_string_lossy().as_ref(), "{boot}");
     drop(web);
-    let _ = std::fs::remove_file(&link);
-    // 걸어 두지 않은 홈은 링크를 푼 철자다.
+    // 걸어 두지 않은 홈은 링크를 푼 철자다 — `project` 도 같은 자리에서 나온다(링크의 이름이 아니다).
     let alone = init("web-spell-alone");
-    let link = alone.path().join("..").join(format!("{}-link", alone.path().file_name().unwrap().to_string_lossy()));
-    let _ = std::fs::remove_file(&link);
-    std::os::unix::fs::symlink(alone.path(), &link).unwrap();
-    let web = serve_with(&link, |cmd| {
+    let link = Linked::to(alone.path());
+    let web = serve_with(&link.0, |cmd| {
         cmd.env("MOAI_CONFIG", alone.path().join("none.toml"));
     });
     let boot = json_of(&get(web.port, "/api/boot").2);
-    assert_eq!(boot["root"], canon(alone.path()).unwrap().display().to_string().as_str(), "{boot}");
+    let real = canon(alone.path()).unwrap();
+    assert_eq!(boot["root"], real.display().to_string().as_str(), "{boot}");
+    assert_eq!(boot["project"], real.file_name().unwrap().to_string_lossy().as_ref(), "링크의 이름이 남았다\n{boot}");
     drop(web);
-    let _ = std::fs::remove_file(&link);
 }
 
 /// **거르개의 뜻과 거절은 moai 가 낸다**(moai-0aa7.a0l) — 서버는 봉투에 옮길 뿐이라 상태는 200 이다.

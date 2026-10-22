@@ -56,10 +56,10 @@ const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields
 const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Worktree];
 
 /// 자식을 띄우는 끝점들 — **쿼리를 재는 자가 하나다**([`argv`]). 받는 이름이 없는 끝점도 여기 서야 거기 붙인
-/// 쿼리가 거절된다(`/api/status?worktree=1` 을 말없이 맨 보드로 답하던 판이 있었다). 경로에 값이 드는
+/// 쿼리가 거절된다(`/api/wiki?worktree=1` 을 말없이 맨 목록으로 답하던 판이 있었다). 경로에 값이 드는
 /// `/api/issue/<id>`·`/api/wiki/<slug>` 만 [`argv_of`] 가 따로 짓는다.
 pub const PROFILES: &[Profile] = &[
-    Profile { route: "/api/status", head: &["status"], params: &[], without_archive: false },
+    Profile { route: "/api/status", head: &["status"], params: &[Param::Worktree], without_archive: false },
     Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS, without_archive: false },
     Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST, without_archive: false },
     Profile {
@@ -480,8 +480,12 @@ mod tests {
             strs(&["tui", "--deep", "--worktree", "--no-archive"])
         );
         assert!(matches!(argv_of("/api/wiki", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
-        // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?worktree=1` 이 맨 보드로 답했다.
-        assert!(matches!(argv_of("/api/status", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
+        // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?archived=1` 이 맨 보드로 답했다.
+        assert!(matches!(argv_of("/api/wiki", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
+        assert!(matches!(argv_of("/api/status", &q(&[("archived", "1")])).unwrap(), Err(Bad::Unknown(_))));
+        // 상세의 롤업 막대·범례는 `/api/status` 에서 오고 n/n 글은 겹친 트리에서 온다 — 둘이 같은 판이어야 한다(moai-m4ez.u6a).
+        assert_eq!(argv_of("/api/status", &q(&[("worktree", "1")])).unwrap().unwrap(), strs(&["status", "--worktree"]));
+        assert_eq!(argv_of("/api/status", &[]).unwrap().unwrap(), strs(&["status"]));
         for v in ["true", "0", "", "2", "yes"] {
             assert!(matches!(rows(&[("archived", v)]), Err(Bad::Shape(_))), "{v:?}");
         }

@@ -96,12 +96,15 @@ struct Boot<'a> {
 
 /// `cwd`(자식이 도는 그 자리, [`super::run::Spawner::cwd`])에서 트래커를 찾아 바탕을 짓는다. 못 찾으면 CLI 가 내는
 /// 그 거절이다.
-pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String> {
+pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang, registered: &[std::path::PathBuf]) -> crate::fail::R<String> {
     let repo = crate::store::Repo::find_from(cwd, || lang)?
         .ok_or_else(|| crate::fail::Fail::new(say(lang, "refuse.not_a_repo")))?;
     let statuses = &repo.config.statuses;
     let glyphs: Vec<(&str, &str)> = statuses.iter().map(|s| (s.as_str(), style::glyph(s))).collect();
-    let (latest, timezone, registered) = from_user_config();
+    let (latest, timezone) = from_user_config();
+    // `root` 와 `project` 는 **한 자리에서** 나온다 — 걸어 둔 철자거나 링크를 푼 철자다. `project` 만 띄운 자리의 이름이던 판은
+    // 걸어 두지 않은 홈을 링크로 띄우면 `root` 는 푼 자리인데 이름은 링크의 것이었다(moai-m4ez.u6a).
+    let root = spelled(&repo.root, registered);
     let boot = Boot {
         lang: lang.code(),
         version: env!("CARGO_PKG_VERSION"),
@@ -110,8 +113,8 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String
             .map(|a| crate::model::label(&a.name, Some(&a.email), repo.config.naming)),
         latest: latest.map(Latest::of),
         timezone,
-        project: repo.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-        root: spelled(&repo.root, &registered).display().to_string(),
+        project: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        root: root.display().to_string(),
         statuses,
         naming: crate::cmd::config::naming(repo.config.naming),
         glyphs: Ordered(glyphs),
@@ -147,7 +150,8 @@ fn spelled(root: &Path, registered: &[std::path::PathBuf]) -> std::path::PathBuf
         .unwrap_or_else(|| crate::path::real(root))
 }
 
-/// 사용자 설정에서 읽는 셋 — 적어 둔 판 소식, 탐색기가 고른 시간대, 걸어 둔 프로젝트들의 자리.
+/// 사용자 설정에서 읽는 둘 — 적어 둔 판 소식, 탐색기가 고른 시간대. 걸어 둔 프로젝트들은 [`super::Site::registered`] 가 표식이
+/// 같은 동안 한 번 푼 것을 받는다(여기서 설정을 다시 풀지 않는다, moai-m4ez.u6a).
 ///
 /// 판 소식은 **안 묻는다.** 탐색기가 하루 한 번 물어 사용자 설정 곁(`latest.toml`)에 적어 둔 답을 읽을 뿐이라,
 /// 페이지를 몇 번 새로 고쳐도 바깥을 안 두드린다. 묻기를 끈 기계(`[update] check = false`·`MOAI_NO_UPDATE_CHECK`)는
@@ -155,8 +159,8 @@ fn spelled(root: &Path, registered: &[std::path::PathBuf]) -> std::path::PathBuf
 /// 그것을 첫 값으로 쓰고, 고른 것은 브라우저에만 둔다(쓰지 않는다).
 ///
 /// **사용자 설정은 보통 파일일 때만 연다** — FIFO 하나면 열기가 끝없이 선다([`super::Site::lang`] 과 같은 자).
-fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>, Vec<std::path::PathBuf>) {
-    let Some(path) = crate::user_config::path() else { return (None, None, Vec::new()) };
+fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>) {
+    let Some(path) = crate::user_config::path() else { return (None, None) };
     let regular = std::fs::metadata(&path).map_or(true, |m| m.is_file());
     let reg = crate::user_config::read(regular.then_some(path.as_path()));
     let env = |k: &str| std::env::var_os(k);
@@ -168,5 +172,5 @@ fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>, Vec<std::
         let repo = crate::latest::repo_lenient(env, reg.update_repo.as_deref());
         crate::latest::held(dir, &crate::latest::url_from(env, &repo))
     });
-    (latest, reg.look.timezone, reg.projects.iter().map(|p| p.path.clone()).collect())
+    (latest, reg.look.timezone)
 }
