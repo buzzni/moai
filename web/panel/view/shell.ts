@@ -69,6 +69,8 @@ export interface Shell {
   refuse(outcome: Outcome): void
   /** `moai web` could not be reached (data/refresh.ts onReach): one line until it answers again. */
   offline(on: boolean): void
+  /** Reads keep failing against a server that answers (data/refresh.ts onBackoff): one line saying they now come every 10 s. */
+  backoff(on: boolean): void
   /**
    * Places other parts mount into: `toolbar` under the tab bar (holds the search / filter / sort toolbar, which
    * the shell mounts; hidden on the wiki tab), `actions` at the end of the tab bar (the help button, empty and
@@ -90,7 +92,7 @@ export interface Shell {
 }
 
 /** What an outcome tells the user, and whether it is information (a choice, a retry) rather than an error. */
-export function describe(outcome: Outcome, copy: Copy, doc: Document): { parts: (string | Node)[]; info: boolean } | null {
+export function describe(outcome: Outcome, copy: Copy): { parts: (string | Node)[]; info: boolean } | null {
   switch (outcome.kind) {
     case "moai-error":
       return { parts: [copy.moaiError(outcome.message)], info: false }
@@ -190,7 +192,9 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const result = el(doc, "p", { class: "moai-result", role: "status" })
   // Its own line: the server out of reach is not a read's problem, and no read's answer takes it away.
   const away = el(doc, "div", { class: "m-banner m-banner-danger moai-offline", role: "alert" })
-  const notes = el(doc, "div", { class: "m-shell-notes" }, hint, away, notice, error, said, archiveNotice, archiveError, result)
+  // Its own line too: the board's error says why a read failed, this says the page now asks less often.
+  const slow = el(doc, "div", { class: "m-banner m-banner-warn moai-backoff", role: "status" })
+  const notes = el(doc, "div", { class: "m-shell-notes" }, hint, away, slow, notice, error, said, archiveNotice, archiveError, result)
   // The path and banners belong to the list and board; the wiki tab brings its own head. A panel
   // that opens on the wiki tab (the remembered one) starts without it: showTab() only runs on a change of tab.
   const head = el(doc, "div", { class: "m-shell-head", hidden: state.tab === "wiki" }, crumbs.el, notes)
@@ -316,7 +320,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       last = outcome
       noticeEl.replaceChildren()
       errorEl.replaceChildren()
-      const said = outcome ? describe(outcome, copy, doc) : null
+      const said = outcome ? describe(outcome, copy) : null
       if (said) (said.info ? noticeEl : errorEl).append(el(doc, "span", {}, ...(lead ? [lead, " "] : []), ...said.parts))
     }
   }
@@ -390,7 +394,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
         // moai's own words for a filter it cannot read (`bad_filter`), as they are; anything else as the banners say it.
         problem: !refused ? undefined
           : refused.kind === "moai-error" ? refused.message
-          : describe(refused, copy, doc)?.parts.map((part) => (typeof part === "string" ? part : part.textContent ?? "")).join(""),
+          : describe(refused, copy)?.parts.map((part) => (typeof part === "string" ? part : part.textContent ?? "")).join(""),
       })
       crumbs.render(state, index)
       mainViews[state.tab].render(state, index)
@@ -435,13 +439,17 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       result.className = problem ? "moai-result m-banner m-banner-danger" : "moai-result"
     },
     refuse(outcome) {
-      const said = describe(outcome, copy, doc)
+      const said = describe(outcome, copy)
       result.replaceChildren(...(said ? [el(doc, "span", {}, ...said.parts)] : []))
       result.className = said && !said.info ? "moai-result m-banner m-banner-danger" : "moai-result m-banner"
     },
     offline(on) {
       const text = on ? copy.unreachable : ""
       if (away.textContent !== text) away.textContent = text
+    },
+    backoff(on) {
+      const text = on ? copy.backingOff : ""
+      if (slow.textContent !== text) slow.textContent = text
     },
     slots: { toolbar, actions },
     setWidth,

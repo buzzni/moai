@@ -8,7 +8,7 @@
  * Right of User and Version stands the TUI's third column, the registered projects (draw.rs `with_projects`,
  * moai-o14f): `<1> name` … `<9> name`, six to a column, the tenth and on without a number. The TUI's `<0>` (its
  * all-projects layer) has no page and is left out. The project on screen is marked as the TUI's shimmer marks it — here
- * in the accent, bold, and `aria-current`, so the colour is not alone — and a click opens another. A narrow header
+ * in the accent, bold, with a `▸` before the name (and `aria-current`), so the colour is not alone — and a click opens another. A narrow header
  * drops the logo first and then this column (shell.css).
  */
 import { versionLine, type About, type VersionCopy } from '../data/about.ts'
@@ -91,6 +91,9 @@ export interface Brand {
 /** The TUI header's rows (`LOGO.len()`): the project column fills six rows, then starts the next column. */
 export const PROJECT_ROWS = 6
 
+/** What stands before the name of the project on screen (the others get blanks the same wide). */
+export const CURRENT = '▸ '
+
 /** `<n> ` before a numbered project; the width of `<9> ` in spaces before one without a number (draw.rs `numbered`). */
 export const projectKey = (number: number | null): string => (number === null ? ' '.repeat('<9> '.length) : `<${number}> `)
 
@@ -154,7 +157,10 @@ function projectEl(doc: Document, entry: ProjectEntry, open?: (entry: ProjectEnt
     'data-current': entry.current ? '' : null,
     'aria-current': entry.current ? 'page' : null,
     'aria-keyshortcuts': entry.number === null ? null : String(entry.number),
-  }, el(doc, 'span', { class: 'm-brand-key' }, projectKey(entry.number)), el(doc, 'span', { class: 'm-brand-name' }, entry.name))
+  }, el(doc, 'span', { class: 'm-brand-key' }, projectKey(entry.number)),
+    // The mark is a glyph, not only the accent: the others get its width in blanks so the names stand in one line.
+    el(doc, 'span', { class: 'm-brand-here', 'aria-hidden': 'true' }, entry.current ? CURRENT : ' '.repeat(CURRENT.length)),
+    el(doc, 'span', { class: 'm-brand-name' }, entry.name))
   node.addEventListener('click', () => {
     if (!entry.current) open?.(entry)
   })

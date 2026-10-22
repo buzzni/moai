@@ -1032,6 +1032,8 @@ export interface Copy {
   stats: Record<string, string>
   /** `moai web` could not be reached (client.ts `not-started`). */
   unreachable: string
+  /** Reads keep failing against a server that answers: they now come every 10 s, not every 2 s (data/refresh.ts). */
+  backingOff: string
   moaiError: (message: string) => string
   failed: string
   unreadable: string
@@ -1054,6 +1056,7 @@ const en: Copy = {
   running: 'Reading…', cancel: 'Cancel', cancelled: 'The read was cancelled.',
   stats: { todo: 'To do', in_progress: 'In progress', review: 'Review', done: 'Done' },
   unreachable: 'moai web cannot be reached — check that it is still running, then click the refresh time.',
+  backingOff: 'Reads keep failing — trying again every 10 s instead of every 2 s. Click the refresh time to try now.',
   moaiError: (message) => `Moai reported an error: ${message}`, failed: 'The read failed.', unreadable: 'The answer could not be read.',
   said: 'moai said:',
   shell: SHELL.en, list: LIST.en, board: BOARD.en, detail: DETAIL.en, toolbar: TOOLBAR.en, keys: KEYS.en,
@@ -1067,6 +1070,7 @@ const ko: Copy = {
   running: '읽는 중…', cancel: '취소', cancelled: '읽기를 취소했습니다.',
   stats: { todo: '할 일', in_progress: '진행 중', review: '리뷰', done: '완료' },
   unreachable: 'moai web 에 닿지 않습니다 — 아직 도는지 본 뒤 갱신 시각을 누르세요.',
+  backingOff: '읽기가 계속 실패합니다 — 2초 대신 10초마다 다시 시도합니다. 지금 시도하려면 갱신 시각을 누르세요.',
   moaiError: (message) => `Moai 오류: ${message}`, failed: '읽지 못했습니다.', unreadable: '답을 읽지 못했습니다.',
   said: 'moai 가 한 말:',
   shell: SHELL.ko, list: LIST.ko, board: BOARD.ko, detail: DETAIL.ko, toolbar: TOOLBAR.ko, keys: KEYS.ko,
@@ -1080,6 +1084,7 @@ const ja: Copy = {
   running: '読み込み中…', cancel: 'キャンセル', cancelled: '読み込みをキャンセルしました。',
   stats: { todo: '未着手', in_progress: '進行中', review: 'レビュー', done: '完了' },
   unreachable: 'moai web に接続できません — まだ動いているか確認してから、更新時刻をクリックしてください。',
+  backingOff: '読み取りが失敗し続けています — 2 秒ではなく 10 秒ごとに再試行します。今すぐ試すには更新時刻をクリックしてください。',
   moaiError: (message) => `Moai のエラー: ${message}`, failed: '読み込みに失敗しました。', unreadable: '応答を読み取れませんでした。',
   said: 'moai のメッセージ:',
   shell: SHELL.ja, list: LIST.ja, board: BOARD.ja, detail: DETAIL.ja, toolbar: TOOLBAR.ja, keys: KEYS.ja,
@@ -1093,6 +1098,7 @@ const zh: Copy = {
   running: '正在读取…', cancel: '取消', cancelled: '已取消读取。',
   stats: { todo: '待办', in_progress: '进行中', review: '审核', done: '完成' },
   unreachable: '无法连接 moai web — 请确认它仍在运行，然后点击刷新时间。',
+  backingOff: '读取持续失败 — 改为每 10 秒重试一次，而不是每 2 秒。点击刷新时间可立即重试。',
   moaiError: (message) => `Moai 错误: ${message}`, failed: '读取失败。', unreadable: '无法读取应答。',
   said: 'moai 提示:',
   shell: SHELL.zh, list: LIST.zh, board: BOARD.zh, detail: DETAIL.zh, toolbar: TOOLBAR.zh, keys: KEYS.zh,

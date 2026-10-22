@@ -181,6 +181,42 @@ test('a read that did not take leaves its stamp unseen: the next look reads agai
   assert.deepEqual(loads, [false, true, true], 'it took: nothing more to read')
 })
 
+test('reads that fail against a server that answers back off to 10 s and say so once; a cancel does not', async () => {
+  const clock = fakeClock()
+  const server = fakeServer()
+  const outcomes = ['failed', 'failed', false, 'failed', true]
+  const loads = []
+  const backoff = []
+  const refresher = createRefresher({
+    load: async () => { loads.push(clock.now()); return outcomes[loads.length - 1] },
+    stamp: server.stamp,
+    onBackoff: (on) => backoff.push(on),
+    visibility: fakeVisibility(),
+    clock,
+  })
+  await refresher.check()
+  assert.deepEqual(loads.length, 1)
+  assert.deepEqual(backoff, [true])
+  await clock.advance(POLL_MS)
+  assert.equal(loads.length, 1, 'no look after 2 s: it is waiting 10 s')
+  await clock.advance(BACKOFF_MS - POLL_MS)
+  assert.equal(loads.length, 2, 'the same stamp is read again after 10 s')
+  assert.deepEqual(backoff, [true], 'told once, not per failure')
+  await clock.advance(BACKOFF_MS)
+  assert.equal(loads.length, 3)
+  assert.deepEqual(backoff, [true], 'a cancelled read changes nothing about the line')
+  await clock.advance(POLL_MS)
+  assert.equal(loads.length, 3, 'a cancel keeps the pace it had: still 10 s')
+  await clock.advance(BACKOFF_MS)
+  assert.equal(loads.length, 4)
+  await clock.advance(BACKOFF_MS)
+  assert.equal(loads.length, 5)
+  assert.deepEqual(backoff, [true, false], 'a read that took takes the line back')
+  await clock.advance(POLL_MS)
+  assert.equal(server.asked >= 6, true, 'and the 2 s pace is back')
+  refresher.stop()
+})
+
 test('the document\'s own visibility follows visibilityState', () => {
   const dom = new JSDOM('')
   const doc = dom.window.document

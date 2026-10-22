@@ -6,7 +6,7 @@
  * The page reads one project: its address's `?project=<path>` (a registered one, moai-o14f), else the server's own
  * tracker. Every call names it (data/client.ts withProject); another project is another page (data/projects.ts).
  */
-import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch } from './data/client.js'
+import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch, type Outcome } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
@@ -119,6 +119,9 @@ async function start(): Promise<void> {
     return lines.flatMap((line) => (line.kind === 'row' ? [line.key] : []))
   }
 
+  /** A read that did not take: `false` when a person cancelled it, `'failed'` when it was answered with a failure (data/refresh.ts backs off). */
+  const failure = (problem: Outcome): false | 'failed' => (problem.kind === 'cancelled' ? false : 'failed')
+
   /** Loads so far: only the latest one's answers count. */
   let loads = 0
   /** The load the clock started on its own, or 0: its reads run without the activity line. */
@@ -128,7 +131,7 @@ async function start(): Promise<void> {
    * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
    * then leaves the stamp unseen and reads again on its next look.
    */
-  async function loadBoard(automatic = false): Promise<boolean> {
+  async function loadBoard(automatic = false): Promise<boolean | 'failed'> {
     const load = ++loads
     quietLoad = automatic ? load : 0
     if (!booted.ok) {
@@ -138,7 +141,7 @@ async function start(): Promise<void> {
       if (load !== loads) return true
       if (!again.ok) {
         store.dispatch({ type: 'board-failed', problem: again.outcome })
-        return false
+        return failure(again.outcome)
       }
       booted = again
       useBoot(again.value)
@@ -158,8 +161,9 @@ async function start(): Promise<void> {
     const [loaded, placed] = await Promise.all([listing, placing])
     if (load !== loads) return true
     if (!loaded.ok || !placed.ok) {
-      store.dispatch({ type: 'board-failed', problem: loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome })
-      return false
+      const problem = loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome
+      store.dispatch({ type: 'board-failed', problem })
+      return failure(problem)
     }
     const { rows, notes } = loaded.value
     const before = store.getState()
@@ -296,7 +300,7 @@ async function start(): Promise<void> {
       clearTimeout(limit)
     }
   }
-  const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached) })
+  const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
 
   let choice = 0
   async function choose(id: string) {
@@ -348,7 +352,7 @@ async function start(): Promise<void> {
 
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
   function said(loaded: Extract<Loaded<unknown>, { ok: false }>): string {
-    const parts = describe(loaded.outcome, copy, document)?.parts ?? [copy.failed]
+    const parts = describe(loaded.outcome, copy)?.parts ?? [copy.failed]
     return parts.map((part) => (typeof part === 'string' ? part : part.textContent ?? '')).join('')
   }
 
@@ -369,7 +373,7 @@ async function start(): Promise<void> {
     const quiet = quietLoad !== 0 && quietLoad === loads
     const requests = client.requests().filter((request) => !(quiet && request.priority === PRIORITY.list))
     const running = requests.some((request) => request.phase === 'running')
-    return { phase: running ? 'running' : 'idle', cancellable: running }
+    return { phase: running ? 'running' : 'idle', cancellable: requests.some((request) => request.phase === 'running' && request.cancellable) }
   }
 
   const root = document.getElementById('moai-app') ?? document.body

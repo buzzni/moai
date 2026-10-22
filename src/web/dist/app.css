@@ -598,11 +598,12 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-brand-projects[hidden] { display: none; }
 .m-brand-project {
   display: block; padding: 0; border: 0; background: transparent; font: inherit; line-height: inherit; color: var(--muted);
-  text-align: left; white-space: pre; cursor: pointer; max-width: 28ch; overflow: hidden; text-overflow: ellipsis;
+  text-align: left; white-space: pre; cursor: pointer; max-width: 30ch; overflow: hidden; text-overflow: ellipsis;
 }
 .m-brand-key { color: var(--ok); }
 .m-brand-project:hover .m-brand-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .m-brand-project[data-current] { cursor: default; }
+.m-brand-project[data-current] .m-brand-here { color: var(--accent); }
 .m-brand-project[data-current] .m-brand-name { color: var(--accent); font-weight: 700; text-decoration: none; }
 /* Narrow: the logo yields first (with projects it needs the room sooner), then the project column (draw.rs `header`). */
 @container m-brand (max-width: 759px) { .m-brand[data-projects] .m-brand-logo { display: none; } }
@@ -639,7 +640,7 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-shell-notes > * { margin: 8px 8px 0; }
 .m-shell-notes > :last-child { margin-bottom: 8px; }
 .moai-hint { color: var(--muted); font-size: 12px; }
-.moai-offline:empty, .moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
+.moai-offline:empty, .moai-backoff:empty, .moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
 /* What moai said beside the lists: one line per line it said. */
 .moai-said { flex-direction: column; gap: 2px; }
 .moai-said > p { margin: 0; }

@@ -46,6 +46,11 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai web` opens the detail of a row only a sibling worktree holds** while
   the overlay is on (`/api/issue/<id>?worktree=1`); it used to say the row was
   not found. (moai-m4ez.yb1)
+- **`moai web`'s page backs off when reads keep failing** against a server that
+  answers (a tracker moai cannot read): it asks every 10 s instead of every 2 s
+  and says so on one line. Cancel no longer ends the one-time projects read or
+  a read mark in flight, and the header marks the project on screen with a `▸`
+  as well as the accent. (moai-m4ez.42r)
 
 ## [0.20.0] - 2026-10-20
 

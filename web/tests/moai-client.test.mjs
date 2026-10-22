@@ -170,6 +170,26 @@ test('cancelAll ends every read at once and starts none of the waiting ones in t
   assert.deepEqual(client.requests(), [])
 })
 
+test('cancelAll leaves a write and a read asked as not cancellable running', async () => {
+  const net = fakeFetch()
+  const client = createClient(net.fetcher, { concurrency: 3 })
+  const rows = client.request({ path: '/api/rows' })
+  const once = client.request({ path: '/api/projects' }, { cancellable: false })
+  const mark = client.request({ path: '/api/read', query: { id: 'x' }, method: 'POST' })
+  await flush()
+  assert.deepEqual(client.requests().map((request) => request.cancellable), [true, false, false])
+  client.cancelAll()
+  assert.deepEqual(await rows, { kind: 'cancelled' })
+  assert.deepEqual(client.requests().map((request) => request.path), ['/api/projects', '/api/read'])
+  assert.equal(net.calls[0].init.signal.aborted, true)
+  assert.equal(net.calls[1].init.signal.aborted, false)
+  assert.equal(net.calls[2].init.signal.aborted, false)
+  net.answer(2, 200, envelope([]))
+  net.answer(3, 200, envelope({}))
+  assert.equal((await once).kind, 'passed')
+  assert.equal((await mark).kind, 'passed')
+})
+
 test('a fetch that fails is not-started (moai web out of reach), and the next read still runs', async () => {
   const net = fakeFetch()
   const client = createClient(net.fetcher)

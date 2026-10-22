@@ -256,7 +256,7 @@ export async function loadDetail(client: Client, id: string, options: Pick<Reque
  * draws no project column and binds no digit.
  */
 export async function loadProjects(client: Client): Promise<Loaded<Project[]>> {
-  const outcome = await client.request({ path: ENDPOINT.projects }, { priority: PRIORITY.background })
+  const outcome = await client.request({ path: ENDPOINT.projects }, { priority: PRIORITY.background, cancellable: false })
   const output = answerOf(outcome)
   return output === undefined ? { ok: false, outcome } : { ok: true, value: projectsFrom(output) }
 }
