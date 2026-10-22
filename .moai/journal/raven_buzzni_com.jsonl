@@ -7457,3 +7457,6 @@
 {"ts":"2026-10-22T09:59:54Z","id":"moai-whvr.wln","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — moai-whvr 테마 버튼"}
 {"ts":"2026-10-22T09:59:54Z","id":"moai-whvr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
 {"ts":"2026-10-22T09:59:59Z","id":"moai-whvr.wln","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T10:42:45Z","id":"moai-whvr.wln","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: /code-review xhigh --fix running in .worktrees/moai-m4ez (base 33751520); do not touch that worktree until it returns"}
+{"ts":"2026-10-22T10:42:58Z","id":"moai-p4ow","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.21.0 을 낸다"}
+{"ts":"2026-10-22T10:43:05Z","id":"moai-p4ow","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
