@@ -78,10 +78,11 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   `a` assignee, `c` created, `u` updated, `n` counts, `t` tags, `e` epic,
   `h` names
 
-The page remembers its tab, where the detail sits, the filter, the sort, the view
-the columns and the time zone in the browser's own local storage, kept per
-address. The search is not kept. A browser that keeps no site
-data (a private window) remembers them until the tab is closed.
+The page remembers its tab, where the detail sits and the time zone, and keeps the
+filter, the sort, the view and the columns apart for each project it reads, in the
+browser's own local storage — one project's filter never lands on another's page.
+The search is not kept. A browser that keeps no site data (a private window)
+remembers them until the tab is closed.
 
 ## Time zone
 
@@ -260,7 +261,7 @@ once and the keys reach it.
 | `/` | Search titles and bodies |
 | `SPC v r` | Raw / rendered page |
 
-The page is tied to the one tracker the server was started in: it does not switch
-between projects, show the stats screen, or write read marks.
+The page does not show the stats screen, and the one thing it writes is your read
+marks.
 
 Decided in: moai-0aa7, moai-jshy
