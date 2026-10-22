@@ -7407,3 +7407,4 @@
 {"ts":"2026-10-22T06:46:36Z","id":"moai-m4ez.yb1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x0pj 에서 펼쳤다 — web: 옆 워크트리에만 있는 줄의 상세(/api/issue/<id>)가 not found — show --worktree 를 안 넘긴다"}
 {"ts":"2026-10-22T06:46:36Z","id":"moai-x0pj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez 의 멤버 moai-m4ez.yb1 로 펼쳤다"}
 {"ts":"2026-10-22T06:46:39Z","id":"moai-m4ez.yb1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T06:46:58Z","id":"moai-m4ez.yb1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: subagent running 4zq+yb1 in .worktrees/moai-m4ez; then 42r, h2o, n42 one by one, epic-end review opus xhigh, merge into milestone/moai-kia8"}
