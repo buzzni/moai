@@ -298,7 +298,8 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
         "/api/boot" => match bare().and_then(|()| {
-            boot::boot(&cwd, site.spawner.user.as_deref(), lang, &site.registered()).map_err(|e| refuse(500, &e.message, e.code))
+            boot::boot(&cwd, site.spawner.user.as_deref(), lang, &site.registered())
+                .map_err(|e| refuse(500, &e.message, e.code))
         }) {
             Ok(body) => Response::new(200, http::JSON, body.into_bytes()),
             Err(refused) => refused,
@@ -307,9 +308,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             .map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))
             .and_then(|on| api::stamp(&cwd, lang, on).map_err(|e| refuse(500, &e.message, e.code)))
         {
-            Ok(stamp) => {
-                Response::new(200, http::JSON, format!("{{\"stamp\":\"{stamp}\"}}").into_bytes())
-            }
+            Ok(stamp) => Response::new(200, http::JSON, format!("{{\"stamp\":\"{stamp}\"}}").into_bytes()),
             Err(refused) => refused,
         },
         path => match api::argv_of(path, &query) {
