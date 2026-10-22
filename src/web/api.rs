@@ -46,6 +46,9 @@ pub struct Profile {
     pub route: &'static str,
     pub head: &'static [&'static str],
     pub params: &'static [Param],
+    /// 아카이브를 **달라고 한 때만** 싣는 끝점이다(`/api/tree`, moai-m4ez.4zq) — 다른 끝점은 `archived=1` 을 줘야 싣고
+    /// 이쪽도 같은 말이지만, 자식의 기본이 반대라(`tui --json` 은 다 낸다) 안 줬을 때 `--no-archive` 를 얹는다.
+    pub without_archive: bool,
 }
 
 const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields];
@@ -56,14 +59,19 @@ const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields
 /// 쿼리가 거절된다(`/api/status?worktree=1` 을 말없이 맨 보드로 답하던 판이 있었다). 경로에 값이 드는
 /// `/api/issue/<id>`·`/api/wiki/<slug>` 만 [`argv_of`] 가 따로 짓는다.
 pub const PROFILES: &[Profile] = &[
-    Profile { route: "/api/status", head: &["status"], params: &[] },
-    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS },
-    Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST },
-    Profile { route: "/api/tree", head: &["tui", "--deep"], params: &[Param::Sort, Param::Reverse, Param::Worktree] },
-    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[] },
+    Profile { route: "/api/status", head: &["status"], params: &[], without_archive: false },
+    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS, without_archive: false },
+    Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST, without_archive: false },
+    Profile {
+        route: "/api/tree",
+        head: &["tui", "--deep"],
+        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived],
+        without_archive: true,
+    },
+    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], without_archive: false },
     // 걸어 둔 프로젝트들 — 사용자 설정을 읽으니 어느 자리에서 돌아도 같은 답이다. 페이지는 그 `path` 를
     // `project=` 로 되돌려 보내 그 프로젝트를 읽는다([`super::project_of`]).
-    Profile { route: "/api/projects", head: &["project", "ls"], params: &[] },
+    Profile { route: "/api/projects", head: &["project", "ls"], params: &[], without_archive: false },
 ];
 
 /// 거르개 줄 하나의 상한(바이트) — 줄을 나눠 여러 `--filter` 가 된다.
@@ -238,7 +246,10 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
                 if value != "1" {
                     return Err(Bad::Shape(name.clone()));
                 }
-                out.push(format!("--{}", p.name()));
+                // 아카이브를 기본으로 싣는 자식에게는 달라는 말이 따로 없다 — 안 줄 때만 뺀다(아래).
+                if !(p == Param::Archived && profile.without_archive) {
+                    out.push(format!("--{}", p.name()));
+                }
             }
             Param::Filter => {
                 shape(name, value, FILTER_MAX)?;
@@ -257,9 +268,17 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
             }
             Param::Sort => {
                 shape(name, value, VALUE_MAX)?;
+                // **차례의 말은 moai 의 것이다**(`query::parse_order`) — 모르는 낱말을 자식에게 넘기면 clap 이 `code` 없는
+                // 글로 거절해 페이지가 갈래를 못 읽었다(moai-m4ez.4zq). 여기서 재서 `bad_input` 으로 같은 길에 세운다.
+                if crate::query::parse_order(value).is_err() {
+                    return Err(Bad::Shape(name.clone()));
+                }
                 out.push(format!("--sort={value}"));
             }
         }
+    }
+    if profile.without_archive && !query.iter().any(|(n, _)| n == Param::Archived.name()) {
+        out.push("--no-archive".to_string());
     }
     if profile.params.contains(&Param::Fields) {
         out.push(format!("--fields={}", fields.unwrap_or(ROW_FIELDS)));
@@ -341,7 +360,7 @@ mod tests {
     fn an_empty_query_is_the_bare_template() {
         assert_eq!(rows(&[]).unwrap(), with_fields(vec!["show", "--all"]));
         assert_eq!(argv_of("/api/backlog", &[]).unwrap().unwrap(), with_fields(vec!["backlog", "show", "--all"]));
-        assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep"]));
+        assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep", "--no-archive"]));
         assert_eq!(argv_of("/api/status", &[]).unwrap().unwrap(), strs(&["status"]));
         assert_eq!(argv_of("/api/wiki", &[]).unwrap().unwrap(), strs(&["wiki", "ls"]));
     }
@@ -366,7 +385,24 @@ mod tests {
         let v = rows(&[("archived", "1"), ("fields", "id")]).unwrap();
         assert_eq!(v, strs(&["show", "--all", "--archived", "--fields=id"]));
         let v = argv_of("/api/tree", &q(&[("sort", "title"), ("reverse", "1")])).unwrap().unwrap();
-        assert_eq!(v, strs(&["tui", "--deep", "--sort=title", "--reverse"]));
+        assert_eq!(v, strs(&["tui", "--deep", "--sort=title", "--reverse", "--no-archive"]));
+        // 아카이브를 보이는 페이지만 달라고 한다 — 안 보이는 동안 3천 줄의 95% 를 싣지 않는다(moai-m4ez.4zq).
+        let v = argv_of("/api/tree", &q(&[("archived", "1"), ("worktree", "1")])).unwrap().unwrap();
+        assert_eq!(v, strs(&["tui", "--deep", "--worktree"]));
+        assert!(matches!(argv_of("/api/tree", &q(&[("archived", "0")])).unwrap(), Err(Bad::Shape(_))));
+    }
+
+    /// **차례의 말은 자식을 띄우기 전에 잰다** — 모르는 필드·방향·겹침은 `bad_input` 이다(moai-m4ez.4zq). 전에는 clap 이
+    /// `code` 없는 글로 거절했다.
+    #[test]
+    fn a_sort_the_child_would_refuse_is_refused_here() {
+        let tree = |sort: &str| argv_of("/api/tree", &q(&[("sort", sort)])).unwrap();
+        for ok in ["title", "priority:desc", "priority:desc,title:asc", "updated"] {
+            assert!(tree(ok).is_ok(), "{ok}");
+        }
+        for bad in ["bogus", "priority:up", "priority,priority:desc", "title,", ",title", ":asc"] {
+            assert_eq!(tree(bad), Err(Bad::Shape("sort".into())), "{bad:?}");
+        }
     }
 
     #[test]
@@ -417,7 +453,7 @@ mod tests {
         assert!(matches!(argv_of("/api/tree", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
         assert_eq!(
             argv_of("/api/tree", &q(&[("worktree", "1")])).unwrap().unwrap(),
-            strs(&["tui", "--deep", "--worktree"])
+            strs(&["tui", "--deep", "--worktree", "--no-archive"])
         );
         assert!(matches!(argv_of("/api/wiki", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
         // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?worktree=1` 이 맨 보드로 답했다.

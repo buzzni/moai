@@ -151,7 +151,7 @@ async function start(): Promise<void> {
     const { sort, view } = store.getState()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree)
+    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived)
     const counting = loadGroups(client, PRIORITY.list, load)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
@@ -192,9 +192,9 @@ async function start(): Promise<void> {
     }
     // The order changed while this read ran: the refresh it asked for joined this one (data/refresh.ts), which read
     // the tree in the order before. Read it again in the order on screen.
-    // So does the worktree overlay turned while it ran.
+    // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     const after = store.getState()
-    if (after.sort !== sort || after.view.worktree !== view.worktree) setTimeout(() => void refresher.refresh(), 0)
+    if (after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
     return true
   }
 
@@ -263,8 +263,12 @@ async function start(): Promise<void> {
   }
   store.subscribe((state, previous) => {
     if (state.view.showArchived === previous.view.showArchived) return
-    if (state.view.showArchived) void loadArchive()
-    else {
+    if (state.view.showArchived) {
+      // The tree is asked for the archive's lines only while archived rows are shown (data/source.ts loadTree), so it is
+      // read again; the read then loads the archive's rows (loadBoard), once the lines that place them are there. Before
+      // the board is there the first read does both.
+      if (state.board.value) void refresher.refresh()
+    } else {
       // Turned off: a read still running is not wanted, and the next turn-on reads the archive afresh.
       archiving++
       store.dispatch({ type: 'archive', rows: null })

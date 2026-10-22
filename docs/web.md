@@ -71,7 +71,8 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   turns it around. The capital letter adds the field to the end of the order. `SPC s e`
   opens the sort editor
 - **View** (`SPC v`) shows or hides deferred work (`l`), backlog items (`b`) and
-  the archive (`o`); `w` overlays what the other worktrees changed, as
+  the archive (`o`; the page asks for the archive's rows, and for its lines in
+  the tree, only while it is shown); `w` overlays what the other worktrees changed, as
   `moai show --worktree` does (on when the page opens); the overlay covers the
   list, the tree that places each row under its epic, the stamp the page follows
   and the read marks, so a row only a sibling worktree holds stands under its
@@ -166,8 +167,9 @@ comes from the start. The rest come from the server while it runs:
 | `forbidden_host` | The `Host` header was not `localhost` or an IP address |
 | `forbidden_origin` | A read mark sent from anywhere but this page |
 | `not_registered` | `?project=` names a directory that is not a registered project |
-| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read |
-| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take |
+| `not_a_project` | `?project=` names a registered directory that has no `.moai` of its own (`moai init` it); the server does not read a parent's tracker in its place |
+| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read; the `Allow` header names the method the path takes (`POST` on the read-mark paths, `GET` elsewhere) |
+| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`) |
 | `not_found` | No such path |
 | `busy` | Too many requests at once; try again |
 | `timeout` | The child `moai` did not answer in time |

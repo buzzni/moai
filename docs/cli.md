@@ -2481,6 +2481,7 @@ Options:
       --path <id|basket>     Open here - a directory opens inside it
       --deep                 With --json, list every row below, with its home
       --worktree             With --json, overlay other worktrees' rows
+      --no-archive           With --json, leave out the archive
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -2814,6 +2815,9 @@ Order:
   then what is in it, with the same filters and order as the one-level
   listing. Each row carries home, the --path handles from the root down to the
   directory it stands in ([] at the root, [none] or [lost] inside a basket).
+  --no-archive leaves out the rows that moai show --all hides as archived, and
+  a folder stays when a live row stands under it. The archive is part of the
+  listing otherwise.
 
     moai tui --path <milestone> -g parser --all --json
     moai tui --sort updated --json

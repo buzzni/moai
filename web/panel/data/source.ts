@@ -136,10 +136,13 @@ export async function loadGroups(client: Client, priority: number = PRIORITY.lis
  * `/api/tree` with the order the page asks for (query.ts sortQuery): every row, where it stands, in moai's order.
  * `worktree` (the view's `SPC v w`) places the rows only another git worktree holds the way the list reads them
  * (`tui --json --deep --worktree`, moai-m4ez.gcp): the same overlay as {@link loadAllRows}, so no row of the list is
- * missing from the tree.
+ * missing from the tree. `archived` (the view's `SPC v o`) asks for the archive's lines too: without it the server
+ * leaves them out, and they were 95% of a 3 000-row tracker's 689 KB answer, read again on every write
+ * (moai-m4ez.4zq). The page reads the tree again when `SPC v o` turns, so the lines are there when the archive is drawn.
  */
-export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false): Promise<Loaded<TreeRow[]>> {
-  const outcome = await client.request({ path: ENDPOINT.tree, query: worktree ? { ...query, worktree: '1' } : query }, { priority, epoch })
+export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false, archived = false): Promise<Loaded<TreeRow[]>> {
+  const asked = { ...query, ...(worktree ? { worktree: '1' } : {}), ...(archived ? { archived: '1' } : {}) }
+  const outcome = await client.request({ path: ENDPOINT.tree, query: asked }, { priority, epoch })
   const output = answerOf(outcome)
   if (output === undefined) return { ok: false, outcome }
   if (!Array.isArray(output)) return { ok: false, outcome: { kind: 'unreadable' } }

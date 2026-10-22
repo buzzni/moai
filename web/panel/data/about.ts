@@ -67,10 +67,17 @@ export interface VersionCopy {
 
 const fill = (template: string, values: Record<string, string>) => template.replace(/\{(\w+)\}/g, (whole, key: string) => values[key] ?? whole)
 
-/** Whole days from `from` to `now`, or null when `from` cannot be read or lies ahead of `now` by more than a minute. */
+/**
+ * How far ahead of the clock a heard-at may lie and still be believed: a day, as the TUI allows it
+ * (`model::FUTURE_SLACK_SECS`, 86 400 s). A minute here let a clock a few hours off turn a true "heard today" into
+ * "heard earlier" on the page while the explorer said "today".
+ */
+export const FUTURE_SLACK_MS = 86_400_000
+
+/** Whole days from `from` to `now`, or null when `from` cannot be read or lies ahead of `now` by more than {@link FUTURE_SLACK_MS}. */
 function daysSince(from: string, now: number): number | null {
   const at = Date.parse(from)
-  if (Number.isNaN(at) || at - now > 60_000) return null
+  if (Number.isNaN(at) || at - now > FUTURE_SLACK_MS) return null
   return Math.max(0, Math.floor((now - at) / 86_400_000))
 }
 

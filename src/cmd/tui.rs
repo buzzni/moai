@@ -48,7 +48,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         crate::worktree::gather(&repo, !ctx.json || args.worktree)?;
     // 산 줄의 id — 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`). 거르개를 받은 `--json` 만 쓴다 —
     // 그것을 읽는 자는 거름망(`Filter::matches`)뿐이라, 차례나 `--deep` 만 받은 판에는 짓지 않는다.
-    let live: std::collections::BTreeSet<String> = match ctx.json && super::show::first_given(&args.filter).is_some() {
+    let live: std::collections::BTreeSet<String> = match ctx.json
+        && (super::show::first_given(&args.filter).is_some() || args.no_archive)
+    {
         true => active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect(),
         false => Default::default(),
     };
@@ -465,6 +467,7 @@ fn shaped(args: &TuiArgs) -> Option<&'static str> {
         .or_else(|| args.order.sort.is_some().then_some("--sort"))
         .or_else(|| args.order.reverse.then_some("--reverse"))
         .or_else(|| args.deep.then_some("--deep"))
+        .or_else(|| args.no_archive.then_some("--no-archive"))
 }
 
 /// `--json` 이 낼 그 자리의 목록(moai-wk7i.5wx).
@@ -487,9 +490,9 @@ fn listing(
     path: &Path,
     args: TuiArgs,
 ) -> R<Vec<(Entry, Option<Vec<String>>)>> {
-    let TuiArgs { path: _, filter, order, deep, worktree: _ } = args;
+    let TuiArgs { path: _, filter, order, deep, worktree: _, no_archive } = args;
     let given = super::show::first_given(&filter).is_some();
-    if !given && order.sort.is_none() && !order.reverse {
+    if !given && order.sort.is_none() && !order.reverse && !no_archive {
         // 거르개도 차례도 없으면 `Index::entries` 의 그 자다 — 다 남기고 목록의 차례로.
         let by = |a: usize, b: usize| crate::query::display_order(&issues[a], &issues[b]);
         return Ok(spread(index, issues, path, deep, &|_| true, &by));
@@ -508,7 +511,10 @@ fn listing(
     let now = crate::model::now();
     // **고르는 자는 `Filter::matches` 하나다**(리뷰) — `show` 의 목록이 숨김을 연 거름망과 `hidden_by` 를 따로
     // 묻는 것은 숨긴 수를 세려는 것이고, 셀 것이 없는 여기서 그 둘을 이으면 `matches` 를 손으로 다시 적는 셈이다.
-    let keep = |at: usize| !given || filter.matches(&issues[at], &now, &wh);
+    // 아카이브를 빼는 자도 같은 거름망의 `archived` 다 — `show --all` 이 숨기는 줄과 한 자(`Where::archived`).
+    let keep = |at: usize| {
+        (!given || filter.matches(&issues[at], &now, &wh)) && (!no_archive || !wh.archived(&issues[at], &now))
+    };
     let fields = order.sort.map(|f| f.0);
     let cfg = &repo.config;
     let by = |a: usize, b: usize| match &fields {

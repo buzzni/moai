@@ -101,7 +101,7 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String
         .ok_or_else(|| crate::fail::Fail::new(say(lang, "refuse.not_a_repo")))?;
     let statuses = &repo.config.statuses;
     let glyphs: Vec<(&str, &str)> = statuses.iter().map(|s| (s.as_str(), style::glyph(s))).collect();
-    let (latest, timezone) = from_user_config();
+    let (latest, timezone, registered) = from_user_config();
     let boot = Boot {
         lang: lang.code(),
         version: env!("CARGO_PKG_VERSION"),
@@ -111,7 +111,7 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String
         latest: latest.map(Latest::of),
         timezone,
         project: repo.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
-        root: repo.root.display().to_string(),
+        root: spelled(&repo.root, &registered).display().to_string(),
         statuses,
         naming: crate::cmd::config::naming(repo.config.naming),
         glyphs: Ordered(glyphs),
@@ -135,7 +135,19 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String
     serde_json::to_string(&boot).map_err(|e| crate::fail::Fail::new(e.to_string()))
 }
 
-/// 사용자 설정에서 읽는 둘 — 적어 둔 판 소식과 탐색기가 고른 시간대.
+/// 페이지가 머리글에서 **글자로** 견주는 자리 — 걸어 둔 프로젝트와 같은 디렉터리면 걸어 둔 그 철자로, 아니면 링크를 푼
+/// 철자로 낸다(moai-m4ez.4zq). 띄운 자리의 철자(`/w/link/app`)와 걸어 둔 철자(`/w/real/app`)가 갈리면 머리글이 같은
+/// 프로젝트를 둘로 늘어놓고(홈이 따로 하나 더 선다), 현재 프로젝트 표식도 한쪽에만 섰다. 견주기는 `project ls` 와 한 자
+/// ([`crate::user_config::same_dir`])다.
+fn spelled(root: &Path, registered: &[std::path::PathBuf]) -> std::path::PathBuf {
+    registered
+        .iter()
+        .find(|p| crate::user_config::same_dir(p, root))
+        .cloned()
+        .unwrap_or_else(|| crate::path::real(root))
+}
+
+/// 사용자 설정에서 읽는 셋 — 적어 둔 판 소식, 탐색기가 고른 시간대, 걸어 둔 프로젝트들의 자리.
 ///
 /// 판 소식은 **안 묻는다.** 탐색기가 하루 한 번 물어 사용자 설정 곁(`latest.toml`)에 적어 둔 답을 읽을 뿐이라,
 /// 페이지를 몇 번 새로 고쳐도 바깥을 안 두드린다. 묻기를 끈 기계(`[update] check = false`·`MOAI_NO_UPDATE_CHECK`)는
@@ -143,8 +155,8 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String
 /// 그것을 첫 값으로 쓰고, 고른 것은 브라우저에만 둔다(쓰지 않는다).
 ///
 /// **사용자 설정은 보통 파일일 때만 연다** — FIFO 하나면 열기가 끝없이 선다([`super::Site::lang`] 과 같은 자).
-fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>) {
-    let Some(path) = crate::user_config::path() else { return (None, None) };
+fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>, Vec<std::path::PathBuf>) {
+    let Some(path) = crate::user_config::path() else { return (None, None, Vec::new()) };
     let regular = std::fs::metadata(&path).map_or(true, |m| m.is_file());
     let reg = crate::user_config::read(regular.then_some(path.as_path()));
     let env = |k: &str| std::env::var_os(k);
@@ -156,5 +168,5 @@ fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>) {
         let repo = crate::latest::repo_lenient(env, reg.update_repo.as_deref());
         crate::latest::held(dir, &crate::latest::url_from(env, &repo))
     });
-    (latest, reg.look.timezone)
+    (latest, reg.look.timezone, reg.projects.iter().map(|p| p.path.clone()).collect())
 }

@@ -127,6 +127,14 @@ test('the tree is /api/tree with the order asked for; an answer that is not a li
   assert.deepEqual(await loadTree(client), { ok: false, outcome: { kind: 'unreadable' } })
 })
 
+test('the tree asks for the archive only while archived rows are shown (moai-m4ez.4zq)', async () => {
+  const client = fakeClient({ '/api/tree': passed(TREE), '/api/tree?archived=1': passed(TREE), '/api/tree?archived=1&worktree=1': passed(TREE) })
+  assert.deepEqual((await loadTree(client)).value, TREE)
+  assert.deepEqual((await loadTree(client, {}, undefined, undefined, false, true)).value, TREE)
+  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true, true)).value, TREE)
+  assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?archived=1', '/api/tree?archived=1&worktree=1'])
+})
+
 test('with the overlay on the tree is asked with worktree=1, so a row only another worktree holds is placed (moai-m4ez.gcp)', async () => {
   const client = fakeClient({ '/api/tree?reverse=1&sort=updated%3Adesc&worktree=1': passed(TREE), '/api/tree?worktree=1': passed(TREE) })
   assert.deepEqual((await loadTree(client, { sort: 'updated:desc', reverse: '1' }, undefined, undefined, true)).value, TREE)

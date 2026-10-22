@@ -34,6 +34,15 @@ does not tag — see `CONTRIBUTING.md`.
   marks the version the overlay shows. `moai web` passes them (and a stamp that
   folds the siblings' snapshots) while the overlay is on, so a write in a
   sibling worktree moves the page within two seconds. (moai-m4ez.gcp)
+- **`moai tui --json --deep --no-archive`** leaves out the archive (the rows
+  `show --all` hides), so the web page's tree stops carrying an archive it is not
+  showing: on a 3 000-row tracker that is 689 KB down to a few dozen. A folder
+  stays when a live row stands under it. (moai-m4ez.4zq)
+- **`moai web`** refuses a registered directory with no `.moai` of its own as
+  `not_a_project` instead of answering with a parent's tracker, refuses an
+  unknown `sort` as `bad_input`, names `POST` in the `Allow` of a read-mark
+  path's 405, and spells the header's home as the registered project when they
+  are the same directory. (moai-m4ez.4zq)
 
 ## [0.20.0] - 2026-10-20
 

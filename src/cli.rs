@@ -761,6 +761,9 @@ BACKLOG
   then what is in it, with the same filters and order as the one-level
   listing. Each row carries home, the --path handles from the root down to the
   directory it stands in ([] at the root, [none] or [lost] inside a basket).
+  --no-archive leaves out the rows that moai show --all hides as archived, and
+  a folder stays when a live row stands under it. The archive is part of the
+  listing otherwise.
 
     moai tui --path <milestone> -g parser --all --json
     moai tui --sort updated --json
@@ -2128,6 +2131,13 @@ pub struct TuiArgs {
     /// With --json, overlay other worktrees' rows
     #[arg(long)]
     pub worktree: bool,
+
+    // **`--json` 의 목록에서 아카이브를 뺀다**(moai-m4ez.4zq) — `show --all` 이 숨기는 줄(`Where::archived`)이다. 웹 페이지가
+    // 아카이브를 안 보이는 동안 쓰기마다 읽는 `/api/tree` 가 3천 줄(689KB) 가운데 95% 를 그 줄로 채웠다. 폴더는 밑에 걸린
+    // 산 줄이 있으면 서니, 아카이브에 든 에픽 밑의 되살린 멤버는 제 자리에 선다. 플래그가 없으면 전처럼 다 낸다.
+    /// With --json, leave out the archive
+    #[arg(long)]
+    pub no_archive: bool,
 
     // **`--json` 의 목록만 거르고 늘어놓는다**(moai-wk7i.5wx) — 화면은 `SPC f`·`SPC s` 가 한다. 말은 `show` 의 것이다.
     #[command(flatten)]

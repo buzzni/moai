@@ -1228,6 +1228,7 @@
   "web.foreign_host": "the Host header is neither localhost nor an IP address — this server only answers those",
   "web.only_get": "{method} {path} is not served — this server answers GET, and POST only to mark rows as read",
   "web.foreign_origin": "a write must come from this page — the Origin header does not name this server",
+  "web.not_a_project": "{path} is registered but has no `.moai` of its own - run `moai init` there",
   "web.not_registered": "{path} is not a registered project — register it with `moai project add`",
   "web.no_path": "no such path: {path}",
   "web.child_timeout": "moai did not answer within {secs} seconds and was stopped",

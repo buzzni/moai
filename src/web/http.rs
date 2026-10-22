@@ -201,6 +201,15 @@ pub struct Response {
     pub status: u16,
     pub kind: &'static str,
     pub body: Vec<u8>,
+    /// 405 의 `Allow` 머리 — 그 길이 받는 메서드. 405 가 아니면 안 쓴다. 읽음 표시 길은 `POST` 만 받으므로 모든 405 에
+    /// `GET` 을 적던 판은 `POST` 를 받는 길에 거짓을 말했다(moai-m4ez.4zq).
+    pub allow: &'static str,
+}
+
+impl Response {
+    pub fn new(status: u16, kind: &'static str, body: Vec<u8>) -> Response {
+        Response { status, kind, body, allow: "GET" }
+    }
 }
 
 pub const JSON: &str = "application/json";
@@ -241,7 +250,7 @@ pub fn write(w: &mut impl Write, r: &Response, body: bool) -> std::io::Result<()
         r.body.len()
     );
     if r.status == 405 {
-        head.push_str("Allow: GET\r\n");
+        head.push_str(&format!("Allow: {}\r\n", r.allow));
     }
     head.push_str("\r\n");
     w.write_all(head.as_bytes())?;
@@ -358,10 +367,25 @@ mod tests {
         assert!(!host_ok(None), "없는 Host");
     }
 
+    /// **`Allow` 는 응답이 든 메서드를 그대로 쓴다**(moai-m4ez.4zq) — 읽음 표시 길의 405 는 `POST` 다.
+    #[test]
+    fn a_405_names_the_methods_the_response_carries() {
+        let mut out = Vec::new();
+        let mut post = Response::new(405, JSON, b"{}".to_vec());
+        post.allow = "POST";
+        write(&mut out, &post, true).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("Allow: POST\r\n") && !out.contains("Allow: GET"), "{out}");
+        // 405 가 아닌 답에는 `Allow` 가 없다.
+        let mut ok = Vec::new();
+        write(&mut ok, &Response::new(200, JSON, b"{}".to_vec()), true).unwrap();
+        assert!(!String::from_utf8(ok).unwrap().contains("Allow:"));
+    }
+
     #[test]
     fn a_response_carries_the_fixed_headers() {
         let mut out = Vec::new();
-        write(&mut out, &Response { status: 405, kind: JSON, body: b"{}".to_vec() }, true).unwrap();
+        write(&mut out, &Response::new(405, JSON, b"{}".to_vec()), true).unwrap();
         let out = String::from_utf8(out).unwrap();
         assert!(out.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"), "{out}");
         for h in [
@@ -378,7 +402,7 @@ mod tests {
         assert!(out.ends_with("\r\n\r\n{}"), "{out}");
         // HEAD 의 답 — 같은 머리(길이까지)에 본문만 없다.
         let mut head = Vec::new();
-        write(&mut head, &Response { status: 405, kind: JSON, body: b"{}".to_vec() }, false).unwrap();
+        write(&mut head, &Response::new(405, JSON, b"{}".to_vec()), false).unwrap();
         let head = String::from_utf8(head).unwrap();
         assert!(head.contains("Content-Length: 2\r\n") && head.ends_with("\r\n\r\n"), "{head}");
     }

@@ -1228,6 +1228,7 @@
   "web.foreign_host": "Host 머리가 localhost 도 IP 주소도 아니다 — 이 서버는 그 둘에만 답한다",
   "web.only_get": "{method} {path} 는 받지 않는다 — 이 서버는 GET 에 답하고, POST 는 읽음 표시에만 받는다",
   "web.foreign_origin": "쓰는 요청은 이 페이지에서 와야 한다 — Origin 머리가 이 서버가 아니다",
+  "web.not_a_project": "{path} 는 걸어 두었지만 제 `.moai` 가 없다 — 거기서 `moai init` 한다",
   "web.not_registered": "{path} 는 걸어 둔 프로젝트가 아니다 — `moai project add` 로 건다",
   "web.no_path": "그런 경로가 없다: {path}",
   "web.child_timeout": "moai 가 {secs}초 안에 답하지 않아 멈췄다",
