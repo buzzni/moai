@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-22
+
 ### Changed
 
 - **The supervisor's workers make one tracker commit per epic.** The worker's
