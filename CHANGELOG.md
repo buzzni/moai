@@ -12,6 +12,68 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai tui --json --deep`** prints the explorer's whole tree in one call, so
+  a program that draws the tracker no longer walks it directory by directory.
+  (moai-0aa7.joy)
+- **`moai web`** serves the tracker on `127.0.0.1:6624` as a page that never
+  writes it: a board, a list and the wiki, with the Saycode panel 2.1 look and
+  the explorer's header (logo, user, version, numbered projects). `--port`,
+  `--port 0` for a free port and `--host` (with a warning off loopback) say
+  where; it answers only requests whose `Host` is `localhost` or an IP address.
+  The page reads again within two seconds of a write, and its filter, search
+  and sort are moai's own. It reads any registered project (`?project=`,
+  `1`~`9`, `SPC p`), overlays the other worktrees (`SPC v w`), marks rows read
+  (`r`, `SPC m a`, `SPC m g` — your read marks only, accepted from the page
+  itself) and draws dates in a zone you pick (`SPC o t`, kept in the browser).
+  (moai-0aa7, moai-jshy)
+- **`moai tui --json --worktree` and `moai read --worktree`** take the other
+  worktrees into the tree and the read marks, as `show --worktree` does for the
+  list: a row only a sibling worktree holds stands under its epic, and `read`
+  marks the version the overlay shows. `moai web` passes them (and a stamp that
+  folds the siblings' snapshots) while the overlay is on, so a write in a
+  sibling worktree moves the page within two seconds. (moai-m4ez.gcp)
+- **`moai tui --json --deep --no-archive`** leaves out the archive (the rows
+  `show --all` hides), so the web page's tree stops carrying an archive it is not
+  showing: on a 3 000-row tracker that is 689 KB down to a few dozen. A folder
+  stays when a live row stands under it. (moai-m4ez.4zq)
+- **`moai web`** refuses a registered directory with no `.moai` of its own as
+  `not_a_project` instead of answering with a parent's tracker, refuses an
+  unknown `sort` as `bad_input`, names `POST` in the `Allow` of a read-mark
+  path's 405, and spells the header's home as the registered project when they
+  are the same directory. (moai-m4ez.4zq)
+- **`moai web` opens the detail of a row only a sibling worktree holds** while
+  the overlay is on (`/api/issue/<id>?worktree=1`); it used to say the row was
+  not found. (moai-m4ez.yb1)
+- **`moai web`'s page backs off when reads keep failing** against a server that
+  answers (a tracker moai cannot read): it asks every 10 s instead of every 2 s
+  and says so on one line. Cancel no longer ends the one-time projects read or
+  a read mark in flight, and the header marks the project on screen with a `▸`
+  as well as the accent. (moai-m4ez.42r)
+- **`moai web` has a theme button** left of the hide-detail button. It cycles
+  system, light and dark: system follows the browser's colour scheme live, light
+  and dark win over it. The icon's shape (half-filled circle, sun, moon) and the
+  button's name say which, and the choice is kept in the browser, not in your
+  user config. (moai-whvr)
+
+### Changed
+
+- **For translators: the `moai web` page's words moved into `i18n/*.json`**, under
+  the `page.` prefix, next to the CLI's own. One set of files now holds both, with
+  `ko` complete and `ja` and `zh` carrying what the page had; a key a language lacks
+  reads in English, as it does in the CLI. After editing a `page.` key run
+  `scripts/gen-web.sh` (the page is bundled, so it speaks even when the server
+  cannot be reached); `cargo test` says so when the bundle is stale. (moai-m4ez.n42)
+
+### Security
+
+- **`moai web`'s page runs under `style-src 'self'`.** The `'unsafe-inline'` it
+  asked for is gone: the page no longer sets a `style` attribute or makes a
+  `<style>` element at run time, so an injected inline style is refused as an
+  injected script already was. Layout values it computes still go in through
+  the browser's style object, which the policy allows. (moai-m4ez.h2o)
+
 ## [0.21.0] - 2026-10-22
 
 ### Changed

@@ -609,7 +609,12 @@ pub fn heads(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
     let Ok(common) = git(root, &["rev-parse", "--git-common-dir"]) else {
         return Vec::new();
     };
-    let common = root.join(common.trim_end_matches('\n'));
+    head_marks(&root.join(common.trim_end_matches('\n')))
+}
+
+/// [`heads`] 의 표식을 공용 디렉터리에서 바로 잰다 — `stat` 과 작은 파일 읽기뿐이라 프로세스를 안 띄운다.
+/// 공용 디렉터리를 이미 아는 [`place_marks`] 도 부른다.
+fn head_marks(common: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
     // 워크트리가 생기거나 없어지면 이 디렉터리의 수정 시각이 바뀐다 — git 을 안 띄우고도
     // 새 워크트리를 다시 읽을 까닭으로 센다.
     let worktrees = common.join("worktrees");
@@ -1257,6 +1262,9 @@ pub fn place_marks(root: &Path) -> Vec<(PathBuf, crate::store::Stamp)> {
         let dot_git = tree.path.join(".git");
         out.push((dot_git.clone(), crate::store::stamp(&dot_git)));
     }
+    // **가지 ref 와 본 HEAD 도 든다**(moai-m4ez.u6a) — [`gather`] 가 [`heads`] 로 지켜보는 그것이다. 옆에만 있는 줄이
+    // "지워진 줄" 로 숨는지는 [`base_of`] 의 merge-base 가 가르니, 병합이 스냅샷을 안 쓰고 가지 ref 만 옮겨도 숨는 줄이 바뀐다.
+    out.extend(head_marks(&common));
     out
 }
 
@@ -1796,6 +1804,11 @@ mod tests {
         let seen = place_marks(&main);
         std::fs::remove_dir_all(base.join("t-1")).unwrap();
         assert!(changed(&seen), "디렉터리째 치운 워크트리를 못 알아챈다");
+
+        // 스냅샷을 안 쓰고 가지 ref 만 옮기는 커밋·병합도 잰다 — 숨는 줄을 가르는 merge-base 가 움직인다(moai-m4ez.u6a).
+        let seen = place_marks(&main);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "b"]);
+        assert!(changed(&seen), "본 가지가 나아간 것을 못 알아챈다 — base_of 의 merge-base 가 바뀐다");
 
         // 딸린 워크트리를 뿌리로 두면 재지 않는다 — 겹쳐 보지 않는 자리 판정이 그 자리를 안 본다.
         run(&main, &["worktree", "add", "-q", "../t-2", "-b", "worktree-t-2"]);

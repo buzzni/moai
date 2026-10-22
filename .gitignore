@@ -25,3 +25,6 @@
 
 # auto-added by aplus-dev-studio (block env secrets)
 .env.*
+
+# moai web 의 Node 도구. 번들(src/web/dist/)은 커밋한다 — scripts/gen-web.sh
+/web/node_modules/

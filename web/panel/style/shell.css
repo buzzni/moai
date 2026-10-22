@@ -1,0 +1,121 @@
+/*
+ * The shell's own parts (view/shell.ts, view/crumbs.ts): the frame fills the panel, the path line, the
+ * banners and the result line under it, the panes, and the run's activity floating over their foot. Needs tokens.css and components.css.
+ */
+
+#moai-app { height: 100%; }
+
+/* ---- The header (view/brand.ts, se-qkga): the TUI's own. The logo's six lines dim, a line down, then User and
+   Version in the TUI's columns. One line height for both sides, so the info lines stand beside the logo's rows. A
+   short panel leaves it out and a narrow one the logo, as the TUI does (HEADER_MIN_H; the logo yields first). ---- */
+.m-brand {
+  flex: none; display: flex; align-items: flex-start; gap: 1ch; padding: 6px 10px; border-bottom: 1px solid var(--border-soft);
+  /* A terminal's: Menlo at its own line height. The logo's block letters are drawn as cells (.m-brand-art), not set
+     in it: a font leaves a seam under every row. */
+  font: 12px/1.17 Menlo, "DejaVu Sans Mono", ui-monospace, monospace; color: var(--text);
+  container-type: inline-size; container-name: m-brand;
+}
+.m-brand-logo { flex: none; color: var(--muted); }
+/* The art drawn as terminal cells (view/brand.ts artPath): 26 cells wide, five rows of the header's line height. */
+.m-brand-art { display: block; width: 26ch; height: calc(5 * 1.17em); fill: currentColor; }
+.m-brand-tagline { white-space: pre; }
+.m-brand-info { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; flex-direction: column; padding-left: 1ch; border-left: 1px solid var(--border); }
+.m-brand-line { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.m-brand-label { color: var(--muted); }
+/* The tip (se-irhr): at the foot of the info column, so its last line stands on the logo's tagline row, as one line
+   of the header. Every tip stacks in one cell, each set to that cell's foot (a short one sits on the tagline's row, a
+   long one rises above it, up to three lines), and wraps after its own label. A click opens the tips page. */
+.m-brand-tip { margin-top: auto; padding-top: 4px; }
+.m-brand-tip-text {
+  display: grid; width: 100%; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit;
+  text-align: left; cursor: pointer;
+}
+.m-brand-tip-item { grid-area: 1 / 1; align-self: end; display: grid; grid-template-columns: max-content minmax(0, 1fr); }
+.m-brand-tip-item > .m-brand-label { white-space: pre; }
+.m-brand-tip-said { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.m-brand-tip-text:hover .m-brand-tip-said { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.m-brand-tip-text:is(:hover, :focus-visible) .m-brand-tip-item { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .m-brand-tip-item:not([data-first]) { visibility: hidden; } }
+/* The tips page (view/tips.ts): the shortcut help's dialog, its rows a tip and its Copy button. */
+.m-tips-intro { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.m-tips-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 13px; }
+.m-tips-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.m-tips-text::before { content: "\201C"; color: var(--muted); }
+.m-tips-text::after { content: "\201D"; color: var(--muted); }
+/* The projects (view/brand.ts, moai-o14f): the TUI's third column, right of User and Version (draw.rs `with_projects`).
+   Six rows to a column, then the next column; the key in the SPC menu's key colour (the TUI's MENU_KEY, light green),
+   the name dim; the project on screen in the accent and bold, and aria-current (the TUI shimmers it). */
+.m-brand-projects { flex: none; display: grid; grid-auto-flow: column; grid-template-rows: repeat(6, auto); column-gap: 2ch; align-content: start; padding-left: 1ch; }
+.m-brand-projects[hidden] { display: none; }
+.m-brand-project {
+  display: block; padding: 0; border: 0; background: transparent; font: inherit; line-height: inherit; color: var(--muted);
+  text-align: left; white-space: pre; cursor: pointer; max-width: 30ch; overflow: hidden; text-overflow: ellipsis;
+}
+.m-brand-key { color: var(--ok); }
+.m-brand-project:hover .m-brand-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.m-brand-project[data-current] { cursor: default; }
+.m-brand-project[data-current] .m-brand-here { color: var(--accent); }
+.m-brand-project[data-current] .m-brand-name { color: var(--accent); font-weight: 700; text-decoration: none; }
+/* Narrow: the logo yields first (with projects it needs the room sooner), then the project column (draw.rs `header`). */
+@container m-brand (max-width: 759px) { .m-brand[data-projects] .m-brand-logo { display: none; } }
+@container m-brand (max-width: 479px) { .m-brand-projects { display: none; } }
+@container m-brand (max-width: 459px) { .m-brand-logo { display: none; } .m-brand-info { padding-left: 1ch; } }
+@media (max-height: 599px) { .m-brand { display: none; } }
+
+/* Slots other parts mount into take no room while empty. */
+.m-toolbar-slot:empty, .m-tabbar-slot:empty { display: none; }
+.m-tabbar-slot { display: flex; align-items: center; gap: 4px; }
+.m-tabbar .moai-refresh:disabled { opacity: 1; cursor: default; }
+
+/* ---- Path line (design §1): the badges get their room first, the path shrinks. ---- */
+.m-crumbs {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 28px; min-width: 0; padding: 0 8px;
+  border-bottom: 1px solid var(--border-soft); font-size: 12px;
+}
+.m-crumbs-path { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.m-crumb {
+  flex: 0 1 auto; min-width: 2ch; max-width: 32ch; height: 22px; padding: 0 4px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font: 600 12px var(--font);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.m-crumb:hover { background: var(--hover); color: var(--text); }
+.m-crumb[aria-current="location"] { color: var(--text); }
+.m-crumbs-sep { flex: none; color: var(--muted); }
+.m-crumbs-badges { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; }
+.m-crumbs-badges:empty { display: none; }
+.m-crumbs-hint { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+/* ---- Notes under the path line: each takes room only while it says something. ---- */
+.m-shell-head { flex: none; }
+.m-shell-notes { display: flex; flex-direction: column; }
+.m-shell-notes > * { margin: 8px 8px 0; }
+.m-shell-notes > :last-child { margin-bottom: 8px; }
+.moai-hint { color: var(--muted); font-size: 12px; }
+.moai-offline:empty, .moai-backoff:empty, .moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
+/* What moai said beside the lists: one line per line it said. */
+.moai-said { flex-direction: column; gap: 2px; }
+.moai-said > p { margin: 0; }
+.moai-result { font-size: 12px; }
+
+/* ---- The run's activity (se-24ey.14i): a toast over the foot of the panes, so a run never pushes the layout.
+   It fades in after a short wait, so a run that ends at once never flickers in; hidden, it takes no room. The clock's
+   own reads do not raise it (main.ts activity), so it does not cover the foot every 10 s. ---- */
+.m-shell { position: relative; }
+.m-shell-status {
+  position: absolute; left: 50%; bottom: 12px; z-index: 20; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); min-height: 32px; padding: 4px 12px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-md);
+  color: var(--muted); font-size: 12px; white-space: nowrap; pointer-events: none;
+  animation: m-toast-in 160ms ease-out 300ms both;
+}
+/* The toast lets clicks through to the rows under it; only Cancel takes them. */
+.m-shell-status .moai-cancel { pointer-events: auto; }
+.m-shell-status[hidden] { display: none; }
+.m-shell-status .moai-activity { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@keyframes m-toast-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---- Panes: the list and board each scroll on their own, so a tab change keeps each one's offset. ---- */
+.m-shell .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+.m-pane-main { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-pane-main:focus, .m-pane-detail:focus, .m-pane-wiki:focus { outline: 0; }
+.m-pane-wiki { overflow: auto; }

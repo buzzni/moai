@@ -207,6 +207,9 @@ pub fn say(lang: Lang, key: &'static str) -> &'static str {
 mod tests {
     use super::*;
 
+    /// 웹 페이지의 말이 서는 키 머리 — `web/i18n-bundles.mjs` 의 `PAGE_PREFIX` 와 같다. CLI 의 키는 이 머리를 쓰지 않는다.
+    const PAGE_PREFIX: &str = "page.";
+
     /// **기계가 주는 모양은 제각각이다** — `ko`·`ko_KR.UTF-8`·`ko-KR`·대문자를 다 받는다.
     #[test]
     fn a_language_tag_is_read_by_its_head() {
@@ -364,7 +367,13 @@ mod tests {
         // 잡는다" 고 말하는 동안 틀린 키를 적어도 아무 데서도 안 붉어졌다. 영어 표에 있는데
         // 아무도 안 부르는 키는 **지운 자리의 찌꺼기이거나 숨은 부름**이고, 둘 다 여기서
         // 이름을 댄다 — 아직 안 이은 키를 미리 적어 두지 않는다.
-        let unasked: Vec<&String> = en.keys().filter(|k| !asked.iter().any(|(a, _)| a == *k)).collect();
+        //
+        // **`page.` 키만은 소스가 안 부른다** — 웹 페이지의 말이다(`web/panel/i18n/index.ts` 가 `page.a.b` 를 `copy.a.b`
+        // 로 펴고, 읽는 쪽은 TS 다). 러스트 소스에는 `say` 부름이 없으니 이 시험이 볼 수 없다. 대신 다른 시험이 잰다:
+        // 번역이 영어의 자리를 지키는가(아래 `every_translation_keeps_the_places_english_marks`)와 ko 가 다 찼는가는
+        // 이 키들에도 그대로 서고, 페이지 쪽은 `web/tests/moai-i18n.test.mjs` 가 모든 키가 읽히는가를 잰다.
+        let unasked: Vec<&String> =
+            en.keys().filter(|k| !k.starts_with(PAGE_PREFIX) && !asked.iter().any(|(a, _)| a == *k)).collect();
         assert!(
             unasked.is_empty(),
             "영어 표에 있는데 소스가 안 부르는 키 — 지웠으면 표에서도 지우고, \
