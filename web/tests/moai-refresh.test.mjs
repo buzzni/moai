@@ -217,6 +217,25 @@ test('reads that fail against a server that answers back off to 10 s and say so 
   refresher.stop()
 })
 
+test('a refresh that fails while the server is out of reach says it is out of reach, not that it backs off', async () => {
+  const clock = fakeClock()
+  const server = fakeServer(null)
+  const reach = []
+  const backoff = []
+  const refresher = createRefresher({
+    load: async () => 'failed',
+    stamp: server.stamp,
+    onReach: (on) => reach.push(on),
+    onBackoff: (on) => backoff.push(on),
+    visibility: fakeVisibility(),
+    clock,
+  })
+  await refresher.refresh()
+  assert.deepEqual(reach, [false])
+  assert.deepEqual(backoff, [], 'the backoff line is for a server that answers')
+  refresher.stop()
+})
+
 test('the document\'s own visibility follows visibilityState', () => {
   const dom = new JSDOM('')
   const doc = dom.window.document

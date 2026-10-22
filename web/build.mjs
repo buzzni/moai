@@ -13,7 +13,7 @@ import { i18nBundles, languageCodes, pageWords } from './i18n-bundles.mjs'
 
 const root = new URL('./', import.meta.url)
 const dist = new URL('../src/web/dist/', root)
-// Tokens come before the components that read them; any other sheet follows in name order.
+// Tokens come before the components that read them; any other sheet follows in name order, but for STYLE_LAST.
 const STYLE_ORDER = ['tokens.css', 'components.css']
 // detail.css was a <style> appended to <head> at run time, after app.css; it stays last so the cascade stays as it was.
 const STYLE_LAST = ['detail.css']

@@ -31,8 +31,10 @@ export const unreadIds = (rows: readonly Row[]): string[] => rows.filter(isUnrea
 
 // ── writes ───────────────────────────────────────────────────────────
 
-/** The three writes `moai web` takes (src/web/api.rs write_argv_of); no body. `worktree` adds the one query they take. */
+/** A write's endpoint: a POST, with `?worktree=1` while the overlay is on. */
 const post = (path: string, worktree: boolean): Endpoint => ({ path, method: 'POST', ...(worktree ? { query: { worktree: '1' } } : {}) })
+
+/** The three writes `moai web` takes (src/web/api.rs write_argv_of); no body. `worktree` adds the one query they take. */
 export const READ_ENDPOINT = {
   one: (id: string, worktree = false): Endpoint => post(`/api/read/${encodeURIComponent(id)}`, worktree),
   all: (worktree = false): Endpoint => post('/api/read-all', worktree),

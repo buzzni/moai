@@ -1,6 +1,6 @@
 // The page's words are moai's own i18n/*.json under `page.`: the lookup (panel/i18n/index.ts) nests them and falls
 // back to English key by key. cargo's i18n tests keep the places and ko whole in those same files; these cover the
-// page's side — every key is read, the shape is the same in each language, and the page speaks en and ko.
+// page's side — every key lands in the tree, the shape is the same in each language, and the page speaks en and ko.
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -17,7 +17,9 @@ function leaves(node, path = []) {
 
 const places = (text) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',')
 
-test('every page key in en.json is read by the page, and nothing else is', async () => {
+// The tree is built from en.json, so this cannot tell a key the page never reads, nor a word the page reads that en.json
+// lacks (that one reads `undefined`): it holds the nesting (`.0` arrays, `table.labels` dotted names) to one leaf per key.
+test('every page key in en.json lands as one leaf of the copy tree, and the tree invents none', async () => {
   const keys = Object.keys(await bundle('en')).filter((key) => key.startsWith('page.')).map((key) => key.slice(5)).sort()
   assert.ok(keys.length > 300)
   assert.deepEqual(leaves(COPY.en).map(([path]) => path).sort(), keys)

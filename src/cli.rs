@@ -1818,7 +1818,8 @@ fn sort_fields(raw: &str) -> Result<SortFields, String> {
     crate::query::parse_order(raw).map(SortFields).map_err(|e| e.to_string())
 }
 
-/// `status`·`ready`·`show` 가 함께 받는다. **전역 플래그로 두지 않는다** — 쓰는
+/// `status`·`ready`·`show` 가 함께 받고, `read` 도 받는다 — `read` 는 트래커가 아니라 읽음 파일에 쓰고, 겹친
+/// 판에서 id 와 `updated_at` 을 찾을 뿐이다(moai-m4ez.gcp). **전역 플래그로 두지 않는다** — 트래커를 쓰는
 /// 명령(`mv`·`edit`)에 붙으면 겹친 화면을 보고 쓴다고 믿게 되는데, 쓰기는 언제나
 /// 제 워크트리 파일에만 간다.
 #[derive(Args, Debug, Default, Clone, Copy)]

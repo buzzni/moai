@@ -290,7 +290,8 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             None => not_allowed(),
         };
     }
-    // 자식 없이 답하는 끝점도 쿼리는 안 받는다 — 말없이 버리면 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
+    // 자식 없이 답하는 끝점도 받는 이름만 받는다(`/api/boot` 는 없고 `/api/stamp` 는 `worktree=1` 하나) — 말없이 버리면
+    // 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
         "/api/boot" => match bare().and_then(|()| {

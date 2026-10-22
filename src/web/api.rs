@@ -184,8 +184,8 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
     }))
 }
 
-/// 쿼리가 `worktree=1` 하나뿐이거나 비었는가 — 받는 이름이 이것뿐인 끝점(`/api/stamp`·읽음 길)이 쓴다. 다른 이름은
-/// [`none_of`] 와 같이 거절한다.
+/// 쿼리가 `worktree=1` 하나뿐이거나 비었는가 — 받는 이름이 이것뿐인 끝점(`/api/stamp`·`/api/issue/<id>`·읽음 길)이
+/// 쓴다. 다른 이름은 [`none_of`] 와 같이 거절한다.
 pub fn overlay_of(query: &[(String, String)]) -> Result<bool, Bad> {
     let mut on = false;
     for (name, value) in query {
@@ -203,7 +203,8 @@ pub fn overlay_of(query: &[(String, String)]) -> Result<bool, Bad> {
     Ok(on)
 }
 
-/// 이 끝점은 쿼리를 안 받는다 — 자식 없이 답하는 `/api/boot`·`/api/stamp` 도 이것으로 잰다.
+/// 이 끝점은 쿼리를 안 받는다 — 자식 없이 답하는 `/api/boot` 도 이것으로 잰다(`/api/stamp` 는 `worktree=1` 을 받아
+/// [`overlay_of`] 로 잰다).
 pub fn none_of(query: &[(String, String)]) -> Result<(), Bad> {
     match query.first() {
         Some((n, _)) => Err(Bad::Unknown(n.clone())),

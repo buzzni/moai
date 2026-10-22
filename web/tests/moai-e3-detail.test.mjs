@@ -240,6 +240,9 @@ test('pane: a group shows head, fields, roll-up, body as text, and close reports
   assert.ok(root.querySelector('[role=progressbar]'))
   // No `moai status` counts for this group (none were given here): the share done still fills the bar beside the text.
   assert.deepEqual([...root.querySelectorAll('[role=progressbar] > span')].map((span) => [span.dataset.status, span.style.width]), [['done', '33%']])
+  // The pane's look is detail.css (moai-m4ez.h2o): the CSP's style-src 'self' refuses a <style> made at run time, so
+  // mounting and drawing add none. tests/web_bundle.rs looks for `style` attributes; this is the element.
+  assert.equal(doc.querySelectorAll('style').length, 0, 'the detail made a <style> element')
   root.querySelector('button').click()
   assert.deepEqual(calls, ['close'])
   assert.equal(renderBody(doc, 'a<b').textContent, 'a<b')

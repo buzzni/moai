@@ -116,8 +116,10 @@ export function createRefresher(options: RefresherOptions): Refresher {
       try {
         const took = await options.load({ automatic })
         if (at !== null && took !== false && took !== 'failed') seen = at
-        // A cancel (`false`) says nothing about the tracker: the line stays as it was.
-        if (took !== false) fail(took === 'failed')
+        // A cancel (`false`) says nothing about the tracker, and neither does a read sent while the stamp went unanswered
+        // (`at` null — a person's refresh with the server out of reach, which `onReach(false)` says already): the line
+        // stays as it was. It is for a server that answers.
+        if (took !== false && at !== null) fail(took === 'failed')
       } finally {
         lastLoaded = clock.now()
         inFlight = null
