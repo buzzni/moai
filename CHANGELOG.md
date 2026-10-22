@@ -74,6 +74,19 @@ does not tag — see `CONTRIBUTING.md`.
   injected script already was. Layout values it computes still go in through
   the browser's style object, which the policy allows. (moai-m4ez.h2o)
 
+## [0.21.0] - 2026-10-22
+
+### Changed
+
+- **The supervisor's workers make one tracker commit per epic.** The worker's
+  steps no longer commit the pick-up, and the supervisor no longer commits each
+  `Sent:`, `Report-checked:` or `model:` note — every session reads the root's
+  `.moai` file, not git, so a row shows the moment it is written. The worker
+  takes the epic's tracker into the root once, at the close (step 11), and the
+  supervisor once before it stops. The CHANGELOG line of an epic is one
+  `docs(changelog):` commit too; a fix after it carries its own line.
+  (moai-p8e9)
+
 ## [0.20.0] - 2026-10-20
 
 ### Added

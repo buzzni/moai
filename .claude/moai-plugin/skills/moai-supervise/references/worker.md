@@ -121,17 +121,18 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
 gets the same check before the merge ("The milestone branch").
 
-**Ask it where you already are.** Before the first tracker commit you are still in the root, so
-it is one command. From inside the worktree, do not ask with `git -C <root> …` — that shape is
+**Ask it where you already are.** The merge and the tracker commits (8, 11) come after
+`ExitWorktree(keep)`, so you are back in the root and it is one command. From inside the
+worktree, do not ask with `git -C <root> …` — that shape is
 refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
 worktree go back in with `EnterWorktree(path)`
 
 **Some repositories keep the tracker out of git** — `.moai` in `.gitignore` or
-`.git/info/exclude`. Ask once, in the root, before your first tracker commit — the one in 2,
-or whichever comes first when the message starts you past 2
+`.git/info/exclude`. Ask once, in the root, before your first tracker commit — the one in 11,
+or one an earlier step makes (8 can call for it)
 
     git -C <root> ls-files --error-unmatch -- .moai/issues.jsonl      a non-zero code: the tracker is not in git
-On a non-zero code every tracker commit in these steps — each "commit with a path, as in 2" —
+On a non-zero code every tracker commit in these steps — each "commit with a path, as in 11" —
 does not exist: the `moai` writes still land in the root's file, and there is nothing to commit.
 Skip them and nothing else; the merge and the branches still go through git. A zero code is the
 usual case, and every step stands as written
@@ -152,8 +153,9 @@ intent.
   `symbolic-ref` are refused even as single plain commands. Root work happens after
   ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
 - Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
-  commit from sealing someone's open merge, but it cannot keep it from carrying rows another
-  session has not committed yet
+  commit from sealing someone's open merge; the rows other sessions have not committed yet ride
+  along, and that is expected — they stand in the shared file already, and the next tracker
+  commit is where they go into history
 
 ## The milestone branch
 
@@ -239,15 +241,12 @@ never in the root
    the milestone's deadline, leave the epic's deadline as it stands and name it in the report
 
        moai edit <epic> --due <due>
-2. Pick the members up with `moai mv <member> in_progress --from todo` and commit in the root.
+2. Pick the members up with `moai mv <member> in_progress --from todo` in the root.
    **Pass the column you saw** — this is a place where several sessions share one `.moai`,
    and overwriting a row picked up beside you means two of you do the same work. A non-zero
-   code means it is taken, so leave that member and tell the supervisor. The root is shared
-   by every session — a commit made while someone has a merge open (MERGE_HEAD) seals that
-   merge with its own subject. So give the tracker commit a path. With a merge open git
-   refuses it, so wait for that merge to finish and run it again
-
-       git commit -m "chore(tracker): pick <epic> up in a worktree" -- .moai/
+   code means it is taken, so leave that member and tell the supervisor.
+   **Do not commit the pick-up.** Every session reads the root's file, not git, so the row
+   shows beside you the moment it is written; the one tracker commit in 11 carries it.
    **A member that is someone else's, or nobody's, is asked about** — the hook refuses that
    pick-up (rule 5). Ask the person watching this window — a yes the message already carries
    counts; on a yes, run the line the refusal hands you (`--take -m '<who said yes>'`), on a
@@ -255,7 +254,7 @@ never in the root
    **In a subagent** there is nobody to ask: without a yes in the message, leave that member
    and name it in the report. Handed an epic `from step 2`, measure first as 1 does, before
    you pick anything up
-3. Right after the commit in 2, branch from the local <base branch> with
+3. Right after 2, branch from the local <base branch> with
    `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
    `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
    Inside a milestone the milestone branch has to stand first — raise it if it is missing
@@ -484,7 +483,11 @@ never in the root
    for the release being prepared**, and write it if it does not. Write it **here, in the
    worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
    the root, which every session shares and where the only commits that belong are the
-   tracker's and the merge itself. Committed here it rides the merge commit instead
+   tracker's and the merge itself. Committed here it rides the merge commit instead.
+   **One commit for the epic**, written once the members and the review's fixes are in —
+   every line the epic needs goes into it. If a fix lands after it and changes what the epic
+   ships, put the CHANGELOG line in that fix's own commit rather than raising a second
+   `docs(changelog):`
 
     git commit -m "docs(changelog): <what this epic changed> (<epic>)" -- CHANGELOG.md
    This window is the only one that knows what the epic did, and it is the only one that
@@ -520,9 +523,10 @@ never in the root
 
        git merge --no-ff worktree-<epic> -m "merge: …"
        git -C .worktrees/milestone-<milestone id> merge --no-ff worktree-<epic> -m "merge: …"     inside a milestone
-   If the root's `.moai` holds uncommitted rows from another session the merge is refused —
-   take them in first with a commit with a path, as in 2. If it stops on a conflict, do not
-   resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
+   If the merge is refused over the root's uncommitted `.moai` — yours since 2 or another
+   session's — take them in first with a commit with a path, as in 11, its subject
+   `chore(tracker): take the root's rows in before <epic> merges`. If it stops on a conflict,
+   do not resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
    `EnterWorktree(path)` and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
@@ -586,12 +590,20 @@ never in the root
     the supervisor's, from your report's `Model ran:`
 
         moai -C <root> show -e <epic> --all --json | jq -r '.[] | select(.work == []) | .id'
-    Leave the tests passing in the root with a commit with a path, as in 2
-11. Leave the line to take over from — `moai note <epic> 'Next: …'` — and take it into the root
-    with a commit with a path as in 2. It is written after the commit in 10, so leaving it out
-    leaves it in the shared root where someone else's commit sweeps it up. If anything is left
-    (a background review, say), finish it before the note — the supervisor reads the note as
-    this work being over; what you cannot finish, name in the report (12)
+    Leave the tests passing in the root
+11. Leave the line to take over from — `moai note <epic> 'Next: …'`. If anything is left (a
+    background review, say), finish it before the note — the supervisor reads the note as this
+    work being over; what you cannot finish, name in the report (12).
+    Then take the tracker into the root with a commit with a path — **one** for the epic. It
+    carries the pick-up of 2, the lines of 9-1, the closes of 10 and this note together, not one
+    commit per step. A report left as a note in 12 — and, in a subagent, the `model:` lines the
+    supervisor writes from it — come after it; the supervisor's own tracker commit carries those.
+    When a step says "a commit with a path, as in 11", this is its shape. The root is shared by
+    every session — a commit made while someone has a merge open (MERGE_HEAD) seals that merge
+    with its own subject. So give the tracker commit a path. With a merge open git refuses it,
+    so wait for that merge to finish and run it again
+
+        git commit -m "chore(tracker): close <epic> with its merge" -- .moai/
 12. Report to the supervisor, **last of all**, with `SendMessage(to: <supervisor>, message: …)`
     — `report: <epic>` at its head. It carries the merge hash,
     the unfolded epic's id, a line or two of summary, what you handed on and any new backlog,
@@ -602,7 +614,8 @@ never in the root
     could not finish.
     **If that send fails** — the supervisor restarted, so its old name is gone — the report
     must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
-    `moai note <epic> -b -` and take it into the root with a commit with a path as in 2. Tell
+    `moai note <epic> -b -` — it stands in the root's file, where the next supervisor reads it,
+    so it needs no commit of its own. Tell
     the person watching that the report is on the epic; the next supervisor reads it there.
     Then **say when the window can be cleared**, in one line to the person watching. The
     context lives in the tracker, not in the conversation: issue bodies, notes, review texts,
@@ -613,9 +626,9 @@ never in the root
     loses what is not yet moved into the tracker, or the message that arrived.
     Then end the turn. The supervisor's next message is the next work.
     **In a subagent** the report goes two ways, the note first: leave the text on the epic
-    with `moai note <epic> -b -`, `report: <epic>` at its head, and take it into the root with
-    a commit with a path as in 2 — a supervisor that restarted has lost the notification and
-    reads the note. Then hand back the same text with `SubagentHandback`, and your turn ends.
+    with `moai note <epic> -b -`, `report: <epic>` at its head — a supervisor that restarted
+    has lost the notification and reads the note from the root's file; it needs no commit of
+    its own. Then hand back the same text with `SubagentHandback`, and your turn ends.
     Its second line is `Model ran: anthropic/<your real model name>` — the name in your own
     system prompt (`opus-5.5`), not the alias in `Model:`; the supervisor writes 9-1's line
     from it. Below it goes one `Subagent ran: anthropic/<its real name> on <member>` line for each

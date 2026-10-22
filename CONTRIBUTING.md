@@ -227,8 +227,8 @@ cargo test                                        # in .worktrees/milestone-<id>
 git merge --no-ff milestone/<id> -m "merge: <milestone title> (<id>)"   # in the root, on develop
 moai archive --dry-run                            # preview closed bundles eligible to move
 moai archive                                      # refresh .moai/archive/<year>.jsonl
-git add .moai/issues.jsonl .moai/archive
-git commit -m "chore(tracker): archive closed bundles"
+git add .moai/archive                             # a new year's file is not tracked yet
+git commit -m "chore(tracker): archive closed bundles" -- .moai/   # the journals' notes too
 scripts/bump-version.sh --next                    # prints 0.2.0 and why; writes nothing
 scripts/bump-version.sh auto                      # Cargo.toml, Cargo.lock, CHANGELOG.md
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md
