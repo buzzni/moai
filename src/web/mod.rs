@@ -261,7 +261,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     };
     if write {
         return match api::write_argv_of(&req.path, &query) {
-            Some(Ok(args)) => child(site, &args, &cwd, lang),
+            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => not_allowed(),
         };
@@ -275,7 +275,9 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             Ok(body) => Response { status: 200, kind: http::JSON, body: body.into_bytes() },
             Err(refused) => refused,
         },
-        "/api/stamp" => match bare().and_then(|()| api::stamp(&cwd, lang).map_err(|e| refuse(500, &e.message, e.code)))
+        "/api/stamp" => match api::overlay_of(&query)
+            .map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))
+            .and_then(|on| api::stamp(&cwd, lang, on).map_err(|e| refuse(500, &e.message, e.code)))
         {
             Ok(stamp) => {
                 Response { status: 200, kind: http::JSON, body: format!("{{\"stamp\":\"{stamp}\"}}").into_bytes() }

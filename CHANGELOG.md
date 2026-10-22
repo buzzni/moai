@@ -28,6 +28,12 @@ does not tag — see `CONTRIBUTING.md`.
   (`r`, `SPC m a`, `SPC m g` — your read marks only, accepted from the page
   itself) and draws dates in a zone you pick (`SPC o t`, kept in the browser).
   (moai-0aa7, moai-jshy)
+- **`moai tui --json --worktree` and `moai read --worktree`** take the other
+  worktrees into the tree and the read marks, as `show --worktree` does for the
+  list: a row only a sibling worktree holds stands under its epic, and `read`
+  marks the version the overlay shows. `moai web` passes them (and a stamp that
+  folds the siblings' snapshots) while the overlay is on, so a write in a
+  sibling worktree moves the page within two seconds. (moai-m4ez.gcp)
 
 ## [0.20.0] - 2026-10-20
 

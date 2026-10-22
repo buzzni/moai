@@ -19,7 +19,14 @@ use std::collections::BTreeSet;
 
 pub fn run(ctx: &Ctx, args: ReadArgs) -> R<Vec<String>> {
     let repo = super::open_repo(ctx)?;
-    let load = repo.read()?;
+    // **`--worktree` 는 읽는 줄만 바꾼다**(moai-m4ez.gcp) — 겹쳐 보기가 보이는 그 판(`show --worktree`, 웹 페이지의
+    // 겹치기)에서 id 를 찾아 그 판의 `updated_at` 을 적는다. 옆에만 있는 줄도 적히고, 옆이 더 늦게 고친 줄은 그
+    // 늦은 값이 적혀 [NEW] 가 내린다. 쓰는 길은 그대로 [`crate::read_marks::update`] 하나고 옆 워크트리에는 아무것도
+    // 안 쓴다. 옆을 못 읽은 까닭은 말하지 않는다 — 이 명령은 읽음을 적을 뿐이고, 못 읽은 옆의 줄은 `missing` 이 된다.
+    let load = match args.worktree.worktree {
+        true => crate::worktree::gather(&repo, true)?.load,
+        false => repo.read()?,
+    };
     let now = crate::model::now();
     let path = super::project::writable_config(ctx)?;
 

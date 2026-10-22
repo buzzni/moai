@@ -2022,6 +2022,11 @@ pub struct ReadArgs {
     /// That group's members and what is under them
     #[arg(short, long, value_name = "epic")]
     pub epic: Option<String>,
+
+    // 읽음으로 적는 것은 겹쳐 보기가 보이는 그 판의 `updated_at` 이다(moai-m4ez.gcp) — 옆 워크트리에만 있는 줄도
+    // 적고, 옆이 더 늦게 고친 줄은 그 늦은 `updated_at` 을 적는다. 옆 워크트리에는 아무것도 안 쓴다.
+    #[command(flatten)]
+    pub worktree: WorktreeArg,
 }
 
 #[derive(Args, Debug)]
@@ -2116,6 +2121,13 @@ pub struct TuiArgs {
     /// With --json, list every row below, with its home
     #[arg(long)]
     pub deep: bool,
+
+    // **`--json` 만 켠다** — 화면은 늘 옆 워크트리를 겹쳐 연다(`SPC v w` 로 끈다). 기계로 읽는 쪽의 모양은
+    // `status`·`ready`·`show` 처럼 `--worktree` 를 줘야 겹친다(moai-m4ez.gcp). `shaped` 에 안 든다 — 화면에서는 받아도
+    // 이미 그렇다.
+    /// With --json, overlay other worktrees' rows
+    #[arg(long)]
+    pub worktree: bool,
 
     // **`--json` 의 목록만 거르고 늘어놓는다**(moai-wk7i.5wx) — 화면은 `SPC f`·`SPC s` 가 한다. 말은 `show` 의 것이다.
     #[command(flatten)]

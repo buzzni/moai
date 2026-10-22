@@ -40,11 +40,12 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 치운 것을 안다. 화면을 안 켜는 `--json` 은 지켜볼 것이 없다.
     let places = if ctx.json { Vec::new() } else { crate::worktree::place_marks(repo.here()) };
     let archived_marks = crate::archive::marks(&repo.root)?;
-    // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 겹치지 않는다 —
-    // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 `--worktree` 없이 그대로다.
+    // 탐색기는 옆 워크트리를 겹친 채로 연다(`App::worktree`). `--json` 은 `--worktree` 를 줄 때만 겹친다 —
+    // 기계로 읽는 쪽의 출력 모양은 `status`·`ready`·`show` 처럼 그 플래그 없이 그대로다(moai-m4ez.gcp).
+    // 옆에만 있는 줄도 `Index` 가 같은 겹친 줄로 짓으니 `show --worktree` 가 목록에 세우는 그 자리에 선다.
     // 찾지 못한 까닭(`unfound`)은 배너에 안 올린다 — 시키지 않은 겹쳐 보기다(`Gathered::unfound`).
     let crate::worktree::Gathered { load: active_load, root, origin, trouble, mut watched, swept, .. } =
-        crate::worktree::gather(&repo, !ctx.json)?;
+        crate::worktree::gather(&repo, !ctx.json || args.worktree)?;
     // 산 줄의 id — 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`). 거르개를 받은 `--json` 만 쓴다 —
     // 그것을 읽는 자는 거름망(`Filter::matches`)뿐이라, 차례나 `--deep` 만 받은 판에는 짓지 않는다.
     let live: std::collections::BTreeSet<String> = match ctx.json && super::show::first_given(&args.filter).is_some() {
@@ -486,7 +487,7 @@ fn listing(
     path: &Path,
     args: TuiArgs,
 ) -> R<Vec<(Entry, Option<Vec<String>>)>> {
-    let TuiArgs { path: _, filter, order, deep } = args;
+    let TuiArgs { path: _, filter, order, deep, worktree: _ } = args;
     let given = super::show::first_given(&filter).is_some();
     if !given && order.sort.is_none() && !order.reverse {
         // 거르개도 차례도 없으면 `Index::entries` 의 그 자다 — 다 남기고 목록의 차례로.

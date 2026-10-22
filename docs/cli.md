@@ -994,6 +994,9 @@ Options:
   -e, --epic <epic>
           That group's members and what is under them
 
+      --worktree
+          Also overlay other worktrees (no file changes)
+
       --json
           Machine-readable output. Every human line goes away
 
@@ -2477,6 +2480,7 @@ Usage: moai tui [OPTIONS]
 Options:
       --path <id|basket>     Open here - a directory opens inside it
       --deep                 With --json, list every row below, with its home
+      --worktree             With --json, overlay other worktrees' rows
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)

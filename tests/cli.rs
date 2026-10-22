@@ -21879,6 +21879,108 @@ fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
     assert!(after.contains(&t.made), "워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
 }
 
+/// **`tui --json --deep --worktree` 는 옆에만 있는 줄을 `show --worktree` 가 놓는 자리에 놓는다**(moai-m4ez.gcp) —
+/// 에픽 밑이다. 플래그 없이는 전처럼 옆 줄이 없고, 옆이 늦게 고친 줄은 옆의 칸으로 선다.
+#[test]
+fn tui_json_deep_places_rows_only_a_sibling_holds_under_their_epic() {
+    let t = trees("wttree");
+    let main = t.main();
+    let rows = |args: &[&str]| -> Vec<serde_json::Value> {
+        let mut all = vec!["tui", "--json", "--deep"];
+        all.extend_from_slice(args);
+        json_of(&ok(&main, &all)).as_array().unwrap_or_else(|| panic!("배열이 아니다")).clone()
+    };
+    let find = |rows: &[serde_json::Value], id: &str| rows.iter().find(|r| r["id"] == id).cloned();
+
+    let plain = rows(&[]);
+    assert!(find(&plain, &t.made).is_none(), "플래그 없이 옆 줄이 섰다");
+    assert_eq!(find(&plain, &t.picked).unwrap()["status"], "todo", "플래그 없이 옆 칸이 섰다");
+
+    let over = rows(&["--worktree"]);
+    let made = find(&over, &t.made).unwrap_or_else(|| panic!("옆에만 있는 줄이 없다\n{over:?}"));
+    assert_eq!(made["home"], serde_json::json!([t.epic]), "에픽 밑이 아니다: {made}");
+    assert_eq!(find(&over, &t.picked).unwrap()["status"], "in_progress", "옆이 늦게 옮긴 칸이 안 섰다");
+    // 에픽의 셈도 옆 줄을 센다.
+    let epic = find(&over, &t.epic).unwrap();
+    let total = |r: &serde_json::Value| r["progress"]["total"].as_u64().unwrap();
+    assert_eq!(total(&epic), total(&find(&plain, &t.epic).unwrap()) + 1, "{epic}");
+    // 거르개와 함께여도 같은 자다.
+    let filtered = rows(&["--worktree", "-s", "todo"]);
+    assert!(find(&filtered, &t.made).is_some(), "거른 목록에서 옆 줄이 빠졌다");
+}
+
+/// **`moai read --worktree` 는 겹쳐 보기가 보이는 판을 읽음으로 적는다**(moai-m4ez.gcp) — 옆에만 있는 줄도 적히고(전에는
+/// `missing`), 옆이 더 늦게 고친 줄은 옆의 `updated_at` 이 적혀 [NEW] 가 내린다. 옆 워크트리에는 아무것도 안 쓴다.
+#[test]
+fn read_with_worktree_stamps_the_version_the_overlay_shows() {
+    let t = trees("wtread");
+    let (main, feat) = (t.main(), t.feat());
+    let cfg = t.s.path().join("user.toml");
+    let updated = |id: &str| -> String {
+        let one = ok(&main, &["show", id, "--worktree", "--json"]);
+        json_of(&one)["updated_at"].as_str().unwrap().to_string()
+    };
+    let (before_main, before_feat) = (issues(&main), issues(&feat));
+
+    // 플래그 없이는 옆에만 있는 줄이 없는 id 다.
+    let out = moai_with(&main, &cfg, &["read", &t.made, "--json"]);
+    assert!(!out.status.success(), "옆에만 있는 줄이 플래그 없이 적혔다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("\"missing\":[\"{}\"]", t.made)));
+
+    let out = ok_with(&main, &cfg, &["read", "--worktree", &t.made, &t.picked, "--json"]);
+    let v = json_of(&out);
+    assert_eq!(v["missing"], serde_json::json!([]), "{out}");
+    let sheet = read_sheet(&cfg, &main);
+    assert!(sheet.contains(&format!("{} = \"{}\"", t.made, updated(&t.made))), "{sheet}");
+    // 옆이 늦게 옮긴 줄은 옆의 값이다 — 루트의 낡은 값이 아니다.
+    let picked = updated(&t.picked);
+    assert_ne!(picked, json_of(&ok(&main, &["show", &t.picked, "--json"]))["updated_at"].as_str().unwrap());
+    assert!(sheet.contains(&format!("{} = \"{picked}\"", t.picked)), "{sheet}");
+
+    assert_eq!((issues(&main), issues(&feat)), (before_main, before_feat), "읽음이 트래커를 고쳤다");
+}
+
+/// **웹은 겹쳐 보기를 켠 페이지에만 옆을 잇는다**(moai-m4ez.gcp) — 트리는 옆 줄을 에픽 밑에 놓고, 표식은 옆의 쓰기에
+/// 움직이고(끈 페이지는 안 움직인다), 읽음은 옆에만 있는 줄에도 적힌다.
+#[test]
+fn web_overlay_reaches_tree_stamp_and_read() {
+    let t = trees("wtweb");
+    let (main, feat) = (t.main(), t.feat());
+    let cfg = t.s.path().join("user.toml");
+    let web = serve_with(&main, |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let mine = format!("http://127.0.0.1:{}", web.port);
+    let tree = |query: &str| json_of(&get(web.port, &format!("/api/tree{query}")).2);
+    let has = |env: &serde_json::Value, id: &str| env["out"].as_array().unwrap().iter().any(|r| r["id"] == id);
+    assert!(!has(&tree(""), &t.made), "끈 페이지의 트리에 옆 줄이 섰다");
+    let on = tree("?worktree=1");
+    assert_eq!(on["exit"], 0, "{on}");
+    let made = on["out"].as_array().unwrap().iter().find(|r| r["id"] == t.made.as_str()).expect("옆 줄이 없다");
+    assert_eq!(made["home"], serde_json::json!([t.epic]), "{made}");
+
+    let stamp = |query: &str| json_of(&get(web.port, &format!("/api/stamp{query}")).2)["stamp"].as_str().unwrap().to_string();
+    let (off0, on0) = (stamp(""), stamp("?worktree=1"));
+    assert_ne!(off0, on0, "켠 표식이 끈 표식과 같다 — 옆을 안 접었다");
+    ok_here_at(&feat, LATER, &["note", &t.made, "옆의 메모"]);
+    ok_here_at(&feat, LATER, &["edit", &t.made, "--title", "옆이 고친 제목"]);
+    assert_ne!(stamp("?worktree=1"), on0, "옆의 쓰기에 켠 표식이 안 움직였다");
+    assert_eq!(stamp(""), off0, "옆의 쓰기에 끈 표식이 움직였다");
+    let (status, _, body) = get(web.port, "/api/stamp?worktree=2");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    let (status, _, body) = get(web.port, "/api/stamp?x=1");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+
+    // 읽음: 끄고 보낸 것은 옆 줄을 못 찾고, 켜고 보낸 것은 적는다.
+    let (status, _, body) = post(web.port, &format!("/api/read/{}", t.made), Some(&mine));
+    assert_eq!(status, 200, "{body}");
+    assert_ne!(json_of(&body)["exit"], 0, "끈 읽음이 옆 줄을 적었다\n{body}");
+    let (status, _, body) = post(web.port, &format!("/api/read/{}?worktree=1", t.made), Some(&mine));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert!(read_sheet(&cfg, &main).contains(&t.made), "읽음이 안 적혔다");
+}
+
 /// `ready` 는 옆에서 이미 집은 일을 **집을 수 있다고 내지 않고**, 잡고 있는 것에
 /// 어느 워크트리에서 잡았는지 댄다. `status` 는 겹쳐 봤다고 머리에서 말한다.
 #[test]
