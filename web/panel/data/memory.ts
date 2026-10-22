@@ -14,6 +14,7 @@ import { SORT_KEYS, sameSort, type Dir, type Sort, type SortField } from './quer
 import { COLUMN_DEFAULTS, type ColumnName, type DetailPosition, type Remembered, type State, type Store, type ViewSettings } from '../store.js'
 import { DEFAULT_RATIO, normalizeRatio } from '../view/split.js'
 import { DEFAULT_TAB, normalizeTab } from '../view/tabs.js'
+import { normalizeTheme } from './theme.js'
 import { validZone } from './zone.js'
 
 /**
@@ -46,13 +47,15 @@ export function normalizeMemory(value: unknown): Remembered {
     // A zone this browser does not know (dropped since, or edited by hand) is no choice: the page falls back silently.
     // No choice is no key, as the page before the picker wrote it.
     ...(validZone(stored.zone) ? { zone: validZone(stored.zone) } : {}),
+    // `system` is no choice and no key; only light or dark was picked.
+    ...(normalizeTheme(stored.theme) !== 'system' ? { theme: normalizeTheme(stored.theme) } : {}),
   }
 }
 
 /** The part of the state that is remembered. */
 export function rememberedOf(state: State): Remembered {
   const { visible, position, ratio } = state.detail
-  return { tab: state.tab, detail: { visible, position, ratio: { left: ratio.left, bottom: ratio.bottom } }, ...(state.zone ? { zone: state.zone } : {}) }
+  return { tab: state.tab, detail: { visible, position, ratio: { left: ratio.left, bottom: ratio.bottom } }, ...(state.zone ? { zone: state.zone } : {}), ...(state.theme !== 'system' ? { theme: state.theme } : {}) }
 }
 
 export function sameMemory(a: Remembered, b: Remembered): boolean {
@@ -62,7 +65,8 @@ export function sameMemory(a: Remembered, b: Remembered): boolean {
     a.detail.position === b.detail.position &&
     a.detail.ratio.left === b.detail.ratio.left &&
     a.detail.ratio.bottom === b.detail.ratio.bottom &&
-    (a.zone ?? null) === (b.zone ?? null)
+    (a.zone ?? null) === (b.zone ?? null) &&
+    (a.theme ?? 'system') === (b.theme ?? 'system')
   )
 }
 

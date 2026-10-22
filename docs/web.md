@@ -58,6 +58,16 @@ its left when the window is wide enough; `SPC o d` moves it and `SPC v d` hides
 it. `SPC v r` switches the body between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
 
+## Theme
+
+The button left of the hide-detail button, in the tab bar's right corner, cycles
+three states: **system** (a half-filled circle) follows the browser's light or
+dark scheme and changes with it, **light** (a sun) and **dark** (a moon) stay as
+chosen whatever the system says. Its name says the state it is in and what
+pressing it does next. The choice is kept in this browser only (nothing goes to
+the server or your user config), so another browser starts at system; choosing
+system again forgets it.
+
 ## Search, filter, sort, view, column
 
 - **Search** (`/`) searches as you type, with the words of `moai show -g`: the
@@ -82,11 +92,11 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   `a` assignee, `c` created, `u` updated, `n` counts, `t` tags, `e` epic,
   `h` names
 
-The page remembers its tab, where the detail sits and the time zone, and keeps the
+The page remembers its tab, where the detail sits, the theme and the time zone, and keeps the
 filter, the sort, the view and the columns apart for each project it reads, in the
 browser's own local storage — one project's filter never lands on another's page.
 The search is not kept. A browser that keeps no site data (a private window)
-remembers them until the tab is closed.
+remembers them until the tab is closed. The theme (see above) is kept the same way.
 
 ## Time zone
 
