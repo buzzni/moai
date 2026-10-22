@@ -12,6 +12,7 @@
 import type { Outcome } from './data/client.js'
 import { pathKey, type Path, type Row, type TreeRow } from './data/index.js'
 import { DEFAULT_SORT, type Sort } from './data/query.js'
+import type { ProjectEntry } from './data/projects.js'
 import type { Boot } from './data/source.js'
 import { toolbarReduce, type ToolbarAction, type ToolbarState } from './view/toolbar.js'
 import type { WikiState } from './view/wiki.js'
@@ -32,6 +33,9 @@ export interface ViewSettings {
   hideDeferred: boolean
   hideBacklog: boolean
   showArchived: boolean
+  /** The other git worktrees' rows over the list (`SPC v w`), as the TUI's explorer starts: on (se-etwu). While it is
+   *  on the rows are read with `/api/rows?worktree=1` (`show --all --worktree`). */
+  worktree: boolean
 }
 
 export interface DetailSettings {
@@ -77,10 +81,11 @@ export interface Matched {
 }
 
 /** What the filter and the search ask moai, as one key: nothing to ask when both are empty. */
-export function matchKey(state: { filter: Pick<FilterState, 'applied'>; search: Pick<SearchState, 'text'>; view: Pick<ViewSettings, 'showArchived'> }): string {
+export function matchKey(state: { filter: Pick<FilterState, 'applied'>; search: Pick<SearchState, 'text'>; view: Pick<ViewSettings, 'showArchived'> & Partial<Pick<ViewSettings, 'worktree'>> }): string {
   const filter = state.filter.applied.trim()
   const q = state.search.text.trim()
-  return filter === '' && q === '' ? '' : JSON.stringify([filter, q, state.view.showArchived])
+  // The worktree overlay is part of the question (data/source.ts matchEndpoints): turning it asks again.
+  return filter === '' && q === '' ? '' : JSON.stringify([filter, q, state.view.showArchived, state.view.worktree === true])
 }
 
 export interface DetailData {
@@ -145,6 +150,16 @@ export interface State {
    * store starts from it (the mounted pane keeps its own state across tab switches).
    */
   wiki: WikiState
+  /**
+   * The projects the header lists and the digits jump to (data/projects.ts headerProjects, moai-o14f): read once from
+   * `/api/projects` after the boot. Empty until then, and for good when nothing is registered or the read failed.
+   */
+  projects: ProjectEntry[]
+  /**
+   * The time zone picked on this page (`SPC o t`, data/zone.ts); null follows the TUI's (`/api/boot`'s `timezone`),
+   * else the browser's. Remembered in the browser (data/memory.ts); never written to the server.
+   */
+  zone: string | null
 }
 
 /**
@@ -154,6 +169,8 @@ export interface State {
 export interface Remembered {
   tab: Tab
   detail: DetailSettings
+  /** The zone picked on this page (`SPC o t`); null when none is. Left out by an older page's settings. */
+  zone?: string | null
 }
 
 export const COLUMN_DEFAULTS: Record<ColumnName, boolean> = {
@@ -204,7 +221,7 @@ export function initialState(): State {
     focus: 'list',
     expanded: [],
     detail: { visible: true, position: 'bottom', ratio: { ...DEFAULT_RATIO } },
-    view: { hiddenStatuses: [], hideDeferred: true, hideBacklog: false, showArchived: false },
+    view: { hiddenStatuses: [], hideDeferred: true, hideBacklog: false, showArchived: false, worktree: true },
     columns: { ...COLUMN_DEFAULTS },
     columnsKnown: Object.keys(COLUMN_DEFAULTS) as ColumnName[],
     sort: copySort(DEFAULT_SORT),
@@ -219,6 +236,8 @@ export function initialState(): State {
     boot: null,
     matched: { key: '', ids: null, loading: false, problem: null },
     wiki: initialWiki(),
+    projects: [],
+    zone: null,
   }
 }
 
@@ -271,6 +290,10 @@ export type Action =
   | { type: 'detail-closed' }
   /** Settings read back at boot (already cleaned by data/memory.ts); what is left out keeps its value. */
   | { type: 'restore'; settings: Partial<Remembered> }
+  /** The header's projects (data/projects.ts headerProjects). */
+  | { type: 'projects'; projects: ProjectEntry[] }
+  /** The zone picked (`SPC o t`); null goes back to the TUI's, else the browser's. */
+  | { type: 'zone'; zone: string | null }
 
 /** Where the detail actually stands at this panel width: a narrow panel forces the bottom. */
 export const detailPosition = (detail: DetailSettings, width: number): DetailPosition => effectivePosition(width, detail.position)
@@ -388,15 +411,20 @@ export function reduce(state: State, action: Action): State {
       return { ...state, shown: { value: null, loading: false, problem: action.problem } }
     case 'detail-closed':
       return { ...state, shown: idle(), focus: 'list' }
+    case 'projects':
+      return { ...state, projects: action.projects }
+    case 'zone':
+      return state.zone === action.zone ? state : { ...state, zone: action.zone }
     case 'restore': {
-      const { tab, detail } = action.settings
-      if (tab === undefined && detail === undefined) return state
+      const { tab, detail, zone } = action.settings
+      if (tab === undefined && detail === undefined && zone === undefined) return state
       const ratio = detail ? { left: normalizeRatio(detail.ratio.left, 'left'), bottom: normalizeRatio(detail.ratio.bottom, 'bottom') } : state.detail.ratio
       return {
         ...state,
         tab: tab ?? state.tab,
         detail: detail ? { visible: detail.visible, position: detail.position, ratio } : state.detail,
         focus: detail && !detail.visible ? 'list' : state.focus,
+        zone: zone === undefined ? state.zone : zone,
       }
     }
   }

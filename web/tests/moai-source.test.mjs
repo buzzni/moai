@@ -6,7 +6,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 
 const fixture = async (name) => JSON.parse(await readFile(new URL(`./fixtures/moai/${name}`, import.meta.url), 'utf8'))
 
-const { ENDPOINT, bootFrom, groupsFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, markArchived, rowsFromLists, sameGroups, withArchive } =
+const { ENDPOINT, bootFrom, groupsFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, markArchived, matchEndpoints, rowsFromLists, sameGroups, withArchive } =
   await panelModule('data/source.ts')
 const { urlOf } = await panelModule('data/client.ts')
 
@@ -176,8 +176,18 @@ const BOOT = {
   filter_keys: ['status', 'due_on'], sort_fields: [{ name: 'due', dir: 'asc' }],
 }
 
+// What a server without the header's fields gives reads as one that sent them as null (a server before moai-fmun).
+const BOOTED = { ...BOOT, user: null, latest: null, timezone: null }
+
 test('the boot answer is read as the server gives it, and anything else is refused', () => {
-  assert.deepEqual(bootFrom(BOOT), BOOT)
+  assert.deepEqual(bootFrom(BOOT), BOOTED, 'an older server without user and latest still boots')
+  assert.deepEqual(bootFrom({ ...BOOT, user: 'Raven (r@x.io)', latest: { state: 'stale', tag: 'v1.0.0', heard_at: '2026-10-20T00:00:00Z', why: 'offline' } }),
+    { ...BOOT, user: 'Raven (r@x.io)', latest: { state: 'stale', tag: 'v1.0.0', heardAt: '2026-10-20T00:00:00Z', why: 'offline' }, timezone: null })
+  // The TUI's zone (moai-ly88): a name as written, or null — an empty or wrong one is none.
+  assert.equal(bootFrom({ ...BOOT, timezone: 'Asia/Seoul' }).timezone, 'Asia/Seoul')
+  for (const none of ['', 9, null, undefined]) assert.equal(bootFrom({ ...BOOT, timezone: none }).timezone, null)
+  assert.deepEqual(bootFrom({ ...BOOT, user: '', latest: { state: 'later' } }), BOOTED, 'an empty user and an unknown state are nothing')
+  assert.deepEqual(bootFrom({ ...BOOT, user: 7, latest: 'v1' }), BOOTED, 'a wrong shape there does not refuse the boot')
   assert.equal(bootFrom({ ...BOOT, glyphs: { todo: 1 } }), null)
   assert.equal(bootFrom({ ...BOOT, columns: { backlog: '◇', shelved: '‖' } }), null, 'the shape before moai-jshy.yxh')
   assert.equal(bootFrom({ ...BOOT, sort_fields: [{ name: 'due', dir: 'up' }] }), null)
@@ -189,8 +199,27 @@ test('loadBoot fetches /api/boot outside the queue; a refusal, a lost server and
     assert.equal(url, '/api/boot')
     return { status, text: async () => body }
   }
-  assert.deepEqual(await loadBoot(answering(200, JSON.stringify(BOOT))), { ok: true, value: BOOT })
+  assert.deepEqual(await loadBoot(answering(200, JSON.stringify(BOOT))), { ok: true, value: BOOTED })
   assert.deepEqual(await loadBoot(answering(500, JSON.stringify({ error: 'not a moai repository', code: 'not_a_repo' }))), { ok: false, outcome: { kind: 'moai-error', message: 'not a moai repository', code: 'not_a_repo' } })
   assert.deepEqual(await loadBoot(answering(200, '{')), { ok: false, outcome: { kind: 'unreadable' } })
   assert.deepEqual(await loadBoot(async () => { throw new TypeError('Failed to fetch') }), { ok: false, outcome: { kind: 'not-started' } })
+})
+
+test('a filter or a search is asked over the worktree overlay while it is on — /api/rows only, as the list is read', () => {
+  const over = matchEndpoints({ filter: 'status=todo', q: '', archived: false, worktree: true })
+  assert.deepEqual(over.map((e) => [e.path, e.query]), [
+    ['/api/rows', { fields: 'id', filter: 'status=todo', worktree: '1' }],
+    ['/api/backlog', { fields: 'id', filter: 'status=todo' }],
+  ])
+  assert.deepEqual(matchEndpoints({ filter: 'status=todo', q: '', archived: false }).map((e) => e.query), [{ fields: 'id', filter: 'status=todo' }, { fields: 'id', filter: 'status=todo' }])
+})
+
+test('loadAllRows asks /api/rows for the worktree overlay while it is on, and the backlog never', async () => {
+  const asked = []
+  const client = { request: async (endpoint) => { asked.push(endpoint); return { kind: 'passed', output: [] } } }
+  await loadAllRows(client, undefined, undefined, true)
+  assert.deepEqual(asked.map((e) => [e.path, e.query]), [['/api/rows', { worktree: '1' }], ['/api/backlog', {}]])
+  asked.length = 0
+  await loadAllRows(client)
+  assert.deepEqual(asked.map((e) => [e.path, e.query]), [['/api/rows', {}], ['/api/backlog', {}]])
 })

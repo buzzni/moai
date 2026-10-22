@@ -100,12 +100,19 @@ test('table: C-d / C-u say the cursor stays in browse, not in the wiki, whose li
   }
 })
 
-test('table: 제외 keys are absent (0-9, SPC q, SPC g s, SPC v w, SPC c w, SPC o t/m, SPC p, Ctrl-C)', () => {
+test('table: 제외 keys are absent (0, SPC q, SPC g s, SPC c w, SPC o m, SPC p a/d, Ctrl-C); SPC v w came in with the worktree overlay (se-etwu)', () => {
   const everything = Object.values(KEY_TABLE).flatMap((bs) => allKeys(bs, 'mac'))
-  for (const n of '0123456789') assert.ok(!KEY_TABLE.browse.some((b) => bindingKeys(b, 'mac').includes(n)), `browse ${n}`)
-  for (const gone of ['SPC q', 'SPC g s', 'SPC v w', 'SPC c w', 'SPC o t', 'SPC o m', 'SPC p a', 'SPC p d', 'C-c']) {
+  // `0` is the TUI's all-projects layer, which the page has not; 1-9 jump to a project (moai-o14f).
+  assert.ok(!KEY_TABLE.browse.some((b) => bindingKeys(b, 'mac').includes('0')), 'browse 0')
+  for (const n of '123456789') {
+    for (const mode of ['browse', 'wiki']) assert.equal(KEY_TABLE[mode].find((b) => bindingKeys(b, 'mac').includes(n))?.action, 'project.jump', `${mode} ${n}`)
+    assert.equal(KEY_TABLE.menu.find((b) => b.keys.includes(`SPC p ${n}`))?.action, 'project.jump', `SPC p ${n}`)
+  }
+  // Registering and unregistering write the user config: the TUI's alone. SPC o t opens the zone picker (moai-ly88).
+  for (const gone of ['SPC q', 'SPC g s', 'SPC c w', 'SPC o m', 'SPC p a', 'SPC p d', 'C-c']) {
     assert.ok(!everything.includes(gone), `${gone} is excluded`)
   }
+  assert.equal(KEY_TABLE.menu.find((b) => b.keys.includes('SPC o t'))?.action, 'option.timezone')
 })
 
 test('table: no Ctrl-w anywhere (it closes the browser tab); SPC w and Alt-Backspace everywhere', () => {
@@ -386,7 +393,10 @@ test('menu: unavailable layers and items cannot be entered; press() acts like th
   noDetail.key('w')
   assert.deepEqual(noDetail.router.state().menu, ['SPC'], 'SPC w is not offered without the detail')
   noDetail.key('o')
-  assert.deepEqual(noDetail.router.state().menu, ['SPC'], 'SPC o has nothing without the detail')
+  // The zone picker stands whether or not the detail does (moai-ly88): SPC o is entered, with `t` alone in it.
+  assert.deepEqual(noDetail.router.state().menu, ['SPC', 'o'], 'SPC o holds the zone picker without the detail')
+  assert.deepEqual(menuLayer('SPC o', browse({ detail: false })).items.map((i) => i.key), ['t'])
+  noDetail.key('Escape')
   const { router, sent } = setup()
   router.press('SPC'); router.press('o')
   assert.equal(router.press('d').action.id, 'option.detailAt')
@@ -449,7 +459,9 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   })
   const root = menuLayer(['SPC'], ctx)
   assert.equal(root.title, '메뉴')
-  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'o', 'w', '?'])
+  // `m` (read marks) stands while they can be written; `p` only with projects to jump to.
+  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'm', 'o', 'w', '?'])
+  assert.deepEqual(menuLayer(['SPC'], browse({ readable: false, projects: ['a', 'b'] })).items.map((i) => i.key), ['/', 'f', 'p', 'g', 'v', 's', 'c', 'o', 'w', '?'])
   const g = root.items.find((i) => i.key === 'g')
   assert.equal(g.kind, 'layer')
   assert.equal(g.label, '+이동')
@@ -459,7 +471,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   assert.equal(view.title, '보기')
   assert.equal(view.waits, true)
   const byKey = Object.fromEntries(view.items.map((i) => [i.key, i]))
-  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
+  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'w', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
   assert.equal(byKey.l.state.label, '[숨김]')
   assert.equal(byKey.b.state.label, '[보임]')
   assert.equal(byKey.l.kind, 'toggle')
@@ -479,12 +491,14 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   // Focus moves follow the split axis; the detail position is gone when the panel is narrow.
   assert.deepEqual(menuLayer('SPC w', ctx).items.map((i) => i.key), ['w', 'W', 'h', 'l'])
   assert.deepEqual(menuLayer('SPC w', browse()).items.map((i) => i.key), ['w', 'W', 'j', 'k'])
-  assert.equal(menuLayer('SPC', browse({ detailAtLocked: true })).items.some((i) => i.key === 'o'), false)
+  assert.deepEqual(menuLayer('SPC o', browse({ detailAtLocked: true })).items.map((i) => i.key), ['t'])
   const hiddenDetail = menuLayer('SPC', browse({ detail: false })).items.map((i) => i.key)
-  assert.ok(!hiddenDetail.includes('w') && !hiddenDetail.includes('o'))
+  assert.ok(!hiddenDetail.includes('w'))
+  assert.deepEqual(menuLayer('SPC o', browse({ detail: false })).items.map((i) => i.key), ['t'])
   assert.ok(!menuLayer('SPC v', browse({ detail: false })).items.some((i) => i.key === 'r'))
-  // The wiki menu: tabs, raw, windows, help.
-  assert.deepEqual(menuLayer('SPC', { mode: 'wiki' }).items.map((i) => i.key), ['g', 'v', 'w', '?'])
+  // The wiki menu: tabs, raw, the zone picker, windows, help — and the projects when there are some.
+  assert.deepEqual(menuLayer('SPC', { mode: 'wiki' }).items.map((i) => i.key), ['g', 'v', 'o', 'w', '?'])
+  assert.deepEqual(menuLayer('SPC', { mode: 'wiki', projects: ['a'] }).items.map((i) => i.key), ['p', 'g', 'v', 'o', 'w', '?'])
   assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['w', 'tab.wiki']])
 })
 
@@ -806,6 +820,12 @@ test('keyToken: a Korean input source falls back to event.code (jamo, Process), 
   assert.equal(keyToken({ key: 'ㅓ', code: 'KeyJ', ctrlKey: true }), 'C-j')
   // AZERTY: 'a' typed on the physical KeyQ is still 'a'.
   assert.equal(keyToken({ key: 'a', code: 'KeyQ' }), 'a')
+  // A Latin letter on a digit key is the layout's own (é on AZERTY's 2, ě on the Czech 2), never the digit: bare digits
+  // leave the page for another project. A non-Latin one (a full-width digit) and an IME at work still read the digit.
+  assert.equal(keyToken({ key: 'é', code: 'Digit2' }), 'é')
+  assert.equal(keyToken({ key: 'ě', code: 'Digit2' }), 'ě')
+  assert.equal(keyToken({ key: '２', code: 'Digit2' }), '2')
+  assert.equal(keyToken({ key: 'Process', code: 'Digit2', keyCode: 229 }), '2')
   // No Key*/Digit* code: what it was before.
   assert.equal(keyToken({ key: 'ㅓ' }), 'ㅓ')
   assert.equal(keyToken({ key: 'ㅓ', code: 'Space' }), 'ㅓ')
@@ -897,4 +917,77 @@ test('toolbar: the scope select is capped, so its disabled notes line cannot wid
   const rule = css.match(/\.m-search \.m-select \{[^}]*\}/)?.[0]
   assert.ok(rule, 'a rule for the search box select')
   assert.match(rule, /max-width:\s*\d+(\.\d+)?(em|px|ch)/)
+})
+
+// ------------------------------------------------------------------ projects, read marks, zone (moai-o14f, moai-ly88)
+
+test('projects: a bare digit and SPC p <digit> jump to that project; past the projects there are, nothing', () => {
+  const ctx = browse({ projects: ['argos', 'moai'] })
+  const { key, sent, router } = setup({ ctx })
+  key('2')
+  assert.deepEqual(sent.map((a) => [a.id, a.args]), [['project.jump', { number: 2 }]])
+  // Past the projects that exist: nothing runs (the TUI's Project(n) past Ctx::projects is quiet).
+  key('3')
+  assert.equal(sent.length, 1)
+  key(' '); key('p')
+  assert.deepEqual(router.state().menu, ['SPC', 'p'])
+  const layer = menuLayer('SPC p', ctx, TABLE.en)
+  assert.equal(layer.title, 'Project')
+  assert.deepEqual(layer.items.map((i) => [i.key, i.label]), [['1', 'argos'], ['2', 'moai']])
+  key('1')
+  assert.deepEqual(sent.at(-1).args, { number: 1 })
+  assert.equal(router.state().menu, null, 'a jump closes the menu')
+  // In the wiki too.
+  const wiki = setup({ ctx: { mode: 'wiki', tab: 'wiki', focus: 'list', projects: ['argos'] } })
+  wiki.key('1')
+  assert.deepEqual(wiki.ids(), ['project.jump'])
+  // No projects: no SPC p layer, and a digit does nothing.
+  const none = setup()
+  none.key('1')
+  none.key(' '); none.key('p')
+  assert.deepEqual(none.ids(), [])
+  assert.deepEqual(none.router.state().menu, ['SPC'])
+})
+
+test('projects: digits never fire inside the search or filter prompt, nor in the sort editor', () => {
+  const prompt = setup({ ctx: { mode: 'prompt', projects: ['argos', 'moai'] } })
+  const typed = prompt.key('1', { editable: true })
+  assert.equal(typed.handled, false, 'the digit types into the input')
+  assert.equal(typed.preventDefault, false)
+  const sorter = setup({ ctx: { mode: 'sorter', projects: ['argos', 'moai'] } })
+  sorter.key('1')
+  assert.deepEqual([...prompt.ids(), ...sorter.ids()], [])
+})
+
+test('projects: the help has one row for all nine, the bare and SPC p forms side by side', () => {
+  const rows = helpSections('browse', browse({ projects: ['a'] }), 'other', TABLE.en).find((s) => s.id === 'project').rows
+  assert.deepEqual(rows.map((r) => [r.label, r.keys, r.available]), [['Go to project 1–9', ['1~9', 'SPC p 1~9'], true]])
+  assert.equal(helpSections('browse', browse(), 'other', TABLE.en).find((s) => s.id === 'project').rows[0].available, false)
+})
+
+test('read marks: r, SPC m a and SPC m g run while they can be written, and are gone when not', () => {
+  const { key, ids, router } = setup()
+  key('r')
+  key(' '); key('m'); key('a')
+  key(' '); key('m'); key('g')
+  assert.deepEqual(ids(), ['read', 'read.all', 'read.group'])
+  assert.equal(router.state().menu, null)
+  assert.deepEqual(menuLayer('SPC m', browse(), TABLE.en).items.map((i) => [i.key, i.label]), [['a', 'Mark all read'], ['g', 'Group read']])
+  const off = setup({ ctx: browse({ readable: false }) })
+  off.key('r')
+  off.key(' '); off.key('m')
+  assert.deepEqual(off.ids(), [])
+  assert.deepEqual(off.router.state().menu, ['SPC'], 'no SPC m layer')
+})
+
+test('zone: SPC o t opens the picker (an action, not a toggle) and shows the zone in use as its state', () => {
+  const ctx = browse({ zone: 'Asia/Seoul' })
+  const item = menuLayer('SPC o', ctx, TABLE.en).items.find((i) => i.key === 't')
+  assert.equal(item.label, 'Timezone')
+  assert.equal(item.kind, 'action')
+  assert.deepEqual(item.state, { id: 'value', label: '[Asia/Seoul]' })
+  const { key, ids, router } = setup({ ctx })
+  key(' '); key('o'); key('t')
+  assert.deepEqual(ids(), ['option.timezone'])
+  assert.equal(router.state().menu, null)
 })

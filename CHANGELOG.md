@@ -17,12 +17,17 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai tui --json --deep`** prints the explorer's whole tree in one call, so
   a program that draws the tracker no longer walks it directory by directory.
   (moai-0aa7.joy)
-- **`moai web`** serves the tracker as a read-only page on `127.0.0.1:6624`:
-  a board, a list and the wiki, built on the Saycode panel 2.0. `--port`,
+- **`moai web`** serves the tracker on `127.0.0.1:6624` as a page that never
+  writes it: a board, a list and the wiki, with the Saycode panel 2.1 look and
+  the explorer's header (logo, user, version, numbered projects). `--port`,
   `--port 0` for a free port and `--host` (with a warning off loopback) say
   where; it answers only requests whose `Host` is `localhost` or an IP address.
   The page reads again within two seconds of a write, and its filter, search
-  and sort are moai's own. (moai-0aa7, moai-jshy)
+  and sort are moai's own. It reads any registered project (`?project=`,
+  `1`~`9`, `SPC p`), overlays the other worktrees (`SPC v w`), marks rows read
+  (`r`, `SPC m a`, `SPC m g` — your read marks only, accepted from the page
+  itself) and draws dates in a zone you pick (`SPC o t`, kept in the browser).
+  (moai-0aa7, moai-jshy)
 
 ## [0.20.0] - 2026-10-20
 

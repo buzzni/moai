@@ -52,13 +52,25 @@ export interface KeyContext {
   detailAtLocked?: boolean
   /** Body shown as raw markdown (SPC v r). */
   raw?: boolean
-  hidden?: { deferred?: boolean; backlog?: boolean; archived?: boolean; columns?: ReadonlyArray<boolean> }
+  hidden?: { deferred?: boolean; backlog?: boolean; archived?: boolean; worktree?: boolean; columns?: ReadonlyArray<boolean> }
   /** Status column names in order (labels of SPC v 1~9; columns beyond the list are not offered). */
   columns?: ReadonlyArray<string>
   /** The order's fields; `id` has no SPC s key but is in the order when the sort editor put it there. */
   sort?: ReadonlyArray<{ field: SortField | "id"; desc: boolean }>
   /** List columns shown (SPC c). A missing field reads as shown. */
   cells?: Partial<Record<CellField, boolean>>
+  /**
+   * The read marks can be written (`r`, `SPC m a`, `SPC m g`). Missing reads as true; keys/wiring.ts passes false
+   * when it is given no read-mark writes, so the menu leaves the items out and the help dims them.
+   */
+  readable?: boolean
+  /**
+   * The numbered projects' names by digit (`1`-`9` and `SPC p 1`-`9`, data/projects.ts numberedNames); a digit past
+   * them does nothing, as the TUI's (keys.rs `Project(n)` past `Ctx::projects`).
+   */
+  projects?: ReadonlyArray<string>
+  /** The zone dates are drawn in (`SPC o t`'s state, data/zone.ts effectiveZone). */
+  zone?: string
 }
 
 export type StateId =
@@ -68,12 +80,12 @@ export type StateId =
 const DEFAULT_WORDS: KeyTableCopy = TABLE.ko
 
 export type HelpGroupId =
-  | "move" | "enter" | "focus" | "tab" | "search" | "other"
+  | "move" | "enter" | "focus" | "tab" | "project" | "search" | "read" | "other"
   | "view" | "sort" | "cell" | "option" | "menu" | "prompt" | "sorter" | "wiki"
 
 /** The help overlay's group order; the titles are the words' `groups`. */
 export const HELP_GROUPS: ReadonlyArray<HelpGroupId> = [
-  "move", "enter", "wiki", "focus", "tab", "search", "view", "sort", "cell", "option", "other", "menu", "prompt", "sorter",
+  "move", "enter", "wiki", "focus", "tab", "project", "search", "read", "view", "sort", "cell", "option", "other", "menu", "prompt", "sorter",
 ]
 
 /** A binding's words, by id in the catalogue's `labels`. */
@@ -81,10 +93,11 @@ export type KeyLabel =
   | "move.down" | "move.up" | "move.top" | "move.bottom" | "move.halfDown" | "move.halfUp" | "move.pageDown" | "move.pageUp"
   | "wiki.halfDown" | "wiki.halfUp"
   | "focus.next" | "focus.prev" | "focus.left" | "focus.right" | "focus.up" | "focus.down"
-  | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "help"
+  | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "read" | "help"
   | "filter" | "tab.list" | "tab.board" | "tab.wiki"
-  | "view.deferred" | "view.backlog" | "view.archived" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
-  | "sort.edit" | "option.detailAt" | "option.detailAtHelp" | "menu.close" | "menu.up"
+  | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
+  | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "option.detailAt" | "option.detailAtHelp"
+  | "option.timezone" | "option.timezoneHelp" | "project.jumpHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
   | "sorter.down" | "sorter.up" | "sorter.lower" | "sorter.raise" | "sorter.toggle" | "sorter.flip" | "sorter.apply" | "sorter.default" | "sorter.cancel"
   | "wiki.enter" | "wiki.back" | "wiki.page" | "wiki.nextLink" | "wiki.prevLink" | "wiki.search" | "wiki.clear"
@@ -93,7 +106,7 @@ export type KeyLabel =
 export type Label = KeyLabel | ((words: KeyTableCopy, ctx: KeyContext) => string)
 
 /** The SPC layers by their key after SPC. */
-export type LayerId = "g" | "v" | "s" | "c" | "o" | "w"
+export type LayerId = "g" | "p" | "v" | "s" | "c" | "m" | "o" | "w"
 
 export interface Binding {
   /** Action id the router dispatches (with `args`). The store performs it. */
@@ -116,6 +129,8 @@ export interface Binding {
   when?: (ctx: KeyContext) => boolean
   /** Current state for the menu's state label. */
   state?: (ctx: KeyContext) => StateId | null
+  /** A state that is a value rather than one of the words' states (the zone `SPC o t` draws in), bracketed as they are. */
+  stateText?: (ctx: KeyContext) => string | null
   verdict?: Verdict
   /** false: left out of the help overlay (repeated rows such as SPC v 2~9). */
   help?: boolean
@@ -168,6 +183,26 @@ const MOTION: ReadonlyArray<Binding> = [
   { action: "move.pageUp", keys: ["C-b", "PageUp"], label: "move.pageUp", group: "move", motion: true, verdict: "확인" },
 ]
 
+/**
+ * The numbered projects (moai-o14f): a bare digit, as the TUI's header `<1>`-`<9>` (keys.rs `Project(n)`), and the same
+ * under `SPC p`, whose items are the projects' names. One help row stands for all nine, and the bare and `SPC p` forms
+ * of one digit share it (helpSections joins rows of one action). A digit past the projects that exist does nothing.
+ */
+function digitBindings(prefix = "", modes?: ReadonlyArray<"browse" | "wiki">): Binding[] {
+  return Array.from({ length: 9 }, (_, i): Binding => ({
+    action: "project.jump",
+    args: { number: i + 1 },
+    keys: [`${prefix}${i + 1}`],
+    label: (_w, c) => c.projects?.[i] ?? String(i + 1),
+    helpLabel: "project.jumpHelp",
+    group: "project",
+    ...(modes ? { modes } : {}),
+    when: (c) => i < (c.projects?.length ?? 0),
+    help: i === 0,
+    helpKeys: i === 0 ? [`${prefix}1~9`] : undefined,
+  }))
+}
+
 const BROWSE: ReadonlyArray<Binding> = [
   ...MOTION,
   { action: "enter", keys: ["Enter"], label: "enter", group: "enter", when: listFocus },
@@ -175,8 +210,10 @@ const BROWSE: ReadonlyArray<Binding> = [
   { action: "expand", keys: ["l", "Right"], label: "expand", group: "enter", motion: true, when: listFocus },
   { action: "collapse", keys: ["h", "Left"], label: "collapse", group: "enter", motion: true, when: listFocus },
   { action: "expandAll", keys: ["Tab"], label: "expandAll", group: "enter", when: (c) => listFocus(c) && c.tab !== "board" },
+  ...digitBindings(),
   { action: "search.open", keys: ["/"], label: "search", group: "search" },
   { action: "clear", keys: ["Esc"], label: "clear", group: "search" },
+  { action: "read", keys: ["r"], label: "read", group: "read", when: (c) => c.readable !== false },
   { action: "help", keys: ["?"], label: "help", group: "other", verdict: "추가" },
 ]
 
@@ -281,12 +318,16 @@ const focusMenu = (action: string, key: string, label: KeyLabel, side: Parameter
 const MENU: ReadonlyArray<Binding> = [
   { action: "search.open", keys: ["SPC /"], label: "search", group: "search", modes: BROWSE_ONLY, help: false },
   { action: "filter.open", keys: ["SPC f"], label: "filter", group: "search", modes: BROWSE_ONLY },
+  // Before `SPC g`, as the TUI's table puts its `SPC p` (keys.rs). Only the jumps: registering is the TUI's.
+  ...digitBindings("SPC p ", BOTH),
   { action: "tab.list", keys: ["SPC g l"], label: "tab.list", group: "tab", modes: BOTH },
   { action: "tab.board", keys: ["SPC g b"], label: "tab.board", group: "tab", modes: BOTH },
   { action: "tab.wiki", keys: ["SPC g w"], label: "tab.wiki", group: "tab", modes: BOTH },
   { action: "view.deferred", keys: ["SPC v l"], label: "view.deferred", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.deferred) },
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },
+  // The other worktrees' rows over the list, as the TUI's `SPC v w` (se-etwu); on when the page opens.
+  { action: "view.worktree", keys: ["SPC v w"], label: "view.worktree", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.worktree) },
   { action: "view.all", keys: ["SPC v a"], label: "view.all", helpLabel: "view.allHelp", group: "view", modes: BROWSE_ONLY },
   ...columnBindings,
   { action: "view.detail", keys: ["SPC v d"], label: "view.detail", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(!detailShown(c)) },
@@ -305,6 +346,8 @@ const MENU: ReadonlyArray<Binding> = [
   ...sortBindings,
   { action: "sort.edit", keys: ["SPC s e"], label: "sort.edit", group: "sort", modes: BROWSE_ONLY },
   ...cellBindings,
+  { action: "read.all", keys: ["SPC m a"], label: "read.all", group: "read", modes: BROWSE_ONLY, when: (c) => c.readable !== false },
+  { action: "read.group", keys: ["SPC m g"], label: "read.group", helpLabel: "read.groupHelp", group: "read", modes: BROWSE_ONLY, when: (c) => c.readable !== false },
   {
     action: "option.detailAt",
     keys: ["SPC o d"],
@@ -317,6 +360,16 @@ const MENU: ReadonlyArray<Binding> = [
     state: (c) => detailAt(c),
     verdict: "변경",
   },
+  // The TUI's `SPC o t` (keys.rs `Timezone`): opens the zone picker, it does not cycle. Dates on every tab follow it.
+  {
+    action: "option.timezone",
+    keys: ["SPC o t"],
+    label: "option.timezone",
+    helpLabel: "option.timezoneHelp",
+    group: "option",
+    modes: BOTH,
+    stateText: (c) => c.zone ?? null,
+  },
   focusMenu("focus.next", "w", "focus.next", "next"),
   focusMenu("focus.prev", "W", "focus.prev", "prev"),
   focusMenu("focus.left", "h", "focus.left", "left"),
@@ -327,10 +380,12 @@ const MENU: ReadonlyArray<Binding> = [
 ]
 
 export const LAYERS: ReadonlyArray<Layer> = [
+  { prefix: "SPC p", id: "p" },
   { prefix: "SPC g", id: "g", state: (c) => (c.mode === "wiki" ? "wiki" : c.tab === "board" ? "board" : c.tab ?? "list") },
   { prefix: "SPC v", id: "v" },
   { prefix: "SPC s", id: "s" },
   { prefix: "SPC c", id: "c" },
+  { prefix: "SPC m", id: "m" },
   { prefix: "SPC o", id: "o" },
   { prefix: "SPC w", id: "w" },
 ]
@@ -373,6 +428,7 @@ const WIKI_MOTION: ReadonlyArray<Binding> = MOTION.map((b) =>
 
 const WIKI: ReadonlyArray<Binding> = [
   ...WIKI_MOTION,
+  ...digitBindings(),
   { action: "wiki.enter", keys: ["Enter"], label: "wiki.enter", group: "wiki" },
   { action: "wiki.back", keys: ["Backspace", "h", "Left"], label: "wiki.back", group: "wiki" },
   { action: "wiki.page", keys: ["l", "Right"], label: "wiki.page", group: "wiki", motion: true },
@@ -417,7 +473,9 @@ export function labelOf(binding: Binding, ctx: KeyContext, words: KeyTableCopy =
   return say(binding.label, ctx, words)
 }
 
-export function stateOf(binding: Binding, ctx: KeyContext, words: KeyTableCopy = DEFAULT_WORDS): { id: StateId; label: string } | null {
+export function stateOf(binding: Binding, ctx: KeyContext, words: KeyTableCopy = DEFAULT_WORDS): { id: StateId | "value"; label: string } | null {
+  const text = binding.stateText?.(ctx) ?? null
+  if (text !== null) return { id: "value", label: `[${text}]` }
   const id = binding.state?.(ctx) ?? null
   return id ? { id, label: words.states[id] } : null
 }
@@ -465,7 +523,7 @@ export interface MenuItem {
   /** Item label; a layer item reads '+보기' (the layer's title). */
   label: string
   kind: "toggle" | "action" | "layer"
-  state: { id: StateId; label: string } | null
+  state: { id: StateId | "value"; label: string } | null
   action?: string
   args?: Readonly<Record<string, string | number>>
 }

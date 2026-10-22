@@ -8,20 +8,29 @@
 // leaves it (attachKeyRouter). The mode comes from the store and the focus: `sorter` while the sort editor is
 // open, `prompt` while a search or filter input has the caret, `wiki` on the wiki tab, `browse` otherwise.
 
+import type { Outcome } from "../data/client.ts"
+import { NO_MILESTONE, type IssueIndex, type Path, type Row } from "../data/index.ts"
+import type { ReadMarks } from "../data/read.ts"
 import { sortDefault, type SortDefault } from "../data/memory.ts"
+import { entryOf, numberedNames, type ProjectEntry } from "../data/projects.ts"
 import { SORT_KEYS, sortEdit, type Sort, type SortKey } from "../data/query.ts"
+import { withArchive } from "../data/source.ts"
+import { effectiveZone, zoneNames } from "../data/zone.ts"
 import type { Copy } from "../i18n/index.ts"
 import type { ColumnName, State, Store } from "../store.ts"
 import { statusKeys } from "../view/board-groups.ts"
 import { createHelp, focusHint, type HelpView } from "../view/help.ts"
-import { SHOW_ALL } from "../view/list-model.ts"
+import { SHOW_ALL, UP_KEY } from "../view/list-model.ts"
 import { createMenu, type MenuView } from "../view/menu.ts"
 import { effectivePosition } from "../view/responsive.ts"
 import type { Shell } from "../view/shell.ts"
 import type { ToolbarAction } from "../view/toolbar.ts"
 import type { PaneView } from "../view/types.ts"
+import { createZonePicker, type ZonePicker } from "../view/zones.ts"
 import { attachKeyRouter, createKeyRouter, detectPlatform, type DispatchedAction, type KeyRouter } from "./router.ts"
 import type { CellField, KeyContext, Mode, Platform } from "./table.ts"
+
+export type { ReadMarks }
 
 /** What the context needs besides the store: things only the DOM knows. */
 export interface ContextEnv {
@@ -34,6 +43,8 @@ export interface ContextEnv {
   raw?: boolean
   /** Status column names as the menu labels them (SPC v 1~9); the status itself when left out. */
   statusName?: (status: string) => string
+  /** The read marks can be written: the page was given {@link ReadMarks}. */
+  readable?: boolean
 }
 
 /** The key table's view of the panel (keys/table.ts KeyContext), read from the store. Pure. */
@@ -49,12 +60,15 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
     detailAtLocked: effectivePosition(env.width, "left") !== "left",
     raw: env.raw ?? false,
     // view.showArchived lets archived rows in (list-model.ts FILTER_FLAGS); the table asks whether they are hidden.
-    hidden: { deferred: state.view.hideDeferred, backlog: state.view.hideBacklog, archived: !state.view.showArchived, columns: statuses.map((s) => hidden.has(s)) },
+    hidden: { deferred: state.view.hideDeferred, backlog: state.view.hideBacklog, archived: !state.view.showArchived, worktree: !state.view.worktree, columns: statuses.map((s) => hidden.has(s)) },
     columns: statuses.map((s) => env.statusName?.(s) ?? s),
     // Every field, `id` too (the sort editor and the toolbar offer it): the menu's state on `SPC s p` says "the order
     // is this field alone, pressing flips it", which a dropped field would make untrue.
     sort: state.sort.fields.map((f) => ({ field: f.key, desc: f.dir === "desc" })),
     cells: { ...state.columns },
+    readable: env.readable ?? false,
+    projects: numberedNames(state.projects),
+    zone: effectiveZone(state.zone, state.boot?.timezone),
   }
 }
 
@@ -71,6 +85,21 @@ export interface KeyWiringOptions {
   copy: Copy
   /** Defaults to the navigator's (detectPlatform). */
   platform?: Platform
+  /** The read-mark writes; without them `r` and `SPC m` are not offered (KeyContext.readable). */
+  read?: ReadMarks
+  /**
+   * Opens another project (`1`–`9`, `SPC p 1`–`9`): main.ts navigates to it (data/projects.ts projectHref). The project
+   * on screen is not opened again.
+   */
+  openProject?: (entry: ProjectEntry) => void
+  /** The names the zone picker lists after its first line; defaults to the browser's (data/zone.ts zoneNames). */
+  zoneNames?: () => string[]
+  /**
+   * The index the views draw from (main.ts indexOf): where the row under the cursor lives, and the tree lines no list
+   * printed (an archived group still holding a live member). Without it the read marks look the row up among the
+   * printed rows and read the group from the folder the list is in.
+   */
+  index?: (state: State) => IssueIndex | null
   /**
    * Where `D` saves the default sort; defaults to the panel's shared one. An emptied order returns to the store's
    * `defaultSort`, which `D` sets and data/memory.ts remember() reads from the same storage at boot: pass both the same one.
@@ -82,6 +111,8 @@ export interface KeyWiring {
   router: KeyRouter
   menu: MenuView
   help: HelpView
+  /** The zone picker (`SPC o t`). */
+  zones: ZonePicker
   hint: HTMLElement
   /** The context the router reads now. */
   context(): KeyContext
@@ -128,6 +159,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       wikiPane: wikiPaneEl()?.dataset.pane === "body" ? "body" : "list",
       raw: (onWiki ? panes().wiki?.raw?.() : panes().detail.raw?.()) ?? false,
       statusName: (status) => (copy.stats as Record<string, string>)[status] ?? status,
+      readable: options.read !== undefined,
     })
   }
 
@@ -235,7 +267,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   }
 
   const say = (text: string) => shell.say(text)
-  const flip = (state: State, key: keyof Pick<State["view"], "hideDeferred" | "hideBacklog" | "showArchived">) =>
+  const flip = (state: State, key: keyof Pick<State["view"], "hideDeferred" | "hideBacklog" | "showArchived" | "worktree">) =>
     store.dispatch({ type: "view", view: { [key]: !state.view[key] } })
 
   // ── the dispatch table: every action id of keys/table.ts ──
@@ -262,6 +294,108 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   const sortBy = (how: "replace" | "flip"): Handler => (a) => {
     const field = String(a.args?.field) as SortKey
     setSort(sortEdit(store.getState().sort, field, how))
+  }
+
+  // ── read marks ──
+  /**
+   * The row under the cursor and, when the index draws it, where it lives. The index's row is the one the list draws:
+   * the archive's answer too while archived rows are shown, and a tree line no list printed (an archived group still
+   * holding a live member, or every archived group while the archive is still being read) as `archived: true`
+   * (data/index.ts). Without an index, or for a row it does not hold, the rows as the lists and the archive printed
+   * them, tagged as main.ts indexOf tags them (source.ts withArchive).
+   */
+  function cursorRow(): { row: Row; home?: Path } | undefined {
+    const state = store.getState()
+    const board = state.board.value
+    if (state.cursor === null || !board) return undefined
+    const index = options.index?.(state)
+    const at = index?.find(state.cursor)
+    if (index && at !== undefined) return { row: index.rows[at]!, home: index.homeOf(at) }
+    const row = withArchive(board, state.view.showArchived ? state.archive : null).find((r) => r.id === state.cursor)
+    return row ? { row } : undefined
+  }
+  /**
+   * The row under the cursor that takes a read mark: an archived one takes none, as it draws no NEW (`moai read`
+   * resolves active rows only, read.ts isUnread).
+   */
+  function rowHere(): Row | undefined {
+    const row = cursorRow()?.row
+    return row?.archived === true ? undefined : row
+  }
+  /**
+   * The group `SPC m g` marks: the milestone or epic under the cursor, else the innermost one the cursor row lives in.
+   * Undefined when the group under the cursor is archived: it takes no mark, and the place around it is not marked
+   * in its stead (the cursor named the group, not the place).
+   */
+  function groupHere(): string | null | undefined {
+    const state = store.getState()
+    const here = cursorRow()
+    const row = here?.row
+    if (row && (row.kind === "milestone" || row.kind === "epic")) return row.archived === true ? undefined : row.id
+    // No row under the cursor — `..`, or a folder left empty: the TUI asks for a row inside a group
+    // (`tui.read.pick_in_group`). Reading the folder here marked the whole group around it read.
+    if (state.cursor === null || state.cursor === UP_KEY) return null
+    // Where the row lives, not the folder the list is in (the TUI's `group_of`): a member of an epic unfolded in place
+    // inside a milestone stands in that milestone's folder, and reading the folder marked the whole milestone read —
+    // a write nothing takes back. A bucket line, which the index places nowhere, reads the folder, as there.
+    // The "(no milestone)" bucket (`m:`, NO_MILESTONE) is a place, not a group: it has no id to mark.
+    const place = [...(here?.home ?? state.path)].reverse().find((segment) => (segment.startsWith("m:") && segment !== NO_MILESTONE) || segment.startsWith("e:"))
+    return place ? place.slice(2) : null
+  }
+  function marking(write: (marks: ReadMarks) => Promise<Outcome | null> | null): Handler {
+    return () => {
+      const marks = options.read
+      if (!marks) return say(copy.keys.readUnavailable)
+      const writing = write(marks)
+      if (!writing) return
+      void writing.then((outcome) => {
+        // A mark that went through says nothing: its NEW goes with the rows read again after it (main.ts marked()).
+        // It does clear the line a mark that failed before left there — nothing else writes that line.
+        if (outcome) shell.refuse(outcome)
+        else shell.say("")
+      })
+    }
+  }
+  const readOne = marking((marks) => {
+    const row = rowHere()
+    return row ? marks.one(row.id) : null
+  })
+  const readAll = marking((marks) => marks.all())
+  const readGroup = marking((marks) => {
+    const id = groupHere()
+    // An archived group under the cursor: nothing to mark, as `r` on an archived row.
+    if (id === undefined) return null
+    if (id === null) {
+      say(copy.keys.readNoGroup)
+      return null
+    }
+    return marks.group(id)
+  })
+
+  // ── projects ──
+  /** `1`–`9` and `SPC p 1`–`9`: the project with that number, unless it is the one on screen (the TUI stays put). */
+  const jump: Handler = (a) => {
+    const entry = entryOf(store.getState().projects, Number(a.args?.number))
+    if (!entry || entry.current) return
+    options.openProject?.(entry)
+  }
+
+  // ── the zone picker ──
+  const zones = createZonePicker(doc, {
+    words: copy.keys.zone,
+    names: options.zoneNames ?? zoneNames,
+    pick: (zone) => store.dispatch({ type: "zone", zone }),
+    closed: (away) => {
+      // Back to the pane the keys were in; a click outside that moved the focus elsewhere keeps it there. `away` is that
+      // click (or a Tab) seen from inside the focusout, where the focus has left the picker and not yet arrived.
+      if (away) return
+      const at = doc.activeElement
+      if (!at || at === doc.body || zones.el.contains(at)) backToPane()
+    },
+  })
+  const openZones: Handler = () => {
+    const state = store.getState()
+    zones.open({ chosen: state.zone, tui: state.boot?.timezone ?? null })
   }
 
   const handlers: Record<string, Handler> = {
@@ -291,6 +425,11 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       if (state.search.open || state.search.text) toolbar({ type: "search-close" })
       if (state.filter.text || state.filter.applied) store.dispatch({ type: "filter", text: "" })
     },
+    read: readOne,
+    "read.all": readAll,
+    "read.group": readGroup,
+    "project.jump": jump,
+    "option.timezone": openZones,
     help: (a) => help.open(a.mode, context()),
     "tab.list": tab("list"),
     "tab.board": tab("board"),
@@ -298,6 +437,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "view.deferred": () => flip(store.getState(), "hideDeferred"),
     "view.backlog": () => flip(store.getState(), "hideBacklog"),
     "view.archived": () => flip(store.getState(), "showArchived"),
+    "view.worktree": () => flip(store.getState(), "worktree"),
     "view.all": () => store.dispatch({ type: "view", view: SHOW_ALL }),
     "view.column": (a) => {
       const state = store.getState()
@@ -429,7 +569,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   const help = createHelp(doc, { platform, words: copy.table })
   const hint = focusHint(doc, copy.keys.focusHint)
   hint.addEventListener("click", () => doc.body.focus({ preventScroll: true }))
-  doc.body.append(menu.el, help.el, hint)
+  doc.body.append(menu.el, help.el, zones.el, hint)
 
   const showHint = () => {
     hint.hidden = doc.hasFocus()
@@ -492,6 +632,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     router,
     menu,
     help,
+    zones,
     hint,
     context,
     actions: Object.keys(handlers),
@@ -504,8 +645,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       doc.removeEventListener("focusin", showHint)
       doc.removeEventListener("focusin", settle)
       help.close()
+      zones.close()
       menu.el.remove()
       help.el.remove()
+      zones.el.remove()
       hint.remove()
     },
   }

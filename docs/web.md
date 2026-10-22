@@ -2,7 +2,8 @@
 
 `moai web` serves the tracker as a page on your own machine: a board, a list and
 the repository's wiki, with the issue under the cursor described below or beside
-it. It reads, and only reads. The page is the [explorer](explorer.md) for a
+it. It reads the tracker and never writes it — the one thing it writes is your
+own read marks. The page is the [explorer](explorer.md) for a
 browser tab — same words, same filter syntax, same keys where a browser allows —
 so that a person who would rather not live in a terminal can still see how the
 work stands.
@@ -26,6 +27,19 @@ flags.
   same one every other command reads
 
 ## What you see
+
+Across the top stands the explorer's header: the moai logo, then `User` (who
+the page reads as, named the way the project's `naming` says) and `Version`
+(this moai, and what the explorer last heard of the latest release — the page
+never asks GitHub itself). A short window leaves the header out and a narrow one
+the logo, as the explorer does.
+
+Beside them stand your [registered projects](explorer.md), numbered `<1>` to
+`<9>` as in the explorer's header, the one on screen marked. Click one, press
+its number, or pick it under `SPC p`, and the page reads that project instead:
+the address becomes `/?project=<its path>`, so a reload or a bookmark stays on
+it. The project the server was started in comes first when it is not
+registered itself. Only registered projects can be read this way.
 
 The page has three tabs.
 
@@ -57,24 +71,40 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   turns it around. The capital letter adds the field to the end of the order. `SPC s e`
   opens the sort editor
 - **View** (`SPC v`) shows or hides deferred work (`l`), backlog items (`b`) and
-  the archive (`o`); `a` shows everything but the archive, `1`~`9` toggle the nth
-  status column
+  the archive (`o`); `w` overlays what the other worktrees changed, as
+  `moai show --worktree` does (on when the page opens); `a` shows everything but
+  the archive, `1`~`9` toggle the nth status column
 - **Column** (`SPC c`) picks what a list row carries: `i` id, `p` priority,
   `a` assignee, `c` created, `u` updated, `n` counts, `t` tags, `e` epic,
   `h` names
 
-The page remembers its tab, where the detail sits, the filter, the sort, the view
-and the columns in the browser's own local storage, kept per address — each
-project's page has its own. The search is not kept. A browser that keeps no site
-data (a private window) remembers them until the tab is closed.
+The page remembers its tab, where the detail sits and the time zone, and keeps the
+filter, the sort, the view and the columns apart for each project it reads, in the
+browser's own local storage — one project's filter never lands on another's page.
+The search is not kept. A browser that keeps no site data (a private window)
+remembers them until the tab is closed.
 
-## It only reads
+## Time zone
+
+Dates are drawn in the zone the explorer uses (`[tui] timezone` in your user
+config), or the browser's own when you have not picked one. `SPC o t` opens a
+list of zones to pick from — type to narrow it, `Enter` to take one. The choice
+only changes what this page draws and is kept in the browser; it never touches
+your user config.
+
+## It does not write the tracker
 
 Nothing on the page changes the tracker. Each list, issue and wiki page it shows
 is the answer of `moai --json <command>`, run in a child process for that request
 and passed on as it is, so what you see is exactly what the CLI says. Writing
 stays where it was: the CLI for moving, editing and noting, and the explorer's
 `SPC n` for a thought you want to park.
+
+The one exception is read marks. `r` marks the issue under the cursor read,
+`SPC m a` everything new to you and `SPC m g` the group under the cursor — the
+same as `moai read`, which keeps them in a file of your own beside your user
+config and never in the tracker. The server takes that write only from the page
+itself: a request another site sends is refused.
 
 Nothing is stored for the page either: each list is read again when you ask.
 Search, filters and sort are moai's own — the server hands them to `moai show`
@@ -125,7 +155,9 @@ comes from the start. The rest come from the server while it runs:
 | Code | Means |
 |---|---|
 | `forbidden_host` | The `Host` header was not `localhost` or an IP address |
-| `method_not_allowed` | Anything but `GET`; the page never writes |
+| `forbidden_origin` | A read mark sent from anywhere but this page |
+| `not_registered` | `?project=` names a directory that is not a registered project |
+| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read |
 | `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take |
 | `not_found` | No such path |
 | `busy` | Too many requests at once; try again |
@@ -176,6 +208,16 @@ once and the keys reach it.
 | `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
 | `SPC g l` `b` `w` | List / board / wiki tab |
 | `SPC o d` | Detail position: left or below |
+| `SPC o t` | Pick the time zone dates are drawn in |
+
+**Projects and read marks**
+
+| Key | Does |
+|---|---|
+| `1`~`9` or `SPC p 1`~`9` | Read the project with that number |
+| `r` | Mark the issue under the cursor read |
+| `SPC m a` | Mark everything new to you read |
+| `SPC m g` | Mark the group under the cursor read |
 
 **Search, filter**
 
@@ -219,7 +261,7 @@ once and the keys reach it.
 | `/` | Search titles and bodies |
 | `SPC v r` | Raw / rendered page |
 
-The page is tied to the one tracker the server was started in: it does not switch
-between projects, show the stats screen, or write read marks.
+The page does not show the stats screen, and the one thing it writes is your read
+marks.
 
 Decided in: moai-0aa7, moai-jshy

@@ -41,11 +41,11 @@ const wikiSource = () => ({
   },
 })
 
-function boot({ wiki, read, rows = ROWS, platform = 'other', sortDefault = createSortDefault() } = {}) {
+function boot({ wiki, read, rows = ROWS, tree = treeOf(rows), platform = 'other', sortDefault = createSortDefault() } = {}) {
   const dom = new JSDOM('<!doctype html><html lang="en"><body><div id="moai-app"></div></body></html>', { pretendToBeVisual: true })
   const doc = dom.window.document
   const store = createStore()
-  const index = new IssueIndex(rows, treeOf(rows))
+  const index = new IssueIndex(rows, tree)
   const chosen = []
   const shell = mountShell(doc.getElementById('moai-app'), {
     document: doc,
@@ -67,7 +67,7 @@ function boot({ wiki, read, rows = ROWS, platform = 'other', sortDefault = creat
     wiki,
   })
   store.dispatch({ type: 'board-loaded', data: { rows, more: 0, loadedAt: Date.now() } })
-  const keys = wireKeys({ document: doc, store, shell, copy: en, platform, read, sortDefault })
+  const keys = wireKeys({ document: doc, store, shell, copy: en, platform, read, sortDefault, index: (state) => (state.board.value ? index : null) })
   const $ = (selector) => doc.querySelector(selector)
   /** A keydown on `target` (the focused element when left out), as the browser sends it. */
   const press = (key, init = {}, target = doc.activeElement ?? doc.body) => {
@@ -371,13 +371,14 @@ test('keys: the board — j/k inside a column, l to the next column with cards, 
   assert.deepEqual(panel.chosen, ['e1.b'])
 })
 
-test('keys: every action of the key table has a dispatch target; the page marks nothing read', () => {
+test('keys: every action of the key table has a dispatch target; without read writes the read marks are not offered', () => {
   const panel = inEpic()
   const ids = new Set(Object.values(KEY_TABLE).flat().map((binding) => binding.action))
   const missing = [...ids].filter((id) => !panel.keys.actions.includes(id))
   assert.deepEqual(missing, [])
   for (const id of Object.keys(NOT_WIRED)) assert.ok(ids.has(id), `${id} is a table action`)
-  // The page only reads: there is no SPC m layer, and `r` runs nothing.
+  // Not given the read writes, `r` and SPC m are unavailable: the menu has no SPC m layer and `r` runs nothing.
+  assert.equal(panel.keys.context().readable, false)
   panel.press(' ')
   assert.equal(panel.keys.menu.el.querySelector('[data-key="m"]'), null)
   panel.press('Escape')
@@ -805,4 +806,126 @@ test('keys: an English panel draws the SPC menu and the help in English, with no
   panel.press('Escape')
   panel.seq(' ', 's', 'e')
   assert.doesNotMatch(panel.$('.m-sort-pop').textContent, /[가-힣]/)
+})
+
+// ── read marks (moai-ly88): upstream's `r`, `SPC m a`, `SPC m g`, restored ──
+
+test('keys: r marks the cursor row read, SPC m a everything, SPC m g the group the list stands in; a refusal is told', async () => {
+  const calls = []
+  let refuse = null
+  const read = {
+    one: async (id) => (calls.push(['one', id]), refuse),
+    all: async () => (calls.push(['all']), refuse),
+    group: async (id) => (calls.push(['group', id]), refuse),
+  }
+  const panel = inEpic({ read })
+  assert.equal(panel.keys.context().readable, true)
+  panel.press(' ')
+  assert.ok(panel.keys.menu.el.querySelector('[data-key="m"]'), 'the SPC m layer is offered')
+  panel.press('Escape')
+  assert.equal(panel.press('r').defaultPrevented, true)
+  panel.seq(' ', 'm', 'a')
+  // Inside the epic with a task under the cursor: the group is the epic.
+  panel.seq(' ', 'm', 'g')
+  await ticks()
+  assert.deepEqual(calls, [['one', 'e1.a'], ['all'], ['group', 'e1']])
+  // A group under the cursor is the one marked.
+  panel.store.dispatch({ type: 'enter', path: ['m:m1'], cursor: 'e1' })
+  panel.shell.focusPane('list')
+  panel.seq(' ', 'm', 'g')
+  // At the root, on the milestone row.
+  panel.store.dispatch({ type: 'enter', path: [], cursor: 'm1' })
+  panel.seq(' ', 'm', 'g')
+  await ticks()
+  assert.deepEqual(calls.slice(3), [['group', 'e1'], ['group', 'm1']])
+  // A write that did not go through says why on the result line.
+  refuse = { kind: 'moai-error', message: 'the read file is held' }
+  panel.store.dispatch({ type: 'enter', path: ['m:m1', 'e:e1'], cursor: 'e1.b' })
+  panel.shell.focusPane('list')
+  panel.press('r')
+  await ticks()
+  assert.deepEqual(calls.at(-1), ['one', 'e1.b'])
+  assert.equal(panel.$('.moai-result').textContent, en.moaiError('the read file is held'))
+  // A later mark that goes through takes that line away: nothing else writes it.
+  refuse = null
+  panel.press('r')
+  await ticks()
+  assert.equal(panel.$('.moai-result').textContent, '')
+})
+
+test('keys: SPC m g on a member of an epic unfolded in place marks that epic, not the milestone the list is in', async () => {
+  const calls = []
+  const read = { one: async () => null, all: async () => null, group: async (id) => (calls.push(id), null) }
+  const panel = boot({ read })
+  // Inside the milestone, the epic unfolded with `l`: the list's folder stays the milestone.
+  panel.store.dispatch({ type: 'enter', path: ['m:m1'], cursor: 'e1' })
+  panel.store.dispatch({ type: 'toggle-expanded', path: ['m:m1', 'e:e1'] })
+  panel.store.dispatch({ type: 'cursor', id: 'e1.a' })
+  panel.shell.focusPane('list')
+  assert.deepEqual(panel.state().path, ['m:m1'])
+  panel.seq(' ', 'm', 'g')
+  // At the root, the milestone and the epic unfolded: the member's epic still.
+  panel.store.dispatch({ type: 'enter', path: [], cursor: 'm1' })
+  panel.store.dispatch({ type: 'toggle-expanded', path: ['m:m1'] })
+  panel.store.dispatch({ type: 'cursor', id: 'e1.b' })
+  panel.seq(' ', 'm', 'g')
+  await ticks()
+  assert.deepEqual(calls, ['e1', 'e1'], 'reading the folder marked the whole milestone (or nothing at the root)')
+  // On `..` there is no row: the TUI asks for one inside a group (`tui.read.pick_in_group`) rather than mark the folder's.
+  panel.store.dispatch({ type: 'enter', path: ['m:m1'], cursor: '..' })
+  panel.seq(' ', 'm', 'g')
+  await ticks()
+  assert.deepEqual(calls, ['e1', 'e1'], 'the milestone around `..` was marked')
+  assert.equal(panel.$('.moai-result').textContent, en.keys.readNoGroup)
+})
+
+test('keys: an archived epic the tree alone draws (archive hidden) takes no mark, and the milestone is not marked in its stead', async () => {
+  const calls = []
+  const read = { one: async () => null, all: async () => null, group: async (id) => (calls.push(id), null) }
+  // `e9` closed and archived, its member reopened: /api/rows prints the member, /api/tree draws the epic as its folder.
+  const e9 = { id: 'e9', kind: 'epic', title: 'Old epic', milestone: 'm1', status: 'done' }
+  const member = { id: 'e9.a', kind: 'issue', title: 'Reopened', epic: 'e9', derived_epic: 'e9', milestone: 'm1', status: 'todo' }
+  const panel = boot({ read, rows: [...ROWS, member], tree: treeOf([...ROWS, e9, member]) })
+  panel.store.dispatch({ type: 'enter', path: ['m:m1'], cursor: 'e9' })
+  panel.shell.focusPane('list')
+  assert.ok(panel.lines().includes('e9'), 'the archived epic is drawn as the member\'s folder')
+  panel.seq(' ', 'm', 'g')
+  await ticks()
+  assert.deepEqual(calls, [])
+})
+
+test('keys: SPC m g in the "(no milestone)" bucket says where to go and writes nothing', () => {
+  const calls = []
+  const read = { one: async () => null, all: async () => null, group: async (id) => (calls.push(id), null) }
+  const panel = boot({ read, rows: [...ROWS, { id: 'x1', kind: 'issue', title: 'Loose', status: 'todo' }] })
+  panel.store.dispatch({ type: 'enter', path: ['m:'], cursor: 'x1' })
+  panel.shell.focusPane('list')
+  panel.seq(' ', 'm', 'g')
+  assert.deepEqual(calls, [])
+  assert.equal(panel.$('.moai-result').textContent, en.keys.readNoGroup)
+})
+
+test('keys: an archived row and an archived group take no mark — not the milestone around it either', async () => {
+  const calls = []
+  const read = { one: async (id) => (calls.push(['one', id]), null), all: async () => null, group: async (id) => (calls.push(['group', id]), null) }
+  const panel = boot({ read })
+  panel.store.dispatch({ type: 'enter', path: ['m:m1'], cursor: 'e1' })
+  panel.shell.focusPane('list')
+  // An archive-only row is archived (source.ts withArchive tags it).
+  panel.store.dispatch({ type: 'view', view: { showArchived: true } })
+  panel.store.dispatch({ type: 'archive', rows: [...ROWS, { id: 'e9', kind: 'epic', title: 'Old epic', milestone: 'm1', status: 'done' }, { id: 'e1.z', kind: 'issue', title: 'Zeta', epic: 'e1', status: 'done' }] })
+  panel.store.dispatch({ type: 'cursor', id: 'e9' })
+  panel.seq(' ', 'm', 'g')
+  panel.store.dispatch({ type: 'cursor', id: 'e1.z' })
+  panel.press('r')
+  await ticks()
+  assert.deepEqual(calls, [], 'the archived epic and row take no mark, and m1 is not marked in their stead')
+  // An active group under the cursor is still the one marked, and a row that is no group marks the place.
+  panel.store.dispatch({ type: 'cursor', id: 'e1' })
+  panel.seq(' ', 'm', 'g')
+  panel.store.dispatch({ type: 'enter', path: ['m:m1', 'e:e1'], cursor: 'e1.a' })
+  panel.shell.focusPane('list')
+  panel.seq(' ', 'm', 'g')
+  await ticks()
+  assert.deepEqual(calls, [['group', 'e1'], ['group', 'e1']])
 })

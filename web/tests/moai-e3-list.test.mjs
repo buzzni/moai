@@ -102,6 +102,9 @@ test('lines: .. below the root, folders first, open folders unfolded in place wi
   assert.equal(model.twigText(open[2].twig), '└─')
   assert.equal(model.twigText(open[1].twig), '')
   assert.equal(model.twigText([true, true, false]), '│ └─')
+  // Each level is drawn as lines in the row's full height (se-gowr.4x9); the parts name which lines.
+  assert.deepEqual(model.twigParts([true, true, false, true]), ['pipe', 'blank', 'tee'])
+  assert.deepEqual(model.twigParts([true]), [])
   assert.equal(model.parentLine(open, 2), 1)
   assert.equal(model.parentLine(open, 3), -1)
   assert.deepEqual(model.folderOf(open[1]), { path: [...EPIC, 'i:se-e1.a'], open: true })
@@ -229,6 +232,7 @@ test('list view: rows, columns, the name line, and going in and out', () => {
   key('ArrowRight')
   assert.deepEqual(lines().map((line) => line.dataset.key), ['..', 'se-e1.a', 'se-e1.a.x', 'se-e1.b'])
   assert.equal(lines()[2].querySelector('.moai-twig').textContent, '└─')
+  assert.deepEqual([...lines()[2].querySelectorAll('.moai-twig .moai-tw')].map((part) => part.dataset.tw), ['end'])
   key('ArrowDown')
   assert.equal(store.getState().cursor, 'se-e1.a.x')
   key('ArrowLeft')
@@ -468,4 +472,10 @@ test('list view: NEW stands after the branch and before the name (design 4.1)', 
   assert.ok(twig.classList.contains('moai-twig'), 'the row hangs under its folder: it has a branch')
   assert.ok(chip.classList.contains('m-chip-new'))
   assert.equal(title.textContent, '└─NEW Rows')
+})
+
+test('list view: rows are 24 high, as list.css --moai-row-h, so the branches meet (se-gowr.4x9)', () => {
+  assert.equal(ROW_HEIGHT, 24)
+  const listCss = readFileSync(new URL('../panel/style/list.css', import.meta.url), 'utf8')
+  assert.match(listCss, /--moai-row-h: 24px/)
 })

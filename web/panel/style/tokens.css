@@ -15,6 +15,15 @@
   --fb-accent: #1B64DA; --fb-accent-contrast: #FFFFFF; --fb-danger: #EF4444;
   --warn: #b9730a;
   --shadow-md: 0 2px 6px rgba(20, 27, 56, .07), 0 18px 40px -14px rgba(20, 27, 56, .20);
+  /* The kanban (components.css 5.7): grey lanes, cards on them with a shadow under. */
+  --lane-bg: #F4F5F7; --card-bg: var(--bg);
+  --shadow-card: 0 1px 1px rgba(9, 30, 66, .25), 0 0 1px rgba(9, 30, 66, .31);
+  /* How much of the column's colour the card's shadow takes (components.css .m-card); less on a dark ground. */
+  --card-tint-strength: 100%;
+  /* The band over a held title (components.css m-glint): the TUI's yellow at the edges, a brighter one in the middle. */
+  --glint-edge: var(--warn); --glint-core: #F2B01E;
+  /* The TUI's branch colour, bright cyan (view/branch.ts). */
+  --branch: #0891B2;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -23,6 +32,11 @@
     --fb-accent: #2470E4;
     --warn: #fbc04e;
     --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+    --lane-bg: #1A1D22; --card-bg: var(--surface);
+    --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+    --card-tint-strength: 28%;
+    --glint-edge: var(--warn); --glint-core: #FFE7A3;
+    --branch: #22D3EE;
   }
 }
 :root[data-theme="dark"] {
@@ -31,6 +45,11 @@
   --fb-accent: #2470E4;
   --warn: #fbc04e;
   --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+  --lane-bg: #1A1D22; --card-bg: var(--surface);
+  --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+  --card-tint-strength: 28%;
+  --glint-edge: var(--warn); --glint-core: #FFE7A3;
+  --branch: #22D3EE;
 }
 
 :root {
@@ -45,6 +64,7 @@
   --danger: var(--saycode-danger, var(--fb-danger));
   --radius: var(--saycode-radius, 10px);
   --radius-xs: 6px;
+  --radius-card: 3px;
   --font: var(--saycode-font, Inter, Pretendard, system-ui, -apple-system, "Segoe UI", sans-serif);
   --mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, monospace;
 

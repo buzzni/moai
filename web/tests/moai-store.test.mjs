@@ -113,6 +113,7 @@ test('matchKey: nothing to ask while the filter and the search are empty; else o
   assert.notEqual(asked, '')
   assert.notEqual(matchKey({ ...state, search: { text: 'grid', open: true } }), asked)
   assert.notEqual(matchKey({ ...state, filter: { text: '', applied: 'status=todo' }, view: { ...state.view, showArchived: true } }), asked, 'the archive is part of the question')
+  assert.notEqual(matchKey({ ...state, filter: { text: '', applied: 'status=todo' }, view: { ...state.view, worktree: !state.view.worktree } }), asked, 'so is the worktree overlay')
 })
 
 test('moai\'s answers: ids come for the question on screen, an older question\'s answer is dropped, a refusal keeps the ids', () => {

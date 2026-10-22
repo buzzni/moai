@@ -15,6 +15,15 @@
   --fb-accent: #1B64DA; --fb-accent-contrast: #FFFFFF; --fb-danger: #EF4444;
   --warn: #b9730a;
   --shadow-md: 0 2px 6px rgba(20, 27, 56, .07), 0 18px 40px -14px rgba(20, 27, 56, .20);
+  /* The kanban (components.css 5.7): grey lanes, cards on them with a shadow under. */
+  --lane-bg: #F4F5F7; --card-bg: var(--bg);
+  --shadow-card: 0 1px 1px rgba(9, 30, 66, .25), 0 0 1px rgba(9, 30, 66, .31);
+  /* How much of the column's colour the card's shadow takes (components.css .m-card); less on a dark ground. */
+  --card-tint-strength: 100%;
+  /* The band over a held title (components.css m-glint): the TUI's yellow at the edges, a brighter one in the middle. */
+  --glint-edge: var(--warn); --glint-core: #F2B01E;
+  /* The TUI's branch colour, bright cyan (view/branch.ts). */
+  --branch: #0891B2;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -23,6 +32,11 @@
     --fb-accent: #2470E4;
     --warn: #fbc04e;
     --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+    --lane-bg: #1A1D22; --card-bg: var(--surface);
+    --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+    --card-tint-strength: 28%;
+    --glint-edge: var(--warn); --glint-core: #FFE7A3;
+    --branch: #22D3EE;
   }
 }
 :root[data-theme="dark"] {
@@ -31,6 +45,11 @@
   --fb-accent: #2470E4;
   --warn: #fbc04e;
   --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+  --lane-bg: #1A1D22; --card-bg: var(--surface);
+  --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+  --card-tint-strength: 28%;
+  --glint-edge: var(--warn); --glint-core: #FFE7A3;
+  --branch: #22D3EE;
 }
 
 :root {
@@ -45,6 +64,7 @@
   --danger: var(--saycode-danger, var(--fb-danger));
   --radius: var(--saycode-radius, 10px);
   --radius-xs: 6px;
+  --radius-card: 3px;
   --font: var(--saycode-font, Inter, Pretendard, system-ui, -apple-system, "Segoe UI", sans-serif);
   --mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, monospace;
 
@@ -86,7 +106,7 @@ body {
 
 /*
  * Moai panel components. Specs: docs/moai-panel/look-and-feel.md section 5. Flat design: shadows only on
- * menus and popovers. Class names are m-* and built by view/components.ts, view/tabs.ts, view/split.ts.
+ * menus, popovers and the kanban's cards. Class names are m-* and built by view/components.ts, view/tabs.ts, view/split.ts.
  * Needs tokens.css.
  */
 
@@ -117,7 +137,11 @@ body {
   transition: background .15s, color .15s;
 }
 .m-tab:hover, .m-tab[aria-selected="true"] { background: var(--hover); }
-.m-tab[aria-selected="true"] { color: var(--text); font-weight: 600; }
+.m-tab[aria-selected="true"] { position: relative; color: var(--text); font-weight: 600; }
+/* The chosen tab stands on the bar's bottom line with a short accent under it (se-gowr.l7b). */
+.m-tab[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -5px; height: 2px; border-radius: 2px 2px 0 0; background: var(--accent);
+}
 .m-tab .m-icon { width: 15px; height: 15px; }
 .m-tabbar-spacer { flex: 1 1 auto; }
 .m-tabbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
@@ -241,7 +265,7 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
 .m-row-dim { opacity: .6; }
 .m-row-head {
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px;
-  background: var(--bg); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border-soft);
+  background: var(--lane-bg); color: var(--muted); font-size: 11px; font-weight: 500; border-bottom: 1px solid var(--border-soft);
 }
 
 /* Right-hand columns: fixed widths, they drop out as the list narrows (see responsive.ts). */
@@ -262,34 +286,93 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
 .m-st-review { color: var(--review); }
 .m-st-done { color: var(--ok); }
 .m-st-other { color: var(--accent); }
+/* What someone holds moves as in the TUI (view/spin.ts, se-gowr.oie). The glyph turns through the braille spinner, a
+   frame every 120 ms; ▸ stays in the DOM, for a screen reader and for the tests, and the spinner is drawn over it.
+   A yellow band runs over the title from left to right, a cell every 120 ms, and rests 8 cells past the end before it
+   comes in again (--glint-time, set per title). On an inline title that wraps, the band runs the lines in order.
+   Without motion both stand still: ▸, and the title in its own colour. */
 @media (prefers-reduced-motion: no-preference) {
-  .m-st-in_progress.m-pulse { animation: m-pulse 2.4s ease-in-out infinite; }
+  .m-spin { position: relative; color: transparent; }
+  /* One spinner for every started column: review's, its magenta at the regular weight (field test). In-progress's own
+     amber, and the bold its glyph carries, left the braille dots faint in Desktop, deepened or not. */
+  .m-spin::before {
+    content: "\280B"; position: absolute; inset: 0; color: var(--review); font-weight: 400; text-align: center;
+    animation: m-spin 1.2s step-start infinite;
+  }
+  .m-glint {
+    --glint-band: 3ch;
+    color: transparent;
+    background-image:
+      linear-gradient(90deg, transparent, var(--glint-edge) 25%, var(--glint-core) 50%, var(--glint-edge) 75%, transparent),
+      linear-gradient(var(--text), var(--text));
+    background-size: var(--glint-band) 100%, 100% 100%;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text; background-clip: text;
+    animation: m-glint var(--glint-time, 3s) linear infinite;
+  }
+  /* A search hit keeps its mark and its words readable; the band skips it. */
+  /* `.m-mark` too: `mark.m-mark` below weighs as much and comes later, and its `color: inherit` took the band's
+     transparent ink — the hit's letters vanished under its opaque background. */
+  .m-glint mark, .m-glint mark.m-mark { color: var(--text); }
 }
-@keyframes m-pulse { 50% { opacity: .55; } }
+@keyframes m-spin {
+  0% { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; } 40% { content: "\283C"; }
+  50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; } 80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+/* From one band's width left of the title to 8 cells past its end: a percentage here is of the title less the band. */
+@keyframes m-glint {
+  from { background-position: calc(-1 * var(--glint-band)) 0, 0 0; }
+  to { background-position: calc(100% + var(--glint-band) + 8ch) 0, 0 0; }
+}
 .m-p0 { color: var(--danger); font-weight: 700; }
 .m-p1 { color: var(--danger); }
 .m-p2 { color: var(--text); }
 .m-p3 { color: var(--muted); }
 .m-epicname { color: var(--epic); }
+/* `⎇ <branch>`: a row another worktree holds (view/branch.ts), in the TUI's bright cyan, bold. */
+.m-branch { color: var(--branch); font: 600 12px var(--mono); white-space: nowrap; }
+.m-crumbs-trees { overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
 mark.m-mark { background: var(--warn-soft); color: inherit; border-radius: 2px; }
 
 /* ---- Kanban (5.7) ---- */
-.m-board { display: flex; gap: 2px; background: var(--border-soft); min-height: 0; overflow: auto; }
-.m-lane { flex: 1 0 200px; min-width: 200px; display: flex; flex-direction: column; background: var(--surface); }
-.m-lane-head { position: sticky; top: 0; display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--surface); font: 600 12px var(--font); }
-.m-card {
-  margin: 4px 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+/* Grey lanes on the panel's background with white cards on them (se-gowr.0vl). One gap stands between two cards and
+   between a card and its lane's sides; the lanes sit closer together. view/board.ts sizes the board from the same
+   numbers, so a change here goes there too. */
+.m-board-wrap { --board-gap: 6px; --board-lane-gap: 4px; padding: var(--board-gap); }
+.m-swim-head { display: flex; align-items: center; gap: 6px; padding: 8px 2px 6px; font: 600 12px var(--font); }
+.m-swim-head .m-count { color: var(--muted); font: 11px var(--mono); }
+.m-swim-head:first-child { padding-top: 2px; }
+.m-board { display: flex; gap: var(--board-lane-gap); min-height: 0; }
+.m-lane {
+  flex: 1 0 200px; min-width: 200px; display: flex; flex-direction: column; gap: var(--board-gap);
+  padding: 0 var(--board-gap) var(--board-gap); border-radius: var(--radius-card); background: var(--lane-bg);
 }
-.m-card[aria-selected="true"] { background: var(--selected); border-color: var(--accent); }
+.m-lane-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px;
+  background: var(--lane-bg); color: var(--muted); font: 600 12px var(--font);
+}
+.m-lane-head .m-count { margin-left: auto; font: 11px var(--mono); }
+.m-lane-empty { padding: 2px 4px; color: var(--muted); font-size: 12px; }
+/* Every card casts a faint blue shadow under it (se-26dv): the field test tried one colour per column and settled on
+   the done column's for all. */
+.m-card {
+  --card-tint: #CFE6F7;
+  --card-glow: 0 3px 6px color-mix(in srgb, var(--card-tint) var(--card-tint-strength), transparent);
+  padding: 8px 10px; border-radius: var(--radius-card); background: var(--card-bg); box-shadow: var(--shadow-card), var(--card-glow);
+  cursor: pointer; transition: background .15s;
+}
+.m-card:hover { background: color-mix(in srgb, var(--text) 3%, var(--card-bg)); }
+.m-card[aria-selected="true"] { background: var(--selected); box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-card), var(--card-glow); }
+.m-card:focus-visible { outline-offset: 1px; }
 
 /* ---- Empty state, banner, kbd (5.9) ---- */
 .m-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 16px; padding: 24px;
-  border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); text-align: center;
+  border-radius: var(--radius-card); background: var(--lane-bg); color: var(--muted); text-align: center;
 }
-.m-empty-icon { display: inline-flex; padding: 8px; border-radius: 999px; background: var(--muted-bg); }
+.m-empty-icon { display: inline-flex; padding: 8px; border-radius: 999px; background: var(--card-bg); color: var(--muted); }
 .m-empty-icon .m-icon { width: 18px; height: 18px; }
-.m-empty-title { color: var(--text); font-weight: 600; }
+.m-empty-title { color: var(--text); font-weight: 500; }
 .m-banner {
   display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid var(--border);
   border-radius: 10px; background: var(--muted-bg); color: var(--text); font-size: 12px;
@@ -344,6 +427,10 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
  * Needs tokens.css and components.css.
  */
 .m-card-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+/* A chip on a card (an epic's name, an assignee, a tag) stays inside the card: one line, cut with an ellipsis, the
+   whole name in its title (moai-rqec). Upstream's inline-flex chip cannot ellipsize its text, so it ran past the
+   card's edge with a long epic name. */
+.m-card-line > .m-chip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 20px; }
 .m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
 .m-card-title { margin-top: 2px; overflow-wrap: anywhere; }
 
@@ -352,12 +439,16 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
  * placed absolutely in a body as tall as every line, so only the lines near the viewport exist.
  * Needs tokens.css and components.css.
  */
-.moai-list { position: relative; }
+/* The line height is view/list.ts ROW_HEIGHT; the title's line box is the whole row, so a branch drawn in it reaches
+   from the row's top to its bottom. */
+.moai-list { position: relative; --moai-row-h: 24px; }
 .moai-list:focus { outline: 0; }
 .moai-list:focus-visible .m-row[aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
 .moai-list-head[hidden], .moai-list-note[hidden], .moai-list-empty[hidden] { display: none; }
 .moai-list-body { position: relative; }
-.moai-list-body > .m-row { position: absolute; left: 0; right: 0; }
+.moai-list-body > .m-row { position: absolute; left: 0; right: 0; height: var(--moai-row-h); }
+.moai-list-body > .m-row > .m-row-title { align-self: stretch; line-height: var(--moai-row-h); }
+.moai-list-body .moai-new { vertical-align: middle; }
 
 .moai-list-note { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; color: var(--muted); font-size: 12px; }
 .moai-list-note .m-btn[hidden] { display: none; }
@@ -375,7 +466,17 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .moai-c-p { flex: none; width: 2ch; font-family: var(--mono); font-size: 12px; }
 .moai-c-st { flex: none; width: 1.5ch; text-align: center; font-family: var(--mono); font-size: 12px; }
 .moai-c-counts { width: 7ch; text-align: right; }
-.moai-twig { color: var(--muted); font-family: var(--mono); white-space: pre; }
+/* The branch (se-gowr.4x9): each level is two cells, its letters kept as text but not shown, and its lines drawn in
+   the colour the letters had. The line runs down the middle of the first cell and turns at the row's middle. */
+.moai-twig { display: inline-flex; height: 100%; vertical-align: top; font-family: var(--mono); white-space: pre; }
+.moai-tw { position: relative; width: 2ch; height: 100%; color: transparent; --tw-line: color-mix(in srgb, var(--muted) 55%, transparent); }
+.moai-tw::before, .moai-tw::after { content: ""; position: absolute; }
+.moai-tw:is([data-tw="pipe"], [data-tw="tee"])::before { top: 0; bottom: 0; left: calc(.5ch - .5px); border-left: 1px solid var(--tw-line); }
+.moai-tw[data-tw="tee"]::after { top: calc(50% - .5px); left: .5ch; right: 2px; border-top: 1px solid var(--tw-line); }
+.moai-tw[data-tw="end"]::before {
+  top: 0; height: calc(50% + .5px); left: calc(.5ch - .5px); right: 2px;
+  border-left: 1px solid var(--tw-line); border-bottom: 1px solid var(--tw-line); border-bottom-left-radius: 4px;
+}
 
 /* The columns are sized in ch of the row font, so their heads keep it; only the title head follows the head line. */
 .moai-list-head .m-row-title.moai-head { font: inherit; color: inherit; }
@@ -453,6 +554,62 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 
 #moai-app { height: 100%; }
 
+/* ---- The header (view/brand.ts, se-qkga): the TUI's own. The logo's six lines dim, a line down, then User and
+   Version in the TUI's columns. One line height for both sides, so the info lines stand beside the logo's rows. A
+   short panel leaves it out and a narrow one the logo, as the TUI does (HEADER_MIN_H; the logo yields first). ---- */
+.m-brand {
+  flex: none; display: flex; align-items: flex-start; gap: 1ch; padding: 6px 10px; border-bottom: 1px solid var(--border-soft);
+  /* A terminal's: Menlo at its own line height. The logo's block letters are drawn as cells (.m-brand-art), not set
+     in it: a font leaves a seam under every row. */
+  font: 12px/1.17 Menlo, "DejaVu Sans Mono", ui-monospace, monospace; color: var(--text);
+  container-type: inline-size; container-name: m-brand;
+}
+.m-brand-logo { flex: none; color: var(--muted); }
+/* The art drawn as terminal cells (view/brand.ts artPath): 26 cells wide, five rows of the header's line height. */
+.m-brand-art { display: block; width: 26ch; height: calc(5 * 1.17em); fill: currentColor; }
+.m-brand-tagline { white-space: pre; }
+.m-brand-info { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; flex-direction: column; padding-left: 1ch; border-left: 1px solid var(--border); }
+.m-brand-line { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.m-brand-label { color: var(--muted); }
+/* The tip (se-irhr): at the foot of the info column, so its last line stands on the logo's tagline row, as one line
+   of the header. Every tip stacks in one cell, each set to that cell's foot (a short one sits on the tagline's row, a
+   long one rises above it, up to three lines), and wraps after its own label. A click opens the tips page. */
+.m-brand-tip { margin-top: auto; padding-top: 4px; }
+.m-brand-tip-text {
+  display: grid; width: 100%; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit;
+  text-align: left; cursor: pointer;
+}
+.m-brand-tip-item { grid-area: 1 / 1; align-self: end; display: grid; grid-template-columns: max-content minmax(0, 1fr); }
+.m-brand-tip-item > .m-brand-label { white-space: pre; }
+.m-brand-tip-said { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.m-brand-tip-text:hover .m-brand-tip-said { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.m-brand-tip-text:is(:hover, :focus-visible) .m-brand-tip-item { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .m-brand-tip-item:not([data-first]) { visibility: hidden; } }
+/* The tips page (view/tips.ts): the shortcut help's dialog, its rows a tip and its Copy button. */
+.m-tips-intro { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.m-tips-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 13px; }
+.m-tips-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.m-tips-text::before { content: "\201C"; color: var(--muted); }
+.m-tips-text::after { content: "\201D"; color: var(--muted); }
+/* The projects (view/brand.ts, moai-o14f): the TUI's third column, right of User and Version (draw.rs `with_projects`).
+   Six rows to a column, then the next column; the key in the SPC menu's key colour (the TUI's MENU_KEY, light green),
+   the name dim; the project on screen in the accent and bold, and aria-current (the TUI shimmers it). */
+.m-brand-projects { flex: none; display: grid; grid-auto-flow: column; grid-template-rows: repeat(6, auto); column-gap: 2ch; align-content: start; padding-left: 1ch; }
+.m-brand-projects[hidden] { display: none; }
+.m-brand-project {
+  display: block; padding: 0; border: 0; background: transparent; font: inherit; line-height: inherit; color: var(--muted);
+  text-align: left; white-space: pre; cursor: pointer; max-width: 28ch; overflow: hidden; text-overflow: ellipsis;
+}
+.m-brand-key { color: var(--ok); }
+.m-brand-project:hover .m-brand-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.m-brand-project[data-current] { cursor: default; }
+.m-brand-project[data-current] .m-brand-name { color: var(--accent); font-weight: 700; text-decoration: none; }
+/* Narrow: the logo yields first (with projects it needs the room sooner), then the project column (draw.rs `header`). */
+@container m-brand (max-width: 759px) { .m-brand[data-projects] .m-brand-logo { display: none; } }
+@container m-brand (max-width: 479px) { .m-brand-projects { display: none; } }
+@container m-brand (max-width: 459px) { .m-brand-logo { display: none; } .m-brand-info { padding-left: 1ch; } }
+@media (max-height: 599px) { .m-brand { display: none; } }
+
 /* Slots other parts mount into take no room while empty. */
 .m-toolbar-slot:empty, .m-tabbar-slot:empty { display: none; }
 .m-tabbar-slot { display: flex; align-items: center; gap: 4px; }
@@ -520,9 +677,25 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 /* After the title of a row only the search shows (the view hides it). */
 .moai-hidden-mark { margin-left: 6px; font-size: 11px; line-height: 16px; }
 
+/* The filter input stands as tall as the sort button beside it (se-ewaw): the small button's height, padding and
+   type size (components.css .m-btn-sm), so the toolbar reads as one row of controls. */
+.m-toolbar .m-filter .m-input { box-sizing: border-box; height: 28px; min-height: 28px; padding: 0 8px; font-size: 12px; line-height: 26px; }
+
 /* The sort editor's row under the key cursor (j/k in sorter mode, keys/wiring.ts). */
 .m-sort-pop .m-menu-item[data-cursor] { background: var(--selected); }
 .m-sort-pop .m-sort-note { padding: 4px 8px; color: var(--muted, inherit); font-size: 11px; }
+
+/* The zone picker (`SPC o t`, view/zones.ts): the sort editor's popover, standing alone over the page as the TUI's
+   picker stands over its panes — a filter box on top, the names under it, the line under the cursor as the sort
+   editor's (data-cursor above). */
+.m-zone-pop { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); z-index: 230; display: flex; flex-direction: column;
+  width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow: hidden; }
+.m-zone-pop[hidden] { display: none; }
+.m-zone-pop .m-zone-filter { flex: none; margin: 0 4px 4px; }
+.m-zone-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-zone-item { min-height: 28px; padding: 4px 8px; cursor: pointer; }
+.m-zone-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-zone-note[hidden] { display: none; }
 
 /*
  * Moai panel wiki tab (design.md 4.10). Built by view/wiki.ts. Needs tokens.css, components.css and markdown.css.

@@ -10,6 +10,7 @@
  * The stamp is read before the rows, so a write landing between the two is seen as a later change, never lost.
  * Timers and visibility are injected so the schedule is tested without a DOM or real time.
  */
+import { partsIn, zoneNow } from './zone.js'
 
 /** Whether the tab is on screen, and a way to hear when that changes. */
 export interface VisibilitySignal {
@@ -43,8 +44,11 @@ export interface RefresherOptions {
 }
 
 export interface Refresher {
-  /** Reads now, whatever the stamp says (unless a read is running, which it then joins). */
-  refresh(): Promise<void>
+  /**
+   * Reads now, whatever the stamp says (unless a read is running, which it then joins). `fresh` waits for a running
+   * read and then reads again: one that began before a write (a read mark) cannot hold what it wrote.
+   */
+  refresh(how?: { fresh?: boolean }): Promise<void>
   /** Asks the stamp now and reads when it moved. */
   check(): Promise<void>
   stop(): void
@@ -129,7 +133,8 @@ export function createRefresher(options: RefresherOptions): Refresher {
     return checking
   }
 
-  async function refresh(): Promise<void> {
+  async function refresh(how: { fresh?: boolean } = {}): Promise<void> {
+    if (how.fresh && inFlight) await inFlight.catch(() => {})
     // The stamp first, so a write after it is a later change and is read on the next look.
     const at = await options.stamp()
     reach(at !== null)
@@ -168,7 +173,9 @@ export function documentVisibility(doc: Document): VisibilitySignal {
   }
 }
 
-/** `HH:MM:SS` in the page's locale and time zone, as the tab bar shows it. */
-export function refreshTime(at: number, locale?: string): string {
-  return new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+/** `HH:MM:SS` in the zone the page draws in (`SPC o t`, data/zone.ts; `zone` when given), as the tab bar shows it. */
+export function refreshTime(at: number, _locale?: string, zone: string | undefined = zoneNow()): string {
+  const { hour, minute, second } = partsIn(at, zone)
+  const two = (n: number) => String(n).padStart(2, '0')
+  return `${two(hour)}:${two(minute)}:${two(second)}`
 }

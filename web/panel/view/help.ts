@@ -41,13 +41,13 @@ export interface HelpView {
  * arrows, Home and End move the tab strip and the split resizer, Backspace and Delete edit an input, Esc leaves the
  * search.
  */
-const ACTS_BEHIND: ReadonlySet<string> = new Set([
+export const ACTS_BEHIND: ReadonlySet<string> = new Set([
   "Enter", " ", "Escape", "Esc", "Backspace", "Delete",
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown",
 ])
 
 /** Host combinations that edit a focused input (paste, cut, undo, redo): copy, select-all and find do not. */
-const EDITS_INPUT: ReadonlySet<string> = new Set(["v", "x", "z", "y"])
+export const EDITS_INPUT: ReadonlySet<string> = new Set(["v", "x", "z", "y"])
 
 export function createHelp(doc: Document, props: HelpProps): HelpView {
   const words = props.words ?? TABLE.ko

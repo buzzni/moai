@@ -19,6 +19,8 @@ pub struct Request {
     pub query: Vec<(String, String)>,
     /// `Host` 머리 — 없으면 `None`. 검사는 [`host_ok`] 가 한다.
     pub host: Option<String>,
+    /// `Origin` 머리 — 없으면 `None`. 쓰는 길 하나(`POST /api/read…`)만 잰다([`origin_ok`]).
+    pub origin: Option<String>,
 }
 
 /// 읽다 만난 탈. [`Bad::Io`] 는 답할 상대가 없는 것이라(시한·끊김) 그냥 닫는다 — 나머지는 400 이다.
@@ -77,13 +79,18 @@ fn parse(head: &[u8]) -> Result<Request, Bad> {
     if method.is_empty() || !version.starts_with("HTTP/1.") {
         return Err(Bad::Malformed);
     }
-    let mut host = None;
+    let (mut host, mut origin) = (None, None);
     for line in lines {
         let (name, value) = line.split_once(':').ok_or(Bad::Malformed)?;
         let value = value.trim();
         if name.eq_ignore_ascii_case("host") {
             // 둘이면 어느 쪽을 잴지 모른다 — 하나를 고르면 검사를 지나는 쪽을 고르게 된다.
             if host.replace(value.to_string()).is_some() {
+                return Err(Bad::Malformed);
+            }
+        } else if name.eq_ignore_ascii_case("origin") {
+            // `Host` 와 같은 까닭이다.
+            if origin.replace(value.to_string()).is_some() {
                 return Err(Bad::Malformed);
             }
         } else if name.eq_ignore_ascii_case("transfer-encoding")
@@ -106,7 +113,20 @@ fn parse(head: &[u8]) -> Result<Request, Bad> {
             Ok((unescape(k, true)?, unescape(v, true)?))
         })
         .collect::<Result<_, Bad>>()?;
-    Ok(Request { method: method.to_string(), path, query, host })
+    Ok(Request { method: method.to_string(), path, query, host, origin })
+}
+
+/// 쓰는 요청이 **이 페이지에서 왔는가** — `Origin` 이 `http://<Host>` 와 글자째 같아야 한다.
+///
+/// `Host` 검사([`host_ok`])는 DNS 다시 묶기를 막을 뿐이다. 남의 사이트가 띄운 `fetch(…, {method: "POST", mode:
+/// "no-cors"})` 는 본문 없는 단순 요청이라 미리 묻기(preflight) 없이 `127.0.0.1` 로 곧장 오고, 그 `Host` 는 이
+/// 서버의 것이다. 브라우저는 POST 에 `Origin` 을 늘 싣고 페이지는 그것을 못 고치므로, 그 값이 이 서버의 자리여야
+/// 이 페이지가 보낸 것이다. **없으면 거절한다** — `curl` 은 `Origin` 없이 오지만 쓰는 길은 CLI 에 이미 있다.
+pub fn origin_ok(origin: Option<&str>, host: Option<&str>) -> bool {
+    match (origin, host) {
+        (Some(origin), Some(host)) => origin.strip_prefix("http://") == Some(host),
+        _ => false,
+    }
 }
 
 /// `%XX` 를 푼다. 쿼리에서는 `+` 도 빈칸이다(폼 꼴 — 브라우저의 `URLSearchParams` 가 그렇게 쓴다).

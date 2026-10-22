@@ -3,6 +3,7 @@
 // on, with how to take it off. The pure functions build the line from the state; mountCrumbs draws it.
 // A segment is a button: clicking it goes to that level.
 
+import { BRANCH_GLYPH, worktreesOf } from "./branch.ts"
 import { LOST, NO_MILESTONE, type IssueIndex, type Path, type Seg } from "../data/index.ts"
 import type { Copy } from "../i18n/index.ts"
 import { sameSort, type Sort } from "../data/query.ts"
@@ -87,9 +88,11 @@ export function mountCrumbs(doc: Document, copy: Copy, enter: (path: Path) => vo
     el: root,
     render(state, index) {
       const line = crumbLine(state, index, copy)
+      // The worktrees whose rows stand overlaid, named as the TUI's path line names them (se-etwu).
+      const trees = state.view.worktree && index ? worktreesOf(index.rows) : []
       // The line redraws on every store change; rebuilding it only when it reads differently keeps the
       // keyboard focus on a segment button across unrelated changes.
-      const key = JSON.stringify(line)
+      const key = JSON.stringify([line, trees])
       if (key === drawn) return
       drawn = key
       const parts: Node[] = []
@@ -108,6 +111,7 @@ export function mountCrumbs(doc: Document, copy: Copy, enter: (path: Path) => vo
       })
       trail.replaceChildren(...parts)
       const chips: Node[] = []
+      if (trees.length) chips.push(el(doc, "span", { class: "m-branch m-crumbs-trees", title: trees.map((tree) => `${BRANCH_GLYPH} ${tree}`).join("\n") }, `${BRANCH_GLYPH} ${trees.join(", ")}`))
       if (line.look) chips.push(chip(doc, { label: line.look }))
       if (line.hung) chips.push(chip(doc, { label: line.hung, tone: "warn" }), el(doc, "span", { class: "m-crumbs-hint" }, copy.shell.clearHint))
       badges.replaceChildren(...chips)

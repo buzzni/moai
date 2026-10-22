@@ -18,14 +18,17 @@ import { button, el, emptyState, icon } from "./components.ts"
 import { segLabel } from "./crumbs.ts"
 import {
   columnSet, firstKey, folderOf, HEAD_SORT, hiddenUnder, hidesAnything, listLines, moveKey, narrow, parentLine, segKey, shortDate, SHOW_ALL,
-  statusGlyph, statusOf, twigText, windowRange, revealOffset, type ColumnSet, type ListLine, type RightColumn,
+  statusGlyph, statusOf, twigParts, TWIG_TEXT, windowRange, revealOffset, type ColumnSet, type ListLine, type RightColumn,
 } from "./list-model.ts"
 import { newChip } from "./unread.ts"
+import { firstStatus, glint, spins } from "./spin.ts"
+import { branchMark, branchOf } from "./branch.ts"
 import { highlight } from "./toolbar.ts"
 import type { MountPane, PaneView } from "./types.ts"
 
-/** Every line is this tall (look-and-feel §5.6); the virtual scroll depends on it. */
-export const ROW_HEIGHT = 28
+/** Every line is this tall (list.css --moai-row-h); the virtual scroll depends on it. 24, not the app's 28: at 28 the
+ * branches of the tree stood apart (se-gowr.4x9). */
+export const ROW_HEIGHT = 24
 /** The sticky name line (style: .m-row-head). */
 export const HEAD_HEIGHT = 24
 /** The visible height assumed while the pane has none (hidden, or not laid out yet). */
@@ -192,20 +195,28 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       const p = row ? (typeof row.priority === "number" || !folder ? priorityOf(row) : undefined) : undefined
       node.append(cell(`moai-c-p${p === undefined ? "" : ` m-p${Math.max(0, Math.min(3, p))}`}`, p === undefined ? "" : `p${p}`))
     }
+    // What someone holds moves as in the TUI (view/spin.ts): the glyph turns and a band runs over the name.
+    const moving = line.kind === "row" && spins(index, line.at, firstStatus(state?.boot), state?.boot?.statuses)
     if (row) {
       const { glyph, tone } = statusGlyph(statusOf(row), state?.boot)
-      const status = cell(`moai-c-st m-st-${tone}${tone === "in_progress" ? " m-pulse" : ""}`, glyph)
+      const status = cell(`moai-c-st m-st-${tone}${moving ? " m-spin" : ""}`, glyph)
       status.title = copy.stats[statusOf(row)] ?? statusOf(row)
       node.append(status)
     } else node.append(cell("moai-c-st"))
 
     const title = cell("m-row-title")
-    const twig = line.kind === "up" ? "" : twigText(line.twig)
-    if (twig) title.append(el(doc, "span", { class: "moai-twig", "aria-hidden": "true" }, twig))
+    // The branch keeps the TUI's letters as its text; list.css draws each level as lines the row's full height, so
+    // one row's branch meets the next one's.
+    const parts = line.kind === "up" ? [] : twigParts(line.twig)
+    if (parts.length) title.append(el(doc, "span", { class: "moai-twig", "aria-hidden": "true" }, ...parts.map((part) => el(doc, "span", { class: "moai-tw", "data-tw": part }, TWIG_TEXT[part]))))
     // NEW stands after the twig and before the name (design §4.1); the title cell stays one line, so the row keeps its height.
     if (row && isUnread(row)) title.append(newChip(doc), " ")
+    // `⎇ <branch>` before the name when another worktree holds it, as the TUI's row (view/branch.ts, se-etwu).
+    const branch = row ? branchOf(row) : undefined
+    if (branch) title.append(branchMark(doc, branch), " ")
     const name = line.kind === "up" ? copy.up : line.kind === "bucket" ? segLabel(line.seg, index, copy) : String(row!.title ?? row!.id)
-    title.append(...(line.kind === "row" ? painted(name) : [name]), folder ? "/" : "")
+    const named = line.kind === "row" ? painted(name) : [name]
+    title.append(...(moving ? [glint(doc, name, ...named)] : named), folder ? "/" : "")
     if (revealed) title.append(" ", el(doc, "span", { class: "m-chip moai-hidden-mark" }, words.hiddenMark))
     if (line.kind === "up") title.setAttribute("aria-label", words.upLabel)
     else title.title = name

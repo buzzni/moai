@@ -238,6 +238,8 @@ test('pane: a group shows head, fields, roll-up, body as text, and close reports
   assert.ok(body.textContent.includes('<img src=x onerror=alert(1)>'))
   assert.ok(body.textContent.includes('line two'))
   assert.ok(root.querySelector('[role=progressbar]'))
+  // No `moai status` counts for this group (none were given here): the share done still fills the bar beside the text.
+  assert.deepEqual([...root.querySelectorAll('[role=progressbar] > span')].map((span) => [span.dataset.status, span.style.width]), [['done', '33%']])
   root.querySelector('button').click()
   assert.deepEqual(calls, ['close'])
   assert.equal(renderBody(doc, 'a<b').textContent, 'a<b')

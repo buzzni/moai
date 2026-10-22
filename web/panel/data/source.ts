@@ -18,9 +18,12 @@
  *   {@link loadWikiPage}); the wiki view parses them.
  * - What the page boots on — the language, the columns and their glyphs — is `/api/boot` ({@link loadBoot}), which
  *   the server answers itself, without the envelope.
+ * - The registered projects the header lists are `/api/projects` (`project ls --json`, {@link loadProjects}).
  */
+import { latestOf, userOf, type Latest } from './about.js'
 import { PRIORITY, answerOf, outcomeOf, type Client, type Endpoint, type Fetch, type Outcome, type RequestOptions } from './client.js'
 import type { Row, TreeRow } from './index.js'
+import { projectsFrom, type Project } from './projects.js'
 import { splitItems } from './query.js'
 
 export const ENDPOINT = {
@@ -31,6 +34,7 @@ export const ENDPOINT = {
   backlog: '/api/backlog',
   issue: (id: string): Endpoint => ({ path: `/api/issue/${encodeURIComponent(id)}` }),
   tree: '/api/tree',
+  projects: '/api/projects',
   wiki: '/api/wiki',
   wikiPage: (slug: string): Endpoint => ({ path: `/api/wiki/${slug.split('/').map(encodeURIComponent).join('/')}` }),
 } as const
@@ -68,10 +72,13 @@ export function rowsFromLists(all: unknown, backlog: unknown): Loaded<Rows> {
   return { ok: true, value: { rows: withBacklog(items(all), backlog) } }
 }
 
-/** Both lists side by side, with `query` on each; the first that gave no answer is the load's failure. */
-async function bothLists(client: Client, query: Record<string, string>, options: RequestOptions): Promise<Loaded<Rows>> {
+/**
+ * Both lists side by side, with `query` on each and `rowsOnly` on `/api/rows` alone; the first that gave no answer
+ * is the load's failure.
+ */
+async function bothLists(client: Client, query: Record<string, string>, options: RequestOptions, rowsOnly: Record<string, string> = {}): Promise<Loaded<Rows>> {
   const [all, backlog] = await Promise.all([
-    client.request({ path: ENDPOINT.rows, query }, options),
+    client.request({ path: ENDPOINT.rows, query: { ...query, ...rowsOnly } }, options),
     client.request({ path: ENDPOINT.backlog, query }, options),
   ])
   for (const outcome of [all, backlog]) if (answerOf(outcome) === undefined) return { ok: false, outcome }
@@ -81,9 +88,13 @@ async function bothLists(client: Client, query: Record<string, string>, options:
   return loaded
 }
 
-/** The index rows: `/api/rows` and `/api/backlog` read at once. */
-export function loadAllRows(client: Client, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<Rows>> {
-  return bothLists(client, {}, { priority, epoch })
+/**
+ * The index rows: `/api/rows` and `/api/backlog` read at once. `worktree` (the view's `SPC v w`, on by default) lays
+ * the other git worktrees' rows over the list: `/api/rows?worktree=1`, which the server runs as `show --all
+ * --worktree`. The backlog has no such overlay.
+ */
+export function loadAllRows(client: Client, priority: number = PRIORITY.list, epoch?: number, worktree = false): Promise<Loaded<Rows>> {
+  return bothLists(client, {}, { priority, epoch }, worktree ? { worktree: '1' } : {})
 }
 
 /**
@@ -135,6 +146,11 @@ export interface Question {
   filter: string
   q: string
   archived: boolean
+  /**
+   * The worktree overlay is on (`SPC v w`): the rows are asked over it, as the list reads them (loadAllRows), so a row
+   * only another worktree holds can match and an overlaid row is judged by the fields it is drawn with.
+   */
+  worktree?: boolean
 }
 
 /**
@@ -148,7 +164,8 @@ export function matchEndpoints(question: Question): Endpoint[] {
   if (question.q.trim() !== '') query.q = question.q.trim()
   if (question.archived) query.archived = '1'
   const typed = splitItems(question.filter).some((item) => item.split('=')[0]!.trim() === 'type')
-  const rows: Endpoint = { path: ENDPOINT.rows, query }
+  // The overlay is `/api/rows`' alone, as on the list's own read: the backlog has none.
+  const rows: Endpoint = { path: ENDPOINT.rows, query: question.worktree ? { ...query, worktree: '1' } : query }
   return typed ? [rows] : [rows, { path: ENDPOINT.backlog, query }]
 }
 
@@ -225,6 +242,16 @@ export async function loadDetail(client: Client, id: string, options: Pick<Reque
   return isRecord(output) && typeof output.id === 'string' ? { ok: true, value: output as Row } : { ok: false, outcome: { kind: 'unreadable' } }
 }
 
+/**
+ * The registered projects (`moai project ls --json`), read once after the boot. A failure is the outcome: the page then
+ * draws no project column and binds no digit.
+ */
+export async function loadProjects(client: Client): Promise<Loaded<Project[]>> {
+  const outcome = await client.request({ path: ENDPOINT.projects }, { priority: PRIORITY.background })
+  const output = answerOf(outcome)
+  return output === undefined ? { ok: false, outcome } : { ok: true, value: projectsFrom(output) }
+}
+
 /** A board column only the board draws — not one of the configured statuses (src/web/boot.rs Column). */
 export interface BootColumn {
   name: string
@@ -245,6 +272,15 @@ export interface Boot {
   columns: { backlog: BootColumn; shelved: BootColumn }
   filter_keys: string[]
   sort_fields: { name: string; dir: 'asc' | 'desc' }[]
+  /** The header's User line, already labelled with the project's naming as the TUI prints it; null when moai could
+   *  not tell who is working, and when an older server does not send it. */
+  user: string | null
+  /** What moai last heard of the latest release (data/about.ts {@link Latest}); null when it holds none, and when an
+   *  older server does not send it. */
+  latest: Latest | null
+  /** The TUI's zone (`[tui] timezone` as written), the page's first choice of zone (data/zone.ts); null when the TUI
+   *  picked none, and when an older server does not send it. */
+  timezone: string | null
 }
 
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === 'string')
@@ -259,7 +295,9 @@ export function bootFrom(value: unknown): Boot | null {
   if (!isRecord(glyphs) || !Object.values(glyphs).every((glyph) => typeof glyph === 'string')) return null
   if (!isRecord(columns) || !column(columns.backlog) || !column(columns.shelved)) return null
   if (!Array.isArray(sort_fields) || !sort_fields.every((field) => isRecord(field) && typeof field.name === 'string' && (field.dir === 'asc' || field.dir === 'desc'))) return null
-  return value as unknown as Boot
+  // `user` and `latest` came later: a server without them still boots, and the header then says `—`.
+  const timezone = typeof value.timezone === 'string' && value.timezone !== '' ? value.timezone : null
+  return { ...(value as unknown as Boot), user: userOf(value.user), latest: latestOf(value.latest), timezone }
 }
 
 /**

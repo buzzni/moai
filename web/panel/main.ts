@@ -2,17 +2,23 @@
  * Boots the page `moai web` serves: reads `/api/boot` (the language, the columns), restores the remembered
  * settings, wires the store to the data layer and mounts the shell (view/shell.ts), which renders from the store.
  * Built by build.mjs into src/web/dist/app.js.
+ *
+ * The page reads one project: its address's `?project=<path>` (a registered one, moai-o14f), else the server's own
+ * tracker. Every call names it (data/client.ts withProject); another project is another page (data/projects.ts).
  */
-import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, requestKey, type Fetch } from './data/client.js'
+import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
-import { createMemory, remember } from './data/memory.js'
+import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
+import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
+import { isUnread, readMarks } from './data/read.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
-  loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
+  loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
+import { effectiveZone, useZone } from './data/zone.js'
 import { COPY, copyFor } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
@@ -21,7 +27,12 @@ import { PANES } from './view/panes.js'
 import { describe, mountShell, type Activity } from './view/shell.js'
 import type { WikiSource } from './view/types.js'
 
-const fetcher: Fetch = (url, init) => window.fetch(url, init)
+/** The browser's fetch, naming no project: the home's boot is read through it. */
+const homeFetcher: Fetch = (url, init) => window.fetch(url, init)
+/** The project this page reads (`?project=`), or null for the server's own tracker. */
+const project = projectOf(window.location.search)
+/** Every call the page makes — reads, read marks, the boot, the stamp — names that project. */
+const fetcher: Fetch = withProject(homeFetcher, project)
 
 /** How long `/api/stamp` may take before the server counts as out of reach. */
 const STAMP_LIMIT_MS = 5_000
@@ -37,7 +48,19 @@ async function start(): Promise<void> {
   const store = createStore()
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the
   // page use it, else this session only (data/memory.ts); reading `window.localStorage` itself can throw, hence the getter.
-  remember(store, createMemory(() => window.localStorage))
+  // The filter, the order, the cells and the hidden columns are this project's own (data/memory.ts queryKeyOf).
+  remember(store, createMemory(() => window.localStorage), sortDefault, settingsStorage, queryKeyOf(project))
+  // Every date is drawn in the zone picked here (`SPC o t`), else the TUI's, else the browser's (data/zone.ts). Set
+  // before any view draws, and before the shell (subscribed after this) draws again on a change.
+  let zoneDrawn = ''
+  const followZone = (state: State) => {
+    const zone = effectiveZone(state.zone, state.boot?.timezone)
+    if (zone === zoneDrawn) return
+    zoneDrawn = zone
+    useZone(zone)
+  }
+  followZone(store.getState())
+  store.subscribe(followZone)
   /** What the boot gives the page: the words, how a person is named, the columns. The language stays the one drawn. */
   function useBoot(boot: Boot): void {
     useVocabulary(boot)
@@ -48,6 +71,32 @@ async function start(): Promise<void> {
   if (booted.ok) useBoot(booted.value)
   // Up to 3 reads at once (data/client.ts PANEL_CLIENT_OPTIONS).
   const client = createClient(fetcher, PANEL_CLIENT_OPTIONS)
+
+  /**
+   * The home: the server's own tracker. Its root is the boot's when the page reads it, else the boot asked without the
+   * project (once). `null` when that boot could not be read: the header then lists the registered projects alone.
+   */
+  async function homeOf(): Promise<{ root: string; name: string } | null> {
+    if (!project) return booted.ok ? { root: booted.value.root, name: booted.value.project } : null
+    const home = await loadBoot(homeFetcher)
+    return home.ok ? { root: home.value.root, name: home.value.project } : null
+  }
+  let homeRoot: string | null = null
+  /**
+   * The registered projects, read once after the boot (`/api/projects`): the header's column and the digits. Nothing
+   * registered, or a read that failed, leaves both out and nothing else changes.
+   */
+  async function readProjects(): Promise<void> {
+    const [listed, home] = await Promise.all([loadProjects(client), homeOf()])
+    homeRoot = home?.root ?? null
+    if (!listed.ok || listed.value.length === 0) return
+    store.dispatch({ type: 'projects', projects: headerProjects(listed.value, home, project) })
+  }
+  /** Another project is another page: `/` for the home, `/?project=<path>` for a registered one. */
+  function openProject(entry: ProjectEntry): void {
+    if (entry.current) return
+    window.location.assign(projectHref(entry.path, homeRoot ?? (entry.home ? entry.path : null)))
+  }
 
   // The index is built once per read, not per render: again when the rows, the tree or the archive shown change.
   let indexed: { rows: Row[]; tree: BoardData['tree']; archive: Row[] | null; index: IssueIndex } | null = null
@@ -99,8 +148,9 @@ async function start(): Promise<void> {
     // status` prints, side by side. The load does not wait for the counts: rows are drawn at once, and the counts
     // are put on them when they come.
     // Each load is a change seen through: a read of it is never handed a run another load started before it.
-    const sort = store.getState().sort
-    const listing = loadAllRows(client, PRIORITY.list, load)
+    const { sort, view } = store.getState()
+    // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
+    const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
     const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load)
     const counting = loadGroups(client, PRIORITY.list, load)
     let counted: Awaited<typeof counting> | undefined
@@ -142,7 +192,9 @@ async function start(): Promise<void> {
     }
     // The order changed while this read ran: the refresh it asked for joined this one (data/refresh.ts), which read
     // the tree in the order before. Read it again in the order on screen.
-    if (store.getState().sort !== sort) setTimeout(() => void refresher.refresh(), 0)
+    // So does the worktree overlay turned while it ran.
+    const after = store.getState()
+    if (after.sort !== sort || after.view.worktree !== view.worktree) setTimeout(() => void refresher.refresh(), 0)
     return true
   }
 
@@ -164,7 +216,7 @@ async function start(): Promise<void> {
     if (key === '' || (!again && key === state.matched.key && askedAt === loads)) return
     const mine = ++asks
     askedAt = loads
-    const question = { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived }
+    const question = { filter: state.filter.applied, q: state.search.text, archived: state.view.showArchived, worktree: state.view.worktree }
     const next = matchEndpoints(question).map(requestKey)
     // The older question's reads this one does not share: their answer would be dropped, and they hold the slots.
     for (const old of askingKeys) if (!next.includes(old)) client.cancel(old)
@@ -186,6 +238,8 @@ async function start(): Promise<void> {
     }
     // A new order is moai's to make: the tree is read again in it.
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
+    // The worktree overlay turned on or off: the rows are read again with it or without it.
+    if (state.view.worktree !== previous.view.worktree && state.board.value) void refresher.refresh()
   })
 
   // The archive is read when archived rows are shown (`SPC v o`), each time they are turned on, once the active
@@ -271,6 +325,21 @@ async function start(): Promise<void> {
     store.dispatch({ type: 'detail-loaded', data: { id, row: loaded.value } })
   }
 
+  /**
+   * The read-mark writes (`r`, `SPC m a`, `SPC m g`, data/read.ts). One that went through reads the rows again — the
+   * marks come back with them — and the detail on screen when it marked that row: nothing else reads the detail
+   * again, and its NEW would outlive the mark.
+   */
+  const read = readMarks(client, (written) => {
+    const shown = store.getState().shown.value
+    // A list read already running began before the write and cannot hold its marks: `fresh` reads again after it.
+    // The detail is asked past every load so far, so it is never handed a run that began before the write.
+    return Promise.all([
+      refresher.refresh({ fresh: true }),
+      shown && isUnread(shown.row) && written.has(shown.id) ? rereadDetail(shown.id, loads + 1) : undefined,
+    ])
+  })
+
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
   function said(loaded: Extract<Loaded<unknown>, { ok: false }>): string {
     const parts = describe(loaded.outcome, copy, document)?.parts ?? [copy.failed]
@@ -314,15 +383,17 @@ async function start(): Promise<void> {
       // Up to three reads go at once (the list is three of them): Cancel stops every one, and the reads that wait
       // behind them, in one step (data/client.ts cancelAll) rather than letting the next queued read start in the freed slot.
       cancel: () => client.cancelAll(),
+      openProject,
     },
   })
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  wireKeys({ document, store, shell, copy })
+  wireKeys({ document, store, shell, copy, read, openProject, index: indexOf })
 
   document.body.tabIndex = -1
   document.body.focus({ preventScroll: true })
+  void readProjects()
   await refresher.refresh()
 }
 
