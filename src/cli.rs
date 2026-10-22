@@ -781,10 +781,12 @@ BACKLOG
   The first line names the address and the tracker. Ctrl-C stops it; there
   is nothing to clean up. It never opens a browser.
 
-  It only reads. Each list, issue and wiki page it serves is the answer of
-  `moai --json <command>`, run in a child process for that request, so the
-  page sees exactly what the CLI says. Writing stays with the CLI and the
-  explorer.
+  It never writes the tracker. Each list, issue and wiki page it serves is
+  the answer of `moai --json <command>`, run in a child process for that
+  request, so the page sees exactly what the CLI says. Writing stays with the
+  CLI and the explorer; the one write the page makes is your read marks
+  (`moai read`), taken only from the page itself. Registered projects
+  (`moai project ls`) can be read too, by `?project=<path>`.
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who
