@@ -239,11 +239,22 @@ pub fn answer(req: &Request, site: &Site) -> Response {
         }
         _ => return not_allowed(),
     };
+    // **페이지와 그 파일은 쿼리를 안 본다** — 이 범위 전에도 그랬다. `project=` 를 재기 전에 내야, 걷은 프로젝트를 가리키는
+    // 책갈피(`/?project=…`)도 페이지가 열리고 그 첫 부름(`/api/boot`)이 `not_registered` 로 까닭을 댄다. 날 JSON 한 장이
+    // 페이지 자리에 서면 돌아갈 길도 안 보인다.
+    match req.path.as_str() {
+        "/" | "/index.html" => return page(http::HTML, include_str!("dist/index.html")),
+        "/app.js" => return page(http::JS, include_str!("dist/app.js")),
+        "/app.css" => return page(http::CSS, include_str!("dist/app.css")),
+        _ => {}
+    }
     let (project, query) = match api::split_project(&req.query) {
         Ok(split) => split,
         Err(bad) => return refuse(400, &bad.said(lang), code::BAD_INPUT),
     };
-    let cwd = match project.as_deref().map(|p| project_of(p, lang)) {
+    // 걸어 둔 목록(`/api/projects`)은 사용자 설정만 읽어 어느 자리에서 돌아도 같은 답이다 — 자리를 안 잰다. 걷은 프로젝트를
+    // 연 페이지도 머리글이 그 목록을 받아 다른 프로젝트로 건너간다.
+    let cwd = match project.as_deref().filter(|_| req.path != "/api/projects").map(|p| project_of(p, lang)) {
         None => site.spawner.cwd.clone(),
         Some(Ok(dir)) => dir,
         Some(Err(refused)) => return refused,
@@ -258,9 +269,6 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     // 자식 없이 답하는 끝점도 쿼리는 안 받는다 — 말없이 버리면 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
-        "/" | "/index.html" => page(http::HTML, include_str!("dist/index.html")),
-        "/app.js" => page(http::JS, include_str!("dist/app.js")),
-        "/app.css" => page(http::CSS, include_str!("dist/app.css")),
         "/api/boot" => match bare().and_then(|()| {
             boot::boot(&cwd, site.spawner.user.as_deref(), lang).map_err(|e| refuse(500, &e.message, e.code))
         }) {
@@ -275,7 +283,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             Err(refused) => refused,
         },
         path => match api::argv_of(path, &query) {
-            Some(Ok(args)) => child(site, &args, &cwd, lang),
+            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => {
                 let said = fill(say(lang, "web.no_path"), &[("path", &req.path)]);
@@ -303,6 +311,18 @@ pub fn project_of(value: &str, lang: Lang) -> Result<std::path::PathBuf, Respons
         let said = fill(say(lang, "web.not_registered"), &[("path", value)]);
         refuse(403, &said, code::NOT_REGISTERED)
     })
+}
+
+/// 겹쳐 보기(`--worktree`)는 git 체크아웃 안에서만 붙인다. 밖에서는 옆 워크트리가 있을 수 없는데 `show --worktree` 가
+/// 부를 때마다 "옆 워크트리를 못 찾았다" 를 stderr 로 내고(`Gathered::unfound`), 페이지는 겹쳐 보기를 켠 채로 열어(`SPC v w`)
+/// 그 말이 읽을 때마다 "moai 가 한 말" 로 섰다. 탐색기는 시키지 않은 겹쳐 보기의 그 까닭을 안 세운다(moai-d5vn) — 떼어도
+/// 줄은 같다: 겹칠 옆이 없다. git 이 저장소를 찾는 자리(`.git` 이 선 조상, `worktree::own_git` 과 같은 자)로 잰다 — git 을
+/// 안 띄운다.
+fn overlay_in_git(mut args: Vec<String>, cwd: &std::path::Path) -> Vec<String> {
+    if !cwd.ancestors().any(|dir| dir.join(".git").exists()) {
+        args.retain(|arg| arg != "--worktree");
+    }
+    args
 }
 
 fn page(kind: &'static str, body: &'static str) -> Response {
@@ -346,6 +366,19 @@ mod tests {
         let client = TcpStream::connect(l.local_addr().unwrap()).unwrap();
         let (server, _) = l.accept().unwrap();
         (client, server)
+    }
+
+    /// **겹쳐 보기는 git 체크아웃 안에서만 붙는다** — 밖에서는 옆이 있을 수 없는데 부를 때마다 "못 찾았다" 를 말했다.
+    /// 스크래치는 체크아웃 밖이다(`crate::scratch::base`).
+    #[test]
+    fn the_overlay_is_asked_only_inside_a_git_checkout() {
+        let s = crate::scratch::Scratch::new("web-overlay-git");
+        let args = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        let asked = args(&["show", "--all", "--worktree", "--fields=id"]);
+        assert_eq!(overlay_in_git(asked.clone(), s.path()), args(&["show", "--all", "--fields=id"]));
+        std::fs::create_dir_all(s.path().join(".git")).unwrap();
+        std::fs::create_dir_all(s.path().join("sub")).unwrap();
+        assert_eq!(overlay_in_git(asked.clone(), &s.path().join("sub")), asked, "체크아웃 밑의 자리");
     }
 
     /// **한 바이트씩 흘려도 머리 전체의 시한에서 끊는다** — `read` 한 번의 시한이던 판은 흘리는 동안 끝없이 쥐었다.

@@ -29803,7 +29803,7 @@ fn envelope_out<'a>(body: &'a str, direct: &str) -> &'a str {
     &body[start..start + n]
 }
 
-const WEB_ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,tags,assignee,assignee_email,blocked_by,unread,archived";
+const WEB_ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,tags,assignee,assignee_email,blocked_by,unread,archived,branch";
 
 /// **`/api/rows` 의 `out` 은 같은 플래그의 `moai show … --json` 과 바이트째 같다**(moai-0aa7.a0l) — 서버가
 /// 데이터의 뜻을 안 짓는다는 계약이다.
@@ -29832,6 +29832,10 @@ fn web_rows_are_moais_show() {
         assert_eq!(json_of(&body)["exit"], 0, "{path}\n{body}");
         assert_eq!(envelope_out(&body, &direct), direct.trim(), "{path}");
     }
+    // 겹쳐 보기는 git 밖에서 붙이지 않는다 — 스크래치는 체크아웃 밖이라 옆이 있을 수 없는데, `show --worktree` 는 부를
+    // 때마다 "옆 워크트리를 못 찾았다" 를 stderr 로 내고 페이지는 그것을 "moai 가 한 말" 로 세웠다(moai-d5vn).
+    let (_, _, body) = get(web.port, "/api/rows?worktree=1");
+    assert!(json_of(&body).get("said").is_none(), "{body}");
     let direct = ok(s.path(), &["backlog", "show", "--all", &fields, "--json"]);
     let (status, _, body) = get(web.port, "/api/backlog");
     assert_eq!(status, 200, "{body}");
@@ -30053,6 +30057,19 @@ fn web_reads_a_registered_project_only() {
     }
     let (status, _, body) = get(web.port, &format!("/api/status?project={0}&project={0}", enc(&listed)));
     assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+
+    // 페이지와 그 파일, 걸어 둔 목록은 `project=` 를 안 잰다 — 걷은 프로젝트를 가리키는 책갈피도 페이지가 열리고(첫 부름이
+    // `not_registered` 로 까닭을 댄다), 머리글은 건너갈 목록을 받는다.
+    let gone = enc(stranger.path().to_str().unwrap());
+    for path in [format!("/?project={gone}"), "/?project=".to_string(), format!("/app.js?project={gone}")] {
+        let (status, head, _) = get(web.port, &path);
+        assert_eq!(status, 200, "{path}\n{head}");
+    }
+    let (status, _, body) = get(web.port, &format!("/api/projects?project={gone}"));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["out"]["projects"][0]["path"], listed.as_str(), "{body}");
+    let (status, _, body) = get(web.port, &format!("/api/boot?project={gone}"));
+    assert_eq!((status, json_of(&body)["code"].as_str()), (403, Some("not_registered")), "{body}");
 }
 
 /// **바탕이 탐색기 머리의 `User` 와 판 소식을 싣는다**(moai-ir9k) — 사람은 `naming` 을 입힌 한 줄, 판 소식은 적어 둔

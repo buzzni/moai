@@ -150,7 +150,9 @@ fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>) {
     let env = |k: &str| std::env::var_os(k);
     // 페이지는 사람이 보는 화면이다 — 끈 것만 거른다. `json`·`on_screen` 은 서버 프로세스의 자리를 잴 뿐이다.
     let asks = crate::latest::gate(env, reg.update_check, false, true).is_none();
-    let latest = path.parent().filter(|_| asks).map(|dir| {
+    // 적어 둔 답의 파일도 보통 파일일 때만 연다 — 같은 까닭이다(리뷰 moai-jshy.o2a).
+    let held_ok = |dir: &Path| std::fs::metadata(crate::latest::file_at(dir)).map_or(true, |m| m.is_file());
+    let latest = path.parent().filter(|dir| asks && held_ok(dir)).map(|dir| {
         let repo = crate::latest::repo_lenient(env, reg.update_repo.as_deref());
         crate::latest::held(dir, &crate::latest::url_from(env, &repo))
     });
