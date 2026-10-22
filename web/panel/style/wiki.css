@@ -1,0 +1,65 @@
+/*
+ * Moai panel wiki tab (design.md 4.10). Built by view/wiki.ts. Needs tokens.css, components.css and markdown.css.
+ * The page list sits in the split's first pane (its "detail" slot, ratio = wiki_width) and the page on the right.
+ * Narrow panels stack the list over the page and drop the resizer.
+ */
+
+.m-wiki { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.m-wiki-toolbar .m-wiki-search { flex: 1 1 200px; max-width: 480px; }
+
+/* ---- Page list ---- */
+.m-wiki .m-split-detail { display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+.m-wiki-pages { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-wiki-list { padding: 4px 0; }
+.m-wiki-list .m-row { gap: 6px; }
+.m-wiki-list .m-row[aria-current="page"] .m-row-title { font-weight: 600; }
+.m-wiki-folder { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-wiki-list-note:empty { display: none; }
+.m-wiki-list-note .m-banner { margin: 8px; }
+
+/* ---- Page ---- */
+.m-wiki .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+.m-wiki-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.m-wiki-head {
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.m-wiki-heading { flex: 1 1 auto; min-width: 0; }
+.m-wiki-title {
+  margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font: 600 14px/1.4 var(--font);
+}
+.m-wiki-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px var(--mono); }
+.m-wiki-path:empty { display: none; }
+.m-wiki-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+.m-wiki-actions .m-btn[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.m-wiki-status { flex: none; padding: 0 12px; color: var(--muted); font-size: 12px; line-height: 24px; }
+.m-wiki-status:empty { display: none; }
+.m-wiki-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px 24px; }
+.m-wiki-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-wiki-scroll > .m-banner { margin-bottom: 12px; }
+.m-wiki-raw {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text);
+  font: 12px/1.6 var(--mono);
+}
+
+/* Link selected with Tab (roving highlight) and a heading reached by an anchor. markdown.css gives links their
+   cursor: pointer, and external ones (which open nothing) the default cursor. */
+.m-wiki .m-md-link.m-wiki-link-selected { background: var(--selected); outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-xs); }
+.m-wiki .m-wiki-flash { background: var(--warn-soft); border-radius: var(--radius-xs); }
+@media (prefers-reduced-motion: no-preference) {
+  .m-wiki .m-wiki-flash { transition: background .3s; }
+}
+
+/* ---- Backlinks at the end of the page ---- */
+.m-wiki-backlinks { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border-soft); font-size: 12px; }
+.m-wiki-backlinks-title { margin-bottom: 6px; color: var(--muted); font-weight: 600; }
+.m-wiki-backlinks-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.m-wiki-backlinks-list li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.m-wiki-backlink-slug { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px var(--mono); }
+.m-wiki-backlinks-none { color: var(--muted); }
+
+/* ---- Narrow: list over page, no resizer (the split's bottom layout, reordered) ---- */
+.m-wiki .m-split[data-position="bottom"] .m-split-detail { order: 0; flex: 0 0 auto; max-height: 35%; border-bottom: 1px solid var(--border); }
+.m-wiki .m-split[data-position="bottom"] .m-split-list { order: 2; }
+.m-wiki .m-split[data-position="bottom"] .m-split-resizer { display: none; }

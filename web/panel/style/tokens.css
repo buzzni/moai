@@ -1,0 +1,105 @@
+/*
+ * Moai panel design tokens. Plain CSS so the bundler can inline it as it stands.
+ *
+ * Saycode's panel host (theme contract v1) injected <html data-theme="light|dark"> and ten --saycode-*
+ * custom properties; a browser injects nothing, so in `moai web` the --fb-* fallbacks stand and the OS scheme
+ * picks light or dark. The layering is kept as upstream wrote it (web/UPSTREAM.md): first the host values with
+ * their fallbacks, then names the panel uses, then values the host does not give and the panel derives. Values follow the Saycode app (docs/moai-panel/look-and-feel.md).
+ */
+
+/* Fallbacks: the app's own values, light first. Dark applies for data-theme="dark", or for an OS dark
+   scheme when the host has not said which theme it wants. */
+:root {
+  color-scheme: light;
+  --fb-bg: #FFFFFF; --fb-surface: #FFFFFF; --fb-text: #09090B; --fb-muted: #52525B; --fb-border: #DCDCE0;
+  --fb-accent: #1B64DA; --fb-accent-contrast: #FFFFFF; --fb-danger: #EF4444;
+  --warn: #b9730a;
+  --shadow-md: 0 2px 6px rgba(20, 27, 56, .07), 0 18px 40px -14px rgba(20, 27, 56, .20);
+  /* The kanban (components.css 5.7): grey lanes, cards on them with a shadow under. */
+  --lane-bg: #F4F5F7; --card-bg: var(--bg);
+  --shadow-card: 0 1px 1px rgba(9, 30, 66, .25), 0 0 1px rgba(9, 30, 66, .31);
+  /* How much of the column's colour the card's shadow takes (components.css .m-card); less on a dark ground. */
+  --card-tint-strength: 100%;
+  /* The band over a held title (components.css m-glint): the TUI's yellow at the edges, a brighter one in the middle. */
+  --glint-edge: var(--warn); --glint-core: #F2B01E;
+  /* The TUI's branch colour, bright cyan (view/branch.ts). */
+  --branch: #0891B2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --fb-bg: #13161A; --fb-surface: #22252C; --fb-text: #FAFAFA; --fb-muted: #A1A1AA; --fb-border: #3E424D;
+    --fb-accent: #2470E4;
+    --warn: #fbc04e;
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+    --lane-bg: #1A1D22; --card-bg: var(--surface);
+    --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+    --card-tint-strength: 28%;
+    --glint-edge: var(--warn); --glint-core: #FFE7A3;
+    --branch: #22D3EE;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --fb-bg: #13161A; --fb-surface: #22252C; --fb-text: #FAFAFA; --fb-muted: #A1A1AA; --fb-border: #3E424D;
+  --fb-accent: #2470E4;
+  --warn: #fbc04e;
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+  --lane-bg: #1A1D22; --card-bg: var(--surface);
+  --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+  --card-tint-strength: 28%;
+  --glint-edge: var(--warn); --glint-core: #FFE7A3;
+  --branch: #22D3EE;
+}
+
+:root {
+  /* Host tokens, by the names the panel's CSS uses. */
+  --bg: var(--saycode-bg, var(--fb-bg));
+  --surface: var(--saycode-surface, var(--fb-surface));
+  --text: var(--saycode-text, var(--fb-text));
+  --muted: var(--saycode-text-muted, var(--fb-muted));
+  --border: var(--saycode-border, var(--fb-border));
+  --accent: var(--saycode-accent, var(--fb-accent));
+  --accent-contrast: var(--saycode-accent-contrast, var(--fb-accent-contrast));
+  --danger: var(--saycode-danger, var(--fb-danger));
+  --radius: var(--saycode-radius, 10px);
+  --radius-xs: 6px;
+  --radius-card: 3px;
+  --font: var(--saycode-font, Inter, Pretendard, system-ui, -apple-system, "Segoe UI", sans-serif);
+  --mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, monospace;
+
+  /* Derived: the host does not give these. */
+  --hover: color-mix(in srgb, var(--text) 8%, var(--bg));
+  --selected: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  --muted-bg: color-mix(in srgb, var(--text) 6%, var(--bg));
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, black);
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  --ok: color-mix(in srgb, #10B981 65%, var(--text));
+  --ok-soft: color-mix(in srgb, #10B981 12%, var(--bg));
+  --warn-soft: color-mix(in srgb, var(--warn) 12%, var(--bg));
+  --border-soft: color-mix(in srgb, var(--border) 65%, transparent);
+  --review: color-mix(in srgb, #a855f7 70%, var(--text));
+  --epic: color-mix(in srgb, var(--accent) 70%, var(--muted));
+}
+
+/* Base. */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden;
+  font: 13px/1.5 var(--font);
+  color: var(--text); background: var(--bg);
+}
+::selection { background: var(--selected); }
+:where(button, a, input, textarea, select, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+:where(button, input, textarea, select):disabled { opacity: .5; cursor: not-allowed; }
+
+/* Scrollbars: 6px, as in the app. */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

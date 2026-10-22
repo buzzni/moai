@@ -1,0 +1,840 @@
+/*
+ * Moai panel design tokens. Plain CSS so the bundler can inline it as it stands.
+ *
+ * Saycode's panel host (theme contract v1) injected <html data-theme="light|dark"> and ten --saycode-*
+ * custom properties; a browser injects nothing, so in `moai web` the --fb-* fallbacks stand and the OS scheme
+ * picks light or dark. The layering is kept as upstream wrote it (web/UPSTREAM.md): first the host values with
+ * their fallbacks, then names the panel uses, then values the host does not give and the panel derives. Values follow the Saycode app (docs/moai-panel/look-and-feel.md).
+ */
+
+/* Fallbacks: the app's own values, light first. Dark applies for data-theme="dark", or for an OS dark
+   scheme when the host has not said which theme it wants. */
+:root {
+  color-scheme: light;
+  --fb-bg: #FFFFFF; --fb-surface: #FFFFFF; --fb-text: #09090B; --fb-muted: #52525B; --fb-border: #DCDCE0;
+  --fb-accent: #1B64DA; --fb-accent-contrast: #FFFFFF; --fb-danger: #EF4444;
+  --warn: #b9730a;
+  --shadow-md: 0 2px 6px rgba(20, 27, 56, .07), 0 18px 40px -14px rgba(20, 27, 56, .20);
+  /* The kanban (components.css 5.7): grey lanes, cards on them with a shadow under. */
+  --lane-bg: #F4F5F7; --card-bg: var(--bg);
+  --shadow-card: 0 1px 1px rgba(9, 30, 66, .25), 0 0 1px rgba(9, 30, 66, .31);
+  /* How much of the column's colour the card's shadow takes (components.css .m-card); less on a dark ground. */
+  --card-tint-strength: 100%;
+  /* The band over a held title (components.css m-glint): the TUI's yellow at the edges, a brighter one in the middle. */
+  --glint-edge: var(--warn); --glint-core: #F2B01E;
+  /* The TUI's branch colour, bright cyan (view/branch.ts). */
+  --branch: #0891B2;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --fb-bg: #13161A; --fb-surface: #22252C; --fb-text: #FAFAFA; --fb-muted: #A1A1AA; --fb-border: #3E424D;
+    --fb-accent: #2470E4;
+    --warn: #fbc04e;
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+    --lane-bg: #1A1D22; --card-bg: var(--surface);
+    --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+    --card-tint-strength: 28%;
+    --glint-edge: var(--warn); --glint-core: #FFE7A3;
+    --branch: #22D3EE;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --fb-bg: #13161A; --fb-surface: #22252C; --fb-text: #FAFAFA; --fb-muted: #A1A1AA; --fb-border: #3E424D;
+  --fb-accent: #2470E4;
+  --warn: #fbc04e;
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, .45), 0 20px 44px -14px rgba(0, 0, 0, .66);
+  --lane-bg: #1A1D22; --card-bg: var(--surface);
+  --shadow-card: 0 1px 1px rgba(0, 0, 0, .5), 0 0 1px rgba(0, 0, 0, .6);
+  --card-tint-strength: 28%;
+  --glint-edge: var(--warn); --glint-core: #FFE7A3;
+  --branch: #22D3EE;
+}
+
+:root {
+  /* Host tokens, by the names the panel's CSS uses. */
+  --bg: var(--saycode-bg, var(--fb-bg));
+  --surface: var(--saycode-surface, var(--fb-surface));
+  --text: var(--saycode-text, var(--fb-text));
+  --muted: var(--saycode-text-muted, var(--fb-muted));
+  --border: var(--saycode-border, var(--fb-border));
+  --accent: var(--saycode-accent, var(--fb-accent));
+  --accent-contrast: var(--saycode-accent-contrast, var(--fb-accent-contrast));
+  --danger: var(--saycode-danger, var(--fb-danger));
+  --radius: var(--saycode-radius, 10px);
+  --radius-xs: 6px;
+  --radius-card: 3px;
+  --font: var(--saycode-font, Inter, Pretendard, system-ui, -apple-system, "Segoe UI", sans-serif);
+  --mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, Menlo, monospace;
+
+  /* Derived: the host does not give these. */
+  --hover: color-mix(in srgb, var(--text) 8%, var(--bg));
+  --selected: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  --muted-bg: color-mix(in srgb, var(--text) 6%, var(--bg));
+  --accent-hover: color-mix(in srgb, var(--accent) 88%, black);
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--bg));
+  --ok: color-mix(in srgb, #10B981 65%, var(--text));
+  --ok-soft: color-mix(in srgb, #10B981 12%, var(--bg));
+  --warn-soft: color-mix(in srgb, var(--warn) 12%, var(--bg));
+  --border-soft: color-mix(in srgb, var(--border) 65%, transparent);
+  --review: color-mix(in srgb, #a855f7 70%, var(--text));
+  --epic: color-mix(in srgb, var(--accent) 70%, var(--muted));
+}
+
+/* Base. */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden;
+  font: 13px/1.5 var(--font);
+  color: var(--text); background: var(--bg);
+}
+::selection { background: var(--selected); }
+:where(button, a, input, textarea, select, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+:where(button, input, textarea, select):disabled { opacity: .5; cursor: not-allowed; }
+
+/* Scrollbars: 6px, as in the app. */
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/*
+ * Moai panel components. Specs: docs/moai-panel/look-and-feel.md section 5. Flat design: shadows only on
+ * menus, popovers and the kanban's cards. Class names are m-* and built by view/components.ts, view/tabs.ts, view/split.ts.
+ * Needs tokens.css.
+ */
+
+.m-icon { flex: none; display: inline-block; vertical-align: middle; }
+
+/* ---- Shell ---- */
+.m-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
+.m-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.m-tabpanel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.m-tabpanel[hidden] { display: none; }
+
+/* ---- Tab bar (5.1) ---- */
+.m-tabbar {
+  flex: none; display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 8px;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+  container-type: inline-size; container-name: m-tabbar;
+}
+/* Under 380px the labels and the actions do not both fit (the refresh time paints over the last tab): the tabs
+   keep their icons and the name moves to the button's aria-label and title. */
+@container m-tabbar (max-width: 379px) { .m-tab > span:not(.m-chip) { display: none; } }
+/* A count after a label (view/tabs.ts setBadge) widens the strip by about 30px a tab, so with one the labels give
+   way sooner, or the refresh time paints over Wiki. The width is the bar's content box: the panel's less 16px. */
+@container m-tabbar (max-width: 443px) { .m-tablist[data-badged] .m-tab > span:not(.m-chip) { display: none; } }
+.m-tablist { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.m-tab {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--muted); font: 500 12px var(--font); white-space: nowrap; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.m-tab:hover, .m-tab[aria-selected="true"] { background: var(--hover); }
+.m-tab[aria-selected="true"] { position: relative; color: var(--text); font-weight: 600; }
+/* The chosen tab stands on the bar's bottom line with a short accent under it (se-gowr.l7b). */
+.m-tab[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -5px; height: 2px; border-radius: 2px 2px 0 0; background: var(--accent);
+}
+.m-tab .m-icon { width: 15px; height: 15px; }
+.m-tabbar-spacer { flex: 1 1 auto; }
+.m-tabbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.m-refreshed { font: 11px var(--mono); color: var(--muted); }
+button.m-refreshed { border: 0; background: transparent; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+button.m-refreshed:hover { background: var(--hover); color: var(--text); }
+
+/* ---- Icon button (5.2) ---- */
+.m-iconbtn {
+  display: inline-flex; flex: 0 0 28px; align-items: center; justify-content: center; width: 28px; height: 28px;
+  min-height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted);
+  box-shadow: none; cursor: pointer;
+}
+.m-iconbtn .m-icon { width: 16px; height: 16px; }
+.m-iconbtn:hover:not(:disabled, [aria-disabled="true"]), .m-iconbtn[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.m-iconbtn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+/* ---- Buttons (5.3) ---- */
+.m-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 0 12px;
+  border: 1px solid transparent; border-radius: var(--radius); font: 500 13px/1.4 var(--font); white-space: nowrap;
+  box-shadow: none; cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.m-btn .m-icon { width: 16px; height: 16px; }
+.m-btn-primary { background: var(--accent); color: var(--accent-contrast); }
+.m-btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.m-btn-outline { background: var(--bg); color: var(--text); border-color: var(--border); }
+.m-btn-outline:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.m-btn-ghost { background: transparent; color: var(--muted); }
+.m-btn-ghost:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.m-btn-danger { background: var(--danger); color: #fff; }
+.m-btn-sm { min-height: 28px; padding: 0 8px; font-size: 12px; }
+
+/* ---- Inputs, search, select (5.4) ---- */
+.m-input, .m-select {
+  min-width: 0; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font: 13px/1.5 var(--font); box-shadow: none;
+}
+.m-input::placeholder { color: var(--muted); opacity: .8; }
+.m-input:focus, .m-select:focus { border-color: var(--accent); outline: none; }
+.m-input[aria-invalid="true"], .m-select[aria-invalid="true"] { border-color: var(--danger); }
+.m-select { min-height: 34px; padding-right: 6px; }
+
+.m-search {
+  display: flex; align-items: center; gap: 6px; height: 32px; min-width: 0; padding: 0 8px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--muted);
+}
+.m-search:focus-within { border-color: var(--accent); }
+.m-search[aria-invalid="true"], .m-search:has([aria-invalid="true"]) { border-color: var(--danger); }
+.m-search .m-icon { width: 14px; height: 14px; }
+.m-search input { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: 13px/1.5 var(--font); }
+.m-search input::placeholder { color: var(--muted); opacity: .8; }
+.m-search .m-select { min-height: 24px; padding: 0 4px; border: 0; background: transparent; color: var(--muted); font-size: 12px;
+  /* A select is as wide as its widest option: the disabled "notes are not searched" line (se-thyl) must not set it. */
+  flex: 0 0 auto; max-width: 8em; text-overflow: ellipsis; }
+
+/* Menus and popovers. */
+.m-menu {
+  z-index: 220; min-width: 180px; max-width: min(360px, calc(100vw - 24px)); max-height: 70vh; overflow: auto;
+  padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
+  box-shadow: var(--shadow-md);
+}
+.m-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border: 0;
+  border-radius: 6px; background: transparent; color: inherit; font: 13px var(--font); text-align: left; cursor: default;
+}
+.m-menu-item .m-icon { width: 15px; height: 15px; }
+.m-menu-item:hover, .m-menu-item[data-highlighted] { background: var(--hover); }
+.m-menu-item[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+.m-menu-sep { height: 1px; margin: 4px 0; background: var(--border); border: 0; }
+
+/* SPC which-key menu and the shortcut help overlay reuse the .m-menu surface. */
+.m-whichkey, .m-help { position: fixed; }
+.m-whichkey[hidden], .m-help[hidden] { display: none; }
+.m-whichkey { left: 50%; bottom: 12px; transform: translateX(-50%); width: min(520px, calc(100vw - 24px)); max-width: none; }
+.m-wk-title { padding: 4px 8px 6px; color: var(--muted); font: 600 12px var(--font); }
+.m-wk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px; }
+.m-wk-item { min-width: 0; }
+.m-wk-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-wk-state { flex: 0 0 auto; color: var(--muted); font: 11px var(--mono); }
+.m-wk-footer { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; padding: 6px 8px 2px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; }
+.m-wk-control { display: inline-flex; align-items: center; gap: 4px; }
+.m-help { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px)); max-width: none; max-height: 80vh; padding: 0; }
+.m-help-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border-soft); background: var(--bg); }
+.m-help-body { padding: 4px 12px 12px; }
+.m-help-title { margin: 12px 0 4px; color: var(--muted); font: 600 12px var(--font); }
+.m-help-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; font-size: 13px; }
+.m-help-row[data-available="false"] { opacity: .45; }
+.m-help-keys, .m-kbd-hint { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+/* Bottom-right, never top: the tab bar sits at the top of the panel and its buttons (refresh, tabs) must stay clickable. */
+.m-focus-hint { position: fixed; bottom: 8px; right: 8px; z-index: 30; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--surface); color: var(--muted); font-size: 12px; text-align: center; cursor: pointer; }
+
+/* ---- Chips (5.5) ---- */
+.m-chip {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--muted-bg); color: var(--muted); font: 500 11px var(--font); white-space: nowrap;
+}
+.m-chip-ok, .m-chip-warn, .m-chip-danger, .m-chip-accent { border-color: transparent; }
+.m-chip-ok { background: var(--ok-soft); color: var(--ok); }
+.m-chip-warn { background: var(--warn-soft); color: var(--warn); }
+.m-chip-danger { background: var(--danger-soft); color: var(--danger); }
+.m-chip-accent { background: var(--selected); color: var(--accent); }
+.m-chip-new { border-color: transparent; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+/* NEW before a list row's name or a board card's title (view/unread.ts): a compact chip, so the 28px row and the
+   one-line title keep their height. */
+.moai-line .moai-new, .m-card-title .moai-new { min-height: 18px; padding: 0 5px; vertical-align: top; }
+.m-chip-x { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.m-chip-x .m-icon { width: 12px; height: 12px; }
+
+/* ---- List row (5.6) ---- */
+.m-row {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px;
+  color: var(--text); cursor: default;
+}
+.m-row:hover { background: var(--hover); }
+.m-row[aria-selected="true"] { background: var(--selected); }
+.m-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.m-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-row-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.m-row-meta { flex: none; font: 12px var(--mono); color: var(--muted); }
+.m-row-dim { opacity: .6; }
+.m-row-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px;
+  background: var(--lane-bg); color: var(--muted); font-size: 11px; font-weight: 500; border-bottom: 1px solid var(--border-soft);
+}
+
+/* Right-hand columns: fixed widths, they drop out as the list narrows (see responsive.ts). */
+.m-list { container-type: inline-size; container-name: m-list; min-width: 0; }
+.m-col { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--muted); }
+.m-col-tags { width: 14ch; }
+.m-col-epic { width: 16ch; }
+.m-col-assignee { width: 10ch; }
+.m-col-date { width: 6ch; }
+@container m-list (max-width: 519px) { .m-col-date { display: none; } }
+@container m-list (max-width: 459px) { .m-col-epic { display: none; } }
+@container m-list (max-width: 399px) { .m-col-assignee { display: none; } }
+@container m-list (max-width: 339px) { .m-col-tags { display: none; } }
+
+/* Status glyphs (look-and-feel section 6). Colour never carries the status alone: the glyph differs. */
+.m-st-todo { color: var(--muted); }
+.m-st-in_progress { color: var(--warn); font-weight: 600; }
+.m-st-review { color: var(--review); }
+.m-st-done { color: var(--ok); }
+.m-st-other { color: var(--accent); }
+/* What someone holds moves as in the TUI (view/spin.ts, se-gowr.oie). The glyph turns through the braille spinner, a
+   frame every 120 ms; ▸ stays in the DOM, for a screen reader and for the tests, and the spinner is drawn over it.
+   A yellow band runs over the title from left to right, a cell every 120 ms, and rests 8 cells past the end before it
+   comes in again (--glint-time, set per title). On an inline title that wraps, the band runs the lines in order.
+   Without motion both stand still: ▸, and the title in its own colour. */
+@media (prefers-reduced-motion: no-preference) {
+  .m-spin { position: relative; color: transparent; }
+  /* One spinner for every started column: review's, its magenta at the regular weight (field test). In-progress's own
+     amber, and the bold its glyph carries, left the braille dots faint in Desktop, deepened or not. */
+  .m-spin::before {
+    content: "\280B"; position: absolute; inset: 0; color: var(--review); font-weight: 400; text-align: center;
+    animation: m-spin 1.2s step-start infinite;
+  }
+  .m-glint {
+    --glint-band: 3ch;
+    color: transparent;
+    background-image:
+      linear-gradient(90deg, transparent, var(--glint-edge) 25%, var(--glint-core) 50%, var(--glint-edge) 75%, transparent),
+      linear-gradient(var(--text), var(--text));
+    background-size: var(--glint-band) 100%, 100% 100%;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text; background-clip: text;
+    animation: m-glint var(--glint-time, 3s) linear infinite;
+  }
+  /* A search hit keeps its mark and its words readable; the band skips it. */
+  /* `.m-mark` too: `mark.m-mark` below weighs as much and comes later, and its `color: inherit` took the band's
+     transparent ink — the hit's letters vanished under its opaque background. */
+  .m-glint mark, .m-glint mark.m-mark { color: var(--text); }
+}
+@keyframes m-spin {
+  0% { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; } 40% { content: "\283C"; }
+  50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; } 80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+/* From one band's width left of the title to 8 cells past its end: a percentage here is of the title less the band. */
+@keyframes m-glint {
+  from { background-position: calc(-1 * var(--glint-band)) 0, 0 0; }
+  to { background-position: calc(100% + var(--glint-band) + 8ch) 0, 0 0; }
+}
+.m-p0 { color: var(--danger); font-weight: 700; }
+.m-p1 { color: var(--danger); }
+.m-p2 { color: var(--text); }
+.m-p3 { color: var(--muted); }
+.m-epicname { color: var(--epic); }
+/* `⎇ <branch>`: a row another worktree holds (view/branch.ts), in the TUI's bright cyan, bold. */
+.m-branch { color: var(--branch); font: 600 12px var(--mono); white-space: nowrap; }
+.m-crumbs-trees { overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
+mark.m-mark { background: var(--warn-soft); color: inherit; border-radius: 2px; }
+
+/* ---- Kanban (5.7) ---- */
+/* Grey lanes on the panel's background with white cards on them (se-gowr.0vl). One gap stands between two cards and
+   between a card and its lane's sides; the lanes sit closer together. view/board.ts sizes the board from the same
+   numbers, so a change here goes there too. */
+.m-board-wrap { --board-gap: 6px; --board-lane-gap: 4px; padding: var(--board-gap); }
+.m-swim-head { display: flex; align-items: center; gap: 6px; padding: 8px 2px 6px; font: 600 12px var(--font); }
+.m-swim-head .m-count { color: var(--muted); font: 11px var(--mono); }
+.m-swim-head:first-child { padding-top: 2px; }
+.m-board { display: flex; gap: var(--board-lane-gap); min-height: 0; }
+.m-lane {
+  flex: 1 0 200px; min-width: 200px; display: flex; flex-direction: column; gap: var(--board-gap);
+  padding: 0 var(--board-gap) var(--board-gap); border-radius: var(--radius-card); background: var(--lane-bg);
+}
+.m-lane-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px;
+  background: var(--lane-bg); color: var(--muted); font: 600 12px var(--font);
+}
+.m-lane-head .m-count { margin-left: auto; font: 11px var(--mono); }
+.m-lane-empty { padding: 2px 4px; color: var(--muted); font-size: 12px; }
+/* Every card casts a faint blue shadow under it (se-26dv): the field test tried one colour per column and settled on
+   the done column's for all. */
+.m-card {
+  --card-tint: #CFE6F7;
+  --card-glow: 0 3px 6px color-mix(in srgb, var(--card-tint) var(--card-tint-strength), transparent);
+  padding: 8px 10px; border-radius: var(--radius-card); background: var(--card-bg); box-shadow: var(--shadow-card), var(--card-glow);
+  cursor: pointer; transition: background .15s;
+}
+.m-card:hover { background: color-mix(in srgb, var(--text) 3%, var(--card-bg)); }
+.m-card[aria-selected="true"] { background: var(--selected); box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-card), var(--card-glow); }
+.m-card:focus-visible { outline-offset: 1px; }
+
+/* ---- Empty state, banner, kbd (5.9) ---- */
+.m-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 16px; padding: 24px;
+  border-radius: var(--radius-card); background: var(--lane-bg); color: var(--muted); text-align: center;
+}
+.m-empty-icon { display: inline-flex; padding: 8px; border-radius: 999px; background: var(--card-bg); color: var(--muted); }
+.m-empty-icon .m-icon { width: 18px; height: 18px; }
+.m-empty-title { color: var(--text); font-weight: 500; }
+.m-banner {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--muted-bg); color: var(--text); font-size: 12px;
+}
+.m-banner-danger { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.m-banner-warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
+kbd, .m-kbd {
+  display: inline-block; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--muted-bg); font: 11px var(--mono); color: var(--muted);
+}
+.m-tooltip {
+  z-index: 230; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+  color: var(--text); font-size: 12px; box-shadow: var(--shadow-md);
+}
+
+/* ---- Toolbar: narrow widths fold button labels away, leaving the icon (6ml) ---- */
+.m-toolbar { container-type: inline-size; container-name: m-toolbar; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.m-toolbar .m-search { flex: 1 1 160px; }
+@container m-toolbar (max-width: 499px) { .m-toolbar .m-btn-label { display: none; } }
+
+/* ---- Split: list and detail (5.8) ---- */
+.m-split { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; }
+.m-split[data-position="bottom"] { flex-direction: column; }
+.m-split[data-position="left"] { flex-direction: row; }
+.m-split-list { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; }
+.m-split-detail { flex: 0 0 auto; min-width: 0; min-height: 0; overflow: auto; background: var(--bg); }
+.m-split[data-position="left"] .m-split-detail { order: 0; flex-basis: var(--m-detail-size); }
+.m-split[data-position="left"] .m-split-resizer { order: 1; }
+.m-split[data-position="left"] .m-split-list { order: 2; }
+.m-split[data-position="bottom"] .m-split-list { order: 0; }
+.m-split[data-position="bottom"] .m-split-resizer { order: 1; }
+.m-split[data-position="bottom"] .m-split-detail { order: 2; flex-basis: var(--m-detail-size); }
+.m-split[data-detail="hidden"] .m-split-detail, .m-split[data-detail="hidden"] .m-split-resizer { display: none; }
+
+/* 1px line, 9px hit area; 3px accent on hover and focus. */
+.m-split-resizer { position: relative; flex: none; background: transparent; touch-action: none; z-index: 1; }
+.m-split[data-position="left"] .m-split-resizer { width: 9px; margin: 0 -4px; cursor: col-resize; }
+.m-split[data-position="bottom"] .m-split-resizer { height: 9px; margin: -4px 0; cursor: row-resize; }
+.m-split-resizer::before { content: ""; position: absolute; background: var(--border); }
+.m-split[data-position="left"] .m-split-resizer::before { top: 0; bottom: 0; left: 4px; width: 1px; }
+.m-split[data-position="bottom"] .m-split-resizer::before { left: 0; right: 0; top: 4px; height: 1px; }
+.m-split[data-position="left"] .m-split-resizer:is(:hover, :focus-visible, [data-dragging])::before { left: 3px; width: 3px; background: var(--accent); }
+.m-split[data-position="bottom"] .m-split-resizer:is(:hover, :focus-visible, [data-dragging])::before { top: 3px; height: 3px; background: var(--accent); }
+.m-split-resizer:focus-visible { outline: 0; }
+body.m-resizing { user-select: none; }
+body.m-resizing[data-resize="left"] { cursor: col-resize; }
+body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
+
+/* The label of a menu row: it takes what the glyph and the key hint leave. */
+.m-menu-label { flex: 1; }
+
+/*
+ * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
+ * of the columns that are on. The lanes, the column heads and the card box are components.css (look-and-feel 5.7).
+ * Needs tokens.css and components.css.
+ */
+.m-card-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+/* A chip on a card (an epic's name, an assignee, a tag) stays inside the card: one line, cut with an ellipsis, the
+   whole name in its title (moai-rqec). Upstream's inline-flex chip cannot ellipsize its text, so it ran past the
+   card's edge with a long epic name. */
+.m-card-line > .m-chip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 20px; }
+.m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
+.m-card-title { margin-top: 2px; overflow-wrap: anywhere; }
+
+/*
+ * The list tab (view/list.ts): the tree list with its virtual scroll. Rows are the m-row of components.css,
+ * placed absolutely in a body as tall as every line, so only the lines near the viewport exist.
+ * Needs tokens.css and components.css.
+ */
+/* The line height is view/list.ts ROW_HEIGHT; the title's line box is the whole row, so a branch drawn in it reaches
+   from the row's top to its bottom. */
+.moai-list { position: relative; --moai-row-h: 24px; }
+.moai-list:focus { outline: 0; }
+.moai-list:focus-visible .m-row[aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.moai-list-head[hidden], .moai-list-note[hidden], .moai-list-empty[hidden] { display: none; }
+.moai-list-body { position: relative; }
+.moai-list-body > .m-row { position: absolute; left: 0; right: 0; height: var(--moai-row-h); }
+.moai-list-body > .m-row > .m-row-title { align-self: stretch; line-height: var(--moai-row-h); }
+.moai-list-body .moai-new { vertical-align: middle; }
+
+.moai-list-note { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; color: var(--muted); font-size: 12px; }
+.moai-list-note .m-btn[hidden] { display: none; }
+
+.moai-c-toggle { flex: none; display: inline-flex; width: 16px; }
+.moai-toggle {
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0;
+  border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.moai-toggle:hover { background: var(--hover); color: var(--text); }
+.moai-toggle .m-icon { width: 12px; height: 12px; transition: transform .15s; }
+.moai-toggle[aria-expanded="true"] .m-icon { transform: rotate(90deg); }
+.moai-c-id { width: var(--moai-id-w, 10ch); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Longhands, not `font:`: the shorthand would reset the weight .m-p0 and .m-st-in_progress set (components.css). */
+.moai-c-p { flex: none; width: 2ch; font-family: var(--mono); font-size: 12px; }
+.moai-c-st { flex: none; width: 1.5ch; text-align: center; font-family: var(--mono); font-size: 12px; }
+.moai-c-counts { width: 7ch; text-align: right; }
+/* The branch (se-gowr.4x9): each level is two cells, its letters kept as text but not shown, and its lines drawn in
+   the colour the letters had. The line runs down the middle of the first cell and turns at the row's middle. */
+.moai-twig { display: inline-flex; height: 100%; vertical-align: top; font-family: var(--mono); white-space: pre; }
+.moai-tw { position: relative; width: 2ch; height: 100%; color: transparent; --tw-line: color-mix(in srgb, var(--muted) 55%, transparent); }
+.moai-tw::before, .moai-tw::after { content: ""; position: absolute; }
+.moai-tw:is([data-tw="pipe"], [data-tw="tee"])::before { top: 0; bottom: 0; left: calc(.5ch - .5px); border-left: 1px solid var(--tw-line); }
+.moai-tw[data-tw="tee"]::after { top: calc(50% - .5px); left: .5ch; right: 2px; border-top: 1px solid var(--tw-line); }
+.moai-tw[data-tw="end"]::before {
+  top: 0; height: calc(50% + .5px); left: calc(.5ch - .5px); right: 2px;
+  border-left: 1px solid var(--tw-line); border-bottom: 1px solid var(--tw-line); border-bottom-left-radius: 4px;
+}
+
+/* The columns are sized in ch of the row font, so their heads keep it; only the title head follows the head line. */
+.moai-list-head .m-row-title.moai-head { font: inherit; color: inherit; }
+.moai-head-sort { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.moai-head-sort:hover { color: var(--text); }
+.moai-list-head [aria-sort] { color: var(--text); }
+
+/*
+ * Rendered markdown (view/markdown.ts). Flat: borders only, tokens only. Needs tokens.css.
+ * Links have no href, so they are styled by class and marked up for the keyboard by the wiki view.
+ */
+
+.m-md { font: 13px/1.6 var(--font); color: var(--text); overflow-wrap: anywhere; }
+.m-md > :first-child { margin-top: 0; }
+.m-md > :last-child { margin-bottom: 0; }
+
+.m-md :is(h1, h2, h3, h4, h5, h6) { margin: 20px 0 8px; font-weight: 600; line-height: 1.3; color: var(--text); scroll-margin-top: 8px; }
+.m-md h1 { font-size: 20px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.m-md h2 { font-size: 16px; padding-bottom: 4px; border-bottom: 1px solid var(--border-soft); }
+.m-md h3 { font-size: 14px; }
+.m-md :is(h4, h5, h6) { font-size: 13px; }
+.m-md h6 { color: var(--muted); }
+
+.m-md p { margin: 0 0 10px; }
+.m-md :is(ul, ol) { margin: 0 0 10px; padding-left: 22px; }
+.m-md li { margin: 2px 0; }
+.m-md li > :is(ul, ol) { margin: 2px 0; }
+.m-md li > p { margin: 0 0 6px; }
+.m-md ul { list-style: disc; }
+.m-md ul ul { list-style: circle; }
+.m-md ul ul ul { list-style: square; }
+
+.m-md blockquote { margin: 0 0 10px; padding: 2px 12px; border-left: 3px solid var(--border); color: var(--muted); }
+.m-md blockquote > :last-child { margin-bottom: 0; }
+.m-md hr { margin: 16px 0; border: 0; border-top: 1px solid var(--border); }
+
+.m-md-inline-code {
+  padding: 1px 5px; border: 1px solid var(--border-soft); border-radius: var(--radius-xs);
+  background: var(--muted-bg); font: 12px var(--mono);
+}
+.m-md-code {
+  margin: 0 0 10px; padding: 10px 12px; overflow-x: auto; border: 1px solid var(--border);
+  border-radius: var(--radius-xs); background: var(--muted-bg); font: 12px/1.5 var(--mono); tab-size: 4;
+}
+.m-md-code code { font: inherit; white-space: pre; background: none; border: 0; padding: 0; }
+
+.m-md-tablewrap { margin: 0 0 10px; overflow-x: auto; }
+.m-md table { border-collapse: collapse; min-width: 50%; font-size: 12px; }
+.m-md :is(th, td) { padding: 5px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+.m-md th { background: var(--muted-bg); font-weight: 600; }
+.m-md :is(th, td)[data-align="center"] { text-align: center; }
+.m-md :is(th, td)[data-align="right"] { text-align: right; }
+.m-md :is(th, td)[data-align="left"] { text-align: left; }
+.m-md tbody tr:hover { background: var(--hover); }
+
+.m-md-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; border-radius: 2px; }
+.m-md-link:hover { color: var(--accent-hover); }
+.m-md-link[data-kind="external"] { color: var(--muted); cursor: default; text-decoration-style: dotted; }
+.m-md-issue { font: 12px var(--mono); text-decoration: none; padding: 0 3px; background: var(--selected); }
+.m-md-link[aria-current="true"] { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--selected); }
+
+.m-md del { color: var(--muted); text-decoration: line-through; }
+.m-md li.m-md-task-item { list-style: none; margin-left: -18px; }
+.m-md-task {
+  display: inline-block; width: 12px; height: 12px; margin-right: 2px; vertical-align: -2px;
+  border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--muted-bg);
+  font-size: 10px; line-height: 10px; text-align: center; color: var(--muted);
+}
+.m-md-task[data-checked="true"]::before { content: "\2713"; }
+
+/*
+ * The shell's own parts (view/shell.ts, view/crumbs.ts): the frame fills the panel, the path line, the
+ * banners and the result line under it, the panes, and the run's activity floating over their foot. Needs tokens.css and components.css.
+ */
+
+#moai-app { height: 100%; }
+
+/* ---- The header (view/brand.ts, se-qkga): the TUI's own. The logo's six lines dim, a line down, then User and
+   Version in the TUI's columns. One line height for both sides, so the info lines stand beside the logo's rows. A
+   short panel leaves it out and a narrow one the logo, as the TUI does (HEADER_MIN_H; the logo yields first). ---- */
+.m-brand {
+  flex: none; display: flex; align-items: flex-start; gap: 1ch; padding: 6px 10px; border-bottom: 1px solid var(--border-soft);
+  /* A terminal's: Menlo at its own line height. The logo's block letters are drawn as cells (.m-brand-art), not set
+     in it: a font leaves a seam under every row. */
+  font: 12px/1.17 Menlo, "DejaVu Sans Mono", ui-monospace, monospace; color: var(--text);
+  container-type: inline-size; container-name: m-brand;
+}
+.m-brand-logo { flex: none; color: var(--muted); }
+/* The art drawn as terminal cells (view/brand.ts artPath): 26 cells wide, five rows of the header's line height. */
+.m-brand-art { display: block; width: 26ch; height: calc(5 * 1.17em); fill: currentColor; }
+.m-brand-tagline { white-space: pre; }
+.m-brand-info { flex: 1 1 auto; min-width: 0; align-self: stretch; display: flex; flex-direction: column; padding-left: 1ch; border-left: 1px solid var(--border); }
+.m-brand-line { overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.m-brand-label { color: var(--muted); }
+/* The tip (se-irhr): at the foot of the info column, so its last line stands on the logo's tagline row, as one line
+   of the header. Every tip stacks in one cell, each set to that cell's foot (a short one sits on the tagline's row, a
+   long one rises above it, up to three lines), and wraps after its own label. A click opens the tips page. */
+.m-brand-tip { margin-top: auto; padding-top: 4px; }
+.m-brand-tip-text {
+  display: grid; width: 100%; padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit;
+  text-align: left; cursor: pointer;
+}
+.m-brand-tip-item { grid-area: 1 / 1; align-self: end; display: grid; grid-template-columns: max-content minmax(0, 1fr); }
+.m-brand-tip-item > .m-brand-label { white-space: pre; }
+.m-brand-tip-said { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.m-brand-tip-text:hover .m-brand-tip-said { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.m-brand-tip-text:is(:hover, :focus-visible) .m-brand-tip-item { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .m-brand-tip-item:not([data-first]) { visibility: hidden; } }
+/* The tips page (view/tips.ts): the shortcut help's dialog, its rows a tip and its Copy button. */
+.m-tips-intro { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.m-tips-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 13px; }
+.m-tips-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.m-tips-text::before { content: "\201C"; color: var(--muted); }
+.m-tips-text::after { content: "\201D"; color: var(--muted); }
+/* The projects (view/brand.ts, moai-o14f): the TUI's third column, right of User and Version (draw.rs `with_projects`).
+   Six rows to a column, then the next column; the key in the SPC menu's key colour (the TUI's MENU_KEY, light green),
+   the name dim; the project on screen in the accent and bold, and aria-current (the TUI shimmers it). */
+.m-brand-projects { flex: none; display: grid; grid-auto-flow: column; grid-template-rows: repeat(6, auto); column-gap: 2ch; align-content: start; padding-left: 1ch; }
+.m-brand-projects[hidden] { display: none; }
+.m-brand-project {
+  display: block; padding: 0; border: 0; background: transparent; font: inherit; line-height: inherit; color: var(--muted);
+  text-align: left; white-space: pre; cursor: pointer; max-width: 30ch; overflow: hidden; text-overflow: ellipsis;
+}
+.m-brand-key { color: var(--ok); }
+.m-brand-project:hover .m-brand-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.m-brand-project[data-current] { cursor: default; }
+.m-brand-project[data-current] .m-brand-here { color: var(--accent); }
+.m-brand-project[data-current] .m-brand-name { color: var(--accent); font-weight: 700; text-decoration: none; }
+/* Narrow: the logo yields first (with projects it needs the room sooner), then the project column (draw.rs `header`). */
+@container m-brand (max-width: 759px) { .m-brand[data-projects] .m-brand-logo { display: none; } }
+@container m-brand (max-width: 479px) { .m-brand-projects { display: none; } }
+@container m-brand (max-width: 459px) { .m-brand-logo { display: none; } .m-brand-info { padding-left: 1ch; } }
+@media (max-height: 599px) { .m-brand { display: none; } }
+
+/* Slots other parts mount into take no room while empty. */
+.m-toolbar-slot:empty, .m-tabbar-slot:empty { display: none; }
+.m-tabbar-slot { display: flex; align-items: center; gap: 4px; }
+.m-tabbar .moai-refresh:disabled { opacity: 1; cursor: default; }
+
+/* ---- Path line (design §1): the badges get their room first, the path shrinks. ---- */
+.m-crumbs {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 28px; min-width: 0; padding: 0 8px;
+  border-bottom: 1px solid var(--border-soft); font-size: 12px;
+}
+.m-crumbs-path { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.m-crumb {
+  flex: 0 1 auto; min-width: 2ch; max-width: 32ch; height: 22px; padding: 0 4px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font: 600 12px var(--font);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.m-crumb:hover { background: var(--hover); color: var(--text); }
+.m-crumb[aria-current="location"] { color: var(--text); }
+.m-crumbs-sep { flex: none; color: var(--muted); }
+.m-crumbs-badges { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; margin-left: auto; min-width: 0; }
+.m-crumbs-badges:empty { display: none; }
+.m-crumbs-hint { color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+/* ---- Notes under the path line: each takes room only while it says something. ---- */
+.m-shell-head { flex: none; }
+.m-shell-notes { display: flex; flex-direction: column; }
+.m-shell-notes > * { margin: 8px 8px 0; }
+.m-shell-notes > :last-child { margin-bottom: 8px; }
+.moai-hint { color: var(--muted); font-size: 12px; }
+.moai-offline:empty, .moai-backoff:empty, .moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
+/* What moai said beside the lists: one line per line it said. */
+.moai-said { flex-direction: column; gap: 2px; }
+.moai-said > p { margin: 0; }
+.moai-result { font-size: 12px; }
+
+/* ---- The run's activity (se-24ey.14i): a toast over the foot of the panes, so a run never pushes the layout.
+   It fades in after a short wait, so a run that ends at once never flickers in; hidden, it takes no room. The clock's
+   own reads do not raise it (main.ts activity), so it does not cover the foot every 10 s. ---- */
+.m-shell { position: relative; }
+.m-shell-status {
+  position: absolute; left: 50%; bottom: 12px; z-index: 20; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; max-width: calc(100% - 24px); min-height: 32px; padding: 4px 12px;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-md);
+  color: var(--muted); font-size: 12px; white-space: nowrap; pointer-events: none;
+  animation: m-toast-in 160ms ease-out 300ms both;
+}
+/* The toast lets clicks through to the rows under it; only Cancel takes them. */
+.m-shell-status .moai-cancel { pointer-events: auto; }
+.m-shell-status[hidden] { display: none; }
+.m-shell-status .moai-activity { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@keyframes m-toast-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---- Panes: the list and board each scroll on their own, so a tab change keeps each one's offset. ---- */
+.m-shell .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+.m-pane-main { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-pane-main:focus, .m-pane-detail:focus, .m-pane-wiki:focus { outline: 0; }
+.m-pane-wiki { overflow: auto; }
+
+/* The search / filter / sort toolbar above the list and board (view/toolbar.ts), mounted by the shell. */
+/* Its rows and buttons have display rules of their own (flex, inline-flex): `hidden` must still hide them. */
+.m-toolbar-slot[hidden], .m-toolbar-stack [hidden] { display: none !important; }
+.m-toolbar-stack .m-chips { padding: 4px 8px !important; }
+.m-toolbar-stack > .m-banner { margin: 4px 8px; }
+.m-hidden-note { padding: 2px 8px 4px; font-size: 12px; color: var(--muted); }
+/* After the title of a row only the search shows (the view hides it). */
+.moai-hidden-mark { margin-left: 6px; font-size: 11px; line-height: 16px; }
+
+/* The filter input stands as tall as the sort button beside it (se-ewaw): the small button's height, padding and
+   type size (components.css .m-btn-sm), so the toolbar reads as one row of controls. */
+.m-toolbar .m-filter .m-input { box-sizing: border-box; height: 28px; min-height: 28px; padding: 0 8px; font-size: 12px; line-height: 26px; }
+
+/* The sort editor's row under the key cursor (j/k in sorter mode, keys/wiring.ts). */
+.m-sort-pop .m-menu-item[data-cursor] { background: var(--selected); }
+.m-sort-pop .m-sort-note { padding: 4px 8px; color: var(--muted, inherit); font-size: 11px; }
+
+/* The zone picker (`SPC o t`, view/zones.ts): the sort editor's popover, standing alone over the page as the TUI's
+   picker stands over its panes — a filter box on top, the names under it, the line under the cursor as the sort
+   editor's (data-cursor above). */
+.m-zone-pop { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); z-index: 230; display: flex; flex-direction: column;
+  width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow: hidden; }
+.m-zone-pop[hidden] { display: none; }
+.m-zone-pop .m-zone-filter { flex: none; margin: 0 4px 4px; }
+.m-zone-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-zone-item { min-height: 28px; padding: 4px 8px; cursor: pointer; }
+.m-zone-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-zone-note[hidden] { display: none; }
+
+/* Placed here, not by a `style` attribute: the CSP's style-src holds no 'unsafe-inline'. */
+.m-filter { position: relative; flex: 1 1 200px; }
+.m-sort { position: relative; }
+.m-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px; }
+.m-filter .m-hints { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; }
+.m-sort > .m-sort-pop { position: absolute; top: 100%; right: 0; z-index: 20; }
+.m-sort > .m-sort-pop .m-menu-item { gap: 4px; }
+
+/*
+ * Moai panel wiki tab (design.md 4.10). Built by view/wiki.ts. Needs tokens.css, components.css and markdown.css.
+ * The page list sits in the split's first pane (its "detail" slot, ratio = wiki_width) and the page on the right.
+ * Narrow panels stack the list over the page and drop the resizer.
+ */
+
+.m-wiki { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.m-wiki-toolbar .m-wiki-search { flex: 1 1 200px; max-width: 480px; }
+
+/* ---- Page list ---- */
+.m-wiki .m-split-detail { display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+.m-wiki-pages { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-wiki-list { padding: 4px 0; }
+.m-wiki-list .m-row { gap: 6px; }
+.m-wiki-list .m-row[aria-current="page"] .m-row-title { font-weight: 600; }
+.m-wiki-folder { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-wiki-list-note:empty { display: none; }
+.m-wiki-list-note .m-banner { margin: 8px; }
+
+/* ---- Page ---- */
+.m-wiki .m-split-list { display: flex; flex-direction: column; overflow: hidden; }
+.m-wiki-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.m-wiki-head {
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.m-wiki-heading { flex: 1 1 auto; min-width: 0; }
+.m-wiki-title {
+  margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font: 600 14px/1.4 var(--font);
+}
+.m-wiki-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px var(--mono); }
+.m-wiki-path:empty { display: none; }
+.m-wiki-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+.m-wiki-actions .m-btn[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.m-wiki-status { flex: none; padding: 0 12px; color: var(--muted); font-size: 12px; line-height: 24px; }
+.m-wiki-status:empty { display: none; }
+.m-wiki-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 12px 16px 24px; }
+.m-wiki-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-wiki-scroll > .m-banner { margin-bottom: 12px; }
+.m-wiki-raw {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text);
+  font: 12px/1.6 var(--mono);
+}
+
+/* Link selected with Tab (roving highlight) and a heading reached by an anchor. markdown.css gives links their
+   cursor: pointer, and external ones (which open nothing) the default cursor. */
+.m-wiki .m-md-link.m-wiki-link-selected { background: var(--selected); outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-xs); }
+.m-wiki .m-wiki-flash { background: var(--warn-soft); border-radius: var(--radius-xs); }
+@media (prefers-reduced-motion: no-preference) {
+  .m-wiki .m-wiki-flash { transition: background .3s; }
+}
+
+/* ---- Backlinks at the end of the page ---- */
+.m-wiki-backlinks { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border-soft); font-size: 12px; }
+.m-wiki-backlinks-title { margin-bottom: 6px; color: var(--muted); font-weight: 600; }
+.m-wiki-backlinks-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.m-wiki-backlinks-list li { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.m-wiki-backlink-slug { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px var(--mono); }
+.m-wiki-backlinks-none { color: var(--muted); }
+
+/* ---- Narrow: list over page, no resizer (the split's bottom layout, reordered) ---- */
+.m-wiki .m-split[data-position="bottom"] .m-split-detail { order: 0; flex: 0 0 auto; max-height: 35%; border-bottom: 1px solid var(--border); }
+.m-wiki .m-split[data-position="bottom"] .m-split-list { order: 2; }
+.m-wiki .m-split[data-position="bottom"] .m-split-resizer { display: none; }
+
+/* The detail pane (view/detail.ts). A sheet of its own, joined last (build.mjs): it used to be a <style> appended to <head> at run time, which the CSP's style-src 'self' refuses, and last is where that one stood in the cascade. */
+.moai-detail { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 16px; font-size: 13px; }
+.moai-detail-head { display: flex; align-items: flex-start; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.moai-detail-headtext { flex: 1; min-width: 0; }
+.moai-detail-idline { display: flex; align-items: center; gap: 6px; color: var(--muted); font: 12px var(--mono); }
+.moai-detail-idline .moai-detail-glyph { position: relative; display: inline-block; width: 1.5ch; text-align: center; }
+.moai-detail-id { font-variant-numeric: tabular-nums; }
+.moai-detail-title { margin: 4px 0 8px; font-size: 16px; line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+.moai-detail-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.moai-detail-fields {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; padding: 10px 12px;
+  border-radius: var(--radius-card); background: var(--lane-bg);
+}
+.moai-detail-fields dt { color: var(--muted); font-size: 12px; line-height: 19px; }
+.moai-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
+.moai-detail-ids { margin: 6px 0 0; padding: 0; list-style: none; }
+.moai-detail-ids li { padding: 2px 0; overflow-wrap: anywhere; }
+.moai-detail-mark { display: inline-block; width: 1.2em; color: var(--muted); }
+.moai-detail-rollup { margin: 6px 0 4px; }
+.moai-detail-bar { display: flex; gap: 1px; height: 8px; border-radius: 4px; background: var(--lane-bg); box-shadow: inset 0 0 0 1px var(--border-soft); overflow: hidden; }
+.moai-detail-bar > span { flex: none; height: 100%; }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status] { --dot: var(--border); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="done"] { --dot: var(--ok); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="review"] { --dot: var(--review); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="in_progress"] { --dot: var(--warn); }
+.moai-detail-bar > span { background: var(--dot); }
+.moai-detail-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.moai-detail-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.moai-detail-legend > span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--dot); }
+.moai-detail-body { overflow-wrap: anywhere; margin-top: 6px; }
+.moai-detail-raw { margin: 6px 0 0; padding: 10px 12px; border-radius: var(--radius-card); background: var(--lane-bg); white-space: pre-wrap; font-family: var(--mono, monospace); font-size: 12px; }
+/* A section's name, and a hairline from it to the right edge: the sections read apart without boxes. */
+.moai-detail h3, .moai-detail summary { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.moai-detail h3::after, .moai-detail summary::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+.moai-detail summary { cursor: pointer; list-style: none; }
+.moai-detail summary::-webkit-details-marker { display: none; }
+.moai-detail summary::before { content: "\25B8"; color: var(--muted); font-size: 10px; transition: transform .15s; }
+.moai-detail details[open] > summary::before { transform: rotate(90deg); }
+.moai-detail-list { margin: 6px 0 0; padding: 0; list-style: none; }
+.moai-detail-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 0; overflow-wrap: anywhere; }
+/* An id or a hash, then its words: the words wrap beside it, not under it. */
+.moai-detail-list li:has(> .moai-detail-hash) { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.moai-detail-hash {
+  flex: none; padding: 0 6px; border-radius: var(--radius-card); background: var(--muted-bg); color: var(--muted);
+  font: 11px/18px var(--mono, monospace);
+}
+.moai-detail-meta { color: var(--muted); }
+/* The history as a timeline: a line down the left, a dot on it for each entry, the colour of what the entry did. */
+/* The line runs from each dot to the next one, so a history of one entry has a dot and no line. */
+.moai-detail-timeline { position: relative; padding-left: 18px; }
+.moai-detail-timeline > li:not(:last-child)::after { content: ""; position: absolute; left: -14px; top: 17px; bottom: -8px; border-left: 1px solid color-mix(in srgb, var(--muted) 55%, transparent); }
+.moai-detail-timeline > li { position: relative; display: block; padding: 3px 0 5px; }
+.moai-detail-timeline > li::before {
+  content: ""; position: absolute; left: -18px; top: 8px; width: 9px; height: 9px; box-sizing: border-box;
+  border: 2px solid var(--muted); border-radius: 50%; background: var(--bg);
+}
+.moai-detail-timeline > li[data-kind="create"]::before { border-color: var(--ok); }
+.moai-detail-timeline > li[data-kind="status"]::before { border-color: var(--accent); }
+.moai-detail-timeline > li[data-kind="note"]::before { border-color: var(--warn); }
+.moai-detail-timeline .moai-detail-meta { display: block; font-size: 11px; }
+.moai-detail-timeline > li.moai-detail-meta::before { display: none; }
+
+[hidden]{display:none!important}

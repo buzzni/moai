@@ -1,0 +1,12 @@
+/*
+ * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
+ * of the columns that are on. The lanes, the column heads and the card box are components.css (look-and-feel 5.7).
+ * Needs tokens.css and components.css.
+ */
+.m-card-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+/* A chip on a card (an epic's name, an assignee, a tag) stays inside the card: one line, cut with an ellipsis, the
+   whole name in its title (moai-rqec). Upstream's inline-flex chip cannot ellipsize its text, so it ran past the
+   card's edge with a long epic name. */
+.m-card-line > .m-chip { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; line-height: 20px; }
+.m-card-line .m-id, .m-card-line .m-count { font: 12px var(--mono); color: var(--muted); }
+.m-card-title { margin-top: 2px; overflow-wrap: anywhere; }

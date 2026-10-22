@@ -2843,8 +2843,8 @@ fn column_name(c: &super::board::Column, lang: Lang) -> String {
 /// 않는다**: 글리프 곁에 늘 칸 이름이 선다.
 fn column_glyph(c: &super::board::Column) -> &'static str {
     match c {
-        super::board::Column::Backlog => "◇",
-        super::board::Column::Shelved => "‖",
+        super::board::Column::Backlog => style::BACKLOG_GLYPH,
+        super::board::Column::Shelved => style::SHELVED_GLYPH,
         super::board::Column::Status(s) => style::glyph(s),
     }
 }

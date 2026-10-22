@@ -1,0 +1,319 @@
+/*
+ * Moai panel components. Specs: docs/moai-panel/look-and-feel.md section 5. Flat design: shadows only on
+ * menus, popovers and the kanban's cards. Class names are m-* and built by view/components.ts, view/tabs.ts, view/split.ts.
+ * Needs tokens.css.
+ */
+
+.m-icon { flex: none; display: inline-block; vertical-align: middle; }
+
+/* ---- Shell ---- */
+.m-shell { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
+.m-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.m-tabpanel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.m-tabpanel[hidden] { display: none; }
+
+/* ---- Tab bar (5.1) ---- */
+.m-tabbar {
+  flex: none; display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 8px;
+  border-bottom: 1px solid var(--border); background: var(--bg);
+  container-type: inline-size; container-name: m-tabbar;
+}
+/* Under 380px the labels and the actions do not both fit (the refresh time paints over the last tab): the tabs
+   keep their icons and the name moves to the button's aria-label and title. */
+@container m-tabbar (max-width: 379px) { .m-tab > span:not(.m-chip) { display: none; } }
+/* A count after a label (view/tabs.ts setBadge) widens the strip by about 30px a tab, so with one the labels give
+   way sooner, or the refresh time paints over Wiki. The width is the bar's content box: the panel's less 16px. */
+@container m-tabbar (max-width: 443px) { .m-tablist[data-badged] .m-tab > span:not(.m-chip) { display: none; } }
+.m-tablist { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.m-tab {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--muted); font: 500 12px var(--font); white-space: nowrap; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.m-tab:hover, .m-tab[aria-selected="true"] { background: var(--hover); }
+.m-tab[aria-selected="true"] { position: relative; color: var(--text); font-weight: 600; }
+/* The chosen tab stands on the bar's bottom line with a short accent under it (se-gowr.l7b). */
+.m-tab[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -5px; height: 2px; border-radius: 2px 2px 0 0; background: var(--accent);
+}
+.m-tab .m-icon { width: 15px; height: 15px; }
+.m-tabbar-spacer { flex: 1 1 auto; }
+.m-tabbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.m-refreshed { font: 11px var(--mono); color: var(--muted); }
+button.m-refreshed { border: 0; background: transparent; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+button.m-refreshed:hover { background: var(--hover); color: var(--text); }
+
+/* ---- Icon button (5.2) ---- */
+.m-iconbtn {
+  display: inline-flex; flex: 0 0 28px; align-items: center; justify-content: center; width: 28px; height: 28px;
+  min-height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted);
+  box-shadow: none; cursor: pointer;
+}
+.m-iconbtn .m-icon { width: 16px; height: 16px; }
+.m-iconbtn:hover:not(:disabled, [aria-disabled="true"]), .m-iconbtn[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.m-iconbtn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
+/* ---- Buttons (5.3) ---- */
+.m-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 0 12px;
+  border: 1px solid transparent; border-radius: var(--radius); font: 500 13px/1.4 var(--font); white-space: nowrap;
+  box-shadow: none; cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+.m-btn .m-icon { width: 16px; height: 16px; }
+.m-btn-primary { background: var(--accent); color: var(--accent-contrast); }
+.m-btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.m-btn-outline { background: var(--bg); color: var(--text); border-color: var(--border); }
+.m-btn-outline:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.m-btn-ghost { background: transparent; color: var(--muted); }
+.m-btn-ghost:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.m-btn-danger { background: var(--danger); color: #fff; }
+.m-btn-sm { min-height: 28px; padding: 0 8px; font-size: 12px; }
+
+/* ---- Inputs, search, select (5.4) ---- */
+.m-input, .m-select {
+  min-width: 0; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); color: var(--text); font: 13px/1.5 var(--font); box-shadow: none;
+}
+.m-input::placeholder { color: var(--muted); opacity: .8; }
+.m-input:focus, .m-select:focus { border-color: var(--accent); outline: none; }
+.m-input[aria-invalid="true"], .m-select[aria-invalid="true"] { border-color: var(--danger); }
+.m-select { min-height: 34px; padding-right: 6px; }
+
+.m-search {
+  display: flex; align-items: center; gap: 6px; height: 32px; min-width: 0; padding: 0 8px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--muted);
+}
+.m-search:focus-within { border-color: var(--accent); }
+.m-search[aria-invalid="true"], .m-search:has([aria-invalid="true"]) { border-color: var(--danger); }
+.m-search .m-icon { width: 14px; height: 14px; }
+.m-search input { flex: 1 1 auto; min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: 13px/1.5 var(--font); }
+.m-search input::placeholder { color: var(--muted); opacity: .8; }
+.m-search .m-select { min-height: 24px; padding: 0 4px; border: 0; background: transparent; color: var(--muted); font-size: 12px;
+  /* A select is as wide as its widest option: the disabled "notes are not searched" line (se-thyl) must not set it. */
+  flex: 0 0 auto; max-width: 8em; text-overflow: ellipsis; }
+
+/* Menus and popovers. */
+.m-menu {
+  z-index: 220; min-width: 180px; max-width: min(360px, calc(100vw - 24px)); max-height: 70vh; overflow: auto;
+  padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); color: var(--text);
+  box-shadow: var(--shadow-md);
+}
+.m-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border: 0;
+  border-radius: 6px; background: transparent; color: inherit; font: 13px var(--font); text-align: left; cursor: default;
+}
+.m-menu-item .m-icon { width: 15px; height: 15px; }
+.m-menu-item:hover, .m-menu-item[data-highlighted] { background: var(--hover); }
+.m-menu-item[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+.m-menu-sep { height: 1px; margin: 4px 0; background: var(--border); border: 0; }
+
+/* SPC which-key menu and the shortcut help overlay reuse the .m-menu surface. */
+.m-whichkey, .m-help { position: fixed; }
+.m-whichkey[hidden], .m-help[hidden] { display: none; }
+.m-whichkey { left: 50%; bottom: 12px; transform: translateX(-50%); width: min(520px, calc(100vw - 24px)); max-width: none; }
+.m-wk-title { padding: 4px 8px 6px; color: var(--muted); font: 600 12px var(--font); }
+.m-wk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px; }
+.m-wk-item { min-width: 0; }
+.m-wk-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-wk-state { flex: 0 0 auto; color: var(--muted); font: 11px var(--mono); }
+.m-wk-footer { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; padding: 6px 8px 2px; border-top: 1px solid var(--border-soft); color: var(--muted); font-size: 11px; }
+.m-wk-control { display: inline-flex; align-items: center; gap: 4px; }
+.m-help { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px)); max-width: none; max-height: 80vh; padding: 0; }
+.m-help-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border-soft); background: var(--bg); }
+.m-help-body { padding: 4px 12px 12px; }
+.m-help-title { margin: 12px 0 4px; color: var(--muted); font: 600 12px var(--font); }
+.m-help-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 26px; font-size: 13px; }
+.m-help-row[data-available="false"] { opacity: .45; }
+.m-help-keys, .m-kbd-hint { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+/* Bottom-right, never top: the tab bar sits at the top of the panel and its buttons (refresh, tabs) must stay clickable. */
+.m-focus-hint { position: fixed; bottom: 8px; right: 8px; z-index: 30; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-xs); background: var(--surface); color: var(--muted); font-size: 12px; text-align: center; cursor: pointer; }
+
+/* ---- Chips (5.5) ---- */
+.m-chip {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--muted-bg); color: var(--muted); font: 500 11px var(--font); white-space: nowrap;
+}
+.m-chip-ok, .m-chip-warn, .m-chip-danger, .m-chip-accent { border-color: transparent; }
+.m-chip-ok { background: var(--ok-soft); color: var(--ok); }
+.m-chip-warn { background: var(--warn-soft); color: var(--warn); }
+.m-chip-danger { background: var(--danger-soft); color: var(--danger); }
+.m-chip-accent { background: var(--selected); color: var(--accent); }
+.m-chip-new { border-color: transparent; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+/* NEW before a list row's name or a board card's title (view/unread.ts): a compact chip, so the 28px row and the
+   one-line title keep their height. */
+.moai-line .moai-new, .m-card-title .moai-new { min-height: 18px; padding: 0 5px; vertical-align: top; }
+.m-chip-x { display: inline-flex; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.m-chip-x .m-icon { width: 12px; height: 12px; }
+
+/* ---- List row (5.6) ---- */
+.m-row {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px;
+  color: var(--text); cursor: default;
+}
+.m-row:hover { background: var(--hover); }
+.m-row[aria-selected="true"] { background: var(--selected); }
+.m-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.m-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-row-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.m-row-meta { flex: none; font: 12px var(--mono); color: var(--muted); }
+.m-row-dim { opacity: .6; }
+.m-row-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px;
+  background: var(--lane-bg); color: var(--muted); font-size: 11px; font-weight: 500; border-bottom: 1px solid var(--border-soft);
+}
+
+/* Right-hand columns: fixed widths, they drop out as the list narrows (see responsive.ts). */
+.m-list { container-type: inline-size; container-name: m-list; min-width: 0; }
+.m-col { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--muted); }
+.m-col-tags { width: 14ch; }
+.m-col-epic { width: 16ch; }
+.m-col-assignee { width: 10ch; }
+.m-col-date { width: 6ch; }
+@container m-list (max-width: 519px) { .m-col-date { display: none; } }
+@container m-list (max-width: 459px) { .m-col-epic { display: none; } }
+@container m-list (max-width: 399px) { .m-col-assignee { display: none; } }
+@container m-list (max-width: 339px) { .m-col-tags { display: none; } }
+
+/* Status glyphs (look-and-feel section 6). Colour never carries the status alone: the glyph differs. */
+.m-st-todo { color: var(--muted); }
+.m-st-in_progress { color: var(--warn); font-weight: 600; }
+.m-st-review { color: var(--review); }
+.m-st-done { color: var(--ok); }
+.m-st-other { color: var(--accent); }
+/* What someone holds moves as in the TUI (view/spin.ts, se-gowr.oie). The glyph turns through the braille spinner, a
+   frame every 120 ms; ▸ stays in the DOM, for a screen reader and for the tests, and the spinner is drawn over it.
+   A yellow band runs over the title from left to right, a cell every 120 ms, and rests 8 cells past the end before it
+   comes in again (--glint-time, set per title). On an inline title that wraps, the band runs the lines in order.
+   Without motion both stand still: ▸, and the title in its own colour. */
+@media (prefers-reduced-motion: no-preference) {
+  .m-spin { position: relative; color: transparent; }
+  /* One spinner for every started column: review's, its magenta at the regular weight (field test). In-progress's own
+     amber, and the bold its glyph carries, left the braille dots faint in Desktop, deepened or not. */
+  .m-spin::before {
+    content: "\280B"; position: absolute; inset: 0; color: var(--review); font-weight: 400; text-align: center;
+    animation: m-spin 1.2s step-start infinite;
+  }
+  .m-glint {
+    --glint-band: 3ch;
+    color: transparent;
+    background-image:
+      linear-gradient(90deg, transparent, var(--glint-edge) 25%, var(--glint-core) 50%, var(--glint-edge) 75%, transparent),
+      linear-gradient(var(--text), var(--text));
+    background-size: var(--glint-band) 100%, 100% 100%;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text; background-clip: text;
+    animation: m-glint var(--glint-time, 3s) linear infinite;
+  }
+  /* A search hit keeps its mark and its words readable; the band skips it. */
+  /* `.m-mark` too: `mark.m-mark` below weighs as much and comes later, and its `color: inherit` took the band's
+     transparent ink — the hit's letters vanished under its opaque background. */
+  .m-glint mark, .m-glint mark.m-mark { color: var(--text); }
+}
+@keyframes m-spin {
+  0% { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; } 40% { content: "\283C"; }
+  50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; } 80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+/* From one band's width left of the title to 8 cells past its end: a percentage here is of the title less the band. */
+@keyframes m-glint {
+  from { background-position: calc(-1 * var(--glint-band)) 0, 0 0; }
+  to { background-position: calc(100% + var(--glint-band) + 8ch) 0, 0 0; }
+}
+.m-p0 { color: var(--danger); font-weight: 700; }
+.m-p1 { color: var(--danger); }
+.m-p2 { color: var(--text); }
+.m-p3 { color: var(--muted); }
+.m-epicname { color: var(--epic); }
+/* `⎇ <branch>`: a row another worktree holds (view/branch.ts), in the TUI's bright cyan, bold. */
+.m-branch { color: var(--branch); font: 600 12px var(--mono); white-space: nowrap; }
+.m-crumbs-trees { overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
+mark.m-mark { background: var(--warn-soft); color: inherit; border-radius: 2px; }
+
+/* ---- Kanban (5.7) ---- */
+/* Grey lanes on the panel's background with white cards on them (se-gowr.0vl). One gap stands between two cards and
+   between a card and its lane's sides; the lanes sit closer together. view/board.ts sizes the board from the same
+   numbers, so a change here goes there too. */
+.m-board-wrap { --board-gap: 6px; --board-lane-gap: 4px; padding: var(--board-gap); }
+.m-swim-head { display: flex; align-items: center; gap: 6px; padding: 8px 2px 6px; font: 600 12px var(--font); }
+.m-swim-head .m-count { color: var(--muted); font: 11px var(--mono); }
+.m-swim-head:first-child { padding-top: 2px; }
+.m-board { display: flex; gap: var(--board-lane-gap); min-height: 0; }
+.m-lane {
+  flex: 1 0 200px; min-width: 200px; display: flex; flex-direction: column; gap: var(--board-gap);
+  padding: 0 var(--board-gap) var(--board-gap); border-radius: var(--radius-card); background: var(--lane-bg);
+}
+.m-lane-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px;
+  background: var(--lane-bg); color: var(--muted); font: 600 12px var(--font);
+}
+.m-lane-head .m-count { margin-left: auto; font: 11px var(--mono); }
+.m-lane-empty { padding: 2px 4px; color: var(--muted); font-size: 12px; }
+/* Every card casts a faint blue shadow under it (se-26dv): the field test tried one colour per column and settled on
+   the done column's for all. */
+.m-card {
+  --card-tint: #CFE6F7;
+  --card-glow: 0 3px 6px color-mix(in srgb, var(--card-tint) var(--card-tint-strength), transparent);
+  padding: 8px 10px; border-radius: var(--radius-card); background: var(--card-bg); box-shadow: var(--shadow-card), var(--card-glow);
+  cursor: pointer; transition: background .15s;
+}
+.m-card:hover { background: color-mix(in srgb, var(--text) 3%, var(--card-bg)); }
+.m-card[aria-selected="true"] { background: var(--selected); box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-card), var(--card-glow); }
+.m-card:focus-visible { outline-offset: 1px; }
+
+/* ---- Empty state, banner, kbd (5.9) ---- */
+.m-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 16px; padding: 24px;
+  border-radius: var(--radius-card); background: var(--lane-bg); color: var(--muted); text-align: center;
+}
+.m-empty-icon { display: inline-flex; padding: 8px; border-radius: 999px; background: var(--card-bg); color: var(--muted); }
+.m-empty-icon .m-icon { width: 18px; height: 18px; }
+.m-empty-title { color: var(--text); font-weight: 500; }
+.m-banner {
+  display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--muted-bg); color: var(--text); font-size: 12px;
+}
+.m-banner-danger { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.m-banner-warn { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 35%, var(--border)); }
+kbd, .m-kbd {
+  display: inline-block; padding: 0 4px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--muted-bg); font: 11px var(--mono); color: var(--muted);
+}
+.m-tooltip {
+  z-index: 230; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+  color: var(--text); font-size: 12px; box-shadow: var(--shadow-md);
+}
+
+/* ---- Toolbar: narrow widths fold button labels away, leaving the icon (6ml) ---- */
+.m-toolbar { container-type: inline-size; container-name: m-toolbar; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.m-toolbar .m-search { flex: 1 1 160px; }
+@container m-toolbar (max-width: 499px) { .m-toolbar .m-btn-label { display: none; } }
+
+/* ---- Split: list and detail (5.8) ---- */
+.m-split { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; }
+.m-split[data-position="bottom"] { flex-direction: column; }
+.m-split[data-position="left"] { flex-direction: row; }
+.m-split-list { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; }
+.m-split-detail { flex: 0 0 auto; min-width: 0; min-height: 0; overflow: auto; background: var(--bg); }
+.m-split[data-position="left"] .m-split-detail { order: 0; flex-basis: var(--m-detail-size); }
+.m-split[data-position="left"] .m-split-resizer { order: 1; }
+.m-split[data-position="left"] .m-split-list { order: 2; }
+.m-split[data-position="bottom"] .m-split-list { order: 0; }
+.m-split[data-position="bottom"] .m-split-resizer { order: 1; }
+.m-split[data-position="bottom"] .m-split-detail { order: 2; flex-basis: var(--m-detail-size); }
+.m-split[data-detail="hidden"] .m-split-detail, .m-split[data-detail="hidden"] .m-split-resizer { display: none; }
+
+/* 1px line, 9px hit area; 3px accent on hover and focus. */
+.m-split-resizer { position: relative; flex: none; background: transparent; touch-action: none; z-index: 1; }
+.m-split[data-position="left"] .m-split-resizer { width: 9px; margin: 0 -4px; cursor: col-resize; }
+.m-split[data-position="bottom"] .m-split-resizer { height: 9px; margin: -4px 0; cursor: row-resize; }
+.m-split-resizer::before { content: ""; position: absolute; background: var(--border); }
+.m-split[data-position="left"] .m-split-resizer::before { top: 0; bottom: 0; left: 4px; width: 1px; }
+.m-split[data-position="bottom"] .m-split-resizer::before { left: 0; right: 0; top: 4px; height: 1px; }
+.m-split[data-position="left"] .m-split-resizer:is(:hover, :focus-visible, [data-dragging])::before { left: 3px; width: 3px; background: var(--accent); }
+.m-split[data-position="bottom"] .m-split-resizer:is(:hover, :focus-visible, [data-dragging])::before { top: 3px; height: 3px; background: var(--accent); }
+.m-split-resizer:focus-visible { outline: 0; }
+body.m-resizing { user-select: none; }
+body.m-resizing[data-resize="left"] { cursor: col-resize; }
+body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
+
+/* The label of a menu row: it takes what the glyph and the key hint leave. */
+.m-menu-label { flex: 1; }

@@ -28,6 +28,7 @@ pub mod stats;
 pub mod status;
 pub mod tui;
 pub mod update;
+pub mod web;
 pub mod wiki;
 
 use crate::cli::{BacklogCmd, Cli, Cmd, ProjectCmd, SkillCmd, Typed, WikiCmd};
@@ -660,6 +661,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Prime(w) => prime::run(ctx, w.worktree),
         Cmd::Status(w) => status::run(ctx, w.worktree),
         Cmd::Tui(a) => tui::run(ctx, a),
+        // 섬기는 판은 안 돌아온다 — 첫 줄은 `web::run` 이 직접 찍는다.
+        Cmd::Web(a) => web::run(ctx, a),
         Cmd::Issue(t) => typed(ctx, t, Kind::Issue),
         Cmd::Epic(t) => typed(ctx, t, Kind::Epic),
         Cmd::Milestone(t) => typed(ctx, t, Kind::Milestone),
