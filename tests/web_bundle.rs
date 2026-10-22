@@ -58,7 +58,8 @@ fn sources() -> String {
         fold(format!("i18n/{code}.json").as_bytes());
         fold(&[0]);
         let all: std::collections::BTreeMap<String, String> =
-            serde_json::from_str(&std::fs::read_to_string(at_root("i18n").join(format!("{code}.json"))).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(at_root("i18n").join(format!("{code}.json"))).unwrap())
+                .unwrap();
         for (key, value) in all.iter().filter(|(k, _)| k.starts_with("page.")) {
             fold(key.as_bytes());
             fold(&[0]);
@@ -159,7 +160,10 @@ fn the_web_bundle_writes_text_not_markup() {
 fn the_web_bundle_sets_no_inline_style_attribute() {
     let js = dist("app.js");
     for word in ["cssText", "setAttribute(\"style\"", "setAttribute('style'", "style=\"", "style='"] {
-        assert!(!js.contains(word), "app.js 에 {word} 가 있다 — CSP 가 style 속성을 막는다. 클래스나 CSSOM 으로 넣는다");
+        assert!(
+            !js.contains(word),
+            "app.js 에 {word} 가 있다 — CSP 가 style 속성을 막는다. 클래스나 CSSOM 으로 넣는다"
+        );
     }
     // `el(doc, tag, { …, style: "…" })` — 속성 모음의 `style:` 키. 꼴은 `style:"`·`style:` + 백틱·`style:` + 변수.
     for (i, _) in js.match_indices("style:") {

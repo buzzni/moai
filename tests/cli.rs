@@ -21959,7 +21959,8 @@ fn web_overlay_reaches_tree_stamp_and_read() {
     let made = on["out"].as_array().unwrap().iter().find(|r| r["id"] == t.made.as_str()).expect("옆 줄이 없다");
     assert_eq!(made["home"], serde_json::json!([t.epic]), "{made}");
 
-    let stamp = |query: &str| json_of(&get(web.port, &format!("/api/stamp{query}")).2)["stamp"].as_str().unwrap().to_string();
+    let stamp =
+        |query: &str| json_of(&get(web.port, &format!("/api/stamp{query}")).2)["stamp"].as_str().unwrap().to_string();
     let (off0, on0) = (stamp(""), stamp("?worktree=1"));
     assert_ne!(off0, on0, "켠 표식이 끈 표식과 같다 — 옆을 안 접었다");
     ok_here_at(&feat, LATER, &["note", &t.made, "옆의 메모"]);
@@ -22015,7 +22016,8 @@ fn tui_json_deep_no_archive_leaves_out_what_show_all_hides() {
         all.extend_from_slice(args);
         json_of(&ok_at(s.path(), later, &all)).as_array().unwrap().clone()
     };
-    let ids = |rows: &[serde_json::Value]| rows.iter().map(|r| r["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let ids =
+        |rows: &[serde_json::Value]| rows.iter().map(|r| r["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
 
     let all = ids(&rows(&[]));
     for id in [&epic, &gone, &back, &live] {

@@ -48,12 +48,11 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         crate::worktree::gather(&repo, !ctx.json || args.worktree)?;
     // 산 줄의 id — 이것 밖의 줄은 아카이브 파일에서만 왔다(`Where::stored`). 거르개를 받은 `--json` 만 쓴다 —
     // 그것을 읽는 자는 거름망(`Filter::matches`)뿐이라, 차례나 `--deep` 만 받은 판에는 짓지 않는다.
-    let live: std::collections::BTreeSet<String> = match ctx.json
-        && (super::show::first_given(&args.filter).is_some() || args.no_archive)
-    {
-        true => active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect(),
-        false => Default::default(),
-    };
+    let live: std::collections::BTreeSet<String> =
+        match ctx.json && (super::show::first_given(&args.filter).is_some() || args.no_archive) {
+            true => active_load.issues.iter().map(|i| i.id.clone()).chain(active_load.reserved_ids()).collect(),
+            false => Default::default(),
+        };
     // The explorer can switch between the live board and archived rows. Keep the
     // active overlay from the worktree gather, then add the archive beside it so
     // worktree-only rows remain visible in both views.
