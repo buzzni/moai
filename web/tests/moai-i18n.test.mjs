@@ -17,6 +17,66 @@ function leaves(node, path = []) {
 
 const places = (text) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',')
 
+/**
+ * The keys the page reads, from the `Copy` interface in panel/i18n/index.ts (the types are erased at run time and TypeScript
+ * 7 has no script API, so the interfaces are read as text). A string member is a leaf the page reads and en.json must hold;
+ * a `Record<…>`, an array or a `{…}` of unknown size is a path en.json must hold something under. The `?` members are
+ * left out: the page does not require them.
+ */
+async function pageReads() {
+  const source = await readFile(new URL('../panel/i18n/index.ts', import.meta.url), 'utf8')
+  const bodies = new Map([...source.matchAll(/(?:export )?interface (\w+) \{\n([\s\S]*?)\n\}/g)].map((m) => [m[1], m[2]]))
+  const leaves = []
+  const unknown = []
+  // A member ends at a `;` or a line end that is not inside a `{…}`, `<…>` or `[…]`.
+  const members = (text) => {
+    const out = []
+    let depth = 0
+    let line = ''
+    for (const ch of text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')) {
+      if ('{<['.includes(ch)) depth++
+      if ('}>]'.includes(ch)) depth--
+      if (depth === 0 && (ch === ';' || ch === '\n')) {
+        if (line.trim()) out.push(line.trim())
+        line = ''
+      } else line += ch
+    }
+    if (line.trim()) out.push(line.trim())
+    return out
+  }
+  const walk = (path, type) => {
+    type = type.trim()
+    if (type === 'string') return leaves.push(path)
+    if (bodies.has(type)) return members(bodies.get(type)).forEach((line) => member(path, line))
+    const inline = /^\{([\s\S]*)\}$/.exec(type)
+    if (inline && !type.includes('[')) return members(inline[1]).forEach((line) => member(path, line))
+    unknown.push(path)
+  }
+  const member = (parent, line) => {
+    const m = /^(\w+)(\?)?:\s*([\s\S]+)$/.exec(line)
+    assert.ok(m, `cannot read the Copy member: ${line}`)
+    if (m[2]) return
+    walk(parent ? `${parent}.${m[1]}` : m[1], m[3])
+  }
+  members(bodies.get('Copy')).forEach((line) => member('', line))
+  return { leaves, unknown }
+}
+
+test('every key the page reads (the Copy interface) is in en.json, and ko holds them too', async () => {
+  const { leaves: read, unknown } = await pageReads()
+  assert.ok(read.length > 150, `${read.length} keys read`)
+  assert.ok(unknown.length < 40, `${unknown.length} sized-by-data members`)
+  const en = new Set(Object.keys(await bundle('en')).filter((key) => key.startsWith('page.')).map((key) => key.slice(5)))
+  const ko = new Set(Object.keys(await bundle('ko')).filter((key) => key.startsWith('page.')).map((key) => key.slice(5)))
+  assert.deepEqual(read.filter((key) => !en.has(key)), [], 'read by the page, missing in en.json')
+  assert.deepEqual(read.filter((key) => !ko.has(key)), [], 'read by the page, missing in ko.json')
+  const under = (keys, path) => [...keys].some((key) => key.startsWith(`${path}.`))
+  assert.deepEqual(unknown.filter((path) => !under(en, path)), [], 'a list or table the page reads, empty in en.json')
+  // And the tree is whole at each of them: copyFor('en') reads no undefined.
+  const get = (path) => path.split('.').reduce((node, part) => node?.[part], COPY.en)
+  assert.deepEqual(read.filter((path) => typeof get(path) !== 'string'), [])
+})
+
 // The tree is built from en.json, so this cannot tell a key the page never reads, nor a word the page reads that en.json
 // lacks (that one reads `undefined`): it holds the nesting (`.0` arrays, `table.labels` dotted names) to one leaf per key.
 test('every page key in en.json lands as one leaf of the copy tree, and the tree invents none', async () => {
