@@ -7330,3 +7330,9 @@
 {"ts":"2026-10-22T01:56:14Z","id":"moai-ly88","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: SPC 메뉴에 p 프로젝트·m read·o timezone 이 없다"}
 {"ts":"2026-10-22T01:56:14Z","id":"moai-rqec","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: 보드에서 에픽 이름이 칸을 벗어난다"}
 {"ts":"2026-10-22T01:56:46Z","id":"moai-jshy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-37 (round 2: ir9k o14f fmun ly88 rqec yuf)"}
+{"ts":"2026-10-22T01:57:09Z","id":"moai-ir9k","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T01:57:10Z","id":"moai-o14f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T01:57:10Z","id":"moai-fmun","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T01:57:10Z","id":"moai-ly88","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T01:57:10Z","id":"moai-rqec","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T01:57:10Z","id":"moai-jshy.yuf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
