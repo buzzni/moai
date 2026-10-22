@@ -75,7 +75,7 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   the tree, only while it is shown); `w` overlays what the other worktrees changed, as
   `moai show --worktree` does (on when the page opens); the overlay covers the
   list, the tree that places each row under its epic, the stamp the page follows,
-  the read marks and the detail pane, so a row only a sibling worktree holds
+  the milestone and epic counts (`moai status --worktree`), the read marks and the detail pane, so a row only a sibling worktree holds
   stands under its epic like any other and opens like one; `a` shows everything but the archive, `1`~`9` toggle the
   nth status column
 - **Column** (`SPC c`) picks what a list row carries: `i` id, `p` priority,

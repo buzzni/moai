@@ -6,7 +6,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 
 const fixture = async (name) => JSON.parse(await readFile(new URL(`./fixtures/moai/${name}`, import.meta.url), 'utf8'))
 
-const { ENDPOINT, bootFrom, groupsFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, markArchived, matchEndpoints, rowsFromLists, sameGroups, withArchive } =
+const { archiveDue, ENDPOINT, bootFrom, groupsFrom, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, markArchived, matchEndpoints, rowsFromLists, sameGroups, withArchive } =
   await panelModule('data/source.ts')
 const { urlOf } = await panelModule('data/client.ts')
 
@@ -118,6 +118,10 @@ test('status epics[] and milestones[] give their counts per column; malformed en
   assert.equal(sameGroups(groups, new Map()), false)
   const loaded = await loadGroups(fakeClient({ '/api/status': passed(STATUS) }))
   assert.deepEqual(loaded.value.get('fx-ep02'), { done: 0, in_progress: 0, review: 0, todo: 1 })
+  // Overlay on: the counts are asked over the same worktrees as the tree (moai-m4ez.u6a).
+  const overlaid = fakeClient({ '/api/status?worktree=1': passed(STATUS) })
+  assert.equal((await loadGroups(overlaid, 0, undefined, true)).ok, true)
+  assert.equal(overlaid.calls[0].url, '/api/status?worktree=1')
   assert.deepEqual(await loadGroups(fakeClient({ '/api/status': { kind: 'not-started' } })), { ok: false, outcome: { kind: 'not-started' } })
 })
 
@@ -244,4 +248,13 @@ test('loadAllRows asks /api/rows for the worktree overlay while it is on, and th
   asked.length = 0
   await loadAllRows(client)
   assert.deepEqual(asked.map((e) => [e.path, e.query]), [['/api/rows', {}], ['/api/backlog', {}]])
+})
+
+test('the archive is read after a board read only when that read asked for its lines in the tree (moai-m4ez.u6a)', () => {
+  assert.equal(archiveDue(true, true, false, false), true)
+  // `SPC v o` turned on while a read asked without the archive ran: its tree lacks the lines, the follow-up read loads it.
+  assert.equal(archiveDue(false, true, false, false), false)
+  assert.equal(archiveDue(true, false, false, false), false)
+  assert.equal(archiveDue(true, true, true, false), false)
+  assert.equal(archiveDue(true, true, false, true), false)
 })

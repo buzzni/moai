@@ -15,7 +15,7 @@ import { isUnread, readMarks } from './data/read.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
-  loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
+  archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
 import { effectiveZone, useZone } from './data/zone.js'
@@ -155,7 +155,7 @@ async function start(): Promise<void> {
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
     const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived)
-    const counting = loadGroups(client, PRIORITY.list, load)
+    const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
     const [loaded, placed] = await Promise.all([listing, placing])
@@ -183,8 +183,9 @@ async function start(): Promise<void> {
     if (shown && wasListed && indexOf(state)?.find(shown.id) === undefined) store.dispatch({ type: 'detail-closed' })
     // The tracker changed: the detail on screen is read again too, in place (its pane, scroll and folds stay).
     else if (shown && automatic) void rereadDetail(shown.id, load)
-    // Archived rows shown but not read yet: turned on before the rows were there, or the last read failed.
-    if (state.view.showArchived && archiveRunning === null && state.archive === null) void loadArchive()
+    // Archived rows shown but not read yet: turned on before the rows were there, or the last read failed. Only for a read
+    // that asked for the archive's lines (archiveDue): one that began before `SPC v o` has none, and the follow-up read below loads it.
+    if (archiveDue(view.showArchived, state.view.showArchived, archiveRunning !== null, state.archive !== null)) void loadArchive()
     // What the filter and the search find moves with the rows: asked again for the rows just read.
     void ask(true)
     // Counts that come later go on this board only: a later load's board has its own (store 'groups'). Counts that

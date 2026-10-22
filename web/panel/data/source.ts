@@ -127,8 +127,13 @@ export function sameGroups(a: ReadonlyMap<string, Readonly<Record<string, number
   return true
 }
 
-export async function loadGroups(client: Client, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<Map<string, Record<string, number>>>> {
-  const outcome = await client.request({ path: ENDPOINT.status }, { priority, epoch })
+/**
+ * `worktree` (the view's `SPC v w`) counts over the same overlay the tree is read with (`status --worktree`,
+ * moai-m4ez.u6a): the detail roll-up's bar and legend come from here and its n/n text from the tree, so a member only a
+ * sibling worktree holds has to be in both.
+ */
+export async function loadGroups(client: Client, priority: number = PRIORITY.list, epoch?: number, worktree = false): Promise<Loaded<Map<string, Record<string, number>>>> {
+  const outcome = await client.request({ path: ENDPOINT.status, ...(worktree ? { query: { worktree: '1' } } : {}) }, { priority, epoch })
   const output = answerOf(outcome)
   return output === undefined ? { ok: false, outcome } : { ok: true, value: groupsFrom(output) }
 }
@@ -201,6 +206,16 @@ export async function loadMatches(client: Client, question: Question, epoch?: nu
  */
 export function markArchived(rows: readonly Row[], active: ReadonlySet<string>): Row[] {
   return rows.map((row) => (row.archived === true || active.has(row.id) ? row : { ...row, archived: true }))
+}
+
+/**
+ * Whether a board read that just ended should read the archive's rows. Only when that read was asked for the archive's
+ * lines too (`askedWithArchive`, the view as the read began): `SPC v o` turned on while it ran joined a read asked
+ * without them, and indexing the archive against a tree that lacks their lines puts those rows in the wrong place
+ * until the follow-up read. That read (loadBoard sees the view moved) asks again with them and loads the archive then.
+ */
+export function archiveDue(askedWithArchive: boolean, shownNow: boolean, running: boolean, loaded: boolean): boolean {
+  return askedWithArchive && shownNow && !running && !loaded
 }
 
 /**
