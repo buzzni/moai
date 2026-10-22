@@ -217,9 +217,11 @@ pub const HTML: &str = "text/html; charset=utf-8";
 pub const JS: &str = "text/javascript; charset=utf-8";
 pub const CSS: &str = "text/css; charset=utf-8";
 
-/// 페이지가 부를 수 있는 것을 제 자리(`'self'`)로만 좁힌다. **style 만 푼다** — 패널 2.0 이 style 속성 아홉
-/// 자리와 런타임 `<style>` 하나를 쓴다. 조이는 일은 그 자리를 걷은 뒤다.
-const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; \
+/// 페이지가 부를 수 있는 것을 제 자리(`'self'`)로만 좁힌다. **style 도 `'unsafe-inline'` 없이 닫혔다**(moai-m4ez.h2o) —
+/// 페이지는 `style` 속성도 런타임 `<style>` 요소도 안 쓴다. 값은 클래스(`web/panel/style/*.css`)로, 계산한 값은
+/// CSSOM(`el.style.x = …`·`style.setProperty`·구성 가능한 시트)으로만 넣는다 — 그 길은 CSP 가 막지 않는다.
+/// `tests/cli.rs` 의 `web_serves_the_page_and_the_boot` 가 이 글자를 그대로 쥔다.
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
                    img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 fn reason(status: u16) -> &'static str {

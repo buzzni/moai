@@ -127,7 +127,8 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
   // Narrow panels scroll sideways instead of squeezing the columns below their minimum. The numbers are the
   // stylesheet's (components.css 5.7): a column's minimum, the gap between columns, the board's padding.
   const columns = model.keys.length
-  const wrap = el(doc, 'div', { class: 'm-board-wrap', style: `min-width: ${columns * LANE_MIN + (columns - 1) * LANE_GAP + 2 * BOARD_PAD}px;` })
+  const wrap = el(doc, 'div', { class: 'm-board-wrap' })
+  wrap.style.minWidth = `${columns * LANE_MIN + (columns - 1) * LANE_GAP + 2 * BOARD_PAD}px`
   wrap.append(...out)
   return [wrap]
 }

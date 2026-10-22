@@ -12,6 +12,8 @@ const root = new URL('./', import.meta.url)
 const dist = new URL('../src/web/dist/', root)
 // Tokens come before the components that read them; any other sheet follows in name order.
 const STYLE_ORDER = ['tokens.css', 'components.css']
+// detail.css was a <style> appended to <head> at run time, after app.css; it stays last so the cascade stays as it was.
+const STYLE_LAST = ['detail.css']
 const BANNER = '/*! moai web — from buzzni/saycode-extensions@90f545b packages/moai/panel, MIT, Copyright (c) 2026 Buzzni Inc. */'
 
 async function styles() {
@@ -22,7 +24,7 @@ async function styles() {
     if (error.code === 'ENOENT') return ''
     throw error
   }
-  const rank = (name) => (STYLE_ORDER.includes(name) ? STYLE_ORDER.indexOf(name) : STYLE_ORDER.length)
+  const rank = (name) => (STYLE_ORDER.includes(name) ? STYLE_ORDER.indexOf(name) : STYLE_LAST.includes(name) ? STYLE_ORDER.length + 1 : STYLE_ORDER.length)
   names.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
   const sheets = await Promise.all(names.map((name) => readFile(new URL(`panel/style/${name}`, root), 'utf8')))
   return sheets.join('\n')

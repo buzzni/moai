@@ -52,6 +52,14 @@ does not tag — see `CONTRIBUTING.md`.
   a read mark in flight, and the header marks the project on screen with a `▸`
   as well as the accent. (moai-m4ez.42r)
 
+### Security
+
+- **`moai web`'s page runs under `style-src 'self'`.** The `'unsafe-inline'` it
+  asked for is gone: the page no longer sets a `style` attribute or makes a
+  `<style>` element at run time, so an injected inline style is refused as an
+  injected script already was. Layout values it computes still go in through
+  the browser's style object, which the policy allows. (moai-m4ez.h2o)
+
 ## [0.20.0] - 2026-10-20
 
 ### Added

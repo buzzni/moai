@@ -29810,6 +29810,14 @@ fn web_serves_the_page_and_the_boot() {
     {
         assert!(head.contains(h), "{h}\n{head}");
     }
+    // moai-m4ez.h2o: style-src 에 'unsafe-inline' 이 없다 — 페이지가 style 속성·런타임 <style> 을 안 쓰기 때문이다.
+    assert!(
+        head.contains(
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
+             img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        ),
+        "{head}"
+    );
     let (status, head, _) = get(web.port, "/app.js");
     assert_eq!(status, 200, "{head}");
     assert!(head.contains("Content-Type: text/javascript"), "{head}");

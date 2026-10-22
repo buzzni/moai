@@ -183,11 +183,11 @@ function tipLine(doc: Document, tips: BrandTips): HTMLElement {
   // Each tip carries its own label, so `Tip :` stands on the tip's first line however many lines it takes.
   const items = tips.tips.map((tip, i) => {
     const turn = (i - start + n) % n
-    return el(doc, 'span', {
-      class: 'm-brand-tip-item',
-      'data-first': turn === 0 ? '' : null,
-      style: n > 1 ? `animation: m-tip-${n} ${n * TIP_MS}ms linear ${turn * TIP_MS}ms infinite both;` : null,
-    }, el(doc, 'span', { class: 'm-brand-label' }, `${pad('Tip', LABEL)} : `), el(doc, 'span', { class: 'm-brand-tip-said' }, tip))
+    const item = el(doc, 'span', { class: 'm-brand-tip-item', 'data-first': turn === 0 ? '' : null },
+      el(doc, 'span', { class: 'm-brand-label' }, `${pad('Tip', LABEL)} : `), el(doc, 'span', { class: 'm-brand-tip-said' }, tip))
+    // Through CSSOM, which the CSP's style-src lets through where a `style` attribute it would not.
+    if (n > 1) item.style.animation = `m-tip-${n} ${n * TIP_MS}ms linear ${turn * TIP_MS}ms infinite both`
+    return item
   })
   const text = el(doc, 'button', { type: 'button', class: 'm-brand-tip-text', title: tips.label, 'aria-label': tips.label }, ...items)
   text.addEventListener('click', () => tips.open())
@@ -198,6 +198,9 @@ function tipLine(doc: Document, tips: BrandTips): HTMLElement {
   return el(doc, 'div', { class: 'm-brand-tip' }, text)
 }
 
+/** The rounds already adopted into a document as sheets (a sheet has no id to look for). */
+const adopted = new WeakMap<Document, Set<string>>()
+
 /**
  * The round for `n` tips, once per document: shown for one `n`th of it. It fades out while the next fades in, so the
  * label both carry at the same place stays on the screen. `both` fill keeps a tip whose turn has not come hidden until
@@ -205,11 +208,22 @@ function tipLine(doc: Document, tips: BrandTips): HTMLElement {
  */
 export function tipKeyframes(doc: Document, n: number): void {
   const id = `m-tip-${n}`
-  if (doc.getElementById(id)) return
+  if (doc.getElementById(id) || adopted.get(doc)?.has(id)) return
   const shown = 100 / n
   const fade = Math.min(shown / 4, (400 / (n * TIP_MS)) * 100)
   const at = (v: number) => `${Number(v.toFixed(3))}%`
+  const rules = `@keyframes ${id} { 0% { opacity: 0; } ${at(fade)} { opacity: 1; } ${at(shown)} { opacity: 1; } ${at(shown + fade)}, 100% { opacity: 0; } }`
+  // A constructable sheet: the CSP's style-src 'self' refuses a `<style>` element made at run time but not a sheet made
+  // through CSSOM. The element stays for a document with no constructable sheets (jsdom), where there is no CSP.
+  const Sheet = doc.defaultView?.CSSStyleSheet
+  if (Sheet && 'adoptedStyleSheets' in doc) {
+    const sheet = new Sheet()
+    sheet.replaceSync(rules)
+    doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet]
+    adopted.get(doc)?.add(id) ?? adopted.set(doc, new Set([id]))
+    return
+  }
   const style = el(doc, 'style', { id })
-  style.textContent = `@keyframes ${id} { 0% { opacity: 0; } ${at(fade)} { opacity: 1; } ${at(shown)} { opacity: 1; } ${at(shown + fade)}, 100% { opacity: 0; } }`
+  style.textContent = rules
   doc.head.append(style)
 }

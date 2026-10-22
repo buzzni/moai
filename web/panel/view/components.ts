@@ -223,7 +223,7 @@ export function menu(doc: Document, items: ReadonlyArray<MenuItem | "separator">
       "data-id": item.id,
     })
     if (item.icon) node.append(icon(doc, item.icon, 15))
-    node.append(el(doc, "span", { style: "flex:1" }, item.label))
+    node.append(el(doc, "span", { class: "m-menu-label" }, item.label))
     if (item.hint) node.append(kbd(doc, item.hint))
     node.addEventListener("click", () => {
       if (!item.disabled) onPick(item.id)

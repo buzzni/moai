@@ -301,7 +301,7 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
   searchRow.append(box.el)
 
   // Filter text with the hint dropdown under it.
-  const filterWrap = el(doc, "div", { class: "m-filter", style: "position:relative;flex:1 1 200px" })
+  const filterWrap = el(doc, "div", { class: "m-filter" })
   const filterInput = textInput(doc, { label: t.filter, placeholder: t.filterPlaceholder })
   const reportFilter = () => dispatch({ type: "filter-text", text: filterInput.value, cursor: filterInput.selectionStart ?? filterInput.value.length })
   filterInput.addEventListener("input", reportFilter)
@@ -341,7 +341,7 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
   let hintsDrawn = ""
 
   // Sort badge and its edit popover.
-  const sortWrap = el(doc, "div", { class: "m-sort", style: "position:relative" })
+  const sortWrap = el(doc, "div", { class: "m-sort" })
   const sortButton = button(doc, { label: t.sort, icon: "arrow-up-down", small: true, onClick: () => dispatch({ type: "sort-toggle" }) })
   sortWrap.append(sortButton)
   let sortPop: HTMLElement | null = null
@@ -363,7 +363,7 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
   const bar = el(doc, "div", { class: "m-toolbar" }, icon(doc, "filter", 14), filterWrap, sortWrap, openSearch, searchShortcut)
 
   // Chips of the parsed filter (comma is OR inside one chip, a repeated key is AND between chips).
-  const chips = el(doc, "div", { class: "m-chips", style: "display:flex;flex-wrap:wrap;gap:4px;padding:0 8px" })
+  const chips = el(doc, "div", { class: "m-chips" })
   // Removing a chip redraws the chips: the focus stays where it was instead of dropping to <body> with its x button.
   chips.addEventListener("mousedown", (event) => event.preventDefault())
   let chipsDrawn: string | null = null
@@ -414,7 +414,6 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
         // A click must not take the caret out of the filter: the list is rebuilt under the clicked item, and the focus
         // would drop to <body>, where what is typed next runs as shortcuts (as view/menu.ts does for its items).
         list.addEventListener("mousedown", (event) => event.preventDefault())
-        list.style.cssText = "position:absolute;top:100%;left:0;right:0;z-index:20"
         list.querySelectorAll<HTMLElement>(".m-menu-item").forEach((node, index) => {
           if (index === state.hintIndex) node.setAttribute("aria-current", "true")
         })
@@ -440,11 +439,11 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
       sortPop?.remove()
       sortPop = null
       if (state.sortOpen) {
-        const pop = el(doc, "div", { class: "m-menu m-sort-pop", role: "dialog", "aria-label": t.sortEdit, style: "position:absolute;top:100%;right:0;z-index:20" })
+        const pop = el(doc, "div", { class: "m-menu m-sort-pop", role: "dialog", "aria-label": t.sortEdit })
         for (const key of SORT_KEYS) {
           const field = state.sort.fields.find((one) => one.key === key)
-          const rowEl = el(doc, "div", { class: "m-menu-item", "data-key": key, style: "gap:4px" })
-          rowEl.append(el(doc, "span", { style: "flex:1" }, `${t.sortKeys[key]}${field ? (field.dir === "asc" ? " ↑" : " ↓") : ""}`))
+          const rowEl = el(doc, "div", { class: "m-menu-item", "data-key": key })
+          rowEl.append(el(doc, "span", { class: "m-menu-label" }, `${t.sortKeys[key]}${field ? (field.dir === "asc" ? " ↑" : " ↓") : ""}`))
           for (const how of ["replace", "append", "flip"] as const) {
             const b = button(doc, { label: t[how], variant: "ghost", small: true, onClick: () => dispatch({ type: "sort-edit", key, how }) })
             b.dataset.how = how

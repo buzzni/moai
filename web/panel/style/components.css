@@ -314,3 +314,6 @@ kbd, .m-kbd {
 body.m-resizing { user-select: none; }
 body.m-resizing[data-resize="left"] { cursor: col-resize; }
 body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
+
+/* The label of a menu row: it takes what the glyph and the key hint leave. */
+.m-menu-label { flex: 1; }

@@ -117,6 +117,30 @@ fn the_web_bundle_writes_text_not_markup() {
     }
 }
 
+/// 서버의 CSP 는 `style-src 'self'` 다(moai-m4ez.h2o). 인라인 스타일을 만드는 길 — 마크업의 `style` 속성,
+/// `setAttribute("style", …)`, `style.cssText`(속성을 통째로 갈아 쓴다) — 이 번들에 다시 서면 그 자리가 조용히 안 그려진다.
+/// CSSOM 의 `el.style.x = …`·`style.setProperty` 는 CSP 가 막지 않으니 걸지 않는다.
+#[test]
+fn the_web_bundle_sets_no_inline_style_attribute() {
+    let js = dist("app.js");
+    for word in ["cssText", "setAttribute(\"style\"", "setAttribute('style'", "style=\"", "style='"] {
+        assert!(!js.contains(word), "app.js 에 {word} 가 있다 — CSP 가 style 속성을 막는다. 클래스나 CSSOM 으로 넣는다");
+    }
+    // `el(doc, tag, { …, style: "…" })` — 속성 모음의 `style:` 키. 꼴은 `style:"`·`style:` + 백틱·`style:` + 변수.
+    for (i, _) in js.match_indices("style:") {
+        let before = js[..i].chars().last().unwrap_or(' ');
+        assert!(
+            before.is_ascii_alphanumeric() || before == '_' || before == '.',
+            "app.js 에 `style:` 키가 있다(…{}) — el() 의 style 속성은 CSP 가 막는다",
+            &js[i.saturating_sub(40)..(i + 40).min(js.len())]
+        );
+    }
+    let html = dist("index.html").to_ascii_lowercase();
+    assert!(!html.contains(" style=") && !html.contains("<style"), "index.html 에 인라인 스타일이 있다");
+    let css = dist("app.css");
+    assert!(!css.contains("@import"), "app.css 가 다른 시트를 부른다 — style-src 'self' 밖일 수 있다");
+}
+
 #[test]
 fn the_web_bundle_fits_its_budget() {
     let bytes = dist("app.js").len() + dist("app.css").len();
