@@ -7402,3 +7402,8 @@
 {"ts":"2026-10-22T06:25:15Z","id":"moai-m4ez.42r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-22T06:25:15Z","id":"moai-m4ez.h2o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-22T06:25:15Z","id":"moai-m4ez.n42","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-22T06:46:08Z","id":"moai-x0pj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: 옆 워크트리에만 있는 줄의 상세(/api/issue/<id>)가 not found — show --worktree 를 안 넘긴다"}
+{"ts":"2026-10-22T06:46:36Z","id":"moai-m4ez.yb1","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"옆 워크트리에만 있는 줄의 상세가 not found — /api/issue 에 worktree=1"}
+{"ts":"2026-10-22T06:46:36Z","id":"moai-m4ez.yb1","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-x0pj 에서 펼쳤다 — web: 옆 워크트리에만 있는 줄의 상세(/api/issue/<id>)가 not found — show --worktree 를 안 넘긴다"}
+{"ts":"2026-10-22T06:46:36Z","id":"moai-x0pj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-m4ez 의 멤버 moai-m4ez.yb1 로 펼쳤다"}
+{"ts":"2026-10-22T06:46:39Z","id":"moai-m4ez.yb1","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
