@@ -435,7 +435,7 @@ export function reduce(state: State, action: Action): State {
         detail: detail ? { visible: detail.visible, position: detail.position, ratio } : state.detail,
         focus: detail && !detail.visible ? 'list' : state.focus,
         zone: zone === undefined ? state.zone : zone,
-        theme: theme ?? 'system',
+        theme: theme ?? state.theme,
       }
     }
   }

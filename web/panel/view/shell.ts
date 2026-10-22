@@ -1,4 +1,4 @@
-// The panel's frame (design §1): the tab bar (board, list, wiki; the refresh time, the detail toggles), the
+// The panel's frame (design §1): the tab bar (board, list, wiki; the refresh time, the theme button, the detail toggles), the
 // search / filter / sort toolbar (view/toolbar.ts, its state in the store), the path line, the banners, the result line, the run's activity, and under them the
 // split holding the list or board beside the detail. The panes are filled by the views named in
 // view/panes.ts through the contract in view/types.ts; the shell renders the panes that show on every store
@@ -116,8 +116,11 @@ export function mainWidth(width: number, position: PaneLayout["position"], detai
   return position === "left" && detailVisible ? width * (1 - leftRatio) : width
 }
 
+/** The theme button's icon: the state it is in, by shape (data/theme.ts). */
+const THEME_ICONS: Record<Theme, IconName> = { system: "contrast", light: "sun", dark: "moon" }
+
 /** How many right-hand columns a list this wide drops; a pane re-renders when this changes. */
-const columnBand = (width: number): number => COLUMN_DROPS.filter((entry) => width < entry.below).length
+const columnBand =(width: number): number => COLUMN_DROPS.filter((entry) => width < entry.below).length
 
 type Saved = Array<[HTMLElement, number, number]>
 const scrollers = (root: HTMLElement): HTMLElement[] => [root, ...root.querySelectorAll<HTMLElement>("[data-keep-scroll]")]
@@ -160,13 +163,12 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     themeShown = theme
     applyTheme(doc, theme)
     const t = copy.shell.theme
-    const now = { system: t.system, light: t.light, dark: t.dark }[theme]
     const toNext = { system: t.toSystem, light: t.toLight, dark: t.toDark }[nextTheme(theme)]
-    const label = `${now} — ${toNext}`
+    const label = `${t[theme]} — ${toNext}`
     themeButton.setAttribute("aria-label", label)
     themeButton.title = label
     themeButton.dataset.state = theme
-    themeButton.replaceChildren(icon(doc, { system: "contrast", light: "sun", dark: "moon" }[theme] as IconName))
+    themeButton.replaceChildren(icon(doc, THEME_ICONS[theme]))
   }
   paintTheme(state.theme)
   const position = createPositionToggle(doc, {

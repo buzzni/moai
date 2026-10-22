@@ -22,8 +22,8 @@ export function applyTheme(doc: Document, theme: Theme): void {
 }
 
 /**
- * The stored choice, read straight from the page's key before anything else runs, so the first paint is already the
- * chosen theme. Whatever throws (site data blocked) or does not parse is `system`.
+ * The stored choice, read straight from the page's key: the page's first script (early.ts) reads it before the body is
+ * drawn, so the first paint is already the chosen theme. Whatever throws (site data blocked) or does not parse is `system`.
  */
 export function storedTheme(key: string, backend: () => { getItem(key: string): string | null } | null | undefined): Theme {
   try {

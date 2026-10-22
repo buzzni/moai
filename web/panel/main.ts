@@ -8,7 +8,7 @@
  */
 import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch, type Outcome } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
-import { MEMORY_KEY, createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
+import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { isUnread, readMarks } from './data/read.js'
@@ -18,7 +18,6 @@ import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
-import { applyTheme, storedTheme } from './data/theme.js'
 import { effectiveZone, useZone } from './data/zone.js'
 import { copyFor, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
@@ -27,10 +26,6 @@ import { listLines, narrow } from './view/list-model.js'
 import { PANES } from './view/panes.js'
 import { describe, mountShell, type Activity } from './view/shell.js'
 import type { WikiSource } from './view/types.js'
-
-// The chosen theme goes on the page before anything else runs, so the first paint is already it. The script is app.js
-// and not an inline one: the CSP allows scripts from the server's own origin only.
-applyTheme(document, storedTheme(MEMORY_KEY, () => window.localStorage))
 
 /** The browser's fetch, naming no project: the home's boot is read through it. */
 const homeFetcher: Fetch = (url, init) => window.fetch(url, init)

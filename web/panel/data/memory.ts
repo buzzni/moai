@@ -1,7 +1,8 @@
 /**
  * What the panel remembers between openings (design §5): the last tab, whether the detail shows, where it
- * stands and its share of the split for each position (`ratio.left`, `ratio.bottom`), and the time zone picked with
- * `SPC o t` (`zone`, data/zone.ts) — how this person reads the page, so it is kept beside the layout, not per project.
+ * stands and its share of the split for each position (`ratio.left`, `ratio.bottom`), the time zone picked with
+ * `SPC o t` (`zone`, data/zone.ts) and the theme picked with the theme button (`theme`, data/theme.ts; left out for
+ * `system`) — how this person reads the page, so it is kept beside the layout, not per project.
  *
  * Where it is kept: the browser's localStorage for the page's origin (`moai web`'s host and port). When it cannot
  * be used — a private window, site data blocked, where touching it throws — the settings stay in memory until the
@@ -14,14 +15,12 @@ import { SORT_KEYS, sameSort, type Dir, type Sort, type SortField } from './quer
 import { COLUMN_DEFAULTS, type ColumnName, type DetailPosition, type Remembered, type State, type Store, type ViewSettings } from '../store.js'
 import { DEFAULT_RATIO, normalizeRatio } from '../view/split.js'
 import { DEFAULT_TAB, normalizeTab } from '../view/tabs.js'
+import { MEMORY_KEY } from './memory-key.js'
 import { normalizeTheme } from './theme.js'
 import { validZone } from './zone.js'
 
-/**
- * The page's key in localStorage. The origin is `moai web`'s host:port, which every project the page reads shares
- * (`?project=`): what is kept here is the person's, and what is a project's own goes under {@link queryKeyOf}.
- */
-export const MEMORY_KEY = 'moai.web'
+/** The page's key in localStorage (data/memory-key.ts); a project's own settings go under {@link queryKeyOf}. */
+export { MEMORY_KEY }
 /** Written with the settings; a later panel that changes their shape reads this to migrate. */
 export const MEMORY_VERSION = 1
 

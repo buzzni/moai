@@ -96,7 +96,7 @@ The page remembers its tab, where the detail sits, the theme and the time zone, 
 filter, the sort, the view and the columns apart for each project it reads, in the
 browser's own local storage — one project's filter never lands on another's page.
 The search is not kept. A browser that keeps no site data (a private window)
-remembers them until the tab is closed. The theme (see above) is kept the same way.
+remembers them until the tab is closed.
 
 ## Time zone
 

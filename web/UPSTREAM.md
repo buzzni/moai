@@ -37,7 +37,9 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
 
 - **Build.** `build.mjs` writes `src/web/dist/app.js`, `app.css`, `index.html` and `SOURCES` instead of one
   inlined `dist/panel.html`: the server's CSP allows scripts from its own origin only. The 512 KiB limit was
-  Desktop's and is gone; `tests/web_bundle.rs` holds the bundle to 1 MiB.
+  Desktop's and is gone; `tests/web_bundle.rs` holds the bundle to 1 MiB. It also writes `theme.js`
+  (`panel/early.ts`, moai's own): `index.html` loads it in `<head>` without `defer`, so the theme picked with the
+  theme button is on before the first paint (moai-whvr).
 - **Tests.** `moai.test.mjs` (packing the extension) and `moai-panel-size.test.mjs` (512 KiB) did not come
   over. The parts of `moai-source.test.mjs` that packed the extension and read its manifest are gone.
 - **The bridge (moai-jshy.jih).** `window.saycodePanel` and its machine runs are gone; `data/client.ts` fetches

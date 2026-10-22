@@ -29793,7 +29793,7 @@ fn web_dry_run_names_where_it_would_serve() {
     assert!(said.contains("http://127.0.0.1:6624/"), "{said}");
 }
 
-/// **페이지와 바탕을 낸다**(moai-0aa7.726) — 정적 파일 셋, `/api/boot`, `/api/status` 의 봉투.
+/// **페이지와 바탕을 낸다**(moai-0aa7.726) — 정적 파일 넷, `/api/boot`, `/api/status` 의 봉투.
 #[test]
 fn web_serves_the_page_and_the_boot() {
     let s = init("web-serve");
@@ -29824,6 +29824,10 @@ fn web_serves_the_page_and_the_boot() {
     let (status, head, _) = get(web.port, "/app.css");
     assert_eq!(status, 200, "{head}");
     assert!(head.contains("Content-Type: text/css"), "{head}");
+    // moai-whvr: 페이지의 첫 스크립트 — 고른 테마를 첫 그림 전에 건다. 이 길이 빠지면 페이지가 404 를 받고 시스템 색으로 깜빡인다.
+    let (status, head, _) = get(web.port, "/theme.js");
+    assert_eq!(status, 200, "{head}");
+    assert!(head.contains("Content-Type: text/javascript"), "{head}");
 
     let (status, head, body) = get(web.port, "/api/boot");
     assert_eq!(status, 200, "{head}\n{body}");
