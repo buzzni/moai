@@ -79,8 +79,10 @@ struct Boot<'a> {
     version: &'static str,
     /// 탐색기 머리의 `User` 줄 그대로 — 프로젝트의 `naming` 을 입혔다. 누군지 모르면 `null` 이다(읽기는 안 묻는다).
     user: Option<String>,
-    /// 적어 둔 판 소식([`latest`]). 묻기를 껐으면 `null` 이다.
+    /// 적어 둔 판 소식([`from_user_config`]). 묻기를 껐으면 `null` 이다.
     latest: Option<Latest>,
+    /// 탐색기가 고른 시간대(`[tui] timezone`) — 안 골랐으면 `null` 이고, 페이지는 브라우저의 시간대로 그린다.
+    timezone: Option<String>,
     project: String,
     root: String,
     statuses: &'a [String],
@@ -99,13 +101,15 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String
         .ok_or_else(|| crate::fail::Fail::new(say(lang, "refuse.not_a_repo")))?;
     let statuses = &repo.config.statuses;
     let glyphs: Vec<(&str, &str)> = statuses.iter().map(|s| (s.as_str(), style::glyph(s))).collect();
+    let (latest, timezone) = from_user_config();
     let boot = Boot {
         lang: lang.code(),
         version: env!("CARGO_PKG_VERSION"),
         user: crate::model::actor(user, &repo.root)
             .ok()
             .map(|a| crate::model::label(&a.name, Some(&a.email), repo.config.naming)),
-        latest: latest().map(Latest::of),
+        latest: latest.map(Latest::of),
+        timezone,
         project: repo.root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         root: repo.root.display().to_string(),
         statuses,
@@ -131,21 +135,24 @@ pub fn boot(cwd: &Path, user: Option<&str>, lang: Lang) -> crate::fail::R<String
     serde_json::to_string(&boot).map_err(|e| crate::fail::Fail::new(e.to_string()))
 }
 
-/// 적어 둔 판 소식 — **안 묻는다.** 탐색기가 하루 한 번 물어 사용자 설정 곁(`latest.toml`)에 적어 둔 답을 읽을
-/// 뿐이라, 페이지를 몇 번 새로 고쳐도 바깥을 안 두드린다. 묻기를 끈 기계(`[update] check = false`·
-/// `MOAI_NO_UPDATE_CHECK`)는 `None` 이다 — 탐색기도 그 기계에서는 판 줄에 답을 안 든다.
+/// 사용자 설정에서 읽는 둘 — 적어 둔 판 소식과 탐색기가 고른 시간대.
+///
+/// 판 소식은 **안 묻는다.** 탐색기가 하루 한 번 물어 사용자 설정 곁(`latest.toml`)에 적어 둔 답을 읽을 뿐이라,
+/// 페이지를 몇 번 새로 고쳐도 바깥을 안 두드린다. 묻기를 끈 기계(`[update] check = false`·`MOAI_NO_UPDATE_CHECK`)는
+/// `None` 이다 — 탐색기도 그 기계에서는 판 줄에 답을 안 든다. 시간대는 `[tui] timezone` 의 이름 그대로다 — 페이지는
+/// 그것을 첫 값으로 쓰고, 고른 것은 브라우저에만 둔다(쓰지 않는다).
 ///
 /// **사용자 설정은 보통 파일일 때만 연다** — FIFO 하나면 열기가 끝없이 선다([`super::Site::lang`] 과 같은 자).
-fn latest() -> Option<crate::latest::Seen> {
-    let path = crate::user_config::path()?;
-    let dir = path.parent()?;
+fn from_user_config() -> (Option<crate::latest::Seen>, Option<String>) {
+    let Some(path) = crate::user_config::path() else { return (None, None) };
     let regular = std::fs::metadata(&path).map_or(true, |m| m.is_file());
     let reg = crate::user_config::read(regular.then_some(path.as_path()));
     let env = |k: &str| std::env::var_os(k);
     // 페이지는 사람이 보는 화면이다 — 끈 것만 거른다. `json`·`on_screen` 은 서버 프로세스의 자리를 잴 뿐이다.
-    if crate::latest::gate(env, reg.update_check, false, true).is_some() {
-        return None;
-    }
-    let repo = crate::latest::repo_lenient(env, reg.update_repo.as_deref());
-    Some(crate::latest::held(dir, &crate::latest::url_from(env, &repo)))
+    let asks = crate::latest::gate(env, reg.update_check, false, true).is_none();
+    let latest = path.parent().filter(|_| asks).map(|dir| {
+        let repo = crate::latest::repo_lenient(env, reg.update_repo.as_deref());
+        crate::latest::held(dir, &crate::latest::url_from(env, &repo))
+    });
+    (latest, reg.look.timezone)
 }

@@ -30068,6 +30068,11 @@ fn web_boot_names_the_user_and_the_latest() {
     let boot = json_of(&get(web.port, "/api/boot").2);
     assert!(boot["user"].as_str().is_some_and(|u| !u.is_empty() && u != "—"), "{boot}");
     assert!(boot["latest"]["state"].is_string(), "적어 둔 답을 안 읽었다 — {boot}");
+    assert!(boot["timezone"].is_null(), "고른 적 없는 시간대를 댔다 — {boot}");
+    // 탐색기가 고른 시간대는 요청마다 다시 읽는다 — 서버를 다시 띄우지 않아도 선다.
+    std::fs::write(&cfg, "[tui]\ntimezone = \"Asia/Seoul\"\n").unwrap();
+    let boot = json_of(&get(web.port, "/api/boot").2);
+    assert_eq!(boot["timezone"], "Asia/Seoul", "{boot}");
     drop(web);
     let web = serve_with(s.path(), |cmd| {
         cmd.env("MOAI_CONFIG", &cfg).env("MOAI_NO_UPDATE_CHECK", "1");
