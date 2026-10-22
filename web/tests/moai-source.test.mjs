@@ -135,6 +135,14 @@ test('the tree asks for the archive only while archived rows are shown (moai-m4e
   assert.deepEqual(client.calls.map((call) => call.url), ['/api/tree', '/api/tree?archived=1', '/api/tree?archived=1&worktree=1'])
 })
 
+test('the detail of a row only another worktree holds is asked with worktree=1 while the overlay is on (moai-m4ez.yb1)', async () => {
+  const client = fakeClient({ '/api/issue/a.b': passed({ id: 'a.b' }), '/api/issue/a.b?worktree=1': passed({ id: 'a.b', branch: 'feat/x' }) })
+  assert.deepEqual(await loadDetail(client, 'a.b'), { ok: true, value: { id: 'a.b' } })
+  assert.deepEqual(await loadDetail(client, 'a.b', { worktree: true }), { ok: true, value: { id: 'a.b', branch: 'feat/x' } })
+  assert.deepEqual(await loadDetail(client, 'a.b', { worktree: false }), { ok: true, value: { id: 'a.b' } })
+  assert.equal(urlOf(ENDPOINT.issue('a/b', true)), '/api/issue/a%2Fb?worktree=1')
+})
+
 test('with the overlay on the tree is asked with worktree=1, so a row only another worktree holds is placed (moai-m4ez.gcp)', async () => {
   const client = fakeClient({ '/api/tree?reverse=1&sort=updated%3Adesc&worktree=1': passed(TREE), '/api/tree?worktree=1': passed(TREE) })
   assert.deepEqual((await loadTree(client, { sort: 'updated:desc', reverse: '1' }, undefined, undefined, true)).value, TREE)

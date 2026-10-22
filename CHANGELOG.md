@@ -43,6 +43,9 @@ does not tag — see `CONTRIBUTING.md`.
   unknown `sort` as `bad_input`, names `POST` in the `Allow` of a read-mark
   path's 405, and spells the header's home as the registered project when they
   are the same directory. (moai-m4ez.4zq)
+- **`moai web` opens the detail of a row only a sibling worktree holds** while
+  the overlay is on (`/api/issue/<id>?worktree=1`); it used to say the row was
+  not found. (moai-m4ez.yb1)
 
 ## [0.20.0] - 2026-10-20
 

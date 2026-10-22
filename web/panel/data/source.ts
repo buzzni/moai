@@ -32,7 +32,8 @@ export const ENDPOINT = {
   status: '/api/status',
   rows: '/api/rows',
   backlog: '/api/backlog',
-  issue: (id: string): Endpoint => ({ path: `/api/issue/${encodeURIComponent(id)}` }),
+  /** `worktree` (the view's `SPC v w`): a row only another git worktree holds opens too (`show --worktree`, moai-m4ez.yb1). */
+  issue: (id: string, worktree = false): Endpoint => ({ path: `/api/issue/${encodeURIComponent(id)}`, ...(worktree ? { query: { worktree: '1' } } : {}) }),
   tree: '/api/tree',
   projects: '/api/projects',
   wiki: '/api/wiki',
@@ -243,8 +244,8 @@ export async function loadWikiPage(client: Client, slug: string): Promise<Loaded
  * answer is read like a whole one, as the lists are: one unreadable line anywhere in the tracker ends every command
  * non-zero with its whole answer still printed, and the detail of every row would otherwise fail beside a full list.
  */
-export async function loadDetail(client: Client, id: string, options: Pick<RequestOptions, 'epoch'> = {}): Promise<Loaded<Row>> {
-  const outcome = await client.request(ENDPOINT.issue(id), { priority: PRIORITY.detail, epoch: options.epoch })
+export async function loadDetail(client: Client, id: string, options: Pick<RequestOptions, 'epoch'> & { worktree?: boolean } = {}): Promise<Loaded<Row>> {
+  const outcome = await client.request(ENDPOINT.issue(id, options.worktree === true), { priority: PRIORITY.detail, epoch: options.epoch })
   const output = answerOf(outcome)
   if (output === undefined) return { ok: false, outcome }
   return isRecord(output) && typeof output.id === 'string' ? { ok: true, value: output as Row } : { ok: false, outcome: { kind: 'unreadable' } }

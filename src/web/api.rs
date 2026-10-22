@@ -118,18 +118,30 @@ pub fn argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<Stri
     // 가 내는 낱말은 파일 자리라 `/`(디렉터리 밑의 쪽)·한글·빈칸이 들고, `wiki show` 는 그것을 걸어 둔 쪽들에서 찾을
     // 뿐이라 자리를 벗어날 길이 없다. id 의 모양으로 재던 판은 그 쪽들을 400 으로 막았다.
     type Check = fn(&str) -> Result<(), Bad>;
-    let (head, rest, check): (&[&str], &str, Check) =
+    let (head, rest, check, overlaid): (&[&str], &str, Check, bool) =
         match (path.strip_prefix("/api/issue/"), path.strip_prefix("/api/wiki/")) {
-            (Some(id), _) => (&["show", "--"], id, issue_id),
-            (_, Some(slug)) => (&["wiki", "show", "--"], slug, |slug| shape("slug", slug, VALUE_MAX)),
+            (Some(id), _) => (&["show"], id, issue_id, true),
+            (_, Some(slug)) => (&["wiki", "show"], slug, |slug| shape("slug", slug, VALUE_MAX), false),
             _ => return None,
         };
-    Some(none_of(query).and_then(|()| {
-        check(rest)?;
-        let mut out: Vec<String> = head.iter().map(|s| s.to_string()).collect();
-        out.push(rest.to_string());
-        Ok(out)
-    }))
+    // **한 줄의 상세도 겹쳐 보기를 알아야 한다**(moai-m4ez.yb1) — 옆 워크트리에만 있는 줄은 `show -- <id>` 가 "없다" 로 답해,
+    // 목록과 트리가 그린 줄을 눌러도 상세가 안 열렸다. 켠 페이지만 `worktree=1` 을 보낸다. 위키는 겹칠 것이 없어 안 받는다.
+    Some(
+        match overlaid {
+            true => overlay_of(query),
+            false => none_of(query).map(|()| false),
+        }
+        .and_then(|on| {
+            check(rest)?;
+            let mut out: Vec<String> = head.iter().map(|s| s.to_string()).collect();
+            if on {
+                out.push("--worktree".to_string());
+            }
+            out.push("--".to_string());
+            out.push(rest.to_string());
+            Ok(out)
+        }),
+    )
 }
 
 /// 걸어 둔 프로젝트의 자리 하나의 상한(바이트) — 경로라 다른 값보다 넉넉하다.
@@ -425,6 +437,17 @@ mod tests {
             assert!(matches!(r, Err(Bad::Shape(_))), "{bad:?}: {r:?}");
         }
         assert!(matches!(argv_of("/api/issue/moai-1abc", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
+        // 겹쳐 보기를 켠 페이지는 상세도 옆 워크트리를 본다(moai-m4ez.yb1) — `--` 앞에 놓는다. 위키는 겹칠 것이 없다.
+        assert_eq!(
+            argv_of("/api/issue/moai-1abc", &q(&[("worktree", "1")])).unwrap().unwrap(),
+            strs(&["show", "--worktree", "--", "moai-1abc"])
+        );
+        assert!(matches!(argv_of("/api/issue/moai-1abc", &q(&[("worktree", "0")])).unwrap(), Err(Bad::Shape(_))));
+        assert!(matches!(
+            argv_of("/api/issue/moai-1abc", &q(&[("worktree", "1"), ("worktree", "1")])).unwrap(),
+            Err(Bad::Twice(_))
+        ));
+        assert!(matches!(argv_of("/api/wiki/guide", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
         assert!(argv_of("/api/nope", &[]).is_none());
     }
 

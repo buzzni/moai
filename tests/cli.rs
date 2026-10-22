@@ -21979,6 +21979,20 @@ fn web_overlay_reaches_tree_stamp_and_read() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
     assert!(read_sheet(&cfg, &main).contains(&t.made), "읽음이 안 적혔다");
+
+    // 상세: 옆에만 있는 줄은 끄고 열면 없는 줄이고, 켜고 열면 열린다(moai-m4ez.yb1).
+    let detail = |query: &str| json_of(&get(web.port, &format!("/api/issue/{}{query}", t.made)).2);
+    let off = detail("");
+    assert_ne!(off["exit"], 0, "끈 상세가 옆 줄을 열었다\n{off}");
+    assert_eq!(off["err"]["code"], "not_found", "{off}");
+    let on = detail("?worktree=1");
+    assert_eq!(on["exit"], 0, "{on}");
+    assert_eq!(on["out"]["id"], t.made.as_str(), "{on}");
+    assert_eq!(on["out"]["branch"], "feat/x", "어느 가지에서 왔는지 안 댄다\n{on}");
+    let (status, _, body) = get(web.port, &format!("/api/issue/{}?worktree=0", t.made));
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    let (status, _, body) = get(web.port, "/api/wiki/guide?worktree=1");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "위키는 겹칠 것이 없다\n{body}");
 }
 
 /// **`tui --json --deep --no-archive` 는 `show --all` 이 숨기는 줄을 뺀다**(moai-m4ez.4zq) — 웹 페이지가 아카이브를 안

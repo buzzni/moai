@@ -306,7 +306,7 @@ async function start(): Promise<void> {
     const held = indexOf(store.getState())?.find(id) !== undefined
     store.dispatch({ type: 'cursor', id })
     store.dispatch({ type: 'detail-loading', id })
-    const loaded = await loadDetail(client, id)
+    const loaded = await loadDetail(client, id, { worktree: store.getState().view.worktree })
     // A later choice wins: its own answer settles the detail.
     if (mine !== choice) return
     const now = store.getState()
@@ -326,7 +326,7 @@ async function start(): Promise<void> {
   async function rereadDetail(id: string, epoch: number): Promise<void> {
     const mine = choice
     const turn = ++rereads
-    const loaded = await loadDetail(client, id, { epoch })
+    const loaded = await loadDetail(client, id, { epoch, worktree: store.getState().view.worktree })
     if (!loaded.ok || mine !== choice || turn !== rereads || store.getState().shown.value?.id !== id) return
     store.dispatch({ type: 'detail-loaded', data: { id, row: loaded.value } })
   }
