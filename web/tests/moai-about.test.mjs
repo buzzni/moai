@@ -46,7 +46,7 @@ test('versionLine writes what the TUI writes, in moai\'s own words', () => {
   assert.deepEqual(A.versionLine({ user: null, version: null, latest: null }, en, now), { said: '—' })
   assert.deepEqual(A.versionLine(null, en, now), { said: '—' })
   // Japanese and Chinese read moai's English, as the TUI does.
-  assert.equal(copyFor('ja').shell.version, en)
+  assert.deepEqual(copyFor('ja').shell.version, en)
 })
 
 test('the logo is the TUI\'s, the art centred as one block over the tagline; the info lines keep the TUI\'s columns', () => {
@@ -105,8 +105,8 @@ test('tips: the field test\'s sentences are all there, by kind, in Korean; Engli
   const en = copyFor('en').shell.tips
   assert.equal(en.groups.length, ko.groups.length)
   assert.deepEqual(en.groups.map((group) => group.tips.length), ko.groups.map((group) => group.tips.length), 'the same sentences, said in English')
-  assert.equal(copyFor('ja').shell.tips, en)
-  assert.equal(copyFor('zh').shell.tips, en)
+  assert.deepEqual(copyFor('ja').shell.tips, en)
+  assert.deepEqual(copyFor('zh').shell.tips, en)
 })
 
 test('tips: the header turns through them every 8 s by CSS, from a random place, and a click opens the page', () => {

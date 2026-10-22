@@ -19,7 +19,7 @@ import {
   type Boot, type Loaded,
 } from './data/source.js'
 import { effectiveZone, useZone } from './data/zone.js'
-import { COPY, copyFor } from './i18n/index.js'
+import { copyFor, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
 import { listLines, narrow } from './view/list-model.js'
@@ -43,7 +43,7 @@ async function start(): Promise<void> {
   let booted = await loadBoot(fetcher)
   const language = booted.ok ? booted.value.lang : navigator.language || 'en'
   // The page says the language it is drawn in: one it does not carry (es) is drawn, and named, in English.
-  document.documentElement.lang = Object.hasOwn(COPY, language.split('-')[0]!.toLowerCase()) ? language : 'en'
+  document.documentElement.lang = speaks(language) ? language : 'en'
   const copy = copyFor(language)
   const store = createStore()
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the

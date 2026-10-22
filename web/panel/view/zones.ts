@@ -14,7 +14,7 @@
 // the server: what is picked goes to the store (keys/wiring.ts), which the browser remembers (data/memory.ts).
 
 import { fallbackZone, filterZones, validZone } from "../data/zone.ts"
-import type { ZoneCopy } from "../i18n/index.ts"
+import { fill, type ZoneCopy } from "../i18n/index.ts"
 import { el } from "./components.ts"
 
 /** The line that clears the choice: no name of its own. */
@@ -80,7 +80,7 @@ export function createZonePicker(doc: Document, props: ZonePickerProps): ZonePic
 
   const firstLine = (): string => {
     const fallback = fallbackZone(now.tui)
-    return (fallback.from === "tui" ? words.tui : words.browser).replace("{zone}", fallback.zone)
+    return fill(fallback.from === "tui" ? words.tui : words.browser, { zone: fallback.zone })
   }
 
   /** The lines for the text typed: the first line only while nothing is typed (it has no name to match). */
@@ -106,7 +106,7 @@ export function createZonePicker(doc: Document, props: ZonePickerProps): ZonePic
     }))
     if (at === null) input.removeAttribute("aria-activedescendant")
     else input.setAttribute("aria-activedescendant", `${id}-${at}`)
-    const said = hits.length === 0 ? words.noMatch : at === null && inUse !== DEFAULT ? words.unlisted(inUse) : ""
+    const said = hits.length === 0 ? words.noMatch : at === null && inUse !== DEFAULT ? fill(words.unlisted, { now: inUse }) : ""
     note.textContent = said
     note.hidden = said === ""
     const line = at === null ? null : list.children[at]

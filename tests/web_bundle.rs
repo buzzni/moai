@@ -32,7 +32,7 @@ fn sources() -> String {
     let web = at_root("web");
     let mut paths = Vec::new();
     walk(&web, "panel/", &mut paths);
-    paths.extend(["build.mjs", "package.json", "package-lock.json"].map(String::from));
+    paths.extend(["build.mjs", "i18n-bundles.mjs", "package.json", "package-lock.json"].map(String::from));
     paths.sort();
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut fold = |bytes: &[u8]| {
@@ -45,6 +45,26 @@ fn sources() -> String {
         fold(&[0]);
         fold(&std::fs::read(web.join(path)).unwrap());
         fold(&[0]);
+    }
+    // 페이지의 말은 `i18n/*.json` 에서 온다 — 그 파일의 `page.` 키만 app.js 에 들어가므로 그것만 접는다(CLI 자신의 말이 바뀌어도
+    // 번들은 안 낡는다). 언어 파일마다 이름 차례로 (파일 이름, 0x00, [키, 0x00, 값, 0x00]…) — `web/build.mjs` 의 `sources` 와 같다.
+    let mut codes: Vec<String> = std::fs::read_dir(at_root("i18n"))
+        .unwrap()
+        .filter_map(|e| e.unwrap().file_name().into_string().ok())
+        .filter_map(|name| name.strip_suffix(".json").map(String::from))
+        .collect();
+    codes.sort();
+    for code in &codes {
+        fold(format!("i18n/{code}.json").as_bytes());
+        fold(&[0]);
+        let all: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(&std::fs::read_to_string(at_root("i18n").join(format!("{code}.json"))).unwrap()).unwrap();
+        for (key, value) in all.iter().filter(|(k, _)| k.starts_with("page.")) {
+            fold(key.as_bytes());
+            fold(&[0]);
+            fold(value.as_bytes());
+            fold(&[0]);
+        }
     }
     format!("fnv1a64 {hash:016x}\n")
 }

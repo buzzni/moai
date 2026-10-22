@@ -12,7 +12,7 @@ import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
 import type { ProjectEntry } from "../data/projects.ts"
 import { refreshTime } from "../data/refresh.ts"
-import type { Copy } from "../i18n/index.ts"
+import { fill, type Copy } from "../i18n/index.ts"
 import { detectPlatform } from "../keys/router.ts"
 import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
 import { button, el, emptyState, iconButton } from "./components.ts"
@@ -95,7 +95,7 @@ export interface Shell {
 export function describe(outcome: Outcome, copy: Copy): { parts: (string | Node)[]; info: boolean } | null {
   switch (outcome.kind) {
     case "moai-error":
-      return { parts: [copy.moaiError(outcome.message)], info: false }
+      return { parts: [fill(copy.moaiError, { message: outcome.message })], info: false }
     case "cancelled":
       return { parts: [copy.cancelled], info: isInformation(outcome) }
     case "unreadable":
@@ -103,7 +103,7 @@ export function describe(outcome: Outcome, copy: Copy): { parts: (string | Node)
     case "not-started":
       return { parts: [copy.unreachable], info: false }
     case "failed":
-      return { parts: [outcome.message ? copy.moaiError(outcome.message) : copy.failed], info: false }
+      return { parts: [outcome.message ? fill(copy.moaiError, { message: outcome.message }) : copy.failed], info: false }
     case "passed":
       return null
   }
@@ -365,7 +365,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const loadedAt = state.board.value?.loadedAt
     const at = loadedAt === undefined ? null : refreshTime(loadedAt, language)
     refresh.textContent = at ? `↻ ${at}` : copy.shell.refreshNow
-    refresh.title = at ? copy.refreshedAt(at) : copy.shell.refreshNow
+    refresh.title = at ? fill(copy.refreshedAt, { time: at }) : copy.shell.refreshNow
     refresh.setAttribute("aria-label", refresh.title)
     refresh.disabled = state.board.loading
     paintLayout(state)

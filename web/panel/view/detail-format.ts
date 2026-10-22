@@ -6,7 +6,7 @@
 import { isDone, isGroup, isWork, type IssueIndex, type Row } from '../data/index.ts'
 import type { Outcome } from '../data/client.ts'
 import { assigneeOf, label } from '../data/people.ts'
-import type { Copy } from '../i18n/index.ts'
+import { fill, type Copy } from '../i18n/index.ts'
 import { partsIn, zoneNow } from '../data/zone.ts'
 
 /** The columns in moai's default order; a column the config adds stands after them. */
@@ -66,7 +66,7 @@ export function headOf(row: Row, copy: Copy): Head {
     status,
     statusLabel: copy.stats[status] ?? status,
     tone: statusTone(status),
-    priority: typeof row.priority === 'number' ? copy.detail.priority(row.priority) : '',
+    priority: typeof row.priority === 'number' ? fill(copy.detail.priority, { n: row.priority }) : '',
     kind: kind && kind !== 'issue' ? copy.detail.kinds[kind] ?? kind : '',
     deferred: text(row.deferred_at) && !isDone(row) ? text(row.deferred_reason) || formatDate(row.deferred_at) || copy.detail.deferred : '',
     shelvedBy: !isDone(row) ? text(row.shelved_by) : '',
@@ -272,11 +272,11 @@ export function childrenOf(row: Row, index: IssueIndex | null = null): { id: str
 /** Why a read failed, in the words the shell uses for the same outcome; null for one that passed. */
 export function problemText(outcome: Outcome, copy: Copy): string | null {
   switch (outcome.kind) {
-    case 'moai-error': return copy.moaiError(outcome.message)
+    case 'moai-error': return fill(copy.moaiError, { message: outcome.message })
     case 'cancelled': return copy.cancelled
     case 'unreadable': return copy.unreadable
     case 'not-started': return copy.unreachable
-    case 'failed': return outcome.message ? copy.moaiError(outcome.message) : copy.failed
+    case 'failed': return outcome.message ? fill(copy.moaiError, { message: outcome.message }) : copy.failed
     case 'passed': return null
   }
 }

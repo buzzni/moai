@@ -25,6 +25,7 @@ import { firstStatus, glint, spins } from "./spin.ts"
 import { branchMark, branchOf } from "./branch.ts"
 import { highlight } from "./toolbar.ts"
 import type { MountPane, PaneView } from "./types.ts"
+import { fill } from "../i18n/index.ts"
 
 /** Every line is this tall (list.css --moai-row-h); the virtual scroll depends on it. 24, not the app's 28: at 28 the
  * branches of the tree stood apart (se-gowr.4x9). */
@@ -251,7 +252,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
       }
       const on = sorted?.key === field
       if (on) span.setAttribute("aria-sort", descending ? "descending" : "ascending")
-      const sort = el(doc, "button", { type: "button", class: "moai-head-sort", tabindex: -1, title: words.sortBy(words.heads[column]), "data-sort": field }, `${text}${on ? (descending ? "↓" : "↑") : ""}`)
+      const sort = el(doc, "button", { type: "button", class: "moai-head-sort", tabindex: -1, title: fill(words.sortBy, { column: words.heads[column] }), "data-sort": field }, `${text}${on ? (descending ? "↓" : "↑") : ""}`)
       // A click is `SPC s <key>`: that field alone, its direction turned when it already is the only one.
       sort.addEventListener("click", () => keepFocus(() => intents.dispatch({ type: "sort", sort: sortEdit(current.sort, field, "replace") })))
       span.append(sort)
@@ -322,7 +323,7 @@ export const mountList: MountPane = (root, ctx): PaneView => {
 
     note.hidden = model.hidden === 0
     // A status line is a live region: written only when it says something new.
-    const hiddenText = model.hidden ? words.hiddenCount(model.hidden) : ""
+    const hiddenText = model.hidden ? fill(words.hiddenCount, { n: model.hidden }) : ""
     if (noteText.textContent !== hiddenText) noteText.textContent = hiddenText
     showAll.hidden = !hidesAnything(current.view)
 

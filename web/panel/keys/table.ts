@@ -21,7 +21,7 @@
 // Labels are ids (KeyLabel) or functions of the words: both resolve through the i18n catalogue's `table` group
 // (KeyTableCopy), passed as `words` to menuLayer and helpSections — Korean when a caller passes none.
 
-import { TABLE, type KeyTableCopy } from "../i18n/index.ts"
+import { fill, TABLE, type KeyTableCopy } from "../i18n/index.ts"
 
 export type Platform = "mac" | "other"
 
@@ -249,7 +249,7 @@ const columnBindings: Binding[] = Array.from({ length: 9 }, (_, i): Binding => (
   action: "view.column",
   args: { index: i },
   keys: [`SPC v ${i + 1}`],
-  label: (w, c) => c.columns?.[i] ?? w.column(i + 1),
+  label: (w, c) => c.columns?.[i] ?? fill(w.column, { n: i + 1 }),
   group: "view",
   kind: "toggle",
   modes: BROWSE_ONLY,
@@ -280,8 +280,8 @@ const sortBindings: Binding[] = SORTS.flatMap(([key, field]): Binding[] => [
     action: "sort.add",
     args: { field },
     keys: [`SPC s ${key.toUpperCase()}`],
-    label: (w) => w.sortAdd(w.sortFields[field]),
-    helpLabel: (w) => w.sortAddHelp(w.sortFields[field]),
+    label: (w) => fill(w.sortAdd, { field: w.sortFields[field] }),
+    helpLabel: (w) => fill(w.sortAddHelp, { field: w.sortFields[field] }),
     group: "sort",
     kind: "toggle",
     modes: BROWSE_ONLY,

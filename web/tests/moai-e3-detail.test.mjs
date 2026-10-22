@@ -12,7 +12,7 @@ const { IssueIndex } = await panelModule('data/index.ts')
 const { treeOf } = await import('./moai-tree-helper.mjs')
 const build = (rows, tree = treeOf(rows)) => new IssueIndex(rows, tree)
 const { initialState, reduce } = await panelModule('store.ts')
-const { copyFor } = await panelModule('i18n/index.ts')
+const { copyFor, fill } = await panelModule('i18n/index.ts')
 
 const en = copyFor('en')
 const ko = copyFor('ko')
@@ -66,8 +66,8 @@ test('roll-up: n/n of the work under a group, none for work', () => {
   assert.deepEqual(rollup.byStatus, [['todo', 1], ['in_progress', 1], ['done', 1]])
   assert.equal(F.rollupOf(ROWS[2], index), null)
   assert.equal(F.rollupOf(ROWS[1], null), null)
-  assert.equal(en.detail.rollupText(1, 3, 33), '1/3 done · 33%')
-  assert.equal(en.detail.rollupText(0, 0, undefined), '0/0 done')
+  assert.equal(fill(en.detail.rollupTextPercent, { done: 1, work: 3, percent: 33 }), '1/3 done · 33%')
+  assert.equal(fill(en.detail.rollupText, { done: 0, work: 0 }), '0/0 done')
 })
 
 test('roll-up: an issue with `.child` ids is a folder in the list and has the roll-up too', () => {
@@ -106,7 +106,7 @@ test('a row put off through its epic carries shelved_by (not deferred_at): the h
   const head = F.headOf({ id: 'x', status: 'todo', shelved_by: 'trk-ep01' }, en)
   assert.deepEqual([head.deferred, head.shelvedBy], ['', 'trk-ep01'])
   assert.equal(F.headOf({ id: 'x', status: 'done', shelved_by: 'trk-ep01' }, en).shelvedBy, '', 'a finished row is not deferred')
-  assert.equal(en.detail.deferredUnder('trk-ep01'), 'Deferred — under trk-ep01')
+  assert.equal(fill(en.detail.deferredUnder, { id: 'trk-ep01' }), 'Deferred — under trk-ep01')
   const { root, view } = mount()
   view.render(stateWith({ value: { id: 'x', row: { id: 'x', title: 'Member', status: 'todo', shelved_by: 'trk-ep01' } } }), index)
   assert.ok([...root.querySelectorAll('.moai-detail-chips .m-chip-warn')].some((chip) => chip.textContent === 'Deferred — under trk-ep01'))
@@ -159,9 +159,9 @@ test('journal, commits and work lines', () => {
 
 test('problem text uses the shell words', () => {
   assert.equal(F.problemText({ kind: 'not-started' }, en), en.unreachable)
-  assert.equal(F.problemText({ kind: 'failed', message: 'page b skipped' }, en), en.moaiError('page b skipped'))
+  assert.equal(F.problemText({ kind: 'failed', message: 'page b skipped' }, en), fill(en.moaiError, { message: 'page b skipped' }))
   assert.equal(F.problemText({ kind: 'failed' }, en), en.failed)
-  assert.equal(F.problemText({ kind: 'moai-error', message: 'boom' }, en), en.moaiError('boom'))
+  assert.equal(F.problemText({ kind: 'moai-error', message: 'boom' }, en), fill(en.moaiError, { message: 'boom' }))
   assert.equal(F.problemText({ kind: 'passed', output: 1 }, en), null)
 })
 

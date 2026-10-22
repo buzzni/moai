@@ -18,7 +18,7 @@ import {
   type SortKey,
 } from "../data/query.ts"
 import type { Row } from "../data/index.ts"
-import { copyFor, type HiddenReason, type Language, type ToolbarCopy } from "../i18n/index.ts"
+import { copyFor, fill, type HiddenReason, type Language, type ToolbarCopy } from "../i18n/index.ts"
 import { button, chip, el, icon, iconButton, menu, searchBox, textInput } from "./components.ts"
 import { kbdHint } from "./help.ts"
 
@@ -481,7 +481,7 @@ export function createToolbar(deps: Pick<ToolbarDeps, "doc" | "copy" | "lang">, 
     }
     const reasons = (Object.keys(view.hidden) as HiddenReason[]).map((reason) => `${t.hiddenReasons[reason]} ${view.hidden[reason]}`)
     const total = Object.values(view.hidden).reduce((sum, n) => sum + (n ?? 0), 0)
-    const said = total ? `${t.hidden(total)}: ${reasons.join(", ")}` : ""
+    const said = total ? `${fill(t.hidden, { n: total })}: ${reasons.join(", ")}` : ""
     // A live region: written only when it says something new.
     if (note.textContent !== said) note.textContent = said
     note.hidden = total === 0

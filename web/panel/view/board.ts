@@ -18,6 +18,7 @@ import { newChip } from './unread.ts'
 import { firstStatus, glint, spins } from './spin.ts'
 import { branchMark, branchOf } from './branch.ts'
 import type { MountPane, PaneView, ViewContext } from './types.ts'
+import { fill } from '../i18n/index.ts'
 
 /**
  * A column head's glyph, as moai draws it (`/api/boot`: `columns` for the backlog and deferred columns, `glyphs`
@@ -113,7 +114,7 @@ function draw(ctx: ViewContext, state: State, index: IssueIndex, model: BoardMod
     const board = el(doc, 'div', { class: 'm-board', 'data-lane': lane.seg ?? '' })
     for (const column of lane.columns) {
       const label = nameOf(column.key)
-      const lanes = el(doc, 'div', { class: 'm-lane', role: 'list', 'data-status': column.key, 'aria-label': copy.board.columnLabel(label, column.cards.length) })
+      const lanes = el(doc, 'div', { class: 'm-lane', role: 'list', 'data-status': column.key, 'aria-label': fill(column.cards.length === 1 ? copy.board.columnLabelOne : copy.board.columnLabelMany, { name: label, count: column.cards.length }) })
       // The column's glyph turns while a card in it does, as the TUI's column head does.
       const turning = column.cards.some((at) => spins(index, at, firstColumn, state.boot?.statuses))
       lanes.append(el(doc, 'div', { class: 'm-lane-head' },

@@ -32,6 +32,7 @@ import { branchMark } from './branch.ts'
 import { newChip } from './unread.ts'
 import { highlight } from './toolbar.ts'
 import type { MountPane, PaneView, ViewContext } from './types.ts'
+import { fill } from '../i18n/index.ts'
 
 /** The milestone and epic counts per column the roll-up reads (main.ts reads them beside the rows). */
 type Groups = BoardData['groups']
@@ -112,7 +113,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     if (head.priority) chips.append(chip(doc, { label: head.priority }))
     if (head.kind) chips.append(chip(doc, { label: head.kind }))
     if (head.deferred) chips.append(chip(doc, { label: `${d.deferred}: ${head.deferred}`, tone: 'warn' }))
-    else if (head.shelvedBy) chips.append(chip(doc, { label: d.deferredUnder(head.shelvedBy), tone: 'warn' }))
+    else if (head.shelvedBy) chips.append(chip(doc, { label: fill(d.deferredUnder, { id: head.shelvedBy }), tone: 'warn' }))
     for (const tag of tagsOf(row)) chips.append(chip(doc, { label: tag }))
     const idLine = el(doc, 'span', { class: 'moai-detail-id' }, ...painted(head.id, search))
     // The status glyph before the id, as the list and the board draw it, and turning while the work is held.
@@ -162,7 +163,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
       if (!counted && rollup.percent) share('done', rollup.percent)
       const legend = el(doc, 'div', { class: 'moai-detail-legend' })
       for (const [status, n] of rollup.byStatus) legend.append(el(doc, 'span', { 'data-status': status }, `${copy.stats[status] ?? status} ${n}`))
-      out.push(section(doc, d.rollup, el(doc, 'div', { class: 'moai-detail-rollup' }, d.rollupText(rollup.done, rollup.work, rollup.percent)), bar, rollup.byStatus.length ? legend : null))
+      out.push(section(doc, d.rollup, el(doc, 'div', { class: 'moai-detail-rollup' }, rollup.percent === undefined ? fill(d.rollupText, { done: rollup.done, work: rollup.work }) : fill(d.rollupTextPercent, { done: rollup.done, work: rollup.work, percent: rollup.percent })), bar, rollup.byStatus.length ? legend : null))
     }
     const body = typeof row.body === 'string' ? row.body.trim() : ''
     if (body) out.push(section(doc, d.body, raw ? el(doc, 'pre', { class: 'moai-detail-body moai-detail-raw' }, body) : renderBody(doc, body)))

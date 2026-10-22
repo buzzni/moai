@@ -4,7 +4,7 @@
 // shell carry that state across tab switches. Keys go through handleKey(); a keydown listener on the root
 // calls it too unless props.standaloneKeys is false. All text goes in through textContent.
 
-import { COPY, type WikiCopy } from "../i18n/index.ts"
+import { COPY, fill, type WikiCopy } from "../i18n/index.ts"
 import { banner, button, chip, el, emptyState, listRow, searchBox, type ChipTone } from "./components.ts"
 import { githubAnchor, renderMarkdown, type LinkTarget } from "./markdown.ts"
 import { FORCE_BOTTOM_BELOW } from "./responsive.ts"
@@ -81,7 +81,7 @@ function decodeJson(input: unknown, words: WikiCopy): Parsed<unknown> {
   try {
     return { ok: true, value: JSON.parse(input) }
   } catch (error) {
-    return { ok: false, error: words.badJson((error as Error).message) }
+    return { ok: false, error: fill(words.badJson, { reason: (error as Error).message }) }
   }
 }
 
@@ -511,7 +511,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
       return
     }
     if (!pages.length) {
-      listNote.append(emptyState(doc, { icon: "book-open", title: words.noPages, hint: dir ? words.noPagesHint(dir) : undefined }))
+      listNote.append(emptyState(doc, { icon: "book-open", title: words.noPages, hint: dir ? fill(words.noPagesHint, { dir }) : undefined }))
       return
     }
     const shown = visiblePages()
@@ -572,7 +572,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
 
   function backlinksSection(source: WikiPage): HTMLElement {
     const section = el(doc, "section", { class: "m-wiki-backlinks", "aria-label": words.backlinksLabel })
-    section.append(el(doc, "div", { class: "m-wiki-backlinks-title" }, words.backlinks(source.linked_from.length)))
+    section.append(el(doc, "div", { class: "m-wiki-backlinks-title" }, fill(words.backlinks, { n: source.linked_from.length })))
     if (!source.linked_from.length) {
       section.append(el(doc, "div", { class: "m-wiki-backlinks-none" }, words.noBacklinks))
     } else {
@@ -645,7 +645,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
           if (node && !headingNodes.has(heading.anchor)) headingNodes.set(heading.anchor, node)
         }
       } catch (error) {
-        scroller.append(banner(doc, "warn", words.renderFailed((error as Error).message)))
+        scroller.append(banner(doc, "warn", fill(words.renderFailed, { reason: (error as Error).message })))
         scroller.append(el(doc, "pre", { class: "m-wiki-raw" }, page.body))
       }
     }
@@ -673,7 +673,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
     const heading = headingFor(anchor)
     if (!heading) {
       // The raw view has no heading elements; saying the heading is missing would be wrong there.
-      setStatus(raw ? words.rawNoAnchor(anchor) : words.noAnchor(anchor))
+      setStatus(raw ? fill(words.rawNoAnchor, { anchor }) : fill(words.noAnchor, { anchor }))
       return false
     }
     const top = heading.getBoundingClientRect().top - scroller.getBoundingClientRect().top
@@ -738,7 +738,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
         return
       case "external":
         // Shown, never opened: the panel CSP blocks navigation and the renderer gives links no href.
-        setStatus(words.outside(target.href))
+        setStatus(fill(words.outside, { href: target.href }))
         return
       case "wiki":
         if (target.slug === current && page) {
@@ -774,7 +774,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
       if (parsed.ok) next = parsed.value
       else error = parsed.error
     } catch (reason) {
-      error = words.loadFailed(reason instanceof Error ? reason.message : String(reason))
+      error = fill(words.loadFailed, { reason: reason instanceof Error ? reason.message : String(reason) })
     }
     if (token !== request) return // a later open won; this answer is stale
     pageLoading = false
@@ -1162,10 +1162,10 @@ export const mountWiki: MountPane = (root, ctx): PaneView => {
     try {
       const parsed = parseWikiLs(await source!.list(), copy.wiki)
       if (parsed.ok) view.setPages(parsed.value.pages, parsed.value.dir)
-      else view.setError(copy.shell.wikiListFailed(parsed.error))
+      else view.setError(fill(copy.shell.wikiListFailed, { reason: parsed.error }))
     } catch (reason) {
       failed = true
-      view.setError(copy.shell.wikiListFailed(reason instanceof Error ? reason.message : String(reason)))
+      view.setError(fill(copy.shell.wikiListFailed, { reason: reason instanceof Error ? reason.message : String(reason) }))
     }
   }
 

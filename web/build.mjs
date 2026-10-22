@@ -2,11 +2,14 @@
 // (the sheets under panel/style/, joined) and index.html (copied). The server sends a CSP that allows scripts from
 // its own origin only, so nothing is inlined — the page loads both files by path.
 //
+// The page's words are moai's own i18n/*.json, the `page.` keys of them (i18n-bundles.mjs).
+//
 // The bundle is committed and `cargo build` never runs node. SOURCES records a hash of every input, so
 // tests/web_bundle.rs (no node) and the CI web job (node, rebuild and diff) both see a stale bundle.
 import { build } from 'esbuild'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { i18nBundles, languageCodes, pageWords } from './i18n-bundles.mjs'
 
 const root = new URL('./', import.meta.url)
 const dist = new URL('../src/web/dist/', root)
@@ -46,7 +49,7 @@ const byteOrder = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))
 // FNV-1a 64 over (path bytes, 0x00, content bytes, 0x00) for each input in path order — the same fold
 // tests/web_bundle.rs makes, so the test can tell a stale bundle without node.
 async function sources() {
-  const paths = [...(await walk('panel/')), 'build.mjs', 'package.json', 'package-lock.json'].sort(byteOrder)
+  const paths = [...(await walk('panel/')), 'build.mjs', 'i18n-bundles.mjs', 'package.json', 'package-lock.json'].sort(byteOrder)
   let hash = 0xcbf29ce484222325n
   const fold = (bytes) => {
     for (const byte of bytes) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn
@@ -56,6 +59,18 @@ async function sources() {
     fold([0])
     fold(await readFile(new URL(path, root)))
     fold([0])
+  }
+  // The page's words come from ../i18n/*.json, but only the `page.` keys reach app.js, so only they are folded in: a
+  // change to the CLI's own words does not stale the bundle. Per language file in byte order, (key, 0x00, value, 0x00).
+  for (const code of await languageCodes()) {
+    fold(Buffer.from(`i18n/${code}.json`))
+    fold([0])
+    for (const [key, value] of Object.entries(await pageWords(code))) {
+      fold(Buffer.from(key))
+      fold([0])
+      fold(Buffer.from(value))
+      fold([0])
+    }
   }
   return `fnv1a64 ${hash.toString(16).padStart(16, '0')}\n`
 }
@@ -74,6 +89,7 @@ const result = await build({
   minifyIdentifiers: false,
   legalComments: 'none',
   banner: { js: BANNER },
+  plugins: [i18nBundles],
 })
 const css = `${await styles()}\n[hidden]{display:none!important}\n`
 await mkdir(dist, { recursive: true })

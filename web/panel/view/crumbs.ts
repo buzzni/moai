@@ -5,7 +5,7 @@
 
 import { BRANCH_GLYPH, worktreesOf } from "./branch.ts"
 import { LOST, NO_MILESTONE, type IssueIndex, type Path, type Seg } from "../data/index.ts"
-import type { Copy } from "../i18n/index.ts"
+import { fill, type Copy } from "../i18n/index.ts"
 import { sameSort, type Sort } from "../data/query.ts"
 import type { State } from "../store.ts"
 import { chip, el } from "./components.ts"
@@ -56,8 +56,8 @@ export function lookBadge(state: Pick<CrumbState, "view" | "sort" | "defaultSort
   if (state.view.hideDeferred) names.push(copy.shell.deferred)
   if (state.view.hideBacklog) names.push(copy.shell.backlog)
   const parts: string[] = []
-  if (names.length) parts.push(copy.shell.hidden(names))
-  if (!sameSort(state.sort, state.defaultSort)) parts.push(copy.shell.sorted(sortWords(state.sort, copy)))
+  if (names.length) parts.push(fill(copy.shell.hidden, { names: names.join(" · ") }))
+  if (!sameSort(state.sort, state.defaultSort)) parts.push(fill(copy.shell.sorted, { by: sortWords(state.sort, copy) }))
   return parts.length ? parts.join(" · ") : null
 }
 

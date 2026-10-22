@@ -52,6 +52,15 @@ does not tag — see `CONTRIBUTING.md`.
   a read mark in flight, and the header marks the project on screen with a `▸`
   as well as the accent. (moai-m4ez.42r)
 
+### Changed
+
+- **For translators: the `moai web` page's words moved into `i18n/*.json`**, under
+  the `page.` prefix, next to the CLI's own. One set of files now holds both, with
+  `ko` complete and `ja` and `zh` carrying what the page had; a key a language lacks
+  reads in English, as it does in the CLI. After editing a `page.` key run
+  `scripts/gen-web.sh` (the page is bundled, so it speaks even when the server
+  cannot be reached); `cargo test` says so when the bundle is stale. (moai-m4ez.n42)
+
 ### Security
 
 - **`moai web`'s page runs under `style-src 'self'`.** The `'unsafe-inline'` it
