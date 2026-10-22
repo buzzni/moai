@@ -7,6 +7,7 @@ import { isDone, isGroup, isWork, type IssueIndex, type Row } from '../data/inde
 import type { Outcome } from '../data/client.ts'
 import { assigneeOf, label } from '../data/people.ts'
 import type { Copy } from '../i18n/index.ts'
+import { partsIn, zoneNow } from '../data/zone.ts'
 
 /** The columns in moai's default order; a column the config adds stands after them. */
 const STATUS_ORDER = ['todo', 'in_progress', 'review', 'done']
@@ -15,14 +16,18 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const text = (value: unknown): string => (typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '')
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item !== '') : [])
 
-/** `YYYY-MM-DD HH:MM` in the host's time zone; '' for anything that is not a date. */
-export function formatDate(value: unknown): string {
+/**
+ * `YYYY-MM-DD HH:MM` in `zone` — the zone the page draws in (`SPC o t`, data/zone.ts) when left out; '' for anything
+ * that is not a date.
+ */
+export function formatDate(value: unknown, zone: string | undefined = zoneNow()): string {
   // A bare date (a due day) has no time zone to move it into.
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value
-  const date = new Date(typeof value === 'string' ? value : NaN)
-  if (Number.isNaN(date.getTime())) return ''
+  const at = new Date(typeof value === 'string' ? value : NaN).getTime()
+  if (Number.isNaN(at)) return ''
   const two = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`
+  const d = partsIn(at, zone)
+  return `${d.year}-${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}`
 }
 
 export type Tone = 'neutral' | 'ok' | 'warn' | 'danger' | 'accent'

@@ -15,6 +15,7 @@ import { sortDefault, type SortDefault } from "../data/memory.ts"
 import { entryOf, numberedNames, type ProjectEntry } from "../data/projects.ts"
 import { SORT_KEYS, sortEdit, type Sort, type SortKey } from "../data/query.ts"
 import { withArchive } from "../data/source.ts"
+import { effectiveZone, zoneNames } from "../data/zone.ts"
 import type { Copy } from "../i18n/index.ts"
 import type { ColumnName, State, Store } from "../store.ts"
 import { statusKeys } from "../view/board-groups.ts"
@@ -25,6 +26,7 @@ import { effectivePosition } from "../view/responsive.ts"
 import type { Shell } from "../view/shell.ts"
 import type { ToolbarAction } from "../view/toolbar.ts"
 import type { PaneView } from "../view/types.ts"
+import { createZonePicker, type ZonePicker } from "../view/zones.ts"
 import { attachKeyRouter, createKeyRouter, detectPlatform, type DispatchedAction, type KeyRouter } from "./router.ts"
 import type { CellField, KeyContext, Mode, Platform } from "./table.ts"
 
@@ -66,6 +68,7 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
     cells: { ...state.columns },
     readable: env.readable ?? false,
     projects: numberedNames(state.projects),
+    zone: effectiveZone(state.zone, state.boot?.timezone),
   }
 }
 
@@ -89,6 +92,8 @@ export interface KeyWiringOptions {
    * on screen is not opened again.
    */
   openProject?: (entry: ProjectEntry) => void
+  /** The names the zone picker lists after its first line; defaults to the browser's (data/zone.ts zoneNames). */
+  zoneNames?: () => string[]
   /**
    * Where `D` saves the default sort; defaults to the panel's shared one. An emptied order returns to the store's
    * `defaultSort`, which `D` sets and data/memory.ts remember() reads from the same storage at boot: pass both the same one.
@@ -100,6 +105,8 @@ export interface KeyWiring {
   router: KeyRouter
   menu: MenuView
   help: HelpView
+  /** The zone picker (`SPC o t`). */
+  zones: ZonePicker
   hint: HTMLElement
   /** The context the router reads now. */
   context(): KeyContext
@@ -351,6 +358,22 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     options.openProject?.(entry)
   }
 
+  // ── the zone picker ──
+  const zones = createZonePicker(doc, {
+    words: copy.keys.zone,
+    names: options.zoneNames ?? zoneNames,
+    pick: (zone) => store.dispatch({ type: "zone", zone }),
+    closed: () => {
+      // Back to the pane the keys were in; a click outside that moved the focus elsewhere keeps it there.
+      const at = doc.activeElement
+      if (!at || at === doc.body || zones.el.contains(at)) backToPane()
+    },
+  })
+  const openZones: Handler = () => {
+    const state = store.getState()
+    zones.open({ chosen: state.zone, tui: state.boot?.timezone ?? null })
+  }
+
   const handlers: Record<string, Handler> = {
     "move.down": move,
     "move.up": move,
@@ -382,6 +405,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "read.all": readAll,
     "read.group": readGroup,
     "project.jump": jump,
+    "option.timezone": openZones,
     help: (a) => help.open(a.mode, context()),
     "tab.list": tab("list"),
     "tab.board": tab("board"),
@@ -521,7 +545,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   const help = createHelp(doc, { platform, words: copy.table })
   const hint = focusHint(doc, copy.keys.focusHint)
   hint.addEventListener("click", () => doc.body.focus({ preventScroll: true }))
-  doc.body.append(menu.el, help.el, hint)
+  doc.body.append(menu.el, help.el, zones.el, hint)
 
   const showHint = () => {
     hint.hidden = doc.hasFocus()
@@ -584,6 +608,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     router,
     menu,
     help,
+    zones,
     hint,
     context,
     actions: Object.keys(handlers),
@@ -596,8 +621,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       doc.removeEventListener("focusin", showHint)
       doc.removeEventListener("focusin", settle)
       help.close()
+      zones.close()
       menu.el.remove()
       help.el.remove()
+      zones.el.remove()
       hint.remove()
     },
   }

@@ -679,6 +679,18 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-sort-pop .m-menu-item[data-cursor] { background: var(--selected); }
 .m-sort-pop .m-sort-note { padding: 4px 8px; color: var(--muted, inherit); font-size: 11px; }
 
+/* The zone picker (`SPC o t`, view/zones.ts): the sort editor's popover, standing alone over the page as the TUI's
+   picker stands over its panes — a filter box on top, the names under it, the line under the cursor as the sort
+   editor's (data-cursor above). */
+.m-zone-pop { position: fixed; top: 12vh; left: 50%; transform: translateX(-50%); z-index: 230; display: flex; flex-direction: column;
+  width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow: hidden; }
+.m-zone-pop[hidden] { display: none; }
+.m-zone-pop .m-zone-filter { flex: none; margin: 0 4px 4px; }
+.m-zone-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.m-zone-item { min-height: 28px; padding: 4px 8px; cursor: pointer; }
+.m-zone-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-zone-note[hidden] { display: none; }
+
 /*
  * Moai panel wiki tab (design.md 4.10). Built by view/wiki.ts. Needs tokens.css, components.css and markdown.css.
  * The page list sits in the split's first pane (its "detail" slot, ratio = wiki_width) and the page on the right.

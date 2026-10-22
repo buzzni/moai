@@ -50,10 +50,12 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
   through the same queue as the reads (never shared). A write that went through reads the rows again (`fresh`: after a
   read already running) and the detail it marked (`readMarks` in `data/read.ts`, called from `main.ts`). Upstream's
   compatibility words for a catalog without read marks did not come back.
-- **Projects (moai-o14f), which upstream has not.** Every call names the project the page reads
+- **Projects and the zone (moai-o14f, moai-ly88), which upstream has not.** Every call names the project the page reads
   (`?project=<path>`, `data/client.ts` `withProject`). The header draws the TUI's third column of registered projects
   (`<1> name` …, `view/brand.ts`; the TUI's `<0>` layer has no page), `1`–`9` and `SPC p 1`–`9` open one as a new page
-  (`data/projects.ts`).
+  (`data/projects.ts`). `SPC o t` opens a zone picker (`view/zones.ts`, the sort editor's popover) as the TUI's
+  `zones.rs`: ↑ ↓ PgUp PgDn move and j k are letters, as there. Every date follows the zone (`data/zone.ts`): the one
+  picked here (remembered in `moai.web`), else `/api/boot`'s `timezone`, else the browser's.
 - **The second set of rules (moai-jshy.hfr).** The panel had rebuilt moai's `nav.rs`, `query.rs` and parts of
   `report.rs` in TS. Those are gone; the page reads what moai gives:
   - where a row stands, whether it opens, its `n/n` and the order of every listing: `/api/tree`

@@ -7,6 +7,7 @@
 import { isInformation } from '../data/client.js'
 import type { IssueIndex, Row } from '../data/index.js'
 import { isUnread } from '../data/read.js'
+import { zoneNow } from '../data/zone.js'
 import type { BoardData, State } from '../store.js'
 import { banner, button, chip, el, emptyState } from './components.ts'
 import {
@@ -157,7 +158,8 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
   let shownId: string | null = null
   /** What the pane was drawn from: it is drawn again only when one of them changed (a redraw loses a text
    *  selection and the focus on a folded section's summary, and the shell renders it on every store change). */
-  let drawn: { shown: State['shown']; index: IssueIndex | null; search: State['search']; groups: Groups } | null = null
+  // The zone the dates are drawn in (`SPC o t`, data/zone.ts) keys it too: a new one redraws every date.
+  let drawn: { shown: State['shown']; index: IssueIndex | null; search: State['search']; groups: Groups; zone: string | undefined } | null = null
   /** The id and title lines of the row drawn, with their text: a search repaints these two and nothing else. */
   let heads: { id: HTMLElement; title: HTMLElement; idText: string; titleText: string } | null = null
   /** `SPC v r`: the body as the markdown it was written in. */
@@ -264,12 +266,13 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     // The roll-up's per-column counts are `moai status`'s, which come after the rows (main.ts `groups`): the index stays
     // the same object then, so they key the drawing of their own.
     const groups = state.board.value?.groups
-    if (drawn && drawn.shown === state.shown && drawn.index === index && drawn.groups === groups) {
+    const zone = zoneNow()
+    if (drawn && drawn.shown === state.shown && drawn.index === index && drawn.groups === groups && drawn.zone === zone) {
       if (drawn.search === state.search) return
       // Only the search changed (a keystroke): the hits are painted in the id and title, so repaint those two lines.
       // The body, the sections and the markdown stay the nodes they were (and so does a text selection in them).
       const same = drawn.search.text === state.search.text
-      drawn = { shown: state.shown, index, search: state.search, groups }
+      drawn = { shown: state.shown, index, search: state.search, groups, zone }
       if (same) return
       if (heads?.id.isConnected && heads.title.isConnected) {
         heads.id.replaceChildren(...painted(heads.idText, state.search))
@@ -277,7 +280,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
         return
       }
     }
-    drawn = { shown: state.shown, index, search: state.search, groups }
+    drawn = { shown: state.shown, index, search: state.search, groups, zone }
     // Another row's detail starts at the top; the same row redrawn (a refresh) keeps its place.
     const id = value?.id ?? null
     const top = id !== null && id === shownId ? scroller().scrollTop : 0

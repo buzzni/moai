@@ -154,6 +154,11 @@ export interface State {
    * `/api/projects` after the boot. Empty until then, and for good when nothing is registered or the read failed.
    */
   projects: ProjectEntry[]
+  /**
+   * The time zone picked on this page (`SPC o t`, data/zone.ts); null follows the TUI's (`/api/boot`'s `timezone`),
+   * else the browser's. Remembered in the browser (data/memory.ts); never written to the server.
+   */
+  zone: string | null
 }
 
 /**
@@ -163,6 +168,8 @@ export interface State {
 export interface Remembered {
   tab: Tab
   detail: DetailSettings
+  /** The zone picked on this page (`SPC o t`); null when none is. Left out by an older page's settings. */
+  zone?: string | null
 }
 
 export const COLUMN_DEFAULTS: Record<ColumnName, boolean> = {
@@ -229,6 +236,7 @@ export function initialState(): State {
     matched: { key: '', ids: null, loading: false, problem: null },
     wiki: initialWiki(),
     projects: [],
+    zone: null,
   }
 }
 
@@ -283,6 +291,8 @@ export type Action =
   | { type: 'restore'; settings: Partial<Remembered> }
   /** The header's projects (data/projects.ts headerProjects). */
   | { type: 'projects'; projects: ProjectEntry[] }
+  /** The zone picked (`SPC o t`); null goes back to the TUI's, else the browser's. */
+  | { type: 'zone'; zone: string | null }
 
 /** Where the detail actually stands at this panel width: a narrow panel forces the bottom. */
 export const detailPosition = (detail: DetailSettings, width: number): DetailPosition => effectivePosition(width, detail.position)
@@ -402,15 +412,18 @@ export function reduce(state: State, action: Action): State {
       return { ...state, shown: idle(), focus: 'list' }
     case 'projects':
       return { ...state, projects: action.projects }
+    case 'zone':
+      return state.zone === action.zone ? state : { ...state, zone: action.zone }
     case 'restore': {
-      const { tab, detail } = action.settings
-      if (tab === undefined && detail === undefined) return state
+      const { tab, detail, zone } = action.settings
+      if (tab === undefined && detail === undefined && zone === undefined) return state
       const ratio = detail ? { left: normalizeRatio(detail.ratio.left, 'left'), bottom: normalizeRatio(detail.ratio.bottom, 'bottom') } : state.detail.ratio
       return {
         ...state,
         tab: tab ?? state.tab,
         detail: detail ? { visible: detail.visible, position: detail.position, ratio } : state.detail,
         focus: detail && !detail.visible ? 'list' : state.focus,
+        zone: zone === undefined ? state.zone : zone,
       }
     }
   }

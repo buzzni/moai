@@ -1,6 +1,7 @@
 /**
  * What the panel remembers between openings (design §5): the last tab, whether the detail shows, where it
- * stands and its share of the split for each position (`ratio.left`, `ratio.bottom`).
+ * stands and its share of the split for each position (`ratio.left`, `ratio.bottom`), and the time zone picked with
+ * `SPC o t` (`zone`, data/zone.ts) — how this person reads the page, so it is kept beside the layout, not per project.
  *
  * Where it is kept: the browser's localStorage for the page's origin (`moai web`'s host and port). When it cannot
  * be used — a private window, site data blocked, where touching it throws — the settings stay in memory until the
@@ -13,6 +14,7 @@ import { SORT_KEYS, sameSort, type Dir, type Sort, type SortField } from './quer
 import { COLUMN_DEFAULTS, type ColumnName, type DetailPosition, type Remembered, type State, type Store, type ViewSettings } from '../store.js'
 import { DEFAULT_RATIO, normalizeRatio } from '../view/split.js'
 import { DEFAULT_TAB, normalizeTab } from '../view/tabs.js'
+import { validZone } from './zone.js'
 
 /** The page's key in localStorage. The origin is `moai web`'s host:port, so each project's page keeps its own. */
 export const MEMORY_KEY = 'moai.web'
@@ -38,13 +40,16 @@ export function normalizeMemory(value: unknown): Remembered {
         bottom: ratio.bottom === undefined ? DEFAULT_RATIO.bottom : normalizeRatio(ratio.bottom, 'bottom'),
       },
     },
+    // A zone this browser does not know (dropped since, or edited by hand) is no choice: the page falls back silently.
+    // No choice is no key, as the page before the picker wrote it.
+    ...(validZone(stored.zone) ? { zone: validZone(stored.zone) } : {}),
   }
 }
 
 /** The part of the state that is remembered. */
 export function rememberedOf(state: State): Remembered {
   const { visible, position, ratio } = state.detail
-  return { tab: state.tab, detail: { visible, position, ratio: { left: ratio.left, bottom: ratio.bottom } } }
+  return { tab: state.tab, detail: { visible, position, ratio: { left: ratio.left, bottom: ratio.bottom } }, ...(state.zone ? { zone: state.zone } : {}) }
 }
 
 export function sameMemory(a: Remembered, b: Remembered): boolean {
@@ -53,7 +58,8 @@ export function sameMemory(a: Remembered, b: Remembered): boolean {
     a.detail.visible === b.detail.visible &&
     a.detail.position === b.detail.position &&
     a.detail.ratio.left === b.detail.ratio.left &&
-    a.detail.ratio.bottom === b.detail.ratio.bottom
+    a.detail.ratio.bottom === b.detail.ratio.bottom &&
+    (a.zone ?? null) === (b.zone ?? null)
   )
 }
 

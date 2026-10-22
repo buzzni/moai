@@ -272,6 +272,9 @@ export interface Boot {
   /** What moai last heard of the latest release (data/about.ts {@link Latest}); null when it holds none, and when an
    *  older server does not send it. */
   latest: Latest | null
+  /** The TUI's zone (`[tui] timezone` as written), the page's first choice of zone (data/zone.ts); null when the TUI
+   *  picked none, and when an older server does not send it. */
+  timezone: string | null
 }
 
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === 'string')
@@ -287,7 +290,8 @@ export function bootFrom(value: unknown): Boot | null {
   if (!isRecord(columns) || !column(columns.backlog) || !column(columns.shelved)) return null
   if (!Array.isArray(sort_fields) || !sort_fields.every((field) => isRecord(field) && typeof field.name === 'string' && (field.dir === 'asc' || field.dir === 'desc'))) return null
   // `user` and `latest` came later: a server without them still boots, and the header then says `—`.
-  return { ...(value as unknown as Boot), user: userOf(value.user), latest: latestOf(value.latest) }
+  const timezone = typeof value.timezone === 'string' && value.timezone !== '' ? value.timezone : null
+  return { ...(value as unknown as Boot), user: userOf(value.user), latest: latestOf(value.latest), timezone }
 }
 
 /**

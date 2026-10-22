@@ -564,6 +564,25 @@ export interface KeysCopy {
   readUnavailable: string
   /** `SPC m g` with no milestone or epic under the cursor or around the list. */
   readNoGroup: string
+  /** The zone picker (`SPC o t`, view/zones.ts), in the TUI's words where it has them (`tui.tz.*`). */
+  zone: ZoneCopy
+}
+
+export interface ZoneCopy {
+  /** `tui.tz.title`. */
+  title: string
+  /** The filter box's placeholder. */
+  filter: string
+  /** Beside the name in use (`tui.tz.now`). */
+  now: string
+  /** The first line, which clears the page's choice: the browser's zone follows (`{zone}` is its name). */
+  browser: string
+  /** The same line when the TUI picked a zone (`/api/boot`'s `timezone`): that one follows. */
+  tui: string
+  /** Nothing on the list holds what was typed (`tui.tz.no_match`). */
+  noMatch: string
+  /** The zone in use is not on the list (`tui.tz.unlisted`): Enter alone keeps it. */
+  unlisted: (now: string) => string
 }
 
 const KEYS: Record<Language, KeysCopy> = {
@@ -573,6 +592,11 @@ const KEYS: Record<Language, KeysCopy> = {
     sortDefaultSavedSession: 'Saved as the default order. This browser keeps no site data, so it lasts until the tab is closed.',
     readUnavailable: 'Marking items read is not available on this page.',
     readNoGroup: 'Move to a milestone or epic to mark its items read.',
+    zone: {
+      title: 'Timezone', filter: 'Type to filter', now: 'now', browser: 'Browser zone ({zone})', tui: 'Explorer zone ({zone})',
+      noMatch: 'No name on this list matches.',
+      unlisted: (now) => `${now} in use is not on this list. Enter alone keeps it; move or type to pick one.`,
+    },
   },
   ko: {
     focusHint: '페이지를 한 번 누르면 키가 듣습니다',
@@ -580,6 +604,11 @@ const KEYS: Record<Language, KeysCopy> = {
     sortDefaultSavedSession: '기본 정렬로 저장했습니다. 이 브라우저가 사이트 데이터를 안 남겨 탭을 닫을 때까지만 유지됩니다.',
     readUnavailable: '이 페이지에서는 읽음 표시를 쓸 수 없습니다.',
     readNoGroup: '읽음으로 표시할 마일스톤이나 에픽으로 옮겨 가세요.',
+    zone: {
+      title: '시간대', filter: '쳐서 거르기', now: '지금', browser: '브라우저 시간대 ({zone})', tui: '탐색기 시간대 ({zone})',
+      noMatch: '맞는 이름이 없습니다.',
+      unlisted: (now) => `지금 쓰는 ${now} 는 목록에 없습니다. 그냥 Enter 는 그대로 둡니다. 옮기거나 쳐서 고르세요.`,
+    },
   },
   ja: {
     focusHint: 'ページを一度クリックするとキーが効きます',
@@ -587,6 +616,11 @@ const KEYS: Record<Language, KeysCopy> = {
     sortDefaultSavedSession: '既定の並べ替えとして保存しました。このブラウザはサイトのデータを残さないため、タブを閉じるまで保持されます。',
     readUnavailable: 'このページでは既読にできません。',
     readNoGroup: '既読にするマイルストーンかエピックに移動してください。',
+    zone: {
+      title: 'タイムゾーン', filter: '入力して絞り込む', now: '使用中', browser: 'ブラウザのタイムゾーン ({zone})', tui: 'エクスプローラーのタイムゾーン ({zone})',
+      noMatch: '一致する名前はありません。',
+      unlisted: (now) => `使用中の ${now} は一覧にありません。Enter だけならそのまま、移動か入力で選びます。`,
+    },
   },
   zh: {
     focusHint: '点击页面一次即可使用按键',
@@ -594,6 +628,11 @@ const KEYS: Record<Language, KeysCopy> = {
     sortDefaultSavedSession: '已保存为默认排序。此浏览器不保留网站数据，关闭标签页前有效。',
     readUnavailable: '此页面不能标记为已读。',
     readNoGroup: '请移到要标记为已读的里程碑或史诗。',
+    zone: {
+      title: '时区', filter: '输入以筛选', now: '当前', browser: '浏览器时区 ({zone})', tui: 'moai tui 时区 ({zone})',
+      noMatch: '没有匹配的名称。',
+      unlisted: (now) => `当前的 ${now} 不在列表中。直接按 Enter 保持不变，移动或输入以选择。`,
+    },
   },
 }
 
@@ -644,7 +683,7 @@ const TABLE_EN: KeyTableCopy = {
     'view.detail': 'Details', 'view.raw': 'Raw', 'view.rawHelp': 'Raw or rendered', 'sort.edit': 'Edit the order…',
     'read.all': 'Mark all read', 'read.group': 'Group read', 'read.groupHelp': 'Mark the group read',
     'option.detailAt': 'Details at', 'option.detailAtHelp': 'Details position (left ↔ bottom)',
-    'project.jumpHelp': 'Go to project 1–9',
+    'option.timezone': 'Timezone', 'option.timezoneHelp': 'Timezone of the dates (pick one)', 'project.jumpHelp': 'Go to project 1–9',
     'menu.close': 'Close', 'menu.up': 'Up one level',
     'prompt.apply': 'Apply (with filter values listed, insert one)', 'prompt.cancel': 'Cancel, back to the cursor before',
     'prompt.next': 'Complete the filter', 'prompt.prev': 'Complete the filter, back',
@@ -691,7 +730,7 @@ const TABLE_KO: KeyTableCopy = {
     'view.detail': '상세', 'view.raw': '원문', 'view.rawHelp': '원문 또는 렌더링', 'sort.edit': '정렬 편집…',
     'read.all': '모두 읽음', 'read.group': '그룹 읽음', 'read.groupHelp': '그룹을 읽음으로',
     'option.detailAt': '상세 위치', 'option.detailAtHelp': '상세 위치 (왼쪽 ↔ 아래)',
-    'project.jumpHelp': '프로젝트 1~9 로 가기',
+    'option.timezone': '시간대', 'option.timezoneHelp': '날짜의 시간대 (고르기)', 'project.jumpHelp': '프로젝트 1~9 로 가기',
     'menu.close': '닫기', 'menu.up': '한 층 위로',
     'prompt.apply': '적용 (필터 값 목록이 있으면 값 넣기)', 'prompt.cancel': '취소하고 열기 전 커서로',
     'prompt.next': '필터 자동완성', 'prompt.prev': '필터 자동완성 거꾸로',
@@ -738,7 +777,7 @@ const TABLE_JA: KeyTableCopy = {
     'view.detail': '詳細', 'view.raw': '原文', 'view.rawHelp': '原文またはレンダリング', 'sort.edit': '並べ替えを編集…',
     'read.all': 'すべて既読', 'read.group': 'グループ既読', 'read.groupHelp': 'グループを既読に',
     'option.detailAt': '詳細の位置', 'option.detailAtHelp': '詳細の位置 (左 ↔ 下)',
-    'project.jumpHelp': 'プロジェクト 1〜9 へ移動',
+    'option.timezone': 'タイムゾーン', 'option.timezoneHelp': '日時のタイムゾーン (選ぶ)', 'project.jumpHelp': 'プロジェクト 1〜9 へ移動',
     'menu.close': '閉じる', 'menu.up': '一つ上の階層へ',
     'prompt.apply': '適用 (フィルター値の候補があれば挿入)', 'prompt.cancel': 'キャンセルして開く前のカーソルへ',
     'prompt.next': 'フィルターを補完', 'prompt.prev': 'フィルターを逆に補完',
@@ -785,7 +824,7 @@ const TABLE_ZH: KeyTableCopy = {
     'view.detail': '详情', 'view.raw': '原文', 'view.rawHelp': '原文或渲染', 'sort.edit': '编辑排序…',
     'read.all': '全部标为已读', 'read.group': '分组已读', 'read.groupHelp': '分组标为已读',
     'option.detailAt': '详情位置', 'option.detailAtHelp': '详情位置 (左 ↔ 下)',
-    'project.jumpHelp': '切换到项目 1–9',
+    'option.timezone': '时区', 'option.timezoneHelp': '日期的时区 (选择)', 'project.jumpHelp': '切换到项目 1–9',
     'menu.close': '关闭', 'menu.up': '返回上一层',
     'prompt.apply': '应用 (有筛选值候选时插入)', 'prompt.cancel': '取消并回到打开前的光标',
     'prompt.next': '补全筛选', 'prompt.prev': '反向补全筛选',

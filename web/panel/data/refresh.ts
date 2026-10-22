@@ -10,6 +10,7 @@
  * The stamp is read before the rows, so a write landing between the two is seen as a later change, never lost.
  * Timers and visibility are injected so the schedule is tested without a DOM or real time.
  */
+import { partsIn, zoneNow } from './zone.js'
 
 /** Whether the tab is on screen, and a way to hear when that changes. */
 export interface VisibilitySignal {
@@ -172,7 +173,9 @@ export function documentVisibility(doc: Document): VisibilitySignal {
   }
 }
 
-/** `HH:MM:SS` in the page's locale and time zone, as the tab bar shows it. */
-export function refreshTime(at: number, locale?: string): string {
-  return new Date(at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+/** `HH:MM:SS` in the zone the page draws in (`SPC o t`, data/zone.ts; `zone` when given), as the tab bar shows it. */
+export function refreshTime(at: number, _locale?: string, zone: string | undefined = zoneNow()): string {
+  const { hour, minute, second } = partsIn(at, zone)
+  const two = (n: number) => String(n).padStart(2, '0')
+  return `${two(hour)}:${two(minute)}:${two(second)}`
 }

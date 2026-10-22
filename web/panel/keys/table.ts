@@ -69,6 +69,8 @@ export interface KeyContext {
    * them does nothing, as the TUI's (keys.rs `Project(n)` past `Ctx::projects`).
    */
   projects?: ReadonlyArray<string>
+  /** The zone dates are drawn in (`SPC o t`'s state, data/zone.ts effectiveZone). */
+  zone?: string
 }
 
 export type StateId =
@@ -95,7 +97,7 @@ export type KeyLabel =
   | "filter" | "tab.list" | "tab.board" | "tab.wiki"
   | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
   | "sort.edit" | "read.all" | "read.group" | "read.groupHelp" | "option.detailAt" | "option.detailAtHelp"
-  | "project.jumpHelp" | "menu.close" | "menu.up"
+  | "option.timezone" | "option.timezoneHelp" | "project.jumpHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
   | "sorter.down" | "sorter.up" | "sorter.lower" | "sorter.raise" | "sorter.toggle" | "sorter.flip" | "sorter.apply" | "sorter.default" | "sorter.cancel"
   | "wiki.enter" | "wiki.back" | "wiki.page" | "wiki.nextLink" | "wiki.prevLink" | "wiki.search" | "wiki.clear"
@@ -127,6 +129,8 @@ export interface Binding {
   when?: (ctx: KeyContext) => boolean
   /** Current state for the menu's state label. */
   state?: (ctx: KeyContext) => StateId | null
+  /** A state that is a value rather than one of the words' states (the zone `SPC o t` draws in), bracketed as they are. */
+  stateText?: (ctx: KeyContext) => string | null
   verdict?: Verdict
   /** false: left out of the help overlay (repeated rows such as SPC v 2~9). */
   help?: boolean
@@ -356,6 +360,16 @@ const MENU: ReadonlyArray<Binding> = [
     state: (c) => detailAt(c),
     verdict: "변경",
   },
+  // The TUI's `SPC o t` (keys.rs `Timezone`): opens the zone picker, it does not cycle. Dates on every tab follow it.
+  {
+    action: "option.timezone",
+    keys: ["SPC o t"],
+    label: "option.timezone",
+    helpLabel: "option.timezoneHelp",
+    group: "option",
+    modes: BOTH,
+    stateText: (c) => c.zone ?? null,
+  },
   focusMenu("focus.next", "w", "focus.next", "next"),
   focusMenu("focus.prev", "W", "focus.prev", "prev"),
   focusMenu("focus.left", "h", "focus.left", "left"),
@@ -459,7 +473,9 @@ export function labelOf(binding: Binding, ctx: KeyContext, words: KeyTableCopy =
   return say(binding.label, ctx, words)
 }
 
-export function stateOf(binding: Binding, ctx: KeyContext, words: KeyTableCopy = DEFAULT_WORDS): { id: StateId; label: string } | null {
+export function stateOf(binding: Binding, ctx: KeyContext, words: KeyTableCopy = DEFAULT_WORDS): { id: StateId | "value"; label: string } | null {
+  const text = binding.stateText?.(ctx) ?? null
+  if (text !== null) return { id: "value", label: `[${text}]` }
   const id = binding.state?.(ctx) ?? null
   return id ? { id, label: words.states[id] } : null
 }
@@ -507,7 +523,7 @@ export interface MenuItem {
   /** Item label; a layer item reads '+보기' (the layer's title). */
   label: string
   kind: "toggle" | "action" | "layer"
-  state: { id: StateId; label: string } | null
+  state: { id: StateId | "value"; label: string } | null
   action?: string
   args?: Readonly<Record<string, string | number>>
 }

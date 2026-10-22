@@ -177,12 +177,15 @@ const BOOT = {
 }
 
 // What a server without the header's fields gives reads as one that sent them as null (a server before moai-fmun).
-const BOOTED = { ...BOOT, user: null, latest: null }
+const BOOTED = { ...BOOT, user: null, latest: null, timezone: null }
 
 test('the boot answer is read as the server gives it, and anything else is refused', () => {
   assert.deepEqual(bootFrom(BOOT), BOOTED, 'an older server without user and latest still boots')
   assert.deepEqual(bootFrom({ ...BOOT, user: 'Raven (r@x.io)', latest: { state: 'stale', tag: 'v1.0.0', heard_at: '2026-10-20T00:00:00Z', why: 'offline' } }),
-    { ...BOOT, user: 'Raven (r@x.io)', latest: { state: 'stale', tag: 'v1.0.0', heardAt: '2026-10-20T00:00:00Z', why: 'offline' } })
+    { ...BOOT, user: 'Raven (r@x.io)', latest: { state: 'stale', tag: 'v1.0.0', heardAt: '2026-10-20T00:00:00Z', why: 'offline' }, timezone: null })
+  // The TUI's zone (moai-ly88): a name as written, or null — an empty or wrong one is none.
+  assert.equal(bootFrom({ ...BOOT, timezone: 'Asia/Seoul' }).timezone, 'Asia/Seoul')
+  for (const none of ['', 9, null, undefined]) assert.equal(bootFrom({ ...BOOT, timezone: none }).timezone, null)
   assert.deepEqual(bootFrom({ ...BOOT, user: '', latest: { state: 'later' } }), BOOTED, 'an empty user and an unknown state are nothing')
   assert.deepEqual(bootFrom({ ...BOOT, user: 7, latest: 'v1' }), BOOTED, 'a wrong shape there does not refuse the boot')
   assert.equal(bootFrom({ ...BOOT, glyphs: { todo: 1 } }), null)

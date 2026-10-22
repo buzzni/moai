@@ -5,6 +5,7 @@
 // Where a row stands and in which order is moai's (data/index.ts: `tui --json --deep`); what the filter and the
 // search find is moai's too (store.ts Matched). What stays here is drawing: which of those rows the view toggles show.
 
+import { partsIn, zoneNow } from "../data/zone.ts"
 import { isBacklog, LOST, NO_MILESTONE, pathKey, type IssueIndex, type Keep, type Path, type Row, type Seg, type Twig } from "../data/index.ts"
 import type { Boot } from "../data/source.ts"
 import type { SortKey } from "../data/query.ts"
@@ -237,13 +238,16 @@ const time = (value: unknown): number | undefined => {
   return Number.isFinite(at) ? at : undefined
 }
 
-/** A date in 6ch: `MM-DD` this year, the year otherwise; empty when unreadable. */
-export function shortDate(value: unknown, now: Date = new Date()): string {
+/**
+ * A date in 6ch: `MM-DD` this year, the year otherwise; empty when unreadable. Both the date and "this year" are read
+ * in `zone`, the zone the page draws in (`SPC o t`, data/zone.ts) when left out.
+ */
+export function shortDate(value: unknown, now: Date = new Date(), zone: string | undefined = zoneNow()): string {
   const at = time(value)
   if (at === undefined) return ""
-  const date = new Date(at)
-  if (date.getFullYear() !== now.getFullYear()) return String(date.getFullYear())
-  return `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
+  const date = partsIn(at, zone)
+  if (date.year !== partsIn(now.getTime(), zone).year) return String(date.year)
+  return `${String(date.month).padStart(2, "0")}-${String(date.day).padStart(2, "0")}`
 }
 
 /** The four columns moai draws in their own colour; any other is `other`. */

@@ -18,6 +18,7 @@ import {
   loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
+import { effectiveZone, useZone } from './data/zone.js'
 import { COPY, copyFor } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
@@ -48,6 +49,17 @@ async function start(): Promise<void> {
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the
   // page use it, else this session only (data/memory.ts); reading `window.localStorage` itself can throw, hence the getter.
   remember(store, createMemory(() => window.localStorage))
+  // Every date is drawn in the zone picked here (`SPC o t`), else the TUI's, else the browser's (data/zone.ts). Set
+  // before any view draws, and before the shell (subscribed after this) draws again on a change.
+  let zoneDrawn = ''
+  const followZone = (state: State) => {
+    const zone = effectiveZone(state.zone, state.boot?.timezone)
+    if (zone === zoneDrawn) return
+    zoneDrawn = zone
+    useZone(zone)
+  }
+  followZone(store.getState())
+  store.subscribe(followZone)
   /** What the boot gives the page: the words, how a person is named, the columns. The language stays the one drawn. */
   function useBoot(boot: Boot): void {
     useVocabulary(boot)
