@@ -6,7 +6,7 @@
  * The page reads one project: its address's `?project=<path>` (a registered one, moai-o14f), else the server's own
  * tracker. Every call names it (data/client.ts withProject); another project is another page (data/projects.ts).
  */
-import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch } from './data/client.js'
+import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch, type Outcome } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
@@ -15,11 +15,11 @@ import { isUnread, readMarks } from './data/read.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
-  loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
+  archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
 import { effectiveZone, useZone } from './data/zone.js'
-import { COPY, copyFor } from './i18n/index.js'
+import { copyFor, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
 import { listLines, narrow } from './view/list-model.js'
@@ -43,7 +43,7 @@ async function start(): Promise<void> {
   let booted = await loadBoot(fetcher)
   const language = booted.ok ? booted.value.lang : navigator.language || 'en'
   // The page says the language it is drawn in: one it does not carry (es) is drawn, and named, in English.
-  document.documentElement.lang = Object.hasOwn(COPY, language.split('-')[0]!.toLowerCase()) ? language : 'en'
+  document.documentElement.lang = speaks(language) ? language : 'en'
   const copy = copyFor(language)
   const store = createStore()
   // The last tab and the detail's place come back before anything is drawn. localStorage when the browser lets the
@@ -119,6 +119,9 @@ async function start(): Promise<void> {
     return lines.flatMap((line) => (line.kind === 'row' ? [line.key] : []))
   }
 
+  /** A read that did not take: `false` when a person cancelled it, `'failed'` when it was answered with a failure (data/refresh.ts backs off). */
+  const failure = (problem: Outcome): false | 'failed' => (problem.kind === 'cancelled' ? false : 'failed')
+
   /** Loads so far: only the latest one's answers count. */
   let loads = 0
   /** The load the clock started on its own, or 0: its reads run without the activity line. */
@@ -128,7 +131,7 @@ async function start(): Promise<void> {
    * Reads the board. False when the read did not take (a refusal, a cancel, the boot still missing): data/refresh.ts
    * then leaves the stamp unseen and reads again on its next look.
    */
-  async function loadBoard(automatic = false): Promise<boolean> {
+  async function loadBoard(automatic = false): Promise<boolean | 'failed'> {
     const load = ++loads
     quietLoad = automatic ? load : 0
     if (!booted.ok) {
@@ -138,7 +141,7 @@ async function start(): Promise<void> {
       if (load !== loads) return true
       if (!again.ok) {
         store.dispatch({ type: 'board-failed', problem: again.outcome })
-        return false
+        return failure(again.outcome)
       }
       booted = again
       useBoot(again.value)
@@ -151,15 +154,16 @@ async function start(): Promise<void> {
     const { sort, view } = store.getState()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load)
-    const counting = loadGroups(client, PRIORITY.list, load)
+    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived)
+    const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
     const [loaded, placed] = await Promise.all([listing, placing])
     if (load !== loads) return true
     if (!loaded.ok || !placed.ok) {
-      store.dispatch({ type: 'board-failed', problem: loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome })
-      return false
+      const problem = loaded.ok ? (placed as Extract<typeof placed, { ok: false }>).outcome : loaded.outcome
+      store.dispatch({ type: 'board-failed', problem })
+      return failure(problem)
     }
     const { rows, notes } = loaded.value
     const before = store.getState()
@@ -179,8 +183,9 @@ async function start(): Promise<void> {
     if (shown && wasListed && indexOf(state)?.find(shown.id) === undefined) store.dispatch({ type: 'detail-closed' })
     // The tracker changed: the detail on screen is read again too, in place (its pane, scroll and folds stay).
     else if (shown && automatic) void rereadDetail(shown.id, load)
-    // Archived rows shown but not read yet: turned on before the rows were there, or the last read failed.
-    if (state.view.showArchived && archiveRunning === null && state.archive === null) void loadArchive()
+    // Archived rows shown but not read yet: turned on before the rows were there, or the last read failed. Only for a read
+    // that asked for the archive's lines (archiveDue): one that began before `SPC v o` has none, and the follow-up read below loads it.
+    if (archiveDue(view.showArchived, state.view.showArchived, archiveRunning !== null, state.archive !== null)) void loadArchive()
     // What the filter and the search find moves with the rows: asked again for the rows just read.
     void ask(true)
     // Counts that come later go on this board only: a later load's board has its own (store 'groups'). Counts that
@@ -192,9 +197,9 @@ async function start(): Promise<void> {
     }
     // The order changed while this read ran: the refresh it asked for joined this one (data/refresh.ts), which read
     // the tree in the order before. Read it again in the order on screen.
-    // So does the worktree overlay turned while it ran.
+    // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
     const after = store.getState()
-    if (after.sort !== sort || after.view.worktree !== view.worktree) setTimeout(() => void refresher.refresh(), 0)
+    if (after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
     return true
   }
 
@@ -263,8 +268,12 @@ async function start(): Promise<void> {
   }
   store.subscribe((state, previous) => {
     if (state.view.showArchived === previous.view.showArchived) return
-    if (state.view.showArchived) void loadArchive()
-    else {
+    if (state.view.showArchived) {
+      // The tree is asked for the archive's lines only while archived rows are shown (data/source.ts loadTree), so it is
+      // read again; the read then loads the archive's rows (loadBoard), once the lines that place them are there. Before
+      // the board is there the first read does both.
+      if (state.board.value) void refresher.refresh()
+    } else {
       // Turned off: a read still running is not wanted, and the next turn-on reads the archive afresh.
       archiving++
       store.dispatch({ type: 'archive', rows: null })
@@ -281,7 +290,9 @@ async function start(): Promise<void> {
     const abort = new AbortController()
     const limit = setTimeout(() => abort.abort(), STAMP_LIMIT_MS)
     try {
-      const answer = await fetcher('/api/stamp', { signal: abort.signal, headers: { Accept: 'application/json' } })
+      // With the overlay on the stamp also folds the other worktrees' snapshots (`/api/stamp?worktree=1`): a write there
+      // changes what the overlaid list says, so the page must look again within the poll. Off, it stays as it was.
+      const answer = await fetcher(store.getState().view.worktree ? '/api/stamp?worktree=1' : '/api/stamp', { signal: abort.signal, headers: { Accept: 'application/json' } })
       const body = JSON.parse(await answer.text()) as { stamp?: unknown }
       return answer.status === 200 && typeof body.stamp === 'string' ? body.stamp : `refused-${++refused}`
     } catch (error) {
@@ -290,7 +301,7 @@ async function start(): Promise<void> {
       clearTimeout(limit)
     }
   }
-  const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached) })
+  const refresher = createRefresher({ load: ({ automatic }) => loadBoard(automatic), stamp, onReach: (reached) => shell.offline(!reached), onBackoff: (on) => shell.backoff(on) })
 
   let choice = 0
   async function choose(id: string) {
@@ -300,7 +311,7 @@ async function start(): Promise<void> {
     const held = indexOf(store.getState())?.find(id) !== undefined
     store.dispatch({ type: 'cursor', id })
     store.dispatch({ type: 'detail-loading', id })
-    const loaded = await loadDetail(client, id)
+    const loaded = await loadDetail(client, id, { worktree: store.getState().view.worktree })
     // A later choice wins: its own answer settles the detail.
     if (mine !== choice) return
     const now = store.getState()
@@ -320,7 +331,7 @@ async function start(): Promise<void> {
   async function rereadDetail(id: string, epoch: number): Promise<void> {
     const mine = choice
     const turn = ++rereads
-    const loaded = await loadDetail(client, id, { epoch })
+    const loaded = await loadDetail(client, id, { epoch, worktree: store.getState().view.worktree })
     if (!loaded.ok || mine !== choice || turn !== rereads || store.getState().shown.value?.id !== id) return
     store.dispatch({ type: 'detail-loaded', data: { id, row: loaded.value } })
   }
@@ -338,11 +349,11 @@ async function start(): Promise<void> {
       refresher.refresh({ fresh: true }),
       shown && isUnread(shown.row) && written.has(shown.id) ? rereadDetail(shown.id, loads + 1) : undefined,
     ])
-  })
+  }, () => store.getState().view.worktree)
 
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
   function said(loaded: Extract<Loaded<unknown>, { ok: false }>): string {
-    const parts = describe(loaded.outcome, copy, document)?.parts ?? [copy.failed]
+    const parts = describe(loaded.outcome, copy)?.parts ?? [copy.failed]
     return parts.map((part) => (typeof part === 'string' ? part : part.textContent ?? '')).join('')
   }
 
@@ -363,7 +374,7 @@ async function start(): Promise<void> {
     const quiet = quietLoad !== 0 && quietLoad === loads
     const requests = client.requests().filter((request) => !(quiet && request.priority === PRIORITY.list))
     const running = requests.some((request) => request.phase === 'running')
-    return { phase: running ? 'running' : 'idle', cancellable: running }
+    return { phase: running ? 'running' : 'idle', cancellable: requests.some((request) => request.phase === 'running' && request.cancellable) }
   }
 
   const root = document.getElementById('moai-app') ?? document.body

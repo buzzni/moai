@@ -26,3 +26,11 @@
 .m-zone-item { min-height: 28px; padding: 4px 8px; cursor: pointer; }
 .m-zone-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-zone-note[hidden] { display: none; }
+
+/* Placed here, not by a `style` attribute: the CSP's style-src holds no 'unsafe-inline'. */
+.m-filter { position: relative; flex: 1 1 200px; }
+.m-sort { position: relative; }
+.m-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px; }
+.m-filter .m-hints { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; }
+.m-sort > .m-sort-pop { position: absolute; top: 100%; right: 0; z-index: 20; }
+.m-sort > .m-sort-pop .m-menu-item { gap: 4px; }

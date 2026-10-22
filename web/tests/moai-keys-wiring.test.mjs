@@ -10,7 +10,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 const { createStore } = await panelModule('store.ts')
 const { IssueIndex } = await panelModule('data/index.ts')
 const { treeOf } = await import('./moai-tree-helper.mjs')
-const { copyFor } = await panelModule('i18n/index.ts')
+const { copyFor, fill } = await panelModule('i18n/index.ts')
 const { mountShell } = await panelModule('view/shell.ts')
 const { PANES } = await panelModule('view/panes.ts')
 const { wireKeys, keyContext, NOT_WIRED } = await panelModule('keys/wiring.ts')
@@ -845,7 +845,7 @@ test('keys: r marks the cursor row read, SPC m a everything, SPC m g the group t
   panel.press('r')
   await ticks()
   assert.deepEqual(calls.at(-1), ['one', 'e1.b'])
-  assert.equal(panel.$('.moai-result').textContent, en.moaiError('the read file is held'))
+  assert.equal(panel.$('.moai-result').textContent, fill(en.moaiError, { message: 'the read file is held' }))
   // A later mark that goes through takes that line away: nothing else writes it.
   refuse = null
   panel.press('r')

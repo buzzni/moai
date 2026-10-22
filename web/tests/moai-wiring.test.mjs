@@ -9,7 +9,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 
 const { createStore, matchKey } = await panelModule('store.ts')
 const { IssueIndex } = await panelModule('data/index.ts')
-const { copyFor } = await panelModule('i18n/index.ts')
+const { copyFor, fill } = await panelModule('i18n/index.ts')
 const { mountShell } = await panelModule('view/shell.ts')
 const { PANES } = await panelModule('view/panes.ts')
 const { mountWiki } = await panelModule('view/wiki.ts')
@@ -124,7 +124,7 @@ test('toolbar: the filter narrows the rows on Enter, a chip removal at once; the
   // The filter follows the view's hiding: r3 (priority 2, archived) stays hidden; the list note counts it.
   assert.deepEqual(panel.listed(), ['r2'])
   assert.equal(panel.$('.moai-list-note').hidden, false)
-  assert.equal(panel.$('.moai-list-note span').textContent, en.list.hiddenCount(1))
+  assert.equal(panel.$('.moai-list-note span').textContent, fill(en.list.hiddenCount, { n: 1 }))
   assert.match(panel.$('.m-crumbs-badges').textContent, /priority=2/)
   assert.equal(panel.$('.m-toolbar-slot .m-filter input'), filter, 'the input was not rebuilt')
   // Esc in the input is the prompt's cancel (keybindings.md 3.7), one key owner: what was typed since goes, the

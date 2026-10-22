@@ -32,7 +32,7 @@ fn sources() -> String {
     let web = at_root("web");
     let mut paths = Vec::new();
     walk(&web, "panel/", &mut paths);
-    paths.extend(["build.mjs", "package.json", "package-lock.json"].map(String::from));
+    paths.extend(["build.mjs", "i18n-bundles.mjs", "package.json", "package-lock.json"].map(String::from));
     paths.sort();
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let mut fold = |bytes: &[u8]| {
@@ -45,6 +45,26 @@ fn sources() -> String {
         fold(&[0]);
         fold(&std::fs::read(web.join(path)).unwrap());
         fold(&[0]);
+    }
+    // 페이지의 말은 `i18n/*.json` 에서 온다 — 그 파일의 `page.` 키만 app.js 에 들어가므로 그것만 접는다(CLI 자신의 말이 바뀌어도
+    // 번들은 안 낡는다). 언어 파일마다 이름 차례로 (파일 이름, 0x00, [키, 0x00, 값, 0x00]…) — `web/build.mjs` 의 `sources` 와 같다.
+    let mut codes: Vec<String> = std::fs::read_dir(at_root("i18n"))
+        .unwrap()
+        .filter_map(|e| e.unwrap().file_name().into_string().ok())
+        .filter_map(|name| name.strip_suffix(".json").map(String::from))
+        .collect();
+    codes.sort();
+    for code in &codes {
+        fold(format!("i18n/{code}.json").as_bytes());
+        fold(&[0]);
+        let all: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(&std::fs::read_to_string(at_root("i18n").join(format!("{code}.json"))).unwrap()).unwrap();
+        for (key, value) in all.iter().filter(|(k, _)| k.starts_with("page.")) {
+            fold(key.as_bytes());
+            fold(&[0]);
+            fold(value.as_bytes());
+            fold(&[0]);
+        }
     }
     format!("fnv1a64 {hash:016x}\n")
 }
@@ -115,6 +135,30 @@ fn the_web_bundle_writes_text_not_markup() {
     for word in ["innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"] {
         assert!(!js.contains(word), "app.js 에 {word} 가 있다 — 글은 textContent 로만 넣는다");
     }
+}
+
+/// 서버의 CSP 는 `style-src 'self'` 다(moai-m4ez.h2o). 인라인 스타일을 만드는 길 — 마크업의 `style` 속성,
+/// `setAttribute("style", …)`, `style.cssText`(속성을 통째로 갈아 쓴다) — 이 번들에 다시 서면 그 자리가 조용히 안 그려진다.
+/// CSSOM 의 `el.style.x = …`·`style.setProperty` 는 CSP 가 막지 않으니 걸지 않는다.
+#[test]
+fn the_web_bundle_sets_no_inline_style_attribute() {
+    let js = dist("app.js");
+    for word in ["cssText", "setAttribute(\"style\"", "setAttribute('style'", "style=\"", "style='"] {
+        assert!(!js.contains(word), "app.js 에 {word} 가 있다 — CSP 가 style 속성을 막는다. 클래스나 CSSOM 으로 넣는다");
+    }
+    // `el(doc, tag, { …, style: "…" })` — 속성 모음의 `style:` 키. 꼴은 `style:"`·`style:` + 백틱·`style:` + 변수.
+    for (i, _) in js.match_indices("style:") {
+        let before = js[..i].chars().last().unwrap_or(' ');
+        assert!(
+            before.is_ascii_alphanumeric() || before == '_' || before == '.',
+            "app.js 에 `style:` 키가 있다(…{}) — el() 의 style 속성은 CSP 가 막는다",
+            &js[i.saturating_sub(40)..(i + 40).min(js.len())]
+        );
+    }
+    let html = dist("index.html").to_ascii_lowercase();
+    assert!(!html.contains(" style=") && !html.contains("<style"), "index.html 에 인라인 스타일이 있다");
+    let css = dist("app.css");
+    assert!(!css.contains("@import"), "app.css 가 다른 시트를 부른다 — style-src 'self' 밖일 수 있다");
 }
 
 #[test]

@@ -74,5 +74,8 @@ export const glintTime = (text: string): number => (cells(text) + BAND + REST) *
 
 /** The title's words in the band; the caller keeps chips and marks outside it, so they keep their own colour. */
 export function glint(doc: Document, text: string, ...content: Array<Node | string>): HTMLElement {
-  return el(doc, 'span', { class: 'm-glint', style: `--glint-time: ${glintTime(text)}ms;` }, ...(content.length ? content : [text]))
+  const band = el(doc, 'span', { class: 'm-glint' }, ...(content.length ? content : [text]))
+  // A custom property through CSSOM: the CSP's style-src lets it through where a `style` attribute it would not.
+  band.style.setProperty('--glint-time', `${glintTime(text)}ms`)
+  return band
 }

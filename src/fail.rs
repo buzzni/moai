@@ -37,6 +37,9 @@ pub mod code {
     pub const FORBIDDEN_ORIGIN: &str = "forbidden_origin";
     /// `project=` 가 걸어 둔 프로젝트가 아니다 — 페이지는 걸어 둔 것만 읽는다.
     pub const NOT_REGISTERED: &str = "not_registered";
+    /// `project=` 가 걸어 둔 자리인데 제 `.moai` 가 없다(`moai project add` 는 받는 init 전 디렉터리) — 위로 찾아 부모의
+    /// 트래커를 제 것으로 읽지 않는다(moai-m4ez.4zq).
+    pub const NOT_A_PROJECT: &str = "not_a_project";
     pub const METHOD_NOT_ALLOWED: &str = "method_not_allowed";
     pub const BUSY: &str = "busy";
     pub const TIMEOUT: &str = "timeout";

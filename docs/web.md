@@ -71,9 +71,13 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   turns it around. The capital letter adds the field to the end of the order. `SPC s e`
   opens the sort editor
 - **View** (`SPC v`) shows or hides deferred work (`l`), backlog items (`b`) and
-  the archive (`o`); `w` overlays what the other worktrees changed, as
-  `moai show --worktree` does (on when the page opens); `a` shows everything but
-  the archive, `1`~`9` toggle the nth status column
+  the archive (`o`; the page asks for the archive's rows, and for its lines in
+  the tree, only while it is shown); `w` overlays what the other worktrees changed, as
+  `moai show --worktree` does (on when the page opens); the overlay covers the
+  list, the tree that places each row under its epic, the stamp the page follows,
+  the milestone and epic counts (`moai status --worktree`), the read marks and the detail pane, so a row only a sibling worktree holds
+  stands under its epic like any other and opens like one; `a` shows everything but the archive, `1`~`9` toggle the
+  nth status column
 - **Column** (`SPC c`) picks what a list row carries: `i` id, `p` priority,
   `a` assignee, `c` created, `u` updated, `n` counts, `t` tags, `e` epic,
   `h` names
@@ -105,6 +109,10 @@ The one exception is read marks. `r` marks the issue under the cursor read,
 same as `moai read`, which keeps them in a file of your own beside your user
 config and never in the tracker. The server takes that write only from the page
 itself: a request another site sends is refused.
+With the worktree overlay on (`SPC v w`), the marks are made on the version the
+overlay shows, as `moai read --worktree` does: a row only another worktree holds
+can be marked, and a row another worktree changed later is marked at that later
+version, so its NEW goes away. Nothing is written to the other worktree.
 
 Nothing is stored for the page either: each list is read again when you ask.
 Search, filters and sort are moai's own — the server hands them to `moai show`
@@ -119,7 +127,9 @@ window — the page notices and reads again. It asks the server for a short
 stamp, folded from the files its answers come from (the tracker's snapshot,
 journal, archive and config, plus your own user config and the read marks kept
 beside it, which say what is new to you), and reloads the list only when the
-stamp has changed. It asks every two seconds while the tab is visible, and not at
+stamp has changed. With the worktree overlay on, the stamp also folds the other
+worktrees' snapshots, so a write in a sibling worktree moves the page within
+those two seconds; with it off, a sibling's writes leave the page alone. It asks every two seconds while the tab is visible, and not at
 all while it is hidden; shown again, it asks at once. The issue open in the
 detail is read again with it, and the cursor, the folded groups and what you are
 typing stay where they were. A tracker nobody touches costs one tiny question and
@@ -157,8 +167,9 @@ comes from the start. The rest come from the server while it runs:
 | `forbidden_host` | The `Host` header was not `localhost` or an IP address |
 | `forbidden_origin` | A read mark sent from anywhere but this page |
 | `not_registered` | `?project=` names a directory that is not a registered project |
-| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read |
-| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take |
+| `not_a_project` | `?project=` names a registered directory that has no `.moai` of its own (`moai init` it); the server does not read a parent's tracker in its place |
+| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read; the `Allow` header names the method the path takes (`POST` on the read-mark paths, `GET` elsewhere) |
+| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`) |
 | `not_found` | No such path |
 | `busy` | Too many requests at once; try again |
 | `timeout` | The child `moai` did not answer in time |
@@ -247,6 +258,7 @@ once and the keys reach it.
 | `J` `K` | Move the field later / earlier in the order |
 | `SPC` | Add / remove the field |
 | `d` | Flip direction |
+| `D` | Save the order as the default: what an emptied order returns to, kept in this browser |
 | `Enter` / `Esc` | Apply / cancel |
 
 **Wiki tab**

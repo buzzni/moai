@@ -761,6 +761,9 @@ BACKLOG
   then what is in it, with the same filters and order as the one-level
   listing. Each row carries home, the --path handles from the root down to the
   directory it stands in ([] at the root, [none] or [lost] inside a basket).
+  --no-archive leaves out the rows that moai show --all hides as archived, and
+  a folder stays when a live row stands under it. The archive is part of the
+  listing otherwise.
 
     moai tui --path <milestone> -g parser --all --json
     moai tui --sort updated --json
@@ -1815,7 +1818,8 @@ fn sort_fields(raw: &str) -> Result<SortFields, String> {
     crate::query::parse_order(raw).map(SortFields).map_err(|e| e.to_string())
 }
 
-/// `status`·`ready`·`show` 가 함께 받는다. **전역 플래그로 두지 않는다** — 쓰는
+/// `status`·`ready`·`show` 가 함께 받고, `read` 도 받는다 — `read` 는 트래커가 아니라 읽음 파일에 쓰고, 겹친
+/// 판에서 id 와 `updated_at` 을 찾을 뿐이다(moai-m4ez.gcp). **전역 플래그로 두지 않는다** — 트래커를 쓰는
 /// 명령(`mv`·`edit`)에 붙으면 겹친 화면을 보고 쓴다고 믿게 되는데, 쓰기는 언제나
 /// 제 워크트리 파일에만 간다.
 #[derive(Args, Debug, Default, Clone, Copy)]
@@ -2022,6 +2026,11 @@ pub struct ReadArgs {
     /// That group's members and what is under them
     #[arg(short, long, value_name = "epic")]
     pub epic: Option<String>,
+
+    // 읽음으로 적는 것은 겹쳐 보기가 보이는 그 판의 `updated_at` 이다(moai-m4ez.gcp) — 옆 워크트리에만 있는 줄도
+    // 적고, 옆이 더 늦게 고친 줄은 그 늦은 `updated_at` 을 적는다. 옆 워크트리에는 아무것도 안 쓴다.
+    #[command(flatten)]
+    pub worktree: WorktreeArg,
 }
 
 #[derive(Args, Debug)]
@@ -2116,6 +2125,20 @@ pub struct TuiArgs {
     /// With --json, list every row below, with its home
     #[arg(long)]
     pub deep: bool,
+
+    // **`--json` 만 켠다** — 화면은 늘 옆 워크트리를 겹쳐 연다(`SPC v w` 로 끈다). 기계로 읽는 쪽의 모양은
+    // `status`·`ready`·`show` 처럼 `--worktree` 를 줘야 겹친다(moai-m4ez.gcp). `shaped` 에 안 든다 — 화면에서는 받아도
+    // 이미 그렇다.
+    /// With --json, overlay other worktrees' rows
+    #[arg(long)]
+    pub worktree: bool,
+
+    // **`--json` 의 목록에서 아카이브를 뺀다**(moai-m4ez.4zq) — `show --all` 이 숨기는 줄(`Where::archived`)이다. 웹 페이지가
+    // 아카이브를 안 보이는 동안 쓰기마다 읽는 `/api/tree` 가 3천 줄(689KB) 가운데 95% 를 그 줄로 채웠다. 폴더는 밑에 걸린
+    // 산 줄이 있으면 서니, 아카이브에 든 에픽 밑의 되살린 멤버는 제 자리에 선다. 플래그가 없으면 전처럼 다 낸다.
+    /// With --json, leave out the archive
+    #[arg(long)]
+    pub no_archive: bool,
 
     // **`--json` 의 목록만 거르고 늘어놓는다**(moai-wk7i.5wx) — 화면은 `SPC f`·`SPC s` 가 한다. 말은 `show` 의 것이다.
     #[command(flatten)]

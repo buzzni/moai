@@ -46,6 +46,9 @@ pub struct Profile {
     pub route: &'static str,
     pub head: &'static [&'static str],
     pub params: &'static [Param],
+    /// 아카이브를 **달라고 한 때만** 싣는 끝점이다(`/api/tree`, moai-m4ez.4zq) — 다른 끝점은 `archived=1` 을 줘야 싣고
+    /// 이쪽도 같은 말이지만, 자식의 기본이 반대라(`tui --json` 은 다 낸다) 안 줬을 때 `--no-archive` 를 얹는다.
+    pub without_archive: bool,
 }
 
 const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields];
@@ -53,17 +56,22 @@ const LIST: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields
 const ROWS: &[Param] = &[Param::Archived, Param::Filter, Param::Q, Param::Fields, Param::Worktree];
 
 /// 자식을 띄우는 끝점들 — **쿼리를 재는 자가 하나다**([`argv`]). 받는 이름이 없는 끝점도 여기 서야 거기 붙인
-/// 쿼리가 거절된다(`/api/status?worktree=1` 을 말없이 맨 보드로 답하던 판이 있었다). 경로에 값이 드는
+/// 쿼리가 거절된다(`/api/wiki?worktree=1` 을 말없이 맨 목록으로 답하던 판이 있었다). 경로에 값이 드는
 /// `/api/issue/<id>`·`/api/wiki/<slug>` 만 [`argv_of`] 가 따로 짓는다.
 pub const PROFILES: &[Profile] = &[
-    Profile { route: "/api/status", head: &["status"], params: &[] },
-    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS },
-    Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST },
-    Profile { route: "/api/tree", head: &["tui", "--deep"], params: &[Param::Sort, Param::Reverse] },
-    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[] },
+    Profile { route: "/api/status", head: &["status"], params: &[Param::Worktree], without_archive: false },
+    Profile { route: "/api/rows", head: &["show", "--all"], params: ROWS, without_archive: false },
+    Profile { route: "/api/backlog", head: &["backlog", "show", "--all"], params: LIST, without_archive: false },
+    Profile {
+        route: "/api/tree",
+        head: &["tui", "--deep"],
+        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived],
+        without_archive: true,
+    },
+    Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], without_archive: false },
     // 걸어 둔 프로젝트들 — 사용자 설정을 읽으니 어느 자리에서 돌아도 같은 답이다. 페이지는 그 `path` 를
     // `project=` 로 되돌려 보내 그 프로젝트를 읽는다([`super::project_of`]).
-    Profile { route: "/api/projects", head: &["project", "ls"], params: &[] },
+    Profile { route: "/api/projects", head: &["project", "ls"], params: &[], without_archive: false },
 ];
 
 /// 거르개 줄 하나의 상한(바이트) — 줄을 나눠 여러 `--filter` 가 된다.
@@ -110,18 +118,30 @@ pub fn argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<Stri
     // 가 내는 낱말은 파일 자리라 `/`(디렉터리 밑의 쪽)·한글·빈칸이 들고, `wiki show` 는 그것을 걸어 둔 쪽들에서 찾을
     // 뿐이라 자리를 벗어날 길이 없다. id 의 모양으로 재던 판은 그 쪽들을 400 으로 막았다.
     type Check = fn(&str) -> Result<(), Bad>;
-    let (head, rest, check): (&[&str], &str, Check) =
+    let (head, rest, check, overlaid): (&[&str], &str, Check, bool) =
         match (path.strip_prefix("/api/issue/"), path.strip_prefix("/api/wiki/")) {
-            (Some(id), _) => (&["show", "--"], id, issue_id),
-            (_, Some(slug)) => (&["wiki", "show", "--"], slug, |slug| shape("slug", slug, VALUE_MAX)),
+            (Some(id), _) => (&["show"], id, issue_id, true),
+            (_, Some(slug)) => (&["wiki", "show"], slug, |slug| shape("slug", slug, VALUE_MAX), false),
             _ => return None,
         };
-    Some(none_of(query).and_then(|()| {
-        check(rest)?;
-        let mut out: Vec<String> = head.iter().map(|s| s.to_string()).collect();
-        out.push(rest.to_string());
-        Ok(out)
-    }))
+    // **한 줄의 상세도 겹쳐 보기를 알아야 한다**(moai-m4ez.yb1) — 옆 워크트리에만 있는 줄은 `show -- <id>` 가 "없다" 로 답해,
+    // 목록과 트리가 그린 줄을 눌러도 상세가 안 열렸다. 켠 페이지만 `worktree=1` 을 보낸다. 위키는 겹칠 것이 없어 안 받는다.
+    Some(
+        match overlaid {
+            true => overlay_of(query),
+            false => none_of(query).map(|()| false),
+        }
+        .and_then(|on| {
+            check(rest)?;
+            let mut out: Vec<String> = head.iter().map(|s| s.to_string()).collect();
+            if on {
+                out.push("--worktree".to_string());
+            }
+            out.push("--".to_string());
+            out.push(rest.to_string());
+            Ok(out)
+        }),
+    )
 }
 
 /// 걸어 둔 프로젝트의 자리 하나의 상한(바이트) — 경로라 다른 값보다 넉넉하다.
@@ -153,10 +173,38 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
         (_, _, Some(id)) => issue_id(id).map(|()| vec!["read".to_string(), format!("--epic={id}")]),
         _ => return None,
     };
-    Some(none_of(query).and(built))
+    // **겹쳐 보기를 켠 페이지는 읽음도 그 판에서 적는다**(moai-m4ez.gcp) — 옆 워크트리에만 있는 줄도, 옆이 더 늦게 고친
+    // 줄도 보이는 그 `updated_at` 으로 적혀야 [NEW] 가 내린다. `--` 앞에 놓는다(뒤는 값 하나만 선다).
+    Some(overlay_of(query).and_then(|on| {
+        let mut args = built?;
+        if on {
+            args.insert(1, "--worktree".to_string());
+        }
+        Ok(args)
+    }))
 }
 
-/// 이 끝점은 쿼리를 안 받는다 — 자식 없이 답하는 `/api/boot`·`/api/stamp` 도 이것으로 잰다.
+/// 쿼리가 `worktree=1` 하나뿐이거나 비었는가 — 받는 이름이 이것뿐인 끝점(`/api/stamp`·`/api/issue/<id>`·읽음 길)이
+/// 쓴다. 다른 이름은 [`none_of`] 와 같이 거절한다.
+pub fn overlay_of(query: &[(String, String)]) -> Result<bool, Bad> {
+    let mut on = false;
+    for (name, value) in query {
+        if name != "worktree" {
+            return Err(Bad::Unknown(name.clone()));
+        }
+        if on {
+            return Err(Bad::Twice(name.clone()));
+        }
+        if value != "1" {
+            return Err(Bad::Shape(name.clone()));
+        }
+        on = true;
+    }
+    Ok(on)
+}
+
+/// 이 끝점은 쿼리를 안 받는다 — 자식 없이 답하는 `/api/boot` 도 이것으로 잰다(`/api/stamp` 는 `worktree=1` 을 받아
+/// [`overlay_of`] 로 잰다).
 pub fn none_of(query: &[(String, String)]) -> Result<(), Bad> {
     match query.first() {
         Some((n, _)) => Err(Bad::Unknown(n.clone())),
@@ -211,7 +259,10 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
                 if value != "1" {
                     return Err(Bad::Shape(name.clone()));
                 }
-                out.push(format!("--{}", p.name()));
+                // 아카이브를 기본으로 싣는 자식에게는 달라는 말이 따로 없다 — 안 줄 때만 뺀다(아래).
+                if !(p == Param::Archived && profile.without_archive) {
+                    out.push(format!("--{}", p.name()));
+                }
             }
             Param::Filter => {
                 shape(name, value, FILTER_MAX)?;
@@ -230,9 +281,17 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
             }
             Param::Sort => {
                 shape(name, value, VALUE_MAX)?;
+                // **차례의 말은 moai 의 것이다**(`query::parse_order`) — 모르는 낱말을 자식에게 넘기면 clap 이 `code` 없는
+                // 글로 거절해 페이지가 갈래를 못 읽었다(moai-m4ez.4zq). 여기서 재서 `bad_input` 으로 같은 길에 세운다.
+                if crate::query::parse_order(value).is_err() {
+                    return Err(Bad::Shape(name.clone()));
+                }
                 out.push(format!("--sort={value}"));
             }
         }
+    }
+    if profile.without_archive && !query.iter().any(|(n, _)| n == Param::Archived.name()) {
+        out.push("--no-archive".to_string());
     }
     if profile.params.contains(&Param::Fields) {
         out.push(format!("--fields={}", fields.unwrap_or(ROW_FIELDS)));
@@ -248,7 +307,7 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
 /// 를 친 뒤에도 표식이 그대로라, 표식이 움직일 때만 다시 읽는 페이지가 [NEW] 를 내내 세웠다.
 ///
 /// 셈은 [`crate::text::fnv1a64_from`] 이다 — 상수와 그 까닭(`DefaultHasher` 를 안 쓴다)은 거기 한 벌이다.
-pub fn stamp(cwd: &std::path::Path, lang: Lang) -> crate::fail::R<String> {
+pub fn stamp(cwd: &std::path::Path, lang: Lang, overlay: bool) -> crate::fail::R<String> {
     let repo = crate::store::Repo::find_from(cwd, || lang)?
         .ok_or_else(|| crate::fail::Fail::new(say(lang, "refuse.not_a_repo")))?;
     let mut marks = vec![(repo.issues_path(), crate::store::stamp(&repo.issues_path()))];
@@ -256,6 +315,12 @@ pub fn stamp(cwd: &std::path::Path, lang: Lang) -> crate::fail::R<String> {
     marks.extend(crate::archive::marks(&repo.root)?);
     let config = repo.dir().join("config.toml");
     marks.push((config.clone(), crate::store::stamp(&config)));
+    // **겹쳐 보기를 켠 페이지만** 옆 워크트리의 스냅샷도 접는다(moai-m4ez.gcp) — 옆의 쓰기가 겹친 목록의 답을 바꾸기
+    // 때문이다. 탐색기가 자리 판정을 지켜보려고 재는 그 표(`worktree::place_marks`: 워크트리 목록·가지 HEAD·옆 스냅샷·
+    // `.git`)를 그대로 쓴다 — 읽기 전에 재는 `stat` 뿐이고 git 을 안 띄운다. 끄고 보는 페이지는 옆이 써도 안 움직인다.
+    if overlay {
+        marks.extend(crate::worktree::place_marks(&repo.root));
+    }
     if let Some(user) = crate::user_config::path() {
         let read = crate::read_marks::place_of(&user, &repo.root);
         let sheets = std::iter::once(read.at).chain(read.pending).chain(read.past);
@@ -308,7 +373,7 @@ mod tests {
     fn an_empty_query_is_the_bare_template() {
         assert_eq!(rows(&[]).unwrap(), with_fields(vec!["show", "--all"]));
         assert_eq!(argv_of("/api/backlog", &[]).unwrap().unwrap(), with_fields(vec!["backlog", "show", "--all"]));
-        assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep"]));
+        assert_eq!(argv_of("/api/tree", &[]).unwrap().unwrap(), strs(&["tui", "--deep", "--no-archive"]));
         assert_eq!(argv_of("/api/status", &[]).unwrap().unwrap(), strs(&["status"]));
         assert_eq!(argv_of("/api/wiki", &[]).unwrap().unwrap(), strs(&["wiki", "ls"]));
     }
@@ -333,7 +398,24 @@ mod tests {
         let v = rows(&[("archived", "1"), ("fields", "id")]).unwrap();
         assert_eq!(v, strs(&["show", "--all", "--archived", "--fields=id"]));
         let v = argv_of("/api/tree", &q(&[("sort", "title"), ("reverse", "1")])).unwrap().unwrap();
-        assert_eq!(v, strs(&["tui", "--deep", "--sort=title", "--reverse"]));
+        assert_eq!(v, strs(&["tui", "--deep", "--sort=title", "--reverse", "--no-archive"]));
+        // 아카이브를 보이는 페이지만 달라고 한다 — 안 보이는 동안 3천 줄의 95% 를 싣지 않는다(moai-m4ez.4zq).
+        let v = argv_of("/api/tree", &q(&[("archived", "1"), ("worktree", "1")])).unwrap().unwrap();
+        assert_eq!(v, strs(&["tui", "--deep", "--worktree"]));
+        assert!(matches!(argv_of("/api/tree", &q(&[("archived", "0")])).unwrap(), Err(Bad::Shape(_))));
+    }
+
+    /// **차례의 말은 자식을 띄우기 전에 잰다** — 모르는 필드·방향·겹침은 `bad_input` 이다(moai-m4ez.4zq). 전에는 clap 이
+    /// `code` 없는 글로 거절했다.
+    #[test]
+    fn a_sort_the_child_would_refuse_is_refused_here() {
+        let tree = |sort: &str| argv_of("/api/tree", &q(&[("sort", sort)])).unwrap();
+        for ok in ["title", "priority:desc", "priority:desc,title:asc", "updated"] {
+            assert!(tree(ok).is_ok(), "{ok}");
+        }
+        for bad in ["bogus", "priority:up", "priority,priority:desc", "title,", ",title", ":asc"] {
+            assert_eq!(tree(bad), Err(Bad::Shape("sort".into())), "{bad:?}");
+        }
     }
 
     #[test]
@@ -356,6 +438,17 @@ mod tests {
             assert!(matches!(r, Err(Bad::Shape(_))), "{bad:?}: {r:?}");
         }
         assert!(matches!(argv_of("/api/issue/moai-1abc", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
+        // 겹쳐 보기를 켠 페이지는 상세도 옆 워크트리를 본다(moai-m4ez.yb1) — `--` 앞에 놓는다. 위키는 겹칠 것이 없다.
+        assert_eq!(
+            argv_of("/api/issue/moai-1abc", &q(&[("worktree", "1")])).unwrap().unwrap(),
+            strs(&["show", "--worktree", "--", "moai-1abc"])
+        );
+        assert!(matches!(argv_of("/api/issue/moai-1abc", &q(&[("worktree", "0")])).unwrap(), Err(Bad::Shape(_))));
+        assert!(matches!(
+            argv_of("/api/issue/moai-1abc", &q(&[("worktree", "1"), ("worktree", "1")])).unwrap(),
+            Err(Bad::Twice(_))
+        ));
+        assert!(matches!(argv_of("/api/wiki/guide", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
         assert!(argv_of("/api/nope", &[]).is_none());
     }
 
@@ -382,9 +475,17 @@ mod tests {
         // 이 끝점이 안 받는 이름도 모르는 이름이다.
         assert!(matches!(rows(&[("sort", "title")]), Err(Bad::Unknown(_))));
         assert!(matches!(argv_of("/api/tree", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
+        assert_eq!(
+            argv_of("/api/tree", &q(&[("worktree", "1")])).unwrap().unwrap(),
+            strs(&["tui", "--deep", "--worktree", "--no-archive"])
+        );
         assert!(matches!(argv_of("/api/wiki", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
-        // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?worktree=1` 이 맨 보드로 답했다.
-        assert!(matches!(argv_of("/api/status", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
+        // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?archived=1` 이 맨 보드로 답했다.
+        assert!(matches!(argv_of("/api/wiki", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
+        assert!(matches!(argv_of("/api/status", &q(&[("archived", "1")])).unwrap(), Err(Bad::Unknown(_))));
+        // 상세의 롤업 막대·범례는 `/api/status` 에서 오고 n/n 글은 겹친 트리에서 온다 — 둘이 같은 판이어야 한다(moai-m4ez.u6a).
+        assert_eq!(argv_of("/api/status", &q(&[("worktree", "1")])).unwrap().unwrap(), strs(&["status", "--worktree"]));
+        assert_eq!(argv_of("/api/status", &[]).unwrap().unwrap(), strs(&["status"]));
         for v in ["true", "0", "", "2", "yes"] {
             assert!(matches!(rows(&[("archived", v)]), Err(Bad::Shape(_))), "{v:?}");
         }
@@ -409,6 +510,17 @@ mod tests {
             assert!(matches!(write_argv_of(bad, &[]), Some(Err(Bad::Shape(_)))), "{bad}");
         }
         assert!(matches!(write_argv_of("/api/read-all", &q(&[("x", "1")])), Some(Err(Bad::Unknown(_)))));
+        // 겹쳐 보기를 켠 페이지는 `--worktree` 를 `--` 앞에 실어 보낸다(moai-m4ez.gcp). 그 밖의 값은 거절한다.
+        let on = q(&[("worktree", "1")]);
+        let w = |path: &str, query: &[(String, String)]| write_argv_of(path, query).unwrap();
+        assert_eq!(w("/api/read/moai-1abc", &on), Ok(strs(&["read", "--worktree", "--", "moai-1abc"])));
+        assert_eq!(w("/api/read-all", &on), Ok(strs(&["read", "--worktree", "--all"])));
+        assert_eq!(w("/api/read-group/moai-1abc", &on), Ok(strs(&["read", "--worktree", "--epic=moai-1abc"])));
+        assert_eq!(w("/api/read-all", &q(&[("worktree", "0")])), Err(Bad::Shape("worktree".into())));
+        assert_eq!(w("/api/read-all", &q(&[("worktree", "1"), ("worktree", "1")])), Err(Bad::Twice("worktree".into())));
+        assert_eq!(overlay_of(&[]), Ok(false));
+        assert_eq!(overlay_of(&on), Ok(true));
+        assert!(matches!(overlay_of(&q(&[("archived", "1")])), Err(Bad::Unknown(_))));
         for none in ["/api/rows", "/api/status", "/api/readall", "/api/read"] {
             assert!(write_argv_of(none, &[]).is_none(), "{none}");
         }

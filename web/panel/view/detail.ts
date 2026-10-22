@@ -32,6 +32,7 @@ import { branchMark } from './branch.ts'
 import { newChip } from './unread.ts'
 import { highlight } from './toolbar.ts'
 import type { MountPane, PaneView, ViewContext } from './types.ts'
+import { fill } from '../i18n/index.ts'
 
 /** The milestone and epic counts per column the roll-up reads (main.ts reads them beside the rows). */
 type Groups = BoardData['groups']
@@ -41,77 +42,6 @@ export function renderBody(doc: Document, text: string): HTMLElement {
   const { root } = renderMarkdown(doc, text)
   root.classList.add('moai-detail-body')
   return root
-}
-
-const STYLE_ID = 'moai-detail-style'
-const STYLE = `
-.moai-detail { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 16px; font-size: 13px; }
-.moai-detail-head { display: flex; align-items: flex-start; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
-.moai-detail-headtext { flex: 1; min-width: 0; }
-.moai-detail-idline { display: flex; align-items: center; gap: 6px; color: var(--muted); font: 12px var(--mono); }
-.moai-detail-idline .moai-detail-glyph { position: relative; display: inline-block; width: 1.5ch; text-align: center; }
-.moai-detail-id { font-variant-numeric: tabular-nums; }
-.moai-detail-title { margin: 4px 0 8px; font-size: 16px; line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
-.moai-detail-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.moai-detail-fields {
-  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; padding: 10px 12px;
-  border-radius: var(--radius-card); background: var(--lane-bg);
-}
-.moai-detail-fields dt { color: var(--muted); font-size: 12px; line-height: 19px; }
-.moai-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
-.moai-detail-ids { margin: 6px 0 0; padding: 0; list-style: none; }
-.moai-detail-ids li { padding: 2px 0; overflow-wrap: anywhere; }
-.moai-detail-mark { display: inline-block; width: 1.2em; color: var(--muted); }
-.moai-detail-rollup { margin: 6px 0 4px; }
-.moai-detail-bar { display: flex; gap: 1px; height: 8px; border-radius: 4px; background: var(--lane-bg); box-shadow: inset 0 0 0 1px var(--border-soft); overflow: hidden; }
-.moai-detail-bar > span { flex: none; height: 100%; }
-.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status] { --dot: var(--border); }
-.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="done"] { --dot: var(--ok); }
-.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="review"] { --dot: var(--review); }
-.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="in_progress"] { --dot: var(--warn); }
-.moai-detail-bar > span { background: var(--dot); }
-.moai-detail-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; color: var(--muted); font-size: 12px; }
-.moai-detail-legend > span { display: inline-flex; align-items: center; gap: 5px; }
-.moai-detail-legend > span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--dot); }
-.moai-detail-body { overflow-wrap: anywhere; margin-top: 6px; }
-.moai-detail-raw { margin: 6px 0 0; padding: 10px 12px; border-radius: var(--radius-card); background: var(--lane-bg); white-space: pre-wrap; font-family: var(--mono, monospace); font-size: 12px; }
-/* A section's name, and a hairline from it to the right edge: the sections read apart without boxes. */
-.moai-detail h3, .moai-detail summary { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; font-weight: 600; color: var(--text); }
-.moai-detail h3::after, .moai-detail summary::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
-.moai-detail summary { cursor: pointer; list-style: none; }
-.moai-detail summary::-webkit-details-marker { display: none; }
-.moai-detail summary::before { content: "\\25B8"; color: var(--muted); font-size: 10px; transition: transform .15s; }
-.moai-detail details[open] > summary::before { transform: rotate(90deg); }
-.moai-detail-list { margin: 6px 0 0; padding: 0; list-style: none; }
-.moai-detail-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 0; overflow-wrap: anywhere; }
-/* An id or a hash, then its words: the words wrap beside it, not under it. */
-.moai-detail-list li:has(> .moai-detail-hash) { display: grid; grid-template-columns: auto minmax(0, 1fr); }
-.moai-detail-hash {
-  flex: none; padding: 0 6px; border-radius: var(--radius-card); background: var(--muted-bg); color: var(--muted);
-  font: 11px/18px var(--mono, monospace);
-}
-.moai-detail-meta { color: var(--muted); }
-/* The history as a timeline: a line down the left, a dot on it for each entry, the colour of what the entry did. */
-/* The line runs from each dot to the next one, so a history of one entry has a dot and no line. */
-.moai-detail-timeline { position: relative; padding-left: 18px; }
-.moai-detail-timeline > li:not(:last-child)::after { content: ""; position: absolute; left: -14px; top: 17px; bottom: -8px; border-left: 1px solid color-mix(in srgb, var(--muted) 55%, transparent); }
-.moai-detail-timeline > li { position: relative; display: block; padding: 3px 0 5px; }
-.moai-detail-timeline > li::before {
-  content: ""; position: absolute; left: -18px; top: 8px; width: 9px; height: 9px; box-sizing: border-box;
-  border: 2px solid var(--muted); border-radius: 50%; background: var(--bg);
-}
-.moai-detail-timeline > li[data-kind="create"]::before { border-color: var(--ok); }
-.moai-detail-timeline > li[data-kind="status"]::before { border-color: var(--accent); }
-.moai-detail-timeline > li[data-kind="note"]::before { border-color: var(--warn); }
-.moai-detail-timeline .moai-detail-meta { display: block; font-size: 11px; }
-.moai-detail-timeline > li.moai-detail-meta::before { display: none; }
-`
-
-function styled(doc: Document) {
-  if (doc.getElementById(STYLE_ID)) return
-  const style = el(doc, 'style', { id: STYLE_ID })
-  style.textContent = STYLE
-  doc.head.append(style)
 }
 
 /** A titled block; `h3` is the section's name. */
@@ -147,7 +77,6 @@ function idList(doc: Document, ids: string[], index: IssueIndex | null, copy: Vi
 export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): PaneView => {
   const { document: doc, copy, intents } = ctx
   const d = copy.detail
-  styled(doc)
   const view = el(doc, 'div', { class: 'moai-detail', role: 'region', 'aria-label': d.label })
   root.replaceChildren(view)
   // The pane scrolls in the split's detail container (marked data-keep-scroll), which holds `root`; a view
@@ -184,7 +113,7 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
     if (head.priority) chips.append(chip(doc, { label: head.priority }))
     if (head.kind) chips.append(chip(doc, { label: head.kind }))
     if (head.deferred) chips.append(chip(doc, { label: `${d.deferred}: ${head.deferred}`, tone: 'warn' }))
-    else if (head.shelvedBy) chips.append(chip(doc, { label: d.deferredUnder(head.shelvedBy), tone: 'warn' }))
+    else if (head.shelvedBy) chips.append(chip(doc, { label: fill(d.deferredUnder, { id: head.shelvedBy }), tone: 'warn' }))
     for (const tag of tagsOf(row)) chips.append(chip(doc, { label: tag }))
     const idLine = el(doc, 'span', { class: 'moai-detail-id' }, ...painted(head.id, search))
     // The status glyph before the id, as the list and the board draw it, and turning while the work is held.
@@ -219,16 +148,22 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
       // The bar in the colours of the columns: what is done, then what waits on a review, then what is held; the
       // rest is the bar's own ground. The legend under it names each, in the same colours.
       const counted = rollup.byStatus.reduce((sum, [, n]) => sum + n, 0)
+      // The share is set through CSSOM (`style.width`), which the CSP lets through; a `style` attribute it would not.
+      const share = (status: string, percent: number) => {
+        const span = el(doc, 'span', { 'data-status': status })
+        span.style.width = `${percent}%`
+        bar.append(span)
+      }
       for (const status of ['done', 'review', 'in_progress']) {
         const n = rollup.byStatus.find(([one]) => one === status)?.[1] ?? 0
-        if (n && counted) bar.append(el(doc, 'span', { 'data-status': status, style: `width: ${(n * 100) / counted}%` }))
+        if (n && counted) share(status, (n * 100) / counted)
       }
       // A group `moai status` gave no counts for — not answered yet, failed, or left out as one closed past
       // archive_days (`SPC v o`) — still has its share done: drawn as the bar always drew it, beside the same text.
-      if (!counted && rollup.percent) bar.append(el(doc, 'span', { 'data-status': 'done', style: `width: ${rollup.percent}%` }))
+      if (!counted && rollup.percent) share('done', rollup.percent)
       const legend = el(doc, 'div', { class: 'moai-detail-legend' })
       for (const [status, n] of rollup.byStatus) legend.append(el(doc, 'span', { 'data-status': status }, `${copy.stats[status] ?? status} ${n}`))
-      out.push(section(doc, d.rollup, el(doc, 'div', { class: 'moai-detail-rollup' }, d.rollupText(rollup.done, rollup.work, rollup.percent)), bar, rollup.byStatus.length ? legend : null))
+      out.push(section(doc, d.rollup, el(doc, 'div', { class: 'moai-detail-rollup' }, rollup.percent === undefined ? fill(d.rollupText, { done: rollup.done, work: rollup.work }) : fill(d.rollupTextPercent, { done: rollup.done, work: rollup.work, percent: rollup.percent })), bar, rollup.byStatus.length ? legend : null))
     }
     const body = typeof row.body === 'string' ? row.body.trim() : ''
     if (body) out.push(section(doc, d.body, raw ? el(doc, 'pre', { class: 'moai-detail-body moai-detail-raw' }, body) : renderBody(doc, body)))

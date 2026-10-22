@@ -47,7 +47,7 @@ const ANSWER = { read: ['t-1'], missing: [], held: [], problems: [], at: '2026-1
 
 test('the three writes are POSTs to the paths moai web takes, with no query of their own', async () => {
   assert.deepEqual(READ_ENDPOINT.one('moai-1abc.x2y'), { path: '/api/read/moai-1abc.x2y', method: 'POST' })
-  assert.deepEqual(READ_ENDPOINT.all, { path: '/api/read-all', method: 'POST' })
+  assert.deepEqual(READ_ENDPOINT.all(), { path: '/api/read-all', method: 'POST' })
   assert.deepEqual(READ_ENDPOINT.group('moai-1abc'), { path: '/api/read-group/moai-1abc', method: 'POST' })
   const { calls, fetcher } = server(ANSWER)
   const client = createClient(withProject(fetcher, '/w/argos'), { concurrency: 3 })
@@ -72,7 +72,7 @@ test('a write is detail-priority and never shared: two marks of one row are two 
   // Even asked as shareable, a POST is not handed another's answer.
   const again = server(ANSWER)
   const plain = createClient(again.fetcher, { concurrency: 1 })
-  await Promise.all([plain.request(READ_ENDPOINT.all), plain.request(READ_ENDPOINT.all)])
+  await Promise.all([plain.request(READ_ENDPOINT.all()), plain.request(READ_ENDPOINT.all())])
   assert.equal(again.calls.length, 2)
 })
 
@@ -102,6 +102,27 @@ test('readMarks reads again after a write that went through, with the ids it wro
   const outcome = await refused.one('t-1')
   assert.equal(outcome.kind, 'moai-error')
   assert.deepEqual(failed, [])
+})
+
+test('with the overlay on the writes carry worktree=1, and only then (moai-m4ez.gcp)', async () => {
+  assert.deepEqual(READ_ENDPOINT.one('a-1', true), { path: '/api/read/a-1', method: 'POST', query: { worktree: '1' } })
+  assert.deepEqual(READ_ENDPOINT.all(true), { path: '/api/read-all', method: 'POST', query: { worktree: '1' } })
+  assert.deepEqual(READ_ENDPOINT.group('e1', true), { path: '/api/read-group/e1', method: 'POST', query: { worktree: '1' } })
+  const { calls, fetcher } = server(ANSWER)
+  const client = createClient(withProject(fetcher, '/w/argos'), { concurrency: 3 })
+  let on = false
+  const marks = readMarks(client, async () => {}, () => on)
+  await marks.one('t-1')
+  on = true
+  await marks.one('t-1')
+  await marks.all()
+  await marks.group('e1')
+  assert.deepEqual(calls, [
+    ['POST', '/api/read/t-1?project=%2Fw%2Fargos'],
+    ['POST', '/api/read/t-1?worktree=1&project=%2Fw%2Fargos'],
+    ['POST', '/api/read-all?worktree=1&project=%2Fw%2Fargos'],
+    ['POST', '/api/read-group/e1?worktree=1&project=%2Fw%2Fargos'],
+  ])
 })
 
 test('readMarks says why a write marked nothing: an id moai does not hold (a sibling worktree\'s row) or one held back', async () => {

@@ -21879,6 +21879,167 @@ fn reading_in_a_worktree_keeps_a_stamp_on_a_row_only_its_own_copy_holds() {
     assert!(after.contains(&t.made), "워크트리에서 친 `read` 가 거기에만 있는 줄의 도장을 걷었다\n{after}");
 }
 
+/// **`tui --json --deep --worktree` 는 옆에만 있는 줄을 `show --worktree` 가 놓는 자리에 놓는다**(moai-m4ez.gcp) —
+/// 에픽 밑이다. 플래그 없이는 전처럼 옆 줄이 없고, 옆이 늦게 고친 줄은 옆의 칸으로 선다.
+#[test]
+fn tui_json_deep_places_rows_only_a_sibling_holds_under_their_epic() {
+    let t = trees("wttree");
+    let main = t.main();
+    let rows = |args: &[&str]| -> Vec<serde_json::Value> {
+        let mut all = vec!["tui", "--json", "--deep"];
+        all.extend_from_slice(args);
+        json_of(&ok(&main, &all)).as_array().unwrap_or_else(|| panic!("배열이 아니다")).clone()
+    };
+    let find = |rows: &[serde_json::Value], id: &str| rows.iter().find(|r| r["id"] == id).cloned();
+
+    let plain = rows(&[]);
+    assert!(find(&plain, &t.made).is_none(), "플래그 없이 옆 줄이 섰다");
+    assert_eq!(find(&plain, &t.picked).unwrap()["status"], "todo", "플래그 없이 옆 칸이 섰다");
+
+    let over = rows(&["--worktree"]);
+    let made = find(&over, &t.made).unwrap_or_else(|| panic!("옆에만 있는 줄이 없다\n{over:?}"));
+    assert_eq!(made["home"], serde_json::json!([t.epic]), "에픽 밑이 아니다: {made}");
+    assert_eq!(find(&over, &t.picked).unwrap()["status"], "in_progress", "옆이 늦게 옮긴 칸이 안 섰다");
+    // 에픽의 셈도 옆 줄을 센다.
+    let epic = find(&over, &t.epic).unwrap();
+    let total = |r: &serde_json::Value| r["progress"]["total"].as_u64().unwrap();
+    assert_eq!(total(&epic), total(&find(&plain, &t.epic).unwrap()) + 1, "{epic}");
+    // 거르개와 함께여도 같은 자다.
+    let filtered = rows(&["--worktree", "-s", "todo"]);
+    assert!(find(&filtered, &t.made).is_some(), "거른 목록에서 옆 줄이 빠졌다");
+}
+
+/// **`moai read --worktree` 는 겹쳐 보기가 보이는 판을 읽음으로 적는다**(moai-m4ez.gcp) — 옆에만 있는 줄도 적히고(전에는
+/// `missing`), 옆이 더 늦게 고친 줄은 옆의 `updated_at` 이 적혀 [NEW] 가 내린다. 옆 워크트리에는 아무것도 안 쓴다.
+#[test]
+fn read_with_worktree_stamps_the_version_the_overlay_shows() {
+    let t = trees("wtread");
+    let (main, feat) = (t.main(), t.feat());
+    let cfg = t.s.path().join("user.toml");
+    let updated = |id: &str| -> String {
+        let one = ok(&main, &["show", id, "--worktree", "--json"]);
+        json_of(&one)["updated_at"].as_str().unwrap().to_string()
+    };
+    let (before_main, before_feat) = (issues(&main), issues(&feat));
+
+    // 플래그 없이는 옆에만 있는 줄이 없는 id 다.
+    let out = moai_with(&main, &cfg, &["read", &t.made, "--json"]);
+    assert!(!out.status.success(), "옆에만 있는 줄이 플래그 없이 적혔다");
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("\"missing\":[\"{}\"]", t.made)));
+
+    let out = ok_with(&main, &cfg, &["read", "--worktree", &t.made, &t.picked, "--json"]);
+    let v = json_of(&out);
+    assert_eq!(v["missing"], serde_json::json!([]), "{out}");
+    let sheet = read_sheet(&cfg, &main);
+    assert!(sheet.contains(&format!("{} = \"{}\"", t.made, updated(&t.made))), "{sheet}");
+    // 옆이 늦게 옮긴 줄은 옆의 값이다 — 루트의 낡은 값이 아니다.
+    let picked = updated(&t.picked);
+    assert_ne!(picked, json_of(&ok(&main, &["show", &t.picked, "--json"]))["updated_at"].as_str().unwrap());
+    assert!(sheet.contains(&format!("{} = \"{picked}\"", t.picked)), "{sheet}");
+
+    assert_eq!((issues(&main), issues(&feat)), (before_main, before_feat), "읽음이 트래커를 고쳤다");
+}
+
+/// **웹은 겹쳐 보기를 켠 페이지에만 옆을 잇는다**(moai-m4ez.gcp) — 트리는 옆 줄을 에픽 밑에 놓고, 표식은 옆의 쓰기에
+/// 움직이고(끈 페이지는 안 움직인다), 읽음은 옆에만 있는 줄에도 적힌다.
+#[test]
+fn web_overlay_reaches_tree_stamp_and_read() {
+    let t = trees("wtweb");
+    let (main, feat) = (t.main(), t.feat());
+    let cfg = t.s.path().join("user.toml");
+    let web = serve_with(&main, |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let mine = format!("http://127.0.0.1:{}", web.port);
+    let tree = |query: &str| json_of(&get(web.port, &format!("/api/tree{query}")).2);
+    let has = |env: &serde_json::Value, id: &str| env["out"].as_array().unwrap().iter().any(|r| r["id"] == id);
+    assert!(!has(&tree(""), &t.made), "끈 페이지의 트리에 옆 줄이 섰다");
+    let on = tree("?worktree=1");
+    assert_eq!(on["exit"], 0, "{on}");
+    let made = on["out"].as_array().unwrap().iter().find(|r| r["id"] == t.made.as_str()).expect("옆 줄이 없다");
+    assert_eq!(made["home"], serde_json::json!([t.epic]), "{made}");
+
+    let stamp = |query: &str| json_of(&get(web.port, &format!("/api/stamp{query}")).2)["stamp"].as_str().unwrap().to_string();
+    let (off0, on0) = (stamp(""), stamp("?worktree=1"));
+    assert_ne!(off0, on0, "켠 표식이 끈 표식과 같다 — 옆을 안 접었다");
+    ok_here_at(&feat, LATER, &["note", &t.made, "옆의 메모"]);
+    ok_here_at(&feat, LATER, &["edit", &t.made, "--title", "옆이 고친 제목"]);
+    assert_ne!(stamp("?worktree=1"), on0, "옆의 쓰기에 켠 표식이 안 움직였다");
+    assert_eq!(stamp(""), off0, "옆의 쓰기에 끈 표식이 움직였다");
+    let (status, _, body) = get(web.port, "/api/stamp?worktree=2");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    let (status, _, body) = get(web.port, "/api/stamp?x=1");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+
+    // 읽음: 끄고 보낸 것은 옆 줄을 못 찾고, 켜고 보낸 것은 적는다.
+    let (status, _, body) = post(web.port, &format!("/api/read/{}", t.made), Some(&mine));
+    assert_eq!(status, 200, "{body}");
+    assert_ne!(json_of(&body)["exit"], 0, "끈 읽음이 옆 줄을 적었다\n{body}");
+    let (status, _, body) = post(web.port, &format!("/api/read/{}?worktree=1", t.made), Some(&mine));
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert!(read_sheet(&cfg, &main).contains(&t.made), "읽음이 안 적혔다");
+
+    // 상세: 옆에만 있는 줄은 끄고 열면 없는 줄이고, 켜고 열면 열린다(moai-m4ez.yb1).
+    let detail = |query: &str| json_of(&get(web.port, &format!("/api/issue/{}{query}", t.made)).2);
+    let off = detail("");
+    assert_ne!(off["exit"], 0, "끈 상세가 옆 줄을 열었다\n{off}");
+    assert_eq!(off["err"]["code"], "not_found", "{off}");
+    let on = detail("?worktree=1");
+    assert_eq!(on["exit"], 0, "{on}");
+    assert_eq!(on["out"]["id"], t.made.as_str(), "{on}");
+    assert_eq!(on["out"]["branch"], "feat/x", "어느 가지에서 왔는지 안 댄다\n{on}");
+    let (status, _, body) = get(web.port, &format!("/api/issue/{}?worktree=0", t.made));
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    let (status, _, body) = get(web.port, "/api/wiki/guide?worktree=1");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "위키는 겹칠 것이 없다\n{body}");
+}
+
+/// **`tui --json --deep --no-archive` 는 `show --all` 이 숨기는 줄을 뺀다**(moai-m4ez.4zq) — 웹 페이지가 아카이브를 안
+/// 보이는 동안 쓰기마다 읽는 트리를 줄인다. 폴더는 밑에 걸린 산 줄이 있으면 서니 아카이브에 든 에픽 밑의 되살린 멤버는
+/// 제 자리에 서고, 플래그가 없으면 전처럼 다 낸다.
+#[test]
+fn tui_json_deep_no_archive_leaves_out_what_show_all_hides() {
+    let s = init("tui-noarchive");
+    let epic = add(s.path(), &["묶음", "--type", "epic"]);
+    let gone = add(s.path(), &["옮겨질 멤버", "-e", &epic]);
+    let back = add(s.path(), &["되살릴 멤버", "-e", &epic]);
+    let live = add(s.path(), &["산 줄"]);
+    ok(s.path(), &["mv", &gone, "done"]);
+    ok(s.path(), &["mv", &back, "done"]);
+    let later = "2026-10-01T00:00:00Z";
+    ok_at(s.path(), later, &["archive"]);
+    assert!(!issues(s.path()).contains(&gone), "시험의 전제 — 아카이브로 안 옮겨졌다");
+    let rows = |args: &[&str]| -> Vec<serde_json::Value> {
+        let mut all = vec!["tui", "--json", "--deep"];
+        all.extend_from_slice(args);
+        json_of(&ok_at(s.path(), later, &all)).as_array().unwrap().clone()
+    };
+    let ids = |rows: &[serde_json::Value]| rows.iter().map(|r| r["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+
+    let all = ids(&rows(&[]));
+    for id in [&epic, &gone, &back, &live] {
+        assert!(all.contains(id), "플래그 없이 {id} 가 빠졌다: {all:?}");
+    }
+    let lean = ids(&rows(&["--no-archive"]));
+    assert_eq!(lean, vec![live.clone()], "아카이브가 남았다");
+
+    // 되살린 멤버는 산 줄이다 — 아카이브에 든 에픽 밑에 제 자리로 서고, 에픽은 폴더로 선다.
+    ok_at(s.path(), later, &["mv", &back, "todo", "--from", "done"]);
+    let lean = rows(&["--no-archive"]);
+    let lean_ids = ids(&lean);
+    assert!(lean_ids.contains(&back) && lean_ids.contains(&live) && lean_ids.contains(&epic), "{lean_ids:?}");
+    assert!(!lean_ids.contains(&gone), "아카이브의 형제가 남았다: {lean_ids:?}");
+    let row = lean.iter().find(|r| r["id"] == back.as_str()).unwrap();
+    assert_eq!(row["home"], serde_json::json!([epic]), "{row}");
+    // 거르개와 함께여도 같은 자다.
+    let both = ids(&rows(&["--no-archive", "-s", "todo"]));
+    assert!(both.contains(&back) && !both.contains(&gone), "{both:?}");
+    // 화면은 이 플래그를 모른다 — 거르개와 같은 말로 거절한다.
+    let out = moai(s.path(), &["tui", "--no-archive"]);
+    assert!(!out.status.success(), "화면이 --no-archive 를 받았다");
+}
+
 /// `ready` 는 옆에서 이미 집은 일을 **집을 수 있다고 내지 않고**, 잡고 있는 것에
 /// 어느 워크트리에서 잡았는지 댄다. `status` 는 겹쳐 봤다고 머리에서 말한다.
 #[test]
@@ -29649,6 +29810,14 @@ fn web_serves_the_page_and_the_boot() {
     {
         assert!(head.contains(h), "{h}\n{head}");
     }
+    // moai-m4ez.h2o: style-src 에 'unsafe-inline' 이 없다 — 페이지가 style 속성·런타임 <style> 을 안 쓰기 때문이다.
+    assert!(
+        head.contains(
+            "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
+             img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        ),
+        "{head}"
+    );
     let (status, head, _) = get(web.port, "/app.js");
     assert_eq!(status, 200, "{head}");
     assert!(head.contains("Content-Type: text/javascript"), "{head}");
@@ -29859,7 +30028,7 @@ fn web_rows_are_moais_show() {
         "/api/issue/--all",
         "/api/issue/issue",
         "/api/issue/epic",
-        "/api/status?worktree=1",
+        "/api/status?archived=1",
         "/api/boot?x=1",
         "/api/stamp?x=1",
     ] {
@@ -29867,6 +30036,10 @@ fn web_rows_are_moais_show() {
         assert_eq!(status, 400, "{path}\n{body}");
         assert_eq!(json_of(&body)["code"], "bad_input", "{path}\n{body}");
     }
+    // 겹쳐 보기를 켠 페이지는 보드의 셈도 그 판으로 묻는다(`status --worktree`, moai-m4ez.u6a) — 트리와 같은 줄을 센다.
+    let (status, _, body) = get(web.port, "/api/status?worktree=1");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
 }
 
 /// **`/api/tree` 는 `moai tui --deep --json` 이다**(moai-0aa7.a0l) — 정렬도 같은 낱말로 옮긴다.
@@ -29886,6 +30059,137 @@ fn web_tree_is_tui_deep() {
     let direct = ok(s.path(), &["tui", "--deep", "--sort", "title", "--reverse", "--json"]);
     let (_, _, body) = get(web.port, "/api/tree?sort=title&reverse=1");
     assert_eq!(envelope_out(&body, &direct), direct.trim());
+}
+
+/// **트리는 아카이브를 달라고 한 때만 싣는다**(moai-m4ez.4zq) — 안 보이는 동안 쓰기마다 읽는 답의 95% 였다. 차례의 말은
+/// 자식을 띄우기 전에 재어, 모르는 낱말이 `code` 없는 clap 글이 아니라 400 `bad_input` 이다.
+#[test]
+fn web_tree_leaves_out_the_archive_unless_asked_and_refuses_a_bogus_sort() {
+    let s = init("web-tree-archive");
+    let done = add(s.path(), &["옮겨질 일"]);
+    let live = add(s.path(), &["산 일"]);
+    ok(s.path(), &["mv", &done, "done"]);
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    assert!(!issues(s.path()).contains(&done), "시험의 전제 — 아카이브로 안 옮겨졌다");
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_NOW", "2026-10-01T00:00:00Z");
+    });
+    let has = |env: &serde_json::Value, id: &str| env["out"].as_array().unwrap().iter().any(|r| r["id"] == id);
+    let lean = json_of(&get(web.port, "/api/tree").2);
+    assert!(has(&lean, &live) && !has(&lean, &done), "아카이브를 안 달랬는데 실었다\n{lean}");
+    let full = json_of(&get(web.port, "/api/tree?archived=1").2);
+    assert!(has(&full, &live) && has(&full, &done), "달랬는데 안 실었다\n{full}");
+    let (status, _, body) = get(web.port, "/api/tree?archived=0");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+
+    for sort in ["bogus", "priority:up", "title,title", "title,"] {
+        let (status, _, body) = get(web.port, &format!("/api/tree?sort={sort}"));
+        assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{sort}\n{body}");
+    }
+    let (status, _, body) = get(web.port, "/api/tree?sort=priority%3Adesc%2Ctitle");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+}
+
+/// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 읽음 표시 길은 `POST` 만 받는다.
+#[test]
+fn web_405_allow_names_the_methods_the_path_takes() {
+    let s = init("web-allow");
+    let web = serve(s.path());
+    let host = format!("127.0.0.1:{}", web.port);
+    for path in ["/api/read-all", "/api/read/moai-1abc", "/api/read-group/moai-1abc"] {
+        for method in ["PUT", "DELETE", "HEAD"] {
+            let (status, head, _) = http(web.port, method, path, Some(&host));
+            assert_eq!(status, 405, "{method} {path}\n{head}");
+            assert!(head.contains("Allow: POST") && !head.contains("Allow: GET"), "{method} {path}\n{head}");
+        }
+    }
+    let (status, head, _) = http(web.port, "POST", "/api/rows", Some(&host));
+    assert_eq!(status, 405, "{head}");
+    assert!(head.contains("Allow: GET") && !head.contains("Allow: POST"), "{head}");
+}
+
+/// **걸어 둔 자리에 제 `.moai` 가 없으면 프로젝트가 아니다**(moai-m4ez.4zq) — `moai project add` 는 init 전 디렉터리를
+/// 받는다. 자식이 위로 찾아 올라가 부모의 트래커로 답하던 것을 404 `not_a_project` 로 막는다. 걸어 둔 목록은 설정이
+/// 바뀌면 다시 읽는다(캐시는 표식을 따른다).
+#[test]
+fn web_refuses_a_registered_directory_without_its_own_tracker() {
+    let home = init("web-notproj");
+    let bare = home.path().join("apps").join("a");
+    std::fs::create_dir_all(&bare).unwrap();
+    let cfg = home.path().join("user.toml");
+    ok(home.path(), &["add", "부모의 일"]);
+    let web = serve_with(home.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let enc = |p: &Path| p.to_str().unwrap().replace('%', "%25").replace(' ', "%20");
+    let asked = format!("/api/status?project={}", enc(&canon(&bare).unwrap()));
+
+    // 아직 안 걸었다.
+    let (status, _, body) = get(web.port, &asked);
+    assert_eq!((status, json_of(&body)["code"].as_str()), (403, Some("not_registered")), "{body}");
+    // 걸었다 — 설정이 바뀌었으니 다시 읽어 받는다. 그러나 제 `.moai` 가 없다.
+    ok_with(home.path(), &cfg, &["project", "add", bare.to_str().unwrap()]);
+    let (status, _, body) = get(web.port, &asked);
+    assert_eq!((status, json_of(&body)["code"].as_str()), (404, Some("not_a_project")), "{body}");
+    assert!(json_of(&body)["error"].as_str().unwrap().contains("init"), "{body}");
+    // 거기서 init 하면 프로젝트다.
+    ok(&bare, &["init", "argos"]);
+    let (status, _, body) = get(web.port, &asked);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(json_of(&body)["out"]["total"], 0, "부모의 트래커로 답했다\n{body}");
+}
+
+/// **머리글이 글자로 견주는 자리는 한 철자다**(moai-m4ez.4zq) — 링크로 띄운 서버의 `root` 가 걸어 둔 철자와 같은 디렉터리면
+/// 걸어 둔 철자로 선다. 아니면 홈이 같은 프로젝트를 한 번 더 늘어놓았다.
+/// 링크를 임시 부모에 남기지 않는다 — 단언이 넘어져도 `Drop` 이 치운다(moai-m4ez.u6a).
+#[cfg(unix)]
+struct Linked(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Linked {
+    fn to(target: &std::path::Path) -> Linked {
+        let name = format!("{}-link", target.file_name().unwrap().to_string_lossy());
+        let link = target.join("..").join(name);
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(target, &link).unwrap();
+        Linked(link)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Linked {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn web_boot_root_is_spelled_as_the_registered_project() {
+    let home = init("web-spell");
+    let link = Linked::to(home.path());
+    let cfg = home.path().join("user.toml");
+    let real = canon(home.path()).unwrap();
+    ok_with(home.path(), &cfg, &["project", "add", real.to_str().unwrap()]);
+    let web = serve_with(&link.0, |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let boot = json_of(&get(web.port, "/api/boot").2);
+    assert_eq!(boot["root"], real.display().to_string().as_str(), "링크 철자가 남았다\n{boot}");
+    assert_eq!(boot["project"], real.file_name().unwrap().to_string_lossy().as_ref(), "{boot}");
+    drop(web);
+    // 걸어 두지 않은 홈은 링크를 푼 철자다 — `project` 도 같은 자리에서 나온다(링크의 이름이 아니다).
+    let alone = init("web-spell-alone");
+    let link = Linked::to(alone.path());
+    let web = serve_with(&link.0, |cmd| {
+        cmd.env("MOAI_CONFIG", alone.path().join("none.toml"));
+    });
+    let boot = json_of(&get(web.port, "/api/boot").2);
+    let real = canon(alone.path()).unwrap();
+    assert_eq!(boot["root"], real.display().to_string().as_str(), "{boot}");
+    assert_eq!(boot["project"], real.file_name().unwrap().to_string_lossy().as_ref(), "링크의 이름이 남았다\n{boot}");
+    drop(web);
 }
 
 /// **거르개의 뜻과 거절은 moai 가 낸다**(moai-0aa7.a0l) — 서버는 봉투에 옮길 뿐이라 상태는 200 이다.

@@ -201,6 +201,15 @@ pub struct Response {
     pub status: u16,
     pub kind: &'static str,
     pub body: Vec<u8>,
+    /// 405 의 `Allow` 머리 — 그 길이 받는 메서드. 405 가 아니면 안 쓴다. 읽음 표시 길은 `POST` 만 받으므로 모든 405 에
+    /// `GET` 을 적던 판은 `POST` 를 받는 길에 거짓을 말했다(moai-m4ez.4zq).
+    pub allow: &'static str,
+}
+
+impl Response {
+    pub fn new(status: u16, kind: &'static str, body: Vec<u8>) -> Response {
+        Response { status, kind, body, allow: "GET" }
+    }
 }
 
 pub const JSON: &str = "application/json";
@@ -208,9 +217,11 @@ pub const HTML: &str = "text/html; charset=utf-8";
 pub const JS: &str = "text/javascript; charset=utf-8";
 pub const CSS: &str = "text/css; charset=utf-8";
 
-/// 페이지가 부를 수 있는 것을 제 자리(`'self'`)로만 좁힌다. **style 만 푼다** — 패널 2.0 이 style 속성 아홉
-/// 자리와 런타임 `<style>` 하나를 쓴다. 조이는 일은 그 자리를 걷은 뒤다.
-const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; \
+/// 페이지가 부를 수 있는 것을 제 자리(`'self'`)로만 좁힌다. **style 도 `'unsafe-inline'` 없이 닫혔다**(moai-m4ez.h2o) —
+/// 페이지는 `style` 속성도 런타임 `<style>` 요소도 안 쓴다. 값은 클래스(`web/panel/style/*.css`)로, 계산한 값은
+/// CSSOM(`el.style.x = …`·`style.setProperty`·구성 가능한 시트)으로만 넣는다 — 그 길은 CSP 가 막지 않는다.
+/// `tests/cli.rs` 의 `web_serves_the_page_and_the_boot` 가 이 글자를 그대로 쥔다.
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
                    img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 fn reason(status: u16) -> &'static str {
@@ -241,7 +252,7 @@ pub fn write(w: &mut impl Write, r: &Response, body: bool) -> std::io::Result<()
         r.body.len()
     );
     if r.status == 405 {
-        head.push_str("Allow: GET\r\n");
+        head.push_str(&format!("Allow: {}\r\n", r.allow));
     }
     head.push_str("\r\n");
     w.write_all(head.as_bytes())?;
@@ -358,10 +369,25 @@ mod tests {
         assert!(!host_ok(None), "없는 Host");
     }
 
+    /// **`Allow` 는 응답이 든 메서드를 그대로 쓴다**(moai-m4ez.4zq) — 읽음 표시 길의 405 는 `POST` 다.
+    #[test]
+    fn a_405_names_the_methods_the_response_carries() {
+        let mut out = Vec::new();
+        let mut post = Response::new(405, JSON, b"{}".to_vec());
+        post.allow = "POST";
+        write(&mut out, &post, true).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("Allow: POST\r\n") && !out.contains("Allow: GET"), "{out}");
+        // 405 가 아닌 답에는 `Allow` 가 없다.
+        let mut ok = Vec::new();
+        write(&mut ok, &Response::new(200, JSON, b"{}".to_vec()), true).unwrap();
+        assert!(!String::from_utf8(ok).unwrap().contains("Allow:"));
+    }
+
     #[test]
     fn a_response_carries_the_fixed_headers() {
         let mut out = Vec::new();
-        write(&mut out, &Response { status: 405, kind: JSON, body: b"{}".to_vec() }, true).unwrap();
+        write(&mut out, &Response::new(405, JSON, b"{}".to_vec()), true).unwrap();
         let out = String::from_utf8(out).unwrap();
         assert!(out.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"), "{out}");
         for h in [
@@ -378,7 +404,7 @@ mod tests {
         assert!(out.ends_with("\r\n\r\n{}"), "{out}");
         // HEAD 의 답 — 같은 머리(길이까지)에 본문만 없다.
         let mut head = Vec::new();
-        write(&mut head, &Response { status: 405, kind: JSON, body: b"{}".to_vec() }, false).unwrap();
+        write(&mut head, &Response::new(405, JSON, b"{}".to_vec()), false).unwrap();
         let head = String::from_utf8(head).unwrap();
         assert!(head.contains("Content-Length: 2\r\n") && head.ends_with("\r\n\r\n"), "{head}");
     }

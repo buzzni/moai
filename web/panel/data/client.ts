@@ -79,6 +79,8 @@ export interface RequestState {
   priority: number
   phase: Phase
   share: boolean
+  /** Whether Cancel (`cancelAll`) ends it: a read mark's write and the one-time projects read are not Cancel's to stop. */
+  cancellable: boolean
 }
 
 export interface RequestOptions {
@@ -91,6 +93,8 @@ export interface RequestOptions {
    * a change is never handed the answer of a run that began before it.
    */
   epoch?: number
+  /** Whether Cancel ends it. Default: a read yes, a write no. */
+  cancellable?: boolean
 }
 
 export interface ClientOptions {
@@ -178,7 +182,7 @@ export interface Client {
   /** Cancels a queued request at once, or aborts a running one. */
   cancel(key: string): void
   /**
-   * Cancels every request, queued and running, in one step. Cancelling them key by key would free a running one's
+   * Cancels every cancellable request (reads; not a write, nor one asked with `cancellable: false`), queued and running, in one step. Cancelling them key by key would free a running one's
    * slot first, and the queue would start the next waiting read — sent to the server — before its own turn came.
    */
   cancelAll(): void
@@ -273,6 +277,7 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
       const entry: Pending = {
         key, url, method, path: endpoint.path, priority, phase: 'queued',
         seq: seq++, promise, resolve, abort: new AbortController(), share, epoch,
+        cancellable: requestOptions.cancellable ?? method === 'GET',
       }
       pending.push(entry)
       notify()
@@ -288,15 +293,20 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
       }
     },
     cancelAll() {
-      const all = pending.splice(0)
+      const all = pending.filter((entry) => entry.cancellable)
+      for (const entry of all) pending.splice(pending.indexOf(entry), 1)
       for (const entry of all) {
         entry.abort.abort()
         entry.resolve({ kind: 'cancelled' })
       }
-      if (all.length) notify()
+      if (all.length) {
+        notify()
+        // What Cancel left (a write) may have been waiting for a slot.
+        pump()
+      }
     },
     requests() {
-      return pending.map(({ key, path, priority, phase, share }) => ({ key, path, priority, phase, share }))
+      return pending.map(({ key, path, priority, phase, share, cancellable }) => ({ key, path, priority, phase, share, cancellable }))
     },
     subscribe(listener) {
       listeners.add(listener)

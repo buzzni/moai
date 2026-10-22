@@ -38,15 +38,23 @@ pub struct Site {
     /// 띄울 때 고른 말 — **받는 고리만 쓴다**(503 `busy`·받기 오류). 고리는 파일을 안 연다: 사용자 설정 자리에 무엇이
     /// 서 있든(FIFO 하나면 열기가 끝없이 선다) 다른 연결을 받는 일이 거기 걸리면 안 된다.
     pub started_in: Lang,
-    /// 사용자 설정의 표식과 그때 고른 말([`Site::lang`]).
-    picked: Mutex<(Option<crate::store::Stamp>, Lang)>,
+    /// 사용자 설정의 표식과 그것에서 읽은 것([`Site::config`]).
+    picked: Mutex<Picked>,
+}
+
+/// 사용자 설정을 한 번 풀어 든 값 — **표식이 같은 동안 다시 안 푼다.** 말과 걸어 둔 프로젝트가 한 번의 풀기를 나눠 쓴다.
+struct Picked {
+    /// 이 값을 푼 때의 사용자 설정 표식 — 바깥 `None` 은 아직 한 번도 안 풀었다는 뜻이다(설정이 없는 기계의 `Some(None)` 과 다르다).
+    stamp: Option<Option<crate::store::Stamp>>,
+    lang: Lang,
+    /// 걸어 둔 프로젝트의 자리들 — `?project=` 요청마다 설정을 통째로 다시 풀던 판은 2 초 표식 묻기에도 디버그에서
+    /// 44ms(릴리스 4~6ms)를 들였다(moai-m4ez.4zq).
+    projects: Vec<std::path::PathBuf>,
 }
 
 impl Site {
     pub fn new(spawner: run::Spawner, started_in: Lang) -> Site {
-        let path = crate::user_config::path();
-        let stamp = path.as_deref().map(crate::store::stamp);
-        Site { spawner, started_in, picked: Mutex::new((stamp, started_in)) }
+        Site { spawner, started_in, picked: Mutex::new(Picked { stamp: None, lang: started_in, projects: Vec::new() }) }
     }
 
     /// 이 요청의 말 — **설정이 바뀌면 다시 고른다**([`crate::cmd::lang_of`] 의 자, `MOAI_LANG` 이 이긴다). 자식은
@@ -57,18 +65,32 @@ impl Site {
     /// **묻는 것은 표식(`stat`)이다** — 요청마다 설정을 통째로 풀던 판은 옛 `[read]` 가 큰 설정에서 정적 파일 하나에
     /// 수백 ms 를 들였다. 표식이 바뀐 때만 다시 읽고, **보통 파일만 연다** — FIFO·장치는 열기가 설 수 있다.
     pub fn lang(&self) -> Lang {
+        self.config(|picked| picked.lang)
+    }
+
+    /// 걸어 둔 프로젝트들의 자리 — [`Site::lang`] 과 **같은 풀기**를 나눠 쓴다. `?project=` 가 붙은 요청마다(2 초 표식
+    /// 묻기 포함) 설정을 새로 풀던 판의 값을 표식이 같은 동안 한 번으로 줄인다(moai-m4ez.4zq).
+    fn registered(&self) -> Vec<std::path::PathBuf> {
+        self.config(|picked| picked.projects.clone())
+    }
+
+    fn config<T>(&self, take: impl FnOnce(&Picked) -> T) -> T {
         let path = crate::user_config::path();
         let stamp = path.as_deref().map(crate::store::stamp);
         let mut picked = self.picked.lock().unwrap_or_else(|e| e.into_inner());
-        if picked.0 != stamp {
+        if picked.stamp != Some(stamp) {
             let regular = path.as_deref().is_none_or(|p| std::fs::metadata(p).map_or(true, |m| m.is_file()));
             let read = match regular {
                 true => crate::user_config::read(path.as_deref()),
                 false => crate::user_config::read(None),
             };
-            *picked = (stamp, crate::cmd::lang_of(&read));
+            *picked = Picked {
+                stamp: Some(stamp),
+                lang: crate::cmd::lang_of(&read),
+                projects: read.projects.iter().map(|p| p.path.clone()).collect(),
+            };
         }
-        picked.1
+        take(&picked)
     }
 }
 
@@ -225,7 +247,9 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     }
     let not_allowed = || {
         let said = fill(say(lang, "web.only_get"), &[("method", &req.method), ("path", &req.path)]);
-        refuse(405, &said, code::METHOD_NOT_ALLOWED)
+        // **`Allow` 는 그 길이 받는 메서드다** — 읽음 표시 길은 `POST` 만 받는다(`GET` 은 404 라 여기 안 온다).
+        let allow = if api::write_argv_of(&req.path, &[]).is_some() { "POST" } else { "GET" };
+        Response { allow, ..refuse(405, &said, code::METHOD_NOT_ALLOWED) }
     };
     // **쓰는 길은 이 페이지가 보낸 것만 받는다**([`http::origin_ok`]) — 무엇을 쓰는지 재기 전에, 프로젝트를 찾으러
     // 사용자 설정을 열기 전에 거른다.
@@ -254,31 +278,34 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     };
     // 걸어 둔 목록(`/api/projects`)은 사용자 설정만 읽어 어느 자리에서 돌아도 같은 답이다 — 자리를 안 잰다. 걷은 프로젝트를
     // 연 페이지도 머리글이 그 목록을 받아 다른 프로젝트로 건너간다.
-    let cwd = match project.as_deref().filter(|_| req.path != "/api/projects").map(|p| project_of(p, lang)) {
+    let cwd = match project.as_deref().filter(|_| req.path != "/api/projects").map(|p| project_of(site, p, lang)) {
         None => site.spawner.cwd.clone(),
         Some(Ok(dir)) => dir,
         Some(Err(refused)) => return refused,
     };
     if write {
         return match api::write_argv_of(&req.path, &query) {
-            Some(Ok(args)) => child(site, &args, &cwd, lang),
+            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => not_allowed(),
         };
     }
-    // 자식 없이 답하는 끝점도 쿼리는 안 받는다 — 말없이 버리면 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
+    // 자식 없이 답하는 끝점도 받는 이름만 받는다(`/api/boot` 는 없고 `/api/stamp` 는 `worktree=1` 하나) — 말없이 버리면
+    // 부른 쪽은 제가 준 것이 먹은 답이라 믿는다([`api::argv`]).
     let bare = || api::none_of(&query).map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT));
     match req.path.as_str() {
         "/api/boot" => match bare().and_then(|()| {
-            boot::boot(&cwd, site.spawner.user.as_deref(), lang).map_err(|e| refuse(500, &e.message, e.code))
+            boot::boot(&cwd, site.spawner.user.as_deref(), lang, &site.registered()).map_err(|e| refuse(500, &e.message, e.code))
         }) {
-            Ok(body) => Response { status: 200, kind: http::JSON, body: body.into_bytes() },
+            Ok(body) => Response::new(200, http::JSON, body.into_bytes()),
             Err(refused) => refused,
         },
-        "/api/stamp" => match bare().and_then(|()| api::stamp(&cwd, lang).map_err(|e| refuse(500, &e.message, e.code)))
+        "/api/stamp" => match api::overlay_of(&query)
+            .map_err(|bad| refuse(400, &bad.said(lang), code::BAD_INPUT))
+            .and_then(|on| api::stamp(&cwd, lang, on).map_err(|e| refuse(500, &e.message, e.code)))
         {
             Ok(stamp) => {
-                Response { status: 200, kind: http::JSON, body: format!("{{\"stamp\":\"{stamp}\"}}").into_bytes() }
+                Response::new(200, http::JSON, format!("{{\"stamp\":\"{stamp}\"}}").into_bytes())
             }
             Err(refused) => refused,
         },
@@ -297,20 +324,34 @@ pub fn answer(req: &Request, site: &Site) -> Response {
 /// 되돌려 보내니, 걸어 둔 목록에 없는 자리는 남이 지어 보낸 것이다: 이 서버가 그 디렉터리의 트래커를 읽어 줄 까닭이
 /// 없다. 견주기는 `project ls` 와 같은 자([`crate::user_config::same_dir`])다.
 ///
-/// **사용자 설정은 보통 파일일 때만 연다**([`Site::lang`] 과 같은 자) — 아니면 걸어 둔 것이 없는 것으로 읽는다.
-pub fn project_of(value: &str, lang: Lang) -> Result<std::path::PathBuf, Response> {
-    let path = crate::user_config::path();
-    let regular = path.as_deref().is_none_or(|p| std::fs::metadata(p).map_or(true, |m| m.is_file()));
-    let reg = crate::user_config::read(if regular { path.as_deref() } else { None });
+/// **걸어 둔 목록은 [`Site::registered`] 가 표식이 같은 동안 한 번만 푼 것이다**(moai-m4ez.4zq). 사용자 설정은 보통 파일일
+/// 때만 연다([`Site::lang`] 과 같은 자) — 아니면 걸어 둔 것이 없는 것으로 읽는다.
+///
+/// **걸어 두었어도 제 `.moai` 가 없으면 프로젝트가 아니다**(404 `not_a_project`). 자식이 [`crate::store::Repo::find_from`] 으로
+/// 위로 찾아 올라가, `moai project add` 는 받아 주는 init 전 디렉터리(모노레포의 `apps/a`)가 부모의 트래커로 답했다 —
+/// 남의 트래커를 이 프로젝트의 것으로 그리는 것이다. 열기는 위로 안 찾는 [`crate::store::Repo::open`] 이고 `project ls`
+/// 와 탐색기가 쓰는 그 자라서, 딸린 워크트리의 비친 트래커는 거기서 그대로 선다. **못 연 것(깨진 설정)은 안 막는다** —
+/// 자식이 같은 까닭을 제 말로 댄다.
+fn project_of(site: &Site, value: &str, lang: Lang) -> Result<std::path::PathBuf, Response> {
     let asked = std::path::Path::new(value);
     let found = match asked.is_absolute() {
-        true => reg.projects.iter().find(|p| crate::user_config::same_dir(&p.path, asked)),
+        true => site.registered().into_iter().find(|p| crate::user_config::same_dir(p, asked)),
         false => None,
     };
-    found.map(|p| p.path.clone()).ok_or_else(|| {
+    let Some(dir) = found else {
         let said = fill(say(lang, "web.not_registered"), &[("path", value)]);
-        refuse(403, &said, code::NOT_REGISTERED)
-    })
+        return Err(refuse(403, &said, code::NOT_REGISTERED));
+    };
+    // **`.moai` 가 섰는지는 `stat` 하나로 가른다**(moai-m4ez.u6a) — `Repo::open` 은 설정을 파싱하고 `held::check` 를 돌려, 2초마다
+    // 도는 `/api/stamp` 도 요청마다 그것을 치렀다. 열기와 같은 자리(`opened_root`: 딸린 워크트리는 트래커가 선 주 체크아웃)에서
+    // 같은 자(`spot`)로 잰다 — 디렉터리가 아닌 `.moai` 나 못 들여다본 자리는 자식이 제 말로 대니 안 막는다.
+    match crate::store::spot(&crate::store::Repo::opened_root(&dir)) {
+        crate::store::Spot::Absent => {
+            let said = fill(say(lang, "web.not_a_project"), &[("path", value)]);
+            Err(refuse(404, &said, code::NOT_A_PROJECT))
+        }
+        _ => Ok(dir),
+    }
 }
 
 /// 겹쳐 보기(`--worktree`)는 git 체크아웃 안에서만 붙인다. 밖에서는 옆 워크트리가 있을 수 없는데 `show --worktree` 가
@@ -326,14 +367,14 @@ fn overlay_in_git(mut args: Vec<String>, cwd: &std::path::Path) -> Vec<String> {
 }
 
 fn page(kind: &'static str, body: &'static str) -> Response {
-    Response { status: 200, kind, body: body.as_bytes().to_vec() }
+    Response::new(200, kind, body.as_bytes().to_vec())
 }
 
 /// 자식을 돌려 봉투로 낸다. **자식이 돌았으면 200 이다** — 자식의 실패는 봉투의 `exit`·`err` 가 말한다.
 /// 4xx·5xx 는 서버가 답을 못 낸 판이다.
 pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, lang: Lang) -> Response {
     match site.spawner.run_in(args, cwd) {
-        Ok(done) => Response { status: 200, kind: http::JSON, body: run::envelope(&done).into_bytes() },
+        Ok(done) => Response::new(200, http::JSON, run::envelope(&done).into_bytes()),
         Err(run::Fault::Timeout) => {
             let secs = run::TIME_LIMIT.as_secs().to_string();
             refuse(504, &fill(say(lang, "web.child_timeout"), &[("secs", &secs)]), code::TIMEOUT)
@@ -352,7 +393,7 @@ pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, lang: Lang) ->
 /// 서버의 거절 — `{"code":"…","error":"…"}`. `moai --json` 이 넘어질 때(`main::fail`)와 같은 꼴, 같은 차례다.
 pub fn refuse(status: u16, said: &str, code: &str) -> Response {
     let body = serde_json::json!({ "error": said, "code": code }).to_string();
-    Response { status, kind: http::JSON, body: body.into_bytes() }
+    Response::new(status, http::JSON, body.into_bytes())
 }
 
 #[cfg(test)]
@@ -381,6 +422,35 @@ mod tests {
         assert_eq!(overlay_in_git(asked.clone(), &s.path().join("sub")), asked, "체크아웃 밑의 자리");
     }
 
+    /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 읽음 표시 길은 `POST`, 나머지는 `GET`. 자식을 안 띄우는
+    /// 답이라 없는 바이너리를 준다.
+    #[test]
+    fn a_405_allows_post_only_on_the_read_mark_paths() {
+        let s = crate::scratch::Scratch::new("web-allow");
+        let site = Site::new(
+            run::Spawner { exe: "/nonexistent/moai".into(), cwd: s.path().to_path_buf(), user: None },
+            Lang::En,
+        );
+        let ask = |method: &str, path: &str| {
+            let req = Request {
+                method: method.into(),
+                path: path.into(),
+                query: Vec::new(),
+                host: Some("127.0.0.1:1".into()),
+                origin: None,
+            };
+            answer(&req, &site)
+        };
+        for path in ["/api/read-all", "/api/read/moai-1abc", "/api/read-group/moai-1abc"] {
+            let got = ask("DELETE", path);
+            assert_eq!((got.status, got.allow), (405, "POST"), "{path}");
+        }
+        for path in ["/api/rows", "/api/stamp", "/nope"] {
+            let got = ask("POST", path);
+            assert_eq!((got.status, got.allow), (405, "GET"), "{path}");
+        }
+    }
+
     /// **한 바이트씩 흘려도 머리 전체의 시한에서 끊는다** — `read` 한 번의 시한이던 판은 흘리는 동안 끝없이 쥐었다.
     #[test]
     fn a_trickled_head_is_cut_at_the_whole_limit() {
@@ -406,7 +476,7 @@ mod tests {
     #[test]
     fn a_reader_that_does_not_keep_up_is_cut_at_the_whole_limit() {
         let (client, server) = pair();
-        let big = Response { status: 200, kind: http::JSON, body: vec![b' '; 32 * 1024 * 1024] };
+        let big = Response::new(200, http::JSON, vec![b' '; 32 * 1024 * 1024]);
         let started = Instant::now();
         let got = http::write(&mut Within::of(&server, Duration::from_millis(300)), &big, true);
         assert!(got.is_err(), "안 읽는 상대에게 32 MiB 를 다 썼다");

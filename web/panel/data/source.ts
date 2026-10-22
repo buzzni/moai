@@ -32,7 +32,8 @@ export const ENDPOINT = {
   status: '/api/status',
   rows: '/api/rows',
   backlog: '/api/backlog',
-  issue: (id: string): Endpoint => ({ path: `/api/issue/${encodeURIComponent(id)}` }),
+  /** `worktree` (the view's `SPC v w`): a row only another git worktree holds opens too (`show --worktree`, moai-m4ez.yb1). */
+  issue: (id: string, worktree = false): Endpoint => ({ path: `/api/issue/${encodeURIComponent(id)}`, ...(worktree ? { query: { worktree: '1' } } : {}) }),
   tree: '/api/tree',
   projects: '/api/projects',
   wiki: '/api/wiki',
@@ -126,15 +127,28 @@ export function sameGroups(a: ReadonlyMap<string, Readonly<Record<string, number
   return true
 }
 
-export async function loadGroups(client: Client, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<Map<string, Record<string, number>>>> {
-  const outcome = await client.request({ path: ENDPOINT.status }, { priority, epoch })
+/**
+ * `worktree` (the view's `SPC v w`) counts over the same overlay the tree is read with (`status --worktree`,
+ * moai-m4ez.u6a): the detail roll-up's bar and legend come from here and its n/n text from the tree, so a member only a
+ * sibling worktree holds has to be in both.
+ */
+export async function loadGroups(client: Client, priority: number = PRIORITY.list, epoch?: number, worktree = false): Promise<Loaded<Map<string, Record<string, number>>>> {
+  const outcome = await client.request({ path: ENDPOINT.status, ...(worktree ? { query: { worktree: '1' } } : {}) }, { priority, epoch })
   const output = answerOf(outcome)
   return output === undefined ? { ok: false, outcome } : { ok: true, value: groupsFrom(output) }
 }
 
-/** `/api/tree` with the order the page asks for (query.ts sortQuery): every row, where it stands, in moai's order. */
-export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<TreeRow[]>> {
-  const outcome = await client.request({ path: ENDPOINT.tree, query }, { priority, epoch })
+/**
+ * `/api/tree` with the order the page asks for (query.ts sortQuery): every row, where it stands, in moai's order.
+ * `worktree` (the view's `SPC v w`) places the rows only another git worktree holds the way the list reads them
+ * (`tui --json --deep --worktree`, moai-m4ez.gcp): the same overlay as {@link loadAllRows}, so no row of the list is
+ * missing from the tree. `archived` (the view's `SPC v o`) asks for the archive's lines too: without it the server
+ * leaves them out, and they were 95% of a 3 000-row tracker's 689 KB answer, read again on every write
+ * (moai-m4ez.4zq). The page reads the tree again when `SPC v o` turns, so the lines are there when the archive is drawn.
+ */
+export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false, archived = false): Promise<Loaded<TreeRow[]>> {
+  const asked = { ...query, ...(worktree ? { worktree: '1' } : {}), ...(archived ? { archived: '1' } : {}) }
+  const outcome = await client.request({ path: ENDPOINT.tree, query: asked }, { priority, epoch })
   const output = answerOf(outcome)
   if (output === undefined) return { ok: false, outcome }
   if (!Array.isArray(output)) return { ok: false, outcome: { kind: 'unreadable' } }
@@ -195,6 +209,16 @@ export function markArchived(rows: readonly Row[], active: ReadonlySet<string>):
 }
 
 /**
+ * Whether a board read that just ended should read the archive's rows. Only when that read was asked for the archive's
+ * lines too (`askedWithArchive`, the view as the read began): `SPC v o` turned on while it ran joined a read asked
+ * without them, and indexing the archive against a tree that lacks their lines puts those rows in the wrong place
+ * until the follow-up read. That read (loadBoard sees the view moved) asks again with them and loads the archive then.
+ */
+export function archiveDue(askedWithArchive: boolean, shownNow: boolean, running: boolean, loaded: boolean): boolean {
+  return askedWithArchive && shownNow && !running && !loaded
+}
+
+/**
  * The listed rows, then the archive's rows they do not hold (only while archived rows are shown), tagged
  * `archived: true` against the rows held now: a row the clock archived after the archive was read left `show --all`
  * and is in the archive's answer untagged (it was active then), and it stays in the list as an archived row.
@@ -235,8 +259,8 @@ export async function loadWikiPage(client: Client, slug: string): Promise<Loaded
  * answer is read like a whole one, as the lists are: one unreadable line anywhere in the tracker ends every command
  * non-zero with its whole answer still printed, and the detail of every row would otherwise fail beside a full list.
  */
-export async function loadDetail(client: Client, id: string, options: Pick<RequestOptions, 'epoch'> = {}): Promise<Loaded<Row>> {
-  const outcome = await client.request(ENDPOINT.issue(id), { priority: PRIORITY.detail, epoch: options.epoch })
+export async function loadDetail(client: Client, id: string, options: Pick<RequestOptions, 'epoch'> & { worktree?: boolean } = {}): Promise<Loaded<Row>> {
+  const outcome = await client.request(ENDPOINT.issue(id, options.worktree === true), { priority: PRIORITY.detail, epoch: options.epoch })
   const output = answerOf(outcome)
   if (output === undefined) return { ok: false, outcome }
   return isRecord(output) && typeof output.id === 'string' ? { ok: true, value: output as Row } : { ok: false, outcome: { kind: 'unreadable' } }
@@ -247,7 +271,7 @@ export async function loadDetail(client: Client, id: string, options: Pick<Reque
  * draws no project column and binds no digit.
  */
 export async function loadProjects(client: Client): Promise<Loaded<Project[]>> {
-  const outcome = await client.request({ path: ENDPOINT.projects }, { priority: PRIORITY.background })
+  const outcome = await client.request({ path: ENDPOINT.projects }, { priority: PRIORITY.background, cancellable: false })
   const output = answerOf(outcome)
   return output === undefined ? { ok: false, outcome } : { ok: true, value: projectsFrom(output) }
 }

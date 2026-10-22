@@ -38,11 +38,15 @@ test('versionLine writes what the TUI writes, in moai\'s own words', () => {
   assert.deepEqual(A.versionLine(about({ state: 'stale', tag: 'v0.18.0', heardAt: '2026-10-12T09:00:00Z', why: 'timeout' }), ko, now), { said: '0.18.0 · 최신 확인 안 함 (타임아웃)', tail: '3일 전에 본 판 v0.18.0' })
   assert.equal(A.versionLine(about({ state: 'stale', tag: 'v0.18.0', heardAt: '2026-10-15T01:00:00Z' }), en, now).tail, 'v0.18.0 seen today')
   assert.equal(A.versionLine(about({ state: 'stale', tag: 'v0.18.0', heardAt: '2099-01-01T00:00:00Z' }), en, now).tail, 'v0.18.0 seen earlier', 'a time ahead is not today')
+  // The TUI believes a heard-at up to a day ahead of the clock (`FUTURE_SLACK_SECS`); one second past that it does not.
+  const at = (offsetMs) => new Date(now + offsetMs).toISOString()
+  assert.equal(A.versionLine(about({ state: 'stale', tag: 'v0.18.0', heardAt: at(A.FUTURE_SLACK_MS - 1000) }), en, now).tail, 'v0.18.0 seen today', 'a clock a few hours off is still today')
+  assert.equal(A.versionLine(about({ state: 'stale', tag: 'v0.18.0', heardAt: at(A.FUTURE_SLACK_MS + 1000) }), en, now).tail, 'v0.18.0 seen earlier', 'past a day it is not believed')
   assert.deepEqual(A.versionLine(about(null), en, now), { said: '0.18.0' })
   assert.deepEqual(A.versionLine({ user: null, version: null, latest: null }, en, now), { said: '—' })
   assert.deepEqual(A.versionLine(null, en, now), { said: '—' })
   // Japanese and Chinese read moai's English, as the TUI does.
-  assert.equal(copyFor('ja').shell.version, en)
+  assert.deepEqual(copyFor('ja').shell.version, en)
 })
 
 test('the logo is the TUI\'s, the art centred as one block over the tagline; the info lines keep the TUI\'s columns', () => {
@@ -101,8 +105,8 @@ test('tips: the field test\'s sentences are all there, by kind, in Korean; Engli
   const en = copyFor('en').shell.tips
   assert.equal(en.groups.length, ko.groups.length)
   assert.deepEqual(en.groups.map((group) => group.tips.length), ko.groups.map((group) => group.tips.length), 'the same sentences, said in English')
-  assert.equal(copyFor('ja').shell.tips, en)
-  assert.equal(copyFor('zh').shell.tips, en)
+  assert.deepEqual(copyFor('ja').shell.tips, en)
+  assert.deepEqual(copyFor('zh').shell.tips, en)
 })
 
 test('tips: the header turns through them every 8 s by CSS, from a random place, and a click opens the page', () => {

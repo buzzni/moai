@@ -421,6 +421,9 @@ body.m-resizing { user-select: none; }
 body.m-resizing[data-resize="left"] { cursor: col-resize; }
 body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 
+/* The label of a menu row: it takes what the glyph and the key hint leave. */
+.m-menu-label { flex: 1; }
+
 /*
  * What a card of the kanban holds (view/board.ts): id, priority and count on one line, the title, and the chips
  * of the columns that are on. The lanes, the column heads and the card box are components.css (look-and-feel 5.7).
@@ -598,11 +601,12 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-brand-projects[hidden] { display: none; }
 .m-brand-project {
   display: block; padding: 0; border: 0; background: transparent; font: inherit; line-height: inherit; color: var(--muted);
-  text-align: left; white-space: pre; cursor: pointer; max-width: 28ch; overflow: hidden; text-overflow: ellipsis;
+  text-align: left; white-space: pre; cursor: pointer; max-width: 30ch; overflow: hidden; text-overflow: ellipsis;
 }
 .m-brand-key { color: var(--ok); }
 .m-brand-project:hover .m-brand-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
 .m-brand-project[data-current] { cursor: default; }
+.m-brand-project[data-current] .m-brand-here { color: var(--accent); }
 .m-brand-project[data-current] .m-brand-name { color: var(--accent); font-weight: 700; text-decoration: none; }
 /* Narrow: the logo yields first (with projects it needs the room sooner), then the project column (draw.rs `header`). */
 @container m-brand (max-width: 759px) { .m-brand[data-projects] .m-brand-logo { display: none; } }
@@ -639,7 +643,7 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-shell-notes > * { margin: 8px 8px 0; }
 .m-shell-notes > :last-child { margin-bottom: 8px; }
 .moai-hint { color: var(--muted); font-size: 12px; }
-.moai-offline:empty, .moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
+.moai-offline:empty, .moai-backoff:empty, .moai-notice:empty, .moai-error:empty, .moai-said:empty, .moai-archive-problem:empty, .moai-result:empty { display: none; }
 /* What moai said beside the lists: one line per line it said. */
 .moai-said { flex-direction: column; gap: 2px; }
 .moai-said > p { margin: 0; }
@@ -696,6 +700,14 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-zone-item { min-height: 28px; padding: 4px 8px; cursor: pointer; }
 .m-zone-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .m-zone-note[hidden] { display: none; }
+
+/* Placed here, not by a `style` attribute: the CSP's style-src holds no 'unsafe-inline'. */
+.m-filter { position: relative; flex: 1 1 200px; }
+.m-sort { position: relative; }
+.m-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px; }
+.m-filter .m-hints { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; }
+.m-sort > .m-sort-pop { position: absolute; top: 100%; right: 0; z-index: 20; }
+.m-sort > .m-sort-pop .m-menu-item { gap: 4px; }
 
 /*
  * Moai panel wiki tab (design.md 4.10). Built by view/wiki.ts. Needs tokens.css, components.css and markdown.css.
@@ -762,5 +774,67 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-wiki .m-split[data-position="bottom"] .m-split-detail { order: 0; flex: 0 0 auto; max-height: 35%; border-bottom: 1px solid var(--border); }
 .m-wiki .m-split[data-position="bottom"] .m-split-list { order: 2; }
 .m-wiki .m-split[data-position="bottom"] .m-split-resizer { display: none; }
+
+/* The detail pane (view/detail.ts). A sheet of its own, joined last (build.mjs): it used to be a <style> appended to <head> at run time, which the CSP's style-src 'self' refuses, and last is where that one stood in the cascade. */
+.moai-detail { display: flex; flex-direction: column; gap: 14px; padding: 12px 14px 16px; font-size: 13px; }
+.moai-detail-head { display: flex; align-items: flex-start; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+.moai-detail-headtext { flex: 1; min-width: 0; }
+.moai-detail-idline { display: flex; align-items: center; gap: 6px; color: var(--muted); font: 12px var(--mono); }
+.moai-detail-idline .moai-detail-glyph { position: relative; display: inline-block; width: 1.5ch; text-align: center; }
+.moai-detail-id { font-variant-numeric: tabular-nums; }
+.moai-detail-title { margin: 4px 0 8px; font-size: 16px; line-height: 1.35; font-weight: 600; overflow-wrap: anywhere; }
+.moai-detail-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.moai-detail-fields {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; padding: 10px 12px;
+  border-radius: var(--radius-card); background: var(--lane-bg);
+}
+.moai-detail-fields dt { color: var(--muted); font-size: 12px; line-height: 19px; }
+.moai-detail-fields dd { margin: 0; overflow-wrap: anywhere; }
+.moai-detail-ids { margin: 6px 0 0; padding: 0; list-style: none; }
+.moai-detail-ids li { padding: 2px 0; overflow-wrap: anywhere; }
+.moai-detail-mark { display: inline-block; width: 1.2em; color: var(--muted); }
+.moai-detail-rollup { margin: 6px 0 4px; }
+.moai-detail-bar { display: flex; gap: 1px; height: 8px; border-radius: 4px; background: var(--lane-bg); box-shadow: inset 0 0 0 1px var(--border-soft); overflow: hidden; }
+.moai-detail-bar > span { flex: none; height: 100%; }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status] { --dot: var(--border); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="done"] { --dot: var(--ok); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="review"] { --dot: var(--review); }
+.moai-detail :is(.moai-detail-bar > span, .moai-detail-legend > span)[data-status="in_progress"] { --dot: var(--warn); }
+.moai-detail-bar > span { background: var(--dot); }
+.moai-detail-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+.moai-detail-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.moai-detail-legend > span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--dot); }
+.moai-detail-body { overflow-wrap: anywhere; margin-top: 6px; }
+.moai-detail-raw { margin: 6px 0 0; padding: 10px 12px; border-radius: var(--radius-card); background: var(--lane-bg); white-space: pre-wrap; font-family: var(--mono, monospace); font-size: 12px; }
+/* A section's name, and a hairline from it to the right edge: the sections read apart without boxes. */
+.moai-detail h3, .moai-detail summary { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; font-weight: 600; color: var(--text); }
+.moai-detail h3::after, .moai-detail summary::after { content: ""; flex: 1; height: 1px; background: var(--border-soft); }
+.moai-detail summary { cursor: pointer; list-style: none; }
+.moai-detail summary::-webkit-details-marker { display: none; }
+.moai-detail summary::before { content: "\25B8"; color: var(--muted); font-size: 10px; transition: transform .15s; }
+.moai-detail details[open] > summary::before { transform: rotate(90deg); }
+.moai-detail-list { margin: 6px 0 0; padding: 0; list-style: none; }
+.moai-detail-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 0; overflow-wrap: anywhere; }
+/* An id or a hash, then its words: the words wrap beside it, not under it. */
+.moai-detail-list li:has(> .moai-detail-hash) { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.moai-detail-hash {
+  flex: none; padding: 0 6px; border-radius: var(--radius-card); background: var(--muted-bg); color: var(--muted);
+  font: 11px/18px var(--mono, monospace);
+}
+.moai-detail-meta { color: var(--muted); }
+/* The history as a timeline: a line down the left, a dot on it for each entry, the colour of what the entry did. */
+/* The line runs from each dot to the next one, so a history of one entry has a dot and no line. */
+.moai-detail-timeline { position: relative; padding-left: 18px; }
+.moai-detail-timeline > li:not(:last-child)::after { content: ""; position: absolute; left: -14px; top: 17px; bottom: -8px; border-left: 1px solid color-mix(in srgb, var(--muted) 55%, transparent); }
+.moai-detail-timeline > li { position: relative; display: block; padding: 3px 0 5px; }
+.moai-detail-timeline > li::before {
+  content: ""; position: absolute; left: -18px; top: 8px; width: 9px; height: 9px; box-sizing: border-box;
+  border: 2px solid var(--muted); border-radius: 50%; background: var(--bg);
+}
+.moai-detail-timeline > li[data-kind="create"]::before { border-color: var(--ok); }
+.moai-detail-timeline > li[data-kind="status"]::before { border-color: var(--accent); }
+.moai-detail-timeline > li[data-kind="note"]::before { border-color: var(--warn); }
+.moai-detail-timeline .moai-detail-meta { display: block; font-size: 11px; }
+.moai-detail-timeline > li.moai-detail-meta::before { display: none; }
 
 [hidden]{display:none!important}
