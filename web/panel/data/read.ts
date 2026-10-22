@@ -15,6 +15,10 @@
  * (a row removed, or one only the archive holds) still writes the rest and prints that answer, but ends the run
  * non-zero; the answer is handed out all the same, with `missing` naming it.
  *
+ * The worktree overlay (moai-m4ez.gcp). With `SPC v w` on the writes carry `?worktree=1` (`read --worktree`): the ids are
+ * looked up in the rows the overlay shows, so a row only another worktree holds is marked, and a row another worktree
+ * changed later is marked at the version drawn. Without it a write sees the main checkout alone, as before.
+ *
  * Stale draws. The CLI takes no value: it writes the row's *current* `updated_at`, so a row changed after it was drawn
  * is marked read for its newer version. Callers read the rows again after every write (main.ts marked()).
  */
@@ -27,11 +31,12 @@ export const unreadIds = (rows: readonly Row[]): string[] => rows.filter(isUnrea
 
 // ── writes ───────────────────────────────────────────────────────────
 
-/** The three writes `moai web` takes (src/web/api.rs write_argv_of); no body, no query of their own. */
+/** The three writes `moai web` takes (src/web/api.rs write_argv_of); no body. `worktree` adds the one query they take. */
+const post = (path: string, worktree: boolean): Endpoint => ({ path, method: 'POST', ...(worktree ? { query: { worktree: '1' } } : {}) })
 export const READ_ENDPOINT = {
-  one: (id: string): Endpoint => ({ path: `/api/read/${encodeURIComponent(id)}`, method: 'POST' }),
-  all: { path: '/api/read-all', method: 'POST' } as Endpoint,
-  group: (id: string): Endpoint => ({ path: `/api/read-group/${encodeURIComponent(id)}`, method: 'POST' }),
+  one: (id: string, worktree = false): Endpoint => post(`/api/read/${encodeURIComponent(id)}`, worktree),
+  all: (worktree = false): Endpoint => post('/api/read-all', worktree),
+  group: (id: string, worktree = false): Endpoint => post(`/api/read-group/${encodeURIComponent(id)}`, worktree),
 } as const
 
 /** What `moai read --json` prints. */
@@ -75,13 +80,13 @@ async function write(client: Client, endpoint: Endpoint): Promise<Marked> {
 }
 
 /** `r`: the drawn row. Only its id travels; see the note on stale draws above. */
-export const markRead = (client: Client, row: Pick<Row, 'id'>): Promise<Marked> => write(client, READ_ENDPOINT.one(row.id))
+export const markRead = (client: Client, row: Pick<Row, 'id'>, worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.one(row.id, worktree))
 
 /** `SPC m a`: everything unread that came to me. */
-export const markAllRead = (client: Client): Promise<Marked> => write(client, READ_ENDPOINT.all)
+export const markAllRead = (client: Client, worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.all(worktree))
 
 /** `SPC m g`: a group's members and what is drawn under it. */
-export const markGroupRead = (client: Client, groupId: string): Promise<Marked> => write(client, READ_ENDPOINT.group(groupId))
+export const markGroupRead = (client: Client, groupId: string, worktree = false): Promise<Marked> => write(client, READ_ENDPOINT.group(groupId, worktree))
 
 /**
  * The three writes as the keys call them (keys/wiring.ts `r`, `SPC m a`, `SPC m g`), each answering null when it went
@@ -97,14 +102,14 @@ export interface ReadMarks {
   group(id: string): Promise<Outcome | null>
 }
 
-export function readMarks(client: Client, after: (written: ReadonlySet<string>) => Promise<unknown>): ReadMarks {
+export function readMarks(client: Client, after: (written: ReadonlySet<string>) => Promise<unknown>, overlay: () => boolean = () => false): ReadMarks {
   const marked = async (writing: Promise<Marked>): Promise<Outcome | null> => {
     const done = await writing
     if (!done.ok) return done.outcome
     await after(new Set(done.result.read))
-    // Nothing written, and the answer says why: an id moai's tracker does not hold — a row only another worktree's
-    // has, drawn under `SPC v w` — or one a value written by hand holds back. Told in moai's own words (the TUI tells
-    // it too) rather than left to a NEW that stays on screen in silence.
+    // Nothing written, and the answer says why: an id moai's tracker does not hold (a row removed since it was drawn;
+    // a row only another worktree has is found while the overlay is on) or one a value written by hand holds back.
+    // Told in moai's own words (the TUI tells it too) rather than left to a NEW that stays on screen in silence.
     const { read, missing, held, problems } = done.result
     if (read.length === 0 && missing.length + held.length > 0) {
       const said = [...problems, ...(done.said ?? [])]
@@ -113,8 +118,8 @@ export function readMarks(client: Client, after: (written: ReadonlySet<string>) 
     return null
   }
   return {
-    one: (id) => marked(markRead(client, { id })),
-    all: () => marked(markAllRead(client)),
-    group: (id) => marked(markGroupRead(client, id)),
+    one: (id) => marked(markRead(client, { id }, overlay())),
+    all: () => marked(markAllRead(client, overlay())),
+    group: (id) => marked(markGroupRead(client, id, overlay())),
   }
 }

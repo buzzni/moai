@@ -127,6 +127,12 @@ test('the tree is /api/tree with the order asked for; an answer that is not a li
   assert.deepEqual(await loadTree(client), { ok: false, outcome: { kind: 'unreadable' } })
 })
 
+test('with the overlay on the tree is asked with worktree=1, so a row only another worktree holds is placed (moai-m4ez.gcp)', async () => {
+  const client = fakeClient({ '/api/tree?reverse=1&sort=updated%3Adesc&worktree=1': passed(TREE), '/api/tree?worktree=1': passed(TREE) })
+  assert.deepEqual((await loadTree(client, { sort: 'updated:desc', reverse: '1' }, undefined, undefined, true)).value, TREE)
+  assert.deepEqual((await loadTree(client, {}, undefined, undefined, true)).value, TREE)
+})
+
 test('what a filter and a search find is both lists with fields=id; moai\'s refusal is the outcome', async () => {
   const todo = await fixture('match-todo.json')
   const client = fakeClient({

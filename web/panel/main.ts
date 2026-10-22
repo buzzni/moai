@@ -151,7 +151,7 @@ async function start(): Promise<void> {
     const { sort, view } = store.getState()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load)
+    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree)
     const counting = loadGroups(client, PRIORITY.list, load)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
@@ -281,7 +281,9 @@ async function start(): Promise<void> {
     const abort = new AbortController()
     const limit = setTimeout(() => abort.abort(), STAMP_LIMIT_MS)
     try {
-      const answer = await fetcher('/api/stamp', { signal: abort.signal, headers: { Accept: 'application/json' } })
+      // With the overlay on the stamp also folds the other worktrees' snapshots (`/api/stamp?worktree=1`): a write there
+      // changes what the overlaid list says, so the page must look again within the poll. Off, it stays as it was.
+      const answer = await fetcher(store.getState().view.worktree ? '/api/stamp?worktree=1' : '/api/stamp', { signal: abort.signal, headers: { Accept: 'application/json' } })
       const body = JSON.parse(await answer.text()) as { stamp?: unknown }
       return answer.status === 200 && typeof body.stamp === 'string' ? body.stamp : `refused-${++refused}`
     } catch (error) {
@@ -338,7 +340,7 @@ async function start(): Promise<void> {
       refresher.refresh({ fresh: true }),
       shown && isUnread(shown.row) && written.has(shown.id) ? rereadDetail(shown.id, loads + 1) : undefined,
     ])
-  })
+  }, () => store.getState().view.worktree)
 
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
   function said(loaded: Extract<Loaded<unknown>, { ok: false }>): string {

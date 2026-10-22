@@ -132,9 +132,14 @@ export async function loadGroups(client: Client, priority: number = PRIORITY.lis
   return output === undefined ? { ok: false, outcome } : { ok: true, value: groupsFrom(output) }
 }
 
-/** `/api/tree` with the order the page asks for (query.ts sortQuery): every row, where it stands, in moai's order. */
-export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<TreeRow[]>> {
-  const outcome = await client.request({ path: ENDPOINT.tree, query }, { priority, epoch })
+/**
+ * `/api/tree` with the order the page asks for (query.ts sortQuery): every row, where it stands, in moai's order.
+ * `worktree` (the view's `SPC v w`) places the rows only another git worktree holds the way the list reads them
+ * (`tui --json --deep --worktree`, moai-m4ez.gcp): the same overlay as {@link loadAllRows}, so no row of the list is
+ * missing from the tree.
+ */
+export async function loadTree(client: Client, query: Record<string, string> = {}, priority: number = PRIORITY.list, epoch?: number, worktree = false): Promise<Loaded<TreeRow[]>> {
+  const outcome = await client.request({ path: ENDPOINT.tree, query: worktree ? { ...query, worktree: '1' } : query }, { priority, epoch })
   const output = answerOf(outcome)
   if (output === undefined) return { ok: false, outcome }
   if (!Array.isArray(output)) return { ok: false, outcome: { kind: 'unreadable' } }

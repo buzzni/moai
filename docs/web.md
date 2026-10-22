@@ -72,8 +72,11 @@ it. `SPC v r` switches the body between rendered markdown and the raw text.
   opens the sort editor
 - **View** (`SPC v`) shows or hides deferred work (`l`), backlog items (`b`) and
   the archive (`o`); `w` overlays what the other worktrees changed, as
-  `moai show --worktree` does (on when the page opens); `a` shows everything but
-  the archive, `1`~`9` toggle the nth status column
+  `moai show --worktree` does (on when the page opens); the overlay covers the
+  list, the tree that places each row under its epic, the stamp the page follows
+  and the read marks, so a row only a sibling worktree holds stands under its
+  epic like any other; `a` shows everything but the archive, `1`~`9` toggle the
+  nth status column
 - **Column** (`SPC c`) picks what a list row carries: `i` id, `p` priority,
   `a` assignee, `c` created, `u` updated, `n` counts, `t` tags, `e` epic,
   `h` names
@@ -105,6 +108,10 @@ The one exception is read marks. `r` marks the issue under the cursor read,
 same as `moai read`, which keeps them in a file of your own beside your user
 config and never in the tracker. The server takes that write only from the page
 itself: a request another site sends is refused.
+With the worktree overlay on (`SPC v w`), the marks are made on the version the
+overlay shows, as `moai read --worktree` does: a row only another worktree holds
+can be marked, and a row another worktree changed later is marked at that later
+version, so its NEW goes away. Nothing is written to the other worktree.
 
 Nothing is stored for the page either: each list is read again when you ask.
 Search, filters and sort are moai's own — the server hands them to `moai show`
@@ -119,7 +126,9 @@ window — the page notices and reads again. It asks the server for a short
 stamp, folded from the files its answers come from (the tracker's snapshot,
 journal, archive and config, plus your own user config and the read marks kept
 beside it, which say what is new to you), and reloads the list only when the
-stamp has changed. It asks every two seconds while the tab is visible, and not at
+stamp has changed. With the worktree overlay on, the stamp also folds the other
+worktrees' snapshots, so a write in a sibling worktree moves the page within
+those two seconds; with it off, a sibling's writes leave the page alone. It asks every two seconds while the tab is visible, and not at
 all while it is hidden; shown again, it asks at once. The issue open in the
 detail is read again with it, and the cursor, the folded groups and what you are
 typing stay where they were. A tracker nobody touches costs one tiny question and
