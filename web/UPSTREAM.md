@@ -45,6 +45,10 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
   busy retries, compatibility probe (`data/compat.ts`), `prime` fallback, archive paging and the clock hold are gone
   with it. Read marks (`r`, `SPC m a`, `SPC m g`) are gone — the page only reads; NEW still shows. The words come
   from `/api/boot`'s `lang`.
+- **Projects (moai-o14f), which upstream has not.** Every call names the project the page reads
+  (`?project=<path>`, `data/client.ts` `withProject`). The header draws the TUI's third column of registered projects
+  (`<1> name` …, `view/brand.ts`; the TUI's `<0>` layer has no page), `1`–`9` and `SPC p 1`–`9` open one as a new page
+  (`data/projects.ts`).
 - **The second set of rules (moai-jshy.hfr).** The panel had rebuilt moai's `nav.rs`, `query.rs` and parts of
   `report.rs` in TS. Those are gone; the page reads what moai gives:
   - where a row stands, whether it opens, its `n/n` and the order of every listing: `/api/tree`

@@ -23,6 +23,24 @@ export interface Endpoint {
 /** The `fetch` the client calls — the browser's, or a test's. */
 export type Fetch = (url: string, init: { signal: AbortSignal; headers: Record<string, string> }) => Promise<{ status: number; text(): Promise<string> }>
 
+/**
+ * The project the page reads: `?project=<path>` of the page's own address, or null for the server's own tracker
+ * (moai-o14f). The server answers it only for a registered project (`/api/projects`), else 403 `not_registered`.
+ */
+export function projectOf(search: string): string | null {
+  const value = new URLSearchParams(search).get('project')
+  return value ? value : null
+}
+
+/**
+ * A {@link Fetch} that names `project` on every call it makes — every read, the boot and the stamp too — so the whole
+ * page reads that project. Null hands the fetch back as it is.
+ */
+export function withProject(fetcher: Fetch, project: string | null): Fetch {
+  if (!project) return fetcher
+  return (url, init) => fetcher(`${url}${url.includes('?') ? '&' : '?'}project=${encodeURIComponent(project)}`, init)
+}
+
 export type Outcome =
   | { kind: 'passed'; output: unknown; notes?: string[] }
   /** The server could not be reached: `moai web` stopped, or the network between. */

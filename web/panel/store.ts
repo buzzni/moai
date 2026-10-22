@@ -12,6 +12,7 @@
 import type { Outcome } from './data/client.js'
 import { pathKey, type Path, type Row, type TreeRow } from './data/index.js'
 import { DEFAULT_SORT, type Sort } from './data/query.js'
+import type { ProjectEntry } from './data/projects.js'
 import type { Boot } from './data/source.js'
 import { toolbarReduce, type ToolbarAction, type ToolbarState } from './view/toolbar.js'
 import type { WikiState } from './view/wiki.js'
@@ -148,6 +149,11 @@ export interface State {
    * store starts from it (the mounted pane keeps its own state across tab switches).
    */
   wiki: WikiState
+  /**
+   * The projects the header lists and the digits jump to (data/projects.ts headerProjects, moai-o14f): read once from
+   * `/api/projects` after the boot. Empty until then, and for good when nothing is registered or the read failed.
+   */
+  projects: ProjectEntry[]
 }
 
 /**
@@ -222,6 +228,7 @@ export function initialState(): State {
     boot: null,
     matched: { key: '', ids: null, loading: false, problem: null },
     wiki: initialWiki(),
+    projects: [],
   }
 }
 
@@ -274,6 +281,8 @@ export type Action =
   | { type: 'detail-closed' }
   /** Settings read back at boot (already cleaned by data/memory.ts); what is left out keeps its value. */
   | { type: 'restore'; settings: Partial<Remembered> }
+  /** The header's projects (data/projects.ts headerProjects). */
+  | { type: 'projects'; projects: ProjectEntry[] }
 
 /** Where the detail actually stands at this panel width: a narrow panel forces the bottom. */
 export const detailPosition = (detail: DetailSettings, width: number): DetailPosition => effectivePosition(width, detail.position)
@@ -391,6 +400,8 @@ export function reduce(state: State, action: Action): State {
       return { ...state, shown: { value: null, loading: false, problem: action.problem } }
     case 'detail-closed':
       return { ...state, shown: idle(), focus: 'list' }
+    case 'projects':
+      return { ...state, projects: action.projects }
     case 'restore': {
       const { tab, detail } = action.settings
       if (tab === undefined && detail === undefined) return state

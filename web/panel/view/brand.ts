@@ -4,8 +4,15 @@
  * column. The TUI's labels are English in every language, and so are these. A short panel leaves the header out and a
  * narrow one the logo (shell.css), as the TUI does on a short or narrow screen. What it says comes from `/api/boot`
  * (data/about.ts; upstream read it from `status`, which moai's does not carry).
+ *
+ * Right of User and Version stands the TUI's third column, the registered projects (draw.rs `with_projects`,
+ * moai-o14f): `<1> name` … `<9> name`, six to a column, the tenth and on without a number. The TUI's `<0>` (its
+ * all-projects layer) has no page and is left out. The project on screen is marked as the TUI's shimmer marks it — here
+ * in the accent, bold, and `aria-current`, so the colour is not alone — and a click opens another. A narrow header
+ * drops the logo first and then this column (shell.css).
  */
 import { versionLine, type About, type VersionCopy } from '../data/about.ts'
+import type { ProjectEntry } from '../data/projects.ts'
 import { el } from './components.ts'
 
 /** How long one tip stands before the next (se-irhr). */
@@ -77,8 +84,15 @@ export function infoLines(about: About | null, copy: VersionCopy, now = Date.now
 
 export interface Brand {
   el: HTMLElement
-  render(about: About | null): void
+  /** Draws the info lines and the projects (none: no column). */
+  render(about: About | null, projects?: readonly ProjectEntry[]): void
 }
+
+/** The TUI header's rows (`LOGO.len()`): the project column fills six rows, then starts the next column. */
+export const PROJECT_ROWS = 6
+
+/** `<n> ` before a numbered project; the width of `<9> ` in spaces before one without a number (draw.rs `numbered`). */
+export const projectKey = (number: number | null): string => (number === null ? ' '.repeat('<9> '.length) : `<${number}> `)
 
 /**
  * The tips the header turns through under the Version line, and what a click on one does (opens the tips page).
@@ -90,7 +104,7 @@ export interface BrandTips {
   open(): void
 }
 
-export function mountBrand(doc: Document, copy: VersionCopy, tips?: BrandTips): Brand {
+export function mountBrand(doc: Document, copy: VersionCopy, tips?: BrandTips, open?: (entry: ProjectEntry) => void): Brand {
   const lines = logoLines()
   const art = lines.slice(0, -1)
   const svg = doc.createElementNS(SVG, 'svg')
@@ -104,19 +118,49 @@ export function mountBrand(doc: Document, copy: VersionCopy, tips?: BrandTips): 
   const told = el(doc, 'div', { class: 'm-brand-told' })
   const info = el(doc, 'div', { class: 'm-brand-info' }, told)
   if (tips && tips.tips.length) info.append(tipLine(doc, tips))
-  const node = el(doc, 'header', { class: 'm-brand', 'aria-label': 'moai' }, logo, info)
+  const projects = el(doc, 'nav', { class: 'm-brand-projects', 'aria-label': 'Projects', hidden: true })
+  const node = el(doc, 'header', { class: 'm-brand', 'aria-label': 'moai' }, logo, info, projects)
   let drawn = ''
+  let drawnProjects = ''
   return {
     el: node,
-    render(about) {
+    render(about, entries = []) {
       const lines = infoLines(about, copy)
       const key = JSON.stringify(lines)
-      if (key === drawn) return
-      drawn = key
-      told.replaceChildren(...lines.map(([label, said]) =>
-        el(doc, 'div', { class: 'm-brand-line' }, el(doc, 'span', { class: 'm-brand-label' }, `${pad(label, LABEL)}${label ? ' : ' : '   '}`), said)))
+      if (key !== drawn) {
+        drawn = key
+        told.replaceChildren(...lines.map(([label, said]) =>
+          el(doc, 'div', { class: 'm-brand-line' }, el(doc, 'span', { class: 'm-brand-label' }, `${pad(label, LABEL)}${label ? ' : ' : '   '}`), said)))
+      }
+      const listed = JSON.stringify(entries)
+      if (listed === drawnProjects) return
+      drawnProjects = listed
+      projects.replaceChildren(...entries.map((entry) => projectEl(doc, entry, open)))
+      projects.hidden = entries.length === 0
+      projects.style.setProperty('--m-brand-project-cols', String(Math.ceil(entries.length / PROJECT_ROWS) || 1))
+      node.toggleAttribute('data-projects', entries.length > 0)
     },
   }
+}
+
+/** One project of the column: its key as the menu draws a key, its name dim — or marked, the one on screen. */
+function projectEl(doc: Document, entry: ProjectEntry, open?: (entry: ProjectEntry) => void): HTMLElement {
+  const node = el(doc, 'button', {
+    type: 'button',
+    class: 'm-brand-project',
+    title: entry.path,
+    'data-path': entry.path,
+    'data-number': entry.number === null ? null : String(entry.number),
+    'data-current': entry.current ? '' : null,
+    'aria-current': entry.current ? 'page' : null,
+    'aria-keyshortcuts': entry.number === null ? null : String(entry.number),
+  }, el(doc, 'span', { class: 'm-brand-key' }, projectKey(entry.number)), el(doc, 'span', { class: 'm-brand-name' }, entry.name))
+  node.addEventListener('click', () => {
+    if (!entry.current) open?.(entry)
+  })
+  // The keys stay where they were: a click must not leave the focus on the button, where SPC would click it again.
+  node.addEventListener('mousedown', (event) => event.preventDefault())
+  return node
 }
 
 /**

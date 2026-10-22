@@ -42,6 +42,22 @@
 .m-tips-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .m-tips-text::before { content: "\201C"; color: var(--muted); }
 .m-tips-text::after { content: "\201D"; color: var(--muted); }
+/* The projects (view/brand.ts, moai-o14f): the TUI's third column, right of User and Version (draw.rs `with_projects`).
+   Six rows to a column, then the next column; the key in the SPC menu's key colour (the TUI's MENU_KEY, light green),
+   the name dim; the project on screen in the accent and bold, and aria-current (the TUI shimmers it). */
+.m-brand-projects { flex: none; display: grid; grid-auto-flow: column; grid-template-rows: repeat(6, auto); column-gap: 2ch; align-content: start; padding-left: 1ch; }
+.m-brand-projects[hidden] { display: none; }
+.m-brand-project {
+  display: block; padding: 0; border: 0; background: transparent; font: inherit; line-height: inherit; color: var(--muted);
+  text-align: left; white-space: pre; cursor: pointer; max-width: 28ch; overflow: hidden; text-overflow: ellipsis;
+}
+.m-brand-key { color: var(--ok); }
+.m-brand-project:hover .m-brand-name { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.m-brand-project[data-current] { cursor: default; }
+.m-brand-project[data-current] .m-brand-name { color: var(--accent); font-weight: 700; text-decoration: none; }
+/* Narrow: the logo yields first (with projects it needs the room sooner), then the project column (draw.rs `header`). */
+@container m-brand (max-width: 759px) { .m-brand[data-projects] .m-brand-logo { display: none; } }
+@container m-brand (max-width: 479px) { .m-brand-projects { display: none; } }
 @container m-brand (max-width: 459px) { .m-brand-logo { display: none; } .m-brand-info { padding-left: 1ch; } }
 @media (max-height: 599px) { .m-brand { display: none; } }
 

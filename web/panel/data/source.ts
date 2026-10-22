@@ -18,10 +18,12 @@
  *   {@link loadWikiPage}); the wiki view parses them.
  * - What the page boots on — the language, the columns and their glyphs — is `/api/boot` ({@link loadBoot}), which
  *   the server answers itself, without the envelope.
+ * - The registered projects the header lists are `/api/projects` (`project ls --json`, {@link loadProjects}).
  */
 import { latestOf, userOf, type Latest } from './about.js'
 import { PRIORITY, answerOf, outcomeOf, type Client, type Endpoint, type Fetch, type Outcome, type RequestOptions } from './client.js'
 import type { Row, TreeRow } from './index.js'
+import { projectsFrom, type Project } from './projects.js'
 import { splitItems } from './query.js'
 
 export const ENDPOINT = {
@@ -32,6 +34,7 @@ export const ENDPOINT = {
   backlog: '/api/backlog',
   issue: (id: string): Endpoint => ({ path: `/api/issue/${encodeURIComponent(id)}` }),
   tree: '/api/tree',
+  projects: '/api/projects',
   wiki: '/api/wiki',
   wikiPage: (slug: string): Endpoint => ({ path: `/api/wiki/${slug.split('/').map(encodeURIComponent).join('/')}` }),
 } as const
@@ -231,6 +234,16 @@ export async function loadDetail(client: Client, id: string, options: Pick<Reque
   const output = answerOf(outcome)
   if (output === undefined) return { ok: false, outcome }
   return isRecord(output) && typeof output.id === 'string' ? { ok: true, value: output as Row } : { ok: false, outcome: { kind: 'unreadable' } }
+}
+
+/**
+ * The registered projects (`moai project ls --json`), read once after the boot. A failure is the outcome: the page then
+ * draws no project column and binds no digit.
+ */
+export async function loadProjects(client: Client): Promise<Loaded<Project[]>> {
+  const outcome = await client.request({ path: ENDPOINT.projects }, { priority: PRIORITY.background })
+  const output = answerOf(outcome)
+  return output === undefined ? { ok: false, outcome } : { ok: true, value: projectsFrom(output) }
 }
 
 /** A board column only the board draws — not one of the configured statuses (src/web/boot.rs Column). */

@@ -2,15 +2,19 @@
  * Boots the page `moai web` serves: reads `/api/boot` (the language, the columns), restores the remembered
  * settings, wires the store to the data layer and mounts the shell (view/shell.ts), which renders from the store.
  * Built by build.mjs into src/web/dist/app.js.
+ *
+ * The page reads one project: its address's `?project=<path>` (a registered one, moai-o14f), else the server's own
+ * tracker. Every call names it (data/client.ts withProject); another project is another page (data/projects.ts).
  */
-import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, requestKey, type Fetch } from './data/client.js'
+import { createClient, PANEL_CLIENT_OPTIONS, PRIORITY, projectOf, requestKey, withProject, type Fetch } from './data/client.js'
 import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, remember } from './data/memory.js'
 import { useNaming } from './data/people.js'
+import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
-  loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
+  loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
 import { COPY, copyFor } from './i18n/index.js'
@@ -21,7 +25,12 @@ import { PANES } from './view/panes.js'
 import { describe, mountShell, type Activity } from './view/shell.js'
 import type { WikiSource } from './view/types.js'
 
-const fetcher: Fetch = (url, init) => window.fetch(url, init)
+/** The browser's fetch, naming no project: the home's boot is read through it. */
+const homeFetcher: Fetch = (url, init) => window.fetch(url, init)
+/** The project this page reads (`?project=`), or null for the server's own tracker. */
+const project = projectOf(window.location.search)
+/** Every call the page makes — reads, the boot, the stamp — names that project. */
+const fetcher: Fetch = withProject(homeFetcher, project)
 
 /** How long `/api/stamp` may take before the server counts as out of reach. */
 const STAMP_LIMIT_MS = 5_000
@@ -48,6 +57,32 @@ async function start(): Promise<void> {
   if (booted.ok) useBoot(booted.value)
   // Up to 3 reads at once (data/client.ts PANEL_CLIENT_OPTIONS).
   const client = createClient(fetcher, PANEL_CLIENT_OPTIONS)
+
+  /**
+   * The home: the server's own tracker. Its root is the boot's when the page reads it, else the boot asked without the
+   * project (once). `null` when that boot could not be read: the header then lists the registered projects alone.
+   */
+  async function homeOf(): Promise<{ root: string; name: string } | null> {
+    if (!project) return booted.ok ? { root: booted.value.root, name: booted.value.project } : null
+    const home = await loadBoot(homeFetcher)
+    return home.ok ? { root: home.value.root, name: home.value.project } : null
+  }
+  let homeRoot: string | null = null
+  /**
+   * The registered projects, read once after the boot (`/api/projects`): the header's column and the digits. Nothing
+   * registered, or a read that failed, leaves both out and nothing else changes.
+   */
+  async function readProjects(): Promise<void> {
+    const [listed, home] = await Promise.all([loadProjects(client), homeOf()])
+    homeRoot = home?.root ?? null
+    if (!listed.ok || listed.value.length === 0) return
+    store.dispatch({ type: 'projects', projects: headerProjects(listed.value, home, project) })
+  }
+  /** Another project is another page: `/` for the home, `/?project=<path>` for a registered one. */
+  function openProject(entry: ProjectEntry): void {
+    if (entry.current) return
+    window.location.assign(projectHref(entry.path, homeRoot ?? (entry.home ? entry.path : null)))
+  }
 
   // The index is built once per read, not per render: again when the rows, the tree or the archive shown change.
   let indexed: { rows: Row[]; tree: BoardData['tree']; archive: Row[] | null; index: IssueIndex } | null = null
@@ -319,15 +354,17 @@ async function start(): Promise<void> {
       // Up to three reads go at once (the list is three of them): Cancel stops every one, and the reads that wait
       // behind them, in one step (data/client.ts cancelAll) rather than letting the next queued read start in the freed slot.
       cancel: () => client.cancelAll(),
+      openProject,
     },
   })
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  wireKeys({ document, store, shell, copy })
+  wireKeys({ document, store, shell, copy, openProject })
 
   document.body.tabIndex = -1
   document.body.focus({ preventScroll: true })
+  void readProjects()
   await refresher.refresh()
 }
 

@@ -9,6 +9,7 @@
 // open, `prompt` while a search or filter input has the caret, `wiki` on the wiki tab, `browse` otherwise.
 
 import { sortDefault, type SortDefault } from "../data/memory.ts"
+import { entryOf, numberedNames, type ProjectEntry } from "../data/projects.ts"
 import { SORT_KEYS, sortEdit, type Sort, type SortKey } from "../data/query.ts"
 import type { Copy } from "../i18n/index.ts"
 import type { ColumnName, State, Store } from "../store.ts"
@@ -55,6 +56,7 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
     // is this field alone, pressing flips it", which a dropped field would make untrue.
     sort: state.sort.fields.map((f) => ({ field: f.key, desc: f.dir === "desc" })),
     cells: { ...state.columns },
+    projects: numberedNames(state.projects),
   }
 }
 
@@ -71,6 +73,11 @@ export interface KeyWiringOptions {
   copy: Copy
   /** Defaults to the navigator's (detectPlatform). */
   platform?: Platform
+  /**
+   * Opens another project (`1`–`9`, `SPC p 1`–`9`): main.ts navigates to it (data/projects.ts projectHref). The project
+   * on screen is not opened again.
+   */
+  openProject?: (entry: ProjectEntry) => void
   /**
    * Where `D` saves the default sort; defaults to the panel's shared one. An emptied order returns to the store's
    * `defaultSort`, which `D` sets and data/memory.ts remember() reads from the same storage at boot: pass both the same one.
@@ -264,6 +271,14 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     setSort(sortEdit(store.getState().sort, field, how))
   }
 
+  // ── projects ──
+  /** `1`–`9` and `SPC p 1`–`9`: the project with that number, unless it is the one on screen (the TUI stays put). */
+  const jump: Handler = (a) => {
+    const entry = entryOf(store.getState().projects, Number(a.args?.number))
+    if (!entry || entry.current) return
+    options.openProject?.(entry)
+  }
+
   const handlers: Record<string, Handler> = {
     "move.down": move,
     "move.up": move,
@@ -291,6 +306,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       if (state.search.open || state.search.text) toolbar({ type: "search-close" })
       if (state.filter.text || state.filter.applied) store.dispatch({ type: "filter", text: "" })
     },
+    "project.jump": jump,
     help: (a) => help.open(a.mode, context()),
     "tab.list": tab("list"),
     "tab.board": tab("board"),

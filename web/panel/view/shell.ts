@@ -10,6 +10,7 @@
 import { aboutFrom } from "../data/about.ts"
 import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
+import type { ProjectEntry } from "../data/projects.ts"
 import { refreshTime } from "../data/refresh.ts"
 import type { Copy } from "../i18n/index.ts"
 import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
@@ -37,6 +38,8 @@ export interface ShellIntents {
   /** Cursor on the row and its detail read. */
   choose(id: string): void
   cancel(): void
+  /** A project in the header was clicked: main.ts opens it (data/projects.ts projectHref). */
+  openProject?(entry: ProjectEntry): void
 }
 
 export interface ShellOptions {
@@ -221,7 +224,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   // that opens the tips page (view/tips.ts).
   const platform = /Mac|iPhone|iPad/.test(win?.navigator.platform ?? "") ? "mac" : "other"
   const tipsPage = createTips(doc, copy.shell.tips, platform)
-  const brand = mountBrand(doc, copy.shell.version, { tips: allTips(copy.shell.tips), label: copy.shell.tips.openAll, open: () => tipsPage.open() })
+  const brand = mountBrand(doc, copy.shell.version, { tips: allTips(copy.shell.tips), label: copy.shell.tips.openAll, open: () => tipsPage.open() }, (entry) => intents.openProject?.(entry))
   const shell = el(doc, "div", { class: "m-shell" }, brand.el, tabbar, toolbar, head, body, status, tipsPage.el)
   root.replaceChildren(shell)
 
@@ -366,7 +369,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     explain(state.board.problem ?? (state.detail.visible ? null : state.shown.problem))
     explainSaid(state.board.value?.notes ?? [])
     explainArchive(state.archiveProblem)
-    brand.render(aboutFrom(state.boot))
+    brand.render(aboutFrom(state.boot), state.projects)
 
     if (state.tab === "wiki") {
       wikiView?.render(state, index)
