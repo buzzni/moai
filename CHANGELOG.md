@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-22
+
 ### Added
 
 - **`moai tui --json --deep`** prints the explorer's whole tree in one call, so
