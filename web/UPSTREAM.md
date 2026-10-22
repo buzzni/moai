@@ -3,7 +3,8 @@
 The page `moai web` serves started as the Saycode Desktop board panel, version 2.0.
 
 - Repository: `buzzni/saycode-extensions`
-- Commit: `90f545bd71fdbb1696a9ac636a8305a963dbe475` (branch `milestone/se-9inv`, 2026-10-15)
+- Commit: `90f545bd71fdbb1696a9ac636a8305a963dbe475` (branch `milestone/se-9inv`, 2026-10-15), then the panel's
+  2.1.0 look carried by hand from `origin/main` `95dfed5` ("Moai 2.1.0", 2026-10-21; see "What changed")
 - License: MIT, `Copyright (c) 2026 Buzzni Inc.` on both sides — same owner, same license
 
 ## What came over
@@ -27,9 +28,10 @@ is those bytes unchanged, so every later diff is what was changed for moai.
 
 Nothing flows back. To bring an upstream fix over, read
 
-    git diff 90f545bd..<new> -- packages/moai/panel
+    git diff 95dfed5..<new> -- packages/moai/panel
 
-and carry it across by hand, then move the commit above.
+and carry it across by hand, then move the commit above. (`95dfed5` is the last one carried; a 3-way
+`git merge-file <ours> <upstream at the last carry> <upstream new>` per file does most of it.)
 
 ## What changed
 
@@ -61,5 +63,21 @@ and carry it across by hand, then move the commit above.
   the wiki anchors (`src/wiki.rs` gives none in JSON).
   The test fixtures are this binary's answers (`scripts/gen-web-fixtures.sh`, held by
   `the_web_fixtures_match_the_binary`); the v0.16/v0.17/v0.8 ones are gone.
+- **The 2.1.0 look (moai-fmun), from `origin/main` `95dfed5`.** Carried: every style change in `panel/style/*` (the
+  new tokens, dark ones too; the tab accent; grey lanes with white cards, swim heads and counts; the empty state; the
+  spinner and the glint band; `⎇` branch chips; list rows 24 high with the tree drawn as `.moai-tw` lines; the
+  `.m-brand` header and the tips page; the filter box as tall as the sort button), `view/spin.ts` (the first column is
+  `/api/boot`'s `statuses[0]`, `todo` before the boot answers), `view/branch.ts`, the board's lanes, swim heads,
+  cards and spin, the path line's worktree chip, the detail's look (glyph before the id, the fields box, the rollup
+  bar in column colours with a legend, id chips, the history as a timeline), `view/brand.ts` (the TUI's logo as one
+  SVG path, `User` and `Version`), `view/tips.ts` with its words (en, ko; ja and zh read English, as upstream), and
+  `SPC v w` (`view.worktree`, on by default, not remembered — upstream does not remember it either), which reads
+  `/api/rows?worktree=1`. The Version words are moai's own `tui.version.*` (`i18n/en.json`, `ko.json`).
+  **About comes from `/api/boot`** (`user`, `latest` beside `version`; a server without them boots and the header
+  says `—`), not from `status --json`, which in moai carries neither. Left out: `data/skills.ts` and the skills
+  banner, the init banner (both write, and both are Desktop's), the `about` read from `status` and its store entry,
+  and reading the detail with `--worktree` (`/api/issue` has no overlay). The `⎇` marks and the path line's worktree
+  chip read `working`/`branch` on a row; this moai's `show --all --worktree --json` emits neither yet, so they stay
+  blank until it does.
 - **jsdom is pinned to 30.1.1.** Upstream's lock had 30.1.1; on 30.1.3 three focus tests in
   `moai-keys-wiring.test.mjs` fail (184, 187, 193 on 2026-10-21). Raise it on purpose, with those tests read.
