@@ -43,8 +43,13 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
 - **The bridge (moai-jshy.jih).** `window.saycodePanel` and its machine runs are gone; `data/client.ts` fetches
   `moai web`'s endpoints and reads the envelope (`{exit, out, err, said}`). Desktop's refusal codes, confirmation,
   busy retries, compatibility probe (`data/compat.ts`), `prime` fallback, archive paging and the clock hold are gone
-  with it. Read marks (`r`, `SPC m a`, `SPC m g`) are gone — the page only reads; NEW still shows. The words come
-  from `/api/boot`'s `lang`.
+  with it. The words come from `/api/boot`'s `lang`.
+- **Read marks came back (moai-ly88).** The bridge commit took `r`, `SPC m a` and `SPC m g` out while the server took
+  GETs only; they are upstream's again (`data/read.ts`, the key table's `readable`, `keys/wiring.ts`, `Shell.refuse`,
+  the words), but each write is a `POST` with no body to `/api/read/<id>`, `/api/read-all` or `/api/read-group/<id>`
+  through the same queue as the reads (never shared). A write that went through reads the rows again (`fresh`: after a
+  read already running) and the detail it marked (`readMarks` in `data/read.ts`, called from `main.ts`). Upstream's
+  compatibility words for a catalog without read marks did not come back.
 - **Projects (moai-o14f), which upstream has not.** Every call names the project the page reads
   (`?project=<path>`, `data/client.ts` `withProject`). The header draws the TUI's third column of registered projects
   (`<1> name` …, `view/brand.ts`; the TUI's `<0>` layer has no page), `1`–`9` and `SPC p 1`–`9` open one as a new page

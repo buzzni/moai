@@ -560,6 +560,10 @@ export interface KeysCopy {
   sortDefaultSaved: string
   /** `D` in the sort editor while no settings storage keeps it: saved for this session only. */
   sortDefaultSavedSession: string
+  /** `r`, `SPC m a`, `SPC m g` in a page given no read-mark writes (keys/wiring.ts `read`). */
+  readUnavailable: string
+  /** `SPC m g` with no milestone or epic under the cursor or around the list. */
+  readNoGroup: string
 }
 
 const KEYS: Record<Language, KeysCopy> = {
@@ -567,21 +571,29 @@ const KEYS: Record<Language, KeysCopy> = {
     focusHint: 'Click the page once and the keys work',
     sortDefaultSaved: 'Saved as the default order.',
     sortDefaultSavedSession: 'Saved as the default order. This browser keeps no site data, so it lasts until the tab is closed.',
+    readUnavailable: 'Marking items read is not available on this page.',
+    readNoGroup: 'Move to a milestone or epic to mark its items read.',
   },
   ko: {
     focusHint: '페이지를 한 번 누르면 키가 듣습니다',
     sortDefaultSaved: '기본 정렬로 저장했습니다.',
     sortDefaultSavedSession: '기본 정렬로 저장했습니다. 이 브라우저가 사이트 데이터를 안 남겨 탭을 닫을 때까지만 유지됩니다.',
+    readUnavailable: '이 페이지에서는 읽음 표시를 쓸 수 없습니다.',
+    readNoGroup: '읽음으로 표시할 마일스톤이나 에픽으로 옮겨 가세요.',
   },
   ja: {
     focusHint: 'ページを一度クリックするとキーが効きます',
     sortDefaultSaved: '既定の並べ替えとして保存しました。',
     sortDefaultSavedSession: '既定の並べ替えとして保存しました。このブラウザはサイトのデータを残さないため、タブを閉じるまで保持されます。',
+    readUnavailable: 'このページでは既読にできません。',
+    readNoGroup: '既読にするマイルストーンかエピックに移動してください。',
   },
   zh: {
     focusHint: '点击页面一次即可使用按键',
     sortDefaultSaved: '已保存为默认排序。',
     sortDefaultSavedSession: '已保存为默认排序。此浏览器不保留网站数据，关闭标签页前有效。',
+    readUnavailable: '此页面不能标记为已读。',
+    readNoGroup: '请移到要标记为已读的里程碑或史诗。',
   },
 }
 
@@ -625,11 +637,12 @@ const TABLE_EN: KeyTableCopy = {
     'focus.next': 'Next pane', 'focus.prev': 'Previous pane', 'focus.left': 'Left pane', 'focus.right': 'Right pane', 'focus.up': 'Pane above', 'focus.down': 'Pane below',
     enter: 'Go in (a leaf row opens its details)', leave: 'Up one level',
     expand: 'Expand (board: column to the right)', collapse: 'Collapse (board: column to the left)', expandAll: 'Expand or collapse all under a group',
-    search: 'Search', clear: 'Clear the search and filter', help: 'Keyboard shortcuts',
+    search: 'Search', clear: 'Clear the search and filter', read: 'Mark the cursor row read', help: 'Keyboard shortcuts',
     filter: 'Filter', 'tab.list': 'List', 'tab.board': 'Board', 'tab.wiki': 'Wiki',
     'view.deferred': 'Deferred', 'view.backlog': 'Backlog', 'view.archived': 'Archive', 'view.worktree': 'Worktrees',
     'view.all': 'All but archived', 'view.allHelp': 'Show all (archive stays hidden)',
     'view.detail': 'Details', 'view.raw': 'Raw', 'view.rawHelp': 'Raw or rendered', 'sort.edit': 'Edit the order…',
+    'read.all': 'Mark all read', 'read.group': 'Group read', 'read.groupHelp': 'Mark the group read',
     'option.detailAt': 'Details at', 'option.detailAtHelp': 'Details position (left ↔ bottom)',
     'project.jumpHelp': 'Go to project 1–9',
     'menu.close': 'Close', 'menu.up': 'Up one level',
@@ -642,9 +655,9 @@ const TABLE_EN: KeyTableCopy = {
     'wiki.nextLink': 'Next link', 'wiki.prevLink': 'Previous link', 'wiki.search': 'Search titles and text', 'wiki.clear': 'Drop the link, then the search',
   },
   root: 'Menu',
-  layers: { g: 'Go', p: 'Project', v: 'View', s: 'Sort', c: 'Columns', o: 'Options', w: 'Window' },
+  layers: { g: 'Go', p: 'Project', v: 'View', s: 'Sort', c: 'Columns', m: 'Read', o: 'Options', w: 'Window' },
   groups: {
-    move: 'Move', enter: 'In, out and expand', wiki: 'Wiki', focus: 'Pane focus', tab: 'Switch views', project: 'Projects', search: 'Search and filter',
+    move: 'Move', enter: 'In, out and expand', wiki: 'Wiki', focus: 'Pane focus', tab: 'Switch views', project: 'Projects', search: 'Search and filter', read: 'Read',
     view: 'View (SPC v)', sort: 'Sort (SPC s)', cell: 'Columns (SPC c)', option: 'Options (SPC o)', other: 'Other',
     menu: 'Inside the SPC menu', prompt: 'Search and filter input', sorter: 'Sort editor',
   },
@@ -671,11 +684,12 @@ const TABLE_KO: KeyTableCopy = {
     'focus.next': '다음 패널', 'focus.prev': '이전 패널', 'focus.left': '왼쪽 패널', 'focus.right': '오른쪽 패널', 'focus.up': '위 패널', 'focus.down': '아래 패널',
     enter: '들어가기 (잎 행이면 상세로)', leave: '한 층 나가기',
     expand: '펼침 (칸반: 오른쪽 칸)', collapse: '접음 (칸반: 왼쪽 칸)', expandAll: '그룹 밑을 모두 펼침·접음',
-    search: '검색', clear: '걸린 검색·필터 해제', help: '단축키 도움말',
+    search: '검색', clear: '걸린 검색·필터 해제', read: '커서 행 읽음', help: '단축키 도움말',
     filter: '필터', 'tab.list': '목록', 'tab.board': '칸반', 'tab.wiki': '위키',
     'view.deferred': '미룸', 'view.backlog': '백로그', 'view.archived': '아카이브', 'view.worktree': '워크트리',
     'view.all': '아카이브 빼고 모두', 'view.allHelp': '모두 보이기 (아카이브 제외)',
     'view.detail': '상세', 'view.raw': '원문', 'view.rawHelp': '원문 또는 렌더링', 'sort.edit': '정렬 편집…',
+    'read.all': '모두 읽음', 'read.group': '그룹 읽음', 'read.groupHelp': '그룹을 읽음으로',
     'option.detailAt': '상세 위치', 'option.detailAtHelp': '상세 위치 (왼쪽 ↔ 아래)',
     'project.jumpHelp': '프로젝트 1~9 로 가기',
     'menu.close': '닫기', 'menu.up': '한 층 위로',
@@ -688,9 +702,9 @@ const TABLE_KO: KeyTableCopy = {
     'wiki.nextLink': '다음 링크', 'wiki.prevLink': '이전 링크', 'wiki.search': '제목·본문 검색', 'wiki.clear': '링크 선택 해제 → 검색 해제',
   },
   root: '메뉴',
-  layers: { g: '이동', p: '프로젝트', v: '보기', s: '정렬', c: '열', o: '옵션', w: '창' },
+  layers: { g: '이동', p: '프로젝트', v: '보기', s: '정렬', c: '열', m: '읽음', o: '옵션', w: '창' },
   groups: {
-    move: '이동', enter: '드나들기·펼침', wiki: '위키', focus: '패널 포커스', tab: '화면 전환', project: '프로젝트', search: '검색·필터',
+    move: '이동', enter: '드나들기·펼침', wiki: '위키', focus: '패널 포커스', tab: '화면 전환', project: '프로젝트', search: '검색·필터', read: '읽음',
     view: '보기 (SPC v)', sort: '정렬 (SPC s)', cell: '열 (SPC c)', option: '옵션 (SPC o)', other: '기타',
     menu: 'SPC 메뉴 안에서', prompt: '검색·필터 입력', sorter: '정렬 편집',
   },
@@ -717,11 +731,12 @@ const TABLE_JA: KeyTableCopy = {
     'focus.next': '次のペイン', 'focus.prev': '前のペイン', 'focus.left': '左のペイン', 'focus.right': '右のペイン', 'focus.up': '上のペイン', 'focus.down': '下のペイン',
     enter: '入る (末端の行なら詳細へ)', leave: '一つ上の階層へ',
     expand: '展開 (カンバン: 右の列)', collapse: '折りたたむ (カンバン: 左の列)', expandAll: 'グループの下をすべて展開・折りたたみ',
-    search: '検索', clear: '検索・フィルターを解除', help: 'ショートカット',
+    search: '検索', clear: '検索・フィルターを解除', read: 'カーソル行を既読に', help: 'ショートカット',
     filter: 'フィルター', 'tab.list': '一覧', 'tab.board': 'カンバン', 'tab.wiki': 'Wiki',
     'view.deferred': '保留', 'view.backlog': 'バックログ', 'view.archived': 'アーカイブ', 'view.worktree': 'ワークツリー',
     'view.all': 'アーカイブ以外', 'view.allHelp': 'すべて表示 (アーカイブは除く)',
     'view.detail': '詳細', 'view.raw': '原文', 'view.rawHelp': '原文またはレンダリング', 'sort.edit': '並べ替えを編集…',
+    'read.all': 'すべて既読', 'read.group': 'グループ既読', 'read.groupHelp': 'グループを既読に',
     'option.detailAt': '詳細の位置', 'option.detailAtHelp': '詳細の位置 (左 ↔ 下)',
     'project.jumpHelp': 'プロジェクト 1〜9 へ移動',
     'menu.close': '閉じる', 'menu.up': '一つ上の階層へ',
@@ -734,9 +749,9 @@ const TABLE_JA: KeyTableCopy = {
     'wiki.nextLink': '次のリンク', 'wiki.prevLink': '前のリンク', 'wiki.search': 'タイトル・本文を検索', 'wiki.clear': 'リンクの選択を解除 → 検索を解除',
   },
   root: 'メニュー',
-  layers: { g: '移動', p: 'プロジェクト', v: '表示', s: '並べ替え', c: '列', o: 'オプション', w: 'ウィンドウ' },
+  layers: { g: '移動', p: 'プロジェクト', v: '表示', s: '並べ替え', c: '列', m: '既読', o: 'オプション', w: 'ウィンドウ' },
   groups: {
-    move: '移動', enter: '出入り・展開', wiki: 'Wiki', focus: 'ペインのフォーカス', tab: '画面の切り替え', project: 'プロジェクト', search: '検索・フィルター',
+    move: '移動', enter: '出入り・展開', wiki: 'Wiki', focus: 'ペインのフォーカス', tab: '画面の切り替え', project: 'プロジェクト', search: '検索・フィルター', read: '既読',
     view: '表示 (SPC v)', sort: '並べ替え (SPC s)', cell: '列 (SPC c)', option: 'オプション (SPC o)', other: 'その他',
     menu: 'SPC メニューの中', prompt: '検索・フィルターの入力', sorter: '並べ替えの編集',
   },
@@ -763,11 +778,12 @@ const TABLE_ZH: KeyTableCopy = {
     'focus.next': '下一个窗格', 'focus.prev': '上一个窗格', 'focus.left': '左侧窗格', 'focus.right': '右侧窗格', 'focus.up': '上方窗格', 'focus.down': '下方窗格',
     enter: '进入 (叶子行则打开详情)', leave: '返回上一层',
     expand: '展开 (看板: 右侧列)', collapse: '折叠 (看板: 左侧列)', expandAll: '展开或折叠分组下的全部',
-    search: '搜索', clear: '清除搜索和筛选', help: '键盘快捷键',
+    search: '搜索', clear: '清除搜索和筛选', read: '将光标所在行标为已读', help: '键盘快捷键',
     filter: '筛选', 'tab.list': '列表', 'tab.board': '看板', 'tab.wiki': 'Wiki',
     'view.deferred': '推迟', 'view.backlog': '待办池', 'view.archived': '归档', 'view.worktree': '工作树',
     'view.all': '除归档外全部', 'view.allHelp': '全部显示 (归档除外)',
     'view.detail': '详情', 'view.raw': '原文', 'view.rawHelp': '原文或渲染', 'sort.edit': '编辑排序…',
+    'read.all': '全部标为已读', 'read.group': '分组已读', 'read.groupHelp': '分组标为已读',
     'option.detailAt': '详情位置', 'option.detailAtHelp': '详情位置 (左 ↔ 下)',
     'project.jumpHelp': '切换到项目 1–9',
     'menu.close': '关闭', 'menu.up': '返回上一层',
@@ -780,9 +796,9 @@ const TABLE_ZH: KeyTableCopy = {
     'wiki.nextLink': '下一个链接', 'wiki.prevLink': '上一个链接', 'wiki.search': '搜索标题和正文', 'wiki.clear': '取消链接选择 → 清除搜索',
   },
   root: '菜单',
-  layers: { g: '跳转', p: '项目', v: '视图', s: '排序', c: '列', o: '选项', w: '窗口' },
+  layers: { g: '跳转', p: '项目', v: '视图', s: '排序', c: '列', m: '已读', o: '选项', w: '窗口' },
   groups: {
-    move: '移动', enter: '进出·展开', wiki: 'Wiki', focus: '窗格焦点', tab: '切换视图', project: '项目', search: '搜索·筛选',
+    move: '移动', enter: '进出·展开', wiki: 'Wiki', focus: '窗格焦点', tab: '切换视图', project: '项目', search: '搜索·筛选', read: '已读',
     view: '视图 (SPC v)', sort: '排序 (SPC s)', cell: '列 (SPC c)', option: '选项 (SPC o)', other: '其他',
     menu: 'SPC 菜单内', prompt: '搜索·筛选输入', sorter: '编辑排序',
   },

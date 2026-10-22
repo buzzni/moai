@@ -43,8 +43,11 @@ export interface RefresherOptions {
 }
 
 export interface Refresher {
-  /** Reads now, whatever the stamp says (unless a read is running, which it then joins). */
-  refresh(): Promise<void>
+  /**
+   * Reads now, whatever the stamp says (unless a read is running, which it then joins). `fresh` waits for a running
+   * read and then reads again: one that began before a write (a read mark) cannot hold what it wrote.
+   */
+  refresh(how?: { fresh?: boolean }): Promise<void>
   /** Asks the stamp now and reads when it moved. */
   check(): Promise<void>
   stop(): void
@@ -129,7 +132,8 @@ export function createRefresher(options: RefresherOptions): Refresher {
     return checking
   }
 
-  async function refresh(): Promise<void> {
+  async function refresh(how: { fresh?: boolean } = {}): Promise<void> {
+    if (how.fresh && inFlight) await inFlight.catch(() => {})
     // The stamp first, so a write after it is a later change and is read on the next look.
     const at = await options.stamp()
     reach(at !== null)

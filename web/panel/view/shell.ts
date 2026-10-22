@@ -64,6 +64,8 @@ export interface Shell {
   activity(current: Activity): void
   /** One line under the banners: what a key did (`D` saved the order), or why it did nothing. */
   say(text: string, problem?: boolean): void
+  /** Why a read mark did nothing, on that same line. The banners belong to the reads and redraw with them. */
+  refuse(outcome: Outcome): void
   /** `moai web` could not be reached (data/refresh.ts onReach): one line until it answers again. */
   offline(on: boolean): void
   /**
@@ -429,6 +431,11 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     say(text, problem = false) {
       result.textContent = text
       result.className = problem ? "moai-result m-banner m-banner-danger" : "moai-result"
+    },
+    refuse(outcome) {
+      const said = describe(outcome, copy, doc)
+      result.replaceChildren(...(said ? [el(doc, "span", {}, ...said.parts)] : []))
+      result.className = said && !said.info ? "moai-result m-banner m-banner-danger" : "moai-result m-banner"
     },
     offline(on) {
       const text = on ? copy.unreachable : ""

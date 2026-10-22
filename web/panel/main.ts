@@ -11,6 +11,7 @@ import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, remember } from './data/memory.js'
 import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
+import { isUnread, readMarks } from './data/read.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
@@ -29,7 +30,7 @@ import type { WikiSource } from './view/types.js'
 const homeFetcher: Fetch = (url, init) => window.fetch(url, init)
 /** The project this page reads (`?project=`), or null for the server's own tracker. */
 const project = projectOf(window.location.search)
-/** Every call the page makes — reads, the boot, the stamp — names that project. */
+/** Every call the page makes — reads, read marks, the boot, the stamp — names that project. */
 const fetcher: Fetch = withProject(homeFetcher, project)
 
 /** How long `/api/stamp` may take before the server counts as out of reach. */
@@ -311,6 +312,21 @@ async function start(): Promise<void> {
     store.dispatch({ type: 'detail-loaded', data: { id, row: loaded.value } })
   }
 
+  /**
+   * The read-mark writes (`r`, `SPC m a`, `SPC m g`, data/read.ts). One that went through reads the rows again — the
+   * marks come back with them — and the detail on screen when it marked that row: nothing else reads the detail
+   * again, and its NEW would outlive the mark.
+   */
+  const read = readMarks(client, (written) => {
+    const shown = store.getState().shown.value
+    // A list read already running began before the write and cannot hold its marks: `fresh` reads again after it.
+    // The detail is asked past every load so far, so it is never handed a run that began before the write.
+    return Promise.all([
+      refresher.refresh({ fresh: true }),
+      shown && isUnread(shown.row) && written.has(shown.id) ? rereadDetail(shown.id, loads + 1) : undefined,
+    ])
+  })
+
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
   function said(loaded: Extract<Loaded<unknown>, { ok: false }>): string {
     const parts = describe(loaded.outcome, copy, document)?.parts ?? [copy.failed]
@@ -360,7 +376,7 @@ async function start(): Promise<void> {
   client.subscribe(() => shell.activity(activity()))
   // The one keydown listener: keys → the key table's actions → the store and the panes (keys/wiring.ts), with the
   // SPC menu, the shortcut help and the "click to use the keyboard" hint.
-  wireKeys({ document, store, shell, copy, openProject })
+  wireKeys({ document, store, shell, copy, read, openProject })
 
   document.body.tabIndex = -1
   document.body.focus({ preventScroll: true })

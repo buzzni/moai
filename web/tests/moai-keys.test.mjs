@@ -455,9 +455,9 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   })
   const root = menuLayer(['SPC'], ctx)
   assert.equal(root.title, '메뉴')
-  // `p` only with projects to jump to.
-  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'o', 'w', '?'])
-  assert.deepEqual(menuLayer(['SPC'], browse({ projects: ['a', 'b'] })).items.map((i) => i.key), ['/', 'f', 'p', 'g', 'v', 's', 'c', 'o', 'w', '?'])
+  // `m` (read marks) stands while they can be written; `p` only with projects to jump to.
+  assert.deepEqual(root.items.map((i) => i.key), ['/', 'f', 'g', 'v', 's', 'c', 'm', 'o', 'w', '?'])
+  assert.deepEqual(menuLayer(['SPC'], browse({ readable: false, projects: ['a', 'b'] })).items.map((i) => i.key), ['/', 'f', 'p', 'g', 'v', 's', 'c', 'o', 'w', '?'])
   const g = root.items.find((i) => i.key === 'g')
   assert.equal(g.kind, 'layer')
   assert.equal(g.label, '+이동')
@@ -908,7 +908,7 @@ test('toolbar: the scope select is capped, so its disabled notes line cannot wid
   assert.match(rule, /max-width:\s*\d+(\.\d+)?(em|px|ch)/)
 })
 
-// ------------------------------------------------------------------ projects (moai-o14f)
+// ------------------------------------------------------------------ projects, read marks (moai-o14f, moai-ly88)
 
 test('projects: a bare digit and SPC p <digit> jump to that project; past the projects there are, nothing', () => {
   const ctx = browse({ projects: ['argos', 'moai'] })
@@ -952,4 +952,19 @@ test('projects: the help has one row for all nine, the bare and SPC p forms side
   const rows = helpSections('browse', browse({ projects: ['a'] }), 'other', TABLE.en).find((s) => s.id === 'project').rows
   assert.deepEqual(rows.map((r) => [r.label, r.keys, r.available]), [['Go to project 1–9', ['1~9', 'SPC p 1~9'], true]])
   assert.equal(helpSections('browse', browse(), 'other', TABLE.en).find((s) => s.id === 'project').rows[0].available, false)
+})
+
+test('read marks: r, SPC m a and SPC m g run while they can be written, and are gone when not', () => {
+  const { key, ids, router } = setup()
+  key('r')
+  key(' '); key('m'); key('a')
+  key(' '); key('m'); key('g')
+  assert.deepEqual(ids(), ['read', 'read.all', 'read.group'])
+  assert.equal(router.state().menu, null)
+  assert.deepEqual(menuLayer('SPC m', browse(), TABLE.en).items.map((i) => [i.key, i.label]), [['a', 'Mark all read'], ['g', 'Group read']])
+  const off = setup({ ctx: browse({ readable: false }) })
+  off.key('r')
+  off.key(' '); off.key('m')
+  assert.deepEqual(off.ids(), [])
+  assert.deepEqual(off.router.state().menu, ['SPC'], 'no SPC m layer')
 })

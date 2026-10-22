@@ -9,6 +9,7 @@ import { panelModule } from './moai-panel-modules.mjs'
 const { createClient, projectOf, withProject } = await panelModule('data/client.ts')
 const { baseName, entryOf, headerProjects, numberedNames, projectHref, projectsFrom, samePath } = await panelModule('data/projects.ts')
 const { loadBoot, loadDetail, loadProjects, loadTree } = await panelModule('data/source.ts')
+const { readMarks } = await panelModule('data/read.ts')
 const { createStore } = await panelModule('store.ts')
 const { IssueIndex } = await panelModule('data/index.ts')
 const { treeOf } = await import('./moai-tree-helper.mjs')
@@ -42,23 +43,25 @@ const PROJECTS = {
   problems: [],
 }
 
-test('the page reads ?project=, and every call it makes names it — reads and the boot', async () => {
+test('the page reads ?project=, and every call it makes names it — reads, writes, the boot', async () => {
   assert.equal(projectOf('?project=%2Fw%2Fargos'), '/w/argos')
   assert.equal(projectOf('?x=1&project=/w/a%20b'), '/w/a b')
   assert.equal(projectOf(''), null)
   assert.equal(projectOf('?project='), null)
-  const { calls, fetcher } = recorder((url) => (url.startsWith('/api/boot') ? '{}' : envelope({})))
+  const { calls, fetcher } = recorder((url) => (url.startsWith('/api/boot') ? '{}' : envelope({ read: [] })))
   const named = withProject(fetcher, '/w/a b&c')
   const client = createClient(named, { concurrency: 3 })
   await loadTree(client, { sort: 'priority' })
   await loadDetail(client, 'moai-1abc')
   await loadProjects(client)
+  await readMarks(client, async () => {}).all()
   await loadBoot(named)
   const project = 'project=%2Fw%2Fa%20b%26c'
   assert.deepEqual(calls.map((c) => [c.method, c.url]), [
     ['GET', `/api/tree?sort=priority&${project}`],
     ['GET', `/api/issue/moai-1abc?${project}`],
     ['GET', `/api/projects?${project}`],
+    ['POST', `/api/read-all?${project}`],
     ['GET', `/api/boot?${project}`],
   ])
   // The home names none: the fetch is handed back as it was.

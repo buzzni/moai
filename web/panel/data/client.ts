@@ -12,16 +12,20 @@
  *   either kind of answer.
  * - The lines moai said on stderr beside its answer (`said`: a line it could not read, a notice) ride the outcome as
  *   `notes`, so the page tells them rather than swallowing them.
+ * - The page's one write — a read mark, `POST /api/read…` — goes through the same queue ({@link Endpoint.method}), so the
+ *   project it names rides along as every read's does ({@link withProject}). A write is never shared.
  */
 
 /** One endpoint of `moai web` and its query (src/web/api.rs PROFILES). */
 export interface Endpoint {
   path: string
   query?: Readonly<Record<string, string>>
+  /** `POST` for a read mark (src/web/api.rs `write_argv_of`); a read is a `GET`. */
+  method?: 'GET' | 'POST'
 }
 
 /** The `fetch` the client calls — the browser's, or a test's. */
-export type Fetch = (url: string, init: { signal: AbortSignal; headers: Record<string, string> }) => Promise<{ status: number; text(): Promise<string> }>
+export type Fetch = (url: string, init: { signal: AbortSignal; headers: Record<string, string>; method?: string }) => Promise<{ status: number; text(): Promise<string> }>
 
 /**
  * The project the page reads: `?project=<path>` of the page's own address, or null for the server's own tracker
@@ -33,8 +37,8 @@ export function projectOf(search: string): string | null {
 }
 
 /**
- * A {@link Fetch} that names `project` on every call it makes — every read, the boot and the stamp too — so the whole
- * page reads that project. Null hands the fetch back as it is.
+ * A {@link Fetch} that names `project` on every call it makes — every read and every write, the boot and the stamp
+ * too — so the whole page reads that project. Null hands the fetch back as it is.
  */
 export function withProject(fetcher: Fetch, project: string | null): Fetch {
   if (!project) return fetcher
@@ -155,11 +159,12 @@ export function urlOf(endpoint: Endpoint): string {
   return query.length ? `${endpoint.path}?${new URLSearchParams(query).toString()}` : endpoint.path
 }
 
-/** The queue's key for an endpoint — its URL. */
-export const requestKey = urlOf
+/** The queue's key for an endpoint — its URL, a write's marked as one. */
+export const requestKey = (endpoint: Endpoint): string => (endpoint.method === 'POST' ? `POST ${urlOf(endpoint)}` : urlOf(endpoint))
 
 interface Pending extends RequestState {
   url: string
+  method: 'GET' | 'POST'
   seq: number
   promise: Promise<Outcome>
   resolve: (outcome: Outcome) => void
@@ -219,7 +224,9 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
     // Aborted by the time limit is out of reach; aborted by a person is a cancel.
     const failed = (): Outcome => (entry.abort.signal.aborted && !late ? { kind: 'cancelled' } : { kind: 'not-started' })
     try {
-      const answer = await fetcher(entry.url, { signal: entry.abort.signal, headers: { Accept: 'application/json' } })
+      const init = { signal: entry.abort.signal, headers: { Accept: 'application/json' } }
+      // A write carries no body: the path says what to mark (src/web/api.rs write_argv_of).
+      const answer = await fetcher(entry.url, entry.method === 'POST' ? { ...init, method: 'POST' } : init)
       return outcomeOf(answer.status, await answer.text())
     } catch {
       return failed()
@@ -241,11 +248,15 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
   return {
     request(endpoint, requestOptions = {}) {
       const url = urlOf(endpoint)
+      const key = requestKey(endpoint)
+      const method = endpoint.method ?? 'GET'
       const priority = requestOptions.priority ?? PRIORITY.list
       const epoch = requestOptions.epoch ?? 0
-      if (requestOptions.share !== false) {
+      // A write is never handed another's answer: each one is a mark of its own.
+      const share = requestOptions.share !== false && method === 'GET'
+      if (share) {
         // The latest one: a read asked after a change may stand beside an older one still running.
-        const shared = pending.filter((entry) => entry.key === url && entry.share && !entry.abort.signal.aborted && (entry.phase === 'queued' || entry.epoch >= epoch)).at(-1)
+        const shared = pending.filter((entry) => entry.key === key && entry.share && !entry.abort.signal.aborted && (entry.phase === 'queued' || entry.epoch >= epoch)).at(-1)
         if (shared) {
           // Someone now waits on it sooner: a queued shared request moves up.
           if (priority < shared.priority) {
@@ -260,8 +271,8 @@ export function createClient(fetcher: Fetch, options: ClientOptions = {}): Clien
       let resolve!: (outcome: Outcome) => void
       const promise = new Promise<Outcome>((done) => (resolve = done))
       const entry: Pending = {
-        key: url, url, path: endpoint.path, priority, phase: 'queued',
-        seq: seq++, promise, resolve, abort: new AbortController(), share: requestOptions.share !== false, epoch,
+        key, url, method, path: endpoint.path, priority, phase: 'queued',
+        seq: seq++, promise, resolve, abort: new AbortController(), share, epoch,
       }
       pending.push(entry)
       notify()

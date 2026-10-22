@@ -8,9 +8,13 @@
 // leaves it (attachKeyRouter). The mode comes from the store and the focus: `sorter` while the sort editor is
 // open, `prompt` while a search or filter input has the caret, `wiki` on the wiki tab, `browse` otherwise.
 
+import type { Outcome } from "../data/client.ts"
+import { NO_MILESTONE, type Row } from "../data/index.ts"
+import type { ReadMarks } from "../data/read.ts"
 import { sortDefault, type SortDefault } from "../data/memory.ts"
 import { entryOf, numberedNames, type ProjectEntry } from "../data/projects.ts"
 import { SORT_KEYS, sortEdit, type Sort, type SortKey } from "../data/query.ts"
+import { withArchive } from "../data/source.ts"
 import type { Copy } from "../i18n/index.ts"
 import type { ColumnName, State, Store } from "../store.ts"
 import { statusKeys } from "../view/board-groups.ts"
@@ -24,6 +28,8 @@ import type { PaneView } from "../view/types.ts"
 import { attachKeyRouter, createKeyRouter, detectPlatform, type DispatchedAction, type KeyRouter } from "./router.ts"
 import type { CellField, KeyContext, Mode, Platform } from "./table.ts"
 
+export type { ReadMarks }
+
 /** What the context needs besides the store: things only the DOM knows. */
 export interface ContextEnv {
   mode: Mode
@@ -35,6 +41,8 @@ export interface ContextEnv {
   raw?: boolean
   /** Status column names as the menu labels them (SPC v 1~9); the status itself when left out. */
   statusName?: (status: string) => string
+  /** The read marks can be written: the page was given {@link ReadMarks}. */
+  readable?: boolean
 }
 
 /** The key table's view of the panel (keys/table.ts KeyContext), read from the store. Pure. */
@@ -56,6 +64,7 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
     // is this field alone, pressing flips it", which a dropped field would make untrue.
     sort: state.sort.fields.map((f) => ({ field: f.key, desc: f.dir === "desc" })),
     cells: { ...state.columns },
+    readable: env.readable ?? false,
     projects: numberedNames(state.projects),
   }
 }
@@ -73,6 +82,8 @@ export interface KeyWiringOptions {
   copy: Copy
   /** Defaults to the navigator's (detectPlatform). */
   platform?: Platform
+  /** The read-mark writes; without them `r` and `SPC m` are not offered (KeyContext.readable). */
+  read?: ReadMarks
   /**
    * Opens another project (`1`–`9`, `SPC p 1`–`9`): main.ts navigates to it (data/projects.ts projectHref). The project
    * on screen is not opened again.
@@ -135,6 +146,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       wikiPane: wikiPaneEl()?.dataset.pane === "body" ? "body" : "list",
       raw: (onWiki ? panes().wiki?.raw?.() : panes().detail.raw?.()) ?? false,
       statusName: (status) => (copy.stats as Record<string, string>)[status] ?? status,
+      readable: options.read !== undefined,
     })
   }
 
@@ -271,6 +283,66 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     setSort(sortEdit(store.getState().sort, field, how))
   }
 
+  // ── read marks ──
+  /**
+   * The row under the cursor, among the rows the list draws: with archived rows shown, the archive's answer too,
+   * tagged as main.ts indexOf draws it (source.ts withArchive): an archive-only row is `archived: true`.
+   */
+  function rowAt(): Row | undefined {
+    const state = store.getState()
+    const board = state.board.value
+    if (state.cursor === null || !board) return undefined
+    return withArchive(board, state.view.showArchived ? state.archive : null).find((r) => r.id === state.cursor)
+  }
+  /**
+   * The row under the cursor that takes a read mark: an archived one takes none, as it draws no NEW (`moai read`
+   * resolves active rows only, read.ts isUnread).
+   */
+  function rowHere(): Row | undefined {
+    const row = rowAt()
+    return row?.archived === true ? undefined : row
+  }
+  /**
+   * The group `SPC m g` marks: the milestone or epic under the cursor, else the innermost one the list stands in.
+   * Undefined when the group under the cursor is archived: it takes no mark, and the place around it is not marked
+   * in its stead (the cursor named the group, not the place).
+   */
+  function groupHere(): string | null | undefined {
+    const state = store.getState()
+    const row = rowAt()
+    if (row && (row.kind === "milestone" || row.kind === "epic")) return row.archived === true ? undefined : row.id
+    // The "(no milestone)" bucket (`m:`, NO_MILESTONE) is a place, not a group: it has no id to mark.
+    const place = [...state.path].reverse().find((segment) => (segment.startsWith("m:") && segment !== NO_MILESTONE) || segment.startsWith("e:"))
+    return place ? place.slice(2) : null
+  }
+  function marking(write: (marks: ReadMarks) => Promise<Outcome | null> | null): Handler {
+    return () => {
+      const marks = options.read
+      if (!marks) return say(copy.keys.readUnavailable)
+      const writing = write(marks)
+      if (!writing) return
+      void writing.then((outcome) => {
+        // A mark that went through says nothing: its NEW goes with the rows read again after it (main.ts marked()).
+        if (outcome) shell.refuse(outcome)
+      })
+    }
+  }
+  const readOne = marking((marks) => {
+    const row = rowHere()
+    return row ? marks.one(row.id) : null
+  })
+  const readAll = marking((marks) => marks.all())
+  const readGroup = marking((marks) => {
+    const id = groupHere()
+    // An archived group under the cursor: nothing to mark, as `r` on an archived row.
+    if (id === undefined) return null
+    if (id === null) {
+      say(copy.keys.readNoGroup)
+      return null
+    }
+    return marks.group(id)
+  })
+
   // ── projects ──
   /** `1`–`9` and `SPC p 1`–`9`: the project with that number, unless it is the one on screen (the TUI stays put). */
   const jump: Handler = (a) => {
@@ -306,6 +378,9 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
       if (state.search.open || state.search.text) toolbar({ type: "search-close" })
       if (state.filter.text || state.filter.applied) store.dispatch({ type: "filter", text: "" })
     },
+    read: readOne,
+    "read.all": readAll,
+    "read.group": readGroup,
     "project.jump": jump,
     help: (a) => help.open(a.mode, context()),
     "tab.list": tab("list"),
