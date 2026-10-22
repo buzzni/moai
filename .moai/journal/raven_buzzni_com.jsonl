@@ -7324,3 +7324,9 @@
 {"ts":"2026-10-21T19:09:00Z","id":"moai-jshy.vve","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-21T19:09:09Z","id":"moai-jshy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 멤버 다섯과 리뷰는 닫혔고 milestone/moai-kia8 에 9bf36dd8 로 들었다. 남은 것은 moai-jshy.yuf(실제 브라우저로 CSP·Ctrl 키·갱신 중 커서) 하나 — 브라우저가 있는 기계에서 잰다. 7-1 대로 그 멤버는 에픽 끝 리뷰를 안 지났다: 고침이 나면 그 창이 에픽 끝 리뷰를 다시 부른다"}
 {"ts":"2026-10-21T19:09:57Z","id":"moai-jshy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 9bf36dd8"}
+{"ts":"2026-10-22T01:56:14Z","id":"moai-ir9k","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: 머리글에 moai 로고·사용자·판이 안 보인다"}
+{"ts":"2026-10-22T01:56:14Z","id":"moai-o14f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: 프로젝트 목록이 안 보인다"}
+{"ts":"2026-10-22T01:56:14Z","id":"moai-fmun","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: 업스트림 스타일이 빠졌다 — 목록 줄 간격이 벌어져 트리선이 끊긴다"}
+{"ts":"2026-10-22T01:56:14Z","id":"moai-ly88","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: SPC 메뉴에 p 프로젝트·m read·o timezone 이 없다"}
+{"ts":"2026-10-22T01:56:14Z","id":"moai-rqec","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web: 보드에서 에픽 이름이 칸을 벗어난다"}
+{"ts":"2026-10-22T01:56:46Z","id":"moai-jshy","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: moa-issue-37 (round 2: ir9k o14f fmun ly88 rqec yuf)"}
