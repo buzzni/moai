@@ -100,10 +100,10 @@ test('table: C-d / C-u say the cursor stays in browse, not in the wiki, whose li
   }
 })
 
-test('table: 제외 keys are absent (0-9, SPC q, SPC g s, SPC v w, SPC c w, SPC o t/m, SPC p, Ctrl-C)', () => {
+test('table: 제외 keys are absent (0-9, SPC q, SPC g s, SPC c w, SPC o t/m, SPC p, Ctrl-C); SPC v w came in with the worktree overlay (se-etwu)', () => {
   const everything = Object.values(KEY_TABLE).flatMap((bs) => allKeys(bs, 'mac'))
   for (const n of '0123456789') assert.ok(!KEY_TABLE.browse.some((b) => bindingKeys(b, 'mac').includes(n)), `browse ${n}`)
-  for (const gone of ['SPC q', 'SPC g s', 'SPC v w', 'SPC c w', 'SPC o t', 'SPC o m', 'SPC p a', 'SPC p d', 'C-c']) {
+  for (const gone of ['SPC q', 'SPC g s', 'SPC c w', 'SPC o t', 'SPC o m', 'SPC p a', 'SPC p d', 'C-c']) {
     assert.ok(!everything.includes(gone), `${gone} is excluded`)
   }
 })
@@ -459,7 +459,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   assert.equal(view.title, '보기')
   assert.equal(view.waits, true)
   const byKey = Object.fromEntries(view.items.map((i) => [i.key, i]))
-  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
+  assert.deepEqual(view.items.map((i) => i.key), ['l', 'b', 'o', 'w', 'a', '1', '2', '3', 'd', 'r'], 'only three numbered columns')
   assert.equal(byKey.l.state.label, '[숨김]')
   assert.equal(byKey.b.state.label, '[보임]')
   assert.equal(byKey.l.kind, 'toggle')

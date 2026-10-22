@@ -49,7 +49,7 @@ export function keyContext(state: State, env: ContextEnv): KeyContext {
     detailAtLocked: effectivePosition(env.width, "left") !== "left",
     raw: env.raw ?? false,
     // view.showArchived lets archived rows in (list-model.ts FILTER_FLAGS); the table asks whether they are hidden.
-    hidden: { deferred: state.view.hideDeferred, backlog: state.view.hideBacklog, archived: !state.view.showArchived, columns: statuses.map((s) => hidden.has(s)) },
+    hidden: { deferred: state.view.hideDeferred, backlog: state.view.hideBacklog, archived: !state.view.showArchived, worktree: !state.view.worktree, columns: statuses.map((s) => hidden.has(s)) },
     columns: statuses.map((s) => env.statusName?.(s) ?? s),
     // Every field, `id` too (the sort editor and the toolbar offer it): the menu's state on `SPC s p` says "the order
     // is this field alone, pressing flips it", which a dropped field would make untrue.
@@ -235,7 +235,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   }
 
   const say = (text: string) => shell.say(text)
-  const flip = (state: State, key: keyof Pick<State["view"], "hideDeferred" | "hideBacklog" | "showArchived">) =>
+  const flip = (state: State, key: keyof Pick<State["view"], "hideDeferred" | "hideBacklog" | "showArchived" | "worktree">) =>
     store.dispatch({ type: "view", view: { [key]: !state.view[key] } })
 
   // ── the dispatch table: every action id of keys/table.ts ──
@@ -298,6 +298,7 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "view.deferred": () => flip(store.getState(), "hideDeferred"),
     "view.backlog": () => flip(store.getState(), "hideBacklog"),
     "view.archived": () => flip(store.getState(), "showArchived"),
+    "view.worktree": () => flip(store.getState(), "worktree"),
     "view.all": () => store.dispatch({ type: "view", view: SHOW_ALL }),
     "view.column": (a) => {
       const state = store.getState()

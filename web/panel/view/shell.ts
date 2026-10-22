@@ -7,12 +7,15 @@
 // The shell reads and dispatches to the store; it does no I/O. Reads and cancels are the caller's
 // (main.ts) and arrive as ShellIntents.
 
+import { aboutFrom } from "../data/about.ts"
 import { isInformation, type Outcome } from "../data/client.ts"
 import type { IssueIndex } from "../data/index.ts"
 import { refreshTime } from "../data/refresh.ts"
 import type { Copy } from "../i18n/index.ts"
 import { matchKey, toolbarOf, type Focus, type State, type Store, type Tab } from "../store.ts"
 import { button, el, emptyState, iconButton } from "./components.ts"
+import { mountBrand } from "./brand.ts"
+import { allTips, createTips } from "./tips.ts"
 import { mountCrumbs } from "./crumbs.ts"
 import { COLUMN_DROPS, effectivePosition } from "./responsive.ts"
 import { narrow, segKey } from "./list-model.ts"
@@ -214,7 +217,12 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
 
   // The activity stays on every tab (the wiki reads too), floating over the foot of the panes so a read never pushes
   // them (shell.css, se-24ey.14i).
-  const shell = el(doc, "div", { class: "m-shell" }, tabbar, toolbar, head, body, status)
+  // The TUI's header (view/brand.ts): the logo, then who and which moai (from `/api/boot`, data/about.ts), and a tip
+  // that opens the tips page (view/tips.ts).
+  const platform = /Mac|iPhone|iPad/.test(win?.navigator.platform ?? "") ? "mac" : "other"
+  const tipsPage = createTips(doc, copy.shell.tips, platform)
+  const brand = mountBrand(doc, copy.shell.version, { tips: allTips(copy.shell.tips), label: copy.shell.tips.openAll, open: () => tipsPage.open() })
+  const shell = el(doc, "div", { class: "m-shell" }, brand.el, tabbar, toolbar, head, body, status, tipsPage.el)
   root.replaceChildren(shell)
 
   // ── panes ──
@@ -358,6 +366,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     explain(state.board.problem ?? (state.detail.visible ? null : state.shown.problem))
     explainSaid(state.board.value?.notes ?? [])
     explainArchive(state.archiveProblem)
+    brand.render(aboutFrom(state.boot))
 
     if (state.tab === "wiki") {
       wikiView?.render(state, index)

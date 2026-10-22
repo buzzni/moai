@@ -99,8 +99,9 @@ async function start(): Promise<void> {
     // status` prints, side by side. The load does not wait for the counts: rows are drawn at once, and the counts
     // are put on them when they come.
     // Each load is a change seen through: a read of it is never handed a run another load started before it.
-    const sort = store.getState().sort
-    const listing = loadAllRows(client, PRIORITY.list, load)
+    const { sort, view } = store.getState()
+    // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
+    const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
     const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load)
     const counting = loadGroups(client, PRIORITY.list, load)
     let counted: Awaited<typeof counting> | undefined
@@ -142,7 +143,9 @@ async function start(): Promise<void> {
     }
     // The order changed while this read ran: the refresh it asked for joined this one (data/refresh.ts), which read
     // the tree in the order before. Read it again in the order on screen.
-    if (store.getState().sort !== sort) setTimeout(() => void refresher.refresh(), 0)
+    // So does the worktree overlay turned while it ran.
+    const after = store.getState()
+    if (after.sort !== sort || after.view.worktree !== view.worktree) setTimeout(() => void refresher.refresh(), 0)
     return true
   }
 
@@ -186,6 +189,8 @@ async function start(): Promise<void> {
     }
     // A new order is moai's to make: the tree is read again in it.
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
+    // The worktree overlay turned on or off: the rows are read again with it or without it.
+    if (state.view.worktree !== previous.view.worktree && state.board.value) void refresher.refresh()
   })
 
   // The archive is read when archived rows are shown (`SPC v o`), each time they are turned on, once the active

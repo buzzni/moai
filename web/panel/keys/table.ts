@@ -52,7 +52,7 @@ export interface KeyContext {
   detailAtLocked?: boolean
   /** Body shown as raw markdown (SPC v r). */
   raw?: boolean
-  hidden?: { deferred?: boolean; backlog?: boolean; archived?: boolean; columns?: ReadonlyArray<boolean> }
+  hidden?: { deferred?: boolean; backlog?: boolean; archived?: boolean; worktree?: boolean; columns?: ReadonlyArray<boolean> }
   /** Status column names in order (labels of SPC v 1~9; columns beyond the list are not offered). */
   columns?: ReadonlyArray<string>
   /** The order's fields; `id` has no SPC s key but is in the order when the sort editor put it there. */
@@ -83,7 +83,7 @@ export type KeyLabel =
   | "focus.next" | "focus.prev" | "focus.left" | "focus.right" | "focus.up" | "focus.down"
   | "enter" | "leave" | "expand" | "collapse" | "expandAll" | "search" | "clear" | "help"
   | "filter" | "tab.list" | "tab.board" | "tab.wiki"
-  | "view.deferred" | "view.backlog" | "view.archived" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
+  | "view.deferred" | "view.backlog" | "view.archived" | "view.worktree" | "view.all" | "view.allHelp" | "view.detail" | "view.raw" | "view.rawHelp"
   | "sort.edit" | "option.detailAt" | "option.detailAtHelp" | "menu.close" | "menu.up"
   | "prompt.apply" | "prompt.cancel" | "prompt.next" | "prompt.prev" | "prompt.up" | "prompt.down" | "prompt.clear" | "prompt.deleteWord"
   | "sorter.down" | "sorter.up" | "sorter.lower" | "sorter.raise" | "sorter.toggle" | "sorter.flip" | "sorter.apply" | "sorter.default" | "sorter.cancel"
@@ -287,6 +287,8 @@ const MENU: ReadonlyArray<Binding> = [
   { action: "view.deferred", keys: ["SPC v l"], label: "view.deferred", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.deferred) },
   { action: "view.backlog", keys: ["SPC v b"], label: "view.backlog", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.backlog) },
   { action: "view.archived", keys: ["SPC v o"], label: "view.archived", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.archived) },
+  // The other worktrees' rows over the list, as the TUI's `SPC v w` (se-etwu); on when the page opens.
+  { action: "view.worktree", keys: ["SPC v w"], label: "view.worktree", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(c.hidden?.worktree) },
   { action: "view.all", keys: ["SPC v a"], label: "view.all", helpLabel: "view.allHelp", group: "view", modes: BROWSE_ONLY },
   ...columnBindings,
   { action: "view.detail", keys: ["SPC v d"], label: "view.detail", group: "view", kind: "toggle", modes: BROWSE_ONLY, state: (c) => shown(!detailShown(c)) },

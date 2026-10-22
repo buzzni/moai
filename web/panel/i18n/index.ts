@@ -4,10 +4,137 @@
  * `wiki`), each with its own interface and its four languages side by side below, so the stages that build those
  * areas add their words inside their own group without touching another's lines.
  */
+import type { VersionCopy } from '../data/about.js'
 import type { SortKey } from '../data/query.js'
 import type { CellField, HelpGroupId, KeyLabel, LayerId, SortField, StateId } from '../keys/table.js'
 
 export type Language = 'en' | 'ko' | 'ja' | 'zh'
+
+// ── the header: the Version line and the tips (Saycode panel 2.1.0, se-qkga / se-irhr) ─────────────────
+
+/**
+ * The header's Version line in moai's own words (its `tui.version.*` keys in i18n/*.json, se-qkga). moai has them in
+ * English and Korean only and falls back to English elsewhere, so Japanese and Chinese read the English, as the TUI does.
+ */
+const VERSION_EN: VersionCopy = {
+  newer: '{tag} is out', same: 'latest ({tag})', ahead: 'ahead of the latest release ({tag})', unchecked: 'latest not checked',
+  uncheckedFor: {
+    offline: 'latest not checked (no network)', timeout: 'latest not checked (timed out)', rate_limited: 'latest not checked (throttled)',
+    http: 'latest not checked (HTTP error)', tls: 'latest not checked (TLS failed)', garbled: 'latest not checked (bad answer)',
+    odd_tag: 'latest not checked (odd tag)', failed: 'latest not checked (call failed)',
+  },
+  seenToday: '{tag} seen today', seenDay: '{tag} seen 1 day ago', seenDays: '{tag} seen {d} days ago', seenEarlier: '{tag} seen earlier',
+}
+
+const VERSION_KO: VersionCopy = {
+  newer: '새 판 {tag}', same: '최신 ({tag})', ahead: '릴리스보다 앞선 판 ({tag})', unchecked: '최신 확인 안 함',
+  uncheckedFor: {
+    offline: '최신 확인 안 함 (네트워크 없음)', timeout: '최신 확인 안 함 (타임아웃)', rate_limited: '최신 확인 안 함 (요청 한도 초과)',
+    http: '최신 확인 안 함 (서버 오류)', tls: '최신 확인 안 함 (TLS 실패)', garbled: '최신 확인 안 함 (응답을 못 읽음)',
+    odd_tag: '최신 확인 안 함 (태그 꼴이 아님)', failed: '최신 확인 안 함 (호출 실패)',
+  },
+  seenToday: '오늘 본 판 {tag}', seenDay: '1일 전에 본 판 {tag}', seenDays: '{d}일 전에 본 판 {tag}', seenEarlier: '전에 본 판 {tag}',
+}
+
+/**
+ * Things to say to an agent session, shown one at a time under the header's Version line and all together, by kind, in
+ * the tips page (view/tips.ts, se-irhr). The field test gave the first of them; the rest fill the kinds out.
+ */
+export interface TipsCopy {
+  /** The header line's label stays English, as the header's others do; this is the page's title. */
+  title: string
+  intro: string
+  /** The header line's accessible name: it opens the page. */
+  openAll: string
+  copy: string
+  copied: string
+  close: string
+  groups: ReadonlyArray<{ title: string; tips: readonly string[] }>
+}
+
+const TIPS_KO: TipsCopy = {
+  title: '에이전트에게 이렇게 말해 보세요',
+  intro: 'Claude Code·Codex·Saycode 세션에 그대로 붙여 넣거나 조금 고쳐서 쓰세요. moai 스킬이 깔린 저장소에서 통합니다.',
+  openAll: '팁 모두 보기',
+  copy: '복사', copied: '복사함', close: '닫기',
+  groups: [
+    { title: '시작하기', tips: [
+      '뭐부터 하면 될까?',
+      'se-43oh 시작해줘 (또는 43oh 시작해줘)',
+      '진행 상황 알려줘',
+      '이거 나중에 하자. 백로그에 넣어줘',
+    ] },
+    { title: '계획과 이슈', tips: [
+      '유저관리설정에서 유저 검색 창을 만들어야 한다. `opus5.x xhigh` 로 계획을 세워줘',
+      '이 기능 요청을 에픽 하나와 이슈 3~7개로 나눠서 먼저 보여줘',
+      'se-43oh 아래에 리뷰 이슈를 만들고 리뷰를 진행해줘',
+    ] },
+    { title: '마일스톤', tips: [
+      'v1.22.x의 마일스톤을 넣고 1.22에서 리뷰에서 발견된 버그 백로그를 마일스톤에 포함시켜줘.',
+      '마일스톤 v0.1.2 를 시작하고 리뷰때 버그가 아닌 백로그는 만들지말 것',
+      'v0.1.2 마일스톤에 남은 일과 막힌 일을 정리해줘',
+    ] },
+    { title: '백로그 정리', tips: [
+      '백로그를 유사한 것들 끼리는 함께 작업할 수 있게 합쳐주고, 필요없다 판단되는 것은 삭제해줘.',
+      '오래된 백로그 중 아직 유효한 것만 이슈로 올려줘',
+    ] },
+    { title: '감독과 모델', tips: [
+      '이 세션은 moai 감독 세션이다. 세이코드 세션 3개를 만들고 서브에이전트로 작업을 시작할 것.',
+      '작업은 sonnet5.x medium 으로 진행하고 리뷰를 opus5.5 high 또는 난이도에 따라 xhigh 로 할 것',
+      '놀고 있는 세션에 백로그를 나눠 줘',
+    ] },
+    { title: '복구', tips: [
+      '작업중에 서버가 죽었다. 작업목록을 확인하여 이전 세션을 복구하고 작업을 계속 진행해줘.',
+      '/moai:moai-recover 로 죽은 세션을 되살려줘',
+    ] },
+    { title: '위키', tips: [
+      '/moai:moai-wiki 또는 모아이 위키 스킬을 사용하여 프로그램 전체의 위키 문서를 작성하고 항상 위키를 업데이트할 것',
+      '이번 에픽에서 바뀐 것을 위키에 반영해줘',
+    ] },
+  ],
+}
+
+const TIPS_EN: TipsCopy = {
+  title: 'Things to say to an agent',
+  intro: 'Paste one into a Claude Code, Codex or Saycode session as it is, or change it to fit. They work in a repository with moai\'s skills.',
+  openAll: 'All tips',
+  copy: 'Copy', copied: 'Copied', close: 'Close',
+  groups: [
+    { title: 'Getting going', tips: [
+      'What should I do first?',
+      'Start se-43oh (or: start 43oh)',
+      'How is it going?',
+      'Let us do this later. Put it in the backlog',
+    ] },
+    { title: 'Plans and issues', tips: [
+      'User management settings need a user search box. Plan it with `opus5.x xhigh`',
+      'Split this feature request into one epic and 3 to 7 issues, and show me first',
+      'Make a review issue under se-43oh and run the review',
+    ] },
+    { title: 'Milestones', tips: [
+      'Add the v1.22.x milestone and put the bug backlog the 1.22 review found into it.',
+      'Start milestone v0.1.2, and make no backlog items in reviews except bugs',
+      'Sum up what is left and what is blocked in milestone v0.1.2',
+    ] },
+    { title: 'Backlog grooming', tips: [
+      'Merge backlog items that are alike so they can be worked on together, and delete the ones you judge unneeded.',
+      'Raise only the old backlog items that still hold into issues',
+    ] },
+    { title: 'Supervising and models', tips: [
+      'This session is the moai supervisor. Make three Saycode sessions and start the work with subagents.',
+      'Work with sonnet5.x medium, and review with opus5.5 high, or xhigh when it is hard',
+      'Hand the backlog out to the idle sessions',
+    ] },
+    { title: 'Recovering', tips: [
+      'The server died mid-work. Check the work list, bring the earlier sessions back and carry on.',
+      'Bring the dead sessions back with /moai:moai-recover',
+    ] },
+    { title: 'Wiki', tips: [
+      'With /moai:moai-wiki (the moai wiki skill), write the wiki for the whole program and keep it up to date.',
+      'Bring the wiki up to date with what this epic changed',
+    ] },
+  ],
+}
 
 // ── shell: tab bar, toggles, path line, banners (E2 se-qwkz.2v9) ────────────────────────────────────
 
@@ -46,6 +173,10 @@ export interface ShellCopy {
   wikiListFailed: (reason: string) => string
   /** The archive read failed (`SPC v o`); why follows. The board's rows stand. */
   archiveFailed: string
+  /** The header's Version line (view/brand.ts). */
+  version: VersionCopy
+  /** The header's tips and the tips page (view/tips.ts). */
+  tips: TipsCopy
 }
 
 const SHELL: Record<Language, ShellCopy> = {
@@ -72,6 +203,8 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiUnavailable: 'The wiki cannot be read here yet.',
     wikiListFailed: (reason) => `The wiki pages could not be read: ${reason}`,
     archiveFailed: 'Archived rows could not be read:',
+    version: VERSION_EN,
+    tips: TIPS_EN,
   },
   ko: {
     tabsLabel: 'Moai 보기',
@@ -96,6 +229,8 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiUnavailable: '아직 여기서는 위키를 읽을 수 없습니다.',
     wikiListFailed: (reason) => `위키 페이지 목록을 읽지 못했습니다: ${reason}`,
     archiveFailed: '아카이브된 항목을 읽지 못했습니다:',
+    version: VERSION_KO,
+    tips: TIPS_KO,
   },
   ja: {
     tabsLabel: 'Moai ビュー',
@@ -120,6 +255,8 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiUnavailable: 'ここではまだ Wiki を読めません。',
     wikiListFailed: (reason) => `Wiki のページ一覧を読めませんでした: ${reason}`,
     archiveFailed: 'アーカイブ済みの項目を読めませんでした:',
+    version: VERSION_EN,
+    tips: TIPS_EN,
   },
   zh: {
     tabsLabel: 'Moai 视图',
@@ -144,6 +281,8 @@ const SHELL: Record<Language, ShellCopy> = {
     wikiUnavailable: '这里暂时无法读取 Wiki。',
     wikiListFailed: (reason) => `无法读取 Wiki 页面列表: ${reason}`,
     archiveFailed: '无法读取已归档的条目:',
+    version: VERSION_EN,
+    tips: TIPS_EN,
   },
 }
 
@@ -488,7 +627,7 @@ const TABLE_EN: KeyTableCopy = {
     expand: 'Expand (board: column to the right)', collapse: 'Collapse (board: column to the left)', expandAll: 'Expand or collapse all under a group',
     search: 'Search', clear: 'Clear the search and filter', help: 'Keyboard shortcuts',
     filter: 'Filter', 'tab.list': 'List', 'tab.board': 'Board', 'tab.wiki': 'Wiki',
-    'view.deferred': 'Deferred', 'view.backlog': 'Backlog', 'view.archived': 'Archive',
+    'view.deferred': 'Deferred', 'view.backlog': 'Backlog', 'view.archived': 'Archive', 'view.worktree': 'Worktrees',
     'view.all': 'All but archived', 'view.allHelp': 'Show all (archive stays hidden)',
     'view.detail': 'Details', 'view.raw': 'Raw', 'view.rawHelp': 'Raw or rendered', 'sort.edit': 'Edit the order…',
     'option.detailAt': 'Details at', 'option.detailAtHelp': 'Details position (left ↔ bottom)',
@@ -533,7 +672,7 @@ const TABLE_KO: KeyTableCopy = {
     expand: '펼침 (칸반: 오른쪽 칸)', collapse: '접음 (칸반: 왼쪽 칸)', expandAll: '그룹 밑을 모두 펼침·접음',
     search: '검색', clear: '걸린 검색·필터 해제', help: '단축키 도움말',
     filter: '필터', 'tab.list': '목록', 'tab.board': '칸반', 'tab.wiki': '위키',
-    'view.deferred': '미룸', 'view.backlog': '백로그', 'view.archived': '아카이브',
+    'view.deferred': '미룸', 'view.backlog': '백로그', 'view.archived': '아카이브', 'view.worktree': '워크트리',
     'view.all': '아카이브 빼고 모두', 'view.allHelp': '모두 보이기 (아카이브 제외)',
     'view.detail': '상세', 'view.raw': '원문', 'view.rawHelp': '원문 또는 렌더링', 'sort.edit': '정렬 편집…',
     'option.detailAt': '상세 위치', 'option.detailAtHelp': '상세 위치 (왼쪽 ↔ 아래)',
@@ -578,7 +717,7 @@ const TABLE_JA: KeyTableCopy = {
     expand: '展開 (カンバン: 右の列)', collapse: '折りたたむ (カンバン: 左の列)', expandAll: 'グループの下をすべて展開・折りたたみ',
     search: '検索', clear: '検索・フィルターを解除', help: 'ショートカット',
     filter: 'フィルター', 'tab.list': '一覧', 'tab.board': 'カンバン', 'tab.wiki': 'Wiki',
-    'view.deferred': '保留', 'view.backlog': 'バックログ', 'view.archived': 'アーカイブ',
+    'view.deferred': '保留', 'view.backlog': 'バックログ', 'view.archived': 'アーカイブ', 'view.worktree': 'ワークツリー',
     'view.all': 'アーカイブ以外', 'view.allHelp': 'すべて表示 (アーカイブは除く)',
     'view.detail': '詳細', 'view.raw': '原文', 'view.rawHelp': '原文またはレンダリング', 'sort.edit': '並べ替えを編集…',
     'option.detailAt': '詳細の位置', 'option.detailAtHelp': '詳細の位置 (左 ↔ 下)',
@@ -623,7 +762,7 @@ const TABLE_ZH: KeyTableCopy = {
     expand: '展开 (看板: 右侧列)', collapse: '折叠 (看板: 左侧列)', expandAll: '展开或折叠分组下的全部',
     search: '搜索', clear: '清除搜索和筛选', help: '键盘快捷键',
     filter: '筛选', 'tab.list': '列表', 'tab.board': '看板', 'tab.wiki': 'Wiki',
-    'view.deferred': '推迟', 'view.backlog': '待办池', 'view.archived': '归档',
+    'view.deferred': '推迟', 'view.backlog': '待办池', 'view.archived': '归档', 'view.worktree': '工作树',
     'view.all': '除归档外全部', 'view.allHelp': '全部显示 (归档除外)',
     'view.detail': '详情', 'view.raw': '原文', 'view.rawHelp': '原文或渲染', 'sort.edit': '编辑排序…',
     'option.detailAt': '详情位置', 'option.detailAtHelp': '详情位置 (左 ↔ 下)',
@@ -867,7 +1006,7 @@ const ko: Copy = {
   refreshedAt: (time) => `${time} 갱신`, empty: '항목이 없습니다.',
   up: '..', root: '전체', noMilestone: '(마일스톤 없음)', lost: '(길 잃음)', loading: '불러오는 중…',
   running: '읽는 중…', cancel: '취소', cancelled: '읽기를 취소했습니다.',
-  stats: { todo: '할 일', in_progress: '진행 중', review: '검토', done: '완료' },
+  stats: { todo: '할 일', in_progress: '진행 중', review: '리뷰', done: '완료' },
   unreachable: 'moai web 에 닿지 않습니다 — 아직 도는지 본 뒤 갱신 시각을 누르세요.',
   moaiError: (message) => `Moai 오류: ${message}`, failed: '읽지 못했습니다.', unreadable: '답을 읽지 못했습니다.',
   said: 'moai 가 한 말:',

@@ -7,6 +7,10 @@
 /* After the title of a row only the search shows (the view hides it). */
 .moai-hidden-mark { margin-left: 6px; font-size: 11px; line-height: 16px; }
 
+/* The filter input stands as tall as the sort button beside it (se-ewaw): the small button's height, padding and
+   type size (components.css .m-btn-sm), so the toolbar reads as one row of controls. */
+.m-toolbar .m-filter .m-input { box-sizing: border-box; height: 28px; min-height: 28px; padding: 0 8px; font-size: 12px; line-height: 26px; }
+
 /* The sort editor's row under the key cursor (j/k in sorter mode, keys/wiring.ts). */
 .m-sort-pop .m-menu-item[data-cursor] { background: var(--selected); }
 .m-sort-pop .m-sort-note { padding: 4px 8px; color: var(--muted, inherit); font-size: 11px; }

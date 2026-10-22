@@ -19,6 +19,7 @@
  * - What the page boots on — the language, the columns and their glyphs — is `/api/boot` ({@link loadBoot}), which
  *   the server answers itself, without the envelope.
  */
+import { latestOf, userOf, type Latest } from './about.js'
 import { PRIORITY, answerOf, outcomeOf, type Client, type Endpoint, type Fetch, type Outcome, type RequestOptions } from './client.js'
 import type { Row, TreeRow } from './index.js'
 import { splitItems } from './query.js'
@@ -68,10 +69,13 @@ export function rowsFromLists(all: unknown, backlog: unknown): Loaded<Rows> {
   return { ok: true, value: { rows: withBacklog(items(all), backlog) } }
 }
 
-/** Both lists side by side, with `query` on each; the first that gave no answer is the load's failure. */
-async function bothLists(client: Client, query: Record<string, string>, options: RequestOptions): Promise<Loaded<Rows>> {
+/**
+ * Both lists side by side, with `query` on each and `rowsOnly` on `/api/rows` alone; the first that gave no answer
+ * is the load's failure.
+ */
+async function bothLists(client: Client, query: Record<string, string>, options: RequestOptions, rowsOnly: Record<string, string> = {}): Promise<Loaded<Rows>> {
   const [all, backlog] = await Promise.all([
-    client.request({ path: ENDPOINT.rows, query }, options),
+    client.request({ path: ENDPOINT.rows, query: { ...query, ...rowsOnly } }, options),
     client.request({ path: ENDPOINT.backlog, query }, options),
   ])
   for (const outcome of [all, backlog]) if (answerOf(outcome) === undefined) return { ok: false, outcome }
@@ -81,9 +85,13 @@ async function bothLists(client: Client, query: Record<string, string>, options:
   return loaded
 }
 
-/** The index rows: `/api/rows` and `/api/backlog` read at once. */
-export function loadAllRows(client: Client, priority: number = PRIORITY.list, epoch?: number): Promise<Loaded<Rows>> {
-  return bothLists(client, {}, { priority, epoch })
+/**
+ * The index rows: `/api/rows` and `/api/backlog` read at once. `worktree` (the view's `SPC v w`, on by default) lays
+ * the other git worktrees' rows over the list: `/api/rows?worktree=1`, which the server runs as `show --all
+ * --worktree`. The backlog has no such overlay.
+ */
+export function loadAllRows(client: Client, priority: number = PRIORITY.list, epoch?: number, worktree = false): Promise<Loaded<Rows>> {
+  return bothLists(client, {}, { priority, epoch }, worktree ? { worktree: '1' } : {})
 }
 
 /**
@@ -245,6 +253,12 @@ export interface Boot {
   columns: { backlog: BootColumn; shelved: BootColumn }
   filter_keys: string[]
   sort_fields: { name: string; dir: 'asc' | 'desc' }[]
+  /** The header's User line, already labelled with the project's naming as the TUI prints it; null when moai could
+   *  not tell who is working, and when an older server does not send it. */
+  user: string | null
+  /** What moai last heard of the latest release (data/about.ts {@link Latest}); null when it holds none, and when an
+   *  older server does not send it. */
+  latest: Latest | null
 }
 
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every((item) => typeof item === 'string')
@@ -259,7 +273,8 @@ export function bootFrom(value: unknown): Boot | null {
   if (!isRecord(glyphs) || !Object.values(glyphs).every((glyph) => typeof glyph === 'string')) return null
   if (!isRecord(columns) || !column(columns.backlog) || !column(columns.shelved)) return null
   if (!Array.isArray(sort_fields) || !sort_fields.every((field) => isRecord(field) && typeof field.name === 'string' && (field.dir === 'asc' || field.dir === 'desc'))) return null
-  return value as unknown as Boot
+  // `user` and `latest` came later: a server without them still boots, and the header then says `—`.
+  return { ...(value as unknown as Boot), user: userOf(value.user), latest: latestOf(value.latest) }
 }
 
 /**

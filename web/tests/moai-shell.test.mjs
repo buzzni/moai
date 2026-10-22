@@ -35,11 +35,13 @@ test('tokens: every host token is mapped, with fallbacks and dark overrides', ()
   assert.match(tokensCss, /#13161A/)
 })
 
-test('components css: no gradient, blur or glow; shadows only on menus and tooltips', () => {
-  assert.doesNotMatch(componentsCss, /gradient|blur\(|drop-shadow|text-shadow/)
+test('components css: no blur or glow; a gradient only in the band over a held title; shadows only on menus, tooltips and kanban cards', () => {
+  assert.doesNotMatch(componentsCss, /blur\(|drop-shadow|text-shadow/)
   const rules = [...componentsCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-  const shadowed = rules.filter(([, , body]) => /box-shadow:\s*(?!none\b)[^;\s]/.test(body)).map(([, selector]) => selector.replace(/\/\*[^]*?\*\//g, '').trim())
-  assert.deepEqual(shadowed, ['.m-menu', '.m-tooltip'])
+  const selectorOf = (selector) => selector.replace(/\/\*[^]*?\*\//g, '').replace(/^[^]*\{/, '').trim()
+  assert.deepEqual(rules.filter(([, , body]) => /gradient/.test(body)).map(([, selector]) => selectorOf(selector)), ['.m-glint'])
+  const shadowed = rules.filter(([, , body]) => /box-shadow:\s*(?!none\b)[^;\s]/.test(body)).map(([, selector]) => selectorOf(selector))
+  assert.deepEqual(shadowed, ['.m-menu', '.m-card', '.m-card[aria-selected="true"]', '.m-tooltip'])
   assert.doesNotMatch(componentsCss + tokensCss, /@import|url\(/, 'CSP: nothing external')
 })
 

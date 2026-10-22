@@ -3,12 +3,16 @@
  * placed absolutely in a body as tall as every line, so only the lines near the viewport exist.
  * Needs tokens.css and components.css.
  */
-.moai-list { position: relative; }
+/* The line height is view/list.ts ROW_HEIGHT; the title's line box is the whole row, so a branch drawn in it reaches
+   from the row's top to its bottom. */
+.moai-list { position: relative; --moai-row-h: 24px; }
 .moai-list:focus { outline: 0; }
 .moai-list:focus-visible .m-row[aria-selected="true"] { outline: 2px solid var(--accent); outline-offset: -2px; }
 .moai-list-head[hidden], .moai-list-note[hidden], .moai-list-empty[hidden] { display: none; }
 .moai-list-body { position: relative; }
-.moai-list-body > .m-row { position: absolute; left: 0; right: 0; }
+.moai-list-body > .m-row { position: absolute; left: 0; right: 0; height: var(--moai-row-h); }
+.moai-list-body > .m-row > .m-row-title { align-self: stretch; line-height: var(--moai-row-h); }
+.moai-list-body .moai-new { vertical-align: middle; }
 
 .moai-list-note { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; color: var(--muted); font-size: 12px; }
 .moai-list-note .m-btn[hidden] { display: none; }
@@ -26,7 +30,17 @@
 .moai-c-p { flex: none; width: 2ch; font-family: var(--mono); font-size: 12px; }
 .moai-c-st { flex: none; width: 1.5ch; text-align: center; font-family: var(--mono); font-size: 12px; }
 .moai-c-counts { width: 7ch; text-align: right; }
-.moai-twig { color: var(--muted); font-family: var(--mono); white-space: pre; }
+/* The branch (se-gowr.4x9): each level is two cells, its letters kept as text but not shown, and its lines drawn in
+   the colour the letters had. The line runs down the middle of the first cell and turns at the row's middle. */
+.moai-twig { display: inline-flex; height: 100%; vertical-align: top; font-family: var(--mono); white-space: pre; }
+.moai-tw { position: relative; width: 2ch; height: 100%; color: transparent; --tw-line: color-mix(in srgb, var(--muted) 55%, transparent); }
+.moai-tw::before, .moai-tw::after { content: ""; position: absolute; }
+.moai-tw:is([data-tw="pipe"], [data-tw="tee"])::before { top: 0; bottom: 0; left: calc(.5ch - .5px); border-left: 1px solid var(--tw-line); }
+.moai-tw[data-tw="tee"]::after { top: calc(50% - .5px); left: .5ch; right: 2px; border-top: 1px solid var(--tw-line); }
+.moai-tw[data-tw="end"]::before {
+  top: 0; height: calc(50% + .5px); left: calc(.5ch - .5px); right: 2px;
+  border-left: 1px solid var(--tw-line); border-bottom: 1px solid var(--tw-line); border-bottom-left-radius: 4px;
+}
 
 /* The columns are sized in ch of the row font, so their heads keep it; only the title head follows the head line. */
 .moai-list-head .m-row-title.moai-head { font: inherit; color: inherit; }

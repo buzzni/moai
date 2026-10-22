@@ -154,10 +154,19 @@ export function folderOf(line: ListLine): { path: Path; open: boolean } | null {
   return null
 }
 
-/** The branch drawn before a line inside an unfolded folder (`│ ├─ └─`); nothing at the listing's own level. */
+/** One level of a branch, two cells wide: a line going on down, nothing, a line with a turn, the last turn. */
+export type TwigPart = "pipe" | "blank" | "tee" | "end"
+export const TWIG_TEXT: Record<TwigPart, string> = { pipe: "│ ", blank: "  ", tee: "├─", end: "└─" }
+
+/** The levels of the branch before a line inside an unfolded folder; none at the listing's own level. */
+export function twigParts(twig: Twig): TwigPart[] {
+  if (twig.length < 2) return []
+  return [...twig.slice(1, -1).map((more): TwigPart => (more ? "pipe" : "blank")), twig[twig.length - 1] ? "tee" : "end"]
+}
+
+/** The branch as the TUI writes it (`│ ├─ └─`); nothing at the listing's own level. */
 export function twigText(twig: Twig): string {
-  if (twig.length < 2) return ""
-  return twig.slice(1, -1).map((more) => (more ? "│ " : "  ")).join("") + (twig[twig.length - 1] ? "├─" : "└─")
+  return twigParts(twig).map((part) => TWIG_TEXT[part]).join("")
 }
 
 /** The cursor key that names a place's last segment — where the cursor lands after leaving it. */

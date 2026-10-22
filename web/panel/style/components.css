@@ -1,6 +1,6 @@
 /*
  * Moai panel components. Specs: docs/moai-panel/look-and-feel.md section 5. Flat design: shadows only on
- * menus and popovers. Class names are m-* and built by view/components.ts, view/tabs.ts, view/split.ts.
+ * menus, popovers and the kanban's cards. Class names are m-* and built by view/components.ts, view/tabs.ts, view/split.ts.
  * Needs tokens.css.
  */
 
@@ -31,7 +31,11 @@
   transition: background .15s, color .15s;
 }
 .m-tab:hover, .m-tab[aria-selected="true"] { background: var(--hover); }
-.m-tab[aria-selected="true"] { color: var(--text); font-weight: 600; }
+.m-tab[aria-selected="true"] { position: relative; color: var(--text); font-weight: 600; }
+/* The chosen tab stands on the bar's bottom line with a short accent under it (se-gowr.l7b). */
+.m-tab[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 8px; right: 8px; bottom: -5px; height: 2px; border-radius: 2px 2px 0 0; background: var(--accent);
+}
 .m-tab .m-icon { width: 15px; height: 15px; }
 .m-tabbar-spacer { flex: 1 1 auto; }
 .m-tabbar-actions { display: flex; align-items: center; gap: 4px; flex: none; }
@@ -155,7 +159,7 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
 .m-row-dim { opacity: .6; }
 .m-row-head {
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px;
-  background: var(--bg); color: var(--muted); font-size: 11px; border-bottom: 1px solid var(--border-soft);
+  background: var(--lane-bg); color: var(--muted); font-size: 11px; font-weight: 500; border-bottom: 1px solid var(--border-soft);
 }
 
 /* Right-hand columns: fixed widths, they drop out as the list narrows (see responsive.ts). */
@@ -176,34 +180,91 @@ button.m-refreshed:hover { background: var(--hover); color: var(--text); }
 .m-st-review { color: var(--review); }
 .m-st-done { color: var(--ok); }
 .m-st-other { color: var(--accent); }
+/* What someone holds moves as in the TUI (view/spin.ts, se-gowr.oie). The glyph turns through the braille spinner, a
+   frame every 120 ms; ▸ stays in the DOM, for a screen reader and for the tests, and the spinner is drawn over it.
+   A yellow band runs over the title from left to right, a cell every 120 ms, and rests 8 cells past the end before it
+   comes in again (--glint-time, set per title). On an inline title that wraps, the band runs the lines in order.
+   Without motion both stand still: ▸, and the title in its own colour. */
 @media (prefers-reduced-motion: no-preference) {
-  .m-st-in_progress.m-pulse { animation: m-pulse 2.4s ease-in-out infinite; }
+  .m-spin { position: relative; color: transparent; }
+  /* One spinner for every started column: review's, its magenta at the regular weight (field test). In-progress's own
+     amber, and the bold its glyph carries, left the braille dots faint in Desktop, deepened or not. */
+  .m-spin::before {
+    content: "\280B"; position: absolute; inset: 0; color: var(--review); font-weight: 400; text-align: center;
+    animation: m-spin 1.2s step-start infinite;
+  }
+  .m-glint {
+    --glint-band: 3ch;
+    color: transparent;
+    background-image:
+      linear-gradient(90deg, transparent, var(--glint-edge) 25%, var(--glint-core) 50%, var(--glint-edge) 75%, transparent),
+      linear-gradient(var(--text), var(--text));
+    background-size: var(--glint-band) 100%, 100% 100%;
+    background-repeat: no-repeat;
+    -webkit-background-clip: text; background-clip: text;
+    animation: m-glint var(--glint-time, 3s) linear infinite;
+  }
+  /* A search hit keeps its mark and its words readable; the band skips it. */
+  .m-glint mark { color: var(--text); }
 }
-@keyframes m-pulse { 50% { opacity: .55; } }
+@keyframes m-spin {
+  0% { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; } 40% { content: "\283C"; }
+  50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; } 80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+/* From one band's width left of the title to 8 cells past its end: a percentage here is of the title less the band. */
+@keyframes m-glint {
+  from { background-position: calc(-1 * var(--glint-band)) 0, 0 0; }
+  to { background-position: calc(100% + var(--glint-band) + 8ch) 0, 0 0; }
+}
 .m-p0 { color: var(--danger); font-weight: 700; }
 .m-p1 { color: var(--danger); }
 .m-p2 { color: var(--text); }
 .m-p3 { color: var(--muted); }
 .m-epicname { color: var(--epic); }
+/* `⎇ <branch>`: a row another worktree holds (view/branch.ts), in the TUI's bright cyan, bold. */
+.m-branch { color: var(--branch); font: 600 12px var(--mono); white-space: nowrap; }
+.m-crumbs-trees { overflow: hidden; text-overflow: ellipsis; max-width: 40ch; }
 mark.m-mark { background: var(--warn-soft); color: inherit; border-radius: 2px; }
 
 /* ---- Kanban (5.7) ---- */
-.m-board { display: flex; gap: 2px; background: var(--border-soft); min-height: 0; overflow: auto; }
-.m-lane { flex: 1 0 200px; min-width: 200px; display: flex; flex-direction: column; background: var(--surface); }
-.m-lane-head { position: sticky; top: 0; display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--surface); font: 600 12px var(--font); }
-.m-card {
-  margin: 4px 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+/* Grey lanes on the panel's background with white cards on them (se-gowr.0vl). One gap stands between two cards and
+   between a card and its lane's sides; the lanes sit closer together. view/board.ts sizes the board from the same
+   numbers, so a change here goes there too. */
+.m-board-wrap { --board-gap: 6px; --board-lane-gap: 4px; padding: var(--board-gap); }
+.m-swim-head { display: flex; align-items: center; gap: 6px; padding: 8px 2px 6px; font: 600 12px var(--font); }
+.m-swim-head .m-count { color: var(--muted); font: 11px var(--mono); }
+.m-swim-head:first-child { padding-top: 2px; }
+.m-board { display: flex; gap: var(--board-lane-gap); min-height: 0; }
+.m-lane {
+  flex: 1 0 200px; min-width: 200px; display: flex; flex-direction: column; gap: var(--board-gap);
+  padding: 0 var(--board-gap) var(--board-gap); border-radius: var(--radius-card); background: var(--lane-bg);
 }
-.m-card[aria-selected="true"] { background: var(--selected); border-color: var(--accent); }
+.m-lane-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px;
+  background: var(--lane-bg); color: var(--muted); font: 600 12px var(--font);
+}
+.m-lane-head .m-count { margin-left: auto; font: 11px var(--mono); }
+.m-lane-empty { padding: 2px 4px; color: var(--muted); font-size: 12px; }
+/* Every card casts a faint blue shadow under it (se-26dv): the field test tried one colour per column and settled on
+   the done column's for all. */
+.m-card {
+  --card-tint: #CFE6F7;
+  --card-glow: 0 3px 6px color-mix(in srgb, var(--card-tint) var(--card-tint-strength), transparent);
+  padding: 8px 10px; border-radius: var(--radius-card); background: var(--card-bg); box-shadow: var(--shadow-card), var(--card-glow);
+  cursor: pointer; transition: background .15s;
+}
+.m-card:hover { background: color-mix(in srgb, var(--text) 3%, var(--card-bg)); }
+.m-card[aria-selected="true"] { background: var(--selected); box-shadow: inset 0 0 0 1px var(--accent), var(--shadow-card), var(--card-glow); }
+.m-card:focus-visible { outline-offset: 1px; }
 
 /* ---- Empty state, banner, kbd (5.9) ---- */
 .m-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 16px; padding: 24px;
-  border: 1px dashed var(--border); border-radius: 10px; color: var(--muted); text-align: center;
+  border-radius: var(--radius-card); background: var(--lane-bg); color: var(--muted); text-align: center;
 }
-.m-empty-icon { display: inline-flex; padding: 8px; border-radius: 999px; background: var(--muted-bg); }
+.m-empty-icon { display: inline-flex; padding: 8px; border-radius: 999px; background: var(--card-bg); color: var(--muted); }
 .m-empty-icon .m-icon { width: 18px; height: 18px; }
-.m-empty-title { color: var(--text); font-weight: 600; }
+.m-empty-title { color: var(--text); font-weight: 500; }
 .m-banner {
   display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border: 1px solid var(--border);
   border-radius: 10px; background: var(--muted-bg); color: var(--text); font-size: 12px;
