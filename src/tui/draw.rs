@@ -7,8 +7,7 @@
 use super::Surfaced;
 use super::form::{Field, Form, Target};
 use super::keys::{
-    self, BROWSE, Browse, CONFIRM, Confirm, Ctx, Goto, JOT, Jot, LEADER, MENU, Menu, PATH, PICK, PROMPT, Pick, Prompt,
-    label, labels,
+    self, Browse, Confirm, Ctx, Goto, JOT, Jot, LEADER, Menu, PATH, PROMPT, Pick, Prompt, label, labels,
 };
 use super::layer::{Look, Place, Shut};
 use super::menu;
@@ -366,7 +365,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             );
             prompt(f, line, say(lang, "tui.prompt.who"), &ask.input, ask.error.clone(), &help);
         }
-        Mode::Backlog(form) => jot_keys(f, form, keys, app.site.lang),
+        Mode::Backlog(form) => jot_keys(f, form, app.keys.confirm, keys, app.site.lang),
         Mode::Pick(p) => match &p.typing {
             Some(input) => {
                 let lang = app.site.lang;
@@ -384,7 +383,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let help = prompt_help(say(lang, "tui.prompt.hang"), lang);
             prompt(f, keys, say(lang, "tui.tz.title"), &z.typing, None, &help)
         }
-        Mode::Sort(_) => sort_keys(f, keys, app.site.lang),
+        Mode::Sort(_) => sort_keys(f, app.keys.sorter, keys, app.site.lang),
         Mode::Stats(w) => match &open_menu {
             Some((items, grid, waits)) => menu_keys.extend(menu_line(f, app, items, grid, *waits, keys)),
             None => stats_keys(f, w, keys, app.site.lang),
@@ -402,7 +401,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let name = clip(&crate::text::one_line(&u.name), (room / 2).max(1));
             let asked = fill(
                 say(app.site.lang, "tui.unregister.confirm"),
-                &[("name", &name), ("yes", &label(CONFIRM, Confirm::Yes))],
+                &[("name", &name), ("yes", &label(app.keys.confirm, Confirm::Yes))],
             );
             let line = Line::from(Span::styled(asked, ask));
             f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
@@ -474,13 +473,13 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
     if p.at.hidden > 0 {
         foot.push(fill(
             say(lang, "tui.pick.hidden_count"),
-            &[("n", &p.at.hidden.to_string()), ("key", &label(PICK, Pick::Hidden))],
+            &[("n", &p.at.hidden.to_string()), ("key", &label(p.keys, Pick::Hidden))],
         ));
     }
     if p.at.cut > 0 {
         foot.push(fill(
             say(lang, "tui.pick.cut_count"),
-            &[("n", &p.at.cut.to_string()), ("key", &label(PICK, Pick::Path))],
+            &[("n", &p.at.cut.to_string()), ("key", &label(p.keys, Pick::Path))],
         ));
     }
     let mut block = Block::default()
@@ -569,10 +568,10 @@ fn sort_edit(f: &mut Frame, e: &super::sorter::Editor, at: Rect, lang: Lang) {
 
 /// 차례 편집 창의 키 바 — 키 이름은 표([`super::keys::SORTER`])에서 읽는다. 좁으면 걷기·옮기기부터 뺀다 — 입히고
 /// 그만두는 길이 끝까지 선다.
-fn sort_keys(f: &mut Frame, at: Rect, lang: Lang) {
-    use super::keys::{SORTER, Sorter};
-    let hint = |a: Sorter| key(&label(SORTER, a), a.what(lang));
-    let pair = |a: Sorter, b: Sorter| key(&labels(SORTER, &[a, b]), a.what(lang));
+fn sort_keys(f: &mut Frame, table: &[keys::Bind<super::keys::Sorter>], at: Rect, lang: Lang) {
+    use super::keys::Sorter;
+    let hint = |a: Sorter| key(&label(table, a), a.what(lang));
+    let pair = |a: Sorter, b: Sorter| key(&labels(table, &[a, b]), a.what(lang));
     let optional = vec![pair(Sorter::Down, Sorter::Up), pair(Sorter::Lower, Sorter::Raise), hint(Sorter::Flip)];
     bar(f, at, optional, vec![hint(Sorter::Toggle), hint(Sorter::Apply), hint(Sorter::Default), hint(Sorter::Close)]);
 }
@@ -1071,18 +1070,18 @@ fn stats_text(st: &crate::report::stats::Stats, width: u16, lang: Lang) -> Vec<S
 /// 통계 창의 키 바 — 칸 너비 바꾸기·굴리기·닫기, 그리고 화면을 고르는 SPC 메뉴(moai-z46r). 이름과 낱말은 키 표
 /// ([`keys::STATS`])에서 읽는다.
 fn stats_keys(f: &mut Frame, w: &super::stats::Window, at: Rect, lang: Lang) {
-    use super::keys::{STATS, Stat};
+    use super::keys::Stat;
     let weekly = w.bucket == crate::report::stats::Bucket::Week;
     if !w.chord.held().is_empty() {
-        let next = keys::next_keys(STATS, w.chord.held())
+        let next = keys::next_keys(w.keys.stats, w.chord.held())
             .into_iter()
             .map(|(k, a)| (k, if let Stat::Step(m) = a { keys::move_word(m, lang) } else { a.what(weekly, lang) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(w.chord.held(), next)]);
     }
-    let scroll = labels(STATS, &[Stat::Step(Move::LineDown), Stat::Step(Move::LineUp)]);
+    let scroll = labels(w.keys.stats, &[Stat::Step(Move::LineDown), Stat::Step(Move::LineUp)]);
     let optional = vec![key(&scroll, Stat::Step(Move::LineDown).what(weekly, lang))];
-    let hint = |a: Stat| key(&label(STATS, a), a.what(weekly, lang));
+    let hint = |a: Stat| key(&label(w.keys.stats, a), a.what(weekly, lang));
     let menu = key(&menu::title(&[LEADER.event()]), menu::root(lang));
     bar(f, at, optional, vec![hint(Stat::Bucket), hint(Stat::Close), menu]);
 }
@@ -1197,7 +1196,7 @@ fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -
         at,
         &mut state,
     );
-    let hint = if focused { String::new() } else { format!(" ({})", label(keys::WIKI, keys::Wiki::FocusNext)) };
+    let hint = if focused { String::new() } else { format!(" ({})", label(w.keys.wiki, keys::Wiki::FocusNext)) };
     scroll_mark(f, &w.list, at, &hint, focused, lang);
     // 찾기에 하나도 안 걸렸으면 빈 칸 대신 그렇다고 말한다 — 빈 목록은 위키가 사라진 것으로 읽힌다.
     if n == 0 && inner.height > 0 {
@@ -1346,9 +1345,9 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
         .collect();
     f.render_widget(block.title(clip(&title, at.width.saturating_sub(2) as usize)), at);
     let hint = if focused {
-        labels(keys::WIKI, &[keys::Wiki::Step(Move::LineDown), keys::Wiki::Step(Move::LineUp)])
+        labels(w.keys.wiki, &[keys::Wiki::Step(Move::LineDown), keys::Wiki::Step(Move::LineUp)])
     } else {
-        label(keys::WIKI, keys::Wiki::FocusNext)
+        label(w.keys.wiki, keys::Wiki::FocusNext)
     };
     scroll_mark(f, &w.page, at, &format!(" ({hint})"), focused, lang);
     f.render_widget(Paragraph::new(visible), inner);
@@ -1500,7 +1499,7 @@ fn link_aim(t: &super::wiki::Target, lang: Lang) -> Option<(String, Option<&'sta
 /// `Bksp` 를 안 댄다(눌러도 아무 일이 없다). 본문의 링크가 골라졌으면 `Enter` 곁에 그 대상이 낱말로 선다(2026-10-04
 /// 사용자 결정, moai-p61w) — 반전 하나로는 어디로 가는지가 안 읽힌다.
 fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
-    use super::keys::{WIKI, Wiki};
+    use super::keys::Wiki;
     // **치는 동안은 칸이 선다** — 하나도 안 걸렸으면 칸 곁에서 그렇다고 댄다(글을 버리지 않는다).
     if let Some(t) = &w.typing {
         let none = w.shown().is_empty().then(|| say(lang, "tui.wiki.no_match").to_string());
@@ -1510,16 +1509,16 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     // 고르기 창이 떠 있으면 그 창의 키 — 이름과 낱말은 그 표([`keys::LINKS`])에서 읽는다. `gg` 의 첫 `g` 를 들고
     // 있으면 이을 키를 댄다(아래 창의 열과 같다).
     if let Some(c) = &w.choose {
-        use super::keys::{LINKS, Link};
+        use super::keys::Link;
         if !c.chord.held().is_empty() {
-            let next = keys::next_keys(LINKS, c.chord.held())
+            let next = keys::next_keys(w.keys.links, c.chord.held())
                 .into_iter()
                 .map(|(k, a)| (k, if let Link::Step(m) = a { keys::move_word(m, lang) } else { a.what(lang) }))
                 .collect();
             return bar(f, at, Vec::new(), vec![waiting(c.chord.held(), next)]);
         }
-        let moves = labels(LINKS, &[Link::Step(Move::LineDown), Link::Step(Move::LineUp)]);
-        let hint = |a: Link| key(&label(LINKS, a), a.what(lang));
+        let moves = labels(w.keys.links, &[Link::Step(Move::LineDown), Link::Step(Move::LineUp)]);
+        let hint = |a: Link| key(&label(w.keys.links, a), a.what(lang));
         let optional = vec![key(&moves, Link::Step(Move::LineDown).what(lang))];
         return bar(f, at, optional, vec![hint(Link::Enter), hint(Link::Close)]);
     }
@@ -1530,14 +1529,14 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
     let aim = picked.filter(|_| on_page).and_then(|k| w.link_target(k)).and_then(|t| link_aim(&t, lang));
     let what = |a: Wiki| a.what(on_page, w.searched(), picked.is_some(), lang);
     if !w.chord.held().is_empty() {
-        let next = keys::next_keys(WIKI, w.chord.held())
+        let next = keys::next_keys(w.keys.wiki, w.chord.held())
             .into_iter()
             .map(|(k, a)| (k, if let Wiki::Step(m) = a { keys::move_word(m, lang) } else { what(a) }))
             .collect();
         return bar(f, at, Vec::new(), vec![waiting(w.chord.held(), next)]);
     }
-    let hint = |a: Wiki| key(&label(WIKI, a), what(a));
-    let moves = labels(WIKI, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
+    let hint = |a: Wiki| key(&label(w.keys.wiki, a), what(a));
+    let moves = labels(w.keys.wiki, &[Wiki::Step(Move::LineDown), Wiki::Step(Move::LineUp)]);
     let optional = vec![key(&moves, what(Wiki::Step(Move::LineDown))), hint(Wiki::FocusNext), hint(Wiki::NextLink)];
     let mut rest = Vec::new();
     if w.can_go_back() {
@@ -1550,7 +1549,7 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
         // **대상이 길면 줄인다** — 밖 주소는 수십 칸이라 그대로 대면 뒤의 `Esc`·`SPC 메뉴` 가 바 밖으로 밀려 말없이
         // 잘린다(나갈 길을 못 찾는 것이 [`key`] 가 막는 일이다). 줄인 자리는 `…` 가 댄다.
         Some((to, tail)) => {
-            let name = label(WIKI, Wiki::Enter);
+            let name = label(w.keys.wiki, Wiki::Enter);
             let tail = tail.map(|t| format!(" {t}")).unwrap_or_default();
             let fixed = crate::text::width(&format!(" {name} → {tail}")) + spans_width(&rest);
             let to = clip(to, (at.width as usize).saturating_sub(fixed).max(1));
@@ -1607,7 +1606,7 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect, lang: Lang) {
     }
     // `g` 가 기다리는 동안은 무엇을 기다리는지 댄다 — 탐색의 바와 같은 모양이다.
     if !p.chord.held().is_empty() {
-        let next = keys::next_keys(PICK, p.chord.held())
+        let next = keys::next_keys(p.keys, p.chord.held())
             .into_iter()
             .map(|(k, a)| {
                 (k, if let Pick::Step(m) = a { keys::move_word(m, lang) } else { a.what(p.show_hidden, lang) })
@@ -1616,7 +1615,7 @@ fn pick_keys(f: &mut Frame, p: &Picker, at: Rect, lang: Lang) {
         return bar(f, at, Vec::new(), vec![waiting(p.chord.held(), next)]);
     }
     // 이름과 낱말은 키 표([`PICK`])에서 읽는다. 여기서 정하는 것은 차례뿐이다.
-    let hint = |a: Pick| key(&label(PICK, a), a.what(p.show_hidden, lang));
+    let hint = |a: Pick| key(&label(p.keys, a), a.what(p.show_hidden, lang));
     let optional = vec![hint(Pick::Hidden), hint(Pick::Path), hint(Pick::Up), hint(Pick::Enter)];
     bar(f, at, optional, vec![hint(Pick::Register), hint(Pick::Close)]);
 }
@@ -1720,10 +1719,10 @@ fn jot_head<'a>(into: &Target, w: usize, tint: Style, lang: Lang) -> Line<'a> {
 ///
 /// 거절된 까닭(빈 제목)과 버릴지 묻는 말은 이 줄을 차지한다 — 키 안내는 폼을 연
 /// 순간 이미 봤고, 지금 답해야 할 것은 그 말이다.
-fn jot_keys(f: &mut Frame, form: &Form, at: Rect, lang: Lang) {
+fn jot_keys(f: &mut Frame, form: &Form, confirm: &[keys::Bind<Confirm>], at: Rect, lang: Lang) {
     let line = if form.leaving {
         let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
-        let asked = fill(say(lang, "tui.jot.discard"), &[("yes", &label(CONFIRM, Confirm::Yes))]);
+        let asked = fill(say(lang, "tui.jot.discard"), &[("yes", &label(confirm, Confirm::Yes))]);
         Line::from(Span::styled(asked, ask))
     } else if let Some(e) = &form.error {
         Line::from(vec![
@@ -2329,7 +2328,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let hung = app.hung.as_ref().map(|h| {
         let said = fill(
             say(lang, "tui.crumbs.filter"),
-            &[("text", &badge(h, lang)), ("key", &label(BROWSE, Browse::ClearFilter))],
+            &[("text", &badge(h, lang)), ("key", &label(app.keys.browse, Browse::ClearFilter))],
         );
         clip(&said, w)
     });
@@ -2350,7 +2349,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let overlay = (app.worktree && !trees.is_empty()).then(|| {
         let names = trees.join(", ");
         let off = match Browse::Worktree.enabled(&app.key_ctx(rows)) {
-            Ok(()) => fill(say(lang, "tui.crumbs.overlay_off"), &[("key", &label(BROWSE, Browse::Worktree))]),
+            Ok(()) => fill(say(lang, "tui.crumbs.overlay_off"), &[("key", &label(app.keys.browse, Browse::Worktree))]),
             Err(_) => String::new(),
         };
         clip(&format!("{} {names}{off}", style::BRANCH_GLYPH), w / 2)
@@ -3650,7 +3649,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         None if app.on_layer() => {
             let lang = app.site.lang;
             let mut out = vec![Line::from(Span::styled(say(lang, "tui.layer.no_projects"), bold())), Line::from("")];
-            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &label(BROWSE, Browse::Pick))]);
+            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &label(app.keys.browse, Browse::Pick))]);
             out.extend(wrapped(&how, inner.width as usize, dim()));
             out
         }
@@ -3698,9 +3697,9 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     // 움직이므로(moai-ob4c) 목록에 선 사람에게 `j·k` 라 적으면 누른 대로 커서가 옮겨 가고
     // 보던 상세가 바뀐다. 목록에서는 상세로 가는 키를 댄다.
     let hint = if app.focus == Pane::Detail {
-        labels(BROWSE, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)])
+        labels(app.keys.browse, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)])
     } else {
-        label(BROWSE, Browse::FocusNext)
+        label(app.keys.browse, Browse::FocusNext)
     };
     let hint = format!(" ({hint})");
     scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail, app.site.lang);
@@ -4743,7 +4742,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 out.extend(wrapped(&said, w, dim()));
             }
             out.push(Line::from(""));
-            let how = fill(say(lang, "tui.place.enter"), &[("key", &label(BROWSE, Browse::Enter))]);
+            let how = fill(say(lang, "tui.place.enter"), &[("key", &label(app.keys.browse, Browse::Enter))]);
             out.push(Line::from(Span::styled(how, dim())));
         }
     }
@@ -4766,7 +4765,7 @@ fn fkeys(f: &mut Frame, app: &App, rows: &[Row], at: Rect, unnumbered: bool) {
     // `g` 가 기다리는 동안은 메뉴와 같은 자리에서 **무엇을 기다리는지** 댄다(moai-k3yi). 뜻 없는
     // 키를 누르면 열이 버려져([`keys::Chord::feed`]) 바가 저절로 돌아온다.
     if !app.chord.held().is_empty() {
-        let next = keys::next_keys(BROWSE, app.chord.held())
+        let next = keys::next_keys(app.keys.browse, app.chord.held())
             .into_iter()
             .filter(|(_, a)| a.enabled(&c).is_ok())
             .map(|(k, a)| (k, if let Browse::Step(m) = a { keys::move_word(m, c.lang) } else { a.what(&c) }))
@@ -4796,7 +4795,7 @@ fn waiting(held: &[ratatui::crossterm::event::KeyEvent], next: Vec<Hint>) -> Spa
 /// 키 처리와 바가 한 판정을 읽고, 둘이 갈릴 수 없다.
 fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) {
     use Browse as B;
-    let hint = |acts: &[Browse]| -> Hint { (labels(BROWSE, acts), acts[0].what(c)) };
+    let hint = |acts: &[Browse]| -> Hint { (labels(app.keys.browse, acts), acts[0].what(c)) };
     let shown = |order: &[&[Browse]]| -> Vec<Hint> {
         order.iter().filter(|acts| acts[0].enabled(c).is_ok()).map(|acts| hint(acts)).collect()
     };
@@ -5055,10 +5054,14 @@ fn menu_line(
     // 닫지만(연 키 SPC 도, 하위 층이면 Bksp 도), 안 기다리는 층에서 그것을 대면 고르면 닫힌다는
     // 뜻이 흐려진다. **모르는 키는 그래도 무시한다**(`menu::feed`) — 아무것도 안 고르고 나가는 길은
     // `moai tui --help` 가 댄다.
-    let exit = |m: Menu| (key(&label(MENU, m), m.what(app.site.lang)), menu_event(m));
-    let mut exits = if waits { vec![exit(Menu::Close)] } else { Vec::new() };
+    //
+    // **키를 뗀 나가는 법은 안 댄다**(moai-bzm3) — 사람의 `keys.toml` 이 `menu.close = "none"` 이면 그 칸이 누를 키가
+    // 없다. 메뉴는 그래도 연 키(SPC)로 닫힌다.
+    let exit =
+        |m: Menu| menu_event(app.keys.menu, m).map(|k| (key(&label(app.keys.menu, m), m.what(app.site.lang)), k));
+    let mut exits: Vec<_> = if waits { exit(Menu::Close).into_iter().collect() } else { Vec::new() };
     if held.len() > 1 {
-        exits.push(exit(Menu::Up));
+        exits.extend(exit(Menu::Up));
     }
     let used = spans_width(&spans) + exits.iter().map(|(s, _)| crate::text::width(&s.content)).sum::<usize>();
     if used <= room {
@@ -5074,9 +5077,10 @@ fn menu_line(
     hits
 }
 
-/// 메뉴의 나가는 법 하나를 누른 모양 — 표([`MENU`])의 첫 키다. 표가 키를 옮기면 따라온다.
-fn menu_event(m: Menu) -> KeyEvent {
-    MENU.iter().find(|b| b.act == m).map(|b| b.seq[0].event()).expect("MENU 표에 없는 나가는 법")
+/// 메뉴의 나가는 법 하나를 누른 모양 — 실행 중의 메뉴 표([`keys::Keymap::menu`])의 첫 키다. 표가 키를 옮기면 따라오고,
+/// 키를 뗐으면 없다.
+fn menu_event(table: &[keys::Bind<Menu>], m: Menu) -> Option<KeyEvent> {
+    table.iter().find(|b| b.act == m).map(|b| b.seq[0].event())
 }
 
 /// 키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
@@ -5402,6 +5406,7 @@ fn mend(prev: &ratatui::buffer::Buffer, next: &mut ratatui::buffer::Buffer) {
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::super::keys::BROWSE;
     use super::super::tests::old_look;
     use super::*;
     use crate::config::Config;

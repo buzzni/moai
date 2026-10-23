@@ -129,6 +129,7 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // **말은 화면이 이미 든 것이다**(`App::site.lang`) — 여기서 `ctx.lang()` 을 다시 물으면 밖에서 띄운
     // 길(`outside`)이 같은 설정을 한 번 더 판다(`super::lang_of` 가 적어 둔 그 까닭이다).
     app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
+    adopt_keys(&mut app);
     // `reg.read` 가 옮겨 가기 전에 잰다 — 통째로 빌리는 자리다.
     let repo_ok = super::update::chosen_repo(app.site.lang, &reg, |k| std::env::var_os(k)).is_ok();
     // 읽음은 이 저장소의 제 파일에 산다(moai-omx7) — 설정에서 오는 것은 겹쳐 볼 옛 `[read]` 뿐이다.
@@ -142,6 +143,14 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
     ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref(), repo_ok);
     screen(app)
+}
+
+/// 사람의 키 파일을 읽어 입힌다(moai-bzm3) — 안에서 띄운 길과 밖에서 띄운 길이 같은 자를 지난다. **보기 설정 뒤에
+/// 부른다**: 둘 다 알림을 세우고, 키 쪽이 그 뒤에 잇는다([`crate::tui::App::adopt_keys`]). 보통 명령은 이 파일을 안 연다.
+fn adopt_keys(app: &mut App) {
+    let file = crate::tui::keymap::path_from(|k| std::env::var_os(k));
+    let (keys, problems) = crate::tui::keymap::load(file.as_deref());
+    app.adopt_keys(keys, &problems, file.as_deref());
 }
 
 /// 새 판을 묻는 실을 띄운다 — **문을 지날 때만**(moai-3gia, 사용자 결정 2026-09-21).
@@ -279,6 +288,7 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.config_tried.saw(reg.trouble);
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
+    adopt_keys(&mut app);
     let repo_ok = super::update::chosen_repo(app.site.lang, &reg, |k| std::env::var_os(k)).is_ok();
     app.legacy_read = reg.read;
     app.load_read();

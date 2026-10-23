@@ -7,7 +7,7 @@
 //! 않는다 — 층이 읽은 파일(`Layer::config`)이나, 층이 없으면 띄울 때 받은 자리
 //! (`App::user_config`)다. 환경을 여기서 다시 읽으면 시험이 돌리는 사람의 설정을 쓴다.
 
-use super::keys::{BROWSE, Browse, CONFIRM, Confirm, Lookup, label, lookup};
+use super::keys::{Browse, Confirm, Lookup, label, lookup};
 use super::layer::Relayered;
 use super::picker::{Act, Dent, Listing, Picker};
 use super::{App, Mode, Row};
@@ -144,7 +144,7 @@ impl App {
         for start in starts {
             match list_dir(&start, &registered, false, lang) {
                 Ok(at) => {
-                    self.mode = Mode::Pick(Picker::new(at));
+                    self.mode = Mode::Pick(Picker { keys: self.keys.pick, ..Picker::new(at) });
                     return;
                 }
                 Err(e) => why = e,
@@ -248,7 +248,7 @@ impl App {
                 let back = if self.on_layer() || self.layer.is_none() || !layer.is_empty() {
                     String::new()
                 } else {
-                    fill(say(lang, "tui.register.go_up"), &[("key", &label(BROWSE, Browse::Project(0)))])
+                    fill(say(lang, "tui.register.go_up"), &[("key", &label(self.keys.browse, Browse::Project(0)))])
                 };
                 self.notice = Some(format!("{what} · {}{bad}{bare}{layer}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {
@@ -305,7 +305,7 @@ impl App {
     /// 이동으로도 쓰지 않는다: 물음을 못 보고 누른 `↓` 가 커서를 옮기면 무엇을 그만뒀는지 헷갈린다.
     pub(super) fn settle_unregister(&mut self, k: KeyEvent) {
         let Mode::Unregister(u) = std::mem::replace(&mut self.mode, Mode::Browse) else { return };
-        if let Lookup::Run(Confirm::Yes) = lookup(CONFIRM, &[k]) {
+        if let Lookup::Run(Confirm::Yes) = lookup(self.keys.confirm, &[k]) {
             self.unregister(&u.path);
         }
     }

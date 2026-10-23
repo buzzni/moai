@@ -21,7 +21,7 @@
 //! - **탐색기가 든 줄을 센다** — 옆 워크트리를 겹쳐 보고 있으면 거기서 온 줄도 든다. CLI 의 `moai stats` 는
 //!   안 겹치므로, 그때는 제목이 그렇다고 말한다
 
-use super::keys::{Browse, LEADER, STATS, Stat};
+use super::keys::{Browse, LEADER, Stat};
 use super::layer::{Depth, Told};
 use super::menu;
 use super::scroll::Scroll;
@@ -52,6 +52,8 @@ pub struct Window {
     pub scroll: Scroll,
     /// 접두어(`gg` 의 첫 `g`)를 기다리는 열.
     pub chord: super::keys::Chord,
+    /// 열 때 든 쪽이 건넨 실행 중의 키 표(moai-bzm3) — 창의 키 바가 이것으로 이름을 댄다.
+    pub keys: super::keys::Keymap,
 }
 
 impl Window {
@@ -153,7 +155,7 @@ impl App {
                 &zone,
                 &site.now,
             );
-            self.mode = Mode::Stats(Box::new(Window::new(project, shown, overlaid, week, day)));
+            self.mode = Mode::Stats(Box::new(Window::new(project, shown, overlaid, week, day, self.keys)));
             return;
         }
         // **한눈 보기에는 "지금 선 프로젝트" 가 없다 — 커서가 댄다**(`App::open_form` 과 같은 규칙).
@@ -175,7 +177,7 @@ impl App {
             let now = crate::model::now();
             let (week, day) =
                 count(&site.issues, &site.cfg, &site.ground, site.repo.as_ref(), &site.origin, &filter, &zone, &now);
-            self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day)));
+            self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day, self.keys)));
             return;
         }
         // **접혀 아직 안 읽은 프로젝트는 그 자리에서 읽는다** — 누른 사람은 결과를 기다리고 있다(들어가는 길
@@ -210,7 +212,7 @@ impl App {
                     &zone,
                     &fresh.now,
                 );
-                self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day)));
+                self.mode = Mode::Stats(Box::new(Window::new(name, None, overlaid, week, day, self.keys)));
             }
             Err(e) => {
                 self.notice = Some(fill(say(lang, "tui.stats.unread"), &[("name", &name), ("why", &e.message)]));
@@ -254,7 +256,7 @@ impl App {
                 self.chord.clear();
                 if let Mode::Stats(w) = &mut self.mode {
                     for k in held {
-                        w.chord.feed(STATS, k);
+                        w.chord.feed(self.keys.stats, k);
                     }
                 }
             }
@@ -273,7 +275,7 @@ impl App {
             };
         }
         let Mode::Stats(w) = &mut self.mode else { return false };
-        match w.chord.feed(STATS, k) {
+        match w.chord.feed(self.keys.stats, k) {
             Some(Stat::Step(m)) => w.scroll.go(m),
             Some(Stat::Bucket) => w.switch(),
             Some(Stat::Close) => self.mode = Mode::Browse,
@@ -285,7 +287,14 @@ impl App {
 }
 
 impl Window {
-    fn new(project: String, filter: Option<String>, overlaid: bool, week: Stats, day: Stats) -> Window {
+    fn new(
+        project: String,
+        filter: Option<String>,
+        overlaid: bool,
+        week: Stats,
+        day: Stats,
+        keys: super::keys::Keymap,
+    ) -> Window {
         Window {
             project,
             filter,
@@ -295,6 +304,7 @@ impl Window {
             bucket: Bucket::Week,
             scroll: Scroll::default(),
             chord: super::keys::Chord::default(),
+            keys,
         }
     }
 }
@@ -344,6 +354,22 @@ mod tests {
             Mode::Stats(w) => w,
             other => panic!("통계 창이 안 열렸다 — {other:?}"),
         }
+    }
+
+    /// **창은 열 때 든 쪽의 키 표를 받는다**(moai-bzm3) — 사람의 키 파일이 바꾼 `b` 가 창 안에서 듣고, 옛 `b` 는
+    /// 안 듣는다. 창이 기본 표를 바로 읽으면 바는 바꾼 키를 대는데 누르면 아무 일이 없다.
+    #[test]
+    fn the_window_runs_on_the_keys_it_was_opened_with() {
+        let (map, problems) = super::super::keymap::build("[stats]\nbucket = \"w\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut a = app();
+        a.adopt_keys(map, &problems, None);
+        a.hit("SPC g s");
+        assert_eq!(window(&a).keys, a.keys);
+        a.hit("b");
+        assert_eq!(window(&a).bucket, Bucket::Week, "옛 b 가 칸 너비를 바꿨다");
+        a.hit("w");
+        assert_eq!(window(&a).bucket, Bucket::Day, "바꾼 w 가 안 들었다");
     }
 
     /// **`SPC g s` 가 창을 열고, Esc 는 보던 화면을 그대로 돌려준다** — 커서·포커스·상세의 굴린 자리·걸린

@@ -952,6 +952,42 @@ pub struct Ctx {
     pub right_pane: &'static str,
     pub up_pane: &'static str,
     pub down_pane: &'static str,
+    /// 실행 중의 키 표(moai-bzm3) — 사람의 `keys.toml` 이 바꾼 것. 거절문과 메뉴가 **누르는 표와 같은 표**의
+    /// 이름을 댄다. 기본값은 기본 표다.
+    pub keys: Keymap,
+}
+
+/// 실행 중의 키 표 — 사람의 키 파일(`keys.toml`, [`super::keymap`])이 바꾼 표는 새로 짓고, 안 바꾼 표는 기본 표
+/// 그대로다. **`&'static` 이다**: 시작 때 한 번 지어 새게 둔다 — 한 프로세스에 한 번이라 샘이 아니고, 그래야
+/// [`lookup`]·[`label`] 이 오늘의 서명 그대로 받는다.
+///
+/// **든 쪽이 들고 건넨다**(`App::keys` → [`Ctx::keys`]·창). 전역에 두지 않는다 — 이 조각은 `KeyEvent` 와 넘겨받은
+/// 값만 안다(맨 위의 글). 못 바꾸는 표(Ctrl-C·글칸·경로 칸·담기 폼)는 여기 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keymap {
+    pub browse: &'static [Bind<Browse>],
+    pub menu: &'static [Bind<Menu>],
+    pub sorter: &'static [Bind<Sorter>],
+    pub pick: &'static [Bind<Pick>],
+    pub stats: &'static [Bind<Stat>],
+    pub wiki: &'static [Bind<Wiki>],
+    pub links: &'static [Bind<Link>],
+    pub confirm: &'static [Bind<Confirm>],
+}
+
+impl Default for Keymap {
+    fn default() -> Keymap {
+        Keymap {
+            browse: BROWSE,
+            menu: MENU,
+            sorter: SORTER,
+            pick: PICK,
+            stats: STATS,
+            wiki: WIKI,
+            links: LINKS,
+            confirm: CONFIRM,
+        }
+    }
 }
 
 impl Ctx {
@@ -1030,7 +1066,7 @@ impl Browse {
             // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
             Leave if c.root && c.projects > 0 => Err(Off::Why(fill(
                 say(c.lang, "tui.off.leave_dir_only"),
-                &[("leave", &label(BROWSE, Leave)), ("project", &label(BROWSE, Project(0)))],
+                &[("leave", &label(c.keys.browse, Leave)), ("project", &label(c.keys.browse, Project(0)))],
             ))),
             Leave if c.root => Err(Off::Quiet),
             // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
@@ -1038,7 +1074,7 @@ impl Browse {
             // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
             Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
-                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &label(BROWSE, Enter))])))
+                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &label(c.keys.browse, Enter))])))
             }
             Worktree if c.layer => Err(Off::Quiet),
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의

@@ -38,7 +38,7 @@
 //! 프로젝트의 위키를 한 목록에 섞지 않는다.
 
 use super::input::Input;
-use super::keys::{self, Browse, Chord, LEADER, LINKS, Lookup, PROMPT, Prompt, WIKI};
+use super::keys::{self, Browse, Chord, LEADER, Lookup, PROMPT, Prompt};
 use super::layer::Depth;
 use super::menu;
 use super::scroll::{self, Move, Scroll};
@@ -117,6 +117,8 @@ pub struct Window {
     /// 잊은 새 길 하나가 다른 페이지의 같은 차례 링크로 `Enter` 를 보낸다. 슬러그가 지금 페이지가 아니면 없는 고름이다
     /// ([`Window::picked`]). 페이지를 바꾸는 길이 걷는 것은 그대로 둔다 — 같은 페이지로 돌아왔을 때 옛 고름이 살지 않게.
     picked: Option<(String, usize)>,
+    /// 열 때 든 쪽이 건넨 실행 중의 키 표(moai-bzm3) — 창과 고르기 창의 키 바·안내가 이것으로 이름을 댄다.
+    pub keys: keys::Keymap,
 }
 
 /// 링크와 id, 이 페이지를 가리키는 페이지를 고르는 창 — 연 순간의 페이지에서 지은 고를 것과 커서.
@@ -169,7 +171,14 @@ pub struct Typing {
 }
 
 impl Window {
-    fn new(project: String, dir: String, from: Option<PathBuf>, wiki: Wiki, titles: Titles) -> Window {
+    fn new(
+        project: String,
+        dir: String,
+        from: Option<PathBuf>,
+        wiki: Wiki,
+        titles: Titles,
+        keys: keys::Keymap,
+    ) -> Window {
         let folded =
             wiki.pages.iter().map(|p| (p.title.to_lowercase(), p.body.as_deref().map(str::to_lowercase))).collect();
         Window {
@@ -193,6 +202,7 @@ impl Window {
             titles,
             choose: None,
             picked: None,
+            keys,
         }
     }
 
@@ -673,7 +683,7 @@ impl App {
             return;
         }
         // **연 키는 탐색의 열을 비운 뒤에 온다** — 메뉴로 열었으면 메뉴가 이미 닫혔다(`menu::feed`).
-        self.mode = Mode::Wiki(Box::new(Window::new(name, dir, from, wiki, titles)));
+        self.mode = Mode::Wiki(Box::new(Window::new(name, dir, from, wiki, titles, self.keys)));
     }
 
     /// 고르기 창의 키 하나(본문 칸의 `Enter` 가 연 창). 고른 것이 페이지면 그리로 건너가고, id 면 창을 닫고 그 줄에 서며,
@@ -683,7 +693,7 @@ impl App {
     fn choose_key(&mut self, k: KeyEvent) -> bool {
         let Mode::Wiki(w) = &mut self.mode else { return false };
         let Some(c) = &mut w.choose else { return false };
-        let picked = match c.chord.feed(LINKS, k) {
+        let picked = match c.chord.feed(self.keys.links, k) {
             Some(keys::Link::Step(m)) => {
                 let len = c.items.len();
                 c.cursor = scroll::cursor(m, c.cursor, || len);
@@ -771,7 +781,7 @@ impl App {
         match self.land(id) {
             Landing::Shown => {}
             Landing::Hidden => {
-                let clear = keys::label(keys::BROWSE, Browse::ClearFilter);
+                let clear = keys::label(self.keys.browse, Browse::ClearFilter);
                 let filtered = || fill(say(lang, "tui.wiki.veiled_filter"), &[("id", id), ("clear", &clear)]);
                 let told = match self.site.index.find(id).map(|at| (at, self.site.veil(at))) {
                     // **둘 다 가렸으면 둘 다 댄다** — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다(moai-2kyl).
@@ -823,7 +833,7 @@ impl App {
                 self.chord.clear();
                 if let Mode::Wiki(w) = &mut self.mode {
                     for k in held {
-                        w.chord.feed(WIKI, k);
+                        w.chord.feed(self.keys.wiki, k);
                     }
                 }
             }
@@ -856,7 +866,7 @@ impl App {
             };
         }
         let Mode::Wiki(w) = &mut self.mode else { return false };
-        match w.chord.feed(WIKI, k) {
+        match w.chord.feed(self.keys.wiki, k) {
             Some(keys::Wiki::Step(m)) => w.step(m),
             // 목록에서는 본문 칸으로 — 본문은 이미 커서의 페이지다. 본문에서는 골라진 링크로 가고, 안 골라졌으면 고르기
             // 창이다(2026-10-04 사용자 결정, moai-p61w).

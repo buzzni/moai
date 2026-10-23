@@ -19,14 +19,12 @@
 //!
 //! **순수하다.** 파일을 읽는 것은 [`load`] 하나고, [`build`] 는 받은 글만 본다 — 시험이 터미널도 파일도 없이 돈다.
 
-// 실행 중의 표를 `App` 이 들고 건네는 것은 moai-bzm3 다 — 그때까지 이 모듈을 부르는 것은 시험뿐이다.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use super::keys::{
-    ANYWHERE, BROWSE, Bind, Browse, CONFIRM, Confirm, Key, LEADER, LINKS, Link, Lookup, MENU, Menu, Order, PICK, Pick,
-    SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, lookup, name_of_seq, parse_seq,
+    ANYWHERE, BROWSE, Bind, Browse, CONFIRM, Confirm, Key, Keymap, LEADER, LINKS, Link, Lookup, MENU, Menu, Order,
+    PICK, Pick, SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, lookup, name_of_seq, parse_seq,
 };
 use super::scroll::Move;
+use crate::i18n::{Lang, fill, say};
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -48,36 +46,6 @@ pub fn load(path: Option<&Path>) -> (Keymap, Vec<Problem>) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Keymap::default(), Vec::new()),
         Err(e) => {
             (Keymap::default(), vec![Problem { at: String::new(), line: None, why: Why::Unreadable(e.to_string()) }])
-        }
-    }
-}
-
-/// 실행 중의 표 — 파일이 바꾼 표는 새로 짓고, 안 바꾼 표는 기본 표 그대로다. **`&'static` 이다**: 시작 때 한 번
-/// 지어 [`Box::leak`] 한다 — 한 프로세스에 한 번이라 샘이 아니고, 그래야 [`lookup`]·[`super::keys::label`] 이
-/// 오늘의 서명 그대로 받는다.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Keymap {
-    pub browse: &'static [Bind<Browse>],
-    pub menu: &'static [Bind<Menu>],
-    pub sorter: &'static [Bind<Sorter>],
-    pub pick: &'static [Bind<Pick>],
-    pub stats: &'static [Bind<Stat>],
-    pub wiki: &'static [Bind<Wiki>],
-    pub links: &'static [Bind<Link>],
-    pub confirm: &'static [Bind<Confirm>],
-}
-
-impl Default for Keymap {
-    fn default() -> Keymap {
-        Keymap {
-            browse: BROWSE,
-            menu: MENU,
-            sorter: SORTER,
-            pick: PICK,
-            stats: STATS,
-            wiki: WIKI,
-            links: LINKS,
-            confirm: CONFIRM,
         }
     }
 }
@@ -112,6 +80,44 @@ pub enum Why {
     OneKey(String),
     /// 다른 줄과 겹쳐 눌러도 안 듣는다. `keys` 는 이 줄의 키 열, `with` 는 겹친 쪽(`browse.grep`·`Ctrl-C`·`SPC`).
     Clash { keys: String, with: String },
+}
+
+impl Problem {
+    /// 사람의 말 한 줄 — `<파일>:<줄> <절.동작>: <까닭>`. 자리를 머리에 붙여야 사람이 파일에서 그 줄을 찾는다
+    /// (`view::look_problems` 와 같은 꼴).
+    pub fn said(&self, file: Option<&Path>, lang: Lang) -> String {
+        let why = match &self.why {
+            Why::Unreadable(e) => fill(say(lang, "tui.keys.unreadable"), &[("why", e)]),
+            Why::Syntax(e) => fill(say(lang, "tui.keys.syntax"), &[("why", e)]),
+            Why::UnknownSection => say(lang, "tui.keys.unknown_section").to_string(),
+            Why::NotATable => say(lang, "tui.keys.not_a_table").to_string(),
+            Why::UnknownAction => say(lang, "tui.keys.unknown_action").to_string(),
+            Why::NotKeys => say(lang, "tui.keys.not_keys").to_string(),
+            Why::BadKey(k) => fill(say(lang, "tui.keys.bad_key"), &[("key", k)]),
+            Why::OneKey(k) => fill(say(lang, "tui.keys.one_key"), &[("key", k)]),
+            Why::Clash { keys, with } => fill(say(lang, "tui.keys.clash"), &[("key", keys), ("with", with)]),
+        };
+        // 줄 번호는 파일 이름에 붙는다(`keys.toml:3`) — 파일을 모르면 붙일 데가 없다.
+        let mut at = match (file, self.line) {
+            (Some(f), Some(n)) => format!("{}:{n}", f.display()),
+            (Some(f), None) => f.display().to_string(),
+            (None, _) => String::new(),
+        };
+        if !self.at.is_empty() {
+            at = if at.is_empty() { self.at.clone() } else { format!("{at} {}", self.at) };
+        }
+        if at.is_empty() { why } else { format!("{at}: {why}") }
+    }
+}
+
+/// 버린 줄을 화면의 알림 한 줄로 — 없으면 `None`. 알림은 탐색기 화면의 한 줄뿐이다(설계): `moai status` 에는 안
+/// 올린다 — 데이터 경고가 아니라 이 사람의 파일 이야기다. 자세한 것은 `moai keys` 가 댄다.
+pub fn notice(problems: &[Problem], file: Option<&Path>, lang: Lang) -> Option<String> {
+    if problems.is_empty() {
+        return None;
+    }
+    let why: Vec<String> = problems.iter().map(|p| p.said(file, lang)).collect();
+    Some(fill(say(lang, "tui.keys.problems"), &[("why", &why.join(" · "))]))
 }
 
 /// 파일의 절. 이동(`moves`)은 표가 아니라 다섯 표가 함께 쓰는 줄이다.
@@ -1116,6 +1122,18 @@ mod tests {
             path_from(env(&[("MOAI_KEYS", ""), ("MOAI_CONFIG", "/t/c.toml")])),
             Some(Path::new("/t").join("keys.toml"))
         );
+    }
+
+    /// 버린 줄의 말은 파일과 줄과 동작을 댄다 — 사람이 파일에서 그 줄을 찾는다.
+    #[test]
+    fn a_problem_says_where_it_is() {
+        let file = Path::new("/k/keys.toml");
+        let (_, p) = build("[browse]\ngrep = \"r\"\n");
+        assert_eq!(p[0].said(Some(file), Lang::En), "/k/keys.toml:2 browse.grep: `r` clashes with browse.read");
+        assert_eq!(p[0].said(None, Lang::En), "browse.grep: `r` clashes with browse.read");
+        let (_, p) = build("[browse\n");
+        assert!(p[0].said(Some(file), Lang::En).starts_with("/k/keys.toml:1: not TOML ("), "{p:?}");
+        assert_eq!(notice(&[], Some(file), Lang::En), None);
     }
 
     /// 없는 파일은 알릴 것이 없다 — 기본 표다.
