@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-23
+
 ### Added
 
 - **Your own keys for the explorer.** A `keys.toml` next to your user config
