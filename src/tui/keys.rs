@@ -88,25 +88,53 @@ impl Key {
         KeyEvent::new(self.code, self.want)
     }
 
-    /// 사람에게 대는 한 키의 이름 — 메뉴의 줄과 테두리(`SPC v`).
-    pub fn name(self) -> String {
-        name_of(self.code)
+    /// 사람이 파일(`keys.toml`, moai-l8qb)에 적은 키 하나를 표의 키로 — [`parse`] 가 읽은 모양이다.
+    ///
+    /// - **글자는 Ctrl·Alt 를 정확히 견준다** — [`Key::plain`]·[`Key::chord`] 와 같은 자다. `Alt-x` 도 그렇게 선다
+    /// - **수식키 없는 비글자 키는 그 표의 꼴(`plain`)을 따른다.** 탐색·통계·위키는 [`Key::any`], 고르기 창은
+    ///   [`Key::bare`] 다 — 그 갈림에는 까닭이 있다([`STATS`] 의 글). 파일이 `Down` 을 적었다고 그 까닭을 지우지 않는다.
+    ///   `Tab` 만은 늘 [`Key::unshift`] 다 — Shift-Tab 은 다른 키다
+    /// - 수식키가 붙은 비글자 키(`Ctrl-Down`·`Shift-Tab`)는 Ctrl·Alt·SHIFT 를 다 정확히 견준다
+    pub fn written(k: KeyEvent, plain: fn(KeyCode) -> Key) -> Key {
+        let (code, mods) = normal(k);
+        match code {
+            KeyCode::Char(_) => Key { code, want: mods.intersection(CTRL_ALT), care: CTRL_ALT },
+            KeyCode::Tab if mods.is_empty() => Key::unshift(KeyCode::Tab),
+            _ if mods.is_empty() => plain(code),
+            _ => Key { code, want: mods, care: CTRL_ALT.union(KeyModifiers::SHIFT) },
+        }
     }
 }
 
 /// 누른 꼴 그대로의 한 키 이름 — **수식키까지** 적는다(`Ctrl-w`). [`name_of`] 는 글자만 읽으므로,
 /// 수식키가 붙은 접두어를 기다리는 동안 그것으로 적으면 바가 `Ctrl-w` 를 맨 `w` 라고 대고(그 키는
 /// 아무 일도 안 한다), 읽은 사람은 안 듣는 키를 누른다(리뷰). [`parse`] 가 거꾸로 읽는 이름과 같다.
+///
+/// **SHIFT 는 비글자 키에만 적는다**(`Shift-Tab`) — 글자는 대문자가 곧 SHIFT 다([`Key`]).
 pub fn name_of_key(k: KeyEvent) -> String {
+    let (code, mods) = normal(k);
     let mut out = String::new();
-    if k.modifiers.contains(KeyModifiers::CONTROL) {
+    if mods.contains(KeyModifiers::CONTROL) {
         out.push_str("Ctrl-");
     }
-    if k.modifiers.contains(KeyModifiers::ALT) {
+    if mods.contains(KeyModifiers::ALT) {
         out.push_str("Alt-");
     }
-    out.push_str(&name_of(k.code));
+    if mods.contains(KeyModifiers::SHIFT) {
+        out.push_str("Shift-");
+    }
+    out.push_str(&name_of(code));
     out
+}
+
+/// 키 열 하나의 이름 — 키마다 [`name_of_key`] 를 띄어 잇는다(`SPC v d`·`Ctrl-w w`). **같은 맨 글자 둘은 붙인다**
+/// (`gg`) — 표의 이름이 그렇게 적혀 있고, [`parse_seq`] 가 둘 다 읽는다. 파일에서 온 줄(moai-l8qb)의 이름이 이것이다.
+pub fn name_of_seq(seq: &[Key]) -> String {
+    let names: Vec<String> = seq.iter().map(|k| name_of_key(k.event())).collect();
+    match &names[..] {
+        [a, b] if a == b && a.len() == 1 && a.chars().all(|c| c.is_ascii_alphabetic()) => format!("{a}{b}"),
+        _ => names.join(" "),
+    }
 }
 
 /// 한 키의 이름. [`parse`] 가 거꾸로 읽는 이름과 같다 — SPC 는 `SPC`, 글자는 그 글자.
@@ -118,6 +146,8 @@ pub fn name_of(code: KeyCode) -> String {
         KeyCode::Esc => "Esc".into(),
         KeyCode::Backspace => "Bksp".into(),
         KeyCode::Tab => "Tab".into(),
+        // `F(5)` 가 아니라 `F5` — [`parse`] 가 읽는 철자다.
+        KeyCode::F(n) => format!("F{n}"),
         other => format!("{other:?}"),
     }
 }
@@ -239,7 +269,9 @@ pub fn next_keys<A: Copy + PartialEq>(table: &[Bind<A>], held: &[KeyEvent]) -> V
     for b in table.iter().filter(|b| {
         b.label.is_some() && b.seq.len() == held.len() + 1 && b.seq.iter().zip(held).all(|(key, k)| key.matches(*k))
     }) {
-        let name = b.seq[held.len()].name();
+        // **수식키까지 댄다**(`name_of_key`) — 사람의 키 파일(moai-pxiy)이 접두어 뒤에 `Alt-x` 를 두면 `x` 로 대는 이름은
+        // 안 듣는 키다.
+        let name = name_of_key(b.seq[held.len()].event());
         if !out.iter().any(|(n, _)| *n == name) {
             out.push((name, b.act));
         }
@@ -265,6 +297,14 @@ pub fn move_word(m: Move, lang: Lang) -> &'static str {
 /// 동작에 붙은 키 이름. 여럿이면 `·` 로 잇는다(`j·k`).
 pub fn label<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
     labels(table, &[act])
+}
+
+/// **말 속에 넣는** 동작의 키 이름 — [`label`] 과 같되, 사람의 키 파일이 그 동작의 키를 뗐으면(`"none"`, moai-pxiy)
+/// `(none)` 이다. 바의 칸은 [`label`] 을 쓴다: 빈 이름의 칸은 안 선다. 말은 빈 이름으로 두면 "`  로 다시 담는다`" 처럼
+/// 낱말이 빠진 글이 된다. 도움말의 틀(`keymap::fill_names`)과 같은 낱말이다.
+pub fn said<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
+    let l = label(table, act);
+    if l.is_empty() && !table.iter().any(|b| b.act == act) { "(none)".to_string() } else { l }
 }
 
 /// 동작 여럿의 키 이름을 `·` 로 잇는다(`j·k`).
@@ -768,7 +808,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Archived, Some("SPC v o"), LEADER, Key::plain('v'), Key::plain('o')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
         // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC v 1` 과 "번호가 차례로 는다" 로 한 번에
-        // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
+        // 대고, 메뉴는 이름이 아니라 키(`name_of_key`)와 설정의 칸 이름을 세운다.
         row!(Column(0), Some("SPC v 1"), LEADER, Key::plain('v'), Key::plain('1')),
         row!(Column(1), None, LEADER, Key::plain('v'), Key::plain('2')),
         row!(Column(2), None, LEADER, Key::plain('v'), Key::plain('3')),
@@ -917,6 +957,42 @@ pub struct Ctx {
     pub right_pane: &'static str,
     pub up_pane: &'static str,
     pub down_pane: &'static str,
+    /// 실행 중의 키 표(moai-bzm3) — 사람의 `keys.toml` 이 바꾼 것. 거절문과 메뉴가 **누르는 표와 같은 표**의
+    /// 이름을 댄다. 기본값은 기본 표다.
+    pub keys: Keymap,
+}
+
+/// 실행 중의 키 표 — 사람의 키 파일(`keys.toml`, [`super::keymap`])이 바꾼 표는 새로 짓고, 안 바꾼 표는 기본 표
+/// 그대로다. **`&'static` 이다**: 시작 때 한 번 지어 새게 둔다 — 한 프로세스에 한 번이라 샘이 아니고, 그래야
+/// [`lookup`]·[`label`] 이 오늘의 서명 그대로 받는다.
+///
+/// **든 쪽이 들고 건넨다**(`App::keys` → [`Ctx::keys`]·창). 전역에 두지 않는다 — 이 조각은 `KeyEvent` 와 넘겨받은
+/// 값만 안다(맨 위의 글). 못 바꾸는 표(Ctrl-C·글칸·경로 칸·담기 폼)는 여기 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Keymap {
+    pub browse: &'static [Bind<Browse>],
+    pub menu: &'static [Bind<Menu>],
+    pub sorter: &'static [Bind<Sorter>],
+    pub pick: &'static [Bind<Pick>],
+    pub stats: &'static [Bind<Stat>],
+    pub wiki: &'static [Bind<Wiki>],
+    pub links: &'static [Bind<Link>],
+    pub confirm: &'static [Bind<Confirm>],
+}
+
+impl Default for Keymap {
+    fn default() -> Keymap {
+        Keymap {
+            browse: BROWSE,
+            menu: MENU,
+            sorter: SORTER,
+            pick: PICK,
+            stats: STATS,
+            wiki: WIKI,
+            links: LINKS,
+            confirm: CONFIRM,
+        }
+    }
 }
 
 impl Ctx {
@@ -995,7 +1071,7 @@ impl Browse {
             // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
             Leave if c.root && c.projects > 0 => Err(Off::Why(fill(
                 say(c.lang, "tui.off.leave_dir_only"),
-                &[("leave", &label(BROWSE, Leave)), ("project", &label(BROWSE, Project(0)))],
+                &[("leave", &said(c.keys.browse, Leave)), ("project", &said(c.keys.browse, Project(0)))],
             ))),
             Leave if c.root => Err(Off::Quiet),
             // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
@@ -1003,7 +1079,7 @@ impl Browse {
             // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
             Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
-                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &label(BROWSE, Enter))])))
+                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &said(c.keys.browse, Enter))])))
             }
             Worktree if c.layer => Err(Off::Quiet),
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의
@@ -1634,7 +1710,9 @@ pub const CONFIRM: &[Bind<Confirm>] =
 /// 사람이 적는 키 이름을 키 **열**로 푼다 — `g p` 는 띄어 적은 둘, `gg` 는 같은 글자 둘.
 /// 키 이름이 아니면 `None`. 같은 글자 둘만 붙여 읽는다 — `Tab` 같은 이름을 글자 셋으로 읽지
 /// 않고, 도움말의 낱말(`to`)이 키 열로 잡히지 않게.
-#[cfg(test)]
+///
+/// **키 이름을 읽는 자는 이것 하나다**(moai-l8qb) — 시험이 표의 이름을 재는 것도, `keys.toml` 을 읽는 것도
+/// 이것이다. 둘이 갈리면 표에 적힌 이름을 파일에 옮겨 적었는데 안 읽히는 판이 선다.
 pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
     if name.contains(' ') {
         return name.split(' ').map(parse).collect();
@@ -1653,45 +1731,58 @@ pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
 
 /// 사람이 적는 키 이름을 키로 푼다 — 표의 이름과 도움말의 낱말이 정말 그 키인지 시험이 잰다.
 /// 키 이름이 아니면 `None`.
-#[cfg(test)]
+///
+/// - 수식키는 앞에 붙는다: `Ctrl-`·`Alt-`·`Shift-`. [`name_of_key`] 가 적는 차례(`Ctrl-Alt-x`)로 다시 읽힌다
+/// - **철자는 표의 이름 그대로다**(`Enter`·`Esc`·`SPC`) — `enter` 는 키가 아니다. 관대하게 읽으면 도움말 시험
+///   (`every_key_the_help_names_is_in_a_table`)이 글 속의 `end`·`up` 을 키로 읽는다. 틀린 철자는 파일을 읽을 때
+///   그 줄을 대며 알린다(moai-l8qb)
+/// - Ctrl 뒤의 글자는 소문자로 읽는다 — 터미널이 Ctrl-S 를 `s` 로 보낸다
+/// - **글자에 `Shift-` 를 붙이지 않는다** — 대문자가 곧 그 키다([`Key`]). 붙이면 키가 아니다
 pub fn parse(name: &str) -> Option<KeyEvent> {
     use KeyModifiers as M;
-    let named = |code| Some(KeyEvent::new(code, M::NONE));
-    if let Some(rest) = name.strip_prefix("Ctrl-") {
-        let mut cs = rest.chars();
-        return match (cs.next(), cs.next()) {
-            (Some(c), None) => Some(KeyEvent::new(KeyCode::Char(c.to_ascii_lowercase()), M::CONTROL)),
-            _ => None,
+    let mut mods = M::NONE;
+    let mut rest = name;
+    while let Some((head, tail)) = rest.split_once('-').filter(|(_, tail)| !tail.is_empty()) {
+        let m = match head {
+            "Ctrl" => M::CONTROL,
+            "Alt" => M::ALT,
+            "Shift" => M::SHIFT,
+            _ => break,
         };
+        mods |= m;
+        rest = tail;
     }
-    match name {
-        "Enter" => named(KeyCode::Enter),
-        "Esc" => named(KeyCode::Esc),
-        "Tab" => named(KeyCode::Tab),
-        "Shift-Tab" => Some(KeyEvent::new(KeyCode::Tab, M::SHIFT)),
-        "BackTab" => named(KeyCode::BackTab),
-        "Bksp" | "Backspace" => named(KeyCode::Backspace),
-        "Delete" => named(KeyCode::Delete),
-        "Up" => named(KeyCode::Up),
-        "Down" => named(KeyCode::Down),
-        "Left" => named(KeyCode::Left),
-        "Right" => named(KeyCode::Right),
-        "Home" => named(KeyCode::Home),
-        "End" => named(KeyCode::End),
-        "PageUp" | "PgUp" => named(KeyCode::PageUp),
-        "PageDown" | "PgDn" => named(KeyCode::PageDown),
-        "SPC" => named(KeyCode::Char(' ')),
+    let code = match rest {
+        "Enter" => KeyCode::Enter,
+        "Esc" => KeyCode::Esc,
+        "Tab" => KeyCode::Tab,
+        "BackTab" => KeyCode::BackTab,
+        "Bksp" | "Backspace" => KeyCode::Backspace,
+        "Delete" => KeyCode::Delete,
+        "Insert" => KeyCode::Insert,
+        "Up" => KeyCode::Up,
+        "Down" => KeyCode::Down,
+        "Left" => KeyCode::Left,
+        "Right" => KeyCode::Right,
+        "Home" => KeyCode::Home,
+        "End" => KeyCode::End,
+        "PageUp" | "PgUp" => KeyCode::PageUp,
+        "PageDown" | "PgDn" => KeyCode::PageDown,
+        "SPC" => KeyCode::Char(' '),
         _ => {
-            if let Some(n) = name.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()) {
-                return named(KeyCode::F(n));
-            }
-            let mut cs = name.chars();
+            let mut cs = rest.chars();
             match (cs.next(), cs.next()) {
-                (Some(c), None) if c.is_ascii_graphic() => named(KeyCode::Char(c)),
-                _ => None,
+                (Some(c), None) if c.is_ascii_graphic() => {
+                    if mods.contains(M::SHIFT) {
+                        return None;
+                    }
+                    KeyCode::Char(if mods.contains(M::CONTROL) { c.to_ascii_lowercase() } else { c })
+                }
+                _ => KeyCode::F(rest.strip_prefix('F')?.parse::<u8>().ok()?),
             }
         }
-    }
+    };
+    Some(KeyEvent::new(code, mods))
 }
 
 #[cfg(test)]
@@ -2349,7 +2440,7 @@ mod tests {
             "SPC s p",
             "SPC",
             "Enter",
-            "Backspace",
+            "Bksp",
             "Shift-Tab",
             "j",
             "k",
@@ -2374,8 +2465,8 @@ mod tests {
     /// **표에 이름 붙은 키는 `moai tui --help` 가 댄다**(moai-3l4l) — 위 시험의 거꾸로다. 위만 있으면
     /// 표에 키를 더하고 도움말을 안 고쳐도 지나가, 도움말이 표의 절반만 대는 채로 낡는다(F5·F3·`/`·
     /// `f`·`w` 가 그렇게 빠져 있었다). 숨은 별칭(`label: None`)은 안 본다 — 바에도 메뉴에도 안
-    /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다: 표의 `Bksp` 를 도움말은
-    /// `Backspace` 로 적는다.
+    /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다 — 도움말의 이름은 이제 표에서
+    /// 채운다(moai-aqmg, `{key:…}` 틀)지만, 틀 밖에 남은 글(검색 칸의 키)은 사람이 적은 그대로다.
     ///
     /// **표마다 그 표를 말하는 문단 안에서만 찾는다**(moai-psqc). 도움말 어디에든 있으면 되던
     /// 때는 여러 표가 함께 쓰는 Enter·Esc·Tab·Bksp 가 한 번만 적혀도 모든 표에서 지나가, 검색
@@ -2434,10 +2525,10 @@ mod tests {
                 &["Enter", "Esc"][..],
                 &["PATH: Enter", "PATH: Esc"][..],
             ),
-            // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
+            // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Bksp 로 지나가면 안 된다.
             (
-                &[("Enter goes in, Backspace comes back out", "it goes in and comes back out")][..],
-                &["Enter", "Backspace"][..],
+                &[("Enter goes in, Bksp comes back out", "it goes in and comes back out")][..],
+                &["Enter", "Bksp"][..],
                 &["BROWSE: Enter", "BROWSE: Bksp"][..],
             ),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
@@ -2625,8 +2716,8 @@ mod tests {
     }
 
     fn tui_help() -> String {
-        use clap::CommandFactory;
-        let cli = crate::cli::Cli::command();
+        // 기본 표로 채운 글이다(moai-aqmg) — 틀(`{key:…}`) 그대로 재면 이름 붙은 키가 글에서 다 사라진다.
+        let cli = crate::cli::command(&Keymap::default());
         cli.find_subcommand("tui").and_then(|c| c.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다")
     }
 

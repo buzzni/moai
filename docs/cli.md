@@ -50,6 +50,7 @@ Commands:
   due           Raise priorities a deadline has caught up with
   config        Read this repository's settings, defaults filled in
   models        Read the model per role from your user config
+  keys          Show the explorer's keys and what your keys.toml changed
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
   help          Print this message or the help of the given subcommand(s)
@@ -2516,7 +2517,7 @@ Order:
   Milestones and epics behave like directories. Move around on the left and
   what the cursor rests on is described on the right.
 
-  j and k or the arrow keys move, Enter goes in, Backspace comes back out.
+  j and k or the arrow keys move, Enter goes in, Bksp comes back out.
   On a milestone or epic row, l and the right arrow unfold one step there and
   h and the left arrow fold it. On an unfolded member row, h folds its parent
   and lands on the parent; with nothing to fold it leaves one level. On a
@@ -2554,7 +2555,7 @@ Order:
 
   The rest lives in the menu that opens the moment you press SPC. The menu
   stands up only what works where you are, ignores keys it does not know,
-  closes on Esc or SPC and goes one level up on Backspace. Keys that move
+  closes on Esc or SPC and goes one level up on Bksp. Keys that move
   the focused pane close the menu and make that move in the same press,
   unless a key on that level holds the letter (SPC g, SPC g l, SPC c h,
   SPC v l, SPC m g).
@@ -2698,7 +2699,7 @@ Order:
   apart. On a narrow card the tags and the epic name shrink, longest first, so
   whose it is and the dates still show. j and k move within the
   column, h and l go to the next column at the nearest height, gg and G go to
-  the column's ends, Enter and Backspace go in and out as in the list, and Tab
+  the column's ends, Enter and Bksp go in and out as in the list, and Tab
   does nothing. The whole board scrolls as one; the column names stay on top.
   When the columns do not fit, the column the cursor stands in always stands
   and the frame title names the rest with their counts. Clicking a card puts
@@ -2719,7 +2720,7 @@ Order:
   Coming out through 0 leaves the project you were in unfolded and the rest
   as header rows only — a project is read the moment it unfolds (its header
   spins while it reads).
-  Enter on a header row goes into that project, Backspace only goes up a
+  Enter on a header row goes into that project, Bksp only goes up a
   directory. Enter on a group row under it goes into that project and lands
   there — you never drill down in the one list; drilling down always happens
   inside a project.
@@ -2730,7 +2731,7 @@ Order:
   with SPC p a (`--json` gives an empty `projects` array and exits 0).
 
   SPC p a opens a window to pick a directory and register it as a project —
-  it walks in and out one level at a time (Enter and Backspace, moving with
+  it walks in and out one level at a time (Enter and Bksp, moving with
   the same j, k, gg and G as the list), and directories with a `.moai` and those
   already registered are marked. Inside the window, a registers the directory
   under the cursor, `.` shows or hides dotted directories, and g p opens a
@@ -3468,6 +3469,57 @@ Options:
   low, medium, high, xhigh or max. Invalid values fall back per key and warn;
   unknown keys warn. written lists only valid, known keys from the config.
   This command only reads; edit the user config by hand to change the table.
+```
+
+## `moai keys`
+
+```
+Show the explorer's keys and what your keys.toml changed
+
+Usage: moai keys [OPTIONS]
+
+Options:
+      --template             Print a starter keys.toml (nothing is written)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai keys               every key the explorer runs on, changed ones marked
+  moai keys --template    a keys.toml with every action, commented out
+  moai keys --json        one object: the file, the dropped lines, every action
+
+  The keys of `moai tui` live in their own file next to your user config:
+  MOAI_KEYS, else keys.toml beside the config (MOAI_CONFIG, then
+  $XDG_CONFIG_HOME/moai/config.toml, then ~/.config/moai/config.toml). It is
+  read once when the explorer starts, when help is printed and by this
+  command; no other command opens it.
+
+    [browse]
+    quit = "SPC x"            one key sequence
+    grep = ["/", "SPC /"]     several: the first is the name shown
+    jot  = "none"             unbind it; [] does the same
+    [moves]
+    line_down = "n"           j, k, gg and the rest move every window at once
+
+  Write only what you change. A line replaces every key of that action, the
+  hidden ones too (the arrows) — list them again to keep them. Key names are
+  spelt as the explorer shows them: SPC, Enter, Esc, Tab, Shift-Tab, Bksp, Up,
+  Down, Home, End, PageUp, PageDown, F1, Ctrl-x, Alt-x, and a capital letter
+  for Shift; a sequence is names apart by spaces (SPC v d), or a doubled letter
+  (gg).
+  A line that is wrong is dropped alone and that action keeps its default:
+  an unknown section or action, a name that is not a key, or a key that
+  clashes with another or waits for a longer one. The explorer says so in one
+  line and still opens; this command lists them on stderr and exits 0. A file
+  that is not TOML is dropped whole. Ctrl-C, the digits 0-9, SPC v 1-9, SPC
+  itself and keys inside text fields cannot be changed, and a window's close
+  key can move but not be set to none.
+
+  --template prints a starter file; save it yourself, nothing is written:
+    moai keys --template > ~/.config/moai/keys.toml
 ```
 
 ## `moai update`

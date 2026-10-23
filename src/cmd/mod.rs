@@ -12,6 +12,7 @@ pub mod due;
 pub mod edit;
 pub mod hook;
 pub mod init;
+pub mod keys;
 pub mod link;
 pub mod merge_driver;
 pub mod models;
@@ -640,6 +641,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
         Cmd::Models => models::run(ctx),
+        // 사람의 키 파일을 읽기만 한다(moai-so7w) — 트래커를 안 찾는다.
+        Cmd::Keys(a) => keys::run(ctx, a),
         Cmd::Config => config::run(ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
@@ -683,7 +686,6 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
 /// 처음 만난 쪽이 알아야 할 것은 둘이다: 지금 무슨 상태인가, 다음에 무엇을
 /// 치는가. 둘 다 여기서 준다.
 fn opening(ctx: &Ctx) -> R<Vec<String>> {
-    use clap::CommandFactory;
     let found = crate::store::Repo::find(|| ctx.lang());
     // `.moai` 밖이어도 등록한 프로젝트가 있으면 한눈 보기가 곧 시작점이다 (`status` 가
     // 그 길로 간다).
@@ -696,7 +698,9 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     let registered = reg.is_some_and(|r| !r.projects.is_empty());
     if outside && !registered {
         let mut help = Vec::new();
-        crate::cli::Cli::command().write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
+        // 도움말은 사람의 키로 그린다(moai-aqmg) — `moai --help` 와 같은 글이어야 한다.
+        let (_, keys, _) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
+        crate::cli::command(&keys).write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
         let mut out: Vec<String> = String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());
         // **이 에픽이 내건 첫 화면이 이것이다**(리뷰 moai-hom6.qd9 4번). `.moai` 밖에서 맨 `moai` 를

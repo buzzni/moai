@@ -12,6 +12,23 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-23
+
+### Added
+
+- **Your own keys for the explorer.** A `keys.toml` next to your user config
+  (or wherever `MOAI_KEYS` points) changes the keys of `moai tui` line by line —
+  `[browse] quit = "SPC x"`, several keys as a list, `"none"` to unbind, and one
+  `[moves]` section for the movement keys of every window. Only the lines you
+  write change. A line that is wrong or clashes with another key is dropped on
+  its own, that action keeps its default, and the explorer opens and says so in
+  one line. The menu, the key bar and `moai tui --help` name the keys you set.
+  Other commands never open the file. (moai-pxiy)
+- **`moai keys`** shows the keys the explorer runs on, marks the ones your file
+  changed and lists the lines it dropped and why (on stderr, exit 0).
+  `--template` prints a starter `keys.toml` with every action commented out;
+  `--json` gives the same as one object. (moai-so7w)
+
 ## [0.22.0] - 2026-10-22
 
 ### Added
