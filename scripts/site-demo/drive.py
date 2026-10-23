@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """moai tui 를 pty 에 띄우고 정해 둔 키를 시간에 맞춰 흘린다. asciinema 가 이것의 출력을 녹화한다.
 
-    asciinema rec --headless --window-size 120x32 -c 'scripts/site-demo/drive.py tour <저장소>' tour.cast
+    asciinema rec --headless --window-size 120x34 -c 'scripts/site-demo/drive.py tour <저장소>' tour.cast
 
 장면은 아래 SCENES 에 있다. 한 걸음은 (기다릴 초, 보낼 것) 이고, 보낼 것이 ('sh', 명령) 이면 키 대신
 그 저장소에서 moai 명령을 돌린다 — TUI 는 파일이 바뀌면 스스로 다시 읽으니, 뒤에서 옮긴 카드가 화면에서 움직인다.
 """
-import fcntl, os, pty, select, shlex, signal, struct, subprocess, sys, termios, time
+import fcntl, os, pty, select, shlex, shutil, signal, struct, subprocess, sys, termios, time
 
 SPC, ENTER, ESC, TAB, BKSP = ' ', '\r', '\x1b', '\t', '\x7f'
 
 def scenes(repo):
     ids = dict(line.split('=', 1) for line in open(os.path.join(repo, '.demo-ids')).read().split())
-    moai = os.environ.get('MOAI', 'moai')
+    moai = os.environ['MOAI']
     def sh(cmd):
         return ('sh', cmd.format(moai=shlex.quote(moai), **ids))
     SAM = shlex.quote('Sam Rivera (sam@example.com)')
@@ -48,17 +48,23 @@ def scenes(repo):
 
 def main():
     scene, repo = sys.argv[1], os.path.abspath(sys.argv[2])
-    steps = scenes(repo)[scene]
-    cols, rows = os.get_terminal_size(sys.stdout.fileno()) if sys.stdout.isatty() else (120, 32)
-    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor',
-               MOAI_CONFIG=os.path.join(repo, '.demo-home', 'config.toml'))
-    env.pop('MOAI_NOW', None)
+    cols, rows = os.get_terminal_size(sys.stdout.fileno()) if sys.stdout.isatty() else (120, 34)
+    moai = os.environ.get('MOAI', 'moai')
+    moai = os.path.abspath(moai) if os.sep in moai else (shutil.which(moai) or moai)
+    os.environ['MOAI'] = moai   # 장면의 뒤쪽 명령(sh)도 같은 바이너리를 부른다
+    # 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말은 데모의 것으로
+    env = dict(os.environ, TERM='xterm-256color', MOAI_NO_UPDATE_CHECK='1', COLORTERM='truecolor', MOAI_LANG='en',
+               MOAI=moai, MOAI_CONFIG=os.path.join(repo, '.demo-home', 'config.toml'))
+    for k in ('MOAI_NOW', 'MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR'):
+        env.pop(k, None)
     pid, fd = pty.fork()
     if pid == 0:
+        # 크기는 자식이 exec 하기 전에 제 터미널에 건다 — 부모가 나중에 걸면 TUI 가 0×0 을 먼저 읽을 수 있다
+        fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
         os.chdir(repo)
-        os.execvpe(os.environ.get('MOAI', 'moai'), [os.environ.get('MOAI', 'moai'), 'tui'], env)
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+        os.execve(moai, [moai, 'tui'], env)
     out = sys.stdout.buffer
+    steps = scenes(repo)[scene]
 
     def pump(seconds):
         end = time.time() + seconds

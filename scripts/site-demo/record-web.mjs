@@ -17,10 +17,18 @@ const { chromium } = require('playwright')
 const [repo, outDir] = process.argv.slice(2).map((p) => path.resolve(p))
 if (!repo || !outDir) throw new Error('usage: record-web.mjs <seed repo> <out dir>')
 mkdirSync(outDir, { recursive: true })
-const moai = process.env.MOAI || 'moai'
+// 이 저장소의 빌드가 기본이다. 상대 경로는 절대 경로로 굳힌다 — 서버는 데모 저장소에서 뜬다
+const moai = path.resolve(process.env.MOAI || path.join(path.dirname(new URL(import.meta.url).pathname), '../../target/release/moai'))
 const SIZE = { width: 1440, height: 900 }
 
-const server = spawn(moai, ['web', '--port', '0', '--json'], { cwd: repo, env: { ...process.env, MOAI_NO_UPDATE_CHECK: '1', MOAI_CONFIG: path.join(repo, '.demo-home', 'config.toml') } })
+// 녹화하는 사람의 환경이 화면에 새지 않게: 정체·키·색·말은 데모의 것으로
+function demoEnv() {
+  const env = { ...process.env, MOAI_NO_UPDATE_CHECK: '1', MOAI_LANG: 'en', MOAI_CONFIG: path.join(repo, '.demo-home', 'config.toml') }
+  for (const k of ['MOAI_ACTOR', 'MOAI_KEYS', 'NO_COLOR', 'MOAI_NOW']) delete env[k]
+  return env
+}
+
+const server = spawn(moai, ['web', '--port', '0', '--json'], { cwd: repo, env: demoEnv() })
 const first = await new Promise((resolve, reject) => {
   createInterface({ input: server.stdout }).once('line', resolve)
   server.once('exit', (code) => reject(new Error(`moai web exited ${code}`)))

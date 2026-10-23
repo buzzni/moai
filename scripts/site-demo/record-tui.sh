@@ -10,13 +10,15 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 out=$(mkdir -p "${1:?usage: record-tui.sh <out dir> [scene...]}" && cd "$1" && pwd); shift
 if [ $# -gt 0 ]; then scenes=("$@"); else scenes=(tour lifecycle); fi
 size=${SIZE:-120x34}
+MOAI=$(realpath -- "${MOAI:-$here/../../target/release/moai}")
+export MOAI
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 for scene in "${scenes[@]}"; do
   repo="$work/$scene/lantern"
   bash "$here/seed.sh" "$repo" >/dev/null
   asciinema rec --headless --window-size "$size" --overwrite -q \
-    -c "$here/drive.py $scene $repo" "$work/$scene.cast" >/dev/null
+    -c "$(printf '%q ' "$here/drive.py" "$scene" "$repo")" "$work/$scene.cast" >/dev/null
   jq -c 'if type == "object" and has("version") then del(.command, .env, .timestamp) else . end' \
     "$work/$scene.cast" > "$out/tui-$scene.cast"
   echo "recorded $scene"

@@ -10,7 +10,14 @@
 set -euo pipefail
 
 dir=${1:?usage: seed.sh <empty dir>}
-moai=${MOAI:-moai}
+# 이 저장소의 빌드가 기본이다. 상대 경로도 받도록 cd 전에 절대 경로로 굳힌다 — 그냥 moai 를 부르면
+# PATH 의 옛 moai 가 조용히 찍힌다
+moai=${MOAI:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)/target/release/moai}
+case $moai in */*) moai=$(realpath -- "$moai") ;; *) moai=$(command -v -- "$moai") ;; esac
+[ -x "$moai" ] || { echo "seed.sh: no moai binary at $moai" >&2; exit 1; }
+# 녹화하는 사람의 환경이 화면에 새지 않게: 정체(MOAI_ACTOR)·키·색·말은 데모의 것으로
+unset MOAI_ACTOR MOAI_KEYS NO_COLOR
+export MOAI_LANG=en
 mkdir -p "$dir"
 cd "$dir"
 [ -z "$(ls -A .)" ] || { echo "seed.sh: $dir is not empty" >&2; exit 1; }
@@ -24,6 +31,8 @@ SAM='Sam Rivera (sam@example.com)'
 ago() { date -u -d "-$1 days -${2:-0} hours" +%Y-%m-%dT%H:%M:%SZ; }
 
 git init -q -b main
+# 녹화용 부속은 데모 저장소의 이력에 안 싣는다 — 첫 커밋의 git add -A 보다 먼저 적는다
+printf '.demo-ids\n.demo-card\n.demo-home/\n' >> .git/info/exclude
 git config user.name 'Mira Chen'
 git config user.email 'mira@example.com'
 git config commit.gpgsign false
@@ -320,8 +329,6 @@ commit 'Jonas Weber' jonas@example.com 1 "feat(sync): retry with exponential bac
 # 녹화 스크립트가 읽는 id 들. 저장소 이력에는 안 싣는다
 printf 'sync=%s\nsearch=%s\nshare=%s\neditor=%s\nconflict=%s\nm14=%s\nm15=%s\n' \
   "$e_sync" "$e_search" "$e_share" "$e_editor" "$s2" "$m14" "$m15" > .demo-ids
-printf '.demo-ids\n.demo-card\n.demo-home/\n' >> .git/info/exclude
-
 # 모두 읽은 채로 둔다 — 녹화에서 새로 생긴 카드만 NEW 로 선다
 MOAI_NOW=$(ago 0); "$moai" read --all --user "$MIRA" >/dev/null
 
