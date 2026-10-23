@@ -25,7 +25,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         return Err(Fail::coded(
             format!(
                 "{}\n      {}",
-                crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen"), &[("flag", flag)]),
+                crate::i18n::fill(
+                    crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen"),
+                    &[("flag", flag), ("filter", &screen_key(crate::tui::keys::Browse::Filter))]
+                ),
                 crate::i18n::fill(crate::i18n::say(ctx.lang(), "refuse.tui_shape_on_screen_how"), &[("flag", flag)]),
             ),
             super::code::BAD_FILTER,
@@ -143,6 +146,13 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
     ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref(), repo_ok);
     screen(app)
+}
+
+/// 화면의 키 이름 하나 — 화면을 켜기 **전에** 그 키를 대는 거절문이 쓴다(moai-aqmg). 탐색기를 부른 판이라 사람의 키 파일을
+/// 읽는다: 화면에서 누를 키와 거절문이 대는 키가 같아야 한다.
+fn screen_key(act: crate::tui::keys::Browse) -> String {
+    let file = crate::tui::keymap::path_from(|k| std::env::var_os(k));
+    crate::tui::keys::label(crate::tui::keymap::load(file.as_deref()).0.browse, act)
 }
 
 /// 사람의 키 파일을 읽어 입힌다(moai-bzm3) — 안에서 띄운 길과 밖에서 띄운 길이 같은 자를 지난다. **보기 설정 뒤에
@@ -1474,7 +1484,10 @@ fn keep_unsaved(app: &App) {
                 crate::i18n::say(app.site.lang, "tui.unsaved_kept"),
                 &[("at", &path.display().to_string())]
             ),
-            crate::i18n::say(app.site.lang, "tui.unsaved_kept_how")
+            crate::i18n::fill(
+                crate::i18n::say(app.site.lang, "tui.unsaved_kept_how"),
+                &[("jot", &crate::tui::keys::label(app.keys.browse, crate::tui::keys::Browse::Jot))]
+            )
         ),
         Err(e) => eprintln!(
             "moai: {}\n{title}\n\n{}",

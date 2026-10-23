@@ -2435,7 +2435,7 @@ mod tests {
             "SPC s p",
             "SPC",
             "Enter",
-            "Backspace",
+            "Bksp",
             "Shift-Tab",
             "j",
             "k",
@@ -2460,8 +2460,8 @@ mod tests {
     /// **표에 이름 붙은 키는 `moai tui --help` 가 댄다**(moai-3l4l) — 위 시험의 거꾸로다. 위만 있으면
     /// 표에 키를 더하고 도움말을 안 고쳐도 지나가, 도움말이 표의 절반만 대는 채로 낡는다(F5·F3·`/`·
     /// `f`·`w` 가 그렇게 빠져 있었다). 숨은 별칭(`label: None`)은 안 본다 — 바에도 메뉴에도 안
-    /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다: 표의 `Bksp` 를 도움말은
-    /// `Backspace` 로 적는다.
+    /// 서는 키라 도움말이 대지 않는 것이 맞다. 이름은 **키 열로** 견준다 — 도움말의 이름은 이제 표에서
+    /// 채운다(moai-aqmg, `{key:…}` 틀)지만, 틀 밖에 남은 글(검색 칸의 키)은 사람이 적은 그대로다.
     ///
     /// **표마다 그 표를 말하는 문단 안에서만 찾는다**(moai-psqc). 도움말 어디에든 있으면 되던
     /// 때는 여러 표가 함께 쓰는 Enter·Esc·Tab·Bksp 가 한 번만 적혀도 모든 표에서 지나가, 검색
@@ -2520,10 +2520,10 @@ mod tests {
                 &["Enter", "Esc"][..],
                 &["PATH: Enter", "PATH: Esc"][..],
             ),
-            // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Backspace 로 지나가면 안 된다.
+            // 거꾸로 — 목록이 검색 칸 문장의 Enter, SPC 메뉴 문장의 Bksp 로 지나가면 안 된다.
             (
-                &[("Enter goes in, Backspace comes back out", "it goes in and comes back out")][..],
-                &["Enter", "Backspace"][..],
+                &[("Enter goes in, Bksp comes back out", "it goes in and comes back out")][..],
+                &["Enter", "Bksp"][..],
                 &["BROWSE: Enter", "BROWSE: Bksp"][..],
             ),
             // 거꾸로 — 고르기 창이 경로 칸 문장의 Esc 로 지나가면 안 된다.
@@ -2711,8 +2711,8 @@ mod tests {
     }
 
     fn tui_help() -> String {
-        use clap::CommandFactory;
-        let cli = crate::cli::Cli::command();
+        // 기본 표로 채운 글이다(moai-aqmg) — 틀(`{key:…}`) 그대로 재면 이름 붙은 키가 글에서 다 사라진다.
+        let cli = crate::cli::command(&Keymap::default());
         cli.find_subcommand("tui").and_then(|c| c.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다")
     }
 

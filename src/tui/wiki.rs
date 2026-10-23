@@ -881,9 +881,14 @@ impl App {
             Some(act @ (keys::Wiki::NextLink | keys::Wiki::PrevLink)) => {
                 if !w.pick_step(act == keys::Wiki::PrevLink) {
                     let lang = self.site.lang;
-                    let said =
-                        if w.raw_here() { say(lang, "tui.wiki.raw_no_marks") } else { say(lang, "tui.wiki.no_marks") };
-                    self.notice = Some(said.to_string());
+                    let enter = keys::label(w.keys.wiki, keys::Wiki::Enter);
+                    let said = if w.raw_here() {
+                        let raw = keys::label(w.keys.browse, Browse::Raw);
+                        fill(say(lang, "tui.wiki.raw_no_marks"), &[("raw", &raw), ("enter", &enter)])
+                    } else {
+                        fill(say(lang, "tui.wiki.no_marks"), &[("enter", &enter)])
+                    };
+                    self.notice = Some(said);
                 }
             }
             // 자취가 없으면 아무 일도 없다 — 바도 그때는 `Bksp` 를 안 댄다.

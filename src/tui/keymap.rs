@@ -21,7 +21,7 @@
 
 use super::keys::{
     ANYWHERE, BROWSE, Bind, Browse, CONFIRM, Confirm, Key, Keymap, LEADER, LINKS, Link, Lookup, MENU, Menu, Order,
-    PICK, Pick, SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, lookup, name_of_seq, parse_seq,
+    PICK, Pick, SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, label, lookup, name_of_seq, parse_seq,
 };
 use super::scroll::Move;
 use crate::i18n::{Lang, fill, say};
@@ -118,6 +118,66 @@ pub fn notice(problems: &[Problem], file: Option<&Path>, lang: Lang) -> Option<S
     }
     let why: Vec<String> = problems.iter().map(|p| p.said(file, lang)).collect();
     Some(fill(say(lang, "tui.keys.problems"), &[("why", &why.join(" · "))]))
+}
+
+/// 도움말 글의 키 틀(`{key:browse.quit}`)을 그 표의 이름으로 채운다(moai-aqmg). `moai tui --help` 가 사람이 바꾼 키를
+/// 대는 길이 이것이다 — 글은 한 벌이고 키 이름만 표에서 온다.
+///
+/// - 이름은 **바와 메뉴가 대는 이름**이다([`label`]). 이름 붙은 줄이 없는 동작(`l`·`h` 의 펼침·접기)은 그 첫 키다.
+///   **숨은 별칭은 안 댄다** — 글이 화살표를 말하는 자리는 틀이 아니다. 정확한 표는 `moai keys` 가 낸다
+/// - 키를 뗀 동작은 `(none)` 이다
+/// - **표의 칸 맞춤을 지킨다**: 틀 뒤에 빈칸이 둘 이상이면(`SPC v l  deferred` 같은 표) 기본 이름의 폭까지 채운다.
+///   글 속의 틀은 안 채운다
+/// - 모르는 절·동작은 `Err` 다 — 시험이 기본 표로 모든 도움말을 그려 틀의 오타를 잡는다
+/// - `{key:` 로 시작하는 것만 틀이다. 도움말의 다른 중괄호(`{"done": 3}`)는 그대로다
+pub fn fill_names(text: &str, keys: &Keymap) -> Result<String, String> {
+    const OPEN: &str = "{key:";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(OPEN) {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + OPEN.len()..];
+        let end = after.find('}').ok_or_else(|| format!("unclosed key template: {}", &rest[at..]))?;
+        let want = &after[..end];
+        let (now, default) = shown(want, keys).ok_or_else(|| format!("unknown key template: {{key:{want}}}"))?;
+        rest = &after[end + 1..];
+        out.push_str(&now);
+        let gap = rest.len() - rest.trim_start_matches(' ').len();
+        if gap >= 2 {
+            out.extend(std::iter::repeat_n(' ', default.chars().count().saturating_sub(now.chars().count())));
+        }
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// `절.동작` 의 지금 이름과 기본 이름.
+fn shown(want: &str, keys: &Keymap) -> Option<(String, String)> {
+    fn of<A: Named>(now: &[Bind<A>], default: &[Bind<A>], want: &Name) -> Option<(String, String)> {
+        let act = default.iter().find(|b| b.act.name() == *want)?.act;
+        let name = |t: &[Bind<A>]| {
+            let l = label(t, act);
+            if !l.is_empty() {
+                return l;
+            }
+            t.iter().find(|b| b.act == act).map_or_else(|| "(none)".to_string(), |b| name_of_seq(b.seq))
+        };
+        Some((name(now), name(default)))
+    }
+    let (section, action) = want.split_once('.')?;
+    let own = Name::Own(action.to_string());
+    match section {
+        "browse" => of(keys.browse, BROWSE, &own),
+        "moves" => of(keys.browse, BROWSE, &Name::Move(MOVES.iter().find(|(n, _)| *n == action)?.1)),
+        "menu" => of(keys.menu, MENU, &own),
+        "sorter" => of(keys.sorter, SORTER, &own),
+        "picker" => of(keys.pick, PICK, &own),
+        "stats" => of(keys.stats, STATS, &own),
+        "wiki" => of(keys.wiki, WIKI, &own),
+        "links" => of(keys.links, LINKS, &own),
+        "confirm" => of(keys.confirm, CONFIRM, &own),
+        _ => None,
+    }
 }
 
 /// 파일의 절. 이동(`moves`)은 표가 아니라 다섯 표가 함께 쓰는 줄이다.
@@ -705,7 +765,7 @@ impl Tables {
 
 #[cfg(test)]
 mod tests {
-    use super::super::keys::{label, name_of_key, parse};
+    use super::super::keys::{name_of_key, parse};
     use super::*;
     use ratatui::crossterm::event::KeyModifiers as M;
 
@@ -1134,6 +1194,140 @@ mod tests {
         let (_, p) = build("[browse\n");
         assert!(p[0].said(Some(file), Lang::En).starts_with("/k/keys.toml:1: not TOML ("), "{p:?}");
         assert_eq!(notice(&[], Some(file), Lang::En), None);
+    }
+
+    /// 명령마다의 도움말 글 — `(명령 이름, 글)`. 틀을 채우기 전의 날글이다.
+    fn help_texts() -> Vec<(String, String)> {
+        use clap::CommandFactory;
+        fn walk(c: &clap::Command, out: &mut Vec<(String, String)>) {
+            for h in
+                [c.get_about(), c.get_long_about(), c.get_before_help(), c.get_after_help(), c.get_after_long_help()]
+                    .into_iter()
+                    .flatten()
+            {
+                out.push((c.get_name().to_string(), h.to_string()));
+            }
+            for s in c.get_subcommands() {
+                walk(s, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&crate::cli::Cli::command(), &mut out);
+        out
+    }
+
+    fn tui_help(keys: &Keymap) -> String {
+        let c = crate::cli::command(keys);
+        c.find_subcommand("tui").and_then(|t| t.get_after_help()).map(|h| h.to_string()).expect("tui 도움말이 없다")
+    }
+
+    /// **모든 도움말의 틀이 기본 표로 채워진다**(moai-aqmg) — 틀의 오타(`{key:browse.qiut}`)가 사람의 화면에 닿기 전에
+    /// 여기서 붉어진다. [`crate::cli::command`] 는 깨진 틀을 날글로 둔다(도움말 하나로 멈추지 않게).
+    #[test]
+    fn every_help_template_names_a_key() {
+        let texts = help_texts();
+        assert!(texts.iter().any(|(_, t)| t.contains("{key:")), "틀이 하나도 없다 — 훑기가 헛돈다");
+        for (name, text) in texts {
+            let filled = fill_names(&text, &Keymap::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(!filled.contains("{key:"), "{name}: 안 채운 틀이 남았다");
+        }
+    }
+
+    /// **`moai tui --help` 가 바꾼 키를 댄다** — 표의 칸 맞춤도 지킨다: 짧아진 이름은 기본 이름의 폭까지 채운다. 글 속의
+    /// 이름은 안 채운다.
+    #[test]
+    fn the_help_names_the_keys_the_file_changed() {
+        let (map, problems) = build("[browse]\nquit = \"SPC x\"\ngo_list = \"L\"\njot = \"none\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let help = tui_help(&map);
+        assert!(help.contains("    SPC x    quit\n"), "{help}");
+        assert!(!help.contains("SPC q"), "옛 이름이 남았다");
+        assert!(help.contains("\n    L        list                SPC g b  board"), "칸 맞춤이 무너졌다:\n{help}");
+        // 글 속의 이름은 안 채운다 — `L, SPC c h` 처럼 선다.
+        assert!(help.contains("(SPC g, L, SPC c h,"), "{help}");
+        assert!(help.contains("(none)"), "뗀 키를 안 댔다");
+        // 위의 줄 글(`moai --help` 의 명령 목록)도 바뀐다.
+        let top = crate::cli::command(&map);
+        let about = top.find_subcommand("tui").and_then(|t| t.get_about()).map(|h| h.to_string()).unwrap();
+        assert!(about.contains("`(none)`"), "{about}");
+    }
+
+    /// **틀을 빠뜨린 자리가 없다** — 바꿀 수 있는 동작을 모두 안 쓰는 키로 옮겨 그리면, 기본 이름이 도움말에 안 남는다.
+    /// 한 글자 이름(`a`·`b`·`y`)은 영어 낱말과 갈리지 않아 못 재고, 고정된 표가 함께 쓰는 이름(Enter·Esc·Tab·
+    /// Shift-Tab·SPC)도 뺀다 — 검색 칸과 담기 폼의 그 키는 틀이 아니다.
+    #[test]
+    fn no_default_name_survives_when_every_key_moves() {
+        let mut spare = Vec::new();
+        for c in ('a'..='z').chain('A'..='Z').chain('0'..='9') {
+            spare.push(format!("Alt-{c}"));
+        }
+        for n in 1..=24 {
+            spare.push(format!("F{n}"));
+        }
+        // Ctrl-Alt-c 는 Ctrl-C 다 — Ctrl-C 는 Alt 를 안 본다.
+        for c in ('a'..='z').filter(|c| *c != 'c') {
+            spare.push(format!("Ctrl-Alt-{c}"));
+        }
+        let mut spare = spare.into_iter();
+        let mut file = String::new();
+        fn each<A: Named>(
+            file: &mut String,
+            section: &str,
+            table: &[Bind<A>],
+            spare: &mut impl Iterator<Item = String>,
+        ) {
+            file.push_str(&format!("[{section}]\n"));
+            for (n, _) in names(table) {
+                if let Name::Own(n) = n {
+                    file.push_str(&format!("{n} = \"{}\"\n", spare.next().expect("키가 모자란다")));
+                }
+            }
+        }
+        file.push_str("[moves]\n");
+        for (n, _) in MOVES {
+            file.push_str(&format!("{n} = \"{}\"\n", spare.next().expect("키가 모자란다")));
+        }
+        each(&mut file, "browse", BROWSE, &mut spare);
+        each(&mut file, "menu", MENU, &mut spare);
+        each(&mut file, "sorter", SORTER, &mut spare);
+        each(&mut file, "picker", PICK, &mut spare);
+        each(&mut file, "stats", STATS, &mut spare);
+        each(&mut file, "wiki", WIKI, &mut spare);
+        each(&mut file, "links", LINKS, &mut spare);
+        each(&mut file, "confirm", CONFIRM, &mut spare);
+        let (map, problems) = build(&file);
+        assert_eq!(problems, Vec::new());
+        let help = tui_help(&map);
+        let fixed = ["Enter", "Esc", "Tab", "Shift-Tab", "SPC", "Up", "Down"];
+        fn olds<A: Named>(table: &[Bind<A>], out: &mut Vec<String>) {
+            for b in table.iter().filter(|b| b.act.name() != Name::Fixed) {
+                if let Some(l) = b.label {
+                    out.push(l.to_string());
+                }
+            }
+        }
+        let mut old = Vec::new();
+        olds(BROWSE, &mut old);
+        olds(MENU, &mut old);
+        olds(SORTER, &mut old);
+        olds(PICK, &mut old);
+        olds(STATS, &mut old);
+        olds(WIKI, &mut old);
+        olds(LINKS, &mut old);
+        olds(CONFIRM, &mut old);
+        let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '-');
+        for name in old.iter().filter(|n| n.chars().count() >= 2 && !fixed.contains(&n.as_str())) {
+            for (at, _) in help.match_indices(name.as_str()) {
+                let before = help[..at].chars().next_back();
+                let after = help[at + name.len()..].chars().next();
+                // 한 칸 띄운 다음 낱말이 키 열을 잇는 글자면(`SPC v` 뒤의 `l`) 더 긴 이름의 앞부분이다.
+                assert!(
+                    word(before) || word(after),
+                    "틀을 빠뜨렸다 — `{name}` 가 도움말에 그대로 남았다: …{}…",
+                    &help[at.saturating_sub(40)..(at + name.len() + 40).min(help.len())]
+                );
+            }
+        }
     }
 
     /// 없는 파일은 알릴 것이 없다 — 기본 표다.
