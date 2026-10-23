@@ -92,21 +92,54 @@ impl Key {
     pub fn name(self) -> String {
         name_of(self.code)
     }
+
+    /// 사람이 파일(`keys.toml`, moai-l8qb)에 적은 키 하나를 표의 키로 — [`parse`] 가 읽은 모양이다.
+    ///
+    /// - **글자는 Ctrl·Alt 를 정확히 견준다** — [`Key::plain`]·[`Key::chord`] 와 같은 자다. `Alt-x` 도 그렇게 선다
+    /// - **수식키 없는 비글자 키는 그 표의 꼴(`plain`)을 따른다.** 탐색·통계·위키는 [`Key::any`], 고르기 창은
+    ///   [`Key::bare`] 다 — 그 갈림에는 까닭이 있다([`STATS`] 의 글). 파일이 `Down` 을 적었다고 그 까닭을 지우지 않는다.
+    ///   `Tab` 만은 늘 [`Key::unshift`] 다 — Shift-Tab 은 다른 키다
+    /// - 수식키가 붙은 비글자 키(`Ctrl-Down`·`Shift-Tab`)는 Ctrl·Alt·SHIFT 를 다 정확히 견준다
+    pub fn written(k: KeyEvent, plain: fn(KeyCode) -> Key) -> Key {
+        let (code, mods) = normal(k);
+        match code {
+            KeyCode::Char(_) => Key { code, want: mods.intersection(CTRL_ALT), care: CTRL_ALT },
+            KeyCode::Tab if mods.is_empty() => Key::unshift(KeyCode::Tab),
+            _ if mods.is_empty() => plain(code),
+            _ => Key { code, want: mods, care: CTRL_ALT.union(KeyModifiers::SHIFT) },
+        }
+    }
 }
 
 /// 누른 꼴 그대로의 한 키 이름 — **수식키까지** 적는다(`Ctrl-w`). [`name_of`] 는 글자만 읽으므로,
 /// 수식키가 붙은 접두어를 기다리는 동안 그것으로 적으면 바가 `Ctrl-w` 를 맨 `w` 라고 대고(그 키는
 /// 아무 일도 안 한다), 읽은 사람은 안 듣는 키를 누른다(리뷰). [`parse`] 가 거꾸로 읽는 이름과 같다.
+///
+/// **SHIFT 는 비글자 키에만 적는다**(`Shift-Tab`) — 글자는 대문자가 곧 SHIFT 다([`Key`]).
 pub fn name_of_key(k: KeyEvent) -> String {
+    let (code, mods) = normal(k);
     let mut out = String::new();
-    if k.modifiers.contains(KeyModifiers::CONTROL) {
+    if mods.contains(KeyModifiers::CONTROL) {
         out.push_str("Ctrl-");
     }
-    if k.modifiers.contains(KeyModifiers::ALT) {
+    if mods.contains(KeyModifiers::ALT) {
         out.push_str("Alt-");
     }
-    out.push_str(&name_of(k.code));
+    if mods.contains(KeyModifiers::SHIFT) {
+        out.push_str("Shift-");
+    }
+    out.push_str(&name_of(code));
     out
+}
+
+/// 키 열 하나의 이름 — 키마다 [`name_of_key`] 를 띄어 잇는다(`SPC v d`·`Ctrl-w w`). **같은 맨 글자 둘은 붙인다**
+/// (`gg`) — 표의 이름이 그렇게 적혀 있고, [`parse_seq`] 가 둘 다 읽는다. 파일에서 온 줄(moai-l8qb)의 이름이 이것이다.
+pub fn name_of_seq(seq: &[Key]) -> String {
+    let names: Vec<String> = seq.iter().map(|k| name_of_key(k.event())).collect();
+    match &names[..] {
+        [a, b] if a == b && a.len() == 1 && a.chars().all(|c| c.is_ascii_alphabetic()) => format!("{a}{b}"),
+        _ => names.join(" "),
+    }
 }
 
 /// 한 키의 이름. [`parse`] 가 거꾸로 읽는 이름과 같다 — SPC 는 `SPC`, 글자는 그 글자.
@@ -118,6 +151,8 @@ pub fn name_of(code: KeyCode) -> String {
         KeyCode::Esc => "Esc".into(),
         KeyCode::Backspace => "Bksp".into(),
         KeyCode::Tab => "Tab".into(),
+        // `F(5)` 가 아니라 `F5` — [`parse`] 가 읽는 철자다.
+        KeyCode::F(n) => format!("F{n}"),
         other => format!("{other:?}"),
     }
 }
@@ -1634,7 +1669,9 @@ pub const CONFIRM: &[Bind<Confirm>] =
 /// 사람이 적는 키 이름을 키 **열**로 푼다 — `g p` 는 띄어 적은 둘, `gg` 는 같은 글자 둘.
 /// 키 이름이 아니면 `None`. 같은 글자 둘만 붙여 읽는다 — `Tab` 같은 이름을 글자 셋으로 읽지
 /// 않고, 도움말의 낱말(`to`)이 키 열로 잡히지 않게.
-#[cfg(test)]
+///
+/// **키 이름을 읽는 자는 이것 하나다**(moai-l8qb) — 시험이 표의 이름을 재는 것도, `keys.toml` 을 읽는 것도
+/// 이것이다. 둘이 갈리면 표에 적힌 이름을 파일에 옮겨 적었는데 안 읽히는 판이 선다.
 pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
     if name.contains(' ') {
         return name.split(' ').map(parse).collect();
@@ -1653,45 +1690,58 @@ pub fn parse_seq(name: &str) -> Option<Vec<KeyEvent>> {
 
 /// 사람이 적는 키 이름을 키로 푼다 — 표의 이름과 도움말의 낱말이 정말 그 키인지 시험이 잰다.
 /// 키 이름이 아니면 `None`.
-#[cfg(test)]
+///
+/// - 수식키는 앞에 붙는다: `Ctrl-`·`Alt-`·`Shift-`. [`name_of_key`] 가 적는 차례(`Ctrl-Alt-x`)로 다시 읽힌다
+/// - **철자는 표의 이름 그대로다**(`Enter`·`Esc`·`SPC`) — `enter` 는 키가 아니다. 관대하게 읽으면 도움말 시험
+///   (`every_key_the_help_names_is_in_a_table`)이 글 속의 `end`·`up` 을 키로 읽는다. 틀린 철자는 파일을 읽을 때
+///   그 줄을 대며 알린다(moai-l8qb)
+/// - Ctrl 뒤의 글자는 소문자로 읽는다 — 터미널이 Ctrl-S 를 `s` 로 보낸다
+/// - **글자에 `Shift-` 를 붙이지 않는다** — 대문자가 곧 그 키다([`Key`]). 붙이면 키가 아니다
 pub fn parse(name: &str) -> Option<KeyEvent> {
     use KeyModifiers as M;
-    let named = |code| Some(KeyEvent::new(code, M::NONE));
-    if let Some(rest) = name.strip_prefix("Ctrl-") {
-        let mut cs = rest.chars();
-        return match (cs.next(), cs.next()) {
-            (Some(c), None) => Some(KeyEvent::new(KeyCode::Char(c.to_ascii_lowercase()), M::CONTROL)),
-            _ => None,
+    let mut mods = M::NONE;
+    let mut rest = name;
+    while let Some((head, tail)) = rest.split_once('-').filter(|(_, tail)| !tail.is_empty()) {
+        let m = match head {
+            "Ctrl" => M::CONTROL,
+            "Alt" => M::ALT,
+            "Shift" => M::SHIFT,
+            _ => break,
         };
+        mods |= m;
+        rest = tail;
     }
-    match name {
-        "Enter" => named(KeyCode::Enter),
-        "Esc" => named(KeyCode::Esc),
-        "Tab" => named(KeyCode::Tab),
-        "Shift-Tab" => Some(KeyEvent::new(KeyCode::Tab, M::SHIFT)),
-        "BackTab" => named(KeyCode::BackTab),
-        "Bksp" | "Backspace" => named(KeyCode::Backspace),
-        "Delete" => named(KeyCode::Delete),
-        "Up" => named(KeyCode::Up),
-        "Down" => named(KeyCode::Down),
-        "Left" => named(KeyCode::Left),
-        "Right" => named(KeyCode::Right),
-        "Home" => named(KeyCode::Home),
-        "End" => named(KeyCode::End),
-        "PageUp" | "PgUp" => named(KeyCode::PageUp),
-        "PageDown" | "PgDn" => named(KeyCode::PageDown),
-        "SPC" => named(KeyCode::Char(' ')),
+    let code = match rest {
+        "Enter" => KeyCode::Enter,
+        "Esc" => KeyCode::Esc,
+        "Tab" => KeyCode::Tab,
+        "BackTab" => KeyCode::BackTab,
+        "Bksp" | "Backspace" => KeyCode::Backspace,
+        "Delete" => KeyCode::Delete,
+        "Insert" => KeyCode::Insert,
+        "Up" => KeyCode::Up,
+        "Down" => KeyCode::Down,
+        "Left" => KeyCode::Left,
+        "Right" => KeyCode::Right,
+        "Home" => KeyCode::Home,
+        "End" => KeyCode::End,
+        "PageUp" | "PgUp" => KeyCode::PageUp,
+        "PageDown" | "PgDn" => KeyCode::PageDown,
+        "SPC" => KeyCode::Char(' '),
         _ => {
-            if let Some(n) = name.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()) {
-                return named(KeyCode::F(n));
-            }
-            let mut cs = name.chars();
+            let mut cs = rest.chars();
             match (cs.next(), cs.next()) {
-                (Some(c), None) if c.is_ascii_graphic() => named(KeyCode::Char(c)),
-                _ => None,
+                (Some(c), None) if c.is_ascii_graphic() => {
+                    if mods.contains(M::SHIFT) {
+                        return None;
+                    }
+                    KeyCode::Char(if mods.contains(M::CONTROL) { c.to_ascii_lowercase() } else { c })
+                }
+                _ => KeyCode::F(rest.strip_prefix('F')?.parse::<u8>().ok()?),
             }
         }
-    }
+    };
+    Some(KeyEvent::new(code, mods))
 }
 
 #[cfg(test)]

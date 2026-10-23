@@ -11,6 +11,7 @@ mod hint;
 pub mod init_screen;
 pub mod input;
 pub mod jotfile;
+pub mod keymap;
 pub mod keys;
 pub mod layer;
 pub mod menu;
