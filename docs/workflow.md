@@ -102,11 +102,16 @@ it belongs to, and `--due` covers every epic the plan creates that has no `@` of
     - recover a truncated line
     PLAN
 
-A row made alone takes the same `--due` on `moai add` or `moai backlog add`; an `@` is
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31` is a
+start and a deadline, `@2026-10-25~` a start alone — and `--start <day>` covers the epics
+that have no `@` of their own, as `--due` does. A start is never made up either.
+
+A row made alone takes the same `--due` and `--start` on `moai add` or `moai backlog add`; an `@` is
 read on a plan line only.
 
 A member's deadline cannot pass its epic's, nor an epic's its milestone's — the write
-is refused and names the day to give instead. As deadlines near, `moai due apply`
+is refused and names the day to give instead. A start is held to the same ceiling: it cannot
+fall after the deadline above it, though it may begin before the parent does. As deadlines near, `moai due apply`
 raises the priority of each open, not deferred issue and backlog item by the deadline
 it follows — the earliest of its own and those of its milestone, epic and open parent (one day
 left or less — today and past included — is `p0`, two or less `p1`, seven or less `p2`)
