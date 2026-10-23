@@ -157,8 +157,8 @@ nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-dec
 @media (prefers-reduced-motion: reduce) { .track { animation: none; } .slide, .slide[hidden] { transition: none; transform: none; } }
 .slot { flex: none; height: 44px; width: 150px; border: 1px dashed #3a3e3a; border-radius: 8px; display: grid; place-items: center; font: 12px var(--mono); color: var(--faint); }
 
-/* 장면: 글을 위에, 녹화를 아래에 넓게. 터미널 녹화는 150칸이라 본문 폭에 담으면 글자가 읽히지 않는다 —
-   녹화만 본문 밖으로 1240px 까지 넓힌다 */
+/* 장면: 글을 위에, 녹화를 아래에. 녹화는 본문과 같은 세로선 안에 선다 — 터미널 녹화는 그 폭에서 글자가
+   읽히도록 120칸으로 찍는다(scripts/site-demo/record-tui.sh 의 SIZE) */
 section.see { padding: 96px 0 24px; }
 .sec-head { max-width: 720px; margin: 0 0 64px; }
 h2.big { font-size: clamp(1.8rem, 3.6vw, 2.6rem); letter-spacing: -.02em; line-height: 1.18; margin: 0 0 14px; }
@@ -171,7 +171,7 @@ h2.big { font-size: clamp(1.8rem, 3.6vw, 2.6rem); letter-spacing: -.02em; line-h
 .scene .run { margin-top: 20px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .scene .run .tag { font: 500 12px var(--sans); color: var(--faint); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
 .scene .run code { font-size: 13px; color: var(--ink); background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
-.scene-media { width: min(1240px, calc(100vw - 32px)); margin-left: calc(50% - min(620px, 50vw - 16px)); }
+.scene-media { min-width: 0; }
 
 /* final cta */
 .cta { padding: 110px 0 100px; text-align: center; }

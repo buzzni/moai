@@ -9,7 +9,7 @@ set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 out=$(mkdir -p "${1:?usage: record-tui.sh <out dir> [scene...]}" && cd "$1" && pwd); shift
 if [ $# -gt 0 ]; then scenes=("$@"); else scenes=(tour lifecycle); fi
-size=${SIZE:-150x38}
+size=${SIZE:-120x34}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 for scene in "${scenes[@]}"; do
