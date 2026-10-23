@@ -1,0 +1,101 @@
+# develop → main 머지가 관리자 승인을 받으면 그 머지 커밋에 태그를 달고 릴리스를 부른다
+# (moai-i5so, 2026-10-23 사용자 결정). 그 전에는 머지 뒤 사람이 `git tag vX origin/main` 을
+# 손으로 쳤다.
+#
+# **승인은 Environment `release` 의 required reviewers 다.** 저장소 설정에서 관리자를
+# reviewers 로 넣는다 — 이 파일이 아니라 설정이 승인하는 사람을 정한다. 다만 environment 가
+# 없거나 보호 규칙이 빠지면 GitHub 는 묻지 않고 잡을 돌리니, 첫 스텝이 이 판에 실제로 관리자의
+# 승인이 섰는지를 API 로 다시 잰다. 설정이 비면 태그가 안 달린다 — 소리 내어 멈추는 쪽이다.
+#
+# **태그를 민 뒤 release.yml 을 손수 부른다.** `GITHUB_TOKEN` 으로 만든 태그는 다른 워크플로의
+# `push: tags` 를 안 깨운다(GitHub 의 되부름 막이). `workflow_dispatch` 는 그 예외라, 태그를
+# `--ref` 로 주면 그쪽은 `github.ref_type == tag` 로 돌아 release.yml 을 한 줄도 안 고친다.
+# 태그에서 돌던 smoke.yml 도 같은 까닭으로 함께 부른다.
+#
+# **판은 머지 커밋의 `Cargo.toml` 이 고른다.** `scripts/bump-version.sh auto` 가 develop 에서 이미
+# 올려 두었다. 그 판의 태그가 이미 있으면 판을 안 올린 머지라 아무것도 안 한다.
+name: tag on merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+# 머지 둘이 겹쳐도 태그를 두 번 만들지 않게 한 줄로 세운다. 끊지 않는다 — 승인을 기다리는
+# 판을 뒤 판이 지우면 앞 머지의 릴리스가 말없이 사라진다.
+concurrency:
+  group: tag-on-merge
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    name: 관리자 승인 뒤 태그와 릴리스
+    # 이 저장소의 develop 에서 온 머지만 릴리스다. 포크의 `develop` 이름을 단 가지는 안 받는다.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'develop' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    # 승인을 기다리는 시간은 여기 안 든다 — 잡이 시작한 뒤의 시간이다.
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write # 태그 ref 를 만든다
+      actions: write # release.yml·smoke.yml 을 부른다
+    steps:
+      - name: 관리자가 승인했는가
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          approvers=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/approvals" \
+            --jq '.[] | select(.state == "approved") | select(any(.environments[]; .name == "release")) | .user.login')
+          if [ -z "$approvers" ]; then
+            printf '이 판에 environment release 의 승인이 없다 — 보호 규칙(required reviewers)을 확인한다\n' >&2
+            exit 1
+          fi
+          for who in $approvers; do
+            role=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$who/permission" --jq .permission)
+            if [ "$role" = admin ]; then
+              printf '승인: %s (admin)\n' "$who"
+              exit 0
+            fi
+            printf '승인했지만 admin 이 아니다: %s (%s)\n' "$who" "$role"
+          done
+          printf '관리자의 승인이 없다 — 태그를 안 단다\n' >&2
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+
+      - name: 태그를 달고 릴리스를 부른다
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          # 대입으로 받는다 — 판을 못 읽으면 `set -e` 가 여기서 멈춘다(release.yml 의 guard 와 같은 자리).
+          version=$(scripts/check-version.sh --print)
+          tag=v$version
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2>/dev/null; then
+            printf '%s 이 이미 있다 — 판을 안 올린 머지라 건너뛴다\n' "$tag"
+            exit 0
+          fi
+          # 태그를 Cargo.toml 에서 짓는 순간 guard 의 "태그 == Cargo.toml" 은 늘 맞는다. 사람이 달던
+          # 때 그 견줌이 잡던 것(판을 안 올린 채 내는 것) 대신 CHANGELOG 의 그 판 절을 본다 —
+          # `auto` 가 연 절이 없으면 bump 를 안 거친 판이다. 줄 머리를 글자째 견준다(release.yml 의 노트와 같다).
+          if ! awk -v head="## [$version]" 'index($0, head) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
+            printf 'CHANGELOG.md 에 %s 절이 없다 — scripts/bump-version.sh auto 를 거친 판이 아니다\n' "$version" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$SHA" --silent
+          printf '태그: %s → %s\n' "$tag" "$SHA"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"
+          gh workflow run smoke.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"
+          printf '불렀다: release.yml · smoke.yml (%s)\n' "$tag"
