@@ -50,6 +50,14 @@ pub fn load(path: Option<&Path>) -> (Keymap, Vec<Problem>) {
     }
 }
 
+/// 그 환경의 자리([`path_from`])에서 읽는다([`load`]) — 자리도 함께 낸다(알림과 `moai keys` 가 댄다). 부르는 자리마다
+/// 자리와 읽기를 따로 짜면 한쪽만 고치는 날 도움말과 화면이 다른 파일을 읽는다. 환경은 부르는 쪽이 건넨다.
+pub fn load_from(env: impl Fn(&str) -> Option<OsString>) -> (Option<PathBuf>, Keymap, Vec<Problem>) {
+    let file = path_from(env);
+    let (keys, problems) = load(file.as_deref());
+    (file, keys, problems)
+}
+
 /// 버린 줄 하나. **말이 아니라 자료다** — 화면의 한 줄과 `moai keys` 가 제 말로 편다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem {
@@ -127,7 +135,7 @@ pub fn notice(problems: &[Problem], file: Option<&Path>, lang: Lang) -> Option<S
 ///   **숨은 별칭은 안 댄다** — 글이 화살표를 말하는 자리는 틀이 아니다. 정확한 표는 `moai keys` 가 낸다
 /// - 키를 뗀 동작은 `(none)` 이다
 /// - **표의 칸 맞춤을 지킨다**: 틀 뒤에 빈칸이 둘 이상이면(`SPC v l  deferred` 같은 표) 기본 이름의 폭까지 채운다.
-///   글 속의 틀은 안 채운다
+///   길어진 이름은 뒤의 빈칸을 그만큼 먹되 둘은 남긴다. 글 속의 틀은 안 채운다
 /// - 모르는 절·동작은 `Err` 다 — 시험이 기본 표로 모든 도움말을 그려 틀의 오타를 잡는다
 /// - `{key:` 로 시작하는 것만 틀이다. 도움말의 다른 중괄호(`{"done": 3}`)는 그대로다
 pub fn fill_names(text: &str, keys: &Keymap) -> Result<String, String> {
@@ -144,7 +152,13 @@ pub fn fill_names(text: &str, keys: &Keymap) -> Result<String, String> {
         out.push_str(&now);
         let gap = rest.len() - rest.trim_start_matches(' ').len();
         if gap >= 2 {
-            out.extend(std::iter::repeat_n(' ', default.chars().count().saturating_sub(now.chars().count())));
+            let (now_w, default_w) = (now.chars().count(), default.chars().count());
+            if now_w <= default_w {
+                out.extend(std::iter::repeat_n(' ', default_w - now_w));
+            } else {
+                // 길어진 이름은 뒤의 빈칸을 그만큼 먹는다 — 칸 사이의 둘은 남긴다. 빈칸은 한 바이트씩이다.
+                rest = &rest[(now_w - default_w).min(gap - 2)..];
+            }
         }
     }
     out.push_str(rest);
@@ -574,12 +588,18 @@ pub fn build(text: &str) -> (Keymap, Vec<Problem>) {
             problems.sort_by_key(|p| p.line);
             return (t.freeze(&entries, &live), problems);
         }
+        // **확실한 탓부터 버린다**([`Blame::sure`]) — 기본 줄·못 바꾸는 줄·Ctrl-C·SPC 와 겹친 줄은 다른 줄을 버려도 안
+        // 풀린다. 그것만 버리고 다시 재야 그 줄과만 겹쳤던 성한 줄이 함께 안 버려진다(`quit = "g"` 와 `jot = "g x"` —
+        // `quit` 이 기본 키로 돌아가면 `g x` 를 가리는 것이 없다). 사람의 줄끼리만 겹쳤으면 둘 다 버린다 — 어느 쪽이
+        // 맞는지 도구가 고르지 않는다.
+        //
         // **한 바퀴에 적어도 한 줄을 버린다** — 탓은 늘 살아 있는 사람의 줄에만 가니(기본 줄은 `from` 이 없다)
         // 바퀴는 줄 수만큼을 못 넘는다.
-        for (i, why) in blamed {
-            if live[i] {
-                live[i] = false;
-                problems.push(Problem { at: entries[i].at(), line: entries[i].line, why });
+        let sure = blamed.iter().any(|b| b.sure);
+        for b in blamed.into_iter().filter(|b| b.sure || !sure) {
+            if live[b.at] {
+                live[b.at] = false;
+                problems.push(Problem { at: entries[b.at].at(), line: entries[b.at].line, why: b.why });
             }
         }
     }
@@ -715,9 +735,18 @@ fn apply<A: Named>(
     out
 }
 
+/// 겹친 사람의 줄 하나(`at` 은 [`Entry`] 의 차례)와 그 까닭.
+struct Blame {
+    at: usize,
+    why: Why,
+    /// **상대가 사람의 다른 줄이 아니다** — 기본 줄·못 바꾸는 줄·Ctrl-C·SPC, 또는 같은 줄의 다른 키다. 다른 줄을 버려도
+    /// 그 상대는 그대로 서므로 이 겹침은 안 풀린다([`build`] 가 이것부터 버린다).
+    sure: bool,
+}
+
 /// 표 안의 겹침 — `no_row_is_shadowed_or_a_prefix_of_another` 가 기본 표에 재던 것을 런타임으로. 줄마다 그 키를 눌러
 /// 그 줄의 동작이 나오는가를 본다: 같은 열의 다른 동작, 그 열로 시작하는 더 긴 줄이 그것을 가린다.
-fn shadows<A: Named>(rows: &[Row<A>], table: Section, out: &mut Vec<(usize, Why)>) {
+fn shadows<A: Named>(rows: &[Row<A>], table: Section, out: &mut Vec<Blame>) {
     for (i, r) in rows.iter().enumerate() {
         let seq = r.pressed();
         for (j, h) in rows.iter().enumerate() {
@@ -732,21 +761,26 @@ fn shadows<A: Named>(rows: &[Row<A>], table: Section, out: &mut Vec<(usize, Why)
     }
 }
 
-/// 두 줄이 겹쳤다 — 둘 중 사람의 줄에 탓을 단다.
-fn blame<A: Named, B: Named>(a: &Row<A>, b: &Row<B>, at: Section, bt: Section, out: &mut Vec<(usize, Why)>) {
+/// 두 줄이 겹쳤다 — 둘 중 사람의 줄에 탓을 단다. 상대가 사람의 줄이 아니거나 **같은 줄**(`quit = ["x", "x y"]`)이면
+/// 확실한 탓이다 — 다른 줄을 버려도 안 풀린다.
+fn blame<A: Named, B: Named>(a: &Row<A>, b: &Row<B>, at: Section, bt: Section, out: &mut Vec<Blame>) {
+    let sure = a.from.is_none() || b.from.is_none() || a.from == b.from;
     if let Some(i) = a.from {
-        out.push((i, Why::Clash { keys: name_of_seq(&a.seq), with: b.who(bt) }));
+        let why = Why::Clash { keys: name_of_seq(&a.seq), with: b.who(bt) };
+        out.push(Blame { at: i, why, sure });
     }
     if let Some(i) = b.from {
-        out.push((i, Why::Clash { keys: name_of_seq(&b.seq), with: a.who(at) }));
+        let why = Why::Clash { keys: name_of_seq(&b.seq), with: a.who(at) };
+        out.push(Blame { at: i, why, sure });
     }
 }
 
 /// 사람의 줄에서 그 키 중 하나라도 `dead` 면 탓을 단다 — 표 밖의 것이 먼저 받는 키다(Ctrl-C·SPC).
-fn beaten<A: Named>(rows: &[Row<A>], dead: impl Fn(KeyEvent) -> bool, with: &str, out: &mut Vec<(usize, Why)>) {
+fn beaten<A: Named>(rows: &[Row<A>], dead: impl Fn(KeyEvent) -> bool, with: &str, out: &mut Vec<Blame>) {
     for r in rows.iter().filter(|r| r.from.is_some()) {
         if r.pressed().iter().any(|e| dead(*e)) {
-            out.push((r.from.expect("사람의 줄"), Why::Clash { keys: name_of_seq(&r.seq), with: with.to_string() }));
+            let why = Why::Clash { keys: name_of_seq(&r.seq), with: with.to_string() };
+            out.push(Blame { at: r.from.expect("사람의 줄"), why, sure: true });
         }
     }
 }
@@ -801,7 +835,7 @@ impl Tables {
     }
 
     /// 겹친 사람의 줄과 그 까닭. 같은 줄이 여러 번 나와도 된다 — 부르는 쪽이 처음 것만 센다.
-    fn clashes(&self) -> Vec<(usize, Why)> {
+    fn clashes(&self) -> Vec<Blame> {
         let mut out = Vec::new();
         shadows(&self.browse, Section::Browse, &mut out);
         shadows(&self.menu, Section::Menu, &mut out);
@@ -834,7 +868,8 @@ impl Tables {
                 if spc(*e)
                     && let Some(i) = r.from
                 {
-                    out.push((i, Why::Clash { keys: name_of_seq(&r.seq), with: "SPC".into() }));
+                    let why = Why::Clash { keys: name_of_seq(&r.seq), with: "SPC".into() };
+                    out.push(Blame { at: i, why, sure: true });
                 }
                 for m in self.menu.iter().filter(|m| m.seq.len() == 1 && m.seq[0].matches(*e)) {
                     blame(r, m, Section::Browse, Section::Menu, &mut out);
@@ -1104,6 +1139,20 @@ mod tests {
         assert_eq!(run(map.browse, "SPC n"), Lookup::Run(Browse::Jot));
     }
 
+    /// **확실히 틀린 줄과만 겹친 줄은 산다** — `g` 는 `gg` 를 기다리게 해 어떻게 해도 안 듣지만, `g x` 는 그 줄이 기본
+    /// 키로 돌아가면 가리는 것이 없다. 한 바퀴에 둘 다 버리면 "틀린 줄은 그 줄만 버린다" 가 무너진다.
+    #[test]
+    fn a_line_that_only_clashed_with_a_doomed_line_survives() {
+        let (map, problems) = build("[browse]\nquit = \"g\"\njot = \"g x\"\n");
+        assert_eq!(whys(&problems), [("browse.quit", &clash("g", "moves.top"))]);
+        assert_eq!(run(map.browse, "SPC q"), Lookup::Run(Browse::Quit));
+        assert_eq!(run(map.browse, "g x"), Lookup::Run(Browse::Jot));
+        assert_eq!(run(map.browse, "gg"), Lookup::Run(Browse::Step(Move::Top)));
+        // 한 줄 안의 겹침도 확실한 탓이다 — 옆 줄을 버려도 안 풀린다.
+        let (_, problems) = build("[browse]\nquit = [\"x\", \"x y\"]\njot = \"1\"\n");
+        assert_eq!(whys(&problems), [("browse.quit", &clash("x", "browse.quit")), ("browse.jot", &clash("1", "1"))]);
+    }
+
     /// **이동은 다섯 표가 함께 쓴다** — `[moves]` 의 한 줄이 탐색·고르기·통계·위키·링크 모두를 바꾼다.
     #[test]
     fn a_move_changes_all_five_tables() {
@@ -1348,6 +1397,16 @@ mod tests {
         let top = crate::cli::command(&map);
         let about = top.find_subcommand("tui").and_then(|t| t.get_about()).map(|h| h.to_string()).unwrap();
         assert!(about.contains("`(none)`"), "{about}");
+    }
+
+    /// **길어진 이름은 뒤의 빈칸을 먹는다** — 표의 다음 칸이 그만큼 덜 밀리고, 칸 사이의 둘은 남는다.
+    #[test]
+    fn a_longer_name_eats_the_gap_after_it() {
+        let (map, problems) = build("[browse]\nquit = \"Ctrl-Alt-x\"\nfilter = \"SPC f f\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let filled =
+            fill_names("    {key:browse.quit}    quit\n    {key:browse.filter}    filter  next\n", &map).unwrap();
+        assert_eq!(filled, "    Ctrl-Alt-x  quit\n    SPC f f  filter  next\n");
     }
 
     /// **틀을 빠뜨린 자리가 없다** — 바꿀 수 있는 동작을 모두 안 쓰는 키로 옮겨 그리면, 기본 이름이 도움말에 안 남는다.

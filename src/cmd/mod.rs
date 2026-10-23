@@ -699,7 +699,7 @@ fn opening(ctx: &Ctx) -> R<Vec<String>> {
     if outside && !registered {
         let mut help = Vec::new();
         // 도움말은 사람의 키로 그린다(moai-aqmg) — `moai --help` 와 같은 글이어야 한다.
-        let keys = crate::tui::keymap::load(crate::tui::keymap::path_from(|k| std::env::var_os(k)).as_deref()).0;
+        let (_, keys, _) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
         crate::cli::command(&keys).write_help(&mut help).map_err(|e| Fail::new(e.to_string()))?;
         let mut out: Vec<String> = String::from_utf8_lossy(&help).lines().map(str::to_string).collect();
         out.push(String::new());

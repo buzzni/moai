@@ -142,6 +142,8 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
     let mut seen = Vec::new();
     let mut out = Vec::new();
     for b in c.keys.browse.iter().filter(|b| b.seq.len() > held.len() && under(b, held)) {
+        // 칸의 이름은 **수식키까지** 댄다(`name_of_key`) — 사람의 키 파일(moai-pxiy)이 `SPC Alt-f` 를 두면 `f` 로 대는
+        // 칸은 눌러도 안 듣는다.
         let next = b.seq[held.len()];
         if seen.contains(&next) {
             continue;
@@ -156,11 +158,16 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
                     Browse::Column(n) => columns.get(usize::from(n)).map_or(act.menu_word(c), String::as_str),
                     _ => act.menu_word(c),
                 };
-                out.push(Entry { key: next.name(), event: next.event(), what: what.into(), state: act.state(c) });
+                out.push(Entry {
+                    key: name_of_key(next.event()),
+                    event: next.event(),
+                    what: what.into(),
+                    state: act.state(c),
+                });
             }
             Lookup::Pending if live(&seq, c) => {
                 let what = format!("+{}", group(&seq, c.lang));
-                out.push(Entry { key: next.name(), event: next.event(), what, state: here(&seq, c) });
+                out.push(Entry { key: name_of_key(next.event()), event: next.event(), what, state: here(&seq, c) });
             }
             _ => {}
         }
@@ -368,6 +375,21 @@ mod tests {
 
     fn layer() -> Ctx {
         Ctx { layer: true, ..inside() }
+    }
+
+    /// **수식키가 붙은 키는 그 이름으로 선다**(moai-pxiy) — 사람의 키 파일이 `SPC Alt-f` 를 두면 칸은 `Alt-f` 다. `f` 로
+    /// 대면 그 칸을 보고 누른 `f` 는 아무 일도 안 한다. 접두어를 기다리는 바(`next_keys`)도 같다.
+    #[test]
+    fn a_key_with_a_modifier_is_named_with_it() {
+        let (map, problems) =
+            super::super::keymap::build("[browse]\nfilter = \"SPC Alt-f\"\n[moves]\ntop = \"g Ctrl-g\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let c = Ctx { keys: map, ..inside() };
+        let root = entries(&[LEADER.event()], &c, &[]);
+        let filter = root.iter().find(|e| e.event.code == KeyCode::Char('f')).expect("거름망 칸이 없다");
+        assert_eq!((filter.key.as_str(), filter.event.modifiers), ("Alt-f", KeyModifiers::ALT));
+        let next = super::super::keys::next_keys(map.browse, &[k('g')]);
+        assert_eq!(next.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["Ctrl-g"]);
     }
 
     fn keys_of(e: &[Entry]) -> Vec<&str> {

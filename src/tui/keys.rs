@@ -88,11 +88,6 @@ impl Key {
         KeyEvent::new(self.code, self.want)
     }
 
-    /// 사람에게 대는 한 키의 이름 — 메뉴의 줄과 테두리(`SPC v`).
-    pub fn name(self) -> String {
-        name_of(self.code)
-    }
-
     /// 사람이 파일(`keys.toml`, moai-l8qb)에 적은 키 하나를 표의 키로 — [`parse`] 가 읽은 모양이다.
     ///
     /// - **글자는 Ctrl·Alt 를 정확히 견준다** — [`Key::plain`]·[`Key::chord`] 와 같은 자다. `Alt-x` 도 그렇게 선다
@@ -274,7 +269,9 @@ pub fn next_keys<A: Copy + PartialEq>(table: &[Bind<A>], held: &[KeyEvent]) -> V
     for b in table.iter().filter(|b| {
         b.label.is_some() && b.seq.len() == held.len() + 1 && b.seq.iter().zip(held).all(|(key, k)| key.matches(*k))
     }) {
-        let name = b.seq[held.len()].name();
+        // **수식키까지 댄다**(`name_of_key`) — 사람의 키 파일(moai-pxiy)이 접두어 뒤에 `Alt-x` 를 두면 `x` 로 대는 이름은
+        // 안 듣는 키다.
+        let name = name_of_key(b.seq[held.len()].event());
         if !out.iter().any(|(n, _)| *n == name) {
             out.push((name, b.act));
         }
@@ -803,7 +800,7 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Archived, Some("SPC v o"), LEADER, Key::plain('v'), Key::plain('o')),
         row!(ShowAll, Some("SPC v a"), LEADER, Key::plain('v'), Key::plain('a')),
         // 번호 줄은 첫 줄만 이름을 단다 — 도움말이 `SPC v 1` 과 "번호가 차례로 는다" 로 한 번에
-        // 대고, 메뉴는 이름이 아니라 키(`next.name()`)와 설정의 칸 이름을 세운다.
+        // 대고, 메뉴는 이름이 아니라 키(`name_of_key`)와 설정의 칸 이름을 세운다.
         row!(Column(0), Some("SPC v 1"), LEADER, Key::plain('v'), Key::plain('1')),
         row!(Column(1), None, LEADER, Key::plain('v'), Key::plain('2')),
         row!(Column(2), None, LEADER, Key::plain('v'), Key::plain('3')),

@@ -98,8 +98,7 @@ fn parse() -> cli::Cli {
     if !matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand) {
         e.exit();
     }
-    let file = tui::keymap::path_from(|k| std::env::var_os(k));
-    let (keys, _) = tui::keymap::load(file.as_deref());
+    let (_, keys, _) = tui::keymap::load_from(|k| std::env::var_os(k));
     match cli::command(&keys).try_get_matches() {
         Ok(m) => cli::Cli::from_arg_matches(&m).unwrap_or_else(|e| e.exit()),
         Err(e) => e.exit(),

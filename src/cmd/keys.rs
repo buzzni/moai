@@ -18,9 +18,8 @@ pub fn run(ctx: &Ctx, args: KeysArgs) -> R<Vec<String>> {
         return Ok(template.lines().map(str::to_string).collect());
     }
     let lang = ctx.lang();
-    let file = keymap::path_from(|k| std::env::var_os(k));
+    let (file, keys, problems) = keymap::load_from(|k| std::env::var_os(k));
     let found = file.as_deref().is_some_and(std::path::Path::is_file);
-    let (keys, problems) = keymap::load(file.as_deref());
     // **버린 줄은 stderr 로, 종료 0 으로** — `moai models` 와 같다. 성한 줄은 산다.
     for p in &problems {
         super::tell(&p.said(file.as_deref(), lang));

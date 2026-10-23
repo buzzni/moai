@@ -8885,6 +8885,24 @@ mod tests {
         assert!(a.quit, "SPC x 로 못 나갔다");
     }
 
+    /// **키를 뗀 동작은 키 바에 안 선다**(moai-pxiy) — 이름 없는 칸은 눌러 볼 키가 없는 낱말뿐이다. 뗀 `/` 가 바에서 빠지고,
+    /// 나머지(`SPC 메뉴`)는 그대로 선다.
+    #[test]
+    fn an_unbound_action_leaves_the_key_bar() {
+        let (map, problems) = keymap::build("[browse]\ngrep = \"none\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::En;
+        let before = super::draw::tests::render(&mut a, 120, 20);
+        let bar = before.last().expect("바가 없다").clone();
+        assert!(bar.contains(" / search"), "전제: 기본 바가 `/` 를 댄다 — {bar}");
+        a.adopt_keys(map, &problems, None);
+        let after = super::draw::tests::render(&mut a, 120, 20);
+        let bar = after.last().expect("바가 없다");
+        assert!(!bar.contains("search"), "뗀 키의 칸이 바에 섰다 — {bar}");
+        assert!(bar.contains("SPC"), "바가 통째로 사라졌다 — {bar}");
+    }
+
     /// **버린 줄은 알림 한 줄로 선다**(moai-bzm3) — 파일과 줄과 동작을 대고, 보기 설정의 탈이 먼저 섰으면 그 뒤에
     /// 잇는다. 덮으면 하나를 잃는다. 버린 줄의 동작은 기본 키로 남는다.
     #[test]

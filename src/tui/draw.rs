@@ -5084,7 +5084,11 @@ fn menu_event(table: &[keys::Bind<Menu>], m: Menu) -> Option<KeyEvent> {
 }
 
 /// 키 바를 폭에 맞춰 놓는다. `optional` 은 **뒤에서부터** 들어가고 모자라면 앞쪽이 떨어진다.
-fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>) {
+fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, mut keep: Vec<Span<'_>>) {
+    // **키를 뗀 동작은 안 댄다**(moai-pxiy) — [`key`] 가 이름 없는 칸을 빈 칸으로 내고 여기서 걷는다. 사람의 `keys.toml`
+    // 이 `grep = "none"` 이면 그 칸은 누를 키가 없는 낱말뿐이다(맨 아래 바의 "아직 없는 것은 적지 않는다").
+    optional.retain(|s| !s.content.is_empty());
+    keep.retain(|s| !s.content.is_empty());
     let room = at.width as usize;
     let mut spans: Vec<Span> = Vec::new();
     while let Some(next) = optional.pop() {
@@ -5100,7 +5104,12 @@ fn bar(f: &mut Frame, at: Rect, mut optional: Vec<Span<'_>>, keep: Vec<Span<'_>>
 /// 바의 키 하나. **뒤에 공백을 두지 않는다** — 앞뒤로 두면 칸 사이가 두 칸이 되고,
 /// 그 여섯 칸 때문에 80칸 터미널에서 줄이 넘쳐 맨 끝의 `SPC 메뉴` 가 말없이
 /// 잘린다. 나갈 길을 못 찾는 것이 빽빽한 줄보다 나쁘다.
+///
+/// **이름이 비면 빈 칸이다** — 키를 뗀 동작이다([`bar`] 가 걷는다).
 fn key(k: &str, what: &str) -> Span<'static> {
+    if k.is_empty() {
+        return Span::raw("");
+    }
     Span::styled(format!(" {k} {what}"), dim())
 }
 

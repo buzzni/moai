@@ -151,15 +151,14 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 /// 화면의 키 이름 하나 — 화면을 켜기 **전에** 그 키를 대는 거절문이 쓴다(moai-aqmg). 탐색기를 부른 판이라 사람의 키 파일을
 /// 읽는다: 화면에서 누를 키와 거절문이 대는 키가 같아야 한다.
 fn screen_key(act: crate::tui::keys::Browse) -> String {
-    let file = crate::tui::keymap::path_from(|k| std::env::var_os(k));
-    crate::tui::keys::label(crate::tui::keymap::load(file.as_deref()).0.browse, act)
+    let (_, keys, _) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
+    crate::tui::keys::label(keys.browse, act)
 }
 
 /// 사람의 키 파일을 읽어 입힌다(moai-bzm3) — 안에서 띄운 길과 밖에서 띄운 길이 같은 자를 지난다. **보기 설정 뒤에
 /// 부른다**: 둘 다 알림을 세우고, 키 쪽이 그 뒤에 잇는다([`crate::tui::App::adopt_keys`]). 보통 명령은 이 파일을 안 연다.
 fn adopt_keys(app: &mut App) {
-    let file = crate::tui::keymap::path_from(|k| std::env::var_os(k));
-    let (keys, problems) = crate::tui::keymap::load(file.as_deref());
+    let (file, keys, problems) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
     app.adopt_keys(keys, &problems, file.as_deref());
 }
 
