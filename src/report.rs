@@ -9,6 +9,7 @@ use crate::model::{FUTURE_SLACK_SECS, Issue, Kind, days_since};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod gantt;
 pub mod stats;
 
 /// 에픽 하나(또는 "에픽 없음")의 집계. **저장하지 않는다** — 멤버 하나를
@@ -2427,21 +2428,43 @@ pub fn blocks_of<'a>(all: &'a [Issue], cfg: &Config, i: &'a Issue) -> Vec<Block<
     if i.blocked_by.is_empty() {
         return Vec::new();
     }
-    let group = Handing::of(all);
-    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|x| (x.id.as_str(), x)).collect();
-    let (off, states, waits, _) = blocking(all, cfg, &group, &by_id);
-    // 막는 줄은 **id 로** 불린다 — 그쪽 답은 접은 지도의 것이다(moai-u3ta).
-    let roots = fold_roots(all, &off);
-    i.blocked_by
-        .iter()
-        .map(|b| {
-            let issue = by_id.get(b.as_str()).copied();
-            let root = roots.get(b.as_str()).copied();
-            let (waiting, aside) = waits.get(b.as_str()).map_or((Waiting::Live, Vec::new()), |(w, a)| (*w, a.clone()));
-            let blocker = blocker(issue.map(|x| column(x, &states)), root.is_some(), waiting);
-            Block { id: b.as_str(), issue, blocker, root, aside }
-        })
-        .collect()
+    BlockMaps::over(all, cfg).of(i)
+}
+
+/// [`blocks_of`] 가 줄마다 짓던 지도를 **한 번 지어 여러 줄에 묻는다**(moai-xf0p.j1r). 줄 하나를 펼치는 상세는 [`blocks_of`]
+/// 를 부르지만, 줄 전부를 훑는 표면(간트)이 줄마다 그것을 부르면 막힌 줄 수만큼 저장소 전체를 다시 훑는다. 판정은
+/// 여기 하나다 — 어느 쪽으로 불러도 같은 답이다.
+pub struct BlockMaps<'a, 'c> {
+    by_id: BTreeMap<&'a str, &'a Issue>,
+    states: BTreeMap<GroupKey<'a>, &'c str>,
+    waits: Waits<'a>,
+    roots: BTreeMap<&'a str, &'a str>,
+}
+
+impl<'a, 'c> BlockMaps<'a, 'c> {
+    pub fn over(all: &'a [Issue], cfg: &'c Config) -> BlockMaps<'a, 'c> {
+        let group = Handing::of(all);
+        let by_id: BTreeMap<&str, &Issue> = all.iter().map(|x| (x.id.as_str(), x)).collect();
+        let (off, states, waits, _) = blocking(all, cfg, &group, &by_id);
+        // 막는 줄은 **id 로** 불린다 — 그쪽 답은 접은 지도의 것이다(moai-u3ta).
+        let roots = fold_roots(all, &off);
+        BlockMaps { by_id, states, waits, roots }
+    }
+
+    /// 줄 하나가 적은 막음을 **적힌 차례대로** 하나씩 가른다.
+    pub fn of(&self, i: &'a Issue) -> Vec<Block<'a>> {
+        i.blocked_by
+            .iter()
+            .map(|b| {
+                let issue = self.by_id.get(b.as_str()).copied();
+                let root = self.roots.get(b.as_str()).copied();
+                let (waiting, aside) =
+                    self.waits.get(b.as_str()).map_or((Waiting::Live, Vec::new()), |(w, a)| (*w, a.clone()));
+                let blocker = blocker(issue.map(|x| column(x, &self.states)), root.is_some(), waiting);
+                Block { id: b.as_str(), issue, blocker, root, aside }
+            })
+            .collect()
+    }
 }
 
 /// id 로 막는 줄을 찾아 그 서 있는 칸을 댄다. 없으면 `None`.
