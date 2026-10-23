@@ -73,7 +73,7 @@ nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-dec
 .rot-slides { flex: 1 1 auto; min-width: 0; display: grid; }
 .slide { grid-area: 1 / 1; transition: opacity .45s ease, transform .45s ease, visibility 0s linear 0s; }
 .slide[hidden] { display: block; visibility: hidden; opacity: 0; transform: translateY(10px); transition: opacity .3s ease, transform .3s ease, visibility 0s linear .3s; }
-.slide .lede { margin: 26px 0 0; }
+.slide .lede { margin: 26px 0 0; max-width: 760px; line-height: 1.75; }
 .rot-tabs { display: flex; gap: 8px; margin: 34px 0 40px; }
 .rot-tab { position: relative; flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 8px; padding: 12px 0 0; border: 0; background: none; color: var(--faint); font: 500 13px var(--sans); text-align: left; cursor: pointer; }
 .rot-tab:hover { color: var(--muted); }
