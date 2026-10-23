@@ -27,6 +27,7 @@
     })();
   </script>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/vendor/asciinema-player.css">
   <link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
@@ -35,8 +36,7 @@
   <div class="wrap">
     <a class="brand" href="./" aria-label="moai"><img src="assets/logo.svg" alt="moai"></a>
     <div class="links">
-      <a href="#features">Features</a>
-      <a href="#start">Get started</a>
+      <a href="#see">See it</a>
       <a href="https://github.com/buzzni/moai/tree/main/docs">Docs</a>
       <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md">Changelog</a>
     </div>
@@ -96,10 +96,6 @@
     </div>
     <p class="meta">macOS · Linux · Windows · MIT · refuses to install anything it cannot verify against <code>SHA256SUMS</code> · <a href="https://github.com/buzzni/moai#install">other ways to install</a></p>
 
-    <div class="media hero-media">
-      <div><b>A1 · GIF</b><span>One terminal, 20 seconds: <code>moai</code> → <code>moai ready</code> → pick up → <code>moai note</code> → <code>done</code></span></div>
-    </div>
-
     <div class="stats">
       <div><b>3,140</b><span>issues, epics and reviews this repository has run through moai</span></div>
       <div><b>31</b><span>releases, now at v0.23.0</span></div>
@@ -109,28 +105,6 @@
     <p class="asof">Numbers as of 2026-10-23</p>
   </div>
 </header>
-
-<section class="demo">
-  <div class="wrap">
-    <div class="term">
-      <div class="bar"><i></i><i></i><i></i><span>~/work/shop-api</span></div>
-<pre><span class="c">$</span> <span class="b">moai</span>
-Issues 941  · Epics 148       .moai/issues.jsonl
-
-  · todo 36    <span class="a">▸ in_progress 5</span>    <span class="y">? review 0</span>    <span class="g">✓ done 900</span>
-
-<span class="y">! Started at once 5</span> — finishing one at a time goes better
-
-+ Backlog 36 (oldest 4 days)
-    → `moai backlog ls`
-
-Last 7 days   created 41  ·  done 38   piling up +3
-
-Next:  `moai ready` picks what to take</pre>
-    </div>
-    <p class="caption">The first thing you type in a session. The board, the warnings and the last seven days on one screen. However many warnings there are, the exit code is 0. It only fails when the data is broken.</p>
-  </div>
-</section>
 
 <section class="logos" aria-label="Teams using moai">
   <div class="wrap">
@@ -144,114 +118,68 @@ Next:  `moai ready` picks what to take</pre>
   </div>
 </section>
 
-<section class="features" id="features">
+<section class="see" id="see">
   <div class="wrap">
     <div class="sec-head">
-      <h2 class="big">Run as many agents as you like.<br>There is still one list.</h2>
-      <p>A web tracker sits outside the repository, where agents have a hard time reading it, and a Markdown TODO list stops being trusted somewhere around the third session. moai is for the space in between.</p>
+      <h2 class="big">See what you get.</h2>
+      <p>Recorded in a demo repository: Lantern, a notes app with two milestones in flight.</p>
     </div>
 
-    <div class="grid">
-      <article class="card">
+    <article class="scene">
+      <div class="scene-text">
         <div class="n">01</div>
-        <h3>One line, one issue.</h3>
-        <p><code>issues.jsonl</code> is JSON lines sorted by id. Nothing is replayed to work out where things stand: <strong>what the file says is the state.</strong> When two branches touch different issues, the merge driver merges them issue by issue, three-way.</p>
-        <pre class="snippet">moai merge-driver --install   <span class="c"># once per clone</span></pre>
-        <div class="media"><div><b>A6 · screenshot</b><span><code>git diff</code> with a single changed line in <code>issues.jsonl</code></span></div></div>
-      </article>
-
-      <article class="card">
+        <h3>Every view, in one terminal.</h3>
+        <p>The list, a kanban board with a lane per milestone, and the wiki, all on one screen. Whatever sits under the cursor shows its detail beside it.</p>
+        <p class="run"><span class="tag">Terminal</span><code>$ moai tui</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="assets/media/tui-tour.cast" data-cols="150" data-rows="38" role="img" aria-label="moai tui moving from the list to the kanban board and the wiki"></div></div>
+      </div>
+    </article>
+    <article class="scene flip">
+      <div class="scene-text">
         <div class="n">02</div>
-        <h3>It tells you. It does not stop you.</h3>
-        <p>Creating and moving work needs no approval. <code>moai status</code> points out that you started too much at once or that a review has stalled, and refuses nothing.</p>
-        <p>A tool that fails on warnings is a tool agents learn to route around. So the warnings stay on screen.</p>
-        <pre class="snippet">moai defer &lt;id&gt; -m 'next quarter'   <span class="c"># column and kind stay as they were</span>
-moai defer &lt;id&gt; --undo              <span class="c"># the same line comes back</span></pre>
-      </article>
-
-      <article class="card">
+        <h3>Read an issue the way an agent does.</h3>
+        <p>What to do, why, and when it is done. Every commit that names it, and the notes each session left. It is the same page your agents read before they start.</p>
+        <p class="run"><span class="tag">Browser</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="assets/media/web-detail.png" data-src="assets/media/web-detail.webm" aria-label="moai web showing an issue with its description, commits and history"></video></div>
+      </div>
+    </article>
+    <article class="scene">
+      <div class="scene-text">
         <div class="n">03</div>
-        <h3>In a shape agents can read.</h3>
-        <p>Every command takes <code>--json</code>. <code>moai ready --json</code> splits the answer into work you can pick up, work that belongs to someone else, and work on hold. <code>moai init</code> writes the commands and the rules into <code>AGENTS.md</code>, and <code>moai skill install</code> adds skills and hooks.</p>
-        <div class="agents"><span>Claude Code</span><span>Codex</span><span>Antigravity</span></div>
-        <div class="media"><div><b>A7 · screenshot</b><span>A hook refusing to pick up someone else's issue and handing back the exact command (<code>--take</code>)</span></div></div>
-      </article>
-
-      <article class="card">
+        <h3>A wiki that links to the work.</h3>
+        <p>Pages live in the repository, next to the code. Follow a link to the next page, or click an issue id to jump straight to the issue.</p>
+        <p class="run"><span class="tag">Browser</span><code>$ moai web</code></p>
+      </div>
+      <div class="scene-media">
+        <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+          <video class="clip" muted loop playsinline preload="none" poster="assets/media/web-wiki.png" data-src="assets/media/web-wiki.webm" aria-label="moai web wiki: following links between pages and into an issue"></video></div>
+      </div>
+    </article>
+    <article class="scene flip">
+      <div class="scene-text">
         <div class="n">04</div>
-        <h3>Many sessions, one repository.</h3>
-        <p>With <code>--from todo</code>, a move only happens if the column is still the one you saw. The session that arrives late gets a non-zero exit and moves on. moai run inside a worktree writes to the main checkout's tracker, so the tracker never conflicts on merge.</p>
-        <p>To take over someone else's work, ask first, then take it with <code>--take</code>. A note keeps whose it was.</p>
-        <div class="media"><div><b>A2 · GIF</b><span>Two sessions grabbing the same issue at once. One moves it, the other gets a single <code>stale</code> line and backs off</span></div></div>
-      </article>
-
-      <article class="card span">
-        <div>
-          <div class="n">05</div>
-          <h3>In the terminal, or in a browser tab.</h3>
-          <p style="margin-top:14px"><code>moai tui</code> puts the list and the detail on one screen. <code>SPC g b</code> turns it into a kanban with a lane per milestone, and <code>SPC g w</code> opens the wiki under <code>docs/</code>. Keyboard and mouse both work.</p>
-          <p style="margin-top:12px">For teammates who would rather not live in a terminal, <code>moai web</code> serves the same view in a browser tab. It only reads, and never writes the tracker.</p>
-        </div>
-        <div class="media"><div><b>A4 · GIF</b><span><code>moai tui</code> switching from the list to the kanban with <code>SPC g b</code>, milestone lanes in view</span></div></div>
-      </article>
-
-      <article class="card">
-        <div class="n">06</div>
-        <h3>A place for what you are not doing now.</h3>
-        <p>Ideas that come up mid-task go into the backlog. They stay off the board and out of <code>ready</code>, so they do not blur the plan. When the time comes, unfold one into an epic and issues.</p>
-        <pre class="snippet">moai backlog add 'what if the board could fold by epic'
-moai backlog promote &lt;id&gt; --from -</pre>
-      </article>
-
-      <article class="card">
-        <div class="n">07</div>
-        <h3>While a milestone runs, it comes first.</h3>
-        <p>A milestone is running as soon as one of its members is picked up. There is no command to open it. Until it ships, <code>moai ready</code> hands out its work first and only <code>p0</code> from outside. As deadlines get close, <code>moai due apply</code> raises priorities.</p>
-        <div class="media"><div><b>A5 · screenshot</b><span>The <code>moai web</code> board in one browser tab, milestone lanes and cards</span></div></div>
-      </article>
-
-      <article class="card span">
-        <div>
-          <div class="n">08</div>
-          <h3>One supervisor, several workers.</h3>
-          <p style="margin-top:14px">In Claude Code, the session that calls <code>/moai-supervise</code> hands the piled-up backlog to idle sessions one at a time and takes their reports. Inside tmux or cmux it can clear a worker's window, and open a new one once you say yes.</p>
-          <p style="margin-top:12px"><strong>The moai binary never launches an agent.</strong> A person always opens the session.</p>
-        </div>
-        <div class="media"><div><b>A8 · GIF</b><span>Three tmux panes. The supervisor sends work to two workers, and the reports come back</span></div></div>
-      </article>
-    </div>
-  </div>
-</section>
-
-<section class="start" id="start">
-  <div class="wrap">
-    <div class="cols">
-      <div>
-        <h2 class="big">The first five minutes.</h2>
-        <ol>
-          <li><strong><code>moai init</code></strong> creates <code>.moai/</code> and writes how to use it into <code>AGENTS.md</code>.</li>
-          <li>Add an issue, then see what is next with <strong><code>moai ready</code></strong>.</li>
-          <li>Pick it up, leave a note, close it. The next session reads the note with <code>moai show</code>.</li>
-          <li>Working with agents? <strong><code>moai skill install</code></strong> adds the skills and hooks.</li>
-        </ol>
+        <h3>Watch the work move.</h3>
+        <p>An idea lands in the backlog, becomes a task in the milestone, and crosses the board to done. Agents move the cards, and the board redraws itself.</p>
+        <p class="run"><span class="tag">Terminal</span><code>$ moai tui</code></p>
       </div>
-      <div class="term">
-        <div class="bar"><i></i><i></i><i></i><span>first five minutes</span></div>
-<pre><span class="c">$</span> moai init
-<span class="c">$</span> moai add 'the board wraps at 80 columns' -t bug -p 1
-<span class="c">$</span> moai ready
-<span class="c">$</span> moai mv &lt;id&gt; in_progress
-<span class="c">$</span> moai note &lt;id&gt; 'the width comes from view.rs, not the terminal'
-<span class="c">$</span> moai mv &lt;id&gt; done</pre>
+      <div class="scene-media">
+        <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+          <div class="cast" data-cast="assets/media/tui-lifecycle.cast" data-cols="150" data-rows="38" role="img" aria-label="A card created in the backlog moving across the board to done"></div></div>
       </div>
-    </div>
+    </article>
   </div>
 </section>
 
 <section class="cta">
   <div class="wrap">
-    <h2>Start your next session<br>with <code style="color:var(--accent)">moai status</code>.</h2>
-    <p>Installing is one line. Run the same line later and it upgrades what is there.</p>
+    <h2>Give your agents<br>a place to work.</h2>
+    <p>Installing is one line. Then open <code>moai tui</code> in the terminal, or <code>moai web</code> in the browser.</p>
     <div class="install">
       <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
       <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="Copied">Copy</button>
@@ -272,6 +200,7 @@ moai backlog promote &lt;id&gt; --from -</pre>
   </div>
 </footer>
 
+<script src="assets/vendor/asciinema-player.min.js"></script>
 <script src="assets/site.js"></script>
 </body>
 </html>

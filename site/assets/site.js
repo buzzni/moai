@@ -44,3 +44,38 @@ document.querySelectorAll('.lang a[data-lang]').forEach(function (a) {
     });
   });
 })();
+
+// 장면 녹화. 화면에 들어올 때 처음 불러 틀고, 나가면 멈춘다 — 첫 화면을 여는 데 녹화 몇 MB 를 기다리게
+// 하지 않으려는 것이다. 움직임을 줄인 환경에서는 저절로 틀지 않고 재생 단추만 둔다.
+(function () {
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var casts = Array.prototype.slice.call(document.querySelectorAll('.cast[data-cast]'));
+  var clips = Array.prototype.slice.call(document.querySelectorAll('video.clip[data-src]'));
+  function cast(el) {
+    if (!el._player && window.AsciinemaPlayer) {
+      el._player = AsciinemaPlayer.create(el.dataset.cast, el, {
+        cols: Number(el.dataset.cols), rows: Number(el.dataset.rows), fit: 'width', loop: true,
+        autoPlay: !reduce, controls: reduce, idleTimeLimit: 2, poster: 'npt:0:6', theme: 'moai',
+        terminalFontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace'
+      });
+      return null;
+    }
+    return el._player || null;
+  }
+  function clip(v) {
+    if (!v.getAttribute('src')) v.src = v.dataset.src;
+    if (reduce) { v.controls = true; return; }
+    var p = v.play(); if (p && p.catch) p.catch(function () {});
+  }
+  if (!('IntersectionObserver' in window)) { casts.forEach(cast); clips.forEach(clip); return; }
+  var seen = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      var el = e.target;
+      if (el.tagName === 'VIDEO') { if (e.isIntersecting) clip(el); else el.pause(); return; }
+      var player = cast(el);
+      if (!player || reduce) return;
+      if (e.isIntersecting) player.play(); else player.pause();
+    });
+  }, { threshold: 0.35 });
+  casts.concat(clips).forEach(function (el) { seen.observe(el); });
+})();
