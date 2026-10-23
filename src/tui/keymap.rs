@@ -180,6 +180,104 @@ fn shown(want: &str, keys: &Keymap) -> Option<(String, String)> {
     }
 }
 
+impl Why {
+    /// `--json` 의 낱말(`moai keys`). 사람의 말은 [`Problem::said`] 다.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Why::Unreadable(_) => "unreadable",
+            Why::Syntax(_) => "syntax",
+            Why::UnknownSection => "unknown_section",
+            Why::NotATable => "not_a_table",
+            Why::UnknownAction => "unknown_action",
+            Why::NotKeys => "not_keys",
+            Why::BadKey(_) => "bad_key",
+            Why::OneKey(_) => "one_key",
+            Why::Clash { .. } => "clash",
+        }
+    }
+}
+
+/// 바꿀 수 있는 동작 하나와 그 키 — `moai keys` 의 한 줄(moai-so7w).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Listed {
+    /// 파일의 절(`browse`·`moves`·…).
+    pub section: &'static str,
+    /// 그 절의 이름(`quit`).
+    pub action: String,
+    /// 지금 도는 키 열들, 표의 차례로 — 첫째가 바·메뉴의 이름이다. 뗐으면 빈다.
+    pub keys: Vec<String>,
+    /// 기본 키 열들.
+    pub default: Vec<String>,
+}
+
+impl Listed {
+    /// 파일이 바꾼 동작인가.
+    pub fn changed(&self) -> bool {
+        self.keys != self.default
+    }
+}
+
+/// 바꿀 수 있는 동작 모두와 그 키 — 절의 차례(파일의 차례)로, 절 안은 표의 차례로. 이동(`moves`)은 탐색의 표에서 읽는다
+/// (다섯 표가 같은 키다).
+pub fn listing(keys: &Keymap) -> Vec<Listed> {
+    fn of<A: Named>(out: &mut Vec<Listed>, section: Section, now: &[Bind<A>], default: &[Bind<A>], moves: bool) {
+        let mut seen: Vec<A> = Vec::new();
+        for b in default {
+            let action = match (b.act.name(), moves) {
+                (Name::Own(n), false) => n,
+                (Name::Move(m), true) => move_name(m).to_string(),
+                _ => continue,
+            };
+            if seen.contains(&b.act) {
+                continue;
+            }
+            seen.push(b.act);
+            let names =
+                |t: &[Bind<A>]| t.iter().filter(|x| x.act == b.act).map(|x| name_of_seq(x.seq)).collect::<Vec<_>>();
+            out.push(Listed { section: section.name(), action, keys: names(now), default: names(default) });
+        }
+    }
+    let mut out = Vec::new();
+    for section in Section::ALL {
+        match section {
+            Section::Browse => of(&mut out, section, keys.browse, BROWSE, false),
+            Section::Moves => of(&mut out, section, keys.browse, BROWSE, true),
+            Section::Menu => of(&mut out, section, keys.menu, MENU, false),
+            Section::Sorter => of(&mut out, section, keys.sorter, SORTER, false),
+            Section::Picker => of(&mut out, section, keys.pick, PICK, false),
+            Section::Stats => of(&mut out, section, keys.stats, STATS, false),
+            Section::Wiki => of(&mut out, section, keys.wiki, WIKI, false),
+            Section::Links => of(&mut out, section, keys.links, LINKS, false),
+            Section::Confirm => of(&mut out, section, keys.confirm, CONFIRM, false),
+        }
+    }
+    out
+}
+
+/// 키 파일의 빈 틀(`moai keys --template`) — 절과 동작을 모두 기본 키와 함께 **주석으로** 적는다. 주석을 풀면 그 줄이
+/// 산다. 도구는 이 파일을 쓰지 않는다: 사람이 표준 출력을 받아 둔다.
+pub fn template() -> String {
+    let value = |keys: &[String]| match keys {
+        [one] => toml_edit::Value::from(one.as_str()).to_string(),
+        many => toml_edit::Value::Array(many.iter().map(String::as_str).collect()).to_string(),
+    };
+    let mut out = String::from(
+        "# moai keys.toml — the explorer's keys (moai tui). Write only the lines you change.\n\
+         # A line takes every key of that action, hidden ones too; the first is the name the bar,\n\
+         # the menu and `moai tui --help` show. \"none\" or [] unbinds it.\n\
+         # Not here, so not changeable: Ctrl-C, the digits 0-9, SPC v 1-9, SPC itself, keys in text fields.\n",
+    );
+    let mut section = "";
+    for l in listing(&Keymap::default()) {
+        if l.section != section {
+            section = l.section;
+            out.push_str(&format!("\n[{section}]\n"));
+        }
+        out.push_str(&format!("# {} = {}\n", l.action, value(&l.default)));
+    }
+    out
+}
+
 /// 파일의 절. 이동(`moves`)은 표가 아니라 다섯 표가 함께 쓰는 줄이다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
@@ -1328,6 +1426,43 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// **빈 틀의 주석을 다 풀면 기본 표 그대로다**(moai-so7w) — 틀이 적은 이름과 철자가 이 파일이 읽는 것과 한 자다.
+    /// 틀은 바꿀 수 있는 동작을 하나도 안 빠뜨린다.
+    #[test]
+    fn the_template_uncommented_is_the_defaults() {
+        let t = template();
+        let open: String = t
+            .lines()
+            .map(|l| if l.starts_with("# ") && l.contains(" = ") { &l[2..] } else { l })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (map, problems) = build(&open);
+        assert_eq!(problems, Vec::new());
+        assert_eq!(listing(&map), listing(&Keymap::default()));
+        assert_eq!(open.matches(" = ").count(), 99, "틀이 동작을 빠뜨렸다");
+        // 주석 그대로면 아무것도 안 바뀐다.
+        assert_eq!(build(&t), (Keymap::default(), Vec::new()));
+    }
+
+    /// 목록은 바꾼 동작을 가른다 — 뗀 동작은 키가 빈다.
+    #[test]
+    fn the_listing_marks_what_the_file_changed() {
+        let (map, _) = build("[browse]\nquit = \"SPC x\"\njot = \"none\"\n[moves]\nline_down = \"n\"\n");
+        let changed: Vec<(String, Vec<String>)> = listing(&map)
+            .into_iter()
+            .filter(|l| l.changed())
+            .map(|l| (format!("{}.{}", l.section, l.action), l.keys))
+            .collect();
+        assert_eq!(
+            changed,
+            [
+                ("browse.jot".to_string(), vec![]),
+                ("browse.quit".to_string(), vec!["SPC x".to_string()]),
+                ("moves.line_down".to_string(), vec!["n".to_string()]),
+            ]
+        );
     }
 
     /// 없는 파일은 알릴 것이 없다 — 기본 표다.

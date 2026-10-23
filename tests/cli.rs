@@ -8750,6 +8750,8 @@ const JSON_SWEEP: &[&str] = &[
     // 자리(`target/`)에 서서 거절되므로, 그 밖에 걸어 둔 한 벌([`hoisted`])로 부른다.
     "update",
     "models",
+    // 사람의 키 파일을 읽기만 한다(moai-so7w). 시험의 격리는 없는 파일을 가리켜 기본 표다.
+    "keys",
     // 기한이 우선순위를 올린다(moai-dr8a.1q4). 훑는 판에는 기한 든 줄이 없어 아무것도 안 쓴다.
     "due",
 ];
@@ -9317,6 +9319,8 @@ fn every_command_still_speaks_json() {
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
         vec!["models", "--json"],
+        vec!["keys", "--json"],
+        vec!["keys", "--template", "--json"],
         vec!["config", "--json"],
         vec!["due", "apply", "--dry-run", "--json"],
         vec!["due", "apply", "--json"],
@@ -24892,6 +24896,38 @@ fn a_broken_key_file_does_not_touch_ordinary_commands() {
     assert!(broken.status.success(), "{}", String::from_utf8_lossy(&broken.stderr));
     assert_eq!(broken.stdout, clean.stdout);
     assert_eq!(broken.stderr, clean.stderr);
+}
+
+/// **`moai keys` 는 지금 도는 키와 바꾼 줄을 댄다**(moai-so7w) — 바꾼 줄은 `*` 와 옛 키를 달고, 버린 줄은 stderr 에
+/// 서며 종료는 0 이다. 트래커 밖에서도 선다.
+#[test]
+fn moai_keys_lists_what_the_file_changed() {
+    let s = Scratch::new("keys-list");
+    let keys = s.path().join("keys.toml");
+    std::fs::write(&keys, "[browse]\nquit = \"SPC x\"\ngrep = \"r\"\n").unwrap();
+    let out = staged(&["keys"]).current_dir(s.path()).env("MOAI_KEYS", &keys).env("MOAI_LANG", "en").output().unwrap();
+    assert!(out.status.success());
+    let shown = String::from_utf8_lossy(&out.stdout);
+    let quit = shown.lines().find(|l| l.contains("quit")).unwrap_or_default();
+    assert!(quit.starts_with("* quit") && quit.contains("SPC x") && quit.ends_with("was SPC q"), "{quit}");
+    let grep = shown.lines().find(|l| l.trim_start().starts_with("grep")).unwrap_or_default();
+    assert!(grep.starts_with("  grep") && grep.contains("/ · SPC /"), "버린 줄이 기본 키로 안 남았다: {grep}");
+    let told = String::from_utf8_lossy(&out.stderr);
+    assert!(told.contains("keys.toml:3 browse.grep: `r` clashes with browse.read"), "{told}");
+    let json = ok_keys(s.path(), &keys);
+    assert!(json.contains(r#""kind":"clash""#) && json.contains(r#""found":true"#), "{json}");
+    // 틀은 표준 출력으로만 — 파일을 안 쓴다.
+    let before = std::fs::read_to_string(&keys).unwrap();
+    let t = staged(&["keys", "--template"]).current_dir(s.path()).env("MOAI_KEYS", &keys).output().unwrap();
+    assert!(String::from_utf8_lossy(&t.stdout).contains("# quit = \"SPC q\""));
+    assert_eq!(std::fs::read_to_string(&keys).unwrap(), before);
+}
+
+fn ok_keys(dir: &Path, keys: &Path) -> String {
+    let out =
+        staged(&["keys", "--json"]).current_dir(dir).env("MOAI_KEYS", keys).env("MOAI_LANG", "en").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
 }
 
 #[test]

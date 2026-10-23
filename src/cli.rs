@@ -1023,6 +1023,40 @@ Examples:
   This command only reads; edit the user config by hand to change the table.")]
     Models,
 
+    /// Show the explorer's keys and what your keys.toml changed
+    #[command(after_help = "  moai keys               every key the explorer runs on, changed ones marked
+  moai keys --template    a keys.toml with every action, commented out
+  moai keys --json        one object: the file, the dropped lines, every action
+
+  The keys of `moai tui` live in their own file next to your user config:
+  MOAI_KEYS, else keys.toml beside the config (MOAI_CONFIG, then
+  $XDG_CONFIG_HOME/moai/config.toml, then ~/.config/moai/config.toml). It is
+  read once when the explorer starts, when help is printed and by this
+  command; no other command opens it.
+
+    [browse]
+    quit = \"SPC x\"            one key sequence
+    grep = [\"/\", \"SPC /\"]     several: the first is the name shown
+    jot  = \"none\"             unbind it; [] does the same
+    [moves]
+    line_down = \"n\"           j, k, gg and the rest move every window at once
+
+  Write only what you change. A line replaces every key of that action, the
+  hidden ones too (the arrows) — list them again to keep them. Key names are
+  spelt as the explorer shows them: SPC, Enter, Esc, Tab, Shift-Tab, Bksp, Up,
+  Down, Home, End, PgUp, PgDn, F1, Ctrl-x, Alt-x, a capital letter for Shift;
+  a sequence is names apart by spaces (SPC v d), or a doubled letter (gg).
+  A line that is wrong is dropped alone and that action keeps its default:
+  an unknown section or action, a name that is not a key, or a key that
+  clashes with another or waits for a longer one. The explorer says so in one
+  line and still opens; this command lists them on stderr and exits 0. A file
+  that is not TOML is dropped whole. Ctrl-C, the digits 0-9, SPC v 1-9, SPC
+  itself and keys inside text fields cannot be changed.
+
+  --template prints a starter file; save it yourself, nothing is written:
+    moai keys --template > ~/.config/moai/keys.toml")]
+    Keys(KeysArgs),
+
     // **받고 돌리는 길은 `cmd::update`, 고르는 길은 `update` 다**(moai-zsfr.2p9). 저장소의 `.moai` 를 안
     // 찾는다 — 올리는 것은 이 바이너리지 트래커가 아니다.
     /// Upgrade the moai you are running with install.sh
@@ -1711,6 +1745,14 @@ const STATS_HELP: &str = "  Counts the rows the filters pick - the same filters 
                           \"lines\":31}],
              \"by_grade\":[{\"grade\":\"high\",\"lines\":12,...},...]},
      \"reviews\":{\"rows\":6,\"work\":{...the same keys as work...}}}";
+
+/// `moai keys` 가 받는 것(moai-so7w).
+#[derive(Args, Debug)]
+pub struct KeysArgs {
+    /// Print a starter keys.toml (nothing is written)
+    #[arg(long)]
+    pub template: bool,
+}
 
 /// `moai stats` 가 받는 것(moai-1hka.k16). **거르개는 `show` 의 것을 그대로 받는다**(`FilterArgs`) — 차례와 쪽
 /// (`PageArgs`)·겹쳐 보기(`WorktreeArg`)는 안 받는다: 세는 자리에 세울 차례도 자를 목록도 없고, 겹쳐 본 줄을

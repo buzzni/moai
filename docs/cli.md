@@ -50,6 +50,7 @@ Commands:
   due           Raise priorities a deadline has caught up with
   config        Read this repository's settings, defaults filled in
   models        Read the model per role from your user config
+  keys          Show the explorer's keys and what your keys.toml changed
   update        Upgrade the moai you are running with install.sh
   init          Put a .moai/ into this repository (safe to run again)
   help          Print this message or the help of the given subcommand(s)
@@ -3468,6 +3469,55 @@ Options:
   low, medium, high, xhigh or max. Invalid values fall back per key and warn;
   unknown keys warn. written lists only valid, known keys from the config.
   This command only reads; edit the user config by hand to change the table.
+```
+
+## `moai keys`
+
+```
+Show the explorer's keys and what your keys.toml changed
+
+Usage: moai keys [OPTIONS]
+
+Options:
+      --template             Print a starter keys.toml (nothing is written)
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+  moai keys               every key the explorer runs on, changed ones marked
+  moai keys --template    a keys.toml with every action, commented out
+  moai keys --json        one object: the file, the dropped lines, every action
+
+  The keys of `moai tui` live in their own file next to your user config:
+  MOAI_KEYS, else keys.toml beside the config (MOAI_CONFIG, then
+  $XDG_CONFIG_HOME/moai/config.toml, then ~/.config/moai/config.toml). It is
+  read once when the explorer starts, when help is printed and by this
+  command; no other command opens it.
+
+    [browse]
+    quit = "SPC x"            one key sequence
+    grep = ["/", "SPC /"]     several: the first is the name shown
+    jot  = "none"             unbind it; [] does the same
+    [moves]
+    line_down = "n"           j, k, gg and the rest move every window at once
+
+  Write only what you change. A line replaces every key of that action, the
+  hidden ones too (the arrows) — list them again to keep them. Key names are
+  spelt as the explorer shows them: SPC, Enter, Esc, Tab, Shift-Tab, Bksp, Up,
+  Down, Home, End, PgUp, PgDn, F1, Ctrl-x, Alt-x, a capital letter for Shift;
+  a sequence is names apart by spaces (SPC v d), or a doubled letter (gg).
+  A line that is wrong is dropped alone and that action keeps its default:
+  an unknown section or action, a name that is not a key, or a key that
+  clashes with another or waits for a longer one. The explorer says so in one
+  line and still opens; this command lists them on stderr and exits 0. A file
+  that is not TOML is dropped whole. Ctrl-C, the digits 0-9, SPC v 1-9, SPC
+  itself and keys inside text fields cannot be changed.
+
+  --template prints a starter file; save it yourself, nothing is written:
+    moai keys --template > ~/.config/moai/keys.toml
 ```
 
 ## `moai update`

@@ -12,6 +12,7 @@ pub mod due;
 pub mod edit;
 pub mod hook;
 pub mod init;
+pub mod keys;
 pub mod link;
 pub mod merge_driver;
 pub mod models;
@@ -640,6 +641,8 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Project(ProjectCmd::Add { path }) => project::add(ctx, &path),
         Cmd::Project(ProjectCmd::Ls) => project::ls(ctx),
         Cmd::Models => models::run(ctx),
+        // 사람의 키 파일을 읽기만 한다(moai-so7w) — 트래커를 안 찾는다.
+        Cmd::Keys(a) => keys::run(ctx, a),
         Cmd::Config => config::run(ctx),
         Cmd::Project(ProjectCmd::Rm { path }) => project::rm(ctx, &path),
         Cmd::Project(ProjectCmd::Color { path, hue }) => project::color(ctx, &path, &hue),
