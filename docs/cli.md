@@ -286,7 +286,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -500,9 +500,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -793,7 +794,7 @@ Options:
       --milestone <id|none>  Move the milestone (`none` clears its own field)
   -p, --priority <0-3>       
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
-      --start <date|none>    Start of a milestone. `none` clears it
+      --start <date|none>    Start, a day or `+N` days. `none` clears it
       --due <date|none>      Deadline, a day or `+N` days. `none` clears it
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1118,7 +1119,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1297,9 +1298,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1422,7 +1424,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1601,9 +1603,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1726,7 +1729,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1905,9 +1908,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2051,7 +2055,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -2230,9 +2234,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~

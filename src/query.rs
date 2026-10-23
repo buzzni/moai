@@ -424,6 +424,8 @@ pub struct Filter {
     /// 줄은 어느 폭에도 안 든다. 때로 묻는 폭([`Filter::times`])이 아니다: 그사이 바뀐 것을 묻는 말이 아니라
     /// 숨김을 안 연다.
     pub due: Vec<Vec<DaySpan>>,
+    /// 줄 자신의 `starts_on` 이 든 날의 폭(`starts_on=`, moai-xf0p.6d5) — [`Filter::due`] 와 같은 꼴·같은 규칙이다.
+    pub starts: Vec<Vec<DaySpan>>,
 }
 
 /// 달력 날의 폭 — 양 끝을 든다(`2026-10-01~2026-10-05` 는 닷새). 한쪽이 없으면 그쪽으로 열렸다.
@@ -431,6 +433,18 @@ pub struct Filter {
 pub struct DaySpan {
     pub from: Option<String>,
     pub to: Option<String>,
+}
+
+/// `due_on=`·`starts_on=` 의 날것을 폭으로 — **빈 값은 거절한다**(리뷰) — [`spans`] 와 같은 까닭이다. 빈 `또는`
+/// 묶음은 어느 줄에도 안 맞아, `--filter "due_on=$DUE"` 의 빈 변수가 말없이 0건이 되고 받는 쪽은 "기한 든
+/// 일이 없다" 로 읽는다.
+fn day_spans(raw: &[String]) -> Result<Vec<Vec<DaySpan>>, BadFilter> {
+    raw.iter()
+        .map(|v| match csv(v).as_slice() {
+            [] => Err(BadFilter::NotADay(v.clone())),
+            days => days.iter().map(|d| DaySpan::parse(d)).collect::<Result<Vec<_>, _>>(),
+        })
+        .collect()
 }
 
 impl DaySpan {
@@ -484,7 +498,7 @@ pub enum BadFilter {
     Backwards(String),
     /// 때로 못 읽는 값.
     NotATime(String),
-    /// 달력의 날로 못 읽는 값(`due_on=`).
+    /// 달력의 날로 못 읽는 값(`due_on=`·`starts_on=`).
     NotADay(String),
     /// 때가 하나도 없는 값(`--since ''`·`--created ,`).
     NoTime,
@@ -609,6 +623,7 @@ pub const KEYS: &[&str] = &[
     "started_at",
     "done_at",
     "due_on",
+    "starts_on",
 ];
 
 /// 플래그에서 온 날것. `cmd` 가 argv 를 그대로 옮겨 담아 넘긴다.
@@ -641,6 +656,8 @@ pub struct Raw {
     pub done_at: Vec<String>,
     /// `--filter due_on=` 의 날것(moai-ghkp.7uy).
     pub due_on: Vec<String>,
+    /// `--filter starts_on=` 의 날것(moai-xf0p.6d5).
+    pub starts_on: Vec<String>,
     pub all: bool,
     /// `--archived` — 아카이브까지 연다. done 도 연다(`all` 을 품는다).
     pub archived: bool,
@@ -733,14 +750,8 @@ impl Filter {
             deferred,
             // **빈 값은 거절한다**(리뷰) — [`spans`] 와 같은 까닭이다. 빈 `또는` 묶음은 어느 줄에도 안 맞아,
             // `--filter "due_on=$DUE"` 의 빈 변수가 말없이 0건이 되고 받는 쪽은 "기한 든 일이 없다" 로 읽는다.
-            due: raw
-                .due_on
-                .iter()
-                .map(|v| match csv(v).as_slice() {
-                    [] => Err(BadFilter::NotADay(v.clone())),
-                    days => days.iter().map(|d| DaySpan::parse(d)).collect::<Result<Vec<_>, _>>(),
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+            due: day_spans(&raw.due_on)?,
+            starts: day_spans(&raw.starts_on)?,
         };
         // **시간으로 물으면 숨김을 다 연다**(moai-efoc.ip5, 2026-09-30 사용자 결정) — done·미룸·생각·아카이브까지.
         // 그 물음은 "그사이 무엇이 바뀌었나" 이고 그사이 닫힌 줄도 바뀐 줄이다. 기본 숨김을 그대로 두면
@@ -787,6 +798,7 @@ impl Filter {
             deferred: _,
             backlog: _,
             due: _,
+            starts: _,
         } = self;
         [updated, created, done, started, done_at]
     }
@@ -944,6 +956,12 @@ impl Filter {
         // 없는 것이다([`Issue::deadline`]) — `*_at=` 이 못 읽는 시각을 어느 폭에도 안 넣는 것과 같은 결이다.
         if !self.due.is_empty()
             && !i.deadline().is_some_and(|d| self.due.iter().all(|any| any.iter().any(|s| s.holds(d))))
+        {
+            return false;
+        }
+        // 계획 시작일도 같은 자로 견준다(moai-xf0p.6d5) — `Issue::deadline` 이 기한에 하는 일을 `planned_start` 가 한다.
+        if !self.starts.is_empty()
+            && !i.planned_start().is_some_and(|d| self.starts.iter().all(|any| any.iter().any(|s| s.holds(d))))
         {
             return false;
         }
@@ -1205,6 +1223,7 @@ pub fn desugar(raw: &mut Raw, text: &str) -> Result<(), BadFilter> {
             "started_at" => raw.started_at.push(v),
             "done_at" => raw.done_at.push(v),
             "due_on" => raw.due_on.push(v),
+            "starts_on" => raw.starts_on.push(v),
             _ => return Err(BadFilter::NoSuchKey(k.to_string())),
         }
     }

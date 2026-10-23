@@ -493,6 +493,7 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
     // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]).
     let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &at));
+    let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &at));
 
     // 만든 줄과, 그것이 묶음이면 **멤버에서 읽은 칸.** 에픽을 먼저 만들고 멤버를
     // 나중에 다는 순서가 흔하지만 그 반대도 있다 — 이미 멤버가 있는 에픽을 뒤늦게
@@ -525,9 +526,9 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
             // 기한 둘(moai-tfcp) — 만들 때 바로 준다. 안 주면 `milestone add` 뒤에 `edit` 를
             // 한 번 더 쳐야 하고, 그 사이의 줄은 기한 없는 마일스톤으로 한 번 커밋된다.
             // `none` 은 여기서 뜻이 없다(새 줄에 비울 것이 없다) — 빈 값은 `normalize` 가
-            // 지우고, 꼴·차례·종류(시작 기한은 마일스톤 줄에만)·위계(종료 기한은 조상을 못 넘는다)는 락 안에서
+            // 지우고, 꼴·차례·위계(종료 기한은 조상을 못 넘는다)는 락 안에서
             // `Repo::write_locked` 가 거절한다(`store::admit` 은 검사를 안 한다, moai-yve0).
-            issue.starts_on = args.start.clone();
+            issue.starts_on = start.clone();
             issue.due_on = due.clone();
             (issue.assignee, issue.assignee_email) = assignee_of(args.assignee.as_deref(), &by);
             issue.body = body.clone();

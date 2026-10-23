@@ -153,8 +153,8 @@ closing by itself.
 
 ## Milestone
 
-A [group](#group) that is usually a release, and the one row that carries a start
-date (`--start`) as well as a [deadline](#deadline). A milestone's deadline that has
+A [group](#group) that is usually a release. Like any row it carries a start
+date (`--start`) and a [deadline](#deadline). A milestone's deadline that has
 passed or falls due soon is one [warning](#warning) line, nothing more. See [running milestone](#running-milestone).
 
 ## Milestone branch

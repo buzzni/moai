@@ -160,6 +160,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     let at = model::now();
     // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]).
     let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &at));
+    let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &at));
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // `cmd/mv.rs` 가 `model::actor` 를 밖으로 뺀 것과 같은 자다.
@@ -211,7 +212,7 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             }
             // 기한 둘(moai-tfcp). **`none` 은 비우는 것이다** — 소속·담당과 같은 낱말을 쓴다.
             // 꼴과 종류와 앞뒤 차례는 아래 `validate_keeping` 이 한자리에서 거절한다.
-            if let Some(d) = &args.start {
+            if let Some(d) = &start {
                 i.starts_on = super::clearable(d);
             }
             if let Some(d) = &due {

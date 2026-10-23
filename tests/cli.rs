@@ -7889,9 +7889,9 @@ fn a_single_add_says_an_epic_that_is_not_there() {
     let row = String::from_utf8(out.stdout).unwrap();
     assert!(row.trim_start().starts_with('{') && row.contains(r#""epic":"argos-zzzz""#), "{row}");
 
-    // 거절된 쓰기는 알리지 않는다 — 시작 기한은 마일스톤 줄에만 서므로 이 쓰기는 락 안에서 물린다.
-    let out = moai(s.path(), &["add", "거절될 줄", "-e", "argos-zzzz", "--start", "2026-10-10"]);
-    assert!(!out.status.success(), "시작 기한을 든 이슈가 받아들여졌다\n{}", text(&out));
+    // 거절된 쓰기는 알리지 않는다 — 꼴이 틀린 시작 기한은 락 안에서 물린다.
+    let out = moai(s.path(), &["add", "거절될 줄", "-e", "argos-zzzz", "--start", "2026-10-1"]);
+    assert!(!out.status.success(), "꼴이 틀린 시작 기한을 든 이슈가 받아들여졌다\n{}", text(&out));
     assert!(!said(&out, "argos-zzzz"), "거절된 쓰기가 알림을 먼저 냈다\n{}", text(&out));
 
     // 에픽이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_epic` 과 같다.
@@ -10387,24 +10387,66 @@ fn a_milestone_carries_a_start_and_a_deadline() {
     assert!(!ok(s.path(), &["show", &m]).contains("기한"), "빈 기한이 줄을 세웠다");
 }
 
-/// **시작 기한은 마일스톤 줄에만 선다.** 다른 종류에 적힌 값은 어느 화면도 안 읽으므로, 조용히
-/// 받으면 적은 사람은 걸린 줄 안다 — 거절문이 비우는 명령을 그대로 낸다. **종료 기한은 모든 줄에
-/// 선다**(moai-ghkp.kz7) — 그쪽은 `a_deadline_stands_on_every_kind_of_row` 가 잰다.
+/// **시작 기한도 모든 줄에 선다**(moai-xf0p.6d5, 종료 기한은 moai-ghkp.kz7) — 이슈·에픽·backlog 가
+/// `--start` 를 받고, `+N` 은 오늘에서 N 일 뒤의 날짜로 적힌다. 종료보다 늦은 시작은 여전히 거절한다.
 #[test]
-fn a_start_date_stands_on_a_milestone_row_only() {
+fn a_start_date_stands_on_every_kind_of_row() {
     let s = init("duekind");
-    let made = moai(s.path(), &["add", "그냥 이슈", "--start", "2026-09-20"]);
-    assert!(!made.status.success(), "이슈에 시작 기한을 받았다");
-    let said = String::from_utf8_lossy(&made.stderr).to_string();
-    assert!(said.contains("--start"), "어느 옵션이 틀렸는지를 안 댄다 — {said}");
-    // **만들다 걸린 줄에는 고칠 id 가 없다**(moai-1rkl, 리뷰) — 거절이 쓰기를 통째로 물리므로
-    // 방금 뽑은 id 는 어디에도 안 남는다. 그 id 를 그대로 내밀면 따라 친 쪽이 "없는 이슈" 를 본다.
-    assert!(said.contains("빼고"), "만들 때 무엇을 해야 하는지를 안 댄다 — {said}");
-    assert_eq!(issues(s.path()).trim(), "", "거절한 줄이 파일에 남았다");
+    let i = add(s.path(), &["그냥 이슈", "--start", "2026-09-20"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--start", "2026-09-21", "--due", "2026-09-30"]);
+    let b = ok(s.path(), &["backlog", "add", "생각", "--start", "2026-09-22", "-q"]).trim().to_string();
+    for (id, day) in [(&i, "2026-09-20"), (&e, "2026-09-21"), (&b, "2026-09-22")] {
+        assert!(line_of(s.path(), id).contains(&format!(r#""starts_on":"{day}""#)), "{id}: 시작이 안 적혔다");
+        let shown = ok(s.path(), &["show", id]);
+        assert!(shown.contains(day), "{id}: 상세에 시작이 안 섰다\n{shown}");
+    }
+    // 시작과 기한이 다 선 줄은 `시작 → 기한` 으로 그린다.
+    assert!(ok(s.path(), &["show", &e]).contains("2026-09-21 → 2026-09-30"));
 
-    // 이미 선 줄도 같다. 에픽도 마일스톤이 아니다.
-    let e = add(s.path(), &["에픽", "--type", "epic"]);
-    assert!(!moai(s.path(), &["edit", &e, "--start", "2026-09-05"]).status.success(), "에픽에 기한을 받았다");
+    // 고치기도 비우기도 된다.
+    ok(s.path(), &["edit", &i, "--start", "2026-09-19"]);
+    assert!(line_of(s.path(), &i).contains(r#""starts_on":"2026-09-19""#));
+    ok(s.path(), &["edit", &i, "--start", "none"]);
+    assert!(!line_of(s.path(), &i).contains("starts_on"), "비운 시작이 남았다");
+
+    // 시작이 기한보다 뒤인 줄은 어느 종류든 거절한다.
+    let late = moai(s.path(), &["edit", &e, "--start", "2026-10-05"]);
+    assert!(!late.status.success(), "기한 뒤의 시작을 받았다");
+}
+
+/// **`--start +N` 은 날짜로 적힌다**(moai-xf0p.6d5) — `--due +N` 과 같은 길(`cmd::due_arg`)이다. 상대값을 그대로
+/// 두면 읽을 때마다 다른 날을 가리킨다. 시계는 `MOAI_NOW` 로 박힌다(`init` 의 환경).
+#[test]
+fn a_relative_start_is_stored_as_the_day_it_lands_on() {
+    let s = init("duerel");
+    let i = add(s.path(), &["상대 시작", "--start", "+3"]);
+    let line = line_of(s.path(), &i);
+    assert!(!line.contains("+3"), "상대값이 그대로 적혔다 — {line}");
+    let day = ok(s.path(), &["show", &i, "--json"]);
+    assert!(day.contains(r#""starts_on":"2026-09-14""#), "오늘(09-11) + 3 일이 아니다\n{day}");
+    ok(s.path(), &["edit", &i, "--start", "+1"]);
+    assert!(line_of(s.path(), &i).contains(r#""starts_on":"2026-09-12""#));
+    // 틀린 꼴은 거절문이 돌려받는다.
+    assert!(!moai(s.path(), &["edit", &i, "--start", "+x"]).status.success());
+}
+
+/// `--filter starts_on=` 는 `due_on=` 과 같은 꼴·같은 규칙이다(moai-xf0p.6d5) — 달력의 날 폭, 시작 없는 줄은
+/// 어느 폭에도 안 든다.
+#[test]
+fn the_start_filter_reads_calendar_days() {
+    let s = init("duefilter");
+    let a = add(s.path(), &["가", "--start", "2026-09-10"]);
+    let b = add(s.path(), &["나", "--start", "2026-09-20"]);
+    let _none = add(s.path(), &["다"]);
+    let ids = |f: &str| -> Vec<String> {
+        let out = ok(s.path(), &["show", "--filter", f, "--json"]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        v.as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(ids("starts_on=2026-09-01~2026-09-15"), vec![a.clone()]);
+    assert_eq!(ids("starts_on=2026-09-16~"), vec![b.clone()]);
+    assert_eq!(ids("starts_on=2026-09-10"), vec![a.clone()]);
+    assert!(!moai(s.path(), &["show", "--filter", "starts_on=어제"]).status.success());
 }
 
 /// **손으로 푼 줄 하나가 그 줄을 도구 밖으로 내몰지 않는다.** 꼴이 틀린 기한은 이번 쓰기가
@@ -10428,8 +10470,8 @@ fn a_row_that_picked_up_a_broken_deadline_is_told_how_to_clear_it() {
 }
 
 /// **종료 기한은 모든 줄에 선다**(moai-ghkp.kz7, 2026-10-16 사용자 결정) — 이슈·에픽·backlog 가
-/// `--due` 를 받고, 상세가 그 날을 그린다. **시작 기한은 마일스톤 줄의 것이다**(moai-x04r.fn4) —
-/// 쓰기가 거절하는 값이라 손으로 푼 충돌이 남겨도 상세는 그리지 않는다. 적힌 값은 지우지 않는다.
+/// `--due` 를 받고, 상세가 그 날을 그린다. 시작 기한도 모든 줄에 선다 — 그쪽은
+/// `a_start_date_stands_on_every_kind_of_row` 가 잰다.
 #[test]
 fn a_deadline_stands_on_every_kind_of_row() {
     let s = init("duekinds");
@@ -10448,14 +10490,6 @@ fn a_deadline_stands_on_every_kind_of_row() {
     ok(s.path(), &["edit", &i, "--due", "none"]);
     assert!(!line_of(s.path(), &i).contains("due_on"), "비운 기한이 남았다");
 
-    // 손으로 끼운 시작 기한은 상세가 그리지 않는다. 적힌 값은 `--json` 에 그대로 선다.
-    let line = line_of(s.path(), &e).replace(r#""status":"#, r#""starts_on":"2026-09-05","status":"#);
-    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&line_of(s.path(), &e), &line))
-        .unwrap();
-    let shown = ok(s.path(), &["show", &e]);
-    assert!(!shown.contains("2026-09-05"), "마일스톤 아닌 줄의 상세에 시작 기한이 섰다\n{shown}");
-    let json = ok(s.path(), &["show", &e, "--json"]);
-    assert!(json.contains(r#""starts_on":"2026-09-05""#), "적힌 값이 기계 표면에서 사라졌다\n{json}");
 }
 
 /// **자식의 기한은 조상보다 늦을 수 없다**(moai-ghkp.33i, 2026-10-16 사용자 결정) — 마일스톤 > 에픽 >
