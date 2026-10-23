@@ -26113,9 +26113,12 @@ fn bumping_moves_the_lock_line_with_the_manifest() {
     assert!(after.contains("name = \"moai\"\nversion = \"0.2.0\"\n"), "Cargo.lock 의 자기 줄을 안 움직였다\n{after}");
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(said.contains("자기 줄을 0.2.0 로 다시 적었다"), "움직인 것을 안 댔다\n{}", text(&out));
-    // 잠금 파일이 맞았으니 다음에 칠 것은 태그다 — develop 끝이 아니라 main 의 머지 커밋에
-    // (moai-ltsv.3qk, CONTRIBUTING.md 의 Releasing).
-    assert!(said.contains("git tag v0.2.0 origin/main"), "태그 자리를 main 에 안 댔다\n{}", text(&out));
+    // 잠금 파일이 맞았으니 다음은 main 으로 가는 PR 이다. 태그는 사람이 안 친다 — 관리자가
+    // environment `release` 를 승인하면 tag-on-merge.yml 이 main 의 머지 커밋에 단다
+    // (moai-i5so, CONTRIBUTING.md 의 Releasing). 손 태그를 일러 두면 워크플로와 둘이 같은 태그를 겨룬다.
+    assert!(said.contains("gh pr create --base main"), "main 으로 가는 PR 을 안 댔다\n{}", text(&out));
+    assert!(said.contains("environment release"), "승인 자리를 안 댔다\n{}", text(&out));
+    assert!(!said.contains("git tag v0.2.0"), "손으로 태그를 달라고 했다\n{}", text(&out));
     assert!(!said.contains("git push && git push origin"), "develop 끝에 단 태그를 밀라고 했다\n{}", text(&out));
 }
 
