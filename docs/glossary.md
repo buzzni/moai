@@ -49,7 +49,7 @@ its own: it is read from its members. More in
 ## Deadline
 
 The day a row is due — its own `due_on` field, set with `--due YYYY-MM-DD`, `--due +N`
-(N days from today) or `@YYYY-MM-DD` at the end of a [plan](#plan) line. Any row can
+(N days from today) or `@YYYY-MM-DD` at the end of a [plan](#plan) line (`@YYYY-MM-DD~YYYY-MM-DD` adds the start). Any row can
 carry one, and it is asked about but never required. It cannot pass the deadline of
 the [milestone](#milestone), [epic](#epic) or parent above it: such a write is refused,
 and a row the one above overtook by being pulled in is a [warning](#warning),
@@ -207,7 +207,8 @@ The first pick-up stamps `started_at`. More in
 
 Markdown that creates an epic and its issues in one go — `# Epic title`, then
 one `- [p1] issue title #tag` line per issue, any line ending in an optional
-`@YYYY-MM-DD` [deadline](#deadline) — fed to `moai add --from -`
+`@YYYY-MM-DD` [deadline](#deadline), `@YYYY-MM-DD~YYYY-MM-DD` (start to deadline) or
+`@YYYY-MM-DD~` (start only) — fed to `moai add --from -`
 (`--dry-run` shows it first) or to `moai backlog promote`. Show it to the person
 once, before writing code. More in
 [the workflow](workflow.md#plan-something-bigger).

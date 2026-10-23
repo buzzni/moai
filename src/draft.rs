@@ -14,8 +14,10 @@
 //! - \[WIP] 제목 \#12              `[`·끝의 `#낱말`·`@숫자…` 가 제목이면 `\` 를 앞에 둔다
 //! ```
 //!
-//! **기한은 줄 끝의 `@YYYY-MM-DD` 하나다**(moai-ghkp.u1w) — 태그와 섞여 끝쪽에 선다. `@` 뒤가
-//! 숫자일 때만 기한으로 읽는다: `@raven` 같은 끝 낱말은 제목이다. 꼴이 틀리면 줄 번호와 거절한다.
+//! **날짜는 줄 끝의 `@` 하나다**(moai-ghkp.u1w) — 태그와 섞여 끝쪽에 선다. 꼴은 셋이다(moai-xf0p.due):
+//! `@2026-10-30` 은 기한, `@2026-10-25~2026-10-30` 은 시작~기한, `@2026-10-25~` 은 시작만. `@` 뒤가
+//! 숫자일 때만 날짜로 읽는다: `@raven` 같은 끝 낱말은 제목이다. 꼴이 틀리거나 시작이 기한보다 뒤면 줄 번호와
+//! 거절한다.
 //!
 //! **이스케이프는 네 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz)·`\@숫자…`(moai-ghkp.u1w),
 //! 그리고 템플릿 변수로 안 읽힐 글자 `\{{`(moai-xqxu). `{{` 바로 앞의 역슬래시는 쌍으로 센다 — `\\{{이름}}` 은 글자
@@ -37,8 +39,21 @@ pub struct Draft {
     pub tags: Vec<String>,
     /// 몇 번째 에픽에 속하는가. 에픽 자신은 `None`.
     pub epic: Option<usize>,
-    /// 줄 끝의 `@YYYY-MM-DD`(moai-ghkp.u1w). 꼴은 [`crate::model::parse_date`] 가 이미 쟀다.
+    /// 줄 끝의 `@…~YYYY-MM-DD` 나 `@YYYY-MM-DD`(moai-ghkp.u1w). 꼴은 [`crate::model::parse_date`] 가 이미 쟀다.
     pub due: Option<String>,
+    /// 줄 끝의 `@YYYY-MM-DD~…`(moai-xf0p.due) — 계획 시작일. 있으면 `due` 보다 늦지 않다(읽을 때 쟀다).
+    pub start: Option<String>,
+}
+
+/// 줄 끝 `@` 의 글 — 시작·기한 둘 다, 기한만, 시작만(`2026-10-25~`). 읽는 자([`split_parts`])와 쓰는 자
+/// ([`body`]·`cmd::add::line_of`)가 이 한 꼴을 같이 든다. 둘 다 없으면 `None` 이다.
+pub fn at_form(start: Option<&str>, due: Option<&str>) -> Option<String> {
+    match (start, due) {
+        (Some(s), Some(d)) => Some(format!("{s}~{d}")),
+        (Some(s), None) => Some(format!("{s}~")),
+        (None, Some(d)) => Some(d.to_string()),
+        (None, None) => None,
+    }
 }
 
 /// 끝 낱말이 기한 자리인가 — `@` 뒤가 숫자다. 읽는 자와 되뽑는 자가 이 하나로 가른다.
@@ -46,8 +61,8 @@ fn is_due_word(w: &str) -> bool {
     w.strip_prefix('@').is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit()))
 }
 
-/// 떼어 낸 한 줄 — 제목·우선순위·태그·기한.
-type Parts = (String, Option<u8>, Vec<String>, Option<String>);
+/// 떼어 낸 한 줄 — 제목·우선순위·태그·기한·시작.
+type Parts = (String, Option<u8>, Vec<String>, Option<String>, Option<String>);
 
 /// 줄 끝의 `#태그`·`@기한` 들과 앞머리의 `[pN]` 을 떼어 낸다.
 ///
@@ -86,16 +101,28 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<Parts, String> {
 
     let mut tags = Vec::new();
     let mut due: Option<String> = None;
+    let mut start: Option<String> = None;
+    let mut dated = false;
     while let Some((head, last)) = rest.rsplit_once(char::is_whitespace) {
         if is_due_word(last) {
-            let day = &last[1..];
-            if crate::model::parse_date(day).is_none() {
+            // `@시작~기한`·`@시작~`·`@기한` — `~` 앞이 시작이고 뒤가 기한이다. 비어 있는 쪽은 그쪽이 없다는 뜻이다.
+            let (first, second) = match last[1..].split_once('~') {
+                Some((a, "")) => (Some(a), None),
+                Some((a, b)) => (Some(a), Some(b)),
+                None => (None, Some(&last[1..])),
+            };
+            if [first, second].into_iter().flatten().any(|d| crate::model::parse_date(d).is_none()) {
                 return Err(say_fill(say(lang, "draft.not_a_due"), &[("line", &at()), ("due", last)]));
             }
-            if due.is_some() {
+            if dated {
                 return Err(say_fill(say(lang, "draft.two_dues"), &[("line", &at()), ("raw", &format!("{raw:?}"))]));
             }
-            due = Some(day.to_string());
+            // 날짜는 고정폭이라 글로 견준다(`Issue::validate_fields` 의 `DateOrder` 와 같은 자).
+            if first.zip(second).is_some_and(|(a, b)| a > b) {
+                return Err(say_fill(say(lang, "draft.start_after_due"), &[("line", &at()), ("due", last)]));
+            }
+            dated = true;
+            (start, due) = (first.map(str::to_string), second.map(str::to_string));
             rest = head.trim_end();
             continue;
         }
@@ -119,7 +146,7 @@ fn split_parts(raw: &str, n: usize, lang: Lang) -> Result<Parts, String> {
         Some(t) if t.strip_prefix('#').is_some_and(|x| !x.is_empty()) || is_due_word(t) => Some(t.to_string()),
         _ => None,
     });
-    Ok((title, priority, tags, due))
+    Ok((title, priority, tags, due, start))
 }
 
 /// 끝쪽에 이어진 낱말을 `f` 가 `None` 을 낼 때까지 바꾼다 — 이스케이프의 두 짝이 같이 쓴다.
@@ -317,7 +344,7 @@ pub fn parse_as(src: &str, shape: Shape, lang: Lang) -> Result<Vec<Draft>, Strin
         }
         match split_parts(body, n, lang) {
             Err(e) => errors.push(e),
-            Ok((title, priority, tags, due)) => {
+            Ok((title, priority, tags, due, start)) => {
                 if kind == Kind::Epic {
                     epic = Some(out.len());
                 }
@@ -328,6 +355,7 @@ pub fn parse_as(src: &str, shape: Shape, lang: Lang) -> Result<Vec<Draft>, Strin
                     tags,
                     epic: (kind == Kind::Issue).then_some(epic).flatten(),
                     due,
+                    start,
                 });
             }
         }
@@ -392,9 +420,11 @@ fn body(i: &Issue) -> String {
     for t in &i.tags {
         s.push_str(&format!(" #{}", escape_braces(t)));
     }
-    // 기한은 형식이 받는 자리라 낸다(moai-ghkp.u1w) — 꼴이 틀린 값은 도로 안 들어가므로 안 낸다([`lossy`] 가 댄다).
-    if let Some(d) = i.deadline() {
-        s.push_str(&format!(" @{d}"));
+    // 날짜는 형식이 받는 자리라 낸다(moai-ghkp.u1w, 시작은 moai-xf0p.due) — 꼴이 틀린 값은 도로 안 들어가므로
+    // 안 낸다([`lossy`] 가 댄다). 시작이 기한보다 뒤인 줄(손으로 푼 충돌)을 그대로 내면 도로 읽을 때 계획째 물린다 —
+    // 그 줄은 `lossy` 가 댄다.
+    if let Some(at) = at_form(i.planned_start(), i.deadline()) {
+        s.push_str(&format!(" @{at}"));
     }
     s
 }
@@ -442,10 +472,18 @@ pub fn lossy<'a>(epic: &'a Issue, members: &[&'a Issue]) -> Vec<&'a str> {
             let read = fill_as(&format!("# {}\n", body(i)), &[], Shape::Plan, Lang::default())
                 .ok()
                 .and_then(|d| d.into_iter().next());
-            let over =
-                !std::ptr::eq(*i, epic) && i.deadline().zip(epic.deadline()).is_some_and(|(mine, above)| mine > above);
-            over || read.map(|d| (d.title, d.priority, d.tags, d.due))
-                != Some((crate::text::one_line(&i.title), i.priority, i.tags.clone(), i.due_on.clone()))
+            let over = !std::ptr::eq(*i, epic)
+                && epic
+                    .deadline()
+                    .is_some_and(|above| [i.deadline(), i.planned_start()].into_iter().flatten().any(|d| d > above));
+            over || read.map(|d| (d.title, d.priority, d.tags, d.due, d.start))
+                != Some((
+                    crate::text::one_line(&i.title),
+                    i.priority,
+                    i.tags.clone(),
+                    i.due_on.clone(),
+                    i.starts_on.clone(),
+                ))
         })
         .map(|i| i.id.as_str())
         .collect()
@@ -494,6 +532,53 @@ mod tests {
         assert_eq!(parse(&render(&epic, &[&tail])).unwrap()[1].title, "마감 @2026");
     }
 
+    /// **`@` 는 시작~기한 꼴도 받는다**(moai-xf0p.due) — `@시작~기한`, `@시작~`(시작만), `@기한`(전처럼). 에픽 줄과
+    /// 이슈 줄 둘 다 받는다. 꼴이 틀리거나 시작이 기한보다 뒤거나 한 줄에 `@` 가 둘이면 줄 번호와 거절한다.
+    /// `\@` 는 제목의 글자고, 되뽑으면 도로 돌아온다.
+    #[test]
+    fn a_trailing_at_range_is_the_start_and_the_deadline() {
+        let d = one(
+            "# 에픽 @2026-10-25~2026-10-30\n- [p1] 둘 #bug @2026-10-26~2026-10-28 #parser\n- 시작만 @2026-10-27~\n- 기한만 @2026-10-29\n- 없음\n- 글자 \\@2026-10-25~\n",
+        );
+        let at = |k: usize| (d[k].start.as_deref(), d[k].due.as_deref());
+        assert_eq!(at(0), (Some("2026-10-25"), Some("2026-10-30")));
+        assert_eq!(at(1), (Some("2026-10-26"), Some("2026-10-28")));
+        assert_eq!((d[1].title.as_str(), d[1].tags.clone()), ("둘", vec!["bug".to_string(), "parser".to_string()]));
+        assert_eq!(at(2), (Some("2026-10-27"), None));
+        assert_eq!(at(3), (None, Some("2026-10-29")));
+        assert_eq!(at(4), (None, None));
+        assert_eq!((d[5].title.as_str(), at(5)), ("글자 @2026-10-25~", (None, None)));
+
+        // 틀린 꼴은 줄 번호와 거절한다 — 날짜 오타, 빈 기한 자리 아닌 `~`, 시작 > 기한, 둘째 `@`.
+        for (src, line) in [
+            ("# 에픽\n- 이슈 @2026-10-25~2026-02-30\n", "2줄"),
+            ("# 에픽\n- 이슈 @2026-10-25~2026-10-30~2026-11-01\n", "2줄"),
+            ("# 에픽\n- 이슈 @2026-10-30~2026-10-25\n", "2줄"),
+            ("# 에픽\n- 이슈 @2026-10-25~ @2026-10-30\n", "2줄"),
+            ("# 에픽 @2026-10-30~2026-10-25\n- 이슈\n", "1줄"),
+        ] {
+            let bad = parse(src).unwrap_err();
+            assert!(bad.contains(line), "{src:?}: {bad}");
+        }
+        // 시작이 기한보다 뒤인 것은 같은 날이면 받는다 — 하루짜리 일이다.
+        assert_eq!(one("# 에픽\n- 하루 @2026-10-25~2026-10-25\n")[1].start.as_deref(), Some("2026-10-25"));
+
+        // 되뽑아도 돌아온다.
+        let mut epic = issue("릴리스", Kind::Epic, None, &[]);
+        (epic.starts_on, epic.due_on) = (Some("2026-10-25".into()), Some("2026-10-30".into()));
+        let mut a = issue("시작만", Kind::Issue, None, &[]);
+        a.starts_on = Some("2026-10-27".into());
+        let md = render(&epic, &[&a]);
+        assert_eq!(md, "# 릴리스 @2026-10-25~2026-10-30\n- 시작만 @2026-10-27~\n");
+        let back = parse(&md).unwrap();
+        assert_eq!((back[0].start.as_deref(), back[0].due.as_deref()), (Some("2026-10-25"), Some("2026-10-30")));
+        assert_eq!((back[1].start.as_deref(), back[1].due.as_deref()), (Some("2026-10-27"), None));
+        assert!(lossy(&epic, &[&a]).is_empty(), "되뽑은 계획이 도로 안 들어간다");
+        // 에픽의 기한 뒤에서 시작하는 멤버는 틀에 담지 못한다.
+        a.starts_on = Some("2026-11-02".into());
+        assert_eq!(lossy(&epic, &[&a]), vec![a.id.as_str()]);
+    }
+
     /// **되뽑은 것은 도로 들어가야 한다.** 이 짝이 어긋나면 `--as-plan` 은
     /// 템플릿이 아니라 손으로 고쳐야 쓸 수 있는 글이다.
     #[test]
@@ -515,7 +600,8 @@ mod tests {
                 priority: Some(1),
                 tags: vec!["release".into()],
                 epic: None,
-                due: None
+                due: None,
+                start: None
             }
         );
         assert_eq!(
@@ -526,12 +612,21 @@ mod tests {
                 priority: Some(0),
                 tags: vec!["bug".into(), "parser".into()],
                 epic: Some(0),
-                due: None
+                due: None,
+                start: None
             }
         );
         assert_eq!(
             got[2],
-            Draft { kind: Kind::Issue, title: b.title.clone(), priority: None, tags: vec![], epic: Some(0), due: None }
+            Draft {
+                kind: Kind::Issue,
+                title: b.title.clone(),
+                priority: None,
+                tags: vec![],
+                epic: Some(0),
+                due: None,
+                start: None
+            }
         );
     }
 
@@ -827,7 +922,13 @@ mod tests {
         assert_eq!(
             got[0],
             Draft {
-                kind: Kind::Epic, title: "저장 계층".into(), priority: None, tags: vec![], epic: None, due: None
+                kind: Kind::Epic,
+                title: "저장 계층".into(),
+                priority: None,
+                tags: vec![],
+                epic: None,
+                due: None,
+                start: None
             }
         );
         assert_eq!(
@@ -838,7 +939,8 @@ mod tests {
                 priority: Some(1),
                 tags: vec!["enhancement".into()],
                 epic: Some(0),
-                due: None
+                due: None,
+                start: None
             }
         );
         assert_eq!(got[2].epic, Some(0));

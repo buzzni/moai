@@ -123,6 +123,15 @@ fn carried_due<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
     }
 }
 
+/// 펼치기가 에픽에 데려갈 계획 시작일(moai-xf0p.due) — [`carried_due`] 와 같은 자리, 같은 규칙이다. 꼴이 틀린 값은
+/// 안 데려간다([`Issue::planned_start`]).
+fn carried_start<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
+    match into {
+        Some(_) => None,
+        None => thought.planned_start(),
+    }
+}
+
 /// 데려갈 본문이 한 쓰기의 상한 안인가 — **넘으면 그 생각을 가리키며 거절한다**(moai-oejf).
 ///
 /// `promote` 가 데려가는 본문은 `store` 의 쓰기 검사를 다시 지난다. 손으로 푼 머지가 남길 수
@@ -221,8 +230,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
         // 데려가는 본문은 여기 안 준다 — 그것은 이 생각이 이미 든 글이라 가리킬 줄이 계획의
         // 것이 아니라 그 생각이다(moai-oejf). 바로 위가 제 자로 잰다.
-        let rooted =
-            crate::cmd::add::Rooted { milestone: stone.as_deref(), body: None, due: carried_due(thought, into) };
+        let rooted = crate::cmd::add::Rooted {
+            milestone: stone.as_deref(),
+            body: None,
+            due: carried_due(thought, into),
+            start: carried_start(thought, into),
+        };
         crate::cmd::add::check_plan(&drafts, rooted, ctx.lang())?;
         // **기한의 꼴과 위계도 진짜의 자로 잰다**(리뷰) — 데려간 기한이 데려간 마일스톤보다 늦거나, 계획의 `@날짜` 가
         // 펼칠 에픽(`-e`)이나 그 마일스톤을 넘으면 진짜가 물린다.
@@ -237,7 +250,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, rooted);
         }
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.will_unfold"))];
-        out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None, rooted.due_for(d, into))));
+        out.extend(drafts.iter().map(|d| {
+            let (start, due) = rooted.dates_for(d, into);
+            crate::cmd::add::line_of(d, None, start, due)
+        }));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
         out.extend(crate::cmd::add::milestone_line(
@@ -319,8 +335,13 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             say_if_inherited(issues, thought, stone.as_deref(), lang);
             say_if_dead(issues, cfg, stone.as_deref(), lang);
             let due = carried_due(thought, into).map(str::to_string);
-            let rooted =
-                crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref(), due: due.as_deref() };
+            let start = carried_start(thought, into).map(str::to_string);
+            let rooted = crate::cmd::add::Rooted {
+                milestone: stone.as_deref(),
+                body: text.as_deref(),
+                due: due.as_deref(),
+                start: start.as_deref(),
+            };
 
             let (mut entries, made) =
                 crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, rooted, &heir, &by, &at)?;
@@ -408,7 +429,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         });
     }
     let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.unfolded"))];
-    out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id), i.due_on.as_deref())));
+    out.extend(
+        drafts
+            .iter()
+            .zip(&made)
+            .map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id), i.starts_on.as_deref(), i.due_on.as_deref())),
+    );
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
     // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)
