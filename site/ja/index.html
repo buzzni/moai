@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>moai — リポジトリの中に置くイシュートラッカー</title>
-  <meta name="description" content="moai は、人とコーディングエージェントが同じリポジトリで使うイシュートラッカーです。イシューは .moai/issues.jsonl に1行ずつ入り、コードと一緒にコミットされます。">
+  <title>moai — コーディングエージェントのためのイシュートラッカー</title>
+  <meta name="description" content="moai は、人とコーディングエージェントが一緒に使うイシュートラッカーです。サーバーなしでリポジトリの中にあり、複数のエージェントがひとつの計画で動きます。">
   <link rel="canonical" href="https://buzzni.github.io/moai/ja/">
   <link rel="alternate" hreflang="en" href="https://buzzni.github.io/moai/">
   <link rel="alternate" hreflang="ko" href="https://buzzni.github.io/moai/ko/">
@@ -38,15 +38,41 @@
 
 <header class="hero">
   <div class="wrap">
-    <p class="eyebrow">人とコーディングエージェントが一緒に使うイシュートラッカー</p>
-    <h1 class="held" style="--glint-time: 5160ms">
-      <span class="spin" aria-hidden="true"><svg viewBox="0 0 10 15"><circle class="d1" cx="2.6" cy="2.6" r="1.8"/><circle class="d2" cx="2.6" cy="7.5" r="1.8"/><circle class="d3" cx="2.6" cy="12.4" r="1.8"/><circle class="d4" cx="7.4" cy="2.6" r="1.8"/><circle class="d5" cx="7.4" cy="7.5" r="1.8"/><circle class="d6" cx="7.4" cy="12.4" r="1.8"/></svg></span>
-      <span class="held-body">
-        <span class="held-text">やることは<br><em>リポジトリの中に</em>置く。</span>
-        <span class="held-glint" aria-hidden="true"><span>やることは<br><em>リポジトリの中に</em>置く。</span></span>
-      </span>
-    </h1>
-    <p class="lede">moai はイシューを <code>.moai/issues.jsonl</code> に1行ずつ書きます。コードと一緒にコミットされ、ブランチに乗り、マージされます。<strong>次のセッションのエージェントも、明日の自分も、同じファイルを読みます。</strong>前に何を決めたのか、チャットの履歴を掘り返す手間が減ります。</p>
+    <h1 class="eyebrow">人とコーディングエージェントが一緒に使うイシュートラッカー</h1>
+    <section class="rotator" aria-roledescription="carousel" aria-label="moai がすること">
+      <div class="rot-stage">
+        <span class="spin" aria-hidden="true"><svg viewBox="0 0 10 15"><circle class="d1" cx="2.6" cy="2.6" r="1.8"/><circle class="d2" cx="2.6" cy="7.5" r="1.8"/><circle class="d3" cx="2.6" cy="12.4" r="1.8"/><circle class="d4" cx="7.4" cy="2.6" r="1.8"/><circle class="d5" cx="7.4" cy="7.5" r="1.8"/><circle class="d6" cx="7.4" cy="12.4" r="1.8"/></svg></span>
+      <div class="rot-slides">
+        <div class="slide is-on" id="slide-1" role="tabpanel" aria-roledescription="slide" aria-label="1 / 5" aria-labelledby="tab-1" style="--glint-time: 6120ms">
+          <p class="headline"><span class="held-body"><span class="held-text">コーディングエージェントも<br><em>アジャイルに。</em></span><span class="held-glint" aria-hidden="true"><span>コーディングエージェントも<br><em>アジャイルに。</em></span></span></span></p>
+          <p class="lede">大きな依頼は、小さく分けた計画を先に見せて了承を取ります。ひとまとまり終わるごとにレビューし、リリースには計画した仕事だけが入ります。</p>
+        </div>
+        <div class="slide" id="slide-2" role="tabpanel" aria-roledescription="slide" aria-label="2 / 5" aria-labelledby="tab-2" hidden style="--glint-time: 5640ms">
+          <p class="headline"><span class="held-body"><span class="held-text">サーバーなしで、<br><em>リポジトリひとつで。</em></span><span class="held-glint" aria-hidden="true"><span>サーバーなしで、<br><em>リポジトリひとつで。</em></span></span></span></p>
+          <p class="lede">やることがコードと同じリポジトリにあります。一緒にコミットされ、ブランチに乗り、一緒にマージされます。アカウントも Web サービスもデータベースもいりません。クローンすれば、やることリストもついてきます。</p>
+        </div>
+        <div class="slide" id="slide-3" role="tabpanel" aria-roledescription="slide" aria-label="3 / 5" aria-labelledby="tab-3" hidden style="--glint-time: 6120ms">
+          <p class="headline"><span class="held-body"><span class="held-text">複数のエージェントを、<br><em>ひとつのチームに。</em></span><span class="held-glint" aria-hidden="true"><span>複数のエージェントを、<br><em>ひとつのチームに。</em></span></span></span></p>
+          <p class="lede">監督役のセッションが、たまった仕事を手の空いたエージェントにひとつずつ渡し、報告を受け取ります。Claude Code と Codex が同じリストを見て動き、同じ仕事を二重に取りません。セッションを開くのはいつも人です。</p>
+        </div>
+        <div class="slide" id="slide-4" role="tabpanel" aria-roledescription="slide" aria-label="4 / 5" aria-labelledby="tab-4" hidden style="--glint-time: 4680ms">
+          <p class="headline"><span class="held-body"><span class="held-text">どの仕事も<br><em>仕様書から始まる。</em></span><span class="held-glint" aria-hidden="true"><span>どの仕事も<br><em>仕様書から始まる。</em></span></span></span></p>
+          <p class="lede">何を、なぜ、どこまでやるかがイシューに書いてあるので、エージェントは調べ直さずにすぐ取りかかれます。前のセッションが残したメモと、これまでのコミットも一緒に見ます。</p>
+        </div>
+        <div class="slide" id="slide-5" role="tabpanel" aria-roledescription="slide" aria-label="5 / 5" aria-labelledby="tab-5" hidden style="--glint-time: 4440ms">
+          <p class="headline"><span class="held-body"><span class="held-text">エージェントが<br><em>覚えている。</em></span><span class="held-glint" aria-hidden="true"><span>エージェントが<br><em>覚えている。</em></span></span></span></p>
+          <p class="lede">なぜそう決めたかはイシューに、マニュアルはリポジトリの中の wiki に残ります。新しいセッションはチャット履歴ではなくそこから文脈を読むので、会話を消しても仕事は途切れません。</p>
+        </div>
+      </div>
+      </div>
+      <div class="rot-tabs" role="tablist" aria-label="moai がすること">
+      <button class="rot-tab" id="tab-1" role="tab" aria-controls="slide-1" aria-selected="true" style="--rot-time: 9120ms"><span class="rot-n">01</span><span class="rot-name">アジャイル</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-2" role="tab" aria-controls="slide-2" aria-selected="false" tabindex="-1" style="--rot-time: 8640ms"><span class="rot-n">02</span><span class="rot-name">サーバー不要</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-3" role="tab" aria-controls="slide-3" aria-selected="false" tabindex="-1" style="--rot-time: 9120ms"><span class="rot-n">03</span><span class="rot-name">マルチエージェント</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-4" role="tab" aria-controls="slide-4" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">04</span><span class="rot-name">仕様書</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-5" role="tab" aria-controls="slide-5" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">05</span><span class="rot-name">記憶</span><i class="rot-bar" aria-hidden="true"></i></button>
+      </div>
+    </section>
 
     <div class="install">
       <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>

@@ -49,33 +49,55 @@ nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-dec
 
 /* hero */
 .hero { padding: 88px 0 40px; }
-.eyebrow { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: .02em; margin: 0 0 18px; }
-h1 { font-size: clamp(2.4rem, 6.4vw, 4.6rem); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 24px; font-weight: 750; }
-h1 em { font-style: normal; color: var(--accent); }
+.eyebrow { font-family: var(--mono); font-size: 13px; font-weight: 500; line-height: 1.5; color: var(--accent); letter-spacing: .02em; margin: 0 0 18px; }
+.rot-stage { display: flex; align-items: flex-start; gap: .28em; font-size: clamp(2.4rem, 6.4vw, 4.6rem); }
+.headline { font-size: 1em; line-height: 1.08; letter-spacing: -.03em; margin: 0; font-weight: 750; }
+.headline em { font-style: normal; color: var(--accent); }
 
 /* 잡힌 일이 움직이는 모양(moai web 의 view/spin.ts·m-spin·m-glint, TUI 의 SPIN_TICK)을 헤드라인에 옮긴다.
    스피너는 점자 열 프레임을 120ms 씩, 띠는 3칸 폭으로 지나가 8칸 쉬고 다시 온다(--glint-time 은 페이지가 글 길이로 준다).
    강조색 em 을 지키려고 띠는 글 위에 겹친 사본에만 그린다. 움직임을 줄이면 스피너는 첫 프레임에 서고 띠는 없다. */
 :root { --review: color-mix(in srgb, #a855f7 70%, var(--ink)); --glint-edge: #fbc04e; --glint-core: #FFE7A3; }
-h1.held { display: flex; align-items: flex-start; gap: .28em; }
 /* 스피너는 글꼴의 점자(⠋…)가 아니라 같은 열 프레임을 점 여섯 개로 그린다 — 글꼴의 점은 굵기를 올려도
    두꺼워지지 않아, 큰 헤드라인 옆에서 가늘게 보였다. 켜진 점은 review 의 보라, 꺼진 점은 흐리게 남겨 칸 모양을 둔다.
    움직임을 줄이면 첫 프레임(⠋)에 선다. */
-.held .spin { flex: none; display: block; width: .5em; height: .75em; margin-top: .22em; --off: .13; }
-.held .spin svg { display: block; width: 100%; height: 100%; fill: var(--review); }
-.held .spin circle { opacity: var(--off); }
-.held .spin :is(.d1, .d2, .d4) { opacity: 1; }
+.rot-stage .spin { flex: none; display: block; width: .5em; height: .75em; margin-top: .22em; --off: .13; }
+.rot-stage .spin svg { display: block; width: 100%; height: 100%; fill: var(--review); }
+.rot-stage .spin circle { opacity: var(--off); }
+.rot-stage .spin :is(.d1, .d2, .d4) { opacity: 1; }
 .held-body { position: relative; display: block; min-width: 0; }
 .held-glint { position: absolute; inset: 0; display: none; color: transparent; pointer-events: none; }
+/* 회전판(히어로의 핵심 다섯 가지). 장은 한 칸에 겹쳐 두어 가장 긴 장의 높이를 지킨다 — 넘길 때 아래가 출렁이지 않는다.
+   감춘 장은 visibility 로 감춰 읽기 도구에서도 빠진다. 진행 막대가 다 차면 site.js 가 다음 장으로 넘기고, 마우스가 올라가
+   있거나 키보드 포커스가 들면 막대가 멈춰 넘기지도 않는다. 움직임을 줄이면 막대가 돌지 않아 스스로 넘기지 않는다. */
+.rot-slides { flex: 1 1 auto; min-width: 0; display: grid; }
+.slide { grid-area: 1 / 1; transition: opacity .45s ease, transform .45s ease, visibility 0s linear 0s; }
+.slide[hidden] { display: block; visibility: hidden; opacity: 0; transform: translateY(10px); transition: opacity .3s ease, transform .3s ease, visibility 0s linear .3s; }
+.slide .lede { margin: 26px 0 0; }
+.rot-tabs { display: flex; gap: 8px; margin: 34px 0 40px; }
+.rot-tab { position: relative; flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 8px; padding: 12px 0 0; border: 0; background: none; color: var(--faint); font: 500 13px var(--sans); text-align: left; cursor: pointer; }
+.rot-tab:hover { color: var(--muted); }
+.rot-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
+.rot-tab[aria-selected="true"] { color: var(--ink); }
+.rot-n { font-family: var(--mono); font-size: 12px; }
+.rot-tab[aria-selected="true"] .rot-n { color: var(--accent); }
+.rot-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rot-bar { position: absolute; top: 0; left: 0; right: 0; height: 2px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.rot-bar::after { content: ""; position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; }
+.rot-tab[aria-selected="true"] .rot-bar::after { transform: scaleX(1); }
+@media (max-width: 560px) { .rot-name { display: none; } .rot-tab { justify-content: center; } }
 .held-glint em { color: transparent; }
 @media (prefers-reduced-motion: no-preference) {
-  .held .spin .d1 { animation: spin-d1 1.2s step-start infinite; }
-  .held .spin .d2 { animation: spin-d2 1.2s step-start infinite; }
-  .held .spin .d3 { animation: spin-d3 1.2s step-start infinite; }
-  .held .spin .d4 { animation: spin-d4 1.2s step-start infinite; }
-  .held .spin .d5 { animation: spin-d5 1.2s step-start infinite; }
-  .held .spin .d6 { animation: spin-d6 1.2s step-start infinite; }
+  .rot-stage .spin .d1 { animation: spin-d1 1.2s step-start infinite; }
+  .rot-stage .spin .d2 { animation: spin-d2 1.2s step-start infinite; }
+  .rot-stage .spin .d3 { animation: spin-d3 1.2s step-start infinite; }
+  .rot-stage .spin .d4 { animation: spin-d4 1.2s step-start infinite; }
+  .rot-stage .spin .d5 { animation: spin-d5 1.2s step-start infinite; }
+  .rot-stage .spin .d6 { animation: spin-d6 1.2s step-start infinite; }
   .held-glint { display: block; }
+  .rot-tab[aria-selected="true"] .rot-bar::after { animation: rot-fill var(--rot-time, 8s) linear forwards; }
+  .rotator:hover .rot-bar::after, .rotator:has(:focus-visible) .rot-bar::after { animation-play-state: paused; }
+  .slide:not(.is-on) .held-glint > span { animation: none; }
   .held-glint > span {
     --glint-band: 2.2em;
     background-image: linear-gradient(90deg, transparent, var(--glint-edge) 25%, var(--glint-core) 50%, var(--glint-edge) 75%, transparent);
@@ -91,6 +113,7 @@ h1.held { display: flex; align-items: flex-start; gap: .28em; }
 @keyframes spin-d4 { 0% { opacity: 1; } 10% { opacity: 1; } 20% { opacity: 1; } 30% { opacity: 1; } 40% { opacity: 1; } 50% { opacity: .13; } 60% { opacity: .13; } 70% { opacity: .13; } 80% { opacity: .13; } 90% { opacity: 1; } }
 @keyframes spin-d5 { 0% { opacity: .13; } 10% { opacity: 1; } 20% { opacity: 1; } 30% { opacity: 1; } 40% { opacity: 1; } 50% { opacity: 1; } 60% { opacity: .13; } 70% { opacity: .13; } 80% { opacity: .13; } 90% { opacity: .13; } }
 @keyframes spin-d6 { 0% { opacity: .13; } 10% { opacity: .13; } 20% { opacity: 1; } 30% { opacity: 1; } 40% { opacity: 1; } 50% { opacity: 1; } 60% { opacity: 1; } 70% { opacity: 1; } 80% { opacity: .13; } 90% { opacity: .13; } }
+@keyframes rot-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes m-glint {
   from { background-position: calc(-1 * var(--glint-band)) 0; }
   to { background-position: calc(100% + var(--glint-band) + 8ch) 0; }
@@ -144,7 +167,7 @@ h1.held { display: flex; align-items: flex-start; gap: .28em; }
 .track { display: flex; gap: 56px; width: max-content; animation: slide 36s linear infinite; }
 .marquee:hover .track { animation-play-state: paused; }
 @keyframes slide { to { transform: translateX(calc(-50% - 28px)); } }
-@media (prefers-reduced-motion: reduce) { .track { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .track { animation: none; } .slide, .slide[hidden] { transition: none; transform: none; } }
 .slot { flex: none; height: 44px; width: 150px; border: 1px dashed #3a3e3a; border-radius: 8px; display: grid; place-items: center; font: 12px var(--mono); color: var(--faint); }
 
 /* features */

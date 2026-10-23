@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>moai — 저장소 안의 이슈 트래커</title>
-  <meta name="description" content="moai는 사람과 코딩 에이전트가 같은 저장소에서 쓰는 이슈 트래커입니다. 이슈는 .moai/issues.jsonl에 한 줄씩 들어가 코드와 같이 커밋됩니다.">
+  <title>moai — 코딩 에이전트를 위한 이슈 트래커</title>
+  <meta name="description" content="moai는 사람과 코딩 에이전트가 같이 쓰는 이슈 트래커입니다. 서버 없이 저장소 안에 있고, 여러 에이전트가 하나의 계획으로 일합니다.">
   <link rel="canonical" href="https://buzzni.github.io/moai/ko/">
   <link rel="alternate" hreflang="en" href="https://buzzni.github.io/moai/">
   <link rel="alternate" hreflang="ko" href="https://buzzni.github.io/moai/ko/">
@@ -38,15 +38,41 @@
 
 <header class="hero">
   <div class="wrap">
-    <p class="eyebrow">코딩 에이전트와 같이 쓰는 이슈 트래커</p>
-    <h1 class="held" style="--glint-time: 4440ms">
-      <span class="spin" aria-hidden="true"><svg viewBox="0 0 10 15"><circle class="d1" cx="2.6" cy="2.6" r="1.8"/><circle class="d2" cx="2.6" cy="7.5" r="1.8"/><circle class="d3" cx="2.6" cy="12.4" r="1.8"/><circle class="d4" cx="7.4" cy="2.6" r="1.8"/><circle class="d5" cx="7.4" cy="7.5" r="1.8"/><circle class="d6" cx="7.4" cy="12.4" r="1.8"/></svg></span>
-      <span class="held-body">
-        <span class="held-text">할 일은 <em>저장소 안에</em><br>둡니다.</span>
-        <span class="held-glint" aria-hidden="true"><span>할 일은 <em>저장소 안에</em><br>둡니다.</span></span>
-      </span>
-    </h1>
-    <p class="lede">moai는 이슈를 <code>.moai/issues.jsonl</code>에 한 줄씩 적습니다. 코드와 같이 커밋되고, 브랜치를 타고, 머지됩니다. <strong>다음 세션의 에이전트도, 내일의 나도 같은 파일을 읽습니다.</strong> 지난번에 무엇을 정했는지 채팅 기록을 뒤질 일이 줄어듭니다.</p>
+    <h1 class="eyebrow">코딩 에이전트와 같이 쓰는 이슈 트래커</h1>
+    <section class="rotator" aria-roledescription="carousel" aria-label="moai가 하는 일">
+      <div class="rot-stage">
+        <span class="spin" aria-hidden="true"><svg viewBox="0 0 10 15"><circle class="d1" cx="2.6" cy="2.6" r="1.8"/><circle class="d2" cx="2.6" cy="7.5" r="1.8"/><circle class="d3" cx="2.6" cy="12.4" r="1.8"/><circle class="d4" cx="7.4" cy="2.6" r="1.8"/><circle class="d5" cx="7.4" cy="7.5" r="1.8"/><circle class="d6" cx="7.4" cy="12.4" r="1.8"/></svg></span>
+      <div class="rot-slides">
+        <div class="slide is-on" id="slide-1" role="tabpanel" aria-roledescription="slide" aria-label="1 / 5" aria-labelledby="tab-1" style="--glint-time: 4440ms">
+          <p class="headline"><span class="held-body"><span class="held-text">코딩 에이전트도<br><em>애자일하게.</em></span><span class="held-glint" aria-hidden="true"><span>코딩 에이전트도<br><em>애자일하게.</em></span></span></span></p>
+          <p class="lede">큰 요청은 작은 단위로 나눈 계획부터 보여 주고 허락을 받습니다. 단위가 끝날 때마다 리뷰하고, 릴리스에는 계획한 일만 담깁니다.</p>
+        </div>
+        <div class="slide" id="slide-2" role="tabpanel" aria-roledescription="slide" aria-label="2 / 5" aria-labelledby="tab-2" hidden style="--glint-time: 4200ms">
+          <p class="headline"><span class="held-body"><span class="held-text">서버 없이,<br><em>저장소 하나로.</em></span><span class="held-glint" aria-hidden="true"><span>서버 없이,<br><em>저장소 하나로.</em></span></span></span></p>
+          <p class="lede">할 일이 코드와 같은 저장소에 있습니다. 같이 커밋되고, 브랜치를 따라가고, 같이 머지됩니다. 계정도 웹 서비스도 데이터베이스도 필요 없습니다. 저장소를 받으면 할 일 목록도 같이 옵니다.</p>
+        </div>
+        <div class="slide" id="slide-3" role="tabpanel" aria-roledescription="slide" aria-label="3 / 5" aria-labelledby="tab-3" hidden style="--glint-time: 4320ms">
+          <p class="headline"><span class="held-body"><span class="held-text">에이전트 여럿을<br><em>한 팀처럼.</em></span><span class="held-glint" aria-hidden="true"><span>에이전트 여럿을<br><em>한 팀처럼.</em></span></span></span></p>
+          <p class="lede">감독 세션 하나가 쌓인 일을 쉬고 있는 에이전트에게 하나씩 나눠 주고 보고를 받습니다. Claude Code와 Codex가 같은 목록을 보고 일하고, 같은 일을 둘이 잡지 않습니다. 세션은 늘 사람이 엽니다.</p>
+        </div>
+        <div class="slide" id="slide-4" role="tabpanel" aria-roledescription="slide" aria-label="4 / 5" aria-labelledby="tab-4" hidden style="--glint-time: 5280ms">
+          <p class="headline"><span class="held-body"><span class="held-text">모든 작업은<br><em>명세서에서 시작합니다.</em></span><span class="held-glint" aria-hidden="true"><span>모든 작업은<br><em>명세서에서 시작합니다.</em></span></span></span></p>
+          <p class="lede">무엇을, 왜, 어디까지 할지가 이슈에 적혀 있어 에이전트가 다시 조사하지 않고 바로 시작합니다. 앞 세션이 남긴 메모와 지금까지의 커밋도 함께 봅니다.</p>
+        </div>
+        <div class="slide" id="slide-5" role="tabpanel" aria-roledescription="slide" aria-label="5 / 5" aria-labelledby="tab-5" hidden style="--glint-time: 3840ms">
+          <p class="headline"><span class="held-body"><span class="held-text">에이전트가<br><em>기억합니다.</em></span><span class="held-glint" aria-hidden="true"><span>에이전트가<br><em>기억합니다.</em></span></span></span></p>
+          <p class="lede">무엇을 왜 정했는지는 이슈에, 매뉴얼은 저장소 안 위키에 남습니다. 새 세션은 대화 기록이 아니라 거기서 맥락을 읽어서, 대화를 비워도 일이 끊기지 않습니다.</p>
+        </div>
+      </div>
+      </div>
+      <div class="rot-tabs" role="tablist" aria-label="moai가 하는 일">
+      <button class="rot-tab" id="tab-1" role="tab" aria-controls="slide-1" aria-selected="true" style="--rot-time: 8000ms"><span class="rot-n">01</span><span class="rot-name">애자일</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-2" role="tab" aria-controls="slide-2" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">02</span><span class="rot-name">서버 없음</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-3" role="tab" aria-controls="slide-3" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">03</span><span class="rot-name">멀티 에이전트</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-4" role="tab" aria-controls="slide-4" aria-selected="false" tabindex="-1" style="--rot-time: 8280ms"><span class="rot-n">04</span><span class="rot-name">작업 명세</span><i class="rot-bar" aria-hidden="true"></i></button>
+      <button class="rot-tab" id="tab-5" role="tab" aria-controls="slide-5" aria-selected="false" tabindex="-1" style="--rot-time: 8000ms"><span class="rot-n">05</span><span class="rot-name">기억</span><i class="rot-bar" aria-hidden="true"></i></button>
+      </div>
+    </section>
 
     <div class="install">
       <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
