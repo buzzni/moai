@@ -12,6 +12,8 @@
   <link rel="alternate" hreflang="x-default" href="https://buzzni.github.io/moai/">
   <script>
     (function () {
+      // ?lang=en 은 다른 언어 페이지의 English 링크가 붙인다 — 저장소가 막힌 브라우저에서도 영어에 머물게
+      if (/(^|[?&])lang=en(&|$)/.test(location.search)) return;
       var pick = null;
       try { pick = localStorage.getItem('moai-lang'); } catch (e) {}
       if (!pick) {
@@ -23,7 +25,7 @@
           else if (l.indexOf('en') === 0) pick = 'en';
         }
       }
-      if (pick === 'ko' || pick === 'ja') location.replace(pick + '/' + location.hash);
+      if (pick === 'ko' || pick === 'ja') location.replace(pick + '/' + location.search + location.hash);
     })();
   </script>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
@@ -102,7 +104,7 @@
   <div class="wrap">
     <div class="window term">
       <div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
-      <div class="cast" data-cast="assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="img" aria-label="Four tmux panes: moai tui, a Claude Code supervisor, and Codex and Antigravity workers"></div>
+      <div class="cast" data-cast="assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="Four tmux panes: moai tui, a Claude Code supervisor, and Codex and Antigravity workers"></div>
     </div>
     <div class="sec-head">
       <h2 class="big">Different vendors. One team.</h2>
@@ -140,10 +142,10 @@
       </div>
       <div class="scene-media">
         <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
-          <div class="cast" data-cast="assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="img" aria-label="moai tui moving from the list to the kanban board and the wiki"></div></div>
+          <div class="cast" data-cast="assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui moving from the list to the kanban board and the wiki"></div></div>
       </div>
     </article>
-    <article class="scene flip">
+    <article class="scene">
       <div class="scene-text">
         <div class="n">02</div>
         <h3>Holds its own against any issue tracker.</h3>
@@ -167,7 +169,7 @@
           <video class="clip" muted loop playsinline preload="none" poster="assets/media/web-wiki.png" data-src="assets/media/web-wiki.webm" aria-label="moai web wiki: following links between pages and into an issue"></video></div>
       </div>
     </article>
-    <article class="scene flip">
+    <article class="scene">
       <div class="scene-text">
         <div class="n">04</div>
         <h3>See progress and flow at a glance.</h3>
@@ -176,7 +178,7 @@
       </div>
       <div class="scene-media">
         <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
-          <div class="cast" data-cast="assets/media/tui-lifecycle.cast" data-cols="120" data-rows="34" role="img" aria-label="A card created in the backlog moving across the board to done"></div></div>
+          <div class="cast" data-cast="assets/media/tui-lifecycle.cast" data-cols="120" data-rows="34" role="figure" aria-label="A card created in the backlog moving across the board to done"></div></div>
       </div>
     </article>
   </div>
@@ -197,7 +199,7 @@
 <footer>
   <div class="wrap">
     <img src="assets/logo.svg" alt="moai">
-    <span>v0.23.0 · MIT · © 2026 Buzzni Inc.</span>
+    <span>MIT · © 2026 Buzzni Inc.</span>
     <div class="links">
       <a href="https://github.com/buzzni/moai/tree/main/docs" hidden>Docs</a><!-- 문서 페이지가 서면 hidden 을 걷는다: moai-qrxu -->
       <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md" hidden>Changelog</a><!-- 변경 기록 페이지가 서면 hidden 을 걷는다: moai-gw11 -->

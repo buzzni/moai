@@ -72,9 +72,10 @@ document.querySelectorAll('.lang a[data-lang]').forEach(function (a) {
     entries.forEach(function (e) {
       var el = e.target;
       if (el.tagName === 'VIDEO') { if (e.isIntersecting) clip(el); else el.pause(); return; }
+      // 처음 지켜보기 시작할 때도 항목이 한 번 온다 — 화면 밖의 녹화를 그때 불러 틀지 않게, 안 보이면 멈추기만 한다
+      if (!e.isIntersecting) { if (el._player) el._player.pause(); return; }
       var player = cast(el);
-      if (!player || reduce) return;
-      if (e.isIntersecting) player.play(); else player.pause();
+      if (player && !reduce) player.play();
     });
   }, { threshold: 0.35 });
   casts.concat(clips).forEach(function (el) { seen.observe(el); });

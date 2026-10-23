@@ -7,9 +7,6 @@
   --muted: #9b988f;
   --faint: #6b6962;
   --accent: #e8794a;
-  --accent-ink: #1a0f09;
-  --ok: #8fbf7a;
-  --warn: #e2b857;
   --sans: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --wrap: 1120px;
@@ -96,7 +93,9 @@ nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-dec
   .rot-stage .spin .d6 { animation: spin-d6 1.2s step-start infinite; }
   .held-glint { display: block; }
   .rot-tab[aria-selected="true"] .rot-bar::after { animation: rot-fill var(--rot-time, 8s) linear forwards; }
-  .rotator:hover .rot-bar::after, .rotator:has(:focus-visible) .rot-bar::after { animation-play-state: paused; }
+  .rotator:hover .rot-bar::after { animation-play-state: paused; }
+  /* :has 를 모르는 브라우저가 줄째 버리지 않게 따로 둔다 */
+  .rotator:has(:focus-visible) .rot-bar::after { animation-play-state: paused; }
   .slide:not(.is-on) .held-glint > span { animation: none; }
   .held-glint > span {
     --glint-band: 2.2em;
