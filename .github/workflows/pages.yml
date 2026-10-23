@@ -1,0 +1,45 @@
+# 소개 홈페이지(site/)를 GitHub Pages 에 낸다 — buzzni.github.io/moai.
+#
+# **Pages 의 "Deploy from branch" 와 /docs 방식을 안 쓴다.** docs/ 는 위키 자리라
+# 거기를 Pages 에 내주면 두 쓰임이 한 폴더를 다툰다. 그래서 source 는 "GitHub
+# Actions" 이고 이 workflow 가 site/ 만 올린다.
+#
+# **develop 에서 낸다.** github-pages environment 의 배포 가지 규칙이 기본 가지만
+# 받고, 이 저장소의 기본 가지가 develop 이다. 사이트는 판에 묶인 문서가 아니라
+# 소개 글이고, 설치 한 줄은 늘 최신 릴리스를 받으니 develop 이 앞서도 어긋나지 않는다.
+name: pages
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포는 하나씩. 도는 배포를 끊으면 반쯤 올라간 판이 남으니 끊지 않는다.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: site/ 를 Pages 에 낸다
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

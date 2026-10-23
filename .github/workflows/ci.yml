@@ -277,7 +277,10 @@ jobs:
             # 뒤의 `grep -q` 가 첫 줄에서 끝내며 앞의 grep 을 SIGPIPE 로 죽이고, `pipefail` 이
             # 그 141 을 파이프라인의 답으로 삼았다 — 경로가 이천을 넘는 판에서 코드 변경이
             # "글만 바뀌었다" 로 읽혔다(재 봤다). 빈 줄은 같은 정규식의 한 갈래로 접는다.
-            if ! grep -qvE '(^$|\.md$|^docs/|^\.moai/|^LICENSE$)' <<<"$touched"; then
+            # `site/` 와 그 녹화 스크립트(`scripts/site-demo/`)는 소개 홈페이지라 바이너리에 안 닿는다
+            # (moai-mfps). 이 답에 걸린 잡(msrv·windows·size-budget·web)만 건너뛰고, ci-gate 는 무엇이
+            # 바뀌었든 돈다. 사이트 배포는 pages.yml 이 따로 맡는다.
+            if ! grep -qvE '(^$|\.md$|^docs/|^\.moai/|^LICENSE$|^site/|^scripts/site-demo/)' <<<"$touched"; then
               code=false
             fi
           fi
