@@ -55,16 +55,26 @@ h1 em { font-style: normal; color: var(--accent); }
 
 /* 잡힌 일이 움직이는 모양(moai web 의 view/spin.ts·m-spin·m-glint, TUI 의 SPIN_TICK)을 헤드라인에 옮긴다.
    스피너는 점자 열 프레임을 120ms 씩, 띠는 3칸 폭으로 지나가 8칸 쉬고 다시 온다(--glint-time 은 페이지가 글 길이로 준다).
-   강조색 em 을 지키려고 띠는 글 위에 겹친 사본에만 그린다. 움직임을 줄이면 ▸ 와 원래 글색만 남는다. */
+   강조색 em 을 지키려고 띠는 글 위에 겹친 사본에만 그린다. 움직임을 줄이면 스피너는 첫 프레임에 서고 띠는 없다. */
 :root { --review: color-mix(in srgb, #a855f7 70%, var(--ink)); --glint-edge: #fbc04e; --glint-core: #FFE7A3; }
 h1.held { display: flex; align-items: flex-start; gap: .28em; }
-.held .spin { flex: none; position: relative; width: 1ch; text-align: center; font-family: var(--mono); font-size: .62em; line-height: calc(1.08 / .62); font-weight: 600; color: var(--glint-edge); }
+/* 스피너는 글꼴의 점자(⠋…)가 아니라 같은 열 프레임을 점 여섯 개로 그린다 — 글꼴의 점은 굵기를 올려도
+   두꺼워지지 않아, 큰 헤드라인 옆에서 가늘게 보였다. 켜진 점은 review 의 보라, 꺼진 점은 흐리게 남겨 칸 모양을 둔다.
+   움직임을 줄이면 첫 프레임(⠋)에 선다. */
+.held .spin { flex: none; display: block; width: .5em; height: .75em; margin-top: .22em; --off: .13; }
+.held .spin svg { display: block; width: 100%; height: 100%; fill: var(--review); }
+.held .spin circle { opacity: var(--off); }
+.held .spin :is(.d1, .d2, .d4) { opacity: 1; }
 .held-body { position: relative; display: block; min-width: 0; }
 .held-glint { position: absolute; inset: 0; display: none; color: transparent; pointer-events: none; }
 .held-glint em { color: transparent; }
 @media (prefers-reduced-motion: no-preference) {
-  .held .spin { color: transparent; }
-  .held .spin::before { content: "\280B"; position: absolute; inset: 0; color: var(--review); font-weight: 400; text-align: center; animation: m-spin 1.2s step-start infinite; }
+  .held .spin .d1 { animation: spin-d1 1.2s step-start infinite; }
+  .held .spin .d2 { animation: spin-d2 1.2s step-start infinite; }
+  .held .spin .d3 { animation: spin-d3 1.2s step-start infinite; }
+  .held .spin .d4 { animation: spin-d4 1.2s step-start infinite; }
+  .held .spin .d5 { animation: spin-d5 1.2s step-start infinite; }
+  .held .spin .d6 { animation: spin-d6 1.2s step-start infinite; }
   .held-glint { display: block; }
   .held-glint > span {
     --glint-band: 2.2em;
@@ -75,10 +85,12 @@ h1.held { display: flex; align-items: flex-start; gap: .28em; }
     animation: m-glint var(--glint-time, 4s) linear infinite;
   }
 }
-@keyframes m-spin {
-  0% { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; } 40% { content: "\283C"; }
-  50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; } 80% { content: "\2807"; } 90% { content: "\280F"; }
-}
+@keyframes spin-d1 { 0% { opacity: 1; } 10% { opacity: 1; } 20% { opacity: 1; } 30% { opacity: .13; } 40% { opacity: .13; } 50% { opacity: .13; } 60% { opacity: .13; } 70% { opacity: 1; } 80% { opacity: 1; } 90% { opacity: 1; } }
+@keyframes spin-d2 { 0% { opacity: 1; } 10% { opacity: .13; } 20% { opacity: .13; } 30% { opacity: .13; } 40% { opacity: .13; } 50% { opacity: .13; } 60% { opacity: 1; } 70% { opacity: 1; } 80% { opacity: 1; } 90% { opacity: 1; } }
+@keyframes spin-d3 { 0% { opacity: .13; } 10% { opacity: .13; } 20% { opacity: .13; } 30% { opacity: .13; } 40% { opacity: 1; } 50% { opacity: 1; } 60% { opacity: 1; } 70% { opacity: 1; } 80% { opacity: 1; } 90% { opacity: 1; } }
+@keyframes spin-d4 { 0% { opacity: 1; } 10% { opacity: 1; } 20% { opacity: 1; } 30% { opacity: 1; } 40% { opacity: 1; } 50% { opacity: .13; } 60% { opacity: .13; } 70% { opacity: .13; } 80% { opacity: .13; } 90% { opacity: 1; } }
+@keyframes spin-d5 { 0% { opacity: .13; } 10% { opacity: 1; } 20% { opacity: 1; } 30% { opacity: 1; } 40% { opacity: 1; } 50% { opacity: 1; } 60% { opacity: .13; } 70% { opacity: .13; } 80% { opacity: .13; } 90% { opacity: .13; } }
+@keyframes spin-d6 { 0% { opacity: .13; } 10% { opacity: .13; } 20% { opacity: 1; } 30% { opacity: 1; } 40% { opacity: 1; } 50% { opacity: 1; } 60% { opacity: 1; } 70% { opacity: 1; } 80% { opacity: .13; } 90% { opacity: .13; } }
 @keyframes m-glint {
   from { background-position: calc(-1 * var(--glint-band)) 0; }
   to { background-position: calc(100% + var(--glint-band) + 8ch) 0; }
