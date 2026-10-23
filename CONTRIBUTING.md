@@ -234,8 +234,8 @@ scripts/bump-version.sh auto                      # Cargo.toml, Cargo.lock, CHAN
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md
 git push origin develop
 gh pr create --base main --head develop --title "v0.2.0"   # merge it, no squash
-git fetch origin && git tag v0.2.0 origin/main
-git push origin v0.2.0
+# an admin approves "tag on merge" in Actions (environment release);
+# v0.2.0 is tagged on main's merge commit and the release workflow runs
 git worktree remove .worktrees/milestone-<id>     # once the release is out
 git branch -d milestone/<id>
 rm -rf /tmp/cargo-target/milestone-<id>
@@ -300,10 +300,40 @@ something that is not what `main` holds. **Merge that pull request, do not
 squash it** — `moai show <id>` finds an issue's commits by the id in their
 subject, and a squash folds 400 subjects into one body where nothing reads them.
 
+**Nobody types the tag; an admin approves it** (moai-i5so, 2026-10-23). When a
+pull request from `develop` is merged into `main`, `tag-on-merge.yml` waits on
+the `release` environment. Once an admin approves that run, it tags the merge
+commit `v<Cargo.toml version>` and starts `release.yml` and `smoke.yml` on that
+tag. It starts them by `workflow_dispatch` because a tag pushed with
+`GITHUB_TOKEN` does not trigger other workflows' `push: tags`, so the release
+workflow itself is unchanged. If that version's tag already exists, the merge
+did not bump the version, and nothing happens.
+
+The approval lives in the repository settings, not in this file: under
+Settings → Environments → `release`, the admins are the required reviewers. If
+that environment is missing or loses its rule, GitHub runs the job without
+asking. So the job's first step reads the run's approvals and stops unless an
+admin approved for `release`. An empty setting means no tag, not an
+unapproved release.
+
 The tag is what the release workflow trusts, so the pre-push hook and the first
 job of the workflow both check the tag against `Cargo.toml` before anything is
 built. The script deliberately neither commits nor tags: if one hand wrote both
-values there would be nothing left to check them against.
+values there would be nothing left to check them against. A tag made from
+`Cargo.toml` always passes that check, so on the automatic path three other
+things carry it. An admin's approval stands where a person read the version.
+That version's section must already be in `CHANGELOG.md`, which `auto`
+opened, or the run stops. And the tag must not exist yet.
+
+If the approval was rejected or the run failed before tagging, tag by hand as
+before. The pre-push hook and the guard still check it. If the tag was made but
+the release did not start, start it on that tag:
+
+```sh
+git fetch origin && git tag v0.2.0 origin/main
+git push origin v0.2.0
+gh workflow run release.yml --ref v0.2.0          # the tag exists, the release did not run
+```
 
 For the very first release the bump script has nothing to move — `Cargo.toml` is
 already at `0.1.0` — so rename the `[Unreleased]` heading in `CHANGELOG.md` to
