@@ -52,6 +52,37 @@ nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-dec
 .eyebrow { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: .02em; margin: 0 0 18px; }
 h1 { font-size: clamp(2.4rem, 6.4vw, 4.6rem); line-height: 1.08; letter-spacing: -.03em; margin: 0 0 24px; font-weight: 750; }
 h1 em { font-style: normal; color: var(--accent); }
+
+/* 잡힌 일이 움직이는 모양(moai web 의 view/spin.ts·m-spin·m-glint, TUI 의 SPIN_TICK)을 헤드라인에 옮긴다.
+   스피너는 점자 열 프레임을 120ms 씩, 띠는 3칸 폭으로 지나가 8칸 쉬고 다시 온다(--glint-time 은 페이지가 글 길이로 준다).
+   강조색 em 을 지키려고 띠는 글 위에 겹친 사본에만 그린다. 움직임을 줄이면 ▸ 와 원래 글색만 남는다. */
+:root { --review: color-mix(in srgb, #a855f7 70%, var(--ink)); --glint-edge: #fbc04e; --glint-core: #FFE7A3; }
+h1.held { display: flex; align-items: flex-start; gap: .28em; }
+.held .spin { flex: none; position: relative; width: 1ch; text-align: center; font-family: var(--mono); font-size: .62em; line-height: calc(1.08 / .62); font-weight: 600; color: var(--glint-edge); }
+.held-body { position: relative; display: block; min-width: 0; }
+.held-glint { position: absolute; inset: 0; display: none; color: transparent; pointer-events: none; }
+.held-glint em { color: transparent; }
+@media (prefers-reduced-motion: no-preference) {
+  .held .spin { color: transparent; }
+  .held .spin::before { content: "\280B"; position: absolute; inset: 0; color: var(--review); font-weight: 400; text-align: center; animation: m-spin 1.2s step-start infinite; }
+  .held-glint { display: block; }
+  .held-glint > span {
+    --glint-band: 2.2em;
+    background-image: linear-gradient(90deg, transparent, var(--glint-edge) 25%, var(--glint-core) 50%, var(--glint-edge) 75%, transparent);
+    background-size: var(--glint-band) 100%; background-repeat: no-repeat;
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-box-decoration-break: slice; box-decoration-break: slice;
+    animation: m-glint var(--glint-time, 4s) linear infinite;
+  }
+}
+@keyframes m-spin {
+  0% { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; } 40% { content: "\283C"; }
+  50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; } 80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+@keyframes m-glint {
+  from { background-position: calc(-1 * var(--glint-band)) 0; }
+  to { background-position: calc(100% + var(--glint-band) + 8ch) 0; }
+}
 .lede { font-size: clamp(1.05rem, 1.6vw, 1.22rem); color: var(--muted); max-width: 640px; margin: 0 0 36px; }
 .lede strong { color: var(--ink); font-weight: 600; }
 
