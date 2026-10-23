@@ -132,7 +132,7 @@ fn temp_at(cmd: &mut Command, dir: impl AsRef<std::ffi::OsStr>) -> &mut Command 
 ///   가리키는 변수(`GIT_DIR`·`GIT_WORK_TREE`·…)도 걷는다 — git 훅이나
 ///   `git -c … rebase -x 'cargo test'` 안에서 돌면 git 이 이것들을 내보내고,
 ///   그러면 moai 의 `git config user.name` 이 바깥 사람의 이름을 읽는다
-/// - `MOAI_CONFIG`·`XDG_CONFIG_HOME` — 사용자 설정(등록한 프로젝트 목록)의 자리
+/// - `MOAI_CONFIG`·`XDG_CONFIG_HOME` — 사용자 설정(등록한 프로젝트 목록)의 자리. `MOAI_KEYS`(키 파일)도 걷는다
 /// - `MOAI_ACTOR`·`MOAI_NOW` — 셸에 내보내 둔 값이 새면 "사람을 못 찾는다" 와
 ///   "시계를 고정하지 않았다" 를 보려던 시험이 조용히 딴것을 본다
 /// - `BASH_ENV` — bash 를 띄우는 시험(`bash -c`, 스크립트)이 **켜자마자 읽는 파일**.
@@ -180,6 +180,9 @@ fn isolated(program: impl AsRef<std::ffi::OsStr>) -> Command {
         // 걷는다 — `MOAI_CONFIG` 를 덮어쓴 시험이 그것을 지우면 그다음 자리다.
         .env("MOAI_CONFIG", home.join("moai-config-unset/config.toml"))
         .env_remove("XDG_CONFIG_HOME")
+        // 키 파일(moai-aqmg)도 사람의 것이 새면 안 된다 — `--help` 가 그 키로 그려져 도움말을 재는 시험이 돌리는
+        // 사람마다 달라진다. 걷으면 위의 없는 설정 곁(`keys.toml`)을 보니 기본 키다.
+        .env_remove("MOAI_KEYS")
         .env_remove("BASH_ENV")
         // 새 판을 묻는 두 이름도 걷는다(moai-omww). `MOAI_API_URL` 은 moai 가 지은 이름이
         // 아니다 — `install.sh` 가 이미 쓰므로 거울에서 깐 사람의 셸에 서 있고, 그러면
@@ -8747,6 +8750,8 @@ const JSON_SWEEP: &[&str] = &[
     // 자리(`target/`)에 서서 거절되므로, 그 밖에 걸어 둔 한 벌([`hoisted`])로 부른다.
     "update",
     "models",
+    // 사람의 키 파일을 읽기만 한다(moai-so7w). 시험의 격리는 없는 파일을 가리켜 기본 표다.
+    "keys",
     // 기한이 우선순위를 올린다(moai-dr8a.1q4). 훑는 판에는 기한 든 줄이 없어 아무것도 안 쓴다.
     "due",
 ];
@@ -9314,6 +9319,8 @@ fn every_command_still_speaks_json() {
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
         vec!["models", "--json"],
+        vec!["keys", "--json"],
+        vec!["keys", "--template", "--json"],
         vec!["config", "--json"],
         vec!["due", "apply", "--dry-run", "--json"],
         vec!["due", "apply", "--json"],
@@ -24846,6 +24853,71 @@ fn the_cross_version_smoke_script_still_runs() {
     assert!(out.status.success(), "스크립트가 떨어졌다\n{}", text(&out));
     let said = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(said.contains("그대로다"), "무엇을 쟀는지 안 말한다\n{said}");
+}
+
+/// **`moai tui --help` 는 사람의 키 파일이 바꾼 키를 댄다**(moai-aqmg) — 도움말을 낼 때만 그 파일을 읽고 다시 그린다.
+/// 종료 코드는 여느 도움말처럼 0 이고 stdout 에 선다. `moai help tui` 도 같은 길이다.
+#[test]
+fn the_tui_help_names_the_keys_the_file_changed() {
+    let s = Scratch::new("keys-help");
+    let keys = s.path().join("keys.toml");
+    std::fs::write(&keys, "[browse]\nquit = \"SPC x\"\n").unwrap();
+    for args in [&["tui", "--help"][..], &["help", "tui"][..]] {
+        let out = staged(args).current_dir(s.path()).env("MOAI_KEYS", &keys).output().unwrap();
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        let help = String::from_utf8_lossy(&out.stdout);
+        assert!(help.contains("    SPC x    quit"), "{args:?}: 바꾼 키를 안 댔다\n{help}");
+        assert!(!help.contains("SPC q"), "{args:?}: 옛 키가 남았다");
+    }
+    // 파일이 없으면 기본 키다.
+    let out = staged(&["tui", "--help"]).current_dir(s.path()).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stdout).contains("    SPC q    quit"));
+}
+
+/// **보통 명령은 키 파일을 안 연다**(moai-aqmg) — 깨진 키 파일이 `moai status` 의 종료 코드도 stderr 도 안 바꾼다.
+/// 키 파일의 탈은 탐색기 화면의 한 줄과 `moai keys` 만 댄다.
+#[test]
+fn a_broken_key_file_does_not_touch_ordinary_commands() {
+    let s = init("keys-broken");
+    let keys = s.path().join("keys.toml");
+    std::fs::write(&keys, "[browse\nquit = 3\n").unwrap();
+    let clean = staged(&["status"]).current_dir(s.path()).output().unwrap();
+    let broken = staged(&["status"]).current_dir(s.path()).env("MOAI_KEYS", &keys).output().unwrap();
+    assert!(broken.status.success(), "{}", String::from_utf8_lossy(&broken.stderr));
+    assert_eq!(broken.stdout, clean.stdout);
+    assert_eq!(broken.stderr, clean.stderr);
+}
+
+/// **`moai keys` 는 지금 도는 키와 바꾼 줄을 댄다**(moai-so7w) — 바꾼 줄은 `*` 와 옛 키를 달고, 버린 줄은 stderr 에
+/// 서며 종료는 0 이다. 트래커 밖에서도 선다.
+#[test]
+fn moai_keys_lists_what_the_file_changed() {
+    let s = Scratch::new("keys-list");
+    let keys = s.path().join("keys.toml");
+    std::fs::write(&keys, "[browse]\nquit = \"SPC x\"\ngrep = \"r\"\n").unwrap();
+    let out = staged(&["keys"]).current_dir(s.path()).env("MOAI_KEYS", &keys).env("MOAI_LANG", "en").output().unwrap();
+    assert!(out.status.success());
+    let shown = String::from_utf8_lossy(&out.stdout);
+    let quit = shown.lines().find(|l| l.contains("quit")).unwrap_or_default();
+    assert!(quit.starts_with("* quit") && quit.contains("SPC x") && quit.ends_with("was SPC q"), "{quit}");
+    let grep = shown.lines().find(|l| l.trim_start().starts_with("grep")).unwrap_or_default();
+    assert!(grep.starts_with("  grep") && grep.contains("/ · SPC /"), "버린 줄이 기본 키로 안 남았다: {grep}");
+    let told = String::from_utf8_lossy(&out.stderr);
+    assert!(told.contains("keys.toml:3 browse.grep: `r` clashes with browse.read"), "{told}");
+    let json = ok_keys(s.path(), &keys);
+    assert!(json.contains(r#""kind":"clash""#) && json.contains(r#""found":true"#), "{json}");
+    // 틀은 표준 출력으로만 — 파일을 안 쓴다.
+    let before = std::fs::read_to_string(&keys).unwrap();
+    let t = staged(&["keys", "--template"]).current_dir(s.path()).env("MOAI_KEYS", &keys).output().unwrap();
+    assert!(String::from_utf8_lossy(&t.stdout).contains("# quit = \"SPC q\""));
+    assert_eq!(std::fs::read_to_string(&keys).unwrap(), before);
+}
+
+fn ok_keys(dir: &Path, keys: &Path) -> String {
+    let out =
+        staged(&["keys", "--json"]).current_dir(dir).env("MOAI_KEYS", keys).env("MOAI_LANG", "en").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout).unwrap()
 }
 
 /// `docs/cli.md` 는 `--help` 에서 짓는다(moai-i3s8). 레퍼런스를 손으로 적으면

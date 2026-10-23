@@ -161,6 +161,51 @@ its key — a group goes one level down and a toggle keeps the menu open. `Esc` 
 closes it and does what it does there, so clicking a row closes the menu and puts
 the cursor on that row. Empty space inside the menu does nothing.
 
+## Change the keys
+
+The keys are yours to change, in a file of their own: `keys.toml` next to your
+user config — `~/.config/moai/keys.toml`, or under `$XDG_CONFIG_HOME/moai/`
+when that is set, unless `MOAI_CONFIG` or `MOAI_KEYS` points elsewhere. Write only the lines you change; every other key keeps its
+default.
+
+1. Get a starter file. `moai keys --template` prints every action under its
+   section with its default keys, commented out — save it where the file lives:
+
+       moai keys --template > ~/.config/moai/keys.toml
+
+2. Uncomment the lines you want and change them:
+
+   ```toml
+   [browse]
+   quit = "SPC x"
+   grep = ["/", "SPC /"]   # several keys: the first is the one the bar and the menu show
+   jot = "none"            # unbind it
+   [moves]
+   line_down = "n"         # moves are shared by the list, the picker, the statistics and the wiki
+   ```
+
+3. Start `moai tui` again — the file is read once, when the explorer starts. Run
+   `moai keys` to see the keys in force: the ones you changed are marked with
+   `*` and the old key.
+
+A line replaces **every** key of that action, the hidden ones too — `line_down
+= "n"` leaves the down arrow doing nothing, so list it again
+(`["n", "Down"]`) to keep it. Key names are spelt the way the explorer shows
+them: `SPC`, `Enter`, `Esc`, `Tab`, `Bksp`, `Ctrl-w w`, `gg`, `Alt-x`, and a
+capital letter for Shift.
+
+A line that cannot work is dropped on its own and that action keeps its default
+key; the explorer still opens and says so in one line. Swapping two keys is
+fine — clashes are measured after every line is in. Some keys cannot be changed:
+`Ctrl-C`, the digits `0`–`9` that jump to a project, `SPC v 1`–`9`, `SPC`
+itself, and the keys inside a text field (search, filter, the jot form). A
+window's `close` key can move to another key but cannot be set to `none` — it
+is the only way out of that window.
+
+`moai tui --help` and the menu name the keys you set. The help's sentences about
+the arrows, `Home` and the page keys still describe the defaults; `moai keys`
+lists every key exactly.
+
 ## The mouse
 
 The mouse is on to begin with; `SPC o m` turns it off and on, and the choice is
@@ -303,8 +348,12 @@ write there either.
   turn the mouse off with `SPC o m`
 - **Parking a thought says another moai is writing** — the form stays open; wait
   a moment and keep it again
+- **A key from `keys.toml` does nothing** — that line was dropped. The notice
+  line at start names it, and `moai keys` lists every dropped line with the
+  reason. Most often the key is already taken, or it starts a longer key and so
+  waits for the rest (`g` waits for `gg`)
 - **It asks who you are when you park a thought** — the tracker records a name and
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy

@@ -10,7 +10,7 @@
 //! 보지도 않을 디렉터리 이름까지 읽는다.
 
 use super::input::Input;
-use super::keys::{Chord, Goto, Lookup, PATH, PICK, Pick, label, lookup};
+use super::keys::{Bind, Chord, Goto, Lookup, PATH, PICK, Pick, lookup, said};
 use super::scroll::Scroll;
 use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
@@ -68,6 +68,8 @@ pub struct Picker {
     pub chord: Chord,
     /// 마지막 키가 못 한 까닭(못 읽는 디렉터리·거절된 등록). **다음 키에 걷힌다.**
     pub error: Option<String>,
+    /// 이 창의 키 표 — 든 쪽의 실행 중 표([`super::keys::Keymap::pick`], moai-bzm3)다. [`Picker::new`] 는 기본 표로 연다.
+    pub keys: &'static [Bind<Pick>],
 }
 
 /// 창이 든 쪽에 시키는 것.
@@ -87,13 +89,13 @@ pub enum Act {
 }
 
 /// `..` 에서 `a` 를 누른 까닭. 키 이름은 표에서 읽는다 — 등록 키를 옮기면 이 말도 따라온다.
-pub fn up_is_not_a_project(lang: crate::i18n::Lang) -> String {
-    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.up_is_not_a_project"), &[("key", &label(PICK, Pick::Register))])
+pub fn up_is_not_a_project(keys: &[Bind<Pick>], lang: crate::i18n::Lang) -> String {
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.up_is_not_a_project"), &[("key", &said(keys, Pick::Register))])
 }
 
 /// `./` 에서 Enter 를 누른 까닭.
-pub fn here_is_already_open(lang: crate::i18n::Lang) -> String {
-    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.here_is_already_open"), &[("key", &label(PICK, Pick::Register))])
+pub fn here_is_already_open(keys: &[Bind<Pick>], lang: crate::i18n::Lang) -> String {
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.here_is_already_open"), &[("key", &said(keys, Pick::Register))])
 }
 
 impl Picker {
@@ -107,6 +109,7 @@ impl Picker {
             typing: None,
             chord: Chord::default(),
             error: None,
+            keys: PICK,
         };
         p.cursor = p.first_dir();
         p
@@ -210,10 +213,10 @@ impl Picker {
                 Lookup::Pending | Lookup::Unknown => Act::Stay,
             };
         }
-        // 키의 뜻은 표([`PICK`])에서 읽는다. 창의 줄은 vi 쪽 이동(Ctrl-d 등)말고는 Ctrl·Alt 없이
+        // 키의 뜻은 표([`Picker::keys`])에서 읽는다. 창의 줄은 vi 쪽 이동(Ctrl-d 등)말고는 Ctrl·Alt 없이
         // 누른 키라, 거들쇠가 붙은 키는 표에 없어 아무 일도 없다. `g` 는 다음 키를 기다린다 —
         // 뜻 없는 다음 키는 기다린 `g` 와 함께 버려진다([`Chord::feed`]).
-        let Some(act) = self.chord.feed(PICK, k) else { return Act::Stay };
+        let Some(act) = self.chord.feed(self.keys, k) else { return Act::Stay };
         if let Pick::Step(m) = act {
             self.cursor = super::scroll::cursor(m, self.cursor, || self.rows().len());
             return Act::Stay;
@@ -227,7 +230,7 @@ impl Picker {
                 // `Enter 들어가기` 를 대고 있고, 하위 디렉터리가 없는 자리에서는 커서가
                 // 여기 서므로(`first_dir`) 아무 말 없으면 창이 멎은 줄 안다(`..` 의 `a` 와 같다).
                 Some(Row::Here) => {
-                    self.error = Some(here_is_already_open(lang));
+                    self.error = Some(here_is_already_open(self.keys, lang));
                     Act::Stay
                 }
                 None => Act::Stay,
@@ -235,7 +238,7 @@ impl Picker {
             Pick::Up => self.path_of(Row::Up).map_or(Act::Stay, Act::Go),
             Pick::Register => match row {
                 Some(Row::Up) => {
-                    self.error = Some(up_is_not_a_project(lang));
+                    self.error = Some(up_is_not_a_project(self.keys, lang));
                     Act::Stay
                 }
                 Some(r) => self.path_of(r).map_or(Act::Stay, Act::Register),
@@ -327,10 +330,10 @@ mod tests {
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Register("/w/mono".into()));
         p.cursor = 1;
         assert_eq!(press(&mut p, KeyCode::Char('a')), Act::Stay);
-        assert_eq!(p.error, Some(up_is_not_a_project(KO)));
+        assert_eq!(p.error, Some(up_is_not_a_project(PICK, KO)));
         // 문구는 표에서 키 이름을 읽어 짓는다 — 옮기기 전과 한 글자도 같다(moai-nc7w).
-        assert_eq!(up_is_not_a_project(KO), "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a");
-        assert_eq!(here_is_already_open(KO), "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a");
+        assert_eq!(up_is_not_a_project(PICK, KO), "`..` 은 등록하지 않는다 — 올라가서 `./` 에서 a");
+        assert_eq!(here_is_already_open(PICK, KO), "`./` 은 지금 열어 둔 디렉터리다 — 여기를 등록하려면 a");
         press(&mut p, KeyCode::Down);
         assert_eq!(p.error, None, "까닭이 다음 키에 안 걷혔다");
         // Ctrl·Alt 붙은 `a` 는 등록이 아니다

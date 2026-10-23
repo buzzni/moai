@@ -23,7 +23,7 @@
 //! **조각이다.** `App`·터미널을 모른다. 켜짐([`Ctx`])은 든 쪽이 재서 넘긴다. 격자를 어떻게
 //! 놓는가([`grid`])도 여기서 폭과 높이만 받아 정하고, `draw.rs` 는 그 격자를 칠하기만 한다.
 
-use super::keys::{BROWSE, Bind, Browse, Chord, Ctx, LEADER, Lookup, MENU, Menu, Off, lookup, name_of_key};
+use super::keys::{Bind, Browse, Chord, Ctx, LEADER, Lookup, Menu, Off, lookup, name_of_key};
 use crate::i18n::{Lang, say};
 use crate::text::{clip, width};
 use ratatui::crossterm::event::KeyEvent;
@@ -39,7 +39,7 @@ pub fn open(chord: &Chord) -> bool {
 /// 이동키는 메뉴를 닫고 그 이동([`moves`]), **그 밖은 아무 일도 없다.**
 pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     if !open(chord) {
-        return chord.feed(BROWSE, k);
+        return chord.feed(c.keys.browse, k);
     }
     // **연 키가 닫는다**(사용자 결정 2026-09-19) — doom·helix 의 버릇이고, 토글 층이 ESC 까지
     // 기다리면서 실제로 필요해졌다. 전에는 메뉴 안의 SPC 가 모르는 키라 아무 일도 없어, 눌러 본
@@ -50,7 +50,7 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
         chord.clear();
         return None;
     }
-    match lookup(MENU, &[k]) {
+    match lookup(c.keys.menu, &[k]) {
         Lookup::Run(Menu::Close) => {
             chord.clear();
             return None;
@@ -63,7 +63,7 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     }
     let mut seq = chord.held().to_vec();
     seq.push(k);
-    match lookup(BROWSE, &seq) {
+    match lookup(c.keys.browse, &seq) {
         Lookup::Run(act) if act.enabled(c).is_ok() => {
             // **상태를 대는 동작은 메뉴를 안 닫는다**(사용자 결정 2026-09-19) — 눌러 보며
             // 맞추는 것이라, 한 번 받고 닫으면 `SPC v 1`·`SPC v w` 를 맞출 때마다 메뉴를 다시
@@ -91,7 +91,7 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
         // 메뉴만 지우고 아무 일도 안 하면 먹통으로 보인다. 까닭을 대는 것(`Off::Why`)은 닫고 알린다.
         Lookup::Unknown if moves(k, c) => {
             chord.clear();
-            chord.feed(BROWSE, k)
+            chord.feed(c.keys.browse, k)
         }
         _ => None,
     }
@@ -102,9 +102,9 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
 /// 안 든다. 판정은 키 표에서 읽고, 무엇이 이동인가는 [`Browse::moves`] 가 가른다 — 이동키를
 /// 더하면 여기도 따라온다.
 fn moves(k: KeyEvent, c: &Ctx) -> bool {
-    match lookup(BROWSE, &[k]) {
+    match lookup(c.keys.browse, &[k]) {
         Lookup::Run(act) => act.moves() && act.enabled(c) != Err(Off::Quiet),
-        Lookup::Pending => BROWSE.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
+        Lookup::Pending => c.keys.browse.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
         Lookup::Unknown => false,
     }
 }
@@ -141,7 +141,9 @@ impl Entry {
 pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
     let mut seen = Vec::new();
     let mut out = Vec::new();
-    for b in BROWSE.iter().filter(|b| b.seq.len() > held.len() && under(b, held)) {
+    for b in c.keys.browse.iter().filter(|b| b.seq.len() > held.len() && under(b, held)) {
+        // 칸의 이름은 **수식키까지** 댄다(`name_of_key`) — 사람의 키 파일(moai-pxiy)이 `SPC Alt-f` 를 두면 `f` 로 대는
+        // 칸은 눌러도 안 듣는다.
         let next = b.seq[held.len()];
         if seen.contains(&next) {
             continue;
@@ -149,18 +151,23 @@ pub fn entries(held: &[KeyEvent], c: &Ctx, columns: &[String]) -> Vec<Entry> {
         seen.push(next);
         let mut seq = held.to_vec();
         seq.push(next.event());
-        match lookup(BROWSE, &seq) {
+        match lookup(c.keys.browse, &seq) {
             Lookup::Run(act) if act.enabled(c).is_ok() => {
                 let what = match act {
                     // 설정에 이름이 없으면 표의 낱말로 — 낱말은 표 한 곳에만 둔다.
                     Browse::Column(n) => columns.get(usize::from(n)).map_or(act.menu_word(c), String::as_str),
                     _ => act.menu_word(c),
                 };
-                out.push(Entry { key: next.name(), event: next.event(), what: what.into(), state: act.state(c) });
+                out.push(Entry {
+                    key: name_of_key(next.event()),
+                    event: next.event(),
+                    what: what.into(),
+                    state: act.state(c),
+                });
             }
             Lookup::Pending if live(&seq, c) => {
                 let what = format!("+{}", group(&seq, c.lang));
-                out.push(Entry { key: next.name(), event: next.event(), what, state: here(&seq, c) });
+                out.push(Entry { key: name_of_key(next.event()), event: next.event(), what, state: here(&seq, c) });
             }
             _ => {}
         }
@@ -313,7 +320,7 @@ fn group(seq: &[KeyEvent], lang: Lang) -> &'static str {
 /// 화면 묶음인지는 **표에서 읽는다** — 그 밑의 줄이 모두 화면 고르기([`Browse::Go`])인 묶음이다. 접두어 글자로 가르면
 /// 글자를 옮기는 날 상태가 말없이 사라진다.
 fn here(seq: &[KeyEvent], c: &Ctx) -> Option<&'static str> {
-    let mut below = BROWSE.iter().filter(|b| b.seq.len() > seq.len() && under(b, seq)).peekable();
+    let mut below = c.keys.browse.iter().filter(|b| b.seq.len() > seq.len() && under(b, seq)).peekable();
     let screens = below.peek().is_some() && below.all(|b| matches!(b.act, Browse::Go(_)));
     screens.then(|| c.screen().state(c.lang))
 }
@@ -332,7 +339,8 @@ fn under(b: &Bind<Browse>, seq: &[KeyEvent]) -> bool {
 /// 아무 토글도 없는 층이 ESC 를 기다린다. 하위 층의 토글은 안 센다: 그 층은 제 차례에 스스로
 /// 답한다.
 pub fn waits(held: &[KeyEvent], c: &Ctx) -> bool {
-    BROWSE
+    c.keys
+        .browse
         .iter()
         .filter(|b| b.seq.len() == held.len() + 1 && under(b, held))
         .any(|b| b.act.stateful() && b.act.enabled(c).is_ok())
@@ -340,12 +348,13 @@ pub fn waits(held: &[KeyEvent], c: &Ctx) -> bool {
 
 /// 이 접두어 밑에 켜진 동작이 하나라도 있나 — 없으면 하위 접두어도 안 선다.
 fn live(seq: &[KeyEvent], c: &Ctx) -> bool {
-    BROWSE.iter().any(|b| b.seq.len() > seq.len() && under(b, seq) && b.act.enabled(c).is_ok())
+    c.keys.browse.iter().any(|b| b.seq.len() > seq.len() && under(b, seq) && b.act.enabled(c).is_ok())
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::keys::Screen;
+    use super::super::keys::{BROWSE, MENU};
     use super::*;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
@@ -366,6 +375,21 @@ mod tests {
 
     fn layer() -> Ctx {
         Ctx { layer: true, ..inside() }
+    }
+
+    /// **수식키가 붙은 키는 그 이름으로 선다**(moai-pxiy) — 사람의 키 파일이 `SPC Alt-f` 를 두면 칸은 `Alt-f` 다. `f` 로
+    /// 대면 그 칸을 보고 누른 `f` 는 아무 일도 안 한다. 접두어를 기다리는 바(`next_keys`)도 같다.
+    #[test]
+    fn a_key_with_a_modifier_is_named_with_it() {
+        let (map, problems) =
+            super::super::keymap::build("[browse]\nfilter = \"SPC Alt-f\"\n[moves]\ntop = \"g Ctrl-g\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let c = Ctx { keys: map, ..inside() };
+        let root = entries(&[LEADER.event()], &c, &[]);
+        let filter = root.iter().find(|e| e.event.code == KeyCode::Char('f')).expect("거름망 칸이 없다");
+        assert_eq!((filter.key.as_str(), filter.event.modifiers), ("Alt-f", KeyModifiers::ALT));
+        let next = super::super::keys::next_keys(map.browse, &[k('g')]);
+        assert_eq!(next.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["Ctrl-g"]);
     }
 
     fn keys_of(e: &[Entry]) -> Vec<&str> {

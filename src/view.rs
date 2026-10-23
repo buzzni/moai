@@ -3464,6 +3464,46 @@ pub fn models_problems(reg: &crate::user_config::Registry, lang: Lang) -> Vec<St
         .collect()
 }
 
+/// `moai keys` 의 사람 화면(moai-so7w) — 파일의 자리 한 줄, 그리고 절마다 동작과 키. **바꾼 줄은 `*` 와 옛 키를 단다**
+/// — 색이 혼자 뜻을 지지 않는다. 키가 여럿이면 `·` 로 잇고 첫째가 바·메뉴의 이름이다.
+pub fn keys(
+    file: Option<&std::path::Path>,
+    found: bool,
+    listed: &[crate::tui::keymap::Listed],
+    lang: Lang,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    out.push(match file {
+        Some(f) if found => fill(say(lang, "keys.file"), &[("path", &crate::text::one_line(&f.display().to_string()))]),
+        Some(f) => fill(say(lang, "keys.file_missing"), &[("path", &crate::text::one_line(&f.display().to_string()))]),
+        None => say(lang, "keys.no_place").to_string(),
+    });
+    let shown =
+        |keys: &[String]| if keys.is_empty() { say(lang, "keys.unbound").to_string() } else { keys.join(" · ") };
+    let mut section = "";
+    // 칸은 절마다 맞춘다 — 탐색의 긴 이름(`sort_add_assignee`)이 한 글자 창의 줄까지 밀지 않게.
+    let (mut wide, mut keys_wide) = (0, 0);
+    for l in listed {
+        if l.section != section {
+            section = l.section;
+            let here = || listed.iter().filter(|m| m.section == section);
+            wide = here().map(|m| m.action.len()).max().unwrap_or(0);
+            keys_wide = here().map(|m| crate::text::width(&shown(&m.keys))).max().unwrap_or(0);
+            out.push(String::new());
+            out.push(format!("[{section}]"));
+        }
+        let now = shown(&l.keys);
+        if l.changed() {
+            let pad = keys_wide.saturating_sub(crate::text::width(&now));
+            let was = fill(say(lang, "keys.was"), &[("keys", &shown(&l.default))]);
+            out.push(format!("* {:<wide$}  {now}{}  {was}", l.action, " ".repeat(pad)));
+        } else {
+            out.push(format!("  {:<wide$}  {now}", l.action));
+        }
+    }
+    out
+}
+
 /// 사람이 읽는 표. 등급·effort도 제 줄에 서야 어느 값이 기본값인지 가를 수 있다.
 pub fn models(reg: &crate::user_config::Registry, lang: Lang) -> Vec<String> {
     use crate::user_config::MODELS_DEFAULT;
