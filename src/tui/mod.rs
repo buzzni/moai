@@ -11,6 +11,7 @@ mod hint;
 pub mod init_screen;
 pub mod input;
 pub mod jotfile;
+pub mod keymap;
 pub mod keys;
 pub mod layer;
 pub mod menu;
@@ -1359,6 +1360,10 @@ pub struct App {
     /// `trouble` 과 **따로 든다.** 쓰기 뒤 다시 읽기가 실패하면 둘이 함께 참이다 —
     /// 파일에는 담겼고 화면은 못 읽었다. 한 칸에 담으면 어느 한쪽이 거짓말을 한다.
     pub notice: Option<String>,
+    /// 실행 중의 키 표(moai-bzm3) — 띄울 때 사람의 `keys.toml` 을 한 번 읽어 짓는다([`keymap::load`]). 핫리로드는
+    /// 없다. 시험과 [`App::new`] 는 기본 표다. 키 처리·바·메뉴·거절문·창이 **모두 이것을** 읽는다 — 한 자리라도 기본
+    /// 표를 바로 읽으면 바꾼 키를 바는 옛 이름으로 댄다.
+    pub keys: keys::Keymap,
     /// 상세에 선 본문을 펼쳐 둔 한 벌(moai-fauw, [`draw::Body`]) — **그리기 전에** `draw::fill_body`
     /// 가 채운다. 그리는 쪽은 `&App` 만 빌려 제자리에서 못 넣고, 안 넣으면 프레임마다 같은 본문을
     /// 다시 판다. 값일 뿐이라 비어 있어도 그림은 같다 — 그때는 그리는 쪽이 그 자리에서 편다.
@@ -2097,6 +2102,7 @@ impl App {
             held: None,
             write_failed: false,
             notice: None,
+            keys: keys::Keymap::default(),
             body: None,
             note_hits: None,
             user: None,
@@ -2366,8 +2372,8 @@ impl App {
                     // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
                     Landing::Hidden => {
                         let veil = self.site.index.find(&id).map(|at| self.site.veil(at)).unwrap_or_default();
-                        let clear = keys::label(keys::BROWSE, keys::Browse::ClearFilter);
-                        let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
+                        let clear = keys::said(self.keys.browse, keys::Browse::ClearFilter);
+                        let show = keys::said(self.keys.browse, keys::Browse::ShowAll);
                         match veil {
                             Veil { filtered: true, viewed: true } => fill(
                                 say(lang, "tui.write.veiled_both"),
@@ -3412,7 +3418,7 @@ impl App {
     /// 차례 편집 창(`SPC s e`, moai-r170.x22)의 키 하나. 창이 고친 차례를 내면 입히고 적는다.
     pub(super) fn edit_sort(&mut self, k: KeyEvent) {
         let Mode::Sort(e) = &mut self.mode else { return };
-        let Lookup::Run(act) = keys::lookup(keys::SORTER, &[k]) else { return };
+        let Lookup::Run(act) = keys::lookup(self.keys.sorter, &[k]) else { return };
         match e.act(act) {
             sorter::Done::Stay => {}
             sorter::Done::Cancel => self.mode = Mode::Browse,
@@ -3579,6 +3585,19 @@ impl App {
             self.notice = Some(fill(say(self.site.lang, "tui.look.problems"), &[("why", &problems.join(" · "))]));
         }
         self.see();
+    }
+
+    /// 사람의 키 파일(`keys.toml`)이 지은 표를 입힌다(moai-bzm3) — 띄울 때 한 번이고 핫리로드는 없다. 버린 줄이 있으면
+    /// **알림에 한 줄을 잇는다** — 보기 설정의 탈([`App::adopt_look`])이 먼저 섰으면 그 뒤에 선다. 덮으면 하나를 잃는다.
+    /// TUI 는 그대로 열린다: 버린 줄은 기본 키로 남았다.
+    pub fn adopt_keys(&mut self, keys: keys::Keymap, problems: &[keymap::Problem], file: Option<&std::path::Path>) {
+        self.keys = keys;
+        if let Some(said) = keymap::notice(problems, file, self.site.lang) {
+            self.notice = Some(match self.notice.take() {
+                Some(before) => format!("{before} · {said}"),
+                None => said,
+            });
+        }
     }
 
     fn apply_look(&mut self, look: &crate::user_config::Look, problems: &mut Vec<String>) {
@@ -5714,6 +5733,7 @@ impl App {
             right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang, layout),
             up_pane: self.focus.step(keys::Side::Up, self.detail_at).word(self.site.lang, layout),
             down_pane: self.focus.step(keys::Side::Down, self.detail_at).word(self.site.lang, layout),
+            keys: self.keys,
         }
     }
 
@@ -6058,11 +6078,11 @@ impl App {
     /// 빼고 보기가 그 줄을 보이는가([`view::View::shows`]).
     fn veiled_row(&self, id: &str, at: usize) -> String {
         let (site, lang) = (&self.site, self.site.lang);
-        let show = keys::label(keys::BROWSE, keys::Browse::ShowAll);
+        let show = keys::said(self.keys.browse, keys::Browse::ShowAll);
         if self.view.show_archived || !site.archived(at) {
             return fill(say(lang, "tui.veiled_row"), &[("id", id), ("show", &show)]);
         }
-        let old = keys::label(keys::BROWSE, keys::Browse::Archived);
+        let old = keys::said(self.keys.browse, keys::Browse::Archived);
         let backlog = crate::report::is_backlog(&site.issues[at]);
         match self.view.shows(site.column(at), site.index.shelved_at(at).is_some(), backlog, &site.cfg.statuses) {
             true => fill(say(lang, "tui.veiled_archived"), &[("id", id), ("old", &old)]),
@@ -6102,7 +6122,7 @@ impl App {
         let open: Vec<String> = [keys::Browse::Grep, keys::Browse::Filter, keys::Browse::Jot]
             .into_iter()
             .filter(|a| a.enabled(&ctx).is_ok())
-            .map(|a| format!("`{}`", keys::label(keys::BROWSE, a)))
+            .map(|a| format!("`{}`", keys::said(self.keys.browse, a)))
             .collect();
         let open = open.join("·");
         match &mut self.mode {
@@ -6179,9 +6199,9 @@ impl App {
     /// Ctrl-C 는 폼보다 먼저 [`App::key`] 가 받는다 — 어느 모드에서든 나가는 길이다. 적던 것은
     /// 그 길로 날아가지만, raw mode 에서 Ctrl-C 를 막으면 멈춘 화면에서 나갈 길이 없어진다.
     fn jot(&mut self, k: KeyEvent) {
-        let lang = self.site.lang;
+        let (lang, confirm) = (self.site.lang, self.keys.confirm);
         let Mode::Backlog(form) = &mut self.mode else { return };
-        match form.key(k, lang) {
+        match form.key(k, confirm, lang) {
             Act::Stay => {}
             Act::Save => save_backlog(self),
             Act::Close => {
@@ -8825,6 +8845,82 @@ mod tests {
         a.cursor = 0; // `..`
         a.key(key(KeyCode::Enter));
         assert!(a.site.path.is_empty());
+    }
+
+    /// **탐색기가 사람의 키 파일이 지은 표로 돈다**(moai-bzm3) — 키 처리·메뉴·이동이 한 표를 읽는다. 한 자리라도 기본
+    /// 표를 바로 읽으면 옛 키가 그대로 듣거나, 메뉴가 안 듣는 키를 댄다.
+    #[test]
+    fn the_explorer_runs_on_the_keys_the_file_built() {
+        let (map, problems) = keymap::build(
+            "[browse]\nquit = \"SPC x\"\nfilter = \"none\"\n[menu]\nclose = \"none\"\n[moves]\nline_down = \"n\"\n",
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut a = app();
+        a.adopt_keys(map, &problems, None);
+        assert_eq!(a.notice, None, "버린 줄이 없는데 알림이 섰다");
+        // 메뉴의 뿌리가 바뀐 키를 댄다 — `q` 는 없고 `x` 가 끝내기다. 뗀 거름망(`f`)은 안 선다.
+        let rows = a.rows();
+        let ctx = a.key_ctx(&rows);
+        let root: Vec<String> = menu::entries(&[keys::LEADER.event()], &ctx, &[]).into_iter().map(|e| e.key).collect();
+        assert!(root.contains(&"x".to_string()) && !root.contains(&"q".to_string()), "{root:?}");
+        assert!(!root.contains(&"f".to_string()), "뗀 키가 메뉴에 섰다: {root:?}");
+        // 옛 키는 안 듣는다. 메뉴의 Esc 를 뗐어도 연 키(SPC)는 닫는다.
+        a.hit("SPC q");
+        assert!(!a.quit, "옛 SPC q 가 끝냈다");
+        a.hit("Esc");
+        assert!(menu::open(&a.chord), "뗀 Esc 가 메뉴를 닫았다");
+        a.hit("SPC");
+        assert!(!menu::open(&a.chord), "SPC 가 메뉴를 못 닫았다");
+        // **메뉴의 나가는 법을 뗐어도 그림이 선다** — 그 칸이 댈 키가 없을 뿐이다.
+        a.hit("SPC v");
+        let _ = super::draw::tests::render(&mut a, 100, 30);
+        a.hit("SPC");
+        // 이동도 바뀐 표다 — `n` 이 내리고 `j` 는 안 듣는다.
+        let at = a.cursor;
+        a.hit("n");
+        assert_eq!(a.cursor, at + 1, "n 이 안 내렸다");
+        a.hit("j");
+        assert_eq!(a.cursor, at + 1, "옛 j 가 내렸다");
+        a.hit("SPC x");
+        assert!(a.quit, "SPC x 로 못 나갔다");
+    }
+
+    /// **키를 뗀 동작은 키 바에 안 선다**(moai-pxiy) — 이름 없는 칸은 눌러 볼 키가 없는 낱말뿐이다. 뗀 `/` 가 바에서 빠지고,
+    /// 나머지(`SPC 메뉴`)는 그대로 선다.
+    #[test]
+    fn an_unbound_action_leaves_the_key_bar() {
+        let (map, problems) = keymap::build("[browse]\ngrep = \"none\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::En;
+        let before = super::draw::tests::render(&mut a, 120, 20);
+        let bar = before.last().expect("바가 없다").clone();
+        assert!(bar.contains(" / search"), "전제: 기본 바가 `/` 를 댄다 — {bar}");
+        a.adopt_keys(map, &problems, None);
+        let after = super::draw::tests::render(&mut a, 120, 20);
+        let bar = after.last().expect("바가 없다");
+        assert!(!bar.contains("search"), "뗀 키의 칸이 바에 섰다 — {bar}");
+        assert!(bar.contains("SPC"), "바가 통째로 사라졌다 — {bar}");
+    }
+
+    /// **버린 줄은 알림 한 줄로 선다**(moai-bzm3) — 파일과 줄과 동작을 대고, 보기 설정의 탈이 먼저 섰으면 그 뒤에
+    /// 잇는다. 덮으면 하나를 잃는다. 버린 줄의 동작은 기본 키로 남는다.
+    #[test]
+    fn dropped_key_lines_stand_as_one_notice() {
+        let (map, problems) = keymap::build("[browse]\ngrep = \"r\"\n");
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::Ko;
+        a.notice = Some("보기 설정 — 무엇".into());
+        a.adopt_keys(map, &problems, Some(std::path::Path::new("/k/keys.toml")));
+        assert_eq!(
+            a.notice.as_deref(),
+            Some(
+                "보기 설정 — 무엇 · 키 파일 — /k/keys.toml:2 browse.grep: `r` 가 browse.read 와 겹친다 — 그 줄은 기본 키로 남는다"
+            )
+        );
+        a.notice = None;
+        a.hit("/");
+        assert!(matches!(a.mode, Mode::Grep(..)), "버린 줄의 동작이 기본 키로 안 남았다: {:?}", a.mode);
     }
 
     #[test]

@@ -24,6 +24,9 @@ out=${1:-$root/docs/cli.md}
 }
 
 export MOAI_LANG=ko NO_COLOR=1 COLUMNS=80
+# **도움말은 기본 키로 짓는다**(moai-aqmg) — `--help` 는 사람의 `keys.toml` 이 바꾼 키를 대므로, 그 파일을 없는
+# 자리로 돌리지 않으면 짓는 사람의 키가 커밋된다.
+export MOAI_KEYS=/nonexistent/moai-gen-cli-docs/keys.toml
 
 # `Commands:` 칸의 이름만 집는다. `help` 는 clap 이 저절로 붙이는 것이라 뺀다.
 #

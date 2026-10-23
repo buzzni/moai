@@ -15,7 +15,7 @@
 //! 조각이 아니다 — 저장소와 사용자 설정을 연다(`input::NOT_COMPONENTS`).
 
 use super::form::{Form, Target};
-use super::keys::{BROWSE, Browse, JOT, Jot, label};
+use super::keys::{Browse, JOT, Jot, said};
 use super::{App, Row, Stamp};
 use crate::i18n::{Lang, say};
 use crate::nav::Index;
@@ -1084,7 +1084,7 @@ impl App {
             // 문구 속 키 이름은 표에서 읽는다 — 키를 옮기면 이 말도 따라온다.
             None => crate::i18n::fill(
                 say(lang, "tui.jot.no_place"),
-                &[("close", &label(JOT, Jot::Close)), ("jot", &label(BROWSE, Browse::Jot))],
+                &[("close", &said(JOT, Jot::Close)), ("jot", &said(self.keys.browse, Browse::Jot))],
             ),
             Some(t) if self.on_layer() => {
                 let name = crate::text::one_line(&t.name);
@@ -1103,7 +1103,7 @@ impl App {
                     }
                     None => crate::i18n::fill(
                         say(lang, "tui.layer.dropped"),
-                        &[("name", &name), ("close", &label(JOT, Jot::Close))],
+                        &[("name", &name), ("close", &said(JOT, Jot::Close))],
                     ),
                 }
             }
@@ -1111,8 +1111,8 @@ impl App {
                 say(lang, "tui.jot.elsewhere"),
                 &[
                     ("name", &crate::text::one_line(&t.name)),
-                    ("close", &label(JOT, Jot::Close)),
-                    ("jot", &label(BROWSE, Browse::Jot)),
+                    ("close", &said(JOT, Jot::Close)),
+                    ("jot", &said(self.keys.browse, Browse::Jot)),
                 ],
             ),
         };

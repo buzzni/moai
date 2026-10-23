@@ -86,8 +86,27 @@ fn said_lang() -> i18n::Lang {
     *LANG.get_or_init(|| picked)
 }
 
+/// argv 를 푼다. **도움말을 낼 때만 사람의 키 파일을 읽는다**(moai-aqmg) — 그때 도움말을 그 키로 다시 그린다
+/// ([`cli::command`]). 다른 명령은 그 파일을 안 연다: 깨진 키 파일 하나가 `moai status` 를 흔들면 안 된다.
+fn parse() -> cli::Cli {
+    use clap::FromArgMatches;
+    use clap::error::ErrorKind;
+    let e = match cli::Cli::try_parse() {
+        Ok(cli) => return cli,
+        Err(e) => e,
+    };
+    if !matches!(e.kind(), ErrorKind::DisplayHelp | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand) {
+        e.exit();
+    }
+    let (_, keys, _) = tui::keymap::load_from(|k| std::env::var_os(k));
+    match cli::command(&keys).try_get_matches() {
+        Ok(m) => cli::Cli::from_arg_matches(&m).unwrap_or_else(|e| e.exit()),
+        Err(e) => e.exit(),
+    }
+}
+
 fn main() -> ExitCode {
-    let cli = cli::Cli::parse();
+    let cli = parse();
 
     // `--json` 이면 색을 하드코딩으로 끈다. JSON 에 이스케이프가 섞이면
     // 받는 쪽의 파서가 깨지고, 그건 플래그로 고를 일이 아니다.

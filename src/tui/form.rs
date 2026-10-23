@@ -13,7 +13,7 @@
 
 use super::edit::Editor;
 use super::input::Input;
-use super::keys::{CONFIRM, Confirm, JOT, Jot, Lookup, lookup};
+use super::keys::{Bind, Confirm, JOT, Jot, Lookup, lookup};
 use ratatui::crossterm::event::KeyEvent;
 
 /// 폼 안의 어느 칸이 키를 먹는가. **폼 안의 포커스다** — 탐색기의 [`super::Pane`] 은
@@ -108,10 +108,12 @@ impl Form {
     /// - **Esc** 닫기. 적던 것이 있으면 한 번 묻고, `y` 만 버린다. 다른 키는 폼으로
     ///   돌아가며 **글자로 들어가지 않는다** — 물음을 못 보고 친 글자가 엉뚱한 자리에
     ///   찍히면 안 된다
-    pub fn key(&mut self, k: KeyEvent, lang: crate::i18n::Lang) -> Act {
+    ///
+    /// `confirm` 은 "버릴까" 에 답하는 표 — 든 쪽의 실행 중 표다(moai-bzm3). 폼의 키([`JOT`])는 못 바꾼다.
+    pub fn key(&mut self, k: KeyEvent, confirm: &[Bind<Confirm>], lang: crate::i18n::Lang) -> Act {
         if self.leaving {
             self.leaving = false;
-            return match lookup(CONFIRM, &[k]) {
+            return match lookup(confirm, &[k]) {
                 Lookup::Run(Confirm::Yes) => Act::Close,
                 _ => Act::Stay,
             };
@@ -180,6 +182,7 @@ impl Form {
 
 #[cfg(test)]
 mod tests {
+    use super::super::keys::CONFIRM;
     use super::*;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
@@ -187,7 +190,7 @@ mod tests {
     const KO: crate::i18n::Lang = crate::i18n::Lang::Ko;
 
     fn press(f: &mut Form, code: KeyCode) -> Act {
-        f.key(KeyEvent::new(code, KeyModifiers::NONE), KO)
+        f.key(KeyEvent::new(code, KeyModifiers::NONE), CONFIRM, KO)
     }
 
     fn type_in(f: &mut Form, s: &str) {
@@ -203,9 +206,9 @@ mod tests {
         press(&mut f, KeyCode::Tab);
         type_in(&mut f, "본문");
         assert_eq!((f.title.text(), f.body.text().as_str(), f.field), ("제목", "본문", Field::Body));
-        f.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT), KO);
+        f.key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT), CONFIRM, KO);
         assert_eq!(f.field, Field::Title);
-        f.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), KO);
+        f.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT), CONFIRM, KO);
         assert_eq!(f.field, Field::Body, "Shift 붙은 Tab 이 안 돌았다");
     }
 
@@ -227,20 +230,24 @@ mod tests {
         // F2 는 걷었다(moai-7sjm) — 제목이 있어도 아무 일도 없다.
         let mut f = Form::default();
         type_in(&mut f, "생각");
-        assert_eq!(f.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE), KO), Act::Stay, "걷은 F2 가 담았다");
+        assert_eq!(
+            f.key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE), CONFIRM, KO),
+            Act::Stay,
+            "걷은 F2 가 담았다"
+        );
         let save = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
         let mut f = Form::default();
         press(&mut f, KeyCode::Tab);
         type_in(&mut f, "본문만");
-        assert_eq!(f.key(save, KO), Act::Stay, "{save:?}: 빈 제목으로 담았다");
+        assert_eq!(f.key(save, CONFIRM, KO), Act::Stay, "{save:?}: 빈 제목으로 담았다");
         assert_eq!((f.error.as_deref(), f.field), (Some(empty_title(KO)), Field::Title), "{save:?}");
         // 빈칸뿐인 제목도 빈 제목이다
         type_in(&mut f, "   ");
-        assert_eq!(f.key(save, KO), Act::Stay);
+        assert_eq!(f.key(save, CONFIRM, KO), Act::Stay);
         // 치면 까닭이 걷힌다
         type_in(&mut f, "생각");
         assert_eq!(f.error, None, "치기 시작했는데 까닭이 남았다");
-        assert_eq!(f.key(save, KO), Act::Save, "{save:?}");
+        assert_eq!(f.key(save, CONFIRM, KO), Act::Save, "{save:?}");
         assert_eq!(f.title(), "생각");
     }
 
@@ -267,7 +274,7 @@ mod tests {
             assert_eq!(press(&mut f, KeyCode::Esc), Act::Stay, "Esc 두 번에 버렸다");
             press(&mut f, KeyCode::Esc);
             assert_eq!(
-                f.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL), KO),
+                f.key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL), CONFIRM, KO),
                 Act::Stay,
                 "Ctrl-Y 로 버렸다"
             );
