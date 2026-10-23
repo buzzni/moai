@@ -55,7 +55,7 @@ document.querySelectorAll('.lang a[data-lang]').forEach(function (a) {
     if (!el._player && window.AsciinemaPlayer) {
       el._player = AsciinemaPlayer.create(el.dataset.cast, el, {
         cols: Number(el.dataset.cols), rows: Number(el.dataset.rows), fit: 'width', loop: true,
-        autoPlay: !reduce, controls: reduce, idleTimeLimit: 2, poster: 'npt:0:6', theme: 'moai',
+        autoPlay: !reduce, controls: reduce, idleTimeLimit: 2, poster: 'npt:0:6', theme: 'moai', speed: Number(el.dataset.speed || 1),
         terminalFontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace'
       });
       return null;
