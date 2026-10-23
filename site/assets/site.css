@@ -150,12 +150,16 @@ nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-dec
 /* logo marquee */
 .logos { padding: 72px 0 8px; }
 .logos h2 { text-align: center; font-size: 14px; font-weight: 500; color: var(--muted); margin: 0 0 26px; letter-spacing: .01em; }
-.marquee { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent); }
-.track { display: flex; gap: 56px; width: max-content; animation: slide 36s linear infinite; }
+.marquee { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+/* 로고 묶음을 세 벌 이어 두고 한 벌 폭만큼 흘린다 — 한 벌이 본문 폭보다 좁아도 빈자리가 안 보인다 */
+.track { display: flex; gap: 20px; width: max-content; animation: slide 30s linear infinite; }
 .marquee:hover .track { animation-play-state: paused; }
-@keyframes slide { to { transform: translateX(calc(-50% - 28px)); } }
+@keyframes slide { to { transform: translateX(calc((100% + 20px) / -3)); } }
 @media (prefers-reduced-motion: reduce) { .track { animation: none; } .slide, .slide[hidden] { transition: none; transform: none; } }
-.slot { flex: none; height: 44px; width: 150px; border: 1px dashed #3a3e3a; border-radius: 8px; display: grid; place-items: center; font: 12px var(--mono); color: var(--faint); }
+/* 로고는 제 색 그대로 둔다. 투명 바탕이라 흰 판을 깔고, 흰 글자 로고(Data HUB)만 검은 판에 얹는다 */
+.slot { flex: none; height: 56px; padding: 0 26px; border-radius: 10px; background: #fff; display: flex; align-items: center; }
+.slot img { display: block; height: 26px; width: auto; }
+.slot.dark { background: #000; box-shadow: inset 0 0 0 1px var(--line); }
 
 /* 장면: 글을 위에, 녹화를 아래에. 녹화는 본문과 같은 세로선 안에 선다 — 터미널 녹화는 그 폭에서 글자가
    읽히도록 120칸으로 찍는다(scripts/site-demo/record-tui.sh 의 SIZE) */
