@@ -7476,3 +7476,31 @@
 {"ts":"2026-10-22T11:08:57Z","id":"moai-wwd2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-22T11:35:20Z","id":"moai-wwd2","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 릴리스 절차, fmt 고침)"}
 {"ts":"2026-10-22T11:35:20Z","id":"moai-wwd2","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.22.0 나갔다 — PR #41, 태그 v0.22.0, 자산 7개. CI fmt 실패는 569f0586 으로 고쳤다"}
+{"ts":"2026-10-23T06:56:58Z","id":"moai-oghw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.22.1"}
+{"ts":"2026-10-23T07:05:47Z","id":"moai-d1dq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"모노레포 하위 트래커의 위키 자리를 바로 댄다"}
+{"ts":"2026-10-23T07:05:47Z","id":"moai-d1dq.aj9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 알림이 하위 프로젝트 자리를 안 댄다"}
+{"ts":"2026-10-23T07:05:47Z","id":"moai-d1dq.r05","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 위키가 없는 위키를 못 읽었다고 한다"}
+{"ts":"2026-10-23T07:05:47Z","id":"moai-d1dq.ddg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 스킬과 도움말이 dir 의 기준을 안 댄다"}
+{"ts":"2026-10-23T07:08:51Z","id":"moai-q669","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"wiki ls --json 에 위키 디렉터리의 절대 경로 키"}
+{"ts":"2026-10-23T07:08:59Z","id":"moai-d1dq.aj9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"절대 경로 JSON 키는 backlog moai-q669 다(본문의 \"backlog 에 따로 담겨 있다\")."}
+{"ts":"2026-10-23T07:09:09Z","id":"moai-d1dq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Plan (anthropic/opus-5.5, xhigh): 보고의 전제(\"위키가 git 뿌리를 읽는다\")는 코드와 재현 둘 다로 틀렸다.\n- 찾는 자리는 이미 `.moai` 를 든 디렉터리다 — `src/cmd/wiki.rs:70`·`src/tui/wiki.rs:913` 가 `wiki::load(repo.here(), …)`, 웹은 자식을 `repo.here()`(`src/cmd/web.rs:79`)·걸어 둔 자리(`src/web/mod.rs:284`)에서 띄운다. 워크트리·Mirrored·`-C`·하위 디렉터리 모두 재현에서 `projects/etv/docs` 를 읽었다\n- 보고 저장소(`shopping_crawler`)에는 `docs` 도 `projects/etv/docs` 도 없다 — 알림은 참이었고, `docs/` 라고만 대서 git 뿌리로 읽혔다. 그 문구는 웹의 `page.shell.wikiListFailed`(\"could not be read\") 였다\n- 그래서 세 멤버는 찾는 자리를 안 바꾸고 대는 자리만 고친다: aj9(CLI·탐색기 알림), r05(웹 빈 위키), ddg(스킬·브리프·도움말). 새 JSON 키는 minor 라 backlog moai-q669 로 뺐다"}
+{"ts":"2026-10-23T07:10:04Z","id":"moai-d1dq","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 원인 분석과 계획, 서브에이전트)"}
+{"ts":"2026-10-23T07:27:32Z","id":"moai-d1dq.aj9","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 알림이 하위 프로젝트 자리를 안 댄다"}
+{"ts":"2026-10-23T07:27:32Z","id":"moai-d1dq.r05","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 위키가 없는 위키를 못 읽었다고 한다"}
+{"ts":"2026-10-23T07:27:32Z","id":"moai-d1dq.ddg","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 스킬과 도움말이 dir 의 기준을 안 댄다"}
+{"ts":"2026-10-23T07:27:32Z","id":"moai-d1dq","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"모노레포 하위 트래커의 위키 자리를 바로 댄다"}
+{"ts":"2026-10-23T07:27:32Z","id":"moai-oghw","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.22.1"}
+{"ts":"2026-10-23T08:26:25Z","id":"moai-ghj5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.22.1"}
+{"ts":"2026-10-23T08:26:34Z","id":"moai-i5so","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"관리자 승인 머지에서 태그와 릴리스를 자동으로"}
+{"ts":"2026-10-23T08:26:34Z","id":"moai-i5so.7p8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"main 머지 뒤 태그를 달고 release.yml 을 부르는 워크플로"}
+{"ts":"2026-10-23T08:26:34Z","id":"moai-i5so.kke","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CONTRIBUTING 의 Releasing 을 자동 태그 흐름으로 고친다"}
+{"ts":"2026-10-23T08:26:34Z","id":"moai-i5so.we8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"bump-version.sh 의 다음 걸음 안내에서 손 태그를 걷는다"}
+{"ts":"2026-10-23T08:26:40Z","id":"moai-i5so.7p8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T08:28:24Z","id":"moai-4nmr","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.23.0 을 낸다"}
+{"ts":"2026-10-23T08:28:32Z","id":"moai-i5so.kke","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T08:28:32Z","id":"moai-4nmr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T08:28:32Z","id":"moai-i5so.we8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T08:32:35Z","id":"moai-i5so.ifx","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 관리자 승인 자동 태그 에픽"}
+{"ts":"2026-10-23T08:32:57Z","id":"moai-i5so.ifx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T08:40:51Z","id":"moai-4nmr","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 릴리스 절차)"}
+{"ts":"2026-10-23T08:40:52Z","id":"moai-4nmr","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.23.0 나갔다 — PR #44, 태그 v0.23.0, 자산 7개, smoke 통과"}
