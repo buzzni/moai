@@ -414,6 +414,7 @@
   "tui.keys.not_keys": "write a key name or a list of them",
   "tui.keys.bad_key": "`{key}` is not a key name",
   "tui.keys.one_key": "`{key}` — this window reads one key at a time",
+  "tui.keys.no_way_out": "this is the window's way out — give it another key instead of none",
   "tui.keys.clash": "`{key}` clashes with {with}",
   "keys.file": "key file {path}",
   "keys.file_missing": "key file {path} — not there, so every key is the default",

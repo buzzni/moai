@@ -7,7 +7,7 @@
 //! 않는다 — 층이 읽은 파일(`Layer::config`)이나, 층이 없으면 띄울 때 받은 자리
 //! (`App::user_config`)다. 환경을 여기서 다시 읽으면 시험이 돌리는 사람의 설정을 쓴다.
 
-use super::keys::{Browse, Confirm, Lookup, label, lookup};
+use super::keys::{Browse, Confirm, Lookup, lookup, said};
 use super::layer::Relayered;
 use super::picker::{Act, Dent, Listing, Picker};
 use super::{App, Mode, Row};
@@ -248,7 +248,7 @@ impl App {
                 let back = if self.on_layer() || self.layer.is_none() || !layer.is_empty() {
                     String::new()
                 } else {
-                    fill(say(lang, "tui.register.go_up"), &[("key", &label(self.keys.browse, Browse::Project(0)))])
+                    fill(say(lang, "tui.register.go_up"), &[("key", &said(self.keys.browse, Browse::Project(0)))])
                 };
                 self.notice = Some(format!("{what} · {}{bad}{bare}{layer}{back}", shown(&added.path)));
                 if let Mode::Pick(p) = &self.mode {

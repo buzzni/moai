@@ -132,7 +132,6 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     // **말은 화면이 이미 든 것이다**(`App::site.lang`) — 여기서 `ctx.lang()` 을 다시 물으면 밖에서 띄운
     // 길(`outside`)이 같은 설정을 한 번 더 판다(`super::lang_of` 가 적어 둔 그 까닭이다).
     app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
-    adopt_keys(&mut app);
     // `reg.read` 가 옮겨 가기 전에 잰다 — 통째로 빌리는 자리다.
     let repo_ok = super::update::chosen_repo(app.site.lang, &reg, |k| std::env::var_os(k)).is_ok();
     // 읽음은 이 저장소의 제 파일에 산다(moai-omx7) — 설정에서 오는 것은 겹쳐 볼 옛 `[read]` 뿐이다.
@@ -141,6 +140,9 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     let mut app = app.attach_layer(layer);
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    // **키 파일의 알림은 띄우는 걸음의 맨 끝에 잇는다**(리뷰 moai-pxiy.bfb 8번) — 알림을 세우는 걸음(보기·읽음·층)이
+    // 앞에 서면 그것이 덮어 키의 한 줄이 첫 화면 앞에서 사라진다. [`crate::tui::App::adopt_keys`] 는 덮지 않고 잇는다.
+    adopt_keys(&mut app);
     let config = app.user_config.clone();
     // 설정이 무엇이라 했는지는 **위에서 한 번 읽은 것**을 그대로 든다(moai-d74q). `reg.read` 가
     // 옮겨 간 뒤에도 이 필드는 그대로 읽힌다 — 옮긴 것은 그 필드 하나다.
@@ -152,11 +154,12 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
 /// 읽는다: 화면에서 누를 키와 거절문이 대는 키가 같아야 한다.
 fn screen_key(act: crate::tui::keys::Browse) -> String {
     let (_, keys, _) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
-    crate::tui::keys::label(keys.browse, act)
+    crate::tui::keys::said(keys.browse, act)
 }
 
-/// 사람의 키 파일을 읽어 입힌다(moai-bzm3) — 안에서 띄운 길과 밖에서 띄운 길이 같은 자를 지난다. **보기 설정 뒤에
-/// 부른다**: 둘 다 알림을 세우고, 키 쪽이 그 뒤에 잇는다([`crate::tui::App::adopt_keys`]). 보통 명령은 이 파일을 안 연다.
+/// 사람의 키 파일을 읽어 입힌다(moai-bzm3) — 안에서 띄운 길과 밖에서 띄운 길이 같은 자를 지난다. **알림을 세우는 걸음
+/// 모두의 뒤에 부른다**: 키 쪽은 앞의 알림 뒤에 잇고([`crate::tui::App::adopt_keys`]), 앞의 걸음은 덮는다. 보통 명령은
+/// 이 파일을 안 연다.
 fn adopt_keys(app: &mut App) {
     let (file, keys, problems) = crate::tui::keymap::load_from(|k| std::env::var_os(k));
     app.adopt_keys(keys, &problems, file.as_deref());
@@ -297,12 +300,13 @@ fn outside(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
     app.config_tried.saw(reg.trouble);
     // 적어 둔 보기(칸 숨김·정렬·열)를 입힌다(moai-2bzp).
     app.adopt_look(&reg.look, crate::view::look_problems(&reg, app.site.lang));
-    adopt_keys(&mut app);
     let repo_ok = super::update::chosen_repo(app.site.lang, &reg, |k| std::env::var_os(k)).is_ok();
     app.legacy_read = reg.read;
     app.load_read();
     app.launched_at = std::env::current_dir().ok();
     app.editor = editor();
+    // 키 파일의 알림은 맨 끝에 잇는다 — 안에서 띄운 길과 같은 까닭이다.
+    adopt_keys(&mut app);
     let config = app.user_config.clone();
     ask_latest(ctx, &mut app, config.as_deref(), reg.update_check, reg.update_repo.as_deref(), repo_ok);
     screen(app)
@@ -1485,7 +1489,7 @@ fn keep_unsaved(app: &App) {
             ),
             crate::i18n::fill(
                 crate::i18n::say(app.site.lang, "tui.unsaved_kept_how"),
-                &[("jot", &crate::tui::keys::label(app.keys.browse, crate::tui::keys::Browse::Jot))]
+                &[("jot", &crate::tui::keys::said(app.keys.browse, crate::tui::keys::Browse::Jot))]
             )
         ),
         Err(e) => eprintln!(

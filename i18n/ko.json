@@ -414,6 +414,7 @@
   "tui.keys.not_keys": "키 이름이나 그 목록을 적는다",
   "tui.keys.bad_key": "`{key}` 는 키 이름이 아니다",
   "tui.keys.one_key": "`{key}` — 이 창은 키를 하나씩만 읽는다",
+  "tui.keys.no_way_out": "창을 나가는 키다 — none 대신 다른 키를 준다",
   "tui.keys.clash": "`{key}` 가 {with} 와 겹친다",
   "keys.file": "키 파일 {path}",
   "keys.file_missing": "키 파일 {path} — 없다. 키는 모두 기본이다",

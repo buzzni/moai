@@ -2372,8 +2372,8 @@ impl App {
                     // (moai-2kyl 단계 리뷰) — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다.
                     Landing::Hidden => {
                         let veil = self.site.index.find(&id).map(|at| self.site.veil(at)).unwrap_or_default();
-                        let clear = keys::label(self.keys.browse, keys::Browse::ClearFilter);
-                        let show = keys::label(self.keys.browse, keys::Browse::ShowAll);
+                        let clear = keys::said(self.keys.browse, keys::Browse::ClearFilter);
+                        let show = keys::said(self.keys.browse, keys::Browse::ShowAll);
                         match veil {
                             Veil { filtered: true, viewed: true } => fill(
                                 say(lang, "tui.write.veiled_both"),
@@ -6078,11 +6078,11 @@ impl App {
     /// 빼고 보기가 그 줄을 보이는가([`view::View::shows`]).
     fn veiled_row(&self, id: &str, at: usize) -> String {
         let (site, lang) = (&self.site, self.site.lang);
-        let show = keys::label(self.keys.browse, keys::Browse::ShowAll);
+        let show = keys::said(self.keys.browse, keys::Browse::ShowAll);
         if self.view.show_archived || !site.archived(at) {
             return fill(say(lang, "tui.veiled_row"), &[("id", id), ("show", &show)]);
         }
-        let old = keys::label(self.keys.browse, keys::Browse::Archived);
+        let old = keys::said(self.keys.browse, keys::Browse::Archived);
         let backlog = crate::report::is_backlog(&site.issues[at]);
         match self.view.shows(site.column(at), site.index.shelved_at(at).is_some(), backlog, &site.cfg.statuses) {
             true => fill(say(lang, "tui.veiled_archived"), &[("id", id), ("old", &old)]),
@@ -6122,7 +6122,7 @@ impl App {
         let open: Vec<String> = [keys::Browse::Grep, keys::Browse::Filter, keys::Browse::Jot]
             .into_iter()
             .filter(|a| a.enabled(&ctx).is_ok())
-            .map(|a| format!("`{}`", keys::label(self.keys.browse, a)))
+            .map(|a| format!("`{}`", keys::said(self.keys.browse, a)))
             .collect();
         let open = open.join("·");
         match &mut self.mode {

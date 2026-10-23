@@ -3507,14 +3507,16 @@ Options:
   Write only what you change. A line replaces every key of that action, the
   hidden ones too (the arrows) — list them again to keep them. Key names are
   spelt as the explorer shows them: SPC, Enter, Esc, Tab, Shift-Tab, Bksp, Up,
-  Down, Home, End, PgUp, PgDn, F1, Ctrl-x, Alt-x, a capital letter for Shift;
-  a sequence is names apart by spaces (SPC v d), or a doubled letter (gg).
+  Down, Home, End, PageUp, PageDown, F1, Ctrl-x, Alt-x, and a capital letter
+  for Shift; a sequence is names apart by spaces (SPC v d), or a doubled letter
+  (gg).
   A line that is wrong is dropped alone and that action keeps its default:
   an unknown section or action, a name that is not a key, or a key that
   clashes with another or waits for a longer one. The explorer says so in one
   line and still opens; this command lists them on stderr and exits 0. A file
   that is not TOML is dropped whole. Ctrl-C, the digits 0-9, SPC v 1-9, SPC
-  itself and keys inside text fields cannot be changed.
+  itself and keys inside text fields cannot be changed, and a window's close
+  key can move but not be set to none.
 
   --template prints a starter file; save it yourself, nothing is written:
     moai keys --template > ~/.config/moai/keys.toml

@@ -781,7 +781,7 @@ impl App {
         match self.land(id) {
             Landing::Shown => {}
             Landing::Hidden => {
-                let clear = keys::label(self.keys.browse, Browse::ClearFilter);
+                let clear = keys::said(self.keys.browse, Browse::ClearFilter);
                 let filtered = || fill(say(lang, "tui.wiki.veiled_filter"), &[("id", id), ("clear", &clear)]);
                 let told = match self.site.index.find(id).map(|at| (at, self.site.veil(at))) {
                     // **둘 다 가렸으면 둘 다 댄다** — 하나만 대면 그 키를 눌러도 다른 쪽에 여전히 가린다(moai-2kyl).
@@ -881,9 +881,9 @@ impl App {
             Some(act @ (keys::Wiki::NextLink | keys::Wiki::PrevLink)) => {
                 if !w.pick_step(act == keys::Wiki::PrevLink) {
                     let lang = self.site.lang;
-                    let enter = keys::label(w.keys.wiki, keys::Wiki::Enter);
+                    let enter = keys::said(w.keys.wiki, keys::Wiki::Enter);
                     let said = if w.raw_here() {
-                        let raw = keys::label(w.keys.browse, Browse::Raw);
+                        let raw = keys::said(w.keys.browse, Browse::Raw);
                         fill(say(lang, "tui.wiki.raw_no_marks"), &[("raw", &raw), ("enter", &enter)])
                     } else {
                         fill(say(lang, "tui.wiki.no_marks"), &[("enter", &enter)])

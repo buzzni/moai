@@ -7,7 +7,7 @@
 use super::Surfaced;
 use super::form::{Field, Form, Target};
 use super::keys::{
-    self, Browse, Confirm, Ctx, Goto, JOT, Jot, LEADER, Menu, PATH, PROMPT, Pick, Prompt, label, labels,
+    self, Browse, Confirm, Ctx, Goto, JOT, Jot, LEADER, Menu, PATH, PROMPT, Pick, Prompt, label, labels, said,
 };
 use super::layer::{Look, Place, Shut};
 use super::menu;
@@ -336,8 +336,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
                     say(lang, "tui.hint.pick"),
                     &[
                         ("keys", &labels(PROMPT, &[Prompt::NextScope, Prompt::PrevScope, Prompt::Up, Prompt::Down])),
-                        ("ok", &label(PROMPT, Prompt::Apply)),
-                        ("cancel", &label(PROMPT, Prompt::Cancel)),
+                        ("ok", &said(PROMPT, Prompt::Apply)),
+                        ("cancel", &said(PROMPT, Prompt::Cancel)),
                     ],
                 )
             } else {
@@ -371,7 +371,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
                 let lang = app.site.lang;
                 let help = fill(
                     say(lang, "tui.pick.goto_help"),
-                    &[("go", &label(PATH, Goto::Go)), ("cancel", &label(PATH, Goto::Cancel))],
+                    &[("go", &said(PATH, Goto::Go)), ("cancel", &said(PATH, Goto::Cancel))],
                 );
                 prompt(f, keys, say(lang, "tui.prompt.path"), input, p.error.clone(), &help)
             }
@@ -401,7 +401,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
             let name = clip(&crate::text::one_line(&u.name), (room / 2).max(1));
             let asked = fill(
                 say(app.site.lang, "tui.unregister.confirm"),
-                &[("name", &name), ("yes", &label(app.keys.confirm, Confirm::Yes))],
+                &[("name", &name), ("yes", &said(app.keys.confirm, Confirm::Yes))],
             );
             let line = Line::from(Span::styled(asked, ask));
             f.render_widget(Paragraph::new(fit(line, keys.width as usize)), keys);
@@ -473,13 +473,13 @@ fn pick(f: &mut Frame, p: &mut Picker, at: Rect, lang: Lang) {
     if p.at.hidden > 0 {
         foot.push(fill(
             say(lang, "tui.pick.hidden_count"),
-            &[("n", &p.at.hidden.to_string()), ("key", &label(p.keys, Pick::Hidden))],
+            &[("n", &p.at.hidden.to_string()), ("key", &said(p.keys, Pick::Hidden))],
         ));
     }
     if p.at.cut > 0 {
         foot.push(fill(
             say(lang, "tui.pick.cut_count"),
-            &[("n", &p.at.cut.to_string()), ("key", &label(p.keys, Pick::Path))],
+            &[("n", &p.at.cut.to_string()), ("key", &said(p.keys, Pick::Path))],
         ));
     }
     let mut block = Block::default()
@@ -1196,7 +1196,7 @@ fn wiki_list(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, lang: Lang) -
         at,
         &mut state,
     );
-    let hint = if focused { String::new() } else { format!(" ({})", label(w.keys.wiki, keys::Wiki::FocusNext)) };
+    let hint = if focused { String::new() } else { format!(" ({})", said(w.keys.wiki, keys::Wiki::FocusNext)) };
     scroll_mark(f, &w.list, at, &hint, focused, lang);
     // 찾기에 하나도 안 걸렸으면 빈 칸 대신 그렇다고 말한다 — 빈 목록은 위키가 사라진 것으로 읽힌다.
     if n == 0 && inner.height > 0 {
@@ -1347,7 +1347,7 @@ fn wiki_page(f: &mut Frame, w: &mut super::wiki::Window, at: Rect, raw: bool, la
     let hint = if focused {
         labels(w.keys.wiki, &[keys::Wiki::Step(Move::LineDown), keys::Wiki::Step(Move::LineUp)])
     } else {
-        label(w.keys.wiki, keys::Wiki::FocusNext)
+        said(w.keys.wiki, keys::Wiki::FocusNext)
     };
     scroll_mark(f, &w.page, at, &format!(" ({hint})"), focused, lang);
     f.render_widget(Paragraph::new(visible), inner);
@@ -1549,7 +1549,7 @@ fn wiki_keys(f: &mut Frame, w: &super::wiki::Window, at: Rect, lang: Lang) {
         // **대상이 길면 줄인다** — 밖 주소는 수십 칸이라 그대로 대면 뒤의 `Esc`·`SPC 메뉴` 가 바 밖으로 밀려 말없이
         // 잘린다(나갈 길을 못 찾는 것이 [`key`] 가 막는 일이다). 줄인 자리는 `…` 가 댄다.
         Some((to, tail)) => {
-            let name = label(w.keys.wiki, Wiki::Enter);
+            let name = said(w.keys.wiki, Wiki::Enter);
             let tail = tail.map(|t| format!(" {t}")).unwrap_or_default();
             let fixed = crate::text::width(&format!(" {name} → {tail}")) + spans_width(&rest);
             let to = clip(to, (at.width as usize).saturating_sub(fixed).max(1));
@@ -1722,7 +1722,7 @@ fn jot_head<'a>(into: &Target, w: usize, tint: Style, lang: Lang) -> Line<'a> {
 fn jot_keys(f: &mut Frame, form: &Form, confirm: &[keys::Bind<Confirm>], at: Rect, lang: Lang) {
     let line = if form.leaving {
         let ask = Style::new().fg(Color::Black).bg(Color::LightYellow);
-        let asked = fill(say(lang, "tui.jot.discard"), &[("yes", &label(confirm, Confirm::Yes))]);
+        let asked = fill(say(lang, "tui.jot.discard"), &[("yes", &said(confirm, Confirm::Yes))]);
         Line::from(Span::styled(asked, ask))
     } else if let Some(e) = &form.error {
         Line::from(vec![
@@ -2328,7 +2328,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let hung = app.hung.as_ref().map(|h| {
         let said = fill(
             say(lang, "tui.crumbs.filter"),
-            &[("text", &badge(h, lang)), ("key", &label(app.keys.browse, Browse::ClearFilter))],
+            &[("text", &badge(h, lang)), ("key", &said(app.keys.browse, Browse::ClearFilter))],
         );
         clip(&said, w)
     });
@@ -2349,7 +2349,7 @@ fn crumbs(f: &mut Frame, app: &App, rows: &[Row], at: Rect) {
     let overlay = (app.worktree && !trees.is_empty()).then(|| {
         let names = trees.join(", ");
         let off = match Browse::Worktree.enabled(&app.key_ctx(rows)) {
-            Ok(()) => fill(say(lang, "tui.crumbs.overlay_off"), &[("key", &label(app.keys.browse, Browse::Worktree))]),
+            Ok(()) => fill(say(lang, "tui.crumbs.overlay_off"), &[("key", &said(app.keys.browse, Browse::Worktree))]),
             Err(_) => String::new(),
         };
         clip(&format!("{} {names}{off}", style::BRANCH_GLYPH), w / 2)
@@ -3649,7 +3649,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
         None if app.on_layer() => {
             let lang = app.site.lang;
             let mut out = vec![Line::from(Span::styled(say(lang, "tui.layer.no_projects"), bold())), Line::from("")];
-            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &label(app.keys.browse, Browse::Pick))]);
+            let how = fill(say(lang, "tui.layer.how_to_register"), &[("key", &said(app.keys.browse, Browse::Pick))]);
             out.extend(wrapped(&how, inner.width as usize, dim()));
             out
         }
@@ -3699,7 +3699,7 @@ fn detail(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) {
     let hint = if app.focus == Pane::Detail {
         labels(app.keys.browse, &[Browse::Step(Move::LineDown), Browse::Step(Move::LineUp)])
     } else {
-        label(app.keys.browse, Browse::FocusNext)
+        said(app.keys.browse, Browse::FocusNext)
     };
     let hint = format!(" ({hint})");
     scroll_mark(f, &app.detail, at, &hint, app.focus == Pane::Detail, app.site.lang);
@@ -4742,7 +4742,7 @@ fn place_about<'a>(app: &App, at: usize, w: usize) -> Vec<Line<'a>> {
                 out.extend(wrapped(&said, w, dim()));
             }
             out.push(Line::from(""));
-            let how = fill(say(lang, "tui.place.enter"), &[("key", &label(app.keys.browse, Browse::Enter))]);
+            let how = fill(say(lang, "tui.place.enter"), &[("key", &said(app.keys.browse, Browse::Enter))]);
             out.push(Line::from(Span::styled(how, dim())));
         }
     }
@@ -5117,7 +5117,7 @@ fn key(k: &str, what: &str) -> Span<'static> {
 fn prompt_help(apply: &str, lang: Lang) -> String {
     fill(
         say(lang, "tui.prompt.help"),
-        &[("ok", &label(PROMPT, Prompt::Apply)), ("apply", apply), ("cancel", &label(PROMPT, Prompt::Cancel))],
+        &[("ok", &said(PROMPT, Prompt::Apply)), ("apply", apply), ("cancel", &said(PROMPT, Prompt::Cancel))],
     )
 }
 

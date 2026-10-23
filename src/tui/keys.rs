@@ -299,6 +299,14 @@ pub fn label<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
     labels(table, &[act])
 }
 
+/// **말 속에 넣는** 동작의 키 이름 — [`label`] 과 같되, 사람의 키 파일이 그 동작의 키를 뗐으면(`"none"`, moai-pxiy)
+/// `(none)` 이다. 바의 칸은 [`label`] 을 쓴다: 빈 이름의 칸은 안 선다. 말은 빈 이름으로 두면 "`  로 다시 담는다`" 처럼
+/// 낱말이 빠진 글이 된다. 도움말의 틀(`keymap::fill_names`)과 같은 낱말이다.
+pub fn said<A: Copy + PartialEq>(table: &[Bind<A>], act: A) -> String {
+    let l = label(table, act);
+    if l.is_empty() && !table.iter().any(|b| b.act == act) { "(none)".to_string() } else { l }
+}
+
 /// 동작 여럿의 키 이름을 `·` 로 잇는다(`j·k`).
 pub fn labels<A: Copy + PartialEq>(table: &[Bind<A>], acts: &[A]) -> String {
     let names: Vec<&str> =
@@ -1063,7 +1071,7 @@ impl Browse {
             // 애초에 위가 없던 자리다: 거기서 말하면 있지도 않은 길을 말하는 셈이다.
             Leave if c.root && c.projects > 0 => Err(Off::Why(fill(
                 say(c.lang, "tui.off.leave_dir_only"),
-                &[("leave", &label(c.keys.browse, Leave)), ("project", &label(c.keys.browse, Project(0)))],
+                &[("leave", &said(c.keys.browse, Leave)), ("project", &said(c.keys.browse, Project(0)))],
             ))),
             Leave if c.root => Err(Off::Quiet),
             // **머리줄에서만 선다**(리뷰) — 뺄 것은 프로젝트고, 한눈 보기의 이슈 줄에서 누르면
@@ -1071,7 +1079,7 @@ impl Browse {
             // 메뉴에 안 세운다(아래 `Raw` 와 같은 까닭).
             Unregister if !(c.layer && c.list_focus && !c.on_row) => Err(Off::Quiet),
             Grep | Filter if c.layer => {
-                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &label(c.keys.browse, Enter))])))
+                Err(Off::Why(fill(say(c.lang, "tui.off.filter_inside"), &[("enter", &said(c.keys.browse, Enter))])))
             }
             Worktree if c.layer => Err(Off::Quiet),
             // **층에는 읽을 줄이 없다**(moai-j038.vna) — 층의 줄은 프로젝트고 안 읽은 줄은 들어간 프로젝트의

@@ -86,6 +86,9 @@ pub enum Why {
     BadKey(String),
     /// 키 하나씩만 읽는 창에 키 열을 줬다 — 그 열.
     OneKey(String),
+    /// 창을 나가는 하나뿐인 키를 뗐다(`picker.close = "none"`) — 떼면 그 창에서 나갈 길이 탐색기를 통째로 끄는
+    /// Ctrl-C 뿐이다. 다른 키로 옮기는 것은 된다.
+    NoWayOut,
     /// 다른 줄과 겹쳐 눌러도 안 듣는다. `keys` 는 이 줄의 키 열, `with` 는 겹친 쪽(`browse.grep`·`Ctrl-C`·`SPC`).
     Clash { keys: String, with: String },
 }
@@ -103,6 +106,7 @@ impl Problem {
             Why::NotKeys => say(lang, "tui.keys.not_keys").to_string(),
             Why::BadKey(k) => fill(say(lang, "tui.keys.bad_key"), &[("key", k)]),
             Why::OneKey(k) => fill(say(lang, "tui.keys.one_key"), &[("key", k)]),
+            Why::NoWayOut => say(lang, "tui.keys.no_way_out").to_string(),
             Why::Clash { keys, with } => fill(say(lang, "tui.keys.clash"), &[("key", keys), ("with", with)]),
         };
         // 줄 번호는 파일 이름에 붙는다(`keys.toml:3`) — 파일을 모르면 붙일 데가 없다.
@@ -206,6 +210,7 @@ impl Why {
             Why::NotKeys => "not_keys",
             Why::BadKey(_) => "bad_key",
             Why::OneKey(_) => "one_key",
+            Why::NoWayOut => "no_way_out",
             Why::Clash { .. } => "clash",
         }
     }
@@ -337,6 +342,13 @@ impl Section {
     /// 주면 그 줄은 영영 안 듣는다.
     fn one_key(self) -> bool {
         matches!(self, Section::Menu | Section::Sorter | Section::Confirm)
+    }
+
+    /// 그 창을 나가는 하나뿐인 동작인가 — 키를 못 뗀다([`Why::NoWayOut`]). 메뉴는 연 키(SPC)가 닫고, 물음은 다른 키가
+    /// 그만두고, 탐색은 창이 아니다. 차례 편집 창의 입히기(Enter·`D`)도 닫지만 바꾸지 않고 나가는 길은 `close` 하나다.
+    fn way_out(self, action: &str) -> bool {
+        matches!(self, Section::Picker | Section::Sorter | Section::Stats | Section::Wiki | Section::Links)
+            && action == "close"
     }
 
     /// 그 절의 이름이 가리키는 동작이 있는가.
@@ -640,6 +652,7 @@ fn read(text: &str) -> (Vec<Entry>, Vec<Problem>) {
                 continue;
             }
             match seqs(value, section) {
+                Ok(seqs) if seqs.is_empty() && section.way_out(name.get()) => bad(Why::NoWayOut),
                 Ok(seqs) => entries.push(Entry { section, action: name.get().to_string(), seqs, line: line(name) }),
                 Err(why) => bad(why),
             }
@@ -1233,6 +1246,17 @@ mod tests {
             ]
         );
         assert_eq!(map, Keymap::default());
+    }
+
+    /// **창을 나가는 하나뿐인 키는 못 뗀다** — 떼면 나갈 길이 탐색기를 통째로 끄는 Ctrl-C 뿐이다. 옮기는 것은 된다.
+    #[test]
+    fn a_window_keeps_its_way_out() {
+        let (map, problems) = build("[picker]\nclose = \"none\"\n[stats]\nclose = []\n[wiki]\nclose = \"q\"\n");
+        assert_eq!(whys(&problems), [("picker.close", &Why::NoWayOut), ("stats.close", &Why::NoWayOut)]);
+        assert_eq!(lookup(map.pick, &seq("Esc")), Lookup::Run(Pick::Close));
+        assert_eq!(lookup(map.wiki, &seq("q")), Lookup::Run(Wiki::Close));
+        // 메뉴는 연 키가 닫으니 떼도 된다.
+        assert_eq!(build("[menu]\nclose = \"none\"\n").1, Vec::new());
     }
 
     /// 모양이 틀린 줄은 그 줄만 버린다 — 옆 줄은 산다.

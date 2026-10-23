@@ -19,7 +19,8 @@ pub fn run(ctx: &Ctx, args: KeysArgs) -> R<Vec<String>> {
     }
     let lang = ctx.lang();
     let (file, keys, problems) = keymap::load_from(|k| std::env::var_os(k));
-    let found = file.as_deref().is_some_and(std::path::Path::is_file);
+    // 서 있는가만 본다 — 디렉터리처럼 못 읽는 것은 "없다" 가 아니라 stderr 의 못 읽은 까닭이 댄다(리뷰 13번).
+    let found = file.as_deref().is_some_and(std::path::Path::exists);
     // **버린 줄은 stderr 로, 종료 0 으로** — `moai models` 와 같다. 성한 줄은 산다.
     for p in &problems {
         super::tell(&p.said(file.as_deref(), lang));

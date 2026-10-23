@@ -10,7 +10,7 @@
 //! 보지도 않을 디렉터리 이름까지 읽는다.
 
 use super::input::Input;
-use super::keys::{Bind, Chord, Goto, Lookup, PATH, PICK, Pick, label, lookup};
+use super::keys::{Bind, Chord, Goto, Lookup, PATH, PICK, Pick, lookup, said};
 use super::scroll::Scroll;
 use ratatui::crossterm::event::KeyEvent;
 use std::path::{Path, PathBuf};
@@ -90,12 +90,12 @@ pub enum Act {
 
 /// `..` 에서 `a` 를 누른 까닭. 키 이름은 표에서 읽는다 — 등록 키를 옮기면 이 말도 따라온다.
 pub fn up_is_not_a_project(keys: &[Bind<Pick>], lang: crate::i18n::Lang) -> String {
-    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.up_is_not_a_project"), &[("key", &label(keys, Pick::Register))])
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.up_is_not_a_project"), &[("key", &said(keys, Pick::Register))])
 }
 
 /// `./` 에서 Enter 를 누른 까닭.
 pub fn here_is_already_open(keys: &[Bind<Pick>], lang: crate::i18n::Lang) -> String {
-    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.here_is_already_open"), &[("key", &label(keys, Pick::Register))])
+    crate::i18n::fill(crate::i18n::say(lang, "tui.pick.here_is_already_open"), &[("key", &said(keys, Pick::Register))])
 }
 
 impl Picker {
