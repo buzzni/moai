@@ -7514,3 +7514,170 @@
 {"ts":"2026-10-23T08:49:54Z","id":"moai-i5so.kke","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
 {"ts":"2026-10-23T08:49:54Z","id":"moai-i5so.we8","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — CI 워크플로·기여자 문서)"}
 {"ts":"2026-10-23T08:49:54Z","id":"moai-i5so.we8","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-23T10:34:37Z","id":"moai-pu12","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지"}
+{"ts":"2026-10-23T10:34:41Z","id":"moai-e7ow","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai 소개 홈페이지 (GitHub Pages)"}
+{"ts":"2026-10-23T10:34:41Z","id":"moai-e7ow.r2s","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"site/ hello world 페이지와 Pages 배포 workflow"}
+{"ts":"2026-10-23T10:34:46Z","id":"moai-e7ow.r2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T10:35:43Z","id":"moai-mfps","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"ci: site/ 만 바뀐 판은 Rust 잡을 건너뛴다"}
+{"ts":"2026-10-23T10:35:43Z","id":"moai-e7ow.r2s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 정적 페이지 한 장과 Pages workflow)"}
+{"ts":"2026-10-23T10:35:43Z","id":"moai-e7ow.r2s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 사용자가 미리보기 확인 → milestone/moai-pu12 에 머지. 실제 배포는 Pages source=GitHub Actions 설정과 develop 푸시 뒤(마일스톤이 develop 에 들 때)"}
+{"ts":"2026-10-23T10:36:06Z","id":"moai-e7ow.r2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자 미리보기 확인과 머지·배포 결정을 기다린다"}
+{"ts":"2026-10-23T10:41:01Z","id":"moai-s0vs","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Studio 프리뷰로 moai web 띄우기"}
+{"ts":"2026-10-23T10:41:01Z","id":"moai-s0vs.uj4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"scripts/preview-web.sh — 툴체인 없는 컨테이너에서 moai web 을 띄운다"}
+{"ts":"2026-10-23T10:41:04Z","id":"moai-s0vs.uj4","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T10:42:03Z","id":"moai-s0vs.uj4","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"scripts/preview-web.sh — 툴체인 없는 컨테이너에서 moai web 을 띄운다"}
+{"ts":"2026-10-23T10:42:03Z","id":"moai-s0vs","kind":"rm","by":"레이븐","by_email":"raven@buzzni.com","title":"Studio 프리뷰로 moai web 띄우기"}
+{"ts":"2026-10-23T10:42:13Z","id":"moai-e7ow.r2s","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Studio 프리뷰: dir=.worktrees/moai-e7ow/site, serve -l tcp://0.0.0.0:30002. 에픽 워크트리를 지우면 이 dir 도 옮긴다"}
+{"ts":"2026-10-23T10:55:03Z","id":"moai-63go","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 시안 — herdr 식 레이아웃과 기능 소개 글"}
+{"ts":"2026-10-23T10:55:03Z","id":"moai-awy9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 스크린샷·GIF 받기"}
+{"ts":"2026-10-23T10:55:03Z","id":"moai-zg62","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"채택 회사 로고와 게재 허락 받기"}
+{"ts":"2026-10-23T10:56:02Z","id":"moai-63go","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T10:58:12Z","id":"moai-63go","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 정적 페이지 시안과 카피)"}
+{"ts":"2026-10-23T10:58:12Z","id":"moai-63go","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 사용자 피드백(카피 언어 ko/en, 톤, 색) 반영. 자산(moai-awy9)·로고(moai-zg62) 받으면 자리 교체"}
+{"ts":"2026-10-23T10:58:12Z","id":"moai-63go","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"시안을 사용자에게 보였다. 피드백 기다림"}
+{"ts":"2026-10-23T11:05:11Z","id":"moai-63go","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"로고는 web/panel/view/brand.ts 의 artPath 를 옮겨 만든 site/assets/logo.svg 다. TUI LOGO 가 바뀌면 같은 스크립트로 다시 뽑는다"}
+{"ts":"2026-10-23T11:27:36Z","id":"moai-1qff","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 언어 전환 — 영어 기본, 한국어·일본어"}
+{"ts":"2026-10-23T11:27:44Z","id":"moai-1qff","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T11:31:10Z","id":"moai-ql5t","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 세 언어 페이지를 한 틀과 글 묶음에서 뽑는다"}
+{"ts":"2026-10-23T11:31:10Z","id":"moai-1qff","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 세 언어 페이지와 자동 선택)"}
+{"ts":"2026-10-23T11:31:10Z","id":"moai-1qff","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"자동 선택 스크립트는 node 로 8 경우를 돌려 봤다(ko-KR→ko/, ja+#start→ja/#start, en 먼저면 그대로, 고른 en 이 브라우저 ko 를 이김 등). 브라우저 렌더링은 이 기계에서 못 봤다"}
+{"ts":"2026-10-23T11:31:10Z","id":"moai-1qff","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자에게 보였다. 영어·일본어 카피 피드백 기다림"}
+{"ts":"2026-10-23T11:41:54Z","id":"moai-b2l7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"헤드라인에 in_progress 스피너와 빛 띠"}
+{"ts":"2026-10-23T11:42:04Z","id":"moai-b2l7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T11:42:38Z","id":"moai-b2l7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — CSS 애니메이션 하나)"}
+{"ts":"2026-10-23T11:42:38Z","id":"moai-b2l7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자에게 보였다. 브라우저 렌더링은 이 기계에서 못 봤다"}
+{"ts":"2026-10-23T12:09:00Z","id":"moai-63go","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"카피 방향(사용자 지시 2026-10-23): moai 명령어와 .moai/issues.jsonl 등 기술 내용은 빼고 docs 로. 설치 한 줄·moai tui·moai web 실행 명령만 기능 소개에서 보인다"}
+{"ts":"2026-10-23T16:33:29Z","id":"moai-a6mp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.24.0"}
+{"ts":"2026-10-23T16:33:29Z","id":"moai-2cu8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.25.0"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-xf0p","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트가 읽을 계획 날짜 — 시작일을 모든 줄에"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-xf0p.6d5","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"starts_on 을 모든 종류의 줄에 받는다"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-xf0p.cbu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시작일도 위 기한을 넘지 못한다"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-xf0p.due","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"계획 줄에 시작일을 싣는다"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-xf0p.j1r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"report::gantt — 줄마다 계획·실제 구간을 읽는다"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-v53u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 위젯 크레이트 — 다른 ratatui 앱도 쓰는 모듈"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-v53u.dh8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"워크스페이스와 moai-gantt 크레이트 뼈대"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-v53u.xhu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"시간 축 — 확대 단계와 머리글"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-v53u.7qp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"막대와 표식 — 계획·실제·기한·오늘·잘림"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-v53u.4xi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"의존 화살표 — 커서 줄을 막는 것과 막히는 것"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-v53u.jeh","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"맞히기와 보기 상태 — 클릭 자리·이동·확대·맞춤"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-i4hf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 간트 화면 — SPC g g"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-i4hf.sas","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"SPC g g 와 간트 배치 — 펼친 목록 옆 고정 칸"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-i4hf.27r","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 키 — 확대·좌우·오늘·맞춤"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-i4hf.exq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 마우스 — 클릭·휠·가로 이동·끌기"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-i4hf.9xi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"막대를 끌어 시작일·기한을 바꾼다"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-i4hf.25n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"날짜 없는 저장소와 좁은 창의 간트"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-d86e","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 간트 탭 — SPC g g"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-d86e.b2m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 자리를 web 에 낸다 — starts_on·계획·실제 구간"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-d86e.92q","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 간트 시안을 먼저 보인다"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-d86e.5wj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"간트 탭 — 고정 격자와 날짜 축"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-d86e.en8","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"막대·기한·오늘·진행률·의존 화살표"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-d86e.jmq","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 간트 마우스 — 휠·가로 이동·끌기·폭"}
+{"ts":"2026-10-23T16:33:47Z","id":"moai-d86e.3ud","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"web 에서 막대를 끌어 날짜를 바꾼다"}
+{"ts":"2026-10-23T16:38:51Z","id":"moai-xf0p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Sent: subagent af511aa45c6d5a032"}
+{"ts":"2026-10-23T16:39:11Z","id":"moai-xf0p.6d5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T16:52:47Z","id":"moai-xf0p.cbu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T16:58:56Z","id":"moai-rhde","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"히어로 헤드라인 캐러셀 — 핵심 다섯 가지 로테이션"}
+{"ts":"2026-10-23T16:59:01Z","id":"moai-rhde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T17:01:23Z","id":"moai-rhde","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 캐러셀 마크업·CSS·JS, 세 언어 카피)"}
+{"ts":"2026-10-23T17:01:24Z","id":"moai-rhde","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"넘김 로직은 가짜 DOM 으로 node 에서 돌렸다(자동 1→2, 끝난 옛 막대 무시, 다른 애니 무시, 클릭, 5→1 순환, 화살표·Home). 브라우저 렌더링은 이 기계에서 못 봤다"}
+{"ts":"2026-10-23T17:01:24Z","id":"moai-rhde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자에게 보였다. 피드백 기다림"}
+{"ts":"2026-10-23T17:01:57Z","id":"moai-xf0p.cbu","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided: 경고 이름은 due_beyond_parent 를 그대로 쓴다(새로 안 지음) — 고치는 길이 같고 소비자가 읽는 경고 종류가 안 는다. 글만 \"기한·시작\" 으로 넓힘. 시작만 바뀐 쓰기가 이미 추월당한 기한을 든 줄이면 기한 쪽 거절이 먼저 선다(지금 쓰는 줄은 엄하게)"}
+{"ts":"2026-10-23T17:01:57Z","id":"moai-xf0p.due","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T17:14:51Z","id":"moai-xf0p.due","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided: 줄의 @ 는 한 덩이 — 시작이든 기한이든 하나라도 적었으면 뿌리의 --start/--due 가 둘 다 안 선다(Rooted::dates_for). 필드마다 가르면 @기한 만 쓴 에픽에 --start 기본값이 내려앉아 시작>기한으로 물린다. @~기한(시작 자리 빈 꼴)은 안 받는다. backlog promote 는 backlog 의 starts_on 도 에픽으로 데려간다"}
+{"ts":"2026-10-23T17:14:51Z","id":"moai-xf0p.j1r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T17:29:07Z","id":"moai-xf0p.clg","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 시작일을 모든 줄에 (moai-xf0p 에픽 끝)"}
+{"ts":"2026-10-23T17:29:12Z","id":"moai-xf0p.6d5","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-23T17:29:12Z","id":"moai-xf0p.cbu","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-23T17:29:12Z","id":"moai-xf0p.due","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-23T17:29:12Z","id":"moai-xf0p.j1r","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review"}
+{"ts":"2026-10-23T17:29:12Z","id":"moai-xf0p.clg","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T17:47:16Z","id":"moai-rhde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
+{"ts":"2026-10-23T17:47:27Z","id":"moai-rhde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자 글을 반영했다. 영어·일본어 옮김 확인 기다림"}
+{"ts":"2026-10-23T17:57:41Z","id":"moai-rhde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
+{"ts":"2026-10-23T17:57:41Z","id":"moai-rhde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"둘째·다섯째 장 글 반영"}
+{"ts":"2026-10-23T18:15:35Z","id":"moai-8e03","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.26.0"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-g8pt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 검색 — moai wiki search 와 이슈의 관련 페이지"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-g8pt.ara","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 검색의 순수 핵심 — 절 단위 BM25·토큰·발췌"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-g8pt.ryi","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai wiki search <질의> — 사람 화면과 --json"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-g8pt.5aw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"show <id> 가 그 이슈를 댄 페이지와 관련 절을 낸다"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-g8pt.y1u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"에이전트가 일을 집을 때 위키를 찾게 한다 — AGENTS 블록·스킬·일꾼 브리프"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-4s5n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"교훈 위키 — 에이전트가 실수와 교훈을 적고 다음 일에서 읽는다"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-4s5n.n7j","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"moai wiki learn — 교훈 페이지를 짓고 그 이슈에 Lesson: 노트를 단다"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-4s5n.c0n","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Lesson: 노트를 읽어 교훈이 선 이슈를 보인다 — wiki show·wiki ls·show <id>"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-4s5n.svp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"교훈을 쓰고 읽는 걸음 — moai-wiki 스킬·AGENTS 닫기·일꾼 브리프"}
+{"ts":"2026-10-23T18:15:47Z","id":"moai-4s5n.m4u","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"이 저장소의 첫 교훈을 docs/lessons/ 에 심는다"}
+{"ts":"2026-10-23T18:19:42Z","id":"moai-neyf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI / 와 web 의 위키 검색을 wiki search 의 순위로"}
+{"ts":"2026-10-23T18:19:42Z","id":"moai-l5u3","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"위키 의미 검색(임베딩·벡터) — 다시 볼 조건"}
+{"ts":"2026-10-23T18:19:42Z","id":"moai-g8pt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 계획)"}
+{"ts":"2026-10-23T18:19:42Z","id":"moai-4s5n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 계획)"}
+{"ts":"2026-10-23T19:07:05Z","id":"moai-0jaj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"데모 저장소 시드 스크립트 — Lantern, 영어"}
+{"ts":"2026-10-23T19:07:06Z","id":"moai-i1hk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"TUI 녹화 (asciinema) — 둘러보기·라이프사이클"}
+{"ts":"2026-10-23T19:07:06Z","id":"moai-05rn","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"웹 녹화 (Playwright) — 이슈 상세·위키 링크"}
+{"ts":"2026-10-23T19:07:06Z","id":"moai-pkj6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"첫 페이지를 화면과 기능 중심으로 다시 짠다"}
+{"ts":"2026-10-23T19:07:06Z","id":"moai-awy9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"녹화로 대체한다: 데모 시드·TUI(asciinema)·웹(Playwright) 이슈가 이 목록을 갈음한다. 네 장면이 첫 페이지에 서면 닫는다"}
+{"ts":"2026-10-23T19:07:12Z","id":"moai-0jaj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T19:31:08Z","id":"moai-0jaj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 데모 시드·녹화 스크립트)"}
+{"ts":"2026-10-23T19:31:08Z","id":"moai-i1hk","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 데모 시드·녹화 스크립트)"}
+{"ts":"2026-10-23T19:31:08Z","id":"moai-05rn","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 데모 시드·녹화 스크립트)"}
+{"ts":"2026-10-23T19:31:08Z","id":"moai-0jaj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"시드 스크립트 커밋"}
+{"ts":"2026-10-23T19:31:08Z","id":"moai-i1hk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T19:31:09Z","id":"moai-i1hk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-23T19:31:09Z","id":"moai-05rn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T19:31:10Z","id":"moai-05rn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-23T19:31:10Z","id":"moai-pkj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T19:31:17Z","id":"moai-0jaj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"review","note":"머지 전이라 review 로 둔다"}
+{"ts":"2026-10-23T19:31:17Z","id":"moai-i1hk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"review","note":"머지 전이라 review 로 둔다"}
+{"ts":"2026-10-23T19:31:18Z","id":"moai-05rn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"done","to":"review","note":"머지 전이라 review 로 둔다"}
+{"ts":"2026-10-23T19:36:11Z","id":"moai-pkj6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 장면 섹션·재생 스크립트·세 언어 글)"}
+{"ts":"2026-10-23T19:36:11Z","id":"moai-pkj6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Playwright 로 1440·390 폭을 찍어 봤다: 가로 넘침 0, 콘솔 오류 0. 자체 포함 미리보기에서도 cast 둘이 그려지고 webm 이 재생된다"}
+{"ts":"2026-10-23T19:36:11Z","id":"moai-pkj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자에게 보였다"}
+{"ts":"2026-10-23T19:36:11Z","id":"moai-awy9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"녹화 네 편이 첫 페이지에 섰다(moai-pkj6). 남은 요청 목록은 없다"}
+{"ts":"2026-10-23T20:28:24Z","id":"moai-pkj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
+{"ts":"2026-10-23T20:28:25Z","id":"moai-pkj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"장면 글 반영"}
+{"ts":"2026-10-23T20:36:24Z","id":"moai-pkj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
+{"ts":"2026-10-23T20:39:06Z","id":"moai-pkj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"녹화를 본문 폭에 맞췄다"}
+{"ts":"2026-10-23T20:49:59Z","id":"moai-cgs7","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"첫 페이지에 감독·일꾼 섹션 (벤더 여럿이 한 팀)"}
+{"ts":"2026-10-23T20:49:59Z","id":"moai-yn4z","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"tmux 4분할 녹화 — moai tui·Claude 감독·Codex·Antigravity 일꾼"}
+{"ts":"2026-10-23T20:50:25Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T20:51:15Z","id":"moai-cgs7","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 섹션 하나와 세 언어 글)"}
+{"ts":"2026-10-23T20:51:15Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자 글 검토 기다림"}
+{"ts":"2026-10-23T20:55:50Z","id":"moai-yn4z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T20:55:50Z","id":"moai-yn4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 데모 tmux(-L moai-demo, scratchpad/team/tmx)가 네 칸으로 서 있다. 녹화 전 사용자 결정 기다림 — Claude 주간 한도 99%. 끝나면 데모 저장소에서 moai skill uninstall 로 local 플러그인 등록을 걷는다"}
+{"ts":"2026-10-23T21:11:13Z","id":"moai-yn4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 녹화 진행) · 장면 속 감독은 anthropic/opus-5.5, 일꾼은 openai/gpt-6.1-sol 과 google/gemini-4-argon"}
+{"ts":"2026-10-23T21:11:13Z","id":"moai-yn4z","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"녹화 중 사람 손: Codex 의 보안 설정 안내 창을 Esc 로 닫고, 감독에게 \"Dismissed it. Send lan-llsj.0xl to Codex.\" 한 줄. 정리: 데모 플러그인 등록 해제, -L moai-demo 서버 종료"}
+{"ts":"2026-10-23T21:11:13Z","id":"moai-yn4z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자에게 보였다"}
+{"ts":"2026-10-23T21:24:47Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
+{"ts":"2026-10-23T21:24:48Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"감독·일꾼 글 반영"}
+{"ts":"2026-10-23T21:32:50Z","id":"moai-oska","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"로고 띠를 본문 폭에 넣고 실제 제품 로고로"}
+{"ts":"2026-10-23T21:36:50Z","id":"moai-oska","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T21:38:09Z","id":"moai-oska","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 로고 떼기와 띠 CSS)"}
+{"ts":"2026-10-23T21:38:10Z","id":"moai-oska","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"사용자에게 보였다"}
+{"ts":"2026-10-23T21:38:10Z","id":"moai-zg62","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"사용자가 다섯 제품(viskits·fitcl·datahub·knoi·saycode) 로고를 쓰라고 직접 지시했다(2026-10-23). 띠에 들었다 — moai-oska"}
+{"ts":"2026-10-23T21:49:38Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
+{"ts":"2026-10-23T21:51:34Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"섹션 순서·숫자 상자·로고 띠 글 반영"}
+{"ts":"2026-10-23T21:53:05Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"in_progress"}
+{"ts":"2026-10-23T21:53:23Z","id":"moai-qrxu","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 문서 페이지를 만들고 메뉴를 다시 보인다"}
+{"ts":"2026-10-23T21:53:23Z","id":"moai-gw11","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 변경 기록 페이지를 만들고 메뉴를 다시 보인다"}
+{"ts":"2026-10-23T21:54:26Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"review","note":"녹화를 글 위로, 메뉴 숨김"}
+{"ts":"2026-10-23T21:57:08Z","id":"moai-awy9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사용자가 완료로 확인했다"}
+{"ts":"2026-10-23T21:57:08Z","id":"moai-zg62","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"사용자가 완료로 확인했다"}
+{"ts":"2026-10-23T21:57:08Z","id":"moai-mfps","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T21:57:55Z","id":"moai-mfps","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — CI 정규식 한 갈래)"}
+{"ts":"2026-10-23T21:58:13Z","id":"moai-e7ow.2vf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 홈페이지 에픽 끝 (site·scripts/site-demo·workflows)"}
+{"ts":"2026-10-23T21:58:19Z","id":"moai-e7ow.2vf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-23T22:10:00Z","id":"moai-e7ow.2vf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"/code-review xhigh worktree-moai-e7ow (develop...worktree-moai-e7ow, 26 commits) — 15 findings, most severe first:\n1. site/assets/media/tui-team.cast:9 — published cast carries the recorder's Google account (hong18s@gmail.com, Google AI Pro), subscription tiers, local paths and Claude session UUID; recording steps clean only the header\n2. site/assets/site.js:75 — IntersectionObserver fires an initial entry for every target; cast(el) runs before the isIntersecting check, so all three players load (~4.1MB) and play off-screen on page load\n3. scripts/site-demo/drive.py:53 — recording scripts pass the whole environment: MOAI_ACTOR overrides the seeded identity, MOAI_LANG/MOAI_KEYS/NO_COLOR leak in (also record-web.mjs, record-team.sh line 23)\n4. scripts/site-demo/record-team.sh:33 — tmux on PATH may be the cmux shim that drops -L; new-session/kill-server would hit the person's cmux (AGENTS rule 4)\n5. scripts/site-demo/record-team.sh:29 — no trap: a failure after skill install exits without printing cleanup, leaving the local plugin registration\n6. site/index.html:26 — root redirect: with storage blocked a ko/ja browser can never reach English; location.search is dropped\n7. site/index.html:200 — footer v0.23.0 hard-coded in three pages; bump-version.sh does not update it\n8. scripts/site-demo/seed.sh:13 — MOAI relative path breaks after cd; unset MOAI silently uses an installed older moai; unquoted paths in record-tui.sh -c\n9. scripts/site-demo/seed.sh:323 — .demo-home/ excluded only after git add -A, so it is committed in the demo repo\n10. site/assets/site.css:99 — :hover and :has(:focus-visible) in one selector list; browsers without :has drop the hover pause too\n11. scripts/site-demo/drive.py:60 — winsize set in the parent after fork races the child's first size read; size defaults disagree (120x32 vs 120x34)\n12. .github/workflows/ci.yml:282 — comment says site-only changes skip the Rust jobs; ci-gate still runs; scripts/site-demo still triggers all jobs\n13. site/index.html:105 — role=\"img\" on cast containers hides the reduced-motion player controls from assistive tech\n14. site/assets/site.css:1 — dead code: scene \"flip\" class has no rule; --ok, --warn, --accent-ink unused\n15. site/ko/index.html:108 — three language pages carry full copies of the markup; structural changes need three hand edits"}
+{"ts":"2026-10-23T22:13:18Z","id":"moai-e7ow.2vf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 에픽 끝 리뷰, code-review 스킬)"}
+{"ts":"2026-10-23T22:13:18Z","id":"moai-e7ow.2vf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"반영 13건: 2·3·4·5·6·7·8·9·10·11·12·13·14 (791a4cb0, 다음 커밋). 반영 안 함: 1 녹화 속 계정 표시는 사용자 결정(계정이 보여야 한다)으로 둔다, 15 세 언어 페이지 중복은 moai-ql5t 로 넘긴다"}
+{"ts":"2026-10-23T22:13:51Z","id":"moai-e7ow.r2s","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:52Z","id":"moai-63go","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:53Z","id":"moai-1qff","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:54Z","id":"moai-b2l7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:54Z","id":"moai-rhde","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:54Z","id":"moai-0jaj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:55Z","id":"moai-i1hk","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:55Z","id":"moai-05rn","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:56Z","id":"moai-pkj6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:56Z","id":"moai-cgs7","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:56Z","id":"moai-yn4z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:57Z","id":"moai-oska","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:13:57Z","id":"moai-mfps","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
