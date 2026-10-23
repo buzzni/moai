@@ -26181,6 +26181,9 @@ fn a_lock_cargo_left_alone_is_said_and_the_tag_waits() {
         text(&out)
     );
     assert!(!said.contains("git tag"), "어긋난 잠금 파일로 태그를 댔다\n{}", text(&out));
+    // 그 갈래의 "다음" 은 stderr 로 간다 — stdout 만 보면 위 줄은 늘 맞는다. 태그는 손으로 안
+    // 단다(moai-i5so): 거기서도 손 태그를 대지 않는다.
+    assert!(!warned.contains("git tag"), "어긋난 잠금 파일의 다음 걸음에 손 태그를 댔다\n{}", text(&out));
 }
 
 /// **못 읽은 저널은 `--json` 에도 선다 — 줄 곁에, 그 줄의 뿌리 것만**(moai-f2lc).

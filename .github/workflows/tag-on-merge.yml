@@ -21,23 +21,71 @@ on:
     types: [closed]
     branches: [main]
 
-# 머지 둘이 겹쳐도 태그를 두 번 만들지 않게 한 줄로 세운다. 끊지 않는다 — 승인을 기다리는
-# 판을 뒤 판이 지우면 앞 머지의 릴리스가 말없이 사라진다.
-concurrency:
-  group: tag-on-merge
-  cancel-in-progress: false
+# **concurrency 를 안 건다.** 태그 ref 를 만드는 API 는 이미 선 ref 에 422 로 지니, 같은 판의
+# 머지 둘이 겹쳐도 태그는 하나고 진 쪽은 붉게 선다. 그룹을 걸면 도리어 머지를 잃는다 — GitHub 는
+# 그룹마다 기다리는 판을 하나만 두고 새 판이 오면 그것을 취소한다(`cancel-in-progress: false` 도
+# 도는 판만 지킨다). 승인을 기다리는 판 뒤에 선 머지가 다음 머지에, 워크플로 단이면 닫기만 한 PR
+# 에도 밀려 그 릴리스가 말없이 사라진다.
 
 permissions:
   contents: read
 
 jobs:
-  tag:
-    name: 관리자 승인 뒤 태그와 릴리스
+  # **관리자를 부르기 전에 달 태그가 있는지 잰다.** 판을 안 올린 머지와 CHANGELOG 에 그 판 절이
+  # 없는 머지는 여기서 끝나 승인을 묻지 않는다 — 승인한 뒤에야 "할 것이 없다" 나 "못 단다" 로
+  # 끝나면 관리자는 판단할 것이 없는 승인을 하고, 아무도 안 누른 판은 30일을 기다린다.
+  plan:
+    name: 달 태그를 고른다
     # 이 저장소의 develop 에서 온 머지만 릴리스다. 포크의 `develop` 이름을 단 가지는 안 받는다.
     if: >-
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.ref == 'develop' &&
       github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+
+      - name: 판과 CHANGELOG 를 읽는다
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          # 대입으로 받는다 — 판을 못 읽으면 `set -e` 가 여기서 멈춘다(release.yml 의 guard 와 같은 자리).
+          version=$(scripts/check-version.sh --print)
+          tag=v$version
+          # **이미 있으면 그 태그가 선 커밋으로 가른다.** 이 머지 커밋이면 앞 시도가 달았거나 손으로
+          # 단 것이라 "판을 안 올렸다" 가 아니다 — 디스패치가 진 뒤 다시 돌린 판이 초록으로 거짓말을 한다.
+          if at=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha 2>/dev/null); then
+            if [ "$at" = "$SHA" ]; then
+              printf '::warning::%s 이 이미 이 머지 커밋에 있다 — 릴리스가 안 돌았으면 gh workflow run release.yml --ref %s\n' "$tag" "$tag"
+            else
+              printf '%s 이 이미 %s 에 있다 — 판을 안 올린 머지라 건너뛴다\n' "$tag" "$at"
+            fi
+            printf 'tag=\n' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # 태그를 Cargo.toml 에서 짓는 순간 guard 의 "태그 == Cargo.toml" 은 늘 맞는다. 사람이 달던
+          # 때 그 견줌이 잡던 것(판을 안 올린 채 내는 것) 대신 CHANGELOG 의 그 판 절을 본다 —
+          # `auto` 가 연 절이 없으면 bump 를 안 거친 판이다. 줄 머리를 글자째 견준다(release.yml 의 노트와 같다).
+          if ! awk -v head="## [$version]" 'index($0, head) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
+            printf 'CHANGELOG.md 에 %s 절이 없다 — scripts/bump-version.sh auto 를 거친 판이 아니다\n' "$version" >&2
+            exit 1
+          fi
+          printf '달 태그: %s → %s\n' "$tag" "$SHA"
+          printf 'tag=%s\n' "$tag" >>"$GITHUB_OUTPUT"
+
+  tag:
+    name: 관리자 승인 뒤 태그와 릴리스
+    needs: plan
+    if: needs.plan.outputs.tag != ''
     runs-on: ubuntu-latest
     # 승인을 기다리는 시간은 여기 안 든다 — 잡이 시작한 뒤의 시간이다.
     timeout-minutes: 10
@@ -59,7 +107,8 @@ jobs:
             exit 1
           fi
           for who in $approvers; do
-            role=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$who/permission" --jq .permission)
+            # 한 사람의 권한을 못 읽었다고 뒤의 승인자를 안 보고 끝내지 않는다 — 그 사람만 건너뛴다.
+            role=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$who/permission" --jq .permission) || role='못 읽음'
             if [ "$role" = admin ]; then
               printf '승인: %s (admin)\n' "$who"
               exit 0
@@ -69,33 +118,23 @@ jobs:
           printf '관리자의 승인이 없다 — 태그를 안 단다\n' >&2
           exit 1
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
-          persist-credentials: false
-
+      # 판과 CHANGELOG 는 plan 이 머지 커밋에서 읽었다 — 여기서는 받아 쓴다. 그래서 체크아웃이 없다.
       - name: 태그를 달고 릴리스를 부른다
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          TAG: ${{ needs.plan.outputs.tag }}
         run: |
           set -euo pipefail
-          # 대입으로 받는다 — 판을 못 읽으면 `set -e` 가 여기서 멈춘다(release.yml 의 guard 와 같은 자리).
-          version=$(scripts/check-version.sh --print)
-          tag=v$version
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --silent 2>/dev/null; then
-            printf '%s 이 이미 있다 — 판을 안 올린 머지라 건너뛴다\n' "$tag"
-            exit 0
-          fi
-          # 태그를 Cargo.toml 에서 짓는 순간 guard 의 "태그 == Cargo.toml" 은 늘 맞는다. 사람이 달던
-          # 때 그 견줌이 잡던 것(판을 안 올린 채 내는 것) 대신 CHANGELOG 의 그 판 절을 본다 —
-          # `auto` 가 연 절이 없으면 bump 를 안 거친 판이다. 줄 머리를 글자째 견준다(release.yml 의 노트와 같다).
-          if ! awk -v head="## [$version]" 'index($0, head) == 1 { found = 1 } END { exit !found }' CHANGELOG.md; then
-            printf 'CHANGELOG.md 에 %s 절이 없다 — scripts/bump-version.sh auto 를 거친 판이 아니다\n' "$version" >&2
+          # **승인을 기다리는 동안 누가 손으로 달았을 수 있다.** 만드는 쪽이 422 로 지면 그 자리를 댄다.
+          if ! gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" --silent; then
+            at=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null) || at=
+            if [ -n "$at" ]; then
+              printf '%s 이 그새 %s 에 섰다 — 태그를 안 단다. 릴리스가 안 돌았으면 gh workflow run release.yml --ref %s\n' "$TAG" "$at" "$TAG" >&2
+            fi
             exit 1
           fi
-          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$SHA" --silent
-          printf '태그: %s → %s\n' "$tag" "$SHA"
-          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"
-          gh workflow run smoke.yml --repo "$GITHUB_REPOSITORY" --ref "$tag"
-          printf '불렀다: release.yml · smoke.yml (%s)\n' "$tag"
+          printf '태그: %s → %s\n' "$TAG" "$SHA"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          gh workflow run smoke.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          printf '불렀다: release.yml · smoke.yml (%s)\n' "$TAG"

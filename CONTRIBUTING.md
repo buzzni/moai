@@ -301,20 +301,23 @@ squash it** — `moai show <id>` finds an issue's commits by the id in their
 subject, and a squash folds 400 subjects into one body where nothing reads them.
 
 **Nobody types the tag; an admin approves it** (moai-i5so, 2026-10-23). When a
-pull request from `develop` is merged into `main`, `tag-on-merge.yml` waits on
-the `release` environment. Once an admin approves that run, it tags the merge
-commit `v<Cargo.toml version>` and starts `release.yml` and `smoke.yml` on that
-tag. It starts them by `workflow_dispatch` because a tag pushed with
-`GITHUB_TOKEN` does not trigger other workflows' `push: tags`, so the release
-workflow itself is unchanged. If that version's tag already exists, the merge
-did not bump the version, and nothing happens.
+pull request from `develop` is merged into `main`, `tag-on-merge.yml` first
+reads the merge commit. If the tag `v<Cargo.toml version>` already exists, the
+merge did not bump the version, and nothing is asked. If `CHANGELOG.md` has no
+section for that version, the run stops before anyone is asked. Otherwise it
+waits on the `release` environment. Once an admin approves, it tags the merge
+commit and starts `release.yml` and `smoke.yml` on that tag. It starts them by
+`workflow_dispatch` because a tag pushed with `GITHUB_TOKEN` does not trigger
+other workflows' `push: tags`, so the release workflow itself is unchanged.
 
 The approval lives in the repository settings, not in this file: under
-Settings → Environments → `release`, the admins are the required reviewers. If
-that environment is missing or loses its rule, GitHub runs the job without
-asking. So the job's first step reads the run's approvals and stops unless an
-admin approved for `release`. An empty setting means no tag, not an
-unapproved release.
+Settings → Environments → `release`, the admins are the required reviewers.
+Leave its deployment branches unrestricted. The job runs on a `pull_request`
+event, so its ref is not `refs/heads/main`, and a rule naming `main` keeps the
+job from starting. If that environment is missing or loses its rule, GitHub runs
+the job without asking. So the job's first step reads the run's approvals and
+stops unless an admin approved for `release`. An empty setting means no tag, not
+an unapproved release.
 
 The tag is what the release workflow trusts, so the pre-push hook and the first
 job of the workflow both check the tag against `Cargo.toml` before anything is
@@ -326,18 +329,26 @@ That version's section must already be in `CHANGELOG.md`, which `auto`
 opened, or the run stops. And the tag must not exist yet.
 
 If the approval was rejected or the run failed before tagging, tag by hand as
-before. The pre-push hook and the guard still check it. If the tag was made but
-the release did not start, start it on that tag:
+before. The pre-push hook and the guard still check it, and the push itself
+starts `release.yml` and `smoke.yml`:
 
 ```sh
 git fetch origin && git tag v0.2.0 origin/main
 git push origin v0.2.0
-gh workflow run release.yml --ref v0.2.0          # the tag exists, the release did not run
+```
+
+If the run made the tag but a workflow did not start, do not push the tag again.
+It already exists. Start the workflows on it instead:
+
+```sh
+gh workflow run release.yml --ref v0.2.0
+gh workflow run smoke.yml --ref v0.2.0
 ```
 
 For the very first release the bump script has nothing to move — `Cargo.toml` is
 already at `0.1.0` — so rename the `[Unreleased]` heading in `CHANGELOG.md` to
-`## [0.1.0] - <date>` by hand, add a fresh empty `[Unreleased]` above it, and tag.
+`## [0.1.0] - <date>` by hand and add a fresh empty `[Unreleased]` above it. The
+merge into `main` then tags it like any other release.
 
 A `v*` tag builds `x86_64-unknown-linux-musl`, `aarch64-apple-darwin`,
 `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`, publishes the two
