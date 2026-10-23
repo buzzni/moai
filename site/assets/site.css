@@ -40,7 +40,12 @@ nav .links a:hover { color: var(--ink); }
 nav .right { margin-left: auto; display: flex; align-items: center; gap: 14px; font-size: 14px; }
 nav .gh { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; border: 1px solid var(--line); padding: 6px 12px; border-radius: 8px; color: var(--ink); }
 nav .gh:hover { border-color: var(--faint); }
-@media (max-width: 640px) { nav .links { display: none; } }
+nav .lang { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 13px; }
+nav .lang a { text-decoration: none; color: var(--muted); white-space: nowrap; }
+nav .lang a:hover { color: var(--ink); }
+nav .lang a[aria-current="page"] { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 5px; text-decoration-thickness: 2px; }
+@media (max-width: 860px) { nav .links { display: none; } }
+@media (max-width: 520px) { nav .gh span { display: none; } nav .gh { padding: 6px 8px; } nav .wrap { gap: 16px; } nav .brand img { height: 26px; } }
 
 /* hero */
 .hero { padding: 88px 0 40px; }

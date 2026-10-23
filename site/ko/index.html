@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>moai — 저장소 안의 이슈 트래커</title>
+  <meta name="description" content="moai는 사람과 코딩 에이전트가 같은 저장소에서 쓰는 이슈 트래커입니다. 이슈는 .moai/issues.jsonl에 한 줄씩 들어가 코드와 같이 커밋됩니다.">
+  <link rel="canonical" href="https://buzzni.github.io/moai/ko/">
+  <link rel="alternate" hreflang="en" href="https://buzzni.github.io/moai/">
+  <link rel="alternate" hreflang="ko" href="https://buzzni.github.io/moai/ko/">
+  <link rel="alternate" hreflang="ja" href="https://buzzni.github.io/moai/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://buzzni.github.io/moai/">
+  <link rel="icon" href="../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="moai"><img src="../assets/logo.svg" alt="moai"></a>
+    <div class="links">
+      <a href="#features">기능</a>
+      <a href="#start">시작하기</a>
+      <a href="https://github.com/buzzni/moai/tree/main/docs">문서</a>
+      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md">변경 기록</a>
+    </div>
+    <div class="right">
+      <div class="lang" role="navigation" aria-label="Language">
+        <a href="../" hreflang="en" lang="en" data-lang="en">English</a><span aria-hidden="true">|</span><a href="./" hreflang="ko" lang="ko" data-lang="ko" aria-current="page">한국어</a><span aria-hidden="true">|</span><a href="../ja/" hreflang="ja" lang="ja" data-lang="ja">日本語</a>
+      </div>
+      <a class="gh" href="https://github.com/buzzni/moai" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>buzzni/moai</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">코딩 에이전트와 같이 쓰는 이슈 트래커</p>
+    <h1>할 일은 <em>저장소 안에</em><br>둡니다.</h1>
+    <p class="lede">moai는 이슈를 <code>.moai/issues.jsonl</code>에 한 줄씩 적습니다. 코드와 같이 커밋되고, 브랜치를 타고, 머지됩니다. <strong>다음 세션의 에이전트도, 내일의 나도 같은 파일을 읽습니다.</strong> 지난번에 무엇을 정했는지 채팅 기록을 뒤질 일이 줄어듭니다.</p>
+
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="복사됨">복사</button>
+    </div>
+    <p class="meta">macOS · Linux · Windows · MIT 라이선스 · <code>SHA256SUMS</code>로 확인되지 않으면 설치하지 않습니다 · <a href="https://github.com/buzzni/moai#install">다른 설치 방법</a></p>
+
+    <div class="media hero-media">
+      <div><b>A1 · GIF</b><span>터미널 한 창에서 <code>moai</code> → <code>moai ready</code> → 집기 → <code>moai note</code> → <code>done</code>까지 이어지는 20초</span></div>
+    </div>
+
+    <div class="stats">
+      <div><b>3,140</b><span>이 저장소가 moai로 다룬 이슈·에픽·리뷰</span></div>
+      <div><b>31</b><span>릴리스, 지금은 v0.23.0</span></div>
+      <div><b>3</b><span>훅까지 붙는 에이전트<br>Claude Code · Codex · Antigravity</span></div>
+      <div><b>0</b><span>승인 단계</span></div>
+    </div>
+    <p class="asof">숫자는 2026-10-23 기준</p>
+  </div>
+</header>
+
+<section class="demo">
+  <div class="wrap">
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>~/work/shop-api</span></div>
+<pre><span class="c">$</span> <span class="b">moai</span>
+Issues 941  · Epics 148       .moai/issues.jsonl
+
+  · todo 36    <span class="a">▸ in_progress 5</span>    <span class="y">? review 0</span>    <span class="g">✓ done 900</span>
+
+<span class="y">! Started at once 5</span> — finishing one at a time goes better
+
++ Backlog 36 (oldest 4 days)
+    → `moai backlog ls`
+
+Last 7 days   created 41  ·  done 38   piling up +3
+
+Next:  `moai ready` picks what to take</pre>
+    </div>
+    <p class="caption">세션을 열면 이것부터 칩니다. 보드, 경고, 지난 7일의 흐름이 한 화면에 나옵니다. 경고가 몇 개든 종료 코드는 0이고, 데이터가 깨졌을 때만 0이 아닌 코드로 끝납니다.</p>
+  </div>
+</section>
+
+<section class="logos" aria-label="moai를 쓰는 팀">
+  <div class="wrap">
+    <h2>이 팀들이 moai로 일을 나눕니다</h2>
+  </div>
+  <div class="marquee">
+    <div class="track">
+      <div class="slot">LOGO 1</div><div class="slot">LOGO 2</div><div class="slot">LOGO 3</div><div class="slot">LOGO 4</div><div class="slot">LOGO 5</div><div class="slot">LOGO 6</div><div class="slot">LOGO 7</div><div class="slot">LOGO 8</div>
+      <div class="slot" aria-hidden="true">LOGO 1</div><div class="slot" aria-hidden="true">LOGO 2</div><div class="slot" aria-hidden="true">LOGO 3</div><div class="slot" aria-hidden="true">LOGO 4</div><div class="slot" aria-hidden="true">LOGO 5</div><div class="slot" aria-hidden="true">LOGO 6</div><div class="slot" aria-hidden="true">LOGO 7</div><div class="slot" aria-hidden="true">LOGO 8</div>
+    </div>
+  </div>
+</section>
+
+<section class="features" id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 class="big">에이전트가 여러 개 돌아도<br>할 일 목록은 하나입니다.</h2>
+      <p>웹 트래커는 저장소 밖에 있어서 에이전트가 읽기 어렵고, 마크다운 TODO는 세 번째 세션쯤 되면 아무도 믿지 않습니다. moai는 그 사이를 메우려고 만들었습니다.</p>
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <div class="n">01</div>
+        <h3>한 줄이 이슈 하나.</h3>
+        <p><code>issues.jsonl</code>은 id 순으로 정렬된 JSON 줄입니다. 상태를 알려고 이벤트를 다시 접지 않습니다. <strong>파일에 적힌 것이 지금 상태입니다.</strong> 서로 다른 이슈를 고친 두 브랜치는 머지 드라이버가 이슈 단위로 3-way 머지합니다.</p>
+        <pre class="snippet">moai merge-driver --install   <span class="c"># 클론마다 한 번</span></pre>
+        <div class="media"><div><b>A6 · 스크린샷</b><span><code>git diff</code>에서 <code>issues.jsonl</code> 한 줄만 바뀐 모습</span></div></div>
+      </article>
+
+      <article class="card">
+        <div class="n">02</div>
+        <h3>막지 않고 알려 줍니다.</h3>
+        <p>만드는 것도 옮기는 것도 승인이 필요 없습니다. <code>moai status</code>는 한꺼번에 벌여 놓은 일이 많다거나 리뷰가 오래 멈췄다고 말해 줄 뿐, 아무것도 거절하지 않습니다.</p>
+        <p>경고로 실패하는 도구는 에이전트가 금방 우회할 대상이 됩니다. 그래서 경고는 화면에만 남깁니다.</p>
+        <pre class="snippet">moai defer &lt;id&gt; -m '다음 분기'   <span class="c"># 칸도 종류도 그대로</span>
+moai defer &lt;id&gt; --undo          <span class="c"># 같은 줄이 그대로 돌아온다</span></pre>
+      </article>
+
+      <article class="card">
+        <div class="n">03</div>
+        <h3>에이전트가 읽는 형식으로.</h3>
+        <p>모든 명령이 <code>--json</code>을 받습니다. <code>moai ready --json</code>은 지금 집을 일, 남의 일, 미뤄 둔 일을 나눠서 돌려줍니다. <code>moai init</code>은 <code>AGENTS.md</code>에 명령과 판단 기준을 적고, <code>moai skill install</code>은 스킬과 훅을 심습니다.</p>
+        <div class="agents"><span>Claude Code</span><span>Codex</span><span>Antigravity</span></div>
+        <div class="media"><div><b>A7 · 스크린샷</b><span>훅이 남의 이슈 집기를 거절하고, 고칠 명령(<code>--take</code>)을 그대로 내주는 장면</span></div></div>
+      </article>
+
+      <article class="card">
+        <div class="n">04</div>
+        <h3>세션 여럿, 저장소 하나.</h3>
+        <p><code>--from todo</code>를 붙이면 본 칸이 그대로일 때만 옮깁니다. 늦게 온 세션은 0이 아닌 코드를 받고 다음 일로 넘어갑니다. 워크트리 안에서 부른 moai는 본 체크아웃의 트래커에 쓰기 때문에, 머지할 때 트래커가 충돌하지 않습니다.</p>
+        <p>남의 일을 집을 때는 사람에게 먼저 묻고 <code>--take</code>로 넘겨받습니다. 원래 누구 것이었는지는 노트로 남습니다.</p>
+        <div class="media"><div><b>A2 · GIF</b><span>두 세션이 같은 이슈를 동시에 집는 장면. 한쪽은 옮기고, 다른 쪽은 <code>stale</code> 한 줄을 받고 물러난다</span></div></div>
+      </article>
+
+      <article class="card span">
+        <div>
+          <div class="n">05</div>
+          <h3>터미널에서도, 브라우저에서도.</h3>
+          <p style="margin-top:14px"><code>moai tui</code>는 목록과 상세를 한 화면에 띄웁니다. <code>SPC g b</code>를 누르면 마일스톤별 칸반이 되고, <code>SPC g w</code>는 <code>docs/</code>의 위키를 엽니다. 키보드와 마우스 둘 다 됩니다.</p>
+          <p style="margin-top:12px">터미널이 낯선 팀원에게는 <code>moai web</code>이 같은 화면을 브라우저 탭으로 보여 줍니다. 읽기만 하고, 트래커에는 아무것도 쓰지 않습니다.</p>
+        </div>
+        <div class="media"><div><b>A4 · GIF</b><span><code>moai tui</code> 목록에서 <code>SPC g b</code>로 칸반 전환, 마일스톤 레인이 보이게</span></div></div>
+      </article>
+
+      <article class="card">
+        <div class="n">06</div>
+        <h3>지금 안 할 일에도 자리가 있습니다.</h3>
+        <p>작업 중 떠오른 생각은 백로그에 담습니다. 보드에도 <code>ready</code>에도 나오지 않아서 계획이 흐려지지 않습니다. 때가 되면 에픽과 이슈로 펼칩니다.</p>
+        <pre class="snippet">moai backlog add '보드를 에픽별로 접으면 어떨까'
+moai backlog promote &lt;id&gt; --from -</pre>
+      </article>
+
+      <article class="card">
+        <div class="n">07</div>
+        <h3>마일스톤이 돌면 그 안부터.</h3>
+        <p>마일스톤 멤버 하나가 시작되면 그 마일스톤은 도는 중입니다. 따로 여는 명령은 없습니다. 그동안 <code>moai ready</code>는 안쪽 일을 먼저 주고, 밖에서는 <code>p0</code>만 내줍니다. 마감이 다가오면 <code>moai due apply</code>가 우선순위를 올립니다.</p>
+        <div class="media"><div><b>A5 · 스크린샷</b><span><code>moai web</code> 보드. 브라우저 탭 하나, 마일스톤 레인과 카드</span></div></div>
+      </article>
+
+      <article class="card span">
+        <div>
+          <div class="n">08</div>
+          <h3>감독 하나에 일꾼 여럿.</h3>
+          <p style="margin-top:14px">Claude Code에서 <code>/moai-supervise</code>를 부른 세션이 쌓인 백로그를 놀고 있는 세션에 하나씩 보내고 보고를 받습니다. tmux와 cmux 안에서는 일꾼 창을 비우고, 사람이 허락하면 새 창도 엽니다.</p>
+          <p style="margin-top:12px"><strong>moai 바이너리는 에이전트를 직접 띄우지 않습니다.</strong> 세션은 늘 사람이 엽니다.</p>
+        </div>
+        <div class="media"><div><b>A8 · GIF</b><span>tmux 세 칸. 감독이 두 일꾼에게 일을 보내고, 일꾼이 끝낸 뒤 보고가 돌아오는 장면</span></div></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="start" id="start">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <h2 class="big">처음 5분.</h2>
+        <ol>
+          <li><strong><code>moai init</code></strong>이 <code>.moai/</code>를 만들고 <code>AGENTS.md</code>에 사용법을 적습니다.</li>
+          <li>이슈를 하나 만들고 <strong><code>moai ready</code></strong>로 지금 할 일을 봅니다.</li>
+          <li>집고, 메모를 남기고, 닫습니다. 메모는 다음 세션이 <code>moai show</code>로 읽습니다.</li>
+          <li>에이전트를 쓰면 <strong><code>moai skill install</code></strong>로 스킬과 훅을 심습니다.</li>
+        </ol>
+      </div>
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>처음 5분</span></div>
+<pre><span class="c">$</span> moai init
+<span class="c">$</span> moai add 'the board wraps at 80 columns' -t bug -p 1
+<span class="c">$</span> moai ready
+<span class="c">$</span> moai mv &lt;id&gt; in_progress
+<span class="c">$</span> moai note &lt;id&gt; 'the width comes from view.rs, not the terminal'
+<span class="c">$</span> moai mv &lt;id&gt; done</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>다음 세션은<br><code style="color:var(--accent)">moai status</code>로 시작하세요.</h2>
+    <p>설치는 한 줄입니다. 이미 깔려 있으면 같은 줄이 새 판으로 올려 줍니다.</p>
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="복사됨">복사</button>
+    </div>
+    <p class="meta" style="margin-top:14px">Windows는 <a href="https://github.com/buzzni/moai#windows"><code>install.ps1</code></a>을 씁니다.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <img src="../assets/logo.svg" alt="moai">
+    <span>v0.23.0 · MIT · © 2026 Buzzni Inc.</span>
+    <div class="links">
+      <a href="https://github.com/buzzni/moai/tree/main/docs">문서</a>
+      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md">변경 기록</a>
+      <a href="https://github.com/buzzni/moai">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/site.js"></script>
+</body>
+</html>

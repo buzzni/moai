@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>moai — リポジトリの中に置くイシュートラッカー</title>
+  <meta name="description" content="moai は、人とコーディングエージェントが同じリポジトリで使うイシュートラッカーです。イシューは .moai/issues.jsonl に1行ずつ入り、コードと一緒にコミットされます。">
+  <link rel="canonical" href="https://buzzni.github.io/moai/ja/">
+  <link rel="alternate" hreflang="en" href="https://buzzni.github.io/moai/">
+  <link rel="alternate" hreflang="ko" href="https://buzzni.github.io/moai/ko/">
+  <link rel="alternate" hreflang="ja" href="https://buzzni.github.io/moai/ja/">
+  <link rel="alternate" hreflang="x-default" href="https://buzzni.github.io/moai/">
+  <link rel="icon" href="../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="./" aria-label="moai"><img src="../assets/logo.svg" alt="moai"></a>
+    <div class="links">
+      <a href="#features">機能</a>
+      <a href="#start">はじめる</a>
+      <a href="https://github.com/buzzni/moai/tree/main/docs">ドキュメント</a>
+      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md">変更履歴</a>
+    </div>
+    <div class="right">
+      <div class="lang" role="navigation" aria-label="Language">
+        <a href="../" hreflang="en" lang="en" data-lang="en">English</a><span aria-hidden="true">|</span><a href="../ko/" hreflang="ko" lang="ko" data-lang="ko">한국어</a><span aria-hidden="true">|</span><a href="./" hreflang="ja" lang="ja" data-lang="ja" aria-current="page">日本語</a>
+      </div>
+      <a class="gh" href="https://github.com/buzzni/moai" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>buzzni/moai</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">人とコーディングエージェントが一緒に使うイシュートラッカー</p>
+    <h1>やることは<br><em>リポジトリの中に</em>置く。</h1>
+    <p class="lede">moai はイシューを <code>.moai/issues.jsonl</code> に1行ずつ書きます。コードと一緒にコミットされ、ブランチに乗り、マージされます。<strong>次のセッションのエージェントも、明日の自分も、同じファイルを読みます。</strong>前に何を決めたのか、チャットの履歴を掘り返す手間が減ります。</p>
+
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="コピーしました">コピー</button>
+    </div>
+    <p class="meta">macOS · Linux · Windows · MIT ライセンス · <code>SHA256SUMS</code> で確認できないものはインストールしません · <a href="https://github.com/buzzni/moai#install">ほかのインストール方法</a></p>
+
+    <div class="media hero-media">
+      <div><b>A1 · GIF</b><span>ターミナル1枚で <code>moai</code> → <code>moai ready</code> → 着手 → <code>moai note</code> → <code>done</code> まで流れる20秒</span></div>
+    </div>
+
+    <div class="stats">
+      <div><b>3,140</b><span>このリポジトリが moai で扱ったイシュー・エピック・レビュー</span></div>
+      <div><b>31</b><span>回のリリース。いまは v0.23.0</span></div>
+      <div><b>3</b><span>フックまで入るエージェント<br>Claude Code · Codex · Antigravity</span></div>
+      <div><b>0</b><span>承認ステップ</span></div>
+    </div>
+    <p class="asof">数字は 2026-10-23 時点</p>
+  </div>
+</header>
+
+<section class="demo">
+  <div class="wrap">
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>~/work/shop-api</span></div>
+<pre><span class="c">$</span> <span class="b">moai</span>
+Issues 941  · Epics 148       .moai/issues.jsonl
+
+  · todo 36    <span class="a">▸ in_progress 5</span>    <span class="y">? review 0</span>    <span class="g">✓ done 900</span>
+
+<span class="y">! Started at once 5</span> — finishing one at a time goes better
+
++ Backlog 36 (oldest 4 days)
+    → `moai backlog ls`
+
+Last 7 days   created 41  ·  done 38   piling up +3
+
+Next:  `moai ready` picks what to take</pre>
+    </div>
+    <p class="caption">セッションを開いたら、まずこれを打ちます。ボード、警告、直近7日の流れが1画面に出ます。警告がいくつあっても終了コードは0で、0以外で終わるのはデータが壊れたときだけです。</p>
+  </div>
+</section>
+
+<section class="logos" aria-label="moai を使っているチーム">
+  <div class="wrap">
+    <h2>moai で仕事を分けているチーム</h2>
+  </div>
+  <div class="marquee">
+    <div class="track">
+      <div class="slot">LOGO 1</div><div class="slot">LOGO 2</div><div class="slot">LOGO 3</div><div class="slot">LOGO 4</div><div class="slot">LOGO 5</div><div class="slot">LOGO 6</div><div class="slot">LOGO 7</div><div class="slot">LOGO 8</div>
+      <div class="slot" aria-hidden="true">LOGO 1</div><div class="slot" aria-hidden="true">LOGO 2</div><div class="slot" aria-hidden="true">LOGO 3</div><div class="slot" aria-hidden="true">LOGO 4</div><div class="slot" aria-hidden="true">LOGO 5</div><div class="slot" aria-hidden="true">LOGO 6</div><div class="slot" aria-hidden="true">LOGO 7</div><div class="slot" aria-hidden="true">LOGO 8</div>
+    </div>
+  </div>
+</section>
+
+<section class="features" id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <h2 class="big">エージェントがいくつ動いていても、<br>やることリストはひとつ。</h2>
+      <p>Web のトラッカーはリポジトリの外にあってエージェントからは読みにくく、Markdown の TODO は3つ目のセッションあたりで誰も信じなくなります。moai はその間を埋めるために作りました。</p>
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <div class="n">01</div>
+        <h3>1行が1イシュー。</h3>
+        <p><code>issues.jsonl</code> は id 順に並んだ JSON の行です。いまの状態を知るためにイベントを再生することはありません。<strong>ファイルに書かれていることが、いまの状態です。</strong>別々のイシューを触った2つのブランチは、マージドライバがイシュー単位で3-way マージします。</p>
+        <pre class="snippet">moai merge-driver --install   <span class="c"># クローンごとに1回</span></pre>
+        <div class="media"><div><b>A6 · スクリーンショット</b><span><code>git diff</code> で <code>issues.jsonl</code> の1行だけが変わった様子</span></div></div>
+      </article>
+
+      <article class="card">
+        <div class="n">02</div>
+        <h3>止めずに、知らせる。</h3>
+        <p>作るのにも動かすのにも承認はいりません。<code>moai status</code> は、同時に抱えすぎている、レビューが長く止まっている、と教えるだけで、何も拒みません。</p>
+        <p>警告で失敗するツールは、エージェントにすぐ迂回されます。だから警告は画面に出すだけにしています。</p>
+        <pre class="snippet">moai defer &lt;id&gt; -m '来期に回す'   <span class="c"># カラムも種類もそのまま</span>
+moai defer &lt;id&gt; --undo           <span class="c"># 同じ行がそのまま戻る</span></pre>
+      </article>
+
+      <article class="card">
+        <div class="n">03</div>
+        <h3>エージェントが読める形で。</h3>
+        <p>どのコマンドも <code>--json</code> を受け付けます。<code>moai ready --json</code> は、いま取れる仕事、ほかの人の仕事、保留中の仕事に分けて返します。<code>moai init</code> は <code>AGENTS.md</code> にコマンドと判断の基準を書き、<code>moai skill install</code> はスキルとフックを入れます。</p>
+        <div class="agents"><span>Claude Code</span><span>Codex</span><span>Antigravity</span></div>
+        <div class="media"><div><b>A7 · スクリーンショット</b><span>フックがほかの人のイシューへの着手を断り、正しいコマンド（<code>--take</code>）をそのまま返す場面</span></div></div>
+      </article>
+
+      <article class="card">
+        <div class="n">04</div>
+        <h3>セッションは複数、リポジトリはひとつ。</h3>
+        <p><code>--from todo</code> を付けると、見たときのカラムのままのときだけ移動します。遅れて来たセッションは0以外の終了コードを受け取り、次の仕事へ移ります。worktree の中で呼んだ moai はメインのチェックアウトのトラッカーに書くので、マージでトラッカーが衝突しません。</p>
+        <p>ほかの人の仕事を取るときは、先に本人に聞いてから <code>--take</code> で引き継ぎます。もとが誰のものだったかはノートに残ります。</p>
+        <div class="media"><div><b>A2 · GIF</b><span>2つのセッションが同じイシューを同時に取りに行く場面。片方は移動し、もう片方は <code>stale</code> の1行を受け取って引き下がる</span></div></div>
+      </article>
+
+      <article class="card span">
+        <div>
+          <div class="n">05</div>
+          <h3>ターミナルでも、ブラウザでも。</h3>
+          <p style="margin-top:14px"><code>moai tui</code> は一覧と詳細を1画面に出します。<code>SPC g b</code> でマイルストーンごとのカンバンになり、<code>SPC g w</code> で <code>docs/</code> の wiki を開きます。キーボードでもマウスでも操作できます。</p>
+          <p style="margin-top:12px">ターミナルに慣れていないメンバーには、<code>moai web</code> が同じ画面をブラウザのタブで見せます。読むだけで、トラッカーには何も書きません。</p>
+        </div>
+        <div class="media"><div><b>A4 · GIF</b><span><code>moai tui</code> の一覧から <code>SPC g b</code> でカンバンに切り替え。マイルストーンのレーンが見えるように</span></div></div>
+      </article>
+
+      <article class="card">
+        <div class="n">06</div>
+        <h3>いまやらないことにも、置き場所がある。</h3>
+        <p>作業中に思いついたことはバックログに入れます。ボードにも <code>ready</code> にも出ないので、計画がぼやけません。時期が来たら、エピックとイシューに展開します。</p>
+        <pre class="snippet">moai backlog add 'エピックごとにボードを畳めたら'
+moai backlog promote &lt;id&gt; --from -</pre>
+      </article>
+
+      <article class="card">
+        <div class="n">07</div>
+        <h3>マイルストーンが動いている間は、その中から。</h3>
+        <p>マイルストーンのメンバーがひとつ着手されれば、そのマイルストーンは進行中です。開くためのコマンドはありません。その間 <code>moai ready</code> は中の仕事を先に渡し、外からは <code>p0</code> だけを出します。締め切りが近づくと <code>moai due apply</code> が優先度を上げます。</p>
+        <div class="media"><div><b>A5 · スクリーンショット</b><span><code>moai web</code> のボード。ブラウザのタブ1枚に、マイルストーンのレーンとカード</span></div></div>
+      </article>
+
+      <article class="card span">
+        <div>
+          <div class="n">08</div>
+          <h3>監督ひとりに、作業者が何人か。</h3>
+          <p style="margin-top:14px">Claude Code で <code>/moai-supervise</code> を呼んだセッションが、たまったバックログを手の空いているセッションにひとつずつ渡し、報告を受け取ります。tmux や cmux の中では作業者のウィンドウを片付け、許可があれば新しいウィンドウも開きます。</p>
+          <p style="margin-top:12px"><strong>moai のバイナリがエージェントを直接起動することはありません。</strong>セッションを開くのはいつも人です。</p>
+        </div>
+        <div class="media"><div><b>A8 · GIF</b><span>tmux の3ペイン。監督が2人の作業者に仕事を送り、報告が戻ってくる場面</span></div></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="start" id="start">
+  <div class="wrap">
+    <div class="cols">
+      <div>
+        <h2 class="big">最初の5分。</h2>
+        <ol>
+          <li><strong><code>moai init</code></strong> が <code>.moai/</code> を作り、<code>AGENTS.md</code> に使い方を書きます。</li>
+          <li>イシューをひとつ作り、<strong><code>moai ready</code></strong> でいまやることを見ます。</li>
+          <li>着手して、メモを残して、閉じます。メモは次のセッションが <code>moai show</code> で読みます。</li>
+          <li>エージェントを使うなら、<strong><code>moai skill install</code></strong> でスキルとフックを入れます。</li>
+        </ol>
+      </div>
+      <div class="term">
+        <div class="bar"><i></i><i></i><i></i><span>最初の5分</span></div>
+<pre><span class="c">$</span> moai init
+<span class="c">$</span> moai add 'the board wraps at 80 columns' -t bug -p 1
+<span class="c">$</span> moai ready
+<span class="c">$</span> moai mv &lt;id&gt; in_progress
+<span class="c">$</span> moai note &lt;id&gt; 'the width comes from view.rs, not the terminal'
+<span class="c">$</span> moai mv &lt;id&gt; done</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="wrap">
+    <h2>次のセッションは<br><code style="color:var(--accent)">moai status</code> から。</h2>
+    <p>インストールは1行です。もう入っていれば、同じ1行で新しい版に上がります。</p>
+    <div class="install">
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code>
+      <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh" data-copied="コピーしました">コピー</button>
+    </div>
+    <p class="meta" style="margin-top:14px">Windows では <a href="https://github.com/buzzni/moai#windows"><code>install.ps1</code></a> を使います。</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <img src="../assets/logo.svg" alt="moai">
+    <span>v0.23.0 · MIT · © 2026 Buzzni Inc.</span>
+    <div class="links">
+      <a href="https://github.com/buzzni/moai/tree/main/docs">ドキュメント</a>
+      <a href="https://github.com/buzzni/moai/blob/main/CHANGELOG.md">変更履歴</a>
+      <a href="https://github.com/buzzni/moai">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/site.js"></script>
+</body>
+</html>
