@@ -12,6 +12,37 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Any row can carry a planned start, not only a milestone.** `--start` works
+  on `add`, `edit`, `epic add` and `backlog add` the way `--due` does, and `+N`
+  means N days from today in your time zone (stored as the date). A start after
+  the row's own deadline is refused, and so is a start later than the deadline of
+  the milestone, epic or parent above it — the message names that ancestor and the
+  latest day it can take. A start earlier than the parent's start is never
+  refused. Only the row being written is checked: pulling an ancestor's deadline
+  in below a child's start never blocks, it prints one line naming the rows it
+  pushed past, and `moai status` counts them in `due_beyond_parent` (its text now
+  says "deadlines or starts"). The detail shows `start → deadline`, and
+  `--filter starts_on=2026-10-01~2026-10-05` keeps rows by their own start.
+  (moai-xf0p.6d5, moai-xf0p.cbu)
+- **A plan line can end in `@start~deadline`.** `@2026-10-25~2026-10-30` is a
+  start and a deadline, `@2026-10-25~` a start alone, and `@2026-10-30` stays a
+  deadline as before; epic lines and issue lines both take them, and a start after
+  its deadline stops the plan with the line number. `add --from --start` puts the
+  start on each epic the plan creates that has no `@` of its own — a line that
+  writes any `@` keeps both flags off it. `backlog promote` carries the backlog
+  item's start onto the epic as it does its deadline, and `--dry-run` and
+  `show --as-plan` print the same range. (moai-xf0p.due)
+
+### Changed
+
+- **`starts_on` is no longer refused on rows that are not milestones.** A binary
+  from before this release still refuses it: it cannot edit an issue, epic or
+  backlog item that carries a start — not even its title, and not `defer` — and
+  says to clear it with `moai edit <id> --start none`. Upgrade every binary that
+  writes the tracker before giving such a row a start. (moai-xf0p.6d5)
+
 ## [0.23.0] - 2026-10-23
 
 ### Added
