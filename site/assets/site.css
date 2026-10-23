@@ -194,9 +194,10 @@ footer a:hover { color: var(--ink); }
 }
 
 /* 감독·일꾼: 벤더가 다른 에이전트 셋과 moai tui 가 한 tmux 창에 선다 */
-section.team { padding: 64px 0 8px; }
+section.team { padding: 48px 0 8px; }
+.team .window { margin: 0 0 44px; }
 .team .sec-head { margin-bottom: 28px; }
-.team-points { list-style: none; margin: 0 0 40px; padding: 0; display: grid; gap: 10px; max-width: 760px; color: var(--muted); }
+.team-points { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-width: 760px; color: var(--muted); }
 .team-points li { position: relative; padding-left: 22px; }
 .team-points li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); }
 .team-points q { color: var(--ink); quotes: "“" "”"; }
