@@ -194,3 +194,16 @@ footer a:hover { color: var(--ink); }
   --term-color-8: #6b6962; --term-color-9: #f47067; --term-color-10: #6bc46d; --term-color-11: #fbc04e;
   --term-color-12: #6cb6ff; --term-color-13: #dcbdfb; --term-color-14: #56d4dd; --term-color-15: #ece9e2;
 }
+
+/* 감독·일꾼: 벤더가 다른 에이전트 넷이 한 화면에 선다. 녹화가 서기 전까지는 칸 그림이다 */
+section.team { padding: 96px 0 8px; }
+.team .sec-head { margin-bottom: 28px; }
+.team-points { list-style: none; margin: 0 0 40px; padding: 0; display: grid; gap: 10px; max-width: 760px; color: var(--muted); }
+.team-points li { position: relative; padding-left: 22px; }
+.team-points li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); }
+.team-points q { color: var(--ink); quotes: "“" "”"; }
+.team-grid .panes { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--line); aspect-ratio: 16 / 9; }
+.team-grid .pane { background: #0a0b0a; display: grid; place-content: center; justify-items: center; gap: 6px; padding: 16px; text-align: center; }
+.team-grid .pane b { font: 600 12px var(--mono); color: var(--accent); }
+.team-grid .pane span { font: 600 clamp(14px, 2vw, 20px) var(--mono); color: var(--ink); }
+.team-grid .pane small { font: 13px var(--sans); color: var(--faint); }

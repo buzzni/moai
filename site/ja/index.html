@@ -102,13 +102,31 @@
   </div>
 </section>
 
-<section class="see" id="see">
+<section class="team" id="team">
   <div class="wrap">
     <div class="sec-head">
-      <h2 class="big">ターミナルでもブラウザでも、進み具合をすぐに確かめられます。</h2>
-      <p>moai は、手になじんだショートカットと使いやすい UI を備えています。</p>
+      <h2 class="big">ベンダーが違っても、ひとつのチームで。</h2>
+      <p>Claude Code で監督スキルを呼ぶと、そのセッションが監督になります。監督はたまった仕事を分け、Codex と Antigravity の作業者にひとつずつ指示します。作業者はそれぞれの worktree で作業して報告し、その間 moai の画面ではカードがカラムを移っていきます。</p>
     </div>
+    <ul class="team-points">
+      <li>指示はひと言で十分です。<q>たまったバックログを、手の空いたセッションに配って。</q></li>
+      <li>作業者のウィンドウを片付け、次の仕事を送り、報告を確かめるところまで監督がやります。</li>
+      <li>セッションを開くのはいつも人です。moai が勝手にエージェントを起動することはありません。</li>
+    </ul>
+    <div class="window term team-grid" role="img" aria-label="tmux の4ペイン: moai tui、Claude Code の監督、Codex と Antigravity の作業者">
+      <div class="bar"><i></i><i></i><i></i><span>tmux</span></div>
+      <div class="panes">
+        <div class="pane"><b>1</b><span>moai tui</span><small>進捗</small></div>
+        <div class="pane"><b>2</b><span>Claude Code</span><small>監督</small></div>
+        <div class="pane"><b>3</b><span>Codex</span><small>作業者</small></div>
+        <div class="pane"><b>4</b><span>Antigravity</span><small>作業者</small></div>
+      </div>
+    </div>
+  </div>
+</section>
 
+<section class="see" id="see">
+  <div class="wrap">
     <article class="scene">
       <div class="scene-text">
         <div class="n">01</div>
