@@ -164,8 +164,8 @@ the cursor on that row. Empty space inside the menu does nothing.
 ## Change the keys
 
 The keys are yours to change, in a file of their own: `keys.toml` next to your
-user config — `~/.config/moai/keys.toml` unless `MOAI_CONFIG` or `MOAI_KEYS`
-points elsewhere. Write only the lines you change; every other key keeps its
+user config — `~/.config/moai/keys.toml`, or under `$XDG_CONFIG_HOME/moai/`
+when that is set, unless `MOAI_CONFIG` or `MOAI_KEYS` points elsewhere. Write only the lines you change; every other key keeps its
 default.
 
 1. Get a starter file. `moai keys --template` prints every action under its
@@ -198,7 +198,9 @@ A line that cannot work is dropped on its own and that action keeps its default
 key; the explorer still opens and says so in one line. Swapping two keys is
 fine — clashes are measured after every line is in. Some keys cannot be changed:
 `Ctrl-C`, the digits `0`–`9` that jump to a project, `SPC v 1`–`9`, `SPC`
-itself, and the keys inside a text field (search, filter, the jot form).
+itself, and the keys inside a text field (search, filter, the jot form). A
+window's `close` key can move to another key but cannot be set to `none` — it
+is the only way out of that window.
 
 `moai tui --help` and the menu name the keys you set. The help's sentences about
 the arrows, `Home` and the page keys still describe the defaults; `moai keys`
