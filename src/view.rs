@@ -3326,6 +3326,14 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
             };
             fill(say(lang, "invalid.due_beyond"), &[("due", due), ("above", &above), ("above_due", above_due)])
         }
+        Invalid::StartBeyond { start, above, above_new, above_due } => {
+            // `DueBeyond` 와 같은 까닭으로 같은 자다 — 이번 쓰기가 짓는 조상은 제목으로 가리킨다.
+            let above = match above_new {
+                true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
+                false => above.clone(),
+            };
+            fill(say(lang, "invalid.start_beyond"), &[("start", start), ("above", &above), ("above_due", above_due)])
+        }
         Invalid::DateOrder { starts_on, due_on } => {
             fill(say(lang, "invalid.date_order"), &[("starts_on", starts_on), ("due_on", due_on)])
         }

@@ -996,7 +996,8 @@ pub fn check_plan_rows(
     for i in &made {
         i.validate_keeping(cfg, false).map_err(|why| Fail::new(crate::view::invalid(lang, &at(i), &why)))?;
     }
-    let measured: Vec<&str> = made.iter().filter(|i| i.due_on.is_some()).map(|i| i.id.as_str()).collect();
+    let measured: Vec<&str> =
+        made.iter().filter(|i| i.due_on.is_some() || i.starts_on.is_some()).map(|i| i.id.as_str()).collect();
     if let Some((i, c)) = crate::report::first_beyond(&rows, &measured) {
         let why = c.refusal(i, made.iter().any(|m| m.id == c.above.id));
         return Err(Fail::new(crate::view::invalid(lang, &at(i), &why)));

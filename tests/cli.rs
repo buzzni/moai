@@ -10574,6 +10574,74 @@ fn pulling_a_parent_deadline_in_warns_about_the_children() {
     assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "닫은 줄을 셌다");
 }
 
+/// **시작일도 조상의 기한을 못 넘는다**(moai-xf0p.cbu) — 기한의 사다리(`a_deadline_cannot_pass_its_ancestors`)가
+/// 시작일도 잰다. 거절문은 줄 수 있는 가장 늦은 날을 대고, 부모의 **시작**보다 이른 시작은 막지 않는다.
+#[test]
+fn a_start_cannot_pass_the_deadline_of_its_ancestors() {
+    let s = init("startladder");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--start", "2026-09-10", "--due", "2026-09-30"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m, "--start", "2026-09-12"]);
+
+    // 에픽의 시작이 마일스톤의 기한을 넘는다 — 거절하고, 줄 수 있는 가장 늦은 날을 댄다.
+    let out = moai(s.path(), &["edit", &e, "--start", "2026-10-01"]);
+    assert!(!out.status.success(), "마일스톤 기한 뒤의 시작을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&m) && said.contains("--start 2026-09-30"), "줄 수 있는 날을 안 댄다 — {said}");
+    assert!(line_of(s.path(), &e).contains("2026-09-12"), "거절한 시작이 남았다");
+
+    // 멤버의 시작은 에픽의 기한(가장 이른 천장)에 걸린다. 기한 없이 시작만 적어도 잰다.
+    ok(s.path(), &["edit", &e, "--due", "2026-09-25"]);
+    let out = moai(s.path(), &["add", "멤버", "-e", &e, "--start", "2026-09-26"]);
+    assert!(!out.status.success(), "에픽 기한 뒤의 시작을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&e) && said.contains("2026-09-25"), "{said}");
+    assert!(!issues(s.path()).contains("멤버"), "거절한 줄이 남았다");
+    // 천장 당일은 받는다.
+    let i = add(s.path(), &["멤버", "-e", &e, "--start", "2026-09-25"]);
+
+    // 점 id 의 자식은 부모 이슈의 기한에 걸린다 — 부모에 기한이 있을 때.
+    let par = add(s.path(), &["부모", "-e", &e, "--due", "2026-09-24"]);
+    let out = moai(s.path(), &["add", "자식", "--parent", &par, "--start", "2026-09-25"]);
+    assert!(!out.status.success(), "부모 기한 뒤의 시작을 받았다");
+
+    // **부모의 시작보다 이른 시작은 막지 않는다** — 간트에서 눈에 보일 뿐이다.
+    add(s.path(), &["일찍 시작", "-e", &e, "--start", "2026-09-01"]);
+
+    // **시작을 안 건드린 쓰기는 안 잰다** — 손으로 넘긴 줄도 제목은 고친다.
+    let line = line_of(s.path(), &i);
+    let over = line.replace(r#""starts_on":"2026-09-25""#, r#""starts_on":"2026-10-20""#);
+    assert_ne!(line, over);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&line, &over)).unwrap();
+    ok(s.path(), &["edit", &i, "--title", "제목만 고친다"]);
+}
+
+/// **조상의 기한을 당긴 쓰기는 아래 시작일도 안 막고 댄다**(moai-xf0p.cbu) — 기한 때(`pulling_a_parent_deadline_in_warns_about_the_children`)와
+/// 같다. 한 줄로 이름을 대고 `status` 의 `due_beyond_parent` 가 센다. 이름을 새로 짓지 않았다: 고치는 길이
+/// 같고(그 줄의 날을 당기거나 조상의 기한을 늦춘다) 소비자가 읽는 경고 이름이 하나 더 늘지 않는다.
+#[test]
+fn pulling_a_parent_deadline_in_warns_about_a_child_start() {
+    let s = init("startpull");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-30"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m]);
+    // 기한 없이 시작만 든 멤버 — 기한 사다리는 이 줄을 못 보던 줄이다.
+    let i = add(s.path(), &["멤버", "-e", &e, "--start", "2026-09-28"]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "넘친 줄이 없는데 경고가 섰다");
+
+    let out = moai(s.path(), &["edit", &m, "--due", "2026-09-20"]);
+    assert!(out.status.success(), "조상을 당기는 쓰기가 막혔다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&i) && said.contains("due_beyond_parent"), "넘친 줄을 안 댄다 — {said}");
+
+    let out = moai(s.path(), &["status", "--json"]);
+    assert!(out.status.success(), "경고가 종료 코드를 바꿨다");
+    let board = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(board.contains("due_beyond_parent") && board.contains(&i), "{board}");
+
+    // 시작을 당기면 풀린다. 닫으면 안 센다.
+    ok(s.path(), &["edit", &i, "--start", "2026-09-19"]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "당긴 줄을 셌다");
+}
+
 /// **기한으로 줄 세우고 거른다**(moai-ghkp.7uy) — `--sort due` 는 이른 것이 먼저고 기한 없는 줄이 뒤다.
 /// `due_on=` 은 달력의 날로 양 끝을 든다. `ready` 는 같은 `p` 안에서 기한이 이른 것을 먼저 낸다 — 읽을
 /// 때만 재고 저장하지 않는다.

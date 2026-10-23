@@ -327,7 +327,7 @@ pub struct Issue {
     /// 거절하므로, 기한 든 이슈를 옛 바이너리로는 못 고치고 `--due none` 으로 비우라는 말을 듣는다.
     /// 짝인 `starts_on` 도 이제 모든 줄에 선다(moai-xf0p.6d5).
     ///
-    /// **조상보다 늦을 수 없다**(moai-ghkp.33i) — 줄 사이의 검사라 여기가 아니라 쓰기 경로
+    /// **조상보다 늦을 수 없다**(moai-ghkp.33i, 시작일도 moai-xf0p.cbu) — 줄 사이의 검사라 여기가 아니라 쓰기 경로
     /// (`store::write_locked` → [`crate::report::first_beyond`], 자는 [`crate::report::DueLadder`])가 잰다.
     ///
     /// 기한으로 **세는** 값은 꼴이 맞는 것뿐이다([`Issue::deadline`]) — 손으로 푼 줄의 틀린 값은 화면에는 적힌
@@ -676,6 +676,15 @@ pub enum Invalid {
         /// 물리므로 방금 뽑은 id 는 어디에도 안 남는다(moai-1rkl, 리뷰) — 거절당한 줄 자신을 가리키는 자리와 같은 자다.
         above: String,
         /// `above` 가 이번 쓰기가 짓는 줄의 제목인가. 글은 [`crate::view::invalid`] 가 고른다 — 여기는 말을 모른다.
+        above_new: bool,
+        above_due: String,
+    },
+    /// 계획 시작일이 조상의 기한보다 늦다(moai-xf0p.cbu) — [`Invalid::DueBeyond`] 의 짝이다. 부모의 **시작**보다 이른
+    /// 시작은 막지 않는다(간트에서 눈에 보인다). 자료의 뜻은 `DueBeyond` 와 같다: `above` 는 이미 선 줄이면 id,
+    /// 이번 쓰기가 짓는 줄이면 그 제목이다.
+    StartBeyond {
+        start: String,
+        above: String,
         above_new: bool,
         above_due: String,
     },

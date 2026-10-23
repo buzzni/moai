@@ -25,7 +25,8 @@ write that gives a row a later day than the earliest of those, or moves a row th
 carries a deadline under one due earlier, is refused, and the refusal names the day to
 give instead. Pulling the one above in is never refused: the rows it overtakes are
 named in one line on stderr and stand as `due_beyond_parent` on the board until their
-own deadlines come in. `moai show --sort due` puts the nearest first, and
+own deadlines come in. A start obeys the same ceiling: it cannot be later than the
+earliest deadline above it, but it may be earlier than the parent's start. `moai show --sort due` puts the nearest first, and
 `--filter due_on=<from>~<to>` picks rows by their own deadline (`starts_on=` by their
 own start).
 

@@ -54,7 +54,7 @@ carry one, and it is asked about but never required. It cannot pass the deadline
 the [milestone](#milestone), [epic](#epic) or parent above it: such a write is refused,
 and a row the one above overtook by being pulled in is a [warning](#warning),
 `due_beyond_parent`. It is not inherited — a member is bounded by its epic's deadline
-without carrying it. `moai due apply` raises an open, not deferred issue's or backlog
+without carrying it. A row's planned start (`--start`, `starts_on`) is held to the same ceiling: a start later than the deadline above it is refused, and one overtaken by pulling that deadline in is the same `due_beyond_parent` warning. A start earlier than the parent's start is never refused. `moai due apply` raises an open, not deferred issue's or backlog
 item's priority as the deadline it follows nears — the earliest of its own and those of
 the rows above it, a parent already closed lending none (one day left or less, today and
 past included, `p0`; two or less `p1`; seven or less `p2`), never lowers it, and leaves a
