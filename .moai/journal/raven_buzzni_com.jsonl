@@ -7695,3 +7695,11 @@
 {"ts":"2026-10-24T03:23:47Z","id":"moai-vfaa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-24T03:24:31Z","id":"moai-vfaa","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 공유 이미지와 메타 태그)"}
 {"ts":"2026-10-24T03:24:31Z","id":"moai-vfaa","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지와 함께 닫는다"}
+{"ts":"2026-10-24T03:25:40Z","id":"moai-olpw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"확인(2026-10-24): https://moai.buzzni.com/ 200, http→https 301, Let's Encrypt 인증서, og.png 200. 0206377a 배포가 도메인 등록 전의 404 캐시도 비웠다"}
+{"ts":"2026-10-24T03:25:47Z","id":"moai-olpw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-24T03:25:47Z","id":"moai-olpw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 배포 확인)"}
+{"ts":"2026-10-24T03:25:47Z","id":"moai-olpw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"사이트가 https 로 선다. 사용자가 Pages·도메인·HTTPS 를 켰다"}
+{"ts":"2026-10-24T16:32:19Z","id":"moai-ae8y","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 한국어 문구를 다듬는다"}
+{"ts":"2026-10-24T16:32:24Z","id":"moai-ae8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-24T16:34:16Z","id":"moai-ae8y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 홈페이지 문구만 바꿈)"}
+{"ts":"2026-10-24T16:34:16Z","id":"moai-ae8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
