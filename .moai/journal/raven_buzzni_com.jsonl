@@ -7681,3 +7681,8 @@
 {"ts":"2026-10-23T22:13:56Z","id":"moai-yn4z","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
 {"ts":"2026-10-23T22:13:57Z","id":"moai-oska","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
 {"ts":"2026-10-23T22:13:57Z","id":"moai-mfps","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지(3fa26cb2)와 함께 닫는다"}
+{"ts":"2026-10-23T22:15:36Z","id":"moai-olpw","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"GitHub Pages 켜고 홈페이지 첫 배포 확인"}
+{"ts":"2026-10-24T02:28:53Z","id":"moai-qubc","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"README 에 홈페이지·녹화·사이트 배포를 적는다"}
+{"ts":"2026-10-24T02:28:54Z","id":"moai-qubc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-24T02:29:39Z","id":"moai-qubc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — README 글)"}
+{"ts":"2026-10-24T02:29:39Z","id":"moai-qubc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지와 함께 닫는다"}
