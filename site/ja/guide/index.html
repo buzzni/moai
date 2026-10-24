@@ -23,6 +23,7 @@
   <link rel="alternate" hreflang="ja" href="https://moai.buzzni.com/ja/guide/">
   <link rel="alternate" hreflang="x-default" href="https://moai.buzzni.com/guide/">
   <link rel="icon" href="../../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/vendor/asciinema-player.css">
   <link rel="stylesheet" href="../../assets/site.css">
 </head>
 <body>
@@ -107,6 +108,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1</code></pre>
     <pre><code>cd &lt;プロジェクト&gt;
 moai init</code></pre>
     <p>ターミナルで実行すると、まず設定画面が表示されます。各項目にはデフォルト値が選ばれています。Enter を押すと選んだ設定で初期化し、Esc を押すと何も変更せずに終了します。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai init</span></div>
+      <div class="cast" data-cast="../../assets/media/guide-init.cast" data-cols="100" data-rows="30" role="figure" aria-label="moai init の設定画面：項目を移動して選び、Enter で導入した後に作られたものを確認する画面"></div></div>
     <div class="table">
       <table>
         <thead><tr><th>項目</th><th>何を決めるか</th><th>選び方</th></tr></thead>
@@ -133,6 +136,8 @@ moai init</code></pre>
 
     <h3 id="tui">moai tui — ターミナルで</h3>
     <pre><code>moai tui</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui で一覧、カンバン、Wiki へと移る画面"></div></div>
     <ul>
       <li>左に一覧、右に選んだイシューの詳細が表示されます。</li>
       <li><code>SPC g b</code> でマイルストーンごとのカンバンボード、<code>SPC g l</code> で一覧、<code>SPC g w</code> で Wiki を開きます。</li>
@@ -142,6 +147,8 @@ moai init</code></pre>
 
     <h3 id="web">moai web — ブラウザで</h3>
     <pre><code>moai web</code></pre>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-detail.png" data-src="../../assets/media/web-detail.webm" aria-label="moai web でイシューの説明、コミット、履歴を読む画面"></video></div>
     <ul>
       <li><code>127.0.0.1:6624</code> にボード、一覧、Wiki を表示します。ブラウザは自分で開きます。</li>
       <li>トラッカーを読むだけで書き込みません。ターミナルに慣れていないメンバーも進み具合を確認できます。</li>
@@ -179,6 +186,8 @@ moai init</code></pre>
     <p>いますぐやらないことはバックログに入れます。</p>
     <pre><code>moai backlog add 'ボードをエピックごとに折りたためたらどうか'
 moai backlog ls</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai backlog</span></div>
+      <div class="cast" data-cast="../../assets/media/guide-backlog.cast" data-cols="100" data-rows="30" role="figure" aria-label="思いついたことをバックログに入れ、エピックとイシュー三つに展開する画面"></div></div>
     <ul>
       <li>バックログは、まだ実行する作業として確定していないアイデアです。ボードと <code>moai ready</code> には表示されません。</li>
       <li>作業中に思いついたアイデアがいまの範囲を外れるなら、バックログに残しておきます。</li>
@@ -243,6 +252,8 @@ effort       = "medium"</code></pre>
 
     <h3 id="supervise">監督とワーカー</h3>
     <p>Claude Code のセッションの一つで <code>/moai-supervise</code> を呼び出すと、そのセッションが<strong>監督</strong>になります。監督はリポジトリごとに一つだけ置きます。</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="tmux の四つのペイン：moai tui、Claude Code の監督、Codex と Antigravity のワーカー"></div></div>
     <ol>
       <li>監督が互いに重ならないバックログを選びます。期限がなければ尋ねます。</li>
       <li>作業の難しさに合った役割（開発・複雑な作業・ドキュメント・雑務）を選び、その役割のモデルで<strong>ワーカー</strong>を立ち上げます。デフォルトは監督セッション内のサブエージェントです。</li>
@@ -289,6 +300,7 @@ effort       = "medium"</code></pre>
   </div>
 </footer>
 
+<script src="../../assets/vendor/asciinema-player.min.js"></script>
 <script src="../../assets/site.js"></script>
 </body>
 </html>

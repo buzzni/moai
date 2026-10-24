@@ -23,6 +23,7 @@
   <link rel="alternate" hreflang="ja" href="https://moai.buzzni.com/ja/guide/">
   <link rel="alternate" hreflang="x-default" href="https://moai.buzzni.com/guide/">
   <link rel="icon" href="../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/vendor/asciinema-player.css">
   <link rel="stylesheet" href="../assets/site.css">
 </head>
 <body>
@@ -107,6 +108,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1</code></pre>
     <pre><code>cd &lt;project&gt;
 moai init</code></pre>
     <p>In a terminal, a setup screen comes up first. Each row has its default already picked. Enter initializes with what is picked, and Esc quits without changing anything.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai init</span></div>
+      <div class="cast" data-cast="../assets/media/guide-init.cast" data-cols="100" data-rows="30" role="figure" aria-label="moai init setup screen: moving between rows, changing a choice, and what it planted"></div></div>
     <div class="table">
       <table>
         <thead><tr><th>Row</th><th>What it decides</th><th>How to pick</th></tr></thead>
@@ -133,6 +136,8 @@ moai init</code></pre>
 
     <h3 id="tui">moai tui — in the terminal</h3>
     <pre><code>moai tui</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui moving from the list to the kanban board and the wiki"></div></div>
     <ul>
       <li>The list is on the left and the selected issue's detail on the right.</li>
       <li><code>SPC g b</code> opens the kanban board by milestone, <code>SPC g l</code> the list and <code>SPC g w</code> the wiki.</li>
@@ -142,6 +147,8 @@ moai init</code></pre>
 
     <h3 id="web">moai web — in the browser</h3>
     <pre><code>moai web</code></pre>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-detail.png" data-src="../assets/media/web-detail.webm" aria-label="moai web showing an issue's description, commits and history"></video></div>
     <ul>
       <li>Serves the board, the list and the wiki on <code>127.0.0.1:6624</code>. Open the browser yourself.</li>
       <li>It only reads the tracker and never writes it. Teammates who are not at home in a terminal can follow along too.</li>
@@ -179,6 +186,8 @@ moai init</code></pre>
     <p>What is not for now goes into the backlog.</p>
     <pre><code>moai backlog add 'what if the board could fold by epic'
 moai backlog ls</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai backlog</span></div>
+      <div class="cast" data-cast="../assets/media/guide-backlog.cast" data-cols="100" data-rows="30" role="figure" aria-label="A thought added to the backlog, then unfolded into an epic with three issues"></div></div>
     <ul>
       <li>A backlog item is an idea not yet settled as work. It does not show on the board or in <code>moai ready</code>.</li>
       <li>When an idea that comes up mid-work falls outside the current scope, leave it in the backlog.</li>
@@ -243,6 +252,8 @@ effort       = "medium"</code></pre>
 
     <h3 id="supervise">The supervisor and workers</h3>
     <p>Call <code>/moai-supervise</code> in one Claude Code session and that session becomes the <strong>supervisor</strong>. Keep one supervisor per repository.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="../assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="Four tmux panes: moai tui, a Claude Code supervisor, and Codex and Antigravity workers"></div></div>
     <ol>
       <li>The supervisor picks backlog items that do not collide. It asks for a deadline where there is none.</li>
       <li>It picks the role that fits the work's difficulty (development, complex work, docs, chores) and raises a <strong>worker</strong> on that role's model. By default the worker is a subagent inside the supervisor's session.</li>
@@ -289,6 +300,7 @@ effort       = "medium"</code></pre>
   </div>
 </footer>
 
+<script src="../assets/vendor/asciinema-player.min.js"></script>
 <script src="../assets/site.js"></script>
 </body>
 </html>
