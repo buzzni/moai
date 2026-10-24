@@ -7686,3 +7686,8 @@
 {"ts":"2026-10-24T02:28:54Z","id":"moai-qubc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-24T02:29:39Z","id":"moai-qubc","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — README 글)"}
 {"ts":"2026-10-24T02:29:39Z","id":"moai-qubc","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지와 함께 닫는다"}
+{"ts":"2026-10-24T02:49:29Z","id":"moai-ybzj","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 주소를 moai.buzzni.com 으로"}
+{"ts":"2026-10-24T02:49:30Z","id":"moai-ybzj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-24T02:49:53Z","id":"moai-ybzj","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 주소 바꾸기)"}
+{"ts":"2026-10-24T02:49:53Z","id":"moai-olpw","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"주소는 moai.buzzni.com 으로 정해졌다(moai-ybzj). Pages 설정의 Custom domain 에 moai.buzzni.com, Enforce HTTPS"}
+{"ts":"2026-10-24T02:49:53Z","id":"moai-ybzj","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"develop 머지와 함께 닫는다"}
