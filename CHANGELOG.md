@@ -12,6 +12,14 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- `moai backlog promote` left its history notes in Korean whatever the screen
+  language — `<id> 에서 펼쳤다` on the new epic and `… 로 펼쳤다` on the backlog item it
+  closed. They are now written in English (`Unfolded from <id> — <title>`,
+  `Unfolded into <ids>, N issues`), like the other notes moai writes itself
+  (`Taken-over:`, `Due-priority:`). Notes written before keep their words.
+
 ## [0.23.0] - 2026-10-23
 
 ### Added

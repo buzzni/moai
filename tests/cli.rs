@@ -12782,7 +12782,7 @@ fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
 }
 
 /// **펼침 노트의 제목은 넘칠 때만 줄여 넣는다**(moai-clta). `promote` 는 새로 선 줄마다
-/// `<idea id> 에서 펼쳤다 — <제목>` 을 저널에 적는데, 머리말(`<id> 길이 + 22`바이트) 때문에
+/// `Unfolded from <idea id> — <제목>` 을 저널에 적는데, 머리말(`<id> 길이 + 19`바이트) 때문에
 /// 제목이 상한 턱밑인 idea 는 그 노트가 상한을 넘어 **펼칠 길 자체가 막혔다** — 그것도 아직
 /// 쓰지도 않은 새 id 를 대면서. 원래 제목은 그 idea 줄에 그대로 남으니 노트의 것은 가리킴이다.
 #[test]
@@ -12795,15 +12795,20 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     let id = ok(s.path(), &["backlog", "add", &big, "-q"]).trim().to_string();
     // 머리말 길이는 접두어를 따르니 **베껴 적지 않고 여기서 잰다**. 제목 자체는 상한 아래고,
     // 머리말을 붙여야 넘는다 — 그 사이가 아니면 이 시험이 `fit` 를 한 번도 안 부른다.
-    let head = format!("{id} 에서 펼쳤다 — ").len();
+    let head = format!("Unfolded from {id} — ").len();
     assert!(big.len() <= limit && big.len() + head > limit, "{} + {head}", big.len());
 
     let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
     assert!(out.status.success(), "상한 턱밑 idea 를 못 펼쳤다 — {}", String::from_utf8_lossy(&out.stderr));
 
     let notes = journal(s.path());
-    let grown: Vec<&str> = notes.lines().filter(|l| l.contains("에서 펼쳤다")).collect();
+    let grown: Vec<&str> = notes.lines().filter(|l| l.contains("Unfolded from")).collect();
     assert_eq!(grown.len(), 1, "펼침 노트가 하나가 아니다 — {}", grown.len());
+    // 닫힌 idea 쪽 노트는 간 곳과 이슈 수를 댄다. 하나면 홑수다
+    assert!(
+        notes.lines().any(|l| l.contains("Unfolded into ") && l.contains(r#", 1 issue""#)),
+        "idea 에 간 곳을 안 적었다"
+    );
     // **글 자체를 꺼내 잰다.** 지나간 것만 보면 쓰기 쪽 검사가 좁아지는 날 이 시험도 같이 눈을
     // 감는다. `note` 는 없고 글에 따옴표가 없으니 `"text":"` 부터 다음 따옴표까지가 그 글이다.
     let text = grown[0].split_once(r#""text":""#).expect("text 가 없다").1;
@@ -12815,7 +12820,7 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     assert!(text.len() <= 2 * 1024 + head, "가리킴이 아니라 사본이다 — {}바이트", text.len());
     // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다. 줄인 자리는 밝힌다.
     let head_of = |t: &str| t.chars().take(24).collect::<String>();
-    assert!(text.starts_with(&format!("{id} 에서 펼쳤다 — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
+    assert!(text.starts_with(&format!("Unfolded from {id} — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
     assert!(text.ends_with('…'), "줄인 것을 안 밝힌다");
     assert!(!text.contains("꼬리"), "꼬리를 담았다 — 앞에서부터 자르지 않았다");
 
@@ -12898,14 +12903,16 @@ fn promote_can_pour_into_a_standing_epic() {
     assert_eq!(id::parent_of(&mid), Some(epic.as_str()), "에픽의 자식이 아니다 — {member}");
     assert!(!member.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {member}");
     let seen = ok(s.path(), &["show", &epic, "--json"]);
-    assert_eq!(list_in(&seen, "members"), Some(vec![mid]), "에픽이 멤버로 안 읽었다 — {seen}");
+    assert_eq!(list_in(&seen, "members"), Some(vec![mid.clone()]), "에픽이 멤버로 안 읽었다 — {seen}");
     assert!(line_of(s.path(), &id).contains(r#""status":"done""#), "idea 가 안 닫혔다");
     // 출처는 멤버에 적힌다 — 에픽은 이 idea 에서 나온 것이 아니다.
-    let from_here = format!("{id} 에서 펼쳤다");
+    let from_here = format!("Unfolded from {id}");
     let log = journal(s.path());
     let noted: Vec<&str> = log.lines().filter(|l| l.contains(&from_here)).collect();
     assert_eq!(noted.len(), 1, "{noted:?}");
     assert!(!noted[0].contains(&format!(r#""id":"{epic}""#)), "선 에픽에 출처를 적었다 — {}", noted[0]);
+    // 닫힌 idea 쪽에는 어디로 갔는지 적는다. 저널의 글은 화면 말을 안 따르고 영어로 고정이다(moai-68ft)
+    assert!(log.contains(&format!("Unfolded into {epic} as {mid}")), "idea 에 간 곳을 안 적었다 — {log}");
 }
 
 /// **계획이 세우는 멤버는 에픽의 자식 id 를 받는다**(moai-s8go, 2026-09-23 사용자 결정) — 과제든
