@@ -6,7 +6,7 @@ working in the same tree.
 No approval gate. Anything can be created and anything can be moved. Discipline
 is something `moai status` reflects back at you, never something it enforces.
 
-See it on the [website](https://buzzni.github.io/moai/) — in English, 한국어 and
+See it on the [website](https://moai.buzzni.com/) — in English, 한국어 and
 日本語: the terminal explorer, the browser view, and a Claude Code supervisor
 handing work to Codex and Antigravity workers in one tmux window.
 
@@ -569,7 +569,7 @@ eventually needs.
 - `SECURITY.md` — reporting a vulnerability
 - `docs/recovery.md` — what to do when the tracker files get into a bad state
 - `CHANGELOG.md` — what changed, per release
-- [The website](https://buzzni.github.io/moai/) — what moai looks like, in English, Korean and Japanese
+- [The website](https://moai.buzzni.com/) — what moai looks like, in English, Korean and Japanese
 
 ## License
 
