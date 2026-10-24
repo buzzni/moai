@@ -200,3 +200,34 @@ section.team { padding: 48px 0 8px; }
 .team-points li { position: relative; padding-left: 22px; }
 .team-points li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); }
 .team-points q { color: var(--ink); quotes: "“" "”"; }
+
+/* 사용 방법 페이지(ko/guide/): 왼쪽에 목차, 오른쪽에 본문. 좁은 화면에서는 목차를 걷고 본문만 둔다 */
+nav .links a[aria-current="page"] { color: var(--ink); }
+.doc { display: grid; grid-template-columns: 1fr; gap: 48px; padding-top: 56px; padding-bottom: 96px; }
+@media (min-width: 960px) { .doc { grid-template-columns: 220px minmax(0, 1fr); } }
+.doc-toc { display: none; }
+@media (min-width: 960px) { .doc-toc { display: block; position: sticky; top: 92px; align-self: start; font-size: 14px; } }
+.doc-toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.doc-toc ol ol { margin: 8px 0 0; padding-left: 14px; border-left: 1px solid var(--line); }
+.doc-toc a { color: var(--muted); text-decoration: none; }
+.doc-toc a:hover { color: var(--ink); }
+.doc-body { min-width: 0; max-width: 780px; word-break: keep-all; overflow-wrap: anywhere; }
+.doc-body h1 { font-size: clamp(2rem, 4.6vw, 3rem); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 32px; }
+.doc-body h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); letter-spacing: -.015em; line-height: 1.25; margin: 72px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 76px; }
+.doc-body h3 { font-size: 1.15rem; line-height: 1.35; margin: 40px 0 12px; scroll-margin-top: 76px; }
+.doc-body p, .doc-body li { color: var(--muted); }
+.doc-body strong { color: var(--ink); font-weight: 600; }
+.doc-body a { color: var(--ink); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.doc-body ul, .doc-body ol { padding-left: 1.3em; }
+.doc-body li { margin: 6px 0; }
+.doc-body pre { margin: 14px 0 18px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; font-size: 13.5px; line-height: 1.6; color: var(--ink); word-break: normal; overflow-wrap: normal; }
+.doc-body pre code { background: none; border: 0; padding: 0; font-size: inherit; border-radius: 0; }
+.doc-body blockquote { margin: 14px 0; padding: 12px 18px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 8px 8px 0; }
+.doc-body blockquote p { margin: 0; color: var(--ink); }
+.doc-body td code, .doc-body th code { font-size: .9em; background: var(--surface-2); border: 1px solid var(--line); padding: .05em .35em; border-radius: 4px; }
+.doc-body .table { margin: 16px 0 20px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+.doc-body table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.doc-body th, .doc-body td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.doc-body th { background: var(--surface); color: var(--ink); font-weight: 600; white-space: nowrap; }
+.doc-body td { color: var(--muted); min-width: 120px; }
+.doc-body tr:last-child td { border-bottom: 0; }
