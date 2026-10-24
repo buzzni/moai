@@ -6,6 +6,10 @@ working in the same tree.
 No approval gate. Anything can be created and anything can be moved. Discipline
 is something `moai status` reflects back at you, never something it enforces.
 
+See it on the [website](https://buzzni.github.io/moai/) — in English, 한국어 and
+日本語: the terminal explorer, the browser view, and a Claude Code supervisor
+handing work to Codex and Antigravity workers in one tmux window.
+
 ```
 $ moai
 Issues 941  · Epics 148       .moai/issues.jsonl
@@ -522,6 +526,27 @@ over it. `en`, `ko`, `zh`, `ja` and `es` are recognised; anything not yet transl
 falls back to English, and the system locale (`LANG`, `LC_ALL`) is not read.
 `i18n/README.md` describes how to add a language.
 
+## The website
+
+The website lives in `site/`: one static page per language (`/`, `/ko/`, `/ja/`),
+English by default. On the root page a Korean or Japanese browser is sent to its
+own page, unless the visitor has picked a language in the header.
+`.github/workflows/pages.yml` publishes `site/` to GitHub Pages on every push to
+`develop` that touches it. CI skips the binary jobs (msrv, windows, size-budget,
+web) for changes under `site/` and `scripts/site-demo/`; `ci-gate` still runs.
+
+The page talks about what people see. How things work belongs here and in `docs/`.
+
+The recordings on it are recorded, not drawn. `scripts/site-demo/` builds a demo
+repository — Lantern, a made-up notes app, with its own config so nothing of the
+recording machine shows — and records it:
+
+- `seed.sh` — the demo tracker: two milestones, four epics, a backlog and a wiki
+- `record-tui.sh` — the terminal scenes, with asciinema
+- `record-web.mjs` — the browser scenes, with Playwright
+- `record-team.sh` — the tmux window for the supervisor scene. Real agents do the
+  work there, so it sets the window up and prints the steps a person takes
+
 ## Budgets
 
 | What | Limit |
@@ -544,6 +569,7 @@ eventually needs.
 - `SECURITY.md` — reporting a vulnerability
 - `docs/recovery.md` — what to do when the tracker files get into a bad state
 - `CHANGELOG.md` — what changed, per release
+- [The website](https://buzzni.github.io/moai/) — what moai looks like, in English, Korean and Japanese
 
 ## License
 
