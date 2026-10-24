@@ -7722,3 +7722,17 @@
 {"ts":"2026-10-24T21:23:37Z","id":"moai-j5xd","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"backlog promote 가 남기는 노트가 화면 언어와 상관없이 한국어다"}
 {"ts":"2026-10-24T21:26:12Z","id":"moai-gfuz","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 녹화 스크립트 둘과 정적 페이지 셋)"}
 {"ts":"2026-10-24T21:26:12Z","id":"moai-gfuz","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-24T21:36:54Z","id":"moai-68ft","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"펼칠 때 남기는 노트의 말"}
+{"ts":"2026-10-24T21:36:54Z","id":"moai-68ft.8lf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"펼칠 때 남기는 노트를 영어로 고정한다"}
+{"ts":"2026-10-24T21:36:54Z","id":"moai-68ft","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"moai-j5xd 에서 펼쳤다 — backlog promote 가 남기는 노트가 화면 언어와 상관없이 한국어다"}
+{"ts":"2026-10-24T21:36:54Z","id":"moai-j5xd","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"done","note":"moai-68ft 로 펼쳤다 (이슈 1건)"}
+{"ts":"2026-10-24T21:37:02Z","id":"moai-68ft.8lf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-24T21:47:35Z","id":"moai-68ft.8lf.se9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 펼침 노트 영어 고정"}
+{"ts":"2026-10-24T21:47:44Z","id":"moai-68ft.8lf.se9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-24T22:05:04Z","id":"moai-68ft.8lf.se9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"/code-review xhigh (worktree-moai-68ft, afaf6180) — 리뷰어 원문 요약\n1. src/cmd/backlog.rs:358 — 노트에 담는 backlog 제목을 한 줄로 안 접는다. 닫힌 backlog 를 다시 펼치면 손으로 고친 제목의 줄바꿈과 model: 줄이 새 에픽 노트에 들어가 work 로 세어진다(재현함)\n2. CHANGELOG.md:15 — 저널 문구를 바꾼 것이라 Changed 일 수 있다. Fixed 면 patch, Changed 면 minor\n3. CHANGELOG.md:17 — -e 일 때의 꼴(Unfolded into <epic> as <ids>, 노트가 각 이슈에 선다)을 빠뜨렸다\n4. tests/cli.rs:12779 — 복수 갈래(N issues)를 재는 시험이 없다\n5. src/cmd/backlog.rs:367 — Unfolded from/into 가 Codex 보고 머리 Unfolded: 와 낱말이 겹친다. 지금은 쌍점으로 갈린다\n6. tests/cli.rs:12816 — 주석이 cmd::idea::TITLE_IN_NOTE 를 가리킨다(cmd::backlog 가 맞다)\n7. 언어를 정한 까닭이 이슈 노트에 없다\n고침(리뷰어가 워크트리에 적용): 1·3·4·6. 넘김: 2(일꾼 판단), 5(guide.rs 범위 밖), 7(트래커 걸음)"}
+{"ts":"2026-10-24T22:05:05Z","id":"moai-68ft.8lf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided: 펼침 노트는 영어로 고정한다. 저널의 글은 화면 말을 안 따른다는 결정(CLAUDE.md)을 지키면서, 도구가 짓는 다른 노트(Taken-over:, Due-priority:)와 화면 기본(영어)에 맞췄다. 쓴 사람의 말로 적는 길은 같은 저장소의 이력이 두 말로 갈려 걷었다. 옛 한국어 줄은 그대로 둔다"}
+{"ts":"2026-10-24T22:05:05Z","id":"moai-a9sz","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"Codex 보고 머리 Unfolded: 와 promote 노트 Unfolded from/into 가 낱말이 겹친다"}
+{"ts":"2026-10-24T22:05:05Z","id":"moai-68ft.8lf.se9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1·3·4·6 반영(b4405a0b). 2 는 Fixed 로 둔다 — 사람이 본 것은 영어 화면의 한국어 줄이고 옛 문구를 읽는 코드가 없다. 5 는 moai-a9sz 로 넘김. 7 은 moai-68ft.8lf 에 Decided 노트"}
+{"ts":"2026-10-24T22:05:05Z","id":"moai-68ft.8lf.se9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 에픽 끝 리뷰)"}
+{"ts":"2026-10-24T22:05:27Z","id":"moai-68ft.8lf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 노트 문구와 시험)"}
+{"ts":"2026-10-24T22:05:27Z","id":"moai-68ft.8lf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
