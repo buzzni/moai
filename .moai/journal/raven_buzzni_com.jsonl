@@ -7703,3 +7703,9 @@
 {"ts":"2026-10-24T16:32:24Z","id":"moai-ae8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
 {"ts":"2026-10-24T16:34:16Z","id":"moai-ae8y","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (low — 홈페이지 문구만 바꿈)"}
 {"ts":"2026-10-24T16:34:16Z","id":"moai-ae8y","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-24T16:34:23Z","id":"moai-dkbk","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"홈페이지 한국어가 폰 폭에서 낱말 가운데서 줄이 바뀐다"}
+{"ts":"2026-10-24T16:53:35Z","id":"moai-5ttt","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"사용 방법 페이지를 만든다"}
+{"ts":"2026-10-24T16:53:40Z","id":"moai-5ttt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-24T16:54:41Z","id":"moai-5ttt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: 초안(.aplus/verification/docs/usage-guide-ko.md)을 사용자에게 넘겼다. 다듬은 글이 오면 어디에 세울지(site/ko 새 페이지인지 docs 위키인지) 묻고 워크트리에서 만든다"}
+{"ts":"2026-10-24T17:13:31Z","id":"moai-5ttt","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 정적 페이지와 CSS, 글은 사용자가 다듬음)"}
+{"ts":"2026-10-24T17:13:31Z","id":"moai-5ttt","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
