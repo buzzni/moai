@@ -355,7 +355,11 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 화면의 기본이 영어고, 도구가 짓는 다른 노트(`Taken-over:`·`Due-priority:`)도 영어다.
             // 한국어로 고정했던 동안 영어 화면의 이력에 한국어 줄이 섰다. 이미 적힌 줄은 그대로 둔다.
             let head = format!("Unfolded from {} — ", args.id);
-            let shown = crate::model::fit_bytes(&title, TITLE_IN_NOTE);
+            // **제목은 한 줄로 접어 담는다** — `Taken-over:` 가 담당을 접는 것과 같은 까닭이다. 쓰기는 바뀐
+            // 줄만 재므로, 이미 닫힌 backlog 를 다시 펼치면 손으로 고쳐 줄바꿈이 든 제목이 검사 없이 여기
+            // 닿는다. 그대로 담으면 그 뒷줄(`model: …`)을 `work` 가 펼친 사람의 일로 센다.
+            let flat = crate::text::one_line(&title);
+            let shown = crate::model::fit_bytes(&flat, TITLE_IN_NOTE);
             // **한 번만 짓는다.** 줄마다 똑같은 글이라, 루프 안에서 지으면 64KB 짜리를 멤버 수만큼
             // 새로 짓고 곧바로 버린다 — `-e` 로 펼치면 만든 이슈가 모두 여기 든다.
             let grew = format!("{head}{shown}");

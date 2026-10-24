@@ -12779,6 +12779,36 @@ fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
 
     let line = line_of(s.path(), &id);
     assert!(line.contains(r#""status":"done""#), "펼쳤는데 안 닫혔다 — {line}");
+    // 닫힌 idea 쪽 노트의 이슈 수 — 둘이면 겹수다. 홑수 쪽은 `an_idea_titled_up_to_the_limit_still_promotes` 가 잰다
+    let notes = journal(s.path());
+    assert!(
+        notes.lines().any(|l| l.contains("Unfolded into ") && l.contains(r#", 2 issues""#)),
+        "idea 에 간 곳과 이슈 수를 안 적었다 — {notes}"
+    );
+}
+
+/// **펼침 노트에 담는 제목은 한 줄로 접는다**(moai-68ft 리뷰). 쓰기는 바뀐 줄만 재므로 이미 닫힌
+/// backlog 를 다시 펼치면 그 제목은 검사를 안 지난다 — 손으로 고쳐 줄바꿈이 든 제목이 노트에 그대로
+/// 들면 그 뒷줄의 `model: …` 을 `work` 가 펼친 사람의 일로 센다.
+#[test]
+fn an_unfold_note_folds_a_hand_edited_title_onto_one_line() {
+    let s = init("promoteflat");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 생각", "-q"]).trim().to_string();
+    let first = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 첫 에픽\n- 첫 일\n");
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    // 닫힌 backlog 의 제목을 손으로 고친다 — 도구로는 이 모양을 못 쓴다.
+    let doctored = issues(s.path())
+        .replace(r#""title":"펼칠 생각""#, r#""title":"펼칠 생각\nmodel: anthropic/opus-5.5 (high — 끼워 넣은 줄)""#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), doctored).unwrap();
+    let again = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 둘째 에픽\n- 둘째 일\n");
+    assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
+
+    let log = journal(s.path());
+    let grown: Vec<&str> = log.lines().filter(|l| l.contains(&format!("Unfolded from {id}"))).collect();
+    assert_eq!(grown.len(), 2, "{grown:?}");
+    assert!(!grown.iter().any(|l| l.contains(r"\nmodel:")), "노트에 줄바꿈이 든 제목을 그대로 담았다 — {grown:?}");
+    let shown = ok(s.path(), &["show", "--json"]);
+    assert!(!shown.contains(r#""why":"끼워 넣은 줄""#), "노트 안의 줄을 일한 AI 로 셌다 — {shown}");
 }
 
 /// **펼침 노트의 제목은 넘칠 때만 줄여 넣는다**(moai-clta). `promote` 는 새로 선 줄마다
@@ -12816,7 +12846,7 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     assert!(text.len() <= limit, "노트가 {}바이트다 — 쓰기가 같은 자로 잰다", text.len());
     // **상한 아래인 것으로는 모자란다.** 상한을 예산으로 주면 64KB 제목이 만든 줄마다 한 벌씩
     // 저널에 베껴져 이력이 그 한 줄에 묻힌다 — 상한이 서 있는 까닭이 그것을 막는 데 있다.
-    // 예산은 `cmd::idea::TITLE_IN_NOTE`(2KB)고, 머리말이 그 위에 얹힌다.
+    // 예산은 `cmd::backlog::TITLE_IN_NOTE`(2KB)고, 머리말이 그 위에 얹힌다.
     assert!(text.len() <= 2 * 1024 + head, "가리킴이 아니라 사본이다 — {}바이트", text.len());
     // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다. 줄인 자리는 밝힌다.
     let head_of = |t: &str| t.chars().take(24).collect::<String>();
