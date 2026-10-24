@@ -211,7 +211,9 @@ nav .links a[aria-current="page"] { color: var(--ink); }
 .doc-toc ol ol { margin: 8px 0 0; padding-left: 14px; border-left: 1px solid var(--line); }
 .doc-toc a { color: var(--muted); text-decoration: none; }
 .doc-toc a:hover { color: var(--ink); }
-.doc-body { min-width: 0; max-width: 780px; word-break: keep-all; overflow-wrap: anywhere; }
+.doc-body { min-width: 0; max-width: 780px; overflow-wrap: anywhere; }
+/* 한국어만 낱말 단위로 줄을 바꾼다 — 일본어는 낱말 사이에 빈칸이 없어 keep-all 이면 구두점에서만 끊긴다 */
+html[lang="ko"] .doc-body { word-break: keep-all; }
 .doc-body h1 { font-size: clamp(2rem, 4.6vw, 3rem); letter-spacing: -.025em; line-height: 1.15; margin: 0 0 32px; }
 .doc-body h2 { font-size: clamp(1.4rem, 2.6vw, 1.8rem); letter-spacing: -.015em; line-height: 1.25; margin: 72px 0 16px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 76px; }
 .doc-body h3 { font-size: 1.15rem; line-height: 1.35; margin: 40px 0 12px; scroll-margin-top: 76px; }
