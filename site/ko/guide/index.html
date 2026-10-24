@@ -23,6 +23,7 @@
   <link rel="alternate" hreflang="ja" href="https://moai.buzzni.com/ja/guide/">
   <link rel="alternate" hreflang="x-default" href="https://moai.buzzni.com/guide/">
   <link rel="icon" href="../../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../../assets/vendor/asciinema-player.css">
   <link rel="stylesheet" href="../../assets/site.css">
 </head>
 <body>
@@ -107,6 +108,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1</code></pre>
     <pre><code>cd &lt;프로젝트&gt;
 moai init</code></pre>
     <p>터미널에서 실행하면 설정 화면이 먼저 나옵니다. 각 항목에는 기본값이 선택되어 있습니다. Enter를 누르면 선택한 설정으로 초기화하고, Esc를 누르면 변경 없이 종료합니다.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai init</span></div>
+      <div class="cast" data-cast="../../assets/media/guide-init.cast" data-cols="100" data-rows="30" role="figure" aria-label="moai init 설정 화면: 칸을 오가며 고르고, Enter 로 심은 뒤 생긴 것을 확인하는 화면"></div></div>
     <div class="table">
       <table>
         <thead><tr><th>선택 항목</th><th>무엇을 정하나</th><th>고르는 법</th></tr></thead>
@@ -133,6 +136,8 @@ moai init</code></pre>
 
     <h3 id="tui">moai tui — 터미널에서</h3>
     <pre><code>moai tui</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui 에서 목록, 칸반, 위키로 옮겨 가는 화면"></div></div>
     <ul>
       <li>왼쪽에 목록, 오른쪽에 선택한 이슈의 상세 내용이 나옵니다.</li>
       <li><code>SPC g b</code>로 마일스톤별 칸반 보드, <code>SPC g l</code>로 목록, <code>SPC g w</code>로 위키를 엽니다.</li>
@@ -142,6 +147,8 @@ moai init</code></pre>
 
     <h3 id="web">moai web — 브라우저에서</h3>
     <pre><code>moai web</code></pre>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-detail.png" data-src="../../assets/media/web-detail.webm" aria-label="moai web 에서 이슈의 설명, 커밋, 이력을 읽는 화면"></video></div>
     <ul>
       <li><code>127.0.0.1:6624</code>에 보드, 목록, 위키를 띄웁니다. 브라우저는 직접 열어야 합니다.</li>
       <li>트래커를 읽기만 하고 쓰지 않습니다. 터미널이 익숙하지 않은 동료도 진행 상황을 볼 수 있습니다.</li>
@@ -179,6 +186,8 @@ moai init</code></pre>
     <p>지금 할 일이 아닌 것은 백로그에 담습니다.</p>
     <pre><code>moai backlog add '보드를 에픽별로 접을 수 있으면 어떨까'
 moai backlog ls</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai backlog</span></div>
+      <div class="cast" data-cast="../../assets/media/guide-backlog.cast" data-cols="100" data-rows="30" role="figure" aria-label="떠오른 생각을 백로그에 담고, 에픽과 이슈 셋으로 펼치는 화면"></div></div>
     <ul>
       <li>백로그는 아직 실행할 작업으로 확정되지 않은 아이디어입니다. 보드와 <code>moai ready</code>에는 표시되지 않습니다.</li>
       <li>작업 중 떠오른 아이디어가 현재 범위를 벗어난다면 백로그에 남겨 둡니다.</li>
@@ -243,6 +252,8 @@ effort       = "medium"</code></pre>
 
     <h3 id="supervise">감독과 일꾼 사용</h3>
     <p>Claude Code 세션 하나에서 <code>/moai-supervise</code>를 부르면 그 세션이 <strong>감독</strong>이 됩니다. 감독은 저장소마다 하나만 둡니다.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="../../assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="tmux 네 칸: moai tui, Claude Code 감독, Codex와 Antigravity 일꾼"></div></div>
     <ol>
       <li>감독이 서로 겹치지 않는 백로그를 고릅니다. 마감일이 없으면 묻습니다.</li>
       <li>일의 난이도에 맞는 역할(개발·복잡한 일·문서·잔일)을 고르고, 그 역할의 모델로 <strong>일꾼</strong>을 띄웁니다. 기본은 감독 세션 안의 서브에이전트입니다.</li>
@@ -289,6 +300,7 @@ effort       = "medium"</code></pre>
   </div>
 </footer>
 
+<script src="../../assets/vendor/asciinema-player.min.js"></script>
 <script src="../../assets/site.js"></script>
 </body>
 </html>
