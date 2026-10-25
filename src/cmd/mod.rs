@@ -676,6 +676,7 @@ fn dispatch(ctx: &Ctx, cli: Cli) -> R<Vec<String>> {
         Cmd::Wiki(WikiCmd::Ls) => wiki::ls(ctx),
         Cmd::Wiki(WikiCmd::Show { slug }) => wiki::show(ctx, &slug),
         Cmd::Wiki(WikiCmd::Search { words, limit }) => wiki::search(ctx, &words, limit),
+        Cmd::Wiki(WikiCmd::Learn(a)) => wiki::learn(ctx, a),
     }
 }
 

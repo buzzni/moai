@@ -40,7 +40,7 @@ Commands:
   epic          The verbs above, pinned to `--type epic`
   milestone     The verbs above, pinned to `--type milestone`
   backlog       Jot a passing thought down where you are (`--type backlog`)
-  wiki          Read the project wiki - the markdown pages under `docs/`
+  wiki          The project wiki - the markdown pages under `docs/`, and lessons
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
   web           Serve this tracker as a page on 127.0.0.1, read-only
   hook          Called by an agent's hook. Reads an event on stdin
@@ -90,6 +90,7 @@ To read the project manual:
   moai wiki ls                  the markdown pages under docs/ - the wiki
   moai wiki show <slug>         one page
   moai wiki search <words...>   the sections that match, best first
+  moai wiki learn '<lesson>'    write a lesson page and note it on the issue
 
 To watch several projects from one place:
 
@@ -2350,7 +2351,7 @@ PLAN
 ## `moai wiki`
 
 ```
-Read the project wiki - the markdown pages under `docs/`
+The project wiki - the markdown pages under `docs/`, and lessons
 
 Usage: moai wiki [OPTIONS] <COMMAND>
 
@@ -2358,6 +2359,7 @@ Commands:
   ls      Every page - slug, title, and what does not resolve
   show    One page, drawn (`--json` gives the raw body)
   search  Find the sections that match some words, best first
+  learn   Write a new lesson page and note it on the issue it came from
   help    Print this message or the help of the given subcommand(s)
 
 Options:
@@ -2380,6 +2382,8 @@ Options:
                                 `--json` gives the raw body
   moai wiki search <words...>   the sections that match, best first, with the
                                 line to open
+  moai wiki learn '<lesson>'    a new lesson page under lessons/, noted on the
+                                issue it came from
 
   **Nothing is stored.** The tracker holds no page and no index - the list,
   the links, the pages linking to each page (`linked_from`) and the ids are
@@ -2388,12 +2392,13 @@ Options:
   the tracker still goes to the main checkout. Git merges them like any
   other file.
 
-  There is no command that writes a page - edit the file and commit it. A
-  page names an issue by its bare id, as a commit subject does, and another
-  page by a relative link: `[the explorer](explorer.md)`. A link can land on
-  a heading - `glossary.md#epic`, or `#epic` on the same page. The anchor is
-  the heading as GitHub makes it (lowercase, punctuation dropped, each space
-  a `-`, a repeated heading `-1`, `-2`), so the same link works there too.
+  No command edits a page - edit the file and commit it. `learn` only
+  creates a new lesson page and never touches one that stands. A page names
+  an issue by its bare id, as a commit subject does, and another page by a
+  relative link: `[the explorer](explorer.md)`. A link can land on a heading
+  - `glossary.md#epic`, or `#epic` on the same page. The anchor is the
+  heading as GitHub makes it (lowercase, punctuation dropped, each space a
+  `-`, a repeated heading `-1`, `-2`), so the same link works there too.
 ```
 
 ## `moai wiki ls`
@@ -2421,13 +2426,18 @@ Options:
   `..`, leads out of the checkout or into `.git/`, or is not a directory is.
 
   Under the list, notices count pages with conflict markers, links leading to
-  no page, links to a heading the page does not have, and ids naming no
-  issue. They block nothing and leave the exit code alone.
+  no page, links to a heading the page does not have, ids naming no issue,
+  and `Lesson:` notes on open work naming a page this checkout does not have.
+  They block nothing and leave the exit code alone. A lesson page
+  (`lessons/<slug>`) shows `×N`, the number of different rows whose notes name
+  it.
 
   --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
-  "links","linked_from","conflict"}]}. `issues` is [{"id","exists"}] - the
-  ids with this tracker's prefix the page names outside code blocks; the name
-  of a skill moai plants (`moai-wiki`) is never one. `links` is
+  "links","linked_from","conflict","seen_count"}]}. `seen_count` is that
+  `×N` - always there, 0 on a page that is not a lesson. `issues` is
+  [{"id","exists"}] - the ids with this tracker's prefix the page names
+  outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
+  one. `links` is
   [{"text","to","anchor","resolved","anchor_resolved"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
@@ -2463,7 +2473,10 @@ Options:
   The slug is what `moai wiki ls` prints - matched letter for letter, so
   `Guide` is not `guide`.
 
-  --json gives the page as `ls` does plus `body`, the file as written.
+  --json gives the page as `ls` does, with `seen` in place of `seen_count`,
+  plus `body`, the file as written. `seen` is always there:
+  [{"id","at","by","by_email"}], the rows whose `Lesson:` notes name this
+  lesson, latest note first ([] on a page that is not a lesson).
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
   yet included - it gives {"dir","error"} as `ls` does, non-zero.
@@ -2526,6 +2539,64 @@ Options:
   gives it; a place the walk left out is in `skipped`, as in `ls`. Each key
   stands only when it has something. When the wiki directory cannot be used
   it gives {"dir","error"} as `ls` does.
+```
+
+## `moai wiki learn`
+
+```
+Write a new lesson page and note it on the issue it came from
+
+Usage: moai wiki learn [OPTIONS] <lesson>
+
+Arguments:
+  <lesson>  The lesson in one line, as an instruction - the page's title
+
+Options:
+      --slug <kebab>         The file name, in lowercase ASCII kebab case
+  -b, --body <text>          The page body, markdown. `-` reads stdin
+      --issue <id>           The issue it came from; `none` for the page alone
+      --dry-run              Print the path and the text; write nothing
+      --json                 Machine-readable output. Every human line goes away
+      --no-color             Turn colour off (same as `--color never`)
+      --color <how>          auto|always|never (auto by default, off when piped)
+  -C, --dir <path>           Run in this directory (same as `git -C`)
+      --user <name (email)>  Who is doing this (from `git config` when absent)
+  -h, --help                 Print help
+
+moai wiki learn 'End a check on the step that must pass' -b - <<'LESSON'
+## What happened
+...
+## Why
+...
+## Do this instead
+...
+LESSON
+
+  It writes a new page, <wiki_dir>/lessons/<slug>.md - `# <title>`, the body as
+  given, and `Learned in: <id>` - and, in the same call, a note on that issue:
+  `Lesson: lessons/<slug>`. The body needs a `## Do this instead` heading and
+  does not open with a `# ` title of its own: the title is the argument.
+  `## What happened` and `## Why` are worth writing too.
+
+  --slug names the file, in lowercase ASCII kebab case. An ASCII title makes
+  one by itself; any other title needs --slug. --issue is the issue the lesson
+  came out of. Without it, the one row you have picked up is used - with none
+  or several picked up, it is refused and asks for --issue. --issue none writes
+  the page alone, and then who you are is not asked.
+
+  It only creates: a page already standing at that path is refused and left
+  as it is. If the lesson is the same, note it again - `moai note <id>
+  'Lesson: lessons/<slug>'`; if the page is wrong, edit the file. The page is
+  written in this checkout - in a linked worktree, in that worktree, to ride
+  the branch - while the note goes to the main checkout's tracker. Nothing is
+  committed: the last lines say how. When the note cannot be written the page
+  stays, the exit code is non-zero, and the line to note it again is given.
+  The wiki directory itself is never made - a missing one is refused.
+
+  --dry-run prints the path and the text and writes nothing. --json gives
+  {"path","slug","issue","noted"}: `path` from the checkout, `slug` as
+  `moai wiki show` takes it, `issue` absent under --issue none, and `noted`
+  true once the note is written. --dry-run adds "dry_run":true and `text`.
 ```
 
 ## `moai tui`

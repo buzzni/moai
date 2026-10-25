@@ -1,6 +1,6 @@
 ---
 name: moai-wiki
-description: Use when the repository's manual (its wiki) has to catch up with what the work changed — at the end of an epic, or when a person asks. "update the wiki", "write the manual", "document this", "위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리". The pages are markdown files in the repository, listed by `moai wiki ls`; nothing checks them.
+description: Use when the repository's manual (its wiki) has to catch up with what the work changed — at the end of an epic, or when a person asks. "update the wiki", "write the manual", "document this", "record a lesson", "위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리", "교훈 남겨", "실수 기록". The pages are markdown files in the repository, listed by `moai wiki ls`; nothing checks them.
 ---
 
 # moai-wiki — keep the manual in step with the work
@@ -107,6 +107,67 @@ one — after the review and the CHANGELOG line and before the merge.
    behind without a word
 5. Name the pages you changed in your report, or say that none changed
 
+## Lessons
+
+A lesson is a mistake written down so the next window does not make it. It is a wiki
+page of its own, `lessons/<slug>.md` below `dir`, one lesson to a file — so lessons
+written on two branches never meet in the same lines. There is no index page: the list
+is `moai wiki ls`, the search is `moai wiki search`. `moai show <id>`
+puts the lessons that bear on a row under its `Wiki` block (`lessons` in `wiki`, and
+`lesson: true` on a search hit); read them when you pick the row up.
+
+**Write one when**, and only when:
+
+- a review finding was one a single rule would have stopped
+- a person corrected you — so they never have to say it twice
+- the same hook refusal caught you twice
+- a test failed because of a premise that was wrong
+
+**Search first**: `moai wiki search '<a word of the mistake>'`. If the lesson stands
+already, write nothing new — it was met again, and that goes on the issue, not the page:
+
+    moai note <id> 'Lesson: lessons/<slug>'
+
+If none stands, write it. The same call makes the page and then puts the note on the
+issue:
+
+    moai wiki learn 'End a check on the step that must pass' --issue <id> -b - <<'LESSON'
+    ## What happened
+    ...
+    ## Why
+    ...
+    ## Do this instead
+    ...
+    LESSON
+
+- The title is one line, as an instruction. The body must hold `## Do this instead` —
+  it is the part the next window reads. `## What happened` and `## Why` are worth a
+  few lines. Do not tell it as a narrative: a list, as in an issue body
+- `--slug` names the file in lowercase ASCII kebab case when the title is not ASCII; `--issue`
+  names the row it came from — pass it every time: without it the note goes to the one row
+  held under your name, and sessions sharing one git identity hold each other's rows. `--dry-run` shows
+  the page first
+- Nothing is committed. The page rides the branch like any other: commit it with the
+  same `docs(wiki):` commit as the end of an epic, `add` first
+- A page already standing is never overwritten. Edit the file if it is wrong
+
+**Do not write**:
+
+- a failure that was the machine's — a binary that was not installed, credentials that
+  were missing
+- a flat "this tool does not work" — a negative claim goes stale the day the tool is fixed
+- a transient error that a retry cleared
+- a story tied to one PR or one error string
+- logs or code pasted whole
+- what CLAUDE.md, AGENTS or the wiki already say
+
+**The page is never marked when a lesson is met again** — the note on the issue is the
+mark, so two branches never edit one line. How often a lesson stood is read from those
+notes: `seen_count` on each page of `moai wiki ls --json` (`0` for a lesson nobody has
+noted), and `seen` on `moai wiki show lessons/<slug> --json` — one entry per issue,
+newest first, each with the issue's `id` and the day (`at`) and person (`by`) of its
+latest `Lesson:` note.
+
 ## When a person asks you to sweep
 
 A person calls this skill to catch the wiki up — before a release, or after work
@@ -141,6 +202,14 @@ merged without touching it.
 6. Write the pages where this repository does its work — in a worktree if it uses
    them — commit with `docs(wiki): <what> (<id>)`, a `git add` first as in step 4 of
    the end of an epic, and move the issue to `done`
+7. Sweep the lessons too. `moai wiki ls --json` gives each `lessons/…` page a `seen_count`;
+   read the pages with `moai wiki show <slug> --json` (`seen`). Then
+   - merge two lessons that say one thing into one page, and remove the other. A note that
+     names the removed slug stays as it is — it is history
+   - take out a lesson the code now prevents: the mistake can no longer be made
+   - a lesson with a `seen_count` over three has outgrown a page. **Ask the person**
+     whether it becomes a rule — in CLAUDE.md, in the AGENTS block, a hook or a test.
+     Promoting it is the person's decision, never yours
 
 ## A new page
 

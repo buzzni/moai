@@ -883,7 +883,8 @@ fn one(
     // 없어 상세의 머리글과 이력이 서로 다른 말을 한다.
     let journal_root = home(repo, origin, &issue.id);
     // `journal_error` 는 읽은 **뒤에** 못 읽은 파일을 묻는 키라 그것을 고른 판도 읽는다.
-    let journal = match wants(&["journal", "work", "journal_error"]) {
+    // `wiki` 도 고른다 — 이 줄의 `Lesson:` 노트가 거기 선다(moai-4s5n.c0n).
+    let journal = match wants(&["journal", "work", "journal_error", "wiki"]) {
         true => at_home(repo, journal_root).journal_of(&issue.id),
         false => Vec::new(),
     };
@@ -959,7 +960,8 @@ fn one(
     // **이 이슈에 관한 위키**(moai-g8pt.5aw) — 집는 순간 읽는 자리라 에이전트가 따로 찾지 않아도 본다. 위키는 이
     // 체크아웃의 것을 읽고(트래커는 루트, 위키는 가지를 탄다), 무엇을 낼지는 순수 함수(`wiki::about`)가 가른다.
     // 커밋과 같은 약속이다 — `--json` 의 `wiki` 는 늘 서고, 디렉터리를 못 썼을 때만 `wiki_error` 가 붙는다. 없는
-    // 디렉터리는 안 쓴 위키라 까닭이 아니다. 사람 화면은 못 읽었어도 말없이 토막을 비운다(커밋 칸과 같다).
+    // 디렉터리는 안 쓴 위키라 까닭이 아니다. 사람 화면은 못 읽었어도 말없이 페이지를 비운다(커밋 칸과 같다) — 이 줄의
+    // 노트가 가리킨 교훈 슬러그만은 노트에서 읽어 그대로 선다.
     // 페이지가 댄 id 가 트래커에 있는가(`IssueRef::exists`)는 `wiki::about` 이 안 읽는다 — 저장소의 id 를 다 모아
     // 건네던 판은 펼칠 때마다 버릴 모음을 지었다.
     let wiki_read = wants(&["wiki", "wiki_error"]).then(|| super::wiki::read_in(repo, &|_| true));
@@ -968,7 +970,9 @@ fn one(
         Some((dir, Err(t))) => (&[], super::wiki::trouble_told(ctx.lang(), dir, t)),
         None => (&[], None),
     };
-    let about = crate::wiki::about::about(pages, issue, stood_in);
+    // 이 이슈의 `Lesson:` 노트가 가리킨 교훈 — 저널의 노트를 읽은 값이다. 하위의 노트는 하위의 것이다.
+    let own_lessons = crate::wiki::seen::lessons_of(&journal);
+    let about = crate::wiki::about::about(pages, issue, stood_in, &own_lessons);
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();

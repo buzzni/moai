@@ -847,17 +847,21 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
 /// `note_of` 가 낸 그 글) 저널을 다시 안 풀고 그 글에서 읽는다. 울타리를 가르는 법이 두 벌이면 CLI 의
 /// `moai stats` 와 창이 같은 노트를 두고 다른 토큰 합을 낸다.
 pub(crate) fn work_in_note(text: &str) -> impl Iterator<Item = Work> + '_ {
+    counted_lines(text).filter_map(parse_work)
+}
+
+/// 노트 글에서 **값으로 읽을 줄들** — 울타리(```` ``` ````·`~~~`) 줄과 그 안의 줄은 꼴을 옮겨 적은 예라 뺀다.
+/// [`work_in_note`] 와 [`lessons_in_note`] 가 이 하나로 가른다(리뷰 moai-4s5n.u8x) — 울타리를 가르는 법이 두 벌이면 한
+/// 노트를 `work` 와 교훈 셈이 다르게 읽는다. 들여 쓴 줄을 빼는 것은 줄을 받는 파서의 몫이다(줄 머리에서 시작한 줄만).
+fn counted_lines(text: &str) -> impl Iterator<Item = &str> + '_ {
     let mut fenced = false;
-    text.lines().filter_map(move |line| {
+    text.lines().filter(move |line| {
         let bare = line.trim_start();
         if bare.starts_with("```") || bare.starts_with("~~~") {
             fenced = !fenced;
-            return None;
+            return false;
         }
-        if fenced {
-            return None;
-        }
-        parse_work(line)
+        !fenced
     })
 }
 
@@ -899,6 +903,36 @@ pub fn may_hold_note(raw: &str) -> bool {
 /// [`work_of`] 가 다시 가른다.
 pub fn may_hold_work(raw: &str) -> bool {
     raw.contains("model:") || raw.contains("\\u")
+}
+
+/// 저널 한 줄 — **풀기 전의 JSON** — 이 [`lessons_in_note`] 에서 값을 낼 수 **있는가**(moai-4s5n.c0n).
+/// [`may_hold_work`] 와 같은 결이다: 값을 내는 줄의 글에는 `Lesson:` 이 들고, 손으로 쓴 줄이 글자를
+/// `\uXXXX` 로 적었을 수 있어 `\u` 가 든 줄은 다 푼다. 더 받는 것은 괜찮다 — 푼 뒤에 파서가 다시 가른다.
+pub fn may_hold_lesson(raw: &str) -> bool {
+    raw.contains("Lesson:") || raw.contains("\\u")
+}
+
+/// `Lesson: lessons/<slug>` 한 줄 — 이 교훈이 다시 선 자리. 돌려주는 것은 위키 슬러그(`lessons/<slug>`)다.
+///
+/// [`parse_work`] 와 같은 규칙이다: **줄 머리에서 시작한 줄만 받는다**(들여 쓴 줄은 꼴을 옮겨 적은 예다),
+/// `Lesson:` 뒤에는 빈칸이 오고(`Lesson:x` 는 아니다), 슬러그는 교훈 페이지의 꼴([`crate::wiki::seen::is_lesson`] —
+/// 화면이 교훈으로 그리는 페이지와 한 자)이다. 슬러그 뒤의 글은 무시한다.
+///
+/// **글줄 끝의 문장 부호와 감싼 백틱은 슬러그가 아니다**(리뷰 moai-4s5n.u8x) — [`parse_work`] 가 모델 이름에서 걷는
+/// 그 넷과, 마크다운으로 적은 `` `lessons/x` `` 의 백틱이다. 안 걷던 판은 `Lesson: lessons/x.` 를 말없이 안 셌다.
+pub(crate) fn parse_lesson(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("Lesson:")?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let word = rest.split_whitespace().next()?.trim_matches(['`', '.', ',', ';', ':']);
+    crate::wiki::seen::is_lesson(word).then_some(word)
+}
+
+/// 노트 글 **하나**에서 읽은 교훈 슬러그들 — 울타리(```` ``` ````·`~~~`) 안의 줄은 예라 안 센다([`work_in_note`]
+/// 와 같은 자, [`counted_lines`]).
+pub(crate) fn lessons_in_note(text: &str) -> impl Iterator<Item = &str> + '_ {
+    counted_lines(text).filter_map(parse_lesson)
 }
 
 /// `model: [<회사>/]<모델> [tokens=<수>] [(<등급> — <까닭>)] …` 한 줄. `at`·`by` 는 비워 낸다.
@@ -1370,6 +1404,32 @@ pub fn days_until(due: &str, now: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    #[test]
+    fn parse_lesson_reads_only_a_line_head_with_a_lessons_slug() {
+        assert_eq!(parse_lesson("Lesson: lessons/grep-exit-code"), Some("lessons/grep-exit-code"));
+        assert_eq!(parse_lesson("Lesson:   lessons/a1 — 또 겪었다"), Some("lessons/a1"));
+        assert_eq!(parse_lesson("  Lesson: lessons/a"), None, "들여 쓴 줄은 예다");
+        assert_eq!(parse_lesson("Lesson:lessons/a"), None, "빈칸이 없다");
+        assert_eq!(parse_lesson("Lesson: README"), None);
+        assert_eq!(parse_lesson("Lesson: notes/a"), None, "lessons/ 밖");
+        assert_eq!(parse_lesson("Lesson: lessons/Bad_Slug"), None);
+        assert_eq!(parse_lesson("Lesson: lessons/"), None);
+        assert_eq!(parse_lesson("Lesson: lessons/a/b"), None, "한 겹만");
+        assert_eq!(parse_lesson("lesson: lessons/a"), None);
+        // 글줄 끝의 문장 부호와 감싼 백틱은 걷는다 — `parse_work` 가 모델 이름에서 걷는 그 넷이다.
+        assert_eq!(parse_lesson("Lesson: lessons/a."), Some("lessons/a"));
+        assert_eq!(parse_lesson("Lesson: `lessons/a`, again"), Some("lessons/a"));
+        assert_eq!(parse_lesson("Lesson: lessons/README"), None, "교훈 슬러그의 꼴이 아니다");
+    }
+
+    #[test]
+    fn lessons_in_a_note_skip_fenced_lines() {
+        let text = "Lesson: lessons/a\n```\nLesson: lessons/b\n```\n    Lesson: lessons/c\nLesson: lessons/d";
+        assert_eq!(lessons_in_note(text).collect::<Vec<_>>(), ["lessons/a", "lessons/d"]);
+        assert!(may_hold_lesson(r#"{"text":"Lesson: lessons/a"}"#));
+        assert!(!may_hold_lesson(r#"{"text":"model: x"}"#));
+    }
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()

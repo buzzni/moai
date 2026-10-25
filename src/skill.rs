@@ -1432,6 +1432,11 @@ mod tests {
         // 자리표시자의 `>` 가 리다이렉션으로 읽히면 여기서 붉어진다.
         let idle = vec![epic_row()];
         for cmd in taught() {
+            // `moai wiki learn` 은 저장소에 페이지를 쓴다 — 규칙 2 가 일부러 그것을 변경으로 센다
+            // (moai-4s5n.n7j). 집은 일 없이는 쓰지 않는 것이 맞고, 위 홀드 판이 지나가는 것으로 충분하다.
+            if cmd.starts_with("moai wiki learn") {
+                continue;
+            }
             assert_eq!(
                 guard_shell(&idle, &cfg, &Default::default(), root, root, &cmd),
                 Decision::Pass,

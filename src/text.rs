@@ -100,6 +100,17 @@ pub fn clip_front(s: &str, max: usize) -> String {
     std::iter::once('…').chain(kept).collect()
 }
 
+/// 앞뒤의 빈 줄과 끝의 빈칸을 걷고 **첫 줄의 들여쓰기는 남긴다** — `cmd::add::read_msg` 와 `wiki::learn::page` 의 자.
+/// 빈칸뿐인 글은 빈 글이 된다. BOM(U+FEFF)도 빈칸으로 센다 — `str::trim` 은 그것을 글자로 남겨, 빈 줄 뒤에 붙은 BOM
+/// 하나가 안 보이는 글로 지나갔다(리뷰). 첫 줄 **안의** BOM 은 들여쓰기처럼 남으니 파일 머리의 것은 부르는 쪽이 먼저
+/// 걷는다(`text.strip_prefix('\u{feff}')`, `wiki::unmarked`).
+pub fn blank_lines_trimmed(s: &str) -> &str {
+    let blank = |c: char| c.is_whitespace() || c == '\u{feff}';
+    let s = s.trim_end_matches(blank);
+    let first = s.len() - s.trim_start_matches(blank).len();
+    &s[s[..first].rfind('\n').map_or(0, |n| n + 1)..]
+}
+
 /// 한 줄에 세우는 글 — 제어문자를 걷고 여러 줄이면 사이를 두 칸으로 접는다.
 ///
 /// **[`sanitize`] 는 줄바꿈과 탭을 남긴다** — 본문은 여러 줄이 정상이라서다. 한 줄짜리
