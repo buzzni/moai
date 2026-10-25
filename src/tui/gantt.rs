@@ -755,9 +755,9 @@ mod tests {
         let before = dates_on_disk(&dir, "argos-0009");
         a.hit("SPC g g");
         put_cursor(&mut a, "argos-0003");
-        a.hit("Ctrl-w l >");
+        a.hit("Ctrl-w j >");
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-20".into()), Some("2026-10-24".into())));
-        a.hit("Ctrl-w h SPC g l");
+        a.hit("Ctrl-w k SPC g l");
         put_cursor(&mut a, "argos-0003");
         a.hit(">");
         assert_eq!(dates_on_disk(&dir, "argos-0003"), (Some("2026-10-20".into()), Some("2026-10-24".into())));
@@ -906,6 +906,26 @@ mod tests {
         let right = chars.iter().rposition(|&x| x == '┃').unwrap();
         let mid = (col('│') + right) / 2;
         assert!(today.abs_diff(mid) <= 6, "t 가 오늘을 가운데로 안 옮겼다\n{}", screen.join("\n"));
+    }
+
+    /// **간트의 상세는 처음에 아래에 선다**(moai-i4hf.sas) — 간트는 가로로 넓어야 한다. 간트 안의 `SPC o d` 는 간트의 자리만
+    /// 돌리고, 목록으로 돌아오면 목록의 자리 그대로다. 칸 옮기기도 그 자리를 따른다.
+    #[test]
+    fn the_detail_stands_below_the_gantt_on_its_own_side() {
+        use super::super::view::DetailAt;
+        let mut a = app();
+        let listed = a.detail_at;
+        a.hit("SPC g g");
+        let _ = draw::tests::render(&mut a, 140, 30);
+        let (list, detail) = (a.drawn.list, a.drawn.detail.expect("상세가 안 섰다"));
+        assert!(detail.y > list.y && detail.x == list.x, "간트의 상세가 아래에 안 섰다: {list:?} {detail:?}");
+        a.hit("Ctrl-w j");
+        assert_eq!(a.focus, super::super::Pane::Detail, "아래의 상세로 칸이 안 옮았다");
+        a.hit("Ctrl-w k SPC o d Esc");
+        assert_ne!(a.detail_side(), DetailAt::Bottom, "간트 안의 SPC o d 가 간트의 자리를 안 돌렸다");
+        assert_eq!(a.detail_at, listed, "간트 안의 SPC o d 가 목록의 자리를 돌렸다");
+        a.hit("SPC g l");
+        assert_eq!(a.detail_side(), listed, "목록으로 오며 목록의 자리를 잃었다");
     }
 
     /// 배치 이름은 설정에 `gantt` 로 남고, 키 문맥은 간트 화면을 댄다.

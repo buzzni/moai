@@ -708,7 +708,9 @@ BACKLOG
   the detail are the list's — but it holds its own folds: it opens with
   everything unfolded, {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
   and the list keeps the folds it had. Coming back to the list opens the
-  folder that holds the row you stood on. The planned bar (░, ▒ on a group)
+  folder that holds the row you stood on. The detail stands below the gantt at
+  first; {key:browse.detail_at} there moves the gantt's detail only, for this session.
+  The planned bar (░, ▒ on a group)
   runs from the start to the deadline and ◆ marks the row's own deadline; █
   over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
   a deferred row's plan, and ▼ over a dotted line marks today.

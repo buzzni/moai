@@ -2302,7 +2302,7 @@ fn split_body(body: Rect, app: &App) -> (Rect, Option<Rect>) {
     if !app.detail_open {
         return (body, None);
     }
-    let at = app.detail_at;
+    let at = app.detail_side();
     if at.vertical() && body.height < LIST_MIN_V + DETAIL_MIN_V {
         return (body, None);
     }

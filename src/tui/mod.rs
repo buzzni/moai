@@ -1524,6 +1524,9 @@ pub struct App {
     /// 간트의 고정 칸 폭을 끈 값(칸, moai-i4hf.exq) — 끈 적 없으면 없고, 그때는 설정에 안 적힌다(`list_width` 와 같은 결).
     /// 그리는 값은 `chart.label_width` 다.
     gantt_label: Option<u16>,
+    /// 간트에서 상세 칸이 서는 자리(moai-i4hf.sas) — **처음은 아래다**: 간트는 가로로 넓어야 날짜가 보인다. 목록의
+    /// 자리(`detail_at`)와 따로 들고, 간트 안의 `SPC o d` 가 이것을 돌린다. 화면에만 산다.
+    gantt_detail_at: view::DetailAt,
     /// 보드에서 커서가 마지막으로 선 카드의 칸 — 칸이 없는 프로젝트 머리줄에서 `j`·`k` 가 걸을 칸이다
     /// (moai-oagj.vcj, [`App::board_step`]). 화면의 손버릇이라 설정에 안 남는다.
     ///
@@ -2159,6 +2162,7 @@ impl App {
             plan_move: None,
             chart_drag: None,
             gantt_label: None,
+            gantt_detail_at: view::DetailAt::Bottom,
             board_column: None,
             adrift: None,
             mouse_on: true,
@@ -4965,6 +4969,13 @@ impl App {
         self.layout == view::Layout::Gantt
     }
 
+    /// 상세 칸이 지금 서는 자리 — 간트면 간트의 자리(`gantt_detail_at`), 아니면 사람이 고른 자리다(moai-i4hf.sas).
+    /// **그리기·마우스·칸 옮기기·키 바가 이 하나를 읽는다** — 한쪽만 간트의 자리를 보면 아래에 선 상세를 `Ctrl-w l` 이
+    /// 오른쪽에서 찾는다.
+    pub fn detail_side(&self) -> view::DetailAt {
+        if self.gantt() { self.gantt_detail_at } else { self.detail_at }
+    }
+
     /// 줄로 세우는가 — 보드도 간트도 아니다.
     pub fn list(&self) -> bool {
         self.layout == view::Layout::List
@@ -5584,7 +5595,7 @@ impl App {
             B::FocusPrev => self.focus = self.focus.prev(),
             B::FocusNext => self.focus = self.focus.next(),
             // **끝에서는 제자리다** — 목록에서 `Ctrl-w h` 를 눌러도 상세로 돌지 않는다.
-            B::Focus(side) => self.focus = self.focus.step(side, self.detail_at),
+            B::Focus(side) => self.focus = self.focus.step(side, self.detail_side()),
             B::Step(m) => self.step(m, &rows),
             // **드나드는 키도 포커스를 탄다**(`enabled`). 상세를 읽다가 누른 Enter·←가 목록을
             // 옮기면 보던 이슈가 바뀌고 굴린 자리도 첫 줄로 돌아간다 — ↑↓ 를 포커스에
@@ -5720,6 +5731,8 @@ impl App {
             }
             // **자리만 돌린다 — 켜지도 끄지도 않는다**(moai-e7r3). 숨긴 상세의 자리를 돌리는 길은
             // 아예 막혀 있다(`Browse::enabled`). 메뉴는 열린 채로 남아 눌러 보며 자리를 맞춘다.
+            // 간트는 제 자리를 돌린다 — 화면에만 사는 값이라 설정에 안 적는다(`App::detail_side`).
+            B::DetailAt if self.gantt() => self.gantt_detail_at = self.gantt_detail_at.next(),
             B::DetailAt => {
                 self.detail_at = self.detail_at.next();
                 self.save_look();
@@ -5793,7 +5806,7 @@ impl App {
             deferred_hidden: self.view.hide_deferred,
             backlog_hidden: self.view.hide_backlog,
             archived_hidden: !self.view.show_archived,
-            detail_at: self.detail_at,
+            detail_at: self.detail_side(),
             board: self.board(),
             gantt: self.gantt(),
             stats: matches!(self.mode, Mode::Stats(_)),
@@ -5805,10 +5818,10 @@ impl App {
             detail: self.detail_open,
             next_pane: self.focus.next().word(self.site.lang, layout),
             prev_pane: self.focus.prev().word(self.site.lang, layout),
-            left_pane: self.focus.step(keys::Side::Left, self.detail_at).word(self.site.lang, layout),
-            right_pane: self.focus.step(keys::Side::Right, self.detail_at).word(self.site.lang, layout),
-            up_pane: self.focus.step(keys::Side::Up, self.detail_at).word(self.site.lang, layout),
-            down_pane: self.focus.step(keys::Side::Down, self.detail_at).word(self.site.lang, layout),
+            left_pane: self.focus.step(keys::Side::Left, self.detail_side()).word(self.site.lang, layout),
+            right_pane: self.focus.step(keys::Side::Right, self.detail_side()).word(self.site.lang, layout),
+            up_pane: self.focus.step(keys::Side::Up, self.detail_side()).word(self.site.lang, layout),
+            down_pane: self.focus.step(keys::Side::Down, self.detail_side()).word(self.site.lang, layout),
             keys: self.keys,
         }
     }

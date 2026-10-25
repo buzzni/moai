@@ -353,8 +353,8 @@ impl App {
     fn grab_at(&self, at: Position) -> Option<Grab> {
         let d = &self.drawn;
         let detail = d.detail?;
-        let front = if self.detail_at.first() { detail } else { d.list };
-        let (p, end, was) = if self.detail_at.vertical() {
+        let front = if self.detail_side().first() { detail } else { d.list };
+        let (p, end, was) = if self.detail_side().vertical() {
             (at.y, front.bottom(), self.list_height)
         } else {
             (at.x, front.right(), self.list_width)
@@ -394,7 +394,7 @@ impl App {
             let body = Rect::new(d.list.x, d.list.y, page.right().saturating_sub(d.list.x), d.list.height);
             (body, super::view::DetailAt::Right)
         } else {
-            (self.drawn.body, self.detail_at)
+            (self.drawn.body, self.detail_side())
         };
         let vertical = side.vertical();
         let (start, len, p) = if vertical { (body.y, body.height, at.y) } else { (body.x, body.width, at.x) };
