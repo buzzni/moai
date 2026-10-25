@@ -85,7 +85,8 @@ from the checkout you call it in:
   `heading` and `anchor` unless the section comes before the page's first
   heading. A section stands only when it matches two words of the title that
   are not common across the wiki (one, when the title has only one such word);
-  a word in more than a quarter of the sections does not count
+  a word in more than a quarter of the sections, and in more than one, does
+  not count
 
 `wiki` is always there; with no wiki directory, or nothing about the row, both
 arrays are empty. `wiki_error` stands only when the wiki directory cannot be

@@ -173,6 +173,15 @@ mod tests {
         assert_eq!(a.related.first().map(|h| (h.distinct, h.rare)), Some((1, 1)), "태그는 질의 낱말이 아니다");
     }
 
+    /// 작은 위키에서도 관련 절이 선다 — 절 하나에만 든 낱말은 흔하지 않다(리뷰 moai-g8pt.9rd). 몫만 보던 판은 절이
+    /// 넷이 안 되면 든 낱말을 모두 흔하다고 보아, 페이지 하나짜리 위키에서 관련 절이 영영 안 섰다.
+    #[test]
+    fn a_small_wiki_still_has_related_sections() {
+        let pages = [page("readme", "# Readme\n\nThe merge driver lives here.\n")];
+        let i = issue("moai-gggg", "merge driver", &[]);
+        assert_eq!(slugs(&about(&pages, &i, None)).1, ["readme"]);
+    }
+
     /// 어디에나 든 낱말은 문턱을 못 채운다 — `moai`·`show` 둘이 맞은 절은 안 내밀고, 흔하지 않은 낱말이 맞은 절만
     /// 낸다. 질의가 흔한 낱말뿐이면 관련 절이 없다.
     #[test]

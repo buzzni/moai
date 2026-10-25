@@ -69,7 +69,7 @@ pub fn search(lang: Lang, dir: &str, query: &str, hits: &[Hit], total: usize) ->
             paint(style::ID, &format!("{}:{}", one_line(&h.page.path), h.line)),
             one_line(&h.page.title)
         );
-        if let Some(t) = &h.heading {
+        if let Some(t) = section_of(h) {
             head.push_str(&format!(" › {}", one_line(t)));
         }
         out.push(head);
@@ -119,7 +119,7 @@ pub fn about(lang: Lang, a: &About) -> Vec<String> {
             paint(style::ID, &format!("{}:{}", one_line(&h.page.path), h.line)),
             one_line(&h.page.title)
         );
-        if let Some(t) = &h.heading {
+        if let Some(t) = section_of(h) {
             line.push_str(&format!(" › {}", one_line(t)));
         }
         out.push(line);
@@ -130,6 +130,12 @@ pub fn about(lang: Lang, a: &About) -> Vec<String> {
         paint(style::DIM, &fill(say(lang, "wiki.about_hint"), &[("slug", &crate::text::quoted(&first.slug))]))
     ));
     out
+}
+
+/// `제목 › 머리글` 의 머리글 — 페이지 제목과 같은 글이면 없다. 제목 절(첫 `# `)의 머리글은 제목 그 자체라
+/// `Windows › Windows` 처럼 같은 말이 두 번 섰다(리뷰 moai-g8pt.9rd). `--json` 의 `heading` 은 그대로다.
+fn section_of<'h>(h: &'h Hit) -> Option<&'h str> {
+    h.heading.as_deref().filter(|t| *t != h.page.title)
 }
 
 /// 발췌에 맞은 자리를 굵게 — 조각마다 제어문자를 걷는다(바이트 범위가 걷기에 밀리지 않게 칠하기 전에 가른다).

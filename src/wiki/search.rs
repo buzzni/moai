@@ -5,7 +5,8 @@
 //! `show <id>` 와 나중의 TUI·web 이 같은 자를 쓴다.
 //!
 //! - **절**은 [`Page::headings`] 의 줄에서 자른 조각이다 — 모든 단의 머리글이다. 첫 머리글 앞의 글은 페이지 제목의
-//!   절이다. 앵커는 `Page::headings` 의 것을 그대로 쓴다. 다시 짓지 않는다 — 짓는 자는 [`super::Anchors`] 하나다
+//!   절이다(빈 줄뿐이면 안 세운다 — 세우면 제목 낱말만으로 맞는 빈 hit 가 선다). 앵커는 `Page::headings` 의 것을 그대로
+//!   쓴다. 다시 짓지 않는다 — 짓는 자는 [`super::Anchors`] 하나다
 //! - **토큰**은 소문자로 접어 글자·숫자·`_` 아닌 곳에서 가른 낱말이다(`merge-driver` → `merge`, `driver`;
 //!   `archive_days` 는 하나). 한글·한자·가나는 글자 둘씩도 낸다 — 조사가 붙은 `검색은` 이 `검색` 과 맞으려면 든다
 //! - **점수**는 BM25 다(`k1 = 1.2`, `b = 0.75`). 절의 필드는 둘 — 머리글(그 절의 머리글 + 페이지 제목)과 본문 —
@@ -26,7 +27,8 @@ const B: f64 = 0.75;
 /// 흔한 낱말의 문턱 — 절의 이 몫보다 많은 곳에 든 낱말은 흔하다([`Found::common`]). 이 저장소 docs/ 의 절
 /// 187 개에서 `moai` 는 84%, `id` 는 43%, `show` 는 31% 에 들고 `wiki` 는 11%, `merge` 는 17% 다(moai-g8pt.5aw).
 /// 낱말 목록이 아니라 몫으로 두는 까닭은 위키마다 흔한 낱말이 달라서다 — 이 저장소의 `moai` 가 남의 위키에서는
-/// 그 제품 이름이다.
+/// 그 제품 이름이다. **절 하나에만 든 낱말은 흔하지 않다** — 몫만 보면 절이 넷이 안 되는 작은 위키에서는 든 낱말이
+/// 모두 흔해져 관련 절이 영영 안 선다(리뷰 moai-g8pt.9rd).
 pub const COMMON_SHARE: f64 = 0.25;
 /// 머리글 필드의 낱말 하나가 본문 몇 번만큼 무거운가.
 const HEADING_WEIGHT: f64 = 3.0;
@@ -40,10 +42,13 @@ const LEAD_COLS: usize = 40;
 pub struct Found<'a> {
     /// 질의를 토큰으로 푼 것, 겹침 없이 처음 나온 차례로. 비었으면 질의가 비었던 것이다 — 부르는 쪽이 가린다.
     pub terms: Vec<String>,
-    /// `terms` 가운데 흔한 낱말 — 절의 [`COMMON_SHARE`] 보다 많은 곳에 든 것, `terms` 의 차례로.
+    /// `terms` 가운데 흔한 낱말 — 절의 [`COMMON_SHARE`] 보다 많은(그리고 둘 이상의) 곳에 든 것, `terms` 의 차례로.
     pub common: Vec<String>,
     /// 순위 차례의 hit — 맞은 서로 다른 낱말 수, 점수, 슬러그, 줄 차례로 정렬하고 `limit` 에서 자른 것.
     pub hits: Vec<Hit<'a>>,
+    /// 맞은 절의 수 — `limit` 이 자르기 **전**이다. 부르는 쪽이 "몇 중 몇" 을 대려고 다 받아 자르면 버릴 hit 의
+    /// 발췌까지 짓는다.
+    pub total: usize,
 }
 
 /// 절 하나의 hit.
@@ -160,9 +165,15 @@ fn tokens(s: &str) -> Vec<Tok> {
     out
 }
 
-/// 머리글 줄의 글 — `#` 와 닫는 `#` 를 걷는다(밑줄 꼴이면 그 줄 그대로다).
+/// 머리글 줄의 글 — 인용의 `>`, 여는 `#` 와 닫는 `#` 를 걷는다(밑줄 꼴이면 그 줄 그대로다). 닫는 `#` 는
+/// CommonMark 처럼 앞에 빈칸이 선 것만이다 — `## C#` 의 `#` 는 글이다.
 fn heading_text(line: &str) -> String {
-    line.trim().trim_start_matches('#').trim_end_matches('#').trim().to_string()
+    let t = line.trim().trim_start_matches(|c: char| c == '>' || c.is_whitespace());
+    let Some(rest) = t.strip_prefix('#') else { return t.trim().to_string() };
+    let rest = rest.trim_start_matches('#').trim_end();
+    let bare = rest.trim_end_matches('#');
+    let rest = if bare.is_empty() || bare.ends_with([' ', '\t']) { bare } else { rest };
+    rest.trim().to_string()
 }
 
 /// 절 하나 — 검색 중에만 산다. 줄은 페이지 글을 빌린다(`'t`) — 절마다 줄을 베끼지 않는다.
@@ -197,7 +208,9 @@ fn sections<'a, 't>(page: &'a Page, all: Option<&'t [&'t str]>) -> Vec<Section<'
     let Some(all) = all else { return vec![mk(None, None, 0, &[])] };
     let mut out = Vec::new();
     let first = page.headings.first().map_or(all.len(), |h| h.line.min(all.len()));
-    if first > 0 || page.headings.is_empty() {
+    // 첫 머리글 앞이 빈 줄뿐이면 절이 아니다 — 머리글 필드에 페이지 제목이 들어, 제목 낱말을 묻는 질의마다 발췌
+    // 없는 `path:1` hit 가 그 페이지의 제목 절 곁에 하나 더 섰다(리뷰 moai-g8pt.9rd).
+    if page.headings.is_empty() || all[..first].iter().any(|l| !l.trim().is_empty()) {
         out.push(mk(None, None, 0, &all[..first]));
     }
     for (n, h) in page.headings.iter().enumerate() {
@@ -221,15 +234,21 @@ pub fn rank<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
     run(pages, query, limit, false)
 }
 
-fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Found<'a> {
+/// 질의를 토큰으로 푼 것 — [`Found::terms`] 와 같다. 비었으면 찾을 것이 없는 질의다. **순수 함수다.**
+pub fn terms(query: &str) -> Vec<String> {
     let mut terms: Vec<String> = Vec::new();
     for t in tokens(query) {
         if !terms.contains(&t.text) {
             terms.push(t.text);
         }
     }
+    terms
+}
+
+fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Found<'a> {
+    let terms = terms(query);
     if terms.is_empty() {
-        return Found { terms, common: Vec::new(), hits: Vec::new() };
+        return Found { terms, common: Vec::new(), hits: Vec::new(), total: 0 };
     }
     let want: HashSet<&str> = terms.iter().map(String::as_str).collect();
     let index: HashMap<&str, usize> = terms.iter().enumerate().map(|(i, t)| (t.as_str(), i)).collect();
@@ -268,7 +287,8 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
     let idf: Vec<f64> = df.iter().map(|df| (1.0 + (n - df + 0.5) / (df + 0.5)).ln()).collect();
     // **흔한 낱말**은 절의 [`COMMON_SHARE`] 보다 많은 곳에 든 낱말이다 — 순위에서는 idf 가 이미 누르지만, 관련 절을
     // 고르는 쪽은 맞은 낱말의 수를 문턱으로 쓰므로 흔한 낱말 둘이 맞은 엉뚱한 절이 문턱을 넘는다(moai-g8pt.5aw).
-    let common: Vec<bool> = df.iter().map(|df| *df > COMMON_SHARE * n).collect();
+    // 절 하나에만 든 낱말은 흔하지 않다 — 몫만 보면 절이 넷이 안 되는 위키에서 든 낱말이 다 흔해진다.
+    let common: Vec<bool> = df.iter().map(|df| *df > 1.0 && *df > COMMON_SHARE * n).collect();
     let mut scored: Vec<(usize, usize, usize, f64)> = Vec::new();
     for (i, s) in secs.iter().enumerate() {
         let len = HEADING_WEIGHT * s.head_len + s.body_len;
@@ -292,6 +312,7 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
             .then_with(|| x.page.slug.cmp(&y.page.slug))
             .then_with(|| x.start.cmp(&y.start))
     });
+    let total = scored.len();
     let hits = scored
         .into_iter()
         .take(limit)
@@ -310,7 +331,7 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
         })
         .collect();
     let common = terms.iter().zip(&common).filter(|(_, c)| **c).map(|(t, _)| t.clone()).collect();
-    Found { terms, common, hits }
+    Found { terms, common, hits, total }
 }
 
 /// 절에서 서로 다른 질의 낱말이 가장 많이 든 줄 하나 — 같으면 앞 줄. 맞은 줄이 없으면(제목으로만 맞았다) 절의 첫
@@ -356,9 +377,12 @@ fn fit(line: &str, want: &HashSet<&str>) -> (String, Vec<Range<usize>>) {
     // 앞뒤의 `…` 에 두 칸을 남긴다.
     let budget = SNIPPET_COLS - 2;
     let (mut lo, mut hi, mut used) = (at, at + 1, w[at]);
-    while lo > 0 && used + w[lo - 1] <= budget && w[lo..at].iter().sum::<usize>() < LEAD_COLS {
+    // 앞에 남긴 폭(`w[lo..at]` 의 합)은 이어 센다 — 걸음마다 다시 더하면 폭 0 인 글자가 긴 줄에서 제곱이 든다.
+    let mut lead = 0;
+    while lo > 0 && used + w[lo - 1] <= budget && lead < LEAD_COLS {
         lo -= 1;
         used += w[lo];
+        lead += w[lo];
     }
     while hi < gs.len() && used + w[hi] <= budget {
         used += w[hi];
@@ -555,6 +579,46 @@ mod tests {
         let pages = [page("a", "# A\n\n    indented code word\n")];
         let s = search(&pages, "word", 5).hits[0].snippet.clone().unwrap();
         assert_eq!((s.text.as_str(), s.line), ("indented code word", 3));
+    }
+
+    /// 닫는 `#` 는 앞에 빈칸이 선 것만 걷는다 — `## C#` 의 `#` 는 글이다(리뷰 moai-g8pt.9rd). 인용 속 머리글은 `>` 를 뗀다.
+    #[test]
+    fn the_heading_keeps_a_hash_that_is_part_of_its_text() {
+        assert_eq!(heading_text("## C#"), "C#");
+        assert_eq!(heading_text("## Foo ##  "), "Foo");
+        assert_eq!(heading_text("## #"), "");
+        assert_eq!(heading_text("> ## Quoted"), "Quoted");
+        assert_eq!(heading_text("Setext C#"), "Setext C#");
+        let pages = [page("a", "# A\n\n## C#\n\nthe sharp language\n")];
+        assert_eq!(top(&pages, "sharp"), [("a", Some("C#".into()))]);
+    }
+
+    /// 첫 머리글 앞이 빈 줄뿐이면 절이 아니다 — 제목 낱말 질의에 발췌 없는 `path:1` hit 가 하나 더 서지 않는다.
+    #[test]
+    fn a_blank_prelude_is_not_a_section() {
+        let pages = [page("a", "\n\n# Zebra notes\n\nbody\n")];
+        let r = search(&pages, "zebra", 5);
+        assert_eq!(r.hits.len(), 1, "{:?}", r.hits);
+        assert_eq!((r.hits[0].line, r.hits[0].heading.as_deref()), (3, Some("Zebra notes")));
+    }
+
+    /// `total` 은 `limit` 이 자르기 전의 수다 — 부르는 쪽이 다 받아 자르지 않아도 "몇 중 몇" 을 댄다.
+    #[test]
+    fn total_counts_the_hits_before_the_limit() {
+        let pages: Vec<Page> = ["a", "b", "c"].iter().map(|s| page(s, "# T\n\nsame words\n")).collect();
+        let r = search(&pages, "same", 1);
+        assert_eq!((r.hits.len(), r.total), (1, 3));
+        assert_eq!(search(&pages, "", 1).total, 0);
+        assert_eq!(terms("Merge-Driver merge"), ["merge", "driver"]);
+    }
+
+    /// 절 하나에만 든 낱말은 흔하지 않다 — 몫만 보면 절이 넷이 안 되는 위키에서 든 낱말이 다 흔해진다.
+    #[test]
+    fn a_word_in_one_section_is_never_common() {
+        let pages = [page("a", "# A\n\nzebra here\n")];
+        assert!(search(&pages, "zebra", 5).common.is_empty());
+        let both = [page("a", "# A\n\nzebra\n"), page("b", "# B\n\nzebra\n")];
+        assert_eq!(search(&both, "zebra", 5).common, ["zebra"], "둘 다에 든 낱말은 흔하다");
     }
 
     #[test]

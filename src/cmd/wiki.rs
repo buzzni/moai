@@ -62,11 +62,14 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
 /// 자리가 있으면 찾은 것은 다 내고 비영이다. 질의가 토큰 하나도 안 내면 사용 오류다.
 pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
     let query = words.join(" ");
-    // 위키를 읽기 전에 거절한다 — 질의가 틀린 것은 위키와 무관하다. 빈 위키로 부르면 토큰만 나온다(순수 함수).
-    if wiki::search::search(&[], &query, 1).terms.is_empty() {
+    // 위키를 읽기 전에 거절한다 — 질의가 틀린 것은 위키와 무관하다.
+    if wiki::search::terms(&query).is_empty() {
         return Err(Fail::coded(crate::view::wiki::search_usage(ctx.lang()), code::BAD_INPUT));
     }
-    let (dir, wiki) = read(ctx)?;
+    // **트래커는 안 읽는다**(리뷰 moai-g8pt.9rd) — 검색은 페이지가 댄 id 가 트래커에 있는가(`IssueRef::exists`)를
+    // 안 묻는다. `read` 로 읽던 판은 트래커의 못 읽는 줄 하나가 위키 검색을 비영으로 세우고 그 줄을 stderr 에 댔다.
+    let repo = super::open_repo(ctx)?;
+    let (dir, wiki) = read_in(&repo, &|_| true);
     let wiki = match wiki {
         Ok(w) => w,
         Err(t) => return trouble(ctx, &dir, &t, false),
@@ -77,10 +80,10 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
     if wiki.fell_short() {
         note_partial();
     }
-    // 몇 개 중 몇 개인지가 `total` 이라 자르기 전의 수를 센다 — `search` 는 순수한 채로 둔다.
-    let mut found = wiki::search::search(&wiki.pages, &query, usize::MAX);
-    let total = found.hits.len();
-    found.hits.truncate(limit.max(1)); // `-n 0` 은 하나로 본다 — 빈 답은 "맞은 절 없음" 과 같은 얼굴이다
+    // `total` 은 `search` 가 자르기 전에 센다 — 다 받아 자르면 버릴 hit 의 발췌까지 짓는다.
+    // `-n 0` 은 하나로 본다 — 빈 답은 "맞은 절 없음" 과 같은 얼굴이다.
+    let found = wiki::search::search(&wiki.pages, &query, limit.max(1));
+    let total = found.total;
     if ctx.json {
         let hits = found.hits.iter().map(HitOut::of).collect();
         return super::json_line(&Searched { dir: &dir, query: &query, terms: &found.terms, hits, total });
@@ -162,11 +165,12 @@ pub(crate) fn trouble_told(lang: Lang, dir: &str, t: &DirTrouble) -> Option<Told
 }
 
 /// `moai show <id> --json` 의 `wiki` — 두 배열은 늘 선다(비었으면 `[]`). 목록 `show [거르개] --json` 은 안 싣는다:
-/// 줄마다 위키 전부를 걷게 된다.
+/// 줄마다 위키 전부를 걷게 된다. 관련 절은 `wiki search --json` 의 hit 와 한 꼴이다 — 발췌 없이 매긴 순위
+/// ([`wiki::search::rank`])라 `snippet`·`snippet_line` 이 안 선다. 꼴을 따로 두면 두 표면의 키가 갈린다.
 #[derive(serde::Serialize)]
 pub(crate) struct AboutOut<'a> {
     named_in: Vec<NamedOut<'a>>,
-    related: Vec<RelatedOut<'a>>,
+    related: Vec<HitOut<'a>>,
 }
 
 /// 이 이슈를 댄 페이지 — `via` 는 걸린 id 다(제 id 나 에픽 id).
@@ -178,20 +182,6 @@ struct NamedOut<'a> {
     via: &'a str,
 }
 
-/// 관련 절 — `wiki search --json` 의 hit 에서 발췌를 뺀 꼴이다. `heading`·`anchor` 는 첫 머리글 앞의 절이면 없다.
-#[derive(serde::Serialize)]
-struct RelatedOut<'a> {
-    slug: &'a str,
-    path: &'a str,
-    title: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    heading: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    anchor: Option<&'a str>,
-    line: usize,
-    score: f64,
-}
-
 impl<'a> AboutOut<'a> {
     pub(crate) fn of(a: &'a wiki::about::About<'a>) -> AboutOut<'a> {
         AboutOut {
@@ -200,22 +190,7 @@ impl<'a> AboutOut<'a> {
                 .iter()
                 .map(|n| NamedOut { slug: &n.page.slug, path: &n.page.path, title: &n.page.title, via: n.via })
                 .collect(),
-            related: a
-                .related
-                .iter()
-                .map(|h| {
-                    let o = HitOut::of(h);
-                    RelatedOut {
-                        slug: o.slug,
-                        path: o.path,
-                        title: o.title,
-                        heading: o.heading,
-                        anchor: o.anchor,
-                        line: o.line,
-                        score: o.score,
-                    }
-                })
-                .collect(),
+            related: a.related.iter().map(HitOut::of).collect(),
         }
     }
 }

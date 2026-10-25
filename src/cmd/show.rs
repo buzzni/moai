@@ -960,11 +960,9 @@ fn one(
     // 체크아웃의 것을 읽고(트래커는 루트, 위키는 가지를 탄다), 무엇을 낼지는 순수 함수(`wiki::about`)가 가른다.
     // 커밋과 같은 약속이다 — `--json` 의 `wiki` 는 늘 서고, 디렉터리를 못 썼을 때만 `wiki_error` 가 붙는다. 없는
     // 디렉터리는 안 쓴 위키라 까닭이 아니다. 사람 화면은 못 읽었어도 말없이 토막을 비운다(커밋 칸과 같다).
-    let wiki_read = wants(&["wiki", "wiki_error"]).then(|| {
-        let ids: std::collections::HashSet<&str> =
-            all.iter().map(|i| i.id.as_str()).chain(live.iter().map(String::as_str)).collect();
-        super::wiki::read_in(repo, &|id: &str| ids.contains(id))
-    });
+    // 페이지가 댄 id 가 트래커에 있는가(`IssueRef::exists`)는 `wiki::about` 이 안 읽는다 — 저장소의 id 를 다 모아
+    // 건네던 판은 펼칠 때마다 버릴 모음을 지었다.
+    let wiki_read = wants(&["wiki", "wiki_error"]).then(|| super::wiki::read_in(repo, &|_| true));
     let (pages, wiki_error): (&[crate::wiki::Page], _) = match &wiki_read {
         Some((_, Ok(w))) => (&w.pages, None),
         Some((dir, Err(t))) => (&[], super::wiki::trouble_told(ctx.lang(), dir, t)),
