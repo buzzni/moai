@@ -432,9 +432,11 @@ pub fn run(ctx: &Ctx, args: AddArgs, kind_override: Option<Kind>) -> R<Vec<Strin
         let body = read_body_told(args.body.clone(), ctx, reads_stdin(from))?;
         // `--due +N` 은 여기서 날짜로 바꾼다 — 연습과 진짜가 같은 날을 낸다(락 밖, [`super::due_arg`]). **빈 값은 없는
         // 것이다**(리뷰) — 쓰기는 빈 기한을 지우므로(`Issue::normalize`) 여기서 안 걸러 두면 연습만 `@ ` 를 그린다.
-        let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &model::now())).filter(|d| !d.trim().is_empty());
-        let start =
-            args.start.as_deref().map(|d| super::due_arg(ctx, d, &model::now())).filter(|d| !d.trim().is_empty());
+        // **오늘은 한 번만 읽는다**(리뷰) — `--start +0 --due +0` 을 두 번 읽은 시계로 풀면, 그 사이에 자정이 지나는
+        // 판에 시작이 기한보다 하루 뒤로 서서 계획째 물린다. 하나짜리(`at`)와 `edit` 이 이미 그렇게 읽는다.
+        let today = model::now();
+        let day = |v: Option<&str>| v.map(|d| super::due_arg(ctx, d, &today)).filter(|d| !d.trim().is_empty());
+        let (due, start) = (day(args.due.as_deref()), day(args.start.as_deref()));
         return bulk(
             ctx,
             &repo,
@@ -765,13 +767,18 @@ impl<'a> Rooted<'a> {
     where
         'a: 'd,
     {
-        if d.start.is_some() || d.due.is_some() {
-            return (d.start.as_deref(), d.due.as_deref());
-        }
-        match d.epic.is_none() && into.is_none() {
+        match Self::takes_root(d, into) {
             true => (self.start, self.due),
-            false => (None, None),
+            false => (d.start.as_deref(), d.due.as_deref()),
         }
+    }
+
+    /// 그 초안이 **뿌리의 날**(`--start`·`--due`·데려간 날)을 받는가 — 뿌리이고 제 `@` 가 하나도 없는 줄이다.
+    /// [`Rooted::dates_for`] 와 "어느 에픽에도 안 섰다" 는 말([`dates_nowhere`])이 이 한 자로 가른다(리뷰) — 둘이
+    /// 저마다 적던 판은 줄의 `@` 를 한 덩이로 보는 규칙을 한쪽만 고치는 날, 선 날을 "안 섰다" 고 하거나 버려진 깃발에
+    /// 말이 없었다.
+    fn takes_root(d: &Draft, into: Option<&str>) -> bool {
+        d.start.is_none() && d.due.is_none() && d.epic.is_none() && into.is_none()
     }
 }
 
@@ -919,8 +926,9 @@ fn dates_line(drafts: &[Draft], due: Option<&str>, start: Option<&str>, lang: cr
 /// [`dates_line`] 의 글 — `--json` 은 사람 줄을 안 내므로 stderr 로 댄다(`say_no_such_milestone` 와 같은 자리, 리뷰).
 /// 기계가 받는 길에서만 말없이 버리면 그 깃발은 에이전트에게서 조용히 사라진다.
 fn dates_nowhere(drafts: &[Draft], due: Option<&str>, start: Option<&str>, lang: crate::i18n::Lang) -> Vec<String> {
-    // 뿌리 가운데 제 `@` 가 없는 줄이 하나라도 있어야 선다 — 둘이 같은 자리에 서므로 한 번만 잰다.
-    let lands = drafts.iter().any(|d| d.epic.is_none() && d.due.is_none() && d.start.is_none());
+    // 뿌리 가운데 제 `@` 가 없는 줄이 하나라도 있어야 선다 — 둘이 같은 자리에 서므로 한 번만 잰다. 이 길(`add --from`)은
+    // 펼칠 에픽(`into`)이 없다.
+    let lands = drafts.iter().any(|d| Rooted::takes_root(d, None));
     if lands {
         return Vec::new();
     }
@@ -1032,8 +1040,8 @@ pub fn check_plan_rows(
     for i in &made {
         i.validate_keeping(cfg, false).map_err(|why| Fail::new(crate::view::invalid(lang, &at(i), &why)))?;
     }
-    let measured: Vec<&str> =
-        made.iter().filter(|i| i.due_on.is_some() || i.starts_on.is_some()).map(|i| i.id.as_str()).collect();
+    // 잴 줄은 진짜(`store::write_locked`)와 같은 자로 고른다([`crate::model::Issue::plan_days`]).
+    let measured: Vec<&str> = made.iter().filter(|i| i.plan_days().next().is_some()).map(|i| i.id.as_str()).collect();
     if let Some((i, c)) = crate::report::first_beyond(&rows, &measured) {
         let why = c.refusal(i, made.iter().any(|m| m.id == c.above.id));
         return Err(Fail::new(crate::view::invalid(lang, &at(i), &why)));
@@ -1111,20 +1119,23 @@ pub fn json_rehearsal(
         dry_run: true,
         drafts: drafts
             .iter()
-            .map(|d| DraftOut {
-                kind: d.kind.as_str(),
-                title: &d.title,
-                // **적어 온 것은 그대로 낸다.** 마크다운은 `# [p1] 제목` 도
-                // 받고 `create_drafts` 는 그것을 에픽에도 그대로 쓰므로,
-                // 종류로 잘라 내면 연습이 진짜보다 적게 말한다 — 연습을 진짜와
-                // 견주는 쪽이 안 적힌 값을 기본값으로 읽는다.
-                // 안 적혔을 때만 종류를 본다: 우선순위가 없는 종류에 기본값을
-                // 씌우면 에픽이 `p2` 인 줄 안다.
-                priority: d.priority.or_else(|| (d.kind == Kind::Issue).then_some(model::DEFAULT_PRIORITY)),
-                tags: &d.tags,
-                epic: d.epic,
-                due_on: rooted.dates_for(d, into).1,
-                starts_on: rooted.dates_for(d, into).0,
+            .map(|d| {
+                let (starts_on, due_on) = rooted.dates_for(d, into);
+                DraftOut {
+                    kind: d.kind.as_str(),
+                    title: &d.title,
+                    // **적어 온 것은 그대로 낸다.** 마크다운은 `# [p1] 제목` 도
+                    // 받고 `create_drafts` 는 그것을 에픽에도 그대로 쓰므로,
+                    // 종류로 잘라 내면 연습이 진짜보다 적게 말한다 — 연습을 진짜와
+                    // 견주는 쪽이 안 적힌 값을 기본값으로 읽는다.
+                    // 안 적혔을 때만 종류를 본다: 우선순위가 없는 종류에 기본값을
+                    // 씌우면 에픽이 `p2` 인 줄 안다.
+                    priority: d.priority.or_else(|| (d.kind == Kind::Issue).then_some(model::DEFAULT_PRIORITY)),
+                    tags: &d.tags,
+                    epic: d.epic,
+                    due_on,
+                    starts_on,
+                }
             })
             .collect(),
         promoted,

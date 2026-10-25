@@ -856,8 +856,9 @@ fn plan(ctx: &Ctx, all: &[Issue], epic: &Issue, raw: bool) -> R<Vec<String>> {
         return super::json_line(&serde_json::json!({ "id": epic.id, "plan": md, "lossy": lossy }));
     }
     for id in &lossy {
-        // 앞머리 `[`·끝의 `#낱말` 은 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
-        // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것뿐이라 까닭을 하나로 단정하지 않는다.
+        // 앞머리 `[`·끝의 `#낱말`·`@날짜` 는 render 가 이스케이프한다(moai-a5pz). 여기 오는 것은 원래
+        // 역슬래시를 든 제목처럼 이스케이프로도 못 담는 것과, 꼴이 틀리거나 에픽의 기한을 넘는 기한·시작(`draft::lossy`)
+        // 이라 까닭을 하나로 단정하지 않는다.
         eprintln!("moai: {}", crate::i18n::fill(crate::i18n::say(ctx.lang(), "show.lossy_title"), &[("id", id)]));
     }
     Ok(md.lines().map(str::to_string).collect())

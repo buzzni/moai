@@ -211,7 +211,8 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 i.priority = Some(p);
             }
             // 기한 둘(moai-tfcp). **`none` 은 비우는 것이다** — 소속·담당과 같은 낱말을 쓴다.
-            // 꼴과 종류와 앞뒤 차례는 아래 `validate_keeping` 이 한자리에서 거절한다.
+            // 꼴과 앞뒤 차례는 아래 `validate_keeping` 이 한자리에서 거절한다. 두 날은 이제 모든 종류의 줄에 서고
+            // (moai-xf0p.6d5), 조상의 기한을 넘는 시작·기한은 쓰기(`store::write_locked`)가 거절한다(moai-xf0p.cbu).
             if let Some(d) = &start {
                 i.starts_on = super::clearable(d);
             }

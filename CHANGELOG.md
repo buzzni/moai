@@ -19,21 +19,25 @@ does not tag — see `CONTRIBUTING.md`.
   means N days from today in your time zone (stored as the date). A start after
   the row's own deadline is refused, and so is a start later than the deadline of
   the milestone, epic or parent above it — the message names that ancestor and the
-  latest day it can take. A start earlier than the parent's start is never
-  refused. Only the row being written is checked: pulling an ancestor's deadline
-  in below a child's start never blocks, it prints one line naming the rows it
-  pushed past, and `moai status` counts them in `due_beyond_parent` (its text now
-  says "deadlines or starts"). The detail shows `start → deadline`, and
+  latest day it can take; when the start and the deadline both pass it, the
+  message names both flags so one write fixes them. A start earlier than the
+  parent's start is never refused. Only the row being written is checked: pulling
+  an ancestor's deadline in below a child's start never blocks, it prints one line
+  naming the rows it pushed past, and `moai status` counts them in
+  `due_beyond_parent` (its text now says "deadlines or starts"). The CLI and
+  explorer detail show `start → deadline` (the web detail does not yet), and
   `--filter starts_on=2026-10-01~2026-10-05` keeps rows by their own start.
   (moai-xf0p.6d5, moai-xf0p.cbu)
 - **A plan line can end in `@start~deadline`.** `@2026-10-25~2026-10-30` is a
   start and a deadline, `@2026-10-25~` a start alone, and `@2026-10-30` stays a
   deadline as before; epic lines and issue lines both take them, and a start after
-  its deadline stops the plan with the line number. `add --from --start` puts the
-  start on each epic the plan creates that has no `@` of its own — a line that
-  writes any `@` keeps both flags off it. `backlog promote` carries the backlog
-  item's start onto the epic as it does its deadline, and `--dry-run` and
-  `show --as-plan` print the same range. (moai-xf0p.due)
+  its deadline stops the plan with the line number — so does `@~2026-10-30`, a
+  range with no start, instead of staying in the title (`\@~` keeps it as text).
+  `add --from --start` puts the start on each epic the plan creates that has no
+  `@` of its own — a line that writes any `@` keeps both flags off it.
+  `backlog promote` carries the backlog item's start onto the epic as it does its
+  deadline, and `--dry-run` and `show --as-plan` print the same range.
+  (moai-xf0p.due)
 
 ### Changed
 

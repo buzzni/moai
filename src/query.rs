@@ -954,15 +954,11 @@ impl Filter {
         let within = |spans: &[Vec<Span>], at: Option<i64>| spans_hold(spans, at, wh.zone);
         // 기한은 **줄 자신의 그 필드**를 날로 견준다(moai-ghkp.7uy) — 없으면 어느 폭에도 안 든다. 꼴이 틀린 값도
         // 없는 것이다([`Issue::deadline`]) — `*_at=` 이 못 읽는 시각을 어느 폭에도 안 넣는 것과 같은 결이다.
-        if !self.due.is_empty()
-            && !i.deadline().is_some_and(|d| self.due.iter().all(|any| any.iter().any(|s| s.holds(d))))
-        {
+        // 계획 시작일도 같은 자로 견준다(moai-xf0p.6d5) — `Issue::deadline` 이 기한에 하는 일을 `planned_start` 가 한다.
+        if !self.due.is_empty() && !days_hold(&self.due, i.deadline()) {
             return false;
         }
-        // 계획 시작일도 같은 자로 견준다(moai-xf0p.6d5) — `Issue::deadline` 이 기한에 하는 일을 `planned_start` 가 한다.
-        if !self.starts.is_empty()
-            && !i.planned_start().is_some_and(|d| self.starts.iter().all(|any| any.iter().any(|s| s.holds(d))))
-        {
+        if !self.starts.is_empty() && !days_hold(&self.starts, i.planned_start()) {
             return false;
         }
         if !self.updated.is_empty() && !within(&self.updated, parse_rfc3339(&i.updated_at)) {
@@ -1136,6 +1132,13 @@ fn spans_hold(spans: &[Vec<Span>], at: Option<i64>, zone: Option<&crate::tz::Zon
     // 벽시계는 **줄마다 한 번** 옮긴다(리뷰 moai-efoc.ln9) — 폭마다 옮기면 같은 값을 폭 수만큼 다시 잰다.
     let wall = zone.map_or(t, |z| z.local(t));
     spans.iter().all(|any| any.iter().any(|s| s.holds(t, wall)))
+}
+
+/// 달력의 날 `day` 가 날 폭 묶음에 드는가 — [`spans_hold`] 의 날 짝이다(`due_on=`·`starts_on=`, 리뷰). 바깥이 그리고,
+/// 안쪽이 또는이다. **날이 없으면(꼴이 틀린 값 포함) 어느 폭에도 안 든다** — 부르는 쪽이 빈 묶음을 미리 거르므로 여기
+/// 오는 묶음은 비지 않았다. 두 키가 같은 꼴·같은 규칙이라 한 자로 잰다 — 손으로 둘 적으면 한쪽만 고치는 날이 온다.
+fn days_hold(spans: &[Vec<DaySpan>], day: Option<&str>) -> bool {
+    day.is_some_and(|d| spans.iter().all(|any| any.iter().any(|s| s.holds(d))))
 }
 
 /// 지운 이슈의 저널 줄 가운데 `--since` 의 폭에 든 것 — 받은 차례 그대로(moai-7dmq, `moai show --removed`).

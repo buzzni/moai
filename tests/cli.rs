@@ -10602,6 +10602,14 @@ fn a_start_cannot_pass_the_deadline_of_its_ancestors() {
     let out = moai(s.path(), &["add", "자식", "--parent", &par, "--start", "2026-09-25"]);
     assert!(!out.status.success(), "부모 기한 뒤의 시작을 받았다");
 
+    // **시작과 기한이 둘 다 넘치면 거절문이 둘 다 댄다**(리뷰) — 기한만 대면 그 말대로 `--due` 를 당긴 쓰기가 "시작이
+    // 기한보다 뒤" 로 또 물린다. 댄 대로 한 번에 주면 받는다.
+    let out = moai(s.path(), &["add", "둘 다 늦게", "-e", &e, "--start", "2026-09-27", "--due", "2026-09-28"]);
+    assert!(!out.status.success(), "에픽 기한 뒤의 시작·기한을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains("--start 2026-09-25 --due 2026-09-25"), "두 날을 함께 고칠 말을 안 댄다 — {said}");
+    add(s.path(), &["둘 다 늦게", "-e", &e, "--start", "2026-09-25", "--due", "2026-09-25"]);
+
     // **부모의 시작보다 이른 시작은 막지 않는다** — 간트에서 눈에 보일 뿐이다.
     add(s.path(), &["일찍 시작", "-e", &e, "--start", "2026-09-01"]);
 
@@ -10638,6 +10646,10 @@ fn pulling_a_parent_deadline_in_warns_about_a_child_start() {
     // 시작을 당기면 풀린다. 닫으면 안 센다.
     ok(s.path(), &["edit", &i, "--start", "2026-09-19"]);
     assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "당긴 줄을 셌다");
+    ok(s.path(), &["edit", &m, "--due", "2026-09-18"]);
+    assert!(ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "다시 넘친 시작을 안 셌다");
+    ok(s.path(), &["mv", &i, "done"]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "닫은 줄을 셌다");
 }
 
 /// **기한으로 줄 세우고 거른다**(moai-ghkp.7uy) — `--sort due` 는 이른 것이 먼저고 기한 없는 줄이 뒤다.
@@ -23611,14 +23623,16 @@ fn a_row_neither_side_touched_does_not_block_the_merge() {
     let old = add(root, &["손으로 푼 충돌이 남긴 줄"]);
     let one = add(root, &["이쪽이 고칠 줄"]);
     let two = add(root, &["저쪽이 고칠 줄"]);
-    // **도구로는 못 적는 값이다** — `--start` 는 마일스톤 줄에만 선다. 손으로 끼운다.
+    // **도구로는 못 적는 값이다** — 날짜는 `YYYY-MM-DD` 꼴이어야 한다(`validate_fields`). 손으로 끼운다.
+    // 한때는 이슈의 `starts_on` 자체가 낡은 값이었지만 이제 모든 줄에 선다(moai-xf0p.6d5) — 바른 꼴의 날짜를 심으면
+    // 이 줄은 오늘 규칙도 지나, 드라이버가 검사를 건너뛰든 말든 초록이 된다.
     //
     // 닫는 괄호가 아니라 id 뒤에 끼운다. 끝에 붙이면 그 자리가 곧 `Issue` 의 표준 차례라
     // 심은 줄이 표준형이 되고, [`line_of`] 는 `{"id":…` 로 찾으므로 머리는 그대로 둔다.
     //
     // **가지마다 되심는다.** `moai` 쓰기는 파일 전체를 표준형으로 되쓰므로, 한 번만 심으면
     // 그 다음 `edit` 한 줄에 차례가 사라져 셋 다 표준형인 채로 머지에 들어간다.
-    let due = "\"starts_on\":\"2026-09-05\"";
+    let due = "\"starts_on\":\"2026-9-5\"";
     let plant = || {
         let was = line_of(root, &old);
         let head = format!("\"id\":\"{old}\",");

@@ -1208,7 +1208,9 @@ impl Repo {
             //
             // 마일스톤 줄은 조상이 없으니 안 잰다([`crate::report::DueLadder`]) — 기한을 드는 쓰기가 가장 흔한 줄이라,
             // 재면 락을 쥔 채 지도를 짓고 늘 `None` 을 받는다.
-            let measured = (i.due_on.is_some() || i.starts_on.is_some())
+            // 잴 날은 [`crate::model::Issue::plan_days`] 하나가 댄다 — 꼴이 틀린 날은 아래 `validate_keeping` 이 이 줄을
+            // 먼저 거절하므로 여기서 빠져도 받는 쓰기가 없다.
+            let measured = i.plan_days().next().is_some()
                 && i.kind != crate::model::Kind::Milestone
                 && match was {
                     Some(o) => {

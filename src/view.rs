@@ -3285,6 +3285,16 @@ pub fn invalid(lang: Lang, at: &crate::store::At, why: &crate::model::Invalid) -
     invalid_at(lang, &at, why)
 }
 
+/// 천장이 된 조상을 가리키는 말 — 위계 거절 셋(기한·시작·둘 다)이 한 자로 짓는다. **이번 쓰기가 짓는 조상은 제목으로**
+/// 가리킨다 — 거절당한 줄 자신을 가리키는 말(`invalid.unwritten`)과 같은 자다(moai-1rkl, 리뷰). 그 id 는 거절 뒤에
+/// 어디에도 안 남는다. 갈래마다 적던 판은 이 규칙을 고치는 날 한 거절만 옛 말로 남을 길이 열려 있었다.
+fn beyond_whom(lang: Lang, above: &str, above_new: bool) -> String {
+    match above_new {
+        true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
+        false => above.to_string(),
+    }
+}
+
 /// [`invalid`] 의 속 — 가리키는 말이 이미 지어졌을 때.
 fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
     use crate::model::{Field, Invalid};
@@ -3318,21 +3328,19 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
             fill(say(lang, "invalid.date"), &[("id", id), ("field", field(f)), ("value", value)])
         }
         Invalid::DueBeyond { due, above, above_new, above_due } => {
-            // 이번 쓰기가 짓는 조상은 제목으로 가리킨다 — 거절당한 줄 자신을 가리키는 말(`invalid.unwritten`)과
-            // 같은 자다(moai-1rkl, 리뷰). 그 id 는 거절 뒤에 어디에도 안 남는다.
-            let above = match above_new {
-                true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
-                false => above.clone(),
-            };
+            let above = beyond_whom(lang, above, *above_new);
             fill(say(lang, "invalid.due_beyond"), &[("due", due), ("above", &above), ("above_due", above_due)])
         }
         Invalid::StartBeyond { start, above, above_new, above_due } => {
-            // `DueBeyond` 와 같은 까닭으로 같은 자다 — 이번 쓰기가 짓는 조상은 제목으로 가리킨다.
-            let above = match above_new {
-                true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
-                false => above.clone(),
-            };
+            let above = beyond_whom(lang, above, *above_new);
             fill(say(lang, "invalid.start_beyond"), &[("start", start), ("above", &above), ("above_due", above_due)])
+        }
+        Invalid::DatesBeyond { start, due, above, above_new, above_due } => {
+            let above = beyond_whom(lang, above, *above_new);
+            fill(
+                say(lang, "invalid.dates_beyond"),
+                &[("start", start), ("due", due), ("above", &above), ("above_due", above_due)],
+            )
         }
         Invalid::DateOrder { starts_on, due_on } => {
             fill(say(lang, "invalid.date_order"), &[("starts_on", starts_on), ("due_on", due_on)])

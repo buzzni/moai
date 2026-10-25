@@ -63,10 +63,11 @@ file says, so read membership from the `derived_` keys. A closed row is in no
 plan, so it carries no `shelved_by` even when it was deferred — `--deferred`
 picks it by its own `deferred_at`. A row is deferred when it carries either.
 
-`starts_on` is the row's own planned start, on any kind of row, and follows the same rule. `due_on` is the row's own deadline and nothing else — no key carries the deadline
+`due_on` is the row's own deadline and nothing else — no key carries the deadline
 inherited from its epic or milestone, because a deadline is not stored on the rows
 below: the one above bounds them, and `moai due apply` raises them by the earliest that
-applies. Read the ancestors' `due_on` to find it. `moai due apply --json` names it in
+applies. Read the ancestors' `due_on` to find it. `starts_on` is the row's own planned
+start, on any kind of row, under the same rule — nothing inherited is written down. `moai due apply --json` names it in
 each raised row's `due_on`, with `due_from` naming the ancestor when it is not the row's
 own; on `moai status --json` the `due_priority_behind` notice carries it per id in
 `deadlines`, beside the days left in `ages`.

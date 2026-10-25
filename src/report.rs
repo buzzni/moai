@@ -3177,25 +3177,27 @@ impl Ceiling<'_> {
     /// 한 꼴로 짓는다. `new` 는 그 조상이 **이번 쓰기가 짓는 줄**인가다 — 거절은 쓰기를 통째로 물리므로 방금 뽑은
     /// 그 id 는 어디에도 안 남는다(moai-1rkl, 리뷰). 그 id 를 대면 "먼저 옮기라" 는 말을 따라 친 쪽이 없는 줄을 본다.
     ///
-    /// **무엇이 넘쳤는지는 줄에서 읽는다**(moai-xf0p.cbu) — 기한이 먼저다. 기한이 천장 안이면 넘친 것은 시작이다.
-    /// 둘 다 안 넘친 줄에 불러도(부르는 쪽이 [`first_beyond`] 가 낸 줄만 넘기므로 안 생긴다) 시작의 거절을 낸다.
+    /// **무엇이 넘쳤는지는 줄에서 읽는다**(moai-xf0p.cbu) — 둘 다 넘쳤으면 둘 다 댄다(리뷰): 기한만 대던 판은 그 말대로
+    /// `--due` 를 당긴 쓰기가 "시작이 기한보다 뒤" 로 또 물렸고, 계획의 줄을 `@기한` 으로 고치면 시작이 말없이 사라졌다.
+    /// 기한만 넘쳤으면 기한을, 아니면 시작을 댄다. 둘 다 안 넘친 줄에 불러도(부르는 쪽이 [`first_beyond`] 가 낸 줄만
+    /// 넘기므로 안 생긴다) 시작의 거절을 낸다.
     pub fn refusal(&self, i: &Issue, new: bool) -> crate::model::Invalid {
         let above = match new {
             true => crate::model::fit_title(&self.above.title),
             false => self.above.id.clone(),
         };
-        match i.deadline().filter(|d| *d > self.due) {
-            Some(due) => crate::model::Invalid::DueBeyond {
-                due: due.to_string(),
+        let above_due = self.due.to_string();
+        let over = |d: Option<&str>| d.filter(|d| *d > self.due).map(str::to_string);
+        match (over(i.planned_start()), over(i.deadline())) {
+            (Some(start), Some(due)) => {
+                crate::model::Invalid::DatesBeyond { start, due, above, above_new: new, above_due }
+            }
+            (None, Some(due)) => crate::model::Invalid::DueBeyond { due, above, above_new: new, above_due },
+            (start, None) => crate::model::Invalid::StartBeyond {
+                start: start.unwrap_or_default(),
                 above,
                 above_new: new,
-                above_due: self.due.to_string(),
-            },
-            None => crate::model::Invalid::StartBeyond {
-                start: i.planned_start().unwrap_or_default().to_string(),
-                above,
-                above_new: new,
-                above_due: self.due.to_string(),
+                above_due,
             },
         }
     }
@@ -3302,9 +3304,9 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         self.ceiling(i).filter(|c| Self::passes(i, c.due))
     }
 
-    /// 줄의 두 날(기한·시작) 가운데 하나라도 `ceiling` 보다 늦은가.
+    /// 줄의 잴 날([`Issue::plan_days`] — 기한·시작) 가운데 하나라도 `ceiling` 보다 늦은가.
     fn passes(i: &Issue, ceiling: &str) -> bool {
-        [i.deadline(), i.planned_start()].into_iter().flatten().any(|d| d > ceiling)
+        i.plan_days().any(|d| d > ceiling)
     }
 
     /// **따를 기한**의 조상 몫(moai-dr8a.7rs) — [`DueLadder::ceiling`] 에서 **닫힌 부모를 뺀다**(리뷰). 닫힌 이슈·생각의
@@ -3375,9 +3377,14 @@ pub fn first_beyond<'a>(all: &'a [Issue], ids: &[&str]) -> Option<(&'a Issue, Ce
 /// 닫힌 줄은 안 센다 — `status` 의 `due_beyond_parent` 와 같은 까닭이다. 묶음 줄의 칸은 멤버에서
 /// 읽으므로 여기서는 묶음을 닫혔다고 치지 않는다.
 pub fn due_overflow_of<'a>(all: &'a [Issue], id: &str) -> Vec<&'a Issue> {
-    // 넘칠 줄은 기한이나 계획 시작일을 든 줄이다(moai-xf0p.cbu) — 시작만 든 줄도 조상의 기한을 넘는다.
-    let measured = |i: &Issue| i.due_on.is_some() || i.starts_on.is_some();
-    if !all.iter().any(|i| measured(i) && i.id != id) {
+    // 넘칠 줄은 잴 날(기한·계획 시작일, [`Issue::plan_days`])을 든 줄이다(moai-xf0p.cbu) — 시작만 든 줄도 조상의 기한을
+    // 넘는다. **넘칠 짝이 없으면 지도를 안 짓는다**(리뷰) — 쓰기가 락을 쥔 채 부르는 자리다. 넘칠 줄은 마일스톤이 아니고
+    // (조상이 없다, [`DueLadder`]) 천장이 되려면 기한이 하나는 서야 한다 — 시작만 든 마일스톤이나 기한 없는 저장소에서
+    // 지도를 지으면 늘 빈 답을 받는다.
+    let measured = |i: &Issue| i.plan_days().next().is_some();
+    if !all.iter().any(|i| measured(i) && i.kind != Kind::Milestone && i.id != id)
+        || !all.iter().any(|i| i.deadline().is_some())
+    {
         return Vec::new();
     }
     let lines = Lines::of(all);
@@ -6205,9 +6212,7 @@ fn status_in_scope<'a, 'c>(
         Some(ladder) => issues
             .iter()
             .enumerate()
-            .filter(|(k, i)| {
-                (i.due_on.is_some() || i.starts_on.is_some()) && visible(i) && off[*k].is_none() && !eclipsed(i)
-            })
+            .filter(|(k, i)| i.plan_days().next().is_some() && visible(i) && off[*k].is_none() && !eclipsed(i))
             .map(|(_, i)| i)
             .filter(|i| column(i, &states) != crate::config::DONE)
             .filter(|i| ladder.beyond_row(i).is_some())

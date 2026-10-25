@@ -16,8 +16,8 @@
 //!
 //! **날짜는 줄 끝의 `@` 하나다**(moai-ghkp.u1w) — 태그와 섞여 끝쪽에 선다. 꼴은 셋이다(moai-xf0p.due):
 //! `@2026-10-30` 은 기한, `@2026-10-25~2026-10-30` 은 시작~기한, `@2026-10-25~` 은 시작만. `@` 뒤가
-//! 숫자일 때만 날짜로 읽는다: `@raven` 같은 끝 낱말은 제목이다. 꼴이 틀리거나 시작이 기한보다 뒤면 줄 번호와
-//! 거절한다.
+//! 숫자(또는 `~` 와 숫자)일 때만 날짜로 읽는다: `@raven` 같은 끝 낱말은 제목이다. 꼴이 틀리거나 시작이 기한보다 뒤면
+//! 줄 번호와 거절한다 — 시작 자리를 비운 `@~2026-10-30` 도 받지 않고 거절한다(제목에 말없이 남기지 않는다).
 //!
 //! **이스케이프는 네 자리뿐이다** — 앞머리 `\[` 와 끝쪽에 이어진 `\#낱말`(moai-a5pz)·`\@숫자…`(moai-ghkp.u1w),
 //! 그리고 템플릿 변수로 안 읽힐 글자 `\{{`(moai-xqxu). `{{` 바로 앞의 역슬래시는 쌍으로 센다 — `\\{{이름}}` 은 글자
@@ -56,9 +56,15 @@ pub fn at_form(start: Option<&str>, due: Option<&str>) -> Option<String> {
     }
 }
 
-/// 끝 낱말이 기한 자리인가 — `@` 뒤가 숫자다. 읽는 자와 되뽑는 자가 이 하나로 가른다.
+/// 끝 낱말이 날짜 자리인가 — `@` 뒤가 숫자다. 읽는 자와 되뽑는 자가 이 하나로 가른다.
+///
+/// **`@~숫자…` 도 날짜 자리다**(moai-xf0p.due 리뷰) — 시작 자리를 비운 꼴은 받지 않지만, 날짜 자리로 안 보면 그
+/// 낱말이 말없이 제목에 남아 기한만 적으려던 줄이 기한 없이 만들어진다(종료 0). 날짜 자리로 보면 [`split_parts`] 가
+/// 빈 시작을 꼴 틀림으로 줄 번호와 거절하고, 그 글자를 제목으로 쓰려면 다른 날짜 낱말처럼 `\@~…` 로 적는다.
 fn is_due_word(w: &str) -> bool {
-    w.strip_prefix('@').is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit()))
+    w.strip_prefix('@')
+        .map(|d| d.strip_prefix('~').unwrap_or(d))
+        .is_some_and(|d| d.starts_with(|c: char| c.is_ascii_digit()))
 }
 
 /// 떼어 낸 한 줄 — 제목·우선순위·태그·기한·시작.
@@ -472,10 +478,9 @@ pub fn lossy<'a>(epic: &'a Issue, members: &[&'a Issue]) -> Vec<&'a str> {
             let read = fill_as(&format!("# {}\n", body(i)), &[], Shape::Plan, Lang::default())
                 .ok()
                 .and_then(|d| d.into_iter().next());
-            let over = !std::ptr::eq(*i, epic)
-                && epic
-                    .deadline()
-                    .is_some_and(|above| [i.deadline(), i.planned_start()].into_iter().flatten().any(|d| d > above));
+            // 잴 날은 쓰기의 위계가 재는 그 날이다([`crate::model::Issue::plan_days`]) — 따로 적으면 쓰기의 규칙이 바뀌는 날
+            // 이 틀만 옛 규칙으로 남아, 도로 못 넣는 계획을 "넣을 수 있다" 고 낸다.
+            let over = !std::ptr::eq(*i, epic) && epic.deadline().is_some_and(|above| i.plan_days().any(|d| d > above));
             over || read.map(|d| (d.title, d.priority, d.tags, d.due, d.start))
                 != Some((
                     crate::text::one_line(&i.title),
@@ -538,7 +543,7 @@ mod tests {
     #[test]
     fn a_trailing_at_range_is_the_start_and_the_deadline() {
         let d = one(
-            "# 에픽 @2026-10-25~2026-10-30\n- [p1] 둘 #bug @2026-10-26~2026-10-28 #parser\n- 시작만 @2026-10-27~\n- 기한만 @2026-10-29\n- 없음\n- 글자 \\@2026-10-25~\n",
+            "# 에픽 @2026-10-25~2026-10-30\n- [p1] 둘 #bug @2026-10-26~2026-10-28 #parser\n- 시작만 @2026-10-27~\n- 기한만 @2026-10-29\n- 없음\n- 글자 \\@2026-10-25~\n- 빈 시작 \\@~2026-10-30\n",
         );
         let at = |k: usize| (d[k].start.as_deref(), d[k].due.as_deref());
         assert_eq!(at(0), (Some("2026-10-25"), Some("2026-10-30")));
@@ -548,9 +553,13 @@ mod tests {
         assert_eq!(at(3), (None, Some("2026-10-29")));
         assert_eq!(at(4), (None, None));
         assert_eq!((d[5].title.as_str(), at(5)), ("글자 @2026-10-25~", (None, None)));
+        assert_eq!((d[6].title.as_str(), at(6)), ("빈 시작 @~2026-10-30", (None, None)));
 
-        // 틀린 꼴은 줄 번호와 거절한다 — 날짜 오타, 빈 기한 자리 아닌 `~`, 시작 > 기한, 둘째 `@`.
+        // 틀린 꼴은 줄 번호와 거절한다 — 날짜 오타, 빈 기한 자리 아닌 `~`, 시작 > 기한, 둘째 `@`, 그리고 시작 자리를
+        // 비운 `@~기한`(리뷰) — 그 꼴이 말없이 제목에 남으면 기한만 적으려던 줄이 기한 없이 만들어진다.
         for (src, line) in [
+            ("# 에픽\n- 이슈 @~2026-10-30\n", "2줄"),
+            ("# 에픽 @~2026-10-30\n- 이슈\n", "1줄"),
             ("# 에픽\n- 이슈 @2026-10-25~2026-02-30\n", "2줄"),
             ("# 에픽\n- 이슈 @2026-10-25~2026-10-30~2026-11-01\n", "2줄"),
             ("# 에픽\n- 이슈 @2026-10-30~2026-10-25\n", "2줄"),
@@ -577,6 +586,13 @@ mod tests {
         // 에픽의 기한 뒤에서 시작하는 멤버는 틀에 담지 못한다.
         a.starts_on = Some("2026-11-02".into());
         assert_eq!(lossy(&epic, &[&a]), vec![a.id.as_str()]);
+
+        // 제목 끝의 `@~숫자…` 는 날짜 자리라 되뽑을 때 `\` 를 앞에 두고, 도로 읽으면 제목으로 돌아온다.
+        let tail = issue("빈 시작 @~2026-10-30", Kind::Issue, None, &[]);
+        let md = render(&epic, &[&tail]);
+        assert!(md.ends_with("- 빈 시작 \\@~2026-10-30\n"), "{md}");
+        assert_eq!(parse(&md).unwrap()[1].title, "빈 시작 @~2026-10-30");
+        assert!(lossy(&epic, &[&tail]).is_empty(), "되뽑은 제목이 도로 안 들어간다");
     }
 
     /// **되뽑은 것은 도로 들어가야 한다.** 이 짝이 어긋나면 `--as-plan` 은

@@ -420,6 +420,17 @@ impl Issue {
         self.starts_on.as_deref().filter(|d| parse_date(d).is_some())
     }
 
+    /// **조상의 기한을 넘으면 안 되는 이 줄의 날** — 꼴이 맞는 기한과 계획 시작일(moai-ghkp.33i, 시작은 moai-xf0p.cbu).
+    ///
+    /// 위계를 재는 자리가 다 이것으로 묻는다(리뷰) — 쓰기가 잴 줄을 고르는 문(`store::write_locked`)과 그 연습
+    /// (`cmd::add::check_plan_rows`), 넘쳤는가(`report::DueLadder`), 당긴 조상 밑의 넘친 줄(`report::due_overflow_of`)과
+    /// 보드의 `due_beyond_parent`, 되뽑기가 도로 못 넣는 줄(`draft::lossy`). 자리마다 `due_on` 을 적던 판은 시작일을 더할
+    /// 때 그 넷을 같이 고쳐야 했고, 하나라도 빠지면 그 자리만 시작일을 못 본다. **천장은 여기가 아니다** — 조상이 대는
+    /// 것은 기한뿐이다([`Issue::deadline`]).
+    pub fn plan_days(&self) -> impl Iterator<Item = &str> {
+        [self.deadline(), self.planned_start()].into_iter().flatten()
+    }
+
     /// 계획에서의 자리가 마지막으로 바뀐 때 — 칸을 옮긴 때(`status_since`)와 미루거나 도로
     /// 집은 때(`planned_at`) 중 늦은 것. 시각은 RFC3339 UTC 고정폭이라 문자열로 견준다.
     pub fn planned(&self) -> &str {
@@ -684,6 +695,16 @@ pub enum Invalid {
     /// 이번 쓰기가 짓는 줄이면 그 제목이다.
     StartBeyond {
         start: String,
+        above: String,
+        above_new: bool,
+        above_due: String,
+    },
+    /// 시작과 기한이 **둘 다** 조상의 기한보다 늦다(moai-xf0p.cbu 리뷰) — 한쪽만 대면 그 말대로 기한을 당긴 쓰기가 "시작이
+    /// 기한보다 뒤"([`Invalid::DateOrder`])로 또 물리고, 계획의 줄이면 `@기한` 으로 고쳐 쓴 줄이 시작을 말없이 잃는다.
+    /// 자료의 뜻은 [`Invalid::DueBeyond`] 와 같다.
+    DatesBeyond {
+        start: String,
+        due: String,
         above: String,
         above_new: bool,
         above_due: String,
