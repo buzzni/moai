@@ -2658,13 +2658,14 @@ mod tests {
         assert!(clashes.is_empty(), "{clashes:?}");
     }
 
-    /// 오늘 규칙이 거절하는 값을 든 줄. **시작 기한은 마일스톤 줄에만 선다**(`validate_fields`)
-    /// — 손으로 푼 충돌이 남겼거나, 뒷날 기한을 넓힌 바이너리가 쓴 줄이 이 꼴로 온다.
+    /// 오늘 규칙이 거절하는 값을 든 줄. **날짜는 `YYYY-MM-DD` 꼴이어야 한다**(`validate_fields`) — 손으로 푼
+    /// 충돌이 남겼거나, 꼴을 느슨하게 받던 바이너리가 쓴 줄이 이 꼴로 온다. 마일스톤 아닌 줄의
+    /// 날짜는 더는 낡은 값이 아니다(moai-ghkp.kz7 이 종료를, moai-xf0p.6d5 가 시작을 열었다).
     /// 키 차례도 일부러 표준형이 아니다 — 지나간 줄을 [`shaped`] 가 맞추는지까지 재려면
     /// 들어가는 줄이 표준형과 갈려 있어야 한다.
     fn stale(id: &str) -> String {
         format!(
-            "{{\"title\":\"{id} 제목\",\"id\":\"{id}\",\"status\":\"todo\",\"starts_on\":\"2026-09-05\",\
+            "{{\"title\":\"{id} 제목\",\"id\":\"{id}\",\"status\":\"todo\",\"starts_on\":\"2026-9-5\",\
              \"created_at\":\"{T0}\",\"updated_at\":\"{T0}\",\"status_since\":\"{T0}\"}}"
         )
     }
@@ -2681,7 +2682,7 @@ mod tests {
         let (text, clashes) = merge(&o, &a, &b);
         assert!(clashes.is_empty(), "{clashes:?}\n{text}");
         // 낡은 **값**은 그대로 지나간다 — 건너뛰는 것은 검사뿐이다.
-        assert!(text.contains("\"starts_on\":\"2026-09-05\""), "낡은 값이 사라졌다\n{text}");
+        assert!(text.contains("\"starts_on\":\"2026-9-5\""), "낡은 값이 사라졌다\n{text}");
         assert!(text.contains("\"priority\":1"), "이쪽 고침이 사라졌다\n{text}");
     }
 
@@ -2701,7 +2702,7 @@ mod tests {
         assert!(clashes.is_empty(), "{clashes:?}\n{theirs}");
         assert_eq!(ours, theirs, "머지 방향이 답을 가른다");
         assert!(ours.contains("\"status\":\"in_progress\""), "고친 쪽 값이 안 섰다\n{ours}");
-        assert!(ours.contains("\"starts_on\":\"2026-09-05\""), "낡은 값이 사라졌다\n{ours}");
+        assert!(ours.contains("\"starts_on\":\"2026-9-5\""), "낡은 값이 사라졌다\n{ours}");
     }
 
     /// 두 방향으로 합쳐 **바이트가 같은가**를 재고 그 답을 낸다. 충돌이 서면 방향에 따라 표식의

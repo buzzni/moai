@@ -9,6 +9,7 @@ use crate::model::{FUTURE_SLACK_SECS, Issue, Kind, days_since};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod gantt;
 pub mod stats;
 
 /// 에픽 하나(또는 "에픽 없음")의 집계. **저장하지 않는다** — 멤버 하나를
@@ -2427,21 +2428,43 @@ pub fn blocks_of<'a>(all: &'a [Issue], cfg: &Config, i: &'a Issue) -> Vec<Block<
     if i.blocked_by.is_empty() {
         return Vec::new();
     }
-    let group = Handing::of(all);
-    let by_id: BTreeMap<&str, &Issue> = all.iter().map(|x| (x.id.as_str(), x)).collect();
-    let (off, states, waits, _) = blocking(all, cfg, &group, &by_id);
-    // 막는 줄은 **id 로** 불린다 — 그쪽 답은 접은 지도의 것이다(moai-u3ta).
-    let roots = fold_roots(all, &off);
-    i.blocked_by
-        .iter()
-        .map(|b| {
-            let issue = by_id.get(b.as_str()).copied();
-            let root = roots.get(b.as_str()).copied();
-            let (waiting, aside) = waits.get(b.as_str()).map_or((Waiting::Live, Vec::new()), |(w, a)| (*w, a.clone()));
-            let blocker = blocker(issue.map(|x| column(x, &states)), root.is_some(), waiting);
-            Block { id: b.as_str(), issue, blocker, root, aside }
-        })
-        .collect()
+    BlockMaps::over(all, cfg).of(i)
+}
+
+/// [`blocks_of`] 가 줄마다 짓던 지도를 **한 번 지어 여러 줄에 묻는다**(moai-xf0p.j1r). 줄 하나를 펼치는 상세는 [`blocks_of`]
+/// 를 부르지만, 줄 전부를 훑는 표면(간트)이 줄마다 그것을 부르면 막힌 줄 수만큼 저장소 전체를 다시 훑는다. 판정은
+/// 여기 하나다 — 어느 쪽으로 불러도 같은 답이다.
+pub struct BlockMaps<'a, 'c> {
+    by_id: BTreeMap<&'a str, &'a Issue>,
+    states: BTreeMap<GroupKey<'a>, &'c str>,
+    waits: Waits<'a>,
+    roots: BTreeMap<&'a str, &'a str>,
+}
+
+impl<'a, 'c> BlockMaps<'a, 'c> {
+    pub fn over(all: &'a [Issue], cfg: &'c Config) -> BlockMaps<'a, 'c> {
+        let group = Handing::of(all);
+        let by_id: BTreeMap<&str, &Issue> = all.iter().map(|x| (x.id.as_str(), x)).collect();
+        let (off, states, waits, _) = blocking(all, cfg, &group, &by_id);
+        // 막는 줄은 **id 로** 불린다 — 그쪽 답은 접은 지도의 것이다(moai-u3ta).
+        let roots = fold_roots(all, &off);
+        BlockMaps { by_id, states, waits, roots }
+    }
+
+    /// 줄 하나가 적은 막음을 **적힌 차례대로** 하나씩 가른다.
+    pub fn of(&self, i: &'a Issue) -> Vec<Block<'a>> {
+        i.blocked_by
+            .iter()
+            .map(|b| {
+                let issue = self.by_id.get(b.as_str()).copied();
+                let root = self.roots.get(b.as_str()).copied();
+                let (waiting, aside) =
+                    self.waits.get(b.as_str()).map_or((Waiting::Live, Vec::new()), |(w, a)| (*w, a.clone()));
+                let blocker = blocker(issue.map(|x| column(x, &self.states)), root.is_some(), waiting);
+                Block { id: b.as_str(), issue, blocker, root, aside }
+            })
+            .collect()
+    }
 }
 
 /// id 로 막는 줄을 찾아 그 서 있는 칸을 댄다. 없으면 `None`.
@@ -3153,15 +3176,29 @@ impl Ceiling<'_> {
     /// 이 천장을 넘은 줄 `i` 의 거절 자료 — 쓰기(`store::write_locked`)와 그 연습(`cmd::add::check_plan_rows`)이
     /// 한 꼴로 짓는다. `new` 는 그 조상이 **이번 쓰기가 짓는 줄**인가다 — 거절은 쓰기를 통째로 물리므로 방금 뽑은
     /// 그 id 는 어디에도 안 남는다(moai-1rkl, 리뷰). 그 id 를 대면 "먼저 옮기라" 는 말을 따라 친 쪽이 없는 줄을 본다.
+    ///
+    /// **무엇이 넘쳤는지는 줄에서 읽는다**(moai-xf0p.cbu) — 둘 다 넘쳤으면 둘 다 댄다(리뷰): 기한만 대던 판은 그 말대로
+    /// `--due` 를 당긴 쓰기가 "시작이 기한보다 뒤" 로 또 물렸고, 계획의 줄을 `@기한` 으로 고치면 시작이 말없이 사라졌다.
+    /// 기한만 넘쳤으면 기한을, 아니면 시작을 댄다. 둘 다 안 넘친 줄에 불러도(부르는 쪽이 [`first_beyond`] 가 낸 줄만
+    /// 넘기므로 안 생긴다) 시작의 거절을 낸다.
     pub fn refusal(&self, i: &Issue, new: bool) -> crate::model::Invalid {
-        crate::model::Invalid::DueBeyond {
-            due: i.due_on.clone().unwrap_or_default(),
-            above: match new {
-                true => crate::model::fit_title(&self.above.title),
-                false => self.above.id.clone(),
+        let above = match new {
+            true => crate::model::fit_title(&self.above.title),
+            false => self.above.id.clone(),
+        };
+        let above_due = self.due.to_string();
+        let over = |d: Option<&str>| d.filter(|d| *d > self.due).map(str::to_string);
+        match (over(i.planned_start()), over(i.deadline())) {
+            (Some(start), Some(due)) => {
+                crate::model::Invalid::DatesBeyond { start, due, above, above_new: new, above_due }
+            }
+            (None, Some(due)) => crate::model::Invalid::DueBeyond { due, above, above_new: new, above_due },
+            (start, None) => crate::model::Invalid::StartBeyond {
+                start: start.unwrap_or_default(),
+                above,
+                above_new: new,
+                above_due,
             },
-            above_new: new,
-            above_due: self.due.to_string(),
         }
     }
 }
@@ -3260,10 +3297,16 @@ impl<'m, 'a> DueLadder<'m, 'a> {
         (self.epic_of.at(i) == passed).then_some(p)
     }
 
-    /// 그 줄의 기한이 조상보다 늦으면 그 조상 — 기한이 없거나 꼴이 틀리면 `None` 이다.
+    /// 그 줄의 기한이나 **계획 시작일**(moai-xf0p.cbu)이 조상의 기한보다 늦으면 그 조상 — 둘 다 없거나 꼴이 틀리면
+    /// `None` 이다. 시작이 조상의 *시작*보다 이른 것은 안 센다: 계획이 부모 막대 앞에서 시작하는 것은 간트에 눈에
+    /// 보일 뿐 어긋남이 아니다.
     pub fn beyond(&self, i: &'a Issue) -> Option<Ceiling<'a>> {
-        let due = i.deadline()?;
-        self.ceiling(i).filter(|c| due > c.due)
+        self.ceiling(i).filter(|c| Self::passes(i, c.due))
+    }
+
+    /// 줄의 잴 날([`Issue::plan_days`] — 기한·시작) 가운데 하나라도 `ceiling` 보다 늦은가.
+    fn passes(i: &Issue, ceiling: &str) -> bool {
+        i.plan_days().any(|d| d > ceiling)
     }
 
     /// **따를 기한**의 조상 몫(moai-dr8a.7rs) — [`DueLadder::ceiling`] 에서 **닫힌 부모를 뺀다**(리뷰). 닫힌 이슈·생각의
@@ -3310,9 +3353,10 @@ impl<'m, 'a> DueLadder<'m, 'a> {
 /// 그 연습(`cmd::add::check_plan_rows`)이 이 하나로 잰다. 차례는 받은 그대로다 — 둘이 같은 차례로 넘겨야 같은
 /// 줄을 댄다. 지도는 한 번 짓는다([`DueLadder`]).
 pub fn first_beyond<'a>(all: &'a [Issue], ids: &[&str]) -> Option<(&'a Issue, Ceiling<'a>)> {
-    // **넘칠 짝이 없으면 지도를 안 짓는다**(리뷰) — 락을 쥔 채 도는 자리다. 기한 든 줄이 둘도 안 되면 잴 줄과 그
-    // 조상이 다 기한을 들 수 없다.
-    if ids.is_empty() || all.iter().filter(|i| i.deadline().is_some()).nth(1).is_none() {
+    // **넘칠 짝이 없으면 지도를 안 짓는다**(리뷰) — 락을 쥔 채 도는 자리다. 천장이 될 기한이 없거나, 기한 든 줄이
+    // 그 하나뿐인데 시작을 든 줄도 없으면 잴 줄과 그 조상이 다 날을 들 수 없다.
+    let deadlines = all.iter().filter(|i| i.deadline().is_some()).take(2).count();
+    if ids.is_empty() || deadlines == 0 || (deadlines == 1 && all.iter().all(|i| i.planned_start().is_none())) {
         return None;
     }
     let lines = Lines::of(all);
@@ -3333,18 +3377,25 @@ pub fn first_beyond<'a>(all: &'a [Issue], ids: &[&str]) -> Option<(&'a Issue, Ce
 /// 닫힌 줄은 안 센다 — `status` 의 `due_beyond_parent` 와 같은 까닭이다. 묶음 줄의 칸은 멤버에서
 /// 읽으므로 여기서는 묶음을 닫혔다고 치지 않는다.
 pub fn due_overflow_of<'a>(all: &'a [Issue], id: &str) -> Vec<&'a Issue> {
-    if !all.iter().any(|i| i.due_on.is_some() && i.id != id) {
+    // 넘칠 줄은 잴 날(기한·계획 시작일, [`Issue::plan_days`])을 든 줄이다(moai-xf0p.cbu) — 시작만 든 줄도 조상의 기한을
+    // 넘는다. **넘칠 짝이 없으면 지도를 안 짓는다**(리뷰) — 쓰기가 락을 쥔 채 부르는 자리다. 넘칠 줄은 마일스톤이 아니고
+    // (조상이 없다, [`DueLadder`]) 천장이 되려면 기한이 하나는 서야 한다 — 시작만 든 마일스톤이나 기한 없는 저장소에서
+    // 지도를 지으면 늘 빈 답을 받는다.
+    let measured = |i: &Issue| i.plan_days().next().is_some();
+    if !all.iter().any(|i| measured(i) && i.kind != Kind::Milestone && i.id != id)
+        || !all.iter().any(|i| i.deadline().is_some())
+    {
         return Vec::new();
     }
     let lines = Lines::of(all);
     let epic_of = Handing::over(all, &lines);
     let ladder = DueLadder::over(&lines, &epic_of);
     all.iter()
-        .filter(|i| i.due_on.is_some() && (is_group(i) || !i.status.is_done()))
+        .filter(|i| measured(i) && (is_group(i) || !i.status.is_done()))
         .filter(|i| {
             // 조상은 한 번만 걷는다 — 이 줄 밑인가와 넘쳤는가가 같은 조상을 본다.
             let above = ladder.above(i);
-            above.contains(&id) && i.deadline().is_some_and(|d| ladder.lowest(i, &above).is_some_and(|c| d > c.due))
+            above.contains(&id) && ladder.lowest(i, &above).is_some_and(|c| DueLadder::passes(i, c.due))
         })
         .collect()
 }
@@ -6161,7 +6212,7 @@ fn status_in_scope<'a, 'c>(
         Some(ladder) => issues
             .iter()
             .enumerate()
-            .filter(|(k, i)| i.due_on.is_some() && visible(i) && off[*k].is_none() && !eclipsed(i))
+            .filter(|(k, i)| i.plan_days().next().is_some() && visible(i) && off[*k].is_none() && !eclipsed(i))
             .map(|(_, i)| i)
             .filter(|i| column(i, &states) != crate::config::DONE)
             .filter(|i| ladder.beyond_row(i).is_some())
