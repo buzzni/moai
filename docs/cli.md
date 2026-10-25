@@ -3038,7 +3038,7 @@ Options:
   <command>`, run in a child process for that request, so the page sees
   exactly what the CLI says. Writing stays with the CLI and the explorer; the
   page writes two things, taken only from the page itself: a Gantt bar dragged
-  to new days, run as `moai edit --start --due`, and your read marks (`moai
+  to new days, run as `moai edit --shift`, and your read marks (`moai
   read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 

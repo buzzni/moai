@@ -18,7 +18,8 @@ pub const TIME_LIMIT: Duration = Duration::from_secs(30);
 /// stdout·stderr 각각의 상한 — 넘으면 죽이고 502 다. 아카이브까지 다 실은 목록이 이 안에 든다.
 pub const OUT_MAX: usize = 64 * 1024 * 1024;
 
-/// 자식을 어떻게 띄우나 — 서버를 띄울 때 한 번 정한다.
+/// 자식을 어떻게 띄우나 — 서버를 띄울 때 한 번 정한다. 부름마다 달라지는 것은 자리(`cwd`, `project=`)와 시간대 하나다
+/// ([`Spawner::run_in`] 의 `zone` — 페이지가 그리는 시간대가 자식의 `TZ` 가 된다, moai-vj8w.7sh).
 pub struct Spawner {
     /// 띄울 바이너리 — [`Spawner::exe_of`] 가 띄울 때 한 번 고른다.
     pub exe: PathBuf,
@@ -85,7 +86,8 @@ impl Spawner {
             cmd.arg(format!("--user={user}"));
         }
         // 페이지가 날짜를 그리는 시간대(`/api/tree?tz=`)를 자식의 시간대로 준다 — `tz::Zone::system` 이 읽는 `TZ` 하나다.
-        // 새 깃발이나 설정이 아니고, 안 준 끝점은 서버의 환경을 그대로 물려받는다.
+        // 새 깃발이나 설정이 아니고, 안 준 끝점은 서버의 환경을 그대로 물려받는다. 이 기계가 못 여는 이름은 부르는 쪽이
+        // 안 준다(`super::zone_for_child`) — 받으면 자식이 UTC 로 떨어진다.
         if let Some(zone) = zone {
             cmd.env("TZ", zone);
         }

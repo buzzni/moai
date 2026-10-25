@@ -231,17 +231,12 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
                 )));
             }
             let dates = match shift {
-                // 0 날 옮기기는 고칠 것이 없는 것이다 — 같은 부름을 되풀이해도 0 으로 끝나는 `edit` 의 자다.
                 Some((edge, days)) => match i.shifted(edge, days) {
                     Ok(dates) => dates,
+                    // 0 날 옮기기는 고칠 것이 없는 것이다 — 같은 부름을 되풀이해도 0 으로 끝나는 `edit` 의 자다.
                     Err(model::Unshifted::Still) => (None, None),
-                    Err(why) => {
-                        let said = match why {
-                            model::Unshifted::Members => crate::i18n::say(lang, "refuse.edit_shift_members"),
-                            _ => crate::i18n::say(lang, "refuse.edit_shift_none"),
-                        };
-                        return Err(Fail::new(crate::i18n::fill(said, &[("id", &args.id)])));
-                    }
+                    // 까닭의 말은 탐색기의 끌기와 한 자다(`view::unshifted`) — 두 표면이 같은 까닭에 같은 길을 댄다.
+                    Err(why) => return Err(Fail::new(crate::view::unshifted(lang, why, &args.id))),
                 },
                 None => (start.as_deref().map(super::clearable), due.as_deref().map(super::clearable)),
             };

@@ -47,18 +47,20 @@ const FALLBACK_WIDTH = 900
 const CLIP_INSET = 2
 /** The window drawn around what is in view: this many rows more above and below, and a view's width more either side. */
 const OVERSCAN_ROWS = 10
-/** The height assumed while the pane has none (hidden, or not laid out yet), as the keys' page size assumes. */
+/** The height assumed while the pane has none (hidden, or not laid out yet) — the window's and the keys' page size. */
 const FALLBACK_HEIGHT = 720
 
 /** A field the row may carry as text: the text, or null. */
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
 
 /**
- * A row the write cannot reach: the worktree overlay is on and the row shown is a sibling worktree's (`branch`, which
- * `show --worktree` puts only on those). The write goes to the main checkout, which may not hold the row at all
- * ("not found"), and where it does hold it the days drawn are the sibling's, not the ones a move would be measured from.
+ * A row the write cannot reach — `moai edit` finds a row in the main checkout's live snapshot only. With the worktree
+ * overlay on, a sibling worktree's row (`branch`, which `show --worktree` puts only on those) may not be there at all
+ * ("not found"), and where it is, the days drawn are the sibling's, not the ones a move would be measured from. An
+ * archived row (`archived`: shown with `SPC v o`, or an archived group still drawn over a reopened member) is not in the
+ * snapshot at all, so its move would only ever come back "not found" (moai-vj8w review).
  */
-const overlaid = (row: Row): boolean => typeof row.branch === 'string' && row.branch !== ''
+const unwritable = (row: Row): boolean => (typeof row.branch === 'string' && row.branch !== '') || row.archived === true
 
 function loadGrid(): number {
   try {
@@ -97,6 +99,12 @@ interface Built {
   clips: Map<number, { left: HTMLElement; right: HTMLElement }>
   /** Per line, drawn or not: where its bars stand. */
   placed: Array<Placed | null>
+  /**
+   * The wall clock `placed` was measured at. Every window draws the today line, its cap and the header's today there
+   * too, so a window built later — the clock moved on, no read since — is still one picture: an open bar ends on the
+   * line (moai-vj8w review).
+   */
+  now: number
   /** The header's top ticks, to keep their label in view while the dates scroll. */
   top: Array<{ el: HTMLElement; from: number; to: number }>
   svg: SVGSVGElement
@@ -131,6 +139,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let holding = false
   let waiting: [State, IssueIndex | null] | null = null
   let drawLater = false
+  /**
+   * A scroll left the window while a bar was held: the window is owed, not a draw. A draw() would place every bar again
+   * from the read before the write, the dropped one back at its old days; the window only rebuilds what the view left.
+   */
+  let paintLater = false
   /** Rows whose planned days are being written: a bar drawn from the read before that write does not move again. */
   const writing = new Set<string>()
 
@@ -266,7 +279,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     svg.setAttribute('width', String(wide))
     svg.setAttribute('height', String(m.lines.length * ROW_H))
     svg.setAttribute('aria-hidden', 'true')
-    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, top: [], svg }
+    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, now, top: [], svg }
     drawn = null
     paintWindow()
 
@@ -305,11 +318,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    */
   function paintWindow(): void {
     if (!model || !state || !built || !axis) return
-    if (holding) return void (drawLater = true)
+    // A held bar keeps its lane: the window is built on release (resume), from the view then — not a whole draw().
+    if (holding) return void (paintLater = true)
+    paintLater = false
     const m = model
     const a = axis
     const b = built
-    const now = nowWall()
+    // The clock the bars were placed at (draw()), not a new one: the today line stays where the open bars end.
+    const now = b.now
     const cursor = state.cursor
     const v = inView()
     const view = Math.max(v.x1 - v.x0, 120)
@@ -346,6 +362,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const p = b.placed[n] ?? null
       const grid = gridRow(m, line, g, cursor)
       grid.style.top = `${n * ROW_H}px`
+      // Only the window's options are in the listbox: each says where it stands in the whole set, as the list's rows do
+      // with aria-rowindex — or a screen reader counts "3 of 41" in a tree of 400.
+      grid.setAttribute('aria-setsize', String(m.lines.length))
+      grid.setAttribute('aria-posinset', String(n + 1))
       rows.push(grid)
       b.rows.set(n, grid)
       const lane = el(doc, 'div', { class: `lane${g?.deferred ? ' dim' : ''}`, 'data-id': line.kind === 'row' ? m.index.rows[line.at]!.id : null, 'data-key': line.key, 'aria-selected': String(line.key === cursor) })
@@ -603,7 +623,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
 
   function command(action: string): boolean {
     if (!model || !state) return false
-    const page = Math.max(1, Math.floor((scroll.clientHeight || 720) / ROW_H) - 2)
+    const page = Math.max(1, Math.floor((scroll.clientHeight || FALLBACK_HEIGHT) / ROW_H) - 2)
     switch (action) {
       case 'move.down':
       case 'move.up':
@@ -615,7 +635,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         return true
       case 'move.halfDown':
       case 'move.halfUp': {
-        const half = Math.max(ROW_H, Math.floor((scroll.clientHeight || 720) / 2))
+        const half = Math.max(ROW_H, Math.floor((scroll.clientHeight || FALLBACK_HEIGHT) / 2))
         scroll.scrollTop = Math.max(0, scroll.scrollTop + (action === 'move.halfDown' ? half : -half))
         return true
       }
@@ -703,7 +723,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    */
   function resume(): void {
     holding = false
-    if (!waiting && !drawLater) return
+    if (!waiting && !drawLater && !paintLater) return
     setTimeout(() => {
       // Another drag took the lanes meanwhile: its release draws.
       if (holding) return
@@ -711,20 +731,26 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       waiting = null
       if (next) render(...next)
       if (drawLater) draw()
+      // Only the window was owed (a scroll during the drag): nothing is built if the view came back inside it.
+      else if (paintLater) {
+        paintLater = false
+        paintView()
+      }
     }, 0)
   }
 
   /**
    * Write a row's planned days. One write at a time per row: until it is answered (and the rows read again), the
-   * bar on screen was drawn from the read before it, and a move measured from there would undo the first.
+   * bar on screen was drawn from the read before it — a second drag would be drawn, and its undo line built, from days
+   * the first has already moved, while moai adds the second move on top of the first.
    */
   function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: PlanChange, undo: string): void {
     writing.add(id)
     // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
-    const drawn = model
+    const read = model
     void movePlan(id, change, undo).finally(() => {
       writing.delete(id)
-      if (model === drawn) draw()
+      if (model === read) draw()
     })
   }
 
@@ -732,7 +758,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function movable(lane: HTMLElement, row: Row, g: GanttRow, planBar: HTMLElement | null, dueMark: HTMLElement | null): void {
     const movePlan = ctx.movePlan
     const grab = planBar ?? dueMark
-    if (!movePlan || !grab || !axis || overlaid(row)) return
+    if (!movePlan || !grab || !axis || unwritable(row)) return
     // A bar or `◆` drawn from a day of the row's own that the plan carries no day for (a milestone's deadline the plan
     // did not read) has nothing to move: it is not grabbed, rather than refused on release.
     const days = g.planned && (dayStart(g.planned.start) !== null || dayStart(g.planned.end) !== null)
@@ -784,8 +810,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        // The days as the list printed them; a row it did not print (one written between its read and the tree's) as
-        // the bar was drawn — the days this move was measured from.
+        // The undo line puts back the days the page read: as the list printed them, or a row it did not print (one
+        // written between its read and the tree's) as the bar was drawn. moai measured the move itself from the row as
+        // it stood when written (moai-vj8w.02c), so a day another session moved after this read comes back with the undo.
         const planned = g.planned?.from === 'own' ? g.planned : null
         write(movePlan, row.id, { edge, days }, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
       }
@@ -800,10 +827,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function plannable(lane: HTMLElement, row: Row, g: GanttRow | undefined): void {
     const movePlan = ctx.movePlan
     const written = typeof row.starts_on === 'string' || typeof row.due_on === 'string'
-    if (!movePlan || !axis || written || overlaid(row) || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
+    if (!movePlan || !axis || written || unwritable(row) || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
     const a = axis
     lane.addEventListener('dblclick', (event) => {
-      // A second double click before the first is answered would plan the row twice.
+      // A second double click before the first is answered would only be refused: the first gave the row its day, and
+      // `--if-unplanned` writes nothing over it.
       if (writing.has(row.id)) return
       const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
       write(movePlan, row.id, { day }, undoLine(row.id, null, null))

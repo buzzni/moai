@@ -877,7 +877,7 @@ BACKLOG
   <command>`, run in a child process for that request, so the page sees
   exactly what the CLI says. Writing stays with the CLI and the explorer; the
   page writes two things, taken only from the page itself: a Gantt bar dragged
-  to new days, run as `moai edit --start --due`, and your read marks (`moai
+  to new days, run as `moai edit --shift`, and your read marks (`moai
   read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 
@@ -2229,17 +2229,17 @@ pub struct EditArgs {
 
     /// Move the planned days N days, as the row
     /// holds them when written
-    #[arg(long, value_name = "±N", allow_negative_numbers = true, verbatim_doc_comment,
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, verbatim_doc_comment, value_parser = shift_days(),
           conflicts_with_all = ["start", "due", "shift_start", "shift_due", "if_unplanned"])]
     pub shift: Option<i64>,
 
     /// Move the start alone (none: from the due)
-    #[arg(long, value_name = "±N", allow_negative_numbers = true,
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, value_parser = shift_days(),
           conflicts_with_all = ["start", "due", "shift_due", "if_unplanned"])]
     pub shift_start: Option<i64>,
 
     /// Move the deadline alone (none: from start)
-    #[arg(long, value_name = "±N", allow_negative_numbers = true,
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, value_parser = shift_days(),
           conflicts_with_all = ["start", "due", "if_unplanned"])]
     pub shift_due: Option<i64>,
 
@@ -2247,6 +2247,13 @@ pub struct EditArgs {
     /// with no planned day; else refuse
     #[arg(long, requires = "dates", verbatim_doc_comment)]
     pub if_unplanned: bool,
+}
+
+/// `edit --shift*` 의 날 수 — **web 의 끌기가 받는 폭과 같다**(여섯 자리, `web::api::is_days`, moai-vj8w 리뷰). 막지 않으면
+/// `Issue::shifted` 의 덧셈이 넘친다: 시험 판(overflow-checks)은 쓰기 안에서 넘어지고, 릴리스 판은 돌아 아무도 안 친
+/// 해를 거절문에 댄다. 여섯 자리는 이천칠백 해 남짓이라 손으로 옮길 날은 다 든다.
+fn shift_days() -> clap::builder::RangedI64ValueParser<i64> {
+    clap::value_parser!(i64).range(-999_999..=999_999)
 }
 
 #[derive(Args, Debug)]

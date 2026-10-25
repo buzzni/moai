@@ -150,9 +150,11 @@ export type Edge = 'start' | 'body' | 'end'
 export type Shifted = { start?: string; due?: string } | { why: 'members' | 'none' | 'still' }
 
 /**
- * A plan moved `days` days: the days to write, **the changing side only** — the page's copy of `Issue::shifted`
- * (src/model.rs), which the TUI's drag and keys write through. Only a row's own days move: a plan a group counts from
- * its members is not that row's days (`members`), and a row with no day has no bar (`none`).
+ * A plan moved `days` days: the days it lands on, **the changing side only** — the page's copy of `Issue::shifted`
+ * (src/model.rs), which the TUI's drag and keys write through. It draws the bar while it is dragged and says why a press
+ * moves nothing; the page never writes these days — moai measures them inside its write (data/plan.ts, moai-vj8w.02c).
+ * Only a row's own days move: a plan a group counts from its members is not that row's days (`members`), and a row with
+ * no day has no bar (`none`).
  *
  * - `body` moves every day written — a row with a deadline alone moves its deadline
  * - `start` moves the start; with none, it sets out from the deadline (the `◆`'s left end was dragged)

@@ -237,6 +237,8 @@ async function start(): Promise<void> {
     if (loaded.ok) store.dispatch({ type: 'matched', key, ids: loaded.value })
     else store.dispatch({ type: 'match-failed', key, problem: loaded.outcome })
   }
+  /** The zone the page drew in at the last change — followZone (subscribed before the listener below) moves it first. */
+  let zoneSeen = zoneNow()
   store.subscribe((state, previous) => {
     if (matchKey(state) !== matchKey(previous)) {
       clearTimeout(asking)
@@ -248,8 +250,13 @@ async function start(): Promise<void> {
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
     if (state.view.worktree !== previous.view.worktree && state.board.value) void refresher.refresh()
-    // The zone the page draws in turned (`SPC o t`, or the boot's arrived): the tree's `overdue` is judged in it.
-    if (effectiveZone(state.zone, state.boot?.timezone) !== effectiveZone(previous.zone, previous.boot?.timezone) && state.board.value) void refresher.refresh()
+    // The zone the page draws in turned (`SPC o t`, or the boot's arrived): the tree's `overdue` is judged in it. What
+    // followZone set is compared, not worked out again — that asks Intl for a zone on every dispatch, every j and k.
+    const zone = zoneNow()
+    if (zone !== zoneSeen) {
+      zoneSeen = zone
+      if (state.board.value) void refresher.refresh()
+    }
   })
 
   // The archive is read when archived rows are shown (`SPC v o`), each time they are turned on, once the active

@@ -2,6 +2,9 @@
 //!
 //! **요청에서 온 값은 틀의 자리에만 든다.** 쿼리의 값은 늘 `--긴이름=값` 한 토막이고 경로의 값(id·위키 쪽)은 `--`
 //! 뒤의 한 토막이라, `-` 로 시작해도 플래그로 안 읽히고 셸을 안 지난다(자식은 `Command::args` 로 뜬다).
+//! **하나만 argv 밖으로 간다** — `/api/tree` 의 `tz`(moai-vj8w.7sh)는 자식의 환경 `TZ` 가 된다. 모양은 [`zone_shape`] 가
+//! 재고(`.` 이 없고 첫 글자가 `/`·`:` 가 아니라 tzdb 밖의 파일을 못 가리킨다), 이 기계가 못 여는 이름은 서버가 안
+//! 넘긴다(`super::zone_for_child`).
 //! 거르개·찾기·정렬의 **뜻**과 거절(`bad_filter` 와 그 말)은 moai 가 낸다 — 서버는 모양(비지 않음·길이·제어 문자·
 //! 이름)만 보고 옮긴다. 모양이 틀리면 자식을 띄우기 전에 400 `bad_input` 이다.
 //!
@@ -99,6 +102,9 @@ pub enum Bad {
     Control(String),
     /// 값이 그 이름이 받는 모양이 아니다 — 불린은 `1`, `fields` 는 `id`, id 는 이슈 id 의 꼴.
     Shape(String),
+    /// 둘 다 이 길이 받는 이름인데 같이는 못 준다 — `/api/plan` 의 옮기기(`edge`·`days`)와 하루 세우기(`day`).
+    /// 모르는 이름(`Unknown`)으로 대면 "이 길은 그 이름을 안 받는다" 는 거짓말이 된다(moai-vj8w 리뷰).
+    Mixed(String, String),
 }
 
 impl Bad {
@@ -110,6 +116,7 @@ impl Bad {
             Bad::Long(n, max) => fill(say(lang, "web.bad_long"), &[("name", n), ("max", &max.to_string())]),
             Bad::Control(n) => fill(say(lang, "web.bad_control"), &[("name", n)]),
             Bad::Shape(n) => fill(say(lang, "web.bad_shape"), &[("name", n)]),
+            Bad::Mixed(n, other) => fill(say(lang, "web.bad_mixed"), &[("name", n), ("other", other)]),
         }
     }
 }
@@ -170,8 +177,9 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
 
 /// 쓰는 길 — **읽음 표시 셋과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
 /// 적힌다(`moai read --help`, 2026-10-22 사람 결정, moai-ly88). **계획 날(`/api/plan/<id>`)은 트래커에 쓰는 하나뿐인
-/// 길이다**(moai-d86e.3ud) — 간트의 막대 끌기가 `moai edit <id> --start <날> --due <날>` 을 자식으로 부르니
-/// `store::with_write` 를 지나고, 거절(시작이 기한 뒤·위 기한 넘김)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
+/// 길이다**(moai-d86e.3ud) — 간트의 막대 끌기가 `moai edit <id> --shift*=<N>`(하루 세우기는 `--start --due
+/// --if-unplanned`, moai-vj8w.02c)을 자식으로 부르니 `store::with_write` 를 지나고, 거절(시작이 기한 뒤·위 기한 넘김·그새
+/// 날이 선 줄)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
 pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
     let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     if let Some(id) = path.strip_prefix("/api/plan/") {
@@ -203,12 +211,12 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
 /// - `day=YYYY-MM-DD` — 날이 없는 줄에 그 하루를 세운다: `edit --start=<날> --due=<날> --if-unplanned`. 그새 날이 섰으면
 ///   `edit` 이 안 쓰고 거절한다
 ///
-/// 둘을 섞으면 거절이다. 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
+/// 둘을 섞으면 거절이다([`Bad::Mixed`]). 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
 fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
     let (mut edge, mut days, mut day) = (None, None, None);
     for (name, value) in query {
         let (slot, fits) = match name.as_str() {
-            "edge" => (&mut edge, matches!(value.as_str(), "start" | "body" | "end")),
+            "edge" => (&mut edge, shift_flag(value).is_some()),
             "days" => (&mut days, is_days(value)),
             "day" => (&mut day, crate::model::parse_date(value).is_some()),
             _ => return Err(Bad::Unknown(name.clone())),
@@ -220,16 +228,13 @@ fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
             return Err(Bad::Twice(name.clone()));
         }
     }
+    let mixed = |name: &str| Bad::Mixed(name.to_string(), "day".to_string());
     let flags = match (edge, days, day) {
         (None, None, Some(d)) => vec![format!("--start={d}"), format!("--due={d}"), "--if-unplanned".to_string()],
-        (Some(_), _, Some(_)) => return Err(Bad::Unknown("edge".to_string())),
-        (None, Some(_), Some(_)) => return Err(Bad::Unknown("days".to_string())),
+        (Some(_), _, Some(_)) => return Err(mixed("edge")),
+        (None, Some(_), Some(_)) => return Err(mixed("days")),
         (Some(e), Some(n), None) => {
-            let flag = match e.as_str() {
-                "start" => "--shift-start",
-                "end" => "--shift-due",
-                _ => "--shift",
-            };
+            let Some(flag) = shift_flag(&e) else { return Err(Bad::Shape("edge".to_string())) };
             vec![format!("{flag}={n}")]
         }
         (Some(_), None, None) => return Err(Bad::Empty("days".to_string())),
@@ -241,7 +246,20 @@ fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
     Ok(out)
 }
 
-/// 옮기는 날 수의 꼴 — 0 아닌 정수, 여섯 자리까지, 앞에 `-` 하나. `+N` 은 안 받는다(페이지가 안 낸다).
+/// 막대의 어느 쪽을 옮기나(`edge`) → `edit` 의 플래그. **잇는 자리는 여기 하나다**(moai-vj8w 리뷰) — 모양 검사와 플래그
+/// 고르기가 글자를 따로 가르면, 검사에만 낱말을 더한 날 그 낱말이 나머지 갈래(`--shift`)로 떨어져 끝 하나를 끈 것이 막대
+/// 통째를 옮긴다([`argv`] 의 글이 적어 둔 그 덫이다).
+fn shift_flag(edge: &str) -> Option<&'static str> {
+    match edge {
+        "start" => Some("--shift-start"),
+        "body" => Some("--shift"),
+        "end" => Some("--shift-due"),
+        _ => None,
+    }
+}
+
+/// 옮기는 날 수의 꼴 — 0 아닌 정수, 여섯 자리까지, 앞에 `-` 하나. `+N` 은 안 받는다(페이지가 안 낸다). 폭은 `edit --shift*`
+/// 가 받는 것과 같다(`cli::shift_days`).
 fn is_days(v: &str) -> bool {
     let digits = v.strip_prefix('-').unwrap_or(v);
     (1..=6).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) && digits.bytes().any(|b| b != b'0')
@@ -298,17 +316,27 @@ fn shape(name: &str, value: &str, max: usize) -> Result<(), Bad> {
 }
 
 /// 시간대 이름의 모양 — tzdb 이름의 글자(`Asia/Seoul`·`Etc/GMT+9`·`America/Port-au-Prince`)만, 첫 글자는 영숫자다.
-/// 첫 글자가 `/` 면 자식의 `TZ` 가 경로로 읽고(`tz::tz_name`), `:` 는 떼어 버리니 둘 다 안 받는다. 모르는 이름은 여기서
-/// 안 막는다 — 자식이 UTC 로 떨어지는 그 길이 한 벌이다(`tz::Zone::named`).
+/// 첫 글자가 `/` 면 자식의 `TZ` 가 경로로 읽고(`tz::tz_name`), `:` 는 떼어 버리니 둘 다 안 받는다.
+///
+/// **브라우저가 내는 오프셋(`+09:00`)도 받는다**(moai-vj8w 리뷰) — Intl 이 ES2024 부터 그 꼴을 시간대로 받아, `[tui]
+/// timezone = "+09:00"` 이나 `TZ=GMT` 로 뜬 브라우저(`+00:00` 이라 댄다)의 페이지가 그대로 보낸다. 막으면 이 끝점이 400 이고
+/// 페이지는 목록 전체를 못 읽는다. 받아도 그 꼴은 이 기계가 여는 이름이 아니라 자식에게는 안 간다 — 모르는 이름처럼
+/// 서버의 시간대로 잰다([`super::zone_for_child`]).
 fn zone_shape(name: &str, value: &str) -> Result<(), Bad> {
     shape(name, value, ZONE_MAX)?;
-    let first = value.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric());
-    let fits = value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-' | b'/'));
-    (first && fits).then_some(()).ok_or_else(|| Bad::Shape(name.to_string()))
+    let b = value.as_bytes();
+    let offset = b.len() == 6
+        && matches!(b[0], b'+' | b'-')
+        && b[3] == b':'
+        && [b[1], b[2], b[4], b[5]].iter().all(u8::is_ascii_digit);
+    let first = b.first().is_some_and(u8::is_ascii_alphanumeric);
+    let fits = b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'+' | b'-' | b'/'));
+    (offset || (first && fits)).then_some(()).ok_or_else(|| Bad::Shape(name.to_string()))
 }
 
 /// 쿼리가 낸 시간대 — 모양은 [`argv`] 가 이미 쟀다. 자식은 이것을 `TZ` 로 받아, 늦었는가(`overdue`)를 페이지가 그리는
-/// 시간대로 잰다(moai-vj8w.7sh). 안 줬으면 `None` 이고 자식은 서버의 시간대 그대로다.
+/// 시간대로 잰다(moai-vj8w.7sh). 안 줬으면 `None` 이고 자식은 서버의 시간대 그대로다. 이 기계가 못 여는 이름을 거르는 것은
+/// 자식을 띄우는 쪽이다([`super::zone_for_child`]) — 여기는 파일을 안 연다.
 pub fn zone_of(query: &[(String, String)]) -> Option<&str> {
     query.iter().find(|(n, _)| n == Param::Tz.name()).map(|(_, v)| v.as_str())
 }
@@ -460,11 +488,23 @@ mod tests {
         assert_eq!(argv_of("/api/tree", &asked).unwrap().unwrap(), plain);
         assert_eq!(zone_of(&asked), Some("Asia/Seoul"));
         assert_eq!(zone_of(&[]), None);
-        for ok in ["UTC", "Etc/GMT+9", "America/Port-au-Prince", "America/Argentina/Buenos_Aires"] {
+        // 브라우저가 내는 오프셋(`+09:00`)도 받는다 — 막으면 그 페이지는 목록 전체를 못 읽는다(moai-vj8w 리뷰).
+        for ok in ["UTC", "Etc/GMT+9", "America/Port-au-Prince", "America/Argentina/Buenos_Aires", "+09:00", "-05:30"] {
             assert!(argv_of("/api/tree", &q(&[("tz", ok)])).unwrap().is_ok(), "{ok}");
         }
-        for bad in ["/etc/localtime", ":Asia/Seoul", "Asia Seoul", "JST-9<", "a\nb", "한국", "../x?", &"A".repeat(65)]
-        {
+        for bad in [
+            "/etc/localtime",
+            ":Asia/Seoul",
+            "Asia Seoul",
+            "JST-9<",
+            "a\nb",
+            "한국",
+            "../x?",
+            &"A".repeat(65),
+            "+0900",
+            "09:00",
+            "+09:00:00",
+        ] {
             assert!(argv_of("/api/tree", &q(&[("tz", bad)])).unwrap().is_err(), "{bad}");
         }
         assert!(matches!(argv_of("/api/tree", &q(&[("tz", "")])).unwrap(), Err(Bad::Empty(_))));
@@ -639,8 +679,12 @@ mod tests {
         assert_eq!(plan(&[]), Err(Bad::Empty("edge".into())));
         assert_eq!(plan(&[("days", "3")]), Err(Bad::Empty("edge".into())));
         assert_eq!(plan(&[("edge", "body")]), Err(Bad::Empty("days".into())));
-        assert_eq!(plan(&[("edge", "body"), ("days", "3"), ("day", "2026-10-26")]), Err(Bad::Unknown("edge".into())));
-        assert_eq!(plan(&[("days", "3"), ("day", "2026-10-26")]), Err(Bad::Unknown("days".into())));
+        // 섞은 것은 "모르는 이름" 이 아니다 — 둘 다 이 길이 받는 이름이다(moai-vj8w 리뷰).
+        let mixed = |name: &str| Err(Bad::Mixed(name.into(), "day".into()));
+        assert_eq!(plan(&[("edge", "body"), ("days", "3"), ("day", "2026-10-26")]), mixed("edge"));
+        assert_eq!(plan(&[("edge", "end"), ("day", "2026-10-26")]), mixed("edge"));
+        assert_eq!(plan(&[("days", "3"), ("day", "2026-10-26")]), mixed("days"));
+        assert!(Bad::Mixed("edge".into(), "day".into()).said(Lang::En).contains("does not go with"));
         for v in ["0", "-0", "+3", "3.5", "", "-", "1234567", "--3", "3d"] {
             assert_eq!(plan(&[("edge", "body"), ("days", v)]), Err(Bad::Shape("days".into())), "{v:?}");
         }

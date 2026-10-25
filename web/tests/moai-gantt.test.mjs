@@ -811,6 +811,102 @@ test('a diamond the plan has no day for is not grabbed: there is nothing to move
   assert.deepEqual([moves, said], [[], []], 'no write, and no "double-click a day" refusal')
 })
 
+test('an archived row is not drawn movable either, and a double click plans nothing: moai edit finds live rows only (moai-vj8w review)', () => {
+  const rows = [
+    ...ROWS.map((row) => (row.id === 'e1.c' ? { ...row, starts_on: '2026-10-26', due_on: '2026-10-27', archived: true } : row)),
+    { id: 'z', kind: 'issue', title: 'Loose', status: 'todo', archived: true },
+  ]
+  const gantt = { ...GANTT, z: g('z') }
+  const { root, dom, moves, said, view, state } = writing(rows, gantt)
+  // Archived rows are drawn while `SPC v o` shows the archive.
+  view.render({ ...state, view: { ...state.view, showArchived: true } }, indexOf(rows, gantt))
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  assert.equal(bar.classList.contains('movable'), false)
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  assert.equal(px(bar, 'left'), x0, 'the bar is not drawn moving')
+  press(dom, l, 'pointerup', x0 + 120)
+  press(dom, lane(root, 'z'), 'dblclick', days('2026-10-30') + 5)
+  assert.deepEqual([moves, said], [[], []])
+  assert.equal(laidOut(lane(root, 'e1.b').querySelector('.b-plan')).classList.contains('movable'), true, 'a live row still moves')
+})
+
+test('a scroll while a bar is held leaves the dropped bar where it was dropped (moai-vj8w review)', async () => {
+  const rows = [
+    ...ROWS.map((row) => (row.id === 'e1.c' ? { ...row, starts_on: '2026-10-26', due_on: '2026-10-27' } : row)),
+    ...Array.from({ length: 80 }, (_, i) => ({ id: `r${String(i).padStart(2, '0')}`, kind: 'issue', title: `Row ${i}`, status: 'todo' })),
+  ]
+  const gantt = { ...GANTT, ...Object.fromEntries(rows.filter((row) => row.id.startsWith('r')).map((row) => [row.id, g(row.id)])) }
+  // The write stays unanswered: the bar must keep the days it was dropped on meanwhile.
+  const { root, dom, moves } = writing(rows, gantt, () => new Promise(() => {}))
+  const box = root.querySelector('.g-scroll')
+  Object.defineProperty(box, 'clientHeight', { get: () => 300, configurable: true })
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  const scrolled = () => box.dispatchEvent(new dom.window.Event('scroll'))
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  // Far down past the window and back up, the button still held.
+  top = 200 * 28
+  scrolled()
+  top = 0
+  scrolled()
+  press(dom, l, 'pointerup', x0 + 120)
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'body', days: 2 }])
+  await tick()
+  assert.equal(lane(root, 'e1.c'), l, 'the lane was rebuilt though the view came back inside the window')
+  assert.equal(px(bar, 'left'), x0 + 80, 'the dropped bar went back to its old days while its write ran')
+})
+
+test('a window built later keeps the clock the bars were placed at: the today line stays where an open bar ends (moai-vj8w review)', () => {
+  const rows = Array.from({ length: 200 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: i === 0 ? 'in_progress' : 'todo' }))
+  const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))
+  gantt.r000 = g('r000', { actual: span('2026-10-24T09:00:00Z'), progress: { kind: 'column', name: 'in_progress' } })
+  const { root, dom } = mount(null, indexOf(rows, gantt), [1600, 560])
+  const box = root.querySelector('.g-scroll')
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  const end = () => {
+    const b = lane(root, 'r000').querySelector('.b-act')
+    return px(b, 'left') + px(b, 'width')
+  }
+  const today = () => px(root.querySelector('.todayline'), 'left')
+  const meet = () => Math.abs(end() - today()) < 0.01
+  assert.ok(meet(), `the open bar ends on the today line: ${end()} ${today()}`)
+  const before = clock.now
+  try {
+    // Six hours pass with no read (rows are read again only when the tracker changes); a scroll builds new windows.
+    clock.now = () => NOW + 6 * 3600e3
+    top = 150 * 28
+    box.dispatchEvent(new dom.window.Event('scroll'))
+    top = 0
+    box.dispatchEvent(new dom.window.Event('scroll'))
+    assert.ok(meet(), `the today line moved away from the bars it was drawn with: ${end()} ${today()}`)
+  } finally {
+    clock.now = before
+  }
+})
+
+test('the window\'s options say where they stand in the whole list (moai-vj8w review)', () => {
+  const rows = Array.from({ length: 400 }, (_, i) => ({ id: `r${String(i).padStart(3, '0')}`, kind: 'issue', title: `Row ${i}`, status: 'todo' }))
+  const gantt = Object.fromEntries(rows.map((row) => [row.id, g(row.id)]))
+  const { root, dom } = mount(null, indexOf(rows, gantt), [1000, 560])
+  const box = root.querySelector('.g-scroll')
+  let top = 0
+  Object.defineProperty(box, 'scrollTop', { get: () => top, set: (v) => { top = Math.max(0, v) }, configurable: true })
+  top = 300 * 28 + 44
+  box.dispatchEvent(new dom.window.Event('scroll'))
+  const option = root.querySelector('.g-row[data-id="r305"]')
+  assert.equal(option.getAttribute('role'), 'option')
+  assert.equal(option.getAttribute('aria-setsize'), '400')
+  assert.equal(option.getAttribute('aria-posinset'), '306')
+})
+
 test('without a writer the bars do not move', () => {
   const { root, dom, calls } = mount()
   const l = lane(root, 'e1.c')

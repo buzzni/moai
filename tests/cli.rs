@@ -10522,6 +10522,15 @@ fn a_shift_moves_the_days_the_row_holds_when_it_is_written() {
     // 날을 적는 플래그와는 같이 못 준다 — 어느 쪽이 이기는지 정할 까닭이 없다.
     assert!(!moai(s.path(), &["edit", &i, "--shift", "1", "--due", "2026-09-30"]).status.success());
     assert!(!moai(s.path(), &["edit", &i, "--shift", "1", "--shift-due", "1"]).status.success());
+
+    // **날 수는 web 의 끌기와 같은 폭(여섯 자리)이다**(리뷰) — 넘는 수는 쓰기 전에 거절한다. 막지 않던 판은 덧셈이 넘쳐
+    // 시험 판이 쓰기 안에서 넘어졌다(`attempt to add with overflow`).
+    for huge in ["9223372036854775807", "-1000000"] {
+        let out = moai(s.path(), &["edit", &i, "--shift-start", huge]);
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && !said.contains("panicked"), "{huge}: {said}");
+    }
+    assert_eq!(days(&i), ("2026-09-21".into(), "2026-09-25".into()), "거절했는데 날이 바뀌었다");
 }
 
 /// **`--if-unplanned` 는 날이 하나도 안 적힌 줄에만 쓴다**(moai-vj8w.02c) — web 간트의 "이 날로 세우기" 가 그사이 날을
@@ -31252,28 +31261,47 @@ fn web_tree_leaves_out_the_archive_unless_asked_and_refuses_a_bogus_sort() {
 
 /// **간트의 `overdue` 는 페이지가 그리는 시간대로 잰다**(moai-vj8w.7sh) — `tz=` 가 자식의 시간대가 된다. 서버는 UTC 로
 /// 도는데 시계는 UTC 10-10 20:00(서울은 10-11 05:00)이라, 10-10 이 기한인 줄이 UTC 에서는 오늘이고 서울에서는 하루 늦다.
+///
+/// **이 기계가 못 여는 시간대는 서버의 시간대로 잰다**(리뷰) — UTC 가 아니다. 브라우저는 `Asia/Kolkata` 를 옛 이름
+/// `Asia/Calcutta` 로 내는데 그 이름을 안 까는 tzdata 가 흔하고, 넘겨서 UTC 로 떨어지면 서버의 시간대로 재던 그 전보다
+/// 나빠진다. 브라우저가 내는 오프셋(`+09:00`)은 400 이 아니다 — 400 이면 페이지가 목록 전체를 못 읽는다.
 #[test]
 fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
     let s = init("web-tree-zone");
     let id = add(s.path(), &["기한 일", "--due", "2026-10-10"]);
-    let web = serve_with(s.path(), |cmd| {
-        cmd.env("MOAI_NOW", "2026-10-10T20:00:00Z").env("TZ", "UTC");
-    });
-    let overdue = |query: &str| {
-        let (status, _, body) = get(web.port, &format!("/api/tree{query}"));
+    let served = |tz: &'static str| {
+        serve_with(s.path(), move |cmd| {
+            cmd.env("MOAI_NOW", "2026-10-10T20:00:00Z").env("TZ", tz);
+        })
+    };
+    let overdue = |port: u16, query: &str| {
+        let (status, _, body) = get(port, &format!("/api/tree{query}"));
         assert_eq!(status, 200, "{body}");
         let env = json_of(&body);
         assert_eq!(env["exit"], 0, "{body}");
         let row = env["out"].as_array().unwrap().iter().find(|r| r["id"] == id.as_str()).unwrap().clone();
         row["gantt"]["overdue"].clone()
     };
-    assert_eq!(overdue(""), serde_json::Value::Null, "서버의 시간대(UTC)로는 아직 오늘이다");
-    assert_eq!(overdue("?tz=UTC"), serde_json::Value::Null);
-    assert_eq!(overdue("?tz=Asia%2FSeoul"), serde_json::json!(1), "서울에서는 기한이 하루 지났다");
-    // 모르는 이름은 막지 않는다 — 자식이 UTC 로 떨어진다. 모양이 틀린 것은 자식 전에 400 이다.
-    assert_eq!(overdue("?tz=Nowhere%2FAtAll"), serde_json::Value::Null);
+    let web = served("UTC");
+    assert_eq!(overdue(web.port, ""), serde_json::Value::Null, "서버의 시간대(UTC)로는 아직 오늘이다");
+    assert_eq!(overdue(web.port, "?tz=UTC"), serde_json::Value::Null);
+    // 모르는 이름과 오프셋은 막지 않는다 — 이 기계가 못 여니 서버의 시간대(여기는 UTC)로 잰다. 모양이 틀린 것은 자식 전에 400 이다.
+    assert_eq!(overdue(web.port, "?tz=Nowhere%2FAtAll"), serde_json::Value::Null);
+    assert_eq!(overdue(web.port, "?tz=%2B09%3A00"), serde_json::Value::Null, "오프셋이 400 이 되면 목록이 안 선다");
     let (status, _, body) = get(web.port, "/api/tree?tz=%2Fetc%2Flocaltime");
     assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    // **자료가 있는 기계에서만 잰다** — `a_bare_day_is_the_readers_day` 와 같은 까닭이다. 없는 기계에서는 서울도 못 여는
+    // 이름이라 위의 줄이 답이다. 자료의 자리는 바이너리가 읽는 자리로 본다(`TZDIR` 이 먼저다).
+    let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+    if tzdb.join("Asia/Seoul").exists() {
+        assert_eq!(overdue(web.port, "?tz=Asia%2FSeoul"), serde_json::json!(1), "서울에서는 기한이 하루 지났다");
+        // 서울에 선 서버에서 못 여는 이름은 UTC 가 아니라 서울로 잰다 — UTC 로 떨어지면 여기서 `null` 이다.
+        let seoul = served("Asia/Seoul");
+        assert_eq!(overdue(seoul.port, ""), serde_json::json!(1));
+        assert_eq!(overdue(seoul.port, "?tz=Nowhere%2FAtAll"), serde_json::json!(1), "못 여는 이름이 UTC 로 떨어졌다");
+        assert_eq!(overdue(seoul.port, "?tz=%2B09%3A00"), serde_json::json!(1));
+        assert_eq!(overdue(seoul.port, "?tz=UTC"), serde_json::Value::Null, "여는 이름은 그대로 페이지의 시간대다");
+    }
 }
 
 /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 읽음 표시 길은 `POST` 만 받는다.
@@ -31593,6 +31621,14 @@ fn web_moves_a_plan_only_from_its_own_page() {
     let (status, _, _) = get(web.port, &format!("/api/plan/{id}?edge=body&days=1"));
     assert_eq!(status, 404, "GET 으로 계획을 고치는 길이 섰다");
     assert_eq!(days(), at("2026-10-29", "2026-11-02"));
+
+    // **같은 쪽을 옆 세션이 옮긴 뒤에도 그 줄에서 잰다**(리뷰) — 위의 판은 옆이 기한을, 페이지가 시작을 옮겨 날을 들고 오던 옛
+    // 길로도 같은 답이 났다. 옆이 시작을 10-20 으로 옮긴 뒤 막대 통째를 하루 끌면, 페이지가 읽은 10-29 가 아니라 10-20 에서
+    // 하루다 — 옛 길은 여기서 10-30 을 적었다.
+    ok_with(s.path(), &cfg, &["edit", &id, "--start", "2026-10-20"]);
+    let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=body&days=1"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert_eq!(days(), at("2026-10-21", "2026-11-03"), "옆 세션이 옮긴 시작을 페이지의 옛 날에서 덮었다");
 }
 
 /// **`project=` 는 걸어 둔 프로젝트만 읽는다**(moai-o14f) — 그 자리의 트래커로 답하고, 걸지 않은 자리·상대 경로는

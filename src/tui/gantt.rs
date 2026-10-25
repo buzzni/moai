@@ -52,16 +52,6 @@ pub(super) enum Plan {
     Day(i64),
 }
 
-/// 옮길 수 없는 까닭의 글 — 키·끌기의 알림과 쓰기 안의 거절이 같은 말을 댄다.
-fn unshifted(lang: crate::i18n::Lang, why: Unshifted, id: &str) -> String {
-    let said = match why {
-        Unshifted::Members => say(lang, "tui.gantt.members"),
-        Unshifted::NoPlan | Unshifted::Still => say(lang, "tui.gantt.no_plan"),
-    };
-    fill(said, &[("id", id)])
-}
-
-/// 잡은 막대의 부분 → 옮기는 날.
 /// 간트 머리의 달 이름과 그것을 엮는 차례를 화면 말로 채운다. 위젯의 기본은 영어 약어다.
 pub(super) fn names_in(lang: crate::i18n::Lang) -> moai_gantt::Names {
     moai_gantt::Names {
@@ -86,6 +76,7 @@ pub(super) fn names_in(lang: crate::i18n::Lang) -> moai_gantt::Names {
     }
 }
 
+/// 잡은 막대의 부분 → 옮기는 날.
 fn edge_of(part: moai_gantt::Part) -> Edge {
     match part {
         moai_gantt::Part::Start => Edge::Start,
@@ -272,7 +263,7 @@ impl App {
         match i.shifted(edge, days) {
             Ok(_) => self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Shift(edge, days) }),
             Err(Unshifted::Still) => {}
-            Err(why) => self.notice = Some(unshifted(self.site.lang, why, &i.id)),
+            Err(why) => self.notice = Some(crate::view::unshifted(self.site.lang, why, &i.id)),
         }
     }
 
@@ -503,7 +494,7 @@ pub(super) fn commit_plan(app: &mut App) {
         let before = i.clone();
         let (start, due) = match plan {
             Plan::Shift(edge, days) => {
-                i.shifted(edge, days).map_err(|why| crate::fail::Fail::new(unshifted(lang, why, &id)))?
+                i.shifted(edge, days).map_err(|why| crate::fail::Fail::new(crate::view::unshifted(lang, why, &id)))?
             }
             Plan::Day(_) if i.has_days() => {
                 return Err(crate::fail::Fail::new(fill(say(lang, "tui.gantt.planned"), &[("id", &id)])));
