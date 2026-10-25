@@ -12,6 +12,7 @@ The work lives in `.moai/issues.jsonl`. There is no approval gate — create any
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
+    moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
@@ -252,5 +253,9 @@ the next session to take over from. The next session reads it in the history und
 `moai show <id>`.
 
     moai note <id> 'Next: <what comes next>'
+
+If this session made a mistake the next one would make too, write it down as a lesson while
+you still hold the row it came from (the page is a change to the repository, as rule 2 counts it) —
+`moai wiki search '<its words>'` first, then `moai wiki learn`; `moai-wiki` says which mistakes count.
 
 Every command and the `--from` syntax are in `references/commands.md`.
