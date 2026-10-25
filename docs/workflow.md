@@ -142,9 +142,15 @@ and wait on each other to merge.
 - **Worktrees stand in `<root>/.worktrees/`**, the place Claude Code, Codex and
   Antigravity share (moai-5s9l); `moai init` keeps it out of git. It stays inside
   the repository because Codex's trust and Antigravity's workspace go by the
-  root's path. Claude Code enters one from the root (`EnterWorktree` with its
-  path) — come back to the root before entering another. Worktrees made earlier
-  under `.claude/worktrees/` keep working
+  root's path. Worktrees made earlier under `.claude/worktrees/` keep working
+- **Claude Code does not enter it.** Every `EnterWorktree` into `.worktrees/`
+  asks the person to approve it, and no allow rule turns that off, so a Claude
+  session — a worker or a person's own — stays in the root and reaches the
+  worktree by absolute path (`cd <root>/.worktrees/<epic> && …`,
+  `git -C <root>/.worktrees/<epic> …`, absolute paths for every file edit)
+  (moai-9js2). The hook's rule 2 stands in for the isolation guard it gives up:
+  while everything the session holds has its worktree standing, a write to the
+  root checkout is refused and the refusal names the same file in the worktree
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,
