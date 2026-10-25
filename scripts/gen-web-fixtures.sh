@@ -57,7 +57,7 @@ cat >"$repo/.moai/issues.jsonl" <<EOF
 {"id":"fx-ep01","title":"Storage layer","kind":"epic","status":"todo","milestone":"fx-ms01",$who,$t,"status_since":"2026-10-10T09:00:00Z"}
 {"id":"fx-ep01.aaa","title":"Write path","status":"in_progress","priority":1,"tags":["store"],$who,$t,"status_since":"2026-10-12T09:00:00Z","started_at":"2026-10-12T09:00:00Z"}
 {"id":"fx-ep01.aaa.bbb","title":"Lock file","status":"todo",$who,$t,"status_since":"2026-10-10T09:00:00Z"}
-{"id":"fx-ep01.bbb","title":"Read path","status":"review","due_on":"2026-10-25",$t,"status_since":"2026-10-14T09:00:00Z"}
+{"id":"fx-ep01.bbb","title":"Read path","status":"review","due_on":"2026-10-25","starts_on":"2026-10-22",$t,"status_since":"2026-10-14T09:00:00Z"}
 {"id":"fx-ep02","title":"Later work","kind":"epic","status":"todo","deferred_at":"2026-10-15T09:00:00Z",$who,$t,"status_since":"2026-10-10T09:00:00Z"}
 {"id":"fx-ep02.aaa","title":"Put off with its epic","status":"todo",$who,$t,"status_since":"2026-10-10T09:00:00Z"}
 {"id":"fx-is01","title":"Grid layout","status":"todo","priority":0,"body":"Columns line up.",$who,$t,"status_since":"2026-10-10T09:00:00Z"}

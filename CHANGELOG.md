@@ -38,6 +38,19 @@ does not tag — see `CONTRIBUTING.md`.
   `backlog promote` carries the backlog item's start onto the epic as it does its
   deadline, and `--dry-run` and `show --as-plan` print the same range.
   (moai-xf0p.due)
+- **The web page has a Gantt tab (`SPC g g`).** The tree, every folder open, stays on
+  the left; the dates scroll on the right at four zoom steps (hour, day, week, month;
+  `-`/`=`, `t` today, `z` fit). It draws what the TUI's Gantt draws, with the same
+  meaning: the planned span (hatched when an epic or milestone counts it from its
+  members), the actual span laid over it in the column's colour, the overdue stretch
+  in red with `!`, `◆` on a deadline-only row, the today line, `‹ ›` for what lies off
+  screen, `n/m` progress, and arrows from the rows that block the one under the cursor.
+  Click a row or a bar for its detail; Shift+wheel or dragging the date header moves
+  the dates; Ctrl+wheel over the dates zooms; the grid's width is dragged and kept.
+  The web detail now shows `start → deadline` too. `moai tui --deep --json` carries
+  each row's `gantt` — the planned and actual spans, progress, overdue days and live
+  blockers — so another program can draw the same chart. (moai-d86e.b2m,
+  moai-d86e.5wj, moai-d86e.en8, moai-d86e.jmq)
 
 ### Changed
 

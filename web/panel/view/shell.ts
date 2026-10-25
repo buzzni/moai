@@ -1,4 +1,4 @@
-// The panel's frame (design §1): the tab bar (board, list, wiki; the refresh time, the theme button, the detail toggles), the
+// The panel's frame (design §1): the tab bar (board, list, wiki, gantt; the refresh time, the theme button, the detail toggles), the
 // search / filter / sort toolbar (view/toolbar.ts, its state in the store), the path line, the banners, the result line, the run's activity, and under them the
 // split holding the list or board beside the detail. The panes are filled by the views named in
 // view/panes.ts through the contract in view/types.ts; the shell renders the panes that show on every store
@@ -83,7 +83,7 @@ export interface Shell {
   setWidth(width: number): void
   layout(): PaneLayout
   /** The views in the panes, for the key router (panel/keys/wiring.ts) to hand its actions to. */
-  panes(): { list: PaneView; board: PaneView; detail: PaneView; wiki: PaneView | null }
+  panes(): { list: PaneView; board: PaneView; gantt: PaneView; detail: PaneView; wiki: PaneView | null }
   /** Move the keyboard focus into a pane of the shown tab (its view's focus()). */
   focusPane(area: Focus): void
   /** Move the keyboard focus to the selected tab of the tab bar: the way out of the wiki, whose Tab cycles its links. */
@@ -230,20 +230,22 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     onRatio: (at, ratio) => store.dispatch({ type: "detail-ratio", position: at, ratio }),
   })
   split.setWidth(width)
-  const mainRoots: Record<"list" | "board", HTMLElement> = {
+  const mainRoots: Record<"list" | "board" | "gantt", HTMLElement> = {
     list: el(doc, "div", { class: "m-pane-main", "data-pane": "list", tabindex: -1, hidden: state.tab !== "list" }),
     board: el(doc, "div", { class: "m-pane-main", "data-pane": "board", tabindex: -1, hidden: state.tab !== "board" }),
+    // The gantt scrolls inside itself (one box for the grid and the dates), so the pane root does not.
+    gantt: el(doc, "div", { class: "m-pane-main m-pane-gantt", "data-pane": "gantt", tabindex: -1, hidden: state.tab !== "gantt" }),
   }
-  split.list.append(mainRoots.list, mainRoots.board)
+  split.list.append(mainRoots.list, mainRoots.board, mainRoots.gantt)
   const detailRoot = el(doc, "div", { class: "m-pane-detail", tabindex: -1 })
   split.detail.append(detailRoot)
   // The store's `focus` follows the DOM's: a click or Tab into a pane (not only focusPane) says which pane has
   // the keys. The reducer ignores a focus that is already the one.
   split.list.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "list" }))
   split.detail.addEventListener("focusin", () => store.dispatch({ type: "focus", focus: "detail" }))
-  // Both work tabs control this one panel; its label follows the tab shown.
+  // The work tabs (list, board, gantt) control this one panel; its label follows the tab shown.
   const work = el(doc, "div", { class: "m-tabpanel", role: "tabpanel", id: panelDomId("list"), hidden: state.tab === "wiki" }, split.el)
-  tabs.el.querySelector(`#${tabDomId("board")}`)?.setAttribute("aria-controls", panelDomId("list"))
+  for (const id of ["board", "gantt"] as const) tabs.el.querySelector(`#${tabDomId(id)}`)?.setAttribute("aria-controls", panelDomId("list"))
   const wiki = el(doc, "div", { class: "m-tabpanel m-pane-wiki", role: "tabpanel", id: panelDomId("wiki"), "aria-labelledby": tabDomId("wiki"), tabindex: -1, hidden: state.tab !== "wiki" })
   const body = el(doc, "div", { class: "m-body" }, work, wiki)
 
@@ -287,9 +289,11 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     return view.focus ? view.focus() : mainRoots[now.tab].focus()
   }
   const ctx: ViewContext = { document: doc, copy, language, intents: viewIntents, layout, focusPane, wiki: options.wiki }
-  const mainViews: Record<"list" | "board", PaneView> = {
+  const mainViews: Record<"list" | "board" | "gantt", PaneView> = {
     list: options.panes.list(mainRoots.list, ctx),
     board: options.panes.board(mainRoots.board, ctx),
+    // A page given no gantt view (a test's panes) still has the tab: it draws nothing.
+    gantt: options.panes.gantt?.(mainRoots.gantt, ctx) ?? { render() {} },
   }
   const detailView = options.panes.detail(detailRoot, ctx)
   const wikiView = options.panes.wiki?.(wiki, ctx) ?? null
@@ -300,7 +304,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const focusTabs = () => tabs.el.querySelector<HTMLElement>(`#${tabDomId(store.getState().tab)}`)?.focus()
 
   // ── tab switching: each tab keeps its scroll offsets (display:none drops them) ──
-  const containers: Record<Tab, HTMLElement> = { list: mainRoots.list, board: mainRoots.board, wiki }
+  const containers: Record<Tab, HTMLElement> = { list: mainRoots.list, board: mainRoots.board, gantt: mainRoots.gantt, wiki }
   const saved = new Map<Tab | "detail", Saved>()
   let shownTab: Tab = state.tab
   /** Show `tab`'s panes; returns the offsets to put back once they are drawn. */
@@ -381,7 +385,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const badges = unreadBadges(index?.rows ?? [])
     tabs.setBadge("board", badges.board)
     tabs.setBadge("list", badges.list)
-    work.setAttribute("aria-labelledby", tabDomId(state.tab === "board" ? "board" : "list"))
+    work.setAttribute("aria-labelledby", tabDomId(state.tab === "board" || state.tab === "gantt" ? state.tab : "list"))
     const left = shownTab
     const putBack = showTab(state.tab)
 
@@ -477,7 +481,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     slots: { toolbar, actions },
     setWidth,
     layout,
-    panes: () => ({ list: mainViews.list, board: mainViews.board, detail: detailView, wiki: wikiView }),
+    panes: () => ({ list: mainViews.list, board: mainViews.board, gantt: mainViews.gantt, detail: detailView, wiki: wikiView }),
     focusPane,
     focusTabs,
     toolbar: bar,
@@ -488,6 +492,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
       split.destroy()
       mainViews.list.destroy?.()
       mainViews.board.destroy?.()
+      mainViews.gantt.destroy?.()
       detailView.destroy?.()
       wikiView?.destroy?.()
       bar.destroy()

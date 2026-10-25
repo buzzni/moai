@@ -134,7 +134,10 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
   let current: KeyboardEvent | null = null
 
   const panes = () => shell.panes()
-  const main = (): PaneView => (store.getState().tab === "board" ? panes().board : panes().list)
+  const main = (): PaneView => {
+    const tab = store.getState().tab
+    return tab === "board" ? panes().board : tab === "gantt" ? panes().gantt : panes().list
+  }
   const focused = (): PaneView => (store.getState().focus === "detail" ? panes().detail : main())
   const wikiPaneEl = () => shell.el.querySelector<HTMLElement>(".m-pane-wiki [data-pane]")
 
@@ -434,6 +437,13 @@ export function wireKeys(options: KeyWiringOptions): KeyWiring {
     "tab.list": tab("list"),
     "tab.board": tab("board"),
     "tab.wiki": tab("wiki"),
+    "tab.gantt": tab("gantt"),
+    "gantt.left": onMain,
+    "gantt.right": onMain,
+    "gantt.zoomIn": onMain,
+    "gantt.zoomOut": onMain,
+    "gantt.today": onMain,
+    "gantt.fit": onMain,
     "view.deferred": () => flip(store.getState(), "hideDeferred"),
     "view.backlog": () => flip(store.getState(), "hideBacklog"),
     "view.archived": () => flip(store.getState(), "showArchived"),

@@ -7261,10 +7261,42 @@ fn tui_deep_is_the_one_level_listings_walked() {
         let mut deep: Vec<serde_json::Value> = serde_json::from_str(&ok(s.path(), &all)).unwrap();
         assert!(!deep.is_empty());
         for r in &mut deep {
-            assert!(r.as_object_mut().unwrap().remove("home").is_some(), "{r}");
+            let r = r.as_object_mut().unwrap();
+            assert!(r.remove("home").is_some(), "{r:?}");
+            // 간트 구간은 `--deep` 에만 싣는다(moai-d86e.b2m) — id 가 있는 줄에는 늘, 바구니에는 없다.
+            assert_eq!(r.remove("gantt").is_some(), r.contains_key("id"), "{r:?}");
         }
         assert_eq!(deep, stepped, "{args:?}");
     }
+}
+
+/// `tui --json --deep` 의 줄마다 `report::gantt` 의 구간이 `gantt` 로 선다(moai-d86e.b2m) — web 의 간트 탭이 멤버를
+/// 다시 접지 않고 그대로 그리는 값이다. 묶음의 계획은 멤버에서 세고, 시작한 줄은 실제 구간이 열려 있고, 기한 넘김은
+/// 읽는 날로 잰다. 판단은 `report::gantt` 의 것이라 여기서는 그 값이 줄에 실리는지만 잰다.
+#[test]
+fn tui_deep_carries_each_rows_gantt() {
+    let s = init("tuideepgantt");
+    let now = "2026-10-25T05:00:00Z";
+    let ep = field(&ok_at(s.path(), now, &["epic", "add", "간트", "--json"]), "id");
+    let a = field(&ok_at(s.path(), now, &["add", "앞 일", "-e", &ep, "--start", "2026-10-20", "--due", "2026-10-22", "--json"]), "id");
+    let b = field(&ok_at(s.path(), now, &["add", "뒤 일", "-e", &ep, "--start", "2026-10-26", "--due", "2026-10-28", "--json"]), "id");
+    ok_at(s.path(), now, &["link", &a, "--blocks", &b]);
+    ok_at(s.path(), "2026-10-21T01:00:00Z", &["mv", &a, "in_progress"]);
+
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
+    let gantt = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
+    assert_eq!(gantt(&ep)["planned"], serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"}));
+    assert_eq!(gantt(&ep)["progress"], serde_json::json!({"kind": "rollup", "done": 0, "total": 2}));
+    assert_eq!(gantt(&a)["actual"], serde_json::json!({"kind": "span", "start": "2026-10-21T01:00:00Z", "end": null}));
+    assert_eq!(gantt(&a)["overdue"], serde_json::json!(3));
+    assert_eq!(gantt(&b)["actual"], serde_json::json!({"kind": "not_started"}));
+    assert_eq!(gantt(&b)["overdue"], serde_json::Value::Null, "늘 서는 키다 — 값이 없으면 null");
+    assert_eq!(gantt(&b)["blocked_by"], serde_json::json!([{"id": a, "state": "open"}]));
+    // 적재한 줄의 첨자는 밖에 안 낸다.
+    assert!(gantt(&a).get("at").is_none(), "{}", gantt(&a));
+    // 한 자리 목록은 싣지 않는다.
+    let flat: Vec<serde_json::Value> = serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json"])).unwrap();
+    assert!(flat.iter().all(|r| r.get("gantt").is_none()), "{flat:?}");
 }
 
 /// `--deep` 는 `--json` 의 목록 모양이다 — 화면에서도 `.moai` 밖에서도 말없이 먹지 않는다.
