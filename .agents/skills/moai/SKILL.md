@@ -249,8 +249,8 @@ the next session to take over from. The next session reads it in the history und
 
     moai note <id> 'Next: <what comes next>'
 
-If this session made a mistake the next one would make too, write it down as a lesson
-before you close — `moai wiki search '<its words>'` first, then `moai wiki learn`; the
-`moai-wiki` skill says which mistakes count.
+If this session made a mistake the next one would make too, write it down as a lesson while
+you still hold the row it came from (the page is a change to the repository, as rule 2 counts it) —
+`moai wiki search '<its words>'` first, then `moai wiki learn`; `moai-wiki` says which mistakes count.
 
 Every command and the `--from` syntax are in `references/commands.md`.
