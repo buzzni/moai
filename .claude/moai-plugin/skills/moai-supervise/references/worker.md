@@ -508,6 +508,7 @@ never in the root
     git add -- <wiki dir>
     git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
    If it did not, write nothing. **Nothing checks this**
+   Also ask whether a finding of this epic's review is one a single rule would have stopped — if so, follow Lessons in `moai-wiki`, in the same commit
 
 8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
    this window stands in a directory that is gone.
@@ -569,6 +570,7 @@ never in the root
     leaving what came out of it
 
         moai note <review id> -b - < <review text>   the reviewer's own words (summarize past 64KB)
+        Could one rule have stopped any finding above? If so, `moai wiki search` it, then follow Lessons in `moai-wiki`
         moai mv <review id> done -m '<what you took in, what you handed on>'
     If the text runs past 64KB, summarize it — put `Summary: original <size>KB agent-<task-id>` on
     the first line, keep every finding's number and place, and shorten only the sentences. Leave fences and indentation alone
@@ -613,7 +615,9 @@ never in the root
     the members left in 4-3 because the work beside you held the file, with that other work
     named, the `member refused:` lines of 4-3,
     the wiki pages 7-4 changed — or that it changed none — and anything still running that 11
-    could not finish.
+    could not finish. **A subagent worker adds a `Lessons:` piece** — the slug of each new
+    lesson page and each `Lesson:` note that met an old one, or `Lessons: none` — the
+    supervisor reads that line.
     **If that send fails** — the supervisor restarted, so its old name is gone — the report
     must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
     `moai note <epic> -b -` — it stands in the root's file, where the next supervisor reads it,
