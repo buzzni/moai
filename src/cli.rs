@@ -719,6 +719,20 @@ BACKLOG
     {key:browse.gantt_left} {key:browse.gantt_right}  one cell earlier and later   {key:browse.gantt_page_left} {key:browse.gantt_page_right}  a page earlier and later
     {key:browse.gantt_today}    today in the middle           {key:browse.gantt_fit}    fit every row on one screen
   It opens fitted, and stays fitted as rows come and go until you move it.
+  Moving a plan writes the row, the way `moai edit --start --due` does. The
+  keys move the cursor row's plan by a day: {key:browse.nudge_earlier} and {key:browse.nudge_later} the whole plan,
+  {key:browse.nudge_start_earlier} and {key:browse.nudge_start_later} only its start.
+  With the mouse, drag a bar's middle to move the plan, its left end to move
+  the start and its right end to move the deadline; it snaps to whole days and
+  is written once, when you let go. Clicking an empty day on a row with no
+  planned days plans that one day. Groups whose bar spans their members are
+  not moved — move the members. When a move is refused (a start after the
+  deadline, a day past the deadline above) the refusal is on the banner; a
+  move that went through names the `moai edit` line that puts it back.
+  Clicking a row puts the cursor on it and the wheel scrolls the rows; a
+  sideways wheel, or Shift and the wheel, slides the dates, and so does
+  dragging the date header. Dragging the line between the rows and the dates
+  widens the rows.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a

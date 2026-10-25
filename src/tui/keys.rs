@@ -401,6 +401,31 @@ pub enum Browse {
     ReadGroup,
     /// 간트의 날짜 축을 움직인다(moai-i4hf.27r). **간트 배치에서만 선다** — 목록·보드에서는 조용하다.
     Gantt(Pan),
+    /// 커서 줄의 계획을 하루 옮긴다(moai-i4hf.9xi) — **트래커에 쓴다**. 간트 배치에서만 선다.
+    Plan(Nudge),
+}
+
+/// 계획을 하루 옮기는 쪽(moai-i4hf.9xi). **조각이라 줄을 모른다** — 어느 날이 옮는지는 `model::Issue::shifted` 가 정한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nudge {
+    /// 막대 전체를 하루 앞으로.
+    Earlier,
+    Later,
+    /// 시작만 하루 앞으로.
+    StartEarlier,
+    StartLater,
+}
+
+impl Nudge {
+    /// 키 파일의 이름과 화면 낱말의 열쇠가 함께 쓰는 꼬리.
+    pub fn name(self) -> &'static str {
+        match self {
+            Nudge::Earlier => "earlier",
+            Nudge::Later => "later",
+            Nudge::StartEarlier => "start_earlier",
+            Nudge::StartLater => "start_later",
+        }
+    }
 }
 
 /// 간트의 날짜 축 — 확대·좌우·오늘·맞춤(moai-i4hf.27r). **조각이라 위젯의 상태를 모른다** — `App` 이 잇는다.
@@ -815,6 +840,12 @@ pub const BROWSE: &[Bind<Browse>] = {
         row!(Gantt(Pan::PageRight), Some("]"), Key::plain(']')),
         row!(Gantt(Pan::Today), Some("t"), Key::plain('t')),
         row!(Gantt(Pan::Fit), Some("z"), Key::plain('z')),
+        // **계획을 하루 옮기는 키는 쓴다**(moai-i4hf.9xi) — 막대 끌기의 키 짝이다. `<`·`>` 는 막대 전체, `{`·`}` 는
+        // 시작만이다. 기한만 옮기는 것은 끌기(오른쪽 끝)다.
+        row!(Plan(Nudge::Earlier), Some("<"), Key::plain('<')),
+        row!(Plan(Nudge::Later), Some(">"), Key::plain('>')),
+        row!(Plan(Nudge::StartEarlier), Some("{"), Key::plain('{')),
+        row!(Plan(Nudge::StartLater), Some("}"), Key::plain('}')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
@@ -1105,6 +1136,11 @@ impl Browse {
             // 간트의 날짜 축은 간트에서만 — 포커스와 상관없다: 상세를 읽다가도 축은 옮긴다(moai-i4hf.27r).
             Gantt(_) if c.gantt => Ok(()),
             Gantt(_) => Err(Off::Quiet),
+            // 계획 옮기기는 **목록 칸의 줄에** 쓴다 — 상세를 읽다 누른 `>` 가 보이지 않는 막대를 옮기면 안 된다. 한눈 보기의
+            // 줄은 남의 프로젝트라 그 안으로 들어가서 옮긴다.
+            Plan(_) if !c.gantt || !c.list_focus => Err(Off::Quiet),
+            Plan(_) if c.layer => Err(Off::Why(say(c.lang, "tui.gantt.layer").into())),
+            Plan(_) => Ok(()),
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
@@ -1360,6 +1396,10 @@ impl Browse {
             Gantt(Pan::PageRight) => say(c.lang, "tui.act.gantt_page_right"),
             Gantt(Pan::Today) => say(c.lang, "tui.act.gantt_today"),
             Gantt(Pan::Fit) => say(c.lang, "tui.act.gantt_fit"),
+            Plan(Nudge::Earlier) => say(c.lang, "tui.act.nudge_earlier"),
+            Plan(Nudge::Later) => say(c.lang, "tui.act.nudge_later"),
+            Plan(Nudge::StartEarlier) => say(c.lang, "tui.act.nudge_start_earlier"),
+            Plan(Nudge::StartLater) => say(c.lang, "tui.act.nudge_start_later"),
         }
     }
 }

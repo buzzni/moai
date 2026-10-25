@@ -1516,6 +1516,11 @@ pub struct App {
     /// 간트의 보기(moai-i4hf) — 가로 축·확대·고정 칸 폭·맞춤. 세로 자리는 목록의 것(`list`)을 그대로 쓴다. **화면에만
     /// 산다** — 처음에는 맞춤이 서서 보이는 줄의 날이 한 화면에 든다.
     pub chart: moai_gantt::GanttState,
+    /// 쓰려다 누군지 물으러 간 계획 옮기기(moai-i4hf.9xi) — 답을 받으면 [`gantt::commit_plan`] 이 이것을 다시 쓴다.
+    /// 쓰기가 끝나면(됐든 거절됐든) 비운다.
+    plan_move: Option<gantt::PlanMove>,
+    /// 간트 위의 끌기(moai-i4hf.exq) — 막대·날짜 머리·나눔 선. 목록·상세 사이 선의 끌기(`dragging`)와 따로 든다.
+    chart_drag: Option<gantt::ChartDrag>,
     /// 보드에서 커서가 마지막으로 선 카드의 칸 — 칸이 없는 프로젝트 머리줄에서 `j`·`k` 가 걸을 칸이다
     /// (moai-oagj.vcj, [`App::board_step`]). 화면의 손버릇이라 설정에 안 남는다.
     ///
@@ -2148,6 +2153,8 @@ impl App {
             detail_at: view::DetailAt::default(),
             layout: view::Layout::default(),
             chart: moai_gantt::GanttState { fitting: true, ..Default::default() },
+            plan_move: None,
+            chart_drag: None,
             board_column: None,
             adrift: None,
             mouse_on: true,
@@ -2786,7 +2793,9 @@ impl App {
         // **보드는 지금 디렉터리 밑의 줄을 이미 카드로 세운다**(moai-9nfw) — 그 집으로 들어가면 뿌리에서 담은 생각
         // 하나(`SPC n`)로 마일스톤 레인 전부가 `(마일스톤 없음)` 한 레인으로 줄어든다. 보드를 오가는 길(`flip_layout`)이
         // 같은 까닭으로 디렉터리를 지킨다. 지금 자리 밖의 줄이면 목록처럼 그리로 간다 — 여기서는 카드가 안 선다.
-        if self.board() && home.starts_with(&self.site.path) {
+        // 간트도 같다(moai-i4hf) — 지금 디렉터리 밑을 다 펼쳐 세우니, 막대를 옮긴 쓰기가 그 줄의 에픽으로 들어가면 보던
+        // 차트가 에픽 하나로 줄어든다.
+        if (self.board() || self.gantt()) && home.starts_with(&self.site.path) {
             home = self.site.path.clone();
         }
         let was = std::mem::replace(&mut self.site.path, home);
@@ -5641,6 +5650,7 @@ impl App {
             // 프로젝트라 어느 칸을 보고 있었는지와 상관이 없다(moai-1hka.bq9).
             B::Go(s) => self.go(s, &rows),
             B::Gantt(p) => self.pan(p, &rows),
+            B::Plan(n) => self.nudge(n, &rows),
             // 거름망이 걸려 있으면 Esc 가 그것을 푼다. 아니면 아무 일도 없다 —
             // Esc 로 화면이 꺼지면 실수 한 번에 하던 것이 날아간다.
             // **검색이 아니어도 커서를 다시 세운다**(리뷰 moai-r1ly.f2x) — `after_search` 는 검색을 풀 때만 세우므로,
