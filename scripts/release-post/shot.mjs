@@ -9,6 +9,7 @@
 // web 은 그 주소를 열어 찍는다. 상자를 칠 자리는 둘로 고른다.
 //
 //   --mark <글>     화면에 그 글이 처음 나오는 자리 (--mark-all 이면 모든 자리)
+//   --line <글>     그 글이 든 줄 전체 (줄 앞뒤의 빈칸은 뺀다)
 //   --cells r,c,w,h tui 의 칸 좌표 (0 부터, 줄·칸·너비·높이)
 //   --select <css>  web 의 요소
 //
@@ -34,7 +35,7 @@ function parse(argv) {
   if (!['tui', 'web'].includes(mode) || !target) {
     throw new Error('usage: shot.mjs tui <cast> --at <s> | --from <s> --to <s> … -o <png|webm>\n       shot.mjs web <url> … -o <png>')
   }
-  const o = { mode, target, mark: [], cells: [], select: [], markAll: false, width: 1100, size: '1440x900', wait: 1500, speed: 1, title: null, lines: 0 }
+  const o = { mode, target, mark: [], line: [], cells: [], select: [], markAll: false, width: 1100, size: '1440x900', wait: 1500, speed: 1, title: null, lines: 0 }
   for (let i = 0; i < rest.length; i++) {
     const k = rest[i]
     const v = () => {
@@ -46,6 +47,7 @@ function parse(argv) {
     else if (k === '--to') o.to = Number(v())
     else if (k === '--mark') o.mark.push(v())
     else if (k === '--mark-all') o.markAll = true
+    else if (k === '--line') o.line.push(v())
     else if (k === '--cells') o.cells.push(v().split(',').map(Number))
     else if (k === '--select') o.select.push(v())
     else if (k === '--width') o.width = Number(v())
@@ -69,7 +71,7 @@ function parse(argv) {
 // 페이지 안에서 도는 것. 글을 찾아 그 자리의 사각형을, 칸 좌표를 사각형으로 바꿔 상자를 친다.
 // 문자열로 넘기는 까닭은 playwright 의 evaluate 가 함수 몸을 옮겨 실행하기 때문이다 — 바깥 변수를 못 잡는다.
 const IN_PAGE = String.raw`
-window.__boxes = function ({ mark, markAll, cells, select, cols, rows, accent, scope }) {
+window.__boxes = function ({ mark, line: whole = [], markAll, cells, select, cols, rows, accent, scope }) {
   // 영상은 이것을 계속 부른다 — 화면이 밀리면 글도 밀리니, 앞서 친 상자를 걷고 지금 자리에 다시 친다
   for (const old of document.querySelectorAll('.shot-box')) old.remove()
   const root = scope ? document.querySelector(scope) : document.body
@@ -77,6 +79,35 @@ window.__boxes = function ({ mark, markAll, cells, select, cols, rows, accent, s
   const missing = []
   // 줄 단위로 글을 이어 붙여 찾는다 — 터미널은 한 줄이 색마다 여러 span 으로 쪼개진다
   const lines = root.querySelectorAll('.ap-line').length ? [...root.querySelectorAll('.ap-line')] : [root]
+  const rangeOf = (nodes, at, end) => {
+    const range = document.createRange()
+    const pick = (off) => { let best = nodes[0]; for (const e of nodes) if (e[1] <= off) best = e; return best }
+    const [sn, so] = pick(at)
+    const [en, eo] = pick(end - 1)
+    range.setStart(sn, at - so)
+    range.setEnd(en, end - eo)
+    return range.getBoundingClientRect()
+  }
+  const textOf = (line) => {
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT)
+    const nodes = []
+    let text = ''
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.parentElement || n.parentElement.closest('script,style')) continue
+      nodes.push([n, text.length])
+      text += n.data
+    }
+    return { nodes, text }
+  }
+  // 그 글이 든 줄을 통째로 — 줄 앞뒤의 빈칸은 뺀다
+  for (const needle of whole) {
+    const line = lines.find((l) => l.textContent.includes(needle))
+    if (!line) { missing.push(needle); continue }
+    const { nodes, text } = textOf(line)
+    const start = text.search(/\S/)
+    const end = text.replace(/\s+$/, '').length
+    found.push(rangeOf(nodes, start, end))
+  }
   for (const needle of mark) {
     let hit = 0
     for (const line of lines) {
@@ -114,19 +145,26 @@ window.__boxes = function ({ mark, markAll, cells, select, cols, rows, accent, s
     for (const el of markAll ? els : els.slice(0, 1)) found.push(el.getBoundingClientRect())
   }
   if (cells.length) {
-    const term = root.querySelector('.ap-term') || root.querySelector('pre') || root
-    const t = term.getBoundingClientRect()
-    const cw = t.width / cols, ch = t.height / rows
-    for (const [r, c, w, h] of cells) found.push(new DOMRect(t.left + c * cw, t.top + r * ch, w * cw, h * ch))
+    // 줄의 자리는 그 줄 요소에서, 칸의 너비는 글자 하나를 재어 얻는다 — 터미널 요소에는 안쪽 여백이
+    // 있어, 그 높이를 줄 수로 나누면 상자가 반 줄씩 밀린다
+    const sample = lines.map(textOf).find((t) => t.text.length)
+    const cw = sample ? rangeOf(sample.nodes, 0, 1).width : 0
+    for (const [r, c, w, h] of cells) {
+      const top = lines[r], bottom = lines[Math.min(r + h - 1, lines.length - 1)]
+      if (!top || !cw) { missing.push('cells ' + [r, c, w, h].join(',')); continue }
+      const a = top.getBoundingClientRect(), b = bottom.getBoundingClientRect()
+      found.push(new DOMRect(a.left + c * cw, a.top, w * cw, b.bottom - a.top))
+    }
   }
   for (const r of found) {
     const box = document.createElement('div')
     box.className = 'shot-box'
-    const pad = 5
+    // 터미널은 줄 사이가 좁아, 위아래 여백을 크게 주면 옆 줄의 글을 덮는다
+    const px = 6, py = 2
     Object.assign(box.style, {
       position: 'absolute', zIndex: 99, pointerEvents: 'none', boxSizing: 'border-box',
-      left: (r.left + scrollX - pad) + 'px', top: (r.top + scrollY - pad) + 'px',
-      width: (r.width + pad * 2) + 'px', height: (r.height + pad * 2) + 'px',
+      left: (r.left + scrollX - px) + 'px', top: (r.top + scrollY - py) + 'px',
+      width: (r.width + px * 2) + 'px', height: (r.height + py * 2) + 'px',
       border: '3px solid ' + accent, borderRadius: '8px',
       boxShadow: '0 0 0 4px ' + accent + '40, 0 0 18px ' + accent + '66',
     })
@@ -186,7 +224,7 @@ html,body{margin:0;background:#0e0f0e}
 
 async function boxes(page, o, size, scope) {
   return page.evaluate((a) => window.__boxes(a), {
-    mark: o.mark, markAll: o.markAll, cells: o.cells, select: o.select,
+    mark: o.mark, line: o.line, markAll: o.markAll, cells: o.cells, select: o.select,
     cols: size?.cols ?? 1, rows: size?.rows ?? 1, accent: ACCENT, scope,
   })
 }
@@ -234,11 +272,11 @@ async function tui(o) {
     let res = { boxed: 0, missing: [], visible: '' }
     while (Date.now() < until) {
       const got = await boxes(page, o, size, '#cast')
-      for (const m of o.mark) if (!got.missing.includes(m)) seen.add(m)
+      for (const m of [...o.mark, ...o.line]) if (!got.missing.includes(m)) seen.add(m)
       res = { boxed: Math.max(res.boxed, got.boxed), missing: [], visible: got.visible }
       await page.waitForTimeout(120)
     }
-    res.missing = o.mark.filter((m) => !seen.has(m))
+    res.missing = [...o.mark, ...o.line].filter((m) => !seen.has(m))
     const video = page.video()
     await ctx.close()
     if (!res.missing.length) renameSync(await video.path(), o.out)
