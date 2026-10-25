@@ -8068,3 +8068,6 @@
 {"ts":"2026-10-25T18:10:22Z","id":"moai-4s5n.m4u","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-25T18:10:22Z","id":"moai-4s5n.u8x","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"들인 것: 18건 고침(7862cf34), 5·6·걸음 12 가이드 글은 내가 고침(9869bfd3), (b) 는 스킬이 --issue 를 늘 주라고(fc7aff94), docs/workflow.md 는 7-4 로(b1df52b1). 넘긴 것: (a)(c)(d)(e) → moai-z4ln, 아카이브 노트 → moai-l4ek, 제목의 <…> → moai-aqth — 셋 다 릴리스 밖. 1619a639 제목은 다시 안 쓴다(가지를 다시 쓰지 않는다)"}
 {"ts":"2026-10-25T18:10:29Z","id":"moai-4s5n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: milestone/moai-8e03 에 8d0193c2 로 들었다. 릴리스 밖으로 넘긴 backlog moai-z4ln·moai-l4ek·moai-aqth. 심은 교훈 여덟은 아카이브된 출처 탓에 Lesson: 노트가 없다(moai-l4ek)"}
+{"ts":"2026-10-25T18:10:59Z","id":"moai-4s5n","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: 8d0193c2"}
+{"ts":"2026-10-25T18:12:17Z","id":"moai-9eod","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.25.0 릴리스 — milestone/moai-2cu8 를 develop 에 들이고 판을 낸다"}
+{"ts":"2026-10-25T18:12:21Z","id":"moai-9eod","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
