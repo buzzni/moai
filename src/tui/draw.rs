@@ -4271,7 +4271,7 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
     // **위키 토막은 커밋 뒤다**(moai-xp7l.vyw) — CLI 상세(`moai show <id>`)의 토막과 같은 고름이다(`wiki::about`): 이
     // id·에픽 id 를 댄 페이지, 제목 낱말로 선 관련 절. 지은 것은 [`fill_wiki`] 가 들여 둔다.
     if let Some(wiki) =
-        app.wiki_about.as_ref().filter(|a| a.id == i.id && site.repo.as_ref().is_some_and(|r| r.here() == a.root))
+        app.wiki_about.as_ref().filter(|a| site.repo.as_ref().is_some_and(|r| a.fits(r.here(), i, wiki_epic(site, i))))
     {
         out.extend(about_wiki_lines(site.lang, wiki));
     }
@@ -4282,10 +4282,34 @@ fn about<'a>(app: &App, site: &Site, idx: usize, e: &Entry, w: usize) -> Vec<Lin
 /// 든다: 폭이 바뀌어도 다시 지을 것이 없고, 자르기는 그리는 쪽이 한 번에 한다. 교훈(`lessons`)은 안 든다 — 그 줄의
 /// 저널을 읽어야 하는데 탐색기는 노트를 찾을 때만 읽는다. CLI 상세와 `show --json` 의 `wiki.lessons` 가 낸다.
 pub(super) struct WikiAbout {
+    /// 지은 재료 — 체크아웃, id, 제목(관련 절의 질의), 에픽(댄 페이지의 둘째 id). [`WikiAbout::fits`] 가 견준다.
     root: std::path::PathBuf,
     id: String,
+    title: String,
+    epic: Option<String>,
     named: Vec<WikiLine>,
     related: Vec<WikiLine>,
+}
+
+impl WikiAbout {
+    /// 이 토막이 그 체크아웃의 그 줄을 **지금의 제목과 에픽으로** 지은 것인가 — 짓는 쪽([`fill_wiki`])과 그리는
+    /// 쪽([`about`])이 같은 자로 묻는다. **제목과 에픽도 견준다**(리뷰 moai-xp7l.mug) — 옆 세션이 커서 밑 줄의 제목이나
+    /// 에픽을 바꾸면 다시 읽기가 커서를 그 줄에 두니, 체크아웃과 id 만 보던 판은 옛 제목의 관련 절과 옛 에픽을 댄 페이지를
+    /// 커서가 떠날 때까지 그렸다. [`Body::fits`] 가 글 자체를 견주는 것과 같은 까닭이다.
+    fn fits(&self, root: &std::path::Path, i: &crate::model::Issue, epic: Option<&str>) -> bool {
+        self.root == root && self.id == i.id && self.title == i.title && self.epic.as_deref() == epic
+    }
+}
+
+/// 상세의 Wiki 토막이 대는 에픽 — `moai show` 의 자(`report::stands_in`, `derived_epic` 과 같은 답)다(리뷰
+/// moai-xp7l.mug): 묶음 줄은 없고, 종류가 다른 쌍둥이에게 id 가 가려진 줄(트리가 `(길 잃음)` 에 두는 줄)도 적힌 `epic`
+/// 과 상관없이 없다. 그 밖에는 적힌 `epic` 이 먼저, 없으면 물려받은 것이다. 상세의 에픽 칸(적힌 값을 먼저 대어 끊긴
+/// 참조를 드러낸다)과는 묻는 것이 다르다 — 여기는 소속이다.
+fn wiki_epic<'s>(site: &'s Site, i: &'s crate::model::Issue) -> Option<&'s str> {
+    if crate::report::is_group(i) {
+        return None;
+    }
+    crate::report::stands_in(&site.ground.kinds(), i, site.ground.epic.get(i.id.as_str()).map(String::as_str))
 }
 
 /// 토막의 한 줄 — `path` 나 `path:line`, 제목(관련 절이면 `› 머리글` 까지), 교훈 페이지인가.
@@ -4295,47 +4319,60 @@ struct WikiLine {
     lesson: bool,
 }
 
-/// 커서가 선 줄의 [`WikiAbout`] 를 짓는다 — 든 것이 그 체크아웃·그 id 의 것이면 그대로다. 위키는 체크아웃마다 한 번
-/// 읽는다([`App::wiki_pages`]). 못 읽은 위키는 빈 토막이다 — CLI 상세의 사람 화면과 같다.
+/// 커서가 선 줄의 [`WikiAbout`] 를 짓는다 — 든 것이 그 줄에 맞으면([`WikiAbout::fits`]) 그대로다. 위키는 체크아웃마다
+/// 한 번 읽는다([`App::wiki_pages`]). 못 읽은 위키는 빈 토막이다 — CLI 상세의 사람 화면과 같다.
 fn fill_wiki(app: &mut App, rows: &[Row]) {
     let Some(Row::Item(seat, e, _)) = app.current_of(rows) else { return };
     let Some(at) = e.at() else { return };
-    let (root, issue, epic, read) = {
+    // 먼저 위키를 들인다 — 읽은 페이지를 `App` 에 넣는 동안은 줄을 빌려 둘 수 없다.
+    let read = {
         let Some(site) = app.site_of_seat(seat) else { return };
         let (Some(repo), Some(i)) = (site.repo.as_ref(), site.issues.get(at)) else { return };
-        let root = repo.here().to_path_buf();
-        if app.wiki_about.as_ref().is_some_and(|w| w.root == root && w.id == i.id) {
+        if app.wiki_about.as_ref().is_some_and(|w| w.fits(repo.here(), i, wiki_epic(site, i))) {
             return;
         }
-        // 묶음 줄의 `epic` 은 소속이 아니다 — `moai show` 와 같다.
-        let epic = match crate::report::is_group(i) {
-            true => None,
-            false => i.epic.clone().or_else(|| site.index.epic_of(at).map(str::to_string)),
-        };
-        let read = (!app.wiki_pages.contains_key(&root))
-            .then(|| crate::cmd::wiki::read_in(repo, &|_| true).1.map(|w| w.pages).unwrap_or_default());
-        (root, i.clone(), epic, read)
+        let root = repo.here().to_path_buf();
+        (!app.wiki_pages.contains_key(&root))
+            .then(|| (root, crate::cmd::wiki::read_in(repo, &|_| true).1.map(|w| w.pages)))
     };
-    if let Some(pages) = read {
-        app.wiki_pages.insert(root.clone(), pages);
+    // **못 읽은 위키는 안 담는다**(리뷰 moai-xp7l.mug) — 담으면 그 세션 내내 빈 토막이다. 없던 위키 디렉터리를 지으면
+    // 다음 줄에서 선다. 못 읽은 자리를 다시 묻는 값은 `stat` 하나다.
+    if let Some((root, Ok(pages))) = read {
+        app.wiki_pages.insert(root, pages);
     }
-    let pages = app.wiki_pages.get(&root).map_or(&[][..], Vec::as_slice);
-    let about = crate::wiki::about::about(pages, &issue, epic.as_deref(), &[]);
-    let line =
-        |at: String, title: String, slug: &str| WikiLine { at, title, lesson: crate::wiki::seen::is_lesson(slug) };
-    let named = about.named_in.iter().map(|n| line(n.page.path.clone(), n.page.title.clone(), &n.page.slug)).collect();
-    let related = about
-        .related
-        .iter()
-        .map(|h| {
-            let mut title = h.page.title.clone();
-            if let Some(t) = h.heading.as_deref().filter(|t| !crate::wiki::search::same_words(t, &h.page.title)) {
-                title.push_str(&format!(" › {t}"));
-            }
-            line(format!("{}:{}", h.page.path, h.line), title, &h.page.slug)
-        })
-        .collect();
-    app.wiki_about = Some(WikiAbout { root, id: issue.id, named, related });
+    let built = {
+        let Some(site) = app.site_of_seat(seat) else { return };
+        let (Some(repo), Some(i)) = (site.repo.as_ref(), site.issues.get(at)) else { return };
+        let unread = Vec::new();
+        let pages = app.wiki_pages.get(repo.here()).unwrap_or(&unread);
+        let epic = wiki_epic(site, i);
+        let about = crate::wiki::about::about(pages, i, epic, &[]);
+        let line =
+            |at: String, title: String, slug: &str| WikiLine { at, title, lesson: crate::wiki::seen::is_lesson(slug) };
+        let named =
+            about.named_in.iter().map(|n| line(n.page.path.clone(), n.page.title.clone(), &n.page.slug)).collect();
+        // 머리글을 다는 자는 CLI 상세와 한 자다(`view::wiki::section_of`) — 제목 절의 머리글은 제목 그 자체라 안 단다.
+        let related = about
+            .related
+            .iter()
+            .map(|h| {
+                let title = match crate::view::wiki::section_of(h) {
+                    Some(t) => format!("{} › {t}", h.page.title),
+                    None => h.page.title.clone(),
+                };
+                line(format!("{}:{}", h.page.path, h.line), title, &h.page.slug)
+            })
+            .collect();
+        WikiAbout {
+            root: repo.here().to_path_buf(),
+            id: i.id.clone(),
+            title: i.title.clone(),
+            epic: epic.map(str::to_string),
+            named,
+            related,
+        }
+    };
+    app.wiki_about = Some(built);
 }
 
 /// [`WikiAbout`] 를 줄로 — 빈 줄, 머리, 댄 페이지, 관련 절. 둘 다 비면 아무 줄도 없다. 낱말 칸은 둘 가운데 넓은 쪽에
@@ -7746,6 +7783,7 @@ pub(super) mod tests {
         let word = title.split_whitespace().next().unwrap().to_string();
         std::fs::write(s.path().join("docs/lessons/near.md"), format!("# Near\n\n## About {word}\n\n{word} {word}.\n"))
             .unwrap();
+        std::fs::write(s.path().join("docs/okapi.md"), "# Okapi\n\n## About okapi\n\nokapi okapi.\n").unwrap();
         // 낱말이 흔해지지 않게 — 절의 넷에 하나보다 많은 곳에 들면 관련 절로 안 선다(`wiki::search::COMMON_SHARE`).
         for n in 0..8 {
             std::fs::write(s.path().join(format!("docs/fill{n}.md")), format!("# Fill {n}\n\nunrelated\n")).unwrap();
@@ -7754,8 +7792,22 @@ pub(super) mod tests {
         let lines = render(&mut a, 160, 80).join("\n");
         assert!(lines.contains("위키") && lines.contains("docs/own.md") && lines.contains("Own page"), "{lines}");
         assert!(lines.contains("docs/lessons/near.md:") && lines.contains("[교훈]"), "관련 절이 없다\n{lines}");
+        assert!(!lines.contains("docs/okapi.md"), "{lines}");
         std::fs::write(s.path().join("docs/late.md"), format!("# Late\n\n{id}\n")).unwrap();
         assert!(!render(&mut a, 160, 80).join("\n").contains("docs/late.md"), "프레임마다 위키를 다시 읽었다");
+        // **제목이 바뀌면 관련 절도 바뀐다**(리뷰 moai-xp7l.mug) — 옆 세션이 커서 밑 줄의 제목을 고치고 다시 읽기가 커서를 그
+        // 줄에 둔 판이다. 체크아웃과 id 만 보던 판은 옛 제목의 관련 절을 그렸다.
+        let at = a.site.issues.iter().position(|i| i.id == id).unwrap();
+        a.site.issues[at].title = "okapi".into();
+        let lines = render(&mut a, 160, 80).join("\n");
+        assert!(
+            lines.contains("docs/okapi.md:") && !lines.contains("docs/lessons/near.md:"),
+            "옛 제목의 관련 절\n{lines}"
+        );
+        // 위키 창은 열 때마다 위키를 새로 읽는다 — 상세도 그 뒤로는 새 페이지를 댄다.
+        a.open_wiki();
+        a.mode = Mode::Browse;
+        assert!(render(&mut a, 160, 80).join("\n").contains("docs/late.md"), "위키 창이 읽은 페이지를 상세가 안 댔다");
     }
 
     /// 본문에 든 ESC 가 화면을 다시 칠하지 못한다.

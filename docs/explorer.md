@@ -40,9 +40,12 @@ directories.
 - The detail describes the row under the cursor. `Ctrl-w w` moves the focus there
   so the same keys scroll it, and back again. After the commits it lists the
   wiki about the row, as `moai show <id>` does: the pages that name the row or
-  its epic, then the related sections its title finds, `path:line` first. The
+  its epic, then the related sections its title finds, `path:line` first. It
+  leaves out the lessons the row's own notes point at (it does not read the
+  notes), so such a lesson can stand among the related sections here while
+  `moai show <id>` lists it as a lesson. The
   wiki is read once per checkout, so a page written after the explorer opened
-  shows the next time it opens
+  shows once `SPC g w` has read the wiki again, or the next time it opens
 
 **What the list shows is the view.** To begin with every column is shown,
 done included, and [deferred](glossary.md#deferred) work is hidden; the path

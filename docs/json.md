@@ -102,7 +102,11 @@ from the checkout you call it in:
   one per page, leaving out the pages already in `lessons` or `named_in`: `slug`, `path`,
   `title`, `line` (counted from 1, the section's heading line), `score`, and
   `heading` and `anchor` unless the section comes before the page's first
-  heading. A section stands only when it matches two words of the title that
+  heading. `heading` is written as in the page; `title_heading` (`true`, absent
+  otherwise) says that heading is the page title itself, so a screen drawing
+  `title › heading` leaves it off — moai compares the words as drawn, and a
+  reader that compares them again gets a different answer on markup and
+  Korean. A section stands only when it matches two words of the title that
   are not common across the wiki (one, when the title has only one such word);
   a word in more than a quarter of the sections, and in more than one, does
   not count. A Korean, Chinese or Japanese word is one word however many
@@ -138,8 +142,10 @@ line that starts at the head of a note counts; indented lines and lines inside
 a fence are examples. Two notes for one lesson on one row count once.
 
 - `moai wiki ls --json` — `dir_abs` beside `dir`: the same wiki directory as an
-  absolute path in this checkout (`dir` is relative to it), absent only when
-  `wiki_dir` points outside the checkout. `moai wiki search --json` carries it too
+  absolute path in this checkout (`dir` is relative to it), absent when
+  `wiki_dir` points outside the checkout and when that path is not UTF-8 (a
+  lossy spelling would name a directory that is not there). `moai wiki search
+  --json` carries it too
 - `moai wiki ls --json` — every page has `seen_count`, the number of different
   rows whose notes name it (`0` for a page that is not a lesson)
 - `moai wiki show <slug> --json` — `seen`, always there (`[]` for a page that is

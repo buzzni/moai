@@ -117,6 +117,10 @@ pub fn page(title: &str, body: &str, issue: Option<&str>) -> Result<String, Refu
 /// 읽혀 제목에서 사라졌고(`moai wiki ls` 가 `Keep  in mind` 를 냈다), `&amp;` 는 `&` 로, `*a*`·`[a](b)` 는 꼴 글자를
 /// 잃었다. 막는 것은 `\ < & [ ] * _ ~` 와 끝의 `#`(머리글을 닫는 줄로 읽힌다)이다. **백틱 토막은 그대로 둔다** — 그
 /// 안에서는 `\` 가 글자로 서고, 토막 자체는 `Code` 로 제목에 든다. 짝이 없는 백틱은 막는다.
+///
+/// **낱말 안의 `_` 는 안 막는다**(리뷰 moai-xp7l.mug) — 앞뒤가 글자·숫자인 `_` 는 CommonMark 에서 강조를 못 연다.
+/// 막던 판은 `wiki_dir` 을 `wiki\_dir` 로 적어, 원문 머리글이 제목과 다른 낱말로 읽히고(`wiki`·`_dir`) 검색의 발췌에
+/// 역슬래시가 섰다.
 fn heading_text(title: &str) -> String {
     let b = title.as_bytes();
     let mut out = String::with_capacity(title.len() + 8);
@@ -155,7 +159,10 @@ fn heading_text(title: &str) -> String {
         }
         // 바이트가 ASCII 가 아니면 글자째 옮긴다.
         let c = title[i..].chars().next().unwrap_or_default();
-        if matches!(c, '\\' | '<' | '&' | '[' | ']' | '*' | '_' | '~') || (c == '#' && i + 1 == b.len()) {
+        let in_word = c == '_'
+            && title[..i].chars().next_back().is_some_and(char::is_alphanumeric)
+            && title[i + 1..].chars().next().is_some_and(char::is_alphanumeric);
+        if (matches!(c, '\\' | '<' | '&' | '[' | ']' | '*' | '_' | '~') && !in_word) || (c == '#' && i + 1 == b.len()) {
             out.push('\\');
         }
         out.push(c);
@@ -308,10 +315,15 @@ mod tests {
             ("A lone ` tick", "A lone ` tick"),
             ("Ends with #", "Ends with #"),
             ("C# stays", "C# stays"),
+            ("Keep wiki_dir and __init__", "Keep wiki_dir and __init__"),
         ] {
             let text = page(title, BODY, None).unwrap();
             assert_eq!(super::super::parse("t", &text, "moai").title.as_deref(), Some(want), "{text}");
         }
+        // 낱말 안의 `_` 는 강조를 못 열어 안 막는다(리뷰 moai-xp7l.mug) — 막으면 원문 머리글이 `wiki`·`_dir` 로 읽혀 제목과
+        // 다른 낱말이 된다. 낱말 가의 `_` 는 막는다.
+        let text = page("Keep wiki_dir and __init__", BODY, None).unwrap();
+        assert!(text.starts_with("# Keep wiki_dir and \\_\\_init\\_\\_\n"), "{text}");
     }
 
     /// 긴 제목의 슬러그는 [`SLUG_MAX`] 안에서 `-` 에 맞춰 자른다 — 파일 이름의 상한에 안 닿게, 같은 제목은 같은 이름으로.

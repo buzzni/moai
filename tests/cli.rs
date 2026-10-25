@@ -27215,6 +27215,32 @@ fn wiki_search_does_not_repeat_a_title_with_backticks() {
     assert!(heads.iter().any(|l| l.contains(" › ")), "아래 절의 머리글이 빠졌다\n{out}");
 }
 
+/// `show <id> --json` 의 관련 절은 제목 절이면 `title_heading` 을 단다(리뷰 moai-xp7l.mug) — `heading` 은 적힌 그대로라
+/// (`wiki\_dir`) 그것을 다시 가르는 화면은 같은 말을 두 번 세웠다. 사람 화면은 그 머리글을 안 단다.
+#[test]
+fn show_marks_a_related_section_that_is_the_title() {
+    let s = init("show-title-heading");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(
+        s.path().join("docs/dir.md"),
+        "# Set wiki\\_dir quokka\n\nThe quokka setting.\n\n## Walrus notes\n\nwalrus only.\n",
+    )
+    .unwrap();
+    // 낱말이 흔해지지 않게 — 절의 넷에 하나보다 많은 곳에 들면 관련 절로 안 선다.
+    for n in 0..8 {
+        std::fs::write(s.path().join(format!("docs/fill{n}.md")), format!("# Fill {n}\n\nunrelated\n")).unwrap();
+    }
+    let id = add(s.path(), &["Set wiki_dir quokka"]);
+    let v: serde_json::Value = serde_json::from_str(ok(s.path(), &["show", &id, "--json"]).trim()).unwrap();
+    let hit = v["wiki"]["related"].as_array().unwrap().iter().find(|h| h["path"] == "docs/dir.md").cloned();
+    let hit = hit.unwrap_or_else(|| panic!("관련 절이 없다 — {v}"));
+    assert_eq!(hit["heading"], "Set wiki\\_dir quokka", "{v}");
+    assert_eq!(hit["title_heading"], true, "{v}");
+    let drawn = ok(s.path(), &["show", &id]);
+    let line = drawn.lines().find(|l| l.contains("docs/dir.md:")).unwrap_or_else(|| panic!("{drawn}"));
+    assert!(line.contains("Set wiki_dir quokka") && !line.contains(" › "), "제목을 머리글로 또 댔다\n{drawn}");
+}
+
 /// `moai wiki search` — 화면의 `path:line`·`제목 › 머리글`·발췌·끝 줄, `--json` 의 키와 **1 부터** 세는 줄(moai-g8pt.ryi).
 /// 절의 머리글 줄은 5 줄(`## Merging…`), 발췌는 7 줄이다 — 0 부터 세거나 1 을 두 번 더하면 이 수가 어긋난다.
 #[test]
@@ -27346,7 +27372,7 @@ const LESSON: &str = "## What happened\nA check ended in grep.\n\n## Why\ngrep f
 /// `wiki learn` 의 드문 자리(moai-xp7l.c4h).
 ///
 /// - `-` 로 여는 제목: 빈칸이 든 글은 제목이고, 빈칸 없는 `-x` 는 깃발을 잘못 친 것으로 보고 `--` 뒤에서만 받는다
-/// - 죽은 쓰기가 남긴 임시 파일(`.<이름>.part-<pid>`)은 페이지가 아니고 그 슬러그를 안 막는다
+/// - 죽은 쓰기가 남긴 임시 파일(`.moai/<이름>.tmp.…`)은 페이지가 아니고 그 슬러그를 안 막고, 남의 것이라 안 지운다
 #[test]
 fn wiki_learn_takes_a_dash_title_and_ignores_a_dead_part_file() {
     let s = init("wiki-learn-edges");
@@ -27364,17 +27390,25 @@ fn wiki_learn_takes_a_dash_title_and_ignores_a_dead_part_file() {
     assert!(!flag.status.success() && !s.path().join("docs/lessons/x.md").exists());
     assert!(String::from_utf8_lossy(&flag.stderr).contains("-x"), "{}", String::from_utf8_lossy(&flag.stderr));
 
-    std::fs::write(s.path().join("docs/lessons/.gone.md.part-1"), "").unwrap();
+    // 죽은 쓰기의 임시 파일은 `.moai/` 에 남는다 — 위키에 안 서고(`git add -- docs` 에 안 딸려 온다), 남의 것이라
+    // 안 지운다(리뷰 moai-xp7l.mug). 이 부름의 임시 파일은 남지 않는다.
+    let dead = s.path().join(".moai/gone-rule.md.tmp.1.0");
+    std::fs::write(&dead, "half").unwrap();
     let out = from_stdin(s.path(), &["wiki", "learn", "Gone rule", "-b", "-", "--issue", "none"], body);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(std::fs::read_to_string(s.path().join("docs/lessons/gone-rule.md")).unwrap().starts_with("# Gone rule"));
-    let leftovers: Vec<_> = std::fs::read_dir(s.path().join("docs/lessons"))
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.contains(".part-") && n != ".gone.md.part-1")
-        .collect();
-    assert!(leftovers.is_empty(), "임시 파일이 남았다 — {leftovers:?}");
-    assert!(!ok(s.path(), &["wiki", "ls", "--json"]).contains("part-1"), "임시 파일을 페이지로 읽었다");
+    assert_eq!(std::fs::read_to_string(&dead).unwrap(), "half", "남의 임시 파일을 건드렸다");
+    let names = |dir: &str| -> Vec<String> {
+        let mut out: Vec<String> = std::fs::read_dir(s.path().join(dir))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        out.sort();
+        out
+    };
+    assert_eq!(names("docs/lessons"), ["dash.md", "gone-rule.md"], "위키에 임시 파일이 섰다");
+    let temps: Vec<String> = names(".moai").into_iter().filter(|n| n.contains(".tmp.")).collect();
+    assert_eq!(temps, ["gone-rule.md.tmp.1.0"], "임시 파일이 남았다");
 }
 
 /// 노트가 저널에 못 들면 `wiki learn` 은 `noted: true` 를 안 낸다(moai-xp7l.c4h) — 손으로 고친 스냅샷은 노트의 쓰기가
@@ -27387,8 +27421,17 @@ fn wiki_learn_does_not_claim_a_note_the_journal_lost() {
     std::fs::create_dir_all(s.path().join("docs")).unwrap();
     let id = add(s.path(), &["row"]);
     let snap = s.path().join(".moai/issues.jsonl");
-    let text = std::fs::read_to_string(&snap).unwrap();
-    std::fs::write(&snap, format!("\n{text}")).unwrap(); // 표준형이 아니다 — 쓰기가 다시 쓴다
+    // 표준형이 아닌 줄 — 기본값(`priority` 2)을 적은 줄은 정규화가 걷으니, 노트의 쓰기가 스냅샷을 다시 써 "썼다" 가 된다.
+    // **빈 줄로는 안 된다**(리뷰 moai-xp7l.mug) — 읽기가 빈 줄을 건너뛰어 쓰기가 같은 글을 보고 안 쓰니, 고친 길이 아니라
+    // 옛 거절 길(`안 썼으면 그대로 Err`)이 답해 이 시험은 고침 없이도 초록이었다. 부를 때마다 다시 비튼다 — 진 부름도
+    // 스냅샷은 표준형으로 써 두고 간다.
+    let skew = || {
+        let text = std::fs::read_to_string(&snap).unwrap();
+        let skewed = text.replace(&format!(r#""id":"{id}","#), &format!(r#""id":"{id}","priority":2,"#));
+        assert_ne!(skewed, text, "줄을 못 비틀었다\n{text}");
+        std::fs::write(&snap, skewed).unwrap();
+    };
+    let landed = || !std::fs::read_to_string(&snap).unwrap().contains(r#""priority":2"#);
     let journal = s.path().join(".moai/journal");
     std::fs::create_dir_all(&journal).unwrap();
     for e in std::fs::read_dir(&journal).unwrap() {
@@ -27396,14 +27439,24 @@ fn wiki_learn_does_not_claim_a_note_the_journal_lost() {
     }
     std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
     if std::fs::File::create(journal.join("probe")).is_ok() {
+        std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
         return; // root 는 권한을 안 본다
     }
+    // `moai note` 도 같은 자다 — 노트만 적는 쓰기는 저널이 전부라 잃었으면 비영이고, 다시 칠 줄을 댄다.
+    skew();
+    let note = moai(s.path(), &["note", &id, "kept?"]);
+    assert!(landed(), "쓰기가 스냅샷을 안 다시 썼다 — 고친 길을 안 지났다");
+    assert!(!note.status.success(), "노트를 잃고 0 으로 끝났다\n{}", text(&note));
+    let said = String::from_utf8_lossy(&note.stderr);
+    assert!(said.contains("moai note") && said.contains(&id), "{said}");
+    skew();
     let out = from_stdin(
         s.path(),
         &["wiki", "learn", "Lost rule", "-b", "-", "--issue", &id, "--json"],
         "## Do this instead\ny\n",
     );
     std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(landed(), "쓰기가 스냅샷을 안 다시 썼다 — 고친 길을 안 지났다");
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(!out.status.success() && !said.contains(r#""noted":true"#), "{said}");
     assert!(s.path().join("docs/lessons/lost-rule.md").exists(), "페이지는 남는다");
@@ -27846,12 +27899,16 @@ fn a_note_lands_on_an_archived_row() {
         serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/alpha", "--json"]).trim()).unwrap();
     assert_eq!(v["seen"][0]["id"], a.as_str(), "{v}");
     assert!(ok(s.path(), &["show", &a]).contains("Lesson: lessons/alpha"));
-    assert!(!ok(s.path(), &["show", "--all"]).contains(&a), "노트가 줄을 산 파일로 되돌렸다");
+    // 산 파일을 직접 본다 — `show --all` 은 done 에 `archive_days` 넘게 선 줄을 빼서, 그 줄이 되돌아왔어도 안 낸다(리뷰
+    // moai-xp7l.mug).
+    let live = || std::fs::read_to_string(s.path().join(".moai/issues.jsonl")).unwrap();
+    assert!(!live().contains(&format!(r#""id":"{a}""#)), "노트가 줄을 산 파일로 되돌렸다");
     // `wiki learn --issue` 도 같은 자다.
     let out =
         from_stdin(s.path(), &["wiki", "learn", "Gamma rule", "-b", "-", "--issue", &a], "## Do this instead\nz\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(s.path().join("docs/lessons/gamma-rule.md").exists());
+    assert!(!live().contains(&format!(r#""id":"{a}""#)), "교훈의 노트가 줄을 산 파일로 되돌렸다");
     // 없는 id 는 그대로 거절한다.
     assert!(!moai(s.path(), &["note", "moai-zzzz", "x"]).status.success());
 }

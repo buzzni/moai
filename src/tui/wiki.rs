@@ -62,19 +62,6 @@ pub enum Side {
     Page,
 }
 
-/// [`Window::shown`] 이 매긴 차례를 찾는 글과 함께 든 값 — 값일 뿐이라 창끼리 견줄 때는 안 센다(없어도 같은 목록이
-/// 다시 매겨진다).
-#[derive(Debug, Clone, Default)]
-struct Ranked(std::cell::RefCell<Option<(String, Vec<usize>)>>);
-
-impl PartialEq for Ranked {
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for Ranked {}
-
 /// 창의 상태 — 연 순간 읽은 페이지들과 커서·굴린 자리·건너온 자취.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window {
@@ -115,8 +102,10 @@ pub struct Window {
     pub(super) laid: Option<super::draw::WikiLaid>,
     /// 걸린 찾기 — 친 글 그대로. 비면 없다.
     search: Option<String>,
-    /// 찾는 글 하나로 매긴 목록의 차례 — [`Window::shown`] 이 그 글이 바뀔 때만 다시 매긴다(그림 한 번에 여러 번 부른다).
-    ranked: Ranked,
+    /// 찾는 글 하나로 매긴 목록의 차례와 그 글 — 글이 바뀌면 [`Window::refilter`] 가 다시 매긴다(그림 한 번에 여러 번
+    /// 부르는 [`Window::shown`] 은 든 것을 쓴다). **`RefCell` 로 숨기지 않는다**(`draw::fill_body` 와 같은 자, 리뷰
+    /// moai-xp7l.mug) — 다시 매기는 때가 코드에서 보여야 한다. 든 글이 지금 글과 다르면 `shown` 이 그 자리에서 매긴다.
+    order: Option<(String, Vec<usize>)>,
     /// 찾는 글을 치는 중 — 칸과, 칸을 열기 전의 찾기. Esc 가 그 찾기로 돌아간다.
     pub typing: Option<Typing>,
     /// 연 순간의 id 제목.
@@ -213,7 +202,7 @@ impl Window {
             chord: Chord::default(),
             laid: None,
             search: None,
-            ranked: Ranked::default(),
+            order: None,
             typing: None,
             titles,
             choose: None,
@@ -368,45 +357,48 @@ impl Window {
     /// 페이지 쪽은 연 순간 접어 둔 것([`Window::folded`])이다. 못 읽은 페이지는 제목으로만 걸린다.
     pub fn shown(&self) -> Vec<&Page> {
         let Some(q) = self.query() else { return self.pages.iter().collect() };
-        let mut ranked = self.ranked.0.borrow_mut();
-        if ranked.as_ref().is_none_or(|(was, _)| was != q) {
-            *ranked = Some((q.to_string(), self.order_for(q)));
-        }
-        ranked.as_ref().map_or_else(Vec::new, |(_, order)| order.iter().map(|&i| &self.pages[i]).collect())
+        let fresh;
+        let order = match &self.order {
+            Some((was, order)) if was == q => order,
+            _ => {
+                fresh = self.order_for(q);
+                &fresh
+            }
+        };
+        order.iter().map(|&i| &self.pages[i]).collect()
     }
 
-    /// [`Window::shown`] 의 차례를 매긴다 — 순위로 맞힌 페이지, 그다음 글자로만 든 페이지. 겹치면 앞의 것이다.
+    /// [`Window::shown`] 의 차례를 매긴다 — 순위로 맞힌 페이지, 그다음 글자로만 든 페이지. 겹치면 앞의 것이다. 낱말이
+    /// 없는 글이면 순위가 아무것도 안 맞힌다([`crate::wiki::search::rank`]).
     fn order_for(&self, q: &str) -> Vec<usize> {
         let at: std::collections::HashMap<&str, usize> =
             self.pages.iter().enumerate().map(|(i, p)| (p.slug.as_str(), i)).collect();
+        let ranked = crate::wiki::search::rank(&self.pages, q, usize::MAX).hits;
+        let folded = q.to_lowercase();
+        let typed = self.folded.iter().enumerate().filter(|(_, (title, body))| {
+            title.contains(&folded) || body.as_deref().is_some_and(|b| b.contains(&folded))
+        });
         let mut seen = vec![false; self.pages.len()];
-        let mut out = Vec::new();
-        let mut take = |i: usize, out: &mut Vec<usize>| {
-            if !std::mem::replace(&mut seen[i], true) {
-                out.push(i);
-            }
-        };
-        if !crate::wiki::search::terms(q).is_empty() {
-            for h in crate::wiki::search::rank(&self.pages, q, usize::MAX).hits {
-                if let Some(&i) = at.get(h.page.slug.as_str()) {
-                    take(i, &mut out);
-                }
-            }
-        }
-        let q = q.to_lowercase();
-        for (i, (title, body)) in self.folded.iter().enumerate() {
-            if title.contains(&q) || body.as_deref().is_some_and(|b| b.contains(&q)) {
-                take(i, &mut out);
-            }
-        }
-        out
+        ranked
+            .iter()
+            .filter_map(|h| at.get(h.page.slug.as_str()).copied())
+            .chain(typed.map(|(i, _)| i))
+            .filter(|&i| !std::mem::replace(&mut seen[i], true))
+            .collect()
     }
 
     /// 찾는 글이 바뀐 뒤 커서를 다시 세운다 — **보던 페이지가 남았으면 그 페이지에** 선다. 빠졌으면 첫 줄이고, 본문은
     /// 첫 줄로 돌아간다.
     ///
     /// 굴려 떼어 둔 화면([`Window::adrift`])은 걷는다 — 굴린 자리는 좁히기 전 목록의 줄이다.
+    ///
+    /// **차례도 여기서 다시 매긴다**([`Window::order`]) — 글이 바뀐 때만이다. 치는 칸은 커서만 옮긴 키(`←`)에도 여기를
+    /// 부르는데, 그때마다 위키 전부에 순위를 다시 매길 까닭이 없다.
     fn refilter(&mut self, was: Option<String>) {
+        if self.order.as_ref().map(|(q, _)| q.as_str()) != self.query() {
+            let order = self.query().map(|q| (q.to_string(), self.order_for(q)));
+            self.order = order;
+        }
         self.adrift = false;
         let at = was.and_then(|slug| self.shown().iter().position(|p| p.slug == slug));
         match at {
@@ -647,6 +639,10 @@ impl App {
     /// `SPC g w` — 창을 연다. 읽을 위키를 못 정하거나 못 읽으면, 또 페이지가 하나도 없으면 알림 한 줄로 까닭을 대고
     /// 안 연다 — 통계 창이 못 셀 때와 같다(2026-10-04, 일꾼이 정했다 — 빈 창에는 할 일이 없다).
     pub(super) fn open_wiki(&mut self) {
+        // **상세의 Wiki 토막도 다시 읽게 한다**(리뷰 moai-xp7l.mug) — 창은 열 때마다 위키를 새로 읽는데, 상세가 체크아웃마다
+        // 한 번 읽어 둔 것([`App::wiki_pages`])을 두면 창에 선 페이지가 상세에는 세션 내내 안 선다. 다음 그림이 다시 읽는다.
+        self.wiki_pages.clear();
+        self.wiki_about = None;
         let lang = self.site.lang;
         if !self.on_layer() {
             let Some(repo) = self.site.repo.as_ref() else {

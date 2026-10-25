@@ -362,9 +362,17 @@ fn project_of(site: &Site, value: &str, lang: Lang) -> Result<std::path::PathBuf
 /// 그 말이 읽을 때마다 "moai 가 한 말" 로 섰다. 탐색기는 시키지 않은 겹쳐 보기의 그 까닭을 안 세운다(moai-d5vn) — 떼어도
 /// 줄은 같다: 겹칠 옆이 없다. git 이 저장소를 찾는 자리(`.git` 이 선 조상, `worktree::own_git` 과 같은 자)로 잰다 — git 을
 /// 안 띄운다.
+///
+/// **떼는 것은 `--` 앞의 깃발뿐이다**(리뷰 moai-xp7l.mug) — 뒤는 값이다(`/api/wiki-search` 의 낱말, `show -- <id>`). 다 떼던
+/// 판은 `--worktree` 라는 낱말을 찾는 위키 검색에서 그 낱말을 지워, 자식이 "낱말이 없다" 로 2 를 냈다.
 fn overlay_in_git(mut args: Vec<String>, cwd: &std::path::Path) -> Vec<String> {
     if !cwd.ancestors().any(|dir| dir.join(".git").exists()) {
-        args.retain(|arg| arg != "--worktree");
+        let values = args.iter().position(|arg| arg == "--").unwrap_or(args.len());
+        let mut at = 0;
+        args.retain(|arg| {
+            at += 1;
+            at > values || arg != "--worktree"
+        });
     }
     args
 }
@@ -420,6 +428,11 @@ mod tests {
         let args = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
         let asked = args(&["show", "--all", "--worktree", "--fields=id"]);
         assert_eq!(overlay_in_git(asked.clone(), s.path()), args(&["show", "--all", "--fields=id"]));
+        // `--` 뒤는 값이다 — `--worktree` 라는 낱말을 찾는 위키 검색의 낱말을 안 뗀다(리뷰 moai-xp7l.mug).
+        let words = args(&["wiki", "search", "-n", "2000", "--", "--worktree"]);
+        assert_eq!(overlay_in_git(words.clone(), s.path()), words);
+        let one = args(&["show", "--worktree", "--", "moai-1abc"]);
+        assert_eq!(overlay_in_git(one, s.path()), args(&["show", "--", "moai-1abc"]));
         std::fs::create_dir_all(s.path().join(".git")).unwrap();
         std::fs::create_dir_all(s.path().join("sub")).unwrap();
         assert_eq!(overlay_in_git(asked.clone(), &s.path().join("sub")), asked, "체크아웃 밑의 자리");

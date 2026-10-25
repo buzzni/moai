@@ -2502,8 +2502,9 @@ fn atomic(path: &Path, bytes: &[u8], within: Option<&Path>, stage: Option<&Path>
 }
 
 /// 임시 자리 `dir` 이 링크를 다 푼 뒤 체크아웃 `root` 안이고 그 `.git` 밖인가 — 대상의 디렉터리를 재는 [`resolve`] 와 같은
-/// 자다. 없는 자리는 아니다 — 거기서는 어차피 못 짓는다.
-fn stage_inside(dir: &Path, root: &Path) -> bool {
+/// 자다. 없는 자리는 아니다 — 거기서는 어차피 못 짓는다. `wiki learn` 의 교훈 페이지도 이 자로 임시 자리를 고른다
+/// (`cmd::wiki::write_new`).
+pub(crate) fn stage_inside(dir: &Path, root: &Path) -> bool {
     let root = crate::path::real(root);
     crate::path::canonical(dir).is_ok_and(|dir| dir.strip_prefix(&root).is_ok_and(|rest| !crate::held::into_git(rest)))
 }
