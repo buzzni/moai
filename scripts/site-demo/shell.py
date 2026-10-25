@@ -9,7 +9,7 @@ drive.py 는 moai tui 를 띄우지만, 사용 방법 페이지의 장면(init �
 """
 import fcntl, json, os, pty, select, shlex, signal, struct, subprocess, sys, termios, time
 
-ENTER, ESC, UP, DOWN, LEFT, RIGHT = '\r', '\x1b', '\x1b[A', '\x1b[B', '\x1b[D', '\x1b[C'
+ENTER, ESC, UP, DOWN, LEFT, RIGHT, CLEAR = '\r', '\x1b', '\x1b[A', '\x1b[B', '\x1b[D', '\x1b[C', '\x0c'
 
 def scenes(repo, env):
     def moai_json(*args):
@@ -30,6 +30,10 @@ def scenes(repo, env):
     def epic_id():
         rows = moai_json('show', '-g', 'Markdown export', '--type', 'epic')
         return rows[0]['id']
+    def demo_id(name):
+        # seed.sh 가 적어 둔 id (.demo-ids 의 name=id 줄)
+        with open(os.path.join(repo, '.demo-ids')) as f:
+            return dict(l.strip().split('=', 1) for l in f if '=' in l)[name]
 
     return {
         # 빈 저장소에서 moai init: 칸을 오가며 고를 것을 보이고, Enter 로 심은 뒤 무엇이 생겼는지 본다
@@ -70,6 +74,25 @@ def scenes(repo, env):
             (1.2, None),
             *key(' ', 'x', gap=0.8),
             (1.5, None),
+        ],
+        # 위키를 찾고, 교훈을 적고, 이슈가 위키를 내미는 것을 본다 (v0.26.0 의 Discord 소식, moai-m7jm). 이미 선 교훈
+        # 하나는 record-guide.sh 가 심어 둔다. typed 의 then 은 Enter 앞의 멈춤이라 출력을 볼 틈은 (초, None) 로 따로
+        # 둔다 — 안 두면 다음 명령의 첫 글자가 출력보다 먼저 찍힌다. Ctrl-L 은 화면을 비워 한 장면에 명령 하나만 서게 한다
+        'wiki': [
+            (1.2, None),
+            *typed('moai wiki search worker index -n 5', then=0.6),
+            (4.0, CLEAR),
+            *typed_later(lambda: f"moai wiki learn 'Test a paste, not only typing' --issue {demo_id('conflict')} -b - <<'LESSON'", then=0.4),
+            *typed('## What happened', then=0.3),
+            *typed('A pasted paragraph got a new id, so sync saw a delete plus an insert.', gap=0.02, then=0.3),
+            *typed('## Do this instead', then=0.3),
+            *typed('Paste a block in every editor test that touches ids.', gap=0.02, then=0.3),
+            *typed('LESSON', then=0.6),
+            (2.0, None),
+            *typed('moai wiki ls', then=0.6),
+            (4.0, CLEAR),
+            *typed_later(lambda: f"moai show {demo_id('conflict')}", then=0.6),
+            (5.0, None),
         ],
     }
 
