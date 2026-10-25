@@ -1,0 +1,1 @@
+**A Gantt tab in `moai web` — `SPC g g`.** The tree stays on the left with every folder open and the dates scroll on the right: the dim bar is the plan, the coloured one is when the work actually ran, red is time past the deadline, and the arrows come from the rows that block the one under the cursor. Hover a bar for its dates and blockers.

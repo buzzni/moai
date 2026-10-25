@@ -12,6 +12,34 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-25
+
+### Added
+
+- **The web page has a Gantt tab (`SPC g g`).** The tree, every folder open, stays on
+  the left; the dates scroll on the right at four zoom steps (hour, day, week, month;
+  `-`/`=`, `t` today, `z` fit). It draws what the TUI's Gantt draws, with the same
+  meaning: the planned span (hatched when an epic or milestone counts it from its
+  members), the actual span laid over it in the column's colour, the overdue stretch
+  in red with `!`, `◆` on a deadline-only row, the today line, `‹ ›` for what lies off
+  screen, `n/m` progress, and arrows from the rows that block the one under the cursor.
+  Click a row or a bar for its detail; Shift+wheel or dragging the date header moves
+  the dates; Ctrl+wheel over the dates zooms; the grid's width is dragged and kept.
+  The web detail now shows `start → deadline` too. `moai tui --deep --json` carries
+  each row's `gantt` — the planned and actual spans, progress, overdue days and live
+  blockers — so another program can draw the same chart. (moai-d86e.b2m,
+  moai-d86e.5wj, moai-d86e.en8, moai-d86e.jmq)
+- **A Gantt bar in the web page can be dragged to new days.** The middle moves the
+  start and the deadline together, either end moves one of them, by whole days, and
+  the row is written once, on release — as `moai edit <id> --start <day> --due
+  <day>`, with only the side that moved. A double-click on a day of a row with no
+  days plans that one day. A refusal (a start after the deadline, a day past the
+  deadline above) is shown in moai's words and the bar goes back; a move that went
+  through names the `moai edit` line that puts the days back. A bar an epic or
+  milestone counts from its members does not move. This is the page's first write
+  to the tracker, taken only from the page itself, like the read marks.
+  (moai-d86e.3ud)
+
 ## [0.24.0] - 2026-10-25
 
 ### Added

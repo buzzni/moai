@@ -20,6 +20,11 @@ def scenes(repo):
         return [(gap, ch) for ch in text]
     def key(*seq, gap=0.6):
         return [(gap, k) for k in seq]
+    def drag(x0, y, x1, wait=1.0, gap=0.09):
+        # 왼 단추로 (x0, y) 를 눌러 x1 까지 끌고 놓는다 — SGR 마우스, 칸은 1 부터
+        step = 1 if x1 > x0 else -1
+        moves = [(gap, f'\x1b[<32;{x};{y}M') for x in range(x0 + step, x1 + step, step)]
+        return [(wait, f'\x1b[<0;{x0};{y}M'), *moves, (0.3, f'\x1b[<0;{x1};{y}m')]
     return {
         # 목록 → 칸반 → 위키
         'tour': [
@@ -43,6 +48,29 @@ def scenes(repo):
             (4.0, sh("{moai} mv $(cat .demo-card) review --user " + SAM)),
             (4.0, sh("{moai} mv $(cat .demo-card) done --user " + SAM)),
             (5.0, None),
+        ],
+        # 간트 (v0.24.0 의 Discord 소식, moai-r96m). 계획한 날은 record-tui.sh 가 plan.sh 로 달아 둔다.
+        # 제목 위의 노란 띠는 검색이 아니라 집은 줄이 도는 빛줄기다(draw.rs 의 shimmer) — 기능이라 그대로 두고, 정지 그림에는
+        # 한 걸음이 굳어 찍힌다(moai-vj8w.fuh)
+        # 줄의 차례는 record-tui.sh 가 데모 설정에 적는 order 로 굳힌다 — 기본 차례는 같은 p 끼리 seed 마다 새로 뜨는 id 로 갈려 자리가 안
+        # 선다. 커서와 마우스는 'Sync attachments larger than 10 MB' 를 겨눈다(여섯째 줄, 화면 18 줄). 칸은 120x40
+        # 창(make.sh 의 SIZE — record-tui.sh 의 기본 120x34 가 아니다. 낮은 창은 ▼ 줄을 접어 줄이 한 칸 올라간다)에서
+        # 맞힌 것이다 — 맞춘 화면에서 하루가 한 칸이고 67 이 그 막대의 가운데, 42 가 줄과 날짜 사이의 금.
+        # 창 크기나 seed.sh·plan.sh 의 날을 바꾸면 여기와 make.sh 의 시각을 같이 본다
+        'gantt': [
+            (2.0, SPC), (0.7, 'g'), (0.6, 'g'),
+            (2.5, '='), (2.0, 't'), (2.0, '-'),
+            (2.0, 'H'), *key('H', 'H', 'H', gap=0.5), (1.0, 'L'), *key('L', gap=0.5),
+            (1.4, 't'), (2.0, 'z'),
+            (2.0, 'j'), *key('j', 'j', 'j', 'j', gap=0.4),
+            (1.4, '<'), *key('<', gap=0.8),
+            (1.6, '>'), *key('>', gap=0.8),
+            # 막대 끌기는 그 줄을 다시 쓴다 — 읽음은 쓴 사람을 안 가리니 Mira 자신의 쓰기도 그 줄을 [NEW] 로 세운다
+            # (moai-vj8w.fuh). 화면이 다시 읽은 뒤 r 로 커서 줄을 읽는다. 둘을 합친 3.0 초는 옛 기다림 그대로라 make.sh 의 시각이 안 밀린다
+            *drag(67, 18, 64, wait=2.0, gap=0.25),
+            (1.2, 'r'),
+            *drag(42, 20, 58, wait=1.8),
+            (3.5, None),
         ],
     }
 

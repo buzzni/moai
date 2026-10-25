@@ -1,0 +1,1 @@
+`=` `-` zoom between hours, days, weeks and months, `H` `L` slide, `t` brings today back and `z` fits everything. `<` `>` move a plan by a day — or drag the bar with the mouse, and drag the line between the rows and the dates to widen the titles.

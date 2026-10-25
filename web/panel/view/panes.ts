@@ -5,10 +5,12 @@ import { mountList } from "./list.ts"
 import { mountBoard } from "./board.ts"
 import { mountDetail } from "./detail.ts"
 import { mountWiki } from "./wiki.ts"
+import { mountGantt } from "./gantt.ts"
 
 export const PANES: Panes = {
   list: mountList,
   board: mountBoard,
   detail: mountDetail,
   wiki: mountWiki,
+  gantt: mountGantt,
 }

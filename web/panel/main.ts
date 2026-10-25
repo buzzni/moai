@@ -11,6 +11,7 @@ import { IssueIndex, type Row } from './data/index.js'
 import { createMemory, queryKeyOf, remember, settingsStorage, sortDefault } from './data/memory.js'
 import { useNaming } from './data/people.js'
 import { headerProjects, projectHref, type ProjectEntry } from './data/projects.js'
+import { writePlan, type PlanChange } from './data/plan.js'
 import { isUnread, readMarks } from './data/read.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
@@ -19,7 +20,7 @@ import {
   type Boot, type Loaded,
 } from './data/source.js'
 import { effectiveZone, useZone } from './data/zone.js'
-import { copyFor, speaks } from './i18n/index.js'
+import { copyFor, fill, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
 import { listLines, narrow } from './view/list-model.js'
@@ -351,6 +352,23 @@ async function start(): Promise<void> {
     ])
   }, () => store.getState().view.worktree)
 
+  /**
+   * The gantt's move of a row's planned days (data/plan.ts, moai-d86e.3ud). One that went through reads the rows again —
+   * the bar comes back from moai at its new days — and the detail when it shows that row, then says what moved and the
+   * `moai edit` line that puts it back, with what moai said beside it (rows a pulled-in deadline now overtakes). A
+   * refusal is told in moai's words.
+   */
+  async function movePlan(id: string, change: PlanChange, undo: string): Promise<void> {
+    const done = await writePlan(client, id, change)
+    if (!done.ok) return shell.refuse(done.outcome)
+    await Promise.all([
+      refresher.refresh({ fresh: true }),
+      store.getState().shown.value?.id === id ? rereadDetail(id, loads + 1) : undefined,
+    ])
+    const words = copy.gantt.move
+    shell.say([fill(words.moved, { id }), fill(words.undo, { cmd: undo }), ...(done.said ?? [])].join(' · '))
+  }
+
   /** What an outcome says, as one line of text (the wiki's error state takes a string). */
   function said(loaded: Extract<Loaded<unknown>, { ok: false }>): string {
     const parts = describe(loaded.outcome, copy)?.parts ?? [copy.failed]
@@ -388,6 +406,7 @@ async function start(): Promise<void> {
     index: indexOf,
     activity,
     wiki,
+    movePlan,
     intents: {
       refresh: () => void refresher.refresh(),
       choose: (id) => void choose(id),

@@ -23,7 +23,7 @@ import { DEFAULT_RATIO, normalizeRatio } from './view/split.js'
 
 export type { DetailPosition, Sort, WikiState }
 export { DEFAULT_SORT }
-export type Tab = 'board' | 'list' | 'wiki'
+export type Tab = 'board' | 'list' | 'wiki' | 'gantt'
 export type Focus = 'list' | 'detail'
 /** A list cell (`SPC c`), named as keys/table.ts's `CellField`: `names` is the sticky name line on top. */
 export type ColumnName = 'id' | 'priority' | 'counts' | 'names' | 'tags' | 'epic' | 'assignee' | 'created' | 'updated'

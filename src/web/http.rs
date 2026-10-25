@@ -201,7 +201,7 @@ pub struct Response {
     pub status: u16,
     pub kind: &'static str,
     pub body: Vec<u8>,
-    /// 405 의 `Allow` 머리 — 그 길이 받는 메서드. 405 가 아니면 안 쓴다. 읽음 표시 길은 `POST` 만 받으므로 모든 405 에
+    /// 405 의 `Allow` 머리 — 그 길이 받는 메서드. 405 가 아니면 안 쓴다. 쓰는 길(읽음 표시·계획 날)은 `POST` 만 받으므로 모든 405 에
     /// `GET` 을 적던 판은 `POST` 를 받는 길에 거짓을 말했다(moai-m4ez.4zq).
     pub allow: &'static str,
 }
@@ -369,7 +369,7 @@ mod tests {
         assert!(!host_ok(None), "없는 Host");
     }
 
-    /// **`Allow` 는 응답이 든 메서드를 그대로 쓴다**(moai-m4ez.4zq) — 읽음 표시 길의 405 는 `POST` 다.
+    /// **`Allow` 는 응답이 든 메서드를 그대로 쓴다**(moai-m4ez.4zq) — 쓰는 길의 405 는 `POST` 다.
     #[test]
     fn a_405_names_the_methods_the_response_carries() {
         let mut out = Vec::new();

@@ -1,0 +1,1 @@
+`-` `=` step between hour, day, week and month, `t` brings today back and `z` fits everything. Shift+wheel or dragging the date header slides the dates, Ctrl+wheel zooms, and the line between the grid and the dates drags to widen the titles.
