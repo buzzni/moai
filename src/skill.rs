@@ -1560,6 +1560,8 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
+                    // 위키 검색의 낱말 자리(moai-g8pt.y1u).
+                    .replace("<words>", "parser")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로

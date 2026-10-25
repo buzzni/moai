@@ -459,6 +459,7 @@ const CHEATSHEET: &str = r#"    moai status                            board · 
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
+    moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
@@ -1025,7 +1026,9 @@ const WIKI: &str = r#"The repository's manual is markdown pages under one direct
 in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki show <slug>`
 prints one. When an epic changes what a person does, the window that did it fixes the page
 on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
-that says how — and sweeps the wiki when a person calls it. Nothing checks this."#;
+that says how — and sweeps the wiki when a person calls it. Nothing checks this.
+Before you touch a place, `moai wiki search '<words>'` finds it; read the sections under the
+`Wiki` block of `moai show <id>` (`wiki` in `--json`) first."#;
 
 /// 위키를 고칠지 가르는 물음의 낱말 — **에픽이 사람의 쓰임을 바꿨는가.** 일꾼 브리프 7-4 와 위키
 /// 스킬이 같은 물음을 묻는다. 두 벌로 적으면 한쪽에만 낱말이 늘어, 브리프로 물은 일꾼과 스킬로
@@ -1337,7 +1340,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
 
 ### When a feature request comes in
 
-1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`.
+1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`, and `moai wiki search <keyword>` for what the manual says.
 2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
    and on a "yes" create it in one go. No answer leaves the deadline empty.
 3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
@@ -1771,6 +1774,7 @@ that changed nothing a person does writes nothing.
     moai wiki ls                           the pages: slug and title, and what does not resolve
     moai wiki ls --json                    the same with each page's path, for a machine
     moai wiki show <slug>                  one page, and the pages that link to it
+    moai wiki search <words>              the sections that hold those words, best first (`--json`)
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
   `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
@@ -4688,7 +4692,9 @@ never in the root
    from here on aim every command at `<root>/.worktrees/<epic>` ("In a subagent"), or at
    `<root>/.worktrees/<epic>/<subdir>` for a subdirectory project. If the repository's
    CLAUDE.md says what a new worktree gets (a link for the build output, say), do that first
-4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
+4. Before you ask about a design decision, read the `Wiki` block of `moai show <member>` and
+   `moai wiki search '<that place>'`; do not ask a person what the wiki already answers.
+   Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
    recommendation instead ("When the person is away").
    **In a subagent** there is no `AskUserQuestion`: hand back with `SubagentHandback`, its
@@ -6102,6 +6108,15 @@ stop sending outside work while a release runs",
         assert_eq!(models, ROLES.len(), "설정의 역할과 표의 역할 수가 다르다");
         for (level, role, _) in DIFFICULTY {
             assert!(ROLES.iter().any(|(r, _, _)| *r == role), "난이도 {level} 의 역할 {role} 이 표에 없다");
+        }
+    }
+
+    /// **에이전트가 읽는 글 셋이 모두 `moai wiki search` 를 댄다**(moai-g8pt.y1u). 명령이 있어도 글이 안 대면
+    /// 에이전트는 모르고, 모르면 안 부른다. 한 글에서 빠지면 그 글만 읽는 창이 위키를 못 찾는다.
+    #[test]
+    fn the_wiki_search_stands_in_the_block_the_skill_and_the_worker_steps() {
+        for (name, text) in [("AGENTS 블록", agents()), ("SKILL.md", skill()), ("worker.md", worker())] {
+            assert!(text.contains("moai wiki search"), "{name} 이 moai wiki search 를 안 댄다");
         }
     }
 
