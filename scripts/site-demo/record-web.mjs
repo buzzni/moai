@@ -38,6 +38,7 @@ const { url } = JSON.parse(first)
 const CURSOR = `
   addEventListener('DOMContentLoaded', () => {
     const c = document.createElement('div')
+    c.id = 'demo-cursor'
     c.style.cssText = 'position:fixed;left:0;top:0;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;' +
       'background:rgba(232,121,74,.85);box-shadow:0 0 0 4px rgba(232,121,74,.25);pointer-events:none;z-index:2147483647;' +
       'transition:transform .08s ease'
@@ -93,6 +94,7 @@ function readAll() {
 // 고른 것들에 shot.mjs 와 같은 상자를 친다. 상자는 찍고 걷는다 — 녹화에 남지 않게
 async function still(page, file, ...targets) {
   await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.evaluate(() => document.getElementById('demo-cursor')?.style.setProperty('visibility', 'hidden'))
   await page.waitForTimeout(300)
   const rects = []
   for (const t of targets) rects.push(await t.boundingBox())
@@ -109,6 +111,7 @@ async function still(page, file, ...targets) {
   }, rects)
   await page.screenshot({ path: path.join(outDir, file) })
   await page.evaluate(() => document.querySelectorAll('.demo-box').forEach((d) => d.remove()))
+  await page.evaluate(() => document.getElementById('demo-cursor')?.style.removeProperty('visibility'))
   await page.emulateMedia({ reducedMotion: 'no-preference' })
 }
 
@@ -139,8 +142,19 @@ const scenes = {
     await page.keyboard.press('t'); await page.waitForTimeout(900)
     // 커서 줄: 막는 줄에서 화살표가 선다. 그 줄의 막대에 말풍선
     const gridRow = page.locator(`.m-gantt .g-row:has(.c-title[title="${TARGET}"])`).first()
+    // 차례는 같은 p 끼리 seed 마다 새로 뜨는 id 로 갈려 그 줄이 창 아래에 설 수 있다 — 말풍선이 잘리지 않게 위에서 다섯째 줄로 올린다. 고르기 전에 — 고른 뒤에 굴리면 고른 것이 풀렸다
+    await gridRow.evaluate((n) => {
+      // 줄은 28px(gantt-model.ts 의 ROW_H) — 붙어 서는 머리의 밑에서 줄 넷만큼 재야 맨 윗줄이 반쯤 잘리지 않는다
+      const box = n.closest('.g-scroll')
+      const head = box.querySelector('.g-left .g-head').getBoundingClientRect().bottom
+      box.scrollTop += n.getBoundingClientRect().top - head - 28 * 4
+    })
+    await page.waitForTimeout(800)
     await glide(page, gridRow)
     await page.waitForTimeout(1400)
+    // 말풍선은 줄 아래에 서서, 그 줄이 창 아래쪽이면 상세 칸에 가려 잘린다 — 정지 그림 동안 상세를 접는다(SPC v d — 메뉴는 열린 채라 Escape 로 닫는다)
+    await keys(page, 'Space', 'v', 'd', 'Escape')
+    await page.waitForTimeout(1000)
     const id = await gridRow.getAttribute('data-id')
     const lane = page.locator(`.m-gantt .lane[data-id="${id}"]`)
     const plan = lane.locator('.bar.b-plan').first()
@@ -148,14 +162,19 @@ const scenes = {
     await page.mouse.move(p.x, p.y, { steps: 20 })
     await page.waitForTimeout(2200)
     await still(page, 'web-gantt-mark.png', gridRow, lane)
-    // 막대를 이틀 뒤로 끈다 — 놓을 때 한 번 쓴다(moai edit --start --due). 날 걸음에서 하루는 40px(gantt-model.ts 의 PX_PER_DAY)
-    await dragBy(page, p.x, p.y, 40 * 2, 0, 24)
+    await keys(page, 'Space', 'v', 'd', 'Escape')
+    await page.waitForTimeout(1000)
+    // 막대를 하루 뒤로 끈다 — 놓을 때 한 번 쓴다(moai edit --start --due). 날 걸음에서 하루는 40px(gantt-model.ts 의 PX_PER_DAY).
+    // 이틀이면 마감이 에픽의 마감(plan.sh 의 +5 대 seed.sh 마일스톤의 +6)을 넘어 거절된다
+    await dragBy(page, p.x, p.y, 40, 0, 24)
     await page.waitForTimeout(1500)
     readAll()
     await page.waitForTimeout(1500)
     // 줄 칸의 너비를 끈다 — 이 브라우저가 기억한다
+    // 손잡이는 줄 칸의 높이를 다 덮어 가운데도 꼭대기도 화면 밖일 수 있다 — 줄 칸 머리의 높이에서 잡는다
     const split = await center(page.locator('.m-gantt .g-split'))
-    await dragBy(page, split.x, split.y, 140)
+    const gridHead = await center(page.locator('.m-gantt .g-left .g-head'))
+    await dragBy(page, split.x, gridHead.y, 140)
     await page.waitForTimeout(2400)
   },
 
@@ -204,6 +223,7 @@ try {
     await play(page)
     // 포스터도 빛줄기를 멈춰 찍는다 — 굳은 한 걸음은 검색이 친 자리로 읽힌다(moai-vj8w.fuh)
     await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.evaluate(() => document.getElementById('demo-cursor')?.style.setProperty('visibility', 'hidden'))
     await page.waitForTimeout(300)
     await page.screenshot({ path: path.join(outDir, `web-${name}.png`) })
     const video = page.video()
