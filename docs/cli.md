@@ -2752,7 +2752,7 @@ Order:
   Clicking a row puts the cursor on it and the wheel scrolls the rows; a
   sideways wheel, or Shift and the wheel, slides the dates, and so does
   dragging the date header. Dragging the line between the rows and the dates
-  widens the rows.
+  widens the rows, and that width is kept under [tui] as gantt_label.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a

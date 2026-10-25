@@ -196,8 +196,9 @@ impl App {
                     self.chart.axis.origin = origin - dx * self.chart.axis.zoom.secs_per_cell();
                 }
                 ChartDrag::Split { width, .. } => {
-                    let w = (i64::from(width) + dx).clamp(1, i64::from(area.width.saturating_sub(2).max(1)));
-                    self.chart.set_label_width(w as u16);
+                    let w = (i64::from(width) + dx).clamp(1, i64::from(area.width.saturating_sub(2).max(1))) as u16;
+                    self.chart.set_label_width(w);
+                    self.gantt_label = Some(w);
                 }
                 ChartDrag::Bar { row, id, part, from, .. } => {
                     let now = i64::from(at.x) - i64::from(laid.dates_body.x);
@@ -259,10 +260,15 @@ impl App {
         self.write_plan(PlanMove { id: i.id.clone(), change: (d.clone(), d) });
     }
 
-    /// 간트의 끌기를 놓는다 — 막대면 **그때 한 번** 쓴다(moai-i4hf.exq). 축·선 끌기는 화면의 것이라 적을 것이 없다.
+    /// 간트의 끌기를 놓는다(moai-i4hf.exq) — 막대면 **그때 한 번** 트래커에 쓰고, 나눔 선이면 그때 한 번 고정 칸 폭을
+    /// 사용자 설정에 적는다(목록·상세 사이 선과 같은 결, `App::drop_line`). 축 끌기는 화면의 것이라 적을 것이 없다.
     /// [`App::drop_line`] 이 부른다 — 뗌을 놓친 터미널에서도 다음 사건·키가 놓는다.
     pub(super) fn drop_chart(&mut self) {
-        let Some(ChartDrag::Bar { id, part, from, now, .. }) = self.chart_drag.take() else { return };
+        let (id, part, from, now) = match self.chart_drag.take() {
+            Some(ChartDrag::Bar { id, part, from, now, .. }) => (id, part, from, now),
+            Some(ChartDrag::Split { .. }) => return self.save_look(),
+            Some(ChartDrag::Axis { .. }) | None => return,
+        };
         let days = moai_gantt::drag_days(self.chart.axis.zoom, from, now);
         let Some(at) = self.site.index.find(&id) else { return };
         let edge = match part {
@@ -627,12 +633,21 @@ mod tests {
         a.mouse(ev(K::Up(MouseButton::Left), hx - 3, area.y, none));
         assert_eq!(a.chart.axis.origin, o + 3 * spc, "날짜 머리 끌기가 축을 손만큼 안 밀었다");
 
-        // 나눔 선을 네 칸 끌면 고정 칸이 네 칸 넓어진다.
+        // 나눔 선을 네 칸 끌면 고정 칸이 네 칸 넓어지고, 놓을 때 사용자 설정에 칸 수로 적힌다.
+        let user = dir.join("user.toml");
+        a.user_config = Some(user.clone());
         let w = laid.labels_body.width;
         a.mouse(ev(K::Down(MouseButton::Left), laid.splitter.x, area.y + 5, none));
         a.mouse(ev(K::Drag(MouseButton::Left), laid.splitter.x + 4, area.y + 5, none));
+        assert!(!std::fs::read_to_string(&user).unwrap_or_default().contains("gantt_label"), "끄는 동안 적었다");
         a.mouse(ev(K::Up(MouseButton::Left), laid.splitter.x + 4, area.y + 5, none));
         assert_eq!(a.chart.label_width, w + 4, "나눔 선 끌기가 고정 칸 폭을 안 바꿨다");
+        let text = std::fs::read_to_string(&user).unwrap_or_default();
+        assert!(text.contains(&format!("gantt_label = {}", w + 4)), "놓은 폭이 설정에 안 적혔다: {text}");
+        let (_d, mut b) = on_disk("mouse-reread");
+        b.user_config = Some(user);
+        b.load_look();
+        assert_eq!(b.chart.label_width, w + 4, "다음 실행이 고정 칸 폭을 못 읽었다");
 
         // 날 없는 줄의 빈 날을 누르면 그 하루가 계획이 된다.
         let _ = draw::tests::render(&mut a, 140, 20);

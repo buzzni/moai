@@ -1521,6 +1521,9 @@ pub struct App {
     plan_move: Option<gantt::PlanMove>,
     /// 간트 위의 끌기(moai-i4hf.exq) — 막대·날짜 머리·나눔 선. 목록·상세 사이 선의 끌기(`dragging`)와 따로 든다.
     chart_drag: Option<gantt::ChartDrag>,
+    /// 간트의 고정 칸 폭을 끈 값(칸, moai-i4hf.exq) — 끈 적 없으면 없고, 그때는 설정에 안 적힌다(`list_width` 와 같은 결).
+    /// 그리는 값은 `chart.label_width` 다.
+    gantt_label: Option<u16>,
     /// 보드에서 커서가 마지막으로 선 카드의 칸 — 칸이 없는 프로젝트 머리줄에서 `j`·`k` 가 걸을 칸이다
     /// (moai-oagj.vcj, [`App::board_step`]). 화면의 손버릇이라 설정에 안 남는다.
     ///
@@ -2155,6 +2158,7 @@ impl App {
             chart: moai_gantt::GanttState { fitting: true, ..Default::default() },
             plan_move: None,
             chart_drag: None,
+            gantt_label: None,
             board_column: None,
             adrift: None,
             mouse_on: true,
@@ -3762,6 +3766,11 @@ impl App {
         self.list_width = look.list_width.map(draw::share);
         self.list_height = look.list_height.map(draw::share);
         self.wiki_width = look.wiki_width.map(draw::share);
+        // 간트의 고정 칸 폭은 칸 수다(moai-i4hf.exq) — 0 과 음수는 1 로, 터무니없이 큰 값은 그릴 때 위젯이 창에 맞춘다.
+        self.gantt_label = look.gantt_label.map(|w| w.clamp(1, i64::from(u16::MAX)) as u16);
+        if let Some(w) = self.gantt_label {
+            self.chart.set_label_width(w);
+        }
     }
 
     /// 지금 보기를 설정에 적을 모양으로.
@@ -3791,6 +3800,7 @@ impl App {
             list_width: self.list_width.map(i64::from),
             list_height: self.list_height.map(i64::from),
             wiki_width: self.wiki_width.map(i64::from),
+            gantt_label: self.gantt_label.map(i64::from),
         }
     }
 
