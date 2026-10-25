@@ -282,15 +282,17 @@ BODY
 Several at once (`--from`):
 
 moai add --from - <<'PLAN'
-# Storage layer @2026-10-31
-- [p1] write atomically #bug @2026-10-20
-- recover a truncated line
+# Storage layer @2026-10-25~2026-10-31
+- [p1] write atomically #bug @2026-10-26~2026-10-28
+- recover a truncated line @2026-10-29
 - \\[WIP] issue \\#12
 PLAN
 
   A `#` line is an epic, a `-` line is an issue of the epic above it.
-  [pN], #tag and @YYYY-MM-DD (the deadline) are optional. --due goes on
-  each epic the plan creates that carries no @date of its own.
+  [pN], #tag and @date are optional. @YYYY-MM-DD is a deadline,
+  @YYYY-MM-DD~YYYY-MM-DD a start to a deadline, @YYYY-MM-DD~ a start only.
+  --due and --start go on each epic the plan creates that carries no
+  @date of its own.
   Put \\ in front of a leading [, a trailing #word or @digit in a title.
   --dry-run keeps a heredoc typo from creating six wrong issues.
 
@@ -1471,7 +1473,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
-    /// Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+    /// Start, `YYYY-MM-DD` or `+N` days from today. Any row
     #[arg(long, value_name = "date")]
     pub start: Option<String>,
 
@@ -1611,9 +1613,10 @@ const SHOW_LIST: &str = "  Order: --sort takes fields separated by commas, like 
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer ({key:browse.filter}) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2057,7 +2060,7 @@ pub struct EditArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
-    /// Start of a milestone. `none` clears it
+    /// Start, a day or `+N` days. `none` clears it
     #[arg(long, value_name = "date|none")]
     pub start: Option<String>,
 

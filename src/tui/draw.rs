@@ -7476,8 +7476,8 @@ pub(super) mod tests {
         let narrow = about_text(&render(&mut a, 80, 24));
         assert!(narrow.contains("(9일 남음)"), "좁은 창이 남은 날수를 잘라 냈다\n{narrow}");
 
-        // **에픽에는 든 시간을 안 내고, 기한은 낸다**(moai-ghkp.kz7) — 종료 기한은 모든 줄에 선다.
-        // 시작 기한은 마일스톤 줄의 것이라(moai-x04r.fn4) 손으로 남은 값이어도 안 그린다.
+        // **에픽에는 든 시간을 안 내고, 시작·기한은 낸다**(moai-ghkp.kz7, moai-xf0p.6d5) — 두 날짜는
+        // 모든 줄에 선다.
         let mut epic = issues();
         epic[0].due_on = Some("2026-09-20".into());
         epic[0].starts_on = Some("2026-09-05".into());
@@ -7488,8 +7488,8 @@ pub(super) mod tests {
         // **없다는 것만 재지 않는다**(리뷰) — 이 패널이 아예 안 그려졌거나 커서가 딴 줄에 섰어도
         // 없다는 말은 지난다. 그 에픽을 그렸다는 것부터 박는다.
         assert!(pane.contains("argos-0001"), "에픽의 상세가 안 그려졌다\n{pane}");
-        assert!(pane.contains("2026-09-20") && pane.contains("(9일 남음)"), "에픽의 기한이 안 섰다\n{pane}");
-        assert!(!pane.contains("2026-09-05"), "마일스톤 아닌 줄에 시작 기한이 섰다\n{pane}");
+        assert!(pane.contains("2026-09-05 → 2026-09-20"), "에픽의 시작·기한이 안 섰다\n{pane}");
+        assert!(pane.contains("(9일 남음)"), "에픽의 남은 날수가 안 섰다\n{pane}");
         assert!(!pane.contains("중앙값"), "에픽에 든 시간이 섰다\n{pane}");
     }
 

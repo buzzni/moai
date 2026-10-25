@@ -325,9 +325,9 @@ pub struct Issue {
     /// 마일스톤 줄에만 두었고, 그 막음을 걷을 때 **키를 새로 짓지 않았다** — 같은 `due_on` 이라 꼴·
     /// 정규화·머지 드라이버가 그대로 선다. 대가는 옛 바이너리다: 그쪽은 마일스톤 아닌 줄의 이 값을
     /// 거절하므로, 기한 든 이슈를 옛 바이너리로는 못 고치고 `--due none` 으로 비우라는 말을 듣는다.
-    /// 짝인 `starts_on` 은 여전히 마일스톤 줄에만 선다.
+    /// 짝인 `starts_on` 도 이제 모든 줄에 선다(moai-xf0p.6d5).
     ///
-    /// **조상보다 늦을 수 없다**(moai-ghkp.33i) — 줄 사이의 검사라 여기가 아니라 쓰기 경로
+    /// **조상보다 늦을 수 없다**(moai-ghkp.33i, 시작일도 moai-xf0p.cbu) — 줄 사이의 검사라 여기가 아니라 쓰기 경로
     /// (`store::write_locked` → [`crate::report::first_beyond`], 자는 [`crate::report::DueLadder`])가 잰다.
     ///
     /// 기한으로 **세는** 값은 꼴이 맞는 것뿐이다([`Issue::deadline`]) — 손으로 푼 줄의 틀린 값은 화면에는 적힌
@@ -340,8 +340,12 @@ pub struct Issue {
     /// 차례로 두어야 새 바이너리와 옛 바이너리가 번갈아 쓰는 저장소에서 헛 diff 가 안 난다.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub due_on: Option<String>,
-    /// **마일스톤의 시작 기한**(moai-tfcp) — `YYYY-MM-DD`. [`Issue::due_on`] 과 한 쌍이고
-    /// 같은 규칙이 선다. 시작이 종료보다 뒤면 쓰기가 거절한다.
+    /// **계획 시작일**(moai-tfcp) — `YYYY-MM-DD`. [`Issue::due_on`] 과 한 쌍이고 같은 규칙이 선다.
+    /// 시작이 종료보다 뒤면 쓰기가 거절한다.
+    ///
+    /// **모든 종류의 줄에 선다**(moai-xf0p.6d5) — 마일스톤 줄에만 받던 막음을 `due_on` 이 걷힌
+    /// 것(moai-ghkp.kz7)과 같은 길로 걷었다. 키는 그대로라 꼴·정규화·머지 드라이버가 그대로 선다.
+    /// 대가도 같다: 옛 바이너리는 마일스톤 아닌 줄의 이 값을 거절하므로 그 줄을 못 고친다.
     ///
     /// **`started_at` 과 다른 것이다.** 저쪽은 줄이 실제로 첫 칸을 떠난 때고 이쪽은 사람이
     /// 잡은 계획이다 — 한 필드로 뭉치면 계획을 적는 순간 "이미 시작했다" 가 된다.
@@ -409,6 +413,22 @@ impl Issue {
     /// 위계만 걸러, 같은 값이 거르개에는 걸리고 차례에서는 날짜로 섰다. **이슈의 뜻이라 `cmd` 에 두지 않는다**(CLAUDE.md).
     pub fn deadline(&self) -> Option<&str> {
         self.due_on.as_deref().filter(|d| parse_date(d).is_some())
+    }
+
+    /// **계획 시작일로 세는 값**(moai-xf0p.6d5) — 꼴이 맞는 `starts_on` 만이다. [`Issue::deadline`] 의 짝이다.
+    pub fn planned_start(&self) -> Option<&str> {
+        self.starts_on.as_deref().filter(|d| parse_date(d).is_some())
+    }
+
+    /// **조상의 기한을 넘으면 안 되는 이 줄의 날** — 꼴이 맞는 기한과 계획 시작일(moai-ghkp.33i, 시작은 moai-xf0p.cbu).
+    ///
+    /// 위계를 재는 자리가 다 이것으로 묻는다(리뷰) — 쓰기가 잴 줄을 고르는 문(`store::write_locked`)과 그 연습
+    /// (`cmd::add::check_plan_rows`), 넘쳤는가(`report::DueLadder`), 당긴 조상 밑의 넘친 줄(`report::due_overflow_of`)과
+    /// 보드의 `due_beyond_parent`, 되뽑기가 도로 못 넣는 줄(`draft::lossy`). 자리마다 `due_on` 을 적던 판은 시작일을 더할
+    /// 때 그 넷을 같이 고쳐야 했고, 하나라도 빠지면 그 자리만 시작일을 못 본다. **천장은 여기가 아니다** — 조상이 대는
+    /// 것은 기한뿐이다([`Issue::deadline`]).
+    pub fn plan_days(&self) -> impl Iterator<Item = &str> {
+        [self.deadline(), self.planned_start()].into_iter().flatten()
     }
 
     /// 계획에서의 자리가 마지막으로 바뀐 때 — 칸을 옮긴 때(`status_since`)와 미루거나 도로
@@ -581,16 +601,12 @@ impl Issue {
         if self.kind == Kind::Milestone && self.milestone.is_some() {
             return Err(Invalid::MilestoneInMilestone { id: self.id.clone() });
         }
-        // **시작 기한은 마일스톤 줄에만 선다**(moai-tfcp). 종료 기한은 모든 줄에 선다
-        // (moai-ghkp.kz7) — 막는 갈래를 `StartsOn` 하나로 좁혔다. 꼴부터 잰다 — 종류가 틀린 줄에
-        // 꼴까지 틀린 값이 적히면 두 말을 다 해야 하는데, 사람이 먼저 고칠 것은 꼴이다.
+        // **시작도 종료 기한도 모든 줄에 선다**(moai-ghkp.kz7 이 종료를, moai-xf0p.6d5 가 시작을 열었다)
+        // — 종류로 막는 갈래는 없다. 꼴만 잰다.
         for (what, v) in [(Field::StartsOn, &self.starts_on), (Field::DueOn, &self.due_on)] {
             let Some(v) = v else { continue };
             if parse_date(v).is_none() {
                 return Err(Invalid::Date { id: self.id.clone(), field: what, value: format!("{v:?}") });
-            }
-            if what == Field::StartsOn && self.kind != Kind::Milestone {
-                return Err(Invalid::DateNotMilestone { id: self.id.clone(), field: what });
             }
         }
         // **시작이 종료보다 뒤면 거절한다.** 둘 다 이번에 쓰는 줄의 값이고, 받아 두면 남은
@@ -662,12 +678,6 @@ pub enum Invalid {
         field: Field,
         value: String,
     },
-    /// 시작 기한을 마일스톤 아닌 줄에 적었다 — 비우는 명령에 쓸 id 를 든다. 종료 기한은 모든 줄에
-    /// 서므로(moai-ghkp.kz7) 이 갈래에 안 든다.
-    DateNotMilestone {
-        id: String,
-        field: Field,
-    },
     /// 기한이 조상(선 마일스톤·든 에픽·그 줄을 접어 그리는 부모) 가운데 가장 이른 기한보다 늦다
     /// (moai-ghkp.33i). 줄 사이의 검사라 [`Issue::validate_fields`] 가 아니라 쓰기 경로가 낸다 —
     /// 그 조상과 기한을 들어, 거절문이 당길 날짜와 먼저 고칠 자리를 함께 댄다.
@@ -677,6 +687,25 @@ pub enum Invalid {
         /// 물리므로 방금 뽑은 id 는 어디에도 안 남는다(moai-1rkl, 리뷰) — 거절당한 줄 자신을 가리키는 자리와 같은 자다.
         above: String,
         /// `above` 가 이번 쓰기가 짓는 줄의 제목인가. 글은 [`crate::view::invalid`] 가 고른다 — 여기는 말을 모른다.
+        above_new: bool,
+        above_due: String,
+    },
+    /// 계획 시작일이 조상의 기한보다 늦다(moai-xf0p.cbu) — [`Invalid::DueBeyond`] 의 짝이다. 부모의 **시작**보다 이른
+    /// 시작은 막지 않는다(간트에서 눈에 보인다). 자료의 뜻은 `DueBeyond` 와 같다: `above` 는 이미 선 줄이면 id,
+    /// 이번 쓰기가 짓는 줄이면 그 제목이다.
+    StartBeyond {
+        start: String,
+        above: String,
+        above_new: bool,
+        above_due: String,
+    },
+    /// 시작과 기한이 **둘 다** 조상의 기한보다 늦다(moai-xf0p.cbu 리뷰) — 한쪽만 대면 그 말대로 기한을 당긴 쓰기가 "시작이
+    /// 기한보다 뒤"([`Invalid::DateOrder`])로 또 물리고, 계획의 줄이면 `@기한` 으로 고쳐 쓴 줄이 시작을 말없이 잃는다.
+    /// 자료의 뜻은 [`Invalid::DueBeyond`] 와 같다.
+    DatesBeyond {
+        start: String,
+        due: String,
+        above: String,
         above_new: bool,
         above_due: String,
     },

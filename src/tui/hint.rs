@@ -665,15 +665,15 @@ mod tests {
         let mut a = explorer();
         a.hit("SPC f");
         type_in(&mut a, "s");
-        for want in ["status", "stale", "since", "started_at", "status"] {
+        for want in ["status", "stale", "since", "started_at", "starts_on", "status"] {
             press(&mut a, Tab);
             assert_eq!(typed(&a), want);
         }
         press(&mut a, BackTab);
-        assert_eq!(typed(&a), "started_at");
+        assert_eq!(typed(&a), "starts_on");
         press(&mut a, Char('='));
         press(&mut a, Tab);
-        assert_eq!(typed(&a), "started_at=", "date fields have no value candidates");
+        assert_eq!(typed(&a), "starts_on=", "date fields have no value candidates");
         press(&mut a, Esc);
         a.hit("SPC f");
         type_in(&mut a, "done");
