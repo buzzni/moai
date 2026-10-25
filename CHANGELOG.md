@@ -12,6 +12,47 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai wiki search <words…>`** finds the wiki's sections for some words and
+  lists them best first, each with the `path:line` to open. `--json` gives the
+  same hits with a `total`, and names the pages it could not read (`unread`)
+  and the places it left out (`skipped`) the way `moai wiki ls --json` does.
+  (moai-g8pt)
+- **`moai show <id>` shows the wiki about that issue** above its history: the
+  pages that name the issue or its epic, and up to three related sections found
+  from the title, one per page. `--json` carries it as `wiki` (`named_in`,
+  `related`), with `wiki_error` when the wiki directory cannot be read; the list
+  form `moai show [filters] --json` does not carry it. (moai-g8pt)
+- **`moai wiki learn '<lesson>'`** writes a new lesson page,
+  `<wiki_dir>/lessons/<slug>.md` (`# <lesson>`, the body from `-b`, and
+  `Learned in: <id>`), and in the same call notes `Lesson: lessons/<slug>` on the
+  issue it came from — `--issue <id>`, or the one row you have picked up, or
+  `--issue none` for the page alone. The body needs a `## Do this instead`
+  section and must close any code fence or HTML comment it opens. A non-ASCII
+  title needs `--slug` (lowercase ASCII kebab case). It only
+  creates: a page already standing there is refused and left as it is. The page
+  is written in the checkout you are in, so in a worktree it rides that branch;
+  nothing is committed. `--dry-run` shows the path and the text, and asks no
+  one who you are. Run without
+  picking anything up, the hooks now count it as a change to the repository
+  (rule 2). (moai-4s5n)
+- **Where a lesson stood is read from its `Lesson: lessons/<slug>` notes.**
+  `moai wiki show lessons/<slug>` ends with a `Seen in` list (row, title, day,
+  latest first), `moai wiki ls` puts `×N` (different rows) beside each lesson
+  and says in one line when a note on open work names a page this checkout
+  does not have,
+  and `moai show <id>` lists the lessons the row's own notes point at and marks
+  lesson pages with a `lesson` word. `--json` carries `seen_count` (`wiki ls`),
+  `seen` (`wiki show`) and `wiki.lessons` and `lesson: true` (`show <id>`).
+  Archived rows count; nothing is stored and nothing is blocked. (moai-4s5n)
+- **The texts agents read now say when to write a lesson and how to read one.** The
+  `moai-wiki` skill has a Lessons section (four occasions, search first, a list of
+  what not to write, and a sweep step that merges, retires and asks about rules);
+  the AGENTS block closes with a line for it, the worker steps ask at 7-4 and a
+  subagent worker reports a `Lessons:` piece, and closing a review asks the same
+  question. Nothing checks it and no hook asks. (moai-4s5n)
+
 ## [0.25.0] - 2026-10-25
 
 ### Added

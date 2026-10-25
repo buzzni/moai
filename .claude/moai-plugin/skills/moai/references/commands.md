@@ -546,6 +546,8 @@ in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki 
 prints one. When an epic changes what a person does, the window that did it fixes the page
 on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this.
+Before you touch a place, `moai wiki search '<words>'` finds it; read the sections under the
+`Wiki` block of `moai show <id>` (`wiki` in `--json`) first.
 
 ## How to find what a review said
 

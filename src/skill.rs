@@ -1432,6 +1432,11 @@ mod tests {
         // 자리표시자의 `>` 가 리다이렉션으로 읽히면 여기서 붉어진다.
         let idle = vec![epic_row()];
         for cmd in taught() {
+            // `moai wiki learn` 은 저장소에 페이지를 쓴다 — 규칙 2 가 일부러 그것을 변경으로 센다
+            // (moai-4s5n.n7j). 집은 일 없이는 쓰지 않는 것이 맞고, 위 홀드 판이 지나가는 것으로 충분하다.
+            if cmd.starts_with("moai wiki learn") {
+                continue;
+            }
             assert_eq!(
                 guard_shell(&idle, &cfg, &Default::default(), root, root, &cmd),
                 Decision::Pass,
@@ -1560,6 +1565,8 @@ mod tests {
                     .replace("<its column>", "in_progress")
                     // 위키 스킬과 AGENTS 블록이 페이지 하나를 이렇게 부른다(moai-bl3x).
                     .replace("<slug>", "cli")
+                    // 위키 검색의 낱말 자리(moai-g8pt.y1u).
+                    .replace("<words>", "parser")
             })
             .collect();
         // **자리표시자가 남으면 시끄럽게 진다**(moai-8na5). 남은 `<…>` 는 셸 읽기가 리다이렉션으로

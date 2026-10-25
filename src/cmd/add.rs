@@ -130,20 +130,10 @@ pub fn read_msg(arg: Option<String>, lang: crate::i18n::Lang) -> R<Option<String
         return Ok(arg);
     }
     let text = read_body(arg)?.unwrap_or_default();
-    match blank_lines_trimmed(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
+    match crate::text::blank_lines_trimmed(text.strip_prefix('\u{feff}').unwrap_or(&text)) {
         "" => Err(Fail::coded(crate::i18n::say(lang, "refuse.msg_stdin_empty"), super::code::BAD_INPUT)),
         t => Ok(Some(t.to_owned())),
     }
-}
-
-/// 앞뒤의 빈 줄과 끝의 빈칸을 걷고 **첫 줄의 들여쓰기는 남긴다** — [`read_msg`] 의 자. 빈칸뿐인 글은 빈 글이 된다.
-/// BOM(U+FEFF)도 빈칸으로 센다 — `str::trim` 은 그것을 글자로 남겨, 빈 줄 뒤에 붙은 BOM 하나가 안 보이는 글로
-/// 지나갔다(리뷰).
-fn blank_lines_trimmed(s: &str) -> &str {
-    let blank = |c: char| c.is_whitespace() || c == '\u{feff}';
-    let s = s.trim_end_matches(blank);
-    let first = s.len() - s.trim_start_matches(blank).len();
-    &s[s[..first].rfind('\n').map_or(0, |n| n + 1)..]
 }
 
 /// [`read_body`] 에 **"준다고 하고 아무것도 안 왔다" 를 한 줄로 말하기**를 더한 것 — `add`·`edit` 이

@@ -88,6 +88,70 @@ each raised row's `due_on`, with `due_from` naming the ancestor when it is not t
 own; on `moai status --json` the `due_priority_behind` notice carries it per id in
 `deadlines`, beside the days left in `ages`.
 
+## Read the wiki about one row
+
+`moai show <id> --json` also carries `wiki`, the wiki pages about that row, read
+from the checkout you call it in:
+
+- `named_in` — the pages whose text names the row's id or the id of the epic it
+  stands in, in `moai wiki ls` order: `slug`, `path`, `title` and `via`, the id
+  the page names (the row's own when a page names both). A page already in
+  `lessons` is left out — a page `moai wiki learn` wrote ends with
+  `Learned in: <id>`, and it stands once, as a lesson
+- `related` — up to three sections found from the row's title, best first and
+  one per page, leaving out the pages already in `lessons` or `named_in`: `slug`, `path`,
+  `title`, `line` (counted from 1, the section's heading line), `score`, and
+  `heading` and `anchor` unless the section comes before the page's first
+  heading. A section stands only when it matches two words of the title that
+  are not common across the wiki (one, when the title has only one such word);
+  a word in more than a quarter of the sections, and in more than one, does
+  not count. A Korean, Chinese or Japanese word is one word however many
+  two-letter pieces it splits into, and it matches a section holding at least
+  half of them — so `검색은` still finds `검색`
+- `lessons` — the lesson pages the row's own `Lesson: lessons/<slug>` notes
+  point at, as slugs, in the order they first stand in the notes. A slug is
+  there even when the page is not in this checkout (it may ride a branch not
+  merged yet). Only the row's own notes count; a note on a child belongs to
+  the child
+
+A lesson page (see below) carries `"lesson": true` in `named_in` and
+`related`; the key is absent on any other page.
+
+`wiki` is always there, and so are its three arrays. With nothing about the row
+all three are empty. With no wiki directory `named_in` and `related` are empty,
+while `lessons` still names what the row's notes point at — it is read from the
+notes, not the pages. `wiki_error` stands only when the wiki directory cannot be
+used, beside two empty arrays: `kind` takes the words of `moai wiki ls --json`'s
+`error.kind` (`not_a_dir`, `outside`, `failed`) and `said` is one line for a
+person. A missing directory is a wiki not started yet, not an error.
+
+Only `moai show <id>` carries these two keys. The list form,
+`moai show [filters] --json`, leaves them out — it would walk the whole wiki
+for every row. Ask per row when you need them.
+
+## Read where a lesson stood
+
+A lesson is a page under `lessons/`, and each time one comes up again the work
+leaves a `Lesson: lessons/<slug>` note on the row. Nothing is stored: the
+counts are read from those notes when you ask, archived rows included. Only a
+line that starts at the head of a note counts; indented lines and lines inside
+a fence are examples. Two notes for one lesson on one row count once.
+
+- `moai wiki ls --json` — every page has `seen_count`, the number of different
+  rows whose notes name it (`0` for a page that is not a lesson)
+- `moai wiki show <slug> --json` — `seen`, always there (`[]` for a page that is
+  not a lesson): one `{"id", "at", "by", "by_email"}` per row, latest note
+  first, where `at` is the time of the row's latest note for this lesson and
+  `by`/`by_email` are who wrote it, as the journal holds them (`by_email` is
+  absent on a line written without one)
+
+A lesson page is one directly under `lessons/` whose name is lowercase ASCII
+kebab case — the only names a `Lesson:` note can point at. A trailing `.`,
+`,`, `;` or `:` and wrapping backticks around the slug in a note are not part
+of it.
+
+None of this changes a column, a kind or an exit code.
+
 ## Keep the payload small
 
 A whole tracker with bodies runs to megabytes — this repository's
@@ -95,7 +159,8 @@ A whole tracker with bodies runs to megabytes — this repository's
 
 - `--fields id,title,status` keeps only those keys of each row, in that order
   and each once. The costly keys it leaves out are not worked out: without
-  `work` a list skips the journals, and `moai show <id>` asks git only for
+  `work` a list skips the journals, and `moai show <id>` reads the wiki only
+  for `wiki` and asks git only for
   `commits`. `moai show -g <word> --all --fields id --json` is a small list of
   the ids a search found, notes included — `-g` still reads the notes it
   searches
@@ -113,4 +178,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-wk7i
+Decided in: moai-wk7i, moai-g8pt
