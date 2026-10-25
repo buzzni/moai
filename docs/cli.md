@@ -2741,6 +2741,8 @@ Order:
     H L  one cell earlier and later   [ ]  a page earlier and later
     t    today in the middle           z    fit every row on one screen
   It opens fitted, and stays fitted as rows come and go until you move it.
+  These keys are under [gantt] in keys.toml and win only inside the gantt: a
+  [browse] line that uses one of them still works in the list and the board.
   On a narrow window the rows give up their columns first and then the dates
   are hidden, which the header says; a low window folds the ▼ row away.
   Moving a plan writes the row, the way `moai edit --start --due` does. The

@@ -829,23 +829,6 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 읽음은 손이 제일 자주 가는 것이라 **바로 누른다**(moai-z9pc). 옛 `r`(다시 읽기)은
         // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었고, 그 `SPC r` 도 뒤에 걷었다(moai-en4u).
         row!(Read, Some("r"), Key::plain('r')),
-        // **간트의 날짜 축은 바로 누른다**(moai-i4hf.27r) — 이동키처럼 손이 자주 가고, 간트 배치에서만 선다
-        // (`Browse::enabled`). 목록·보드에서 이 글자들은 비어 있다. `+` 는 `=` 와 같다 — 같은 자판의 Shift 다.
-        row!(Gantt(Pan::ZoomOut), Some("-"), Key::plain('-')),
-        row!(Gantt(Pan::ZoomIn), Some("="), Key::plain('=')),
-        row!(Gantt(Pan::ZoomIn), None, Key::plain('+')),
-        row!(Gantt(Pan::Left), Some("H"), Key::plain('H')),
-        row!(Gantt(Pan::Right), Some("L"), Key::plain('L')),
-        row!(Gantt(Pan::PageLeft), Some("["), Key::plain('[')),
-        row!(Gantt(Pan::PageRight), Some("]"), Key::plain(']')),
-        row!(Gantt(Pan::Today), Some("t"), Key::plain('t')),
-        row!(Gantt(Pan::Fit), Some("z"), Key::plain('z')),
-        // **계획을 하루 옮기는 키는 쓴다**(moai-i4hf.9xi) — 막대 끌기의 키 짝이다. `<`·`>` 는 막대 전체, `{`·`}` 는
-        // 시작만이다. 기한만 옮기는 것은 끌기(오른쪽 끝)다.
-        row!(Plan(Nudge::Earlier), Some("<"), Key::plain('<')),
-        row!(Plan(Nudge::Later), Some(">"), Key::plain('>')),
-        row!(Plan(Nudge::StartEarlier), Some("{"), Key::plain('{')),
-        row!(Plan(Nudge::StartLater), Some("}"), Key::plain('}')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
@@ -1058,6 +1041,8 @@ pub struct Ctx {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Keymap {
     pub browse: &'static [Bind<Browse>],
+    /// 간트 배치에서만 먼저 찾는 표(moai-l80o) — [`GANTT`].
+    pub gantt: &'static [Bind<Browse>],
     pub menu: &'static [Bind<Menu>],
     pub sorter: &'static [Bind<Sorter>],
     pub pick: &'static [Bind<Pick>],
@@ -1071,6 +1056,7 @@ impl Default for Keymap {
     fn default() -> Keymap {
         Keymap {
             browse: BROWSE,
+            gantt: GANTT,
             menu: MENU,
             sorter: SORTER,
             pick: PICK,
@@ -1570,6 +1556,32 @@ pub enum Stat {
     Bucket,
     Close,
 }
+
+/// 간트 배치의 키(moai-i4hf.27r·9xi) — 날짜 축과 계획 옮기기. **탐색의 표([`BROWSE`])와 따로다**(moai-l80o, 사람 결정
+/// 2026-10-25): 간트에서는 이 표를 먼저 찾고(`menu::feed`), 목록·보드에서는 안 찾는다. 그래서 겹침도 이 표 안에서만
+/// 센다 — `keys.toml` 의 `[browse] expand = "L"` 은 목록·보드에서 그대로 살고, 간트에서는 `L` 이 간트의 키다.
+///
+/// **한 키씩만 받는다** — 간트에서 이 표가 탐색의 표보다 먼저 한 키로 찾기 때문이다. 키 열을 주면 그 줄은 첫 키에서
+/// 탐색의 표로 넘어가 영영 안 듣는다. 바로 누르는 키라 이동키처럼 손이 자주 간다. `+` 는 `=` 와 같다 — 같은 자판의
+/// Shift 다. 기한만 옮기는 것은 끌기(오른쪽 끝)다.
+pub const GANTT: &[Bind<Browse>] = {
+    use Browse::{Gantt, Plan};
+    &[
+        row!(Gantt(Pan::ZoomOut), Some("-"), Key::plain('-')),
+        row!(Gantt(Pan::ZoomIn), Some("="), Key::plain('=')),
+        row!(Gantt(Pan::ZoomIn), None, Key::plain('+')),
+        row!(Gantt(Pan::Left), Some("H"), Key::plain('H')),
+        row!(Gantt(Pan::Right), Some("L"), Key::plain('L')),
+        row!(Gantt(Pan::PageLeft), Some("["), Key::plain('[')),
+        row!(Gantt(Pan::PageRight), Some("]"), Key::plain(']')),
+        row!(Gantt(Pan::Today), Some("t"), Key::plain('t')),
+        row!(Gantt(Pan::Fit), Some("z"), Key::plain('z')),
+        row!(Plan(Nudge::Earlier), Some("<"), Key::plain('<')),
+        row!(Plan(Nudge::Later), Some(">"), Key::plain('>')),
+        row!(Plan(Nudge::StartEarlier), Some("{"), Key::plain('{')),
+        row!(Plan(Nudge::StartLater), Some("}"), Key::plain('}')),
+    ]
+};
 
 /// **`q` 는 안 둔다** — 고르기 창에서 걷은 까닭(moai-en4u)이 여기도 선다: 탐색에서 `q` 가 아무것도 안 하는데
 /// 창에서만 닫으면 같은 글자가 자리마다 뜻이 갈린다. 닫는 것은 다른 창과 같은 Esc 다.
@@ -2681,7 +2693,7 @@ mod tests {
     /// SPC 메뉴 문단.
     const SPC: &str = "The rest lives in the menu";
     /// 간트 배치 문단 — 날짜 축 키가 여기 선다(moai-i4hf.27r).
-    const GANTT: &str = "SPC g g lays the same rows out as a gantt chart";
+    const GANTT_PAR: &str = "SPC g g lays the same rows out as a gantt chart";
     /// 고르기 창·경로 칸·목록에서 빼기 문단.
     const PICKER: &str = "SPC p a opens a window";
     /// 생각 담기 문단.
@@ -2735,7 +2747,8 @@ mod tests {
     ///   번 적히면 된다
     const SECTIONS: &[(&str, &[&str])] = &[
         ("ANYWHERE", &[SPC]),
-        ("BROWSE", &[LIST, SPC, GANTT]),
+        ("BROWSE", &[LIST, SPC]),
+        ("GANTT", &[GANTT_PAR]),
         ("PICK", &[PICKER]),
         ("JOT", &[JOTTING]),
         ("CONFIRM", &[PICKER, JOTTING]),
@@ -2778,9 +2791,10 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 12] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 13] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
+            ("GANTT", named(GANTT)),
             ("MENU", named(MENU)),
             ("PROMPT", named(PROMPT)),
             ("PICK", named(PICK)),
@@ -2868,11 +2882,12 @@ mod tests {
         every(k).contains(&Lookup::Pending)
     }
 
-    fn every(k: &[KeyEvent]) -> [Lookup<()>; 12] {
+    fn every(k: &[KeyEvent]) -> [Lookup<()>; 13] {
         [
             bare(lookup(ANYWHERE, k)),
             bare(lookup(MENU, k)),
             bare(lookup(BROWSE, k)),
+            bare(lookup(GANTT, k)),
             bare(lookup(PICK, k)),
             bare(lookup(JOT, k)),
             bare(lookup(PROMPT, k)),

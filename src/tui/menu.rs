@@ -39,6 +39,15 @@ pub fn open(chord: &Chord) -> bool {
 /// 이동키는 메뉴를 닫고 그 이동([`moves`]), **그 밖은 아무 일도 없다.**
 pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     if !open(chord) {
+        // **간트에서는 간트의 표가 먼저다**(moai-l80o, 사람 결정 2026-10-25) — 기다리는 열이 없을 때 한 키로 찾는다. 그
+        // 표는 한 키씩만 받으니 열을 들 일이 없다. 목록·보드에서는 안 찾는다: 그래서 `[browse]` 에 같은 키를 쓴 줄이
+        // 거기서 그대로 산다.
+        if c.gantt
+            && chord.held().is_empty()
+            && let Lookup::Run(act) = lookup(c.keys.gantt, &[k])
+        {
+            return Some(act);
+        }
         return chord.feed(c.keys.browse, k);
     }
     // **연 키가 닫는다**(사용자 결정 2026-09-19) — doom·helix 의 버릇이고, 토글 층이 ESC 까지
