@@ -714,14 +714,16 @@ mod tests {
     }
 
     /// **그 층에 선 항목이 이긴다**(moai-y8v2, 사용자 결정) — 메뉴 창에 적힌 키가 다른 일을 하는
-    /// 판이 없다. 오늘 부딪치는 자리는 넷이다: `SPC g l`(목록, moai-z46r)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음
-    /// 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 — `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
+    /// 판이 없다. 오늘 부딪치는 자리는 다섯이다: `SPC g l`(목록, moai-z46r)·`SPC g g`(간트 — 맨 위로 가는 `gg` 의 첫 `g`,
+    /// moai-i4hf)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 —
+    /// `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
     #[test]
     fn an_item_on_the_layer_wins_over_the_move() {
         use super::super::scroll::Move;
         let c = inside();
         for (layer, x, item) in [
             ('g', 'l', Browse::Go(super::super::keys::Screen::List)),
+            ('g', 'g', Browse::Go(super::super::keys::Screen::Gantt)),
             ('c', 'h', Browse::Cell(super::super::view::Field::Names)),
             ('v', 'l', Browse::Deferred),
             ('m', 'g', Browse::ReadGroup),
@@ -842,16 +844,20 @@ mod tests {
         };
         assert_eq!(at(inside()), "+화면 [목록]");
         assert_eq!(at(Ctx { board: true, ..inside() }), "+화면 [보드]");
+        assert_eq!(at(Ctx { gantt: true, ..inside() }), "+화면 [간트]");
         assert_eq!(at(Ctx { stats: true, board: true, ..inside() }), "+화면 [통계]", "통계 창이 배치에 가렸다");
         assert_eq!(at(Ctx { wiki: true, board: true, ..inside() }), "+화면 [위키]", "위키 창이 배치에 가렸다");
+        assert_eq!(at(Ctx { stats: true, gantt: true, ..inside() }), "+화면 [통계]", "통계 창이 간트에 가렸다");
         let root = entries(&[k(' ')], &inside(), &[]);
         assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
         let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
-        assert_eq!(keys_of(&screens), ["l", "b", "s", "w"]);
-        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계", "위키"]);
+        assert_eq!(keys_of(&screens), ["l", "b", "g", "s", "w"]);
+        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "간트", "통계", "위키"]);
         // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
         assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");
-        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats), ('w', Screen::Wiki)] {
+        for (x, to) in
+            [('l', Screen::List), ('b', Screen::Board), ('g', Screen::Gantt), ('s', Screen::Stats), ('w', Screen::Wiki)]
+        {
             let mut ch = Chord::default();
             for y in [' ', 'g'] {
                 feed(&mut ch, &inside(), k(y));

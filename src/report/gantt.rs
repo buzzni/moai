@@ -34,10 +34,6 @@
 //! 칸을 읽는 자(`report::counted`, [`super::deferred_sources`]), 막음은 상세가 그리는 그대로([`super::BlockMaps`]) 부른다.
 //! 이 모듈은 그것들을 줄마다 한 값으로 모을 뿐이다.
 
-// **부르는 표면은 이 에픽 밖에서 온다**(TUI 의 간트 위젯, web 은 moai-d86e.b2m) — 그 전까지 바이너리에는 부르는 곳이 없어
-// `dead_code` 가 운다. 표면이 이 값을 읽는 날 이 줄을 걷는다. 시험은 이미 이 함수를 돈다.
-#![allow(dead_code)]
-
 use super::{Block, BlockMaps, is_group, is_work};
 use crate::config::{Config, DONE};
 use crate::model::{FUTURE_SLACK_SECS, Issue, Kind, days_until, format_rfc3339, parse_date, parse_rfc3339};

@@ -27,10 +27,16 @@ pub struct Layout {
 impl Layout {
     /// `label_width` 는 분할선 한 칸을 남기도록 잘린다. 영역이 아주 좁으면 날짜 칸이 0 폭이 된다.
     pub fn new(area: Rect, label_width: u16) -> Self {
+        Self::with_header(area, label_width, HEADER_ROWS)
+    }
+
+    /// 머리글 줄 수를 정해 나눈다 — 두 줄이면 오늘(`▼`) 줄이 접힌다. 낮은 창에서 본문 한 줄이 머리 한 줄보다 값질 때
+    /// 부르는 쪽이 고른다([`GanttState::short_header`]). 오늘은 본문의 오늘 선(`┊`)이 그대로 댄다.
+    pub fn with_header(area: Rect, label_width: u16, header_rows: u16) -> Self {
         let lw = label_width.min(area.width.saturating_sub(1));
         let sx = area.x + lw;
         let dw = area.width.saturating_sub(lw + 1);
-        let hh = HEADER_ROWS.min(area.height);
+        let hh = header_rows.min(HEADER_ROWS).min(area.height);
         let bh = area.height - hh;
         let by = area.y + hh;
         Layout {
@@ -42,9 +48,9 @@ impl Layout {
         }
     }
 
-    /// 상태의 고정 칸 폭으로 나눈다.
+    /// 상태의 고정 칸 폭과 머리글 줄 수로 나눈다.
     pub fn of(area: Rect, state: &GanttState) -> Self {
-        Self::new(area, state.label_width)
+        Self::with_header(area, state.label_width, if state.short_header { HEADER_ROWS - 1 } else { HEADER_ROWS })
     }
 
     /// 날짜 칸의 폭 — 맞춤·쪽 이동이 쓴다.
@@ -250,6 +256,20 @@ mod tests {
         assert_eq!(l.labels_body.width, 39);
         assert_eq!(l.dates_body.width, 0);
         assert_eq!(l.splitter.x, 44);
+    }
+
+    /// 짧은 머리글은 오늘 줄을 접고 그 줄을 본문에 준다 — 맞히기도 같은 자리에서 첫 줄을 잰다.
+    #[test]
+    fn a_short_header_gives_its_today_row_to_the_body() {
+        let mut s = st(Zoom::Week, 10 * DAY);
+        s.short_header = true;
+        let l = Layout::of(AREA, &s);
+        assert_eq!(l.dates_header, Rect::new(16, 2, 29, 2));
+        assert_eq!(l.dates_body, Rect::new(16, 4, 29, 8));
+        let rows = [GanttRow::default()];
+        assert_eq!(hit(AREA, &s, &rows, 0, 6, 4), Hit::Label { row: 0 });
+        s.short_header = false;
+        assert_eq!(hit(AREA, &s, &rows, 0, 6, 4), Hit::None, "긴 머리글에서는 그 줄이 머리다");
     }
 
     #[test]

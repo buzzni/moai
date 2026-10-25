@@ -455,6 +455,7 @@ impl Named for Browse {
                 match s {
                     Screen::List => "list",
                     Screen::Board => "board",
+                    Screen::Gantt => "gantt",
                     Screen::Stats => "stats",
                     Screen::Wiki => "wiki",
                 }
@@ -477,6 +478,8 @@ impl Named for Browse {
             Read => own("read"),
             ReadAll => own("read_all"),
             ReadGroup => own("read_group"),
+            Gantt(p) => Name::Own(format!("gantt_{}", p.name())),
+            Plan(n) => Name::Own(format!("nudge_{}", n.name())),
         }
     }
 }
@@ -981,7 +984,7 @@ mod tests {
             each(LINKS),
             each(CONFIRM),
         ];
-        assert_eq!(counts, [60, 8, 2, 9, 6, 2, 9, 2, 1]);
+        assert_eq!(counts, [73, 8, 2, 9, 6, 2, 9, 2, 1]);
         // 이동은 다섯 표 모두에서 여덟이 다 선다 — `[moves]` 의 한 줄이 어느 표에서는 없는 동작이면 안 된다.
         fn moves<A: Named>(table: &[Bind<A>]) -> usize {
             names(table).iter().filter(|(n, _)| matches!(n, Name::Move(_))).count()
@@ -1081,9 +1084,9 @@ mod tests {
         let at = |t: &[Bind<Browse>], a: Browse| t.iter().position(|b| b.act == a).unwrap();
         assert_eq!(at(map.browse, Browse::Filter), at(BROWSE, Browse::Filter));
         // 숨은 별칭뿐이던 동작은 바뀌어도 숨는다 — 바의 몫이 안 는다.
-        let (map, _) = build("[browse]\nexpand = \"L\"\n");
+        let (map, _) = build("[browse]\nexpand = \"Q\"\n");
         assert_eq!(label(map.browse, Browse::Expand), "");
-        assert_eq!(run(map.browse, "L"), Lookup::Run(Browse::Expand));
+        assert_eq!(run(map.browse, "Q"), Lookup::Run(Browse::Expand));
     }
 
     /// `"none"` 과 `[]` 는 그 동작의 키를 뗀다.
@@ -1408,14 +1411,14 @@ mod tests {
     /// 이름은 안 채운다.
     #[test]
     fn the_help_names_the_keys_the_file_changed() {
-        let (map, problems) = build("[browse]\nquit = \"SPC x\"\ngo_list = \"L\"\njot = \"none\"\n");
+        let (map, problems) = build("[browse]\nquit = \"SPC x\"\ngo_list = \"Q\"\njot = \"none\"\n");
         assert!(problems.is_empty(), "{problems:?}");
         let help = tui_help(&map);
         assert!(help.contains("    SPC x    quit\n"), "{help}");
         assert!(!help.contains("SPC q"), "옛 이름이 남았다");
-        assert!(help.contains("\n    L        list                SPC g b  board"), "칸 맞춤이 무너졌다:\n{help}");
-        // 글 속의 이름은 안 채운다 — `L, SPC c h` 처럼 선다.
-        assert!(help.contains("(SPC g, L, SPC c h,"), "{help}");
+        assert!(help.contains("\n    Q        list                SPC g b  board"), "칸 맞춤이 무너졌다:\n{help}");
+        // 글 속의 이름은 안 채운다 — `Q, SPC c h` 처럼 선다.
+        assert!(help.contains("(SPC g, Q, SPC c h,"), "{help}");
         assert!(help.contains("(none)"), "뗀 키를 안 댔다");
         // 위의 줄 글(`moai --help` 의 명령 목록)도 바뀐다.
         let top = crate::cli::command(&map);
@@ -1439,7 +1442,7 @@ mod tests {
     #[test]
     fn no_default_name_survives_when_every_key_moves() {
         let mut spare = Vec::new();
-        for c in ('a'..='z').chain('A'..='Z').chain('0'..='9') {
+        for c in ('a'..='z').chain('A'..='Z').chain('0'..='9').chain([',', '.', ';', '\'']) {
             spare.push(format!("Alt-{c}"));
         }
         for n in 1..=24 {
@@ -1524,7 +1527,7 @@ mod tests {
         let (map, problems) = build(&open);
         assert_eq!(problems, Vec::new());
         assert_eq!(listing(&map), listing(&Keymap::default()));
-        assert_eq!(open.matches(" = ").count(), 99, "틀이 동작을 빠뜨렸다");
+        assert_eq!(open.matches(" = ").count(), 112, "틀이 동작을 빠뜨렸다");
         // 주석 그대로면 아무것도 안 바뀐다.
         assert_eq!(build(&t), (Keymap::default(), Vec::new()));
     }

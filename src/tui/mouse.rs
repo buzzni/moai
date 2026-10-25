@@ -58,6 +58,9 @@ pub struct Drawn {
     /// 위키 창의 칸 자리(moai-o3cb) — 창이 떠 있을 때만 선다. 창은 몸통을 덮으므로 그동안 위의 목록·상세 자리는 창
     /// 밑에 깔린 그림의 것이다.
     pub wiki: Option<WikiAt>,
+    /// 간트 위젯이 선 자리 — 목록 칸의 테두리 안쪽(moai-i4hf). 간트로 세웠을 때만 선다. 고정 칸·머리·날짜 칸·나눔
+    /// 선은 이 자리와 `App::chart` 로 위젯이 다시 잰다(`moai_gantt::Layout::of`) — 그린 쪽과 맞히는 쪽이 한 자로 잰다.
+    pub chart: Option<Rect>,
 }
 
 /// 위키 창이 그린 자리 — `draw::wiki_window` 가 낸다.
@@ -132,7 +135,21 @@ impl App {
             return;
         }
         let at = Position::new(m.column, m.row);
+        // **가로 휠은 간트의 날짜 축만 받는다**(moai-i4hf.exq) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
+        // 자리에서는 가로로 구를 것이 없어 버린다. 한 번에 한 칸 — 축의 한 칸은 확대에 따라 한 시간~한 주다.
+        // **Shift+휠이 가로인 것은 간트 위에서만이다** — 목록·상세·통계 창·위키 창에서는 이 에픽 전처럼 세로로 구른다. 어디서나
+        // 가로로 읽으면 Shift 를 쥔 휠이 그 창들에서 아무 일도 안 한다.
+        let shift = m.modifiers.contains(ratatui::crossterm::event::KeyModifiers::SHIFT);
+        let over_chart = self.mode == Mode::Browse && self.drawn.chart.is_some_and(|c| c.contains(at));
+        let sideways = match m.kind {
+            MouseEventKind::ScrollLeft => Some(-1),
+            MouseEventKind::ScrollRight => Some(1),
+            MouseEventKind::ScrollUp if shift && over_chart => Some(-1),
+            MouseEventKind::ScrollDown if shift && over_chart => Some(1),
+            _ => None,
+        };
         let wheel = match m.kind {
+            _ if sideways.is_some() => None,
             MouseEventKind::ScrollUp => Some(-WHEEL),
             MouseEventKind::ScrollDown => Some(WHEEL),
             _ => None,
@@ -146,11 +163,11 @@ impl App {
             }
             let carried = self.notice.take();
             self.chord.clear();
-            self.pointer(m.kind, wheel, at);
+            self.pointer(m.kind, wheel, sideways, at);
             self.notice = self.notice.take().or(carried);
             return;
         }
-        self.pointer(m.kind, wheel, at);
+        self.pointer(m.kind, wheel, sideways, at);
     }
 
     /// 메뉴가 열린 채 온 사건(moai-m6ni). **메뉴 밖에서 누르거나 굴렸으면 참이다** — 부르는 쪽([`App::mouse`])이
@@ -173,7 +190,7 @@ impl App {
     }
 
     /// 메뉴 밖의 손짓 하나 — 메뉴가 닫혀 있었거나 방금 닫혔다([`App::mouse`]).
-    fn pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, at: Position) {
+    fn pointer(&mut self, kind: MouseEventKind, wheel: Option<isize>, sideways: Option<isize>, at: Position) {
         // **통계 창은 휠만 받는다**(사용자 결정 2026-10-01) — 목록·상세 자리를 통째로 덮은 창이라 그 위의 휠은
         // 창을 굴린다. 키(`j`·`k`)와 같은 굴린 자리를 옮기는 것은 창이 한다(`stats::Window::roll`).
         if let Mode::Stats(w) = &mut self.mode {
@@ -190,6 +207,18 @@ impl App {
         }
         if self.mode != Mode::Browse {
             return;
+        }
+        // **간트가 먼저 받는다**(moai-i4hf.exq) — 막대·날짜 머리·나눔 선은 목록의 줄 자리 위에 선다. 목록·상세 사이 선은
+        // 간트 밖(테두리)이라 아래 갈래가 그대로 잡는다.
+        if self.dragging.is_none() {
+            if (matches!(kind, MouseEventKind::Down(MouseButton::Left)) || sideways.is_some())
+                && self.drawn.chart.is_some_and(|c| c.contains(at))
+            {
+                self.acted();
+            }
+            if self.chart_pointer(kind, sideways, at) {
+                return;
+            }
         }
         match (kind, wheel) {
             (MouseEventKind::Down(MouseButton::Left), _) => {
@@ -327,8 +356,8 @@ impl App {
     fn grab_at(&self, at: Position) -> Option<Grab> {
         let d = &self.drawn;
         let detail = d.detail?;
-        let front = if self.detail_at.first() { detail } else { d.list };
-        let (p, end, was) = if self.detail_at.vertical() {
+        let front = if self.detail_side().first() { detail } else { d.list };
+        let (p, end, was) = if self.detail_side().vertical() {
             (at.y, front.bottom(), self.list_height)
         } else {
             (at.x, front.right(), self.list_width)
@@ -368,7 +397,7 @@ impl App {
             let body = Rect::new(d.list.x, d.list.y, page.right().saturating_sub(d.list.x), d.list.height);
             (body, super::view::DetailAt::Right)
         } else {
-            (self.drawn.body, self.detail_at)
+            (self.drawn.body, self.detail_side())
         };
         let vertical = side.vertical();
         let (start, len, p) = if vertical { (body.y, body.height, at.y) } else { (body.x, body.width, at.x) };
@@ -400,6 +429,7 @@ impl App {
         if self.dragging.take().is_some() {
             self.save_look();
         }
+        self.drop_chart();
     }
 
     /// 휠을 굴렸다. **마우스가 올라선 칸이 받는다** — 포커스는 안 옮긴다(사용자 결정 2026-10-01). 목록에

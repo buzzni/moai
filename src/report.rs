@@ -3400,6 +3400,34 @@ pub fn due_overflow_of<'a>(all: &'a [Issue], id: &str) -> Vec<&'a Issue> {
         .collect()
 }
 
+/// **이 쓰기가** 넘치게 한 줄의 id — 쓰기 뒤의 `all` 에서 고친 줄(`after`) 밑에 넘친 줄 가운데, 쓰기 앞(`before`)에도
+/// 넘쳤던 줄을 뺀 것이다(moai-ghkp.cb3). `moai edit` 과 탐색기의 막대 끌기(moai-i4hf.9xi)가 같은 자로 잰다.
+///
+/// - 기한·자리(에픽·마일스톤)가 그대로인 쓰기는 묻지도 않는다 — 쓰는 쪽이 락을 쥔 채 부르는 자리다
+/// - 조상을 늦추는 쓰기나 기한 곁에 제목을 고친 쓰기가 남은 넘침을 제 탓으로 대면, 받는 쪽은 그때마다 남의 기한을
+///   고치러 간다. 그래서 쓰기 앞의 모습을 고친 줄 하나만 되돌려 다시 잰다 — 다른 줄은 이 쓰기가 안 건드린다
+/// - 계획 밖의 줄(미룬 것과 그 밑)과 멤버가 다 닫힌 묶음은 뺀다: `status` 의 `due_beyond_parent` 가 안 세는 줄을
+///   "센다" 고 하면 거짓말이다. 묶음의 칸은 멤버에서 읽는다
+pub fn overflow_by(all: &[Issue], before: &Issue, after: &Issue, cfg: &Config) -> Vec<String> {
+    let moved = before.due_on != after.due_on || before.epic != after.epic || before.milestone != after.milestone;
+    if !moved {
+        return Vec::new();
+    }
+    let now: Vec<String> = due_overflow_of(all, &after.id).into_iter().map(|i| i.id.clone()).collect();
+    if now.is_empty() {
+        return now;
+    }
+    let Some(k) = all.iter().position(|x| x.id == after.id) else { return now };
+    let mut was_all = all.to_vec();
+    was_all[k] = before.clone();
+    let was: BTreeSet<String> = due_overflow_of(&was_all, &after.id).into_iter().map(|i| i.id.clone()).collect();
+    let off = deferred_roots(all);
+    let ids: Vec<&str> = now.iter().map(String::as_str).collect();
+    let states = group_states_of(all, cfg, &ids);
+    let shut = |id: &str| states.iter().any(|((_, g), col)| *g == id && *col == crate::config::DONE);
+    now.into_iter().filter(|id| !was.contains(id) && !off.contains_key(id.as_str()) && !shut(id)).collect()
+}
+
 /// **뿌리로 올라간 생각** — 제 부모 밑에 접히지 않는 backlog 의 id.
 ///
 /// 소속·마일스톤·미룸은 이것을 지나 내려오지 않는다. 생각인 부모에서 무조건

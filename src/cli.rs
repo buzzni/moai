@@ -554,6 +554,7 @@ BACKLOG
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
+    {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
     {key:browse.go_stats}  statistics — the numbers `moai stats` gives, drawn (see below)
     {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
@@ -700,6 +701,42 @@ BACKLOG
   shown, together. The cursor stands on a header too — {key:moves.line_up} from the project's
   top card in a column goes up to it — and there {key:browse.expand} unfolds, {key:browse.collapse} folds, {key:browse.expand_all}
   unfolds everything and {key:browse.enter} goes in, as in the list.
+
+  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right.
+  It is the list's layout too — the cursor, the filter, the view, search and
+  the detail are the list's — but it holds its own folds: it opens with
+  everything unfolded, {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
+  and the list keeps the folds it had. Coming back to the list opens the
+  folder that holds the row you stood on. The detail stands below the gantt at
+  first; {key:browse.detail_at} there moves the gantt's detail only, for this session.
+  The planned bar (░, ▒ on a group)
+  runs from the start to the deadline and ◆ marks the row's own deadline; █
+  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
+  a deferred row's plan, and ▼ over a dotted line marks today.
+  Groups that wrote no days of their own span their members' days. Planned days
+  are calendar days; actual times are shown in your time zone.
+  Keys that stand only in the gantt move the date axis:
+    {key:browse.gantt_zoom_in} {key:browse.gantt_zoom_out}  zoom in and out — hour, day, week, month
+    {key:browse.gantt_left} {key:browse.gantt_right}  one cell earlier and later   {key:browse.gantt_page_left} {key:browse.gantt_page_right}  a page earlier and later
+    {key:browse.gantt_today}    today in the middle           {key:browse.gantt_fit}    fit every row on one screen
+  It opens fitted, and stays fitted as rows come and go until you move it.
+  On a narrow window the rows give up their columns first and then the dates
+  are hidden, which the header says; a low window folds the ▼ row away.
+  Moving a plan writes the row, the way `moai edit --start --due` does. The
+  keys move the cursor row's plan by a day: {key:browse.nudge_earlier} and {key:browse.nudge_later} the whole plan,
+  {key:browse.nudge_start_earlier} and {key:browse.nudge_start_later} only its start.
+  With the mouse, drag a bar's middle to move the plan, its left end to move
+  the start and its right end to move the deadline; it snaps to whole days and
+  is written once, when you let go. Clicking an empty day on a row with no
+  planned days plans that one day. Groups whose bar spans their members are
+  not moved — move the members. When a move is refused (a start after the
+  deadline, a day past the deadline above) the refusal is on the banner; a
+  move that went through names the `moai edit` line that puts it back.
+  Clicking a row puts the cursor on it and the wheel scrolls the rows; a
+  sideways wheel, or Shift and the wheel, slides the dates, and so does
+  dragging the date header. Dragging the line between the rows and the dates
+  widens the rows, and that width is kept under [tui] as gantt_label.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a
