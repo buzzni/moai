@@ -27162,6 +27162,18 @@ fn the_wiki_rides_the_branch_while_the_tracker_goes_to_the_root() {
     assert!(root.contains(r#""title":"Root home""#), "{root}");
     let drawn = ok(&wt, &["wiki", "show", "new"]);
     assert!(drawn.contains("New page") && drawn.contains(&id), "{drawn}");
+
+    // `dir_abs` 는 이 체크아웃의 위키 자리다(moai-xp7l.ml4) — 워크트리에서 부르면 워크트리의 것이다.
+    let abs = |out: &str| serde_json::from_str::<serde_json::Value>(out.trim()).unwrap()["dir_abs"].clone();
+    assert_eq!(abs(&here), wt.join("docs").to_string_lossy().as_ref(), "{here}");
+    assert_eq!(abs(&root), main.join("docs").to_string_lossy().as_ref(), "{root}");
+    let cfg = std::fs::read_to_string(main.join(".moai/config.toml")).unwrap();
+    std::fs::write(main.join(".moai/config.toml"), format!("wiki_dir = \"./wiki\"\n{cfg}")).unwrap();
+    let none = String::from_utf8_lossy(&moai(&main, &["wiki", "ls", "--json"]).stdout).into_owned();
+    assert_eq!(abs(&none), main.join("wiki").to_string_lossy().as_ref(), "아직 없는 위키에도 지을 자리가 선다 — {none}");
+    std::fs::write(main.join(".moai/config.toml"), format!("wiki_dir = \"../away\"\n{cfg}")).unwrap();
+    let away = String::from_utf8_lossy(&moai(&main, &["wiki", "ls", "--json"]).stdout).into_owned();
+    assert!(!away.contains("dir_abs"), "체크아웃 밖을 쓸 자리로 내밀었다 — {away}");
 }
 
 /// `moai wiki search` — 화면의 `path:line`·`제목 › 머리글`·발췌·끝 줄, `--json` 의 키와 **1 부터** 세는 줄(moai-g8pt.ryi).
@@ -27708,6 +27720,27 @@ fn wiki_seen_counts_notes_on_archived_rows() {
         serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/alpha", "--json"]).trim()).unwrap();
     assert_eq!(v["issues"], serde_json::json!([{ "id": a, "exists": true }]), "{v}");
     assert!(!ok(s.path(), &["wiki", "ls"]).contains(&a), "아카이브의 id 를 없는 id 로 댔다");
+}
+
+/// 아카이브로 간 이슈에도 노트를 단다(moai-xp7l.82p) — 옛 교훈의 `Learned in:` 이슈는 닫힌 지 오래면 아카이브에 있고,
+/// 되풀이(`Lesson:`)를 달 자리가 그 이슈다. 노트는 저널에만 서니 줄은 아카이브에 그대로 남는다.
+#[test]
+fn a_note_lands_on_an_archived_row() {
+    let (s, a, _b) = lesson_repo("note-archived");
+    assert!(at(s.path(), "2026-01-02T00:00:00Z", &["mv", &a, "done"]).status.success());
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    ok(s.path(), &["note", &a, "Lesson: lessons/alpha"]);
+    let v: serde_json::Value =
+        serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/alpha", "--json"]).trim()).unwrap();
+    assert_eq!(v["seen"][0]["id"], a.as_str(), "{v}");
+    assert!(ok(s.path(), &["show", &a]).contains("Lesson: lessons/alpha"));
+    assert!(!ok(s.path(), &["show", "--all"]).contains(&a), "노트가 줄을 산 파일로 되돌렸다");
+    // `wiki learn --issue` 도 같은 자다.
+    let out = from_stdin(s.path(), &["wiki", "learn", "Gamma rule", "-b", "-", "--issue", &a], "## Do this instead\nz\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(s.path().join("docs/lessons/gamma-rule.md").exists());
+    // 없는 id 는 그대로 거절한다.
+    assert!(!moai(s.path(), &["note", "moai-zzzz", "x"]).status.success());
 }
 
 /// `show <id>` 의 Wiki 토막 — 이 이슈의 노트가 가리킨 교훈이 `lessons` 에 서고, 교훈 페이지에는 `lesson: true`.

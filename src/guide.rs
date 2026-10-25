@@ -1820,7 +1820,9 @@ that changed nothing a person does writes nothing.
     moai wiki search <words>               the sections that hold those words, best first (`--json`)
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
-  `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
+  `wiki_dir` in `.moai/config.toml` says otherwise — relative to the checkout, and
+  `dir_abs` is the same directory as an absolute path in this checkout (absent only
+  for `outside`). When it cannot be read, `error`
   stands in place of `pages`, and its `kind` says why: `no_dir` is a repository with
   no wiki yet, `outside` and `not_a_dir` are a `wiki_dir` pointing where moai will
   not read — fix the key, not the pages — and `failed` is the disk refusing to open it
@@ -6417,6 +6419,7 @@ stop sending outside work while a release runs",
     /// 그대로다.
     const WIKI_KEYS: &[&str] = &[
         "dir",
+        "dir_abs",
         "pages",
         "slug",
         "title",
@@ -6499,7 +6502,7 @@ stop sending outside work while a release runs",
         let lang = crate::i18n::Lang::En;
         let known = |id: &str| id == "moai-ab12";
         let read = crate::wiki::load(s.path(), "docs", "moai", &known);
-        let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read, &Default::default()).unwrap();
+        let mut printed = crate::cmd::wiki::listed_json(lang, s.path(), "docs", &read, &Default::default()).unwrap();
         let loaded = read.unwrap();
         // 교훈이 선 이슈 하나 — `seen` 안쪽의 `at`·`by` 가 출력에 서야 스킬이 그것을 대도 붉지 않다. 꼴은 바이너리가 내는
         // 그대로다: `at` 은 저널의 도장, 사람은 이름과 메일로 갈라 든다.
@@ -6515,11 +6518,11 @@ stop sending outside work while a release runs",
         for raw in ["missing", "/etc", "file"] {
             let read = crate::wiki::load(s.path(), raw, "moai", &known);
             assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
-            printed.extend(crate::cmd::wiki::listed_json(lang, raw, &read, &Default::default()).unwrap());
+            printed.extend(crate::cmd::wiki::listed_json(lang, s.path(), raw, &read, &Default::default()).unwrap());
         }
         // 디렉터리를 못 연 `failed` 는 픽스처로 못 세운다(권한은 root 에서 안 먹는다) — 갈래로 지어 넣는다.
         let failed = Err(DirTrouble::Failed("permission denied".into()));
-        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &failed, &Default::default()).unwrap());
+        printed.extend(crate::cmd::wiki::listed_json(lang, s.path(), "docs", &failed, &Default::default()).unwrap());
         let unreadable = crate::wiki::Skipped {
             path: "docs/locked".into(),
             why: crate::wiki::Skip::Unreadable("permission denied".into()),
@@ -6529,7 +6532,7 @@ stop sending outside work while a release runs",
             skipped.push(crate::wiki::Skipped { path: "docs/caf?.md".into(), why: crate::wiki::Skip::NotUtf8 });
         }
         let walked = crate::wiki::Wiki { pages: Vec::new(), skipped };
-        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &Ok(walked), &Default::default()).unwrap());
+        printed.extend(crate::cmd::wiki::listed_json(lang, s.path(), "docs", &Ok(walked), &Default::default()).unwrap());
 
         // 출력에 선 키와 `kind` 값을 모은다.
         fn gather(v: &serde_json::Value, keys: &mut BTreeSet<String>, kinds: &mut BTreeSet<String>) {

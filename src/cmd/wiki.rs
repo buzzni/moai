@@ -19,7 +19,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let (repo, load, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
-        Err(t) => return trouble(ctx, &dir, &t, false),
+        Err(t) => return trouble(ctx, repo.here(), &dir, &t, false),
     };
     for s in &wiki.skipped {
         tell(&crate::view::wiki::skipped(ctx.lang(), s));
@@ -37,7 +37,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     };
     let lessons = if wanted { lessons_seen(ctx.lang(), &repo, load)? } else { Default::default() };
     if ctx.json {
-        return listed_json(ctx.lang(), &dir, &Ok(wiki), &lessons);
+        return listed_json(ctx.lang(), repo.here(), &dir, &Ok(wiki), &lessons);
     }
     Ok(crate::view::wiki::list(ctx.lang(), &dir, &wiki, &lessons))
 }
@@ -66,7 +66,7 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     let (repo, load, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
-        Err(t) => return trouble(ctx, &dir, &t, true),
+        Err(t) => return trouble(ctx, repo.here(), &dir, &t, true),
     };
     let Some(page) = wiki.find(slug) else {
         return Err(Fail::coded(crate::view::wiki::no_page(ctx.lang(), slug, &dir), code::NOT_FOUND));
@@ -102,7 +102,7 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
     let (dir, wiki) = read_in(&repo, &|_| true);
     let wiki = match wiki {
         Ok(w) => w,
-        Err(t) => return trouble(ctx, &dir, &t, false),
+        Err(t) => return trouble(ctx, repo.here(), &dir, &t, false),
     };
     for s in &wiki.skipped {
         tell(&crate::view::wiki::skipped(ctx.lang(), s));
@@ -295,13 +295,13 @@ impl<'a> AboutOut<'a> {
 
 /// 위키 디렉터리를 못 쓴다. `--json` 은 `{"dir","error"}` 를 stdout 에 내고, 사람 화면은 없는 디렉터리면 한 줄로
 /// 알리고 나머지는 실패로 선다. 페이지를 물었으면(`asked`) 없는 디렉터리도 그 페이지를 못 낸 것이라 비영이다.
-fn trouble(ctx: &Ctx, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> {
+fn trouble(ctx: &Ctx, here: &std::path::Path, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> {
     let fell = t.fell() || asked;
     if ctx.json {
         if fell {
             note_partial();
         }
-        return listed_json(ctx.lang(), dir, &Err(t.clone()), &Default::default());
+        return listed_json(ctx.lang(), here, dir, &Err(t.clone()), &Default::default());
     }
     let said = crate::view::wiki::dir_trouble(ctx.lang(), dir, t);
     if fell {
@@ -316,12 +316,17 @@ fn trouble(ctx: &Ctx, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> 
 /// **moai-wiki 스킬이 이 키 이름을 가르친다**(`guide::wiki`). 그 글이 대는 키를 이 출력에 묶는 시험
 /// (`guide::tests::the_wiki_skill_teaches_the_keys_the_wiki_prints`)이 이 함수를 부른다 — 명령과 시험이 같은 자로
 /// 짓지 않으면 그 시험은 손으로 옮긴 꼴과 견주게 되고, 키가 바뀌어도 초록이다(moai-ihu4.l2e).
+///
+/// `here` 는 이 체크아웃의 뿌리다 — `dir_abs` 를 그것에 잇는다([`dir_abs`]).
 pub(crate) fn listed_json(
     lang: Lang,
+    here: &std::path::Path,
     dir: &str,
     read: &Result<Wiki, DirTrouble>,
     lessons: &wiki::seen::Lessons,
 ) -> R<Vec<String>> {
+    let abs = dir_abs(here, dir, read.as_ref().err());
+    let dir_abs = abs.as_deref();
     match read {
         Ok(w) => {
             let pages = w
@@ -329,13 +334,28 @@ pub(crate) fn listed_json(
                 .iter()
                 .map(|p| PageOut { seen_count: Some(lessons.get(&p.slug).map_or(0, Vec::len)), ..PageOut::of(lang, p) })
                 .collect();
-            super::json_line(&Listed { dir, pages, skipped: skipped_out(lang, &w.skipped) })
+            super::json_line(&Listed { dir, dir_abs, pages, skipped: skipped_out(lang, &w.skipped) })
         }
         Err(t) => {
             let said = crate::view::wiki::dir_trouble(lang, dir, t);
-            super::json_line(&Refused { dir, error: Told { kind: t.kind(), said } })
+            super::json_line(&Refused { dir, dir_abs, error: Told { kind: t.kind(), said } })
         }
     }
+}
+
+/// 이 체크아웃의 위키 디렉터리 절대 경로 — `wiki ls --json` 의 `dir_abs` 다(moai-xp7l.ml4). `dir` 은 트래커 뿌리
+/// 기준 상대 경로라, 그것을 쓰려는 에이전트는 기준 자리를 따로 알아야 했다. 링크를 풀지 않고 글자로 잇는다 —
+/// `dir` 을 적은 그대로의 자리다. **`outside` 면 없다** — 체크아웃 밖이나 `.git/` 안을 가리키는 자리를 쓸 자리로
+/// 내밀지 않는다. 디렉터리가 아직 없는(`no_dir`) 것은 선다: 첫 페이지를 지을 자리다.
+fn dir_abs(here: &std::path::Path, dir: &str, trouble: Option<&DirTrouble>) -> Option<String> {
+    if matches!(trouble, Some(DirTrouble::Outside(_))) {
+        return None;
+    }
+    let p = std::path::Path::new(dir)
+        .components()
+        .filter(|c| !matches!(c, std::path::Component::CurDir))
+        .fold(here.to_path_buf(), |at, c| at.join(c));
+    Some(p.to_string_lossy().into_owned())
 }
 
 /// `moai wiki show <slug> --json` 의 한 줄 — 목록의 페이지에 원문 `body` 와, 역링크를 덜 셌을 때 `linked_from_partial`
@@ -369,6 +389,9 @@ struct SeenOut<'a> {
 #[derive(serde::Serialize)]
 struct Listed<'a> {
     dir: &'a str,
+    /// 이 체크아웃의 위키 디렉터리 절대 경로 — [`dir_abs`]. `outside` 가 아니면 늘 선다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir_abs: Option<&'a str>,
     pages: Vec<PageOut<'a>>,
     /// 걷다가 페이지로 못 세운 자리 — 없으면 키가 없다(2026-10-04 사용자 결정, moai-ihu4.x94). 이것이 서면 종료
     /// 코드가 비영인데, 까닭이 stderr 의 사람 말에만 서면 기계는 성해 보이는 `pages` 와 비영 종료만 받는다.
@@ -402,6 +425,8 @@ struct SkippedOut<'a> {
 #[derive(serde::Serialize)]
 struct Refused<'a> {
     dir: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir_abs: Option<&'a str>,
     error: Told,
 }
 
@@ -523,6 +548,8 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
             super::name_load_errors(lang, &repo.issues_path(), &load.errors);
             Some(match given {
                 Some(id) if load.issues.iter().any(|i| i.id == id) => id.to_string(),
+                // 아카이브된 줄에도 노트를 단다([`super::note::append`], moai-xp7l.82p).
+                Some(id) if crate::archive::reserve(&repo.root).ids.contains(id) => id.to_string(),
                 Some(id) => return Err(Fail::not_found(id, lang)),
                 // **`prime` 이 "쥐었다" 고 대는 그 줄이다**(`report::held_by`) — 고르는 자도, 고르는 판도 같다: 아카이브의
                 // 맥락(미룬 에픽·부모)까지 얹은 판이다(`cmd::prime`). 산 줄만 넘기던 판은 아카이브에 든 미룬 에픽 밑에서 다시

@@ -106,11 +106,62 @@ pub fn page(title: &str, body: &str, issue: Option<&str>) -> Result<String, Refu
     if !closes(body) {
         return Err(Refused::OpenBlock);
     }
-    let mut out = format!("# {title}\n\n{body}\n");
+    let mut out = format!("# {}\n\n{body}\n", heading_text(title));
     if let Some(id) = issue {
         out.push_str(&format!("\n{LEARNED_IN} {id}\n"));
     }
     Ok(out)
+}
+
+/// 제목을 `# ` 뒤에 그대로 읽히게 — **마크다운이 글자를 먹는 자리를 `\` 로 막는다**(moai-xp7l.kp7). `<Foo>` 는 HTML 로
+/// 읽혀 제목에서 사라졌고(`moai wiki ls` 가 `Keep  in mind` 를 냈다), `&amp;` 는 `&` 로, `*a*`·`[a](b)` 는 꼴 글자를
+/// 잃었다. 막는 것은 `\ < & [ ] * _ ~` 와 끝의 `#`(머리글을 닫는 줄로 읽힌다)이다. **백틱 토막은 그대로 둔다** — 그
+/// 안에서는 `\` 가 글자로 서고, 토막 자체는 `Code` 로 제목에 든다. 짝이 없는 백틱은 막는다.
+fn heading_text(title: &str) -> String {
+    let b = title.as_bytes();
+    let mut out = String::with_capacity(title.len() + 8);
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'`' {
+            let run = b[i..].iter().take_while(|&&c| c == b'`').count();
+            // 같은 길이의 닫는 줄을 찾는다 — 더 긴 줄은 닫지 않는다.
+            let mut j = i + run;
+            let mut close = None;
+            while j < b.len() {
+                if b[j] == b'`' {
+                    let n = b[j..].iter().take_while(|&&c| c == b'`').count();
+                    if n == run {
+                        close = Some(j + n);
+                        break;
+                    }
+                    j += n;
+                } else {
+                    j += 1;
+                }
+            }
+            match close {
+                Some(end) => {
+                    out.push_str(&title[i..end]);
+                    i = end;
+                }
+                None => {
+                    for _ in 0..run {
+                        out.push_str("\\`");
+                    }
+                    i += run;
+                }
+            }
+            continue;
+        }
+        // 바이트가 ASCII 가 아니면 글자째 옮긴다.
+        let c = title[i..].chars().next().unwrap_or_default();
+        if matches!(c, '\\' | '<' | '&' | '[' | ']' | '*' | '_' | '~') || (c == '#' && i + 1 == b.len()) {
+            out.push('\\');
+        }
+        out.push(c);
+        i += c.len_utf8();
+    }
+    out
 }
 
 /// 페이지 끝에서 이슈를 대는 줄의 머리.
@@ -242,6 +293,25 @@ mod tests {
     fn a_leading_bom_is_not_part_of_the_body() {
         assert_eq!(page("T", "\u{feff}# Own\n\n## Do this instead\ny", None), Err(Refused::OpensWithTitle));
         assert_eq!(page("T", "\u{feff}## Do this instead\ny", None).unwrap(), "# T\n\n## Do this instead\ny\n");
+    }
+
+    /// 제목은 쓴 글자 그대로 페이지 제목으로 읽힌다(moai-xp7l.kp7) — `<…>` 가 HTML 로, `&amp;` 가 `&` 로, 꼴 글자가
+    /// 강조로 먹히지 않는다. 백틱 토막 안은 그대로다.
+    #[test]
+    fn the_title_reads_back_as_written() {
+        for (title, want) in [
+            ("Keep <Foo> in mind", "Keep <Foo> in mind"),
+            ("Tom & Jerry &amp; co", "Tom & Jerry &amp; co"),
+            ("Not *bold* or _it_ or ~gone~", "Not *bold* or _it_ or ~gone~"),
+            ("See [x](y) and \\n", "See [x](y) and \\n"),
+            ("Quote `a<b` here", "Quote a<b here"),
+            ("A lone ` tick", "A lone ` tick"),
+            ("Ends with #", "Ends with #"),
+            ("C# stays", "C# stays"),
+        ] {
+            let text = page(title, BODY, None).unwrap();
+            assert_eq!(super::super::parse("t", &text, "moai").title.as_deref(), Some(want), "{text}");
+        }
     }
 
     /// 긴 제목의 슬러그는 [`SLUG_MAX`] 안에서 `-` 에 맞춰 자른다 — 파일 이름의 상한에 안 닿게, 같은 제목은 같은 이름으로.

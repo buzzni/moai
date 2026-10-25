@@ -71,6 +71,11 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
 /// 이 하나로 쓴다(moai-4s5n.n7j): 노트를 다는 길이 둘이면 한쪽만 고쳐지는 날 두 노트가 다른 꼴로 선다.
 ///
 /// 글은 부르는 쪽이 이미 다듬은 것이다. 없는 줄이면 `not_found` 로 거절하고 아무것도 안 쓴다.
+///
+/// **아카이브로 옮긴 줄에도 단다**(moai-xp7l.82p) — 노트는 저널에만 서고 스냅샷의 줄을 안 고치니, 줄을 산 파일로
+/// 되돌릴 까닭이 없다. `moai show <id>` 가 아카이브된 줄을 열고 그 저널을 읽는다. 거절하던 판은 오래전 교훈에
+/// 되풀이(`Lesson:`)를 못 달았다 — 교훈의 `Learned in:` 이슈는 닫힌 지 오래면 아카이브에 있다. 아카이브는 산
+/// 파일에 없을 때만 훑는다(`archive::reserve` — 줄을 풀지 않고 id 만 본다).
 pub(crate) fn append(
     repo: &crate::store::Repo,
     lang: crate::i18n::Lang,
@@ -86,7 +91,7 @@ pub(crate) fn append(
     repo.with_write(
         || lang,
         |issues, _, _| {
-            if !issues.iter().any(|i| i.id == id) {
+            if !issues.iter().any(|i| i.id == id) && !crate::archive::reserve(&repo.root).ids.contains(id) {
                 return Err(Fail::not_found(id, lang));
             }
             Ok((vec![entry.clone()], ()))
