@@ -9,9 +9,9 @@
 //!   쓴다. 다시 짓지 않는다 — 짓는 자는 [`super::Anchors`] 하나다
 //! - **토큰**은 소문자로 접어 글자·숫자·`_` 아닌 곳에서 가른 낱말이다(`merge-driver` → `merge`, `driver`;
 //!   `archive_days` 는 하나). 한글·한자·가나는 글자 둘씩도 낸다 — 조사가 붙은 `검색은` 이 `검색` 과 맞으려면 든다
-//! - **점수**는 BM25 다(`k1 = 1.2`, `b = 0.75`). 절의 필드는 둘 — 머리글(그 절의 머리글 + 페이지 제목)과 본문 —
-//!   이고 머리글의 낱말은 무게 3 으로 센다(BM25F 를 얕게). 질의 낱말은 OR 지만 **맞은 서로 다른 낱말 수를 먼저**
-//!   견주고 점수를 그다음에 견준다. 같으면 슬러그, 그다음 줄 차례다 — 차례는 결정적이다
+//! - **점수**는 BM25 다(`k1 = 1.2`, `b = 0.75`). 절의 필드는 둘 — 머리글(그 절의 머리글 + 페이지 제목, 둘이 같은
+//!   낱말이면 한 번)과 본문 — 이고 머리글의 낱말은 무게 3 으로 센다(BM25F 를 얕게). 질의 낱말은 OR 지만 **맞은 서로
+//!   다른 낱말 수를 먼저** 견주고 점수를 그다음에 견준다. 같으면 슬러그, 그다음 줄 차례다 — 차례는 결정적이다
 //! - **낱말**은 질의의 원래 낱말이다 — 점수는 토큰으로 세지만, 맞은 낱말의 수([`Hit::distinct`]·[`Hit::rare`])는
 //!   낱말로 센다. 한글·한자·가나 낱말은 그 토큰의 절반 이상이 든 절에서 맞은 것이고, 낱말 하나 맞지 않은 절은 hit 가
 //!   아니다
@@ -173,6 +173,12 @@ fn tokens(s: &str) -> Vec<Tok> {
     out
 }
 
+/// 두 글이 같은 토큰을 같은 차례로 내는가 — 머리글과 페이지 제목을 마크다운 기호와 상관없이 견준다. 제목은
+/// 기호를 걷은 글이고(`# The \`moai\` CLI` → `The moai CLI`) 머리글은 원문이라 글자째로는 못 견준다.
+fn same_words(a: &str, b: &str) -> bool {
+    tokens(a).into_iter().map(|t| t.text).eq(tokens(b).into_iter().map(|t| t.text))
+}
+
 /// 머리글 줄의 글 — 인용의 `>`, 여는 `#` 와 닫는 `#` 를 걷는다(밑줄 꼴이면 그 줄 그대로다). 닫는 `#` 는
 /// CommonMark 처럼 앞에 빈칸이 선 것만이다 — `## C#` 의 `#` 는 글이다.
 fn heading_text(line: &str) -> String {
@@ -317,7 +323,9 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
             })
         };
         count(&s.page.title, &mut head, &mut head_len);
-        if let Some(h) = &s.heading {
+        // 머리글이 페이지 제목과 같은 낱말이면(제목을 낸 맨 위 `# ` 의 절) 한 번만 센다 — 두 번 세던 판은 제목의
+        // 낱말이 그 절에서 무게 6 으로 서서 다른 절의 3 을 거의 늘 이겼다(리뷰 moai-g8pt.9rd).
+        if let Some(h) = s.heading.as_deref().filter(|h| !same_words(h, &s.page.title)) {
             count(h, &mut head, &mut head_len);
         }
         for l in s.lines.iter().skip(usize::from(s.heading.is_some())) {
@@ -593,6 +601,22 @@ mod tests {
         let h = &search(&pages, "검색은", 5).hits;
         assert_eq!((h.len(), h[0].distinct), (1, 1));
         assert!(search(&pages, "데이터베이스", 5).hits.is_empty(), "토큰 다섯 가운데 하나로 맞았다");
+    }
+
+    /// 제목을 낸 맨 위 `# ` 의 절은 제목을 한 번만 센다 — 제목 낱말이 그 절에서 무게 6 이던 판은, 같은 낱말을
+    /// 머리글로 단 다른 절(무게 3)을 본문이 같아도 이겼다(리뷰 moai-g8pt.9rd).
+    #[test]
+    fn the_title_is_counted_once_in_the_section_under_it() {
+        // 본문 없는 두 절 — 하나는 못 읽은 페이지의 제목 절(제목만), 하나는 제목을 낸 `# ` 의 절. 제목을 한 번 세면 둘의
+        // 필드가 같아 점수가 같고, 두 번 세면 뒤의 것이 이긴다.
+        let same = |pages: &[Page]| {
+            let r = search(pages, "zebra", 5);
+            assert_eq!(r.hits.len(), 2);
+            assert!((r.hits[0].score - r.hits[1].score).abs() < 1e-9, "{:?}", r.hits);
+        };
+        same(&[unread("u", "Zebra"), page("a", "# Zebra\n")]);
+        // 마크다운 기호가 든 제목도 같은 낱말이면 한 번이다 — 제목은 기호를 걷은 글이다.
+        same(&[unread("u", "The zebra tool"), page("m", "# The `zebra` tool\n")]);
     }
 
     #[test]
