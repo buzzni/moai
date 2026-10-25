@@ -7736,3 +7736,30 @@
 {"ts":"2026-10-24T22:05:05Z","id":"moai-68ft.8lf.se9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 에픽 끝 리뷰)"}
 {"ts":"2026-10-24T22:05:27Z","id":"moai-68ft.8lf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 노트 문구와 시험)"}
 {"ts":"2026-10-24T22:05:27Z","id":"moai-68ft.8lf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-25T03:11:27Z","id":"moai-hwl4","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"릴리스 소식을 Discord 에 올린다"}
+{"ts":"2026-10-25T03:11:27Z","id":"moai-hwl4.ho9","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"CHANGELOG 한 판을 Discord 글로 줄인다"}
+{"ts":"2026-10-25T03:11:27Z","id":"moai-hwl4.yf6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"화면 변경점 스크린샷에 테두리 박스를 그린다"}
+{"ts":"2026-10-25T03:11:27Z","id":"moai-hwl4.y2m","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"GitHub Actions 가 Discord 웹훅으로 올린다"}
+{"ts":"2026-10-25T03:11:27Z","id":"moai-hwl4.7fp","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.23.0 소식을 만든다"}
+{"ts":"2026-10-25T03:11:27Z","id":"moai-hwl4.8dl","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"릴리스 절차에 Discord 소식을 넣는다"}
+{"ts":"2026-10-25T03:11:37Z","id":"moai-hwl4.ho9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-25T03:11:37Z","id":"moai-hwl4","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided: 마일스톤 v0.24.0 의 일이지만 가지는 develop 에서 뜨고 develop 으로 들인다. 첫 게시(v0.23.0)를 마감(10-26)까지 내려면 워크플로가 GitHub 의 기본 가지(develop)에 서야 하는데, 마일스톤 가지는 릴리스 때까지 develop 에 안 든다. 바꾸는 것은 기여자 스크립트·워크플로·release-posts 뿐이라 바이너리와 그 판에 실리는 것은 그대로다"}
+{"ts":"2026-10-25T03:15:08Z","id":"moai-hwl4.ho9","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-25T03:15:09Z","id":"moai-hwl4.yf6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-25T03:19:25Z","id":"moai-hwl4.yf6","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-25T03:19:25Z","id":"moai-hwl4.y2m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-25T03:22:13Z","id":"moai-hwl4.y2m","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-25T03:22:13Z","id":"moai-hwl4.7fp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-25T03:29:17Z","id":"moai-hwl4.7fp","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
+{"ts":"2026-10-25T03:29:18Z","id":"moai-hwl4.8dl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-25T03:29:58Z","id":"moai-hwl4.8dl.lcf","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"review — 릴리스 소식을 Discord 에 올린다 (moai-hwl4 에픽 끝)"}
+{"ts":"2026-10-25T03:30:07Z","id":"moai-hwl4.8dl.lcf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
+{"ts":"2026-10-25T03:44:26Z","id":"moai-hwl4.8dl.lcf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"/code-review xhigh (worktree-moai-hwl4, develop..adc8d840 + CONTRIBUTING) — 리뷰어 원문 요약\n1. CONTRIBUTING.md:233 — compose 를 bump-version auto 앞에 두어 그 판의 절이 아직 없다(재현). 그림 없는 글만 나간다\n2. shot.mjs:297 — web 모드의 addScriptTag 가 moai web 의 CSP(script-src 'self')에 막힌다(재현)\n3. shot.mjs:282 — .webm 을 os.tmpdir() 에서 rename 해 /home 으로 옮기면 EXDEV, 임시 디렉터리가 남는다(재현)\n4. compose.py:104 — cut·drop_aside 가 ** 나 ` 안에서 끊어 닫는 표가 빠진다(v0.7.0·v0.17.0 재현)\n5. compose.py:28 — IDS 가 (read-only) 같은 낱말을 트래커 id 로 읽어 지운다\n6. ci.yml:284 — release-post 를 바이너리 잡에서 빼서 그 시험이 PR 에서 안 돈다\n7. __pycache__ 의 .pyc 가 커밋됐고 .gitignore 에 없다\n8. post.py:127 — 중간에 실패한 뒤 다시 돌리면 앞 메시지가 두 번 올라간다\n9. shot.mjs:135 — 숨은 첫 자리(크기 0)에서 멈추고, --select 가 숨은 요소에 친다\n10. discord.yml:38 — 동시 실행 무리가 입력 그대로라 0.23.0 과 v0.23.0 이 겹친다\n11. shot.mjs:56 — --speed 0 이면 끝나지 않고 빈 --mark 와 --mark-all 이 같은 자리를 돈다\n12. post.py:122 — retry_after 가 null 이면 TypeError\n13. shot.mjs:213 — 녹화 속 </script> 가 인라인 스크립트를 끝낸다\n14. shot.mjs:29 — import.meta.url 의 pathname 이 퍼센트 부호화된 채라 한글·빈칸 경로에서 못 찾는다\n15. compose.py:84 — e.g.·i.e. 의 마침표를 문장 끝으로 읽는다\n고침(리뷰어가 워크트리에 적용): 1~7, 9~15. 넘김: 8(설계 판단)"}
+{"ts":"2026-10-25T03:44:27Z","id":"moai-hwl4.8dl.lcf","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"1~7·9~15 는 리뷰어 고침을 확인해 5b11a965 로 들였다. 8 은 넘기지 않고 직접 고쳤다 — post.py --start 와 워크플로 start 입력으로 멈춘 자리부터 보내고, 실패 줄이 그 수를 댄다(같은 커밋)"}
+{"ts":"2026-10-25T03:44:27Z","id":"moai-hwl4.8dl.lcf","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (xhigh — 에픽 끝 리뷰)"}
+{"ts":"2026-10-25T03:44:39Z","id":"moai-hwl4.ho9","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 릴리스 스크립트·워크플로·문서)"}
+{"ts":"2026-10-25T03:44:39Z","id":"moai-hwl4.yf6","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 릴리스 스크립트·워크플로·문서)"}
+{"ts":"2026-10-25T03:44:39Z","id":"moai-hwl4.y2m","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 릴리스 스크립트·워크플로·문서)"}
+{"ts":"2026-10-25T03:44:40Z","id":"moai-hwl4.7fp","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 릴리스 스크립트·워크플로·문서)"}
+{"ts":"2026-10-25T03:44:40Z","id":"moai-hwl4.8dl","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 릴리스 스크립트·워크플로·문서)"}
+{"ts":"2026-10-25T03:44:40Z","id":"moai-hwl4.8dl","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done"}
