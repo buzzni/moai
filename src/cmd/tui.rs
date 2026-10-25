@@ -85,9 +85,10 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
         // **간트는 `--deep` 에만 싣는다**(moai-d86e.b2m) — 그것을 읽는 자는 web 의 간트 탭(`/api/tree`)이고, 한 자리의
         // 목록을 묻는 쪽에 저장소 전부의 구간 셈을 물리지 않는다. 판단은 `report::gantt` 가 하고 여기는 줄에 얹기만 한다.
-        let wh = ground.here(&load.issues);
-        let gantt = deep.then(|| {
-            crate::report::gantt::gantt(&load.issues, &index, &wh, &repo.config, &crate::model::now(), ctx.zone())
+        // 거르개 문맥도 `--deep` 에만 짓는다 — 한 자리 목록은 그것을 읽는 자가 없다.
+        let wh = deep.then(|| ground.here(&load.issues));
+        let gantt = wh.as_ref().map(|wh| {
+            crate::report::gantt::gantt(&load.issues, &index, wh, &repo.config, &crate::model::now(), ctx.zone())
         });
         let rows: Vec<Row> = entries
             .into_iter()

@@ -450,7 +450,7 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
  */
 .m-pane-gantt { overflow: hidden; }
 .m-pane-gantt:not([hidden]) { display: flex; flex-direction: column; }
-.m-gantt { --link: color-mix(in srgb, #a855f7 75%, var(--text)); flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.m-gantt { --link: var(--review); flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .m-gantt:focus { outline: 0; }
 
 /* Toolbar. */
@@ -469,13 +469,14 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .g-toolbar kbd { font: 11px var(--mono); color: var(--muted); border: 1px solid var(--border-soft); border-radius: 4px; padding: 0 3px; }
 .g-range { font: 12px var(--mono); color: var(--muted); }
 
-/* One scroll box, two columns; the left one is sticky. */
+/* One scroll box, two columns; the left one is sticky. One stacking order for both: bars 1, marks and the today line 2,
+ * the date header 3 (so what scrolls under it stays under it), the grid 4 (so the dates slide under it). */
 .g-scroll { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; }
 .g-inner { position: relative; display: grid; grid-template-columns: var(--grid-w, 460px) max-content; min-width: max-content; }
-.g-left { position: sticky; left: 0; z-index: 3; background: var(--bg); border-right: 1px solid var(--border); }
+.g-left { position: sticky; left: 0; z-index: 4; background: var(--bg); border-right: 1px solid var(--border); }
 .g-split { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; z-index: 6; touch-action: none; }
 .g-split:hover, .g-split.drag { background: color-mix(in srgb, var(--accent) 35%, transparent); }
-.g-head { position: sticky; top: 0; z-index: 2; height: 44px; background: var(--lane-bg); border-bottom: 1px solid var(--border-soft); }
+.g-head { position: sticky; top: 0; z-index: 3; height: 44px; background: var(--lane-bg); border-bottom: 1px solid var(--border-soft); }
 .g-left .g-head { z-index: 5; display: flex; align-items: flex-end; gap: 8px; padding: 0 8px 4px; color: var(--muted); font-size: 11px; font-weight: 500; }
 
 /* The grid's rows. */

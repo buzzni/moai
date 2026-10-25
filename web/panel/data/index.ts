@@ -73,7 +73,10 @@ export interface GanttRow {
   /** UTC instants. `unknown` is a start nobody recorded — not zero, not never. An open span has `end: null`. */
   actual: { kind: 'not_started' } | { kind: 'unknown' } | { kind: 'span'; start: string; end: string | null }
   progress: { kind: 'rollup'; done: number; total: number } | { kind: 'column'; name: string }
-  /** Days past the row's own deadline, read in the viewer's zone; `null` when not overdue. */
+  /**
+   * Days past the row's own deadline, `null` when not overdue. moai counts them in its own zone (the server machine's,
+   * `ctx.zone()`), not in the zone this page draws in (`SPC o t`); the page places the verdict and never recounts it.
+   */
   overdue: number | null
   deferred: boolean
   blocked_by: { id: string; state: string; root?: string; aside?: string[] }[]
@@ -221,7 +224,8 @@ export class IssueIndex {
       }
       const own = printedFor(line.id, line)
       const row: Row = own ? { ...own } : { id: line.id, archived: true }
-      // The tree's keys fill what the list did not print (an archived row), never what it did.
+      // The tree's keys fill what the list did not print (an archived row; `gantt` on every row, as only the tree
+      // carries it), never what it did.
       for (const key of TREE_KEYS) if (row[key] === undefined && line[key] !== undefined) (row as Record<string, unknown>)[key] = line[key]
       placed.add(line.id)
       stand(row, home, line.dir === true, line.progress, segFor(line.id, kindOf(line)))

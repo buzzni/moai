@@ -10,7 +10,9 @@
  * CSP allows no style attribute; no colour stands alone — each has a glyph, a texture or a letter beside it.
  *
  * Keys are the key router's (panel/keys/): it calls command() — j/k the cursor, H/L the dates, -/= the step, t today,
- * z fit, Enter the detail — and this view listens for none. The mouse's wheel and axis drag are another issue's.
+ * z fit, Enter the detail — and this view listens for none. The mouse is this view's (moai-d86e.jmq, "the mouse"
+ * below): a click chooses, the date header drags, Shift+wheel moves the dates, Ctrl+wheel steps the zoom, and the
+ * grid's handle sets its width.
  */
 import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
@@ -62,6 +64,8 @@ interface Model {
   key: string
   matched: State['matched']
   boot: State['boot']
+  /** The zone the bars were placed in (`SPC o t`): a new one places every actual band and today again. */
+  zone: string | undefined
   lines: GanttLine[]
 }
 
@@ -204,11 +208,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const now = nowWall()
     const zone = clock.zone()
     const placed = m.lines.map((line) => (line.kind === 'row' ? placeRow(m.index.rows[line.at]!.gantt, m.index.rows[line.at], now, zone) : null))
+    const was = axis
     if (!axis || axis.zoom !== zoom || !fresh(placed, now)) {
       const [from, to] = rangeOf(placed.map((p) => p?.span ?? null), now)
       axis = { zoom, from, to }
     }
     const a = axis
+    // The bars this hovered bubble spoke of are about to be replaced, and a removed node sends no mouseleave.
+    bubble.hidden = true
     const cursor = state.cursor
     const rows: HTMLElement[] = []
     const lanes: HTMLElement[] = []
@@ -217,6 +224,9 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const wide = widthOf(a)
     right.style.width = `${wide}px`
     lanesBox.style.height = `${m.lines.length * ROW_H}px`
+    // An axis that grew at its start (a new row reaches earlier) moves every date right: the same dates stay in view.
+    // A new step is setZoom's and fit's to place.
+    if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
 
     // Weekends, behind everything. Not at the month step, where a day is 4px.
     const shade: HTMLElement[] = []
@@ -382,7 +392,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const t = words.tip
       if (g.planned) add(g.planned.from === 'members' ? t.plannedMembers : t.planned, `${g.planned.start ?? '—'} ~ ${g.planned.end ?? '—'}`)
       add(t.actual, g.actual.kind === 'span' ? `${formatDate(g.actual.start, zone)} ~ ${g.actual.end ? formatDate(g.actual.end, zone) : t.now}` : g.actual.kind === 'unknown' ? t.unknown : t.notStarted)
-      if (g.overdue !== null) add(t.overdue, fill(t.overdueDays, { n: g.overdue }))
+      if (g.overdue !== null) add(t.overdue, fill(g.overdue === 1 ? t.overdueDay : t.overdueDays, { n: g.overdue }))
       if (g.progress.kind === 'rollup' && g.progress.total > 0) add(t.progress, `${g.progress.done}/${g.progress.total}`)
       if (g.blocked_by.length) add(t.blockedBy, g.blocked_by.map((block) => `${block.id} (${block.state})`).join(', '))
       if (g.deferred) add(t.deferred, t.deferredNote)
@@ -557,7 +567,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   {
     let start = gridW
     drag(split, () => {
-      start = gridW
+      // From the width drawn, not the one remembered: a narrow pane draws less, and the handle stands there.
+      start = gridNow()
     }, (event, down) => {
       gridW = normalizeGrid(start + event.clientX - down.clientX, (scroll.clientWidth || FALLBACK_WIDTH) - 120)
       paintGrid()
@@ -582,6 +593,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   right.addEventListener('wheel', (event) => {
     if (event.ctrlKey) {
       event.preventDefault()
+      // A sideways Ctrl+wheel says nothing about the step.
+      if (!event.deltaY) return
       const next = ZOOMS[ZOOMS.indexOf(zoom) + (event.deltaY < 0 ? 1 : -1)]
       if (next) setZoom(next, event.clientX - scroll.getBoundingClientRect().left - gridNow())
       return
@@ -615,9 +628,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         return
       }
       const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied])
-      if (!model || model.index !== index || model.key !== key || model.matched !== current.matched || model.boot !== current.boot) {
+      const zone = clock.zone()
+      if (!model || model.index !== index || model.key !== key || model.matched !== current.matched || model.boot !== current.boot || model.zone !== zone) {
         const found = narrow(current, index)
-        model = { index, key, matched: current.matched, boot: current.boot, lines: ganttLines(index, current.path, found.keep) }
+        model = { index, key, matched: current.matched, boot: current.boot, zone, lines: ganttLines(index, current.path, found.keep) }
         draw()
         position()
         shownCursor = current.cursor

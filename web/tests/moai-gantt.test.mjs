@@ -12,8 +12,8 @@ const { IssueIndex } = await panelModule('data/index.ts')
 const { TABS } = await panelModule('view/tabs.ts')
 const { ICONS } = await panelModule('view/icons.ts')
 const { initialState } = await panelModule('store.ts')
-const { copyFor } = await panelModule('i18n/index.ts')
-const { menuLayer, KEY_TABLE } = await panelModule('keys/table.ts')
+const { copyFor, TABLE } = await panelModule('i18n/index.ts')
+const { menuLayer, KEY_TABLE, helpSections } = await panelModule('keys/table.ts')
 const { treeOf } = await import('./moai-tree-helper.mjs')
 
 const NOW = Date.UTC(2026, 9, 25, 14, 0)
@@ -64,6 +64,20 @@ const mount = (cursor = null, index = build()) => {
   at(cursor)
   return { root, view, calls, dom, at, index }
 }
+/**
+ * The view keeps the grid's width in its module's storage, which every mount in this file shares: a test that drags
+ * it puts the default back with this, so the tests after it start from the width the first one did.
+ */
+function resetGrid({ root, dom }) {
+  const box = root.querySelector('.g-scroll')
+  Object.defineProperty(box, 'clientWidth', { get: () => 0, configurable: true })
+  const drawn = Number.parseFloat(root.querySelector('.g-inner').style.getPropertyValue('--grid-w'))
+  const handle = root.querySelector('.g-split')
+  const fire = (type, x) => handle.dispatchEvent(new dom.window.MouseEvent(type, { clientX: x, bubbles: true }))
+  fire('pointerdown', 0)
+  fire('pointermove', model.DEFAULT_GRID - drawn)
+  fire('pointerup', model.DEFAULT_GRID - drawn)
+}
 const lane = (root, id) => root.querySelector(`.lane[data-id="${id}"]`)
 const px = (node, prop) => Number.parseFloat(node.style[prop])
 const days = (iso) => (Date.UTC(...iso.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n)))) - Date.UTC(2026, 9, 3)) / 864e5 * 40
@@ -82,6 +96,11 @@ test('the tab is in the strip with the gantt icon, and SPC g g reaches it', () =
   const keys = (tab) => KEY_TABLE.browse.filter((b) => b.action.startsWith('gantt.') && (!b.when || b.when({ mode: 'browse', tab }))).map((b) => b.keys[0]).sort()
   assert.deepEqual(keys('gantt'), ['-', '=', 'H', 'L', 't', 'z'])
   assert.deepEqual(keys('list'), [])
+  // The help lists them under their own group (keys/table.ts HELP_GROUPS), usable on the gantt tab.
+  const gantt = helpSections('browse', { mode: 'browse', tab: 'gantt', focus: 'list' }, 'other', TABLE.en).find((s) => s.id === 'gantt')
+  assert.ok(gantt, 'the help has a gantt section')
+  assert.equal(gantt.title, 'Gantt')
+  assert.deepEqual(gantt.rows.map((r) => [r.keys[0], r.available]), [['H', true], ['L', true], ['-', true], ['=', true], ['t', true], ['z', true]])
 })
 
 test('the model puts planned days, actual instants and the late band on the axis', () => {
@@ -108,6 +127,32 @@ test('the model puts planned days, actual instants and the late band on the axis
   // A milestone's own deadline marks the end of that day whatever its plan says.
   assert.equal(model.placeRow(GANTT.m1, ROWS[0], NOW, 'UTC').due, Date.UTC(2026, 9, 29))
   assert.equal(model.placeRow(undefined, ROWS[0], NOW).span, null)
+})
+
+test('late without a planned bar: a deadline-only row is late from its diamond, and moai\'s verdict is not asked again', () => {
+  // The usual row writes a deadline and no start: no planned bar, a `◆` at the end of 10-22, late by 3 days.
+  const due = g('x', { planned: { start: null, end: '2026-10-22', from: 'own' }, overdue: 3 })
+  const late = model.placeRow(due, { id: 'x', status: 'todo', due_on: '2026-10-22' }, NOW, 'UTC')
+  assert.equal(late.plan, null)
+  assert.equal(late.due, Date.UTC(2026, 9, 23))
+  assert.deepEqual(late.over, { from: Date.UTC(2026, 9, 23), to: NOW })
+  // moai counts late days in its own zone; where the page's zone is still on the deadline day the hatch is a sliver,
+  // never dropped.
+  const today = g('y', { planned: { start: null, end: '2026-10-25', from: 'own' }, overdue: 1 })
+  const sliver = model.placeRow(today, { id: 'y', status: 'todo', due_on: '2026-10-25' }, NOW, 'UTC')
+  assert.deepEqual(sliver.over, { from: Date.UTC(2026, 9, 26), to: Date.UTC(2026, 9, 26) })
+  // A row with a plan ending before its start is late from the deadline, not from the start's day.
+  const backwards = g('z', { planned: own('2026-10-20', '2026-10-18'), overdue: 7 })
+  assert.equal(model.placeRow(backwards, { id: 'z', status: 'todo' }, NOW, 'UTC').over.from, Date.UTC(2026, 9, 19))
+})
+
+test('a milestone that wrote no deadline has no diamond; an archived one reads its own from the plan', () => {
+  // Members' days give the hatched bar; their latest deadline is not the milestone's.
+  const members = g('m', { kind: 'milestone', planned: { start: '2026-10-20', end: '2026-10-26', from: 'members' } })
+  assert.equal(model.placeRow(members, { id: 'm', kind: 'milestone', status: 'todo' }, NOW, 'UTC').due, null)
+  // An archived row (a tree line no list printed) carries no due_on: its own plan's end is that deadline.
+  const archived = g('n', { kind: 'milestone', planned: { start: null, end: '2026-10-28', from: 'own' } })
+  assert.equal(model.placeRow(archived, { id: 'n', kind: 'milestone', archived: true }, NOW, 'UTC').due, Date.UTC(2026, 9, 29))
 })
 
 test('the axis: steps, the two header lines, weekends, fit', () => {
@@ -307,6 +352,26 @@ test('the grid width is dragged, clamped, and remembered', () => {
   // The next time the tab opens it has the width it was left at.
   const again = mount()
   assert.equal(again.root.querySelector('.g-inner').style.getPropertyValue('--grid-w'), '220px')
+  resetGrid(again)
+  assert.equal(mount().root.querySelector('.g-inner').style.getPropertyValue('--grid-w'), '460px', 'put back for the tests after')
+})
+
+test('the grid handle drags from the width drawn, not a wider one remembered', () => {
+  const view = mount()
+  const box = view.root.querySelector('.g-scroll')
+  const inner = view.root.querySelector('.g-inner')
+  const handle = view.root.querySelector('.g-split')
+  const fire = (type, x) => handle.dispatchEvent(new view.dom.window.MouseEvent(type, { clientX: x, bubbles: true }))
+  try {
+    // A 500px pane leaves the dates 120px: the 460 remembered is drawn 380 wide, and the handle stands there.
+    Object.defineProperty(box, 'clientWidth', { get: () => 500, configurable: true })
+    fire('pointerdown', 500)
+    fire('pointermove', 490)
+    assert.equal(inner.style.getPropertyValue('--grid-w'), '370px', 'ten pixels left of where it was drawn')
+    fire('pointerup', 490)
+  } finally {
+    resetGrid(view)
+  }
 })
 
 test('no rows: it says so; and a page with no gantt values still draws the rows', () => {
@@ -406,4 +471,49 @@ test('mouse: Ctrl+wheel steps the zoom over the dates only, keeping the date und
   wheel(root.querySelector('.g-right'), { deltaY: 100, clientX: grid + 100 })
   assert.equal(wheel(root.querySelector('.g-right'), { deltaY: 100, clientX: grid + 100 }).defaultPrevented, true)
   assert.equal(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'month')
+})
+
+test('mouse: a sideways Ctrl+wheel keeps the step (and still keeps the page\'s zoom from the browser)', () => {
+  const { root, dom } = mount()
+  scrollable(root)
+  const event = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaX: 40, deltaY: 0 })
+  root.querySelector('.g-right').dispatchEvent(event)
+  assert.equal(event.defaultPrevented, true)
+  assert.equal(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'day')
+})
+
+test('a new zone (SPC o t) places the bars again, with no new index to say so', () => {
+  const { root, at } = mount()
+  const left = () => px(lane(root, 'e1.a').querySelector('.b-act'), 'left')
+  const before = left()
+  try {
+    clock.zone = () => 'Asia/Seoul'
+    at(null)
+    assert.ok(Math.abs(left() - before - (9 / 24) * 40) < 0.01, 'nine hours later on the axis')
+  } finally {
+    clock.zone = () => 'UTC'
+  }
+})
+
+test('a redraw under a hovered bar takes the bubble down', () => {
+  const { root, view, dom } = mount()
+  const bubble = root.querySelector('.g-bubble')
+  lane(root, 'e1.b').querySelector('.b-act').dispatchEvent(new dom.window.MouseEvent('mouseenter'))
+  assert.equal(bubble.hidden, false)
+  view.command('gantt.zoomIn')
+  assert.equal(bubble.hidden, true, 'the bar it spoke of is gone')
+})
+
+test('a read that reaches an earlier day grows the axis at its start, and the dates in view stay in view', () => {
+  const { root, view } = mount()
+  const box = scrollable(root)
+  box.scrollLeft = 400
+  const shown = model.wallAt({ zoom: 'day', from: Date.UTC(2026, 9, 3) }, 400)
+  // e1.e now plans from 10-01: the axis starts a week before, on 09-24, nine days earlier than it did.
+  const earlier = { ...GANTT, 'e1.e': { ...GANTT['e1.e'], planned: own('2026-10-01', '2026-10-02') } }
+  const tree = treeOf(ROWS).map((line) => (line.id ? { ...line, gantt: earlier[line.id] } : line))
+  view.render({ ...initialState(), tab: 'gantt', cursor: null }, new IssueIndex(ROWS, tree))
+  assert.equal(px(lane(root, 'e1.c').querySelector('.b-plan'), 'left'), days('2026-10-26') + 9 * 40)
+  assert.equal(box.scrollLeft, 400 + 9 * 40)
+  assert.equal(model.wallAt({ zoom: 'day', from: Date.UTC(2026, 8, 24) }, box.scrollLeft), shown)
 })

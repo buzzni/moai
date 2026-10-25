@@ -138,6 +138,8 @@ export interface GanttCopy {
     unknown: string
     notStarted: string
     overdue: string
+    /** One day past the deadline (`{n}` is 1). */
+    overdueDay: string
     /** `{n}` days past the deadline. */
     overdueDays: string
     progress: string

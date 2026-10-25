@@ -83,7 +83,7 @@ export interface Placed {
   actual: { from: number; to: number; open: boolean } | null
   /** The start nobody recorded. */
   unknown: boolean
-  /** The red hatch from the planned end to now. */
+  /** The red hatch from the end of the deadline day to now. */
   over: { from: number; to: number } | null
   /** Everything drawn, for the fit and the `‹ ›` marks. */
   span: [number, number] | null
@@ -109,9 +109,11 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
     out.plan = { from: start, to, origin: planned.from }
     add(start, to)
   }
-  // A deadline and no start is a mark alone; a milestone's deadline is a mark whatever its plan is.
+  // A deadline and no start is a mark alone; a milestone's own deadline is a mark whatever its plan is. A milestone
+  // that wrote no deadline has none: the end its members' days reach is the hatched bar's end, not a `◆` (an archived
+  // row carries no `due_on`, and its own plan's end is that deadline).
   const own = row && typeof (row.due_on ?? row.due) === 'string' ? dayStart(row.due_on ?? row.due) : null
-  const dueDay = g.kind === 'milestone' ? own ?? end : start === null ? end : null
+  const dueDay = g.kind === 'milestone' ? own ?? (planned?.from === 'own' ? end : null) : start === null ? end : null
   if (dueDay !== null) {
     out.due = dueDay + DAY
     add(dueDay, dueDay + DAY)
@@ -126,10 +128,14 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
       add(from, stop)
     }
   }
-  // Late: from the end of the plan to now. report::gantt said whether (and by how many days); this only places it.
-  if (g.overdue !== null && out.plan && now > out.plan.to) {
-    out.over = { from: out.plan.to, to: now }
-    add(out.plan.to, now)
+  // Late: from the end of the deadline day to now. report::gantt said whether (and by how many days), so this neither
+  // asks the clock again nor needs a planned bar: a row that wrote a deadline and no start (the usual one) is late
+  // from its `◆`. The zone the page draws in may still be on the deadline day; the hatch is then a sliver, as the TUI's
+  // one cell.
+  const lateFrom = planned?.from === 'own' && end !== null ? end + DAY : out.due
+  if (g.overdue !== null && lateFrom !== null) {
+    out.over = { from: lateFrom, to: Math.max(now, lateFrom) }
+    add(lateFrom, out.over.to)
   }
   if (lo.length) out.span = [Math.min(...lo), Math.max(...hi)]
   return out
