@@ -66,12 +66,32 @@ committed tracker.
    `review` and `done` unless `statuses` in `.moai/config.toml` says otherwise
 
 **Read what the wiki says before you start.** `moai show <id>` shows a `Wiki`
-block above its history: the pages that name the row's id or its epic's, and up to
-three sections whose words match the row's title — each as `path:line`, ready
-to open. To look something up yourself, `moai wiki search <words>` lists the
+block above its history: the lessons noted on the row, the pages that name the
+row's id or its epic's, and up to three sections whose words match the row's
+title — each as `path:line`, ready to open, with `lesson` beside a page under
+`lessons/`. To look something up yourself, `moai wiki search <words>` lists the
 sections that hold those words, best first; several words are one query, and a
 section holding more of them comes first. Both read the wiki of the checkout you
 are in, so in a worktree they see that branch's pages.
+
+**Write down a mistake the next session would make too.** A lesson is one page under
+`lessons/` in the wiki, written by `moai wiki learn` — it makes the page and notes
+`Lesson: lessons/<slug>` on the row it came from:
+
+    moai wiki search '<a word of the mistake>'          is it written already?
+    moai note <id> 'Lesson: lessons/<slug>'             yes: it was met again
+    moai wiki learn '<the lesson, as an instruction>' --issue <id> -b - <<'LESSON'
+    ## What happened
+    ...
+    ## Do this instead
+    ...
+    LESSON
+
+The body must hold `## Do this instead`. A page that already stands is never
+overwritten. Nothing is committed: commit the page on the branch, like any wiki page.
+`moai wiki ls` puts `×N` beside a lesson — the number of rows that noted it — and
+`moai wiki show lessons/<slug>` lists those rows. The `moai-wiki` skill says which
+mistakes count and how a person sweeps the lessons.
 
 Work that belongs to someone else, or to nobody, stands apart under `others` in
 `moai ready`. Ask its person before you [take it over](glossary.md#take-over) —
