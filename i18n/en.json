@@ -415,6 +415,8 @@
   "tui.write.unjournaled": " — the journal was not written: {why}",
   "tui.write.landed": "✓ {done} · {what}",
   "tui.gantt.moved": "moved",
+  "tui.gantt.no_dates": "no planned days yet — `moai edit <id> --start <day> --due <day>`, or `@start~due` on a plan line",
+  "tui.gantt.narrow": "too narrow for the dates — widen the window",
   "tui.gantt.undo": " · undo: `{cmd}`",
   "tui.gantt.overflow": " · now past this deadline: {ids}",
   "tui.gantt.no_plan": "{id} has no planned days to move — `moai edit {id} --start <day> --due <day>` sets them",

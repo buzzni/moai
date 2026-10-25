@@ -20,6 +20,17 @@ use ratatui::text::Line;
 /// 하루의 초 — 위젯의 축이 재는 단위다.
 const DAY: i64 = 86_400;
 
+/// 날짜 칸이 이보다 좁아지면 고정 칸을 줄이고, 그래도 모자라면 날짜 칸을 감춘다(moai-i4hf.25n). 한 주(Week 단계의
+/// 일곱 칸) 남짓을 두 번 보일 폭이다 — 그보다 좁은 날짜 칸은 막대가 어디쯤인지 못 댄다.
+const MIN_DATES: u16 = 20;
+
+/// 고정 칸이 줄어드는 바닥 — 커서·칸 글리프·트리 선 뒤에 제목 머리가 남는 폭. 이보다 줄이면 열이 다 걷혀도 제목이
+/// 안 서, 막대가 어느 줄의 것인지 못 읽는다 — 그때는 날짜 칸이 먼저 물러난다.
+const MIN_LABEL: u16 = 20;
+
+/// 본문이 이보다 적은 줄만 남는 낮은 창에서는 머리글을 두 줄로 줄인다 — 본문 한 줄이 머리의 오늘(`▼`) 줄보다 값지다.
+const LOW_BODY: u16 = 4;
+
 /// 쓰려는 계획 옮기기 하나(moai-i4hf.9xi). 누군지 물으러 갔다 오면 이것을 다시 쓴다 — 그래서 고칠 값을 들고 있고,
 /// 쓰는 순간 줄을 다시 읽지 않는다: 그새 바뀐 줄 위에 옛 값으로 덮지 않도록 쓰기 안에서 `before` 를 잰다.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +98,35 @@ impl App {
         }
     }
 
+    /// 이 자리에 그릴 보기 상태(moai-i4hf.25n) — 사람이 고른 것(`App::chart`)을 창에 맞춘다. **그리기·키·마우스가 이
+    /// 하나로 잰다** — 한쪽만 맞추면 그린 막대와 누른 막대가 어긋난다.
+    ///
+    /// - 날짜 칸이 [`MIN_DATES`] 보다 좁아지면 고정 칸을 [`MIN_LABEL`] 까지 줄인다 — 고정 칸의 열은 폭을 따라 담당 →
+    ///   진행 → id 차례로 걷힌다(목록의 `Head::of`)
+    /// - 그래도 모자라면 고정 칸이 창을 다 쓰고 날짜 칸은 0 폭이다([`App::dates_hidden`])
+    /// - 낮은 창에서는 머리글이 두 줄이다([`LOW_BODY`])
+    ///
+    /// 사람이 고른 폭(`label_width`)은 안 바꾼다 — 창을 넓히면 그 폭으로 돌아온다.
+    pub(super) fn chart_view(&self, area: ratatui::layout::Rect) -> moai_gantt::GanttState {
+        let mut st = self.chart;
+        let room = area.width.saturating_sub(1);
+        let want = st.label_width.min(room);
+        st.label_width = if room - want >= MIN_DATES {
+            want
+        } else if room >= MIN_LABEL + MIN_DATES {
+            room - MIN_DATES
+        } else {
+            area.width
+        };
+        st.short_header = area.height < moai_gantt::HEADER_ROWS + LOW_BODY;
+        st
+    }
+
+    /// 창이 좁아 날짜 칸을 감췄는가.
+    pub(super) fn dates_hidden(&self, area: ratatui::layout::Rect) -> bool {
+        moai_gantt::Layout::of(area, &self.chart_view(area)).dates_width() == 0
+    }
+
     /// 간트의 지금 — 적재 때 잡은 시각(`Site::now`)을 보는 사람의 벽시계로 옮긴 지역 기준 초.
     fn chart_now(&self) -> i64 {
         parse_rfc3339(&self.site.now).map_or(0, |t| self.zone.local(t))
@@ -103,7 +143,7 @@ impl App {
             }
             return;
         };
-        let w = moai_gantt::Layout::of(area, &self.chart).dates_width();
+        let w = moai_gantt::Layout::of(area, &self.chart_view(area)).dates_width();
         let mid = f64::from(w / 2);
         let anchor = self.chart.axis.secs_at_cell(mid);
         match p {
@@ -183,7 +223,7 @@ impl App {
             return false;
         }
         let Some(area) = self.drawn.chart else { return false };
-        let laid = moai_gantt::Layout::of(area, &self.chart);
+        let laid = moai_gantt::Layout::of(area, &self.chart_view(area));
         if let (K::Drag(MouseButton::Left), Some(drag)) = (kind, self.chart_drag.clone()) {
             let dx = i64::from(at.x)
                 - i64::from(match &drag {
@@ -221,7 +261,7 @@ impl App {
         let rows = self.rows();
         let chart = self.chart_of(&rows, 0..0, &|_, _| Line::default());
         let col = |x: u16| i64::from(x) - i64::from(laid.dates_body.x);
-        match moai_gantt::hit(area, &self.chart, &chart.rows, chart.now, at.x, at.y) {
+        match moai_gantt::hit(area, &self.chart_view(area), &chart.rows, chart.now, at.x, at.y) {
             moai_gantt::Hit::Splitter => {
                 self.chart_drag = Some(ChartDrag::Split { from: at.x, width: laid.labels_body.width });
             }
@@ -657,6 +697,54 @@ mod tests {
         a.mouse(ev(K::Down(MouseButton::Left), laid.dates_body.x + col, laid.dates_body.y + (n9 - top) as u16, none));
         let d = crate::model::format_date(day);
         assert_eq!(dates_on_disk(&dir, "argos-0009"), (Some(d.clone()), Some(d)), "빈 날 누르기가 계획을 안 세웠다");
+    }
+
+    /// **폭을 훑어도 간트가 안 깨진다**(moai-i4hf.25n) — 20칸부터 200칸까지 줄의 제목은 늘 서고, 날짜 칸이 너무 좁아지면
+    /// 고정 칸이 먼저 줄고 그래도 안 되면 날짜 칸을 감추며 그렇다고 댄다.
+    #[test]
+    fn every_width_keeps_the_rows_and_says_when_the_dates_go() {
+        let mut a = app();
+        a.hit("SPC g g SPC v d Esc");
+        assert!(!a.detail_open, "시험의 전제 — 상세를 닫았다");
+        for w in 20..=200 {
+            let screen = draw::tests::render(&mut a, w, 20).join("\n");
+            assert!(screen.matches("arg").count() >= 5, "{w}칸에서 줄이 사라졌다\n{screen}");
+            let area = a.drawn.chart.expect("간트가 제 자리를 안 남겼다");
+            let hidden = a.dates_hidden(area);
+            assert_eq!(screen.contains("창이 좁아"), hidden, "{w}칸: 감춘 날짜 칸과 그 말이 안 맞는다\n{screen}");
+            if !hidden {
+                let laid = moai_gantt::Layout::of(area, &a.chart_view(area));
+                assert!(laid.dates_width() >= super::MIN_DATES, "{w}칸: 날짜 칸이 바닥보다 좁게 섰다");
+            }
+        }
+        let _ = draw::tests::render(&mut a, 200, 20);
+        assert!(!a.dates_hidden(a.drawn.chart.unwrap()), "넓은 창에서 날짜 칸이 숨었다");
+        assert_eq!(a.chart.label_width, moai_gantt::DEFAULT_LABEL_WIDTH, "창에 맞춘 폭이 사람의 폭을 덮었다");
+    }
+
+    /// 날 든 줄이 하나도 없으면 날짜 칸이 날을 넣는 길을 댄다. 고정 칸은 그대로 선다.
+    #[test]
+    fn a_tracker_without_dates_says_how_to_add_them() {
+        let issues = vec![make("argos-0001", Kind::Epic), make("argos-0009", Kind::Issue)];
+        let mut a = App::new(issues, cfg(), Path::new());
+        a.hit("SPC g g");
+        let screen = draw::tests::render(&mut a, 160, 20).join("\n");
+        assert!(screen.contains("argos-0009"), "고정 칸이 안 섰다\n{screen}");
+        assert!(screen.contains("아직 계획 날짜가 없다"), "날을 넣는 길을 안 댔다\n{screen}");
+        let screen = draw::tests::render(&mut app(), 160, 20).join("\n");
+        assert!(!screen.contains("아직 계획 날짜가 없다"), "날이 있는데 없다고 했다");
+    }
+
+    /// 낮은 창에서는 머리의 오늘(`▼`) 줄을 접고 그 줄을 본문에 준다. 높은 창에서는 선다.
+    #[test]
+    fn a_low_window_folds_the_today_row() {
+        let mut a = app();
+        a.hit("SPC g g SPC v d Esc");
+        let tall = draw::tests::render(&mut a, 140, 24).join("\n");
+        assert!(tall.contains('▼'), "높은 창에 오늘 표식이 없다\n{tall}");
+        let low = draw::tests::render(&mut a, 140, 9).join("\n");
+        assert!(!low.contains('▼'), "낮은 창이 오늘 줄을 안 접었다\n{low}");
+        assert!(low.contains("argos-0001"), "낮은 창에 줄이 안 섰다\n{low}");
     }
 
     /// 목록과 상세에서는 계획 옮기기가 조용하다 — 보이지 않는 막대를 옮기지 않는다.

@@ -2710,7 +2710,8 @@ fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
     let block = frame(app, Pane::Explorer).title(list_title(app, rows));
     let inner_at = block.inner(at);
     f.render_widget(block, at);
-    let laid = moai_gantt::Layout::of(inner_at, &app.chart);
+    // 창에 맞춘 보기로 잰다(moai-i4hf.25n) — 좁으면 고정 칸이 줄고, 낮으면 머리글이 두 줄이다. 키와 마우스도 이 자로 잰다.
+    let laid = moai_gantt::Layout::of(inner_at, &app.chart_view(inner_at));
     let body = laid.labels_body;
     app.list.fit(body.height as usize, rows.len());
     let selected = (!rows.is_empty()).then_some(app.cursor.min(rows.len().saturating_sub(1)));
@@ -2735,6 +2736,7 @@ fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
     title.spans.insert(0, Span::raw(" ".repeat(pad)));
     app.chart.first_row = app.list.offset();
     app.chart.refit(chart.range, laid.dates_width());
+    let mut view = app.chart_view(inner_at);
     let widget = moai_gantt::Gantt {
         rows: &chart.rows,
         links: &chart.links,
@@ -2745,8 +2747,21 @@ fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
         palette: moai_gantt::Palette::default(),
         glyphs: moai_gantt::Glyphs::default(),
     };
-    f.render_stateful_widget(widget, inner_at, &mut app.chart);
-    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, app.site.lang);
+    f.render_stateful_widget(widget, inner_at, &mut view);
+    // **빈 날짜 칸과 감춘 날짜 칸은 그렇다고 한 줄로 댄다**(moai-i4hf.25n) — 빈 칸만 서면 고장 난 줄 안다. 날 든 줄이 하나도
+    // 없으면 날을 넣는 길을, 창이 좁아 날짜 칸을 감췄으면 그 까닭을 댄다. 고정 칸은 그대로 선다.
+    let lang = app.site.lang;
+    let dim_line = |text: &str, w: u16| Paragraph::new(Line::from(Span::styled(clip(text, w as usize), dim())));
+    if app.dates_hidden(inner_at) {
+        let note = Rect::new(laid.labels_header.x, laid.labels_header.y + 1, inner_at.width, 1);
+        if laid.labels_header.height > 1 {
+            f.render_widget(dim_line(say(lang, "tui.gantt.narrow"), note.width), note);
+        }
+    } else if chart.range.is_none() && laid.dates_body.height > 0 {
+        let note = Rect::new(laid.dates_body.x, laid.dates_body.y, laid.dates_body.width, 1);
+        f.render_widget(dim_line(say(lang, "tui.gantt.no_dates"), note.width), note);
+    }
+    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, lang);
     (Rect::new(body.x, body.y, inner_at.width, body.height), inner_at)
 }
 

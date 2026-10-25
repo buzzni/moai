@@ -2739,6 +2739,8 @@ Order:
     H L  one cell earlier and later   [ ]  a page earlier and later
     t    today in the middle           z    fit every row on one screen
   It opens fitted, and stays fitted as rows come and go until you move it.
+  On a narrow window the rows give up their columns first and then the dates
+  are hidden, which the header says; a low window folds the ▼ row away.
   Moving a plan writes the row, the way `moai edit --start --due` does. The
   keys move the cursor row's plan by a day: < and > the whole plan,
   { and } only its start.
