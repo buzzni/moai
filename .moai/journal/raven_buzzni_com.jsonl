@@ -7995,3 +7995,5 @@
 {"ts":"2026-10-25T15:30:37Z","id":"moai-l80o.xkx","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"들인 것 1·2·3(메뉴로 새는 간트 키, 겹침 두 쪽, 기본 표끼리 견주는 시험) — 46509d83. 넘긴 것 없음: 4 는 사람 결정(간트 안에서는 간트의 키)대로 두고, 5 는 정리일 뿐이라 두었다"}
 {"ts":"2026-10-25T15:30:57Z","id":"moai-l80o","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (high — 간트 키를 제 표와 [gantt] 절로, 키 파일의 꼴이 바뀐다)"}
 {"ts":"2026-10-25T15:30:57Z","id":"moai-l80o","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
+{"ts":"2026-10-25T15:31:55Z","id":"moai-9r6f","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.24.0 릴리스 — milestone/moai-a6mp 를 develop 에 들이고 판을 낸다"}
+{"ts":"2026-10-25T15:32:00Z","id":"moai-9r6f","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
