@@ -84,8 +84,7 @@ pub fn make_review(anchor: &str) -> String {
 
 /// 리뷰를 닫기 앞에서 묻는 한 줄(moai-4s5n.svp). 위키 스킬의 "Lessons" 와 같은 물음이다 — 리뷰가 낸 지적 가운데
 /// 규칙 하나로 막을 수 있었던 것이 있는가. 아무것도 막지 않는다: 답이 "없다" 면 그대로 닫는다.
-const LESSON_ASK: &str =
-    "Could one rule have stopped any finding above? If so, `moai wiki search` it, then follow Lessons in `moai-wiki`";
+const LESSON_ASK: &str = "Could one rule have stopped any finding above? If so, write the lesson on the branch before it merges — `moai wiki search` it, then follow Lessons in `moai-wiki`";
 
 /// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
 /// 것. 닫기 거절문과 세션을 닫을 때의 붙듦이 쓴다. 손으로 다시 적던 두 자리는
@@ -1026,9 +1025,9 @@ the next session to take over from. The next session reads it in the history und
 
     moai note <id> 'Next: <what comes next>'
 
-If this session made a mistake the next one would make too, write it down as a lesson
-before you close — `moai wiki search '<its words>'` first, then `moai wiki learn`; the
-`moai-wiki` skill says which mistakes count."#;
+If this session made a mistake the next one would make too, write it down as a lesson while
+you still hold the row it came from (the page is a change to the repository, as rule 2 counts it) —
+`moai wiki search '<its words>'` first, then `moai wiki learn`; `moai-wiki` says which mistakes count."#;
 
 /// 위키를 AGENTS 블록과 참고 문서에 알리는 조각(moai-bl3x). **짧게 둔다** — 어떻게 쓰는가는
 /// 셋째 스킬 [`wiki`] 에 있고, 언제나 읽히는 블록에 그 본문을 얹으면 모든 세션이 그 값을 낸다.
@@ -5097,8 +5096,8 @@ never in the root
     named, the `member refused:` lines of 4-3,
     the wiki pages 7-4 changed — or that it changed none — and anything still running that 11
     could not finish. **A subagent worker adds a `Lessons:` piece** — the slug of each new
-    lesson page and each `Lesson:` note that met an old one, or `Lessons: none` — the
-    supervisor reads that line.
+    lesson page and each `Lesson:` note that met an old one, or `Lessons: none` — so
+    what the epic learned stands in the report as well as on the branch.
     **If that send fails** — the supervisor restarted, so its old name is gone — the report
     must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
     `moai note <epic> -b -` — it stands in the root's file, where the next supervisor reads it,
