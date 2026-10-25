@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-25
+
 ### Added
 
 - **Any row can carry a planned start, not only a milestone.** `--start` works
