@@ -7278,14 +7278,25 @@ fn tui_deep_carries_each_rows_gantt() {
     let s = init("tuideepgantt");
     let now = "2026-10-25T05:00:00Z";
     let ep = field(&ok_at(s.path(), now, &["epic", "add", "간트", "--json"]), "id");
-    let a = field(&ok_at(s.path(), now, &["add", "앞 일", "-e", &ep, "--start", "2026-10-20", "--due", "2026-10-22", "--json"]), "id");
-    let b = field(&ok_at(s.path(), now, &["add", "뒤 일", "-e", &ep, "--start", "2026-10-26", "--due", "2026-10-28", "--json"]), "id");
+    let a = field(
+        &ok_at(s.path(), now, &["add", "앞 일", "-e", &ep, "--start", "2026-10-20", "--due", "2026-10-22", "--json"]),
+        "id",
+    );
+    let b = field(
+        &ok_at(s.path(), now, &["add", "뒤 일", "-e", &ep, "--start", "2026-10-26", "--due", "2026-10-28", "--json"]),
+        "id",
+    );
     ok_at(s.path(), now, &["link", &a, "--blocks", &b]);
     ok_at(s.path(), "2026-10-21T01:00:00Z", &["mv", &a, "in_progress"]);
 
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
-    let gantt = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
-    assert_eq!(gantt(&ep)["planned"], serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"}));
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
+    let gantt =
+        |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
+    assert_eq!(
+        gantt(&ep)["planned"],
+        serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"})
+    );
     assert_eq!(gantt(&ep)["progress"], serde_json::json!({"kind": "rollup", "done": 0, "total": 2}));
     assert_eq!(gantt(&a)["actual"], serde_json::json!({"kind": "span", "start": "2026-10-21T01:00:00Z", "end": null}));
     assert_eq!(gantt(&a)["overdue"], serde_json::json!(3));
@@ -31421,7 +31432,11 @@ fn web_moves_a_plan_only_from_its_own_page() {
     let cfg = s.path().join("user.toml");
     let epic = field(&ok_with(s.path(), &cfg, &["epic", "add", "묶음", "--due", "2026-11-10", "--json"]), "id");
     let id = field(
-        &ok_with(s.path(), &cfg, &["add", "막대", "-e", &epic, "--start", "2026-10-26", "--due", "2026-10-27", "--json"]),
+        &ok_with(
+            s.path(),
+            &cfg,
+            &["add", "막대", "-e", &epic, "--start", "2026-10-26", "--due", "2026-10-27", "--json"],
+        ),
         "id",
     );
     let web = serve_with(s.path(), |cmd| {
