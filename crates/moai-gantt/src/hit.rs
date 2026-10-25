@@ -82,27 +82,46 @@ pub enum Hit {
 }
 
 impl GanttRow {
-    /// 막대가 차지하는 시각 `[시작, 끝]`. 한쪽만 알면 그 한 점이고, 둘 다 모르면 막대가 없다.
-    /// 끝이 시작보다 앞이면 시작으로 맞춘다. 맞히기가 보는 막대의 크기는 여기 한 곳에서 정한다 —
-    /// 그리는 쪽이 막대 모양을 바꾸면 이 함수를 같이 바꾼다.
-    pub fn span(&self) -> Option<(i64, i64)> {
-        match (self.start, self.end) {
-            (Some(s), Some(e)) => Some((s, e.max(s))),
-            (Some(t), None) | (None, Some(t)) => Some((t, t)),
-            (None, None) => None,
+    /// 맞히기가 보는 막대의 크기 `[시작, 끝]`: 그려지는 것 전부의 **합집합**이다 — 계획, 실제(끝이
+    /// 없으면 `now` 까지), 기한 표식(기한이 든 날의 칸), 기한 넘김(기한~`now`). 어느 하나라도 있으면
+    /// 그 칸을 누를 수 있어야 하고, 막대 없이 표식뿐인 칸도 누를 수 있다. 끝이 시작보다 앞이면 시작으로
+    /// 맞춘다. 그리는 쪽이 모양을 바꾸면 이 함수를 같이 바꾼다(`draw` 시험이 그리기와 견준다).
+    pub fn span(&self, now: i64) -> Option<(i64, i64)> {
+        let mut parts: Vec<(i64, i64)> = Vec::with_capacity(4);
+        if let Some((s, e)) = self.planned {
+            parts.push((s, e.max(s)));
         }
+        if let Some((s, e)) = self.actual {
+            parts.push((s, e.unwrap_or(now).max(s)));
+        }
+        if let Some(d) = self.due {
+            // 기한은 그날 끝 시각(미포함)이다 — 표식은 그날의 마지막 칸에 선다.
+            parts.push((d - 1, d));
+            if self.overdue {
+                // `!` 는 지금이 든 칸에 서므로 끝을 1초 넘겨 그 칸을 포함시킨다.
+                parts.push((d, now.max(d) + 1));
+            }
+        }
+        let lo = parts.iter().map(|p| p.0).min()?;
+        let hi = parts.iter().map(|p| p.1).max()?;
+        Some((lo, hi))
     }
 }
 
 /// 막대가 차지하는 칸 `[첫 칸, 끝 칸)` (왼쪽이 화면 밖이면 음수). 시각이 한 점이어도 한 칸은 차지한다.
-pub fn bar_cells(state: &GanttState, span: (i64, i64)) -> (i64, i64) {
-    let c0 = state.axis.cell_of_secs(span.0).floor() as i64;
-    let c1 = state.axis.cell_of_secs(span.1).ceil() as i64;
+pub fn span_cells(axis: &crate::Axis, span: (i64, i64)) -> (i64, i64) {
+    let c0 = axis.cell_of_secs(span.0).floor() as i64;
+    let c1 = axis.cell_of_secs(span.1).ceil() as i64;
     (c0, c1.max(c0 + 1))
 }
 
-/// `(x, y)` 에 무엇이 있는가. `rows` 는 부르는 쪽 목록 전체이고, 본문 첫 줄이 `state.first_row` 다.
-pub fn hit(area: Rect, state: &GanttState, rows: &[GanttRow], x: u16, y: u16) -> Hit {
+/// [`span_cells`] 를 보기 상태의 축으로.
+pub fn bar_cells(state: &GanttState, span: (i64, i64)) -> (i64, i64) {
+    span_cells(&state.axis, span)
+}
+
+/// `(x, y)` 에 무엇이 있는가. `now` 는 끝나지 않은 실제와 기한 넘김의 끝이다. `rows` 는 부르는 쪽 목록 전체이고, 본문 첫 줄이 `state.first_row` 다.
+pub fn hit(area: Rect, state: &GanttState, rows: &[GanttRow], now: i64, x: u16, y: u16) -> Hit {
     let p = Position { x, y };
     if !area.contains(p) {
         return Hit::None;
@@ -124,7 +143,7 @@ pub fn hit(area: Rect, state: &GanttState, rows: &[GanttRow], x: u16, y: u16) ->
         return Hit::Label { row };
     }
     let col = i64::from(x - l.dates_body.x);
-    if let Some(span) = r.span() {
+    if let Some(span) = r.span(now) {
         let (c0, c1) = bar_cells(state, span);
         if (c0..c1).contains(&col) {
             let n = c1 - c0;
@@ -170,7 +189,7 @@ mod tests {
     use crate::axis::Axis;
 
     fn row(s: i64, e: i64) -> GanttRow {
-        GanttRow { label: "r".into(), start: Some(s), end: Some(e) }
+        GanttRow { planned: Some((s, e)), ..GanttRow::default() }
     }
 
     fn st(zoom: Zoom, origin: i64) -> GanttState {
@@ -202,7 +221,7 @@ mod tests {
         // Week: 하루 한 칸. 날 10 의 칸 = 0. 막대 날 12..15 → 칸 2..5.
         let s = st(Zoom::Week, 10 * DAY);
         let rows = [row(12 * DAY, 15 * DAY)];
-        let at = |col: u16| hit(AREA, &s, &rows, 16 + col, 5);
+        let at = |col: u16| hit(AREA, &s, &rows, 0, 16 + col, 5);
         assert_eq!(at(1), Hit::Empty { row: 0, day: 11 });
         assert_eq!(at(2), Hit::Bar { row: 0, part: Part::Start });
         assert_eq!(at(3), Hit::Bar { row: 0, part: Part::Body });
@@ -215,11 +234,11 @@ mod tests {
         let s = st(Zoom::Week, 10 * DAY);
         // 한 점(12일 정각): 한 칸 Body.
         let rows = [row(12 * DAY, 12 * DAY), row(12 * DAY, 14 * DAY)];
-        assert_eq!(hit(AREA, &s, &rows, 18, 5), Hit::Bar { row: 0, part: Part::Body });
-        assert_eq!(hit(AREA, &s, &rows, 19, 5), Hit::Empty { row: 0, day: 13 });
+        assert_eq!(hit(AREA, &s, &rows, 0, 18, 5), Hit::Bar { row: 0, part: Part::Body });
+        assert_eq!(hit(AREA, &s, &rows, 0, 19, 5), Hit::Empty { row: 0, day: 13 });
         // 두 칸: Start·End.
-        assert_eq!(hit(AREA, &s, &rows, 18, 6), Hit::Bar { row: 1, part: Part::Start });
-        assert_eq!(hit(AREA, &s, &rows, 19, 6), Hit::Bar { row: 1, part: Part::End });
+        assert_eq!(hit(AREA, &s, &rows, 0, 18, 6), Hit::Bar { row: 1, part: Part::Start });
+        assert_eq!(hit(AREA, &s, &rows, 0, 19, 6), Hit::Bar { row: 1, part: Part::End });
     }
 
     #[test]
@@ -229,25 +248,25 @@ mod tests {
         let area = Rect::new(5, 2, 100, 10);
         // Hour: 24칸 — 24..48.
         let s = st(Zoom::Hour, o);
-        assert_eq!(hit(area, &s, &rows, 16 + 24, 5), Hit::Bar { row: 0, part: Part::Start });
-        assert_eq!(hit(area, &s, &rows, 16 + 47, 5), Hit::Bar { row: 0, part: Part::End });
+        assert_eq!(hit(area, &s, &rows, 0, 16 + 24, 5), Hit::Bar { row: 0, part: Part::Start });
+        assert_eq!(hit(area, &s, &rows, 0, 16 + 47, 5), Hit::Bar { row: 0, part: Part::End });
         // Day: 4칸 — 4..8, 날 101 은 칸 4..8.
         let s = st(Zoom::Day, o);
-        assert_eq!(hit(area, &s, &rows, 16 + 4, 5), Hit::Bar { row: 0, part: Part::Start });
-        assert_eq!(hit(area, &s, &rows, 16 + 7, 5), Hit::Bar { row: 0, part: Part::End });
-        assert_eq!(hit(area, &s, &rows, 16 + 8, 5), Hit::Empty { row: 0, day: 102 });
+        assert_eq!(hit(area, &s, &rows, 0, 16 + 4, 5), Hit::Bar { row: 0, part: Part::Start });
+        assert_eq!(hit(area, &s, &rows, 0, 16 + 7, 5), Hit::Bar { row: 0, part: Part::End });
+        assert_eq!(hit(area, &s, &rows, 0, 16 + 8, 5), Hit::Empty { row: 0, day: 102 });
         // Month: 한 칸이 7일. 하루 막대는 한 칸 (칸 0, 날 101 은 칸 0 에 든다).
         let s = st(Zoom::Month, o);
-        assert_eq!(hit(area, &s, &rows, 16, 5), Hit::Bar { row: 0, part: Part::Body });
-        assert_eq!(hit(area, &s, &rows, 17, 5), Hit::Empty { row: 0, day: 107 });
+        assert_eq!(hit(area, &s, &rows, 0, 16, 5), Hit::Bar { row: 0, part: Part::Body });
+        assert_eq!(hit(area, &s, &rows, 0, 17, 5), Hit::Empty { row: 0, day: 107 });
     }
 
     #[test]
     fn a_bar_clipped_at_the_left_has_no_start_cell() {
         let s = st(Zoom::Week, 10 * DAY);
         let rows = [row(5 * DAY, 12 * DAY)]; // 칸 -5..2
-        assert_eq!(hit(AREA, &s, &rows, 16, 5), Hit::Bar { row: 0, part: Part::Body });
-        assert_eq!(hit(AREA, &s, &rows, 17, 5), Hit::Bar { row: 0, part: Part::End });
+        assert_eq!(hit(AREA, &s, &rows, 0, 16, 5), Hit::Bar { row: 0, part: Part::Body });
+        assert_eq!(hit(AREA, &s, &rows, 0, 17, 5), Hit::Bar { row: 0, part: Part::End });
     }
 
     #[test]
@@ -255,15 +274,15 @@ mod tests {
         let mut s = st(Zoom::Week, 0);
         s.first_row = 3;
         let rows: Vec<_> = (0..5).map(|_| row(0, DAY)).collect();
-        assert_eq!(hit(AREA, &s, &rows, 6, 5), Hit::Label { row: 3 });
-        assert_eq!(hit(AREA, &s, &rows, 6, 6), Hit::Label { row: 4 });
+        assert_eq!(hit(AREA, &s, &rows, 0, 6, 5), Hit::Label { row: 3 });
+        assert_eq!(hit(AREA, &s, &rows, 0, 6, 6), Hit::Label { row: 4 });
         // 5번 줄은 없다.
-        assert_eq!(hit(AREA, &s, &rows, 6, 7), Hit::None);
-        assert_eq!(hit(AREA, &s, &rows, 20, 7), Hit::None);
+        assert_eq!(hit(AREA, &s, &rows, 0, 6, 7), Hit::None);
+        assert_eq!(hit(AREA, &s, &rows, 0, 20, 7), Hit::None);
         // 날짜가 없는 줄은 막대 없이 Empty.
         let rows = [GanttRow::default()];
         s.first_row = 0;
-        assert_eq!(hit(AREA, &s, &rows, 16, 5), Hit::Empty { row: 0, day: 0 });
+        assert_eq!(hit(AREA, &s, &rows, 0, 16, 5), Hit::Empty { row: 0, day: 0 });
     }
 
     #[test]
@@ -271,20 +290,20 @@ mod tests {
         let s = st(Zoom::Week, 10 * DAY);
         let rows = [row(0, DAY)];
         for y in 2..5 {
-            assert_eq!(hit(AREA, &s, &rows, 16 + 3, y), Hit::Axis { day: 13 });
+            assert_eq!(hit(AREA, &s, &rows, 0, 16 + 3, y), Hit::Axis { day: 13 });
         }
         // 분할선은 머리글 줄에도 이어진다.
-        assert_eq!(hit(AREA, &s, &rows, 15, 2), Hit::Splitter);
-        assert_eq!(hit(AREA, &s, &rows, 15, 11), Hit::Splitter);
+        assert_eq!(hit(AREA, &s, &rows, 0, 15, 2), Hit::Splitter);
+        assert_eq!(hit(AREA, &s, &rows, 0, 15, 11), Hit::Splitter);
         // 고정 칸 머리글은 아무것도 아니다.
-        assert_eq!(hit(AREA, &s, &rows, 6, 3), Hit::None);
+        assert_eq!(hit(AREA, &s, &rows, 0, 6, 3), Hit::None);
         // 영역 밖: 왼쪽·위·오른쪽 끝 다음·아래 끝 다음.
-        assert_eq!(hit(AREA, &s, &rows, 4, 5), Hit::None);
-        assert_eq!(hit(AREA, &s, &rows, 20, 1), Hit::None);
-        assert_eq!(hit(AREA, &s, &rows, 45, 5), Hit::None);
-        assert_eq!(hit(AREA, &s, &rows, 20, 12), Hit::None);
+        assert_eq!(hit(AREA, &s, &rows, 0, 4, 5), Hit::None);
+        assert_eq!(hit(AREA, &s, &rows, 0, 20, 1), Hit::None);
+        assert_eq!(hit(AREA, &s, &rows, 0, 45, 5), Hit::None);
+        assert_eq!(hit(AREA, &s, &rows, 0, 20, 12), Hit::None);
         // 가장자리 칸은 안이다.
-        assert_eq!(hit(AREA, &s, &rows, 44, 5), Hit::Empty { row: 0, day: 10 + 28 });
+        assert_eq!(hit(AREA, &s, &rows, 0, 44, 5), Hit::Empty { row: 0, day: 10 + 28 });
     }
 
     #[test]
@@ -294,10 +313,10 @@ mod tests {
         let tiny = Rect::new(3, 3, 1, 2);
         for x in 0..6 {
             for y in 0..8 {
-                let _ = hit(tiny, &s, &rows, x, y);
+                let _ = hit(tiny, &s, &rows, 0, x, y);
             }
         }
-        assert_eq!(hit(Rect::new(0, 0, 0, 0), &s, &rows, 0, 0), Hit::None);
+        assert_eq!(hit(Rect::new(0, 0, 0, 0), &s, &rows, 0, 0, 0), Hit::None);
     }
 
     #[test]
