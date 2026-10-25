@@ -15,6 +15,7 @@ that changed nothing a person does writes nothing.
     moai wiki ls                           the pages: slug and title, and what does not resolve
     moai wiki ls --json                    the same with each page's path, for a machine
     moai wiki show <slug>                  one page, and the pages that link to it
+    moai wiki search <words>               the sections that hold those words, best first (`--json`)
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
   `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`

@@ -272,7 +272,9 @@ never in the root
    from here on aim every command at `<root>/.worktrees/<epic>` ("In a subagent"), or at
    `<root>/.worktrees/<epic>/<subdir>` for a subdirectory project. If the repository's
    CLAUDE.md says what a new worktree gets (a link for the build output, say), do that first
-4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
+4. Before you ask about a design decision, read the `Wiki` block of `moai show <member>` and
+   `moai wiki search '<that place>'`; do not ask a person what the wiki already answers.
+   Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
    recommendation instead ("When the person is away").
    **In a subagent** there is no `AskUserQuestion`: hand back with `SubagentHandback`, its

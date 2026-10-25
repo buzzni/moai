@@ -65,6 +65,14 @@ committed tracker.
 4. `moai mv <id> review`, then `done` — the columns are `todo`, `in_progress`,
    `review` and `done` unless `statuses` in `.moai/config.toml` says otherwise
 
+**Read what the wiki says before you start.** `moai show <id>` shows a `Wiki`
+block above its history: the pages that name the row's id or its epic's, and up to
+three sections whose words match the row's title — each as `path:line`, ready
+to open. To look something up yourself, `moai wiki search <words>` lists the
+sections that hold those words, best first; several words are one query, and a
+section holding more of them comes first. Both read the wiki of the checkout you
+are in, so in a worktree they see that branch's pages.
+
 Work that belongs to someone else, or to nobody, stands apart under `others` in
 `moai ready`. Ask its person before you [take it over](glossary.md#take-over) —
 the [agents page](agents.md#the-five-rules) has the `--take` line, and why it is
@@ -278,4 +286,4 @@ where its contributors read them rather than repeated here:
   broken data, the same as a broken line in `issues.jsonl` — see [An archive file
   cannot be read](recovery.md#an-archive-file-cannot-be-read)
 
-Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo
+Decided in: moai-0zjo moai-40ht moai-bx6t moai-9793 moai-ug3j moai-gelm moai-tllo moai-snyk moai-zynt moai-j9nf moai-jtvp moai-fx9t moai-bth3 moai-r0x8 moai-9tqo moai-g8pt

@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.18.0 hash:117d9520 -->
+<!-- moai:begin v:0.23.0 hash:d37ee0ff -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -11,6 +11,7 @@ Start a session by running `moai status`. The board and the warnings come up on 
     moai ready                             what you can pick up right now
     moai show <id>                         body, children, history. Why it was decided is here
     moai show -g <keyword>                 find out whether it is written down already
+    moai wiki search '<words>'             what the manual (and the lessons) say about it
     moai show -s todo -t bug               filters (comma = or, repeated flag = and, except -a: or)
     moai show --tree                       epic → issue → child
     moai ready --worktree                  overlay what the other worktrees picked up
@@ -388,7 +389,7 @@ source and a directory you cannot write are refused before anything is fetched.
 
 ### When a feature request comes in
 
-1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`.
+1. Look at the epics that already exist with `moai status`. If it may overlap, `moai show -g <keyword>`, and `moai wiki search <keyword>` for what the manual says.
 2. Show a plan split the way fork 3 says, once, ask when it is due in the same breath,
    and on a "yes" create it in one go. No answer leaves the deadline empty.
 3. Pick it up with `moai mv <id> in_progress`, and move it to `done` when it is finished.
@@ -600,6 +601,8 @@ in `.moai/config.toml` says otherwise. `moai wiki ls` lists them and `moai wiki 
 prints one. When an epic changes what a person does, the window that did it fixes the page
 on its branch before the merge, and `moai skill install` plants a skill for it, `moai-wiki`,
 that says how — and sweeps the wiki when a person calls it. Nothing checks this.
+Before you touch a place, `moai wiki search '<words>'` finds it; read the sections under the
+`Wiki` block of `moai show <id>` (`wiki` in `--json`) first.
 
 ### Before you close the session
 

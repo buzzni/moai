@@ -87,6 +87,7 @@ To read the project manual:
 
   moai wiki ls                  the markdown pages under docs/ - the wiki
   moai wiki show <slug>         one page
+  moai wiki search <words...>   the sections that match, best first
 
 To watch several projects from one place:
 
@@ -481,6 +482,8 @@ BACKLOG
   moai wiki ls                  every page, and what does not resolve
   moai wiki show <slug>         one page, drawn, and the pages linking to it.
                                 `--json` gives the raw body
+  moai wiki search <words...>   the sections that match, best first, with the
+                                line to open
 
   **Nothing is stored.** The tracker holds no page and no index - the list,
   the links, the pages linking to each page (`linked_from`) and the ids are
@@ -1280,6 +1283,47 @@ pub enum WikiCmd {
         /// The page - its path under the wiki directory without `.md`
         #[arg(value_name = "slug")]
         slug: String,
+    },
+    /// Find the sections that match some words, best first
+    #[command(after_help = "  moai wiki search merge driver          several words, one query
+  moai wiki search '병합 드라이버' -n 5   -n/--limit, 10 unless given
+  moai wiki search merge --json
+
+  Every heading, at any level, starts a section; the text before the first
+  heading is one too. Words are lowercased and split at anything that is not a
+  letter, digit or `_`, and Korean, Chinese and Japanese text also matches two
+  letters at a time - such a word counts as matched where half its two-letter
+  pieces are; there is no stemming. A title or heading counts more than the
+  body, and a section matching more of the distinct words comes first. A
+  screen line is `path:line  Page title › Heading`, with the best line of the
+  section under it - the matched words in bold, which is decoration only. The
+  last line says how many of how many are shown and the command that opens a
+  page.
+
+  Nothing matching is not an error: the exit code is 0, as it is when the wiki
+  directory is not there yet. A page that could not be read makes it non-zero
+  once everything found is out, as `moai wiki ls` does.
+
+  --json gives {\"dir\",\"query\",\"terms\",\"hits\":[{\"slug\",\"path\",\"title\",
+  \"heading\",\"anchor\",\"line\",\"score\",\"snippet\",\"snippet_line\"}],
+  \"total\"}. `hits` is always there, `[]` when nothing matched; `total` counts
+  the matches before `--limit` cut the list. `line` and `snippet_line` count
+  from 1, the line to open in an editor. `heading` and `anchor` are absent on
+  the section before a page's first heading; `snippet` and `snippet_line` are
+  absent when the page could not be read. `score` shows the ranking, not a
+  contract - trust the order, not the values, and never compare them across
+  queries. A page whose text could not be read is matched by its title alone
+  and named in `unread`, [{\"slug\",\"path\",\"error\"}] with `error` as `ls`
+  gives it; a place the walk left out is in `skipped`, as in `ls`. Each key
+  stands only when it has something. When the wiki directory cannot be used
+  it gives {\"dir\",\"error\"} as `ls` does.")]
+    Search {
+        /// What to look for - several words are one query
+        #[arg(value_name = "words", required = true, num_args = 1..)]
+        words: Vec<String>,
+        /// How many sections to show, best first
+        #[arg(short = 'n', long, default_value_t = 10)]
+        limit: usize,
     },
 }
 

@@ -17,6 +17,9 @@ use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
+pub mod about;
+pub mod search;
+
 /// 본문을 읽는 상한 — 이보다 큰 페이지는 목록에만 서고 본문은 안 읽는다([`Unread::TooLarge`]). 이 저장소에서
 /// 가장 큰 생성 페이지(`docs/cli.md`)가 128KB 남짓이라 여덟 배를 둔다.
 pub const TOO_LARGE: u64 = 1024 * 1024;

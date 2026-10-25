@@ -71,6 +71,35 @@ each raised row's `due_on`, with `due_from` naming the ancestor when it is not t
 own; on `moai status --json` the `due_priority_behind` notice carries it per id in
 `deadlines`, beside the days left in `ages`.
 
+## Read the wiki about one row
+
+`moai show <id> --json` also carries `wiki`, the wiki pages about that row, read
+from the checkout you call it in:
+
+- `named_in` — the pages whose text names the row's id or the id of the epic it
+  stands in, in `moai wiki ls` order: `slug`, `path`, `title` and `via`, the id
+  the page names (the row's own when a page names both)
+- `related` — up to three sections found from the row's title, best first and
+  one per page, leaving out the pages already in `named_in`: `slug`, `path`,
+  `title`, `line` (counted from 1, the section's heading line), `score`, and
+  `heading` and `anchor` unless the section comes before the page's first
+  heading. A section stands only when it matches two words of the title that
+  are not common across the wiki (one, when the title has only one such word);
+  a word in more than a quarter of the sections, and in more than one, does
+  not count. A Korean, Chinese or Japanese word is one word however many
+  two-letter pieces it splits into, and it matches a section holding at least
+  half of them — so `검색은` still finds `검색`
+
+`wiki` is always there; with no wiki directory, or nothing about the row, both
+arrays are empty. `wiki_error` stands only when the wiki directory cannot be
+used, beside two empty arrays: `kind` takes the words of `moai wiki ls --json`'s
+`error.kind` (`not_a_dir`, `outside`, `failed`) and `said` is one line for a
+person. A missing directory is a wiki not started yet, not an error.
+
+Only `moai show <id>` carries these two keys. The list form,
+`moai show [filters] --json`, leaves them out — it would walk the whole wiki
+for every row. Ask per row when you need them.
+
 ## Keep the payload small
 
 A whole tracker with bodies runs to megabytes — this repository's
@@ -78,7 +107,8 @@ A whole tracker with bodies runs to megabytes — this repository's
 
 - `--fields id,title,status` keeps only those keys of each row, in that order
   and each once. The costly keys it leaves out are not worked out: without
-  `work` a list skips the journals, and `moai show <id>` asks git only for
+  `work` a list skips the journals, and `moai show <id>` reads the wiki only
+  for `wiki` and asks git only for
   `commits`. `moai show -g <word> --all --fields id --json` is a small list of
   the ids a search found, notes included — `-g` still reads the notes it
   searches
@@ -96,4 +126,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-wk7i
+Decided in: moai-wk7i, moai-g8pt
