@@ -187,7 +187,7 @@ function boot(storage, { rows = ROWS, indexOf = null } = {}) {
 test('shell: tabs switch the pane shown and the choice is remembered', () => {
   const storage = fakeStorage()
   const panel = boot(storage)
-  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Wiki'])
+  assert.deepEqual([...panel.doc.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent), ['Board', 'List', 'Wiki', 'Gantt'])
   assert.equal(panel.tab('list').getAttribute('aria-selected'), 'true')
   assert.equal(panel.$('.m-pane-main[data-pane="list"]').hidden, false)
   assert.equal(panel.$('.m-pane-main[data-pane="board"]').hidden, true)
@@ -200,6 +200,16 @@ test('shell: tabs switch the pane shown and the choice is remembered', () => {
   assert.equal(panel.$('.m-pane-main[data-pane="board"]').hidden, false)
   assert.ok(panel.$('.m-pane-main[data-pane="board"] .m-board-pane .m-lane'), 'the board view drew its status columns')
   assert.equal(JSON.parse(storage.items.get(MEMORY_KEY)).tab, 'board')
+
+  // The gantt tab is a main pane like the list and the board: the detail stays beside it and it draws its own grid.
+  assert.equal(panel.tab('gantt').getAttribute('aria-controls'), panel.tab('list').getAttribute('aria-controls'))
+  panel.tab('gantt').click()
+  assert.equal(panel.store.getState().tab, 'gantt')
+  assert.equal(panel.$('.m-pane-main[data-pane="gantt"]').hidden, false)
+  assert.equal(panel.$('.m-pane-main[data-pane="board"]').hidden, true)
+  assert.ok(panel.$('.m-pane-main[data-pane="gantt"] .m-gantt .g-scroll'), 'the gantt view drew its scroll box')
+  assert.equal(JSON.parse(storage.items.get(MEMORY_KEY)).tab, 'gantt')
+  panel.tab('board').click()
 
   // The wiki tab: no path line, toolbar or add field; without the wiki's reads it says it cannot read the wiki.
   assert.equal(panel.$('.m-toolbar-slot').hidden, false)

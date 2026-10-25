@@ -438,6 +438,125 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .m-card-title { margin-top: 2px; overflow-wrap: anywhere; }
 
 /*
+ * The gantt tab (view/gantt.ts): a toolbar, one scroll box holding two columns — the grid (left, sticky, so it never
+ * moves sideways) and the dates — and a legend. Ported from the mockup the person confirmed
+ * (.aplus/verification/previews/gantt-web-mockup.html). Needs tokens.css and components.css.
+ *
+ * The CSP allows no style attribute, so the view sets only positions through the CSSOM (left, width, --grid-w) and
+ * everything painted is a class here. No colour stands alone: planned/plan-from-members differ by texture (solid vs
+ * hatch), late by hatch and a `!`, deferred by a dashed outline, the deadline by `◆`, today by a dashed line and a
+ * cap, and the column of an actual band by the status glyph in the grid. The colours are tokens that already have
+ * their dark values (tokens.css), so this sheet adds none.
+ */
+.m-pane-gantt { overflow: hidden; }
+.m-pane-gantt:not([hidden]) { display: flex; flex-direction: column; }
+.m-gantt { --link: color-mix(in srgb, #a855f7 75%, var(--text)); flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.m-gantt:focus { outline: 0; }
+
+/* Toolbar. */
+.g-toolbar { flex: none; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border-soft); }
+.g-spacer { flex: 1; }
+.g-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.g-seg button { border: 0; background: transparent; color: var(--muted); font: 500 12px var(--font); height: 26px; padding: 0 10px; cursor: pointer; }
+.g-seg button + button { border-left: 1px solid var(--border); }
+.g-seg button:hover { background: var(--hover); color: var(--text); }
+.g-seg button[aria-pressed="true"] { background: var(--selected); color: var(--text); font-weight: 600; }
+.g-toolbar .m-btn-sm {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 1px solid transparent;
+  border-radius: var(--radius); background: transparent; color: var(--muted); font: 500 12px var(--font); cursor: pointer;
+}
+.g-toolbar .m-btn-sm:hover { background: var(--hover); color: var(--text); }
+.g-toolbar kbd { font: 11px var(--mono); color: var(--muted); border: 1px solid var(--border-soft); border-radius: 4px; padding: 0 3px; }
+.g-range { font: 12px var(--mono); color: var(--muted); }
+
+/* One scroll box, two columns; the left one is sticky. */
+.g-scroll { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; }
+.g-inner { position: relative; display: grid; grid-template-columns: var(--grid-w, 460px) max-content; min-width: max-content; }
+.g-left { position: sticky; left: 0; z-index: 3; background: var(--bg); border-right: 1px solid var(--border); }
+.g-split { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; z-index: 6; touch-action: none; }
+.g-split:hover, .g-split.drag { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.g-head { position: sticky; top: 0; z-index: 2; height: 44px; background: var(--lane-bg); border-bottom: 1px solid var(--border-soft); }
+.g-left .g-head { z-index: 5; display: flex; align-items: flex-end; gap: 8px; padding: 0 8px 4px; color: var(--muted); font-size: 11px; font-weight: 500; }
+
+/* The grid's rows. */
+.g-rows { position: relative; }
+.g-row { position: relative; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; white-space: nowrap; cursor: default; }
+.g-row:hover { background: var(--hover); }
+.g-row[aria-selected="true"] { background: var(--selected); }
+.g-row[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.g-left .c-id { width: 13ch; flex: none; font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.g-left .c-st { width: 1.5ch; flex: none; text-align: center; font: 12px var(--mono); }
+.g-left .c-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.g-row .c-title { align-self: stretch; line-height: 28px; }
+.g-row .c-title.grp { font-weight: 600; }
+.g-row .c-title.ms { color: var(--accent); }
+.g-left .c-n { width: 5ch; flex: none; text-align: right; font: 12px var(--mono); color: var(--branch); }
+.g-left .c-who { width: 7ch; flex: none; font: 12px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.g-left[data-cols="mid"] .c-who, .g-left[data-cols="min"] .c-who, .g-left[data-cols="min"] .c-n { display: none; }
+.g-row.dim, .lane.dim { opacity: .55; }
+
+/* The dates. */
+.g-right { position: relative; }
+.hd1, .hd2 { position: absolute; left: 0; right: 0; height: 22px; }
+.hd1 { top: 0; }
+.hd2 { top: 22px; }
+.tick { position: absolute; top: 0; height: 22px; padding: 3px 0 0 4px; font: 11px var(--mono); color: var(--muted); border-left: 1px solid var(--border-soft); white-space: nowrap; overflow: hidden; }
+.hd1 .tick { color: var(--text); font-weight: 600; }
+.tick.today { color: var(--danger); font-weight: 700; }
+.tick.we { color: color-mix(in srgb, var(--muted) 60%, transparent); }
+.g-lanes { position: relative; }
+.col-we { position: absolute; top: 0; bottom: 0; background: var(--muted-bg); }
+.lane { position: relative; height: 28px; }
+.lane:hover { background: var(--hover); }
+.lane[aria-selected="true"] { background: var(--selected); }
+.todayline { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px dashed var(--danger); z-index: 2; pointer-events: none; }
+.todaycap { position: absolute; top: 36px; width: 10px; height: 8px; margin-left: -5px; background: var(--danger); clip-path: polygon(0 0, 100% 0, 50% 100%); z-index: 3; }
+
+/* Bars: planned 14px tall, the actual band 8px over it, centred. */
+.bar { position: absolute; border-radius: 4px; }
+.b-plan { z-index: 1; top: 7px; height: 14px; background: color-mix(in srgb, var(--muted) 16%, transparent); border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent); }
+.b-plan.members { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--muted) 24%, transparent) 0 3px, transparent 3px 7px); }
+.b-plan.deferred { background: transparent; border: 1px dashed color-mix(in srgb, var(--muted) 60%, transparent); }
+.b-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px 0 0 3px; background: color-mix(in srgb, var(--branch) 30%, transparent); }
+.b-act { top: 10px; height: 8px; border-radius: 3px; z-index: 1; background: var(--muted); }
+.b-act.a-in_progress { background: var(--warn); }
+.b-act.a-review { background: var(--review); }
+.b-act.a-done { background: var(--ok); }
+.b-act.a-other { background: var(--accent); }
+.b-over {
+  top: 7px; height: 14px; z-index: 1; border-radius: 0 4px 4px 0; border: 1px solid var(--danger);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--danger) 55%, transparent) 0 3px, var(--danger-soft) 3px 6px);
+}
+.mk { position: absolute; top: 4px; height: 20px; line-height: 20px; font: 700 12px var(--mono); z-index: 2; pointer-events: none; }
+.mk.over { color: var(--danger); }
+.mk.due { color: var(--accent); font-size: 15px; margin-left: -7px; pointer-events: auto; }
+.mk.clip { color: var(--branch); font-size: 14px; }
+.mk[hidden] { display: none; }
+svg.links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 0; overflow: visible; }
+svg.links path { fill: none; stroke: var(--link); stroke-width: 1.5; }
+svg.links polygon { fill: var(--link); }
+
+/* The bubble over a bar. */
+.g-bubble { position: absolute; z-index: 10; min-width: 220px; max-width: 340px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-md); font-size: 12px; pointer-events: none; }
+.g-bubble[hidden] { display: none; }
+.g-bubble .t { font-weight: 600; margin-bottom: 4px; }
+.g-bubble dl { display: grid; grid-template-columns: max-content 1fr; gap: 1px 10px; margin: 0; }
+.g-bubble dt { color: var(--muted); }
+.g-bubble dd { margin: 0; font-family: var(--mono); }
+
+.g-empty[hidden] { display: none; }
+
+/* The legend: drawn with the classes of the bars it names. */
+.g-legend { flex: none; display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 10px; border-top: 1px solid var(--border-soft); font-size: 12px; color: var(--muted); }
+.g-key { display: inline-flex; align-items: center; gap: 4px; }
+.g-legend .sw { display: inline-block; position: relative; width: 28px; height: 14px; vertical-align: middle; }
+.g-legend .sw .bar { top: 0; }
+.g-legend .sw .b-act { top: 3px; }
+.g-legend .sw .mk { top: -3px; }
+.g-legend .sw .todayline { left: 13px; }
+.g-legend .arrow-key { color: var(--link); font: 13px var(--mono); }
+
+/*
  * The list tab (view/list.ts): the tree list with its virtual scroll. Rows are the m-row of components.css,
  * placed absolutely in a body as tall as every line, so only the lines near the viewport exist.
  * Needs tokens.css and components.css.

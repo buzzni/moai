@@ -36,6 +36,8 @@ export interface Row {
   assignee?: string
   assignee_email?: string
   blocked_by?: string[]
+  /** The gantt's values for this row (`tui --json --deep`'s `gantt`, carried over from the tree line; the gantt tab places them). */
+  gantt?: GanttRow
   /** CLI's unread verdict: `true` or absent (see read.ts). */
   unread?: boolean
   /** The nearest row that took this one out of the plan (`report::Shelf`): its own id when deferred itself. */
@@ -142,7 +144,7 @@ interface Place {
   under: number[]
 }
 
-const TREE_KEYS = ['title', 'kind', 'status', 'derived_status', 'priority'] as const
+const TREE_KEYS = ['title', 'kind', 'status', 'derived_status', 'priority', 'gantt'] as const
 
 export class IssueIndex {
   readonly rows: readonly Row[]

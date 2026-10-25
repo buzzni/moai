@@ -1,11 +1,11 @@
-// Tab shell: the kanban / list / wiki tab strip (roving tabindex) and the panels they switch.
+// Tab shell: the kanban / list / wiki / gantt tab strip (roving tabindex) and the panels they switch.
 // Standalone: it takes props and callbacks and touches only the elements it makes. Where the last tab is
 // remembered (the store, the saved settings) is the caller's business; normalizeTab() cleans what comes back.
 
 import { el, icon } from "./components.ts"
 import type { IconName } from "./icons.ts"
 
-export type TabId = "board" | "list" | "wiki"
+export type TabId = "board" | "list" | "wiki" | "gantt"
 
 export interface TabDef {
   id: TabId
@@ -18,6 +18,7 @@ export const TABS: ReadonlyArray<TabDef> = [
   { id: "board", icon: "kanban", label: "칸반" },
   { id: "list", icon: "list-tree", label: "목록" },
   { id: "wiki", icon: "book-open", label: "위키" },
+  { id: "gantt", icon: "gantt-chart", label: "간트" },
 ]
 
 export const DEFAULT_TAB: TabId = "list"

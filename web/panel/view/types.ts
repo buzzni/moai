@@ -112,4 +112,6 @@ export interface Panes {
   board: MountPane
   detail: MountPane
   wiki?: MountPane
+  /** The gantt tab (view/gantt.ts); like the list and board it fills the main pane, with the detail beside it. */
+  gantt?: MountPane
 }
