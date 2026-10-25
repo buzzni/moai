@@ -50,6 +50,8 @@ def scenes(repo):
             (5.0, None),
         ],
         # 간트 (v0.24.0 의 Discord 소식, moai-r96m). 계획한 날은 record-tui.sh 가 plan.sh 로 달아 둔다.
+        # 제목 위의 노란 띠는 검색이 아니라 집은 줄이 도는 빛줄기다(draw.rs 의 shimmer) — 기능이라 그대로 두고, 정지 그림에는
+        # 한 걸음이 굳어 찍힌다(moai-vj8w.fuh)
         # 줄의 차례는 record-tui.sh 가 데모 설정에 적는 order 로 굳힌다 — 기본 차례는 같은 p 끼리 seed 마다 새로 뜨는 id 로 갈려 자리가 안
         # 선다. 커서와 마우스는 'Sync attachments larger than 10 MB' 를 겨눈다(여섯째 줄, 화면 18 줄). 칸은 120x40
         # 창(make.sh 의 SIZE — record-tui.sh 의 기본 120x34 가 아니다. 낮은 창은 ▼ 줄을 접어 줄이 한 칸 올라간다)에서
@@ -63,8 +65,11 @@ def scenes(repo):
             (2.0, 'j'), *key('j', 'j', 'j', 'j', gap=0.4),
             (1.4, '<'), *key('<', gap=0.8),
             (1.6, '>'), *key('>', gap=0.8),
+            # 막대 끌기는 그 줄을 다시 쓴다 — 읽음은 쓴 사람을 안 가리니 Mira 자신의 쓰기도 그 줄을 [NEW] 로 세운다
+            # (moai-vj8w.fuh). 화면이 다시 읽은 뒤 r 로 커서 줄을 읽는다. 둘을 합친 3.0 초는 옛 기다림 그대로라 make.sh 의 시각이 안 밀린다
             *drag(67, 18, 64, wait=2.0, gap=0.25),
-            *drag(42, 20, 58, wait=3.0),
+            (1.2, 'r'),
+            *drag(42, 20, 58, wait=1.8),
             (3.5, None),
         ],
     }
