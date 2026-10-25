@@ -7,8 +7,10 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::StatefulWidget;
 
+pub mod axis;
 pub mod civil;
 
+pub use axis::{Axis, Header, HeaderStyle, Label, Names, Zoom, iso_week, render_header, weekday};
 pub use civil::{civil_from_days, days_from_civil};
 
 /// 가로 시간축. 보이는 날 범위를 든다.
