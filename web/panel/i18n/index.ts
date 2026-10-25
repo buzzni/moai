@@ -150,6 +150,8 @@ export interface GanttCopy {
   }
   /** The legend under the dates; each entry is drawn with the class of the bar it names. */
   legend: { planned: string; members: string; deferred: string; actual: string; overdue: string; due: string; today: string; clipped: string; blocker: string }
+  /** Moving a bar (moai-d86e.3ud): `{id}` the row, `{cmd}` the `moai edit` line that puts its days back. */
+  move: { moved: string; undo: string; members: string; none: string }
 }
 
 export interface DetailCopy {

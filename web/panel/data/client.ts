@@ -12,15 +12,16 @@
  *   either kind of answer.
  * - The lines moai said on stderr beside its answer (`said`: a line it could not read, a notice) ride the outcome as
  *   `notes`, so the page tells them rather than swallowing them.
- * - The page's one write — a read mark, `POST /api/read…` — goes through the same queue ({@link Endpoint.method}), so the
- *   project it names rides along as every read's does ({@link withProject}). A write is never shared.
+ * - The page's writes — a read mark, `POST /api/read…`, and a Gantt bar's days, `POST /api/plan/<id>` (data/plan.ts) — go
+ *   through the same queue ({@link Endpoint.method}), so the project they name rides along as every read's does
+ *   ({@link withProject}). A write is never shared.
  */
 
 /** One endpoint of `moai web` and its query (src/web/api.rs PROFILES). */
 export interface Endpoint {
   path: string
   query?: Readonly<Record<string, string>>
-  /** `POST` for a read mark (src/web/api.rs `write_argv_of`); a read is a `GET`. */
+  /** `POST` for a write — a read mark or a plan (src/web/api.rs `write_argv_of`); a read is a `GET`. */
   method?: 'GET' | 'POST'
 }
 

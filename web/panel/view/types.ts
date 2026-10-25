@@ -20,6 +20,7 @@
  *   on (the wiki's Esc with nothing left to clear moves the focus to the tab bar).
  */
 import type { IssueIndex, Path } from '../data/index.js'
+import type { PlanChange } from '../data/plan.js'
 import type { Copy } from '../i18n/index.js'
 import type { Action, DetailPosition, Focus, State } from '../store.js'
 
@@ -77,6 +78,13 @@ export interface ViewContext {
   focusPane(area: Focus): void
   /** The wiki's reads; absent until the data layer gives them (main.ts). */
   wiki?: WikiSource
+  /** One line under the banners (the shell's result line): what a gantt move did, or why it did nothing. */
+  say?(text: string, problem?: boolean): void
+  /**
+   * Write a row's planned days (data/plan.ts, moai-d86e.3ud) and say how it went; `undo` is the `moai edit` line that
+   * puts them back. Absent where nothing writes (the tests' shell): the gantt then moves no bar.
+   */
+  movePlan?(id: string, change: PlanChange, undo: string): Promise<void>
 }
 
 export interface PaneView {

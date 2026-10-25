@@ -57,6 +57,8 @@ export interface ShellOptions {
   activity(): Activity
   /** The wiki's reads, handed to the wiki pane; without them the wiki tab says it cannot read the wiki. */
   wiki?: WikiSource
+  /** The gantt's write of a row's planned days (main.ts, data/plan.ts); without it the bars do not move. */
+  movePlan?: ViewContext["movePlan"]
 }
 
 export interface Shell {
@@ -212,6 +214,10 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
   const archiveError = el(doc, "div", { class: "m-banner m-banner-danger moai-archive-problem", role: "alert" })
   // A live region from the start: what a key did (or why it did nothing) is read out when it is written.
   const result = el(doc, "p", { class: "moai-result", role: "status" })
+  function say(text: string, problem = false): void {
+    result.textContent = text
+    result.className = problem ? "moai-result m-banner m-banner-danger" : "moai-result"
+  }
   // Its own line: the server out of reach is not a read's problem, and no read's answer takes it away.
   const away = el(doc, "div", { class: "m-banner m-banner-danger moai-offline", role: "alert" })
   // Its own line too: the board's error says why a read failed, this says the page now asks less often.
@@ -288,7 +294,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     const view = mainViews[now.tab]
     return view.focus ? view.focus() : mainRoots[now.tab].focus()
   }
-  const ctx: ViewContext = { document: doc, copy, language, intents: viewIntents, layout, focusPane, wiki: options.wiki }
+  const ctx: ViewContext = { document: doc, copy, language, intents: viewIntents, layout, focusPane, wiki: options.wiki, say, movePlan: options.movePlan }
   const mainViews: Record<"list" | "board" | "gantt", PaneView> = {
     list: options.panes.list(mainRoots.list, ctx),
     board: options.panes.board(mainRoots.board, ctx),
@@ -461,10 +467,7 @@ export function mountShell(root: HTMLElement, options: ShellOptions): Shell {
     el: shell,
     render,
     activity: showActivity,
-    say(text, problem = false) {
-      result.textContent = text
-      result.className = problem ? "moai-result m-banner m-banner-danger" : "moai-result"
-    },
+    say,
     refuse(outcome) {
       const said = describe(outcome, copy)
       result.replaceChildren(...(said ? [el(doc, "span", {}, ...said.parts)] : []))

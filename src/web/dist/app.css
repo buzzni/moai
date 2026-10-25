@@ -532,6 +532,13 @@ body.m-resizing[data-resize="bottom"] { cursor: row-resize; }
 .mk.over { color: var(--danger); }
 .mk.due { color: var(--accent); font-size: 15px; margin-left: -7px; pointer-events: auto; }
 .mk.clip { color: var(--branch); font-size: 14px; }
+/* A bar that moves (moai-d86e.3ud): the ends resize, the middle grabs. The cursor is the lane's, which takes the press.
+   A touch on it drags rather than pans the dates, or the browser takes the gesture and cancels the drag. */
+.lane[data-grip="start"], .lane[data-grip="end"] { cursor: ew-resize; }
+.lane[data-grip="body"] { cursor: grab; }
+.lane.drag { cursor: grabbing; }
+.lane.drag .movable { outline: 1.5px solid var(--accent); outline-offset: 1px; }
+.movable { touch-action: none; }
 .mk[hidden] { display: none; }
 svg.links { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 0; overflow: visible; }
 svg.links path { fill: none; stroke: var(--link); stroke-width: 1.5; }

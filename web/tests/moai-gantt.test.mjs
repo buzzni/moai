@@ -517,3 +517,251 @@ test('a read that reaches an earlier day grows the axis at its start, and the da
   assert.equal(box.scrollLeft, 400 + 9 * 40)
   assert.equal(model.wallAt({ zoom: 'day', from: Date.UTC(2026, 8, 24) }, box.scrollLeft), shown)
 })
+
+// ── moving a plan (moai-d86e.3ud) ──
+
+test('shiftPlan is Issue::shifted: the changing side only, own days only', () => {
+  const { shiftPlan, dragDays, movedPlan } = model
+  assert.deepEqual(shiftPlan(own('2026-10-26', '2026-10-27'), 'body', 2), { start: '2026-10-28', due: '2026-10-29' })
+  assert.deepEqual(shiftPlan(own('2026-10-26', '2026-10-27'), 'start', -1), { start: '2026-10-25' })
+  assert.deepEqual(shiftPlan(own('2026-10-26', '2026-10-27'), 'end', 3), { due: '2026-10-30' })
+  // A deadline alone: the body moves it, the start sets out from it; a start alone: the end sets out from it.
+  assert.deepEqual(shiftPlan(own(null, '2026-10-27'), 'body', 1), { due: '2026-10-28' })
+  assert.deepEqual(shiftPlan(own(null, '2026-10-27'), 'start', -2), { start: '2026-10-25' })
+  assert.deepEqual(shiftPlan(own('2026-10-26', null), 'end', 1), { due: '2026-10-27' })
+  // Across a month end and a year end, in calendar days.
+  assert.deepEqual(shiftPlan(own('2026-12-31', null), 'body', 1), { start: '2027-01-01' })
+  assert.deepEqual(shiftPlan({ start: '2026-10-20', end: '2026-10-26', from: 'members' }, 'body', 1), { why: 'members' })
+  assert.deepEqual(shiftPlan(null, 'body', 1), { why: 'none' })
+  assert.deepEqual(shiftPlan(own('2026-10-26', '2026-10-27'), 'body', 0), { why: 'still' })
+  // Whole days at every step: half a day and more rounds to the next.
+  assert.equal(dragDays('day', 19), 0)
+  assert.equal(dragDays('day', 21), 1)
+  assert.equal(dragDays('day', -61), -2)
+  assert.equal(dragDays('month', 9), 2)
+  assert.equal(dragDays('hour', 239), 0)
+  assert.equal(dragDays('day', -1), 0)
+  assert.ok(!Object.is(dragDays('day', -1), -0), 'no -0: it reads as a move')
+  // The bar a move draws; a start past the deadline draws none (the write refuses it).
+  const D = 864e5
+  assert.deepEqual(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-27' }), [Date.UTC(2026, 9, 27), Date.UTC(2026, 9, 27) + D])
+  assert.equal(movedPlan(own('2026-10-26', '2026-10-27'), { start: '2026-10-28' }), null)
+  assert.deepEqual(movedPlan(own(null, '2026-10-27'), { due: '2026-10-28' }), [Date.UTC(2026, 9, 28), Date.UTC(2026, 9, 28) + D])
+})
+
+/** The index the gantt draws `rows` from, each tree line carrying its `gantt`. */
+const indexOf = (rows = ROWS, gantt = GANTT) => new IssueIndex(rows, treeOf(rows).map((line) => (line.id ? { ...line, gantt: gantt[line.id] } : line)))
+/** One turn of the event loop: a write answered, a redraw the view put off. */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+/**
+ * A mount that writes: `moves` holds what movePlan was handed, `said` what the view said. `answer` stands for the
+ * write: by default it is answered at once.
+ */
+const writing = (rows = ROWS, gantt = GANTT, answer = async () => {}) => {
+  const dom = new JSDOM('<!doctype html><body><div id="r"></div></body>')
+  const calls = []
+  const moves = []
+  const said = []
+  const root = dom.window.document.getElementById('r')
+  const ctx = {
+    document: dom.window.document, copy: copyFor('en'), language: 'en',
+    intents: { choose: (id) => calls.push(`choose:${id}`), point: (id) => calls.push(`point:${id}`) },
+    layout: () => ({ detailVisible: false }), focusPane: () => {},
+    say: (text, problem) => said.push([text, problem]),
+    movePlan: (id, change, undo) => {
+      moves.push({ id, change, undo })
+      return answer()
+    },
+  }
+  const view = mountGantt(root, ctx)
+  const state = { ...initialState(), tab: 'gantt', cursor: null }
+  view.render(state, indexOf(rows, gantt))
+  return { root, dom, calls, moves, said, view, state }
+}
+/** jsdom lays nothing out: a bar's box is read from the left and width the view gave it, the lane standing at x = 0. */
+const laidOut = (node) => {
+  node.getBoundingClientRect = () => {
+    const left = px(node, 'left')
+    const width = node.classList.contains('mk') ? 10 : px(node, 'width')
+    return { left, right: left + width, width, top: 0, bottom: 28, height: 28 }
+  }
+  return node
+}
+const press = (dom, node, type, x, init = {}) => node.dispatchEvent(new dom.window.MouseEvent(type, { clientX: x, bubbles: true, cancelable: true, ...init }))
+
+test('dragging a bar\'s middle moves the plan by whole days, once, on release; the release is no choice', async () => {
+  const rows = ROWS.map((row) => (row.id === 'e1.c' ? { ...row, starts_on: '2026-10-26', due_on: '2026-10-27' } : row))
+  const { root, dom, calls, moves } = writing(rows)
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  assert.ok(bar.classList.contains('movable'))
+  const x0 = px(bar, 'left')
+  const mid = x0 + 40
+  press(dom, l, 'pointerdown', mid)
+  press(dom, l, 'pointermove', mid + 70)
+  assert.equal(px(bar, 'left'), x0 + 80, 'the bar snaps to the nearest day while it moves')
+  assert.deepEqual(moves, [], 'nothing is written while it moves')
+  press(dom, l, 'pointerup', mid + 70)
+  l.click()
+  assert.deepEqual(moves, [{ id: 'e1.c', change: { start: '2026-10-28', due: '2026-10-29' }, undo: 'moai edit e1.c --start 2026-10-26 --due 2026-10-27' }])
+  assert.deepEqual(calls, [], 'the click a drag ends with chose the row')
+  l.click()
+  assert.deepEqual(calls, ['choose:e1.c'], 'the next click chooses as before')
+})
+
+test('the ends move the start or the deadline alone; a press that does not move writes nothing', async () => {
+  const { root, dom, moves } = writing()
+  // Each drag waits for the write before it to be answered: the bar is drawn again from the rows then.
+  const drag = async (from, to) => {
+    const l = lane(root, 'e1.c')
+    const bar = laidOut(l.querySelector('.b-plan'))
+    const [x0, w] = [px(bar, 'left'), px(bar, 'width')]
+    press(dom, l, 'pointerdown', from(x0, w))
+    press(dom, l, 'pointerup', to(x0, w))
+    await tick()
+  }
+  await drag((x0) => x0 + 1, (x0) => x0 - 39)
+  await drag((x0, w) => x0 + w - 1, (x0, w) => x0 + w + 41)
+  await drag((x0) => x0 + 40, (x0) => x0 + 45)
+  // A press outside the bar is the lane's: a choice, never a move.
+  await drag((x0, w) => x0 + w + 200, (x0, w) => x0 + w + 400)
+  assert.deepEqual(moves.map((m) => m.change), [{ start: '2026-10-25' }, { due: '2026-10-28' }])
+})
+
+test('a read that lands while a bar is dragged waits for the release, and the drag goes on', async () => {
+  const { root, dom, moves, view, state } = writing()
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  // Another session wrote: the rows come back with a new index while the bar is held.
+  const later = ROWS.map((row) => (row.id === 'e1.a' ? { ...row, title: 'Done one, renamed' } : row))
+  view.render(state, indexOf(later))
+  assert.equal(lane(root, 'e1.c'), l, 'the lane under the pointer was rebuilt mid-drag')
+  press(dom, l, 'pointermove', x0 + 120)
+  assert.equal(px(bar, 'left'), x0 + 80)
+  press(dom, l, 'pointerup', x0 + 120)
+  assert.deepEqual(moves.map((m) => m.change), [{ start: '2026-10-28', due: '2026-10-29' }])
+  await tick()
+  assert.notEqual(lane(root, 'e1.c'), l, 'the read that waited is drawn after the release')
+  assert.match(root.querySelector('.g-row[data-id="e1.a"]').textContent, /renamed/)
+})
+
+test('a row is moved again only once its last move is answered; a plain press meanwhile still chooses', async () => {
+  let answer
+  const { root, dom, moves, calls } = writing(ROWS, GANTT, () => new Promise((resolve) => (answer = resolve)))
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointerup', x0 + 80)
+  // The bar lies where it was dropped, drawn from the read before the write: a move from there is not taken.
+  press(dom, l, 'pointerdown', px(bar, 'left') + 40)
+  press(dom, l, 'pointerup', px(bar, 'left') + 80)
+  l.click()
+  assert.equal(moves.length, 1)
+  assert.deepEqual(calls, ['choose:e1.c'])
+  answer()
+  await tick()
+  const again = lane(root, 'e1.c')
+  const fresh = laidOut(again.querySelector('.b-plan'))
+  press(dom, again, 'pointerdown', px(fresh, 'left') + 40)
+  press(dom, again, 'pointerup', px(fresh, 'left') + 80)
+  assert.equal(moves.length, 2)
+})
+
+test('a drag that ends without a click does not take the next press\'s click', () => {
+  const { root, dom, moves, calls } = writing()
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  // A touch drag: the browser sends no click after it.
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointerup', x0 + 80)
+  assert.equal(moves.length, 1)
+  const other = lane(root, 'e1.a')
+  press(dom, other, 'pointerdown', 5)
+  press(dom, other, 'pointerup', 5)
+  other.click()
+  assert.deepEqual(calls, ['choose:e1.a'])
+})
+
+test('a milestone\'s own diamond moves with its bar\'s end; the undo names the days the bar was drawn from', () => {
+  const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, starts_on: '2026-10-26' } : row))
+  const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: own('2026-10-26', '2026-10-28') } }
+  const { root, dom, moves } = writing(rows, gantt)
+  const l = lane(root, 'm1')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const due = l.querySelector('.mk.due')
+  const [x0, d0] = [px(bar, 'left'), px(due, 'left')]
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 80)
+  assert.deepEqual([px(bar, 'left'), px(due, 'left')], [x0 + 40, d0 + 40])
+  press(dom, l, 'pointercancel', x0 + 80)
+  assert.deepEqual([px(bar, 'left'), px(due, 'left')], [x0, d0], 'a cancel puts both back')
+  // e1.c: the list printed no days for it, the tree drew 10-26 ~ 10-27 — the undo puts back what was drawn.
+  const c = lane(root, 'e1.c')
+  const cb = laidOut(c.querySelector('.b-plan'))
+  press(dom, c, 'pointerdown', px(cb, 'left') + 40)
+  press(dom, c, 'pointerup', px(cb, 'left') + 80)
+  assert.equal(moves.at(-1).undo, 'moai edit e1.c --start 2026-10-26 --due 2026-10-27')
+})
+
+test('a deadline-only row drags its diamond; a group counted from its members says why and moves nothing', () => {
+  const { root, dom, moves, said } = writing()
+  const l = lane(root, 'e1.d')
+  const due = laidOut(l.querySelector('.mk.due'))
+  const x = px(due, 'left')
+  press(dom, l, 'pointerdown', x + 2)
+  press(dom, l, 'pointerup', x + 42)
+  assert.deepEqual(moves.map((m) => m.change), [{ due: '2026-10-28' }])
+  const e = lane(root, 'e1')
+  const hatched = laidOut(e.querySelector('.b-plan'))
+  assert.equal(hatched.classList.contains('movable'), false)
+  const h = px(hatched, 'left') + 100
+  press(dom, e, 'pointerdown', h)
+  press(dom, e, 'pointermove', h + 80)
+  assert.equal(px(hatched, 'left') + 100, h, 'a members bar is not drawn moving')
+  press(dom, e, 'pointerup', h + 80)
+  assert.equal(moves.length, 1)
+  assert.deepEqual(said, [['e1 wrote no days of its own — its bar spans its members, move them instead', true]])
+})
+
+test('a double click on a day of a row with no days plans that day; a group or a row with days does not', () => {
+  const rows = [...ROWS, { id: 'z', kind: 'issue', title: 'Loose', status: 'todo' }, { id: 'y', kind: 'issue', title: 'Odd', status: 'todo', due_on: 'soon' }]
+  const gantt = { ...GANTT, z: g('z'), y: g('y') }
+  const { root, dom, moves } = writing(rows, gantt)
+  const day = days('2026-10-30') + 5
+  for (const id of ['z', 'y', 'e1.c']) press(dom, lane(root, id), 'dblclick', day)
+  assert.deepEqual(moves, [{ id: 'z', change: { start: '2026-10-30', due: '2026-10-30' }, undo: 'moai edit z --start none --due none' }])
+})
+
+test('without a writer the bars do not move', () => {
+  const { root, dom, calls } = mount()
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  assert.equal(bar.classList.contains('movable'), false)
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  assert.equal(px(bar, 'left'), x0)
+  press(dom, l, 'pointerup', x0 + 120)
+  l.click()
+  assert.deepEqual(calls, ['choose:e1.c'])
+})
+
+test('a cancelled or lost drag puts the bar back and writes nothing', () => {
+  const { root, dom, moves } = writing()
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  const x0 = px(bar, 'left')
+  for (const end of ['pointercancel', 'lostpointercapture']) {
+    press(dom, l, 'pointerdown', x0 + 40)
+    press(dom, l, 'pointermove', x0 + 160)
+    press(dom, l, end, x0 + 160)
+    assert.equal(px(bar, 'left'), x0, end)
+  }
+  press(dom, l, 'pointerdown', x0 + 40, { button: 2 })
+  press(dom, l, 'pointerup', x0 + 160)
+  assert.deepEqual(moves, [])
+})
