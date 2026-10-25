@@ -57,6 +57,20 @@ def scenes(repo, env):
             *typed('PLAN', then=2.4),
             *typed_later(lambda: f'moai show --tree -e {epic_id()}', then=5.0),
         ],
+        # 탐색기 키를 내 것으로 (v0.23.0 의 Discord 소식, moai-hwl4). keys.toml 은 record-guide.sh 가 써 둔다 —
+        # 바꾼 줄 둘과 부딪히는 줄 하나. `moai keys` 가 바꾼 줄에 * 를 달고 부딪힌 줄을 왜 뺐는지 대는 것,
+        # 메뉴가 바꾼 키(SPC x 로 닫기)를 대는 것을 차례로 보인다
+        'keys': [
+            (1.2, None),
+            *typed('cat ~/.config/moai/keys.toml', then=1.8),
+            *typed('moai keys | head -22', then=3.5),
+            *typed('moai tui', then=3.0),
+            (1.0, ' '),
+            (3.5, ' '),
+            (1.2, None),
+            *key(' ', 'x', gap=0.8),
+            (1.5, None),
+        ],
     }
 
 def main():

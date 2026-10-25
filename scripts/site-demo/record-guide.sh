@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 사용 방법 페이지(guide/)의 셸 장면을 asciinema 로 녹화한다. 장면마다 데모 자리를 새로 짓는다.
+# 사용 방법 페이지(guide/)와 릴리스 소식(release-posts/)의 셸 장면을 asciinema 로 녹화한다. 장면마다 데모 자리를 새로 짓는다.
 #
 #     MOAI=<moai 바이너리> scripts/site-demo/record-guide.sh <내보낼 디렉터리> [장면...]
 #
-# 장면은 shell.py 의 scenes(init, backlog). init 은 아직 moai 가 없는 저장소에서, backlog 는 seed.sh 가
-# 지은 Lantern 에서 찍는다.
+# 장면은 shell.py 의 scenes(init, backlog, keys). init 은 아직 moai 가 없는 저장소에서, 나머지는 seed.sh 가
+# 지은 Lantern 에서 찍는다. 장면을 주지 않으면 사용 방법 페이지의 둘(init, backlog)만 찍는다.
 #
 # init 은 저장소·바이너리·사용자 설정의 절대 경로를 화면에 찍는다. 그래서 데모 사람의 HOME 을 고정된
 # 자리(DEMO_ROOT, 기본 /tmp/mira)에 짓고 moai 를 그 안에 복사해 둔다 — 녹화하는 기계의 경로가 공개
@@ -43,6 +43,10 @@ for scene in "${scenes[@]}"; do
     cd - >/dev/null
   else
     bash "$here/seed.sh" "$repo" >/dev/null
+  fi
+  if [ "$scene" = keys ]; then
+    # 바꾼 줄 둘과, 기본 키(정렬)와 부딪혀 빠질 줄 하나
+    printf '[browse]\nquit = "SPC x"\ngo_board = ["SPC g b", "B"]\nsort_due = "SPC s p"\n' > "$root/.config/moai/keys.toml"
   fi
   asciinema rec --headless --window-size "$size" --overwrite -q \
     -c "$(printf '%q ' "$here/shell.py" "$scene" "$repo")" "$root/$scene.cast" >/dev/null

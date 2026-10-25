@@ -103,6 +103,12 @@ jobs:
           fi
           echo "트래커는 그대로다"
 
+      # **릴리스 소식을 짓는 스크립트의 시험**(moai-hwl4). 1초 남짓이라 무엇이 바뀌었든 돈다 — 밑의 `changes` 가
+      # 그 경로를 바이너리 잡에서 빼니, 여기서 안 돌면 깨진 규칙이 머지를 지나 릴리스 날 discord.yml 에서야 드러나고
+      # 그 판의 소식이 안 나간다.
+      - name: 릴리스 소식 스크립트의 시험
+        run: python3 -I -B -m unittest discover -s scripts/release-post
+
       # **툴체인을 캐시에서 푼다.** 러너에 깔려 오는 stable 은 1.98.1 이고 이 저장소가
       # 박은 것은 1.97.1 이라, 잡마다 129MB 를 받아 xz 로 푼다. 그 15초는 러너가
       # 빨라도 안 줄어든다 — 드는 값이 받는 것이 아니라 한 갈래로 도는 CPU 라서다.
@@ -279,8 +285,10 @@ jobs:
             # "글만 바뀌었다" 로 읽혔다(재 봤다). 빈 줄은 같은 정규식의 한 갈래로 접는다.
             # `site/` 와 그 녹화 스크립트(`scripts/site-demo/`)는 소개 홈페이지라 바이너리에 안 닿는다
             # (moai-mfps). 이 답에 걸린 잡(msrv·windows·size-budget·web)만 건너뛰고, ci-gate 는 무엇이
-            # 바뀌었든 돈다. 사이트 배포는 pages.yml 이 따로 맡는다.
-            if ! grep -qvE '(^$|\.md$|^docs/|^\.moai/|^LICENSE$|^site/|^scripts/site-demo/)' <<<"$touched"; then
+            # 바뀌었든 돈다. 사이트 배포는 pages.yml 이 따로 맡는다. 릴리스 소식(`scripts/release-post/`,
+            # `release-posts/`)도 바이너리에 안 닿는다 — 그 시험은 ci-gate 가 돌고, discord.yml 이 올리기 전에 한 번
+            # 더 돈다(moai-hwl4).
+            if ! grep -qvE '(^$|\.md$|^docs/|^\.moai/|^LICENSE$|^site/|^scripts/site-demo/|^scripts/release-post/|^release-posts/)' <<<"$touched"; then
               code=false
             fi
           fi
