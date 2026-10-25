@@ -30736,6 +30736,68 @@ fn web_marks_read_only_from_its_own_page() {
     assert_eq!(status, 404, "GET 으로 읽음을 적는 길이 섰다");
 }
 
+/// **간트의 막대 끌기는 `moai edit` 의 길로 트래커에 쓴다**(moai-d86e.3ud) — 이 페이지에서 보낸 것만 받고, 바뀌는 쪽만
+/// 고치며, 거절(시작이 기한 뒤·위 기한 넘김)은 `edit` 의 말 그대로 봉투의 `err` 에 서고, 모양이 틀리면 자식을 안 띄운다.
+#[test]
+fn web_moves_a_plan_only_from_its_own_page() {
+    let s = init("web-plan");
+    let cfg = s.path().join("user.toml");
+    let epic = field(&ok_with(s.path(), &cfg, &["epic", "add", "묶음", "--due", "2026-11-10", "--json"]), "id");
+    let id = field(
+        &ok_with(s.path(), &cfg, &["add", "막대", "-e", &epic, "--start", "2026-10-26", "--due", "2026-10-27", "--json"]),
+        "id",
+    );
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_CONFIG", &cfg);
+    });
+    let mine = format!("http://127.0.0.1:{}", web.port);
+    let days = || {
+        let row = json_of(&ok_with(s.path(), &cfg, &["show", &id, "--json"]));
+        (row["starts_on"].as_str().map(String::from), row["due_on"].as_str().map(String::from))
+    };
+    let at = |a: &str, b: &str| (Some(a.to_string()), Some(b.to_string()));
+    let snapshot = std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap();
+
+    for origin in [None, Some("http://evil.example"), Some("null")] {
+        let (status, _, body) = post(web.port, &format!("/api/plan/{id}?start=2026-10-28&due=2026-10-29"), origin);
+        assert_eq!((status, json_of(&body)["code"].as_str()), (403, Some("forbidden_origin")), "{origin:?}\n{body}");
+    }
+    assert_eq!(std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap(), snapshot, "거절한 POST 가 트래커를 고쳤다");
+
+    let (status, _, body) = post(web.port, &format!("/api/plan/{id}?start=2026-10-28&due=2026-10-29"), Some(&mine));
+    assert_eq!((status, json_of(&body)["exit"].as_i64()), (200, Some(0)), "{body}");
+    assert!(json_of(&body).get("out").is_some(), "성공한 판에 답이 없으면 페이지는 못 읽은 답으로 본다 — {body}");
+    assert_eq!(days(), at("2026-10-28", "2026-10-29"));
+    // 한쪽만 온 판은 다른 쪽을 그대로 둔다.
+    let (_, _, body) = post(web.port, &format!("/api/plan/{id}?due=2026-10-31"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert_eq!(days(), at("2026-10-28", "2026-10-31"));
+
+    // 거절은 `edit` 의 말이다 — 페이지가 그 말을 그대로 보인다. 아무것도 안 바뀐다.
+    for asked in ["start=2026-11-02", "due=2026-11-20"] {
+        let (status, _, body) = post(web.port, &format!("/api/plan/{id}?{asked}"), Some(&mine));
+        let v = json_of(&body);
+        assert_eq!(status, 200, "{body}");
+        assert_ne!(v["exit"], 0, "{asked}: {body}");
+        assert!(v["err"]["error"].as_str().is_some_and(|e| !e.is_empty()), "{asked}: {body}");
+    }
+    assert_eq!(days(), at("2026-10-28", "2026-10-31"));
+
+    for bad in [
+        format!("/api/plan/{id}"),
+        format!("/api/plan/{id}?due=none"),
+        format!("/api/plan/{id}?due=%2B3"),
+        format!("/api/plan/{id}?title=x"),
+        "/api/plan/issue?due=2026-10-30".to_string(),
+    ] {
+        let (status, _, body) = post(web.port, &bad, Some(&mine));
+        assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{bad}\n{body}");
+    }
+    let (status, _, _) = get(web.port, &format!("/api/plan/{id}?due=2026-10-30"));
+    assert_eq!(status, 404, "GET 으로 계획을 고치는 길이 섰다");
+    assert_eq!(days(), at("2026-10-28", "2026-10-31"));
+}
+
 /// **`project=` 는 걸어 둔 프로젝트만 읽는다**(moai-o14f) — 그 자리의 트래커로 답하고, 걸지 않은 자리·상대 경로는
 /// 자식을 띄우기 전에 403 `not_registered`, 두 번 주면 400 이다. `/api/projects` 는 `project ls` 의 원문이다.
 #[test]

@@ -141,6 +141,48 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
   return out
 }
 
+// ── moving a plan ──────────────────────────────────────────────────────
+
+/** Which part of a planned bar is dragged: the start alone, the whole bar, the deadline alone. */
+export type Edge = 'start' | 'body' | 'end'
+
+/** What a move writes (data/plan.ts PlanChange), or why it writes nothing. */
+export type Shifted = { start?: string; due?: string } | { why: 'members' | 'none' | 'still' }
+
+/**
+ * A plan moved `days` days: the days to write, **the changing side only** — the page's copy of `Issue::shifted`
+ * (src/model.rs), which the TUI's drag and keys write through. Only a row's own days move: a plan a group counts from
+ * its members is not that row's days (`members`), and a row with no day has no bar (`none`).
+ *
+ * - `body` moves every day written — a row with a deadline alone moves its deadline
+ * - `start` moves the start; with none, it sets out from the deadline (the `◆`'s left end was dragged)
+ * - `end` moves the deadline; with none, it sets out from the start
+ *
+ * A start past the deadline is not stopped here: the write refuses it in moai's words, and the page shows them.
+ */
+export function shiftPlan(planned: GanttRow['planned'], edge: Edge, days: number): Shifted {
+  if (days === 0) return { why: 'still' }
+  if (planned?.from === 'members') return { why: 'members' }
+  const start = planned ? dayStart(planned.start) : null
+  const due = planned ? dayStart(planned.end) : null
+  if (start === null && due === null) return { why: 'none' }
+  const day = (d: number | null) => (d === null ? undefined : dayText(d + days * DAY))
+  const out = edge === 'body' ? { start: day(start), due: day(due) } : edge === 'start' ? { start: day(start ?? due) } : { due: day(due ?? start) }
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined))
+}
+
+/** Whole days a drag of `dx` px moves at `zoom` — the nearest day, so a bar snaps to days at every step. */
+export const dragDays = (zoom: Zoom, dx: number): number => Math.round(dx / PX_PER_DAY[zoom]) || 0
+
+/** The planned bar a move would draw, `[from, to)` in wall ms, or null when the move would not stand. */
+export function movedPlan(planned: GanttRow['planned'], change: { start?: string; due?: string }): [number, number] | null {
+  const start = change.start !== undefined ? dayStart(change.start) : planned ? dayStart(planned.start) : null
+  const due = change.due !== undefined ? dayStart(change.due) : planned ? dayStart(planned.end) : null
+  if (start !== null && due !== null) return start > due ? null : [start, due + DAY]
+  if (start !== null) return [start, start + DAY]
+  return due === null ? null : [due, due + DAY]
+}
+
 // ── the axis ───────────────────────────────────────────────────────────
 
 export interface Axis {

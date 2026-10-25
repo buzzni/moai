@@ -4,9 +4,10 @@
 //! ([`run`]) 스레드끼리 함께 쥐는 것은 띄우는 법([`Site`])과 도는 연결의 수뿐이다. 비동기 런타임을 안 쓰는
 //! 까닭이 이것이다 — 동시에 도는 것이 많아야 [`BUSY_MAX`] 이고, 한 판의 값은 자식 프로세스가 치른다.
 //!
-//! **트래커는 읽기만 한다.** 길은 GET 이고, 트래커를 바꾸는 길은 CLI 와 탐색기다(사람 결정, v1). 하나뿐인 POST 는
-//! 읽음 표시다([`api::write_argv_of`], 2026-10-22 사람 결정, moai-ly88) — 읽음은 사용자 설정 곁의 제 파일에만
-//! 적히고, 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]).
+//! **트래커에 쓰는 길은 계획 날 하나다.** 길은 GET 이고, POST 는 둘이다([`api::write_argv_of`]) — 읽음 표시(2026-10-22
+//! 사람 결정, moai-ly88)는 사용자 설정 곁의 제 파일에만 적히고, 간트의 막대 끌기(`/api/plan/<id>`, moai-d86e.3ud)는 자식
+//! `moai edit --start --due` 로 트래커에 쓴다 — 쓰기는 CLI 의 그 길(`store::with_write`)을 그대로 지난다. 그 밖에 트래커를
+//! 바꾸는 길은 여전히 CLI 와 탐색기다. 두 POST 모두 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]).
 
 pub mod api;
 pub mod boot;
@@ -247,7 +248,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     }
     let not_allowed = || {
         let said = fill(say(lang, "web.only_get"), &[("method", &req.method), ("path", &req.path)]);
-        // **`Allow` 는 그 길이 받는 메서드다** — 읽음 표시 길은 `POST` 만 받는다(`GET` 은 404 라 여기 안 온다).
+        // **`Allow` 는 그 길이 받는 메서드다** — 쓰는 길(읽음 표시·계획 날)은 `POST` 만 받는다(`GET` 은 404 라 여기 안 온다).
         let allow = if api::write_argv_of(&req.path, &[]).is_some() { "POST" } else { "GET" };
         Response { allow, ..refuse(405, &said, code::METHOD_NOT_ALLOWED) }
     };
@@ -424,10 +425,10 @@ mod tests {
         assert_eq!(overlay_in_git(asked.clone(), &s.path().join("sub")), asked, "체크아웃 밑의 자리");
     }
 
-    /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 읽음 표시 길은 `POST`, 나머지는 `GET`. 자식을 안 띄우는
+    /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 쓰는 길(읽음 표시·계획 날)은 `POST`, 나머지는 `GET`. 자식을 안 띄우는
     /// 답이라 없는 바이너리를 준다.
     #[test]
-    fn a_405_allows_post_only_on_the_read_mark_paths() {
+    fn a_405_allows_post_only_on_the_write_paths() {
         let s = crate::scratch::Scratch::new("web-allow");
         let site = Site::new(
             run::Spawner { exe: "/nonexistent/moai".into(), cwd: s.path().to_path_buf(), user: None },
@@ -443,7 +444,7 @@ mod tests {
             };
             answer(&req, &site)
         };
-        for path in ["/api/read-all", "/api/read/moai-1abc", "/api/read-group/moai-1abc"] {
+        for path in ["/api/read-all", "/api/read/moai-1abc", "/api/read-group/moai-1abc", "/api/plan/moai-1abc"] {
             let got = ask("DELETE", path);
             assert_eq!((got.status, got.allow), (405, "POST"), "{path}");
         }

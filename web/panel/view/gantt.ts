@@ -12,10 +12,12 @@
  * Keys are the key router's (panel/keys/): it calls command() — j/k the cursor, H/L the dates, -/= the step, t today,
  * z fit, Enter the detail — and this view listens for none. The mouse is this view's (moai-d86e.jmq, "the mouse"
  * below): a click chooses, the date header drags, Shift+wheel moves the dates, Ctrl+wheel steps the zoom, and the
- * grid's handle sets its width.
+ * grid's handle sets its width. A bar drags to move the row's planned days ("moving a plan" below, moai-d86e.3ud) — the
+ * page's one write to the tracker.
  */
 import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
+import { undoLine } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
 import type { GanttRow, IssueIndex, Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
@@ -24,8 +26,9 @@ import { el, emptyState } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
-  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayText, fitSpan, ganttLines, HEAD_H, headerOf, normalizeGrid, placeRow, PX_PER_DAY, rangeOf,
-  MIN_GRID, ROW_H, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type GanttLine, type Placed, type Tick, type Zoom,
+  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
+  PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
+  type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
 import { narrow, revealOffset, statusGlyph, statusOf, twigParts, TWIG_TEXT } from './list-model.ts'
 import type { MountPane, PaneView } from './types.ts'
@@ -42,6 +45,9 @@ export const GRID_KEY = `${MEMORY_KEY}.gantt.grid`
 const FALLBACK_WIDTH = 900
 /** The `‹ ›` marks sit this far inside the dates' visible edge. */
 const CLIP_INSET = 2
+
+/** A field the row may carry as text: the text, or null. */
+const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
 
 function loadGrid(): number {
   try {
@@ -98,6 +104,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let built: Built | null = null
   let positioned = false
   let shownCursor: string | null | undefined
+  /** A bar was dragged: the click the release sends is the drag's, not a choice of the row. */
+  let dragged = false
 
   // ── frame ──
   const zoomButtons = new Map<Zoom, HTMLButtonElement>()
@@ -249,11 +257,19 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       const p = placed[n] ?? null
       rows.push(gridRow(m, line, g, cursor))
       const lane = el(doc, 'div', { class: `lane${g?.deferred ? ' dim' : ''}`, 'data-id': line.kind === 'row' ? m.index.rows[line.at]!.id : null, 'data-key': line.key, 'aria-selected': String(line.key === cursor) })
-      lane.addEventListener('click', () => (line.kind === 'row' ? intents.choose(line.key) : intents.point(line.key)))
+      lane.addEventListener('click', () => {
+        // The click that ends a bar's drag is the drag's, not a choice.
+        if (dragged) return void (dragged = false)
+        if (line.kind === 'row') intents.choose(line.key)
+        else intents.point(line.key)
+      })
+      if (line.kind === 'row') plannable(lane, m.index.rows[line.at]!, g)
       if (p && g) {
         const hover = (node: HTMLElement) => tip(node, m, line, g)
+        let planBar: HTMLElement | null = null
+        let dueMark: HTMLElement | null = null
         if (p.plan) {
-          const plan = bars(lane, `b-plan${p.plan.origin === 'members' ? ' members' : ''}${g.deferred ? ' deferred' : ''}`, p.plan.from, p.plan.to, a)
+          const plan = (planBar = bars(lane, `b-plan${p.plan.origin === 'members' ? ' members' : ''}${g.deferred ? ' deferred' : ''}`, p.plan.from, p.plan.to, a))
           // A group's plan carries how far its members are, as a fill from the left.
           if (line.dir && g.progress.kind === 'rollup' && g.progress.total > 0) {
             const fillBar = el(doc, 'div', { class: 'b-fill' })
@@ -267,7 +283,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
           hover(bars(lane, 'b-over', p.over.from, p.over.to, a))
           mark(lane, 'over', '!', xOf(a, p.over.to) + 3)
         }
-        if (p.due !== null) hover(mark(lane, 'due', '◆', xOf(a, p.due)))
+        if (p.due !== null) hover((dueMark = mark(lane, 'due', '◆', xOf(a, p.due))))
+        if (line.kind === 'row') movable(lane, m.index.rows[line.at]!, g, planBar, dueMark)
         const l = mark(lane, 'clip', '‹', 0)
         const r = mark(lane, 'clip', '›', 0)
         l.hidden = r.hidden = true
@@ -560,6 +577,101 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       target.addEventListener('pointerup', stop)
       target.addEventListener('pointercancel', stop)
       target.addEventListener('lostpointercapture', stop)
+    })
+  }
+
+  // ── moving a plan (moai-d86e.3ud) ──
+  // A bar drags as the TUI's does (moai-i4hf.exq): the middle moves the plan, either end the start or the deadline
+  // alone, by whole days; the bar is only drawn while it moves and the row is written once, on release. Which days a
+  // move writes is shiftPlan's (gantt-model.ts, `Issue::shifted`'s copy) and the write is the CLI's (data/plan.ts), so
+  // a refusal — a start past the deadline, a day past the deadline above — comes back in moai's words.
+
+  /** How close to a bar's end a press takes that end rather than the whole bar, in px. */
+  const GRIP = 6
+  const edgeAt = (box: DOMRect, x: number): Edge => {
+    const grip = Math.min(GRIP, box.width / 3)
+    return x < box.left + grip ? 'start' : x > box.right - grip ? 'end' : 'body'
+  }
+
+  /** A press on the row's own planned bar, or on its `◆`, drags it. The lane takes the press: the actual band lies over the bar. */
+  function movable(lane: HTMLElement, row: Row, g: GanttRow, planBar: HTMLElement | null, dueMark: HTMLElement | null): void {
+    const movePlan = ctx.movePlan
+    const grab = planBar ?? dueMark
+    if (!movePlan || !grab || !axis) return
+    const a = axis
+    // A group's bar counted from its members does not move: the press is still taken, and the release says why.
+    const own = g.planned?.from !== 'members'
+    if (own) grab.classList.add('movable')
+    lane.addEventListener('pointermove', (event) => {
+      if (event.buttons || !own) return
+      const box = grab.getBoundingClientRect()
+      const inside = event.clientX >= box.left - 2 && event.clientX <= box.right + 2
+      lane.dataset.grip = inside ? (planBar ? edgeAt(box, event.clientX) : 'body') : ''
+    })
+    lane.addEventListener('pointerleave', () => void (lane.dataset.grip = ''))
+    lane.addEventListener('pointerdown', (down) => {
+      if (down.button !== 0) return
+      const box = grab.getBoundingClientRect()
+      if (down.clientX < box.left - 2 || down.clientX > box.right + 2) return
+      down.preventDefault()
+      const edge: Edge = planBar ? edgeAt(box, down.clientX) : 'body'
+      const was = { left: grab.style.left, width: grab.style.width }
+      let days = 0
+      lane.setPointerCapture?.(down.pointerId)
+      lane.classList.add('moving')
+      const onMove = (event: PointerEvent) => {
+        days = dragDays(a.zoom, event.clientX - down.clientX)
+        const change = shiftPlan(g.planned, edge, days)
+        const span = 'why' in change ? null : movedPlan(g.planned, change)
+        if (!span) return Object.assign(grab.style, was)
+        // The `◆` stands at the end of its day, the bar spans its days.
+        if (planBar) {
+          grab.style.left = `${xOf(a, span[0])}px`
+          grab.style.width = `${Math.max(2, xOf(a, span[1]) - xOf(a, span[0]))}px`
+        } else grab.style.left = `${xOf(a, span[1])}px`
+      }
+      // The release is where the bar lands; a cancel or a lost capture puts it back and writes nothing.
+      const stop = (end: PointerEvent) => {
+        lane.removeEventListener('pointermove', onMove)
+        lane.removeEventListener('pointerup', stop)
+        lane.removeEventListener('pointercancel', stop)
+        lane.removeEventListener('lostpointercapture', stop)
+        lane.classList.remove('moving')
+        days = end.type === 'pointerup' ? dragDays(a.zoom, end.clientX - down.clientX) : 0
+        if (days === 0) return void Object.assign(grab.style, was)
+        dragged = true
+        const change = shiftPlan(g.planned, edge, days)
+        if ('why' in change) {
+          Object.assign(grab.style, was)
+          if (change.why !== 'still') ctx.say?.(fill(change.why === 'members' ? words.move.members : words.move.none, { id: row.id }), true)
+          return
+        }
+        const undo = undoLine(row.id, text(row.starts_on), text(row.due_on))
+        // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
+        const drawn = model
+        void movePlan(row.id, change, undo).finally(() => {
+          if (model === drawn) draw()
+        })
+      }
+      lane.addEventListener('pointermove', onMove)
+      lane.addEventListener('pointerup', stop)
+      lane.addEventListener('pointercancel', stop)
+      lane.addEventListener('lostpointercapture', stop)
+    })
+  }
+
+  /**
+   * A double click on a day of a row that wrote no day plans that one day, as a click does in the TUI. A double click,
+   * not a click: here a click on a lane chooses the row, and choosing must never write. A group's bar is its members'.
+   */
+  function plannable(lane: HTMLElement, row: Row, g: GanttRow | undefined): void {
+    const movePlan = ctx.movePlan
+    const written = typeof row.starts_on === 'string' || typeof row.due_on === 'string'
+    if (!movePlan || !axis || written || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
+    const a = axis
+    lane.addEventListener('dblclick', (event) => {
+      const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
+      void movePlan(row.id, { start: day, due: day }, undoLine(row.id, null, null))
     })
   }
 
