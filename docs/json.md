@@ -86,7 +86,9 @@ from the checkout you call it in:
   heading. A section stands only when it matches two words of the title that
   are not common across the wiki (one, when the title has only one such word);
   a word in more than a quarter of the sections, and in more than one, does
-  not count
+  not count. A Korean, Chinese or Japanese word is one word however many
+  two-letter pieces it splits into, and it matches a section holding at least
+  half of them — so `검색은` still finds `검색`
 
 `wiki` is always there; with no wiki directory, or nothing about the row, both
 arrays are empty. `wiki_error` stands only when the wiki directory cannot be
@@ -124,4 +126,4 @@ A whole tracker with bodies runs to megabytes — this repository's
 - **Pages repeat or skip a row** — the order moved under you. Page in `id` or
   `created` order; priority and title move when someone edits a row
 
-Decided in: moai-wk7i, moai-g8pt.5aw
+Decided in: moai-wk7i, moai-g8pt
