@@ -81,44 +81,73 @@ fn is_cjk(c: char) -> bool {
         | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2FA1F) // 한자
 }
 
-/// 글을 토큰으로 푼다. 낱말은 글자·숫자·`_` 가 이어진 것이고, 그 안의 한글·한자·가나 덩어리는 글자 둘씩(길이
-/// 1 이면 그 글자 하나) 낸다. 소문자로 접되 범위는 원문의 것이다.
-fn tokens(s: &str) -> Vec<Tok> {
-    // 0: 낱말 밖, 1: 한글·한자·가나, 2: 그 밖의 낱말 글자.
-    let class = |c: char| {
-        if is_cjk(c) {
-            1
-        } else if c.is_alphanumeric() || c == '_' {
-            2
-        } else {
-            0
-        }
-    };
-    let chars: Vec<(usize, char)> = s.char_indices().collect();
-    let end_of = |i: usize| chars.get(i + 1).map_or(s.len(), |&(b, _)| b);
-    let fold = |r: Range<usize>| s[r].to_lowercase();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < chars.len() {
-        let k = class(chars[i].1);
-        let mut j = i;
-        while j + 1 < chars.len() && class(chars[j + 1].1) == k {
-            j += 1;
-        }
-        let run = chars[i].0..end_of(j);
-        match k {
+/// 0: 낱말 밖, 1: 한글·한자·가나, 2: 그 밖의 낱말 글자.
+fn class(c: char) -> u8 {
+    if is_cjk(c) {
+        1
+    } else if c.is_alphanumeric() || c == '_' {
+        2
+    } else {
+        0
+    }
+}
+
+/// 낱말을 소문자로 접어 `buf` 에 둔다. ASCII 면 제자리에서 접는다 — 흔한 길에서 낱말마다 String 을 짓지 않는다.
+fn fold(w: &str, buf: &mut String) {
+    buf.clear();
+    if w.is_ascii() {
+        buf.push_str(w);
+        buf.make_ascii_lowercase();
+    } else {
+        buf.push_str(&w.to_lowercase());
+    }
+}
+
+/// 글의 토큰을 차례로 `f(접은 글, 원문 범위)` 에 건넨다. 낱말은 글자·숫자·`_` 가 이어진 것이고, 그 안의
+/// 한글·한자·가나 덩어리는 글자 둘씩(길이 1 이면 그 글자 하나) 낸다. 접은 글은 버퍼 하나를 돌려 쓴다 — 절을 세는
+/// 걸음이 위키 전부를 지나므로, 글자 배열과 낱말마다의 String 을 짓던 판은 그 값을 낱말 수만큼 치렀다.
+/// 한글·한자·가나에는 대소문자가 없어 접지 않는다.
+fn each_token(s: &str, buf: &mut String, mut f: impl FnMut(&str, Range<usize>)) {
+    let mut it = s.char_indices().peekable();
+    while let Some((start, c)) = it.next() {
+        match class(c) {
             0 => {}
-            2 => out.push(Tok { text: fold(run.clone()), at: run }),
-            _ if i == j => out.push(Tok { text: fold(run.clone()), at: run }),
+            2 => {
+                let mut end = start + c.len_utf8();
+                while let Some(&(b, d)) = it.peek().filter(|&&(_, d)| class(d) == 2) {
+                    end = b + d.len_utf8();
+                    it.next();
+                }
+                fold(&s[start..end], buf);
+                f(buf, start..end);
+            }
             _ => {
-                for w in i..j {
-                    let at = chars[w].0..end_of(w + 1);
-                    out.push(Tok { text: fold(at.clone()), at });
+                let mut prev = start;
+                let mut single = true;
+                while let Some(&(b, d)) = it.peek().filter(|&&(_, d)| class(d) == 1) {
+                    let end = b + d.len_utf8();
+                    buf.clear();
+                    buf.push_str(&s[prev..end]);
+                    f(buf, prev..end);
+                    single = false;
+                    prev = b;
+                    it.next();
+                }
+                if single {
+                    let end = start + c.len_utf8();
+                    buf.clear();
+                    buf.push_str(&s[start..end]);
+                    f(buf, start..end);
                 }
             }
         }
-        i = j + 1;
     }
+}
+
+/// 글을 토큰으로 푼다([`each_token`] 을 모은 것). 소문자로 접되 범위는 원문의 것이다.
+fn tokens(s: &str) -> Vec<Tok> {
+    let mut out = Vec::new();
+    each_token(s, &mut String::new(), |t, at| out.push(Tok { text: t.to_string(), at }));
     out
 }
 
@@ -127,46 +156,45 @@ fn heading_text(line: &str) -> String {
     line.trim().trim_start_matches('#').trim_end_matches('#').trim().to_string()
 }
 
-/// 절 하나 — 검색 중에만 산다.
-struct Section<'a> {
+/// 절 하나 — 검색 중에만 산다. 줄은 페이지 글을 빌린다(`'t`) — 절마다 줄을 베끼지 않는다.
+struct Section<'a, 't> {
     page: &'a Page,
     heading: Option<String>,
     anchor: Option<&'a str>,
     /// 절의 첫 줄(0 부터)과 그 줄들. 본문을 못 읽은 페이지의 절은 줄이 없다.
     start: usize,
-    lines: Vec<String>,
-    /// 머리글 필드와 본문 필드에서 질의 낱말마다 센 수, 그리고 필드의 길이.
-    head: HashMap<String, f64>,
-    body: HashMap<String, f64>,
+    lines: &'t [&'t str],
+    /// 머리글 필드와 본문 필드에서 질의 낱말마다 센 수(`terms` 의 차례), 그리고 필드의 길이.
+    head: Vec<f64>,
+    body: Vec<f64>,
     head_len: f64,
     body_len: f64,
 }
 
 /// 페이지를 절로 자른다. 첫 머리글 앞의 글이 있거나(또는 머리글이 아예 없으면) 페이지 제목의 절이 먼저 선다.
-fn sections<'a>(page: &'a Page) -> Vec<Section<'a>> {
-    let mk = |heading: Option<String>, anchor: Option<&'a str>, start: usize, lines: Vec<String>| Section {
+/// `all` 은 그 페이지 본문의 줄이고, 본문을 못 읽었으면 `None` 이다.
+fn sections<'a, 't>(page: &'a Page, all: Option<&'t [&'t str]>) -> Vec<Section<'a, 't>> {
+    let mk = |heading: Option<String>, anchor: Option<&'a str>, start: usize, lines: &'t [&'t str]| Section {
         page,
         heading,
         anchor,
         start,
         lines,
-        head: HashMap::new(),
-        body: HashMap::new(),
+        head: Vec::new(),
+        body: Vec::new(),
         head_len: 0.0,
         body_len: 0.0,
     };
-    let Some(body) = &page.body else { return vec![mk(None, None, 0, Vec::new())] };
-    let text = unified(unmarked(body));
-    let all: Vec<&str> = text.split('\n').collect();
+    let Some(all) = all else { return vec![mk(None, None, 0, &[])] };
     let mut out = Vec::new();
     let first = page.headings.first().map_or(all.len(), |h| h.line.min(all.len()));
     if first > 0 || page.headings.is_empty() {
-        out.push(mk(None, None, 0, all[..first].iter().map(|l| l.to_string()).collect()));
+        out.push(mk(None, None, 0, &all[..first]));
     }
     for (n, h) in page.headings.iter().enumerate() {
         let from = h.line.min(all.len());
         let to = page.headings.get(n + 1).map_or(all.len(), |x| x.line.clamp(from, all.len()));
-        let lines: Vec<String> = all[from..to].iter().map(|l| l.to_string()).collect();
+        let lines = &all[from..to];
         let text = lines.first().map(|l| heading_text(l)).unwrap_or_default();
         out.push(mk(Some(text), Some(h.anchor.as_str()), from, lines));
     }
@@ -175,6 +203,10 @@ fn sections<'a>(page: &'a Page) -> Vec<Section<'a>> {
 
 /// 질의 `query` 로 `pages` 의 절을 찾아 순위대로 `limit` 개까지 낸다. **순수 함수다.**
 pub fn search<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
+    run(pages, query, limit, true)
+}
+
+fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Found<'a> {
     let mut terms: Vec<String> = Vec::new();
     for t in tokens(query) {
         if !terms.contains(&t.text) {
@@ -185,43 +217,45 @@ pub fn search<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
         return Found { terms, hits: Vec::new() };
     }
     let want: HashSet<&str> = terms.iter().map(String::as_str).collect();
-    let mut secs: Vec<Section> = pages.iter().flat_map(sections).collect();
+    let index: HashMap<&str, usize> = terms.iter().enumerate().map(|(i, t)| (t.as_str(), i)).collect();
+    // 페이지 글은 여기 한 벌만 산다 — 절은 그 줄을 빌린다.
+    let texts: Vec<Option<std::borrow::Cow<str>>> =
+        pages.iter().map(|p| p.body.as_deref().map(|b| unified(unmarked(b)))).collect();
+    let lines: Vec<Option<Vec<&str>>> = texts.iter().map(|t| t.as_deref().map(|t| t.split('\n').collect())).collect();
+    let mut secs: Vec<Section> = pages.iter().zip(&lines).flat_map(|(p, l)| sections(p, l.as_deref())).collect();
+    let mut buf = String::new();
     for s in &mut secs {
         // 머리글 필드는 이 절의 머리글과 페이지 제목이다. 머리글 줄은 본문 필드에서 뺀다 — 두 번 세지 않는다.
-        let mut head_text = s.page.title.clone();
-        if let Some(h) = &s.heading {
-            head_text.push('\n');
-            head_text.push_str(h);
-        }
-        let skip = usize::from(s.heading.is_some());
-        let body_text = s.lines.iter().skip(skip).map(String::as_str).collect::<Vec<_>>().join("\n");
-        for (text, field, len) in [(head_text, &mut s.head, &mut s.head_len), (body_text, &mut s.body, &mut s.body_len)]
-        {
-            for t in tokens(&text) {
+        // 토큰은 줄을 넘지 않으므로 줄마다 세는 것이 이어 붙여 세는 것과 같다.
+        let (mut head, mut body) = (vec![0.0; terms.len()], vec![0.0; terms.len()]);
+        let (mut head_len, mut body_len) = (0.0, 0.0);
+        let mut count = |text: &str, field: &mut Vec<f64>, len: &mut f64| {
+            each_token(text, &mut buf, |t, _| {
                 *len += 1.0;
-                if want.contains(t.text.as_str()) {
-                    *field.entry(t.text).or_insert(0.0) += 1.0;
+                if let Some(&i) = index.get(t) {
+                    field[i] += 1.0;
                 }
-            }
+            })
+        };
+        count(&s.page.title, &mut head, &mut head_len);
+        if let Some(h) = &s.heading {
+            count(h, &mut head, &mut head_len);
         }
+        for l in s.lines.iter().skip(usize::from(s.heading.is_some())) {
+            count(l, &mut body, &mut body_len);
+        }
+        (s.head, s.body, s.head_len, s.body_len) = (head, body, head_len, body_len);
     }
-    let weighted = |s: &Section, t: &str| {
-        HEADING_WEIGHT * s.head.get(t).copied().unwrap_or(0.0) + s.body.get(t).copied().unwrap_or(0.0)
-    };
+    let weighted = |s: &Section, i: usize| HEADING_WEIGHT * s.head[i] + s.body[i];
     let n = secs.len() as f64;
     let avg = secs.iter().map(|s| HEADING_WEIGHT * s.head_len + s.body_len).sum::<f64>() / n.max(1.0);
-    let idf: Vec<f64> = terms
-        .iter()
-        .map(|t| {
-            let df = secs.iter().filter(|s| weighted(s, t) > 0.0).count() as f64;
-            (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
-        })
-        .collect();
+    let df: Vec<f64> = (0..terms.len()).map(|i| secs.iter().filter(|s| weighted(s, i) > 0.0).count() as f64).collect();
+    let idf: Vec<f64> = df.iter().map(|df| (1.0 + (n - df + 0.5) / (df + 0.5)).ln()).collect();
     let mut scored: Vec<(usize, usize, f64)> = Vec::new();
     for (i, s) in secs.iter().enumerate() {
         let len = HEADING_WEIGHT * s.head_len + s.body_len;
         let (mut distinct, mut score) = (0, 0.0);
-        for (t, idf) in terms.iter().zip(&idf) {
+        for (t, idf) in idf.iter().enumerate() {
             let tf = weighted(s, t);
             if tf > 0.0 {
                 distinct += 1;
@@ -251,7 +285,7 @@ pub fn search<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
                 line: s.start + 1,
                 distinct,
                 score,
-                snippet: snippet(s, &want),
+                snippet: if snippets { snippet(s, &want) } else { None },
             }
         })
         .collect();
@@ -357,6 +391,32 @@ mod tests {
 
     fn top<'a>(pages: &'a [Page], q: &str) -> Vec<(&'a str, Option<String>)> {
         search(pages, q, 50).hits.into_iter().map(|h| (h.page.slug.as_str(), h.heading)).collect()
+    }
+
+    /// 토큰 — 가르는 곳, 접기(ASCII 와 그 밖), 한글 글자 둘씩, 원문 범위. 버퍼를 돌려 쓰는 걸음이 낱말마다 String 을
+    /// 짓던 판과 같은 답을 낸다.
+    #[test]
+    fn tokens_split_fold_and_keep_the_source_ranges() {
+        let s = "Merge-Driver 검색은 절 ÉCOLE ΟΔΟΣ snake_case 2026";
+        let got: Vec<(String, &str)> = tokens(s).into_iter().map(|t| (t.text, &s[t.at])).collect();
+        let want = [
+            ("merge", "Merge"),
+            ("driver", "Driver"),
+            ("검색", "검색"),
+            ("색은", "색은"),
+            ("절", "절"),
+            ("école", "ÉCOLE"),
+            ("οδος", "ΟΔΟΣ"),
+            ("snake_case", "snake_case"),
+            ("2026", "2026"),
+        ];
+        let want: Vec<(String, &str)> = want.iter().map(|(a, b)| (a.to_string(), *b)).collect();
+        // 끝의 Σ 는 `str::to_lowercase` 가 낱말 끝 꼴(ς)로 접는다 — 낱말째 접어야 그 답이 선다.
+        let want: Vec<(String, &str)> =
+            want.into_iter().map(|(a, b)| if b == "ΟΔΟΣ" { (b.to_lowercase(), b) } else { (a, b) }).collect();
+        assert_eq!(got, want);
+        assert!(tokens("  ,. ").is_empty());
+        assert_eq!(tokens("가a나").iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), ["가", "a", "나"]);
     }
 
     #[test]
