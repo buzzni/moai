@@ -40,6 +40,8 @@ pub struct Palette {
     pub clip: Style,
     /// 주말 바탕(Day·Hour). 바탕만 바꾸는 꾸밈이라 글리프가 없어도 날은 머리글 라벨이 말한다.
     pub weekend: Style,
+    /// 의존 화살표(`─┐┤│└▶`)와 표식(`↑`·`↓`)의 자주.
+    pub link: Style,
     /// 분할선.
     pub splitter: Style,
     /// 머리글 글자.
@@ -63,6 +65,7 @@ impl Default for Palette {
             today: fg(Color::Red),
             clip: fg(Color::Cyan),
             weekend: Style::new().bg(Color::Indexed(235)),
+            link: fg(Color::Magenta),
             splitter: fg(Color::DarkGray),
             header: Style::new(),
             focus: Style::new().bg(Color::Indexed(237)),
@@ -110,6 +113,31 @@ pub struct Glyphs {
     pub clip_right: char,
     pub today: char,
     pub splitter: char,
+    /// 의존 화살표: 가로·세로·꺾임 넷(`┐┘┌└`)·가지 둘(`┤├`)·화살촉, 그리고 막힌 길의 표식 둘.
+    pub link: LinkGlyphs,
+}
+
+/// 의존 화살표의 글리프. 팔 모양(왼·오른·위·아래)이 글리프를 고른다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinkGlyphs {
+    pub h: char,
+    pub v: char,
+    /// 왼쪽에서 와 아래로 꺾음 `┐`.
+    pub down_left: char,
+    /// 왼쪽에서 와 위로 꺾음 `┘`.
+    pub up_left: char,
+    /// 오른쪽으로 나가 아래로 `┌`.
+    pub down_right: char,
+    /// 오른쪽으로 나가 위로 `└`.
+    pub up_right: char,
+    /// 세로줄에 왼쪽 가지 `┤`.
+    pub tee_left: char,
+    /// 세로줄에 오른쪽 가지 `├`.
+    pub tee_right: char,
+    pub arrow: char,
+    /// 길이 막힌 줄의 표식과 화면 밖 개수의 머리. 커서 줄이 아래면 `up`.
+    pub up: char,
+    pub down: char,
 }
 
 impl Default for Glyphs {
@@ -127,6 +155,19 @@ impl Default for Glyphs {
             clip_right: '›',
             today: '┊',
             splitter: '│',
+            link: LinkGlyphs {
+                h: '─',
+                v: '│',
+                down_left: '┐',
+                up_left: '┘',
+                down_right: '┌',
+                up_right: '└',
+                tee_left: '┤',
+                tee_right: '├',
+                arrow: '▶',
+                up: '↑',
+                down: '↓',
+            },
         }
     }
 }
@@ -147,6 +188,19 @@ impl Glyphs {
             clip_right: '>',
             today: ':',
             splitter: '|',
+            link: LinkGlyphs {
+                h: '-',
+                v: '|',
+                down_left: '+',
+                up_left: '+',
+                down_right: '+',
+                up_right: '+',
+                tee_left: '+',
+                tee_right: '+',
+                arrow: '>',
+                up: '^',
+                down: 'v',
+            },
         }
     }
 }

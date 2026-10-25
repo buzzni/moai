@@ -19,6 +19,8 @@ pub(crate) struct Ctx<'a> {
     pub now: i64,
     pub palette: &'a Palette,
     pub glyphs: &'a Glyphs,
+    /// 화면 맨 위 본문 줄의 번호.
+    pub first_row: usize,
 }
 
 /// 칸 하나를 덮어쓴다. 앞 스타일(글자색·꾸밈)은 지우되 바탕은 이어받아 주말 바탕이 막대 밑에서 산다.

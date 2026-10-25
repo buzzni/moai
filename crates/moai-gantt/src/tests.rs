@@ -278,3 +278,127 @@ fn what_is_drawn_stays_inside_what_hit_testing_covers() {
         }
     }
 }
+
+// ---- 의존 화살표 (moai-v53u.4xi) ----
+
+/// 하루 한 칸(Week)인 날 `a..b` 의 계획 줄 — 칸 `a..b`.
+fn bar(a: i64, b: i64) -> GanttRow {
+    planned((100 + a) * DAY, (100 + b) * DAY)
+}
+
+const fn lk(from_row: usize, to_row: usize) -> Link {
+    Link { from_row, to_row }
+}
+
+/// 연결선 화면. `shown` 줄을 `first` 번 줄부터 그린다.
+fn view(rows: &[GanttRow], links: &[Link], focus: Option<usize>, first: usize, shown: u16, glyphs: Glyphs) -> Buffer {
+    let area = Rect::new(0, 0, LW + 1 + W, HEADER_ROWS + shown);
+    let mut buf = Buffer::empty(area);
+    let mut st = GanttState::new(Axis::new(Zoom::Week, ORIGIN));
+    st.label_width = LW;
+    st.first_row = first;
+    let g = Gantt { rows, links, focus, now: LONG_AGO, glyphs, ..Gantt::default() };
+    g.render(area, &mut buf, &mut st);
+    buf
+}
+
+fn lines(buf: &Buffer, n: u16) -> Vec<String> {
+    (0..n).map(|i| line(buf, i)).collect()
+}
+
+fn simple(rows: &[GanttRow], links: &[Link], focus: Option<usize>) -> Vec<String> {
+    let n = rows.len() as u16;
+    lines(&view(rows, links, focus, 0, n, Glyphs::default()), n)
+}
+
+#[test]
+fn one_blocker_draws_a_line_a_corner_and_the_arrow_before_the_focus_bar() {
+    let rows = [bar(0, 2), bar(6, 9)];
+    let b = view(&rows, &[lk(0, 1)], Some(1), 0, 2, Glyphs::default());
+    assert_eq!(lines(&b, 2), ["░░──┐", "    └▶░░░"]);
+    assert_eq!(cell(&b, 2, 0).fg, Color::Magenta);
+    assert_eq!(cell(&b, 5, 1).fg, Color::Magenta);
+}
+
+#[test]
+fn two_blockers_end_in_a_corner_then_a_tee() {
+    let rows = [bar(0, 2), bar(0, 3), bar(6, 9)];
+    assert_eq!(simple(&rows, &[lk(0, 2), lk(1, 2)], Some(2)), ["░░──┐", "░░░─┤", "    └▶░░░"]);
+}
+
+#[test]
+fn a_blocker_below_the_focus_climbs_with_a_corner_up() {
+    let rows = [bar(6, 9), bar(0, 2)];
+    assert_eq!(simple(&rows, &[lk(1, 0)], Some(0)), ["    ┌▶░░░", "░░──┘"]);
+}
+
+#[test]
+fn nothing_is_drawn_without_a_focus() {
+    let rows = [bar(0, 2), bar(6, 9)];
+    assert_eq!(simple(&rows, &[lk(0, 1)], None), ["░░", "      ░░░"]);
+}
+
+#[test]
+fn the_focus_blocking_others_mirrors_the_shape() {
+    // 커서 줄 끝 2, 막히는 줄의 가장 이른 시작 7 → 연결 칸 5.
+    let rows = [bar(0, 2), bar(7, 10), bar(8, 11)];
+    assert_eq!(simple(&rows, &[lk(0, 1), lk(0, 2)], Some(0)), ["░░───┐", "     ├▶░░░", "     └─▶░░░"]);
+}
+
+#[test]
+fn offscreen_blockers_and_blocked_show_counts_at_the_edge_rows() {
+    // 줄 0·1 은 위로 밀렸고 5 는 아래다. 화면은 줄 2..5 — 커서 3.
+    let mut rows = vec![GanttRow::default(); 6];
+    rows[3] = bar(6, 9);
+    let links = [lk(0, 3), lk(1, 3), lk(5, 3)];
+    let b = view(&rows, &links, Some(3), 2, 3, Glyphs::default());
+    assert_eq!(lines(&b, 3), ["    ↑ 2", "    ├▶░░░", "    ↓ 1"]);
+    assert_eq!(cell(&b, 4, 0).fg, Color::Magenta);
+}
+
+#[test]
+fn the_count_moves_left_of_the_corner_when_the_focus_is_the_edge_row() {
+    let mut rows = vec![GanttRow::default(); 3];
+    rows[1] = bar(6, 9);
+    let b = view(&rows, &[lk(0, 1)], Some(1), 1, 2, Glyphs::default());
+    assert_eq!(lines(&b, 2), [" ↑ 1└▶░░░", ""]);
+}
+
+#[test]
+fn overlapping_schedules_leave_only_the_mark_and_never_cover_the_bar() {
+    // 막는 줄이 커서 줄의 시작을 넘어 겹친다 → 길이 없다. 표식은 날짜 칸 첫 칸에.
+    let rows = [bar(3, 7), bar(6, 9)];
+    assert_eq!(simple(&rows, &[lk(0, 1)], Some(1)), ["↓  ░░░░", "    └▶░░░"]);
+    // 첫 칸이 막대면 표식도 못 놓는다.
+    let rows = [bar(0, 7), bar(6, 9)];
+    assert_eq!(simple(&rows, &[lk(0, 1)], Some(1))[0], "░░░░░░░");
+    // 커서 줄 아래의 막는 줄이면 `↑`.
+    let rows = [bar(6, 9), bar(3, 7)];
+    assert_eq!(simple(&rows, &[lk(1, 0)], Some(0))[1], "↑  ░░░░");
+}
+
+#[test]
+fn the_vertical_line_skips_a_bar_it_would_cross() {
+    let rows = [bar(0, 2), bar(3, 6), bar(6, 9)];
+    assert_eq!(simple(&rows, &[lk(0, 2)], Some(2)), ["░░──┐", "   ░░░", "    └▶░░░"]);
+}
+
+#[test]
+fn ascii_glyphs_draw_the_same_shape() {
+    let rows = [bar(0, 2), bar(6, 9)];
+    let b = view(&rows, &[lk(0, 1)], Some(1), 0, 2, Glyphs::ascii());
+    assert_eq!(lines(&b, 2), ["..--+", "    +>..."]);
+}
+
+#[test]
+fn the_today_line_gives_way_to_a_link() {
+    let rows = [bar(0, 2), bar(6, 9)];
+    let area = rows_of(2);
+    let mut buf = Buffer::empty(area);
+    let mut st = GanttState::new(Axis::new(Zoom::Week, ORIGIN));
+    st.label_width = LW;
+    let links = [lk(0, 1)];
+    Gantt { rows: &rows, links: &links, focus: Some(1), now: 103 * DAY, ..Gantt::default() }
+        .render(area, &mut buf, &mut st);
+    assert_eq!(line(&buf, 0), "░░──┐");
+}

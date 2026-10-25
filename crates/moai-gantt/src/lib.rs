@@ -12,6 +12,7 @@ pub mod axis;
 pub mod civil;
 mod draw;
 pub mod hit;
+mod links;
 pub mod state;
 pub mod style;
 
@@ -19,7 +20,7 @@ pub use axis::{Axis, Header, HeaderStyle, Label, Names, Zoom, iso_week, render_h
 pub use civil::{civil_from_days, days_from_civil};
 pub use hit::{HEADER_ROWS, Hit, Layout, Part, bar_cells, drag_apply, drag_days, hit, span_cells};
 pub use state::{DEFAULT_LABEL_WIDTH, GanttState};
-pub use style::{Glyphs, Palette, Tone};
+pub use style::{Glyphs, LinkGlyphs, Palette, Tone};
 
 /// 줄의 종류. 계획 막대의 글리프(`░` 이슈, `▒` 묶음)와 `◆` 표식을 가른다.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -53,7 +54,7 @@ pub struct GanttRow {
     pub deferred: bool,
 }
 
-/// 행 사이의 의존. 행 번호는 `rows` 안의 자리다. 선은 뒤 이슈(moai-v53u.4xi)가 그린다.
+/// 행 사이의 의존. 행 번호는 `rows` 안의 자리다. `from_row` 가 막는 줄, `to_row` 가 막히는 줄이다(끝-시작). 커서 줄의 것만 그린다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Link {
     pub from_row: usize,
@@ -101,7 +102,14 @@ impl StatefulWidget for Gantt<'_> {
         }
         render_header(buf, l.dates_header, &header, &pal.header_style());
 
-        let ctx = draw::Ctx { axis: &state.axis, header: &header, now: self.now, palette: pal, glyphs: g };
+        let ctx = draw::Ctx {
+            axis: &state.axis,
+            header: &header,
+            now: self.now,
+            palette: pal,
+            glyphs: g,
+            first_row: state.first_row,
+        };
         let body = self.rows.iter().enumerate().skip(state.first_row).zip(l.dates_body.rows());
         for ((i, r), line) in body {
             let y = line.y;
@@ -118,11 +126,47 @@ impl StatefulWidget for Gantt<'_> {
 
 impl Gantt<'_> {
     /// 연결선 층 — 가장 위, **빈 칸에만** 긋는다([`draw::is_empty_cell`] 이 빈 칸을 가린다).
-    /// 선 셈은 moai-v53u.4xi 가 여기에 채운다: `l.dates_body` 의 칸 `(x, y)` 는 `rows` 의
-    /// `first_row + (y - dates_body.y)` 번 줄이고, 막대가 차지하는 칸은 [`GanttRow::span`] 과
-    /// [`span_cells`] 가 맞히기와 같은 값으로 준다.
-    fn paint_links(&self, _buf: &mut Buffer, _layout: &Layout, _ctx: &draw::Ctx) {
-        let _ = (self.links, draw::is_empty_cell);
+    /// 길은 [`links::route`] 가 버퍼 없이 찾고, 여기는 그것을 칸에 옮기기만 한다. 커서 줄이 없으면
+    /// 아무것도 안 그린다.
+    fn paint_links(&self, buf: &mut Buffer, l: &Layout, ctx: &draw::Ctx) {
+        let (Some(focus), area) = (self.focus, l.dates_body) else { return };
+        if self.links.is_empty() || area.width == 0 || area.height == 0 {
+            return;
+        }
+        let first = ctx.first_row;
+        let vis = first..(first + usize::from(area.height)).min(self.rows.len());
+        let ext = |r: usize| self.rows.get(r)?.span(self.now).map(|s| span_cells(ctx.axis, s));
+        let at = |row: usize, col: i64| -> Option<(u16, u16)> {
+            let in_x = (0..i64::from(area.width)).contains(&col);
+            let in_y = (first..first + usize::from(area.height)).contains(&row);
+            (in_x && in_y).then(|| (area.x + col as u16, area.y + (row - first) as u16))
+        };
+        let occupied = |row: usize, col: i64| at(row, col).is_some_and(|(x, y)| !draw::is_empty_cell(buf, x, y));
+        let route = links::route(focus, self.links, ext, vis, occupied);
+        let (st, g) = (ctx.palette.link, &ctx.glyphs.link);
+        let put = |buf: &mut Buffer, row: usize, col: i64, ch: char| {
+            if let Some((x, y)) = at(row, col)
+                && draw::is_empty_cell(buf, x, y)
+            {
+                buf[(x, y)].set_char(ch).set_style(st);
+            }
+        };
+        for (&(row, col), p) in &route.cells {
+            let ch = if p.arrow { g.arrow } else { links::glyph(p.arms, g) };
+            put(buf, row, col, ch);
+        }
+        // 막힌 길의 표식은 그 줄의 고정 칸 쪽 끝(날짜 칸 첫 칸)에 선다.
+        for &(row, dir) in &route.marks {
+            put(buf, row, 0, if dir == links::Dir::Up { g.up } else { g.down });
+        }
+        for m in &route.more {
+            let text = format!("{} {}", if m.dir == links::Dir::Up { g.up } else { g.down }, m.n);
+            // 커서 줄이 끝 줄이면 연결 칸이 `└▶` 로 차 있으니 개수는 그 왼쪽에 닿게 쓴다.
+            let start = if m.row == focus { m.col - text.chars().count() as i64 } else { m.col };
+            for (i, ch) in text.chars().enumerate() {
+                put(buf, m.row, start + i as i64, ch);
+            }
+        }
     }
 }
 
