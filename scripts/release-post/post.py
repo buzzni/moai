@@ -142,11 +142,35 @@ def describe(msgs):
             print(f"{i}. text, {len(m['content'])} characters\n" + "\n".join("   " + l for l in m["content"].splitlines()))
 
 
+def markdown(text):
+    """Discord 가 그리는 만큼만 — 제목·목록·굵게·코드·<링크>. 미리보기에서 글이 실제와 비슷하게 보이게."""
+    def inline(line):
+        line = html.escape(line, quote=False)
+        line = re.sub(r"`([^`]+)`", r"<code>\1</code>", line)
+        line = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", line)
+        return re.sub(r"&lt;(https?://[^&\s]+)&gt;", r'<a href="\1">\1</a>', line)
+    out, items = [], []
+    for line in text.splitlines() + [""]:
+        if line.startswith("- "):
+            items.append(f"<li>{inline(line[2:])}</li>")
+            continue
+        if items:
+            out.append("<ul>" + "".join(items) + "</ul>")
+            items = []
+        if line.startswith("### "):
+            out.append(f"<h3>{inline(line[4:])}</h3>")
+        elif line.startswith("## "):
+            out.append(f"<h2>{inline(line[3:])}</h2>")
+        elif line.strip():
+            out.append(f"<p>{inline(line)}</p>")
+    return "".join(out)
+
+
 def preview(msgs, path):
     """보낼 차례를 한 장의 HTML 로. 그림은 data: 로 넣어 그 파일 하나로 열린다."""
     parts = []
     for m in msgs:
-        block = f'<pre>{html.escape(m["content"])}</pre>' if m["content"] else ""
+        block = f'<div class="text">{markdown(m["content"])}</div>' if m["content"] else ""
         if m["file"]:
             kind = "video/webm" if m["file"].endswith(".webm") else (mimetypes.guess_type(m["file"])[0] or "")
             with open(m["file"], "rb") as f:
@@ -158,7 +182,9 @@ def preview(msgs, path):
 <title>Discord post preview</title><style>
 body{{margin:0;background:#313338;color:#dbdee1;font:15px/1.4 system-ui,sans-serif;padding:24px 16px}}
 .msg{{max-width:760px;margin:0 auto 18px;padding:12px 16px;background:#2b2d31;border-radius:8px}}
-pre{{white-space:pre-wrap;font:inherit;margin:0 0 8px}} img,video{{max-width:100%;border-radius:6px;display:block}}
+.text{{margin:0 0 8px}} .text p,.text ul{{margin:4px 0}} .text ul{{padding-left:22px}} h2{{font-size:20px;margin:4px 0 6px}}
+h3{{font-size:16px;margin:10px 0 4px}} code{{background:#1e1f22;border-radius:4px;padding:1px 4px;font-size:.88em}}
+a{{color:#00a8fc;text-decoration:none}} img,video{{max-width:100%;border-radius:6px;display:block}}
 </style></head><body>{''.join(parts)}</body></html>"""
     with open(path, "w", encoding="utf-8") as f:
         f.write(page)
