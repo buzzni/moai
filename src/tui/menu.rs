@@ -39,6 +39,14 @@ pub fn open(chord: &Chord) -> bool {
 /// 이동키는 메뉴를 닫고 그 이동([`moves`]), **그 밖은 아무 일도 없다.**
 pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     if !open(chord) {
+        // **간트에서는 간트의 표가 먼저다**(moai-l80o, 사람 결정 2026-10-25) — 기다리는 열이 없을 때 한 키로 찾는다. 그
+        // 표는 한 키씩만 받으니 열을 들 일이 없다. 목록·보드에서는 안 찾는다: 그래서 `[browse]` 에 같은 키를 쓴 줄이
+        // 거기서 그대로 산다.
+        if chord.held().is_empty()
+            && let Some(act) = gantt_first(c, k)
+        {
+            return Some(act);
+        }
         return chord.feed(c.keys.browse, k);
     }
     // **연 키가 닫는다**(사용자 결정 2026-09-19) — doom·helix 의 버릇이고, 토글 층이 ESC 까지
@@ -102,10 +110,27 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
 /// 안 든다. 판정은 키 표에서 읽고, 무엇이 이동인가는 [`Browse::moves`] 가 가른다 — 이동키를
 /// 더하면 여기도 따라온다.
 fn moves(k: KeyEvent, c: &Ctx) -> bool {
+    // 간트에서 간트의 키는 이동으로 안 샌다(moai-l80o 리뷰) — 메뉴 밖에서 그 키는 간트의 것이라, 메뉴를 닫으며 탐색의 표로
+    // 먹이면 `[browse] expand = "L"` 이 간트에서 메뉴를 거쳐서만 펼친다.
+    if gantt_first(c, k).is_some() {
+        return false;
+    }
     match lookup(c.keys.browse, &[k]) {
         Lookup::Run(act) => act.moves() && act.enabled(c) != Err(Off::Quiet),
         Lookup::Pending => c.keys.browse.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
         Lookup::Unknown => false,
+    }
+}
+
+/// 간트에서 이 한 키가 간트의 표에서 무엇인가 — 탐색의 표보다 먼저 찾는다(moai-l80o). 통계·위키 창은 간트 위에 떠도
+/// 제 표로 받으니 안 찾는다.
+fn gantt_first(c: &Ctx, k: KeyEvent) -> Option<Browse> {
+    if !c.gantt || c.stats || c.wiki {
+        return None;
+    }
+    match lookup(c.keys.gantt, &[k]) {
+        Lookup::Run(act) => Some(act),
+        _ => None,
     }
 }
 
@@ -390,6 +415,24 @@ mod tests {
         assert_eq!((filter.key.as_str(), filter.event.modifiers), ("Alt-f", KeyModifiers::ALT));
         let next = super::super::keys::next_keys(map.browse, &[k('g')]);
         assert_eq!(next.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["Ctrl-g"]);
+    }
+
+    /// **간트에서 간트의 키는 메뉴를 거쳐서도 탐색의 동작으로 안 샌다**(moai-l80o 리뷰). `[browse] expand = "L"` 이면 메뉴
+    /// 밖의 `L` 은 간트의 것인데, 열린 메뉴의 이동키 갈래가 탐색의 표로 먹여 간트에서 펼쳤다. 목록에서는 그대로 닫고 편다.
+    #[test]
+    fn a_gantt_key_does_not_leak_through_the_menu_as_a_move() {
+        let (map, problems) = super::super::keymap::build("[browse]\nexpand = \"L\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let shift_l = KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT);
+        let gantt = Ctx { keys: map, gantt: true, group: true, ..inside() };
+        let mut ch = Chord::default();
+        assert_eq!(feed(&mut ch, &gantt, k(' ')), None);
+        assert_eq!(feed(&mut ch, &gantt, shift_l), None, "간트의 L 이 메뉴를 거쳐 펼쳤다");
+        let list = Ctx { keys: map, group: true, ..inside() };
+        let mut ch = Chord::default();
+        assert_eq!(feed(&mut ch, &list, k(' ')), None);
+        assert_eq!(feed(&mut ch, &list, shift_l), Some(Browse::Expand), "목록의 L 이 메뉴를 닫고 안 폈다");
+        assert!(!open(&ch));
     }
 
     fn keys_of(e: &[Entry]) -> Vec<&str> {
@@ -714,14 +757,16 @@ mod tests {
     }
 
     /// **그 층에 선 항목이 이긴다**(moai-y8v2, 사용자 결정) — 메뉴 창에 적힌 키가 다른 일을 하는
-    /// 판이 없다. 오늘 부딪치는 자리는 넷이다: `SPC g l`(목록, moai-z46r)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음
-    /// 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 — `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
+    /// 판이 없다. 오늘 부딪치는 자리는 다섯이다: `SPC g l`(목록, moai-z46r)·`SPC g g`(간트 — 맨 위로 가는 `gg` 의 첫 `g`,
+    /// moai-i4hf)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 —
+    /// `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
     #[test]
     fn an_item_on_the_layer_wins_over_the_move() {
         use super::super::scroll::Move;
         let c = inside();
         for (layer, x, item) in [
             ('g', 'l', Browse::Go(super::super::keys::Screen::List)),
+            ('g', 'g', Browse::Go(super::super::keys::Screen::Gantt)),
             ('c', 'h', Browse::Cell(super::super::view::Field::Names)),
             ('v', 'l', Browse::Deferred),
             ('m', 'g', Browse::ReadGroup),
@@ -842,16 +887,20 @@ mod tests {
         };
         assert_eq!(at(inside()), "+화면 [목록]");
         assert_eq!(at(Ctx { board: true, ..inside() }), "+화면 [보드]");
+        assert_eq!(at(Ctx { gantt: true, ..inside() }), "+화면 [간트]");
         assert_eq!(at(Ctx { stats: true, board: true, ..inside() }), "+화면 [통계]", "통계 창이 배치에 가렸다");
         assert_eq!(at(Ctx { wiki: true, board: true, ..inside() }), "+화면 [위키]", "위키 창이 배치에 가렸다");
+        assert_eq!(at(Ctx { stats: true, gantt: true, ..inside() }), "+화면 [통계]", "통계 창이 간트에 가렸다");
         let root = entries(&[k(' ')], &inside(), &[]);
         assert!(root.iter().filter(|e| e.key != "g").all(|e| e.state.is_none()), "다른 묶음이 상태를 달았다");
         let screens = entries(&[k(' '), k('g')], &Ctx { board: true, ..inside() }, &[]);
-        assert_eq!(keys_of(&screens), ["l", "b", "s", "w"]);
-        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "통계", "위키"]);
+        assert_eq!(keys_of(&screens), ["l", "b", "g", "s", "w"]);
+        assert_eq!(screens.iter().map(Entry::text).collect::<Vec<_>>(), ["목록", "보드", "간트", "통계", "위키"]);
         // 고르면 메뉴를 닫는다 — 토글처럼 열어 두지 않는다.
         assert!(!waits(&[k(' '), k('g')], &inside()), "SPC g 가 Esc 를 기다린다");
-        for (x, to) in [('l', Screen::List), ('b', Screen::Board), ('s', Screen::Stats), ('w', Screen::Wiki)] {
+        for (x, to) in
+            [('l', Screen::List), ('b', Screen::Board), ('g', Screen::Gantt), ('s', Screen::Stats), ('w', Screen::Wiki)]
+        {
             let mut ch = Chord::default();
             for y in [' ', 'g'] {
                 feed(&mut ch, &inside(), k(y));

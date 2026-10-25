@@ -14,6 +14,24 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Added
 
+- **The web page has a Gantt tab (`SPC g g`).** The tree, every folder open, stays on
+  the left; the dates scroll on the right at four zoom steps (hour, day, week, month;
+  `-`/`=`, `t` today, `z` fit). It draws what the TUI's Gantt draws, with the same
+  meaning: the planned span (hatched when an epic or milestone counts it from its
+  members), the actual span laid over it in the column's colour, the overdue stretch
+  in red with `!`, `◆` on a deadline-only row, the today line, `‹ ›` for what lies off
+  screen, `n/m` progress, and arrows from the rows that block the one under the cursor.
+  Click a row or a bar for its detail; Shift+wheel or dragging the date header moves
+  the dates; Ctrl+wheel over the dates zooms; the grid's width is dragged and kept.
+  The web detail now shows `start → deadline` too. `moai tui --deep --json` carries
+  each row's `gantt` — the planned and actual spans, progress, overdue days and live
+  blockers — so another program can draw the same chart. (moai-d86e.b2m,
+  moai-d86e.5wj, moai-d86e.en8, moai-d86e.jmq)
+
+## [0.24.0] - 2026-10-25
+
+### Added
+
 - **Any row can carry a planned start, not only a milestone.** `--start` works
   on `add`, `edit`, `epic add` and `backlog add` the way `--due` does, and `+N`
   means N days from today in your time zone (stored as the date). A start after
@@ -38,27 +56,56 @@ does not tag — see `CONTRIBUTING.md`.
   `backlog promote` carries the backlog item's start onto the epic as it does its
   deadline, and `--dry-run` and `show --as-plan` print the same range.
   (moai-xf0p.due)
-- **The web page has a Gantt tab (`SPC g g`).** The tree, every folder open, stays on
-  the left; the dates scroll on the right at four zoom steps (hour, day, week, month;
-  `-`/`=`, `t` today, `z` fit). It draws what the TUI's Gantt draws, with the same
-  meaning: the planned span (hatched when an epic or milestone counts it from its
-  members), the actual span laid over it in the column's colour, the overdue stretch
-  in red with `!`, `◆` on a deadline-only row, the today line, `‹ ›` for what lies off
-  screen, `n/m` progress, and arrows from the rows that block the one under the cursor.
-  Click a row or a bar for its detail; Shift+wheel or dragging the date header moves
-  the dates; Ctrl+wheel over the dates zooms; the grid's width is dragged and kept.
-  The web detail now shows `start → deadline` too. `moai tui --deep --json` carries
-  each row's `gantt` — the planned and actual spans, progress, overdue days and live
-  blockers — so another program can draw the same chart. (moai-d86e.b2m,
-  moai-d86e.5wj, moai-d86e.en8, moai-d86e.jmq)
+- **A gantt layout in the explorer — `SPC g g`.** The list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right:
+  the planned start to deadline, when the work actually ran, the time past a
+  deadline, and today. Groups that wrote no days of their own span their
+  members. `-` and `=` zoom, `H` `L` `[` `]` slide the dates, `t` centres today
+  and `z` fits every row. `<` `>` move the cursor row's plan a day and `{` `}`
+  its start; with the mouse, drag a bar's middle or either end, or click an
+  empty day on a row with no plan. A move is written the way `moai edit --start
+  --due` writes it — refused past the deadline above — and the notice names the
+  `moai edit` line that puts it back. The gantt keeps its own folds, its detail
+  stands below at first, and the width of its fixed column is kept under `[tui]`
+  as `gantt_label`. (moai-i4hf)
 
 ### Changed
 
+- **`-` `=` `+` `H` `L` `[` `]` `t` `z` `<` `>` `{` `}` are now the gantt's keys
+  in the explorer** — in the gantt only. A `keys.toml` line under `[browse]` that
+  gives one of them to another action keeps working in the list and the board;
+  in the gantt that key does the gantt's thing. The gantt's keys have a section
+  of their own, `[gantt]`, one key per line, and a line there that would hide a
+  list key in the gantt is the one that is dropped. (moai-i4hf, moai-l80o)
 - **`starts_on` is no longer refused on rows that are not milestones.** A binary
   from before this release still refuses it: it cannot edit an issue, epic or
   backlog item that carries a start — not even its title, and not `defer` — and
   says to clear it with `moai edit <id> --start none`. Upgrade every binary that
   writes the tracker before giving such a row a start. (moai-xf0p.6d5)
+- **Claude workers no longer go into their worktree.** Every `EnterWorktree`
+  into `.worktrees/` made Claude Code ask the person to approve it, and no allow
+  rule turned that off. The worker steps (`moai-supervise`'s `references/worker.md`)
+  now have session workers stay in the root and reach the worktree by absolute
+  path, as subagent workers already did; the supervisor's message carries a
+  `Worktree:` line saying so, and the `moai` skill's "Words per agent" table says
+  the same for Claude. (moai-9js2)
+- **Hook rule 2 now also refuses a write to the main checkout while everything
+  you hold has its worktree standing.** A session in the root no longer gets
+  Claude Code's worktree isolation guard, so a relative `src/x.rs` would land in
+  the checkout every session shares; the refusal names the same file inside the
+  worktree. Work with no worktree, a session inside a linked worktree and a person
+  at a terminal are not affected. (moai-9js2.3xn)
+### Fixed
+
+- `moai backlog promote` left its history notes in Korean whatever the screen
+  language — `<id> 에서 펼쳤다` on the new epic (on each new issue with `-e`) and
+  `… 로 펼쳤다` on the backlog item it closed. They are now written in English
+  (`Unfolded from <id> — <title>`, and `Unfolded into <ids>, N issues` or, with `-e`,
+  `Unfolded into <epic> as <ids>`), like the other notes moai writes itself
+  (`Taken-over:`, `Due-priority:`). Notes written before keep their words.
+- The backlog title `promote` copies into that note is folded onto one line. A title
+  hand-edited to hold a line break reached the note when an already closed backlog item
+  was unfolded again, and a `model: …` line in it counted as AI work in `moai stats`.
 
 ## [0.23.0] - 2026-10-23
 

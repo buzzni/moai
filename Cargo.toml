@@ -6,7 +6,7 @@ members = ["crates/moai-gantt"]
 
 [package]
 name = "moai"
-version = "0.23.0"
+version = "0.24.0"
 edition = "2024"
 description = "이슈 트래커. 승인 게이트 없음. 규율은 `moai status` 가 비춘다."
 license = "MIT"
@@ -52,6 +52,8 @@ toml_edit     = { version = "0.25.15", default-features = false, features = ["pa
 # 지금 크기는 `ls -l target/release/moai` 가 댄다. 위의 표와 다른 것은 기능을 깎아서다: `gzip` 을
 # 끄면 `flate2` 가 안 따라오고, 답이 JSON 몇 KB 라 푸는 값도 없다.
 ureq          = { version = "3", default-features = false, features = ["rustls"] }
+# 탐색기의 간트 배치(moai-i4hf)가 그리는 위젯 — 같은 워크스페이스의 크레이트라 전이 의존이 ratatui 하나다(moai-v53u).
+moai-gantt    = { path = "crates/moai-gantt" }
 
 # `access(X_OK)` 하나를 쓴다(`cmd::runnable`, moai-dhx9, 2026-09-23 사용자 결정) — 표준
 # 라이브러리에 없다.

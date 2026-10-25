@@ -7,8 +7,8 @@ The supervisor skill remains Claude Code only; reading this file does not instal
 
 | Instead of (worker.md) | Do this here |
 |---|---|
-| `EnterWorktree(path)` | Work in the worktree's absolute path on every command call (`workdir` or `cd`). |
-| `ExitWorktree(keep)` | Return to the assignment's `Root:` absolute path on every root command call. |
+| Never `EnterWorktree` ("Stay in the root") | The same: aim at the worktree's absolute path on every command call (`workdir` or `cd`). |
+| `ExitWorktree(keep)` | Run every root command at the assignment's `Root:` absolute path. |
 | `AskUserQuestion` | Ask this window's person with the available question tool; otherwise ask in conversation and wait. |
 | `/code-review` (7) | Send the review readiness note below and wait for the supervisor's review. |
 | `TaskStop` | No equivalent step here; the supervisor manages its review subagent. |

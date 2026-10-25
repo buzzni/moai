@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.23.0 hash:19a9f609 -->
+<!-- moai:begin v:0.23.0 hash:6c3ad2bf -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -520,6 +520,8 @@ What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, 
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
 files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
 `Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
+A session standing in the main checkout that holds only work whose worktree stands is
+refused a write to the main checkout too — the refusal names the same file in that worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and

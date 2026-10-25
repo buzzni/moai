@@ -358,11 +358,13 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
 gets the same check before the merge ("The milestone branch").
 
-**Ask it where you already are.** The merge and the tracker commits (8, 11) come after
-`ExitWorktree(keep)`, so you are back in the root and it is one command. From inside the
-worktree, do not ask with `git -C <root> …` — that shape is
-refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
-worktree go back in with `EnterWorktree(path)`"#;
+**Ask it where you already are.** You stay in the root ("Stay in the root" — in a session,
+as long as every `cd` into the worktree stood in parentheses), so the merge and the tracker
+commits (8, 11) and this check are plain commands there.
+Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+commit from sealing someone's open merge; the rows other sessions have not committed yet ride
+along, and that is expected — they stand in the shared file already, and the next tracker
+commit is where they go into history"#;
 
 /// 트래커가 git 밖인지 묻는 한 줄(moai-nzmp.ush). `.moai` 를 `.gitignore` 나 `.git/info/exclude` 에 둔 저장소가 있다 —
 /// 2026-10-14 saycode-extensions 회차의 감독이 일꾼마다 "트래커 커밋을 건너뛰라" 를 손으로 덧붙였다. 거기서 경로를 준
@@ -393,36 +395,47 @@ usual case, and every step stands as written"#
     )
 }
 
-/// **격리 가드가 읽을 수 있는 꼴로 이른다**(moai-rgp9). `EnterWorktree` 로 들어간 세션의 Bash
-/// 호출은 하네스가 정적으로 읽고, git 이 그 워크트리를 겨눈다는 것을 증명 못 하면 거절한다 —
-/// 판정은 "위험하다" 가 아니라 **"확인 불가"** 다.
+/// **루트에 서서 워크트리를 절대 경로로 다룬다**(moai-9js2, 2026-10-25 사용자 결정) — 세션 일꾼도 서브에이전트처럼.
+/// `.worktrees/` 로 드는 `EnterWorktree` 는 부를 때마다 사람에게 "permission-root relocation" 승인을 묻는다(Claude Code
+/// v2.1.206 부터) — allow 규칙도 "don't ask again" 도 안 끄고 `bypassPermissions` 만 건너뛴다. 자리는 세 벤더가 함께 쓰는
+/// `.worktrees/`(moai-5s9l)라 되돌리지 않는다. 그래서 감독이 보낼 때부터 들지 말라고 시킨다.
 ///
-/// 2026-09-29 에 이 저장소의 전사 246개(561MB)를 훑어 **714건**을 셌다. 복합 명령이 든 것이
-/// 608건(85%)이고, 꾸밈 하나 없는 단일 명령 28건은 전부 `git -C <루트>` 처럼 **과녁이 밖**인
-/// 것이었다. 그 28건 안에 옛 [`BRANCH_CHECK`] 가 이르던 `git -C <root> symbolic-ref -q HEAD`
-/// 가 있었다 — 심은 글이 거절되는 명령을 시키고 있었다.
+/// **들지 않으니 격리 가드도 안 선다** — 가드는 워크트리에 든 세션의 것이다. 옛 글(`GIT_SHAPES`, moai-rgp9)은 그 가드가
+/// 거절하는 git 꼴(복합 명령·heredoc·치환·`git -C <루트>`)을 일렀는데, 루트에 선 세션에는 그 거절이 없어 걷었다.
+/// 가드의 몫 — 루트 소스에 잘못 쓰는 것 — 은 훅의 규칙 2 가 진다(moai-9js2.3xn, `hook::homed`).
 ///
-/// **Claude Code 의 것이다**(moai-snyk) — 그 하네스의 격리 가드가 거절한 꼴을 센 글이라, Codex·Antigravity 창은
-/// 이 걸음 없이 `cd` 로 든다. 일꾼 글에 한 번 서서 새 일과 거둔 일이 같은 글을 읽는다.
-const GIT_SHAPES: &str = r#"**Git in a Claude Code worktree session: one plain command per call.** The harness reads each Bash call
-and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
-intent.
-- One command per call. `git add X && git commit …` is refused whole — so is anything with
-  `&&`, `;` or `||`
-- `-m "…"` on one plain command is fine; a **heredoc** message is refused.
-  When the message runs past one line, write it with Write and use `git commit -F <that file>`
-- Several git steps in a row: put them in a script file and call it as a bare
-  `bash /abs/path/script.sh` with literal arguments and nothing appended — `&&`, a pipe or
-  `$PWD` after it is refused
-- Never build a command or a path with a variable or `$(…)` — that is refused as
-  `computed at runtime`
-- **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
-  `symbolic-ref` are refused even as single plain commands. Root work happens after
-  ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
-- Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
-  commit from sealing someone's open merge; the rows other sessions have not committed yet ride
-  along, and that is expected — they stand in the shared file already, and the next tracker
-  commit is where they go into history"#;
+/// **루트로 돌아오는 것은 서브에이전트뿐이다**(리뷰 moai-9js2.s4s). 서브에이전트의 Bash 는 부름마다 루트에서 다시
+/// 서지만, 세션의 셸은 `cd` 가 옮긴 자리에 다음 부름까지 남는다(Claude Code 의 기본값이고, 훅의 `cwd` 도 따라간다).
+/// "부름마다 루트로 돌아간다" 를 둘에게 함께 이르던 판은 세션이 8 의 대조·병합, 9 의 워크트리 지우기, 11 의 트래커
+/// 커밋을 워크트리 안에서 치게 두었고 — 병합은 "Already up to date" 로 지나가 10 이 안 든 멤버를 닫는다 — 그 셸에서는
+/// 절대 경로로 루트를 고쳐도 규칙 2 가 안 섰다. 그래서 세션은 `cd` 를 하위 셸에 가둔다. 하위 셸의 `cd` 는 훅도 뒤로 안
+/// 잇는다(`hook::aimed`). `cd` 로 옮긴 창에 `ExitWorktree` 는 아무것도 안 한다 — 그 도구는 `EnterWorktree` 가 연 판만 닫는다.
+const STAY_IN_ROOT: &str = r#"## Stay in the root
+
+**Never call `EnterWorktree` — in a session or in a subagent.** Every call into `.worktrees/`
+asks the person watching to approve it, and no allow rule turns that off; a subagent has no
+such tool at all. You stay in the root, so where a step goes into the worktree, aim at it
+instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`, and every
+Read and Edit takes an absolute path under it. That holds for resolving a conflict too.
+
+**Only a subagent's Bash starts in the root again on every call. A session's shell stays
+wherever a `cd` left it**, so in a session put that `cd` in parentheses —
+`(cd <root>/.worktrees/<epic> && …)` — and the shell itself never leaves the root. Where a
+step says you are back in the root, you are there only if it never left: if a session's
+shell did stay in the worktree, `cd <root>` before the step. The branch check, the merge,
+removing the worktree and the tracker commit all run in the root — merged from inside the
+worktree, the merge says "Already up to date" and lands nothing, and a shell standing in the
+worktree you remove is left in a directory that is gone.
+
+**Rule 2 of the hook watches the root for you** while the shell stands there. While everything
+you hold has its worktree standing, a write to the root checkout — a relative `src/x.rs`, say
+— is refused, and the refusal names the same file inside the worktree (each worktree, when
+what you hold stands in several — write in the one your work is in). Write there instead;
+never work around it.
+
+A window that already stands inside a worktree comes out first, as "The assignment" says —
+`ExitWorktree(keep)` if this session went in with `EnterWorktree`, `cd <root>` if a `cd`
+took it there (`ExitWorktree` does nothing then)."#;
 
 /// 밖의 backlog 를 도는 마일스톤 안으로 들이는 한 줄(moai-6qgz). 감독의 1 과 일꾼의 1 이 **같은 줄**을
 /// 받는다 — 감독은 "들일 것인가" 를 정하고 일꾼이 실제로 단다. 한쪽만 고치면 감독이 들이기로 한
@@ -442,12 +455,14 @@ const MILESTONE_FROM: &str = "the release `moai show --milestone` stands that ba
 /// 거둔 일은 3 을 안 받아(4-1 부터), 여기 없으면 이어받은 일꾼만 워크트리 꼭대기에 선다.
 ///
 /// **자리를 감독이 채운다**(리뷰 moai-rgp9.sdj 1번). 옛 줄은
-/// `cd "$(git -C <root> rev-parse --show-prefix)"` 였는데, 그 한 줄이 [`GIT_SHAPES`] 가 거절된다고
-/// 적어 둔 두 꼴을 동시에 든다 — `$(…)` 로 만든 명령과 워크트리 밖을 겨눈 `git -C <root>` 다.
-/// 게다가 이 걸음은 **워크트리 안으로** 드는 것이라 `ExitWorktree` 로 피할 수도 없었다. 감독은
+/// `cd "$(git -C <root> rev-parse --show-prefix)"` 였는데, 그 한 줄이 격리 가드가 거절하는 두 꼴을
+/// 동시에 들었다 — `$(…)` 로 만든 명령과 워크트리 밖을 겨눈 `git -C <root>` 다. 감독은
 /// 2 의 스크립트에서 이미 그 상대 경로를 `subdir` 줄로 읽으므로, 값을 채워 보내면 일꾼은 `cd` 만
 /// 한다. 꼭대기 프로젝트에는 그 줄이 안 서고 이 걸음도 없다.
-const SUBDIR: &str = "cd <subdir>";
+///
+/// **절대 경로로 겨눈다**(moai-9js2) — 일꾼은 워크트리에 들지 않고 루트에 서므로([`STAY_IN_ROOT`]), Bash 마다
+/// 워크트리 안의 그 하위를 `cd` 로 겨눈 뒤 명령을 잇는다.
+const SUBDIR: &str = "cd <root>/.worktrees/<epic>/<subdir> && …";
 
 /// **`moai read` 는 여기에 안 든다**(사용자 결정 2026-09-18, `moai-ha5d`). 이 저장소의 에이전트는
 /// 사람과 같은 git 신원·HOME 으로 돌아 사람의 `[read]` 표를 같이 쓴다 — 브리프가 `moai read --all`
@@ -1104,10 +1119,12 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 /// 표를 싣는 것은 `moai` 스킬 하나다([`verbs_section`]) — 세 벤더에 다 심기는 스킬이다. 감독 스킬과 그 일꾼 글은
 /// Claude Code 에만 가니(moai-obxm) 도구를 바로 적는다.
 pub const VERBS: [Verb; 8] = [
+    // **Claude 는 들지 않는다**(moai-9js2, 2026-10-25 사용자 결정) — `.worktrees/` 로 드는 `EnterWorktree` 는 부를
+    // 때마다 사람에게 승인을 묻고, allow 규칙으로 안 꺼진다. 그래서 칸이 도구가 아니라 "들지 말고 겨눈다" 다.
     Verb {
-        step: "Enter the worktree",
+        step: "Work in the worktree",
         words: [
-            "`EnterWorktree(path)` from the root",
+            "stay in the root and aim every call at its absolute path — not `EnterWorktree`, which asks the person to approve each call into `.worktrees/`",
             "`cd` into it and run every command there",
             "`cd` into it and run every command there",
         ],
@@ -1115,7 +1132,7 @@ pub const VERBS: [Verb; 8] = [
     Verb {
         step: "Come back to the root",
         words: [
-            "`ExitWorktree(keep)`",
+            "nothing if the shell never left; `cd` to the root if a `cd` moved it — the shell keeps it — and `ExitWorktree(keep)` only after an `EnterWorktree`",
             "`cd` to the root and run every command there",
             "`cd` to the root and run every command there",
         ],
@@ -1183,6 +1200,8 @@ What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, 
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
 files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
 `Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
+A session standing in the main checkout that holds only work whose worktree stands is
+refused a write to the main checkout too — the refusal names the same file in that worktree.
 
 **3. {three}.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is {claude} in Claude Code; in Codex and
@@ -2181,7 +2200,7 @@ a worker with a message, any other window through the person.
 
 The `Place` line (`place` under `--json`) has three values. **Only `none` is handed on.**
 
-    <path> (<branch>)  at        it runs there. Go in and carry on
+    <path> (<branch>)  at        it runs there. Aim at it and carry on
     not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
     none               lost      it lost its place — only this one is reclaimed
 
@@ -2355,7 +2374,7 @@ worker, and the message is the whole assignment.
 Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
 to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
 subdirectory that has `.moai`, and a worktree stands for the whole repository — the worker
-has to go into the same subdirectory inside it (its step 3). The first line is `root dir`;
+has to aim at the same subdirectory inside it (its step 3). The first line is `root dir`;
 a `subdir` line stands only when the root is not the top of the repository.
 
 ```sh
@@ -2436,8 +2455,8 @@ and if the message does not arrive, deliver it into the tab —
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
-`<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
-reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
+`<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
+worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
 `<milestone>` is the release that backlog already stands under **and that is still alive**,
 read in 1 — `none` when it stands under none, `none` when the one it stands under has
@@ -2464,6 +2483,8 @@ you measured and your reason; `<effort>` is that role's effort (2-1), the same v
 to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
 left at the close says `<model>` instead of what actually did the work.
 `<worker kind>` is `subagent` or `session` — how you raised it in 2.
+The `Worktree:` line goes as written to both: a session's `EnterWorktree` into
+`.worktrees/` asks its person to approve every call, and no allow rule turns that off.
 `<subagent ladder>` is the models the worker may hand pieces of the work to, copied from the
 `moai models --json` of this round, each role with the effort 2-1 reads for it —
 `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)`, the
@@ -4295,7 +4316,7 @@ before it sends.
 ///
 /// **`-C <루트>` 를 줄에 박는다.** 7-1 은 워크트리에서 치는데, 글로만 "4-1 대로" 라고 적고 줄을
 /// 맨 `moai` 로 두면 그대로 옮겨 친 줄이 워크트리의 `.moai` 에 멤버를 세운다 — 병합에서 스냅샷이
-/// 부딪히거나, 4-1 이 시키는 `git checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
+/// 부딪히거나, 4-1 이 시키는 `git -C <워크트리> checkout -- .moai` 로 그 멤버가 사라진 채 에픽이 닫힌다.
 /// `<루트>` 는 감독이 채우는 자리라 받은 줄에 실제 자리가 박혀 온다. 다른 자리 이름은 그 목록과
 /// 겹치지 않는다 — 겹치면 맡긴 backlog 의 값이 이 줄에 미리 박힌다(`<등급>` 와 같은 덫).
 const RECALL: &str = "moai -C <root> backlog promote <backlog id> -e <epic> --from -";
@@ -4343,6 +4364,14 @@ const TO_REVIEW: &str = "moai -C <root> mv <member> review --from in_progress";
 /// `the_brief_stands_members_in_review` 가 이 글을 `refuse.no_column` 의 영어 글과 견준다.
 const NO_REVIEW_COLUMN: &str = "`review` is not a column";
 
+/// 메시지의 한 줄 — **워크트리에 들지 말라**(moai-9js2.3tl, 2026-10-25 사용자 결정). 걸음 파일의 "Stay in the root"
+/// 절이 같은 말을 하지만, 그 절을 읽기 전에 `EnterWorktree` 를 부르는 창이 있다 — 그 한 번이 사람에게 승인 창을 띄운다.
+/// 새 일과 거둔 일(감독 0)이 같은 줄을 싣는다: 거둔 일은 첫 두 줄만 바꿔 보낸다.
+///
+/// **[`message`] 의 글 위에 둔다**(리뷰 moai-9js2.s4s) — 그 글과 `fn message` 사이에 끼우면 rustdoc 이 메시지의 계약
+/// 글 전부를 이 상수에 달고 `fn message` 는 글 없이 남는다.
+const STAY_LINE: &str = "Worktree: stay in the root and reach it by absolute path — never EnterWorktree, every call into .worktrees/ asks the person to approve it";
+
 /// 감독이 일꾼에게 `SendMessage` 로 보내는 메시지 — 맡길 일(첫 줄)과 감독이 채운 자리들(moai-obxm). 첫 줄이
 /// [`worker`] 의 파일(`<steps file>`)을 읽고 몇째 걸음부터 할지를 댄다(moai-fim6). **일꾼이 아는 것은 이 메시지와 그 파일뿐이다** — 감독 스킬의 다른 절을 가리키면 일꾼에게
 /// 없는 글을 가리키는 것이라(첫 판의 "아래 공유 main" 이 그랬다), 감독만 아는 값은 모두 자리로 싣는다. 자리마다 읽는
@@ -4368,7 +4397,8 @@ fn message() -> String {
     Due: <due>
     Root: <root>
     Subdir: <subdir>
-    Person: <person>"#
+    Person: <person>
+    {STAY_LINE}"#
     )
 }
 
@@ -4421,8 +4451,9 @@ Root: <root>
 /// 일꾼 스킬(`moai-work`)을 걷었으니 일꾼이 지킬 것은 모두 여기 적는다.
 ///
 /// **Claude Code 의 것이다**(2026-10-06 사용자 결정). 감독 스킬이 Claude Code 에만 심기니 이 글을 받는 창도 Claude
-/// Code 다 — 낱말표의 *기울인* 걸음 이름을 걷고 도구를 바로 적는다(`EnterWorktree(path)`·`ExitWorktree(keep)`·
-/// `AskUserQuestion`·`/code-review`·`/model`·`TaskStop`·`/clear`). Codex·Antigravity 를 위한 갈래 글도 걷었다.
+/// Code 다 — 낱말표의 *기울인* 걸음 이름을 걷고 도구를 바로 적는다(`ExitWorktree(keep)`·`AskUserQuestion`·
+/// `/code-review`·`/model`·`TaskStop`·`/clear`). Codex·Antigravity 를 위한 갈래 글도 걷었다. `EnterWorktree` 는 부르지
+/// 말라는 말로만 선다(moai-9js2) — 시험이 `EnterWorktree(path)` 가 다시 서면 붉어진다.
 ///
 /// **고리가 없다.** 출석·기다림·편지(`moai hello`·`moai inbox`·`moai send`)를 걷었다 — 메시지가 창을 깨우고, 일꾼은
 /// 보고하고 턴을 끝낸다. 다음 메시지가 다음 일이다.
@@ -4432,12 +4463,16 @@ Root: <root>
 ///
 /// **닫기는 워크트리를 지운 뒤다.** 워크트리가 남아 있으면 훅이 그 에픽을 옆 워크트리의 일로 읽을 수 있어
 /// (`worktree::away`) — 이 세션이 집은 줄이 아니면 — `-m` 없는 리뷰 닫기를 못 막는다. 충돌과 시험은 워크트리에서
-/// 풀고, 루트 병합이 막히면 되돌리고 돌아간다. 루트를 고치지 않는 것은 이제 글이 지킨다 — 이 세션이 집은 줄은 옆
-/// 이름이 가리켜도 제 것이라(moai-pxui) 규칙 2 가 루트의 편집을 안 막는다.
+/// 풀고, 루트 병합이 막히면 되돌리고 돌아간다. 루트를 고치지 않는 것은 규칙 2 가 다시 지킨다 — 쥔 줄이 모두 제
+/// 워크트리를 가지면 루트 체크아웃에 쓰는 것을 막고 같은 파일의 워크트리 경로를 낸다(moai-9js2.3xn, `hook::homed`).
+///
+/// **워크트리에는 세션도 서브에이전트도 들지 않는다**(moai-9js2, 2026-10-25 사용자 결정) — 그 절([`STAY_IN_ROOT`])이
+/// 둘의 걸음 앞에 한 번 선다. `.worktrees/` 로 드는 `EnterWorktree` 는 부를 때마다 사람에게 승인을 물었다.
 ///
 /// **서브에이전트 길은 한 절과 걸음마다 한 줄이다**(moai-9tqo.p1p). 서브에이전트에는 `EnterWorktree`·`AskUserQuestion`·
 /// `/model` 이 없다(moai-9tqo.fxp) — 걸음을 두 벌로 적으면 한쪽만 고쳐지니, 규칙은 "In a subagent" 절에 한 번 서고
-/// 더 할 말이 있는 걸음(1·2·3·4·7·9-1·10·12)만 **In a subagent** 줄을 단다. 보고는 노트가 먼저다 — 감독이 다시
+/// 더 할 말이 있는 걸음(1·2·4·7·9-1·10·12)만 **In a subagent** 줄을 단다 — 3 은 세션도 루트에서 띄우고 안 들게 되어
+/// 두 길이 같은 걸음이 되었다(moai-9js2). 보고는 노트가 먼저다 — 감독이 다시
 /// 섰으면 끝난 알림이 사라진다.
 ///
 /// **보고가 마지막이다**(moai-snyk). 감독은 보고를 받고서야 다음을 보낸다 — 보고 뒤에 `Next:` 노트를 적던 판은
@@ -4449,8 +4484,8 @@ Root: <root>
 ///
 /// **마일스톤 일은 마일스톤 가지로 병합한다**(2026-10-08 사용자 결정, moai-nvju). 그 가지는 루트 밖의 오래 사는
 /// 워크트리(`.worktrees/milestone-<id>`)에 체크아웃돼 있어, 병합과 그 HEAD 대조와 `branch -d` 를 **루트에서
-/// `git -C <그 워크트리>`** 로 친다 — 격리 가드는 `EnterWorktree` 로 든 세션에만 서므로 `ExitWorktree(keep)` 뒤의
-/// 루트에서는 한 줄 맨 명령으로 지나간다. 그 워크트리에 `EnterWorktree` 로 드는 판은 충돌을 풀 때만이다.
+/// `git -C <그 워크트리>`** 로 친다. 충돌도 그 워크트리를 절대 경로로 겨눠 푼다 — 일꾼은 어느 워크트리에도 들지 않는다
+/// ([`STAY_IN_ROOT`], moai-9js2).
 /// `branch -d` 를 루트에서 치면 루트의 가지가 아직 그 병합을 안 들어 "not fully merged" 로 거절한다(재 봤다).
 pub fn worker() -> String {
     let rule = indent(&model_rule(), "  ");
@@ -4517,6 +4552,8 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
 - `Person:` — `here`, or `away` (below)
+- `Worktree:` — the same words to every worker: you never go into the worktree, you aim at it
+  ("Stay in the root")
 
 Ask two things where the window stands now, before you move anywhere.
 **If this window runs `moai-supervise` itself**, it is a supervisor, not a worker: do
@@ -4526,10 +4563,13 @@ of its worktrees — the supervisor took you for a worker by a name that only lo
 repository's. Do nothing of it: reply to its `from` that you stand in another repository, and
 end the turn.
 The steps begin in the root the message names (`Root:`) — if this window stands anywhere
-else in that repository, go there first: `cd` from a subdirectory, `ExitWorktree(keep)` from
-a worktree.
+else in that repository, go there first: `cd <root>` from a subdirectory or from a worktree
+a `cd` moved into, `ExitWorktree(keep)` from a worktree this session entered with
+`EnterWorktree`.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
+
+{STAY_IN_ROOT}
 
 ## In a subagent
 
@@ -4537,12 +4577,8 @@ When `Worker:` says `subagent`, the supervisor raised you with `Agent` inside it
 and four things a session has are not yours. The rule for each stands here once; a step that
 needs more says so in a line of its own, **In a subagent**.
 
-- **No `EnterWorktree` or `ExitWorktree`.** You stay in the root — every Bash call starts
-  there again, whatever an earlier call moved into. So where a step goes into the worktree,
-  aim at it instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`,
-  and every Read and Edit takes an absolute path under it. Where a step comes back to the root
-  with `ExitWorktree(keep)`, you are there already. The git shapes in "Before the steps" bind a
-  session that went into a worktree, not you
+- **No `EnterWorktree` or `ExitWorktree`.** A session does without them too ("Stay in the
+  root"); for you they do not exist
 - **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
   instead and end (4). `Person: away` still decides by recommendation, as below
 - **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
@@ -4577,8 +4613,6 @@ it. When the person is back in the window, what they say overrides what you deci
 
 {untracked}
 
-{GIT_SHAPES}
-
 ## The milestone branch
 
 When `Base branch:` reads `milestone/<milestone id>`, the work is inside a milestone —
@@ -4604,10 +4638,8 @@ first — look at `git worktree list` again and carry on with what stands
 If the repository's own worktree convention adds something to a new worktree (a link for
 the build output, say), add it to this one too.
 
-**Git aimed at the milestone's worktree runs from the root**, after `ExitWorktree(keep)` —
-there `git -C .worktrees/milestone-<milestone id> …` is one plain command and goes
-through. From inside your epic's worktree it is refused like any git aimed outside it (the
-git shapes above), so do not try it there. That worktree is shared by every worker of the
+**Git aimed at the milestone's worktree runs from the root**, where you stand —
+`git -C .worktrees/milestone-<milestone id> …`. That worktree is shared by every worker of the
 milestone, like the root: if git refuses a merge there because one is already open
 (`MERGE_HEAD`), it is another worker's — never `merge --abort` it; wait for it to finish
 and run yours again. Before you merge into it, check its HEAD the way
@@ -4618,8 +4650,8 @@ supervisor
 **The milestone branch takes `<root branch>` in only at the release.** If this epic needs a
 fix that landed on `<root branch>` after the milestone branch split off, take it in at that
 moment, from the root, and then pull the milestone branch in 6 as usual. If it stops on a
-conflict, resolve it inside the milestone's worktree (`EnterWorktree(path)` from the root),
-never in the root
+conflict, resolve it inside the milestone's worktree, by its absolute path ("Stay in the
+root"), never in the root
 
     git -C .worktrees/milestone-<milestone id> merge --no-ff <root branch> -m "merge: take <root branch> in for <epic>"
 
@@ -4677,23 +4709,21 @@ never in the root
    and name it in the report. Handed an epic `from step 2`, measure first as 1 does, before
    you pick anything up
 3. Right after 2, branch from the local <base branch> with
-   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
-   `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
+   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` from the root, and do
+   not go in: from here on aim every command at `<root>/.worktrees/<epic>` ("Stay in the
+   root"). If the repository's CLAUDE.md says what a new worktree gets (a link for the build
+   output, say), do that first. The name is the unfolded epic's id, not the backlog's.
    Inside a milestone the milestone branch has to stand first — raise it if it is missing
    ("The milestone branch").
    Until the worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
-   worktree stands for the whole repository, so once inside, move to the same subdirectory in
-   it and work there — standing at the worktree top, `moai` walks up and finds the root's
+   worktree stands for the whole repository, so aim at the same subdirectory in it and work
+   there — standing at the worktree top, `moai` walks up and finds the root's
    `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
    relative path, filled in by the supervisor; if the message carries no `Subdir:`, the root
    **is** the top and this step does not exist
 
        {SUBDIR}
-   **In a subagent** raise it with the same line — you are in the root — and do not go in:
-   from here on aim every command at `<root>/.worktrees/<epic>` ("In a subagent"), or at
-   `<root>/.worktrees/<epic>/<subdir>` for a subdirectory project. If the repository's
-   CLAUDE.md says what a new worktree gets (a link for the build output, say), do that first
 4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
    recommendation instead ("When the person is away").
@@ -4713,8 +4743,10 @@ never in the root
    Put `-e <epic>` on a backlog item you park mid-epic — it does not keep the epic open, and 7-1
    reclaims it through that even if the window is cleared or the work is taken over.
    **Give a review subagent the same words.** If that worktree's `.moai` changed anyway,
-   undo it with `git checkout -- .moai`, and if the row was already committed, undo that
-   commit too and park it again from the root
+   undo it with `git -C <root>/.worktrees/<epic> checkout -- .moai` — aimed at the worktree:
+   the same line in the root throws away every session's rows not committed yet, yours
+   included — and if the row was already committed, undo that commit too and park it again
+   from the root
 
 4-2. **If you test tmux, do it on a separate server only** — `env -u TMUX tmux -L <unique name>`
    on every call. Put the epic id in the name so it cannot collide with the test servers of
@@ -4764,12 +4796,14 @@ never in the root
 {rubric}
 6. When the members' work is all done, pull <base branch> into the worktree, resolve the
    conflicts and run the tests. Fix things here, never in the root — the root is shared and
-   stands on `<root branch>`, and the hook does not stop the session that holds this work
-   from editing there. Inside a milestone that is the milestone branch, not `<root branch>`
-   — the epics merged beside you are there
-7. Before merging, review the whole epic with `/code-review <grade> --fix` — the members were
-   not reviewed separately, so this once is the only review. **It runs inside this session** —
-   never start another agent program for it.
+   stands on `<root branch>`; the hook refuses a write there only while everything you hold
+   has its worktree standing ("Stay in the root"), and this line is what holds the rest.
+   Inside a milestone that is the milestone branch, not `<root branch>` — the epics merged
+   beside you are there
+7. Before merging, review the whole epic with `/code-review <grade> --fix <root>/.worktrees/<epic>`
+   — aimed at the worktree: you stand in the root, and a call with no target reviews the
+   root's diff. The members were not reviewed separately, so this once is the only review.
+   **It runs inside this session** — never start another agent program for it.
 {epic_rule}
    If the window is not on that model, ask the person watching it to change it before you
    call — `/model <that model>` (a review agent inherits the window's model).
@@ -4778,19 +4812,19 @@ never in the root
    model from `moai models --json`, create the review issue and stand the members in `review`
    as below, **pick the review issue up** —
    `moai -C <root> mv <review id> in_progress --from todo` — and only then raise it on the
-   review brief (the last section of this file), every slot filled. You stand in the root, so
-   the hook reads a review issue nobody picked up under `.worktrees/<epic>` as that worktree's,
-   and rule 3 refuses the review it raises. It leaves its fixes uncommitted and the reviewer's
+   review brief (the last section of this file), every slot filled, for the reason below.
+   It leaves its fixes uncommitted and the reviewer's
    words on the review issue, and hands back what it fixed and what it left — take that in as
    below
 
        Agent(subagent_type: "general-purpose", model: <review model>, description: "review <epic>", prompt: <the review brief>)
    Write the grade you picked and why in one line in the angle (`-b`). The diff runs from
-   where the branch left <base branch> (`git merge-base <base branch> HEAD`). You pulled it
+   where the branch left <base branch> — `git -C <root>/.worktrees/<epic> merge-base <base branch> HEAD`;
+   asked in the root, `HEAD` is the root's own tip and the range comes out empty. You pulled it
    in 6, so the conflict resolution is inside it too. Create the review issue (rule 3)
 
        {review}
-   This line is called from the worktree too, so run it as `moai -C <root>`, per 4-1.
+   Run this line as `moai -C <root>`, per 4-1, wherever the shell stands.
    **In the same breath, stand the finished members in `review`** — while the review runs
    nobody is working on them, and `in_progress` on the board says somebody is. One id per
    call, as in 2
@@ -4806,6 +4840,11 @@ never in the root
    does not exist here: leave the members where they stand and go on. If it answers that the
    member already stands `review`, you came back from 8 — leave it. What you take in goes in
    a separate fix: commit; what you hand on goes in a note with the issue id.
+   **Then pick the review issue up, and only then call the review** — in a session as in a
+   subagent: `moai -C <root> mv <review id> in_progress --from todo`. You stand in the root,
+   so the hook reads a review issue nobody picked up under `.worktrees/<epic>` as that
+   worktree's, and rule 3 refuses the review — asking for another review issue, which it
+   reads the same way, while the first one stays open and keeps the epic from closing.
    A refusal from the hook, such as a missing angle, is not worked around: fix it the way the
    refusal's own command says.
    **If the review stays refused** — the review issue stands with its angle, you picked it up
@@ -4883,7 +4922,9 @@ never in the root
    for the release being prepared**, and write it if it does not. Write it **here, in the
    worktree, before the merge**: after 8 the worktree is gone and the only checkout left is
    the root, which every session shares and where the only commits that belong are the
-   tracker's and the merge itself. Committed here it rides the merge commit instead.
+   tracker's and the merge itself. Committed here it rides the merge commit instead. Aim the
+   line below at the worktree like every step there (`git -C <root>/.worktrees/<epic> commit …`,
+   "Stay in the root") — and 7-4's two lines the same way.
    **One commit for the epic**, written once the members and the review's fixes are in —
    every line the epic needs goes into it. If a fix lands after it and changes what the epic
    ships, put the CHANGELOG line in that fix's own commit rather than raising a second
@@ -4902,12 +4943,12 @@ never in the root
    epic changed what a person does — {CHANGED_USE}.
    If it did, follow the `moai-wiki` skill and commit what it wrote for the same reason as
    7-3 — here, in the worktree, before the merge. `<wiki dir>` is `dir` in `moai wiki ls --json`
+   Aim the skill's `moai wiki` calls at the worktree, `moai -C <root>/.worktrees/<epic> wiki ls` — bare, they read the root's pages
 
 {wiki_commit}
    If it did not, write nothing. **Nothing checks this**
 
-8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
-   this window stands in a directory that is gone.
+8. Merge from the root, where you stand ("Stay in the root").
    Before merging outside a milestone, check that the root stands on <root branch> — if it
    does not, do not merge: tell the supervisor
 
@@ -4925,8 +4966,8 @@ never in the root
    If the merge is refused over the root's uncommitted `.moai` — yours since 2 or another
    session's — take them in first with a commit with a path, as in 11, its subject
    `chore(tracker): take the root's rows in before <epic> merges`. If it stops on a conflict,
-   do not resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
-   `EnterWorktree(path)` and run again from 6
+   do not resolve it where it stopped — undo with `git merge --abort`, aim at the worktree again
+   and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
    **Inside a milestone delete the branch in the milestone's worktree** —
@@ -5038,25 +5079,32 @@ A session died holding a member of `<epic>`, the epic the message's first line n
 member still stands picked up. Read how far it got (`moai show <epic>`, its history and
 notes), then
 
-- If the worktree is there, go in with `EnterWorktree(path)` — in a subagent, aim at it
-  ("In a subagent") — read how far it got with `git log <base branch>..HEAD` and
-  `git status`, and carry on
+- If the worktree is there, aim at it ("Stay in the root") — read how far it got with
+  `git -C <root>/.worktrees/<epic> log <base branch>..HEAD` and `git -C <root>/.worktrees/<epic> status`
+  (asked in the root, both read the root and show nothing of it), and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
   raise the milestone branch first if it is missing ("The milestone branch")
 - **If the root is not the top of the repository** (a subdirectory project in a
-  monorepo), go into the worktree and then move to the same subdirectory inside it and
-  work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-  hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
+  monorepo), aim at the same subdirectory inside the worktree and work there — standing
+  at the top, `moai` finds and writes the root's `.moai`, and the hook does not count edits
+  under `.worktrees/`. `<subdir>` is that relative path, filled in
   by the supervisor; with no `Subdir:` in the message, the root is the top and this step
   does not exist
 
       {SUBDIR}
-- The member's column is already picked up — do not pick it up again. **If its assignee
+- The member's column is already picked up — do not move it to another column, but **record
+  it as this session's** with a move to the column it stands in, on a line of its own:
+  `moai mv <member> <its column> --from <its column>` — nothing moves; the hook writes the
+  pick-up down. Standing in the root, the hook reads a member this session never picked up
+  under `.worktrees/<epic>` as that worktree's, so without it you hold nothing: rule 1 stops
+  fencing what you create, rule 3 refuses the review, and the turn's end does not hold the
+  member for you. **If its assignee
   is not you** (`moai show <member>`), ask the person watching before you carry it on; on
   a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the
-  column stays, the assignee becomes you, and a note keeps whose it was
+  column stays, the assignee becomes you, a note keeps whose it was, and the pick-up is
+  written down the same way
 - The note in 9-1 records this window's share only. Append `reclaimed work, the previous
   session's share is unknown` to the end of the reason — the previous session's model is
   written nowhere, and without it the whole member reads as this window's work
@@ -5084,8 +5132,8 @@ The supervisor skill remains Claude Code only; reading this file does not instal
 
 | Instead of (worker.md) | Do this here |
 |---|---|
-| `EnterWorktree(path)` | Work in the worktree's absolute path on every command call (`workdir` or `cd`). |
-| `ExitWorktree(keep)` | Return to the assignment's `Root:` absolute path on every root command call. |
+| Never `EnterWorktree` ("Stay in the root") | The same: aim at the worktree's absolute path on every command call (`workdir` or `cd`). |
+| `ExitWorktree(keep)` | Run every root command at the assignment's `Root:` absolute path. |
 | `AskUserQuestion` | Ask this window's person with the available question tool; otherwise ask in conversation and wait. |
 | `/code-review` (7) | Send the review readiness note below and wait for the supervisor's review. |
 | `TaskStop` | No equivalent step here; the supervisor manages its review subagent. |
@@ -6769,12 +6817,14 @@ stop sending outside work while a release runs",
         for tool in ["`EnterWorktree`", "`ExitWorktree`", "`AskUserQuestion`", "`/model`", "`SubagentHandback`"] {
             assert!(section.contains(tool), "서브에이전트 절이 {tool} 를 다루지 않는다");
         }
-        assert!(section.contains("`cd <root>/.worktrees/<epic> && …`"), "워크트리를 겨누는 길이 없다");
+        // 워크트리를 겨누는 길은 세션과 함께 쓰는 절에 선다(moai-9js2) — 세션도 이제 들지 않는다.
+        assert!(STAY_IN_ROOT.contains("`cd <root>/.worktrees/<epic> && …`"), "워크트리를 겨누는 길이 없다");
         // 걸음마다 그 줄이 선다 — 걸음이 서브에이전트에서 다르게 돌아가는 자리다.
         let steps = ["1", "2", "3", "4", "4-1", "7", "7-1", "9-1", "10", "11", "12"];
         for pair in steps.windows(2) {
             let (n, next) = (pair[0], pair[1]);
-            if matches!(n, "4-1" | "7-1" | "11") {
+            // 3 은 세션과 서브에이전트가 같은 걸음이 되었다(moai-9js2) — 루트에서 띄우고 들지 않는다.
+            if matches!(n, "3" | "4-1" | "7-1" | "11") {
                 continue;
             }
             let step = &brief[step_at(&brief, n)..step_at(&brief, next)];
@@ -7179,15 +7229,17 @@ stop sending outside work while a release runs",
         // 커밋 전의 대조는 걸음 앞에 한 번 선다 — 새 일과 거둔 일이 같은 글을 읽는다(moai-snyk).
         let steps = work.find("## The steps").expect("일꾼 글에 걸음 절이 없다");
         assert!(work[..steps].contains(BRANCH_CHECK), "걸음 앞에 루트 대조가 없다");
-        assert!(work[..steps].contains(GIT_SHAPES), "걸음 앞에 git 꼴이 없다");
+        // **루트에 선다**(moai-9js2) — 세션 일꾼도 워크트리에 안 든다. 격리 가드의 꼴(옛 `GIT_SHAPES`)은 걷었고,
+        // 트래커 커밋 앞의 `git status -- .moai/` 만 루트 대조 곁에 남았다.
+        assert!(work[..steps].contains(STAY_IN_ROOT), "걸음 앞에 루트에 서라는 절이 없다");
+        assert!(BRANCH_CHECK.contains("`git status -- .moai/`"), "남의 트래커 줄을 쓸어 가는 자리를 안 적었다");
+        assert!(!work.contains("EnterWorktree(path)"), "일꾼 글이 아직 워크트리에 들라고 한다");
         // **대조를 루트에서 한다**(moai-rgp9) — 워크트리 안에서 `-C <루트>` 로 묻는 꼴은 격리
         // 가드가 거절한다. 그 명령이 다시 글에 서면 일꾼이 필수 검사에서 막힌다.
         assert!(!work.contains("git -C <root> symbolic-ref"), "거절되는 꼴로 루트의 가지를 묻는다");
         // **심은 글이 거절되는 꼴을 아무 걸음에서도 시키지 않는다**(리뷰 moai-rgp9.sdj 1번) —
         // `SUBDIR` 이 `$(git -C <root> …)` 이던 자리가 그것이었고, 그 걸음은 워크트리 **안으로**
         // 드는 것이라 ExitWorktree 로 피할 수도 없었다.
-        // 꼴을 **이르는** 자리만 잰다 — `GIT_SHAPES` 는 거절되는 꼴의 이름을 대야 하므로 그 글자가
-        // 그 안에 서는 것은 맞다.
         for shape in ["$(git -C", "git -C <root> rev-parse"] {
             assert!(!work.contains(shape), "일꾼 글이 거절되는 꼴을 시킨다 — {shape}");
             assert!(!supervise.contains(shape), "감독 글이 거절되는 꼴을 시킨다 — {shape}");
@@ -7196,17 +7248,6 @@ stop sending outside work while a release runs",
             BRANCH_CHECK.contains("run `git symbolic-ref -q HEAD` **in the root**"),
             "대조를 어디서 하는지 안 적었다"
         );
-        for (piece, why) in [
-            ("One command per call", "한 호출에 한 명령이라는 줄이 없다"),
-            ("`git commit -F <that file>`", "긴 커밋 글을 파일로 주라는 줄이 없다"),
-            ("`-m \"…\"` on one plain command is fine", "-m 이 되는 것을 안 적어 브리프의 걸음과 어긋난다"),
-            ("`bash /abs/path/script.sh`", "여러 걸음을 스크립트로 빼라는 줄이 없다"),
-            ("computed at runtime", "치환으로 만든 명령이 거절되는 것을 안 적었다"),
-            ("Do not aim git at the root from inside the worktree", "루트를 겨누지 말라는 줄이 없다"),
-            ("`git status -- .moai/`", "남의 트래커 줄을 쓸어 가는 자리를 안 적었다"),
-        ] {
-            assert!(GIT_SHAPES.contains(piece), "{why} — {piece}");
-        }
     }
 
     /// **heredoc 은 들여쓰지 않는다.** 4칸 들여쓴 블록을 그대로 복사하면 닫는 표시도
@@ -7334,7 +7375,7 @@ stop sending outside work while a release runs",
         assert!(text.contains(&make_review("--parent <epic>")));
         assert!(!text.contains("tokens="), "사람이 걷은 토큰 항목이 남았다");
         assert!(!text.contains("gpt-"), "모델 이름을 구웠다");
-        assert!(text.contains("`/model` exists") && text.contains("Return to the assignment's `Root:`"));
+        assert!(text.contains("`/model` exists") && text.contains("at the assignment's `Root:` absolute path"));
     }
 
     #[test]

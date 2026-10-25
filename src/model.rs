@@ -530,6 +530,31 @@ impl Issue {
         }
     }
 
+    /// 계획 날짜 둘(시작·기한)을 고친다 — `moai edit --start`·`--due` 와 간트의 막대 끌기가 **같은 몸**을 지난다
+    /// (moai-i4hf.9xi). `None` 은 안 건드리고 `Some(None)` 은 비운다. 꼴과 앞뒤 차례는 [`Issue::settle`] 이 거절하고,
+    /// 조상의 기한을 넘는 날은 쓰기(`store::write_locked`)가 거절한다(moai-xf0p.cbu).
+    pub fn set_dates(&mut self, start: Option<Option<String>>, due: Option<Option<String>>) {
+        if let Some(d) = start {
+            self.starts_on = d;
+        }
+        if let Some(d) = due {
+            self.due_on = d;
+        }
+    }
+
+    /// 고친 줄을 맞춘다 — 정규화 → 검사 → 바뀌었으면 `updated_at`. **바뀌었나**를 낸다. 고치는 길(`moai edit`·탐색기)이
+    /// 차례를 저마다 적으면 한쪽만 정규화를 잊는다. 칸은 `before` 와 견줘 안 바뀌었으면 다시 안 묻는다
+    /// ([`Issue::validate_keeping`]).
+    pub fn settle(&mut self, before: &Issue, cfg: &crate::config::Config, at: &str) -> Result<bool, Invalid> {
+        self.normalize();
+        self.validate_keeping(cfg, self.status == before.status)?;
+        let changed = *self != *before;
+        if changed {
+            self.updated_at = at.to_string();
+        }
+        Ok(changed)
+    }
+
     /// 쓰기는 읽기보다 엄하다 — 읽기는 아는 만큼 보여주고 쓰기는 거부한다. 다만 `kept_status`
     /// 면 **칸 이름은 다시 묻지 않는다**.
     ///
@@ -1384,6 +1409,68 @@ pub fn relative_due(v: &str, today: &str) -> Option<String> {
         return Some(v.to_string());
     }
     Some(format!("{y:04}-{mo:02}-{d:02}"))
+}
+
+/// 1970-01-01 부터의 날 수 → `YYYY-MM-DD`. [`parse_date`] 의 거꾸로다. 네 자리 해를 넘는 날도 그대로 적는다 — 꼴
+/// 검사는 쓰기(`Issue::settle`)가 한다.
+pub fn format_date(days: i64) -> String {
+    let (y, mo, d) = civil_from_days(days);
+    format!("{y:04}-{mo:02}-{d:02}")
+}
+
+/// 계획 막대의 어느 쪽을 옮기나 — 간트의 막대 끌기와 날 옮기는 키(moai-i4hf.9xi).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    /// 시작만.
+    Start,
+    /// 둘 다 같은 날 수만큼.
+    Body,
+    /// 기한만.
+    End,
+}
+
+/// 날 고치기 — (시작, 기한). 바깥 `None` 은 그대로 두기, `Some(None)` 은 비우기다([`Issue::set_dates`]).
+pub type DateChange = (Option<Option<String>>, Option<Option<String>>);
+
+/// 옮긴 계획이 못 서는 까닭.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unshifted {
+    /// 제 날이 하나도 없다 — 옮길 막대가 없다.
+    NoPlan,
+    /// 묶음의 막대가 멤버에서 센 것이다(`report::gantt` 의 `Origin::Members`) — 그 줄의 날이 아니라 못 옮긴다.
+    Members,
+    /// 0 날 옮기기.
+    Still,
+}
+
+impl Issue {
+    /// 계획을 `days` 날 옮긴 새 (시작, 기한)(moai-i4hf.9xi). **제 날만 옮긴다** — 날이 한 덩이라는 규칙
+    /// (`report::gantt`)대로, 하나라도 적었으면 그 줄의 것이고 비었으면 막대가 없거나 멤버에서 센 것이다.
+    ///
+    /// - `Body` 는 적힌 날을 다 옮긴다 — 기한만 든 줄은 기한만
+    /// - `Start` 는 시작만. 시작이 없으면 기한의 날에서 출발한다 — 기한 표식(◆)의 왼쪽 끝을 끈 것이다
+    /// - `End` 는 기한만. 기한이 없으면 시작의 날에서 출발한다
+    ///
+    /// 시작이 기한을 넘는 것은 여기서 막지 않는다 — 쓰기의 검사(`Issue::settle`)가 거절문을 낸다.
+    ///
+    /// 낸 값은 **바뀌는 쪽만** 든다(`None` 은 그대로 둔다) — [`Issue::set_dates`] 에 그대로 넘긴다. 못 읽는 날이
+    /// 적힌 쪽을 다시 적으면 그 글을 지운다.
+    pub fn shifted(&self, edge: Edge, days: i64) -> Result<DateChange, Unshifted> {
+        if days == 0 {
+            return Err(Unshifted::Still);
+        }
+        let (start, due) =
+            (self.starts_on.as_deref().and_then(parse_date), self.due_on.as_deref().and_then(parse_date));
+        if start.is_none() && due.is_none() {
+            return Err(if crate::report::is_group(self) { Unshifted::Members } else { Unshifted::NoPlan });
+        }
+        let day = |d: Option<i64>| d.map(|d| Some(format_date(d + days)));
+        Ok(match edge {
+            Edge::Body => (day(start), day(due)),
+            Edge::Start => (day(start.or(due)), None),
+            Edge::End => (None, day(due.or(start))),
+        })
+    }
 }
 
 /// `now` 부터 그 기한까지 **며칠 남았나**. 지났으면 음수다(moai-tfcp).

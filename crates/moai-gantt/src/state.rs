@@ -20,11 +20,19 @@ pub struct GanttState {
     pub label_width: u16,
     /// 맞춤 상태인가. 사람이 움직이거나 확대하면 내려간다.
     pub fitting: bool,
+    /// 머리글을 두 줄로 줄이는가 — 오늘(`▼`) 줄을 접는다. 낮은 창에서 부르는 쪽이 켠다([`crate::Layout::with_header`]).
+    pub short_header: bool,
 }
 
 impl Default for GanttState {
     fn default() -> Self {
-        GanttState { first_row: 0, axis: Axis::new(Zoom::Week, 0), label_width: DEFAULT_LABEL_WIDTH, fitting: false }
+        GanttState {
+            first_row: 0,
+            axis: Axis::new(Zoom::Week, 0),
+            label_width: DEFAULT_LABEL_WIDTH,
+            fitting: false,
+            short_header: false,
+        }
     }
 }
 

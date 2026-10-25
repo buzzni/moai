@@ -13022,10 +13022,40 @@ fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
 
     let line = line_of(s.path(), &id);
     assert!(line.contains(r#""status":"done""#), "펼쳤는데 안 닫혔다 — {line}");
+    // 닫힌 idea 쪽 노트의 이슈 수 — 둘이면 겹수다. 홑수 쪽은 `an_idea_titled_up_to_the_limit_still_promotes` 가 잰다
+    let notes = journal(s.path());
+    assert!(
+        notes.lines().any(|l| l.contains("Unfolded into ") && l.contains(r#", 2 issues""#)),
+        "idea 에 간 곳과 이슈 수를 안 적었다 — {notes}"
+    );
+}
+
+/// **펼침 노트에 담는 제목은 한 줄로 접는다**(moai-68ft 리뷰). 쓰기는 바뀐 줄만 재므로 이미 닫힌
+/// backlog 를 다시 펼치면 그 제목은 검사를 안 지난다 — 손으로 고쳐 줄바꿈이 든 제목이 노트에 그대로
+/// 들면 그 뒷줄의 `model: …` 을 `work` 가 펼친 사람의 일로 센다.
+#[test]
+fn an_unfold_note_folds_a_hand_edited_title_onto_one_line() {
+    let s = init("promoteflat");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 생각", "-q"]).trim().to_string();
+    let first = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 첫 에픽\n- 첫 일\n");
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    // 닫힌 backlog 의 제목을 손으로 고친다 — 도구로는 이 모양을 못 쓴다.
+    let doctored = issues(s.path())
+        .replace(r#""title":"펼칠 생각""#, r#""title":"펼칠 생각\nmodel: anthropic/opus-5.5 (high — 끼워 넣은 줄)""#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), doctored).unwrap();
+    let again = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 둘째 에픽\n- 둘째 일\n");
+    assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
+
+    let log = journal(s.path());
+    let grown: Vec<&str> = log.lines().filter(|l| l.contains(&format!("Unfolded from {id}"))).collect();
+    assert_eq!(grown.len(), 2, "{grown:?}");
+    assert!(!grown.iter().any(|l| l.contains(r"\nmodel:")), "노트에 줄바꿈이 든 제목을 그대로 담았다 — {grown:?}");
+    let shown = ok(s.path(), &["show", "--json"]);
+    assert!(!shown.contains(r#""why":"끼워 넣은 줄""#), "노트 안의 줄을 일한 AI 로 셌다 — {shown}");
 }
 
 /// **펼침 노트의 제목은 넘칠 때만 줄여 넣는다**(moai-clta). `promote` 는 새로 선 줄마다
-/// `<idea id> 에서 펼쳤다 — <제목>` 을 저널에 적는데, 머리말(`<id> 길이 + 22`바이트) 때문에
+/// `Unfolded from <idea id> — <제목>` 을 저널에 적는데, 머리말(`<id> 길이 + 19`바이트) 때문에
 /// 제목이 상한 턱밑인 idea 는 그 노트가 상한을 넘어 **펼칠 길 자체가 막혔다** — 그것도 아직
 /// 쓰지도 않은 새 id 를 대면서. 원래 제목은 그 idea 줄에 그대로 남으니 노트의 것은 가리킴이다.
 #[test]
@@ -13038,15 +13068,20 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     let id = ok(s.path(), &["backlog", "add", &big, "-q"]).trim().to_string();
     // 머리말 길이는 접두어를 따르니 **베껴 적지 않고 여기서 잰다**. 제목 자체는 상한 아래고,
     // 머리말을 붙여야 넘는다 — 그 사이가 아니면 이 시험이 `fit` 를 한 번도 안 부른다.
-    let head = format!("{id} 에서 펼쳤다 — ").len();
+    let head = format!("Unfolded from {id} — ").len();
     assert!(big.len() <= limit && big.len() + head > limit, "{} + {head}", big.len());
 
     let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
     assert!(out.status.success(), "상한 턱밑 idea 를 못 펼쳤다 — {}", String::from_utf8_lossy(&out.stderr));
 
     let notes = journal(s.path());
-    let grown: Vec<&str> = notes.lines().filter(|l| l.contains("에서 펼쳤다")).collect();
+    let grown: Vec<&str> = notes.lines().filter(|l| l.contains("Unfolded from")).collect();
     assert_eq!(grown.len(), 1, "펼침 노트가 하나가 아니다 — {}", grown.len());
+    // 닫힌 idea 쪽 노트는 간 곳과 이슈 수를 댄다. 하나면 홑수다
+    assert!(
+        notes.lines().any(|l| l.contains("Unfolded into ") && l.contains(r#", 1 issue""#)),
+        "idea 에 간 곳을 안 적었다"
+    );
     // **글 자체를 꺼내 잰다.** 지나간 것만 보면 쓰기 쪽 검사가 좁아지는 날 이 시험도 같이 눈을
     // 감는다. `note` 는 없고 글에 따옴표가 없으니 `"text":"` 부터 다음 따옴표까지가 그 글이다.
     let text = grown[0].split_once(r#""text":""#).expect("text 가 없다").1;
@@ -13054,11 +13089,11 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     assert!(text.len() <= limit, "노트가 {}바이트다 — 쓰기가 같은 자로 잰다", text.len());
     // **상한 아래인 것으로는 모자란다.** 상한을 예산으로 주면 64KB 제목이 만든 줄마다 한 벌씩
     // 저널에 베껴져 이력이 그 한 줄에 묻힌다 — 상한이 서 있는 까닭이 그것을 막는 데 있다.
-    // 예산은 `cmd::idea::TITLE_IN_NOTE`(2KB)고, 머리말이 그 위에 얹힌다.
+    // 예산은 `cmd::backlog::TITLE_IN_NOTE`(2KB)고, 머리말이 그 위에 얹힌다.
     assert!(text.len() <= 2 * 1024 + head, "가리킴이 아니라 사본이다 — {}바이트", text.len());
     // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다. 줄인 자리는 밝힌다.
     let head_of = |t: &str| t.chars().take(24).collect::<String>();
-    assert!(text.starts_with(&format!("{id} 에서 펼쳤다 — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
+    assert!(text.starts_with(&format!("Unfolded from {id} — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
     assert!(text.ends_with('…'), "줄인 것을 안 밝힌다");
     assert!(!text.contains("꼬리"), "꼬리를 담았다 — 앞에서부터 자르지 않았다");
 
@@ -13141,14 +13176,16 @@ fn promote_can_pour_into_a_standing_epic() {
     assert_eq!(id::parent_of(&mid), Some(epic.as_str()), "에픽의 자식이 아니다 — {member}");
     assert!(!member.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {member}");
     let seen = ok(s.path(), &["show", &epic, "--json"]);
-    assert_eq!(list_in(&seen, "members"), Some(vec![mid]), "에픽이 멤버로 안 읽었다 — {seen}");
+    assert_eq!(list_in(&seen, "members"), Some(vec![mid.clone()]), "에픽이 멤버로 안 읽었다 — {seen}");
     assert!(line_of(s.path(), &id).contains(r#""status":"done""#), "idea 가 안 닫혔다");
     // 출처는 멤버에 적힌다 — 에픽은 이 idea 에서 나온 것이 아니다.
-    let from_here = format!("{id} 에서 펼쳤다");
+    let from_here = format!("Unfolded from {id}");
     let log = journal(s.path());
     let noted: Vec<&str> = log.lines().filter(|l| l.contains(&from_here)).collect();
     assert_eq!(noted.len(), 1, "{noted:?}");
     assert!(!noted[0].contains(&format!(r#""id":"{epic}""#)), "선 에픽에 출처를 적었다 — {}", noted[0]);
+    // 닫힌 idea 쪽에는 어디로 갔는지 적는다. 저널의 글은 화면 말을 안 따르고 영어로 고정이다(moai-68ft)
+    assert!(log.contains(&format!("Unfolded into {epic} as {mid}")), "idea 에 간 곳을 안 적었다 — {log}");
 }
 
 /// **계획이 세우는 멤버는 에픽의 자식 id 를 받는다**(moai-s8go, 2026-09-23 사용자 결정) — 과제든
@@ -17537,6 +17574,57 @@ fn a_row_this_session_picked_stays_its_own_beside_its_epics_worktree() {
     );
     let held = at("c", "stop", None);
     assert!(held.trim().is_empty(), "옆 워크트리의 일로 남을 붙든다\n{held}");
+}
+
+/// **루트에 선 세션이 워크트리가 선 일을 쥐면 루트 체크아웃의 쓰기를 그 워크트리로 돌린다**(moai-9js2.3xn, 리뷰
+/// moai-9js2.s4s). 막는 판은 `settle` 이 겹친 스냅샷으로 한 번 더 재는데, 그 판의 `Away` 는 `worktree::fresh` 가
+/// 새로 짓는다 — 자리(`homes`)를 옮겨 싣지 않으면 겹친 판이 풀어 거절이 아무에게도 안 닿는다. 단위 시험은 그
+/// 배선과 git 이 적은 자리의 철자(꼭대기 뿌리에서 빈 조각을 이으면 `/` 로 끝난다)를 못 밟아 여기서 본다.
+#[test]
+fn a_root_session_holding_worktree_work_is_sent_to_the_worktree() {
+    let s = Scratch::new("hookhomed");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("src")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 멤버", "-e", &epic, "--json"]), "id");
+    std::fs::write(main.join("src/x.rs"), "").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let at = |session: &str, name: &str, input: String| {
+        let input = format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":{},\"tool_name\":\"{name}\",\"tool_input\":{input}}}",
+            json_str(&main.display().to_string())
+        );
+        String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let bash = |c: &str| format!("{{\"command\":{}}}", json_str(c));
+    let edit = |p: &Path| format!("{{\"file_path\":{}}}", json_str(&p.display().to_string()));
+    let pick = format!("moai mv {mine} in_progress --from todo");
+    assert!(at("a", "Bash", bash(&pick)).trim().is_empty());
+    ok(&main, &["mv", &mine, "in_progress", "--from", "todo"]);
+    // 워크트리를 띄우기 전에는 루트를 고쳐도 지난다 — 집고 `worktree add` 하는 사이다.
+    let before = at("a", "Edit", edit(&main.join("src/x.rs")));
+    assert!(before.trim().is_empty(), "띄우기 전의 쓰기를 막았다\n{before}");
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    let home = canon(main.join(".worktrees").join(&epic)).unwrap().display().to_string().replace('\\', "/");
+
+    let why = refusal(&at("a", "Edit", edit(&main.join("src/x.rs"))));
+    assert!(why.contains(&mine), "쥔 줄을 안 댄다\n{why}");
+    assert!(why.contains(&format!(" {home}/src/x.rs")), "워크트리의 같은 파일을 안 낸다\n{why}");
+    assert!(
+        !why.contains(&format!("{home}//")) && !why.contains(&format!("{home}/.")),
+        "자리 끝에 `/` 가 붙었다\n{why}"
+    );
+    let why = refusal(&at("a", "Bash", bash("echo x > src/x.rs")));
+    assert!(why.contains(&format!(" {home}/src/x.rs")), "껍데기 쓰기를 안 돌린다\n{why}");
+    // 거절문이 낸 자리에 쓰면 지난다 — 시킨 대로 치면 지나가야 규칙이다.
+    let inside = main.join(".worktrees").join(&epic).join("src/x.rs");
+    let there = at("a", "Edit", edit(&inside));
+    assert!(there.trim().is_empty(), "워크트리 안의 쓰기를 막았다\n{there}");
+    // 아무것도 안 쥔 세션은 전처럼 빈손으로 막힌다 — 그 멤버는 옆 워크트리의 일이다.
+    assert!(refusal(&at("c", "Edit", edit(&main.join("src/x.rs")))).contains("holding nothing"));
 }
 
 /// **겨루다 질 집기는 적지 않는다**(리뷰 moai-3k2d.1df). 훅은 명령이 돌기 전에 적으므로, 낡은 `--from` 으로
