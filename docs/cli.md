@@ -2556,7 +2556,7 @@ Write a new lesson page and note it on the issue it came from
 Usage: moai wiki learn [OPTIONS] <lesson>
 
 Arguments:
-  <lesson>  The lesson in one line, as an instruction - the page's title
+  <lesson>  The lesson in one line, the page's title. A lone `-x` needs `--`
 
 Options:
       --slug <kebab>         The file name, in lowercase ASCII kebab case

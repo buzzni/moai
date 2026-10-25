@@ -137,6 +137,9 @@ counts are read from those notes when you ask, archived rows included. Only a
 line that starts at the head of a note counts; indented lines and lines inside
 a fence are examples. Two notes for one lesson on one row count once.
 
+- `moai wiki ls --json` — `dir_abs` beside `dir`: the same wiki directory as an
+  absolute path in this checkout (`dir` is relative to it), absent only when
+  `wiki_dir` points outside the checkout. `moai wiki search --json` carries it too
 - `moai wiki ls --json` — every page has `seen_count`, the number of different
   rows whose notes name it (`0` for a page that is not a lesson)
 - `moai wiki show <slug> --json` — `seen`, always there (`[]` for a page that is
