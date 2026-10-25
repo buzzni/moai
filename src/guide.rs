@@ -82,6 +82,11 @@ pub fn make_review(anchor: &str) -> String {
     )
 }
 
+/// 리뷰를 닫기 앞에서 묻는 한 줄(moai-4s5n.svp). 위키 스킬의 "Lessons" 와 같은 물음이다 — 리뷰가 낸 지적 가운데
+/// 규칙 하나로 막을 수 있었던 것이 있는가. 아무것도 막지 않는다: 답이 "없다" 면 그대로 닫는다.
+const LESSON_ASK: &str =
+    "Could one rule have stopped any finding above? If so, `moai wiki search` it, then follow Lessons in `moai-wiki`";
+
 /// 리뷰를 닫는 두 걸음 — `REVIEW_STEPS` 에서 시작 걸음을 빼고 **실제 id** 를 넣은
 /// 것. 닫기 거절문과 세션을 닫을 때의 붙듦이 쓴다. 손으로 다시 적던 두 자리는
 /// 이미 서로 다른 글을 내고 있었다.
@@ -94,12 +99,14 @@ pub fn close_steps(id: &str, moai: &str) -> String {
     // 바꾼다: `REVIEW_STEPS` 의 줄은 들여쓰기 뒤 곧바로 그 낱말로 시작한다
     // (`the_skill_names_each_rule_as_the_hook_does` 가 그것을 못박는다).
     let head = format!("{moai} ");
-    REVIEW_STEPS
-        .lines()
-        .skip(1)
-        .map(|l| l.replace("<id>", id).replacen("moai ", &head, 1))
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut steps: Vec<String> =
+        REVIEW_STEPS.lines().skip(1).map(|l| l.replace("<id>", id).replacen("moai ", &head, 1)).collect();
+    // 물음은 닫는 명령 바로 앞이다 — 리뷰 원문과 판단을 두 노트로 가르는 걸음은 그대로고, 닫는 줄이 늘 마지막이다
+    // (`closing_offers_a_held_review_the_steps_rule_three_lets_through` 가 마지막 줄을 닫는 명령으로 친다).
+    // 명령이 아니라 물음이라 `moai ` 머리를 갈지 않는다.
+    let at = steps.len().saturating_sub(1);
+    steps.insert(at, format!("  {LESSON_ASK}"));
+    steps.join("\n")
 }
 
 /// 난이도 한 낱말 — **개발의 역할과 에픽 끝 리뷰의 `max` 를 함께 가르는 그 축**이다. 낱말·역할·잣대 셋.
@@ -1017,7 +1024,11 @@ If you end the session still holding something, leave one line on that issue for
 the next session to take over from. The next session reads it in the history under
 `moai show <id>`.
 
-    moai note <id> 'Next: <what comes next>'"#;
+    moai note <id> 'Next: <what comes next>'
+
+If this session made a mistake the next one would make too, write it down as a lesson
+before you close — `moai wiki search '<its words>'` first, then `moai wiki learn`; the
+`moai-wiki` skill says which mistakes count."#;
 
 /// 위키를 AGENTS 블록과 참고 문서에 알리는 조각(moai-bl3x). **짧게 둔다** — 어떻게 쓰는가는
 /// 셋째 스킬 [`wiki`] 에 있고, 언제나 읽히는 블록에 그 본문을 얹으면 모든 세션이 그 값을 낸다.
@@ -1767,7 +1778,7 @@ pub fn wiki() -> String {
     format!(
         r#"---
 name: moai-wiki
-description: Use when the repository's manual (its wiki) has to catch up with what the work changed — at the end of an epic, or when a person asks. "update the wiki", "write the manual", "document this", "위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리". The pages are markdown files in the repository, listed by `moai wiki ls`; nothing checks them.
+description: Use when the repository's manual (its wiki) has to catch up with what the work changed — at the end of an epic, or when a person asks. "update the wiki", "write the manual", "document this", "record a lesson", "위키 갱신", "매뉴얼 써", "문서화해 줘", "wiki 정리", "교훈 남겨", "실수 기록". The pages are markdown files in the repository, listed by `moai wiki ls`; nothing checks them.
 ---
 
 # moai-wiki — keep the manual in step with the work
@@ -1873,6 +1884,66 @@ one — after the review and the CHANGELOG line and before the merge.
    behind without a word
 5. Name the pages you changed in your report, or say that none changed
 
+## Lessons
+
+A lesson is a mistake written down so the next window does not make it. It is a wiki
+page of its own, `lessons/<slug>.md` below `dir`, one lesson to a file — so lessons
+written on two branches never meet in the same lines. There is no index page: the list
+is `moai wiki ls`, the search is `moai wiki search`. `moai show <id>`
+puts the lessons that bear on a row under its `Wiki` block (`lessons` in `wiki`, and
+`lesson: true` on a search hit); read them when you pick the row up.
+
+**Write one when**, and only when:
+
+- a review finding was one a single rule would have stopped
+- a person corrected you — so they never have to say it twice
+- the same hook refusal caught you twice
+- a test failed because of a premise that was wrong
+
+**Search first**: `moai wiki search '<a word of the mistake>'`. If the lesson stands
+already, write nothing new — it was met again, and that goes on the issue, not the page:
+
+    moai note <id> 'Lesson: lessons/<slug>'
+
+If none stands, write it. The call makes the page and puts the same note on the issue
+in one write:
+
+    moai wiki learn 'End a check on the step that must pass' -b - <<'LESSON'
+    ## What happened
+    ...
+    ## Why
+    ...
+    ## Do this instead
+    ...
+    LESSON
+
+- The title is one line, as an instruction. The body must hold `## Do this instead` —
+  it is the part the next window reads. `## What happened` and `## Why` are worth a
+  few lines. Do not tell it as a narrative: a list, as in an issue body
+- `--slug` names the file in {slug_rule} when the title is not ASCII; `--issue`
+  names the row it came from (the one row you hold, if you pass none). `--dry-run` shows
+  the page first
+- Nothing is committed. The page rides the branch like any other: commit it with the
+  same `docs(wiki):` commit as the end of an epic, `add` first
+- A page already standing is never overwritten. Edit the file if it is wrong
+
+**Do not write**:
+
+- a failure that was the machine's — a binary that was not installed, credentials that
+  were missing
+- a flat "this tool does not work" — a negative claim goes stale the day the tool is fixed
+- a transient error that a retry cleared
+- a story tied to one PR or one error string
+- logs or code pasted whole
+- what CLAUDE.md, AGENTS or the wiki already say
+
+**The page is never marked when a lesson is met again** — the note on the issue is the
+mark, so two branches never edit one line. How often a lesson stood is read from those
+notes: `seen_count` on each page of `moai wiki ls --json` (`0` for a lesson nobody has
+noted), and `seen` on `moai wiki show lessons/<slug> --json` — one entry per issue,
+newest first, each with the issue's `id` and the day (`at`) and person (`by`) of its
+latest `Lesson:` note.
+
 ## When a person asks you to sweep
 
 A person calls this skill to catch the wiki up — before a release, or after work
@@ -1907,6 +1978,14 @@ merged without touching it.
 6. Write the pages where this repository does its work — in a worktree if it uses
    them — commit with `docs(wiki): <what> (<id>)`, a `git add` first as in step 4 of
    the end of an epic, and move the issue to `done`
+7. Sweep the lessons too. `moai wiki ls --json` gives each `lessons/…` page a `seen_count`;
+   read the pages with `moai wiki show <slug> --json` (`seen`). Then
+   - merge two lessons that say one thing into one page, and remove the other. A note that
+     names the removed slug stays as it is — it is history
+   - take out a lesson the code now prevents: the mistake can no longer be made
+   - a lesson with a `seen_count` over three has outgrown a page. **Ask the person**
+     whether it becomes a rule — in CLAUDE.md, in the AGENTS block, a hook or a test.
+     Promoting it is the person's decision, never yours
 
 ## A new page
 
@@ -4913,6 +4992,7 @@ never in the root
 
 {wiki_commit}
    If it did not, write nothing. **Nothing checks this**
+   Also ask whether a finding of this epic's review is one a single rule would have stopped — if so, follow Lessons in `moai-wiki`, in the same commit
 
 8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
    this window stands in a directory that is gone.
@@ -5016,7 +5096,9 @@ never in the root
     the members left in 4-3 because the work beside you held the file, with that other work
     named, the `member refused:` lines of 4-3,
     the wiki pages 7-4 changed — or that it changed none — and anything still running that 11
-    could not finish.
+    could not finish. **A subagent worker adds a `Lessons:` piece** — the slug of each new
+    lesson page and each `Lesson:` note that met an old one, or `Lessons: none` — the
+    supervisor reads that line.
     **If that send fails** — the supervisor restarted, so its old name is gone — the report
     must not be lost: leave the same text, `report: <epic>` at its head, on the epic with
     `moai note <epic> -b -` — it stands in the root's file, where the next supervisor reads it,
@@ -6303,6 +6385,10 @@ stop sending outside work while a release runs",
         "linked_from",
         "linked_from_partial",
         "conflict",
+        "seen_count",
+        "seen",
+        "at",
+        "by",
         "too_large",
         "refused",
         "failed",
@@ -6317,7 +6403,7 @@ stop sending outside work while a release runs",
     /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
     /// 여기 둘지를 그때 정한다.
     #[cfg(unix)]
-    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body", "seen", "seen_count", "at", "by"];
+    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
 
     /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
     /// 키를 바꿔도 초록이라, 심긴 스킬이 `jq` 에서 `null` 이 되는 키를 가르칠 수 있었다(리뷰 moai-bl3x.vbw 4번).
@@ -6361,7 +6447,14 @@ stop sending outside work while a release runs",
         let read = crate::wiki::load(s.path(), "docs", "moai", &known);
         let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read, &Default::default()).unwrap();
         let loaded = read.unwrap();
-        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap(), &[]).unwrap());
+        // 교훈이 선 이슈 하나 — `seen` 안쪽의 `at`·`by` 가 출력에 서야 스킬이 그것을 대도 붉지 않다.
+        let seen = [crate::wiki::seen::Seen {
+            id: "moai-ab12".into(),
+            title: "t".into(),
+            at: "2026-10-25 12:00".into(),
+            by: "A (a@b.c)".into(),
+        }];
+        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap(), &seen).unwrap());
         for raw in ["missing", "/etc", "file"] {
             let read = crate::wiki::load(s.path(), raw, "moai", &known);
             assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
@@ -6464,6 +6557,73 @@ stop sending outside work while a release runs",
         // 아무것도 막지 않는다 — "하지 않는 것" 의 첫 줄이 게이트다.
         let not = &wiki[wiki.find("## What this skill does not do").expect("하지 않는 것 절이 없다")..];
         assert!(not.contains("**No gate.**"), "위키 스킬이 게이트를 안 걷는다");
+    }
+
+    /// **교훈을 쓰고 읽는 걸음이 글에 선다**(moai-4s5n.svp). 명령(`moai wiki learn`)이 서도 에이전트가 읽는 글에 없으면
+    /// 고리가 안 돈다. 안 쓰는 것의 목록은 에픽 본문(moai-4s5n)의 것이고, 발동어는 늘 켜진 비용이라 셋뿐이다.
+    #[test]
+    fn the_wiki_skill_teaches_lessons() {
+        let wiki = wiki();
+        let lessons = &wiki[wiki.find("## Lessons").expect("교훈 절이 없다")
+            ..wiki.find("## When a person asks you to sweep").unwrap()];
+        for (piece, why) in [
+            ("a review finding was one a single rule would have stopped", "언제 쓰는가: 리뷰 지적"),
+            ("a person corrected you", "언제 쓰는가: 사람의 고침"),
+            ("the same hook refusal caught you twice", "언제 쓰는가: 두 번 걸린 거절"),
+            ("a premise that was wrong", "언제 쓰는가: 틀린 전제"),
+            ("moai wiki search '<a word of the mistake>'", "먼저 찾는다"),
+            ("moai note <id> 'Lesson: lessons/<slug>'", "되풀이는 노트로"),
+            ("moai wiki learn", "새로 쓰는 명령"),
+            ("## Do this instead", "핵심 절"),
+            ("same `docs(wiki):` commit", "에픽 끝 위키 커밋에 태운다"),
+            ("**Do not write**", "안 쓰는 것의 목록"),
+            ("the machine's", "기계 탓"),
+            ("this tool does not work", "부정 단정"),
+            ("transient error that a retry cleared", "재시도로 풀린 오류"),
+            ("one PR or one error string", "한 PR 에 묶인 서사"),
+            ("logs or code pasted whole", "로그·코드 통째"),
+            ("CLAUDE.md, AGENTS or the wiki already say", "이미 말하는 것"),
+            (crate::wiki::learn::SLUG_RULE, "슬러그의 자"),
+        ] {
+            assert!(lessons.contains(piece), "교훈 절에 {why} 가 없다 — {piece}");
+        }
+        // 거두기: 훑기의 한 걸음이 `seen_count` 로 겹침·막힘·세 번 넘게 선 것을 가르고, 올리는 것은 사람이 정한다.
+        let sweep =
+            &wiki[wiki.find("## When a person asks you to sweep").unwrap()..wiki.find("## A new page").unwrap()];
+        for piece in ["`seen_count`", "merge two lessons", "the code now prevents", "over three", "**Ask the person**"]
+        {
+            assert!(sweep.contains(piece), "훑기가 교훈을 거두지 않는다 — {piece}");
+        }
+        assert!(sweep.contains("CLAUDE.md, in the AGENTS block, a hook or a test"), "올릴 자리 넷을 안 댄다");
+    }
+
+    /// **발동어는 늘어난 셋뿐이다** — 설명은 세션마다 읽히는 비용이라(moai-4s5n.svp) 넷째를 더하려면 이 시험부터 고친다.
+    #[test]
+    fn the_wiki_skill_adds_exactly_three_lesson_triggers() {
+        let head = wiki().lines().find(|l| l.starts_with("description: ")).unwrap().to_string();
+        for trigger in ["record a lesson", "교훈 남겨", "실수 기록"] {
+            assert!(head.contains(trigger), "위키 스킬의 발동어에서 {trigger} 가 빠졌다");
+        }
+        let quoted = head.matches('"').count() / 2;
+        assert_eq!(quoted, 7 + 3, "발동어가 열 개가 아니다 — 늘리지 않는다\n{head}");
+    }
+
+    /// 닫기 안내와 일꾼 브리프, 리뷰를 닫는 걸음이 같은 물음을 한 번씩 싣는다 — 그리고 아무것도 막지 않는다.
+    #[test]
+    fn the_lesson_question_stands_in_closing_the_brief_and_the_review_close() {
+        assert!(agents().contains("moai wiki learn"), "AGENTS 닫기가 교훈을 안 댄다");
+        assert!(CLOSING.contains("`moai wiki search"), "닫기가 먼저 찾으라고 안 한다");
+        let brief = worker();
+        let step = &brief[step_at(&brief, "7-4")..step_at(&brief, "8")];
+        assert!(step.contains("a finding of this epic's review is one a single rule would have stopped"), "{step}");
+        assert!(step.contains("Lessons in `moai-wiki`") && step.contains("same commit"), "{step}");
+        assert!(brief[step_at(&brief, "12")..].contains("`Lessons:`"), "보고가 교훈 토막을 안 싣는다");
+        let steps = close_steps("t-r", "moai");
+        let lines: Vec<&str> = steps.lines().collect();
+        assert!(lines[lines.len() - 2].contains("Could one rule have stopped any finding above?"), "{steps}");
+        // 닫는 줄이 마지막이고, 원문 노트와 판단 노트를 가르는 걸음은 그대로다.
+        assert!(lines.last().unwrap().trim_start().starts_with("moai mv t-r done -m"), "{steps}");
+        assert!(lines[0].contains("moai note t-r -b -"), "{steps}");
     }
 
     /// **에픽 끝의 위키 걸음(7-4)은 짧게 두고 본문은 스킬로 보낸다**(moai-bl3x, 사용자 결정 2026-10-04).
