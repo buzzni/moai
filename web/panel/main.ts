@@ -16,7 +16,7 @@ import { isUnread, readMarks } from './data/read.js'
 import { createRefresher } from './data/refresh.js'
 import { sortQuery, useVocabulary } from './data/query.js'
 import {
-  archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
+  archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, loadWikiSearch, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
 import { effectiveZone, useZone, zoneNow } from './data/zone.js'
@@ -395,6 +395,7 @@ async function start(): Promise<void> {
   const wiki: WikiSource = {
     list: async () => answer(await loadWikiListing(client)),
     page: async (slug) => answer(await loadWikiPage(client, slug)),
+    search: async (query) => answer(await loadWikiSearch(client, query)),
   }
 
   function activity(): Activity {

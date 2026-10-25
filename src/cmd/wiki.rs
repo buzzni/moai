@@ -19,7 +19,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     let (repo, load, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
-        Err(t) => return trouble(ctx, &dir, &t, false),
+        Err(t) => return trouble(ctx, repo.here(), &dir, &t, false),
     };
     for s in &wiki.skipped {
         tell(&crate::view::wiki::skipped(ctx.lang(), s));
@@ -37,7 +37,7 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     };
     let lessons = if wanted { lessons_seen(ctx.lang(), &repo, load)? } else { Default::default() };
     if ctx.json {
-        return listed_json(ctx.lang(), &dir, &Ok(wiki), &lessons);
+        return listed_json(ctx.lang(), repo.here(), &dir, &Ok(wiki), &lessons);
     }
     Ok(crate::view::wiki::list(ctx.lang(), &dir, &wiki, &lessons))
 }
@@ -66,7 +66,7 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     let (repo, load, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
-        Err(t) => return trouble(ctx, &dir, &t, true),
+        Err(t) => return trouble(ctx, repo.here(), &dir, &t, true),
     };
     let Some(page) = wiki.find(slug) else {
         return Err(Fail::coded(crate::view::wiki::no_page(ctx.lang(), slug, &dir), code::NOT_FOUND));
@@ -102,7 +102,7 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
     let (dir, wiki) = read_in(&repo, &|_| true);
     let wiki = match wiki {
         Ok(w) => w,
-        Err(t) => return trouble(ctx, &dir, &t, false),
+        Err(t) => return trouble(ctx, repo.here(), &dir, &t, false),
     };
     for s in &wiki.skipped {
         tell(&crate::view::wiki::skipped(ctx.lang(), s));
@@ -122,8 +122,10 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
             .filter_map(|p| Some(UnreadOut { slug: &p.slug, path: &p.path, error: told_unread(ctx.lang(), p)? }))
             .collect();
         let skipped = skipped_out(ctx.lang(), &wiki.skipped);
+        let abs = dir_abs(repo.here(), &dir, None);
         return super::json_line(&Searched {
             dir: &dir,
+            dir_abs: abs.as_deref(),
             query: &query,
             terms: &found.terms,
             hits,
@@ -143,6 +145,9 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
 #[derive(serde::Serialize)]
 struct Searched<'a> {
     dir: &'a str,
+    /// `wiki ls --json` 의 `dir_abs` 와 같은 값이다 — 거절의 꼴(`{dir,dir_abs,error}`)과 한 키로 서게.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir_abs: Option<&'a str>,
     query: &'a str,
     terms: &'a [String],
     hits: Vec<HitOut<'a>>,
@@ -256,6 +261,12 @@ struct RelatedOut<'a> {
     hit: HitOut<'a>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     lesson: bool,
+    /// 이 절의 머리글이 페이지 제목 그 자체인가(제목 절) — 그때만 서고, 화면은 `제목 › 머리글` 의 머리글을 안 단다
+    /// ([`crate::view::wiki::section_of`]). `heading` 은 적힌 그대로라 **web 상세가 이것을 읽는다**(리뷰 moai-xp7l.mug) —
+    /// 낱말을 브라우저에서 다시 가르던 판은 토큰 자가 달라(`moai`의 위키, 이스케이프·강조·링크) CLI 와 탐색기가 안 다는
+    /// 머리글을 달았다.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    title_heading: bool,
 }
 
 /// 이 이슈를 댄 페이지 — `via` 는 걸린 id 다(제 id 나 에픽 id).
@@ -286,7 +297,11 @@ impl<'a> AboutOut<'a> {
             related: a
                 .related
                 .iter()
-                .map(|h| RelatedOut { hit: HitOut::of(h), lesson: wiki::seen::is_lesson(&h.page.slug) })
+                .map(|h| RelatedOut {
+                    hit: HitOut::of(h),
+                    lesson: wiki::seen::is_lesson(&h.page.slug),
+                    title_heading: h.heading.is_some() && crate::view::wiki::section_of(h).is_none(),
+                })
                 .collect(),
             lessons: a.lessons.iter().map(|l| l.slug).collect(),
         }
@@ -295,13 +310,13 @@ impl<'a> AboutOut<'a> {
 
 /// 위키 디렉터리를 못 쓴다. `--json` 은 `{"dir","error"}` 를 stdout 에 내고, 사람 화면은 없는 디렉터리면 한 줄로
 /// 알리고 나머지는 실패로 선다. 페이지를 물었으면(`asked`) 없는 디렉터리도 그 페이지를 못 낸 것이라 비영이다.
-fn trouble(ctx: &Ctx, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> {
+fn trouble(ctx: &Ctx, here: &std::path::Path, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> {
     let fell = t.fell() || asked;
     if ctx.json {
         if fell {
             note_partial();
         }
-        return listed_json(ctx.lang(), dir, &Err(t.clone()), &Default::default());
+        return listed_json(ctx.lang(), here, dir, &Err(t.clone()), &Default::default());
     }
     let said = crate::view::wiki::dir_trouble(ctx.lang(), dir, t);
     if fell {
@@ -316,12 +331,17 @@ fn trouble(ctx: &Ctx, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> 
 /// **moai-wiki 스킬이 이 키 이름을 가르친다**(`guide::wiki`). 그 글이 대는 키를 이 출력에 묶는 시험
 /// (`guide::tests::the_wiki_skill_teaches_the_keys_the_wiki_prints`)이 이 함수를 부른다 — 명령과 시험이 같은 자로
 /// 짓지 않으면 그 시험은 손으로 옮긴 꼴과 견주게 되고, 키가 바뀌어도 초록이다(moai-ihu4.l2e).
+///
+/// `here` 는 이 체크아웃의 뿌리다 — `dir_abs` 를 그것에 잇는다([`dir_abs`]).
 pub(crate) fn listed_json(
     lang: Lang,
+    here: &std::path::Path,
     dir: &str,
     read: &Result<Wiki, DirTrouble>,
     lessons: &wiki::seen::Lessons,
 ) -> R<Vec<String>> {
+    let abs = dir_abs(here, dir, read.as_ref().err());
+    let dir_abs = abs.as_deref();
     match read {
         Ok(w) => {
             let pages = w
@@ -329,13 +349,28 @@ pub(crate) fn listed_json(
                 .iter()
                 .map(|p| PageOut { seen_count: Some(lessons.get(&p.slug).map_or(0, Vec::len)), ..PageOut::of(lang, p) })
                 .collect();
-            super::json_line(&Listed { dir, pages, skipped: skipped_out(lang, &w.skipped) })
+            super::json_line(&Listed { dir, dir_abs, pages, skipped: skipped_out(lang, &w.skipped) })
         }
         Err(t) => {
             let said = crate::view::wiki::dir_trouble(lang, dir, t);
-            super::json_line(&Refused { dir, error: Told { kind: t.kind(), said } })
+            super::json_line(&Refused { dir, dir_abs, error: Told { kind: t.kind(), said } })
         }
     }
+}
+
+/// 이 체크아웃의 위키 디렉터리 절대 경로 — `wiki ls --json` 의 `dir_abs` 다(moai-xp7l.ml4). `dir` 은 트래커 뿌리
+/// 기준 상대 경로라, 그것을 쓰려는 에이전트는 기준 자리를 따로 알아야 했다. 링크를 풀지 않고 글자로 잇는다 —
+/// `dir` 을 적은 그대로의 자리다. **`outside` 면 없다** — 체크아웃 밖이나 `.git/` 안을 가리키는 자리를 쓸 자리로
+/// 내밀지 않는다. 디렉터리가 아직 없는(`no_dir`) 것은 선다: 첫 페이지를 지을 자리다.
+///
+/// 글자로 접는 자는 [`crate::path::lexical`] 하나다(`./docs` 의 `.` 를 걷는다 — 절대 경로와 `..` 는 `outside` 라 여기 안
+/// 온다). **UTF-8 이 아닌 자리는 안 낸다**(리뷰 moai-xp7l.mug) — 손실 변환한 글은 `U+FFFD` 가 든, 아무 데도 없는 자리를
+/// 대고, 그 자리에 쓰라고 배운 에이전트는 엉뚱한 디렉터리를 짓는다.
+fn dir_abs(here: &std::path::Path, dir: &str, trouble: Option<&DirTrouble>) -> Option<String> {
+    if matches!(trouble, Some(DirTrouble::Outside(_))) {
+        return None;
+    }
+    crate::path::lexical(&here.join(dir)).to_str().map(str::to_string)
 }
 
 /// `moai wiki show <slug> --json` 의 한 줄 — 목록의 페이지에 원문 `body` 와, 역링크를 덜 셌을 때 `linked_from_partial`
@@ -369,6 +404,9 @@ struct SeenOut<'a> {
 #[derive(serde::Serialize)]
 struct Listed<'a> {
     dir: &'a str,
+    /// 이 체크아웃의 위키 디렉터리 절대 경로 — [`dir_abs`]. `outside` 가 아니면 늘 선다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir_abs: Option<&'a str>,
     pages: Vec<PageOut<'a>>,
     /// 걷다가 페이지로 못 세운 자리 — 없으면 키가 없다(2026-10-04 사용자 결정, moai-ihu4.x94). 이것이 서면 종료
     /// 코드가 비영인데, 까닭이 stderr 의 사람 말에만 서면 기계는 성해 보이는 `pages` 와 비영 종료만 받는다.
@@ -402,6 +440,8 @@ struct SkippedOut<'a> {
 #[derive(serde::Serialize)]
 struct Refused<'a> {
     dir: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir_abs: Option<&'a str>,
     error: Told,
 }
 
@@ -480,6 +520,11 @@ impl<'a> PageOut<'a> {
 pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
     use crate::wiki::learn;
     let lang = ctx.lang();
+    // **`-` 로 여는 제목도 받는다**(moai-xp7l.c4h) — `- not a flag` 같은 교훈을 clap 이 모르는 깃발로 거절했다. `add`
+    // 의 제목과 같은 자다: 빈칸 없는 `-x` 는 깃발을 잘못 친 것으로 보고 `--` 뒤에서만 받는다. 훅의 규칙 2 는 이 부름을
+    // 자리 인자 `wiki learn` 으로 알아보고, `--` 뒤의 토막은 깃발로 안 읽는다(`hook::flag_words`) — 제목이 `--dry-run`
+    // 이어도 쓰는 부름이다.
+    super::refuse_if_flag_like(args.title.trim(), super::FlagLike::Title("wiki learn"), lang)?;
     // 꼴은 디스크도 트래커도 안 보고 잰다 — 틀린 부름이 저장소를 열 까닭이 없다. stdin 은 여기서 읽는다(락은 노트를
     // 달 때 `with_write` 안에서만 잡힌다).
     let body = super::add::read_body(args.body)?.unwrap_or_default();
@@ -523,6 +568,13 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
             super::name_load_errors(lang, &repo.issues_path(), &load.errors);
             Some(match given {
                 Some(id) if load.issues.iter().any(|i| i.id == id) => id.to_string(),
+                // 못 읽는 산 줄과 아카이브된 줄에도 노트를 단다([`super::note::append`], moai-xp7l.82p) — 노트가 락 안에서
+                // 묻는 자(`store::Reserved`)와 같은 답이라야, 여기서 받은 id 를 노트가 `not_found` 로 물리지 않는다.
+                Some(id)
+                    if load.reserved_ids().contains(id) || crate::archive::reserve(&repo.root).ids.contains(id) =>
+                {
+                    id.to_string()
+                }
                 Some(id) => return Err(Fail::not_found(id, lang)),
                 // **`prime` 이 "쥐었다" 고 대는 그 줄이다**(`report::held_by`) — 고르는 자도, 고르는 판도 같다: 아카이브의
                 // 맥락(미룬 에픽·부모)까지 얹은 판이다(`cmd::prime`). 산 줄만 넘기던 판은 아카이브에 든 미룬 에픽 밑에서 다시
@@ -586,7 +638,7 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
     let made = std::fs::symlink_metadata(&lessons).is_err();
     std::fs::create_dir_all(&lessons)
         .map_err(|e| Fail::coded(crate::view::wiki::learn_failed(lang, &path, &e.to_string()), code::ERROR))?;
-    if let Err(e) = write_new(&lessons.join(&file), &text) {
+    if let Err(e) = write_new(&lessons.join(&file), &text, repo.here()) {
         if made {
             let _ = std::fs::remove_dir(&lessons);
         }
@@ -611,17 +663,25 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
     said(ctx, &path, &slug, issue, noted, &note, &wiki_dir, None)
 }
 
-/// 새 파일에 글을 쓴다 — **있으면 진다**(`create_new`). 쓰다 지면 반쯤 쓴 파일을 걷는다: 꼴이 깨진 교훈이 남으면
-/// 다음 부름이 "이미 있다" 로 막힌다. 쓰고 나면 `sync` 한다 — 노트가 그 페이지를 가리키는데 페이지가 디스크에
-/// 없으면 안 된다.
-fn write_new(at: &std::path::Path, text: &str) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(at)?;
-    let wrote = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
-    if wrote.is_err() {
-        drop(f);
-        let _ = std::fs::remove_file(at);
-        return wrote;
+/// 새 파일에 글을 쓴다 — **있으면 진다.** 노트가 그 페이지를 가리키는데 페이지가 디스크에 없으면 안 되니 `sync` 한다.
+///
+/// **다 쓴 글만 그 이름에 선다**(moai-xp7l.c4h) — 임시 파일에 다 쓰고 적은 뒤 `hard_link` 로 이름을 세운다. 링크는 이름이
+/// 이미 있으면 지니 `create_new` 와 같은 "하나만 이긴다" 다. 이름에 바로 쓰던 판은 쓰는 중에 죽으면(SIGKILL) 빈 페이지가
+/// 남아 그 슬러그의 `learn` 을 "이미 있다" 로 영영 막았다.
+///
+/// **임시 파일은 그 체크아웃(`checkout`)의 `.moai/` 에 짓는다**(리뷰 moai-xp7l.mug) — 커밋되는 파일의 임시 자리와 같은
+/// 자다([`crate::store::write_staged`], moai-3akx). 페이지 곁에 짓던 판은 쓰다 죽은 찌꺼기를 위키에 남겨, `learn` 이 내미는
+/// `git add -- <위키>` 가 그것을 커밋에 실었다 — `.moai/*.tmp.*` 는 `init` 이 심는 무시 줄이 덮는다. 그 자리가 링크를 다 푼
+/// 뒤 체크아웃 밖이거나 `.git` 안이면 안 쓴다([`crate::store::stage_inside`] — `write_staged` 가 고르는 자와 같다). 이름은
+/// [`crate::store::tmp_names`] 로 짓고 **있는 파일은 지우지 않는다**(moai-ydm7.976) — pid 가 같은 남의 쓰기가 아직 쓰는
+/// 파일일 수 있다. 거기서 못 짓거나 링크를 못 걸면(`.moai/` 가 없다, 다른 파일시스템, 링크를 모르는 파일시스템) 옛 길 —
+/// 이름에 바로 쓰고, 지면 걷는다. **"이미 있다" 는 링크가 진 것뿐이다** — 임시 이름이 막힌 것은 페이지가 있다는 말이 아니다.
+fn write_new(at: &std::path::Path, text: &str, checkout: &std::path::Path) -> std::io::Result<()> {
+    match staged(at, text, checkout) {
+        Some(Ok(())) => {}
+        Some(Err(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(e),
+        // 임시 파일을 못 지었거나 링크를 못 건다 — 이름에 바로 쓴다.
+        _ => write_synced(at, text)?,
     }
     // **이름도 디스크에 적는다**(리뷰 moai-4s5n.u8x) — `sync_all` 은 파일의 글만 적고 디렉터리에 선 이름은 안 적는다.
     // `store` 가 새 저널 파일과 갈아끼운 스냅샷에 같은 까닭으로 디렉터리를 적는다. 방금 지었을 수 있는 `lessons/` 의
@@ -631,6 +691,42 @@ fn write_new(at: &std::path::Path, text: &str) -> std::io::Result<()> {
         if let Ok(d) = std::fs::File::open(d) {
             let _ = d.sync_all();
         }
+    }
+    Ok(())
+}
+
+/// 체크아웃의 `.moai/` 에 임시 파일을 지어 글을 다 쓰고 적은 뒤 `at` 에 링크한다 — 임시 파일은 어느 쪽이든 걷는다. 지을
+/// 임시 파일이 없었으면 `None`, 지었으면 링크의 답이다. 이름이 막혔으면([`crate::store::tmp_names`] 의 다음 이름) 다음
+/// 이름으로 간다.
+fn staged(at: &std::path::Path, text: &str, checkout: &std::path::Path) -> Option<std::io::Result<()>> {
+    let stage = checkout.join(".moai");
+    if !crate::store::stage_inside(&stage, checkout) {
+        return None;
+    }
+    let name = at.file_name()?.to_str()?;
+    for tmp in crate::store::tmp_names(name).map(|n| stage.join(n)) {
+        match write_synced(&tmp, text) {
+            Ok(()) => {
+                let linked = std::fs::hard_link(&tmp, at);
+                let _ = std::fs::remove_file(&tmp);
+                return Some(linked);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// `at` 을 새로 지어(`create_new`) 글을 다 쓰고 적는다. 지은 뒤에 지면 반쯤 쓴 파일을 걷는다 — 못 지었으면 남의 것일
+/// 수 있으니 안 건드린다.
+fn write_synced(at: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(at)?;
+    let wrote = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
+    if wrote.is_err() {
+        drop(f);
+        let _ = std::fs::remove_file(at);
     }
     wrote
 }
@@ -675,4 +771,52 @@ fn said(
     let dir = if dir.is_empty() { crate::wiki::learn::LESSONS } else { dir };
     let commit = crate::guide::wiki_commit(&crate::text::shell_word(dir));
     Ok(crate::view::wiki::learned(ctx.lang(), path, issue, note, &commit, dry))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **"이미 있다" 는 이름이 섰을 때뿐이다**(리뷰 moai-xp7l.mug) — 임시 이름이 다 막혀도(남의 것이라 안 지운다) 이름에 바로
+    /// 쓰고, 막은 자리는 안 건드린다. 쓴 뒤에는 임시 파일이 안 남고, 같은 이름을 다시 쓰면 그때 진다.
+    #[test]
+    fn write_new_loses_only_to_the_name_itself() {
+        let s = crate::scratch::Scratch::new("wiki-write-new");
+        let (stage, lessons) = (s.path().join(".moai"), s.path().join("docs/lessons"));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&lessons).unwrap();
+        let a = lessons.join("a.md");
+        crate::store::with_tmp_names_taken(&stage, "a.md", || write_new(&a, "# A\n", s.path())).unwrap();
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "# A\n");
+        let b = lessons.join("b.md");
+        write_new(&b, "# B\n", s.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "# B\n");
+        assert_eq!(std::fs::read_dir(&stage).unwrap().count(), 0, "임시 파일이 남았다");
+        let again = write_new(&b, "# other\n", s.path()).unwrap_err();
+        assert_eq!(again.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "# B\n", "선 페이지를 건드렸다");
+        assert_eq!(std::fs::read_dir(&stage).unwrap().count(), 0, "진 쓰기가 임시 파일을 남겼다");
+    }
+
+    /// `.moai` 가 체크아웃 밖을 가리키는 링크면 거기에 임시 파일을 안 짓는다(리뷰 moai-xp7l.mug) — `store::write_staged` 가
+    /// 임시 자리를 고르는 자와 같다. 교훈의 글이 체크아웃 밖이나 `.git` 안에 남을 길을 안 연다. 페이지는 이름에 바로 쓴다.
+    #[cfg(unix)]
+    #[test]
+    fn write_new_stages_nowhere_outside_the_checkout() {
+        let s = crate::scratch::Scratch::new("wiki-write-new-link");
+        let away = crate::scratch::Scratch::new("wiki-write-new-away");
+        let lessons = s.path().join("docs/lessons");
+        std::fs::create_dir_all(&lessons).unwrap();
+        std::os::unix::fs::symlink(away.path(), s.path().join(".moai")).unwrap();
+        let c = lessons.join("c.md");
+        assert!(staged(&c, "# C\n", s.path()).is_none(), "체크아웃 밖의 `.moai` 에 임시 파일을 지으려 했다");
+        assert!(!c.exists());
+        write_new(&c, "# C\n", s.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&c).unwrap(), "# C\n");
+        assert_eq!(std::fs::read_dir(away.path()).unwrap().count(), 0, "체크아웃 밖에 무엇이 남았다");
+        // 체크아웃 안의 `.moai` 는 임시 자리다.
+        std::fs::remove_file(s.path().join(".moai")).unwrap();
+        std::fs::create_dir(s.path().join(".moai")).unwrap();
+        assert!(matches!(staged(&lessons.join("d.md"), "# D\n", s.path()), Some(Ok(()))));
+    }
 }

@@ -1,6 +1,6 @@
 /**
  * The detail pane (design §4.3): the row under the cursor from `show <id>` — head line, labeled fields,
- * blockers, a group's roll-up, the body, commits, and the history (journal) and work log as folded sections.
+ * blockers, a group's roll-up, the body, commits, the wiki pages about it, and the history (journal) and work log as folded sections.
  * It only draws `state.shown` and the index; closing is the one thing it reports (`intents.closeDetail`).
  * The pure wording lives in view/detail-format.ts.
  */
@@ -23,6 +23,7 @@ import {
   problemText,
   rollupOf,
   tagsOf,
+  wikiOf,
   workOf,
 } from './detail-format.ts'
 import { statusGlyph } from './list-model.ts'
@@ -178,6 +179,26 @@ export const mountDetail: MountPane = (root: HTMLElement, ctx: ViewContext): Pan
       const list = el(doc, 'ul', { class: 'moai-detail-list' })
       for (const commit of commits) list.append(el(doc, 'li', {}, el(doc, 'span', { class: 'moai-detail-hash' }, commit.hash), commit.subject))
       out.push(section(doc, d.commits, list))
+    }
+    // The wiki pages about the row, after the commits as in `moai show <id>` and the explorer's detail (moai-xp7l.vyw).
+    // Each group's word stands on a row of its own, then one row per page in the two columns the list draws for a
+    // hash and its words (detail.css), as the commits do: a third or fourth child in that row broke it into a 2x2 grid
+    // and the title squeezed the path into a column a letter wide (review moai-xp7l.mug).
+    const wiki = wikiOf(row)
+    if (wiki.lessons.length || wiki.named.length || wiki.related.length) {
+      const list = el(doc, 'ul', { class: 'moai-detail-list moai-detail-wiki' })
+      for (const [label, lines] of [[d.wikiLessons, wiki.lessons], [d.wikiNamed, wiki.named], [d.wikiRelated, wiki.related]] as const) {
+        if (!lines.length) continue
+        list.append(el(doc, 'li', { class: 'moai-detail-meta' }, label))
+        for (const line of lines) {
+          list.append(
+            el(doc, 'li', {},
+              el(doc, 'span', { class: 'moai-detail-hash' }, line.at),
+              el(doc, 'span', {}, line.title, line.lesson ? ' ' : null, line.lesson ? chip(doc, { label: d.wikiLesson }) : null)),
+          )
+        }
+      }
+      out.push(section(doc, d.wiki, list))
     }
     const journal = journalOf(row, copy)
     const history = el(doc, 'ol', { class: 'moai-detail-list moai-detail-timeline' })

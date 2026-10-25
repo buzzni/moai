@@ -52,6 +52,18 @@ does not tag — see `CONTRIBUTING.md`.
   the AGENTS block closes with a line for it, the worker steps ask at 7-4 and a
   subagent worker reports a `Lessons:` piece, and closing a review asks the same
   question. Nothing checks it and no hook asks. (moai-4s5n)
+- **`moai wiki ls --json` and `moai wiki search --json` carry `dir_abs`**, the
+  wiki directory as an absolute path in this checkout, beside `dir` (which is
+  relative to it). It is absent when `wiki_dir` points outside the checkout and
+  when that path is not UTF-8. (moai-xp7l)
+- **The explorer's detail and the `moai web` issue panel show the wiki about the
+  issue**, after its commits: the pages that name it or its epic and the related
+  sections, as `moai show <id>` lists them (the web panel adds the lessons its
+  notes point at). The explorer reads the wiki once per checkout, so a page
+  written after it opened shows once `SPC g w` has read the wiki again, or the
+  next time it opens. In `moai show <id> --json`, a related section whose
+  heading is the page title itself carries `title_heading: true`, so a screen
+  leaves that heading off. (moai-xp7l)
 - **`moai edit --shift <±N>`, `--shift-start <±N>` and `--shift-due <±N>`** move
   a row's planned days by whole days, measured from the days the row holds when
   it is written — the whole plan, the start alone, or the deadline alone, as a
@@ -60,6 +72,9 @@ does not tag — see `CONTRIBUTING.md`.
 
 ### Changed
 
+- **The wiki search in the explorer (`/` in `SPC g w`) and in `moai web`'s wiki
+  tab puts pages in `moai wiki search`'s order** — the pages its words rank,
+  best first, then the pages that only contain the typed letters. (moai-xp7l)
 - **The web Gantt's drag writes the move, not the days.** `/api/plan/<id>` takes
   `edge`/`days` or `day` and runs `moai edit --shift…` or
   `--if-unplanned`, so a row another session moved after the page read it moves
@@ -75,6 +90,33 @@ does not tag — see `CONTRIBUTING.md`.
   drag a row shown only from a sibling worktree, an archived row, or a `◆` whose
   day it cannot read. The TUI's dependency arrows no longer map the off-screen
   part of a long path. (moai-vj8w)
+
+### Fixed
+
+- **`moai note` takes an issue `moai archive` moved away**, and so does
+  `moai wiki learn --issue`; the note goes to the journal and the row stays in
+  the archive. Before, both said the issue was not found, so a lesson learned
+  on old work could not be noted where it came from. (moai-xp7l)
+- **`moai note` and `moai wiki learn` no longer pass a note the journal lost as
+  written** — a hand-edited snapshot made the note's write count as a write,
+  and a journal that could not be written then passed as success: `moai note`
+  ended 0 saying not to call it again, and `wiki learn` reported `noted: true`.
+  Both now fail and print the `moai note` line to run again. (moai-xp7l)
+- **`moai wiki learn` writes the title so it reads back as given** — `<Foo>`,
+  `&amp;`, `*` and a trailing `#` stay text, where `<Foo>` vanished from the
+  title and `&amp;` read as `&`. A `_` inside a word is left as it is. (moai-xp7l)
+- **`moai wiki learn` takes a lesson that starts with `-`** when it has a space
+  in it; a lone `-x` goes after `--`. Before, it was refused as an unknown flag.
+  (moai-xp7l)
+- **A `moai wiki learn` killed halfway no longer leaves a page blocking that
+  name** — the page appears whole or not at all. The unfinished copy is written
+  under `.moai/`, where git ignores it, so it never rides the `git add -- docs`
+  the command prints. (moai-xp7l)
+- **`moai wiki search` and the wiki in `moai show <id>` no longer repeat a page's
+  title as its heading** when the title line carries markup — an escape,
+  emphasis, a link or an entity (`Set wiki_dir › Set wiki\_dir`). The heading is
+  compared with the title as it is drawn, and the title section's words are no
+  longer counted twice in its score. (moai-xp7l)
 
 ## [0.25.0] - 2026-10-25
 

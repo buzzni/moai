@@ -1303,8 +1303,10 @@ pub enum WikiCmd {
   (`lessons/<slug>`) shows `×N`, the number of different rows whose notes name
   it.
 
-  --json gives {\"dir\",\"pages\":[{\"slug\",\"title\",\"path\",\"bytes\",\"issues\",
-  \"links\",\"linked_from\",\"conflict\",\"seen_count\"}]}. `seen_count` is that
+  --json gives {\"dir\",\"dir_abs\",\"pages\":[{\"slug\",\"title\",\"path\",
+  \"bytes\",\"issues\",\"links\",\"linked_from\",\"conflict\",\"seen_count\"}]}.
+  `dir_abs` is `dir` as an absolute path in this checkout - absent when
+  `wiki_dir` points outside it or that path is not UTF-8. `seen_count` is that
   `×N` - always there, 0 on a page that is not a lesson. `issues` is
   [{\"id\",\"exists\"}] - the ids with this tracker's prefix the page names
   outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
@@ -1332,7 +1334,7 @@ pub enum WikiCmd {
   lesson, latest note first ([] on a page that is not a lesson).
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
-  yet included - it gives {\"dir\",\"error\"} as `ls` does, non-zero.
+  yet included - it gives {\"dir\",\"dir_abs\",\"error\"} as `ls` does, non-zero.
 
   `linked_from` counts only the pages that could be read. When another page
   could not be read, or the walk left a name or directory out, the count may
@@ -1364,7 +1366,7 @@ pub enum WikiCmd {
   directory is not there yet. A page that could not be read makes it non-zero
   once everything found is out, as `moai wiki ls` does.
 
-  --json gives {\"dir\",\"query\",\"terms\",\"hits\":[{\"slug\",\"path\",\"title\",
+  --json gives {\"dir\",\"dir_abs\",\"query\",\"terms\",\"hits\":[{\"slug\",\"path\",\"title\",
   \"heading\",\"anchor\",\"line\",\"score\",\"snippet\",\"snippet_line\"}],
   \"total\"}. `hits` is always there, `[]` when nothing matched; `total` counts
   the matches before `--limit` cut the list. `line` and `snippet_line` count
@@ -1376,7 +1378,7 @@ pub enum WikiCmd {
   and named in `unread`, [{\"slug\",\"path\",\"error\"}] with `error` as `ls`
   gives it; a place the walk left out is in `skipped`, as in `ls`. Each key
   stands only when it has something. When the wiki directory cannot be used
-  it gives {\"dir\",\"error\"} as `ls` does.")]
+  it gives {\"dir\",\"dir_abs\",\"error\"} as `ls` does.")]
     Search {
         /// What to look for - several words are one query
         #[arg(value_name = "words", required = true, num_args = 1..)]
@@ -1426,8 +1428,8 @@ LESSON
 /// `moai wiki learn` 의 인자(moai-4s5n.n7j).
 #[derive(Args, Debug)]
 pub struct LearnArgs {
-    /// The lesson in one line, as an instruction - the page's title
-    #[arg(value_name = "lesson")]
+    /// The lesson in one line, the page's title. A lone `-x` needs `--`
+    #[arg(value_name = "lesson", allow_hyphen_values = true)]
     pub title: String,
     /// The file name, in lowercase ASCII kebab case
     #[arg(long, value_name = "kebab")]

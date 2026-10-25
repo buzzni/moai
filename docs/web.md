@@ -54,7 +54,9 @@ Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
 
 Choosing an issue shows its detail: column, priority, assignee, tags, what blocks
-it, the body, its children and its history. The detail sits below the list, or on
+it, the body, its children, its commits, the wiki about it (the lessons its notes
+point at, the pages that name it, the related sections — as `moai show <id>`
+lists them) and its history. The detail sits below the list, or on
 its left when the window is wide enough; `SPC o d` moves it and `SPC v d` hides
 it. `SPC v r` switches the body between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
@@ -339,7 +341,7 @@ once and the keys reach it.
 | `Enter` | Open the page (list); follow the chosen link (page) |
 | `Tab` / `Shift-Tab` | Next / previous link in the page |
 | `Backspace` `h` `Left` | Back along the path you came by |
-| `/` | Search titles and bodies |
+| `/` | Search titles and bodies, in `moai wiki search`'s order |
 | `SPC v r` | Raw / rendered page |
 
 The page does not show the stats screen, and what it writes is a Gantt bar's days

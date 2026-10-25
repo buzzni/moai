@@ -176,8 +176,15 @@ pub fn about(lang: Lang, a: &About) -> Vec<String> {
 
 /// `제목 › 머리글` 의 머리글 — 페이지 제목과 같은 글이면 없다. 제목 절(첫 `# `)의 머리글은 제목 그 자체라
 /// `Windows › Windows` 처럼 같은 말이 두 번 섰다(리뷰 moai-g8pt.9rd). `--json` 의 `heading` 은 그대로다.
-fn section_of<'h>(h: &'h Hit) -> Option<&'h str> {
-    h.heading.as_deref().filter(|t| *t != h.page.title)
+///
+/// **낱말로 견준다**(moai-xp7l.teh) — 제목은 마크다운 기호를 걷은 글이고 머리글은 원문이라, 글자째 견주던 판은
+/// ``# The `moai` CLI`` 의 제목 절에서 `The moai CLI › The `moai` CLI` 로 같은 말을 두 번 세웠다. 점수가 제목 절의
+/// 머리글을 빼는 자([`crate::wiki::search::same_words`])와 같은 자다.
+///
+/// **세 표면이 이 하나로 고른다**(리뷰 moai-xp7l.mug) — CLI 상세·검색과 탐색기 상세(`tui::draw::fill_wiki`)가 부르고,
+/// `show <id> --json` 은 그 답을 관련 절의 `title_heading` 으로 실어 web 상세가 다시 가르지 않는다.
+pub(crate) fn section_of<'h>(h: &'h Hit) -> Option<&'h str> {
+    h.heading.as_deref().filter(|t| !crate::wiki::search::same_words(t, &h.page.title))
 }
 
 /// 발췌에 맞은 자리를 굵게 — 조각마다 제어문자를 걷는다(바이트 범위가 걷기에 밀리지 않게 칠하기 전에 가른다).
