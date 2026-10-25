@@ -16,7 +16,7 @@ use crate::wiki::{self, DirTrouble, IssueRef, Link, Page, Wiki};
 use std::collections::HashSet;
 
 pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
-    let (repo, dir, wiki) = read(ctx)?;
+    let (repo, load, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
         Err(t) => return trouble(ctx, &dir, &t, false),
@@ -27,8 +27,15 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     if wiki.fell_short() {
         note_partial();
     }
-    // **교훈이 선 이슈는 노트에서 읽는다**(moai-4s5n.c0n) — 저장하지 않고, 아무것도 막지 않는다.
-    let lessons = lessons_seen(ctx, &repo)?;
+    // **교훈이 선 이슈는 노트에서 읽는다**(moai-4s5n.c0n) — 저장하지 않고, 아무것도 막지 않는다. **쓸 데가 있을 때만
+    // 읽는다**(리뷰 moai-4s5n.u8x) — 저널 전부와 아카이브 전부를 걷는 값이다. `--json` 의 `seen_count` 는 교훈 페이지에만
+    // 0 아닌 값이 서고(노트는 교훈 슬러그만 가리킨다), 사람 화면은 빈 위키에서 노트를 안 쓴다(페이지 없는 노트의 알림은
+    // 페이지가 있는 목록 밑에만 선다).
+    let wanted = match ctx.json {
+        true => wiki.pages.iter().any(|p| wiki::seen::is_lesson(&p.slug)),
+        false => !wiki.pages.is_empty(),
+    };
+    let lessons = if wanted { lessons_seen(ctx.lang(), &repo, load)? } else { Default::default() };
     if ctx.json {
         return listed_json(ctx.lang(), &dir, &Ok(wiki), &lessons);
     }
@@ -37,10 +44,17 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
 
 /// 교훈마다 선 이슈 — 아카이브된 줄의 노트도 센다(`moai stats` 의 `work` 가 아카이브까지 세는 것과 같은 까닭: 오래전
 /// 교훈의 이력이 말없이 빠지지 않게). 저널은 `Lesson:` 이 들 수 있는 줄만 푼다(`model::may_hold_lesson`).
-fn lessons_seen(ctx: &Ctx, repo: &crate::store::Repo) -> R<wiki::seen::Lessons> {
-    let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, repo, false)?;
+///
+/// `load` 는 [`read`] 가 이미 푼 산 스냅샷이다 — 여기서 다시 풀던 판은 한 부름에 스냅샷을 두 번 풀었고, 그 사이에 떨어진
+/// 쓰기를 한쪽만 봤다(리뷰 moai-4s5n.u8x). 산 줄만 보니 옆 워크트리를 겹치지 않는다(`Origin` 의 빈 값).
+fn lessons_seen(lang: Lang, repo: &crate::store::Repo, load: crate::store::Load) -> R<wiki::seen::Lessons> {
     let load = crate::archive::read_all(&repo.root, load)?;
-    let journal = super::show::journal_of_rows(repo, &origin, &load.issues, crate::model::may_hold_lesson);
+    // **아카이브의 못 읽는 줄은 말한다** — 그 줄의 노트가 셈에서 빠진다(`moai stats` 와 같은 자). 산 파일의 것은 [`read`]
+    // 가 이미 댔다. 부분 실패 깃발은 안 세운다: 교훈 셈은 목록의 덤이고, 목록의 종료 코드는 위키를 못 읽었을 때만
+    // 비영이다(모듈 머리).
+    let archived: Vec<crate::store::LoadError> = load.errors.iter().filter(|e| e.source.is_some()).cloned().collect();
+    super::name_load_errors(lang, &repo.issues_path(), &archived);
+    let journal = super::show::journal_of_rows(repo, &Default::default(), &load.issues, crate::model::may_hold_lesson);
     Ok(wiki::seen::seen_in(&load.issues, &journal))
 }
 
@@ -49,7 +63,7 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     // 페이지를 못 읽어 역링크가 덜 셌어도 그 페이지는 `moai wiki ls` 가 대고, 여기서 비영이면 옆 파일 하나가 멀쩡한
     // 페이지의 `show` 를 실패로 세운다. 덜 셌다는 것은 종료 코드 대신 `linked_from_partial` 과 화면의 한 줄이
     // 말한다(moai-mdzx.jty).
-    let (repo, dir, wiki) = read(ctx)?;
+    let (repo, load, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
         Err(t) => return trouble(ctx, &dir, &t, true),
@@ -63,13 +77,13 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     }
     // 저널은 교훈 페이지를 물었을 때만 연다 — 다른 페이지의 `seen` 은 늘 빈 배열이다.
     let seen = match wiki::seen::is_lesson(&page.slug) {
-        true => lessons_seen(ctx, &repo)?.remove(&page.slug).unwrap_or_default(),
+        true => lessons_seen(ctx.lang(), &repo, load)?.remove(&page.slug).unwrap_or_default(),
         false => Vec::new(),
     };
     if ctx.json {
         return page_json(ctx.lang(), &wiki, page, &seen);
     }
-    Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug), &seen))
+    Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug), &seen, ctx.zone()))
 }
 
 /// `moai wiki search <낱말…>` — 위키를 절 단위로 찾아 순위대로 낸다(moai-g8pt). 낱말은 빈칸 하나로 이어 한 질의다.
@@ -184,17 +198,29 @@ impl<'a> HitOut<'a> {
     }
 }
 
-/// 트래커를 열고(id 가 있는가를 물을 자리) 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께.
-fn read(ctx: &Ctx) -> R<(crate::store::Repo, String, Result<Wiki, DirTrouble>)> {
+/// 트래커를 열고(id 가 있는가를 물을 자리) 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께. 푼 산 스냅샷도
+/// 함께 낸다 — 교훈 셈([`lessons_seen`])이 그것을 다시 풀지 않게.
+fn read(ctx: &Ctx) -> R<(crate::store::Repo, crate::store::Load, String, Result<Wiki, DirTrouble>)> {
     let repo = super::open_repo(ctx)?;
     let load = repo.read()?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
     // **못 읽는 줄이 쓰는 id 도 있는 id 다** — 그 줄은 파일에 있다. 빼면 그 id 를 댄 페이지가 "없는 id" 로 선다.
+    // **아카이브로 옮긴 줄의 id 도 있는 id 다**(리뷰 moai-4s5n.u8x) — `moai show <id>` 가 그 줄을 연다. 빼던 판은
+    // `Learned in: <id>` 로 끝나는 교훈 페이지마다, 그 이슈가 아카이브로 간 날부터 "없는 id" 알림을 영영 세웠다. 줄을
+    // 풀지 않고 id 만 훑는다(`archive::reserve`, 쓰기가 새 id 를 피하는 그 자).
     let reserved = load.reserved_ids();
-    let ids: HashSet<&str> =
-        load.issues.iter().map(|i| i.id.as_str()).chain(reserved.iter().map(String::as_str)).collect();
-    let (dir, wiki) = read_in(&repo, &|id: &str| ids.contains(id));
-    Ok((repo, dir, wiki))
+    let archived = crate::archive::reserve(&repo.root).ids;
+    let (dir, wiki) = {
+        let ids: HashSet<&str> = load
+            .issues
+            .iter()
+            .map(|i| i.id.as_str())
+            .chain(reserved.iter().map(String::as_str))
+            .chain(archived.iter().map(String::as_str))
+            .collect();
+        read_in(&repo, &|id: &str| ids.contains(id))
+    };
+    Ok((repo, load, dir, wiki))
 }
 
 /// 이미 연 트래커 곁에서 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께. `known` 은 그 id 의 줄이
@@ -206,13 +232,13 @@ pub(crate) fn read_in(repo: &crate::store::Repo, known: &dyn Fn(&str) -> bool) -
 }
 
 /// 위키 디렉터리를 못 쓴 까닭을 기계의 꼴로 — `moai show <id> --json` 의 `wiki_error` 다(moai-g8pt.5aw). **없는
-/// 디렉터리는 까닭이 아니다** — 아직 안 쓴 위키라 두 빈 배열이 답이다(`DirTrouble::fell`). `kind` 는 `wiki ls --json`
-/// 의 `error.kind` 와 같은 낱말이다.
+/// 디렉터리는 까닭이 아니다** — 아직 안 쓴 위키라 빈 `named_in`·`related` 가 답이다(`DirTrouble::fell`). `lessons` 는
+/// 그 줄의 노트에서 읽어 위키가 없어도 선다. `kind` 는 `wiki ls --json` 의 `error.kind` 와 같은 낱말이다.
 pub(crate) fn trouble_told(lang: Lang, dir: &str, t: &DirTrouble) -> Option<Told> {
     t.fell().then(|| Told { kind: t.kind(), said: crate::view::wiki::dir_trouble(lang, dir, t) })
 }
 
-/// `moai show <id> --json` 의 `wiki` — 두 배열은 늘 선다(비었으면 `[]`). 목록 `show [거르개] --json` 은 안 싣는다:
+/// `moai show <id> --json` 의 `wiki` — 세 배열은 늘 선다(비었으면 `[]`). 목록 `show [거르개] --json` 은 안 싣는다:
 /// 줄마다 위키 전부를 걷게 된다. 관련 절은 `wiki search --json` 의 hit 와 한 꼴이다 — 발췌 없이 매긴 순위
 /// ([`wiki::search::rank`])라 `snippet`·`snippet_line` 이 안 선다. 꼴을 따로 두면 두 표면의 키가 갈린다.
 #[derive(serde::Serialize)]
@@ -317,7 +343,8 @@ pub(crate) fn listed_json(
 /// 과 같은 까닭으로 스킬의 키를 재는 시험이 함께 부른다.
 pub(crate) fn page_json(lang: Lang, w: &Wiki, p: &Page, seen: &[wiki::seen::Seen]) -> R<Vec<String>> {
     let partial = w.uncounted(&p.slug) > 0;
-    let seen = seen.iter().map(|s| SeenOut { id: &s.id, at: &s.at, by: &s.by }).collect();
+    let seen =
+        seen.iter().map(|s| SeenOut { id: &s.id, at: &s.at, by: &s.by, by_email: s.by_email.as_deref() }).collect();
     super::json_line(&PageOut {
         body: p.body.as_deref(),
         linked_from_partial: partial,
@@ -326,12 +353,15 @@ pub(crate) fn page_json(lang: Lang, w: &Wiki, p: &Page, seen: &[wiki::seen::Seen
     })
 }
 
-/// `wiki show --json` 의 `seen` 한 칸 — 이 교훈이 선 이슈, 그 이슈에서 가장 나중에 적은 때와 사람(moai-4s5n.c0n).
+/// `wiki show --json` 의 `seen` 한 칸 — 이 교훈이 선 이슈, 그 이슈에서 가장 나중에 적은 때와 사람(moai-4s5n.c0n). 사람은
+/// 저널 줄처럼 `by` 와 `by_email` 로 갈라 든다 — 메일이 없는 옛 줄이면 `by_email` 이 없다(`journal`·`work` 와 같은 자).
 #[derive(serde::Serialize)]
 struct SeenOut<'a> {
     id: &'a str,
     at: &'a str,
     by: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    by_email: Option<&'a str>,
 }
 
 /// `moai wiki ls --json` — **moai-wiki 스킬이 이 키 이름을 읽는다**(moai-ihu4 본문의 계약). 키를 바꾸면 그 에픽에
@@ -444,23 +474,25 @@ impl<'a> PageOut<'a> {
 /// - 파일은 `create_new` 로 연다. 이미 있으면 거절하고 그 파일을 안 건드린다 — 두 세션이 같은 슬러그를 고른
 ///   경합도 여기서 하나만 이긴다. 페이지를 고치는 동사가 아니다(`cli::WikiCmd`)
 /// - 위키 디렉터리 자체가 없으면 짓지 않는다 — `wiki_dir` 이 틀렸을 수 있다. 그 밑의 `lessons/` 는 짓는다
-/// - **쓰기 전에 다 잰다** — 꼴·슬러그·이슈·사람·이미 선 파일. 그 뒤에 지는 것은 디스크뿐이다
+/// - **쓰기 전에 다 잰다** — 꼴·슬러그·이슈·사람(쓸 때만 — `--dry-run` 은 안 묻는다)·이미 선 파일·`lessons/` 의 자리.
+///   그 뒤에 지는 것은 디스크뿐이다
 /// - 커밋하지 않는다. 끝 줄이 브리프 7-4 와 같은 커밋 줄([`crate::guide::wiki_commit`])을 댄다
 pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
     use crate::wiki::learn;
     let lang = ctx.lang();
     // 꼴은 디스크도 트래커도 안 보고 잰다 — 틀린 부름이 저장소를 열 까닭이 없다. stdin 은 여기서 읽는다(락은 노트를
     // 달 때 `with_write` 안에서만 잡힌다).
+    let body = super::add::read_body(args.body)?.unwrap_or_default();
+    // 꼴은 이슈를 모른 채 먼저 잰다 — 틀린 본문이 사람을 묻거나 트래커를 읽을 까닭이 없다. **제목도 슬러그보다 먼저
+    // 잰다**(리뷰 moai-4s5n.u8x) — 빈 제목에 "ASCII 가 아니다" 를 대고, 그대로 치면 또 거절될 `--slug` 줄을 내밀던 판이 있었다.
+    learn::page(&args.title, &body, None)
+        .map_err(|why| Fail::coded(crate::view::wiki::learn_refused(lang, &why), code::BAD_INPUT))?;
     let slug = match &args.slug {
         Some(s) if learn::is_slug(s) => s.clone(),
         Some(s) => return Err(Fail::coded(crate::view::wiki::learn_bad_slug(lang, s), code::BAD_INPUT)),
         None => learn::slug_from(&args.title)
             .ok_or_else(|| Fail::coded(crate::view::wiki::learn_no_slug(lang, args.title.trim()), code::BAD_INPUT))?,
     };
-    let body = super::add::read_body(args.body)?.unwrap_or_default();
-    // 꼴은 이슈를 모른 채 먼저 잰다 — 틀린 본문이 사람을 묻거나 트래커를 읽을 까닭이 없다.
-    learn::page(&args.title, &body, None)
-        .map_err(|why| Fail::coded(crate::view::wiki::learn_refused(lang, &why), code::BAD_INPUT))?;
     let repo = super::open_repo(ctx)?;
 
     // 자리 — 이 체크아웃의 위키 밑 `lessons/<slug>.md`. 위키 디렉터리는 [`wiki::dir_of`] 가 잰다(체크아웃 안,
@@ -473,21 +505,36 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
         }
         Err(t) => return Err(Fail::coded(crate::view::wiki::dir_trouble(lang, &raw, &t), code::ERROR)),
     };
+    // **누군지는 쓸 때만 묻는다**(리뷰 moai-4s5n.u8x) — `--dry-run` 은 아무것도 안 써서 사람을 안 묻는다(`add --from
+    // --dry-run` 과 같은 자, CLAUDE.md "누군지 모르면 쓰기는 멈추고, 읽기는 묻지 않는다"). `--issue none` 은 노트가 없다.
+    let by = match (args.issue.as_deref(), args.dry_run) {
+        (Some("none"), _) | (_, true) => None,
+        _ => Some(crate::model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, lang))?),
+    };
     // 노트를 달 줄 — `none` 이면 없다. 없는 id 는 페이지를 쓰기 **전에** 거절한다: 오타 하나로 노트 없는 페이지가
     // 남으면 그 거절은 고칠 줄이 아니라 치울 파일을 낸다.
-    let target = match args.issue.as_deref() {
+    let target: Option<String> = match args.issue.as_deref() {
         Some("none") => None,
         given => {
-            let by = crate::model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, lang))?;
             let load = repo.read()?;
-            super::report_load_errors(lang, &repo.issues_path(), &load.errors);
-            let id = match given {
+            // **말만 하고 부분 실패 깃발은 안 세운다** — 쓰기와 짝을 이루는 읽기다([`super::name_load_errors`], `backlog
+            // promote` 와 같은 자). 세우던 판은 남의 못 읽는 줄 하나에 페이지도 노트도 다 쓴 부름을 1 로 끝내, 실패로 읽은
+            // 쪽이 다시 불러 `already_exists` 에 막히거나 다른 슬러그로 같은 교훈을 또 썼다(리뷰 moai-4s5n.u8x).
+            super::name_load_errors(lang, &repo.issues_path(), &load.errors);
+            Some(match given {
                 Some(id) if load.issues.iter().any(|i| i.id == id) => id.to_string(),
                 Some(id) => return Err(Fail::not_found(id, lang)),
-                // **`prime` 이 "쥐었다" 고 대는 그 줄이다**(`report::held_by`) — 고르는 자를 둘로 두지 않는다.
+                // **`prime` 이 "쥐었다" 고 대는 그 줄이다**(`report::held_by`) — 고르는 자도, 고르는 판도 같다: 아카이브의
+                // 맥락(미룬 에픽·부모)까지 얹은 판이다(`cmd::prime`). 산 줄만 넘기던 판은 아카이브에 든 미룬 에픽 밑에서 다시
+                // 연 줄을, prime 은 안 대는데 집은 것으로 셌다(리뷰 moai-4s5n.u8x). 사람을 모르면(미리보기) 가르지 않는다 —
+                // `prime` 과 같은 약속이다.
                 None => {
-                    let me = crate::query::Me::of(&by);
-                    let held = crate::report::held_by(&load.issues, &repo.config, Some(&me));
+                    let me = match &by {
+                        Some(a) => Some(crate::query::Me::of(a)),
+                        None => super::me_at(ctx, &repo.root),
+                    };
+                    let all = crate::archive::context(&repo.root, load)?;
+                    let held = crate::report::held_by(&all.issues, &repo.config, me.as_ref());
                     match held.as_slice() {
                         [one] => one.id.clone(),
                         many => {
@@ -496,11 +543,10 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
                         }
                     }
                 }
-            };
-            Some((id, by))
+            })
         }
     };
-    let issue = target.as_ref().map(|(id, _)| id.as_str());
+    let issue = target.as_deref();
     // 위에서 잰 꼴이라 지지 않는다 — 다른 것은 `Learned in:` 줄 하나다.
     let text = learn::page(&args.title, &body, issue)
         .map_err(|why| Fail::coded(crate::view::wiki::learn_refused(lang, &why), code::BAD_INPUT))?;
@@ -514,6 +560,8 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
         .collect();
     let file = format!("{slug}.md");
     let path = shown.iter().copied().chain([learn::LESSONS, file.as_str()]).collect::<Vec<_>>().join("/");
+    // 커밋 줄이 댈 위키 디렉터리 — 체크아웃에서 잰 글자다(`./docs` 는 `docs`, 뿌리면 빈 글).
+    let wiki_dir = shown.join("/");
     let note = learn::note(&slug);
     let exists = || Fail::coded(crate::view::wiki::learn_exists(lang, &path, issue, &note), code::ALREADY_EXISTS);
     let lessons = dir.join(learn::LESSONS);
@@ -522,28 +570,45 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
     if std::fs::symlink_metadata(&at).is_ok() {
         return Err(exists());
     }
-
-    if args.dry_run {
-        return said(ctx, &path, &slug, issue, false, &note, &raw, Some(&text));
-    }
-
-    // `lessons/` 를 짓는다 — 체크아웃 밖을 가리키는 링크면 안 짓는다(아카이브 디렉터리와 같은 자, `held::place_dir`).
+    // `lessons/` 의 자리를 잰다 — 체크아웃 밖을 가리키는 링크면 안 짓는다(아카이브 디렉터리와 같은 자, `held::place_dir`).
+    // **미리보기 앞에서 잰다**(리뷰 moai-4s5n.u8x) — 뒤에서 재던 판은 `--dry-run` 이 "쓸 것이다" 라고 한 자리를 진짜 부름이
+    // 거절했다. 재기만 하고 짓지는 않는다.
     let home = crate::held::Home::of(repo.here());
     let lessons = crate::held::place_dir(&lessons, &home)
         .map_err(|u| Fail::coded(crate::held::refused(lang, &lessons, &u), code::BROKEN))?;
+
+    if args.dry_run {
+        return said(ctx, &path, &slug, issue, false, &note, &wiki_dir, Some(&text));
+    }
+
+    // `lessons/` 를 짓는다. **이 부름이 지은 것은 쓰기가 지면 걷는다** — `remove_dir` 은 빈 디렉터리만 지우니 남의 페이지는
+    // 안 다친다. 안 걷던 판은 "남긴 것은 없다" 고 말하면서 빈 `lessons/` 를 남겼다(리뷰 moai-4s5n.u8x).
+    let made = std::fs::symlink_metadata(&lessons).is_err();
     std::fs::create_dir_all(&lessons)
         .map_err(|e| Fail::coded(crate::view::wiki::learn_failed(lang, &path, &e.to_string()), code::ERROR))?;
-    write_new(&lessons.join(&file), &text).map_err(|e| match e.kind() {
-        std::io::ErrorKind::AlreadyExists => exists(),
-        _ => Fail::coded(crate::view::wiki::learn_failed(lang, &path, &e.to_string()), code::ERROR),
-    })?;
-
-    // 노트 — 페이지는 이미 섰다. 지면 페이지는 남기고, 다시 칠 줄을 내며 비영으로 끝난다.
-    if let Some((id, by)) = &target {
-        super::note::append(&repo, lang, id, &note, by)
-            .map_err(|e| Fail::coded(crate::view::wiki::learn_unnoted(lang, &path, id, &note, &e.message), e.code))?;
+    if let Err(e) = write_new(&lessons.join(&file), &text) {
+        if made {
+            let _ = std::fs::remove_dir(&lessons);
+        }
+        return Err(match e.kind() {
+            std::io::ErrorKind::AlreadyExists => exists(),
+            _ => Fail::coded(crate::view::wiki::learn_failed(lang, &path, &e.to_string()), code::ERROR),
+        });
     }
-    said(ctx, &path, &slug, issue, target.is_some(), &note, &raw, None)
+
+    // 노트 — 페이지는 이미 섰다. 지면 페이지는 남기고, 다시 칠 줄을 내며 비영으로 끝난다. **코드는 `error` 다**(리뷰
+    // moai-4s5n.u8x) — 안의 코드(`locked`·`not_found`·`broken`)는 "아무것도 안 바뀌었으니 같은 부름을 다시 쳐도 된다" 는
+    // 말인데 페이지는 이미 섰다. 그 코드를 믿고 같은 부름을 다시 친 쪽은 `already_exists` 에 막혀 노트를 영영 못 단다.
+    let noted = match (issue, &by) {
+        (Some(id), Some(by)) => {
+            super::note::append(&repo, lang, id, &note, by).map_err(|e| {
+                Fail::coded(crate::view::wiki::learn_unnoted(lang, &path, id, &note, &e.message), code::ERROR)
+            })?;
+            true
+        }
+        _ => false,
+    };
+    said(ctx, &path, &slug, issue, noted, &note, &wiki_dir, None)
 }
 
 /// 새 파일에 글을 쓴다 — **있으면 진다**(`create_new`). 쓰다 지면 반쯤 쓴 파일을 걷는다: 꼴이 깨진 교훈이 남으면
@@ -556,6 +621,16 @@ fn write_new(at: &std::path::Path, text: &str) -> std::io::Result<()> {
     if wrote.is_err() {
         drop(f);
         let _ = std::fs::remove_file(at);
+        return wrote;
+    }
+    // **이름도 디스크에 적는다**(리뷰 moai-4s5n.u8x) — `sync_all` 은 파일의 글만 적고 디렉터리에 선 이름은 안 적는다.
+    // `store` 가 새 저널 파일과 갈아끼운 스냅샷에 같은 까닭으로 디렉터리를 적는다. 방금 지었을 수 있는 `lessons/` 의
+    // 이름은 그 위 디렉터리에 선다.
+    #[cfg(unix)]
+    for d in at.ancestors().skip(1).take(2) {
+        if let Ok(d) = std::fs::File::open(d) {
+            let _ = d.sync_all();
+        }
     }
     wrote
 }
@@ -574,7 +649,7 @@ struct Learned<'a> {
     text: Option<&'a str>,
 }
 
-/// 쓴 것(또는 쓸 것)을 낸다 — `dry` 는 `--dry-run` 의 글이다.
+/// 쓴 것(또는 쓸 것)을 낸다 — `dry` 는 `--dry-run` 의 글이고, `dir` 은 체크아웃에서 잰 위키 디렉터리다(뿌리면 빈 글).
 fn said(
     ctx: &Ctx,
     path: &str,
@@ -595,7 +670,9 @@ fn said(
             text: dry,
         });
     }
-    let dir = if dir.is_empty() { "." } else { dir };
+    // **위키가 체크아웃 뿌리면 `lessons` 를 댄다**(리뷰 moai-4s5n.u8x) — `.` 을 대던 판의 `git add -- .`·`git commit … -- .`
+    // 은 체크아웃의 고침을 다 그 `docs(wiki):` 커밋에 실었다.
+    let dir = if dir.is_empty() { crate::wiki::learn::LESSONS } else { dir };
     let commit = crate::guide::wiki_commit(&crate::text::shell_word(dir));
     Ok(crate::view::wiki::learned(ctx.lang(), path, issue, note, &commit, dry))
 }

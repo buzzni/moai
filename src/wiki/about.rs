@@ -1,13 +1,14 @@
-//! 이슈 하나에 관한 위키 — `moai show <id>` 가 본문 밑에 내는 두 묶음(moai-g8pt.5aw).
+//! 이슈 하나에 관한 위키 — `moai show <id>` 가 본문 밑에 내는 세 묶음(moai-g8pt.5aw, moai-4s5n.c0n).
 //!
 //! **순수 함수 하나다.** `&[Page]` 와 `&Issue`(와 부르는 쪽이 이미 읽은 그 줄의 에픽 id)를 받아 답만 낸다 — 파일을
 //! 열지 않고 찍지 않는다(CLAUDE.md "`report` 와 `query` 는 순수 함수다"). 위키를 읽는 것은 `cmd::show` 고, 무엇을
 //! 낼지는 여기서 가른다 — `cmd/*.rs` 에 이슈의 뜻을 가르는 `if` 를 두지 않는다.
 //!
+//! - **이 줄의 교훈**(`lessons`) — 이 줄의 `Lesson:` 노트가 가리킨 교훈. 가장 가깝다
 //! - **댄 페이지**(`named_in`) — 본문이 이 id 나 이 줄의 에픽 id 를 댄 페이지. 결정적이고 싸다. 둘 다 댔으면 제 id 로
-//!   한 번만 선다 — 더 가까운 까닭이다
+//!   한 번만 선다 — 더 가까운 까닭이다. 이 줄의 교훈은 빼고
 //! - **관련 절**(`related`) — 제목을 질의로 [`rank`] 한 절 가운데 흔하지 않은 낱말이 [`MIN_DISTINCT`] 개 맞은 것,
-//!   페이지당 하나(같은 페이지의 절 셋이 자리를 다 먹지 않게), 댄 페이지는 빼고 [`RELATED`] 개까지
+//!   페이지당 하나(같은 페이지의 절 셋이 자리를 다 먹지 않게), 교훈과 댄 페이지는 빼고 [`RELATED`] 개까지
 //!
 //! **엉뚱한 절을 내미느니 안 내민다**(2026-10-25 사용자 결정, moai-g8pt.5aw). 첫 판은 제목과 태그를 질의로 두고 맞은
 //! 낱말을 다 셌는데, 이 저장소의 열린 이슈 열 개에서 관련 절 여섯 가운데 맞는 것이 하나였다 — 문턱을 넘긴 것이
@@ -30,9 +31,9 @@ pub const RELATED: usize = 3;
 /// 이 이슈에 관한 위키.
 #[derive(Debug, Clone, PartialEq)]
 pub struct About<'a> {
-    /// 이 id 나 에픽 id 를 댄 페이지, 위키 목록의 차례로.
+    /// 이 id 나 에픽 id 를 댄 페이지, 위키 목록의 차례로 — `lessons` 의 페이지는 없다.
     pub named_in: Vec<Named<'a>>,
-    /// 관련 절, 순위 차례로 — 페이지당 하나, `named_in` 의 페이지는 없다. 발췌는 없다([`rank`]).
+    /// 관련 절, 순위 차례로 — 페이지당 하나, `named_in`·`lessons` 의 페이지는 없다. 발췌는 없다([`rank`]).
     pub related: Vec<Hit<'a>>,
     /// 이 이슈의 `Lesson:` 노트가 가리킨 교훈, 노트에 처음 선 차례로(moai-4s5n.c0n). 페이지가 이 체크아웃에 없을 수
     /// 있다 — 다른 가지에서 아직 안 든 것일 수 있어 슬러그는 서고 `page` 가 비어 있다.
@@ -57,9 +58,15 @@ pub struct Named<'a> {
 /// — 소속은 저장소 전부를 봐야 답하니 부르는 쪽이 읽어 건넨다. `lessons` 는 그 줄의 저널이 가리킨 교훈 슬러그다
 /// ([`super::seen::lessons_of`]) — 저널도 부르는 쪽이 읽는다. **순수 함수다.**
 pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>, lessons: &'a [String]) -> About<'a> {
+    // **한 페이지는 한 묶음에만 선다** — 이 줄의 교훈이 가장 가깝고, 그다음이 댄 페이지, 관련 절이 마지막이다.
+    // `moai wiki learn` 은 페이지 끝에 `Learned in: <id>` 를 적어 그 교훈이 이 id 를 댄 페이지로도 걸리므로, 빼지 않던
+    // 판은 한 페이지를 `lessons` 와 `named_in` 에 두 번 세웠다(리뷰 moai-4s5n.u8x). `related` 가 `named_in` 을 빼던 그
+    // 자를 교훈까지 넓힌 것이다.
+    let mut seen: HashSet<&str> = lessons.iter().map(String::as_str).collect();
     let names = |p: &Page, id: &str| p.issues.iter().any(|r| r.id == id);
     let named_in: Vec<Named> = pages
         .iter()
+        .filter(|p| !seen.contains(p.slug.as_str()))
         .filter_map(|p| {
             let via = if names(p, &issue.id) { Some(issue.id.as_str()) } else { epic.filter(|e| names(p, e)) };
             via.map(|via| Named { page: p, via })
@@ -71,7 +78,7 @@ pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>, les
     let mut hits: Vec<Hit> = found.hits.into_iter().filter(|h| need > 0 && h.rare >= need).collect();
     // 흔하지 않은 낱말이 많이 맞은 절이 앞이다 — 같으면 `rank` 의 차례 그대로다(안정 정렬).
     hits.sort_by_key(|h| std::cmp::Reverse(h.rare));
-    let mut seen: HashSet<&str> = named_in.iter().map(|n| n.page.slug.as_str()).collect();
+    seen.extend(named_in.iter().map(|n| n.page.slug.as_str()));
     let related = hits.into_iter().filter(|h| seen.insert(h.page.slug.as_str())).take(RELATED).collect();
     let lessons = lessons.iter().map(|slug| OwnLesson { slug, page: pages.iter().find(|p| p.slug == *slug) }).collect();
     About { named_in, related, lessons }
@@ -153,6 +160,24 @@ mod tests {
         let (named, related) = slugs(&a);
         assert_eq!(named, [("named", "moai-bbbb")]);
         assert_eq!(related, ["merge", "other"], "페이지당 하나, 댄 페이지는 빠진다");
+    }
+
+    /// **이 줄의 교훈은 `lessons` 에만 선다**(리뷰 moai-4s5n.u8x) — `wiki learn` 이 적는 `Learned in: <id>` 로 그 페이지가
+    /// 이 id 를 대도 `named_in` 에 다시 서지 않고, 제목 낱말이 맞아도 `related` 에 다시 서지 않는다.
+    #[test]
+    fn an_own_lesson_stands_once() {
+        let pages = with_filler(vec![page(
+            "lessons/merge",
+            "# Merge driver lesson\n\n## Do this instead\n\nThe merge driver.\n\nLearned in: moai-dddd\n",
+        )]);
+        let i = issue("moai-dddd", "merge driver", &[]);
+        let own = ["lessons/merge".to_string()];
+        let a = about(&pages, &i, None, &own);
+        let (named, related) = slugs(&a);
+        assert!(named.is_empty() && related.is_empty(), "{a:?}");
+        assert_eq!(a.lessons.iter().map(|l| (l.slug, l.page.is_some())).collect::<Vec<_>>(), [("lessons/merge", true)]);
+        // 노트가 없으면 같은 페이지가 댄 페이지로 선다 — 빼는 것은 이 줄의 교훈뿐이다.
+        assert_eq!(slugs(&about(&pages, &i, None, &[])).0, [("lessons/merge", "moai-dddd")]);
     }
 
     #[test]

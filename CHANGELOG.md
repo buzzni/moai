@@ -29,16 +29,19 @@ does not tag — see `CONTRIBUTING.md`.
   `Learned in: <id>`), and in the same call notes `Lesson: lessons/<slug>` on the
   issue it came from — `--issue <id>`, or the one row you have picked up, or
   `--issue none` for the page alone. The body needs a `## Do this instead`
-  section. A non-ASCII title needs `--slug` (lowercase ASCII kebab case). It only
+  section and must close any code fence or HTML comment it opens. A non-ASCII
+  title needs `--slug` (lowercase ASCII kebab case). It only
   creates: a page already standing there is refused and left as it is. The page
   is written in the checkout you are in, so in a worktree it rides that branch;
-  nothing is committed. `--dry-run` shows the path and the text. Run without
+  nothing is committed. `--dry-run` shows the path and the text, and asks no
+  one who you are. Run without
   picking anything up, the hooks now count it as a change to the repository
   (rule 2). (moai-4s5n)
 - **Where a lesson stood is read from its `Lesson: lessons/<slug>` notes.**
   `moai wiki show lessons/<slug>` ends with a `Seen in` list (row, title, day,
   latest first), `moai wiki ls` puts `×N` (different rows) beside each lesson
-  and says in one line when a note names a page this checkout does not have,
+  and says in one line when a note on open work names a page this checkout
+  does not have,
   and `moai show <id>` lists the lessons the row's own notes point at and marks
   lesson pages with a `lesson` word. `--json` carries `seen_count` (`wiki ls`),
   `seen` (`wiki show`) and `wiki.lessons` and `lesson: true` (`show <id>`).

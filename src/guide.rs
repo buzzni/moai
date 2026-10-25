@@ -6400,10 +6400,11 @@ stop sending outside work while a release runs",
 
     /// 위키 명령이 내는데 스킬이 **일부러 안 대는** 키 — `bytes` 는 고칠 것을 안 말하고, `said` 는 사람이 읽는
     /// 말이라 가르면 안 되며("Branch on `kind`, not on the words beside it"), `body` 는 원문이라 페이지 파일을 읽는
-    /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
-    /// 여기 둘지를 그때 정한다.
+    /// 것과 같다. `by_email` 은 `seen` 의 `by` 곁에 선 메일이다 — 스킬은 사람을 `by` 로 대고, 메일은 이름이 같은 두 사람을
+    /// 가를 때만 읽는다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에
+    /// 적을지 여기 둘지를 그때 정한다.
     #[cfg(unix)]
-    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
+    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body", "by_email"];
 
     /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
     /// 키를 바꿔도 초록이라, 심긴 스킬이 `jq` 에서 `null` 이 되는 키를 가르칠 수 있었다(리뷰 moai-bl3x.vbw 4번).
@@ -6447,12 +6448,15 @@ stop sending outside work while a release runs",
         let read = crate::wiki::load(s.path(), "docs", "moai", &known);
         let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read, &Default::default()).unwrap();
         let loaded = read.unwrap();
-        // 교훈이 선 이슈 하나 — `seen` 안쪽의 `at`·`by` 가 출력에 서야 스킬이 그것을 대도 붉지 않다.
+        // 교훈이 선 이슈 하나 — `seen` 안쪽의 `at`·`by` 가 출력에 서야 스킬이 그것을 대도 붉지 않다. 꼴은 바이너리가 내는
+        // 그대로다: `at` 은 저널의 도장, 사람은 이름과 메일로 갈라 든다.
         let seen = [crate::wiki::seen::Seen {
             id: "moai-ab12".into(),
             title: "t".into(),
-            at: "2026-10-25 12:00".into(),
-            by: "A (a@b.c)".into(),
+            at: "2026-10-25T12:00:00Z".into(),
+            by: "A".into(),
+            by_email: Some("a@b.c".into()),
+            open: true,
         }];
         printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap(), &seen).unwrap());
         for raw in ["missing", "/etc", "file"] {

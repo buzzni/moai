@@ -27146,6 +27146,67 @@ fn wiki_learn_picks_the_one_row_held_or_asks_for_issue() {
         .unwrap();
     assert_eq!(code(&out), "no_actor");
     assert!(!s.path().join("docs/lessons/do-y.md").exists());
+    // 미리보기는 사람을 안 묻는다 — 아무것도 안 쓴다(`add --from --dry-run` 과 같은 자, 리뷰 moai-4s5n.u8x).
+    let dry = without_user(s.path(), &["wiki", "learn", "Do y", "--issue", &a, "--dry-run", "-b", LESSON, "--json"]);
+    assert!(dry.status.success(), "{}", String::from_utf8_lossy(&dry.stderr));
+    assert!(String::from_utf8_lossy(&dry.stdout).contains(r#""dry_run":true"#));
+    assert!(!s.path().join("docs/lessons/do-y.md").exists());
+}
+
+/// 위키가 체크아웃 뿌리면 커밋 줄은 `lessons` 를 댄다 — `.` 을 대던 판의 `git add -- .` 는 체크아웃의 고침을 다 그
+/// `docs(wiki):` 커밋에 실었다(리뷰 moai-4s5n.u8x).
+#[test]
+fn wiki_learn_at_the_checkout_root_names_only_lessons_to_commit() {
+    let s = init("wiki-learn-root");
+    let config = s.path().join(".moai/config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{base}wiki_dir = \".\"\n")).unwrap();
+    let out = ok(s.path(), &["wiki", "learn", "Do x", "--issue", "none", "-b", LESSON]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines[lines.len() - 2..],
+        ["  git add -- lessons", "  git commit -m \"docs(wiki): <what changed> (<epic>)\" -- lessons"],
+        "{out}"
+    );
+    assert!(out.contains("lessons/do-x.md"), "{out}");
+    assert!(s.path().join("lessons/do-x.md").exists());
+}
+
+/// 미리보기도 `lessons/` 의 자리를 잰다 — 체크아웃 밖을 가리키는 링크면 진짜 부름처럼 거절한다(리뷰 moai-4s5n.u8x).
+#[cfg(unix)]
+#[test]
+fn wiki_learn_dry_run_refuses_a_lessons_link_out_of_the_checkout() {
+    let s = init("wiki-learn-link");
+    let away = Scratch::new("wiki-learn-link-away");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::os::unix::fs::symlink(away.path(), s.path().join("docs/lessons")).unwrap();
+    for dry in [true, false] {
+        let mut args = vec!["wiki", "learn", "Do x", "--issue", "none", "-b", LESSON, "--json"];
+        if dry {
+            args.push("--dry-run");
+        }
+        let out = moai(s.path(), &args);
+        assert!(!out.status.success(), "dry={dry}: 밖을 가리키는 자리를 받았다");
+        assert_eq!(field(&String::from_utf8_lossy(&out.stderr), "code"), "broken", "dry={dry}");
+    }
+    assert!(std::fs::read_dir(away.path()).unwrap().next().is_none(), "밖에 썼다");
+}
+
+/// 노트까지 다 쓴 부름은 0 이다 — 산 파일에 남의 못 읽는 줄이 있어도. 그 줄은 말만 한다(`moai note` 와 같다, 리뷰
+/// moai-4s5n.u8x). 1 로 끝내던 판은 실패로 읽은 쪽이 다시 불러 `already_exists` 에 막히거나 같은 교훈을 또 썼다.
+#[test]
+fn wiki_learn_succeeds_beside_an_unreadable_line() {
+    let s = init("wiki-learn-unreadable");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    let id = add(s.path(), &["가"]);
+    let issues = s.path().join(".moai/issues.jsonl");
+    let mut text = std::fs::read_to_string(&issues).unwrap();
+    text.push_str("{\"id\":\"argos-zzzz\",\"title\":\n");
+    std::fs::write(&issues, text).unwrap();
+    let out = from_stdin(s.path(), &["wiki", "learn", "Do x", "--issue", &id, "-b", "-", "--json"], LESSON);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(r#""noted":true"#));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("argos-zzzz"), "못 읽는 줄을 말하지 않았다");
 }
 
 /// 노트가 지면 페이지는 남고 비영이며, 다시 칠 `moai note` 줄이 나온다 — 빠진 노트가 사라진 교훈보다 싸다.
@@ -27156,17 +27217,36 @@ fn wiki_learn_keeps_the_page_when_the_note_fails() {
     let s = init("wiki-learn-unnoted");
     std::fs::create_dir_all(s.path().join("docs")).unwrap();
     let id = add(s.path(), &["가"]);
-    // 락을 못 열게 한다 — 노트의 쓰기(`with_write`)만 진다.
+    // 락을 링크로 바꾼다 — 락은 링크를 안 따르니(moai-sn57) 노트의 쓰기(`with_write`)만 진다. 권한과 달리 root 도 그렇다
+    // (리뷰 moai-4s5n.u8x — 권한만 쓰던 판은 root 로 돌리면 노트가 서서 붉었다).
     let lock = s.path().join(".moai/lock");
-    std::fs::write(&lock, "").unwrap();
-    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let _ = std::fs::remove_file(&lock);
+    std::fs::write(s.path().join(".moai/real-lock"), "").unwrap();
+    std::os::unix::fs::symlink("real-lock", &lock).unwrap();
     let out = from_stdin(s.path(), &["wiki", "learn", "Do x", "--issue", &id, "-b", "-"], LESSON);
-    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let json = from_stdin(s.path(), &["wiki", "learn", "Do y", "--issue", &id, "-b", "-", "--json"], LESSON);
+    std::fs::remove_file(&lock).unwrap();
     assert!(!out.status.success(), "노트가 졌는데 0 으로 끝났다");
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(said.contains(&format!("moai note {id} 'Lesson: lessons/do-x'")), "{said}");
     assert!(s.path().join("docs/lessons/do-x.md").exists(), "페이지를 걷었다");
     assert!(!ok(s.path(), &["show", &id]).contains("Lesson:"));
+    // **코드는 `error` 다** — 안의 코드(여기서는 링크인 락의 `broken`)는 "아무것도 안 바뀌었다" 는 말인데 페이지는 이미
+    // 섰다. 그 코드를 믿고 같은 부름을 다시 친 쪽은 `already_exists` 에 막혀 노트를 영영 못 단다(리뷰 moai-4s5n.u8x).
+    assert!(!json.status.success(), "노트가 졌는데 0 으로 끝났다");
+    assert_eq!(field(&String::from_utf8_lossy(&json.stderr), "code"), "error");
+    assert!(s.path().join("docs/lessons/do-y.md").exists(), "페이지를 걷었다");
+
+    // 권한으로 못 여는 락도 같다 — root 는 권한을 안 보니 그때는 이 갈래를 건너뛴다.
+    std::fs::write(&lock, "").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
+    if std::fs::OpenOptions::new().append(true).open(&lock).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+    let out = from_stdin(s.path(), &["wiki", "learn", "Do z", "--issue", &id, "-b", "-"], LESSON);
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(!out.status.success(), "노트가 졌는데 0 으로 끝났다");
+    assert!(s.path().join("docs/lessons/do-z.md").exists(), "페이지를 걷었다");
 }
 
 /// 워크트리에서 부르면 페이지는 그 워크트리에, 노트는 루트의 트래커에 선다 — 위키는 가지를 탄다.
@@ -27257,7 +27337,11 @@ fn wiki_show_lists_where_a_lesson_stood_latest_first() {
     let seen: Vec<(&str, &str)> =
         v["seen"].as_array().unwrap().iter().map(|r| (r["id"].as_str().unwrap(), r["at"].as_str().unwrap())).collect();
     assert_eq!(seen, [(a.as_str(), "2026-10-05T00:00:00Z"), (b.as_str(), "2026-10-03T00:00:00Z")], "{v}");
-    assert!(v["seen"][0]["by"].is_string());
+    // 사람은 저널처럼 이름과 메일로 갈라 든다 — 이름만 내면 이름이 같은 두 사람이 한 사람이 된다(리뷰 moai-4s5n.u8x).
+    assert_eq!(
+        (v["seen"][0]["by"].as_str(), v["seen"][0]["by_email"].as_str()),
+        (Some("테스터"), Some("tester@example.com"))
+    );
     let beta: serde_json::Value =
         serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/beta", "--json"]).trim()).unwrap();
     let ids: Vec<&str> = beta["seen"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
@@ -27290,6 +27374,19 @@ fn wiki_ls_counts_the_issues_a_lesson_stood_in() {
     assert!(line("lessons/alpha").contains("×2") && line("lessons/beta").contains("×0"), "{out}");
     assert!(!line("README").contains('×'), "{out}");
     assert!(out.contains("lessons/elsewhere"), "페이지 없는 노트의 알림이 없다\n{out}");
+
+    // 닫힌 일의 노트는 그 알림에 안 선다 — 훑기가 걷은 교훈의 옛 노트는 이력이다(리뷰 moai-4s5n.u8x).
+    let c = add(s.path(), &["third row"]);
+    ok(s.path(), &["note", &c, "Lesson: lessons/retired"]);
+    ok(s.path(), &["mv", &c, "done"]);
+    let out = ok(s.path(), &["wiki", "ls"]);
+    assert!(out.contains("lessons/elsewhere") && !out.contains("lessons/retired"), "{out}");
+    // 노트 끝의 마침표와 감싼 백틱은 슬러그가 아니다 — 그 노트도 센다.
+    ok(s.path(), &["note", &c, "Lesson: `lessons/beta`."]);
+    let v: serde_json::Value = serde_json::from_str(ok(s.path(), &["wiki", "ls", "--json"]).trim()).unwrap();
+    let beta =
+        v["pages"].as_array().unwrap().iter().find(|p| p["slug"] == "lessons/beta").unwrap()["seen_count"].clone();
+    assert_eq!(beta, 1, "{v}");
 }
 
 /// 아카이브된 이슈의 노트도 센다 — 오래전에 닫은 일의 교훈이 말없이 빠지지 않게.
@@ -27303,6 +27400,18 @@ fn wiki_seen_counts_notes_on_archived_rows() {
     let v: serde_json::Value =
         serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/alpha", "--json"]).trim()).unwrap();
     assert_eq!(v["seen"][0]["id"], a.as_str(), "{v}");
+
+    // 아카이브로 간 이슈를 댄 페이지는 "없는 id" 가 아니다 — `wiki learn` 이 쓰는 `Learned in:` 이 그 자리다(리뷰
+    // moai-4s5n.u8x). 빼던 판은 그 이슈가 아카이브로 간 날부터 교훈마다 알림을 세웠다.
+    std::fs::write(
+        s.path().join("docs/lessons/alpha.md"),
+        format!("# Alpha first\n\n## Do this instead\nx\n\nLearned in: {a}\n"),
+    )
+    .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/alpha", "--json"]).trim()).unwrap();
+    assert_eq!(v["issues"], serde_json::json!([{ "id": a, "exists": true }]), "{v}");
+    assert!(!ok(s.path(), &["wiki", "ls"]).contains(&a), "아카이브의 id 를 없는 id 로 댔다");
 }
 
 /// `show <id>` 의 Wiki 토막 — 이 이슈의 노트가 가리킨 교훈이 `lessons` 에 서고, 교훈 페이지에는 `lesson: true`.
@@ -27312,8 +27421,17 @@ fn show_names_the_lessons_the_row_stood_in() {
     ok(s.path(), &["note", &a, "Lesson: lessons/alpha"]);
     ok(s.path(), &["note", &a, "Lesson: lessons/gone"]);
     std::fs::write(s.path().join("docs/lessons/beta.md"), format!("# Beta second\n\nSee {b}.\n")).unwrap();
+    // `wiki learn` 이 쓰는 꼴 — 페이지 끝의 `Learned in:` 이 그 이슈를 댄다. 그래도 그 교훈은 한 번만 선다(리뷰 moai-4s5n.u8x).
+    std::fs::write(
+        s.path().join("docs/lessons/alpha.md"),
+        format!("# Alpha first\n\n## Do this instead\nx\n\nLearned in: {a}\n"),
+    )
+    .unwrap();
     let v: serde_json::Value = serde_json::from_str(ok(s.path(), &["show", &a, "--json"]).trim()).unwrap();
     assert_eq!(v["wiki"]["lessons"], serde_json::json!(["lessons/alpha", "lessons/gone"]), "{v}");
+    assert_eq!(v["wiki"]["named_in"], serde_json::json!([]), "제 교훈이 댄 페이지로 또 섰다 — {v}");
+    let shown = ok(s.path(), &["show", &a]);
+    assert_eq!(shown.matches("docs/lessons/alpha.md").count(), 1, "사람 화면에 교훈이 두 번 섰다\n{shown}");
     let other: serde_json::Value = serde_json::from_str(ok(s.path(), &["show", &b, "--json"]).trim()).unwrap();
     assert_eq!(other["wiki"]["lessons"], serde_json::json!([]));
     let named = &other["wiki"]["named_in"][0];

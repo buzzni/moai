@@ -27,20 +27,32 @@ pub fn is_slug(s: &str) -> bool {
             .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
 }
 
+/// 제목에서 짓는 슬러그의 상한(바이트) — 넘으면 그 앞의 `-` 에서 자른다. 파일 이름의 상한(NAME_MAX 255)보다 한참
+/// 밑이라, `--dry-run` 이 "쓸 것이다" 라고 한 이름을 진짜 부름이 "이름이 너무 길다" 로 거절하지 않는다(리뷰
+/// moai-4s5n.u8x). `--slug` 로 준 이름은 자르지 않는다 — 사람이 고른 이름이다.
+pub const SLUG_MAX: usize = 100;
+
 /// 제목에서 슬러그를 짓는다 — **제목이 ASCII 일 때만이다.** 한국어 제목을 소리로 옮겨 짓지 않는다: 옮긴 이름은
 /// 아무도 찾지 못한다. 그때는 `None` 이고 부르는 쪽이 `--slug` 를 대라고 한다. 글자·숫자 아닌 것의 줄은 `-`
-/// 하나가 되고 앞뒤의 `-` 는 걷는다. 그렇게 해서 빈 글이면(`'!!!'`) 역시 `None` 이다.
+/// 하나가 되고 앞뒤의 `-` 는 걷는다. 그렇게 해서 빈 글이면(`'!!!'`) 역시 `None` 이다. [`SLUG_MAX`] 를 넘으면 토막
+/// 가운데가 아니라 그 앞의 `-` 에서 자른다 — 같은 제목은 늘 같은 이름이다.
 pub fn slug_from(title: &str) -> Option<String> {
     if !title.is_ascii() {
         return None;
     }
-    let mut out = String::new();
+    let mut built = String::new();
     for c in title.chars() {
         if c.is_ascii_alphanumeric() {
-            out.push(c.to_ascii_lowercase());
-        } else if !out.is_empty() && !out.ends_with('-') {
-            out.push('-');
+            built.push(c.to_ascii_lowercase());
+        } else if !built.is_empty() && !built.ends_with('-') {
+            built.push('-');
         }
+    }
+    let mut out = built.trim_end_matches('-');
+    if out.len() > SLUG_MAX {
+        // ASCII 라 바이트 자리가 곧 글자 자리다. `-` 가 상한 안에 없는 한 낱말이면 상한에서 자른다.
+        let head = &out[..=SLUG_MAX];
+        out = head.rfind('-').map_or(&out[..SLUG_MAX], |at| &head[..at]);
     }
     let out = out.trim_end_matches('-').to_string();
     is_slug(&out).then_some(out)
@@ -67,41 +79,63 @@ pub enum Refused {
     OpensWithTitle,
     /// `## Do this instead` 머리글이 없다.
     NoDoInstead,
+    /// 본문이 덩이(울타리·HTML 덩이)를 연 채 끝난다 — 그 뒤에 붙는 `Learned in:` 줄까지 그 덩이에 든다.
+    OpenBlock,
 }
 
 /// 교훈 페이지의 글 전부 — 제목 한 줄, 빈 줄, 본문, 빈 줄, `Learned in: <id>`, 끝에 줄바꿈 하나. 이슈가 없으면
 /// (`--issue none`) `Learned in:` 줄이 안 선다.
 ///
 /// **같은 것을 받으면 같은 바이트다.** 본문 앞의 빈 줄과 끝의 빈칸은 걷는다 — heredoc 의 끝 줄바꿈 하나가 있고
-/// 없고로 파일이 갈리지 않게. 본문 안은 한 글자도 안 바꾼다. 제목은 앞뒤 빈칸만 걷는다.
+/// 없고로 파일이 갈리지 않게. 첫 줄의 들여쓰기는 남긴다(들여 쓴 코드 덩이일 수 있다). 파일 머리의 BOM 도 걷는다 —
+/// 남으면 `# 제목` 이 제목으로 안 읽혀 여는 제목의 거절을 지나고 페이지 가운데에 U+FEFF 가 선다(리뷰
+/// moai-4s5n.u8x, `cmd::add::read_msg` 와 같은 자). 본문 안은 한 글자도 안 바꾼다. 제목은 앞뒤 빈칸만 걷는다.
 pub fn page(title: &str, body: &str, issue: Option<&str>) -> Result<String, Refused> {
     let title = title.trim();
     if title.is_empty() || title.contains(['\n', '\r']) {
         return Err(Refused::Title);
     }
-    let body = trimmed(body);
+    let body = crate::text::blank_lines_trimmed(super::unmarked(body));
     if body.is_empty() {
         return Err(Refused::Empty);
     }
     check(body)?;
+    // **본문이 연 덩이는 본문 안에서 닫힌다**(리뷰 moai-4s5n.u8x) — 닫히지 않은 울타리나 HTML 덩이는 그 뒤의
+    // `Learned in:` 줄까지 삼켜, 페이지가 제 이슈를 안 댄다(위키는 울타리 안의 id 를 안 센다). 이슈가 없는 부름도 같은
+    // 자로 잰다 — 꼴은 이슈를 모른 채 먼저 재고, 끝이 열린 채 커밋되는 페이지는 그것만으로 깨진 글이다.
+    if !closes(body) {
+        return Err(Refused::OpenBlock);
+    }
     let mut out = format!("# {title}\n\n{body}\n");
     if let Some(id) = issue {
-        out.push_str(&format!("\nLearned in: {id}\n"));
+        out.push_str(&format!("\n{LEARNED_IN} {id}\n"));
     }
     Ok(out)
 }
 
-/// 앞의 빈 줄과 끝의 빈칸을 걷는다 — 첫 줄의 들여쓰기는 남긴다(들여 쓴 코드 블록일 수 있다).
-fn trimmed(body: &str) -> &str {
-    let body = body.trim_end();
-    let mut start = 0;
-    for line in body.split_inclusive('\n') {
-        if !line.trim().is_empty() {
-            break;
+/// 페이지 끝에서 이슈를 대는 줄의 머리.
+const LEARNED_IN: &str = "Learned in:";
+
+/// 본문 뒤에 빈 줄을 두고 붙인 한 줄이 **맨 바깥의 제 문단으로** 서는가 — 그러면 본문이 연 덩이는 다 닫혔다. 위키를
+/// 읽는 자와 같은 마크다운 읽기([`crate::markdown::OPTIONS`])로 잰다.
+fn closes(body: &str) -> bool {
+    let probe = format!("{body}\n\n{LEARNED_IN}");
+    let (mut depth, mut paragraph, mut text) = (0usize, false, String::new());
+    for event in Parser::new_ext(&probe, crate::markdown::OPTIONS) {
+        match event {
+            Event::Start(tag) => {
+                if depth == 0 {
+                    paragraph = matches!(tag, Tag::Paragraph);
+                    text.clear();
+                }
+                depth += 1;
+            }
+            Event::End(_) => depth = depth.saturating_sub(1),
+            Event::Text(t) => text.push_str(&t),
+            _ => {}
         }
-        start += line.len();
     }
-    &body[start..]
+    paragraph && text == LEARNED_IN
 }
 
 /// 본문의 꼴을 잰다 — 첫 블록이 1단 제목이면 거절, 2단 `Do this instead` 머리글이 없으면 거절. 울타리 안의
@@ -181,5 +215,43 @@ mod tests {
         assert_eq!(page("T", "  \n\n", None), Err(Refused::Empty));
         // 본문 가운데의 1단 제목은 막지 않는다 — 막는 것은 여는 제목이다.
         assert!(page("T", "x\n\n# Later\n\n## Do this instead\ny", None).is_ok());
+    }
+
+    /// **본문이 연 덩이는 거절한다**(리뷰 moai-4s5n.u8x) — 닫히지 않은 울타리나 HTML 덩이는 뒤에 붙는 `Learned in:` 줄을
+    /// 삼켜, 페이지가 제 이슈를 안 댄다. 닫은 울타리, 목록·인용으로 끝나는 본문은 그대로 받는다.
+    #[test]
+    fn a_body_that_leaves_a_block_open_is_refused() {
+        for open in
+            ["## Do this instead\n```sh\nset -e", "## Do this instead\ny\n\n<!-- later", "## Do this instead\n~~~\nx"]
+        {
+            assert_eq!(page("T", open, Some("moai-abcd")), Err(Refused::OpenBlock), "{open}");
+        }
+        for closed in [
+            "## Do this instead\n```sh\nset -e\n```",
+            "## Do this instead\n- one\n- two",
+            "## Do this instead\n> quoted",
+            "## Do this instead\n\n    indented code",
+        ] {
+            let text = page("T", closed, Some("moai-abcd")).unwrap_or_else(|e| panic!("{closed}: {e:?}"));
+            assert!(text.ends_with("\n\nLearned in: moai-abcd\n"), "{text}");
+        }
+    }
+
+    /// 파일 머리의 BOM 은 글이 아니다 — 걷고 잰다. 남기던 판은 BOM 뒤의 `# 제목` 을 줄글로 읽어 여는 제목의 거절을 지났다.
+    #[test]
+    fn a_leading_bom_is_not_part_of_the_body() {
+        assert_eq!(page("T", "\u{feff}# Own\n\n## Do this instead\ny", None), Err(Refused::OpensWithTitle));
+        assert_eq!(page("T", "\u{feff}## Do this instead\ny", None).unwrap(), "# T\n\n## Do this instead\ny\n");
+    }
+
+    /// 긴 제목의 슬러그는 [`SLUG_MAX`] 안에서 `-` 에 맞춰 자른다 — 파일 이름의 상한에 안 닿게, 같은 제목은 같은 이름으로.
+    #[test]
+    fn a_long_title_makes_a_bounded_slug() {
+        let title = vec!["word"; 80].join(" ");
+        let slug = slug_from(&title).unwrap();
+        assert!(slug.len() <= SLUG_MAX && is_slug(&slug) && slug.ends_with("word"), "{slug}");
+        assert_eq!(slug_from(&title), Some(slug));
+        let one = "x".repeat(SLUG_MAX + 20);
+        assert_eq!(slug_from(&one).map(|s| s.len()), Some(SLUG_MAX), "`-` 가 없는 한 낱말은 상한에서 자른다");
     }
 }

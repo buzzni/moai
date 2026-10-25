@@ -2,7 +2,7 @@
 
 ## What happened
 
-A merge of an epic branch stopped on a conflict in the root checkout, and it was resolved right there. A review later reproduced the harm: a half-resolved merge in the shared root is sealed by another session's commit that names no path, under that session's subject. (moai-hdrd)
+A merge of an epic branch stopped on a conflict in the root checkout, and it was resolved right there. A review later reproduced the harm: a half-resolved merge in the shared root is sealed by another session's commit that names no path, under that session's subject.
 
 ## Why
 

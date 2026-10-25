@@ -2426,13 +2426,18 @@ Options:
   `..`, leads out of the checkout or into `.git/`, or is not a directory is.
 
   Under the list, notices count pages with conflict markers, links leading to
-  no page, links to a heading the page does not have, and ids naming no
-  issue. They block nothing and leave the exit code alone.
+  no page, links to a heading the page does not have, ids naming no issue,
+  and `Lesson:` notes on open work naming a page this checkout does not have.
+  They block nothing and leave the exit code alone. A lesson page
+  (`lessons/<slug>`) shows `×N`, the number of different rows whose notes name
+  it.
 
   --json gives {"dir","pages":[{"slug","title","path","bytes","issues",
-  "links","linked_from","conflict"}]}. `issues` is [{"id","exists"}] - the
-  ids with this tracker's prefix the page names outside code blocks; the name
-  of a skill moai plants (`moai-wiki`) is never one. `links` is
+  "links","linked_from","conflict","seen_count"}]}. `seen_count` is that
+  `×N` - always there, 0 on a page that is not a lesson. `issues` is
+  [{"id","exists"}] - the ids with this tracker's prefix the page names
+  outside code blocks; the name of a skill moai plants (`moai-wiki`) is never
+  one. `links` is
   [{"text","to","anchor","resolved","anchor_resolved"}] - relative links to a
   `.md` page of this wiki, `to` being the target slug (the page itself for a
   bare `#anchor`). `anchor` is the part after `#` and `anchor_resolved` says
@@ -2468,7 +2473,10 @@ Options:
   The slug is what `moai wiki ls` prints - matched letter for letter, so
   `Guide` is not `guide`.
 
-  --json gives the page as `ls` does plus `body`, the file as written.
+  --json gives the page as `ls` does, with `seen` in place of `seen_count`,
+  plus `body`, the file as written. `seen` is always there:
+  [{"id","at","by","by_email"}], the rows whose `Lesson:` notes name this
+  lesson, latest note first ([] on a page that is not a lesson).
   A page that could not be read has no `body`, carries `error`, and the exit
   code is non-zero. When the wiki directory itself cannot be used - not there
   yet included - it gives {"dir","error"} as `ls` does, non-zero.

@@ -847,17 +847,21 @@ pub fn work_of(journal: &[JournalEntry]) -> Vec<Work> {
 /// `note_of` 가 낸 그 글) 저널을 다시 안 풀고 그 글에서 읽는다. 울타리를 가르는 법이 두 벌이면 CLI 의
 /// `moai stats` 와 창이 같은 노트를 두고 다른 토큰 합을 낸다.
 pub(crate) fn work_in_note(text: &str) -> impl Iterator<Item = Work> + '_ {
+    counted_lines(text).filter_map(parse_work)
+}
+
+/// 노트 글에서 **값으로 읽을 줄들** — 울타리(```` ``` ````·`~~~`) 줄과 그 안의 줄은 꼴을 옮겨 적은 예라 뺀다.
+/// [`work_in_note`] 와 [`lessons_in_note`] 가 이 하나로 가른다(리뷰 moai-4s5n.u8x) — 울타리를 가르는 법이 두 벌이면 한
+/// 노트를 `work` 와 교훈 셈이 다르게 읽는다. 들여 쓴 줄을 빼는 것은 줄을 받는 파서의 몫이다(줄 머리에서 시작한 줄만).
+fn counted_lines(text: &str) -> impl Iterator<Item = &str> + '_ {
     let mut fenced = false;
-    text.lines().filter_map(move |line| {
+    text.lines().filter(move |line| {
         let bare = line.trim_start();
         if bare.starts_with("```") || bare.starts_with("~~~") {
             fenced = !fenced;
-            return None;
+            return false;
         }
-        if fenced {
-            return None;
-        }
-        parse_work(line)
+        !fenced
     })
 }
 
@@ -911,33 +915,24 @@ pub fn may_hold_lesson(raw: &str) -> bool {
 /// `Lesson: lessons/<slug>` 한 줄 — 이 교훈이 다시 선 자리. 돌려주는 것은 위키 슬러그(`lessons/<slug>`)다.
 ///
 /// [`parse_work`] 와 같은 규칙이다: **줄 머리에서 시작한 줄만 받는다**(들여 쓴 줄은 꼴을 옮겨 적은 예다),
-/// `Lesson:` 뒤에는 빈칸이 오고(`Lesson:x` 는 아니다), 슬러그는 `lessons/` 밑의 위키 슬러그 꼴
-/// ([`crate::wiki::learn::is_slug`])이다. 슬러그 뒤의 글은 무시한다.
+/// `Lesson:` 뒤에는 빈칸이 오고(`Lesson:x` 는 아니다), 슬러그는 교훈 페이지의 꼴([`crate::wiki::seen::is_lesson`] —
+/// 화면이 교훈으로 그리는 페이지와 한 자)이다. 슬러그 뒤의 글은 무시한다.
+///
+/// **글줄 끝의 문장 부호와 감싼 백틱은 슬러그가 아니다**(리뷰 moai-4s5n.u8x) — [`parse_work`] 가 모델 이름에서 걷는
+/// 그 넷과, 마크다운으로 적은 `` `lessons/x` `` 의 백틱이다. 안 걷던 판은 `Lesson: lessons/x.` 를 말없이 안 셌다.
 pub(crate) fn parse_lesson(line: &str) -> Option<&str> {
     let rest = line.strip_prefix("Lesson:")?;
     if !rest.starts_with(char::is_whitespace) {
         return None;
     }
-    let word = rest.split_whitespace().next()?;
-    let tail = word.strip_prefix(crate::wiki::learn::LESSONS)?.strip_prefix('/')?;
-    crate::wiki::learn::is_slug(tail).then_some(word)
+    let word = rest.split_whitespace().next()?.trim_matches(['`', '.', ',', ';', ':']);
+    crate::wiki::seen::is_lesson(word).then_some(word)
 }
 
 /// 노트 글 **하나**에서 읽은 교훈 슬러그들 — 울타리(```` ``` ````·`~~~`) 안의 줄은 예라 안 센다([`work_in_note`]
-/// 와 같다).
+/// 와 같은 자, [`counted_lines`]).
 pub(crate) fn lessons_in_note(text: &str) -> impl Iterator<Item = &str> + '_ {
-    let mut fenced = false;
-    text.lines().filter_map(move |line| {
-        let bare = line.trim_start();
-        if bare.starts_with("```") || bare.starts_with("~~~") {
-            fenced = !fenced;
-            return None;
-        }
-        if fenced {
-            return None;
-        }
-        parse_lesson(line)
-    })
+    counted_lines(text).filter_map(parse_lesson)
 }
 
 /// `model: [<회사>/]<모델> [tokens=<수>] [(<등급> — <까닭>)] …` 한 줄. `at`·`by` 는 비워 낸다.
@@ -1422,6 +1417,10 @@ mod tests {
         assert_eq!(parse_lesson("Lesson: lessons/"), None);
         assert_eq!(parse_lesson("Lesson: lessons/a/b"), None, "한 겹만");
         assert_eq!(parse_lesson("lesson: lessons/a"), None);
+        // 글줄 끝의 문장 부호와 감싼 백틱은 걷는다 — `parse_work` 가 모델 이름에서 걷는 그 넷이다.
+        assert_eq!(parse_lesson("Lesson: lessons/a."), Some("lessons/a"));
+        assert_eq!(parse_lesson("Lesson: `lessons/a`, again"), Some("lessons/a"));
+        assert_eq!(parse_lesson("Lesson: lessons/README"), None, "교훈 슬러그의 꼴이 아니다");
     }
 
     #[test]

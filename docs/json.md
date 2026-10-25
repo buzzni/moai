@@ -78,9 +78,11 @@ from the checkout you call it in:
 
 - `named_in` — the pages whose text names the row's id or the id of the epic it
   stands in, in `moai wiki ls` order: `slug`, `path`, `title` and `via`, the id
-  the page names (the row's own when a page names both)
+  the page names (the row's own when a page names both). A page already in
+  `lessons` is left out — a page `moai wiki learn` wrote ends with
+  `Learned in: <id>`, and it stands once, as a lesson
 - `related` — up to three sections found from the row's title, best first and
-  one per page, leaving out the pages already in `named_in`: `slug`, `path`,
+  one per page, leaving out the pages already in `lessons` or `named_in`: `slug`, `path`,
   `title`, `line` (counted from 1, the section's heading line), `score`, and
   `heading` and `anchor` unless the section comes before the page's first
   heading. A section stands only when it matches two words of the title that
@@ -95,11 +97,13 @@ from the checkout you call it in:
   merged yet). Only the row's own notes count; a note on a child belongs to
   the child
 
-A page under `lessons/` carries `"lesson": true` in `named_in` and `related`;
-the key is absent on any other page.
+A lesson page (see below) carries `"lesson": true` in `named_in` and
+`related`; the key is absent on any other page.
 
-`wiki` is always there; with no wiki directory, or nothing about the row, its
-three arrays are empty. `wiki_error` stands only when the wiki directory cannot be
+`wiki` is always there, and so are its three arrays. With nothing about the row
+all three are empty. With no wiki directory `named_in` and `related` are empty,
+while `lessons` still names what the row's notes point at — it is read from the
+notes, not the pages. `wiki_error` stands only when the wiki directory cannot be
 used, beside two empty arrays: `kind` takes the words of `moai wiki ls --json`'s
 `error.kind` (`not_a_dir`, `outside`, `failed`) and `said` is one line for a
 person. A missing directory is a wiki not started yet, not an error.
@@ -119,8 +123,15 @@ a fence are examples. Two notes for one lesson on one row count once.
 - `moai wiki ls --json` — every page has `seen_count`, the number of different
   rows whose notes name it (`0` for a page that is not a lesson)
 - `moai wiki show <slug> --json` — `seen`, always there (`[]` for a page that is
-  not a lesson): one `{"id", "at", "by"}` per row, latest note first, where
-  `at` is the row's latest note for this lesson
+  not a lesson): one `{"id", "at", "by", "by_email"}` per row, latest note
+  first, where `at` is the time of the row's latest note for this lesson and
+  `by`/`by_email` are who wrote it, as the journal holds them (`by_email` is
+  absent on a line written without one)
+
+A lesson page is one directly under `lessons/` whose name is lowercase ASCII
+kebab case — the only names a `Lesson:` note can point at. A trailing `.`,
+`,`, `;` or `:` and wrapping backticks around the slug in a note are not part
+of it.
 
 None of this changes a column, a kind or an exit code.
 

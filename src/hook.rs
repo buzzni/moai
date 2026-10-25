@@ -11251,19 +11251,12 @@ mod tests {
         assert!(matches!(got, Decision::Deny(_)), "술어 안의 집기가 규칙 2 를 채웠다\n{got:?}");
     }
 
-    /// **find 이 제 손으로 만드는 파일도 쓰기다**(moai-ati3, 리뷰 moai-514e.mvw 가 넘겼다) —
-    /// `-fprint`·`-fprint0`·`-fls`·`-fprintf` 넷이다. [`FIND_TAKES`] 는 그 값을 "건너뛸 낱말" 로만
-    /// 알아, 빈손으로 규칙 2 를 지나갔다.
-    ///
-    /// **걷는 것이 명령이 아니라 과녁이라 [`Text::Find`] 와 다른 자리다** — 돌 명령이 없고 파일
-    /// 하나가 곧 답이라, 쓰기 축에 곧장 낸다([`shell_scan`] 의 `sed`·`tee` 와 같은 줄이다).
-    ///
-    /// **2026-09-23 에 findutils 4.9 로 쟀다** — 넷 다 그 파일을 만들고, 술어가 아무것도 안 골라도
-    /// (`-false`) 이미 있는 파일을 **0바이트로 비운다**. 값이 없으면 find 이
-    /// `missing argument` 로 거절한다.
     /// **`moai wiki learn` 은 저장소에 파일을 쓴다**(moai-4s5n.n7j). 다른 `moai` 동사는 `.moai/` 만 고쳐 규칙 2
     /// 밖이고, 그 판에서는 이 명령도 통째로 지나갔다 — 2026-10-25 에 0.24.0 바이너리로 쟀다: 아무것도 안 쥔
     /// 세션의 `moai wiki learn …` 은 거절 없이 지났고 `echo hi > src.txt` 는 규칙 2 에 막혔다.
+    ///
+    /// 이 시험은 아래 find 시험의 doc 주석 **앞에** 선다 — 둘 사이에 끼우면 그 주석이 이 시험의 것이 된다(리뷰
+    /// moai-4s5n.u8x).
     #[test]
     fn wiki_learn_counts_as_a_write() {
         let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
@@ -11302,6 +11295,16 @@ mod tests {
         );
     }
 
+    /// **find 이 제 손으로 만드는 파일도 쓰기다**(moai-ati3, 리뷰 moai-514e.mvw 가 넘겼다) —
+    /// `-fprint`·`-fprint0`·`-fls`·`-fprintf` 넷이다. [`FIND_TAKES`] 는 그 값을 "건너뛸 낱말" 로만
+    /// 알아, 빈손으로 규칙 2 를 지나갔다.
+    ///
+    /// **걷는 것이 명령이 아니라 과녁이라 [`Text::Find`] 와 다른 자리다** — 돌 명령이 없고 파일
+    /// 하나가 곧 답이라, 쓰기 축에 곧장 낸다([`shell_scan`] 의 `sed`·`tee` 와 같은 줄이다).
+    ///
+    /// **2026-09-23 에 findutils 4.9 로 쟀다** — 넷 다 그 파일을 만들고, 술어가 아무것도 안 골라도
+    /// (`-false`) 이미 있는 파일을 **0바이트로 비운다**. 값이 없으면 find 이
+    /// `missing argument` 로 거절한다.
     #[test]
     fn a_file_find_writes_by_itself_is_a_write() {
         // `all` 은 집은 것이 있는 판, `held` 는 첫 칸에 선 판이다 — 이웃한 시험들과 같은 이름이다.

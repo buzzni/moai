@@ -2,7 +2,7 @@
 
 ## What happened
 
-A test killed its child's process group with `Command::new("kill").args(["-9", "-<pgid>"])`. Every process the user owned — all agent sessions, tmux, the editor server — died at the moment that test binary started, twice in one day. It looked like an out-of-memory kill or a server restart. (moai-3d6j.idr)
+A test killed its child's process group with `Command::new("kill").args(["-9", "-<pgid>"])`. Every process the user owned — all agent sessions, tmux, the editor server — died at the moment that test binary started, twice in one day. It looked like an out-of-memory kill or a server restart.
 
 ## Why
 

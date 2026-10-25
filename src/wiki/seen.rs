@@ -8,6 +8,8 @@
 //! - **이슈 하나의 하위(`<id>.xxx`)에 단 노트는 그 하위의 것이다** — 저널 줄의 `id` 가 갈라 주니 부모로 올려 세지 않는다
 //! - 이슈가 스냅샷에 없는 저널 줄(지운 줄)은 안 센다 — 제목을 댈 줄이 없다. 아카이브된 줄은 부르는 쪽이 `issues` 에
 //!   얹어 넘긴다
+//! - **교훈 슬러그의 꼴은 [`is_lesson`] 하나다** — 노트가 가리킬 수 있는 꼴(`model::parse_lesson`)과 화면이 교훈으로
+//!   그리는 페이지가 같은 자로 갈린다
 
 use crate::model::{self, Issue, JournalEntry};
 use std::collections::BTreeMap;
@@ -19,7 +21,12 @@ pub struct Seen {
     pub title: String,
     /// 그 이슈에서 이 교훈을 **가장 나중에** 적은 노트의 때.
     pub at: String,
+    /// 그 노트를 적은 사람 — 저널의 `by`·`by_email` 그대로다(CLAUDE.md "파일에는 갈라서, 화면에는 합쳐서"). 메일을
+    /// 버리던 판은 이름이 같은 두 사람을 한 사람으로 냈다(리뷰 moai-4s5n.u8x).
     pub by: String,
+    pub by_email: Option<String>,
+    /// 그 이슈가 아직 안 닫혔는가 — 페이지 없는 노트의 알림([`unpaged`])이 이것으로 가른다.
+    pub open: bool,
 }
 
 /// 교훈 슬러그(`lessons/<slug>`)마다 선 자리 — 최근 먼저, 이슈마다 하나.
@@ -29,8 +36,11 @@ pub type Lessons = BTreeMap<String, Vec<Seen>>;
 pub fn seen_in(issues: &[Issue], journal: &BTreeMap<String, Vec<JournalEntry>>) -> Lessons {
     let mut out: Lessons = BTreeMap::new();
     // 살아 있는 줄과 아카이브의 사본이 같은 id 로 겹쳐 올 수 있다(`archive_duplicate_id`) — 이슈는 하나로 센다.
+    // **뒷줄이 이긴다** — `Load::get` 이 `rfind` 로 고르는 그 줄이다(`archive::read_all` 은 산 줄을 아카이브의 사본 뒤에
+    // 둔다). 앞줄을 고르던 판은 `moai show <id>` 가 새 제목을 낼 때 여기만 아카이브의 낡은 제목을 냈다(리뷰
+    // moai-4s5n.u8x). 그래서 뒤에서부터 걷는다.
     let mut done: std::collections::HashSet<&str> = Default::default();
-    for i in issues {
+    for i in issues.iter().rev() {
         if !done.insert(i.id.as_str()) {
             continue;
         }
@@ -53,6 +63,8 @@ pub fn seen_in(issues: &[Issue], journal: &BTreeMap<String, Vec<JournalEntry>>) 
                 title: i.title.clone(),
                 at: e.ts.clone(),
                 by: e.by.clone(),
+                by_email: e.by_email.clone(),
+                open: !i.status.is_done(),
             });
         }
     }
@@ -73,14 +85,26 @@ pub fn lessons_of(journal: &[JournalEntry]) -> Vec<String> {
     out
 }
 
-/// 이 슬러그가 교훈 페이지인가 — 위키 뿌리 밑 `lessons/` 안이다.
+/// 이 슬러그가 교훈 페이지인가 — 위키 뿌리 밑 `lessons/` **바로 밑의** [`SLUG_RULE`](super::learn::SLUG_RULE) 이름이다.
+///
+/// **`Lesson:` 노트가 가리킬 수 있는 꼴과 한 자다**(`model::parse_lesson` 이 이것을 부른다, 리뷰 moai-4s5n.u8x). `lessons/`
+/// 밑이면 다 교훈으로 치던 판은 `lessons/README`·`lessons/sub/x` 를 `×0`·`[lesson]` 으로 영영 그리면서, 그것을 가리킨
+/// 노트는 꼴이 안 맞아 한 번도 안 셌다.
 pub fn is_lesson(slug: &str) -> bool {
-    slug.strip_prefix(super::learn::LESSONS).is_some_and(|r| r.starts_with('/'))
+    slug.strip_prefix(super::learn::LESSONS).and_then(|r| r.strip_prefix('/')).is_some_and(super::learn::is_slug)
 }
 
 /// 교훈 노트는 있는데 이 체크아웃에 페이지가 없는 슬러그들 — 다른 가지에서 아직 안 든 페이지일 수 있다.
+///
+/// **아직 안 닫힌 이슈의 노트만 센다**(리뷰 moai-4s5n.u8x). 위키 스킬의 훑기는 겹친 교훈을 합치며 한 페이지를 지우고
+/// 그 슬러그를 가리킨 노트는 이력으로 남기라고 한다 — 저널은 덧붙이기만 하니, 닫힌 일의 노트까지 세던 판은 그 알림을
+/// 영영 못 걷었다. 아직 안 든 가지의 페이지는 그 일이 열려 있는 동안의 일이다.
 pub fn unpaged(lessons: &Lessons, has_page: impl Fn(&str) -> bool) -> Vec<&str> {
-    lessons.keys().map(String::as_str).filter(|s| !has_page(s)).collect()
+    lessons
+        .iter()
+        .filter(|(slug, seen)| seen.iter().any(|s| s.open) && !has_page(slug))
+        .map(|(slug, _)| slug.as_str())
+        .collect()
 }
 
 #[cfg(test)]
@@ -153,5 +177,41 @@ mod tests {
         assert!(!is_lesson("lessons"));
         assert!(!is_lesson("lessonsx/y"));
         assert!(!is_lesson("README"));
+        // 노트가 가리킬 수 있는 꼴과 한 자다 — 한 겹 밑의 kebab 슬러그만이다(리뷰 moai-4s5n.u8x).
+        for not in ["lessons/README", "lessons/sub/x", "lessons/Upper", "lessons/snake_case", "lessons/"] {
+            assert!(!is_lesson(not), "{not}");
+        }
+    }
+
+    /// 같은 id 가 둘이면 뒷줄(산 줄)의 제목이다 — `Load::get` 과 같은 자다. 노트를 적은 사람은 이름과 메일 그대로 든다.
+    #[test]
+    fn the_later_copy_names_the_row_and_the_person_keeps_the_email() {
+        let mut live = issue("a-1", "live title");
+        live.status = Status::new("in_progress");
+        let issues = [issue("a-1", "archived title"), live];
+        let mut e = note("a-1", "2026-10-01T00:00:00Z", "Lesson: lessons/x");
+        e.by_email = Some("me@example.com".into());
+        let l = seen_in(&issues, &journal(vec![e]));
+        let s = &l["lessons/x"][0];
+        assert_eq!(
+            (s.title.as_str(), s.by.as_str(), s.by_email.as_deref()),
+            ("live title", "me", Some("me@example.com"))
+        );
+        assert!(s.open);
+    }
+
+    /// 페이지 없는 노트의 알림은 아직 안 닫힌 일의 노트만 센다 — 훑기가 걷은 교훈의 옛 노트가 영영 알림으로 서지 않게.
+    #[test]
+    fn unpaged_counts_only_notes_on_open_rows() {
+        let mut closed = issue("a-2", "closed");
+        closed.status = Status::new("done");
+        let issues = [issue("a-1", "open"), closed];
+        let j = journal(vec![
+            note("a-1", "2026-10-01T00:00:00Z", "Lesson: lessons/branch-only"),
+            note("a-2", "2026-10-01T00:00:00Z", "Lesson: lessons/retired"),
+            note("a-2", "2026-10-02T00:00:00Z", "Lesson: lessons/here"),
+        ]);
+        let l = seen_in(&issues, &j);
+        assert_eq!(unpaged(&l, |s| s == "lessons/here"), ["lessons/branch-only"]);
     }
 }
