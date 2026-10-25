@@ -30,7 +30,11 @@ does not tag — see `CONTRIBUTING.md`.
   issue it came from — `--issue <id>`, or the one row you have picked up, or
   `--issue none` for the page alone. The body needs a `## Do this instead`
   section and must close any code fence or HTML comment it opens. A non-ASCII
-  title needs `--slug` (lowercase ASCII kebab case). It only
+  title needs `--slug` (lowercase ASCII kebab case). The title is written so it
+  reads back as given — `<Foo>`, `&amp;`, `*` and a trailing `#` stay text — and
+  a title that starts with `-` is taken when it has a space in it (`-x` alone
+  goes after `--`). The page appears whole or not at all, so a write killed
+  halfway no longer leaves an empty page blocking that name. It only
   creates: a page already standing there is refused and left as it is. The page
   is written in the checkout you are in, so in a worktree it rides that branch;
   nothing is committed. `--dry-run` shows the path and the text, and asks no
@@ -52,6 +56,32 @@ does not tag — see `CONTRIBUTING.md`.
   the AGENTS block closes with a line for it, the worker steps ask at 7-4 and a
   subagent worker reports a `Lessons:` piece, and closing a review asks the same
   question. Nothing checks it and no hook asks. (moai-4s5n)
+- **`moai wiki ls --json` and `moai wiki search --json` carry `dir_abs`**, the
+  wiki directory as an absolute path in this checkout, beside `dir` (which is
+  relative to it). It is absent only when `wiki_dir` points outside the
+  checkout. (moai-xp7l)
+- **The explorer's detail and the `moai web` issue panel show the wiki about the
+  issue**, after its commits: the pages that name it or its epic and the related
+  sections, as `moai show <id>` lists them (the web panel adds the lessons its
+  notes point at). The explorer reads the wiki once per checkout, so a page
+  written after it opened shows the next time it opens. (moai-xp7l)
+
+### Changed
+
+- **The wiki search in the explorer (`/` in `SPC g w`) and in `moai web`'s wiki
+  tab puts pages in `moai wiki search`'s order** — the pages its words rank,
+  best first, then the pages that only contain the typed letters. (moai-xp7l)
+
+### Fixed
+
+- **`moai note` takes an issue `moai archive` moved away**, and so does
+  `moai wiki learn --issue`; the note goes to the journal and the row stays in
+  the archive. Before, both said the issue was not found, so a lesson learned
+  on old work could not be noted where it came from. (moai-xp7l)
+- **`moai wiki learn` no longer reports `noted: true` when the note was lost** —
+  a hand-edited snapshot made the note's write count as a write, and a journal
+  that could not be written then passed as success. It now fails and prints
+  the `moai note` line to run again. (moai-xp7l)
 
 ## [0.25.0] - 2026-10-25
 
