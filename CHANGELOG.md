@@ -54,10 +54,11 @@ does not tag — see `CONTRIBUTING.md`.
 ### Changed
 
 - **`-` `=` `+` `H` `L` `[` `]` `t` `z` `<` `>` `{` `}` are now the gantt's keys
-  in the explorer.** They do nothing outside the gantt, but a `keys.toml` line
-  that gave one of them to another action now clashes and is dropped, with the
-  one-line notice — that action keeps its default key. Move it to a free key.
-  (moai-i4hf)
+  in the explorer** — in the gantt only. A `keys.toml` line under `[browse]` that
+  gives one of them to another action keeps working in the list and the board;
+  in the gantt that key does the gantt's thing. The gantt's keys have a section
+  of their own, `[gantt]`, one key per line, and a line there that would hide a
+  list key in the gantt is the one that is dropped. (moai-i4hf, moai-l80o)
 - **`starts_on` is no longer refused on rows that are not milestones.** A binary
   from before this release still refuses it: it cannot edit an issue, epic or
   backlog item that carries a start — not even its title, and not `defer` — and
