@@ -81,9 +81,22 @@ pub fn run(ctx: &Ctx, args: TuiArgs) -> R<Vec<String>> {
         // 그 이슈가 없다고 읽는다. 다른 읽기 명령과 같은 길로 간다.
         super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
         let states = ground.columns();
+        let deep = args.deep;
         let entries = listing(ctx, &repo, &load.issues, &origin, &live, (&index, &ground), &path, args)?;
-        let rows: Vec<Row> =
-            entries.into_iter().map(|(e, home)| Row::of(&index, &load.issues, &states, &e, home, ctx.lang())).collect();
+        // **간트는 `--deep` 에만 싣는다**(moai-d86e.b2m) — 그것을 읽는 자는 web 의 간트 탭(`/api/tree`)이고, 한 자리의
+        // 목록을 묻는 쪽에 저장소 전부의 구간 셈을 물리지 않는다. 판단은 `report::gantt` 가 하고 여기는 줄에 얹기만 한다.
+        let wh = ground.here(&load.issues);
+        let gantt = deep.then(|| {
+            crate::report::gantt::gantt(&load.issues, &index, &wh, &repo.config, &crate::model::now(), ctx.zone())
+        });
+        let rows: Vec<Row> = entries
+            .into_iter()
+            .map(|(e, home)| {
+                let mut row = Row::of(&index, &load.issues, &states, &e, home, ctx.lang());
+                row.gantt = gantt.as_ref().zip(e.at()).map(|(g, at)| &g.rows[at]);
+                row
+            })
+            .collect();
         return super::json_line(&rows);
     }
 
@@ -599,7 +612,7 @@ fn handle(seg: &Seg) -> String {
 
 /// `--json` 한 줄의 원소. 파일의 키 순서와 같은 뜻으로 앞에서부터 읽힌다.
 #[derive(serde::Serialize)]
-struct Row {
+struct Row<'g> {
     #[serde(skip_serializing_if = "Option::is_none")]
     id: Option<String>,
     title: String,
@@ -628,6 +641,10 @@ struct Row {
     /// 절대 자리라 `--path` 를 줘도 뿌리에서부터다 — 보는 쪽이 자리 규칙을 다시 짓지 않게 하는 값이다.
     #[serde(skip_serializing_if = "Option::is_none")]
     home: Option<Vec<String>>,
+    /// `--deep` 일 때 id 가 있는 줄마다 서는 계획·실제 구간 — [`crate::report::gantt::Row`] 의 꼴 그대로다(moai-d86e.b2m).
+    /// 바구니에는 없다. 그 안의 키는 늘 선다 — 값이 없으면 `null` 이다(`planned`·`overdue`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gantt: Option<&'g crate::report::gantt::Row<'g>>,
 }
 
 #[derive(serde::Serialize)]
@@ -636,7 +653,7 @@ struct Tally {
     total: usize,
 }
 
-impl Row {
+impl<'g> Row<'g> {
     fn of(
         index: &Index,
         issues: &[Issue],
@@ -644,7 +661,7 @@ impl Row {
         e: &Entry,
         home: Option<Vec<String>>,
         lang: crate::i18n::Lang,
-    ) -> Row {
+    ) -> Row<'g> {
         let dir = matches!(e, Entry::Dir { .. });
         let title = index.label(issues, e, lang);
         match e.at() {
@@ -665,6 +682,7 @@ impl Row {
                     Tally { done, total }
                 }),
                 home,
+                gantt: None,
             },
             None => Row {
                 id: None,
@@ -682,6 +700,7 @@ impl Row {
                 priority: None,
                 progress: None,
                 home,
+                gantt: None,
             },
         }
     }

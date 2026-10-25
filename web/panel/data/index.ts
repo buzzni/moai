@@ -58,6 +58,23 @@ export interface TreeRow {
   progress?: { done: number; total: number }
   /** The handles from the root down to where it stands: ids, `none`, `lost`. */
   home?: string[]
+  /** The planned and actual spans (`report::gantt::Row`), on every row with an id. The page only places them. */
+  gantt?: GanttRow
+}
+
+/** `report::gantt::Row` as serialized. Every key stands; a value that is not there is `null`. */
+export interface GanttRow {
+  id: string
+  kind: string
+  /** Calendar days, either end may be missing; `from` is `own` or, on a group that wrote no day, `members`. */
+  planned: { start: string | null; end: string | null; from: 'own' | 'members' } | null
+  /** UTC instants. `unknown` is a start nobody recorded — not zero, not never. An open span has `end: null`. */
+  actual: { kind: 'not_started' } | { kind: 'unknown' } | { kind: 'span'; start: string; end: string | null }
+  progress: { kind: 'rollup'; done: number; total: number } | { kind: 'column'; name: string }
+  /** Days past the row's own deadline, read in the viewer's zone; `null` when not overdue. */
+  overdue: number | null
+  deferred: boolean
+  blocked_by: { id: string; state: string; root?: string; aside?: string[] }[]
 }
 
 /**
