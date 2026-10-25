@@ -726,7 +726,13 @@ fn settle<'a>(
     // 기록이 끝났는지는 겹친 줄의 칸 시각으로 재야 맞다.
     let (rows, mut narrow): (std::borrow::Cow<'a, [model::Issue]>, _) = match overlaid {
         Some((fresh, beside)) => {
-            let mut away = crate::hook::Away { me: base.me.clone(), archive: base.archive.clone(), ..beside };
+            // 옆 워크트리의 자리(`homes`)는 겹쳐 보기가 안 읽는다 — 같은 git 목록이니 `base` 의 것을 옮긴다.
+            let mut away = crate::hook::Away {
+                me: base.me.clone(),
+                archive: base.archive.clone(),
+                homes: base.homes.clone(),
+                ..beside
+            };
             add_picked(input, repo, &fresh, &mut away);
             (std::borrow::Cow::Owned(fresh), away)
         }

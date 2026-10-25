@@ -677,7 +677,12 @@ fn head_of(me: Option<&Tree>) -> Option<&str> {
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
 pub fn away(root: &Path) -> crate::hook::Away {
     on_disk(root)
-        .map(|d| crate::hook::Away { names: names(d.others()), own: names(d.mine()), ..Default::default() })
+        .map(|d| crate::hook::Away {
+            names: names(d.others()),
+            own: names(d.mine()),
+            homes: d.homes(),
+            ..Default::default()
+        })
         .unwrap_or_default()
 }
 
@@ -705,6 +710,20 @@ impl Disk {
     /// 제 워크트리 — 그 이름 후보가 훅의 제 이름([`crate::hook::Away::own`])이다.
     fn mine(&self) -> impl Iterator<Item = &Tree> {
         self.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t)
+    }
+
+    /// 이 자리가 main 일 때 옆 딸린 워크트리마다 그 moai 뿌리와 이름 후보([`crate::hook::Away::homes`],
+    /// moai-9js2.3xn). 딸린 워크트리에 선 자리와 맨몸 저장소는 비어 있다. 마일스톤 워크트리는 모으는
+    /// 자리라 안 든다([`is_milestone`]).
+    fn homes(&self) -> Vec<(PathBuf, BTreeSet<String>)> {
+        if !self.all.iter().any(|(_, linked, me)| *me && !*linked) {
+            return Vec::new();
+        }
+        self.all
+            .iter()
+            .filter(|(t, linked, me)| *linked && !*me && !is_milestone(t))
+            .map(|(t, ..)| (t.path.join(&self.rel), names([t])))
+            .collect()
     }
 
     /// main 워크트리. 맨몸 저장소면 없다.
@@ -2141,6 +2160,26 @@ mod tests {
         assert!(!is_milestone(&t("/r/.worktrees/moai-nvju", "worktree-moai-nvju")));
         assert!(!is_milestone(&t("/r/x", "milestone/")), "id 없는 가지를 마일스톤으로 읽었다");
         assert!(!is_milestone(&t("/r/x", "milestones/x")));
+    }
+
+    /// **훅이 루트의 쓰기를 돌릴 자리는 main 에 선 세션에만 든다**(moai-9js2.3xn). 딸린 워크트리의 세션은 이미 제
+    /// 워크트리에 쓰고, 마일스톤 워크트리는 일하는 자리가 아니다.
+    #[test]
+    fn homes_stand_only_for_a_session_in_main() {
+        let scratch = crate::scratch::Scratch::fenced("homes");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../t-eeee", "-b", "worktree-t-eeee"]);
+        run(&main, &["worktree", "add", "-q", "../milestone-t-zzzz", "-b", "milestone/t-zzzz"]);
+        let homes = away(&main).homes;
+        assert_eq!(homes.len(), 1, "{homes:?}");
+        assert_eq!(real(&homes[0].0), real(&base.join("t-eeee")));
+        assert!(homes[0].1.contains("t-eeee"), "{homes:?}");
+        assert!(away(&base.join("t-eeee")).homes.is_empty(), "딸린 워크트리의 세션에 자리를 실었다");
     }
 
     /// **마일스톤 가지의 워크트리는 일하는 자리가 아니다**(moai-nvju.ztj, 2026-10-08 사용자 결정). 그
