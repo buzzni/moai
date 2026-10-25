@@ -26938,6 +26938,28 @@ fn wiki_search_exit_codes_follow_wiki_ls() {
     let part = moai(s.path(), &["wiki", "search", "merge"]);
     assert!(!part.status.success(), "못 읽은 페이지가 있는데 0 이다");
     assert!(String::from_utf8_lossy(&part.stdout).contains("docs/a.md:1"), "{}", text(&part));
+    // **비영의 까닭을 기계에도 댄다**(리뷰 moai-g8pt.9rd) — `wiki ls --json` 의 페이지 `error`·`skipped` 와 같은 키다.
+    // 까닭이 stderr 에만 서면 스크립트는 멀쩡해 보이는 `hits` 와 비영 종료만 받는다.
+    let part = moai(s.path(), &["wiki", "search", "merge", "--json"]);
+    assert!(!part.status.success(), "못 읽은 페이지가 있는데 0 이다");
+    let v: serde_json::Value = serde_json::from_slice(&part.stdout).unwrap();
+    assert_eq!(v["unread"][0]["slug"], "bad", "{v}");
+    assert_eq!(v["unread"][0]["path"], "docs/bad.md", "{v}");
+    assert_eq!(v["unread"][0]["error"]["kind"], "failed", "{v}");
+    assert!(v["unread"][0]["error"]["said"].is_string(), "{v}");
+    assert!(v.get("skipped").is_none(), "건너뛴 것이 없는데 `skipped` 가 섰다 — {v}");
+    let ls: serde_json::Value = serde_json::from_slice(&moai(s.path(), &["wiki", "ls", "--json"]).stdout).unwrap();
+    let bad = ls["pages"].as_array().unwrap().iter().find(|p| p["slug"] == "bad").unwrap();
+    assert_eq!(bad["error"], v["unread"][0]["error"], "`wiki ls` 와 다른 꼴이다");
+    std::fs::remove_file(s.path().join("docs/bad.md")).unwrap();
+    let clean = ok(s.path(), &["wiki", "search", "merge", "--json"]);
+    assert!(!clean.contains(r#""unread""#) && !clean.contains(r#""skipped""#), "{clean}");
+    let away = Scratch::new("wiki-search-away");
+    std::os::unix::fs::symlink(away.path(), s.path().join("docs/away")).unwrap();
+    let out = moai(s.path(), &["wiki", "search", "merge", "--json"]);
+    assert!(!out.status.success(), "건너뛴 자리를 두고 0 으로 냈다");
+    let listed = String::from_utf8_lossy(&out.stdout);
+    assert!(listed.contains(r#","skipped":[{"path":"docs/away","kind":"dir_link","said":"#), "{listed}");
 }
 
 /// 워크트리 안에서 부르면 그 워크트리의 `docs/` 를 찾는다 — 트래커만 루트로 간다(`wiki ls` 와 같은 꼴).

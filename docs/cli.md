@@ -2521,8 +2521,11 @@ Options:
   the section before a page's first heading; `snippet` and `snippet_line` are
   absent when the page could not be read. `score` shows the ranking, not a
   contract - trust the order, not the values, and never compare them across
-  queries. When the wiki directory cannot be used it gives {"dir","error"}
-  as `ls` does.
+  queries. A page whose text could not be read is matched by its title alone
+  and named in `unread`, [{"slug","path","error"}] with `error` as `ls`
+  gives it; a place the walk left out is in `skipped`, as in `ls`. Each key
+  stands only when it has something. When the wiki directory cannot be used
+  it gives {"dir","error"} as `ls` does.
 ```
 
 ## `moai tui`

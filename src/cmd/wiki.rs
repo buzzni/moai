@@ -86,12 +86,30 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
     let total = found.total;
     if ctx.json {
         let hits = found.hits.iter().map(HitOut::of).collect();
-        return super::json_line(&Searched { dir: &dir, query: &query, terms: &found.terms, hits, total });
+        let unread = wiki
+            .pages
+            .iter()
+            .filter_map(|p| Some(UnreadOut { slug: &p.slug, path: &p.path, error: told_unread(ctx.lang(), p)? }))
+            .collect();
+        let skipped = skipped_out(ctx.lang(), &wiki.skipped);
+        return super::json_line(&Searched {
+            dir: &dir,
+            query: &query,
+            terms: &found.terms,
+            hits,
+            total,
+            unread,
+            skipped,
+        });
     }
     Ok(crate::view::wiki::search(ctx.lang(), &dir, &query, &found.hits, total))
 }
 
 /// `moai wiki search --json` — `hits` 는 늘 선다(없으면 `[]`). `score` 는 순위를 보이는 값이지 계약이 아니다.
+///
+/// `unread`·`skipped` 는 `wiki ls --json` 의 페이지 `error` 와 `skipped` 를 같은 꼴·같은 키로 옮긴 것이고, 없으면 키가
+/// 없다(리뷰 moai-g8pt.9rd). 못 읽은 페이지·건너뛴 자리가 있으면 종료 코드가 비영인데, 까닭이 stderr 의 사람 말에만
+/// 서면 기계는 멀쩡해 보이는 `hits` 와 비영 종료만 받는다 — `Listed::skipped` 와 같은 까닭이다(moai-ihu4.x94).
 #[derive(serde::Serialize)]
 struct Searched<'a> {
     dir: &'a str,
@@ -99,6 +117,19 @@ struct Searched<'a> {
     terms: &'a [String],
     hits: Vec<HitOut<'a>>,
     total: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unread: Vec<UnreadOut<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skipped: Vec<SkippedOut<'a>>,
+}
+
+/// 본문을 못 읽은 페이지 하나 — 그 페이지는 제목으로만 찾혔다. `error` 는 `wiki ls --json` 의 그 페이지 `error` 다
+/// (크기 상한의 `too_large` 도 든다 — 그것만으로는 종료 코드가 0 이다).
+#[derive(serde::Serialize)]
+struct UnreadOut<'a> {
+    slug: &'a str,
+    path: &'a str,
+    error: Told,
 }
 
 /// hit 하나. `heading`·`anchor` 는 첫 머리글 앞의 절이면 없고, `snippet`·`snippet_line` 은 보일 줄이 없으면(본문을
@@ -222,16 +253,7 @@ pub(crate) fn listed_json(lang: Lang, dir: &str, read: &Result<Wiki, DirTrouble>
     match read {
         Ok(w) => {
             let pages = w.pages.iter().map(|p| PageOut::of(lang, p)).collect();
-            let skipped = w
-                .skipped
-                .iter()
-                .map(|s| SkippedOut {
-                    path: &s.path,
-                    kind: s.why.kind(),
-                    said: crate::view::wiki::skip_reason(lang, s),
-                })
-                .collect();
-            super::json_line(&Listed { dir, pages, skipped })
+            super::json_line(&Listed { dir, pages, skipped: skipped_out(lang, &w.skipped) })
         }
         Err(t) => {
             let said = crate::view::wiki::dir_trouble(lang, dir, t);
@@ -258,6 +280,20 @@ struct Listed<'a> {
     /// 코드가 비영인데, 까닭이 stderr 의 사람 말에만 서면 기계는 성해 보이는 `pages` 와 비영 종료만 받는다.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     skipped: Vec<SkippedOut<'a>>,
+}
+
+/// 걷다가 건너뛴 자리들의 `--json` 꼴 — `wiki ls` 와 `wiki search` 가 같은 자로 짓는다.
+fn skipped_out(lang: Lang, skipped: &[wiki::Skipped]) -> Vec<SkippedOut<'_>> {
+    skipped
+        .iter()
+        .map(|s| SkippedOut { path: &s.path, kind: s.why.kind(), said: crate::view::wiki::skip_reason(lang, s) })
+        .collect()
+}
+
+/// 페이지 본문을 못 읽은 까닭의 `--json` 꼴 — 다 읽었으면 없다. `wiki ls`·`show` 의 `error` 와 `wiki search` 의
+/// `unread[].error` 가 같은 자로 짓는다.
+fn told_unread(lang: Lang, p: &Page) -> Option<Told> {
+    p.error.as_ref().map(|u| Told { kind: u.kind(), said: crate::view::wiki::unread(lang, p, u) })
 }
 
 /// 건너뛴 자리 하나 — `path` 는 체크아웃에서의 상대 경로, `kind` 는 `dir_link`·`not_utf8`·`unreadable`.
@@ -320,7 +356,7 @@ impl<'a> PageOut<'a> {
             linked_from: &p.linked_from,
             linked_from_partial: false,
             conflict: p.conflict,
-            error: p.error.as_ref().map(|u| Told { kind: u.kind(), said: crate::view::wiki::unread(lang, p, u) }),
+            error: told_unread(lang, p),
             body: None,
         }
     }
