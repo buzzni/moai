@@ -58,6 +58,8 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
 - `Person:` — `here`, or `away` (below)
+- `Worktree:` — the same words to every worker: you never go into the worktree, you aim at it
+  ("Stay in the root")
 
 Ask two things where the window stands now, before you move anywhere.
 **If this window runs `moai-supervise` itself**, it is a supervisor, not a worker: do
@@ -72,18 +74,31 @@ a worktree.
 A message that hands over no work is not work: if it asks something, answer it with
 `SendMessage` to its `from`, and end the turn.
 
+## Stay in the root
+
+**Never call `EnterWorktree` — in a session or in a subagent.** Every call into `.worktrees/`
+asks the person watching to approve it, and no allow rule turns that off; a subagent has no
+such tool at all. You stay in the root — every Bash call starts there again, whatever an
+earlier call moved into. So where a step goes into the worktree, aim at it instead:
+`cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`, and every Read and
+Edit takes an absolute path under it. Where a step says you are back in the root, you are
+there already. That holds for resolving a conflict too.
+
+**Rule 2 of the hook watches the root for you.** While everything you hold has its worktree
+standing, a write to the root checkout — a relative `src/x.rs`, say — is refused, and the
+refusal names the same file inside the worktree. Write there instead; never work around it.
+
+A window that already stands inside a worktree (an earlier session went in) comes out with
+`ExitWorktree(keep)` first, as "The assignment" says.
+
 ## In a subagent
 
 When `Worker:` says `subagent`, the supervisor raised you with `Agent` inside its own session,
 and four things a session has are not yours. The rule for each stands here once; a step that
 needs more says so in a line of its own, **In a subagent**.
 
-- **No `EnterWorktree` or `ExitWorktree`.** You stay in the root — every Bash call starts
-  there again, whatever an earlier call moved into. So where a step goes into the worktree,
-  aim at it instead: `cd <root>/.worktrees/<epic> && …` or `git -C <root>/.worktrees/<epic> …`,
-  and every Read and Edit takes an absolute path under it. Where a step comes back to the root
-  with `ExitWorktree(keep)`, you are there already. The git shapes in "Before the steps" bind a
-  session that went into a worktree, not you
+- **No `EnterWorktree` or `ExitWorktree`.** A session does without them too ("Stay in the
+  root"); for you they do not exist
 - **No `AskUserQuestion`, and nobody watches you.** Where a step asks the person, hand back
   instead and end (4). `Person: away` still decides by recommendation, as below
 - **No `/model`.** The model and the effort you were raised on stay (`Model:` above)
@@ -121,11 +136,12 @@ stop. A merge that lands on the wrong HEAD leaves no reference at all once `bran
 Work inside a milestone merges in the milestone's worktree, not in the root, and that worktree
 gets the same check before the merge ("The milestone branch").
 
-**Ask it where you already are.** The merge and the tracker commits (8, 11) come after
-`ExitWorktree(keep)`, so you are back in the root and it is one command. From inside the
-worktree, do not ask with `git -C <root> …` — that shape is
-refused there (the git shapes below): `ExitWorktree(keep)`, ask, and if work is left in that
-worktree go back in with `EnterWorktree(path)`
+**Ask it where you already are.** You never leave the root ("Stay in the root"), so the
+merge and the tracker commits (8, 11) and this check are plain commands there.
+Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
+commit from sealing someone's open merge; the rows other sessions have not committed yet ride
+along, and that is expected — they stand in the shared file already, and the next tracker
+commit is where they go into history
 
 **Some repositories keep the tracker out of git** — `.moai` in `.gitignore` or
 `.git/info/exclude`. Ask once, in the root, before your first tracker commit — the one in 11,
@@ -136,26 +152,6 @@ On a non-zero code every tracker commit in these steps — each "commit with a p
 does not exist: the `moai` writes still land in the root's file, and there is nothing to commit.
 Skip them and nothing else; the merge and the branches still go through git. A zero code is the
 usual case, and every step stands as written
-
-**Git in a Claude Code worktree session: one plain command per call.** The harness reads each Bash call
-and refuses what it cannot prove stays inside your worktree, so the shape matters more than the
-intent.
-- One command per call. `git add X && git commit …` is refused whole — so is anything with
-  `&&`, `;` or `||`
-- `-m "…"` on one plain command is fine; a **heredoc** message is refused.
-  When the message runs past one line, write it with Write and use `git commit -F <that file>`
-- Several git steps in a row: put them in a script file and call it as a bare
-  `bash /abs/path/script.sh` with literal arguments and nothing appended — `&&`, a pipe or
-  `$PWD` after it is refused
-- Never build a command or a path with a variable or `$(…)` — that is refused as
-  `computed at runtime`
-- **Do not aim git at the root from inside the worktree.** `git -C <root> status`, `commit` and
-  `symbolic-ref` are refused even as single plain commands. Root work happens after
-  ExitWorktree(keep), and the tracker needs no `-C` at all — `moai` moves that by itself
-- Before a tracker commit in the root, look at `git status -- .moai/` first. The path keeps the
-  commit from sealing someone's open merge; the rows other sessions have not committed yet ride
-  along, and that is expected — they stand in the shared file already, and the next tracker
-  commit is where they go into history
 
 ## The milestone branch
 
@@ -182,10 +178,8 @@ first — look at `git worktree list` again and carry on with what stands
 If the repository's own worktree convention adds something to a new worktree (a link for
 the build output, say), add it to this one too.
 
-**Git aimed at the milestone's worktree runs from the root**, after `ExitWorktree(keep)` —
-there `git -C .worktrees/milestone-<milestone id> …` is one plain command and goes
-through. From inside your epic's worktree it is refused like any git aimed outside it (the
-git shapes above), so do not try it there. That worktree is shared by every worker of the
+**Git aimed at the milestone's worktree runs from the root**, where you stand —
+`git -C .worktrees/milestone-<milestone id> …`. That worktree is shared by every worker of the
 milestone, like the root: if git refuses a merge there because one is already open
 (`MERGE_HEAD`), it is another worker's — never `merge --abort` it; wait for it to finish
 and run yours again. Before you merge into it, check its HEAD the way
@@ -196,8 +190,8 @@ supervisor
 **The milestone branch takes `<root branch>` in only at the release.** If this epic needs a
 fix that landed on `<root branch>` after the milestone branch split off, take it in at that
 moment, from the root, and then pull the milestone branch in 6 as usual. If it stops on a
-conflict, resolve it inside the milestone's worktree (`EnterWorktree(path)` from the root),
-never in the root
+conflict, resolve it inside the milestone's worktree, by its absolute path ("Stay in the
+root"), never in the root
 
     git -C .worktrees/milestone-<milestone id> merge --no-ff <root branch> -m "merge: take <root branch> in for <epic>"
 
@@ -255,23 +249,21 @@ never in the root
    and name it in the report. Handed an epic `from step 2`, measure first as 1 does, before
    you pick anything up
 3. Right after 2, branch from the local <base branch> with
-   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` and go in with
-   `EnterWorktree(path)` from the root. The name is the unfolded epic's id, not the backlog's.
+   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` from the root, and do
+   not go in: from here on aim every command at `<root>/.worktrees/<epic>` ("Stay in the
+   root"). If the repository's CLAUDE.md says what a new worktree gets (a link for the build
+   output, say), do that first. The name is the unfolded epic's id, not the backlog's.
    Inside a milestone the milestone branch has to stand first — raise it if it is missing
    ("The milestone branch").
    Until the worktree stands, the other sessions in the root read this member as their own focus.
    **If the root is not the top of the repository** (a subdirectory project in a monorepo) the
-   worktree stands for the whole repository, so once inside, move to the same subdirectory in
-   it and work there — standing at the worktree top, `moai` walks up and finds the root's
+   worktree stands for the whole repository, so aim at the same subdirectory in it and work
+   there — standing at the worktree top, `moai` walks up and finds the root's
    `.moai` to write, and the hook does not count edits under `.worktrees/`. `<subdir>` is that
    relative path, filled in by the supervisor; if the message carries no `Subdir:`, the root
    **is** the top and this step does not exist
 
-       cd <subdir>
-   **In a subagent** raise it with the same line — you are in the root — and do not go in:
-   from here on aim every command at `<root>/.worktrees/<epic>` ("In a subagent"), or at
-   `<root>/.worktrees/<epic>/<subdir>` for a subdirectory project. If the repository's
-   CLAUDE.md says what a new worktree gets (a link for the build output, say), do that first
+       cd <root>/.worktrees/<epic>/<subdir> && …
 4. Do not guess a design decision that is not in the notes — ask with `AskUserQuestion`;
    a person is watching the worker's window. With `Person: away` in the message, decide by
    recommendation instead ("When the person is away").
@@ -507,8 +499,7 @@ never in the root
     git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>
    If it did not, write nothing. **Nothing checks this**
 
-8. Come back to the root with `ExitWorktree(keep)` — remove the worktree from inside it and
-   this window stands in a directory that is gone.
+8. Merge from the root, where you stand ("Stay in the root").
    Before merging outside a milestone, check that the root stands on <root branch> — if it
    does not, do not merge: tell the supervisor
 
@@ -526,8 +517,8 @@ never in the root
    If the merge is refused over the root's uncommitted `.moai` — yours since 2 or another
    session's — take them in first with a commit with a path, as in 11, its subject
    `chore(tracker): take the root's rows in before <epic> merges`. If it stops on a conflict,
-   do not resolve it where it stopped — undo with `git merge --abort`, go back into the worktree with
-   `EnterWorktree(path)` and run again from 6
+   do not resolve it where it stopped — undo with `git merge --abort`, aim at the worktree again
+   and run again from 6
 9. Once the merge has really landed, remove the worktree and the branch from the root with
    `git worktree remove .worktrees/<epic>` and `git branch -d worktree-<epic>`.
    **Inside a milestone delete the branch in the milestone's worktree** —
@@ -641,21 +632,20 @@ A session died holding a member of `<epic>`, the epic the message's first line n
 member still stands picked up. Read how far it got (`moai show <epic>`, its history and
 notes), then
 
-- If the worktree is there, go in with `EnterWorktree(path)` — in a subagent, aim at it
-  ("In a subagent") — read how far it got with `git log <base branch>..HEAD` and
+- If the worktree is there, aim at it ("Stay in the root") — read how far it got with `git log <base branch>..HEAD` and
   `git status`, and carry on
 - If it is not, raise it again from the root. If the branch survives, on that branch
   (`git worktree add .worktrees/<epic> worktree-<epic>`); if it does not,
   `git worktree add -b worktree-<epic> .worktrees/<epic> <base branch>` — inside a milestone,
   raise the milestone branch first if it is missing ("The milestone branch")
 - **If the root is not the top of the repository** (a subdirectory project in a
-  monorepo), go into the worktree and then move to the same subdirectory inside it and
-  work there — standing at the top, `moai` finds and writes the root's `.moai`, and the
-  hook does not count edits under `.worktrees/`. `<subdir>` is that relative path, filled in
+  monorepo), aim at the same subdirectory inside the worktree and work there — standing
+  at the top, `moai` finds and writes the root's `.moai`, and the hook does not count edits
+  under `.worktrees/`. `<subdir>` is that relative path, filled in
   by the supervisor; with no `Subdir:` in the message, the root is the top and this step
   does not exist
 
-      cd <subdir>
+      cd <root>/.worktrees/<epic>/<subdir> && …
 - The member's column is already picked up — do not pick it up again. **If its assignee
   is not you** (`moai show <member>`), ask the person watching before you carry it on; on
   a yes, `moai mv <member> <its column> --from <its column> --take -m '<who said yes>'` — the

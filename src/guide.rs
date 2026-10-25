@@ -1101,10 +1101,12 @@ const REVIEW_IN_SESSION: &str = "the review this session has, else read the diff
 /// 표를 싣는 것은 `moai` 스킬 하나다([`verbs_section`]) — 세 벤더에 다 심기는 스킬이다. 감독 스킬과 그 일꾼 글은
 /// Claude Code 에만 가니(moai-obxm) 도구를 바로 적는다.
 pub const VERBS: [Verb; 8] = [
+    // **Claude 는 들지 않는다**(moai-9js2, 2026-10-25 사용자 결정) — `.worktrees/` 로 드는 `EnterWorktree` 는 부를
+    // 때마다 사람에게 승인을 묻고, allow 규칙으로 안 꺼진다. 그래서 칸이 도구가 아니라 "들지 말고 겨눈다" 다.
     Verb {
-        step: "Enter the worktree",
+        step: "Work in the worktree",
         words: [
-            "`EnterWorktree(path)` from the root",
+            "stay in the root and aim every call at its absolute path — not `EnterWorktree`, which asks the person to approve each call into `.worktrees/`",
             "`cd` into it and run every command there",
             "`cd` into it and run every command there",
         ],
@@ -1112,7 +1114,7 @@ pub const VERBS: [Verb; 8] = [
     Verb {
         step: "Come back to the root",
         words: [
-            "`ExitWorktree(keep)`",
+            "nothing — you never left; a window already inside a worktree uses `ExitWorktree(keep)`",
             "`cd` to the root and run every command there",
             "`cd` to the root and run every command there",
         ],
@@ -2435,8 +2437,8 @@ and if the message does not arrive, deliver it into the tab —
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
-`<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
-reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
+`<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
+worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
 `<milestone>` is the release that backlog already stands under **and that is still alive**,
 read in 1 — `none` when it stands under none, `none` when the one it stands under has
@@ -2463,6 +2465,8 @@ you measured and your reason; `<effort>` is that role's effort (2-1), the same v
 to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
 left at the close says `<model>` instead of what actually did the work.
 `<worker kind>` is `subagent` or `session` — how you raised it in 2.
+The `Worktree:` line goes as written to both: a session's `EnterWorktree` into
+`.worktrees/` asks its person to approve every call, and no allow rule turns that off.
 `<subagent ladder>` is the models the worker may hand pieces of the work to, copied from the
 `moai models --json` of this round, each role with the effort 2-1 reads for it —
 `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)`, the
@@ -4352,6 +4356,11 @@ const NO_REVIEW_COLUMN: &str = "`review` is not a column";
 ///
 /// **줄 머리의 낱말이 계약이다** — 일꾼 글이 `Model:`·`Base branch:` 따위를 그 이름으로 가리킨다.
 /// `the_message_carries_every_slot_the_steps_read` 가 둘을 견준다.
+/// 메시지의 한 줄 — **워크트리에 들지 말라**(moai-9js2.3tl, 2026-10-25 사용자 결정). 걸음 파일의 "Stay in the root"
+/// 절이 같은 말을 하지만, 그 절을 읽기 전에 `EnterWorktree` 를 부르는 창이 있다 — 그 한 번이 사람에게 승인 창을 띄운다.
+/// 새 일과 거둔 일(감독 0)이 같은 줄을 싣는다: 거둔 일은 첫 두 줄만 바꿔 보낸다.
+const STAY_LINE: &str = "Worktree: stay in the root and reach it by absolute path — never EnterWorktree, every call into .worktrees/ asks the person to approve it";
+
 fn message() -> String {
     format!(
         r#"    You are handed backlog <id> — <title>. Read <steps file> and follow its steps from step 1.
@@ -4367,7 +4376,8 @@ fn message() -> String {
     Due: <due>
     Root: <root>
     Subdir: <subdir>
-    Person: <person>"#
+    Person: <person>
+    {STAY_LINE}"#
     )
 }
 
@@ -4519,6 +4529,8 @@ said yes to taking over a row that is not yours, say — belongs to the assignme
 - `Subdir:` — `<subdir>`, only for a subdirectory project in a monorepo (3). Without it the
   root is the top of the repository
 - `Person:` — `here`, or `away` (below)
+- `Worktree:` — the same words to every worker: you never go into the worktree, you aim at it
+  ("Stay in the root")
 
 Ask two things where the window stands now, before you move anywhere.
 **If this window runs `moai-supervise` itself**, it is a supervisor, not a worker: do
