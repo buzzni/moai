@@ -19,7 +19,7 @@ import {
   archiveDue, loadAllRows, loadArchived, loadBoot, loadDetail, loadGroups, loadMatches, loadProjects, loadTree, loadWikiListing, loadWikiPage, matchEndpoints, sameGroups, withArchive,
   type Boot, type Loaded,
 } from './data/source.js'
-import { effectiveZone, useZone } from './data/zone.js'
+import { effectiveZone, useZone, zoneNow } from './data/zone.js'
 import { copyFor, fill, speaks } from './i18n/index.js'
 import { wireKeys } from './keys/wiring.js'
 import { createStore, matchKey, type BoardData, type State } from './store.js'
@@ -153,9 +153,10 @@ async function start(): Promise<void> {
     // are put on them when they come.
     // Each load is a change seen through: a read of it is never handed a run another load started before it.
     const { sort, view } = store.getState()
+    const zone = zoneNow()
     // `SPC v w` (on by default): the other worktrees' rows over the list, as the TUI's explorer opens.
     const listing = loadAllRows(client, PRIORITY.list, load, view.worktree)
-    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived)
+    const placing = loadTree(client, sortQuery(sort), PRIORITY.list, load, view.worktree, view.showArchived, zone)
     const counting = loadGroups(client, PRIORITY.list, load, view.worktree)
     let counted: Awaited<typeof counting> | undefined
     void counting.then((groups) => (counted = groups))
@@ -199,8 +200,9 @@ async function start(): Promise<void> {
     // The order changed while this read ran: the refresh it asked for joined this one (data/refresh.ts), which read
     // the tree in the order before. Read it again in the order on screen.
     // So does the worktree overlay, or the archive shown, turned while it ran (the tree is asked for both).
+    // The zone picked while it ran is the same: the tree's `overdue` was judged in the zone before.
     const after = store.getState()
-    if (after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
+    if (zoneNow() !== zone || after.sort !== sort || after.view.worktree !== view.worktree || after.view.showArchived !== view.showArchived) setTimeout(() => void refresher.refresh(), 0)
     return true
   }
 
@@ -246,6 +248,8 @@ async function start(): Promise<void> {
     if (state.sort !== previous.sort && state.board.value) void refresher.refresh()
     // The worktree overlay turned on or off: the rows are read again with it or without it.
     if (state.view.worktree !== previous.view.worktree && state.board.value) void refresher.refresh()
+    // The zone the page draws in turned (`SPC o t`, or the boot's arrived): the tree's `overdue` is judged in it.
+    if (effectiveZone(state.zone, state.boot?.timezone) !== effectiveZone(previous.zone, previous.boot?.timezone) && state.board.value) void refresher.refresh()
   })
 
   // The archive is read when archived rows are shown (`SPC v o`), each time they are turned on, once the active

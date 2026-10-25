@@ -25,6 +25,8 @@ pub enum Param {
     Sort,
     Reverse,
     Worktree,
+    /// 페이지가 날짜를 그리는 시간대 이름 — 자식의 `TZ` 로 간다([`zone_of`]), argv 에는 안 든다.
+    Tz,
 }
 
 impl Param {
@@ -37,6 +39,7 @@ impl Param {
             Param::Sort => "sort",
             Param::Reverse => "reverse",
             Param::Worktree => "worktree",
+            Param::Tz => "tz",
         }
     }
 }
@@ -65,7 +68,7 @@ pub const PROFILES: &[Profile] = &[
     Profile {
         route: "/api/tree",
         head: &["tui", "--deep"],
-        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived],
+        params: &[Param::Sort, Param::Reverse, Param::Worktree, Param::Archived, Param::Tz],
         without_archive: true,
     },
     Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], without_archive: false },
@@ -78,6 +81,8 @@ pub const PROFILES: &[Profile] = &[
 const FILTER_MAX: usize = 2048;
 /// 그 밖의 값 하나의 상한(바이트).
 const VALUE_MAX: usize = 512;
+/// 시간대 이름의 상한(바이트) — 가장 긴 tzdb 이름도 40자 안이다.
+const ZONE_MAX: usize = 64;
 
 /// 서버가 자식을 띄우기 전에 거절하는 모양 — 말은 [`Bad::said`] 가 고른다.
 #[derive(Debug, PartialEq, Eq)]
@@ -292,6 +297,22 @@ fn shape(name: &str, value: &str, max: usize) -> Result<(), Bad> {
     Ok(())
 }
 
+/// 시간대 이름의 모양 — tzdb 이름의 글자(`Asia/Seoul`·`Etc/GMT+9`·`America/Port-au-Prince`)만, 첫 글자는 영숫자다.
+/// 첫 글자가 `/` 면 자식의 `TZ` 가 경로로 읽고(`tz::tz_name`), `:` 는 떼어 버리니 둘 다 안 받는다. 모르는 이름은 여기서
+/// 안 막는다 — 자식이 UTC 로 떨어지는 그 길이 한 벌이다(`tz::Zone::named`).
+fn zone_shape(name: &str, value: &str) -> Result<(), Bad> {
+    shape(name, value, ZONE_MAX)?;
+    let first = value.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric());
+    let fits = value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'-' | b'/'));
+    (first && fits).then_some(()).ok_or_else(|| Bad::Shape(name.to_string()))
+}
+
+/// 쿼리가 낸 시간대 — 모양은 [`argv`] 가 이미 쟀다. 자식은 이것을 `TZ` 로 받아, 늦었는가(`overdue`)를 페이지가 그리는
+/// 시간대로 잰다(moai-vj8w.7sh). 안 줬으면 `None` 이고 자식은 서버의 시간대 그대로다.
+pub fn zone_of(query: &[(String, String)]) -> Option<&str> {
+    query.iter().find(|(n, _)| n == Param::Tz.name()).map(|(_, v)| v.as_str())
+}
+
 /// 틀에 쿼리를 채운다. **틀이 안 받는 이름과 두 번 준 이름은 거절**이다 — 하나를 조용히 버리면 페이지가 낸
 /// 거르개가 안 먹은 채 전체 목록이 돌아온다.
 ///
@@ -336,6 +357,9 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
                     return Err(Bad::Shape(name.clone()));
                 }
                 fields = Some("id");
+            }
+            Param::Tz => {
+                zone_shape(name, value)?;
             }
             Param::Sort => {
                 shape(name, value, VALUE_MAX)?;
@@ -425,6 +449,27 @@ mod tests {
         let mut out = strs(&v);
         out.push(format!("--fields={ROW_FIELDS}"));
         out
+    }
+
+    /// **`tz` 는 `/api/tree` 만 받고 argv 에는 안 든다**(moai-vj8w.7sh) — 자식의 `TZ` 로 가니 틀이 바뀌면 안 된다.
+    /// 모양은 tzdb 이름의 글자뿐이다.
+    #[test]
+    fn tz_is_a_zone_name_for_the_tree_alone_and_leaves_the_argv_as_it_was() {
+        let plain = argv_of("/api/tree", &[]).unwrap().unwrap();
+        let asked = q(&[("tz", "Asia/Seoul")]);
+        assert_eq!(argv_of("/api/tree", &asked).unwrap().unwrap(), plain);
+        assert_eq!(zone_of(&asked), Some("Asia/Seoul"));
+        assert_eq!(zone_of(&[]), None);
+        for ok in ["UTC", "Etc/GMT+9", "America/Port-au-Prince", "America/Argentina/Buenos_Aires"] {
+            assert!(argv_of("/api/tree", &q(&[("tz", ok)])).unwrap().is_ok(), "{ok}");
+        }
+        for bad in ["/etc/localtime", ":Asia/Seoul", "Asia Seoul", "JST-9<", "a\nb", "한국", "../x?", &"A".repeat(65)]
+        {
+            assert!(argv_of("/api/tree", &q(&[("tz", bad)])).unwrap().is_err(), "{bad}");
+        }
+        assert!(matches!(argv_of("/api/tree", &q(&[("tz", "")])).unwrap(), Err(Bad::Empty(_))));
+        assert!(matches!(argv_of("/api/tree", &q(&[("tz", "UTC"), ("tz", "UTC")])).unwrap(), Err(Bad::Twice(_))));
+        assert!(matches!(argv_of("/api/rows", &asked).unwrap(), Err(Bad::Unknown(_))));
     }
 
     #[test]

@@ -74,8 +74,8 @@ export interface GanttRow {
   actual: { kind: 'not_started' } | { kind: 'unknown' } | { kind: 'span'; start: string; end: string | null }
   progress: { kind: 'rollup'; done: number; total: number } | { kind: 'column'; name: string }
   /**
-   * Days past the row's own deadline, `null` when not overdue. moai counts them in its own zone (the server machine's,
-   * `ctx.zone()`), not in the zone this page draws in (`SPC o t`); the page places the verdict and never recounts it.
+   * Days past the row's own deadline, `null` when not overdue. moai counts them in the zone the tree was asked in
+   * (`/api/tree?tz=`, the zone this page draws in, `SPC o t`); the page places the verdict and never recounts it.
    */
   overdue: number | null
   deferred: boolean

@@ -289,7 +289,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     };
     if write {
         return match api::write_argv_of(&req.path, &query) {
-            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, lang),
+            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, None, lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => not_allowed(),
         };
@@ -313,7 +313,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             Err(refused) => refused,
         },
         path => match api::argv_of(path, &query) {
-            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, lang),
+            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, api::zone_of(&query), lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => {
                 let said = fill(say(lang, "web.no_path"), &[("path", &req.path)]);
@@ -375,8 +375,8 @@ fn page(kind: &'static str, body: &'static str) -> Response {
 
 /// 자식을 돌려 봉투로 낸다. **자식이 돌았으면 200 이다** — 자식의 실패는 봉투의 `exit`·`err` 가 말한다.
 /// 4xx·5xx 는 서버가 답을 못 낸 판이다.
-pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, lang: Lang) -> Response {
-    match site.spawner.run_in(args, cwd) {
+pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, zone: Option<&str>, lang: Lang) -> Response {
+    match site.spawner.run_in(args, cwd, zone) {
         Ok(done) => Response::new(200, http::JSON, run::envelope(&done).into_bytes()),
         Err(run::Fault::Timeout) => {
             let secs = run::TIME_LIMIT.as_secs().to_string();

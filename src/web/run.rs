@@ -63,8 +63,8 @@ impl Spawner {
 
     /// `cwd` 에서 돌린다 — 보통은 [`Spawner::cwd`] 고, 페이지가 고른 걸어 둔 프로젝트면 그 자리다
     /// (`project=`, [`super::project_of`]).
-    pub fn run_in(&self, args: &[String], cwd: &std::path::Path) -> Result<Done, Fault> {
-        self.run_within(args, cwd, TIME_LIMIT)
+    pub fn run_in(&self, args: &[String], cwd: &std::path::Path, zone: Option<&str>) -> Result<Done, Fault> {
+        self.run_within(args, cwd, zone, TIME_LIMIT)
     }
 
     /// [`Spawner::run_in`] 의 몸통 — 시한을 받는 것은 시험이 짧게 재려고서다.
@@ -72,11 +72,22 @@ impl Spawner {
     /// **파이프가 닫히기를 먼저 기다린다**(`git::finish_within` 과 같은 차례) — 자식이 끝나면 곧 닫히고, 상한을
     /// 넘긴 쪽은 거기서 그만 읽고 바로 알린다. 일정한 간격으로 깨어 묻던 판은 끝난 자식을 그 간격만큼 늦게 알았고,
     /// 자식이 끝난 뒤의 읽기에는 시한이 없어 파이프를 쥔 손자 하나에 요청이 끝없이 섰다.
-    fn run_within(&self, args: &[String], cwd: &std::path::Path, limit: Duration) -> Result<Done, Fault> {
+    fn run_within(
+        &self,
+        args: &[String],
+        cwd: &std::path::Path,
+        zone: Option<&str>,
+        limit: Duration,
+    ) -> Result<Done, Fault> {
         let mut cmd = Command::new(&self.exe);
         cmd.arg("--json");
         if let Some(user) = &self.user {
             cmd.arg(format!("--user={user}"));
+        }
+        // 페이지가 날짜를 그리는 시간대(`/api/tree?tz=`)를 자식의 시간대로 준다 — `tz::Zone::system` 이 읽는 `TZ` 하나다.
+        // 새 깃발이나 설정이 아니고, 안 준 끝점은 서버의 환경을 그대로 물려받는다.
+        if let Some(zone) = zone {
+            cmd.env("TZ", zone);
         }
         cmd.args(args).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(Fault::Spawn)?;
@@ -276,7 +287,7 @@ mod tests {
         let s = crate::scratch::Scratch::new("web-run-argv");
         let exe = planted(s.path(), "echo.sh", "#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
         let spawner = Spawner { exe, cwd: s.path().to_path_buf(), user: Some("Bob Lee (b@b)".into()) };
-        let got = spawner.run_in(&["show".into(), "--grep=a b".into()], &spawner.cwd).unwrap();
+        let got = spawner.run_in(&["show".into(), "--grep=a b".into()], &spawner.cwd, None).unwrap();
         assert_eq!(got.exit, 0);
         assert_eq!(String::from_utf8(got.stdout).unwrap(), "--json\n--user=Bob Lee (b@b)\nshow\n--grep=a b\n");
     }
@@ -293,7 +304,7 @@ mod tests {
         {
             let spawner = Spawner { exe: planted(s.path(), name, body), cwd: s.path().to_path_buf(), user: None };
             let started = Instant::now();
-            let got = spawner.run_within(&[], &spawner.cwd, Duration::from_millis(300));
+            let got = spawner.run_within(&[], &spawner.cwd, None, Duration::from_millis(300));
             assert!(matches!(got, Err(Fault::Timeout)), "{name}: {:?}", got.err());
             assert!(started.elapsed() < Duration::from_secs(2), "{name}: {:?}", started.elapsed());
         }

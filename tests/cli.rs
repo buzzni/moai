@@ -31250,6 +31250,32 @@ fn web_tree_leaves_out_the_archive_unless_asked_and_refuses_a_bogus_sort() {
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
 }
 
+/// **간트의 `overdue` 는 페이지가 그리는 시간대로 잰다**(moai-vj8w.7sh) — `tz=` 가 자식의 시간대가 된다. 서버는 UTC 로
+/// 도는데 시계는 UTC 10-10 20:00(서울은 10-11 05:00)이라, 10-10 이 기한인 줄이 UTC 에서는 오늘이고 서울에서는 하루 늦다.
+#[test]
+fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
+    let s = init("web-tree-zone");
+    let id = add(s.path(), &["기한 일", "--due", "2026-10-10"]);
+    let web = serve_with(s.path(), |cmd| {
+        cmd.env("MOAI_NOW", "2026-10-10T20:00:00Z").env("TZ", "UTC");
+    });
+    let overdue = |query: &str| {
+        let (status, _, body) = get(web.port, &format!("/api/tree{query}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        let row = env["out"].as_array().unwrap().iter().find(|r| r["id"] == id.as_str()).unwrap().clone();
+        row["gantt"]["overdue"].clone()
+    };
+    assert_eq!(overdue(""), serde_json::Value::Null, "서버의 시간대(UTC)로는 아직 오늘이다");
+    assert_eq!(overdue("?tz=UTC"), serde_json::Value::Null);
+    assert_eq!(overdue("?tz=Asia%2FSeoul"), serde_json::json!(1), "서울에서는 기한이 하루 지났다");
+    // 모르는 이름은 막지 않는다 — 자식이 UTC 로 떨어진다. 모양이 틀린 것은 자식 전에 400 이다.
+    assert_eq!(overdue("?tz=Nowhere%2FAtAll"), serde_json::Value::Null);
+    let (status, _, body) = get(web.port, "/api/tree?tz=%2Fetc%2Flocaltime");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+}
+
 /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 읽음 표시 길은 `POST` 만 받는다.
 #[test]
 fn web_405_allow_names_the_methods_the_path_takes() {
