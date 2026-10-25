@@ -1292,8 +1292,9 @@ pub enum WikiCmd {
   Every heading, at any level, starts a section; the text before the first
   heading is one too. Words are lowercased and split at anything that is not a
   letter, digit or `_`, and Korean, Chinese and Japanese text also matches two
-  letters at a time; there is no stemming. A title or heading counts more than
-  the body, and a section matching more of the distinct words comes first. A
+  letters at a time - such a word counts as matched where half its two-letter
+  pieces are; there is no stemming. A title or heading counts more than the
+  body, and a section matching more of the distinct words comes first. A
   screen line is `path:line  Page title › Heading`, with the best line of the
   section under it - the matched words in bold, which is decoration only. The
   last line says how many of how many are shown and the command that opens a

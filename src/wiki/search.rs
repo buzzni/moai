@@ -12,6 +12,9 @@
 //! - **점수**는 BM25 다(`k1 = 1.2`, `b = 0.75`). 절의 필드는 둘 — 머리글(그 절의 머리글 + 페이지 제목)과 본문 —
 //!   이고 머리글의 낱말은 무게 3 으로 센다(BM25F 를 얕게). 질의 낱말은 OR 지만 **맞은 서로 다른 낱말 수를 먼저**
 //!   견주고 점수를 그다음에 견준다. 같으면 슬러그, 그다음 줄 차례다 — 차례는 결정적이다
+//! - **낱말**은 질의의 원래 낱말이다 — 점수는 토큰으로 세지만, 맞은 낱말의 수([`Hit::distinct`]·[`Hit::rare`])는
+//!   낱말로 센다. 한글·한자·가나 낱말은 그 토큰의 절반 이상이 든 절에서 맞은 것이고, 낱말 하나 맞지 않은 절은 hit 가
+//!   아니다
 //! - 어간 추출·불용어·질의 문법은 없다. 흔한 낱말은 idf 가 누른다
 //!
 //! 본문을 못 읽은 페이지(`Page::body` 없음)는 제목만으로 맞는다 — 빠뜨리지 않는다. 그 hit 는 발췌가 없다.
@@ -41,8 +44,12 @@ const LEAD_COLS: usize = 40;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Found<'a> {
     /// 질의를 토큰으로 푼 것, 겹침 없이 처음 나온 차례로. 비었으면 질의가 비었던 것이다 — 부르는 쪽이 가린다.
+    /// 점수는 이것으로 센다.
     pub terms: Vec<String>,
-    /// `terms` 가운데 흔한 낱말 — 절의 [`COMMON_SHARE`] 보다 많은(그리고 둘 이상의) 곳에 든 것, `terms` 의 차례로.
+    /// 질의의 **원래 낱말**(접은 글), 겹침 없이 처음 나온 차례로 — 한글·한자·가나 덩어리 하나는 토큰이 여럿이어도
+    /// 낱말 하나다. [`Hit::distinct`]·[`Hit::rare`] 는 이것을 센다.
+    pub words: Vec<String>,
+    /// `words` 가운데 흔한 낱말 — 절의 [`COMMON_SHARE`] 보다 많은(그리고 둘 이상의) 곳에서 맞은 것, `words` 의 차례로.
     pub common: Vec<String>,
     /// 순위 차례의 hit — 맞은 서로 다른 낱말 수, 점수, 슬러그, 줄 차례로 정렬하고 `limit` 에서 자른 것.
     pub hits: Vec<Hit<'a>>,
@@ -61,7 +68,8 @@ pub struct Hit<'a> {
     pub anchor: Option<&'a str>,
     /// 절이 시작하는 줄(**1 부터** — `path:line` 이 가리키는 줄). 머리글 줄이고, 첫 머리글 앞의 절이면 1 이다.
     pub line: usize,
-    /// 절에서 맞은 서로 다른 질의 낱말의 수. 점수보다 먼저 견준다.
+    /// 절에서 맞은 서로 다른 질의 낱말([`Found::words`])의 수. 점수보다 먼저 견준다. 한글·한자·가나 낱말은 그
+    /// 토큰(글자 둘씩)의 절반 이상이 맞아야 맞은 것이다 — 토큰 하나짜리면 그 하나다. 0 인 절은 hit 가 아니다.
     pub distinct: usize,
     /// `distinct` 가운데 흔하지 않은 낱말의 수([`Found::common`] 밖). 차례에는 안 쓴다 — 관련 절의 문턱이 쓴다.
     pub rare: usize,
@@ -236,19 +244,56 @@ pub fn rank<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
 
 /// 질의를 토큰으로 푼 것 — [`Found::terms`] 와 같다. 비었으면 찾을 것이 없는 질의다. **순수 함수다.**
 pub fn terms(query: &str) -> Vec<String> {
+    parse_query(query).0
+}
+
+/// 질의의 낱말 하나 — 접은 글과, 그것이 푼 토큰의 `terms` 속 자리(겹침 없이).
+struct Word {
+    text: String,
+    pieces: Vec<usize>,
+}
+
+/// 질의를 토큰(`terms`)과 **원래의 낱말**로 푼다. 낱말은 [`each_token`] 이 가르는 덩어리 그대로다 — 글자·숫자·`_`
+/// 덩어리는 토큰 하나라 낱말 하나고, 한글·한자·가나 덩어리는 글자 둘씩 낸 토큰 여럿이 낱말 하나다. 맞은 낱말을
+/// 셀 때 토큰을 세면 `드라이버` 하나가 세 낱말로 선다(리뷰 moai-g8pt.9rd).
+fn parse_query(query: &str) -> (Vec<String>, Vec<Word>) {
     let mut terms: Vec<String> = Vec::new();
-    for t in tokens(query) {
-        if !terms.contains(&t.text) {
-            terms.push(t.text);
+    let mut words: Vec<Word> = Vec::new();
+    let mut buf = String::new();
+    let mut it = query.char_indices().peekable();
+    while let Some((start, c)) = it.next() {
+        let k = class(c);
+        if k == 0 {
+            continue;
+        }
+        let mut end = start + c.len_utf8();
+        while let Some(&(b, d)) = it.peek().filter(|&&(_, d)| class(d) == k) {
+            end = b + d.len_utf8();
+            it.next();
+        }
+        let run = &query[start..end];
+        let mut pieces: Vec<usize> = Vec::new();
+        each_token(run, &mut buf, |t, _| {
+            let i = terms.iter().position(|x| x == t).unwrap_or_else(|| {
+                terms.push(t.to_string());
+                terms.len() - 1
+            });
+            if !pieces.contains(&i) {
+                pieces.push(i);
+            }
+        });
+        fold(run, &mut buf);
+        if !words.iter().any(|w| w.text == buf) {
+            words.push(Word { text: buf.clone(), pieces });
         }
     }
-    terms
+    (terms, words)
 }
 
 fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Found<'a> {
-    let terms = terms(query);
+    let (terms, words) = parse_query(query);
     if terms.is_empty() {
-        return Found { terms, common: Vec::new(), hits: Vec::new(), total: 0 };
+        return Found { terms, words: Vec::new(), common: Vec::new(), hits: Vec::new(), total: 0 };
     }
     let want: HashSet<&str> = terms.iter().map(String::as_str).collect();
     let index: HashMap<&str, usize> = terms.iter().enumerate().map(|(i, t)| (t.as_str(), i)).collect();
@@ -285,25 +330,39 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
     let avg = secs.iter().map(|s| HEADING_WEIGHT * s.head_len + s.body_len).sum::<f64>() / n.max(1.0);
     let df: Vec<f64> = (0..terms.len()).map(|i| secs.iter().filter(|s| weighted(s, i) > 0.0).count() as f64).collect();
     let idf: Vec<f64> = df.iter().map(|df| (1.0 + (n - df + 0.5) / (df + 0.5)).ln()).collect();
-    // **흔한 낱말**은 절의 [`COMMON_SHARE`] 보다 많은 곳에 든 낱말이다 — 순위에서는 idf 가 이미 누르지만, 관련 절을
-    // 고르는 쪽은 맞은 낱말의 수를 문턱으로 쓰므로 흔한 낱말 둘이 맞은 엉뚱한 절이 문턱을 넘는다(moai-g8pt.5aw).
+    // 낱말이 절에서 맞았는가 — 토큰의 절반 이상이 들었으면 맞은 것이다. 글자·숫자 낱말은 토큰이 하나라 그 하나고,
+    // `검색은` 은 `검색`·`색은` 가운데 하나로 넉넉하다(조사가 붙어도 맞는다). 맞은 낱말을 토큰으로 세던 판은
+    // `드라이버` 하나가 세 낱말로 서서 낱말 둘의 문턱을 혼자 넘었다(리뷰 moai-g8pt.9rd).
+    let hit = |s: &Section, w: &Word| 2 * w.pieces.iter().filter(|&&t| weighted(s, t) > 0.0).count() >= w.pieces.len();
+    // **흔한 낱말**은 절의 [`COMMON_SHARE`] 보다 많은 곳에서 맞은 낱말이다 — 순위에서는 idf 가 이미 누르지만, 관련
+    // 절을 고르는 쪽은 맞은 낱말의 수를 문턱으로 쓰므로 흔한 낱말 둘이 맞은 엉뚱한 절이 문턱을 넘는다(moai-g8pt.5aw).
     // 절 하나에만 든 낱말은 흔하지 않다 — 몫만 보면 절이 넷이 안 되는 위키에서 든 낱말이 다 흔해진다.
-    let common: Vec<bool> = df.iter().map(|df| *df > 1.0 && *df > COMMON_SHARE * n).collect();
+    let common: Vec<bool> = words
+        .iter()
+        .map(|w| secs.iter().filter(|s| hit(s, w)).count() as f64)
+        .map(|df| df > 1.0 && df > COMMON_SHARE * n)
+        .collect();
     let mut scored: Vec<(usize, usize, usize, f64)> = Vec::new();
     for (i, s) in secs.iter().enumerate() {
+        let (mut distinct, mut rare) = (0, 0);
+        for (w, common) in words.iter().zip(&common) {
+            if hit(s, w) {
+                distinct += 1;
+                rare += usize::from(!common);
+            }
+        }
+        if distinct == 0 {
+            continue;
+        }
         let len = HEADING_WEIGHT * s.head_len + s.body_len;
-        let (mut distinct, mut rare, mut score) = (0, 0, 0.0);
+        let mut score = 0.0;
         for (t, idf) in idf.iter().enumerate() {
             let tf = weighted(s, t);
             if tf > 0.0 {
-                distinct += 1;
-                rare += usize::from(!common[t]);
                 score += idf * tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * len / avg.max(f64::MIN_POSITIVE)));
             }
         }
-        if distinct > 0 {
-            scored.push((i, distinct, rare, score));
-        }
+        scored.push((i, distinct, rare, score));
     }
     scored.sort_by(|a, b| {
         let (x, y) = (&secs[a.0], &secs[b.0]);
@@ -330,8 +389,9 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
             }
         })
         .collect();
-    let common = terms.iter().zip(&common).filter(|(_, c)| **c).map(|(t, _)| t.clone()).collect();
-    Found { terms, common, hits, total }
+    let common = words.iter().zip(&common).filter(|(_, c)| **c).map(|(w, _)| w.text.clone()).collect();
+    let words = words.into_iter().map(|w| w.text).collect();
+    Found { terms, words, common, hits, total }
 }
 
 /// 절에서 서로 다른 질의 낱말이 가장 많이 든 줄 하나 — 같으면 앞 줄. 맞은 줄이 없으면(제목으로만 맞았다) 절의 첫
@@ -509,6 +569,30 @@ mod tests {
         assert_eq!(top(&pages, "절"), [("w", Some("위키".into()))], "길이 1 인 낱말은 그 글자 하나다");
         let s = search(&pages, "검색", 5).hits[0].snippet.clone().unwrap();
         assert_eq!(&s.text[s.marks[0].clone()], "검색");
+    }
+
+    /// 맞은 낱말은 원래 낱말로 센다 — `드라이버` 는 토큰이 셋(`드라`·`라이`·`이버`)이어도 낱말 하나고, `병합 드라이버` 는
+    /// 둘이다. 토큰을 세던 판은 `드라이버` 하나로 낱말 둘의 문턱을 넘었다(리뷰 moai-g8pt.9rd).
+    #[test]
+    fn a_korean_word_counts_once_however_many_pieces_it_has() {
+        let pages = [page("d", "# 문서\n\n병합 드라이버를 깐다\n"), page("o", "# 다른\n\n드라이버만 있다\n")];
+        let one = search(&pages, "드라이버", 5);
+        assert_eq!((one.terms.len(), one.words.len()), (3, 1));
+        assert!(one.hits.iter().all(|h| h.distinct == 1), "{:?}", one.hits);
+        let two = search(&pages, "병합 드라이버", 5);
+        assert_eq!(two.words, ["병합", "드라이버"]);
+        assert_eq!((two.hits[0].page.slug.as_str(), two.hits[0].distinct), ("d", 2));
+        assert_eq!((two.hits[1].page.slug.as_str(), two.hits[1].distinct), ("o", 1));
+    }
+
+    /// 한글 낱말은 토큰의 절반 이상이 든 절에서 맞는다 — 조사가 붙은 `검색은` 은 `검색` 하나로 맞고, `데이터베이스` 의
+    /// 토큰 하나(`이스`)만 든 절은 hit 가 아니다.
+    #[test]
+    fn a_korean_word_matches_where_half_its_pieces_do() {
+        let pages = [page("w", "# 위키\n\n검색은 절 단위로 한다\n"), page("x", "# 엑스\n\n이스 하나\n")];
+        let h = &search(&pages, "검색은", 5).hits;
+        assert_eq!((h.len(), h[0].distinct), (1, 1));
+        assert!(search(&pages, "데이터베이스", 5).hits.is_empty(), "토큰 다섯 가운데 하나로 맞았다");
     }
 
     #[test]

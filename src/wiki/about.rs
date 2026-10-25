@@ -21,6 +21,7 @@ use std::collections::HashSet;
 
 /// 관련 절에 들려면 맞아야 하는 **흔하지 않은 서로 다른 질의 낱말**의 수([`Hit::rare`]). 질의의 흔하지 않은 낱말이
 /// 이보다 적으면 그 수다(하나뿐이면 하나). 이 저장소의 열린 이슈 열 개로 잰 값이다 — 잰 수는 moai-g8pt.5aw 의 노트에 있다.
+/// 세는 것은 **제목의 원래 낱말**이다([`super::search::Found::words`]) — 한글 낱말이 푼 글자 둘씩의 토큰이 아니다.
 pub const MIN_DISTINCT: usize = 2;
 
 /// 관련 절을 몇 개까지 내는가.
@@ -55,7 +56,7 @@ pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>) -> 
         .collect();
     // 발췌는 안 짓는다 — 다 받아 페이지당 하나로 거르고 셋에서 자르므로, 버릴 hit 가 거의 전부다.
     let found = rank(pages, &issue.title, usize::MAX);
-    let need = (found.terms.len() - found.common.len()).min(MIN_DISTINCT);
+    let need = (found.words.len() - found.common.len()).min(MIN_DISTINCT);
     let mut hits: Vec<Hit> = found.hits.into_iter().filter(|h| need > 0 && h.rare >= need).collect();
     // 흔하지 않은 낱말이 많이 맞은 절이 앞이다 — 같으면 `rank` 의 차례 그대로다(안정 정렬).
     hits.sort_by_key(|h| std::cmp::Reverse(h.rare));
@@ -180,6 +181,19 @@ mod tests {
         let pages = [page("readme", "# Readme\n\nThe merge driver lives here.\n")];
         let i = issue("moai-gggg", "merge driver", &[]);
         assert_eq!(slugs(&about(&pages, &i, None)).1, ["readme"]);
+    }
+
+    /// 문턱은 제목의 원래 낱말로 센다 — `드라이버` 하나만 든 절은 `드라이버 설치` 의 낱말 둘 문턱을 못 넘는다. 토큰으로
+    /// 세던 판은 `드라`·`라이`·`이버` 셋으로 넘었다(리뷰 moai-g8pt.9rd).
+    #[test]
+    fn one_korean_word_does_not_pass_a_two_word_threshold() {
+        let pages =
+            with_filler(vec![page("a", "# 가\n\n드라이버만 있다\n"), page("b", "# 나\n\n드라이버 설치 방법\n")]);
+        let i = issue("moai-hhhh", "드라이버 설치", &[]);
+        assert_eq!(slugs(&about(&pages, &i, None)).1, ["b"]);
+        let alone = issue("moai-hhhh", "드라이버", &[]);
+        let a = about(&pages, &alone, None);
+        assert!(a.related.iter().all(|h| h.rare == 1), "{a:?}");
     }
 
     /// 어디에나 든 낱말은 문턱을 못 채운다 — `moai`·`show` 둘이 맞은 절은 안 내밀고, 흔하지 않은 낱말이 맞은 절만
