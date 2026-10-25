@@ -52,11 +52,6 @@ pub(super) enum Plan {
     Day(i64),
 }
 
-/// 줄에 계획 날이 **적혀** 있는가 — 못 읽는 글도 적힌 날이다. 하루 세우기가 그것을 덮으면 그 글이 사라진다.
-fn has_days(i: &crate::model::Issue) -> bool {
-    i.starts_on.is_some() || i.due_on.is_some()
-}
-
 /// 옮길 수 없는 까닭의 글 — 키·끌기의 알림과 쓰기 안의 거절이 같은 말을 댄다.
 fn unshifted(lang: crate::i18n::Lang, why: Unshifted, id: &str) -> String {
     let said = match why {
@@ -370,7 +365,7 @@ impl App {
     /// 칸을 누른 것이다) 멤버에서 센 묶음이면 커서만 옮긴 것이다.
     fn plan_day(&mut self, at: usize, day: i64) {
         let i = &self.site.issues[at];
-        if has_days(i) || crate::report::is_group(i) {
+        if i.has_days() || crate::report::is_group(i) {
             return;
         }
         self.write_plan(PlanMove { id: i.id.clone(), plan: Plan::Day(day) });
@@ -510,7 +505,7 @@ pub(super) fn commit_plan(app: &mut App) {
             Plan::Shift(edge, days) => {
                 i.shifted(edge, days).map_err(|why| crate::fail::Fail::new(unshifted(lang, why, &id)))?
             }
-            Plan::Day(_) if has_days(i) => {
+            Plan::Day(_) if i.has_days() => {
                 return Err(crate::fail::Fail::new(fill(say(lang, "tui.gantt.planned"), &[("id", &id)])));
             }
             Plan::Day(day) => {

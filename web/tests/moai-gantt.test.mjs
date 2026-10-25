@@ -520,6 +520,13 @@ test('a read that reaches an earlier day grows the axis at its start, and the da
 
 // ── moving a plan (moai-d86e.3ud) ──
 
+test('the plan write carries the move, not the days: moai measures them inside its lock (moai-vj8w.02c)', async () => {
+  const { planEndpoint } = await panelModule('data/plan.ts')
+  assert.deepEqual(planEndpoint('e1.c', { edge: 'body', days: -2 }), { path: '/api/plan/e1.c', method: 'POST', query: { edge: 'body', days: '-2' } })
+  assert.deepEqual(planEndpoint('e1.c', { edge: 'end', days: 3 }).query, { edge: 'end', days: '3' })
+  assert.deepEqual(planEndpoint('z', { day: '2026-10-30' }).query, { day: '2026-10-30' })
+})
+
 test('shiftPlan is Issue::shifted: the changing side only, own days only', () => {
   const { shiftPlan, dragDays, movedPlan } = model
   assert.deepEqual(shiftPlan(own('2026-10-26', '2026-10-27'), 'body', 2), { start: '2026-10-28', due: '2026-10-29' })
@@ -603,7 +610,7 @@ test('dragging a bar\'s middle moves the plan by whole days, once, on release; t
   assert.deepEqual(moves, [], 'nothing is written while it moves')
   press(dom, l, 'pointerup', mid + 70)
   l.click()
-  assert.deepEqual(moves, [{ id: 'e1.c', change: { start: '2026-10-28', due: '2026-10-29' }, undo: 'moai edit e1.c --start 2026-10-26 --due 2026-10-27' }])
+  assert.deepEqual(moves, [{ id: 'e1.c', change: { edge: 'body', days: 2 }, undo: 'moai edit e1.c --start 2026-10-26 --due 2026-10-27' }])
   assert.deepEqual(calls, [], 'the click a drag ends with chose the row')
   l.click()
   assert.deepEqual(calls, ['choose:e1.c'], 'the next click chooses as before')
@@ -625,7 +632,7 @@ test('the ends move the start or the deadline alone; a press that does not move 
   await drag((x0) => x0 + 40, (x0) => x0 + 45)
   // A press outside the bar is the lane's: a choice, never a move.
   await drag((x0, w) => x0 + w + 200, (x0, w) => x0 + w + 400)
-  assert.deepEqual(moves.map((m) => m.change), [{ start: '2026-10-25' }, { due: '2026-10-28' }])
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'start', days: -1 }, { edge: 'end', days: 1 }])
 })
 
 test('a read that lands while a bar is dragged waits for the release, and the drag goes on', async () => {
@@ -641,7 +648,7 @@ test('a read that lands while a bar is dragged waits for the release, and the dr
   press(dom, l, 'pointermove', x0 + 120)
   assert.equal(px(bar, 'left'), x0 + 80)
   press(dom, l, 'pointerup', x0 + 120)
-  assert.deepEqual(moves.map((m) => m.change), [{ start: '2026-10-28', due: '2026-10-29' }])
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'body', days: 2 }])
   await tick()
   assert.notEqual(lane(root, 'e1.c'), l, 'the read that waited is drawn after the release')
   assert.match(root.querySelector('.g-row[data-id="e1.a"]').textContent, /renamed/)
@@ -714,7 +721,7 @@ test('a deadline-only row drags its diamond; a group counted from its members sa
   const x = px(due, 'left')
   press(dom, l, 'pointerdown', x + 2)
   press(dom, l, 'pointerup', x + 42)
-  assert.deepEqual(moves.map((m) => m.change), [{ due: '2026-10-28' }])
+  assert.deepEqual(moves.map((m) => m.change), [{ edge: 'body', days: 1 }], 'a diamond drags as the whole plan: its deadline')
   const e = lane(root, 'e1')
   const hatched = laidOut(e.querySelector('.b-plan'))
   assert.equal(hatched.classList.contains('movable'), false)
@@ -733,7 +740,7 @@ test('a double click on a day of a row with no days plans that day; a group or a
   const { root, dom, moves } = writing(rows, gantt)
   const day = days('2026-10-30') + 5
   for (const id of ['z', 'y', 'e1.c']) press(dom, lane(root, id), 'dblclick', day)
-  assert.deepEqual(moves, [{ id: 'z', change: { start: '2026-10-30', due: '2026-10-30' }, undo: 'moai edit z --start none --due none' }])
+  assert.deepEqual(moves, [{ id: 'z', change: { day: '2026-10-30' }, undo: 'moai edit z --start none --due none' }])
 })
 
 test('without a writer the bars do not move', () => {

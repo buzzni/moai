@@ -161,6 +161,11 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
     // `--due +N` 은 락 밖에서 날짜로 바꾼다 — 시간대를 풀면 tzdb 를 연다([`super::due_arg`]).
     let due = args.due.as_deref().map(|d| super::due_arg(ctx, d, &at));
     let start = args.start.as_deref().map(|d| super::due_arg(ctx, d, &at));
+    // 옮기는 뜻 — 날은 락 안에서 그때의 줄로 잰다(아래). clap 이 셋 가운데 하나만 받는다.
+    let shift =
+        [(model::Edge::Body, args.shift), (model::Edge::Start, args.shift_start), (model::Edge::End, args.shift_due)]
+            .into_iter()
+            .find_map(|(edge, days)| days.map(|d| (edge, d)));
     // **말도 락 밖에서 묻는다**(리뷰) — `ctx.lang()` 의 첫 부름은 사용자 설정을 열어 파싱한다.
     // 락 안에서 부르면 그 읽기가 트래커 락을 쥔 채로 서서, 옆 세션의 집기가 그만큼 기다린다.
     // `cmd/mv.rs` 가 `model::actor` 를 밖으로 뺀 것과 같은 자다.
@@ -214,7 +219,33 @@ pub fn run(ctx: &Ctx, args: EditArgs) -> R<Vec<String>> {
             // 꼴과 앞뒤 차례는 아래 `settle` 이 한자리에서 거절한다. 두 날은 이제 모든 종류의 줄에 서고
             // (moai-xf0p.6d5), 조상의 기한을 넘는 시작·기한은 쓰기(`store::write_locked`)가 거절한다(moai-xf0p.cbu).
             // 탐색기의 막대 끌기도 같은 몸을 지난다(`Issue::set_dates`, moai-i4hf.9xi).
-            i.set_dates(start.as_deref().map(super::clearable), due.as_deref().map(super::clearable));
+            //
+            // **옮기기(`--shift*`)와 하루 세우기(`--if-unplanned`)는 여기서, 락 안에서 다시 읽은 줄로 잰다**(moai-vj8w.02c) —
+            // web 간트의 끌기가 이 길을 부른다. 화면이 읽은 날에서 미리 센 날을 들고 오면, 그 읽기와 이 쓰기 사이에 옆
+            // 세션이 옮긴 날 위에 화면의 옛 날에서 센 값을 덮어 그 고침이 말없이 사라진다. TUI 의 `Plan::Shift`·`Plan::Day`
+            // 와 같은 자(`Issue::shifted`·`Issue::has_days`)다.
+            if args.if_unplanned && i.has_days() {
+                return Err(Fail::new(crate::i18n::fill(
+                    crate::i18n::say(lang, "refuse.edit_planned"),
+                    &[("id", &args.id)],
+                )));
+            }
+            let dates = match shift {
+                // 0 날 옮기기는 고칠 것이 없는 것이다 — 같은 부름을 되풀이해도 0 으로 끝나는 `edit` 의 자다.
+                Some((edge, days)) => match i.shifted(edge, days) {
+                    Ok(dates) => dates,
+                    Err(model::Unshifted::Still) => (None, None),
+                    Err(why) => {
+                        let said = match why {
+                            model::Unshifted::Members => crate::i18n::say(lang, "refuse.edit_shift_members"),
+                            _ => crate::i18n::say(lang, "refuse.edit_shift_none"),
+                        };
+                        return Err(Fail::new(crate::i18n::fill(said, &[("id", &args.id)])));
+                    }
+                },
+                None => (start.as_deref().map(super::clearable), due.as_deref().map(super::clearable)),
+            };
+            i.set_dates(dates.0, dates.1);
             if let Some(who) = assignee {
                 (i.assignee, i.assignee_email) = who;
             }
@@ -515,7 +546,10 @@ fn fail_if_nothing(args: &EditArgs, ctx: &Ctx) -> R<()> {
         || args.priority.is_some()
         || args.assignee.is_some()
         || args.start.is_some()
-        || args.due.is_some();
+        || args.due.is_some()
+        || args.shift.is_some()
+        || args.shift_start.is_some()
+        || args.shift_due.is_some();
     touched.then_some(()).ok_or_else(|| Fail::new(crate::i18n::say(ctx.lang(), "refuse.edit_nothing")))
 }
 

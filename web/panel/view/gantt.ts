@@ -17,7 +17,7 @@
  */
 import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
-import { undoLine } from '../data/plan.ts'
+import { undoLine, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
 import type { GanttRow, IssueIndex, Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
@@ -601,9 +601,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
 
   // ── moving a plan (moai-d86e.3ud) ──
   // A bar drags as the TUI's does (moai-i4hf.exq): the middle moves the plan, either end the start or the deadline
-  // alone, by whole days; the bar is only drawn while it moves and the row is written once, on release. Which days a
-  // move writes is shiftPlan's (gantt-model.ts, `Issue::shifted`'s copy) and the write is the CLI's (data/plan.ts), so
-  // a refusal — a start past the deadline, a day past the deadline above — comes back in moai's words.
+  // alone, by whole days; the bar is only drawn while it moves and the row is written once, on release. What is
+  // written is the move — the edge and the days — and moai measures the days inside its lock from the row as it stands
+  // then (data/plan.ts, moai-vj8w.02c); shiftPlan (gantt-model.ts, `Issue::shifted`'s copy) only draws the bar meanwhile.
+  // A refusal — a start past the deadline, a day past the deadline above — comes back in moai's words.
 
   /** How close to a bar's end a press takes that end rather than the whole bar, in px. */
   const GRIP = 6
@@ -633,7 +634,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    * Write a row's planned days. One write at a time per row: until it is answered (and the rows read again), the
    * bar on screen was drawn from the read before it, and a move measured from there would undo the first.
    */
-  function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: { start?: string; due?: string }, undo: string): void {
+  function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: PlanChange, undo: string): void {
     writing.add(id)
     // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
     const drawn = model
@@ -684,7 +685,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       if (dueMark) dueMark.style.left = `${xOf(a, span[1])}px`
     }, (end, down) => {
       // The release is where the bar lands; a cancel or a lost capture puts it back and writes nothing.
-      const change = shiftPlan(g.planned, edge, end.type === 'pointerup' ? dragDays(a.zoom, end.clientX - down.clientX) : 0)
+      const days = end.type === 'pointerup' ? dragDays(a.zoom, end.clientX - down.clientX) : 0
+      const change = shiftPlan(g.planned, edge, days)
       if ('why' in change) {
         putBack()
         // Not a day moved: the press was a click, and it chooses. A day or more is the drag's, and says why it stands.
@@ -697,7 +699,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         // The days as the list printed them; a row it did not print (one written between its read and the tree's) as
         // the bar was drawn — the days this move was measured from.
         const planned = g.planned?.from === 'own' ? g.planned : null
-        write(movePlan, row.id, change, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
+        write(movePlan, row.id, { edge, days }, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
       }
       resume()
     })
@@ -716,7 +718,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       // A second double click before the first is answered would plan the row twice.
       if (writing.has(row.id)) return
       const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
-      write(movePlan, row.id, { start: day, due: day }, undoLine(row.id, null, null))
+      write(movePlan, row.id, { day }, undoLine(row.id, null, null))
     })
   }
 

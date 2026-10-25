@@ -146,7 +146,7 @@ export function placeRow(g: GanttRow | undefined, row: Row | undefined, now: num
 /** Which part of a planned bar is dragged: the start alone, the whole bar, the deadline alone. */
 export type Edge = 'start' | 'body' | 'end'
 
-/** What a move writes (data/plan.ts PlanChange), or why it writes nothing. */
+/** The days a move would land on — drawn while a bar is dragged; moai measures the written ones itself (data/plan.ts). */
 export type Shifted = { start?: string; due?: string } | { why: 'members' | 'none' | 'still' }
 
 /**

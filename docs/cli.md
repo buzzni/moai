@@ -800,6 +800,12 @@ Options:
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
       --start <date|none>    Start, a day or `+N` days. `none` clears it
       --due <date|none>      Deadline, a day or `+N` days. `none` clears it
+      --shift <±N>           Move the planned days N days, as the row
+                             holds them when written
+      --shift-start <±N>     Move the start alone (none: from the due)
+      --shift-due <±N>       Move the deadline alone (none: from start)
+      --if-unplanned         Write `--start`/`--due` only on a row
+                             with no planned day; else refuse
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)

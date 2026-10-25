@@ -2183,6 +2183,7 @@ pub struct MvArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(group(clap::ArgGroup::new("dates").args(["start", "due"]).multiple(true)))]
 pub struct EditArgs {
     #[arg(value_name = "id")]
     pub id: String,
@@ -2225,6 +2226,27 @@ pub struct EditArgs {
     /// Deadline, a day or `+N` days. `none` clears it
     #[arg(long, value_name = "date|none")]
     pub due: Option<String>,
+
+    /// Move the planned days N days, as the row
+    /// holds them when written
+    #[arg(long, value_name = "±N", allow_negative_numbers = true, verbatim_doc_comment,
+          conflicts_with_all = ["start", "due", "shift_start", "shift_due", "if_unplanned"])]
+    pub shift: Option<i64>,
+
+    /// Move the start alone (none: from the due)
+    #[arg(long, value_name = "±N", allow_negative_numbers = true,
+          conflicts_with_all = ["start", "due", "shift_due", "if_unplanned"])]
+    pub shift_start: Option<i64>,
+
+    /// Move the deadline alone (none: from start)
+    #[arg(long, value_name = "±N", allow_negative_numbers = true,
+          conflicts_with_all = ["start", "due", "if_unplanned"])]
+    pub shift_due: Option<i64>,
+
+    /// Write `--start`/`--due` only on a row
+    /// with no planned day; else refuse
+    #[arg(long, requires = "dates", verbatim_doc_comment)]
+    pub if_unplanned: bool,
 }
 
 #[derive(Args, Debug)]

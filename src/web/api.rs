@@ -189,34 +189,57 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
     }))
 }
 
-/// `/api/plan/<id>` 의 argv — `start`·`due` 는 **바뀌는 쪽만** 온다(`Issue::shifted` 가 내는 꼴, 페이지는
-/// view/gantt-model.ts `shiftPlan`). 안 온 쪽은 `edit` 이 그대로 둔다 — 못 읽는 글이 적힌 쪽을 다시 적으면 그 글을 지운다.
+/// `/api/plan/<id>` 의 argv — **날이 아니라 옮기는 뜻을 받는다**(moai-vj8w.02c). 날은 `edit` 이 락 안에서 그때의 줄로
+/// 잰다(`Issue::shifted`) — 페이지가 읽은 날에서 센 날을 들고 오면, 그 읽기와 이 쓰기 사이에 옆 세션이 옮긴 날을
+/// 화면의 옛 날에서 센 값이 말없이 덮는다. TUI 의 끌기(`tui::gantt::Plan`)와 한 자다.
 ///
-/// **값은 날 하나(`YYYY-MM-DD`)만 받는다** — `none`·`+N` 도 `edit` 은 받지만 끌기는 비우지도 오늘에 기대지도 않는다.
-/// 둘 다 없으면 쓸 것이 없으니 거절이다. 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
+/// - `edge=start|body|end&days=N` — 막대를 옮긴다: `edit --shift-start=N`·`--shift=N`·`--shift-due=N`. `N` 은 0 아닌
+///   정수(여섯 자리까지, 앞에 `-` 하나)다
+/// - `day=YYYY-MM-DD` — 날이 없는 줄에 그 하루를 세운다: `edit --start=<날> --due=<날> --if-unplanned`. 그새 날이 섰으면
+///   `edit` 이 안 쓰고 거절한다
+///
+/// 둘을 섞으면 거절이다. 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
 fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
-    let (mut start, mut due) = (None, None);
+    let (mut edge, mut days, mut day) = (None, None, None);
     for (name, value) in query {
-        let slot = match name.as_str() {
-            "start" => &mut start,
-            "due" => &mut due,
+        let (slot, fits) = match name.as_str() {
+            "edge" => (&mut edge, matches!(value.as_str(), "start" | "body" | "end")),
+            "days" => (&mut days, is_days(value)),
+            "day" => (&mut day, crate::model::parse_date(value).is_some()),
             _ => return Err(Bad::Unknown(name.clone())),
         };
-        if crate::model::parse_date(value).is_none() {
+        if !fits {
             return Err(Bad::Shape(name.clone()));
         }
         if slot.replace(value.clone()).is_some() {
             return Err(Bad::Twice(name.clone()));
         }
     }
-    if start.is_none() && due.is_none() {
-        return Err(Bad::Empty("start".to_string()));
-    }
+    let flags = match (edge, days, day) {
+        (None, None, Some(d)) => vec![format!("--start={d}"), format!("--due={d}"), "--if-unplanned".to_string()],
+        (Some(_), _, Some(_)) => return Err(Bad::Unknown("edge".to_string())),
+        (None, Some(_), Some(_)) => return Err(Bad::Unknown("days".to_string())),
+        (Some(e), Some(n), None) => {
+            let flag = match e.as_str() {
+                "start" => "--shift-start",
+                "end" => "--shift-due",
+                _ => "--shift",
+            };
+            vec![format!("{flag}={n}")]
+        }
+        (Some(_), None, None) => return Err(Bad::Empty("days".to_string())),
+        (None, _, None) => return Err(Bad::Empty("edge".to_string())),
+    };
     let mut out = vec!["edit".to_string()];
-    out.extend(start.map(|d| format!("--start={d}")));
-    out.extend(due.map(|d| format!("--due={d}")));
+    out.extend(flags);
     out.extend(["--".to_string(), id.to_string()]);
     Ok(out)
+}
+
+/// 옮기는 날 수의 꼴 — 0 아닌 정수, 여섯 자리까지, 앞에 `-` 하나. `+N` 은 안 받는다(페이지가 안 낸다).
+fn is_days(v: &str) -> bool {
+    let digits = v.strip_prefix('-').unwrap_or(v);
+    (1..=6).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()) && digits.bytes().any(|b| b != b'0')
 }
 
 /// 쿼리가 `worktree=1` 하나뿐이거나 비었는가 — 받는 이름이 이것뿐인 끝점(`/api/stamp`·`/api/issue/<id>`·읽음 길)이
@@ -556,22 +579,38 @@ mod tests {
         assert_eq!(overlay_of(&[]), Ok(false));
         assert_eq!(overlay_of(&on), Ok(true));
         assert!(matches!(overlay_of(&q(&[("archived", "1")])), Err(Bad::Unknown(_))));
-        // 계획 날 — 바뀌는 쪽만 실리고, 날 하나(`YYYY-MM-DD`)만 받는다. `none`·`+N` 은 끌기가 내지 않는다.
+        // 계획 날 — 날이 아니라 옮기는 뜻이 실린다(moai-vj8w.02c). 날은 `edit` 이 락 안에서 잰다.
         let plan = |query: &[(&str, &str)]| write_argv_of("/api/plan/moai-1abc", &q(query)).unwrap();
+        assert_eq!(plan(&[("edge", "body"), ("days", "3")]), Ok(strs(&["edit", "--shift=3", "--", "moai-1abc"])));
         assert_eq!(
-            plan(&[("start", "2026-10-26"), ("due", "2026-10-30")]),
-            Ok(strs(&["edit", "--start=2026-10-26", "--due=2026-10-30", "--", "moai-1abc"]))
+            plan(&[("days", "-2"), ("edge", "start")]),
+            Ok(strs(&["edit", "--shift-start=-2", "--", "moai-1abc"]))
         );
-        assert_eq!(plan(&[("due", "2026-10-30")]), Ok(strs(&["edit", "--due=2026-10-30", "--", "moai-1abc"])));
-        assert_eq!(plan(&[("start", "2026-10-26")]), Ok(strs(&["edit", "--start=2026-10-26", "--", "moai-1abc"])));
-        assert_eq!(plan(&[]), Err(Bad::Empty("start".into())));
-        for v in ["none", "+3", "2026-1-1", "2026-13-01", "-e", ""] {
-            assert_eq!(plan(&[("due", v)]), Err(Bad::Shape("due".into())), "{v:?}");
+        assert_eq!(plan(&[("edge", "end"), ("days", "10")]), Ok(strs(&["edit", "--shift-due=10", "--", "moai-1abc"])));
+        assert_eq!(
+            plan(&[("day", "2026-10-26")]),
+            Ok(strs(&["edit", "--start=2026-10-26", "--due=2026-10-26", "--if-unplanned", "--", "moai-1abc"]))
+        );
+        assert_eq!(plan(&[]), Err(Bad::Empty("edge".into())));
+        assert_eq!(plan(&[("days", "3")]), Err(Bad::Empty("edge".into())));
+        assert_eq!(plan(&[("edge", "body")]), Err(Bad::Empty("days".into())));
+        assert_eq!(plan(&[("edge", "body"), ("days", "3"), ("day", "2026-10-26")]), Err(Bad::Unknown("edge".into())));
+        assert_eq!(plan(&[("days", "3"), ("day", "2026-10-26")]), Err(Bad::Unknown("days".into())));
+        for v in ["0", "-0", "+3", "3.5", "", "-", "1234567", "--3", "3d"] {
+            assert_eq!(plan(&[("edge", "body"), ("days", v)]), Err(Bad::Shape("days".into())), "{v:?}");
         }
-        assert_eq!(plan(&[("due", "2026-10-30"), ("due", "2026-10-31")]), Err(Bad::Twice("due".into())));
+        for v in ["both", "", "Body"] {
+            assert_eq!(plan(&[("edge", v), ("days", "1")]), Err(Bad::Shape("edge".into())), "{v:?}");
+        }
+        for v in ["none", "+3", "2026-1-1", "2026-13-01", "-e", ""] {
+            assert_eq!(plan(&[("day", v)]), Err(Bad::Shape("day".into())), "{v:?}");
+        }
+        assert_eq!(plan(&[("day", "2026-10-30"), ("day", "2026-10-31")]), Err(Bad::Twice("day".into())));
+        // 옛 꼴(날을 들고 오는 `start`·`due`)은 이제 모르는 이름이다 — 쓰는 날을 페이지가 세지 않는다.
+        assert_eq!(plan(&[("due", "2026-10-30")]), Err(Bad::Unknown("due".into())));
         assert_eq!(plan(&[("worktree", "1")]), Err(Bad::Unknown("worktree".into())));
         for bad in ["/api/plan/issue", "/api/plan/--due", "/api/plan/"] {
-            assert!(matches!(write_argv_of(bad, &q(&[("due", "2026-10-30")])), Some(Err(Bad::Shape(_)))), "{bad}");
+            assert!(matches!(write_argv_of(bad, &q(&[("day", "2026-10-30")])), Some(Err(Bad::Shape(_)))), "{bad}");
         }
         for none in ["/api/rows", "/api/status", "/api/readall", "/api/read", "/api/plan"] {
             assert!(write_argv_of(none, &[]).is_none(), "{none}");
