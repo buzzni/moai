@@ -13,8 +13,8 @@ import { parentOf, priorityOf, type Row } from './index.js'
 
 // ---- the words ------------------------------------------------------------------------------------------
 
-/** Filter keys as moai 0.20 names them (`query::KEYS`), until `/api/boot` says. */
-let filterKeys: readonly string[] = ['status', 'tag', 'no-tag', 'epic', 'milestone', 'parent', 'priority', 'assignee', 'type', 'grep', 'stale', 'since', 'created', 'done', 'due_on', 'created_at', 'updated_at', 'started_at', 'done_at']
+/** Filter keys as moai 0.24 names them (`query::KEYS`), until `/api/boot` says. */
+let filterKeys: readonly string[] = ['status', 'tag', 'no-tag', 'epic', 'milestone', 'parent', 'priority', 'assignee', 'type', 'grep', 'stale', 'since', 'created', 'done', 'created_at', 'updated_at', 'started_at', 'done_at', 'due_on', 'starts_on']
 
 /** The fields a list may be ordered by (`query::SortKey::ALL`). */
 export type SortKey = 'priority' | 'created' | 'updated' | 'status' | 'assignee' | 'title' | 'due' | 'id'
@@ -299,7 +299,7 @@ export function valueHints(rows: readonly Row[], key: string, prefix = '', ctx: 
   return [...found.filter(first), ...found.filter((hint) => !first(hint))]
 }
 
-const TIME_KEYS: readonly string[] = ['since', 'created', 'done', 'due_on', 'created_at', 'updated_at', 'started_at', 'done_at']
+const TIME_KEYS: readonly string[] = ['since', 'created', 'done', 'created_at', 'updated_at', 'started_at', 'done_at', 'due_on', 'starts_on']
 
 /** The item under the cursor of a filter line: which key it is on and the value typed so far. */
 export interface Slot {

@@ -157,6 +157,13 @@ export function rollupOf(row: Row, index: IssueIndex | null, groups?: ReadonlyMa
   return { done, work: total, percent: total ? Math.floor((done * 100) / total) : undefined, byStatus }
 }
 
+/** The planned span the due field shows, `—` standing for a missing end; '' when the row carries neither day. */
+export function dueSpan(row: Row): string {
+  const start = formatDate(row.starts_on), due = formatDate(row.due_on ?? row.due)
+  if (!start && !due) return ''
+  return start || row.kind === 'milestone' ? `${start || '—'} → ${due || '—'}` : due
+}
+
 export interface Field {
   key: string
   label: string
@@ -177,8 +184,9 @@ export function fieldsOf(row: Row, index: IssueIndex | null, copy: Copy): Field[
     ['assignee', d.assignee, assigneeOf(row)],
     ['epic', d.epic, epic ? titled(epic) : ''],
     ['milestone', d.milestone, milestone ? titled(milestone) : ''],
-    // The CLI's key is `due_on` (and `starts_on`); `due` is what an older row may carry.
-    ['due', d.due, formatDate(row.due_on ?? row.due)],
+    // The CLI's key is `due_on`; `due` is what an older row may carry. The span reads as the TUI and the CLI write it
+    // (`view::due_of`): `start → due` once a start is written or on a milestone, the deadline alone otherwise.
+    ['due', d.due, dueSpan(row)],
     ['created', d.created, formatDate(row.created_at)],
     ['updated', d.updated, formatDate(row.updated_at)],
     ['started', d.started, formatDate(row.started_at)],

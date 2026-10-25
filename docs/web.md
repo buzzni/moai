@@ -2,8 +2,8 @@
 
 `moai web` serves the tracker as a page on your own machine: a board, a list and
 the repository's wiki, with the issue under the cursor described below or beside
-it. It reads the tracker and never writes it — the one thing it writes is your
-own read marks. The page is the [explorer](explorer.md) for a
+it. It reads the tracker and writes it in one place only — a Gantt bar
+dragged to new days — besides your own read marks. The page is the [explorer](explorer.md) for a
 browser tab — same words, same filter syntax, same keys where a browser allows —
 so that a person who would rather not live in a terminal can still see how the
 work stands.
@@ -41,13 +41,14 @@ the address becomes `/?project=<its path>`, so a reload or a bookmark stays on
 it. The project the server was started in comes first when it is not
 registered itself. Only registered projects can be read this way.
 
-The page has three tabs.
+The page has four tabs.
 
 | Tab | Shows | Switch |
 |---|---|---|
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone) | `SPC g b` |
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold | `SPC g l` |
 | **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
+| **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
 
 Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
@@ -57,6 +58,49 @@ it, the body, its children and its history. The detail sits below the list, or o
 its left when the window is wide enough; `SPC o d` moves it and `SPC v d` hides
 it. `SPC v r` switches the body between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
+
+## Gantt
+
+The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
+meaning. The tree stays on the left with every folder open, the filter, search and
+view toggles of the list applied; the dates scroll on the right.
+
+| Mark | Means |
+|---|---|
+| light bar | The planned span: the row's start to its deadline |
+| hatched bar | The planned span of an epic or milestone that wrote no day of its own, counted from its members |
+| dashed outline | A deferred row |
+| solid band over the bar | When the work actually ran, in its column's colour; a row whose start nobody recorded has none |
+| red hatch and `!` | Past the row's own deadline, up to today |
+| `◆` | A row with a deadline and no start |
+| red dashed line | Now |
+| `‹` `›` | The row goes on off screen |
+| `n/m` and the fill | Finished work under an epic or milestone |
+| arrows | The rows that block the one under the cursor |
+
+The page only places these: which span a group covers and whether a row is late is
+decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
+in the time zone moai runs in.
+
+| Key / mouse | Does |
+|---|---|
+| `j` `k`, click | Move the cursor; a click on a row or bar opens its detail |
+| `H` `L`, Shift+wheel, drag the date header | Move the dates |
+| `-` `=`, the zoom buttons, Ctrl+wheel over the dates | Hour / day / week / month |
+| `t` / `z` | Jump to today / fit every drawn row |
+| drag the line between grid and dates | Grid width, kept in this browser |
+| drag a bar's middle | Move its start and deadline by the same number of days |
+| drag a bar's left or right end, or a `◆` | Move the start alone, or the deadline alone |
+| double-click a day on a row with no days | Plan that one day as its start and deadline |
+
+A bar moves by whole days and is written once, when you let go — the same write as
+`moai edit <id> --start <day> --due <day>`, and only the side that moved is sent.
+A move moai refuses (a start after the deadline, a day past the deadline of the
+epic, milestone or parent above) is told in moai's own words under the banners and
+the bar goes back. A move that went through says the `moai edit` line that puts the
+days back. A bar an epic or milestone counts from its members (hatched) does not
+move — move the members. The days written are the ones drawn: a row someone moved
+in the two seconds before the page read it again is given the days you dragged to.
 
 ## Theme
 
@@ -106,15 +150,20 @@ list of zones to pick from — type to narrow it, `Enter` to take one. The choic
 only changes what this page draws and is kept in the browser; it never touches
 your user config.
 
-## It does not write the tracker
+## What it writes
 
-Nothing on the page changes the tracker. Each list, issue and wiki page it shows
-is the answer of `moai --json <command>`, run in a child process for that request
-and passed on as it is, so what you see is exactly what the CLI says. Writing
-stays where it was: the CLI for moving, editing and noting, and the explorer's
-`SPC n` for a thought you want to park.
+Each list, issue and wiki page the page shows is the answer of `moai --json
+<command>`, run in a child process for that request and passed on as it is, so
+what you see is exactly what the CLI says. Writing stays where it was: the CLI for
+moving, editing and noting, and the explorer's `SPC n` for a thought you want to
+park.
 
-The one exception is read marks. `r` marks the issue under the cursor read,
+The one write to the tracker is a Gantt bar's days ([above](#gantt)): the server
+runs `moai edit --start --due` for it, so it goes through the same lock, checks and
+refusals as the CLI. The server takes it only from the page itself: a request
+another site sends is refused.
+
+The other write is read marks. `r` marks the issue under the cursor read,
 `SPC m a` everything new to you and `SPC m g` the group under the cursor — the
 same as `moai read`, which keeps them in a file of your own beside your user
 config and never in the tracker. The server takes that write only from the page
@@ -159,7 +208,9 @@ Leave the server on `127.0.0.1` and bring the port to you:
     ssh -L 6624:127.0.0.1:6624 you@the-machine
 
 Then open `http://localhost:6624/` on your own machine. This is the way to go
-rather than `--host 0.0.0.0`, which serves the tracker to anyone on the network.
+rather than `--host 0.0.0.0`, which serves the tracker to anyone on the network —
+and lets them move its planned days, since a Gantt bar dragged on their page
+writes the tracker as yours does.
 
 Whatever it binds, the server answers only requests whose `Host` header is
 `localhost` or an IP address. A request with another name — what a page on some
@@ -175,11 +226,11 @@ comes from the start. The rest come from the server while it runs:
 | Code | Means |
 |---|---|
 | `forbidden_host` | The `Host` header was not `localhost` or an IP address |
-| `forbidden_origin` | A read mark sent from anywhere but this page |
+| `forbidden_origin` | A read mark or a Gantt bar's days sent from anywhere but this page |
 | `not_registered` | `?project=` names a directory that is not a registered project |
 | `not_a_project` | `?project=` names a registered directory that has no `.moai` of its own (`moai init` it); the server does not read a parent's tracker in its place |
-| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read; the `Allow` header names the method the path takes (`POST` on the read-mark paths, `GET` elsewhere) |
-| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`) |
+| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read or moves a Gantt bar's days; the `Allow` header names the method the path takes (`POST` on those write paths, `GET` elsewhere) |
+| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt day that is not `YYYY-MM-DD`) |
 | `not_found` | No such path |
 | `busy` | Too many requests at once; try again |
 | `timeout` | The child `moai` did not answer in time |
@@ -227,7 +278,7 @@ once and the keys reach it.
 |---|---|
 | `SPC w w` / `SPC w W` | Next / previous pane |
 | `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
-| `SPC g l` `b` `w` | List / board / wiki tab |
+| `SPC g l` `b` `w` `g` | List / board / wiki / Gantt tab |
 | `SPC o d` | Detail position: left or below |
 | `SPC o t` | Pick the time zone dates are drawn in |
 
@@ -283,7 +334,7 @@ once and the keys reach it.
 | `/` | Search titles and bodies |
 | `SPC v r` | Raw / rendered page |
 
-The page does not show the stats screen, and the one thing it writes is your read
-marks.
+The page does not show the stats screen, and what it writes is a Gantt bar's days
+and your read marks.
 
-Decided in: moai-0aa7, moai-jshy
+Decided in: moai-0aa7, moai-jshy, moai-d86e.3ud

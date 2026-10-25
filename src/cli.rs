@@ -854,9 +854,10 @@ BACKLOG
   tool uses for them: none (no milestone) and lost.")]
     Tui(TuiArgs),
 
-    // **트래커를 읽기만 하는 서버다**(moai-0aa7). 데이터는 요청마다 띄우는 자식 `moai --json …` 의 stdout 이라
-    // 서버가 짓는 뜻이 없다 — 받고 옮기는 길은 `crate::web`, 묶고 첫 줄을 내는 길은 `cmd::web` 이다.
-    /// Serve this tracker as a page on 127.0.0.1, read-only
+    // **트래커를 읽는 서버다**(moai-0aa7) — 쓰는 것은 간트 막대의 계획 날 하나다(자식 `moai edit`, moai-d86e.3ud).
+    // 데이터는 요청마다 띄우는 자식 `moai --json …` 의 stdout 이라 서버가 짓는 뜻이 없다 — 받고 옮기는 길은
+    // `crate::web`, 묶고 첫 줄을 내는 길은 `cmd::web` 이다.
+    /// Serve this tracker as a page on 127.0.0.1
     #[command(after_help = "  moai web                  http://127.0.0.1:6624/ - open it in a browser
   moai web --port 0         let the system pick a free port
   moai web --dry-run        say where it would serve; bind nothing
@@ -865,17 +866,18 @@ BACKLOG
   The first line names the address and the tracker. Ctrl-C stops it; there
   is nothing to clean up. It never opens a browser.
 
-  It never writes the tracker. Each list, issue and wiki page it serves is
-  the answer of `moai --json <command>`, run in a child process for that
-  request, so the page sees exactly what the CLI says. Writing stays with the
-  CLI and the explorer; the one write the page makes is your read marks
-  (`moai read`), taken only from the page itself. Registered projects
+  Each list, issue and wiki page it serves is the answer of `moai --json
+  <command>`, run in a child process for that request, so the page sees
+  exactly what the CLI says. Writing stays with the CLI and the explorer; the
+  page writes two things, taken only from the page itself: a Gantt bar dragged
+  to new days, run as `moai edit --start --due`, and your read marks (`moai
+  read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who
-  reaches that port can read the tracker. Whatever it binds, it answers only
-  requests whose Host is localhost or an IP address.
+  reaches that port can read the tracker and move its planned days. Whatever
+  it binds, it answers only requests whose Host is localhost or an IP address.
 
   A port already in use stops it with the code port_in_use. Run inside a
   linked worktree, it serves the main checkout's tracker, as other commands

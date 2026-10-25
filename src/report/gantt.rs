@@ -86,6 +86,8 @@ pub enum Standing<'a> {
 /// 간트의 한 줄. `at` 은 `all` 의 첨자다 — id 는 겹칠 수 있어(`duplicate_id`) 줄을 첨자로 가리킨다.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Row<'a> {
+    /// 부르는 쪽이 적재한 줄의 첨자라 밖에 내지 않는다 — `tui --json --deep` 의 줄에는 제 id 가 선다.
+    #[serde(skip)]
     pub at: usize,
     pub id: &'a str,
     pub kind: Kind,

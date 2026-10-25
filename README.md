@@ -214,10 +214,11 @@ the keys it takes and a few examples stand above the field, and in the value of
 `assignee=`, `tag=`, `no-tag=` or `milestone=` the values this tracker holds
 do — typing narrows them, Up and Down pick one and Enter puts it in.
 
-`moai web` serves the same tracker as a page in a browser tab, read-only, on
-`127.0.0.1:6624` (`--port`, `--port 0` for a free one, `--host`): a board, a list
-and the wiki, with the keys of the explorer. It never opens a browser and never
-writes; see [the manual page](docs/web.md).
+`moai web` serves the same tracker as a page in a browser tab on
+`127.0.0.1:6624` (`--port`, `--port 0` for a free one, `--host`): a board, a list,
+a Gantt chart and the wiki, with the keys of the explorer. It never opens a
+browser, and the one change it makes to the tracker is a Gantt bar dragged to new
+days; see [the manual page](docs/web.md).
 
 Done work that has sat in done for two weeks is the archive. It is not removed
 and nothing is stored for it — moai reads it off the column and the clock each
