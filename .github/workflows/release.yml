@@ -286,3 +286,15 @@ jobs:
             args+=(--generate-notes)
           fi
           gh release create "$REF_NAME" "${args[@]}" dist/*
+
+  # 릴리스가 나간 뒤에 Discord 에 소식을 올린다(moai-hwl4). 시험판(`-rc` 같은 꼬리)은 안 알린다.
+  # 이 잡이 붉어도 릴리스는 이미 나갔다 — discord.yml 을 손으로 다시 돌리면 된다.
+  discord:
+    name: Discord 소식
+    needs: release
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    uses: ./.github/workflows/discord.yml
+    with:
+      version: ${{ github.ref_name }}
+    secrets:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}

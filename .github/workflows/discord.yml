@@ -1,0 +1,96 @@
+# 릴리스 소식을 Discord 에 올린다 (moai-hwl4).
+#
+# 글과 그림은 `release-posts/<판>/` 에 있다 — 릴리스 앞에 에이전트가 compose.py·shot.mjs 로 지어 커밋한다.
+# 어디를 상자로 짚을지는 판단이 필요해 이 워크플로가 못 한다. 그 디렉터리가 없으면 CHANGELOG 의 그 판
+# 절로 글만 지어 올린다.
+#
+# 웹훅 주소는 저장소 시크릿 `DISCORD_WEBHOOK_URL` 이다. 시크릿이 없으면 무엇을 보냈을지만 찍고
+# 초록으로 끝난다 — 소식 하나가 릴리스 워크플로를 붉게 만들면 안 된다.
+name: discord
+
+on:
+  # release.yml 이 GitHub 릴리스를 낸 뒤 부른다
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+    secrets:
+      DISCORD_WEBHOOK_URL:
+        required: false
+  # 손으로 한 판을 올리거나 다시 올리는 자리. 이 워크플로 전에 나간 판(v0.23.0)의 소식도 이것으로 낸다
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "올릴 판 (예: v0.23.0)"
+        required: true
+      dry_run:
+        description: "보낼 것만 찍고 올리지 않는다"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# 한 판을 두 번 겹쳐 올리지 않는다 — 앞의 것이 끝난 뒤에 돈다
+concurrency:
+  group: discord-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  post:
+    name: Discord 에 올린다
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 입력은 `${{ }}` 로 스크립트에 붙이지 않는다 — 넣은 글자가 셸 명령이 되는 자리다. 환경으로 준다.
+      - name: 판을 고른다
+        id: pick
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          case $VERSION in v*) ;; *) VERSION=v$VERSION ;; esac
+          if ! [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            printf '판의 꼴이 아니다: %s\n' "$VERSION" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$VERSION" >>"$GITHUB_OUTPUT"
+
+      # 글을 짓는 규칙이 깨진 채로 공개 채널에 나가지 않게, 올리기 전에 그 시험부터 돈다
+      - name: 글을 짓는 규칙을 잰다
+        run: python3 -I -m unittest discover -s scripts/release-post
+
+      - name: 글을 고른다
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+        run: |
+          set -euo pipefail
+          dir=release-posts/$VERSION
+          if [ -f "$dir/post.md" ]; then
+            printf '글: 커밋된 %s\n' "$dir"
+          else
+            printf '글: 커밋된 것이 없다 — CHANGELOG 의 %s 절로 글만 짓는다\n' "$VERSION"
+            python3 -I scripts/release-post/compose.py "$VERSION" --out "$dir"
+          fi
+
+      - name: 올린다
+        env:
+          VERSION: ${{ steps.pick.outputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          dir=release-posts/$VERSION
+          if [ "$DRY_RUN" = true ]; then
+            python3 -I scripts/release-post/post.py "$dir" --dry-run
+            exit 0
+          fi
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            printf '::notice::DISCORD_WEBHOOK_URL 시크릿이 없어 올리지 않았다 — 보냈을 것은 아래와 같다\n'
+            python3 -I scripts/release-post/post.py "$dir" --dry-run
+            exit 0
+          fi
+          python3 -I scripts/release-post/post.py "$dir"
