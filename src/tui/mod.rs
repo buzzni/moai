@@ -1513,6 +1513,9 @@ pub struct App {
     /// 보기·상세는 둘이 한 벌이고, 이것은 [`App::rows`] 가 무엇을 내고 그림과 이동이 그것을 어디에 세우는가만
     /// 가른다. 한눈 보기에서는 프로젝트마다 머리줄이 서는 보드다(moai-oagj.vcj). 설정에 남는다.
     pub layout: view::Layout,
+    /// 간트의 보기(moai-i4hf) — 가로 축·확대·고정 칸 폭·맞춤. 세로 자리는 목록의 것(`list`)을 그대로 쓴다. **화면에만
+    /// 산다** — 처음에는 맞춤이 서서 보이는 줄의 날이 한 화면에 든다.
+    pub chart: moai_gantt::GanttState,
     /// 보드에서 커서가 마지막으로 선 카드의 칸 — 칸이 없는 프로젝트 머리줄에서 `j`·`k` 가 걸을 칸이다
     /// (moai-oagj.vcj, [`App::board_step`]). 화면의 손버릇이라 설정에 안 남는다.
     ///
@@ -2144,6 +2147,7 @@ impl App {
             detail_open: true,
             detail_at: view::DetailAt::default(),
             layout: view::Layout::default(),
+            chart: moai_gantt::GanttState { fitting: true, ..Default::default() },
             board_column: None,
             adrift: None,
             mouse_on: true,

@@ -219,6 +219,8 @@ pub fn screen(f: &mut Frame, app: &mut App) {
     let (rows_at, cards, columns) = if app.board() {
         let b = board(f, app, left, &rows);
         (Rect::default(), b.cards, b.columns)
+    } else if app.gantt() {
+        (gantt(f, app, left, &rows), Vec::new(), Vec::new())
     } else {
         (list(f, app, left, &rows), Vec::new(), Vec::new())
     };
@@ -2505,9 +2507,9 @@ fn prompt_room(avail: usize, error: usize) -> (usize, usize) {
 
 /// 목록을 그리고 **줄이 선 자리**를 낸다 — 테두리와 열 이름 줄을 뗀 안쪽이다. 마우스가 누른 줄을 그것으로 센다
 /// (`mouse::Drawn::rows`).
-fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
-    // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
-    let inner = at.width.saturating_sub(2) as usize;
+/// 목록의 열을 잰다 — 줄마다의 셈 글, 왼쪽 열의 폭, 걷고 남은 열. 목록과 간트의 고정 칸이 같은 자로 잰다(moai-i4hf):
+/// 둘이 따로 재면 `SPC g l` ↔ `SPC g g` 를 오갈 때 같은 줄이 다른 열로 선다. `inner` 는 줄 하나에 줄 폭이다.
+fn measure(app: &App, rows: &[Row], inner: usize) -> (Vec<String>, Head, super::view::Fields) {
     // **셈은 줄마다 한 번만 센다** — 머리를 걷는 셈(`Head::of`)·오른쪽 열 걷기·이름 줄·줄(`row_line`)이
     // 같은 글을 본다. 셈 자체는 적재 때 센 것을 읽지만(`Index::tally`, moai-m7iy) 줄마다 경로를 짓고 글을
     // 지으므로, 자리마다 다시 부르면 그 값을 프레임마다 여러 번 치른다.
@@ -2533,7 +2535,11 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
         },
         Row::Up | Row::Project(_) => common,
     });
+    (tallies, cols, common)
+}
 
+/// 목록 칸의 제목 — 칸별 건수나 줄 수. 간트도 같은 제목을 단다(moai-i4hf).
+fn list_title<'a>(app: &App, rows: &[Row]) -> Line<'a> {
     // 제목에 칸별 건수를 **config 차례로** 낸다. 칸 이름과 순서는 저장소가
     // 정하는 것이라(`config.statuses`) 여기서 다시 정하지 않는다.
     //
@@ -2579,7 +2585,7 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     // `..` 은 줄로 안 센다 — 층이 있으면 프로젝트 뿌리에도 서므로, 세면 빈 프로젝트가
     // " 1줄 " 로 서고 "비었다" 에 영영 못 닿는다.
     let lines = rows.iter().filter(|r| !matches!(r, Row::Up)).count();
-    let title: Line = match (counts.is_empty(), lines == 0) {
+    match (counts.is_empty(), lines == 0) {
         // 층의 줄은 일이 아니라 프로젝트다 — 칸 셈은 줄마다 곁에 선다.
         // 한눈 보기의 제목은 **프로젝트 수**다 — 줄 수로 세면 펼친 프로젝트의 이슈까지 프로젝트로
         // 읽혀 "프로젝트 40곳" 이 선다(moai-3f1b).
@@ -2609,7 +2615,14 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
             spans.push(Span::raw(" "));
             Line::from(spans)
         }
-    };
+    }
+}
+
+fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
+    // 테두리 두 칸을 뺀 안쪽 폭. 좁은 창에서도 음수가 되지 않게 막는다.
+    let inner = at.width.saturating_sub(2) as usize;
+    let (tallies, cols, common) = measure(app, rows, inner);
+    let title = list_title(app, rows);
     // **자리는 프레임을 넘어 산다**(`App::list`). 매번 새로 세면 훑는 자리가 0 으로
     // 돌아가, 커서를 보이게 하려고 커서를 늘 맨 아랫줄에 붙인다 — 커서 아래를 한
     // 줄도 못 보게 된다. 굴리는 셈은 상세와 같은 조각이 하고, 위젯은 그 자리를 받아
@@ -2681,6 +2694,55 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     );
     scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, app.site.lang);
     list_at
+}
+
+/// 간트를 그린다(moai-i4hf) — **목록 자리에** 고정 칸과 날짜 칸을 세운다. 테두리·제목·굴린 자리(`App::list`)가
+/// 목록과 한 벌이고, 고정 칸의 줄은 목록의 줄(`row_line`)을 같은 자로 잰 것이다 — `SPC g l` ↔ `SPC g g` 를 오가도
+/// 같은 줄이 같은 열로 선다. 날짜 칸은 위젯(`moai_gantt::Gantt`)이 그린다.
+///
+/// 낸 값은 줄의 자리 — 고정 칸부터 날짜 칸 끝까지다. 마우스가 그 안의 줄을 누르면 목록처럼 커서가 그 줄로 간다.
+fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
+    let block = frame(app, Pane::Explorer).title(list_title(app, rows));
+    let inner_at = block.inner(at);
+    f.render_widget(block, at);
+    let laid = moai_gantt::Layout::of(inner_at, &app.chart);
+    let body = laid.labels_body;
+    app.list.fit(body.height as usize, rows.len());
+    let selected = (!rows.is_empty()).then_some(app.cursor.min(rows.len().saturating_sub(1)));
+    if let Some(at) = selected
+        && !app.rolled_off(rows)
+    {
+        app.list.reveal(at);
+    }
+    let window = app.list.offset()..app.list.offset() + body.height as usize;
+    // 커서 칸(`> `)은 목록처럼 늘 자리를 둔다 — 안 두면 커서가 움직일 때마다 줄이 그 폭만큼 들썩인다.
+    let pad = CURSOR.chars().count();
+    let budget = (body.width as usize).saturating_sub(pad);
+    let (tallies, cols, common) = measure(app, rows, budget);
+    let chart = app.chart_of(rows, window, &|n, r| {
+        let mark = if selected == Some(n) { CURSOR.to_string() } else { " ".repeat(pad) };
+        let mut line = row_line(app, r, &tallies[n], budget, common, cols);
+        line.spans.insert(0, Span::raw(mark));
+        line
+    });
+    let tallied = tallies.iter().any(|t| !t.is_empty());
+    let mut title = names_line(common, cols, tallied, budget);
+    title.spans.insert(0, Span::raw(" ".repeat(pad)));
+    app.chart.first_row = app.list.offset();
+    app.chart.refit(chart.range, laid.dates_width());
+    let widget = moai_gantt::Gantt {
+        rows: &chart.rows,
+        links: &chart.links,
+        now: chart.now,
+        focus: selected,
+        title,
+        names: None,
+        palette: moai_gantt::Palette::default(),
+        glyphs: moai_gantt::Glyphs::default(),
+    };
+    f.render_stateful_widget(widget, inner_at, &mut app.chart);
+    scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, app.site.lang);
+    Rect::new(body.x, body.y, inner_at.width, body.height)
 }
 
 /// 보드가 그린 자리 — 마우스가 맞히는 바탕이다(`mouse::Drawn::cards`·`columns`).

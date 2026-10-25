@@ -459,8 +459,7 @@ mod tests {
         assert!(screen.contains("l : 목록") && screen.contains("s : 통계"), "SPC g 층이 안 섰다\n{screen}");
     }
 
-    /// **메뉴를 닫는 이동키는 창을 굴린다**(moai-y8v2 를 통계 창에서) — `gg` 는 메뉴가 닫힌 뒤 창의 열로 이어진다.
-    /// 메뉴를 여는 SPC 는 창이 기다리던 `g` 를 버리고, Bksp 는 한 층 오르다 뿌리에서 메뉴만 닫는다. 메뉴가 뜬 동안의
+    /// **메뉴를 닫는 이동키는 창을 굴린다**(moai-y8v2 를 통계 창에서). 메뉴를 여는 SPC 는 창이 기다리던 `g` 를 버리고, Bksp 는 한 층 오르다 뿌리에서 메뉴만 닫는다. 메뉴가 뜬 동안의
     /// 휠은 `mouse::tests::the_wheel_scrolls_the_stats_window_and_nothing_over_a_picker` 가 본다.
     #[test]
     fn a_move_key_closes_the_menu_over_the_window_and_scrolls_it() {
@@ -475,13 +474,7 @@ mod tests {
         assert!(window(&a).scroll.offset() > 1, "Ctrl-d 가 창을 안 굴렸다");
         a.hit("SPC s");
         assert!(menu::open(&a.chord), "시험의 전제 — 통계 창 위의 SPC s 는 모르는 키라 메뉴가 남는다");
-        a.hit("Esc SPC g");
-        assert_eq!(menu::title(a.chord.held()), "SPC g");
-        a.hit("g");
-        assert!(!menu::open(&a.chord), "SPC g 층의 g 가 메뉴를 안 닫았다");
-        a.hit("g");
-        assert_eq!(window(&a).scroll.offset(), 0, "메뉴에서 시작한 gg 가 창의 맨 위로 안 갔다");
-        assert!(a.chord.held().is_empty(), "탐색의 열에 g 가 남았다");
+        a.hit("Esc");
 
         // **메뉴를 열면 창이 기다리던 `g` 를 버린다** — 메뉴를 사이에 둔 `g` 와 `g` 가 `gg` 로 이으면 사람이 친 적 없는
         // 맨 위로 가기가 선다(휠의 `Window::roll` 과 같은 까닭).
@@ -496,6 +489,13 @@ mod tests {
         a.hit("Bksp");
         assert!(!menu::open(&a.chord), "뿌리의 Bksp 가 메뉴를 안 닫았다");
         assert_eq!(window(&a).scroll.offset(), bottom, "메뉴의 Bksp 가 창을 건드렸다");
+
+        // **`SPC g` 층의 `g` 는 메뉴 항목이다**(moai-i4hf) — 메뉴를 닫고 `gg` 를 시작하던 길은 간트 고르기가 이긴다.
+        // 고르면 창을 닫고 간트로 선다.
+        a.hit("SPC g g");
+        assert!(!menu::open(&a.chord), "SPC g g 가 메뉴를 열어 뒀다");
+        assert!(!matches!(a.mode, Mode::Stats(_)), "SPC g g 가 통계 창을 안 닫았다");
+        assert_eq!(a.layout, crate::tui::view::Layout::Gantt);
     }
 
     /// **바로 친 Ctrl·Alt 화살표와 쪽 키도 창을 굴린다**(moai-ug6x.3ip) — 메뉴를 거친 같은 키는 탐색의 표(`Key::any`)로

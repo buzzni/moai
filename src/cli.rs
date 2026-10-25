@@ -554,6 +554,7 @@ BACKLOG
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
+    {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
     {key:browse.go_stats}  statistics — the numbers `moai stats` gives, drawn (see below)
     {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
@@ -700,6 +701,19 @@ BACKLOG
   shown, together. The cursor stands on a header too — {key:moves.line_up} from the project's
   top card in a column goes up to it — and there {key:browse.expand} unfolds, {key:browse.collapse} folds, {key:browse.expand_all}
   unfolds everything and {key:browse.enter} goes in, as in the list.
+
+  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right.
+  It is the list's layout too — the cursor, the filter, the view, search and
+  the detail are the list's — but it holds its own folds: it opens with
+  everything unfolded, {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
+  and the list keeps the folds it had. Coming back to the list opens the
+  folder that holds the row you stood on. The planned bar (░, ▒ on a group)
+  runs from the start to the deadline and ◆ marks the row's own deadline; █
+  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
+  a deferred row's plan, and ▼ over a dotted line marks today.
+  Groups that wrote no days of their own span their members' days. Planned days
+  are calendar days; actual times are shown in your time zone.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a
