@@ -123,6 +123,15 @@ fn carried_due<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
     }
 }
 
+/// 펼치기가 에픽에 데려갈 계획 시작일(moai-xf0p.due) — [`carried_due`] 와 같은 자리, 같은 규칙이다. 꼴이 틀린 값은
+/// 안 데려간다([`Issue::planned_start`]).
+fn carried_start<'a>(thought: &'a Issue, into: Option<&str>) -> Option<&'a str> {
+    match into {
+        Some(_) => None,
+        None => thought.planned_start(),
+    }
+}
+
 /// 데려갈 본문이 한 쓰기의 상한 안인가 — **넘으면 그 생각을 가리키며 거절한다**(moai-oejf).
 ///
 /// `promote` 가 데려가는 본문은 `store` 의 쓰기 검사를 다시 지난다. 손으로 푼 머지가 남길 수
@@ -221,8 +230,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         // `code` 로 갈라지는 쪽은 그 사이 엉뚱한 갈래를 탄다. 여기가 바로 그 어긋남을 없애려던 고침이다.
         // 데려가는 본문은 여기 안 준다 — 그것은 이 생각이 이미 든 글이라 가리킬 줄이 계획의
         // 것이 아니라 그 생각이다(moai-oejf). 바로 위가 제 자로 잰다.
-        let rooted =
-            crate::cmd::add::Rooted { milestone: stone.as_deref(), body: None, due: carried_due(thought, into) };
+        let rooted = crate::cmd::add::Rooted {
+            milestone: stone.as_deref(),
+            body: None,
+            due: carried_due(thought, into),
+            start: carried_start(thought, into),
+        };
         crate::cmd::add::check_plan(&drafts, rooted, ctx.lang())?;
         // **기한의 꼴과 위계도 진짜의 자로 잰다**(리뷰) — 데려간 기한이 데려간 마일스톤보다 늦거나, 계획의 `@날짜` 가
         // 펼칠 에픽(`-e`)이나 그 마일스톤을 넘으면 진짜가 물린다.
@@ -237,7 +250,10 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             return crate::cmd::add::json_rehearsal(&drafts, Some(&args.id), into, rooted);
         }
         let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.will_unfold"))];
-        out.extend(drafts.iter().map(|d| crate::cmd::add::line_of(d, None, rooted.due_for(d, into))));
+        out.extend(drafts.iter().map(|d| {
+            let (start, due) = rooted.dates_for(d, into);
+            crate::cmd::add::line_of(d, None, start, due)
+        }));
         out.push(String::new());
         out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
         out.extend(crate::cmd::add::milestone_line(
@@ -319,8 +335,13 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             say_if_inherited(issues, thought, stone.as_deref(), lang);
             say_if_dead(issues, cfg, stone.as_deref(), lang);
             let due = carried_due(thought, into).map(str::to_string);
-            let rooted =
-                crate::cmd::add::Rooted { milestone: stone.as_deref(), body: text.as_deref(), due: due.as_deref() };
+            let start = carried_start(thought, into).map(str::to_string);
+            let rooted = crate::cmd::add::Rooted {
+                milestone: stone.as_deref(),
+                body: text.as_deref(),
+                due: due.as_deref(),
+                start: start.as_deref(),
+            };
 
             let (mut entries, made) =
                 crate::cmd::add::create_drafts(issues, cfg, reserved, &drafts, into, rooted, &heir, &by, &at)?;
@@ -351,9 +372,15 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 한 줄에 묻힌다 — `MAX_TEXT_BYTES` 가 애초에 막으려던 바로 그것이다.
             // **저널에 적히는 글은 화면 말을 안 따른다** — 설정이 이미 쓴 줄을 바꾸면 그것은
             // 설정이 아니라 마이그레이션이다(CLAUDE.md). 같은 저장소의 이력이 사람마다 다른
-            // 말로 남으면 `moai show` 의 이력이 두 말로 갈린다.
-            let head = format!("{} 에서 펼쳤다 — ", args.id);
-            let shown = crate::model::fit_bytes(&title, TITLE_IN_NOTE);
+            // 말로 남으면 `moai show` 의 이력이 두 말로 갈린다. **고정한 말은 영어다**(moai-68ft) —
+            // 화면의 기본이 영어고, 도구가 짓는 다른 노트(`Taken-over:`·`Due-priority:`)도 영어다.
+            // 한국어로 고정했던 동안 영어 화면의 이력에 한국어 줄이 섰다. 이미 적힌 줄은 그대로 둔다.
+            let head = format!("Unfolded from {} — ", args.id);
+            // **제목은 한 줄로 접어 담는다** — `Taken-over:` 가 담당을 접는 것과 같은 까닭이다. 쓰기는 바뀐
+            // 줄만 재므로, 이미 닫힌 backlog 를 다시 펼치면 손으로 고쳐 줄바꿈이 든 제목이 검사 없이 여기
+            // 닿는다. 그대로 담으면 그 뒷줄(`model: …`)을 `work` 가 펼친 사람의 일로 센다.
+            let flat = crate::text::one_line(&title);
+            let shown = crate::model::fit_bytes(&flat, TITLE_IN_NOTE);
             // **한 번만 짓는다.** 줄마다 똑같은 글이라, 루프 안에서 지으면 64KB 짜리를 멤버 수만큼
             // 새로 짓고 곧바로 버린다 — `-e` 로 펼치면 만든 이슈가 모두 여기 든다.
             let grew = format!("{head}{shown}");
@@ -362,8 +389,11 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             }
             let done = Status::new(crate::config::DONE);
             let note = match into {
-                Some(e) => format!("{e} 의 멤버 {} 로 펼쳤다", grown.join(" ")),
-                None => format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len()),
+                Some(e) => format!("Unfolded into {e} as {}", grown.join(" ")),
+                None => {
+                    let n = made.len() - grown.len();
+                    format!("Unfolded into {}, {n} {}", grown.join(" "), if n == 1 { "issue" } else { "issues" })
+                }
             };
             // **이 노트도 같은 자로 잰다.** 계획에 줄 수 상한이 없어 id 목록만으로도 상한을 넘는데
             // (재 봤다: 8,000줄 계획이 79KB), 그러면 위와 똑같이 펼칠 길이 통째로 막힌 채 거절문이
@@ -408,7 +438,12 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
         });
     }
     let mut out = vec![paint(style::HEAD, crate::i18n::say(ctx.lang(), "backlog.unfolded"))];
-    out.extend(drafts.iter().zip(&made).map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id), i.due_on.as_deref())));
+    out.extend(
+        drafts
+            .iter()
+            .zip(&made)
+            .map(|(d, i)| crate::cmd::add::line_of(d, Some(&i.id), i.starts_on.as_deref(), i.due_on.as_deref())),
+    );
     out.push(String::new());
     out.push(crate::cmd::add::tally(&drafts, ctx.lang()));
     // **만든 줄에서 읽는다** — 어디에 섰는지를 두 번 셈하지 않는다. 뿌리가 없으면(`-e`)

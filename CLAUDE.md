@@ -206,17 +206,19 @@
 - **가지는 로컬 `develop` 에서 뜬다.** `EnterWorktree` 에 `name` 만 주면
   `origin/develop` 에서 뜨는데, 그쪽은 로컬보다 한참 낡았을 수 있다 (2026-09-14
   에 91커밋 뒤였다).
-  `git worktree add` 로 만든 뒤 `EnterWorktree` 에 `path` 로 들어간다
+  `git worktree add` 로 만들고, 들지 않고 절대 경로로 다룬다(아래)
 - **워크트리 자리는 `.worktrees/moai-<id>` 다**(2026-10-04 사용자 결정, `moai-5s9l`). 에이전트가 셋(Claude Code·
   Codex·Antigravity)이 되어 Claude 의 자리 `.claude/worktrees/` 를 걷고 세 벤더가 함께 쓰는 자리로 옮겼다.
   저장소 밖(`../`)이 아닌 까닭은 Codex 의 신뢰와 Antigravity 의 workspace 가 루트 경로 기준이라서다.
-  Claude Code 의 `EnterWorktree(path)` 는 루트에서 들어갈 때 이 자리를 받지만, 워크트리에서 다른 워크트리로
-  바로 옮기는 것은 `.claude/worktrees/` 밑만 받는다 — 그래서 늘 `ExitWorktree(keep)` 로 루트에 나왔다가
-  들어간다. 옛 자리에 선 워크트리는 그대로 돌고, `.gitignore` 의 옛 줄도 그것이 다 걷힐 때까지 둔다
-- **서브에이전트 일꾼은 워크트리에 들지 않고 절대 경로로 다룬다**(`moai-9tqo`). 서브에이전트는
-  `EnterWorktree` 를 못 쓰고, Bash 의 자리가 부름마다 루트로 돌아간다(`moai-9tqo.fxp`) —
-  `cd <루트>/.worktrees/moai-<에픽> && …` 나 `git -C <루트>/.worktrees/moai-<에픽> …` 로 겨눈다.
-  걸음은 감독 스킬의 `references/worker.md` "In a subagent" 에 있다. 훅은 그 서브에이전트를
+  옛 자리에 선 워크트리는 그대로 돌고, `.gitignore` 의 옛 줄도 그것이 다 걷힐 때까지 둔다
+- **Claude 세션은 워크트리에 들지 않고 절대 경로로 다룬다** — 세션 일꾼도 서브에이전트 일꾼도, 사람이 연
+  창도(2026-10-25 사용자 결정, `moai-9js2`). `.worktrees/` 로 드는 `EnterWorktree` 는 부를 때마다 사람에게
+  "permission-root relocation" 승인을 묻고(Claude Code v2.1.206 부터), allow 규칙도 "don't ask again" 도 안 끈다.
+  서브에이전트는 그 도구가 아예 없고 Bash 의 자리가 부름마다 루트로 돌아간다(`moai-9tqo`, `moai-9tqo.fxp`) —
+  `cd <루트>/.worktrees/moai-<에픽> && …` 나 `git -C <루트>/.worktrees/moai-<에픽> …` 로 겨누고, 파일은 절대 경로로
+  고친다. 충돌도 그렇게 푼다. 걸음은 감독 스킬의 `references/worker.md` "Stay in the root" 에 있다.
+  들지 않으니 Claude Code 의 격리 가드도 안 선다 — 그 몫은 훅의 규칙 2 가 진다(`moai-9js2.3xn`): 쥔 줄이 모두
+  제 워크트리를 가지면 루트 체크아웃에 쓰는 것을 막고, 거절문이 같은 파일의 워크트리 경로를 낸다. 훅은 서브에이전트를
   감독과 한 세션으로 읽는다 — 그 세션이 확실히 집은 줄은 워크트리 이름이 가리켜도 제 것이다(`moai-pxui`).
   `&&` 뒤에 친 집기처럼 돌았는지 모르는 것은 안 센다
 - **본 가지는 `develop` 이다.** 2026-09-18 에 사용자가 `main` 에서 바꿨다 — 로컬 가지와
@@ -235,8 +237,8 @@
   - 마일스톤 워크트리도 `target/` 을 `/tmp/cargo-target/milestone-<id>` 로 가는 링크로 둔다(아래)
   - 가지는 그 워크트리를 처음 세울 때 **로컬 develop 에서** 뜬다 — 감독이 그 마일스톤의 첫 에픽을 보낼 때다.
     감독은 그 일의 메시지에 `Base branch: milestone/<id>` 를 싣고, 보고의 병합도 그 가지에서 확인한다
-  - 병합은 루트가 아니라 **마일스톤 워크트리에서** 한다. 일꾼은 `ExitWorktree(keep)` 로 루트에 나와
-    `git -C .worktrees/milestone-<id> …` 를 친다 — 격리 가드는 워크트리에 든 세션에만 선다. 충돌이 나면 그
+  - 병합은 루트가 아니라 **마일스톤 워크트리에서** 한다. 일꾼은 루트에 선 채
+    `git -C .worktrees/milestone-<id> …` 를 친다. 충돌이 나면 그
     자리에서 `merge --abort` 하고, 에픽 워크트리로 돌아가 마일스톤 가지를 받아 풀고 다시 친다. 그 워크트리는 루트처럼
     마일스톤의 일꾼 모두가 나눠 쓴다 — 이미 열린 병합(`MERGE_HEAD`) 때문에 거절되면 남의 것이니 abort 하지 않고 기다린다
   - 에픽 가지를 지우는 `branch -d` 도 마일스톤 워크트리에서 친다. 루트의 develop 은 릴리스 전까지 그 병합을

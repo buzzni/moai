@@ -7447,8 +7447,8 @@ fn a_plan_hangs_its_epics_on_the_milestone() {
 
 /// **`--from` 과 뜻이 안 통하는 깃발은 거절한다**(moai-fppn). `--body -` 는 계획과 stdin 을
 /// 다투고, `--status` 는 계획이 늘 첫 칸에 세우므로 갈 곳이 없다 — 받고 버리면 0 으로 끝난
-/// 부름이 사람이 준 글과 칸을 말없이 삼킨다. `--epic`·`--tag`·`--start` 가 이미 선 자리와 한 줄이다
-/// (`--due` 는 계획이 짓는 에픽에 서서 빠졌다, moai-ghkp.u1w).
+/// 부름이 사람이 준 글과 칸을 말없이 삼킨다. `--epic`·`--tag` 가 이미 선 자리와 한 줄이다
+/// (`--due`·`--start` 는 계획이 짓는 에픽에 서서 빠졌다, moai-ghkp.u1w·moai-xf0p.due).
 #[test]
 fn a_plan_refuses_the_flags_it_cannot_use() {
     let s = init("planflags");
@@ -7458,7 +7458,7 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
     // **`--body` 는 여기서 빠졌다**(moai-kqid) — 계획은 본문을 받아 첫 뿌리에 단다. 못 서는
     // 판은 stdin 을 정말 다투는 판뿐이고, 그것은 아래 [`a_plan_takes_a_body_unless_stdin_is_contested`] 가 잰다.
     //
-    // **아홉 가지를 남김없이 돈다**(리뷰 — `--due` 는 계획이 짓는 에픽에 서서 빠졌다, moai-ghkp.u1w). clap 의 `conflicts_with_all` 이 거저 지키던 목록을
+    // **여덟 가지를 남김없이 돈다**(리뷰 — `--due`·`--start` 는 계획이 짓는 에픽에 서서 빠졌다, moai-ghkp.u1w·moai-xf0p.due). clap 의 `conflicts_with_all` 이 거저 지키던 목록을
     // 손으로 옮겨 적었는데 시험은 셋만 돌아, 그 목록에서 한 줄이 빠지는 날 아무것도 안 붉어졌다 —
     // 빠진 깃발은 받아서 버려지고 그 부름이 0 으로 끝난다(`--type` 이 실제로 그랬다, moai-g9a8).
     for extra in [
@@ -7467,7 +7467,6 @@ fn a_plan_refuses_the_flags_it_cannot_use() {
         ["--tag", "parser"].as_slice(),
         ["--priority", "1"].as_slice(),
         ["--parent", "moai-aaaa"].as_slice(),
-        ["--start", "2026-09-01"].as_slice(),
         ["--status", "in_progress"].as_slice(),
         ["--quiet"].as_slice(),
         ["--type", "issue"].as_slice(),
@@ -7889,9 +7888,9 @@ fn a_single_add_says_an_epic_that_is_not_there() {
     let row = String::from_utf8(out.stdout).unwrap();
     assert!(row.trim_start().starts_with('{') && row.contains(r#""epic":"argos-zzzz""#), "{row}");
 
-    // 거절된 쓰기는 알리지 않는다 — 시작 기한은 마일스톤 줄에만 서므로 이 쓰기는 락 안에서 물린다.
-    let out = moai(s.path(), &["add", "거절될 줄", "-e", "argos-zzzz", "--start", "2026-10-10"]);
-    assert!(!out.status.success(), "시작 기한을 든 이슈가 받아들여졌다\n{}", text(&out));
+    // 거절된 쓰기는 알리지 않는다 — 꼴이 틀린 시작 기한은 락 안에서 물린다.
+    let out = moai(s.path(), &["add", "거절될 줄", "-e", "argos-zzzz", "--start", "2026-10-1"]);
+    assert!(!out.status.success(), "꼴이 틀린 시작 기한을 든 이슈가 받아들여졌다\n{}", text(&out));
     assert!(!said(&out, "argos-zzzz"), "거절된 쓰기가 알림을 먼저 냈다\n{}", text(&out));
 
     // 에픽이 아닌 줄을 가리켜도 "없다" 고 한다 — 재는 자는 `dangling_epic` 과 같다.
@@ -10387,24 +10386,66 @@ fn a_milestone_carries_a_start_and_a_deadline() {
     assert!(!ok(s.path(), &["show", &m]).contains("기한"), "빈 기한이 줄을 세웠다");
 }
 
-/// **시작 기한은 마일스톤 줄에만 선다.** 다른 종류에 적힌 값은 어느 화면도 안 읽으므로, 조용히
-/// 받으면 적은 사람은 걸린 줄 안다 — 거절문이 비우는 명령을 그대로 낸다. **종료 기한은 모든 줄에
-/// 선다**(moai-ghkp.kz7) — 그쪽은 `a_deadline_stands_on_every_kind_of_row` 가 잰다.
+/// **시작 기한도 모든 줄에 선다**(moai-xf0p.6d5, 종료 기한은 moai-ghkp.kz7) — 이슈·에픽·backlog 가
+/// `--start` 를 받고, `+N` 은 오늘에서 N 일 뒤의 날짜로 적힌다. 종료보다 늦은 시작은 여전히 거절한다.
 #[test]
-fn a_start_date_stands_on_a_milestone_row_only() {
+fn a_start_date_stands_on_every_kind_of_row() {
     let s = init("duekind");
-    let made = moai(s.path(), &["add", "그냥 이슈", "--start", "2026-09-20"]);
-    assert!(!made.status.success(), "이슈에 시작 기한을 받았다");
-    let said = String::from_utf8_lossy(&made.stderr).to_string();
-    assert!(said.contains("--start"), "어느 옵션이 틀렸는지를 안 댄다 — {said}");
-    // **만들다 걸린 줄에는 고칠 id 가 없다**(moai-1rkl, 리뷰) — 거절이 쓰기를 통째로 물리므로
-    // 방금 뽑은 id 는 어디에도 안 남는다. 그 id 를 그대로 내밀면 따라 친 쪽이 "없는 이슈" 를 본다.
-    assert!(said.contains("빼고"), "만들 때 무엇을 해야 하는지를 안 댄다 — {said}");
-    assert_eq!(issues(s.path()).trim(), "", "거절한 줄이 파일에 남았다");
+    let i = add(s.path(), &["그냥 이슈", "--start", "2026-09-20"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--start", "2026-09-21", "--due", "2026-09-30"]);
+    let b = ok(s.path(), &["backlog", "add", "생각", "--start", "2026-09-22", "-q"]).trim().to_string();
+    for (id, day) in [(&i, "2026-09-20"), (&e, "2026-09-21"), (&b, "2026-09-22")] {
+        assert!(line_of(s.path(), id).contains(&format!(r#""starts_on":"{day}""#)), "{id}: 시작이 안 적혔다");
+        let shown = ok(s.path(), &["show", id]);
+        assert!(shown.contains(day), "{id}: 상세에 시작이 안 섰다\n{shown}");
+    }
+    // 시작과 기한이 다 선 줄은 `시작 → 기한` 으로 그린다.
+    assert!(ok(s.path(), &["show", &e]).contains("2026-09-21 → 2026-09-30"));
 
-    // 이미 선 줄도 같다. 에픽도 마일스톤이 아니다.
-    let e = add(s.path(), &["에픽", "--type", "epic"]);
-    assert!(!moai(s.path(), &["edit", &e, "--start", "2026-09-05"]).status.success(), "에픽에 기한을 받았다");
+    // 고치기도 비우기도 된다.
+    ok(s.path(), &["edit", &i, "--start", "2026-09-19"]);
+    assert!(line_of(s.path(), &i).contains(r#""starts_on":"2026-09-19""#));
+    ok(s.path(), &["edit", &i, "--start", "none"]);
+    assert!(!line_of(s.path(), &i).contains("starts_on"), "비운 시작이 남았다");
+
+    // 시작이 기한보다 뒤인 줄은 어느 종류든 거절한다.
+    let late = moai(s.path(), &["edit", &e, "--start", "2026-10-05"]);
+    assert!(!late.status.success(), "기한 뒤의 시작을 받았다");
+}
+
+/// **`--start +N` 은 날짜로 적힌다**(moai-xf0p.6d5) — `--due +N` 과 같은 길(`cmd::due_arg`)이다. 상대값을 그대로
+/// 두면 읽을 때마다 다른 날을 가리킨다. 시계는 `MOAI_NOW` 로 박힌다(`init` 의 환경).
+#[test]
+fn a_relative_start_is_stored_as_the_day_it_lands_on() {
+    let s = init("duerel");
+    let i = add(s.path(), &["상대 시작", "--start", "+3"]);
+    let line = line_of(s.path(), &i);
+    assert!(!line.contains("+3"), "상대값이 그대로 적혔다 — {line}");
+    let day = ok(s.path(), &["show", &i, "--json"]);
+    assert!(day.contains(r#""starts_on":"2026-09-14""#), "오늘(09-11) + 3 일이 아니다\n{day}");
+    ok(s.path(), &["edit", &i, "--start", "+1"]);
+    assert!(line_of(s.path(), &i).contains(r#""starts_on":"2026-09-12""#));
+    // 틀린 꼴은 거절문이 돌려받는다.
+    assert!(!moai(s.path(), &["edit", &i, "--start", "+x"]).status.success());
+}
+
+/// `--filter starts_on=` 는 `due_on=` 과 같은 꼴·같은 규칙이다(moai-xf0p.6d5) — 달력의 날 폭, 시작 없는 줄은
+/// 어느 폭에도 안 든다.
+#[test]
+fn the_start_filter_reads_calendar_days() {
+    let s = init("duefilter");
+    let a = add(s.path(), &["가", "--start", "2026-09-10"]);
+    let b = add(s.path(), &["나", "--start", "2026-09-20"]);
+    let _none = add(s.path(), &["다"]);
+    let ids = |f: &str| -> Vec<String> {
+        let out = ok(s.path(), &["show", "--filter", f, "--json"]);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        v.as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(ids("starts_on=2026-09-01~2026-09-15"), vec![a.clone()]);
+    assert_eq!(ids("starts_on=2026-09-16~"), vec![b.clone()]);
+    assert_eq!(ids("starts_on=2026-09-10"), vec![a.clone()]);
+    assert!(!moai(s.path(), &["show", "--filter", "starts_on=어제"]).status.success());
 }
 
 /// **손으로 푼 줄 하나가 그 줄을 도구 밖으로 내몰지 않는다.** 꼴이 틀린 기한은 이번 쓰기가
@@ -10428,8 +10469,8 @@ fn a_row_that_picked_up_a_broken_deadline_is_told_how_to_clear_it() {
 }
 
 /// **종료 기한은 모든 줄에 선다**(moai-ghkp.kz7, 2026-10-16 사용자 결정) — 이슈·에픽·backlog 가
-/// `--due` 를 받고, 상세가 그 날을 그린다. **시작 기한은 마일스톤 줄의 것이다**(moai-x04r.fn4) —
-/// 쓰기가 거절하는 값이라 손으로 푼 충돌이 남겨도 상세는 그리지 않는다. 적힌 값은 지우지 않는다.
+/// `--due` 를 받고, 상세가 그 날을 그린다. 시작 기한도 모든 줄에 선다 — 그쪽은
+/// `a_start_date_stands_on_every_kind_of_row` 가 잰다.
 #[test]
 fn a_deadline_stands_on_every_kind_of_row() {
     let s = init("duekinds");
@@ -10447,15 +10488,6 @@ fn a_deadline_stands_on_every_kind_of_row() {
     assert!(line_of(s.path(), &i).contains(r#""due_on":"2026-09-19""#));
     ok(s.path(), &["edit", &i, "--due", "none"]);
     assert!(!line_of(s.path(), &i).contains("due_on"), "비운 기한이 남았다");
-
-    // 손으로 끼운 시작 기한은 상세가 그리지 않는다. 적힌 값은 `--json` 에 그대로 선다.
-    let line = line_of(s.path(), &e).replace(r#""status":"#, r#""starts_on":"2026-09-05","status":"#);
-    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&line_of(s.path(), &e), &line))
-        .unwrap();
-    let shown = ok(s.path(), &["show", &e]);
-    assert!(!shown.contains("2026-09-05"), "마일스톤 아닌 줄의 상세에 시작 기한이 섰다\n{shown}");
-    let json = ok(s.path(), &["show", &e, "--json"]);
-    assert!(json.contains(r#""starts_on":"2026-09-05""#), "적힌 값이 기계 표면에서 사라졌다\n{json}");
 }
 
 /// **자식의 기한은 조상보다 늦을 수 없다**(moai-ghkp.33i, 2026-10-16 사용자 결정) — 마일스톤 > 에픽 >
@@ -10540,6 +10572,86 @@ fn pulling_a_parent_deadline_in_warns_about_the_children() {
     assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "닫은 줄을 셌다");
 }
 
+/// **시작일도 조상의 기한을 못 넘는다**(moai-xf0p.cbu) — 기한의 사다리(`a_deadline_cannot_pass_its_ancestors`)가
+/// 시작일도 잰다. 거절문은 줄 수 있는 가장 늦은 날을 대고, 부모의 **시작**보다 이른 시작은 막지 않는다.
+#[test]
+fn a_start_cannot_pass_the_deadline_of_its_ancestors() {
+    let s = init("startladder");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--start", "2026-09-10", "--due", "2026-09-30"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m, "--start", "2026-09-12"]);
+
+    // 에픽의 시작이 마일스톤의 기한을 넘는다 — 거절하고, 줄 수 있는 가장 늦은 날을 댄다.
+    let out = moai(s.path(), &["edit", &e, "--start", "2026-10-01"]);
+    assert!(!out.status.success(), "마일스톤 기한 뒤의 시작을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&m) && said.contains("--start 2026-09-30"), "줄 수 있는 날을 안 댄다 — {said}");
+    assert!(line_of(s.path(), &e).contains("2026-09-12"), "거절한 시작이 남았다");
+
+    // 멤버의 시작은 에픽의 기한(가장 이른 천장)에 걸린다. 기한 없이 시작만 적어도 잰다.
+    ok(s.path(), &["edit", &e, "--due", "2026-09-25"]);
+    let out = moai(s.path(), &["add", "멤버", "-e", &e, "--start", "2026-09-26"]);
+    assert!(!out.status.success(), "에픽 기한 뒤의 시작을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&e) && said.contains("2026-09-25"), "{said}");
+    assert!(!issues(s.path()).contains("멤버"), "거절한 줄이 남았다");
+    // 천장 당일은 받는다.
+    let i = add(s.path(), &["멤버", "-e", &e, "--start", "2026-09-25"]);
+
+    // 점 id 의 자식은 부모 이슈의 기한에 걸린다 — 부모에 기한이 있을 때.
+    let par = add(s.path(), &["부모", "-e", &e, "--due", "2026-09-24"]);
+    let out = moai(s.path(), &["add", "자식", "--parent", &par, "--start", "2026-09-25"]);
+    assert!(!out.status.success(), "부모 기한 뒤의 시작을 받았다");
+
+    // **시작과 기한이 둘 다 넘치면 거절문이 둘 다 댄다**(리뷰) — 기한만 대면 그 말대로 `--due` 를 당긴 쓰기가 "시작이
+    // 기한보다 뒤" 로 또 물린다. 댄 대로 한 번에 주면 받는다.
+    let out = moai(s.path(), &["add", "둘 다 늦게", "-e", &e, "--start", "2026-09-27", "--due", "2026-09-28"]);
+    assert!(!out.status.success(), "에픽 기한 뒤의 시작·기한을 받았다");
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains("--start 2026-09-25 --due 2026-09-25"), "두 날을 함께 고칠 말을 안 댄다 — {said}");
+    add(s.path(), &["둘 다 늦게", "-e", &e, "--start", "2026-09-25", "--due", "2026-09-25"]);
+
+    // **부모의 시작보다 이른 시작은 막지 않는다** — 간트에서 눈에 보일 뿐이다.
+    add(s.path(), &["일찍 시작", "-e", &e, "--start", "2026-09-01"]);
+
+    // **시작을 안 건드린 쓰기는 안 잰다** — 손으로 넘긴 줄도 제목은 고친다.
+    let line = line_of(s.path(), &i);
+    let over = line.replace(r#""starts_on":"2026-09-25""#, r#""starts_on":"2026-10-20""#);
+    assert_ne!(line, over);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), issues(s.path()).replace(&line, &over)).unwrap();
+    ok(s.path(), &["edit", &i, "--title", "제목만 고친다"]);
+}
+
+/// **조상의 기한을 당긴 쓰기는 아래 시작일도 안 막고 댄다**(moai-xf0p.cbu) — 기한 때(`pulling_a_parent_deadline_in_warns_about_the_children`)와
+/// 같다. 한 줄로 이름을 대고 `status` 의 `due_beyond_parent` 가 센다. 이름을 새로 짓지 않았다: 고치는 길이
+/// 같고(그 줄의 날을 당기거나 조상의 기한을 늦춘다) 소비자가 읽는 경고 이름이 하나 더 늘지 않는다.
+#[test]
+fn pulling_a_parent_deadline_in_warns_about_a_child_start() {
+    let s = init("startpull");
+    let m = add(s.path(), &["v0.1", "--type", "milestone", "--due", "2026-09-30"]);
+    let e = add(s.path(), &["에픽", "--type", "epic", "--milestone", &m]);
+    // 기한 없이 시작만 든 멤버 — 기한 사다리는 이 줄을 못 보던 줄이다.
+    let i = add(s.path(), &["멤버", "-e", &e, "--start", "2026-09-28"]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "넘친 줄이 없는데 경고가 섰다");
+
+    let out = moai(s.path(), &["edit", &m, "--due", "2026-09-20"]);
+    assert!(out.status.success(), "조상을 당기는 쓰기가 막혔다\n{}", text(&out));
+    let said = String::from_utf8_lossy(&out.stderr).to_string();
+    assert!(said.contains(&i) && said.contains("due_beyond_parent"), "넘친 줄을 안 댄다 — {said}");
+
+    let out = moai(s.path(), &["status", "--json"]);
+    assert!(out.status.success(), "경고가 종료 코드를 바꿨다");
+    let board = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(board.contains("due_beyond_parent") && board.contains(&i), "{board}");
+
+    // 시작을 당기면 풀린다. 닫으면 안 센다.
+    ok(s.path(), &["edit", &i, "--start", "2026-09-19"]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "당긴 줄을 셌다");
+    ok(s.path(), &["edit", &m, "--due", "2026-09-18"]);
+    assert!(ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "다시 넘친 시작을 안 셌다");
+    ok(s.path(), &["mv", &i, "done"]);
+    assert!(!ok(s.path(), &["status", "--json"]).contains("due_beyond_parent"), "닫은 줄을 셌다");
+}
+
 /// **기한으로 줄 세우고 거른다**(moai-ghkp.7uy) — `--sort due` 는 이른 것이 먼저고 기한 없는 줄이 뒤다.
 /// `due_on=` 은 달력의 날로 양 끝을 든다. `ready` 는 같은 `p` 안에서 기한이 이른 것을 먼저 낸다 — 읽을
 /// 때만 재고 저장하지 않는다.
@@ -10613,6 +10725,105 @@ fn a_plan_carries_deadlines() {
     let line = |title: &str| rows.lines().find(|l| l.contains(&format!(r#""title":"{title}""#))).unwrap().to_string();
     assert!(line("펼친 에픽").contains(r#""due_on":"2026-11-01""#), "{}", line("펼친 에픽"));
     assert!(!line("펼친 멤버").contains("due_on"));
+}
+
+/// **계획이 시작일도 든다**(moai-xf0p.due) — 줄 끝의 `@시작~기한`·`@시작~`·`@기한` 이 그 줄의 날이고,
+/// `add --from --start` 는 `--due` 처럼 제 `@` 가 없는 에픽에 선다. 줄이 `@` 를 하나라도 들었으면 둘 다 안 선다.
+/// 틀린 꼴·시작 > 기한은 계획째 거절한다. `backlog promote` 는 backlog 의 시작일도 에픽으로 데려간다.
+#[test]
+fn a_plan_carries_starts_too() {
+    let s = init("startplan");
+    let plan = "# 첫 에픽\n- 둘 @2026-10-20~2026-10-24\n- 시작만 @2026-10-21~\n- 기한만 @2026-10-22\n- 없음\n# 둘째 에픽 @2026-10-26~\n- 다른 멤버\n# 셋째 에픽 @2026-10-27\n";
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--start", "2026-10-15", "--due", "2026-10-30"], plan);
+    assert!(out.status.success(), "{}", text(&out));
+    let rows = issues(s.path());
+    let line = |title: &str| rows.lines().find(|l| l.contains(&format!(r#""title":"{title}""#))).unwrap().to_string();
+    let has = |title: &str, key: &str, day: &str| line(title).contains(&format!(r#""{key}":"{day}""#));
+    // 제 `@` 가 없는 에픽은 --start·--due 를 받는다.
+    assert!(has("첫 에픽", "starts_on", "2026-10-15") && has("첫 에픽", "due_on", "2026-10-30"), "{}", line("첫 에픽"));
+    // 줄의 `@` 는 한 덩이다 — 시작만 쓴 에픽은 --due 를, 기한만 쓴 에픽은 --start 를 받지 않는다.
+    assert!(
+        has("둘째 에픽", "starts_on", "2026-10-26") && !line("둘째 에픽").contains("due_on"),
+        "{}",
+        line("둘째 에픽")
+    );
+    assert!(
+        has("셋째 에픽", "due_on", "2026-10-27") && !line("셋째 에픽").contains("starts_on"),
+        "{}",
+        line("셋째 에픽")
+    );
+    // 멤버의 네 꼴.
+    assert!(has("둘", "starts_on", "2026-10-20") && has("둘", "due_on", "2026-10-24"));
+    assert!(has("시작만", "starts_on", "2026-10-21") && !line("시작만").contains("due_on"));
+    assert!(has("기한만", "due_on", "2026-10-22") && !line("기한만").contains("starts_on"));
+    assert!(!line("없음").contains("starts_on") && !line("없음").contains("due_on"), "멤버에 날을 내렸다");
+
+    // 연습도 같은 날을 댄다 — 사람 줄은 계획이 받는 꼴 그대로.
+    let dry = from_stdin(
+        s.path(),
+        &["add", "--from", "-", "--start", "2026-10-15", "--due", "2026-10-30", "--dry-run"],
+        plan,
+    );
+    let shown = String::from_utf8_lossy(&dry.stdout).to_string();
+    assert!(shown.contains("@2026-10-15~2026-10-30") && shown.contains("@2026-10-20~2026-10-24"), "{shown}");
+    assert!(shown.contains("@2026-10-21~") && shown.contains("@2026-10-26~"), "{shown}");
+    let json = from_stdin(
+        s.path(),
+        &["add", "--from", "-", "--start", "2026-10-15", "--dry-run", "--json"],
+        "# 에픽\n- 멤버\n",
+    );
+    assert!(String::from_utf8_lossy(&json.stdout).contains(r#""starts_on":"2026-10-15""#), "{}", text(&json));
+    // `--start` 가 어느 에픽에도 안 서면 말한다 — 기계가 받는 길에서는 stderr 로.
+    let out = from_stdin(
+        s.path(),
+        &["add", "--from", "-", "--start", "2026-10-15", "--dry-run", "--json"],
+        "# 에픽 @2026-10-25\n- 멤버\n",
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--start 2026-10-15"), "{}", text(&out));
+
+    // `+N` 은 날짜로 적힌다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--start", "+2"], "# 상대 에픽\n");
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(issues(s.path()).contains(r#""starts_on":"2026-09-13""#), "상대 시작이 날짜로 안 적혔다");
+
+    // 같은 쓰기 안의 위계 — 멤버의 시작이 제 에픽의 기한보다 늦으면 계획째 물린다. 틀린 꼴과 시작 > 기한도 그렇다.
+    let before = issues(s.path());
+    for bad in [
+        "# 에픽 @2026-10-10\n- 늦게 시작 @2026-10-11~\n",
+        "# 에픽\n- 멤버 @2026-13-01~\n",
+        "# 에픽\n- 멤버 @2026-10-20~2026-10-10\n",
+        "# 에픽\n- 멤버 @2026-10-20~ @2026-10-25\n",
+    ] {
+        let out = from_stdin(s.path(), &["add", "--from", "-"], bad);
+        assert!(!out.status.success(), "{bad:?} 를 받았다");
+    }
+    assert_eq!(issues(s.path()), before, "물린 계획이 남았다");
+    // `--start` 가 `--due` 보다 뒤인 부름도 계획째 거절한다.
+    let out = from_stdin(s.path(), &["add", "--from", "-", "--start", "2026-11-02", "--due", "2026-11-01"], "# 에픽\n");
+    assert!(!out.status.success(), "{}", text(&out));
+
+    // promote 는 backlog 의 시작일도 에픽으로 데려간다.
+    let b = ok(s.path(), &["backlog", "add", "나중", "--start", "2026-11-01", "--due", "2026-11-09", "-q"])
+        .trim()
+        .to_string();
+    let out = from_stdin(s.path(), &["backlog", "promote", &b, "--from", "-"], "# 펼친 에픽\n- 펼친 멤버\n");
+    assert!(out.status.success(), "{}", text(&out));
+    let rows = issues(s.path());
+    let line = |title: &str| rows.lines().find(|l| l.contains(&format!(r#""title":"{title}""#))).unwrap().to_string();
+    assert!(line("펼친 에픽").contains(r#""starts_on":"2026-11-01""#), "{}", line("펼친 에픽"));
+    assert!(!line("펼친 멤버").contains("starts_on"));
+    // 계획이 `@` 로 제 날을 들었으면 backlog 의 날은 따라오지 않는다.
+    let b = ok(s.path(), &["backlog", "add", "또 나중", "--start", "2026-11-05", "-q"]).trim().to_string();
+    let out =
+        from_stdin(s.path(), &["backlog", "promote", &b, "--from", "-"], "# 제 날 있는 에픽 @2026-11-02\n- 멤버\n");
+    assert!(out.status.success(), "{}", text(&out));
+    assert!(!issues(s.path()).lines().find(|l| l.contains("제 날 있는 에픽")).unwrap().contains("starts_on"));
+
+    // 되뽑기가 시작~기한 꼴로 돌아오고, 도로 넣어도 같다.
+    let e = add(s.path(), &["되뽑을 에픽", "--type", "epic", "--start", "2026-10-01", "--due", "2026-10-31"]);
+    add(s.path(), &["멤버", "-e", &e, "--start", "2026-10-05"]);
+    let plan = ok(s.path(), &["show", &e, "--as-plan"]);
+    assert!(plan.contains("@2026-10-01~2026-10-31") && plan.contains("@2026-10-05~"), "{plan}");
 }
 
 /// **`--due +N` 은 오늘에서 N 일 뒤다**(moai-ghkp.kz7) — 저장하는 것은 날짜다. `+3` 을 그대로 두면
@@ -12779,10 +12990,40 @@ fn promoting_an_idea_opens_a_plan_and_closes_the_thought() {
 
     let line = line_of(s.path(), &id);
     assert!(line.contains(r#""status":"done""#), "펼쳤는데 안 닫혔다 — {line}");
+    // 닫힌 idea 쪽 노트의 이슈 수 — 둘이면 겹수다. 홑수 쪽은 `an_idea_titled_up_to_the_limit_still_promotes` 가 잰다
+    let notes = journal(s.path());
+    assert!(
+        notes.lines().any(|l| l.contains("Unfolded into ") && l.contains(r#", 2 issues""#)),
+        "idea 에 간 곳과 이슈 수를 안 적었다 — {notes}"
+    );
+}
+
+/// **펼침 노트에 담는 제목은 한 줄로 접는다**(moai-68ft 리뷰). 쓰기는 바뀐 줄만 재므로 이미 닫힌
+/// backlog 를 다시 펼치면 그 제목은 검사를 안 지난다 — 손으로 고쳐 줄바꿈이 든 제목이 노트에 그대로
+/// 들면 그 뒷줄의 `model: …` 을 `work` 가 펼친 사람의 일로 센다.
+#[test]
+fn an_unfold_note_folds_a_hand_edited_title_onto_one_line() {
+    let s = init("promoteflat");
+    let id = ok(s.path(), &["backlog", "add", "펼칠 생각", "-q"]).trim().to_string();
+    let first = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 첫 에픽\n- 첫 일\n");
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    // 닫힌 backlog 의 제목을 손으로 고친다 — 도구로는 이 모양을 못 쓴다.
+    let doctored = issues(s.path())
+        .replace(r#""title":"펼칠 생각""#, r#""title":"펼칠 생각\nmodel: anthropic/opus-5.5 (high — 끼워 넣은 줄)""#);
+    std::fs::write(s.path().join(".moai/issues.jsonl"), doctored).unwrap();
+    let again = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 둘째 에픽\n- 둘째 일\n");
+    assert!(again.status.success(), "{}", String::from_utf8_lossy(&again.stderr));
+
+    let log = journal(s.path());
+    let grown: Vec<&str> = log.lines().filter(|l| l.contains(&format!("Unfolded from {id}"))).collect();
+    assert_eq!(grown.len(), 2, "{grown:?}");
+    assert!(!grown.iter().any(|l| l.contains(r"\nmodel:")), "노트에 줄바꿈이 든 제목을 그대로 담았다 — {grown:?}");
+    let shown = ok(s.path(), &["show", "--json"]);
+    assert!(!shown.contains(r#""why":"끼워 넣은 줄""#), "노트 안의 줄을 일한 AI 로 셌다 — {shown}");
 }
 
 /// **펼침 노트의 제목은 넘칠 때만 줄여 넣는다**(moai-clta). `promote` 는 새로 선 줄마다
-/// `<idea id> 에서 펼쳤다 — <제목>` 을 저널에 적는데, 머리말(`<id> 길이 + 22`바이트) 때문에
+/// `Unfolded from <idea id> — <제목>` 을 저널에 적는데, 머리말(`<id> 길이 + 19`바이트) 때문에
 /// 제목이 상한 턱밑인 idea 는 그 노트가 상한을 넘어 **펼칠 길 자체가 막혔다** — 그것도 아직
 /// 쓰지도 않은 새 id 를 대면서. 원래 제목은 그 idea 줄에 그대로 남으니 노트의 것은 가리킴이다.
 #[test]
@@ -12795,15 +13036,20 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     let id = ok(s.path(), &["backlog", "add", &big, "-q"]).trim().to_string();
     // 머리말 길이는 접두어를 따르니 **베껴 적지 않고 여기서 잰다**. 제목 자체는 상한 아래고,
     // 머리말을 붙여야 넘는다 — 그 사이가 아니면 이 시험이 `fit` 를 한 번도 안 부른다.
-    let head = format!("{id} 에서 펼쳤다 — ").len();
+    let head = format!("Unfolded from {id} — ").len();
     assert!(big.len() <= limit && big.len() + head > limit, "{} + {head}", big.len());
 
     let out = from_stdin(s.path(), &["backlog", "promote", &id, "--from", "-"], "# 펼친 에픽\n- [p1] 첫 일\n");
     assert!(out.status.success(), "상한 턱밑 idea 를 못 펼쳤다 — {}", String::from_utf8_lossy(&out.stderr));
 
     let notes = journal(s.path());
-    let grown: Vec<&str> = notes.lines().filter(|l| l.contains("에서 펼쳤다")).collect();
+    let grown: Vec<&str> = notes.lines().filter(|l| l.contains("Unfolded from")).collect();
     assert_eq!(grown.len(), 1, "펼침 노트가 하나가 아니다 — {}", grown.len());
+    // 닫힌 idea 쪽 노트는 간 곳과 이슈 수를 댄다. 하나면 홑수다
+    assert!(
+        notes.lines().any(|l| l.contains("Unfolded into ") && l.contains(r#", 1 issue""#)),
+        "idea 에 간 곳을 안 적었다"
+    );
     // **글 자체를 꺼내 잰다.** 지나간 것만 보면 쓰기 쪽 검사가 좁아지는 날 이 시험도 같이 눈을
     // 감는다. `note` 는 없고 글에 따옴표가 없으니 `"text":"` 부터 다음 따옴표까지가 그 글이다.
     let text = grown[0].split_once(r#""text":""#).expect("text 가 없다").1;
@@ -12811,11 +13057,11 @@ fn an_idea_titled_up_to_the_limit_still_promotes() {
     assert!(text.len() <= limit, "노트가 {}바이트다 — 쓰기가 같은 자로 잰다", text.len());
     // **상한 아래인 것으로는 모자란다.** 상한을 예산으로 주면 64KB 제목이 만든 줄마다 한 벌씩
     // 저널에 베껴져 이력이 그 한 줄에 묻힌다 — 상한이 서 있는 까닭이 그것을 막는 데 있다.
-    // 예산은 `cmd::idea::TITLE_IN_NOTE`(2KB)고, 머리말이 그 위에 얹힌다.
+    // 예산은 `cmd::backlog::TITLE_IN_NOTE`(2KB)고, 머리말이 그 위에 얹힌다.
     assert!(text.len() <= 2 * 1024 + head, "가리킴이 아니라 사본이다 — {}바이트", text.len());
     // 줄인 것은 **앞에서부터**다 — 어느 생각에서 왔는지 보라고 담는 글이다. 줄인 자리는 밝힌다.
     let head_of = |t: &str| t.chars().take(24).collect::<String>();
-    assert!(text.starts_with(&format!("{id} 에서 펼쳤다 — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
+    assert!(text.starts_with(&format!("Unfolded from {id} — 머리")), "제목의 머리를 안 담았다 — {}", head_of(text));
     assert!(text.ends_with('…'), "줄인 것을 안 밝힌다");
     assert!(!text.contains("꼬리"), "꼬리를 담았다 — 앞에서부터 자르지 않았다");
 
@@ -12898,14 +13144,16 @@ fn promote_can_pour_into_a_standing_epic() {
     assert_eq!(id::parent_of(&mid), Some(epic.as_str()), "에픽의 자식이 아니다 — {member}");
     assert!(!member.contains(r#""epic":"#), "소속이 두 자리에 섰다 — {member}");
     let seen = ok(s.path(), &["show", &epic, "--json"]);
-    assert_eq!(list_in(&seen, "members"), Some(vec![mid]), "에픽이 멤버로 안 읽었다 — {seen}");
+    assert_eq!(list_in(&seen, "members"), Some(vec![mid.clone()]), "에픽이 멤버로 안 읽었다 — {seen}");
     assert!(line_of(s.path(), &id).contains(r#""status":"done""#), "idea 가 안 닫혔다");
     // 출처는 멤버에 적힌다 — 에픽은 이 idea 에서 나온 것이 아니다.
-    let from_here = format!("{id} 에서 펼쳤다");
+    let from_here = format!("Unfolded from {id}");
     let log = journal(s.path());
     let noted: Vec<&str> = log.lines().filter(|l| l.contains(&from_here)).collect();
     assert_eq!(noted.len(), 1, "{noted:?}");
     assert!(!noted[0].contains(&format!(r#""id":"{epic}""#)), "선 에픽에 출처를 적었다 — {}", noted[0]);
+    // 닫힌 idea 쪽에는 어디로 갔는지 적는다. 저널의 글은 화면 말을 안 따르고 영어로 고정이다(moai-68ft)
+    assert!(log.contains(&format!("Unfolded into {epic} as {mid}")), "idea 에 간 곳을 안 적었다 — {log}");
 }
 
 /// **계획이 세우는 멤버는 에픽의 자식 id 를 받는다**(moai-s8go, 2026-09-23 사용자 결정) — 과제든
@@ -17294,6 +17542,57 @@ fn a_row_this_session_picked_stays_its_own_beside_its_epics_worktree() {
     );
     let held = at("c", "stop", None);
     assert!(held.trim().is_empty(), "옆 워크트리의 일로 남을 붙든다\n{held}");
+}
+
+/// **루트에 선 세션이 워크트리가 선 일을 쥐면 루트 체크아웃의 쓰기를 그 워크트리로 돌린다**(moai-9js2.3xn, 리뷰
+/// moai-9js2.s4s). 막는 판은 `settle` 이 겹친 스냅샷으로 한 번 더 재는데, 그 판의 `Away` 는 `worktree::fresh` 가
+/// 새로 짓는다 — 자리(`homes`)를 옮겨 싣지 않으면 겹친 판이 풀어 거절이 아무에게도 안 닿는다. 단위 시험은 그
+/// 배선과 git 이 적은 자리의 철자(꼭대기 뿌리에서 빈 조각을 이으면 `/` 로 끝난다)를 못 밟아 여기서 본다.
+#[test]
+fn a_root_session_holding_worktree_work_is_sent_to_the_worktree() {
+    let s = Scratch::new("hookhomed");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("src")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 멤버", "-e", &epic, "--json"]), "id");
+    std::fs::write(main.join("src/x.rs"), "").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let at = |session: &str, name: &str, input: String| {
+        let input = format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":{},\"tool_name\":\"{name}\",\"tool_input\":{input}}}",
+            json_str(&main.display().to_string())
+        );
+        String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let bash = |c: &str| format!("{{\"command\":{}}}", json_str(c));
+    let edit = |p: &Path| format!("{{\"file_path\":{}}}", json_str(&p.display().to_string()));
+    let pick = format!("moai mv {mine} in_progress --from todo");
+    assert!(at("a", "Bash", bash(&pick)).trim().is_empty());
+    ok(&main, &["mv", &mine, "in_progress", "--from", "todo"]);
+    // 워크트리를 띄우기 전에는 루트를 고쳐도 지난다 — 집고 `worktree add` 하는 사이다.
+    let before = at("a", "Edit", edit(&main.join("src/x.rs")));
+    assert!(before.trim().is_empty(), "띄우기 전의 쓰기를 막았다\n{before}");
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    let home = canon(main.join(".worktrees").join(&epic)).unwrap().display().to_string().replace('\\', "/");
+
+    let why = refusal(&at("a", "Edit", edit(&main.join("src/x.rs"))));
+    assert!(why.contains(&mine), "쥔 줄을 안 댄다\n{why}");
+    assert!(why.contains(&format!(" {home}/src/x.rs")), "워크트리의 같은 파일을 안 낸다\n{why}");
+    assert!(
+        !why.contains(&format!("{home}//")) && !why.contains(&format!("{home}/.")),
+        "자리 끝에 `/` 가 붙었다\n{why}"
+    );
+    let why = refusal(&at("a", "Bash", bash("echo x > src/x.rs")));
+    assert!(why.contains(&format!(" {home}/src/x.rs")), "껍데기 쓰기를 안 돌린다\n{why}");
+    // 거절문이 낸 자리에 쓰면 지난다 — 시킨 대로 치면 지나가야 규칙이다.
+    let inside = main.join(".worktrees").join(&epic).join("src/x.rs");
+    let there = at("a", "Edit", edit(&inside));
+    assert!(there.trim().is_empty(), "워크트리 안의 쓰기를 막았다\n{there}");
+    // 아무것도 안 쥔 세션은 전처럼 빈손으로 막힌다 — 그 멤버는 옆 워크트리의 일이다.
+    assert!(refusal(&at("c", "Edit", edit(&main.join("src/x.rs")))).contains("holding nothing"));
 }
 
 /// **겨루다 질 집기는 적지 않는다**(리뷰 moai-3k2d.1df). 훅은 명령이 돌기 전에 적으므로, 낡은 `--from` 으로
@@ -23412,14 +23711,16 @@ fn a_row_neither_side_touched_does_not_block_the_merge() {
     let old = add(root, &["손으로 푼 충돌이 남긴 줄"]);
     let one = add(root, &["이쪽이 고칠 줄"]);
     let two = add(root, &["저쪽이 고칠 줄"]);
-    // **도구로는 못 적는 값이다** — `--start` 는 마일스톤 줄에만 선다. 손으로 끼운다.
+    // **도구로는 못 적는 값이다** — 날짜는 `YYYY-MM-DD` 꼴이어야 한다(`validate_fields`). 손으로 끼운다.
+    // 한때는 이슈의 `starts_on` 자체가 낡은 값이었지만 이제 모든 줄에 선다(moai-xf0p.6d5) — 바른 꼴의 날짜를 심으면
+    // 이 줄은 오늘 규칙도 지나, 드라이버가 검사를 건너뛰든 말든 초록이 된다.
     //
     // 닫는 괄호가 아니라 id 뒤에 끼운다. 끝에 붙이면 그 자리가 곧 `Issue` 의 표준 차례라
     // 심은 줄이 표준형이 되고, [`line_of`] 는 `{"id":…` 로 찾으므로 머리는 그대로 둔다.
     //
     // **가지마다 되심는다.** `moai` 쓰기는 파일 전체를 표준형으로 되쓰므로, 한 번만 심으면
     // 그 다음 `edit` 한 줄에 차례가 사라져 셋 다 표준형인 채로 머지에 들어간다.
-    let due = "\"starts_on\":\"2026-09-05\"";
+    let due = "\"starts_on\":\"2026-9-5\"";
     let plant = || {
         let was = line_of(root, &old);
         let head = format!("\"id\":\"{old}\",");

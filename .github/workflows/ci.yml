@@ -103,6 +103,12 @@ jobs:
           fi
           echo "트래커는 그대로다"
 
+      # **릴리스 소식을 짓는 스크립트의 시험**(moai-hwl4). 1초 남짓이라 무엇이 바뀌었든 돈다 — 밑의 `changes` 가
+      # 그 경로를 바이너리 잡에서 빼니, 여기서 안 돌면 깨진 규칙이 머지를 지나 릴리스 날 discord.yml 에서야 드러나고
+      # 그 판의 소식이 안 나간다.
+      - name: 릴리스 소식 스크립트의 시험
+        run: python3 -I -B -m unittest discover -s scripts/release-post
+
       # **툴체인을 캐시에서 푼다.** 러너에 깔려 오는 stable 은 1.98.1 이고 이 저장소가
       # 박은 것은 1.97.1 이라, 잡마다 129MB 를 받아 xz 로 푼다. 그 15초는 러너가
       # 빨라도 안 줄어든다 — 드는 값이 받는 것이 아니라 한 갈래로 도는 CPU 라서다.
@@ -159,7 +165,7 @@ jobs:
       # 기본 가지가 담은 것을 읽을 수 있다 — PR 마다 담을 까닭이 없다. 대가는 PR 에서 의존성을 바꾼 판이
       # 그 PR 의 다음 푸시에서도 바뀐 의존성을 다시 짓는 것이다.
       #
-      # **담기 전에 `cargo clean -p moai` 로 이 크레이트의 산출물을 걷는다.** 시험 바이너리·clippy 산출물은
+      # **담기 전에 `cargo clean -p moai -p moai-gantt` 로 이 저장소 크레이트(둘)의 산출물을 걷는다.** 시험 바이너리·clippy 산출물은
       # 커밋마다 바뀌어 다음 판이 어차피 다시 짓는데, 덩치는 `target/debug` 의 절반을 넘는다(로컬에서
       # clippy·`test --no-run` 뒤 1.5GB 가 517MB 가 됐다). 남는 것은 의존성 산출물이다.
       #
@@ -189,9 +195,9 @@ jobs:
       #
       # 경고를 오류로 올린다. 새 경고가 붙는 자리는 PR 이고, 쌓인 뒤에 걷으면
       # 그 판이 통째로 남의 일이 된다. 저장소가 일부러 지고 가는 lint 는
-      # Cargo.toml 의 `[lints.clippy]` 에 까닭과 함께 적혀 있다.
+      # Cargo.toml 의 `[workspace.lints.clippy]` 에 까닭과 함께 적혀 있다(두 패키지가 같이 쓴다).
       - name: clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
       # **크레이트를 두 번 컴파일하는 것은 그대로 둔다**(moai-bn0y). clippy 는
       # `clippy-driver` 로 짓고 시험은 `rustc` 로 지어 산출물을 못 나눠 쓴다
@@ -200,12 +206,12 @@ jobs:
       # 35초는 그 둘보다 싸다. 밑의 `changes` 로 걷은 것은 이것이 아니라 문서 PR 의
       # LTO 한 판(65~84초, 그 잡의 머리글에 잰 값이 있다)이다.
       - name: test
-        run: cargo test --locked
+        run: cargo test --workspace --locked
 
       # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 이 잡의 cargo 캐시 자리에 있다.
       - name: 이 크레이트의 산출물을 걷는다
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
-        run: cargo clean -p moai
+        run: cargo clean -p moai -p moai-gantt
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
@@ -277,7 +283,12 @@ jobs:
             # 뒤의 `grep -q` 가 첫 줄에서 끝내며 앞의 grep 을 SIGPIPE 로 죽이고, `pipefail` 이
             # 그 141 을 파이프라인의 답으로 삼았다 — 경로가 이천을 넘는 판에서 코드 변경이
             # "글만 바뀌었다" 로 읽혔다(재 봤다). 빈 줄은 같은 정규식의 한 갈래로 접는다.
-            if ! grep -qvE '(^$|\.md$|^docs/|^\.moai/|^LICENSE$)' <<<"$touched"; then
+            # `site/` 와 그 녹화 스크립트(`scripts/site-demo/`)는 소개 홈페이지라 바이너리에 안 닿는다
+            # (moai-mfps). 이 답에 걸린 잡(msrv·windows·size-budget·web)만 건너뛰고, ci-gate 는 무엇이
+            # 바뀌었든 돈다. 사이트 배포는 pages.yml 이 따로 맡는다. 릴리스 소식(`scripts/release-post/`,
+            # `release-posts/`)도 바이너리에 안 닿는다 — 그 시험은 ci-gate 가 돌고, discord.yml 이 올리기 전에 한 번
+            # 더 돈다(moai-hwl4).
+            if ! grep -qvE '(^$|\.md$|^docs/|^\.moai/|^LICENSE$|^site/|^scripts/site-demo/|^scripts/release-post/|^release-posts/)' <<<"$touched"; then
               code=false
             fi
           fi
@@ -358,7 +369,7 @@ jobs:
       - name: MSRV 로 짓는다
         env:
           MSRV: ${{ steps.msrv.outputs.version }}
-        run: cargo "+$MSRV" check --locked --all-targets
+        run: cargo "+$MSRV" check --locked --workspace --all-targets
 
       # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 `ci-gate` 의 같은 자리에 있다.
       # 판을 대고 부르는 까닭은 위 "그 판을 받는다" 의 rustup 프록시 이야기와 같다.
@@ -366,7 +377,7 @@ jobs:
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
         env:
           MSRV: ${{ steps.msrv.outputs.version }}
-        run: cargo "+$MSRV" clean -p moai
+        run: cargo "+$MSRV" clean -p moai -p moai-gantt
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
@@ -446,10 +457,10 @@ jobs:
           restore-keys: cargo-dev-${{ runner.os }}-${{ steps.toolchain.outputs.channel }}-
 
       - name: clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
       - name: test 를 짓는다
-        run: cargo test --locked --no-run
+        run: cargo test --workspace --locked --no-run
 
       # **PE 버전 정보가 들었는가**(moai-uwzg.kpx, 리뷰 moai-uwzg.i4r 6번). 위 스텝이 통합 시험을 위해
       # `target/debug/moai.exe` 를 이미 지었다 — `build.rs` 가 리소스를 안 넣게 된 PR 을 태그까지 끌고 가지
@@ -468,7 +479,7 @@ jobs:
       # 담는 것은 develop 푸시뿐이고, 담기 전에 이 크레이트의 산출물을 걷는다 — 까닭은 `ci-gate` 의 같은 자리에 있다.
       - name: 이 크레이트의 산출물을 걷는다
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'
-        run: cargo clean -p moai
+        run: cargo clean -p moai -p moai-gantt
 
       - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: github.ref == 'refs/heads/develop' && steps.cargo-cache.outputs.cache-hit != 'true'

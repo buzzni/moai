@@ -1,4 +1,4 @@
-<!-- moai:begin v:0.18.0 hash:117d9520 -->
+<!-- moai:begin v:0.23.0 hash:6c3ad2bf -->
 ## Issue tracker — moai
 
 This repository's work lives in `.moai/issues.jsonl`.
@@ -129,8 +129,11 @@ always asked about — for a plan, an epic, an issue or a backlog item that come
 the person's own request. Write the answer as `@YYYY-MM-DD` at the end of the plan line
 it belongs to (`# Epic title @2026-10-31`, `- [p1] first issue @2026-10-20`), or give
 `--due <day>` to put it on every epic the plan creates that carries no `@` of its own.
-A row made alone takes the same `--due` on `moai add` or `moai backlog add` — an `@` in
-a single title stays text. `--due +3` is three days from today.
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31`
+(start to deadline), or `@2026-10-25~` for a start alone — and `--start <day>` goes on
+epics the way `--due` does. A start is the person's too: never make one up.
+A row made alone takes the same `--due` on `moai add` or `moai backlog add` (and
+`--start` likewise) — an `@` in a single title stays text. `--due +3` is three days from today.
 **No answer, no deadline** — leave it empty, never make one up. A review issue and a
 backlog item you park mid-work are not asked about.
 Nothing checks this: it is a question for you to ask, not a gate.
@@ -246,9 +249,10 @@ the work under it drops out with it.
     moai show <epic|milestone id>                  what stands under it
     moai show --milestone <id>                     everything attached to that milestone
 
-**Any row can carry a deadline; only a milestone carries a start.** `--due` takes a
-calendar day, `YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on),
-and `moai edit <id> --due none` clears one. `--start` stands on a milestone row only.
+**Any row can carry a deadline and a start.** `--due` and `--start` take a calendar day,
+`YYYY-MM-DD`, or `+N` days from today (stored as the day it lands on), and
+`moai edit <id> --due none` clears one (`--start none` the same). The start is the
+planned day to begin; a start after the deadline is refused.
 A milestone's deadline that has passed, and one falling due within `status_due_days`
 (3 unless your config says otherwise), is one warning line on the board, and so is
 an open issue or epic whose own deadline has passed (`overdue`); **nothing is blocked and
@@ -259,8 +263,10 @@ write that gives a row a later day than the earliest of those, or moves a row th
 carries a deadline under one due earlier, is refused, and the refusal names the day to
 give instead. Pulling the one above in is never refused: the rows it overtakes are
 named in one line on stderr and stand as `due_beyond_parent` on the board until their
-own deadlines come in. `moai show --sort due` puts the nearest first, and
-`--filter due_on=<from>~<to>` picks rows by their own deadline.
+own deadlines come in. A start obeys the same ceiling: it cannot be later than the
+earliest deadline above it, but it may be earlier than the parent's start. `moai show --sort due` puts the nearest first, and
+`--filter due_on=<from>~<to>` picks rows by their own deadline (`starts_on=` by their
+own start).
 
 **A near deadline raises priority, by one verb.** `moai due apply` (`--dry-run` shows it
 first) raises an open, not deferred issue or backlog item by the deadline it follows —
@@ -514,6 +520,8 @@ What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, 
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
 files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
 `Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
+A session standing in the main checkout that holds only work whose worktree stands is
+refused a write to the main checkout too — the refusal names the same file in that worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and

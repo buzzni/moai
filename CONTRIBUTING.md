@@ -37,10 +37,14 @@ matters.
 
 ```sh
 cargo build --release      # target/release/moai
-cargo test                 # 1,500+ tests, a few seconds
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace     # 1,500+ tests, a few seconds
+cargo clippy --all-targets --workspace -- -D warnings
 cargo fmt --all --check    # or `cargo fmt --all` to fix
 ```
+
+The repository is a Cargo workspace: the root package is `moai`, and
+`crates/moai-gantt` is a member. A bare `cargo test` or `cargo clippy` in the
+root covers `moai` alone, so pass `--workspace` to check what CI checks.
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
@@ -60,7 +64,7 @@ dependencies blurs the premise that this is a tool installed into someone else's
 repository.
 
 Clippy runs with `-D warnings`. Lints this project deliberately carries are
-listed under `[lints.clippy]` in `Cargo.toml`, each with the reason it is there.
+listed under `[workspace.lints.clippy]` in `Cargo.toml`, each with the reason it is there.
 Add the reason when you add a line — an `allow` without one cannot be judged
 later.
 
@@ -232,10 +236,13 @@ git commit -m "chore(tracker): archive closed bundles" -- .moai/   # the journal
 scripts/bump-version.sh --next                    # prints 0.2.0 and why; writes nothing
 scripts/bump-version.sh auto                      # Cargo.toml, Cargo.lock, CHANGELOG.md
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md
+scripts/release-post/compose.py v0.2.0 --out release-posts/v0.2.0   # the Discord post, from the section auto just opened
+scripts/release-post/post.py release-posts/v0.2.0 --preview /tmp/post.html   # look at it before it goes out
+git add release-posts && git commit -m "docs(release-posts): v0.2.0" -- release-posts
 git push origin develop
 gh pr create --base main --head develop --title "v0.2.0"   # merge it, no squash
 git fetch origin && git tag v0.2.0 origin/main
-git push origin v0.2.0
+git push origin v0.2.0                            # builds, releases, then posts release-posts/v0.2.0 to Discord
 git worktree remove .worktrees/milestone-<id>     # once the release is out
 git branch -d milestone/<id>
 rm -rf /tmp/cargo-target/milestone-<id>
@@ -275,6 +282,41 @@ finds an issue's commits by the id in their subject and a squash folds them
 away; a review's fixes stay as their own `fix:` commits; and a rebase changes
 the merge hashes that `Report-checked:` notes point at. Rewording a subject on
 your own unshared branch before its review starts is fine; never during one.
+
+**Each release is announced on Discord** (moai-hwl4, 2026-10-25). The post lives in
+`release-posts/<version>/` and goes in before the tag, so the tag carries it:
+
+    post.md            the message — big changes first, then fixes; one line each
+    media/01-keys.png  then one message per picture or clip, in name order
+    media/01-keys.md   the line under that picture (optional)
+    make.sh            how the pictures were made, so they can be made again
+
+`compose.py` writes `post.md` from that version's changelog section: an entry's bold
+lead, or its first sentence without the aside, six per group and the rest left to the
+release notes. Edit it if it reads badly — it is in English, like the Discord server.
+When a release changes what the explorer or `moai web` shows, add a picture:
+record the scene with `scripts/site-demo` and take it with `shot.mjs`, which draws
+the frame the homepage uses and puts a box around what changed — `--mark <text>`,
+`--line <text>` for a whole line, `--select <css>` on a web page. A `-o` ending in
+`.webm` takes a clip of the scene instead. `release-posts/v0.23.0/make.sh` is the
+pattern to copy. Playwright is not a dependency of this repository; pass it in with
+`NODE_PATH`, as `scripts/site-demo/record-web.mjs` does.
+
+The release workflow posts it once the GitHub release is out (`discord.yml`, skipped
+for a pre-release such as `-rc.1`). With no `post.md` committed it posts the text alone,
+composed from the changelog. The webhook is the repository secret
+`DISCORD_WEBHOOK_URL` (Settings → Secrets and variables → Actions); without it the
+job prints what it would have sent and stays green. To post a release again, or one
+that went out before this — v0.23.0 was the first — run it by hand:
+
+```sh
+gh workflow run discord.yml -f version=v0.2.0                # post it
+gh workflow run discord.yml -f version=v0.2.0 -f dry_run=true   # print what it would post
+gh workflow run discord.yml -f version=v0.2.0 -f start=3        # a run that stopped after message 2
+```
+
+A run that fails part way says how many messages went out and where to start again,
+so a retry does not post the first ones twice.
 
 Before `auto`, the `moai-wiki` skill's sweep can be called once: it walks the work
 closed since the last tag and lists the wiki pages it left behind. It is not a
