@@ -2,8 +2,8 @@
 
 `moai web` serves the tracker as a page on your own machine: a board, a list and
 the repository's wiki, with the issue under the cursor described below or beside
-it. It reads the tracker and never writes it — the one thing it writes is your
-own read marks. The page is the [explorer](explorer.md) for a
+it. It reads the tracker and writes it in one place only — a Gantt bar
+dragged to new days — besides your own read marks. The page is the [explorer](explorer.md) for a
 browser tab — same words, same filter syntax, same keys where a browser allows —
 so that a person who would rather not live in a terminal can still see how the
 work stands.
@@ -89,6 +89,18 @@ in the time zone moai runs in.
 | `-` `=`, the zoom buttons, Ctrl+wheel over the dates | Hour / day / week / month |
 | `t` / `z` | Jump to today / fit every drawn row |
 | drag the line between grid and dates | Grid width, kept in this browser |
+| drag a bar's middle | Move its start and deadline by the same number of days |
+| drag a bar's left or right end, or a `◆` | Move the start alone, or the deadline alone |
+| double-click a day on a row with no days | Plan that one day as its start and deadline |
+
+A bar moves by whole days and is written once, when you let go — the same write as
+`moai edit <id> --start <day> --due <day>`, and only the side that moved is sent.
+A move moai refuses (a start after the deadline, a day past the deadline of the
+epic, milestone or parent above) is told in moai's own words under the banners and
+the bar goes back. A move that went through says the `moai edit` line that puts the
+days back. A bar an epic or milestone counts from its members (hatched) does not
+move — move the members. The days written are the ones drawn: a row someone moved
+in the two seconds before the page read it again is given the days you dragged to.
 
 ## Theme
 
@@ -138,15 +150,20 @@ list of zones to pick from — type to narrow it, `Enter` to take one. The choic
 only changes what this page draws and is kept in the browser; it never touches
 your user config.
 
-## It does not write the tracker
+## What it writes
 
-Nothing on the page changes the tracker. Each list, issue and wiki page it shows
-is the answer of `moai --json <command>`, run in a child process for that request
-and passed on as it is, so what you see is exactly what the CLI says. Writing
-stays where it was: the CLI for moving, editing and noting, and the explorer's
-`SPC n` for a thought you want to park.
+Each list, issue and wiki page the page shows is the answer of `moai --json
+<command>`, run in a child process for that request and passed on as it is, so
+what you see is exactly what the CLI says. Writing stays where it was: the CLI for
+moving, editing and noting, and the explorer's `SPC n` for a thought you want to
+park.
 
-The one exception is read marks. `r` marks the issue under the cursor read,
+The one write to the tracker is a Gantt bar's days ([above](#gantt)): the server
+runs `moai edit --start --due` for it, so it goes through the same lock, checks and
+refusals as the CLI. The server takes it only from the page itself: a request
+another site sends is refused.
+
+The other write is read marks. `r` marks the issue under the cursor read,
 `SPC m a` everything new to you and `SPC m g` the group under the cursor — the
 same as `moai read`, which keeps them in a file of your own beside your user
 config and never in the tracker. The server takes that write only from the page
@@ -315,7 +332,7 @@ once and the keys reach it.
 | `/` | Search titles and bodies |
 | `SPC v r` | Raw / rendered page |
 
-The page does not show the stats screen, and the one thing it writes is your read
-marks.
+The page does not show the stats screen, and what it writes is a Gantt bar's days
+and your read marks.
 
-Decided in: moai-0aa7, moai-jshy
+Decided in: moai-0aa7, moai-jshy, moai-d86e.3ud
