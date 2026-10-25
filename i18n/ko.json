@@ -420,6 +420,7 @@
   "tui.gantt.undo": " · 되돌리기: `{cmd}`",
   "tui.gantt.overflow": " · 이 기한을 넘는 줄: {ids}",
   "tui.gantt.no_plan": "{id} 에는 옮길 계획 날짜가 없다 — `moai edit {id} --start <날> --due <날>` 로 적는다",
+  "tui.gantt.planned": "{id} 에는 그새 계획 날짜가 섰다 — 안 썼다. 막대를 옮긴다",
   "tui.gantt.members": "{id} 는 제 날을 안 적었다 — 막대는 멤버의 날이라 멤버를 옮긴다",
   "tui.gantt.layer": "계획은 그 프로젝트 안에서 옮긴다 — Enter 로 들어간다",
   "tui.write.veiled_both": "✓ {done} · {what} — 거름망과 보기에 가려 안 보인다 · {clear} 로 풀고 {show} 로 모두 보인다",

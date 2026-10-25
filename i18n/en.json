@@ -420,6 +420,7 @@
   "tui.gantt.undo": " · undo: `{cmd}`",
   "tui.gantt.overflow": " · now past this deadline: {ids}",
   "tui.gantt.no_plan": "{id} has no planned days to move — `moai edit {id} --start <day> --due <day>` sets them",
+  "tui.gantt.planned": "{id} has planned days by now — nothing was written; move its bar instead",
   "tui.gantt.members": "{id} wrote no days of its own — its bar spans its members, move them instead",
   "tui.gantt.layer": "a plan is moved inside its project — Enter goes in",
   "tui.write.veiled_both": "✓ {done} · {what} — hidden by the filter and by the view · {clear} clears it, {show} shows all",

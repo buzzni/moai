@@ -714,14 +714,16 @@ mod tests {
     }
 
     /// **그 층에 선 항목이 이긴다**(moai-y8v2, 사용자 결정) — 메뉴 창에 적힌 키가 다른 일을 하는
-    /// 판이 없다. 오늘 부딪치는 자리는 넷이다: `SPC g l`(목록, moai-z46r)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음
-    /// 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 — `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
+    /// 판이 없다. 오늘 부딪치는 자리는 다섯이다: `SPC g l`(목록, moai-z46r)·`SPC g g`(간트 — 맨 위로 가는 `gg` 의 첫 `g`,
+    /// moai-i4hf)·`SPC c h`(이름 열)·`SPC v l`(미룸)·`SPC m g`(묶음 읽음). 뿌리의 `g` 도 묶음(화면)이 쥔다 —
+    /// `a_move_key_closes_the_menu_and_moves`. 같은 글자가 **그 층 밖**에서는 이동이다.
     #[test]
     fn an_item_on_the_layer_wins_over_the_move() {
         use super::super::scroll::Move;
         let c = inside();
         for (layer, x, item) in [
             ('g', 'l', Browse::Go(super::super::keys::Screen::List)),
+            ('g', 'g', Browse::Go(super::super::keys::Screen::Gantt)),
             ('c', 'h', Browse::Cell(super::super::view::Field::Names)),
             ('v', 'l', Browse::Deferred),
             ('m', 'g', Browse::ReadGroup),

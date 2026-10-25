@@ -137,12 +137,15 @@ impl App {
         let at = Position::new(m.column, m.row);
         // **가로 휠은 간트의 날짜 축만 받는다**(moai-i4hf.exq) — 가로 휠이 없는 마우스를 위해 Shift+휠도 가로다. 다른
         // 자리에서는 가로로 구를 것이 없어 버린다. 한 번에 한 칸 — 축의 한 칸은 확대에 따라 한 시간~한 주다.
+        // **Shift+휠이 가로인 것은 간트 위에서만이다** — 목록·상세·통계 창·위키 창에서는 이 에픽 전처럼 세로로 구른다. 어디서나
+        // 가로로 읽으면 Shift 를 쥔 휠이 그 창들에서 아무 일도 안 한다.
         let shift = m.modifiers.contains(ratatui::crossterm::event::KeyModifiers::SHIFT);
+        let over_chart = self.mode == Mode::Browse && self.drawn.chart.is_some_and(|c| c.contains(at));
         let sideways = match m.kind {
             MouseEventKind::ScrollLeft => Some(-1),
             MouseEventKind::ScrollRight => Some(1),
-            MouseEventKind::ScrollUp if shift => Some(-1),
-            MouseEventKind::ScrollDown if shift => Some(1),
+            MouseEventKind::ScrollUp if shift && over_chart => Some(-1),
+            MouseEventKind::ScrollDown if shift && over_chart => Some(1),
             _ => None,
         };
         let wheel = match m.kind {

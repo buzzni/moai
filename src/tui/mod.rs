@@ -5395,11 +5395,16 @@ impl App {
     /// 그대로 서고, 낡았으면 표식과 시계가 다시 읽는다. 굴려 떼어 둔 화면은 [`App::unfold`] 처럼 [`App::key`] 가 걷는다.
     fn fold(&mut self, rows: &[Row]) {
         let Some(at) = self.head_at(rows) else { return };
+        let gantt = self.gantt();
         if let Some(path) = self.place_path(at).map(std::path::Path::to_path_buf) {
             // 밑의 펼침까지 걷는다 — 다 접기(`Tab`)와 같은 자다: 접힌 것을 다시 펼 때 접기 전
             // 모양이 아니라 그 이전 모양이 서면, 같은 자리로 오는 데 두 번을 눌러야 한다.
+            // **간트에서 접으면 간트의 것만 걷는다**(moai-i4hf) — 목록의 펼침은 목록의 것이라, 간트의 머리줄 `Tab` 하나에
+            // 목록으로 돌아온 사람이 펼쳐 두었던 그 프로젝트의 폴더를 잃으면 안 된다.
             if let Some(site) = self.site_mut(Seat::Place(at)) {
-                site.expanded.clear();
+                if !gantt {
+                    site.expanded.clear();
+                }
                 site.gantt_shut.clear();
             }
             self.deep.remove(&path);

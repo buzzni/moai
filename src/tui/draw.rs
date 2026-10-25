@@ -2721,9 +2721,11 @@ fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
         app.list.reveal(at);
     }
     let window = app.list.offset()..app.list.offset() + body.height as usize;
-    // 커서 칸(`> `)은 목록처럼 늘 자리를 둔다 — 안 두면 커서가 움직일 때마다 줄이 그 폭만큼 들썩인다.
+    // 커서 칸(`> `)은 목록처럼 늘 자리를 둔다 — 안 두면 커서가 움직일 때마다 줄이 그 폭만큼 들썩인다. **잴 폭은 고정 칸
+    // 전부다** — 목록의 `inner` 와 같은 자: `row_line` 은 커서 칸을 제 몫에서 빼고 재고, `names_line` 은 그 칸을 비워 두고
+    // 시작한다. 커서 칸을 한 번 더 빼면 줄은 두 칸 좁게 잘리고 열 이름은 값보다 두 칸 오른쪽에 선다.
     let pad = CURSOR.chars().count();
-    let budget = (body.width as usize).saturating_sub(pad);
+    let budget = body.width as usize;
     let (tallies, cols, common) = measure(app, rows, budget);
     let chart = app.chart_of(rows, window, &|n, r| {
         let mark = if selected == Some(n) { CURSOR.to_string() } else { " ".repeat(pad) };
@@ -2731,9 +2733,10 @@ fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
         line.spans.insert(0, Span::raw(mark));
         line
     });
+    // 열 이름 줄은 목록과 같은 때에만 선다 — 사람이 끈 이름 줄(`Field::Names`)과 이슈 줄 없는 한눈 보기에서는 비운다.
     let tallied = tallies.iter().any(|t| !t.is_empty());
-    let mut title = names_line(common, cols, tallied, budget);
-    title.spans.insert(0, Span::raw(" ".repeat(pad)));
+    let named = common.shows(super::view::Field::Names) && rows.iter().any(|r| matches!(r, Row::Item(..)));
+    let title = if named { names_line(common, cols, tallied, budget) } else { Line::default() };
     app.chart.first_row = app.list.offset();
     app.chart.refit(chart.range, laid.dates_width());
     let mut view = app.chart_view(inner_at);
