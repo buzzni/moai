@@ -2734,6 +2734,11 @@ Order:
   a deferred row's plan, and ▼ over a dotted line marks today.
   Groups that wrote no days of their own span their members' days. Planned days
   are calendar days; actual times are shown in your time zone.
+  Keys that stand only in the gantt move the date axis:
+    = -  zoom in and out — hour, day, week, month
+    H L  one cell earlier and later   [ ]  a page earlier and later
+    t    today in the middle           z    fit every row on one screen
+  It opens fitted, and stays fitted as rows come and go until you move it.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a

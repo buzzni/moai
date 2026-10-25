@@ -399,6 +399,42 @@ pub enum Browse {
     ReadAll,
     /// 커서가 선 줄이 든 묶음(에픽·마일스톤)의 멤버 전부.
     ReadGroup,
+    /// 간트의 날짜 축을 움직인다(moai-i4hf.27r). **간트 배치에서만 선다** — 목록·보드에서는 조용하다.
+    Gantt(Pan),
+}
+
+/// 간트의 날짜 축 — 확대·좌우·오늘·맞춤(moai-i4hf.27r). **조각이라 위젯의 상태를 모른다** — `App` 이 잇는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pan {
+    /// 한 단계 곱게(Month → Week → Day → Hour).
+    ZoomIn,
+    ZoomOut,
+    /// 한 칸 과거 쪽으로.
+    Left,
+    Right,
+    /// 한 쪽(날짜 칸 폭에서 한 칸 뺀 만큼) 과거 쪽으로.
+    PageLeft,
+    PageRight,
+    /// 오늘을 가운데로.
+    Today,
+    /// 보이는 줄의 날이 한 화면에 들게 — 범위가 바뀌면 다시 맞춘다.
+    Fit,
+}
+
+impl Pan {
+    /// 키 파일의 이름과 화면 낱말의 열쇠가 함께 쓰는 꼬리.
+    pub fn name(self) -> &'static str {
+        match self {
+            Pan::ZoomIn => "zoom_in",
+            Pan::ZoomOut => "zoom_out",
+            Pan::Left => "left",
+            Pan::Right => "right",
+            Pan::PageLeft => "page_left",
+            Pan::PageRight => "page_right",
+            Pan::Today => "today",
+            Pan::Fit => "fit",
+        }
+    }
 }
 
 /// 탐색기가 보이는 화면(moai-z46r) — `SPC g` 가 고른다. 다음 화면은 여기 하나와 `SPC g <글자>` 줄 하나를 더해 든다.
@@ -768,6 +804,17 @@ pub const BROWSE: &[Bind<Browse>] = {
         // 읽음은 손이 제일 자주 가는 것이라 **바로 누른다**(moai-z9pc). 옛 `r`(다시 읽기)은
         // moai-7sjm 이 `SPC r` 로 옮겨 이 자리가 비어 있었고, 그 `SPC r` 도 뒤에 걷었다(moai-en4u).
         row!(Read, Some("r"), Key::plain('r')),
+        // **간트의 날짜 축은 바로 누른다**(moai-i4hf.27r) — 이동키처럼 손이 자주 가고, 간트 배치에서만 선다
+        // (`Browse::enabled`). 목록·보드에서 이 글자들은 비어 있다. `+` 는 `=` 와 같다 — 같은 자판의 Shift 다.
+        row!(Gantt(Pan::ZoomOut), Some("-"), Key::plain('-')),
+        row!(Gantt(Pan::ZoomIn), Some("="), Key::plain('=')),
+        row!(Gantt(Pan::ZoomIn), None, Key::plain('+')),
+        row!(Gantt(Pan::Left), Some("H"), Key::plain('H')),
+        row!(Gantt(Pan::Right), Some("L"), Key::plain('L')),
+        row!(Gantt(Pan::PageLeft), Some("["), Key::plain('[')),
+        row!(Gantt(Pan::PageRight), Some("]"), Key::plain(']')),
+        row!(Gantt(Pan::Today), Some("t"), Key::plain('t')),
+        row!(Gantt(Pan::Fit), Some("z"), Key::plain('z')),
         row!(ClearFilter, Some("Esc"), Key::any(C::Esc)),
         // `/` 는 바로 누르는 키이면서 메뉴에도 선다 — 이름은 바로 누르는 쪽 하나만 댄다.
         row!(Grep, None, LEADER, Key::plain('/')),
@@ -1055,6 +1102,9 @@ impl Browse {
             Go(_) | Step(_) if c.stats || c.wiki => Ok(()),
             Raw if c.wiki => Ok(()),
             _ if c.stats || c.wiki => Err(Off::Quiet),
+            // 간트의 날짜 축은 간트에서만 — 포커스와 상관없다: 상세를 읽다가도 축은 옮긴다(moai-i4hf.27r).
+            Gantt(_) if c.gantt => Ok(()),
+            Gantt(_) => Err(Off::Quiet),
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
@@ -1302,6 +1352,14 @@ impl Browse {
             Timezone => say(c.lang, "tui.act.timezone"),
             Mouse => say(c.lang, "tui.act.mouse"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
+            Gantt(Pan::ZoomIn) => say(c.lang, "tui.act.gantt_zoom_in"),
+            Gantt(Pan::ZoomOut) => say(c.lang, "tui.act.gantt_zoom_out"),
+            Gantt(Pan::Left) => say(c.lang, "tui.act.gantt_left"),
+            Gantt(Pan::Right) => say(c.lang, "tui.act.gantt_right"),
+            Gantt(Pan::PageLeft) => say(c.lang, "tui.act.gantt_page_left"),
+            Gantt(Pan::PageRight) => say(c.lang, "tui.act.gantt_page_right"),
+            Gantt(Pan::Today) => say(c.lang, "tui.act.gantt_today"),
+            Gantt(Pan::Fit) => say(c.lang, "tui.act.gantt_fit"),
         }
     }
 }
@@ -2582,6 +2640,8 @@ mod tests {
     const LIST: &str = "j and k or the arrow keys move";
     /// SPC 메뉴 문단.
     const SPC: &str = "The rest lives in the menu";
+    /// 간트 배치 문단 — 날짜 축 키가 여기 선다(moai-i4hf.27r).
+    const GANTT: &str = "SPC g g lays the same rows out as a gantt chart";
     /// 고르기 창·경로 칸·목록에서 빼기 문단.
     const PICKER: &str = "SPC p a opens a window";
     /// 생각 담기 문단.
@@ -2635,7 +2695,7 @@ mod tests {
     ///   번 적히면 된다
     const SECTIONS: &[(&str, &[&str])] = &[
         ("ANYWHERE", &[SPC]),
-        ("BROWSE", &[LIST, SPC]),
+        ("BROWSE", &[LIST, SPC, GANTT]),
         ("PICK", &[PICKER]),
         ("JOT", &[JOTTING]),
         ("CONFIRM", &[PICKER, JOTTING]),

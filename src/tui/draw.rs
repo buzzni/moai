@@ -216,11 +216,14 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         f.render_widget(Paragraph::new(banner_line(&text, note.width as usize, style, dimmed)), note);
     }
     // **보드는 목록 자리에 선다**(moai-9nfw) — 새 창이 아니라 목록의 배치라 상세·포커스·마우스의 칸은 그대로다.
+    let mut chart = None;
     let (rows_at, cards, columns) = if app.board() {
         let b = board(f, app, left, &rows);
         (Rect::default(), b.cards, b.columns)
     } else if app.gantt() {
-        (gantt(f, app, left, &rows), Vec::new(), Vec::new())
+        let (rows_at, at) = gantt(f, app, left, &rows);
+        chart = Some(at);
+        (rows_at, Vec::new(), Vec::new())
     } else {
         (list(f, app, left, &rows), Vec::new(), Vec::new())
     };
@@ -240,6 +243,7 @@ pub fn screen(f: &mut Frame, app: &mut App) {
         menu,
         menu_keys: Vec::new(),
         wiki: None,
+        chart,
     };
     if let Some(right) = right {
         detail(f, app, right, &rows);
@@ -2700,8 +2704,9 @@ fn list(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
 /// 목록과 한 벌이고, 고정 칸의 줄은 목록의 줄(`row_line`)을 같은 자로 잰 것이다 — `SPC g l` ↔ `SPC g g` 를 오가도
 /// 같은 줄이 같은 열로 선다. 날짜 칸은 위젯(`moai_gantt::Gantt`)이 그린다.
 ///
-/// 낸 값은 줄의 자리 — 고정 칸부터 날짜 칸 끝까지다. 마우스가 그 안의 줄을 누르면 목록처럼 커서가 그 줄로 간다.
-fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
+/// 낸 값은 줄의 자리(고정 칸부터 날짜 칸 끝까지 — 마우스가 그 안의 줄을 누르면 목록처럼 커서가 그 줄로 간다)와 위젯이
+/// 선 자리다(`mouse::Drawn::chart`).
+fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
     let block = frame(app, Pane::Explorer).title(list_title(app, rows));
     let inner_at = block.inner(at);
     f.render_widget(block, at);
@@ -2742,7 +2747,7 @@ fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> Rect {
     };
     f.render_stateful_widget(widget, inner_at, &mut app.chart);
     scroll_mark(f, &app.list, at, "", app.focus == Pane::Explorer, app.site.lang);
-    Rect::new(body.x, body.y, inner_at.width, body.height)
+    (Rect::new(body.x, body.y, inner_at.width, body.height), inner_at)
 }
 
 /// 보드가 그린 자리 — 마우스가 맞히는 바탕이다(`mouse::Drawn::cards`·`columns`).
@@ -4889,6 +4894,14 @@ fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) 
     } else {
         // 층에 선 갈래는 위에서 이미 갈렸다 — 여기 오면 층 밖이다.
         let mut order: Vec<&[Browse]> = if unnumbered { vec![&[B::Project(0)]] } else { Vec::new() };
+        // **간트의 날짜 축 키는 간트에서만 선다**(moai-i4hf.27r, `Browse::enabled`) — 목록의 키보다 먼저 떨어진다. 다
+        // 적지 않는다: 확대·오늘·맞춤만 대고, 좌우와 쪽 넘기기는 `moai tui --help` 가 댄다.
+        order.extend([
+            &[B::Gantt(keys::Pan::ZoomIn)][..],
+            &[B::Gantt(keys::Pan::ZoomOut)],
+            &[B::Gantt(keys::Pan::Today)],
+            &[B::Gantt(keys::Pan::Fit)],
+        ]);
         order.extend([
             &[B::Step(Move::LineDown), B::Step(Move::LineUp)][..],
             // **`Tab` 은 가는 곳을 댄다** — 가는 곳을 적으면 이 줄도 글자로 지금 자리를 말한다.

@@ -9,6 +9,7 @@
 //!
 //! 조각이 아니다 — `App`·`Site` 를 고치고 저장소의 줄(`crate::model`)을 읽는다(`input::NOT_COMPONENTS`).
 
+use super::keys::Pan;
 use super::{App, Path, Row, Seat, Site};
 use crate::model::{Kind, parse_date, parse_rfc3339};
 use crate::report::gantt::{Actual, Origin};
@@ -65,6 +66,43 @@ impl App {
         }
     }
 
+    /// 간트의 지금 — 적재 때 잡은 시각(`Site::now`)을 보는 사람의 벽시계로 옮긴 지역 기준 초.
+    fn chart_now(&self) -> i64 {
+        parse_rfc3339(&self.site.now).map_or(0, |t| self.zone.local(t))
+    }
+
+    /// 날짜 축을 움직인다(moai-i4hf.27r). 폭은 **지난 프레임이 그린 자리**로 잰다(`Drawn::chart`) — 키는 그 화면을 본
+    /// 사람의 손이다. 아직 안 그렸으면 맞춤만 깃발을 세우고 나머지는 아무 일도 안 한다: 잴 폭이 없다.
+    ///
+    /// 확대의 기준점은 **날짜 칸의 가운데**다 — 그 시각이 그 칸에 그대로 남는다.
+    pub(super) fn pan(&mut self, p: Pan, rows: &[Row]) {
+        let Some(area) = self.drawn.chart else {
+            if p == Pan::Fit {
+                self.chart.fitting = true;
+            }
+            return;
+        };
+        let w = moai_gantt::Layout::of(area, &self.chart).dates_width();
+        let mid = f64::from(w / 2);
+        let anchor = self.chart.axis.secs_at_cell(mid);
+        match p {
+            Pan::ZoomIn => self.chart.zoom_in(anchor, mid),
+            Pan::ZoomOut => self.chart.zoom_out(anchor, mid),
+            Pan::Left => self.chart.scroll_cells(-1),
+            Pan::Right => self.chart.scroll_cells(1),
+            Pan::PageLeft => self.chart.scroll_pages(-1, w),
+            Pan::PageRight => self.chart.scroll_pages(1, w),
+            Pan::Today => {
+                let now = self.chart_now();
+                self.chart.to_today(now, w);
+            }
+            Pan::Fit => {
+                let range = self.chart_of(rows, 0..0, &|_, _| Line::default()).range;
+                self.chart.fit(range, w);
+            }
+        }
+    }
+
     /// 목록의 줄을 위젯의 줄로 옮긴다. 고정 칸의 글(`label`)은 그리는 쪽이 짓는다 — 목록의 줄과 같은 자로 재야
     /// 해서다(`draw::row_line`). `window` 밖의 줄은 글을 안 짓는다: 위젯은 보이는 창만 그린다.
     ///
@@ -77,7 +115,7 @@ impl App {
         label: &dyn Fn(usize, &Row) -> Line<'static>,
     ) -> Chart {
         let utc_now = self.site.now.clone();
-        let now = parse_rfc3339(&utc_now).map_or(0, |t| self.zone.local(t));
+        let now = self.chart_now();
         let mut seats: Vec<Seat> = Vec::new();
         for r in rows {
             if let Row::Item(seat, ..) = r
@@ -293,6 +331,54 @@ mod tests {
         assert!(pane("argos-0003").contains('░'), "계획 막대가 안 섰다\n{screen}");
         assert!(pane("argos-0001").contains('▒'), "멤버에서 센 묶음 막대가 안 섰다\n{screen}");
         assert!(!pane("argos-0009").contains('░'), "날 없는 줄에 막대가 섰다\n{screen}");
+    }
+
+    /// **날짜 축 키는 간트에서만 듣는다**(moai-i4hf.27r) — 확대·좌우·쪽·오늘·맞춤이 위젯의 보기를 옮기고, 움직이면
+    /// 맞춤이 내려간다. 목록에서는 같은 글자가 아무 일도 안 한다.
+    #[test]
+    fn the_axis_keys_move_the_chart_only_in_the_gantt() {
+        use moai_gantt::Zoom;
+        let mut a = app();
+        let before = a.chart;
+        a.hit("H L - = t z");
+        assert_eq!(a.chart, before, "목록에서 간트 키가 들었다");
+
+        a.hit("SPC g g");
+        let _ = draw::tests::render(&mut a, 140, 20);
+        assert!(a.chart.fitting, "간트가 맞춤으로 안 섰다");
+        let fitted = a.chart.axis;
+        a.hit("L");
+        assert!(!a.chart.fitting, "움직였는데 맞춤이 남았다");
+        assert_eq!(a.chart.axis.origin - fitted.origin, fitted.zoom.secs_per_cell(), "L 이 한 칸 안 갔다");
+        a.hit("H H");
+        assert_eq!(a.chart.axis.origin - fitted.origin, -fitted.zoom.secs_per_cell(), "H 가 한 칸 안 돌아왔다");
+        a.hit("]");
+        assert!(a.chart.axis.origin > fitted.origin + fitted.zoom.secs_per_cell(), "] 가 한 쪽 안 넘겼다");
+        a.hit("[");
+        assert_eq!(a.chart.axis.origin - fitted.origin, -fitted.zoom.secs_per_cell(), "[ 가 그 쪽을 안 되돌렸다");
+
+        let zoom = a.chart.axis.zoom;
+        a.hit("=");
+        assert_eq!(a.chart.axis.zoom, zoom.finer(), "= 가 확대하지 않았다");
+        a.hit("+");
+        assert_eq!(a.chart.axis.zoom, zoom.finer().finer(), "+ 가 = 와 다르다");
+        a.hit("- - - - -");
+        assert_eq!(a.chart.axis.zoom, Zoom::Month, "- 가 가장 거친 단계에서 안 멈췄다");
+
+        a.hit("z");
+        assert!(a.chart.fitting, "z 가 맞춤을 안 켰다");
+        assert_eq!(a.chart.axis, fitted, "z 가 처음 맞춘 자리로 안 돌아왔다");
+
+        a.hit("t");
+        assert!(!a.chart.fitting);
+        let screen = draw::tests::render(&mut a, 140, 20);
+        let head = screen.iter().find(|l| l.contains('▼')).expect("오늘 표식이 안 섰다");
+        let chars: Vec<char> = head.chars().collect();
+        let col = |c: char| chars.iter().position(|&x| x == c).unwrap();
+        let today = col('▼');
+        let right = chars.iter().rposition(|&x| x == '┃').unwrap();
+        let mid = (col('│') + right) / 2;
+        assert!(today.abs_diff(mid) <= 6, "t 가 오늘을 가운데로 안 옮겼다\n{}", screen.join("\n"));
     }
 
     /// 배치 이름은 설정에 `gantt` 로 남고, 키 문맥은 간트 화면을 댄다.

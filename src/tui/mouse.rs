@@ -58,6 +58,9 @@ pub struct Drawn {
     /// 위키 창의 칸 자리(moai-o3cb) — 창이 떠 있을 때만 선다. 창은 몸통을 덮으므로 그동안 위의 목록·상세 자리는 창
     /// 밑에 깔린 그림의 것이다.
     pub wiki: Option<WikiAt>,
+    /// 간트 위젯이 선 자리 — 목록 칸의 테두리 안쪽(moai-i4hf). 간트로 세웠을 때만 선다. 고정 칸·머리·날짜 칸·나눔
+    /// 선은 이 자리와 `App::chart` 로 위젯이 다시 잰다(`moai_gantt::Layout::of`) — 그린 쪽과 맞히는 쪽이 한 자로 잰다.
+    pub chart: Option<Rect>,
 }
 
 /// 위키 창이 그린 자리 — `draw::wiki_window` 가 낸다.
