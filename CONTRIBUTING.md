@@ -37,10 +37,14 @@ matters.
 
 ```sh
 cargo build --release      # target/release/moai
-cargo test                 # 1,500+ tests, a few seconds
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace     # 1,500+ tests, a few seconds
+cargo clippy --all-targets --workspace -- -D warnings
 cargo fmt --all --check    # or `cargo fmt --all` to fix
 ```
+
+The repository is a Cargo workspace: the root package is `moai`, and
+`crates/moai-gantt` is a member. A bare `cargo test` or `cargo clippy` in the
+root covers `moai` alone, so pass `--workspace` to check what CI checks.
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
@@ -60,7 +64,7 @@ dependencies blurs the premise that this is a tool installed into someone else's
 repository.
 
 Clippy runs with `-D warnings`. Lints this project deliberately carries are
-listed under `[lints.clippy]` in `Cargo.toml`, each with the reason it is there.
+listed under `[workspace.lints.clippy]` in `Cargo.toml`, each with the reason it is there.
 Add the reason when you add a line — an `allow` without one cannot be judged
 later.
 

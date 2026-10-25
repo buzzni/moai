@@ -726,7 +726,18 @@ fn settle<'a>(
     // 기록이 끝났는지는 겹친 줄의 칸 시각으로 재야 맞다.
     let (rows, mut narrow): (std::borrow::Cow<'a, [model::Issue]>, _) = match overlaid {
         Some((fresh, beside)) => {
-            let mut away = crate::hook::Away { me: base.me.clone(), archive: base.archive.clone(), ..beside };
+            // 옆 워크트리의 자리(`homes`)는 겹쳐 보기(`worktree::fresh`)가 안 짓는다 — `base` 가 git 이 적어 둔 파일로
+            // 읽은 것(`worktree::away`)을 옮긴다. **이 한 줄이 루트 쓰기의 거절을 세운다**: 막는 판은 늘 여기를 지나므로,
+            // 빠지면 겹친 판이 풀어 그 거절이 아무에게도 안 닿는다(`tests/cli.rs` 의 같은 이름의 시험
+            // `a_root_session_holding_worktree_work_is_sent_to_the_worktree` 가 훅을 통째로 돌려 잰다). 제 스냅샷에 집힌
+            // 줄이 없어 `base` 가 자리를 안 읽은 판(`away_of`)은 여기도 비어
+            // 그 물음이 안 선다 — 그 판은 제 스냅샷으로는 아무것도 안 쥐었다.
+            let mut away = crate::hook::Away {
+                me: base.me.clone(),
+                archive: base.archive.clone(),
+                homes: base.homes.clone(),
+                ..beside
+            };
             add_picked(input, repo, &fresh, &mut away);
             (std::borrow::Cow::Owned(fresh), away)
         }

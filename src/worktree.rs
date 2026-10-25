@@ -677,7 +677,12 @@ fn head_of(me: Option<&Tree>) -> Option<&str> {
 /// 전처럼 스냅샷의 집은 줄이 다 제 초점이다. 훅은 무엇이 어긋나도 조용해야 한다.
 pub fn away(root: &Path) -> crate::hook::Away {
     on_disk(root)
-        .map(|d| crate::hook::Away { names: names(d.others()), own: names(d.mine()), ..Default::default() })
+        .map(|d| crate::hook::Away {
+            names: names(d.others()),
+            own: names(d.mine()),
+            homes: d.homes(),
+            ..Default::default()
+        })
         .unwrap_or_default()
 }
 
@@ -705,6 +710,23 @@ impl Disk {
     /// 제 워크트리 — 그 이름 후보가 훅의 제 이름([`crate::hook::Away::own`])이다.
     fn mine(&self) -> impl Iterator<Item = &Tree> {
         self.all.iter().filter(|(_, _, me)| *me).map(|(t, ..)| t)
+    }
+
+    /// 이 자리가 main 일 때 옆 딸린 워크트리마다 그 moai 뿌리와 이름 후보([`crate::hook::Away::homes`],
+    /// moai-9js2.3xn). 딸린 워크트리에 선 자리와 맨몸 저장소는 비어 있다. 마일스톤 워크트리는 모으는
+    /// 자리라 안 든다([`is_milestone`]).
+    ///
+    /// **뿌리는 [`root_in`] 으로 짓는다**(리뷰 moai-9js2.s4s) — 트래커가 꼭대기에 선 흔한 판은 `rel` 이 비어,
+    /// `join("")` 이 끝에 가름선을 더해 거절문이 `…/<에픽>/.` 과 `…/<에픽>//src/x.rs` 를 냈다.
+    fn homes(&self) -> Vec<(PathBuf, BTreeSet<String>)> {
+        if !self.all.iter().any(|(_, linked, me)| *me && !*linked) {
+            return Vec::new();
+        }
+        self.all
+            .iter()
+            .filter(|(t, linked, me)| *linked && !*me && !is_milestone(t))
+            .map(|(t, ..)| (root_in(self, t), names([t])))
+            .collect()
     }
 
     /// main 워크트리. 맨몸 저장소면 없다.
@@ -2141,6 +2163,34 @@ mod tests {
         assert!(!is_milestone(&t("/r/.worktrees/moai-nvju", "worktree-moai-nvju")));
         assert!(!is_milestone(&t("/r/x", "milestone/")), "id 없는 가지를 마일스톤으로 읽었다");
         assert!(!is_milestone(&t("/r/x", "milestones/x")));
+    }
+
+    /// **훅이 루트의 쓰기를 돌릴 자리는 main 에 선 세션에만 든다**(moai-9js2.3xn). 딸린 워크트리의 세션은 이미 제
+    /// 워크트리에 쓰고, 마일스톤 워크트리는 일하는 자리가 아니다.
+    ///
+    /// **에픽 워크트리가 둘이어야 main 의 문이 재진다**(리뷰 moai-9js2.s4s) — 하나뿐이면 딸린 워크트리의 세션에서 제
+    /// 것을 빼고 나면 문이 없어도 비어 있었다. 자리는 **글자째** 견준다 — `real()` 로 견주던 판은 꼭대기 뿌리에서
+    /// `join("")` 이 붙인 끝의 가름선을 못 봤다. 하위에 선 트래커(모노레포)는 워크트리마다 같은 하위가 자리다.
+    #[test]
+    fn homes_stand_only_for_a_session_in_main() {
+        let scratch = crate::scratch::Scratch::fenced("homes");
+        let base = scratch.path().to_path_buf();
+        let main = base.join("main");
+        std::fs::create_dir_all(main.join("app")).unwrap();
+        let run = |dir: &Path, args: &[&str]| crate::git::tests::run_git(dir, None, args);
+        run(&main, &["init", "-q"]);
+        run(&main, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&main, &["worktree", "add", "-q", "../t-eeee", "-b", "worktree-t-eeee"]);
+        run(&main, &["worktree", "add", "-q", "../t-ffff", "-b", "worktree-t-ffff"]);
+        run(&main, &["worktree", "add", "-q", "../milestone-t-zzzz", "-b", "milestone/t-zzzz"]);
+        let homes = away(&main).homes;
+        let at: Vec<&std::ffi::OsStr> = homes.iter().map(|(p, _)| p.as_os_str()).collect();
+        let (e, f) = (real(&base.join("t-eeee")), real(&base.join("t-ffff")));
+        assert_eq!(at, [e.as_os_str(), f.as_os_str()], "{homes:?}");
+        assert!(homes[0].1.contains("t-eeee") && homes[1].1.contains("t-ffff"), "{homes:?}");
+        assert!(away(&base.join("t-eeee")).homes.is_empty(), "딸린 워크트리의 세션에 자리를 실었다");
+        let sub = away(&main.join("app")).homes;
+        assert_eq!(sub.first().map(|(p, _)| p.as_os_str()), Some(e.join("app").as_os_str()), "{sub:?}");
     }
 
     /// **마일스톤 가지의 워크트리는 일하는 자리가 아니다**(moai-nvju.ztj, 2026-10-08 사용자 결정). 그

@@ -1,3 +1,9 @@
+# 루트 패키지가 `moai` 그대로고 `default-members` 는 두지 않는다 — 루트에서 `cargo build`·`cargo test`
+# 는 `moai` 하나만 돈다(릴리스 빌드·시험이 크레이트 때문에 늘지 않는다). 크레이트까지 돌려야 하는 자리(CI 의
+# clippy·시험·MSRV)는 `--workspace` 를 명시한다 (moai-v53u.dh8).
+[workspace]
+members = ["crates/moai-gantt"]
+
 [package]
 name = "moai"
 version = "0.23.0"
@@ -10,6 +16,9 @@ repository = "https://github.com/buzzni/moai"
 # "1.88 이상이 필요하다" 대신 `expected expression, found keyword 'let'` 을 본다.
 # README 가 그 밖의 기계에 소스 빌드를 대고 있어, 그 사람이 처음 받는 말이 이것이다.
 rust-version = "1.88"
+
+[lints]
+workspace = true
 
 [dependencies]
 # `wrap_help` 는 켜지 않는다 — 도움말에 실제 개행을 넣어 좁은 창에서 예시 명령이 복사하면
@@ -43,6 +52,8 @@ toml_edit     = { version = "0.25.15", default-features = false, features = ["pa
 # 지금 크기는 `ls -l target/release/moai` 가 댄다. 위의 표와 다른 것은 기능을 깎아서다: `gzip` 을
 # 끄면 `flate2` 가 안 따라오고, 답이 JSON 몇 KB 라 푸는 값도 없다.
 ureq          = { version = "3", default-features = false, features = ["rustls"] }
+# 탐색기의 간트 배치(moai-i4hf)가 그리는 위젯 — 같은 워크스페이스의 크레이트라 전이 의존이 ratatui 하나다(moai-v53u).
+moai-gantt    = { path = "crates/moai-gantt" }
 
 # `access(X_OK)` 하나를 쓴다(`cmd::runnable`, moai-dhx9, 2026-09-23 사용자 결정) — 표준
 # 라이브러리에 없다.
@@ -59,11 +70,12 @@ ureq          = { version = "3", default-features = false, features = ["rustls"]
 [target.'cfg(unix)'.dependencies]
 libc          = "0.2"
 
+# 두 패키지(`moai`·`moai-gantt`)가 `[lints] workspace = true` 로 같이 쓴다.
 # CI 의 ci-gate 가 clippy 를 `-D warnings` 로 돌린다. 그러니 여기 적힌 세 줄은
 # "이건 경고가 아니다" 라는 선언이고, 줄마다 `#[allow]` 을 흩뿌리는 대신 까닭과
 # 함께 한자리에 둔다. 새 줄을 더할 때도 까닭을 같이 적는다 — 까닭 없는 allow 는
 # 다음 사람이 걷어도 되는지 못 가린다.
-[lints.clippy]
+[workspace.lints.clippy]
 # 지금 걸리는 자리는 일곱이다 — `cmd/add.rs` 의 `bulk`·`create_drafts`, `cmd/show.rs` 의 `one`,
 # `hook.rs` 의 `closing`, `tui/stats.rs` 의 `count`, `view.rs` 의 `list`·`ready`(2026-10-06 에 이 줄을
 # `warn` 으로 내려 셌다 — 둘로 적혀 있던 동안 넷이 말없이 늘었다, 리뷰 moai-084j.ghf).

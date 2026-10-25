@@ -102,11 +102,16 @@ it belongs to, and `--due` covers every epic the plan creates that has no `@` of
     - recover a truncated line
     PLAN
 
-A row made alone takes the same `--due` on `moai add` or `moai backlog add`; an `@` is
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31` is a
+start and a deadline, `@2026-10-25~` a start alone — and `--start <day>` covers the epics
+that have no `@` of their own, as `--due` does. A start is never made up either.
+
+A row made alone takes the same `--due` and `--start` on `moai add` or `moai backlog add`; an `@` is
 read on a plan line only.
 
 A member's deadline cannot pass its epic's, nor an epic's its milestone's — the write
-is refused and names the day to give instead. As deadlines near, `moai due apply`
+is refused and names the day to give instead. A start is held to the same ceiling: it cannot
+fall after the deadline above it, though it may begin before the parent does. As deadlines near, `moai due apply`
 raises the priority of each open, not deferred issue and backlog item by the deadline
 it follows — the earliest of its own and those of its milestone, epic and open parent (one day
 left or less — today and past included — is `p0`, two or less `p1`, seven or less `p2`)
@@ -137,9 +142,19 @@ and wait on each other to merge.
 - **Worktrees stand in `<root>/.worktrees/`**, the place Claude Code, Codex and
   Antigravity share (moai-5s9l); `moai init` keeps it out of git. It stays inside
   the repository because Codex's trust and Antigravity's workspace go by the
-  root's path. Claude Code enters one from the root (`EnterWorktree` with its
-  path) — come back to the root before entering another. Worktrees made earlier
-  under `.claude/worktrees/` keep working
+  root's path. Worktrees made earlier under `.claude/worktrees/` keep working
+- **Claude Code does not enter it.** Every `EnterWorktree` into `.worktrees/`
+  asks the person to approve it, and no allow rule turns that off, so a Claude
+  session — a worker or a person's own — stays in the root and reaches the
+  worktree by absolute path (`git -C <root>/.worktrees/<epic> …`, absolute paths
+  for every file edit, and `(cd <root>/.worktrees/<epic> && …)` for a tool that
+  needs the directory) (moai-9js2). The parentheses matter in a session: its
+  shell keeps a `cd` into the next call, while a subagent's starts in the root
+  again every time. The hook's rule 2 takes over part of the isolation guard it
+  gives up: while the shell stands in the root and everything the session holds
+  has its worktree standing, a write to the root checkout — an edit, or a shell
+  redirect, `sed -i` or `tee` — is refused, and the refusal names the same file
+  in the worktree (in each worktree, when the work held stands in several)
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,

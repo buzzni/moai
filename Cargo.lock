@@ -550,6 +550,7 @@ dependencies = [
  "clap",
  "fs2",
  "libc",
+ "moai-gantt",
  "pulldown-cmark",
  "ratatui",
  "serde",
@@ -558,6 +559,13 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "ureq",
+]
+
+[[package]]
+name = "moai-gantt"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
 ]
 
 [[package]]

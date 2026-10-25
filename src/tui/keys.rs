@@ -399,16 +399,79 @@ pub enum Browse {
     ReadAll,
     /// 커서가 선 줄이 든 묶음(에픽·마일스톤)의 멤버 전부.
     ReadGroup,
+    /// 간트의 날짜 축을 움직인다(moai-i4hf.27r). **간트 배치에서만 선다** — 목록·보드에서는 조용하다.
+    Gantt(Pan),
+    /// 커서 줄의 계획을 하루 옮긴다(moai-i4hf.9xi) — **트래커에 쓴다**. 간트 배치에서만 선다.
+    Plan(Nudge),
+}
+
+/// 계획을 하루 옮기는 쪽(moai-i4hf.9xi). **조각이라 줄을 모른다** — 어느 날이 옮는지는 `model::Issue::shifted` 가 정한다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Nudge {
+    /// 막대 전체를 하루 앞으로.
+    Earlier,
+    Later,
+    /// 시작만 하루 앞으로.
+    StartEarlier,
+    StartLater,
+}
+
+impl Nudge {
+    /// 키 파일의 이름과 화면 낱말의 열쇠가 함께 쓰는 꼬리.
+    pub fn name(self) -> &'static str {
+        match self {
+            Nudge::Earlier => "earlier",
+            Nudge::Later => "later",
+            Nudge::StartEarlier => "start_earlier",
+            Nudge::StartLater => "start_later",
+        }
+    }
+}
+
+/// 간트의 날짜 축 — 확대·좌우·오늘·맞춤(moai-i4hf.27r). **조각이라 위젯의 상태를 모른다** — `App` 이 잇는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pan {
+    /// 한 단계 곱게(Month → Week → Day → Hour).
+    ZoomIn,
+    ZoomOut,
+    /// 한 칸 과거 쪽으로.
+    Left,
+    Right,
+    /// 한 쪽(날짜 칸 폭에서 한 칸 뺀 만큼) 과거 쪽으로.
+    PageLeft,
+    PageRight,
+    /// 오늘을 가운데로.
+    Today,
+    /// 보이는 줄의 날이 한 화면에 들게 — 범위가 바뀌면 다시 맞춘다.
+    Fit,
+}
+
+impl Pan {
+    /// 키 파일의 이름과 화면 낱말의 열쇠가 함께 쓰는 꼬리.
+    pub fn name(self) -> &'static str {
+        match self {
+            Pan::ZoomIn => "zoom_in",
+            Pan::ZoomOut => "zoom_out",
+            Pan::Left => "left",
+            Pan::Right => "right",
+            Pan::PageLeft => "page_left",
+            Pan::PageRight => "page_right",
+            Pan::Today => "today",
+            Pan::Fit => "fit",
+        }
+    }
 }
 
 /// 탐색기가 보이는 화면(moai-z46r) — `SPC g` 가 고른다. 다음 화면은 여기 하나와 `SPC g <글자>` 줄 하나를 더해 든다.
 ///
-/// **목록과 보드는 한 화면의 두 배치다**(moai-9nfw) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
-/// `[tui] layout` 에 남는다. **통계와 위키는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 목록이나 보드다.
+/// **목록·보드·간트는 한 화면의 세 배치다**(moai-9nfw·moai-i4hf) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
+/// `[tui] layout` 에 남는다. **통계와 위키는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 고른 배치다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     List,
     Board,
+    /// 펼친 목록 옆에 날짜 축과 막대(moai-i4hf).
+    Gantt,
     Stats,
     /// 프로젝트의 위키(moai-o3cb) — 읽기만 한다(2026-10-04 사용자 결정).
     Wiki,
@@ -420,6 +483,7 @@ impl Screen {
         match self {
             Screen::List => say(lang, "tui.menu.list"),
             Screen::Board => say(lang, "tui.menu.board"),
+            Screen::Gantt => say(lang, "tui.menu.gantt"),
             Screen::Stats => say(lang, "tui.menu.stats"),
             Screen::Wiki => say(lang, "tui.menu.wiki"),
         }
@@ -430,6 +494,7 @@ impl Screen {
         match self {
             Screen::List => say(lang, "tui.state.list"),
             Screen::Board => say(lang, "tui.state.board"),
+            Screen::Gantt => say(lang, "tui.state.gantt"),
             Screen::Stats => say(lang, "tui.state.stats"),
             Screen::Wiki => say(lang, "tui.state.wiki"),
         }
@@ -781,6 +846,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         // — 화면들이 서로 오가는 자리라서다.
         row!(Go(Screen::List), Some("SPC g l"), LEADER, Key::plain('g'), Key::plain('l')),
         row!(Go(Screen::Board), Some("SPC g b"), LEADER, Key::plain('g'), Key::plain('b')),
+        // 간트는 `g`(gantt, moai-i4hf). 맨 `gg`(맨 위로)와는 리더가 달라 안 부딪는다 — `SPC g` 메뉴 안의 `g` 는
+        // 메뉴 항목이 이긴다.
+        row!(Go(Screen::Gantt), Some("SPC g g"), LEADER, Key::plain('g'), Key::plain('g')),
         row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
         // 위키는 `w`(wiki, moai-o3cb) — 다음 화면은 이렇게 한 줄을 더해 든다(moai-z46r).
         row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
@@ -932,6 +1000,8 @@ pub struct Ctx {
     /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
     /// 빼고다.
     pub board: bool,
+    /// 목록을 간트로 세웠는가(moai-i4hf). 줄 키(`j`·`k`·`h`·`l`·`Tab`)는 목록과 같고, 날짜 축의 키가 이때만 선다.
+    pub gantt: bool,
     /// 통계 창이 떠 있는가(moai-z46r). **메뉴에는 화면 고르기(`SPC g`)만 서고**, 메뉴를 닫는 이동키는 창을 굴린다 —
     /// 창이 목록과 상세를 통째로 덮어, 그 밖의 항목은 눌러도 보이는 것이 없다.
     pub stats: bool,
@@ -971,6 +1041,8 @@ pub struct Ctx {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Keymap {
     pub browse: &'static [Bind<Browse>],
+    /// 간트 배치에서만 먼저 찾는 표(moai-l80o) — [`GANTT`].
+    pub gantt: &'static [Bind<Browse>],
     pub menu: &'static [Bind<Menu>],
     pub sorter: &'static [Bind<Sorter>],
     pub pick: &'static [Bind<Pick>],
@@ -984,6 +1056,7 @@ impl Default for Keymap {
     fn default() -> Keymap {
         Keymap {
             browse: BROWSE,
+            gantt: GANTT,
             menu: MENU,
             sorter: SORTER,
             pick: PICK,
@@ -999,11 +1072,16 @@ impl Ctx {
     /// 지금 화면 — 덮는 창(통계·위키)이 떠 있으면 그 창, 아니면 고른 배치다. **따로 들지 않는다**: 창과 배치가 이미
     /// 그 답을 든다. 두 창은 한 모드라 함께 서지 않는다(`Mode::Stats`·`Mode::Wiki`).
     pub fn screen(&self) -> Screen {
-        match (self.stats, self.wiki, self.board) {
-            (true, _, _) => Screen::Stats,
-            (false, true, _) => Screen::Wiki,
-            (false, false, true) => Screen::Board,
-            (false, false, false) => Screen::List,
+        if self.stats {
+            Screen::Stats
+        } else if self.wiki {
+            Screen::Wiki
+        } else if self.board {
+            Screen::Board
+        } else if self.gantt {
+            Screen::Gantt
+        } else {
+            Screen::List
         }
     }
 }
@@ -1041,6 +1119,14 @@ impl Browse {
             Go(_) | Step(_) if c.stats || c.wiki => Ok(()),
             Raw if c.wiki => Ok(()),
             _ if c.stats || c.wiki => Err(Off::Quiet),
+            // 간트의 날짜 축은 간트에서만 — 포커스와 상관없다: 상세를 읽다가도 축은 옮긴다(moai-i4hf.27r).
+            Gantt(_) if c.gantt => Ok(()),
+            Gantt(_) => Err(Off::Quiet),
+            // 계획 옮기기는 **목록 칸의 줄에** 쓴다 — 상세를 읽다 누른 `>` 가 보이지 않는 막대를 옮기면 안 된다. 한눈 보기의
+            // 줄은 남의 프로젝트라 그 안으로 들어가서 옮긴다.
+            Plan(_) if !c.gantt || !c.list_focus => Err(Off::Quiet),
+            Plan(_) if c.layer => Err(Off::Why(say(c.lang, "tui.gantt.layer").into())),
+            Plan(_) => Ok(()),
             Enter | Leave | Expand | Collapse | ExpandAll if !c.list_focus => Err(Off::Quiet),
             // **보드에서 `h`·`l` 은 옆 칸이고 `Tab` 은 펼칠 것이 없다**(moai-9nfw) — 보드에는 카드만 서고 묶음 줄이
             // 없다. 펼침의 켜짐(`group`·`expanded`)으로 가르면 카드 위에서 `l` 이 늘 꺼져 옆 칸으로 못 간다.
@@ -1264,6 +1350,7 @@ impl Browse {
             Unregister => say(c.lang, "tui.act.unregister"),
             Go(Screen::List) => say(c.lang, "tui.act.list"),
             Go(Screen::Board) => say(c.lang, "tui.act.board"),
+            Go(Screen::Gantt) => say(c.lang, "tui.act.gantt"),
             Go(Screen::Stats) => say(c.lang, "tui.act.stats"),
             Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
@@ -1287,6 +1374,18 @@ impl Browse {
             Timezone => say(c.lang, "tui.act.timezone"),
             Mouse => say(c.lang, "tui.act.mouse"),
             Read | ReadAll | ReadGroup => say(c.lang, "tui.act.read"),
+            Gantt(Pan::ZoomIn) => say(c.lang, "tui.act.gantt_zoom_in"),
+            Gantt(Pan::ZoomOut) => say(c.lang, "tui.act.gantt_zoom_out"),
+            Gantt(Pan::Left) => say(c.lang, "tui.act.gantt_left"),
+            Gantt(Pan::Right) => say(c.lang, "tui.act.gantt_right"),
+            Gantt(Pan::PageLeft) => say(c.lang, "tui.act.gantt_page_left"),
+            Gantt(Pan::PageRight) => say(c.lang, "tui.act.gantt_page_right"),
+            Gantt(Pan::Today) => say(c.lang, "tui.act.gantt_today"),
+            Gantt(Pan::Fit) => say(c.lang, "tui.act.gantt_fit"),
+            Plan(Nudge::Earlier) => say(c.lang, "tui.act.nudge_earlier"),
+            Plan(Nudge::Later) => say(c.lang, "tui.act.nudge_later"),
+            Plan(Nudge::StartEarlier) => say(c.lang, "tui.act.nudge_start_earlier"),
+            Plan(Nudge::StartLater) => say(c.lang, "tui.act.nudge_start_later"),
         }
     }
 }
@@ -1457,6 +1556,32 @@ pub enum Stat {
     Bucket,
     Close,
 }
+
+/// 간트 배치의 키(moai-i4hf.27r·9xi) — 날짜 축과 계획 옮기기. **탐색의 표([`BROWSE`])와 따로다**(moai-l80o, 사람 결정
+/// 2026-10-25): 간트에서는 이 표를 먼저 찾고(`menu::feed`), 목록·보드에서는 안 찾는다. 그래서 겹침도 이 표 안에서만
+/// 센다 — `keys.toml` 의 `[browse] expand = "L"` 은 목록·보드에서 그대로 살고, 간트에서는 `L` 이 간트의 키다.
+///
+/// **한 키씩만 받는다** — 간트에서 이 표가 탐색의 표보다 먼저 한 키로 찾기 때문이다. 키 열을 주면 그 줄은 첫 키에서
+/// 탐색의 표로 넘어가 영영 안 듣는다. 바로 누르는 키라 이동키처럼 손이 자주 간다. `+` 는 `=` 와 같다 — 같은 자판의
+/// Shift 다. 기한만 옮기는 것은 끌기(오른쪽 끝)다.
+pub const GANTT: &[Bind<Browse>] = {
+    use Browse::{Gantt, Plan};
+    &[
+        row!(Gantt(Pan::ZoomOut), Some("-"), Key::plain('-')),
+        row!(Gantt(Pan::ZoomIn), Some("="), Key::plain('=')),
+        row!(Gantt(Pan::ZoomIn), None, Key::plain('+')),
+        row!(Gantt(Pan::Left), Some("H"), Key::plain('H')),
+        row!(Gantt(Pan::Right), Some("L"), Key::plain('L')),
+        row!(Gantt(Pan::PageLeft), Some("["), Key::plain('[')),
+        row!(Gantt(Pan::PageRight), Some("]"), Key::plain(']')),
+        row!(Gantt(Pan::Today), Some("t"), Key::plain('t')),
+        row!(Gantt(Pan::Fit), Some("z"), Key::plain('z')),
+        row!(Plan(Nudge::Earlier), Some("<"), Key::plain('<')),
+        row!(Plan(Nudge::Later), Some(">"), Key::plain('>')),
+        row!(Plan(Nudge::StartEarlier), Some("{"), Key::plain('{')),
+        row!(Plan(Nudge::StartLater), Some("}"), Key::plain('}')),
+    ]
+};
 
 /// **`q` 는 안 둔다** — 고르기 창에서 걷은 까닭(moai-en4u)이 여기도 선다: 탐색에서 `q` 가 아무것도 안 하는데
 /// 창에서만 닫으면 같은 글자가 자리마다 뜻이 갈린다. 닫는 것은 다른 창과 같은 Esc 다.
@@ -2134,6 +2259,7 @@ mod tests {
         }
         each("anywhere", ANYWHERE);
         each("browse", BROWSE);
+        each("gantt", GANTT);
         each("prompt", PROMPT);
         each("pick", PICK);
         each("path", PATH);
@@ -2143,6 +2269,23 @@ mod tests {
         each("stats", STATS);
         each("wiki", WIKI);
         each("links", LINKS);
+    }
+
+    /// **기본 간트 키는 기본 탐색 키를 안 가린다**(moai-l80o 리뷰) — 간트에서는 [`GANTT`] 를 먼저 한 키로 찾으니, 두 표가
+    /// 따로 서면서 놓친 겹침(같은 표일 때 위 시험이 재던 것)을 여기서 잰다. 사람의 줄은 `keymap` 이 런타임에 잰다.
+    #[test]
+    fn the_default_gantt_keys_hide_no_default_browse_key() {
+        for g in GANTT {
+            for b in BROWSE {
+                let (gk, bk) = (g.seq[0], b.seq[0]);
+                assert!(
+                    !bk.matches(gk.event()) && !gk.matches(bk.event()),
+                    "간트의 {:?} 가 탐색의 {:?} 를 가린다",
+                    g.act,
+                    b.act
+                );
+            }
+        }
     }
 
     /// **화면은 `SPC g` 가 고른다**(moai-z46r, 2026-10-04 사용자 결정) — `l` 목록·`b` 보드·`s` 통계. 옛 자리
@@ -2224,6 +2367,7 @@ mod tests {
         }
         each("anywhere", ANYWHERE);
         each("browse", BROWSE);
+        each("gantt", GANTT);
         each("prompt", PROMPT);
         each("pick", PICK);
         each("path", PATH);
@@ -2567,6 +2711,8 @@ mod tests {
     const LIST: &str = "j and k or the arrow keys move";
     /// SPC 메뉴 문단.
     const SPC: &str = "The rest lives in the menu";
+    /// 간트 배치 문단 — 날짜 축 키가 여기 선다(moai-i4hf.27r).
+    const GANTT_PAR: &str = "SPC g g lays the same rows out as a gantt chart";
     /// 고르기 창·경로 칸·목록에서 빼기 문단.
     const PICKER: &str = "SPC p a opens a window";
     /// 생각 담기 문단.
@@ -2621,6 +2767,7 @@ mod tests {
     const SECTIONS: &[(&str, &[&str])] = &[
         ("ANYWHERE", &[SPC]),
         ("BROWSE", &[LIST, SPC]),
+        ("GANTT", &[GANTT_PAR]),
         ("PICK", &[PICKER]),
         ("JOT", &[JOTTING]),
         ("CONFIRM", &[PICKER, JOTTING]),
@@ -2663,9 +2810,10 @@ mod tests {
 
     /// `help` 에서 표마다 제 범위([`SENTENCES`]·[`SECTIONS`])가 안 대는 이름 붙은 키 — `표: 이름`.
     fn missing_in(help: &str) -> Vec<String> {
-        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 12] = [
+        let tables: [(&str, Vec<(&'static str, &'static [Key])>); 13] = [
             ("ANYWHERE", named(ANYWHERE)),
             ("BROWSE", named(BROWSE)),
+            ("GANTT", named(GANTT)),
             ("MENU", named(MENU)),
             ("PROMPT", named(PROMPT)),
             ("PICK", named(PICK)),
@@ -2753,11 +2901,12 @@ mod tests {
         every(k).contains(&Lookup::Pending)
     }
 
-    fn every(k: &[KeyEvent]) -> [Lookup<()>; 12] {
+    fn every(k: &[KeyEvent]) -> [Lookup<()>; 13] {
         [
             bare(lookup(ANYWHERE, k)),
             bare(lookup(MENU, k)),
             bare(lookup(BROWSE, k)),
+            bare(lookup(GANTT, k)),
             bare(lookup(PICK, k)),
             bare(lookup(JOT, k)),
             bare(lookup(PROMPT, k)),

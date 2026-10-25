@@ -286,7 +286,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -360,15 +360,17 @@ BODY
 Several at once (`--from`):
 
 moai add --from - <<'PLAN'
-# Storage layer @2026-10-31
-- [p1] write atomically #bug @2026-10-20
-- recover a truncated line
+# Storage layer @2026-10-25~2026-10-31
+- [p1] write atomically #bug @2026-10-26~2026-10-28
+- recover a truncated line @2026-10-29
 - \[WIP] issue \#12
 PLAN
 
   A `#` line is an epic, a `-` line is an issue of the epic above it.
-  [pN], #tag and @YYYY-MM-DD (the deadline) are optional. --due goes on
-  each epic the plan creates that carries no @date of its own.
+  [pN], #tag and @date are optional. @YYYY-MM-DD is a deadline,
+  @YYYY-MM-DD~YYYY-MM-DD a start to a deadline, @YYYY-MM-DD~ a start only.
+  --due and --start go on each epic the plan creates that carries no
+  @date of its own.
   Put \ in front of a leading [, a trailing #word or @digit in a title.
   --dry-run keeps a heredoc typo from creating six wrong issues.
 
@@ -500,9 +502,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -793,7 +796,7 @@ Options:
       --milestone <id|none>  Move the milestone (`none` clears its own field)
   -p, --priority <0-3>       
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
-      --start <date|none>    Start of a milestone. `none` clears it
+      --start <date|none>    Start, a day or `+N` days. `none` clears it
       --due <date|none>      Deadline, a day or `+N` days. `none` clears it
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
@@ -1118,7 +1121,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1297,9 +1300,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1422,7 +1426,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1601,9 +1605,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -1726,7 +1731,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -1905,9 +1910,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2051,7 +2057,7 @@ Options:
           Assignee. The creator when absent; `none` clears it, `me` is you
 
       --start <date>
-          Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+          Start, `YYYY-MM-DD` or `+N` days from today. Any row
 
       --due <date>
           Deadline, `YYYY-MM-DD` or `+N` days from today. Not past a parent
@@ -2230,9 +2236,10 @@ Order and paging:
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer (SPC f) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2567,6 +2574,7 @@ Order:
     SPC p a  register            SPC p d  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     SPC g l  list                SPC g b  board — described below
+    SPC g g  gantt — the list opened out beside a date axis (see below)
     SPC g s  statistics — the numbers `moai stats` gives, drawn (see below)
     SPC g w  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
@@ -2713,6 +2721,44 @@ Order:
   shown, together. The cursor stands on a header too — k from the project's
   top card in a column goes up to it — and there l unfolds, h folds, Tab
   unfolds everything and Enter goes in, as in the list.
+
+  SPC g g lays the same rows out as a gantt chart: the list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right.
+  It is the list's layout too — the cursor, the filter, the view, search and
+  the detail are the list's — but it holds its own folds: it opens with
+  everything unfolded, h, l and Tab fold and unfold only inside it,
+  and the list keeps the folds it had. Coming back to the list opens the
+  folder that holds the row you stood on. The detail stands below the gantt at
+  first; SPC o d there moves the gantt's detail only, for this session.
+  The planned bar (░, ▒ on a group)
+  runs from the start to the deadline and ◆ marks the row's own deadline; █
+  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
+  a deferred row's plan, and ▼ over a dotted line marks today.
+  Groups that wrote no days of their own span their members' days. Planned days
+  are calendar days; actual times are shown in your time zone.
+  Keys that stand only in the gantt move the date axis:
+    = -  zoom in and out — hour, day, week, month
+    H L  one cell earlier and later   [ ]  a page earlier and later
+    t    today in the middle           z    fit every row on one screen
+  It opens fitted, and stays fitted as rows come and go until you move it.
+  These keys are under [gantt] in keys.toml and win only inside the gantt: a
+  [browse] line that uses one of them still works in the list and the board.
+  On a narrow window the rows give up their columns first and then the dates
+  are hidden, which the header says; a low window folds the ▼ row away.
+  Moving a plan writes the row, the way `moai edit --start --due` does. The
+  keys move the cursor row's plan by a day: < and > the whole plan,
+  { and } only its start.
+  With the mouse, drag a bar's middle to move the plan, its left end to move
+  the start and its right end to move the deadline; it snaps to whole days and
+  is written once, when you let go. Clicking an empty day on a row with no
+  planned days plans that one day. Groups whose bar spans their members are
+  not moved — move the members. When a move is refused (a start after the
+  deadline, a day past the deadline above) the refusal is on the banner; a
+  move that went through names the `moai edit` line that puts it back.
+  Clicking a row puts the cursor on it and the wheel scrolls the rows; a
+  sideways wheel, or Shift and the wheel, slides the dates, and so does
+  dragging the date header. Dragging the line between the rows and the dates
+  widens the rows, and that width is kept under [tui] as gantt_label.
 
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a

@@ -49,12 +49,12 @@ its own: it is read from its members. More in
 ## Deadline
 
 The day a row is due — its own `due_on` field, set with `--due YYYY-MM-DD`, `--due +N`
-(N days from today) or `@YYYY-MM-DD` at the end of a [plan](#plan) line. Any row can
+(N days from today) or `@YYYY-MM-DD` at the end of a [plan](#plan) line (`@YYYY-MM-DD~YYYY-MM-DD` adds the start). Any row can
 carry one, and it is asked about but never required. It cannot pass the deadline of
 the [milestone](#milestone), [epic](#epic) or parent above it: such a write is refused,
 and a row the one above overtook by being pulled in is a [warning](#warning),
 `due_beyond_parent`. It is not inherited — a member is bounded by its epic's deadline
-without carrying it. `moai due apply` raises an open, not deferred issue's or backlog
+without carrying it. A row's planned start (`--start`, `starts_on`) is held to the same ceiling: a start later than the deadline above it is refused, and one overtaken by pulling that deadline in is the same `due_beyond_parent` warning. A start earlier than the parent's start is never refused. `moai due apply` raises an open, not deferred issue's or backlog
 item's priority as the deadline it follows nears — the earliest of its own and those of
 the rows above it, a parent already closed lending none (one day left or less, today and
 past included, `p0`; two or less `p1`; seven or less `p2`), never lowers it, and leaves a
@@ -153,8 +153,8 @@ closing by itself.
 
 ## Milestone
 
-A [group](#group) that is usually a release, and the one row that carries a start
-date (`--start`) as well as a [deadline](#deadline). A milestone's deadline that has
+A [group](#group) that is usually a release. Like any row it carries a start
+date (`--start`) and a [deadline](#deadline). A milestone's deadline that has
 passed or falls due soon is one [warning](#warning) line, nothing more. See [running milestone](#running-milestone).
 
 ## Milestone branch
@@ -207,7 +207,8 @@ The first pick-up stamps `started_at`. More in
 
 Markdown that creates an epic and its issues in one go — `# Epic title`, then
 one `- [p1] issue title #tag` line per issue, any line ending in an optional
-`@YYYY-MM-DD` [deadline](#deadline) — fed to `moai add --from -`
+`@YYYY-MM-DD` [deadline](#deadline), `@YYYY-MM-DD~YYYY-MM-DD` (start to deadline) or
+`@YYYY-MM-DD~` (start only) — fed to `moai add --from -`
 (`--dry-run` shows it first) or to `moai backlog promote`. Show it to the person
 once, before writing code. More in
 [the workflow](workflow.md#plan-something-bigger).

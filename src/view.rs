@@ -2126,15 +2126,13 @@ pub struct Due {
 
 /// [`Due`] 를 짓는다. 둘 다 없으면 없다 — 세울 줄이 없다.
 pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<Due> {
-    // **종료 기한은 모든 줄의 것이다**(moai-ghkp.kz7) — 쓰기가 정한 규칙을 따른다. 시작 기한은
-    // 여전히 마일스톤 줄에만 서므로(`Issue::validate_fields` 의 `Field::StartsOn`), 다른 종류의 줄에
-    // 남은 값(손으로 푼 충돌·머지 드라이버가 넘긴 낡은 줄)은 그리지 않는다 — 그리면 쓰기가 안 받는
-    // 값이 화면에 선다(moai-x04r.fn4 가 종료 기한에 대해 세운 그 까닭이다).
+    // **시작도 종료 기한도 모든 줄의 것이다**(moai-ghkp.kz7 이 종료를, moai-xf0p.6d5 가 시작을 열었다)
+    // — 쓰기가 정한 규칙을 따른다(moai-x04r.fn4 의 까닭: 쓰기가 안 받는 값을 그리지 않는다).
     //
     // **보드가 세는 것과 같아지려는 줄이 아니다**(리뷰). 보드(`report::Dues`)는 종류·계획 밖·
     // 가려짐·닫힌 칸으로 거르는데 여기서는 **일부러** 안 본다: 닫히거나 미뤄 둔 줄의 날은 사람이
     // 적어 둔 이력이라, 보드가 조용한 것과 맞추려고 지우면 그 값이 어느 화면에도 안 서게 된다.
-    let start = i.starts_on.as_deref().filter(|_| i.kind == Kind::Milestone);
+    let start = i.starts_on.as_deref();
     let due = i.due_on.as_deref();
     if start.is_none() && due.is_none() {
         return None;
@@ -2144,10 +2142,11 @@ pub fn due_of(i: &Issue, now: &str, z: &crate::tz::Zone, lang: Lang) -> Option<D
     // (`report::Dues::split`, moai-fgjj 가 `status_in` 에서 그리로 옮겼다). 둘이 갈리면 보드는
     // "지남" 이라 세고 이 줄은 "오늘까지" 라 말한다.
     let left = due.and_then(|d| crate::model::days_until(d, &z.shift(now)));
-    // 시작 기한이 설 수 없는 줄은 날 하나만 든다 — `— → 2026-09-30` 의 빈 자리는 "아직 안 정했다"
-    // 로 읽히는데, 그 줄에는 정할 자리가 없다.
-    let span = match i.kind {
-        Kind::Milestone => format!("{} → {}", start.unwrap_or(dash), due.unwrap_or(dash)),
+    // 마일스톤은 늘 `시작 → 기한` 으로 그린다(빈 자리는 `—`). 다른 줄은 시작을 적은 줄만 그렇게 그리고,
+    // 기한만 든 줄은 날 하나만 든다 — 시작을 한 번도 안 적은 줄의 `— → 2026-09-30` 은 쓰는 사람이 없는
+    // 자리를 비워 둔 것처럼 읽힌다.
+    let span = match (i.kind, start) {
+        (Kind::Milestone, _) | (_, Some(_)) => format!("{} → {}", start.unwrap_or(dash), due.unwrap_or(dash)),
         _ => due.unwrap_or(dash).to_string(),
     };
     Some(Due { span, left: left.map(|d| due_tail(d, lang)), past: left.is_some_and(|d| d < 0) })
@@ -3286,6 +3285,16 @@ pub fn invalid(lang: Lang, at: &crate::store::At, why: &crate::model::Invalid) -
     invalid_at(lang, &at, why)
 }
 
+/// 천장이 된 조상을 가리키는 말 — 위계 거절 셋(기한·시작·둘 다)이 한 자로 짓는다. **이번 쓰기가 짓는 조상은 제목으로**
+/// 가리킨다 — 거절당한 줄 자신을 가리키는 말(`invalid.unwritten`)과 같은 자다(moai-1rkl, 리뷰). 그 id 는 거절 뒤에
+/// 어디에도 안 남는다. 갈래마다 적던 판은 이 규칙을 고치는 날 한 거절만 옛 말로 남을 길이 열려 있었다.
+fn beyond_whom(lang: Lang, above: &str, above_new: bool) -> String {
+    match above_new {
+        true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
+        false => above.to_string(),
+    }
+}
+
 /// [`invalid`] 의 속 — 가리키는 말이 이미 지어졌을 때.
 fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
     use crate::model::{Field, Invalid};
@@ -3318,17 +3327,20 @@ fn invalid_at(lang: Lang, at: &str, why: &crate::model::Invalid) -> String {
         Invalid::Date { id, field: f, value } => {
             fill(say(lang, "invalid.date"), &[("id", id), ("field", field(f)), ("value", value)])
         }
-        Invalid::DateNotMilestone { id, field: f } => {
-            fill(say(lang, "invalid.date_not_milestone"), &[("id", id), ("field", field(f))])
-        }
         Invalid::DueBeyond { due, above, above_new, above_due } => {
-            // 이번 쓰기가 짓는 조상은 제목으로 가리킨다 — 거절당한 줄 자신을 가리키는 말(`invalid.unwritten`)과
-            // 같은 자다(moai-1rkl, 리뷰). 그 id 는 거절 뒤에 어디에도 안 남는다.
-            let above = match above_new {
-                true => fill(say(lang, "invalid.unwritten"), &[("title", above)]),
-                false => above.clone(),
-            };
+            let above = beyond_whom(lang, above, *above_new);
             fill(say(lang, "invalid.due_beyond"), &[("due", due), ("above", &above), ("above_due", above_due)])
+        }
+        Invalid::StartBeyond { start, above, above_new, above_due } => {
+            let above = beyond_whom(lang, above, *above_new);
+            fill(say(lang, "invalid.start_beyond"), &[("start", start), ("above", &above), ("above_due", above_due)])
+        }
+        Invalid::DatesBeyond { start, due, above, above_new, above_due } => {
+            let above = beyond_whom(lang, above, *above_new);
+            fill(
+                say(lang, "invalid.dates_beyond"),
+                &[("start", start), ("due", due), ("above", &above), ("above_due", above_due)],
+            )
         }
         Invalid::DateOrder { starts_on, due_on } => {
             fill(say(lang, "invalid.date_order"), &[("starts_on", starts_on), ("due_on", due_on)])
@@ -5160,11 +5172,10 @@ mod tests {
         assert!(back.contains("(1일 남음)"), "{back}");
     }
 
-    /// **종료 기한은 모든 줄에 선다**(moai-ghkp.kz7) — 쓰기가 받으므로 상세도 그린다. **시작 기한은
-    /// 마일스톤 줄에만 선다**(moai-x04r.fn4) — 쓰기가 다른 종류에 거절하는 값이라, 손으로 푼 충돌이
-    /// 남긴 것이 서면 한 줄이 두 표면에서 다르게 읽힌다.
+    /// **두 날짜는 모든 줄에 선다**(moai-ghkp.kz7 이 종료를, moai-xf0p.6d5 가 시작을 열었다) — 쓰기가
+    /// 받으므로 상세도 그린다. 기한만 든 줄은 날 하나만, 시작을 적은 줄은 `시작 → 기한` 이다.
     #[test]
-    fn a_deadline_is_drawn_on_every_row_and_a_start_on_a_milestone_only() {
+    fn a_start_and_a_deadline_are_drawn_on_every_row() {
         let now = "2026-09-23T00:00:00Z";
         let z = crate::tz::Zone::utc();
         let mut stone = issue("argos-0001", "v0.1", "todo");
@@ -5178,15 +5189,19 @@ mod tests {
             let mut row = issue("argos-0002", "기한 든 줄", "todo");
             row.kind = kind;
             row.due_on = Some("2026-09-20".into());
-            // 손으로 푼 충돌이 남긴 시작 기한 — 그리지 않는다.
-            row.starts_on = Some("2026-09-05".into());
             let d = due_of(&row, now, &z, Lang::Ko).unwrap_or_else(|| panic!("{kind:?} 줄의 기한이 빠졌다"));
             assert_eq!(d.span, "2026-09-20", "{kind:?}");
             assert!(d.past, "{kind:?}");
 
-            // 시작만 남은 줄은 그릴 것이 없다.
+            row.starts_on = Some("2026-09-05".into());
+            let d = due_of(&row, now, &z, Lang::Ko).unwrap_or_else(|| panic!("{kind:?} 줄의 시작이 빠졌다"));
+            assert_eq!(d.span, "2026-09-05 → 2026-09-20", "{kind:?}");
+
+            // 시작만 적은 줄도 선다 — 기한 자리는 `—` 이고 남은 날수는 없다.
             row.due_on = None;
-            assert!(due_of(&row, now, &z, Lang::Ko).is_none(), "{kind:?} 줄에 시작 기한이 섰다");
+            let d = due_of(&row, now, &z, Lang::Ko).unwrap_or_else(|| panic!("{kind:?} 줄의 시작이 빠졌다"));
+            assert_eq!(d.span, "2026-09-05 → —", "{kind:?}");
+            assert!(d.left.is_none() && !d.past, "{kind:?}");
         }
     }
 
