@@ -1030,7 +1030,7 @@ mod tests {
         a.hit("SPC g g");
         let screen = draw::tests::render(&mut a, 140, 20).join("\n");
         assert!(screen.contains("argos-0003"), "고정 칸에 줄이 안 섰다\n{screen}");
-        assert!(screen.contains("Oct"), "날짜 머리가 안 섰다\n{screen}");
+        assert!(screen.contains("2026년 10월"), "날짜 머리가 안 섰다\n{screen}");
         // 간트 칸만 본다 — 오른쪽 상세의 진척 막대도 `░` 다.
         let pane = |id: &str| {
             let left = |l: &str| l.split("┃│").next().unwrap().to_string();
