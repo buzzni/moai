@@ -125,16 +125,16 @@ fn overdue_runs_from_the_day_after_due_to_now_and_ends_in_a_bang() {
     r.due = Some(103 * DAY);
     r.overdue = true;
     let b = render(&[r], Zoom::Week, 107 * DAY + H);
-    assert_eq!(line(&b, 0), " ░░▓▓▓▓!");
+    assert_eq!(line(&b, 0), " ░░▓▓▓▓▓!");
     let red = Palette::default().overdue.fg.unwrap();
     assert_eq!(cell(&b, 3, 0).fg, red);
-    assert_eq!(cell(&b, 7, 0).fg, red);
-    // 기한과 지금이 같은 칸이면 `!` 하나만 선다.
+    assert_eq!(cell(&b, 8, 0).fg, red);
+    // 기한과 지금이 같은 칸이면 그 칸이 `▓`, 다음 칸이 `!` 다.
     let mut r = planned(101 * DAY, 103 * DAY);
     r.due = Some(103 * DAY);
     r.overdue = true;
     let b = render(&[r], Zoom::Week, 103 * DAY + H);
-    assert_eq!(line(&b, 0), " ░░!");
+    assert_eq!(line(&b, 0), " ░░▓!");
 }
 
 #[test]
@@ -237,7 +237,7 @@ fn ascii_glyphs_keep_every_mark() {
     r.due = Some(103 * DAY);
     r.overdue = true;
     let b = render_with(&[r], Zoom::Week, 106 * DAY + H, |g, _| g.glyphs = Glyphs::ascii());
-    assert_eq!(line(&b, 0), " ..%%%!");
+    assert_eq!(line(&b, 0), " ..%%%%!");
     assert!(line(&b, 0).is_ascii());
     // 끝 조각 없이: 반 칸 넘게 걸친 칸만 채운다.
     let b = render_with(&[actual(100 * DAY + 9 * H, Some(100 * DAY + 26 * H))], Zoom::Day, LONG_AGO, |g, _| {
@@ -267,7 +267,7 @@ fn what_is_drawn_stays_inside_what_hit_testing_covers() {
         let b = render(&rows, zoom, now);
         let st = GanttState::new(Axis::new(zoom, ORIGIN));
         for (i, r) in rows.iter().enumerate() {
-            let (c0, c1) = bar_cells(&st, r.span(now).unwrap());
+            let (c0, c1) = r.cells(&st.axis, now).unwrap();
             for col in 0..W {
                 let s = cell(&b, col, i as u16).symbol();
                 // 잘림 표식은 화면 밖 막대를 가리키는 힌트라 맞히기 칸 밖에도 설 수 있다.

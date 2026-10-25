@@ -66,8 +66,9 @@ pub enum Part {
 pub enum Hit {
     /// 위젯 밖이거나, 마지막 줄 아래, 줄이 아닌 자리.
     None,
-    /// 막대. 한 칸짜리는 `Body`(끝을 잡을 수 없다), 두 칸은 `Start`·`End`, 세 칸 이상은 양 끝 한 칸씩이
-    /// `Start`·`End` 고 나머지가 `Body` 다. 화면 밖으로 잘린 끝은 끝이 아니라서 `Body` 다.
+    /// 막대. 한 칸짜리 계획은 `Body`(끝을 잡을 수 없다), 두 칸은 `Start`·`End`, 세 칸 이상은 양 끝 한 칸씩이
+    /// `Start`·`End` 고 나머지가 `Body` 다 — 계획 막대에서만 잰다([`part_at`]). 계획 밖(실제·기한 넘김)과
+    /// 화면 밖으로 잘린 끝은 `Body` 다.
     Bar { row: usize, part: Part },
     /// 막대 없는 날짜 칸. `day` 는 그 칸이 든 날 번호다.
     Empty { row: usize, day: i64 },
@@ -108,10 +109,37 @@ impl GanttRow {
             add(d - 1, d);
         }
         if let (Some(d), true) = (self.due, self.overdue) {
-            // `!` 는 지금이 든 칸에 서므로 끝을 1초 넘겨 그 칸을 포함시킨다.
+            // `▓` 는 지금이 든 칸까지 간다 — 끝을 1초 넘겨 그 칸을 포함시킨다. 그 다음 칸의 `!` 는
+            // 시각이 아니라 칸에서 셈하므로 [`cells`](Self::cells) 가 더한다.
             add(d, now.max(d) + 1);
         }
         acc
+    }
+}
+
+impl GanttRow {
+    /// 기한 넘김의 칸 `(▓ 첫 칸, ▓ 끝 칸)`(양끝 포함). `▓` 는 기한 끝 다음 칸부터 지금이 든 칸까지고, `!` 는
+    /// 그 끝 칸 **다음** 칸이다(시안 e7ow `▓▓▓!`). 그리기와 [`cells`](Self::cells) 가 이 한 곳을 읽는다.
+    pub(crate) fn overdue_cells(&self, axis: &crate::Axis, now: i64) -> Option<(i64, i64)> {
+        let due = self.due.filter(|_| self.overdue)?;
+        // 기한 끝이 칸 경계면 다음 칸이고, 경계가 아니면(Month) 기한이 든 칸에서 시작한다.
+        let a = axis.cell_of_secs(due).floor() as i64;
+        Some((a, (axis.cell_of_secs(now).floor() as i64).max(a)))
+    }
+
+    /// 맞히기가 보는 막대의 칸 `[첫 칸, 끝 칸)`: [`span`](Self::span) 을 칸으로 옮기고, 기한 넘김 줄은 `!`
+    /// 칸까지 넓힌다. `!` 가 지금이 든 칸 다음에 서는데 그 칸은 시각으로 말할 수 없어서(확대마다 크기가
+    /// 다르다) 시각 구간인 `span` 이 아니라 칸에서 더한다.
+    pub fn cells(&self, axis: &crate::Axis, now: i64) -> Option<(i64, i64)> {
+        let (c0, c1) = span_cells(axis, self.span(now)?);
+        let c1 = self.overdue_cells(axis, now).map_or(c1, |(_, b)| c1.max(b + 2));
+        Some((c0, c1))
+    }
+
+    /// 끌어서 바뀌는 것은 **계획**(시작·기한)이다. 계획 막대(없으면 `◆` 칸)의 칸 `[첫 칸, 끝 칸)`.
+    fn plan_cells(&self, axis: &crate::Axis) -> Option<(i64, i64)> {
+        let span = self.planned.map(|(s, e)| (s, e.max(s))).or_else(|| self.due_mark().map(|d| (d - 1, d)))?;
+        Some(span_cells(axis, span))
     }
 }
 
@@ -125,6 +153,18 @@ pub fn span_cells(axis: &crate::Axis, span: (i64, i64)) -> (i64, i64) {
 /// [`span_cells`] 를 보기 상태의 축으로.
 pub fn bar_cells(state: &GanttState, span: (i64, i64)) -> (i64, i64) {
     span_cells(&state.axis, span)
+}
+
+/// 막대 안의 칸 `col` 이 어느 부분인가. 끌기는 계획을 바꾸므로 `Start`·`End` 는 **계획 막대**(`plan`)의
+/// 첫·끝 칸에서만 잰다: 한 칸짜리 계획은 `Body`, 두 칸은 `Start`·`End`, 셋 이상은 양 끝 한 칸씩이
+/// `Start`·`End` 다. 계획 밖의 칸(실제만 있는 부분, 기한 넘김의 `▓`·`!`)과 계획 없는 실제 막대는 통째로
+/// `Body` 다 — 거기를 끌면 계획 전체가 움직인다. 화면 밖으로 잘린 끝은 칸이 안 보여 저절로 `Body` 다.
+fn part_at(plan: Option<(i64, i64)>, col: i64) -> Part {
+    match plan {
+        Some((p0, p1)) if p1 - p0 >= 2 && col == p0 => Part::Start,
+        Some((p0, p1)) if p1 - p0 >= 2 && col == p1 - 1 => Part::End,
+        _ => Part::Body,
+    }
 }
 
 /// `(x, y)` 에 무엇이 있는가. `now` 는 끝나지 않은 실제와 기한 넘김의 끝이다. `rows` 는 부르는 쪽 목록 전체이고, 본문 첫 줄이 `state.first_row` 다.
@@ -150,21 +190,10 @@ pub fn hit(area: Rect, state: &GanttState, rows: &[GanttRow], now: i64, x: u16, 
         return Hit::Label { row };
     }
     let col = i64::from(x - l.dates_body.x);
-    if let Some(span) = r.span(now) {
-        let (c0, c1) = bar_cells(state, span);
-        if (c0..c1).contains(&col) {
-            let n = c1 - c0;
-            let part = if n < 2 {
-                Part::Body
-            } else if col == c0 {
-                Part::Start
-            } else if col == c1 - 1 {
-                Part::End
-            } else {
-                Part::Body
-            };
-            return Hit::Bar { row, part };
-        }
+    if let Some((c0, c1)) = r.cells(&state.axis, now)
+        && (c0..c1).contains(&col)
+    {
+        return Hit::Bar { row, part: part_at(r.plan_cells(&state.axis), col) };
     }
     Hit::Empty { row, day: state.axis.day_at_cell(col as f64) }
 }
@@ -266,6 +295,34 @@ mod tests {
         let s = st(Zoom::Month, o);
         assert_eq!(hit(area, &s, &rows, 0, 16, 5), Hit::Bar { row: 0, part: Part::Body });
         assert_eq!(hit(area, &s, &rows, 0, 17, 5), Hit::Empty { row: 0, day: 107 });
+    }
+
+    #[test]
+    fn drag_handles_are_measured_on_the_plan_not_on_the_overdue_tail() {
+        let s = st(Zoom::Week, 100 * DAY);
+        // 계획 101..104(칸 1..4), 기한 104, 지금 108 → `▓` 칸 4..=8, `!` 칸 9.
+        let r = GanttRow { due: Some(104 * DAY), overdue: true, ..row(101 * DAY, 104 * DAY) };
+        let now = 108 * DAY + 3_600;
+        assert_eq!(r.cells(&s.axis, now), Some((1, 10)));
+        let at = |col: u16| hit(AREA, &s, std::slice::from_ref(&r), now, 16 + col, 5);
+        assert_eq!(at(0), Hit::Empty { row: 0, day: 100 });
+        assert_eq!(at(1), Hit::Bar { row: 0, part: Part::Start });
+        assert_eq!(at(2), Hit::Bar { row: 0, part: Part::Body });
+        assert_eq!(at(3), Hit::Bar { row: 0, part: Part::End });
+        for col in 4..=9 {
+            assert_eq!(at(col), Hit::Bar { row: 0, part: Part::Body }, "칸 {col}");
+        }
+        assert_eq!(at(10), Hit::Empty { row: 0, day: 110 });
+        // 계획 밖으로 나간 실제: 실제만 있는 칸은 Body, 계획의 끝은 여전히 End.
+        let r = GanttRow { actual: Some((101 * DAY, Some(108 * DAY))), ..row(101 * DAY, 104 * DAY) };
+        let at = |col: u16| hit(AREA, &s, std::slice::from_ref(&r), now, 16 + col, 5);
+        assert_eq!(at(1), Hit::Bar { row: 0, part: Part::Start });
+        assert_eq!(at(3), Hit::Bar { row: 0, part: Part::End });
+        assert_eq!(at(6), Hit::Bar { row: 0, part: Part::Body });
+        // 계획 없는 실제 막대는 통째로 Body.
+        let r = GanttRow { actual: Some((101 * DAY, Some(104 * DAY))), ..GanttRow::default() };
+        assert_eq!(hit(AREA, &s, std::slice::from_ref(&r), now, 16 + 1, 5), Hit::Bar { row: 0, part: Part::Body });
+        assert_eq!(hit(AREA, &s, std::slice::from_ref(&r), now, 16 + 3, 5), Hit::Bar { row: 0, part: Part::Body });
     }
 
     #[test]

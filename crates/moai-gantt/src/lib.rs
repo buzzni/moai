@@ -138,7 +138,7 @@ impl Gantt<'_> {
         }
         let first = ctx.first_row;
         let vis = first..(first + usize::from(area.height)).min(self.rows.len());
-        let ext = |r: usize| self.rows.get(r)?.span(self.now).map(|s| span_cells(ctx.axis, s));
+        let ext = |r: usize| self.rows.get(r)?.cells(ctx.axis, self.now);
         let at = |row: usize, col: i64| -> Option<(u16, u16)> {
             let in_x = (0..i64::from(area.width)).contains(&col);
             let in_y = (first..first + usize::from(area.height)).contains(&row);

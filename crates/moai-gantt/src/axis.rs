@@ -139,9 +139,14 @@ impl Axis {
                 }
             })
             .collect();
+        let lower = self.labels_at(low, width, names);
+        // 오늘이 든 단위의 라벨 — 그 단위의 라벨이 폭에 안 들어 빠졌으면 없다(앞 라벨을 대신 칠하지 않는다).
+        let now_unit = low.floor(now);
+        let today_label = lower.iter().position(|(_, start)| *start == now_unit);
         Header {
             upper: self.labels(up, width, names),
-            lower: self.labels(low, width, names),
+            lower: lower.into_iter().map(|(l, _)| l).collect(),
+            today_label,
             weekend,
             today: self.today_col(now, width),
         }
@@ -149,10 +154,15 @@ impl Axis {
 
     /// 단위 하나의 라벨들. 보이는 폭(왼쪽이 잘렸으면 0 부터)에 통째로 안 들어가는 글은 뺀다.
     fn labels(&self, unit: Unit, width: u16, names: &Names) -> Vec<Label> {
+        self.labels_at(unit, width, names).into_iter().map(|(l, _)| l).collect()
+    }
+
+    /// [`labels`](Self::labels) 에 라벨이 속한 단위의 시작 시각을 곁들인다.
+    fn labels_at(&self, unit: Unit, width: u16, names: &Names) -> Vec<(Label, i64)> {
         let spc = self.zoom.secs_per_cell();
         let end = self.origin + i64::from(width) * spc;
         let col = |t: i64| self.cell_of_secs(t).round() as i64;
-        let mut out: Vec<Label> = Vec::new();
+        let mut out: Vec<(Label, i64)> = Vec::new();
         let mut free = 0i64; // 앞 라벨이 끝난 칸. 이보다 왼쪽에는 못 놓는다.
         let mut start = unit.floor(self.origin);
         while start < end {
@@ -162,7 +172,7 @@ impl Axis {
             let text = unit.text(start, names);
             let w = Span::raw(text.as_str()).width() as i64;
             if from + w <= to {
-                out.push(Label { col: from as u16, text });
+                out.push((Label { col: from as u16, text }, start));
                 free = from + w;
             }
             start = next;
@@ -185,6 +195,8 @@ pub struct Header {
     pub upper: Vec<Label>,
     /// 아래 줄: 작은 단위(날·ISO 주·달·3시간).
     pub lower: Vec<Label>,
+    /// 아래 줄에서 오늘이 든 단위의 라벨 번호. 라벨이 없으면 `None`.
+    pub today_label: Option<usize>,
     /// 칸마다 주말인가. Day·Hour 에서만 참이다 — 바탕만 바꾸는 꾸밈이다.
     pub weekend: Vec<bool>,
     /// 오늘 칸. 머리 아래 줄에 `▼`, 본문 빈 칸에는 `┊` 를 이 칸에 둔다(막대가 덮으면 막대가 이긴다).
@@ -197,6 +209,8 @@ pub struct HeaderStyle {
     pub label: Style,
     pub weekend: Style,
     pub today: Style,
+    /// 아래 줄에서 오늘이 든 단위의 라벨(시안의 `tday`).
+    pub today_label: Style,
 }
 
 /// 머리글 세 줄(위·아래·오늘)을 `area` 맨 위에 그린다. 높이가 모자라면 아래 줄부터 빠진다.
@@ -211,6 +225,12 @@ pub fn render_header(buf: &mut Buffer, area: Rect, h: &Header, st: &HeaderStyle)
     }
     if area.height > 1 {
         put(buf, area.y + 1, &h.lower);
+        if let Some(l) = h.today_label.and_then(|i| h.lower.get(i)).filter(|l| l.col < area.width) {
+            let w = Span::raw(l.text.as_str()).width().min(usize::from(area.width - l.col));
+            for x in l.col..l.col + w as u16 {
+                buf[(area.x + x, area.y + 1)].set_style(st.today_label);
+            }
+        }
     }
     for (c, we) in h.weekend.iter().enumerate().take(usize::from(area.width)) {
         if *we {
@@ -531,6 +551,25 @@ mod tests {
         assert_eq!(buf[(16, 2)].bg, Color::DarkGray);
         assert_eq!(buf[(15, 1)].bg, Color::Reset);
         assert_eq!(buf[(16, 0)].bg, Color::Reset, "위 줄은 주말 바탕을 안 받는다");
+    }
+
+    #[test]
+    fn the_label_of_the_unit_holding_today_gets_its_own_style_cell_by_cell() {
+        use ratatui::style::Color;
+        let a = Axis::new(Zoom::Day, d(2026, 10, 20) * DAY);
+        let h = a.header(48, d(2026, 10, 23) * DAY + 14 * 3_600, &Names::default());
+        assert_eq!(h.today_label, Some(3));
+        let st = HeaderStyle { today_label: Style::new().fg(Color::Red), ..Default::default() };
+        let mut buf = Buffer::empty(Rect::new(0, 0, 48, 3));
+        let area = buf.area;
+        render_header(&mut buf, area, &h, &st);
+        // "23" 은 칸 12·13 — 그 글자 칸만 붉고 이웃은 아니다.
+        let red: Vec<u16> = (0..48).filter(|x| buf[(*x, 1)].fg == Color::Red).collect();
+        assert_eq!(red, vec![12, 13]);
+        assert!((0..48).all(|x| buf[(x, 0)].fg != Color::Red && buf[(x, 2)].fg != Color::Red));
+        // 오늘이 화면 밖이면 아무 라벨도 칠하지 않는다.
+        let h = a.header(48, d(2026, 12, 1) * DAY, &Names::default());
+        assert_eq!(h.today_label, None);
     }
 
     #[test]

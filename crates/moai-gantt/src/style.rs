@@ -36,6 +36,8 @@ pub struct Palette {
     pub due: Style,
     /// 오늘 선(`┊`)과 머리글의 `▼`.
     pub today: Style,
+    /// 머리글 아래 줄에서 오늘이 든 날의 라벨.
+    pub today_label: Style,
     /// 화면 밖으로 잘림(`‹`·`›`).
     pub clip: Style,
     /// 주말 바탕(Day·Hour). 바탕만 바꾸는 꾸밈이라 글리프가 없어도 날은 머리글 라벨이 말한다.
@@ -63,6 +65,7 @@ impl Default for Palette {
             overdue: fg(Color::Red),
             due: Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD),
             today: fg(Color::Red),
+            today_label: Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
             clip: fg(Color::Cyan),
             weekend: Style::new().bg(Color::Indexed(235)),
             link: fg(Color::Magenta),
@@ -85,7 +88,7 @@ impl Palette {
     }
 
     pub(crate) fn header_style(&self) -> HeaderStyle {
-        HeaderStyle { label: self.header, weekend: self.weekend, today: self.today }
+        HeaderStyle { label: self.header, weekend: self.weekend, today: self.today, today_label: self.today_label }
     }
 }
 

@@ -2,7 +2,7 @@
 //! 빈 칸 → 주말 바탕 → 오늘 → 계획 → 실제 → 기한 넘김 → 표식 → 연결선(빈 칸에만).
 //!
 //! 막대가 차지하는 칸은 [`crate::GanttRow::span`] 과 [`crate::bar_cells`] 가 맞히기에 쓰는 것과
-//! 같은 합집합 안에 든다 — 시험이 그것을 견준다.
+//! 같은 합집합([`crate::GanttRow::cells`]) 안에 든다 — 시험이 그것을 견준다.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -76,16 +76,11 @@ pub(crate) fn row(buf: &mut Buffer, area: Rect, r: &GanttRow, c: &Ctx) {
     if let Some((s, e)) = r.actual {
         actual(buf, area, c, (cell(s), cell(e.unwrap_or(c.now).max(s))), pal.tone(r.tone));
     }
-    // 기한 넘김: 기한이 든 칸 다음부터 지금 칸까지 `▓`, 지금 칸이 `!`.
-    if r.overdue
-        && let Some(due) = r.due
-    {
-        // 기한 끝이 칸 경계면 다음 칸이고, 경계가 아니면(Month) 기한이 든 칸에서 시작한다.
-        let a = floor(due);
-        let b = floor(c.now).max(a);
-        for col in a.max(0)..=b.min(i64::from(area.width)) {
+    // 기한 넘김(시안 e7ow): 기한이 든 칸 다음부터 지금이 든 칸까지 `▓`, 그 다음 칸이 `!`.
+    if let Some((a, b)) = r.overdue_cells(c.axis, c.now) {
+        for col in a.max(0)..=(b + 1).min(i64::from(area.width)) {
             if let Some(x) = at(area, col) {
-                let ch = if col == b { g.overdue_end } else { g.overdue };
+                let ch = if col > b { g.overdue_end } else { g.overdue };
                 put(buf, x, y, ch, pal.overdue);
             }
         }
@@ -97,13 +92,13 @@ pub(crate) fn row(buf: &mut Buffer, area: Rect, r: &GanttRow, c: &Ctx) {
         put(buf, x, y, g.due, pal.due);
     }
     // 화면 밖으로 잘림. 날짜 칸이 0 폭이면 `area.x` 는 이미 영역 밖이라 아무것도 안 쓴다.
-    if let Some((lo, hi)) = r.span(c.now)
+    if let Some((c0, c1)) = r.cells(c.axis, c.now)
         && area.width > 0
     {
-        if floor(lo) < 0 {
+        if c0 < 0 {
             put(buf, area.x, y, g.clip_left, pal.clip);
         }
-        if cell(hi).ceil() as i64 > i64::from(area.width) {
+        if c1 > i64::from(area.width) {
             put(buf, area.x + area.width - 1, y, g.clip_right, pal.clip);
         }
     }
