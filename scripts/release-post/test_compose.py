@@ -169,5 +169,53 @@ class Render(unittest.TestCase):
         self.assertIn("### Fixes", post)
 
 
+class Pictures(unittest.TestCase):
+    """화면을 바꾼 판에 그림이 없으면 한 줄로 알린다 — 막지는 않는다 (moai-r96m)."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.log = os.path.join(self.dir, "CHANGELOG.md")
+        with open(self.log, "w", encoding="utf-8") as f:
+            f.write(CHANGELOG)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.dir)
+
+    def run_main(self, version):
+        import contextlib
+        import io
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            code = compose.main([version, "--changelog", self.log, "--out", os.path.join(self.dir, "post")])
+        return code, err.getvalue()
+
+    def test_counts_only_big_changes_that_name_a_screen(self):
+        # 0.23.0 의 Added 둘이 탐색기를 말한다. Fixed 의 "board" 는 안 센다 — 고친 것까지 그림을 조르지 않는다
+        self.assertEqual(compose.screen_changes(CHANGELOG, "0.23.0"), 2)
+        self.assertEqual(compose.screen_changes(CHANGELOG, "0.2.0"), 0)
+
+    def test_a_screen_release_without_media_says_so_and_still_exits_0(self):
+        code, err = self.run_main("0.23.0")
+        self.assertEqual(code, 0)
+        self.assertIn("touch the explorer", err)
+        self.assertEqual(err.count("\n"), 1)
+
+    def test_a_picture_in_media_quiets_it(self):
+        media = os.path.join(self.dir, "post", "media")
+        os.makedirs(media)
+        with open(os.path.join(media, "01-keys.md"), "w") as f:
+            f.write("a caption is not a picture")
+        self.assertIn("touch the explorer", self.run_main("0.23.0")[1])
+        os.remove(os.path.join(self.dir, "post", "post.md"))
+        with open(os.path.join(media, "01-keys.png"), "wb") as f:
+            f.write(b"png")
+        self.assertNotIn("touch the explorer", self.run_main("0.23.0")[1])
+
+    def test_a_release_without_screen_changes_is_quiet(self):
+        self.assertEqual(self.run_main("0.2.0"), (0, ""))
+
+
 if __name__ == "__main__":
     unittest.main()
