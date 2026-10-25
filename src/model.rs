@@ -530,6 +530,31 @@ impl Issue {
         }
     }
 
+    /// 계획 날짜 둘(시작·기한)을 고친다 — `moai edit --start`·`--due` 와 간트의 막대 끌기가 **같은 몸**을 지난다
+    /// (moai-i4hf.9xi). `None` 은 안 건드리고 `Some(None)` 은 비운다. 꼴과 앞뒤 차례는 [`Issue::settle`] 이 거절하고,
+    /// 조상의 기한을 넘는 날은 쓰기(`store::write_locked`)가 거절한다(moai-xf0p.cbu).
+    pub fn set_dates(&mut self, start: Option<Option<String>>, due: Option<Option<String>>) {
+        if let Some(d) = start {
+            self.starts_on = d;
+        }
+        if let Some(d) = due {
+            self.due_on = d;
+        }
+    }
+
+    /// 고친 줄을 맞춘다 — 정규화 → 검사 → 바뀌었으면 `updated_at`. **바뀌었나**를 낸다. 고치는 길(`moai edit`·탐색기)이
+    /// 차례를 저마다 적으면 한쪽만 정규화를 잊는다. 칸은 `before` 와 견줘 안 바뀌었으면 다시 안 묻는다
+    /// ([`Issue::validate_keeping`]).
+    pub fn settle(&mut self, before: &Issue, cfg: &crate::config::Config, at: &str) -> Result<bool, Invalid> {
+        self.normalize();
+        self.validate_keeping(cfg, self.status == before.status)?;
+        let changed = *self != *before;
+        if changed {
+            self.updated_at = at.to_string();
+        }
+        Ok(changed)
+    }
+
     /// 쓰기는 읽기보다 엄하다 — 읽기는 아는 만큼 보여주고 쓰기는 거부한다. 다만 `kept_status`
     /// 면 **칸 이름은 다시 묻지 않는다**.
     ///
