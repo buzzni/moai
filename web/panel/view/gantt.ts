@@ -426,14 +426,16 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   }
 
   // ── moving about ──
-  function setZoom(next: Zoom): void {
+  /** `anchor` is how far from the dates' visible left edge the date to keep still stands (the middle when left out). */
+  function setZoom(next: Zoom, anchor?: number): void {
     if (!axis || next === zoom) return
     const view = viewWidth()
-    const centre = wallAt(axis, scroll.scrollLeft + view / 2)
+    const held = anchor ?? view / 2
+    const centre = wallAt(axis, scroll.scrollLeft + held)
     zoom = next
     axis = { ...axis, zoom }
     draw()
-    scroll.scrollLeft = Math.max(0, xOf(axis, centre) - view / 2)
+    scroll.scrollLeft = Math.max(0, xOf(axis, centre) - held)
     paintView()
   }
 
@@ -523,29 +525,73 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     return false
   }
 
-  // ── the grid's width: dragged by the handle, kept for the next time ──
-  {
-    let from: { x: number; w: number } | null = null
-    split.addEventListener('pointerdown', (event) => {
-      from = { x: event.clientX, w: gridW }
-      split.classList.add('drag')
-      split.setPointerCapture?.(event.pointerId)
+  // ── the mouse ──
+  /**
+   * A drag of the primary button on `target`, as view/split.ts does it: the pointer is captured, the move and the end
+   * listeners stand only while it lasts, and a cancel or a lost capture ends it like a release.
+   */
+  function drag(target: HTMLElement, begin: () => void, move: (event: PointerEvent, from: PointerEvent) => void, end?: () => void): void {
+    target.addEventListener('pointerdown', (down) => {
+      if (down.button !== 0) return
+      down.preventDefault()
+      begin()
+      target.setPointerCapture?.(down.pointerId)
+      target.classList.add('drag')
+      const onMove = (event: PointerEvent) => move(event, down)
+      const stop = () => {
+        target.removeEventListener('pointermove', onMove)
+        target.removeEventListener('pointerup', stop)
+        target.removeEventListener('pointercancel', stop)
+        target.removeEventListener('lostpointercapture', stop)
+        target.classList.remove('drag')
+        end?.()
+      }
+      target.addEventListener('pointermove', onMove)
+      target.addEventListener('pointerup', stop)
+      target.addEventListener('pointercancel', stop)
+      target.addEventListener('lostpointercapture', stop)
     })
-    split.addEventListener('pointermove', (event) => {
-      if (!from) return
-      gridW = normalizeGrid(from.w + event.clientX - from.x, (scroll.clientWidth || FALLBACK_WIDTH) - 120)
+  }
+
+  // The grid's width: dragged by the handle, kept for the next time.
+  {
+    let start = gridW
+    drag(split, () => {
+      start = gridW
+    }, (event, down) => {
+      gridW = normalizeGrid(start + event.clientX - down.clientX, (scroll.clientWidth || FALLBACK_WIDTH) - 120)
       paintGrid()
       paintView()
-    })
-    const end = () => {
-      if (!from) return
-      from = null
-      split.classList.remove('drag')
-      saveGrid(gridW)
-    }
-    split.addEventListener('pointerup', end)
-    split.addEventListener('pointercancel', end)
+    }, () => saveGrid(gridW))
   }
+
+  // The date header: dragging it moves the dates the other way, as a hand on paper.
+  {
+    let start = 0
+    drag(axisBox, () => {
+      start = scroll.scrollLeft
+    }, (event, down) => {
+      scroll.scrollLeft = Math.max(0, start - (event.clientX - down.clientX))
+      paintView()
+    })
+  }
+
+  // The wheel: up and down is the browser's. Shift+wheel moves the dates (a sideways wheel or swipe scrolls the box
+  // natively, and the grid is sticky, so only the dates move); Ctrl+wheel steps the zoom and is taken only over the
+  // dates, so the page's own zoom stays the browser's everywhere else. The date under the pointer stays under it.
+  right.addEventListener('wheel', (event) => {
+    if (event.ctrlKey) {
+      event.preventDefault()
+      const next = ZOOMS[ZOOMS.indexOf(zoom) + (event.deltaY < 0 ? 1 : -1)]
+      if (next) setZoom(next, event.clientX - scroll.getBoundingClientRect().left - gridNow())
+      return
+    }
+    if (event.shiftKey && !event.deltaX) {
+      event.preventDefault()
+      scroll.scrollLeft = Math.max(0, scroll.scrollLeft + event.deltaY)
+      paintView()
+    }
+  }, { passive: false })
 
   paintGrid()
   let frame = 0

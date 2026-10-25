@@ -116,3 +116,7 @@ svg.links polygon { fill: var(--link); }
 .g-legend .sw .mk { top: -3px; }
 .g-legend .sw .todayline { left: 13px; }
 .g-legend .arrow-key { color: var(--link); font: 13px var(--mono); }
+
+/* The date header is dragged to move the dates. */
+.g-right .g-head { cursor: grab; touch-action: none; user-select: none; }
+.g-right .g-head.drag { cursor: grabbing; }

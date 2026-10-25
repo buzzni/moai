@@ -316,3 +316,94 @@ test('no rows: it says so; and a page with no gantt values still draws the rows'
   assert.equal(bare.root.querySelectorAll('.g-row').length, 7)
   assert.equal(bare.root.querySelector('.g-lanes .b-plan'), null)
 })
+
+// jsdom lays nothing out, so scrollLeft stands still; give the scroll box one that remembers what it is set to.
+const scrollable = (root) => {
+  const box = root.querySelector('.g-scroll')
+  let left = 0
+  Object.defineProperty(box, 'scrollLeft', { get: () => left, set: (v) => { left = Math.max(0, v) }, configurable: true })
+  return box
+}
+
+test('mouse: a click on a bar or a row chooses it, a bucket row only moves the cursor', () => {
+  const { root, calls } = mount()
+  lane(root, 'e1.a').querySelector('.b-act').click()
+  root.querySelector('.g-row[data-id="e1.b"]').click()
+  assert.deepEqual(calls, ['choose:e1.a', 'choose:e1.b'])
+  const rows = [{ id: 'm1', kind: 'milestone', title: 'v1', status: 'todo' }, { id: 'z', kind: 'issue', title: 'Loose', status: 'todo' }]
+  const loose = mount(null, new IssueIndex(rows, treeOf(rows)))
+  loose.root.querySelector('.g-row:not([data-id])').click()
+  assert.deepEqual(loose.calls, ['point:m:'])
+})
+
+test('mouse: dragging the date header moves the dates; a cancel, a lost capture or the right button do not leave it stuck', () => {
+  const { root, dom } = mount()
+  const box = scrollable(root)
+  const axis = root.querySelector('.g-right .g-head')
+  const fire = (type, x, init = {}) => axis.dispatchEvent(new dom.window.MouseEvent(type, { clientX: x, bubbles: true, cancelable: true, ...init }))
+  box.scrollLeft = 300
+  fire('pointerdown', 500)
+  fire('pointermove', 450)
+  assert.equal(box.scrollLeft, 350, 'dragging left shows later dates')
+  fire('pointermove', 600)
+  assert.equal(box.scrollLeft, 200)
+  fire('pointercancel', 0)
+  fire('pointermove', 0)
+  assert.equal(box.scrollLeft, 200, 'a cancelled drag is over')
+  assert.equal(axis.classList.contains('drag'), false)
+  fire('pointerdown', 500)
+  fire('lostpointercapture', 0)
+  fire('pointermove', 400)
+  assert.equal(box.scrollLeft, 200, 'a lost capture ends it too')
+  fire('pointerdown', 500, { button: 2 })
+  fire('pointermove', 400)
+  assert.equal(box.scrollLeft, 200, 'a right click does not start a drag')
+  fire('pointerdown', 500)
+  fire('pointermove', 300)
+  fire('pointerup', 300)
+  assert.equal(box.scrollLeft, 400)
+})
+
+test('mouse: Shift+wheel moves the dates, a plain wheel is left to the browser', () => {
+  const { root, dom } = mount()
+  const box = scrollable(root)
+  const dates = root.querySelector('.g-right')
+  const wheel = (init) => {
+    const event = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, ...init })
+    dates.dispatchEvent(event)
+    return event
+  }
+  assert.equal(wheel({ deltaY: 120 }).defaultPrevented, false)
+  assert.equal(box.scrollLeft, 0)
+  assert.equal(wheel({ deltaY: 120, shiftKey: true }).defaultPrevented, true)
+  assert.equal(box.scrollLeft, 120)
+  assert.equal(wheel({ deltaX: 80 }).defaultPrevented, false, 'a sideways wheel scrolls the box natively')
+})
+
+test('mouse: Ctrl+wheel steps the zoom over the dates only, keeping the date under the pointer', () => {
+  const { root, dom } = mount()
+  const box = scrollable(root)
+  const wheel = (target, init) => {
+    const event = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, ...init })
+    target.dispatchEvent(event)
+    return event
+  }
+  const planWidth = () => px(lane(root, 'e1.c').querySelector('.b-plan'), 'width')
+  const grid = Number.parseFloat(root.querySelector('.g-inner').style.getPropertyValue('--grid-w'))
+  // Over the grid the browser keeps its zoom.
+  assert.equal(wheel(root.querySelector('.g-left'), { deltaY: -100 }).defaultPrevented, false)
+  assert.equal(planWidth(), 80)
+  // Over the dates: 100px in is 2.5 days after the axis start; one step finer is 480px a day, and the date stays at 100px (the grid's width is added to the pointer).
+  const event = wheel(root.querySelector('.g-right'), { deltaY: -100, clientX: grid + 100 })
+  assert.equal(event.defaultPrevented, true)
+  assert.equal(planWidth(), 960)
+  assert.equal(box.scrollLeft, 2.5 * 480 - 100)
+  wheel(root.querySelector('.g-right'), { deltaY: 100, clientX: grid + 100 })
+  assert.equal(planWidth(), 80)
+  assert.equal(box.scrollLeft, 0)
+  // At the coarsest step there is nothing more to take, and the page's zoom is still not taken by the browser.
+  wheel(root.querySelector('.g-right'), { deltaY: 100, clientX: grid + 100 })
+  wheel(root.querySelector('.g-right'), { deltaY: 100, clientX: grid + 100 })
+  assert.equal(wheel(root.querySelector('.g-right'), { deltaY: 100, clientX: grid + 100 }).defaultPrevented, true)
+  assert.equal(root.querySelector('.g-seg [aria-pressed="true"]').dataset.zoom, 'month')
+})
