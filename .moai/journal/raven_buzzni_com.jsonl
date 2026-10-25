@@ -8335,3 +8335,5 @@
 {"ts":"2026-10-25T21:33:00Z","id":"moai-xp7l.vyw","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"review","to":"done"}
 {"ts":"2026-10-25T21:33:00Z","id":"moai-xp7l.mug","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"13건 fix 커밋 30b91841 로 들였다. 넘긴 것: 5번(mv/defer 저널 손실, write_locked 뿌리) → backlog moai-iovx, 성능 셋 → backlog moai-9dwl, 6번(CHANGELOG 의 [Unreleased] 줄이 릴리스 때 develop 을 받으며 [0.26.0] 밑으로 갈 수 있다) → 감독에게 보고(마일스톤 단계). 나머지 Left 는 리뷰 원문대로 둔다"}
 {"ts":"2026-10-25T21:33:10Z","id":"moai-xp7l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Next: milestone/moai-10pj 에 dc86eb47 로 들었다. 남은 멤버 없음. 넘긴 것 backlog moai-iovx(mv/defer 저널 손실)·moai-9dwl(위키 순위 성능). 릴리스 때 develop 을 받으면 [Unreleased] 의 이 에픽 줄이 [0.26.0] 밑으로 미끄러질 수 있다 — 리뷰 moai-xp7l.mug 6번, 받은 뒤 CHANGELOG 를 본다"}
+{"ts":"2026-10-25T21:33:55Z","id":"moai-xp7l","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Report-checked: dc86eb47"}
+{"ts":"2026-10-25T21:34:05Z","id":"moai-scb6","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"hook: pick-up via a variable command ($M mv …) is not recorded"}
