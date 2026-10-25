@@ -17507,6 +17507,57 @@ fn a_row_this_session_picked_stays_its_own_beside_its_epics_worktree() {
     assert!(held.trim().is_empty(), "옆 워크트리의 일로 남을 붙든다\n{held}");
 }
 
+/// **루트에 선 세션이 워크트리가 선 일을 쥐면 루트 체크아웃의 쓰기를 그 워크트리로 돌린다**(moai-9js2.3xn, 리뷰
+/// moai-9js2.s4s). 막는 판은 `settle` 이 겹친 스냅샷으로 한 번 더 재는데, 그 판의 `Away` 는 `worktree::fresh` 가
+/// 새로 짓는다 — 자리(`homes`)를 옮겨 싣지 않으면 겹친 판이 풀어 거절이 아무에게도 안 닿는다. 단위 시험은 그
+/// 배선과 git 이 적은 자리의 철자(꼭대기 뿌리에서 빈 조각을 이으면 `/` 로 끝난다)를 못 밟아 여기서 본다.
+#[test]
+fn a_root_session_holding_worktree_work_is_sent_to_the_worktree() {
+    let s = Scratch::new("hookhomed");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("src")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    let epic = field(&ok(&main, &["epic", "add", "에픽", "--json"]), "id");
+    let mine = field(&ok(&main, &["add", "내가 할 멤버", "-e", &epic, "--json"]), "id");
+    std::fs::write(main.join("src/x.rs"), "").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "세운다"]);
+    let at = |session: &str, name: &str, input: String| {
+        let input = format!(
+            "{{\"session_id\":\"{session}\",\"cwd\":{},\"tool_name\":\"{name}\",\"tool_input\":{input}}}",
+            json_str(&main.display().to_string())
+        );
+        String::from_utf8(hook_in(&s, &main, "pre-tool-use", &input).stdout).unwrap()
+    };
+    let bash = |c: &str| format!("{{\"command\":{}}}", json_str(c));
+    let edit = |p: &Path| format!("{{\"file_path\":{}}}", json_str(&p.display().to_string()));
+    let pick = format!("moai mv {mine} in_progress --from todo");
+    assert!(at("a", "Bash", bash(&pick)).trim().is_empty());
+    ok(&main, &["mv", &mine, "in_progress", "--from", "todo"]);
+    // 워크트리를 띄우기 전에는 루트를 고쳐도 지난다 — 집고 `worktree add` 하는 사이다.
+    let before = at("a", "Edit", edit(&main.join("src/x.rs")));
+    assert!(before.trim().is_empty(), "띄우기 전의 쓰기를 막았다\n{before}");
+    git(&main, &["worktree", "add", "-q", &format!(".worktrees/{epic}"), "-b", &format!("worktree-{epic}")]);
+    let home = canon(main.join(".worktrees").join(&epic)).unwrap().display().to_string().replace('\\', "/");
+
+    let why = refusal(&at("a", "Edit", edit(&main.join("src/x.rs"))));
+    assert!(why.contains(&mine), "쥔 줄을 안 댄다\n{why}");
+    assert!(why.contains(&format!(" {home}/src/x.rs")), "워크트리의 같은 파일을 안 낸다\n{why}");
+    assert!(
+        !why.contains(&format!("{home}//")) && !why.contains(&format!("{home}/.")),
+        "자리 끝에 `/` 가 붙었다\n{why}"
+    );
+    let why = refusal(&at("a", "Bash", bash("echo x > src/x.rs")));
+    assert!(why.contains(&format!(" {home}/src/x.rs")), "껍데기 쓰기를 안 돌린다\n{why}");
+    // 거절문이 낸 자리에 쓰면 지난다 — 시킨 대로 치면 지나가야 규칙이다.
+    let inside = main.join(".worktrees").join(&epic).join("src/x.rs");
+    let there = at("a", "Edit", edit(&inside));
+    assert!(there.trim().is_empty(), "워크트리 안의 쓰기를 막았다\n{there}");
+    // 아무것도 안 쥔 세션은 전처럼 빈손으로 막힌다 — 그 멤버는 옆 워크트리의 일이다.
+    assert!(refusal(&at("c", "Edit", edit(&main.join("src/x.rs")))).contains("holding nothing"));
+}
+
 /// **겨루다 질 집기는 적지 않는다**(리뷰 moai-3k2d.1df). 훅은 명령이 돌기 전에 적으므로, 낡은 `--from` 으로
 /// 진 쪽이 마지막으로 집은 세션이 되어 이긴 쪽의 줄을 제 것으로 들었다 — 진 쪽은 남의 일을 닫거나 미루라고
 /// 붙들리고, 이긴 쪽은 제 줄을 놓았다. 본 칸이 지금 칸과 다르면 `moai mv` 가 안 옮기니 적을 것도 없다.

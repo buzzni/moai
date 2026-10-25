@@ -337,7 +337,11 @@ gets through — run it as given. None of them waits on a person except rule 5.
    held issue — `moai mv <id> in_progress`, or `moai add` first if it was not in
    the plan. Not counted: `.moai/`, `.claude/`, `.agents/`, `.codex/`,
    `.worktrees/`, `.git/`, `target/`, `node_modules/`, and anything outside the
-   repository
+   repository. A session that stands in the main checkout while everything it
+   holds has a worktree standing (`.worktrees/<epic>`) is refused a write to the
+   main checkout, and the refusal names the same file inside that worktree —
+   workers stay in the root and reach their worktree by absolute path, so this is
+   what keeps a relative path from landing in the checkout every session shares
 3. **A review is an issue too.** `/code-review` needs an open review issue tied to
    the held work, and that issue needs an angle in its body (`-b`) — what is being
    looked for and why. Moving it to `done` needs a closing line (`-m`) saying what

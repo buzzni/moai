@@ -46,6 +46,19 @@ does not tag — see `CONTRIBUTING.md`.
   backlog item that carries a start — not even its title, and not `defer` — and
   says to clear it with `moai edit <id> --start none`. Upgrade every binary that
   writes the tracker before giving such a row a start. (moai-xf0p.6d5)
+- **Claude workers no longer go into their worktree.** Every `EnterWorktree`
+  into `.worktrees/` made Claude Code ask the person to approve it, and no allow
+  rule turned that off. The worker steps (`moai-supervise`'s `references/worker.md`)
+  now have session workers stay in the root and reach the worktree by absolute
+  path, as subagent workers already did; the supervisor's message carries a
+  `Worktree:` line saying so, and the `moai` skill's "Words per agent" table says
+  the same for Claude. (moai-9js2)
+- **Hook rule 2 now also refuses a write to the main checkout while everything
+  you hold has its worktree standing.** A session in the root no longer gets
+  Claude Code's worktree isolation guard, so a relative `src/x.rs` would land in
+  the checkout every session shares; the refusal names the same file inside the
+  worktree. Work with no worktree, a session inside a linked worktree and a person
+  at a terminal are not affected. (moai-9js2.3xn)
 
 ## [0.23.0] - 2026-10-23
 
