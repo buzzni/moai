@@ -284,15 +284,17 @@ BODY
 Several at once (`--from`):
 
 moai add --from - <<'PLAN'
-# Storage layer @2026-10-31
-- [p1] write atomically #bug @2026-10-20
-- recover a truncated line
+# Storage layer @2026-10-25~2026-10-31
+- [p1] write atomically #bug @2026-10-26~2026-10-28
+- recover a truncated line @2026-10-29
 - \\[WIP] issue \\#12
 PLAN
 
   A `#` line is an epic, a `-` line is an issue of the epic above it.
-  [pN], #tag and @YYYY-MM-DD (the deadline) are optional. --due goes on
-  each epic the plan creates that carries no @date of its own.
+  [pN], #tag and @date are optional. @YYYY-MM-DD is a deadline,
+  @YYYY-MM-DD~YYYY-MM-DD a start to a deadline, @YYYY-MM-DD~ a start only.
+  --due and --start go on each epic the plan creates that carries no
+  @date of its own.
   Put \\ in front of a leading [, a trailing #word or @digit in a title.
   --dry-run keeps a heredoc typo from creating six wrong issues.
 
@@ -559,6 +561,7 @@ BACKLOG
     {key:browse.pick}  register            {key:browse.unregister}  drop from the list
   Screen — which one stands; the root menu names it, as in [board]:
     {key:browse.go_list}  list                {key:browse.go_board}  board — described below
+    {key:browse.go_gantt}  gantt — the list opened out beside a date axis (see below)
     {key:browse.go_stats}  statistics — the numbers `moai stats` gives, drawn (see below)
     {key:browse.go_wiki}  wiki — the project's manual pages, read only (see below)
   View — every toggle except the list columns (SPC c) is here:
@@ -706,6 +709,44 @@ BACKLOG
   top card in a column goes up to it — and there {key:browse.expand} unfolds, {key:browse.collapse} folds, {key:browse.expand_all}
   unfolds everything and {key:browse.enter} goes in, as in the list.
 
+  {key:browse.go_gantt} lays the same rows out as a gantt chart: the list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right.
+  It is the list's layout too — the cursor, the filter, the view, search and
+  the detail are the list's — but it holds its own folds: it opens with
+  everything unfolded, {key:browse.collapse}, {key:browse.expand} and {key:browse.expand_all} fold and unfold only inside it,
+  and the list keeps the folds it had. Coming back to the list opens the
+  folder that holds the row you stood on. The detail stands below the gantt at
+  first; {key:browse.detail_at} there moves the gantt's detail only, for this session.
+  The planned bar (░, ▒ on a group)
+  runs from the start to the deadline and ◆ marks the row's own deadline; █
+  over it is when the work actually ran, ▓ is the time past a deadline, ┄ is
+  a deferred row's plan, and ▼ over a dotted line marks today.
+  Groups that wrote no days of their own span their members' days. Planned days
+  are calendar days; actual times are shown in your time zone.
+  Keys that stand only in the gantt move the date axis:
+    {key:gantt.zoom_in} {key:gantt.zoom_out}  zoom in and out — hour, day, week, month
+    {key:gantt.left} {key:gantt.right}  one cell earlier and later   {key:gantt.page_left} {key:gantt.page_right}  a page earlier and later
+    {key:gantt.today}    today in the middle           {key:gantt.fit}    fit every row on one screen
+  It opens fitted, and stays fitted as rows come and go until you move it.
+  These keys are under [gantt] in keys.toml and win only inside the gantt: a
+  [browse] line that uses one of them still works in the list and the board.
+  On a narrow window the rows give up their columns first and then the dates
+  are hidden, which the header says; a low window folds the ▼ row away.
+  Moving a plan writes the row, the way `moai edit --start --due` does. The
+  keys move the cursor row's plan by a day: {key:gantt.nudge_earlier} and {key:gantt.nudge_later} the whole plan,
+  {key:gantt.nudge_start_earlier} and {key:gantt.nudge_start_later} only its start.
+  With the mouse, drag a bar's middle to move the plan, its left end to move
+  the start and its right end to move the deadline; it snaps to whole days and
+  is written once, when you let go. Clicking an empty day on a row with no
+  planned days plans that one day. Groups whose bar spans their members are
+  not moved — move the members. When a move is refused (a start after the
+  deadline, a day past the deadline above) the refusal is on the banner; a
+  move that went through names the `moai edit` line that puts it back.
+  Clicking a row puts the cursor on it and the wheel scrolls the rows; a
+  sideways wheel, or Shift and the wheel, slides the dates, and so does
+  dragging the date header. Dragging the line between the rows and the dates
+  widens the rows, and that width is kept under [tui] as gantt_label.
+
   With registered projects (`moai project add`), 0 lists them all — a header
   row per project with that project's rows under it. Started outside a
   `.moai` it begins there; started inside one it begins in that project.
@@ -820,9 +861,10 @@ BACKLOG
   tool uses for them: none (no milestone) and lost.")]
     Tui(TuiArgs),
 
-    // **트래커를 읽기만 하는 서버다**(moai-0aa7). 데이터는 요청마다 띄우는 자식 `moai --json …` 의 stdout 이라
-    // 서버가 짓는 뜻이 없다 — 받고 옮기는 길은 `crate::web`, 묶고 첫 줄을 내는 길은 `cmd::web` 이다.
-    /// Serve this tracker as a page on 127.0.0.1, read-only
+    // **트래커를 읽는 서버다**(moai-0aa7) — 쓰는 것은 간트 막대의 계획 날 하나다(자식 `moai edit`, moai-d86e.3ud).
+    // 데이터는 요청마다 띄우는 자식 `moai --json …` 의 stdout 이라 서버가 짓는 뜻이 없다 — 받고 옮기는 길은
+    // `crate::web`, 묶고 첫 줄을 내는 길은 `cmd::web` 이다.
+    /// Serve this tracker as a page on 127.0.0.1
     #[command(after_help = "  moai web                  http://127.0.0.1:6624/ - open it in a browser
   moai web --port 0         let the system pick a free port
   moai web --dry-run        say where it would serve; bind nothing
@@ -831,17 +873,18 @@ BACKLOG
   The first line names the address and the tracker. Ctrl-C stops it; there
   is nothing to clean up. It never opens a browser.
 
-  It never writes the tracker. Each list, issue and wiki page it serves is
-  the answer of `moai --json <command>`, run in a child process for that
-  request, so the page sees exactly what the CLI says. Writing stays with the
-  CLI and the explorer; the one write the page makes is your read marks
-  (`moai read`), taken only from the page itself. Registered projects
+  Each list, issue and wiki page it serves is the answer of `moai --json
+  <command>`, run in a child process for that request, so the page sees
+  exactly what the CLI says. Writing stays with the CLI and the explorer; the
+  page writes two things, taken only from the page itself: a Gantt bar dragged
+  to new days, run as `moai edit --start --due`, and your read marks (`moai
+  read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who
-  reaches that port can read the tracker. Whatever it binds, it answers only
-  requests whose Host is localhost or an IP address.
+  reaches that port can read the tracker and move its planned days. Whatever
+  it binds, it answers only requests whose Host is localhost or an IP address.
 
   A port already in use stops it with the code port_in_use. Run inside a
   linked worktree, it serves the main checkout's tracker, as other commands
@@ -1588,7 +1631,7 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
-    /// Start of a milestone, `YYYY-MM-DD` (milestone rows only)
+    /// Start, `YYYY-MM-DD` or `+N` days from today. Any row
     #[arg(long, value_name = "date")]
     pub start: Option<String>,
 
@@ -1728,9 +1771,10 @@ const SHOW_LIST: &str = "  Order: --sort takes fields separated by commas, like 
   so add status=done for what is closed now; done= keeps the meaning of
   --done. updated_at= with a single day is that day, where since= runs on
   from it. In the explorer ({key:browse.filter}) a value right after = may be quoted.
-  due_on= is the row's own deadline, read as calendar days with both ends
-  in (2026-10-01~2026-10-05, ~2026-10-05, or one day); a row without one
-  falls in none. It is not a time item and opens nothing hidden.
+  due_on= is the row's own deadline and starts_on= its planned start, read
+  as calendar days with both ends in (2026-10-01~2026-10-05, ~2026-10-05,
+  or one day); a row without one falls in none. They are not time items
+  and open nothing hidden.
 
     moai show --filter 'done_at=2026-10-03 00:00~2026-10-05 23:59'
     moai show -a raven -a joshep --filter started_at=2026-10-01~
@@ -2174,7 +2218,7 @@ pub struct EditArgs {
     #[arg(short, long, value_name = "who|none")]
     pub assignee: Option<String>,
 
-    /// Start of a milestone. `none` clears it
+    /// Start, a day or `+N` days. `none` clears it
     #[arg(long, value_name = "date|none")]
     pub start: Option<String>,
 

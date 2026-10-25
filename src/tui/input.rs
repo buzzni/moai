@@ -656,8 +656,9 @@ mod tests {
     /// 보고 [`components_know_neither_the_terminal_nor_the_store`] 가 훑는다 — 새
     /// 파일이 조각이 아니면 이유를 적어 여기 더한다. 목록을 조각 쪽으로 두면 새 조각이
     /// 목록에 안 올라 조용히 안 훑인다.
-    const NOT_COMPONENTS: [(&str, &str); 11] = [
+    const NOT_COMPONENTS: [(&str, &str); 12] = [
         ("mod.rs", "App — 저장소(Repo)를 들고 키를 칸에 나눈다"),
+        ("gantt.rs", "간트 배치 — App·Site 의 펼침을 고치고, 저장소의 줄(crate::model)을 위젯의 줄(GanttRow)로 옮긴다"),
         (
             "keymap.rs",
             "사람의 키 파일 — 사용자 설정 곁의 keys.toml 을 읽고(fs) TOML 로 푼다. 키 표와 그 찾기는 조각 keys.rs 가 든다",

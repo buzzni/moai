@@ -499,7 +499,7 @@ test('menuLayer: root items and layers with titles; state labels; availability h
   // The wiki menu: tabs, raw, the zone picker, windows, help — and the projects when there are some.
   assert.deepEqual(menuLayer('SPC', { mode: 'wiki' }).items.map((i) => i.key), ['g', 'v', 'o', 'w', '?'])
   assert.deepEqual(menuLayer('SPC', { mode: 'wiki', projects: ['a'] }).items.map((i) => i.key), ['p', 'g', 'v', 'o', 'w', '?'])
-  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['w', 'tab.wiki']])
+  assert.deepEqual(menuLayer('SPC g', { mode: 'wiki' }).items.map((i) => [i.key, i.action]), [['l', 'tab.list'], ['b', 'tab.board'], ['w', 'tab.wiki'], ['g', 'tab.gantt']])
 })
 
 test('helpSections: grouped rows, platform keys, availability', () => {

@@ -138,6 +138,15 @@ test('what `show --json` really sends: children are ids, a due date is due_on, a
   assert.match(F.workOf(row)[0], /^anthropic\/opus-5 tokens=12345 \(medium — wrote the list view\)  Tester · 2026-10-14/)
 })
 
+test('the due field reads the planned span as the TUI and the CLI write it (view::due_of)', () => {
+  const due = (row) => F.fieldsOf(row, null, en).find((f) => f.key === 'due')?.value
+  assert.equal(due({ id: 'a', due_on: '2026-10-28' }), '2026-10-28')
+  assert.equal(due({ id: 'a', starts_on: '2026-10-25', due_on: '2026-10-28' }), '2026-10-25 → 2026-10-28')
+  assert.equal(due({ id: 'a', starts_on: '2026-10-25' }), '2026-10-25 → —')
+  assert.equal(due({ id: 'm', kind: 'milestone', due_on: '2026-10-28' }), '— → 2026-10-28')
+  assert.equal(due({ id: 'a' }), undefined)
+})
+
 test('journal, commits and work lines', () => {
   const row = {
     id: 'a',

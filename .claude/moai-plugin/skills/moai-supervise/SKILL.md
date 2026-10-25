@@ -182,7 +182,7 @@ a worker with a message, any other window through the person.
 
 The `Place` line (`place` under `--json`) has three values. **Only `none` is handed on.**
 
-    <path> (<branch>)  at        it runs there. Go in and carry on
+    <path> (<branch>)  at        it runs there. Aim at it and carry on
     not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
     none               lost      it lost its place — only this one is reclaimed
 
@@ -356,7 +356,7 @@ worker, and the message is the whole assignment.
 Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
 to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
 subdirectory that has `.moai`, and a worktree stands for the whole repository — the worker
-has to go into the same subdirectory inside it (its step 3). The first line is `root dir`;
+has to aim at the same subdirectory inside it (its step 3). The first line is `root dir`;
 a `subdir` line stands only when the root is not the top of the repository.
 
 ```sh
@@ -453,8 +453,8 @@ and if the message does not arrive, deliver it into the tab —
 Inside Saycode, a worker Saycode lists gets the message as a prompt instead of `SendMessage` —
 `moai-saycode`, "Send work".
 Fill in `<id>`, `<title>`, `<steps file>`, `<root branch>`, `<base branch>`, `<milestone>`, `<due>`, `<model>`, `<difficulty>`, `<why>`, `<effort>`, `<worker kind>`, `<subagent ladder>`, `<other work>`, `<root>`, `<person>` and — only for a subdirectory project — `<subdir>`.
-`<root>` is the `root dir` from 2. **Leave it unfilled** and the worker, inside its worktree,
-reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
+`<root>` is the `root dir` from 2. **Leave it unfilled** and a worker that stands in a
+worktree reads its own place as the root. With no `subdir` line in 2, leave the `Subdir:` line out
 of the message.
 `<milestone>` is the release that backlog already stands under **and that is still alive**,
 read in 1 — `none` when it stands under none, `none` when the one it stands under has
@@ -481,6 +481,8 @@ you measured and your reason; `<effort>` is that role's effort (2-1), the same v
 to `Agent`. **Leave them unfilled** and those placeholders travel as they are, so the note
 left at the close says `<model>` instead of what actually did the work.
 `<worker kind>` is `subagent` or `session` — how you raised it in 2.
+The `Worktree:` line goes as written to both: a session's `EnterWorktree` into
+`.worktrees/` asks its person to approve every call, and no allow rule turns that off.
 `<subagent ladder>` is the models the worker may hand pieces of the work to, copied from the
 `moai models --json` of this round, each role with the effort 2-1 reads for it —
 `bulk <model> (<effort>) · develop <model> (<effort>) · complex <model> (<effort>)`, the
@@ -516,6 +518,7 @@ a session worker's 9-1).
     Root: <root>
     Subdir: <subdir>
     Person: <person>
+    Worktree: stay in the root and reach it by absolute path — never EnterWorktree, every call into .worktrees/ asks the person to approve it
 
 **4. Wait.** End your turn.
 

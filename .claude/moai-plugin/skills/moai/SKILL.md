@@ -114,8 +114,11 @@ always asked about — for a plan, an epic, an issue or a backlog item that come
 the person's own request. Write the answer as `@YYYY-MM-DD` at the end of the plan line
 it belongs to (`# Epic title @2026-10-31`, `- [p1] first issue @2026-10-20`), or give
 `--due <day>` to put it on every epic the plan creates that carries no `@` of its own.
-A row made alone takes the same `--due` on `moai add` or `moai backlog add` — an `@` in
-a single title stays text. `--due +3` is three days from today.
+When the person also names a day to begin, write the range — `@2026-10-25~2026-10-31`
+(start to deadline), or `@2026-10-25~` for a start alone — and `--start <day>` goes on
+epics the way `--due` does. A start is the person's too: never make one up.
+A row made alone takes the same `--due` on `moai add` or `moai backlog add` (and
+`--start` likewise) — an `@` in a single title stays text. `--due +3` is three days from today.
 **No answer, no deadline** — leave it empty, never make one up. A review issue and a
 backlog item you park mid-work are not asked about.
 Nothing checks this: it is a question for you to ask, not a gate.
@@ -157,6 +160,8 @@ What counts is work inside the repository — `.moai/`, `.claude/`, `.agents/`, 
 `.worktrees/`, `target/` and anything outside the repository (scratchpad, temporary
 files) do not. Shell writes (`>`, `>>`, `sed -i`, `tee`) count as much as `Edit` and
 `Write`. If it was not in the plan, create it with `moai add 'a title'` and pick that up.
+A session standing in the main checkout that holds only work whose worktree stands is
+refused a write to the main checkout too — the refusal names the same file in that worktree.
 
 **3. A review is an issue too.** Before you call a review, create a review issue tied to
 what you are reviewing. The review is `/code-review` in Claude Code; in Codex and
@@ -224,8 +229,8 @@ its own way — read your own column.
 
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
-| Enter the worktree | `EnterWorktree(path)` from the root | `cd` into it and run every command there | `cd` into it and run every command there |
-| Come back to the root | `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
+| Work in the worktree | stay in the root and aim every call at its absolute path — not `EnterWorktree`, which asks the person to approve each call into `.worktrees/` | `cd` into it and run every command there | `cd` into it and run every command there |
+| Come back to the root | nothing if the shell never left; `cd` to the root if a `cd` moved it — the shell keeps it — and `ExitWorktree(keep)` only after an `EnterWorktree` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |

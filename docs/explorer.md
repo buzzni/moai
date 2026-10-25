@@ -103,6 +103,8 @@ remain readable; if both keys exist, `hide_backlog` wins.
   one, and the wheel and `Ctrl-d`/`Ctrl-u` scroll the board without moving the
   cursor. The cursor, filter, view and detail are the list's, so switching keeps
   your place. The board does not move cards — `moai mv` does
+- **`SPC g g` — the gantt.** The same rows opened out on the left and a date axis
+  with bars on the right — see [the gantt](#the-gantt) below
 - **`SPC g s` — statistics.** The numbers `moai stats` gives, drawn: the flow per
   week, the columns and priorities, lead and cycle time, and AI work by model. It
   counts the project you are in, and only what passes the filter when one is set.
@@ -141,7 +143,46 @@ cannot be opened, the one you are in stays as it was and only the notice stands.
 In both windows the arrows, `Home`/`End` and the page keys move with `Ctrl` or
 `Alt` held too, as on the list; letter keys do not.
 
-The list or the board you leave on is the one the next run opens with.
+The list, the board or the gantt you leave on is the one the next run opens with.
+
+## The gantt
+
+Reach for it when you want to see the plan against the calendar: what starts when,
+what runs late, and what is moving right now. It is the list's layout, not a window
+of its own, so the cursor, filter, view, search and detail carry over and `SPC g l`
+brings you back to the same row.
+
+**Reading it.** Every group opens out when you enter, and the left column is the
+list's row. On the right, `░` is the planned start to deadline (`▒` on an epic or a
+milestone), `◆` the row's own deadline, `█` over it when the work actually ran,
+`▓` the time past a deadline, `┄` a deferred row's plan, and `▼` over a dotted line
+today. An epic that wrote no days of its own spans its members' days. Planned days
+are calendar days; actual times are shown in your time zone. With no planned days
+anywhere, the date side says how to add them: `moai edit <id> --start <day> --due
+<day>`, or `@start~due` at the end of a plan line.
+
+**Folding.** `h`, `l` and `Tab` fold and unfold inside the gantt only — the list
+keeps the folds it had, and the next time you enter, everything is open again.
+
+**Moving the dates.** `=` and `-` zoom in and out (hour, day, week, month), `H` and
+`L` slide one cell, `[` and `]` a page, `t` puts today in the middle and `z` fits
+every row on one screen. It opens fitted and stays fitted until you move it.
+
+**Moving a plan.** `<` and `>` move the cursor row's whole plan a day, `{` and `}`
+only its start. With the mouse, drag a bar's middle, its left end (the start) or its
+right end (the deadline); it snaps to whole days and is written once, when you let
+go. Click an empty day on a row with no plan to plan that one day. The write is the
+same as `moai edit --start --due`: a start after the deadline, or a day past the
+deadline above, is refused and the refusal stands on the banner. A move that went
+through names the `moai edit` line that puts it back, and the rows it pushed past
+this deadline. An epic whose bar spans its members does not move — move the members.
+On the overview, enter the project first.
+
+**The detail** stands below the gantt at first, so the dates keep the width.
+`SPC o d` there moves only the gantt's detail, for this session.
+
+**Small windows.** On a narrow window the left column gives up its columns first,
+then the dates are hidden and the header says so; a low window folds the `▼` row.
 
 ## The menu
 
@@ -202,6 +243,12 @@ itself, and the keys inside a text field (search, filter, the jot form). A
 window's `close` key can move to another key but cannot be set to `none` — it
 is the only way out of that window.
 
+The gantt's own keys live under `[gantt]`, one key per line, and are looked up
+first only while the gantt stands. A `[browse]` line that uses one of them
+(`expand = "L"`) keeps working in the list and the board, and in the gantt that
+key does the gantt's thing. A `[gantt]` line that would hide a list key inside
+the gantt — `fit = "j"` — is the one dropped.
+
 `moai tui --help` and the menu name the keys you set. The help's sentences about
 the arrows, `Home` and the page keys still describe the defaults; `moai keys`
 lists every key exactly.
@@ -222,6 +269,10 @@ kept.
 - **Dragging the line** between the list and the detail resizes them, and the
   share is kept. The wiki window's line drags the same way and keeps a share of
   its own (`wiki_width`); until you drag it, the wiki splits like the list
+- **In the gantt**, a sideways wheel or `Shift` and the wheel slide the dates, and
+  so does dragging the date header. Dragging a bar moves its plan — see
+  [the gantt](#the-gantt). Dragging the line between the rows and the dates widens
+  the rows, and that width is kept (`gantt_label`)
 - **To select or paste with the terminal**, hold `Shift` over the list and the
   detail (`Option` in iTerm2), or turn the mouse off. While a form, a picker or a
   prompt is open, the mouse is the terminal's again
@@ -356,4 +407,4 @@ write there either.
   an email on every write and `git config` had none. The answer holds for this
   run; set `user.name` and `user.email` to stop it asking
 
-Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy
+Decided in: moai-z46r moai-9nfw moai-47mz moai-irrj moai-ucx8 moai-1hka moai-h2rh moai-gelm moai-m6ni moai-p3r9 moai-o3cb moai-fyul moai-ogaw moai-tllo moai-fc97 moai-jtvp moai-bth3 moai-9tqo moai-wk7i moai-pxiy moai-i4hf

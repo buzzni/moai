@@ -105,3 +105,10 @@ and carry it across by hand, then move the commit above. (`95dfed5` is the last 
   digits now open another project.
 - **jsdom is pinned to 30.1.1.** Upstream's lock had 30.1.1; on 30.1.3 three focus tests in
   `moai-keys-wiring.test.mjs` fail (184, 187, 193 on 2026-10-21). Raise it on purpose, with those tests read.
+- **A Gantt tab, which upstream has not (moai-d86e).** `view/gantt.ts` and `view/gantt-model.ts` draw the tree beside a
+  date axis from each `/api/tree` row's `gantt` (`report::gantt`, the TUI's own values), with `style/gantt.css`, the
+  lucide `gantt-chart` icon, `SPC g g` and a `gantt` help group. `Tab`, `TABS`, `Panes` and the shell gained a fourth
+  main pane; the detail's due field draws `start → deadline` (`detail-format.ts` dueSpan).
+- **The page writes the tracker in one place: a Gantt bar's days (moai-d86e.3ud).** Dragging a bar posts
+  `/api/plan/<id>?start=&due=` (`data/plan.ts`), which the server runs as `moai edit --start --due`; which side moves is
+  `gantt-model.ts` `shiftPlan`, the copy of moai's `Issue::shifted`. Views gained `ViewContext.say` and `movePlan`.

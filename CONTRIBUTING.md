@@ -37,10 +37,14 @@ matters.
 
 ```sh
 cargo build --release      # target/release/moai
-cargo test                 # 1,500+ tests, a few seconds
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace     # 1,500+ tests, a few seconds
+cargo clippy --all-targets --workspace -- -D warnings
 cargo fmt --all --check    # or `cargo fmt --all` to fix
 ```
+
+The repository is a Cargo workspace: the root package is `moai`, and
+`crates/moai-gantt` is a member. A bare `cargo test` or `cargo clippy` in the
+root covers `moai` alone, so pass `--workspace` to check what CI checks.
 
 **Do not add `--release` to tests.** `[profile.release]` sets `lto = true`, so
 every one-file change re-runs the LTO link and a rebuild goes from seconds to
@@ -60,7 +64,7 @@ dependencies blurs the premise that this is a tool installed into someone else's
 repository.
 
 Clippy runs with `-D warnings`. Lints this project deliberately carries are
-listed under `[lints.clippy]` in `Cargo.toml`, each with the reason it is there.
+listed under `[workspace.lints.clippy]` in `Cargo.toml`, each with the reason it is there.
 Add the reason when you add a line — an `allow` without one cannot be judged
 later.
 
@@ -233,6 +237,7 @@ scripts/bump-version.sh --next                    # prints 0.2.0 and why; writes
 scripts/bump-version.sh auto                      # Cargo.toml, Cargo.lock, CHANGELOG.md
 git commit -m "chore(release): 0.2.0" -- Cargo.toml Cargo.lock CHANGELOG.md
 scripts/release-post/compose.py v0.2.0 --out release-posts/v0.2.0   # the Discord post, from the section auto just opened
+release-posts/v0.2.0/make.sh                      # a screen changed? its pictures, copied from v0.24.0/make.sh
 scripts/release-post/post.py release-posts/v0.2.0 --preview /tmp/post.html   # look at it before it goes out
 git add release-posts && git commit -m "docs(release-posts): v0.2.0" -- release-posts
 git push origin develop
@@ -290,12 +295,18 @@ your own unshared branch before its review starts is fine; never during one.
 `compose.py` writes `post.md` from that version's changelog section: an entry's bold
 lead, or its first sentence without the aside, six per group and the rest left to the
 release notes. Edit it if it reads badly — it is in English, like the Discord server.
-When a release changes what the explorer or `moai web` shows, add a picture:
-record the scene with `scripts/site-demo` and take it with `shot.mjs`, which draws
+**A release that changes what the explorer or `moai web` shows carries a picture**
+— a screenshot, a clip, or both — and it is made before the tag, since the tag
+posts what is committed (moai-r96m, 2026-10-25: v0.24.0 announced the new gantt
+in text alone and was posted again). `compose.py` says so in one line on stderr
+when a big change names the explorer, `moai tui`, `moai web` or a `SPC` key and
+`media/` holds no picture; it only tells, and the exit code stays 0.
+Record the scene with `scripts/site-demo` and take it with `shot.mjs`, which draws
 the frame the homepage uses and puts a box around what changed — `--mark <text>`,
 `--line <text>` for a whole line, `--select <css>` on a web page. A `-o` ending in
-`.webm` takes a clip of the scene instead. `release-posts/v0.23.0/make.sh` is the
-pattern to copy. Playwright is not a dependency of this repository; pass it in with
+`.webm` takes a clip of the scene instead. `release-posts/v0.24.0/make.sh` (a TUI
+scene with a clip) and `release-posts/v0.23.0/make.sh` (a shell scene) are the
+patterns to copy. Playwright is not a dependency of this repository; pass it in with
 `NODE_PATH`, as `scripts/site-demo/record-web.mjs` does.
 
 The release workflow posts it once the GitHub release is out (`discord.yml`, skipped

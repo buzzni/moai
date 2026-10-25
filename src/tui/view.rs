@@ -163,37 +163,36 @@ impl DetailAt {
     }
 }
 
-/// 목록을 **어떻게 세우나** — 줄로(`List`) 칸반 보드로(`Board`)(moai-9nfw, 사용자 결정 2026-10-02).
+/// 목록을 **어떻게 세우나** — 줄로(`List`) 칸반 보드로(`Board`)(moai-9nfw, 사용자 결정 2026-10-02), 날짜 축
+/// 옆에(`Gantt`, moai-i4hf).
 ///
-/// **새 창이 아니라 목록의 배치다.** 커서·거름망·보기·검색·상세는 둘이 한 벌이고, 이것은 그 줄이 화면
-/// 어디에 서는가만 가른다(`board`). 상세의 자리([`DetailAt`])처럼 보는 사람의 것이라 설정에 남는다.
+/// **새 창이 아니라 목록의 배치다.** 커서·거름망·보기·검색·상세는 셋이 한 벌이고, 이것은 그 줄이 화면
+/// 어디에 서는가만 가른다(`board`·`gantt`). 상세의 자리([`DetailAt`])처럼 보는 사람의 것이라 설정에 남는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Layout {
     #[default]
     List,
     Board,
+    /// 펼친 목록을 왼쪽에 고정하고 오른쪽에 날짜 축과 막대를 둔다(moai-i4hf). 펼침은 목록의 것과 따로
+    /// 든다 — 들어갈 때 모두 펼친 채로 서고, 목록의 접기는 그대로 남는다.
+    Gantt,
 }
 
 impl Layout {
-    /// 다른 쪽 — `SPC g l`·`b` 가 지금과 다른 배치를 고르면 이리 간다(`App::go`).
-    pub fn flip(self) -> Layout {
-        match self {
-            Layout::List => Layout::Board,
-            Layout::Board => Layout::List,
-        }
-    }
+    pub const ALL: [Layout; 3] = [Layout::List, Layout::Board, Layout::Gantt];
 
     /// 설정 파일에 적는 이름 — 화면 낱말과 따로다([`Field::name`] 과 같은 까닭).
     pub fn name(self) -> &'static str {
         match self {
             Layout::List => "list",
             Layout::Board => "board",
+            Layout::Gantt => "gantt",
         }
     }
 
     /// 모르는 이름은 `None` — 읽는 쪽이 목록으로 세운다. **읽기는 관대하다.**
     pub fn named(name: &str) -> Option<Layout> {
-        [Layout::List, Layout::Board].into_iter().find(|l| l.name() == name)
+        Layout::ALL.into_iter().find(|l| l.name() == name)
     }
 }
 
@@ -599,10 +598,9 @@ mod tests {
     }
 
     #[test]
-    fn layout_names_round_trip_and_flip() {
-        for l in [Layout::List, Layout::Board] {
+    fn layout_names_round_trip() {
+        for l in Layout::ALL {
             assert_eq!(Layout::named(l.name()), Some(l));
-            assert_eq!(l.flip().flip(), l);
         }
         assert_eq!(Layout::default(), Layout::List, "처음에는 목록이다");
         assert_eq!(Layout::named("보드"), None, "화면 낱말을 설정 이름으로 받았다");

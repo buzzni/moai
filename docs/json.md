@@ -46,6 +46,22 @@ inside a basket), always counted from the root even when `--path` starts the
 walk lower. `--deep` needs `--json` and a
 `.moai`, and one-level listings carry no `home`.
 
+Under `--deep` every row with an id also carries `gantt`, what the Gantt charts
+draw, decided by moai so that a program drawing it judges no dates itself. Basket
+rows have none, and every key inside it always stands (`null` when there is no value):
+
+- `planned` — `{start, end, from}`: calendar days, either end may be `null`; `from`
+  is `own`, or `members` for an epic or milestone that wrote no day and is counted
+  from its members. `null` when no day can be read
+- `actual` — `{"kind": "span", start, end}` in UTC (`end` `null` while it runs),
+  `{"kind": "not_started"}`, or `{"kind": "unknown"}` for a start nobody recorded —
+  not zero, not never
+- `progress` — `{"kind": "rollup", done, total}` on a group, `{"kind": "column", name}` otherwise
+- `overdue` — days past the row's own deadline, counted in moai's time zone; `null`
+  when not late, closed, deferred or without a deadline
+- `deferred` — `true` when the row is out of the plan
+- `blocked_by` — the blocks that still hold, `{id, state}`
+
 ## Read rows and what they inherit
 
 `moai show --json` gives the rows themselves. Beside the fields written on a
@@ -66,7 +82,8 @@ picks it by its own `deferred_at`. A row is deferred when it carries either.
 `due_on` is the row's own deadline and nothing else — no key carries the deadline
 inherited from its epic or milestone, because a deadline is not stored on the rows
 below: the one above bounds them, and `moai due apply` raises them by the earliest that
-applies. Read the ancestors' `due_on` to find it. `moai due apply --json` names it in
+applies. Read the ancestors' `due_on` to find it. `starts_on` is the row's own planned
+start, on any kind of row, under the same rule — nothing inherited is written down. `moai due apply --json` names it in
 each raised row's `due_on`, with `due_from` naming the ancestor when it is not the row's
 own; on `moai status --json` the `due_priority_behind` notice carries it per id in
 `deadlines`, beside the days left in `ages`.

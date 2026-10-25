@@ -166,7 +166,7 @@ pub(crate) fn tell_after(line: String) {
     AFTER.lock().unwrap_or_else(|e| e.into_inner()).push(line);
 }
 
-/// `--due` 에 친 값 — `+N` 이면 **오늘에서 N 일 뒤**의 날짜로 바꾼다(moai-ghkp.kz7, [`crate::model::relative_due`]).
+/// `--due`·`--start` 에 친 값 — `+N` 이면 **오늘에서 N 일 뒤**의 날짜로 바꾼다(moai-ghkp.kz7, [`crate::model::relative_due`]).
 /// 오늘은 읽는 사람의 달이다 — 보드가 남은 날수를 재는 그 달이라야 `+1` 이 "내일" 로 선다.
 ///
 /// **락 밖에서 부른다** — 시간대를 풀면 tzdb 를 연다([`Ctx::zone`]). `+` 로 시작하지 않으면 안 연다:

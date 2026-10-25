@@ -13,7 +13,7 @@ use crate::i18n::{Lang, fill, say};
 
 /// `/api/rows` 가 싣는 키 — 본문은 안 싣는다(상세가 따로 읽는다). `branch` 는 옆 워크트리에서 온 줄에만 선다
 /// (`--worktree`, `cmd::Row::on`) — 빼면 `--fields` 가 그것을 걷어 페이지의 `⎇` 가 영영 안 섰다. 없는 줄에는 키가 없다.
-pub const ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,tags,assignee,assignee_email,blocked_by,unread,archived,branch";
+pub const ROW_FIELDS: &str = "id,title,kind,status,derived_status,priority,epic,derived_epic,milestone,derived_milestone,deferred_at,shelved_by,status_since,created_at,updated_at,started_at,done_at,due_on,starts_on,tags,assignee,assignee_email,blocked_by,unread,archived,branch";
 
 /// 받는 값의 이름.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -163,10 +163,15 @@ pub fn split_project(query: &[(String, String)]) -> Result<(Option<String>, Vec<
     Ok((project, rest))
 }
 
-/// 쓰는 길 — **읽음 표시 셋뿐이다**(2026-10-22 사람 결정, moai-ly88). 읽음은 사용자 설정 곁의 제 파일에만 적히고
-/// 트래커에는 안 적힌다(`moai read --help`) — 트래커를 바꾸는 길은 여전히 CLI 와 탐색기다. 끝점이 아니면 `None`.
+/// 쓰는 길 — **읽음 표시 셋과 계획 날 하나다**. 읽음은 사용자 설정 곁의 제 파일에만 적히고 트래커에는 안
+/// 적힌다(`moai read --help`, 2026-10-22 사람 결정, moai-ly88). **계획 날(`/api/plan/<id>`)은 트래커에 쓰는 하나뿐인
+/// 길이다**(moai-d86e.3ud) — 간트의 막대 끌기가 `moai edit <id> --start <날> --due <날>` 을 자식으로 부르니
+/// `store::with_write` 를 지나고, 거절(시작이 기한 뒤·위 기한 넘김)도 `edit` 의 말 그대로다. 끝점이 아니면 `None`.
 pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Vec<String>, Bad>> {
     let strs = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    if let Some(id) = path.strip_prefix("/api/plan/") {
+        return Some(issue_id(id).and_then(|()| plan_argv(id, query)));
+    }
     let built = match (path, path.strip_prefix("/api/read/"), path.strip_prefix("/api/read-group/")) {
         ("/api/read-all", _, _) => Ok(strs(&["read", "--all"])),
         (_, Some(id), _) => issue_id(id).map(|()| strs(&["read", "--", id])),
@@ -182,6 +187,36 @@ pub fn write_argv_of(path: &str, query: &[(String, String)]) -> Option<Result<Ve
         }
         Ok(args)
     }))
+}
+
+/// `/api/plan/<id>` 의 argv — `start`·`due` 는 **바뀌는 쪽만** 온다(`Issue::shifted` 가 내는 꼴, 페이지는
+/// view/gantt-model.ts `shiftPlan`). 안 온 쪽은 `edit` 이 그대로 둔다 — 못 읽는 글이 적힌 쪽을 다시 적으면 그 글을 지운다.
+///
+/// **값은 날 하나(`YYYY-MM-DD`)만 받는다** — `none`·`+N` 도 `edit` 은 받지만 끌기는 비우지도 오늘에 기대지도 않는다.
+/// 둘 다 없으면 쓸 것이 없으니 거절이다. 겹쳐 보기(`worktree`)는 안 받는다: 쓰기는 늘 주 체크아웃의 트래커에 간다.
+fn plan_argv(id: &str, query: &[(String, String)]) -> Result<Vec<String>, Bad> {
+    let (mut start, mut due) = (None, None);
+    for (name, value) in query {
+        let slot = match name.as_str() {
+            "start" => &mut start,
+            "due" => &mut due,
+            _ => return Err(Bad::Unknown(name.clone())),
+        };
+        if crate::model::parse_date(value).is_none() {
+            return Err(Bad::Shape(name.clone()));
+        }
+        if slot.replace(value.clone()).is_some() {
+            return Err(Bad::Twice(name.clone()));
+        }
+    }
+    if start.is_none() && due.is_none() {
+        return Err(Bad::Empty("start".to_string()));
+    }
+    let mut out = vec!["edit".to_string()];
+    out.extend(start.map(|d| format!("--start={d}")));
+    out.extend(due.map(|d| format!("--due={d}")));
+    out.extend(["--".to_string(), id.to_string()]);
+    Ok(out)
 }
 
 /// 쿼리가 `worktree=1` 하나뿐이거나 비었는가 — 받는 이름이 이것뿐인 끝점(`/api/stamp`·`/api/issue/<id>`·읽음 길)이
@@ -499,9 +534,9 @@ mod tests {
         assert!(rows(&[("filter", &"a".repeat(2048))]).is_ok());
     }
 
-    /// **쓰는 길은 읽음 셋뿐이고, 값은 `--` 뒤나 `--epic=` 한 토막에 든다**(moai-ly88).
+    /// **쓰는 길은 읽음 셋과 계획 날 하나이고, 값은 `--` 뒤나 `--플래그=` 한 토막에 든다**(moai-ly88, moai-d86e.3ud).
     #[test]
-    fn writes_are_the_three_read_marks() {
+    fn writes_are_the_three_read_marks_and_the_plan() {
         let w = |path: &str| write_argv_of(path, &[]).map(|r| r.unwrap());
         assert_eq!(w("/api/read/moai-1abc"), Some(strs(&["read", "--", "moai-1abc"])));
         assert_eq!(w("/api/read-all"), Some(strs(&["read", "--all"])));
@@ -521,7 +556,24 @@ mod tests {
         assert_eq!(overlay_of(&[]), Ok(false));
         assert_eq!(overlay_of(&on), Ok(true));
         assert!(matches!(overlay_of(&q(&[("archived", "1")])), Err(Bad::Unknown(_))));
-        for none in ["/api/rows", "/api/status", "/api/readall", "/api/read"] {
+        // 계획 날 — 바뀌는 쪽만 실리고, 날 하나(`YYYY-MM-DD`)만 받는다. `none`·`+N` 은 끌기가 내지 않는다.
+        let plan = |query: &[(&str, &str)]| write_argv_of("/api/plan/moai-1abc", &q(query)).unwrap();
+        assert_eq!(
+            plan(&[("start", "2026-10-26"), ("due", "2026-10-30")]),
+            Ok(strs(&["edit", "--start=2026-10-26", "--due=2026-10-30", "--", "moai-1abc"]))
+        );
+        assert_eq!(plan(&[("due", "2026-10-30")]), Ok(strs(&["edit", "--due=2026-10-30", "--", "moai-1abc"])));
+        assert_eq!(plan(&[("start", "2026-10-26")]), Ok(strs(&["edit", "--start=2026-10-26", "--", "moai-1abc"])));
+        assert_eq!(plan(&[]), Err(Bad::Empty("start".into())));
+        for v in ["none", "+3", "2026-1-1", "2026-13-01", "-e", ""] {
+            assert_eq!(plan(&[("due", v)]), Err(Bad::Shape("due".into())), "{v:?}");
+        }
+        assert_eq!(plan(&[("due", "2026-10-30"), ("due", "2026-10-31")]), Err(Bad::Twice("due".into())));
+        assert_eq!(plan(&[("worktree", "1")]), Err(Bad::Unknown("worktree".into())));
+        for bad in ["/api/plan/issue", "/api/plan/--due", "/api/plan/"] {
+            assert!(matches!(write_argv_of(bad, &q(&[("due", "2026-10-30")])), Some(Err(Bad::Shape(_)))), "{bad}");
+        }
+        for none in ["/api/rows", "/api/status", "/api/readall", "/api/read", "/api/plan"] {
             assert!(write_argv_of(none, &[]).is_none(), "{none}");
         }
     }

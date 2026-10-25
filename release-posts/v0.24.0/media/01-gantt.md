@@ -1,0 +1,1 @@
+**A gantt in the explorer — `SPC g g`.** The list stays on the left and every plan gets a bar on the right: the dim bar is planned start to deadline, the coloured one is when the work actually ran, red is time past the deadline, and `▼` is today.
