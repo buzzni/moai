@@ -344,7 +344,8 @@ impl Section {
         }
     }
 
-    /// **키를 하나씩만 찾는 창** — 메뉴의 Esc·Bksp(`menu::feed`), 차례 편집 창(`App::sorter_key`), 물음. 키 열을
+    /// **키를 하나씩만 찾는 창** — 메뉴의 Esc·Bksp(`menu::feed`), 차례 편집 창(`App::sorter_key`), 물음, 간트(탐색보다
+    /// 먼저 한 키로 찾는다, `menu::feed`). 키 열을
     /// 주면 그 줄은 영영 안 듣는다.
     fn one_key(self) -> bool {
         matches!(self, Section::Menu | Section::Sorter | Section::Confirm | Section::Gantt)
@@ -916,14 +917,15 @@ impl Tables {
     /// 아니다: 그 줄은 목록·보드에서 살고, 간트에서만 간트의 키가 이긴다. 그래야 `expand = "L"` 이 업그레이드로 안 버려진다.
     fn gantt_over_browse(&self, out: &mut Vec<Blame>) {
         for g in self.gantt.iter().filter(|g| g.from.is_some()) {
-            let pressed = g.pressed();
-            let Some(first) = pressed.first() else { continue };
+            let Some(gk) = g.seq.first() else { continue };
             for b in &self.browse {
-                if b.seq.first().is_some_and(|k| k.matches(*first)) {
+                // **두 쪽으로 견준다**(moai-l80o 리뷰) — 수식키를 안 보는 간트의 키(`Key::any`, `F5`)는 탐색의
+                // `Ctrl-F5` 를 눌러도 먼저 받는다. 탐색 쪽에서만 견주면 그 겹침을 못 본다.
+                let Some(bk) = b.seq.first() else { continue };
+                if bk.matches(gk.event()) || gk.matches(bk.event()) {
                     let why = Why::Clash { keys: name_of_seq(&g.seq), with: b.who(Section::Browse) };
-                    out.push(Blame {
-                        at: g.from.expect("사람의 줄"), why, sure: b.from.is_none() || b.from == g.from
-                    });
+                    // 상대가 사람의 `[browse]` 줄이면 그 줄을 버려 풀릴 수도 있다 — 확실한 탓이 아니다.
+                    out.push(Blame { at: g.from.expect("사람의 줄"), why, sure: b.from.is_none() });
                 }
             }
         }
@@ -1141,6 +1143,11 @@ mod tests {
         assert_eq!(whys(&problems).len(), 1, "탐색의 j 를 가린 간트의 줄이 안 버려졌다: {problems:?}");
         assert!(matches!(problems[0].why, Why::Clash { .. }), "{problems:?}");
         assert_eq!(run(map.gantt, "z"), Lookup::Run(Browse::Gantt(Pan::Fit)), "버린 줄의 동작이 기본 키로 안 돌아왔다");
+
+        // 수식키를 안 보는 간트의 `F5` 는 탐색의 `Ctrl-F5` 를 간트에서 먼저 받는다 — 그 간트의 줄이 버려진다.
+        let (map, problems) = build("[browse]\njot = \"Ctrl-F5\"\n[gantt]\nfit = \"F5\"\n");
+        assert_eq!(problems.iter().map(|p| p.at.as_str()).collect::<Vec<_>>(), ["gantt.fit"], "{problems:?}");
+        assert_eq!(run(map.gantt, "z"), Lookup::Run(Browse::Gantt(Pan::Fit)));
 
         let (_, problems) = build("[gantt]\nfit = \"g z\"\n");
         assert!(matches!(problems[0].why, Why::OneKey(_)), "간트가 키 열을 받았다: {problems:?}");

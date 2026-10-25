@@ -2259,6 +2259,7 @@ mod tests {
         }
         each("anywhere", ANYWHERE);
         each("browse", BROWSE);
+        each("gantt", GANTT);
         each("prompt", PROMPT);
         each("pick", PICK);
         each("path", PATH);
@@ -2268,6 +2269,23 @@ mod tests {
         each("stats", STATS);
         each("wiki", WIKI);
         each("links", LINKS);
+    }
+
+    /// **기본 간트 키는 기본 탐색 키를 안 가린다**(moai-l80o 리뷰) — 간트에서는 [`GANTT`] 를 먼저 한 키로 찾으니, 두 표가
+    /// 따로 서면서 놓친 겹침(같은 표일 때 위 시험이 재던 것)을 여기서 잰다. 사람의 줄은 `keymap` 이 런타임에 잰다.
+    #[test]
+    fn the_default_gantt_keys_hide_no_default_browse_key() {
+        for g in GANTT {
+            for b in BROWSE {
+                let (gk, bk) = (g.seq[0], b.seq[0]);
+                assert!(
+                    !bk.matches(gk.event()) && !gk.matches(bk.event()),
+                    "간트의 {:?} 가 탐색의 {:?} 를 가린다",
+                    g.act,
+                    b.act
+                );
+            }
+        }
     }
 
     /// **화면은 `SPC g` 가 고른다**(moai-z46r, 2026-10-04 사용자 결정) — `l` 목록·`b` 보드·`s` 통계. 옛 자리
@@ -2349,6 +2367,7 @@ mod tests {
         }
         each("anywhere", ANYWHERE);
         each("browse", BROWSE);
+        each("gantt", GANTT);
         each("prompt", PROMPT);
         each("pick", PICK);
         each("path", PATH);
