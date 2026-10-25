@@ -743,6 +743,43 @@ test('a double click on a day of a row with no days plans that day; a group or a
   assert.deepEqual(moves, [{ id: 'z', change: { day: '2026-10-30' }, undo: 'moai edit z --start none --due none' }])
 })
 
+test('a row only a sibling worktree shows is not drawn movable, and a double click plans nothing (moai-vj8w.93u)', () => {
+  const rows = [
+    ...ROWS.map((row) => (row.id === 'e1.c' ? { ...row, starts_on: '2026-10-26', due_on: '2026-10-27', branch: 'worktree-moai-e1c' } : row)),
+    { id: 'z', kind: 'issue', title: 'Loose', status: 'todo', branch: 'worktree-moai-z' },
+  ]
+  const { root, dom, moves, said, calls } = writing(rows, { ...GANTT, z: g('z') })
+  const l = lane(root, 'e1.c')
+  const bar = laidOut(l.querySelector('.b-plan'))
+  assert.equal(bar.classList.contains('movable'), false)
+  const x0 = px(bar, 'left')
+  press(dom, l, 'pointerdown', x0 + 40)
+  press(dom, l, 'pointermove', x0 + 120)
+  assert.equal(px(bar, 'left'), x0, 'the bar is not drawn moving')
+  press(dom, l, 'pointerup', x0 + 120)
+  press(dom, lane(root, 'z'), 'dblclick', days('2026-10-30') + 5)
+  assert.deepEqual([moves, said], [[], []])
+  // A row the main checkout holds still moves.
+  const other = lane(root, 'e1.b')
+  assert.equal(laidOut(other.querySelector('.b-plan')).classList.contains('movable'), true)
+  l.click()
+  assert.deepEqual(calls, ['choose:e1.c'], 'it still chooses')
+})
+
+test('a diamond the plan has no day for is not grabbed: there is nothing to move (moai-vj8w.93u)', () => {
+  const rows = ROWS.map((row) => (row.id === 'm1' ? { ...row, due_on: '2026-10-28' } : row))
+  const gantt = { ...GANTT, m1: { ...GANTT.m1, planned: { start: null, end: null, from: 'own' } } }
+  const { root, dom, moves, said } = writing(rows, gantt)
+  const l = lane(root, 'm1')
+  const due = laidOut(l.querySelector('.mk.due'))
+  assert.ok(due, 'the diamond is drawn')
+  assert.equal(due.classList.contains('movable'), false)
+  const x = px(due, 'left')
+  press(dom, l, 'pointerdown', x + 2)
+  press(dom, l, 'pointerup', x + 42)
+  assert.deepEqual([moves, said], [[], []], 'no write, and no "double-click a day" refusal')
+})
+
 test('without a writer the bars do not move', () => {
   const { root, dom, calls } = mount()
   const l = lane(root, 'e1.c')

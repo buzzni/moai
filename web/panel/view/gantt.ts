@@ -26,7 +26,7 @@ import { el, emptyState } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
-  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
+  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
@@ -48,6 +48,13 @@ const CLIP_INSET = 2
 
 /** A field the row may carry as text: the text, or null. */
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
+
+/**
+ * A row the write cannot reach: the worktree overlay is on and the row shown is a sibling worktree's (`branch`, which
+ * `show --worktree` puts only on those). The write goes to the main checkout, which may not hold the row at all
+ * ("not found"), and where it does hold it the days drawn are the sibling's, not the ones a move would be measured from.
+ */
+const overlaid = (row: Row): boolean => typeof row.branch === 'string' && row.branch !== ''
 
 function loadGrid(): number {
   try {
@@ -648,7 +655,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function movable(lane: HTMLElement, row: Row, g: GanttRow, planBar: HTMLElement | null, dueMark: HTMLElement | null): void {
     const movePlan = ctx.movePlan
     const grab = planBar ?? dueMark
-    if (!movePlan || !grab || !axis) return
+    if (!movePlan || !grab || !axis || overlaid(row)) return
+    // A bar or `◆` drawn from a day of the row's own that the plan carries no day for (a milestone's deadline the plan
+    // did not read) has nothing to move: it is not grabbed, rather than refused on release.
+    const days = g.planned && (dayStart(g.planned.start) !== null || dayStart(g.planned.end) !== null)
+    if (!days) return
     const a = axis
     // A group's bar counted from its members does not move: the press is still taken, and the release says why.
     const own = g.planned?.from !== 'members'
@@ -712,7 +723,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function plannable(lane: HTMLElement, row: Row, g: GanttRow | undefined): void {
     const movePlan = ctx.movePlan
     const written = typeof row.starts_on === 'string' || typeof row.due_on === 'string'
-    if (!movePlan || !axis || written || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
+    if (!movePlan || !axis || written || overlaid(row) || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
     const a = axis
     lane.addEventListener('dblclick', (event) => {
       // A second double click before the first is answered would plan the row twice.
