@@ -1047,6 +1047,12 @@ const CHANGED_USE: &str = "a key, a command, a flag, a file, a format, a procedu
 const WIKI_COMMIT: &str = r#"git add -- <wiki dir>
 git commit -m "docs(wiki): <what changed> (<epic>)" -- <wiki dir>"#;
 
+/// [`WIKI_COMMIT`] 에 위키 디렉터리를 채운 것 — `moai wiki learn` 이 페이지를 쓴 뒤 끝 줄로 낸다(moai-4s5n.n7j).
+/// 브리프 7-4·위키 스킬과 같은 줄이라야 교훈 페이지도 같은 제목·같은 경로로 머지에 실린다.
+pub fn wiki_commit(dir: &str) -> String {
+    WIKI_COMMIT.replace("<wiki dir>", dir)
+}
+
 /// 집은 채 닫을 때 남기는 한 줄. `CLOSING` 과 세션을 닫을 때의 붙듦이 같은
 /// 글을 내야 한다 — 안내가 가르친 줄과 훅이 내민 줄이 다르면 둘 다 안 믿는다.
 ///
@@ -1756,6 +1762,8 @@ write that repository's name.
 pub fn wiki() -> String {
     let [one, two, ..] = RULES;
     let commit = indent(WIKI_COMMIT, "       ");
+    // 새 파일 이름의 자는 `moai wiki learn` 이 재는 자와 한 글이다 — 스킬이 가르친 이름을 명령이 거절하지 않게.
+    let slug_rule = crate::wiki::learn::SLUG_RULE;
     format!(
         r#"---
 name: moai-wiki
@@ -1782,7 +1790,7 @@ that changed nothing a person does writes nothing.
   no wiki yet, `outside` and `not_a_dir` are a `wiki_dir` pointing where moai will
   not read — fix the key, not the pages — and `failed` is the disk refusing to open it
 - **One page is one `.md` file** — `path` in the list. Its `slug` is that path below
-  `dir` without `.md`. Name a new file in lowercase ASCII kebab case
+  `dir` without `.md`. Name a new file in {slug_rule}
   (`merge-driver.md`) so its slug reads the same on every machine. `README.md` or
   `index.md` at the top of `dir` is the home page
 - **One `# Title` line opens the page.** It is the `title` the list shows; without it

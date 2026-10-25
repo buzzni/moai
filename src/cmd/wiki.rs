@@ -361,3 +361,169 @@ impl<'a> PageOut<'a> {
         }
     }
 }
+
+/// `moai wiki learn` — 교훈 페이지를 새로 짓고, 그 교훈이 나온 이슈에 `Lesson:` 노트를 단다(moai-4s5n.n7j).
+///
+/// **쓰는 차례는 페이지 먼저, 노트 나중이다** — "스냅샷 먼저, 저널 나중" 과 같은 결이다. 노트가 지면 페이지는
+/// 남기고 비영으로 끝나며 다시 칠 `moai note` 줄을 낸다: 빠진 노트가 사라진 교훈보다 싸다.
+///
+/// - 페이지는 **이 체크아웃**(`Repo::here`)의 위키에 선다 — 위키는 가지를 탄다. 노트는 트래커로 간다(딸린
+///   워크트리면 루트의 것)
+/// - 파일은 `create_new` 로 연다. 이미 있으면 거절하고 그 파일을 안 건드린다 — 두 세션이 같은 슬러그를 고른
+///   경합도 여기서 하나만 이긴다. 페이지를 고치는 동사가 아니다(`cli::WikiCmd`)
+/// - 위키 디렉터리 자체가 없으면 짓지 않는다 — `wiki_dir` 이 틀렸을 수 있다. 그 밑의 `lessons/` 는 짓는다
+/// - **쓰기 전에 다 잰다** — 꼴·슬러그·이슈·사람·이미 선 파일. 그 뒤에 지는 것은 디스크뿐이다
+/// - 커밋하지 않는다. 끝 줄이 브리프 7-4 와 같은 커밋 줄([`crate::guide::wiki_commit`])을 댄다
+pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
+    use crate::wiki::learn;
+    let lang = ctx.lang();
+    // 꼴은 디스크도 트래커도 안 보고 잰다 — 틀린 부름이 저장소를 열 까닭이 없다. stdin 은 여기서 읽는다(락은 노트를
+    // 달 때 `with_write` 안에서만 잡힌다).
+    let slug = match &args.slug {
+        Some(s) if learn::is_slug(s) => s.clone(),
+        Some(s) => return Err(Fail::coded(crate::view::wiki::learn_bad_slug(lang, s), code::BAD_INPUT)),
+        None => learn::slug_from(&args.title)
+            .ok_or_else(|| Fail::coded(crate::view::wiki::learn_no_slug(lang, args.title.trim()), code::BAD_INPUT))?,
+    };
+    let body = super::add::read_body(args.body)?.unwrap_or_default();
+    // 꼴은 이슈를 모른 채 먼저 잰다 — 틀린 본문이 사람을 묻거나 트래커를 읽을 까닭이 없다.
+    learn::page(&args.title, &body, None)
+        .map_err(|why| Fail::coded(crate::view::wiki::learn_refused(lang, &why), code::BAD_INPUT))?;
+    let repo = super::open_repo(ctx)?;
+
+    // 자리 — 이 체크아웃의 위키 밑 `lessons/<slug>.md`. 위키 디렉터리는 [`wiki::dir_of`] 가 잰다(체크아웃 안,
+    // `.git/` 밖, 디렉터리).
+    let raw = repo.config.wiki_dir.clone();
+    let dir = match wiki::dir_of(repo.here(), &raw) {
+        Ok(d) => d,
+        Err(wiki::DirTrouble::NoDir) => {
+            return Err(Fail::coded(crate::view::wiki::learn_no_wiki(lang, &raw), code::NOT_FOUND));
+        }
+        Err(t) => return Err(Fail::coded(crate::view::wiki::dir_trouble(lang, &raw, &t), code::ERROR)),
+    };
+    // 노트를 달 줄 — `none` 이면 없다. 없는 id 는 페이지를 쓰기 **전에** 거절한다: 오타 하나로 노트 없는 페이지가
+    // 남으면 그 거절은 고칠 줄이 아니라 치울 파일을 낸다.
+    let target = match args.issue.as_deref() {
+        Some("none") => None,
+        given => {
+            let by = crate::model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, lang))?;
+            let load = repo.read()?;
+            super::report_load_errors(lang, &repo.issues_path(), &load.errors);
+            let id = match given {
+                Some(id) if load.issues.iter().any(|i| i.id == id) => id.to_string(),
+                Some(id) => return Err(Fail::not_found(id, lang)),
+                // **`prime` 이 "쥐었다" 고 대는 그 줄이다**(`report::held_by`) — 고르는 자를 둘로 두지 않는다.
+                None => {
+                    let me = crate::query::Me::of(&by);
+                    let held = crate::report::held_by(&load.issues, &repo.config, Some(&me));
+                    match held.as_slice() {
+                        [one] => one.id.clone(),
+                        many => {
+                            let ids: Vec<&str> = many.iter().map(|i| i.id.as_str()).collect();
+                            return Err(Fail::coded(crate::view::wiki::learn_which_issue(lang, &ids), code::BAD_INPUT));
+                        }
+                    }
+                }
+            };
+            Some((id, by))
+        }
+    };
+    let issue = target.as_ref().map(|(id, _)| id.as_str());
+    // 위에서 잰 꼴이라 지지 않는다 — 다른 것은 `Learned in:` 줄 하나다.
+    let text = learn::page(&args.title, &body, issue)
+        .map_err(|why| Fail::coded(crate::view::wiki::learn_refused(lang, &why), code::BAD_INPUT))?;
+
+    let shown: Vec<&str> = std::path::Path::new(&raw)
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(n) => n.to_str(),
+            _ => None,
+        })
+        .collect();
+    let file = format!("{slug}.md");
+    let path = shown.iter().copied().chain([learn::LESSONS, file.as_str()]).collect::<Vec<_>>().join("/");
+    let note = learn::note(&slug);
+    let exists = || Fail::coded(crate::view::wiki::learn_exists(lang, &path, issue, &note), code::ALREADY_EXISTS);
+    let lessons = dir.join(learn::LESSONS);
+    let at = lessons.join(&file);
+    // 링크도 센다 — 끝이 없는 링크도 그 자리는 섰다(`create_new` 도 그것을 안 따르고 진다).
+    if std::fs::symlink_metadata(&at).is_ok() {
+        return Err(exists());
+    }
+
+    if args.dry_run {
+        return said(ctx, &path, &slug, issue, false, &note, &raw, Some(&text));
+    }
+
+    // `lessons/` 를 짓는다 — 체크아웃 밖을 가리키는 링크면 안 짓는다(아카이브 디렉터리와 같은 자, `held::place_dir`).
+    let home = crate::held::Home::of(repo.here());
+    let lessons = crate::held::place_dir(&lessons, &home)
+        .map_err(|u| Fail::coded(crate::held::refused(lang, &lessons, &u), code::BROKEN))?;
+    std::fs::create_dir_all(&lessons)
+        .map_err(|e| Fail::coded(crate::view::wiki::learn_failed(lang, &path, &e.to_string()), code::ERROR))?;
+    write_new(&lessons.join(&file), &text).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => exists(),
+        _ => Fail::coded(crate::view::wiki::learn_failed(lang, &path, &e.to_string()), code::ERROR),
+    })?;
+
+    // 노트 — 페이지는 이미 섰다. 지면 페이지는 남기고, 다시 칠 줄을 내며 비영으로 끝난다.
+    if let Some((id, by)) = &target {
+        super::note::append(&repo, lang, id, &note, by)
+            .map_err(|e| Fail::coded(crate::view::wiki::learn_unnoted(lang, &path, id, &note, &e.message), e.code))?;
+    }
+    said(ctx, &path, &slug, issue, target.is_some(), &note, &raw, None)
+}
+
+/// 새 파일에 글을 쓴다 — **있으면 진다**(`create_new`). 쓰다 지면 반쯤 쓴 파일을 걷는다: 꼴이 깨진 교훈이 남으면
+/// 다음 부름이 "이미 있다" 로 막힌다. 쓰고 나면 `sync` 한다 — 노트가 그 페이지를 가리키는데 페이지가 디스크에
+/// 없으면 안 된다.
+fn write_new(at: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(at)?;
+    let wrote = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
+    if wrote.is_err() {
+        drop(f);
+        let _ = std::fs::remove_file(at);
+    }
+    wrote
+}
+
+/// `moai wiki learn --json` — `issue` 는 `--issue none` 이면 없다. `dry_run`·`text` 는 `--dry-run` 에만 선다.
+#[derive(serde::Serialize)]
+struct Learned<'a> {
+    path: &'a str,
+    slug: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    issue: Option<&'a str>,
+    noted: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<&'a str>,
+}
+
+/// 쓴 것(또는 쓸 것)을 낸다 — `dry` 는 `--dry-run` 의 글이다.
+fn said(
+    ctx: &Ctx,
+    path: &str,
+    slug: &str,
+    issue: Option<&str>,
+    noted: bool,
+    note: &str,
+    dir: &str,
+    dry: Option<&str>,
+) -> R<Vec<String>> {
+    if ctx.json {
+        return super::json_line(&Learned {
+            path,
+            slug: crate::wiki::learn::page_slug(slug),
+            issue,
+            noted,
+            dry_run: dry.is_some(),
+            text: dry,
+        });
+    }
+    let dir = if dir.is_empty() { "." } else { dir };
+    let commit = crate::guide::wiki_commit(&crate::text::shell_word(dir));
+    Ok(crate::view::wiki::learned(ctx.lang(), path, issue, note, &commit, dry))
+}

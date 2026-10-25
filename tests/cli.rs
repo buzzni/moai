@@ -9320,6 +9320,8 @@ fn every_command_still_speaks_json() {
         vec!["wiki", "ls", "--json"],
         // 위키를 읽기만 한다 — `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "search", "merge", "--json"],
+        // 교훈 페이지 — `--dry-run` 이라 아무것도 안 쓴다. 위키 디렉터리는 아래에서 세운다(없으면 거절이다).
+        vec!["wiki", "learn", "Do x", "--issue", "none", "--dry-run", "-b", "## Do this instead\ny", "--json"],
         vec!["models", "--json"],
         vec!["keys", "--json"],
         vec!["keys", "--template", "--json"],
@@ -9360,7 +9362,11 @@ fn every_command_still_speaks_json() {
     for cmd in JSON_SWEEP.iter().filter(|c| !["init", "add", "read", "merge-driver", "update"].contains(c)) {
         assert!(cases.iter().any(|a| a[0] == *cmd), "`{cmd}` 가 JSON_SWEEP 에는 있는데 실제로 부르지 않는다");
     }
+    // `wiki learn` 은 없는 위키 디렉터리를 거절한다 — 앞의 `wiki ls`·`search` 는 없는 판을 본다.
     for args in &cases {
+        if args[..2] == ["wiki", "learn"] {
+            std::fs::create_dir_all(s.path().join("docs")).unwrap();
+        }
         one_json_value(&ok(s.path(), args));
     }
     // 쓰는 `project` 동사는 제 설정 파일로 — 공용 집을 비워 둔다.
@@ -26978,6 +26984,243 @@ fn wiki_search_reads_the_worktrees_own_docs() {
     std::fs::write(wt.join("docs/new.md"), "# New page\n\nbranchonly\n").unwrap();
     assert!(ok(&wt, &["wiki", "search", "branchonly"]).contains("docs/new.md:1"));
     assert!(ok(&main, &["wiki", "search", "branchonly"]).contains("맞은 절이 없다"));
+}
+
+// ── 교훈 위키 — moai wiki learn (moai-4s5n.n7j) ─────────────────────────
+
+/// 교훈 본문 — `## Do this instead` 가 선 꼴.
+const LESSON: &str = "## What happened\nA check ended in grep.\n\n## Why\ngrep finds nothing, exits 1.\n\n## Do this instead\nEnd with the step that must succeed.\n";
+
+/// 짓는 글이 꼴대로, 바이트 결정적이다. 집은 줄 하나면 `--issue` 없이 그 줄에 노트가 선다. 같은 자리를 다시 부르면
+/// 거절하고 파일은 그대로다.
+#[test]
+fn wiki_learn_writes_the_page_and_notes_the_picked_row() {
+    let s = init("wiki-learn");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    let id = add(s.path(), &["grep 으로 끝나는 검사"]);
+    ok(s.path(), &["mv", &id, "in_progress"]);
+
+    let title = "Never end a check script with a grep that may find nothing";
+    let out = from_stdin(s.path(), &["wiki", "learn", title, "-b", "-", "--json"], LESSON);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let slug = "never-end-a-check-script-with-a-grep-that-may-find-nothing";
+    let path = format!("docs/lessons/{slug}.md");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap().trim(),
+        format!(r#"{{"path":"{path}","slug":"lessons/{slug}","issue":"{id}","noted":true}}"#)
+    );
+    let page = std::fs::read_to_string(s.path().join(&path)).unwrap();
+    assert_eq!(page, format!("# {title}\n\n{}\n\nLearned in: {id}\n", LESSON.trim_end()));
+    // 노트는 그 줄의 이력에 선다.
+    let shown = ok(s.path(), &["show", &id]);
+    assert!(shown.contains(&format!("note: Lesson: lessons/{slug}")), "{shown}");
+    // 위키가 읽는다 — 슬러그는 `wiki show` 가 받는 그 이름이다.
+    assert!(ok(s.path(), &["wiki", "show", &format!("lessons/{slug}")]).contains(title));
+
+    // 같은 자리 — 거절하고 파일은 한 바이트도 안 바뀐다. 거절문은 되풀이의 노트 줄과 고칠 경로를 댄다.
+    let again = from_stdin(s.path(), &["wiki", "learn", title, "-b", "-"], "## Do this instead\nother\n");
+    assert!(!again.status.success());
+    let said = String::from_utf8_lossy(&again.stderr);
+    assert!(said.contains(&format!("moai note {id} 'Lesson: lessons/{slug}'")) && said.contains(&path), "{said}");
+    assert_eq!(std::fs::read_to_string(s.path().join(&path)).unwrap(), page);
+    let json = from_stdin(s.path(), &["wiki", "learn", title, "-b", "-", "--json"], LESSON);
+    assert_eq!(field(&String::from_utf8_lossy(&json.stderr), "code"), "already_exists");
+
+    // 사람 화면의 끝 줄은 커밋 줄이다 — `git add` 가 먼저다.
+    let human = from_stdin(s.path(), &["wiki", "learn", "Second lesson", "-b", "-"], LESSON);
+    let text = String::from_utf8(human.stdout).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines[lines.len() - 2..],
+        ["  git add -- docs", "  git commit -m \"docs(wiki): <what changed> (<epic>)\" -- docs"],
+        "{text}"
+    );
+}
+
+/// 꼴은 쓰기 전에 엄하게 잰다 — 거절하면 아무것도 안 남는다.
+#[test]
+fn wiki_learn_refuses_a_page_out_of_form() {
+    let s = init("wiki-learn-form");
+    let refused = |args: &[&str], body: &str| {
+        let out = from_stdin(
+            s.path(),
+            &[&["wiki", "learn"][..], args, &["-b", "-", "--issue", "none", "--json"]].concat(),
+            body,
+        );
+        assert!(!out.status.success(), "{args:?} 를 받았다");
+        field(&String::from_utf8_lossy(&out.stderr), "code")
+    };
+    // 위키 디렉터리가 없으면 짓지 않는다 — `wiki_dir` 이 틀렸을 수 있다.
+    assert_eq!(refused(&["Do x"], LESSON), "not_found");
+    assert!(!s.path().join("docs").exists(), "위키 디렉터리를 지었다");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    // 한국어 제목은 슬러그를 못 짓는다 — `--slug` 를 대라고 한다. 자에 안 맞는 슬러그도 거절이다.
+    assert_eq!(refused(&["검사를 grep 으로 끝내지 않는다"], LESSON), "bad_input");
+    assert_eq!(refused(&["Do x", "--slug", "Grep_Exit"], LESSON), "bad_input");
+    // `## Do this instead` 가 없거나, 본문이 제목으로 연다.
+    assert_eq!(refused(&["Do x"], "## Why\nbecause\n"), "bad_input");
+    assert_eq!(refused(&["Do x"], &format!("# Do x\n\n{LESSON}")), "bad_input");
+    assert!(!s.path().join("docs/lessons").exists(), "거절한 부름이 자리를 남겼다");
+    // 거절문이 꼴 전체를 낸다.
+    let out = from_stdin(s.path(), &["wiki", "learn", "Do x", "-b", "-"], "## Why\nx\n");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("## Do this instead"));
+
+    // 한국어 제목에 `--slug` 를 주면 쓴다.
+    let out = ok(
+        s.path(),
+        &[
+            "wiki",
+            "learn",
+            "검사를 grep 으로 끝내지 않는다",
+            "--slug",
+            "grep-exit-code",
+            "--issue",
+            "none",
+            "-b",
+            LESSON,
+        ],
+    );
+    assert!(out.contains("docs/lessons/grep-exit-code.md"), "{out}");
+    assert!(
+        std::fs::read_to_string(s.path().join("docs/lessons/grep-exit-code.md")).unwrap().starts_with("# 검사를 grep")
+    );
+    // `--dry-run` 은 쓸 자리와 글을 내고 아무것도 안 쓴다.
+    let dry = ok(s.path(), &["wiki", "learn", "Dry one", "--issue", "none", "--dry-run", "-b", LESSON, "--json"]);
+    let v: serde_json::Value = serde_json::from_str(dry.trim()).unwrap();
+    assert_eq!(
+        (v["path"].as_str(), v["dry_run"].as_bool(), v["noted"].as_bool()),
+        (Some("docs/lessons/dry-one.md"), Some(true), Some(false))
+    );
+    assert!(v["text"].as_str().unwrap().starts_with("# Dry one\n\n## What happened"), "{dry}");
+    assert!(v.get("issue").is_none(), "{dry}");
+    assert!(!s.path().join("docs/lessons/dry-one.md").exists());
+}
+
+/// `--issue` 없이 — 집은 줄이 하나일 때만이다(`prime` 의 `picked` 와 같은 자). 둘이거나 없으면 거절하고
+/// `--issue` 를 대라고 한다. `--issue none` 은 노트 없이 페이지만, 사람을 안 묻는다.
+#[test]
+fn wiki_learn_picks_the_one_row_held_or_asks_for_issue() {
+    let s = init("wiki-learn-held");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    let a = add(s.path(), &["가"]);
+    let b = add(s.path(), &["나"]);
+    let code = |out: &Output| field(&String::from_utf8_lossy(&out.stderr), "code");
+    // 집은 것이 없다.
+    let out = from_stdin(s.path(), &["wiki", "learn", "Do x", "-b", "-", "--json"], LESSON);
+    assert_eq!(code(&out), "bad_input");
+    // 둘을 집었다 — 둘 다 댄다.
+    ok(s.path(), &["mv", &a, "in_progress"]);
+    ok(s.path(), &["mv", &b, "in_progress"]);
+    let out = from_stdin(s.path(), &["wiki", "learn", "Do x", "-b", "-"], LESSON);
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success() && said.contains(&a) && said.contains(&b), "{said}");
+    assert!(!s.path().join("docs/lessons").exists());
+    // 없는 id 는 페이지를 쓰기 전에 거절한다.
+    let out = from_stdin(s.path(), &["wiki", "learn", "Do x", "--issue", "argos-zzzz", "-b", "-", "--json"], LESSON);
+    assert_eq!(code(&out), "not_found");
+    assert!(!s.path().join("docs/lessons").exists());
+    // `--issue none` — 노트도 `Learned in:` 줄도 없고, 누군지 몰라도 쓴다.
+    let out = isolated(BIN)
+        .args(["wiki", "learn", "Do x", "--issue", "none", "-b", LESSON, "--json"])
+        .env("NO_COLOR", "1")
+        .env("MOAI_NOW", NOW)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(r#""noted":false"#));
+    assert!(!std::fs::read_to_string(s.path().join("docs/lessons/do-x.md")).unwrap().contains("Learned in:"));
+    for id in [&a, &b] {
+        assert!(!ok(s.path(), &["show", id]).contains("Lesson:"), "{id} 에 노트가 섰다");
+    }
+    // 누군지 모르면 노트를 못 쓰니 멈춘다 — 페이지도 안 쓴다.
+    let out = isolated(BIN)
+        .args(["wiki", "learn", "Do y", "--issue", &a, "-b", LESSON, "--json"])
+        .env("NO_COLOR", "1")
+        .current_dir(s.path())
+        .output()
+        .unwrap();
+    assert_eq!(code(&out), "no_actor");
+    assert!(!s.path().join("docs/lessons/do-y.md").exists());
+}
+
+/// 노트가 지면 페이지는 남고 비영이며, 다시 칠 `moai note` 줄이 나온다 — 빠진 노트가 사라진 교훈보다 싸다.
+#[cfg(unix)]
+#[test]
+fn wiki_learn_keeps_the_page_when_the_note_fails() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let s = init("wiki-learn-unnoted");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    let id = add(s.path(), &["가"]);
+    // 락을 못 열게 한다 — 노트의 쓰기(`with_write`)만 진다.
+    let lock = s.path().join(".moai/lock");
+    std::fs::write(&lock, "").unwrap();
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let out = from_stdin(s.path(), &["wiki", "learn", "Do x", "--issue", &id, "-b", "-"], LESSON);
+    std::fs::set_permissions(&lock, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(!out.status.success(), "노트가 졌는데 0 으로 끝났다");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains(&format!("moai note {id} 'Lesson: lessons/do-x'")), "{said}");
+    assert!(s.path().join("docs/lessons/do-x.md").exists(), "페이지를 걷었다");
+    assert!(!ok(s.path(), &["show", &id]).contains("Lesson:"));
+}
+
+/// 워크트리에서 부르면 페이지는 그 워크트리에, 노트는 루트의 트래커에 선다 — 위키는 가지를 탄다.
+#[test]
+fn wiki_learn_writes_the_worktrees_page_and_the_roots_note() {
+    let s = Scratch::new("wiki-learn-worktree");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("docs")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    std::fs::write(main.join("docs/README.md"), "# Home\n").unwrap();
+    let id = add(&main, &["가"]);
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let wt = main.join(".worktrees/argos-wt");
+    let before = std::fs::read_to_string(wt.join(".moai/issues.jsonl")).unwrap();
+    let out = from_stdin(&wt, &["wiki", "learn", "Do x", "--issue", &id, "-b", "-"], LESSON);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(wt.join("docs/lessons/do-x.md").exists(), "워크트리에 안 썼다");
+    assert!(!main.join("docs/lessons").exists(), "루트에 썼다");
+    assert!(ok(&main, &["show", &id]).contains("Lesson: lessons/do-x"), "노트가 루트에 안 섰다");
+    assert_eq!(std::fs::read_to_string(wt.join(".moai/issues.jsonl")).unwrap(), before);
+}
+
+/// 두 프로세스가 같은 슬러그로 부르면 하나만 쓰고 나머지는 거절한다 — 조용히 덮어 잃지 않는다.
+#[test]
+fn wiki_learn_racing_on_one_slug_writes_once() {
+    let s = init("wiki-learn-race");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    let racers: Vec<_> = (0..8)
+        .map(|n| {
+            staged_live(&[
+                "wiki",
+                "learn",
+                "Do x",
+                "--issue",
+                "none",
+                "-b",
+                &format!("## Do this instead\nracer {n}\n"),
+                "--json",
+            ])
+            .current_dir(s.path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+        })
+        .collect();
+    let outs: Vec<Output> = racers.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
+    let won: Vec<&Output> = outs.iter().filter(|o| o.status.success()).collect();
+    assert_eq!(won.len(), 1, "이긴 쪽이 하나가 아니다");
+    for lost in outs.iter().filter(|o| !o.status.success()) {
+        assert_eq!(field(&String::from_utf8_lossy(&lost.stderr), "code"), "already_exists");
+    }
+    let page = std::fs::read_to_string(s.path().join("docs/lessons/do-x.md")).unwrap();
+    assert_eq!(page.matches("racer").count(), 1, "{page}");
 }
 
 /// `moai show <id>` 가 그 이슈에 관한 위키를 낸다(moai-g8pt.5aw) — 이 id 를 댄 페이지와 에픽 id 를 댄 페이지(`via`),

@@ -4310,9 +4310,16 @@ pub fn prime<'a>(issues: &'a [Issue], cfg: &Config, me: Option<&crate::query::Me
     let (mut mine, mut others) = by_owner(all, me);
     let rest = crate::query::cut(&mut mine, Some(PRIME_PICKS));
     let others_rest = crate::query::cut(&mut others, Some(PRIME_PICKS));
-    // 집은 것도 **같은 자로** 가른다 — 모르면 가르지 않는다는 약속까지 [`by_owner`] 하나에 산다.
-    let (held, _) = by_owner(wip(issues, cfg), me);
+    let held = held_by(issues, cfg, me);
     Prime { held, picks: mine, rest, others, others_rest, focus }
+}
+
+/// 이 사람이 **지금 집은 줄** — `moai prime` 의 `picked` 와 `moai wiki learn` 이 `--issue` 없이 노트를 달 줄을
+/// 고르는 자가 이것 하나다(moai-4s5n.n7j). 둘이 따로 고르면 prime 이 "쥐었다" 고 댄 줄과 교훈이 붙는 줄이 갈린다.
+///
+/// [`wip`] 을 [`by_owner`] 로 가른다 — 모르면 가르지 않는다는 약속까지 그 하나에 산다.
+pub fn held_by<'a>(issues: &'a [Issue], cfg: &Config, me: Option<&crate::query::Me>) -> Vec<&'a Issue> {
+    by_owner(wip(issues, cfg), me).0
 }
 
 /// 스냅샷 하나에서 [`ready`] 를 고르는 데 드는 것 — **한 벌 지어 여러 번 묻는다**(moai-ydm7.7wq).

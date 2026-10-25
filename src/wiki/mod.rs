@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 pub mod about;
+pub mod learn;
 pub mod search;
 
 /// 본문을 읽는 상한 — 이보다 큰 페이지는 목록에만 서고 본문은 안 읽는다([`Unread::TooLarge`]). 이 저장소에서

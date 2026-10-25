@@ -47,24 +47,8 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
     if text.is_empty() {
         return Err(empty(ctx.lang()));
     }
-    let at = model::now();
     let by = model::actor(ctx.user.as_deref(), &repo.root).map_err(|e| Fail::no_actor(&e, ctx.lang()))?;
-    let entry = JournalEntry::note(&args.id, &text, &at, &by);
-
-    // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
-    // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
-    // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
-    // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 값은 `OnceLock` 하나라 뒤의 부름은 공짜다.
-    let lang = ctx.lang();
-    repo.with_write(
-        || lang,
-        |issues, _, _| {
-            if !issues.iter().any(|i| i.id == args.id) {
-                return Err(Fail::not_found(&args.id, lang));
-            }
-            Ok((vec![entry.clone()], ()))
-        },
-    )?;
+    let entry = append(&repo, ctx.lang(), &args.id, &text, &by)?;
 
     // 저널에 적은 **그 줄을 그대로** 낸다. `serde_json::json!` 은 `Value` 를
     // 거치고 `Value` 의 맵은 알파벳 순이라, 파일과 `--json` 이 서로 다른
@@ -81,6 +65,34 @@ pub fn run(ctx: &Ctx, args: NoteArgs) -> R<Vec<String>> {
             _ => format!("{}  {}", " ".repeat(args.id.chars().count()), paint(style::DIM, l)),
         })
         .collect())
+}
+
+/// 줄 `id` 에 노트 한 줄을 단다 — 저널에 적은 그 줄을 낸다. `moai note` 와 `moai wiki learn` 의 `Lesson:` 노트가
+/// 이 하나로 쓴다(moai-4s5n.n7j): 노트를 다는 길이 둘이면 한쪽만 고쳐지는 날 두 노트가 다른 꼴로 선다.
+///
+/// 글은 부르는 쪽이 이미 다듬은 것이다. 없는 줄이면 `not_found` 로 거절하고 아무것도 안 쓴다.
+pub(crate) fn append(
+    repo: &crate::store::Repo,
+    lang: crate::i18n::Lang,
+    id: &str,
+    text: &str,
+    by: &model::Actor,
+) -> R<JournalEntry> {
+    let entry = JournalEntry::note(id, text, &model::now(), by);
+    // **말은 락 밖에서 한 번 푼다**(리뷰 moai-t6z9.bd6 11번, `edit` 이 이미 그 꼴이다).
+    // 닫힘 안에서 `ctx.lang()` 을 처음 부르면 그 첫 부름이 사용자 설정을 여는데, 그 자리는
+    // `.moai/lock` 을 쥔 채다 — `with_write` 가 `lang` 을 **묻는 길**로 받는 까닭이 그것이라
+    // 닫힘 쪽만 그대로 두면 그 약속이 반쪽이 된다. 그래서 `lang` 은 이미 푼 값으로 받는다.
+    repo.with_write(
+        || lang,
+        |issues, _, _| {
+            if !issues.iter().any(|i| i.id == id) {
+                return Err(Fail::not_found(id, lang));
+            }
+            Ok((vec![entry.clone()], ()))
+        },
+    )?;
+    Ok(entry)
 }
 
 /// 빈 메모는 이력을 더럽히기만 한다. `defer` 의 빈 까닭을 안 적기로 한 것과

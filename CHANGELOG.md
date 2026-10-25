@@ -24,6 +24,15 @@ does not tag — see `CONTRIBUTING.md`.
   from the title, one per page. `--json` carries it as `wiki` (`named_in`,
   `related`), with `wiki_error` when the wiki directory cannot be read; the list
   form `moai show [filters] --json` does not carry it. (moai-g8pt)
+- **`moai wiki learn '<lesson>'`** writes a new lesson page,
+  `<wiki_dir>/lessons/<slug>.md` (`# <lesson>`, the body from `-b`, and
+  `Learned in: <id>`), and in the same call notes `Lesson: lessons/<slug>` on the
+  issue it came from — `--issue <id>`, or the one row you have picked up, or
+  `--issue none` for the page alone. The body needs a `## Do this instead`
+  section. A non-ASCII title needs `--slug` (lowercase ASCII kebab case). It only
+  creates: a page already standing there is refused and left as it is. The page
+  is written in the checkout you are in, so in a worktree it rides that branch;
+  nothing is committed. `--dry-run` shows the path and the text. (moai-4s5n)
 
 ### Fixed
 
