@@ -143,10 +143,81 @@ fn read(ctx: &Ctx) -> R<(String, Result<Wiki, DirTrouble>)> {
     let reserved = load.reserved_ids();
     let ids: HashSet<&str> =
         load.issues.iter().map(|i| i.id.as_str()).chain(reserved.iter().map(String::as_str)).collect();
+    Ok(read_in(&repo, &|id: &str| ids.contains(id)))
+}
+
+/// 이미 연 트래커 곁에서 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께. `known` 은 그 id 의 줄이
+/// 트래커에 있는가를 답한다. `moai show <id>` 가 이것으로 읽는다(moai-g8pt.5aw) — 이미 읽은 트래커를 다시 열지 않는다.
+pub(crate) fn read_in(repo: &crate::store::Repo, known: &dyn Fn(&str) -> bool) -> (String, Result<Wiki, DirTrouble>) {
     let dir = repo.config.wiki_dir.clone();
-    let known = |id: &str| ids.contains(id);
-    let wiki = wiki::load(repo.here(), &dir, &repo.config.prefix, &known);
-    Ok((dir, wiki))
+    let wiki = wiki::load(repo.here(), &dir, &repo.config.prefix, known);
+    (dir, wiki)
+}
+
+/// 위키 디렉터리를 못 쓴 까닭을 기계의 꼴로 — `moai show <id> --json` 의 `wiki_error` 다(moai-g8pt.5aw). **없는
+/// 디렉터리는 까닭이 아니다** — 아직 안 쓴 위키라 두 빈 배열이 답이다(`DirTrouble::fell`). `kind` 는 `wiki ls --json`
+/// 의 `error.kind` 와 같은 낱말이다.
+pub(crate) fn trouble_told(lang: Lang, dir: &str, t: &DirTrouble) -> Option<Told> {
+    t.fell().then(|| Told { kind: t.kind(), said: crate::view::wiki::dir_trouble(lang, dir, t) })
+}
+
+/// `moai show <id> --json` 의 `wiki` — 두 배열은 늘 선다(비었으면 `[]`). 목록 `show [거르개] --json` 은 안 싣는다:
+/// 줄마다 위키 전부를 걷게 된다.
+#[derive(serde::Serialize)]
+pub(crate) struct AboutOut<'a> {
+    named_in: Vec<NamedOut<'a>>,
+    related: Vec<RelatedOut<'a>>,
+}
+
+/// 이 이슈를 댄 페이지 — `via` 는 걸린 id 다(제 id 나 에픽 id).
+#[derive(serde::Serialize)]
+struct NamedOut<'a> {
+    slug: &'a str,
+    path: &'a str,
+    title: &'a str,
+    via: &'a str,
+}
+
+/// 관련 절 — `wiki search --json` 의 hit 에서 발췌를 뺀 꼴이다. `heading`·`anchor` 는 첫 머리글 앞의 절이면 없다.
+#[derive(serde::Serialize)]
+struct RelatedOut<'a> {
+    slug: &'a str,
+    path: &'a str,
+    title: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    heading: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    anchor: Option<&'a str>,
+    line: usize,
+    score: f64,
+}
+
+impl<'a> AboutOut<'a> {
+    pub(crate) fn of(a: &'a wiki::about::About<'a>) -> AboutOut<'a> {
+        AboutOut {
+            named_in: a
+                .named_in
+                .iter()
+                .map(|n| NamedOut { slug: &n.page.slug, path: &n.page.path, title: &n.page.title, via: n.via })
+                .collect(),
+            related: a
+                .related
+                .iter()
+                .map(|h| {
+                    let o = HitOut::of(h);
+                    RelatedOut {
+                        slug: o.slug,
+                        path: o.path,
+                        title: o.title,
+                        heading: o.heading,
+                        anchor: o.anchor,
+                        line: o.line,
+                        score: o.score,
+                    }
+                })
+                .collect(),
+        }
+    }
 }
 
 /// 위키 디렉터리를 못 쓴다. `--json` 은 `{"dir","error"}` 를 stdout 에 내고, 사람 화면은 없는 디렉터리면 한 줄로
@@ -231,7 +302,7 @@ struct Refused<'a> {
 
 /// `commits_error` 와 같은 꼴이다 — 가르는 것은 `kind` 고 `said` 는 사람이 읽는 한 줄이다.
 #[derive(serde::Serialize)]
-struct Told {
+pub(crate) struct Told {
     kind: &'static str,
     said: String,
 }

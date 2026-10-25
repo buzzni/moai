@@ -956,6 +956,21 @@ fn one(
             Err(e) => (Vec::new(), Some(e.told(root, ctx.lang()))),
         },
     };
+    // **이 이슈에 관한 위키**(moai-g8pt.5aw) — 집는 순간 읽는 자리라 에이전트가 따로 찾지 않아도 본다. 위키는 이
+    // 체크아웃의 것을 읽고(트래커는 루트, 위키는 가지를 탄다), 무엇을 낼지는 순수 함수(`wiki::about`)가 가른다.
+    // 커밋과 같은 약속이다 — `--json` 의 `wiki` 는 늘 서고, 디렉터리를 못 썼을 때만 `wiki_error` 가 붙는다. 없는
+    // 디렉터리는 안 쓴 위키라 까닭이 아니다. 사람 화면은 못 읽었어도 말없이 토막을 비운다(커밋 칸과 같다).
+    let wiki_read = wants(&["wiki", "wiki_error"]).then(|| {
+        let ids: std::collections::HashSet<&str> =
+            all.iter().map(|i| i.id.as_str()).chain(live.iter().map(String::as_str)).collect();
+        super::wiki::read_in(repo, &|id: &str| ids.contains(id))
+    });
+    let (pages, wiki_error): (&[crate::wiki::Page], _) = match &wiki_read {
+        Some((_, Ok(w))) => (&w.pages, None),
+        Some((dir, Err(t))) => (&[], super::wiki::trouble_told(ctx.lang(), dir, t)),
+        None => (&[], None),
+    };
+    let about = crate::wiki::about::about(pages, issue, stood_in);
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();
@@ -1029,6 +1044,15 @@ fn one(
         extra.push(("commits", serde_json::to_string(&commits).map_err(|e| Fail::new(e.to_string()))?));
         if let Some(why) = &commits_error {
             extra.push(("commits_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
+        }
+        // **키는 늘 선다**(moai-g8pt.5aw) — 두 배열이고, 위키가 없거나 비면 둘 다 `[]` 다. 그것과 "위키 디렉터리를
+        // 못 읽었다" 를 가르는 것이 `wiki_error` 다. 목록(`show [거르개] --json`)에는 안 싣는다 — 줄마다 위키를 걷는다.
+        extra.push((
+            "wiki",
+            serde_json::to_string(&super::wiki::AboutOut::of(&about)).map_err(|e| Fail::new(e.to_string()))?,
+        ));
+        if let Some(why) = &wiki_error {
+            extra.push(("wiki_error", serde_json::to_string(why).map_err(|e| Fail::new(e.to_string()))?));
         }
         // **이력이 덜 왔으면 그렇다고 말한다**(moai-f2lc). 여기까지 오면 저널은 이미 읽혔다 —
         // 못 읽은 파일은 `journal` 에서 말없이 빠져 있고, 그 침묵을 가르는 자가 이 키다.
@@ -1160,6 +1184,8 @@ fn one(
     // **말은 명령 층이 한 번 풀어 준다**(`Ctx::lang`) — 위의 `seen.screen` 이 든 것과 같은
     // 값이다. 머리글만 다른 말로 서면 한 번 펼친 화면 안에서 말이 갈린다.
     out.extend(view::commits(&commits, ctx.lang()));
+    // 이력 바로 앞이다 — 둘 다 비면 토막째 안 선다(`view::wiki::about`).
+    out.extend(view::wiki::about(ctx.lang(), &about));
     out.extend(view::history(&journal, &repo.config, seen.screen));
     Ok(out)
 }

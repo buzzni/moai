@@ -23,6 +23,11 @@ use unicode_width::UnicodeWidthStr;
 
 const K1: f64 = 1.2;
 const B: f64 = 0.75;
+/// 흔한 낱말의 문턱 — 절의 이 몫보다 많은 곳에 든 낱말은 흔하다([`Found::common`]). 이 저장소 docs/ 의 절
+/// 187 개에서 `moai` 는 84%, `id` 는 43%, `show` 는 31% 에 들고 `wiki` 는 11%, `merge` 는 17% 다(moai-g8pt.5aw).
+/// 낱말 목록이 아니라 몫으로 두는 까닭은 위키마다 흔한 낱말이 달라서다 — 이 저장소의 `moai` 가 남의 위키에서는
+/// 그 제품 이름이다.
+pub const COMMON_SHARE: f64 = 0.25;
 /// 머리글 필드의 낱말 하나가 본문 몇 번만큼 무거운가.
 const HEADING_WEIGHT: f64 = 3.0;
 /// 발췌 한 줄의 최대 표시 폭(칸).
@@ -35,6 +40,8 @@ const LEAD_COLS: usize = 40;
 pub struct Found<'a> {
     /// 질의를 토큰으로 푼 것, 겹침 없이 처음 나온 차례로. 비었으면 질의가 비었던 것이다 — 부르는 쪽이 가린다.
     pub terms: Vec<String>,
+    /// `terms` 가운데 흔한 낱말 — 절의 [`COMMON_SHARE`] 보다 많은 곳에 든 것, `terms` 의 차례로.
+    pub common: Vec<String>,
     /// 순위 차례의 hit — 맞은 서로 다른 낱말 수, 점수, 슬러그, 줄 차례로 정렬하고 `limit` 에서 자른 것.
     pub hits: Vec<Hit<'a>>,
 }
@@ -51,6 +58,8 @@ pub struct Hit<'a> {
     pub line: usize,
     /// 절에서 맞은 서로 다른 질의 낱말의 수. 점수보다 먼저 견준다.
     pub distinct: usize,
+    /// `distinct` 가운데 흔하지 않은 낱말의 수([`Found::common`] 밖). 차례에는 안 쓴다 — 관련 절의 문턱이 쓴다.
+    pub rare: usize,
     pub score: f64,
     /// 발췌 한 줄. 본문을 못 읽은 페이지와, 보일 줄이 없는 절이면 없다.
     pub snippet: Option<Snippet>,
@@ -206,6 +215,12 @@ pub fn search<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
     run(pages, query, limit, true)
 }
 
+/// [`search`] 와 같은 순위를 **발췌 없이** 낸다 — 모든 hit 의 `snippet` 이 없다. 순위를 다 받아 다시 고르는 쪽
+/// (`show <id>` 의 관련 절, [`super::about`])이 버릴 hit 의 발췌까지 짓지 않게. **순수 함수다.**
+pub fn rank<'a>(pages: &'a [Page], query: &str, limit: usize) -> Found<'a> {
+    run(pages, query, limit, false)
+}
+
 fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Found<'a> {
     let mut terms: Vec<String> = Vec::new();
     for t in tokens(query) {
@@ -214,7 +229,7 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
         }
     }
     if terms.is_empty() {
-        return Found { terms, hits: Vec::new() };
+        return Found { terms, common: Vec::new(), hits: Vec::new() };
     }
     let want: HashSet<&str> = terms.iter().map(String::as_str).collect();
     let index: HashMap<&str, usize> = terms.iter().enumerate().map(|(i, t)| (t.as_str(), i)).collect();
@@ -251,32 +266,36 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
     let avg = secs.iter().map(|s| HEADING_WEIGHT * s.head_len + s.body_len).sum::<f64>() / n.max(1.0);
     let df: Vec<f64> = (0..terms.len()).map(|i| secs.iter().filter(|s| weighted(s, i) > 0.0).count() as f64).collect();
     let idf: Vec<f64> = df.iter().map(|df| (1.0 + (n - df + 0.5) / (df + 0.5)).ln()).collect();
-    let mut scored: Vec<(usize, usize, f64)> = Vec::new();
+    // **흔한 낱말**은 절의 [`COMMON_SHARE`] 보다 많은 곳에 든 낱말이다 — 순위에서는 idf 가 이미 누르지만, 관련 절을
+    // 고르는 쪽은 맞은 낱말의 수를 문턱으로 쓰므로 흔한 낱말 둘이 맞은 엉뚱한 절이 문턱을 넘는다(moai-g8pt.5aw).
+    let common: Vec<bool> = df.iter().map(|df| *df > COMMON_SHARE * n).collect();
+    let mut scored: Vec<(usize, usize, usize, f64)> = Vec::new();
     for (i, s) in secs.iter().enumerate() {
         let len = HEADING_WEIGHT * s.head_len + s.body_len;
-        let (mut distinct, mut score) = (0, 0.0);
+        let (mut distinct, mut rare, mut score) = (0, 0, 0.0);
         for (t, idf) in idf.iter().enumerate() {
             let tf = weighted(s, t);
             if tf > 0.0 {
                 distinct += 1;
+                rare += usize::from(!common[t]);
                 score += idf * tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * len / avg.max(f64::MIN_POSITIVE)));
             }
         }
         if distinct > 0 {
-            scored.push((i, distinct, score));
+            scored.push((i, distinct, rare, score));
         }
     }
     scored.sort_by(|a, b| {
         let (x, y) = (&secs[a.0], &secs[b.0]);
         b.1.cmp(&a.1)
-            .then_with(|| b.2.total_cmp(&a.2))
+            .then_with(|| b.3.total_cmp(&a.3))
             .then_with(|| x.page.slug.cmp(&y.page.slug))
             .then_with(|| x.start.cmp(&y.start))
     });
     let hits = scored
         .into_iter()
         .take(limit)
-        .map(|(i, distinct, score)| {
+        .map(|(i, distinct, rare, score)| {
             let s = &secs[i];
             Hit {
                 page: s.page,
@@ -284,12 +303,14 @@ fn run<'a>(pages: &'a [Page], query: &str, limit: usize, snippets: bool) -> Foun
                 anchor: s.anchor,
                 line: s.start + 1,
                 distinct,
+                rare,
                 score,
                 snippet: if snippets { snippet(s, &want) } else { None },
             }
         })
         .collect();
-    Found { terms, hits }
+    let common = terms.iter().zip(&common).filter(|(_, c)| **c).map(|(t, _)| t.clone()).collect();
+    Found { terms, common, hits }
 }
 
 /// 절에서 서로 다른 질의 낱말이 가장 많이 든 줄 하나 — 같으면 앞 줄. 맞은 줄이 없으면(제목으로만 맞았다) 절의 첫
@@ -307,7 +328,7 @@ fn snippet(s: &Section, want: &HashSet<&str>) -> Option<Snippet> {
         Some((n, _)) => n,
         None => s.lines.iter().position(|l| !l.trim().is_empty())?,
     };
-    let (text, marks) = fit(&s.lines[n], want);
+    let (text, marks) = fit(s.lines[n], want);
     Some(Snippet { line: s.start + n + 1, text, marks })
 }
 
@@ -526,7 +547,7 @@ mod tests {
         assert!(s.text.starts_with('…') && s.text.ends_with('…'), "{}", s.text);
         assert!(s.text.width() <= SNIPPET_COLS, "{}", s.text.width());
         assert_eq!(&s.text[s.marks[0].clone()], "needle");
-        assert!(s.text.trim_end_matches('…').chars().last() != Some('e'), "결합 부호를 떼지 않는다");
+        assert!(!s.text.trim_end_matches('…').ends_with('e'), "결합 부호를 떼지 않는다");
     }
 
     #[test]

@@ -26958,6 +26958,89 @@ fn wiki_search_reads_the_worktrees_own_docs() {
     assert!(ok(&main, &["wiki", "search", "branchonly"]).contains("맞은 절이 없다"));
 }
 
+/// `moai show <id>` 가 그 이슈에 관한 위키를 낸다(moai-g8pt.5aw) — 이 id 를 댄 페이지와 에픽 id 를 댄 페이지(`via`),
+/// 제목 낱말로 선 관련 절(페이지당 하나, 댄 페이지는 빠진다). 사람 화면은 이력 앞의 한 토막이다.
+#[test]
+fn show_names_the_wiki_pages_about_the_issue() {
+    let s = init("show-wiki");
+    let epic = field(&ok(s.path(), &["epic", "add", "an epic", "--json"]), "id");
+    let id = add(s.path(), &["merge driver 를 고친다", "-e", &epic]);
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    let w = |name: &str, body: &str| std::fs::write(s.path().join("docs").join(name), body).unwrap();
+    w("own.md", &format!("# Own\n\n{id} fixes the merge driver.\n"));
+    w("bundle.md", &format!("# Bundle\n\nThe whole of {epic}.\n"));
+    w(
+        "workflow.md",
+        "# Workflow\n\nIntro.\n\n## Merging the tracker\n\nInstall the merge driver once.\n\n## Again\n\nThe merge driver, said once more in a longer paragraph that runs on with many more words than the first.\n",
+    );
+    w("other.md", "# Other\n\nOnly the merge word.\n");
+    // 질의 낱말이 흔해지지 않게 깐다 — 절의 넷에 하나보다 많은 곳에 든 낱말은 문턱을 못 채운다(`COMMON_SHARE`).
+    for n in 0..20 {
+        w(&format!("fill{n}.md"), &format!("# Fill {n}\n\nunrelated text\n"));
+    }
+
+    let json = ok(s.path(), &["show", &id, "--json"]);
+    let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+    let named: Vec<(&str, &str)> = v["wiki"]["named_in"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| (n["slug"].as_str().unwrap(), n["via"].as_str().unwrap()))
+        .collect();
+    assert_eq!(named, [("bundle", epic.as_str()), ("own", id.as_str())], "{json}");
+    assert_eq!(v["wiki"]["named_in"][1]["path"], "docs/own.md");
+    let related = v["wiki"]["related"].as_array().unwrap();
+    assert_eq!(related.len(), 1, "페이지당 하나, 댄 페이지와 문턱 밑(other)은 빠진다 — {json}");
+    let r = &related[0];
+    assert_eq!((r["slug"].as_str(), r["heading"].as_str()), (Some("workflow"), Some("Merging the tracker")));
+    assert_eq!((r["anchor"].as_str(), r["line"].as_u64()), (Some("merging-the-tracker"), Some(5)), "{json}");
+    assert!(r["score"].is_number() && r.get("snippet").is_none(), "{json}");
+    assert!(v.get("wiki_error").is_none(), "{json}");
+
+    // 사람 화면 — 이력 바로 앞의 토막.
+    let out = ok(s.path(), &["show", &id]);
+    let lines: Vec<&str> = out.lines().collect();
+    let head = lines.iter().position(|l| *l == "위키").unwrap_or_else(|| panic!("토막이 없다\n{out}"));
+    let history = lines.iter().position(|l| *l == "이력").unwrap();
+    assert!(head < history, "{out}");
+    assert!(lines[head + 1].contains("docs/bundle.md") && lines[head + 1].contains("Bundle"), "{out}");
+    assert!(lines[head + 3].contains("docs/workflow.md:5") && lines[head + 3].contains("Workflow › Merging"), "{out}");
+    assert!(lines[head + 4].contains("moai wiki show bundle"), "{out}");
+
+    // 목록에는 안 싣는다 — 줄마다 위키를 걷게 된다.
+    assert!(!ok(s.path(), &["show", "--json"]).contains(r#""wiki""#));
+    // `--fields` 로 고를 수 있다.
+    assert!(ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]).starts_with(r#"{"wiki":{"named_in":"#));
+}
+
+/// 문턱 밑이면 `related` 가 비고, 둘 다 비면 사람 화면에 토막이 없다. 위키 디렉터리가 없으면 두 빈 배열이고
+/// `wiki_error` 는 없다 — 안 쓴 위키다. 디렉터리를 못 쓰면 `wiki_error` 가 서고 `show` 는 그대로 0 이다.
+#[test]
+fn show_says_nothing_of_the_wiki_when_nothing_fits() {
+    let s = init("show-wiki-none");
+    let id = add(s.path(), &["zebra quagga"]);
+    let none = ok(s.path(), &["show", &id, "--json"]);
+    assert!(none.contains(r#""wiki":{"named_in":[],"related":[]}"#), "{none}");
+    assert!(!none.contains("wiki_error"), "안 쓴 위키를 못 읽은 것으로 냈다\n{none}");
+
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(s.path().join("docs/a.md"), "# A\n\nA zebra, alone.\n").unwrap();
+    let below = ok(s.path(), &["show", &id, "--json"]);
+    assert!(below.contains(r#""wiki":{"named_in":[],"related":[]}"#), "두 낱말 질의에 한 낱말 절을 냈다\n{below}");
+    let out = ok(s.path(), &["show", &id]);
+    assert!(!out.lines().any(|l| l == "위키"), "빈 토막을 세웠다\n{out}");
+
+    let config = s.path().join(".moai/config.toml");
+    let base = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(&config, format!("{base}wiki_dir = \"AGENTS.md\"\n")).unwrap();
+    let bad = moai(s.path(), &["show", &id, "--json"]);
+    assert!(bad.status.success(), "위키 때문에 상세가 섰다\n{}", text(&bad));
+    let said = String::from_utf8_lossy(&bad.stdout);
+    assert!(said.contains(r#""wiki":{"named_in":[],"related":[]}"#), "{said}");
+    assert!(said.contains(r#""wiki_error":{"kind":"not_a_dir","said":"#), "{said}");
+    assert!(moai(s.path(), &["show", &id]).status.success());
+}
+
 /// **`wiki_dir` 은 쓰는 자리에서 잰다** — 밖을 가리키는 값도 설정은 읽혀 `moai status` 가 선다. 위키만 그 까닭으로
 /// 비영이다. 디렉터리가 아직 없는 것은 안 쓴 위키라 0 이고, 그 자리의 페이지를 물으면 없는 페이지다.
 #[test]

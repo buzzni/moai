@@ -7,6 +7,7 @@ use crate::held;
 use crate::i18n::{Lang, fill, say};
 use crate::style::{self, paint};
 use crate::text::{one_line, width};
+use crate::wiki::about::About;
 use crate::wiki::search::Hit;
 use crate::wiki::{DirTrouble, Notices, Outside, Page, Skip, Skipped, Unread, Wiki};
 
@@ -84,6 +85,49 @@ pub fn search(lang: Lang, dir: &str, query: &str, hits: &[Hit], total: usize) ->
             ("total", &total.to_string()),
             ("slug", &crate::text::quoted(&first.page.slug)),
         ],
+    ));
+    out
+}
+
+/// `moai show <id>` 의 위키 토막(moai-g8pt.5aw) — 빈 줄, 머리, 댄 페이지(`path   제목`), 관련 절
+/// (`path:line   제목 › 머리글`), 다음 명령 한 줄. 둘 다 비면 아무 줄도 없다 — 토막째 안 선다. 낱말 칸은 둘 가운데
+/// 넓은 쪽에 맞추고, 같은 묶음의 둘째 줄부터는 낱말 자리를 비운다.
+pub fn about(lang: Lang, a: &About) -> Vec<String> {
+    let Some(first) = a.named_in.first().map(|n| n.page).or_else(|| a.related.first().map(|h| h.page)) else {
+        return Vec::new();
+    };
+    let (named, related) = (say(lang, "wiki.about_named"), say(lang, "wiki.about_related"));
+    let wide = width(named).max(width(related));
+    let label = |word: &str, n: usize| {
+        let w = if n == 0 { word } else { "" };
+        let painted = if w.is_empty() { String::new() } else { paint(style::DIM, w) };
+        format!("  {painted}{}   ", " ".repeat(wide - width(w)))
+    };
+    let mut out = vec![String::new(), paint(style::HEAD, say(lang, "wiki.about_head"))];
+    for (n, x) in a.named_in.iter().enumerate() {
+        out.push(format!(
+            "{}{}   {}",
+            label(named, n),
+            paint(style::ID, &one_line(&x.page.path)),
+            one_line(&x.page.title)
+        ));
+    }
+    for (n, h) in a.related.iter().enumerate() {
+        let mut line = format!(
+            "{}{}   {}",
+            label(related, n),
+            paint(style::ID, &format!("{}:{}", one_line(&h.page.path), h.line)),
+            one_line(&h.page.title)
+        );
+        if let Some(t) = &h.heading {
+            line.push_str(&format!(" › {}", one_line(t)));
+        }
+        out.push(line);
+    }
+    out.push(format!(
+        "  {}   {}",
+        " ".repeat(wide),
+        paint(style::DIM, &fill(say(lang, "wiki.about_hint"), &[("slug", &crate::text::quoted(&first.slug))]))
     ));
     out
 }

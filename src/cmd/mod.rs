@@ -978,6 +978,9 @@ pub const OURS: &[&str] = &[
     "journal_error",
     "work",
     "spent",
+    // `show <id> --json` 이 덧붙이는 위키(moai-g8pt.5aw).
+    "wiki",
+    "wiki_error",
     // `show --json`(목록도 하나도)이 안 읽은 줄에 다는 것(moai-cqwy).
     "unread",
     // `show --json`(목록도 하나도)이 곁들이는 선 마일스톤과 아카이브(moai-wk7i.rmc).

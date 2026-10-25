@@ -17,6 +17,11 @@ does not tag — see `CONTRIBUTING.md`.
 - **`moai wiki search <words…>`** finds the wiki's sections for some words and
   lists them best first, each with the `path:line` to open. `--json` gives the
   same hits with a `total`. (moai-g8pt)
+- **`moai show <id>` shows the wiki about that issue** above its history: the
+  pages that name the issue or its epic, and up to three related sections found
+  from the title, one per page. `--json` carries it as `wiki` (`named_in`,
+  `related`), with `wiki_error` when the wiki directory cannot be read; the list
+  form `moai show [filters] --json` does not carry it. (moai-g8pt)
 
 ### Fixed
 
