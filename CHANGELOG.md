@@ -38,9 +38,26 @@ does not tag — see `CONTRIBUTING.md`.
   `backlog promote` carries the backlog item's start onto the epic as it does its
   deadline, and `--dry-run` and `show --as-plan` print the same range.
   (moai-xf0p.due)
+- **A gantt layout in the explorer — `SPC g g`.** The list, every group opened
+  out, stays fixed on the left and a date axis with bars stands on the right:
+  the planned start to deadline, when the work actually ran, the time past a
+  deadline, and today. Groups that wrote no days of their own span their
+  members. `-` and `=` zoom, `H` `L` `[` `]` slide the dates, `t` centres today
+  and `z` fits every row. `<` `>` move the cursor row's plan a day and `{` `}`
+  its start; with the mouse, drag a bar's middle or either end, or click an
+  empty day on a row with no plan. A move is written the way `moai edit --start
+  --due` writes it — refused past the deadline above — and the notice names the
+  `moai edit` line that puts it back. The gantt keeps its own folds, its detail
+  stands below at first, and the width of its fixed column is kept under `[tui]`
+  as `gantt_label`. (moai-i4hf)
 
 ### Changed
 
+- **`-` `=` `+` `H` `L` `[` `]` `t` `z` `<` `>` `{` `}` are now the gantt's keys
+  in the explorer.** They do nothing outside the gantt, but a `keys.toml` line
+  that gave one of them to another action now clashes and is dropped, with the
+  one-line notice — that action keeps its default key. Move it to a free key.
+  (moai-i4hf)
 - **`starts_on` is no longer refused on rows that are not milestones.** A binary
   from before this release still refuses it: it cannot edit an issue, epic or
   backlog item that carries a start — not even its title, and not `defer` — and
