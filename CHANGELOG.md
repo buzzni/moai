@@ -32,7 +32,9 @@ does not tag — see `CONTRIBUTING.md`.
   section. A non-ASCII title needs `--slug` (lowercase ASCII kebab case). It only
   creates: a page already standing there is refused and left as it is. The page
   is written in the checkout you are in, so in a worktree it rides that branch;
-  nothing is committed. `--dry-run` shows the path and the text. (moai-4s5n)
+  nothing is committed. `--dry-run` shows the path and the text. Run without
+  picking anything up, the hooks now count it as a change to the repository
+  (rule 2). (moai-4s5n)
 
 ### Fixed
 

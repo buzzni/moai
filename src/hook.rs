@@ -5384,6 +5384,28 @@ fn positionals(args: &[String]) -> Vec<&str> {
     out
 }
 
+/// `moai wiki learn` 이 쓸 자리 — 그 부름이 아니거나 아무것도 안 쓰면(`--dry-run`·도움말) 비었다(moai-4s5n.n7j).
+///
+/// 자리는 `<-C>/<wiki_dir>/lessons/<slug>.md` 다. `--slug` 가 없으면 제목에서 짓는 이름을 여기서 다시 짓지 않고
+/// `lessons/` 디렉터리를 댄다 — 규칙 2 가 묻는 것은 "저장소 안인가" 하나고, 그 답은 디렉터리로 같다. `wiki_dir` 은
+/// 이 세션 트래커의 설정이다 — `-C` 로 남의 저장소를 가리키면 그쪽 설정은 모르지만, 위키가 그 체크아웃 밑이라는
+/// 것은 같다.
+fn learn_writes(args: &[String], cfg: &Config) -> Vec<String> {
+    if !matches!(positionals(args).get(..2), Some(["wiki", "learn"]))
+        || asks_help(args)
+        || flag_words(args).any(|w| w == "--dry-run")
+    {
+        return Vec::new();
+    }
+    let mut at = flag_values(args, &["-C", "--dir"]).pop().map(PathBuf::from).unwrap_or_default();
+    at.push(&cfg.wiki_dir);
+    at.push(crate::wiki::learn::LESSONS);
+    if let Some(slug) = flag_values(args, &["--slug"]).pop() {
+        at.push(format!("{slug}.md"));
+    }
+    vec![at.to_string_lossy().into_owned()]
+}
+
 /// 이 토막이 **일을 새로 세우는가.**
 ///
 /// `moai add` 와 `moai issue add` 는 같은 일이다. 앞의 것만 보던 판은 뒤의
@@ -7555,6 +7577,10 @@ fn shell_scan(line: &Line<'_>, cfg: &Config, only: &dyn Fn(usize) -> bool) -> (V
             // `*spot` 이 안 서니([`find_under`]) 이 파일은 여기 것으로 읽힌다. 남은 것은 `~`·`..`
             // 로 시작하는 줄이다.
             Some("find") => found.extend(find_writes(&words[1..]).into_iter().map(|p| (p, off_site))),
+            // **`moai wiki learn` 은 저장소에 파일을 쓴다**(moai-4s5n.n7j) — 다른 `moai` 동사는 `.moai/` 만 고쳐
+            // 규칙 2 밖이지만([`SKIP`]), 이것은 위키 밑에 새 페이지를 짓는다. 셈하지 않던 판은 아무것도 안 쥔 채
+            // 친 `moai wiki learn` 이 `docs/lessons/` 에 파일을 남겼다.
+            Some("moai") => found.extend(learn_writes(&words[1..], cfg).into_iter().map(|p| (p, off_site))),
             _ => {}
         }
         // `cd` 뒤는 과녁이 어느 쪽이든 자리를 모른다 — 리다이렉션도 옮긴 자리에서 열린다.
@@ -11235,6 +11261,47 @@ mod tests {
     /// **2026-09-23 에 findutils 4.9 로 쟀다** — 넷 다 그 파일을 만들고, 술어가 아무것도 안 골라도
     /// (`-false`) 이미 있는 파일을 **0바이트로 비운다**. 값이 없으면 find 이
     /// `missing argument` 로 거절한다.
+    /// **`moai wiki learn` 은 저장소에 파일을 쓴다**(moai-4s5n.n7j). 다른 `moai` 동사는 `.moai/` 만 고쳐 규칙 2
+    /// 밖이고, 그 판에서는 이 명령도 통째로 지나갔다 — 2026-10-25 에 0.24.0 바이너리로 쟀다: 아무것도 안 쥔
+    /// 세션의 `moai wiki learn …` 은 거절 없이 지났고 `echo hi > src.txt` 는 규칙 2 에 막혔다.
+    #[test]
+    fn wiki_learn_counts_as_a_write() {
+        let all = vec![epic("t-e"), under("t-1", "in_progress", "t-e")];
+        let root = &abs("/repo");
+        for cmd in [
+            "moai wiki learn 'Do x' -b -",
+            "moai wiki learn 'Do x' --slug do-x -b -",
+            "moai --json wiki learn 'Do x' --issue none -b -",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert!(matches!(got, Decision::Deny(_)), "교훈 페이지 쓰기를 못 봤다 — {cmd}\n{got:?}");
+        }
+        // 슬러그를 주면 그 파일을 댄다 — 위키 디렉터리는 설정의 `wiki_dir` 이다.
+        let Decision::Deny(why) = guard_writes(&[], &cfg(), &here(), root, root, "moai wiki learn T --slug do-x")
+        else {
+            panic!("막지 않았다")
+        };
+        assert!(why.contains("docs/lessons/do-x.md"), "{why}");
+        // 안 쓰는 부름은 안 센다 — `--dry-run`·도움말, 그리고 다른 위키 동사와 다른 `moai` 동사.
+        for cmd in [
+            "moai wiki learn 'Do x' --dry-run -b -",
+            "moai wiki learn --help",
+            "moai wiki search learn",
+            "moai note t-1 'wiki learn'",
+            "echo moai wiki learn x",
+        ] {
+            let got = guard_writes(&[], &cfg(), &here(), root, root, cmd);
+            assert_eq!(got, Decision::Pass, "안 쓰는 부름을 막았다 — {cmd}");
+        }
+        // 집은 것이 있으면 지난다 — 같은 줄의 집기 뒤여도.
+        assert_eq!(guard_writes(&all, &cfg(), &here(), root, root, "moai wiki learn 'Do x' -b -"), Decision::Pass);
+        let picked = "moai mv t-1 in_progress && moai wiki learn 'Do x' -b -";
+        assert_eq!(
+            guard_writes(&[epic("t-e"), under("t-1", "todo", "t-e")], &cfg(), &here(), root, root, picked),
+            Decision::Pass
+        );
+    }
+
     #[test]
     fn a_file_find_writes_by_itself_is_a_write() {
         // `all` 은 집은 것이 있는 판, `held` 는 첫 칸에 선 판이다 — 이웃한 시험들과 같은 이름이다.
