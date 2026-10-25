@@ -31,7 +31,11 @@ IDS = re.compile(r"\s*\((?:moai-[0-9a-z]{4}(?:\.[0-9a-z]{3})*(?:\s*[,·]\s*|\s+)
 # 화면(탐색기·moai web)을 바꾼 항목. 이런 항목이 든 판의 소식에는 그림이 있어야 한다(2026-10-25 사용자 결정,
 # moai-r96m) — v0.24.0 이 새 간트를 글로만 올렸다. 낱말로 어림하니 `moai tui --json` 같은 것도 걸리지만, 알림
 # 한 줄이 헛도는 값이 그림 없이 나가는 값보다 싸다
-SCREEN = re.compile(r"\bexplorer\b|`moai (?:tui|web)\b|`SPC ", re.IGNORECASE)
+SCREEN = re.compile(r"\bexplorer\b|`moai (?:tui|web)\b|`SPC\b", re.IGNORECASE)
+# post.py 가 그림 메시지로 보내는 확장자 — post.MEDIA 와 같은 벌이다(test_compose 가 둘을 견준다). 가져오지 않고 옮겨 적은
+# 까닭은 `python3 -I` 가 스크립트의 디렉터리를 sys.path 에 안 넣어서다. `.cast` 같은 것을 그림으로 세면 알림은 조용한데
+# post.py 는 그 파일에서 멈춘다
+MEDIA = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".webm", ".mp4", ".mov"}
 # 마침표가 문장 끝이 아닌 줄임말 — `e.g. ` 에서 끊으면 요약이 "Use e.g" 가 된다
 ABBREV = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e|vs)\.$", re.IGNORECASE)
 
@@ -189,11 +193,17 @@ def screen_changes(changelog, version):
 
 
 def has_media(directory):
-    """post.py 가 그림 메시지로 보낼 파일이 media/ 에 하나라도 있는가 (글 파일 `.md` 는 안 센다)."""
+    """post.py 가 그림 메시지로 보낼 파일이 media/ 에 하나라도 있는가 — 글 파일(`.md`)·디렉터리·post.py 가 안 보내는
+    확장자는 안 센다."""
     media = os.path.join(directory, "media")
     if not os.path.isdir(media):
         return False
-    return any(not n.startswith(".") and not n.endswith(".md") for n in os.listdir(media))
+    return any(
+        not n.startswith(".")
+        and os.path.splitext(n)[1].lower() in MEDIA
+        and os.path.isfile(os.path.join(media, n))
+        for n in os.listdir(media)
+    )
 
 
 def main(argv=None):

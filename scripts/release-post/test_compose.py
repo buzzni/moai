@@ -213,6 +213,21 @@ class Pictures(unittest.TestCase):
             f.write(b"png")
         self.assertNotIn("touch the explorer", self.run_main("0.23.0")[1])
 
+    def test_a_file_post_py_would_not_send_is_not_a_picture(self):
+        # post.py 는 MEDIA 밖의 확장자에서 멈춘다 — 그것을 그림으로 세면 알림이 조용한 채 올리기가 깨진다
+        media = os.path.join(self.dir, "post", "media")
+        os.makedirs(os.path.join(media, "raw.png"))
+        with open(os.path.join(media, "tui-gantt.cast"), "w") as f:
+            f.write("{}")
+        self.assertIn("touch the explorer", self.run_main("0.23.0")[1])
+
+    def test_the_picture_extensions_are_the_ones_post_py_sends(self):
+        import post
+        self.assertEqual(compose.MEDIA, post.MEDIA)
+
+    def test_a_bare_spc_code_span_names_a_screen(self):
+        self.assertTrue(compose.SCREEN.search("The `SPC` menu takes the mouse."))
+
     def test_a_release_without_screen_changes_is_quiet(self):
         self.assertEqual(self.run_main("0.2.0"), (0, ""))
 

@@ -51,8 +51,9 @@ def scenes(repo):
         ],
         # 간트 (v0.24.0 의 Discord 소식, moai-r96m). 계획한 날은 record-tui.sh 가 plan.sh 로 달아 둔다.
         # 줄의 차례는 record-tui.sh 가 데모 설정에 적는 order 로 굳힌다 — 기본 차례는 같은 p 끼리 seed 마다 새로 뜨는 id 로 갈려 자리가 안
-        # 선다. 커서와 마우스는 'Sync attachments larger than 10 MB' 를 겨눈다(여섯째 줄, 화면 18 줄). 칸은 120 칸
-        # 창에서 맞힌 것이다 — 맞춘 화면에서 하루가 한 칸이고 67 이 그 막대의 가운데, 42 가 줄과 날짜 사이의 금.
+        # 선다. 커서와 마우스는 'Sync attachments larger than 10 MB' 를 겨눈다(여섯째 줄, 화면 18 줄). 칸은 120x40
+        # 창(make.sh 의 SIZE — record-tui.sh 의 기본 120x34 가 아니다. 낮은 창은 ▼ 줄을 접어 줄이 한 칸 올라간다)에서
+        # 맞힌 것이다 — 맞춘 화면에서 하루가 한 칸이고 67 이 그 막대의 가운데, 42 가 줄과 날짜 사이의 금.
         # 창 크기나 seed.sh·plan.sh 의 날을 바꾸면 여기와 make.sh 의 시각을 같이 본다
         'gantt': [
             (2.0, SPC), (0.7, 'g'), (0.6, 'g'),

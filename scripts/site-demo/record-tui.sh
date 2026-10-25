@@ -19,7 +19,7 @@ for scene in "${scenes[@]}"; do
   repo="$work/$scene/lantern"
   bash "$here/seed.sh" "$repo" >/dev/null
   # 간트는 계획한 날이 있어야 막대를 그린다 — 다른 장면의 그림이 안 바뀌게 그 장면에만 단다. 차례도 굳힌다:
-  # 기본 차례(priority, updated)는 같은 p 끼리 쓴 때로 갈려, 마우스가 겨눌 줄이 녹화마다 옮겨 간다
+  # 기본 차례(priority)는 같은 p 끼리 seed 마다 새로 뜨는 id 로 갈려(query::display_order), 마우스가 겨눌 줄이 녹화마다 옮겨 간다
   if [ "$scene" = gantt ]; then
     bash "$here/plan.sh" "$repo"
     printf '[tui]\norder = ["priority", "title"]\n' >> "$repo/.demo-home/config.toml"
