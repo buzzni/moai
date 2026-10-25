@@ -27270,12 +27270,16 @@ fn wiki_search_exit_codes_follow_wiki_ls() {
     std::fs::remove_file(s.path().join("docs/bad.md")).unwrap();
     let clean = ok(s.path(), &["wiki", "search", "merge", "--json"]);
     assert!(!clean.contains(r#""unread""#) && !clean.contains(r#""skipped""#), "{clean}");
-    let away = Scratch::new("wiki-search-away");
-    std::os::unix::fs::symlink(away.path(), s.path().join("docs/away")).unwrap();
-    let out = moai(s.path(), &["wiki", "search", "merge", "--json"]);
-    assert!(!out.status.success(), "건너뛴 자리를 두고 0 으로 냈다");
-    let listed = String::from_utf8_lossy(&out.stdout);
-    assert!(listed.contains(r#","skipped":[{"path":"docs/away","kind":"dir_link","said":"#), "{listed}");
+    // 디렉터리 링크는 unix 에서만 권한 없이 만든다 — Windows 는 개발자 모드나 관리자를 요구한다
+    #[cfg(unix)]
+    {
+        let away = Scratch::new("wiki-search-away");
+        std::os::unix::fs::symlink(away.path(), s.path().join("docs/away")).unwrap();
+        let out = moai(s.path(), &["wiki", "search", "merge", "--json"]);
+        assert!(!out.status.success(), "건너뛴 자리를 두고 0 으로 냈다");
+        let listed = String::from_utf8_lossy(&out.stdout);
+        assert!(listed.contains(r#","skipped":[{"path":"docs/away","kind":"dir_link","said":"#), "{listed}");
+    }
 }
 
 /// 워크트리 안에서 부르면 그 워크트리의 `docs/` 를 찾는다 — 트래커만 루트로 간다(`wiki ls` 와 같은 꼴).
