@@ -18,7 +18,9 @@ that changed nothing a person does writes nothing.
     moai wiki search <words>               the sections that hold those words, best first (`--json`)
 
 - **One directory.** `dir` in `moai wiki ls --json` names it — `docs` unless
-  `wiki_dir` in `.moai/config.toml` says otherwise. When it cannot be read, `error`
+  `wiki_dir` in `.moai/config.toml` says otherwise — relative to the checkout, and
+  `dir_abs` is the same directory as an absolute path in this checkout (absent only
+  for `outside`). When it cannot be read, `error`
   stands in place of `pages`, and its `kind` says why: `no_dir` is a repository with
   no wiki yet, `outside` and `not_a_dir` are a `wiki_dir` pointing where moai will
   not read — fix the key, not the pages — and `failed` is the disk refusing to open it

@@ -38,6 +38,7 @@ export const ENDPOINT = {
   projects: '/api/projects',
   wiki: '/api/wiki',
   wikiPage: (slug: string): Endpoint => ({ path: `/api/wiki/${slug.split('/').map(encodeURIComponent).join('/')}` }),
+  wikiSearch: (query: string): Endpoint => ({ path: '/api/wiki-search', query: { q: query } }),
 } as const
 
 export interface Rows {
@@ -243,6 +244,13 @@ export async function loadArchived(client: Client, options: { priority?: number;
 /** `moai wiki ls` as printed (a skipped page's partial answer included); the wiki view parses it. */
 export async function loadWikiListing(client: Client): Promise<Loaded<unknown>> {
   const outcome = await client.request({ path: ENDPOINT.wiki }, { priority: PRIORITY.wiki })
+  const output = answerOf(outcome)
+  return output === undefined ? { ok: false, outcome } : { ok: true, value: output }
+}
+
+/** `moai wiki search <query>` as printed; the wiki view reads its order (moai-xp7l.nyi). */
+export async function loadWikiSearch(client: Client, query: string): Promise<Loaded<unknown>> {
+  const outcome = await client.request(ENDPOINT.wikiSearch(query), { priority: PRIORITY.wiki })
   const output = answerOf(outcome)
   return output === undefined ? { ok: false, outcome } : { ok: true, value: output }
 }

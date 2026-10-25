@@ -147,6 +147,21 @@ export function parseWikiLs(input: unknown, words: WikiCopy = DEFAULT_WORDS): Pa
   return { ok: true, value: { dir, pages, skipped } }
 }
 
+/**
+ * `moai wiki search --json` (text or parsed): the slugs its hits stand on, best first, each once (a page's best
+ * section places it). Null when the answer is not that shape — the list then keeps the plain substring order.
+ */
+export function parseWikiSearch(input: unknown, words: WikiCopy = DEFAULT_WORDS): string[] | null {
+  const decoded = decodeJson(input, words)
+  if (!decoded.ok || !isObject(decoded.value) || !Array.isArray(decoded.value.hits)) return null
+  const out: string[] = []
+  for (const hit of decoded.value.hits) {
+    const slug = isObject(hit) ? str(hit.slug) : undefined
+    if (slug !== undefined && !out.includes(slug)) out.push(slug)
+  }
+  return out
+}
+
 /** `moai wiki show <slug> --json` (text or parsed): the page fields plus `body`. */
 export function parseWikiShow(input: unknown, words: WikiCopy = DEFAULT_WORDS): Parsed<WikiPage> {
   const decoded = decodeJson(input, words)
@@ -240,6 +255,37 @@ export function filterPages<T extends { slug: string; title: string; body?: stri
     return body !== undefined && body.toLowerCase().includes(q)
   })
 }
+
+/**
+ * The list for a query (moai-xp7l.nyi): the pages `moai wiki search` ranked, in its order, then the pages
+ * {@link filterPages} finds that it did not rank, in list order. The rank is moai's own (the CLI and the explorer
+ * use the same one), so the three surfaces agree; the substring half keeps the list narrowing while a word is half
+ * typed (`gui` ranks nothing, yet finds `guide`). Without a rank for this query it is the substring list alone.
+ */
+export function rankPages<T extends { slug: string; title: string; body?: string }>(
+  pages: ReadonlyArray<T>,
+  query: string,
+  bodies?: BodySource,
+  ranked?: ReadonlyArray<string> | null,
+): T[] {
+  const found = filterPages(pages, query, bodies)
+  if (!query.trim() || !ranked?.length) return found
+  const bySlug = new Map(pages.map((page) => [page.slug, page] as const))
+  const out: T[] = []
+  const seen = new Set<string>()
+  for (const slug of ranked) {
+    const page = bySlug.get(slug)
+    if (page && !seen.has(slug)) {
+      seen.add(slug)
+      out.push(page)
+    }
+  }
+  for (const page of found) if (!seen.has(page.slug)) out.push(page)
+  return out
+}
+
+/** How long the search field waits after the last key before it asks moai for the rank, in ms. */
+export const RANK_DELAY_MS = 150
 
 // ---- Link targets (port of moai `wiki::target`) ----
 
@@ -357,6 +403,8 @@ export interface WikiState {
 export interface WikiViewProps {
   /** Fetch one page (`moai wiki show <slug> --json`, parsed or not). */
   loadPage: (slug: string) => Promise<unknown>
+  /** Rank the pages for a query (`moai wiki search <query> --json`, parsed or not); without it the list is a substring filter. */
+  searchPages?: (query: string) => Promise<unknown>
   /** An issue id link was followed: the shell jumps to that row on the list tab. */
   onIssue?: (id: string) => void
   /** The list's share of the width (the `wiki_width` setting) after a drag or key press. */
@@ -441,6 +489,9 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
   let cursor: string | null = null
   let trail: TrailEntry[] = []
   let query = ""
+  /** The rank moai gave the query it was asked for — used only while that is still the query. */
+  let ranked: { query: string; slugs: string[] } | null = null
+  let rankTimer: ReturnType<typeof setTimeout> | null = null
   let raw = false
   let selected = -1
   let pane: WikiPane = "list"
@@ -483,7 +534,31 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
   const root = el(doc, "div", { class: "m-wiki", "data-pane": pane }, toolbar, split.el)
 
   // -- list --
-  const visiblePages = (): WikiPage[] => filterPages(pages, query, bodies)
+  const visiblePages = (): WikiPage[] =>
+    rankPages(pages, query, bodies, ranked && ranked.query === query.trim() ? ranked.slugs : null)
+
+  /**
+   * Ask moai for the rank of the query, once the keys stop. An answer for a query that is no longer typed is
+   * dropped; a failed one (a query with no words in it, moai out of reach) leaves the substring list as it was.
+   */
+  function askRank(): void {
+    if (rankTimer) clearTimeout(rankTimer)
+    rankTimer = null
+    const asked = query.trim()
+    if (!props.searchPages || !asked || ranked?.query === asked) return
+    rankTimer = setTimeout(() => {
+      rankTimer = null
+      props.searchPages!(asked).then(
+        (answer) => {
+          const slugs = parseWikiSearch(answer, words)
+          if (!slugs || query.trim() !== asked) return
+          ranked = { query: asked, slugs }
+          paintList()
+        },
+        () => {},
+      )
+    }, RANK_DELAY_MS)
+  }
   const titleOf = (slug: string): string => pages.find((p) => p.slug === slug)?.title ?? slug
 
   /**
@@ -810,6 +885,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
     if (search.input.value !== next) search.input.value = next
     root.dataset.searching = next.trim() ? "true" : "false"
     paintList()
+    askRank()
   }
 
   function focusSearch(): void {
@@ -1115,6 +1191,7 @@ export function createWikiView(doc: Document, props: WikiViewProps): WikiView {
       root.removeEventListener("focusin", onFocusIn)
       scroller.removeEventListener("click", onBodyClick)
       if (flashTimer) clearTimeout(flashTimer)
+      if (rankTimer) clearTimeout(rankTimer)
       split.destroy()
     },
   }
@@ -1145,6 +1222,7 @@ export const mountWiki: MountPane = (root, ctx): PaneView => {
   const view = createWikiView(doc, {
     words: copy.wiki,
     loadPage: (slug) => source.page(slug),
+    searchPages: source.search ? (query) => source.search!(query) : undefined,
     standaloneKeys: false,
     // An issue id in a page: the list tab, at the place the row is listed, with the row chosen.
     onIssue: (id) => {

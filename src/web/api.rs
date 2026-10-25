@@ -25,6 +25,8 @@ pub enum Param {
     Sort,
     Reverse,
     Worktree,
+    /// 위키 검색의 낱말(`wiki search -- <q>`, moai-xp7l.nyi) — 이름은 `q` 지만 `--grep` 이 아니라 자리 인자다.
+    Words,
 }
 
 impl Param {
@@ -37,6 +39,7 @@ impl Param {
             Param::Sort => "sort",
             Param::Reverse => "reverse",
             Param::Worktree => "worktree",
+            Param::Words => "q",
         }
     }
 }
@@ -69,6 +72,15 @@ pub const PROFILES: &[Profile] = &[
         without_archive: true,
     },
     Profile { route: "/api/wiki", head: &["wiki", "ls"], params: &[], without_archive: false },
+    // 위키 탭의 찾기가 순위를 받는 자리(moai-xp7l.nyi) — CLI·TUI 와 같은 자로 매긴다. 상한은 페이지의 목록이 다 서도록
+    // 넉넉히 둔다(순위는 절마다라 한 페이지가 여러 번 선다). `/api/wiki/<slug>` 밑에 두지 않는다 — `search` 라는 페이지와
+    // 겹친다.
+    Profile {
+        route: "/api/wiki-search",
+        head: &["wiki", "search", "-n", "2000"],
+        params: &[Param::Words],
+        without_archive: false,
+    },
     // 걸어 둔 프로젝트들 — 사용자 설정을 읽으니 어느 자리에서 돌아도 같은 답이다. 페이지는 그 `path` 를
     // `project=` 로 되돌려 보내 그 프로젝트를 읽는다([`super::project_of`]).
     Profile { route: "/api/projects", head: &["project", "ls"], params: &[], without_archive: false },
@@ -307,6 +319,12 @@ pub fn argv(profile: &Profile, query: &[(String, String)]) -> Result<Vec<String>
                 shape(name, value, VALUE_MAX)?;
                 out.push(format!("--grep={value}"));
             }
+            // `--` 뒤에 선다 — `-` 로 여는 낱말도 깃발로 안 읽힌다. 틀이 받는 이름이 이것 하나라 끝에 선다.
+            Param::Words => {
+                shape(name, value, VALUE_MAX)?;
+                out.push("--".to_string());
+                out.push(value.clone());
+            }
             Param::Fields => {
                 shape(name, value, VALUE_MAX)?;
                 if value != "id" {
@@ -515,6 +533,13 @@ mod tests {
             strs(&["tui", "--deep", "--worktree", "--no-archive"])
         );
         assert!(matches!(argv_of("/api/wiki", &q(&[("q", "x")])).unwrap(), Err(Bad::Unknown(_))));
+        // 위키 찾기의 낱말은 `--` 뒤의 자리 인자다(moai-xp7l.nyi).
+        assert_eq!(
+            argv_of("/api/wiki-search", &q(&[("q", "-x merge")])).unwrap().unwrap(),
+            strs(&["wiki", "search", "-n", "2000", "--", "-x merge"])
+        );
+        assert!(matches!(argv_of("/api/wiki-search", &q(&[("q", " ")])).unwrap(), Err(Bad::Empty(_))));
+        assert!(matches!(argv_of("/api/wiki-search", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
         // 받는 이름이 없는 끝점도 같은 자로 잰다 — 말없이 버리면 `?archived=1` 이 맨 보드로 답했다.
         assert!(matches!(argv_of("/api/wiki", &q(&[("worktree", "1")])).unwrap(), Err(Bad::Unknown(_))));
         assert!(matches!(argv_of("/api/status", &q(&[("archived", "1")])).unwrap(), Err(Bad::Unknown(_))));

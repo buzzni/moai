@@ -62,6 +62,19 @@ pub enum Side {
     Page,
 }
 
+/// [`Window::shown`] 이 매긴 차례를 찾는 글과 함께 든 값 — 값일 뿐이라 창끼리 견줄 때는 안 센다(없어도 같은 목록이
+/// 다시 매겨진다).
+#[derive(Debug, Clone, Default)]
+struct Ranked(std::cell::RefCell<Option<(String, Vec<usize>)>>);
+
+impl PartialEq for Ranked {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for Ranked {}
+
 /// 창의 상태 — 연 순간 읽은 페이지들과 커서·굴린 자리·건너온 자취.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window {
@@ -102,6 +115,8 @@ pub struct Window {
     pub(super) laid: Option<super::draw::WikiLaid>,
     /// 걸린 찾기 — 친 글 그대로. 비면 없다.
     search: Option<String>,
+    /// 찾는 글 하나로 매긴 목록의 차례 — [`Window::shown`] 이 그 글이 바뀔 때만 다시 매긴다(그림 한 번에 여러 번 부른다).
+    ranked: Ranked,
     /// 찾는 글을 치는 중 — 칸과, 칸을 열기 전의 찾기. Esc 가 그 찾기로 돌아간다.
     pub typing: Option<Typing>,
     /// 연 순간의 id 제목.
@@ -198,6 +213,7 @@ impl Window {
             chord: Chord::default(),
             laid: None,
             search: None,
+            ranked: Ranked::default(),
             typing: None,
             titles,
             choose: None,
@@ -344,17 +360,46 @@ impl Window {
         self.typing.is_none() && self.query().is_some()
     }
 
-    /// 목록에 선 페이지들, 차례대로 — 찾는 글이 있으면 **제목이나 본문에 그 글이 든** 페이지만이다. 견주는 법은
-    /// 거름망과 같은 `to_lowercase` 다(`query::Filter`) — 페이지 쪽은 연 순간 접어 둔 것([`Window::folded`])이다. 못
-    /// 읽은 페이지는 제목으로만 걸린다.
+    /// 목록에 선 페이지들, 차례대로 — 찾는 글이 있으면 **`moai wiki search` 가 맞힌 페이지가 그 순위대로 먼저**
+    /// 서고(moai-xp7l.nyi, 페이지마다 가장 높은 절의 자리), 그다음 **제목이나 본문에 그 글이 든** 페이지가 위키 차례로
+    /// 선다. 세 표면(CLI·TUI·web)이 같은 질의에 다른 차례를 내지 않게 순위는 같은 자([`crate::wiki::search::rank`])다.
+    /// 글자 거름을 남기는 까닭은 치는 중이라서다 — 순위는 낱말로 맞히니 `gui` 는 `guide` 를 못 맞히는데, 치는 대로
+    /// 좁히던 목록이 낱말을 다 칠 때까지 비면 안 된다. 견주는 법은 거름망과 같은 `to_lowercase` 다(`query::Filter`) —
+    /// 페이지 쪽은 연 순간 접어 둔 것([`Window::folded`])이다. 못 읽은 페이지는 제목으로만 걸린다.
     pub fn shown(&self) -> Vec<&Page> {
-        let Some(q) = self.query().map(str::to_lowercase) else { return self.pages.iter().collect() };
-        self.pages
-            .iter()
-            .zip(&self.folded)
-            .filter(|(_, (title, body))| title.contains(&q) || body.as_deref().is_some_and(|b| b.contains(&q)))
-            .map(|(p, _)| p)
-            .collect()
+        let Some(q) = self.query() else { return self.pages.iter().collect() };
+        let mut ranked = self.ranked.0.borrow_mut();
+        if ranked.as_ref().is_none_or(|(was, _)| was != q) {
+            *ranked = Some((q.to_string(), self.order_for(q)));
+        }
+        ranked.as_ref().map_or_else(Vec::new, |(_, order)| order.iter().map(|&i| &self.pages[i]).collect())
+    }
+
+    /// [`Window::shown`] 의 차례를 매긴다 — 순위로 맞힌 페이지, 그다음 글자로만 든 페이지. 겹치면 앞의 것이다.
+    fn order_for(&self, q: &str) -> Vec<usize> {
+        let at: std::collections::HashMap<&str, usize> =
+            self.pages.iter().enumerate().map(|(i, p)| (p.slug.as_str(), i)).collect();
+        let mut seen = vec![false; self.pages.len()];
+        let mut out = Vec::new();
+        let mut take = |i: usize, out: &mut Vec<usize>| {
+            if !std::mem::replace(&mut seen[i], true) {
+                out.push(i);
+            }
+        };
+        if !crate::wiki::search::terms(q).is_empty() {
+            for h in crate::wiki::search::rank(&self.pages, q, usize::MAX).hits {
+                if let Some(&i) = at.get(h.page.slug.as_str()) {
+                    take(i, &mut out);
+                }
+            }
+        }
+        let q = q.to_lowercase();
+        for (i, (title, body)) in self.folded.iter().enumerate() {
+            if title.contains(&q) || body.as_deref().is_some_and(|b| b.contains(&q)) {
+                take(i, &mut out);
+            }
+        }
+        out
     }
 
     /// 찾는 글이 바뀐 뒤 커서를 다시 세운다 — **보던 페이지가 남았으면 그 페이지에** 선다. 빠졌으면 첫 줄이고, 본문은
@@ -1491,6 +1536,25 @@ pub(super) mod tests {
         assert_eq!(a.mode, Mode::Browse);
     }
 
+    /// **`/` 의 차례는 `moai wiki search` 의 순위다**(moai-xp7l.nyi) — 낱말로 맞은 페이지가 순위대로 먼저 서고, 글자로만 든
+    /// 페이지(`zebras`)는 그 뒤에 위키 차례로 선다. 위키 차례(홈 먼저, 제목 차례)와 다르다.
+    #[test]
+    fn slash_orders_the_pages_by_the_search_rank() {
+        let pages: &[(&str, &str)] = &[
+            ("README.md", "# Home\n\nA zebra once.\n"),
+            ("a.md", "# Zebra\n\nzebra zebra zebra\n"),
+            ("b.md", "# B\n\nMany zebras.\n"),
+        ];
+        let (_s, mut a) = wiki_app("search-rank", pages);
+        a.hit("SPC g w");
+        assert_eq!(slugs(&a), ["README", "b", "a"], "위키 차례가 바뀌었다");
+        a.hit("/ z e b r a Enter");
+        assert_eq!(slugs(&a), ["a", "README", "b"], "순위대로 안 섰다");
+        // 낱말을 다 치기 전에도 글자로 좁힌다.
+        a.hit("/ Bksp Bksp");
+        assert_eq!(slugs(&a), ["README", "b", "a"], "치는 중의 글자 거름이 빠졌다");
+    }
+
     /// **찾는 동안의 화면** — 아래에 칸이 서고, 하나도 안 걸리면 목록과 칸 곁이 그렇다고 댄다. 걸린 찾기는 목록 머리에
     /// 서고, 본문은 맞은 글을 칠한다(글자만 보는 이 시험은 칠은 못 보고 머리를 본다). 치는 동안은 마우스를 놓는다.
     #[test]
@@ -1511,7 +1575,8 @@ pub(super) mod tests {
         assert!(lines.last().unwrap().contains("Esc 풀기"), "Esc 가 찾기를 푼다고 안 댔다: {:?}", lines.last());
         // 붙여넣기는 치는 칸에만 들어간다.
         a.paste("x");
-        assert_eq!(slugs(&a), ["README", "guide"], "칸 없이 붙여넣기가 찾기를 바꿨다");
+        // 순위가 먼저다 — 제목이 `Guide` 인 페이지가 본문에만 든 README 앞에 선다(moai-xp7l.nyi).
+        assert_eq!(slugs(&a), ["guide", "README"], "칸 없이 붙여넣기가 찾기를 바꿨다");
         a.hit("/ Bksp Bksp Bksp Bksp Bksp");
         a.paste("deep");
         assert_eq!(slugs(&a), ["notes/deep", "guide"]);

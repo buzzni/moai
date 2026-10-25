@@ -122,8 +122,10 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
             .filter_map(|p| Some(UnreadOut { slug: &p.slug, path: &p.path, error: told_unread(ctx.lang(), p)? }))
             .collect();
         let skipped = skipped_out(ctx.lang(), &wiki.skipped);
+        let abs = dir_abs(repo.here(), &dir, None);
         return super::json_line(&Searched {
             dir: &dir,
+            dir_abs: abs.as_deref(),
             query: &query,
             terms: &found.terms,
             hits,
@@ -143,6 +145,9 @@ pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
 #[derive(serde::Serialize)]
 struct Searched<'a> {
     dir: &'a str,
+    /// `wiki ls --json` 의 `dir_abs` 와 같은 값이다 — 거절의 꼴(`{dir,dir_abs,error}`)과 한 키로 서게.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dir_abs: Option<&'a str>,
     query: &'a str,
     terms: &'a [String],
     hits: Vec<HitOut<'a>>,
