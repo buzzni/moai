@@ -67,6 +67,30 @@ fn unshifted(lang: crate::i18n::Lang, why: Unshifted, id: &str) -> String {
 }
 
 /// 잡은 막대의 부분 → 옮기는 날.
+/// 간트 머리의 달 이름과 그것을 엮는 차례를 화면 말로 채운다. 위젯의 기본은 영어 약어다.
+pub(super) fn names_in(lang: crate::i18n::Lang) -> moai_gantt::Names {
+    moai_gantt::Names {
+        // 키는 `say` 에 글자째 적어야 번역표 시험이 부르는 키로 센다 — 반복문으로 만들지 않는다.
+        months: [
+            say(lang, "tui.gantt.month_1"),
+            say(lang, "tui.gantt.month_2"),
+            say(lang, "tui.gantt.month_3"),
+            say(lang, "tui.gantt.month_4"),
+            say(lang, "tui.gantt.month_5"),
+            say(lang, "tui.gantt.month_6"),
+            say(lang, "tui.gantt.month_7"),
+            say(lang, "tui.gantt.month_8"),
+            say(lang, "tui.gantt.month_9"),
+            say(lang, "tui.gantt.month_10"),
+            say(lang, "tui.gantt.month_11"),
+            say(lang, "tui.gantt.month_12"),
+        ]
+        .map(String::from),
+        month_year: say(lang, "tui.gantt.month_year").to_string(),
+        month_day: say(lang, "tui.gantt.month_day").to_string(),
+    }
+}
+
 fn edge_of(part: moai_gantt::Part) -> Edge {
     match part {
         moai_gantt::Part::Start => Edge::Start,
@@ -784,6 +808,20 @@ mod tests {
         assert!(screen.contains("아직 계획 날짜가 없다"), "날을 넣는 길을 안 댔다\n{screen}");
         let screen = draw::tests::render(&mut app(), 160, 20).join("\n");
         assert!(!screen.contains("아직 계획 날짜가 없다"), "날이 있는데 없다고 했다");
+    }
+
+    /// **머리의 달 이름은 화면 말이다**(moai-9p7z) — 한국어 화면에 "Oct 2026" 이 서지 않고, 영어 화면은 옛 그대로다.
+    #[test]
+    fn the_header_months_follow_the_screen_language() {
+        let mut a = app();
+        a.site.lang = crate::i18n::Lang::Ko;
+        a.hit("SPC g g");
+        let ko = draw::tests::render(&mut a, 160, 20).join("\n");
+        assert!(ko.contains("10월"), "한국어 화면의 머리에 10월 이 없다\n{ko}");
+        assert!(!ko.contains("Oct"), "한국어 화면에 영어 달 이름이 남았다\n{ko}");
+        a.site.lang = crate::i18n::Lang::En;
+        let en = draw::tests::render(&mut a, 160, 20).join("\n");
+        assert!(en.contains("Oct"), "영어 화면의 머리에 Oct 가 없다\n{en}");
     }
 
     /// 낮은 창에서는 머리의 오늘(`▼`) 줄을 접고 그 줄을 본문에 준다. 높은 창에서는 선다.

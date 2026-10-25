@@ -60,16 +60,21 @@ impl Zoom {
     }
 }
 
-/// 달 이름. 부르는 쪽이 i18n 으로 채우고, 기본은 영어 약어다.
+/// 달 이름과 그것을 엮는 차례. 부르는 쪽이 i18n 으로 채우고, 기본은 영어 약어다.
+/// 차례는 말마다 달라("Oct 2026" ↔ "2026년 10월") 이름만 바꾸면 한국어가 "10월 2026" 으로 읽힌다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Names {
     pub months: [String; 12],
+    /// 달 + 해 머리글의 틀. 자리는 `{month}`·`{year}`.
+    pub month_year: String,
+    /// 달 + 날 머리글의 틀. 자리는 `{month}`·`{day}`.
+    pub month_day: String,
 }
 
 impl Default for Names {
     fn default() -> Self {
         const EN: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        Names { months: EN.map(String::from) }
+        Names { months: EN.map(String::from), month_year: "{month} {year}".into(), month_day: "{month} {day}".into() }
     }
 }
 
@@ -299,10 +304,10 @@ impl Unit {
         match self {
             Unit::Hour3 => format!("{:02}", start.rem_euclid(DAY) / 3_600),
             Unit::Day => d.to_string(),
-            Unit::DayHead => format!("{mon} {d}"),
+            Unit::DayHead => names.month_day.replace("{month}", mon).replace("{day}", &d.to_string()),
             Unit::IsoWeek => format!("W{}", iso_week(day).1),
             Unit::Month => mon.clone(),
-            Unit::MonthYear => format!("{mon} {y}"),
+            Unit::MonthYear => names.month_year.replace("{month}", mon).replace("{year}", &y.to_string()),
             Unit::Year => y.to_string(),
         }
     }
@@ -532,6 +537,15 @@ mod tests {
         n.months[9] = "10월".into();
         let a = Axis::new(Zoom::Day, d(2026, 10, 20) * DAY);
         assert_eq!(a.header(48, 0, &n).upper[0].text, "10월 2026");
+    }
+
+    #[test]
+    fn the_order_of_month_and_year_comes_from_the_caller() {
+        let mut n = Names::default();
+        n.months[9] = "10월".into();
+        n.month_year = "{year}년 {month}".into();
+        let a = Axis::new(Zoom::Day, d(2026, 10, 20) * DAY);
+        assert_eq!(a.header(48, 0, &n).upper[0].text, "2026년 10월");
     }
 
     #[test]
