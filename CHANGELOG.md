@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-25
+
 ### Added
 
 - **The web page has a Gantt tab (`SPC g g`).** The tree, every folder open, stays on
