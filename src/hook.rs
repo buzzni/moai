@@ -5547,7 +5547,9 @@ pub struct Away {
     /// 한다는 moai-hze6 의 자를 어긴다. 사람의 결정도 "확실히 집은 줄" 이었다. 남의 세션이 마지막으로 집은
     /// 줄은 여기 안 들어 전처럼 이름이 가른다. 받아들인 대가 둘: 감독의 `Stop` 이 서브에이전트 일꾼이 집은
     /// 줄까지 붙들고(같은 세션 id), 그 줄을 집은 세션은 워크트리가 선 동안에도 루트를 고친다 — 규칙 2 가
-    /// 그것을 "빈손" 으로 막던 것은 이름이 낳은 부산물이었다(사용자 결정, 초점은 한 자다).
+    /// 그것을 "빈손" 으로 막던 것은 이름이 낳은 부산물이었다(사용자 결정, 초점은 한 자다). **둘째 대가는 걷혔다**
+    /// (moai-9js2.3xn, 2026-10-25 사용자 결정) — 쥔 줄이 모두 제 워크트리를 가지면 규칙 2 가 루트 쓰기를 빈손이
+    /// 아니라 그 워크트리의 자리를 대며 막는다([`homed`], [`Away::homes`]).
     pub sure: BTreeSet<String>,
     /// 이 세션의 사람(moai-0zjo, 2026-10-02 사용자 결정) — **담당이 내가 아닌 줄**은 초점([`held`])에서 뺀다.
     /// 남이 집은 줄도, 담당 없이 시작 칸에 선 줄도 내 일이 아니다. 담당은 줄마다 보고 묶음에서 물려받지
@@ -5557,8 +5559,12 @@ pub struct Away {
     /// 줄의 담당을 실제로 가르는 규칙만 부른다.
     pub me: Person,
     /// 이 세션이 **main 체크아웃에 섰을 때** 옆 딸린 워크트리마다 그 moai 뿌리와 이름 후보(moai-9js2.3xn,
-    /// [`homed`]). 딸린 워크트리에 선 세션은 비어 있다 — 그 세션의 쓰기는 이미 제 워크트리고, Claude Code 의
-    /// 격리 가드도 거기 선다. 마일스톤 워크트리는 일하는 자리가 아니라서 안 든다(`worktree::is_milestone`).
+    /// [`homed`]). 마일스톤 워크트리는 일하는 자리가 아니라서 안 든다(`worktree::is_milestone`).
+    ///
+    /// **딸린 워크트리에 선 세션은 비어 있다** — 훅이 세는 자리가 그 워크트리라([`counted`]) 상대 경로의 쓰기는 이미
+    /// 거기 떨어진다. **그 자리의 세션도 루트를 절대 경로로는 고칠 수 있다**(리뷰 moai-9js2.s4s): Claude 세션은 이제
+    /// `EnterWorktree` 로 안 들어 격리 가드가 없고, 셸의 `cd` 가 다음 부름까지 남아 훅의 `cwd` 가 그 워크트리로
+    /// 옮겨 간다. 그 틈은 글이 막는다 — 일꾼 글이 `cd` 를 하위 셸에 가두라고 이른다(`guide::STAY_IN_ROOT`).
     pub homes: Vec<(PathBuf, BTreeSet<String>)>,
 }
 
@@ -6350,7 +6356,7 @@ pub fn guard_edit(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, targ
 
 /// [`guard_edit`] 과 같은 것 — **푼 자리와 사람이 친 철자를 따로 받는다.**
 ///
-/// 가른 까닭은 껍데기에서 캔 쓰기다. [`guard_writes_in`] 은 `cwd.join(<친 낱말>)` 을 지어 넘기는데,
+/// 가른 까닭은 껍데기에서 캔 쓰기다. [`guard_writes_in`] 은 `cwd.join(<친 낱말>)` 을 지어 같은 몸통([`edit_held`])에 넘기는데,
 /// 한 인자로 받던 판은 그것을 글자로 풀어 다시 `PathBuf` 로 되돌리면서 **사람이 친 낱말을 잃었다** —
 /// [`shown`] 이 뿌리를 못 떼는 자리(세션의 `cwd` 가 링크인 기계)에서 되돌려 줄 철자가 moai 가 지은
 /// 절대 경로여서, 사람이 친 적 없는 자리를 옮겨 치라고 내밀었다. `moai-fr0a` 가 `Edit`·`Write`
@@ -6359,22 +6365,26 @@ fn guard_edit_at(issues: &[Issue], cfg: &Config, away: &Away, root: &Path, at: &
     if !counted(at, root) {
         return Decision::Pass;
     }
-    edit_held(issues, cfg, away, &held(issues, cfg, away), root, at, typed)
+    let focus = held(issues, cfg, away);
+    edit_held(issues, cfg, away, &focus, &homes_of(issues, away, &focus), root, at, typed)
 }
 
-/// [`guard_edit_at`] 의 몸통 — **초점은 부르는 쪽이 지어 건넨다.** 껍데기의 쓰기는 경로가 여럿이라
-/// ([`guard_writes_in`]) 경로마다 초점을 다시 지으면 [`held`] 가 그만큼 돈다.
+/// [`guard_edit_at`] 의 몸통 — **초점과 그 자리는 부르는 쪽이 한 번 지어 건넨다**([`held`]·[`homes_of`]). 껍데기의
+/// 쓰기는 경로가 여럿이라([`guard_writes_in`]) 경로마다 지으면 소속 재료를 그만큼 다시 짓는다. 셀 자리인지는 부르는
+/// 쪽이 이미 쟀다([`counted`]).
+#[allow(clippy::too_many_arguments)]
 fn edit_held(
     issues: &[Issue],
     cfg: &Config,
     away: &Away,
     focus: &[&Issue],
+    homes: &[(&Issue, &Path)],
     root: &Path,
     at: &Path,
     typed: &str,
 ) -> Decision {
     if !focus.is_empty() {
-        return homed(issues, away, focus, root, at, typed);
+        return homed(away, homes, root, at, typed);
     }
     // **내 줄만 내민다**(moai-0zjo 리뷰) — `moai ready` 가 내 것만 내미는 것과 같은 자다([`Away::me`],
     // [`report::owner`]). 남의 줄이나 담당 없는 줄을 내밀면 시킨 대로 친 줄이 규칙 5 에 막히고, 아래의
@@ -6394,7 +6404,7 @@ fn edit_held(
     // 앞 세션은 이미 넘긴 일에 붙들리고 이 세션은 빈손으로 여기 막힌다. 지금 낫는 길은 맨 줄로 한 번
     // 더 집는 것뿐인데 그 안내가 어디에도 없어, 막힌 쪽이 왜 막혔는지조차 몰랐다.
     //
-    // **여기 오는 줄은 이 세션이 못 쥔 것뿐이다** — 쥔 것이 있으면 위에서 이미 지나갔다([`held`]).
+    // **여기 오는 줄은 이 세션이 못 쥔 것뿐이다** — 쥔 것이 있으면 위에서 [`homed`] 가 이미 답했다([`held`]).
     //
     // **칸은 그 줄이 선 칸이다 — `in_progress` 를 박지 않는다**(리뷰). [`report::wip`] 은 **시작한
     // 칸 전부**를 내므로(`Config::is_started`) 그 줄이 `review` 일 수 있는데, 거기에 `in_progress` 를
@@ -6439,35 +6449,78 @@ fn edit_held(
 /// - **초점의 줄마다 그 줄을 가장 가까이 가리키는 옆 워크트리**([`report::nearness`])를 찾는다. 하나라도 제
 ///   워크트리가 없는 줄이 있으면 지난다 — 워크트리를 띄우기 전(집고 `worktree add` 하는 사이)과, 워크트리 없이
 ///   루트에서 하기로 한 일을 막지 않는다
-/// - **거절문이 같은 파일의 워크트리 경로를 낸다** — 리뷰 이슈의 규칙 3 처럼 시킨 대로 치면 지난다
+/// - **거절문이 같은 파일의 워크트리 경로를 낸다** — 리뷰 이슈의 규칙 3 처럼 시킨 대로 치면 지난다. **자리가 여럿이면
+///   다 댄다**(리뷰 moai-9js2.s4s) — 서브에이전트 일꾼은 감독과 세션 id 를 나눠 써 둘의 집기가 한 초점에 서는데, 첫
+///   줄의 자리 하나만 대던 판은 다른 일꾼의 쓰기를 남의 가지로 보냈다
+/// - **딸린 워크트리 안의 쓰기는 루트의 것이 아니다**(리뷰 moai-9js2.s4s) — `.worktrees/` 밑은 [`counted`] 가 이미
+///   빼지만, 그 밖의 자리에 띄운 워크트리(이 저장소의 `.aplus/worktrees/…`)는 뿌리 밑이라 세어진다. 안 빼던 판은 그
+///   파일을 막고 그 경로를 한 번 더 이어 붙인 자리를 내밀었다 — 그 자리도 같은 까닭으로 막혀 끝이 없었다
 /// - 사람은 훅을 안 지나니 터미널에서 고치는 것은 안 막힌다. 딸린 워크트리에 선 세션은 [`Away::homes`] 가 비어 있다
-fn homed(issues: &[Issue], away: &Away, focus: &[&Issue], root: &Path, at: &Path, typed: &str) -> Decision {
-    if away.homes.is_empty() {
+///
+/// **초점이 모두 제 워크트리를 가졌는가는 부르는 쪽이 한 번 잰다**([`homes_of`]) — 그 답은 경로에 안 달리지만, 이
+/// 물음은 경로마다 다르다(딸린 워크트리 안이면 지난다). 껍데기의 쓰기가 여럿이면 경로마다 여기를 부른다.
+fn homed(away: &Away, found: &[(&Issue, &Path)], root: &Path, at: &Path, typed: &str) -> Decision {
+    if found.is_empty() {
         return Decision::Pass;
     }
+    let real = real_path(at);
+    if away.homes.iter().any(|(home, _)| real.starts_with(home)) {
+        return Decision::Pass;
+    }
+    // **워크트리 쪽 자리는 뿌리에서 뗀 조각으로 짓는다**(리뷰 moai-9js2.s4s). [`shown`] 은 뿌리 밑으로 안 떨어지는
+    // 철자(링크를 지나 친 절대 경로, 링크인 `cwd` 에서 친 상대 경로)를 친 그대로 돌려주는데, 그것을 워크트리 뒤에
+    // 이으면 없는 자리를 내민다. 친 철자가 뿌리 밑이면 그것을, 아니면 [`counted`] 가 뿌리 밑임을 이미 잰 푼 자리를
+    // 뗀다. 잇는 것도 글자가 아니라 `Path::join` 이다.
+    let rel = [at, real.as_path()].into_iter().find_map(|p| p.strip_prefix(root).ok());
+    let spell = |p: &Path| crate::path::slashed(&p.to_string_lossy(), cfg!(windows));
+    let there = |home: &Path| rel.map_or_else(|| spell(home), |rel| spell(&home.join(rel)));
+    let what = shown(at, root, typed);
+    let text = match found {
+        &[(row, home)] => format!(
+            "Changing {what} in the root checkout while holding {}, whose worktree stands at {}.\n\
+         The root is shared by every session. Write the same file in the worktree instead:\n\
+         \x20 {}\n\
+         If the change is not part of {}, pick up the work it belongs to and call again.",
+            row.id,
+            spell(home),
+            there(home),
+            row.id
+        ),
+        many => format!(
+            "Changing {what} in the root checkout while holding work whose worktrees stand beside it.\n\
+         The root is shared by every session. Write the same file in the worktree of the work it belongs to:\n\
+         {}\n\
+         If the change is part of none of them, pick up the work it belongs to and call again.",
+            many.iter()
+                .map(|&(row, home)| format!("\x20 {}   ({})", there(home), row.id))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
+    };
+    refuse(2, text)
+}
+
+/// [`homed`] 가 댈 자리 — 초점의 줄마다 그 줄을 가장 가까이 가리키는 옆 워크트리, 겹치는 자리는 한 번씩(초점 차례).
+/// **하나라도 제 워크트리가 없는 줄이 있으면 비어 있다** — 그러면 [`homed`] 가 지난다. 옆 워크트리의 자리가 없거나
+/// 초점이 비면 소속 재료를 안 짓는다.
+fn homes_of<'a, 'h>(issues: &'a [Issue], away: &'h Away, focus: &[&'a Issue]) -> Vec<(&'a Issue, &'h Path)> {
+    if away.homes.is_empty() || focus.is_empty() {
+        return Vec::new();
+    }
     let ties = report::Ties::of(issues);
-    let mut first = None;
-    for i in focus {
+    let mut found: Vec<(&Issue, &Path)> = Vec::new();
+    for &i in focus {
         let home = away
             .homes
             .iter()
             .filter_map(|(path, names)| report::nearness(&ties, names, i).map(|d| (d, path)))
             .min_by_key(|(d, _)| *d);
-        let Some((_, path)) = home else { return Decision::Pass };
-        first.get_or_insert((i, path));
+        let Some((_, path)) = home else { return Vec::new() };
+        if !found.iter().any(|(_, p)| *p == path.as_path()) {
+            found.push((i, path.as_path()));
+        }
     }
-    let Some((row, home)) = first else { return Decision::Pass };
-    let rel = shown(at, root, typed);
-    let home = crate::path::slashed(&home.to_string_lossy(), cfg!(windows));
-    refuse(
-        2,
-        format!(
-            "Changing {rel} in the root checkout while holding {}, whose worktree stands at {home}.\n\
-         The root is shared by every session. Write the same file in the worktree instead:\n\
-         \x20 {home}/{rel}",
-            row.id
-        ),
-    )
+    found
 }
 
 /// 규칙 2 의 껍데기 쪽 — **`Bash` 로 쓰는 파일도 센다.**
@@ -6504,8 +6557,9 @@ fn guard_writes_in(
     // `git` 을 두 번 띄운다. `2>/dev/null`·`| tee /tmp/…` 처럼 저장소 밖에 쓰는 흔한 줄이 그 값을 안 치르게,
     // 경로를 푸는 것(파일 계통만 묻는다)이 먼저다.
     //
-    // **친 낱말을 그대로 넘긴다**([`guard_edit_at`]) — 글자로 풀어 넘기면 [`shown`] 이 되돌려 줄 철자가 moai 가
+    // **친 낱말을 그대로 넘긴다**([`edit_held`]) — 글자로 풀어 넘기면 [`shown`] 이 되돌려 줄 철자가 moai 가
     // 지은 절대 경로가 되고, 푸는 일도 한 벌 더 돈다.
+    //
     let inside: Vec<(PathBuf, &String)> = writes
         .iter()
         .map(|path| (resolve_path(&cwd.join(&*native(path, cfg!(windows))), root), path))
@@ -6514,12 +6568,14 @@ fn guard_writes_in(
     if inside.is_empty() {
         return Decision::Pass;
     }
-    let focus = held(issues, scan.cfg(), away);
-    if !focus.is_empty() && away.homes.is_empty() {
-        return Decision::Pass;
-    }
+    // **지을 것은 한 번, 묻는 것은 경로마다**(리뷰 moai-9js2.s4s) — 초점과 그 자리([`homes_of`])는 경로에 안 달려
+    // 한 번 짓는다. 경로마다 짓던 판은 지나가는 판에서 그 수만큼 소속 재료를 다시 지었다. 묻는 것은 경로마다다 — 딸린
+    // 워크트리 안의 쓰기는 지나고 루트의 쓰기는 막힌다([`homed`]). 빈손 거절은 첫 경로에서 선다.
+    let cfg = scan.cfg();
+    let focus = held(issues, cfg, away);
+    let homes = homes_of(issues, away, &focus);
     for (at, path) in &inside {
-        if let deny @ Decision::Deny(_) = edit_held(issues, scan.cfg(), away, &focus, root, at, path) {
+        if let deny @ Decision::Deny(_) = edit_held(issues, cfg, away, &focus, &homes, root, at, path) {
             return deny;
         }
     }
@@ -9161,6 +9217,44 @@ mod tests {
         // 워크트리 안에 쓰는 것, 트래커에 쓰는 것은 지난다.
         assert_eq!(guard_edit(&all, &cfg(), &homed, &root, "/repo/.worktrees/t-e/src/store.rs"), Decision::Pass);
         assert_eq!(guard_edit(&all, &cfg(), &homed, &root, ".moai/issues.jsonl"), Decision::Pass);
+        // 쥔 일과 상관없는 쓰기라면 그 일을 집으라는 길도 댄다(리뷰 moai-9js2.s4s) — 서브에이전트 일꾼의 집기를 함께 쥔 감독이다.
+        assert!(why.contains("pick up the work it belongs to"), "딴 일의 쓰기에 길을 안 댄다 — {why}");
+
+        // **자리가 `/` 로 끝나도 겹치지 않는다**(리뷰 moai-9js2.s4s) — 꼭대기 뿌리의 자리는 `join("")` 이 끝에 가름선을
+        // 더한 철자로 올 수 있다. 글자로 잇던 판은 `…/t-e//src/store.rs` 를 냈다.
+        let slash = Away { homes: vec![(home.join(""), set(&["t-e", "worktree-t-e"]))], ..homed.clone() };
+        let why = denied(&guard_edit(&all, &cfg(), &slash, &root, "src/store.rs")).to_string();
+        assert!(why.contains(&format!("{}/src/store.rs", spelt("/repo/.worktrees/t-e"))), "{why}");
+        assert!(!why.contains("t-e//"), "가름선이 겹쳤다 — {why}");
+
+        // **딸린 워크트리 안의 쓰기는 루트의 것이 아니다**(리뷰 moai-9js2.s4s) — `.worktrees/` 밖에 띄운 워크트리(이
+        // 저장소의 `.aplus/worktrees/…`)는 뿌리 밑이라 세어진다. 막던 판은 그 경로를 한 번 더 이은 자리를 내밀었다.
+        let aplus = Away { homes: vec![(abs("/repo/.aplus/worktrees/t-e"), set(&["t-e"]))], ..homed.clone() };
+        assert_eq!(guard_edit(&all, &cfg(), &aplus, &root, "/repo/.aplus/worktrees/t-e/src/store.rs"), Decision::Pass);
+        let why = denied(&guard_edit(&all, &cfg(), &aplus, &root, "src/store.rs")).to_string();
+        assert!(why.contains(&format!("{}/src/store.rs", spelt("/repo/.aplus/worktrees/t-e"))), "{why}");
+        // 껍데기의 쓰기는 경로마다 묻는다 — 앞의 것이 딸린 워크트리 안이라고 뒤의 루트 쓰기를 넘기지 않는다.
+        let pair = "echo x > /repo/.aplus/worktrees/t-e/a.rs; echo y > src/store.rs";
+        assert!(denied(&guard_writes(&all, &cfg(), &aplus, &root, &root, pair)).contains("src/store.rs"), "{pair}");
+
+        // **쥔 일의 워크트리가 여럿이면 다 댄다**(리뷰 moai-9js2.s4s) — 감독의 서브에이전트 일꾼 둘은 세션 id 를 나눠 써
+        // 한 초점에 선다. 첫 줄의 자리 하나만 대던 판은 다른 일꾼의 쓰기를 남의 가지로 보냈다.
+        let mut two = all.clone();
+        two.extend([epic("t-f"), under("t-f.bb", "in_progress", "t-f")]);
+        let pair = Away {
+            names: set(&["t-e", "worktree-t-e", "t-f", "worktree-t-f"]),
+            sure: set(&["t-e.aa", "t-f.bb"]),
+            homes: vec![
+                (home.clone(), set(&["t-e", "worktree-t-e"])),
+                (abs("/repo/.worktrees/t-f"), set(&["t-f", "worktree-t-f"])),
+            ],
+            ..homed.clone()
+        };
+        let why = denied(&guard_edit(&two, &cfg(), &pair, &root, "src/store.rs")).to_string();
+        for (wt, row) in [("/repo/.worktrees/t-e", "t-e.aa"), ("/repo/.worktrees/t-f", "t-f.bb")] {
+            assert!(why.contains(&format!("{}/src/store.rs   ({row})", spelt(wt))), "{row} 의 자리를 안 댄다 — {why}");
+        }
+
         // 쥔 줄에 워크트리가 없으면 지난다 — 띄우기 전이다.
         let bare = Away { homes: vec![(home, set(&["t-z"]))], ..homed.clone() };
         assert_eq!(guard_edit(&all, &cfg(), &bare, &root, "src/store.rs"), Decision::Pass);
@@ -9171,6 +9265,36 @@ mod tests {
         let mut both = all.clone();
         both.push(issue("t-2", "in_progress"));
         assert_eq!(guard_edit(&both, &cfg(), &homed, &root, "src/store.rs"), Decision::Pass);
+    }
+
+    /// **링크를 지나 친 철자도 워크트리의 같은 파일로 돌린다**(리뷰 moai-9js2.s4s). [`shown`] 은 뿌리 밑으로 안
+    /// 떨어지는 철자를 친 그대로 돌려주는데, 그것을 워크트리 뒤에 잇던 판은 `<워크트리>//<친 절대 경로>` 처럼 없는
+    /// 자리를 내밀었다 — 시킨 대로 쓰면 `.worktrees/` 밑이라 지나가 엉뚱한 파일이 섰다.
+    #[test]
+    #[cfg(unix)]
+    fn the_worktree_path_in_the_refusal_is_rooted_even_through_a_link() {
+        let s = crate::scratch::Scratch::real("hookhomed");
+        let root = s.path().join("repo");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let link = s.path().join("link");
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+        let home = root.join(".worktrees/t-e");
+        let all = vec![epic("t-e"), under("t-e.aa", "in_progress", "t-e")];
+        let homed = Away {
+            names: set(&["t-e"]),
+            own: set(&["develop"]),
+            sure: set(&["t-e.aa"]),
+            homes: vec![(home.clone(), set(&["t-e"]))],
+            ..Away::default()
+        };
+        let want = format!("  {}", home.join("src/store.rs").display());
+        let typed = link.join("src/store.rs").to_string_lossy().into_owned();
+        let why = denied(&guard_edit(&all, &cfg(), &homed, &root, &typed)).to_string();
+        assert!(why.lines().any(|l| l == want), "링크 철자를 워크트리 뒤에 이었다\n{why}");
+        // 링크인 `cwd` 의 하위에서 친 상대 경로도 뿌리에서 잰 자리로 돌린다 — 친 낱말(`store.rs`)은 뿌리에서 잰 것이 아니다.
+        let shell =
+            denied(&guard_writes(&all, &cfg(), &homed, &root, &link.join("src"), "echo x > store.rs")).to_string();
+        assert!(shell.lines().any(|l| l == want), "{shell}");
     }
 
     /// 이 세션의 사람 — 시험의 담당.

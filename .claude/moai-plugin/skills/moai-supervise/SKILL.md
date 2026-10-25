@@ -182,7 +182,7 @@ a worker with a message, any other window through the person.
 
 The `Place` line (`place` under `--json`) has three values. **Only `none` is handed on.**
 
-    <path> (<branch>)  at        it runs there. Go in and carry on
+    <path> (<branch>)  at        it runs there. Aim at it and carry on
     not showing yet    fresh     just picked up — the gap while the worker raises its worktree. Leave it
     none               lost      it lost its place — only this one is reclaimed
 
@@ -356,7 +356,7 @@ worker, and the message is the whole assignment.
 Either way, the root checkout and, for a subdirectory project in a monorepo, the path down
 to it come from the lines below. The root is where `.moai` stands, so for a monorepo it is the
 subdirectory that has `.moai`, and a worktree stands for the whole repository — the worker
-has to go into the same subdirectory inside it (its step 3). The first line is `root dir`;
+has to aim at the same subdirectory inside it (its step 3). The first line is `root dir`;
 a `subdir` line stands only when the root is not the top of the repository.
 
 ```sh

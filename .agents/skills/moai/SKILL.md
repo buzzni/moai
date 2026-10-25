@@ -229,7 +229,7 @@ its own way — read your own column.
 | Step | Claude Code | Codex | Antigravity |
 |---|---|---|---|
 | Work in the worktree | stay in the root and aim every call at its absolute path — not `EnterWorktree`, which asks the person to approve each call into `.worktrees/` | `cd` into it and run every command there | `cd` into it and run every command there |
-| Come back to the root | nothing — you never left; a window already inside a worktree uses `ExitWorktree(keep)` | `cd` to the root and run every command there | `cd` to the root and run every command there |
+| Come back to the root | nothing if the shell never left; `cd` to the root if a `cd` moved it — the shell keeps it — and `ExitWorktree(keep)` only after an `EnterWorktree` | `cd` to the root and run every command there | `cd` to the root and run every command there |
 | Ask the person watching | `AskUserQuestion` | `request_user_input` | ask in the conversation and wait |
 | Review the work | `/code-review` | the review this session has, else read the diff yourself | the review this session has, else read the diff yourself |
 | Change the model (the person does it) | `/model` | `/model` | — |

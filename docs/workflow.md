@@ -146,11 +146,15 @@ and wait on each other to merge.
 - **Claude Code does not enter it.** Every `EnterWorktree` into `.worktrees/`
   asks the person to approve it, and no allow rule turns that off, so a Claude
   session — a worker or a person's own — stays in the root and reaches the
-  worktree by absolute path (`cd <root>/.worktrees/<epic> && …`,
-  `git -C <root>/.worktrees/<epic> …`, absolute paths for every file edit)
-  (moai-9js2). The hook's rule 2 stands in for the isolation guard it gives up:
-  while everything the session holds has its worktree standing, a write to the
-  root checkout is refused and the refusal names the same file in the worktree
+  worktree by absolute path (`git -C <root>/.worktrees/<epic> …`, absolute paths
+  for every file edit, and `(cd <root>/.worktrees/<epic> && …)` for a tool that
+  needs the directory) (moai-9js2). The parentheses matter in a session: its
+  shell keeps a `cd` into the next call, while a subagent's starts in the root
+  again every time. The hook's rule 2 takes over part of the isolation guard it
+  gives up: while the shell stands in the root and everything the session holds
+  has its worktree standing, a write to the root checkout — an edit, or a shell
+  redirect, `sed -i` or `tee` — is refused, and the refusal names the same file
+  in the worktree (in each worktree, when the work held stands in several)
 - **Work a supervisor hands out inside a milestone branches from that
   milestone's branch**, `milestone/<milestone id>`, instead of the root branch,
   and merges back into it; the branch lives in its own worktree,
