@@ -7278,14 +7278,25 @@ fn tui_deep_carries_each_rows_gantt() {
     let s = init("tuideepgantt");
     let now = "2026-10-25T05:00:00Z";
     let ep = field(&ok_at(s.path(), now, &["epic", "add", "간트", "--json"]), "id");
-    let a = field(&ok_at(s.path(), now, &["add", "앞 일", "-e", &ep, "--start", "2026-10-20", "--due", "2026-10-22", "--json"]), "id");
-    let b = field(&ok_at(s.path(), now, &["add", "뒤 일", "-e", &ep, "--start", "2026-10-26", "--due", "2026-10-28", "--json"]), "id");
+    let a = field(
+        &ok_at(s.path(), now, &["add", "앞 일", "-e", &ep, "--start", "2026-10-20", "--due", "2026-10-22", "--json"]),
+        "id",
+    );
+    let b = field(
+        &ok_at(s.path(), now, &["add", "뒤 일", "-e", &ep, "--start", "2026-10-26", "--due", "2026-10-28", "--json"]),
+        "id",
+    );
     ok_at(s.path(), now, &["link", &a, "--blocks", &b]);
     ok_at(s.path(), "2026-10-21T01:00:00Z", &["mv", &a, "in_progress"]);
 
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
-    let gantt = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
-    assert_eq!(gantt(&ep)["planned"], serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"}));
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
+    let gantt =
+        |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
+    assert_eq!(
+        gantt(&ep)["planned"],
+        serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"})
+    );
     assert_eq!(gantt(&ep)["progress"], serde_json::json!({"kind": "rollup", "done": 0, "total": 2}));
     assert_eq!(gantt(&a)["actual"], serde_json::json!({"kind": "span", "start": "2026-10-21T01:00:00Z", "end": null}));
     assert_eq!(gantt(&a)["overdue"], serde_json::json!(3));
@@ -10467,6 +10478,75 @@ fn a_relative_start_is_stored_as_the_day_it_lands_on() {
     assert!(line_of(s.path(), &i).contains(r#""starts_on":"2026-09-12""#));
     // 틀린 꼴은 거절문이 돌려받는다.
     assert!(!moai(s.path(), &["edit", &i, "--start", "+x"]).status.success());
+}
+
+/// **`--shift*` 는 쓰는 순간의 줄에서 옮긴다**(moai-vj8w.02c) — web 간트의 끌기가 날 대신 이 뜻을 들고 와, 그 읽기 뒤에 옆
+/// 세션이 옮긴 날 위에서 옮긴다. 같은 부름을 두 번 하면 두 번 옮는 것이 그 증거다(미리 센 날을 들고 왔으면 같은 날에
+/// 선다). 옮기는 자는 TUI 의 끌기와 하나다(`Issue::shifted`) — 기한만 든 줄은 기한만, 시작만 옮기면서 시작이 없으면
+/// 기한에서 출발한다.
+#[test]
+fn a_shift_moves_the_days_the_row_holds_when_it_is_written() {
+    let s = init("shift");
+    let i = add(s.path(), &["옮길 일", "--start", "2026-09-20", "--due", "2026-09-22"]);
+    let days = |id: &str| {
+        let j = ok(s.path(), &["show", id, "--json"]);
+        (field(&j, "starts_on"), field(&j, "due_on"))
+    };
+    ok(s.path(), &["edit", &i, "--shift", "2"]);
+    ok(s.path(), &["edit", &i, "--shift", "2"]);
+    assert_eq!(days(&i), ("2026-09-24".into(), "2026-09-26".into()), "두 번 옮기면 두 번 옮는다");
+    ok(s.path(), &["edit", &i, "--shift-start", "-3"]);
+    ok(s.path(), &["edit", &i, "--shift-due=-1"]);
+    assert_eq!(days(&i), ("2026-09-21".into(), "2026-09-25".into()));
+    // 0 날은 고칠 것이 없는 것이다 — 실패가 아니다.
+    ok(s.path(), &["edit", &i, "--shift", "0"]);
+    assert_eq!(days(&i), ("2026-09-21".into(), "2026-09-25".into()));
+    // 시작이 기한을 넘는 옮기기는 `--start` 와 같은 거절이다.
+    assert!(!moai(s.path(), &["edit", &i, "--shift-start", "10"]).status.success());
+
+    let d = add(s.path(), &["기한만", "--due", "2026-09-30"]);
+    ok(s.path(), &["edit", &d, "--shift-start", "-2"]);
+    assert_eq!(days(&d), ("2026-09-28".into(), "2026-09-30".into()), "시작이 없으면 기한에서 출발한다");
+
+    // 날이 없는 줄은 옮길 것이 없다고 거절하고, 멤버에서 센 묶음의 막대는 그 줄의 날이 아니라 거절한다.
+    let bare = add(s.path(), &["날 없음"]);
+    let out = moai(s.path(), &["edit", &bare, "--shift", "1"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--start"), "날을 적는 명령을 안 댔다");
+    let e = add(s.path(), &["묶음", "--type", "epic"]);
+    add(s.path(), &["멤버", "-e", &e, "--due", "2026-09-25"]);
+    let out = moai(s.path(), &["edit", &e, "--shift", "1"]);
+    assert!(!out.status.success(), "멤버에서 센 막대를 옮겼다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("멤버"), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // 날을 적는 플래그와는 같이 못 준다 — 어느 쪽이 이기는지 정할 까닭이 없다.
+    assert!(!moai(s.path(), &["edit", &i, "--shift", "1", "--due", "2026-09-30"]).status.success());
+    assert!(!moai(s.path(), &["edit", &i, "--shift", "1", "--shift-due", "1"]).status.success());
+
+    // **날 수는 web 의 끌기와 같은 폭(여섯 자리)이다**(리뷰) — 넘는 수는 쓰기 전에 거절한다. 막지 않던 판은 덧셈이 넘쳐
+    // 시험 판이 쓰기 안에서 넘어졌다(`attempt to add with overflow`).
+    for huge in ["9223372036854775807", "-1000000"] {
+        let out = moai(s.path(), &["edit", &i, "--shift-start", huge]);
+        let said = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && !said.contains("panicked"), "{huge}: {said}");
+    }
+    assert_eq!(days(&i), ("2026-09-21".into(), "2026-09-25".into()), "거절했는데 날이 바뀌었다");
+}
+
+/// **`--if-unplanned` 는 날이 하나도 안 적힌 줄에만 쓴다**(moai-vj8w.02c) — web 간트의 "이 날로 세우기" 가 그사이 날을
+/// 얻은 줄의 날을 덮지 않게, 그 판단을 락 안에서 한다. 못 읽는 글도 적힌 날이다(`Issue::has_days`).
+#[test]
+fn if_unplanned_writes_only_a_row_with_no_day() {
+    let s = init("unplanned");
+    let i = add(s.path(), &["세울 일"]);
+    ok(s.path(), &["edit", &i, "--start", "2026-09-20", "--due", "2026-09-20", "--if-unplanned"]);
+    assert!(line_of(s.path(), &i).contains(r#""due_on":"2026-09-20""#));
+    let out = moai(s.path(), &["edit", &i, "--start", "2026-09-25", "--due", "2026-09-25", "--if-unplanned"]);
+    assert!(!out.status.success(), "날이 선 줄에 다시 세웠다");
+    assert!(String::from_utf8_lossy(&out.stderr).contains(&i), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(line_of(s.path(), &i).contains(r#""due_on":"2026-09-20""#), "거절했는데 날이 바뀌었다");
+    // 세울 날 없이는 뜻이 없다.
+    assert!(!moai(s.path(), &["edit", &i, "--if-unplanned"]).status.success());
 }
 
 /// `--filter starts_on=` 는 `due_on=` 과 같은 꼴·같은 규칙이다(moai-xf0p.6d5) — 달력의 날 폭, 시작 없는 줄은
@@ -31179,6 +31259,51 @@ fn web_tree_leaves_out_the_archive_unless_asked_and_refuses_a_bogus_sort() {
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
 }
 
+/// **간트의 `overdue` 는 페이지가 그리는 시간대로 잰다**(moai-vj8w.7sh) — `tz=` 가 자식의 시간대가 된다. 서버는 UTC 로
+/// 도는데 시계는 UTC 10-10 20:00(서울은 10-11 05:00)이라, 10-10 이 기한인 줄이 UTC 에서는 오늘이고 서울에서는 하루 늦다.
+///
+/// **이 기계가 못 여는 시간대는 서버의 시간대로 잰다**(리뷰) — UTC 가 아니다. 브라우저는 `Asia/Kolkata` 를 옛 이름
+/// `Asia/Calcutta` 로 내는데 그 이름을 안 까는 tzdata 가 흔하고, 넘겨서 UTC 로 떨어지면 서버의 시간대로 재던 그 전보다
+/// 나빠진다. 브라우저가 내는 오프셋(`+09:00`)은 400 이 아니다 — 400 이면 페이지가 목록 전체를 못 읽는다.
+#[test]
+fn web_tree_judges_overdue_in_the_zone_the_page_draws() {
+    let s = init("web-tree-zone");
+    let id = add(s.path(), &["기한 일", "--due", "2026-10-10"]);
+    let served = |tz: &'static str| {
+        serve_with(s.path(), move |cmd| {
+            cmd.env("MOAI_NOW", "2026-10-10T20:00:00Z").env("TZ", tz);
+        })
+    };
+    let overdue = |port: u16, query: &str| {
+        let (status, _, body) = get(port, &format!("/api/tree{query}"));
+        assert_eq!(status, 200, "{body}");
+        let env = json_of(&body);
+        assert_eq!(env["exit"], 0, "{body}");
+        let row = env["out"].as_array().unwrap().iter().find(|r| r["id"] == id.as_str()).unwrap().clone();
+        row["gantt"]["overdue"].clone()
+    };
+    let web = served("UTC");
+    assert_eq!(overdue(web.port, ""), serde_json::Value::Null, "서버의 시간대(UTC)로는 아직 오늘이다");
+    assert_eq!(overdue(web.port, "?tz=UTC"), serde_json::Value::Null);
+    // 모르는 이름과 오프셋은 막지 않는다 — 이 기계가 못 여니 서버의 시간대(여기는 UTC)로 잰다. 모양이 틀린 것은 자식 전에 400 이다.
+    assert_eq!(overdue(web.port, "?tz=Nowhere%2FAtAll"), serde_json::Value::Null);
+    assert_eq!(overdue(web.port, "?tz=%2B09%3A00"), serde_json::Value::Null, "오프셋이 400 이 되면 목록이 안 선다");
+    let (status, _, body) = get(web.port, "/api/tree?tz=%2Fetc%2Flocaltime");
+    assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{body}");
+    // **자료가 있는 기계에서만 잰다** — `a_bare_day_is_the_readers_day` 와 같은 까닭이다. 없는 기계에서는 서울도 못 여는
+    // 이름이라 위의 줄이 답이다. 자료의 자리는 바이너리가 읽는 자리로 본다(`TZDIR` 이 먼저다).
+    let tzdb = std::env::var_os("TZDIR").map_or_else(|| PathBuf::from("/usr/share/zoneinfo"), PathBuf::from);
+    if tzdb.join("Asia/Seoul").exists() {
+        assert_eq!(overdue(web.port, "?tz=Asia%2FSeoul"), serde_json::json!(1), "서울에서는 기한이 하루 지났다");
+        // 서울에 선 서버에서 못 여는 이름은 UTC 가 아니라 서울로 잰다 — UTC 로 떨어지면 여기서 `null` 이다.
+        let seoul = served("Asia/Seoul");
+        assert_eq!(overdue(seoul.port, ""), serde_json::json!(1));
+        assert_eq!(overdue(seoul.port, "?tz=Nowhere%2FAtAll"), serde_json::json!(1), "못 여는 이름이 UTC 로 떨어졌다");
+        assert_eq!(overdue(seoul.port, "?tz=%2B09%3A00"), serde_json::json!(1));
+        assert_eq!(overdue(seoul.port, "?tz=UTC"), serde_json::Value::Null, "여는 이름은 그대로 페이지의 시간대다");
+    }
+}
+
 /// **405 의 `Allow` 는 그 길이 받는 메서드다**(moai-m4ez.4zq) — 읽음 표시 길은 `POST` 만 받는다.
 #[test]
 fn web_405_allow_names_the_methods_the_path_takes() {
@@ -31413,15 +31538,20 @@ fn web_marks_read_only_from_its_own_page() {
     assert_eq!(status, 404, "GET 으로 읽음을 적는 길이 섰다");
 }
 
-/// **간트의 막대 끌기는 `moai edit` 의 길로 트래커에 쓴다**(moai-d86e.3ud) — 이 페이지에서 보낸 것만 받고, 바뀌는 쪽만
-/// 고치며, 거절(시작이 기한 뒤·위 기한 넘김)은 `edit` 의 말 그대로 봉투의 `err` 에 서고, 모양이 틀리면 자식을 안 띄운다.
+/// **간트의 막대 끌기는 `moai edit` 의 길로 트래커에 쓴다**(moai-d86e.3ud) — 이 페이지에서 보낸 것만 받고, 날이 아니라
+/// 옮기는 뜻(`edge`·`days`, 하루 세우기는 `day`)을 실어 `edit` 이 락 안에서 날을 잰다(moai-vj8w.02c). 거절(시작이 기한
+/// 뒤·위 기한 넘김·그새 날이 선 줄)은 `edit` 의 말 그대로 봉투의 `err` 에 서고, 모양이 틀리면 자식을 안 띄운다.
 #[test]
 fn web_moves_a_plan_only_from_its_own_page() {
     let s = init("web-plan");
     let cfg = s.path().join("user.toml");
     let epic = field(&ok_with(s.path(), &cfg, &["epic", "add", "묶음", "--due", "2026-11-10", "--json"]), "id");
     let id = field(
-        &ok_with(s.path(), &cfg, &["add", "막대", "-e", &epic, "--start", "2026-10-26", "--due", "2026-10-27", "--json"]),
+        &ok_with(
+            s.path(),
+            &cfg,
+            &["add", "막대", "-e", &epic, "--start", "2026-10-26", "--due", "2026-10-27", "--json"],
+        ),
         "id",
     );
     let web = serve_with(s.path(), |cmd| {
@@ -31436,43 +31566,69 @@ fn web_moves_a_plan_only_from_its_own_page() {
     let snapshot = std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap();
 
     for origin in [None, Some("http://evil.example"), Some("null")] {
-        let (status, _, body) = post(web.port, &format!("/api/plan/{id}?start=2026-10-28&due=2026-10-29"), origin);
+        let (status, _, body) = post(web.port, &format!("/api/plan/{id}?edge=body&days=2"), origin);
         assert_eq!((status, json_of(&body)["code"].as_str()), (403, Some("forbidden_origin")), "{origin:?}\n{body}");
     }
     assert_eq!(std::fs::read(s.path().join(".moai/issues.jsonl")).unwrap(), snapshot, "거절한 POST 가 트래커를 고쳤다");
 
-    let (status, _, body) = post(web.port, &format!("/api/plan/{id}?start=2026-10-28&due=2026-10-29"), Some(&mine));
+    let (status, _, body) = post(web.port, &format!("/api/plan/{id}?edge=body&days=2"), Some(&mine));
     assert_eq!((status, json_of(&body)["exit"].as_i64()), (200, Some(0)), "{body}");
     assert!(json_of(&body).get("out").is_some(), "성공한 판에 답이 없으면 페이지는 못 읽은 답으로 본다 — {body}");
     assert_eq!(days(), at("2026-10-28", "2026-10-29"));
-    // 한쪽만 온 판은 다른 쪽을 그대로 둔다.
-    let (_, _, body) = post(web.port, &format!("/api/plan/{id}?due=2026-10-31"), Some(&mine));
+    // 끝 하나를 옮긴 판은 다른 쪽을 그대로 둔다.
+    let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=end&days=2"), Some(&mine));
     assert_eq!(json_of(&body)["exit"], 0, "{body}");
     assert_eq!(days(), at("2026-10-28", "2026-10-31"));
 
+    // **옮기기는 쓰는 순간의 줄에서 잰다**(moai-vj8w.02c) — 페이지가 읽은 뒤 옆 세션이 기한을 옮겼어도, 시작을 끈 쓰기는
+    // 그 기한을 페이지의 옛 값으로 덮지 않는다.
+    ok_with(s.path(), &cfg, &["edit", &id, "--due", "2026-11-02"]);
+    let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=start&days=1"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert_eq!(days(), at("2026-10-29", "2026-11-02"), "옆 세션이 옮긴 기한이 사라졌다");
+
     // 거절은 `edit` 의 말이다 — 페이지가 그 말을 그대로 보인다. 아무것도 안 바뀐다.
-    for asked in ["start=2026-11-02", "due=2026-11-20"] {
+    for asked in ["edge=start&days=10", "edge=end&days=20"] {
         let (status, _, body) = post(web.port, &format!("/api/plan/{id}?{asked}"), Some(&mine));
         let v = json_of(&body);
         assert_eq!(status, 200, "{body}");
         assert_ne!(v["exit"], 0, "{asked}: {body}");
         assert!(v["err"]["error"].as_str().is_some_and(|e| !e.is_empty()), "{asked}: {body}");
     }
-    assert_eq!(days(), at("2026-10-28", "2026-10-31"));
+    assert_eq!(days(), at("2026-10-29", "2026-11-02"));
+
+    // 하루 세우기는 날 없는 줄에만 쓴다 — 그새 날이 선 줄은 거절하고 그 날을 그대로 둔다.
+    let bare = field(&ok_with(s.path(), &cfg, &["add", "날 없음", "-e", &epic, "--json"]), "id");
+    let (_, _, body) = post(web.port, &format!("/api/plan/{bare}?day=2026-10-30"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    let (_, _, body) = post(web.port, &format!("/api/plan/{bare}?day=2026-11-01"), Some(&mine));
+    assert_ne!(json_of(&body)["exit"], 0, "날이 선 줄에 다시 세웠다 — {body}");
+    let row = json_of(&ok_with(s.path(), &cfg, &["show", &bare, "--json"]));
+    assert_eq!(row["due_on"].as_str(), Some("2026-10-30"));
 
     for bad in [
         format!("/api/plan/{id}"),
-        format!("/api/plan/{id}?due=none"),
-        format!("/api/plan/{id}?due=%2B3"),
+        format!("/api/plan/{id}?edge=body&days=0"),
+        format!("/api/plan/{id}?edge=body&days=%2B3"),
+        format!("/api/plan/{id}?edge=both&days=1"),
+        format!("/api/plan/{id}?due=2026-10-30"),
         format!("/api/plan/{id}?title=x"),
-        "/api/plan/issue?due=2026-10-30".to_string(),
+        "/api/plan/issue?day=2026-10-30".to_string(),
     ] {
         let (status, _, body) = post(web.port, &bad, Some(&mine));
         assert_eq!((status, json_of(&body)["code"].as_str()), (400, Some("bad_input")), "{bad}\n{body}");
     }
-    let (status, _, _) = get(web.port, &format!("/api/plan/{id}?due=2026-10-30"));
+    let (status, _, _) = get(web.port, &format!("/api/plan/{id}?edge=body&days=1"));
     assert_eq!(status, 404, "GET 으로 계획을 고치는 길이 섰다");
-    assert_eq!(days(), at("2026-10-28", "2026-10-31"));
+    assert_eq!(days(), at("2026-10-29", "2026-11-02"));
+
+    // **같은 쪽을 옆 세션이 옮긴 뒤에도 그 줄에서 잰다**(리뷰) — 위의 판은 옆이 기한을, 페이지가 시작을 옮겨 날을 들고 오던 옛
+    // 길로도 같은 답이 났다. 옆이 시작을 10-20 으로 옮긴 뒤 막대 통째를 하루 끌면, 페이지가 읽은 10-29 가 아니라 10-20 에서
+    // 하루다 — 옛 길은 여기서 10-30 을 적었다.
+    ok_with(s.path(), &cfg, &["edit", &id, "--start", "2026-10-20"]);
+    let (_, _, body) = post(web.port, &format!("/api/plan/{id}?edge=body&days=1"), Some(&mine));
+    assert_eq!(json_of(&body)["exit"], 0, "{body}");
+    assert_eq!(days(), at("2026-10-21", "2026-11-03"), "옆 세션이 옮긴 시작을 페이지의 옛 날에서 덮었다");
 }
 
 /// **`project=` 는 걸어 둔 프로젝트만 읽는다**(moai-o14f) — 그 자리의 트래커로 답하고, 걸지 않은 자리·상대 경로는

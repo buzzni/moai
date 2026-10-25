@@ -800,6 +800,12 @@ Options:
   -a, --assignee <who|none>  Give `name (email)`. `none` clears it, `me` is you
       --start <date|none>    Start, a day or `+N` days. `none` clears it
       --due <date|none>      Deadline, a day or `+N` days. `none` clears it
+      --shift <±N>           Move the planned days N days, as the row
+                             holds them when written
+      --shift-start <±N>     Move the start alone (none: from the due)
+      --shift-due <±N>       Move the deadline alone (none: from start)
+      --if-unplanned         Write `--start`/`--due` only on a row
+                             with no planned day; else refuse
       --json                 Machine-readable output. Every human line goes away
       --no-color             Turn colour off (same as `--color never`)
       --color <how>          auto|always|never (auto by default, off when piped)
@@ -3032,7 +3038,7 @@ Options:
   <command>`, run in a child process for that request, so the page sees
   exactly what the CLI says. Writing stays with the CLI and the explorer; the
   page writes two things, taken only from the page itself: a Gantt bar dragged
-  to new days, run as `moai edit --start --due`, and your read marks (`moai
+  to new days, run as `moai edit --shift`, and your read marks (`moai
   read`). Registered projects
   (`moai project ls`) can be read too, by `?project=<path>`.
 
