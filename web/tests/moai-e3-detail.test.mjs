@@ -166,6 +166,30 @@ test('journal, commits and work lines', () => {
   assert.deepEqual(F.workOf(row), ['ran  ai', 'plain'])
 })
 
+// moai-xp7l.vyw: `show <id> --json`'s `wiki` as the CLI's detail draws it.
+test('wiki: lessons, pages naming the id and related sections; a heading that is the title again is left off', () => {
+  const row = {
+    id: 'x',
+    wiki: {
+      lessons: ['lessons/keep-it'],
+      named_in: [{ slug: 'guide', path: 'docs/guide.md', title: 'Guide', via: 'x' }],
+      related: [
+        { slug: 'cli', path: 'docs/cli.md', title: 'The moai CLI', heading: 'The `moai` CLI', anchor: 'the-moai-cli', line: 1, score: 2 },
+        { slug: 'lessons/near', path: 'docs/lessons/near.md', title: 'Near', heading: 'Why', line: 5, score: 1, lesson: true },
+      ],
+    },
+  }
+  assert.deepEqual(F.wikiOf(row), {
+    lessons: [{ at: 'lessons/keep-it', title: '', lesson: true }],
+    named: [{ at: 'docs/guide.md', title: 'Guide', lesson: false }],
+    related: [
+      { at: 'docs/cli.md:1', title: 'The moai CLI', lesson: false },
+      { at: 'docs/lessons/near.md:5', title: 'Near › Why', lesson: true },
+    ],
+  })
+  assert.deepEqual(F.wikiOf({ id: 'y' }), { lessons: [], named: [], related: [] })
+})
+
 test('problem text uses the shell words', () => {
   assert.equal(F.problemText({ kind: 'not-started' }, en), en.unreachable)
   assert.equal(F.problemText({ kind: 'failed', message: 'page b skipped' }, en), fill(en.moaiError, { message: 'page b skipped' }))

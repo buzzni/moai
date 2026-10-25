@@ -243,6 +243,45 @@ export function commitsOf(row: Row): { hash: string; subject: string }[] {
     .filter((line): line is { hash: string; subject: string } => line !== null)
 }
 
+/** One line of the wiki section: where (`path` or `path:line`), the page title (and `› heading` for a section). */
+export interface WikiLine {
+  at: string
+  title: string
+  lesson: boolean
+}
+
+/**
+ * The wiki pages about the row, from `show <id> --json`'s `wiki` (moai-xp7l.vyw): the lessons this row's notes
+ * point at, the pages that name the id (or its epic), and the sections its title's words rank. As the CLI's detail
+ * draws them, a section's heading is left off when it is the page title again (moai-xp7l.teh: compared by words,
+ * not letters, since the title is the heading with its marks taken off). Empty when moai sent no `wiki`.
+ */
+export function wikiOf(row: Row): { lessons: WikiLine[]; named: WikiLine[]; related: WikiLine[] } {
+  const wiki = isRecord(row.wiki) ? row.wiki : {}
+  const list = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.filter(isRecord) : [])
+  const isLesson = (slug: string): boolean => /^lessons\/[a-z0-9]+(-[a-z0-9]+)*$/.test(slug)
+  const words = (value: string): string => value.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter(Boolean).join(' ')
+  const lessons = (Array.isArray(wiki.lessons) ? wiki.lessons : [])
+    .filter((slug): slug is string => typeof slug === 'string')
+    .map((slug) => ({ at: slug, title: '', lesson: true }))
+  const named = list(wiki.named_in).map((page) => ({
+    at: text(page.path) || text(page.slug),
+    title: text(page.title),
+    lesson: page.lesson === true || isLesson(text(page.slug)),
+  }))
+  const related = list(wiki.related).map((hit) => {
+    const title = text(hit.title)
+    const heading = text(hit.heading)
+    const line = typeof hit.line === 'number' ? `:${hit.line}` : ''
+    return {
+      at: `${text(hit.path) || text(hit.slug)}${line}`,
+      title: heading && words(heading) !== words(title) ? `${title} › ${heading}` : title,
+      lesson: hit.lesson === true || isLesson(text(hit.slug)),
+    }
+  })
+  return { lessons, named, related }
+}
+
 /**
  * A work record as one line. moai's is {provider, model, tokens, grade, why, at, by}: it reads like the note
  * it was written from, `anthropic/opus-5 tokens=12345 (medium — wrote the list view)`, then who and when.

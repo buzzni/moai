@@ -1426,7 +1426,7 @@ LESSON
 /// `moai wiki learn` 의 인자(moai-4s5n.n7j).
 #[derive(Args, Debug)]
 pub struct LearnArgs {
-    /// The lesson in one line, as an instruction - the page's title. A lone `-x` needs `--` in front
+    /// The lesson in one line, the page's title. A lone `-x` needs `--`
     #[arg(value_name = "lesson", allow_hyphen_values = true)]
     pub title: String,
     /// The file name, in lowercase ASCII kebab case
