@@ -208,7 +208,9 @@ Leave the server on `127.0.0.1` and bring the port to you:
     ssh -L 6624:127.0.0.1:6624 you@the-machine
 
 Then open `http://localhost:6624/` on your own machine. This is the way to go
-rather than `--host 0.0.0.0`, which serves the tracker to anyone on the network.
+rather than `--host 0.0.0.0`, which serves the tracker to anyone on the network —
+and lets them move its planned days, since a Gantt bar dragged on their page
+writes the tracker as yours does.
 
 Whatever it binds, the server answers only requests whose `Host` header is
 `localhost` or an IP address. A request with another name — what a page on some
@@ -224,11 +226,11 @@ comes from the start. The rest come from the server while it runs:
 | Code | Means |
 |---|---|
 | `forbidden_host` | The `Host` header was not `localhost` or an IP address |
-| `forbidden_origin` | A read mark sent from anywhere but this page |
+| `forbidden_origin` | A read mark or a Gantt bar's days sent from anywhere but this page |
 | `not_registered` | `?project=` names a directory that is not a registered project |
 | `not_a_project` | `?project=` names a registered directory that has no `.moai` of its own (`moai init` it); the server does not read a parent's tracker in its place |
-| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read; the `Allow` header names the method the path takes (`POST` on the read-mark paths, `GET` elsewhere) |
-| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`) |
+| `method_not_allowed` | Anything but `GET`, except the `POST` that marks rows read or moves a Gantt bar's days; the `Allow` header names the method the path takes (`POST` on those write paths, `GET` elsewhere) |
+| `bad_input` | A request the server could not read, one carrying a body, or a query this path does not take or whose value is the wrong shape (a `sort` moai does not know, a flag other than `1`, a Gantt day that is not `YYYY-MM-DD`) |
 | `not_found` | No such path |
 | `busy` | Too many requests at once; try again |
 | `timeout` | The child `moai` did not answer in time |

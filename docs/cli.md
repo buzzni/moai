@@ -42,7 +42,7 @@ Commands:
   backlog       Jot a passing thought down where you are (`--type backlog`)
   wiki          Read the project wiki - the markdown pages under `docs/`
   tui           Open the explorer (the one write to an issue is `SPC n`, jot)
-  web           Serve this tracker as a page on 127.0.0.1, read-only
+  web           Serve this tracker as a page on 127.0.0.1
   hook          Called by an agent's hook. Reads an event on stdin
   merge-driver  Called by git. Merges issues.jsonl per issue, three-way
   skill         Plant skills for Claude, Codex, Antigravity (safe to run again)
@@ -2877,7 +2877,7 @@ Order:
 ## `moai web`
 
 ```
-Serve this tracker as a page on 127.0.0.1, read-only
+Serve this tracker as a page on 127.0.0.1
 
 Usage: moai web [OPTIONS]
 
@@ -2910,8 +2910,8 @@ Options:
 
   --port is 6624 unless given. --host is 127.0.0.1 unless given; another
   address than a loopback one is served with a warning, because anyone who
-  reaches that port can read the tracker. Whatever it binds, it answers only
-  requests whose Host is localhost or an IP address.
+  reaches that port can read the tracker and move its planned days. Whatever
+  it binds, it answers only requests whose Host is localhost or an IP address.
 
   A port already in use stops it with the code port_in_use. Run inside a
   linked worktree, it serves the main checkout's tracker, as other commands

@@ -104,8 +104,18 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let built: Built | null = null
   let positioned = false
   let shownCursor: string | null | undefined
-  /** A bar was dragged: the click the release sends is the drag's, not a choice of the row. */
+  /** A bar was dragged: the click the release sends is the drag's, not a choice of the row. Every press clears it. */
   let dragged = false
+  /**
+   * A bar is being dragged. A draw meanwhile — the rows read again after another session's write, the page's own
+   * write landing — would rebuild the lanes under the pointer and drop the drag with nothing said, so it waits for
+   * the release ({@link resume}): `waiting` is the last render asked for, `drawLater` a draw asked for directly.
+   */
+  let holding = false
+  let waiting: [State, IssueIndex | null] | null = null
+  let drawLater = false
+  /** Rows whose planned days are being written: a bar drawn from the read before that write does not move again. */
+  const writing = new Set<string>()
 
   // ── frame ──
   const zoomButtons = new Map<Zoom, HTMLButtonElement>()
@@ -212,6 +222,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
 
   function draw(): void {
     if (!model || !state) return
+    if (holding) return void (drawLater = true)
+    drawLater = false
     const m = model
     const now = nowWall()
     const zone = clock.zone()
@@ -455,7 +467,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   // ── moving about ──
   /** `anchor` is how far from the dates' visible left edge the date to keep still stands (the middle when left out). */
   function setZoom(next: Zoom, anchor?: number): void {
-    if (!axis || next === zoom) return
+    // A bar being dragged measures its days at the step it was pressed at.
+    if (!axis || next === zoom || holding) return
     const view = viewWidth()
     const held = anchor ?? view / 2
     const centre = wallAt(axis, scroll.scrollLeft + held)
@@ -473,7 +486,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   }
 
   function fit(): void {
-    if (!axis || !built) return
+    if (!axis || !built || holding) return
     const span = fitSpan(built.placed.map((p) => p?.span ?? null))
     if (!span) return goToday()
     const next = zoomToFit(span, viewWidth())
@@ -555,23 +568,29 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   // ── the mouse ──
   /**
    * A drag of the primary button on `target`, as view/split.ts does it: the pointer is captured, the move and the end
-   * listeners stand only while it lasts, and a cancel or a lost capture ends it like a release.
+   * listeners stand only while it lasts, and a cancel or a lost capture ends it like a release. `begin` may turn the
+   * press down by answering false — it is then an ordinary press, and its click goes on as any other. `end` is handed
+   * the event that ended it (a bar lands only on `pointerup`) and the press.
    */
-  function drag(target: HTMLElement, begin: () => void, move: (event: PointerEvent, from: PointerEvent) => void, end?: () => void): void {
+  function drag(
+    target: HTMLElement,
+    begin: (down: PointerEvent) => boolean | void,
+    move: (event: PointerEvent, from: PointerEvent) => void,
+    end?: (event: PointerEvent, from: PointerEvent) => void,
+  ): void {
     target.addEventListener('pointerdown', (down) => {
-      if (down.button !== 0) return
+      if (down.button !== 0 || begin(down) === false) return
       down.preventDefault()
-      begin()
       target.setPointerCapture?.(down.pointerId)
       target.classList.add('drag')
       const onMove = (event: PointerEvent) => move(event, down)
-      const stop = () => {
+      const stop = (event: PointerEvent) => {
         target.removeEventListener('pointermove', onMove)
         target.removeEventListener('pointerup', stop)
         target.removeEventListener('pointercancel', stop)
         target.removeEventListener('lostpointercapture', stop)
         target.classList.remove('drag')
-        end?.()
+        end?.(event, down)
       }
       target.addEventListener('pointermove', onMove)
       target.addEventListener('pointerup', stop)
@@ -593,6 +612,37 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     return x < box.left + grip ? 'start' : x > box.right - grip ? 'end' : 'body'
   }
 
+  /**
+   * The drag let go: what waited for it is drawn — in a task of its own, so the click the release sends still reaches
+   * the lane it pressed (a choice made by a plain press must not be lost to a redraw).
+   */
+  function resume(): void {
+    holding = false
+    if (!waiting && !drawLater) return
+    setTimeout(() => {
+      // Another drag took the lanes meanwhile: its release draws.
+      if (holding) return
+      const next = waiting
+      waiting = null
+      if (next) render(...next)
+      if (drawLater) draw()
+    }, 0)
+  }
+
+  /**
+   * Write a row's planned days. One write at a time per row: until it is answered (and the rows read again), the
+   * bar on screen was drawn from the read before it, and a move measured from there would undo the first.
+   */
+  function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: { start?: string; due?: string }, undo: string): void {
+    writing.add(id)
+    // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
+    const drawn = model
+    void movePlan(id, change, undo).finally(() => {
+      writing.delete(id)
+      if (model === drawn) draw()
+    })
+  }
+
   /** A press on the row's own planned bar, or on its `◆`, drags it. The lane takes the press: the actual band lies over the bar. */
   function movable(lane: HTMLElement, row: Row, g: GanttRow, planBar: HTMLElement | null, dueMark: HTMLElement | null): void {
     const movePlan = ctx.movePlan
@@ -602,61 +652,54 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     // A group's bar counted from its members does not move: the press is still taken, and the release says why.
     const own = g.planned?.from !== 'members'
     if (own) grab.classList.add('movable')
+    // A milestone draws its own `◆` at the end of its bar: the mark moves with the bar's end.
+    const drawnAt = planBar && dueMark ? [planBar, dueMark] : [grab]
     lane.addEventListener('pointermove', (event) => {
       if (event.buttons || !own) return
       const box = grab.getBoundingClientRect()
       const inside = event.clientX >= box.left - 2 && event.clientX <= box.right + 2
-      lane.dataset.grip = inside ? (planBar ? edgeAt(box, event.clientX) : 'body') : ''
+      const grip = inside ? (planBar ? edgeAt(box, event.clientX) : 'body') : ''
+      if (lane.dataset.grip !== grip) lane.dataset.grip = grip
     })
     lane.addEventListener('pointerleave', () => void (lane.dataset.grip = ''))
-    lane.addEventListener('pointerdown', (down) => {
-      if (down.button !== 0) return
+    let edge: Edge = 'body'
+    let was: Array<{ left: string; width: string }> = []
+    const putBack = () => drawnAt.forEach((node, n) => Object.assign(node.style, was[n]))
+    drag(lane, (down) => {
       const box = grab.getBoundingClientRect()
-      if (down.clientX < box.left - 2 || down.clientX > box.right + 2) return
-      down.preventDefault()
-      const edge: Edge = planBar ? edgeAt(box, down.clientX) : 'body'
-      const was = { left: grab.style.left, width: grab.style.width }
-      let days = 0
-      lane.setPointerCapture?.(down.pointerId)
-      lane.classList.add('moving')
-      const onMove = (event: PointerEvent) => {
-        days = dragDays(a.zoom, event.clientX - down.clientX)
-        const change = shiftPlan(g.planned, edge, days)
-        const span = 'why' in change ? null : movedPlan(g.planned, change)
-        if (!span) return Object.assign(grab.style, was)
-        // The `◆` stands at the end of its day, the bar spans its days.
-        if (planBar) {
-          grab.style.left = `${xOf(a, span[0])}px`
-          grab.style.width = `${Math.max(2, xOf(a, span[1]) - xOf(a, span[0]))}px`
-        } else grab.style.left = `${xOf(a, span[1])}px`
+      // A press beside the bar is the lane's, a choice; so is one while another drag, or this row's write, runs.
+      if (holding || writing.has(row.id) || down.clientX < box.left - 2 || down.clientX > box.right + 2) return false
+      holding = true
+      edge = planBar ? edgeAt(box, down.clientX) : 'body'
+      was = drawnAt.map((node) => ({ left: node.style.left, width: node.style.width }))
+    }, (event, down) => {
+      const change = shiftPlan(g.planned, edge, dragDays(a.zoom, event.clientX - down.clientX))
+      const span = 'why' in change ? null : movedPlan(g.planned, change)
+      if (!span) return putBack()
+      // The bar spans its days; a `◆` stands at the end of its day.
+      if (planBar) {
+        planBar.style.left = `${xOf(a, span[0])}px`
+        planBar.style.width = `${Math.max(2, xOf(a, span[1]) - xOf(a, span[0]))}px`
       }
+      if (dueMark) dueMark.style.left = `${xOf(a, span[1])}px`
+    }, (end, down) => {
       // The release is where the bar lands; a cancel or a lost capture puts it back and writes nothing.
-      const stop = (end: PointerEvent) => {
-        lane.removeEventListener('pointermove', onMove)
-        lane.removeEventListener('pointerup', stop)
-        lane.removeEventListener('pointercancel', stop)
-        lane.removeEventListener('lostpointercapture', stop)
-        lane.classList.remove('moving')
-        days = end.type === 'pointerup' ? dragDays(a.zoom, end.clientX - down.clientX) : 0
-        if (days === 0) return void Object.assign(grab.style, was)
-        dragged = true
-        const change = shiftPlan(g.planned, edge, days)
-        if ('why' in change) {
-          Object.assign(grab.style, was)
-          if (change.why !== 'still') ctx.say?.(fill(change.why === 'members' ? words.move.members : words.move.none, { id: row.id }), true)
-          return
+      const change = shiftPlan(g.planned, edge, end.type === 'pointerup' ? dragDays(a.zoom, end.clientX - down.clientX) : 0)
+      if ('why' in change) {
+        putBack()
+        // Not a day moved: the press was a click, and it chooses. A day or more is the drag's, and says why it stands.
+        if (change.why !== 'still') {
+          dragged = true
+          ctx.say?.(fill(change.why === 'members' ? words.move.members : words.move.none, { id: row.id }), true)
         }
-        const undo = undoLine(row.id, text(row.starts_on), text(row.due_on))
-        // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
-        const drawn = model
-        void movePlan(row.id, change, undo).finally(() => {
-          if (model === drawn) draw()
-        })
+      } else {
+        dragged = true
+        // The days as the list printed them; a row it did not print (one written between its read and the tree's) as
+        // the bar was drawn — the days this move was measured from.
+        const planned = g.planned?.from === 'own' ? g.planned : null
+        write(movePlan, row.id, change, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
       }
-      lane.addEventListener('pointermove', onMove)
-      lane.addEventListener('pointerup', stop)
-      lane.addEventListener('pointercancel', stop)
-      lane.addEventListener('lostpointercapture', stop)
+      resume()
     })
   }
 
@@ -670,10 +713,16 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (!movePlan || !axis || written || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
     const a = axis
     lane.addEventListener('dblclick', (event) => {
+      // A second double click before the first is answered would plan the row twice.
+      if (writing.has(row.id)) return
       const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
-      void movePlan(row.id, { start: day, due: day }, undoLine(row.id, null, null))
+      write(movePlan, row.id, { start: day, due: day }, undoLine(row.id, null, null))
     })
   }
+
+  // Every press on the dates starts afresh: a drag whose release sent no click (a touch, a pen) must not take the
+  // click of the next press, on whichever lane it lands.
+  lanesBox.addEventListener('pointerdown', () => void (dragged = false), true)
 
   // The grid's width: dragged by the handle, kept for the next time.
   {
@@ -729,30 +778,35 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   const observer = win && 'ResizeObserver' in win ? new win.ResizeObserver(() => (paintGrid(), position(), paintView())) : null
   observer?.observe(scroll)
 
+  function render(current: State, index: IssueIndex | null): void {
+    // A bar being dragged holds the lanes it moves: the newest render waits for its release (resume).
+    if (holding) return void (waiting = [current, index])
+    waiting = null
+    state = current
+    if (!index) {
+      model = null
+      built = null
+      rowsBox.replaceChildren()
+      lanesBox.replaceChildren()
+      return
+    }
+    const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied])
+    const zone = clock.zone()
+    if (!model || model.index !== index || model.key !== key || model.matched !== current.matched || model.boot !== current.boot || model.zone !== zone) {
+      const found = narrow(current, index)
+      model = { index, key, matched: current.matched, boot: current.boot, zone, lines: ganttLines(index, current.path, found.keep) }
+      draw()
+      position()
+      shownCursor = current.cursor
+      reveal()
+    } else if (current.cursor !== shownCursor) {
+      shownCursor = current.cursor
+      paintCursor()
+    }
+  }
+
   return {
-    render(current, index) {
-      state = current
-      if (!index) {
-        model = null
-        built = null
-        rowsBox.replaceChildren()
-        lanesBox.replaceChildren()
-        return
-      }
-      const key = JSON.stringify([current.path, current.view, current.search.text, current.filter.applied])
-      const zone = clock.zone()
-      if (!model || model.index !== index || model.key !== key || model.matched !== current.matched || model.boot !== current.boot || model.zone !== zone) {
-        const found = narrow(current, index)
-        model = { index, key, matched: current.matched, boot: current.boot, zone, lines: ganttLines(index, current.path, found.keep) }
-        draw()
-        position()
-        shownCursor = current.cursor
-        reveal()
-      } else if (current.cursor !== shownCursor) {
-        shownCursor = current.cursor
-        paintCursor()
-      }
-    },
+    render,
     command,
     focus() {
       pane.focus({ preventScroll: true })

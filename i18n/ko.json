@@ -1259,7 +1259,7 @@
   "web.serving": "{root} 을 {url} 에서 낸다 — Ctrl-C 로 끈다",
   "web.would_serve": "{root} 을 {url} 에서 낼 것이다 (--dry-run: 아무것도 안 묶었다)",
   "web.from_worktree": "워크트리 {here} 에서 불렀다 — 트래커는 주 체크아웃의 것이다",
-  "web.not_loopback": "{host} 는 루프백 주소가 아니다 — 이 기계의 그 포트에 닿는 누구나 트래커를 읽는다",
+  "web.not_loopback": "{host} 는 루프백 주소가 아니다 — 이 기계의 그 포트에 닿는 누구나 트래커를 읽고 계획 날을 옮긴다",
   "web.port_in_use": "{port} 포트는 이미 쓰인다. --port <n> 으로 다른 포트를 주거나, --port 0 으로 빈 포트를 고르게 한다",
   "web.bind_failed": "묶지 못했다: {said}",
   "web.no_exe": "요청마다 부를 moai 를 못 찾았다: {said}",

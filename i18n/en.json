@@ -1259,7 +1259,7 @@
   "web.serving": "serving {root} at {url} — Ctrl-C stops it",
   "web.would_serve": "would serve {root} at {url} (--dry-run: nothing bound)",
   "web.from_worktree": "called from the worktree {here}; its tracker is the main checkout's",
-  "web.not_loopback": "{host} is not a loopback address — anyone who reaches this machine on that port can read the tracker",
+  "web.not_loopback": "{host} is not a loopback address — anyone who reaches this machine on that port can read the tracker and move its planned days",
   "web.port_in_use": "port {port} is already in use. Pick another with --port <n>, or let the system pick a free one with --port 0",
   "web.bind_failed": "could not listen: {said}",
   "web.no_exe": "could not find the running moai to call for each request: {said}",
