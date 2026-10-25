@@ -7,6 +7,7 @@ pub mod board;
 pub mod draw;
 pub mod edit;
 pub mod form;
+mod gantt;
 mod hint;
 pub mod init_screen;
 pub mod input;
@@ -380,8 +381,11 @@ impl Pane {
     /// (moai-9nfw) — 화면에 선 것과 다른 이름을 대면 그 키가 어디로 가는지 못 읽는다.
     pub fn word(self, lang: crate::i18n::Lang, layout: view::Layout) -> &'static str {
         match self {
-            Pane::Explorer if layout == view::Layout::Board => crate::i18n::say(lang, "tui.pane.board"),
-            Pane::Explorer => crate::i18n::say(lang, "tui.pane.list"),
+            Pane::Explorer => match layout {
+                view::Layout::Board => crate::i18n::say(lang, "tui.pane.board"),
+                view::Layout::Gantt => crate::i18n::say(lang, "tui.pane.gantt"),
+                view::Layout::List => crate::i18n::say(lang, "tui.pane.list"),
+            },
             Pane::Detail => crate::i18n::say(lang, "tui.pane.detail"),
         }
     }
@@ -1320,6 +1324,9 @@ pub struct Site {
     /// 접어도 **밑의 펼침은 기억한다** — 접었다 다시 펼치면 안이 그대로 선다. `Tab`
     /// (다 펼침)의 두 번째 누름만 밑까지 걷는다([`App::expand_all`]).
     expanded: std::collections::HashSet<Path>,
+    /// 간트에서 **접어 둔** 묶음의 자리(moai-i4hf). 목록의 `expanded` 와 따로 들고 뜻이 거꾸로다 — 간트는 모두
+    /// 펼친 채로 서니(비면 "모두"), 사람이 접은 자리만 적는다. 들어갈 때마다 비운다([`App::open_gantt`]).
+    gantt_shut: std::collections::HashSet<Path>,
     /// 겹쳐 본 줄의 출처. 꺼져 있으면 비었다.
     pub origin: crate::worktree::Origin,
     /// 옆 워크트리에서 만난 문제. **배너로 말만 한다** — CLI 가 stderr 로 흘리는
@@ -1716,6 +1723,7 @@ impl Site {
             lit: Default::default(),
             unread: Default::default(),
             expanded: Default::default(),
+            gantt_shut: Default::default(),
             origin: crate::worktree::Origin::default(),
             elsewhere: Vec::new(),
             unfound: None,
@@ -4894,7 +4902,7 @@ impl App {
         rows.extend(
             site.index
                 .entries_tree(&site.issues, &site.path, keep, &|a, b| self.order_in(site, a, b), &|under| {
-                    site.expanded.contains(under) || found_under.contains(under)
+                    self.opened(site, under) || found_under.contains(under)
                 })
                 .into_iter()
                 .map(|(e, twig)| Row::Item(seat, e, twig)),
@@ -4927,6 +4935,16 @@ impl App {
     /// 서고, 펼친 프로젝트 밑에 그 프로젝트의 마일스톤 레인이 선다.
     pub fn board(&self) -> bool {
         self.layout == view::Layout::Board
+    }
+
+    /// 간트로 세우는가(moai-i4hf). 줄은 목록과 같이 세우되 펼침만 간트의 것(`Site::gantt_shut`)을 읽는다.
+    pub fn gantt(&self) -> bool {
+        self.layout == view::Layout::Gantt
+    }
+
+    /// 줄로 세우는가 — 보드도 간트도 아니다.
+    pub fn list(&self) -> bool {
+        self.layout == view::Layout::List
     }
 
     /// 보드의 카드 — 지금 디렉터리를 **통째로 펼친** 줄 가운데 묶음이 아닌 것(일과 backlog)이다(moai-9nfw).
@@ -5098,31 +5116,37 @@ impl App {
             keys::Screen::Wiki => return self.open_wiki(),
             keys::Screen::List => view::Layout::List,
             keys::Screen::Board => view::Layout::Board,
+            keys::Screen::Gantt => view::Layout::Gantt,
         };
         if self.layout != layout {
-            self.flip_layout(rows);
+            self.set_layout(layout, rows);
         }
     }
 
-    /// 목록과 보드를 오간다 — [`App::go`] 가 다른 배치를 고를 때(moai-9nfw). **고른 줄을 그대로 든다.**
+    /// 배치를 바꾼다 — [`App::go`] 가 다른 배치를 고를 때(moai-9nfw·moai-i4hf). **고른 줄을 그대로 든다.**
     ///
     /// - 목록 → 보드: 그 줄이 카드면 그 카드에, 폴더(에픽·마일스톤·바구니)면 그 밑의 첫 카드에 선다
-    /// - 보드 → 목록: **같은 디렉터리에 남고** 그 카드를 품은 폴더를 연다. 그 카드의 집으로 들어가면(`land`)
-    ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다
+    /// - 보드·간트 → 목록: **같은 디렉터리에 남고** 그 줄을 품은 폴더를 연다. 그 줄의 집으로 들어가면(`land`)
+    ///   한 번 오간 것만으로 뿌리의 보드가 에픽 하나의 보드로 줄어 돌아온다. 간트는 제 펼침을 따로 들어
+    ///   목록이 접어 둔 폴더 안의 줄에도 커서가 설 수 있다 — 그 폴더만 연다
+    /// - → 간트: **모두 펼친 채로 선다**([`App::open_gantt`]). 목록의 접기는 건드리지 않는다
     ///
     /// 굴린 자리는 첫 줄로 돌린다 — 목록의 줄 수와 보드 캔버스의 줄 수는 다른 자다. 화면을 떼어 둔 줄
     /// ([`App::adrift`])도 함께 걷는다: 남기면 첫 줄로 돌아간 보드나 목록에서 그 줄이 안 보여도 그림이 안 드러낸다.
-    fn flip_layout(&mut self, rows: &[Row]) {
+    fn set_layout(&mut self, to: view::Layout, rows: &[Row]) {
         let current = self.current_of(rows);
         let held = current.as_ref().map(|r| self.anchor_of(r));
         let under = self.dir_of(current.clone());
-        // 보드에서 고른 카드 — 목록으로 오면 그 카드를 품은 폴더를 연다. **그 카드의 프로젝트에서** 연다: 한눈 보기의
+        // 보드·간트에서 고른 줄 — 목록으로 오면 그 줄을 품은 폴더를 연다. **그 줄의 프로젝트에서** 연다: 한눈 보기의
         // 카드는 남의 프로젝트의 것이라(moai-oagj.vcj) 지금 선 것에 열면 엉뚱한 프로젝트의 폴더가 열린다.
         let card = match &current {
-            Some(Row::Item(seat, e, _)) if self.board() => e.at().map(|at| (*seat, at)),
+            Some(Row::Item(seat, e, _)) if to == view::Layout::List && !self.list() => e.at().map(|at| (*seat, at)),
             _ => None,
         };
-        self.layout = self.layout.flip();
+        if to == view::Layout::Gantt {
+            self.open_gantt();
+        }
+        self.layout = to;
         self.list.rewind();
         self.adrift = None;
         if let Some((seat, at)) = card
@@ -5231,7 +5255,7 @@ impl App {
     fn open_seat_at(&self, rows: &[Row]) -> Option<(Seat, Path)> {
         let (seat, path) = self.dir_seat_at(rows)?;
         let site = self.site_of_seat(seat)?;
-        (site.expanded.contains(&path) || self.searched_into(seat, &path)).then_some((seat, path))
+        (self.opened(site, &path) || self.searched_into(seat, &path)).then_some((seat, path))
     }
 
     /// 검색이 **이 자리를** 저절로 열었는가 — [`App::searched_open`] 의 한 자리 판이다. 집합을
@@ -5263,10 +5287,11 @@ impl App {
     /// 자리를 잃는다. 멤버 줄이 아니면 거짓 — 그때는 한 층 나간다.
     fn fold_parent(&mut self, rows: &[Row]) -> bool {
         let Some(up) = self.parent_row(rows) else { return false };
+        let gantt = self.gantt();
         if let Some((seat, path)) = self.dir_of(rows.get(up).cloned())
             && let Some(site) = self.site_mut(seat)
         {
-            site.expanded.remove(&path);
+            site.set_open(gantt, path, false);
         }
         // 부모 줄 위의 줄은 안 바뀐다 — 번호가 그대로 그 줄이다.
         let rows = self.rows();
@@ -5319,7 +5344,12 @@ impl App {
     /// 그 프로젝트의 묶음을 **다 편다**(`Tab`). 아직 줄이 없으면 아무 일도 안 한다 — 읽어 온
     /// 뒤에 [`App::follow_site`] 가 다시 부른다.
     fn open_all(&mut self, seat: Seat) {
+        let gantt = self.gantt();
         let Some(site) = self.site_mut(seat) else { return };
+        if gantt {
+            site.gantt_shut.clear();
+            return;
+        }
         let dirs: Vec<Path> = (0..site.issues.len())
             .filter(|&n| site.index.is_dir(&site.issues, n))
             .map(|n| site.index.dir_path(&site.issues, n))
@@ -5336,6 +5366,7 @@ impl App {
             // 모양이 아니라 그 이전 모양이 서면, 같은 자리로 오는 데 두 번을 눌러야 한다.
             if let Some(site) = self.site_mut(Seat::Place(at)) {
                 site.expanded.clear();
+                site.gantt_shut.clear();
             }
             self.deep.remove(&path);
             self.folded.insert(path);
@@ -5349,10 +5380,11 @@ impl App {
 
     /// 한 단계 펼친다(`l`·`→`). 이미 펼쳐져 있으면 아무 일도 없다 — 들어가는 것은 `Enter` 다.
     fn expand(&mut self, rows: &[Row]) {
+        let gantt = self.gantt();
         if let Some((seat, path)) = self.dir_seat_at(rows)
             && let Some(site) = self.site_mut(seat)
         {
-            site.expanded.insert(path);
+            site.set_open(gantt, path, true);
         }
     }
 
@@ -5363,8 +5395,9 @@ impl App {
     /// 아무 일도 안 하는 것보다 나쁘다. 그 펼침은 검색을 풀 때 함께 걷힌다.
     fn collapse(&mut self, rows: &[Row]) -> bool {
         let Some((seat, path)) = self.open_seat_at(rows) else { return false };
+        let gantt = self.gantt();
         let Some(site) = self.site_mut(seat) else { return false };
-        site.expanded.remove(&path);
+        site.set_open(gantt, path, false);
         true
     }
 
@@ -5379,7 +5412,24 @@ impl App {
     /// 누름이 하나 생겼다 — 펼치려면 두 번을 눌러야 했고, 그것이 이 함수가 막으려던 바로 그것이다.
     fn expand_all(&mut self, rows: &[Row]) {
         let Some((seat, path)) = self.dir_seat_at(rows) else { return };
-        if self.open_at(rows).is_some() {
+        let (open, gantt) = (self.open_at(rows).is_some(), self.gantt());
+        if gantt {
+            // 간트는 접은 자리를 적는다 — 다 접기는 그 자리와 밑의 묶음 전부를 넣고, 다 펼치기는 그것을 걷는다.
+            let Some(site) = self.site_mut(seat) else { return };
+            let mut under: Vec<Path> = site
+                .index
+                .descendants(&path)
+                .into_iter()
+                .filter(|&at| site.index.is_dir(&site.issues, at))
+                .map(|at| site.index.dir_path(&site.issues, at))
+                .collect();
+            under.push(path);
+            for p in under {
+                site.set_open(true, p, !open);
+            }
+            return;
+        }
+        if open {
             let Some(site) = self.site_mut(seat) else { return };
             let under: Vec<Path> = site.expanded.iter().filter(|p| p.starts_with(&path)).cloned().collect();
             for p in under {
@@ -5720,6 +5770,7 @@ impl App {
             archived_hidden: !self.view.show_archived,
             detail_at: self.detail_at,
             board: self.board(),
+            gantt: self.gantt(),
             stats: matches!(self.mode, Mode::Stats(_)),
             wiki: matches!(self.mode, Mode::Wiki(_)),
             head: self.head_at(rows).is_some(),

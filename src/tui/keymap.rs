@@ -455,6 +455,7 @@ impl Named for Browse {
                 match s {
                     Screen::List => "list",
                     Screen::Board => "board",
+                    Screen::Gantt => "gantt",
                     Screen::Stats => "stats",
                     Screen::Wiki => "wiki",
                 }

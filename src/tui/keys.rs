@@ -403,12 +403,14 @@ pub enum Browse {
 
 /// 탐색기가 보이는 화면(moai-z46r) — `SPC g` 가 고른다. 다음 화면은 여기 하나와 `SPC g <글자>` 줄 하나를 더해 든다.
 ///
-/// **목록과 보드는 한 화면의 두 배치다**(moai-9nfw) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
-/// `[tui] layout` 에 남는다. **통계와 위키는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 목록이나 보드다.
+/// **목록·보드·간트는 한 화면의 세 배치다**(moai-9nfw·moai-i4hf) — 커서·거름망·보기·상세가 한 벌이고, 고른 배치는
+/// `[tui] layout` 에 남는다. **통계와 위키는 열 때마다 새로 여는 창이다** — 설정에 안 남아, 껐다 켜면 고른 배치다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     List,
     Board,
+    /// 펼친 목록 옆에 날짜 축과 막대(moai-i4hf).
+    Gantt,
     Stats,
     /// 프로젝트의 위키(moai-o3cb) — 읽기만 한다(2026-10-04 사용자 결정).
     Wiki,
@@ -420,6 +422,7 @@ impl Screen {
         match self {
             Screen::List => say(lang, "tui.menu.list"),
             Screen::Board => say(lang, "tui.menu.board"),
+            Screen::Gantt => say(lang, "tui.menu.gantt"),
             Screen::Stats => say(lang, "tui.menu.stats"),
             Screen::Wiki => say(lang, "tui.menu.wiki"),
         }
@@ -430,6 +433,7 @@ impl Screen {
         match self {
             Screen::List => say(lang, "tui.state.list"),
             Screen::Board => say(lang, "tui.state.board"),
+            Screen::Gantt => say(lang, "tui.state.gantt"),
             Screen::Stats => say(lang, "tui.state.stats"),
             Screen::Wiki => say(lang, "tui.state.wiki"),
         }
@@ -781,6 +785,9 @@ pub const BROWSE: &[Bind<Browse>] = {
         // — 화면들이 서로 오가는 자리라서다.
         row!(Go(Screen::List), Some("SPC g l"), LEADER, Key::plain('g'), Key::plain('l')),
         row!(Go(Screen::Board), Some("SPC g b"), LEADER, Key::plain('g'), Key::plain('b')),
+        // 간트는 `g`(gantt, moai-i4hf). 맨 `gg`(맨 위로)와는 리더가 달라 안 부딪는다 — `SPC g` 메뉴 안의 `g` 는
+        // 메뉴 항목이 이긴다.
+        row!(Go(Screen::Gantt), Some("SPC g g"), LEADER, Key::plain('g'), Key::plain('g')),
         row!(Go(Screen::Stats), Some("SPC g s"), LEADER, Key::plain('g'), Key::plain('s')),
         // 위키는 `w`(wiki, moai-o3cb) — 다음 화면은 이렇게 한 줄을 더해 든다(moai-z46r).
         row!(Go(Screen::Wiki), Some("SPC g w"), LEADER, Key::plain('g'), Key::plain('w')),
@@ -932,6 +939,8 @@ pub struct Ctx {
     /// 목록을 보드로 세웠는가(moai-9nfw). `h`·`l` 이 옆 칸으로 가고 `Tab` 이 조용해진다 — 프로젝트 머리줄(`head`)만
     /// 빼고다.
     pub board: bool,
+    /// 목록을 간트로 세웠는가(moai-i4hf). 줄 키(`j`·`k`·`h`·`l`·`Tab`)는 목록과 같고, 날짜 축의 키가 이때만 선다.
+    pub gantt: bool,
     /// 통계 창이 떠 있는가(moai-z46r). **메뉴에는 화면 고르기(`SPC g`)만 서고**, 메뉴를 닫는 이동키는 창을 굴린다 —
     /// 창이 목록과 상세를 통째로 덮어, 그 밖의 항목은 눌러도 보이는 것이 없다.
     pub stats: bool,
@@ -999,11 +1008,16 @@ impl Ctx {
     /// 지금 화면 — 덮는 창(통계·위키)이 떠 있으면 그 창, 아니면 고른 배치다. **따로 들지 않는다**: 창과 배치가 이미
     /// 그 답을 든다. 두 창은 한 모드라 함께 서지 않는다(`Mode::Stats`·`Mode::Wiki`).
     pub fn screen(&self) -> Screen {
-        match (self.stats, self.wiki, self.board) {
-            (true, _, _) => Screen::Stats,
-            (false, true, _) => Screen::Wiki,
-            (false, false, true) => Screen::Board,
-            (false, false, false) => Screen::List,
+        if self.stats {
+            Screen::Stats
+        } else if self.wiki {
+            Screen::Wiki
+        } else if self.board {
+            Screen::Board
+        } else if self.gantt {
+            Screen::Gantt
+        } else {
+            Screen::List
         }
     }
 }
@@ -1264,6 +1278,7 @@ impl Browse {
             Unregister => say(c.lang, "tui.act.unregister"),
             Go(Screen::List) => say(c.lang, "tui.act.list"),
             Go(Screen::Board) => say(c.lang, "tui.act.board"),
+            Go(Screen::Gantt) => say(c.lang, "tui.act.gantt"),
             Go(Screen::Stats) => say(c.lang, "tui.act.stats"),
             Go(Screen::Wiki) => say(c.lang, "tui.act.wiki"),
             ClearFilter => say(c.lang, "tui.act.clear_filter"),
