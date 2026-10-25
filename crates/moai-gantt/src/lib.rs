@@ -9,9 +9,13 @@ use ratatui::widgets::StatefulWidget;
 
 pub mod axis;
 pub mod civil;
+pub mod hit;
+pub mod state;
 
 pub use axis::{Axis, Header, HeaderStyle, Label, Names, Zoom, iso_week, render_header, weekday};
 pub use civil::{civil_from_days, days_from_civil};
+pub use hit::{HEADER_ROWS, Hit, Layout, Part, bar_cells, drag_apply, drag_days, hit};
+pub use state::{DEFAULT_LABEL_WIDTH, GanttState};
 
 /// 가로 시간축. 보이는 날 범위를 든다.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -36,21 +40,6 @@ pub struct GanttRow {
 pub struct Link {
     pub from_row: usize,
     pub to_row: usize,
-}
-
-/// 보기 상태 (스크롤 따위). 위젯이 그리는 사이에 갱신한다.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct GanttState {
-    pub first_row: usize,
-}
-
-/// 좌표를 맞힌 결과.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hit {
-    /// 아무것도 아닌 자리.
-    None,
-    /// 행의 막대나 이름.
-    Row(usize),
 }
 
 /// 간트 위젯. 아직 아무것도 그리지 않는다.
