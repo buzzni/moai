@@ -1904,10 +1904,10 @@ already, write nothing new — it was met again, and that goes on the issue, not
 
     moai note <id> 'Lesson: lessons/<slug>'
 
-If none stands, write it. The call makes the page and puts the same note on the issue
-in one write:
+If none stands, write it. The same call makes the page and then puts the note on the
+issue:
 
-    moai wiki learn 'End a check on the step that must pass' -b - <<'LESSON'
+    moai wiki learn 'End a check on the step that must pass' --issue <id> -b - <<'LESSON'
     ## What happened
     ...
     ## Why
@@ -1920,7 +1920,8 @@ in one write:
   it is the part the next window reads. `## What happened` and `## Why` are worth a
   few lines. Do not tell it as a narrative: a list, as in an issue body
 - `--slug` names the file in {slug_rule} when the title is not ASCII; `--issue`
-  names the row it came from (the one row you hold, if you pass none). `--dry-run` shows
+  names the row it came from — pass it every time: without it the note goes to the one row
+  held under your name, and sessions sharing one git identity hold each other's rows. `--dry-run` shows
   the page first
 - Nothing is committed. The page rides the branch like any other: commit it with the
   same `docs(wiki):` commit as the end of an epic, `add` first
