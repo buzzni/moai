@@ -94,8 +94,11 @@ impl StatefulWidget for Gantt<'_> {
         let header = state.axis.header(l.dates_body.width, self.now, names);
         let (pal, g) = (&self.palette, &self.glyphs);
 
-        for y in l.splitter.top()..l.splitter.bottom() {
-            buf[(l.splitter.x, y)].set_char(g.splitter).set_style(pal.splitter);
+        // 0 폭 영역이면 분할선도 0 폭이다 — 그 `x` 는 영역 밖이라 안 쓴다.
+        if l.splitter.width > 0 {
+            for y in l.splitter.top()..l.splitter.bottom() {
+                buf[(l.splitter.x, y)].set_char(g.splitter).set_style(pal.splitter);
+            }
         }
         if l.labels_header.height > 0 {
             buf.set_line(l.labels_header.x, l.labels_header.y, &self.title, l.labels_header.width);
@@ -125,7 +128,7 @@ impl StatefulWidget for Gantt<'_> {
 }
 
 impl Gantt<'_> {
-    /// 연결선 층 — 가장 위, **빈 칸에만** 긋는다([`draw::is_empty_cell`] 이 빈 칸을 가린다).
+    /// 연결선 층 — 가장 위, **빈 칸에만** 긋는다([`draw::is_empty_cell`] 이 오늘 선 글리프와 함께 빈 칸을 가린다).
     /// 길은 [`links::route`] 가 버퍼 없이 찾고, 여기는 그것을 칸에 옮기기만 한다. 커서 줄이 없으면
     /// 아무것도 안 그린다.
     fn paint_links(&self, buf: &mut Buffer, l: &Layout, ctx: &draw::Ctx) {
@@ -141,12 +144,13 @@ impl Gantt<'_> {
             let in_y = (first..first + usize::from(area.height)).contains(&row);
             (in_x && in_y).then(|| (area.x + col as u16, area.y + (row - first) as u16))
         };
-        let occupied = |row: usize, col: i64| at(row, col).is_some_and(|(x, y)| !draw::is_empty_cell(buf, x, y));
+        let today = ctx.glyphs.today;
+        let occupied = |row: usize, col: i64| at(row, col).is_some_and(|(x, y)| !draw::is_empty_cell(buf, x, y, today));
         let route = links::route(focus, self.links, ext, vis, occupied);
         let (st, g) = (ctx.palette.link, &ctx.glyphs.link);
         let put = |buf: &mut Buffer, row: usize, col: i64, ch: char| {
             if let Some((x, y)) = at(row, col)
-                && draw::is_empty_cell(buf, x, y)
+                && draw::is_empty_cell(buf, x, y, today)
             {
                 buf[(x, y)].set_char(ch).set_style(st);
             }
@@ -161,8 +165,12 @@ impl Gantt<'_> {
         }
         for m in &route.more {
             let text = format!("{} {}", if m.dir == links::Dir::Up { g.up } else { g.down }, m.n);
-            // 커서 줄이 끝 줄이면 연결 칸이 `└▶` 로 차 있으니 개수는 그 왼쪽에 닿게 쓴다.
-            let start = if m.row == focus { m.col - text.chars().count() as i64 } else { m.col };
+            // 끝 줄의 길이 연결 칸에 닿아 있으면 개수는 길의 반대쪽에 붙는다 — 자리는 `links::spine` 이 고른다.
+            let start = match m.place {
+                links::Place::At => m.col,
+                links::Place::Before => m.col - text.chars().count() as i64,
+                links::Place::After => m.col + 1,
+            };
             for (i, ch) in text.chars().enumerate() {
                 put(buf, m.row, start + i as i64, ch);
             }

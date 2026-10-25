@@ -5,11 +5,9 @@
 
 use ratatui::layout::{Position, Rect};
 
-use crate::GanttRow;
-use crate::axis::Zoom;
+use crate::axis::{DAY, Zoom};
 use crate::state::GanttState;
-
-const DAY: i64 = 86_400;
+use crate::{GanttRow, RowKind};
 
 /// 머리글 줄 수: 위 줄·아래 줄·오늘(`▼`). [`crate::Axis::header`] 의 세 줄과 같다.
 pub const HEADER_ROWS: u16 = 3;
@@ -82,29 +80,38 @@ pub enum Hit {
 }
 
 impl GanttRow {
+    /// `◆` 가 서는 기한. 마일스톤이거나 계획 없이 기한만 있는 줄에만 선다 — 계획이 있는 이슈는 막대의
+    /// 끝이 기한이라 표식을 안 둔다. 그리기와 [`span`](Self::span) 이 이 한 곳을 읽는다.
+    pub(crate) fn due_mark(&self) -> Option<i64> {
+        self.due.filter(|_| self.kind == RowKind::Milestone || self.planned.is_none())
+    }
+
     /// 맞히기가 보는 막대의 크기 `[시작, 끝]`: 그려지는 것 전부의 **합집합**이다 — 계획, 실제(끝이
-    /// 없으면 `now` 까지), 기한 표식(기한이 든 날의 칸), 기한 넘김(기한~`now`). 어느 하나라도 있으면
-    /// 그 칸을 누를 수 있어야 하고, 막대 없이 표식뿐인 칸도 누를 수 있다. 끝이 시작보다 앞이면 시작으로
-    /// 맞춘다. 그리는 쪽이 모양을 바꾸면 이 함수를 같이 바꾼다(`draw` 시험이 그리기와 견준다).
+    /// 없으면 `now` 까지), `◆` 가 서는 줄의 기한 표식(기한이 든 날의 칸), 기한 넘김(기한~`now`). 어느
+    /// 하나라도 있으면 그 칸을 누를 수 있어야 하고, 막대 없이 표식뿐인 칸도 누를 수 있다. 안 그리는 것은
+    /// 넣지 않는다 — 계획이 있는 이슈의 기한이 계획 끝보다 늦어도 빈 칸이 막대가 되지 않는다. 끝이 시작보다
+    /// 앞이면 시작으로 맞춘다. 그리는 쪽이 모양을 바꾸면 이 함수를 같이 바꾼다(`draw` 시험이 그리기와 견준다).
     pub fn span(&self, now: i64) -> Option<(i64, i64)> {
-        let mut parts: Vec<(i64, i64)> = Vec::with_capacity(4);
+        let mut acc: Option<(i64, i64)> = None;
+        let mut add = |s: i64, e: i64| {
+            let e = e.max(s);
+            acc = Some(acc.map_or((s, e), |(lo, hi)| (lo.min(s), hi.max(e))));
+        };
         if let Some((s, e)) = self.planned {
-            parts.push((s, e.max(s)));
+            add(s, e);
         }
         if let Some((s, e)) = self.actual {
-            parts.push((s, e.unwrap_or(now).max(s)));
+            add(s, e.unwrap_or(now));
         }
-        if let Some(d) = self.due {
+        if let Some(d) = self.due_mark() {
             // 기한은 그날 끝 시각(미포함)이다 — 표식은 그날의 마지막 칸에 선다.
-            parts.push((d - 1, d));
-            if self.overdue {
-                // `!` 는 지금이 든 칸에 서므로 끝을 1초 넘겨 그 칸을 포함시킨다.
-                parts.push((d, now.max(d) + 1));
-            }
+            add(d - 1, d);
         }
-        let lo = parts.iter().map(|p| p.0).min()?;
-        let hi = parts.iter().map(|p| p.1).max()?;
-        Some((lo, hi))
+        if let (Some(d), true) = (self.due, self.overdue) {
+            // `!` 는 지금이 든 칸에 서므로 끝을 1초 넘겨 그 칸을 포함시킨다.
+            add(d, now.max(d) + 1);
+        }
+        acc
     }
 }
 

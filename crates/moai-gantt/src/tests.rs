@@ -388,17 +388,89 @@ fn ascii_glyphs_draw_the_same_shape() {
     let rows = [bar(0, 2), bar(6, 9)];
     let b = view(&rows, &[lk(0, 1)], Some(1), 0, 2, Glyphs::ascii());
     assert_eq!(lines(&b, 2), ["..--+", "    +>..."]);
+    // 미룬 막는 줄의 막대는 연결선과 글자가 다르다 — 색 없이도 막대가 어디서 끝나는지 보인다.
+    let rows = [GanttRow { deferred: true, ..bar(0, 2) }, bar(6, 9)];
+    let b = view(&rows, &[lk(0, 1)], Some(1), 0, 2, Glyphs::ascii());
+    assert_eq!(lines(&b, 2), ["~~--+", "    +>..."]);
 }
 
 #[test]
 fn the_today_line_gives_way_to_a_link() {
     let rows = [bar(0, 2), bar(6, 9)];
-    let area = rows_of(2);
-    let mut buf = Buffer::empty(area);
+    let links = [lk(0, 1)];
+    // 기본 글리프와 부르는 쪽이 고른 오늘 글리프 둘 다 — 빈 칸 판정이 글자를 박아 두면 둘째가 길을 막는다.
+    for today in [Glyphs::default().today, '|'] {
+        let area = rows_of(2);
+        let mut buf = Buffer::empty(area);
+        let mut st = GanttState::new(Axis::new(Zoom::Week, ORIGIN));
+        st.label_width = LW;
+        let glyphs = Glyphs { today, ..Glyphs::default() };
+        Gantt { rows: &rows, links: &links, focus: Some(1), now: 103 * DAY, glyphs, ..Gantt::default() }
+            .render(area, &mut buf, &mut st);
+        assert_eq!(line(&buf, 0), "░░──┐", "오늘 글리프 {today:?}");
+        assert_eq!(line(&buf, 1), format!("   {today}└▶░░░"));
+    }
+}
+
+#[test]
+fn a_count_on_the_focus_edge_row_on_the_blocked_side_stays_visible() {
+    // 커서 줄(1)이 화면 첫 줄이고 위로 밀린 줄 0 을 막는다. 길이 왼쪽(막대 끝)에서 와 꺾으니 개수는 오른쪽이다.
+    let mut rows = vec![GanttRow::default(); 3];
+    rows[1] = bar(0, 2);
+    let b = view(&rows, &[lk(1, 0)], Some(1), 1, 2, Glyphs::default());
+    assert_eq!(lines(&b, 2), ["░░┘↑ 1", ""]);
+}
+
+#[test]
+fn a_count_on_an_edge_row_that_carries_a_path_keeps_its_arrow() {
+    // 화면 첫 줄(1)이 길을 낸 막는 줄이고 그 위(0)에도 막는 줄이 있다 — 첫 줄은 세로줄에 이어지고 개수는 그 오른쪽.
+    let mut rows = vec![GanttRow::default(); 4];
+    rows[1] = bar(0, 2);
+    rows[3] = bar(6, 9);
+    let b = view(&rows, &[lk(0, 3), lk(1, 3)], Some(3), 1, 3, Glyphs::default());
+    assert_eq!(lines(&b, 3), ["░░──┤↑ 1", "    │", "    └▶░░░"]);
+}
+
+#[test]
+fn a_due_that_draws_no_diamond_is_not_part_of_the_bar() {
+    // 계획이 있는 이슈는 기한에 ◆ 를 안 둔다 — 기한이 계획 끝보다 늦어도 막대는 계획에서 끝난다.
+    let r = GanttRow { planned: Some((101 * DAY, 103 * DAY)), due: Some(115 * DAY), ..GanttRow::default() };
+    assert_eq!(r.span(LONG_AGO), Some((101 * DAY, 103 * DAY)));
+    let b = render(std::slice::from_ref(&r), Zoom::Week, LONG_AGO);
+    assert_eq!(line(&b, 0), " ░░", "안 그린 기한을 `›` 로 가리키지 않는다");
     let mut st = GanttState::new(Axis::new(Zoom::Week, ORIGIN));
     st.label_width = LW;
-    let links = [lk(0, 1)];
-    Gantt { rows: &rows, links: &links, focus: Some(1), now: 103 * DAY, ..Gantt::default() }
-        .render(area, &mut buf, &mut st);
-    assert_eq!(line(&buf, 0), "░░──┐");
+    assert_eq!(hit(rows_of(1), &st, &[r], LONG_AGO, LW + 1 + 6, HEADER_ROWS), Hit::Empty { row: 0, day: 106 });
+}
+
+#[test]
+fn a_squeezed_widget_never_writes_outside_its_area() {
+    // 고정 칸이 날짜 칸을 다 먹은 폭(0 폭 날짜 칸)·0 폭·낮은 높이에서, 잘린 막대·기한 넘김·연결선이 든 줄을 그린다.
+    let rows = [
+        planned(90 * DAY, 105 * DAY),
+        GanttRow { planned: Some((101 * DAY, 103 * DAY)), due: Some(103 * DAY), overdue: true, ..GanttRow::default() },
+        GanttRow { kind: RowKind::Milestone, due: Some(130 * DAY), ..GanttRow::default() },
+        bar(6, 9),
+    ];
+    let links = [lk(0, 3), lk(1, 3), lk(3, 2)];
+    let full = Rect::new(0, 0, 30, 12);
+    for zoom in Zoom::ALL {
+        for w in 0..=LW + 3 {
+            for h in 0..=HEADER_ROWS + 2 {
+                let area = Rect::new(3, 2, w, h);
+                let mut buf = Buffer::empty(full);
+                let mut st = GanttState::new(Axis::new(zoom, ORIGIN));
+                st.label_width = LW;
+                let g = Gantt { rows: &rows, links: &links, focus: Some(3), now: 106 * DAY, ..Gantt::default() };
+                g.render(area, &mut buf, &mut st);
+                for y in 0..full.height {
+                    for x in 0..full.width {
+                        if !area.contains(ratatui::layout::Position { x, y }) {
+                            assert_eq!(buf[(x, y)], Default::default(), "{zoom:?} {w}x{h}: ({x},{y}) 에 썼다");
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

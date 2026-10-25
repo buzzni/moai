@@ -4,9 +4,7 @@
 //! 크레이트가 쥔다. 모든 동작은 "사람이 움직였다" 이므로 맞춤 깃발을 내린다 — 맞춤만 깃발을
 //! 올리고, 깃발이 선 동안은 [`GanttState::refit`] 가 범위가 바뀔 때마다 다시 맞춘다.
 
-use crate::axis::{Axis, Zoom};
-
-const DAY: i64 = 86_400;
+use crate::axis::{Axis, DAY, Zoom};
 
 /// 고정 칸의 기본 폭. 시안의 `ID st 제목` 이 들어갈 만한 값이다.
 pub const DEFAULT_LABEL_WIDTH: u16 = 40;
@@ -108,7 +106,7 @@ impl GanttState {
         self.axis = Axis::new(Zoom::Month, lo.div_euclid(DAY) * DAY);
     }
 
-    /// 분할선 끌기. 폭은 0 아래로 내려가지 않는다.
+    /// 분할선 끌기. 값은 그대로 두고, 그릴 때 분할선 한 칸을 남기도록 화면에 맞춰 잘린다([`crate::Layout`]).
     pub fn set_label_width(&mut self, w: u16) {
         self.label_width = w;
     }

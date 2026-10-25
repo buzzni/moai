@@ -47,13 +47,25 @@ pub(crate) enum Dir {
     Down,
 }
 
-/// 화면 밖 줄의 수. 위 줄은 본문 첫 줄에, 아래 줄은 본문 끝 줄에 `col` 부터 쓴다.
+/// 화면 밖 개수 글이 연결 칸 `col` 의 어디에 서는가.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Place {
+    /// 그 줄의 길이 연결 칸에 안 닿았다 — 연결 칸을 비우고 거기서부터 쓴다.
+    At,
+    /// 길이 연결 칸에서 오른쪽으로 나간다(`└▶`, 막히는 쪽의 `├─`) — 연결 칸 왼쪽에 닿게 끝난다.
+    Before,
+    /// 길이 왼쪽에서 연결 칸으로 온다(막는 줄의 `─┤`, 커서 줄이 막는 쪽의 `─┘`) — 연결 칸 다음 칸부터 쓴다.
+    After,
+}
+
+/// 화면 밖 줄의 수. 위 줄은 본문 첫 줄에, 아래 줄은 본문 끝 줄에 쓰고, 자리는 `place` 가 정한다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct More {
     pub row: usize,
     pub col: i64,
     pub dir: Dir,
     pub n: usize,
+    pub place: Place,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -95,8 +107,8 @@ fn side(others: &[usize], vis: &Range<usize>, focus: usize, ext: &impl Fn(usize)
 
 /// 커서 줄 `focus` 의 연결을 찾는다.
 ///
-/// - `ext(row)`: 줄의 막대가 차지하는 칸 `[시작, 끝)`. 끝은 계획 끝과 실제 끝 중 늦은 쪽이다.
-///   없으면(날짜 없는 줄) 길을 못 그린다.
+/// - `ext(row)`: 줄의 막대가 차지하는 칸 `[시작, 끝)` — 맞히기와 같은 합집합([`crate::GanttRow::span`])이라
+///   끝은 계획·실제·기한 넘김(`!`) 가운데 가장 늦은 쪽이다. 없으면(날짜 없는 줄) 길을 못 그린다.
 /// - `vis`: 화면에 든 줄 번호.
 /// - `occupied(row, col)`: 그 칸에 이미 막대나 표식이 있나. 길이 지날 칸이 막혔는지만 본다.
 pub(crate) fn route(
@@ -141,11 +153,12 @@ pub(crate) fn route(
             out.marks.push((r, if r < focus { Dir::Down } else { Dir::Up }));
         }
     }
-    spine(&mut out, c, rows, focus, &vis, &sd);
+    // 커서 줄의 길을 세로줄보다 먼저 놓는다 — `spine` 이 끝 줄의 길이 연결 칸에 닿았는지를 그 칸에서 읽는다.
     if !sd.seen.is_empty() || sd.above + sd.below > 0 {
         out.arm(focus, c, R);
         out.cells.entry((focus, c + 1)).or_default().arrow = true;
     }
+    spine(&mut out, c, rows, focus, &vis, &sd);
 
     // 막히는 쪽: 커서 막대 끝에서 나가, 가장 이른 목표의 시작 두 칸 앞에서 꺾는다.
     let sd = side(&blocked, &vis, focus, &ext);
@@ -166,18 +179,20 @@ pub(crate) fn route(
             out.marks.push((r, if r < focus { Dir::Down } else { Dir::Up }));
         }
     }
-    spine(&mut out, c2, rows, focus, &vis, &sd);
     if !sd.seen.is_empty() || sd.above + sd.below > 0 {
         for x in fe..c2 {
             out.arm(focus, x, L | R);
         }
         out.arm(focus, c2, L);
     }
+    spine(&mut out, c2, rows, focus, &vis, &sd);
     out
 }
 
 /// 연결 칸의 세로줄과 화면 밖 개수. 세로줄은 가장 먼 줄(화면 밖이 있으면 화면 끝 안쪽 줄)까지 닿는다.
-/// 개수는 끝 줄에 쓰므로 그 칸 하나는 비운다.
+/// 개수는 끝 줄에 쓴다. 그 줄의 길이 연결 칸에 닿아 있지 않으면 그 칸을 비워 거기서부터 쓰고, 닿아 있으면
+/// (커서 줄, 길을 낸 막는·막히는 줄) 세로줄이 그 칸을 지나고 개수는 길의 반대쪽에 붙는다 — 길의 글리프 위에
+/// 쓰면 빈 칸에만 쓰는 층이 개수를 통째로 버린다. 부르기 전에 그 줄들의 길이 `out` 에 들어 있어야 한다.
 fn spine(out: &mut Route, col: i64, rows: Vec<usize>, focus: usize, vis: &Range<usize>, s: &Side) {
     if rows.len() == 1 && s.above + s.below == 0 {
         return;
@@ -185,20 +200,28 @@ fn spine(out: &mut Route, col: i64, rows: Vec<usize>, focus: usize, vis: &Range<
     let mut lo = rows.iter().copied().min().unwrap_or(focus);
     let mut hi = rows.iter().copied().max().unwrap_or(focus);
     let last = vis.end.saturating_sub(1);
-    // 개수가 앉는 줄까지 세로줄이 이어지는 것으로 셈하되, 그 줄의 칸은 개수가 쓰니 비운다.
+    let path = |out: &Route, r: usize| out.cells.get(&(r, col)).map_or(0, |p| p.arms) & (L | R);
+    let place = |arms: u8| match arms {
+        0 => Place::At,
+        a if a & R != 0 => Place::Before,
+        _ => Place::After,
+    };
+    // 개수가 앉는 줄까지 세로줄이 이어지는 것으로 셈하되, 길이 안 닿은 그 줄의 칸은 개수가 쓰니 비운다.
     let (top, bottom) = (s.above > 0, s.below > 0);
     if top {
         lo = vis.start;
-        out.more.push(More { row: vis.start, col, dir: Dir::Up, n: s.above });
+        let place = place(path(out, vis.start));
+        out.more.push(More { row: vis.start, col, dir: Dir::Up, n: s.above, place });
     }
     if bottom {
         hi = last;
-        out.more.push(More { row: last, col, dir: Dir::Down, n: s.below });
+        let place = place(path(out, last));
+        out.more.push(More { row: last, col, dir: Dir::Down, n: s.below, place });
     }
     for r in lo..=hi {
-        let label_row = r != focus && ((top && r == vis.start) || (bottom && r == last));
+        let label_row = path(out, r) == 0 && ((top && r == vis.start) || (bottom && r == last));
         if !label_row {
-            // 커서 줄이 개수 줄이기도 하면 위·아래 팔은 화면 밖으로 나간다.
+            // 길이 닿은 줄(커서 줄 등)이 개수 줄이기도 하면 위·아래 팔은 화면 밖으로 나간다.
             let up = r > lo || (top && r == vis.start);
             let down = r < hi || (bottom && r == last);
             let arms = if up { U } else { 0 } | if down { D } else { 0 };
@@ -266,7 +289,10 @@ mod tests {
         let r = run(5, &[(0, 5), (1, 5), (9, 5)], &b, 3..8, &[]);
         assert_eq!(
             r.more,
-            vec![More { row: 3, col: 7, dir: Dir::Up, n: 2 }, More { row: 7, col: 7, dir: Dir::Down, n: 1 },]
+            vec![
+                More { row: 3, col: 7, dir: Dir::Up, n: 2, place: Place::At },
+                More { row: 7, col: 7, dir: Dir::Down, n: 1, place: Place::At },
+            ]
         );
         // 세로줄은 화면 끝 줄 바로 안쪽까지 간다.
         assert_eq!(arms(&r, 4, 7), U | D);
@@ -274,6 +300,24 @@ mod tests {
         assert_eq!(arms(&r, 5, 7), R | U | D);
         assert_eq!(arms(&r, 6, 7), U | D);
         assert_eq!(arms(&r, 7, 7), 0);
+    }
+
+    #[test]
+    fn a_count_on_a_row_whose_path_reaches_the_column_sits_beside_the_path() {
+        // 커서 줄이 막는 쪽이고 화면 첫 줄이다: 길은 왼쪽에서 와 꺾으니 개수는 연결 칸 오른쪽에 선다.
+        let bars = [Some((0, 2)), Some((0, 2))];
+        let r = run(1, &[(1, 0)], &bars, 1..2, &[]);
+        assert_eq!(r.more, vec![More { row: 1, col: 2, dir: Dir::Up, n: 1, place: Place::After }]);
+        assert_eq!(arms(&r, 1, 2), L | U);
+        // 화면 첫 줄이 길을 낸 막는 줄이면 그 줄은 세로줄에 이어지고 개수는 그 오른쪽이다.
+        let bars = [Some((0, 2)), Some((0, 2)), None, Some((6, 9))];
+        let r = run(3, &[(0, 3), (1, 3)], &bars, 1..4, &[]);
+        assert_eq!(r.more, vec![More { row: 1, col: 4, dir: Dir::Up, n: 1, place: Place::After }]);
+        assert_eq!(arms(&r, 1, 4), L | U | D);
+        // 커서 줄이 막히는 쪽이고 화면 첫 줄이면 길이 오른쪽으로 나가니 개수는 왼쪽이다.
+        let bars = [Some((0, 2)), Some((6, 9))];
+        let r = run(1, &[(0, 1)], &bars, 1..2, &[]);
+        assert_eq!(r.more, vec![More { row: 1, col: 4, dir: Dir::Up, n: 1, place: Place::Before }]);
     }
 
     #[test]

@@ -173,12 +173,13 @@ impl Default for Glyphs {
 }
 
 impl Glyphs {
-    /// ASCII 만. 오늘 선과 묶음 계획이 겹치지 않도록 글자를 따로 쓴다.
+    /// ASCII 만. 오늘 선과 묶음 계획이 겹치지 않도록 글자를 따로 쓴다. 미룬 계획도 연결선의 `-` 와 갈라
+    /// `~` 다 — 같은 글자면 미룬 막는 줄의 막대와 그 뒤의 연결선이 색으로만 갈린다.
     pub fn ascii() -> Self {
         Glyphs {
             planned: '.',
             planned_group: '=',
-            deferred: '-',
+            deferred: '~',
             actual: '#',
             eighths: None,
             overdue: '%',

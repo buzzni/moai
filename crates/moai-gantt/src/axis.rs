@@ -10,7 +10,8 @@ use ratatui::text::Span;
 
 use crate::civil::{civil_from_days, days_from_civil};
 
-const DAY: i64 = 86_400;
+/// 하루의 초. 크레이트가 이 한 곳에서 읽는다.
+pub(crate) const DAY: i64 = 86_400;
 
 /// 확대 단계.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +45,7 @@ impl Zoom {
     /// 한 단계 더 고운 쪽. 끝이면 제자리.
     pub fn finer(self) -> Zoom {
         let i = Self::ALL.iter().position(|z| *z == self).unwrap_or(0);
-        Self::ALL[(i + 1).min(3)]
+        Self::ALL[(i + 1).min(Self::ALL.len() - 1)]
     }
 
     /// 한 단계 더 거친 쪽. 끝이면 제자리.
@@ -219,7 +220,10 @@ pub fn render_header(buf: &mut Buffer, area: Rect, h: &Header, st: &HeaderStyle)
             }
         }
     }
-    if let (Some(c), true) = (h.today, area.height > 2) {
+    // 라벨·주말처럼 영역 폭 안에서만 그린다 — 더 넓게 지은 머리글을 받아도 영역 밖에 안 쓴다.
+    if let Some(c) = h.today.filter(|c| *c < area.width)
+        && area.height > 2
+    {
         buf.set_string(area.x + c, area.y + 2, "▼", st.today);
     }
 }
@@ -527,5 +531,16 @@ mod tests {
         assert_eq!(buf[(16, 2)].bg, Color::DarkGray);
         assert_eq!(buf[(15, 1)].bg, Color::Reset);
         assert_eq!(buf[(16, 0)].bg, Color::Reset, "위 줄은 주말 바탕을 안 받는다");
+    }
+
+    #[test]
+    fn render_keeps_the_today_marker_inside_a_narrower_area() {
+        // 48칸으로 지은 머리글(오늘 칸 14)을 10칸 영역에 그린다 — 영역 밖의 칸에는 아무것도 안 쓴다.
+        let a = Axis::new(Zoom::Day, d(2026, 10, 20) * DAY);
+        let h = a.header(48, d(2026, 10, 23) * DAY + 14 * 3_600, &Names::default());
+        assert_eq!(h.today, Some(14));
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 3));
+        render_header(&mut buf, Rect::new(0, 0, 10, 3), &h, &HeaderStyle::default());
+        assert_eq!(row(&buf, 2), format!("{:20}", ""));
     }
 }

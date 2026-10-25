@@ -36,9 +36,11 @@ fn at(area: Rect, col: i64) -> Option<u16> {
     (0..i64::from(area.width)).contains(&col).then(|| area.x + col as u16)
 }
 
-/// 칸이 아직 비었나 — 연결선이 막대 위를 안 긋게.
-pub(crate) fn is_empty_cell(buf: &Buffer, x: u16, y: u16) -> bool {
-    matches!(buf[(x, y)].symbol(), " " | "┊" | ":")
+/// 칸이 아직 비었나 — 연결선이 막대 위를 안 긋게. 오늘 선은 빈 칸에 선 꾸밈이라 빈 칸으로 친다. 그 글리프는
+/// 부르는 쪽의 [`Glyphs::today`] 다 — 글자를 여기 박으면 다른 글리프 집합에서 오늘 선이 길을 막는다.
+pub(crate) fn is_empty_cell(buf: &Buffer, x: u16, y: u16, today: char) -> bool {
+    let mut s = buf[(x, y)].symbol().chars();
+    matches!((s.next(), s.next()), (Some(c), None) if c == ' ' || c == today)
 }
 
 pub(crate) fn row(buf: &mut Buffer, area: Rect, r: &GanttRow, c: &Ctx) {
@@ -63,7 +65,8 @@ pub(crate) fn row(buf: &mut Buffer, area: Rect, r: &GanttRow, c: &Ctx) {
             (false, _) => (g.planned_group, pal.planned),
         };
         let (c0, c1) = crate::span_cells(c.axis, (s, e.max(s)));
-        for col in c0..c1 {
+        // 화면 안의 칸만 돈다 — Hour 에서 한 해짜리 계획은 칸이 9천 가까이 된다.
+        for col in c0.max(0)..c1.min(i64::from(area.width)) {
             if let Some(x) = at(area, col) {
                 put(buf, x, y, ch, st);
             }
@@ -80,26 +83,27 @@ pub(crate) fn row(buf: &mut Buffer, area: Rect, r: &GanttRow, c: &Ctx) {
         // 기한 끝이 칸 경계면 다음 칸이고, 경계가 아니면(Month) 기한이 든 칸에서 시작한다.
         let a = floor(due);
         let b = floor(c.now).max(a);
-        for col in a..=b {
+        for col in a.max(0)..=b.min(i64::from(area.width)) {
             if let Some(x) = at(area, col) {
                 let ch = if col == b { g.overdue_end } else { g.overdue };
                 put(buf, x, y, ch, pal.overdue);
             }
         }
     }
-    // 표식. 마일스톤과 기한만 있는 줄은 `◆` 하나로 선다.
-    if let Some(due) = r.due
-        && (r.kind == RowKind::Milestone || r.planned.is_none())
+    // 표식. 마일스톤과 기한만 있는 줄은 `◆` 하나로 선다 — 어느 줄인지는 맞히기와 같은 `due_mark` 가 고른다.
+    if let Some(due) = r.due_mark()
         && let Some(x) = at(area, floor(due - 1))
     {
         put(buf, x, y, g.due, pal.due);
     }
-    // 화면 밖으로 잘림.
-    if let Some((lo, hi)) = r.span(c.now) {
+    // 화면 밖으로 잘림. 날짜 칸이 0 폭이면 `area.x` 는 이미 영역 밖이라 아무것도 안 쓴다.
+    if let Some((lo, hi)) = r.span(c.now)
+        && area.width > 0
+    {
         if floor(lo) < 0 {
             put(buf, area.x, y, g.clip_left, pal.clip);
         }
-        if cell(hi).ceil() as i64 > i64::from(area.width) && area.width > 0 {
+        if cell(hi).ceil() as i64 > i64::from(area.width) {
             put(buf, area.x + area.width - 1, y, g.clip_right, pal.clip);
         }
     }

@@ -189,7 +189,7 @@ jobs:
       #
       # 경고를 오류로 올린다. 새 경고가 붙는 자리는 PR 이고, 쌓인 뒤에 걷으면
       # 그 판이 통째로 남의 일이 된다. 저장소가 일부러 지고 가는 lint 는
-      # Cargo.toml 의 `[lints.clippy]` 에 까닭과 함께 적혀 있다.
+      # Cargo.toml 의 `[workspace.lints.clippy]` 에 까닭과 함께 적혀 있다(두 패키지가 같이 쓴다).
       - name: clippy
         run: cargo clippy --all-targets --workspace --locked -- -D warnings
 
