@@ -56,7 +56,11 @@
     <ol>
       <li><a href="#install">설치</a></li>
       <li><a href="#start">시작하기</a></li>
-      <li><a href="#screens">tui 와 web</a></li>
+      <li><a href="#screens">tui 와 web</a>
+        <ol>
+          <li><a href="#gantt">간트</a></li>
+        </ol>
+      </li>
       <li><a href="#develop">moai로 시작하는 개발 지시</a></li>
       <li><a href="#examples">사용 예</a></li>
       <li><a href="#env">지원하는 작업 환경</a>
@@ -151,8 +155,22 @@ moai init</code></pre>
       <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-detail.png" data-src="../../assets/media/web-detail.webm" aria-label="moai web 에서 이슈의 설명, 커밋, 이력을 읽는 화면"></video></div>
     <ul>
       <li><code>127.0.0.1:6624</code>에 보드, 목록, 위키를 띄웁니다. 브라우저는 직접 열어야 합니다.</li>
-      <li>트래커를 읽기만 하고 쓰지 않습니다. 터미널이 익숙하지 않은 동료도 진행 상황을 볼 수 있습니다.</li>
+      <li>간트에서 막대를 끌어 날짜를 바꾸는 것 말고는 트래커를 읽기만 합니다. 터미널이 익숙하지 않은 동료도 진행 상황을 볼 수 있습니다.</li>
       <li>포트가 쓰이고 있으면 <code>--port</code>로 바꾸거나 <code>--port 0</code>으로 빈 포트를 고릅니다. 끌 때는 <code>Ctrl-C</code> 입니다.</li>
+    </ul>
+
+    <h3 id="gantt">간트 — 일정을 막대로</h3>
+    <p>목록 옆에 날짜 축을 붙여, 이슈마다 계획한 기간과 실제로 일한 기간을 막대로 봅니다. tui와 web 모두 <code>SPC g g</code>로 엽니다.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/tui-gantt.png" data-src="../../assets/media/tui-gantt.webm" aria-label="tui 의 간트에서 계획한 기간과 일한 기간의 막대를 넓히고 좁혀 보는 화면"></video></div>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../../assets/media/web-gantt.png" data-src="../../assets/media/web-gantt.webm" aria-label="web 의 간트에서 단위를 바꾸고 오늘로 돌아오며 막대를 보는 화면"></video></div>
+    <ul>
+      <li>흐린 막대는 계획한 시작일부터 기한까지, 색 막대는 실제로 일한 기간입니다. 기한을 넘긴 부분은 빨간 빗금으로 보입니다.</li>
+      <li>에픽과 마일스톤은 멤버들의 기간을 모아 빗금 막대로 보여 줍니다.</li>
+      <li>시간, 일, 주, 월 단위로 넓히고 좁힐 수 있습니다. <code>t</code>는 오늘로 돌아가고, <code>z</code>는 모든 막대를 한 화면에 맞춥니다.</li>
+      <li>커서가 놓인 이슈를 막고 있는 이슈는 화살표로 이어집니다.</li>
+      <li>막대를 마우스로 끌면 시작일과 기한이 바뀝니다. 손을 놓을 때 한 번 저장되고, 위의 에픽이나 마일스톤 기한을 넘기면 저장하지 않고 이유를 알려 줍니다.</li>
     </ul>
 
     <h2 id="develop">moai로 시작하는 개발 지시</h2>
