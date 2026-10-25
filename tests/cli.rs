@@ -9318,6 +9318,8 @@ fn every_command_still_speaks_json() {
         vec!["project", "ls", "--json"],
         // 위키를 읽기만 한다 — 이 판에는 `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
         vec!["wiki", "ls", "--json"],
+        // 위키를 읽기만 한다 — `docs/` 가 없어 `no_dir` 객체 하나와 0 이다.
+        vec!["wiki", "search", "merge", "--json"],
         vec!["models", "--json"],
         vec!["keys", "--json"],
         vec!["keys", "--template", "--json"],
@@ -26855,6 +26857,105 @@ fn the_wiki_rides_the_branch_while_the_tracker_goes_to_the_root() {
     assert!(root.contains(r#""title":"Root home""#), "{root}");
     let drawn = ok(&wt, &["wiki", "show", "new"]);
     assert!(drawn.contains("New page") && drawn.contains(&id), "{drawn}");
+}
+
+/// `moai wiki search` — 화면의 `path:line`·`제목 › 머리글`·발췌·끝 줄, `--json` 의 키와 **1 부터** 세는 줄(moai-g8pt.ryi).
+/// 절의 머리글 줄은 5 줄(`## Merging…`), 발췌는 7 줄이다 — 0 부터 세거나 1 을 두 번 더하면 이 수가 어긋난다.
+#[test]
+fn wiki_search_prints_the_section_and_counts_lines_from_one() {
+    let s = init("wiki-search");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(
+        s.path().join("docs/workflow.md"),
+        "# Workflow\n\nIntro.\n\n## Merging the tracker\n\nInstall the merge driver once per clone.\n",
+    )
+    .unwrap();
+    let out = ok(s.path(), &["wiki", "search", "merge", "driver"]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines[0], "docs/workflow.md:5  Workflow › Merging the tracker", "{out}");
+    assert_eq!(lines[1], "    Install the merge driver once per clone.", "{out}");
+    assert!(
+        lines.last().unwrap().contains("1 중 1") && lines.last().unwrap().contains("`moai wiki show workflow`"),
+        "{out}"
+    );
+
+    let json = ok(s.path(), &["wiki", "search", "merge", "driver", "--json"]);
+    let v: serde_json::Value = serde_json::from_str(json.trim()).unwrap();
+    assert_eq!(v["query"], "merge driver");
+    assert_eq!(v["terms"], serde_json::json!(["merge", "driver"]));
+    assert_eq!(v["total"], 1);
+    let h = &v["hits"][0];
+    assert_eq!((h["slug"].as_str(), h["path"].as_str()), (Some("workflow"), Some("docs/workflow.md")));
+    assert_eq!(h["heading"], "Merging the tracker");
+    assert_eq!(h["anchor"], "merging-the-tracker");
+    assert_eq!((h["line"].as_u64(), h["snippet_line"].as_u64()), (Some(5), Some(7)), "{json}");
+
+    // 첫 머리글 앞의 절 — `heading`·`anchor` 키가 없고(없음이 답이다) 줄은 1 이다.
+    std::fs::write(s.path().join("docs/pre.md"), "\nZebrafish live here.\n\n# Pre\n\nbody\n").unwrap();
+    let top = ok(s.path(), &["wiki", "search", "zebrafish", "--json"]);
+    let h: serde_json::Value = serde_json::from_str(top.trim()).unwrap();
+    let h = &h["hits"][0];
+    assert!(h.get("heading").is_none() && h.get("anchor").is_none(), "{top}");
+    assert_eq!((h["line"].as_u64(), h["snippet_line"].as_u64()), (Some(1), Some(2)), "{top}");
+    let plain = ok(s.path(), &["wiki", "search", "zebrafish"]);
+    assert!(plain.starts_with("docs/pre.md:1  Pre\n"), "{plain}");
+
+    // -n 은 보이는 수만 자르고 `total` 은 자르기 전이다.
+    std::fs::write(s.path().join("docs/more.md"), "# More\n\nmerge here too\n").unwrap();
+    let cut = ok(s.path(), &["wiki", "search", "merge", "-n", "1", "--json"]);
+    let c: serde_json::Value = serde_json::from_str(cut.trim()).unwrap();
+    assert_eq!((c["hits"].as_array().unwrap().len(), c["total"].as_u64()), (1, Some(2)), "{cut}");
+}
+
+/// 결과가 없어도 0, 빈 질의는 거절, 위키가 없어도 0, 못 읽은 페이지가 있으면 찾은 것은 다 내고 비영이다.
+#[test]
+fn wiki_search_exit_codes_follow_wiki_ls() {
+    let s = init("wiki-search-exit");
+    // 위키 없음 — 0, `--json` 은 `{"dir","error"}`.
+    let none = moai(s.path(), &["wiki", "search", "merge", "--json"]);
+    assert!(none.status.success(), "{}", text(&none));
+    assert!(String::from_utf8_lossy(&none.stdout).starts_with(r#"{"dir":"docs","error":{"kind":"no_dir""#));
+
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    std::fs::write(s.path().join("docs/a.md"), "# A\n\nmerge driver\n").unwrap();
+    let miss = moai(s.path(), &["wiki", "search", "nothingmatches"]);
+    assert!(
+        miss.status.success() && String::from_utf8_lossy(&miss.stdout).contains("맞은 절이 없다"),
+        "{}",
+        text(&miss)
+    );
+    let miss = ok(s.path(), &["wiki", "search", "nothingmatches", "--json"]);
+    assert!(miss.contains(r#""hits":[]"#) && miss.contains(r#""total":0"#), "{miss}");
+
+    for words in [&["wiki", "search"][..], &["wiki", "search", "!!"][..]] {
+        let bad = moai(s.path(), words);
+        assert!(!bad.status.success(), "빈 질의를 받았다 — {words:?}");
+    }
+    assert!(text(&moai(s.path(), &["wiki", "search", "!!"])).contains("moai wiki search merge driver"));
+
+    // 못 읽는 페이지(UTF-8 이 아니다) — 찾은 것은 다 내고 비영.
+    std::fs::write(s.path().join("docs/bad.md"), [0xff, 0xfe, 0x00]).unwrap();
+    let part = moai(s.path(), &["wiki", "search", "merge"]);
+    assert!(!part.status.success(), "못 읽은 페이지가 있는데 0 이다");
+    assert!(String::from_utf8_lossy(&part.stdout).contains("docs/a.md:1"), "{}", text(&part));
+}
+
+/// 워크트리 안에서 부르면 그 워크트리의 `docs/` 를 찾는다 — 트래커만 루트로 간다(`wiki ls` 와 같은 꼴).
+#[test]
+fn wiki_search_reads_the_worktrees_own_docs() {
+    let s = Scratch::new("wiki-search-worktree");
+    let main = s.path().join("main");
+    std::fs::create_dir_all(main.join("docs")).unwrap();
+    git(&main, &["init", "-q"]);
+    ok(&main, &["init", "argos"]);
+    std::fs::write(main.join("docs/README.md"), "# Root home\n\nrootonly\n").unwrap();
+    git(&main, &["add", "-A"]);
+    git(&main, &["commit", "-q", "-m", "init"]);
+    git(&main, &["worktree", "add", "-q", ".claude/worktrees/argos-wt", "-b", "worktree-argos-wt"]);
+    let wt = main.join(".claude/worktrees/argos-wt");
+    std::fs::write(wt.join("docs/new.md"), "# New page\n\nbranchonly\n").unwrap();
+    assert!(ok(&wt, &["wiki", "search", "branchonly"]).contains("docs/new.md:1"));
+    assert!(ok(&main, &["wiki", "search", "branchonly"]).contains("맞은 절이 없다"));
 }
 
 /// **`wiki_dir` 은 쓰는 자리에서 잰다** — 밖을 가리키는 값도 설정은 읽혀 `moai status` 가 선다. 위키만 그 까닭으로

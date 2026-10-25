@@ -17,8 +17,6 @@ use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
-// 부르는 자리(`wiki search`·`show <id>`)는 moai-g8pt.ryi·.5aw 가 더한다 — 그때까지 안 쓰인다.
-#[allow(dead_code)]
 pub mod search;
 
 /// 본문을 읽는 상한 — 이보다 큰 페이지는 목록에만 서고 본문은 안 읽는다([`Unread::TooLarge`]). 이 저장소에서

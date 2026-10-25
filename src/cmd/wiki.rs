@@ -56,6 +56,84 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug)))
 }
 
+/// `moai wiki search <낱말…>` — 위키를 절 단위로 찾아 순위대로 낸다(moai-g8pt). 낱말은 빈칸 하나로 이어 한 질의다.
+///
+/// **종료 코드는 `ls` 와 같은 자다** — 결과가 없어도, 위키 디렉터리가 아직 없어도 0 이고, 못 읽은 페이지·건너뛴
+/// 자리가 있으면 찾은 것은 다 내고 비영이다. 질의가 토큰 하나도 안 내면 사용 오류다.
+pub fn search(ctx: &Ctx, words: &[String], limit: usize) -> R<Vec<String>> {
+    let query = words.join(" ");
+    // 위키를 읽기 전에 거절한다 — 질의가 틀린 것은 위키와 무관하다. 빈 위키로 부르면 토큰만 나온다(순수 함수).
+    if wiki::search::search(&[], &query, 1).terms.is_empty() {
+        return Err(Fail::coded(crate::view::wiki::search_usage(ctx.lang()), code::BAD_INPUT));
+    }
+    let (dir, wiki) = read(ctx)?;
+    let wiki = match wiki {
+        Ok(w) => w,
+        Err(t) => return trouble(ctx, &dir, &t, false),
+    };
+    for s in &wiki.skipped {
+        tell(&crate::view::wiki::skipped(ctx.lang(), s));
+    }
+    if wiki.fell_short() {
+        note_partial();
+    }
+    // 몇 개 중 몇 개인지가 `total` 이라 자르기 전의 수를 센다 — `search` 는 순수한 채로 둔다.
+    let mut found = wiki::search::search(&wiki.pages, &query, usize::MAX);
+    let total = found.hits.len();
+    found.hits.truncate(limit.max(1)); // `-n 0` 은 하나로 본다 — 빈 답은 "맞은 절 없음" 과 같은 얼굴이다
+    if ctx.json {
+        let hits = found.hits.iter().map(HitOut::of).collect();
+        return super::json_line(&Searched { dir: &dir, query: &query, terms: &found.terms, hits, total });
+    }
+    Ok(crate::view::wiki::search(ctx.lang(), &dir, &query, &found.hits, total))
+}
+
+/// `moai wiki search --json` — `hits` 는 늘 선다(없으면 `[]`). `score` 는 순위를 보이는 값이지 계약이 아니다.
+#[derive(serde::Serialize)]
+struct Searched<'a> {
+    dir: &'a str,
+    query: &'a str,
+    terms: &'a [String],
+    hits: Vec<HitOut<'a>>,
+    total: usize,
+}
+
+/// hit 하나. `heading`·`anchor` 는 첫 머리글 앞의 절이면 없고, `snippet`·`snippet_line` 은 보일 줄이 없으면(본문을
+/// 못 읽은 페이지) 없다 — 없음이 답이다(`wiki ls --json` 의 `anchor` 와 같은 약속). 줄은 모두 1 부터다.
+#[derive(serde::Serialize)]
+struct HitOut<'a> {
+    slug: &'a str,
+    path: &'a str,
+    title: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    heading: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    anchor: Option<&'a str>,
+    line: usize,
+    score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snippet: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snippet_line: Option<usize>,
+}
+
+impl<'a> HitOut<'a> {
+    fn of(h: &'a wiki::search::Hit<'a>) -> HitOut<'a> {
+        HitOut {
+            slug: &h.page.slug,
+            path: &h.page.path,
+            title: &h.page.title,
+            heading: h.heading.as_deref(),
+            anchor: h.anchor,
+            line: h.line,
+            // 소수 둘로 — 부동소수 꼬리가 줄마다 다른 글자로 서지 않게.
+            score: (h.score * 100.0).round() / 100.0,
+            snippet: h.snippet.as_ref().map(|s| s.text.as_str()),
+            snippet_line: h.snippet.as_ref().map(|s| s.line),
+        }
+    }
+}
+
 /// 트래커를 열고(id 가 있는가를 물을 자리) 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께.
 fn read(ctx: &Ctx) -> R<(String, Result<Wiki, DirTrouble>)> {
     let repo = super::open_repo(ctx)?;

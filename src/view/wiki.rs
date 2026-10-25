@@ -7,6 +7,7 @@ use crate::held;
 use crate::i18n::{Lang, fill, say};
 use crate::style::{self, paint};
 use crate::text::{one_line, width};
+use crate::wiki::search::Hit;
 use crate::wiki::{DirTrouble, Notices, Outside, Page, Skip, Skipped, Unread, Wiki};
 
 /// `wiki_dir` 을 화면에 — 빈 글은 체크아웃 뿌리라 `.` 으로 댄다.
@@ -46,6 +47,60 @@ pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
         out.push(String::new());
         out.extend(notice_lines(lang, &n, true));
     }
+    out
+}
+
+/// 질의가 비었을 때의 거절문 — 고칠 명령 한 줄이 같이 선다.
+pub fn search_usage(lang: Lang) -> String {
+    say(lang, "wiki.search_usage").to_string()
+}
+
+/// `moai wiki search` — hit 마다 두 줄(`path:line  제목 › 머리글`, 발췌), 빈 줄, 끝 줄(몇 개 중 몇 개와 다음 명령).
+/// 맞은 자리의 굵은 칠은 꾸밈이다 — 색을 빼도 글은 그대로 서고 뜻은 칠에 없다. 결과가 없으면 그 말과 `wiki ls` 다.
+pub fn search(lang: Lang, dir: &str, query: &str, hits: &[Hit], total: usize) -> Vec<String> {
+    let Some(first) = hits.first() else {
+        return vec![fill(say(lang, "wiki.search_none"), &[("query", &one_line(query)), ("dir", &shown(dir))])];
+    };
+    let mut out = Vec::new();
+    for h in hits {
+        let mut head = format!(
+            "{}  {}",
+            paint(style::ID, &format!("{}:{}", one_line(&h.page.path), h.line)),
+            one_line(&h.page.title)
+        );
+        if let Some(t) = &h.heading {
+            head.push_str(&format!(" › {}", one_line(t)));
+        }
+        out.push(head);
+        if let Some(s) = &h.snippet {
+            out.push(format!("    {}", marked(&s.text, &s.marks)));
+        }
+    }
+    out.push(String::new());
+    out.push(fill(
+        say(lang, "wiki.search_foot"),
+        &[
+            ("n", &hits.len().to_string()),
+            ("total", &total.to_string()),
+            ("slug", &crate::text::quoted(&first.page.slug)),
+        ],
+    ));
+    out
+}
+
+/// 발췌에 맞은 자리를 굵게 — 조각마다 제어문자를 걷는다(바이트 범위가 걷기에 밀리지 않게 칠하기 전에 가른다).
+fn marked(text: &str, marks: &[std::ops::Range<usize>]) -> String {
+    let (mut out, mut at) = (String::new(), 0);
+    for m in marks {
+        // 범위가 글자 경계가 아니면 칠을 건너뛴다 — 칠은 꾸밈이라 글이 먼저다.
+        if m.start < at || m.end > text.len() || !text.is_char_boundary(m.start) || !text.is_char_boundary(m.end) {
+            continue;
+        }
+        out.push_str(&one_line(&text[at..m.start]));
+        out.push_str(&paint(style::STRONG, &one_line(&text[m.clone()])));
+        at = m.end;
+    }
+    out.push_str(&one_line(&text[at..]));
     out
 }
 

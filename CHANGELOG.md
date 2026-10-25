@@ -12,6 +12,12 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **`moai wiki search <words…>`** finds the wiki's sections for some words and
+  lists them best first, each with the `path:line` to open. `--json` gives the
+  same hits with a `total`. (moai-g8pt)
+
 ### Fixed
 
 - `moai backlog promote` left its history notes in Korean whatever the screen
