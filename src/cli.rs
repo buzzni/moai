@@ -717,15 +717,17 @@ BACKLOG
   Groups that wrote no days of their own span their members' days. Planned days
   are calendar days; actual times are shown in your time zone.
   Keys that stand only in the gantt move the date axis:
-    {key:browse.gantt_zoom_in} {key:browse.gantt_zoom_out}  zoom in and out — hour, day, week, month
-    {key:browse.gantt_left} {key:browse.gantt_right}  one cell earlier and later   {key:browse.gantt_page_left} {key:browse.gantt_page_right}  a page earlier and later
-    {key:browse.gantt_today}    today in the middle           {key:browse.gantt_fit}    fit every row on one screen
+    {key:gantt.zoom_in} {key:gantt.zoom_out}  zoom in and out — hour, day, week, month
+    {key:gantt.left} {key:gantt.right}  one cell earlier and later   {key:gantt.page_left} {key:gantt.page_right}  a page earlier and later
+    {key:gantt.today}    today in the middle           {key:gantt.fit}    fit every row on one screen
   It opens fitted, and stays fitted as rows come and go until you move it.
+  These keys are under [gantt] in keys.toml and win only inside the gantt: a
+  [browse] line that uses one of them still works in the list and the board.
   On a narrow window the rows give up their columns first and then the dates
   are hidden, which the header says; a low window folds the ▼ row away.
   Moving a plan writes the row, the way `moai edit --start --due` does. The
-  keys move the cursor row's plan by a day: {key:browse.nudge_earlier} and {key:browse.nudge_later} the whole plan,
-  {key:browse.nudge_start_earlier} and {key:browse.nudge_start_later} only its start.
+  keys move the cursor row's plan by a day: {key:gantt.nudge_earlier} and {key:gantt.nudge_later} the whole plan,
+  {key:gantt.nudge_start_earlier} and {key:gantt.nudge_start_later} only its start.
   With the mouse, drag a bar's middle to move the plan, its left end to move
   the start and its right end to move the deadline; it snaps to whole days and
   is written once, when you let go. Clicking an empty day on a row with no

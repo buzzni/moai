@@ -39,6 +39,14 @@ pub fn open(chord: &Chord) -> bool {
 /// 이동키는 메뉴를 닫고 그 이동([`moves`]), **그 밖은 아무 일도 없다.**
 pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
     if !open(chord) {
+        // **간트에서는 간트의 표가 먼저다**(moai-l80o, 사람 결정 2026-10-25) — 기다리는 열이 없을 때 한 키로 찾는다. 그
+        // 표는 한 키씩만 받으니 열을 들 일이 없다. 목록·보드에서는 안 찾는다: 그래서 `[browse]` 에 같은 키를 쓴 줄이
+        // 거기서 그대로 산다.
+        if chord.held().is_empty()
+            && let Some(act) = gantt_first(c, k)
+        {
+            return Some(act);
+        }
         return chord.feed(c.keys.browse, k);
     }
     // **연 키가 닫는다**(사용자 결정 2026-09-19) — doom·helix 의 버릇이고, 토글 층이 ESC 까지
@@ -102,10 +110,27 @@ pub fn feed(chord: &mut Chord, c: &Ctx, k: KeyEvent) -> Option<Browse> {
 /// 안 든다. 판정은 키 표에서 읽고, 무엇이 이동인가는 [`Browse::moves`] 가 가른다 — 이동키를
 /// 더하면 여기도 따라온다.
 fn moves(k: KeyEvent, c: &Ctx) -> bool {
+    // 간트에서 간트의 키는 이동으로 안 샌다(moai-l80o 리뷰) — 메뉴 밖에서 그 키는 간트의 것이라, 메뉴를 닫으며 탐색의 표로
+    // 먹이면 `[browse] expand = "L"` 이 간트에서 메뉴를 거쳐서만 펼친다.
+    if gantt_first(c, k).is_some() {
+        return false;
+    }
     match lookup(c.keys.browse, &[k]) {
         Lookup::Run(act) => act.moves() && act.enabled(c) != Err(Off::Quiet),
         Lookup::Pending => c.keys.browse.iter().filter(|b| b.seq.len() > 1 && under(b, &[k])).all(|b| b.act.moves()),
         Lookup::Unknown => false,
+    }
+}
+
+/// 간트에서 이 한 키가 간트의 표에서 무엇인가 — 탐색의 표보다 먼저 찾는다(moai-l80o). 통계·위키 창은 간트 위에 떠도
+/// 제 표로 받으니 안 찾는다.
+fn gantt_first(c: &Ctx, k: KeyEvent) -> Option<Browse> {
+    if !c.gantt || c.stats || c.wiki {
+        return None;
+    }
+    match lookup(c.keys.gantt, &[k]) {
+        Lookup::Run(act) => Some(act),
+        _ => None,
     }
 }
 
@@ -390,6 +415,24 @@ mod tests {
         assert_eq!((filter.key.as_str(), filter.event.modifiers), ("Alt-f", KeyModifiers::ALT));
         let next = super::super::keys::next_keys(map.browse, &[k('g')]);
         assert_eq!(next.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["Ctrl-g"]);
+    }
+
+    /// **간트에서 간트의 키는 메뉴를 거쳐서도 탐색의 동작으로 안 샌다**(moai-l80o 리뷰). `[browse] expand = "L"` 이면 메뉴
+    /// 밖의 `L` 은 간트의 것인데, 열린 메뉴의 이동키 갈래가 탐색의 표로 먹여 간트에서 펼쳤다. 목록에서는 그대로 닫고 편다.
+    #[test]
+    fn a_gantt_key_does_not_leak_through_the_menu_as_a_move() {
+        let (map, problems) = super::super::keymap::build("[browse]\nexpand = \"L\"\n");
+        assert!(problems.is_empty(), "{problems:?}");
+        let shift_l = KeyEvent::new(KeyCode::Char('L'), KeyModifiers::SHIFT);
+        let gantt = Ctx { keys: map, gantt: true, group: true, ..inside() };
+        let mut ch = Chord::default();
+        assert_eq!(feed(&mut ch, &gantt, k(' ')), None);
+        assert_eq!(feed(&mut ch, &gantt, shift_l), None, "간트의 L 이 메뉴를 거쳐 펼쳤다");
+        let list = Ctx { keys: map, group: true, ..inside() };
+        let mut ch = Chord::default();
+        assert_eq!(feed(&mut ch, &list, k(' ')), None);
+        assert_eq!(feed(&mut ch, &list, shift_l), Some(Browse::Expand), "목록의 L 이 메뉴를 닫고 안 폈다");
+        assert!(!open(&ch));
     }
 
     fn keys_of(e: &[Entry]) -> Vec<&str> {

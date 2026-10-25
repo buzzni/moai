@@ -20,8 +20,8 @@
 //! **순수하다.** 파일을 읽는 것은 [`load`] 하나고, [`build`] 는 받은 글만 본다 — 시험이 터미널도 파일도 없이 돈다.
 
 use super::keys::{
-    ANYWHERE, BROWSE, Bind, Browse, CONFIRM, Confirm, Key, Keymap, LEADER, LINKS, Link, Lookup, MENU, Menu, Order,
-    PICK, Pick, SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, label, lookup, name_of_seq, parse_seq,
+    ANYWHERE, BROWSE, Bind, Browse, CONFIRM, Confirm, GANTT, Key, Keymap, LEADER, LINKS, Link, Lookup, MENU, Menu,
+    Order, PICK, Pick, SORTER, STATS, Screen, Side, Sorter, Stat, WIKI, Wiki, label, lookup, name_of_seq, parse_seq,
 };
 use super::scroll::Move;
 use crate::i18n::{Lang, fill, say};
@@ -186,6 +186,7 @@ fn shown(want: &str, keys: &Keymap) -> Option<(String, String)> {
     let own = Name::Own(action.to_string());
     match section {
         "browse" => of(keys.browse, BROWSE, &own),
+        "gantt" => of(keys.gantt, GANTT, &own),
         "moves" => of(keys.browse, BROWSE, &Name::Move(MOVES.iter().find(|(n, _)| *n == action)?.1)),
         "menu" => of(keys.menu, MENU, &own),
         "sorter" => of(keys.sorter, SORTER, &own),
@@ -261,6 +262,7 @@ pub fn listing(keys: &Keymap) -> Vec<Listed> {
         match section {
             Section::Browse => of(&mut out, section, keys.browse, BROWSE, false),
             Section::Moves => of(&mut out, section, keys.browse, BROWSE, true),
+            Section::Gantt => of(&mut out, section, keys.gantt, GANTT, false),
             Section::Menu => of(&mut out, section, keys.menu, MENU, false),
             Section::Sorter => of(&mut out, section, keys.sorter, SORTER, false),
             Section::Picker => of(&mut out, section, keys.pick, PICK, false),
@@ -302,6 +304,8 @@ pub fn template() -> String {
 enum Section {
     Browse,
     Moves,
+    /// 간트 배치의 표(moai-l80o) — 탐색의 표와 따로 재고 따로 산다([`GANTT`]).
+    Gantt,
     Menu,
     Sorter,
     Picker,
@@ -312,9 +316,10 @@ enum Section {
 }
 
 impl Section {
-    const ALL: [Section; 9] = [
+    const ALL: [Section; 10] = [
         Section::Browse,
         Section::Moves,
+        Section::Gantt,
         Section::Menu,
         Section::Sorter,
         Section::Picker,
@@ -328,6 +333,7 @@ impl Section {
         match self {
             Section::Browse => "browse",
             Section::Moves => "moves",
+            Section::Gantt => "gantt",
             Section::Menu => "menu",
             Section::Sorter => "sorter",
             Section::Picker => "picker",
@@ -338,10 +344,11 @@ impl Section {
         }
     }
 
-    /// **키를 하나씩만 찾는 창** — 메뉴의 Esc·Bksp(`menu::feed`), 차례 편집 창(`App::sorter_key`), 물음. 키 열을
+    /// **키를 하나씩만 찾는 창** — 메뉴의 Esc·Bksp(`menu::feed`), 차례 편집 창(`App::sorter_key`), 물음, 간트(탐색보다
+    /// 먼저 한 키로 찾는다, `menu::feed`). 키 열을
     /// 주면 그 줄은 영영 안 듣는다.
     fn one_key(self) -> bool {
-        matches!(self, Section::Menu | Section::Sorter | Section::Confirm)
+        matches!(self, Section::Menu | Section::Sorter | Section::Confirm | Section::Gantt)
     }
 
     /// 그 창을 나가는 하나뿐인 동작인가 — 키를 못 뗀다([`Why::NoWayOut`]). 메뉴는 연 키(SPC)가 닫고, 물음은 다른 키가
@@ -359,6 +366,7 @@ impl Section {
         match self {
             Section::Browse => any(BROWSE, action),
             Section::Moves => MOVES.iter().any(|(n, _)| *n == action),
+            Section::Gantt => any(GANTT, action),
             Section::Menu => any(MENU, action),
             Section::Sorter => any(SORTER, action),
             Section::Picker => any(PICK, action),
@@ -478,7 +486,8 @@ impl Named for Browse {
             Read => own("read"),
             ReadAll => own("read_all"),
             ReadGroup => own("read_group"),
-            Gantt(p) => Name::Own(format!("gantt_{}", p.name())),
+            // `[gantt]` 절의 이름이라 앞말을 안 단다(moai-l80o) — `gantt.zoom_in`.
+            Gantt(p) => own(p.name()),
             Plan(n) => Name::Own(format!("nudge_{}", n.name())),
         }
     }
@@ -826,6 +835,7 @@ fn freeze<A: Copy + 'static>(rows: Vec<Row<A>>, touched: bool, default: &'static
 /// 짓는 중의 표 전부.
 struct Tables {
     browse: Vec<Row<Browse>>,
+    gantt: Vec<Row<Browse>>,
     menu: Vec<Row<Menu>>,
     sorter: Vec<Row<Sorter>>,
     pick: Vec<Row<Pick>>,
@@ -840,6 +850,7 @@ impl Tables {
     fn apply(e: &[Entry], live: &[bool]) -> Tables {
         Tables {
             browse: apply(BROWSE, Section::Browse, Key::any, e, live),
+            gantt: apply(GANTT, Section::Gantt, Key::any, e, live),
             menu: apply(MENU, Section::Menu, Key::any, e, live),
             sorter: apply(SORTER, Section::Sorter, Key::bare, e, live),
             pick: apply(PICK, Section::Picker, Key::bare, e, live),
@@ -854,6 +865,8 @@ impl Tables {
     fn clashes(&self) -> Vec<Blame> {
         let mut out = Vec::new();
         shadows(&self.browse, Section::Browse, &mut out);
+        shadows(&self.gantt, Section::Gantt, &mut out);
+        self.gantt_over_browse(&mut out);
         shadows(&self.menu, Section::Menu, &mut out);
         shadows(&self.sorter, Section::Sorter, &mut out);
         shadows(&self.pick, Section::Picker, &mut out);
@@ -863,6 +876,7 @@ impl Tables {
         shadows(&self.confirm, Section::Confirm, &mut out);
         // Ctrl-C 는 어느 표보다 먼저다 — 그 키를 쓴 줄은 영영 안 듣는다.
         beaten(&self.browse, ctrl_c, "Ctrl-C", &mut out);
+        beaten(&self.gantt, ctrl_c, "Ctrl-C", &mut out);
         beaten(&self.menu, ctrl_c, "Ctrl-C", &mut out);
         beaten(&self.sorter, ctrl_c, "Ctrl-C", &mut out);
         beaten(&self.pick, ctrl_c, "Ctrl-C", &mut out);
@@ -873,6 +887,8 @@ impl Tables {
         let spc = |e: KeyEvent| LEADER.matches(e);
         // 통계·위키 창은 SPC 를 표보다 먼저 메뉴로 받는다(`App::stats_key`·`App::wiki_key`). 열린 메뉴에서 SPC 는 닫는
         // 키다(`menu::feed`) — 메뉴의 줄에도 못 준다.
+        // 간트의 표는 SPC 보다 먼저 찾는다(`menu::feed`) — SPC 를 쓴 줄은 간트에서 메뉴를 막는다.
+        beaten(&self.gantt, spc, "SPC", &mut out);
         beaten(&self.stats, spc, "SPC", &mut out);
         beaten(&self.wiki, spc, "SPC", &mut out);
         beaten(&self.menu, spc, "SPC", &mut out);
@@ -895,12 +911,33 @@ impl Tables {
         out
     }
 
+    /// **간트의 줄이 탐색의 키를 가리면 간트의 줄 탓이다**(moai-l80o, 사람 결정 2026-10-25). 간트에서는 간트의 표를 먼저
+    /// 한 키로 찾으니(`menu::feed`), 간트의 키가 탐색의 한 키와 같거나 탐색의 키 열의 첫 키면 간트에서 그 탐색의 키가
+    /// 안 듣는다. 탓은 **사람이 적은 간트의 줄에만** 단다 — 기본 간트 키와 사람의 `[browse]` 줄이 겹친 것은 겹침이
+    /// 아니다: 그 줄은 목록·보드에서 살고, 간트에서만 간트의 키가 이긴다. 그래야 `expand = "L"` 이 업그레이드로 안 버려진다.
+    fn gantt_over_browse(&self, out: &mut Vec<Blame>) {
+        for g in self.gantt.iter().filter(|g| g.from.is_some()) {
+            let Some(gk) = g.seq.first() else { continue };
+            for b in &self.browse {
+                // **두 쪽으로 견준다**(moai-l80o 리뷰) — 수식키를 안 보는 간트의 키(`Key::any`, `F5`)는 탐색의
+                // `Ctrl-F5` 를 눌러도 먼저 받는다. 탐색 쪽에서만 견주면 그 겹침을 못 본다.
+                let Some(bk) = b.seq.first() else { continue };
+                if bk.matches(gk.event()) || gk.matches(bk.event()) {
+                    let why = Why::Clash { keys: name_of_seq(&g.seq), with: b.who(Section::Browse) };
+                    // 상대가 사람의 `[browse]` 줄이면 그 줄을 버려 풀릴 수도 있다 — 확실한 탓이 아니다.
+                    out.push(Blame { at: g.from.expect("사람의 줄"), why, sure: b.from.is_none() });
+                }
+            }
+        }
+    }
+
     fn freeze(self, e: &[Entry], live: &[bool]) -> Keymap {
         fn aimed<A: Named>(table: &[Bind<A>], at: Section, e: &[Entry], live: &[bool]) -> bool {
             table.iter().any(|b| e.iter().zip(live).any(|(e, l)| *l && e.aims(at, b.act)))
         }
         Keymap {
             browse: freeze(self.browse, aimed(BROWSE, Section::Browse, e, live), BROWSE),
+            gantt: freeze(self.gantt, aimed(GANTT, Section::Gantt, e, live), GANTT),
             menu: freeze(self.menu, aimed(MENU, Section::Menu, e, live), MENU),
             sorter: freeze(self.sorter, aimed(SORTER, Section::Sorter, e, live), SORTER),
             pick: freeze(self.pick, aimed(PICK, Section::Picker, e, live), PICK),
@@ -976,6 +1013,7 @@ mod tests {
         let counts = [
             each(BROWSE),
             MOVES.len(),
+            each(GANTT),
             each(MENU),
             each(SORTER),
             each(PICK),
@@ -984,7 +1022,7 @@ mod tests {
             each(LINKS),
             each(CONFIRM),
         ];
-        assert_eq!(counts, [73, 8, 2, 9, 6, 2, 9, 2, 1]);
+        assert_eq!(counts, [61, 8, 12, 2, 9, 6, 2, 9, 2, 1]);
         // 이동은 다섯 표 모두에서 여덟이 다 선다 — `[moves]` 의 한 줄이 어느 표에서는 없는 동작이면 안 된다.
         fn moves<A: Named>(table: &[Bind<A>]) -> usize {
             names(table).iter().filter(|(n, _)| matches!(n, Name::Move(_))).count()
@@ -1013,6 +1051,7 @@ mod tests {
             out.push_str(&format!("{n} = [{}]\n", keys.join(", ")));
         }
         each(&mut out, "browse", BROWSE);
+        each(&mut out, "gantt", GANTT);
         each(&mut out, "menu", MENU);
         each(&mut out, "sorter", SORTER);
         each(&mut out, "picker", PICK);
@@ -1084,9 +1123,40 @@ mod tests {
         let at = |t: &[Bind<Browse>], a: Browse| t.iter().position(|b| b.act == a).unwrap();
         assert_eq!(at(map.browse, Browse::Filter), at(BROWSE, Browse::Filter));
         // 숨은 별칭뿐이던 동작은 바뀌어도 숨는다 — 바의 몫이 안 는다.
-        let (map, _) = build("[browse]\nexpand = \"Q\"\n");
+        let (map, _) = build("[browse]\nexpand = \"L\"\n");
         assert_eq!(label(map.browse, Browse::Expand), "");
-        assert_eq!(run(map.browse, "Q"), Lookup::Run(Browse::Expand));
+        assert_eq!(run(map.browse, "L"), Lookup::Run(Browse::Expand));
+    }
+
+    /// **간트의 키는 제 표 안에서만 겹침을 센다**(moai-l80o, 사람 결정 2026-10-25). `[browse]` 에 간트의 기본 키를 쓴 줄은
+    /// 안 버려진다 — 목록·보드에서 살고 간트에서만 간트의 키가 이긴다. 거꾸로 사람이 `[gantt]` 에 적은 줄이 탐색의 키를
+    /// 가리면 그 간트의 줄이 버려진다: 간트에서 그 탐색의 키가 안 들어서다. `[gantt]` 는 한 키씩만 받는다.
+    #[test]
+    fn gantt_keys_clash_only_inside_the_gantt() {
+        use super::super::keys::Pan;
+        let (map, problems) = build("[browse]\nexpand = \"L\"\n");
+        assert_eq!(problems, Vec::new(), "간트의 기본 키와 같은 [browse] 줄이 버려졌다");
+        assert_eq!(run(map.browse, "L"), Lookup::Run(Browse::Expand));
+        assert_eq!(run(map.gantt, "L"), Lookup::Run(Browse::Gantt(Pan::Right)), "간트의 L 이 사라졌다");
+
+        let (map, problems) = build("[gantt]\nfit = \"j\"\n");
+        assert_eq!(whys(&problems).len(), 1, "탐색의 j 를 가린 간트의 줄이 안 버려졌다: {problems:?}");
+        assert!(matches!(problems[0].why, Why::Clash { .. }), "{problems:?}");
+        assert_eq!(run(map.gantt, "z"), Lookup::Run(Browse::Gantt(Pan::Fit)), "버린 줄의 동작이 기본 키로 안 돌아왔다");
+
+        // 수식키를 안 보는 간트의 `F5` 는 탐색의 `Ctrl-F5` 를 간트에서 먼저 받는다 — 그 간트의 줄이 버려진다.
+        let (map, problems) = build("[browse]\njot = \"Ctrl-F5\"\n[gantt]\nfit = \"F5\"\n");
+        assert_eq!(problems.iter().map(|p| p.at.as_str()).collect::<Vec<_>>(), ["gantt.fit"], "{problems:?}");
+        assert_eq!(run(map.gantt, "z"), Lookup::Run(Browse::Gantt(Pan::Fit)));
+
+        let (_, problems) = build("[gantt]\nfit = \"g z\"\n");
+        assert!(matches!(problems[0].why, Why::OneKey(_)), "간트가 키 열을 받았다: {problems:?}");
+
+        let (map, problems) = build("[gantt]\nfit = \"Z\"\nzoom_in = \"none\"\n");
+        assert_eq!(problems, Vec::new());
+        assert_eq!(run(map.gantt, "Z"), Lookup::Run(Browse::Gantt(Pan::Fit)));
+        assert_eq!(run(map.gantt, "="), Lookup::Unknown, "뗀 간트의 키가 남았다");
+        assert_eq!(map.browse, BROWSE, "간트만 겨눈 파일이 탐색의 표를 새로 지었다");
     }
 
     /// `"none"` 과 `[]` 는 그 동작의 키를 뗀다.
@@ -1411,14 +1481,14 @@ mod tests {
     /// 이름은 안 채운다.
     #[test]
     fn the_help_names_the_keys_the_file_changed() {
-        let (map, problems) = build("[browse]\nquit = \"SPC x\"\ngo_list = \"Q\"\njot = \"none\"\n");
+        let (map, problems) = build("[browse]\nquit = \"SPC x\"\ngo_list = \"L\"\njot = \"none\"\n");
         assert!(problems.is_empty(), "{problems:?}");
         let help = tui_help(&map);
         assert!(help.contains("    SPC x    quit\n"), "{help}");
         assert!(!help.contains("SPC q"), "옛 이름이 남았다");
-        assert!(help.contains("\n    Q        list                SPC g b  board"), "칸 맞춤이 무너졌다:\n{help}");
-        // 글 속의 이름은 안 채운다 — `Q, SPC c h` 처럼 선다.
-        assert!(help.contains("(SPC g, Q, SPC c h,"), "{help}");
+        assert!(help.contains("\n    L        list                SPC g b  board"), "칸 맞춤이 무너졌다:\n{help}");
+        // 글 속의 이름은 안 채운다 — `L, SPC c h` 처럼 선다.
+        assert!(help.contains("(SPC g, L, SPC c h,"), "{help}");
         assert!(help.contains("(none)"), "뗀 키를 안 댔다");
         // 위의 줄 글(`moai --help` 의 명령 목록)도 바뀐다.
         let top = crate::cli::command(&map);

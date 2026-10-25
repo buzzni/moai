@@ -243,6 +243,12 @@ itself, and the keys inside a text field (search, filter, the jot form). A
 window's `close` key can move to another key but cannot be set to `none` — it
 is the only way out of that window.
 
+The gantt's own keys live under `[gantt]`, one key per line, and are looked up
+first only while the gantt stands. A `[browse]` line that uses one of them
+(`expand = "L"`) keeps working in the list and the board, and in the gantt that
+key does the gantt's thing. A `[gantt]` line that would hide a list key inside
+the gantt — `fit = "j"` — is the one dropped.
+
 `moai tui --help` and the menu name the keys you set. The help's sentences about
 the arrows, `Home` and the page keys still describe the defaults; `moai keys`
 lists every key exactly.

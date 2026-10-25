@@ -1003,6 +1003,29 @@ mod tests {
         assert!(!pane("argos-0009").contains('░'), "날 없는 줄에 막대가 섰다\n{screen}");
     }
 
+    /// **`keys.toml` 의 `[browse] expand = "L"` 은 목록에서 살고, 간트에서는 `L` 이 간트의 키다**(moai-l80o, 사람 결정
+    /// 2026-10-25) — 간트의 키를 기본으로 묶은 업그레이드가 사람의 목록 키를 버리지 않는다.
+    #[test]
+    fn a_browse_key_the_gantt_also_uses_lives_in_the_list() {
+        let (map, problems) = super::super::keymap::build("[browse]\nexpand = \"L\"\n");
+        assert_eq!(problems, Vec::new(), "시험의 전제 — 그 줄이 버려졌다");
+        let mut a = app();
+        a.keys = map;
+        a.cursor = 0;
+        a.hit("L");
+        assert_eq!(
+            ids(&a),
+            ["argos-0001", "argos-0003", "argos-0004", "argos-0002", "argos-0009"],
+            "목록의 L 이 안 펼쳤다"
+        );
+        a.hit("SPC g g");
+        let _ = draw::tests::render(&mut a, 140, 20);
+        let origin = a.chart.axis.origin;
+        a.hit("L");
+        assert_eq!(a.chart.axis.origin - origin, a.chart.axis.zoom.secs_per_cell(), "간트의 L 이 축을 안 밀었다");
+        assert_eq!(ids(&a).len(), 5, "간트의 L 이 목록의 펼침을 했다");
+    }
+
     /// **날짜 축 키는 간트에서만 듣는다**(moai-i4hf.27r) — 확대·좌우·쪽·오늘·맞춤이 위젯의 보기를 옮기고, 움직이면
     /// 맞춤이 내려간다. 목록에서는 같은 글자가 아무 일도 안 한다.
     #[test]

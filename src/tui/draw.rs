@@ -4880,7 +4880,11 @@ fn waiting(held: &[ratatui::crossterm::event::KeyEvent], next: Vec<Hint>) -> Spa
 /// 키 처리와 바가 한 판정을 읽고, 둘이 갈릴 수 없다.
 fn browse_hints(app: &App, c: &Ctx, unnumbered: bool) -> (Vec<Hint>, Vec<Hint>) {
     use Browse as B;
-    let hint = |acts: &[Browse]| -> Hint { (labels(app.keys.browse, acts), acts[0].what(c)) };
+    // 간트의 키는 제 표에서 이름을 읽는다(moai-l80o) — 탐색의 표에는 없다.
+    let hint = |acts: &[Browse]| -> Hint {
+        let table = if matches!(acts[0], B::Gantt(_) | B::Plan(_)) { app.keys.gantt } else { app.keys.browse };
+        (labels(table, acts), acts[0].what(c))
+    };
     let shown = |order: &[&[Browse]]| -> Vec<Hint> {
         order.iter().filter(|acts| acts[0].enabled(c).is_ok()).map(|acts| hint(acts)).collect()
     };
