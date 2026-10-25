@@ -34,6 +34,16 @@ pub struct About<'a> {
     pub named_in: Vec<Named<'a>>,
     /// 관련 절, 순위 차례로 — 페이지당 하나, `named_in` 의 페이지는 없다. 발췌는 없다([`rank`]).
     pub related: Vec<Hit<'a>>,
+    /// 이 이슈의 `Lesson:` 노트가 가리킨 교훈, 노트에 처음 선 차례로(moai-4s5n.c0n). 페이지가 이 체크아웃에 없을 수
+    /// 있다 — 다른 가지에서 아직 안 든 것일 수 있어 슬러그는 서고 `page` 가 비어 있다.
+    pub lessons: Vec<OwnLesson<'a>>,
+}
+
+/// 이 이슈의 노트가 가리킨 교훈 하나.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnLesson<'a> {
+    pub slug: &'a str,
+    pub page: Option<&'a Page>,
 }
 
 /// 댄 페이지 하나와, 어느 id 로 걸렸는가.
@@ -44,8 +54,9 @@ pub struct Named<'a> {
 }
 
 /// `issue` 에 관한 위키를 `pages` 에서 고른다. `epic` 은 그 줄이 선 에픽의 id 다(물려받은 것까지, 묶음 줄이면 없다)
-/// — 소속은 저장소 전부를 봐야 답하니 부르는 쪽이 읽어 건넨다. **순수 함수다.**
-pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>) -> About<'a> {
+/// — 소속은 저장소 전부를 봐야 답하니 부르는 쪽이 읽어 건넨다. `lessons` 는 그 줄의 저널이 가리킨 교훈 슬러그다
+/// ([`super::seen::lessons_of`]) — 저널도 부르는 쪽이 읽는다. **순수 함수다.**
+pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>, lessons: &'a [String]) -> About<'a> {
     let names = |p: &Page, id: &str| p.issues.iter().any(|r| r.id == id);
     let named_in: Vec<Named> = pages
         .iter()
@@ -62,7 +73,8 @@ pub fn about<'a>(pages: &'a [Page], issue: &'a Issue, epic: Option<&'a str>) -> 
     hits.sort_by_key(|h| std::cmp::Reverse(h.rare));
     let mut seen: HashSet<&str> = named_in.iter().map(|n| n.page.slug.as_str()).collect();
     let related = hits.into_iter().filter(|h| seen.insert(h.page.slug.as_str())).take(RELATED).collect();
-    About { named_in, related }
+    let lessons = lessons.iter().map(|slug| OwnLesson { slug, page: pages.iter().find(|p| p.slug == *slug) }).collect();
+    About { named_in, related, lessons }
 }
 
 #[cfg(test)]
@@ -116,14 +128,14 @@ mod tests {
             page("none", "# None\n\nNothing here.\n"),
         ];
         let i = issue("moai-aaaa.x1y", "zzz", &[]);
-        let a = about(&pages, &i, Some("moai-aaaa"));
+        let a = about(&pages, &i, Some("moai-aaaa"), &[]);
         assert_eq!(
             slugs(&a).0,
             [("own", "moai-aaaa.x1y"), ("epic", "moai-aaaa"), ("both", "moai-aaaa.x1y")],
             "제 id 가 에픽 id 보다 가깝다"
         );
         // 에픽이 없으면 에픽 id 를 댄 페이지는 안 걸린다.
-        assert_eq!(slugs(&about(&pages, &i, None)).0, [("own", "moai-aaaa.x1y"), ("both", "moai-aaaa.x1y")]);
+        assert_eq!(slugs(&about(&pages, &i, None, &[])).0, [("own", "moai-aaaa.x1y"), ("both", "moai-aaaa.x1y")]);
     }
 
     #[test]
@@ -137,10 +149,20 @@ mod tests {
             page("other", "# Other\n\nThe merge driver once more.\n"),
         ]);
         let i = issue("moai-bbbb", "merge driver", &[]);
-        let a = about(&pages, &i, None);
+        let a = about(&pages, &i, None, &[]);
         let (named, related) = slugs(&a);
         assert_eq!(named, [("named", "moai-bbbb")]);
         assert_eq!(related, ["merge", "other"], "페이지당 하나, 댄 페이지는 빠진다");
+    }
+
+    #[test]
+    fn own_lessons_carry_their_page_when_this_checkout_has_it() {
+        let pages = [page("lessons/a", "# A\n")];
+        let i = issue("moai-dddd", "zzz", &[]);
+        let own = ["lessons/a".to_string(), "lessons/gone".to_string()];
+        let a = about(&pages, &i, None, &own);
+        let got: Vec<(&str, bool)> = a.lessons.iter().map(|l| (l.slug, l.page.is_some())).collect();
+        assert_eq!(got, [("lessons/a", true), ("lessons/gone", false)]);
     }
 
     #[test]
@@ -148,7 +170,7 @@ mod tests {
         let pages =
             with_filler((0..5).map(|n| page(&format!("p{n}"), &format!("# P{n}\n\nmerge driver {n}\n"))).collect());
         let i = issue("moai-cccc", "merge driver", &[]);
-        let a = about(&pages, &i, None);
+        let a = about(&pages, &i, None, &[]);
         assert_eq!(a.related.len(), RELATED);
     }
 
@@ -158,11 +180,11 @@ mod tests {
             with_filler(vec![page("a", "# A\n\nOnly the merge word.\n"), page("b", "# B\n\nOnly the driver word.\n")]);
         // 두 낱말 질의인데 둘 다 든 절이 없다 — 엉뚱한 절을 내밀지 않는다.
         let two = issue("moai-dddd", "merge driver", &[]);
-        let a = about(&pages, &two, None);
+        let a = about(&pages, &two, None, &[]);
         assert!(a.related.is_empty() && a.named_in.is_empty(), "{a:?}");
         // 한 낱말 질의면 하나로 넉넉하다.
         let single = issue("moai-dddd", "merge", &[]);
-        let one = about(&pages, &single, None);
+        let one = about(&pages, &single, None, &[]);
         assert_eq!(slugs(&one).1, ["a"]);
     }
 
@@ -170,7 +192,7 @@ mod tests {
     fn tags_stay_out_of_the_query() {
         let pages = with_filler(vec![page("a", "# A\n\nThe archive moves rows.\n")]);
         let i = issue("moai-eeee", "archive", &["rows"]);
-        let a = about(&pages, &i, None);
+        let a = about(&pages, &i, None, &[]);
         assert_eq!(a.related.first().map(|h| (h.distinct, h.rare)), Some((1, 1)), "태그는 질의 낱말이 아니다");
     }
 
@@ -180,7 +202,7 @@ mod tests {
     fn a_small_wiki_still_has_related_sections() {
         let pages = [page("readme", "# Readme\n\nThe merge driver lives here.\n")];
         let i = issue("moai-gggg", "merge driver", &[]);
-        assert_eq!(slugs(&about(&pages, &i, None)).1, ["readme"]);
+        assert_eq!(slugs(&about(&pages, &i, None, &[])).1, ["readme"]);
     }
 
     /// 문턱은 제목의 원래 낱말로 센다 — `드라이버` 하나만 든 절은 `드라이버 설치` 의 낱말 둘 문턱을 못 넘는다. 토큰으로
@@ -190,9 +212,9 @@ mod tests {
         let pages =
             with_filler(vec![page("a", "# 가\n\n드라이버만 있다\n"), page("b", "# 나\n\n드라이버 설치 방법\n")]);
         let i = issue("moai-hhhh", "드라이버 설치", &[]);
-        assert_eq!(slugs(&about(&pages, &i, None)).1, ["b"]);
+        assert_eq!(slugs(&about(&pages, &i, None, &[])).1, ["b"]);
         let alone = issue("moai-hhhh", "드라이버", &[]);
-        let a = about(&pages, &alone, None);
+        let a = about(&pages, &alone, None, &[]);
         assert!(a.related.iter().all(|h| h.rare == 1), "{a:?}");
     }
 
@@ -205,10 +227,10 @@ mod tests {
         pages.push(page("hit", "# Hit\n\nmoai show draws the gantt chart\n"));
         let pages = with_filler(pages);
         let i = issue("moai-ffff", "moai show 가 gantt chart 를 그린다", &[]);
-        let a = about(&pages, &i, None);
+        let a = about(&pages, &i, None, &[]);
         assert_eq!(slugs(&a).1, ["hit"], "흔한 두 낱말만 맞은 절이 섰다 — {a:?}");
         assert_eq!(a.related[0].rare, 2);
         let only = issue("moai-ffff", "moai show", &[]);
-        assert!(about(&pages, &only, None).related.is_empty(), "흔한 낱말뿐인 질의에 절을 냈다");
+        assert!(about(&pages, &only, None, &[]).related.is_empty(), "흔한 낱말뿐인 질의에 절을 냈다");
     }
 }

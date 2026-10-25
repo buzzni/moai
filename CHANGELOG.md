@@ -35,6 +35,14 @@ does not tag — see `CONTRIBUTING.md`.
   nothing is committed. `--dry-run` shows the path and the text. Run without
   picking anything up, the hooks now count it as a change to the repository
   (rule 2). (moai-4s5n)
+- **Where a lesson stood is read from its `Lesson: lessons/<slug>` notes.**
+  `moai wiki show lessons/<slug>` ends with a `Seen in` list (row, title, day,
+  latest first), `moai wiki ls` puts `×N` (different rows) beside each lesson
+  and says in one line when a note names a page this checkout does not have,
+  and `moai show <id>` lists the lessons the row's own notes point at and marks
+  lesson pages with a `lesson` word. `--json` carries `seen_count` (`wiki ls`),
+  `seen` (`wiki show`) and `wiki.lessons` and `lesson: true` (`show <id>`).
+  Archived rows count; nothing is stored and nothing is blocked. (moai-4s5n)
 
 ### Fixed
 

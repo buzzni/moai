@@ -6317,7 +6317,7 @@ stop sending outside work while a release runs",
     /// 것과 같다. 명령이 새 키를 더하면 [`the_wiki_skill_teaches_the_keys_the_wiki_prints`] 가 붉어지고, 스킬에 적을지
     /// 여기 둘지를 그때 정한다.
     #[cfg(unix)]
-    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body"];
+    const WIKI_UNTAUGHT: &[&str] = &["bytes", "said", "body", "seen", "seen_count", "at", "by"];
 
     /// **`WIKI_KEYS` 를 실제 `moai wiki --json` 에 묶는다**(moai-ihu4.l2e). 손으로 옮긴 목록만 보던 판은 명령이
     /// 키를 바꿔도 초록이라, 심긴 스킬이 `jq` 에서 `null` 이 되는 키를 가르칠 수 있었다(리뷰 moai-bl3x.vbw 4번).
@@ -6359,17 +6359,17 @@ stop sending outside work while a release runs",
         let lang = crate::i18n::Lang::En;
         let known = |id: &str| id == "moai-ab12";
         let read = crate::wiki::load(s.path(), "docs", "moai", &known);
-        let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read).unwrap();
+        let mut printed = crate::cmd::wiki::listed_json(lang, "docs", &read, &Default::default()).unwrap();
         let loaded = read.unwrap();
-        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap()).unwrap());
+        printed.extend(crate::cmd::wiki::page_json(lang, &loaded, loaded.find("README").unwrap(), &[]).unwrap());
         for raw in ["missing", "/etc", "file"] {
             let read = crate::wiki::load(s.path(), raw, "moai", &known);
             assert!(read.is_err(), "{raw} 가 디렉터리 거절이 아니다");
-            printed.extend(crate::cmd::wiki::listed_json(lang, raw, &read).unwrap());
+            printed.extend(crate::cmd::wiki::listed_json(lang, raw, &read, &Default::default()).unwrap());
         }
         // 디렉터리를 못 연 `failed` 는 픽스처로 못 세운다(권한은 root 에서 안 먹는다) — 갈래로 지어 넣는다.
         let failed = Err(DirTrouble::Failed("permission denied".into()));
-        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &failed).unwrap());
+        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &failed, &Default::default()).unwrap());
         let unreadable = crate::wiki::Skipped {
             path: "docs/locked".into(),
             why: crate::wiki::Skip::Unreadable("permission denied".into()),
@@ -6379,7 +6379,7 @@ stop sending outside work while a release runs",
             skipped.push(crate::wiki::Skipped { path: "docs/caf?.md".into(), why: crate::wiki::Skip::NotUtf8 });
         }
         let walked = crate::wiki::Wiki { pages: Vec::new(), skipped };
-        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &Ok(walked)).unwrap());
+        printed.extend(crate::cmd::wiki::listed_json(lang, "docs", &Ok(walked), &Default::default()).unwrap());
 
         // 출력에 선 키와 `kind` 값을 모은다.
         fn gather(v: &serde_json::Value, keys: &mut BTreeSet<String>, kinds: &mut BTreeSet<String>) {
@@ -6422,7 +6422,7 @@ stop sending outside work while a release runs",
             assert!(wiki().contains(&format!("`{home}.md`")), "스킬이 홈 페이지 `{home}.md` 를 안 댄다");
         }
         // 사람 화면이 대는 것만 가르친다 — 목록은 슬러그와 제목이고 경로는 `--json` 에만 선다.
-        let drawn = crate::view::wiki::list(lang, "docs", &loaded).join("\n");
+        let drawn = crate::view::wiki::list(lang, "docs", &loaded, &Default::default()).join("\n");
         assert!(!drawn.contains("docs/README.md"), "사람 목록에 경로가 섰다 — 스킬의 `moai wiki ls` 줄을 고친다");
         assert!(wiki().contains("moai wiki ls                           the pages: slug and title"));
     }

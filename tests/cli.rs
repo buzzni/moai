@@ -26770,16 +26770,19 @@ fn the_wiki_json_is_the_contract_the_skill_reads() {
     // `#앵커` 는 `to` 가 제 페이지고, 역링크로는 안 센다.
     let ls = ok(s.path(), &["wiki", "ls", "--json"]);
     let want_home = format!(
-        r#"{{"slug":"README","title":"Home","path":"docs/README.md","bytes":{},"issues":[{{"id":"{id}","exists":true}},{{"id":"argos-zzzz","exists":false}}],"links":[{{"text":"Guide","to":"guide/a","anchor":"a-guide","resolved":true,"anchor_resolved":true}},{{"text":"gone","to":"nope","resolved":false}},{{"text":"up","to":"README","anchor":"nowhere","resolved":true,"anchor_resolved":false}}],"linked_from":["guide/a"],"conflict":false}}"#,
+        r#"{{"slug":"README","title":"Home","path":"docs/README.md","bytes":{},"issues":[{{"id":"{id}","exists":true}},{{"id":"argos-zzzz","exists":false}}],"links":[{{"text":"Guide","to":"guide/a","anchor":"a-guide","resolved":true,"anchor_resolved":true}},{{"text":"gone","to":"nope","resolved":false}},{{"text":"up","to":"README","anchor":"nowhere","resolved":true,"anchor_resolved":false}}],"linked_from":["guide/a"],"conflict":false"#,
         home.len()
     );
-    let want_guide = r#"{"slug":"guide/a","title":"A guide","path":"docs/guide/a.md","bytes":32,"issues":[],"links":[{"text":"home","to":"README","resolved":true}],"linked_from":["README"],"conflict":false}"#;
-    assert_eq!(ls.trim_end(), format!(r#"{{"dir":"docs","pages":[{want_home},{want_guide}]}}"#));
+    let want_guide = r#"{"slug":"guide/a","title":"A guide","path":"docs/guide/a.md","bytes":32,"issues":[],"links":[{"text":"home","to":"README","resolved":true}],"linked_from":["README"],"conflict":false"#;
+    // 목록은 페이지마다 `seen_count` 를 늘 낸다(moai-4s5n.c0n), `show` 는 `seen` 을 늘 낸다.
+    assert_eq!(
+        ls.trim_end(),
+        format!(r#"{{"dir":"docs","pages":[{want_home},"seen_count":0}},{want_guide},"seen_count":0}}]}}"#)
+    );
 
     let show = ok(s.path(), &["wiki", "show", "README", "--json"]);
     let body = home.replace('\n', "\\n");
-    let open = want_home.strip_suffix('}').unwrap();
-    assert_eq!(show.trim_end(), format!(r#"{open},"body":"{body}"}}"#));
+    assert_eq!(show.trim_end(), format!(r#"{want_home},"body":"{body}","seen":[]}}"#));
 }
 
 /// **`show` 도 역링크를 낸다**(2026-10-04 사용자 결정, moai-ogaw) — 사람 화면의 꼬리 한 줄과 `--json` 의
@@ -27223,6 +27226,108 @@ fn wiki_learn_racing_on_one_slug_writes_once() {
     assert_eq!(page.matches("racer").count(), 1, "{page}");
 }
 
+/// 교훈 위키를 갖춘 저장소 — 교훈 둘(`alpha`·`beta`)과 교훈 아닌 페이지 하나. 이슈 `a`·`b` 가 알파를 달았다.
+fn lesson_repo(name: &str) -> (Scratch, String, String) {
+    let s = init(name);
+    std::fs::create_dir_all(s.path().join("docs/lessons")).unwrap();
+    let w = |p: &str, t: &str| std::fs::write(s.path().join("docs").join(p), t).unwrap();
+    w("lessons/alpha.md", "# Alpha first\n\n## Do this instead\nx\n");
+    w("lessons/beta.md", "# Beta second\n\n## Do this instead\ny\n");
+    w("README.md", "# Home\n");
+    let a = add(s.path(), &["first row"]);
+    let b = add(s.path(), &["second row"]);
+    (s, a, b)
+}
+
+/// 교훈이 선 이슈를 노트에서 읽는다(moai-4s5n.c0n) — `wiki show` 의 `seen` 은 최근 먼저, 같은 이슈의 되풀이는 하나,
+/// 교훈이 아닌 페이지는 `[]` 다. 들여 쓴 줄·울타리 안의 줄은 예라 안 센다. 하위의 노트는 하위의 것이다.
+#[test]
+fn wiki_show_lists_where_a_lesson_stood_latest_first() {
+    let (s, a, b) = lesson_repo("wiki-seen");
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["note", &a, "Lesson: lessons/alpha"]);
+    ok_at(s.path(), "2026-10-03T00:00:00Z", &["note", &b, "Lesson: lessons/alpha"]);
+    ok_at(s.path(), "2026-10-05T00:00:00Z", &["note", &a, "Lesson: lessons/alpha"]);
+    ok_at(s.path(), "2026-10-06T00:00:00Z", &["note", &b, "example:\n    Lesson: lessons/beta"]);
+    ok_at(s.path(), "2026-10-06T00:00:00Z", &["note", &b, "```\nLesson: lessons/beta\n```"]);
+    let child = field(&ok(s.path(), &["add", "child", "--parent", &a, "--json"]), "id");
+    ok_at(s.path(), "2026-10-04T00:00:00Z", &["note", &child, "Lesson: lessons/beta"]);
+
+    let v: serde_json::Value =
+        serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/alpha", "--json"]).trim()).unwrap();
+    let seen: Vec<(&str, &str)> =
+        v["seen"].as_array().unwrap().iter().map(|r| (r["id"].as_str().unwrap(), r["at"].as_str().unwrap())).collect();
+    assert_eq!(seen, [(a.as_str(), "2026-10-05T00:00:00Z"), (b.as_str(), "2026-10-03T00:00:00Z")], "{v}");
+    assert!(v["seen"][0]["by"].is_string());
+    let beta: serde_json::Value =
+        serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/beta", "--json"]).trim()).unwrap();
+    let ids: Vec<&str> = beta["seen"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, [child.as_str()], "예로 쓴 줄과 부모로 올려 센 것이 없어야 한다 — {beta}");
+    let home: serde_json::Value =
+        serde_json::from_str(ok(s.path(), &["wiki", "show", "README", "--json"]).trim()).unwrap();
+    assert_eq!(home["seen"], serde_json::json!([]), "교훈이 아닌 페이지도 키가 선다");
+
+    let human = ok(s.path(), &["wiki", "show", "lessons/alpha"]);
+    let at = human.lines().position(|l| l.starts_with("선 이슈 2")).unwrap_or_else(|| panic!("{human}"));
+    assert!(human.lines().nth(at + 1).unwrap().contains("2026-10-05") && human.contains("second row"), "{human}");
+}
+
+/// `wiki ls` — `seen_count` 는 늘 서고(0 포함), 사람 화면은 교훈 곁에 `×N`, 페이지 없는 노트는 알림 한 줄이다. 종료
+/// 코드는 그대로 0 이다.
+#[test]
+fn wiki_ls_counts_the_issues_a_lesson_stood_in() {
+    let (s, a, b) = lesson_repo("wiki-seen-ls");
+    ok(s.path(), &["note", &a, "Lesson: lessons/alpha"]);
+    ok(s.path(), &["note", &b, "Lesson: lessons/alpha"]);
+    ok(s.path(), &["note", &b, "Lesson: lessons/alpha"]);
+    ok(s.path(), &["note", &b, "Lesson: lessons/elsewhere"]);
+    let v: serde_json::Value = serde_json::from_str(ok(s.path(), &["wiki", "ls", "--json"]).trim()).unwrap();
+    let count =
+        |slug: &str| v["pages"].as_array().unwrap().iter().find(|p| p["slug"] == slug).unwrap()["seen_count"].clone();
+    assert_eq!((count("lessons/alpha"), count("lessons/beta"), count("README")), (2.into(), 0.into(), 0.into()), "{v}");
+
+    let out = ok(s.path(), &["wiki", "ls"]);
+    let line = |slug: &str| out.lines().find(|l| l.trim_start().starts_with(slug)).unwrap().to_string();
+    assert!(line("lessons/alpha").contains("×2") && line("lessons/beta").contains("×0"), "{out}");
+    assert!(!line("README").contains('×'), "{out}");
+    assert!(out.contains("lessons/elsewhere"), "페이지 없는 노트의 알림이 없다\n{out}");
+}
+
+/// 아카이브된 이슈의 노트도 센다 — 오래전에 닫은 일의 교훈이 말없이 빠지지 않게.
+#[test]
+fn wiki_seen_counts_notes_on_archived_rows() {
+    let (s, a, _b) = lesson_repo("wiki-seen-archive");
+    ok_at(s.path(), "2026-01-01T00:00:00Z", &["note", &a, "Lesson: lessons/alpha"]);
+    assert!(at(s.path(), "2026-01-02T00:00:00Z", &["mv", &a, "done"]).status.success());
+    ok_at(s.path(), "2026-10-01T00:00:00Z", &["archive"]);
+    assert!(ok(s.path(), &["show", "--archived", "--json"]).contains(&a));
+    let v: serde_json::Value =
+        serde_json::from_str(ok(s.path(), &["wiki", "show", "lessons/alpha", "--json"]).trim()).unwrap();
+    assert_eq!(v["seen"][0]["id"], a.as_str(), "{v}");
+}
+
+/// `show <id>` 의 Wiki 토막 — 이 이슈의 노트가 가리킨 교훈이 `lessons` 에 서고, 교훈 페이지에는 `lesson: true`.
+#[test]
+fn show_names_the_lessons_the_row_stood_in() {
+    let (s, a, b) = lesson_repo("show-lessons");
+    ok(s.path(), &["note", &a, "Lesson: lessons/alpha"]);
+    ok(s.path(), &["note", &a, "Lesson: lessons/gone"]);
+    std::fs::write(s.path().join("docs/lessons/beta.md"), format!("# Beta second\n\nSee {b}.\n")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(ok(s.path(), &["show", &a, "--json"]).trim()).unwrap();
+    assert_eq!(v["wiki"]["lessons"], serde_json::json!(["lessons/alpha", "lessons/gone"]), "{v}");
+    let other: serde_json::Value = serde_json::from_str(ok(s.path(), &["show", &b, "--json"]).trim()).unwrap();
+    assert_eq!(other["wiki"]["lessons"], serde_json::json!([]));
+    let named = &other["wiki"]["named_in"][0];
+    assert_eq!((named["slug"].as_str(), named["lesson"].as_bool()), (Some("lessons/beta"), Some(true)), "{other}");
+
+    let human = ok(s.path(), &["show", &a]);
+    assert!(
+        human.contains("교훈") && human.contains("docs/lessons/alpha.md") && human.contains("lessons/gone"),
+        "{human}"
+    );
+    let human_b = ok(s.path(), &["show", &b]);
+    assert!(human_b.contains("[교훈]"), "색 없이도 낱말이 선다\n{human_b}");
+}
+
 /// `moai show <id>` 가 그 이슈에 관한 위키를 낸다(moai-g8pt.5aw) — 이 id 를 댄 페이지와 에픽 id 를 댄 페이지(`via`),
 /// 제목 낱말로 선 관련 절(페이지당 하나, 댄 페이지는 빠진다). 사람 화면은 이력 앞의 한 토막이다.
 #[test]
@@ -27275,7 +27380,9 @@ fn show_names_the_wiki_pages_about_the_issue() {
     // 목록에는 안 싣는다 — 줄마다 위키를 걷게 된다.
     assert!(!ok(s.path(), &["show", "--json"]).contains(r#""wiki""#));
     // `--fields` 로 고를 수 있다.
-    assert!(ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]).starts_with(r#"{"wiki":{"named_in":"#));
+    assert!(
+        ok(s.path(), &["show", &id, "--json", "--fields", "wiki"]).starts_with(r#"{"wiki":{"lessons":[],"named_in":"#)
+    );
 }
 
 /// 문턱 밑이면 `related` 가 비고, 둘 다 비면 사람 화면에 토막이 없다. 위키 디렉터리가 없으면 두 빈 배열이고
@@ -27285,13 +27392,16 @@ fn show_says_nothing_of_the_wiki_when_nothing_fits() {
     let s = init("show-wiki-none");
     let id = add(s.path(), &["zebra quagga"]);
     let none = ok(s.path(), &["show", &id, "--json"]);
-    assert!(none.contains(r#""wiki":{"named_in":[],"related":[]}"#), "{none}");
+    assert!(none.contains(r#""wiki":{"named_in":[],"related":[],"lessons":[]}"#), "{none}");
     assert!(!none.contains("wiki_error"), "안 쓴 위키를 못 읽은 것으로 냈다\n{none}");
 
     std::fs::create_dir_all(s.path().join("docs")).unwrap();
     std::fs::write(s.path().join("docs/a.md"), "# A\n\nA zebra, alone.\n").unwrap();
     let below = ok(s.path(), &["show", &id, "--json"]);
-    assert!(below.contains(r#""wiki":{"named_in":[],"related":[]}"#), "두 낱말 질의에 한 낱말 절을 냈다\n{below}");
+    assert!(
+        below.contains(r#""wiki":{"named_in":[],"related":[],"lessons":[]}"#),
+        "두 낱말 질의에 한 낱말 절을 냈다\n{below}"
+    );
     let out = ok(s.path(), &["show", &id]);
     assert!(!out.lines().any(|l| l == "위키"), "빈 토막을 세웠다\n{out}");
 
@@ -27301,7 +27411,7 @@ fn show_says_nothing_of_the_wiki_when_nothing_fits() {
     let bad = moai(s.path(), &["show", &id, "--json"]);
     assert!(bad.status.success(), "위키 때문에 상세가 섰다\n{}", text(&bad));
     let said = String::from_utf8_lossy(&bad.stdout);
-    assert!(said.contains(r#""wiki":{"named_in":[],"related":[]}"#), "{said}");
+    assert!(said.contains(r#""wiki":{"named_in":[],"related":[],"lessons":[]}"#), "{said}");
     assert!(said.contains(r#""wiki_error":{"kind":"not_a_dir","said":"#), "{said}");
     assert!(moai(s.path(), &["show", &id]).status.success());
 }

@@ -883,7 +883,8 @@ fn one(
     // 없어 상세의 머리글과 이력이 서로 다른 말을 한다.
     let journal_root = home(repo, origin, &issue.id);
     // `journal_error` 는 읽은 **뒤에** 못 읽은 파일을 묻는 키라 그것을 고른 판도 읽는다.
-    let journal = match wants(&["journal", "work", "journal_error"]) {
+    // `wiki` 도 고른다 — 이 줄의 `Lesson:` 노트가 거기 선다(moai-4s5n.c0n).
+    let journal = match wants(&["journal", "work", "journal_error", "wiki"]) {
         true => at_home(repo, journal_root).journal_of(&issue.id),
         false => Vec::new(),
     };
@@ -968,7 +969,9 @@ fn one(
         Some((dir, Err(t))) => (&[], super::wiki::trouble_told(ctx.lang(), dir, t)),
         None => (&[], None),
     };
-    let about = crate::wiki::about::about(pages, issue, stood_in);
+    // 이 이슈의 `Lesson:` 노트가 가리킨 교훈 — 저널의 노트를 읽은 값이다. 하위의 노트는 하위의 것이다.
+    let own_lessons = crate::wiki::seen::lessons_of(&journal);
+    let about = crate::wiki::about::about(pages, issue, stood_in, &own_lessons);
 
     if ctx.json {
         let ids: Vec<&str> = children.iter().map(|c| c.id.as_str()).collect();

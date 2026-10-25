@@ -16,7 +16,7 @@ use crate::wiki::{self, DirTrouble, IssueRef, Link, Page, Wiki};
 use std::collections::HashSet;
 
 pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
-    let (dir, wiki) = read(ctx)?;
+    let (repo, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
         Err(t) => return trouble(ctx, &dir, &t, false),
@@ -27,10 +27,21 @@ pub fn ls(ctx: &Ctx) -> R<Vec<String>> {
     if wiki.fell_short() {
         note_partial();
     }
+    // **교훈이 선 이슈는 노트에서 읽는다**(moai-4s5n.c0n) — 저장하지 않고, 아무것도 막지 않는다.
+    let lessons = lessons_seen(ctx, &repo)?;
     if ctx.json {
-        return listed_json(ctx.lang(), &dir, &Ok(wiki));
+        return listed_json(ctx.lang(), &dir, &Ok(wiki), &lessons);
     }
-    Ok(crate::view::wiki::list(ctx.lang(), &dir, &wiki))
+    Ok(crate::view::wiki::list(ctx.lang(), &dir, &wiki, &lessons))
+}
+
+/// 교훈마다 선 이슈 — 아카이브된 줄의 노트도 센다(`moai stats` 의 `work` 가 아카이브까지 세는 것과 같은 까닭: 오래전
+/// 교훈의 이력이 말없이 빠지지 않게). 저널은 `Lesson:` 이 들 수 있는 줄만 푼다(`model::may_hold_lesson`).
+fn lessons_seen(ctx: &Ctx, repo: &crate::store::Repo) -> R<wiki::seen::Lessons> {
+    let crate::worktree::Gathered { load, origin, .. } = super::gather(ctx, repo, false)?;
+    let load = crate::archive::read_all(&repo.root, load)?;
+    let journal = super::show::journal_of_rows(repo, &origin, &load.issues, crate::model::may_hold_lesson);
+    Ok(wiki::seen::seen_in(&load.issues, &journal))
 }
 
 pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
@@ -38,7 +49,7 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     // 페이지를 못 읽어 역링크가 덜 셌어도 그 페이지는 `moai wiki ls` 가 대고, 여기서 비영이면 옆 파일 하나가 멀쩡한
     // 페이지의 `show` 를 실패로 세운다. 덜 셌다는 것은 종료 코드 대신 `linked_from_partial` 과 화면의 한 줄이
     // 말한다(moai-mdzx.jty).
-    let (dir, wiki) = read(ctx)?;
+    let (repo, dir, wiki) = read(ctx)?;
     let wiki = match wiki {
         Ok(w) => w,
         Err(t) => return trouble(ctx, &dir, &t, true),
@@ -50,10 +61,15 @@ pub fn show(ctx: &Ctx, slug: &str) -> R<Vec<String>> {
     if page.error.is_some() {
         note_partial();
     }
+    // 저널은 교훈 페이지를 물었을 때만 연다 — 다른 페이지의 `seen` 은 늘 빈 배열이다.
+    let seen = match wiki::seen::is_lesson(&page.slug) {
+        true => lessons_seen(ctx, &repo)?.remove(&page.slug).unwrap_or_default(),
+        false => Vec::new(),
+    };
     if ctx.json {
-        return page_json(ctx.lang(), &wiki, page);
+        return page_json(ctx.lang(), &wiki, page, &seen);
     }
-    Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug)))
+    Ok(crate::view::wiki::page(ctx.lang(), page, wiki.uncounted(&page.slug), &seen))
 }
 
 /// `moai wiki search <낱말…>` — 위키를 절 단위로 찾아 순위대로 낸다(moai-g8pt). 낱말은 빈칸 하나로 이어 한 질의다.
@@ -169,7 +185,7 @@ impl<'a> HitOut<'a> {
 }
 
 /// 트래커를 열고(id 가 있는가를 물을 자리) 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께.
-fn read(ctx: &Ctx) -> R<(String, Result<Wiki, DirTrouble>)> {
+fn read(ctx: &Ctx) -> R<(crate::store::Repo, String, Result<Wiki, DirTrouble>)> {
     let repo = super::open_repo(ctx)?;
     let load = repo.read()?;
     super::report_load_errors(ctx.lang(), &repo.issues_path(), &load.errors);
@@ -177,7 +193,8 @@ fn read(ctx: &Ctx) -> R<(String, Result<Wiki, DirTrouble>)> {
     let reserved = load.reserved_ids();
     let ids: HashSet<&str> =
         load.issues.iter().map(|i| i.id.as_str()).chain(reserved.iter().map(String::as_str)).collect();
-    Ok(read_in(&repo, &|id: &str| ids.contains(id)))
+    let (dir, wiki) = read_in(&repo, &|id: &str| ids.contains(id));
+    Ok((repo, dir, wiki))
 }
 
 /// 이미 연 트래커 곁에서 이 체크아웃의 위키를 읽는다 — `wiki_dir` 의 날글자와 함께. `known` 은 그 id 의 줄이
@@ -201,7 +218,18 @@ pub(crate) fn trouble_told(lang: Lang, dir: &str, t: &DirTrouble) -> Option<Told
 #[derive(serde::Serialize)]
 pub(crate) struct AboutOut<'a> {
     named_in: Vec<NamedOut<'a>>,
-    related: Vec<HitOut<'a>>,
+    related: Vec<RelatedOut<'a>>,
+    /// 이 이슈의 `Lesson:` 노트가 가리킨 슬러그 — 늘 선다(moai-4s5n.c0n).
+    lessons: Vec<&'a str>,
+}
+
+/// 관련 절 하나 — `wiki search` 의 hit 에 교훈 페이지의 표시 `lesson` 이 더해진다. 교훈일 때만 서고 없으면 아니다.
+#[derive(serde::Serialize)]
+struct RelatedOut<'a> {
+    #[serde(flatten)]
+    hit: HitOut<'a>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    lesson: bool,
 }
 
 /// 이 이슈를 댄 페이지 — `via` 는 걸린 id 다(제 id 나 에픽 id).
@@ -211,6 +239,8 @@ struct NamedOut<'a> {
     path: &'a str,
     title: &'a str,
     via: &'a str,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    lesson: bool,
 }
 
 impl<'a> AboutOut<'a> {
@@ -219,9 +249,20 @@ impl<'a> AboutOut<'a> {
             named_in: a
                 .named_in
                 .iter()
-                .map(|n| NamedOut { slug: &n.page.slug, path: &n.page.path, title: &n.page.title, via: n.via })
+                .map(|n| NamedOut {
+                    slug: &n.page.slug,
+                    path: &n.page.path,
+                    title: &n.page.title,
+                    via: n.via,
+                    lesson: wiki::seen::is_lesson(&n.page.slug),
+                })
                 .collect(),
-            related: a.related.iter().map(HitOut::of).collect(),
+            related: a
+                .related
+                .iter()
+                .map(|h| RelatedOut { hit: HitOut::of(h), lesson: wiki::seen::is_lesson(&h.page.slug) })
+                .collect(),
+            lessons: a.lessons.iter().map(|l| l.slug).collect(),
         }
     }
 }
@@ -234,7 +275,7 @@ fn trouble(ctx: &Ctx, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> 
         if fell {
             note_partial();
         }
-        return listed_json(ctx.lang(), dir, &Err(t.clone()));
+        return listed_json(ctx.lang(), dir, &Err(t.clone()), &Default::default());
     }
     let said = crate::view::wiki::dir_trouble(ctx.lang(), dir, t);
     if fell {
@@ -249,10 +290,19 @@ fn trouble(ctx: &Ctx, dir: &str, t: &DirTrouble, asked: bool) -> R<Vec<String>> 
 /// **moai-wiki 스킬이 이 키 이름을 가르친다**(`guide::wiki`). 그 글이 대는 키를 이 출력에 묶는 시험
 /// (`guide::tests::the_wiki_skill_teaches_the_keys_the_wiki_prints`)이 이 함수를 부른다 — 명령과 시험이 같은 자로
 /// 짓지 않으면 그 시험은 손으로 옮긴 꼴과 견주게 되고, 키가 바뀌어도 초록이다(moai-ihu4.l2e).
-pub(crate) fn listed_json(lang: Lang, dir: &str, read: &Result<Wiki, DirTrouble>) -> R<Vec<String>> {
+pub(crate) fn listed_json(
+    lang: Lang,
+    dir: &str,
+    read: &Result<Wiki, DirTrouble>,
+    lessons: &wiki::seen::Lessons,
+) -> R<Vec<String>> {
     match read {
         Ok(w) => {
-            let pages = w.pages.iter().map(|p| PageOut::of(lang, p)).collect();
+            let pages = w
+                .pages
+                .iter()
+                .map(|p| PageOut { seen_count: Some(lessons.get(&p.slug).map_or(0, Vec::len)), ..PageOut::of(lang, p) })
+                .collect();
             super::json_line(&Listed { dir, pages, skipped: skipped_out(lang, &w.skipped) })
         }
         Err(t) => {
@@ -265,9 +315,23 @@ pub(crate) fn listed_json(lang: Lang, dir: &str, read: &Result<Wiki, DirTrouble>
 /// `moai wiki show <slug> --json` 의 한 줄 — 목록의 페이지에 원문 `body` 와, 역링크를 덜 셌을 때 `linked_from_partial`
 /// 을 더한 것. `w` 는 그 페이지가 든 위키다 — 덜 셌는가는 다른 페이지가 답한다([`Wiki::uncounted`]). [`listed_json`]
 /// 과 같은 까닭으로 스킬의 키를 재는 시험이 함께 부른다.
-pub(crate) fn page_json(lang: Lang, w: &Wiki, p: &Page) -> R<Vec<String>> {
+pub(crate) fn page_json(lang: Lang, w: &Wiki, p: &Page, seen: &[wiki::seen::Seen]) -> R<Vec<String>> {
     let partial = w.uncounted(&p.slug) > 0;
-    super::json_line(&PageOut { body: p.body.as_deref(), linked_from_partial: partial, ..PageOut::of(lang, p) })
+    let seen = seen.iter().map(|s| SeenOut { id: &s.id, at: &s.at, by: &s.by }).collect();
+    super::json_line(&PageOut {
+        body: p.body.as_deref(),
+        linked_from_partial: partial,
+        seen: Some(seen),
+        ..PageOut::of(lang, p)
+    })
+}
+
+/// `wiki show --json` 의 `seen` 한 칸 — 이 교훈이 선 이슈, 그 이슈에서 가장 나중에 적은 때와 사람(moai-4s5n.c0n).
+#[derive(serde::Serialize)]
+struct SeenOut<'a> {
+    id: &'a str,
+    at: &'a str,
+    by: &'a str,
 }
 
 /// `moai wiki ls --json` — **moai-wiki 스킬이 이 키 이름을 읽는다**(moai-ihu4 본문의 계약). 키를 바꾸면 그 에픽에
@@ -341,6 +405,12 @@ struct PageOut<'a> {
     error: Option<Told>,
     #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<&'a str>,
+    /// 서로 다른 이슈 수 — `ls` 만 내고 **늘 선다**(교훈이 아닌 페이지도 0). 노트에서 읽은 값이고 저장하지 않는다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seen_count: Option<usize>,
+    /// 이 교훈이 선 이슈, 최근 먼저 — `show` 만 내고 **늘 선다**(교훈이 아닌 페이지는 `[]`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seen: Option<Vec<SeenOut<'a>>>,
 }
 
 impl<'a> PageOut<'a> {
@@ -358,6 +428,8 @@ impl<'a> PageOut<'a> {
             conflict: p.conflict,
             error: told_unread(lang, p),
             body: None,
+            seen_count: None,
+            seen: None,
         }
     }
 }

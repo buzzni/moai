@@ -901,6 +901,45 @@ pub fn may_hold_work(raw: &str) -> bool {
     raw.contains("model:") || raw.contains("\\u")
 }
 
+/// 저널 한 줄 — **풀기 전의 JSON** — 이 [`lessons_in_note`] 에서 값을 낼 수 **있는가**(moai-4s5n.c0n).
+/// [`may_hold_work`] 와 같은 결이다: 값을 내는 줄의 글에는 `Lesson:` 이 들고, 손으로 쓴 줄이 글자를
+/// `\uXXXX` 로 적었을 수 있어 `\u` 가 든 줄은 다 푼다. 더 받는 것은 괜찮다 — 푼 뒤에 파서가 다시 가른다.
+pub fn may_hold_lesson(raw: &str) -> bool {
+    raw.contains("Lesson:") || raw.contains("\\u")
+}
+
+/// `Lesson: lessons/<slug>` 한 줄 — 이 교훈이 다시 선 자리. 돌려주는 것은 위키 슬러그(`lessons/<slug>`)다.
+///
+/// [`parse_work`] 와 같은 규칙이다: **줄 머리에서 시작한 줄만 받는다**(들여 쓴 줄은 꼴을 옮겨 적은 예다),
+/// `Lesson:` 뒤에는 빈칸이 오고(`Lesson:x` 는 아니다), 슬러그는 `lessons/` 밑의 위키 슬러그 꼴
+/// ([`crate::wiki::learn::is_slug`])이다. 슬러그 뒤의 글은 무시한다.
+pub(crate) fn parse_lesson(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("Lesson:")?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let word = rest.split_whitespace().next()?;
+    let tail = word.strip_prefix(crate::wiki::learn::LESSONS)?.strip_prefix('/')?;
+    crate::wiki::learn::is_slug(tail).then_some(word)
+}
+
+/// 노트 글 **하나**에서 읽은 교훈 슬러그들 — 울타리(```` ``` ````·`~~~`) 안의 줄은 예라 안 센다([`work_in_note`]
+/// 와 같다).
+pub(crate) fn lessons_in_note(text: &str) -> impl Iterator<Item = &str> + '_ {
+    let mut fenced = false;
+    text.lines().filter_map(move |line| {
+        let bare = line.trim_start();
+        if bare.starts_with("```") || bare.starts_with("~~~") {
+            fenced = !fenced;
+            return None;
+        }
+        if fenced {
+            return None;
+        }
+        parse_lesson(line)
+    })
+}
+
 /// `model: [<회사>/]<모델> [tokens=<수>] [(<등급> — <까닭>)] …` 한 줄. `at`·`by` 는 비워 낸다.
 ///
 /// 괄호 뒤는 무엇이 와도 받는다 — 옛 줄이 거기에 사연을 붙였다. 괄호 **앞**에 모르는 것이
@@ -1370,6 +1409,28 @@ pub fn days_until(due: &str, now: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    #[test]
+    fn parse_lesson_reads_only_a_line_head_with_a_lessons_slug() {
+        assert_eq!(parse_lesson("Lesson: lessons/grep-exit-code"), Some("lessons/grep-exit-code"));
+        assert_eq!(parse_lesson("Lesson:   lessons/a1 — 또 겪었다"), Some("lessons/a1"));
+        assert_eq!(parse_lesson("  Lesson: lessons/a"), None, "들여 쓴 줄은 예다");
+        assert_eq!(parse_lesson("Lesson:lessons/a"), None, "빈칸이 없다");
+        assert_eq!(parse_lesson("Lesson: README"), None);
+        assert_eq!(parse_lesson("Lesson: notes/a"), None, "lessons/ 밖");
+        assert_eq!(parse_lesson("Lesson: lessons/Bad_Slug"), None);
+        assert_eq!(parse_lesson("Lesson: lessons/"), None);
+        assert_eq!(parse_lesson("Lesson: lessons/a/b"), None, "한 겹만");
+        assert_eq!(parse_lesson("lesson: lessons/a"), None);
+    }
+
+    #[test]
+    fn lessons_in_a_note_skip_fenced_lines() {
+        let text = "Lesson: lessons/a\n```\nLesson: lessons/b\n```\n    Lesson: lessons/c\nLesson: lessons/d";
+        assert_eq!(lessons_in_note(text).collect::<Vec<_>>(), ["lessons/a", "lessons/d"]);
+        assert!(may_hold_lesson(r#"{"text":"Lesson: lessons/a"}"#));
+        assert!(!may_hold_lesson(r#"{"text":"model: x"}"#));
+    }
 
     fn cfg() -> Config {
         Config::parse("prefix = \"argos\"\n").unwrap()

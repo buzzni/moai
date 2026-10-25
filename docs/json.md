@@ -89,9 +89,17 @@ from the checkout you call it in:
   not count. A Korean, Chinese or Japanese word is one word however many
   two-letter pieces it splits into, and it matches a section holding at least
   half of them — so `검색은` still finds `검색`
+- `lessons` — the lesson pages the row's own `Lesson: lessons/<slug>` notes
+  point at, as slugs, in the order they first stand in the notes. A slug is
+  there even when the page is not in this checkout (it may ride a branch not
+  merged yet). Only the row's own notes count; a note on a child belongs to
+  the child
 
-`wiki` is always there; with no wiki directory, or nothing about the row, both
-arrays are empty. `wiki_error` stands only when the wiki directory cannot be
+A page under `lessons/` carries `"lesson": true` in `named_in` and `related`;
+the key is absent on any other page.
+
+`wiki` is always there; with no wiki directory, or nothing about the row, its
+three arrays are empty. `wiki_error` stands only when the wiki directory cannot be
 used, beside two empty arrays: `kind` takes the words of `moai wiki ls --json`'s
 `error.kind` (`not_a_dir`, `outside`, `failed`) and `said` is one line for a
 person. A missing directory is a wiki not started yet, not an error.
@@ -99,6 +107,22 @@ person. A missing directory is a wiki not started yet, not an error.
 Only `moai show <id>` carries these two keys. The list form,
 `moai show [filters] --json`, leaves them out — it would walk the whole wiki
 for every row. Ask per row when you need them.
+
+## Read where a lesson stood
+
+A lesson is a page under `lessons/`, and each time one comes up again the work
+leaves a `Lesson: lessons/<slug>` note on the row. Nothing is stored: the
+counts are read from those notes when you ask, archived rows included. Only a
+line that starts at the head of a note counts; indented lines and lines inside
+a fence are examples. Two notes for one lesson on one row count once.
+
+- `moai wiki ls --json` — every page has `seen_count`, the number of different
+  rows whose notes name it (`0` for a page that is not a lesson)
+- `moai wiki show <slug> --json` — `seen`, always there (`[]` for a page that is
+  not a lesson): one `{"id", "at", "by"}` per row, latest note first, where
+  `at` is the row's latest note for this lesson
+
+None of this changes a column, a kind or an exit code.
 
 ## Keep the payload small
 

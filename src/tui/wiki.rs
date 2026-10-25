@@ -672,7 +672,7 @@ impl App {
             }
         };
         if wiki.pages.is_empty() {
-            let mut said = crate::view::wiki::list(lang, &dir, &wiki).join(" ");
+            let mut said = crate::view::wiki::list(lang, &dir, &wiki, &Default::default()).join(" ");
             // **못 걸은 자리가 있으면 그 수도 댄다** — 창이 안 서니 목록 밑의 수([`Window::skipped`])가 설 자리가 없다.
             // 빼면 "첫 페이지는 README.md" 만 남아, 디렉터리 링크 밑에 둔 페이지가 정말 없는 줄 안다.
             if !wiki.skipped.is_empty() {

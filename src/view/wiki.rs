@@ -9,6 +9,7 @@ use crate::style::{self, paint};
 use crate::text::{one_line, width};
 use crate::wiki::about::About;
 use crate::wiki::search::Hit;
+use crate::wiki::seen;
 use crate::wiki::{DirTrouble, Notices, Outside, Page, Skip, Skipped, Unread, Wiki};
 
 /// `wiki_dir` 을 화면에 — 빈 글은 체크아웃 뿌리라 `.` 으로 댄다.
@@ -18,7 +19,7 @@ fn shown(dir: &str) -> String {
 }
 
 /// `moai wiki ls` — 머리 한 줄, 그 밑에 페이지마다 `슬러그  제목`. 못 읽은 페이지는 곁에 `!` 와 까닭이 선다.
-pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
+pub fn list(lang: Lang, dir: &str, w: &Wiki, lessons: &crate::wiki::seen::Lessons) -> Vec<String> {
     let dir = shown(dir);
     if w.pages.is_empty() {
         return vec![fill(say(lang, "wiki.empty"), &[("dir", &dir)])];
@@ -30,6 +31,11 @@ pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
     for (p, slug) in w.pages.iter().zip(&slugs) {
         let gap = " ".repeat(wide - width(slug));
         let mut line = format!("  {}{gap}  {}", paint(style::ID, slug), one_line(&p.title));
+        // 교훈 페이지 곁에 서로 다른 이슈 수(moai-4s5n.c0n) — 노트에서 읽은 값이다.
+        if seen::is_lesson(&p.slug) {
+            let n = lessons.get(&p.slug).map_or(0, Vec::len);
+            line.push_str(&format!("  {}", paint(style::DIM, &format!("×{n}"))));
+        }
         if let Some(u) = &p.error {
             // 옮겨 치라고 내미는 명령이라 슬러그는 원문을 셸 낱말로 감싼다(`text::quoted`) — `my page` 를 그대로
             // 대면 `moai wiki show my page` 가 낱말 둘로 갈려 clap 이 거절한다.
@@ -44,9 +50,20 @@ pub fn list(lang: Lang, dir: &str, w: &Wiki) -> Vec<String> {
         out.push(line);
     }
     let n = crate::wiki::notices(&w.pages);
-    if !n.is_empty() {
+    // 페이지 없는 `Lesson:` 노트 — 다른 가지에서 아직 안 든 페이지일 수 있어 "이 체크아웃에 없다" 고만 말한다.
+    let unpaged = seen::unpaged(lessons, |s| w.find(s).is_some());
+    if !n.is_empty() || !unpaged.is_empty() {
         out.push(String::new());
         out.extend(notice_lines(lang, &n, true));
+        if !unpaged.is_empty() {
+            let which = unpaged.iter().take(3).map(|s| one_line(s)).collect::<Vec<_>>();
+            let mut which = which.join(", ");
+            if unpaged.len() > 3 {
+                which.push_str(&format!(", +{}", unpaged.len() - 3));
+            }
+            let text = fill(say(lang, "wiki.notice_unpaged"), &[("n", &unpaged.len().to_string()), ("which", &which)]);
+            out.push(paint(style::WARN, &format!("! {text}")));
+        }
     }
     out
 }
@@ -93,23 +110,47 @@ pub fn search(lang: Lang, dir: &str, query: &str, hits: &[Hit], total: usize) ->
 /// (`path:line   제목 › 머리글`), 다음 명령 한 줄. 둘 다 비면 아무 줄도 없다 — 토막째 안 선다. 낱말 칸은 둘 가운데
 /// 넓은 쪽에 맞추고, 같은 묶음의 둘째 줄부터는 낱말 자리를 비운다.
 pub fn about(lang: Lang, a: &About) -> Vec<String> {
-    let Some(first) = a.named_in.first().map(|n| n.page).or_else(|| a.related.first().map(|h| h.page)) else {
+    let first = a
+        .named_in
+        .first()
+        .map(|n| n.page.slug.as_str())
+        .or_else(|| a.related.first().map(|h| h.page.slug.as_str()))
+        .or_else(|| a.lessons.first().map(|l| l.slug));
+    let Some(first) = first else {
         return Vec::new();
     };
-    let (named, related) = (say(lang, "wiki.about_named"), say(lang, "wiki.about_related"));
-    let wide = width(named).max(width(related));
+    let (named, related, own) =
+        (say(lang, "wiki.about_named"), say(lang, "wiki.about_related"), say(lang, "wiki.about_lessons"));
+    let wide = width(named).max(width(related)).max(width(own));
+    let mark = |slug: &str| {
+        if seen::is_lesson(slug) {
+            format!("  {}", paint(style::DIM, &format!("[{}]", say(lang, "wiki.lesson_mark"))))
+        } else {
+            String::new()
+        }
+    };
     let label = |word: &str, n: usize| {
         let w = if n == 0 { word } else { "" };
         let painted = if w.is_empty() { String::new() } else { paint(style::DIM, w) };
         format!("  {painted}{}   ", " ".repeat(wide - width(w)))
     };
     let mut out = vec![String::new(), paint(style::HEAD, say(lang, "wiki.about_head"))];
+    // 이 이슈의 노트가 가리킨 교훈이 맨 앞이다 — 이 일을 하다 겪은 것이라 가장 가깝다. 페이지가 이 체크아웃에 없으면
+    // 슬러그만 선다.
+    for (n, l) in a.lessons.iter().enumerate() {
+        let (path, title) = match l.page {
+            Some(p) => (one_line(&p.path), format!("   {}", one_line(&p.title))),
+            None => (one_line(l.slug), String::new()),
+        };
+        out.push(format!("{}{}{title}{}", label(own, n), paint(style::ID, &path), mark(l.slug)));
+    }
     for (n, x) in a.named_in.iter().enumerate() {
         out.push(format!(
-            "{}{}   {}",
+            "{}{}   {}{}",
             label(named, n),
             paint(style::ID, &one_line(&x.page.path)),
-            one_line(&x.page.title)
+            one_line(&x.page.title),
+            mark(&x.page.slug)
         ));
     }
     for (n, h) in a.related.iter().enumerate() {
@@ -122,12 +163,13 @@ pub fn about(lang: Lang, a: &About) -> Vec<String> {
         if let Some(t) = section_of(h) {
             line.push_str(&format!(" › {}", one_line(t)));
         }
+        line.push_str(&mark(&h.page.slug));
         out.push(line);
     }
     out.push(format!(
         "  {}   {}",
         " ".repeat(wide),
-        paint(style::DIM, &fill(say(lang, "wiki.about_hint"), &[("slug", &crate::text::quoted(&first.slug))]))
+        paint(style::DIM, &fill(say(lang, "wiki.about_hint"), &[("slug", &crate::text::quoted(first))]))
     ));
     out
 }
@@ -161,7 +203,7 @@ fn marked(text: &str, marks: &[std::ops::Range<usize>]) -> String {
 ///
 /// `uncounted` 는 역링크를 세지 못한 자리의 수다(`Wiki::uncounted`). 0 이 아니면 그 밑에 한 줄이 더 선다 — 아무도
 /// 안 가리켜 역링크 줄이 없을 때도 선다: 그때가 "아무도 안 가리킨다" 와 "못 셌다" 가 같아 보이는 자리다(moai-mdzx.jty).
-pub fn page(lang: Lang, p: &Page, uncounted: usize) -> Vec<String> {
+pub fn page(lang: Lang, p: &Page, uncounted: usize, seen: &[seen::Seen]) -> Vec<String> {
     let mut out = vec![
         format!("{}  {}", paint(style::ID, &one_line(&p.slug)), paint(style::HEAD, &one_line(&p.title))),
         paint(style::DIM, &one_line(&p.path)),
@@ -200,6 +242,22 @@ pub fn page(lang: Lang, p: &Page, uncounted: usize) -> Vec<String> {
             out.push(String::new());
         }
         out.push(paint(style::DIM, &fill(say(lang, "wiki.linked_from_partial"), &[("n", &uncounted.to_string())])));
+    }
+    // 교훈이 선 이슈 — 최근 먼저, 이슈 id·제목·날짜(moai-4s5n.c0n).
+    if !seen.is_empty() {
+        out.push(String::new());
+        out.push(paint(style::HEAD, &fill(say(lang, "wiki.seen_head"), &[("n", &seen.len().to_string())])));
+        let wide = seen.iter().map(|s| width(&s.id)).max().unwrap_or(0);
+        for s in seen {
+            let gap = " ".repeat(wide - width(&s.id));
+            let day = s.at.get(..10).unwrap_or(&s.at);
+            out.push(format!(
+                "  {}{gap}  {}  {}",
+                paint(style::ID, &one_line(&s.id)),
+                paint(style::DIM, &one_line(day)),
+                one_line(&s.title)
+            ));
+        }
     }
     // 충돌은 본문 머리에 이미 섰다 — 꼬리에는 링크와 id 만 센다.
     let n = Notices { conflict: Vec::new(), ..crate::wiki::notices([p]) };
