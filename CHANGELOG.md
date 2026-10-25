@@ -12,6 +12,8 @@ does not tag — see `CONTRIBUTING.md`.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-25
+
 ### Added
 
 - **`moai wiki search <words…>`** finds the wiki's sections for some words and
