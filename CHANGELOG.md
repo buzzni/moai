@@ -52,6 +52,29 @@ does not tag — see `CONTRIBUTING.md`.
   the AGENTS block closes with a line for it, the worker steps ask at 7-4 and a
   subagent worker reports a `Lessons:` piece, and closing a review asks the same
   question. Nothing checks it and no hook asks. (moai-4s5n)
+- **`moai edit --shift <±N>`, `--shift-start <±N>` and `--shift-due <±N>`** move
+  a row's planned days by whole days, measured from the days the row holds when
+  it is written — the whole plan, the start alone, or the deadline alone, as a
+  Gantt drag does. `--if-unplanned` writes `--start`/`--due` only on a row with
+  no planned day and refuses one that has some. (moai-vj8w)
+
+### Changed
+
+- **The web Gantt's drag writes the move, not the days.** `/api/plan/<id>` takes
+  `edge`/`days` or `day` and runs `moai edit --shift…` or
+  `--if-unplanned`, so a row another session moved after the page read it moves
+  on from there instead of being given the dragged days, and planning a day on a
+  row that gained days meanwhile is refused. `start`/`due` on that path are
+  refused now. (moai-vj8w)
+- **The web Gantt judges lateness in the zone it draws in.** `/api/tree` takes
+  `tz=<zone>` and the page sends the zone picked with `SPC o t`; a name this
+  machine's tzdata cannot open leaves the server's zone. (moai-vj8w)
+- **The TUI Gantt's month names follow the screen language** (`10월`, not
+  `Oct`, on a Korean screen). (moai-vj8w)
+- **The web Gantt draws only the rows and dates in view**, and does not let you
+  drag a row shown only from a sibling worktree, an archived row, or a `◆` whose
+  day it cannot read. The TUI's dependency arrows no longer map the off-screen
+  part of a long path. (moai-vj8w)
 
 ## [0.25.0] - 2026-10-25
 
