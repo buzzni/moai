@@ -43,6 +43,12 @@ does not tag — see `CONTRIBUTING.md`.
   lesson pages with a `lesson` word. `--json` carries `seen_count` (`wiki ls`),
   `seen` (`wiki show`) and `wiki.lessons` and `lesson: true` (`show <id>`).
   Archived rows count; nothing is stored and nothing is blocked. (moai-4s5n)
+- **The texts agents read now say when to write a lesson and how to read one.** The
+  `moai-wiki` skill has a Lessons section (four occasions, search first, a list of
+  what not to write, and a sweep step that merges, retires and asks about rules);
+  the AGENTS block closes with a line for it, the worker steps ask at 7-4 and a
+  subagent worker reports a `Lessons:` piece, and closing a review asks the same
+  question. Nothing checks it and no hook asks. (moai-4s5n)
 
 ### Fixed
 
