@@ -886,9 +886,17 @@ fn one(
     let journal_root = home(repo, origin, &issue.id);
     // `journal_error` 는 읽은 **뒤에** 못 읽은 파일을 묻는 키라 그것을 고른 판도 읽는다.
     // `wiki` 도 고른다 — 이 줄의 `Lesson:` 노트가 거기 선다(moai-4s5n.c0n).
-    let journal = match wants(&["journal", "work", "journal_error", "wiki"]) {
-        true => at_home(repo, journal_root).journal_of(&issue.id),
-        false => Vec::new(),
+    // **`wiki` 만 고르면 `Lesson:` 이 들 수 있는 줄만 푼다**(moai-xp7l.c4h) — 그 키가 읽는 것은 교훈 노트뿐이다.
+    // 이력 전부를 풀던 판은 `--fields wiki` 에 그 줄의 저널을 통째 풀었다(답은 같다, 값만 비쌌다).
+    let journal = if wants(&["journal", "work", "journal_error"]) {
+        at_home(repo, journal_root).journal_of(&issue.id)
+    } else if wants(&["wiki"]) {
+        at_home(repo, journal_root)
+            .journal_by_id(&BTreeSet::from([issue.id.as_str()]), model::may_hold_lesson)
+            .remove(&issue.id)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
     };
     // 이 줄과 자식을 계획에서 뺀 줄. **물려받은 미룸까지** — 미룬 에픽의 멤버를
     // 펼쳤을 때 표가 없으면 상세가 답하기로 한 "왜 ready 에 안 나오나" 가 빈다.

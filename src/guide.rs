@@ -6532,7 +6532,8 @@ stop sending outside work while a release runs",
             skipped.push(crate::wiki::Skipped { path: "docs/caf?.md".into(), why: crate::wiki::Skip::NotUtf8 });
         }
         let walked = crate::wiki::Wiki { pages: Vec::new(), skipped };
-        printed.extend(crate::cmd::wiki::listed_json(lang, s.path(), "docs", &Ok(walked), &Default::default()).unwrap());
+        printed
+            .extend(crate::cmd::wiki::listed_json(lang, s.path(), "docs", &Ok(walked), &Default::default()).unwrap());
 
         // 출력에 선 키와 `kind` 값을 모은다.
         fn gather(v: &serde_json::Value, keys: &mut BTreeSet<String>, kinds: &mut BTreeSet<String>) {

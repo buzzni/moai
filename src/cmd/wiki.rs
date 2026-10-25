@@ -505,6 +505,11 @@ impl<'a> PageOut<'a> {
 pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
     use crate::wiki::learn;
     let lang = ctx.lang();
+    // **`-` 로 여는 제목도 받는다**(moai-xp7l.c4h) — `- not a flag` 같은 교훈을 clap 이 모르는 깃발로 거절했다. `add`
+    // 의 제목과 같은 자다: 빈칸 없는 `-x` 는 깃발을 잘못 친 것으로 보고 `--` 뒤에서만 받는다. 훅의 규칙 2 는 이 부름을
+    // 자리 인자 `wiki learn` 으로 알아보고, `--` 뒤의 토막은 깃발로 안 읽는다(`hook::flag_words`) — 제목이 `--dry-run`
+    // 이어도 쓰는 부름이다.
+    super::refuse_if_flag_like(args.title.trim(), super::FlagLike::Title("wiki learn"), lang)?;
     // 꼴은 디스크도 트래커도 안 보고 잰다 — 틀린 부름이 저장소를 열 까닭이 없다. stdin 은 여기서 읽는다(락은 노트를
     // 달 때 `with_write` 안에서만 잡힌다).
     let body = super::add::read_body(args.body)?.unwrap_or_default();
@@ -638,17 +643,24 @@ pub fn learn(ctx: &Ctx, args: crate::cli::LearnArgs) -> R<Vec<String>> {
     said(ctx, &path, &slug, issue, noted, &note, &wiki_dir, None)
 }
 
-/// 새 파일에 글을 쓴다 — **있으면 진다**(`create_new`). 쓰다 지면 반쯤 쓴 파일을 걷는다: 꼴이 깨진 교훈이 남으면
-/// 다음 부름이 "이미 있다" 로 막힌다. 쓰고 나면 `sync` 한다 — 노트가 그 페이지를 가리키는데 페이지가 디스크에
-/// 없으면 안 된다.
+/// 새 파일에 글을 쓴다 — **있으면 진다.** 노트가 그 페이지를 가리키는데 페이지가 디스크에 없으면 안 되니 `sync` 한다.
+///
+/// **다 쓴 글만 그 이름에 선다**(moai-xp7l.c4h) — 곁의 임시 파일(`.<이름>.part-<pid>`, `.md` 가 아니라 위키가 안
+/// 읽는다)에 다 쓰고 적은 뒤 `hard_link` 로 이름을 세운다. 링크는 이름이 이미 있으면 지니 `create_new` 와 같은 "하나만
+/// 이긴다" 다. 이름에 바로 쓰던 판은 쓰는 중에 죽으면(SIGKILL) 빈 페이지가 남아 그 슬러그의 `learn` 을 "이미 있다" 로
+/// 영영 막았다. 죽은 자리의 임시 파일은 남지만 아무것도 막지 않는다. 링크를 못 거는 파일 시스템이면(`Unsupported`·
+/// 권한) 옛 길 — 이름에 바로 쓰고, 지면 걷는다.
 fn write_new(at: &std::path::Path, text: &str) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(at)?;
-    let wrote = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
-    if wrote.is_err() {
-        drop(f);
-        let _ = std::fs::remove_file(at);
-        return wrote;
+    let name = at.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let part = at.with_file_name(format!(".{name}.part-{}", std::process::id()));
+    let _ = std::fs::remove_file(&part);
+    let staged = write_synced(&part, text).and_then(|()| std::fs::hard_link(&part, at));
+    let _ = std::fs::remove_file(&part);
+    match staged {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(e),
+        // 임시 파일을 못 지었거나 링크를 못 건다 — 이름에 바로 쓴다.
+        Err(_) => write_synced(at, text)?,
     }
     // **이름도 디스크에 적는다**(리뷰 moai-4s5n.u8x) — `sync_all` 은 파일의 글만 적고 디렉터리에 선 이름은 안 적는다.
     // `store` 가 새 저널 파일과 갈아끼운 스냅샷에 같은 까닭으로 디렉터리를 적는다. 방금 지었을 수 있는 `lessons/` 의
@@ -658,6 +670,19 @@ fn write_new(at: &std::path::Path, text: &str) -> std::io::Result<()> {
         if let Ok(d) = std::fs::File::open(d) {
             let _ = d.sync_all();
         }
+    }
+    Ok(())
+}
+
+/// `at` 을 새로 지어(`create_new`) 글을 다 쓰고 적는다. 지은 뒤에 지면 반쯤 쓴 파일을 걷는다 — 못 지었으면 남의 것일
+/// 수 있으니 안 건드린다.
+fn write_synced(at: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(at)?;
+    let wrote = f.write_all(text.as_bytes()).and_then(|()| f.sync_all());
+    if wrote.is_err() {
+        drop(f);
+        let _ = std::fs::remove_file(at);
     }
     wrote
 }

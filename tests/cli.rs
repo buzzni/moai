@@ -7278,14 +7278,25 @@ fn tui_deep_carries_each_rows_gantt() {
     let s = init("tuideepgantt");
     let now = "2026-10-25T05:00:00Z";
     let ep = field(&ok_at(s.path(), now, &["epic", "add", "간트", "--json"]), "id");
-    let a = field(&ok_at(s.path(), now, &["add", "앞 일", "-e", &ep, "--start", "2026-10-20", "--due", "2026-10-22", "--json"]), "id");
-    let b = field(&ok_at(s.path(), now, &["add", "뒤 일", "-e", &ep, "--start", "2026-10-26", "--due", "2026-10-28", "--json"]), "id");
+    let a = field(
+        &ok_at(s.path(), now, &["add", "앞 일", "-e", &ep, "--start", "2026-10-20", "--due", "2026-10-22", "--json"]),
+        "id",
+    );
+    let b = field(
+        &ok_at(s.path(), now, &["add", "뒤 일", "-e", &ep, "--start", "2026-10-26", "--due", "2026-10-28", "--json"]),
+        "id",
+    );
     ok_at(s.path(), now, &["link", &a, "--blocks", &b]);
     ok_at(s.path(), "2026-10-21T01:00:00Z", &["mv", &a, "in_progress"]);
 
-    let rows: Vec<serde_json::Value> = serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
-    let gantt = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
-    assert_eq!(gantt(&ep)["planned"], serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"}));
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&ok_at(s.path(), now, &["tui", "--json", "--deep"])).unwrap();
+    let gantt =
+        |id: &str| rows.iter().find(|r| r["id"] == id).unwrap_or_else(|| panic!("{id} 가 없다"))["gantt"].clone();
+    assert_eq!(
+        gantt(&ep)["planned"],
+        serde_json::json!({"start": "2026-10-20", "end": "2026-10-28", "from": "members"})
+    );
     assert_eq!(gantt(&ep)["progress"], serde_json::json!({"kind": "rollup", "done": 0, "total": 2}));
     assert_eq!(gantt(&a)["actual"], serde_json::json!({"kind": "span", "start": "2026-10-21T01:00:00Z", "end": null}));
     assert_eq!(gantt(&a)["overdue"], serde_json::json!(3));
@@ -27170,7 +27181,11 @@ fn the_wiki_rides_the_branch_while_the_tracker_goes_to_the_root() {
     let cfg = std::fs::read_to_string(main.join(".moai/config.toml")).unwrap();
     std::fs::write(main.join(".moai/config.toml"), format!("wiki_dir = \"./wiki\"\n{cfg}")).unwrap();
     let none = String::from_utf8_lossy(&moai(&main, &["wiki", "ls", "--json"]).stdout).into_owned();
-    assert_eq!(abs(&none), main.join("wiki").to_string_lossy().as_ref(), "아직 없는 위키에도 지을 자리가 선다 — {none}");
+    assert_eq!(
+        abs(&none),
+        main.join("wiki").to_string_lossy().as_ref(),
+        "아직 없는 위키에도 지을 자리가 선다 — {none}"
+    );
     std::fs::write(main.join(".moai/config.toml"), format!("wiki_dir = \"../away\"\n{cfg}")).unwrap();
     let away = String::from_utf8_lossy(&moai(&main, &["wiki", "ls", "--json"]).stdout).into_owned();
     assert!(!away.contains("dir_abs"), "체크아웃 밖을 쓸 자리로 내밀었다 — {away}");
@@ -27301,6 +27316,77 @@ fn wiki_search_reads_the_worktrees_own_docs() {
 
 /// 교훈 본문 — `## Do this instead` 가 선 꼴.
 const LESSON: &str = "## What happened\nA check ended in grep.\n\n## Why\ngrep finds nothing, exits 1.\n\n## Do this instead\nEnd with the step that must succeed.\n";
+
+/// `wiki learn` 의 드문 자리(moai-xp7l.c4h).
+///
+/// - `-` 로 여는 제목: 빈칸이 든 글은 제목이고, 빈칸 없는 `-x` 는 깃발을 잘못 친 것으로 보고 `--` 뒤에서만 받는다
+/// - 죽은 쓰기가 남긴 임시 파일(`.<이름>.part-<pid>`)은 페이지가 아니고 그 슬러그를 안 막는다
+#[test]
+fn wiki_learn_takes_a_dash_title_and_ignores_a_dead_part_file() {
+    let s = init("wiki-learn-edges");
+    std::fs::create_dir_all(s.path().join("docs/lessons")).unwrap();
+    let body = "## Do this instead\ny\n";
+    let out = from_stdin(
+        s.path(),
+        &["wiki", "learn", "- not a flag rule", "--slug", "dash", "-b", "-", "--issue", "none"],
+        body,
+    );
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let page = std::fs::read_to_string(s.path().join("docs/lessons/dash.md")).unwrap();
+    assert!(page.starts_with("# - not a flag rule\n"), "{page}");
+    let flag = from_stdin(s.path(), &["wiki", "learn", "-x", "--slug", "x", "-b", "-", "--issue", "none"], body);
+    assert!(!flag.status.success() && !s.path().join("docs/lessons/x.md").exists());
+    assert!(String::from_utf8_lossy(&flag.stderr).contains("-x"), "{}", String::from_utf8_lossy(&flag.stderr));
+
+    std::fs::write(s.path().join("docs/lessons/.gone.md.part-1"), "").unwrap();
+    let out = from_stdin(s.path(), &["wiki", "learn", "Gone rule", "-b", "-", "--issue", "none"], body);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(std::fs::read_to_string(s.path().join("docs/lessons/gone-rule.md")).unwrap().starts_with("# Gone rule"));
+    let leftovers: Vec<_> = std::fs::read_dir(s.path().join("docs/lessons"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains(".part-") && n != ".gone.md.part-1")
+        .collect();
+    assert!(leftovers.is_empty(), "임시 파일이 남았다 — {leftovers:?}");
+    assert!(!ok(s.path(), &["wiki", "ls", "--json"]).contains("part-1"), "임시 파일을 페이지로 읽었다");
+}
+
+/// 노트가 저널에 못 들면 `wiki learn` 은 `noted: true` 를 안 낸다(moai-xp7l.c4h) — 손으로 고친 스냅샷은 노트의 쓰기가
+/// 표준형으로 다시 써 "썼다" 가 되고, 그 판의 저널 실패는 성공으로 삼켜졌다. 페이지는 남고 다시 칠 줄이 선다.
+#[cfg(unix)]
+#[test]
+fn wiki_learn_does_not_claim_a_note_the_journal_lost() {
+    use std::os::unix::fs::PermissionsExt;
+    let s = init("wiki-learn-lost-note");
+    std::fs::create_dir_all(s.path().join("docs")).unwrap();
+    let id = add(s.path(), &["row"]);
+    let snap = s.path().join(".moai/issues.jsonl");
+    let text = std::fs::read_to_string(&snap).unwrap();
+    std::fs::write(&snap, format!("\n{text}")).unwrap(); // 표준형이 아니다 — 쓰기가 다시 쓴다
+    let journal = s.path().join(".moai/journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    for e in std::fs::read_dir(&journal).unwrap() {
+        std::fs::set_permissions(e.unwrap().path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+    }
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(journal.join("probe")).is_ok() {
+        return; // root 는 권한을 안 본다
+    }
+    let out = from_stdin(
+        s.path(),
+        &["wiki", "learn", "Lost rule", "-b", "-", "--issue", &id, "--json"],
+        "## Do this instead\ny\n",
+    );
+    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success() && !said.contains(r#""noted":true"#), "{said}");
+    assert!(s.path().join("docs/lessons/lost-rule.md").exists(), "페이지는 남는다");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&format!("moai note {id}")),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
 
 /// 짓는 글이 꼴대로, 바이트 결정적이다. 집은 줄 하나면 `--issue` 없이 그 줄에 노트가 선다. 같은 자리를 다시 부르면
 /// 거절하고 파일은 그대로다.
@@ -27736,7 +27822,8 @@ fn a_note_lands_on_an_archived_row() {
     assert!(ok(s.path(), &["show", &a]).contains("Lesson: lessons/alpha"));
     assert!(!ok(s.path(), &["show", "--all"]).contains(&a), "노트가 줄을 산 파일로 되돌렸다");
     // `wiki learn --issue` 도 같은 자다.
-    let out = from_stdin(s.path(), &["wiki", "learn", "Gamma rule", "-b", "-", "--issue", &a], "## Do this instead\nz\n");
+    let out =
+        from_stdin(s.path(), &["wiki", "learn", "Gamma rule", "-b", "-", "--issue", &a], "## Do this instead\nz\n");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(s.path().join("docs/lessons/gamma-rule.md").exists());
     // 없는 id 는 그대로 거절한다.
@@ -31454,7 +31541,11 @@ fn web_moves_a_plan_only_from_its_own_page() {
     let cfg = s.path().join("user.toml");
     let epic = field(&ok_with(s.path(), &cfg, &["epic", "add", "묶음", "--due", "2026-11-10", "--json"]), "id");
     let id = field(
-        &ok_with(s.path(), &cfg, &["add", "막대", "-e", &epic, "--start", "2026-10-26", "--due", "2026-10-27", "--json"]),
+        &ok_with(
+            s.path(),
+            &cfg,
+            &["add", "막대", "-e", &epic, "--start", "2026-10-26", "--due", "2026-10-27", "--json"],
+        ),
         "id",
     );
     let web = serve_with(s.path(), |cmd| {
