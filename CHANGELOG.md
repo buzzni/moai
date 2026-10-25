@@ -77,6 +77,17 @@ does not tag — see `CONTRIBUTING.md`.
   the checkout every session shares; the refusal names the same file inside the
   worktree. Work with no worktree, a session inside a linked worktree and a person
   at a terminal are not affected. (moai-9js2.3xn)
+### Fixed
+
+- `moai backlog promote` left its history notes in Korean whatever the screen
+  language — `<id> 에서 펼쳤다` on the new epic (on each new issue with `-e`) and
+  `… 로 펼쳤다` on the backlog item it closed. They are now written in English
+  (`Unfolded from <id> — <title>`, and `Unfolded into <ids>, N issues` or, with `-e`,
+  `Unfolded into <epic> as <ids>`), like the other notes moai writes itself
+  (`Taken-over:`, `Due-priority:`). Notes written before keep their words.
+- The backlog title `promote` copies into that note is folded onto one line. A title
+  hand-edited to hold a line break reached the note when an already closed backlog item
+  was unfolded again, and a `model: …` line in it counted as AI work in `moai stats`.
 
 ## [0.23.0] - 2026-10-23
 

@@ -1,0 +1,1 @@
+**Your own keys for the explorer** — write only the lines you change in `keys.toml`. `moai keys` marks what your file changed, and a line that clashes with another key is dropped on its own, with the reason.

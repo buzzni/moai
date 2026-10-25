@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How to use moai</title>
+  <meta name="description" content="Installing moai, getting started, tui and web, directing development, the supervisor and its workers, and agents from several vendors working together.">
+  <link rel="canonical" href="https://moai.buzzni.com/guide/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="moai">
+  <meta property="og:title" content="How to use moai">
+  <meta property="og:description" content="Installing moai, getting started, tui and web, directing development, the supervisor and its workers, and agents from several vendors working together.">
+  <meta property="og:url" content="https://moai.buzzni.com/guide/">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:image" content="https://moai.buzzni.com/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="moai — Issue tracker for AI agents">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://moai.buzzni.com/assets/og.png">
+  <link rel="alternate" hreflang="en" href="https://moai.buzzni.com/guide/">
+  <link rel="alternate" hreflang="ko" href="https://moai.buzzni.com/ko/guide/">
+  <link rel="alternate" hreflang="ja" href="https://moai.buzzni.com/ja/guide/">
+  <link rel="alternate" hreflang="x-default" href="https://moai.buzzni.com/guide/">
+  <link rel="icon" href="../assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="../assets/vendor/asciinema-player.css">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="../?lang=en" aria-label="moai"><img src="../assets/logo.svg" alt="moai"></a>
+    <div class="links">
+      <a href="../?lang=en#see">See it</a>
+      <a href="./" aria-current="page">Guide</a>
+    </div>
+    <div class="right">
+      <div class="lang" role="navigation" aria-label="Language">
+        <a href="./" hreflang="en" lang="en" data-lang="en" aria-current="page">English</a><span aria-hidden="true">|</span><a href="../ko/guide/" hreflang="ko" lang="ko" data-lang="ko">한국어</a><span aria-hidden="true">|</span><a href="../ja/guide/" hreflang="ja" lang="ja" data-lang="ja">日本語</a>
+      </div>
+      <a class="gh" href="https://discord.gg/hCfQ76uX3t" aria-label="Discord">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
+        <span>Discord</span>
+      </a>
+      <a class="gh" href="https://github.com/buzzni/moai" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>buzzni/moai</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap doc">
+  <aside class="doc-toc" aria-label="Contents">
+    <ol>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#start">Getting started</a></li>
+      <li><a href="#screens">tui and web</a></li>
+      <li><a href="#develop">Directing development with moai</a></li>
+      <li><a href="#examples">Examples</a></li>
+      <li><a href="#env">Supported environments</a>
+        <ol>
+          <li><a href="#hooks">Hooks</a></li>
+          <li><a href="#supervise">The supervisor and workers</a></li>
+          <li><a href="#vendors">Agents from several vendors</a></li>
+        </ol>
+      </li>
+    </ol>
+  </aside>
+
+  <main class="doc-body">
+    <h1>How to use moai</h1>
+
+    <h2 id="install">Install</h2>
+    <p>The installer downloads the release archive together with <code>SHA256SUMS</code>, and installs nothing whose checksum does not match. There is no option to turn this check off.</p>
+
+    <h3 id="install-unix">macOS · Linux</h3>
+    <pre><code>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh | sh</code></pre>
+    <ul>
+      <li>It installs to <code>~/.local/bin</code>. That directory has to be on your <code>PATH</code> for <code>moai</code> to run.</li>
+      <li>To install somewhere else or a specific version, add the options after <code>-s --</code>.
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/buzzni/moai/main/install.sh \
+  | sh -s -- --dir ~/bin --version v0.1.0</code></pre>
+      </li>
+    </ul>
+
+    <h3 id="install-windows">Windows</h3>
+    <p>Download the script in PowerShell, then run it as a file.</p>
+    <pre><code>Invoke-WebRequest -UseBasicParsing -OutFile install.ps1 https://raw.githubusercontent.com/buzzni/moai/main/install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1</code></pre>
+    <ul>
+      <li>It installs to <code>%LOCALAPPDATA%\Programs\moai</code>. Pick the directory with <code>-Dir</code> and the version with <code>-Version</code>.</li>
+      <li>The installer does not edit your <code>PATH</code>. When the directory is not on it, it says so in one line.</li>
+      <li>Piping it, as in <code>irm … | iex</code>, is not supported: the PowerShell window would close along with the script.</li>
+      <li>It runs as is on a clean PC without the Visual C++ redistributable.</li>
+    </ul>
+
+    <h3 id="update">Update</h3>
+    <pre><code>moai update</code></pre>
+    <p>Replaces the moai you are running with the latest release. When a new version is out, the top of the <code>moai tui</code> screen says so too. Running the install line again also updates.</p>
+
+    <h3 id="platforms">Supported platforms</h3>
+    <p>Prebuilt binaries are published for Linux (x86_64), macOS (Apple Silicon) and Windows (x86_64 · ARM64). Anywhere else, build from source with <code>cargo build --release</code>.</p>
+
+    <h2 id="start">Getting started</h2>
+    <p>Run this once in the root of the project you want moai to track.</p>
+    <pre><code>cd &lt;project&gt;
+moai init</code></pre>
+    <p>In a terminal, a setup screen comes up first. Each row has its default already picked. Enter initializes with what is picked, and Esc quits without changing anything.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai init</span></div>
+      <div class="cast" data-cast="../assets/media/guide-init.cast" data-cols="100" data-rows="30" role="figure" aria-label="moai init setup screen: moving between rows, changing a choice, and what it planted"></div></div>
+    <div class="table">
+      <table>
+        <thead><tr><th>Row</th><th>What it decides</th><th>How to pick</th></tr></thead>
+        <tbody>
+          <tr><td><strong>id prefix</strong></td><td>The front of every issue id (the <code>moai</code> in <code>moai-ae8y</code>). It defaults to the directory name</td><td><strong>It cannot change later</strong>, so pick something short and easy to recognize</td></tr>
+          <tr><td><strong>Whether git tracks the tracker</strong></td><td><code>commit</code>: committed to the repository and shared with your team (the default)<br><code>exclude</code>: kept in your clone only, hidden through <code>.git/info/exclude</code><br><code>gitignore</code>: kept in your clone only, hidden through <code>.gitignore</code></td><td><code>commit</code> for a team; <code>exclude</code> to track only your own work in someone else's repository</td></tr>
+          <tr><td><strong>Where the agent guide goes</strong></td><td><code>block</code>: the whole guide inside <code>AGENTS.md</code><br><code>file</code>: the guide in <code>.moai/guide.md</code>, and only a link in <code>AGENTS.md</code><br><code>hook</code>: <code>AGENTS.md</code> is left alone and the hooks tell Claude<br><code>none</code>: nothing is written</td><td><code>file</code> to keep <code>AGENTS.md</code> short; <code>hook</code> when git does not track the tracker</td></tr>
+          <tr><td><strong>Install the hooks and skills</strong></td><td>Installs the Claude Code plugin (skills and hooks)</td><td>Turn it on if you work with agents. See <a href="#hooks">Hooks</a> below</td></tr>
+          <tr><td>└ Optional skills</td><td>One row each for <code>moai-tmux</code> · <code>moai-cmux</code> · <code>moai-saycode</code></td><td>Turn on the ones for the environment you use. If you are running inside tmux, cmux or Saycode right now, that row starts checked</td></tr>
+          <tr><td><strong>Merge driver</strong></td><td>When two branches changed different issues, git merges them issue by issue on its own</td><td>Turn it on when git tracks the tracker (it is needed once per clone)</td></tr>
+          <tr><td><strong>Add to the project list</strong></td><td>Registers this repository in your project list</td><td>Turn it on if you work on several projects. Running <code>moai</code> outside a project then shows every registered project on one screen</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul>
+      <li>Claude Code reads <code>CLAUDE.md</code>, not <code>AGENTS.md</code>. Put one <code>@AGENTS.md</code> line in <code>CLAUDE.md</code> and both are read.</li>
+      <li>To use it from Codex or Antigravity as well, install their skills and hooks with <code>moai skill install --agent codex</code> or <code>--agent antigravity</code>.</li>
+      <li>After updating moai, run <code>moai init</code> again to bring the guide up to the new version. It does not touch your issues or their history.</li>
+    </ul>
+    <p>Once that is done, open an agent session and ask for work in plain words as you always do. The agent reads the current board with <code>moai status</code> when the session starts, and creates and moves issues on its own.</p>
+
+    <h2 id="screens">tui and web</h2>
+    <p>moai has two screens. Agents read and change the tracker file directly without opening either. Open whichever you like when you want to see how the work stands.</p>
+
+    <h3 id="tui">moai tui — in the terminal</h3>
+    <pre><code>moai tui</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai tui</span></div>
+      <div class="cast" data-cast="../assets/media/tui-tour.cast" data-cols="120" data-rows="34" role="figure" aria-label="moai tui moving from the list to the kanban board and the wiki"></div></div>
+    <ul>
+      <li>The list is on the left and the selected issue's detail on the right.</li>
+      <li><code>SPC g b</code> opens the kanban board by milestone, <code>SPC g l</code> the list and <code>SPC g w</code> the wiki.</li>
+      <li>The mouse works too — click rows, scroll, resize the panes. The keys are listed in <code>moai tui --help</code>.</li>
+      <li><code>SPC n</code> writes a thought straight into the backlog.</li>
+    </ul>
+
+    <h3 id="web">moai web — in the browser</h3>
+    <pre><code>moai web</code></pre>
+    <div class="window browser"><div class="bar"><i></i><i></i><i></i><span class="addr">127.0.0.1:6624</span></div>
+      <video class="clip" muted loop playsinline preload="none" poster="../assets/media/web-detail.png" data-src="../assets/media/web-detail.webm" aria-label="moai web showing an issue's description, commits and history"></video></div>
+    <ul>
+      <li>Serves the board, the list and the wiki on <code>127.0.0.1:6624</code>. Open the browser yourself.</li>
+      <li>It only reads the tracker and never writes it. Teammates who are not at home in a terminal can follow along too.</li>
+      <li>If the port is taken, change it with <code>--port</code>, or let <code>--port 0</code> pick a free one. <code>Ctrl-C</code> stops it.</li>
+    </ul>
+
+    <h2 id="develop">Directing development with moai</h2>
+
+    <h3 id="milestones">Split big work into milestones and epics</h3>
+    <p>moai groups issues into epics and milestones.</p>
+    <ul>
+      <li><strong>Epic</strong> — a bundle of issues serving one purpose. When a request touches several files, the agent first shows you a plan split into one epic and three to seven issues, and creates it in one go once you approve.</li>
+      <li><strong>Milestone</strong> — what ships together in one release. Attach an epic to a milestone and the issues under it come along.</li>
+    </ul>
+    <p>You never move an epic or a milestone yourself. Start any member and it becomes in progress; finish them all and it becomes done, automatically.</p>
+    <p>While a milestone is running, the work inside it comes first. <code>moai ready</code> hands out only the running milestone's work and <code>p0</code> (urgent), and leaves the rest for later. Whether to add work to a running milestone is your decision.</p>
+    <p>When the agent shows a plan, it also asks for a deadline. With no answer, there is no deadline.</p>
+
+    <h3 id="worktrees">How worktrees are made and merged</h3>
+    <p>When several sessions pile commits onto one branch, they end up waiting on each other to merge. So moai's agents make a separate branch for each piece of work.</p>
+    <ol>
+      <li><strong>Pick up the work.</strong> The issue moves to <code>in_progress</code> (<code>moai mv &lt;id&gt; in_progress --from todo</code>). If another session already took it, nothing moves and the agent goes on to the next one.</li>
+      <li><strong>Make a worktree.</strong> A new branch is checked out at <code>.worktrees/&lt;epic&gt;</code> inside the repository. Claude Code, Codex and Antigravity all use the same place.</li>
+      <li><strong>Work and commit there.</strong> With the issue id in the commit subject, <code>moai show &lt;id&gt;</code> finds and shows that issue's commits.</li>
+      <li><strong>Get it reviewed.</strong> When the epic is finished, the whole epic is reviewed once and the review's findings are taken in.</li>
+      <li><strong>Merge and clean up.</strong> It is merged into the base branch with <code>--no-ff</code>, the worktree and branch are removed, and the issue moves to <code>done</code>.</li>
+    </ol>
+    <ul>
+      <li><strong>The tracker always stays in the root.</strong> Run <code>moai</code> inside a worktree and it still reads and writes the root's <code>.moai/</code>. Other sessions see who took what right away, and the tracker file never conflicts on a merge.</li>
+      <li><strong>Work in a milestone starts from the milestone branch.</strong> Epic branches are made from <code>milestone/&lt;milestone id&gt;</code> and merged back into it when done. The milestone branch goes into the base branch in one go at the release.</li>
+      <li><code>moai ready --worktree</code> shows what the neighbouring worktrees are doing.</li>
+    </ul>
+
+    <h3 id="backlog">Backlog</h3>
+    <p>What is not for now goes into the backlog.</p>
+    <pre><code>moai backlog add 'what if the board could fold by epic'
+moai backlog ls</code></pre>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>moai backlog</span></div>
+      <div class="cast" data-cast="../assets/media/guide-backlog.cast" data-cols="100" data-rows="30" role="figure" aria-label="A thought added to the backlog, then unfolded into an epic with three issues"></div></div>
+    <ul>
+      <li>A backlog item is an idea not yet settled as work. It does not show on the board or in <code>moai ready</code>.</li>
+      <li>When an idea that comes up mid-work falls outside the current scope, leave it in the backlog.</li>
+      <li>When its time comes, <code>moai backlog promote &lt;id&gt;</code> turns it into an epic and issues. The original backlog item closes, and the new work's history leads back to the old note.</li>
+      <li>Work already created that you have decided not to do right now is deferred, not sent to the backlog: <code>moai defer &lt;id&gt; -m 'why'</code>. <code>--undo</code> brings it back exactly as it was.</li>
+    </ul>
+
+    <h2 id="examples">Examples</h2>
+    <p>You direct agents in plain words. You can ask like this.</p>
+
+    <h3 id="ex-backlog">Tidying the backlog</h3>
+    <blockquote><p>Tidy up the backlog. Merge what overlaps, close what is already done, and prioritize what is worth doing now.</p></blockquote>
+    <blockquote><p>Hand the piled-up backlog to the idle sessions.</p></blockquote>
+    <p>The second one calls the supervisor (<code>/moai-supervise</code>). See <a href="#supervise">The supervisor and workers</a> below.</p>
+
+    <h3 id="ex-plan">Plan with Fable, in detail</h3>
+    <blockquote><p>Plan this work with Claude Fable, and write the descriptions in detail so other agents can pick them up right away.</p></blockquote>
+    <p>If the plan writes into each issue what is done and why, how far it goes and which files change, another agent can understand the context and carry the work on.</p>
+
+    <h3 id="ex-models">Different models for development and review</h3>
+    <blockquote><p>In each worker session, use subagents — develop with Sonnet 5.5 at medium, and review with Opus 5.5 at high.</p></blockquote>
+    <p>To avoid saying this every time, write the model for each role into your user config. The supervisor reads it every time it hands out work. <code>moai models</code> shows the current values.</p>
+    <pre><code>[models]
+plan    = "fable"    # planning
+develop = "sonnet"   # development — most work
+complex = "opus"     # the write path, concurrency, work across several files
+review  = "opus"     # the epic-end review
+review_grade = "high"
+effort       = "medium"</code></pre>
+
+    <h2 id="env">Supported environments</h2>
+    <p>Where the supervisor can see and work the workers' windows, you can leave managing the sessions to it as well. Turn on the optional skill for your environment (the optional-skill rows of <code>moai init</code>, or <code>moai skill install --with &lt;skill&gt;</code>).</p>
+    <ul>
+      <li><strong>tmux</strong> — <code>moai-tmux</code>. The supervisor labels the worker panes, clears a reported pane with <code>/clear</code>, and pastes in a message that did not arrive. When workers run short, it asks before opening new panes.</li>
+      <li><strong>cmux</strong> — <code>moai-cmux</code> (cmux 0.65.0 or later). The same as tmux, on cmux tabs.</li>
+      <li><strong>Saycode</strong> — <code>moai-saycode</code>. Inside a Saycode session, the supervisor sees the worker sessions through <code>happy agent</code>, sends them work and opens new sessions.</li>
+    </ul>
+    <p>In every environment, the supervisor never closes your panes, tabs or sessions, and leaves an input box alone when someone has typed in it.</p>
+
+    <h3 id="hooks">Hooks</h3>
+    <p>After <code>moai skill install</code> (or the hooks and skills row of <code>moai init</code>), moai's hooks run at key moments of an agent session.</p>
+    <div class="table">
+      <table>
+        <thead><tr><th>When</th><th>What happens</th></tr></thead>
+        <tbody>
+          <tr><td>The session starts</td><td>A baseline of the warnings is written. After the context is compacted, the work in progress is told again</td></tr>
+          <tr><td>The first prompt</td><td>The <code>moai status</code> board is read in once</td></tr>
+          <tr><td>Before a tool runs</td><td>The five rules below are checked</td></tr>
+          <tr><td>The turn ends</td><td>If work in progress is left, the agent is asked to leave a <code>Next:</code> note for the next session</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The five rules the hooks keep:</p>
+    <ol>
+      <li><strong>New issues are created inside the work in hand.</strong> Anything out of scope goes to the backlog.</li>
+      <li><strong>Pick up work before changing the repository.</strong></li>
+      <li><strong>A review is recorded as an issue too.</strong> It says what is being looked at and what was taken in.</li>
+      <li><strong>Never kill your tmux server.</strong></li>
+      <li><strong>Check first before taking over another agent's work.</strong></li>
+    </ol>
+    <p>A refusal hands over the command that gets through, so the agent fixes it right away instead of waiting on a person (only rule 5 asks one). The hooks never fail the session, and a <code>moai</code> a person types in a terminal does not go through them.</p>
+
+    <h3 id="supervise">The supervisor and workers</h3>
+    <p>Call <code>/moai-supervise</code> in one Claude Code session and that session becomes the <strong>supervisor</strong>. Keep one supervisor per repository.</p>
+    <div class="window term"><div class="bar"><i></i><i></i><i></i><span>tmux · moai tui · Claude Code · Codex · Antigravity</span></div>
+      <div class="cast" data-cast="../assets/media/tui-team.cast" data-cols="200" data-rows="56" data-speed="2" role="figure" aria-label="Four tmux panes: moai tui, a Claude Code supervisor, and Codex and Antigravity workers"></div></div>
+    <ol>
+      <li>The supervisor picks backlog items that do not collide. It asks for a deadline where there is none.</li>
+      <li>It picks the role that fits the work's difficulty (development, complex work, docs, chores) and raises a <strong>worker</strong> on that role's model. By default the worker is a subagent inside the supervisor's session.</li>
+      <li>The worker turns the backlog item into an epic, works in a worktree, and reports once review, merge and clean-up are done.</li>
+      <li>The supervisor checks that the merge happened, the epic closed and the worktree is gone, then sends the next item.</li>
+    </ol>
+    <ul>
+      <li>To watch the workers' windows yourself, use <strong>session workers</strong> instead of subagents. Open a few Claude Code sessions in the repository's root, and the supervisor sends work to the idle ones.</li>
+      <li>When a design decision is needed, the worker stops and the supervisor asks you. If you tell the supervisor you are stepping away, workers decide by their recommendation and leave the reason on the issue.</li>
+      <li>The supervisor picks and assigns work and checks the results. Changing code and merging are the workers' job.</li>
+    </ul>
+
+    <h3 id="vendors">Using agents from several vendors together</h3>
+    <p>Claude Code, Codex and Antigravity share one tracker. Open each one interactively in the repository's root, as you always do.</p>
+    <div class="table">
+      <table>
+        <thead><tr><th></th><th>Claude Code</th><th>Codex</th><th>Antigravity</th></tr></thead>
+        <tbody>
+          <tr><td>Run</td><td><code>claude</code></td><td><code>codex</code></td><td><code>agy</code></td></tr>
+          <tr><td>Install</td><td><code>moai skill install</code></td><td><code>moai skill install --agent codex</code></td><td><code>moai skill install --agent antigravity</code></td></tr>
+          <tr><td>Hooks</td><td>In the plugin</td><td><code>.codex/hooks.json</code> — runs once trusted in <code>/hooks</code></td><td><code>.agents/hooks.json</code></td></tr>
+          <tr><td>Supervisor</td><td>Yes (<code>/moai-supervise</code>)</td><td>Worker only</td><td>Worker only</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul>
+      <li>Only Claude Code supervises. Codex takes work as a worker in a tmux pane or cmux tab. A Codex worker waits after its tests and commits, and gets the merge instruction once the supervisor's review is done.</li>
+      <li><code>moai skill install --agent auto</code> finds <code>claude</code> · <code>codex</code> · <code>agy</code> on your <code>PATH</code> and installs for each at once.</li>
+      <li>Codex and Antigravity read the same <code>.agents/skills/</code>, so commit it and the whole team uses the same skills.</li>
+      <li>An agent that finishes work leaves one line on the issue: <code>model: &lt;vendor&gt;/&lt;model&gt;</code>. <code>moai stats</code> gathers these lines and shows how much work each model did.</li>
+    </ul>
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <img src="../assets/logo.svg" alt="moai">
+    <span>MIT · © 2026 Buzzni Inc.</span>
+    <div class="links">
+      <a href="./">Guide</a>
+      <a href="https://discord.gg/hCfQ76uX3t">Discord</a>
+      <a href="https://github.com/buzzni/moai">GitHub</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/vendor/asciinema-player.min.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

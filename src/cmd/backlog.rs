@@ -372,9 +372,15 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             // 한 줄에 묻힌다 — `MAX_TEXT_BYTES` 가 애초에 막으려던 바로 그것이다.
             // **저널에 적히는 글은 화면 말을 안 따른다** — 설정이 이미 쓴 줄을 바꾸면 그것은
             // 설정이 아니라 마이그레이션이다(CLAUDE.md). 같은 저장소의 이력이 사람마다 다른
-            // 말로 남으면 `moai show` 의 이력이 두 말로 갈린다.
-            let head = format!("{} 에서 펼쳤다 — ", args.id);
-            let shown = crate::model::fit_bytes(&title, TITLE_IN_NOTE);
+            // 말로 남으면 `moai show` 의 이력이 두 말로 갈린다. **고정한 말은 영어다**(moai-68ft) —
+            // 화면의 기본이 영어고, 도구가 짓는 다른 노트(`Taken-over:`·`Due-priority:`)도 영어다.
+            // 한국어로 고정했던 동안 영어 화면의 이력에 한국어 줄이 섰다. 이미 적힌 줄은 그대로 둔다.
+            let head = format!("Unfolded from {} — ", args.id);
+            // **제목은 한 줄로 접어 담는다** — `Taken-over:` 가 담당을 접는 것과 같은 까닭이다. 쓰기는 바뀐
+            // 줄만 재므로, 이미 닫힌 backlog 를 다시 펼치면 손으로 고쳐 줄바꿈이 든 제목이 검사 없이 여기
+            // 닿는다. 그대로 담으면 그 뒷줄(`model: …`)을 `work` 가 펼친 사람의 일로 센다.
+            let flat = crate::text::one_line(&title);
+            let shown = crate::model::fit_bytes(&flat, TITLE_IN_NOTE);
             // **한 번만 짓는다.** 줄마다 똑같은 글이라, 루프 안에서 지으면 64KB 짜리를 멤버 수만큼
             // 새로 짓고 곧바로 버린다 — `-e` 로 펼치면 만든 이슈가 모두 여기 든다.
             let grew = format!("{head}{shown}");
@@ -383,8 +389,11 @@ pub fn promote(ctx: &Ctx, args: PromoteArgs) -> R<Vec<String>> {
             }
             let done = Status::new(crate::config::DONE);
             let note = match into {
-                Some(e) => format!("{e} 의 멤버 {} 로 펼쳤다", grown.join(" ")),
-                None => format!("{} 로 펼쳤다 (이슈 {}건)", grown.join(" "), made.len() - grown.len()),
+                Some(e) => format!("Unfolded into {e} as {}", grown.join(" ")),
+                None => {
+                    let n = made.len() - grown.len();
+                    format!("Unfolded into {}, {n} {}", grown.join(" "), if n == 1 { "issue" } else { "issues" })
+                }
             };
             // **이 노트도 같은 자로 잰다.** 계획에 줄 수 상한이 없어 id 목록만으로도 상한을 넘는데
             // (재 봤다: 8,000줄 계획이 79KB), 그러면 위와 똑같이 펼칠 길이 통째로 막힌 채 거절문이
