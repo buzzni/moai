@@ -41,13 +41,14 @@ the address becomes `/?project=<its path>`, so a reload or a bookmark stays on
 it. The project the server was started in comes first when it is not
 registered itself. Only registered projects can be read this way.
 
-The page has three tabs.
+The page has four tabs.
 
 | Tab | Shows | Switch |
 |---|---|---|
 | **Board** | A kanban: one column per status, with backlog and deferred columns and one lane per [milestone](glossary.md#milestone) | `SPC g b` |
 | **List** | The tree of milestones, [epics](glossary.md#epic) and issues, which you step into and fold | `SPC g l` |
 | **Wiki** | The pages of this wiki: the page list on one side, the page on the other | `SPC g w` |
+| **Gantt** | The tree beside a date axis: when each row was planned and when it actually ran | `SPC g g` |
 
 Click a tab, or use the keys. Switching tabs keeps the list's cursor, filter and
 sort.
@@ -57,6 +58,37 @@ it, the body, its children and its history. The detail sits below the list, or o
 its left when the window is wide enough; `SPC o d` moves it and `SPC v d` hides
 it. `SPC v r` switches the body between rendered markdown and the raw text.
 `Enter` on an issue moves the focus to the detail, and `SPC w w` moves it back.
+
+## Gantt
+
+The Gantt tab draws the same chart as the explorer's `SPC g g`, with the same
+meaning. The tree stays on the left with every folder open, the filter, search and
+view toggles of the list applied; the dates scroll on the right.
+
+| Mark | Means |
+|---|---|
+| light bar | The planned span: the row's start to its deadline |
+| hatched bar | The planned span of an epic or milestone that wrote no day of its own, counted from its members |
+| dashed outline | A deferred row |
+| solid band over the bar | When the work actually ran, in its column's colour; a row whose start nobody recorded has none |
+| red hatch and `!` | Past the row's own deadline, up to today |
+| `◆` | A row with a deadline and no start |
+| red dashed line | Now |
+| `‹` `›` | The row goes on off screen |
+| `n/m` and the fill | Finished work under an epic or milestone |
+| arrows | The rows that block the one under the cursor |
+
+The page only places these: which span a group covers and whether a row is late is
+decided by moai (`moai tui --deep --json` carries it as `gantt`). Lateness is counted
+in the time zone moai runs in.
+
+| Key / mouse | Does |
+|---|---|
+| `j` `k`, click | Move the cursor; a click on a row or bar opens its detail |
+| `H` `L`, Shift+wheel, drag the date header | Move the dates |
+| `-` `=`, the zoom buttons, Ctrl+wheel over the dates | Hour / day / week / month |
+| `t` / `z` | Jump to today / fit every drawn row |
+| drag the line between grid and dates | Grid width, kept in this browser |
 
 ## Theme
 
@@ -227,7 +259,7 @@ once and the keys reach it.
 |---|---|
 | `SPC w w` / `SPC w W` | Next / previous pane |
 | `SPC w h` `j` `k` `l` | Pane to the left / below / above / right |
-| `SPC g l` `b` `w` | List / board / wiki tab |
+| `SPC g l` `b` `w` `g` | List / board / wiki / Gantt tab |
 | `SPC o d` | Detail position: left or below |
 | `SPC o t` | Pick the time zone dates are drawn in |
 
