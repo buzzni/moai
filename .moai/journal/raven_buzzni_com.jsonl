@@ -8245,3 +8245,5 @@
 {"ts":"2026-10-25T18:50:20Z","id":"moai-xp7l.82p","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"Decided alone: 아카이브된 줄을 산 파일로 되돌리지 않고 저널에만 노트를 단다(note::append 가 산 줄에 없으면 archive::reserve 의 id 를 본다). mv 처럼 되살리면 노트 하나가 닫힌 묶음을 쪼갠다. 다른 길: 되살려 달기."}
 {"ts":"2026-10-25T18:56:16Z","id":"moai-9eod","kind":"note","by":"레이븐","by_email":"raven@buzzni.com","text":"model: anthropic/opus-5.5 (medium — 감독이 릴리스 절차를 돌렸다)"}
 {"ts":"2026-10-25T18:56:16Z","id":"moai-9eod","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"in_progress","to":"done","note":"v0.25.0 나감 — PR #47 893a29b7, 자산 4종+설치+SHA256SUMS, Discord 잡 성공(그림 셋)"}
+{"ts":"2026-10-25T18:56:22Z","id":"moai-m7jm","kind":"create","by":"레이븐","by_email":"raven@buzzni.com","title":"v0.26.0 릴리스 — milestone/moai-8e03 를 develop 에 들이고 판을 낸다"}
+{"ts":"2026-10-25T18:56:23Z","id":"moai-m7jm","kind":"status","by":"레이븐","by_email":"raven@buzzni.com","from":"todo","to":"in_progress"}
