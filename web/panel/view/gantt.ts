@@ -17,7 +17,7 @@
  */
 import { assigneeOf } from '../data/people.ts'
 import { MEMORY_KEY, settingsStorage } from '../data/memory.ts'
-import { undoLine } from '../data/plan.ts'
+import { undoLine, type PlanChange } from '../data/plan.ts'
 import { zoneNow } from '../data/zone.ts'
 import type { GanttRow, IssueIndex, Row } from '../data/index.ts'
 import { fill } from '../i18n/index.ts'
@@ -26,7 +26,7 @@ import { el, emptyState } from './components.ts'
 import { segLabel } from './crumbs.ts'
 import { formatDate } from './detail-format.ts'
 import {
-  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
+  arrowOf, DEFAULT_GRID, DEFAULT_ZOOM, dayStart, dayText, dragDays, fitSpan, floorDay, ganttLines, HEAD_H, headerOf, movedPlan, normalizeGrid, placeRow,
   PX_PER_DAY, rangeOf, MIN_GRID, ROW_H, shiftPlan, wallAt, wallOf, weekends, widthOf, xOf, ZOOMS, zoomToFit, type Axis, type Edge, type GanttLine,
   type Placed, type Tick, type Zoom,
 } from './gantt-model.ts'
@@ -45,9 +45,22 @@ export const GRID_KEY = `${MEMORY_KEY}.gantt.grid`
 const FALLBACK_WIDTH = 900
 /** The `‹ ›` marks sit this far inside the dates' visible edge. */
 const CLIP_INSET = 2
+/** The window drawn around what is in view: this many rows more above and below, and a view's width more either side. */
+const OVERSCAN_ROWS = 10
+/** The height assumed while the pane has none (hidden, or not laid out yet) — the window's and the keys' page size. */
+const FALLBACK_HEIGHT = 720
 
 /** A field the row may carry as text: the text, or null. */
 const text = (value: unknown): string | null => (typeof value === 'string' ? value : null)
+
+/**
+ * A row the write cannot reach — `moai edit` finds a row in the main checkout's live snapshot only. With the worktree
+ * overlay on, a sibling worktree's row (`branch`, which `show --worktree` puts only on those) may not be there at all
+ * ("not found"), and where it is, the days drawn are the sibling's, not the ones a move would be measured from. An
+ * archived row (`archived`: shown with `SPC v o`, or an archived group still drawn over a reopened member) is not in the
+ * snapshot at all, so its move would only ever come back "not found" (moai-vj8w review).
+ */
+const unwritable = (row: Row): boolean => (typeof row.branch === 'string' && row.branch !== '') || row.archived === true
 
 function loadGrid(): number {
   try {
@@ -76,12 +89,22 @@ interface Model {
 }
 
 interface Built {
-  /** Per line: the grid row and the date lane. */
-  rows: HTMLElement[]
-  lanes: HTMLElement[]
-  /** Per line: the `‹` and `›` marks of the lane, hidden until the dates scroll past the row. */
-  clips: Array<{ left: HTMLElement; right: HTMLElement } | null>
+  /**
+   * Per line number, the grid row and the date lane — **only the lines in (or near) the window** (moai-vj8w.2fh): the
+   * rest are not nodes at all, as the list draws only the rows in view.
+   */
+  rows: Map<number, HTMLElement>
+  lanes: Map<number, HTMLElement>
+  /** Per drawn line: the `‹` and `›` marks of the lane, hidden until the dates scroll past the row. */
+  clips: Map<number, { left: HTMLElement; right: HTMLElement }>
+  /** Per line, drawn or not: where its bars stand. */
   placed: Array<Placed | null>
+  /**
+   * The wall clock `placed` was measured at. Every window draws the today line, its cap and the header's today there
+   * too, so a window built later — the clock moved on, no read since — is still one picture: an open bar ends on the
+   * line (moai-vj8w review).
+   */
+  now: number
   /** The header's top ticks, to keep their label in view while the dates scroll. */
   top: Array<{ el: HTMLElement; from: number; to: number }>
   svg: SVGSVGElement
@@ -102,6 +125,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let model: Model | null = null
   let axis: Axis | null = null
   let built: Built | null = null
+  /** The window the nodes were built for: lines `[r0, r1)` and the dates' pixels `[x0, x1]`. */
+  let drawn: { r0: number; r1: number; x0: number; x1: number } | null = null
   let positioned = false
   let shownCursor: string | null | undefined
   /** A bar was dragged: the click the release sends is the drag's, not a choice of the row. Every press clears it. */
@@ -114,6 +139,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   let holding = false
   let waiting: [State, IssueIndex | null] | null = null
   let drawLater = false
+  /**
+   * A scroll left the window while a bar was held: the window is owed, not a draw. A draw() would place every bar again
+   * from the read before the write, the dropped one back at its old days; the window only rebuilds what the view left.
+   */
+  let paintLater = false
   /** Rows whose planned days are being written: a bar drawn from the read before that write does not move again. */
   const writing = new Set<string>()
 
@@ -236,39 +266,110 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const a = axis
     // The bars this hovered bubble spoke of are about to be replaced, and a removed node sends no mouseleave.
     bubble.hidden = true
-    const cursor = state.cursor
-    const rows: HTMLElement[] = []
-    const lanes: HTMLElement[] = []
-    const clips: Built['clips'] = []
-
     const wide = widthOf(a)
     right.style.width = `${wide}px`
     lanesBox.style.height = `${m.lines.length * ROW_H}px`
+    rowsBox.style.height = `${m.lines.length * ROW_H}px`
     // An axis that grew at its start (a new row reaches earlier) moves every date right: the same dates stay in view.
     // A new step is setZoom's and fit's to place.
     if (was && was.zoom === a.zoom && was.from !== a.from) scroll.scrollLeft = Math.max(0, scroll.scrollLeft + xOf(a, was.from))
 
+    const svg = doc.createElementNS(SVG, 'svg')
+    svg.setAttribute('class', 'links')
+    svg.setAttribute('width', String(wide))
+    svg.setAttribute('height', String(m.lines.length * ROW_H))
+    svg.setAttribute('aria-hidden', 'true')
+    built = { rows: new Map(), lanes: new Map(), clips: new Map(), placed, now, top: [], svg }
+    drawn = null
+    paintWindow()
+
+    empty.hidden = m.lines.length > 0
+    empty.replaceChildren(...(m.lines.length ? [] : [emptyState(doc, { icon: 'gantt-chart', title: words.empty })]))
+    for (const [z, b] of zoomButtons) b.setAttribute('aria-pressed', String(z === zoom))
+    paintArrows()
+    paintView()
+  }
+
+  /** What is in view now: the lines `[r0, r1)` and the dates' pixels `[x0, x1]`, with no margin. */
+  function inView(): NonNullable<typeof drawn> {
+    const total = model ? model.lines.length : 0
+    const top = scroll.scrollTop - HEAD_H
+    const height = scroll.clientHeight || FALLBACK_HEIGHT
+    const x0 = scroll.scrollLeft
+    return {
+      r0: Math.max(0, Math.min(total, Math.floor(top / ROW_H))),
+      r1: Math.max(0, Math.min(total, Math.ceil((top + height) / ROW_H))),
+      x0,
+      x1: x0 + viewWidth(),
+    }
+  }
+
+  /** Whether everything in view stands among the nodes built. */
+  function covered(): boolean {
+    if (!drawn) return false
+    const v = inView()
+    return v.r0 >= drawn.r0 && v.r1 <= drawn.r1 && v.x0 >= drawn.x0 && v.x1 <= drawn.x1
+  }
+
+  /**
+   * Build the nodes of the window: the lines in view and ten more either side, the weekend blocks and header ticks of
+   * the dates in view and a view's width more either side, and the bars that reach into those dates. Nothing outside is
+   * a node, so a long axis or a long list costs what the screen shows (moai-vj8w.2fh). Drawn again when a scroll leaves it.
+   */
+  function paintWindow(): void {
+    if (!model || !state || !built || !axis) return
+    // A held bar keeps its lane: the window is built on release (resume), from the view then — not a whole draw().
+    if (holding) return void (paintLater = true)
+    paintLater = false
+    const m = model
+    const a = axis
+    const b = built
+    // The clock the bars were placed at (draw()), not a new one: the today line stays where the open bars end.
+    const now = b.now
+    const cursor = state.cursor
+    const v = inView()
+    const view = Math.max(v.x1 - v.x0, 120)
+    const win = {
+      r0: Math.max(0, v.r0 - OVERSCAN_ROWS),
+      r1: Math.min(m.lines.length, v.r1 + OVERSCAN_ROWS),
+      x0: Math.max(0, v.x0 - view),
+      x1: Math.min(widthOf(a), v.x1 + view),
+    }
+    // The dates' margin is kept unclamped: a view at the axis' edge is covered by a window that ends there.
+    drawn = { ...win, x0: v.x0 - view, x1: v.x1 + view }
+    // A bubble over a bar about to go has no mouseleave to take it down.
+    bubble.hidden = true
+    const wall: [number, number] = [wallAt(a, win.x0), wallAt(a, win.x1)]
+
     // Weekends, behind everything. Not at the month step, where a day is 4px.
     const shade: HTMLElement[] = []
     if (a.zoom !== 'month') {
-      for (const [from, to] of weekends(a)) {
+      for (const [from, to] of weekends(a, wall)) {
         const col = el(doc, 'div', { class: 'col-we' })
         col.style.left = `${xOf(a, from)}px`
         col.style.width = `${xOf(a, to) - xOf(a, from)}px`
         shade.push(col)
       }
     }
-    const svg = doc.createElementNS(SVG, 'svg')
-    svg.setAttribute('class', 'links')
-    svg.setAttribute('width', String(wide))
-    svg.setAttribute('height', String(m.lines.length * ROW_H))
-    svg.setAttribute('aria-hidden', 'true')
-
-    m.lines.forEach((line, n) => {
+    b.rows.clear()
+    b.lanes.clear()
+    b.clips.clear()
+    const rows: HTMLElement[] = []
+    const lanes: HTMLElement[] = []
+    for (let n = win.r0; n < win.r1; n++) {
+      const line = m.lines[n]!
       const g = line.kind === 'row' ? m.index.rows[line.at]!.gantt : undefined
-      const p = placed[n] ?? null
-      rows.push(gridRow(m, line, g, cursor))
+      const p = b.placed[n] ?? null
+      const grid = gridRow(m, line, g, cursor)
+      grid.style.top = `${n * ROW_H}px`
+      // Only the window's options are in the listbox: each says where it stands in the whole set, as the list's rows do
+      // with aria-rowindex — or a screen reader counts "3 of 41" in a tree of 400.
+      grid.setAttribute('aria-setsize', String(m.lines.length))
+      grid.setAttribute('aria-posinset', String(n + 1))
+      rows.push(grid)
+      b.rows.set(n, grid)
       const lane = el(doc, 'div', { class: `lane${g?.deferred ? ' dim' : ''}`, 'data-id': line.kind === 'row' ? m.index.rows[line.at]!.id : null, 'data-key': line.key, 'aria-selected': String(line.key === cursor) })
+      lane.style.top = `${n * ROW_H}px`
       lane.addEventListener('click', () => {
         // The click that ends a bar's drag is the drag's, not a choice.
         if (dragged) return void (dragged = false)
@@ -277,48 +378,30 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       })
       if (line.kind === 'row') plannable(lane, m.index.rows[line.at]!, g)
       if (p && g) {
-        const hover = (node: HTMLElement) => tip(node, m, line, g)
-        let planBar: HTMLElement | null = null
-        let dueMark: HTMLElement | null = null
-        if (p.plan) {
-          const plan = (planBar = bars(lane, `b-plan${p.plan.origin === 'members' ? ' members' : ''}${g.deferred ? ' deferred' : ''}`, p.plan.from, p.plan.to, a))
-          // A group's plan carries how far its members are, as a fill from the left.
-          if (line.dir && g.progress.kind === 'rollup' && g.progress.total > 0) {
-            const fillBar = el(doc, 'div', { class: 'b-fill' })
-            fillBar.style.width = `${(g.progress.done / g.progress.total) * 100}%`
-            plan.append(fillBar)
-          }
-          hover(plan)
-        }
-        if (p.actual) hover(bars(lane, `b-act a-${statusGlyph(p.status, m.boot).tone}`, p.actual.from, p.actual.to, a))
-        if (p.over) {
-          hover(bars(lane, 'b-over', p.over.from, p.over.to, a))
-          mark(lane, 'over', '!', xOf(a, p.over.to) + 3)
-        }
-        if (p.due !== null) hover((dueMark = mark(lane, 'due', '◆', xOf(a, p.due))))
-        if (line.kind === 'row') movable(lane, m.index.rows[line.at]!, g, planBar, dueMark)
+        // A row whose dates all lie outside the window draws no bars: there is nothing of them to see.
+        if (p.span && xOf(a, p.span[1]) >= win.x0 && xOf(a, p.span[0]) <= win.x1) drawBars(lane, m, line, g, p, a)
         const l = mark(lane, 'clip', '‹', 0)
         const r = mark(lane, 'clip', '›', 0)
         l.hidden = r.hidden = true
-        clips.push(p.span ? { left: l, right: r } : null)
-      } else clips.push(null)
+        if (p.span) b.clips.set(n, { left: l, right: r })
+      }
       lanes.push(lane)
-    })
+      b.lanes.set(n, lane)
+    }
     const today = el(doc, 'div', { class: 'todayline' })
     today.style.left = `${xOf(a, now)}px`
-    lanesBox.replaceChildren(...shade, ...lanes, svg, today)
+    lanesBox.replaceChildren(...shade, ...lanes, b.svg, today)
     rowsBox.replaceChildren(...rows)
-    rowsBox.style.height = `${m.lines.length * ROW_H}px`
 
     // The header; its today cap stands over the day's line.
-    const top: Built['top'] = []
-    const header = headerOf(a, now, words)
+    b.top = []
+    const header = headerOf(a, now, words, wall)
     const ticks = (box: HTMLElement, list: Tick[], keep: boolean) => {
       box.replaceChildren(...list.map((tick) => {
         const node = el(doc, 'div', { class: `tick${tick.cls ? ` ${tick.cls}` : ''}` }, tick.text)
         node.style.left = `${xOf(a, tick.from)}px`
         node.style.width = `${xOf(a, tick.to) - xOf(a, tick.from)}px`
-        if (keep) top.push({ el: node, from: xOf(a, tick.from), to: xOf(a, tick.to) })
+        if (keep) b.top.push({ el: node, from: xOf(a, tick.from), to: xOf(a, tick.to) })
         return node
       }))
     }
@@ -327,13 +410,30 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     const cap = el(doc, 'div', { class: 'todaycap', 'aria-hidden': 'true' })
     cap.style.left = `${xOf(a, now)}px`
     hd1.append(cap)
+  }
 
-    built = { rows, lanes, clips, placed, top, svg }
-    empty.hidden = m.lines.length > 0
-    empty.replaceChildren(...(m.lines.length ? [] : [emptyState(doc, { icon: 'gantt-chart', title: words.empty })]))
-    for (const [z, b] of zoomButtons) b.setAttribute('aria-pressed', String(z === zoom))
-    paintArrows()
-    paintView()
+  /** The bars of one row: planned, actual, late, the `◆`, and what drags. */
+  function drawBars(lane: HTMLElement, m: Model, line: GanttLine, g: GanttRow, p: Placed, a: Axis): void {
+    const hover = (node: HTMLElement) => tip(node, m, line, g)
+    let planBar: HTMLElement | null = null
+    let dueMark: HTMLElement | null = null
+    if (p.plan) {
+      const plan = (planBar = bars(lane, `b-plan${p.plan.origin === 'members' ? ' members' : ''}${g.deferred ? ' deferred' : ''}`, p.plan.from, p.plan.to, a))
+      // A group's plan carries how far its members are, as a fill from the left.
+      if (line.dir && g.progress.kind === 'rollup' && g.progress.total > 0) {
+        const fillBar = el(doc, 'div', { class: 'b-fill' })
+        fillBar.style.width = `${(g.progress.done / g.progress.total) * 100}%`
+        plan.append(fillBar)
+      }
+      hover(plan)
+    }
+    if (p.actual) hover(bars(lane, `b-act a-${statusGlyph(p.status, m.boot).tone}`, p.actual.from, p.actual.to, a))
+    if (p.over) {
+      hover(bars(lane, 'b-over', p.over.from, p.over.to, a))
+      mark(lane, 'over', '!', xOf(a, p.over.to) + 3)
+    }
+    if (p.due !== null) hover((dueMark = mark(lane, 'due', '◆', xOf(a, p.due))))
+    if (line.kind === 'row') movable(lane, m.index.rows[line.at]!, g, planBar, dueMark)
   }
 
   /** The axis stands while the lines' dates still fit in it; a draw because the index was read again does not shift it. */
@@ -372,6 +472,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   /** What depends on the scroll offset: the `‹ ›` marks, the header labels kept in view, the range. */
   function paintView(): void {
     if (!built || !axis) return
+    // A scroll, a resize or a step that left the window builds the one around where the view is now.
+    if (!covered()) paintWindow()
     const v0 = scroll.scrollLeft
     const v1 = v0 + viewWidth()
     built.clips.forEach((pair, n) => {
@@ -392,10 +494,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function paintCursor(): void {
     if (!built || !model || !state) return
     const cursor = state.cursor
-    model.lines.forEach((line, n) => {
-      const on = String(line.key === cursor)
-      for (const node of [built!.rows[n]!, built!.lanes[n]!]) if (node.getAttribute('aria-selected') !== on) node.setAttribute('aria-selected', on)
-    })
+    for (const [n, lane] of built.lanes) {
+      const on = String(model.lines[n]!.key === cursor)
+      for (const node of [built.rows.get(n)!, lane]) if (node.getAttribute('aria-selected') !== on) node.setAttribute('aria-selected', on)
+    }
     paintArrows()
     reveal()
   }
@@ -407,6 +509,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
     if (at < 0 || !height) return
     const next = revealOffset(scroll.scrollTop, height, HEAD_H + at * ROW_H, ROW_H, HEAD_H)
     if (next !== scroll.scrollTop) scroll.scrollTop = next
+    // The cursor may have gone to a line the window has not reached (the scroll event comes later): build around the view now.
+    if (!covered()) paintView()
   }
 
   // ── the bubble ──
@@ -519,7 +623,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
 
   function command(action: string): boolean {
     if (!model || !state) return false
-    const page = Math.max(1, Math.floor((scroll.clientHeight || 720) / ROW_H) - 2)
+    const page = Math.max(1, Math.floor((scroll.clientHeight || FALLBACK_HEIGHT) / ROW_H) - 2)
     switch (action) {
       case 'move.down':
       case 'move.up':
@@ -531,7 +635,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         return true
       case 'move.halfDown':
       case 'move.halfUp': {
-        const half = Math.max(ROW_H, Math.floor((scroll.clientHeight || 720) / 2))
+        const half = Math.max(ROW_H, Math.floor((scroll.clientHeight || FALLBACK_HEIGHT) / 2))
         scroll.scrollTop = Math.max(0, scroll.scrollTop + (action === 'move.halfDown' ? half : -half))
         return true
       }
@@ -601,9 +705,10 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
 
   // ── moving a plan (moai-d86e.3ud) ──
   // A bar drags as the TUI's does (moai-i4hf.exq): the middle moves the plan, either end the start or the deadline
-  // alone, by whole days; the bar is only drawn while it moves and the row is written once, on release. Which days a
-  // move writes is shiftPlan's (gantt-model.ts, `Issue::shifted`'s copy) and the write is the CLI's (data/plan.ts), so
-  // a refusal — a start past the deadline, a day past the deadline above — comes back in moai's words.
+  // alone, by whole days; the bar is only drawn while it moves and the row is written once, on release. What is
+  // written is the move — the edge and the days — and moai measures the days inside its lock from the row as it stands
+  // then (data/plan.ts, moai-vj8w.02c); shiftPlan (gantt-model.ts, `Issue::shifted`'s copy) only draws the bar meanwhile.
+  // A refusal — a start past the deadline, a day past the deadline above — comes back in moai's words.
 
   /** How close to a bar's end a press takes that end rather than the whole bar, in px. */
   const GRIP = 6
@@ -618,7 +723,7 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
    */
   function resume(): void {
     holding = false
-    if (!waiting && !drawLater) return
+    if (!waiting && !drawLater && !paintLater) return
     setTimeout(() => {
       // Another drag took the lanes meanwhile: its release draws.
       if (holding) return
@@ -626,20 +731,26 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       waiting = null
       if (next) render(...next)
       if (drawLater) draw()
+      // Only the window was owed (a scroll during the drag): nothing is built if the view came back inside it.
+      else if (paintLater) {
+        paintLater = false
+        paintView()
+      }
     }, 0)
   }
 
   /**
    * Write a row's planned days. One write at a time per row: until it is answered (and the rows read again), the
-   * bar on screen was drawn from the read before it, and a move measured from there would undo the first.
+   * bar on screen was drawn from the read before it — a second drag would be drawn, and its undo line built, from days
+   * the first has already moved, while moai adds the second move on top of the first.
    */
-  function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: { start?: string; due?: string }, undo: string): void {
+  function write(movePlan: NonNullable<typeof ctx.movePlan>, id: string, change: PlanChange, undo: string): void {
     writing.add(id)
     // The bar stays where it was dropped until the rows are read again; a refusal draws it back.
-    const drawn = model
+    const read = model
     void movePlan(id, change, undo).finally(() => {
       writing.delete(id)
-      if (model === drawn) draw()
+      if (model === read) draw()
     })
   }
 
@@ -647,7 +758,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function movable(lane: HTMLElement, row: Row, g: GanttRow, planBar: HTMLElement | null, dueMark: HTMLElement | null): void {
     const movePlan = ctx.movePlan
     const grab = planBar ?? dueMark
-    if (!movePlan || !grab || !axis) return
+    if (!movePlan || !grab || !axis || unwritable(row)) return
+    // A bar or `◆` drawn from a day of the row's own that the plan carries no day for (a milestone's deadline the plan
+    // did not read) has nothing to move: it is not grabbed, rather than refused on release.
+    const days = g.planned && (dayStart(g.planned.start) !== null || dayStart(g.planned.end) !== null)
+    if (!days) return
     const a = axis
     // A group's bar counted from its members does not move: the press is still taken, and the release says why.
     const own = g.planned?.from !== 'members'
@@ -684,7 +799,8 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
       if (dueMark) dueMark.style.left = `${xOf(a, span[1])}px`
     }, (end, down) => {
       // The release is where the bar lands; a cancel or a lost capture puts it back and writes nothing.
-      const change = shiftPlan(g.planned, edge, end.type === 'pointerup' ? dragDays(a.zoom, end.clientX - down.clientX) : 0)
+      const days = end.type === 'pointerup' ? dragDays(a.zoom, end.clientX - down.clientX) : 0
+      const change = shiftPlan(g.planned, edge, days)
       if ('why' in change) {
         putBack()
         // Not a day moved: the press was a click, and it chooses. A day or more is the drag's, and says why it stands.
@@ -694,10 +810,11 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
         }
       } else {
         dragged = true
-        // The days as the list printed them; a row it did not print (one written between its read and the tree's) as
-        // the bar was drawn — the days this move was measured from.
+        // The undo line puts back the days the page read: as the list printed them, or a row it did not print (one
+        // written between its read and the tree's) as the bar was drawn. moai measured the move itself from the row as
+        // it stood when written (moai-vj8w.02c), so a day another session moved after this read comes back with the undo.
         const planned = g.planned?.from === 'own' ? g.planned : null
-        write(movePlan, row.id, change, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
+        write(movePlan, row.id, { edge, days }, undoLine(row.id, text(row.starts_on) ?? planned?.start, text(row.due_on) ?? planned?.end))
       }
       resume()
     })
@@ -710,13 +827,14 @@ export const mountGantt: MountPane = (root, ctx): PaneView => {
   function plannable(lane: HTMLElement, row: Row, g: GanttRow | undefined): void {
     const movePlan = ctx.movePlan
     const written = typeof row.starts_on === 'string' || typeof row.due_on === 'string'
-    if (!movePlan || !axis || written || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
+    if (!movePlan || !axis || written || unwritable(row) || row.kind === 'epic' || row.kind === 'milestone' || g?.planned) return
     const a = axis
     lane.addEventListener('dblclick', (event) => {
-      // A second double click before the first is answered would plan the row twice.
+      // A second double click before the first is answered would only be refused: the first gave the row its day, and
+      // `--if-unplanned` writes nothing over it.
       if (writing.has(row.id)) return
       const day = dayText(floorDay(wallAt(a, event.clientX - lane.getBoundingClientRect().left)))
-      write(movePlan, row.id, { start: day, due: day }, undoLine(row.id, null, null))
+      write(movePlan, row.id, { day }, undoLine(row.id, null, null))
     })
   }
 

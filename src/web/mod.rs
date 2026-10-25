@@ -6,7 +6,8 @@
 //!
 //! **트래커에 쓰는 길은 계획 날 하나다.** 길은 GET 이고, POST 는 둘이다([`api::write_argv_of`]) — 읽음 표시(2026-10-22
 //! 사람 결정, moai-ly88)는 사용자 설정 곁의 제 파일에만 적히고, 간트의 막대 끌기(`/api/plan/<id>`, moai-d86e.3ud)는 자식
-//! `moai edit --start --due` 로 트래커에 쓴다 — 쓰기는 CLI 의 그 길(`store::with_write`)을 그대로 지난다. 그 밖에 트래커를
+//! `moai edit --shift*`(하루 세우기는 `--start --due --if-unplanned`, moai-vj8w.02c)로 트래커에 쓴다 — 쓰기는 CLI 의 그
+//! 길(`store::with_write`)을 그대로 지난다. 그 밖에 트래커를
 //! 바꾸는 길은 여전히 CLI 와 탐색기다. 두 POST 모두 이 페이지에서 보낸 것만 받는다([`http::origin_ok`]).
 
 pub mod api;
@@ -289,7 +290,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
     };
     if write {
         return match api::write_argv_of(&req.path, &query) {
-            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, lang),
+            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, None, lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => not_allowed(),
         };
@@ -313,7 +314,7 @@ pub fn answer(req: &Request, site: &Site) -> Response {
             Err(refused) => refused,
         },
         path => match api::argv_of(path, &query) {
-            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, lang),
+            Some(Ok(args)) => child(site, &overlay_in_git(args, &cwd), &cwd, zone_for_child(&query), lang),
             Some(Err(bad)) => refuse(400, &bad.said(lang), code::BAD_INPUT),
             None => {
                 let said = fill(say(lang, "web.no_path"), &[("path", &req.path)]);
@@ -377,14 +378,24 @@ fn overlay_in_git(mut args: Vec<String>, cwd: &std::path::Path) -> Vec<String> {
     args
 }
 
+/// 페이지가 그리는 시간대(`/api/tree?tz=`, [`api::zone_of`]) 가운데 **이 기계가 여는 것만** 자식의 `TZ` 로 준다
+/// (moai-vj8w 리뷰). 브라우저(V8)가 내는 이름은 CLDR 의 정본이라 `Asia/Kolkata` 가 `Asia/Calcutta` 로, `Europe/Kyiv` 가
+/// `Europe/Kiev` 로 오는데, 옛 이름을 따로 까는 tzdata(우분투 24.04 는 `tzdata-legacy`)에는 그 파일이 없다. 그대로 넘기면
+/// 자식이 UTC 로 떨어져(`tz::Zone::named` — 유닉스는 기계로 안 내려간다) 서버의 시간대로 재던 그 전보다 나빠지고, 그 까닭은
+/// 봉투의 `said` 에 묻혀 페이지에 안 선다. 못 여는 것(그런 이름, 오프셋 `+09:00`, tzdb 가 없는 기계의 이름)은 안 넘기고 서버의
+/// 시간대로 잰다. 여는 것은 tzdb 의 파일 하나다 — 이름의 모양은 [`api::argv`] 가 이미 쟀다(`.`·절대 경로가 없다).
+fn zone_for_child(query: &[(String, String)]) -> Option<&str> {
+    api::zone_of(query).filter(|zone| crate::tz::Zone::load(zone).is_ok())
+}
+
 fn page(kind: &'static str, body: &'static str) -> Response {
     Response::new(200, kind, body.as_bytes().to_vec())
 }
 
 /// 자식을 돌려 봉투로 낸다. **자식이 돌았으면 200 이다** — 자식의 실패는 봉투의 `exit`·`err` 가 말한다.
 /// 4xx·5xx 는 서버가 답을 못 낸 판이다.
-pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, lang: Lang) -> Response {
-    match site.spawner.run_in(args, cwd) {
+pub fn child(site: &Site, args: &[String], cwd: &std::path::Path, zone: Option<&str>, lang: Lang) -> Response {
+    match site.spawner.run_in(args, cwd, zone) {
         Ok(done) => Response::new(200, http::JSON, run::envelope(&done).into_bytes()),
         Err(run::Fault::Timeout) => {
             let secs = run::TIME_LIMIT.as_secs().to_string();

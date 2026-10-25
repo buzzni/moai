@@ -2740,13 +2740,14 @@ fn gantt(f: &mut Frame, app: &mut App, at: Rect, rows: &[Row]) -> (Rect, Rect) {
     app.chart.first_row = app.list.offset();
     app.chart.refit(chart.range, laid.dates_width());
     let mut view = app.chart_view(inner_at);
+    let month_names = super::gantt::names_in(app.site.lang);
     let widget = moai_gantt::Gantt {
         rows: &chart.rows,
         links: &chart.links,
         now: chart.now,
         focus: selected,
         title,
-        names: None,
+        names: Some(&month_names),
         palette: moai_gantt::Palette::default(),
         glyphs: moai_gantt::Glyphs::default(),
     };

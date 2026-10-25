@@ -64,12 +64,32 @@ does not tag — see `CONTRIBUTING.md`.
   next time it opens. In `moai show <id> --json`, a related section whose
   heading is the page title itself carries `title_heading: true`, so a screen
   leaves that heading off. (moai-xp7l)
+- **`moai edit --shift <±N>`, `--shift-start <±N>` and `--shift-due <±N>`** move
+  a row's planned days by whole days, measured from the days the row holds when
+  it is written — the whole plan, the start alone, or the deadline alone, as a
+  Gantt drag does. `--if-unplanned` writes `--start`/`--due` only on a row with
+  no planned day and refuses one that has some. (moai-vj8w)
 
 ### Changed
 
 - **The wiki search in the explorer (`/` in `SPC g w`) and in `moai web`'s wiki
   tab puts pages in `moai wiki search`'s order** — the pages its words rank,
   best first, then the pages that only contain the typed letters. (moai-xp7l)
+- **The web Gantt's drag writes the move, not the days.** `/api/plan/<id>` takes
+  `edge`/`days` or `day` and runs `moai edit --shift…` or
+  `--if-unplanned`, so a row another session moved after the page read it moves
+  on from there instead of being given the dragged days, and planning a day on a
+  row that gained days meanwhile is refused. `start`/`due` on that path are
+  refused now. (moai-vj8w)
+- **The web Gantt judges lateness in the zone it draws in.** `/api/tree` takes
+  `tz=<zone>` and the page sends the zone picked with `SPC o t`; a name this
+  machine's tzdata cannot open leaves the server's zone. (moai-vj8w)
+- **The TUI Gantt's month names follow the screen language** (`10월`, not
+  `Oct`, on a Korean screen). (moai-vj8w)
+- **The web Gantt draws only the rows and dates in view**, and does not let you
+  drag a row shown only from a sibling worktree, an archived row, or a `◆` whose
+  day it cannot read. The TUI's dependency arrows no longer map the off-screen
+  part of a long path. (moai-vj8w)
 
 ### Fixed
 
