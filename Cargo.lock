@@ -561,6 +561,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "moai-gantt"
+version = "0.1.0"
+dependencies = [
+ "ratatui",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
